@@ -1,0 +1,71 @@
+
+# ==========================================
+# Environment Variables & Secrets
+# ==========================================
+.env
+.env.*
+
+*.pem
+*.key
+**/secrets/
+
+# ==========================================
+# Node.js / React / NestJS
+# ==========================================
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/.vite/
+**/.next/
+**/.cache/
+*.tsbuildinfo
+
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# ==========================================
+# Python / FastAPI
+# ==========================================
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.coverage
+**/htmlcov/
+**/*.egg-info/
+
+# ==========================================
+# Logs / Temporary Files
+# ==========================================
+*.log
+*.tmp
+*.temp
+
+# ==========================================
+# IDE / Editor
+# ==========================================
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# ==========================================
+# Operating System
+# ==========================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==========================================
+# Terraform (Future Infrastructure)
+# ==========================================
+**/.terraform/
+*.tfstate
+*.tfstate.*
