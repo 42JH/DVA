@@ -21,7 +21,7 @@ pipeline {
                         'README.md',
                         'compose.yaml',
                         'backend/Dockerfile',
-                        'ai-agent/Dockerfile'
+                        'ai/Dockerfile'
                     ]
 
                     files.each { file ->
