@@ -34,6 +34,23 @@ pipeline {
                 echo '프로젝트 기본 구조 검증 성공'
             }
         }
+        
+        stage('Build Backend') {
+            steps {
+                nodejs(nodeJSInstallationName: 'node24') {
+                    dir('backend') {
+                        echo 'Node.js 버전 확인'
+                        sh 'node --version'
+
+                        echo '의존성 설치'
+                        sh 'npm ci'
+
+                        echo 'NestJS 빌드'
+                        sh 'npm run build'
+                    }
+                }
+            }
+        }
     }
 
     post {
