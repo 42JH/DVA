@@ -51,6 +51,25 @@ pipeline {
                 }
             }
         }
+
+        
+        stage('Build Docker Images') {
+            agent {
+                label 'docker-builder'
+            }
+
+            steps {
+                checkout scm
+
+                powershell 'docker version'
+
+                echo 'Backend Docker 이미지 빌드'
+                powershell 'docker build -t dva-backend:ci ./backend'
+
+                echo 'AI Docker 이미지 빌드'
+                powershell 'docker build -t dva-ai:ci ./ai'
+            }
+        }
     }
 
     post {
