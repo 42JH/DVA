@@ -1,0 +1,63 @@
+# AI 전화 접수 서버 + 전용 PostgreSQL(pgvector). ai/ 에서 `docker compose up -d --build`.
+# 비밀값은 ai/.env(커밋 금지, 항목은 .env.example)에서 읽는다.
+name: dva-ai
+
+services:
+  ai-db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: ${AI_DB_USER:?Set AI_DB_USER in .env}
+      POSTGRES_PASSWORD: ${AI_DB_PASSWORD:?Set AI_DB_PASSWORD in .env}
+      POSTGRES_DB: ${AI_DB_NAME:?Set AI_DB_NAME in .env}
+    volumes:
+      - ai_postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai_db_net
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  ai:
+    build:
+      context: .
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
+      DATABASE_URL: postgresql://${AI_DB_USER}:${AI_DB_PASSWORD}@ai-db:5432/${AI_DB_NAME}
+      MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
+      MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
+    volumes:
+      # 이미지 재빌드 없이 조정: GPT-Live 세션·서버 설정, 프롬프트
+      - ./config:/app/config:ro
+      - ./prompts:/app/prompts:ro
+    ports:
+      # 앞단 리버스 프록시(TLS)가 붙을 자리. 공인 HTTPS 연결은 아직 범위 밖
+      - "127.0.0.1:8000:8000"
+    networks:
+      - ai_net
+      - ai_db_net
+    depends_on:
+      ai-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+networks:
+  ai_net:
+    driver: bridge
+  # DB는 밖으로 열지 않는다
+  ai_db_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  ai_postgres_data:

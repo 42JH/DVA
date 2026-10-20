@@ -24,3 +24,5 @@ data/
 *.onnx
 *.safetensors
 *.ckpt
+
+!.env.example

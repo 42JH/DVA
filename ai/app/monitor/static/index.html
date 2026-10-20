@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>디포스트콜 관제</title>
+<style>
+  :root { --blue: #2ea3ff; --line: #d6e9fb; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 18px/1.5 system-ui, sans-serif; background: #fff; color: #1a1a1a; height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--blue); color: #fff; padding: 8px 16px; display: flex; gap: 16px; align-items: center; }
+  header h1 { font-size: 22px; margin: 0; flex: 1; }
+  header button { font: inherit; background: #fff; color: var(--blue); border: 0; border-radius: 6px; padding: 4px 12px; cursor: pointer; }
+  main { flex: 1; display: grid; grid-template-columns: 280px 1fr 1fr; gap: 0; min-height: 0; }
+  section { border-right: 1px solid var(--line); overflow: auto; padding: 12px; min-height: 0; }
+  h2 { font-size: 18px; color: var(--blue); margin: 8px 0; }
+  .call { padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+  .call.sel { border-color: var(--blue); background: #f0f8ff; }
+  .muted { color: #777; font-size: 15px; }
+  .bubble { margin: 6px 0; padding: 6px 10px; border-radius: 10px; max-width: 90%; }
+  .customer { background: #f2f2f2; }
+  .agent { background: #e3f2ff; margin-left: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 16px; }
+  td, th { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+  .tool { border: 1px solid var(--line); border-radius: 8px; padding: 6px; margin: 6px 0; font-size: 15px; }
+  .tool pre { white-space: pre-wrap; word-break: break-all; margin: 4px 0 0; max-height: 160px; overflow: auto; }
+  .error { color: #c62828; }
+  #orders { display: none; position: fixed; inset: 52px 0 0; background: #fff; overflow: auto; padding: 16px; }
+</style>
+</head>
+<body>
+<header><h1>디포스트콜 관제</h1><span id="conn" class="muted"></span><button id="toggle">접수 주문</button></header>
+<main>
+  <section><h2>통화</h2><div id="calls"></div></section>
+  <section><h2>받아쓰기</h2><div id="transcript"></div></section>
+  <section><h2>주문·진행</h2><div id="detail"></div><h2>도구 호출</h2><div id="tools"></div></section>
+</main>
+<div id="orders"><h2>접수 주문</h2><table id="orderTable"></table></div>
+<script>
+const calls = new Map();
+let selected = null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+const time = (t) => t ? new Date(t * 1000).toLocaleTimeString("ko-KR") : "";
+const LABELS = { sender_name: "보내는 분", sender_phone: "보내는 분 전화", sender_address: "수거지", sender_address_detail: "수거지 상세",
+  receiver_name: "받는 분", receiver_phone: "받는 분 전화", receiver_address: "받는 분 주소", receiver_address_detail: "받는 분 상세", item: "물품" };
+
+function render() {
+  const list = [...calls.values()].sort((a, b) => b.started_at - a.started_at);
+  if (!selected && list.length) selected = list[0].session_id;
+  $("calls").innerHTML = list.map((c) => `<div class="call ${c.session_id === selected ? "sel" : ""}" data-id="${esc(c.session_id)}">
+    <b>${esc(c.caller)}</b> <span class="muted">${time(c.started_at)}</span><br>${esc(c.status)} · ${esc(c.stage)}
+    ${c.end_reason ? `<br><span class="muted">종료: ${esc(c.end_reason)}</span>` : ""}</div>`).join("");
+  const c = calls.get(selected);
+  if (!c) return;
+  $("transcript").innerHTML = c.transcript.map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
+  const rows = Object.entries(c.order).map(([k, v]) => `<tr><th>${esc(LABELS[k] || k)}</th><td>${v === null ? "<span class=muted>-</span>" : esc(v || "(없음)")}</td></tr>`).join("");
+  $("detail").innerHTML = `<table>${rows}<tr><th>요금</th><td>${esc(c.fare)}원</td></tr>
+    <tr><th>단계</th><td>${esc(c.stage)}</td></tr><tr><th>다음</th><td>${esc(c.next)}</td></tr>
+    <tr><th>접수번호</th><td>${esc(c.submitted.join(", "))}</td></tr></table>
+    <h2>단계 기록</h2>${c.history.map((h) => `<div class="muted">${time(h.at)} ${esc(h.from)} → ${esc(h.to)} (${esc(h.tool)}, ${esc(h.event)})</div>`).join("")}
+    ${c.errors.map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
+  $("tools").innerHTML = [...c.tool_calls].reverse().map((t) => `<div class="tool"><b>${esc(t.name)}</b> · ${esc(t.status)}
+    ${t.elapsed_ms != null ? `· ${t.elapsed_ms}ms` : ""}<pre>${esc(t.arguments)}</pre>${t.output ? `<pre>${esc(JSON.stringify(t.output, null, 1))}</pre>` : ""}</div>`).join("");
+}
+
+$("calls").addEventListener("click", (e) => {
+  const el = e.target.closest(".call");
+  if (el) { selected = el.dataset.id; render(); }
+});
+
+$("toggle").addEventListener("click", async () => {
+  const box = $("orders");
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const orders = await (await fetch("/monitor/api/orders")).json();
+  $("orderTable").innerHTML = `<tr><th>접수번호</th><th>시각</th><th>상태</th><th>보내는 분</th><th>수거지</th><th>받는 분</th><th>주소</th><th>물품</th><th>요금</th></tr>` +
+    orders.map((o) => `<tr><td>${esc(o.order_no)}</td><td>${esc(o.created_at)}</td><td>${esc(o.status)}</td>
+      <td>${esc(o.sender_name)}<br>${esc(o.sender_phone)}</td><td>${esc(o.sender_address)} ${esc(o.sender_address_detail)}</td>
+      <td>${esc(o.receiver_name)}<br>${esc(o.receiver_phone)}</td><td>${esc(o.receiver_address)} ${esc(o.receiver_address_detail)}</td>
+      <td>${esc(o.item)}</td><td>${esc(o.fare)}</td></tr>`).join("");
+});
+
+const source = new EventSource("/monitor/api/stream");
+source.onopen = () => { $("conn").textContent = "연결됨"; };
+source.onerror = () => { $("conn").textContent = "다시 연결 중…"; };
+source.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === "call") { calls.set(msg.call.session_id, msg.call); render(); }
+};
+</script>
+</body>
+</html>

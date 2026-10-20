@@ -1,0 +1,54 @@
+# 진행 상태 문구. 서버가 "다음에 할 일"을 만들 때 쓴다(spec/flow.md).
+# 쓸 수 있는 자리표시자: {company} {fare} {order_no} {goodbye_message} {recent_receiver}
+#   {save_candidates} {caller} {customer_type}
+# 기동 시 모든 단계·항목의 문구가 있는지, 자리표시자가 맞는지 검사한다.
+
+# 진행 상태(thinking.append) 틀
+progress = "[진행 상태] 단계: {stage}. 기록된 값: {recorded}. 다음에 할 일: {next}"
+progress_item = "{label}={value}"
+progress_sep = ", "
+
+# 지시문 끝에 붙는 통화 정보
+call_info = "\n\n[통화 정보] 발신번호: {caller}. 고객 유형: {customer_type}."
+
+[customer_types]
+new = "신규 고객"
+registered = "등록 고객(저장된 배송지나 지난 주문이 있음)"
+
+# 기록된 값을 보여 줄 때의 이름
+[labels]
+sender_name = "보내는 분 성함"
+sender_phone = "보내는 분 전화"
+sender_address = "수거지 주소"
+sender_address_detail = "수거지 상세"
+receiver_name = "받는 분 성함"
+receiver_phone = "받는 분 전화"
+receiver_address = "받는 분 주소"
+receiver_address_detail = "받는 분 상세"
+item = "물품"
+
+# 항목을 물을 때 할 일(수집 단계에서 빠진 첫 항목)
+[fields]
+recent = "지난번 받는 분({recent_receiver})께 다시 보내시는지 여쭤보고 use_recent_receiver로 답을 보고하세요."
+sender_name = "보내는 분 성함을 여쭤보세요. 저장된 배송지를 쓰겠다고 하면 find_saved_places를 쓰세요."
+sender_phone = "보내는 분 전화번호를 여쭤보세요."
+sender_address = "기사님이 수거하러 갈 주소(기본 주소)를 여쭤보세요."
+sender_address_detail = "수거지 상세 주소(동·호수)를 여쭤보세요. 없다고 하면 빈 값으로 기록하세요."
+receiver_name = "받는 분 성함을 여쭤보세요. 저장된 배송지를 쓰겠다고 하면 find_saved_places를 쓰세요."
+receiver_phone = "받는 분 전화번호를 여쭤보세요."
+receiver_address = "받는 분 주소(기본 주소)를 여쭤보세요."
+receiver_address_detail = "받는 분 상세 주소(동·호수)를 여쭤보세요. 없다고 하면 빈 값으로 기록하세요."
+item = "보내실 물품 종류를 여쭤보세요."
+
+# 단계별 할 일(빠진 항목이 없을 때)
+[stages]
+collecting_new = "빠진 항목이 없습니다. 기록된 값을 되읽어 확인하세요."
+collecting_registered = "빠진 항목이 없습니다. 기록된 값을 되읽어 확인하세요."
+confirming = "기록된 값을 그대로 되읽고 요금 {fare}원으로 접수할지 여쭤본 뒤 confirm_order로 답을 보고하세요. 고칠 곳은 record_order로 기록하세요."
+save_offer = "접수번호를 안내했으면, 이번 주소({save_candidates})를 다음에도 쓰도록 저장할지 여쭤보고 save_places로 답을 보고하세요."
+after_order = "접수번호 {order_no}를 안내했으면, 더 보내실 택배나 다른 용건이 있는지 여쭤보세요. 용건은 next_request로, 마치겠다고 하면 end_call로."
+ending = "마무리 인사를 하세요: {goodbye_message}"
+modify = "고칠 주문의 접수번호와 고칠 내용을 듣고, 고객 확인 후 modify_order를 쓰세요. 접수번호를 모르면 lookup_orders."
+cancel = "취소할 주문의 접수번호를 듣고, 고객 확인 후 cancel_order를 쓰세요. 접수번호를 모르면 lookup_orders."
+lookup = "lookup_orders 결과를 안내하세요. 다른 용건은 next_request로 보고하세요."
+handoff = "상담원에게 연결할지 확인하고, 동의하면 transfer_to_agent를 쓰세요. 원하지 않으면 next_request(other)."
