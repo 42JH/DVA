@@ -23,7 +23,7 @@ content = [{ type = "input_text", text = "전화가 방금 연결됐습니다. �
 # 내장 31개(alloy ash ballad beacon bossa brise cedar cinder coral delta echo flitz gleam harema
 # juni marin meridian nira noeul nuri quartz ripple sage shida shimmer sillage stone tempo verse
 # vesper willow) 또는 { id = "voice_..." }. 기본 marin. 통화 중 변경 불가
-voice = "marin"
+voice = "noeul"
 # audio.format: WebSocket 전용. SIP는 협상하므로 넣지 않는다(넣어도 서버가 뺀다)
 # format = { type = "audio/pcm", rate = 24000 }
 
@@ -33,7 +33,7 @@ type = "responses"
 
 [delegation.responses]
 # 백엔드 Responses 모델(필수). GPT-Live 위임에서 쓸 수 있는 모델 목록은 미확인 — 실제 통화 전 확인
-model = "gpt-5.4-mini"
+model = "gpt-6-luna"
 instructions_file = "backend.md"
 # auto · none · required, 또는 { type = "function", name = "..." }
 tool_choice = "auto"
@@ -54,31 +54,14 @@ effort = "low"
 verbosity = "low"
 
 # 백엔드 도구: function(이 서버가 실행) · web_search. 함수는 이름만 적으면 코드에서 설명·스키마를 채운다.
-# 여기 없는 도구는 모델이 쓸 수 없다.
+# 여기 없는 도구는 모델이 쓸 수 없다. 백엔드는 항목 기록과 접수된 주문 조회·수정·취소만 한다.
+# 고객 답에 따른 단계 전환(예/아니오, 접수 확인, 저장, 상담원, 종료)은 서버가 고객 말을 직접 판별한다(app/listener.py).
 [[delegation.responses.tools]]
 type = "function"
 name = "get_state"
 [[delegation.responses.tools]]
 type = "function"
 name = "record_order"
-[[delegation.responses.tools]]
-type = "function"
-name = "find_saved_places"
-[[delegation.responses.tools]]
-type = "function"
-name = "use_saved_place"
-[[delegation.responses.tools]]
-type = "function"
-name = "use_recent_receiver"
-[[delegation.responses.tools]]
-type = "function"
-name = "confirm_order"
-[[delegation.responses.tools]]
-type = "function"
-name = "save_places"
-[[delegation.responses.tools]]
-type = "function"
-name = "next_request"
 [[delegation.responses.tools]]
 type = "function"
 name = "lookup_orders"
@@ -88,12 +71,6 @@ name = "modify_order"
 [[delegation.responses.tools]]
 type = "function"
 name = "cancel_order"
-[[delegation.responses.tools]]
-type = "function"
-name = "transfer_to_agent"
-[[delegation.responses.tools]]
-type = "function"
-name = "end_call"
 
 # decisions 위임·트리거는 쓰지 않는다(참고용)
 # [[triggers]]

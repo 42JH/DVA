@@ -12,6 +12,9 @@ class CancelArgs(Args):
 async def cancel_order(ctx, args: CancelArgs) -> Result:
     require_confirmed(args)
     order_no = args.order_no.strip().upper()
-    if not await ctx.db.cancel_order(require_caller(ctx), order_no):
-        raise ToolError("이 발신번호로 접수된 취소 가능한 그 접수번호의 주문이 없음", "lookup_orders로 접수번호 확인")
+    status = await ctx.backend.cancel_order(require_caller(ctx), order_no)
+    if status == "cancelled":
+        raise ToolError("이미 취소된 주문", "이미 취소된 주문이라고 안내")
+    if status != "ok":
+        raise ToolError("이 발신번호로 접수된 그 접수번호의 주문이 없음", "접수번호를 다시 여쭤보기(모르면 lookup_orders)")
     return Result({"order_no": order_no}, ["order.cancelled"])

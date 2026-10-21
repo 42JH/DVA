@@ -2,13 +2,13 @@
 허용 도구 확인과 진행 상태 문구 생성만 한다(spec/flow.md).
 
 ctx(통화 객체)에 기대하는 것: flow(FlowState), texts(Texts), field_done(name) -> bool,
-recorded() -> [(label, value)], text_vars() -> dict.
+recorded() -> [(label, value)], text_vars() -> dict, stage_variant(stage) -> str | None.
 """
 
 import importlib
 import pkgutil
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,6 +38,12 @@ class Stage:
     tools: tuple[str, ...]
     transitions: tuple[Transition, ...] = ()
     fields: tuple[str, ...] = ()  # 받을 항목과 순서(수집 단계)
+    order: Callable[[Any], tuple[str, ...]] | None = None  # 상황에 따라 순서가 다르면(fields의 순열)
+    variants: tuple[str, ...] = ()  # 같은 단계 안의 결과별 안내 문구("단계.variant")
+    # 고객 답 판별(app/listener.py): 이 단계에서 고객 말을 듣는지, 답 선택지(값 → 뜻), 답에 따른 처리(→ 사건)
+    listen: bool = True
+    choices: Callable[[Any], dict[str, str]] | None = None
+    on_answer: Callable[[Any, str], Awaitable[list[str]]] | None = None
     subflow: bool = False  # 들어온 단계를 기억했다가 RETURN으로 돌아간다
     enter_on: str | None = None  # 이 사건이 enter_from 단계에서 나면 이 단계로 들어온다
     enter_from: tuple[str, ...] = ()
@@ -86,8 +92,9 @@ def validate(tool_names: set[str], texts: Any, sample_vars: dict) -> None:
         errors += [f"{s.name}: 없는 단계 {t}" for t in targets if t not in (RETURN, ANY) and t not in STAGES]
         if s.enter_on and not s.enter_from:
             errors.append(f"{s.name}: enter_from 없음")
-        templates = [texts.stages.get(s.name)] + [texts.fields.get(f) for f in s.fields]
-        names = [s.name] + list(s.fields)
+        names = [s.name] + [f"{s.name}.{v}" for v in s.variants]
+        templates = [texts.stages.get(n) for n in names] + [texts.fields.get(f) for f in s.fields]
+        names += list(s.fields)
         for name, tpl in zip(names, templates):
             if tpl is None:
                 errors.append(f"문구 없음: {name}")
@@ -98,6 +105,12 @@ def validate(tool_names: set[str], texts: Any, sample_vars: dict) -> None:
                 errors.append(f"문구 자리표시자 오류 {name}: {e}")
     if errors:
         raise FlowError("; ".join(errors))
+
+
+def start(ctx: Any) -> None:
+    """통화 시작 단계로 들어간다(들어온 직후 조건도 평가)."""
+    ctx.flow.stage = start_stage(ctx)
+    apply(ctx, [ENTERED])
 
 
 def start_stage(ctx: Any) -> str:
@@ -116,12 +129,18 @@ def allowed_tools(ctx: Any) -> tuple[str, ...]:
 
 
 def missing(ctx: Any) -> list[str]:
-    return [f for f in current(ctx).fields if not ctx.field_done(f)]
+    stage = current(ctx)
+    fields = stage.order(ctx) if stage.order else stage.fields
+    return [f for f in fields if not ctx.field_done(f)]
 
 
 def next_text(ctx: Any) -> str:
     m = missing(ctx)
-    tpl = ctx.texts.fields[m[0]] if m else ctx.texts.stages[ctx.flow.stage]
+    if m:
+        tpl = ctx.texts.fields[m[0]]
+    else:
+        variant = ctx.stage_variant(ctx.flow.stage)
+        tpl = ctx.texts.stages[f"{ctx.flow.stage}.{variant}" if variant else ctx.flow.stage]
     return tpl.format(**ctx.text_vars())
 
 
@@ -153,7 +172,8 @@ def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
 
 
 def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:
-    """도구가 낸 사건으로 단계를 옮긴다. 단계에 들어오면 ENTERED를 한 번 더 평가한다."""
+    """도구가 낸 사건으로 단계를 옮긴다. 단계에 들어오면 ENTERED를 한 번 더 평가한다.
+    하위 흐름에서 돌아왔으면 돌아간 단계가 같은 사건을 먼저 본다(예: 조회 중 "새 주문" → 복귀 후 새 주문)."""
     for event in events:
         hops = 0
         while (target := _target(ctx, event)) is not None:
@@ -161,6 +181,8 @@ def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:
             hops += 1
             if hops >= MAX_HOPS:
                 raise FlowError(f"단계 전이가 끝나지 않음: {ctx.flow.stage}")
+            if target == RETURN and _target(ctx, event) is not None:
+                continue
             event = ENTERED
 
 

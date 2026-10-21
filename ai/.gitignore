@@ -25,4 +25,4 @@ data/
 *.safetensors
 *.ckpt
 
-!.env.example
+.env.example

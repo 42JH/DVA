@@ -14,6 +14,7 @@ from app.order import ORDER_FIELDS, Order, Place
 log = logging.getLogger(__name__)
 
 MAX_CALLER_DIGITS = 15
+MAX_SIP_CALL_ID = 256
 
 
 def caller_from_headers(headers: list[Any]) -> str | None:
@@ -31,6 +32,14 @@ def caller_from_headers(headers: list[Any]) -> str | None:
     return None
 
 
+def sip_call_id_from_headers(headers: list[Any]) -> str | None:
+    """SIP Call-ID(약식 이름 i). PBX의 통화 종료 웹훅이 어느 통화인지 맞출 때 쓴다. 미신뢰 값: 길이 제한."""
+    for h in headers:
+        if h.name.lower() in ("call-id", "i"):
+            return h.value.strip()[:MAX_SIP_CALL_ID] or None
+    return None
+
+
 def mask_phone(phone: str | None) -> str:
     if not phone:
         return "알 수 없음"
@@ -38,19 +47,22 @@ def mask_phone(phone: str | None) -> str:
 
 
 class Call:
-    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, db: Any):
+    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any,
+                 sip_call_id: str | None = None):
         self.session_id = session_id
         self.caller = caller
+        self.sip_call_id = sip_call_id
+        self.pbx_ended: dict | None = None  # PBX가 알린 통화 종료(spec/pbx-sip.md)
         self.cfg = cfg
         self.texts = texts
-        self.db = db
+        self.backend = backend  # 백엔드 API(app/backend_api.py)
         self.order = Order()
         self.flow = engine.FlowState(stage="")
         self.customer_type = "new"
-        self.recent_receiver: Place | None = None
-        self.recent_asked = False
-        self.places: list[Place] | None = None  # 저장된 배송지 캐시
-        self.save_candidates: list[Place] = []
+        self.recent: Order | None = None  # 최근 배송(지난 주문, 이번 통화에서 접수하면 그 주문)
+        self.places: dict[str, list[Place]] = {"origin": [], "destination": []}  # 발신번호 주인의 저장된 배송지
+        self.save_candidates: list[tuple[str, Place]] = []  # 접수 후 저장을 제안할 (종류, 배송지)
+        self.reset_order_flags()
         self.submitted: list[str] = []
         self.last_order_no: str | None = None
         self.lock = asyncio.Lock()  # 한 통화 안의 도구 호출은 순서대로
@@ -59,6 +71,12 @@ class Call:
         self.last_output_at = 0.0  # 음성 출력 이벤트를 마지막으로 본 시각(monotonic)
         self.task: asyncio.Task | None = None
         self.last_progress = ""
+        # 고객 답 판별(app/listener.py)
+        self.heard_stage = ""  # heard_text를 모은 단계
+        self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
+        self.listen_timer: asyncio.Task | None = None
+        self.listen_seq = 0  # 마지막으로 시작한 판별 번호(늦게 온 옛 판별은 버린다)
+        self.listen_tasks: set[asyncio.Task] = set()
         # 관제용 기록
         self.status = "accepting"  # accepting · active · ended · failed
         self.started_at = time.time()
@@ -72,24 +90,34 @@ class Call:
     # --- 시작 ---
 
     async def prepare(self) -> None:
-        """발신번호로 고객 유형·최근 배송을 찾고 시작 단계를 정한다. DB 실패면 신규 고객으로 진행."""
+        """발신번호로 고객 유형·최근 배송·저장된 배송지를 백엔드에서 받고 시작 단계로 들어간다.
+        백엔드 실패면 신규 고객으로 진행. 등록 고객 = 지난 주문이나 저장된 배송지가 있음."""
         if self.caller:
             try:
-                self.recent_receiver = await self.db.latest_receiver(self.caller)
-                if self.recent_receiver or await self.db.list_places(self.caller):
+                context = await self.backend.caller_context(self.caller)
+                self.recent, self.places = context.recent, context.places
+                if self.recent or any(self.places.values()):
                     self.customer_type = "registered"
             except Exception:
                 log.exception("고객 조회 실패 %s", self.session_id)
                 self.add_error("고객 조회 실패")
-        self.flow.stage = engine.start_stage(self)
+        engine.start(self)
         self.notify()
+
+    def reset_order_flags(self) -> None:
+        """주문 하나를 받는 동안만 쓰는 검색·확인 상태. 새 주문을 시작할 때 비운다."""
+        self.dest_misses = 0  # 저장된 받는 곳을 못 찾은 횟수
+        self.dest_variant: str | None = None  # find_destination 안내(need_region · need_detail · need_more)
+        self.origin_variant: str | None = None  # find_origin 안내(which)
+        self.origin_checked = False  # 이번 주문에서 "보내는 곳이 지난번과 같은지"를 이미 물었음
 
     # --- 상태 엔진이 쓰는 것 ---
 
     def field_done(self, name: str) -> bool:
-        if name == "recent":
-            return self.recent_asked or self.recent_receiver is None or self.order.place("receiver") is not None
         return getattr(self.order, name) is not None
+
+    def stage_variant(self, stage: str) -> str | None:
+        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant}.get(stage)
 
     def recorded(self) -> list[tuple[str, str]]:
         labels = self.texts.labels
@@ -97,14 +125,15 @@ class Call:
 
     def text_vars(self) -> dict:
         biz = self.cfg.business
-        r = self.recent_receiver
+        r = self.recent
         return {
             "company": biz.company_name,
             "fare": biz.fare,
             "order_no": self.last_order_no or "",
             "goodbye_message": biz.goodbye_message,
-            "recent_receiver": f"{r.name}, {r.address}" if r else "",
-            "save_candidates": " / ".join(f"{p.name} {p.address}" for p in self.save_candidates),
+            "recent_order": f"{r.sender_address} → {r.receiver_name}, {r.receiver_address}" if r else "",
+            "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
+            "save_candidates": " / ".join(f"{p.name} {p.address}" for _, p in self.save_candidates),
             "caller": self.caller or "알 수 없음",
             "customer_type": self.texts.customer_types[self.customer_type],
         }
@@ -123,7 +152,8 @@ class Call:
         """문장 경계·item ID가 없으므로 말하는 쪽의 마지막 말풍선에 이어 붙인다. 겹쳐 말해도 쪼개지지 않게,
         그 말풍선이 맨 끝이거나 직전 조각과의 간격이 짧으면 이어 붙이고, 아니면 새 말풍선(말 차례가 바뀜)."""
         last = next((b for b in reversed(self.transcript) if b["speaker"] == speaker), None)
-        gap_ok = start_ms is not None and last is not None and last["end_ms"] is not None             and start_ms - last["end_ms"] <= self.cfg.monitor.bubble_gap_ms
+        gap_ok = start_ms is not None and last is not None and last["end_ms"] is not None \
+            and start_ms - last["end_ms"] <= self.cfg.monitor.bubble_gap_ms
         if last is not None and (last is self.transcript[-1] or gap_ok):
             last["text"] += delta
             last["end_ms"] = end_ms if end_ms is not None else last["end_ms"]
@@ -152,6 +182,7 @@ class Call:
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "end_reason": self.end_reason,
+            "pbx_ended": self.pbx_ended,
             "stage": self.flow.stage,
             "history": self.flow.history,
             "order": self.order.model_dump(),
@@ -200,6 +231,11 @@ class Registry:
 
     def get(self, session_id: str) -> Call | None:
         return self.calls.get(session_id)
+
+    def find_by_sip_call_id(self, sip_call_id: str) -> Call | None:
+        """진행 중인 통화 중 SIP Call-ID가 같은 것. shortcut: 순회(통화 수가 동시 상한 이하라 충분)."""
+        return next((c for c in self.calls.values()
+                     if c.sip_call_id == sip_call_id and c.status in ("accepting", "active")), None)
 
     def list(self) -> list[Call]:
         self.purge()

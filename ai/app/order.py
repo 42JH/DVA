@@ -16,6 +16,8 @@ ORDER_FIELDS = (
 )
 PHONE_FIELDS = ("sender_phone", "receiver_phone")
 PLACE_PARTS = ("name", "phone", "address", "address_detail")
+# 주문의 어느 쪽이 저장된 배송지의 어느 종류인지(보내는 곳 = 출발지, 받는 곳 = 도착지)
+PLACE_KIND = {"sender": "origin", "receiver": "destination"}
 
 
 class Order(BaseModel):

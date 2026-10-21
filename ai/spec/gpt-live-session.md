@@ -17,7 +17,7 @@
 | `audio.format` | `audio/pcm`(16000·24000), `audio/pcmu`·`audio/pcma`(8000) | **WebSocket 전용. SIP는 협상하므로 넣지 않는다** | 불가 |
 | `store` | bool | `false`(개인정보라 끔). 켜면 녹음 30일 보관 | 불가 |
 | `delegation.type` | `client` · `responses` · `decisions` | 이 서버는 `responses`만 | 불가 |
-| `delegation.responses.model` | 백엔드 Responses 모델 | 필수. 위임에서 쓸 수 있는 모델 목록은 **미확인**(지금 `gpt-5.4-mini`) | 가능 |
+| `delegation.responses.model` | 백엔드 Responses 모델 | 필수. 위임에서 쓸 수 있는 모델 목록은 **미확인**(지금 `gpt-6-luna`) | 가능 |
 | `delegation.responses.instructions` | 문자열 | | 가능 |
 | `delegation.responses.tools` | 도구 목록: SDK 3.35.1 타입은 `function`·`web_search`만 받는다(문서의 다른 종류는 미확인) | 이 서버가 실행하는 것은 function뿐 | 가능 |
 | `delegation.responses.tool_choice` | `auto`·`none`·`required`, 특정 도구 `{type="function", name}`·`{type="mcp", name, server_label}` (SDK 3.35.1 기준. `allowed_tools`는 SDK 타입에 없음) | | 가능 |

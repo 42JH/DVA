@@ -3,7 +3,7 @@
 import time
 
 import pytest
-from conftest import CALLER, FakeClient, FakeDB, signed_webhook
+from conftest import CALLER, FakeClient, FakeBackend, signed_webhook
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -11,8 +11,8 @@ from app.main import create_app
 
 @pytest.fixture
 def env():
-    client, db = FakeClient(), FakeDB()
-    with TestClient(create_app(client=client, db=db)) as http:
+    client, db = FakeClient(), FakeBackend()
+    with TestClient(create_app(client=client, backend=db)) as http:
         yield http, client, db
 
 
@@ -99,14 +99,14 @@ def test_untrusted_from_header(env):
 
 
 def test_registered_caller_gets_registered_flow():
-    client, db = FakeClient(), FakeDB()
+    client, db = FakeClient(), FakeBackend()
     from conftest import FULL_ORDER, run
 
     from app.order import Order
-    run(db.insert_order(CALLER, "old", Order(**FULL_ORDER), 3500, "Q"))
-    with TestClient(create_app(client=client, db=db)) as http:
+    run(db.create_order(CALLER, "old", Order(**FULL_ORDER), 3500, None))
+    with TestClient(create_app(client=client, backend=db)) as http:
         post(http, *signed_webhook("live.transport.incoming", "live_r"))
         wait(lambda: client.live.sessions.of("accept"))
         call = http.app.state.svc.registry.get("live_r")
-        assert call.customer_type == "registered" and call.flow.stage == "collecting_registered"
+        assert call.customer_type == "registered" and call.flow.stage == "recent_offer"
         assert "등록 고객" in client.live.sessions.of("accept")[0][2]["instructions"]

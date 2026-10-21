@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
-from app.call import Call, Registry, caller_from_headers
+from app.call import Call, Registry, caller_from_headers, sip_call_id_from_headers
 from app.config import ServerConfig, Texts
 from app.live_session import LiveConfigError, build_session
 from app.sideband import run_call
@@ -24,7 +24,7 @@ class Services:
     cfg: ServerConfig
     texts: Texts
     client: Any  # AsyncOpenAI(테스트에서는 가짜)
-    db: Any
+    backend: Any  # BackendAPI(테스트에서는 가짜)
     registry: Registry
     seen_webhooks: dict[str, float] = field(default_factory=dict)
     tasks: set[asyncio.Task] = field(default_factory=set)
@@ -75,7 +75,8 @@ async def _reject(svc: Services, session_id: str) -> None:
 
 async def handle_incoming(svc: Services, data) -> None:
     session_id = data.session_id
-    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.db)
+    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend,
+                sip_call_id_from_headers(data.sip_headers))
     status = svc.registry.try_register(call)
     if status == "duplicate":
         return
@@ -103,5 +104,11 @@ async def handle_incoming(svc: Services, data) -> None:
         log.exception("accept 실패 %s", session_id)
         call.add_error(f"accept 실패: {type(e).__name__}")
         call.end("accept_failed", status="failed")
+        return
+    if call.pbx_ended:  # accept하는 사이 PBX가 통화 종료를 알렸다
+        from app.pbx import hangup
+
+        call.end("pbx_hangup")
+        await hangup(svc, call)
         return
     call.task = asyncio.create_task(run_call(call, svc.client))  # 참조는 통화 객체(레지스트리)가 든다
