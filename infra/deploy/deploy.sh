@@ -41,7 +41,7 @@ apply_release() {
     curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8082/nginx-health || return 1
     curl --fail --silent --show-error --max-time 10 http://127.0.0.1:8082/api/health || return 1
     compose "$directory" exec -T backend node -e \
-        "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" || return 1
+        "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" </dev/null || return 1
 }
 
 read_version() {

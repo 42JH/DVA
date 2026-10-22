@@ -14,6 +14,8 @@ printf '%s\n' "$*" >> "$TEST_DOCKER_LOG"
 if [[ "$*" == *' up '* && -n "${TEST_FAIL_VERSION:-}" && "$*" == *"/releases/$TEST_FAIL_VERSION/"* ]]; then
     exit 1
 fi
+# Compose exec attaches stdin by default; emulate its consumption of a streamed SSH script.
+if [[ "$*" == *' exec '* ]]; then cat >/dev/null; fi
 MOCK
 cat > "$test_root/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
@@ -79,4 +81,7 @@ if grep -F '/releases/corrupt/images.tar' "$TEST_DOCKER_LOG" >/dev/null; then
     exit 1
 fi
 
-echo 'PASS: first deploy, update, failed update restore, manual rollback, corrupt transfer rejection.'
+stream_output="$(printf 'bash %q\nprintf "STREAM_CONTINUES\\n"\n' "$test_root/site/releases/first/deploy.sh" | bash)"
+[[ "$stream_output" == *STREAM_CONTINUES ]] || { echo 'Deployment consumed following SSH commands.' >&2; exit 1; }
+
+echo 'PASS: first deploy, update, failed update restore, manual rollback, corrupt transfer rejection, SSH stdin isolation.'
