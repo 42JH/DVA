@@ -4,6 +4,8 @@ pipeline {
 
     options {
         skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '5', artifactNumToKeepStr: '2'))
     }
 
     stages {
@@ -11,6 +13,10 @@ pipeline {
             steps {
                 echo 'GitLab 저장소에서 코드 가져오기'
                 checkout scm
+                script {
+                    env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.RELEASE_VERSION = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
+                }
             }
         }
 
@@ -21,7 +27,11 @@ pipeline {
                         'README.md',
                         'compose.yaml',
                         'backend/Dockerfile',
-                        'ai/Dockerfile'
+                        'ai/Dockerfile',
+                        'compose.prod.yaml',
+                        'infra/nginx/default.prod.conf',
+                        'infra/deploy/package.ps1',
+                        'infra/deploy/deploy.sh'
                     ]
 
                     files.each { file ->
@@ -53,21 +63,20 @@ pipeline {
         }
 
         
-        stage('Build Docker Images') {
+        stage('Build and Package Images') {
             agent {
                 label 'docker-builder'
             }
 
             steps {
                 checkout scm
-
-                powershell 'docker version'
-
-                echo 'Backend Docker 이미지 빌드'
-                powershell 'docker build -t dva-backend:ci ./backend'
-
-                echo 'AI Docker 이미지 빌드'
-                powershell 'docker build -t dva-ai:ci ./ai'
+                powershell '''
+                    $ErrorActionPreference = 'Stop'
+                    git checkout --detach $env:SOURCE_COMMIT
+                    if ($LASTEXITCODE -ne 0) { throw 'Cannot check out the verified commit.' }
+                    & ./infra/deploy/package.ps1 -Version $env:RELEASE_VERSION
+                '''
+                archiveArtifacts artifacts: ".deploy/${env.RELEASE_VERSION}/**", onlyIfSuccessful: true
             }
         }
     }

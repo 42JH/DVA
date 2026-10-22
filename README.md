@@ -136,6 +136,9 @@ dva/
 
 ## 7. Documentation
 
+현재 선택한 Lightsail 배포 방식은 이미지 파일 전송이다.
+[파일 생성·SSH 전송·배포·롤백 가이드](infra/deploy/README.md)를 참고한다.
+
 상세 설계 및 개발 관련 문서는 `docs/` 디렉터리에서 관리합니다.
 
 - 시스템 아키텍처 및 설계 문서

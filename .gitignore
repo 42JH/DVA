@@ -46,6 +46,7 @@ yarn-error.log*
 *.log
 *.tmp
 *.temp
+.deploy/
 
 # ==========================================
 # IDE / Editor

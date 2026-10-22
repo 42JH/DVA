@@ -1,5 +1,12 @@
 # Dva AWS 배포 아키텍처 — 초안 (v0.1)
 
+> 2026-10-22 갱신: 실제 모놀리식 서버는 Lightsail `dva-monolith`
+> (서울, Ubuntu 24.04, 2 vCPU / 8GB / 160GB, `13.209.59.180`)로 확정했다.
+> 서버 Docker 설치와 hello-world 실행은 확인했다. 이미지 전달은 ECR 대신
+> Jenkins에서 파일 생성 → SSH 전송 → docker load 방식으로 선택했다.
+> 현재 실행 절차는 [이미지 파일 배포 가이드](../deploy/README.md)를 따른다.
+> 아래 EC2·ECR·SSM 내용은 기존 검토안이며 실제 구축 완료 상태를 의미하지 않는다.
+
 > 상태: 설계 초안 / AWS EC2 미발급. 실제 계정·리전·도메인·IP-PBX 연결 사양 확인 후 확정한다.
 
 ## 1. 범위와 전제
