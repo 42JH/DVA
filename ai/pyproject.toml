@@ -12,7 +12,10 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "langgraph-cli[inmem]>=0.4.37",
+    "pytest",
+]
 
 [tool.uv]
 package = false

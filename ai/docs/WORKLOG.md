@@ -209,3 +209,34 @@
 - Docker 이미지 빌드·기동 확인(데몬을 켜고 `docker compose build`).
 - 실제 통화로 회귀 확인(분기 동작은 그대로여야 함).
 - (선택) 관제 화면에 흐름도(mermaid) 보여 주기.
+
+### 바꾼 것(LangGraph Studio)
+- 사용자 결정: 시나리오 분기를 직관적으로 보도록 LangGraph Studio를 세팅(관제 화면 흐름도 대신).
+- dev 의존성 `langgraph-cli[inmem]`(lock 패키지 53 → 88개, 운영 이미지는 `--no-dev`라 영향 없음).
+- `langgraph.json`: 그래프 `call_flow` = `studio/graph.py:graph`, `LANGSMITH_TRACING=false` 고정.
+- `studio/graph.py`(개발 전용, 이미지·Docker 빌드 컨텍스트에서 뺌)
+  - 스레드 하나 = 가짜 통화 하나. 실행마다 보고 하나(customer로 시작, 그다음 answer·intent·tool 중 하나).
+  - 보고 처리는 실제 코드(`call.prepare`, `listener.apply_answer`, `dispatcher.dispatch`)를 그대로 부르고, `engine.apply`를 잠시 바꿔 사건만 모음.
+  - 모은 사건을 실제 엔진 노드(`engine._step`)로 단계 노드마다 흘려보내 Studio에서 경로가 노드별로 보임.
+  - 결과: 단계·다음 질문·답 선택지·허용 도구·기록된 값·`record_order` 예시 인수·지나온 경로.
+  - 고객 상황·가짜 백엔드는 테스트의 것을 그대로 씀.
+- `.gitignore`·`.dockerignore`에 `.langgraph_api/`(dev 서버 상태) 추가.
+- 문서: `spec/flow.md`("LangGraph Studio로 보기"), AGENTS.md(dev 의존성, 문서 표, 추적 고정).
+
+### 확인한 것
+- 공식 문서
+  - Studio 화면은 smith.langchain.com에서 로컬 서버(`baseUrl`)로 붙는다.
+  - `LANGSMITH_TRACING=false`면 데이터가 로컬 서버 밖으로 나가지 않는다.
+  - Studio 연결에 LangSmith API 키가 필요하다고 되어 있다.
+- 한국어 Windows에서 `langgraph dev`는 cp949 때문에 기동 실패 → `PYTHONUTF8=1`로 해결.
+- 실제 `langgraph dev`(Python 3.14)를 띄워 HTTP API로 확인
+  - 스레드를 만들고 한 통화(시작 → 기록 → 접수 → 저장 거절 → 종료)를 실행함.
+  - 스레드에 상태가 이어지고, 노드가 report → 단계 노드들 → done 순서로 기록됨.
+  - LangSmith API 키 없이도, `.env` 없이도 서버가 뜸.
+- 테스트 119개 통과
+  - 추가 13개(`tests/test_studio.py`): 시나리오 12건이 Studio 그래프에서도 같은 경로.
+  - 한 실행에서 단계 노드가 하나씩 지나가는지, 잘못된 입력은 오류 결과로 돌려주는지.
+
+### 남은 것
+- Studio 웹 화면 연결은 사용자 계정으로 확인(LangSmith 로그인 필요, 키가 필요하면 `LANGSMITH_API_KEY` 환경변수).
+- Studio의 되감기·포크는 가짜 통화에 반영되지 않음(새 스레드로 다시 시작).

@@ -12,7 +12,7 @@
 | sideband 이벤트 처리, 함수 호출 결과 반환, `thinking.append`, 받아쓰기, 종료 타이밍 | `spec/sideband.md` |
 | 통화 레지스트리, async 처리, 동시 통화 상한 | `spec/concurrency.md` |
 | 도구 추가, 디스패처 | `spec/tools.md` |
-| 상태 엔진(LangGraph) 구조, 진행 상태 문구 | `spec/flow.md` |
+| 상태 엔진(LangGraph) 구조, 진행 상태 문구, Studio로 흐름 보기(`studio/`, `langgraph.json`) | `spec/flow.md` |
 | 단계·분기·시나리오(고객 응대 흐름) | `spec/scenario.md` |
 | 관제 화면(임시), SSE | `spec/monitor.md` |
 | 고객·주문·배송지 조회·저장(백엔드 서버 API) | `spec/backend-api.md` |
@@ -32,7 +32,7 @@
 ## 스택과 실행 환경
 
 - Python(버전은 자유, 최신 안정판 권장). `.python-version`과 Docker 베이스 이미지의 버전을 맞춘다.
-- 패키지 관리: **uv**. `pyproject.toml` + `uv.lock`을 커밋하고, 의존성은 최소로 둔다: `fastapi`, `uvicorn`, `pydantic`, `openai[realtime]`(`client.live`, `client.webhooks` 사용), `langgraph`, dev `pytest`. HTTP 호출(백엔드 API)은 `openai`에 딸린 `httpx2`를 쓴다.
+- 패키지 관리: **uv**. `pyproject.toml` + `uv.lock`을 커밋하고, 의존성은 최소로 둔다: `fastapi`, `uvicorn`, `pydantic`, `openai[realtime]`(`client.live`, `client.webhooks` 사용), `langgraph`, dev `pytest`·`langgraph-cli[inmem]`(LangGraph Studio, 개발용). HTTP 호출(백엔드 API)은 `openai`에 딸린 `httpx2`를 쓴다.
 - LLM 호출은 전부 **openai SDK**(gpt-live-1 세션, 백엔드 위임 모델, 고객 답 판별). `langchain`·`langchain-openai`는 쓰지 않는다.
 - 시나리오 분기(상태 엔진): **LangGraph** `StateGraph`. 단계 = 노드, 사건 하나 = 그래프 실행 한 번(`spec/flow.md`). 에이전트·도구 루프로는 쓰지 않는다.
 - 웹 서버: **FastAPI** 하나(PBX 웹훅, 관제 API·SSE, 관제 화면).
@@ -78,7 +78,7 @@
 - 백엔드 API: 전화번호는 URL에 넣지 않고 본문으로. 경로에 넣는 값(접수번호 등)은 경로 조각으로 인코딩. 주문 항목은 정해진 이름 목록으로만 보낸다.
 - 접수번호는 백엔드가 발급한다(동시 통화에서도 겹치지 않게). 접수 요청에 `Idempotency-Key`를 붙여 재요청으로 중복 접수가 생기지 않게 한다.
 - 관제 화면·API는 인증 필수. 도구 인수·결과와 받아쓰기는 개인정보다.
-- LangSmith 추적(`LANGSMITH_TRACING`)은 켜지 않는다(langgraph와 함께 설치되지만 기본은 꺼져 있음). 켜면 실행 기록이 외부로 나간다. 그래프 상태에는 개인정보를 넣지 않는다(통화 객체는 `context`로).
+- LangSmith 추적(`LANGSMITH_TRACING`)은 켜지 않는다(langgraph와 함께 설치되지만 기본은 꺼져 있음, Studio용 `langgraph.json`에서도 `false`로 고정). 켜면 실행 기록이 외부로 나간다. 그래프 상태에는 개인정보를 넣지 않는다(통화 객체는 `context`로).
 
 ## 설계 원칙
 
