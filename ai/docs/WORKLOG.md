@@ -170,3 +170,42 @@
 - PBX가 보는 Call-ID와 OpenAI 웹훅 `sip_headers`의 Call-ID가 같은지 실제 통화로 확인.
 - `ai/.env`에 `PBX_WEBHOOK_SECRET` 추가(PBX와 같은 값).
 - 리버스 프록시에서 `/pbx/webhook/call-ended` 공개.
+
+## 2026-10-22 (상태 엔진을 LangGraph로)
+
+### 바꾼 것
+- 사용자 결정: 시나리오 분기 구조에 LangChain 계열을 쓴다. LLM 호출은 openai SDK 그대로(gpt-live-1, gpt-6-luna).
+  - 그래서 쓰는 것은 `langgraph`(`StateGraph`) 하나. `langchain`·`langchain-openai`는 넣지 않음.
+- 의존성: `langgraph>=1.2.16` 추가(langchain-core·langsmith 등이 따라와 lock 패키지 29 → 53개).
+- `app/flow/engine.py`: 전이 실행부(`start`·`apply`)를 LangGraph 그래프 실행으로 바꿈.
+  - 기동 시 `engine.build()`가 단계 정의로 그래프를 만든다(단계 = 노드, `check_definitions`에서 검증 뒤).
+  - 사건 하나 = `ainvoke` 한 번. 노드(`_step`)가 전이(가드)를 보고 `Command(goto=…)`로 옮김.
+  - 그래프 상태(`Step`)는 단계·사건·도구 이름뿐. 통화 객체는 `context`로 넘김. 체크포인터 없음.
+  - `MAX_HOPS`는 `recursion_limit`(`MAX_HOPS + 1`)로. 넘으면 지금처럼 `FlowError`.
+  - 노드마다 `destinations`를 적어 `get_graph().draw_mermaid()`로 흐름도를 만들 수 있게 함.
+- `start`·`apply`가 async가 되어 호출부 4곳에 await(`app/call.py`, `app/dispatcher.py`, `app/listener.py` 2곳).
+- 단계 정의(`app/flow/stages/`), 도구, 디스패처, 판별기, FastAPI는 그대로.
+- 문서: `spec/flow.md`(엔진 = LangGraph, 실행 방식·규칙), `spec/concurrency.md`(그래프 공유·async 노드), AGENTS.md(스택·구조·안전장치에 LangSmith 추적 끔).
+
+### 확인한 것
+- langgraph 1.2.16: openai 3.35.1·Python 3.14와 충돌 없이 설치.
+- 실행으로 확인한 동작(스크래치 예제)
+  - `ainvoke`에서 동기 노드·동기 라우터는 다른 스레드에서 돈다. 그래서 노드·라우터는 모두 async.
+  - `context`로 임의 객체(통화 객체)를 넘길 수 있다(`context_schema` 없이).
+  - `recursion_limit=L`이면 노드 실행 L-1번까지만 된다.
+- 오버헤드: 사건 하나에 약 0.8~1.4ms(전이 1~4번).
+- 테스트 106개 통과
+  - 기존 103개는 시나리오 데이터를 고치지 않고 그대로 통과.
+  - 추가 3개: 흐름도 엣지가 전이·하위 흐름·복귀를 모두 그리는지, `MAX_HOPS` 한도(4번 이동은 되고 5번째에서 `FlowError`).
+- 실제 단계로 만든 그래프: 노드 15개(START·END 포함), 엣지 132개.
+- 이전 엔진과 비교(일회성 스크립트, 저장소에 넣지 않음)
+  - 이전 엔진(HEAD)과 새 엔진에 같은 무작위 통화 1,800개(행동 41,064개)를 넣음.
+  - 행동마다 단계·복귀 단계·전이 기록·임시 주문·도구 결과가 모두 같았음.
+  - 13개 단계를 모두 지나갔고, 서로 다른 전이는 138가지.
+  - 비교가 실제로 차이를 잡는지도 확인: 이전 엔진의 "복귀 후 같은 사건 다시 보기"를 일부러 끄자 불일치를 잡음.
+- Docker 데몬이 꺼져 있어 이미지 빌드는 못 함. 대신 잠긴 런타임 패키지 46개가 Linux x86_64·Python 3.14 바이너리 wheel만으로 설치되는 것을 확인(`uv pip install --dry-run --only-binary :all:`).
+
+### 남은 것
+- Docker 이미지 빌드·기동 확인(데몬을 켜고 `docker compose build`).
+- 실제 통화로 회귀 확인(분기 동작은 그대로여야 함).
+- (선택) 관제 화면에 흐름도(mermaid) 보여 주기.

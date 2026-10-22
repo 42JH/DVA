@@ -1,5 +1,8 @@
-"""상태 엔진. 업무를 모른다: 단계 정의를 읽어 "현재 단계 + 사건 → 다음 단계"를 계산하고,
-허용 도구 확인과 진행 상태 문구 생성만 한다(spec/flow.md).
+"""상태 엔진. 업무를 모른다: 단계 정의를 LangGraph 상태 그래프(단계 = 노드)로 엮어 "현재 단계 + 사건 → 다음 단계"를
+계산하고, 허용 도구 확인과 진행 상태 문구 생성만 한다(spec/flow.md).
+
+사건 하나 = 그래프 실행 한 번: 현재 단계 노드에서 시작해 전이가 없을 때까지 노드를 옮겨 다닌다.
+진행 상태(FlowState)는 통화 객체가 들고(가드·관제·도구 결과가 모두 본다), 그래프에는 통화 객체를 context로 넘긴다.
 
 ctx(통화 객체)에 기대하는 것: flow(FlowState), texts(Texts), field_done(name) -> bool,
 recorded() -> [(label, value)], text_vars() -> dict, stage_variant(stage) -> str | None.
@@ -12,12 +15,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from langgraph.errors import GraphRecursionError
+from langgraph.graph import END, START, StateGraph
+from langgraph.runtime import Runtime
+from langgraph.types import Command
 from pydantic import BaseModel
 
 RETURN = "@return"  # 하위 흐름을 끝내고 들어온 단계로 돌아간다
 ANY = "*"  # enter_from에 쓰면 어느 단계에서나 들어올 수 있다(자기 자신 제외)
 ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(바로 다음 단계로 넘길 조건용)
-MAX_HOPS = 5
+MAX_HOPS = 5  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
 
 
 def always(ctx: Any) -> bool:
@@ -57,11 +64,20 @@ class FlowState(BaseModel):
     history: list[dict] = []
 
 
+class Step(BaseModel):
+    """그래프 한 번 실행하는 동안의 상태: 지금 단계와 보고 있는 사건(개인정보 없음)."""
+
+    stage: str
+    event: str
+    tool: str | None = None
+
+
 class FlowError(Exception):
     pass
 
 
 STAGES: dict[str, Stage] = {}
+GRAPH: Any = None  # build()가 만든 그래프(통화끼리 같이 쓴다. 통화별 상태는 context로)
 
 
 def load_stages(package: str = "app.flow.stages") -> dict[str, Stage]:
@@ -107,10 +123,49 @@ def validate(tool_names: set[str], texts: Any, sample_vars: dict) -> None:
         raise FlowError("; ".join(errors))
 
 
-def start(ctx: Any) -> None:
+def build() -> None:
+    """검증을 통과한 단계 정의로 그래프를 만든다(기동 시 한 번). 모든 단계 노드는 같은 _step이고,
+    어디로 갈지는 노드가 전이를 보고 정한다. destinations는 그림(get_graph)에 엣지를 그리기 위한 것."""
+    global GRAPH
+    graph = StateGraph(Step)
+    for stage in STAGES.values():
+        graph.add_node(stage.name, _step, destinations=_destinations(stage))
+    graph.add_conditional_edges(START, _enter, list(STAGES))
+    GRAPH = graph.compile()
+
+
+def _destinations(stage: Stage) -> tuple[str, ...]:
+    """이 단계에서 갈 수 있는 단계: 전이 대상, 이 단계에서 들어올 수 있는 하위 흐름, 복귀면 하위 흐름이 아닌 단계."""
+    out = {t.target for t in stage.transitions if t.target != RETURN}
+    out |= {s.name for s in STAGES.values()
+            if s.enter_on and s.name != stage.name and (ANY in s.enter_from or stage.name in s.enter_from)}
+    if any(t.target == RETURN for t in stage.transitions):
+        out |= {s.name for s in STAGES.values() if not s.subflow}
+    return (*sorted(out), END)
+
+
+async def _enter(step: Step) -> str:
+    return step.stage
+
+
+async def _step(step: Step, runtime: Runtime) -> Command:
+    """현재 단계에서 사건 하나를 본다. 노드·라우터는 async여야 한다: ainvoke는 동기 함수를 다른 스레드에서 돌리는데
+    통화 객체와 관제 버스는 스레드 안전하지 않다. 가드는 여기서 부른다(조건부 엣지 함수로 쓰지 않는다)."""
+    ctx = runtime.context
+    target = _target(ctx, step.event)
+    if target is None:
+        return Command(goto=END)
+    _move(ctx, target, step.event, step.tool)
+    # 하위 흐름에서 돌아왔으면 돌아간 단계가 같은 사건을 먼저 본다(예: 조회 중 "새 주문" → 복귀 후 새 주문).
+    # 아니면 들어온 직후 사건(ENTERED)을 한 번 더 본다
+    event = step.event if target == RETURN and _target(ctx, step.event) is not None else ENTERED
+    return Command(goto=ctx.flow.stage, update={"stage": ctx.flow.stage, "event": event})
+
+
+async def start(ctx: Any) -> None:
     """통화 시작 단계로 들어간다(들어온 직후 조건도 평가)."""
     ctx.flow.stage = start_stage(ctx)
-    apply(ctx, [ENTERED])
+    await apply(ctx, [ENTERED])
 
 
 def start_stage(ctx: Any) -> str:
@@ -171,19 +226,15 @@ def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
         STAGES[target].on_enter(ctx, prev)
 
 
-def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:
-    """도구가 낸 사건으로 단계를 옮긴다. 단계에 들어오면 ENTERED를 한 번 더 평가한다.
-    하위 흐름에서 돌아왔으면 돌아간 단계가 같은 사건을 먼저 본다(예: 조회 중 "새 주문" → 복귀 후 새 주문)."""
+async def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:
+    """도구·답 처리가 낸 사건마다 그래프를 한 번 실행해 단계를 옮긴다."""
     for event in events:
-        hops = 0
-        while (target := _target(ctx, event)) is not None:
-            _move(ctx, target, event, tool)
-            hops += 1
-            if hops >= MAX_HOPS:
-                raise FlowError(f"단계 전이가 끝나지 않음: {ctx.flow.stage}")
-            if target == RETURN and _target(ctx, event) is not None:
-                continue
-            event = ENTERED
+        try:
+            # 노드 실행 수 = 이동 수 + 1이고, LangGraph는 실행 수가 한도에 닿으면 멈춘다 → MAX_HOPS번째 이동에서 실패
+            await GRAPH.ainvoke(Step(stage=ctx.flow.stage, event=event, tool=tool), context=ctx,
+                                config={"recursion_limit": MAX_HOPS + 1})
+        except GraphRecursionError:
+            raise FlowError(f"단계 전이가 끝나지 않음: {ctx.flow.stage}") from None
 
 
 def summary(ctx: Any) -> dict:

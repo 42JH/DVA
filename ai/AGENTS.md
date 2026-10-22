@@ -12,7 +12,7 @@
 | sideband 이벤트 처리, 함수 호출 결과 반환, `thinking.append`, 받아쓰기, 종료 타이밍 | `spec/sideband.md` |
 | 통화 레지스트리, async 처리, 동시 통화 상한 | `spec/concurrency.md` |
 | 도구 추가, 디스패처 | `spec/tools.md` |
-| 상태 엔진 구조, 진행 상태 문구 | `spec/flow.md` |
+| 상태 엔진(LangGraph) 구조, 진행 상태 문구 | `spec/flow.md` |
 | 단계·분기·시나리오(고객 응대 흐름) | `spec/scenario.md` |
 | 관제 화면(임시), SSE | `spec/monitor.md` |
 | 고객·주문·배송지 조회·저장(백엔드 서버 API) | `spec/backend-api.md` |
@@ -32,7 +32,9 @@
 ## 스택과 실행 환경
 
 - Python(버전은 자유, 최신 안정판 권장). `.python-version`과 Docker 베이스 이미지의 버전을 맞춘다.
-- 패키지 관리: **uv**. `pyproject.toml` + `uv.lock`을 커밋하고, 의존성은 최소로 둔다: `fastapi`, `uvicorn`, `pydantic`, `openai[realtime]`(`client.live`, `client.webhooks` 사용), dev `pytest`. HTTP 호출(백엔드 API)은 `openai`에 딸린 `httpx2`를 쓴다.
+- 패키지 관리: **uv**. `pyproject.toml` + `uv.lock`을 커밋하고, 의존성은 최소로 둔다: `fastapi`, `uvicorn`, `pydantic`, `openai[realtime]`(`client.live`, `client.webhooks` 사용), `langgraph`, dev `pytest`. HTTP 호출(백엔드 API)은 `openai`에 딸린 `httpx2`를 쓴다.
+- LLM 호출은 전부 **openai SDK**(gpt-live-1 세션, 백엔드 위임 모델, 고객 답 판별). `langchain`·`langchain-openai`는 쓰지 않는다.
+- 시나리오 분기(상태 엔진): **LangGraph** `StateGraph`. 단계 = 노드, 사건 하나 = 그래프 실행 한 번(`spec/flow.md`). 에이전트·도구 루프로는 쓰지 않는다.
 - 웹 서버: **FastAPI** 하나(PBX 웹훅, 관제 API·SSE, 관제 화면).
 - 배포: **Linux에서 Docker로 띄운다.** 개발 PC는 Windows이므로 경로는 `pathlib`, 인코딩은 UTF-8로 OS에 의존하지 않게 쓴다.
   - 이미지: uv로 `uv sync --frozen --no-dev` 설치, 컨테이너 안에서는 `uvicorn ... --host 0.0.0.0`.
@@ -53,6 +55,7 @@
 서버(FastAPI) ── ② POST /v1/live/sessions/{session_id}/accept {session: config/live.toml}
              ── ③ sideband wss://api.openai.com/v1/live/sessions/{session_id}/attach
                     · 백엔드 function_call → 도구 실행 → 결과 반환
+                    · 사건(고객 답 판별·도구 결과) → 상태 그래프(LangGraph) → thinking.append
                     · 받아쓰기·상태 → 관제 화면(SSE)
              ── ④ refer(상담원 전환) / hangup(종료)
              ── 백엔드 서버 API(고객·주문·배송지)   ── Qdrant(매뉴얼 RAG)
@@ -75,13 +78,14 @@
 - 백엔드 API: 전화번호는 URL에 넣지 않고 본문으로. 경로에 넣는 값(접수번호 등)은 경로 조각으로 인코딩. 주문 항목은 정해진 이름 목록으로만 보낸다.
 - 접수번호는 백엔드가 발급한다(동시 통화에서도 겹치지 않게). 접수 요청에 `Idempotency-Key`를 붙여 재요청으로 중복 접수가 생기지 않게 한다.
 - 관제 화면·API는 인증 필수. 도구 인수·결과와 받아쓰기는 개인정보다.
+- LangSmith 추적(`LANGSMITH_TRACING`)은 켜지 않는다(langgraph와 함께 설치되지만 기본은 꺼져 있음). 켜면 실행 기록이 외부로 나간다. 그래프 상태에는 개인정보를 넣지 않는다(통화 객체는 `context`로).
 
 ## 설계 원칙
 
 - 질문 순서를 모델 추론에 맡기면 잘 안 지킨다. 서버가 "다음에 물을 것 + 지금까지 기록된 값"을 계산해 `thinking.append`로 음성 모델에 알려 준다.
 - **고객 답에 따른 대화 상태 전환은 도구 호출로 하지 않는다.** 서버가 고객 받아쓰기를 직접 판별해 상태를 바꾼다(도구 왕복 지연 방지). 백엔드 도구는 값 기록과 주문 작업에만.
 - **임시 주문이 유일한 근거.** 요약·되읽기·접수는 모델 기억이 아니라 기록된 값으로 한다.
-- 다음 질문과 분기를 정하는 주체는 코드 하나다. LLM(음성·백엔드)은 듣고 옮기고 말할 뿐, 순서·분기를 판단하지 않는다(`spec/flow.md`).
+- 다음 질문과 분기를 정하는 주체는 코드 하나(단계 정의 + LangGraph 상태 그래프)다. LLM(음성·백엔드)은 듣고 옮기고 말할 뿐, 순서·분기를 판단하지 않는다(`spec/flow.md`).
 - 진행 상태는 백엔드가 기록한 *뒤에야* 바뀌어 한 박자 늦을 수 있고, 그사이 같은 질문을 되풀이하기 쉽다. 설계 단계에서 이 지연을 고려한다.
 - `thinking.append` 문구는 짧게 유지한다(항목이 다 차고 주소가 길어도 500토큰 이하).
 - 통화 처리(웹훅·sideband)는 관제 화면과 독립이다. 관제 화면을 아무도 안 보고 있어도 통화는 끝까지 처리된다.
