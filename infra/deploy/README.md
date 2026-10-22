@@ -19,8 +19,8 @@ Lightsail → 체크섬 확인 → docker load → Compose 실행 → 상태 확
   Nginx 경유 HTTP 상태를 확인한다. 실패하면 기존 정상 릴리스를 재적용한다.
 - Jenkins는 커밋 SHA와 빌드 번호로 버전을 만들고 해당 폴더를 빌드 산출물로 보관한다.
   Windows Agent도 Controller에서 검증한 것과 같은 커밋을 사용한다.
-- 서버 전송·실행은 첫 배포에서 수동으로 검증한다. Jenkins의 자동 SSH 배포는
-  서버 설정과 Jenkins용 SSH 인증 정보를 준비한 뒤 연결한다.
+- 서버 전송·실행은 실제 Lightsail에서 수동 검증했다. Jenkinsfile에는 수동 선택 배포를
+  추가했으며 Jenkins의 SSH 인증 정보 등록과 Job 실행 검증이 남아 있다.
 - 도메인·HTTPS 준비 전에는 Nginx를 `127.0.0.1:8082`에서 검증한다.
   `/`는 프론트엔드 미구현으로 404이며, 외부 전화 웹훅은 아직 연결되지 않는다.
 
@@ -119,11 +119,58 @@ df -h /
 sudo docker system df
 ```
 
+## Jenkins에서 수동 선택 배포
+
+`DEPLOY_LIGHTSAIL`의 기본값은 false다. 일반 빌드·SCM 폴링은 이미지 파일 생성까지만
+진행하며, 사람이 매개변수를 체크해 시작한 빌드가 `Deploy to Lightsail` 단계로 진행한다.
+빌드·패키징·배포는 동일한 Windows Agent와 작업 폴더를 사용한다.
+
+### SSH 인증 정보 등록
+
+Jenkins 관리 → Credentials → System → Global credentials → Add Credentials에서 등록한다.
+
+| 필드 | 값 |
+|---|---|
+| Kind | SSH Username with private key |
+| ID | `dva-lightsail-ssh` |
+| Username | `ubuntu` |
+| Private Key | Enter directly → 로컬 PEM 파일의 전체 내용을 직접 입력 |
+| Passphrase | 현재 제공된 PEM은 접속 시 암호를 요구하지 않으므로 비워 둠 |
+
+개인 키는 Jenkins Credentials에만 등록한다. Git·빌드 매개변수·채팅·콘솔 로그에는
+붙여넣지 않는다. Pipeline은 withCredentials로 임시 키 경로만 받아 사용한다.
+
+`known_hosts`는 서버의 공개 호스트 키이며 개인 키가 아니다. 확인한 지문은
+`SHA256:W9suR7/VFXc7he/VDB6jFvQcnJJXrlTkykWFZL/hjhU`다.
+업로드 스크립트는 이 키로 접속 대상을 검증하고 호스트 키 확인을 우회하지 않는다.
+Windows SSH 권한 문제를 피하도록 실행 계정만 접근할 수 있는 임시 키 사본을
+작업 폴더 밖에 만들고, 성공·실패 여부와 관계없이 정리한다. 원본 키의 권한은 변경하지 않는다.
+
+### 실행 순서
+
+1. Jenkins가 변경된 Jenkinsfile을 읽을 수 있도록 해당 브랜치를 원격에 반영한다. Push·MR은 사용자가 수행한다.
+2. 현재 `dva-ci`는 `*/develop`을 사용한다. 병합 전 작업 브랜치를 시험하려면 기존 Job을
+   복제한 테스트 Job에서 Branch Specifier만 `*/ci/file-transfer-deploy`로 지정한다.
+3. 최초 빌드는 배포를 선택하지 않고 실행해 파이프라인과 매개변수를 등록한다.
+4. Build with Parameters에서 `DEPLOY_LIGHTSAIL`을 체크해 실행한다.
+5. Backend 검증 → 이미지 빌드·파일 생성 → 산출물 보관 → SCP 전송 → 서버 deploy.sh → 상태 확인 순서로 실행한다.
+
+기존 릴리스 폴더는 덮어쓰지 않는다. 전송이 끊겼다면 실패 폴더를 임의로 덮어쓰지 말고
+새 빌드 번호로 다시 실행한다. 서버 환경 파일이 없는 경우 배포를 중단하며,
+이 스크립트가 기존 DB 설정을 생성하거나 교체하지 않는다.
+
+직접 접속 검증만 할 때는 아래처럼 `-VerifyOnly`를 사용한다. 이 모드는 서버 배포를 하지 않는다.
+
+```powershell
+& ./infra/deploy/upload.ps1 -Version '383f3cc5be57-first-20261022' `
+    -IdentityFile 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' -VerifyOnly
+```
+
 ## 남은 작업
 
 - 변경한 Jenkinsfile·스크립트·운영 Compose를 GitLab에 반영하고 CI 실행 검증
 - 실제 장애를 주입한 서버 자동 복구 검증 (현재 자동 복구 분기는 모의 환경에서 검증)
-- Jenkins 자동 전송을 위한 SSH 자격 증명 등록 및 Agent 계정의 known_hosts 준비
+- Jenkins `dva-lightsail-ssh` 자격 증명 등록 후 실제 수동 선택 배포 Job 검증
 - 도메인·HTTPS·외부 접근·실제 AI API·S3·PBX·웹훅 연동
 
 Jenkins가 개인 PC에 있으므로 PC 또는 Windows Agent가 꺼지면 새 빌드는 중단된다.
@@ -157,6 +204,9 @@ Jenkins가 개인 PC에 있으므로 PC 또는 Windows Agent가 꺼지면 새 �
 readiness 확인 명령의 stdin을 `/dev/null`로 분리했다. 해당 상황을 재현하는 회귀 테스트를
 추가했고 기존 배포·실패 복구·손상 거부 테스트와 함께 통과했다.
 
-현재는 기본 Health Check 앱의 인프라 검증 결과다. Jenkins에서 변경된 파이프라인 실행,
-자동 SSH 전송, 도메인·HTTPS, 실제 관리자 웹·AI·S3·전화 업무 연동은 아직 검증하지 않았다.
+현재는 기본 Health Check 앱의 인프라 검증 결과다. Jenkinsfile의 수동 선택 배포와 전송
+스크립트를 추가하고 Groovy·PowerShell 구문 및 실제 SSH 인증·임시 키 정리를 확인했다.
+Jenkins Credentials에는 현재 GitLab 읽기용 ID만 있어 SSH 키 등록이 필요하다.
+변경된 Jenkins Job의 실제 파일 전송·배포, 도메인·HTTPS,
+실제 관리자 웹·AI·S3·전화 업무 연동은 아직 검증하지 않았다.
 ECR 등 신규 유료 AWS 리소스는 생성하지 않았다. 이전 검증 릴리스 폴더는 복구 확인용으로 보관했다.
