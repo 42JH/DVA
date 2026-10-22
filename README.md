@@ -95,7 +95,7 @@ Backend (NestJS)
 | AI Agent | Python, FastAPI |
 | Database | PostgreSQL |
 | Infrastructure | AWS, Docker, Docker Compose |
-| CI/CD | Jenkins (도입 예정) |
+| CI/CD | Jenkins (이미지 빌드 확인, 파일 전송 CD 연결 예정) |
 | Version Control | GitLab |
 
 기술 스택은 프로젝트 개발 과정에서 변경되거나 확장될 수 있습니다.
@@ -129,8 +129,8 @@ dva/
 | Docker Compose 통합 환경 구축 | 완료 |
 | Backend · AI Agent · DB 연결 검증 | 완료 |
 | 핵심 서비스 기능 구현 | 진행 예정 |
-| AWS 인프라 배포 | 진행 예정 |
-| Jenkins CI/CD 구성 | 진행 예정 |
+| AWS 인프라 배포 | Lightsail 기본 서비스 배포·내부 연결 검증 완료 |
+| Jenkins CI/CD 구성 | 이미지 빌드 검증 완료 · 자동 파일 전송 연결 예정 |
 
 ---
 

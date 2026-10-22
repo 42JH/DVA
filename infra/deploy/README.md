@@ -119,10 +119,10 @@ df -h /
 sudo docker system df
 ```
 
-## 배포 전 남은 확인
+## 남은 작업
 
 - 변경한 Jenkinsfile·스크립트·운영 Compose를 GitLab에 반영하고 CI 실행 검증
-- 서버 최초 환경 파일 생성, 실제 파일 전송, 컨테이너 기동·실패 복구 검증
+- 실제 장애를 주입한 서버 자동 복구 검증 (현재 자동 복구 분기는 모의 환경에서 검증)
 - Jenkins 자동 전송을 위한 SSH 자격 증명 등록 및 Agent 계정의 known_hosts 준비
 - 도메인·HTTPS·외부 접근·실제 AI API·S3·PBX·웹훅 연동
 
@@ -139,4 +139,24 @@ Jenkins가 개인 PC에 있으므로 PC 또는 Windows Agent가 꺼지면 새 �
 - 모의 Docker를 이용한 최초 배포·갱신·실패 시 이전 버전 재적용·수동 롤백·전송 손상 거부 검사 통과
 - 검증용 컨테이너·네트워크·볼륨 정리 완료
 
-실제 Lightsail 전송·기동과 Jenkins에서 변경한 파이프라인 실행은 아직 검증하지 않았다.
+## 2026-10-22 Lightsail 검증 결과
+
+- 서버: `13.209.59.180`, x86_64, Docker Compose v5.6.1
+- 로컬 패키징 파일을 SCP 전송한 뒤 서버에서 SHA-256 검증·이미지 로드·Compose 기동 성공
+- 서버 환경 파일은 `/home/ubuntu/dva-deploy/shared/.env`, 파일 권한 600으로 생성
+- 최종 실행 릴리스: `383f3cc5be57-first-20261022` (배포 스크립트 수정 커밋 `383f3cc` 기준)
+- Nginx·Backend·AI·PostgreSQL 모두 healthy 확인
+- `/api/health` 정상, 내부 `/health/ready`에서 DB·AI 모두 up 확인
+- Nginx는 `127.0.0.1:8082`에만 바인딩, Backend·AI·DB의 호스트 포트 매핑 없음
+- DB 네트워크 internal 확인, Nginx의 상세 readiness 경로는 404 확인
+- 동일 앱 이미지를 사용하는 릴리스 간 실제 롤백 후 최신 릴리스 재배포 성공
+- DB 볼륨은 유지했으며 DB 데이터 백업·복원을 검증한 것은 아님
+- 최종 디스크 사용량 약 5.1GB / 154GB, 여유 약 149GB
+
+검증 중 Docker Compose exec가 SSH로 전달한 후속 입력을 소비하는 문제가 확인되어
+readiness 확인 명령의 stdin을 `/dev/null`로 분리했다. 해당 상황을 재현하는 회귀 테스트를
+추가했고 기존 배포·실패 복구·손상 거부 테스트와 함께 통과했다.
+
+현재는 기본 Health Check 앱의 인프라 검증 결과다. Jenkins에서 변경된 파이프라인 실행,
+자동 SSH 전송, 도메인·HTTPS, 실제 관리자 웹·AI·S3·전화 업무 연동은 아직 검증하지 않았다.
+ECR 등 신규 유료 AWS 리소스는 생성하지 않았다. 이전 검증 릴리스 폴더는 복구 확인용으로 보관했다.

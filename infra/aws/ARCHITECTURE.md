@@ -2,8 +2,9 @@
 
 > 2026-10-22 갱신: 실제 모놀리식 서버는 Lightsail `dva-monolith`
 > (서울, Ubuntu 24.04, 2 vCPU / 8GB / 160GB, `13.209.59.180`)로 확정했다.
-> 서버 Docker 설치와 hello-world 실행은 확인했다. 이미지 전달은 ECR 대신
-> Jenkins에서 파일 생성 → SSH 전송 → docker load 방식으로 선택했다.
+> 이미지 전달은 ECR 대신 Jenkins에서 파일 생성 → SSH 전송 → docker load 방식으로 선택했다.
+> 로컬 패키징 → 실제 서버 전송·기동 → 내부 Health Check → 수동 롤백·재배포를 검증했다.
+> 현재 Nginx는 `127.0.0.1:8082`에서만 접근하며 Jenkins 자동 전송·HTTPS·실제 업무 연동은 남아 있다.
 > 현재 실행 절차는 [이미지 파일 배포 가이드](../deploy/README.md)를 따른다.
 > 아래 EC2·ECR·SSM 내용은 기존 검토안이며 실제 구축 완료 상태를 의미하지 않는다.
 
