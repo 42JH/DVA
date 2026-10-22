@@ -1,5 +1,5 @@
 import pytest
-from conftest import FakeClient, FakeDB, signed_webhook
+from conftest import FakeClient, FakeBackend, signed_webhook
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -11,7 +11,7 @@ AUTH = ("admin", "pw")
 def http(monkeypatch):
     monkeypatch.setenv("MONITOR_USER", AUTH[0])
     monkeypatch.setenv("MONITOR_PASSWORD", AUTH[1])
-    with TestClient(create_app(client=FakeClient(), db=FakeDB())) as c:
+    with TestClient(create_app(client=FakeClient(), backend=FakeBackend())) as c:
         yield c
 
 
@@ -24,7 +24,7 @@ def test_monitor_requires_auth(http):
 def test_monitor_closed_without_credentials(monkeypatch):
     monkeypatch.delenv("MONITOR_USER", raising=False)
     monkeypatch.delenv("MONITOR_PASSWORD", raising=False)
-    with TestClient(create_app(client=FakeClient(), db=FakeDB())) as c:
+    with TestClient(create_app(client=FakeClient(), backend=FakeBackend())) as c:
         assert c.get("/monitor", auth=AUTH).status_code == 503
 
 

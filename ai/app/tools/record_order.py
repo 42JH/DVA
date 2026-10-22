@@ -9,6 +9,12 @@ from app.tools._base import OrderFields, Result, ToolError, tool
 )
 async def record_order(ctx, args: OrderFields) -> Result:
     values, invalid = args.cleaned()
+    for role in ("sender", "receiver"):
+        # 주소가 바뀌었는데 상세 주소를 같이 말하지 않았으면 이전 상세 주소는 맞지 않으므로 다시 묻는다
+        address = values.get(f"{role}_address")
+        if address is not None and address != getattr(ctx.order, f"{role}_address") \
+                and f"{role}_address_detail" not in values:
+            setattr(ctx.order, f"{role}_address_detail", None)
     for name, value in values.items():
         setattr(ctx.order, name, value)
     events = ["order.updated"] if values else []

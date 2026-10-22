@@ -27,10 +27,10 @@ def test_build_session_fills_server_owned_parts(tmp_path):
 
 @pytest.mark.parametrize("change, message", [
     (lambda t: t.replace('type = "responses"', 'type = "client"'), "responses"),
-    (lambda t: t.replace('name = "end_call"', 'name = "launch_rocket"'), "launch_rocket"),
+    (lambda t: t.replace('name = "cancel_order"', 'name = "launch_rocket"'), "launch_rocket"),
     (lambda t: t.replace('instructions_file = "voice.md"', 'instructions_file = "nope.md"'), "nope.md"),
     (lambda t: t + "\n[broken", "live.toml"),
-    (lambda t: t.replace('model = "gpt-5.4-mini"', ""), "model"),
+    (lambda t: t.replace('model = "gpt-6-luna"', ""), "model"),
     (lambda t: t.replace("store = false", 'store = "yes please"'), "형식"),
 ])
 def test_bad_config_raises(tmp_path, change, message):

@@ -42,8 +42,8 @@ let selected = null;
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const time = (t) => t ? new Date(t * 1000).toLocaleTimeString("ko-KR") : "";
-const LABELS = { sender_name: "보내는 분", sender_phone: "보내는 분 전화", sender_address: "수거지", sender_address_detail: "수거지 상세",
-  receiver_name: "받는 분", receiver_phone: "받는 분 전화", receiver_address: "받는 분 주소", receiver_address_detail: "받는 분 상세", item: "물품" };
+const LABELS = { sender_name: "보내는 분", sender_phone: "보내는 분 전화", sender_address: "출발지", sender_address_detail: "출발지 상세",
+  receiver_name: "받는 분", receiver_phone: "받는 분 전화", receiver_address: "도착지", receiver_address_detail: "도착지 상세", item: "물품" };
 
 function render() {
   const list = [...calls.values()].sort((a, b) => b.started_at - a.started_at);
@@ -74,7 +74,7 @@ $("toggle").addEventListener("click", async () => {
   if (box.style.display === "block") { box.style.display = "none"; return; }
   box.style.display = "block";
   const orders = await (await fetch("/monitor/api/orders")).json();
-  $("orderTable").innerHTML = `<tr><th>접수번호</th><th>시각</th><th>상태</th><th>보내는 분</th><th>수거지</th><th>받는 분</th><th>주소</th><th>물품</th><th>요금</th></tr>` +
+  $("orderTable").innerHTML = `<tr><th>접수번호</th><th>시각</th><th>상태</th><th>보내는 분</th><th>출발지</th><th>받는 분</th><th>도착지</th><th>물품</th><th>요금</th></tr>` +
     orders.map((o) => `<tr><td>${esc(o.order_no)}</td><td>${esc(o.created_at)}</td><td>${esc(o.status)}</td>
       <td>${esc(o.sender_name)}<br>${esc(o.sender_phone)}</td><td>${esc(o.sender_address)} ${esc(o.sender_address_detail)}</td>
       <td>${esc(o.receiver_name)}<br>${esc(o.receiver_phone)}</td><td>${esc(o.receiver_address)} ${esc(o.receiver_address_detail)}</td>

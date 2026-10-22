@@ -1,24 +1,18 @@
-# AI 전화 접수 서버 + 전용 PostgreSQL(pgvector). ai/ 에서 `docker compose up -d --build`.
+# AI 전화 접수 서버 + 매뉴얼 RAG용 Qdrant. ai/ 에서 `docker compose up -d --build`.
+# 고객·주문·배송지는 AI 서버가 저장하지 않고 백엔드 서버 API로 읽고 쓴다(spec/backend-api.md).
 # 비밀값은 ai/.env(커밋 금지, 항목은 .env.example)에서 읽는다.
 name: dva-ai
 
 services:
-  ai-db:
-    image: pgvector/pgvector:pg17
+  # 매뉴얼 RAG 벡터 DB. 컬렉션·색인·검색 코드는 RAG 담당자 몫(docs/rag-handoff.md)
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
     environment:
-      POSTGRES_USER: ${AI_DB_USER:?Set AI_DB_USER in .env}
-      POSTGRES_PASSWORD: ${AI_DB_PASSWORD:?Set AI_DB_PASSWORD in .env}
-      POSTGRES_DB: ${AI_DB_NAME:?Set AI_DB_NAME in .env}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
     volumes:
-      - ai_postgres_data:/var/lib/postgresql/data
+      - qdrant_data:/qdrant/storage
     networks:
-      - ai_db_net
-    healthcheck:
-      test: ["CMD-SHELL", 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 10s
+      - rag_net
     restart: unless-stopped
 
   ai:
@@ -27,7 +21,10 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
-      DATABASE_URL: postgresql://${AI_DB_USER}:${AI_DB_PASSWORD}@ai-db:5432/${AI_DB_NAME}
+      # 백엔드 서버 API 주소(예: http://backend:3000). 인증 방식은 백엔드 담당자가 정한다
+      BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
+      # PBX 통화 종료 웹훅 서명 비밀값(PBX와 공유)
+      PBX_WEBHOOK_SECRET: ${PBX_WEBHOOK_SECRET:?Set PBX_WEBHOOK_SECRET in .env}
       MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
     volumes:
@@ -39,10 +36,7 @@ services:
       - "127.0.0.1:8000:8000"
     networks:
       - ai_net
-      - ai_db_net
-    depends_on:
-      ai-db:
-        condition: service_healthy
+      - rag_net
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
       interval: 5s
@@ -54,10 +48,10 @@ services:
 networks:
   ai_net:
     driver: bridge
-  # DB는 밖으로 열지 않는다
-  ai_db_net:
+  # Qdrant는 밖으로 열지 않는다(ai 서버만 접근)
+  rag_net:
     driver: bridge
     internal: true
 
 volumes:
-  ai_postgres_data:
+  qdrant_data:

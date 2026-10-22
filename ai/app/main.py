@@ -12,6 +12,7 @@ from app.config import load_server_config, load_texts
 from app.flow import engine
 from app.live_session import LiveConfigError, function_tool_names, load_live_toml
 from app.monitor.router import router as monitor_router
+from app.pbx import router as pbx_router
 from app.tools._base import TOOLS, load_tools
 from app.webhook import Services
 from app.webhook import router as webhook_router
@@ -31,32 +32,32 @@ def check_definitions(cfg, texts) -> None:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")
 
 
-def create_app(client: Any = None, db: Any = None) -> FastAPI:
+def create_app(client: Any = None, backend: Any = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg = load_server_config()
         logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
         texts = load_texts()
         check_definitions(cfg, texts)
-        openai_client, database = client, db
+        openai_client, backend_api = client, backend
         if openai_client is None:
             from openai import AsyncOpenAI
 
             openai_client = AsyncOpenAI()  # OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET
-        if database is None:
-            from app.db import Database
+        if backend_api is None:
+            from app.backend_api import BackendAPI
 
-            database = Database(os.environ["DATABASE_URL"], cfg.storage.pool_min, cfg.storage.pool_max)
-            await database.open()
-        app.state.svc = Services(cfg, texts, openai_client, database, Registry(cfg))
+            backend_api = BackendAPI(os.environ["BACKEND_API_URL"], cfg.backend.timeout_sec)
+        app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
         try:
             yield
         finally:
-            if db is None:
-                await database.close()
+            if backend is None:
+                await backend_api.close()
 
     app = FastAPI(title="디포스트콜 전화 접수", lifespan=lifespan)
     app.include_router(webhook_router)
+    app.include_router(pbx_router)
     app.include_router(monitor_router)
 
     @app.get("/health")

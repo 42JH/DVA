@@ -17,6 +17,10 @@ async def modify_order(ctx, args: ModifyArgs) -> Result:
     if not values:
         raise ToolError("고칠 항목이 없음", "무엇을 고칠지 여쭤보기")
     order_no = args.order_no.strip().upper()
-    if not await ctx.db.update_order(require_caller(ctx), order_no, values):
-        raise ToolError("이 발신번호로 접수된 그 접수번호의 주문이 없음", "lookup_orders로 접수번호 확인")
-    return Result({"order_no": order_no, "modified": list(values)}, ["order.modified"])
+    status = await ctx.backend.update_order(require_caller(ctx), order_no, values)
+    if status == "cancelled":
+        raise ToolError("취소된 주문이라 고칠 수 없음", "취소된 주문은 수정할 수 없다고 안내")
+    if status != "ok":
+        raise ToolError("이 발신번호로 접수된 그 접수번호의 주문이 없음", "접수번호를 다시 여쭤보기(모르면 lookup_orders)")
+    # 지금 요금은 고정이라 바뀌지 않는다. 요금 API가 생기면 다시 계산해 바뀐 요금을 함께 안내한다
+    return Result({"order_no": order_no, "modified": list(values), "fare": ctx.cfg.business.fare}, ["order.modified"])

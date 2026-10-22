@@ -8,7 +8,6 @@ dependencies = [
     "uvicorn",
     "pydantic",
     "openai[realtime]",
-    "psycopg[binary,pool]",
 ]
 
 [dependency-groups]

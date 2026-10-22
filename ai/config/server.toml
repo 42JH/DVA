@@ -21,8 +21,6 @@ tool_timeout_sec = 10.0
 company_name = "디포스트콜"
 # 기본 요금(원). 지금은 가짜 값
 fare = 3500
-# 접수번호 접두사
-order_prefix = "Q"
 # 접수 직후 안내. {order_no} {fare} 사용 가능
 submitted_message = "접수번호는 {order_no}입니다. 요금은 {fare}원이고, 기사님이 방문해서 수거해 갑니다."
 goodbye_message = "디포스트콜을 이용해 주셔서 감사합니다. 좋은 하루 보내세요."
@@ -31,9 +29,10 @@ goodbye_message = "디포스트콜을 이용해 주셔서 감사합니다. 좋�
 # thinking.append 최대 글자 수(500토큰 한도 안쪽, 한글 1글자 ≈ 1토큰 이상으로 잡음)
 max_chars = 400
 
-[storage]
-pool_min = 1
-pool_max = 10
+[backend]
+# 고객·주문·배송지를 관리하는 백엔드 서버 API(spec/backend-api.md). 주소는 환경변수 BACKEND_API_URL
+# 요청 하나의 시간 제한(초). 통화 시작 조회는 accept 전이라 짧게 둔다
+timeout_sec = 3.0
 # 조회 도구가 돌려주는 최근 주문 수
 lookup_limit = 5
 # 관제 화면 접수 주문 목록 개수
@@ -48,3 +47,23 @@ retain_ended_sec = 1800
 call_history_keep = 100
 # 받아쓰기: 같은 사람의 직전 조각과 이 간격(ms) 안이면 겹쳐 말해도 같은 말풍선에 이어 붙인다
 bubble_gap_ms = 1500
+
+[listener]
+# 고객 답 판별(예/아니오·어느 곳·끼어드는 용건). 백엔드 도구 호출 없이 서버가 직접 판별해 대화 상태를 바꾼다
+model = "gpt-6-luna"
+# none · minimal · low · medium · high(모델마다 다름). 높을수록 판별이 늦다
+reasoning_effort = "low"
+# 고객 말이 이만큼(ms) 멈추면 판별한다
+pause_ms = 600
+# 판별 한 번의 시간 제한(초). 넘으면 상태를 바꾸지 않는다
+timeout_sec = 5.0
+# 판별에 넘기는 고객 말(이번 단계에서 아직 판별하지 않은 말)의 최대 글자 수
+max_heard_chars = 400
+# 판별에 같이 넘기는 상담원의 직전 말 최대 글자 수
+max_agent_chars = 200
+# 저장된 배송지를 선택지로 넘길 때 최대 개수
+max_choices = 30
+
+[pbx]
+# PBX 통화 종료 웹훅(POST /pbx/webhook/call-ended): 서명 타임스탬프 허용 오차(초). 비밀값은 환경변수 PBX_WEBHOOK_SECRET
+webhook_tolerance_sec = 300

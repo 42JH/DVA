@@ -35,7 +35,6 @@ class CallConfig(_Strict):
 class BusinessConfig(_Strict):
     company_name: str = Field(min_length=1)
     fare: int = Field(ge=0)
-    order_prefix: str = Field(pattern=r"^[A-Z]{1,4}$")
     submitted_message: str
     goodbye_message: str
 
@@ -44,9 +43,8 @@ class ProgressConfig(_Strict):
     max_chars: int = Field(ge=100, le=1000)
 
 
-class StorageConfig(_Strict):
-    pool_min: int = Field(ge=1)
-    pool_max: int = Field(ge=1)
+class BackendConfig(_Strict):
+    timeout_sec: float = Field(gt=0)
     lookup_limit: int = Field(ge=1, le=20)
     monitor_orders_limit: int = Field(ge=1, le=1000)
 
@@ -58,13 +56,29 @@ class MonitorConfig(_Strict):
     bubble_gap_ms: int = Field(ge=0)
 
 
+class PbxConfig(_Strict):
+    webhook_tolerance_sec: int = Field(ge=30, le=3600)
+
+
+class ListenerConfig(_Strict):
+    model: str = Field(min_length=1)
+    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
+    pause_ms: int = Field(ge=100, le=5000)
+    timeout_sec: float = Field(gt=0)
+    max_heard_chars: int = Field(ge=50, le=2000)
+    max_agent_chars: int = Field(ge=0, le=2000)
+    max_choices: int = Field(ge=2, le=100)
+
+
 class ServerConfig(_Strict):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
     call: CallConfig
     business: BusinessConfig
     progress: ProgressConfig
-    storage: StorageConfig
+    backend: BackendConfig
     monitor: MonitorConfig
+    listener: ListenerConfig
+    pbx: PbxConfig
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:
@@ -84,6 +98,8 @@ class Texts(_Strict):
     progress: str
     progress_item: str
     progress_sep: str
+    classifier: str
+    answer_error: str
 
 
 def load_texts(path: Path | None = None) -> Texts:

@@ -1,15 +1,20 @@
-"""가짜 sideband로 함수 호출 결과 반환·받아쓰기·종료 타이밍·동시 통화를 확인한다."""
+"""가짜 sideband로 함수 호출 결과 반환·받아쓰기·고객 답 판별·종료 타이밍·동시 통화를 확인한다."""
 
 import asyncio
 import time
 
-from conftest import CFG, FULL_ORDER, FakeClient, FakeDB, make_call, run, until
+from conftest import CFG, FULL_ORDER, FakeClient, FakeBackend, make_call, run, until
 
 from app.sideband import run_call
 
 
-def quick_cfg(**call):
-    return CFG.model_copy(update={"call": CFG.call.model_copy(update=call)})
+def quick_cfg(pause_ms=100, **call):
+    return CFG.model_copy(update={"call": CFG.call.model_copy(update=call),
+                                  "listener": CFG.listener.model_copy(update={"pause_ms": pause_ms})})
+
+
+def answers(client, answer, intent="none"):
+    client.responses.decide = lambda kw: {"answer": answer, "intent": intent}
 
 
 async def start(call, client):
@@ -64,6 +69,71 @@ def test_transcript_bubbles_append_to_open_bubble_of_speaker():
     run(scenario())
 
 
+def test_customer_answer_changes_state_without_tool_call():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "after_order"
+        task, conn = await start(call, client)
+        conn.push("session.output_transcript.delta", delta="더 보내실 택배가 있으신가요?")
+        answers(client, "more")
+        conn.push("session.input_transcript.delta", delta="네 하나 ")
+        conn.push("session.input_transcript.delta", delta="더요")
+        await until(lambda: call.flow.stage == "collecting")
+        assert len(client.responses.requests) == 1  # 말이 멈춘 뒤 한 번만 판별
+        req = client.responses.requests[0]
+        assert "네 하나 더요" in req["input"] and "더 보내실 택배" in req["input"]
+        assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["more", "no_more", "none"]
+        assert req["model"] == CFG.listener.model and req["store"] is False
+        await until(lambda: conn.sent[-1][0] == "session.thinking.append" and "보내는 분" in conn.sent[-1][1]["content"])
+        assert conn.outputs() == []  # 백엔드 도구 호출 없음
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_stale_answer_is_discarded_when_stage_changed():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "after_order"
+        task, conn = await start(call, client)
+        client.responses.delay = 0.3
+        answers(client, "no_more")
+        conn.push("session.input_transcript.delta", delta="아니요")
+        await until(lambda: client.responses.requests)
+        call.flow.stage = "collecting"  # 판별 중에 다른 경로로 단계가 바뀜
+        await until(lambda: any(r.get("status") == "stale" for r in call.tool_calls.values()))
+        assert call.flow.stage == "collecting" and not call.hangup_requested.is_set()
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_classifier_output_outside_choices_is_ignored():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "after_order"
+        task, conn = await start(call, client)
+        client.responses.decide = lambda kw: {"answer": "drop_table", "intent": "none"}
+        conn.push("session.input_transcript.delta", delta="음")
+        await until(lambda: call.errors)
+        assert call.flow.stage == "after_order"
+        client.responses.decide = lambda kw: "not json"
+        conn.push("session.input_transcript.delta", delta="음")
+        await until(lambda: len(call.errors) == 2)
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
+
+
 def test_hangup_waits_for_goodbye_to_finish():
     client, call = FakeClient(), make_call()
 
@@ -71,8 +141,9 @@ def test_hangup_waits_for_goodbye_to_finish():
         call.cfg = quick_cfg(hangup_silence_sec=0.2, hangup_max_wait_sec=3.0)
         call.flow.stage = "after_order"
         task, conn = await start(call, client)
-        conn.function_call("end_call", {"customer_confirmed": True}, "c1")
-        await until(lambda: conn.outputs())
+        answers(client, "no_more")
+        conn.push("session.input_transcript.delta", delta="없어요")
+        await until(lambda: call.flow.stage == "ending")
         await asyncio.sleep(0.3)
         assert client.live.sessions.of("hangup") == []  # 인사가 시작되기 전에는 끊지 않는다
         for _ in range(3):
@@ -81,6 +152,9 @@ def test_hangup_waits_for_goodbye_to_finish():
         t0 = time.monotonic()
         await until(lambda: client.live.sessions.of("hangup"))
         assert time.monotonic() - t0 >= 0.1
+        conn.push("session.input_transcript.delta", delta="네 수고하세요")  # ending에서는 판별하지 않는다
+        await asyncio.sleep(0.2)
+        assert len(client.responses.requests) == 1
         conn.push("session.closed", reason="close_requested", usage=None)
         await task
 
@@ -92,9 +166,9 @@ def test_hangup_after_max_wait_even_without_speech():
 
     async def scenario():
         call.cfg = quick_cfg(hangup_silence_sec=0.1, hangup_max_wait_sec=0.3)
-        call.flow.stage = "after_order"
         task, conn = await start(call, client)
-        conn.function_call("end_call", {"customer_confirmed": True}, "c1")
+        answers(client, "none", "end")
+        conn.push("session.input_transcript.delta", delta="그냥 끊을게요")
         await until(lambda: client.live.sessions.of("hangup"), timeout=2)
         conn.push("session.closed", reason="close_requested", usage=None)
         await task
@@ -102,14 +176,15 @@ def test_hangup_after_max_wait_even_without_speech():
     run(scenario())
 
 
-def test_refer_after_transfer():
+def test_refer_after_handoff_yes():
     client, call = FakeClient(), make_call()
 
     async def scenario():
         call.cfg = quick_cfg(hangup_silence_sec=0.05, hangup_max_wait_sec=0.2)
         call.flow.stage = "handoff"
         task, conn = await start(call, client)
-        conn.function_call("transfer_to_agent", {"customer_confirmed": True}, "c1")
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네 연결해 주세요")
         await until(lambda: client.live.sessions.of("refer"))
         assert client.live.sessions.of("refer")[0][2] == CFG.call.refer_target_uri
         conn.push("session.closed", reason="remote_hangup", usage=None)
@@ -146,24 +221,26 @@ def test_sideband_failure_ends_only_that_call():
 
 
 def test_concurrent_calls_do_not_mix_and_slow_tool_does_not_block_others():
-    client, db = FakeClient(), FakeDB()
+    client, db = FakeClient(), FakeBackend()
     calls = [make_call(db, caller=f"0101111000{i}", session_id=f"live_{i}") for i in range(5)]
 
     async def scenario():
         started = [await start(c, client) for c in calls]
-        # 0번 통화의 DB가 느려도(접수 지연) 다른 통화는 진행된다
+        # 0번 통화의 백엔드가 느려도(접수 지연) 다른 통화는 진행된다
 
-        class SlowDB(FakeDB):
-            async def insert_order(self, *a, **k):
+        class SlowBackend(FakeBackend):
+            async def create_order(self, *a, **k):
                 await asyncio.sleep(0.5)
-                return await db.insert_order(*a, **k)
+                return await db.create_order(*a, **k)
 
-        calls[0].db = SlowDB()
+        calls[0].backend = SlowBackend()
         for i, (call, (_, conn)) in enumerate(zip(calls, started)):
             conn.function_call("record_order", {**FULL_ORDER, "item": f"물품{i}"}, f"r{i}")
         await until(lambda: all(c.flow.stage == "confirming" for c in calls))
-        for _, conn in started:
-            conn.function_call("confirm_order", {"answer": "confirm", "customer_confirmed": True}, "k")
+        answers(client, "confirm")
+        for call, (_, conn) in zip(calls, started):
+            call.cfg = quick_cfg()
+            conn.push("session.input_transcript.delta", delta="네 맞아요")
         await until(lambda: all(c.submitted for c in calls[1:]), timeout=0.4)
         assert not calls[0].submitted  # 아직 느린 DB 대기 중
         await until(lambda: calls[0].submitted)

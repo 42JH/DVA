@@ -43,7 +43,7 @@ async def calls(request: Request) -> list[dict]:
 @router.get("/api/orders")
 async def orders(request: Request) -> list[dict]:
     svc = request.app.state.svc
-    return await svc.db.recent_orders(svc.cfg.storage.monitor_orders_limit)
+    return await svc.backend.recent_orders(svc.cfg.backend.monitor_orders_limit)
 
 
 def _sse(message: dict) -> str:

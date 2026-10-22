@@ -16,3 +16,22 @@
 - SDK 메서드(openai 3.35.1에서 확인): `client.live.sessions.accept(session_id, session=...)` · `reject(session_id, status_code=...)` · `refer(session_id, target_uri=...)` · `hangup(session_id)`. accept 본문의 `session`에는 `type = "live"`가 필수다.
 - 웹훅 주소는 서버의 `POST /openai/webhook`. 공인 HTTPS 연결(리버스 프록시·OpenAI 프로젝트 등록)은 아직 하지 않았다.
 - 한도: 동시 세션 Build 50·Launch 300·Grow 500. 과금 분당 $0.05(초 단위), 백엔드 모델 별도. 컨텍스트 128K, 90%를 넘으면 같은 세션에서 엔진이 교체된다(원래 지시문 + 최근 8,192토큰). `session.started`의 `expires_at`이 세션 만료 시각.
+
+## PBX → 서버: 통화 종료 웹훅 (제안, PBX 쪽에 전달)
+
+OpenAI는 통화 종료 웹훅을 보내지 않는다(종료는 sideband `session.closed`로만 옴). 고객이 끊은 것을 PBX가 알려 주면 서버가 해당 OpenAI 세션을 바로 끝낸다. 구현: `app/pbx.py`, 테스트 `tests/test_pbx.py`.
+
+- 주소: `POST https://<서버 도메인>/pbx/webhook/call-ended`. 리버스 프록시에서 이 경로를 공개한다.
+- 본문(JSON): `{"call_id": "<SIP Call-ID>", "ended_at": "2026-10-21T15:04:05+09:00", "reason": "caller_hangup"}`
+  - `call_id`(필수, 256자 이하): 그 통화 INVITE의 **SIP `Call-ID` 헤더 값 그대로**. 서버는 OpenAI 웹훅(`live.transport.incoming`)의 `sip_headers`에서 같은 값을 기억해 두고 맞춘다. **PBX→OpenAI 구간에서 Call-ID가 바뀌면 맞출 수 없으니 확인 필요.**
+  - `ended_at`, `reason`(선택, 64자 이하): 기록용.
+- 서명(필수): 공유 비밀값 `PBX_WEBHOOK_SECRET`으로 `"<타임스탬프>.<본문 원문 바이트>"`를 HMAC-SHA256한 hex.
+  - 헤더 `X-Pbx-Timestamp: <유닉스 초>`, `X-Pbx-Signature: sha256=<hex>`.
+  - 시각 오차가 `[pbx] webhook_tolerance_sec`(기본 300초)를 넘으면 거절한다.
+- 응답
+  - 200: 처리함. 모르는 통화·이미 끝난 통화도 200이고, 같은 요청을 다시 보내도 된다.
+  - 401: 서명 오류. 400: 본문 오류. 503: 서버에 비밀값이 설정되지 않음.
+- 동작
+  - 진행 중인 통화면 마무리 인사를 기다리지 않고 바로 `hangup`.
+  - accept 중인 통화면 accept가 끝나는 대로 `hangup`하고 sideband를 열지 않는다.
+  - 관제 화면에 `pbx_ended`로 남긴다.

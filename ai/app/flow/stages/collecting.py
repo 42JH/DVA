@@ -1,28 +1,32 @@
-"""주문 정보 받기. 신규·등록 고객은 받는 항목 순서만 다르다."""
+"""주문 정보 받기. 신규·등록 고객은 받는 순서만 다르다. 항목 기록은 백엔드가 record_order로 한다."""
 
 from app.flow.engine import ENTERED, Stage, Transition
-from app.flow.stages._common import complete, is_new, is_registered
+from app.flow.stages._common import COMMON_TOOLS, complete, is_new, is_registered, origin_due, reset_for_new_order
 from app.order import ORDER_FIELDS
 
-TOOLS = ("get_state", "record_order", "find_saved_places", "use_saved_place", "next_request", "end_call")
-TO_CONFIRM = (Transition("order.updated", "confirming", complete), Transition(ENTERED, "confirming", complete))
+NEW_ORDER_FIELDS = ("sender_name", "sender_phone", "sender_address", "sender_address_detail",
+                    "receiver_address", "receiver_address_detail", "receiver_name", "receiver_phone", "item")
+REGISTERED_ORDER_FIELDS = ("receiver_address", "receiver_address_detail", "receiver_name", "receiver_phone",
+                           "sender_address", "sender_address_detail", "sender_name", "sender_phone", "item")
+
+
+def field_order(ctx) -> tuple[str, ...]:
+    return REGISTERED_ORDER_FIELDS if is_registered(ctx) else NEW_ORDER_FIELDS
+
 
 STAGES = [
     Stage(
-        name="collecting_new",
-        description="주문 정보 받는 중(신규 고객)",
-        tools=TOOLS,
-        transitions=TO_CONFIRM,
+        name="collecting",
+        description="주문 정보 받는 중",
+        tools=COMMON_TOOLS + ("record_order",),
         fields=ORDER_FIELDS,
+        order=field_order,
+        transitions=tuple(
+            Transition(event, target, guard)
+            for event in ("order.updated", ENTERED)
+            for target, guard in (("confirming", complete), ("find_origin", origin_due))
+        ),
         start_if=is_new,
-    ),
-    Stage(
-        name="collecting_registered",
-        description="주문 정보 받는 중(등록 고객)",
-        tools=TOOLS + ("use_recent_receiver",),
-        transitions=TO_CONFIRM,
-        # 지난번 받는 분을 다시 쓸지 먼저 묻는다
-        fields=("recent",) + ORDER_FIELDS,
-        start_if=is_registered,
+        on_enter=reset_for_new_order,
     ),
 ]

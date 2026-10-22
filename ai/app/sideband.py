@@ -1,14 +1,15 @@
 """sideband 연결 하나 = 통화 하나의 작업(spec/sideband.md).
-백엔드 function_call 실행·결과 반환, 진행 상태 thinking.append, 받아쓰기, 종료·전환 타이밍."""
+백엔드 function_call 실행·결과 반환, 진행 상태 thinking.append, 받아쓰기·고객 답 판별, 종료·전환 타이밍."""
 
 import asyncio
 import json
 import logging
 import time
 
+from app import listener
 from app.call import Call
 from app.dispatcher import dispatch
-from app.flow import engine
+from app.progress import send_progress
 
 log = logging.getLogger(__name__)
 
@@ -27,14 +28,15 @@ async def run_call(call: Call, client) -> None:
             tool_tasks: set[asyncio.Task] = set()
             try:
                 async for event in conn:
-                    closed = handle_event(call, conn, event, tool_tasks)
+                    closed = handle_event(call, conn, event, tool_tasks, client)
                     if closed:
                         reason = closed
                         break
             finally:
                 watcher.cancel()
-                for t in tool_tasks:
-                    t.cancel()
+                for t in [*tool_tasks, *call.listen_tasks, call.listen_timer]:
+                    if t:
+                        t.cancel()
     except Exception as e:
         log.exception("sideband 오류 %s", call.session_id)
         call.add_error(f"sideband 오류: {type(e).__name__}")
@@ -47,7 +49,7 @@ async def run_call(call: Call, client) -> None:
         call.end(reason)
 
 
-def handle_event(call: Call, conn, event, tool_tasks: set) -> str | None:
+def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str | None:
     """이벤트 하나 처리. 통화가 닫혔으면 이유를 돌려준다. 도구 실행은 별도 작업으로(받기를 막지 않게)."""
     etype = getattr(event, "type", None)
     if etype == "response.event":
@@ -70,6 +72,7 @@ def handle_event(call: Call, conn, event, tool_tasks: set) -> str | None:
             task.add_done_callback(tool_tasks.discard)
     elif etype == "session.input_transcript.delta":
         call.add_transcript("customer", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
+        listener.heard(call, event.delta, conn, client)
     elif etype == "session.output_transcript.delta":
         call.add_transcript("agent", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
     elif etype == "session.output_audio.delta":
@@ -107,14 +110,6 @@ async def run_tool(call: Call, conn, item: dict) -> None:
         except Exception:
             log.exception("도구 결과 전송 실패 %s", call.session_id)
             call.add_error("도구 결과 전송 실패")
-
-
-async def send_progress(call: Call, conn) -> None:
-    """음성 모델에 "다음에 물을 것 + 기록된 값". 바뀌었을 때만 보낸다."""
-    text = engine.progress_text(call, call.cfg.progress.max_chars)
-    if text != call.last_progress:
-        await conn.session.thinking.append(content=text, delegation_id=None)
-        call.last_progress = text
 
 
 async def wait_quiet(call: Call) -> None:

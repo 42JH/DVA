@@ -6,12 +6,12 @@ import hashlib
 import hmac
 import itertools
 import json
-import sys
 import time
 from types import SimpleNamespace
 
 from openai import AsyncOpenAI
 
+from app.backend_api import CallerContext
 from app.call import Call
 from app.config import load_server_config, load_texts
 from app.main import check_definitions
@@ -32,63 +32,62 @@ FULL_ORDER = {
 
 
 def run(coro):
-    """psycopg async는 Windows에서 SelectorEventLoop가 필요하다."""
-    if sys.platform == "win32":
-        return asyncio.run(coro, loop_factory=asyncio.SelectorEventLoop)
     return asyncio.run(coro)
 
 
-class FakeDB:
-    """app.db.Database와 같은 메서드를 메모리로."""
+class FakeBackend:
+    """app.backend_api.BackendAPI와 같은 메서드를 메모리로. 발신번호 기준으로만 보이고 고친다."""
 
     def __init__(self):
         self.orders: list[dict] = []
-        self.places: dict[str, list[Place]] = {}
+        self.places: dict[str, list[tuple[str, Place]]] = {}  # 소유자 → [(종류, 배송지)]
+        self.keys: dict[str, str] = {}  # Idempotency-Key → 접수번호
         self._seq = itertools.count(1)
-        self.delay = 0.0
 
-    async def insert_order(self, caller, session_id, order: Order, fare, prefix):
-        await asyncio.sleep(self.delay)
-        no = f"{prefix}{next(self._seq):06d}"
+    def places_of(self, owner, kind):
+        return [p for k, p in self.places.get(owner, []) if k == kind]
+
+    async def caller_context(self, phone):
+        recent = next((o for o in reversed(self.orders) if o["caller_phone"] == phone and o["status"] == "received"),
+                      None)
+        return CallerContext(
+            recent=Order(**{f: recent[f] for f in ORDER_FIELDS}) if recent else None,
+            places={kind: self.places_of(phone, kind) for kind in ("origin", "destination")})
+
+    async def create_order(self, caller, session_id, order: Order, fare, idempotency_key):
+        if idempotency_key in self.keys:
+            return self.keys[idempotency_key]
+        no = f"Q{next(self._seq):06d}"
         self.orders.append({"order_no": no, "caller_phone": caller, "session_id": session_id, "fare": fare,
                             "status": "received", **order.model_dump()})
+        if idempotency_key:
+            self.keys[idempotency_key] = no
         return no
 
     async def list_orders(self, caller, limit):
         mine = [o for o in reversed(self.orders) if o["caller_phone"] == caller]
         return [{k: o[k] for k in ("order_no", "receiver_name", "item", "status")} for o in mine[:limit]]
 
-    async def latest_receiver(self, caller):
-        for o in reversed(self.orders):
-            if o["caller_phone"] == caller and o["status"] == "received":
-                return Place(name=o["receiver_name"], phone=o["receiver_phone"], address=o["receiver_address"],
-                             address_detail=o["receiver_address_detail"])
-        return None
-
-    def _find(self, caller, order_no):
-        return next((o for o in self.orders if o["order_no"] == order_no and o["caller_phone"] == caller
-                     and o["status"] == "received"), None)
+    def _status(self, caller, order_no):
+        o = next((o for o in self.orders if o["order_no"] == order_no and o["caller_phone"] == caller), None)
+        return o["status"] if o else "not_found"
 
     async def update_order(self, caller, order_no, values):
-        o = self._find(caller, order_no)
-        if not o:
-            return False
+        if self._status(caller, order_no) != "received":
+            return self._status(caller, order_no)
+        o = next(o for o in self.orders if o["order_no"] == order_no)
         o.update({k: v for k, v in values.items() if k in ORDER_FIELDS})
-        return True
+        return "ok"
 
     async def cancel_order(self, caller, order_no):
-        o = self._find(caller, order_no)
-        if not o:
-            return False
-        o["status"] = "cancelled"
-        return True
-
-    async def list_places(self, owner):
-        return list(self.places.get(owner, []))
+        if self._status(caller, order_no) != "received":
+            return self._status(caller, order_no)
+        next(o for o in self.orders if o["order_no"] == order_no)["status"] = "cancelled"
+        return "ok"
 
     async def save_places(self, owner, places):
         mine = self.places.setdefault(owner, [])
-        new = [p for p in places if p not in mine]
+        new = [kp for kp in places if kp not in mine]
         mine.extend(new)
         return len(new)
 
@@ -96,8 +95,8 @@ class FakeDB:
         return list(reversed(self.orders))[:limit]
 
 
-def make_call(db=None, caller=CALLER, session_id="live_test") -> Call:
-    call = Call(session_id, caller, CFG, TEXTS, db or FakeDB())
+def make_call(backend=None, caller=CALLER, session_id="live_test") -> Call:
+    call = Call(session_id, caller, CFG, TEXTS, backend or FakeBackend())
     run(call.prepare())
     return call
 
@@ -109,8 +108,10 @@ class FakeSessions:
     def __init__(self):
         self.calls: list[tuple] = []
         self.accept_error: Exception | None = None
+        self.accept_delay = 0.0
 
     async def accept(self, session_id, *, session):
+        await asyncio.sleep(self.accept_delay)
         self.calls.append(("accept", session_id, session))
         if self.accept_error:
             raise self.accept_error
@@ -180,18 +181,36 @@ class FakeSideband:
         return self.conns.setdefault(session_id, FakeConn())
 
 
+class FakeResponses:
+    """판별 모델(responses.create). decide(요청 인수) → {"answer", "intent"} 또는 예외. 기본은 아무 판별 없음."""
+
+    def __init__(self):
+        self.requests: list[dict] = []
+        self.delay = 0.0
+        self.decide = lambda kw: {"answer": "none", "intent": "none"}
+
+    async def create(self, **kw):
+        self.requests.append(kw)
+        await asyncio.sleep(self.delay)
+        result = self.decide(kw)
+        return SimpleNamespace(output_text=result if isinstance(result, str) else json.dumps(result))
+
+
 class FakeClient:
     def __init__(self):
         self.live = SimpleNamespace(sessions=FakeSessions(), sideband=FakeSideband())
+        self.responses = FakeResponses()
         self.webhooks = AsyncOpenAI(api_key="test", webhook_secret=WEBHOOK_SECRET).webhooks
 
 
 def signed_webhook(event_type: str, session_id: str, from_header: str = f"<sip:+82{CALLER[1:]}@pbx>",
-                   webhook_id: str | None = None, secret: str = WEBHOOK_SECRET) -> tuple[bytes, dict]:
+                   webhook_id: str | None = None, secret: str = WEBHOOK_SECRET,
+                   sip_call_id: str | None = None) -> tuple[bytes, dict]:
     body = json.dumps({
         "id": webhook_id or f"evt_{session_id}", "object": "event", "created_at": int(time.time()), "type": event_type,
         "data": {"type": "sip", "session_id": session_id,
-                 "sip_headers": [{"name": "From", "value": from_header}, {"name": "To", "value": "<sip:proj@x>"}]},
+                 "sip_headers": [{"name": "From", "value": from_header}, {"name": "To", "value": "<sip:proj@x>"},
+                                 {"name": "Call-ID", "value": sip_call_id or f"sip-{session_id}@pbx"}]},
     }).encode()
     wid, ts = webhook_id or f"wh_{session_id}", str(int(time.time()))
     key = base64.b64decode(secret[6:])
