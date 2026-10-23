@@ -1,0 +1,34 @@
+// AI 서버 배포(Lightsail). Jenkins job: Pipeline script from SCM, 브랜치 develop-ai, Script Path ai/Jenkinsfile.
+// 비밀값은 서버의 /srv/dva-ai/.env(jenkins 소유, 600, 커밋 금지)에서 읽는다.
+// 컨테이너를 다시 만들므로 진행 중인 통화는 끊긴다.
+pipeline {
+    agent any
+
+    options {
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        ENV_FILE = '/srv/dva-ai/.env'
+    }
+
+    stages {
+        stage('Deploy AI') {
+            steps {
+                dir('ai') {
+                    // compose의 name(dva-ai)이 고정이라 작업공간이 바뀌어도 같은 컨테이너·볼륨을 쓴다
+                    sh 'docker compose --env-file "$ENV_FILE" up -d --build --remove-orphans --wait --wait-timeout 120'
+                    sh 'docker image prune -f'
+                }
+            }
+        }
+    }
+
+    post {
+        failure {
+            dir('ai') {
+                sh 'docker compose --env-file "$ENV_FILE" logs --tail 100 ai || true'
+            }
+        }
+    }
+}

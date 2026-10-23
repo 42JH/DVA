@@ -240,3 +240,33 @@
 ### 남은 것
 - Studio 웹 화면 연결은 사용자 계정으로 확인(LangSmith 로그인 필요, 키가 필요하면 `LANGSMITH_API_KEY` 환경변수).
 - Studio의 되감기·포크는 가짜 통화에 반영되지 않음(새 스레드로 다시 시작).
+
+## 2026-10-22 (AI 서버 Lightsail 인스턴스: Jenkins 설치)
+
+### 바꾼 것
+- Lightsail(Ubuntu 24.04, x86_64, RAM 16GB) 인스턴스에 설치: Docker Engine 29.9 + compose plugin(Docker 공식 apt 저장소), OpenJDK 21, Jenkins LTS 2.580.1(공식 apt 저장소).
+- `jenkins`·`ubuntu` 사용자를 `docker` 그룹에 넣음(Jenkins가 `docker compose` 직접 실행).
+- nginx·certbot은 하지 않기로 함(HTTPS 불필요하다고 사용자 결정).
+- `ai/Jenkinsfile`: `develop-ai` push(GitLab 웹훅) → 작업공간의 `ai/`에서 `docker compose --env-file /srv/dva-ai/.env up -d --build --wait`. 루트 `Jenkinsfile`(팀 CI)은 건드리지 않음.
+- 서버에 `/srv/dva-ai/.env`(jenkins 소유, 600, 빈 파일) 생성. 값은 사용자가 채운다.
+- Jenkins URL `http://3.37.162.168:8080/` 확인, 역방향 프록시 경고(`ReverseProxySetupMonitor`) 끔(프록시 없음).
+- Jenkins job `dva-ai-deploy` 생성(일회용 init Groovy, 실행 후 삭제): SCM `develop-ai`, Script Path `ai/Jenkinsfile`, 자격 증명 ID `gitlab-ssafy`, GitLab push 트리거(`develop-ai`만, 비밀 토큰은 서버 `/root/dva-ai-webhook-token`).
+- 확인: 맞는 토큰 200, 틀린 토큰 401, 다른 브랜치 push는 빌드 안 됨.
+- job `dva-ai-deploy`는 일단 비활성화(사용자 요청). 사용자가 직접 돌린 #1은 GitLab 인증 실패(토큰 대신 비밀번호로 추정).
+- 서버 시간대 Asia/Seoul. `compose.yaml`의 `ai`에 `TZ: Asia/Seoul`(python:3.14-slim에 tzdata 있음 확인). 앱 코드에 로컬 시각 의존은 없어 로그 시각만 바뀐다.
+- nginx 1.24 설치. 80은 열림, 443은 닫힘.
+- 사용자가 IP 주소용 Let's Encrypt 인증서 발급(`/etc/letsencrypt/live/3.37.162.168`, `shortlived` 6일, webroot 갱신). nginx를 80(인증 경로 + 나머지 HTTPS로 301)·443(프록시, SSE 버퍼링 끔) 두 블록으로 정리. 갱신 후 `systemctl reload nginx` 하는 deploy hook 추가. `certbot renew --dry-run` 성공.
+- 확인: 밖에서 HTTPS 인증서 검증 통과(앱이 없어 502). 443은 사용자가 Lightsail 방화벽에서 엶.
+- 인증서를 발급 후 3일째 갱신: 갱신 설정에 `renew_before_expiry = 88 hours`(수명 160시간 - 72시간). snap 타이머가 하루 두 번(03:23, 19:36 KST)이라 실제 갱신은 3일 경과 후 첫 타이머. 첫 갱신 예상 2026-10-25 19:36.
+- certbot은 snap 5.8.0만 남김(apt 2.9.0은 purge, `/usr/bin/certbot` → `/snap/bin/certbot` 링크). 갱신 타이머는 `snap.certbot.renew.timer` 하나.
+- nginx `sites-available/default`를 server 블록 하나로 정리(기본 블록 안에 새 설정이 붙어 `duplicate listen` 오류였음, 원본은 서버 `/root/nginx-default.bak.*`): `/.well-known/acme-challenge/` → `/var/www/certbot`, 나머지 → `127.0.0.1:8000`, `/monitor/api/stream`은 버퍼링 끔. 확인: 인증 경로 응답, `/`는 앱이 없어 502.
+
+### 확인한 것
+- Jenkins apt 저장소 서명 키가 `jenkins.io-2026.key`(지문 `5E386EADB55F01504CAE8BCF7198F4B714ABFC68`)로 바뀌어 있음. 2023 키로는 `NO_PUBKEY 7198F4B714ABFC68`.
+- `jenkins` 사용자로 `docker ps` 성공. Jenkins는 8080에서 대기, 외부에서는 Lightsail 방화벽에 막혀 닿지 않음.
+
+### 남은 것
+- `/srv/dva-ai/.env` 값 채우기, Jenkins 자격 증명 `gitlab-ssafy` 등록, GitLab 웹훅 등록, `ai/Jenkinsfile`을 `develop-ai`에 반영, 첫 배포 확인.
+- Jenkins 로그에 `github-branch-source` 플러그인 로드 실패가 있음(쓰지 않음, 배포와 무관).
+- 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
+- OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.
