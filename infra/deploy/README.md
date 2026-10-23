@@ -19,10 +19,11 @@ Lightsail → 체크섬 확인 → docker load → Compose 실행 → 상태 확
   Nginx 경유 HTTP 상태를 확인한다. 실패하면 기존 정상 릴리스를 재적용한다.
 - Jenkins는 커밋 SHA와 빌드 번호로 버전을 만들고 해당 폴더를 빌드 산출물로 보관한다.
   Windows Agent도 Controller에서 검증한 것과 같은 커밋을 사용한다.
-- 서버 전송·실행은 실제 Lightsail에서 수동 검증했다. Jenkinsfile에는 수동 선택 배포를
-  추가했으며 Jenkins의 SSH 인증 정보 등록과 Job 실행 검증이 남아 있다.
-- 도메인·HTTPS 준비 전에는 Nginx를 `127.0.0.1:8082`에서 검증한다.
-  `/`는 프론트엔드 미구현으로 404이며, 외부 전화 웹훅은 아직 연결되지 않는다.
+- Jenkins #15에서 SSH 인증·파일 전송·수동 선택 배포를 검증했다.
+- 컨테이너 Nginx는 `127.0.0.1:8082`를 유지한다. 호스트 Nginx가 IP HTTPS를 종료하고
+  PBX 웹훅만 전달한다. [HTTPS 운영](../https/README.md), [웹훅 규격](../webhooks/PBX-CALL-ENDED.md)을 참고한다.
+- 운영 `shared/.env`에는 DB 설정 외에 32바이트 이상의 `PBX_WEBHOOK_TOKEN`이 필요하다.
+  기존 서버에는 무작위 토큰을 생성했으며 Git·산출물에 포함하지 않았다.
 
 ## 1. Windows에서 배포 폴더 생성
 
@@ -149,8 +150,9 @@ Windows SSH 권한 문제를 피하도록 실행 계정만 접근할 수 있는 
 ### 실행 순서
 
 1. Jenkins가 변경된 Jenkinsfile을 읽을 수 있도록 해당 브랜치를 원격에 반영한다. Push·MR은 사용자가 수행한다.
-2. 현재 `dva-ci`는 `*/develop`을 사용한다. 병합 전 작업 브랜치를 시험하려면 기존 Job을
-   복제한 테스트 Job에서 Branch Specifier만 `*/ci/file-transfer-deploy`로 지정한다.
+2. 기존 `dva-ci` Job의 Branch Specifier를 배포할 브랜치로 지정한다.
+   CI/CD 검증 당시에는 `*/ci/file-transfer-deploy`를 사용했다. 해당 작업은 `develop-backend`에
+   병합됐으며, Job 설정 변경과 Push·MR은 사용자가 수행한다. 새 Job을 만들 필요는 없다.
 3. 최초 빌드는 배포를 선택하지 않고 실행해 파이프라인과 매개변수를 등록한다.
 4. Build with Parameters에서 `DEPLOY_LIGHTSAIL`을 체크해 실행한다.
 5. Backend 검증 → 이미지 빌드·파일 생성 → 산출물 보관 → SCP 전송 → 서버 deploy.sh → 상태 확인 순서로 실행한다.
@@ -168,10 +170,9 @@ Windows SSH 권한 문제를 피하도록 실행 계정만 접근할 수 있는 
 
 ## 남은 작업
 
-- 변경한 Jenkinsfile·스크립트·운영 Compose를 GitLab에 반영하고 CI 실행 검증
 - 실제 장애를 주입한 서버 자동 복구 검증 (현재 자동 복구 분기는 모의 환경에서 검증)
-- Jenkins `dva-lightsail-ssh` 자격 증명 등록 후 실제 수동 선택 배포 Job 검증
-- 도메인·HTTPS·외부 접근·실제 AI API·S3·PBX·웹훅 연동
+- 디버 PBX의 인증 헤더·재전송·녹취 다운로드 규격 확정 및 실제 통화 수신 검증
+- 저장된 웹훅과 업무 통화 데이터·S3·AI 후속 처리 연결, 정기 DB 백업·모니터링
 
 Jenkins가 개인 PC에 있으므로 PC 또는 Windows Agent가 꺼지면 새 빌드는 중단된다.
 이미 서버에서 실행 중인 앱은 이와 별개로 계속 실행된다.
@@ -210,3 +211,14 @@ Jenkins Credentials에는 현재 GitLab 읽기용 ID만 있어 SSH 키 등록이
 변경된 Jenkins Job의 실제 파일 전송·배포, 도메인·HTTPS,
 실제 관리자 웹·AI·S3·전화 업무 연동은 아직 검증하지 않았다.
 ECR 등 신규 유료 AWS 리소스는 생성하지 않았다. 이전 검증 릴리스 폴더는 복구 확인용으로 보관했다.
+
+## 2026-10-23 갱신
+
+위 10월 22일 기록 이후 Jenkins #15의 실제 선택 배포가 성공했고, CI/CD 변경은
+`100faa4`로 `develop-backend`에 병합됐다.
+
+현재 릴리스는 `pbx-ip-20261023-01`이다. 이 버전은 웹훅 작업 브랜치의 로컬 검증 소스로
+수동 패키징·배포했으며, 해당 브랜치의 GitLab 반영은 아직 수행하지 않았다.
+네 서비스 healthy, 내부 readiness, 외부 IP HTTPS 웹훅의 인증·저장·재전송 처리를 확인했다.
+신규 모놀리식 웹훅 테이블은 백엔드 시작 시 추가되며 기존 MSA migration은 적용하지 않는다.
+DB 변경 전 서버에 dump를 만들고 archive index를 검사했다. 정기 백업·복원 시험은 별도다.

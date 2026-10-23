@@ -95,7 +95,7 @@ Backend (NestJS)
 | AI Agent | Python, FastAPI |
 | Database | PostgreSQL |
 | Infrastructure | AWS, Docker, Docker Compose |
-| CI/CD | Jenkins (이미지 빌드 확인, 수동 선택 배포 설정·Job 검증 대기) |
+| CI/CD | Jenkins (이미지 빌드·SSH 파일 전송·수동 선택 배포 검증 완료) |
 | Version Control | GitLab |
 
 기술 스택은 프로젝트 개발 과정에서 변경되거나 확장될 수 있습니다.
@@ -130,7 +130,8 @@ dva/
 | Backend · AI Agent · DB 연결 검증 | 완료 |
 | 핵심 서비스 기능 구현 | 진행 예정 |
 | AWS 인프라 배포 | Lightsail 기본 서비스 배포·내부 연결 검증 완료 |
-| Jenkins CI/CD 구성 | 이미지 빌드 검증 완료 · 수동 선택 배포 설정 추가, SSH 키 등록·Job 검증 대기 |
+| Jenkins CI/CD 구성 | 이미지 빌드·수동 선택 Lightsail 배포 검증 완료 |
+| PBX 통화 종료 웹훅 | IP HTTPS·인증·DB 저장 검증 완료, 디버 실제 통화 연동 협의 대기 |
 
 ---
 
@@ -138,6 +139,9 @@ dva/
 
 현재 선택한 Lightsail 배포 방식은 이미지 파일 전송이다.
 [파일 생성·SSH 전송·배포·롤백 가이드](infra/deploy/README.md)를 참고한다.
+
+- [고정 IP HTTPS·인증서 자동 갱신](infra/https/README.md)
+- [PBX 통화 종료 웹훅 규격·토큰 전달·검증](infra/webhooks/PBX-CALL-ENDED.md)
 
 상세 설계 및 개발 관련 문서는 `docs/` 디렉터리에서 관리합니다.
 

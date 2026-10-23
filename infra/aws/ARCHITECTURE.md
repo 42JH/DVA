@@ -1,11 +1,13 @@
 # Dva AWS 배포 아키텍처 — 초안 (v0.1)
 
-> 2026-10-22 갱신: 실제 모놀리식 서버는 Lightsail `dva-monolith`
+> 2026-10-23 갱신: 실제 모놀리식 서버는 Lightsail `dva-monolith`
 > (서울, Ubuntu 24.04, 2 vCPU / 8GB / 160GB, `13.209.59.180`)로 확정했다.
 > 이미지 전달은 ECR 대신 Jenkins에서 파일 생성 → SSH 전송 → docker load 방식으로 선택했다.
 > 로컬 패키징 → 실제 서버 전송·기동 → 내부 Health Check → 수동 롤백·재배포를 검증했다.
-> 현재 Nginx는 `127.0.0.1:8082`에서만 접근한다. Jenkins 수동 선택 전송·배포 설정은
-> 추가했으며, SSH 자격 증명 등록·실제 Job 검증·HTTPS·실제 업무 연동은 남아 있다.
+> Jenkins 수동 선택 전송·배포 검증을 완료했다. 컨테이너 Nginx는 `127.0.0.1:8082`를 유지하고,
+> 호스트 Nginx가 고정 IP의 공인 HTTPS 인증서를 사용해 PBX 웹훅을 전달한다.
+> 웹훅 인증·DB 저장을 검증했으며 실제 PBX 통화, 업무 데이터·AI 연결은 남아 있다.
+> [HTTPS 운영](../https/README.md), [PBX 규격](../webhooks/PBX-CALL-ENDED.md)을 참고한다.
 > 현재 실행 절차는 [이미지 파일 배포 가이드](../deploy/README.md)를 따른다.
 > 아래 EC2·ECR·SSM 내용은 기존 검토안이며 실제 구축 완료 상태를 의미하지 않는다.
 
