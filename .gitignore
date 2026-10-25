@@ -48,6 +48,9 @@ yarn-error.log*
 *.temp
 .deploy/
 msa-release/
+infra/jenkins/home/
+infra/jenkins/bootstrap-output/
+infra/jenkins/validation/
 
 # ==========================================
 # IDE / Editor
