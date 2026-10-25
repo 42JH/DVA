@@ -17,6 +17,12 @@ CI는 항상 전체 5개 DB를 검사한다. CD는 `DB_SERVICE`로 선택한 하
 
 ## CI 검사
 
+GitLab Webhook 실행에서는 마지막 성공 빌드의 커밋과 현재 checkout의 `msa/` 내용을 비교한다. 변경이 없으면 환경·DB 검사와 이미지 패키징을 생략하며, 빌드 기록에 `MSA 변경 없음: CI 생략`을 남긴다. 최초 실행이나 비교 이력이 없거나 분기된 경우에는 전체 CI를 실행한다. 실패한 빌드의 MSA 변경도 다시 검사하도록 직전 빌드가 아닌 마지막 성공 빌드를 기준으로 한다. 수동 실행과 명시적 배포 실행은 변경 여부와 관계없이 전체 CI를 수행한다.
+
+자동 실행은 GitLab의 Push events Webhook을 사용한다. Jenkins 트리거는 Push Events만 활성화하고 Allowed branches를 `develop-backend`로 제한한다. GitLab Webhook 주소는 `https://13.209.59.180/jenkins/project/dva-msa`, 브랜치 필터는 `develop-backend`이며 Jenkins에서 생성한 Secret token을 등록하고 SSL 검증을 유지한다. Poll SCM과 별도 주기 빌드는 끈다. Git의 Included Regions 설정은 Webhook 직접 실행에 적용되지 않으므로 파이프라인에서 경로를 검사한다. 자동 실행은 기본값 `DEPLOY_MSA=false`를 유지한다.
+
+Webhook을 켜기 전에 이 Jenkinsfile이 대상 브랜치에 반영되어야 한다. 반영 후 MSA 변경과 다른 폴더 변경을 각각 검증한다. 코드 checkout과 빌드 기록 생성은 MSA 변경이 없어도 발생하며, 동시에 여러 푸시가 들어오면 checkout 시점의 최신 코드 기준으로 비교한다.
+
 | 검사 | 내용 |
 |---|---|
 | 실행 환경 | Linux amd64, Docker 엔진, Python 3, Bash, SSH/SCP 및 체크섬 도구 |
