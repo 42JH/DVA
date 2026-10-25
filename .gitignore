@@ -47,6 +47,9 @@ yarn-error.log*
 *.tmp
 *.temp
 .deploy/
+infra/jenkins/home/
+infra/jenkins/bootstrap-output/
+infra/jenkins/validation/
 
 # ==========================================
 # IDE / Editor
