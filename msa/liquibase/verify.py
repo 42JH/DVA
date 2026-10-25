@@ -28,12 +28,13 @@ def sql(db, statement, label, user='postgres'):
     return run(['docker', 'exec', '-i', name, 'psql', '-X', '-At', '-v', 'ON_ERROR_STOP=1',
                 '-U', user, '-d', db], label, statement)
 
-def lb(service, db, action, label, failure=False):
+def lb(service, db, action, label, failure=False, extra=(), changelog_root=None):
     return run(['docker', 'run', '--rm', '--network', name,
+                *(['-v', str(changelog_root) + ':/liquibase/changelog:ro'] if changelog_root else []),
                 '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{name}:5432/{db}',
                 '-e', f'LIQUIBASE_COMMAND_USERNAME={service}_app',
                 IMAGE, f'--changelog-file={service}/db.changelog.xml',
-                action], label, failure=failure)
+                action, *extra], label, failure=failure)
 
 network_created = pg_created = False
 try:
@@ -64,7 +65,8 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        assert catalog == f'{tables}|{fks}|1', catalog
+        changesets = 2 if service in ('customer', 'operations') else 1
+        assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
         history = sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog;', service+'-history-before')
@@ -81,18 +83,71 @@ try:
     # An error late in the initial SQL must roll back tables and Liquibase history.
     broken = logs / 'atomicity' / 'customer'
     broken.mkdir(parents=True, exist_ok=True)
-    for filename in ('db.changelog.xml', '001-initial.sql'):
+    for filename in ('db.changelog.xml', '001-initial.sql', '002-employee-no-and-status.sql'):
         content = (BASE / 'changelog' / 'customer' / filename).read_text(encoding='utf-8')
-        if filename.endswith('.sql'):
+        if filename == '001-initial.sql':
             content += '\nSELECT 1 / 0;\n'
         (broken / filename).write_text(content, encoding='utf-8')
     sql('postgres', 'CREATE DATABASE atomic_db OWNER customer_app;', 'atomic-setup')
-    run(['docker', 'run', '--rm', '--network', name,
-         '-v', str(broken.parent) + ':/liquibase/changelog:ro',
-         '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{name}:5432/atomic_db',
-         '-e', 'LIQUIBASE_COMMAND_USERNAME=customer_app', IMAGE,
-         '--changelog-file=customer/db.changelog.xml', 'update'], 'atomic-failure', failure=True)
+    failure_output = lb('customer', 'atomic_db', 'update', 'atomic-failure',
+                        failure=True, changelog_root=broken.parent)
+    assert 'division by zero' in failure_output.lower(), failure_output
     assert sql('atomic_db', "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM databasechangelog);", 'atomic-rolled-back') == '0|0'
+    # Upgrade a DB with 001 already applied. Each incompatible-data case must
+    # halt without recording 002 or changing the original data/schema.
+    for service in ('customer', 'operations'):
+        db = service + '_upgrade_db'
+        sql('postgres', f'CREATE DATABASE {db} OWNER {service}_app;', service+'-upgrade-setup')
+        lb(service, db, 'update-count', service+'-baseline', extra=('--count=1',))
+        baseline = sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', service+'-baseline-history')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-baseline-count') == '1'
+        if service == 'customer':
+            cases = [
+                ('member', "INSERT INTO customers(name,phone_number,status) VALUES('test','01099999999','ACTIVE'); INSERT INTO organizations(name,status) VALUES('test','ACTIVE'); INSERT INTO memberships(customer_seq,organization_seq,status) SELECT customer_seq,organization_seq,'ACTIVE' FROM customers CROSS JOIN organizations;",
+                 'SELECT count(*) FROM memberships;', 'DELETE FROM memberships; DELETE FROM customers; DELETE FROM organizations;'),
+                ('customer-status', "INSERT INTO customers(name,phone_number,status) VALUES('test','01099999999','SUSPENDED');",
+                 "SELECT count(*) FROM customers WHERE status='SUSPENDED';", 'DELETE FROM customers;'),
+                ('organization-status', "INSERT INTO organizations(name,status) VALUES('test','SUSPENDED');",
+                 "SELECT count(*) FROM organizations WHERE status='SUSPENDED';", 'DELETE FROM organizations;'),
+            ]
+        else:
+            cases = [('admin-status', "INSERT INTO admin_users(login_id,password_hash,role,status) VALUES('test','not-a-login','OPERATOR','INACTIVE');",
+                      "SELECT count(*) FROM admin_users WHERE status='INACTIVE';", 'DELETE FROM admin_users;')]
+        for case, seed, preserved, cleanup in cases:
+            label = service+'-guard-'+case
+            sql(db, seed, label+'-seed', service+'_app')
+            output = lb(service, db, 'update', label+'-rejected', failure=True)
+            assert 'precondition' in output.lower(), output
+            assert sql(db, preserved, label+'-data-preserved') == '1'
+            assert sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', label+'-history-preserved') == baseline
+            sql(db, cleanup, label+'-cleanup', service+'_app')
+
+        # Inject a late failure into 002 only; 001 must remain applied and the
+        # added column/changed status constraint must roll back atomically.
+        upgrade_root = logs / ('atomicity-002-'+service)
+        target = upgrade_root / service
+        target.mkdir(parents=True, exist_ok=True)
+        second = '002-employee-no-and-status.sql' if service == 'customer' else '002-admin-status.sql'
+        for filename in ('db.changelog.xml', '001-initial.sql', second):
+            content = (BASE / 'changelog' / service / filename).read_text(encoding='utf-8')
+            if filename == second:
+                content += '\nSELECT 1 / 0;\n'
+            (target / filename).write_text(content, encoding='utf-8')
+        output = lb(service, db, 'update', service+'-002-atomic-failure', failure=True, changelog_root=upgrade_root)
+        assert 'division by zero' in output.lower(), output
+        assert sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', service+'-002-history-rolled-back') == baseline
+        if service == 'customer':
+            assert sql(db, "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='employee_no';", service+'-002-column-rolled-back') == '0'
+            restored = "SELECT count(*) FROM pg_constraint WHERE conrelid IN ('customers'::regclass,'organizations'::regclass) AND pg_get_constraintdef(oid) LIKE '%SUSPENDED%';"
+            expected = '2'
+        else:
+            restored = "SELECT count(*) FROM pg_constraint WHERE conrelid='admin_users'::regclass AND conname='admin_users_status_check' AND pg_get_constraintdef(oid) LIKE '%INACTIVE%';"
+            expected = '1'
+        assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
+        lb(service, db, 'update', service+'-upgrade')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '2'
+        assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
+        sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

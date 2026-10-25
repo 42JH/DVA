@@ -10,6 +10,13 @@ BEGIN
  INSERT INTO admin_users(login_id,password_hash,role,status)
  VALUES('faq-check-'||txid_current(),'test-only-not-a-login','SYSTEM_ADMIN','ACTIVE')
  RETURNING admin_user_seq INTO admin_id;
+ UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=admin_id;
+ UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=admin_id;
+ BEGIN
+  UPDATE admin_users SET status='INACTIVE' WHERE admin_user_seq=admin_id;
+  RAISE EXCEPTION 'Inactive admin accepted';
+ EXCEPTION WHEN check_violation THEN NULL;
+ END;
  INSERT INTO ai_personas(code,name) VALUES('faq-check-'||txid_current(),'test')
  RETURNING ai_persona_seq INTO persona_id;
  IF (SELECT turn_wait_level FROM ai_personas WHERE ai_persona_seq=persona_id)<>'NORMAL' THEN
