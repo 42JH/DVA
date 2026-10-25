@@ -32,12 +32,21 @@ def sql(db, statement, label, user='postgres'):
                 '-U', user, '-d', db], label, statement)
 
 def lb(service, db, action, label, failure=False, extra=(), changelog_root=None):
-    return run(['docker', 'run', '--rm', '--network', name,
-                *(['-v', str(changelog_root) + ':/liquibase/changelog:ro'] if changelog_root else []),
+    args = ['--network', name,
                 '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{name}:5432/{db}',
                 '-e', f'LIQUIBASE_COMMAND_USERNAME={service}_app',
                 report['imageId'], f'--changelog-file={service}/db.changelog.xml',
-                action, *extra], label, failure=failure)
+                action, *extra]
+    if changelog_root is None:
+        return run(['docker', 'run', '--rm', *args], label, failure=failure)
+    container = run(['docker', 'create', *args], label+'-create')
+    try:
+        # The Docker daemon may run separately from the Jenkins workspace.
+        run(['docker', 'cp', str(changelog_root) + '/.',
+             container + ':/liquibase/changelog/'], label+'-copy')
+        return run(['docker', 'start', '--attach', container], label, failure=failure)
+    finally:
+        run(['docker', 'rm', '-f', container], label+'-cleanup')
 
 def ci_command(service, db, action, label, expected='', failure=False):
     return run(['docker', 'run', '--rm', '--network', name,
