@@ -28,6 +28,17 @@ pipeline {
                     env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
                     env.RELEASE_NAME = "${env.SOURCE_COMMIT}-${env.BUILD_NUMBER}"
                     env.DB_IMAGE = "docker.io/library/dva-liquibase:${env.RELEASE_NAME}"
+                    env.RUN_MSA_CI = 'true'
+                    def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
+                    if (webhook && !params.DEPLOY_MSA) {
+                        env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
+                        env.RUN_MSA_CI = sh(script: 'bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT"', returnStdout: true).trim()
+                        if (!(env.RUN_MSA_CI in ['true', 'false'])) { error 'Invalid MSA change detection result.' }
+                        if (env.RUN_MSA_CI == 'false') {
+                            currentBuild.description = 'MSA 변경 없음: CI 생략'
+                            echo 'No msa/ changes since the last successful build. Skipping CI.'
+                        }
+                    }
                     if (params.DEPLOY_MSA) {
                         if (env.CHANGE_ID || !(env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend'])) {
                             error 'CD is allowed only for develop-backend, not MR/feature builds.'
@@ -39,6 +50,7 @@ pipeline {
         }
 
         stage('Check Environment and Scripts') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
                 sh '''
                     set -eu
@@ -54,6 +66,7 @@ pipeline {
         }
 
         stage('Verify Database') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
             steps { sh 'python3 msa/liquibase/verify.py' }
             post {
                 always {
@@ -63,6 +76,7 @@ pipeline {
         }
 
         stage('Package Database Image') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
             steps { sh 'bash msa/deploy/package.sh' }
             post {
                 success {
