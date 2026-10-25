@@ -1,0 +1,60 @@
+pipeline {
+    agent {
+        label 'docker-builder'
+    }
+
+    options {
+        skipDefaultCheckout(true)
+        disableConcurrentBuilds()
+        timestamps()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Check Environment') {
+            steps {
+                powershell '''
+                    $ErrorActionPreference = 'Stop'
+
+                    docker version
+                    if ($LASTEXITCODE -ne 0) {
+                        throw 'Docker engine is unavailable.'
+                    }
+
+                    python --version
+                    if ($LASTEXITCODE -ne 0) {
+                        throw 'Python is unavailable.'
+                    }
+                '''
+            }
+        }
+
+        stage('Verify Database') {
+            steps {
+                powershell '''
+                    $ErrorActionPreference = 'Stop'
+
+                    python msa/liquibase/verify.py
+                    if ($LASTEXITCODE -ne 0) {
+                        throw 'Database verification failed.'
+                    }
+                '''
+            }
+
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'msa/liquibase/verification.json,msa/liquibase/verification-logs/**',
+                        allowEmptyArchive: true
+                    )
+                }
+            }
+        }
+    }
+}
