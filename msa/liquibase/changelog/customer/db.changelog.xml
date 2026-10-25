@@ -9,4 +9,13 @@
     </preConditions>
     <sqlFile path="001-initial.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+
+  <changeSet id = "002-employee-no-and-status" author = "dva" dbms = "postgresql" runInTransaction = "true">
+    <preConditions onFail="HALT" onError="HALT">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM memberships</sqlCheck>
+      <sqlCheck expectedResult="0">SELECT count(*) FROM customers WHERE status = 'SUSPENDED'</sqlCheck>
+      <sqlCheck expectedResult="0">SELECT count(*) FROM organizations WHERE status = 'SUSPENDED'</sqlCheck>
+    </preConditions>
+    <sqlFile path = "002-employee-no-and-status.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false" />
+    </changeSet>
 </databaseChangeLog>
