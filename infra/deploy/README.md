@@ -1,5 +1,10 @@
 # Lightsail 이미지 파일 배포
 
+> 2026-10-25: Jenkins를 기존 Lightsail로 이전하고 Linux 빌드 에이전트를 구성했다.
+> 최신 `Jenkinsfile`은 `package.sh`·`upload.sh`를 사용한다.
+> [Jenkins 서버 운영·검증·정식 Job 전환 안내](../jenkins/README.md)를 참고한다.
+> 아래 PowerShell 스크립트는 Windows에서 수동 패키징·전송할 때 사용할 수 있다.
+
 배포 대상: `ubuntu@13.209.59.180`, Ubuntu 24.04 / linux/amd64.
 Jenkins Windows Agent에서 이미지를 만들고 파일로 SSH 전송한다. ECR은 사용하지 않는다.
 별도 이미지 저장소 요금은 발생하지 않으며, 기존 서버의 디스크와 전송량을 사용한다.
@@ -121,6 +126,9 @@ sudo docker system df
 ```
 
 ## Jenkins에서 수동 선택 배포
+
+이 절의 Windows Agent 설정은 이전 구성 기록이다. 서버 이전 후의 실행 환경과
+정식 Job 활성화 절차는 [Jenkins 운영 안내](../jenkins/README.md)를 따른다.
 
 `DEPLOY_LIGHTSAIL`의 기본값은 false다. 일반 빌드·SCM 폴링은 이미지 파일 생성까지만
 진행하며, 사람이 매개변수를 체크해 시작한 빌드가 `Deploy to Lightsail` 단계로 진행한다.
