@@ -1,5 +1,7 @@
 # DVA MSA 초기 Liquibase 마이그레이션
 
+Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)를 따른다. 아래 서버 명령은 수동 운영 경로이며 CI/CD 실행과 동시에 사용하지 않는다.
+
 2026-10-22 확정 MSA SQL을 기준으로 한 서비스별 초기 마이그레이션이다. 원본 경로와 체크섬은 source-manifest.json에 출처 기록으로 보존한다.
 기존 backend/ 모놀리식과 독립적으로 관리한다. 관련 이슈: [S15P31D109-125](https://ssafy.atlassian.net/browse/S15P31D109-125).
 
@@ -19,6 +21,7 @@ DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 36개�
 ## 변경 관리
 
 - 서비스별 초기 changeset 1개. 각 서비스 DB 안에서 원자적으로 실행한다.
+- customer와 operations는 후속 `002` changeset도 포함한다. 각 changeset은 별도 트랜잭션이다.
 - SQL의 바깥 BEGIN/COMMIT만 제거하고 runInTransaction=true로 Liquibase가 트랜잭션을 관리한다.
 - splitStatements=false로 PostgreSQL 함수 본문의 세미콜론을 보존한다.
 - 기존 업무 테이블이 있으면 초기 changeset을 HALT한다. 자동 삭제/덮어쓰기하지 않는다.
@@ -39,15 +42,16 @@ SQL 원본 체크섬은 source-manifest.json에 기록했다.
 
 ## 서버 준비 (운영 적용 전에 먼저 수행)
 
-이 폴더의 Dockerfile, .dockerignore, changelog/, run-service.sh를
+이 폴더의 Dockerfile, .dockerignore, changelog/, run-service.sh, ci-command.sh를
 서버의 `/home/ubuntu/infra/liquibase/`로 복사한다. 비밀번호는 파일에 넣지 않는다.
 
 ```bash
 cd ~/infra/liquibase
-sudo docker build -t dva-liquibase:5.0.4-pg42.7.14 .
+image=docker.io/library/dva-liquibase:5.0.4-pg42.7.14
+sudo docker build --platform linux/amd64 -t "$image" .
 (
   set -euo pipefail
-  sudo docker save dva-liquibase:5.0.4-pg42.7.14 |
+  sudo docker save "$image" |
     sudo k3s ctr -n k8s.io images import -
 )
 bash -n run-service.sh
@@ -64,11 +68,12 @@ Community 5에는 JDBC 드라이버가 포함되지 않으므로 공식 Maven �
 
 ```bash
 cd ~/infra/liquibase
-bash run-service.sh customer validate
-bash run-service.sh customer update-sql
+image=docker.io/library/dva-liquibase:5.0.4-pg42.7.14
+bash run-service.sh customer validate "$image"
+bash run-service.sh customer update-sql "$image"
 # SQL 검토 후 실제 적용:
-bash run-service.sh customer update
-bash run-service.sh customer status
+bash run-service.sh customer update "$image"
+bash run-service.sh customer status "$image"
 ```
 
 customer 성공 후 order, consultation, delivery, operations를 각각 같은 순서로 진행한다.

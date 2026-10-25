@@ -4,14 +4,17 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+import os
+import re
 
 BASE = Path(__file__).resolve().parent
 SOURCE = BASE / 'tests'
-IMAGE = 'dva-liquibase:5.0.4-pg42.7.14'
+IMAGE = os.environ.get('DB_IMAGE', 'dva-liquibase:5.0.4-pg42.7.14')
 name = 'dva-lb-test-' + uuid.uuid4().hex[:10]
 logs = BASE / 'verification-logs'
 logs.mkdir(exist_ok=True)
 report = {'passed': False, 'checks': [], 'postgres': '17.11', 'liquibase': '5.0.4'}
+report['image'] = IMAGE
 
 def run(args, label, stdin=None, failure=False):
     result = subprocess.run(args, input=stdin, text=True, encoding='utf-8',
@@ -33,12 +36,26 @@ def lb(service, db, action, label, failure=False, extra=(), changelog_root=None)
                 *(['-v', str(changelog_root) + ':/liquibase/changelog:ro'] if changelog_root else []),
                 '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{name}:5432/{db}',
                 '-e', f'LIQUIBASE_COMMAND_USERNAME={service}_app',
-                IMAGE, f'--changelog-file={service}/db.changelog.xml',
+                report['imageId'], f'--changelog-file={service}/db.changelog.xml',
                 action, *extra], label, failure=failure)
+
+def ci_command(service, db, action, label, expected='', failure=False):
+    return run(['docker', 'run', '--rm', '--network', name,
+                '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{name}:5432/{db}',
+                '-e', f'LIQUIBASE_COMMAND_USERNAME={service}_app',
+                '--entrypoint', '/bin/bash', report['imageId'], '/liquibase/ci-command.sh',
+                service, action, expected], label, failure=failure)
+
+def preview_fingerprint(service, db, label):
+    output = ci_command(service, db, 'preview', label)
+    found = re.findall(r'^DVA_PENDING_SHA256=([0-9a-f]{64})$', output, re.M)
+    assert len(found) == 1, output
+    return found[0]
 
 network_created = pg_created = False
 try:
-    run(['docker', 'build', '-t', IMAGE, str(BASE)], 'image-build')
+    run(['docker', 'build', '--platform', 'linux/amd64', '-t', IMAGE, str(BASE)], 'image-build')
+    report['imageId'] = run(['docker', 'image', 'inspect', IMAGE, '--format', '{{.Id}}'], 'image-id')
     run(['docker', 'network', 'create', '--internal', name], 'network-create')
     network_created = True
     run(['docker', 'run', '-d', '--name', name, '--network', name,
@@ -75,6 +92,9 @@ try:
         assert history == after, service
         if service in checks:
             sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-workflow', service+'_app')
+        fingerprint = preview_fingerprint(service, db, service+'-ci-preview-current')
+        output = ci_command(service, db, 'apply', service+'-ci-apply-current', fingerprint)
+        assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
 
     sql('postgres', 'CREATE DATABASE guard_db OWNER customer_app;', 'guard-setup')
     sql('guard_db', 'CREATE TABLE sentinel(id integer);', 'guard-existing', 'customer_app')
@@ -101,6 +121,10 @@ try:
         lb(service, db, 'update-count', service+'-baseline', extra=('--count=1',))
         baseline = sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', service+'-baseline-history')
         assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-baseline-count') == '1'
+        approved = preview_fingerprint(service, db, service+'-upgrade-preview')
+        output = ci_command(service, db, 'apply', service+'-wrong-approval-rejected', '0'*64, failure=True)
+        assert 'Pending changes changed after preview' in output, output
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-wrong-approval-no-update') == '1'
         if service == 'customer':
             cases = [
                 ('member', "INSERT INTO customers(name,phone_number,status) VALUES('test','01099999999','ACTIVE'); INSERT INTO organizations(name,status) VALUES('test','ACTIVE'); INSERT INTO memberships(customer_seq,organization_seq,status) SELECT customer_seq,organization_seq,'ACTIVE' FROM customers CROSS JOIN organizations;",
@@ -144,10 +168,13 @@ try:
             restored = "SELECT count(*) FROM pg_constraint WHERE conrelid='admin_users'::regclass AND conname='admin_users_status_check' AND pg_get_constraintdef(oid) LIKE '%INACTIVE%';"
             expected = '1'
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
-        lb(service, db, 'update', service+'-upgrade')
+        output = ci_command(service, db, 'apply', service+'-upgrade', approved)
+        assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
         assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '2'
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
+        output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
+        assert 'Pending changes changed after preview' in output, output
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

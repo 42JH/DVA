@@ -1,60 +1,151 @@
 pipeline {
-    agent {
-        label 'docker-builder'
-    }
+    agent { label 'msa-builder' }
 
     options {
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
+        disableRestartFromStage()
         timestamps()
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 120, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '2'))
+    }
+
+    parameters {
+        booleanParam(name: 'DEPLOY_MSA', defaultValue: false,
+            description: 'MSA 서버에 전달·미리보기 후 승인받아 선택한 DB 하나에 적용합니다.')
+        choice(name: 'DB_SERVICE', choices: ['customer', 'operations', 'order', 'consultation', 'delivery'],
+            description: 'CI는 전체 DB를 검사하고, CD는 이 DB 하나에만 적용합니다.')
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
+                // Jenkins workspace only: prevent previous reports from being reused.
+                deleteDir()
+                script {
+                    def source = checkout scm
+                    env.SOURCE_BRANCH = source.GIT_BRANCH ?: ''
+                    env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.RELEASE_NAME = "${env.SOURCE_COMMIT}-${env.BUILD_NUMBER}"
+                    env.DB_IMAGE = "docker.io/library/dva-liquibase:${env.RELEASE_NAME}"
+                    if (params.DEPLOY_MSA) {
+                        if (env.CHANGE_ID || !(env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend'])) {
+                            error 'CD is allowed only for develop-backend, not MR/feature builds.'
+                        }
+                        sh 'test "$(git rev-parse origin/develop-backend)" = "$SOURCE_COMMIT"'
+                    }
+                }
             }
         }
 
-        stage('Check Environment') {
+        stage('Check Environment and Scripts') {
             steps {
-                powershell '''
-                    $ErrorActionPreference = 'Stop'
-
+                sh '''
+                    set -eu
+                    test "$(uname -s)" = Linux
+                    test "$(uname -m)" = x86_64
+                    for tool in docker python3 bash ssh scp sha256sum realpath; do command -v "$tool"; done
                     docker version
-                    if ($LASTEXITCODE -ne 0) {
-                        throw 'Docker engine is unavailable.'
-                    }
-
-                    python --version
-                    if ($LASTEXITCODE -ne 0) {
-                        throw 'Python is unavailable.'
-                    }
+                    python3 --version
+                    for script in msa/deploy/*.sh msa/liquibase/*.sh; do bash -n "$script"; done
+                    python3 -m unittest discover -s msa/deploy/tests -v
                 '''
             }
         }
 
         stage('Verify Database') {
-            steps {
-                powershell '''
-                    $ErrorActionPreference = 'Stop'
-
-                    python msa/liquibase/verify.py
-                    if ($LASTEXITCODE -ne 0) {
-                        throw 'Database verification failed.'
-                    }
-                '''
-            }
-
+            steps { sh 'python3 msa/liquibase/verify.py' }
             post {
                 always {
-                    archiveArtifacts(
-                        artifacts: 'msa/liquibase/verification.json,msa/liquibase/verification-logs/**',
-                        allowEmptyArchive: true
-                    )
+                    archiveArtifacts artifacts: 'msa/liquibase/verification.json,msa/liquibase/verification-logs/**', allowEmptyArchive: true
                 }
             }
         }
+
+        stage('Package Database Image') {
+            steps { sh 'bash msa/deploy/package.sh' }
+            post {
+                success {
+                    archiveArtifacts artifacts: "msa-release/${env.RELEASE_NAME}/**", allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Database Delivery') {
+            when { expression { params.DEPLOY_MSA } }
+            options {
+                timeout(time: 90, unit: 'MINUTES')
+                lock(resource: 'dva-msa-database-deploy')
+            }
+            stages {
+                stage('Upload and Verify Image') {
+                    options { timeout(time: 15, unit: 'MINUTES') }
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                            sh '''
+                                set +x
+                                set -eu
+                                bash msa/deploy/upload.sh "msa-release/$RELEASE_NAME" "$MSA_SSH_KEY"
+                            '''
+                        }
+                    }
+                }
+                stage('Preview Database Changes') {
+                    options { timeout(time: 12, unit: 'MINUTES') }
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                            sh '''
+                                #!/bin/bash
+                                set +x
+                                set -euo pipefail
+                                mkdir -p msa-release/logs
+                                bash msa/deploy/run-remote.sh "$RELEASE_NAME" "$DB_SERVICE" preview "$MSA_SSH_KEY" 2>&1 | tee msa-release/logs/preview.log
+                            '''.stripIndent().trim()
+                        }
+                        script {
+                            def matches = readFile('msa-release/logs/preview.log').readLines().findAll { it ==~ /DVA_PENDING_SHA256=[0-9a-f]{64}/ }
+                            if (matches.size() != 1) { error 'Preview did not return one valid changeset fingerprint.' }
+                            env.PENDING_SHA256 = matches[0].split('=')[1]
+                        }
+                        archiveArtifacts artifacts: 'msa-release/logs/preview.log', allowEmptyArchive: false
+                    }
+                }
+                stage('Approve Database Changes') {
+                    steps {
+                        script {
+                            def approval = timeout(time: 30, unit: 'MINUTES') {
+                                input message: "Apply ${params.DB_SERVICE} on k15d109.p.ssafy.io? Release ${env.RELEASE_NAME}. Review preview.log first.",
+                                    ok: 'Apply database changes', submitter: 'msa-deployers', submitterParameter: 'APPROVED_BY',
+                                    parameters: [booleanParam(name: 'BACKUP_CONFIRMED', defaultValue: false,
+                                        description: '대상 DB의 복구 가능한 최신 백업과 미리보기 SQL을 확인했습니다.')]
+                            }
+                            if (!approval.BACKUP_CONFIRMED) { error 'Backup and SQL review confirmation is required.' }
+                            writeFile file: 'msa-release/logs/approval.txt', text: "release=${env.RELEASE_NAME}\nservice=${params.DB_SERVICE}\npending=${env.PENDING_SHA256}\napprover=${approval.APPROVED_BY}\n"
+                        }
+                    }
+                }
+                stage('Apply and Verify Database') {
+                    options { timeout(time: 12, unit: 'MINUTES') }
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                            sh '''
+                                #!/bin/bash
+                                set +x
+                                set -euo pipefail
+                                bash msa/deploy/run-remote.sh "$RELEASE_NAME" "$DB_SERVICE" apply "$MSA_SSH_KEY" "$PENDING_SHA256" 2>&1 | tee msa-release/logs/apply.log
+                                grep -Fx "DVA_MIGRATION_COMPLETE=$DB_SERVICE" msa-release/logs/apply.log
+                            '''.stripIndent().trim()
+                        }
+                    }
+                }
+            }
+            post {
+                always { archiveArtifacts artifacts: 'msa-release/logs/**', allowEmptyArchive: true }
+            }
+        }
+    }
+    post {
+        failure { echo 'Pipeline failed. Do not retry a database update until the target Job and Liquibase history are checked.' }
+        aborted { echo 'Pipeline aborted. An already-started k3s Job may still be running; inspect it before retrying.' }
     }
 }
