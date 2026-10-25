@@ -47,6 +47,7 @@ yarn-error.log*
 *.tmp
 *.temp
 .deploy/
+msa-release/
 infra/jenkins/home/
 infra/jenkins/bootstrap-output/
 infra/jenkins/validation/
