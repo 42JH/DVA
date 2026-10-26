@@ -21,20 +21,6 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  ai:
-    image: ${AI_IMAGE:?Set AI_IMAGE to a built image tag}
-    expose:
-      - "8000"
-    networks:
-      - ai_net
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 5s
-    restart: unless-stopped
-
   backend:
     image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to a built image tag}
     expose:
@@ -57,8 +43,6 @@ services:
       - db_net
     depends_on:
       db:
-        condition: service_healthy
-      ai:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -91,7 +75,8 @@ networks:
   web_net:
     driver: bridge
   ai_net:
-    driver: bridge
+    external: true
+    name: dva-prod_ai_net
   db_net:
     driver: bridge
     internal: true

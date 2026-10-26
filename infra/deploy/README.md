@@ -1,5 +1,19 @@
 # Lightsail 이미지 파일 배포
 
+## AI 배포 관리 분리
+
+백엔드 패키징(`package.sh`, `package.ps1`)은 Backend·PostgreSQL·Nginx만 포함한다.
+AI 이미지 빌드·배포·컨테이너 관리는 AI 팀이 담당한다.
+운영 백엔드는 기존 외부 네트워크 `dva-prod_ai_net`에서 `http://ai:8000`으로 연결한다.
+AI 팀은 이 네트워크에 AI 컨테이너를 연결하고 `ai` 별칭과 8000 포트, `/health`를 유지해야 한다.
+백엔드 readiness의 AI 연결 검사는 유지한다.
+
+기존 `dva-prod-ai-1`은 이 변경으로 중지하거나 삭제하지 않는다.
+전환 중 `--remove-orphans` 또는 기존 Compose의 `down`을 실행하지 않는다.
+분리 이전 릴리스로 롤백하면 예전 Compose가 AI를 다시 관리할 수 있으므로,
+해당 롤백은 AI 팀과 조율해야 한다. 아래 과거 배포 검증 기록은 당시 구성 기준이다.
+
+
 > 2026-10-25: Jenkins를 기존 Lightsail로 이전하고 Linux 빌드 에이전트를 구성했다.
 > 최신 `Jenkinsfile`은 `package.sh`·`upload.sh`를 사용한다.
 > [Jenkins 서버 운영·검증·정식 Job 전환 안내](../jenkins/README.md)를 참고한다.

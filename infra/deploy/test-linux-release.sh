@@ -40,7 +40,12 @@ printf 'test-only identity\n' > "$test_root/identity"
 bash "$test_root/repo/infra/deploy/package.sh" test-one
 release="$test_root/repo/.deploy/test-one"
 (cd "$release" && sha256sum --check --status images.tar.sha256)
-test "$(grep -c '_IMAGE=' "$release/release.env")" = 4
+test "$(grep -c '_IMAGE=' "$release/release.env")" = 3
+if grep -E 'dva-ai|AI_IMAGE' "$TEST_COMMAND_LOG" "$release/release.env"; then
+ echo 'Backend release must not package AI' >&2; exit 1
+fi
+grep -F 'docker build --platform linux/amd64 -t dva-backend:test-one ./backend' "$TEST_COMMAND_LOG"
+grep -F 'docker image save --output' "$TEST_COMMAND_LOG" | grep -F 'dva-backend:test-one dva-postgres:test-one dva-nginx:test-one'
 test ! -e "$release/.env"
 if bash "$test_root/repo/infra/deploy/package.sh" test-one; then echo 'Duplicate release accepted' >&2; exit 1; fi
 if bash "$test_root/repo/infra/deploy/package.sh" '../escape'; then echo 'Invalid version accepted' >&2; exit 1; fi
