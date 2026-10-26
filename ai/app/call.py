@@ -14,7 +14,6 @@ from app.order import ORDER_FIELDS, Order, Place
 log = logging.getLogger(__name__)
 
 MAX_CALLER_DIGITS = 15
-MAX_SIP_CALL_ID = 256
 
 
 def caller_from_headers(headers: list[Any]) -> str | None:
@@ -24,20 +23,16 @@ def caller_from_headers(headers: list[Any]) -> str | None:
             m = re.search(r"sips?:([^@;>]+)", h.value)
             if not m:
                 return None
-            user = m.group(1).strip()
-            if user.startswith("+82"):
-                user = "0" + user[3:]
-            digits = re.sub(r"\D", "", user)[:MAX_CALLER_DIGITS]
-            return digits or None
+            return normalize_phone(m.group(1))
     return None
 
 
-def sip_call_id_from_headers(headers: list[Any]) -> str | None:
-    """SIP Call-ID(약식 이름 i). PBX의 통화 종료 웹훅이 어느 통화인지 맞출 때 쓴다. 미신뢰 값: 길이 제한."""
-    for h in headers:
-        if h.name.lower() in ("call-id", "i"):
-            return h.value.strip()[:MAX_SIP_CALL_ID] or None
-    return None
+def normalize_phone(value: str) -> str | None:
+    """미신뢰 전화번호: 숫자만, +82 → 0, 길이 제한."""
+    value = value.strip()
+    if value.startswith("+82"):
+        value = "0" + value[3:]
+    return re.sub(r"\D", "", value)[:MAX_CALLER_DIGITS] or None
 
 
 def mask_phone(phone: str | None) -> str:
@@ -47,11 +42,9 @@ def mask_phone(phone: str | None) -> str:
 
 
 class Call:
-    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any,
-                 sip_call_id: str | None = None):
+    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any):
         self.session_id = session_id
         self.caller = caller
-        self.sip_call_id = sip_call_id
         self.pbx_ended: dict | None = None  # PBX가 알린 통화 종료(spec/pbx-sip.md)
         self.cfg = cfg
         self.texts = texts
@@ -232,10 +225,12 @@ class Registry:
     def get(self, session_id: str) -> Call | None:
         return self.calls.get(session_id)
 
-    def find_by_sip_call_id(self, sip_call_id: str) -> Call | None:
-        """진행 중인 통화 중 SIP Call-ID가 같은 것. shortcut: 순회(통화 수가 동시 상한 이하라 충분)."""
-        return next((c for c in self.calls.values()
-                     if c.sip_call_id == sip_call_id and c.status in ("accepting", "active")), None)
+    def find_active_by_caller(self, caller: str | None, started_before: float) -> list[Call]:
+        """진행 중인 통화 중 발신번호가 같고 started_before 전에 시작한 것. shortcut: 순회(통화 수가 동시 상한 이하라 충분)."""
+        if not caller:
+            return []
+        return [c for c in self.calls.values()
+                if c.caller == caller and c.started_at < started_before and c.status in ("accepting", "active")]
 
     def list(self) -> list[Call]:
         self.purge()

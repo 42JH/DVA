@@ -306,3 +306,21 @@
 
 ### 확인한 것
 - `uv run pytest -q` 119개 통과.
+
+## 2026-10-26 (PBX 종료 웹훅: Bearer 인증, PBX 본문 형식)
+
+### 바꾼 것
+- PBX가 팀 백엔드에 보내는 통화 종료 웹훅을 같은 본문으로 우리에게도 보내기로 함(`/pbx/webhook/call-ended`, 주소 그대로).
+  - 인증: HMAC 서명(`X-Pbx-*`) → `Authorization: Bearer <PBX_WEBHOOK_SECRET>`(상수 시간 비교). `[pbx] webhook_tolerance_sec` 삭제.
+  - 본문: `call_id`(SIP Call-ID) → PBX 형식(`callFrom`·`endedAt` 필수, `recordingId` 기록, 나머지 무시).
+  - 통화 찾기: SIP Call-ID 대신 발신번호. `endedAt` 전에 시작한 진행 중 통화만(웹훅이 몇 초 늦게 와서, 그사이 같은 번호로 다시 건 통화를 끊지 않게).
+  - SIP Call-ID 수집(`sip_call_id_from_headers`, `Call.sip_call_id`, `Registry.find_by_sip_call_id`) 삭제.
+  - 발신번호 정규화를 `call.normalize_phone`으로 빼서 SIP From과 PBX `callFrom`이 같이 씀.
+- `spec/pbx-sip.md` 종료 웹훅 절, compose·`.env.example` 주석.
+
+### 확인한 것
+- `uv run pytest -q` 120개 통과(Bearer 성공·실패, `+82` 번호, 다시 건 통화 보호, accept 중 종료, 본문 오류).
+
+### 남은 것
+- PBX `callFrom`이 OpenAI 웹훅 SIP `From`의 발신번호와 같은 번호인지 실제 통화로 확인(다르면 통화를 못 찾는다).
+- PBX 담당에 `Authorization: Bearer` 토큰 전달, 우리 서버 주소 전달.

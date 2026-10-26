@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Request, Response
 
-from app.call import Call, caller_from_headers, sip_call_id_from_headers
+from app.call import Call, caller_from_headers
 from app.live_session import LiveConfigError, build_session
 from app.services import Services
 from app.sideband import hangup_now, run_call
@@ -42,8 +42,7 @@ async def _reject(svc: Services, session_id: str) -> None:
 
 async def handle_incoming(svc: Services, data) -> None:
     session_id = data.session_id
-    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend,
-                sip_call_id_from_headers(data.sip_headers))
+    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend)
     status = svc.registry.try_register(call)
     if status == "duplicate":
         return

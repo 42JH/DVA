@@ -26,7 +26,7 @@ services:
       OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
       # 백엔드 서버 API 주소(예: http://backend:3000). 인증 방식은 백엔드 담당자가 정한다
       BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
-      # PBX 통화 종료 웹훅 서명 비밀값(PBX와 공유)
+      # PBX 통화 종료 웹훅 인증 토큰(Authorization: Bearer, PBX와 공유)
       PBX_WEBHOOK_SECRET: ${PBX_WEBHOOK_SECRET:?Set PBX_WEBHOOK_SECRET in .env}
       MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
