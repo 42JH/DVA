@@ -77,9 +77,10 @@ Node.js 24와 Docker CLI는 agent 이미지에 포함한다. Backend 컴파일�
 
 1. GitLab Checkout
 2. 셸 구문 및 배포 회귀 테스트
-3. Backend·AI·PostgreSQL·Nginx 이미지 패키징
+3. Backend·PostgreSQL·Nginx 이미지와 모놀리식 migration SQL/실행기 패키징
 4. 이전한 SSH credential·호스트 키·서버 준비 상태를 읽기 전용으로 검증
-5. `DEPLOY_LIGHTSAIL=true`인 경우에만 SSH 파일 전송·배포
+5. `develop-backend` Push 웹훅은 자동 배포, 수동 빌드는 `DEPLOY_LIGHTSAIL=true`일 때 배포
+6. 서버에서 SQL/이미지 체크섬 확인 → 미적용 migration → 스키마 검증 → 앱 교체 → 상태 확인
 
 기존 전체 서비스 파이프라인의 동작 범위를 유지한다. AI 파트의 별도 자동 배포 작업은 이 변경에 포함하지 않는다.
 기존 Windows용 package.ps1·upload.ps1은 수동 사용을 위해 보존한다.
@@ -105,7 +106,14 @@ Job 설정을 보호된 서버 디렉터리에 백업하며 MSA Job은 변경하
 
 서버에서 `sudo python3 test-monolith-trigger.py`로 실제 HTTPS 경로의 dry run을 실행한다.
 인증·포함/제외 경로·이벤트·브랜치를 검증하고 모놀리식/MSA의 빌드 번호가 증가하지 않는지 확인한다.
-수동 Build 실행은 웹훅 필터를 거치지 않으며 기존 `DEPLOY_LIGHTSAIL=false` 기본값을 유지한다.
+수동 Build 실행은 웹훅 필터를 거치지 않으며 `DEPLOY_LIGHTSAIL=false` 기본값을 유지한다.
+자동 배포는 `should-deploy.sh`가 확인한 프로젝트 `1462697`의 `push`, ref `refs/heads/develop-backend`,
+실제 체크아웃 브랜치 `origin/develop-backend`일 때만 실행한다. 다른 프로젝트·이벤트·브랜치는 배포하지 않는다.
+첫 반영 빌드는 기존 Job 매개변수가 false여도 웹훅 조건으로 자동 배포된다. Job 설정을 별도로 바꿀 필요가 없다.
+
+개발 단계의 자동 배포는 DB 백업을 만들지 않는다. 기존 runner의 `--no-backup` 모드를 사용하며,
+체크섬·적용 이력·advisory lock·트랜잭션 롤백은 유지한다. SQL/스키마 검증 실패 시 새 앱을 실행하지 않는다.
+커밋된 DB 변경은 앱 롤백으로 취소되지 않으므로 migration은 기존 앱과 호환되도록 작성한다.
 
 ## 코드 반영 전 검증
 

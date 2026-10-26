@@ -8,13 +8,14 @@ pipeline {
     }
     parameters {
         booleanParam(name: 'DEPLOY_LIGHTSAIL', defaultValue: false,
-            description: '체크하면 빌드·검증 후 Lightsail에 배포합니다. 기본값은 빌드만 수행합니다.')
+            description: '수동 빌드의 배포 선택입니다. develop-backend 웹훅 빌드는 검증 성공 후 자동 배포합니다.')
     }
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
                 script {
+                    def source = checkout scm
+                    env.SOURCE_BRANCH = source.GIT_BRANCH ?: ''
                     env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
                     env.RELEASE_VERSION = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
                 }
@@ -26,7 +27,9 @@ pipeline {
                     set -eu
                     test -f backend/package-lock.json
                     test -f compose.prod.yaml
-                    bash -n infra/deploy/package.sh infra/deploy/upload.sh infra/deploy/deploy.sh
+                    bash -n infra/deploy/package.sh infra/deploy/upload.sh infra/deploy/deploy.sh infra/deploy/should-deploy.sh
+                    sh -n infra/database/migrate.sh
+                    bash infra/deploy/test-deploy-trigger.sh
                     bash infra/deploy/test-deploy.sh
                     bash infra/deploy/test-linux-release.sh
                     node --version
@@ -55,7 +58,11 @@ pipeline {
             }
         }
         stage('Deploy to Lightsail') {
-            when { expression { params.DEPLOY_LIGHTSAIL } }
+            when {
+                expression {
+                    sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0
+                }
+            }
             options { timeout(time: 15, unit: 'MINUTES') }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',

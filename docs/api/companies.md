@@ -100,5 +100,6 @@ origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
    POST·PATCH에는 로그인 때와 동일한 Origin/CSRF 헤더를 넣는다.
 5. 로그아웃하거나 쿠키를 제거하면 기업 API가 401을 반환하는지 확인한다.
 
-운영의 Secure 쿠키는 HTTPS에서만 사용한다. 서버에서 확인하려면 별도로 migration을 적용하고,
-해당 소스를 배포한 뒤 인증·기업 API의 호스트 Nginx 공개 경로를 설정해야 한다.
+운영의 Secure 쿠키는 HTTPS에서만 사용한다. [자동 배포 파이프라인](../../infra/deploy/README.md)이
+반영된 이후에는 Jenkins가 앱 교체 전에 미적용 migration을 실행한다. 서버에서 확인하려면 해당
+소스를 배포하고 인증·기업 API의 호스트 Nginx 공개 경로도 설정해야 한다.

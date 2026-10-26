@@ -44,6 +44,25 @@ apply_release() {
         "fetch('http://127.0.0.1:3000/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))" </dev/null || return 1
 }
 
+migrate_release() {
+    local directory="$1" db_container
+    db_container="$(compose "$directory" ps -q db)" || return 1
+    if [[ -z "$db_container" ]]; then
+        # On a fresh server start only PostgreSQL; no new backend may run before SQL succeeds.
+        compose "$directory" up -d --no-deps --no-build --pull never --wait --wait-timeout 180 db || return 1
+        db_container="$(compose "$directory" ps -q db)" || return 1
+    fi
+    [[ "$db_container" =~ ^[a-zA-Z0-9_.-]+$ ]] || return 1
+    if [[ "$EUID" -eq 0 ]]; then
+        sh "$directory/infra/database/migrate.sh" --no-backup "$db_container" </dev/null || return 1
+    else
+        sudo -n sh "$directory/infra/database/migrate.sh" --no-backup "$db_container" </dev/null || return 1
+    fi
+    "${docker_cmd[@]}" exec -i "$db_container" sh -c \
+        'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+        < "$directory/infra/database/verify.sql" || return 1
+}
+
 read_version() {
     local file="$1" value
     [[ -f "$file" ]] || return 1
@@ -66,8 +85,14 @@ esac
 # A release must be fully transferred before this command is invoked.
 if [[ "${1:-}" != --rollback ]]; then
     (cd -- "$release_dir" && sha256sum --check --status images.tar.sha256)
+    (cd -- "$release_dir" && sha256sum --check --status release-files.sha256)
     compose "$release_dir" config --quiet
     "${docker_cmd[@]}" image load --input "$release_dir/images.tar"
+    # Keep the existing app/release markers on any migration or schema verification failure.
+    if ! migrate_release "$release_dir"; then
+        echo 'Database migration/verification failed. New application deployment stopped.' >&2
+        exit 1
+    fi
 fi
 
 if apply_release "$release_dir"; then

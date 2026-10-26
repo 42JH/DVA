@@ -13,10 +13,11 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 release_dir="$repo_root/.deploy/$version"
 server="$ssh_user@13.209.59.180"
 remote_root=/home/ubuntu/dva-deploy
-for file in images.tar images.tar.sha256 deploy.sh compose.prod.yaml release.env infra/nginx/default.prod.conf; do
+for file in images.tar images.tar.sha256 release-files.sha256 deploy.sh compose.prod.yaml release.env infra/nginx/default.prod.conf infra/database/migrate.sh infra/database/verify.sql; do
  [[ -f "$release_dir/$file" ]] || { echo "Missing release file: $file" >&2; exit 1; }
 done
 (cd "$release_dir" && sha256sum --check --status images.tar.sha256)
+(cd "$release_dir" && sha256sum --check --status release-files.sha256)
 key_dir="$(mktemp -d)"
 trap 'rm -f -- "$key_dir/identity"; rmdir -- "$key_dir"' EXIT
 install -m 600 "$identity_file" "$key_dir/identity"

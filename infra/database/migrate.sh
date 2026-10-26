@@ -3,18 +3,27 @@
 set -eu
 umask 077
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+BACKUP_ENABLED=true
+if [ "${1:-}" = --no-backup ]; then
+ BACKUP_ENABLED=false
+ shift
+fi
 CONTAINER=${1:-dva-prod-db-1}
 BACKUP_DIR=${2:-"$HOME/dva-deploy/shared/db-backups"}
 case "$CONTAINER" in *[!a-zA-Z0-9_.-]*|'') echo 'Invalid container name' >&2; exit 1;; esac
 command -v docker >/dev/null
 command -v sha256sum >/dev/null
-mkdir -p "$BACKUP_DIR"
-BACKUP=$(mktemp "$BACKUP_DIR/pre-monolith-$(date -u +%Y%m%dT%H%M%SZ).dump-XXXXXX")
-docker exec "$CONTAINER" sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP"
-test -s "$BACKUP"
-docker exec -i "$CONTAINER" pg_restore --list < "$BACKUP" > /dev/null
-sha256sum "$BACKUP" > "$BACKUP.sha256"
-echo "Backup: $BACKUP"
+if [ "$BACKUP_ENABLED" = true ]; then
+ mkdir -p "$BACKUP_DIR"
+ BACKUP=$(mktemp "$BACKUP_DIR/pre-monolith-$(date -u +%Y%m%dT%H%M%SZ).dump-XXXXXX")
+ docker exec "$CONTAINER" sh -c 'exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$BACKUP"
+ test -s "$BACKUP"
+ docker exec -i "$CONTAINER" pg_restore --list < "$BACKUP" > /dev/null
+ sha256sum "$BACKUP" > "$BACKUP.sha256"
+ echo "Backup: $BACKUP"
+else
+ echo 'Automatic DB backup disabled for development deployment.'
+fi
 
 SQL=$(mktemp)
 trap 'rm -f "$SQL"' EXIT HUP INT TERM
