@@ -340,6 +340,38 @@ def test_definitions_valid_and_every_stage_reachable():
     assert reachable == set(engine.STAGES)
 
 
+def test_graph_draws_every_transition():
+    """흐름도(get_graph)는 코드에서 만든다. 전이·어디서나 들어오는 하위 흐름·복귀가 모두 엣지로 그려져야 한다."""
+    edges = {(e.source, e.target) for e in engine.GRAPH.get_graph().edges}
+    for s in engine.STAGES.values():
+        assert {(s.name, t.target) for t in s.transitions if t.target != engine.RETURN} <= edges
+    assert {("collecting", "cancel"), ("cancel", "collecting"), ("save_offer", "ending")} <= edges
+
+
+@pytest.mark.parametrize("moves", [engine.MAX_HOPS - 1, engine.MAX_HOPS])
+def test_transition_chain_limit(moves):
+    """사건 하나로 MAX_HOPS번 옮겨 가면 정의 오류(전이가 끝나지 않는 정의를 막는다)."""
+    names = [f"chain_{i}" for i in range(moves + 1)]
+    call = make_call()
+    engine.STAGES.update({n: engine.Stage(
+        name=n, description=n, tools=(),
+        transitions=(engine.Transition("go" if i == 0 else engine.ENTERED, names[i + 1]),) if i < moves else (),
+    ) for i, n in enumerate(names)})
+    try:
+        engine.build()
+        call.flow.stage = names[0]
+        if moves < engine.MAX_HOPS:
+            run(engine.apply(call, ["go"]))
+            assert call.flow.stage == names[-1]
+        else:
+            with pytest.raises(engine.FlowError, match="끝나지 않음"):
+                run(engine.apply(call, ["go"]))
+    finally:
+        for n in names:
+            del engine.STAGES[n]
+        engine.build()
+
+
 def test_only_ending_does_not_listen():
     assert [s.name for s in engine.STAGES.values() if not s.listen] == ["ending"]
 

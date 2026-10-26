@@ -101,7 +101,7 @@ class Call:
             except Exception:
                 log.exception("고객 조회 실패 %s", self.session_id)
                 self.add_error("고객 조회 실패")
-        engine.start(self)
+        await engine.start(self)
         self.notify()
 
     def reset_order_flags(self) -> None:

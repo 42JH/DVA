@@ -46,7 +46,7 @@ async def dispatch(call, name: str, arguments: str, call_id: str) -> dict:
         log.exception("도구 예외 %s %s", call.session_id, name)
         output = {"ok": False, "error": "내부 오류", "retry": "잠시 후 한 번만 다시 시도, 계속되면 상담원 전환 안내"}
     try:
-        engine.apply(call, events, name)
+        await engine.apply(call, events, name)
     except Exception:
         log.exception("상태 전이 오류 %s %s %s", call.session_id, name, events)
     output["state"] = engine.summary(call)

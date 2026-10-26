@@ -21,11 +21,13 @@ log = logging.getLogger(__name__)
 
 
 def check_definitions(cfg, texts) -> None:
-    """기동 시 검증: 단계·도구·문구가 서로 맞는지, live.toml의 함수 도구가 모두 있는지. 실패하면 기동을 멈춘다."""
+    """기동 시 검증: 단계·도구·문구가 서로 맞는지, live.toml의 함수 도구가 모두 있는지. 실패하면 기동을 멈춘다.
+    단계 정의가 검증을 통과하면 상태 그래프(LangGraph)를 만든다."""
     load_tools()
     engine.load_stages()
     sample = Call("startup-check", None, cfg, texts, None).text_vars()
     engine.validate(set(TOOLS), texts, sample)
+    engine.build()
     texts.call_info.format(**sample)
     unknown = [n for n in function_tool_names(load_live_toml()) if n not in TOOLS]
     if unknown:

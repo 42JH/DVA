@@ -141,11 +141,11 @@ async def apply_answer(call, answer: str, intent: str) -> list[str]:
     events: list[str] = []
     if answer != NO_ANSWER and stage.on_answer and answer in stage_choices(call):  # 이 단계의 선택지만
         events = await stage.on_answer(call, answer)
-        engine.apply(call, events, "listener")
+        await engine.apply(call, events, "listener")
     if intent != "none" and engine.current(call).listen:  # 답으로 ending에 들어갔으면 용건은 무시
         if intent == "end":
             call.request_hangup()
         more = ["call.ending" if intent == "end" else f"intent.{intent}"]
-        engine.apply(call, more, "listener")
+        await engine.apply(call, more, "listener")
         events += more
     return events

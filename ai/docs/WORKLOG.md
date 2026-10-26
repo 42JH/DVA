@@ -171,15 +171,102 @@
 - `ai/.env`에 `PBX_WEBHOOK_SECRET` 추가(PBX와 같은 값).
 - 리버스 프록시에서 `/pbx/webhook/call-ended` 공개.
 
-## 2026-10-26
+## 2026-10-22 (상태 엔진을 LangGraph로)
 
 ### 바꾼 것
-- 착신 웹훅 주소 변경: `POST /openai/webhook` → `POST /api/webhooks/openai/call-incoming`(`app/webhook.py`, 테스트 3곳, `spec/pbx-sip.md`).
-- 통화 종료 웹훅은 그대로 PBX가 보낸다(`POST /pbx/webhook/call-ended`, `PBX_WEBHOOK_SECRET`). 백엔드 서버가 보내게 바꾸려다 취소.
-- `.gitignore`에 `.langgraph_api/`(LangGraph Studio 개발 서버 상태) 추가. `refactor/langchain`과 같은 내용.
+- 사용자 결정: 시나리오 분기 구조에 LangChain 계열을 쓴다. LLM 호출은 openai SDK 그대로(gpt-live-1, gpt-6-luna).
+  - 그래서 쓰는 것은 `langgraph`(`StateGraph`) 하나. `langchain`·`langchain-openai`는 넣지 않음.
+- 의존성: `langgraph>=1.2.16` 추가(langchain-core·langsmith 등이 따라와 lock 패키지 29 → 53개).
+- `app/flow/engine.py`: 전이 실행부(`start`·`apply`)를 LangGraph 그래프 실행으로 바꿈.
+  - 기동 시 `engine.build()`가 단계 정의로 그래프를 만든다(단계 = 노드, `check_definitions`에서 검증 뒤).
+  - 사건 하나 = `ainvoke` 한 번. 노드(`_step`)가 전이(가드)를 보고 `Command(goto=…)`로 옮김.
+  - 그래프 상태(`Step`)는 단계·사건·도구 이름뿐. 통화 객체는 `context`로 넘김. 체크포인터 없음.
+  - `MAX_HOPS`는 `recursion_limit`(`MAX_HOPS + 1`)로. 넘으면 지금처럼 `FlowError`.
+  - 노드마다 `destinations`를 적어 `get_graph().draw_mermaid()`로 흐름도를 만들 수 있게 함.
+- `start`·`apply`가 async가 되어 호출부 4곳에 await(`app/call.py`, `app/dispatcher.py`, `app/listener.py` 2곳).
+- 단계 정의(`app/flow/stages/`), 도구, 디스패처, 판별기, FastAPI는 그대로.
+- 문서: `spec/flow.md`(엔진 = LangGraph, 실행 방식·규칙), `spec/concurrency.md`(그래프 공유·async 노드), AGENTS.md(스택·구조·안전장치에 LangSmith 추적 끔).
 
 ### 확인한 것
-- `uv run pytest -q` 103개 통과.
+- langgraph 1.2.16: openai 3.35.1·Python 3.14와 충돌 없이 설치.
+- 실행으로 확인한 동작(스크래치 예제)
+  - `ainvoke`에서 동기 노드·동기 라우터는 다른 스레드에서 돈다. 그래서 노드·라우터는 모두 async.
+  - `context`로 임의 객체(통화 객체)를 넘길 수 있다(`context_schema` 없이).
+  - `recursion_limit=L`이면 노드 실행 L-1번까지만 된다.
+- 오버헤드: 사건 하나에 약 0.8~1.4ms(전이 1~4번).
+- 테스트 106개 통과
+  - 기존 103개는 시나리오 데이터를 고치지 않고 그대로 통과.
+  - 추가 3개: 흐름도 엣지가 전이·하위 흐름·복귀를 모두 그리는지, `MAX_HOPS` 한도(4번 이동은 되고 5번째에서 `FlowError`).
+- 실제 단계로 만든 그래프: 노드 15개(START·END 포함), 엣지 132개.
+- 이전 엔진과 비교(일회성 스크립트, 저장소에 넣지 않음)
+  - 이전 엔진(HEAD)과 새 엔진에 같은 무작위 통화 1,800개(행동 41,064개)를 넣음.
+  - 행동마다 단계·복귀 단계·전이 기록·임시 주문·도구 결과가 모두 같았음.
+  - 13개 단계를 모두 지나갔고, 서로 다른 전이는 138가지.
+  - 비교가 실제로 차이를 잡는지도 확인: 이전 엔진의 "복귀 후 같은 사건 다시 보기"를 일부러 끄자 불일치를 잡음.
+- Docker 데몬이 꺼져 있어 이미지 빌드는 못 함. 대신 잠긴 런타임 패키지 46개가 Linux x86_64·Python 3.14 바이너리 wheel만으로 설치되는 것을 확인(`uv pip install --dry-run --only-binary :all:`).
 
 ### 남은 것
-- OpenAI 프로젝트 웹훅 등록 URL을 새 주소로 맞춰야 한다(등록 전이면 새 주소로 등록).
+- Docker 이미지 빌드·기동 확인(데몬을 켜고 `docker compose build`).
+- 실제 통화로 회귀 확인(분기 동작은 그대로여야 함).
+- (선택) 관제 화면에 흐름도(mermaid) 보여 주기.
+
+### 바꾼 것(LangGraph Studio)
+- 사용자 결정: 시나리오 분기를 직관적으로 보도록 LangGraph Studio를 세팅(관제 화면 흐름도 대신).
+- dev 의존성 `langgraph-cli[inmem]`(lock 패키지 53 → 88개, 운영 이미지는 `--no-dev`라 영향 없음).
+- `langgraph.json`: 그래프 `call_flow` = `studio/graph.py:graph`, `LANGSMITH_TRACING=false` 고정.
+- `studio/graph.py`(개발 전용, 이미지·Docker 빌드 컨텍스트에서 뺌)
+  - 스레드 하나 = 가짜 통화 하나. 실행마다 보고 하나(customer로 시작, 그다음 answer·intent·tool 중 하나).
+  - 보고 처리는 실제 코드(`call.prepare`, `listener.apply_answer`, `dispatcher.dispatch`)를 그대로 부르고, `engine.apply`를 잠시 바꿔 사건만 모음.
+  - 모은 사건을 실제 엔진 노드(`engine._step`)로 단계 노드마다 흘려보내 Studio에서 경로가 노드별로 보임.
+  - 결과: 단계·다음 질문·답 선택지·허용 도구·기록된 값·`record_order` 예시 인수·지나온 경로.
+  - 고객 상황·가짜 백엔드는 테스트의 것을 그대로 씀.
+- `.gitignore`·`.dockerignore`에 `.langgraph_api/`(dev 서버 상태) 추가.
+- 문서: `spec/flow.md`("LangGraph Studio로 보기"), AGENTS.md(dev 의존성, 문서 표, 추적 고정).
+
+### 확인한 것
+- 공식 문서
+  - Studio 화면은 smith.langchain.com에서 로컬 서버(`baseUrl`)로 붙는다.
+  - `LANGSMITH_TRACING=false`면 데이터가 로컬 서버 밖으로 나가지 않는다.
+  - Studio 연결에 LangSmith API 키가 필요하다고 되어 있다.
+- 한국어 Windows에서 `langgraph dev`는 cp949 때문에 기동 실패 → `PYTHONUTF8=1`로 해결.
+- 실제 `langgraph dev`(Python 3.14)를 띄워 HTTP API로 확인
+  - 스레드를 만들고 한 통화(시작 → 기록 → 접수 → 저장 거절 → 종료)를 실행함.
+  - 스레드에 상태가 이어지고, 노드가 report → 단계 노드들 → done 순서로 기록됨.
+  - LangSmith API 키 없이도, `.env` 없이도 서버가 뜸.
+- 테스트 119개 통과
+  - 추가 13개(`tests/test_studio.py`): 시나리오 12건이 Studio 그래프에서도 같은 경로.
+  - 한 실행에서 단계 노드가 하나씩 지나가는지, 잘못된 입력은 오류 결과로 돌려주는지.
+
+### 남은 것
+- Studio 웹 화면 연결은 사용자 계정으로 확인(LangSmith 로그인 필요, 키가 필요하면 `LANGSMITH_API_KEY` 환경변수).
+- Studio의 되감기·포크는 가짜 통화에 반영되지 않음(새 스레드로 다시 시작).
+
+## 2026-10-22 (AI 서버 Lightsail 인스턴스: Jenkins 설치)
+
+### 바꾼 것
+- Lightsail(Ubuntu 24.04, x86_64, RAM 16GB) 인스턴스에 설치: Docker Engine 29.9 + compose plugin(Docker 공식 apt 저장소), OpenJDK 21, Jenkins LTS 2.580.1(공식 apt 저장소).
+- `jenkins`·`ubuntu` 사용자를 `docker` 그룹에 넣음(Jenkins가 `docker compose` 직접 실행).
+- nginx·certbot은 하지 않기로 함(HTTPS 불필요하다고 사용자 결정).
+- `ai/Jenkinsfile`: `develop-ai` push(GitLab 웹훅) → 작업공간의 `ai/`에서 `docker compose --env-file /srv/dva-ai/.env up -d --build --wait`. 루트 `Jenkinsfile`(팀 CI)은 건드리지 않음.
+- 서버에 `/srv/dva-ai/.env`(jenkins 소유, 600, 빈 파일) 생성. 값은 사용자가 채운다.
+- Jenkins URL `http://3.37.162.168:8080/` 확인, 역방향 프록시 경고(`ReverseProxySetupMonitor`) 끔(프록시 없음).
+- Jenkins job `dva-ai-deploy` 생성(일회용 init Groovy, 실행 후 삭제): SCM `develop-ai`, Script Path `ai/Jenkinsfile`, 자격 증명 ID `gitlab-ssafy`, GitLab push 트리거(`develop-ai`만, 비밀 토큰은 서버 `/root/dva-ai-webhook-token`).
+- 확인: 맞는 토큰 200, 틀린 토큰 401, 다른 브랜치 push는 빌드 안 됨.
+- job `dva-ai-deploy`는 일단 비활성화(사용자 요청). 사용자가 직접 돌린 #1은 GitLab 인증 실패(토큰 대신 비밀번호로 추정).
+- 서버 시간대 Asia/Seoul. `compose.yaml`의 `ai`에 `TZ: Asia/Seoul`(python:3.14-slim에 tzdata 있음 확인). 앱 코드에 로컬 시각 의존은 없어 로그 시각만 바뀐다.
+- nginx 1.24 설치. 80은 열림, 443은 닫힘.
+- 사용자가 IP 주소용 Let's Encrypt 인증서 발급(`/etc/letsencrypt/live/3.37.162.168`, `shortlived` 6일, webroot 갱신). nginx를 80(인증 경로 + 나머지 HTTPS로 301)·443(프록시, SSE 버퍼링 끔) 두 블록으로 정리. 갱신 후 `systemctl reload nginx` 하는 deploy hook 추가. `certbot renew --dry-run` 성공.
+- 확인: 밖에서 HTTPS 인증서 검증 통과(앱이 없어 502). 443은 사용자가 Lightsail 방화벽에서 엶.
+- 인증서를 발급 후 3일째 갱신: 갱신 설정에 `renew_before_expiry = 88 hours`(수명 160시간 - 72시간). snap 타이머가 하루 두 번(03:23, 19:36 KST)이라 실제 갱신은 3일 경과 후 첫 타이머. 첫 갱신 예상 2026-10-25 19:36.
+- certbot은 snap 5.8.0만 남김(apt 2.9.0은 purge, `/usr/bin/certbot` → `/snap/bin/certbot` 링크). 갱신 타이머는 `snap.certbot.renew.timer` 하나.
+- nginx `sites-available/default`를 server 블록 하나로 정리(기본 블록 안에 새 설정이 붙어 `duplicate listen` 오류였음, 원본은 서버 `/root/nginx-default.bak.*`): `/.well-known/acme-challenge/` → `/var/www/certbot`, 나머지 → `127.0.0.1:8000`, `/monitor/api/stream`은 버퍼링 끔. 확인: 인증 경로 응답, `/`는 앱이 없어 502.
+
+### 확인한 것
+- Jenkins apt 저장소 서명 키가 `jenkins.io-2026.key`(지문 `5E386EADB55F01504CAE8BCF7198F4B714ABFC68`)로 바뀌어 있음. 2023 키로는 `NO_PUBKEY 7198F4B714ABFC68`.
+- `jenkins` 사용자로 `docker ps` 성공. Jenkins는 8080에서 대기, 외부에서는 Lightsail 방화벽에 막혀 닿지 않음.
+
+### 남은 것
+- `/srv/dva-ai/.env` 값 채우기, Jenkins 자격 증명 `gitlab-ssafy` 등록, GitLab 웹훅 등록, `ai/Jenkinsfile`을 `develop-ai`에 반영, 첫 배포 확인.
+- Jenkins 로그에 `github-branch-source` 플러그인 로드 실패가 있음(쓰지 않음, 배포와 무관).
+- 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
+- OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.

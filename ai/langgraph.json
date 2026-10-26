@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "call_flow": "./studio/graph.py:graph"
+  },
+  "env": {
+    "LANGSMITH_TRACING": "false"
+  }
+}
