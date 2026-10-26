@@ -73,7 +73,7 @@ cd ..
 
 Docker 검증은 기존 테스트와 기업 API HTTP/DB·멱등·동시 요청·재시작·롤백·Swagger 계약 검증을 실행한다.
 실제 로그인 세션으로 모든 ACTIVE 역할의 기업 등록·목록·상세·수정 성공과 미인증·위조·만료·로그아웃·
-PENDING 계정 거절, Origin/CSRF 없는 변경 거절을 확인한다. 운영 이미지와 실제 Nginx에서도 로그인 후
+PENDING 계정 거절, Origin 없는 변경 거절을 확인한다. 운영 이미지와 실제 Nginx에서도 로그인 후
 기업 생성·재시도·조회·수정 및 로그아웃 후 접근 거절을 검증한다.
 별도 DB 검증은 migration 재실행, 체크섬 변경 거부, 백업 복원과 최초/후속 실패 롤백을 검증한다.
 기존 배포 Jenkins 검증 실행기도 같은 npm test:integration을 사용한다.
@@ -97,7 +97,7 @@ origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
 3. 등록은 `{ "name": "테스트 기업" }`와 `Idempotency-Key: {{idempotencyKey}}`를 보낸다.
    idempotencyKey는 UUID로 준비하며 같은 등록의 재시도에는 같은 값을 유지한다.
 4. 목록·상세는 GET으로, 수정은 PATCH와 `{ "name": "변경 기업", "status": "INACTIVE" }`로 확인한다.
-   POST·PATCH에는 로그인 때와 동일한 Origin/CSRF 헤더를 넣는다.
+   POST·PATCH에는 로그인 때와 동일한 Origin 헤더를 넣는다.
 5. 로그아웃하거나 쿠키를 제거하면 기업 API가 401을 반환하는지 확인한다.
 
 운영의 Secure 쿠키는 HTTPS에서만 사용한다. [자동 배포 파이프라인](../../infra/deploy/README.md)이

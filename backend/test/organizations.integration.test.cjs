@@ -487,3 +487,72 @@ test('OpenAPI describes the four company operations and their actual envelopes',
   );
   assert.ok(document.paths['/api/companies/{id}'].patch.responses['204']);
 });
+
+test('company creation audit is atomic and idempotent retries record only one success', async () => {
+  const key = randomUUID();
+  const name = '감사 등록 ' + key;
+  const first = await create(name, key);
+  assert.equal(first.status, 201);
+  const id = (await first.json()).data.organizationSeq;
+  assert.equal((await create(name, key)).status, 201);
+  const rows = (
+    await pool.query(
+      "SELECT * FROM audit_logs WHERE target_type='ORGANIZATION' AND target_seq=$1 AND action='ORGANIZATION_CREATED' AND result='SUCCESS'",
+      [id],
+    )
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].request_id, first.headers.get('x-request-id'));
+  assert.deepEqual(rows[0].metadata, {});
+  const rejected = await create(name + ' changed', key);
+  assert.equal(rejected.status, 422);
+  const failures = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      rejected.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].result, 'FAILED');
+  assert.equal(failures[0].actor_seq, adminA);
+});
+
+test('company creation rolls back row and receipt when success audit cannot be saved', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const original = audit.recordSuccess;
+  const key = randomUUID();
+  const name = '감사 롤백 ' + key;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit storage failure');
+  };
+  try {
+    const response = await create(name, key);
+    assert.equal(response.status, 500);
+    assert.ok(!(await response.text()).includes('private audit storage failure'));
+    assert.equal(
+      (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
+      '0',
+    );
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*) FROM api_idempotency.organization_creations WHERE idempotency_key=$1',
+          [key],
+        )
+      ).rows[0].count,
+      '0',
+    );
+    const rows = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].result, 'FAILED');
+    assert.equal(rows[0].action, 'ORGANIZATION_CREATED');
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await create(name, key)).status, 201);
+});

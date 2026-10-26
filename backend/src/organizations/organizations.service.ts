@@ -7,12 +7,14 @@ import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsRepository } from './organizations.repository';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class OrganizationsService {
   constructor(
     private readonly repository: OrganizationsRepository,
     private readonly database: DatabaseService,
+    private readonly audit: AuditService,
   ) {}
 
   async list(query: ListOrganizationsQueryDto) {
@@ -32,7 +34,7 @@ export class OrganizationsService {
       throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
   }
 
-  async create(adminId: number, key: string, input: CreateOrganizationDto) {
+  async create(adminId: number, key: string, input: CreateOrganizationDto, requestId: string) {
     const hash = createHash('sha256')
       .update(JSON.stringify({ name: input.name }))
       .digest('hex');
@@ -51,6 +53,16 @@ export class OrganizationsService {
       }
       const id = await this.repository.insert(client, input.name);
       await this.repository.rememberCreation(client, adminId, key, hash, id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          targetId: id,
+          action: 'ORGANIZATION_CREATED',
+          targetType: 'ORGANIZATION',
+          requestId,
+        },
+        client,
+      );
       return { organizationSeq: id };
     });
   }
