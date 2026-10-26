@@ -10,7 +10,7 @@ PBX → 공인 IP:443 (호스트 Nginx, TLS 종료)
     → backend:3000 → 내부 PostgreSQL
 ```
 
-외부 HTTPS에는 `/api/webhooks/pbx/call-ended`의 POST와 `/https-health`만 연결한다.
+외부 HTTPS에는 PBX 웹훅, `/https-health`, Jenkins와 Swagger 문서를 연결한다.
 Backend·AI·DB 포트는 외부로 공개하지 않는다. HTTP 80은 인증서 검증 경로만 제공하며
 웹훅이나 토큰을 받거나 HTTPS로 리다이렉트하지 않는다. SSH 설정은 변경하지 않는다.
 Lightsail IPv4 방화벽은 TCP 80·443 접근이 가능해야 한다. 실제 인증서 발급과 외부 접속으로
@@ -49,6 +49,21 @@ staging 인증서는 별도 디렉터리에 보관하고 실제 HTTPS에는 사�
 
 배포 Compose는 `127.0.0.1:8082`를 유지한다. Jenkins 재배포가 호스트 HTTPS 설정이나
 인증서를 교체하지 않는다. 향후 호스트 경로·포트를 바꾸면 양쪽 Nginx 설정을 함께 확인한다.
+
+## 서버 Swagger
+
+접속 주소는 `https://13.209.59.180/api/docs`이며 OpenAPI JSON은 `/api/docs-json`이다.
+호스트 Nginx는 `/api/docs`, `/api/docs/` 아래 정적 파일, `/api/docs-json`의 GET·HEAD·OPTIONS를 전달한다.
+기존 PBX 수신 경로는 유지하며 다른 업무 API와 내부 readiness 경로는 별도로 공개하지 않는다.
+
+서버 `shared/.env`에 `SWAGGER_ENABLED=true`를 설정한다. `CORS_ORIGINS`에는
+`https://13.209.59.180`을 포함하며 기존에 허용한 주소는 유지한다. 이 환경 파일은 Git에 넣지 않는다.
+새 설정은 컨테이너 재생성 때 적용되므로, Jenkins에서 `DEPLOY_LIGHTSAIL=true`로 배포하거나
+현재 릴리스의 Compose·release.env·shared/.env를 사용해 backend를 재생성한다.
+단순 `docker restart`는 환경변수 변경을 반영하지 않는다.
+
+Swagger 화면·JSON과 `swagger-ui.css`, `swagger-ui-bundle.js`, `swagger-ui-init.js`의 HTTPS 응답을 확인한다.
+현재 공통 기반에서는 업무 API를 아직 구현하지 않았으므로 문서의 API 목록은 비어 있을 수 있다.
 
 ## 갱신과 점검
 

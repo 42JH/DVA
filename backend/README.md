@@ -81,7 +81,7 @@ Repository의 `client` 인수는 PoolClient로 선언하고 전달받은 client�
 기존 `/health`, `/health/ready`, `/webhooks/pbx/call-ended`는 경로와 응답을 유지한다.
 컨테이너 Nginx는 신규 `/api/...`를 그대로 전달한다. 기존 `/api/health`, `/api/health/ready`,
 `/api/webhooks/pbx/call-ended`에만 `/api`를 제거하여 기존 백엔드 경로로 전달한다.
-공개 호스트 Nginx는 현재 PBX·Jenkins만 허용한다. 신규 업무 API를 외부에 공개하는 변경은 인증 구현 이후 별도로 적용한다.
+공개 호스트 Nginx는 현재 PBX·Jenkins·Swagger 문서를 허용한다. 신규 업무 API를 외부에 공개하는 변경은 인증 구현 이후 별도로 적용한다.
 
 | 응답 | 형식 |
 |---|---|

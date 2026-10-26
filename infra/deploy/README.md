@@ -26,7 +26,7 @@ Lightsail → 체크섬 확인 → docker load → Compose 실행 → 상태 확
   Windows Agent도 Controller에서 검증한 것과 같은 커밋을 사용한다.
 - Jenkins #15에서 SSH 인증·파일 전송·수동 선택 배포를 검증했다.
 - 컨테이너 Nginx는 `127.0.0.1:8082`를 유지한다. 호스트 Nginx가 IP HTTPS를 종료하고
-  PBX 웹훅만 전달한다. [HTTPS 운영](../https/README.md), [웹훅 규격](../webhooks/PBX-CALL-ENDED.md)을 참고한다.
+  PBX 웹훅과 Swagger 문서 경로를 전달한다. [HTTPS 운영](../https/README.md), [웹훅 규격](../webhooks/PBX-CALL-ENDED.md)을 참고한다.
 - 운영 `shared/.env`에는 DB 설정 외에 32바이트 이상의 `PBX_WEBHOOK_TOKEN`이 필요하다.
   기존 서버에는 무작위 토큰을 생성했으며 Git·산출물에 포함하지 않았다.
 
