@@ -34,6 +34,11 @@ pipeline {
                 '''
             }
         }
+        stage('Backend checks') {
+            steps {
+                sh 'node backend/scripts/check.cjs'
+            }
+        }
         stage('Build and Package Images') {
             steps {
                 // NestJS compilation runs inside the backend Docker build stage.

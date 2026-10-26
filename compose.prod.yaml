@@ -49,6 +49,8 @@ services:
       DB_NAME: ${DB_NAME:?Set DB_NAME in the environment file}
       AI_AGENT_URL: http://ai:8000
       PBX_WEBHOOK_TOKEN: ${PBX_WEBHOOK_TOKEN:?Set the server-only PBX webhook token}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
     networks:
       - web_net
       - ai_net

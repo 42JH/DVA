@@ -7,6 +7,14 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
+FROM builder AS checks
+COPY eslint.config.mjs .prettierrc.json ./
+COPY test ./test
+COPY scripts ./scripts
+COPY migrations ./migrations
+RUN npm run check
+CMD ["npm", "run", "test:integration"]
+
 FROM node:24-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
