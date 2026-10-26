@@ -145,3 +145,12 @@ async def watch_end(call: Call, client) -> None:
     finally:
         hangup.cancel()
         refer.cancel()
+
+
+async def hangup_now(svc, call) -> None:
+    """PBX가 고객이 끊은 것을 알렸을 때: 마무리 인사를 기다리지 않고 바로 끝낸다."""
+    try:
+        await svc.client.live.sessions.hangup(call.session_id)
+    except Exception:
+        log.exception("PBX 종료 후 hangup 실패 %s", call.session_id)
+        call.add_error("PBX 종료 후 hangup 실패")

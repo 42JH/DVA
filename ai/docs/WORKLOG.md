@@ -295,3 +295,14 @@
 - 백엔드 담당에 요청: `package.sh`·`compose.prod.yaml`에서 `ai` 빼기, `backend`를 `dva-shared` 네트워크에 붙이고 `AI_AGENT_URL=http://dva-ai:8000`. 호스트 Nginx에서 `/api/webhooks/openai/call-incoming`·`/pbx/webhook/call-ended`를 `127.0.0.1:8000`(AI)으로.
 - 대상 서버: `/home/ubuntu/dva-ai/shared/.env` 작성(`BACKEND_API_URL`은 `dva-shared`에서 백엔드 컨테이너 이름으로). 8000이 쓰이고 있으면 `AI_PORT`.
 - Jenkins에서 `DEPLOY_LIGHTSAIL` 체크해 첫 배포 확인.
+
+## 2026-10-26 (app/ 웹훅 정리)
+
+### 바꾼 것
+- 밖에서 오는 웹훅을 `app/webhooks/`로 모음: `app/webhook.py` → `app/webhooks/openai.py`(전화 수신), `app/pbx.py` → `app/webhooks/pbx.py`(통화 종료). 주소·동작은 그대로.
+- 앱 공용 객체 `Services`를 `app/webhook.py`에서 `app/services.py`로.
+- PBX 종료 때 세션을 바로 끊는 함수를 `pbx.hangup` → `sideband.hangup_now`로(OpenAI 세션을 다루는 일). 함수 안 import(순환 회피)를 없앰.
+- `spec/pbx-sip.md`, `docs/rag-handoff.md`의 경로 수정.
+
+### 확인한 것
+- `uv run pytest -q` 119개 통과.

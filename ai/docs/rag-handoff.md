@@ -83,7 +83,7 @@
    - 질문 임베딩은 `openai` 비동기 클라이언트로 만든다. 이벤트 루프를 막지 않는다(`spec/concurrency.md`).
 5. **연결**
    - `app/main.py` lifespan에서 RAG 클라이언트를 만들고 닫는다.
-   - `app/webhook.py`의 `Services`와 통화 객체(`app/call.py`의 `Call`, 도구의 `ctx`)에서 쓸 수 있게 넘긴다. 지금 `ctx.backend`가 백엔드 API를 넘기는 방식과 같다.
+   - `app/services.py`의 `Services`와 통화 객체(`app/call.py`의 `Call`, 도구의 `ctx`)에서 쓸 수 있게 넘긴다. 지금 `ctx.backend`가 백엔드 API를 넘기는 방식과 같다.
    - Qdrant가 죽어도 통화는 계속돼야 한다. 검색 실패는 오류 결과로 돌려주고 상담원 연결을 안내한다.
 6. **환경변수**: `ai/compose.yaml`의 `ai` 서비스에 `QDRANT_URL: http://qdrant:6333`과 읽기 전용 키 변수를 추가하고, `.env.example`에 키 이름을 적는다.
 7. **지시문**

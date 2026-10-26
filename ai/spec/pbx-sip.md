@@ -14,12 +14,12 @@
 - 상담원 전환: `POST .../refer` `{"target_uri": "sip:..."}`. 대상은 서버 설정. 고객 동의 후에만.
 - DTMF: sideband로 `transport.dtmf.received`(`event` 0-9·*·#·A-D) 알림만 온다. 지금은 쓰지 않는다.
 - SDK 메서드(openai 3.35.1에서 확인): `client.live.sessions.accept(session_id, session=...)` · `reject(session_id, status_code=...)` · `refer(session_id, target_uri=...)` · `hangup(session_id)`. accept 본문의 `session`에는 `type = "live"`가 필수다.
-- 웹훅 주소는 서버의 `POST /api/webhooks/openai/call-incoming`. 공인 HTTPS 연결(리버스 프록시·OpenAI 프로젝트 등록)은 아직 하지 않았다.
+- 웹훅 주소는 서버의 `POST /api/webhooks/openai/call-incoming`(구현 `app/webhooks/openai.py`). 공인 HTTPS 연결(리버스 프록시·OpenAI 프로젝트 등록)은 아직 하지 않았다.
 - 한도: 동시 세션 Build 50·Launch 300·Grow 500. 과금 분당 $0.05(초 단위), 백엔드 모델 별도. 컨텍스트 128K, 90%를 넘으면 같은 세션에서 엔진이 교체된다(원래 지시문 + 최근 8,192토큰). `session.started`의 `expires_at`이 세션 만료 시각.
 
 ## PBX → 서버: 통화 종료 웹훅 (제안, PBX 쪽에 전달)
 
-OpenAI는 통화 종료 웹훅을 보내지 않는다(종료는 sideband `session.closed`로만 옴). 고객이 끊은 것을 PBX가 알려 주면 서버가 해당 OpenAI 세션을 바로 끝낸다. 구현: `app/pbx.py`, 테스트 `tests/test_pbx.py`.
+OpenAI는 통화 종료 웹훅을 보내지 않는다(종료는 sideband `session.closed`로만 옴). 고객이 끊은 것을 PBX가 알려 주면 서버가 해당 OpenAI 세션을 바로 끝낸다. 구현: `app/webhooks/pbx.py`, 테스트 `tests/test_pbx.py`.
 
 - 주소: `POST https://<서버 도메인>/pbx/webhook/call-ended`. 리버스 프록시에서 이 경로를 공개한다.
 - 본문(JSON): `{"call_id": "<SIP Call-ID>", "ended_at": "2026-10-21T15:04:05+09:00", "reason": "caller_hangup"}`
