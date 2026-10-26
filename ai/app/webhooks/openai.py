@@ -2,51 +2,18 @@
 
 import asyncio
 import logging
-import time
-from dataclasses import dataclass, field
-from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
-from app.call import Call, Registry, caller_from_headers, sip_call_id_from_headers
-from app.config import ServerConfig, Texts
+from app.call import Call, caller_from_headers, sip_call_id_from_headers
 from app.live_session import LiveConfigError, build_session
-from app.sideband import run_call
+from app.services import Services
+from app.sideband import hangup_now, run_call
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 INCOMING = ("live.transport.incoming", "live.call.incoming")
-
-
-@dataclass
-class Services:
-    cfg: ServerConfig
-    texts: Texts
-    client: Any  # AsyncOpenAI(테스트에서는 가짜)
-    backend: Any  # BackendAPI(테스트에서는 가짜)
-    registry: Registry
-    seen_webhooks: dict[str, float] = field(default_factory=dict)
-    tasks: set[asyncio.Task] = field(default_factory=set)
-
-    def first_time(self, webhook_id: str | None) -> bool:
-        """같은 webhook-id는 한 번만. 오래된 기록은 지운다."""
-        now = time.time()
-        ttl = self.cfg.call.webhook_dedupe_sec
-        for k in [k for k, t in self.seen_webhooks.items() if now - t > ttl]:
-            del self.seen_webhooks[k]
-        if not webhook_id:
-            return True
-        if webhook_id in self.seen_webhooks:
-            return False
-        self.seen_webhooks[webhook_id] = now
-        return True
-
-    def spawn(self, coro) -> asyncio.Task:
-        task = asyncio.create_task(coro)
-        self.tasks.add(task)
-        task.add_done_callback(self.tasks.discard)
-        return task
 
 
 @router.post("/api/webhooks/openai/call-incoming")
@@ -106,9 +73,7 @@ async def handle_incoming(svc: Services, data) -> None:
         call.end("accept_failed", status="failed")
         return
     if call.pbx_ended:  # accept하는 사이 PBX가 통화 종료를 알렸다
-        from app.pbx import hangup
-
         call.end("pbx_hangup")
-        await hangup(svc, call)
+        await hangup_now(svc, call)
         return
     call.task = asyncio.create_task(run_call(call, svc.client))  # 참조는 통화 객체(레지스트리)가 든다

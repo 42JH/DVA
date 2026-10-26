@@ -14,6 +14,8 @@ import time
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field, ValidationError
 
+from app.sideband import hangup_now
+
 log = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -56,15 +58,7 @@ async def call_ended(request: Request) -> Response:
         call.pbx_ended = {"at": time.time(), "reason": event.reason, "ended_at": event.ended_at}
         call.notify()
         if call.status == "active":
-            svc.spawn(hangup(svc, call))
+            svc.spawn(hangup_now(svc, call))
         # accepting이면 accept가 끝나는 대로 webhook.handle_incoming이 끊는다
     return Response(status_code=200)
 
-
-async def hangup(svc, call) -> None:
-    """고객이 이미 끊었으므로 마무리 인사를 기다리지 않고 바로 끝낸다."""
-    try:
-        await svc.client.live.sessions.hangup(call.session_id)
-    except Exception:
-        log.exception("PBX 종료 후 hangup 실패 %s", call.session_id)
-        call.add_error("PBX 종료 후 hangup 실패")

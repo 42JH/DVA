@@ -12,10 +12,10 @@ from app.config import load_server_config, load_texts
 from app.flow import engine
 from app.live_session import LiveConfigError, function_tool_names, load_live_toml
 from app.monitor.router import router as monitor_router
-from app.pbx import router as pbx_router
+from app.services import Services
 from app.tools._base import TOOLS, load_tools
-from app.webhook import Services
-from app.webhook import router as webhook_router
+from app.webhooks.openai import router as webhook_router
+from app.webhooks.pbx import router as pbx_router
 
 log = logging.getLogger(__name__)
 
