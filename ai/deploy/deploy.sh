@@ -39,7 +39,7 @@ compose() {
 apply_release() {
     local directory="$1"
     compose "$directory" config --quiet || return 1
-    compose "$directory" up -d --no-build --pull never --remove-orphans --wait --wait-timeout 120 || return 1
+    compose "$directory" up -d --no-build --pull missing --remove-orphans --wait --wait-timeout 120 || return 1
 }
 
 read_version() {
