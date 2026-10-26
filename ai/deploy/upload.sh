@@ -12,6 +12,8 @@ mode="${4:-}"
 [[ "$version" =~ ^[a-z0-9][a-z0-9.-]{0,79}$ ]] || { echo 'Invalid release version.' >&2; exit 1; }
 [[ "$ssh_user" =~ ^[a-z_][a-z0-9_-]*$ ]] || exit 1
 [[ -f "$identity_file" ]] || { echo 'Missing SSH credential file.' >&2; exit 1; }
+# 비밀값은 Jenkins Secret file credential(dva-ai)로 받아 배포 때 shared/.env로 올린다
+[[ -s "${AI_ENV_FILE:?Set AI_ENV_FILE}" ]] || { echo 'Empty or missing AI env credential file.' >&2; exit 1; }
 ai_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 server="$ssh_user@${DEPLOY_HOST:?Set DEPLOY_HOST}"
 remote_root=/home/ubuntu/dva-ai
@@ -22,11 +24,14 @@ trap 'rm -rf -- "$key_dir"' EXIT
 install -m 600 "$identity_file" "$key_dir/identity"
 options=(-i "$key_dir/identity" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
  -o "UserKnownHostsFile=$ai_root/deploy/known_hosts" -o ConnectTimeout=15)
-ssh "${options[@]}" "$server" "test -f $remote_root/shared/.env && sudo -n docker info >/dev/null" </dev/null
+ssh "${options[@]}" "$server" "test -d $remote_root/shared -a -w $remote_root/shared && sudo -n docker info >/dev/null" </dev/null \
+ || { echo "Server check failed: $remote_root/shared must be a writable directory and sudo docker must work." >&2; exit 1; }
 if [[ "$mode" == --verify-only ]]; then
  echo 'SSH credential, pinned host key and server prerequisites verified. No release transfer or deployment.'
  exit 0
 fi
+
+ssh "${options[@]}" "$server" "umask 077 && cat > $remote_root/shared/.env.tmp && mv $remote_root/shared/.env.tmp $remote_root/shared/.env" < "$AI_ENV_FILE"
 
 docker image inspect "$image" >/dev/null
 ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir -p $remote_root/releases/$version" </dev/null
