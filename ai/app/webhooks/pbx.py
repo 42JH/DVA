@@ -1,19 +1,19 @@
-"""PBX 통화 종료 웹훅(spec/pbx-sip.md). 고객이 끊은 것을 PBX가 알려 주면 해당 OpenAI 세션을 끝낸다.
+"""PBX 통화 종료 웹훅(spec/pbx-sip.md). PBX가 팀 백엔드에 보내는 것과 같은 본문을 우리에게도 보낸다.
+고객이 끊었는데 아직 진행 중인 세션이 있으면 바로 끝낸다(보통은 sideband session.closed로 먼저 끝나 있다).
 
-통화는 SIP Call-ID로 찾는다(들어오는 전화 웹훅의 SIP 헤더에서 기억해 둔 값).
-공인 인터넷에 열리는 주소이므로 서명 검증을 통과한 것만 처리한다: 공유 비밀값 PBX_WEBHOOK_SECRET으로
-"타임스탬프.본문"을 HMAC-SHA256한 hex를 X-Pbx-Signature: sha256=<hex>, 시각은 X-Pbx-Timestamp(유닉스 초).
+공인 인터넷에 열리는 주소이므로 Authorization: Bearer <PBX_WEBHOOK_SECRET>이 맞는 것만 처리한다.
+본문의 발신번호(callFrom)는 미신뢰 값이다: 통화를 찾는 데만 쓴다.
 """
 
-import hashlib
 import hmac
 import logging
 import os
 import time
 
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 
+from app.call import normalize_phone
 from app.sideband import hangup_now
 
 log = logging.getLogger(__name__)
@@ -21,18 +21,15 @@ router = APIRouter()
 
 
 class CallEnded(BaseModel):
-    call_id: str = Field(min_length=1, max_length=256)
-    ended_at: str | None = Field(None, max_length=64)
-    reason: str | None = Field(None, max_length=64)
+    """쓰는 필드만 검증한다. recordingUrl 등 나머지 필드는 무시."""
+    call_from: str = Field(alias="callFrom", min_length=1, max_length=32)
+    ended_at: AwareDatetime = Field(alias="endedAt")
+    recording_id: str | None = Field(None, alias="recordingId", max_length=128)
 
 
-def signature_ok(secret: str, timestamp: str | None, signature: str | None, body: bytes, tolerance: int) -> bool:
-    if not timestamp or not signature or not timestamp.isdigit():
-        return False
-    if abs(time.time() - int(timestamp)) > tolerance:  # 재전송 공격 방지
-        return False
-    expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(f"sha256={expected}", signature)
+def token_ok(secret: str, authorization: str | None) -> bool:
+    scheme, _, token = (authorization or "").partition(" ")
+    return scheme.lower() == "bearer" and hmac.compare_digest(token.strip().encode(), secret.encode())
 
 
 @router.post("/pbx/webhook/call-ended")
@@ -42,23 +39,21 @@ async def call_ended(request: Request) -> Response:
     if not secret:
         log.error("PBX_WEBHOOK_SECRET이 없어 PBX 웹훅을 받지 않음")
         return Response(status_code=503)
-    body = await request.body()
-    if not signature_ok(secret, request.headers.get("x-pbx-timestamp"), request.headers.get("x-pbx-signature"),
-                        body, svc.cfg.pbx.webhook_tolerance_sec):
-        log.warning("PBX 웹훅 서명 검증 실패")
+    if not token_ok(secret, request.headers.get("authorization")):
+        log.warning("PBX 웹훅 인증 실패")
         return Response(status_code=401)
     try:
-        event = CallEnded.model_validate_json(body)
+        event = CallEnded.model_validate_json(await request.body())
     except ValidationError:
         return Response(status_code=400)
-    call = svc.registry.find_by_sip_call_id(event.call_id)
-    if call is None:
-        return Response(status_code=200)  # 이미 끝났거나 모르는 통화. 다시 와도 괜찮다
-    if call.pbx_ended is None:
-        call.pbx_ended = {"at": time.time(), "reason": event.reason, "ended_at": event.ended_at}
-        call.notify()
-        if call.status == "active":
-            svc.spawn(hangup_now(svc, call))
-        # accepting이면 accept가 끝나는 대로 webhook.handle_incoming이 끊는다
-    return Response(status_code=200)
-
+    caller = normalize_phone(event.call_from)
+    # 웹훅은 통화가 끝나고 몇 초 뒤에 온다. 그사이 같은 번호로 다시 건 통화를 끊지 않게 종료 시각 전에 시작한 통화만
+    for call in svc.registry.find_active_by_caller(caller, started_before=event.ended_at.timestamp()):
+        if call.pbx_ended is None:
+            call.pbx_ended = {"at": time.time(), "ended_at": event.ended_at.isoformat(),
+                              "recording_id": event.recording_id}
+            call.notify()
+            if call.status == "active":
+                svc.spawn(hangup_now(svc, call))
+            # accepting이면 accept가 끝나는 대로 webhooks.openai.handle_incoming이 끊는다
+    return Response(status_code=200)  # 모르는 통화·이미 끝난 통화도 200. 다시 와도 괜찮다

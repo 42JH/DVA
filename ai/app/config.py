@@ -56,10 +56,6 @@ class MonitorConfig(_Strict):
     bubble_gap_ms: int = Field(ge=0)
 
 
-class PbxConfig(_Strict):
-    webhook_tolerance_sec: int = Field(ge=30, le=3600)
-
-
 class ListenerConfig(_Strict):
     model: str = Field(min_length=1)
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
@@ -78,7 +74,6 @@ class ServerConfig(_Strict):
     backend: BackendConfig
     monitor: MonitorConfig
     listener: ListenerConfig
-    pbx: PbxConfig
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:

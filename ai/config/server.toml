@@ -63,7 +63,3 @@ max_heard_chars = 400
 max_agent_chars = 200
 # 저장된 배송지를 선택지로 넘길 때 최대 개수
 max_choices = 30
-
-[pbx]
-# PBX 통화 종료 웹훅(POST /pbx/webhook/call-ended): 서명 타임스탬프 허용 오차(초). 비밀값은 환경변수 PBX_WEBHOOK_SECRET
-webhook_tolerance_sec = 300

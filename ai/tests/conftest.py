@@ -204,13 +204,11 @@ class FakeClient:
 
 
 def signed_webhook(event_type: str, session_id: str, from_header: str = f"<sip:+82{CALLER[1:]}@pbx>",
-                   webhook_id: str | None = None, secret: str = WEBHOOK_SECRET,
-                   sip_call_id: str | None = None) -> tuple[bytes, dict]:
+                   webhook_id: str | None = None, secret: str = WEBHOOK_SECRET) -> tuple[bytes, dict]:
     body = json.dumps({
         "id": webhook_id or f"evt_{session_id}", "object": "event", "created_at": int(time.time()), "type": event_type,
         "data": {"type": "sip", "session_id": session_id,
-                 "sip_headers": [{"name": "From", "value": from_header}, {"name": "To", "value": "<sip:proj@x>"},
-                                 {"name": "Call-ID", "value": sip_call_id or f"sip-{session_id}@pbx"}]},
+                 "sip_headers": [{"name": "From", "value": from_header}, {"name": "To", "value": "<sip:proj@x>"}]},
     }).encode()
     wid, ts = webhook_id or f"wh_{session_id}", str(int(time.time()))
     key = base64.b64decode(secret[6:])
