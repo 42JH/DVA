@@ -15,10 +15,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>18 THEN RAISE EXCEPTION 'Expected 18 business tables, got %',n; END IF;
+ IF n<>19 THEN RAISE EXCEPTION 'Expected 19 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>17 THEN RAISE EXCEPTION 'Expected 17 foreign keys, got %',n; END IF;
+ IF n<>18 THEN RAISE EXCEPTION 'Expected 18 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>9 THEN RAISE EXCEPTION 'Expected 9 business triggers, got %',n; END IF;
@@ -73,8 +73,8 @@ BEGIN
  UPDATE orders SET status='ACCEPTED',parcel_no='TEST0001',dver_received_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_name=%L WHERE order_parcel_seq=%s','Changed',parcel_id),'23514');
 
- INSERT INTO admin_users(login_id,password_hash,role,status) VALUES('test-admin','test-only-hash','SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq INTO admin_id;
- PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status) VALUES('disabled','x','OPERATOR','INACTIVE')$q$,'23514');
+ INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('testAdmin','test-only-hash','SYSTEM_ADMIN','ACTIVE','Test Admin') RETURNING admin_user_seq INTO admin_id;
+ PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('disabled','x','OPERATOR','INACTIVE','Test Admin')$q$,'23514');
  INSERT INTO call_sessions(order_seq,provider_call_id) VALUES(order_id,'test-call') RETURNING call_session_seq INTO call_id;
  INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(call_id,1,'CUSTOMER','Hello',1);
  PERFORM pg_temp.expect_error(format('UPDATE call_sessions SET ended_at=CURRENT_TIMESTAMP WHERE call_session_seq=%s',call_id),'23514');
@@ -98,5 +98,29 @@ BEGIN
  IF (SELECT updated_at FROM faq_entries WHERE faq_entry_seq=faq_id)<=before_time THEN RAISE EXCEPTION 'FAQ timestamp failed'; END IF;
  PERFORM pg_temp.expect_error($q$INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata) VALUES('SYSTEM','TEST','TEST','00000000-0000-0000-0000-000000000003','SUCCESS','[]')$q$,'23514');
  RAISE NOTICE 'PASS: schema, preservation, customer states, employee identity, PINs, order versions/snapshots, calls, recordings, delivery FK/history, prompts, FAQ and audit checks';
+END $$;
+DO $$
+DECLARE first_id integer; second_id integer;
+BEGIN
+ INSERT INTO admin_users(login_id,password_hash,role,status,name)
+ VALUES('sessionOne','test-only','OPERATOR','ACTIVE','First') RETURNING admin_user_seq INTO first_id;
+ INSERT INTO admin_users(login_id,password_hash,role,status,name)
+ VALUES('sessionTwo','test-only','OPERATOR','ACTIVE','Second') RETURNING admin_user_seq INTO second_id;
+ PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status)
+ VALUES('missingName','x','OPERATOR','PENDING')$q$,'23502');
+ PERFORM pg_temp.expect_error(format('UPDATE admin_users SET name=%L WHERE admin_user_seq=%s','',first_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE admin_users SET name=%L WHERE admin_user_seq=%s',E' \t\n',first_id),'23514');
+ INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES(repeat('a',64),first_id),(repeat('b',64),first_id),(repeat('c',64),second_id);
+ IF EXISTS(SELECT 1 FROM admin_sessions WHERE expires_at-created_at<>INTERVAL '9 hours') THEN
+  RAISE EXCEPTION 'Session expiry default incorrect'; END IF;
+ PERFORM pg_temp.expect_error(format('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES(%L,%s)',repeat('a',64),first_id),'23505');
+ PERFORM pg_temp.expect_error(format('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES(%L,%s)','invalid',first_id),'23514');
+ PERFORM pg_temp.expect_error(format('INSERT INTO admin_sessions(session_token_hash,admin_user_seq,expires_at) VALUES(%L,%s,CURRENT_TIMESTAMP)',repeat('d',64),first_id),'23514');
+ PERFORM pg_temp.expect_error(format('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES(%L,2147483647)',repeat('e',64)),'23503');
+ DELETE FROM admin_sessions WHERE admin_user_seq=first_id;
+ IF (SELECT count(*) FROM admin_sessions WHERE admin_user_seq=second_id)<>1 THEN RAISE EXCEPTION 'Other sessions lost'; END IF;
+ DELETE FROM admin_users WHERE admin_user_seq=second_id;
+ IF EXISTS(SELECT 1 FROM admin_sessions WHERE admin_user_seq=second_id) THEN RAISE EXCEPTION 'Session cascade failed'; END IF;
+ RAISE NOTICE 'PASS: admin names, session uniqueness, expiry, FK, scoped deletion and cascade';
 END $$;
 ROLLBACK;

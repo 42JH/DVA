@@ -1,9 +1,9 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '모놀리식: 단일 DB / 업무 테이블 18개. 서비스 간 FK 포함.'
+  Note: '모놀리식: 단일 DB / 업무 테이블 18개 + 관리자 세션 1개. 서비스 간 FK 포함.'
 }
 
-// 시각화용 DBML. 배포 원본은 서비스별 schema.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
+// 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
 // 2026-10-25 ERD 선반영: 기업별 사번 UNIQUE와 고객/기업/관리자 상태 축소. SQL·코드 반영은 후속 작업.
 // auth_version은 채택하지 않음. 기존 직원 사번 보완 및 제거 상태값의 데이터 이관 정책은 배포 전 확정.
 // CQRS 조회 테이블 / Kafka / Kubernetes는 검토 단계이며 이 확정 ERD에는 추가하지 않았다.
@@ -260,17 +260,36 @@ Table shipment_status_history {
 Table admin_users {
   admin_user_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   login_id text [not null, unique, note: '관리자 로그인 식별자']
+  name text [not null, note: '가입 시 필수 이름. 공백만인 값 금지']
   password_hash text [not null, note: '단방향 해시된 비밀번호']
   role text [not null, note: '역할']
   status text [not null, note: '업무 상태']
   created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
   last_login_at timestamptz [note: '가장 최근 로그인 성공 시각. 미접속은 NULL']
   checks {
+    `name ~ '[^[:space:]]'`
     `role IN ('OPERATOR','SUPERVISOR','SYSTEM_ADMIN')`
     `status IN ('ACTIVE','PENDING')`
   }
   Note: 'operations / 관리자 계정. ACTIVE만 접근 허용 예정이며 PENDING은 승인 대기다.'
 }
+
+Table admin_sessions {
+  session_token_hash text [pk, not null, note: '랜덤 세션 토큰의 SHA-256 해시. 원문 저장 금지']
+  admin_user_seq integer [not null]
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  expires_at timestamptz [not null, default: `CURRENT_TIMESTAMP + INTERVAL '9 hours'`]
+  indexes {
+    admin_user_seq
+    expires_at
+  }
+  checks {
+    `session_token_hash ~ '^[0-9a-f]{64}$'`
+    `expires_at > created_at`
+  }
+  Note: 'auth / 고정 9시간 세션. 활동으로 연장하지 않으며 비밀번호 변경 시 대상의 모든 세션 삭제.'
+}
+Ref: admin_sessions.admin_user_seq > admin_users.admin_user_seq [delete: cascade]
 
 Table audit_logs {
   audit_log_seq integer [pk, increment, not null, note: '행의 고유 기본키']
