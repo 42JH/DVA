@@ -1,8 +1,8 @@
+import { AuditOperation } from '../audit/audit-operation';
 import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
-  ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiParam,
@@ -28,11 +28,6 @@ function adminId(value: string): number {
 }
 @ApiTags('Admins')
 @ApiCookieAuth('adminSession')
-@ApiHeader({
-  name: 'X-CSRF-Protection',
-  description: '변경 요청에 1 전달. 허용 Origin 필수.',
-  required: false,
-})
 @ApiResponse({ status: 400, type: ErrorResponseDto })
 @ApiResponse({ status: 401, type: ErrorResponseDto })
 @ApiResponse({ status: 403, type: ErrorResponseDto })
@@ -51,6 +46,7 @@ export class AdminAccessController {
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
   }
+  @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id')
   @HttpCode(204)
   @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
@@ -58,6 +54,7 @@ export class AdminAccessController {
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
+  @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id/password')
   @HttpCode(204)
   @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })

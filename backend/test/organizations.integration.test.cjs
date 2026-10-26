@@ -28,7 +28,7 @@ let app, appB, base, baseB, adminA, adminB, repository, hash, sessionA;
 const apps = [];
 const cookies = new Map();
 const password = 'company-test-only-password';
-const mutationHeaders = { Origin: 'http://localhost:5173', 'X-CSRF-Protection': '1' };
+const mutationHeaders = { Origin: 'http://localhost:5173' };
 
 async function start() {
   const application = await NestFactory.create(AppModule, { logger: false });
@@ -141,14 +141,9 @@ test('every company operation rejects missing, forged and malformed sessions bef
   assert.equal((await pool.query('SELECT count(*) FROM organizations')).rows[0].count, count);
 });
 
-test('company writes require both the allowed Origin and CSRF header even with a valid session', async () => {
+test('company writes require an allowed Origin even with a valid session', async () => {
   const id = (await (await create('CSRF 검증 기업')).json()).data.organizationSeq;
-  for (const headers of [
-    { Origin: undefined },
-    { 'X-CSRF-Protection': undefined },
-    { 'X-CSRF-Protection': '0' },
-    { Origin: 'https://untrusted.invalid' },
-  ]) {
+  for (const headers of [{ Origin: undefined }, { Origin: 'https://untrusted.invalid' }]) {
     for (const [method, path, body] of [
       ['POST', '', { name: 'CSRF 거절 기업' }],
       ['PATCH', '/' + id, { name: 'CSRF 거절 기업' }],
@@ -491,4 +486,142 @@ test('OpenAPI describes the four company operations and their actual envelopes',
     ),
   );
   assert.ok(document.paths['/api/companies/{id}'].patch.responses['204']);
+});
+
+test('company creation audit is atomic and idempotent retries record only one success', async () => {
+  const key = randomUUID();
+  const name = '감사 등록 ' + key;
+  const first = await create(name, key);
+  assert.equal(first.status, 201);
+  const id = (await first.json()).data.organizationSeq;
+  assert.equal((await create(name, key)).status, 201);
+  const rows = (
+    await pool.query(
+      "SELECT * FROM audit_logs WHERE target_type='ORGANIZATION' AND target_seq=$1 AND action='ORGANIZATION_CREATED' AND result='SUCCESS'",
+      [id],
+    )
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].request_id, first.headers.get('x-request-id'));
+  assert.deepEqual(rows[0].metadata, {});
+  const rejected = await create(name + ' changed', key);
+  assert.equal(rejected.status, 422);
+  const failures = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      rejected.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0].result, 'FAILED');
+  assert.equal(failures[0].actor_seq, adminA);
+});
+
+test('company creation rolls back row and receipt when success audit cannot be saved', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const original = audit.recordSuccess;
+  const key = randomUUID();
+  const name = '감사 롤백 ' + key;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit storage failure');
+  };
+  try {
+    const response = await create(name, key);
+    assert.equal(response.status, 500);
+    assert.ok(!(await response.text()).includes('private audit storage failure'));
+    assert.equal(
+      (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
+      '0',
+    );
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*) FROM api_idempotency.organization_creations WHERE idempotency_key=$1',
+          [key],
+        )
+      ).rows[0].count,
+      '0',
+    );
+    const rows = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].result, 'FAILED');
+    assert.equal(rows[0].action, 'ORGANIZATION_CREATED');
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await create(name, key)).status, 201);
+});
+
+test('company update audit commits with the change and rolls back on audit failure', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const created = await create('수정 감사 원본 ' + randomUUID());
+  assert.equal(created.status, 201);
+  const id = (await created.json()).data.organizationSeq;
+  const updated = await patch(id, { name: '수정 감사 성공', status: 'INACTIVE' });
+  assert.equal(updated.status, 204);
+  const rows = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      updated.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, 'ORGANIZATION_UPDATED');
+  assert.equal(rows[0].target_type, 'ORGANIZATION');
+  assert.equal(rows[0].target_seq, id);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].result, 'SUCCESS');
+  assert.deepEqual(rows[0].metadata, {});
+  const original = audit.recordSuccess;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit error');
+  };
+  try {
+    const failed = await patch(id, { name: '저장되면 안 됨', status: 'ACTIVE' });
+    assert.equal(failed.status, 500);
+    const record = (
+      await pool.query('SELECT name,status FROM organizations WHERE organization_seq=$1', [id])
+    ).rows[0];
+    assert.deepEqual(record, { name: '수정 감사 성공', status: 'INACTIVE' });
+    const failures = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        failed.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].result, 'FAILED');
+    assert.equal(failures[0].target_seq, id);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  const denied = await request('/' + id, {
+    method: 'PATCH',
+    headers: { Cookie: undefined, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'ACTIVE' }),
+  });
+  assert.equal(denied.status, 401);
+  const denial = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      denied.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(denial.length, 1);
+  assert.equal(denial[0].result, 'DENIED');
+  assert.equal(denial[0].actor_seq, null);
+  assert.equal(denial[0].target_seq, id);
+  const missing = await patch(2147483647, { status: 'ACTIVE' });
+  assert.equal(missing.status, 404);
+  assert.equal(
+    (
+      await pool.query('SELECT result FROM audit_logs WHERE request_id=$1', [
+        missing.headers.get('x-request-id'),
+      ])
+    ).rows[0].result,
+    'FAILED',
+  );
 });

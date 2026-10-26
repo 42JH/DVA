@@ -30,8 +30,8 @@ export class OrganizationsRepository {
     return result.rows[0];
   }
 
-  async update(id: number, changes: UpdateOrganizationDto): Promise<boolean> {
-    const result = await this.database.pool.query(
+  async update(id: number, changes: UpdateOrganizationDto, client: PoolClient): Promise<boolean> {
+    const result = await client.query(
       `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status)
        WHERE organization_seq = $1 RETURNING organization_seq`,
       [id, changes.name ?? null, changes.status ?? null],

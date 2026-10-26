@@ -51,7 +51,6 @@ async function call(method, path, body, cookie, headers = {}) {
     method,
     headers: {
       Origin: 'http://localhost:5173',
-      'X-CSRF-Protection': '1',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(cookie ? { Cookie: cookie } : {}),
       ...headers,
@@ -238,17 +237,13 @@ test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout re
   );
   assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 401);
 });
-test('login rotates presented session and CSRF rejects missing/foreign origins and simple requests', async () => {
+test('login rotates presented session and Origin validation rejects missing/foreign origins', async () => {
   const user = await account('csrf');
   const first = await login(user);
   const second = await login(user, password, first.session);
   assert.notEqual(first.session, second.session);
   assert.equal((await call('GET', '/api/auth/me', undefined, first.session)).status, 401);
-  for (const headers of [
-    { Origin: '' },
-    { Origin: 'https://evil.invalid' },
-    { 'X-CSRF-Protection': '' },
-  ]) {
+  for (const headers of [{ Origin: '' }, { Origin: 'https://evil.invalid' }]) {
     assert.equal(
       (await call('POST', '/api/auth/logout', undefined, second.session, headers)).status,
       403,
@@ -333,7 +328,7 @@ test('system admin approves pending accounts, filters lists, rejects empty/null 
   assert.equal(list.body.data[0].passwordHash, undefined);
   const audit = (
     await db.pool.query(
-      "SELECT * FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED'",
+      "SELECT * FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
       [pending.id],
     )
   ).rows;
@@ -544,4 +539,391 @@ test('prepare disposable runtime account for production-image cookie checks', as
     "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('runtimeAdmin83','Runtime test',$1,'OPERATOR','ACTIVE')",
     [await hashPassword('runtime-only-password')],
   );
+});
+test('OPS-02 requires a session and permits only supervisors and system administrators', async () => {
+  assert.equal((await call('GET', '/api/audit-logs')).status, 401);
+  assert.equal(
+    (await call('GET', '/api/audit-logs', undefined, 'dva_session=invalid')).status,
+    401,
+  );
+
+  for (const [suffix, role, expected] of [
+    ['auditOperator', 'OPERATOR', 403],
+    ['auditSupervisor', 'SUPERVISOR', 200],
+    ['auditSystem', 'SYSTEM_ADMIN', 200],
+  ]) {
+    const user = await account(suffix, role);
+    const signedIn = await login(user);
+    assert.equal(signedIn.status, 200);
+
+    const response = await call('GET', '/api/audit-logs', undefined, signedIn.session);
+
+    assert.equal(response.status, expected);
+  }
+});
+
+test('OPS-02 filters, paginates, orders ties and excludes private metadata', async () => {
+  const user = await account('auditReader', 'SUPERVISOR');
+  const signedIn = await login(user);
+  assert.equal(signedIn.status, 200);
+
+  const action = prefix + '_AUDIT_LIST';
+  const inserted = [];
+
+  for (const [occurredAt, result] of [
+    ['2026-01-01T00:00:00Z', 'SUCCESS'],
+    ['2026-01-02T00:00:00Z', 'DENIED'],
+    ['2026-01-02T00:00:00Z', 'FAILED'],
+    ['2026-01-03T00:00:00Z', 'SUCCESS'],
+  ]) {
+    const row = await db.pool.query(
+      `INSERT INTO audit_logs(
+        actor_type, actor_seq, action, target_type, target_seq,
+        request_id, result, metadata, occurred_at
+      )
+      VALUES(
+        'ADMIN', $1, $2, 'ADMIN_USER', $1,
+        $3, $4, $5::jsonb, $6::timestamptz
+      )
+      RETURNING audit_log_seq`,
+      [
+        user.id,
+        action,
+        require('node:crypto').randomUUID(),
+        result,
+        JSON.stringify({ password: 'must-not-be-exposed' }),
+        occurredAt,
+      ],
+    );
+    inserted.push(row.rows[0].audit_log_seq);
+  }
+
+  const filters = {
+    actorSeq: String(user.id),
+    action,
+    targetType: 'ADMIN_USER',
+    targetSeq: String(user.id),
+    from: '2026-01-01T00:00:00Z',
+    to: '2026-01-03T00:00:00Z',
+    limit: '2',
+  };
+
+  const read = (extra = {}) =>
+    call(
+      'GET',
+      '/api/audit-logs?' + new URLSearchParams({ ...filters, ...extra }),
+      undefined,
+      signedIn.session,
+    );
+
+  const first = await read();
+  assert.equal(first.status, 200);
+  assert.deepEqual(
+    first.body.data.map((row) => row.auditLogSeq),
+    [inserted[2], inserted[1]],
+  );
+  assert.equal(first.body.hasNext, true);
+  assert.deepEqual(Object.keys(first.body).sort(), ['data', 'hasNext']);
+  assert.ok(first.body.data.every((row) => Object.keys(row.metadata).length === 0));
+  assert.ok(!first.text.includes('must-not-be-exposed'));
+
+  const second = await read({ offset: '2' });
+  assert.equal(second.status, 200);
+  assert.deepEqual(
+    second.body.data.map((row) => row.auditLogSeq),
+    [inserted[0]],
+  );
+  assert.equal(second.body.hasNext, false);
+
+  for (const [result, id] of [
+    ['SUCCESS', inserted[0]],
+    ['DENIED', inserted[1]],
+    ['FAILED', inserted[2]],
+  ]) {
+    const response = await read({ result });
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.data.map((row) => row.auditLogSeq),
+      [id],
+    );
+  }
+
+  for (const extra of [
+    { actorSeq: String(user.id + 100000) },
+    { targetSeq: String(user.id + 100000) },
+    { targetType: 'NO_SUCH_TARGET' },
+    { action: action + "' OR 1=1 --" },
+    { offset: '100' },
+  ]) {
+    const response = await read(extra);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { data: [], hasNext: false });
+  }
+
+  const systemAction = action + '_SYSTEM';
+  await db.pool.query(
+    `INSERT INTO audit_logs(
+      actor_type, actor_seq, action, target_type, target_seq,
+      request_id, result, metadata
+    )
+    VALUES('SYSTEM', NULL, $1, 'ADMIN_USER', NULL, $2, 'SUCCESS', '{}')`,
+    [systemAction, require('node:crypto').randomUUID()],
+  );
+
+  const system = await call(
+    'GET',
+    '/api/audit-logs?' + new URLSearchParams({ action: systemAction }),
+    undefined,
+    signedIn.session,
+  );
+
+  assert.equal(system.status, 200);
+  assert.equal(system.body.data.length, 1);
+  assert.equal(system.body.data[0].actorType, 'SYSTEM');
+  assert.equal(system.body.data[0].actorSeq, null);
+  assert.equal(system.body.data[0].targetSeq, null);
+});
+
+test('OPS-02 rejects invalid filters and documents the session-protected endpoint', async () => {
+  const user = await account('auditValidation', 'SYSTEM_ADMIN');
+  const signedIn = await login(user);
+  assert.equal(signedIn.status, 200);
+
+  for (const query of [
+    { actorSeq: '0' },
+    { actorSeq: '1e2' },
+    { actorSeq: '2147483648' },
+    { targetSeq: '-1' },
+    { action: ' ' },
+    { targetType: '' },
+    { result: 'UNKNOWN' },
+    { limit: '0' },
+    { limit: '101' },
+    { offset: '-1' },
+    { from: 'not-a-date' },
+    { from: '2026-02-30T00:00:00Z' },
+    { from: '2026-01-01T00:00:00' },
+    { from: '2026-01-02T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+    { from: '2026-01-01T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+  ]) {
+    const response = await call(
+      'GET',
+      '/api/audit-logs?' + new URLSearchParams(query),
+      undefined,
+      signedIn.session,
+    );
+
+    assert.equal(response.status, 400, JSON.stringify(query));
+    assert.equal(response.body.error.code, 'INVALID_REQUEST');
+  }
+
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const operation = document.paths['/api/audit-logs'].get;
+
+  assert.ok(operation);
+  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
+  assert.ok(operation.responses['200']);
+
+  const names = operation.parameters.map((parameter) => parameter.name);
+  for (const name of [
+    'actorSeq',
+    'action',
+    'targetType',
+    'targetSeq',
+    'result',
+    'from',
+    'to',
+    'limit',
+    'offset',
+  ])
+    assert.ok(names.includes(name), name);
+});
+
+test('audit detail enforces roles, validates IDs and returns a redacted immutable record', async () => {
+  const { randomUUID } = require('node:crypto');
+  const eventRequestId = randomUUID();
+  const inserted = await db.pool.query(
+    `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata)
+     VALUES('SYSTEM',NULL,'DETAIL_TEST','ADMIN_USER',NULL,$1,'SUCCESS',$2::jsonb)
+     RETURNING audit_log_seq`,
+    [
+      eventRequestId,
+      JSON.stringify({ password: 'private-detail-secret', nested: { token: 'secret' } }),
+    ],
+  );
+  const id = inserted.rows[0].audit_log_seq;
+  const path = '/api/audit-logs/' + id;
+  assert.equal((await call('GET', path)).status, 401);
+  assert.equal((await call('GET', path, undefined, 'dva_session=invalid')).status, 401);
+  let session;
+  for (const [suffix, role, status] of [
+    ['detailOp', 'OPERATOR', 403],
+    ['detailSuper', 'SUPERVISOR', 200],
+    ['detailAdmin', 'SYSTEM_ADMIN', 200],
+  ]) {
+    const user = await account(suffix, role);
+    const signedIn = await login(user);
+    assert.equal(signedIn.status, 200);
+    session = signedIn.session;
+    const response = await call('GET', path, undefined, session);
+    assert.equal(response.status, status);
+    if (status === 200) {
+      assert.equal(response.body.data.auditLogSeq, id);
+      assert.equal(response.body.data.requestId, eventRequestId);
+      assert.equal(response.body.data.actorSeq, null);
+      assert.equal(response.body.data.targetSeq, null);
+      assert.deepEqual(response.body.data.metadata, {});
+      assert.equal(response.body.meta.requestId, response.headers.get('x-request-id'));
+      assert.notEqual(response.body.meta.requestId, eventRequestId);
+      assert.ok(!response.text.includes('private-detail-secret'));
+      const list = await call('GET', '/api/audit-logs?action=DETAIL_TEST', undefined, session);
+      assert.equal(list.status, 200);
+      assert.deepEqual(
+        list.body.data.find((row) => row.auditLogSeq === id),
+        response.body.data,
+      );
+    }
+  }
+  for (const invalid of ['0', '-1', '1.5', '1e2', 'abc', '2147483648', '1%20OR%201=1']) {
+    const response = await call('GET', '/api/audit-logs/' + invalid, undefined, session);
+    assert.equal(response.status, 400, invalid);
+    assert.equal(response.body.error.code, 'INVALID_REQUEST');
+  }
+  const missing = await call('GET', '/api/audit-logs/2147483647', undefined, session);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error.code, 'NOT_FOUND');
+  const stored = await db.pool.query('SELECT metadata FROM audit_logs WHERE audit_log_seq=$1', [
+    id,
+  ]);
+  assert.equal(stored.rows[0].metadata.password, 'private-detail-secret');
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const operation = document.paths['/api/audit-logs/{id}'].get;
+  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
+  assert.ok(
+    operation.parameters.some(
+      (parameter) => parameter.name === 'id' && parameter.in === 'path' && parameter.required,
+    ),
+  );
+  assert.ok(operation.responses['404']);
+  assert.equal(
+    operation.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/AuditDetailResponseDto',
+  );
+});
+
+test('audited mutations preserve actor, target and exactly one failure after guard/DTO/transaction rejection', async () => {
+  const operator = await account('auditDenied');
+  const session = (await login(operator)).session;
+  const system = await account('auditWriter', 'SYSTEM_ADMIN');
+  const systemSession = (await login(system)).session;
+  const pending = await account('auditPending', 'OPERATOR', 'PENDING');
+  const cases = [
+    [
+      'PATCH',
+      `/api/admins/${pending.id}`,
+      { status: 'ACTIVE' },
+      session,
+      403,
+      'DENIED',
+      operator.id,
+    ],
+    ['PATCH', `/api/admins/${pending.id}`, { role: null }, systemSession, 400, 'FAILED', system.id],
+    [
+      'POST',
+      '/api/auth/login',
+      { loginId: operator.loginId, password: 'wrong-secret' },
+      undefined,
+      401,
+      'DENIED',
+      null,
+    ],
+    ['PATCH', `/api/admins/${pending.id}`, { status: 'ACTIVE' }, undefined, 401, 'DENIED', null],
+  ];
+  for (const [method, path, body, cookie, status, result, actor] of cases) {
+    const response = await call(method, path, body, cookie);
+    assert.equal(response.status, status);
+    const rows = (
+      await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.body.meta.requestId,
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].result, result);
+    assert.equal(rows[0].actor_seq, actor);
+    assert.deepEqual(rows[0].metadata, {});
+    assert.ok(!JSON.stringify(rows).includes('wrong-secret'));
+  }
+  const audit = app.get(AuditService);
+  const original = audit.record;
+  audit.record = async () => {
+    throw new Error('private audit failure');
+  };
+  let response;
+  try {
+    response = await call(
+      'PATCH',
+      `/api/admins/${pending.id}`,
+      { status: 'ACTIVE' },
+      systemSession,
+    );
+    assert.equal(response.status, 500);
+  } finally {
+    audit.record = original;
+  }
+  const rows = (
+    await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      response.body.meta.requestId,
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].result, 'FAILED');
+  assert.equal(rows[0].target_seq, pending.id);
+  assert.equal(
+    (await db.pool.query('SELECT status FROM admin_users WHERE admin_user_seq=$1', [pending.id]))
+      .rows[0].status,
+    'PENDING',
+  );
+});
+
+test('logout records one success with session deletion and failed audit storage does not hide original error', async () => {
+  const user = await account('auditLogout');
+  const session = (await login(user)).session;
+  const response = await call('POST', '/api/auth/logout', undefined, session);
+  assert.equal(response.status, 204);
+  const rows = (
+    await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      response.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, 'ADMIN_LOGOUT');
+  assert.equal(rows[0].result, 'SUCCESS');
+  assert.equal(rows[0].actor_seq, user.id);
+  assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+  const replay = await call('POST', '/api/auth/logout', undefined, session);
+  assert.equal(replay.status, 204);
+  assert.equal(
+    (
+      await db.pool.query('SELECT count(*) FROM audit_logs WHERE request_id=$1', [
+        replay.headers.get('x-request-id'),
+      ])
+    ).rows[0].count,
+    '0',
+  );
+  const { AuditRepository } = require('../dist/audit/audit.repository');
+  const repository = app.get(AuditRepository);
+  const original = repository.insert;
+  repository.insert = async () => {
+    throw new Error('private database failure');
+  };
+  try {
+    const failure = await call('POST', '/api/auth/login', {
+      loginId: user.loginId,
+      password: 'wrong-secret',
+    });
+    assert.equal(failure.status, 401);
+    assert.ok(!failure.text.includes('private database failure'));
+  } finally {
+    repository.insert = original;
+  }
 });

@@ -39,6 +39,7 @@ import { OrganizationIdParamsDto } from './dto/organization-id-params.dto';
 import { CreatedOrganizationDto, OrganizationResponseDto } from './dto/organization-response.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
+import { AuditOperation } from '../audit/audit-operation';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
   type: 'object',
@@ -84,6 +85,7 @@ export class OrganizationsController {
   }
 
   @Post()
+  @AuditOperation({ action: 'ORGANIZATION_CREATED', targetType: 'ORGANIZATION', target: 'none' })
   @ApiOperation({
     summary: '기업 등록',
     description: '모든 활성 관리자. 신규 기업 상태는 ACTIVE입니다.',
@@ -101,7 +103,12 @@ export class OrganizationsController {
     @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrganizationDto,
   ) {
-    return this.organizations.create(request.admin.adminUserSeq, key.toLowerCase(), input);
+    return this.organizations.create(
+      request.admin.adminUserSeq,
+      key.toLowerCase(),
+      input,
+      request.requestId,
+    );
   }
 
   @Get(':id')
@@ -113,6 +120,7 @@ export class OrganizationsController {
   }
 
   @Patch(':id')
+  @AuditOperation({ action: 'ORGANIZATION_UPDATED', targetType: 'ORGANIZATION', target: 'id' })
   @HttpCode(204)
   @ApiOperation({
     summary: '기업명·상태 변경',
@@ -120,7 +128,16 @@ export class OrganizationsController {
   })
   @ApiNoContentResponse({ description: '저장 완료. 응답 본문 없음.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
-  async update(@Param() params: OrganizationIdParamsDto, @Body() changes: UpdateOrganizationDto) {
-    await this.organizations.update(params.id, changes);
+  async update(
+    @Param() params: OrganizationIdParamsDto,
+    @Body() changes: UpdateOrganizationDto,
+    @Req() request: AuthRequest,
+  ) {
+    await this.organizations.update(
+      params.id,
+      changes,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 }

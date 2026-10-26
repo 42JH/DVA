@@ -36,7 +36,7 @@ test('production company endpoints require a real session for every operation', 
   ]) {
     const response = await fetch('http://proxy' + path, {
       method,
-      headers: { Origin: 'https://13.209.59.180', 'X-CSRF-Protection': '1' },
+      headers: { Origin: 'https://13.209.59.180' },
     });
     assert.equal(response.status, 401);
     assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
@@ -88,7 +88,6 @@ test('production login through Nginx authorizes company operations and logout re
   const headers = {
     'Content-Type': 'application/json',
     Origin: 'https://13.209.59.180',
-    'X-CSRF-Protection': '1',
   };
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
@@ -126,12 +125,12 @@ test('production login through Nginx authorizes company operations and logout re
   const detail = await fetch('http://proxy/api/companies/' + id, { headers: { Cookie: session } });
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.name, name);
-  const csrf = await fetch('http://proxy/api/companies/' + id, {
+  const missingOrigin = await fetch('http://proxy/api/companies/' + id, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', Cookie: session, Origin: headers.Origin },
+    headers: { 'Content-Type': 'application/json', Cookie: session },
     body: '{"status":"INACTIVE"}',
   });
-  assert.equal(csrf.status, 403);
+  assert.equal(missingOrigin.status, 403);
   const updated = await fetch('http://proxy/api/companies/' + id, {
     method: 'PATCH',
     headers: companyHeaders,

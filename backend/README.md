@@ -292,7 +292,7 @@ API 단건/오류 meta에도 넣는다. Idempotency-Key는 업무 중복 방지�
 신규 API 응답은 no-store다. 인프라 로그 수집·모니터링 설정은 112번 작업 범위다.
 
 CORS_ORIGINS는 브라우저의 정확한 scheme/host/port를 지정한다. 빈 목록은 외부 origin을 허용하지 않으며
-Origin 없는 서버 간 요청의 CORS 처리는 유지한다. 관리자 변경 요청은 별도로 허용 Origin과 `X-CSRF-Protection: 1`을 요구한다.
+Origin 없는 서버 간 요청의 CORS 처리는 유지한다. 관리자 변경 요청은 별도로 허용 Origin을 요구한다.
 관리자는 쿠키 인증을 사용하고 CORS credentials를 허용한다. 통화 Bearer·멱등키 헤더와 request ID·Location·Retry-After 노출은 유지한다. CORS는 인증/권한 검사의 대체 수단이 아니다.
 
 ## Swagger와 자동 검증
@@ -351,8 +351,8 @@ HTTP 요청 본문 크기 제한은 유지한다. 로그인·가입·비밀번�
 
 쿠키 이름은 `dva_session`, HttpOnly, SameSite=Lax, Path=/api, Domain 생략이다.
 NODE_ENV=production에서는 Secure가 활성화되어 HTTPS가 필요하고 개발·테스트에서는 HTTP를 지원한다.
-프론트는 `credentials: 'include'`를 사용하며 POST/PATCH 등 변경 요청에 `X-CSRF-Protection: 1`을 붙인다.
-로그인·가입·로그아웃도 허용 Origin과 이 헤더가 필요하다. curl/Postman에서도 둘을 명시한다.
+프론트는 `credentials: 'include'`를 사용한다. POST/PATCH 등 변경 요청에는 허용된 Origin이 필요하며 별도 보호 헤더는 요구하지 않는다.
+로그인·가입·로그아웃도 허용 Origin이 필요하다. 브라우저는 자동으로 보내며 curl/Postman에서는 Origin을 명시한다.
 `CORS_ORIGINS`에는 실제 프론트 origin을 정확히 등록한다. 동일 출처 배포라도 해당 origin을 등록한다.
 SameSite=Lax 기준으로 동일 사이트 배포를 전제한다. 다른 사이트의 프론트와 쿠키를 공유하려면 별도 설계가 필요하다.
 
@@ -360,7 +360,7 @@ SameSite=Lax 기준으로 동일 사이트 배포를 전제한다. 다른 사이
 await fetch('/api/auth/login', {
   method: 'POST',
   credentials: 'include',
-  headers: { 'Content-Type': 'application/json', 'X-CSRF-Protection': '1' },
+  headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ loginId, password }),
 });
 ```
@@ -401,6 +401,6 @@ CLI는 SYSTEM_ADMIN이 이미 있으면 중단하고 기존 계정을 변경하�
 ### 검증
 
 `npm run check`는 설정·공통 HTTP·비밀번호/쿠키 단위 검증을 수행한다.
-`node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, CSRF, 만료·삭제, 동시 로그인/비밀번호 변경,
+`node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, Origin 검증, 만료·삭제, 동시 로그인/비밀번호 변경,
 동시 관리자 강등, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
 저장소 루트의 `./infra/database/test-monolith.ps1`은 migration·백업 복구·체크섬·실패 롤백을 검증한다.

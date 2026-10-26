@@ -62,10 +62,21 @@ export class AuthService {
       await this.audit.record(null, account.adminUserSeq, 'ADMIN_SIGNUP', requestId, client);
     });
   }
-  async logout(token?: string) {
+  async logout(token: string | undefined, requestId: string) {
     if (!token) return;
     try {
-      await this.repository.remove(tokenHash(token));
+      await this.database.transaction(async (client) => {
+        const account = await this.repository.find(tokenHash(token), client);
+        await this.repository.remove(tokenHash(token), client);
+        if (account)
+          await this.audit.record(
+            account.adminUserSeq,
+            account.adminUserSeq,
+            'ADMIN_LOGOUT',
+            requestId,
+            client,
+          );
+      });
     } catch {
       throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '로그아웃 처리를 확인할 수 없습니다.');
     }
