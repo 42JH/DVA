@@ -14,7 +14,7 @@ PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행�
 
 | 환경 변수 | 뜻 |
 |---|---|
-| `VITE_API_BASE_URL` | API 기본 경로. 기본 `/api/v1` (명세서 기준) |
+| `VITE_API_BASE_URL` | API 기본 경로. 기본 `/api` (버전 접두사 없음) |
 | `VITE_USE_MOCK` | `true`면 MSW 가짜 API 사용. 가짜가 없는 요청은 백엔드로 감 |
 
 개발 서버는 `/api`를 떼고 `http://localhost:3000`(백엔드)으로 넘깁니다 — 배포 nginx(`infra/nginx/default.conf`)와 같은 동작.

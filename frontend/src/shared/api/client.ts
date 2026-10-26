@@ -2,7 +2,7 @@
 // 기본 경로 · Bearer 토큰 · X-Request-Id · 응답 10초 제한 · 오류 본문 → ApiError · 401이면 로그인 화면으로
 import { clearToken, getToken } from '../auth/token'
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api' // 10/26 BE 결정: v1 없음
 const TIMEOUT_MS = 10_000 // 명세서 1.4 일반 응답 10초
 
 /** 단건 응답 { data, meta } (명세서 1.1) */
