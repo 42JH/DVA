@@ -5,6 +5,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsRepository } from './organizations.repository';
 
 @Injectable()
@@ -22,6 +23,13 @@ export class OrganizationsService {
     const result = await this.repository.find(id);
     if (!result) throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
     return result;
+  }
+
+  async update(id: number, changes: UpdateOrganizationDto): Promise<void> {
+    if (changes.name === undefined && changes.status === undefined)
+      throw new ApiException(400, 'INVALID_REQUEST', '변경할 기업명 또는 상태를 입력해 주세요.');
+    if (!(await this.repository.update(id, changes)))
+      throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
   }
 
   async create(adminId: number, key: string, input: CreateOrganizationDto) {

@@ -4,8 +4,10 @@ import {
   Get,
   createParamDecorator,
   ExecutionContext,
+  HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -17,6 +19,7 @@ import {
   ApiExtraModels,
   ApiForbiddenResponse,
   ApiHeader,
+  ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -32,6 +35,7 @@ import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { OrganizationIdParamsDto } from './dto/organization-id-params.dto';
 import { CreatedOrganizationDto, OrganizationResponseDto } from './dto/organization-response.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
@@ -106,5 +110,17 @@ export class OrganizationsController {
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   find(@Param() params: OrganizationIdParamsDto) {
     return this.organizations.find(params.id);
+  }
+
+  @Patch(':id')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: '기업명·상태 변경',
+    description: 'INACTIVE 전환은 구성원·PIN을 삭제하지 않습니다.',
+  })
+  @ApiNoContentResponse({ description: '저장 완료. 응답 본문 없음.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  async update(@Param() params: OrganizationIdParamsDto, @Body() changes: UpdateOrganizationDto) {
+    await this.organizations.update(params.id, changes);
   }
 }

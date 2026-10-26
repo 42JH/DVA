@@ -3,6 +3,7 @@ import { PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { Organization } from './organizations.types';
 
 @Injectable()
@@ -27,6 +28,15 @@ export class OrganizationsRepository {
       [id],
     );
     return result.rows[0];
+  }
+
+  async update(id: number, changes: UpdateOrganizationDto): Promise<boolean> {
+    const result = await this.database.pool.query(
+      `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status)
+       WHERE organization_seq = $1 RETURNING organization_seq`,
+      [id, changes.name ?? null, changes.status ?? null],
+    );
+    return result.rowCount === 1;
   }
 
   async lockCreation(client: PoolClient, adminId: number, key: string): Promise<boolean> {
