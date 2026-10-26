@@ -270,3 +270,28 @@
 - Jenkins 로그에 `github-branch-source` 플러그인 로드 실패가 있음(쓰지 않음, 배포와 무관).
 - 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
 - OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.
+
+## 2026-10-26 (Jenkinsfile 교체, 백엔드 방식으로 배포)
+
+### 바꾼 것
+- `ai/Jenkinsfile`: 백엔드 Jenkinsfile(`develop-backend`)과 같은 방식으로.
+  - `linux-docker-builder` 노드. 이미지 빌드(`dva-ai-server:<커밋12자리>-<빌드번호>`, linux/amd64) → 이미지 안에서 pytest → 배포 접속 확인(`--verify-only`).
+  - `DEPLOY_LIGHTSAIL`을 체크했을 때만 배포. 자격 증명은 백엔드와 같은 `dva-lightsail-ssh`.
+  - 예전 파일은 `agent any`라 레이블 전용 노드만 있는 Jenkins에서 대기열에 머물렀다.
+- `ai/deploy/`(백엔드 `infra/deploy/` 구조를 따름)
+  - `upload.sh`: 호스트 키 고정(`known_hosts`, `StrictHostKeyChecking=yes`) SSH로 이미지(`docker save | docker load`)와 릴리스(`compose.yaml`·`config/`·`prompts/`·`deploy.sh`·`compose.deploy.yaml`·`release.env`)를 `/home/ubuntu/dva-ai/releases/<version>`에 보내고 `deploy.sh` 실행.
+  - `deploy.sh`(대상 서버): `shared/.env` + `release.env`로 `docker compose --project-name dva-ai up --no-build --wait`. 성공하면 `current-release`·`previous-release` 기록, 지금·직전 이미지만 남김. 실패하면 직전 릴리스로 복구. `sudo -n docker`, `flock`으로 동시 배포 막음.
+  - `compose.deploy.yaml`: 배포 때만 외부 네트워크 `dva-shared`(별칭 `dva-ai`)에 붙임. 로컬 compose는 그대로.
+  - `known_hosts`: 백엔드와 같은 서버(`13.209.59.180`) 호스트 키.
+- `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`. `.env.example`에 `AI_PORT`. `.dockerignore`에 `deploy`.
+
+### 확인한 것
+- 백엔드 배포(`develop-backend`의 `infra/deploy/package.sh`, `compose.prod.yaml`)가 `ai/`를 `dva-ai` 이미지로 빌드해 `dva-prod` 스택에 `ai` 서비스로 띄우고 있다. 그 서비스에는 환경변수·config 볼륨·Qdrant가 없다.
+- `docker compose config`(가짜 env)로 `compose.yaml` + `compose.deploy.yaml` 병합, `AI_IMAGE`·`AI_PORT` 치환 확인.
+- `deploy.sh`를 가짜 docker로 시험: 첫 배포, 두 번째 배포(직전 기록·이미지 정리), 실패 시 직전 릴리스 복구.
+- `bash -n`으로 두 스크립트 문법 확인. 실제 서버 배포는 안 해 봄.
+
+### 남은 것
+- 백엔드 담당에 요청: `package.sh`·`compose.prod.yaml`에서 `ai` 빼기, `backend`를 `dva-shared` 네트워크에 붙이고 `AI_AGENT_URL=http://dva-ai:8000`. 호스트 Nginx에서 `/api/webhooks/openai/call-incoming`·`/pbx/webhook/call-ended`를 `127.0.0.1:8000`(AI)으로.
+- 대상 서버: `/home/ubuntu/dva-ai/shared/.env` 작성(`BACKEND_API_URL`은 `dva-shared`에서 백엔드 컨테이너 이름으로). 8000이 쓰이고 있으면 `AI_PORT`.
+- Jenkins에서 `DEPLOY_LIGHTSAIL` 체크해 첫 배포 확인.

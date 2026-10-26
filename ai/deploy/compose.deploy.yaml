@@ -1,0 +1,13 @@
+# 배포 서버에서만 compose.yaml 위에 덧붙인다(로컬 개발에는 없는 외부 네트워크라서 분리).
+# 백엔드 스택(dva-prod)과 같은 서버에서 서로 부르는 네트워크: 백엔드 → http://dva-ai:8000, AI → BACKEND_API_URL
+services:
+  ai:
+    networks:
+      shared:
+        aliases:
+          - dva-ai
+
+networks:
+  shared:
+    external: true
+    name: dva-shared
