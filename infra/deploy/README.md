@@ -20,7 +20,7 @@ AI 팀은 이 네트워크에 AI 컨테이너를 연결하고 `ai` 별칭과 800
 > 아래 PowerShell 스크립트는 Windows에서 수동 패키징·전송할 때 사용할 수 있다.
 
 배포 대상: `ubuntu@13.209.59.180`, Ubuntu 24.04 / linux/amd64.
-Jenkins Windows Agent에서 이미지를 만들고 파일로 SSH 전송한다. ECR은 사용하지 않는다.
+Jenkins Linux Agent에서 이미지를 만들고 파일로 SSH 전송한다. ECR은 사용하지 않는다.
 별도 이미지 저장소 요금은 발생하지 않으며, 기존 서버의 디스크와 전송량을 사용한다.
 S3 및 외부 AI API 비용은 이 배포 방식과 별개다.
 
@@ -29,12 +29,12 @@ S3 및 외부 AI API 비용은 이 배포 방식과 별개다.
 ```text
 Jenkins → docker build → docker save → 버전별 배포 폴더
                                          ↓ scp
-Lightsail → 체크섬 확인 → docker load → Compose 실행 → 상태 확인
+Lightsail → 체크섬 확인 → docker load → 미적용 DB migration → 스키마 검증 → Compose 실행 → 상태 확인
 ```
 
-- `package.ps1`: Backend·AI를 linux/amd64로 빌드한다. Nginx·PostgreSQL 이미지까지
+- `package.sh`·`package.ps1`: Backend를 linux/amd64로 빌드한다. Nginx·PostgreSQL 이미지까지
   포함하여 서버에서 이미지를 추가로 내려받지 않고 실행할 수 있는 폴더를 만든다.
-- `deploy.sh`: 체크섬·Compose 설정 확인, 이미지 로드, 실행, 내부 readiness와
+- `deploy.sh`: 체크섬·Compose 설정 확인, 이미지 로드, 미적용 migration·스키마 검증, 실행, 내부 readiness와
   Nginx 경유 HTTP 상태를 확인한다. 실패하면 기존 정상 릴리스를 재적용한다.
 - Jenkins는 커밋 SHA와 빌드 번호로 버전을 만들고 해당 폴더를 빌드 산출물로 보관한다.
   Windows Agent도 Controller에서 검증한 것과 같은 커밋을 사용한다.
@@ -56,9 +56,13 @@ $releaseVersion = 'manual-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
 ```
 
 결과는 `.deploy/<버전>/`에 생성된다. 같은 버전 폴더는 덮어쓰지 않는다.
-`release.env`에는 네 이미지의 버전만 포함하며, DB 비밀번호·PEM·AWS 키·로컬 `.env`는
+`release.env`에는 세 이미지의 버전만 포함하며, DB 비밀번호·PEM·AWS 키·로컬 `.env`는
 배포 폴더에 복사하지 않는다. `docker save --output`을 사용하여 Windows PowerShell의
 바이너리 리다이렉션 문제를 피한다.
+
+배포 폴더에는 `backend/migrations/*.sql`, `infra/database/migrate.sh`, `infra/database/verify.sql`도 포함한다.
+`release-files.sha256`은 SQL·실행기·설정 파일을 검증하며 001의 기존 CRLF 바이트는 그대로 보존한다.
+업로드 전과 서버 실행 전 모두 이미지/파일 체크섬을 확인한다.
 
 ## 2. 서버 최초 준비
 
@@ -101,6 +105,11 @@ if ($LASTEXITCODE -ne 0) { throw '배포 실패: 서버 상태를 확인하세�
 서버에서는 `--pull never --no-build`로 실행하며, 기존 DB 볼륨은 유지한다.
 정상 배포만 `current-release`에 기록하고 직전 버전은 `previous-release`에 기록한다.
 
+개발 단계이므로 배포는 DB 백업 없이 migration runner의 `--no-backup`을 사용한다.
+기존 DB가 있으면 새 앱을 교체하기 전에 미적용 SQL만 실행한다. 최초 배포에서는 DB만 먼저 시작한다.
+SQL은 기존 advisory lock과 하나의 트랜잭션을 사용하며 실패하면 신규 SQL/이력은 함께 롤백된다.
+SQL 또는 적용 후 스키마 검증이 실패하면 앱 배포와 버전 기록 갱신을 중단한다.
+
 ## 4. 브라우저에서 연결 확인
 
 Windows의 별도 PowerShell 창에서 터널을 열고 유지한다.
@@ -126,7 +135,8 @@ bash ~/dva-deploy/releases/<현재버전>/deploy.sh --rollback
 명령은 실패를 반환하고 수동 점검이 필요하다.
 
 이 롤백은 DB 데이터를 복원하지 않는다. 스키마 변경이 들어오면 호환 가능한
-마이그레이션과 별도 복구 절차가 필요하다. DB 백업은 현재 인계 범위에서 보류 상태다.
+마이그레이션과 별도 복구 절차가 필요하다. 자동 배포에서는 DB 백업을 생성하지 않는다.
+`--rollback`과 앱 실패 시 자동 복구는 migration을 다시 실행하지 않고 앱 이미지·설정만 복원한다.
 `docker compose down -v`, 전체 이미지·볼륨 prune은 사용하지 않는다.
 
 현재·직전 정상 버전의 폴더와 이미지를 보관한다. 오래된 버전 삭제는 해당 두 버전과
@@ -139,14 +149,15 @@ df -h /
 sudo docker system df
 ```
 
-## Jenkins에서 수동 선택 배포
+## Jenkins 자동 배포와 수동 선택
 
 이 절의 Windows Agent 설정은 이전 구성 기록이다. 서버 이전 후의 실행 환경과
 정식 Job 활성화 절차는 [Jenkins 운영 안내](../jenkins/README.md)를 따른다.
 
-`DEPLOY_LIGHTSAIL`의 기본값은 false다. 일반 빌드·SCM 폴링은 이미지 파일 생성까지만
-진행하며, 사람이 매개변수를 체크해 시작한 빌드가 `Deploy to Lightsail` 단계로 진행한다.
-빌드·패키징·배포는 동일한 Windows Agent와 작업 폴더를 사용한다.
+프로젝트 `1462697`의 `develop-backend` Push 웹훅으로 시작되고 실제로 해당 브랜치를 체크아웃한 빌드는
+검증 성공 후 `Deploy to Lightsail` 단계로 자동 진행한다. 수동 빌드의 `DEPLOY_LIGHTSAIL` 기본값은 false이며,
+체크하면 같은 브랜치에서 배포한다. 빌드·패키징·배포는 동일한 Linux agent와 작업 폴더를 사용한다.
+배포 직전에 migration을 실행하고 스키마를 검증한다. 실제 운영 반영은 이 변경의 MR 병합 이후 빌드에서 확인한다.
 
 ### SSH 인증 정보 등록
 
