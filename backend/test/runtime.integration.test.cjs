@@ -27,16 +27,19 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
-test('company endpoints remain unregistered until the session authentication from issue 83 is connected', async () => {
+test('production company endpoints require a real session for every operation', async () => {
   for (const [method, path] of [
     ['GET', '/api/companies'],
     ['POST', '/api/companies'],
     ['GET', '/api/companies/1'],
     ['PATCH', '/api/companies/1'],
   ]) {
-    const response = await fetch('http://backend:3000' + path, { method });
-    assert.equal(response.status, 404);
-    assert.equal((await response.json()).error.code, 'NOT_FOUND');
+    const response = await fetch('http://proxy' + path, {
+      method,
+      headers: { Origin: 'https://13.209.59.180', 'X-CSRF-Protection': '1' },
+    });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
   }
 });
 

@@ -4,8 +4,16 @@ import { ApplicationConfigModule } from './config/application-config.module';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
+import { OrganizationsModule } from './organizations/organizations.module';
 
 @Module({
-  imports: [ApplicationConfigModule, DatabaseModule, HealthModule, PbxWebhookModule, AuthModule],
+  imports: [
+    ApplicationConfigModule,
+    DatabaseModule,
+    HealthModule,
+    PbxWebhookModule,
+    AuthModule,
+    OrganizationsModule,
+  ],
 })
 export class AppModule {}
