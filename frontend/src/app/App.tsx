@@ -6,6 +6,7 @@ import { ApiError } from '../shared/api/client'
 import { AppLayout } from './AppLayout'
 import { Placeholder } from './Placeholder'
 import { RequireAuth } from './RequireAuth'
+import { UiKitPage } from './UiKitPage'
 
 // 명세서 1.6: 조회만 재시도 — 연결 실패(0) · 429 · 503일 때 최대 2번. 등록 · 수정은 재시도 안 함
 // ponytail: Retry-After 헤더는 아직 안 따름(기본 지수 대기). 백엔드가 429에 Retry-After를 주면 retryDelay에 반영
@@ -41,6 +42,7 @@ const router = createBrowserRouter([
       { path: 'faqs', element: <Placeholder title="09 FAQ 관리" /> },
       { path: 'admins', element: <Placeholder title="10 관리자 권한 관리" /> },
       { path: 'me', element: <Placeholder title="11 내 정보" /> },
+      ...(import.meta.env.DEV ? [{ path: 'ui-kit', element: <UiKitPage /> }] : []), // 공통 부품 확인용, 개발 중에만
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },
