@@ -1,5 +1,5 @@
 # Container Nginx stays on localhost. Host Nginx terminates public IP HTTPS
-# and forwards only the PBX webhook. See infra/https/README.md.
+# and forwards PBX/Swagger paths. See infra/https/README.md.
 name: dva-prod
 
 services:
