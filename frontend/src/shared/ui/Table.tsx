@@ -24,6 +24,8 @@ export function Table<Row>({
   onSelect,
   onSelectAll,
   subRows,
+  expanded,
+  head,
   empty = '내역이 없습니다.',
   loading,
   footer,
@@ -36,7 +38,9 @@ export function Table<Row>({
   selected?: Set<string | number>
   onSelect?: (key: string | number) => void
   onSelectAll?: () => void
-  subRows?: (row: Row, ctx: { tinted: boolean }) => ReactNode // 05 AI 미답변: 통화 줄 아래 질문 줄들
+  subRows?: (row: Row, ctx: { tinted: boolean; gridCols: string }) => ReactNode // 05 질문 줄들 · 09 답변 띠 (같은 열 자리에 맞추도록 gridCols를 줌)
+  expanded?: (row: Row) => boolean // 펼치는 목록(08 · 09): 줄 끝 ›가 ▾ · ▴
+  head?: ReactNode // 카드 제목 줄 (08 · 09: '기업 목록 24곳' + 버튼) — 높이 40, 아래 20
   empty?: string
   loading?: boolean
   footer?: ReactNode // 페이지 번호
@@ -56,6 +60,7 @@ export function Table<Row>({
 
   return (
     <section className="rounded-xl bg-surface px-8 pt-8 pb-7 ring-1 ring-line ring-inset">
+      {head && <div className="mb-5 flex h-10 items-center justify-between">{head}</div>}
       {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
       <div
         className="mb-4 grid h-6 items-center text-label font-semibold text-sub"
@@ -83,12 +88,19 @@ export function Table<Row>({
             const key = rowKey(row)
             const isSelected = selected?.has(key) ?? false
             const tinted = isSelected // 호버는 CSS(group-hover)라 태그는 선택만 흰 바탕으로
+            const isOpen = expanded?.(row) ?? false // 펼친 줄: 옅은 바탕, 아래 모서리는 각지게 → 아래 subRows 띠와 한 덩어리
             return (
               <li key={key} className={i < rows.length - 1 ? 'border-b border-line' : ''}>
                 <div
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   className={`group -mx-4 grid min-h-[66px] items-center rounded-lg px-4 ${
-                    isSelected ? 'bg-action-soft' : onRowClick ? 'cursor-pointer hover:bg-bg' : ''
+                    isSelected
+                      ? 'bg-action-soft'
+                      : isOpen
+                        ? 'cursor-pointer rounded-b-none bg-bg'
+                        : onRowClick
+                          ? 'cursor-pointer hover:bg-bg'
+                          : ''
                   }`}
                   style={{ gridTemplateColumns: gridCols }}
                 >
@@ -116,11 +128,19 @@ export function Table<Row>({
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     >
-                      <path d="M8 5l5 5-5 5" />
+                      {expanded ? (
+                        expanded(row) ? (
+                          <path d="M5 12l5-5 5 5" />
+                        ) : (
+                          <path d="M5 8l5 5 5-5" />
+                        )
+                      ) : (
+                        <path d="M8 5l5 5-5 5" />
+                      )}
                     </svg>
                   )}
                 </div>
-                {subRows?.(row, { tinted })}
+                {subRows?.(row, { tinted, gridCols })}
               </li>
             )
           })}
