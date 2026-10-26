@@ -1,11 +1,14 @@
-import { Controller } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiCookieAuth, ApiHeader, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiHeader, ApiOkResponse, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AdminsService } from '../admins/admins.service';
+import { AdminQueryDto } from '../admins/dto/admin-query.dto';
+import { ListResponse } from '../common/pagination';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { Environment } from '../config/environment';
 import { AuthService } from './auth.service';
 import { Roles } from './auth.guard';
+import { AdminListDto } from './dto/auth-response.dto';
 @ApiTags('Admins')
 @ApiCookieAuth('adminSession')
 @ApiHeader({
@@ -26,4 +29,9 @@ export class AdminAccessController {
     private readonly auth: AuthService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+  @Get()
+  @ApiOkResponse({ type: AdminListDto })
+  async list(@Query() query: AdminQueryDto) {
+    return new ListResponse(await this.admins.list(query), query.limit);
+  }
 }

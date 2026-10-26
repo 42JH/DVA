@@ -199,6 +199,20 @@ test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout re
   );
   assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 401);
 });
+test('new routes default to authenticated; roles and current DB status are enforced on every request', async () => {
+  const user = await account('role');
+  const session = (await login(user)).session;
+  assert.equal((await call('GET', '/api/role-check/read')).status, 401);
+  assert.equal((await call('GET', '/api/role-check/read', undefined, session)).status, 200);
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, session)).status, 403);
+  assert.equal((await call('GET', '/api/admins', undefined, session)).status, 403);
+  await db.pool.query("UPDATE admin_users SET role='SUPERVISOR' WHERE admin_user_seq=$1", [
+    user.id,
+  ]);
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, session)).status, 200);
+  await db.pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [user.id]);
+  assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+});
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(
