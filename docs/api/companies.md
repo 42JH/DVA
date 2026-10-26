@@ -91,7 +91,7 @@ origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
 
 1. `POST {{baseUrl}}/api/auth/login`을 JSON 본문
    `{ "loginId": "{{loginId}}", "password": "{{password}}" }`로 호출한다.
-   헤더는 `Content-Type: application/json`, `Origin: {{origin}}`, `X-CSRF-Protection: 1`을 넣는다.
+   헤더는 `Content-Type: application/json`, `Origin: {{origin}}`을 넣는다.
 2. 응답의 `dva_session` 쿠키가 Postman 쿠키 저장소에 저장되면 같은 호스트의 기업 API를 호출한다.
    Bearer 토큰이나 관리자 ID 헤더는 필요하지 않다.
 3. 등록은 `{ "name": "테스트 기업" }`와 `Idempotency-Key: {{idempotencyKey}}`를 보낸다.

@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
   ApiOperation,
-  ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiResponse,
@@ -21,11 +20,6 @@ export function cookieOptions(production: boolean): CookieOptions {
 }
 @ApiTags('Auth')
 @ApiCookieAuth('adminSession')
-@ApiHeader({
-  name: 'X-CSRF-Protection',
-  description: '변경 요청에 1 전달. 허용 Origin 필수.',
-  required: false,
-})
 @ApiResponse({ status: 400, type: ErrorResponseDto })
 @ApiResponse({ status: 401, type: ErrorResponseDto })
 @ApiResponse({ status: 403, type: ErrorResponseDto })

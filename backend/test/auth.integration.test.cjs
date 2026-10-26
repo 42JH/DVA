@@ -51,7 +51,6 @@ async function call(method, path, body, cookie, headers = {}) {
     method,
     headers: {
       Origin: 'http://localhost:5173',
-      'X-CSRF-Protection': '1',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(cookie ? { Cookie: cookie } : {}),
       ...headers,
@@ -238,17 +237,13 @@ test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout re
   );
   assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 401);
 });
-test('login rotates presented session and CSRF rejects missing/foreign origins and simple requests', async () => {
+test('login rotates presented session and Origin validation rejects missing/foreign origins', async () => {
   const user = await account('csrf');
   const first = await login(user);
   const second = await login(user, password, first.session);
   assert.notEqual(first.session, second.session);
   assert.equal((await call('GET', '/api/auth/me', undefined, first.session)).status, 401);
-  for (const headers of [
-    { Origin: '' },
-    { Origin: 'https://evil.invalid' },
-    { 'X-CSRF-Protection': '' },
-  ]) {
+  for (const headers of [{ Origin: '' }, { Origin: 'https://evil.invalid' }]) {
     assert.equal(
       (await call('POST', '/api/auth/logout', undefined, second.session, headers)).status,
       403,

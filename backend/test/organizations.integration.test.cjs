@@ -28,7 +28,7 @@ let app, appB, base, baseB, adminA, adminB, repository, hash, sessionA;
 const apps = [];
 const cookies = new Map();
 const password = 'company-test-only-password';
-const mutationHeaders = { Origin: 'http://localhost:5173', 'X-CSRF-Protection': '1' };
+const mutationHeaders = { Origin: 'http://localhost:5173' };
 
 async function start() {
   const application = await NestFactory.create(AppModule, { logger: false });
@@ -141,14 +141,9 @@ test('every company operation rejects missing, forged and malformed sessions bef
   assert.equal((await pool.query('SELECT count(*) FROM organizations')).rows[0].count, count);
 });
 
-test('company writes require both the allowed Origin and CSRF header even with a valid session', async () => {
+test('company writes require an allowed Origin even with a valid session', async () => {
   const id = (await (await create('CSRF 검증 기업')).json()).data.organizationSeq;
-  for (const headers of [
-    { Origin: undefined },
-    { 'X-CSRF-Protection': undefined },
-    { 'X-CSRF-Protection': '0' },
-    { Origin: 'https://untrusted.invalid' },
-  ]) {
+  for (const headers of [{ Origin: undefined }, { Origin: 'https://untrusted.invalid' }]) {
     for (const [method, path, body] of [
       ['POST', '', { name: 'CSRF 거절 기업' }],
       ['PATCH', '/' + id, { name: 'CSRF 거절 기업' }],
