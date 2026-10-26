@@ -50,8 +50,8 @@ read_version() {
     printf '%s' "$value"
 }
 
-# 백엔드 스택(dva-prod)과 서로 부르는 공유 네트워크. 없으면 만든다
-"${docker_cmd[@]}" network inspect dva-shared >/dev/null 2>&1 || "${docker_cmd[@]}" network create dva-shared >/dev/null
+# 백엔드 스택(dva-prod)이 외부 네트워크로 쓰는 AI 연결 네트워크. 없으면 만든다
+"${docker_cmd[@]}" network inspect dva-prod_ai_net >/dev/null 2>&1 || "${docker_cmd[@]}" network create dva-prod_ai_net >/dev/null
 
 old_version="$(read_version "$current_file" || true)"
 if apply_release "$release_dir"; then
@@ -61,6 +61,11 @@ if apply_release "$release_dir"; then
     fi
     printf '%s\n' "$version" > "$current_file.tmp"
     mv -- "$current_file.tmp" "$current_file"
+    # 백엔드 스택이 띄웠던 예전 AI가 같은 별칭(ai)을 쓰므로 새 AI가 뜬 뒤 멈춘다. 지우지 않으니 docker start로 되살릴 수 있다
+    if [[ -n "$("${docker_cmd[@]}" ps -q --filter name=^dva-prod-ai-1$)" ]]; then
+        "${docker_cmd[@]}" stop dva-prod-ai-1 >/dev/null
+        echo 'Stopped legacy container dva-prod-ai-1 (not removed).'
+    fi
     # 지금·직전 릴리스 이미지만 남긴다(다른 관리자의 서버이므로 docker image prune은 쓰지 않는다)
     keep="dva-ai-server:$version"
     [[ -n "$old_version" ]] && keep="$keep|dva-ai-server:$old_version"
