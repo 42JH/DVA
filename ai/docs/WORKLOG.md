@@ -42,7 +42,7 @@
 - 실제 연결(범위 밖)
   - 공인 HTTPS·리버스 프록시, OpenAI 프로젝트 웹훅 등록, PBX 트렁크 설정, 실제 통화 확인.
 - 실제 통화 전에 확인할 것
-  - `delegation.responses.model`(지금 `gpt-5.4-mini`)이 GPT-Live 위임에서 되는지.
+  - `delegation.responses.model`(지금 `gpt-6-luna`)이 GPT-Live 위임에서 되는지.
   - strict 스키마의 `maxLength`가 위임 백엔드에서 받아들여지는지.
 - RAG(pgvector)
   - 주문 DB와 데이터베이스·계정을 나눌 것.
@@ -170,3 +170,16 @@
 - PBX가 보는 Call-ID와 OpenAI 웹훅 `sip_headers`의 Call-ID가 같은지 실제 통화로 확인.
 - `ai/.env`에 `PBX_WEBHOOK_SECRET` 추가(PBX와 같은 값).
 - 리버스 프록시에서 `/pbx/webhook/call-ended` 공개.
+
+## 2026-10-26
+
+### 바꾼 것
+- 착신 웹훅 주소 변경: `POST /openai/webhook` → `POST /api/webhooks/openai/call-incoming`(`app/webhook.py`, 테스트 3곳, `spec/pbx-sip.md`).
+- 통화 종료 웹훅은 그대로 PBX가 보낸다(`POST /pbx/webhook/call-ended`, `PBX_WEBHOOK_SECRET`). 백엔드 서버가 보내게 바꾸려다 취소.
+- `.gitignore`에 `.langgraph_api/`(LangGraph Studio 개발 서버 상태) 추가. `refactor/langchain`과 같은 내용.
+
+### 확인한 것
+- `uv run pytest -q` 103개 통과.
+
+### 남은 것
+- OpenAI 프로젝트 웹훅 등록 URL을 새 주소로 맞춰야 한다(등록 전이면 새 주소로 등록).

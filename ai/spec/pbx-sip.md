@@ -14,7 +14,7 @@
 - 상담원 전환: `POST .../refer` `{"target_uri": "sip:..."}`. 대상은 서버 설정. 고객 동의 후에만.
 - DTMF: sideband로 `transport.dtmf.received`(`event` 0-9·*·#·A-D) 알림만 온다. 지금은 쓰지 않는다.
 - SDK 메서드(openai 3.35.1에서 확인): `client.live.sessions.accept(session_id, session=...)` · `reject(session_id, status_code=...)` · `refer(session_id, target_uri=...)` · `hangup(session_id)`. accept 본문의 `session`에는 `type = "live"`가 필수다.
-- 웹훅 주소는 서버의 `POST /openai/webhook`. 공인 HTTPS 연결(리버스 프록시·OpenAI 프로젝트 등록)은 아직 하지 않았다.
+- 웹훅 주소는 서버의 `POST /api/webhooks/openai/call-incoming`. 공인 HTTPS 연결(리버스 프록시·OpenAI 프로젝트 등록)은 아직 하지 않았다.
 - 한도: 동시 세션 Build 50·Launch 300·Grow 500. 과금 분당 $0.05(초 단위), 백엔드 모델 별도. 컨텍스트 128K, 90%를 넘으면 같은 세션에서 엔진이 교체된다(원래 지시문 + 최근 8,192토큰). `session.started`의 `expires_at`이 세션 만료 시각.
 
 ## PBX → 서버: 통화 종료 웹훅 (제안, PBX 쪽에 전달)

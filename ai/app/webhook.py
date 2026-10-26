@@ -49,7 +49,7 @@ class Services:
         return task
 
 
-@router.post("/openai/webhook")
+@router.post("/api/webhooks/openai/call-incoming")
 async def openai_webhook(request: Request) -> Response:
     svc: Services = request.app.state.svc
     body = await request.body()

@@ -37,7 +37,7 @@ def wait(cond, timeout=3.0):
 
 
 def incoming(http, session_id, sip_call_id):
-    http.post("/openai/webhook", content=(w := signed_webhook("live.transport.incoming", session_id,
+    http.post("/api/webhooks/openai/call-incoming", content=(w := signed_webhook("live.transport.incoming", session_id,
                                                                sip_call_id=sip_call_id))[0], headers=w[1])
 
 
