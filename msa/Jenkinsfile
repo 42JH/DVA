@@ -33,6 +33,16 @@ pipeline {
                     env.RUN_MSA_CI = 'true'
                     env.MSA_BASE_COMMIT = ''
                     def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
+                    def backendBranch = env.SOURCE_BRANCH in [
+                        'origin/develop-backend', 'develop-backend'
+                    ]
+
+                    env.AUTO_DEPLOY_APPS = (
+                        webhook &&
+                        backendBranch &&
+                        !env.CHANGE_ID &&
+                        !params.DEPLOY_MSA
+                    ).toString()
                     if (webhook && !params.DEPLOY_MSA && !params.DEPLOY_APPS) {
                         env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                         env.RUN_MSA_CI = sh(script: 'bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT"', returnStdout: true).trim()
@@ -45,8 +55,7 @@ pipeline {
                     if (params.DEPLOY_MSA && params.DEPLOY_APPS) {
                         error 'Run database and application deployments separately.'
                     }
-
-                    if (params.DEPLOY_MSA || params.DEPLOY_APPS) {
+                    if (params.DEPLOY_MSA || params.DEPLOY_APPS || env.AUTO_DEPLOY_APPS == 'true') {
                         if (env.CHANGE_ID || !(env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend'])) {
                             error 'CD is allowed only for develop-backend, not MR/feature builds.'
                         }
@@ -76,34 +85,47 @@ pipeline {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
                 script {
-                    env.RUN_COMMON_CI = sh(
-                        script: '''
-                            bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
-                                msa/ \
-                                ':(exclude)msa/services/**' \
-                                ':(exclude)msa/liquibase/**'
-                        ''',
-                        returnStdout: true
-                    ).trim()
+                    if (params.DEPLOY_APPS) {
+                        env.RUN_COMMON_CI = 'true'
+                        env.RUN_DB_CI = 'false'
 
-                    env.RUN_DB_CI = sh(
-                        script: '''
-                            bash msa/deploy/has-msa-changes.sh \
-                                "$MSA_BASE_COMMIT" msa/liquibase/
-                        ''',
-                        returnStdout: true
-                    ).trim()
+                        echo 'Manual application deployment: build all services; skip database CI.'
+                    } else {
+                        env.RUN_COMMON_CI = sh(
+                            script: '''
+                                bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
+                                    msa/ \
+                                    ':(exclude)msa/services/**' \
+                                    ':(exclude)msa/liquibase/**'
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        env.RUN_DB_CI = sh(
+                            script: '''
+                                bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
+                                    msa/liquibase/ \
+                                    msa/Jenkinsfile \
+                                    msa/deploy/has-msa-changes.sh \
+                                    msa/deploy/package.sh \
+                                    msa/deploy/upload.sh \
+                                    msa/deploy/remote.sh \
+                                    msa/deploy/run-remote.sh \
+                                    msa/deploy/ssh-common.sh \
+                                    msa/deploy/known_hosts \
+                                    msa/deploy/tests/test_deploy.py \
+                                    msa/deploy/tests/test_changes.py
+                            ''',
+                            returnStdout: true
+                        ).trim()
+                    }
 
                     if (!(env.RUN_COMMON_CI in ['true', 'false']) ||
                         !(env.RUN_DB_CI in ['true', 'false'])) {
                         error 'Invalid build scope result.'
                     }
 
-                    if (env.RUN_COMMON_CI == 'true') {
-                        env.RUN_DB_CI = 'true'
-                    }
-
-                    echo "Common changes: ${env.RUN_COMMON_CI}, database checks: ${env.RUN_DB_CI}"
+                    echo "Build all services: ${env.RUN_COMMON_CI}; run database CI: ${env.RUN_DB_CI}"
                 }
             }
         }
@@ -197,12 +219,33 @@ pipeline {
         }
 
         stage('Application Delivery') {
-            when { expression { params.DEPLOY_APPS } }
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' &&
+                    (env.AUTO_DEPLOY_APPS == 'true' || params.DEPLOY_APPS) &&
+                    fileExists("msa-release/apps/${env.RELEASE_NAME}")
+                }
+            }
             options {
                 timeout(time: 20, unit: 'MINUTES')
                 lock(resource: 'dva-msa-database-deploy')
             }
             steps {
+                script {
+                    if (env.AUTO_DEPLOY_APPS == 'true') {
+                        def schemaChanged = sh(
+                            script: '''
+                                bash msa/deploy/has-msa-changes.sh \
+                                    "$MSA_BASE_COMMIT" msa/liquibase/changelog/
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        if (schemaChanged != 'false') {
+                            error 'Database schema changes require DB deployment approval before application delivery.'
+                        }
+                    }
+                }
                 withCredentials([
                     sshUserPrivateKey(
                         credentialsId: 'dva-msa-ssh',
