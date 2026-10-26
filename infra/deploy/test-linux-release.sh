@@ -3,10 +3,12 @@ set -euo pipefail
 test_root="$(mktemp -d)"
 trap 'rm -rf -- "$test_root"' EXIT
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-mkdir -p "$test_root/repo/infra/deploy" "$test_root/repo/infra/nginx" "$test_root/bin"
+mkdir -p "$test_root/repo/infra/deploy" "$test_root/repo/infra/nginx" "$test_root/repo/infra/database" "$test_root/repo/backend/migrations" "$test_root/bin"
 cp "$repo_root/infra/deploy/"{package.sh,upload.sh,deploy.sh,known_hosts} "$test_root/repo/infra/deploy/"
 cp "$repo_root/compose.prod.yaml" "$test_root/repo/"
 cp "$repo_root/infra/nginx/default.prod.conf" "$test_root/repo/infra/nginx/"
+cp "$repo_root/infra/database/"{migrate.sh,verify.sql} "$test_root/repo/infra/database/"
+cp "$repo_root/backend/migrations/"[0-9][0-9][0-9]-*.sql "$test_root/repo/backend/migrations/"
 export TEST_COMMAND_LOG="$test_root/commands.log"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
@@ -40,6 +42,9 @@ printf 'test-only identity\n' > "$test_root/identity"
 bash "$test_root/repo/infra/deploy/package.sh" test-one
 release="$test_root/repo/.deploy/test-one"
 (cd "$release" && sha256sum --check --status images.tar.sha256)
+(cd "$release" && sha256sum --check --status release-files.sha256)
+cmp "$repo_root/backend/migrations/001-pbx-call-ended.sql" "$release/backend/migrations/001-pbx-call-ended.sql"
+test -f "$release/backend/migrations/004-organization-creation-requests.sql"
 test "$(grep -c '_IMAGE=' "$release/release.env")" = 3
 if grep -E 'dva-ai|AI_IMAGE' "$TEST_COMMAND_LOG" "$release/release.env"; then
  echo 'Backend release must not package AI' >&2; exit 1
@@ -59,7 +64,12 @@ bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"
 grep -q 'scp invoked' "$TEST_COMMAND_LOG"
 grep -q '/releases/test-one/deploy.sh' "$TEST_COMMAND_LOG"
 before="$(wc -l < "$TEST_COMMAND_LOG")"
+printf '\n-- tampered SQL\n' >> "$release/backend/migrations/004-organization-creation-requests.sql"
+if bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"; then echo 'Tampered SQL accepted' >&2; exit 1; fi
+test "$(wc -l < "$TEST_COMMAND_LOG")" = "$before"
+cp "$repo_root/backend/migrations/004-organization-creation-requests.sql" "$release/backend/migrations/"
+before="$(wc -l < "$TEST_COMMAND_LOG")"
 printf 'tampered\n' >> "$release/images.tar"
 if bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"; then echo 'Tampered release accepted' >&2; exit 1; fi
 test "$(wc -l < "$TEST_COMMAND_LOG")" = "$before"
-echo 'PASS: Linux packaging, fail-fast builds, release validation, pinned SSH, temporary key permissions and corrupt-transfer rejection.'
+echo 'PASS: Linux packaging with exact SQL bytes, fail-fast builds, pinned SSH, temporary key permissions and image/SQL transfer integrity.'
