@@ -2,7 +2,7 @@
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
-현재 구현 범위는 5개 서비스 DB의 Liquibase CI/CD와 customer NestJS 서비스의 테스트·이미지 빌드다. 애플리케이션의 k3s 배포는 아직 연결하지 않았다.
+현재 구현 범위는 5개 서비스 DB의 Liquibase CI/CD와 customer NestJS 서비스의 테스트·이미지 패키징·수동 k3s 배포다. 앱 배포 스크립트는 작성했으며 실제 서버 배포와 무중단 동작은 검증 전이다.
 
 자동 실행에서는 마지막 성공 빌드의 커밋과 비교해 검사 범위를 결정한다. `msa/liquibase/` 변경은 전체 DB 검사와 이미지 패키징을 실행하고, `msa/services/<서비스>/` 변경은 해당 서비스의 테스트와 이미지 빌드만 실행한다. 두 경로 외의 MSA 변경은 공통 변경으로 취급해 전체 검사한다. 수동 실행, 명시적 DB 배포 실행, 비교 이력이 없는 경우에도 전체 검사한다.
 
@@ -11,10 +11,14 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 ## 실행 흐름
 
 ```text
-Checkout → 환경·스크립트 검사 → 임시 PostgreSQL 통합 검사 → 검증 이미지 패키징
-  → DEPLOY_MSA=false: 종료 (기본값)
-  → DEPLOY_MSA=true: MSA 서버 전송 → 이미지 검증 → DB 변경 SQL 확인
-    → 담당자 승인 → 선택 DB 적용 → 적용 결과 확인
+Checkout → 환경·스크립트 검사 → 변경 범위 결정
+  → 필요한 DB 검사·패키징
+  → 필요한 서비스 테스트·빌드·패키징
+  → 배포 옵션 모두 false: CI 종료
+  → DEPLOY_APPS=true: 앱 전송 → 이미지 검증 → YAML 검증·적용 → rollout 확인
+  → DEPLOY_MSA=true: DB 전송 → 미리보기 → 승인 → DB 적용
+
+DEPLOY_APPS와 DEPLOY_MSA는 동시에 활성화할 수 없다.
 ```
 
 DB 검사가 선택되면 전체 5개 DB를 검사한다. CD는 `DB_SERVICE`로 선택한 하나만 적용한다. 여러 DB를 변경하면 서비스별로 실행하고 결과를 확인한다. CD는 MR/작업 브랜치에서는 차단되며 `develop-backend` 체크아웃에서만 허용한다.
@@ -95,6 +99,21 @@ Jenkins에서 `verification.json`, `verification-logs/`, `msa-release/<커밋>-<
 - 로컬 Docker PostgreSQL 통합 검사와 격리된 배포 스크립트 테스트는 실제 Jenkins 플러그인 조합, SSH 네트워크, 운영 k3s Job의 종단간 검증을 대체하지 않는다. 서버 연결 후 첫 실행에서 이를 확인해야 한다.
 
 검사 실행(저장소 루트, Linux 빌드 환경):
+
+## 애플리케이션 배포
+
+- 자동 실행의 DEPLOY_APPS 기본값은 false다.
+- 수동 앱 배포 실행은 전체 CI를 수행하고 생성된 모든 서비스 패키지를 배포한다.
+- 배포는 develop-backend에서만 허용하며 DB 배포와 잠금을 공유한다.
+- 서버는 단일 Linux amd64 k3s 노드여야 한다.
+- 이미지를 containerd에 직접 등록하고 CI 이미지 ID와 비교한다.
+- customer는 RollingUpdate(maxUnavailable=0, maxSurge=1)를 사용한다.
+- readiness 검사와 종료 유예 시간을 설정했지만 실제 요청 유지 여부는 별도 검증이 필요하다.
+- Service는 ClusterIP이며 외부 접속 경로는 아직 구성하지 않았다.
+- 실패 시 자동 롤백하지 않는다. 서버 패키지 디렉터리의 previous-deployment.yaml과 rollout 상태를 확인한 뒤 복구한다.
+- 최초 배포에는 이전 Deployment가 없으므로 롤백할 버전이 없다.
+- 로그는 msa-release/app-logs에 보관한다.
+- 서버 패키지는 /home/ubuntu/msa-deploy/apps/<릴리스>/<서비스>에 저장한다.
 
 ```bash
 python3 -m unittest discover -s msa/deploy/tests -v

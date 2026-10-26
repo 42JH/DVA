@@ -13,6 +13,8 @@ pipeline {
     parameters {
         booleanParam(name: 'DEPLOY_MSA', defaultValue: false,
             description: 'MSA 서버에 전달·미리보기 후 승인받아 선택한 DB 하나에 적용합니다.')
+        booleanParam(name: 'DEPLOY_APPS', defaultValue: false,
+            description: '백엔드를 검사·빌드한 뒤 MSA k3s에 배포합니다.')
         choice(name: 'DB_SERVICE', choices: ['customer', 'operations', 'order', 'consultation', 'delivery'],
             description: 'CI는 전체 DB를 검사하고, CD는 이 DB 하나에만 적용합니다.')
     }
@@ -31,7 +33,7 @@ pipeline {
                     env.RUN_MSA_CI = 'true'
                     env.MSA_BASE_COMMIT = ''
                     def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
-                    if (webhook && !params.DEPLOY_MSA) {
+                    if (webhook && !params.DEPLOY_MSA && !params.DEPLOY_APPS) {
                         env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                         env.RUN_MSA_CI = sh(script: 'bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT"', returnStdout: true).trim()
                         if (!(env.RUN_MSA_CI in ['true', 'false'])) { error 'Invalid MSA change detection result.' }
@@ -40,7 +42,11 @@ pipeline {
                             echo 'No msa/ changes since the last successful build. Skipping CI.'
                         }
                     }
-                    if (params.DEPLOY_MSA) {
+                    if (params.DEPLOY_MSA && params.DEPLOY_APPS) {
+                        error 'Run database and application deployments separately.'
+                    }
+
+                    if (params.DEPLOY_MSA || params.DEPLOY_APPS) {
                         if (env.CHANGE_ID || !(env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend'])) {
                             error 'CD is allowed only for develop-backend, not MR/feature builds.'
                         }
@@ -159,10 +165,20 @@ pipeline {
 
                         echo "BUILD: $service"
                         docker build \
-                            --tag "dva-$service:$RELEASE_NAME" \
+                            --tag "docker.io/library/dva-$service:$RELEASE_NAME" \
                             "$directory"
+
+                        bash msa/deploy/package-app.sh "$service"
                     done
                 '''
+            }
+            post {
+                success {
+                    archiveArtifacts(
+                        artifacts: "msa-release/apps/${env.RELEASE_NAME}/**",
+                        allowEmptyArchive: true
+                    )
+                }
             }
         }
 
@@ -176,6 +192,58 @@ pipeline {
             post {
                 success {
                     archiveArtifacts artifacts: "msa-release/${env.RELEASE_NAME}/**", allowEmptyArchive: false
+                }
+            }
+        }
+
+        stage('Application Delivery') {
+            when { expression { params.DEPLOY_APPS } }
+            options {
+                timeout(time: 20, unit: 'MINUTES')
+                lock(resource: 'dva-msa-database-deploy')
+            }
+            steps {
+                withCredentials([
+                    sshUserPrivateKey(
+                        credentialsId: 'dva-msa-ssh',
+                        keyFileVariable: 'MSA_SSH_KEY'
+                    )
+                ]) {
+                    sh '''
+                        #!/bin/bash
+                        set +x
+                        set -euo pipefail
+
+                        mkdir -p msa-release/app-logs
+                        count=0
+
+                        for package in msa-release/apps/"$RELEASE_NAME"/*; do
+                            [ -d "$package" ] || continue
+                            service=$(basename "$package")
+
+                            bash msa/deploy/upload-app.sh \
+                                "$package" "$MSA_SSH_KEY" \
+                                2>&1 | tee "msa-release/app-logs/$service.log"
+
+                            grep -Fx "DVA_APP_ROLLOUT_COMPLETE=$service" \
+                                "msa-release/app-logs/$service.log"
+
+                            count=$((count + 1))
+                        done
+
+                        if [ "$count" -eq 0 ]; then
+                            echo 'No application packages to deploy.' >&2
+                            exit 1
+                        fi
+                    '''.stripIndent().trim()
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts(
+                        artifacts: 'msa-release/app-logs/**',
+                        allowEmptyArchive: true
+                    )
                 }
             }
         }
