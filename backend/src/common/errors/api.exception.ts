@@ -6,6 +6,7 @@ export interface ErrorDetail {
 }
 
 export type ErrorCode =
+  | 'SIGNUP_UNAVAILABLE'
   | 'INVALID_REQUEST'
   | 'PAYLOAD_TOO_LARGE'
   | 'UNSUPPORTED_MEDIA_TYPE'

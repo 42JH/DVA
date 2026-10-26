@@ -24,7 +24,7 @@ echo 'PASS: pre-migration backup restored with the original PBX receipt'
 
 # Repeating the unchanged migrations is a no-op.
 sh "$RUNNER" dva-db-129-check "$ROOT/backups"
-test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 2
+test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 3
 echo 'PASS: repeated execution skips already-applied migrations'
 
 # Tamper only with a copy inside this test container, never with repo files.
@@ -37,13 +37,13 @@ grep -q 'Previously applied migration checksum changed' "$ROOT/drift.log"
 cp "$ROOT/original-002.sql" "$MIGRATIONS/002-monolith-initial.sql"
 echo 'PASS: changed applied SQL is rejected'
 
-printf 'CREATE TABLE migration_rollback_probe(id integer);\n' > "$MIGRATIONS/003-rollback-probe.sql"
-printf 'SELECT 1/0;\n' > "$MIGRATIONS/004-failure-probe.sql"
+printf 'CREATE TABLE migration_rollback_probe(id integer);\n' > "$MIGRATIONS/004-rollback-probe.sql"
+printf 'SELECT 1/0;\n' > "$MIGRATIONS/005-failure-probe.sql"
 if sh "$RUNNER" dva-db-129-check "$ROOT/backups" > "$ROOT/failure.log" 2>&1; then
  echo 'FAIL: invalid migration was accepted' >&2; exit 1
 fi
 test "$(psql -X -U dva -d monolith_db -Atc "SELECT to_regclass('public.migration_rollback_probe') IS NULL")" = t
-test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 2
+test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 3
 echo 'PASS: failure rolls back all newly pending SQL and ledger records'
 
 # Also prove atomic rollback when no ledger or business schema exists yet.
