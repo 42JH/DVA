@@ -2,7 +2,7 @@
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
-현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
+현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
 
 ## 실행 흐름
 
@@ -167,3 +167,10 @@ DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 
 - 공통 서비스 자동 검색을 사용하므로 Jenkinsfile에 order 전용 분기를 추가하지 않는다.
 - 작업 브랜치에서는 운영 배포하지 않는다. 병합 후 첫 Webhook에서 order 선택, 변경 없는 customer·DB 생략, `DVA_APP_ROLLOUT_COMPLETE=order`, 외부 HTTPS 응답을 확인한다.
 - 교체·실패 복구 검사는 기존 도구에 `--service order --image dva-order:local`을 전달한다. 기본 customer 검증도 유지한다.
+
+## Delivery 서비스 추가
+
+- 구성과 실행: [services/delivery/README.md](services/delivery/README.md)
+- 포트 3003, 경로: /delivery/health, /delivery/docs, /delivery/docs-json.
+- 공통 서비스 검색·선택 배포·실패 복구를 재사용한다. Jenkinsfile과 DB changeset은 변경하지 않는다.
+- 병합 후 Delivery 자동 배포와 외부 HTTPS를 확인한다. 정상 Customer·Order와 변경 없는 DB는 생략한다.
