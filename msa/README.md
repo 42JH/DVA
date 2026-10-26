@@ -2,7 +2,7 @@
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
-현재 5개 서비스 DB의 Liquibase CI/CD와 customer NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
+현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
 
 ## 실행 흐름
 
@@ -28,11 +28,13 @@ Webhook → develop-backend checkout → 스크립트 검사 → 실제 배포 �
 
 ## CI 검사
 
-자동 배포에서는 클러스터 배포 이력을 조회하고 검사 대상을 결정한다. 변경이 없어도 Jenkins 실행 기록과 빠른 스크립트 검사는 남지만, 서비스 빌드·배포와 불필요한 DB 검사는 생략한다. 선택 결과는 `Select Build Scope` 로그에서 확인한다.
+Webhook 경로 필터를 통과한 실행에서 클러스터 배포 이력을 조회하고 검사 대상을 결정한다. 서비스 빌드·배포와 DB 검사는 실제 변경 및 배포 이력에 따라 생략한다. 선택 결과는 `Select Build Scope` 로그에서 확인한다.
 
-자동 실행은 GitLab의 Push events Webhook을 사용한다. Jenkins 트리거는 Push Events만 활성화하고 Allowed branches를 `develop-backend`로 제한한다. GitLab Webhook 주소는 `https://13.209.59.180/jenkins/project/dva-msa`, 브랜치 필터는 `develop-backend`이며 Jenkins에서 생성한 Secret token을 등록하고 SSL 검증을 유지한다. Poll SCM과 별도 주기 빌드는 끈다. Git의 Included Regions 설정은 Webhook 직접 실행에 적용되지 않으므로 파이프라인에서 경로를 검사한다. 앱과 DB 자동 배포는 동일한 Webhook 실행 안에서 처리한다.
+자동 실행은 Generic Webhook Trigger를 사용한다. 기존 GitLab 직접 트리거와 Poll SCM은 끈다. GitLab MSA Webhook 주소는 `https://13.209.59.180/jenkins/generic-webhook-trigger/invoke`이며, `develop-backend` Push events와 기존 Secret token·SSL 검증을 유지한다. Secret은 Jenkins의 Generic Webhook Trigger Token과 일치시킨다.
 
-Webhook을 켜기 전에 이 Jenkinsfile이 대상 브랜치에 반영되어야 한다. 반영 후 MSA 변경과 다른 폴더 변경을 각각 검증한다. 코드 checkout과 빌드 기록 생성은 MSA 변경이 없어도 발생하며, 동시에 여러 푸시가 들어오면 checkout 시점의 최신 코드 기준으로 비교한다.
+Jenkins는 `object_kind=push`, `project.id=1462697`, `ref=refs/heads/develop-backend`, 삭제가 아닌 after SHA를 확인하고 `$.commits[*]['added','modified','removed'][*]`에 `msa/` 경로가 있을 때만 작업을 생성한다. `backend/`만 바뀐 일반 push는 빌드 기록이나 노드를 할당하지 않는다. GitLab이 commit 목록을 최대 20개로 제한하므로 20커밋 초과 push는 누락 방지를 위해 작업을 실행하고 내부에서 비교한다. 테스트용 Custom webhook template과 `gwt-dry-run` 헤더는 실제 운영 설정에서 비워둔다.
+
+Webhook 설정은 Jenkins·GitLab에서 관리한다. 앱과 DB 자동 배포는 동일 실행에서 처리하며, 동시에 여러 push가 오면 checkout 시점의 최신 코드 기준으로 비교한다.
 
 | 검사 | 내용 |
 |---|---|
@@ -70,7 +72,7 @@ Webhook을 켜기 전에 이 Jenkinsfile이 대상 브랜치에 반영되어야 
 기존 Jenkins Job과 SSH credential을 사용한다. 아래는 재구성 시 필요한 설정이다.
 
 1. Linux amd64 빌드 노드에 `msa-builder` 라벨을 지정한다. Docker 데몬 사용 권한과 `git`, `python3`, `bash`, `ssh`, `scp`, `sha256sum`, `realpath`가 필요하다. 빌드는 이 서버 노드에서 실행한다.
-2. Pipeline/Declarative, Git, Credentials Binding, SSH Credentials, Lockable Resources, Timestamper 플러그인을 준비한다.
+2. Pipeline/Declarative, Git, Credentials Binding, SSH Credentials, Lockable Resources, Timestamper, Generic Webhook Trigger 플러그인을 준비한다.
 3. 신뢰할 수 있는 배포용 Pipeline Job을 만들고 Git SCM 브랜치는 `*/develop-backend`, Script Path는 `msa/Jenkinsfile`로 설정한다. 저장소 접근용 credential은 팀 설정을 사용한다. 설치 후 webhook 또는 수동 실행을 설정한다.
 4. 해당 배포 Job/폴더에만 SSH private key credential `dva-msa-ssh`를 등록한다. 접속 사용자는 스크립트에 `ubuntu`로 고정되어 있다. PEM은 Git에 넣지 않는다. MR 등 비신뢰 코드 실행 Job에 배포 credential을 공유하지 않는다. 브랜치 조건만으로 악의적인 Jenkinsfile을 방어할 수는 없다.
 5. MSA 서버는 `python3`, `flock`, `sha256sum`, Bash, SCP를 제공하고 ubuntu가 비밀번호 없이 `sudo -n k3s kubectl`, `ctr`, `crictl`을 실행할 수 있어야 한다. `/home/ubuntu/msa-deploy`에 쓸 수 있어야 한다.
@@ -157,3 +159,11 @@ python3 msa/deploy/tests/integration_app_rollout.py --image dva-customer:local
 DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 안에서 `Database Delivery`가 먼저 실행되고, 모든 DB 적용이 성공해야 `Application Delivery`를 실행한다. DB만 변경된 MR도 실제 서버에 적용한다. 변경이 없는 DB만 생략한다. 이전 검증 기록의 41개 검사는 앱 배포 중심의 기록이며, 이번 보완은 DB 전용 변경·다중 DB·실패 중단·재실행 선택 경로를 추가로 검증한다.
 
 보완 검증: Linux Python 3.13 회귀 검사 46개와 Bash·Jenkinsfile Groovy 구문 검사 통과. DB 전용 변경 선택, 다중 DB 순차 적용, 적용 실패 시 중단, 미적용 DB 재선택을 확인했다. 신규 자동 DB 흐름의 운영 Jenkins 실행은 병합 후 확인한다.
+
+## Order 서비스 추가 (MR 전 준비)
+
+- 서버·Swagger·Docker·k3s 구성: [services/order/README.md](services/order/README.md)
+- 예정 HTTPS 경로: `/order/health`, `/order/docs`, `/order/docs-json` (포트 3002).
+- 공통 서비스 자동 검색을 사용하므로 Jenkinsfile에 order 전용 분기를 추가하지 않는다.
+- 작업 브랜치에서는 운영 배포하지 않는다. 병합 후 첫 Webhook에서 order 선택, 변경 없는 customer·DB 생략, `DVA_APP_ROLLOUT_COMPLETE=order`, 외부 HTTPS 응답을 확인한다.
+- 교체·실패 복구 검사는 기존 도구에 `--service order --image dva-order:local`을 전달한다. 기본 customer 검증도 유지한다.

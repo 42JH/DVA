@@ -50,6 +50,19 @@ class DeliveryPlanTests(unittest.TestCase):
         self.deployed = self.git('rev-parse', 'HEAD')
         self.state = {'customer': deployment(self.deployed)}
 
+    def test_new_order_service_does_not_rebuild_customer_or_database(self):
+        self.commit('msa/services/order/Dockerfile', 'FROM node')
+        self.commit('msa/services/order/k8s.yaml', 'manifest')
+        annotations = {f'dva.ssafy.io/db-{name}-commit': self.deployed
+                       for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
+        self.assertEqual(planner.plan(self.deployed, True, self.state, annotations), ['order'])
+        self.assertEqual(planner.databases(self.deployed, True, annotations), [])
+        self.assertFalse(planner.changed(self.deployed, planner.DB_PATHS))
+        order = deployment(self.git('rev-parse', 'HEAD'))
+        order['metadata']['name'] = 'order'
+        self.state['order'] = order
+        self.assertEqual(planner.plan(self.deployed, True, self.state, annotations), [])
+
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')

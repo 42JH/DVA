@@ -30,9 +30,11 @@ def command(args, data=None, timeout=360):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--service', default='customer', choices=['customer', 'order'])
     parser.add_argument('--image', default='dva-customer:local')
     parser.add_argument('--cluster', help='Existing disposable test container, must start with dva-delivery-check-')
     args = parser.parse_args()
+    service = args.service
     cluster = args.cluster or 'dva-delivery-check-' + uuid.uuid4().hex[:8]
     if not cluster.startswith('dva-delivery-check-'):
         raise ValueError('Refusing non-test container')
@@ -59,22 +61,24 @@ def main():
         for attempt in range(90):
             try:
                 nodes = json.loads(kube('get', 'nodes', '-o', 'json'))['items']
-                if nodes and any(c['type'] == 'Ready' and c['status'] == 'True' for c in nodes[0]['status']['conditions']):
+                if (nodes and any(c['type'] == 'Ready' and c['status'] == 'True' for c in nodes[0]['status']['conditions'])
+                        and kube('-n', 'kube-system', 'get', 'deployment', 'coredns', '--ignore-not-found', '-o', 'name').strip()):
                     break
             except Exception:
                 pass
             time.sleep(2)
         else:
             raise RuntimeError('Local k3s did not become Ready')
+        kube('-n', 'kube-system', 'rollout', 'status', 'deployment/coredns', '--timeout=120s')
         kube('apply', '-f', '-', data=json.dumps({'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': 'dva'}}))
         port = command(['docker', 'port', cluster, '30081/tcp']).strip()
-        url = f'http://{port}/customer/health'
+        url = f'http://{port}/{service}/health'
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
             command(['docker', 'save', '-o', str(Path('image.tar').resolve()), args.image])
             command(['docker', 'cp', 'image.tar', cluster + ':/tmp/customer.tar'])
             command(['docker', 'exec', cluster, '/bin/ctr', '-n', 'k8s.io', 'images', 'import', '/tmp/customer.tar'])
             source = args.image if '/' in args.image else 'docker.io/library/' + args.image
-            manifest = (ROOT / 'msa/services/customer/k8s.yaml').read_text(encoding='utf-8')
+            manifest = (ROOT / f'msa/services/{service}/k8s.yaml').read_text(encoding='utf-8')
             # Local NodePort exercises Service traffic; production HTTPS is checked separately.
             manifest = '---'.join(manifest.split('---')[:2])
             resources = app.parse_resources(kube('create', '--dry-run=client', '-f', '-', '-o', 'json', data=manifest))
@@ -85,7 +89,7 @@ def main():
             dep['spec']['progressDeadlineSeconds'] = 30
             def deploy(letter, number, broken=False):
                 release = letter * 40 + '-' + str(number)
-                image = 'docker.io/library/dva-customer:' + release
+                image = f'docker.io/library/dva-{service}:' + release
                 command(['docker', 'exec', cluster, '/bin/ctr', '-n', 'k8s.io', 'images', 'tag', '--force', source, image])
                 candidate = copy.deepcopy(resources)
                 deployment = next(r for r in candidate if r['kind'] == 'Deployment')
@@ -94,11 +98,11 @@ def main():
                 if broken:
                     container['readinessProbe']['httpGet']['path'] = '/intentionally-not-ready'
                 Path('k8s.yaml').write_text(json.dumps({'apiVersion': 'v1', 'kind': 'List', 'items': candidate}))
-                app.apply_release('customer', release, image)
+                app.apply_release(service, release, image)
                 return image
             def wait_stable():
                 for _ in range(60):
-                    if app.ready(json.loads(kube('-n', 'dva', 'get', 'deployment', 'customer', '-o', 'json'))):
+                    if app.ready(json.loads(kube('-n', 'dva', 'get', 'deployment', service, '-o', 'json'))):
                         return
                     time.sleep(1)
                 raise RuntimeError('Deployment did not settle')
@@ -126,7 +130,7 @@ def main():
             else:
                 raise AssertionError('Broken rollout incorrectly succeeded')
             wait_stable()
-            actual = json.loads(kube('-n', 'dva', 'get', 'deployment', 'customer', '-o', 'json'))
+            actual = json.loads(kube('-n', 'dva', 'get', 'deployment', service, '-o', 'json'))
             assert actual['spec']['template']['spec']['containers'][0]['image'] == expected
             assert actual['metadata']['annotations']['dva.ssafy.io/deployed-commit'] == 'b' * 40
             stop.set()
