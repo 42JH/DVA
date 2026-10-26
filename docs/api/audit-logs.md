@@ -60,3 +60,34 @@ Nginx·CORS·본문 파싱 등 Guard 이전에 차단된 요청, 읽기 API 및 
 기업 행·멱등 응답·성공 감사는 같은 트랜잭션에 저장한다.
 같은 멱등키·본문의 재시도는 기존 기업을 반환하고 성공 감사를 추가하지 않는다.
 본문 불일치나 저장 실패는 별도 `FAILED`, 세션 거부는 `DENIED`로 기록한다.
+
+기업 수정은 `ORGANIZATION_UPDATED` / `ORGANIZATION`으로 기록한다.
+기업명·상태 변경과 성공 감사가 같은 트랜잭션에 저장되며 감사 저장 실패 시 변경도 롤백한다.
+기존 PATCH 계약에는 멱등키가 없으므로 독립된 PATCH 요청은 각각 작업으로 기록한다.
+
+## 이벤트와 후속 연동
+
+| 이벤트 | 대상 | 현재 연결 |
+| --- | --- | --- |
+| ADMIN_BOOTSTRAP | ADMIN_USER | 최초 관리자 CLI의 기존 성공 기록 |
+| ADMIN_SIGNUP | ADMIN_USER | 가입 |
+| ADMIN_LOGIN | ADMIN_USER | 로그인 |
+| ADMIN_LOGOUT | ADMIN_USER | 유효한 세션 로그아웃 |
+| ADMIN_ACCESS_CHANGED | ADMIN_USER | 역할·상태 변경 |
+| ADMIN_PASSWORD_CHANGED | ADMIN_USER | 본인 변경·관리자 초기화 |
+| ORGANIZATION_CREATED | ORGANIZATION | 기업 등록 |
+| ORGANIZATION_UPDATED | ORGANIZATION | 기업명·상태 수정 |
+
+Jira 101의 주문 수정·취소, 배송 상태 변경, AI 설정 적용은 현재 모놀리식에 해당 API가 없어
+실제 연동되지 않았다. 관련 작업(61·64·67·98)의 구현 시 이벤트 이름과 대상 계약을 확정하고,
+같은 트랜잭션에서 `AuditService.recordSuccess(event, client)`를 호출해야 한다.
+HTTP 실패 기록은 `@AuditOperation`을 함께 선언한다. 외부 MSA 이벤트의 중복 방지·전달 보장은
+별도 수신/outbox 계약이 필요하며 이 구현으로 해결됐다고 간주하지 않는다.
+따라서 이 MR 병합만으로 Jira 101의 모든 업무 연동이 완료되는 것은 아니다.
+
+## 검증
+
+`node backend/scripts/check.cjs`는 격리 DB에서 인증·역할·검색·페이지·기간 경계·상세 404,
+민감 metadata 비노출, 실패 기록 단일 저장, 업무 롤백 후 FAILED 기록,
+기업 등록 재시도 중복 방지, 기업 수정과 감사의 원자성을 검사한다.
+기존 PBX, 세션 만료/비밀번호 변경, 기업 API, 운영 이미지와 Nginx 회귀도 함께 실행한다.

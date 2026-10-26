@@ -27,11 +27,28 @@ export class OrganizationsService {
     return result;
   }
 
-  async update(id: number, changes: UpdateOrganizationDto): Promise<void> {
+  async update(
+    id: number,
+    changes: UpdateOrganizationDto,
+    adminId: number,
+    requestId: string,
+  ): Promise<void> {
     if (changes.name === undefined && changes.status === undefined)
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 기업명 또는 상태를 입력해 주세요.');
-    if (!(await this.repository.update(id, changes)))
-      throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
+    await this.database.transaction(async (client) => {
+      if (!(await this.repository.update(id, changes, client)))
+        throw new ApiException(404, 'NOT_FOUND', '기업을 찾을 수 없습니다.');
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          targetId: id,
+          action: 'ORGANIZATION_UPDATED',
+          targetType: 'ORGANIZATION',
+          requestId,
+        },
+        client,
+      );
+    });
   }
 
   async create(adminId: number, key: string, input: CreateOrganizationDto, requestId: string) {

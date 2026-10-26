@@ -120,6 +120,7 @@ export class OrganizationsController {
   }
 
   @Patch(':id')
+  @AuditOperation({ action: 'ORGANIZATION_UPDATED', targetType: 'ORGANIZATION', target: 'id' })
   @HttpCode(204)
   @ApiOperation({
     summary: '기업명·상태 변경',
@@ -127,7 +128,16 @@ export class OrganizationsController {
   })
   @ApiNoContentResponse({ description: '저장 완료. 응답 본문 없음.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
-  async update(@Param() params: OrganizationIdParamsDto, @Body() changes: UpdateOrganizationDto) {
-    await this.organizations.update(params.id, changes);
+  async update(
+    @Param() params: OrganizationIdParamsDto,
+    @Body() changes: UpdateOrganizationDto,
+    @Req() request: AuthRequest,
+  ) {
+    await this.organizations.update(
+      params.id,
+      changes,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
   }
 }

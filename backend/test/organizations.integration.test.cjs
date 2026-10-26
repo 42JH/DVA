@@ -556,3 +556,72 @@ test('company creation rolls back row and receipt when success audit cannot be s
   }
   assert.equal((await create(name, key)).status, 201);
 });
+
+test('company update audit commits with the change and rolls back on audit failure', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const created = await create('수정 감사 원본 ' + randomUUID());
+  assert.equal(created.status, 201);
+  const id = (await created.json()).data.organizationSeq;
+  const updated = await patch(id, { name: '수정 감사 성공', status: 'INACTIVE' });
+  assert.equal(updated.status, 204);
+  const rows = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      updated.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, 'ORGANIZATION_UPDATED');
+  assert.equal(rows[0].target_type, 'ORGANIZATION');
+  assert.equal(rows[0].target_seq, id);
+  assert.equal(rows[0].actor_seq, adminA);
+  assert.equal(rows[0].result, 'SUCCESS');
+  assert.deepEqual(rows[0].metadata, {});
+  const original = audit.recordSuccess;
+  audit.recordSuccess = async () => {
+    throw new Error('private audit error');
+  };
+  try {
+    const failed = await patch(id, { name: '저장되면 안 됨', status: 'ACTIVE' });
+    assert.equal(failed.status, 500);
+    const record = (
+      await pool.query('SELECT name,status FROM organizations WHERE organization_seq=$1', [id])
+    ).rows[0];
+    assert.deepEqual(record, { name: '수정 감사 성공', status: 'INACTIVE' });
+    const failures = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        failed.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].result, 'FAILED');
+    assert.equal(failures[0].target_seq, id);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  const denied = await request('/' + id, {
+    method: 'PATCH',
+    headers: { Cookie: undefined, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'ACTIVE' }),
+  });
+  assert.equal(denied.status, 401);
+  const denial = (
+    await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      denied.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(denial.length, 1);
+  assert.equal(denial[0].result, 'DENIED');
+  assert.equal(denial[0].actor_seq, null);
+  assert.equal(denial[0].target_seq, id);
+  const missing = await patch(2147483647, { status: 'ACTIVE' });
+  assert.equal(missing.status, 404);
+  assert.equal(
+    (
+      await pool.query('SELECT result FROM audit_logs WHERE request_id=$1', [
+        missing.headers.get('x-request-id'),
+      ])
+    ).rows[0].result,
+    'FAILED',
+  );
+});
