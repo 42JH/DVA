@@ -42,7 +42,7 @@
 - 실제 연결(범위 밖)
   - 공인 HTTPS·리버스 프록시, OpenAI 프로젝트 웹훅 등록, PBX 트렁크 설정, 실제 통화 확인.
 - 실제 통화 전에 확인할 것
-  - `delegation.responses.model`(지금 `gpt-5.4-mini`)이 GPT-Live 위임에서 되는지.
+  - `delegation.responses.model`(지금 `gpt-6-luna`)이 GPT-Live 위임에서 되는지.
   - strict 스키마의 `maxLength`가 위임 백엔드에서 받아들여지는지.
 - RAG(pgvector)
   - 주문 DB와 데이터베이스·계정을 나눌 것.

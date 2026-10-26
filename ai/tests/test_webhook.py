@@ -17,7 +17,7 @@ def env():
 
 
 def post(http, body, headers):
-    return http.post("/openai/webhook", content=body, headers=headers)
+    return http.post("/api/webhooks/openai/call-incoming", content=body, headers=headers)
 
 
 def wait(cond, timeout=3.0):
