@@ -82,6 +82,28 @@ class DeliveryPlanTests(unittest.TestCase):
         self.state['delivery'] = delivery
         self.assertEqual(planner.plan(baseline, True, self.state, annotations), [])
 
+    def test_two_new_services_skip_existing_apps_and_retry_only_undeployed(self):
+        for service in ('order', 'delivery'):
+            self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
+            self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
+        baseline = self.git('rev-parse', 'HEAD')
+        for service in ('customer', 'order', 'delivery'):
+            self.state[service] = deployment(baseline)
+            self.state[service]['metadata']['name'] = service
+        annotations = {f'dva.ssafy.io/db-{name}-commit': baseline
+                       for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
+        for service in ('consultation', 'operations'):
+            self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
+            self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
+        self.assertEqual(planner.plan(baseline, True, self.state, annotations),
+                         ['consultation', 'operations'])
+        self.assertEqual(planner.databases(baseline, True, annotations), [])
+        self.assertFalse(planner.changed(baseline, planner.DB_PATHS))
+        for service, remaining in [('consultation', ['operations']), ('operations', [])]:
+            self.state[service] = deployment(self.git('rev-parse', 'HEAD'))
+            self.state[service]['metadata']['name'] = service
+            self.assertEqual(planner.plan(baseline, True, self.state, annotations), remaining)
+
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')
