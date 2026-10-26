@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import {
   AUDIT_ACTOR_TYPES,
   AUDIT_RESULTS,
@@ -50,4 +51,12 @@ export class AuditListResponseDto {
 
   @ApiProperty()
   hasNext!: boolean;
+}
+
+export class AuditDetailResponseDto {
+  @ApiProperty({ type: AuditResponseDto })
+  data!: AuditResponseDto;
+
+  @ApiProperty({ type: RequestMetaDto })
+  meta!: RequestMetaDto;
 }

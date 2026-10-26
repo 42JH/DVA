@@ -39,4 +39,10 @@ export class AuditService {
     const rows = await this.repository.findMany(query);
     return new ListResponse(rows, query.limit);
   }
+
+  async findOne(id: number): Promise<AuditLog> {
+    const row = await this.repository.findOne(id);
+    if (!row) throw new ApiException(404, 'NOT_FOUND', '감사 로그를 찾을 수 없습니다.');
+    return row;
+  }
 }

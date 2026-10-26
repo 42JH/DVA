@@ -738,3 +738,75 @@ test('OPS-02 rejects invalid filters and documents the session-protected endpoin
   ])
     assert.ok(names.includes(name), name);
 });
+
+test('audit detail enforces roles, validates IDs and returns a redacted immutable record', async () => {
+  const { randomUUID } = require('node:crypto');
+  const eventRequestId = randomUUID();
+  const inserted = await db.pool.query(
+    `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata)
+     VALUES('SYSTEM',NULL,'DETAIL_TEST','ADMIN_USER',NULL,$1,'SUCCESS',$2::jsonb)
+     RETURNING audit_log_seq`,
+    [
+      eventRequestId,
+      JSON.stringify({ password: 'private-detail-secret', nested: { token: 'secret' } }),
+    ],
+  );
+  const id = inserted.rows[0].audit_log_seq;
+  const path = '/api/audit-logs/' + id;
+  assert.equal((await call('GET', path)).status, 401);
+  assert.equal((await call('GET', path, undefined, 'dva_session=invalid')).status, 401);
+  let session;
+  for (const [suffix, role, status] of [
+    ['detailOp', 'OPERATOR', 403],
+    ['detailSuper', 'SUPERVISOR', 200],
+    ['detailAdmin', 'SYSTEM_ADMIN', 200],
+  ]) {
+    const user = await account(suffix, role);
+    const signedIn = await login(user);
+    assert.equal(signedIn.status, 200);
+    session = signedIn.session;
+    const response = await call('GET', path, undefined, session);
+    assert.equal(response.status, status);
+    if (status === 200) {
+      assert.equal(response.body.data.auditLogSeq, id);
+      assert.equal(response.body.data.requestId, eventRequestId);
+      assert.equal(response.body.data.actorSeq, null);
+      assert.equal(response.body.data.targetSeq, null);
+      assert.deepEqual(response.body.data.metadata, {});
+      assert.equal(response.body.meta.requestId, response.headers.get('x-request-id'));
+      assert.notEqual(response.body.meta.requestId, eventRequestId);
+      assert.ok(!response.text.includes('private-detail-secret'));
+      const list = await call('GET', '/api/audit-logs?action=DETAIL_TEST', undefined, session);
+      assert.equal(list.status, 200);
+      assert.deepEqual(
+        list.body.data.find((row) => row.auditLogSeq === id),
+        response.body.data,
+      );
+    }
+  }
+  for (const invalid of ['0', '-1', '1.5', '1e2', 'abc', '2147483648', '1%20OR%201=1']) {
+    const response = await call('GET', '/api/audit-logs/' + invalid, undefined, session);
+    assert.equal(response.status, 400, invalid);
+    assert.equal(response.body.error.code, 'INVALID_REQUEST');
+  }
+  const missing = await call('GET', '/api/audit-logs/2147483647', undefined, session);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.body.error.code, 'NOT_FOUND');
+  const stored = await db.pool.query('SELECT metadata FROM audit_logs WHERE audit_log_seq=$1', [
+    id,
+  ]);
+  assert.equal(stored.rows[0].metadata.password, 'private-detail-secret');
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const operation = document.paths['/api/audit-logs/{id}'].get;
+  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
+  assert.ok(
+    operation.parameters.some(
+      (parameter) => parameter.name === 'id' && parameter.in === 'path' && parameter.required,
+    ),
+  );
+  assert.ok(operation.responses['404']);
+  assert.equal(
+    operation.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/AuditDetailResponseDto',
+  );
+});

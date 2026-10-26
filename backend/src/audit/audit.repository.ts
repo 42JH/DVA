@@ -4,6 +4,20 @@ import { DatabaseService } from '../database/database.service';
 import { AuditLog } from './audit.types';
 import { AuditQueryDto } from './dto/audit-query.dto';
 
+// shortcut: metadata는 공개 필드 정책이 정해지면 허용 필드만 선택해 반환한다.
+const AUDIT_SELECT = `SELECT
+        audit_log_seq AS "auditLogSeq",
+        actor_type AS "actorType",
+        actor_seq AS "actorSeq",
+        action,
+        target_type AS "targetType",
+        target_seq AS "targetSeq",
+        request_id AS "requestId",
+        result,
+        '{}'::jsonb AS metadata,
+        occurred_at AS "occurredAt"
+      FROM audit_logs`;
+
 @Injectable()
 export class AuditRepository {
   constructor(private readonly database: DatabaseService) {}
@@ -72,20 +86,8 @@ export class AuditRepository {
     values.push(query.offset);
     const offsetParameter = `$${values.length}`;
 
-    // shortcut: metadata는 공개 필드 정책이 정해지면 허용 필드만 선택해 반환한다.
     const result = await this.database.pool.query<AuditLog>(
-      `SELECT
-        audit_log_seq AS "auditLogSeq",
-        actor_type AS "actorType",
-        actor_seq AS "actorSeq",
-        action,
-        target_type AS "targetType",
-        target_seq AS "targetSeq",
-        request_id AS "requestId",
-        result,
-        '{}'::jsonb AS metadata,
-        occurred_at AS "occurredAt"
-      FROM audit_logs
+      `${AUDIT_SELECT}
       ${where}
       ORDER BY occurred_at DESC, audit_log_seq DESC
       LIMIT ${limitParameter}
@@ -94,5 +96,12 @@ export class AuditRepository {
     );
 
     return result.rows;
+  }
+  async findOne(id: number): Promise<AuditLog | undefined> {
+    const result = await this.database.pool.query<AuditLog>(
+      `${AUDIT_SELECT} WHERE audit_log_seq = $1`,
+      [id],
+    );
+    return result.rows[0];
   }
 }
