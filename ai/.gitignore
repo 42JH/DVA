@@ -12,6 +12,9 @@ venv/
 .coverage
 htmlcov/
 
+# LangGraph Studio 개발 서버(langgraph dev) 상태
+.langgraph_api/
+
 # Environment
 .env
 .env.*

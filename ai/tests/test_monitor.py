@@ -31,7 +31,7 @@ def test_monitor_closed_without_credentials(monkeypatch):
 def test_monitor_lists_calls_with_masked_caller(http):
     import time
 
-    http.post("/openai/webhook", content=(w := signed_webhook("live.transport.incoming", "live_m"))[0], headers=w[1])
+    http.post("/api/webhooks/openai/call-incoming", content=(w := signed_webhook("live.transport.incoming", "live_m"))[0], headers=w[1])
     for _ in range(100):
         calls = http.get("/monitor/api/calls", auth=AUTH).json()
         if calls:
