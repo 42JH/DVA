@@ -26,13 +26,12 @@ Push-Location $repoRoot
 try {
     Invoke-Docker -DockerArgs @('version')
     Invoke-Docker -DockerArgs @('build', '--platform', 'linux/amd64', '-t', "dva-backend:$Version", './backend')
-    Invoke-Docker -DockerArgs @('build', '--platform', 'linux/amd64', '-t', "dva-ai:$Version", './ai')
     Invoke-Docker -DockerArgs @('pull', '--platform', 'linux/amd64', 'postgres:17-alpine')
     Invoke-Docker -DockerArgs @('pull', '--platform', 'linux/amd64', 'nginx:stable-alpine')
     Invoke-Docker -DockerArgs @('tag', 'postgres:17-alpine', "dva-postgres:$Version")
     Invoke-Docker -DockerArgs @('tag', 'nginx:stable-alpine', "dva-nginx:$Version")
 
-    $images = @("dva-backend:$Version", "dva-ai:$Version", "dva-postgres:$Version", "dva-nginx:$Version")
+    $images = @("dva-backend:$Version", "dva-postgres:$Version", "dva-nginx:$Version")
     foreach ($image in $images) {
         $platform = & docker image inspect --format '{{.Os}}/{{.Architecture}}' $image
         if ($LASTEXITCODE -ne 0 -or $platform -ne 'linux/amd64') {
@@ -46,7 +45,6 @@ try {
     Write-Utf8 -Path (Join-Path $releaseDir 'images.tar.sha256') -Content "$hash  images.tar`n"
     Write-Utf8 -Path (Join-Path $releaseDir 'release.env') -Content @"
 BACKEND_IMAGE=dva-backend:$Version
-AI_IMAGE=dva-ai:$Version
 POSTGRES_IMAGE=dva-postgres:$Version
 NGINX_IMAGE=dva-nginx:$Version
 
