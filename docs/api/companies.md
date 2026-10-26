@@ -13,6 +13,8 @@ Jira: [S15P31D109-35](https://ssafy.atlassian.net/browse/S15P31D109-35).
 수정 버전 컬럼이 없는 현재 ERD를 따르므로 임의의 expectedVersion을 요구하지 않는다.
 
 **인증은 세션 방식이며 83번 담당자의 작업이다. 로그인·세션 저장·쿠키 검증·공통 Guard를 구현하지 않는다.**
+83번의 인증 코드는 develop-backend에서 병합했으며, 기업 Controller는 공통 `AuthRequest`의
+`request.admin.adminUserSeq`와 Swagger의 `adminSession` 쿠키 정의를 사용한다.
 현재 OrganizationsModule은 AppModule에 등록하지 않는다. 따라서 일반 앱 실행과 운영 Swagger에는
 기업 경로가 아직 노출되지 않는다. 이 상태는 기업 로직 개발·테스트 완료 상태이며 운영 연동 완료를 뜻하지 않는다.
 테스트는 별도 FixtureModule에서 기업 모듈을 등록하고 이미 인증된 관리자 정보를 제공한다.
@@ -56,8 +58,9 @@ q는 대소문자를 구분하지 않는 기업명 부분 검색이며 `%`, `_`�
 
 ## 마이그레이션·검증
 
-`backend/migrations/003-organization-creation-requests.sql`을 기존 migration runner로 적용한다.
-이미 적용한 001·002는 변경하지 않는다. 기존 public 업무 테이블 18개는 유지한다.
+`backend/migrations/004-organization-creation-requests.sql`을 기존 migration runner로 적용한다.
+인증의 003과 번호가 겹치지 않도록 미적용 기업 migration을 004로 변경했다.
+001·002와 인증의 003은 변경하지 않는다. 기업 기능이 public 업무 테이블을 추가하지 않는다.
 이 작업에서는 실제 서버나 로컬 개발 DB에 migration을 적용하지 않았으며 임시 DB에서 검증한다.
 
 ```powershell
@@ -70,16 +73,19 @@ cd ..
 Docker 검증은 기존 테스트와 기업 API HTTP/DB·멱등·동시 요청·재시작·롤백·Swagger 계약 검증을 실행한다.
 별도 DB 검증은 migration 재실행, 체크섬 변경 거부, 백업 복원과 최초/후속 실패 롤백을 검증한다.
 기존 배포 Jenkins 검증 실행기도 같은 npm test:integration을 사용한다.
+인증 통합 테스트가 먼저 업무·세션 스키마를 준비한 뒤 기업 테스트가 004를 적용하며,
+기업 테스트만 빈 임시 DB에서 실행할 때는 002·003도 적용한다.
 
 ## 83번 담당자와 연결할 항목
 
 1. 공통 세션 인증이 쿠키를 검증하고 현재 DB 계정이 ACTIVE인지 확인한다.
-2. 현재 Controller의 최소 연결 계약은 `request.user.adminUserSeq`다. 최종 세션 규격이 다르면
-   Controller의 이 한 지점을 맞춘다. 기업 Service는 인증된 관리자 번호만 받고 쿠키를 처리하지 않는다.
+2. Controller는 공통 `AuthRequest`의 `request.admin.adminUserSeq`를 사용한다.
+   기업 Service는 인증된 관리자 번호만 받고 쿠키를 처리하지 않는다.
 3. 네 경로 전체에 공통 인증 Guard를 적용한 뒤 OrganizationsModule을 AppModule에 등록한다.
 4. 실제 쿠키 이름을 기준으로 공통 Swagger 세션 인증을 설정하고 실제 로그인 세션으로 통합 테스트한다.
 5. 쿠키의 HttpOnly·Secure·SameSite, CSRF 보호와 필요한 credentials/CORS 설정은 공통 인증에서 구성한다.
 6. 서버 migration 적용과 인증 검증 후 필요한 기업 API의 호스트 Nginx 공개 경로를 추가한다.
 
-현재 공통 Swagger의 이전 Bearer 정의와 credentials:false 설정은 이 이슈에서 변경하지 않는다.
-실제 세션 연동 시 83번의 공통 설정에 맞춰 조정해야 한다. 인증 연결 전에는 35번을 최종 운영 완료로 판단하지 않는다.
+83번에서 공통 Swagger의 `adminSession` 쿠키 정의와 CORS credentials 설정을 제공한다.
+변경 요청은 허용된 Origin과 `X-CSRF-Protection: 1` 헤더가 필요하다.
+실제 세션으로 기업 경로 전체를 검증하고 앱에 등록하기 전에는 35번을 최종 운영 완료로 판단하지 않는다.

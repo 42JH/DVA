@@ -34,7 +34,7 @@ async function start(adminId) {
   apps.push(application);
   // Test fixture only: emulate an already authenticated session, without implementing issue 83.
   application.use((request, _response, next) => {
-    request.user = { adminUserSeq: adminId };
+    request.admin = { adminUserSeq: adminId };
     next();
   });
   configureApplication(application, { log: () => {} });
@@ -45,7 +45,19 @@ before(async () => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    for (const name of ['002-monolith-initial.sql', '003-organization-creation-requests.sql'])
+    // The auth suite runs first in CI and leaves its schema/runtime account for later suites.
+    // A standalone invocation against an empty disposable DB also applies the prerequisites.
+    const initialized = await client.query(
+      "SELECT to_regclass('public.admin_sessions') IS NOT NULL AS ready",
+    );
+    const migrations = initialized.rows[0].ready
+      ? ['004-organization-creation-requests.sql']
+      : [
+          '002-monolith-initial.sql',
+          '003-admin-auth-sessions.sql',
+          '004-organization-creation-requests.sql',
+        ];
+    for (const name of migrations)
       await client.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
     await client.query('COMMIT');
   } catch (error) {
@@ -54,9 +66,9 @@ before(async () => {
   } finally {
     client.release();
   }
-  const admins = await pool.query(`INSERT INTO admin_users (login_id,password_hash,role,status)
-    VALUES ('company-test-a','test-only-hash','OPERATOR','ACTIVE'),
-           ('company-test-b','test-only-hash','SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq`);
+  const admins = await pool.query(`INSERT INTO admin_users (login_id,name,password_hash,role,status)
+    VALUES ('company-test-a','기업 테스트 A','test-only-hash','OPERATOR','ACTIVE'),
+           ('company-test-b','기업 테스트 B','test-only-hash','SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq`);
   [adminA, adminB] = admins.rows.map((row) => row.admin_user_seq);
   app = await start(adminA);
   appB = await start(adminB);

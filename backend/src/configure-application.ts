@@ -28,9 +28,10 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       'X-Request-Id',
       'X-Call-Session-Id',
       'Idempotency-Key',
+      'X-CSRF-Protection',
     ],
     exposedHeaders: ['X-Request-Id', 'Location', 'Retry-After'],
-    credentials: false,
+    credentials: true,
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
@@ -53,6 +54,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
         )
         .setVersion('0.1.0')
         .addBearerAuth()
+        .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')
         .build(),
       { extraModels: [RequestMetaDto, ErrorResponseDto] },
     );

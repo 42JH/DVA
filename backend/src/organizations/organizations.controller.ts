@@ -15,6 +15,7 @@ import {
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
+  ApiCookieAuth,
   ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
@@ -30,6 +31,7 @@ import {
   getSchemaPath,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { AuthRequest } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
@@ -47,14 +49,12 @@ const single = (model: typeof CreatedOrganizationDto) => ({
   },
 });
 
-// Issue 83 supplies the session-authenticated identity before this module is registered in AppModule.
-type OrganizationAdminRequest = Request & { user: { adminUserSeq: number } };
-
 const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
   context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
 );
 
 @ApiTags('Companies')
+@ApiCookieAuth('adminSession')
 @ApiExtraModels(CreatedOrganizationDto, OrganizationResponseDto, RequestMetaDto, ErrorResponseDto)
 @ApiBadRequestResponse({ type: ErrorResponseDto })
 @ApiUnauthorizedResponse({ type: ErrorResponseDto })
@@ -97,11 +97,11 @@ export class OrganizationsController {
   @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiUnprocessableEntityResponse({ type: ErrorResponseDto })
   create(
-    @Req() request: OrganizationAdminRequest,
+    @Req() request: AuthRequest,
     @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrganizationDto,
   ) {
-    return this.organizations.create(request.user.adminUserSeq, key.toLowerCase(), input);
+    return this.organizations.create(request.admin.adminUserSeq, key.toLowerCase(), input);
   }
 
   @Get(':id')

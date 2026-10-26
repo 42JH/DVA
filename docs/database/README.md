@@ -5,13 +5,14 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 최신 ERD 원본이다. 단일 PostgreSQL DB,
-업무 테이블 18개, FK 17개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
+업무 테이블 18개와 관리자 세션 테이블 1개, FK 18개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
 - `002-monolith-initial.sql`: 업무 테이블·제약·특수 인덱스·함수·생성 컬럼·트리거.
-- `003-organization-creation-requests.sql`: 기업 등록 재시도 기록용 `api_idempotency.organization_creations`.
-  기존 public 업무 테이블 18개와 별도이며, 35번 기업 API의 운영 연동 전에 적용한다.
+- `003-admin-auth-sessions.sql`: 관리자 이름과 PostgreSQL 세션 저장소. 기존 관리자 데이터가 있다면 이름 보완 정책이 필요하며 자동 채우지 않는다.
+- `004-organization-creation-requests.sql`: 기업 등록 재시도 기록용 `api_idempotency.organization_creations`.
+  public 테이블과 별도이며, 35번 기업 API의 운영 연동 전에 적용한다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
 - `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 18개와 별도다.
 
@@ -32,7 +33,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- 테이블 18개·FK 17개·트리거 9개, 기존 PBX 데이터 보존.
+- public 테이블 19개·FK 18개·트리거 9개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지.
@@ -76,7 +77,7 @@ archive 목록 확인 후 advisory lock과 하나의 트랜잭션으로 미적�
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `004-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `005-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -100,3 +101,6 @@ DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다
 
 통화 `provider_call_id` 계약과 주문 저장 방식에 관한 기존 Jira 설명과 ERD 차이도 별도 합의가 필요하다.
 이 작업에서 새로운 상태나 중도 종료 상담 테이블을 임의로 추가하지 않는다.
+
+관리자 세션 검증은 이름 필수·공백 거절, 토큰 해시·만료 시각·FK 제약, 관리자별 세션 삭제와 계정 삭제 cascade를 포함한다.
+003은 기존 관리자 행이 없는 DB를 전제로 한다. 운영 데이터가 있으면 사전 검토 후 이름 보완 migration으로 조정해야 한다.

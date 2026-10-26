@@ -40,7 +40,7 @@ npm run start:dev
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
 
 설정 검증 오류에는 변수 이름만 출력하고 값은 출력하지 않는다. 실제 `.env*`는 Git에서 제외하고 `.env.example`만 관리한다.
-인증 관련 JWT 설정·관리자 비밀번호는 이번 기반에서 요구하지 않는다.
+관리자 인증은 PostgreSQL 서버 세션을 사용한다. JWT 비밀키는 필요하지 않으며 관리자 비밀번호를 환경 파일에 저장하지 않는다.
 
 ## 구조와 역할
 
@@ -252,8 +252,7 @@ DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션�
 
 - 현재 구현과 이 README의 신규 API 접두사는 `/api`이며 공통 기반 Jira 설명에는 `/api/v1`이 남아 있다.
   이번 구조 문서화에서는 현재 경로를 유지하며 접두사를 변경하지 않는다.
-- 후속 인증 설명의 `auth_version`과 DB 문서의 미채택 방침이 다르며 현재 업무 마이그레이션에도 해당 컬럼이 없다.
-  채택 여부를 확인하기 전 임의로 컬럼이나 토큰 정책을 추가하지 않는다.
+- 관리자 인증은 83번에서 서버 세션 9시간으로 확정했다. `auth_version`과 JWT는 사용하지 않는다.
 - 통화 `provider_call_id`와 문장 순번의 전달 계약은 ERD에 미정으로 기록돼 있다.
   AI·PBX 연동 구현 시 확인하며 추정한 규격으로 연결하지 않는다.
 
@@ -293,13 +292,13 @@ API 단건/오류 meta에도 넣는다. Idempotency-Key는 업무 중복 방지�
 신규 API 응답은 no-store다. 인프라 로그 수집·모니터링 설정은 112번 작업 범위다.
 
 CORS_ORIGINS는 브라우저의 정확한 scheme/host/port를 지정한다. 빈 목록은 외부 origin을 허용하지 않으며
-Origin 없는 서버 간 요청은 처리한다. 관리자 Bearer·통화 헤더·멱등키 헤더를 허용하고 request ID·Location·Retry-After를 노출한다.
-쿠키 인증은 사용하지 않는다. CORS는 인증/권한 검사의 대체 수단이 아니다.
+Origin 없는 서버 간 요청의 CORS 처리는 유지한다. 관리자 변경 요청은 별도로 허용 Origin과 `X-CSRF-Protection: 1`을 요구한다.
+관리자는 쿠키 인증을 사용하고 CORS credentials를 허용한다. 통화 Bearer·멱등키 헤더와 request ID·Location·Retry-After 노출은 유지한다. CORS는 인증/권한 검사의 대체 수단이 아니다.
 
 ## Swagger와 자동 검증
 
 개발 문서는 `http://localhost:3000/api/docs`, OpenAPI JSON은 `/api/docs-json`이다.
-공통 ErrorResponseDto와 RequestMetaDto 및 Bearer 인증 정의를 제공한다. 실제 Bearer 인증 구현은 포함하지 않는다.
+공통 ErrorResponseDto와 RequestMetaDto, 관리자 세션 쿠키 인증과 기존 서비스 Bearer 인증 정의를 제공한다.
 업무 Controller의 Swagger 응답에는 전역 envelope를 포함한 최종 응답 스키마를 명시한다.
 
 ```sh
@@ -323,5 +322,85 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 
 ## 후속 기능
 
-관리자 로그인·권한·세션 인증·최초 관리자 생성은 83번 작업 담당자가 구현한다.
+관리자 인증 AUTH-01~08은 아래 계약을 따른다. 최초 관리자는 운영자가 CLI로 직접 생성한다.
 고객·주문 등 업무 API, 프론트 배포/로그인 연동, 업무 스키마 변경 및 MSA 구성은 포함하지 않는다.
+
+## 관리자 세션 인증 — S15P31D109-83
+
+| API | 결과 / 권한 |
+|---|---|
+| POST /api/auth/login | 200 `{ data: { expiresAt }, meta }`, ACTIVE만 로그인 |
+| POST /api/auth/logout | 204, 현재 세션 삭제. 없는 세션도 204 |
+| GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
+| GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext }` |
+| PATCH /api/admins/:id | SYSTEM_ADMIN, role/status 변경, 204 |
+| POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
+| PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
+| PATCH /api/admins/:id/password | SYSTEM_ADMIN, newPassword로 대상 비밀번호 변경, 204 |
+
+ID는 영문 대소문자·숫자 1~20자이고 대소문자를 구분한다. 이름은 필수이며 공백만인 값은 거절한다.
+비밀번호는 최소 6자이고 별도 문자 조합·길이 상한을 두지 않으며 원문을 trim하지 않는다.
+HTTP 요청 본문 크기 제한은 유지한다. 로그인·가입·비밀번호 변경 요청 제한은 사용자 결정으로 적용하지 않는다.
+따라서 반복 로그인 추측과 자원 고갈 위험이 남으며 운영 확장 전에 별도 정책을 정해야 한다.
+
+세션 토큰은 32바이트 암호학적 난수이고 쿠키로만 전달한다. DB에는 SHA-256 해시만 저장한다.
+비밀번호는 Node 내장 scrypt(N=32768,r=8,p=3)와 무작위 salt로 저장한다.
+[OWASP scrypt 기준](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt)을 따른다.
+최초 세션 생성부터 9시간 고정 만료이며 조회로 연장하지 않는다. 재로그인 시 제출된 기존 세션을 교체한다.
+만료 세션은 인증 시 거절하며 같은 관리자의 다음 로그인에서 정리한다. 별도 주기적 청소 작업은 아직 없다.
+
+쿠키 이름은 `dva_session`, HttpOnly, SameSite=Lax, Path=/api, Domain 생략이다.
+NODE_ENV=production에서는 Secure가 활성화되어 HTTPS가 필요하고 개발·테스트에서는 HTTP를 지원한다.
+프론트는 `credentials: 'include'`를 사용하며 POST/PATCH 등 변경 요청에 `X-CSRF-Protection: 1`을 붙인다.
+로그인·가입·로그아웃도 허용 Origin과 이 헤더가 필요하다. curl/Postman에서도 둘을 명시한다.
+`CORS_ORIGINS`에는 실제 프론트 origin을 정확히 등록한다. 동일 출처 배포라도 해당 origin을 등록한다.
+SameSite=Lax 기준으로 동일 사이트 배포를 전제한다. 다른 사이트의 프론트와 쿠키를 공유하려면 별도 설계가 필요하다.
+
+```ts
+await fetch('/api/auth/login', {
+  method: 'POST',
+  credentials: 'include',
+  headers: { 'Content-Type': 'application/json', 'X-CSRF-Protection': '1' },
+  body: JSON.stringify({ loginId, password }),
+});
+```
+
+역할·계정 상태는 매 요청 DB에서 재검사한다. 신규 Controller는 전역 AuthGuard로 기본 보호되며,
+`@Roles('SUPERVISOR', 'SYSTEM_ADMIN')`처럼 허용 역할을 명시한다. 역할 계층을 자동 추론하지 않는다.
+업무 조회는 모든 활성 관리자, AI 설정 편집 등 제한 기능은 해당 명세의 역할을 선언해야 한다.
+기존 health/PBX는 전용 경로와 기존 인증을 유지한다. 새 서비스 토큰 API에는 별도 인증 계약이 필요하다.
+`@PublicAuth()`는 로그인·가입·로그아웃에만 사용하며 다른 업무에 임의로 붙이지 않는다.
+
+AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAccessController도 이 모듈에서 등록하며,
+계정 쓰기는 AdminsService, 감사 기록은 AuditService 공개 기능으로 위임한다. 순환 참조를 만들지 않는다.
+비밀번호 변경은 대상 계정의 모든 세션 삭제·해시 갱신·감사 기록을 동일 트랜잭션으로 처리한다.
+로그인도 같은 계정 잠금을 사용해 이전 비밀번호로 검증 중인 로그인이 변경 후 살아남지 않게 한다.
+동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
+이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 마지막 활성 SYSTEM_ADMIN의 강등은 409다.
+PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
+
+### DB 적용·최초 관리자 생성
+
+앱 시작은 기존 001만 적용한다. 002·003은 `infra/database/migrate.sh`로 별도 적용해야 한다.
+003은 기존 관리자 데이터가 없는 상태를 전제로 하며 운영 DB 적용은 이번 MR에 포함하지 않는다.
+이름이 없는 기존 행이 있으면 적용이 실패하므로 데이터 보완 계획을 먼저 세운다.
+
+첫 SYSTEM_ADMIN/ACTIVE는 운영자가 직접 만든다. 비밀번호를 명령줄 인수·소스·문서에 기록하지 않는다.
+로컬 소스에서 `npm run build` 후 DB 환경변수를 주입하고 아래처럼 표준 입력으로 비밀번호를 전달한다.
+PowerShell에서 입력은 화면에 표시하지 않는다. 테스트 또는 승인한 DB인지 먼저 확인한다.
+
+```powershell
+$adminPassword = Read-Host '초기 관리자 비밀번호' -MaskInput
+$adminPassword | node scripts/bootstrap-admin.cjs admin 디버
+Remove-Variable adminPassword
+```
+
+CLI는 SYSTEM_ADMIN이 이미 있으면 중단하고 기존 계정을 변경하지 않는다. 실제 계정은 자동 생성하지 않는다.
+운영 이미지에는 scripts가 없으므로 CLI는 소스 체크아웃에서 실행한다.
+
+### 검증
+
+`npm run check`는 설정·공통 HTTP·비밀번호/쿠키 단위 검증을 수행한다.
+`node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, CSRF, 만료·삭제, 동시 로그인/비밀번호 변경,
+동시 관리자 강등, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
+저장소 루트의 `./infra/database/test-monolith.ps1`은 migration·백업 복구·체크섬·실패 롤백을 검증한다.
