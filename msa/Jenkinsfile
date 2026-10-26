@@ -31,7 +31,7 @@ pipeline {
                     env.RELEASE_NAME = "${env.SOURCE_COMMIT}-${env.BUILD_NUMBER}"
                     env.DB_IMAGE = "docker.io/library/dva-liquibase:${env.RELEASE_NAME}"
                     env.RUN_MSA_CI = 'true'
-                    env.MSA_BASE_COMMIT = ''
+                    env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
                     def backendBranch = env.SOURCE_BRANCH in [
                         'origin/develop-backend', 'develop-backend'
@@ -43,7 +43,8 @@ pipeline {
                         !env.CHANGE_ID &&
                         !params.DEPLOY_MSA
                     ).toString()
-                    if (webhook && !params.DEPLOY_MSA && !params.DEPLOY_APPS) {
+                    env.DELIVER_APPS = (env.AUTO_DEPLOY_APPS == 'true' || params.DEPLOY_APPS).toString()
+                    if (webhook && !params.DEPLOY_MSA && !params.DEPLOY_APPS && env.DELIVER_APPS != 'true') {
                         env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                         env.RUN_MSA_CI = sh(script: 'bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT"', returnStdout: true).trim()
                         if (!(env.RUN_MSA_CI in ['true', 'false'])) { error 'Invalid MSA change detection result.' }
@@ -84,48 +85,18 @@ pipeline {
         stage('Select Build Scope') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
+                sh 'mkdir -p msa-release'
                 script {
-                    if (params.DEPLOY_APPS) {
-                        env.RUN_COMMON_CI = 'true'
-                        env.RUN_DB_CI = 'false'
-
-                        echo 'Manual application deployment: build all services; skip database CI.'
-                    } else {
-                        env.RUN_COMMON_CI = sh(
-                            script: '''
-                                bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
-                                    msa/ \
-                                    ':(exclude)msa/services/**' \
-                                    ':(exclude)msa/liquibase/**'
-                            ''',
-                            returnStdout: true
-                        ).trim()
-
-                        env.RUN_DB_CI = sh(
-                            script: '''
-                                bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
-                                    msa/liquibase/ \
-                                    msa/Jenkinsfile \
-                                    msa/deploy/has-msa-changes.sh \
-                                    msa/deploy/package.sh \
-                                    msa/deploy/upload.sh \
-                                    msa/deploy/remote.sh \
-                                    msa/deploy/run-remote.sh \
-                                    msa/deploy/ssh-common.sh \
-                                    msa/deploy/known_hosts \
-                                    msa/deploy/tests/test_deploy.py \
-                                    msa/deploy/tests/test_changes.py
-                            ''',
-                            returnStdout: true
-                        ).trim()
+                    if (env.DELIVER_APPS == 'true') {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                            sh 'set +x; bash msa/deploy/read-app-state.sh "$MSA_SSH_KEY" > msa-release/cluster-state.json'
+                        }
                     }
-
-                    if (!(env.RUN_COMMON_CI in ['true', 'false']) ||
-                        !(env.RUN_DB_CI in ['true', 'false'])) {
-                        error 'Invalid build scope result.'
+                    withEnv(["DEPLOY_MSA=${params.DEPLOY_MSA}", "DEPLOY_APPS=${params.DEPLOY_APPS}"]) {
+                        sh 'python3 msa/deploy/plan-apps.py'
                     }
-
-                    echo "Build all services: ${env.RUN_COMMON_CI}; run database CI: ${env.RUN_DB_CI}"
+                    env.RUN_DB_CI = readFile('msa-release/database-ci.txt').trim()
+                    env.HAS_APP_BUILD = (!readFile('msa-release/services.txt').trim().isEmpty()).toString()
                 }
             }
         }
@@ -150,48 +121,15 @@ pipeline {
                 sh '''
                     set -eu
 
-                    for directory in msa/services/*; do
-                        [ -d "$directory" ] || continue
-                        service=$(basename "$directory")
-
-                        case "$service" in
-                            ''|*[!a-z0-9-]*)
-                                echo "Invalid service directory: $service" >&2
-                                exit 1
-                                ;;
-                        esac
-
-                        if [ "$RUN_COMMON_CI" = true ]; then
-                            changed=true
-                        else
-                            changed=$(bash msa/deploy/has-msa-changes.sh \
-                                "$MSA_BASE_COMMIT" "$directory/")
-                        fi
-
-                        case "$changed" in
-                            false)
-                                echo "SKIP: $service"
-                                continue
-                                ;;
-                            true) ;;
-                            *)
-                                echo "Invalid change result: $changed" >&2
-                                exit 1
-                                ;;
-                        esac
-
-                        if [ ! -f "$directory/Dockerfile" ]; then
-                            echo "Missing Dockerfile: $directory" >&2
-                            exit 1
-                        fi
-
+                    while IFS= read -r service; do
+                        directory="msa/services/$service"
                         echo "BUILD: $service"
                         docker build \
                             --tag "docker.io/library/dva-$service:$RELEASE_NAME" \
                             "$directory"
 
                         bash msa/deploy/package-app.sh "$service"
-                    done
+                    done < msa-release/services.txt
                 '''
             }
             post {
@@ -222,28 +160,18 @@ pipeline {
             when {
                 expression {
                     env.RUN_MSA_CI == 'true' &&
-                    (env.AUTO_DEPLOY_APPS == 'true' || params.DEPLOY_APPS) &&
-                    fileExists("msa-release/apps/${env.RELEASE_NAME}")
+                    env.DELIVER_APPS == 'true' && env.HAS_APP_BUILD == 'true'
                 }
             }
             options {
-                timeout(time: 20, unit: 'MINUTES')
+                timeout(time: 45, unit: 'MINUTES')
                 lock(resource: 'dva-msa-database-deploy')
             }
             steps {
                 script {
-                    if (env.AUTO_DEPLOY_APPS == 'true') {
-                        def schemaChanged = sh(
-                            script: '''
-                                bash msa/deploy/has-msa-changes.sh \
-                                    "$MSA_BASE_COMMIT" msa/liquibase/changelog/
-                            ''',
-                            returnStdout: true
-                        ).trim()
-
-                        if (schemaChanged != 'false') {
-                            error 'Database schema changes require DB deployment approval before application delivery.'
-                        }
+                    def blocked = readFile('msa-release/schema-blocked.txt').trim()
+                    if (blocked) {
+                        error "DB approval/apply required before app delivery: ${blocked}. Run the existing DB approval flow first."
                     }
                 }
                 withCredentials([

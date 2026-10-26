@@ -43,3 +43,9 @@ if [[ "$action" != prepare ]]; then
   sudo -n k3s kubectl -n dva get secret "$service-db" -o name
   bash ./run-service.sh "$service" "$action" "$image" "$expected"
 fi
+
+# Record only an approved, successfully verified DB apply; app delivery does not infer approval from CI.
+if [[ "$action" == apply ]]; then
+  sudo -n k3s kubectl annotate namespace dva \
+    "dva.ssafy.io/db-$service-commit=${release%-*}" --overwrite
+fi
