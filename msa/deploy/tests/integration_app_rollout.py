@@ -30,7 +30,7 @@ def command(args, data=None, timeout=360):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--service', default='customer', choices=['customer', 'order'])
+    parser.add_argument('--service', default='customer', choices=['customer', 'order', 'delivery'])
     parser.add_argument('--image', default='dva-customer:local')
     parser.add_argument('--cluster', help='Existing disposable test container, must start with dva-delivery-check-')
     args = parser.parse_args()

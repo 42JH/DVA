@@ -63,6 +63,25 @@ class DeliveryPlanTests(unittest.TestCase):
         self.state['order'] = order
         self.assertEqual(planner.plan(self.deployed, True, self.state, annotations), [])
 
+    def test_new_delivery_skips_deployed_customer_order_and_database(self):
+        self.commit('msa/services/order/Dockerfile', 'FROM node')
+        self.commit('msa/services/order/k8s.yaml', 'manifest')
+        baseline = self.git('rev-parse', 'HEAD')
+        order = deployment(baseline)
+        order['metadata']['name'] = 'order'
+        self.state['order'] = order
+        annotations = {f'dva.ssafy.io/db-{name}-commit': baseline
+                       for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
+        self.commit('msa/services/delivery/Dockerfile', 'FROM node')
+        self.commit('msa/services/delivery/k8s.yaml', 'manifest')
+        self.assertEqual(planner.plan(baseline, True, self.state, annotations), ['delivery'])
+        self.assertEqual(planner.databases(baseline, True, annotations), [])
+        self.assertFalse(planner.changed(baseline, planner.DB_PATHS))
+        delivery = deployment(self.git('rev-parse', 'HEAD'))
+        delivery['metadata']['name'] = 'delivery'
+        self.state['delivery'] = delivery
+        self.assertEqual(planner.plan(baseline, True, self.state, annotations), [])
+
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')
