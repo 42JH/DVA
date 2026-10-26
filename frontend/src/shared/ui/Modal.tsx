@@ -3,7 +3,7 @@ import { Button } from './Button'
 
 // 오버레이 두 가지 (와이어프레임 13 · 14)
 // ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]
-// FormModal:     600(08 · 09 팝업) / 960(03 송장표 · 주문 추가) 폭 · 제목 + ✕ · 내용 · 아래 버튼 — 안쪽 여백 32
+// FormModal:     600(08 사원 수정) / 680(09 질의) / 960(03 송장표 · 주문 추가) 폭 · 제목 + ✕ · 내용 · 아래 버튼 — 안쪽 여백 32
 // 둘 다 뒤 화면을 #2B2F36 40%로 가리고, Esc로 닫힘. 창 자체는 DOM 흐름 밖(fixed)
 
 function Overlay({
@@ -101,7 +101,7 @@ export function FormModal({
 }: {
   title: string
   description?: string // 제목 아래 회색 한 줄 (03 주문 추가)
-  width?: 600 | 960
+  width?: number // 600 · 680 · 960
   onClose: () => void
   children: ReactNode
   footer: ReactNode // 보통 <Button>취소</Button> <Button kind="primary">저장</Button>

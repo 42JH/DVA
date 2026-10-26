@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, Navigate } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { LoginPage } from '../features/auth/view/LoginPage'
+import { FaqPage } from '../features/faq/view/FaqPage'
 import { ApiError } from '../shared/api/client'
 import { AppLayout } from './AppLayout'
 import { Placeholder } from './Placeholder'
@@ -39,7 +40,7 @@ const router = createBrowserRouter([
       { path: 'inquiries/:callId', element: <Placeholder title="05 통화 문의 상세" /> },
       { path: 'companies', element: <Placeholder title="08 기업관리" /> },
       { path: 'personas', element: <Placeholder title="07 페르소나 관리" /> },
-      { path: 'faqs', element: <Placeholder title="09 FAQ 관리" /> },
+      { path: 'faqs', element: <FaqPage /> },
       { path: 'admins', element: <Placeholder title="10 관리자 권한 관리" /> },
       { path: 'me', element: <Placeholder title="11 내 정보" /> },
       ...(import.meta.env.DEV ? [{ path: 'ui-kit', element: <UiKitPage /> }] : []), // 공통 부품 확인용, 개발 중에만

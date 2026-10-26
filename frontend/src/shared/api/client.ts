@@ -11,10 +11,11 @@ export interface ApiItem<T> {
   meta?: { requestId: string }
 }
 
-/** 목록 응답 { data[], hasNext } — 총 건수는 없음 (대조표 D2) */
+/** 목록 응답 { data[], hasNext } — 총 건수(totalCount)는 대조표 D2로 BE에 요청 중. 오면 쪽 번호를 그리고, 없으면 ‹ 현재 › 만 */
 export interface ApiList<T> {
   data: T[]
   hasNext: boolean
+  totalCount?: number
 }
 
 type FieldError = { field: string; reason: string }
