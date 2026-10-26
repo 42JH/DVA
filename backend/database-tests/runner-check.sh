@@ -23,14 +23,17 @@ test "$(psql -X -U dva -d restore_check -Atc "SELECT count(*) FROM pg_tables WHE
 echo 'PASS: pre-migration backup restored with the original PBX receipt'
 
 # Repeating the unchanged migrations is a no-op.
-sh "$RUNNER" dva-db-129-check "$ROOT/backups"
+backup_count=$(find "$ROOT/backups" -type f | wc -l)
+sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/no-backup"
+test ! -e "$ROOT/no-backup"
+test "$(find "$ROOT/backups" -type f | wc -l)" = "$backup_count"
 test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 4
 echo 'PASS: repeated execution skips already-applied migrations'
 
 # Tamper only with a copy inside this test container, never with repo files.
 cp "$MIGRATIONS/002-monolith-initial.sql" "$ROOT/original-002.sql"
 printf '\n-- checksum drift probe\n' >> "$MIGRATIONS/002-monolith-initial.sql"
-if sh "$RUNNER" dva-db-129-check "$ROOT/backups" > "$ROOT/drift.log" 2>&1; then
+if sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/backups" > "$ROOT/drift.log" 2>&1; then
  echo 'FAIL: checksum drift was accepted' >&2; exit 1
 fi
 grep -q 'Previously applied migration checksum changed' "$ROOT/drift.log"
@@ -39,7 +42,7 @@ echo 'PASS: changed applied SQL is rejected'
 
 printf 'CREATE TABLE migration_rollback_probe(id integer);\n' > "$MIGRATIONS/005-rollback-probe.sql"
 printf 'SELECT 1/0;\n' > "$MIGRATIONS/006-failure-probe.sql"
-if sh "$RUNNER" dva-db-129-check "$ROOT/backups" > "$ROOT/failure.log" 2>&1; then
+if sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/backups" > "$ROOT/failure.log" 2>&1; then
  echo 'FAIL: invalid migration was accepted' >&2; exit 1
 fi
 test "$(psql -X -U dva -d monolith_db -Atc "SELECT to_regclass('public.migration_rollback_probe') IS NULL")" = t
@@ -48,7 +51,7 @@ echo 'PASS: failure rolls back all newly pending SQL and ledger records'
 
 # Also prove atomic rollback when no ledger or business schema exists yet.
 createdb -U dva first_run_failure_check
-if POSTGRES_DB=first_run_failure_check sh "$RUNNER" dva-db-129-check "$ROOT/backups" > "$ROOT/first-failure.log" 2>&1; then
+if POSTGRES_DB=first_run_failure_check sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/backups" > "$ROOT/first-failure.log" 2>&1; then
  echo 'FAIL: first-run invalid migration was accepted' >&2; exit 1
 fi
 test "$(psql -X -U dva -d first_run_failure_check -Atc "SELECT count(*) FROM pg_namespace WHERE nspname IN ('db_migrations','pbx_webhooks','api_idempotency')")" = 0
