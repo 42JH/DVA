@@ -27,16 +27,19 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
-test('company endpoints remain unregistered until the session authentication from issue 83 is connected', async () => {
+test('production company endpoints require a real session for every operation', async () => {
   for (const [method, path] of [
     ['GET', '/api/companies'],
     ['POST', '/api/companies'],
     ['GET', '/api/companies/1'],
     ['PATCH', '/api/companies/1'],
   ]) {
-    const response = await fetch('http://backend:3000' + path, { method });
-    assert.equal(response.status, 404);
-    assert.equal((await response.json()).error.code, 'NOT_FOUND');
+    const response = await fetch('http://proxy' + path, {
+      method,
+      headers: { Origin: 'https://13.209.59.180', 'X-CSRF-Protection': '1' },
+    });
+    assert.equal(response.status, 401);
+    assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
   }
 });
 
@@ -81,7 +84,7 @@ test('production image receives the existing PBX contract through real Nginx wit
   assert.deepEqual(await response.json(), { status: 'received', recordingId, duplicate: false });
 });
 
-test('production login through Nginx sets Secure cookie, authenticates me, and logs out', async () => {
+test('production login through Nginx authorizes company operations and logout revokes access', async () => {
   const headers = {
     'Content-Type': 'application/json',
     Origin: 'https://13.209.59.180',
@@ -100,6 +103,46 @@ test('production login through Nginx sets Secure cookie, authenticates me, and l
   const me = await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } });
   assert.equal(me.status, 200);
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
+  const name = 'runtime-company-' + randomUUID();
+  const key = randomUUID();
+  const companyHeaders = { ...headers, Cookie: session, 'Idempotency-Key': key };
+  const register = () =>
+    fetch('http://proxy/api/companies', {
+      method: 'POST',
+      headers: companyHeaders,
+      body: JSON.stringify({ name }),
+    });
+  const created = await register();
+  assert.equal(created.status, 201);
+  const id = (await created.json()).data.organizationSeq;
+  const replay = await register();
+  assert.equal(replay.status, 201);
+  assert.equal((await replay.json()).data.organizationSeq, id);
+  const list = await fetch('http://proxy/api/companies?q=' + encodeURIComponent(name), {
+    headers: { Cookie: session },
+  });
+  assert.equal(list.status, 200);
+  assert.equal((await list.json()).data[0].organizationSeq, id);
+  const detail = await fetch('http://proxy/api/companies/' + id, { headers: { Cookie: session } });
+  assert.equal(detail.status, 200);
+  assert.equal((await detail.json()).data.name, name);
+  const csrf = await fetch('http://proxy/api/companies/' + id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Cookie: session, Origin: headers.Origin },
+    body: '{"status":"INACTIVE"}',
+  });
+  assert.equal(csrf.status, 403);
+  const updated = await fetch('http://proxy/api/companies/' + id, {
+    method: 'PATCH',
+    headers: companyHeaders,
+    body: '{"status":"INACTIVE"}',
+  });
+  assert.equal(updated.status, 204);
+  assert.equal(await updated.text(), '');
+  const inactive = await fetch('http://proxy/api/companies/' + id, {
+    headers: { Cookie: session },
+  });
+  assert.equal((await inactive.json()).data.status, 'INACTIVE');
   const logout = await fetch('http://proxy/api/auth/logout', {
     method: 'POST',
     headers: { ...headers, Cookie: session },
@@ -107,6 +150,10 @@ test('production login through Nginx sets Secure cookie, authenticates me, and l
   assert.equal(logout.status, 204);
   assert.equal(
     (await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } })).status,
+    401,
+  );
+  assert.equal(
+    (await fetch('http://proxy/api/companies', { headers: { Cookie: session } })).status,
     401,
   );
 });
