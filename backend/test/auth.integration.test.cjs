@@ -540,3 +540,201 @@ test('prepare disposable runtime account for production-image cookie checks', as
     [await hashPassword('runtime-only-password')],
   );
 });
+test('OPS-02 requires a session and permits only supervisors and system administrators', async () => {
+  assert.equal((await call('GET', '/api/audit-logs')).status, 401);
+  assert.equal(
+    (await call('GET', '/api/audit-logs', undefined, 'dva_session=invalid')).status,
+    401,
+  );
+
+  for (const [suffix, role, expected] of [
+    ['auditOperator', 'OPERATOR', 403],
+    ['auditSupervisor', 'SUPERVISOR', 200],
+    ['auditSystem', 'SYSTEM_ADMIN', 200],
+  ]) {
+    const user = await account(suffix, role);
+    const signedIn = await login(user);
+    assert.equal(signedIn.status, 200);
+
+    const response = await call('GET', '/api/audit-logs', undefined, signedIn.session);
+
+    assert.equal(response.status, expected);
+  }
+});
+
+test('OPS-02 filters, paginates, orders ties and excludes private metadata', async () => {
+  const user = await account('auditReader', 'SUPERVISOR');
+  const signedIn = await login(user);
+  assert.equal(signedIn.status, 200);
+
+  const action = prefix + '_AUDIT_LIST';
+  const inserted = [];
+
+  for (const [occurredAt, result] of [
+    ['2026-01-01T00:00:00Z', 'SUCCESS'],
+    ['2026-01-02T00:00:00Z', 'DENIED'],
+    ['2026-01-02T00:00:00Z', 'FAILED'],
+    ['2026-01-03T00:00:00Z', 'SUCCESS'],
+  ]) {
+    const row = await db.pool.query(
+      `INSERT INTO audit_logs(
+        actor_type, actor_seq, action, target_type, target_seq,
+        request_id, result, metadata, occurred_at
+      )
+      VALUES(
+        'ADMIN', $1, $2, 'ADMIN_USER', $1,
+        $3, $4, $5::jsonb, $6::timestamptz
+      )
+      RETURNING audit_log_seq`,
+      [
+        user.id,
+        action,
+        require('node:crypto').randomUUID(),
+        result,
+        JSON.stringify({ password: 'must-not-be-exposed' }),
+        occurredAt,
+      ],
+    );
+    inserted.push(row.rows[0].audit_log_seq);
+  }
+
+  const filters = {
+    actorSeq: String(user.id),
+    action,
+    targetType: 'ADMIN_USER',
+    targetSeq: String(user.id),
+    from: '2026-01-01T00:00:00Z',
+    to: '2026-01-03T00:00:00Z',
+    limit: '2',
+  };
+
+  const read = (extra = {}) =>
+    call(
+      'GET',
+      '/api/audit-logs?' + new URLSearchParams({ ...filters, ...extra }),
+      undefined,
+      signedIn.session,
+    );
+
+  const first = await read();
+  assert.equal(first.status, 200);
+  assert.deepEqual(
+    first.body.data.map((row) => row.auditLogSeq),
+    [inserted[2], inserted[1]],
+  );
+  assert.equal(first.body.hasNext, true);
+  assert.deepEqual(Object.keys(first.body).sort(), ['data', 'hasNext']);
+  assert.ok(first.body.data.every((row) => Object.keys(row.metadata).length === 0));
+  assert.ok(!first.text.includes('must-not-be-exposed'));
+
+  const second = await read({ offset: '2' });
+  assert.equal(second.status, 200);
+  assert.deepEqual(
+    second.body.data.map((row) => row.auditLogSeq),
+    [inserted[0]],
+  );
+  assert.equal(second.body.hasNext, false);
+
+  for (const [result, id] of [
+    ['SUCCESS', inserted[0]],
+    ['DENIED', inserted[1]],
+    ['FAILED', inserted[2]],
+  ]) {
+    const response = await read({ result });
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.data.map((row) => row.auditLogSeq),
+      [id],
+    );
+  }
+
+  for (const extra of [
+    { actorSeq: String(user.id + 100000) },
+    { targetSeq: String(user.id + 100000) },
+    { targetType: 'NO_SUCH_TARGET' },
+    { action: action + "' OR 1=1 --" },
+    { offset: '100' },
+  ]) {
+    const response = await read(extra);
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { data: [], hasNext: false });
+  }
+
+  const systemAction = action + '_SYSTEM';
+  await db.pool.query(
+    `INSERT INTO audit_logs(
+      actor_type, actor_seq, action, target_type, target_seq,
+      request_id, result, metadata
+    )
+    VALUES('SYSTEM', NULL, $1, 'ADMIN_USER', NULL, $2, 'SUCCESS', '{}')`,
+    [systemAction, require('node:crypto').randomUUID()],
+  );
+
+  const system = await call(
+    'GET',
+    '/api/audit-logs?' + new URLSearchParams({ action: systemAction }),
+    undefined,
+    signedIn.session,
+  );
+
+  assert.equal(system.status, 200);
+  assert.equal(system.body.data.length, 1);
+  assert.equal(system.body.data[0].actorType, 'SYSTEM');
+  assert.equal(system.body.data[0].actorSeq, null);
+  assert.equal(system.body.data[0].targetSeq, null);
+});
+
+test('OPS-02 rejects invalid filters and documents the session-protected endpoint', async () => {
+  const user = await account('auditValidation', 'SYSTEM_ADMIN');
+  const signedIn = await login(user);
+  assert.equal(signedIn.status, 200);
+
+  for (const query of [
+    { actorSeq: '0' },
+    { actorSeq: '1e2' },
+    { actorSeq: '2147483648' },
+    { targetSeq: '-1' },
+    { action: ' ' },
+    { targetType: '' },
+    { result: 'UNKNOWN' },
+    { limit: '0' },
+    { limit: '101' },
+    { offset: '-1' },
+    { from: 'not-a-date' },
+    { from: '2026-02-30T00:00:00Z' },
+    { from: '2026-01-01T00:00:00' },
+    { from: '2026-01-02T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+    { from: '2026-01-01T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+  ]) {
+    const response = await call(
+      'GET',
+      '/api/audit-logs?' + new URLSearchParams(query),
+      undefined,
+      signedIn.session,
+    );
+
+    assert.equal(response.status, 400, JSON.stringify(query));
+    assert.equal(response.body.error.code, 'INVALID_REQUEST');
+  }
+
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const operation = document.paths['/api/audit-logs'].get;
+
+  assert.ok(operation);
+  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
+  assert.ok(operation.responses['200']);
+
+  const names = operation.parameters.map((parameter) => parameter.name);
+  for (const name of [
+    'actorSeq',
+    'action',
+    'targetType',
+    'targetSeq',
+    'result',
+    'from',
+    'to',
+    'limit',
+    'offset',
+  ])
+    assert.ok(names.includes(name), name);
+});

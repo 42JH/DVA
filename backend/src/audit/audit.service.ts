@@ -1,9 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
+import { ApiException } from '../common/errors/api.exception';
+import { ListResponse } from '../common/pagination';
 import { AuditRepository } from './audit.repository';
+import { AuditLog } from './audit.types';
+import { AuditQueryDto } from './dto/audit-query.dto';
+
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
+
   record(
     actorId: number | null,
     targetId: number | null,
@@ -12,5 +18,25 @@ export class AuditService {
     client: PoolClient,
   ) {
     return this.repository.record(actorId, targetId, action, requestId, client);
+  }
+
+  async findMany(query: AuditQueryDto): Promise<ListResponse<AuditLog>> {
+    const from = query.from === undefined ? undefined : Date.parse(query.from);
+    const to = query.to === undefined ? undefined : Date.parse(query.to);
+
+    if (
+      (from !== undefined && !Number.isFinite(from)) ||
+      (to !== undefined && !Number.isFinite(to)) ||
+      (from !== undefined && to !== undefined && from >= to)
+    ) {
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. 시작 시각은 종료 시각보다 빨라야 합니다.',
+      );
+    }
+
+    const rows = await this.repository.findMany(query);
+    return new ListResponse(rows, query.limit);
   }
 }
