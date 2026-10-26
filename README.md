@@ -142,6 +142,7 @@ dva/
 
 - [고정 IP HTTPS·인증서 자동 갱신](infra/https/README.md)
 - [PBX 통화 종료 웹훅 규격·토큰 전달·검증](infra/webhooks/PBX-CALL-ENDED.md)
+- [모놀리식 백엔드 개발 환경·공통 API 처리·자동 검증](backend/README.md)
 
 상세 설계 및 개발 관련 문서는 `docs/` 디렉터리에서 관리합니다.
 
