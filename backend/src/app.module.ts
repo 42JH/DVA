@@ -1,13 +1,10 @@
 import { Module } from '@nestjs/common';
-import { HealthController } from './health.controller';
-import { HealthService } from './health.service';
-import { DatabaseService } from './database.service';
-import { PbxWebhookController } from './pbx-webhook.controller';
-import { PbxWebhookGuard } from './pbx-webhook.guard';
-import { PbxWebhookService } from './pbx-webhook.service';
+import { ApplicationConfigModule } from './config/application-config.module';
+import { DatabaseModule } from './database/database.module';
+import { HealthModule } from './health/health.module';
+import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
 
 @Module({
-  controllers: [HealthController, PbxWebhookController],
-  providers: [DatabaseService, HealthService, PbxWebhookGuard, PbxWebhookService],
+  imports: [ApplicationConfigModule, DatabaseModule, HealthModule, PbxWebhookModule],
 })
 export class AppModule {}

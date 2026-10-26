@@ -1,17 +1,25 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { DatabaseService } from './database.service';
+import { ConfigService } from '@nestjs/config';
+import { DatabaseService } from '../database/database.service';
+import { Environment } from '../config/environment';
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly config: ConfigService<Environment, true>,
+  ) {}
 
   async checkDependencies(): Promise<{
     status: string;
     dependencies: { database: string; aiAgent: string };
   }> {
-    const aiUrl = process.env.AI_AGENT_URL ?? 'http://ai-agent:8000';
+    const aiUrl = this.config.get('AI_AGENT_URL', { infer: true });
     const [databaseOk, aiAgentOk] = await Promise.all([
-      this.database.pool.query('SELECT 1').then(() => true).catch(() => false),
+      this.database.pool
+        .query('SELECT 1')
+        .then(() => true)
+        .catch(() => false),
       fetch(`${aiUrl}/health`, { signal: AbortSignal.timeout(2000) })
         .then((response) => response.ok)
         .catch(() => false),
@@ -30,5 +38,4 @@ export class HealthService {
     }
     return body;
   }
-
 }

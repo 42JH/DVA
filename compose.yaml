@@ -41,7 +41,7 @@ services:
     expose:
       - "3000"
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: "3000"
       DB_HOST: db
       DB_PORT: "5432"
@@ -50,6 +50,8 @@ services:
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
       AI_AGENT_URL: http://ai:8000
       PBX_WEBHOOK_TOKEN: ${PBX_WEBHOOK_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
     networks:
       - web_net
       - ai_net
