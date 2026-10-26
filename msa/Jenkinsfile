@@ -75,6 +75,18 @@ pipeline {
             }
         }
 
+        stage('Verify and Build Customer') {
+            when {expression {env.RUN_MSA_CI == 'true'} }
+            steps {
+                sh '''
+                    set -eu
+                    docker build \
+                    --tag "dva-customer:$RELEASE_NAME" \
+                    msa/services/customer
+                '''
+            }
+        }
+
         stage('Package Database Image') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps { sh 'bash msa/deploy/package.sh' }
