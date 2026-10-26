@@ -5,20 +5,18 @@ const { randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { Pool } = require('pg');
-const { Module } = require('@nestjs/common');
 const { NestFactory } = require('@nestjs/core');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
-const { ApplicationConfigModule } = require('../dist/config/application-config.module');
-const { OrganizationsModule } = require('../dist/organizations/organizations.module');
+process.env.CORS_ORIGINS = 'http://localhost:5173';
+const { AppModule } = require('../dist/app.module');
 const { OrganizationsRepository } = require('../dist/organizations/organizations.repository');
 const { configureApplication } = require('../dist/configure-application');
+const { hashPassword } = require('../dist/auth/password');
 
-class FixtureModule {}
-Module({ imports: [ApplicationConfigModule, OrganizationsModule] })(FixtureModule);
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
@@ -26,20 +24,34 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-let app, appB, base, baseB, adminA, adminB, repository;
+let app, appB, base, baseB, adminA, adminB, repository, hash, sessionA;
 const apps = [];
+const cookies = new Map();
+const password = 'company-test-only-password';
+const mutationHeaders = { Origin: 'http://localhost:5173', 'X-CSRF-Protection': '1' };
 
-async function start(adminId) {
-  const application = await NestFactory.create(FixtureModule, { logger: false });
+async function start() {
+  const application = await NestFactory.create(AppModule, { logger: false });
   apps.push(application);
-  // Test fixture only: emulate an already authenticated session, without implementing issue 83.
-  application.use((request, _response, next) => {
-    request.admin = { adminUserSeq: adminId };
-    next();
-  });
   configureApplication(application, { log: () => {} });
   await application.listen(0, '127.0.0.1');
   return application;
+}
+async function login(loginId, host = base) {
+  const response = await fetch(host + '/api/auth/login', {
+    method: 'POST',
+    headers: { ...mutationHeaders, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginId, password }),
+  });
+  assert.equal(response.status, 200);
+  return response.headers.get('set-cookie').split(';')[0];
+}
+async function account(loginId, role = 'OPERATOR', status = 'ACTIVE') {
+  const result = await pool.query(
+    'INSERT INTO admin_users (login_id,name,password_hash,role,status) VALUES ($1,$2,$3,$4,$5) RETURNING admin_user_seq',
+    [loginId, '기업 테스트', hash, role, status],
+  );
+  return result.rows[0].admin_user_seq;
 }
 before(async () => {
   const client = await pool.connect();
@@ -66,14 +78,16 @@ before(async () => {
   } finally {
     client.release();
   }
-  const admins = await pool.query(`INSERT INTO admin_users (login_id,name,password_hash,role,status)
-    VALUES ('company-test-a','기업 테스트 A','test-only-hash','OPERATOR','ACTIVE'),
-           ('company-test-b','기업 테스트 B','test-only-hash','SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq`);
-  [adminA, adminB] = admins.rows.map((row) => row.admin_user_seq);
-  app = await start(adminA);
-  appB = await start(adminB);
+  hash = await hashPassword(password);
+  adminA = await account('companyTestA');
+  adminB = await account('companyTestB', 'SYSTEM_ADMIN');
+  app = await start();
+  appB = await start();
   base = await app.getUrl();
   baseB = await appB.getUrl();
+  sessionA = await login('companyTestA');
+  cookies.set(base, sessionA);
+  cookies.set(baseB, await login('companyTestB', baseB));
   repository = app.get(OrganizationsRepository);
 });
 after(async () => {
@@ -81,7 +95,15 @@ after(async () => {
   await pool.end();
 });
 
-const request = (path, options = {}, host = base) => fetch(host + '/api/companies' + path, options);
+const request = (path, options = {}, host = base) =>
+  fetch(host + '/api/companies' + path, {
+    ...options,
+    headers: Object.fromEntries(
+      Object.entries({ ...mutationHeaders, Cookie: cookies.get(host), ...options.headers }).filter(
+        ([, value]) => value !== undefined,
+      ),
+    ),
+  });
 const create = (name, key = randomUUID(), host = base, extra = {}) =>
   request(
     '',
@@ -98,6 +120,122 @@ const patch = (id, body) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+
+test('every company operation rejects missing, forged and malformed sessions before writes', async () => {
+  const count = (await pool.query('SELECT count(*) FROM organizations')).rows[0].count;
+  for (const cookie of [undefined, 'dva_session=invalid', 'dva_session=' + 'a'.repeat(64)]) {
+    for (const [method, path] of [
+      ['GET', ''],
+      ['POST', ''],
+      ['GET', '/1'],
+      ['PATCH', '/1'],
+    ]) {
+      const response = await request(path, {
+        method,
+        headers: { Cookie: cookie, 'X-Admin-User-Seq': String(adminA) },
+      });
+      assert.equal(response.status, 401, method + ' ' + path);
+      assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
+    }
+  }
+  assert.equal((await pool.query('SELECT count(*) FROM organizations')).rows[0].count, count);
+});
+
+test('company writes require both the allowed Origin and CSRF header even with a valid session', async () => {
+  const id = (await (await create('CSRF 검증 기업')).json()).data.organizationSeq;
+  for (const headers of [
+    { Origin: undefined },
+    { 'X-CSRF-Protection': undefined },
+    { 'X-CSRF-Protection': '0' },
+    { Origin: 'https://untrusted.invalid' },
+  ]) {
+    for (const [method, path, body] of [
+      ['POST', '', { name: 'CSRF 거절 기업' }],
+      ['PATCH', '/' + id, { name: 'CSRF 거절 기업' }],
+    ]) {
+      const response = await request(path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': randomUUID(),
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).error.code, 'FORBIDDEN');
+    }
+  }
+  assert.equal((await (await request('/' + id)).json()).data.name, 'CSRF 검증 기업');
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', ['CSRF 거절 기업']))
+      .rows[0].count,
+    '0',
+  );
+});
+
+test('all active administrator roles can register, list, read and update companies', async () => {
+  await account('companySupervisor', 'SUPERVISOR');
+  for (const cookie of [sessionA, cookies.get(baseB), await login('companySupervisor')]) {
+    const name = '역할 검증 ' + randomUUID();
+    const created = await request('', {
+      method: 'POST',
+      headers: {
+        Cookie: cookie,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
+      body: JSON.stringify({ name }),
+    });
+    assert.equal(created.status, 201);
+    const id = (await created.json()).data.organizationSeq;
+    assert.equal((await request('/' + id, { headers: { Cookie: cookie } })).status, 200);
+    const list = await request('?q=' + encodeURIComponent(name), { headers: { Cookie: cookie } });
+    assert.equal(list.status, 200);
+    assert.equal((await list.json()).data[0].organizationSeq, id);
+    assert.equal(
+      (
+        await request('/' + id, {
+          method: 'PATCH',
+          headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+          body: '{"status":"INACTIVE"}',
+        })
+      ).status,
+      204,
+    );
+  }
+});
+
+test('expired, logged-out and pending-administrator sessions cannot access any company operation', async () => {
+  for (const reason of ['expired', 'logout', 'pending']) {
+    const loginId = 'company' + reason;
+    const id = await account(loginId);
+    const cookie = await login(loginId);
+    if (reason === 'expired') {
+      await pool.query(
+        "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
+        [id],
+      );
+    } else if (reason === 'pending') {
+      await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [id]);
+    } else {
+      const response = await fetch(base + '/api/auth/logout', {
+        method: 'POST',
+        headers: { ...mutationHeaders, Cookie: cookie },
+      });
+      assert.equal(response.status, 204);
+    }
+    for (const [method, path] of [
+      ['GET', ''],
+      ['POST', ''],
+      ['GET', '/1'],
+      ['PATCH', '/1'],
+    ]) {
+      const response = await request(path, { method, headers: { Cookie: cookie } });
+      assert.equal(response.status, 401, reason + ' ' + method + ' ' + path);
+    }
+  }
+});
 
 test('registration returns only an ID; detail preserves the agreed name/status contract', async () => {
   const response = await create('  등록 기업  ');
@@ -251,19 +389,28 @@ test('completed registration survives application restart and replays the same I
   const original = (await (await create('재시작 검증 기업', key)).json()).data;
   await app.close();
   apps.splice(apps.indexOf(app), 1);
-  app = await start(adminA);
+  app = await start();
   base = await app.getUrl();
+  cookies.set(base, sessionA);
   repository = app.get(OrganizationsRepository);
   const response = await create('재시작 검증 기업', key);
   assert.equal(response.status, 201);
   assert.deepEqual((await response.json()).data, original);
 });
 
-test('the same key is scoped by the supplied authenticated identity, without role-specific business rules', async () => {
+test('the same key is scoped by the actual logged-in administrator', async () => {
   const key = randomUUID();
   const first = (await (await create('관리자 A 기업', key)).json()).data;
   const second = (await (await create('관리자 B 기업', key, baseB)).json()).data;
   assert.notEqual(first.organizationSeq, second.organizationSeq);
+  const actors = await pool.query(
+    'SELECT admin_user_seq FROM api_idempotency.organization_creations WHERE idempotency_key=$1 ORDER BY admin_user_seq',
+    [key],
+  );
+  assert.deepEqual(
+    actors.rows.map((row) => row.admin_user_seq),
+    [adminA, adminB],
+  );
   assert.equal(
     (
       await pool.query(
@@ -324,7 +471,16 @@ test('a failed idempotency write rolls back the organization, allowing a success
 
 test('OpenAPI describes the four company operations and their actual envelopes', async () => {
   const document = await (await fetch(base + '/api/docs-json')).json();
-  assert.deepEqual(Object.keys(document.paths).sort(), ['/api/companies', '/api/companies/{id}']);
+  for (const [path, method] of [
+    ['/api/companies', 'get'],
+    ['/api/companies', 'post'],
+    ['/api/companies/{id}', 'get'],
+    ['/api/companies/{id}', 'patch'],
+  ]) {
+    assert.ok(document.paths[path][method]);
+    assert.deepEqual(document.paths[path][method].security, [{ adminSession: [] }]);
+  }
+  assert.equal(document.components.securitySchemes.adminSession.name, 'dva_session');
   assert.ok(
     document.paths['/api/companies'].get.responses['200'].content['application/json'].schema
       .properties.hasNext,
