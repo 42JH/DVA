@@ -4,10 +4,11 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
-COPY nest-cli.json tsconfig*.json ./
+COPY nest-cli.json tsconfig*.json .prettierrc eslint.config.mjs ./
 COPY src ./src
 COPY test ./test
-RUN npm test -- --runInBand \
+RUN npm run lint \
+ && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
  && npm run build
 
