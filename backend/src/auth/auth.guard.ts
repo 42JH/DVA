@@ -5,6 +5,8 @@ import { Request } from 'express';
 import { Environment } from '../config/environment';
 import { AdminPublic, AdminRole } from '../admins/admins.types';
 import { ApiException } from '../common/errors/api.exception';
+import { AuditService } from '../audit/audit.service';
+import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/audit-operation';
 import { AuthService } from './auth.service';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
@@ -23,10 +25,27 @@ export function readSessionToken(request: Request): string | undefined {
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly auth: AuthService,
+    private readonly audit: AuditService,
     private readonly reflector: Reflector,
     private readonly config: ConfigService<Environment, true>,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    try {
+      return await this.checkAccess(context);
+    } catch (error) {
+      const operation = this.reflector.get<AuditOperationOptions>(
+        AUDIT_OPERATION,
+        context.getHandler(),
+      );
+      if (operation)
+        await this.audit.recordFailure(
+          auditEvent(operation, context.switchToHttp().getRequest<AuthRequest>()),
+          error,
+        );
+      throw error;
+    }
+  }
+  private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     // Existing health and PBX retain their dedicated authentication contracts.
     if (

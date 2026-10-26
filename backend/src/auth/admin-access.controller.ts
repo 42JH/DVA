@@ -1,3 +1,4 @@
+import { AuditOperation } from '../audit/audit-operation';
 import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -45,6 +46,7 @@ export class AdminAccessController {
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
   }
+  @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id')
   @HttpCode(204)
   @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
@@ -52,6 +54,7 @@ export class AdminAccessController {
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
+  @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id/password')
   @HttpCode(204)
   @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })

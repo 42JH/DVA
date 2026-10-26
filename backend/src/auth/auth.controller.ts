@@ -1,3 +1,4 @@
+import { AuditOperation } from '../audit/audit-operation';
 import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -34,6 +35,7 @@ export class AuthController {
   }
   @PublicAuth()
   @ApiOperation({ security: [] })
+  @AuditOperation({ action: 'ADMIN_LOGIN', targetType: 'ADMIN_USER', target: 'none' })
   @Post('login')
   @HttpCode(200)
   @ApiOkResponse({
@@ -53,6 +55,7 @@ export class AuthController {
   }
   @PublicAuth()
   @ApiOperation({ security: [] })
+  @AuditOperation({ action: 'ADMIN_SIGNUP', targetType: 'ADMIN_USER', target: 'none' })
   @Post('signup')
   @HttpCode(204)
   @ApiNoContentResponse()
@@ -62,12 +65,13 @@ export class AuthController {
   }
   @PublicAuth()
   @ApiOperation({ security: [] })
+  @AuditOperation({ action: 'ADMIN_LOGOUT', targetType: 'ADMIN_USER', target: 'none' })
   @Post('logout')
   @HttpCode(204)
   @ApiNoContentResponse()
   @ApiResponse({ status: 503, type: ErrorResponseDto })
   async logout(@Req() request: AuthRequest, @Res({ passthrough: true }) response: Response) {
-    await this.auth.logout(request.sessionToken);
+    await this.auth.logout(request.sessionToken, request.requestId);
     response.clearCookie(SESSION_COOKIE, this.options());
   }
   @Get('me')
@@ -76,6 +80,7 @@ export class AuthController {
     const { adminUserSeq, loginId, name, role, status } = request.admin;
     return { adminUserSeq, loginId, name, role, status };
   }
+  @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'actor' })
   @Patch('password')
   @HttpCode(204)
   @ApiNoContentResponse()

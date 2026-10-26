@@ -328,7 +328,7 @@ test('system admin approves pending accounts, filters lists, rejects empty/null 
   assert.equal(list.body.data[0].passwordHash, undefined);
   const audit = (
     await db.pool.query(
-      "SELECT * FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED'",
+      "SELECT * FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
       [pending.id],
     )
   ).rows;
@@ -809,4 +809,121 @@ test('audit detail enforces roles, validates IDs and returns a redacted immutabl
     operation.responses['200'].content['application/json'].schema.$ref,
     '#/components/schemas/AuditDetailResponseDto',
   );
+});
+
+test('audited mutations preserve actor, target and exactly one failure after guard/DTO/transaction rejection', async () => {
+  const operator = await account('auditDenied');
+  const session = (await login(operator)).session;
+  const system = await account('auditWriter', 'SYSTEM_ADMIN');
+  const systemSession = (await login(system)).session;
+  const pending = await account('auditPending', 'OPERATOR', 'PENDING');
+  const cases = [
+    [
+      'PATCH',
+      `/api/admins/${pending.id}`,
+      { status: 'ACTIVE' },
+      session,
+      403,
+      'DENIED',
+      operator.id,
+    ],
+    ['PATCH', `/api/admins/${pending.id}`, { role: null }, systemSession, 400, 'FAILED', system.id],
+    [
+      'POST',
+      '/api/auth/login',
+      { loginId: operator.loginId, password: 'wrong-secret' },
+      undefined,
+      401,
+      'DENIED',
+      null,
+    ],
+    ['PATCH', `/api/admins/${pending.id}`, { status: 'ACTIVE' }, undefined, 401, 'DENIED', null],
+  ];
+  for (const [method, path, body, cookie, status, result, actor] of cases) {
+    const response = await call(method, path, body, cookie);
+    assert.equal(response.status, status);
+    const rows = (
+      await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.body.meta.requestId,
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].result, result);
+    assert.equal(rows[0].actor_seq, actor);
+    assert.deepEqual(rows[0].metadata, {});
+    assert.ok(!JSON.stringify(rows).includes('wrong-secret'));
+  }
+  const audit = app.get(AuditService);
+  const original = audit.record;
+  audit.record = async () => {
+    throw new Error('private audit failure');
+  };
+  let response;
+  try {
+    response = await call(
+      'PATCH',
+      `/api/admins/${pending.id}`,
+      { status: 'ACTIVE' },
+      systemSession,
+    );
+    assert.equal(response.status, 500);
+  } finally {
+    audit.record = original;
+  }
+  const rows = (
+    await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      response.body.meta.requestId,
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].result, 'FAILED');
+  assert.equal(rows[0].target_seq, pending.id);
+  assert.equal(
+    (await db.pool.query('SELECT status FROM admin_users WHERE admin_user_seq=$1', [pending.id]))
+      .rows[0].status,
+    'PENDING',
+  );
+});
+
+test('logout records one success with session deletion and failed audit storage does not hide original error', async () => {
+  const user = await account('auditLogout');
+  const session = (await login(user)).session;
+  const response = await call('POST', '/api/auth/logout', undefined, session);
+  assert.equal(response.status, 204);
+  const rows = (
+    await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+      response.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].action, 'ADMIN_LOGOUT');
+  assert.equal(rows[0].result, 'SUCCESS');
+  assert.equal(rows[0].actor_seq, user.id);
+  assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+  const replay = await call('POST', '/api/auth/logout', undefined, session);
+  assert.equal(replay.status, 204);
+  assert.equal(
+    (
+      await db.pool.query('SELECT count(*) FROM audit_logs WHERE request_id=$1', [
+        replay.headers.get('x-request-id'),
+      ])
+    ).rows[0].count,
+    '0',
+  );
+  const { AuditRepository } = require('../dist/audit/audit.repository');
+  const repository = app.get(AuditRepository);
+  const original = repository.insert;
+  repository.insert = async () => {
+    throw new Error('private database failure');
+  };
+  try {
+    const failure = await call('POST', '/api/auth/login', {
+      loginId: user.loginId,
+      password: 'wrong-secret',
+    });
+    assert.equal(failure.status, 401);
+    assert.ok(!failure.text.includes('private database failure'));
+  } finally {
+    repository.insert = original;
+  }
 });
