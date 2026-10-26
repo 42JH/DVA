@@ -55,12 +55,28 @@ sudo -n k3s kubectl get namespace dva -o name
 
 sudo -n k3s ctr -n k8s.io images import "$PWD/image.tar"
 
-sudo -n k3s crictl inspecti "$image" | python3 -c '
-import json, sys
+sudo -n k3s ctr -n k8s.io images ls | python3 -c '
+import sys
 
-if json.load(sys.stdin)["status"]["id"] != sys.argv[1]:
-    raise SystemExit("Imported image does not match the CI image.")
-' "$image_id"
+expected_name, expected_digest = sys.argv[1:]
+matches = [
+    line.split()
+    for line in sys.stdin
+    if line.split() and line.split()[0] == expected_name
+]
+
+if len(matches) != 1 or len(matches[0]) < 3:
+    raise SystemExit("Expected exactly one imported image.")
+
+actual_digest = matches[0][2]
+if actual_digest != expected_digest:
+    raise SystemExit(
+        f"Image digest mismatch: CI={expected_digest}, "
+        f"containerd={actual_digest}"
+    )
+
+print(f"Verified imported image: {expected_name} {actual_digest}")
+' "$image" "$image_id"
 
 # 적용 전 서버의 Kubernetes API로 설정을 검증한다.
 sudo -n k3s kubectl apply --dry-run=server -f k8s.yaml
