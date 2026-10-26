@@ -135,4 +135,12 @@ export class AuthService {
       await this.savePassword(actor, target, hash, requestId, client);
     });
   }
+  async resetPassword(token: string, id: number, password: string, requestId: string) {
+    const hash = await hashPassword(password);
+    return this.database.transaction(async (client) => {
+      const { actor, target } = await this.lockAuthorized(token, id, true, client);
+      await this.savePassword(actor, target, hash, requestId, client);
+      return actor.adminUserSeq === id;
+    });
+  }
 }

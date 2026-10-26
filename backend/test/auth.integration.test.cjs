@@ -376,6 +376,126 @@ test('own password change validates confirmation, preserves failed sessions, rev
   assert.equal((await login(user)).status, 401);
   assert.equal((await login(user, ' new pass ')).status, 200);
 });
+test('system reset revokes only target sessions, preserves pending state, and self reset clears caller cookie', async () => {
+  const system = await account('resetter', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('resetTarget');
+  const old = (await login(target)).session;
+  assert.equal(
+    (
+      await call(
+        'PATCH',
+        `/api/admins/${target.id}/password`,
+        { newPassword: 'reset pass' },
+        session,
+      )
+    ).status,
+    204,
+  );
+  assert.equal((await call('GET', '/api/auth/me', undefined, old)).status, 401);
+  assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 200);
+  assert.equal((await login(target, 'reset pass')).status, 200);
+  const pending = await account('resetPending', 'OPERATOR', 'PENDING');
+  assert.equal(
+    (
+      await call(
+        'PATCH',
+        `/api/admins/${pending.id}/password`,
+        { newPassword: 'reset pass' },
+        session,
+      )
+    ).status,
+    204,
+  );
+  assert.equal((await login(pending, 'reset pass')).status, 401);
+  const self = await call(
+    'PATCH',
+    `/api/admins/${system.id}/password`,
+    { newPassword: 'reset self' },
+    session,
+  );
+  assert.equal(self.status, 204);
+  assert.match(self.cookie, /Expires=Thu, 01 Jan 1970/);
+});
+test('audit failure rolls back password and session deletion; logout storage failure is not success', async () => {
+  const system = await account('atomic', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const audit = app.get(AuditService);
+  const original = audit.record;
+  audit.record = async () => {
+    throw new Error('private diagnostic');
+  };
+  try {
+    assert.equal(
+      (
+        await call(
+          'PATCH',
+          `/api/admins/${system.id}/password`,
+          { newPassword: 'rollback pass' },
+          session,
+        )
+      ).status,
+      500,
+    );
+  } finally {
+    audit.record = original;
+  }
+  assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 200);
+  assert.equal((await login(system)).status, 200);
+  const repository = app.get(AuthRepository);
+  const remove = repository.remove;
+  repository.remove = async () => {
+    throw new Error('db unavailable');
+  };
+  try {
+    const result = await call('POST', '/api/auth/logout', undefined, session);
+    assert.equal(result.status, 503);
+    assert.equal(result.cookie, null);
+  } finally {
+    repository.remove = remove;
+  }
+});
+test('password reset waits for in-flight login and invalidates its session after commit', async () => {
+  const system = await account('concurrentAdmin', 'SYSTEM_ADMIN');
+  const adminSession = (await login(system)).session;
+  const target = await account('concurrentUser');
+  const admins = app.get(AdminsService);
+  const original = admins.recordLogin.bind(admins);
+  let entered, release;
+  const reached = new Promise((resolve) => (entered = resolve));
+  const hold = new Promise((resolve) => (release = resolve));
+  admins.recordLogin = async (id, client) => {
+    if (id === target.id) {
+      entered();
+      await hold;
+    }
+    return original(id, client);
+  };
+  const loggingIn = login(target);
+  try {
+    await Promise.race([
+      reached,
+      loggingIn.then((result) => {
+        throw new Error(`Login did not reach transaction barrier: ${result.status}`);
+      }),
+    ]);
+    const resetting = call(
+      'PATCH',
+      `/api/admins/${target.id}/password`,
+      { newPassword: 'concurrent pass' },
+      adminSession,
+    );
+    release();
+    const loggedIn = await loggingIn;
+    assert.equal(loggedIn.status, 200);
+    assert.equal((await resetting).status, 204);
+    assert.equal((await call('GET', '/api/auth/me', undefined, loggedIn.session)).status, 401);
+    assert.equal((await login(target)).status, 401);
+  } finally {
+    release();
+    admins.recordLogin = original;
+  }
+});
 test('concurrent self-demotions preserve the last active system administrator', async () => {
   await db.pool.query("UPDATE admin_users SET role='OPERATOR' WHERE role='SYSTEM_ADMIN'");
   const first = await account('lastOne', 'SYSTEM_ADMIN');
@@ -399,6 +519,24 @@ test('concurrent self-demotions preserve the last active system administrator', 
     ).rows[0].count,
     '1',
   );
+});
+test('OpenAPI documents all eight contracts and logs contain no passwords or tokens', async () => {
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  for (const [path, method] of [
+    ['/api/auth/login', 'post'],
+    ['/api/auth/logout', 'post'],
+    ['/api/auth/me', 'get'],
+    ['/api/auth/signup', 'post'],
+    ['/api/auth/password', 'patch'],
+    ['/api/admins', 'get'],
+    ['/api/admins/{id}', 'patch'],
+    ['/api/admins/{id}/password', 'patch'],
+  ])
+    assert.ok(document.paths[path][method]);
+  assert.equal(document.components.securitySchemes.adminSession.in, 'cookie');
+  const serialized = JSON.stringify(logs);
+  assert.ok(!serialized.includes(password));
+  assert.ok(!serialized.includes('dva_session='));
 });
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {

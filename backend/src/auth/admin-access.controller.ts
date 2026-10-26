@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
@@ -9,6 +9,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Response } from 'express';
 import { AdminsService } from '../admins/admins.service';
 import { AdminQueryDto, UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { ListResponse } from '../common/pagination';
@@ -16,7 +17,9 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { ApiException } from '../common/errors/api.exception';
 import { Environment } from '../config/environment';
 import { AuthService } from './auth.service';
-import { AuthRequest, Roles } from './auth.guard';
+import { AuthRequest, Roles, SESSION_COOKIE } from './auth.guard';
+import { cookieOptions } from './auth.controller';
+import { ResetPasswordDto } from './dto/auth-request.dto';
 import { AdminListDto } from './dto/auth-response.dto';
 function adminId(value: string): number {
   if (!/^[1-9][0-9]*$/.test(value) || Number(value) > 2147483647)
@@ -54,5 +57,28 @@ export class AdminAccessController {
   @ApiNoContentResponse()
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
+  }
+  @Patch(':id/password')
+  @HttpCode(204)
+  @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
+  @ApiNoContentResponse()
+  async password(
+    @Param('id') id: string,
+    @Body() input: ResetPasswordDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    if (
+      await this.auth.resetPassword(
+        request.sessionToken,
+        adminId(id),
+        input.newPassword,
+        request.requestId,
+      )
+    )
+      response.clearCookie(
+        SESSION_COOKIE,
+        cookieOptions(this.config.get('NODE_ENV', { infer: true }) === 'production'),
+      );
   }
 }
