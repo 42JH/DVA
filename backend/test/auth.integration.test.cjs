@@ -165,6 +165,45 @@ test('AUTH-02 removes only the presented session and accepts missing or expired 
   );
   assert.equal((await call('POST', '/api/auth/logout', undefined, second.session)).status, 204);
 });
+test('signup preserves name, rejects bad IDs and elevation, duplicate signup is atomic, pending cannot login', async () => {
+  const loginId = prefix + 'signup';
+  for (const invalid of ['', 'with-dash', 'with space', '한글', 'a'.repeat(21)])
+    assert.equal(
+      (await call('POST', '/api/auth/signup', { loginId: invalid, password, name: 'Name' })).status,
+      400,
+    );
+  for (const name of ['', ' \t', null])
+    assert.equal((await call('POST', '/api/auth/signup', { loginId, password, name })).status, 400);
+  assert.equal(
+    (await call('POST', '/api/auth/signup', { loginId, password: '12345', name: 'Name' })).status,
+    400,
+  );
+  assert.equal(
+    (
+      await call('POST', '/api/auth/signup', {
+        loginId,
+        password,
+        name: 'Name',
+        role: 'SYSTEM_ADMIN',
+      })
+    ).status,
+    400,
+  );
+  const responses = await Promise.all(
+    [1, 2].map(() => call('POST', '/api/auth/signup', { loginId, password, name: ' 가입자 ' })),
+  );
+  assert.deepEqual(responses.map((x) => x.status).sort(), [204, 409]);
+  assert.equal(responses.find((x) => x.status === 409).body.error.code, 'SIGNUP_UNAVAILABLE');
+  assert.equal(responses.find((x) => x.status === 204).cookie, null);
+  const row = (await db.pool.query('SELECT * FROM admin_users WHERE login_id=$1', [loginId]))
+    .rows[0];
+  assert.equal(row.name, ' 가입자 ');
+  assert.equal(row.role, 'OPERATOR');
+  assert.equal(row.status, 'PENDING');
+  assert.notEqual(row.password_hash, password);
+  assert.equal((await login({ loginId })).status, 401);
+  assert.equal((await login({ loginId: loginId.toUpperCase() })).status, 401);
+});
 test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout revokes only current session', async () => {
   const user = await account('sessions');
   const first = await login(user);
@@ -198,6 +237,54 @@ test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout re
     [user.id],
   );
   assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 401);
+});
+test('login rotates presented session and CSRF rejects missing/foreign origins and simple requests', async () => {
+  const user = await account('csrf');
+  const first = await login(user);
+  const second = await login(user, password, first.session);
+  assert.notEqual(first.session, second.session);
+  assert.equal((await call('GET', '/api/auth/me', undefined, first.session)).status, 401);
+  for (const headers of [
+    { Origin: '' },
+    { Origin: 'https://evil.invalid' },
+    { 'X-CSRF-Protection': '' },
+  ]) {
+    assert.equal(
+      (await call('POST', '/api/auth/logout', undefined, second.session, headers)).status,
+      403,
+    );
+    assert.equal(
+      (
+        await call(
+          'POST',
+          '/api/auth/login',
+          { loginId: user.loginId, password },
+          undefined,
+          headers,
+        )
+      ).status,
+      403,
+    );
+    assert.equal(
+      (
+        await call(
+          'POST',
+          '/api/auth/signup',
+          { loginId: prefix + 'csrfnew', password, name: 'Name' },
+          undefined,
+          headers,
+        )
+      ).status,
+      403,
+    );
+  }
+  assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 200);
+  const preflight = await call('OPTIONS', '/api/auth/login', undefined, undefined, {
+    'Access-Control-Request-Method': 'POST',
+    'Access-Control-Request-Headers': 'content-type,x-csrf-protection',
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-credentials'), 'true');
 });
 test('new routes default to authenticated; roles and current DB status are enforced on every request', async () => {
   const user = await account('role');

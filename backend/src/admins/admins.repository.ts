@@ -24,6 +24,15 @@ export class AdminsRepository {
       )
     ).rows;
   }
+  async create(loginId: string, name: string, hash: string, client: PoolClient) {
+    return (
+      await client.query<AdminAccount>(
+        `INSERT INTO admin_users(login_id,name,password_hash,role,status)
+   VALUES($1,$2,$3,'OPERATOR','PENDING') RETURNING ${columns}`,
+        [loginId, name, hash],
+      )
+    ).rows[0];
+  }
   async list(query: AdminQueryDto) {
     return (
       await this.database.pool.query<AdminAccount>(

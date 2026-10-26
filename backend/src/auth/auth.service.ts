@@ -8,8 +8,8 @@ import { UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { AuthRepository } from './auth.repository';
-import { LoginDto } from './dto/auth-request.dto';
-import { verifyPassword } from './password';
+import { LoginDto, SignupDto } from './dto/auth-request.dto';
+import { hashPassword, verifyPassword } from './password';
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -53,6 +53,13 @@ export class AuthService {
         client,
       );
       return { token, expiresAt };
+    });
+  }
+  async signup(input: SignupDto, requestId: string) {
+    const hash = await hashPassword(input.password);
+    await this.database.transaction(async (client) => {
+      const account = await this.admins.signup(input.loginId, input.name, hash, client);
+      await this.audit.record(null, account.adminUserSeq, 'ADMIN_SIGNUP', requestId, client);
     });
   }
   async logout(token?: string) {

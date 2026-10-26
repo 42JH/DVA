@@ -13,6 +13,15 @@ export class AdminsService {
   lockAccounts(ids: number[], client: PoolClient) {
     return this.repository.lock(ids, client);
   }
+  async signup(loginId: string, name: string, hash: string, client: PoolClient) {
+    try {
+      return await this.repository.create(loginId, name, hash, client);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '23505')
+        throw new ApiException(409, 'SIGNUP_UNAVAILABLE', '가입 신청을 처리할 수 없습니다.');
+      throw error;
+    }
+  }
   async list(query: AdminQueryDto) {
     return (await this.repository.list(query)).map(publicAdmin);
   }

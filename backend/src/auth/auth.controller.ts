@@ -14,7 +14,7 @@ import { Environment } from '../config/environment';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { AuthService } from './auth.service';
 import { AuthRequest, PublicAuth, SESSION_COOKIE } from './auth.guard';
-import { LoginDto } from './dto/auth-request.dto';
+import { LoginDto, SignupDto } from './dto/auth-request.dto';
 import { LoginEnvelopeDto, MeEnvelopeDto } from './dto/auth-response.dto';
 export function cookieOptions(production: boolean): CookieOptions {
   return { httpOnly: true, secure: production, sameSite: 'lax', path: '/api' };
@@ -56,6 +56,15 @@ export class AuthController {
     const result = await this.auth.login(input, request.requestId, request.sessionToken);
     response.cookie(SESSION_COOKIE, result.token, { ...this.options(), expires: result.expiresAt });
     return { expiresAt: result.expiresAt };
+  }
+  @PublicAuth()
+  @ApiOperation({ security: [] })
+  @Post('signup')
+  @HttpCode(204)
+  @ApiNoContentResponse()
+  @ApiResponse({ status: 409, type: ErrorResponseDto })
+  signup(@Body() input: SignupDto, @Req() request: AuthRequest) {
+    return this.auth.signup(input, request.requestId);
   }
   @PublicAuth()
   @ApiOperation({ security: [] })
