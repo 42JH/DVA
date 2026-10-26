@@ -213,6 +213,70 @@ test('new routes default to authenticated; roles and current DB status are enfor
   await db.pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [user.id]);
   assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
 });
+test('system admin approves pending accounts, filters lists, rejects empty/null patches and deactivation', async () => {
+  const system = await account('system', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const pending = await account('pending', 'OPERATOR', 'PENDING');
+  assert.equal(
+    (await call('PATCH', `/api/admins/${pending.id}`, { status: 'ACTIVE' }, session)).status,
+    204,
+  );
+  assert.equal((await login(pending)).status, 200);
+  assert.equal(
+    (await call('PATCH', `/api/admins/${pending.id}`, { status: 'PENDING' }, session)).status,
+    409,
+  );
+  for (const body of [{}, { role: null }, { status: null }, { name: 'X' }])
+    assert.equal((await call('PATCH', `/api/admins/${pending.id}`, body, session)).status, 400);
+  assert.equal((await call('PATCH', '/api/admins/1e2', { role: 'OPERATOR' }, session)).status, 400);
+  assert.equal(
+    (await call('PATCH', '/api/admins/2147483647', { role: 'OPERATOR' }, session)).status,
+    404,
+  );
+  const list = await call(
+    'GET',
+    '/api/admins?role=OPERATOR&status=ACTIVE&limit=1',
+    undefined,
+    session,
+  );
+  assert.equal(list.status, 200);
+  assert.deepEqual(Object.keys(list.body).sort(), ['data', 'hasNext']);
+  assert.equal(list.body.data.length, 1);
+  assert.equal(list.body.hasNext, true);
+  assert.equal(list.body.data[0].passwordHash, undefined);
+  const audit = (
+    await db.pool.query(
+      "SELECT * FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED'",
+      [pending.id],
+    )
+  ).rows;
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].actor_seq, system.id);
+});
+test('concurrent self-demotions preserve the last active system administrator', async () => {
+  await db.pool.query("UPDATE admin_users SET role='OPERATOR' WHERE role='SYSTEM_ADMIN'");
+  const first = await account('lastOne', 'SYSTEM_ADMIN');
+  const second = await account('lastTwo', 'SYSTEM_ADMIN');
+  const firstSession = (await login(first)).session;
+  const secondSession = (await login(second)).session;
+  const responses = await Promise.all(
+    [
+      [first, firstSession],
+      [second, secondSession],
+    ].map(([user, cookie]) =>
+      call('PATCH', `/api/admins/${user.id}`, { role: 'OPERATOR' }, cookie),
+    ),
+  );
+  assert.deepEqual(responses.map((r) => r.status).sort(), [204, 409]);
+  assert.equal(
+    (
+      await db.pool.query(
+        "SELECT count(*) FROM admin_users WHERE role='SYSTEM_ADMIN' AND status='ACTIVE'",
+      )
+    ).rows[0].count,
+    '1',
+  );
+});
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(

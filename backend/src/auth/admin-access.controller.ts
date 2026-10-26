@@ -1,14 +1,28 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiCookieAuth, ApiHeader, ApiOkResponse, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiCookieAuth,
+  ApiHeader,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AdminsService } from '../admins/admins.service';
-import { AdminQueryDto } from '../admins/dto/admin-query.dto';
+import { AdminQueryDto, UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { ListResponse } from '../common/pagination';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
+import { ApiException } from '../common/errors/api.exception';
 import { Environment } from '../config/environment';
 import { AuthService } from './auth.service';
-import { Roles } from './auth.guard';
+import { AuthRequest, Roles } from './auth.guard';
 import { AdminListDto } from './dto/auth-response.dto';
+function adminId(value: string): number {
+  if (!/^[1-9][0-9]*$/.test(value) || Number(value) > 2147483647)
+    throw new ApiException(400, 'INVALID_REQUEST', '관리자 식별자를 확인해 주세요.');
+  return Number(value);
+}
 @ApiTags('Admins')
 @ApiCookieAuth('adminSession')
 @ApiHeader({
@@ -33,5 +47,12 @@ export class AdminAccessController {
   @ApiOkResponse({ type: AdminListDto })
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
+  }
+  @Patch(':id')
+  @HttpCode(204)
+  @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
+  @ApiNoContentResponse()
+  update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
+    return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
 }

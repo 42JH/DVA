@@ -4,6 +4,7 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AdminsService } from '../admins/admins.service';
 import { AdminPublic } from '../admins/admins.types';
+import { UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { AuthRepository } from './auth.repository';
@@ -61,5 +62,29 @@ export class AuthService {
     } catch {
       throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '로그아웃 처리를 확인할 수 없습니다.');
     }
+  }
+  private async lockAuthorized(
+    token: string,
+    targetId: number,
+    systemOnly: boolean,
+    client: PoolClient,
+  ) {
+    const before = await this.authenticate(token, client);
+    const accounts = await this.admins.lockAccounts([before.adminUserSeq, targetId], client);
+    const actor = await this.authenticate(token, client);
+    if (systemOnly && actor.role !== 'SYSTEM_ADMIN')
+      throw new ApiException(403, 'FORBIDDEN', '접근 권한이 없습니다.');
+    const target = accounts.find((account) => account.adminUserSeq === targetId);
+    if (!target) throw new ApiException(404, 'NOT_FOUND', '관리자를 찾을 수 없습니다.');
+    return { actor, target };
+  }
+  async updateAdmin(token: string, id: number, input: UpdateAdminDto, requestId: string) {
+    await this.database.transaction(async (client) => {
+      // Serialize role changes so concurrent demotions cannot remove the last administrator.
+      await this.admins.serializeAccessChanges(client);
+      const { actor, target } = await this.lockAuthorized(token, id, true, client);
+      await this.admins.updateAccess(target, input, client);
+      await this.audit.record(actor.adminUserSeq, id, 'ADMIN_ACCESS_CHANGED', requestId, client);
+    });
   }
 }
