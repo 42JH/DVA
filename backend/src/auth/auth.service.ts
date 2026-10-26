@@ -54,4 +54,12 @@ export class AuthService {
       return { token, expiresAt };
     });
   }
+  async logout(token?: string) {
+    if (!token) return;
+    try {
+      await this.repository.remove(tokenHash(token));
+    } catch {
+      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '로그아웃 처리를 확인할 수 없습니다.');
+    }
+  }
 }

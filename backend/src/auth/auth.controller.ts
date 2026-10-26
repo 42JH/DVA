@@ -4,6 +4,7 @@ import {
   ApiCookieAuth,
   ApiOperation,
   ApiHeader,
+  ApiNoContentResponse,
   ApiOkResponse,
   ApiResponse,
   ApiTags,
@@ -55,5 +56,15 @@ export class AuthController {
     const result = await this.auth.login(input, request.requestId, request.sessionToken);
     response.cookie(SESSION_COOKIE, result.token, { ...this.options(), expires: result.expiresAt });
     return { expiresAt: result.expiresAt };
+  }
+  @PublicAuth()
+  @ApiOperation({ security: [] })
+  @Post('logout')
+  @HttpCode(204)
+  @ApiNoContentResponse()
+  @ApiResponse({ status: 503, type: ErrorResponseDto })
+  async logout(@Req() request: AuthRequest, @Res({ passthrough: true }) response: Response) {
+    await this.auth.logout(request.sessionToken);
+    response.clearCookie(SESSION_COOKIE, this.options());
   }
 }

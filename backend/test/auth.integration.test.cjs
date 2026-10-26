@@ -145,6 +145,26 @@ test('AUTH-01 rejects wrong and case-mismatched credentials and issues a nine-ho
   ).rows[0];
   assert.equal(row.expires_at - row.created_at, 9 * 60 * 60 * 1000);
 });
+test('AUTH-02 removes only the presented session and accepts missing or expired sessions', async () => {
+  const user = await account('logoutOnly');
+  const first = await login(user);
+  const second = await login(user);
+  assert.equal((await call('POST', '/api/auth/logout', undefined, first.session)).status, 204);
+  await assert.rejects(
+    app.get(AuthService).authenticate(first.session.split('=')[1]),
+    (error) => error.getStatus() === 401,
+  );
+  assert.equal(
+    (await app.get(AuthService).authenticate(second.session.split('=')[1])).adminUserSeq,
+    user.id,
+  );
+  assert.equal((await call('POST', '/api/auth/logout')).status, 204);
+  await db.pool.query(
+    "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
+    [user.id],
+  );
+  assert.equal((await call('POST', '/api/auth/logout', undefined, second.session)).status, 204);
+});
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(
