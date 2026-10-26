@@ -12,13 +12,14 @@ Jira: [S15P31D109-35](https://ssafy.atlassian.net/browse/S15P31D109-35).
 비활성화는 기업 상태만 바꾸며 구성원·PIN의 삭제나 일괄 상태 변경을 수행하지 않는다.
 수정 버전 컬럼이 없는 현재 ERD를 따르므로 임의의 expectedVersion을 요구하지 않는다.
 
-**인증은 세션 방식이며 83번 담당자의 작업이다. 로그인·세션 저장·쿠키 검증·공통 Guard를 구현하지 않는다.**
-83번의 인증 코드는 develop-backend에서 병합했으며, 기업 Controller는 공통 `AuthRequest`의
+**인증은 83번에서 구현한 공통 세션 인증을 사용한다. 기업 모듈에 별도 로그인·인증 코드를 만들지 않는다.**
+기업 Controller는 공통 `AuthRequest`의
 `request.admin.adminUserSeq`와 Swagger의 `adminSession` 쿠키 정의를 사용한다.
-현재 OrganizationsModule은 AppModule에 등록하지 않는다. 따라서 일반 앱 실행과 운영 Swagger에는
-기업 경로가 아직 노출되지 않는다. 이 상태는 기업 로직 개발·테스트 완료 상태이며 운영 연동 완료를 뜻하지 않는다.
-테스트는 별도 FixtureModule에서 기업 모듈을 등록하고 이미 인증된 관리자 정보를 제공한다.
-테스트용 인증 정보 주입은 운영 코드에 포함하지 않는다.
+OrganizationsModule을 AppModule에 등록하여 일반 앱 실행과 활성화된 Swagger에 기업 경로를 제공한다.
+AuthModule의 전역 Guard가 네 경로 모두에서 로그인·현재 계정 상태와 변경 요청의 CSRF를 검증한다.
+기업별 관리자 역할 제한은 추가하지 않는다. 테스트도 실제 AppModule을 실행하고 로그인 API가 발급한
+쿠키를 사용하며 관리자 정보를 임의로 주입하지 않는다.
+이 소스 변경만으로 서버 배포나 DB migration이 자동 적용되지는 않는다.
 
 ## HTTP 계약
 
@@ -71,21 +72,33 @@ cd ..
 ```
 
 Docker 검증은 기존 테스트와 기업 API HTTP/DB·멱등·동시 요청·재시작·롤백·Swagger 계약 검증을 실행한다.
+실제 로그인 세션으로 모든 ACTIVE 역할의 기업 등록·목록·상세·수정 성공과 미인증·위조·만료·로그아웃·
+PENDING 계정 거절, Origin/CSRF 없는 변경 거절을 확인한다. 운영 이미지와 실제 Nginx에서도 로그인 후
+기업 생성·재시도·조회·수정 및 로그아웃 후 접근 거절을 검증한다.
 별도 DB 검증은 migration 재실행, 체크섬 변경 거부, 백업 복원과 최초/후속 실패 롤백을 검증한다.
 기존 배포 Jenkins 검증 실행기도 같은 npm test:integration을 사용한다.
 인증 통합 테스트가 먼저 업무·세션 스키마를 준비한 뒤 기업 테스트가 004를 적용하며,
 기업 테스트만 빈 임시 DB에서 실행할 때는 002·003도 적용한다.
 
-## 83번 담당자와 연결할 항목
+## Postman으로 로컬 확인
 
-1. 공통 세션 인증이 쿠키를 검증하고 현재 DB 계정이 ACTIVE인지 확인한다.
-2. Controller는 공통 `AuthRequest`의 `request.admin.adminUserSeq`를 사용한다.
-   기업 Service는 인증된 관리자 번호만 받고 쿠키를 처리하지 않는다.
-3. 네 경로 전체에 공통 인증 Guard를 적용한 뒤 OrganizationsModule을 AppModule에 등록한다.
-4. 실제 쿠키 이름을 기준으로 공통 Swagger 세션 인증을 설정하고 실제 로그인 세션으로 통합 테스트한다.
-5. 쿠키의 HttpOnly·Secure·SameSite, CSRF 보호와 필요한 credentials/CORS 설정은 공통 인증에서 구성한다.
-6. 서버 migration 적용과 인증 검증 후 필요한 기업 API의 호스트 Nginx 공개 경로를 추가한다.
+개발 DB에 002·003·004 migration을 적용하고 테스트할 ACTIVE 관리자 계정을 준비한 뒤 앱을 실행한다.
+초기 관리자 생성 방법은 [백엔드 README](../../backend/README.md)의 CLI 절차를 따른다.
+실제 비밀번호나 세션 쿠키를 컬렉션·소스에 저장하지 않는다.
 
-83번에서 공통 Swagger의 `adminSession` 쿠키 정의와 CORS credentials 설정을 제공한다.
-변경 요청은 허용된 Origin과 `X-CSRF-Protection: 1` 헤더가 필요하다.
-실제 세션으로 기업 경로 전체를 검증하고 앱에 등록하기 전에는 35번을 최종 운영 완료로 판단하지 않는다.
+Postman 환경에 `baseUrl=http://localhost:3000`, `origin=http://localhost:5173`과 로그인 정보를 설정한다.
+origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
+
+1. `POST {{baseUrl}}/api/auth/login`을 JSON 본문
+   `{ "loginId": "{{loginId}}", "password": "{{password}}" }`로 호출한다.
+   헤더는 `Content-Type: application/json`, `Origin: {{origin}}`, `X-CSRF-Protection: 1`을 넣는다.
+2. 응답의 `dva_session` 쿠키가 Postman 쿠키 저장소에 저장되면 같은 호스트의 기업 API를 호출한다.
+   Bearer 토큰이나 관리자 ID 헤더는 필요하지 않다.
+3. 등록은 `{ "name": "테스트 기업" }`와 `Idempotency-Key: {{idempotencyKey}}`를 보낸다.
+   idempotencyKey는 UUID로 준비하며 같은 등록의 재시도에는 같은 값을 유지한다.
+4. 목록·상세는 GET으로, 수정은 PATCH와 `{ "name": "변경 기업", "status": "INACTIVE" }`로 확인한다.
+   POST·PATCH에는 로그인 때와 동일한 Origin/CSRF 헤더를 넣는다.
+5. 로그아웃하거나 쿠키를 제거하면 기업 API가 401을 반환하는지 확인한다.
+
+운영의 Secure 쿠키는 HTTPS에서만 사용한다. 서버에서 확인하려면 별도로 migration을 적용하고,
+해당 소스를 배포한 뒤 인증·기업 API의 호스트 Nginx 공개 경로를 설정해야 한다.
