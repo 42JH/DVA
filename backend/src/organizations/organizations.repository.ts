@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
+import { createHash } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { Organization } from './organizations.types';
@@ -25,5 +27,46 @@ export class OrganizationsRepository {
       [id],
     );
     return result.rows[0];
+  }
+
+  async lockCreation(client: PoolClient, adminId: number, key: string): Promise<boolean> {
+    const hash = createHash('sha256').update(`organizations.create:${adminId}:${key}`).digest();
+    const result = await client.query<{ acquired: boolean }>(
+      'SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS acquired',
+      [hash.readInt32BE(0), hash.readInt32BE(4)],
+    );
+    return result.rows[0].acquired;
+  }
+
+  async findCreation(client: PoolClient, adminId: number, key: string) {
+    const result = await client.query<{ requestHash: string; organizationSeq: number }>(
+      `SELECT request_hash AS "requestHash", organization_seq AS "organizationSeq"
+       FROM api_idempotency.organization_creations WHERE admin_user_seq = $1 AND idempotency_key = $2::uuid`,
+      [adminId, key],
+    );
+    return result.rows[0];
+  }
+
+  async insert(client: PoolClient, name: string): Promise<number> {
+    const result = await client.query<{ organizationSeq: number }>(
+      `INSERT INTO organizations (name, status) VALUES ($1, 'ACTIVE')
+       RETURNING organization_seq AS "organizationSeq"`,
+      [name],
+    );
+    return result.rows[0].organizationSeq;
+  }
+
+  async rememberCreation(
+    client: PoolClient,
+    adminId: number,
+    key: string,
+    hash: string,
+    id: number,
+  ) {
+    await client.query(
+      `INSERT INTO api_idempotency.organization_creations
+       (admin_user_seq, idempotency_key, request_hash, organization_seq) VALUES ($1, $2::uuid, $3, $4)`,
+      [adminId, key, hash, id],
+    );
   }
 }
