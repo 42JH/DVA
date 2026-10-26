@@ -13,7 +13,7 @@ pipeline {
     }
 
     environment {
-        DEPLOY_HOST = 'CHANGE_ME'          // 대상 Lightsail 주소
+        DEPLOY_HOST = '13.209.59.180'      // 대상 Lightsail 주소
         DEPLOY_DIR = '/srv/dva-ai'         // 대상 서버에서 compose·config·prompts·.env를 두는 곳
         DEPLOY_SSH = 'dva-ai-deploy-ssh'   // Jenkins 자격 증명(SSH Username with private key) ID
     }
