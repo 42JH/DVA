@@ -3,12 +3,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AdminsService } from '../admins/admins.service';
-import { AdminPublic } from '../admins/admins.types';
+import { AdminAccount, AdminPublic } from '../admins/admins.types';
 import { UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { AuthRepository } from './auth.repository';
-import { LoginDto, SignupDto } from './dto/auth-request.dto';
+import { ChangePasswordDto, LoginDto, SignupDto } from './dto/auth-request.dto';
 import { hashPassword, verifyPassword } from './password';
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
@@ -92,6 +92,47 @@ export class AuthService {
       const { actor, target } = await this.lockAuthorized(token, id, true, client);
       await this.admins.updateAccess(target, input, client);
       await this.audit.record(actor.adminUserSeq, id, 'ADMIN_ACCESS_CHANGED', requestId, client);
+    });
+  }
+  private async savePassword(
+    actor: AdminPublic,
+    target: AdminAccount,
+    hash: string,
+    requestId: string,
+    client: PoolClient,
+  ) {
+    await this.admins.setPassword(target.adminUserSeq, hash, client);
+    await this.repository.removeAll(target.adminUserSeq, client);
+    await this.audit.record(
+      actor.adminUserSeq,
+      target.adminUserSeq,
+      'ADMIN_PASSWORD_CHANGED',
+      requestId,
+      client,
+    );
+  }
+  async changePassword(token: string, input: ChangePasswordDto, requestId: string) {
+    const details = [];
+    if ([...input.newPassword].length < 6)
+      details.push({ field: 'newPassword', reason: 'PASSWORD_POLICY_VIOLATION' });
+    if (input.newPassword !== input.newPasswordConfirm)
+      details.push({ field: 'newPasswordConfirm', reason: 'PASSWORD_MISMATCH' });
+    if (details.length)
+      throw new ApiException(422, 'VALIDATION_FAILED', '입력값을 확인해 주세요.', details);
+    const hash = await hashPassword(input.newPassword);
+    await this.database.transaction(async (client) => {
+      const identity = await this.authenticate(token, client);
+      const { actor, target } = await this.lockAuthorized(
+        token,
+        identity.adminUserSeq,
+        false,
+        client,
+      );
+      if (!(await verifyPassword(input.currentPassword, target.passwordHash)))
+        throw new ApiException(422, 'VALIDATION_FAILED', '입력값을 확인해 주세요.', [
+          { field: 'currentPassword', reason: 'INCORRECT_PASSWORD' },
+        ]);
+      await this.savePassword(actor, target, hash, requestId, client);
     });
   }
 }

@@ -62,6 +62,12 @@ export class AdminsRepository {
   async serializeAccessChanges(client: PoolClient) {
     await client.query('SELECT pg_advisory_xact_lock(20261026,83)');
   }
+  async setPassword(id: number, hash: string, client: PoolClient) {
+    await client.query('UPDATE admin_users SET password_hash=$2 WHERE admin_user_seq=$1', [
+      id,
+      hash,
+    ]);
+  }
   async recordLogin(id: number, client: PoolClient) {
     await client.query(
       'UPDATE admin_users SET last_login_at=clock_timestamp() WHERE admin_user_seq=$1',

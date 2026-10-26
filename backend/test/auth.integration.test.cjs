@@ -340,6 +340,42 @@ test('system admin approves pending accounts, filters lists, rejects empty/null 
   assert.equal(audit.length, 1);
   assert.equal(audit[0].actor_seq, system.id);
 });
+test('own password change validates confirmation, preserves failed sessions, revokes all sessions on success', async () => {
+  const user = await account('ownpass');
+  const first = (await login(user)).session;
+  const second = (await login(user)).session;
+  for (const [input, reason] of [
+    [
+      { currentPassword: 'wrong', newPassword: 'new pass', newPasswordConfirm: 'new pass' },
+      'INCORRECT_PASSWORD',
+    ],
+    [
+      { currentPassword: password, newPassword: 'new pass', newPasswordConfirm: 'different' },
+      'PASSWORD_MISMATCH',
+    ],
+    [
+      { currentPassword: password, newPassword: '123', newPasswordConfirm: '123' },
+      'PASSWORD_POLICY_VIOLATION',
+    ],
+  ]) {
+    const res = await call('PATCH', '/api/auth/password', input, first);
+    assert.equal(res.status, 422);
+    assert.equal(res.body.error.details[0].reason, reason);
+  }
+  assert.equal((await call('GET', '/api/auth/me', undefined, second)).status, 200);
+  const res = await call(
+    'PATCH',
+    '/api/auth/password',
+    { currentPassword: password, newPassword: ' new pass ', newPasswordConfirm: ' new pass ' },
+    first,
+  );
+  assert.equal(res.status, 204);
+  assert.match(res.cookie, /Expires=Thu, 01 Jan 1970/);
+  for (const cookie of [first, second])
+    assert.equal((await call('GET', '/api/auth/me', undefined, cookie)).status, 401);
+  assert.equal((await login(user)).status, 401);
+  assert.equal((await login(user, ' new pass ')).status, 200);
+});
 test('concurrent self-demotions preserve the last active system administrator', async () => {
   await db.pool.query("UPDATE admin_users SET role='OPERATOR' WHERE role='SYSTEM_ADMIN'");
   const first = await account('lastOne', 'SYSTEM_ADMIN');

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Patch, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
@@ -14,7 +14,7 @@ import { Environment } from '../config/environment';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { AuthService } from './auth.service';
 import { AuthRequest, PublicAuth, SESSION_COOKIE } from './auth.guard';
-import { LoginDto, SignupDto } from './dto/auth-request.dto';
+import { ChangePasswordDto, LoginDto, SignupDto } from './dto/auth-request.dto';
 import { LoginEnvelopeDto, MeEnvelopeDto } from './dto/auth-response.dto';
 export function cookieOptions(production: boolean): CookieOptions {
   return { httpOnly: true, secure: production, sameSite: 'lax', path: '/api' };
@@ -81,5 +81,17 @@ export class AuthController {
   me(@Req() request: AuthRequest) {
     const { adminUserSeq, loginId, name, role, status } = request.admin;
     return { adminUserSeq, loginId, name, role, status };
+  }
+  @Patch('password')
+  @HttpCode(204)
+  @ApiNoContentResponse()
+  @ApiResponse({ status: 422, type: ErrorResponseDto })
+  async password(
+    @Body() input: ChangePasswordDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    await this.auth.changePassword(request.sessionToken, input, request.requestId);
+    response.clearCookie(SESSION_COOKIE, this.options());
   }
 }

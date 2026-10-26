@@ -48,6 +48,9 @@ export class AdminsService {
       );
     await this.repository.setAccess(target.adminUserSeq, role, status, client);
   }
+  setPassword(id: number, hash: string, client: PoolClient) {
+    return this.repository.setPassword(id, hash, client);
+  }
   recordLogin(id: number, client: PoolClient) {
     return this.repository.recordLogin(id, client);
   }

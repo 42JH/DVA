@@ -32,6 +32,9 @@ export class AuthRepository {
       [hash],
     );
   }
+  async removeAll(id: number, client: PoolClient) {
+    await client.query('DELETE FROM admin_sessions WHERE admin_user_seq=$1', [id]);
+  }
   async removeExpired(id: number, client: PoolClient) {
     await client.query(
       'DELETE FROM admin_sessions WHERE admin_user_seq=$1 AND expires_at<=clock_timestamp()',
