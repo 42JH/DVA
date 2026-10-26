@@ -29,6 +29,7 @@ pipeline {
                     env.RELEASE_NAME = "${env.SOURCE_COMMIT}-${env.BUILD_NUMBER}"
                     env.DB_IMAGE = "docker.io/library/dva-liquibase:${env.RELEASE_NAME}"
                     env.RUN_MSA_CI = 'true'
+                    env.MSA_BASE_COMMIT = ''
                     def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
                     if (webhook && !params.DEPLOY_MSA) {
                         env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
@@ -65,8 +66,48 @@ pipeline {
             }
         }
 
-        stage('Verify Database') {
+        stage('Select Build Scope') {
             when { expression { env.RUN_MSA_CI == 'true' } }
+            steps {
+                script {
+                    env.RUN_COMMON_CI = sh(
+                        script: '''
+                            bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT" \
+                                msa/ \
+                                ':(exclude)msa/services/**' \
+                                ':(exclude)msa/liquibase/**'
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    env.RUN_DB_CI = sh(
+                        script: '''
+                            bash msa/deploy/has-msa-changes.sh \
+                                "$MSA_BASE_COMMIT" msa/liquibase/
+                        ''',
+                        returnStdout: true
+                    ).trim()
+
+                    if (!(env.RUN_COMMON_CI in ['true', 'false']) ||
+                        !(env.RUN_DB_CI in ['true', 'false'])) {
+                        error 'Invalid build scope result.'
+                    }
+
+                    if (env.RUN_COMMON_CI == 'true') {
+                        env.RUN_DB_CI = 'true'
+                    }
+
+                    echo "Common changes: ${env.RUN_COMMON_CI}, database checks: ${env.RUN_DB_CI}"
+                }
+            }
+        }
+
+        stage('Verify Database') {
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' && env.RUN_DB_CI == 'true'
+                }
+            }
             steps { sh 'python3 msa/liquibase/verify.py' }
             post {
                 always {
@@ -75,20 +116,62 @@ pipeline {
             }
         }
 
-        stage('Verify and Build Customer') {
-            when {expression {env.RUN_MSA_CI == 'true'} }
+        stage('Verify and Build Services') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
                 sh '''
                     set -eu
-                    docker build \
-                    --tag "dva-customer:$RELEASE_NAME" \
-                    msa/services/customer
+
+                    for directory in msa/services/*; do
+                        [ -d "$directory" ] || continue
+                        service=$(basename "$directory")
+
+                        case "$service" in
+                            ''|*[!a-z0-9-]*)
+                                echo "Invalid service directory: $service" >&2
+                                exit 1
+                                ;;
+                        esac
+
+                        if [ "$RUN_COMMON_CI" = true ]; then
+                            changed=true
+                        else
+                            changed=$(bash msa/deploy/has-msa-changes.sh \
+                                "$MSA_BASE_COMMIT" "$directory/")
+                        fi
+
+                        case "$changed" in
+                            false)
+                                echo "SKIP: $service"
+                                continue
+                                ;;
+                            true) ;;
+                            *)
+                                echo "Invalid change result: $changed" >&2
+                                exit 1
+                                ;;
+                        esac
+
+                        if [ ! -f "$directory/Dockerfile" ]; then
+                            echo "Missing Dockerfile: $directory" >&2
+                            exit 1
+                        fi
+
+                        echo "BUILD: $service"
+                        docker build \
+                            --tag "dva-$service:$RELEASE_NAME" \
+                            "$directory"
+                    done
                 '''
             }
         }
 
         stage('Package Database Image') {
-            when { expression { env.RUN_MSA_CI == 'true' } }
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' && env.RUN_DB_CI == 'true'
+                }
+            }
             steps { sh 'bash msa/deploy/package.sh' }
             post {
                 success {
