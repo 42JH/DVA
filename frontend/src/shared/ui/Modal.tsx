@@ -61,17 +61,21 @@ export function ConfirmDialog({
         {target && <p className="text-body text-sub">{target}</p>}
         {warn && (
           <p className="mt-3 flex items-start gap-2 text-label font-semibold text-danger">
-            <svg
-              viewBox="0 0 20 20"
-              className="mt-0.5 size-5 shrink-0"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.6}
-              strokeLinecap="round"
-            >
-              <circle cx="10" cy="10" r="7.5" />
-              <path d="M10 6.5v4M10 13.5v.1" />
-            </svg>
+            {/* 아이콘은 첫 줄 높이(1.4em) 칸 가운데 — 글꼴이 바뀌어도 첫 줄과 나란히 */}
+            <span className="flex h-[1.4em] shrink-0 items-center">
+              <svg
+                viewBox="0 0 20 20"
+                className="size-5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <circle cx="10" cy="10" r="7.5" />
+                <path d="M10 6.5v4M10 13.5v.1" />
+              </svg>
+            </span>
             {warn}
           </p>
         )}
@@ -114,7 +118,7 @@ export function FormModal({
             type="button"
             onClick={onClose}
             aria-label="닫기"
-            className="-mr-2 grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg"
+            className="-mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg" // 32 칸 안 20 아이콘 → 아이콘 오른쪽이 안쪽 여백 선(32)에 딱
           >
             <svg
               viewBox="0 0 20 20"

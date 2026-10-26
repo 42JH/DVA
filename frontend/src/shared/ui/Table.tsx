@@ -55,9 +55,10 @@ export function Table<Row>({
   const allState = !selected?.size ? 'off' : selected.size === rows.length ? 'on' : 'some'
 
   return (
-    <section className="rounded-xl border border-line bg-surface px-8 pt-3 pb-7">
+    <section className="rounded-xl bg-surface px-8 pt-8 pb-7 ring-1 ring-line ring-inset">
+      {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
       <div
-        className="grid items-center pb-2.5 text-label font-semibold text-sub"
+        className="mb-4 grid h-6 items-center text-label font-semibold text-sub"
         style={{ gridTemplateColumns: gridCols }}
       >
         {selectable && (

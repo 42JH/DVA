@@ -73,10 +73,10 @@ export function CountTabs<K extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={`flex h-12 items-center gap-2 rounded-lg border px-5 text-body ${
+            className={`flex h-12 items-center gap-2 rounded-lg px-5 text-body ring-inset ${
               on
-                ? 'border-[1.5px] border-action bg-action-soft font-semibold text-action'
-                : 'border-line bg-surface text-ink'
+                ? 'bg-action-soft font-semibold text-action ring-[1.5px] ring-action'
+                : 'bg-surface text-ink ring-1 ring-line'
             }`}
           >
             {t.label}
