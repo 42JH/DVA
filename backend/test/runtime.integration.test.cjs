@@ -67,3 +67,33 @@ test('production image receives the existing PBX contract through real Nginx wit
   assert.equal(response.headers.get('access-control-allow-origin'), 'https://13.209.59.180');
   assert.deepEqual(await response.json(), { status: 'received', recordingId, duplicate: false });
 });
+
+test('production login through Nginx sets Secure cookie, authenticates me, and logs out', async () => {
+  const headers = {
+    'Content-Type': 'application/json',
+    Origin: 'https://13.209.59.180',
+    'X-CSRF-Protection': '1',
+  };
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie');
+  for (const flag of ['Secure', 'HttpOnly', 'SameSite=Lax', 'Path=/api'])
+    assert.ok(cookie.includes(flag));
+  const session = cookie.split(';')[0];
+  const me = await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } });
+  assert.equal(me.status, 200);
+  assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
+  const logout = await fetch('http://proxy/api/auth/logout', {
+    method: 'POST',
+    headers: { ...headers, Cookie: session },
+  });
+  assert.equal(logout.status, 204);
+  assert.equal(
+    (await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } })).status,
+    401,
+  );
+});

@@ -165,6 +165,40 @@ test('AUTH-02 removes only the presented session and accepts missing or expired 
   );
   assert.equal((await call('POST', '/api/auth/logout', undefined, second.session)).status, 204);
 });
+test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout revokes only current session', async () => {
+  const user = await account('sessions');
+  const first = await login(user);
+  const second = await login(user);
+  assert.equal(first.status, 200);
+  assert.match(first.cookie, /HttpOnly/);
+  assert.match(first.cookie, /SameSite=Lax/);
+  assert.match(first.cookie, /Path=\/api/);
+  assert.deepEqual(Object.keys(first.body.data), ['expiresAt']);
+  const token = first.session.split('=')[1];
+  const row = (
+    await db.pool.query('SELECT * FROM admin_sessions WHERE session_token_hash=$1', [
+      tokenHash(token),
+    ])
+  ).rows[0];
+  assert.equal(row.expires_at - row.created_at, 9 * 60 * 60 * 1000);
+  assert.notEqual(row.session_token_hash, token);
+  const me = await call('GET', '/api/auth/me', undefined, first.session);
+  assert.equal(me.status, 200);
+  assert.deepEqual(
+    Object.keys(me.body.data).sort(),
+    ['adminUserSeq', 'loginId', 'name', 'role', 'status'].sort(),
+  );
+  assert.equal((await login(user, 'wrong password')).status, 401);
+  assert.equal((await call('POST', '/api/auth/logout', undefined, first.session)).status, 204);
+  assert.equal((await call('GET', '/api/auth/me', undefined, first.session)).status, 401);
+  assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 200);
+  assert.equal((await call('POST', '/api/auth/logout')).status, 204);
+  await db.pool.query(
+    "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
+    [user.id],
+  );
+  assert.equal((await call('GET', '/api/auth/me', undefined, second.session)).status, 401);
+});
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(
