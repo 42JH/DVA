@@ -4,6 +4,7 @@ import { AppModule } from './app.module';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.setGlobalPrefix('customer');
 
   const config = new DocumentBuilder()
     .setTitle('DVA Customer API')
@@ -15,7 +16,8 @@ async function bootstrap() {
     SwaggerModule.createDocument(app, config);
 
   SwaggerModule.setup('docs', app, documentFactory, {
-    jsonDocumentUrl: 'docs-json',
+  useGlobalPrefix: true,
+  jsonDocumentUrl: 'docs-json',
   });
 
   app.enableShutdownHooks();

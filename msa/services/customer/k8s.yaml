@@ -43,21 +43,21 @@ spec:
               memory: 512Mi
           startupProbe:
             httpGet:
-              path: /health
+              path: /customer/health
               port: http
             periodSeconds: 2
             timeoutSeconds: 2
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /health
+              path: /customer/health
               port: http
             periodSeconds: 3
             timeoutSeconds: 2
             failureThreshold: 2
           livenessProbe:
             httpGet:
-              path: /health
+              path: /customer/health
               port: http
             periodSeconds: 10
             timeoutSeconds: 2
@@ -80,3 +80,27 @@ spec:
     - name: http
       port: 3001
       targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer
+  namespace: dva
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: k15d109.p.ssafy.io
+      http:
+        paths:
+          - path: /customer
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port:
+                  number: 3001
