@@ -1,34 +1,81 @@
-// AI 서버 배포(Lightsail). Jenkins job: Pipeline script from SCM, 브랜치 develop-ai, Script Path ai/Jenkinsfile.
-// 비밀값은 서버의 /srv/dva-ai/.env(jenkins 소유, 600, 커밋 금지)에서 읽는다.
-// 컨테이너를 다시 만들므로 진행 중인 통화는 끊긴다.
+// AI 서버 CI·배포. 빌드·테스트는 빌더 노드에서, 배포는 develop-ai일 때만 대상 서버(Lightsail)로 SSH.
+// 대상 서버에는 git·빌드 도구가 필요 없다: 이미지는 docker save로 보내고 compose·config·prompts만 복사한다.
+// 비밀값은 대상 서버의 $DEPLOY_DIR/.env(커밋 금지)에서 읽는다. 컨테이너를 다시 만들므로 진행 중인 통화는 끊긴다.
 pipeline {
-    agent any
+    agent { label 'linux-docker-builder' }
 
     options {
+        skipDefaultCheckout(true)
         disableConcurrentBuilds()
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     environment {
-        ENV_FILE = '/srv/dva-ai/.env'
+        DEPLOY_HOST = 'CHANGE_ME'          // 대상 Lightsail 주소
+        DEPLOY_DIR = '/srv/dva-ai'         // 대상 서버에서 compose·config·prompts·.env를 두는 곳
+        DEPLOY_SSH = 'dva-ai-deploy-ssh'   // Jenkins 자격 증명(SSH Username with private key) ID
     }
 
     stages {
-        stage('Deploy AI') {
+        stage('Checkout') {
             steps {
-                dir('ai') {
-                    // compose의 name(dva-ai)이 고정이라 작업공간이 바뀌어도 같은 컨테이너·볼륨을 쓴다
-                    sh 'docker compose --env-file "$ENV_FILE" up -d --build --remove-orphans --wait --wait-timeout 120'
-                    sh 'docker image prune -f'
+                deleteDir()
+                script {
+                    def scmVars = checkout scm
+                    env.GIT_BRANCH = scmVars.GIT_BRANCH ?: ''
+                    def commit = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.AI_IMAGE = "dva-ai:ci-${commit}-${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Build Image') {
+            steps { sh 'docker build --pull --tag "$AI_IMAGE" ai' }
+        }
+
+        stage('Test') {
+            steps {
+                // agent의 Python(3.13)이 아니라 방금 빌드한 3.14 이미지 안에서 dev 의존성을 더해 테스트한다
+                sh '''
+                    set -eu
+                    tar -C ai --exclude=.venv -cf - . | docker run -i --rm --user root "$AI_IMAGE" \
+                        sh -c 'tar -xf - -C /app && uv sync --frozen && uv run --frozen pytest -q'
+                '''
+            }
+        }
+
+        stage('Deploy') {
+            when { expression { env.GIT_BRANCH ==~ /(origin\/)?develop-ai/ } }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+                    // shortcut: 첫 접속 호스트 키를 그대로 믿는다(작업공간을 매번 지우므로 매 빌드 첫 접속). 키 고정이 필요하면 known_hosts를 자격 증명으로
+                    sh '''
+                        set -eu
+                        ssh_() { ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$WORKSPACE/known_hosts" "$SSH_USER@$DEPLOY_HOST" "$@"; }
+                        docker save "$AI_IMAGE" | gzip | ssh_ 'gunzip | docker load'
+                        tar -C ai -cf - compose.yaml config prompts | ssh_ "mkdir -p '$DEPLOY_DIR' && tar -xf - -C '$DEPLOY_DIR'"
+                        ssh_ "cd '$DEPLOY_DIR' && AI_IMAGE='$AI_IMAGE' docker compose --env-file .env up -d --no-build --remove-orphans --wait --wait-timeout 120"
+                        # 남의 서버이므로 docker image prune 대신 지난 dva-ai 이미지만 지운다
+                        ssh_ "docker image ls dva-ai --format '{{.Repository}}:{{.Tag}}' | grep -vx '$AI_IMAGE' | xargs -r docker image rm || true"
+                    '''
+                }
+            }
+            post {
+                failure {
+                    withCredentials([sshUserPrivateKey(credentialsId: env.DEPLOY_SSH, keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+                        sh '''
+                            ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$WORKSPACE/known_hosts" "$SSH_USER@$DEPLOY_HOST" \
+                                "cd '$DEPLOY_DIR' && AI_IMAGE='$AI_IMAGE' docker compose --env-file .env logs --tail 100 ai" || true
+                        '''
+                    }
                 }
             }
         }
     }
 
     post {
-        failure {
-            dir('ai') {
-                sh 'docker compose --env-file "$ENV_FILE" logs --tail 100 ai || true'
-            }
-        }
+        always { sh 'docker image rm "$AI_IMAGE" || true' }
     }
 }

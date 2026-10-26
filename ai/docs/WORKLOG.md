@@ -270,3 +270,23 @@
 - Jenkins 로그에 `github-branch-source` 플러그인 로드 실패가 있음(쓰지 않음, 배포와 무관).
 - 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
 - OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.
+
+## 2026-10-26 (Jenkinsfile 교체, 배포를 SSH로)
+
+### 바꾼 것
+- `ai/Jenkinsfile`을 팀 최신 버전(`linux-docker-builder` 노드, 빌드 → 이미지 안에서 pytest)으로 바꾸고 `Deploy` 단계를 더함.
+  - 예전 파일은 `agent any`라 레이블 전용 노드만 있는 Jenkins에서 대기열에 머물렀다.
+  - `Deploy`는 `develop-ai`일 때만. 대상 서버(다른 관리자의 Lightsail, 별개 컨테이너)로 SSH:
+    `docker save | ssh docker load` → `compose.yaml`·`config/`·`prompts/` 복사 → `docker compose up -d --no-build --wait` → 지난 `dva-ai` 이미지만 삭제.
+  - 대상 서버에 git·소스·빌드가 필요 없다. 실패하면 `ai` 로그 100줄을 Jenkins에 남긴다.
+- `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`(같은 서버의 다른 서비스와 겹칠 때). `.env.example`에 `AI_PORT`.
+
+### 확인한 것
+- `docker compose config`(가짜 env 파일)로 `AI_IMAGE`·`AI_PORT` 치환 확인.
+
+### 남은 것
+- `Jenkinsfile`의 `DEPLOY_HOST`(지금 `CHANGE_ME`) 채우기.
+- Jenkins 자격 증명 `dva-ai-deploy-ssh`(SSH Username with private key) 등록.
+- 대상 서버: SSH 사용자를 `docker` 그룹에, `/srv/dva-ai/.env` 작성(jenkins가 아니라 SSH 사용자가 읽을 수 있게, 600), 빌더 노드에서 22번 포트 접속 허용.
+- 대상 서버 CPU 아키텍처가 빌더와 같은지(x86_64) 확인.
+- Jenkins에서 실제 빌드·배포 확인.
