@@ -271,21 +271,27 @@
 - 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
 - OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.
 
-## 2026-10-26 (Jenkinsfile 교체, 배포를 SSH로)
+## 2026-10-26 (Jenkinsfile 교체, 백엔드 방식으로 배포)
 
 ### 바꾼 것
-- `ai/Jenkinsfile`을 팀 최신 버전(`linux-docker-builder` 노드, 빌드 → 이미지 안에서 pytest)으로 바꾸고 `Deploy` 단계를 더함.
+- `ai/Jenkinsfile`: 백엔드 Jenkinsfile(`develop-backend`)과 같은 방식으로.
+  - `linux-docker-builder` 노드. 이미지 빌드(`dva-ai-server:<커밋12자리>-<빌드번호>`, linux/amd64) → 이미지 안에서 pytest → 배포 접속 확인(`--verify-only`).
+  - `DEPLOY_LIGHTSAIL`을 체크했을 때만 배포. 자격 증명은 백엔드와 같은 `dva-lightsail-ssh`.
   - 예전 파일은 `agent any`라 레이블 전용 노드만 있는 Jenkins에서 대기열에 머물렀다.
-  - `Deploy`는 `develop-ai`일 때만. 대상 서버(다른 관리자의 Lightsail, 별개 컨테이너)로 SSH:
-    `docker save | ssh docker load` → `compose.yaml`·`config/`·`prompts/` 복사 → `docker compose up -d --no-build --wait` → 지난 `dva-ai` 이미지만 삭제.
-  - 대상 서버 `13.209.59.180`(`DEPLOY_HOST`). 대상 서버에 git·소스·빌드가 필요 없다. 실패하면 `ai` 로그 100줄을 Jenkins에 남긴다.
-- `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`(같은 서버의 다른 서비스와 겹칠 때). `.env.example`에 `AI_PORT`.
+- `ai/deploy/`(백엔드 `infra/deploy/` 구조를 따름)
+  - `upload.sh`: 호스트 키 고정(`known_hosts`, `StrictHostKeyChecking=yes`) SSH로 이미지(`docker save | docker load`)와 릴리스(`compose.yaml`·`config/`·`prompts/`·`deploy.sh`·`compose.deploy.yaml`·`release.env`)를 `/home/ubuntu/dva-ai/releases/<version>`에 보내고 `deploy.sh` 실행.
+  - `deploy.sh`(대상 서버): `shared/.env` + `release.env`로 `docker compose --project-name dva-ai up --no-build --wait`. 성공하면 `current-release`·`previous-release` 기록, 지금·직전 이미지만 남김. 실패하면 직전 릴리스로 복구. `sudo -n docker`, `flock`으로 동시 배포 막음.
+  - `compose.deploy.yaml`: 배포 때만 외부 네트워크 `dva-shared`(별칭 `dva-ai`)에 붙임. 로컬 compose는 그대로.
+  - `known_hosts`: 백엔드와 같은 서버(`13.209.59.180`) 호스트 키.
+- `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`. `.env.example`에 `AI_PORT`. `.dockerignore`에 `deploy`.
 
 ### 확인한 것
-- `docker compose config`(가짜 env 파일)로 `AI_IMAGE`·`AI_PORT` 치환 확인.
+- 백엔드 배포(`develop-backend`의 `infra/deploy/package.sh`, `compose.prod.yaml`)가 `ai/`를 `dva-ai` 이미지로 빌드해 `dva-prod` 스택에 `ai` 서비스로 띄우고 있다. 그 서비스에는 환경변수·config 볼륨·Qdrant가 없다.
+- `docker compose config`(가짜 env)로 `compose.yaml` + `compose.deploy.yaml` 병합, `AI_IMAGE`·`AI_PORT` 치환 확인.
+- `deploy.sh`를 가짜 docker로 시험: 첫 배포, 두 번째 배포(직전 기록·이미지 정리), 실패 시 직전 릴리스 복구.
+- `bash -n`으로 두 스크립트 문법 확인. 실제 서버 배포는 안 해 봄.
 
 ### 남은 것
-- Jenkins 자격 증명 `dva-ai-deploy-ssh`(SSH Username with private key) 등록.
-- 대상 서버: SSH 사용자를 `docker` 그룹에, `/srv/dva-ai/.env` 작성(jenkins가 아니라 SSH 사용자가 읽을 수 있게, 600), 빌더 노드에서 22번 포트 접속 허용.
-- 대상 서버 CPU 아키텍처가 빌더와 같은지(x86_64) 확인.
-- Jenkins에서 실제 빌드·배포 확인.
+- 백엔드 담당에 요청: `package.sh`·`compose.prod.yaml`에서 `ai` 빼기, `backend`를 `dva-shared` 네트워크에 붙이고 `AI_AGENT_URL=http://dva-ai:8000`. 호스트 Nginx에서 `/api/webhooks/openai/call-incoming`·`/pbx/webhook/call-ended`를 `127.0.0.1:8000`(AI)으로.
+- 대상 서버: `/home/ubuntu/dva-ai/shared/.env` 작성(`BACKEND_API_URL`은 `dva-shared`에서 백엔드 컨테이너 이름으로). 8000이 쓰이고 있으면 `AI_PORT`.
+- Jenkins에서 `DEPLOY_LIGHTSAIL` 체크해 첫 배포 확인.
