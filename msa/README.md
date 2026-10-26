@@ -2,30 +2,32 @@
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
-현재 구현 범위는 5개 서비스 DB의 Liquibase CI/CD와 customer NestJS 서비스의 테스트·이미지 패키징·수동 k3s 배포다. 앱 배포 스크립트는 작성했으며 실제 서버 배포와 무중단 동작은 검증 전이다.
-
-자동 실행에서는 마지막 성공 빌드의 커밋과 비교해 검사 범위를 결정한다. `msa/liquibase/` 변경은 전체 DB 검사와 이미지 패키징을 실행하고, `msa/services/<서비스>/` 변경은 해당 서비스의 테스트와 이미지 빌드만 실행한다. 두 경로 외의 MSA 변경은 공통 변경으로 취급해 전체 검사한다. 수동 실행, 명시적 DB 배포 실행, 비교 이력이 없는 경우에도 전체 검사한다.
-
-서비스별 테스트는 각 Dockerfile에서 실행한다. 서비스 폴더 전체 삭제에 따른 기존 배포 리소스 제거는 자동 처리하지 않는다.
+현재 5개 서비스 DB의 Liquibase CI/CD와 customer NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB 변경은 기존 미리보기·백업 확인·승인 절차를 유지한다.
 
 ## 실행 흐름
 
 ```text
-Checkout → 환경·스크립트 검사 → 변경 범위 결정
-  → 필요한 DB 검사·패키징
-  → 필요한 서비스 테스트·빌드·패키징
-  → 배포 옵션 모두 false: CI 종료
-  → DEPLOY_APPS=true: 앱 전송 → 이미지 검증 → YAML 검증·적용 → rollout 확인
-  → DEPLOY_MSA=true: DB 전송 → 미리보기 → 승인 → DB 적용
-
-DEPLOY_APPS와 DEPLOY_MSA는 동시에 활성화할 수 없다.
+Webhook → develop-backend checkout → 스크립트 검사 → 실제 배포 이력 조회
+  → DB 관련 변경이 있을 때만 전체 DB CI·패키징
+  → 변경된 서비스만 테스트·이미지 빌드·패키징
+  → 승인되지 않은 해당 서비스 DB 변경이 있으면 앱 배포 중단
+  → SSH 전송 → 이미지 검증 → 이전 리소스 보관 → RollingUpdate
+  → 내부 health/OpenAPI + 외부 HTTPS health/Swagger/OpenAPI 확인
+  → 성공: 배포 커밋 기록 / 실패: 이전 리소스 복원 후 빌드 실패
 ```
 
-DB 검사가 선택되면 전체 5개 DB를 검사한다. CD는 `DB_SERVICE`로 선택한 하나만 적용한다. 여러 DB를 변경하면 서비스별로 실행하고 결과를 확인한다. CD는 MR/작업 브랜치에서는 차단되며 `develop-backend` 체크아웃에서만 허용한다.
+앱은 서비스별 **실제 배포 성공 커밋**과 비교한다. CI만 성공했거나 배포가 실패한 변경을 누락하지 않는다. 기존 정상 customer는 이미지 태그의 커밋으로 최초 이력을 이어받는다. 클러스터 이력 조회 실패는 배포를 중단한다.
+
+- 서비스 폴더 변경: 해당 서비스만 빌드한다. 앱 공통 배포 코드 변경: 모든 서비스를 빌드한다.
+- DB CI는 마지막 성공 CI 커밋 기준으로 DB 관련 경로를 비교한다. 앱 전용 코드·문서 변경만으로 DB 검사를 실행하지 않는다. Jenkinsfile, DB 배포 코드, 공통 SSH 설정 변경이나 비교 이력 누락은 DB CI를 실행한다.
+- Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
+- 수동 실행 기본값은 CI만 수행한다. `DEPLOY_APPS=true`는 실제 배포 이력을 기준으로 앱 배포를 재시도하는 용도다. `DEPLOY_MSA=true`와 동시에 켤 수 없다.
+- DB CD는 `DB_SERVICE`로 고른 하나만 승인 후 적용한다. 성공 시 namespace에 `dva.ssafy.io/db-<서비스>-commit`을 기록한다. 새 서비스의 최초 배포도 DB 적용 이력이 필요하다. DB 적용 후 앱 배포를 재실행한다.
+- 서비스 디렉터리 삭제나 manifest에서 리소스를 제거하는 변경은 기존 서버 리소스를 자동 삭제하지 않는다.
 
 ## CI 검사
 
-GitLab Webhook 실행에서는 마지막 성공 빌드의 커밋과 현재 checkout의 `msa/` 내용을 비교한다. 변경이 없으면 환경·DB 검사와 이미지 패키징을 생략하며, 빌드 기록에 `MSA 변경 없음: CI 생략`을 남긴다. 최초 실행이나 비교 이력이 없거나 분기된 경우에는 전체 CI를 실행한다. 실패한 빌드의 MSA 변경도 다시 검사하도록 직전 빌드가 아닌 마지막 성공 빌드를 기준으로 한다. 수동 실행과 명시적 배포 실행은 변경 여부와 관계없이 전체 CI를 수행한다.
+자동 배포에서는 클러스터 배포 이력을 조회하고 검사 대상을 결정한다. 변경이 없어도 Jenkins 실행 기록과 빠른 스크립트 검사는 남지만, 서비스 빌드·배포와 불필요한 DB 검사는 생략한다. 선택 결과는 `Select Build Scope` 로그에서 확인한다.
 
 자동 실행은 GitLab의 Push events Webhook을 사용한다. Jenkins 트리거는 Push Events만 활성화하고 Allowed branches를 `develop-backend`로 제한한다. GitLab Webhook 주소는 `https://13.209.59.180/jenkins/project/dva-msa`, 브랜치 필터는 `develop-backend`이며 Jenkins에서 생성한 Secret token을 등록하고 SSL 검증을 유지한다. Poll SCM과 별도 주기 빌드는 끈다. Git의 Included Regions 설정은 Webhook 직접 실행에 적용되지 않으므로 파이프라인에서 경로를 검사한다. 자동 실행은 기본값 `DEPLOY_MSA=false`를 유지한다.
 
@@ -60,9 +62,9 @@ Webhook을 켜기 전에 이 Jenkinsfile이 대상 브랜치에 반영되어야 
 
 대기 목록 해시는 changeset 식별자에 대한 승인 연결이다. 임의의 데이터 변경이나 수동 DDL까지 감지하는 스키마 비교 기능은 아니다. 승인 중에는 별도 수동 마이그레이션을 수행하지 않는다. Jenkins 전체 DB 배포 잠금과 서버 작업 잠금을 사용하며, Liquibase DB 잠금도 유지한다.
 
-## Jenkins 설치 후 연결할 설정
+## Jenkins 연결 설정
 
-이번 구현에서는 Jenkins 설치, 모놀리식 서버 연결, 실제 MSA 서버 접속·배포를 수행하지 않았다.
+기존 Jenkins Job과 SSH credential을 사용한다. 아래는 재구성 시 필요한 설정이다.
 
 1. Linux amd64 빌드 노드에 `msa-builder` 라벨을 지정한다. Docker 데몬 사용 권한과 `git`, `python3`, `bash`, `ssh`, `scp`, `sha256sum`, `realpath`가 필요하다. 빌드는 이 서버 노드에서 실행한다.
 2. Pipeline/Declarative, Git, Credentials Binding, SSH Credentials, Lockable Resources, Timestamper 플러그인을 준비한다.
@@ -98,24 +100,52 @@ Jenkins에서 `verification.json`, `verification-logs/`, `msa-release/<커밋>-<
 - 현재 단일 노드에서 로컬 이미지 import를 사용한다. 노드가 늘면 이미지 저장소 또는 노드별 배포 방식을 먼저 설계한다.
 - 로컬 Docker PostgreSQL 통합 검사와 격리된 배포 스크립트 테스트는 실제 Jenkins 플러그인 조합, SSH 네트워크, 운영 k3s Job의 종단간 검증을 대체하지 않는다. 서버 연결 후 첫 실행에서 이를 확인해야 한다.
 
-검사 실행(저장소 루트, Linux 빌드 환경):
+## 애플리케이션 배포와 복구
 
-## 애플리케이션 배포
+customer 주소:
 
-- 자동 실행의 DEPLOY_APPS 기본값은 false다.
-- 수동 앱 배포 실행은 전체 CI를 수행하고 생성된 모든 서비스 패키지를 배포한다.
-- 배포는 develop-backend에서만 허용하며 DB 배포와 잠금을 공유한다.
-- 서버는 단일 Linux amd64 k3s 노드여야 한다.
-- 이미지를 containerd에 직접 등록하고 CI 이미지 ID와 비교한다.
-- customer는 RollingUpdate(maxUnavailable=0, maxSurge=1)를 사용한다.
-- readiness 검사와 종료 유예 시간을 설정했지만 실제 요청 유지 여부는 별도 검증이 필요하다.
-- Service는 ClusterIP이며 외부 접속 경로는 아직 구성하지 않았다.
-- 실패 시 자동 롤백하지 않는다. 서버 패키지 디렉터리의 previous-deployment.yaml과 rollout 상태를 확인한 뒤 복구한다.
-- 최초 배포에는 이전 Deployment가 없으므로 롤백할 버전이 없다.
-- 로그는 msa-release/app-logs에 보관한다.
-- 서버 패키지는 /home/ubuntu/msa-deploy/apps/<릴리스>/<서비스>에 저장한다.
+- https://k15d109.p.ssafy.io/customer/health
+- https://k15d109.p.ssafy.io/customer/docs
+- https://k15d109.p.ssafy.io/customer/docs-json
+
+Traefik의 `websecure`와 `letsencrypt`를 사용한다. 앱은 `/<서비스>` 접두어와 `/health`, `/docs`, `/docs-json`을 제공한다. 배포 성공 전에 내부 Service와 외부 HTTPS 응답을 검사한다.
+
+`maxUnavailable=0`, `maxSurge=1`로 새 Pod가 준비될 때까지 기존 Pod를 유지한다. readiness, 시작 검사, 종료 유예를 함께 사용한다. 이는 단일 노드 장애나 DB 호환성까지 해결하는 고가용성 보장은 아니다.
+
+적용 전에 해당 서비스의 Deployment·Service·Ingress를 `previous-resources.json`으로 보관한다. rollout 또는 응답 검사 실패 시 이전 리소스를 적용하고 복구 응답을 확인한다. 복구에 성공해도 실패한 릴리스의 Jenkins 빌드는 실패 처리한다. 다른 이미지가 이미 배포되었다면 이를 덮어쓰지 않고 복구를 중단한다. 최초 배포는 이전 버전이 없으므로 진단용 리소스를 남긴다. SSH 단절·강제 종료·노드 장애에서는 자동 복구 완료를 보장하지 않는다.
+
+앱/DB는 배포 잠금을 공유한다. 앱 롤백은 DB를 되돌리지 않으므로 스키마 변경은 이전 앱과도 호환되게 적용해야 한다. DB 백업·승인 절차는 유지한다.
+
+| 파일 | 역할 |
+|---|---|
+| `deploy/plan-apps.py`, `read-app-state.sh` | 실제 배포 커밋 조회와 서비스·DB 검사 범위 결정 |
+| `deploy/package-app.sh`, `upload-app.sh` | 검증된 이미지와 실행 파일 패키징·전송 |
+| `deploy/remote-app.sh`, `app-release.py` | 서버 잠금, 이미지 검증, 배포·응답 검사·복구 |
+| `deploy/tests/integration_app_rollout.py` | 격리된 로컬 k3s에서 정상 교체와 의도적인 readiness 실패·복구 확인 |
+
+서버 패키지는 `/home/ubuntu/msa-deploy/apps/<릴리스>/<서비스>`에 저장한다. Jenkins 앱 로그는 `msa-release/app-logs`에 보관한다. 성공 마커는 `DVA_APP_ROLLOUT_COMPLETE`, 복구 성공 마커는 `DVA_APP_ROLLBACK_COMPLETE`다.
+
+## 검증과 다음 서비스 작업 단위
+
+일반 Jenkins 검사에는 다음 unittest가 포함된다. 실제 k3s 장애 검증은 매 빌드에 실행하지 않는다.
 
 ```bash
 python3 -m unittest discover -s msa/deploy/tests -v
-python3 msa/liquibase/verify.py
+# 배포 동작을 바꾸었을 때만, 운영 kubeconfig를 사용하지 않는 로컬 Docker 환경에서 실행
+python3 msa/deploy/tests/integration_app_rollout.py --image dva-customer:local
 ```
+
+다음 서비스는 아래 작업을 **하나의 MR → develop-backend**로 묶고 커밋을 나눈다.
+
+1. NestJS 서버와 서비스 접두어, health·Swagger, 필요한 테스트 구성.
+2. Dockerfile 및 k3s Deployment·Service·HTTPS Ingress 구성.
+3. 변경 서비스 선택·자동 배포·실패 복구와의 연결 확인, 문서 정리.
+
+이미 지원되는 공통 CI/CD 코드를 서비스마다 복사하지 않는다. DB 변경이 있으면 해당 changeset을 같은 작업에서 준비하되 실제 DB 적용은 승인 절차를 따른다. 첫 배포는 외부 Swagger와 배포 완료 로그까지 확인한다.
+
+## 이번 변경의 검증 기록 (2026-10-26)
+
+- Linux Python 3.13 배포 회귀 검사 41개 통과, Bash 구문 및 Jenkinsfile Groovy 구문 통과.
+- 격리된 k3s `v1.35.5+k3s1`에서 실제 customer 이미지로 최초 배포 → 정상 교체 → readiness 실패 → 이전 버전 복구 확인. 교체·복구 중 HTTP 요청 456건, 실패 0건.
+- 현재 운영 customer의 HTTPS health·Swagger·OpenAPI 모두 HTTP 200 확인.
+- 신규 파이프라인의 운영 Jenkins 실행과 운영 장애 주입은 수행하지 않았다. 병합 후 첫 Webhook 실행에서 실제 배포 성공 마커와 외부 주소를 확인한다.

@@ -46,10 +46,10 @@ grep -Fq "image: $image" "$dest/k8s.yaml" || {
   exit 1
 }
 
-cp msa/deploy/remote-app.sh "$dest/"
+cp msa/deploy/remote-app.sh msa/deploy/app-release.py "$dest/"
 
 cd "$dest"
-sha256sum image.tar image-name.txt image-id.txt k8s.yaml remote-app.sh > SHA256SUMS
+sha256sum image.tar image-name.txt image-id.txt k8s.yaml remote-app.sh app-release.py > SHA256SUMS
 sha256sum --check --strict SHA256SUMS
 
 echo "Packaged: $service ($release)"

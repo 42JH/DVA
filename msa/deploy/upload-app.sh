@@ -19,6 +19,7 @@ files=(
   image-id.txt
   k8s.yaml
   remote-app.sh
+  app-release.py
   SHA256SUMS
 )
 
