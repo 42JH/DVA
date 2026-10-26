@@ -16,6 +16,12 @@ Jira: S15P31D109-111 · 브랜치: `ci/jenkins-lightsail` · MR 대상: `develop
 동일 서버이므로 Jenkins와 서비스가 하드웨어 자원을 공유한다. 별도 CI 서버로 분리한 것과 같은
 장애 격리나 성능 보장을 의미하지 않는다. 동시 빌드는 1개로 제한한다.
 
+agent는 `init: true`로 실행하여 빌드 중 부모를 잃은 자식 프로세스를 회수한다.
+이 설정이 없으면 종료된 Git·셸 프로세스가 누적되어 `pids_limit: 512`에 도달하고,
+`fork: Resource temporarily unavailable` 또는 출력 없는 빌드 정지가 발생할 수 있다.
+이미 누적된 경우 실행 중인 빌드를 중단하고 agent만 재생성한다. 설정 반영 후
+`docker inspect --format '{{.HostConfig.Init}}' dva-jenkins-agent-1`의 결과가 `true`인지 확인한다.
+
 controller는 Docker 소켓을 마운트하지 않는다. agent는 TLS와 내부 네트워크로 빌드용 Docker에
 연결하며 운영 Docker 소켓을 사용하지 않는다. Docker-in-Docker에는 privileged 컨테이너가 필요하다.
 신뢰한 프로젝트의 코드만 실행한다. 빌드 daemon의 포트는 호스트에 공개하지 않는다.
@@ -67,6 +73,25 @@ Node.js 24와 Docker CLI는 agent 이미지에 포함한다. Backend 컴파일�
 
 Job의 GitLab credential ID는 `gitlab-dva-readonly`, 배포 credential ID는 `dva-lightsail-ssh`를 유지한다.
 배포 시 SSH 호스트 키를 `infra/deploy/known_hosts`로 검증한다.
+
+## 모놀리식 웹훅 경로 필터
+
+`dva-ci-linux-validation`은 Generic Webhook Trigger로 프로젝트 `1462697`의
+`develop-backend` Push 중 `backend/`, 루트 `Jenkinsfile`, `compose.yaml`, `compose.prod.yaml`,
+`infra/deploy/`, `infra/nginx/`, `infra/https/`, `infra/jenkins/`, `.gitattributes` 변경만 선택한다.
+일반적인 `msa/` 단독 변경·다른 브랜치·MR 이벤트·브랜치 삭제는 선택하지 않는다.
+[GitLab Push payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#push-events)가
+commits를 최대 20개만 제공하므로, 총 커밋이 20개를 넘으면
+누락된 backend 변경을 놓치지 않도록 보수적으로 실행한다. 이 경우 MSA 단독 Push도 선택될 수 있다.
+
+`configure-monolith-trigger.groovy`를 인증된 관리 콘솔에서 실행한다. 기존 웹훅 토큰을 재사용하고,
+Job 설정을 보호된 서버 디렉터리에 백업하며 MSA Job은 변경하지 않는다. 토큰과 payload를 로그에 출력하지 않는다.
+호스트 Nginx는 기존 `/jenkins/project/dva-ci-linux-validation`을 Generic Trigger에 전달한다.
+따라서 GitLab 웹훅 URL·Secret token을 바꾸지 않는다. Jenkins 재시작이나 앱 재배포도 필요 없다.
+
+서버에서 `sudo python3 test-monolith-trigger.py`로 실제 HTTPS 경로의 dry run을 실행한다.
+인증·포함/제외 경로·이벤트·브랜치를 검증하고 모놀리식/MSA의 빌드 번호가 증가하지 않는지 확인한다.
+수동 Build 실행은 웹훅 필터를 거치지 않으며 기존 `DEPLOY_LIGHTSAIL=false` 기본값을 유지한다.
 
 ## 코드 반영 전 검증
 
