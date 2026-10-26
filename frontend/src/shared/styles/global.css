@@ -1,0 +1,60 @@
+@import 'tailwindcss';
+
+/* 디자인 토큰 — 와이어프레임 v2 값 (임시). 디자인이 확정되면 값만 바꾼다, 이름은 유지.
+   @theme 안의 변수는 Tailwind 유틸리티가 됨: --color-action → bg-action · text-action · border-action,
+   --text-title → text-title, --font-sans → font-sans */
+@theme {
+  --color-*: initial; /* Tailwind 기본 팔레트 끔 — 토큰에 있는 색만 쓴다 */
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-transparent: transparent;
+
+  --color-brand: #2ea3ff; /* 로고 */
+  --color-action: #1c477f; /* 주 버튼 · 선택 · 링크 */
+  --color-action-soft: #ecf2fa;
+  --color-danger: #c62f35;
+  --color-danger-soft: #fdecec;
+  --color-ink: #2b2f36; /* 본문 글자 */
+  --color-sub: #5f6b7a; /* 보조 글자 */
+  --color-muted: #8a95a2; /* 흐린 글자 · 비활성 */
+  --color-line: #dde3ea; /* 구분선 · 테두리 */
+  --color-bg: #f2f6fa; /* 호버 · 옅은 바탕 */
+  --color-surface: #ffffff;
+
+  /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
+  --font-sans: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --text-title: 28px; /* 화면 제목 700 */
+  --text-title--line-height: 1.4;
+  --text-card: 24px; /* 카드 제목 700 */
+  --text-card--line-height: 1.4;
+  --text-strong: 22px; /* 핵심 값 600 */
+  --text-strong--line-height: 1.4;
+  --text-body: 20px; /* 본문 400 */
+  --text-body--line-height: 1.4;
+  --text-label: 18px; /* 보조 500 */
+  --text-label--line-height: 1.4;
+  --text-caption: 17px; /* 캡션 500 */
+  --text-caption--line-height: 1.4;
+
+  --tracking-tight: -0.025em;
+
+  --spacing-sidebar: 222px; /* w-sidebar */
+  --spacing-content: 32px; /* p-content */
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    min-width: 1280px; /* 1280 미만은 가로 스크롤 (반응형 규칙) */
+    font-size: var(--text-body);
+    line-height: 1.4;
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-ink);
+    background: var(--color-surface);
+  }
+}
