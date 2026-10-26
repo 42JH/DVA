@@ -16,6 +16,12 @@ Jira: S15P31D109-111 · 브랜치: `ci/jenkins-lightsail` · MR 대상: `develop
 동일 서버이므로 Jenkins와 서비스가 하드웨어 자원을 공유한다. 별도 CI 서버로 분리한 것과 같은
 장애 격리나 성능 보장을 의미하지 않는다. 동시 빌드는 1개로 제한한다.
 
+agent는 `init: true`로 실행하여 빌드 중 부모를 잃은 자식 프로세스를 회수한다.
+이 설정이 없으면 종료된 Git·셸 프로세스가 누적되어 `pids_limit: 512`에 도달하고,
+`fork: Resource temporarily unavailable` 또는 출력 없는 빌드 정지가 발생할 수 있다.
+이미 누적된 경우 실행 중인 빌드를 중단하고 agent만 재생성한다. 설정 반영 후
+`docker inspect --format '{{.HostConfig.Init}}' dva-jenkins-agent-1`의 결과가 `true`인지 확인한다.
+
 controller는 Docker 소켓을 마운트하지 않는다. agent는 TLS와 내부 네트워크로 빌드용 Docker에
 연결하며 운영 Docker 소켓을 사용하지 않는다. Docker-in-Docker에는 privileged 컨테이너가 필요하다.
 신뢰한 프로젝트의 코드만 실행한다. 빌드 daemon의 포트는 호스트에 공개하지 않는다.

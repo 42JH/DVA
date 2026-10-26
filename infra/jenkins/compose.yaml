@@ -30,6 +30,7 @@ services:
     networks: [build]
   agent:
     image: dva-jenkins-agent:linux-20261025
+    init: true
     build:
       context: .
       dockerfile: agent.Dockerfile
