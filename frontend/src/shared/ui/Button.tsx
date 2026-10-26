@@ -2,11 +2,12 @@ import type { ButtonHTMLAttributes } from 'react'
 
 // 버튼 — 와이어프레임 공통: 높이 40(표 안 32) · 모서리 8 · 좌우 20 · 라벨 18/600
 // kind: primary(남색) · normal(흰 바탕 선) · danger(빨강 바탕) · dangerLine(흰 바탕 빨강 선). 비활성은 어느 kind든 회색
+// 선은 border가 아니라 안쪽 ring — 선 있는 버튼과 없는 버튼의 폭(라벨 + 40)과 글자 자리가 똑같아야 해서
 const KIND = {
   primary: 'bg-action text-white',
-  normal: 'border border-line bg-surface text-ink',
+  normal: 'bg-surface text-ink ring-1 ring-line ring-inset',
   danger: 'bg-danger text-white',
-  dangerLine: 'border border-danger bg-surface text-danger',
+  dangerLine: 'bg-surface text-danger ring-1 ring-danger ring-inset',
 } as const
 
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -19,7 +20,7 @@ export function Button({ kind = 'normal', small, className = '', ...rest }: Prop
     <button
       type="button"
       {...rest}
-      className={`${small ? 'h-8' : 'h-10'} rounded-lg px-5 text-label font-semibold whitespace-nowrap ${KIND[kind]} disabled:border disabled:border-line disabled:bg-bg disabled:text-muted ${className}`}
+      className={`${small ? 'h-8' : 'h-10'} rounded-lg px-5 text-label font-semibold whitespace-nowrap ${KIND[kind]} disabled:bg-bg disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset ${className}`}
     />
   )
 }

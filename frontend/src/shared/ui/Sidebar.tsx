@@ -30,7 +30,18 @@ export function Sidebar({ userLabel, onLogout }: { userLabel?: string; onLogout:
                 className={`${row(false, inDetail)} w-full justify-between`}
               >
                 {m.label}
-                <span className="text-sub">{open ? '▴' : '▾'}</span>
+                {/* 펼침 화살표 — 글자(▾)가 아니라 16 칸 아이콘, 펼치면 뒤집음 */}
+                <svg
+                  viewBox="0 0 20 20"
+                  className={`size-4 stroke-sub ${open ? 'rotate-180' : ''}`}
+                  fill="none"
+                  strokeWidth={1.6}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M5 8l5 5 5-5" />
+                </svg>
               </button>
               {open && (
                 <ul className="relative ml-4 flex flex-col gap-1 border-l border-line pl-1">
@@ -62,7 +73,8 @@ export function Sidebar({ userLabel, onLogout }: { userLabel?: string; onLogout:
           ),
         )}
       </ul>
-      <div className="mt-auto flex flex-col gap-1 px-4 pb-6">
+      {/* 위 메뉴 줄과 같은 좌우 4 → 로그아웃 글자도 메뉴 글자와 같은 x(16) */}
+      <div className="mt-auto flex flex-col gap-1 px-1 pb-6">
         {userLabel && <span className="truncate px-3 text-caption text-muted">{userLabel}</span>}
         <button
           type="button"

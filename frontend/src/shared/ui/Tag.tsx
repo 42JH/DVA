@@ -4,7 +4,7 @@ const KIND = {
   blue: 'bg-action-soft text-action',
   red: 'bg-danger-soft text-danger',
   gray: 'bg-bg text-sub',
-  outline: 'border border-muted bg-surface text-sub',
+  outline: 'bg-surface text-sub ring-1 ring-muted ring-inset', // 선도 안쪽 ring — 색 태그와 폭 동일
 } as const
 
 export type TagKind = keyof typeof KIND

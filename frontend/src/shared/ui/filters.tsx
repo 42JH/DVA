@@ -1,5 +1,8 @@
 // 필터 줄 부품 — 높이 48 · 모서리 8. 적용된(applied) 상태 = 옅은 남색 바탕 + 남색 1.5 선 (와이어프레임 04 '불만 있음')
 // 상태는 ViewModel이 들고, 여기는 그리기만
+// 선은 전부 안쪽 ring — 1 → 1.5로 굵어져도 칸 폭 · 글자 자리가 안 움직이게
+const LINE = 'ring-1 ring-line ring-inset'
+const LINE_ON = 'ring-[1.5px] ring-action ring-inset'
 
 /** 검색칸 — 입력 중엔 Enter로 검색. 자리글 예: '주문 · 디버 접수번호 · 고객 · 발신번호' */
 export function SearchBox({
@@ -17,7 +20,7 @@ export function SearchBox({
 }) {
   return (
     <label
-      className={`flex h-12 items-center gap-3 rounded-lg border border-line bg-surface px-4 focus-within:border-action ${className}`}
+      className={`flex h-12 items-center gap-3 rounded-lg bg-surface px-4 ${LINE} focus-within:ring-action ${className}`}
     >
       <svg
         viewBox="0 0 20 20"
@@ -68,10 +71,10 @@ export function PeriodFilter({
             role="radio"
             aria-checked={on}
             onClick={() => onChange(k)}
-            className={`flex h-12 items-center gap-2 rounded-lg border px-5 text-body ${
+            className={`flex h-12 items-center gap-2 rounded-lg px-5 text-body ${
               on
-                ? 'border-[1.5px] border-action bg-action-soft font-semibold text-action'
-                : 'border-line bg-surface text-ink'
+                ? `${LINE_ON} bg-action-soft font-semibold text-action`
+                : `${LINE} bg-surface text-ink`
             }`}
           >
             {label}
@@ -118,8 +121,8 @@ export function Select<V extends string>({
   const current = options.find((o) => o.value === value)?.label ?? ''
   return (
     <label
-      className={`relative flex h-12 items-center gap-2 rounded-lg border px-4 text-body ${
-        applied ? 'border-[1.5px] border-action bg-action-soft' : 'border-line bg-surface'
+      className={`relative flex h-12 items-center gap-2 rounded-lg px-4 text-body ${
+        applied ? `${LINE_ON} bg-action-soft` : `${LINE} bg-surface`
       } ${className}`}
     >
       <span className="text-sub">{name}</span>
@@ -215,7 +218,18 @@ export function AppliedFilters({
           className="flex h-9 items-center gap-2 rounded-full bg-action-soft pr-3 pl-4 text-label font-semibold text-action"
         >
           {c.label}
-          <span aria-hidden>✕</span>
+          {/* ✕는 글자가 아니라 16 칸 아이콘 — 글꼴에 따라 자리가 흔들리지 않게 */}
+          <svg
+            viewBox="0 0 16 16"
+            className="size-4 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.6}
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
           <span className="sr-only">필터 해제</span>
         </button>
       ))}

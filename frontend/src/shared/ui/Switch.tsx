@@ -16,11 +16,11 @@ export function Switch({
         role="switch"
         aria-checked={on}
         onClick={() => onChange(!on)}
-        className={`relative h-6 w-10 rounded-full transition-colors ${on ? 'bg-action' : 'border border-muted bg-bg'}`}
+        className={`relative h-6 w-10 rounded-full transition-colors ${on ? 'bg-action' : 'bg-bg ring-1 ring-muted ring-inset'}`}
       >
         <span
           className={`absolute top-1/2 size-[18px] -translate-y-1/2 rounded-full transition-[left] ${
-            on ? 'left-[19px] bg-white' : 'left-[3px] bg-muted'
+            on ? 'left-[19px] bg-white' : 'left-0.75 bg-muted'
           }`}
         />
       </button>

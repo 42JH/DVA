@@ -9,6 +9,24 @@ import { fmtRange, monthGrid, pickRange, rangeDays, todayYmd, type Ymd } from '.
 const DOW = ['일', '월', '화', '수', '목', '금', '토']
 const pad = (n: number) => String(n).padStart(2, '0')
 
+/** 달 이동 화살표 — 글자(‹ ›)가 아니라 16 칸 아이콘 (페이지 번호 화살표와 같은 모양) */
+function Chevron({ dir }: { dir: 'prev' | 'next' }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className="size-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {dir === 'prev' ? <path d="M12 5l-5 5 5 5" /> : <path d="M8 5l5 5-5 5" />}
+    </svg>
+  )
+}
+
 export function Calendar({
   value,
   onApply,
@@ -35,7 +53,8 @@ export function Calendar({
   const complete = range.from && range.to ? { from: range.from, to: range.to } : null
 
   return (
-    <div className="w-[356px] rounded-xl border border-line bg-surface p-6 shadow-[0_14px_40px_rgba(43,47,54,0.16)]">
+    // 선은 안쪽 ring — 안쪽 폭이 정확히 356 − 48 = 308 = 44 × 7 (칸이 소수점에 안 걸리게)
+    <div className="w-[356px] rounded-xl bg-surface p-6 shadow-[0_14px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset">
       <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
@@ -43,7 +62,7 @@ export function Calendar({
           aria-label="이전 달"
           className="grid size-8 place-items-center rounded-lg text-sub hover:bg-bg"
         >
-          ‹
+          <Chevron dir="prev" />
         </button>
         <span className="text-strong font-bold">
           {view.y}년 {view.m}월
@@ -54,7 +73,7 @@ export function Calendar({
           aria-label="다음 달"
           className="grid size-8 place-items-center rounded-lg text-sub hover:bg-bg"
         >
-          ›
+          <Chevron dir="next" />
         </button>
       </div>
       <div className="grid grid-cols-7 text-center text-caption text-sub">

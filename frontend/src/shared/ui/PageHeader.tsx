@@ -13,7 +13,7 @@ export function PageHeader({
   right?: ReactNode
 }) {
   return (
-    <header className="-mx-content -mt-content mb-6 flex h-16 items-center gap-4 border-b border-line px-content">
+    <header className="-mx-content -mt-content mb-6 box-content flex h-16 items-center gap-4 border-b border-line px-content">
       <h1 className="text-title font-bold">{title}</h1>
       {back && (
         <Link to={back.to} className="text-label font-semibold text-action">

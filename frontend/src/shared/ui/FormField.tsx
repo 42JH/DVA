@@ -3,9 +3,11 @@ import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react'
 // 폼 칸 (와이어프레임 03 Form field) — 라벨(18/600 회색) 위 · 칸 44 · 모서리 8 · 글자 왼쪽 14
 // 입력 중 = 남색 1.5 선 · locked = 회색 바탕 + 자물쇠(11 이메일 · 이름) · 오류 = 빨간 선 + 아래 빨간 글(명세서 error.details → field별)
 
-const BOX = 'w-full rounded-lg border px-3.5 text-body text-ink outline-none placeholder:text-muted'
+// 선은 안쪽 ring — 입력 중 1.5로 굵어져도 글자 자리(왼쪽 14)가 안 움직이게
+const BOX =
+  'w-full rounded-lg px-3.5 text-body text-ink outline-none ring-inset placeholder:text-muted'
 const STATE = (error?: string) =>
-  error ? 'border-[1.5px] border-danger' : 'border-line focus:border-[1.5px] focus:border-action'
+  error ? 'ring-[1.5px] ring-danger' : 'ring-1 ring-line focus:ring-[1.5px] focus:ring-action'
 
 function Wrap({
   label,
@@ -53,7 +55,7 @@ export function TextField({
           <input
             {...rest}
             readOnly
-            className={`${BOX} h-11 border-line bg-bg text-sub ${className}`}
+            className={`${BOX} h-11 bg-bg pr-10 text-sub ring-1 ring-line ${className}`} // 오른쪽은 자물쇠 자리(16) + 여백만큼 비움
           />
           <svg
             viewBox="0 0 20 20"
@@ -93,7 +95,7 @@ export function TextArea({
       <textarea
         {...rest}
         aria-invalid={!!error}
-        className={`${BOX} min-h-[180px] resize-y bg-surface py-2.5 leading-[1.6] ${STATE(error)} ${className}`}
+        className={`${BOX} min-h-[180px] resize-y bg-surface py-2.5 ${STATE(error)} ${className}`}
       />
     </Wrap>
   )
