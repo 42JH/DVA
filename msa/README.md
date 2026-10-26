@@ -2,7 +2,7 @@
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
-현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
+현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery·consultation·operations NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
 
 ## 실행 흐름
 
@@ -174,3 +174,19 @@ DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 
 - 포트 3003, 경로: /delivery/health, /delivery/docs, /delivery/docs-json.
 - 공통 서비스 검색·선택 배포·실패 복구를 재사용한다. Jenkinsfile과 DB changeset은 변경하지 않는다.
 - 병합 후 Delivery 자동 배포와 외부 HTTPS를 확인한다. 정상 Customer·Order와 변경 없는 DB는 생략한다.
+
+## 5개 서비스 실행 기반
+
+| 서비스 | 포트 | HTTPS Swagger 경로 |
+|---|---|---|
+| Customer | 3001 | /customer/docs |
+| Order | 3002 | /order/docs |
+| Delivery | 3003 | /delivery/docs |
+| Consultation | 3004 | /consultation/docs |
+| Operations | 3005 | /operations/docs |
+
+공통 호스트는 https://k15d109.p.ssafy.io 이며 각 서비스는 같은 접두어 아래 health와 docs-json을 제공한다. Consultation·Operations의 운영 주소는 병합 후 배포 완료 확인이 필요하다.
+
+남은 두 서비스는 하나의 MR에서 추가하되 Jenkinsfile·DB changeset은 변경하지 않는다. 자동 검색·선택 빌드·패키징·HTTPS 배포·실패 복구를 재사용한다. 정상 Customer·Order·Delivery 및 변경 없는 DB는 생략한다. 다중 앱 배포는 서비스별 성공을 기록하며 전체 원자적 롤백은 하지 않는다. 재실행 시 아직 배포하지 못한 서비스만 선택한다.
+
+각 서비스의 README에 실행법과 검증 결과를 기록한다. 이 구성은 업무 API와 DB 연결 전의 서버 인프라 기반이다.
