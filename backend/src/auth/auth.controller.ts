@@ -1,10 +1,20 @@
-import { Controller } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiCookieAuth, ApiHeader, ApiResponse, ApiTags } from '@nestjs/swagger';
-import { CookieOptions } from 'express';
+import {
+  ApiCookieAuth,
+  ApiOperation,
+  ApiHeader,
+  ApiOkResponse,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { CookieOptions, Response } from 'express';
 import { Environment } from '../config/environment';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { AuthService } from './auth.service';
+import { AuthRequest, PublicAuth, SESSION_COOKIE } from './auth.guard';
+import { LoginDto } from './dto/auth-request.dto';
+import { LoginEnvelopeDto } from './dto/auth-response.dto';
 export function cookieOptions(production: boolean): CookieOptions {
   return { httpOnly: true, secure: production, sameSite: 'lax', path: '/api' };
 }
@@ -26,5 +36,24 @@ export class AuthController {
   ) {}
   private options() {
     return cookieOptions(this.config.get('NODE_ENV', { infer: true }) === 'production');
+  }
+  @PublicAuth()
+  @ApiOperation({ security: [] })
+  @Post('login')
+  @HttpCode(200)
+  @ApiOkResponse({
+    type: LoginEnvelopeDto,
+    headers: {
+      'Set-Cookie': { description: 'HttpOnly 관리자 세션 쿠키', schema: { type: 'string' } },
+    },
+  })
+  async login(
+    @Body() input: LoginDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.auth.login(input, request.requestId, request.sessionToken);
+    response.cookie(SESSION_COOKIE, result.token, { ...this.options(), expires: result.expiresAt });
+    return { expiresAt: result.expiresAt };
   }
 }

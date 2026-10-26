@@ -16,10 +16,26 @@ export class AuthRepository {
       )
     ).rows[0];
   }
+  async create(hash: string, id: number, client: PoolClient): Promise<Date> {
+    const row = (
+      await client.query(
+        `INSERT INTO admin_sessions(session_token_hash,admin_user_seq,created_at,expires_at)
+   VALUES($1,$2,statement_timestamp(),statement_timestamp()+INTERVAL '9 hours') RETURNING expires_at`,
+        [hash, id],
+      )
+    ).rows[0];
+    return row.expires_at;
+  }
   async remove(hash: string, client?: PoolClient) {
     await (client ?? this.database.pool).query(
       'DELETE FROM admin_sessions WHERE session_token_hash=$1',
       [hash],
+    );
+  }
+  async removeExpired(id: number, client: PoolClient) {
+    await client.query(
+      'DELETE FROM admin_sessions WHERE admin_user_seq=$1 AND expires_at<=clock_timestamp()',
+      [id],
     );
   }
 }

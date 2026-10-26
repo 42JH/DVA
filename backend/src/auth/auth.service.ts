@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AdminsService } from '../admins/admins.service';
@@ -7,6 +7,8 @@ import { AdminPublic } from '../admins/admins.types';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { AuthRepository } from './auth.repository';
+import { LoginDto } from './dto/auth-request.dto';
+import { verifyPassword } from './password';
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -25,5 +27,31 @@ export class AuthService {
     const account = await this.repository.find(tokenHash(token), client);
     if (!account) throw unauthorized();
     return account;
+  }
+  async login(input: LoginDto, requestId: string, previousToken?: string) {
+    return this.database.transaction(async (client) => {
+      // Hold the account lock through password verification and session creation.
+      // Password changes use the same lock, so old-password logins cannot survive a reset.
+      const account = await this.admins.findForLogin(input.loginId, client);
+      const valid = await verifyPassword(input.password, account?.passwordHash);
+      if (!account || !valid || account.status !== 'ACTIVE') throw unauthorized();
+      const token = randomBytes(32).toString('hex');
+      if (previousToken) await this.repository.remove(tokenHash(previousToken), client);
+      await this.repository.removeExpired(account.adminUserSeq, client);
+      const expiresAt = await this.repository.create(
+        tokenHash(token),
+        account.adminUserSeq,
+        client,
+      );
+      await this.admins.recordLogin(account.adminUserSeq, client);
+      await this.audit.record(
+        account.adminUserSeq,
+        account.adminUserSeq,
+        'ADMIN_LOGIN',
+        requestId,
+        client,
+      );
+      return { token, expiresAt };
+    });
   }
 }
