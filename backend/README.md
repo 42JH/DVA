@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+기업명·상태 관리 기능과 83번 세션 인증 연결 항목은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
+
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
 

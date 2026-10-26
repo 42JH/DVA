@@ -27,6 +27,19 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
+test('company endpoints remain unregistered until the session authentication from issue 83 is connected', async () => {
+  for (const [method, path] of [
+    ['GET', '/api/companies'],
+    ['POST', '/api/companies'],
+    ['GET', '/api/companies/1'],
+    ['PATCH', '/api/companies/1'],
+  ]) {
+    const response = await fetch('http://backend:3000' + path, { method });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).error.code, 'NOT_FOUND');
+  }
+});
+
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
   const requestId = randomUUID();
   const response = await fetch('http://proxy/api/not-implemented', {
