@@ -53,18 +53,31 @@ class DeliveryPlanTests(unittest.TestCase):
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')
-        self.assertEqual(planner.plan(ci_success, True, self.state, {}), (['customer'], []))
+        self.assertEqual(planner.plan(ci_success, True, self.state, {}), ['customer'])
 
     def test_unchanged_deployed_service_skips(self):
         self.commit('backend/other.ts', 'unrelated')
-        self.assertEqual(planner.plan('', True, self.state, {}), ([], []))
+        self.assertEqual(planner.plan('', True, self.state, {}), [])
 
-    def test_db_approval_required_and_approved_commit_unblocks(self):
+    def test_database_only_change_is_selected_without_app(self):
+        annotations = {f'dva.ssafy.io/db-{name}-commit': self.deployed for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
+        self.commit('msa/liquibase/changelog/operations/002.sql', 'schema only')
+        self.assertEqual(planner.plan('', True, self.state, annotations), [])
+        self.assertEqual(planner.databases(self.git('rev-parse', 'HEAD'), True, annotations), ['operations'])
+
+    def test_database_retry_uses_apply_history_not_successful_ci(self):
+        annotations = {f'dva.ssafy.io/db-{name}-commit': self.deployed for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
         self.commit('msa/liquibase/changelog/customer/002.sql', 'new schema')
-        self.commit('msa/services/customer/src/main.ts', 'uses new schema')
-        self.assertEqual(planner.plan('', True, self.state, {}), (['customer'], ['customer']))
-        annotations = {'dva.ssafy.io/db-customer-commit': self.git('rev-parse', 'HEAD')}
-        self.assertEqual(planner.plan('', True, self.state, annotations), (['customer'], []))
+        self.commit('msa/liquibase/changelog/order/002.sql', 'new schema')
+        current = self.git('rev-parse', 'HEAD')
+        self.assertEqual(planner.databases(current, True, annotations), ['customer', 'order'])
+        annotations['dva.ssafy.io/db-customer-commit'] = current
+        self.assertEqual(planner.databases(current, True, annotations), ['order'])
+        annotations['dva.ssafy.io/db-order-commit'] = current
+        self.assertEqual(planner.databases(current, True, annotations), [])
+
+    def test_missing_database_history_checks_all_databases(self):
+        self.assertEqual(planner.databases('', True, {}), ['customer', 'operations', 'order', 'consultation', 'delivery'])
 
     def test_legacy_image_bootstrap_only_when_ready(self):
         old = self.state['customer']

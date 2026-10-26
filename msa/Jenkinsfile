@@ -10,15 +10,6 @@ pipeline {
         buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '2'))
     }
 
-    parameters {
-        booleanParam(name: 'DEPLOY_MSA', defaultValue: false,
-            description: 'MSA 서버에 전달·미리보기 후 승인받아 선택한 DB 하나에 적용합니다.')
-        booleanParam(name: 'DEPLOY_APPS', defaultValue: false,
-            description: '백엔드를 검사·빌드한 뒤 MSA k3s에 배포합니다.')
-        choice(name: 'DB_SERVICE', choices: ['customer', 'operations', 'order', 'consultation', 'delivery'],
-            description: 'CI는 전체 DB를 검사하고, CD는 이 DB 하나에만 적용합니다.')
-    }
-
     stages {
         stage('Checkout') {
             steps {
@@ -32,34 +23,9 @@ pipeline {
                     env.DB_IMAGE = "docker.io/library/dva-liquibase:${env.RELEASE_NAME}"
                     env.RUN_MSA_CI = 'true'
                     env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
-                    def webhook = !currentBuild.getBuildCauses('com.dabsquared.gitlabjenkins.cause.GitLabWebHookCause').isEmpty()
-                    def backendBranch = env.SOURCE_BRANCH in [
-                        'origin/develop-backend', 'develop-backend'
-                    ]
-
-                    env.AUTO_DEPLOY_APPS = (
-                        webhook &&
-                        backendBranch &&
-                        !env.CHANGE_ID &&
-                        !params.DEPLOY_MSA
-                    ).toString()
-                    env.DELIVER_APPS = (env.AUTO_DEPLOY_APPS == 'true' || params.DEPLOY_APPS).toString()
-                    if (webhook && !params.DEPLOY_MSA && !params.DEPLOY_APPS && env.DELIVER_APPS != 'true') {
-                        env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
-                        env.RUN_MSA_CI = sh(script: 'bash msa/deploy/has-msa-changes.sh "$MSA_BASE_COMMIT"', returnStdout: true).trim()
-                        if (!(env.RUN_MSA_CI in ['true', 'false'])) { error 'Invalid MSA change detection result.' }
-                        if (env.RUN_MSA_CI == 'false') {
-                            currentBuild.description = 'MSA 변경 없음: CI 생략'
-                            echo 'No msa/ changes since the last successful build. Skipping CI.'
-                        }
-                    }
-                    if (params.DEPLOY_MSA && params.DEPLOY_APPS) {
-                        error 'Run database and application deployments separately.'
-                    }
-                    if (params.DEPLOY_MSA || params.DEPLOY_APPS || env.AUTO_DEPLOY_APPS == 'true') {
-                        if (env.CHANGE_ID || !(env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend'])) {
-                            error 'CD is allowed only for develop-backend, not MR/feature builds.'
-                        }
+                    def backendBranch = env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend']
+                    env.DELIVER_APPS = (backendBranch && !env.CHANGE_ID).toString()
+                    if (env.DELIVER_APPS == 'true') {
                         sh 'test "$(git rev-parse origin/develop-backend)" = "$SOURCE_COMMIT"'
                     }
                 }
@@ -92,9 +58,8 @@ pipeline {
                             sh 'set +x; bash msa/deploy/read-app-state.sh "$MSA_SSH_KEY" > msa-release/cluster-state.json'
                         }
                     }
-                    withEnv(["DEPLOY_MSA=${params.DEPLOY_MSA}", "DEPLOY_APPS=${params.DEPLOY_APPS}"]) {
-                        sh 'python3 msa/deploy/plan-apps.py'
-                    }
+                    sh 'python3 msa/deploy/plan-apps.py'
+                    env.HAS_DB_DELIVERY = (!readFile('msa-release/databases.txt').trim().isEmpty()).toString()
                     env.RUN_DB_CI = readFile('msa-release/database-ci.txt').trim()
                     env.HAS_APP_BUILD = (!readFile('msa-release/services.txt').trim().isEmpty()).toString()
                 }
@@ -156,144 +121,84 @@ pipeline {
             }
         }
 
-        stage('Application Delivery') {
-            when {
-                expression {
-                    env.RUN_MSA_CI == 'true' &&
-                    env.DELIVER_APPS == 'true' && env.HAS_APP_BUILD == 'true'
-                }
-            }
-            options {
-                timeout(time: 45, unit: 'MINUTES')
-                lock(resource: 'dva-msa-database-deploy')
-            }
-            steps {
-                script {
-                    def blocked = readFile('msa-release/schema-blocked.txt').trim()
-                    if (blocked) {
-                        error "DB approval/apply required before app delivery: ${blocked}. Run the existing DB approval flow first."
-                    }
-                }
-                withCredentials([
-                    sshUserPrivateKey(
-                        credentialsId: 'dva-msa-ssh',
-                        keyFileVariable: 'MSA_SSH_KEY'
-                    )
-                ]) {
-                    sh '''
-                        #!/bin/bash
-                        set +x
-                        set -euo pipefail
-
-                        mkdir -p msa-release/app-logs
-                        count=0
-
-                        for package in msa-release/apps/"$RELEASE_NAME"/*; do
-                            [ -d "$package" ] || continue
-                            service=$(basename "$package")
-
-                            bash msa/deploy/upload-app.sh \
-                                "$package" "$MSA_SSH_KEY" \
-                                2>&1 | tee "msa-release/app-logs/$service.log"
-
-                            grep -Fx "DVA_APP_ROLLOUT_COMPLETE=$service" \
-                                "msa-release/app-logs/$service.log"
-
-                            count=$((count + 1))
-                        done
-
-                        if [ "$count" -eq 0 ]; then
-                            echo 'No application packages to deploy.' >&2
-                            exit 1
-                        fi
-                    '''.stripIndent().trim()
-                }
-            }
-            post {
-                always {
-                    archiveArtifacts(
-                        artifacts: 'msa-release/app-logs/**',
-                        allowEmptyArchive: true
-                    )
-                }
-            }
-        }
-
-        stage('Database Delivery') {
-            when { expression { params.DEPLOY_MSA } }
+        stage('Release Delivery') {
+            when { expression { env.DELIVER_APPS == 'true' } }
             options {
                 timeout(time: 90, unit: 'MINUTES')
                 lock(resource: 'dva-msa-database-deploy')
             }
             stages {
-                stage('Upload and Verify Image') {
-                    options { timeout(time: 15, unit: 'MINUTES') }
+                stage('Database Delivery') {
+                    when { expression { env.HAS_DB_DELIVERY == 'true' } }
                     steps {
                         withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
-                            sh '''
-                                set +x
-                                set -eu
-                                bash msa/deploy/upload.sh "msa-release/$RELEASE_NAME" "$MSA_SSH_KEY"
-                            '''
+                            sh 'set +x; bash msa/deploy/deliver-databases.sh "$MSA_SSH_KEY"'
                         }
                     }
-                }
-                stage('Preview Database Changes') {
-                    options { timeout(time: 12, unit: 'MINUTES') }
-                    steps {
-                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
-                            sh '''
-                                #!/bin/bash
-                                set +x
-                                set -euo pipefail
-                                mkdir -p msa-release/logs
-                                bash msa/deploy/run-remote.sh "$RELEASE_NAME" "$DB_SERVICE" preview "$MSA_SSH_KEY" 2>&1 | tee msa-release/logs/preview.log
-                            '''.stripIndent().trim()
-                        }
-                        script {
-                            def matches = readFile('msa-release/logs/preview.log').readLines().findAll { it ==~ /DVA_PENDING_SHA256=[0-9a-f]{64}/ }
-                            if (matches.size() != 1) { error 'Preview did not return one valid changeset fingerprint.' }
-                            env.PENDING_SHA256 = matches[0].split('=')[1]
-                        }
-                        archiveArtifacts artifacts: 'msa-release/logs/preview.log', allowEmptyArchive: false
+                    post {
+                        always { archiveArtifacts artifacts: 'msa-release/db-logs/**', allowEmptyArchive: true }
                     }
                 }
-                stage('Approve Database Changes') {
-                    steps {
-                        script {
-                            def approval = timeout(time: 30, unit: 'MINUTES') {
-                                input message: "Apply ${params.DB_SERVICE} on k15d109.p.ssafy.io? Release ${env.RELEASE_NAME}. Review preview.log first.",
-                                    ok: 'Apply database changes', submitter: 'msa-deployers', submitterParameter: 'APPROVED_BY',
-                                    parameters: [booleanParam(name: 'BACKUP_CONFIRMED', defaultValue: false,
-                                        description: '대상 DB의 복구 가능한 최신 백업과 미리보기 SQL을 확인했습니다.')]
-                            }
-                            if (!approval.BACKUP_CONFIRMED) { error 'Backup and SQL review confirmation is required.' }
-                            writeFile file: 'msa-release/logs/approval.txt', text: "release=${env.RELEASE_NAME}\nservice=${params.DB_SERVICE}\npending=${env.PENDING_SHA256}\napprover=${approval.APPROVED_BY}\n"
+                stage('Application Delivery') {
+                    when {
+                        expression {
+                            env.RUN_MSA_CI == 'true' &&
+                            env.DELIVER_APPS == 'true' && env.HAS_APP_BUILD == 'true'
                         }
                     }
-                }
-                stage('Apply and Verify Database') {
-                    options { timeout(time: 12, unit: 'MINUTES') }
+                    options {
+                        timeout(time: 45, unit: 'MINUTES')
+                    }
                     steps {
-                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                        withCredentials([
+                            sshUserPrivateKey(
+                                credentialsId: 'dva-msa-ssh',
+                                keyFileVariable: 'MSA_SSH_KEY'
+                            )
+                        ]) {
                             sh '''
                                 #!/bin/bash
                                 set +x
                                 set -euo pipefail
-                                bash msa/deploy/run-remote.sh "$RELEASE_NAME" "$DB_SERVICE" apply "$MSA_SSH_KEY" "$PENDING_SHA256" 2>&1 | tee msa-release/logs/apply.log
-                                grep -Fx "DVA_MIGRATION_COMPLETE=$DB_SERVICE" msa-release/logs/apply.log
+
+                                mkdir -p msa-release/app-logs
+                                count=0
+
+                                for package in msa-release/apps/"$RELEASE_NAME"/*; do
+                                    [ -d "$package" ] || continue
+                                    service=$(basename "$package")
+
+                                    bash msa/deploy/upload-app.sh \
+                                        "$package" "$MSA_SSH_KEY" \
+                                        2>&1 | tee "msa-release/app-logs/$service.log"
+
+                                    grep -Fx "DVA_APP_ROLLOUT_COMPLETE=$service" \
+                                        "msa-release/app-logs/$service.log"
+
+                                    count=$((count + 1))
+                                done
+
+                                if [ "$count" -eq 0 ]; then
+                                    echo 'No application packages to deploy.' >&2
+                                    exit 1
+                                fi
                             '''.stripIndent().trim()
                         }
                     }
+                    post {
+                        always {
+                            archiveArtifacts(
+                                artifacts: 'msa-release/app-logs/**',
+                                allowEmptyArchive: true
+                            )
+                        }
+                    }
                 }
-            }
-            post {
-                always { archiveArtifacts artifacts: 'msa-release/logs/**', allowEmptyArchive: true }
             }
         }
     }
     post {
-        failure { echo 'Pipeline failed. Do not retry a database update until the target Job and Liquibase history are checked.' }
+        failure { echo 'Release failed. Application delivery does not run after a database failure. Inspect migration/rollout logs before retrying.' }
         aborted { echo 'Pipeline aborted. An already-started k3s Job may still be running; inspect it before retrying.' }
     }
 }

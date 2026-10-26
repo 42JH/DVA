@@ -34,17 +34,18 @@ sudo -n k3s kubectl get namespace dva -o name
 if [[ "$action" == prepare ]]; then
   sudo -n k3s ctr -n k8s.io images import "$PWD/liquibase-image.tar"
 fi
-sudo -n k3s crictl inspecti "$image" | python3 -c '
-import json,sys
-if json.load(sys.stdin)["status"]["id"] != sys.argv[1]:
-    raise SystemExit("Imported image ID does not match the CI image.")
-' "$image_id"
+sudo -n k3s ctr -n k8s.io images ls | python3 -c '
+import sys
+rows=[line.split() for line in sys.stdin if line.split() and line.split()[0]==sys.argv[1]]
+if len(rows)!=1 or len(rows[0])<3 or rows[0][2]!=sys.argv[2]:
+    raise SystemExit("Imported image digest does not match the CI image.")
+' "$image" "$image_id"
 if [[ "$action" != prepare ]]; then
   sudo -n k3s kubectl -n dva get secret "$service-db" -o name
   bash ./run-service.sh "$service" "$action" "$image" "$expected"
 fi
 
-# Record only an approved, successfully verified DB apply; app delivery does not infer approval from CI.
+# Record only a successfully applied and verified migration, never a CI-only success.
 if [[ "$action" == apply ]]; then
   sudo -n k3s kubectl annotate namespace dva \
     "dva.ssafy.io/db-$service-commit=${release%-*}" --overwrite

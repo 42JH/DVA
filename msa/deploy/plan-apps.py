@@ -13,7 +13,7 @@ APP_COMMON = ["msa/Jenkinsfile", "msa/deploy/package-app.sh", "msa/deploy/upload
               "msa/shared/", "msa/services/package.json", "msa/services/package-lock.json"]
 DB_PATHS = ["msa/liquibase/", "msa/Jenkinsfile", "msa/deploy/package.sh", "msa/deploy/upload.sh",
             "msa/deploy/remote.sh", "msa/deploy/run-remote.sh", "msa/deploy/ssh-common.sh",
-            "msa/deploy/known_hosts", "msa/deploy/has-msa-changes.sh",
+            "msa/deploy/known_hosts", "msa/deploy/has-msa-changes.sh", "msa/deploy/deliver-databases.sh", "msa/deploy/plan-apps.py",
             "msa/deploy/tests/test_changes.py", "msa/deploy/tests/test_deploy.py"]
 
 
@@ -67,7 +67,7 @@ def read_state(text):
 
 
 def plan(base, delivery, deployments, annotations):
-    selected, blocked = [], []
+    selected = []
     for directory in sorted(Path("msa/services").iterdir()):
         if not directory.is_dir():
             continue
@@ -85,12 +85,17 @@ def plan(base, delivery, deployments, annotations):
         if not (directory / "Dockerfile").is_file() or not (directory / "k8s.yaml").is_file():
             raise ValueError(f"Missing Dockerfile/k8s.yaml: {service}")
         selected.append(service)
-        if delivery:
-            db_base = annotations.get(f"dva.ssafy.io/db-{service}-commit", app_base)
-            if changed(db_base, [f"msa/liquibase/changelog/{service}/"]):
-                blocked.append(service)
         print(f"BUILD: {service} (baseline={app_base or 'unknown'})")
-    return selected, blocked
+    return selected
+
+
+def databases(base, delivery, annotations):
+    selected = []
+    for service in ('customer', 'operations', 'order', 'consultation', 'delivery'):
+        baseline = annotations.get(f'dva.ssafy.io/db-{service}-commit', '') if delivery else base
+        if changed(baseline, [f'msa/liquibase/changelog/{service}/']):
+            selected.append(service)
+    return selected
 
 
 def main():
@@ -99,12 +104,13 @@ def main():
     delivery = os.environ.get("DELIVER_APPS") == "true"
     deployments, annotations = read_state((out / "cluster-state.json").read_text()) if delivery else ({}, {})
     base = os.environ.get("MSA_BASE_COMMIT", "")
-    services, blocked = plan(base, delivery, deployments, annotations)
-    db = os.environ.get("DEPLOY_MSA") == "true" or (os.environ.get("DEPLOY_APPS") != "true" and changed(base, DB_PATHS))
+    services = plan(base, delivery, deployments, annotations)
+    db_services = databases(base, delivery, annotations)
+    db = bool(db_services) or changed(base, DB_PATHS)
     (out / "services.txt").write_text("".join(s + "\n" for s in services))
-    (out / "schema-blocked.txt").write_text("".join(s + "\n" for s in blocked))
+    (out / "databases.txt").write_text("".join(s + "\n" for s in db_services))
     (out / "database-ci.txt").write_text(str(db).lower())
-    print(f"Database CI: {db}; selected services: {services}; DB approval required: {blocked}")
+    print(f"Database CI: {db}; apps: {services}; databases: {db_services}")
 
 
 if __name__ == "__main__":
