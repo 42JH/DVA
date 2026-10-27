@@ -5,12 +5,20 @@ import {
   Pagination,
   SearchBox,
   Table,
+  Tabs,
+  Tag,
   type Column,
 } from '../../../shared/ui'
-import { useFaqListViewModel, type FaqRow } from '../viewmodel/useFaqListViewModel'
+import {
+  useFaqListViewModel,
+  type CategoryFilter,
+  type FaqRow,
+} from '../viewmodel/useFaqListViewModel'
 import { FaqFormModal } from './FaqFormModal'
 
-// 09 FAQ 관리 (와이어프레임 09_FAQ관리) — 검색칸 → 카드(FAQ 목록 · [삭제] [질의 추가]) → 번호 · 질문 · [수정] ▾ → 펼치면 회색 띠에 답변
+// 09 FAQ 관리 (와이어프레임 09_FAQ관리 v2, 10/27) — 분류 밑줄 탭(전체 + 9) → 검색칸 → 카드(FAQ 목록 n개 · [삭제] [질의 추가])
+// 줄 = 번호 · (전체 보기면 분류 태그) 질문 · [수정] ▾ → 펼치면 답변 띠. 삭제 버튼 · 체크박스는 슈퍼바이저만, 전체 선택 없음
+// (드롭다운 · 칩 줄 · 왼쪽 칸은 10/27 반려 — 글자만 있는 밑줄 탭이 10개여도 깨끗함)
 export function FaqPage() {
   const vm = useFaqListViewModel()
 
@@ -20,10 +28,14 @@ export function FaqPage() {
       key: 'question',
       header: '질문',
       cell: (r) => (
-        <span
-          className={`truncate text-body group-hover:text-action ${vm.openId === r.faqEntrySeq ? 'font-semibold' : ''}`}
-        >
-          {r.question}
+        <span className="flex min-w-0 items-center gap-2.5">
+          {/* 전체 보기에서만 분류 태그 (고른 분류 안에선 뻔하니 생략) */}
+          {vm.category === '전체' && <Tag kind="gray">{r.category}</Tag>}
+          <span
+            className={`truncate text-body group-hover:text-action ${vm.openId === r.faqEntrySeq ? 'font-semibold' : ''}`}
+          >
+            {r.question}
+          </span>
         </span>
       ),
     },
@@ -46,9 +58,17 @@ export function FaqPage() {
     },
   ]
 
+  // 분류 탭: 건수는 카드 제목('FAQ 목록 3개')에 — 탭에 숫자까지 붙이면 10개가 한 줄에 안 들어감
+  const tabs: { key: CategoryFilter; label: string }[] = [
+    { key: '전체', label: '전체' },
+    ...vm.categories.map((c) => ({ key: c.name, label: c.name })),
+  ]
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="FAQ 관리" />
+
+      <Tabs items={tabs} value={vm.category} onChange={vm.setCategory} />
 
       <SearchBox value={vm.q} onChange={vm.setQ} placeholder="질문 · 답변 검색" />
 
@@ -60,9 +80,11 @@ export function FaqPage() {
               <span className="text-label font-normal text-sub">{vm.count}개</span>
             </h2>
             <div className="flex gap-3">
-              <Button kind="dangerLine" disabled={vm.selected.size === 0} onClick={vm.openDelete}>
-                삭제
-              </Button>
+              {vm.canDelete && (
+                <Button kind="dangerLine" disabled={vm.selected.size === 0} onClick={vm.openDelete}>
+                  삭제
+                </Button>
+              )}
               <Button kind="primary" onClick={vm.openAdd}>
                 질의 추가
               </Button>
@@ -74,16 +96,15 @@ export function FaqPage() {
         rowKey={(r) => r.faqEntrySeq}
         onRowClick={(r) => vm.toggleOpen(r.faqEntrySeq)}
         expanded={(r) => vm.openId === r.faqEntrySeq}
-        selectable
+        selectable={vm.canDelete}
         selected={vm.selected}
         onSelect={vm.toggleSelect}
-        onSelectAll={vm.toggleSelectAll}
         subRows={(r, { gridCols }) =>
           vm.openId === r.faqEntrySeq ? (
             // 펼친 줄과 같은 좌우(16 나옴) · 아래만 둥글게 → 줄 + 띠가 한 덩어리. 라벨은 첫 줄 기준선에
             <div className="-mx-4 rounded-b-lg bg-bg px-4 pt-1 pb-[22px]">
               <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
-                <span />
+                {vm.canDelete && <span />}
                 <span className="text-label font-semibold text-sub">답변</span>
                 <p className="pr-4 text-body whitespace-pre-wrap">{r.answer}</p>
               </div>
@@ -91,7 +112,10 @@ export function FaqPage() {
           ) : null
         }
         loading={vm.isLoading}
-        empty={vm.listError ?? (vm.q ? '검색 결과가 없습니다.' : 'FAQ가 없습니다.')}
+        empty={
+          vm.listError ??
+          (vm.q || vm.category !== '전체' ? '해당하는 FAQ가 없습니다.' : 'FAQ가 없습니다.')
+        }
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
 

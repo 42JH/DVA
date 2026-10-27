@@ -1,8 +1,26 @@
 // 09 FAQ 관리 Model — FAQ-01 · 02 · 03 (명세서 16장 p57–59). React를 모르는 데이터 · API 층
 import { api, type ApiList } from '../../../shared/api/client'
 
+/**
+ * 분류 9개 (10/27 확정) — 축 = 고객 의도(택배 단계), 05 AI 답변 실패 태그와 같은 목록. '기타' 없음
+ * 명세에 없음 → BE 요청안: faq_entries.category · FAQ-01 category 필터 · FAQ-02/03 본문 category
+ */
+export const FAQ_CATEGORIES = [
+  { name: '접수' },
+  { name: '수거 일정' },
+  { name: '물품·박스' },
+  { name: '포장·파손' },
+  { name: '배송·운송장' },
+  { name: '주소' },
+  { name: '변경·취소' },
+  { name: '요금·결제' },
+  { name: '이용 안내' },
+] as const
+export type FaqCategory = (typeof FAQ_CATEGORIES)[number]['name']
+
 export interface Faq {
   faqEntrySeq: number
+  category: FaqCategory
   question: string
   answer: string
   updatedByAdminUserSeq: number
@@ -11,6 +29,7 @@ export interface Faq {
 }
 
 export interface FaqInput {
+  category: FaqCategory
   question: string
   answer: string
 }
