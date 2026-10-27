@@ -140,7 +140,7 @@ cd ..
 
 ### 2026-10-27 검증 결과
 
-- `node backend/scripts/check.cjs`: Linux Node.js 24에서 ESLint·Prettier·TypeScript 빌드 및
+- 최초 구성원 개발 검증의 `node backend/scripts/check.cjs`: Linux Node.js 24에서 ESLint·Prettier·TypeScript 빌드 및
   공통/CSV 17개, 인증·DB·PBX 31개, 기업 17개, 고객 10개, 구성원 22개,
   운영 이미지/Nginx 7개로 총 104개 테스트 통과.
 - 구성원 검증: 관리자 인증·Origin·대표자 표시, 검색/페이지, 입력·상태 검증,
@@ -151,6 +151,9 @@ cd ..
   1MiB/1,000행 경계 통과. 실제 운영 이미지·Nginx에서도 정확히 1MiB 파일 성공 및 초과 거부 통과.
 - `infra/database/test-monolith.ps1`: 009 제약·관리자별 키·소속 삭제 후 기록 보존·
   재실행·기존 데이터 보존·백업 복원·체크섬 변경 거부·최초/후속 실패 롤백 통과.
+- 최신 develop-backend 병합 후 같은 두 검증 명령을 다시 실행하여 주문 생성·입력·최종 접수 준비
+  검증을 포함한 전체 API 테스트와 운영 이미지·Nginx 검증 통과. 기존 007·008 SQL은 원본과 동일하게
+  유지했으며, 008의 과거 요청 기록 제거 이후 009 구성원 기록 생성 순서도 임시 PostgreSQL에서 검증했다.
 - 백엔드 운영 배포·DB 적용·프론트/AI 실제 연동은 수행하지 않았다. 호스트 Nginx 반영은 아래 후속 기록을 참고한다.
 
 ### 2026-10-27 호스트 Nginx 후속 반영
