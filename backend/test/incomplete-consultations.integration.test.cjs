@@ -177,7 +177,7 @@ test('existing call identity and EPIC1 utterances/recordings are reused without 
   );
 });
 
-test('same event replays across app restart and canonical timezone/null input without another success audit', async () => {
+test('same event replays across new app instances and canonical timezone/null input without another success audit', async () => {
   const input = payload(),
     first = await saved(input);
   const third = await start();

@@ -1,6 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
+55번 AI 주문 검증·미완료 상담 저장과 관리자 조회는 [상담/주문 API 계약](../docs/api/orders.md)을 참고한다. 관리자 수기 주문 생성은 69번 별도 작업이다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
@@ -121,7 +122,7 @@ backend/
 
 ### 업무 모듈과 데이터 책임
 
-[모놀리식 ERD](../docs/database/monolith.dbml)의 업무 테이블 18개를 다음 기준으로 묶는다.
+[모놀리식 ERD](../docs/database/monolith.dbml)의 업무 테이블 19개를 다음 기준으로 묶는다.
 테이블마다 Module을 만들지 않고 함께 변경되는 데이터와 업무 흐름을 기준으로 구분한다.
 
 | 모듈 | 담당 데이터·책임 |
@@ -129,7 +130,7 @@ backend/
 | `customers` | `customers`, `personal_pins` |
 | `organizations` | `organizations`, `memberships`, `company_pins` |
 | `orders` | `orders`, `order_parcels` |
-| `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests` |
+| `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests`, `incomplete_consultations` |
 | `deliveries` | `shipments`, `shipment_status_history` |
 | `admins` | `admin_users` 계정 관리 |
 | `auth` | 로그인·인증·권한 검사. 계정 접근은 `admins`가 공개한 기능 사용 |
