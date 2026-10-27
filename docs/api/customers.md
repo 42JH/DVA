@@ -49,7 +49,7 @@ phoneNumber는 정확히 일치 검색하고 status는 ACTIVE/WITHDRAWN이다. �
 탈퇴 고객의 이름과 이력은 보존하며 관리자에게 목록·상세를 제공한다.
 인증 없는 상세·이름 수정은 WITHDRAWN 고객을 404로 처리한다.
 상태 변경으로 기존 주문·개인 PIN·기업 소속을 삭제하거나 상태를 일괄 변경하지 않는다.
-탈퇴한 고객도 전화번호 고유성을 유지하므로 새 키로 같은 번호를 등록하면 409 DUPLICATE_RESOURCE다.
+탈퇴한 고객도 전화번호 고유성을 유지하므로 같은 번호를 다시 등록하면 409 DUPLICATE_RESOURCE다.
 
 ## 고객 등록 중복 처리
 
@@ -61,9 +61,7 @@ customers.phone_number의 UNIQUE 제약으로 동시 등록까지 막는다. 이
 
 ## DB 적용과 검증
 
-`backend/migrations/005-customer-creation-requests.sql`을 기존 migration runner로 적용한다.
-001~004와 public 업무 테이블은 변경하지 않는다. 앱 시작은 기존 001만 적용하며,
-Jenkins 배포에서 앱 교체 전에 migration과 스키마 검증을 수행한다.
+등록 API는 기존 customers 테이블만 사용한다. 005는 과거 적용 이력으로 보존하며 008에서 요청 기록 테이블을 제거한다. 배포·복구 절차는 [DB 문서](../database/README.md)를 따른다.
 
 ```powershell
 cd backend
@@ -73,20 +71,10 @@ cd ..
 ```
 
 기존 Docker 검증에 고객 HTTP/DB 테스트를 연결한다. 입력·검색·권한·상태 전이,
-동시 등록·키 충돌·재시작·실패 롤백, 실제 운영 이미지와 Nginx의 무인증 AI 호출 및
+동시 전화번호 충돌·재시작·실패 롤백, 실제 운영 이미지와 Nginx의 무인증 AI 호출 및
 관리자 경계를 검사한다. DB runner는 신규 migration·제약·반복 적용·기존 데이터 보존·
 백업 복원·체크섬 변경 거부·최초 및 후속 실패 롤백을 검사한다.
 테스트는 임시 PostgreSQL만 사용한다. 이 문서는 실제 서버 적용이나 AI 팀 연동 완료를 뜻하지 않는다.
-
-### 2026-10-27 검증 기록
-
-- `node backend/scripts/check.cjs`: Linux Node.js 24에서 ESLint·Prettier·TypeScript 빌드와
-  공통 단위/HTTP 13개, 인증·DB·PBX 31개, 기업 17개, 고객 10개, 운영 이미지/Nginx 6개로 총 77개 통과.
-- `infra/database/test-monolith.ps1`: 005 신규 제약·기존 PBX 보존·반복 적용·백업 복원·
-  적용 SQL 체크섬 변경 거부·최초/후속 실패 시 전체 미적용 migration 롤백 통과.
-- Windows 샌드박스의 네이티브 HTTP 테스트는 loopback 연결 권한 오류로 실패하여,
-  기존 Docker 검증기로 실제 Linux 환경에서 전체 검사를 완료했다.
-- 운영 서버 migration·배포와 AI 팀의 실제 호출은 수행하지 않았다.
 
 ## AI 호출 예시
 

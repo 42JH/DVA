@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
@@ -45,20 +44,14 @@ export class OrdersService {
         'AI 주문 생성에는 유효한 X-Call-Session-Id가 필요합니다.',
       );
     const callId = callSessionHeader === undefined ? null : Number(callSessionHeader);
-    const actorKey = adminId === null ? `call:${callId}` : `admin:${adminId}`;
     const draft = orderDraft(input);
-    const hash = createHash('sha256').update(JSON.stringify({ callId, draft })).digest('hex');
     return this.database.transaction(async (client) => {
-      if (!(await this.repository.lockCreation(client, actorKey, key)))
+      if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
-      const previous = await this.repository.findCreation(client, actorKey, key);
+      const previous = await this.repository.findCreation(client, key, adminId, callId);
       if (previous) {
-        if (previous.requestHash !== hash)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 요청 키에 다른 내용이 전달됐습니다.',
-          );
+        if (!previous.allowed)
+          throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 주문에 접근할 수 없습니다.');
         return { orderSeq: previous.orderSeq, version: previous.version };
       }
       const call = callId === null ? undefined : await this.repository.call(client, callId);
@@ -81,9 +74,8 @@ export class OrdersService {
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
-      const result = await this.repository.insert(client, draft, customerId);
+      const result = await this.repository.insert(client, draft, customerId, key);
       if (callId !== null) await this.repository.linkCall(client, callId, result.orderSeq);
-      await this.repository.rememberCreation(client, actorKey, key, hash, result);
       await this.audit.recordSuccess(
         {
           actorId: adminId,

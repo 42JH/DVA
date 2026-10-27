@@ -7,8 +7,8 @@ import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 
 @Injectable()
 export class OrdersRepository {
-  async lockCreation(client: PoolClient, actorKey: string, key: string): Promise<boolean> {
-    const hash = createHash('sha256').update(`orders.create:${actorKey}:${key}`).digest();
+  async lockCreation(client: PoolClient, key: string): Promise<boolean> {
+    const hash = createHash('sha256').update(`orders.create:${key}`).digest();
     const result = await client.query<{ acquired: boolean }>(
       'SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS acquired',
       [hash.readInt32BE(0), hash.readInt32BE(4)],
@@ -16,12 +16,25 @@ export class OrdersRepository {
     return result.rows[0].acquired;
   }
 
-  async findCreation(client: PoolClient, actorKey: string, key: string) {
+  async findCreation(
+    client: PoolClient,
+    key: string,
+    adminId: number | null,
+    callId: number | null,
+  ) {
     return (
-      await client.query<CreatedOrderDto & { requestHash: string }>(
-        `SELECT request_hash AS "requestHash", order_seq AS "orderSeq", response_version AS version
-       FROM api_idempotency.order_creations WHERE actor_key=$1 AND idempotency_key=$2::uuid`,
-        [actorKey, key],
+      await client.query<CreatedOrderDto & { allowed: boolean }>(
+        `SELECT o.order_seq AS "orderSeq", o.version,
+          CASE WHEN $2::int IS NULL THEN EXISTS(
+            SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq)
+          ELSE EXISTS(
+            SELECT 1 FROM audit_logs a WHERE a.target_type='ORDER' AND a.target_seq=o.order_seq
+              AND a.action='ORDER_CREATED' AND a.result='SUCCESS' AND a.actor_type='ADMIN' AND a.actor_seq=$2)
+            AND ($3::int IS NULL OR EXISTS(
+              SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq))
+          END AS allowed
+        FROM orders o WHERE o.creation_request_id=$1::uuid`,
+        [key, adminId, callId],
       )
     ).rows[0];
   }
@@ -65,12 +78,13 @@ export class OrdersRepository {
     client: PoolClient,
     draft: OrderDraft,
     customerId: number,
+    key: string,
   ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status)
-       VALUES($1,$2,$3,'COLLECTING') RETURNING order_seq AS id`,
-        [customerId, draft.paymentMethodType, draft.pickupRequestedAt],
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id)
+       VALUES($1,$2,$3,'COLLECTING',$4::uuid) RETURNING order_seq AS id`,
+        [customerId, draft.paymentMethodType, draft.pickupRequestedAt, key],
       )
     ).rows[0].id;
     for (const [index, parcel] of draft.parcels.entries()) {
@@ -108,19 +122,5 @@ export class OrdersRepository {
         [id],
       )
     ).rows[0];
-  }
-
-  async rememberCreation(
-    client: PoolClient,
-    actorKey: string,
-    key: string,
-    hash: string,
-    result: CreatedOrderDto,
-  ) {
-    await client.query(
-      `INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version)
-       VALUES($1,$2::uuid,$3,$4,$5)`,
-      [actorKey, key, hash, result.orderSeq, result.version],
-    );
   }
 }

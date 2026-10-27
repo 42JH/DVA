@@ -16,7 +16,6 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiConflictResponse,
-  ApiUnprocessableEntityResponse,
   ApiCreatedResponse,
   ApiHeader,
   ApiOperation,
@@ -73,6 +72,8 @@ export class OrdersController {
   })
   @ApiHeader({
     name: 'Idempotency-Key',
+    description:
+      '생성 요청 UUID. 같은 키는 기존 주문과 현재 버전을 반환하며 본문을 다시 적용하지 않습니다. 새 주문은 새 키를 사용합니다.',
     required: true,
     schema: { type: 'string', format: 'uuid' },
   })
@@ -85,7 +86,6 @@ export class OrdersController {
   })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   @ApiConflictResponse({ type: ErrorResponseDto })
-  @ApiUnprocessableEntityResponse({ type: ErrorResponseDto })
   @ApiCreatedResponse({
     schema: {
       type: 'object',

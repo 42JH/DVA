@@ -53,10 +53,7 @@ Idempotency-Key는 요구하거나 저장하지 않는다. 각 POST는 새로운
 
 ## 마이그레이션·검증
 
-`backend/migrations/004-organization-creation-requests.sql`을 기존 migration runner로 적용한다.
-인증의 003과 번호가 겹치지 않도록 미적용 기업 migration을 004로 변경했다.
-001·002와 인증의 003은 변경하지 않는다. 기업 기능이 public 업무 테이블을 추가하지 않는다.
-이 작업에서는 실제 서버나 로컬 개발 DB에 migration을 적용하지 않았으며 임시 DB에서 검증한다.
+등록 API는 기존 organizations 테이블만 사용한다. 004는 과거 적용 이력으로 보존하며, 008에서 요청 기록 테이블을 제거한다. 배포·복구 절차는 [DB 문서](../database/README.md)를 따른다.
 
 ```powershell
 cd backend
@@ -71,12 +68,11 @@ PENDING 계정 거절, Origin 없는 변경 거절을 확인한다. 운영 이�
 기업 생성·조회·수정 및 로그아웃 후 접근 거절을 검증한다.
 별도 DB 검증은 migration 재실행, 체크섬 변경 거부, 백업 복원과 최초/후속 실패 롤백을 검증한다.
 기존 배포 Jenkins 검증 실행기도 같은 npm test:integration을 사용한다.
-인증 통합 테스트가 먼저 업무·세션 스키마를 준비한 뒤 기업 테스트가 004를 적용하며,
-기업 테스트만 빈 임시 DB에서 실행할 때는 002·003도 적용한다.
+기업 테스트는 기존 업무·세션 스키마를 사용하며 요청 기록 테이블에 의존하지 않는다.
 
 ## Postman으로 로컬 확인
 
-개발 DB에 002·003·004 migration을 적용하고 테스트할 ACTIVE 관리자 계정을 준비한 뒤 앱을 실행한다.
+개발 DB에 현재 migration을 순서대로 적용하고 테스트할 ACTIVE 관리자 계정을 준비한 뒤 앱을 실행한다.
 초기 관리자 생성 방법은 [백엔드 README](../../backend/README.md)의 CLI 절차를 따른다.
 실제 비밀번호나 세션 쿠키를 컬렉션·소스에 저장하지 않는다.
 

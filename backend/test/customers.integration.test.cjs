@@ -58,8 +58,6 @@ before(async () => {
     for (const [table, migration] of [
       ['public.customers', '002-monolith-initial.sql'],
       ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-      ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-      ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
     ]) {
       const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
       if (!rows[0].name)

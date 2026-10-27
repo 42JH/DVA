@@ -62,12 +62,8 @@ before(async () => {
       "SELECT to_regclass('public.admin_sessions') IS NOT NULL AS ready",
     );
     const migrations = initialized.rows[0].ready
-      ? ['004-organization-creation-requests.sql']
-      : [
-          '002-monolith-initial.sql',
-          '003-admin-auth-sessions.sql',
-          '004-organization-creation-requests.sql',
-        ];
+      ? []
+      : ['002-monolith-initial.sql', '003-admin-auth-sessions.sql'];
     for (const name of migrations)
       await client.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
     await client.query('COMMIT');

@@ -86,7 +86,7 @@ parcelPosition과 notifiedPrice는 요청에서 받지 않는다. 서버가 상�
 
 201 응답이다. version은 상세 추가 트리거까지 실행된 DB 실제 값을 읽어 반환한다. 상세 개수로 추정하거나 1로 고정하지 않는다. 디버 접수번호·배송은 생성하지 않는다.
 
-하나의 트랜잭션에서 고객 연결/등록 → 고객 상태·PIN 범위 확인 → orders와 order_parcels 저장 → 선택한 통화의 order_seq 연결 → 재시도 결과 저장 → 성공 감사를 처리한다. 하나라도 실패하면 신규 고객까지 함께 롤백한다. 감사 metadata에 전화번호·주소를 복제하지 않는다.
+하나의 트랜잭션에서 고객 연결/등록 → 고객 상태·PIN 범위 확인 → 생성 키를 포함한 orders와 order_parcels 저장 → 선택한 통화의 order_seq 연결 → 성공 감사를 처리한다. 하나라도 실패하면 신규 고객까지 함께 롤백한다. 감사 metadata에 전화번호·주소를 복제하지 않는다.
 
 AI는 통화 존재·종료 여부·이미 연결된 주문을 확인한다. 통화에 확인된 발신번호가 있으면 고객 전화번호와 비교한다. 번호가 없는 통화에 대한 신원 검증이 완료됐다는 의미는 아니다. 같은 통화에 별도 키로 또 주문을 생성하면 409 INVALID_STATE이며 기존 주문을 ORD-04로 보완해야 한다.
 
@@ -94,12 +94,14 @@ AI는 통화 존재·종료 여부·이미 연결된 주문을 확인한다. 통
 
 ## 재시도와 수정 버전
 
-- 관리자: 인증된 관리자 ID + 멱등키. AI: 통화 ID + 멱등키로 요청을 구분한다.
-- 같은 키·정규화된 동일 본문: 최초 orderSeq·version을 반환한다. 이후 주문 버전이 증가하거나 통화가 종료돼도 최초 응답을 회수할 수 있다.
-- 같은 키·다른 본문 또는 통화 연결 변경: 422 IDEMPOTENCY_KEY_REUSED.
-- 같은 키 처리 중: 409 REQUEST_IN_PROGRESS. 같은 요청으로 재시도한다.
-- DB 잠금과 UNIQUE 제약으로 여러 앱 인스턴스에서 중복 저장을 막는다.
-- version은 **이미 존재하는 주문의 수정 충돌**을 막는다. 아직 orderSeq가 없고 응답도 유실될 수 있는 **생성 중복**은 별도의 생성 영수증(api_idempotency.order_creations)으로 처리한다. 업무 데이터를 복제하는 별도 주문·상담 테이블은 아니다.
+- Idempotency-Key UUID를 orders.creation_request_id에 저장하며 전체 주문에서 UNIQUE다. 새 주문에는 새 키를 사용한다.
+- 같은 키의 재요청은 기존 orderSeq와 **현재 version**을 반환한다. 최초 응답의 버전을 별도로 보관하지 않는다.
+- 같은 키의 본문은 다시 적용하지 않는다. 본문 해시 비교와 422 IDEMPOTENCY_KEY_REUSED는 제거한다. 수정은 ORD-04를 사용한다.
+- 관리자 재시도는 기존 ORDER_CREATED 성공 감사의 actor로 최초 생성자를 확인한다. 다른 관리자 키는 403이다. 생성 감사가 없으면 재시도를 허용하지 않으므로 해당 기록을 임의로 제거하지 않는다.
+- AI 재시도는 기존 call_sessions.order_seq와 전달한 통화 ID가 일치해야 한다. 다른 통화나 관리자 주문의 키는 403이다. 종료된 통화도 기존 연결 주문을 재조회할 수 있다.
+- 같은 키 처리 중에는 트랜잭션 잠금으로 409 REQUEST_IN_PROGRESS를 반환한다. 동시에 들어온 요청의 최종 유일성은 DB UNIQUE가 보장한다.
+- 통화당 주문 하나를 유지한다. 같은 통화에 새 키로 두 번째 주문을 만들면 409 INVALID_STATE다.
+- version은 기존 주문 수정 충돌 방지용이다. 생성 키와 역할이 다르므로 유지한다.
 
 ## 생성 검증과 최종 접수 검증
 
@@ -111,15 +113,14 @@ ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각
 | --- | --- |
 | 400 INVALID_REQUEST | 잘못된 본문·키·통화 헤더·고객 지정 방식 |
 | 401 UNAUTHORIZED | 잘못되거나 만료된 관리자 세션 |
-| 403 FORBIDDEN | 관리자 Origin, 비활성 고객, 타 고객 PIN, 확인된 발신번호 불일치 |
+| 403 FORBIDDEN | 관리자 Origin, 비활성 고객, 타 고객 PIN, 확인된 발신번호 불일치, 다른 주체의 생성 키 |
 | 404 NOT_FOUND | 고객 또는 통화 없음 |
 | 409 INVALID_STATE | 종료되었거나 주문이 이미 연결된 통화의 새 생성 요청 |
 | 409 REQUEST_IN_PROGRESS | 같은 키 처리 중 |
-| 422 IDEMPOTENCY_KEY_REUSED | 같은 키에 다른 내용 |
 
 ## DB·검증·연동 범위
 
-- 신규 SQL: 007-order-creation-requests.sql. 고객 API의 005와 중복되지 않는다. 앱 교체 전에 적용한다.
+- 신규 전환 SQL: 008-simplify-creation-requests.sql. 기존 주문 생성 키를 orders로 옮기고 기업·고객·주문 요청 기록 테이블과 빈 api_idempotency 스키마를 제거한다. 001~005·007 파일은 적용 이력과 체크섬 때문에 보존한다.
 - 이전 초안의 미배포 006-incomplete-consultations.sql과 별도 상담 테이블 ERD는 제외했다. 운영 DB에 DROP·데이터 초기화를 실행하지 않았다. 별도 환경에 초안 006을 수동 적용했다면 이 MR이 자동 제거하지 않는다.
 - 기존 고객 API를 포함해 빌드·단위/HTTP·실제 DB·동시 요청·실패 롤백·Nginx/PBX 회귀를 node scripts/check.cjs로 검증한다.
 - DB migration·제약·반복 적용·체크섬·실패 롤백·백업 복원은 infra/database/test-monolith.ps1로 검증한다.

@@ -80,6 +80,7 @@ Table company_pins {
 // End of customer service
 
 Table orders {
+  creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '연결 대상 ID']
   payment_method_type text [not null, default: 'credit', note: '디버 API 결제 방식. 기본 credit(월정산)']

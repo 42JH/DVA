@@ -58,12 +58,16 @@ before(async () => {
       ['public.admin_users', '002-monolith-initial.sql'],
       ['public.admin_sessions', '003-admin-auth-sessions.sql'],
       ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
+      ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
       ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
     ];
     for (const [table, file] of migrations) {
       if (!(await client.query('SELECT to_regclass($1) AS present', [table])).rows[0].present)
         await client.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
     }
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
+    );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -151,7 +155,7 @@ const counts = async () =>
   (
     await pool.query(`SELECT
   (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM order_parcels) AS parcels,
-  (SELECT count(*) FROM api_idempotency.order_creations) AS receipts,
+  (SELECT count(*) FROM orders WHERE creation_request_id IS NOT NULL) AS creationKeys,
   (SELECT count(*) FROM customers) AS customers,
   (SELECT count(*) FROM shipments) AS shipments`)
   ).rows[0];
@@ -257,10 +261,13 @@ test('call replay returns the first response after termination; a new key cannot
   assert.equal(replay.status, 201);
   assert.deepEqual((await replay.json()).data, data);
   await errorCode(await aiCreate(callId, body), 409, 'INVALID_STATE');
-  await errorCode(
-    await aiCreate(callId, { ...body, paymentMethodType: 'cat' }, key),
-    422,
-    'IDEMPOTENCY_KEY_REUSED',
+  const unchanged = await aiCreate(callId, { ...body, paymentMethodType: 'cat' }, key);
+  assert.equal(unchanged.status, 201);
+  assert.deepEqual((await unchanged.json()).data, data);
+  assert.equal(
+    (await pool.query('SELECT payment_method_type FROM orders WHERE order_seq=$1', [data.orderSeq]))
+      .rows[0].payment_method_type,
+    'credit',
   );
   assert.equal(
     (await pool.query('SELECT status FROM orders WHERE order_seq=$1', [data.orderSeq])).rows[0]
@@ -293,7 +300,7 @@ test('concurrent AI retries across application instances create one order per ca
   assert.deepEqual(differentKeys.map((r) => r.status).sort(), [201, 409]);
 });
 
-test('AI call linkage, new customer, order and receipt roll back together on audit failure', async () => {
+test('AI call linkage, new customer, order and creation key roll back together on audit failure', async () => {
   const callId = await call('01000559999'),
     key = randomUUID();
   const body = { customer: { name: 'AI 신규 고객', phoneNumber: '01000559999' }, parcels: [{}] };
@@ -467,23 +474,35 @@ test('PIN access is checked for the order customer and active company membership
   }
 });
 
-test('idempotency normalizes object order and defaults, preserves the original version and rejects changed input', async () => {
+test('creation key returns the current order version without applying a second body or accepting another actor', async () => {
   const key = randomUUID(),
     requestId = randomUUID();
   const first = await create({ customerSeq: customerId }, key, 0, { 'X-Request-Id': requestId });
   assert.equal(first.status, 201);
   const { data } = await first.json();
-  await pool.query('UPDATE orders SET version=version+1 WHERE order_seq=$1', [data.orderSeq]);
+  await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [
+    data.orderSeq,
+  ]);
+  const current = (
+    await pool.query('SELECT version,creation_request_id FROM orders WHERE order_seq=$1', [
+      data.orderSeq,
+    ])
+  ).rows[0];
+  assert.equal(current.creation_request_id, key);
   const replay = await create(
-    { parcels: [], pickupRequestedAt: null, paymentMethodType: 'credit', customerSeq: customerId },
+    { customerSeq: customerId, paymentMethodType: 'groupBilling' },
     key.toUpperCase(),
   );
   assert.equal(replay.status, 201);
-  assert.deepEqual((await replay.json()).data, data);
-  await errorCode(
-    await create({ customerSeq: customerId, paymentMethodType: 'cat' }, key),
-    422,
-    'IDEMPOTENCY_KEY_REUSED',
+  assert.deepEqual((await replay.json()).data, {
+    orderSeq: data.orderSeq,
+    version: current.version,
+  });
+  assert.ok(current.version > data.version);
+  assert.equal(
+    (await pool.query('SELECT payment_method_type FROM orders WHERE order_seq=$1', [data.orderSeq]))
+      .rows[0].payment_method_type,
+    'cat',
   );
   const logs = (
     await pool.query(
@@ -491,13 +510,42 @@ test('idempotency normalizes object order and defaults, preserves the original v
       [data.orderSeq],
     )
   ).rows;
-  assert.equal(logs.length, 1);
-  assert.equal(logs[0].actor_seq, adminId);
-  assert.equal(logs[0].request_id, requestId);
-  assert.deepEqual(logs[0].metadata, {});
-  const other = await create({ customerSeq: customerId }, key, 1);
-  assert.equal(other.status, 201);
-  assert.notEqual((await other.json()).data.orderSeq, data.orderSeq);
+  assert.deepEqual(logs, [{ actor_seq: adminId, request_id: requestId, metadata: {} }]);
+  await errorCode(await create({ customerSeq: customerId }, key, 1), 403, 'FORBIDDEN');
+  await errorCode(await aiCreate(await call(), { customerSeq: customerId }, key), 403, 'FORBIDDEN');
+  await assert.rejects(
+    pool.query('INSERT INTO orders(creation_request_id) VALUES($1)', [key]),
+    (error) => error.code === '23505',
+  );
+});
+
+test('AI replay stays bound to the original call even after restart and order changes', async () => {
+  const callId = await call(),
+    key = randomUUID(),
+    body = { customerSeq: customerId };
+  const first = await aiCreate(callId, body, key);
+  assert.equal(first.status, 201);
+  const { orderSeq } = (await first.json()).data;
+  await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [orderSeq]);
+  await errorCode(await aiCreate(await call(), body, key), 403, 'FORBIDDEN');
+  await errorCode(await create(body, key), 403, 'FORBIDDEN');
+  const restarted = await NestFactory.create(AppModule, { logger: false });
+  apps.push(restarted);
+  configureApplication(restarted, { log: () => {} });
+  await restarted.listen(0, '127.0.0.1');
+  const retry = await fetch((await restarted.getUrl()) + '/api/orders', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': key,
+      'X-Call-Session-Id': String(callId),
+    },
+    body: JSON.stringify(body),
+  });
+  assert.equal(retry.status, 201);
+  const version = (await pool.query('SELECT version FROM orders WHERE order_seq=$1', [orderSeq]))
+    .rows[0].version;
+  assert.deepEqual((await retry.json()).data, { orderSeq, version });
 });
 
 test('in-flight duplicates across application instances return 409 and retry the stored result', async () => {
@@ -505,7 +553,7 @@ test('in-flight duplicates across application instances return 409 and retry the
     client = await pool.connect();
   await client.query('BEGIN');
   try {
-    assert.equal(await repository.lockCreation(client, `admin:${adminId}`, key), true);
+    assert.equal(await repository.lockCreation(client, key), true);
     await errorCode(await create(undefined, key), 409, 'REQUEST_IN_PROGRESS');
   } finally {
     await client.query('ROLLBACK');
@@ -529,12 +577,8 @@ test('in-flight duplicates across application instances return 409 and retry the
     assert.equal(retry.status, 201);
     assert.equal((await retry.json()).data.orderSeq, ids[0]);
     assert.equal(
-      (
-        await pool.query(
-          'SELECT count(*) FROM api_idempotency.order_creations WHERE actor_key=$1 AND idempotency_key=$2',
-          [`admin:${adminId}`, key],
-        )
-      ).rows[0].count,
+      (await pool.query('SELECT count(*) FROM orders WHERE creation_request_id=$1', [key])).rows[0]
+        .count,
       '1',
     );
   } finally {
@@ -542,17 +586,18 @@ test('in-flight duplicates across application instances return 409 and retry the
   }
 });
 
-test('receipt and success-audit failures roll back header, parcels and receipt while preserving safe failure audit', async () => {
+test('creation key and success-audit failures roll back header, parcels and creation key while preserving safe failure audit', async () => {
   const audit = apps[0].get(AuditService);
   for (const [target, method] of [
-    [repository, 'rememberCreation'],
+    [repository, 'insert'],
     [audit, 'recordSuccess'],
   ]) {
     const original = target[method],
       before = await counts(),
       requestId = randomUUID(),
       key = randomUUID();
-    target[method] = async () => {
+    target[method] = async function (...args) {
+      if (method === 'insert') await original.apply(this, args);
       throw new Error('private-order-diagnostic');
     };
     try {
@@ -584,7 +629,7 @@ test('receipt and success-audit failures roll back header, parcels and receipt w
   }
 });
 
-test('new customer and draft order are saved together, with one customer audit and an idempotent receipt', async () => {
+test('new customer and draft order are saved together, with one customer audit and a creation key', async () => {
   const key = randomUUID(),
     requestId = randomUUID();
   const input = { customer: { name: '신규 주문 고객', phoneNumber: '01000550001' }, parcels: [{}] };
@@ -619,10 +664,9 @@ test('new customer and draft order are saved together, with one customer audit a
     { ...input.customer, name: '다른 이름' },
     { ...input.customer, phoneNumber: '01000550002' },
   ])
-    await errorCode(
-      await create({ ...input, customer: changed }, key),
-      422,
-      'IDEMPOTENCY_KEY_REUSED',
+    assert.deepEqual(
+      (await (await create({ ...input, customer: changed }, key)).json()).data,
+      data,
     );
   assert.deepEqual(await counts(), afterReplay);
   const logs = (
@@ -759,7 +803,7 @@ test('concurrent distinct orders across instances share a single newly registere
   );
 });
 
-test('PIN denial, receipt failure and order-audit failure roll back newly registered customers too', async () => {
+test('PIN denial, creation key failure and order-audit failure roll back newly registered customers too', async () => {
   const deniedBefore = await counts();
   await errorCode(
     await create({
@@ -772,7 +816,7 @@ test('PIN denial, receipt failure and order-audit failure roll back newly regist
   assert.deepEqual(await counts(), deniedBefore);
   const audit = apps[0].get(AuditService);
   for (const [index, [target, method]] of [
-    [repository, 'rememberCreation'],
+    [repository, 'insert'],
     [audit, 'recordSuccess'],
   ].entries()) {
     const original = target[method],
@@ -786,6 +830,7 @@ test('PIN denial, receipt failure and order-audit failure roll back newly regist
     target[method] = async function (...args) {
       if (method === 'recordSuccess' && args[0].action !== 'ORDER_CREATED')
         return original.apply(this, args);
+      if (method === 'insert') await original.apply(this, args);
       throw new Error('private-customer-order-diagnostic');
     };
     try {

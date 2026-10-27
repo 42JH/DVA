@@ -35,14 +35,6 @@ DECLARE customer_id integer; other_customer integer; company_id integer; other_c
 BEGIN
  INSERT INTO customers(name,phone_number,status) VALUES('Test','01000000001','ACTIVE') RETURNING customer_seq INTO customer_id;
  INSERT INTO customers(name,phone_number,status) VALUES('Other','01000000002','ACTIVE') RETURNING customer_seq INTO other_customer;
- INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq)
- VALUES('00000000-0000-4000-8000-000000000034',repeat('a',64),customer_id);
- PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq) VALUES(%L,%L,%s)',
-  '00000000-0000-4000-8000-000000000034',repeat('a',64),customer_id),'23505');
- PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq) VALUES(%L,%L,%s)',
-  '00000000-0000-4000-8000-000000000035','bad',customer_id),'23514');
- PERFORM pg_temp.expect_error($q$INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq)
-  VALUES('00000000-0000-4000-8000-000000000036',repeat('b',64),2147483647)$q$,'23503');
  INSERT INTO organizations(name,status) VALUES('Company','ACTIVE') RETURNING organization_seq INTO company_id;
  INSERT INTO organizations(name,status) VALUES('Other company','ACTIVE') RETURNING organization_seq INTO other_company;
  PERFORM pg_temp.expect_error($q$INSERT INTO customers(name,phone_number,status) VALUES('X','01000000003','SUSPENDED')$q$,'23514');
@@ -70,14 +62,8 @@ BEGIN
  INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,'Support',address);
 
  INSERT INTO orders(customer_seq) VALUES(customer_id) RETURNING order_seq INTO order_id;
- INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version)
- VALUES('call:1','00000000-0000-4000-8000-000000000055',repeat('a',64),order_id,1);
- PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version) VALUES(%L,%L,%L,%s,1)',
-  'call:1','00000000-0000-4000-8000-000000000055',repeat('a',64),order_id),'23505');
- PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version) VALUES(%L,%L,%L,%s,1)',
-  'spoofed','00000000-0000-4000-8000-000000000056',repeat('a',64),order_id),'23514');
- PERFORM pg_temp.expect_error($q$INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version)
-  VALUES('admin:1','00000000-0000-4000-8000-000000000057',repeat('a',64),2147483647,1)$q$,'23503');
+ UPDATE orders SET creation_request_id='00000000-0000-4000-8000-000000000055' WHERE order_seq=order_id;
+ PERFORM pg_temp.expect_error($q$INSERT INTO orders(creation_request_id) VALUES('00000000-0000-4000-8000-000000000055')$q$,'23505');
  INSERT INTO order_parcels(order_seq,parcel_position) VALUES(order_id,1) RETURNING order_parcel_seq INTO parcel_id;
  IF (SELECT version FROM orders WHERE order_seq=order_id)<>2 THEN RAISE EXCEPTION 'Order content version failed'; END IF;
  UPDATE orders SET pickup_requested_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
