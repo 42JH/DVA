@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '../../../shared/api/client'
+import { pageSlice } from '../../../shared/api/paging'
+import { useListParams } from '../../../shared/lib/useListParams'
 import { authKeys, fetchMe } from '../../auth/model/authApi'
 import {
   FAQ_CATEGORIES,
@@ -19,15 +21,17 @@ export type FaqRow = Faq & { no: number }
 export type CategoryFilter = '전체' | FaqCategory
 
 const PAGE_SIZE = 20 // 한 쪽 20줄
+const DEFAULTS = { q: '', category: '전체' } // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙)
 
 type Modal = { kind: 'add' } | { kind: 'edit'; faq: Faq } | { kind: 'delete' } | null
 
 /** 09 FAQ 목록 ViewModel — 전체를 받아 화면에서 검색 · 분류 · 쪽을 나눔. 펼침 · 선택 · 창 상태와 삭제(슈퍼바이저만) */
 export function useFaqListViewModel() {
   const qc = useQueryClient()
-  const [q, setQ] = useState('') // 검색어 — 치는 대로 바로 거름
-  const [category, setCategory] = useState<CategoryFilter>('전체') // 왼쪽 분류 칸
-  const [page, setPage] = useState(0) // 0부터
+  // 검색어 · 분류 · 쪽은 URL 쿼리에 (뒤로가기 · 새로고침 · 주소 공유에도 그대로). 필터를 바꾸면 쪽은 1로
+  const { params, page, set } = useListParams(DEFAULTS)
+  const q = params.q
+  const category = params.category as CategoryFilter
   const [openId, setOpenId] = useState<number | null>(null) // 답변 펼친 줄 (한 번에 하나)
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [modal, setModal] = useState<Modal>(null)
@@ -51,11 +55,11 @@ export function useFaqListViewModel() {
   const hit = searched
     .filter((f) => category === '전체' || f.category === category)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) // 최근 만든 것이 1번. 수정은 자리 유지
-  const pages = Math.max(1, Math.ceil(hit.length / PAGE_SIZE))
-  const cur = Math.min(page, pages - 1) // 지워서 쪽이 줄면 마지막 쪽으로
-  const rows: FaqRow[] = hit
-    .slice(cur * PAGE_SIZE, (cur + 1) * PAGE_SIZE)
-    .map((faq, i) => ({ ...faq, no: cur * PAGE_SIZE + i + 1 }))
+  const sliced = pageSlice(hit, page, PAGE_SIZE) // 지워서 쪽이 줄면 마지막 쪽으로
+  const rows: FaqRow[] = sliced.rows.map((faq, i) => ({
+    ...faq,
+    no: (sliced.page - 1) * PAGE_SIZE + i + 1, // 번호 = 보이는 순서 (쪽 반영)
+  }))
 
   const remove = useMutation({
     mutationFn: async () => {
@@ -78,7 +82,6 @@ export function useFaqListViewModel() {
         : null
 
   const reset = () => {
-    setPage(0)
     setOpenId(null)
     setSelected(new Set())
   }
@@ -86,12 +89,12 @@ export function useFaqListViewModel() {
   return {
     q,
     setQ: (v: string) => {
-      setQ(v)
+      set({ q: v })
       reset()
     },
     category,
     setCategory: (c: CategoryFilter) => {
-      setCategory(c)
+      set({ category: c })
       reset()
     },
     categories: FAQ_CATEGORIES.map((c) => ({ name: c.name, count: counts[c.name] })),
@@ -101,10 +104,10 @@ export function useFaqListViewModel() {
     count: hit.length, // 'FAQ 목록 23개' (검색 · 분류 중엔 결과 수)
     isLoading: list.isPending,
     listError: message(list.error),
-    page: cur + 1, // 화면은 1부터
-    pages,
+    page: sliced.page,
+    pages: sliced.pages,
     goPage: (p: number) => {
-      setPage(p - 1)
+      set({ page: p })
       setOpenId(null)
     },
 

@@ -2,12 +2,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, Navigate } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { LoginPage } from '../features/auth/view/LoginPage'
+import { PendingPage } from '../features/auth/view/PendingPage'
 import { CallDetailPage } from '../features/call/view/CallDetailPage'
 import { FaqPage } from '../features/faq/view/FaqPage'
 import { ApiError } from '../shared/api/client'
 import { AppLayout } from './AppLayout'
 import { Placeholder } from './Placeholder'
 import { RequireAuth } from './RequireAuth'
+import { RequireRole } from './RequireRole'
 import { UiKitPage } from './UiKitPage'
 
 // 명세서 1.6: 조회만 재시도 — 연결 실패(0) · 429 · 503일 때 최대 2번. 등록 · 수정은 재시도 안 함
@@ -25,6 +27,7 @@ const queryClient = new QueryClient({
 const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/signup', element: <Placeholder title="00 회원가입" /> },
+  { path: '/pending', element: <PendingPage /> }, // 승인 대기 (RequireAuth가 PENDING 계정을 여기로)
   {
     element: (
       <RequireAuth>
@@ -42,7 +45,14 @@ const router = createBrowserRouter([
       { path: 'companies', element: <Placeholder title="08 기업관리" /> },
       { path: 'personas', element: <Placeholder title="07 페르소나 관리" /> },
       { path: 'faqs', element: <FaqPage /> },
-      { path: 'admins', element: <Placeholder title="10 관리자 권한 관리" /> },
+      {
+        path: 'admins',
+        element: (
+          <RequireRole roles={['SYSTEM_ADMIN']}>
+            <Placeholder title="10 관리자 권한 관리" />
+          </RequireRole>
+        ),
+      },
       { path: 'me', element: <Placeholder title="11 내 정보" /> },
       ...(import.meta.env.DEV ? [{ path: 'ui-kit', element: <UiKitPage /> }] : []), // 공통 부품 확인용, 개발 중에만
     ],
