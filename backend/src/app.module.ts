@@ -5,6 +5,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { OrdersModule } from './orders/orders.module';
 import { CustomersModule } from './customers/customers.module';
 import { MembersModule } from './members/members.module';
 
@@ -16,6 +17,7 @@ import { MembersModule } from './members/members.module';
     PbxWebhookModule,
     AuthModule,
     OrganizationsModule,
+    OrdersModule,
     CustomersModule,
     MembersModule,
   ],

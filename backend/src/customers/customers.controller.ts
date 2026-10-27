@@ -1,21 +1,7 @@
-import {
-  Body,
-  Controller,
-  createParamDecorator,
-  ExecutionContext,
-  Get,
-  HttpCode,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiCreatedResponse,
-  ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -36,10 +22,6 @@ import {
   CustomerEnvelopeDto,
   CustomersEnvelopeDto,
 } from './dto/customer-response.dto';
-
-const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
-  context.switchToHttp().getRequest<AuthRequest>().get('Idempotency-Key'),
-);
 
 @ApiTags('Customers')
 @ApiResponse({ status: 400, type: ErrorResponseDto })
@@ -69,17 +51,11 @@ export class CustomersController {
     summary: '고객 등록',
     security: [],
     description:
-      'MVP에서는 서비스 인증 없음(후속 Jira 135). 신규 상태 ACTIVE. 같은 멱등키 재시도는 원래 고객 번호를 반환합니다.',
-  })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    required: true,
-    schema: { type: 'string', format: 'uuid' },
+      'MVP에서는 서비스 인증 없음(후속 Jira 135). 신규 상태 ACTIVE. 이미 등록된 전화번호는 409 DUPLICATE_RESOURCE를 반환합니다.',
   })
   @ApiCreatedResponse({ type: CreatedCustomerEnvelopeDto })
-  @ApiResponse({ status: 422, type: ErrorResponseDto })
-  create(@CreationKey(new ParseUUIDPipe()) key: string, @Body() input: CreateCustomerDto) {
-    return this.customers.create(key.toLowerCase(), input);
+  create(@Body() input: CreateCustomerDto) {
+    return this.customers.create(input);
   }
 
   @Get(':id')

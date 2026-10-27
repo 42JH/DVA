@@ -57,14 +57,37 @@ before(async () => {
     for (const [table, migration] of [
       ['public.customers', '002-monolith-initial.sql'],
       ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-      ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-      ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
-      ['api_idempotency.membership_writes', '006-membership-write-requests.sql'],
     ]) {
       const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
       if (!rows[0].name)
         await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
     }
+    const upgraded = (
+      await client.query(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id') AS ready",
+      )
+    ).rows[0].ready;
+    if (!upgraded) {
+      for (const [table, migration] of [
+        ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
+        ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
+        ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
+      ]) {
+        const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
+        if (!rows[0].name)
+          await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
+      }
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
+      );
+    }
+    if (
+      !(await client.query("SELECT to_regclass('api_idempotency.membership_writes') AS name"))
+        .rows[0].name
+    )
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/009-membership-write-requests.sql'), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

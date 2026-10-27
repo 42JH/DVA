@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import { PoolClient } from 'pg';
+import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
@@ -15,7 +16,40 @@ export class CustomersService {
   constructor(
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
+    private readonly audit: AuditService,
   ) {}
+
+  async resolveForOrder(
+    client: PoolClient,
+    input: { customerSeq?: number; customer?: CreateCustomerDto },
+    actorId: number | null,
+    requestId: string,
+  ) {
+    const created = input.customer
+      ? await this.repository.insertForOrder(client, input.customer)
+      : undefined;
+    // 충돌한 INSERT가 다른 트랜잭션을 기다렸다면 새 SELECT에서 커밋된 고객을 읽는다.
+    const customer =
+      created ??
+      (input.customer
+        ? await this.repository.findByPhoneForOrder(client, input.customer.phoneNumber)
+        : await this.repository.find(input.customerSeq!, client));
+    if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+    if (customer.status !== 'ACTIVE')
+      throw new ApiException(403, 'FORBIDDEN', '활성 고객의 주문만 생성할 수 있습니다.');
+    if (created)
+      await this.audit.recordSuccess(
+        {
+          actorId,
+          requestId,
+          targetId: customer.customerSeq,
+          targetType: 'CUSTOMER',
+          action: 'CUSTOMER_CREATED',
+        },
+        client,
+      );
+    return customer;
+  }
 
   list(query: ListCustomersQueryDto) {
     return this.repository.list(query).then((rows) => new ListResponse(rows, query.limit));
@@ -28,27 +62,10 @@ export class CustomersService {
     return customer;
   }
 
-  async create(key: string, input: CreateCustomerDto) {
-    const hash = createHash('sha256')
-      .update(JSON.stringify({ name: input.name, phoneNumber: input.phoneNumber }))
-      .digest('hex');
-    return this.database.transaction(async (client) => {
-      if (!(await this.repository.lockCreation(client, key)))
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 고객 등록 요청을 처리 중입니다.');
-      const previous = await this.repository.findCreation(client, key);
-      if (previous) {
-        if (previous.requestHash !== hash)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 요청 키에 다른 내용이 전달됐습니다.',
-          );
-        return { customerSeq: previous.customerSeq };
-      }
-      const customerSeq = await this.repository.insert(client, input);
-      await this.repository.rememberCreation(client, key, hash, customerSeq);
-      return { customerSeq };
-    });
+  async create(input: CreateCustomerDto) {
+    return this.database.transaction(async (client) => ({
+      customerSeq: await this.repository.insert(client, input),
+    }));
   }
 
   async update(id: number, changes: UpdateCustomerDto, administrator: boolean): Promise<void> {

@@ -121,7 +121,9 @@ MEMBERSHIP_CREATED / MEMBERSHIP_UPDATED / MEMBERSHIP_REMOVED는 MEMBERSHIP 대�
 MEMBERS_IMPORTED는 ORGANIZATION 대상으로 기록한다. 성공은 업무와 같은 트랜잭션,
 실패·거부는 기존 공통 실패 감사 경로를 사용한다. 감사는 작업 기록이며 완전한 소속 이력은 아니다.
 
-기존 001~005는 변경하지 않고 006-membership-write-requests.sql을 기존 runner로 적용한다.
+기존 001~005·007·008은 변경하지 않고 009-membership-write-requests.sql을 기존 runner로 적용한다.
+미배포 구성원용 006은 최신 develop-backend 병합 시 009로 이동했다. 008이 과거 생성 요청
+스키마를 정리한 다음 009가 구성원 등록·CSV 전용 스키마와 테이블을 생성한다.
 public 테이블 변경은 없다. 자동 배포의 migration·스키마 검증에 새 기록 테이블을 포함한다.
 내부 Nginx와 호스트 HTTPS 설정의 /api/ 본문 제한을 2MiB로 맞춰 multipart 헤더 공간을 확보한다.
 앱은 파일 자체를 1MiB로 제한한다. 호스트 설정은 앱 배포로 자동 갱신되지 않으므로 기존 서버
@@ -147,7 +149,7 @@ cd ..
   고객 탈퇴와의 경합 시 잠금 후 상태 재검사, Swagger 계약 통과.
 - CSV 단위 검증: BOM·CRLF·따옴표·쉼표·필드 내 줄바꿈·오류 레코드 번호·원문 비노출,
   1MiB/1,000행 경계 통과. 실제 운영 이미지·Nginx에서도 정확히 1MiB 파일 성공 및 초과 거부 통과.
-- `infra/database/test-monolith.ps1`: 006 제약·관리자별 키·소속 삭제 후 기록 보존·
+- `infra/database/test-monolith.ps1`: 009 제약·관리자별 키·소속 삭제 후 기록 보존·
   재실행·기존 데이터 보존·백업 복원·체크섬 변경 거부·최초/후속 실패 롤백 통과.
 - 백엔드 운영 배포·DB 적용·프론트/AI 실제 연동은 수행하지 않았다. 호스트 Nginx 반영은 아래 후속 기록을 참고한다.
 

@@ -3,6 +3,8 @@ SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '60s';
 SET LOCAL search_path = public, pg_catalog;
 
+-- 008 removes the old creation receipt schema; membership receipts are created afterwards.
+CREATE SCHEMA IF NOT EXISTS api_idempotency;
 CREATE TABLE api_idempotency.membership_writes (
  admin_user_seq integer NOT NULL REFERENCES public.admin_users(admin_user_seq),
  idempotency_key uuid NOT NULL,

@@ -33,15 +33,15 @@ test('production customer MVP flow through Nginx needs no service token while ad
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
   };
   const key = randomUUID();
-  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+  const headers = { 'Content-Type': 'application/json' };
   const register = () =>
     fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
   const first = await register();
   assert.equal(first.status, 201);
   const id = (await first.json()).data.customerSeq;
   const replay = await register();
-  assert.equal(replay.status, 201);
-  assert.equal((await replay.json()).data.customerSeq, id);
+  assert.equal(replay.status, 409);
+  assert.equal((await replay.json()).error.code, 'DUPLICATE_RESOURCE');
   const detail = await fetch('http://proxy/api/customers/' + id);
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.phoneNumber, input.phoneNumber);
@@ -234,7 +234,7 @@ test('production login through Nginx authorizes company operations and logout re
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
   const name = 'runtime-company-' + randomUUID();
   const key = randomUUID();
-  const companyHeaders = { ...headers, Cookie: session, 'Idempotency-Key': key };
+  const companyHeaders = { ...headers, Cookie: session };
   const register = () =>
     fetch('http://proxy/api/companies', {
       method: 'POST',
@@ -244,9 +244,6 @@ test('production login through Nginx authorizes company operations and logout re
   const created = await register();
   assert.equal(created.status, 201);
   const id = (await created.json()).data.organizationSeq;
-  const replay = await register();
-  assert.equal(replay.status, 201);
-  assert.equal((await replay.json()).data.organizationSeq, id);
   const list = await fetch('http://proxy/api/companies?q=' + encodeURIComponent(name), {
     headers: { Cookie: session },
   });
@@ -272,6 +269,16 @@ test('production login through Nginx authorizes company operations and logout re
     headers: { Cookie: session },
   });
   assert.equal((await inactive.json()).data.status, 'INACTIVE');
+  const orderBody = { customer: { name: '주문 검증', phoneNumber: '01000880088' }, parcels: [] };
+  const order = () =>
+    fetch('http://proxy/api/orders', {
+      method: 'POST',
+      headers: { ...companyHeaders, 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify(orderBody),
+    });
+  const registered = await order();
+  assert.equal(registered.status, 201);
+  assert.ok((await registered.json()).data.orderSeq > 0);
   const logout = await fetch('http://proxy/api/auth/logout', {
     method: 'POST',
     headers: { ...headers, Cookie: session },
@@ -285,4 +292,18 @@ test('production login through Nginx authorizes company operations and logout re
     (await fetch('http://proxy/api/companies', { headers: { Cookie: session } })).status,
     401,
   );
+});
+
+test('production Nginx routes the shared ORD-01 API and forwards its call header', async () => {
+  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
+  const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
+  const missing = await fetch('http://proxy/api/orders', { method: 'POST', headers, body });
+  assert.equal(missing.status, 400);
+  const unknown = await fetch('http://proxy/api/orders', {
+    method: 'POST',
+    headers: { ...headers, 'X-Call-Session-Id': '2147483647' },
+    body,
+  });
+  assert.equal(unknown.status, 404);
+  assert.equal((await unknown.json()).error.code, 'NOT_FOUND');
 });
