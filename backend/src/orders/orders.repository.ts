@@ -2,11 +2,60 @@ import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { OriginPinDto } from './dto/create-order.dto';
-import { CreatedOrderDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderSummaryDto } from './dto/order-response.dto';
+import { OrderQueryDto } from './dto/order-query.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 
 @Injectable()
 export class OrdersRepository {
+  async readCustomer(client: PoolClient, callId: number) {
+    return (
+      await client.query<{ customerSeq: number | null; endedAt: Date | null }>(
+        `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt"
+         FROM call_sessions c LEFT JOIN customers u
+           ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE'
+         WHERE c.call_session_seq=$1`,
+        [callId],
+      )
+    ).rows[0];
+  }
+
+  async list(client: PoolClient, query: OrderQueryDto, customerId: number | null) {
+    return (
+      await client.query<OrderSummaryDto>(
+        `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
+          o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
+          o.created_at AS "createdAt",
+          (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount",
+          ARRAY(SELECT DISTINCT s.status FROM shipments s
+            JOIN order_parcels p ON p.order_parcel_seq=s.order_parcel_seq
+            WHERE p.order_seq=o.order_seq ORDER BY s.status) AS "shipmentStatuses"
+         FROM orders o
+         WHERE ($1::int IS NULL OR o.customer_seq=$1)
+           AND ($2::timestamptz IS NULL OR o.created_at >= $2)
+           AND ($3::timestamptz IS NULL OR o.created_at < $3)
+           AND ($4::text IS NULL OR o.status=$4)
+           AND ($5::text IS NULL OR EXISTS(
+             SELECT 1 FROM order_parcels p JOIN shipments s ON s.order_parcel_seq=p.order_parcel_seq
+             WHERE p.order_seq=o.order_seq AND s.status=$5))
+           AND ($6::text IS NULL OR EXISTS(
+             SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq
+               AND strpos(lower(p.destination_name),lower($6)) > 0))
+         ORDER BY o.created_at DESC, o.order_seq DESC LIMIT $7 OFFSET $8`,
+        [
+          customerId,
+          query.from ?? null,
+          query.to ?? null,
+          query.status ?? null,
+          query.shipmentStatus ?? null,
+          query.recipientName ?? null,
+          query.limit + 1,
+          query.offset,
+        ],
+      )
+    ).rows;
+  }
+
   async lockCreation(client: PoolClient, key: string): Promise<boolean> {
     const hash = createHash('sha256').update(`orders.create:${key}`).digest();
     const result = await client.query<{ acquired: boolean }>(

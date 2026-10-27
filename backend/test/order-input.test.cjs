@@ -2,10 +2,56 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { CreateOrderDto } = require('../dist/orders/dto/create-order.dto');
+const { OrderQueryDto } = require('../dist/orders/dto/order-query.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
+
+test('order queries validate dates, enum filters, integer pagination and unknown fields', async () => {
+  const query = (value) => pipe.transform(value, { type: 'query', metatype: OrderQueryDto });
+  const defaults = await query({});
+  assert.equal(defaults.limit, 20);
+  assert.equal(defaults.offset, 0);
+  assert.equal(defaults.customerSeq, undefined);
+  const result = await query({
+    customerSeq: '31',
+    limit: '100',
+    offset: '2',
+    from: '2026-10-27T00:00:00+09:00',
+    to: '2026-10-28T00:00:00Z',
+    status: 'COLLECTING',
+    shipmentStatus: 'paid',
+    recipientName: ' 수령인 ',
+  });
+  assert.equal(result.customerSeq, 31);
+  assert.equal(result.limit, 100);
+  assert.equal(result.offset, 2);
+  assert.equal(result.recipientName, '수령인');
+  for (const input of [
+    { customerSeq: '0' },
+    { customerSeq: '2147483648' },
+    { customerSeq: '1e2' },
+    { customerSeq: ['1', '2'] },
+    { limit: '0' },
+    { limit: '101' },
+    { limit: '' },
+    { offset: '-1' },
+    { offset: '1.5' },
+    { status: 'paid' },
+    { shipmentStatus: 'ACCEPTED' },
+    { recipientName: '   ' },
+    { recipientName: ['a', 'b'] },
+    { from: '2026-02-30T00:00:00Z' },
+    { to: '2026-10-28T00:00:00' },
+    { unexpected: '1' },
+  ])
+    await assert.rejects(
+      () => query(input),
+      (error) => error.getStatus() === 400,
+      JSON.stringify(input),
+    );
+});
 
 test('collecting orders accept missing details and preserve nullable fields and leading zeros', async () => {
   const minimal = await validate({ customerSeq: 31 });

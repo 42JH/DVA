@@ -3,6 +3,8 @@ import {
   Headers,
   Controller,
   Post,
+  Get,
+  Query,
   Req,
   createParamDecorator,
   ExecutionContext,
@@ -17,18 +19,20 @@ import {
   ApiNotFoundResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiOkResponse,
   ApiHeader,
   ApiOperation,
   ApiBody,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { Request } from 'express';
-import { MvpAiOrderIntake } from '../auth/mvp-ai-access';
+import { MvpAiOrderAccess } from '../auth/mvp-ai-access';
 import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderSummaryDto } from './dto/order-response.dto';
+import { OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 
 const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
@@ -36,7 +40,7 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
 );
 
 @ApiTags('주문')
-@ApiExtraModels(CreateOrderDto, CreatedOrderDto, RequestMetaDto, ErrorResponseDto)
+@ApiExtraModels(CreateOrderDto, CreatedOrderDto, OrderSummaryDto, RequestMetaDto, ErrorResponseDto)
 @ApiBadRequestResponse({
   description: '요청 본문·생성 키·통화 번호 형식 오류 또는 필수 값 누락.',
   type: ErrorResponseDto,
@@ -54,8 +58,46 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
+  @Get()
+  @MvpAiOrderAccess()
+  @ApiOperation({
+    summary: '주문 목록 조회 (ORD-02)',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '생성 시각·주문 번호 내림차순으로 조회합니다. 필터는 모두 AND 조건이며, 배송 상태는 팀 DB 저장값입니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'X-Call-Session-Id',
+    required: false,
+    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({ description: '통화가 없음.', type: ErrorResponseDto })
+  @ApiConflictResponse({
+    description: '종료된 통화의 AI 조회(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiOkResponse({
+    description: '주문 요약과 다음 페이지 존재 여부. 검색 결과가 없으면 data는 빈 배열입니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'hasNext'],
+      properties: {
+        data: { type: 'array', items: { $ref: getSchemaPath(OrderSummaryDto) } },
+        hasNext: { type: 'boolean', description: '이후 주문이 더 있으면 true.' },
+      },
+    },
+  })
+  list(
+    @Req() request: AuthRequest,
+    @Query() query: OrderQueryDto,
+    @Headers('X-Call-Session-Id') callSessionId?: string,
+  ) {
+    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionId);
+  }
+
   @Post()
-  @MvpAiOrderIntake()
+  @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
   @ApiOperation({
     summary: '주문 생성 (ORD-01)',
