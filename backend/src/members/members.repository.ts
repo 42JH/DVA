@@ -1,17 +1,10 @@
 import { Injectable } from '@nestjs/common';
-
 import { createHash } from 'node:crypto';
-
 import { PoolClient } from 'pg';
-
 import { DatabaseService } from '../database/database.service';
-
 import { Customer } from '../customers/customers.types';
-
 import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
-
-import { Membership } from './members.types';
-
+import { CsvMemberRow, MemberCandidate, Membership } from './members.types';
 import { MemberViewDto } from './dto/member-response.dto';
 
 const memberColumns =
@@ -120,5 +113,48 @@ export class MembersRepository {
       (admin_user_seq,idempotency_key,organization_seq,operation,request_hash) VALUES ($1,$2::uuid,$3,$4,$5)`,
       [adminId, key, companyId, operation, hash],
     );
+  }
+
+  async candidates(
+    companyId: number,
+    rows: CsvMemberRow[],
+    client: PoolClient,
+  ): Promise<MemberCandidate[]> {
+    const result = await client.query<MemberCandidate>(
+      `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status AS "customerStatus",
+       m.membership_seq AS "membershipSeq",m.organization_seq AS "organizationSeq",m.employee_no AS "employeeNo"
+       FROM customers c LEFT JOIN memberships m ON m.customer_seq=c.customer_seq
+       WHERE c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[]))`,
+      [rows.map((row) => row.phoneNumber), companyId, rows.map((row) => row.employeeNo)],
+    );
+    return result.rows;
+  }
+
+  async lockCustomers(ids: number[], client: PoolClient): Promise<void> {
+    await client.query(
+      'SELECT customer_seq FROM customers WHERE customer_seq=ANY($1::int[]) ORDER BY customer_seq FOR UPDATE',
+      [ids],
+    );
+  }
+
+  async saveCsvCustomer(
+    row: CsvMemberRow,
+    existing: MemberCandidate | undefined,
+    client: PoolClient,
+  ): Promise<number> {
+    if (existing) {
+      if (existing.name !== row.name || existing.phoneNumber !== row.phoneNumber)
+        await client.query('UPDATE customers SET name=$2,phone_number=$3 WHERE customer_seq=$1', [
+          existing.customerSeq,
+          row.name,
+          row.phoneNumber,
+        ]);
+      return existing.customerSeq;
+    }
+    const result = await client.query<{ id: number }>(
+      "INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE') RETURNING customer_seq AS id",
+      [row.name, row.phoneNumber],
+    );
+    return result.rows[0].id;
   }
 }

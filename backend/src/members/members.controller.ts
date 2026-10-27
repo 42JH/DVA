@@ -12,9 +12,13 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
-
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBody,
+  ApiConsumes,
   ApiCookieAuth,
   ApiHeader,
   ApiNoContentResponse,
@@ -23,23 +27,20 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-
 import { AuthRequest } from '../auth/auth.guard';
-
 import { AuditOperation } from '../audit/audit-operation';
-
+import { ApiException } from '../common/errors/api.exception';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-
 import { MembersService } from './members.service';
-
 import {
   CreateMemberDto,
   ListMembersQueryDto,
   MemberIdParamsDto,
   UpdateMemberDto,
 } from './dto/member-request.dto';
-
 import { MembersEnvelopeDto } from './dto/member-response.dto';
+import { CSV_MAX_BYTES } from './member-csv';
+import { CsvUpload } from './members.types';
 
 const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
   context.switchToHttp().getRequest<AuthRequest>().get('Idempotency-Key'),
@@ -65,6 +66,59 @@ export class MembersController {
   @ApiOkResponse({ type: MembersEnvelopeDto })
   list(@Param() params: MemberIdParamsDto, @Query() query: ListMembersQueryDto) {
     return this.members.list(params.id, query);
+  }
+
+  @Post('companies/:id/members/import')
+  @HttpCode(204)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: CSV_MAX_BYTES + 1, files: 1, fields: 0, parts: 2 },
+    }),
+  )
+  @AuditOperation({ action: 'MEMBERS_IMPORTED', targetType: 'ORGANIZATION', target: 'id' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      additionalProperties: false,
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'UTF-8 CSV. employeeNo,name,phoneNumber. 최대 1MiB·1,000행.',
+        },
+      },
+    },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+  })
+  @ApiOperation({
+    summary: '기업 직원 CSV 등록·갱신',
+    description:
+      '관리자 CSV에서 기존 사번의 이름·전화번호 수정 허용. 파일 전체를 한 트랜잭션으로 저장합니다.',
+  })
+  @ApiNoContentResponse()
+  @ApiResponse({ status: 413, type: ErrorResponseDto })
+  @ApiResponse({ status: 415, type: ErrorResponseDto })
+  importCsv(
+    @Param() params: MemberIdParamsDto,
+    @CreationKey(new ParseUUIDPipe()) key: string,
+    @UploadedFile() file: CsvUpload | undefined,
+    @Req() request: AuthRequest,
+  ) {
+    if (!request.is('multipart/form-data'))
+      throw new ApiException(415, 'UNSUPPORTED_MEDIA_TYPE', 'multipart/form-data가 필요합니다.');
+    return this.members.importCsv(
+      params.id,
+      file,
+      request.admin.adminUserSeq,
+      key.toLowerCase(),
+      request.requestId,
+    );
   }
 
   @Post('companies/:id/members')

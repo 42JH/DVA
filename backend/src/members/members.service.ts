@@ -1,20 +1,14 @@
 import { Injectable } from '@nestjs/common';
-
 import { createHash } from 'node:crypto';
-
 import { PoolClient } from 'pg';
-
 import { DatabaseService } from '../database/database.service';
-
-import { ApiException } from '../common/errors/api.exception';
-
+import { ApiException, ErrorDetail } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
-
 import { AuditService } from '../audit/audit.service';
-
 import { MembersRepository } from './members.repository';
-
 import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
+import { CsvUpload, MemberCandidate } from './members.types';
+import { parseMemberCsv } from './member-csv';
 
 @Injectable()
 export class MembersService {
@@ -146,6 +140,74 @@ export class MembersService {
       if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
       await this.repository.remove(id, client);
       await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
+    });
+  }
+
+  async importCsv(
+    companyId: number,
+    file: CsvUpload | undefined,
+    adminId: number,
+    key: string,
+    requestId: string,
+  ): Promise<void> {
+    const rows = parseMemberCsv(file);
+    const hash = createHash('sha256')
+      .update(JSON.stringify({ operation: 'IMPORT', companyId }))
+      .update(file!.buffer)
+      .digest('hex');
+    await this.writeOnce(companyId, adminId, key, 'IMPORT', hash, async (client) => {
+      const before = await this.repository.candidates(companyId, rows, client);
+      await this.repository.lockCustomers(
+        before.map((row) => row.customerSeq),
+        client,
+      );
+      const candidates = await this.repository.candidates(companyId, rows, client);
+      const byPhone = new Map(candidates.map((row) => [row.phoneNumber, row]));
+      const byEmployee = new Map(
+        candidates
+          .filter((row) => row.organizationSeq === companyId)
+          .map((row) => [row.employeeNo, row]),
+      );
+      const errors: ErrorDetail[] = [];
+      const plans: Array<MemberCandidate | undefined> = [];
+      rows.forEach((row, index) => {
+        const employee = byEmployee.get(row.employeeNo);
+        const phoneOwner = byPhone.get(row.phoneNumber);
+        const existing = employee ?? phoneOwner;
+        const add = (field: string, reason: string) =>
+          errors.push({ field: `rows[${index + 2}].${field}`, reason });
+        if (existing?.customerStatus === 'WITHDRAWN') add('phoneNumber', 'CUSTOMER_WITHDRAWN');
+        if (employee) {
+          if (phoneOwner && phoneOwner.customerSeq !== employee.customerSeq)
+            add('phoneNumber', 'PHONE_NUMBER_CONFLICT');
+        } else if (phoneOwner?.membershipSeq) {
+          add(
+            'phoneNumber',
+            phoneOwner.organizationSeq === companyId
+              ? 'EMPLOYEE_NO_CONFLICT'
+              : 'OTHER_COMPANY_MEMBERSHIP',
+          );
+        }
+        plans.push(existing);
+      });
+      if (errors.length)
+        throw new ApiException(
+          422,
+          'VALIDATION_FAILED',
+          'CSV 행의 고객·소속 충돌을 확인해 주세요.',
+          errors,
+        );
+      for (const [index, row] of rows.entries()) {
+        const existing = plans[index];
+        const customerSeq = await this.repository.saveCsvCustomer(row, existing, client);
+        if (!existing?.membershipSeq)
+          await this.repository.create(
+            companyId,
+            { customerSeq, employeeNo: row.employeeNo, role: 'MEMBER' },
+            client,
+          );
+      }
+      await this.record('MEMBERS_IMPORTED', 'ORGANIZATION', companyId, adminId, requestId, client);
     });
   }
 }
