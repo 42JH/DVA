@@ -88,9 +88,9 @@ call_session_seq: 7
 
 특정 시점에 사용한 출발지·도착지를 신규 주문에 재사용하려면 [42번 이전 주문 주소 조회](order-address-history.md)를 사용한다.
 
-1. 선행 통화 생성 측에서 `callSessionSeq`를 전달해야 한다. 이번 작업에 CALL-01은 포함하지 않는다.
+1. 새 AI 상담 결과는 POST /api/orders의 본문 call로 통화를 생성·연결하고 응답의 `callSessionSeq`를 받는다. 조회에서는 이 값을 `call_session_seq` 헤더로 사용한다. 상담 시작 시 고객·주소록은 별도 POST /api/customers/context로 확인한다.
 2. AI는 목록의 `data[]`에서 orderSeq를 선택하고, 상세의 `data`에서 주소·상세 번호·version을 읽는다.
-3. ORD-01 → ORD-03 → ORD-04 → ORD-06은 같은 orderSeq를 사용한다. 수정은 [61번 연동 문서](order-update.md)를 따르며 최종 접수는 57번 후속 작업이다.
+3. 기존 주문 조회·보완은 같은 orderSeq를 사용한다. 새 AI 완료 결과는 ORD-01에서 디버 접수까지 처리하며 ORD-04·ORD-06을 추가 호출하지 않는다. [AI·PBX 계약](ai-pbx-recordings.md)을 참고한다.
 4. 현재 `develop-ai`의 제안 호출부는 `/internal/ai/orders/search` POST·snake_case를 사용한다. 담당 호출부를 이 문서의 `/api/orders` GET·camelCase·응답 구조에 맞춰야 하며, 이번 백엔드 변경만으로 자동 연결되지 않는다.
 
 Swagger `/api/docs`와 OpenAPI `/api/docs-json`에 각 API 요약·필터·헤더·응답 필드·오류를 등록했다. 통화 헤더 이름은 DB 컬럼명과 같은 `call_session_seq`다.

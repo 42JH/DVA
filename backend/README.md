@@ -5,8 +5,8 @@
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
-55번 ORD-01 공통 주문 생성과 접수 전 검증은 [주문 API 계약](../docs/api/orders.md)을 참고한다. AI와 관리자는 같은 POST /api/orders를 사용하고, 미완료 주문도 orders·order_parcels에 COLLECTING으로 저장한다.
-57번 ORD-06은 [주문 최종 접수 계약](../docs/api/order-submit.md)을 따른다. 저장된 같은 주문을 검증해 디버에 전송하고 결과·배송·초기 이력을 함께 저장한다.
+AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 디버 접수 결과까지 반환하고, INCOMPLETE·CANCELLED는 저장만 한다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
+PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
@@ -46,6 +46,12 @@ npm run start:dev
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
 | `DVER_API_URL` | 기본 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용 |
 | `DVER_API_KEY` | 서버 전용 디버 키. 빈 값이면 신규 최종 접수만 503. 공백·제어문자 금지. Compose가 backend에 전달 |
+| `AWS_REGION` | S3 대상 리전. 기본 ap-northeast-2 |
+| `S3_RECORDINGS_BUCKET` | 비공개 녹취 버킷명. 미설정이면 웹훅은 보존하고 업로드 워커만 비활성 |
+| `RECORDING_ALLOWED_HOSTS` | 정확한 원본 다운로드 호스트 목록. 기본 디버 녹취 S3 호스트, 쉼표 구분 |
+| `RECORDING_MATCH_WINDOW_SECONDS` | 동일 발신번호의 OpenAI/PBX 시작 시각 허용 차이. 기본 ±30초, 1~300 |
+
+AWS 자격 증명은 SDK 기본 체인을 사용한다. 역할이 없는 환경은 배포 비밀의 `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY`·필요 시 `AWS_SESSION_TOKEN`을 Compose로 주입한다. 새 앱 실행 전 011 migration이 필요하다. 기존 테이블에 연결·재시도 컬럼만 추가하며 새 업무 테이블은 없다.
 
 설정 검증 오류에는 변수 이름만 출력하고 값은 출력하지 않는다. 실제 `.env*`는 Git에서 제외하고 `.env.example`만 관리한다.
 관리자 인증은 PostgreSQL 서버 세션을 사용한다. JWT 비밀키는 필요하지 않으며 관리자 비밀번호를 환경 파일에 저장하지 않는다.
@@ -261,8 +267,7 @@ DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션�
 - 현재 구현과 이 README의 신규 API 접두사는 `/api`이며 공통 기반 Jira 설명에는 `/api/v1`이 남아 있다.
   이번 구조 문서화에서는 현재 경로를 유지하며 접두사를 변경하지 않는다.
 - 관리자 인증은 83번에서 서버 세션 9시간으로 확정했다. `auth_version`과 JWT는 사용하지 않는다.
-- 통화 `provider_call_id`와 문장 순번의 전달 계약은 ERD에 미정으로 기록돼 있다.
-  AI·PBX 연동 구현 시 확인하며 추정한 규격으로 연결하지 않는다.
+- 통화 `provider_call_id`는 OpenAI 세션 ID이며 수신 이벤트 시각과 함께 전달한다. PBX는 [AI·PBX 계약](../docs/api/ai-pbx-recordings.md)의 유일 후보 매칭을 사용한다. 문장 전송·전사는 이번 범위가 아니다.
 
 ## API 계약
 
@@ -270,7 +275,7 @@ DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션�
 기존 `/health`, `/health/ready`, `/webhooks/pbx/call-ended`는 경로와 응답을 유지한다.
 컨테이너 Nginx는 신규 `/api/...`를 그대로 전달한다. 기존 `/api/health`, `/api/health/ready`,
 `/api/webhooks/pbx/call-ended`에만 `/api`를 제거하여 기존 백엔드 경로로 전달한다.
-공개 호스트 Nginx는 현재 PBX·Jenkins·Swagger 문서를 허용한다. 신규 업무 API를 외부에 공개하는 변경은 인증 구현 이후 별도로 적용한다.
+공개 호스트 Nginx는 `/api/...`를 컨테이너 프록시로 전달한다. AI 수신·PBX 미러 경로는 별도 운영 설정이 있으므로 저장소 파일 전체로 덮어쓰지 않는다.
 
 | 응답 | 형식 |
 |---|---|

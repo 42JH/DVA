@@ -16,6 +16,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
+import { OrderCallDto } from './order-call.dto';
 
 const present = (_object: unknown, value: unknown) => value !== undefined;
 
@@ -219,12 +220,34 @@ export class OrderCustomerDto extends CreateCustomerDto {}
 
 export class CreateOrderDto {
   @ApiPropertyOptional({
+    enum: ['COMPLETE', 'INCOMPLETE', 'CANCELLED'],
+    description:
+      'AI 상담 결과. COMPLETE만 디버 접수, INCOMPLETE는 미완료 저장, CANCELLED는 상담 중 취소 저장. call과 함께 전달합니다.',
+  })
+  @ValidateIf(present)
+  @IsIn(['COMPLETE', 'INCOMPLETE', 'CANCELLED'])
+  outcome?: 'COMPLETE' | 'INCOMPLETE' | 'CANCELLED';
+
+  @ApiPropertyOptional({
+    type: () => OrderCallDto,
+    description: 'AI 결과 필수 통화 정보. 기존 통화 번호 없이 세션을 생성·연결합니다.',
+  })
+  @ValidateIf(present)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => OrderCallDto)
+  call?: OrderCallDto;
+
+  @ApiPropertyOptional({
     minimum: 1,
     maximum: 2147483647,
-    description: '기존 고객 번호. customerSeq와 customer 중 하나만 입력합니다.',
+    description: '기존 고객 번호. customer와 동시 입력 불가. AI 미완료·취소 결과는 고객 생략 가능.',
   })
   @ValidateIf(
-    (input: CreateOrderDto, value: unknown) => value !== undefined || input.customer === undefined,
+    (input: CreateOrderDto, value: unknown) =>
+      value !== undefined ||
+      (input.customer === undefined &&
+        !(input.call && ['INCOMPLETE', 'CANCELLED'].includes(input.outcome ?? ''))),
   )
   @IsInt()
   @Min(1)

@@ -82,6 +82,20 @@ before(async () => {
       await client.query(
         readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
       );
+    if (
+      !(
+        await client.query(
+          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='incoming_at') AS ready",
+        )
+      ).rows[0].ready
+    ) {
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/001-pbx-call-ended.sql'), 'utf8'),
+      );
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/011-call-recording-correlation.sql'), 'utf8'),
+      );
+    }
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -929,7 +943,14 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
   assert.equal(examples.existingCustomer.value.customer, undefined);
   assert.equal(examples.customerByPhone.value.customerSeq, undefined);
   assert.equal(typeof examples.customerByPhone.value.customer.phoneNumber, 'string');
-  assert.deepEqual(inputSchema.oneOf, [{ required: ['customerSeq'] }, { required: ['customer'] }]);
+  assert.deepEqual(inputSchema.anyOf, [
+    { required: ['customerSeq'] },
+    { required: ['customer'] },
+    {
+      required: ['call', 'outcome'],
+      properties: { outcome: { enum: ['INCOMPLETE', 'CANCELLED'] } },
+    },
+  ]);
   assert.equal(inputSchema.allOf[0].$ref, '#/components/schemas/CreateOrderDto');
   assert.deepEqual(spec.components.schemas.OrderCustomerDto.required.sort(), [
     'name',
@@ -2049,6 +2070,162 @@ const resetDver = () => {
   dverRequests = [];
   dverRespond = (_req, res) => res.end(JSON.stringify(dverSuccess));
 };
+
+const aiResult = (outcome = 'COMPLETE', changes = {}) => ({
+  outcome,
+  call: {
+    providerCallId: randomUUID(),
+    callerPhoneNumber: '+821000000001',
+    incomingAt: '2026-10-27T01:00:00Z',
+  },
+  customerSeq: customerId,
+  pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+  parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+  ...changes,
+});
+
+test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result without submit', async () => {
+  resetDver();
+  const input = aiResult(),
+    key = randomUUID();
+  const response = await aiCreate(undefined, input, key);
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  assert.equal(data.status, 'ACCEPTED');
+  assert.equal(data.parcelNo, dverSuccess.parcelNo);
+  assert.ok(data.callSessionSeq > 0);
+  assert.deepEqual(await submissionRows(data.orderSeq), {
+    status: 'ACCEPTED',
+    shipments: 1,
+    history: 1,
+    acceptedAudit: 1,
+  });
+  const stored = (
+    await pool.query(
+      'SELECT caller_phone_number,incoming_at,order_seq FROM call_sessions WHERE call_session_seq=$1',
+      [data.callSessionSeq],
+    )
+  ).rows[0];
+  assert.equal(stored.caller_phone_number, '01000000001');
+  assert.equal(stored.incoming_at.toISOString(), input.call.incomingAt.replace('00Z', '00.000Z'));
+  assert.equal(stored.order_seq, data.orderSeq);
+  assert.deepEqual(
+    (await (await aiCreate(undefined, { ...input, outcome: 'CANCELLED' }, key, 1)).json()).data,
+    data,
+  );
+  assert.equal(dverRequests.length, 1);
+});
+
+test('AI incomplete and cancelled calls survive without a known customer and never call Dver', async () => {
+  resetDver();
+  const beforeCustomers = (await counts()).customers;
+  for (const outcome of ['INCOMPLETE', 'CANCELLED']) {
+    const input = aiResult(outcome, {
+      customerSeq: undefined,
+      call: {
+        providerCallId: randomUUID(),
+        callerPhoneNumber: '01099118822',
+        incomingAt: '2026-10-27T01:00:00Z',
+      },
+      parcels: [{ origin: { roadAddress: '수집된 주소' } }],
+    });
+    const key = randomUUID();
+    const response = await aiCreate(undefined, input, key);
+    assert.equal(response.status, 201);
+    const { data } = await response.json();
+    assert.equal(data.status, outcome === 'INCOMPLETE' ? 'COLLECTING' : 'CANCELLED');
+    assert.equal(data.parcelNo, null);
+    const stored = (
+      await pool.query('SELECT customer_seq FROM orders WHERE order_seq=$1', [data.orderSeq])
+    ).rows[0];
+    assert.equal(stored.customer_seq, null);
+    assert.deepEqual((await (await aiCreate(undefined, input, key)).json()).data, data);
+  }
+  assert.equal((await counts()).customers, beforeCustomers);
+  assert.equal(dverRequests.length, 0);
+});
+
+test('AI COMPLETE validation rolls back call, customer and order before any Dver request', async () => {
+  resetDver();
+  const before = await counts();
+  const input = aiResult('COMPLETE', {
+    customerSeq: undefined,
+    customer: { name: '검증 실패', phoneNumber: '01088990011' },
+    parcels: [],
+  });
+  input.call.callerPhoneNumber = input.customer.phoneNumber;
+  await errorCode(await aiCreate(undefined, input), 422, 'VALIDATION_FAILED');
+  assert.deepEqual(await counts(), before);
+  assert.equal(
+    (
+      await pool.query('SELECT 1 FROM call_sessions WHERE provider_call_id=$1', [
+        input.call.providerCallId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal(dverRequests.length, 0);
+});
+
+test('AI result identity cannot change phone or event timestamp; another key cannot duplicate the call order', async () => {
+  const input = aiResult('INCOMPLETE'),
+    key = randomUUID();
+  assert.equal((await aiCreate(undefined, input, key)).status, 201);
+  for (const callChange of [
+    { incomingAt: '2026-10-27T01:00:01Z' },
+    { callerPhoneNumber: '01011112222' },
+  ])
+    await errorCode(
+      await aiCreate(undefined, { ...input, call: { ...input.call, ...callChange } }, key),
+      409,
+      'INVALID_STATE',
+    );
+  await errorCode(await aiCreate(undefined, input), 409, 'INVALID_STATE');
+});
+
+test('AI COMPLETE retries while Dver is running return SUBMITTING across application instances', async () => {
+  resetDver();
+  let received;
+  const arrived = new Promise((resolve) => {
+    received = resolve;
+  });
+  let finish;
+  dverRespond = (_req, res) => {
+    finish = () => res.end(JSON.stringify(dverSuccess));
+    received();
+  };
+  const input = aiResult(),
+    key = randomUUID();
+  const first = aiCreate(undefined, input, key);
+  await arrived;
+  try {
+    const replay = await aiCreate(undefined, input, key, 1);
+    assert.equal(replay.status, 202);
+    assert.equal((await replay.json()).data.status, 'SUBMITTING');
+    assert.equal(dverRequests.length, 1);
+  } finally {
+    finish();
+  }
+  assert.equal((await (await first).json()).data.status, 'ACCEPTED');
+});
+
+test('AI COMPLETE reports upstream rejection or uncertainty and never resends on retry', async () => {
+  for (const status of [403, 500]) {
+    resetDver();
+    dverRespond = (_req, res) => {
+      res.writeHead(status);
+      res.end('{}');
+    };
+    const input = aiResult(),
+      key = randomUUID();
+    const response = await aiCreate(undefined, input, key);
+    const { data } = await response.json();
+    assert.equal(data.status, status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED');
+    assert.equal((await submissionRows(data.orderSeq)).shipments, 0);
+    assert.deepEqual((await (await aiCreate(undefined, input, key)).json()).data, data);
+    assert.equal(dverRequests.length, 1);
+  }
+});
 const submissionRows = async (id) =>
   (
     await pool.query(

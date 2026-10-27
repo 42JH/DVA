@@ -16,6 +16,29 @@ export class CreatedOrderDto {
   version!: number;
 }
 
+export class OrderResultDto extends CreatedOrderDto {
+  @ApiProperty({
+    enum: ORDER_STATUSES,
+    description:
+      'ACCEPTED만 디버 접수 성공. SUBMITTING은 처리 중, AUTH_FAILED·REVIEW_REQUIRED는 성공으로 안내하지 않습니다.',
+  })
+  status!: OrderStatus;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '연결된 call_sessions.call_session_seq. 통화 없는 관리자 주문은 null.',
+  })
+  callSessionSeq!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '디버 접수 참고번호. 접수 성공 전에는 null.',
+  })
+  parcelNo!: string | null;
+}
+
 export class OrderSummaryDto {
   @ApiProperty({ description: '주문 번호(orderSeq).', minimum: 1 })
   orderSeq!: number;

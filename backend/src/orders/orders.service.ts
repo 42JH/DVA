@@ -5,7 +5,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto } from './dto/order-response.dto';
+import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ListResponse } from '../common/pagination';
 import { isZonedDate, orderDraft } from './order-draft';
@@ -15,6 +15,7 @@ import { assertOrderUpdate } from './order-update.validation';
 import { DverClient, DverResult, dverPayload } from './dver.client';
 import { OrderSubmissionRepository } from './order-submission.repository';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
+import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 
 @Injectable()
@@ -133,42 +134,81 @@ export class OrdersService {
     input: CreateOrderDto,
     requestId: string,
     callSessionHeader?: string,
-  ): Promise<CreatedOrderDto> {
-    if ((input.customerSeq === undefined) === (input.customer === undefined))
+  ): Promise<CreatedOrderDto | OrderResultDto> {
+    const partialResult = input.call && input.outcome !== 'COMPLETE';
+    if ((input.call === undefined) !== (input.outcome === undefined))
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'AI 결과에는 call과 outcome을 함께 전달해 주세요.',
+      );
+    if (
+      (input.customerSeq !== undefined && input.customer !== undefined) ||
+      (!partialResult && input.customerSeq === undefined && input.customer === undefined)
+    )
       throw new ApiException(
         400,
         'INVALID_REQUEST',
         'customerSeq와 customer 중 하나만 전달해 주세요.',
         [{ field: 'customer', reason: 'exactlyOneCustomerReference' }],
       );
-    const callId = this.callId(adminId, callSessionHeader);
+    const headerId = this.callId(input.call ? 0 : adminId, callSessionHeader);
     const draft = orderDraft(input);
-    return this.database.transaction(async (client) => {
+    const prepared = await this.database.transaction(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
+      const callId = input.call ? await this.repository.ensureCall(client, input.call) : headerId;
+      if (input.call && headerId !== null && headerId !== callId)
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '본문 세션과 call_session_seq가 일치하지 않습니다.',
+        );
       const previous = await this.repository.findCreation(client, key, adminId, callId);
       if (previous) {
         if (!previous.allowed)
           throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 주문에 접근할 수 없습니다.');
-        return { orderSeq: previous.orderSeq, version: previous.version };
+        if (!input.call)
+          return { result: { orderSeq: previous.orderSeq, version: previous.version } };
+        if (await this.submissions.markStale(client, previous.orderSeq))
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              targetId: previous.orderSeq,
+              targetType: 'ORDER',
+              action: 'ORDER_SUBMISSION_REVIEW_REQUIRED',
+              requestId,
+            },
+            client,
+          );
+        return { result: await this.repository.result(client, previous.orderSeq, callId) };
       }
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
-      if (call && (call.endedAt !== null || call.orderSeq !== null))
+      if (call && ((!input.call && call.endedAt !== null) || call.orderSeq !== null))
         throw new ApiException(
           409,
           'INVALID_STATE',
           '종료되었거나 주문이 연결된 통화입니다. 기존 주문을 사용해 주세요.',
         );
-      const customer = await this.customers.resolveForOrder(client, draft, adminId, requestId);
-      if (call?.phone && call.phone !== customer.phoneNumber)
+      const customer =
+        draft.customerSeq !== undefined || draft.customer !== undefined
+          ? await this.customers.resolveForOrder(client, draft, adminId, requestId)
+          : await this.repository.customerByPhone(client, call!.phone!);
+      if (
+        call?.phone &&
+        customer &&
+        'phoneNumber' in customer &&
+        callerPhone(call.phone) !== customer.phoneNumber
+      )
         throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
-      const customerId = customer.customerSeq;
+      const customerId = customer?.customerSeq ?? null;
       for (const parcel of draft.parcels) {
         if (
           parcel.originPin &&
-          !(await this.repository.canUsePin(client, customerId, parcel.originPin))
+          (customerId === null ||
+            !(await this.repository.canUsePin(client, customerId, parcel.originPin)))
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
@@ -184,8 +224,40 @@ export class OrdersService {
         },
         client,
       );
-      return result;
+      if (!input.call) return { result };
+      if (input.outcome === 'CANCELLED') {
+        await this.repository.cancel(client, result.orderSeq);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: result.orderSeq,
+            targetType: 'ORDER',
+            action: 'ORDER_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      const payload =
+        input.outcome === 'COMPLETE'
+          ? await this.prepareSubmission(client, result.orderSeq, customerId!, adminId, requestId)
+          : undefined;
+      return { result: await this.repository.result(client, result.orderSeq, callId), payload };
     });
+    if (!prepared.payload) return prepared.result;
+    await this.finishSubmission(prepared.result.orderSeq, adminId, requestId, prepared.payload);
+    try {
+      return await this.database.transaction((client) =>
+        this.repository.result(
+          client,
+          prepared.result.orderSeq,
+          (prepared.result as OrderResultDto).callSessionSeq,
+        ),
+      );
+    } catch {
+      // 결과 조회도 실패하면 성공으로 안내하지 않는다. 같은 키 재전송으로 확인한다.
+      return prepared.result;
+    }
   }
 
   async update(
@@ -337,38 +409,73 @@ export class OrdersService {
           'VERSION_CONFLICT',
           '주문이 변경되었습니다. 최신 내용을 조회하고 다시 확인해 주세요.',
         );
-      const snapshot = (await this.repository.detail(client, id, null))!;
-      const payload = dverPayload(snapshot);
-      if (snapshot.paymentMethodType !== 'credit') {
-        const company = await this.submissions.isCompanyCustomer(client, customer.customerSeq);
-        if ((snapshot.paymentMethodType === 'groupBilling') !== company)
-          throw new ApiException(
-            403,
-            'FORBIDDEN',
-            '그룹카드는 기업 고객, 개인카드는 개인 고객만 사용할 수 있습니다.',
-          );
-      }
-      for (const parcel of snapshot.parcels) {
-        if (parcel.shipment)
-          throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
-        if (
-          parcel.originPin &&
-          !(await this.repository.canUsePin(client, customer.customerSeq, parcel.originPin))
-        )
-          throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
-      }
-      this.dver.ensureConfigured();
-      await this.submissions.start(client, id);
+      const payload = await this.prepareSubmission(
+        client,
+        id,
+        customer.customerSeq,
+        adminId,
+        requestId,
+      );
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
-      await this.audit.recordSuccess({ ...event, action: 'ORDER_SUBMISSION_STARTED' }, client);
       return { payload };
     });
     if ('status' in prepared) return { status: prepared.status };
+    return this.finishSubmission(id, adminId, requestId, prepared.payload);
+  }
 
+  private async prepareSubmission(
+    client: PoolClient,
+    id: number,
+    customerId: number,
+    adminId: number | null,
+    requestId: string,
+  ) {
+    const snapshot = (await this.repository.detail(client, id, null))!;
+    const payload = dverPayload(snapshot);
+    if (snapshot.paymentMethodType !== 'credit') {
+      const company = await this.submissions.isCompanyCustomer(client, customerId);
+      if ((snapshot.paymentMethodType === 'groupBilling') !== company)
+        throw new ApiException(
+          403,
+          'FORBIDDEN',
+          '그룹카드는 기업 고객, 개인카드는 개인 고객만 사용할 수 있습니다.',
+        );
+    }
+    for (const parcel of snapshot.parcels) {
+      if (parcel.shipment)
+        throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
+      if (
+        parcel.originPin &&
+        !(await this.repository.canUsePin(client, customerId, parcel.originPin))
+      )
+        throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+    }
+    this.dver.ensureConfigured();
+    await this.submissions.start(client, id);
+    await this.audit.recordSuccess(
+      {
+        actorId: adminId,
+        targetId: id,
+        targetType: 'ORDER',
+        action: 'ORDER_SUBMISSION_STARTED',
+        requestId,
+      },
+      client,
+    );
+    return payload;
+  }
+
+  private async finishSubmission(
+    id: number,
+    adminId: number | null,
+    requestId: string,
+    payload: ReturnType<typeof dverPayload>,
+  ): Promise<SubmittedOrderDto> {
+    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
     // SUBMITTING을 COMMIT한 요청만 전송하며 이 구간에는 DB 트랜잭션이 없다.
     let result: DverResult;
     try {
-      result = await this.dver.submit(prepared.payload);
+      result = await this.dver.submit(payload);
     } catch {
       result = { status: 'REVIEW_REQUIRED' };
     }

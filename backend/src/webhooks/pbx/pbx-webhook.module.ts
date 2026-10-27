@@ -4,10 +4,18 @@ import { PbxWebhookController } from './pbx-webhook.controller';
 import { PbxWebhookGuard } from './pbx-webhook.guard';
 import { PbxWebhookService } from './pbx-webhook.service';
 import { PbxWebhookRepository } from './pbx-webhook.repository';
+import { PbxRecordingWorker } from './pbx-recording.worker';
+import { RecordingStorage } from './recording-storage';
 
 @Module({
   imports: [DatabaseModule],
   controllers: [PbxWebhookController],
-  providers: [PbxWebhookGuard, PbxWebhookService, PbxWebhookRepository],
+  providers: [
+    PbxWebhookGuard,
+    PbxWebhookService,
+    PbxWebhookRepository,
+    PbxRecordingWorker,
+    RecordingStorage,
+  ],
 })
 export class PbxWebhookModule {}

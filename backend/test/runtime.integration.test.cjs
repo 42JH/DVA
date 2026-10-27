@@ -1,6 +1,30 @@
 const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+
+test('Nginx forwards an AI consultation result in the JSON body without a call header', async () => {
+  const key = randomUUID();
+  const input = {
+    outcome: 'INCOMPLETE',
+    call: {
+      providerCallId: `runtime-${key}`,
+      callerPhoneNumber: '01099008877',
+      incomingAt: '2026-10-27T01:00:00Z',
+    },
+  };
+  const send = () =>
+    fetch('http://proxy/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify(input),
+    });
+  const response = await send();
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  assert.equal(data.status, 'COLLECTING');
+  assert.ok(data.callSessionSeq > 0);
+  assert.deepEqual((await (await send()).json()).data, data);
+});
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);
 

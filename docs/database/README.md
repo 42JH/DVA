@@ -15,6 +15,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `008-simplify-creation-requests.sql`: orders.creation_request_id UUID UNIQUE 추가 → 기존 주문 요청 키 이전 → 기업·고객·주문 요청 기록 테이블 및 api_idempotency 스키마 제거. 업무 데이터·주문 version·updated_at·감사·통화 연결·PBX 기록은 보존한다.
 - `009-membership-write-requests.sql`: 과거 구성원 등록·CSV 처리 기록. 이미 적용된 원본·체크섬·이력을 그대로 보존한다.
 - `010-remove-membership-write-requests.sql`: 구성원 요청 기록 테이블과 전용 스키마를 제거한다. 009를 포함한 기존 적용 이력과 고객·기업·소속·주문·감사·PBX 데이터는 보존한다.
+- `011-call-recording-correlation.sql`: `call_sessions.incoming_at`에 OpenAI 이벤트 시각을 보관하고, 기존 PBX 수신함에 `call_session_seq`·`last_attempt_at`을 추가한다. 녹취 연결 고정과 재처리에 필요한 변경이며 테이블은 추가하지 않는다. 기존 행은 새 컬럼을 NULL로 유지한다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
@@ -101,7 +102,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `011-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `012-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -126,7 +127,7 @@ sudo docker exec -i dva-prod-db-1 pg_restore --exit-on-error --no-owner -U dva -
 인증·권한, CSV 업로드, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
 DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다.
 
-주문 저장 방식은 사용자가 재확정한 ORD-01 → ORD-04 → ORD-06 계약을 따른다. Jira 55의 별도 상담 스냅샷 설명과는 충돌하며, 구현 기준은 docs/api/orders.md에 명시한다. 통화 식별자 연결은 AI 연동에서 확인해야 한다.
+새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
 
 관리자 세션 검증은 이름 필수·공백 거절, 토큰 해시·만료 시각·FK 제약, 관리자별 세션 삭제와 계정 삭제 cascade를 포함한다.
 003은 기존 관리자 행이 없는 DB를 전제로 한다. 운영 데이터가 있으면 사전 검토 후 이름 보완 migration으로 조정해야 한다.
