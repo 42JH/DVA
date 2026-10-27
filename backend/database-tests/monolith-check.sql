@@ -123,4 +123,27 @@ BEGIN
  IF EXISTS(SELECT 1 FROM admin_sessions WHERE admin_user_seq=second_id) THEN RAISE EXCEPTION 'Session cascade failed'; END IF;
  RAISE NOTICE 'PASS: admin names, session uniqueness, expiry, FK, scoped deletion and cascade';
 END $$;
+DO $$
+DECLARE admin_id integer; other_admin integer; order_id integer;
+ key uuid := '00000000-0000-4000-8000-000000000055'; statement text;
+BEGIN
+ INSERT INTO admin_users(login_id,password_hash,role,status,name)
+ VALUES('orderReceipt','test-only','OPERATOR','ACTIVE','Order receipt') RETURNING admin_user_seq INTO admin_id;
+ INSERT INTO admin_users(login_id,password_hash,role,status,name)
+ VALUES('otherReceipt','test-only','OPERATOR','ACTIVE','Other receipt') RETURNING admin_user_seq INTO other_admin;
+ INSERT INTO orders DEFAULT VALUES RETURNING order_seq INTO order_id;
+ statement := format('INSERT INTO api_idempotency.order_creations(admin_user_seq,idempotency_key,request_hash,order_seq,response_version) VALUES(%s,%L,%L,%s,1)',admin_id,key,repeat('a',64),order_id);
+ EXECUTE statement;
+ PERFORM pg_temp.expect_error(statement,'23505');
+ INSERT INTO api_idempotency.order_creations(admin_user_seq,idempotency_key,request_hash,order_seq,response_version)
+ VALUES(other_admin,key,repeat('b',64),order_id,1);
+ PERFORM pg_temp.expect_error(format('UPDATE api_idempotency.order_creations SET request_hash=%L WHERE admin_user_seq=%s','invalid',admin_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE api_idempotency.order_creations SET response_version=0 WHERE admin_user_seq=%s',admin_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE api_idempotency.order_creations SET order_seq=2147483647 WHERE admin_user_seq=%s',admin_id),'23503');
+ PERFORM pg_temp.expect_error(format('UPDATE api_idempotency.order_creations SET admin_user_seq=2147483647 WHERE admin_user_seq=%s',admin_id),'23503');
+ UPDATE orders SET version=version+1 WHERE order_seq=order_id;
+ IF EXISTS(SELECT 1 FROM api_idempotency.order_creations WHERE order_seq=order_id AND response_version<>1) THEN
+  RAISE EXCEPTION 'Original response version changed'; END IF;
+ RAISE NOTICE 'PASS: order creation receipt actor/key uniqueness, hash, positive version, foreign keys and original response preservation';
+END $$;
 ROLLBACK;

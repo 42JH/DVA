@@ -13,6 +13,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `003-admin-auth-sessions.sql`: 관리자 이름과 PostgreSQL 세션 저장소. 기존 관리자 데이터가 있다면 이름 보완 정책이 필요하며 자동 채우지 않는다.
 - `004-organization-creation-requests.sql`: 기업 등록 재시도 기록용 `api_idempotency.organization_creations`.
   public 테이블과 별도이며, 35번 기업 API의 운영 연동 전에 적용한다.
+- `005-order-creation-requests.sql`: 관리자 미완료 주문 생성 재시도 기록용 `api_idempotency.order_creations`.
+  관리자·요청 키별 본문 해시와 최초 응답(orderSeq/version)을 보존한다. 업무 테이블은 추가하지 않으며 ORD-01 배포 전에 적용한다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
 - `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 18개와 별도다.
 
@@ -85,7 +87,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `005-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `006-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
