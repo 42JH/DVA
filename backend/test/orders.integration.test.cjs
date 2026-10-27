@@ -889,7 +889,15 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
   const spec = await response.json(),
     operation = spec.paths['/api/orders'].post;
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
-  assert.ok(operation.parameters.some((p) => p.name === 'X-Call-Session-Id'));
+  const callHeaders = operation.parameters.filter(
+    (p) => p.in === 'header' && p.name.toLowerCase() === 'x-call-session-id',
+  );
+  assert.equal(callHeaders.length, 1);
+  assert.equal(callHeaders[0].name, 'X-Call-Session-Id');
+  assert.equal(callHeaders[0].required, false);
+  assert.equal(callHeaders[0].schema.type, 'integer');
+  assert.equal(callHeaders[0].schema.minimum, 1);
+  assert.equal(callHeaders[0].schema.maximum, 2147483647);
   assert.equal(spec.paths['/api/orders/validation'], undefined);
   assert.equal(spec.paths['/api/consultations/incomplete'], undefined);
   assert.equal(spec.paths['/api/consultations/incomplete/{id}'], undefined);

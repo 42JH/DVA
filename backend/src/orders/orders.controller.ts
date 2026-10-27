@@ -100,7 +100,7 @@ export class OrdersController {
     @Req() request: AuthRequest,
     @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrderDto,
-    @Headers('x-call-session-id') callSessionId?: string,
+    @Headers('X-Call-Session-Id') callSessionId?: string,
   ) {
     return this.orders.create(
       request.admin?.adminUserSeq ?? null,
