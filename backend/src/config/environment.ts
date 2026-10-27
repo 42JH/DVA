@@ -10,6 +10,8 @@ export interface Environment {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   PBX_WEBHOOK_TOKEN?: string;
+  DVER_API_URL: string;
+  DVER_API_KEY?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -83,6 +85,33 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   ) {
     errors.push('PBX_WEBHOOK_TOKEN');
   }
+  const dverUrl = raw.DVER_API_URL ?? 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel';
+  try {
+    const url = new URL(String(dverUrl));
+    if (
+      typeof dverUrl !== 'string' ||
+      (url.protocol !== 'https:' &&
+        !(
+          nodeEnv === 'test' &&
+          url.protocol === 'http:' &&
+          ['127.0.0.1', 'localhost'].includes(url.hostname)
+        )) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      errors.push('DVER_API_URL');
+  } catch {
+    errors.push('DVER_API_URL');
+  }
+  const dverKey = raw.DVER_API_KEY;
+  if (
+    dverKey !== undefined &&
+    dverKey !== '' &&
+    (typeof dverKey !== 'string' || !/^[\x21-\x7e]+$/.test(dverKey))
+  )
+    errors.push('DVER_API_KEY');
   const config: Environment = {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3000),
@@ -95,6 +124,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CORS_ORIGINS: [...new Set(origins)],
     SWAGGER_ENABLED: swagger === 'true',
     PBX_WEBHOOK_TOKEN: typeof token === 'string' && token ? token : undefined,
+    DVER_API_URL: String(dverUrl),
+    DVER_API_KEY: typeof dverKey === 'string' && dverKey ? dverKey : undefined,
   };
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;

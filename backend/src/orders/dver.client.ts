@@ -1,0 +1,106 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Environment } from '../config/environment';
+import { ApiException } from '../common/errors/api.exception';
+import { isZonedDate, ORDER_ADDRESS_FIELDS } from './order-draft';
+import { assertOrderSubmissionReady, OrderSubmissionSnapshot } from './order-submission.validation';
+
+export type DverResult =
+  | { status: 'ACCEPTED'; parcelNo: string; receivedAt: string }
+  | { status: 'AUTH_FAILED' | 'REVIEW_REQUIRED' };
+
+export function dverPayload(order: OrderSubmissionSnapshot) {
+  assertOrderSubmissionReady(order);
+  return {
+    paymentMethodType: order.paymentMethodType,
+    pickupRequestedAt: order.pickupRequestedAt,
+    outboundParcels: order.parcels.map((parcel) => {
+      const address = (side: 'origin' | 'destination') =>
+        Object.fromEntries(
+          ORDER_ADDRESS_FIELDS.map((field) => [
+            field,
+            field === 'detailAddress' ? (parcel[side][field] ?? '') : parcel[side][field],
+          ]),
+        );
+      return {
+        origin: address('origin'),
+        destination: address('destination'),
+        item: {
+          document: parcel.documentCount,
+          smallBox: parcel.smallBoxCount,
+          mediumBox: parcel.mediumBoxCount,
+          bigBox: parcel.bigBoxCount,
+          etc: parcel.otherItemDescription,
+        },
+        clientComment: parcel.clientComment,
+        notifiedPrice: parcel.notifiedPrice,
+        itemPrice: parcel.itemPrice,
+      };
+    }),
+  };
+}
+
+@Injectable()
+export class DverClient {
+  constructor(private readonly config: ConfigService<Environment, true>) {}
+
+  ensureConfigured(): void {
+    if (!this.config.get('DVER_API_KEY', { infer: true }))
+      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '디버 접수 설정이 필요합니다.');
+  }
+
+  async submit(payload: ReturnType<typeof dverPayload>): Promise<DverResult> {
+    this.ensureConfigured();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await fetch(this.config.get('DVER_API_URL', { infer: true }), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': this.config.get('DVER_API_KEY', { infer: true })!,
+        },
+        body: JSON.stringify(payload),
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      if (response.status !== 200) {
+        await response.body?.cancel();
+        return { status: response.status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED' };
+      }
+      const chunks: Uint8Array[] = [];
+      let length = 0;
+      const reader = response.body!.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        length += value.byteLength;
+        if (length > 65_536) {
+          await reader.cancel();
+          return { status: 'REVIEW_REQUIRED' };
+        }
+        chunks.push(value);
+      }
+      const result: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      if (
+        typeof result === 'object' &&
+        result !== null &&
+        'ok' in result &&
+        result.ok === true &&
+        'parcelNo' in result &&
+        typeof result.parcelNo === 'string' &&
+        /^[A-Za-z0-9]{8}$/.test(result.parcelNo) &&
+        'receivedAt' in result &&
+        typeof result.receivedAt === 'string' &&
+        isZonedDate(result.receivedAt)
+      )
+        return { status: 'ACCEPTED', parcelNo: result.parcelNo, receivedAt: result.receivedAt };
+      return { status: 'REVIEW_REQUIRED' };
+    } catch {
+      // 응답 유실은 접수 실패를 뜻하지 않으므로 자동으로 다시 전송하지 않는다.
+      return { status: 'REVIEW_REQUIRED' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
