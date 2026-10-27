@@ -23,6 +23,8 @@ import { CreatedOrganizationDto, OrganizationResponseDto } from './dto/organizat
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
 import { AuditOperation } from '../audit/audit-operation';
+import { MvpAiDirectoryAccess } from '../auth/mvp-ai-access';
+import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
   type: 'object',
@@ -43,6 +45,20 @@ const single = (model: typeof CreatedOrganizationDto) => ({
 @Controller('companies')
 export class OrganizationsController {
   constructor(private readonly organizations: OrganizationsService) {}
+
+  // 정적 경로를 :id보다 먼저 등록하여 search를 기업 번호로 해석하지 않는다.
+  @Get('search')
+  @MvpAiDirectoryAccess()
+  @ApiOperation({
+    summary: '기업 공식 배송지 검색 (DIR-01)',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '활성 기업의 공유 PIN 전체를 공식 공개 배송지로 검색합니다. 기업명과 PIN의 부서·수령인·연락처·주소만 제공하며 구성원·개인 PIN은 조회하지 않습니다. MVP AI 서비스 인증·통화 헤더는 요구하지 않습니다.',
+  })
+  @ApiOkResponse({ type: CompanyDirectoryEnvelopeDto })
+  search(@Query() query: CompanyDirectoryQueryDto) {
+    return this.organizations.searchDirectory(query);
+  }
 
   @Get()
   @ApiOperation({
