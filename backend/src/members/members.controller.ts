@@ -2,11 +2,13 @@ import {
   Body,
   Controller,
   createParamDecorator,
+  Delete,
   ExecutionContext,
   Get,
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -30,7 +32,12 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 
 import { MembersService } from './members.service';
 
-import { CreateMemberDto, ListMembersQueryDto, MemberIdParamsDto } from './dto/member-request.dto';
+import {
+  CreateMemberDto,
+  ListMembersQueryDto,
+  MemberIdParamsDto,
+  UpdateMemberDto,
+} from './dto/member-request.dto';
 
 import { MembersEnvelopeDto } from './dto/member-response.dto';
 
@@ -86,5 +93,34 @@ export class MembersController {
       key.toLowerCase(),
       request.requestId,
     );
+  }
+
+  @Patch('members/:id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'MEMBERSHIP_UPDATED', targetType: 'MEMBERSHIP', target: 'id' })
+  @ApiOperation({
+    summary: '기업 구성원 대표자 표시·상태 변경',
+    description: '사번·고객·기업 변경 불가. INACTIVE는 소속 행을 유지합니다.',
+  })
+  @ApiNoContentResponse()
+  update(
+    @Param() params: MemberIdParamsDto,
+    @Body() input: UpdateMemberDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.members.update(params.id, input, request.admin.adminUserSeq, request.requestId);
+  }
+
+  @Delete('members/:id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'MEMBERSHIP_REMOVED', targetType: 'MEMBERSHIP', target: 'id' })
+  @ApiOperation({
+    summary: '기업 소속 해제',
+    description:
+      '소속 연결 행만 삭제. 고객·개인 PIN·주문은 보존하며 이후 다른 기업 등록을 허용합니다.',
+  })
+  @ApiNoContentResponse()
+  remove(@Param() params: MemberIdParamsDto, @Req() request: AuthRequest) {
+    return this.members.remove(params.id, request.admin.adminUserSeq, request.requestId);
   }
 }

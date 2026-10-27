@@ -14,7 +14,7 @@ import { AuditService } from '../audit/audit.service';
 
 import { MembersRepository } from './members.repository';
 
-import { CreateMemberDto, ListMembersQueryDto } from './dto/member-request.dto';
+import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
 
 @Injectable()
 export class MembersService {
@@ -113,6 +113,39 @@ export class MembersService {
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객은 등록할 수 없습니다.');
       const id = await this.repository.create(companyId, input, client);
       await this.record('MEMBERSHIP_CREATED', 'MEMBERSHIP', id, adminId, requestId, client);
+    });
+  }
+
+  async update(
+    id: number,
+    input: UpdateMemberDto,
+    adminId: number,
+    requestId: string,
+  ): Promise<void> {
+    if (input.role === undefined && input.status === undefined)
+      throw new ApiException(400, 'INVALID_REQUEST', '변경할 표시 역할 또는 상태를 입력해 주세요.');
+    await this.database.transaction(async (client) => {
+      await this.lockWrites(client);
+      const member = await this.repository.member(id, client);
+      if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      await this.company(member.organizationSeq, client, input.status === 'ACTIVE');
+      if (input.status === 'ACTIVE') {
+        const customer = await this.repository.customer(member.customerSeq, client);
+        if (!customer || customer.status !== 'ACTIVE')
+          throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 소속을 활성화할 수 없습니다.');
+      }
+      await this.repository.update(id, input, client);
+      await this.record('MEMBERSHIP_UPDATED', 'MEMBERSHIP', id, adminId, requestId, client);
+    });
+  }
+
+  async remove(id: number, adminId: number, requestId: string): Promise<void> {
+    await this.database.transaction(async (client) => {
+      await this.lockWrites(client);
+      const member = await this.repository.member(id, client);
+      if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      await this.repository.remove(id, client);
+      await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
     });
   }
 }

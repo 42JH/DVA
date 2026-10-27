@@ -8,9 +8,14 @@ import { DatabaseService } from '../database/database.service';
 
 import { Customer } from '../customers/customers.types';
 
-import { CreateMemberDto, ListMembersQueryDto } from './dto/member-request.dto';
+import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
+
+import { Membership } from './members.types';
 
 import { MemberViewDto } from './dto/member-response.dto';
+
+const memberColumns =
+  'membership_seq AS "membershipSeq", customer_seq AS "customerSeq", organization_seq AS "organizationSeq", employee_no AS "employeeNo", role, status';
 
 @Injectable()
 export class MembersRepository {
@@ -40,6 +45,14 @@ export class MembersRepository {
     return result.rows;
   }
 
+  async member(id: number, client?: PoolClient): Promise<Membership | undefined> {
+    const result = await (client ?? this.database.pool).query<Membership>(
+      `SELECT ${memberColumns} FROM memberships WHERE membership_seq=$1${client ? ' FOR UPDATE' : ''}`,
+      [id],
+    );
+    return result.rows[0];
+  }
+
   async customer(id: number, client: PoolClient): Promise<Customer | undefined> {
     const result = await client.query<Customer>(
       'SELECT customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status FROM customers WHERE customer_seq=$1 FOR UPDATE',
@@ -55,6 +68,17 @@ export class MembersRepository {
       [companyId, input.customerSeq, input.employeeNo, input.role],
     );
     return result.rows[0].id;
+  }
+
+  async update(id: number, changes: UpdateMemberDto, client: PoolClient): Promise<void> {
+    await client.query(
+      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status) WHERE membership_seq=$1',
+      [id, changes.role ?? null, changes.status ?? null],
+    );
+  }
+
+  async remove(id: number, client: PoolClient): Promise<void> {
+    await client.query('DELETE FROM memberships WHERE membership_seq=$1', [id]);
   }
 
   async lockKey(client: PoolClient, adminId: number, key: string): Promise<boolean> {
