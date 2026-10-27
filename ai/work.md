@@ -2,7 +2,7 @@
 
 현재 작업: `feature/S15P31D109-122-rag-gcp-integration` → 병합 대상 `develop-ai`.
 
-추가 통합(2026-10-27): 최신 origin/develop-ai `cacc32f`의 가짜 백엔드·PoC 대사·저장된 배송지 가림·상담원 연결/무응답 종료를 합쳤다. GCP 서울 L4 HTTPS REST 리랭커와 로컬 실제 RAG 연결은 확인했으며 운영 서버에는 아직 배포하지 않았다. 전체 가짜 테스트 203개 통과. GPU VM은 중지 상태, 시작마다 900초 후 자동 중지다. 설정·비용·측정은 `deploy/gcp/README.md`와 최신 `docs/rag-handoff.md`를 따른다. 아래 이전 통합 기록의 GPU 미연결 상태는 이번 추가 확인으로 갱신한다.
+추가 통합(2026-10-27): 최신 origin/develop-ai `a056a36`의 가짜 백엔드·PoC 대사·저장된 배송지 가림·상담원 연결/무응답 종료를 합쳤다. GCP 서울 L4 HTTPS REST 리랭커와 로컬 실제 RAG 연결은 확인했으며 운영 서버에는 아직 배포하지 않았다. 전체 가짜 테스트 203개 통과. GPU VM은 중지 상태, 시작마다 900초 후 자동 중지다. 설정·비용·측정은 `deploy/gcp/README.md`와 최신 `docs/rag-handoff.md`를 따른다. 아래 이전 통합 기록의 GPU 미연결 상태는 이번 추가 확인으로 갱신한다.
 
 최신 develop-ai(`2b111f6`)를 기준으로 통합했다. 팀원 작업인 LangGraph/Studio, API별 services/webhooks 분리, PBX 종료 Bearer 처리, 고객 답 판별 지연, develop-ai 자동 배포를 확인하고 유지했다. 기존 feature 브랜치·stash·private 실험 데이터는 보존했다.
 

@@ -8,8 +8,10 @@ import json
 import time
 from types import SimpleNamespace
 
+import pytest
 from openai import AsyncOpenAI
 
+from app import address
 from app.call import Call
 from app.config import load_server_config, load_texts
 from app.main import check_definitions
@@ -27,6 +29,13 @@ FULL_ORDER = {
     "sender_address_detail": "1201호", "receiver_name": "이영희", "receiver_phone": "010-9876-5432",
     "receiver_address": "부산 해운대구 센텀로 10", "receiver_address_detail": "", "item": "옷",
 }
+
+
+@pytest.fixture(autouse=True)
+def no_address_db(monkeypatch):
+    """개발 PC에 data/address.db가 있어도 테스트는 주소 보정 없이 돈다(보정 테스트는 test_address.py가 작은 DB로)."""
+    monkeypatch.setattr(address, "_db", None)
+    monkeypatch.setattr(address, "load", lambda path: False)
 
 
 def run(coro):

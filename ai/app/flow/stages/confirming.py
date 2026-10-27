@@ -1,5 +1,5 @@
-from app.flow.engine import Stage, Transition
-from app.flow.stages._common import COMMON_TOOLS, incomplete
+from app.flow.engine import ENTERED, Stage, Transition
+from app.flow.stages._common import COMMON_TOOLS, address_pending, incomplete
 from app.order import PLACE_KIND, Order
 
 CHOICES = {"confirm": "되읽은 내용이 맞으니 이대로 접수해 달라고 함", "correct": "고칠 곳이 있다고 함"}
@@ -35,6 +35,9 @@ STAGES = [
         description="마지막 확인 대기",
         tools=COMMON_TOOLS + ("record_order",),
         transitions=(
+            Transition("order.updated", "address", address_pending),
+            # 주소 확정에서 돌아온 직후(ENTERED)에도 같은 조건으로 본다
+            Transition(ENTERED, "collecting", incomplete),
             # 정정하다 빠진 항목이 생기면(예: 주소를 바꿔 상세 주소를 다시 물어야 함) 다시 받는다
             Transition("order.updated", "collecting", incomplete),
             Transition("order.submitted", "submitted"),

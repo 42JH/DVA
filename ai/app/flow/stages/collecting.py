@@ -2,7 +2,8 @@
 
 from app.flow import engine
 from app.flow.engine import ENTERED, Stage, Transition
-from app.flow.stages._common import COMMON_TOOLS, complete, is_new, is_registered, origin_due, reset_for_new_order
+from app.flow.stages._common import (COMMON_TOOLS, address_pending, complete, is_new, is_registered, origin_due,
+                                     reset_for_new_order)
 from app.order import ORDER_FIELDS
 
 NEW_ORDER_FIELDS = ("sender_name", "sender_phone", "sender_address", "sender_address_detail",
@@ -39,7 +40,7 @@ STAGES = [
         tools=COMMON_TOOLS + ("record_order",),
         fields=ORDER_FIELDS,
         order=field_order,
-        transitions=tuple(
+        transitions=(Transition("order.updated", "address", address_pending),) + tuple(
             Transition(event, target, guard)
             for event in ("order.updated", ENTERED)
             for target, guard in (("confirming", complete), ("find_origin", origin_due))

@@ -7,8 +7,9 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from app import address
 from app.call import Call, Registry
-from app.config import load_server_config, load_texts
+from app.config import ROOT, load_server_config, load_texts
 from app.flow import engine
 from app.live_session import LiveConfigError, function_tool_names, load_live_toml
 from app.monitor.router import router as monitor_router
@@ -41,6 +42,7 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
         logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
         texts = load_texts()
         check_definitions(cfg, texts)
+        address.load(ROOT / cfg.address.db_path)
         openai_client, backend_api = client, backend
         if openai_client is None:
             from openai import AsyncOpenAI

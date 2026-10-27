@@ -9,6 +9,7 @@ recorded() -> [(label, value)], text_vars() -> dict, stage_variant(stage) -> str
 """
 
 import importlib
+import inspect
 import pkgutil
 import time
 from collections.abc import Awaitable, Callable
@@ -55,7 +56,7 @@ class Stage:
     enter_on: str | None = None  # 이 사건이 enter_from 단계에서 나면 이 단계로 들어온다
     enter_from: tuple[str, ...] = ()
     start_if: Callable[[Any], bool] | None = None  # 통화 시작 단계 조건
-    on_enter: Callable[[Any, str], None] | None = None  # (ctx, 이전 단계)
+    on_enter: Callable[[Any, str], None | Awaitable[None]] | None = None  # (ctx, 이전 단계). async도 된다
 
 
 class FlowState(BaseModel):
@@ -155,7 +156,7 @@ async def _step(step: Step, runtime: Runtime) -> Command:
     target = _target(ctx, step.event)
     if target is None:
         return Command(goto=END)
-    _move(ctx, target, step.event, step.tool)
+    await _move(ctx, target, step.event, step.tool)
     # 하위 흐름에서 돌아왔으면 돌아간 단계가 같은 사건을 먼저 본다(예: 조회 중 "새 주문" → 복귀 후 새 주문).
     # 아니면 들어온 직후 사건(ENTERED)을 한 번 더 본다
     event = step.event if target == RETURN and _target(ctx, step.event) is not None else ENTERED
@@ -210,7 +211,7 @@ def _target(ctx: Any, event: str) -> str | None:
     return None
 
 
-def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
+async def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
     state = ctx.flow
     prev = state.stage
     if target == RETURN:
@@ -222,8 +223,8 @@ def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
         state.return_to = None
     state.stage = target
     state.history.append({"at": time.time(), "from": prev, "to": target, "event": event, "tool": tool})
-    if STAGES[target].on_enter:
-        STAGES[target].on_enter(ctx, prev)
+    if STAGES[target].on_enter and inspect.isawaitable(done := STAGES[target].on_enter(ctx, prev)):
+        await done
 
 
 async def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:

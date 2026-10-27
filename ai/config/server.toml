@@ -52,6 +52,11 @@ call_history_keep = 100
 # 받아쓰기: 같은 사람의 직전 조각과 이 간격(ms) 안이면 겹쳐 말해도 같은 말풍선에 이어 붙인다
 bubble_gap_ms = 1500
 
+[address]
+# 고객이 말한 주소를 행안부 주소DB로 실제 도로명주소로 보정(spec/address.md). ai/ 기준 경로, 컨테이너에서는 /app/data(볼륨)
+# 파일이 없으면 보정을 끄고 들은 그대로 기록한다. 만들기: uv run python -X utf8 -m app.address.db <주소DB 텍스트 폴더> data/address.db
+db_path = "data/address.db"
+
 [listener]
 # 고객 답 판별(예/아니오·어느 곳·끼어드는 용건). 백엔드 도구 호출 없이 서버가 직접 판별해 대화 상태를 바꾼다
 model = "gpt-6-luna"

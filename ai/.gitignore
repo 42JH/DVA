@@ -21,7 +21,7 @@ htmlcov/
 
 # AI artifacts
 models/
-data/
+/data/
 *.pt
 *.pth
 *.onnx

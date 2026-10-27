@@ -1,6 +1,6 @@
 # RAG 전화 통합 인계 (2026-10-27)
 
-최신 통합 기준 origin/develop-ai는 `cacc32f`. 작업 브랜치는 `feature/S15P31D109-122-rag-gcp-integration`이다. 이전 RAG 통합과 GCP 작업을 보존하고 최신 팀원 기능을 합쳤다. 아직 develop-ai에 반영하거나 운영 배포하지 않았다.
+최신 통합 기준 origin/develop-ai는 `a056a36`. 작업 브랜치는 `feature/S15P31D109-122-rag-gcp-integration`이다. 이전 RAG 통합과 GCP 작업을 보존하고 최신 팀원 기능을 합쳤다. 아직 develop-ai에 반영하거나 운영 배포하지 않았다.
 
 ## GCP 연결 확인 및 배포 전 준비
 
