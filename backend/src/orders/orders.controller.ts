@@ -5,6 +5,7 @@ import {
   Post,
   Get,
   Query,
+  Param,
   Req,
   createParamDecorator,
   ExecutionContext,
@@ -31,8 +32,8 @@ import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
-import { CreatedOrderDto, OrderSummaryDto } from './dto/order-response.dto';
-import { OrderQueryDto } from './dto/order-query.dto';
+import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
+import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 
 const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
@@ -40,9 +41,16 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
 );
 
 @ApiTags('주문')
-@ApiExtraModels(CreateOrderDto, CreatedOrderDto, OrderSummaryDto, RequestMetaDto, ErrorResponseDto)
+@ApiExtraModels(
+  CreateOrderDto,
+  CreatedOrderDto,
+  OrderSummaryDto,
+  OrderDetailDto,
+  RequestMetaDto,
+  ErrorResponseDto,
+)
 @ApiBadRequestResponse({
-  description: '요청 본문·생성 키·통화 번호 형식 오류 또는 필수 값 누락.',
+  description: '요청 값의 형식·범위 오류 또는 필수 값 누락.',
   type: ErrorResponseDto,
 })
 @ApiUnauthorizedResponse({
@@ -73,6 +81,10 @@ export class OrdersController {
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({ description: '통화가 없음.', type: ErrorResponseDto })
+  @ApiForbiddenResponse({
+    description: '관리자 권한이 없거나 통화의 활성 고객 범위를 벗어남.',
+    type: ErrorResponseDto,
+  })
   @ApiConflictResponse({
     description: '종료된 통화의 AI 조회(INVALID_STATE).',
     type: ErrorResponseDto,
@@ -165,5 +177,51 @@ export class OrdersController {
       request.requestId,
       callSessionId,
     );
+  }
+
+  @Get(':id')
+  @MvpAiOrderAccess()
+  @ApiOperation({
+    summary: '주문 상세·배송 상태 조회 (ORD-03)',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'X-Call-Session-Id',
+    required: false,
+    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({
+    description: '통화·주문이 없거나 AI의 고객 범위 밖인 주문(NOT_FOUND).',
+    type: ErrorResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description: '관리자 권한이 없거나 통화 발신번호에 연결된 활성 고객이 없음.',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description: '종료된 통화의 AI 조회(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiOkResponse({
+    description:
+      '주문 상세와 요청 추적 정보. version을 다음 수정 요청의 expectedVersion으로 전달합니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(OrderDetailDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  detail(
+    @Req() request: AuthRequest,
+    @Param() params: OrderIdParamsDto,
+    @Headers('X-Call-Session-Id') callSessionId?: string,
+  ) {
+    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionId);
   }
 }

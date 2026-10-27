@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { CreateOrderDto } = require('../dist/orders/dto/create-order.dto');
-const { OrderQueryDto } = require('../dist/orders/dto/order-query.dto');
+const { OrderQueryDto, OrderIdParamsDto } = require('../dist/orders/dto/order-query.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 
 const pipe = createValidationPipe();
@@ -50,6 +50,17 @@ test('order queries validate dates, enum filters, integer pagination and unknown
       () => query(input),
       (error) => error.getStatus() === 400,
       JSON.stringify(input),
+    );
+});
+
+test('order path IDs accept only positive PostgreSQL integers', async () => {
+  const params = (id) => pipe.transform({ id }, { type: 'param', metatype: OrderIdParamsDto });
+  assert.equal((await params('2147483647')).id, 2147483647);
+  for (const id of ['0', '-1', '2147483648', '1.5', '1e2', '+1', 'abc', '1 OR 1=1'])
+    await assert.rejects(
+      () => params(id),
+      (error) => error.getStatus() === 400,
+      id,
     );
 });
 

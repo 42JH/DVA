@@ -134,4 +134,15 @@ export class OrdersService {
       return result;
     });
   }
+
+  async detail(adminId: number | null, id: number, callSessionHeader?: string) {
+    const callId = this.callId(adminId, callSessionHeader);
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const customerId = await this.readCustomer(client, adminId, callId);
+      const order = await this.repository.detail(client, id, customerId);
+      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      return order;
+    });
+  }
 }

@@ -1,4 +1,4 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
@@ -70,4 +70,20 @@ export class OrderQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({ description: '건너뛸 주문 수. 0부터 시작합니다.', default: 0, minimum: 0 })
   declare offset: number;
+}
+
+export class OrderIdParamsDto {
+  @ApiProperty({
+    description: '주문 번호(orderSeq). 디버 접수 참고값(parcelNo)과 다릅니다.',
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+  })
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  id!: number;
 }
