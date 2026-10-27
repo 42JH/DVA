@@ -1,0 +1,302 @@
+{
+  "scope": "과거 개발 데이터 95문항. 이번 통합 코드 또는 RunPod 실측 결과가 아님",
+  "runs": {
+    "text_rag_full_v1": {
+      "status": "completed",
+      "source_file": "evaluation.json",
+      "source_sha256": "8f2b76fa24a34dba167fa857375008fe4c295bef033ff9d84901c5beb8e61b8c",
+      "summary": {
+        "requested_count": 95,
+        "recorded_count": 95,
+        "generation_completed": 95,
+        "generation_failed": 0,
+        "missing_generation_count": 0,
+        "tool_called_count": 95,
+        "search_error_count": 0,
+        "metric_summary": {
+          "faithfulness": {
+            "valid_count": 95,
+            "mean": 0.9612280701754385,
+            "unscored_count": 0
+          },
+          "answer_relevancy": {
+            "valid_count": 95,
+            "mean": 0.5934217070509867,
+            "unscored_count": 0
+          },
+          "context_precision": {
+            "valid_count": 95,
+            "mean": 0.9807017543042982,
+            "unscored_count": 0
+          },
+          "context_recall": {
+            "valid_count": 95,
+            "mean": 0.9789473684210527,
+            "unscored_count": 0
+          }
+        },
+        "retrieval_summary": {
+          "bm25": {
+            "hit_at_5": 0.9789473684210527,
+            "recall_at_5": 0.9789473684210527,
+            "mrr": 0.8809941520467837,
+            "hit_at_3": 0.968421052631579,
+            "recall_at_3": 0.968421052631579,
+            "hit_at_1": 0.8,
+            "evaluated_count": 95
+          },
+          "dense": {
+            "hit_at_5": 1.0,
+            "recall_at_5": 1.0,
+            "mrr": 0.8749122807017543,
+            "hit_at_3": 0.9578947368421052,
+            "recall_at_3": 0.9578947368421052,
+            "hit_at_1": 0.7894736842105263,
+            "evaluated_count": 95
+          },
+          "rrf": {
+            "hit_at_5": 0.9894736842105263,
+            "recall_at_5": 0.9894736842105263,
+            "mrr": 0.9140350877192982,
+            "hit_at_3": 0.9894736842105263,
+            "recall_at_3": 0.9894736842105263,
+            "hit_at_1": 0.8526315789473684,
+            "evaluated_count": 95
+          },
+          "reranked": {
+            "hit_at_3": 0.9789473684210527,
+            "recall_at_3": 0.9789473684210527,
+            "mrr": 0.9710526315789474,
+            "hit_at_1": 0.9578947368421052,
+            "evaluated_count": 95
+          }
+        },
+        "generation_seconds": {
+          "count": 95,
+          "mean": 4.552247241080591,
+          "p95": 14.100438999943435
+        },
+        "latency_components": {
+          "initial_llm_seconds": {
+            "count": 95,
+            "mean": 1.9413128768437002,
+            "p95": 7.425154599826783
+          },
+          "followup_llm_seconds": {
+            "count": 95,
+            "mean": 2.0325488179235864,
+            "p95": 9.818616699893028
+          },
+          "tokenization_and_bm25_seconds": {
+            "count": 95,
+            "mean": 0.0008952558040618896,
+            "p95": 0.0014073001220822334
+          },
+          "embedding_seconds": {
+            "count": 95,
+            "mean": 0.19720561681805474,
+            "p95": 0.2814370999112725
+          },
+          "dense_search_seconds": {
+            "count": 95,
+            "mean": 0.036247457911897644,
+            "p95": 0.11882710037752986
+          },
+          "fusion_seconds": {
+            "count": 95,
+            "mean": 0.0009124263385800939,
+            "p95": 0.0002549001947045326
+          },
+          "reranking_seconds": {
+            "count": 95,
+            "mean": 0.2261034452699517,
+            "p95": 0.4667424000799656
+          },
+          "retrieval_other_seconds": {
+            "count": 95,
+            "mean": 0.000823275754718404,
+            "p95": 0.0010005002841353416
+          },
+          "tool_queue_and_other_seconds": {
+            "count": 95,
+            "mean": 0.11612352736686406,
+            "p95": 0.7839891002513468
+          },
+          "request_other_seconds": {
+            "count": 95,
+            "mean": 7.454104917614084e-05,
+            "p95": 9.42000187933445e-05
+          }
+        }
+      },
+      "factual_summary": null
+    },
+    "live_rag_full_v1": {
+      "status": "completed",
+      "source_file": "evaluation_with_factual.json",
+      "source_sha256": "36d9f9a8ec88109f86a8cfe3a25619f6c6f045e457d0b1f4ca0bbb94feb01b9b",
+      "summary": {
+        "requested_count": 95,
+        "recorded_count": 95,
+        "generation_completed": 95,
+        "generation_failed": 0,
+        "missing_generation_count": 0,
+        "tool_called_count": 95,
+        "search_error_count": 0,
+        "metric_summary": {
+          "faithfulness": {
+            "valid_count": 95,
+            "mean": 0.8578822055137845,
+            "unscored_count": 0
+          },
+          "answer_relevancy": {
+            "valid_count": 95,
+            "mean": 0.48252697512307363,
+            "unscored_count": 0
+          },
+          "context_precision": {
+            "valid_count": 95,
+            "mean": 0.9894736841289473,
+            "unscored_count": 0
+          },
+          "context_recall": {
+            "valid_count": 95,
+            "mean": 0.9894736842105263,
+            "unscored_count": 0
+          },
+          "factual_correctness": {
+            "valid_count": 95,
+            "mean": 0.7213684210526315,
+            "unscored_count": 0
+          }
+        },
+        "retrieval_summary": {
+          "bm25": {
+            "hit_at_5": 0.9894736842105263,
+            "recall_at_5": 0.9894736842105263,
+            "mrr": 0.897719298245614,
+            "hit_at_3": 0.968421052631579,
+            "recall_at_3": 0.968421052631579,
+            "hit_at_1": 0.8315789473684211,
+            "evaluated_count": 95
+          },
+          "dense": {
+            "hit_at_5": 0.9894736842105263,
+            "recall_at_5": 0.9894736842105263,
+            "mrr": 0.9053634085213033,
+            "hit_at_3": 0.9578947368421052,
+            "recall_at_3": 0.9578947368421052,
+            "hit_at_1": 0.8421052631578947,
+            "evaluated_count": 95
+          },
+          "rrf": {
+            "hit_at_5": 1.0,
+            "recall_at_5": 1.0,
+            "mrr": 0.9310526315789474,
+            "hit_at_3": 0.9789473684210527,
+            "recall_at_3": 0.9789473684210527,
+            "hit_at_1": 0.8736842105263158,
+            "evaluated_count": 95
+          },
+          "reranked": {
+            "hit_at_3": 1.0,
+            "recall_at_3": 1.0,
+            "mrr": 0.9824561403508771,
+            "hit_at_1": 0.968421052631579,
+            "evaluated_count": 95
+          }
+        },
+        "generation_seconds": {
+          "count": 0,
+          "mean": null,
+          "p95": null
+        },
+        "latency_components": {
+          "input_end_to_first_audio_packet_seconds": {
+            "count": 95,
+            "mean": 1.3060421020968964,
+            "p95": 2.0478416001424193
+          },
+          "input_end_to_first_transcript_seconds": {
+            "count": 95,
+            "mean": 1.458715799990061,
+            "p95": 2.315403399989009
+          },
+          "input_end_to_last_output_seconds": {
+            "count": 95,
+            "mean": 18.859085368389557,
+            "p95": 31.978543099947274
+          },
+          "input_end_to_observation_end_seconds": {
+            "count": 95,
+            "mean": 25.080537725239992,
+            "p95": 38.24380909977481
+          },
+          "input_end_to_post_handoff_audio_seconds": {
+            "count": 95,
+            "mean": 5.787805276824848,
+            "p95": 7.81807029992342
+          },
+          "backend_seconds": {
+            "count": 95,
+            "mean": 1.9977276063377136,
+            "p95": 3.9200798999518156
+          },
+          "search_seconds": {
+            "count": 95,
+            "mean": 0.7643917968594715,
+            "p95": 1.1800305000506341
+          },
+          "context_delivery_seconds": {
+            "count": 95,
+            "mean": 1.6705878526266469,
+            "p95": 2.515789800323546
+          },
+          "embedding_seconds": {
+            "count": 95,
+            "mean": 0.2671738147196409,
+            "p95": 0.598233399912715
+          },
+          "dense_search_seconds": {
+            "count": 95,
+            "mean": 0.03413998315012769,
+            "p95": 0.0551426000893116
+          },
+          "tokenization_and_bm25_seconds": {
+            "count": 95,
+            "mean": 0.0014817747483520131,
+            "p95": 0.002747899852693081
+          },
+          "fusion_seconds": {
+            "count": 95,
+            "mean": 0.0018142652550810262,
+            "p95": 0.00030059972777962685
+          },
+          "reranking_seconds": {
+            "count": 95,
+            "mean": 0.40003904420392294,
+            "p95": 0.5998878995887935
+          }
+        }
+      },
+      "factual_summary": {
+        "requested_count": 95,
+        "valid_count": 95,
+        "failed_count": 0,
+        "pending_count": 0,
+        "mean": 0.7213684210526315,
+        "median": 0.67,
+        "min": 0.0,
+        "max": 1.0,
+        "score_distribution": {
+          "zero": 1,
+          "above_zero_below_0_5": 10,
+          "from_0_5_below_0_8": 46,
+          "from_0_8_below_1": 11,
+          "one": 27
+        },
+        "note": "점수 구간은 검토 편의용이며 합격선이나 정답률이 아님"
+      }
+    }
+  }
+}

@@ -20,7 +20,7 @@ STAGES = [
     Stage(
         name="lookup",
         description="접수된 주문 조회",
-        tools=("get_state", "lookup_orders"),
+        tools=("get_state", "search_manual", "lookup_orders"),
         transitions=(Transition("orders.listed", RETURN),) + BACK,
         subflow=True,
         enter_on="intent.lookup",
@@ -29,7 +29,7 @@ STAGES = [
     Stage(
         name="modify",
         description="접수된 주문 수정",
-        tools=("get_state", "lookup_orders", "modify_order"),
+        tools=("get_state", "search_manual", "lookup_orders", "modify_order"),
         transitions=(Transition("order.modified", RETURN),) + BACK,
         subflow=True,
         enter_on="intent.modify",
@@ -38,7 +38,7 @@ STAGES = [
     Stage(
         name="cancel",
         description="접수된 주문 취소",
-        tools=("get_state", "lookup_orders", "cancel_order"),
+        tools=("get_state", "search_manual", "lookup_orders", "cancel_order"),
         transitions=(Transition("order.cancelled", RETURN),) + BACK,
         subflow=True,
         enter_on="intent.cancel",
@@ -47,7 +47,7 @@ STAGES = [
     Stage(
         name="handoff",
         description="상담원 연결",
-        tools=("get_state",),
+        tools=("get_state", "search_manual"),
         transitions=(Transition("handoff.requested", "ending"),) + BACK,
         choices=lambda ctx: HANDOFF_CHOICES,
         on_answer=handoff_answer,

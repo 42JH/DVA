@@ -3,7 +3,7 @@
 from app.flow import engine
 from app.flow.engine import Transition
 
-COMMON_TOOLS = ("get_state",)
+COMMON_TOOLS = ("get_state", "search_manual")
 
 
 def is_registered(ctx) -> bool:

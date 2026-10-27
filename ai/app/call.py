@@ -62,6 +62,7 @@ class Call:
         self.hangup_requested = asyncio.Event()
         self.refer_requested = asyncio.Event()
         self.last_output_at = 0.0  # 음성 출력 이벤트를 마지막으로 본 시각(monotonic)
+        self.last_input_at = 0.0
         self.task: asyncio.Task | None = None
         self.last_progress = ""
         # 고객 답 판별(app/listener.py)
@@ -80,6 +81,14 @@ class Call:
         self.tool_calls: dict[str, dict] = {}
         self.errors: list[dict] = []
         self.usage: dict | None = None
+        self.rag = None
+        # 직접 만든 테스트 Call은 기존 responses 경로를 유지한다. 실제 accept에서 설정한다.
+        self.delegation_mode = 'responses'
+        self.backend_settings: dict = {}
+        self.latest_delegation: str | None = None
+        self.delegations: dict[str, dict] = {}
+        self.pending_context: dict[str, asyncio.Future] = {}
+        self.input_ready = asyncio.Event()
 
     # --- 시작 ---
 
@@ -122,7 +131,6 @@ class Call:
         r = self.recent
         return {
             "company": biz.company_name,
-            "fare": biz.fare,
             "order_no": self.last_order_no or "",
             "goodbye_message": biz.goodbye_message,
             "recent_order": f"{r.sender_address} → {r.receiver_name}, {r.receiver_address}" if r else "",
@@ -155,6 +163,8 @@ class Call:
             self.transcript.append({"speaker": speaker, "text": delta, "at": time.time(), "end_ms": end_ms})
         if speaker == "agent":
             self.last_output_at = time.monotonic()
+        elif speaker == 'customer':
+            self.last_input_at = time.monotonic()
         self.notify()
 
     def add_error(self, message: str) -> None:
@@ -180,13 +190,15 @@ class Call:
             "stage": self.flow.stage,
             "history": self.flow.history,
             "order": self.order.model_dump(),
-            "fare": self.cfg.business.fare,
+            "fare": None,  # 백엔드가 확인한 금액이 없으면 숫자를 만들지 않는다.
             "next": engine.next_text(self) if self.flow.stage else "",
             "submitted": self.submitted,
             "transcript": self.transcript,
             "tool_calls": list(self.tool_calls.values()),
             "errors": self.errors,
             "usage": self.usage,
+            "delegations": [{key: value for key, value in row.items() if key != 'task'}
+                            for row in self.delegations.values()],
         }
 
     def notify(self) -> None:

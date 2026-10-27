@@ -18,6 +18,7 @@ class Services:
     registry: Registry
     seen_webhooks: dict[str, float] = field(default_factory=dict)
     tasks: set[asyncio.Task] = field(default_factory=set)
+    rag: Any = None
 
     def first_time(self, webhook_id: str | None) -> bool:
         """같은 webhook-id는 한 번만. 오래된 기록은 지운다."""

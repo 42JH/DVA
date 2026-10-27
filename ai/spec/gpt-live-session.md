@@ -1,9 +1,15 @@
 # GPT-Live 세션 설정 (`config/live.toml`)
 
+## 2026-10-27 적용 계약
+
+기본 위임은 `client`이다. `[backend]`는 서버 SDK 도구 선택용 설정이며 `build_session`에서 제거해 Live API에 보내지 않는다. `app/client_backend.py`가 도구 선택을 한 번 수행하고 원문 결과를 Live에 직접 전달한다. 상세 흐름은 `spec/rag.md` 및 `docs/rag-handoff.md`가 기준이다.
+
+복귀할 때는 `[backend]`를 `[delegation.responses]`로 옮기고 `delegation.type="responses"`로 바꾼다. 이 모드에서는 기존 `function_call_output`과 `response.create`가 필수이며 직접 전달과 다르다. 아래 Responses 파라미터 설명은 이 복귀 모드 참고다. 두 모드 모두 지원하지 않는 delegation.type은 거절한다.
+
 - `gpt-live-1` 세션에 보낼 수 있는 **모든 파라미터**를 여기서 설정한다. 키 이름과 구조는 API의 SessionConfig와 똑같이 둔다(코드에서 키를 바꿔 끼우지 않는다). 각 키 위에 주석으로 허용값·기본값·한도·통화 중 변경 가능 여부를 적고, 기본값을 쓰는 항목은 주석 처리해 둔다.
 - 통화가 올 때마다(accept 직전) 읽는다. 고치면 다음 통화부터 반영된다.
 - 서버가 바꿔 넣는 것만 예외: `instructions_file`(파일 내용을 `instructions`로), 함수 도구는 이름만 적으면 코드의 설명·인수 스키마를 채움, 지시문 끝에 통화 정보(발신번호·등록 고객) 덧붙임.
-- 잘못된 설정(파일 없음·문법 오류·없는 함수 도구·`delegation.type`이 `responses`가 아님·SDK `SessionConfig` 형식 오류)은 그 통화를 reject하고 로그를 남긴다. 함수 도구 이름은 기동 시에도 검사한다.
+- 잘못된 설정(파일 없음·문법 오류·없는 함수 도구·지원하지 않는 delegation.type·SDK SessionConfig 형식 오류)은 그 통화를 reject하고 로그를 남긴다. 함수 도구 이름은 기동 시에도 검사한다.
 - 지시문 파일(`instructions_file`, `delegation.responses.instructions_file`)은 `prompts/` 기준 파일 이름. 구현: `app/live_session.py`.
 
 설정 가능한 파라미터(공식 레퍼런스 기준):
@@ -16,7 +22,7 @@
 | `audio.output.voice` | 내장 31개: alloy ash ballad beacon bossa brise cedar cinder coral delta echo flitz gleam harema juni marin meridian nira noeul nuri quartz ripple sage shida shimmer sillage stone tempo verse vesper willow, 또는 `{ id = "voice_..." }`(권한 필요) | `marin` | 불가 |
 | `audio.format` | `audio/pcm`(16000·24000), `audio/pcmu`·`audio/pcma`(8000) | **WebSocket 전용. SIP는 협상하므로 넣지 않는다** | 불가 |
 | `store` | bool | `false`(개인정보라 끔). 켜면 녹음 30일 보관 | 불가 |
-| `delegation.type` | `client` · `responses` · `decisions` | 이 서버는 `responses`만 | 불가 |
+| `delegation.type` | `client` · `responses` · `decisions` | 기본 client, 복귀용 responses | 불가 |
 | `delegation.responses.model` | 백엔드 Responses 모델 | 필수. 위임에서 쓸 수 있는 모델 목록은 **미확인**(지금 `gpt-6-luna`) | 가능 |
 | `delegation.responses.instructions` | 문자열 | | 가능 |
 | `delegation.responses.tools` | 도구 목록: SDK 3.35.1 타입은 `function`·`web_search`만 받는다(문서의 다른 종류는 미확인) | 이 서버가 실행하는 것은 function뿐 | 가능 |

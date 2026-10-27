@@ -34,7 +34,7 @@ def check_definitions(cfg, texts) -> None:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")
 
 
-def create_app(client: Any = None, backend: Any = None) -> FastAPI:
+def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg = load_server_config()
@@ -51,11 +51,29 @@ def create_app(client: Any = None, backend: Any = None) -> FastAPI:
 
             backend_api = BackendAPI(os.environ["BACKEND_API_URL"], cfg.backend.timeout_sec)
         app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
+        if rag is not None:
+            app.state.svc.rag = rag
+        elif client is None:
+            from app.rag.service import RagService
+            app.state.svc.rag = RagService(cfg.rag)  # 첫 검색 전까지 외부 연결 없음
+            app.state.svc.spawn(app.state.svc.rag.warmup())
         try:
             yield
         finally:
+            import asyncio
+            calls = list(app.state.svc.registry.calls.values())
+            jobs = [c.task for c in calls if c.task is not None and not c.task.done()]
+            jobs += [t for t in app.state.svc.tasks if not t.done()]
+            for task in jobs:
+                task.cancel()
+            if jobs:
+                await asyncio.gather(*jobs, return_exceptions=True)
+            if rag is None and app.state.svc.rag is not None:
+                await app.state.svc.rag.close()
             if backend is None:
                 await backend_api.close()
+            if client is None:
+                await openai_client.close()
 
     app = FastAPI(title="디포스트콜 전화 접수", lifespan=lifespan)
     app.include_router(webhook_router)

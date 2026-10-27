@@ -1,5 +1,5 @@
 # 진행 상태 문구. 서버가 "다음에 할 일"을 만들 때 쓴다(spec/flow.md).
-# 쓸 수 있는 자리표시자: {company} {fare} {order_no} {goodbye_message} {recent_order}
+# 쓸 수 있는 자리표시자: {company} {order_no} {goodbye_message} {recent_order}
 #   {saved_origins} {save_candidates} {caller} {customer_type}
 # 기동 시 모든 단계·항목의 문구가 있는지, 자리표시자가 맞는지 검사한다.
 
@@ -58,7 +58,7 @@ find_destination = "어디로 보내시는지(받는 분 성함이나 지역·�
 "find_destination.need_more" = "저장된 곳에서 찾지 못했습니다. 받는 분이나 주소를 조금 더 자세히 여쭤보세요."
 find_origin = "보내는 곳이 지난번과 같은 곳({saved_origins})인지 여쭤보세요."
 "find_origin.which" = "지난번 보낸 곳이 여러 곳입니다({saved_origins}). 어느 곳인지 여쭤보세요."
-confirming = "기록된 값을 그대로 되읽고 요금 {fare}원으로 접수할지 여쭤보세요."
+confirming = "기록된 값을 그대로 되읽고 이 내용으로 접수할지 여쭤보세요. 확정되지 않은 요금은 말하지 마세요."
 submitted = "접수번호 {order_no}를 안내하세요."
 save_offer = "접수번호 {order_no}를 안내하고, 이번 주소({save_candidates})를 다음에도 쓰도록 저장할지 여쭤보세요."
 after_order = "접수번호 {order_no}를 안내했으면, 더 보내실 택배나 다른 용건이 있는지 여쭤보세요."

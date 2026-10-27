@@ -33,7 +33,7 @@
 
 - Python(버전은 자유, 최신 안정판 권장). `.python-version`과 Docker 베이스 이미지의 버전을 맞춘다.
 - 패키지 관리: **uv**. `pyproject.toml` + `uv.lock`을 커밋하고, 의존성은 최소로 둔다: `fastapi`, `uvicorn`, `pydantic`, `openai[realtime]`(`client.live`, `client.webhooks` 사용), `langgraph`, dev `pytest`·`langgraph-cli[inmem]`(LangGraph Studio, 개발용). HTTP 호출(백엔드 API)은 `openai`에 딸린 `httpx2`를 쓴다.
-- LLM 호출은 전부 **openai SDK**(gpt-live-1 세션, 백엔드 위임 모델, 고객 답 판별). `langchain`·`langchain-openai`는 쓰지 않는다.
+- LLM 호출은 전부 **openai SDK**(gpt-live-1 세션, 백엔드 도구 선택, 고객 답 판별). 사용자 요청에 따라 **RAG 임베딩·검색·분할만 LangChain**을 쓴다. RAG는 `docs/rag-handoff.md`, 평가 정의는 `docs/rag-evaluation-metrics.md`를 먼저 읽는다. Qwen은 외부 `/rerank` 서비스이며 전화 서버에 torch를 설치하지 않는다.
 - 시나리오 분기(상태 엔진): **LangGraph** `StateGraph`. 단계 = 노드, 사건 하나 = 그래프 실행 한 번(`spec/flow.md`). 에이전트·도구 루프로는 쓰지 않는다.
 - 웹 서버: **FastAPI** 하나(PBX 웹훅, 관제 API·SSE, 관제 화면).
 - 배포: **Linux에서 Docker로 띄운다.** 개발 PC는 Windows이므로 경로는 `pathlib`, 인코딩은 UTF-8로 OS에 의존하지 않게 쓴다.
@@ -62,7 +62,7 @@
 ```
 
 - 음성은 PBX와 OpenAI가 직접 주고받는다. 서버는 오디오를 다루지 않는다.
-- 생각·도구: `delegation.type = "responses"`. OpenAI가 백엔드 Responses 모델을 돌리고, 함수 도구 실행은 서버가 sideband로 한다.
+- 생각·도구: 기본 `delegation.type = "client"`. 서버가 SDK Responses로 도구를 한 번 선택하고 기존 디스패처로 실행한 뒤 원문 결과를 Live에 직접 전달한다. 서버 전용 `[backend]`는 세션 API에 보내지 않는다. 구 `responses` 모드는 복귀용으로만 유지한다.
 - 저장: **AI 서버는 고객·주문·배송지를 저장하지 않는다.** 이 정보를 관리하는 별개의 백엔드 서버 API로 읽고 쓴다(`spec/backend-api.md`, 접수번호 발급도 백엔드). 백엔드 호출은 모듈 하나(`app/backend_api.py`)에 모은다. 접수 전 진행 중인 주문만 통화별 메모리(임시 주문).
   - 매뉴얼 RAG는 **Qdrant**(벡터 DB)에 둔다. 개인정보와 섞지 않는다. 구현은 RAG 담당자 몫(`docs/rag-handoff.md`).
 - 프롬프트는 파일 두 개: 음성 모델용(말투·맞장구·끼어들기·위임 정책)과 백엔드용(도구 규칙·결과 돌려주기).
@@ -93,5 +93,12 @@
 ## 아직 없는 것
 
 - 추가 주문에서 "앞 주문과 같은 보내는 분/곳"을 다시 넣는 기능.
-- 알림톡 발송, 실제 요금 API, 결제 확인·주문 확정, 발신(outbound) 전화, RAG(Qdrant 서비스만 compose에 있음).
+- 알림톡 발송, 실제 요금 확정 API, 결제 확인·주문 확정, 발신(outbound) 전화. 고정 3,500원은 사용하지 않는다. RAG 코드는 통합됐지만 외부 GPU 연결과 실제 전화 통합 확인은 별도다.
+
+## 브랜치와 기록
+
+- 사용자 제공 팀 규칙은 `docs/BRANCH_STRATEGY.md`를 따른다. `develop-ai`에서 작업 브랜치를 만들고 그 브랜치에서 병합을 준비한다.
+- 커밋은 `feat: 한국어 설명` 형식이며 Jira 번호(`S15P31D109-122` 등)는 본문 마지막 독립 줄에 둔다. 사용자 요청 없이 develop-ai 병합·푸시·배포하지 않는다.
+- 팀 공유 현황은 `work.md`, 날짜별 변경은 `docs/WORKLOG.md`에 쓴다. 개인 개발로그는 사용자가 지정한 `C:/Users/SSAFY/Desktop/자율/개발로그.md`에 중복 번호 없이 이어 적는다.
+- 평가 질문/기준 답변은 `evaluation/datasets/`, 집계 결과는 `evaluation/results/`. 실제 통화 개인정보·모델 가중치·대용량 실행 기록은 커밋하지 않는다. 과거 실제 실험은 `data/private/evaluation/runs/`에 보존한다.
 - 백엔드 API 인증(백엔드 담당자가 정함).

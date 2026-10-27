@@ -13,6 +13,11 @@ RUN uv sync --frozen --no-dev \
 COPY --chown=appuser:appuser app ./app
 COPY --chown=appuser:appuser config ./config
 COPY --chown=appuser:appuser prompts ./prompts
+COPY --chown=appuser:appuser manuals ./manuals
+# 첫 전화에서 토크나이저 파일을 받지 않도록 빌드 때 준비한다.
+ENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache
+RUN /app/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')" \
+    && chmod -R a+rX /app/tokenizer_cache
 USER appuser
 EXPOSE 8000
 # 통화 상태가 프로세스 메모리에 있으므로 워커는 1개

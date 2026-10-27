@@ -38,7 +38,7 @@ def recent_db():
     order = Order(**{**FULL_ORDER, "sender_phone": CALLER, "receiver_phone": DEST.phone, "receiver_name": DEST.name,
                      "receiver_address": DEST.address, "receiver_address_detail": DEST.address_detail,
                      "sender_address": ORIGIN.address, "sender_address_detail": ORIGIN.address_detail})
-    run(db.create_order(CALLER, "old", order, 3500, None))
+    run(db.create_order(CALLER, "old", order, 4950, None))
     return db
 
 
@@ -313,7 +313,7 @@ def test_modify_and_cancel_results():
     out = tool_out("modify_order", args | {"order_no": "Q999999"})
     assert out["ok"] is False and "접수번호" in out["retry"] and call.flow.stage == "modify"
     out = tool_out("modify_order", args | {"order_no": "q000001"})
-    assert out["ok"] and out["fare"] == CFG.business.fare and call.flow.stage == "recent_offer"
+    assert out["ok"] and out["fare"] is None and call.flow.stage == "recent_offer"
     run(apply_answer(call, "none", "cancel"))
     assert tool_out("cancel_order", {"order_no": "Q000001", "customer_confirmed": True})["ok"]
     run(apply_answer(call, "none", "cancel"))

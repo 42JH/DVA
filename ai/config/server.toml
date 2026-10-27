@@ -19,10 +19,8 @@ tool_timeout_sec = 10.0
 
 [business]
 company_name = "디포스트콜"
-# 기본 요금(원). 지금은 가짜 값
-fare = 3500
-# 접수 직후 안내. {order_no} {fare} 사용 가능
-submitted_message = "접수번호는 {order_no}입니다. 요금은 {fare}원이고, 기사님이 방문해서 수거해 갑니다."
+# 확정 요금은 백엔드 확인 전 임의 안내하지 않는다. {order_no} 사용 가능
+submitted_message = "접수번호는 {order_no}입니다. 기사님이 방문해서 수거해 갑니다. 요금은 실제 접수 조건에 따라 확인 후 안내됩니다."
 goodbye_message = "디포스트콜을 이용해 주셔서 감사합니다. 좋은 하루 보내세요."
 
 [progress]
@@ -63,3 +61,25 @@ max_heard_chars = 400
 max_agent_chars = 200
 # 저장된 배송지를 선택지로 넘길 때 최대 개수
 max_choices = 30
+
+[rag]
+# large 통합 Q+A → Kiwi BM25 + 벡터 RRF → Qwen Top5 → 원문 Top3
+collection = "manuals_dev_openai_large"
+embedding_model = "text-embedding-3-large"
+dimensions = 3072
+bm25_weight = 0.4
+rrf_c = 60
+candidate_k = 5
+context_k = 3
+timeout_sec = 12.0
+http_timeout_sec = 5.0
+retry_cooldown_sec = 30.0
+
+[client_backend]
+# 백엔드는 도구 선택만 한 번. 결과를 받은 뒤의 답변 생성은 Live가 한다.
+timeout_sec = 8.0
+transcript_wait_sec = 1.0
+history_chars = 6000
+max_delegations = 100
+context_chunk_tokens = 350
+append_timeout_sec = 5.0

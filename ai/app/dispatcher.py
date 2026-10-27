@@ -33,7 +33,8 @@ async def dispatch(call, name: str, arguments: str, call_id: str) -> dict:
             raise ToolError("인수 오류", _validation_hint(e)) from None
         if name not in engine.allowed_tools(call):
             raise ToolError(f"지금 단계({call.flow.stage})에서 쓸 수 없는 도구", "state.next를 따르기")
-        result = await asyncio.wait_for(tool.run(call, args), call.cfg.call.tool_timeout_sec)
+        timeout = call.cfg.rag.timeout_sec if name == 'search_manual' else call.cfg.call.tool_timeout_sec
+        result = await asyncio.wait_for(tool.run(call, args), timeout)
         events = result.events
         output = {"ok": True, **result.data}
     except ToolError as e:

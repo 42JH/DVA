@@ -368,3 +368,24 @@
 ### 남은 것
 - 실제 통화로 판별 지연 측정(`docker logs`에서 `판별` 줄, 또는 관제 화면). 결과에 따라 판별 모델·reasoning·`pause_ms` 조정.
 - PoC 발화 자산 이식(voice.md·flow.toml·backend.md), 저장된 값 가림, 확인 단계 "아니요" 변형 문구, 종료 판별 확인.
+
+### RAG 전화 통합 브랜치 준비 — S15P31D109-122
+
+요청: 최신 develop-ai 위에서 검증한 RAG를 실제 수신 통화에 연결하고, 실험 잔여 코드를 정리한 뒤 커밋/병합 검토를 준비한다. develop-ai에 직접 병합·푸시·배포하지 않는다.
+
+- 최신 origin/develop-ai `2b111f6`로 로컬 develop-ai를 fast-forward하고 `feature/S15P31D109-122-rag-call-integration`을 만들었다. 마무리 fetch에서도 원격은 같았다.
+- 기존 feature/S15P31D109-122-rag-llm-context HEAD b9fbb9e와 미커밋 작업은 stash3c3cb3b 및 private ZIP에 보존했다. 기존 stash2개도 유지했다. stash를 새 develop에 통째로 덮지 않고 필요한 파일만 선택했다.
+- 팀원 변경(LangGraph/Studio, services/webhooks 분리, PBX 종료 인증, 판별 지연, 자동 배포)을 확인·유지했다. RAG가 없던 운영 브랜치에 검색/분할/임베딩만 LangChain으로 추가하고 LLM은 SDK를 유지했다.
+- 운영 RAG: 통합 Q+A large3072 Cosine, Kiwi/BM25+vector 0.4/0.6 가중 RRF c60 Top5, 고정 Qwen3-Reranker-0.6B 원문A/FP16/1024토큰, 원문 Top3. 알고리즘은 app/rag에 두고 운영 코드의 scripts 의존을 제거했다. PDF/HTML/질문 전용/C/BGE 비교·모델 가중치는 통합 대상에서 제외했다.
+- Live 기본을 client 위임으로 변경했다. 최근 전사+현재 상태를 SDK backend에 보내 도구를 한 번 선택하고 기존 디스패처로 실행한다. 반환 근거는 다시 backend 답변 생성에 보내지 않고 Live thinking 조각+ACK+commentary로 직접 전달한다. 기존 responses 경로는 복귀용으로 유지하며 그 경우 function_call_output/response.create 규칙도 유지한다.
+- 검색은 주문 상태/상담원 연결을 바꾸지 않는다. 중복 위임 방지, 새 위임의 옛 검색 취소, 늦은 결과 차단, 이미 시작한 쓰기의 재실행 방지, 통화별 ACK/정리, 검색/전달 실패 후 안내를 추가했다. 단계별 도구 권한·발신번호·확인 안전장치는 유지했다.
+- backend 선택/검색·임베딩·DB·리랭킹·맥락 전달 시간을 남긴다. 근거 뒤 첫 패킷/전사도 관측하되 정답 안내 시작/고객 재생 완료로 부르지 않는다.
+- 사용자가 GPU를 직접 준비하기로 했으므로 외부 /rerank 코드·인증·모델 버전/ID/점수 검증을 준비했다. RunPod과 Google Cloud 모두 같은 계약이다. 전화 이미지에는 torch를 넣지 않는다. 실제 외부 GPU는 미연결이다.
+- 사용자 추가 결정: 3,500원 고정 요금 삭제. 미확정 fare 전송과 확정 안내도 제거했다. 백엔드는 우선 유인 기준 서류3,850/소박스4,950/중박스6,050/대박스7,150원을 계산한다. 현재 AI 주문에는 별도 규격이 없으므로 규격 입력/전달과 backend fare 생략 수용·확정 금액 응답 계약을 맞춰야 한다. 임의 금액이나 가격 API를 만들어 대신하지 않았다.
+- 공개 원문 manuals/, 평가 데이터 evaluation/datasets/, 과거 집계·실제 Live 전사95개·근거·점수 evaluation/results/를 공유한다. 대용량 원시 실행/오디오/모델/비밀은 data/private에 보존하고 Docker context에서도 제외했다.
+- 기존 평가: Live RRF Recall5=95/95, Qwen Recall3=95/95, Hit1=92/95, MRR0.982456. Faithfulness0.857882, ContextPrecision0.989474, ContextRecall0.989474, Factual F1=0.721368. Relevancy0.482527은 보조 기록으로 둔다. 기준 답변 자체의 Relevancy도 평균0.521229이고0.8기준8/95만 통과해 보편적 합격선으로 쓰지 않았다. 의미/한계/오답 사례·지연 범위는 evaluation/results/analysis.md에 정리했다.
+- Windows CRLF와 manifest의 LF 해시가 달랐던 재현 문제를 발견했다. 과거 cases 바이트/점수를 보존하고 raw/내용 해시를 구분했다. 새 생성은 LF 바이트로 고정하고 .gitattributes로 공유 원문/평가 바이트를 보존한다.
+- 검증: 전체191 passed(7.46초), compileall, FAQ32개 dry-run, 평가95문항/근거/해시 검사 성공. Docker Linux/Python3.14 이미지 빌드 성공. --network none 실행으로 SDK 세션 구성, Kiwi, 캐시 토크나이저, FAQ32개, torch/scripts/data 부재를 확인했다. Docker credential 도우미 PATH 누락은 실행 프로세스 PATH만 보완해 해결했다.
+- docs/rag-handoff.md, spec/rag.md 및 관련spec, work.md, AGENTS 팀 규칙을 갱신했다. 기존95문항은 이전 실험이며 이번 통합/외부 GPU/실제 전화 평가를 새로 한 것이 아니다. .env는 읽거나 고치지 않았다.
+
+남은 운영 확인: 외부 GPU URL/키와 서버 용량·왕복 지연, 배포 서버 Qdrant의 원문 동일 색인, 규격/요금 백엔드 계약, 실제 전화 FAQ 끼어들기/정정/취소 상태/상담원 동의/장애 회귀. develop-ai 병합 시 자동 배포가 가능하므로 완료를 확인한 뒤 반영한다.
