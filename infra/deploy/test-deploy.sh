@@ -6,6 +6,7 @@ trap 'rm -rf -- "$test_root"' EXIT
 mkdir -p "$test_root/bin" "$test_root/site/shared" "$test_root/site/releases"
 printf 'DB_USER=test\nDB_PASSWORD=test-only\nDB_NAME=test\n' > "$test_root/site/shared/.env"
 export TEST_DOCKER_LOG="$test_root/docker.log"
+export TEST_CREATION_SCHEMA="$test_root/creation-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -15,6 +16,11 @@ if [[ "$*" == *' ps -q db' ]]; then
     if [[ "${TEST_FRESH_DB:-}" != 1 || -f "${TEST_DB_STARTED:-/nonexistent}" ]]; then printf 'test-db\n'; fi
 fi
 if [[ "$*" == *' up '* && "${!#}" == db && -n "${TEST_DB_STARTED:-}" ]]; then touch "$TEST_DB_STARTED"; fi
+if [[ "$1" == exec && "$*" == *creation_request_id* ]]; then
+    [[ "${TEST_SCHEMA_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_CREATION_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
 if [[ "$*" == *' up '* && -n "${TEST_FAIL_VERSION:-}" && "$*" == *"/releases/$TEST_FAIL_VERSION/"* ]]; then
     exit 1
@@ -44,14 +50,26 @@ make_release() {
     cat > "$directory/infra/database/migrate.sh" <<'MOCK'
 #!/bin/sh
 set -eu
-test "$1" = --no-backup
-test "$2" = test-db
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+if [ "$1" = --no-backup ]; then
+    test "$2" = test-db
+    printf 'NO_BACKUP %s\n' "$root" >> "$TEST_DOCKER_LOG"
+else
+    test "$1" = test-db
+    test "$2" = "$(dirname "$(dirname "$root")")/shared/db-backups"
+    printf 'BACKUP %s\n' "$root" >> "$TEST_DOCKER_LOG"
+    test "${TEST_BACKUP_FAIL:-}" != 1
+fi
 printf 'MIGRATE %s\n' "$root" >> "$TEST_DOCKER_LOG"
 test "$(basename "$root")" != "${TEST_MIGRATION_FAIL_VERSION:-}"
+if [ -f "$root/backend/migrations/008-simplify-creation-requests.sql" ]; then touch "$TEST_CREATION_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
-    (cd "$directory" && sha256sum deploy.sh compose.prod.yaml release.env infra/database/migrate.sh infra/database/verify.sql > release-files.sha256)
+    if [[ "${2:-}" == cutover ]]; then
+        mkdir -p "$directory/backend/migrations"
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/008-simplify-creation-requests.sql"
+    fi
+    (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
 
 assert_current() {
@@ -133,4 +151,85 @@ test -f "$test_root/db-started"
 db_line="$(grep -n '/releases/fresh/compose.prod.yaml up .* db$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
 migration_line="$(grep -n '^MIGRATE .*releases/fresh$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
 [[ "$db_line" -lt "$migration_line" ]]
-echo 'PASS: migration before app, failure gating, fresh DB startup, update restore, rollback without SQL replay, corrupt transfer rejection and SSH stdin isolation.'
+
+: > "$TEST_DOCKER_LOG"
+make_release schema-query-failure cutover
+if TEST_SCHEMA_QUERY_FAIL=1 bash "$test_root/site/releases/schema-query-failure/deploy.sh"; then
+    echo 'Unknown schema compatibility was accepted.' >&2; exit 1
+fi
+assert_current fresh
+if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+: > "$TEST_DOCKER_LOG"
+make_release backup-failure cutover
+if TEST_BACKUP_FAIL=1 bash "$test_root/site/releases/backup-failure/deploy.sh"; then
+    echo 'Backup failure was accepted.' >&2; exit 1
+fi
+assert_current fresh
+[[ ! -f "$TEST_CREATION_SCHEMA" ]]
+grep -F '/releases/backup-failure/compose.prod.yaml stop backend' "$TEST_DOCKER_LOG" >/dev/null
+grep -F '/releases/fresh/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+if grep '^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+: > "$TEST_DOCKER_LOG"
+make_release cutover-sql-failure cutover
+if TEST_MIGRATION_FAIL_VERSION=cutover-sql-failure bash "$test_root/site/releases/cutover-sql-failure/deploy.sh"; then
+    echo 'Cutover SQL failure was accepted.' >&2; exit 1
+fi
+assert_current fresh
+[[ ! -f "$TEST_CREATION_SCHEMA" ]]
+grep '^BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+grep -F '/releases/fresh/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+if grep -F '/releases/cutover-sql-failure/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+: > "$TEST_DOCKER_LOG"
+make_release cutover cutover
+bash "$test_root/site/releases/cutover/deploy.sh"
+assert_current cutover
+[[ -f "$TEST_CREATION_SCHEMA" ]]
+stop_line="$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+backup_line="$(grep -n '^BACKUP ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+migration_line="$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+app_line="$(grep -n ' up ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+[[ "$stop_line" -lt "$backup_line" && "$backup_line" -lt "$migration_line" && "$migration_line" -lt "$app_line" ]]
+
+: > "$TEST_DOCKER_LOG"
+if bash "$test_root/site/releases/cutover/deploy.sh" --rollback; then
+    echo 'Incompatible manual rollback was accepted.' >&2; exit 1
+fi
+if bash "$test_root/site/releases/fresh/deploy.sh"; then
+    echo 'Incompatible deployment was accepted.' >&2; exit 1
+fi
+assert_current cutover
+if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+: > "$TEST_DOCKER_LOG"
+make_release compatible-broken cutover
+if TEST_FAIL_VERSION=compatible-broken bash "$test_root/site/releases/compatible-broken/deploy.sh"; then exit 1; fi
+assert_current cutover
+grep '^NO_BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+grep -F '/releases/cutover/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+if grep '^BACKUP ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+# Reset only the disposable fixture to exercise a committed cutover followed by verification failure.
+rm -f -- "$TEST_CREATION_SCHEMA"
+printf 'fresh\n' > "$test_root/site/current-release"
+: > "$TEST_DOCKER_LOG"
+make_release cutover-verification-failure cutover
+if TEST_VERIFY_FAIL=1 bash "$test_root/site/releases/cutover-verification-failure/deploy.sh"; then exit 1; fi
+assert_current fresh
+[[ -f "$TEST_CREATION_SCHEMA" ]]
+grep -F '/releases/cutover-verification-failure/compose.prod.yaml stop backend' "$TEST_DOCKER_LOG" >/dev/null
+if grep ' up ' "$TEST_DOCKER_LOG"; then echo 'App started after incompatible schema verification failure.' >&2; exit 1; fi
+
+: > "$TEST_DOCKER_LOG"
+make_release cutover-app-failure cutover
+if TEST_FAIL_VERSION=cutover-app-failure bash "$test_root/site/releases/cutover-app-failure/deploy.sh"; then exit 1; fi
+assert_current fresh
+grep -F '/releases/cutover-app-failure/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+grep -F '/releases/cutover-app-failure/compose.prod.yaml stop backend' "$TEST_DOCKER_LOG" >/dev/null
+if grep -F '/releases/fresh/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then
+    echo 'Incompatible old application was restored.' >&2; exit 1
+fi
+
+echo 'PASS: migration gating, fresh DB startup, compatible restore/rollback, checksum/SSH checks, cutover stop/backup order and incompatible restore protection.'

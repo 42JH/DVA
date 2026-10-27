@@ -8,6 +8,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { AuditService } from '../audit/audit.service';
 import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/audit-operation';
 import { AuthService } from './auth.service';
+import { MVP_AI_ACCESS } from './mvp-ai-access';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 // Temporary, explicit opt-in for customer registration/detail/name updates (Jira 135).
@@ -55,6 +56,13 @@ export class AuthGuard implements CanActivate {
       ['/health', '/health/ready', '/webhooks/pbx/call-ended'].includes(
         request.path.replace(/\/$/, ''),
       )
+    )
+      return true;
+    if (
+      this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler()) &&
+      !(request.headers.cookie ?? '')
+        .split(';')
+        .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
     )
       return true;
     request.sessionToken = readSessionToken(request) ?? '';

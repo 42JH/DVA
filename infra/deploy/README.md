@@ -35,7 +35,7 @@ Lightsail → 체크섬 확인 → docker load → 미적용 DB migration → �
 - `package.sh`·`package.ps1`: Backend를 linux/amd64로 빌드한다. Nginx·PostgreSQL 이미지까지
   포함하여 서버에서 이미지를 추가로 내려받지 않고 실행할 수 있는 폴더를 만든다.
 - `deploy.sh`: 체크섬·Compose 설정 확인, 이미지 로드, 미적용 migration·스키마 검증, 실행, 내부 readiness와
-  Nginx 경유 HTTP 상태를 확인한다. 실패하면 기존 정상 릴리스를 재적용한다.
+  Nginx 경유 HTTP 상태를 확인한다. 실패하면 DB와 호환되는 기존 정상 릴리스를 재적용한다.
 - Jenkins는 커밋 SHA와 빌드 번호로 버전을 만들고 해당 폴더를 빌드 산출물로 보관한다.
   Windows Agent도 Controller에서 검증한 것과 같은 커밋을 사용한다.
 - Jenkins #15에서 SSH 인증·파일 전송·수동 선택 배포를 검증했다.
@@ -105,10 +105,16 @@ if ($LASTEXITCODE -ne 0) { throw '배포 실패: 서버 상태를 확인하세�
 서버에서는 `--pull never --no-build`로 실행하며, 기존 DB 볼륨은 유지한다.
 정상 배포만 `current-release`에 기록하고 직전 버전은 `previous-release`에 기록한다.
 
-개발 단계이므로 배포는 DB 백업 없이 migration runner의 `--no-backup`을 사용한다.
+일반 개발 배포는 migration runner의 `--no-backup`을 사용한다. 다만 생성 요청 테이블을 제거하는
+`008-simplify-creation-requests.sql` 최초 적용은 기존 백엔드를 중지하고
+`shared/db-backups`에 백업·체크섬을 만든 뒤 실행한다. 이 전환에는 API 중단 시간이 있다.
 기존 DB가 있으면 새 앱을 교체하기 전에 미적용 SQL만 실행한다. 최초 배포에서는 DB만 먼저 시작한다.
 SQL은 기존 advisory lock과 하나의 트랜잭션을 사용하며 실패하면 신규 SQL/이력은 함께 롤백된다.
 SQL 또는 적용 후 스키마 검증이 실패하면 앱 배포와 버전 기록 갱신을 중단한다.
+
+008 전환 중 백업/SQL이 실패해 DB가 구버전 구조를 유지하면 기존 백엔드를 다시 시작한다.
+DB 전환이 커밋된 뒤 스키마 검증이나 새 앱 실행이 실패하면 구버전 자동 복귀를 차단한다.
+이미 전환된 DB에는 008이 포함된 앱만 배포·복구할 수 있으며 DB 상태 조회 실패도 배포 중단으로 처리한다.
 
 ## 4. 브라우저에서 연결 확인
 
@@ -134,8 +140,11 @@ bash ~/dva-deploy/releases/<현재버전>/deploy.sh --rollback
 실패한 컨테이너는 로그를 조사할 수 있도록 남긴다. 이전 버전 복구도 실패하면
 명령은 실패를 반환하고 수동 점검이 필요하다.
 
-이 롤백은 DB 데이터를 복원하지 않는다. 스키마 변경이 들어오면 호환 가능한
-마이그레이션과 별도 복구 절차가 필요하다. 자동 배포에서는 DB 백업을 생성하지 않는다.
+이 롤백은 DB 데이터를 복원하지 않는다. 008 적용 이후에는 해당 migration이 없는 릴리스로
+앱만 되돌리는 수동 롤백도 차단한다. 실패한 신규 릴리스의 최신 `deploy.sh`로 재시도하거나 복구해야 하며,
+보호 로직이 없는 과거 `deploy.sh`를 직접 실행하지 않는다.
+호환되는 수정 앱 배포를 우선하고, DB 복원이 필요하면 서비스를 중지한 상태에서 백업을 별도 DB에
+복원·검증한 뒤 전환한다. 자동 DB 복원은 하지 않는다. [DB 복구 절차](../../docs/database/README.md)를 참고한다.
 `--rollback`과 앱 실패 시 자동 복구는 migration을 다시 실행하지 않고 앱 이미지·설정만 복원한다.
 `docker compose down -v`, 전체 이미지·볼륨 prune은 사용하지 않는다.
 

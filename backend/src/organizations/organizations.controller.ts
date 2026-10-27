@@ -1,25 +1,10 @@
-import {
-  Body,
-  Controller,
-  Get,
-  createParamDecorator,
-  ExecutionContext,
-  HttpCode,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Post,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
-  ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiExtraModels,
   ApiForbiddenResponse,
-  ApiHeader,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -27,10 +12,8 @@ import {
   ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
-  ApiUnprocessableEntityResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Request } from 'express';
 import { AuthRequest } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
@@ -49,10 +32,6 @@ const single = (model: typeof CreatedOrganizationDto) => ({
     meta: { $ref: getSchemaPath(RequestMetaDto) },
   },
 });
-
-const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
-  context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
-);
 
 @ApiTags('Companies')
 @ApiCookieAuth('adminSession')
@@ -88,27 +67,12 @@ export class OrganizationsController {
   @AuditOperation({ action: 'ORGANIZATION_CREATED', targetType: 'ORGANIZATION', target: 'none' })
   @ApiOperation({
     summary: '기업 등록',
-    description: '모든 활성 관리자. 신규 기업 상태는 ACTIVE입니다.',
-  })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    required: true,
-    schema: { type: 'string', format: 'uuid' },
+    description:
+      '모든 활성 관리자. 신규 기업 상태는 ACTIVE입니다. 동일 기업명은 허용하며 등록 요청을 자동 재시도하지 않습니다.',
   })
   @ApiCreatedResponse({ schema: single(CreatedOrganizationDto) })
-  @ApiConflictResponse({ type: ErrorResponseDto })
-  @ApiUnprocessableEntityResponse({ type: ErrorResponseDto })
-  create(
-    @Req() request: AuthRequest,
-    @CreationKey(new ParseUUIDPipe()) key: string,
-    @Body() input: CreateOrganizationDto,
-  ) {
-    return this.organizations.create(
-      request.admin.adminUserSeq,
-      key.toLowerCase(),
-      input,
-      request.requestId,
-    );
+  create(@Req() request: AuthRequest, @Body() input: CreateOrganizationDto) {
+    return this.organizations.create(request.admin.adminUserSeq, input, request.requestId);
   }
 
   @Get(':id')
