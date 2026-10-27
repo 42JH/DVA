@@ -31,8 +31,14 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.orders'::regclass AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (creation_request_id)') THEN
   RAISE EXCEPTION 'Order creation request uniqueness missing'; END IF;
  IF to_regclass('pbx_webhooks.call_ended_events') IS NULL THEN RAISE EXCEPTION 'PBX table missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='incoming_at' AND udt_name='timestamptz') THEN
+  RAISE EXCEPTION 'OpenAI incoming event timestamp missing'; END IF;
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events' AND column_name IN ('call_session_seq','last_attempt_at'))<>2 THEN
+  RAISE EXCEPTION 'Recording correlation/retry columns missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
+  RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql'))<>9 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql'))<>10 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  RAISE NOTICE 'PASS: 19 public tables, 18 FKs, 9 triggers, employee identity, generated columns and migration ledger';
 END $$;

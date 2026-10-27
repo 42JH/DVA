@@ -79,6 +79,12 @@ BEGIN
  INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('testAdmin','test-only-hash','SYSTEM_ADMIN','ACTIVE','Test Admin') RETURNING admin_user_seq INTO admin_id;
  PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('disabled','x','OPERATOR','INACTIVE','Test Admin')$q$,'23514');
  INSERT INTO call_sessions(order_seq,provider_call_id) VALUES(order_id,'test-call') RETURNING call_session_seq INTO call_id;
+ UPDATE call_sessions SET incoming_at='2026-10-27T01:00:00Z' WHERE call_session_seq=call_id;
+ IF NOT EXISTS(SELECT 1 FROM call_sessions WHERE call_session_seq=call_id AND incoming_at IS NOT NULL AND started_at IS NULL AND ended_at IS NULL) THEN
+  RAISE EXCEPTION 'Incoming event timestamp must be independent of PBX call times'; END IF;
+ INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq,last_attempt_at)
+ VALUES('correlation-check','{}',call_id,CURRENT_TIMESTAMP);
+ PERFORM pg_temp.expect_error($q$INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq) VALUES('missing-call-check','{}',2147483647)$q$,'23503');
  INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(call_id,1,'CUSTOMER','Hello',1);
  PERFORM pg_temp.expect_error(format('UPDATE call_sessions SET ended_at=CURRENT_TIMESTAMP WHERE call_session_seq=%s',call_id),'23514');
  UPDATE call_sessions SET started_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,end_reason='NORMAL' WHERE call_session_seq=call_id;
