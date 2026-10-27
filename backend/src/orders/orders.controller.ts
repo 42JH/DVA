@@ -150,6 +150,48 @@ export class OrdersController {
       ],
     },
     examples: {
+      completeCall: {
+        summary: '상담 완료: 디버 접수 결과까지 반환 (수거 시각은 미래로 변경)',
+        value: {
+          outcome: 'COMPLETE',
+          call: {
+            providerCallId: 'sess_complete',
+            callerPhoneNumber: '01012345678',
+            incomingAt: '2026-10-27T01:00:00Z',
+          },
+          customer: { name: '발신 고객', phoneNumber: '01012345678' },
+          paymentMethodType: 'credit',
+          pickupRequestedAt: '2026-10-28T10:00:00+09:00',
+          parcels: [
+            {
+              origin: {
+                name: '발송인',
+                phoneNumber: '01012345678',
+                roadAddress: '서울시 예시로 1',
+                jibunAddress: '서울시 예시동 1',
+                detailAddress: '101호',
+                dongName: '예시동',
+                postalCode: '01234',
+                latitude: 37.5,
+                longitude: 127,
+              },
+              destination: {
+                name: '수령인',
+                phoneNumber: '01087654321',
+                roadAddress: '서울시 배송로 2',
+                jibunAddress: '서울시 배송동 2',
+                detailAddress: '',
+                dongName: '배송동',
+                postalCode: '05678',
+                latitude: 37.6,
+                longitude: 127.1,
+              },
+              smallBoxCount: 1,
+              itemPrice: 10000,
+            },
+          ],
+        },
+      },
       incompleteCall: {
         summary: '중도 종료·상담사 연결: 수집한 값만 저장',
         value: {

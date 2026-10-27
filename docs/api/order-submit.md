@@ -1,7 +1,7 @@
 # 주문 최종 접수 — ORD-06
 
 관련 Jira: [S15P31D109-57](https://ssafy.atlassian.net/browse/S15P31D109-57).
-API 명세의 **기존 주문 생성 → 수정 → 최종 접수** 흐름을 따른다. Jira의 새 주문 일괄 생성 설명은 적용하지 않는다.
+기존 미완료 주문을 보완해 접수할 때 사용하는 API다. **새 AI 상담 완료는 POST /api/orders에 COMPLETE 결과를 보내면 디버 접수까지 처리**하므로 이 API를 추가 호출하지 않는다. [AI·PBX 연동 명세](ai-pbx-recordings.md)를 따른다.
 디버 전송 형식은 팀 제공 「디버 택배 주문 접수 API 명세 v2」(2026-10-01), 결제 자격은 2026-10-27 사용자 확정 기준이다.
 최종 접수의 중복 처리는 사용자 확정에 따라 주문 번호·기존 상태로 처리한다. 초안의 별도 접수 키·추가 컬럼은 사용하지 않는다.
 
@@ -91,12 +91,12 @@ ORD-03에서 디버 참고번호·접수 시각·배송을 조회한다. 배송�
 
 ## 배포 및 확인
 
-- 최종 접수용 신규 migration은 없다. 기존 001~010이 적용된 DB에서 동작하며 파일·이력·테이블·컬럼을 변경하지 않는다. 초안의 미병합 011은 제외했다.
+- 최종 접수 전용 migration은 없다. 이번 AI·PBX 연결의 011은 통화 이벤트 시각과 기존 웹훅 수신함 컬럼만 추가한다. 과거 접수 전용 011 초안과는 다른 변경이다.
 - `DVER_API_URL` 기본값은 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`이다. 운영·개발은 HTTPS를 요구한다.
 - 서버 비밀 환경변수 `DVER_API_KEY`를 설정한다. 빈 값이면 기존 API는 실행되고 신규 디버 접수만 503이다. 로컬·운영 Compose에서 두 변수를 backend에 전달한다. 키는 저장소에 넣지 않는다.
 - 키를 설정한 서버에서 `/submit`을 호출하면 실제 디버 주문 요청이 나간다. 자동 검증은 실제 키를 사용하지 않고 로컬 모의 서버로 실행한다.
-- Swagger `/api/docs`의 `Orders` → `주문 최종 접수 (ORD-06)`에서 호출 규격·예시·상태·오류를 확인한다.
+- Swagger `/api/docs`의 `Orders` → `기존 미완료 주문 최종 접수 (ORD-06)`에서 호출 규격·예시·상태·오류를 확인한다.
 - `node scripts/check.cjs`: 빌드·린트·포맷, 실제 임시 DB, 모의 디버, 동시 요청·실패 롤백·재시작·기존 API·Nginx/PBX 회귀.
 - `./infra/database/test-monolith.ps1`: 기존 migration의 업무 데이터 보존, 제약, 반복 적용·체크섬·백업 복원·전체 롤백.
 
-운영 DB 적용·Jenkins 배포·실제 디버 주문 전송·AI 컨테이너 호출부 연결은 아직 실행하지 않았다. AI 측은 같은 주문의 ORD-01 → ORD-04 → ORD-03 확인 → ORD-06 순서와 `call_session_seq` 헤더를 사용해야 한다.
+운영 DB 적용·Jenkins 배포·실제 디버 주문 전송·AI 컨테이너 호출부 연결은 아직 실행하지 않았다. 기존 저장 주문 보완 경로에는 `expectedVersion`·`call_session_seq` 계약을 유지한다. 새 AI 상담 결과는 [POST /api/orders](orders.md) 한 번으로 전달한다.

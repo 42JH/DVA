@@ -2,6 +2,8 @@
 
 관련 Jira: [S15P31D109-61](https://ssafy.atlassian.net/browse/S15P31D109-61). 기준은 API 명세이며, `COLLECTING` 주문의 정보를 같은 `orderSeq`에 저장한다. 디버 전송·접수 후 수정·취소는 이 API의 범위가 아니다.
 
+새 AI 상담은 중간에 이 API를 반복 호출하지 않고 수집 완료·중도 종료·취소 결과를 [POST /api/orders](orders.md)에 한 번 전달한다. 이 PATCH는 기존 미완료 주문의 보완 경로로 유지한다.
+
 ## 호출 방법
 
 ```http
