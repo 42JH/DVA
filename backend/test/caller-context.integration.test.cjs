@@ -1,0 +1,388 @@
+require('reflect-metadata');
+const { before, after, test } = require('node:test');
+const assert = require('node:assert/strict');
+const { randomUUID, randomInt } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
+const { Pool } = require('pg');
+const { NestFactory } = require('@nestjs/core');
+
+assert.equal(process.env.NODE_ENV, 'test');
+assert.equal(process.env.DB_NAME, 'dva_webhook_test');
+assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
+process.env.SWAGGER_ENABLED = 'true';
+process.env.CORS_ORIGINS = 'http://localhost:5173';
+const { AppModule } = require('../dist/app.module');
+const { DatabaseService } = require('../dist/database/database.service');
+const { configureApplication } = require('../dist/configure-application');
+const pool = new Pool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+});
+let app, base;
+const logs = [];
+const phone = () => '010' + String(randomInt(10000000, 100000000));
+const address = {
+  name: '주소 수령인',
+  phoneNumber: '01000000001',
+  roadAddress: '예시로 12',
+  jibunAddress: '예시동 12',
+  detailAddress: '101호',
+  dongName: '예시동',
+  postalCode: '01234',
+  latitude: 37.5,
+  longitude: 127,
+};
+before(async () => {
+  for (const [table, migration] of [
+    ['public.customers', '002-monolith-initial.sql'],
+    ['public.admin_sessions', '003-admin-auth-sessions.sql'],
+  ]) {
+    const { rows } = await pool.query('SELECT to_regclass($1) AS name', [table]);
+    if (!rows[0].name)
+      await pool.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
+  }
+  app = await NestFactory.create(AppModule, { logger: false });
+  configureApplication(app, { log: (entry) => logs.push(entry) });
+  await app.listen(0, '127.0.0.1');
+  base = await app.getUrl();
+});
+after(async () => {
+  if (app) await app.close();
+  await pool.end();
+});
+async function customer(status = 'ACTIVE') {
+  const { rows } = await pool.query(
+    `INSERT INTO customers(name,phone_number,status) VALUES('초기 조회 고객',$1,$2)
+     RETURNING customer_seq AS "customerSeq",name,phone_number AS "phoneNumber",status`,
+    [phone(), status],
+  );
+  return rows[0];
+}
+async function organization(status = 'ACTIVE') {
+  return (
+    await pool.query(
+      `INSERT INTO organizations(name,status) VALUES('초기 조회 기업',$1) RETURNING organization_seq`,
+      [status],
+    )
+  ).rows[0].organization_seq;
+}
+async function member(customerSeq, organizationSeq, status = 'ACTIVE', role = 'MEMBER') {
+  return (
+    await pool.query(
+      `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status)
+       VALUES($1,$2,$3,$4,$5) RETURNING membership_seq`,
+      [customerSeq, organizationSeq, '00' + randomUUID(), role, status],
+    )
+  ).rows[0].membership_seq;
+}
+async function pin(scope, owner, label = null, version = 1) {
+  if (scope === 'PERSONAL')
+    return (
+      await pool.query(
+        `INSERT INTO personal_pins(customer_seq,label,address_data,version) VALUES($1,$2,$3,$4)
+         RETURNING personal_pin_seq`,
+        [owner, label, { ...address, detailAddress: randomUUID() }, version],
+      )
+    ).rows[0].personal_pin_seq;
+  return (
+    await pool.query(
+      `INSERT INTO company_pins(organization_seq,label,department_name,address_data,version)
+       VALUES($1,$2,'개발부',$3,$4) RETURNING company_pin_seq`,
+      [owner, label, { ...address, detailAddress: randomUUID() }, version],
+    )
+  ).rows[0].company_pin_seq;
+}
+function request(input, headers = {}) {
+  return fetch(base + '/api/customers/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: JSON.stringify(input),
+  });
+}
+async function context(number, headers) {
+  const response = await request({ phoneNumber: number }, headers);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'meta']);
+  assert.equal(body.meta.requestId, response.headers.get('x-request-id'));
+  return body.data;
+}
+const emptyContext = (lookupStatus) => ({
+  lookupStatus,
+  customer: null,
+  membership: null,
+  organization: null,
+  availableUsageTypes: [],
+  personalPins: [],
+  companyPins: [],
+});
+
+test('unknown caller is explicitly unregistered; reads do not create a customer or call', async () => {
+  const number = phone();
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM customers) AS customers,
+        (SELECT count(*) FROM call_sessions) AS calls, (SELECT count(*) FROM orders) AS orders,
+        (SELECT count(*) FROM audit_logs) AS audits`)
+    ).rows[0];
+  const previous = await counts();
+  for (let i = 0; i < 3; i++) assert.deepEqual(await context(number), emptyContext('UNREGISTERED'));
+  assert.deepEqual(await counts(), previous);
+});
+
+test('registered caller without orders, pins or membership remains registered', async () => {
+  const c = await customer();
+  assert.deepEqual(await context(c.phoneNumber), {
+    ...emptyContext('REGISTERED'),
+    customer: c,
+    availableUsageTypes: ['PERSONAL'],
+  });
+});
+
+test('active company member receives only their personal pins and their company shared pins', async () => {
+  const c = await customer();
+  const colleague = await customer();
+  const outsider = await customer();
+  const org = await organization();
+  const otherOrg = await organization();
+  const membershipSeq = await member(c.customerSeq, org);
+  await member(colleague.customerSeq, org);
+  await member(outsider.customerSeq, otherOrg);
+  const personal = await pin('PERSONAL', c.customerSeq, '내 주소', 3);
+  const company = await pin('COMPANY', org, '기업 공용', 2);
+  await pin('PERSONAL', colleague.customerSeq, '동료 비공개');
+  await pin('PERSONAL', outsider.customerSeq, '타인 비공개');
+  await pin('COMPANY', otherOrg, '다른 기업 공용');
+  const result = await context(c.phoneNumber);
+  assert.equal(result.lookupStatus, 'REGISTERED');
+  assert.deepEqual(result.customer, c);
+  assert.equal(result.membership.membershipSeq, membershipSeq);
+  assert.equal(result.membership.role, 'MEMBER');
+  assert.equal(result.organization.organizationSeq, org);
+  assert.deepEqual(result.availableUsageTypes, ['PERSONAL', 'COMPANY']);
+  assert.deepEqual(
+    result.personalPins.map((p) => p.personalPinSeq),
+    [personal],
+  );
+  assert.deepEqual(
+    result.companyPins.map((p) => p.companyPinSeq),
+    [company],
+  );
+  assert.equal(result.personalPins[0].version, 3);
+  assert.equal(result.companyPins[0].departmentName, '개발부');
+  assert.equal(result.companyPins[0].version, 2);
+  assert.equal(result.personalPins[0].addressData.postalCode, '01234');
+  assert.equal(result.personalPins[0].addressData.latitude, 37.5);
+  assert.deepEqual(Object.keys(result.personalPins[0]).sort(), [
+    'addressData',
+    'label',
+    'personalPinSeq',
+    'version',
+  ]);
+  const serialized = JSON.stringify(result);
+  for (const forbidden of [
+    '동료 비공개',
+    '타인 비공개',
+    '다른 기업 공용',
+    'searchText',
+    'directory',
+  ])
+    assert.ok(!serialized.includes(forbidden));
+});
+
+test('all membership/company status combinations enforce company access; representative has the same scope', async () => {
+  for (const membershipStatus of ['ACTIVE', 'INACTIVE']) {
+    for (const companyStatus of ['ACTIVE', 'INACTIVE']) {
+      for (const role of ['MEMBER', 'ORG_ADMIN']) {
+        const c = await customer();
+        const org = await organization(companyStatus);
+        await member(c.customerSeq, org, membershipStatus, role);
+        const personal = await pin('PERSONAL', c.customerSeq);
+        const company = await pin('COMPANY', org);
+        const result = await context(c.phoneNumber);
+        const canUseCompany = membershipStatus === 'ACTIVE' && companyStatus === 'ACTIVE';
+        assert.equal(result.membership.status, membershipStatus);
+        assert.equal(result.membership.role, role);
+        assert.equal(result.organization.status, companyStatus);
+        assert.deepEqual(
+          result.personalPins.map((p) => p.personalPinSeq),
+          [personal],
+        );
+        assert.deepEqual(
+          result.companyPins.map((p) => p.companyPinSeq),
+          canUseCompany ? [company] : [],
+        );
+        assert.deepEqual(
+          result.availableUsageTypes,
+          canUseCompany ? ['PERSONAL', 'COMPANY'] : ['PERSONAL'],
+        );
+      }
+    }
+  }
+});
+
+test('withdrawn callers remain distinct but expose no profile, membership or pins', async () => {
+  const c = await customer('WITHDRAWN');
+  const org = await organization();
+  await member(c.customerSeq, org, 'ACTIVE', 'ORG_ADMIN');
+  await pin('PERSONAL', c.customerSeq);
+  await pin('COMPANY', org);
+  assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
+  assert.equal(
+    (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [c.customerSeq]))
+      .rows[0].status,
+    'WITHDRAWN',
+  );
+});
+
+test('whole address book is returned beyond page size, with stable IDs, nullable labels and address values', async () => {
+  const c = await customer();
+  const org = await organization();
+  await member(c.customerSeq, org);
+  const personalIds = [],
+    companyIds = [];
+  for (let i = 0; i < 105; i++) {
+    personalIds.push(await pin('PERSONAL', c.customerSeq));
+    companyIds.push(await pin('COMPANY', org));
+  }
+  const first = await context(c.phoneNumber);
+  assert.deepEqual(
+    first.personalPins.map((p) => p.personalPinSeq),
+    personalIds,
+  );
+  assert.deepEqual(
+    first.companyPins.map((p) => p.companyPinSeq),
+    companyIds,
+  );
+  assert.equal(first.personalPins[0].label, null);
+  assert.deepEqual(await context(c.phoneNumber), first);
+  const stored = (
+    await pool.query('SELECT address_data FROM personal_pins WHERE personal_pin_seq=$1', [
+      personalIds[0],
+    ])
+  ).rows[0].address_data;
+  assert.deepEqual(first.personalPins[0].addressData, stored);
+});
+
+test('next lookup reflects withdrawal, membership deactivation, unlinking and organization changes', async () => {
+  const c = await customer();
+  const org = await organization();
+  const id = await member(c.customerSeq, org);
+  await pin('COMPANY', org);
+  assert.equal((await context(c.phoneNumber)).companyPins.length, 1);
+  await pool.query("UPDATE memberships SET status='INACTIVE' WHERE membership_seq=$1", [id]);
+  assert.deepEqual((await context(c.phoneNumber)).companyPins, []);
+  await pool.query("UPDATE memberships SET status='ACTIVE' WHERE membership_seq=$1", [id]);
+  await pool.query("UPDATE organizations SET status='INACTIVE' WHERE organization_seq=$1", [org]);
+  assert.deepEqual((await context(c.phoneNumber)).companyPins, []);
+  await pool.query('DELETE FROM memberships WHERE membership_seq=$1', [id]);
+  const unlinked = await context(c.phoneNumber);
+  assert.equal(unlinked.membership, null);
+  assert.equal(unlinked.organization, null);
+  assert.deepEqual(unlinked.availableUsageTypes, ['PERSONAL']);
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [
+    c.customerSeq,
+  ]);
+  assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
+});
+
+test('only a digits-only string phoneNumber is accepted, without legacy or ownership override fields', async () => {
+  for (const input of [
+    {},
+    { phone: phone() },
+    { phoneNumber: null },
+    { phoneNumber: 1012345678 },
+    { phoneNumber: '' },
+    { phoneNumber: '010-1234-5678' },
+    { phoneNumber: '+821012345678' },
+    { phoneNumber: ' 01012345678' },
+    { phoneNumber: '01012345678\n' },
+    { phoneNumber: "' OR TRUE --" },
+    { phoneNumber: phone(), customerSeq: 1 },
+    { phoneNumber: phone(), organizationSeq: 1 },
+  ]) {
+    const response = await request(input);
+    assert.equal(response.status, 400, JSON.stringify(input));
+    const body = await response.json();
+    assert.equal(body.error.code, 'INVALID_REQUEST');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+});
+
+test('query failure is 503 rather than a new customer or a partial success', async () => {
+  const database = app.get(DatabaseService);
+  const original = database.pool.query;
+  database.pool.query = async () => {
+    throw new Error('private SQL and phoneNumber must not leak');
+  };
+  try {
+    const response = await request({ phoneNumber: phone() });
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.error.code, 'DEPENDENCY_UNAVAILABLE');
+    assert.equal(body.data, undefined);
+    assert.ok(!JSON.stringify(body).includes('private SQL'));
+  } finally {
+    database.pool.query = original;
+  }
+});
+
+test('MVP needs no service token or Origin; stale administrator cookies never bypass session checks', async () => {
+  const c = await customer();
+  assert.equal((await context(c.phoneNumber)).customer.customerSeq, c.customerSeq);
+  const badCookie = await request(
+    { phoneNumber: c.phoneNumber },
+    {
+      Cookie: 'dva_session=' + 'f'.repeat(64),
+      Origin: 'http://localhost:5173',
+    },
+  );
+  assert.equal(badCookie.status, 401);
+  assert.equal((await badCookie.json()).error.code, 'UNAUTHORIZED');
+  const administratorList = await fetch(base + '/api/customers');
+  assert.equal(administratorList.status, 401);
+  const forbidden = await request(
+    { phoneNumber: c.phoneNumber },
+    { Origin: 'https://untrusted.invalid' },
+  );
+  assert.equal(forbidden.status, 403);
+});
+
+test('OpenAPI documents request, explicit lookup states, complete pin schemas and 200 envelope', async () => {
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const operation = document.paths['/api/customers/context'].post;
+  assert.deepEqual(operation.security, []);
+  assert.ok(operation.responses['200']);
+  assert.ok(!operation.responses['201']);
+  const schemas = document.components.schemas;
+  assert.deepEqual(schemas.CallerContextRequestDto.required, ['phoneNumber']);
+  assert.deepEqual(schemas.CallerContextDto.properties.lookupStatus.enum, [
+    'REGISTERED',
+    'UNREGISTERED',
+    'WITHDRAWN',
+  ]);
+  assert.deepEqual(Object.keys(schemas.CallerContextEnvelopeDto.properties).sort(), [
+    'data',
+    'meta',
+  ]);
+  assert.equal(schemas.CallerContextDto.properties.customer.nullable, true);
+  assert.ok(schemas.PinAddressDto.properties.roadAddress);
+  assert.ok(schemas.CompanyContextPinDto.properties.departmentName);
+});
+
+test('request logs contain route and request ID without caller number or address content', async () => {
+  const c = await customer();
+  const requestId = randomUUID();
+  await context(c.phoneNumber, { 'X-Request-Id': requestId });
+  await new Promise((resolve) => setImmediate(resolve));
+  const entries = logs.filter((entry) => entry.requestId === requestId);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].route, '/api/customers/context');
+  assert.ok(!JSON.stringify(entries).includes(c.phoneNumber));
+  assert.ok(!JSON.stringify(entries).includes(address.roadAddress));
+});
