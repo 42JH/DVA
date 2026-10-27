@@ -15,6 +15,7 @@ import { assertOrderUpdate } from './order-update.validation';
 import { DverClient, DverResult, dverPayload } from './dver.client';
 import { OrderSubmissionRepository } from './order-submission.repository';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
+import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 
 @Injectable()
 export class OrdersService {
@@ -86,6 +87,41 @@ export class OrdersService {
         throw new ApiException(403, 'FORBIDDEN', '다른 고객의 주문은 조회할 수 없습니다.');
       return new ListResponse(
         await this.repository.list(client, query, customerId ?? query.customerSeq ?? null),
+        query.limit,
+      );
+    });
+  }
+
+  async addressHistory(
+    adminId: number | null,
+    customerId: number,
+    query: OrderAddressHistoryQueryDto,
+    header?: string,
+  ) {
+    const callId = this.callId(adminId, header);
+    if (
+      (query.from !== undefined && !isZonedDate(query.from)) ||
+      (query.to !== undefined && !isZonedDate(query.to)) ||
+      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
+      );
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const callerCustomer = await this.readCustomer(client, adminId, callId);
+      if (callerCustomer !== null && callerCustomer !== customerId)
+        throw new ApiException(
+          403,
+          'FORBIDDEN',
+          '다른 고객의 이전 주문 주소는 조회할 수 없습니다.',
+        );
+      if (callerCustomer === null && !(await this.repository.customerExists(client, customerId)))
+        throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      return new ListResponse(
+        await this.repository.addressHistory(client, customerId, query),
         query.limit,
       );
     });
