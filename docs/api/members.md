@@ -149,4 +149,18 @@ cd ..
   1MiB/1,000행 경계 통과. 실제 운영 이미지·Nginx에서도 정확히 1MiB 파일 성공 및 초과 거부 통과.
 - `infra/database/test-monolith.ps1`: 006 제약·관리자별 키·소속 삭제 후 기록 보존·
   재실행·기존 데이터 보존·백업 복원·체크섬 변경 거부·최초/후속 실패 롤백 통과.
-- 운영 서버 DB 적용·호스트 Nginx reload·프론트/AI 실제 연동은 수행하지 않았다.
+- 백엔드 운영 배포·DB 적용·프론트/AI 실제 연동은 수행하지 않았다. 호스트 Nginx 반영은 아래 후속 기록을 참고한다.
+
+### 2026-10-27 호스트 Nginx 후속 반영
+
+- 사용자 요청으로 Lightsail IP HTTPS의 `/etc/nginx/sites-available/dva-ip`에서 `/api/` 블록에만
+  `client_max_body_size 2m`을 추가했다. 원본 백업은
+  `/etc/nginx/sites-available/dva-ip.backup-upload-limit-20261027T035158Z`다.
+- `nginx -t`·reload·서비스 active 확인 통과. HTTPS health 200, backend health 200,
+  외부 readiness 404, 미인증 기업 목록 401을 유지했다.
+- DB 쓰기가 없는 64KiB OPTIONS 요청이 변경 전 413에서 변경 후 204로 통과했다.
+  2MiB 초과 Content-Length 요청은 호스트에서 413으로 거절됨을 확인했다.
+- 현재 실행 중인 컨테이너 Nginx는 별도 크기 설정이 없고 1MiB 초과 요청을 413으로 거절한다.
+  이 브랜치의 내부 Nginx 2MiB 설정은 37번 배포 시 자동 반영된다. 파일 1MiB에 multipart
+  헤더를 더한 실제 최대 크기 업로드는 이 컨테이너 설정도 반영된 뒤 가능하다.
+- 이번 후속 작업은 호스트 설정에 한정하며 앱·DB·컨테이너 배포는 수행하지 않았다.
