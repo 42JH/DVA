@@ -456,6 +456,67 @@ test('production order address history reads stored snapshots through Nginx and 
   assert.equal(invalid.status, 400);
 });
 
+test('production company directory searches official PINs through Nginx without opening management APIs', async () => {
+  const root = 'http://proxy/api';
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { Origin: 'https://13.209.59.180', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = {
+    Cookie: login.headers.get('set-cookie').split(';')[0],
+    Origin: 'https://13.209.59.180',
+    'Content-Type': 'application/json',
+  };
+  const name = '공식배송지-' + randomUUID();
+  const registered = await fetch(root + '/companies', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name }),
+  });
+  assert.equal(registered.status, 201);
+  const id = (await registered.json()).data.organizationSeq;
+  const addressData = {
+    name: '공식 담당자',
+    phoneNumber: '07012345678',
+    roadAddress: '공식로 1',
+    jibunAddress: '공식동 1',
+    detailAddress: '',
+    dongName: '공식동',
+    postalCode: '01234',
+    latitude: 37.5,
+    longitude: 127,
+  };
+  const created = await fetch(root + `/companies/${id}/pins`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ label: '물류센터', departmentName: '운영부', addressData }),
+  });
+  assert.equal(created.status, 201);
+  const pinId = (await created.json()).data.companyPinSeq;
+  const url = root + '/companies/search?' + new URLSearchParams({ q: name + ' 운영부' });
+  const searched = await fetch(url);
+  assert.equal(searched.status, 200);
+  assert.equal(searched.headers.get('cache-control'), 'no-store');
+  const body = await searched.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.equal(body.data[0].organizationSeq, id);
+  assert.equal(body.data[0].companyPinSeq, pinId);
+  assert.equal(body.data[0].organizationName, name);
+  assert.deepEqual(body.data[0].addressData, addressData);
+  assert.equal((await fetch(root + '/companies')).status, 401);
+  assert.equal((await fetch(root + `/companies/${id}/members`)).status, 401);
+  const deactivated = await fetch(root + `/companies/${id}`, {
+    method: 'PATCH',
+    headers,
+    body: '{"status":"INACTIVE"}',
+  });
+  assert.equal(deactivated.status, 204);
+  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false });
+  assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
+});
+
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });

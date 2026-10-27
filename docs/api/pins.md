@@ -3,6 +3,8 @@
 Jira: [S15P31D109-39](https://ssafy.atlassian.net/browse/S15P31D109-39).
 모놀리식 `backend/src/pins/`에서 개인 주소록과 기업 공유 주소록을 관리한다.
 별도 서비스나 외부 주소 API를 호출하지 않는다.
+2026-10-27 합의에 따라 기업 공유 PIN은 기업의 공식 공개 배송지이며, 타 기업 검색은 [40번 디렉터리 API](company-directory.md)를 사용한다.
+아래 소속 기업 조회 경로와 관리자 전용 등록·수정 권한은 유지한다.
 
 ## HTTP 계약
 

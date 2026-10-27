@@ -7,6 +7,7 @@ import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsRepository } from './organizations.repository';
 import { AuditService } from '../audit/audit.service';
+import { CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 
 @Injectable()
 export class OrganizationsService {
@@ -15,6 +16,10 @@ export class OrganizationsService {
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
   ) {}
+
+  async searchDirectory(query: CompanyDirectoryQueryDto) {
+    return new ListResponse(await this.repository.searchDirectory(query), query.limit);
+  }
 
   async list(query: ListOrganizationsQueryDto) {
     return new ListResponse(await this.repository.list(query), query.limit);
