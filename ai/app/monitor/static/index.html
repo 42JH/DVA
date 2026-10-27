@@ -61,7 +61,7 @@ function render() {
     <h2>단계 기록</h2>${c.history.map((h) => `<div class="muted">${time(h.at)} ${esc(h.from)} → ${esc(h.to)} (${esc(h.tool)}, ${esc(h.event)})</div>`).join("")}
     ${c.errors.map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
   $("tools").innerHTML = [...c.tool_calls].reverse().map((t) => `<div class="tool"><b>${esc(t.name)}</b> · ${esc(t.status)}
-    ${t.elapsed_ms != null ? `· ${t.elapsed_ms}ms` : ""}<pre>${esc(t.arguments)}</pre>${t.output ? `<pre>${esc(JSON.stringify(t.output, null, 1))}</pre>` : ""}</div>`).join("");
+    ${t.elapsed_ms != null ? `· ${t.elapsed_ms}ms` : ""}${t.total_ms != null ? ` · 말 끝→진행 상태 ${t.total_ms}ms` : ""}<pre>${esc(t.arguments)}</pre>${t.output ? `<pre>${esc(JSON.stringify(t.output, null, 1))}</pre>` : ""}</div>`).join("");
 }
 
 $("calls").addEventListener("click", (e) => {

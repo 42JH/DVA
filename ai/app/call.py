@@ -67,6 +67,7 @@ class Call:
         # 고객 답 판별(app/listener.py)
         self.heard_stage = ""  # heard_text를 모은 단계
         self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
+        self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
         self.listen_timer: asyncio.Task | None = None
         self.listen_seq = 0  # 마지막으로 시작한 판별 번호(늦게 온 옛 판별은 버린다)
         self.listen_tasks: set[asyncio.Task] = set()
