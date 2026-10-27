@@ -1,5 +1,7 @@
 # AI·PBX 주문 결과 및 녹취 연동
 
+AI 팀 전달용 요청·응답 요약은 [짧은 연동 명세](ai-integration-quickstart.md)를 참고한다.
+
 ## 호출 순서
 
 ```mermaid

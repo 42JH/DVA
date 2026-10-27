@@ -4,9 +4,9 @@
 
 ## AWS에서 할 설정
 
-1. 사용할 리전에 일반 S3 버킷을 만든다. 예: `dva-private-recordings-팀고유값`. 공개 액세스 차단을 모두 켜고 Object Ownership은 Bucket owner enforced를 사용한다. 브라우저 공개 읽기나 ACL 설정은 필요 없다.
-2. 기본 서버 측 암호화를 유지한다. 아래 권한 예시는 SSE-S3 기준이며, 별도 KMS 키를 선택하면 그 키에 대한 권한도 필요하다.
-3. 백엔드 실행 주체에 아래 정책을 연결한다. `YOUR_BUCKET`을 실제 버킷명으로 바꾼다. HEAD로 업로드 완료 객체를 재사용하므로 읽기 권한이 필요하고, 없는 객체를 404로 구분하기 위해 ListBucket도 부여한다.
+1. 기존 서울 리전 버킷 `dva-d109-storage`의 `recordings/` 경로를 사용한다. 버킷이나 폴더를 새로 만들 필요는 없다. 공개 읽기나 ACL 권한은 앱에 주지 않는다.
+2. 기존 버킷의 암호화 설정을 확인한다. 아래 권한 예시는 SSE-S3 기준이며, KMS 키를 사용 중이면 그 키에 대한 권한도 필요하다.
+3. 기존 IAM 사용자 `dvercall-recording-app`을 재사용한다. 사용자가 확인한 기존 정책은 `dva-monolith-recordings-984402139349-seoul` 버킷용이므로, 현재 대상 권한이 없다면 아래 정책을 별도로 추가한다. 기존 정책은 다른 사용처를 확인하기 전에 제거하지 않는다. HEAD로 저장된 객체를 재사용하므로 읽기 권한이 필요하고, 없는 객체를 404로 구분하기 위해 대상 버킷의 ListBucket도 부여한다.
 
 ```json
 {
@@ -15,26 +15,28 @@
     {
       "Effect": "Allow",
       "Action": ["s3:ListBucket"],
-      "Resource": "arn:aws:s3:::YOUR_BUCKET"
+      "Resource": "arn:aws:s3:::dva-d109-storage"
     },
     {
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::YOUR_BUCKET/recordings/*"
+      "Resource": "arn:aws:s3:::dva-d109-storage/recordings/*"
     }
   ]
 }
 ```
 
-삭제·공개 ACL·버킷 생성 권한은 앱에 주지 않는다. 이 버킷은 녹취 전용으로 사용한다. 버킷 소유권을 확인하고, 같은 키 공간에 다른 업로더를 두지 않는다.
+추가 정책에는 삭제·공개 ACL·버킷 생성 권한이 필요 없다. 기존 버킷의 다른 데이터는 유지하고 `recordings/` 키 공간이 다른 업로더와 겹치지 않게 한다.
 
 EC2 역할 등 실행 환경의 임시 자격 증명을 우선 사용한다. 현재 호스트에서 역할을 연결할 수 없다면 배포 비밀 설정으로 접근 키를 주입한다. SDK는 [기본 자격 증명 체인](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html)을 사용하며 코드에 키를 넣지 않는다.
 
 ## 서버에 넣을 값
 
+현재 배포는 `/home/ubuntu/dva-deploy/shared/.env`를 읽는다. 기존 DB·PBX 설정을 유지하면서 아래 값을 설정한다.
+
 ```dotenv
 AWS_REGION=ap-northeast-2
-S3_RECORDINGS_BUCKET=YOUR_BUCKET
+S3_RECORDINGS_BUCKET=dva-d109-storage
 ```
 
 역할을 사용할 수 없는 경우에만 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`를 배포 비밀에 등록한다. 임시 자격 증명이면 `AWS_SESSION_TOKEN`도 필요하다. 값은 채팅·Git·MR에 붙이지 않는다.
