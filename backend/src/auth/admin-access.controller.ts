@@ -28,7 +28,7 @@ function adminId(value: string): number {
     throw new ApiException(400, 'INVALID_REQUEST', '관리자 식별자를 확인해 주세요.');
   return Number(value);
 }
-@ApiTags('관리자')
+@ApiTags('Admins')
 @ApiCookieAuth('adminSession')
 @ApiResponse({
   status: 400,

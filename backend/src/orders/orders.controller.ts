@@ -42,7 +42,7 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
   context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
 );
 
-@ApiTags('주문')
+@ApiTags('Orders')
 @ApiExtraModels(
   CreateOrderDto,
   CreatedOrderDto,
