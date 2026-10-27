@@ -116,6 +116,9 @@ class Call:
         self.origin_variant: str | None = None  # find_origin 안내(which)
         self.origin_checked = False  # 이번 주문에서 "보내는 곳이 지난번과 같은지"를 이미 물었음
         self.from_saved: set[str] = set()  # 저장된 배송지·최근 배송으로 채운 항목(번호·상세주소는 읽지 않게 가린다)
+        # 주소 확정(address 단계): 새로 기록돼 아직 주소DB로 확정하지 않은 주소 항목, 항목별 확정 결과(관제용)
+        self.address_pending: set[str] = set()
+        self.address_results: dict[str, dict] = {}
 
     def use_place(self, role: str, place: Place) -> None:
         """저장된 배송지(또는 최근 배송)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
@@ -222,6 +225,7 @@ class Call:
             "stage": self.flow.stage,
             "history": self.flow.history,
             "order": self.order.model_dump(),
+            "address": self.address_results,
             "fare": self.cfg.business.fare,
             "next": engine.next_text(self) if self.flow.stage else "",
             "submitted": self.submitted,

@@ -10,9 +10,12 @@ from app.tools._base import OrderFields, Result, ToolError, tool
 async def record_order(ctx, args: OrderFields) -> Result:
     values, invalid = args.cleaned()
     for role in ("sender", "receiver"):
+        # 새 주소는 그래프의 주소 확정 단계(address)가 주소DB로 실제 주소로 정한다
+        if values.get(f"{role}_address") and values[f"{role}_address"] != getattr(ctx.order, f"{role}_address"):
+            ctx.address_pending.add(f"{role}_address")
         # 주소가 바뀌었는데 상세 주소를 같이 말하지 않았으면 이전 상세 주소는 맞지 않으므로 다시 묻는다
-        address = values.get(f"{role}_address")
-        if address is not None and address != getattr(ctx.order, f"{role}_address") \
+        address_ = values.get(f"{role}_address")
+        if address_ is not None and address_ != getattr(ctx.order, f"{role}_address") \
                 and f"{role}_address_detail" not in values:
             setattr(ctx.order, f"{role}_address_detail", None)
     for name, value in values.items():
@@ -25,3 +28,4 @@ async def record_order(ctx, args: OrderFields) -> Result:
     if not values:
         raise ToolError("기록할 항목이 없음", "고객이 말한 항목을 채워 다시 호출")
     return Result({"recorded": list(values)}, events)
+

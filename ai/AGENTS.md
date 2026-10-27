@@ -16,6 +16,7 @@
 | 단계·분기·시나리오(고객 응대 흐름) | `spec/scenario.md` |
 | 관제 화면(임시), SSE | `spec/monitor.md` |
 | 고객·주문·배송지 조회·저장(백엔드 서버 API) | `spec/backend-api.md` |
+| 주소 보정(행안부 주소DB), `app/address/` | `spec/address.md` |
 | 매뉴얼 RAG(Qdrant) | `docs/rag-handoff.md`(RAG 담당자 인계) |
 
 설계가 바뀌면 해당 `spec/` 문서를 같이 고친다. 같은 내용을 두 곳에 쓰지 않는다.
