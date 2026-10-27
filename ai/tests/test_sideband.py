@@ -88,6 +88,8 @@ def test_customer_answer_changes_state_without_tool_call():
         assert req["model"] == CFG.listener.model and req["store"] is False
         await until(lambda: conn.sent[-1][0] == "session.thinking.append" and "보내는 분" in conn.sent[-1][1]["content"])
         assert conn.outputs() == []  # 백엔드 도구 호출 없음
+        rec = next(t for t in call.tool_calls.values() if t["name"] == "listener")
+        assert rec["total_ms"] >= rec["elapsed_ms"]  # 지연 측정: 말 끝 → 진행 상태
         conn.push("session.closed", reason="remote_hangup", usage=None)
         await task
 

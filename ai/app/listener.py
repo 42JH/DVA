@@ -62,6 +62,7 @@ def heard(call, delta: str, conn, client) -> None:
     if call.heard_stage != stage.name:
         call.heard_stage, call.heard_text = stage.name, ""
     call.heard_text = (call.heard_text + delta)[-call.cfg.listener.max_heard_chars:]
+    call.heard_at = time.monotonic()
     if call.listen_timer and not call.listen_timer.done():
         call.listen_timer.cancel()
     call.listen_timer = asyncio.create_task(_after_pause(call, conn, client))
@@ -77,7 +78,7 @@ async def _after_pause(call, conn, client) -> None:
 
 async def classify(call, conn, client, seq: int) -> None:
     cfg = call.cfg.listener
-    stage_name, text = call.flow.stage, call.heard_text.strip()
+    stage_name, text, heard_at = call.flow.stage, call.heard_text.strip(), call.heard_at
     if not text:
         return
     choices = stage_choices(call)
@@ -125,11 +126,17 @@ async def classify(call, conn, client, seq: int) -> None:
         record["output"]["events"] = events
         if events or answer != NO_ANSWER:
             call.heard_text = ""  # 판별에 쓴 말은 소비
-        call.notify()
+        before = call.last_progress
         try:
             await send_progress(call, conn)
         except Exception:
             log.exception("진행 상태 전송 실패 %s", call.session_id)
+        # 고객 말이 끝난 뒤(마지막 받아쓰기 조각) 진행 상태를 보낼 때까지. 멈춤 대기(pause_ms) + 판별 + 처리
+        record["total_ms"] = round((time.monotonic() - heard_at) * 1000)
+        log.info("판별 %s 단계=%s answer=%s intent=%s 모델=%dms 말끝→진행상태=%dms 진행상태변경=%s",
+                 call.session_id, stage_name, answer, intent, record["elapsed_ms"], record["total_ms"],
+                 call.last_progress != before)
+        call.notify()
 
 
 async def apply_answer(call, answer: str, intent: str) -> list[str]:

@@ -353,3 +353,18 @@
 - Jenkins credential `dva-ai`의 `.env`가 CRLF. compose는 읽지만 셸에서 `source`하면 값 끝에 `\r`이 붙는다. LF로 다시 올리기.
 - sslip.io는 외부 무료 서비스(보장 없음). 오래 쓸 거면 정식 도메인으로.
 - PBX 종료 웹훅 토큰을 바꿀 때는 백엔드와 AI 값을 함께 바꾸기(다르면 AI 쪽 mirror만 조용히 401).
+
+## 2026-10-27
+
+### 바꾼 것
+- 고객 답 판별 지연 측정(`app/listener.py`, `app/call.py`)
+  - 마지막 받아쓰기 조각 시각(`heard_at`)부터 진행 상태를 보낼 때까지를 `total_ms`로 판별 기록에 남김. 멈춤 대기(`pause_ms`) + 판별 모델 + 답 처리(접수 등)를 모두 포함.
+  - 판별마다 INFO 로그 한 줄: 단계·answer·intent·모델 시간(`elapsed_ms`)·`total_ms`·진행 상태가 바뀌었는지. 고객 말은 로그에 남기지 않음.
+  - 관제 화면 도구 목록의 listener 항목에 "말 끝→진행 상태" 시간 표시.
+
+### 확인한 것
+- `uv run pytest -q` 120개 통과(판별 테스트에 `total_ms ≥ elapsed_ms` 확인 추가).
+
+### 남은 것
+- 실제 통화로 판별 지연 측정(`docker logs`에서 `판별` 줄, 또는 관제 화면). 결과에 따라 판별 모델·reasoning·`pause_ms` 조정.
+- PoC 발화 자산 이식(voice.md·flow.toml·backend.md), 저장된 값 가림, 확인 단계 "아니요" 변형 문구, 종료 판별 확인.
