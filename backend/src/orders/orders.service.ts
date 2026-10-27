@@ -244,7 +244,6 @@ export class OrdersService {
   async submit(
     adminId: number | null,
     id: number,
-    key: string,
     input: SubmitOrderDto,
     requestId: string,
     callSessionHeader?: string,
@@ -254,8 +253,6 @@ export class OrdersService {
     const prepared = await this.database.transaction<
       SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
     >(async (client) => {
-      if (!(await this.submissions.lockRequest(client, key)))
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 접수 요청을 처리 중입니다.');
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
@@ -276,14 +273,7 @@ export class OrdersService {
         (call?.phone && call.phone !== customer.phoneNumber)
       )
         throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
-      const previous = await this.submissions.findRequest(client, key);
-      if (previous) {
-        if (previous.orderSeq !== id || previous.expectedVersion !== input.expectedVersion)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 접수 키에는 같은 주문과 expectedVersion을 사용해 주세요.',
-          );
+      if (['SUBMITTING', 'ACCEPTED', 'AUTH_FAILED', 'REVIEW_REQUIRED'].includes(order.status)) {
         if (call && call.endedAt !== null && call.orderSeq !== id)
           throw new ApiException(
             409,
@@ -297,12 +287,6 @@ export class OrdersService {
           );
           return { status: 'REVIEW_REQUIRED' as const };
         }
-        if (!['SUBMITTING', 'ACCEPTED', 'AUTH_FAILED', 'REVIEW_REQUIRED'].includes(order.status))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '접수 결과를 확인할 수 없는 주문 상태입니다.',
-          );
         return { status: order.status as SubmittedOrderDto['status'] };
       }
       if (order.status !== 'COLLECTING' || (call && call.endedAt !== null))
@@ -338,14 +322,14 @@ export class OrdersService {
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       this.dver.ensureConfigured();
-      await this.submissions.start(client, id, key, input.expectedVersion);
+      await this.submissions.start(client, id);
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
       await this.audit.recordSuccess({ ...event, action: 'ORDER_SUBMISSION_STARTED' }, client);
       return { payload };
     });
     if ('status' in prepared) return { status: prepared.status };
 
-    // 접수 의도가 COMMIT된 후에만 전송하며 이 구간에는 DB 트랜잭션이 없다.
+    // SUBMITTING을 COMMIT한 요청만 전송하며 이 구간에는 DB 트랜잭션이 없다.
     let result: DverResult;
     try {
       result = await this.dver.submit(prepared.payload);
@@ -354,7 +338,7 @@ export class OrdersService {
     }
     try {
       await this.database.transaction(async (client) => {
-        await this.submissions.finish(client, id, key, result);
+        await this.submissions.finish(client, id, result);
         await this.audit.recordSuccess(
           { ...event, action: `ORDER_SUBMISSION_${result.status}` },
           client,

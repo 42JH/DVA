@@ -82,9 +82,6 @@ Table company_pins {
 
 Table orders {
   creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
-  submission_request_id uuid [unique, note: '최종 접수 요청 키. 생성 키와 별개. 외부 전송 후 교체하거나 삭제하지 않음']
-  submission_expected_version integer [note: '최초 접수 요청의 expectedVersion. 같은 키로 다른 버전을 보내면 거절']
-  submission_started_at timestamptz [note: '외부 전송 전에 확정한 접수 시작 시각. 오래된 SUBMITTING은 재전송 없이 확인 필요로 처리']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '연결 대상 ID']
   payment_method_type text [not null, default: 'credit', note: '디버 API 결제 방식. 기본 credit(월정산)']
@@ -97,9 +94,6 @@ Table orders {
   updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '마지막 변경 시각']
   checks {
     `payment_method_type IN ('cat','billing','credit','groupBilling')`
-    `num_nonnulls(submission_request_id,submission_expected_version,submission_started_at) IN (0,3)`
-    `submission_expected_version > 0`
-    `submission_request_id IS NULL OR status <> 'COLLECTING'`
     `status IN ('COLLECTING','SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED','CANCELLED','EXPIRED')`
     `version>0`
     `parcel_no ~ '^[A-Za-z0-9]{8}$'`

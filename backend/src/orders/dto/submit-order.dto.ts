@@ -3,7 +3,8 @@ import { IsInt, Max, Min } from 'class-validator';
 
 export class SubmitOrderDto {
   @ApiProperty({
-    description: '고객이 최종 확인한 주문의 version. 상세 조회 후 그대로 전달합니다.',
+    description:
+      '고객이 최종 확인한 주문의 version. 최초 접수에 검사하며, 이미 접수한 주문은 현재 상태만 반환합니다.',
     minimum: 1,
     maximum: 2147483647,
     example: 4,

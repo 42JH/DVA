@@ -1,31 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { ApiException } from '../common/errors/api.exception';
 import { DverResult } from './dver.client';
 
 @Injectable()
 export class OrderSubmissionRepository {
-  async lockRequest(client: PoolClient, key: string): Promise<boolean> {
-    const hash = createHash('sha256').update(`orders.submit:${key}`).digest();
-    return (
-      await client.query<{ acquired: boolean }>(
-        'SELECT pg_try_advisory_xact_lock($1::int,$2::int) AS acquired',
-        [hash.readInt32BE(0), hash.readInt32BE(4)],
-      )
-    ).rows[0].acquired;
-  }
-
-  async findRequest(client: PoolClient, key: string) {
-    return (
-      await client.query<{ orderSeq: number; expectedVersion: number }>(
-        `SELECT order_seq AS "orderSeq",submission_expected_version AS "expectedVersion"
-       FROM orders WHERE submission_request_id=$1::uuid`,
-        [key],
-      )
-    ).rows[0];
-  }
-
   async isCompanyCustomer(client: PoolClient, customerId: number): Promise<boolean> {
     try {
       const result = await client.query(
@@ -47,32 +26,26 @@ export class OrderSubmissionRepository {
     }
   }
 
-  async start(client: PoolClient, id: number, key: string, version: number) {
-    await client.query(
-      `UPDATE orders SET status='SUBMITTING',submission_request_id=$2::uuid,
-         submission_expected_version=$3,submission_started_at=clock_timestamp()
-       WHERE order_seq=$1`,
-      [id, key, version],
-    );
+  async start(client: PoolClient, id: number) {
+    await client.query("UPDATE orders SET status='SUBMITTING' WHERE order_seq=$1", [id]);
   }
 
   async markStale(client: PoolClient, id: number): Promise<boolean> {
-    // shortcut: 중단된 접수는 같은 키의 재조회 때 복구한다. 상시 감시가 필요해지면 별도 작업으로 이동한다.
+    // shortcut: 중단된 접수는 재호출 때 확인 필요로 전환한다. 상시 감시가 필요해지면 별도 작업으로 이동한다.
     const result = await client.query(
       `UPDATE orders SET status='REVIEW_REQUIRED' WHERE order_seq=$1 AND status='SUBMITTING'
-       AND submission_started_at < clock_timestamp()-interval '1 minute'`,
+       AND updated_at < clock_timestamp()-interval '1 minute'`,
       [id],
     );
     return result.rowCount === 1;
   }
 
-  async finish(client: PoolClient, id: number, key: string, result: DverResult): Promise<void> {
+  async finish(client: PoolClient, id: number, result: DverResult): Promise<void> {
     const saved = await client.query(
-      `UPDATE orders SET status=$3,parcel_no=$4,dver_received_at=$5
-       WHERE order_seq=$1 AND submission_request_id=$2::uuid AND status IN ('SUBMITTING','REVIEW_REQUIRED')`,
+      `UPDATE orders SET status=$2,parcel_no=$3,dver_received_at=$4
+       WHERE order_seq=$1 AND status IN ('SUBMITTING','REVIEW_REQUIRED')`,
       [
         id,
-        key,
         result.status,
         result.status === 'ACCEPTED' ? result.parcelNo : null,
         result.status === 'ACCEPTED' ? result.receivedAt : null,

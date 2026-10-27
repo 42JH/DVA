@@ -82,16 +82,6 @@ before(async () => {
       await client.query(
         readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
       );
-    if (
-      !(
-        await client.query(
-          "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='submission_request_id'",
-        )
-      ).rowCount
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/011-order-submission.sql'), 'utf8'),
-      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2042,13 +2032,7 @@ const readyOrder = async (changes = {}) => {
   assert.equal(response.status, 201);
   return (await response.json()).data;
 };
-const submitOrder = (
-  order,
-  key = randomUUID(),
-  extra = {},
-  index = 0,
-  body = { expectedVersion: order.version },
-) =>
+const submitOrder = (order, extra = {}, index = 0, body = { expectedVersion: order.version }) =>
   fetch(hosts[index] + `/api/orders/${order.orderSeq}/submit`, {
     method: 'POST',
     headers: Object.fromEntries(
@@ -2056,7 +2040,6 @@ const submitOrder = (
         Origin: origin,
         Cookie: cookies[index],
         'Content-Type': 'application/json',
-        'Idempotency-Key': key,
         ...extra,
       }).filter(([, value]) => value !== undefined),
     ),
@@ -2071,7 +2054,6 @@ const submissionRows = async (id) =>
     await pool.query(
       `SELECT
   (SELECT status FROM orders WHERE order_seq=$1) AS status,
-  (SELECT submission_request_id FROM orders WHERE order_seq=$1) AS key,
   (SELECT count(*)::int FROM shipments s JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1) AS shipments,
   (SELECT count(*)::int FROM shipment_status_history h JOIN shipments s USING(shipment_seq) JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1) AS history,
   (SELECT count(*)::int FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 AND action='ORDER_SUBMISSION_ACCEPTED' AND result='SUCCESS') AS "acceptedAudit"`,
@@ -2081,16 +2063,23 @@ const submissionRows = async (id) =>
 
 test('ORD-06 submits the existing order and atomically creates each shipment and initial history', async () => {
   resetDver();
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name LIKE 'submission_%'",
+      )
+    ).rowCount,
+    0,
+  );
   const order = await readyOrder({
     parcels: [
       { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 },
       { origin: address, destination: address, otherItemDescription: '기타', itemPrice: 3000 },
     ],
   });
-  const key = randomUUID(),
-    requestId = randomUUID(),
+  const requestId = randomUUID(),
     before = await counts();
-  const response = await submitOrder(order, key, { 'X-Request-Id': requestId });
+  const response = await submitOrder(order, { 'X-Request-Id': requestId });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { data: { status: 'ACCEPTED' }, meta: { requestId } });
   assert.equal(dverRequests.length, 1);
@@ -2101,7 +2090,6 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
   assert.equal((await counts()).orders, before.orders);
   assert.deepEqual(await submissionRows(order.orderSeq), {
     status: 'ACCEPTED',
-    key,
     shipments: 2,
     history: 2,
     acceptedAudit: 1,
@@ -2116,12 +2104,12 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
     assert.match(parcel.shipment.trackingNumber, /^DVA-[0-9a-f-]{36}$/);
   }
   await pool.query('UPDATE orders SET version=version+1 WHERE order_seq=$1', [order.orderSeq]);
-  const retry = await submitOrder(order, key.toUpperCase(), {}, 1);
+  const retry = await submitOrder(order, {}, 1);
   assert.equal(retry.status, 200);
   assert.equal((await retry.json()).data.status, 'ACCEPTED');
   assert.equal(dverRequests.length, 1);
   assert.equal((await submissionRows(order.orderSeq)).history, 2);
-  await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+  assert.equal((await submitOrder(order)).status, 200);
 });
 
 test('ORD-06 payment eligibility uses active enterprise membership and allows credit for both kinds', async () => {
@@ -2163,16 +2151,15 @@ test('ORD-06 payment eligibility uses active enterprise membership and allows cr
   }
 });
 
-test('ORD-06 checks saved completeness, legacy cat, active customer and PIN; validation failures do not consume keys', async () => {
+test('ORD-06 checks saved completeness, legacy cat, active customer and PIN; validation failures preserve the collecting order', async () => {
   resetDver();
-  const partial = await readyOrder({ pickupRequestedAt: null, parcels: [{}] }),
-    key = randomUUID();
-  const response = await submitOrder(partial, key);
+  const partial = await readyOrder({ pickupRequestedAt: null, parcels: [{}] });
+  const response = await submitOrder(partial);
   assert.equal(response.status, 422);
   const failure = (await response.json()).error;
   assert.equal(failure.code, 'VALIDATION_FAILED');
   assert.ok(failure.details.some((x) => x.field === 'parcels.0.origin.name'));
-  assert.equal((await submissionRows(partial.orderSeq)).key, null);
+  assert.equal((await submissionRows(partial.orderSeq)).status, 'COLLECTING');
   const legacy = await readyOrder();
   await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [
     legacy.orderSeq,
@@ -2227,25 +2214,22 @@ test('ORD-06 checks saved completeness, legacy cat, active customer and PIN; val
   });
   assert.equal(patched.status, 200);
   partial.version = (await patched.json()).data.version;
-  assert.equal((await submitOrder(partial, key)).status, 200);
+  assert.equal((await submitOrder(partial)).status, 200);
 });
 
-test('ORD-06 rejects invalid path/body/key and keeps session and Origin checks', async () => {
+test('ORD-06 rejects invalid path/body and keeps session and Origin checks', async () => {
   resetDver();
   const order = await readyOrder();
-  for (const key of [undefined, '', 'bad-key'])
-    await errorCode(
-      await submitOrder(order, randomUUID(), { 'Idempotency-Key': key }),
-      400,
-      'INVALID_REQUEST',
-    );
   for (const body of [
     {},
     { expectedVersion: '1' },
+    { expectedVersion: 0 },
+    { expectedVersion: 1.5 },
+    { expectedVersion: 2147483648 },
     { expectedVersion: order.version, confirmed: true },
     { expectedVersion: order.version, parcels: [] },
   ])
-    await errorCode(await submitOrder(order, randomUUID(), {}, 0, body), 400, 'INVALID_REQUEST');
+    await errorCode(await submitOrder(order, {}, 0, body), 400, 'INVALID_REQUEST');
   await errorCode(await submitOrder({ ...order, orderSeq: 0 }), 400, 'INVALID_REQUEST');
   await errorCode(await submitOrder({ ...order, orderSeq: 2147483647 }), 404, 'NOT_FOUND');
   await errorCode(
@@ -2254,17 +2238,13 @@ test('ORD-06 rejects invalid path/body/key and keeps session and Origin checks',
     'VERSION_CONFLICT',
   );
   await errorCode(
-    await submitOrder(order, randomUUID(), { Origin: 'https://untrusted.invalid' }),
+    await submitOrder(order, { Origin: 'https://untrusted.invalid' }),
     403,
     'FORBIDDEN',
   );
+  await errorCode(await submitOrder(order, { Cookie: 'dva_session=broken' }), 401, 'UNAUTHORIZED');
   await errorCode(
-    await submitOrder(order, randomUUID(), { Cookie: 'dva_session=broken' }),
-    401,
-    'UNAUTHORIZED',
-  );
-  await errorCode(
-    await submitOrder(order, randomUUID(), { Cookie: undefined, Origin: undefined }),
+    await submitOrder(order, { Cookie: undefined, Origin: undefined }),
     400,
     'INVALID_REQUEST',
   );
@@ -2276,24 +2256,15 @@ test('ORD-06 AI requires matching phone and active call; an ended call can repla
   const { customer, phone } = await readCustomer();
   const order = await readyOrder({ customerSeq: customer });
   for (const callId of [await call(), await call('01099990000')])
-    await errorCode(
-      await submitOrder(order, randomUUID(), aiReadHeaders(callId)),
-      403,
-      'FORBIDDEN',
-    );
+    await errorCode(await submitOrder(order, aiReadHeaders(callId)), 403, 'FORBIDDEN');
   const ended = await call(phone, true);
   await pool.query('UPDATE call_sessions SET order_seq=$2 WHERE call_session_seq=$1', [
     ended,
     order.orderSeq,
   ]);
-  await errorCode(
-    await submitOrder(order, randomUUID(), aiReadHeaders(ended)),
-    409,
-    'INVALID_STATE',
-  );
-  const callId = await call(phone),
-    key = randomUUID();
-  assert.equal((await submitOrder(order, key, aiReadHeaders(callId))).status, 200);
+  await errorCode(await submitOrder(order, aiReadHeaders(ended)), 409, 'INVALID_STATE');
+  const callId = await call(phone);
+  assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 200);
   assert.equal(
     (await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [callId]))
       .rows[0].order_seq,
@@ -2303,34 +2274,39 @@ test('ORD-06 AI requires matching phone and active call; an ended call can repla
     'UPDATE call_sessions SET started_at=now(),ended_at=now() WHERE call_session_seq=$1',
     [callId],
   );
-  assert.equal((await submitOrder(order, key, aiReadHeaders(callId), 1)).status, 200);
+  assert.equal((await submitOrder(order, aiReadHeaders(callId), 1)).status, 200);
   assert.equal(dverRequests.length, 1);
+  assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 200);
+  const unboundEnded = await call(phone, true);
+  await errorCode(await submitOrder(order, aiReadHeaders(unboundEnded)), 409, 'INVALID_STATE');
   await errorCode(
-    await submitOrder(order, randomUUID(), aiReadHeaders(callId)),
-    409,
-    'INVALID_STATE',
+    await submitOrder(order, aiReadHeaders(await call('01099990000'))),
+    403,
+    'FORBIDDEN',
   );
 });
 
-test('ORD-06 same key with another order or version is rejected before status/version checks', async () => {
+test('ORD-06 uses the order identity, ignores obsolete keys and rejects cancelled or expired orders', async () => {
   resetDver();
   const first = await readyOrder(),
-    second = await readyOrder(),
-    key = randomUUID();
-  assert.equal((await submitOrder(first, key)).status, 200);
-  await errorCode(await submitOrder(second, key), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await errorCode(
-    await submitOrder({ ...first, version: first.version + 1 }, key),
-    422,
-    'IDEMPOTENCY_KEY_REUSED',
-  );
-  assert.equal(dverRequests.length, 1);
+    second = await readyOrder();
+  const headers = { 'Idempotency-Key': randomUUID() };
+  assert.equal((await submitOrder(first, headers)).status, 200);
+  assert.equal((await submitOrder(second, headers)).status, 200);
+  const replay = await submitOrder({ ...first, version: first.version + 1 });
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).data.status, 'ACCEPTED');
+  for (const status of ['CANCELLED', 'EXPIRED']) {
+    const order = await readyOrder();
+    await pool.query('UPDATE orders SET status=$2 WHERE order_seq=$1', [order.orderSeq, status]);
+    await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+  }
+  assert.equal(dverRequests.length, 2);
 });
 
-test('ORD-06 commits intent and releases locks before HTTP; concurrent retries only return status', async () => {
+test('ORD-06 commits SUBMITTING and releases locks before HTTP; concurrent retries only return status', async () => {
   resetDver();
-  const order = await readyOrder(),
-    key = randomUUID();
+  const order = await readyOrder();
   let release, received;
   const arrived = new Promise((resolve) => {
     received = resolve;
@@ -2339,7 +2315,7 @@ test('ORD-06 commits intent and releases locks before HTTP; concurrent retries o
     release = () => res.end(JSON.stringify(dverSuccess));
     received();
   };
-  const first = submitOrder(order, key);
+  const first = submitOrder(order);
   try {
     await Promise.race([
       arrived,
@@ -2352,21 +2328,21 @@ test('ORD-06 commits intent and releases locks before HTTP; concurrent retries o
       await locked.query('BEGIN');
       const row = (
         await locked.query(
-          'SELECT status,submission_request_id FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',
+          'SELECT status,version FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',
           [order.orderSeq],
         )
       ).rows[0];
       assert.equal(row.status, 'SUBMITTING');
-      assert.equal(row.submission_request_id, key);
+      assert.equal(row.version, order.version);
       await locked.query('ROLLBACK');
     } finally {
       locked.release();
     }
-    const retry = await submitOrder(order, key, {}, 1);
+    const retry = await submitOrder(order, {}, 1);
     assert.equal(retry.status, 202);
     assert.equal(retry.headers.get('location'), `/api/orders/${order.orderSeq}`);
     assert.equal((await retry.json()).data.status, 'SUBMITTING');
-    await errorCode(await submitOrder(order, randomUUID(), {}, 2), 409, 'INVALID_STATE');
+    assert.equal((await submitOrder(order, {}, 2)).status, 202);
     await errorCode(
       await patchOrder(order.orderSeq, {
         expectedVersion: order.version,
@@ -2383,64 +2359,83 @@ test('ORD-06 commits intent and releases locks before HTTP; concurrent retries o
   assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
 });
 
-test('ORD-06 same-key concurrent prepare returns REQUEST_IN_PROGRESS and then one result', async () => {
+test('ORD-06 serializes concurrent preparation on the existing order row', async () => {
   resetDver();
-  const order = await readyOrder(),
-    key = randomUUID(),
-    original = submissionRepository.start;
-  let release, entered;
+  const order = await readyOrder();
+  const originalStart = submissionRepository.start;
+  const secondRepository = apps[1].get(OrdersRepository);
+  const originalLock = secondRepository.lockOrder;
+  let release, entered, attempted;
   const gate = new Promise((resolve) => {
-      release = resolve;
-    }),
-    preparing = new Promise((resolve) => {
-      entered = resolve;
-    });
+    release = resolve;
+  });
+  const preparing = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const competing = new Promise((resolve) => {
+    attempted = resolve;
+  });
   submissionRepository.start = async function (...args) {
-    await original.apply(this, args);
+    await originalStart.apply(this, args);
     entered();
     await gate;
   };
-  const first = submitOrder(order, key);
+  secondRepository.lockOrder = function (...args) {
+    const result = originalLock.apply(this, args);
+    attempted();
+    return result;
+  };
+  const first = submitOrder(order);
+  let second;
   try {
     await Promise.race([
       preparing,
-      first.then((response) => {
-        throw Error(`Request ended before intent: ${response.status}`);
+      first.then((r) => {
+        throw Error(`Preparation failed: ${r.status}`);
       }),
     ]);
-    await errorCode(await submitOrder(order, key, {}, 1), 409, 'REQUEST_IN_PROGRESS');
+    second = submitOrder(order, {}, 1);
+    await Promise.race([
+      competing,
+      second.then((r) => {
+        throw Error(`Competing request failed: ${r.status}`);
+      }),
+    ]);
+    assert.equal(dverRequests.length, 0);
   } finally {
     release();
-    submissionRepository.start = original;
+    submissionRepository.start = originalStart;
+    secondRepository.lockOrder = originalLock;
   }
   assert.equal((await first).status, 200);
-  assert.equal((await submitOrder(order, key, {}, 2)).status, 200);
+  const replay = await second;
+  assert.ok([200, 202].includes(replay.status));
+  assert.ok(['ACCEPTED', 'SUBMITTING'].includes((await replay.json()).data.status));
+  assert.equal((await submitOrder(order, {}, 2)).status, 200);
   assert.equal(dverRequests.length, 1);
 });
 
 test('ORD-06 records auth failures and unknown outcomes without shipments or a second external request', async () => {
   for (const mode of ['auth', 'error', 'invalid', 'disconnect']) {
     resetDver();
-    const order = await readyOrder(),
-      key = randomUUID();
+    const order = await readyOrder();
     dverRespond = (req, res) => {
       if (mode === 'disconnect') return req.socket.destroy();
       res.statusCode = mode === 'auth' ? 403 : mode === 'error' ? 500 : 200;
       res.end(mode === 'auth' ? 'Authorization data is wrong!' : '{}');
     };
-    const response = await submitOrder(order, key);
+    const response = await submitOrder(order);
     assert.equal(response.status, 200);
     const status = mode === 'auth' ? 'AUTH_FAILED' : 'REVIEW_REQUIRED';
     assert.equal((await response.json()).data.status, status);
     assert.deepEqual(await submissionRows(order.orderSeq), {
       status,
-      key,
       shipments: 0,
       history: 0,
       acceptedAudit: 0,
     });
-    assert.equal((await submitOrder(order, key, {}, 1)).status, 200);
-    await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+    assert.equal((await submitOrder(order, {}, 1)).status, 200);
+    assert.equal((await submitOrder(order)).status, 200);
     assert.equal(dverRequests.length, 1);
   }
 });
@@ -2464,13 +2459,12 @@ test('ORD-06 disabled configuration and prepare audit failure preserve the colle
     if (args[0].action === 'ORDER_SUBMISSION_STARTED') throw Error('submit-prepare-rollback');
   };
   try {
-    assert.equal((await submitOrder(order, randomUUID(), aiReadHeaders(callId))).status, 500);
+    assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 500);
   } finally {
     audit.recordSuccess = original;
   }
   assert.deepEqual(await submissionRows(order.orderSeq), {
     status: 'COLLECTING',
-    key: null,
     shipments: 0,
     history: 0,
     acceptedAudit: 0,
@@ -2483,11 +2477,10 @@ test('ORD-06 disabled configuration and prepare audit failure preserve the colle
   assert.equal(dverRequests.length, 0);
 });
 
-test('ORD-06 result storage failure rolls back shipments/audit and stale intent becomes review without resending', async () => {
+test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITTING becomes review without resending', async () => {
   for (const failure of ['shipment', 'audit']) {
     resetDver();
-    const order = await readyOrder(),
-      key = randomUUID();
+    const order = await readyOrder();
     const owner = failure === 'shipment' ? submissionRepository : apps[0].get(AuditService);
     const method = failure === 'shipment' ? 'finish' : 'recordSuccess',
       original = owner[method];
@@ -2497,7 +2490,7 @@ test('ORD-06 result storage failure rolls back shipments/audit and stale intent 
         throw Error('submit-finalize-rollback');
     };
     try {
-      const response = await submitOrder(order, key);
+      const response = await submitOrder(order);
       assert.equal(response.status, 202);
       assert.equal((await response.json()).data.status, 'SUBMITTING');
     } finally {
@@ -2505,29 +2498,40 @@ test('ORD-06 result storage failure rolls back shipments/audit and stale intent 
     }
     assert.deepEqual(await submissionRows(order.orderSeq), {
       status: 'SUBMITTING',
-      key,
       shipments: 0,
       history: 0,
       acceptedAudit: 0,
     });
-    assert.equal((await submitOrder(order, key, {}, 1)).status, 202);
-    await pool.query(
-      "UPDATE orders SET submission_started_at=now()-interval '2 minutes' WHERE order_seq=$1",
-      [order.orderSeq],
-    );
-    const recovery = await submitOrder(order, key, {}, 1);
+    assert.equal((await submitOrder(order, {}, 1)).status, 202);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Set an old timestamp only in the disposable fixture; restore the trigger before commit.
+      await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
+      await client.query(
+        "UPDATE orders SET updated_at=now()-interval '2 minutes' WHERE order_seq=$1",
+        [order.orderSeq],
+      );
+      await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const recovery = await submitOrder(order, {}, 1);
     assert.equal(recovery.status, 200);
     assert.equal((await recovery.json()).data.status, 'REVIEW_REQUIRED');
-    await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+    assert.equal((await submitOrder(order)).status, 200);
     assert.equal(dverRequests.length, 1);
   }
 });
 
-test('ORD-06 request identity survives a new application instance', async () => {
+test('ORD-06 stored submission state survives a new application instance without a request key', async () => {
   resetDver();
-  const order = await readyOrder(),
-    key = randomUUID();
-  assert.equal((await submitOrder(order, key)).status, 200);
+  const order = await readyOrder();
+  assert.equal((await submitOrder(order)).status, 200);
   const app = await NestFactory.create(AppModule, { logger: false });
   apps.push(app);
   configureApplication(app, { log: () => {} });
@@ -2538,7 +2542,6 @@ test('ORD-06 request identity survives a new application instance', async () => 
       Origin: origin,
       Cookie: cookies[0],
       'Content-Type': 'application/json',
-      'Idempotency-Key': key,
     },
     body: JSON.stringify({ expectedVersion: order.version }),
   });
@@ -2554,9 +2557,16 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
   assert.match(operation.summary, /ORD-06/);
   assert.ok(operation.description.includes('groupBilling'));
   const headers = operation.parameters.filter((p) => p.in === 'header');
-  assert.equal(headers.length, 2);
+  assert.equal(headers.length, 1);
   assert.equal(headers.find((p) => p.name === 'call_session_seq').schema.type, 'integer');
-  assert.equal(headers.find((p) => p.name === 'Idempotency-Key').required, true);
+  assert.equal(
+    headers.find((p) => p.name === 'Idempotency-Key'),
+    undefined,
+  );
+  assert.equal(
+    spec.paths['/api/orders'].post.parameters.find((p) => p.name === 'Idempotency-Key').required,
+    true,
+  );
   assert.deepEqual(spec.components.schemas.SubmitOrderDto.required, ['expectedVersion']);
   for (const status of [200, 202, 400, 401, 403, 404, 409, 422, 503])
     assert.ok(operation.responses[status]?.description, status);
@@ -2571,20 +2581,19 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
 test('ORD-06 does not deadlock with a membership change and retries eligibility after it completes', async () => {
   resetDver();
   const order = await readyOrder({ customerSeq: customerId, paymentMethodType: 'groupBilling' });
-  const lock = await pool.connect(),
-    key = randomUUID();
+  const lock = await pool.connect();
   try {
     await lock.query('BEGIN');
     await lock.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1 FOR UPDATE', [
       customerId,
     ]);
-    await errorCode(await submitOrder(order, key), 409, 'REQUEST_IN_PROGRESS');
+    await errorCode(await submitOrder(order), 409, 'REQUEST_IN_PROGRESS');
     assert.equal(dverRequests.length, 0);
-    assert.equal((await submissionRows(order.orderSeq)).key, null);
+    assert.equal((await submissionRows(order.orderSeq)).status, 'COLLECTING');
   } finally {
     await lock.query('ROLLBACK');
     lock.release();
   }
-  assert.equal((await submitOrder(order, key)).status, 200);
+  assert.equal((await submitOrder(order)).status, 200);
   assert.equal(dverRequests.length, 1);
 });
