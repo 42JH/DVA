@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, Navigate } from 'react-router'
 import { RouterProvider } from 'react-router/dom'
 import { LoginPage } from '../features/auth/view/LoginPage'
+import { CallDetailPage } from '../features/call/view/CallDetailPage'
 import { FaqPage } from '../features/faq/view/FaqPage'
 import { ApiError } from '../shared/api/client'
 import { AppLayout } from './AppLayout'
@@ -35,7 +36,7 @@ const router = createBrowserRouter([
       { path: 'dashboard', element: <Placeholder title="02 대시보드" /> },
       { path: 'orders', element: <Placeholder title="03 주문 내역" /> },
       { path: 'calls', element: <Placeholder title="04 통화 내역" /> },
-      { path: 'calls/:callId', element: <Placeholder title="06 통화 상세" /> },
+      { path: 'calls/:callId', element: <CallDetailPage /> },
       { path: 'inquiries', element: <Placeholder title="05 통화 문의" /> },
       { path: 'inquiries/:callId', element: <Placeholder title="05 통화 문의 상세" /> },
       { path: 'companies', element: <Placeholder title="08 기업관리" /> },
