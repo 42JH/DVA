@@ -72,6 +72,14 @@ PIN 참조는 고객 본인의 개인 PIN 또는 ACTIVE 기업/소속의 기업 
 | 422 IDEMPOTENCY_KEY_REUSED | 같은 관리자·키에 다른 본문 |
 | 500 INTERNAL_ERROR | 저장 실패. 주문·상세·중복 방지·성공 감사는 함께 롤백 |
 
+## 접수 전 필수값 검사
+
+`assertOrderSubmissionReady`는 형식 검증을 거쳐 정규화된 주문의 필수값을 검사한다. 상세 1개 이상, 수거 시각, 각 상세의 itemPrice, 완전한 출발/도착 주소를 요구한다. 상세주소는 선택이며 좌표 0과 물품 가액 0은 유효하다. 물품 수량 중 하나가 양수이거나 기타 물품 설명이 비어 있지 않아야 한다.
+
+부족하면 `422 VALIDATION_FAILED` 예외의 details에 `parcels.0.origin.name`처럼 필드 경로와 사유를 담는다. 입력 원문은 포함하지 않고 주문을 수정하지 않는다. 초안 생성에는 이 검사를 적용하지 않는다.
+
+현재 이 검사는 독립 함수와 단위 테스트까지 구현되어 있으며 HTTP 접수 경로에는 아직 연결되지 않았다. 57번 ORD-06 구현 시 저장된 최신 주문을 검사한 뒤 고객/PIN/결제 자격, 상태·버전 확인과 함께 사용한다. 수거 가능 날짜/시간대·결제 자격 정책은 확정되지 않아 임의로 추가하지 않았다.
+
 ## DB와 후속 작업
 
 앱 배포 전에 신규 migration `005-order-creation-requests.sql`이 적용되어야 한다. 기존 orders/order_parcels 구조는 유지하고 `api_idempotency.order_creations`에 요청 해시와 최초 응답만 저장한다. 주소·전화번호 원문은 중복 방지 기록과 감사 metadata에 저장하지 않는다.
