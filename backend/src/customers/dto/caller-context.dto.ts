@@ -1,0 +1,89 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { IsString, Matches } from 'class-validator';
+import { RequestMetaDto } from '../../common/dto/api-response.dto';
+import { MembershipResponseDto } from '../../members/dto/member-response.dto';
+import { OrganizationResponseDto } from '../../organizations/dto/organization-response.dto';
+import { CustomerResponseDto } from './customer-response.dto';
+
+export class CallerContextRequestDto {
+  @ApiProperty({
+    description: 'PBX에서 전달된 발신번호. 선행 0을 보존한 숫자 문자열.',
+    pattern: '^[0-9]+(?![\\s\\S])',
+    example: '01012345678',
+  })
+  @IsString()
+  @Matches(/^[0-9]+(?![\s\S])/)
+  phoneNumber!: string;
+}
+
+export class PinAddressDto {
+  @ApiProperty() name!: string;
+  @ApiProperty() phoneNumber!: string;
+  @ApiProperty() roadAddress!: string;
+  @ApiProperty() jibunAddress!: string;
+  @ApiProperty({ type: String, nullable: true, required: false }) detailAddress?: string | null;
+  @ApiProperty() dongName!: string;
+  @ApiProperty() postalCode!: string;
+  @ApiProperty({ minimum: -90, maximum: 90 }) latitude!: number;
+  @ApiProperty({ minimum: -180, maximum: 180 }) longitude!: number;
+}
+
+export class PersonalContextPinDto {
+  @ApiProperty({ minimum: 1 }) personalPinSeq!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty({ type: PinAddressDto }) addressData!: PinAddressDto;
+  @ApiProperty({ minimum: 1 }) version!: number;
+}
+
+export class CompanyContextPinDto {
+  @ApiProperty({ minimum: 1 }) companyPinSeq!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;
+  @ApiProperty({ type: PinAddressDto }) addressData!: PinAddressDto;
+  @ApiProperty({ minimum: 1 }) version!: number;
+}
+
+export class CallerContextDto {
+  @ApiProperty({
+    enum: ['REGISTERED', 'UNREGISTERED', 'WITHDRAWN'],
+    description: '고객 등록 상태. 주문·주소록 유무로 판단하지 않습니다.',
+  })
+  lookupStatus!: 'REGISTERED' | 'UNREGISTERED' | 'WITHDRAWN';
+
+  @ApiProperty({ type: CustomerResponseDto, nullable: true })
+  customer!: CustomerResponseDto | null;
+
+  @ApiProperty({
+    type: MembershipResponseDto,
+    nullable: true,
+    description: '활성 고객의 현재 소속. 비활성 소속도 상태를 확인할 수 있습니다.',
+  })
+  membership!: MembershipResponseDto | null;
+
+  @ApiProperty({ type: OrganizationResponseDto, nullable: true })
+  organization!: OrganizationResponseDto | null;
+
+  @ApiProperty({
+    enum: ['PERSONAL', 'COMPANY'],
+    isArray: true,
+    description: '현재 이용 가능한 범위. COMPANY는 고객·소속·기업이 모두 ACTIVE일 때만 포함.',
+  })
+  availableUsageTypes!: ('PERSONAL' | 'COMPANY')[];
+
+  @ApiProperty({
+    type: [PersonalContextPinDto],
+    description: '본인의 개인 PIN 전체. 번호 오름차순.',
+  })
+  personalPins!: PersonalContextPinDto[];
+
+  @ApiProperty({
+    type: [CompanyContextPinDto],
+    description: '접근 가능한 소속 기업 PIN 전체. 번호 오름차순.',
+  })
+  companyPins!: CompanyContextPinDto[];
+}
+
+export class CallerContextEnvelopeDto {
+  @ApiProperty({ type: CallerContextDto }) data!: CallerContextDto;
+  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
+}

@@ -19,6 +19,15 @@ export class CustomersService {
     private readonly audit: AuditService,
   ) {}
 
+  async context(phoneNumber: string) {
+    try {
+      return await this.repository.context(phoneNumber);
+    } catch {
+      // 조회 장애를 미등록 고객으로 바꾸거나 일부 주소록만 성공으로 반환하지 않는다.
+      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '고객 초기 정보를 조회할 수 없습니다.');
+    }
+  }
+
   async resolveForOrder(
     client: PoolClient,
     input: { customerSeq?: number; customer?: CreateCustomerDto },
