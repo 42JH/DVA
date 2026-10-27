@@ -86,6 +86,8 @@ call_session_seq: 7
 
 ## AI 연동과 후속 작업
 
+특정 시점에 사용한 출발지·도착지를 신규 주문에 재사용하려면 [42번 이전 주문 주소 조회](order-address-history.md)를 사용한다.
+
 1. 새 AI 상담 결과는 POST /api/orders의 본문 call로 통화를 생성·연결하고 응답의 `callSessionSeq`를 받는다. 조회에서는 이 값을 `call_session_seq` 헤더로 사용한다. 상담 시작 시 고객·주소록은 별도 POST /api/customers/context로 확인한다.
 2. AI는 목록의 `data[]`에서 orderSeq를 선택하고, 상세의 `data`에서 주소·상세 번호·version을 읽는다.
 3. 기존 주문 조회·보완은 같은 orderSeq를 사용한다. 새 AI 완료 결과는 ORD-01에서 디버 접수까지 처리하며 ORD-04·ORD-06을 추가 호출하지 않는다. [AI·PBX 계약](ai-pbx-recordings.md)을 참고한다.

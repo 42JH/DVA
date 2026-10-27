@@ -10,6 +10,10 @@ import { OrderStatus } from './orders.types';
 import { OrderCallDto } from './dto/order-call.dto';
 import { callerPhone } from '../common/caller-phone';
 import { ApiException } from '../common/errors/api.exception';
+import {
+  OrderAddressHistoryQueryDto,
+  PreviousOrderAddressDto,
+} from './dto/order-address-history.dto';
 
 @Injectable()
 export class OrdersRepository {
@@ -58,6 +62,45 @@ export class OrdersRepository {
         [phone],
       )
     ).rows[0];
+  }
+
+  async customerExists(client: PoolClient, id: number): Promise<boolean> {
+    return (
+      (await client.query('SELECT 1 FROM customers WHERE customer_seq=$1', [id])).rowCount === 1
+    );
+  }
+
+  async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
+    // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
+    const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';
+    return (
+      await client.query<PreviousOrderAddressDto>(
+        `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",
+        jsonb_build_object('name',p.${side}_name,'phoneNumber',p.${side}_phone_number,
+          'roadAddress',p.${side}_road_address,'jibunAddress',p.${side}_jibun_address,
+          'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
+          'postalCode',p.${side}_postal_code,'latitude',p.${side}_latitude,'longitude',p.${side}_longitude) AS address
+       FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
+       WHERE o.customer_seq=$1 AND o.status='ACCEPTED'
+         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
+         AND ($3::timestamptz IS NULL OR o.created_at < $3)
+         AND (NULLIF(btrim(p.${side}_road_address),'') IS NOT NULL
+           OR NULLIF(btrim(p.${side}_jibun_address),'') IS NOT NULL)
+         AND ($4::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+           p.${side}_name,p.${side}_phone_number,p.${side}_road_address,p.${side}_jibun_address,
+           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)
+       ORDER BY o.created_at DESC,o.order_seq DESC,p.parcel_position,p.order_parcel_seq
+       LIMIT $5 OFFSET $6`,
+        [
+          customerId,
+          query.from ?? null,
+          query.to ?? null,
+          query.q || null,
+          query.limit + 1,
+          query.offset,
+        ],
+      )
+    ).rows;
   }
 
   async readCustomer(client: PoolClient, callId: number) {
