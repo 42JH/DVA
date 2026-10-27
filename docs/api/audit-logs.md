@@ -36,6 +36,7 @@ DB에 저장된 원문 JSON이나 비밀번호·토큰 등 비밀값은 반환�
 ## 기록 규칙
 
 관리자 가입·로그인·권한/상태 변경·비밀번호 변경/초기화·로그아웃을 기록한다.
+주소록 등록·수정은 [PIN API](pins.md)의 PERSONAL_PIN_CREATED·PERSONAL_PIN_UPDATED·COMPANY_PIN_CREATED·COMPANY_PIN_UPDATED로 기록한다.
 성공 기록은 기존 업무 트랜잭션에서 저장한다. 감사 저장 실패 시 업무 변경도 롤백한다.
 이미 만료되거나 삭제된 세션의 반복 로그아웃은 성공 기록을 추가하지 않는다.
 
