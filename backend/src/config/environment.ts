@@ -12,6 +12,10 @@ export interface Environment {
   PBX_WEBHOOK_TOKEN?: string;
   DVER_API_URL: string;
   DVER_API_KEY?: string;
+  AWS_REGION: string;
+  S3_RECORDINGS_BUCKET?: string;
+  RECORDING_ALLOWED_HOSTS: string[];
+  RECORDING_MATCH_WINDOW_SECONDS: number;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -126,7 +130,41 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     PBX_WEBHOOK_TOKEN: typeof token === 'string' && token ? token : undefined,
     DVER_API_URL: String(dverUrl),
     DVER_API_KEY: typeof dverKey === 'string' && dverKey ? dverKey : undefined,
+    AWS_REGION: String(raw.AWS_REGION || 'ap-northeast-2'),
+    S3_RECORDINGS_BUCKET:
+      typeof raw.S3_RECORDINGS_BUCKET === 'string' && raw.S3_RECORDINGS_BUCKET
+        ? raw.S3_RECORDINGS_BUCKET
+        : undefined,
+    RECORDING_ALLOWED_HOSTS: String(
+      raw.RECORDING_ALLOWED_HOSTS ||
+        'dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com',
+    )
+      .split(',')
+      .map((host) => host.trim().toLowerCase()),
+    RECORDING_MATCH_WINDOW_SECONDS: Number(raw.RECORDING_MATCH_WINDOW_SECONDS || '30'),
   };
+  if (!/^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(config.AWS_REGION)) errors.push('AWS_REGION');
+  if (
+    raw.S3_RECORDINGS_BUCKET &&
+    (typeof raw.S3_RECORDINGS_BUCKET !== 'string' ||
+      !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(config.S3_RECORDINGS_BUCKET!))
+  )
+    errors.push('S3_RECORDINGS_BUCKET');
+  if (
+    config.RECORDING_ALLOWED_HOSTS.some(
+      (host) =>
+        !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(host) ||
+        !host.includes('.') ||
+        /^[\d.]+$/.test(host),
+    )
+  )
+    errors.push('RECORDING_ALLOWED_HOSTS');
+  if (
+    !Number.isInteger(config.RECORDING_MATCH_WINDOW_SECONDS) ||
+    config.RECORDING_MATCH_WINDOW_SECONDS < 1 ||
+    config.RECORDING_MATCH_WINDOW_SECONDS > 300
+  )
+    errors.push('RECORDING_MATCH_WINDOW_SECONDS');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

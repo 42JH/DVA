@@ -164,8 +164,9 @@ Table order_parcels {
 Table call_sessions {
   call_session_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   order_seq integer [note: '연결 대상 ID']
-  provider_call_id text [not null, unique, note: 'AI 결과·문장·디버 녹취를 연결할 공통 통화 식별값. 전달 규격 미정']
+  provider_call_id text [not null, unique, note: 'OpenAI 통화 세션 ID. PBX recordingId와 별개이며 AI 결과 재전송 시 유지']
   caller_phone_number text [note: '해당 통화 발신번호. 숫자 문자열, AI 수신 연동 전에는 NULL 가능']
+  incoming_at timestamptz [note: 'OpenAI 수신 이벤트 created_at. PBX 매칭용 기준 시각이며 실제 통화 시작 시각과 별도']
   started_at timestamptz [note: '종료 결과로 전달받는 실제 통화 시작 시각']
   ended_at timestamptz [note: '종료 결과로 전달받는 실제 통화 종료 시각']
   end_reason text [note: '통화 종료 사유']
@@ -173,8 +174,20 @@ Table call_sessions {
     `btrim(provider_call_id)<>''`
     `(started_at IS NULL AND ended_at IS NULL AND end_reason IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`
   }
-  Note: 'consultation / 통화마다 새 행. 최초 문장 수신 시 최소 행 생성, 종료 결과로 실제 시각과 주문을 연결한다. / SQL 인덱스: CREATE INDEX calls_order_idx ON call_sessions(order_seq,started_at,call_session_seq); CREATE INDEX calls_retention_idx ON call_sessions(ended_at,provider_call_id);'
+  Note: 'consultation / AI 주문 결과에서 세션 생성·주문 연결. PBX는 발신번호와 incoming_at 허용 구간 내 유일 후보에만 연결한다. / SQL 인덱스: calls_order_idx, calls_retention_idx, call_sessions_caller_incoming_idx.'
 }
+
+Table pbx_webhooks.call_ended_events {
+  recording_id varchar(200) [pk, not null, note: 'PBX 녹취 고유 ID. 같은 ID와 같은 본문의 재전송은 한 번만 수신']
+  payload jsonb [not null, note: '정규화한 웹훅 원문. 발신·수신번호, 실제 시각, 재생 시간, 다운로드 URL 포함']
+  received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  processing_status text [not null, default: 'RECEIVED', note: 'RECEIVED: 대기·매칭 보류 / FAILED: 저장 실패 재시도 / PROCESSED: S3·DB 완료']
+  call_session_seq integer [note: '처음 결정한 통화 연결. 이후 재시도에서 재매칭하지 않음']
+  last_attempt_at timestamptz [note: '공정한 순환 재시도용 마지막 시도 시각']
+  Note: '기존 PBX 수신함 재사용. 별도 중복 검증·작업 큐 테이블을 만들지 않는다.'
+}
+
+Ref: call_sessions.call_session_seq < pbx_webhooks.call_ended_events.call_session_seq
 
 Table call_utterances {
   call_utterance_seq integer [pk, increment, not null, note: '행의 고유 기본키']

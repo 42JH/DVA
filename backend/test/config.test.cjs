@@ -12,6 +12,38 @@ const valid = {
   AI_AGENT_URL: 'http://ai:8000',
 };
 
+test('recording config is disabled until a bucket is set and bounds correlation settings', () => {
+  const defaults = validateEnvironment(valid);
+  assert.equal(defaults.S3_RECORDINGS_BUCKET, undefined);
+  assert.equal(defaults.AWS_REGION, 'ap-northeast-2');
+  assert.equal(defaults.RECORDING_MATCH_WINDOW_SECONDS, 30);
+  assert.deepEqual(defaults.RECORDING_ALLOWED_HOSTS, [
+    'dvercorp-aicc-connect-dev-recordings.s3.ap-northeast-2.amazonaws.com',
+  ]);
+  const enabled = validateEnvironment({
+    ...valid,
+    S3_RECORDINGS_BUCKET: 'dva-private-recordings',
+    RECORDING_MATCH_WINDOW_SECONDS: '10',
+    RECORDING_ALLOWED_HOSTS: 'records.example.test,second.example.test',
+  });
+  assert.equal(enabled.RECORDING_MATCH_WINDOW_SECONDS, 10);
+  assert.equal(enabled.RECORDING_ALLOWED_HOSTS.length, 2);
+  for (const settings of [
+    { AWS_REGION: 'https://wrong.example' },
+    { S3_RECORDINGS_BUCKET: 'arn:aws:s3:::secret-bucket' },
+    { RECORDING_ALLOWED_HOSTS: '*' },
+    { RECORDING_ALLOWED_HOSTS: '127.0.0.1' },
+    { RECORDING_ALLOWED_HOSTS: 'https://records.example.test' },
+    { RECORDING_MATCH_WINDOW_SECONDS: '0' },
+    { RECORDING_MATCH_WINDOW_SECONDS: '301' },
+    { RECORDING_MATCH_WINDOW_SECONDS: '1.5' },
+  ])
+    assert.throws(
+      () => validateEnvironment({ ...valid, ...settings }),
+      /^EnvironmentValidationError: Invalid environment variables:/,
+    );
+});
+
 test('configuration parses ports and exact CORS origins; production docs default off', () => {
   const config = validateEnvironment({
     ...valid,
