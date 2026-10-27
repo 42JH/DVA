@@ -1,5 +1,5 @@
 // 필터 줄 부품 — 높이 48 · 모서리 8. 적용된(applied) 상태 = 옅은 남색 바탕 + 남색 1.5 선 (와이어프레임 04 '불만 있음')
-// 상태는 ViewModel이 들고, 여기는 그리기만
+// 상태는 훅(hooks/)이 들고, 여기는 그리기만
 // 선은 전부 안쪽 ring — 1 → 1.5로 굵어져도 칸 폭 · 글자 자리가 안 움직이게
 const LINE = 'ring-1 ring-line ring-inset'
 const LINE_ON = 'ring-[1.5px] ring-action ring-inset'

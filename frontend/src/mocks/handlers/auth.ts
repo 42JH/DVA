@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { API_BASE_URL } from '../../shared/api/client'
+import { API_BASE_URL } from '@/shared/api/client'
 
 // 가짜 로그인 — 아이디만 맞으면 비밀번호는 아무 값이나 통과 (가짜 전용). 역할 · 승인 상태별로 화면을 확인하려고 셋
 // jaehoon.lee = 슈퍼바이저(SYSTEM_ADMIN) · supervisor = 일반 관리자(SUPERVISOR) · pending = 승인 대기
