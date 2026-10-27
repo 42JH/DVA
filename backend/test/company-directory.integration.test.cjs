@@ -205,6 +205,45 @@ test('query matches company, department, label, official recipient/contact and a
   });
 });
 
+test('only explicit public PIN fields are projected; member and private PIN values cannot match queries', async () => {
+  const c = await company(),
+    secret = marker();
+  const p = await pin(c);
+  const phone = '010' + String(randomInt(10000000, 100000000));
+  const customer = (
+    await pool.query(
+      `INSERT INTO customers(name,phone_number,status)
+    VALUES($1,$2,'ACTIVE') RETURNING customer_seq`,
+      [secret, phone],
+    )
+  ).rows[0].customer_seq;
+  await pool.query(
+    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,status)
+    VALUES($1,$2,$3,'ACTIVE')`,
+    [customer, c.id, secret],
+  );
+  await pool.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)', [
+    customer,
+    secret,
+    address({ name: secret, phoneNumber: phone }),
+  ]);
+  const body = await result(await search({ q: c.name }));
+  assert.deepEqual(body.data, [p]);
+  assert.deepEqual(Object.keys(body.data[0]).sort(), [
+    'addressData',
+    'companyPinSeq',
+    'departmentName',
+    'label',
+    'organizationName',
+    'organizationSeq',
+    'version',
+  ]);
+  assert.ok(!JSON.stringify(body).includes(secret));
+  assert.ok(!JSON.stringify(body).includes(phone));
+  assert.deepEqual(await result(await search({ q: secret })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: phone })), { data: [], hasNext: false });
+});
+
 test('company and PIN edits and deactivation are reflected by the next query', async () => {
   const c = await company();
   const p = await pin(c, { label: '이전 별칭', departmentName: '이전 부서' });
@@ -241,6 +280,55 @@ test('company and PIN edits and deactivation are reflected by the next query', a
   assert.equal((await result(await search({ q: renamed }))).data[0].companyPinSeq, p.companyPinSeq);
 });
 
+test('every active admin role can search while the anonymous MVP read uses the same projection', async () => {
+  const c = await company();
+  await pin(c);
+  const anonymous = await result(await search({ q: c.name }));
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN'])
+    assert.deepEqual(await result(await search({ q: c.name }, await account(role))), anonymous);
+});
+
+test('stale cookies never fall back to anonymous access and untrusted Origin is rejected', async () => {
+  const c = await company();
+  for (const Cookie of ['dva_session=bad', 'dva_session=' + 'f'.repeat(64)])
+    await error(await search({ q: c.name }, { Cookie }), 401, 'UNAUTHORIZED');
+  const loggedOut = await account();
+  assert.equal(
+    (await fetch(base + '/api/auth/logout', { method: 'POST', headers: loggedOut })).status,
+    204,
+  );
+  await error(await search({ q: c.name }, loggedOut), 401, 'UNAUTHORIZED');
+  await error(
+    await search({ q: c.name }, { Origin: 'https://untrusted.invalid' }),
+    403,
+    'FORBIDDEN',
+  );
+});
+
+test('the search exception does not open company management, member lists or scoped PIN APIs', async () => {
+  const c = await company();
+  const p = await pin(c);
+  assert.equal((await fetch(base + '/api/companies')).status, 401);
+  assert.equal((await fetch(base + `/api/companies/${c.id}`)).status, 401);
+  assert.equal((await fetch(base + `/api/companies/${c.id}/members`)).status, 401);
+  await error(await fetch(base + `/api/companies/${c.id}/pins`), 400, 'INVALID_REQUEST');
+  const create = await fetch(base + `/api/companies/${c.id}/pins`, {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ addressData: address() }),
+  });
+  await error(create, 401, 'UNAUTHORIZED');
+  await error(
+    await fetch(base + `/api/company-pins/${p.companyPinSeq}`, {
+      method: 'PATCH',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: '{"label":"금지"}',
+    }),
+    401,
+    'UNAUTHORIZED',
+  );
+});
+
 test('query and pagination validation reject missing, blank, repeated and unsupported filters', async () => {
   for (const query of [
     '',
@@ -257,6 +345,31 @@ test('query and pagination validation reject missing, blank, repeated and unsupp
   ])
     await error(await search(query), 400, 'INVALID_REQUEST');
   assert.deepEqual(await result(await search({ q: marker() })), { data: [], hasNext: false });
+});
+
+test('search is read-only and database failures are not transformed into empty successes', async () => {
+  const c = await company();
+  await pin(c);
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM organizations) AS companies,
+    (SELECT count(*) FROM company_pins) AS pins,(SELECT count(*) FROM audit_logs) AS audits`)
+    ).rows[0];
+  const before = await counts();
+  await result(await search({ q: c.name }));
+  await result(await search({ q: c.name }));
+  assert.deepEqual(await counts(), before);
+  const repository = app.get(OrganizationsRepository),
+    original = repository.searchDirectory;
+  repository.searchDirectory = async () => {
+    throw new Error('private directory SQL');
+  };
+  try {
+    await error(await search({ q: c.name }), 500, 'INTERNAL_ERROR');
+  } finally {
+    repository.searchDirectory = original;
+  }
+  assert.equal((await result(await search({ q: c.name }))).data.length, 1);
 });
 
 test('Swagger exposes public PIN projection and static search remains separate from company IDs', async () => {
