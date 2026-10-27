@@ -14,7 +14,7 @@ import { AuditQueryDto } from './dto/audit-query.dto';
 import { AuditDetailResponseDto, AuditListResponseDto } from './dto/audit-response.dto';
 import { AuditIdParamsDto } from './dto/audit-id-params.dto';
 
-@ApiTags('감사 기록')
+@ApiTags('Audit')
 @ApiCookieAuth('adminSession')
 @ApiResponse({
   status: 400,

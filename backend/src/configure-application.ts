@@ -26,7 +26,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       'Content-Type',
       'Authorization',
       'X-Request-Id',
-      'X-Call-Session-Id',
+      'call_session_seq',
       'Idempotency-Key',
     ],
     exposedHeaders: ['X-Request-Id', 'Location', 'Retry-After'],

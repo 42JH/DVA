@@ -1,6 +1,6 @@
-# 주문 API 계약 — ORD-01~03
+# 주문 API 계약 — ORD-01~04
 
-관련 작업: [55번 주문 생성](https://ssafy.atlassian.net/browse/S15P31D109-55), [58번 주문 조회](https://ssafy.atlassian.net/browse/S15P31D109-58). 목록·상세 호출 방법은 [주문 조회 연동 문서](order-read.md)를 참고한다.
+관련 작업: [55번 주문 생성](https://ssafy.atlassian.net/browse/S15P31D109-55), [58번 주문 조회](https://ssafy.atlassian.net/browse/S15P31D109-58), [61번 주문 수정](https://ssafy.atlassian.net/browse/S15P31D109-61). [조회 연동 문서](order-read.md)와 [수정 연동 문서](order-update.md)를 참고한다.
 
 ## 확정 기준
 
@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | ORD-01 주문 생성 | POST /api/orders | 구현. COLLECTING 저장, orderSeq·version 반환 |
 | ORD-02/03 목록·상세 | GET /api/orders, /api/orders/{id} | 58번 구현. 미완료도 같은 주문 조회에서 status로 구분 |
-| ORD-04 수집 정보 저장 | PATCH /api/orders/{id} | 61번. 같은 주문에 expectedVersion으로 수정 |
+| ORD-04 수집 정보 저장 | PATCH /api/orders/{id} | 61번 구현. COLLECTING 주문을 expectedVersion으로 부분 수정·상세 추가 |
 | ORD-06 최종 접수 | POST /api/orders/{id}/submit | 57번. 같은 주문 재검증·디버 접수 |
 | 통화 종료 | CALL-02 | 기존 주문에 통화 종료 결과 연결. 별도 미완료 주문 생성 없음 |
 
@@ -24,15 +24,24 @@
 POST /api/orders
 Content-Type: application/json
 Idempotency-Key: 00000000-0000-4000-8000-000000000055
-X-Call-Session-Id: 7
+call_session_seq: 7
 ```
 
 - Idempotency-Key: 필수 UUID. 같은 생성 의도를 재시도하면 같은 값을 사용한다.
-- AI: X-Call-Session-Id에 기존 call_sessions.call_session_seq를 전달한다. providerCallId 문자열과 다르다. 이 MR은 CALL-01이나 통화 생성 API를 구현하지 않으므로 실제 연동에서는 선행 통화 생성과 이 ID 전달이 필요하다.
-- 관리자: ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN의 dva_session 쿠키와 기존 허용 Origin을 사용한다. X-Call-Session-Id는 선택이며, 전달하면 해당 통화에 연결한다.
+- AI: call_session_seq에 기존 call_sessions.call_session_seq를 전달한다. providerCallId 문자열과 다르다. 이 MR은 CALL-01이나 통화 생성 API를 구현하지 않으므로 실제 연동에서는 선행 통화 생성과 이 ID 전달이 필요하다.
+- 관리자: ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN의 dva_session 쿠키와 기존 허용 Origin을 사용한다. call_session_seq는 선택이며, 전달하면 해당 통화에 연결한다.
 - 관리자 쿠키가 존재하면 정상 인증을 요구한다. 잘못된·만료된 쿠키를 AI 호출로 전환하지 않는다.
 - AI 서비스 인증은 기존 MVP 방침(135번)에 따라 생략한다. 통화 ID 자체는 인증 수단이 아니며, 실제 호출 서버·통화 소유권을 증명하지 않는다. 다른 관리자/고객/PBX API의 인증 동작은 유지한다.
 - /api를 사용하며 /v1은 붙이지 않는다. Swagger: /api/docs, OpenAPI: /api/docs-json.
+
+### 통화 헤더 이름 변경과 배포
+
+2026-10-27 사용자 요청에 따라 통화 헤더를 실제 DB 컬럼명 `call_session_seq`로 통일한다. 값은 `call_sessions.call_session_seq`의 양의 정수다. 기존 `X-Call-Session-Id`는 더 이상 읽지 않으므로 호출 측도 새 이름으로 변경해야 한다.
+
+- 주문 생성·목록·상세·수정과 CORS·Swagger가 같은 이름을 사용한다. DB 컬럼 변경이나 migration은 없다.
+- 밑줄이 있는 헤더를 전달하도록 개발·운영 컨테이너 Nginx와 호스트 HTTPS Nginx의 server 블록에 `underscores_in_headers on;`을 설정한다.
+- Jenkins 앱 배포는 호스트 Nginx 설정을 자동 적용하지 않는다. 운영 반영 시 현재 호스트 설정을 백업하고 API를 받는 server 블록에 해당 지시문을 추가한 뒤 `nginx -t` 성공 후 reload해야 한다. 별도 도메인·AI 설정이 있으므로 저장소 파일 전체로 덮어쓰지 않는다.
+- 호스트 설정을 먼저 준비하고, 새 앱·컨테이너 프록시 배포와 호출 측 헤더 변경을 맞춘다. 기존 호출자가 옛 헤더만 보내면 AI 주문 API에서 400이 발생한다.
 
 ## 요청
 
@@ -124,5 +133,5 @@ ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각
 - 이전 초안의 미배포 006-incomplete-consultations.sql과 별도 상담 테이블 ERD는 제외했다. 운영 DB에 DROP·데이터 초기화를 실행하지 않았다. 별도 환경에 초안 006을 수동 적용했다면 이 MR이 자동 제거하지 않는다.
 - 기존 고객 API를 포함해 빌드·단위/HTTP·실제 DB·동시 요청·실패 롤백·Nginx/PBX 회귀를 node scripts/check.cjs로 검증한다.
 - DB migration·제약·반복 적용·체크섬·실패 롤백·백업 복원은 infra/database/test-monolith.ps1로 검증한다.
-- 현재 HTTP 구현은 ORD-01/02/03이다. ORD-04/06 및 CALL-01/02 구현, 실제 AI 호출부의 통화 ID·경로·필드 연결, 디버 연동, 운영 배포는 별도 작업이다. 58번 조회는 기존 스키마를 사용하며 신규 migration을 추가하지 않는다.
+- 현재 HTTP 구현은 ORD-01/02/03/04다. ORD-06 및 CALL-01/02 구현, 실제 AI 호출부의 통화 ID·경로·필드 연결, 디버 연동, 운영 배포는 별도 작업이다. 58번 조회와 61번 수정은 기존 스키마를 사용하며 신규 migration을 추가하지 않는다.
 - 기존 AI 제안의 /internal/ai·snake_case는 이 /api·camelCase·응답 envelope 계약과 자동 호환되지 않는다. 실제 호출부는 담당 연동 작업에서 맞춰야 한다.

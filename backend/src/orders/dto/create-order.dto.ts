@@ -143,7 +143,11 @@ export class ParcelInputDto {
   @Type(() => OriginPinDto)
   originPin?: OriginPinDto | null;
 
-  @ApiPropertyOptional({ description: '서류 수량. 생략 시 0.', minimum: 0, maximum: 2147483647 })
+  @ApiPropertyOptional({
+    description: '서류 수량. 생성 시 기본 0, 수정 시 생략하면 유지.',
+    minimum: 0,
+    maximum: 2147483647,
+  })
   @ValidateIf(present)
   @IsInt()
   @Min(0)
@@ -151,7 +155,7 @@ export class ParcelInputDto {
   documentCount?: number;
 
   @ApiPropertyOptional({
-    description: '소형 박스 수량. 생략 시 0.',
+    description: '소형 박스 수량. 생성 시 기본 0, 수정 시 생략하면 유지.',
     minimum: 0,
     maximum: 2147483647,
   })
@@ -162,7 +166,7 @@ export class ParcelInputDto {
   smallBoxCount?: number;
 
   @ApiPropertyOptional({
-    description: '중형 박스 수량. 생략 시 0.',
+    description: '중형 박스 수량. 생성 시 기본 0, 수정 시 생략하면 유지.',
     minimum: 0,
     maximum: 2147483647,
   })
@@ -173,7 +177,7 @@ export class ParcelInputDto {
   mediumBoxCount?: number;
 
   @ApiPropertyOptional({
-    description: '대형 박스 수량. 생략 시 0.',
+    description: '대형 박스 수량. 생성 시 기본 0, 수정 시 생략하면 유지.',
     minimum: 0,
     maximum: 2147483647,
   })
@@ -183,18 +187,22 @@ export class ParcelInputDto {
   @Max(2147483647)
   bigBoxCount?: number;
 
-  @ApiPropertyOptional({ description: '기타 물품 설명. 생략 시 빈 문자열.' })
+  @ApiPropertyOptional({
+    description: '기타 물품 설명. 생성 시 기본 빈 문자열, 수정 시 생략하면 유지.',
+  })
   @ValidateIf(present)
   @IsString()
   otherItemDescription?: string;
 
-  @ApiPropertyOptional({ description: '배송 요청 사항. 생략 시 빈 문자열.' })
+  @ApiPropertyOptional({
+    description: '배송 요청 사항. 생성 시 기본 빈 문자열, 수정 시 생략하면 유지.',
+  })
   @ValidateIf(present)
   @IsString()
   clientComment?: string;
 
   @ApiPropertyOptional({
-    description: '물품 가액(원). 0 이상의 정수이며 미입력 시 null.',
+    description: '물품 가액(원). 생성 시 기본 null, 수정 시 생략하면 유지·null이면 비우기.',
     type: Number,
     nullable: true,
     minimum: 0,

@@ -291,16 +291,43 @@ test('production login through Nginx authorizes company operations and logout re
   );
 });
 
-test('production Nginx routes the shared ORD-01 API and forwards its call header', async () => {
+test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
   const missing = await fetch('http://proxy/api/orders', { method: 'POST', headers, body });
   assert.equal(missing.status, 400);
   const unknown = await fetch('http://proxy/api/orders', {
     method: 'POST',
-    headers: { ...headers, 'X-Call-Session-Id': '2147483647' },
+    headers: { ...headers, call_session_seq: '2147483647' },
     body,
   });
   assert.equal(unknown.status, 404);
   assert.equal((await unknown.json()).error.code, 'NOT_FOUND');
+  for (const [method, path, payload] of [
+    ['GET', '/api/orders', undefined],
+    ['GET', '/api/orders/2147483647', undefined],
+    [
+      'PATCH',
+      '/api/orders/2147483647',
+      JSON.stringify({ expectedVersion: 1, paymentMethodType: 'cat' }),
+    ],
+  ]) {
+    const response = await fetch('http://proxy' + path, {
+      method,
+      headers: { ...headers, call_session_seq: '2147483647' },
+      body: payload,
+    });
+    assert.equal(response.status, 404, `${method} ${path}`);
+    assert.equal((await response.json()).error.code, 'NOT_FOUND');
+  }
+  const preflight = await fetch('http://proxy/api/orders', {
+    method: 'OPTIONS',
+    headers: {
+      Origin: 'https://13.209.59.180',
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type,idempotency-key,call_session_seq',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.ok(preflight.headers.get('access-control-allow-headers').includes('call_session_seq'));
 });

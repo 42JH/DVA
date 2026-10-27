@@ -4,14 +4,20 @@ import { PoolClient } from 'pg';
 import { OriginPinDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
+import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
+import { OrderStatus } from './orders.types';
 
 @Injectable()
 export class OrdersRepository {
   async readCustomer(client: PoolClient, callId: number) {
     return (
-      await client.query<{ customerSeq: number | null; endedAt: Date | null }>(
-        `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt"
+      await client.query<{
+        customerSeq: number | null;
+        endedAt: Date | null;
+        orderSeq: number | null;
+      }>(
+        `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt", c.order_seq AS "orderSeq"
          FROM call_sessions c LEFT JOIN customers u
            ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE'
          WHERE c.call_session_seq=$1`,
@@ -165,6 +171,91 @@ export class OrdersRepository {
     return result.rowCount === 1;
   }
 
+  async lockOrder(client: PoolClient, id: number) {
+    return (
+      await client.query<{ customerSeq: number | null; status: OrderStatus; version: number }>(
+        'SELECT customer_seq AS "customerSeq",status,version FROM orders WHERE order_seq=$1 FOR UPDATE',
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async parcelReferences(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        orderParcelSeq: number;
+        parcelPosition: number;
+        originPin: OriginPinDto | null;
+      }>(
+        `SELECT order_parcel_seq AS "orderParcelSeq",parcel_position AS "parcelPosition",
+          CASE WHEN origin_pin_seq IS NULL THEN NULL
+            ELSE jsonb_build_object('scope',origin_pin_scope,'pinSeq',origin_pin_seq) END AS "originPin"
+         FROM order_parcels WHERE order_seq=$1 ORDER BY parcel_position`,
+        [id],
+      )
+    ).rows;
+  }
+
+  async updateHeader(client: PoolClient, id: number, input: UpdateOrderDto) {
+    // 같은 값을 저장해도 버전을 소비해 이전 expectedVersion의 재전송을 막는다.
+    await client.query(
+      `UPDATE orders SET version=version+1,
+         payment_method_type=COALESCE($2,payment_method_type),
+         pickup_requested_at=CASE WHEN $3 THEN $4::timestamptz ELSE pickup_requested_at END
+       WHERE order_seq=$1`,
+      [
+        id,
+        input.paymentMethodType ?? null,
+        input.pickupRequestedAt !== undefined,
+        input.pickupRequestedAt ?? null,
+      ],
+    );
+  }
+
+  async updateParcel(client: PoolClient, orderId: number, parcel: ParcelChangeDto) {
+    const values: unknown[] = [orderId, parcel.orderParcelSeq];
+    const changes: string[] = [];
+    const set = (column: string, value: unknown) => {
+      if (value !== undefined) {
+        values.push(value);
+        changes.push(`${column}=$${values.length}`);
+      }
+    };
+    for (const side of ['origin', 'destination'] as const)
+      for (const field of ORDER_ADDRESS_FIELDS)
+        set(
+          `${side}_${field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`,
+          parcel[side]?.[field],
+        );
+    for (const field of [
+      'documentCount',
+      'smallBoxCount',
+      'mediumBoxCount',
+      'bigBoxCount',
+      'otherItemDescription',
+      'clientComment',
+      'itemPrice',
+    ] as const)
+      set(
+        field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase()),
+        parcel[field],
+      );
+    if (parcel.originPin !== undefined) {
+      set('origin_pin_scope', parcel.originPin?.scope ?? null);
+      set('origin_pin_seq', parcel.originPin?.pinSeq ?? null);
+    }
+    await client.query(
+      `UPDATE order_parcels SET ${changes.join(',')} WHERE order_seq=$1 AND order_parcel_seq=$2`,
+      values,
+    );
+  }
+
+  async currentVersion(client: PoolClient, id: number): Promise<UpdatedOrderDto> {
+    return (
+      await client.query<UpdatedOrderDto>('SELECT version FROM orders WHERE order_seq=$1', [id])
+    ).rows[0];
+  }
+
   async insert(
     client: PoolClient,
     draft: OrderDraft,
@@ -178,9 +269,20 @@ export class OrdersRepository {
         [customerId, draft.paymentMethodType, draft.pickupRequestedAt, key],
       )
     ).rows[0].id;
-    for (const [index, parcel] of draft.parcels.entries()) {
-      await client.query(
-        `INSERT INTO order_parcels (
+    for (const [index, parcel] of draft.parcels.entries())
+      await this.insertParcel(client, id, index + 1, parcel);
+    // 상세 추가 트리거가 버전을 올리므로 초기값이나 상세 수로 추정하지 않는다.
+    return { orderSeq: id, ...(await this.currentVersion(client, id)) };
+  }
+
+  async insertParcel(
+    client: PoolClient,
+    id: number,
+    position: number,
+    parcel: OrderDraft['parcels'][number],
+  ) {
+    await client.query(
+      `INSERT INTO order_parcels (
           order_seq,parcel_position,
           origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_detail_address,
           origin_dong_name,origin_postal_code,origin_latitude,origin_longitude,
@@ -189,29 +291,21 @@ export class OrdersRepository {
           origin_pin_scope,origin_pin_seq,document_count,small_box_count,medium_box_count,big_box_count,
           other_item_description,client_comment,item_price,notified_price)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,3500)`,
-        [
-          id,
-          index + 1,
-          ...ORDER_ADDRESS_FIELDS.map((field) => parcel.origin[field]),
-          ...ORDER_ADDRESS_FIELDS.map((field) => parcel.destination[field]),
-          parcel.originPin?.scope ?? null,
-          parcel.originPin?.pinSeq ?? null,
-          parcel.documentCount,
-          parcel.smallBoxCount,
-          parcel.mediumBoxCount,
-          parcel.bigBoxCount,
-          parcel.otherItemDescription,
-          parcel.clientComment,
-          parcel.itemPrice,
-        ],
-      );
-    }
-    // 상세 추가 트리거가 버전을 올리므로 초기값이나 상세 수로 추정하지 않는다.
-    return (
-      await client.query<CreatedOrderDto>(
-        'SELECT order_seq AS "orderSeq",version FROM orders WHERE order_seq=$1',
-        [id],
-      )
-    ).rows[0];
+      [
+        id,
+        position,
+        ...ORDER_ADDRESS_FIELDS.map((field) => parcel.origin[field]),
+        ...ORDER_ADDRESS_FIELDS.map((field) => parcel.destination[field]),
+        parcel.originPin?.scope ?? null,
+        parcel.originPin?.pinSeq ?? null,
+        parcel.documentCount,
+        parcel.smallBoxCount,
+        parcel.mediumBoxCount,
+        parcel.bigBoxCount,
+        parcel.otherItemDescription,
+        parcel.clientComment,
+        parcel.itemPrice,
+      ],
+    );
   }
 }

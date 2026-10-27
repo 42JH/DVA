@@ -19,7 +19,7 @@ import { LoginEnvelopeDto, MeEnvelopeDto } from './dto/auth-response.dto';
 export function cookieOptions(production: boolean): CookieOptions {
   return { httpOnly: true, secure: production, sameSite: 'lax', path: '/api' };
 }
-@ApiTags('인증')
+@ApiTags('Auth')
 @ApiCookieAuth('adminSession')
 @ApiResponse({ status: 400, description: '요청 형식 오류.', type: ErrorResponseDto })
 @ApiResponse({

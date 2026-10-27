@@ -3,6 +3,7 @@ import {
   Headers,
   Controller,
   Post,
+  Patch,
   Get,
   Query,
   Param,
@@ -35,17 +36,20 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
 import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
+import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 
 const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
   context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
 );
 
-@ApiTags('주문')
+@ApiTags('Orders')
 @ApiExtraModels(
   CreateOrderDto,
   CreatedOrderDto,
   OrderSummaryDto,
   OrderDetailDto,
+  UpdateOrderDto,
+  UpdatedOrderDto,
   RequestMetaDto,
   ErrorResponseDto,
 )
@@ -75,9 +79,10 @@ export class OrdersController {
       '생성 시각·주문 번호 내림차순으로 조회합니다. 필터는 모두 AND 조건이며, 배송 상태는 팀 DB 저장값입니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    description:
+      'DB call_sessions.call_session_seq 값. AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({ description: '통화가 없음.', type: ErrorResponseDto })
@@ -103,9 +108,9 @@ export class OrdersController {
   list(
     @Req() request: AuthRequest,
     @Query() query: OrderQueryDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionId);
+    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionSeq);
   }
 
   @Post()
@@ -143,9 +148,9 @@ export class OrdersController {
     schema: { type: 'string', format: 'uuid' },
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '기존 통화 번호(callSessionSeq). AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
+    description: 'DB call_sessions.call_session_seq 값. AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({ description: '고객 또는 통화가 없음.', type: ErrorResponseDto })
@@ -168,14 +173,98 @@ export class OrdersController {
     @Req() request: AuthRequest,
     @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrderDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
     return this.orders.create(
       request.admin?.adminUserSeq ?? null,
       key.toLowerCase(),
       input,
       request.requestId,
-      callSessionId,
+      callSessionSeq,
+    );
+  }
+
+  @Patch(':id')
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_UPDATED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 수집 정보 수정 (ORD-04)',
+    security: [{ adminSession: [] }, {}],
+    description:
+      'AI·관리자 공통 API. COLLECTING 주문만 부분 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description: 'DB call_sessions.call_session_seq 값. AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiBody({
+    type: UpdateOrderDto,
+    description:
+      'expectedVersion과 변경값이 필요합니다. 상세 번호가 없으면 새 상세를 추가합니다. 응답 유실·409 시 최신 상세를 조회해 재판단하며 새 상세를 무조건 재추가하지 않습니다.',
+    examples: {
+      changeAddress: {
+        summary: '기존 상세의 도착지 일부 수정',
+        value: {
+          expectedVersion: 4,
+          parcels: [{ orderParcelSeq: 101, destination: { roadAddress: '예시시 배송로 2' } }],
+        },
+      },
+      appendParcel: {
+        summary: '새 상세 추가',
+        value: {
+          expectedVersion: 4,
+          parcels: [{ destination: { name: '수령인' }, smallBoxCount: 1 }],
+        },
+      },
+      clearPickup: {
+        summary: '수거 요청 시각 비우기',
+        value: { expectedVersion: 4, pickupRequestedAt: null },
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: '형식·범위 오류, 변경값 누락 또는 중복 상세 번호(INVALID_REQUEST).',
+    type: ErrorResponseDto,
+  })
+  @ApiNotFoundResponse({
+    description: '주문·통화 또는 해당 주문의 상세가 없음(NOT_FOUND).',
+    type: ErrorResponseDto,
+  })
+  @ApiForbiddenResponse({
+    description:
+      '세션 권한·Origin 오류, 비활성 고객, 발신번호 불일치 또는 PIN 접근 불가(FORBIDDEN).',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '저장 버전 불일치(VERSION_CONFLICT), 주문·통화 상태 또는 연결 충돌(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiOkResponse({
+    description: '저장 후 실제 version. 새 상세 번호·저장 내용은 ORD-03으로 조회합니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(UpdatedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  update(
+    @Req() request: AuthRequest,
+    @Param() params: OrderIdParamsDto,
+    @Body() input: UpdateOrderDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    return this.orders.update(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      input,
+      request.requestId,
+      callSessionSeq,
     );
   }
 
@@ -185,12 +274,13 @@ export class OrdersController {
     summary: '주문 상세·배송 상태 조회 (ORD-03)',
     security: [{ adminSession: [] }, {}],
     description:
-      '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
+      '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    description:
+      'DB call_sessions.call_session_seq 값. AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({
@@ -202,7 +292,7 @@ export class OrdersController {
     type: ErrorResponseDto,
   })
   @ApiConflictResponse({
-    description: '종료된 통화의 AI 조회(INVALID_STATE).',
+    description: '종료된 통화로 기존 연결 주문 외의 상세 조회(INVALID_STATE).',
     type: ErrorResponseDto,
   })
   @ApiOkResponse({
@@ -220,8 +310,8 @@ export class OrdersController {
   detail(
     @Req() request: AuthRequest,
     @Param() params: OrderIdParamsDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionId);
+    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionSeq);
   }
 }
