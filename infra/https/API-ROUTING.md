@@ -5,6 +5,11 @@
 NestJS로 전달하고, 관리자 인증·권한·CSRF 검사는 기존 전역 AuthGuard가 처리한다.
 새 업무 API마다 호스트 Nginx 경로를 추가할 필요는 없다.
 
+직원 CSV 업로드는 파일 최대 1MiB와 multipart 헤더를 수용하도록 `/api/`의
+`client_max_body_size 2m`을 사용한다. 앱은 파일 크기 1MiB·1,000행을 별도로 제한한다.
+기존 서버의 `/api/` 블록에도 이 제한을 반영해야 하며 앱 배포만으로 호스트 설정이 바뀌지 않는다.
+자세한 계약은 [기업 구성원 API](../../docs/api/members.md)를 참고한다.
+
 - `/api/health/ready`와 하위 경로는 외부에서 404다.
 - 기존 PBX 웹훅의 POST 제한, Swagger 메서드 제한, Jenkins 경로는 유지한다.
 - API 프록시는 요청을 자동 재시도하지 않고 요청 URL 접근 로그를 남기지 않는다.
