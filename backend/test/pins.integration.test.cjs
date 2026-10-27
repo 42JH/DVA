@@ -383,6 +383,166 @@ test('withdrawal blocks personal access; inactive company permits admin reads bu
   );
 });
 
+test('duplicate personal addresses use existing normalized DB identity, independent of labels, coordinates and request keys', async () => {
+  const f = await fixture();
+  const data = address({ name: 'TEST Name', detailAddress: '가 101호' });
+  const p = await personal(
+    f,
+    data,
+    { label: '첫 주소' },
+    { ...f.ai, 'Idempotency-Key': randomUUID() },
+  );
+  const duplicate = {
+    ...data,
+    name: '  test   name  ',
+    detailAddress: data.detailAddress.normalize('NFD'),
+    latitude: 38,
+  };
+  await error(
+    await request(
+      'POST',
+      `/customers/${f.customer}/pins`,
+      { label: '다른 별칭', addressData: duplicate },
+      f.ai,
+    ),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  const other = await fixture();
+  await personal(other, data);
+  assert.equal((await stored(p.personalPinSeq)).label, '첫 주소');
+  const concurrent = address();
+  const results = await Promise.all(
+    [1, 2].map(() =>
+      request('POST', `/customers/${f.customer}/pins`, { addressData: concurrent }, f.ai),
+    ),
+  );
+  assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
+});
+
+test('company duplicate identity includes normalized department; personal and other company scopes are independent', async () => {
+  const f = await fixture();
+  const other = await fixture();
+  const data = address();
+  await company(f, data, { departmentName: 'Dev Team' });
+  await error(
+    await request('POST', `/companies/${f.company}/pins`, {
+      addressData: data,
+      departmentName: ' dev   team ',
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  await company(f, data, { departmentName: '영업부' });
+  await company(other, data, { departmentName: 'Dev Team' });
+  await personal(f, data);
+  const withoutDepartment = address();
+  await company(f, withoutDepartment);
+  await error(
+    await request('POST', `/companies/${f.company}/pins`, {
+      addressData: withoutDepartment,
+      departmentName: '',
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+});
+
+test('stale expectedVersion is accepted without a re-read and omitted fields survive', async () => {
+  const f = await fixture();
+  const data = address({ detailAddress: '101호' });
+  const p = await personal(f, data, { label: '집' });
+  assert.equal(
+    (
+      await success(
+        await request('PATCH', `/pins/${p.personalPinSeq}`, {
+          addressData: { ...data, detailAddress: '102호' },
+        }),
+      )
+    ).version,
+    2,
+  );
+  assert.equal(
+    (
+      await success(
+        await request(
+          'PATCH',
+          `/pins/${p.personalPinSeq}`,
+          { addressData: { ...data, detailAddress: '103호' }, expectedVersion: 1 },
+          f.ai,
+        ),
+      )
+    ).version,
+    3,
+  );
+  assert.equal((await stored(p.personalPinSeq)).address_data.detailAddress, '103호');
+  assert.equal((await stored(p.personalPinSeq)).label, '집');
+  const cleared = await success(
+    await request('PATCH', `/pins/${p.personalPinSeq}`, { label: null }, f.ai),
+  );
+  assert.equal(cleared.version, 4);
+  assert.equal((await stored(p.personalPinSeq)).address_data.detailAddress, '103호');
+  assert.equal(
+    (await success(await request('PATCH', `/pins/${p.personalPinSeq}`, { label: null }, f.ai)))
+      .version,
+    4,
+  );
+  const c = await company(f, data, { label: '사무실', departmentName: '개발부' });
+  await success(
+    await request('PATCH', `/company-pins/${c.companyPinSeq}`, { departmentName: '영업부' }),
+  );
+  assert.equal(
+    (
+      await success(
+        await request('PATCH', `/company-pins/${c.companyPinSeq}`, {
+          label: null,
+          expectedVersion: 1,
+        }),
+      )
+    ).version,
+    3,
+  );
+  const final = await stored(c.companyPinSeq, true);
+  assert.equal(final.department_name, '영업부');
+  assert.equal(final.label, null);
+  assert.deepEqual(final.address_data, data);
+});
+
+test('concurrent partial updates preserve unrelated fields without a version conflict', async () => {
+  const f = await fixture();
+  const data = address();
+  const p = await personal(f, data);
+  const results = await Promise.all([
+    request('PATCH', `/pins/${p.personalPinSeq}`, { label: '새 별칭', expectedVersion: 1 }, f.ai),
+    request('PATCH', `/pins/${p.personalPinSeq}`, {
+      addressData: { ...data, detailAddress: '새 상세주소' },
+      expectedVersion: 1,
+    }),
+  ]);
+  for (const response of results) assert.equal(response.status, 200);
+  const final = await stored(p.personalPinSeq);
+  assert.equal(final.label, '새 별칭');
+  assert.equal(final.address_data.detailAddress, '새 상세주소');
+  assert.equal(final.version, 3);
+});
+
+test('duplicate edits roll back all fields and version rather than partially saving', async () => {
+  const f = await fixture();
+  const first = await personal(f, address(), { label: '보존' });
+  const duplicate = address();
+  await personal(f, duplicate);
+  const previous = await stored(first.personalPinSeq);
+  await error(
+    await request('PATCH', `/pins/${first.personalPinSeq}`, {
+      label: '저장하면 안 됨',
+      addressData: duplicate,
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  assert.deepEqual(await stored(first.personalPinSeq), previous);
+});
+
 test('literal search, pagination, generated search updates and company department search stay scoped', async () => {
   const f = await fixture();
   for (let i = 0; i < 3; i++)
@@ -443,6 +603,158 @@ test('literal search, pagination, generated search updates and company departmen
       .hasNext,
     false,
   );
+});
+
+test('invalid or incomplete addresses and scope overrides are rejected without storing data', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  const badAddresses = [
+    null,
+    [],
+    {},
+    { ...address(), latitude: '37' },
+    { ...address(), longitude: 181 },
+    { ...address(), name: ' ' },
+    { ...address(), phoneNumber: '010-1234-5678' },
+    { ...address(), postalCode: '1234' },
+    { ...address(), detailAddress: null },
+    { ...address(), private: true },
+  ];
+  for (const data of badAddresses)
+    await error(
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
+      400,
+      'INVALID_REQUEST',
+    );
+  for (const body of [
+    {},
+    { expectedVersion: 1 },
+    { version: 1, label: '변경' },
+    { customerSeq: f.customer, label: '변경' },
+    { addressData: { detailAddress: '부분 주소' } },
+    { label: 123 },
+    { label: '변경', paymentMethodType: 'credit' },
+  ])
+    await error(
+      await request('PATCH', `/pins/${p.personalPinSeq}`, body, f.ai),
+      400,
+      'INVALID_REQUEST',
+    );
+  for (const path of [
+    `/customers/${f.customer}/pins?limit=101`,
+    `/customers/${f.customer}/pins?offset=-1`,
+    '/customers/2147483648/pins',
+    '/customers/abc/pins',
+  ])
+    await error(await request('GET', path), 400, 'INVALID_REQUEST');
+  const noDetail = address();
+  delete noDetail.detailAddress;
+  await personal(f, noDetail, {}, f.ai);
+  await error(
+    await request(
+      'POST',
+      `/customers/${f.customer}/pins`,
+      { addressData: address({ detailAddress: '' }) },
+      f.ai,
+    ),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  await personal(f, address({ roadAddress: '예시로 13', detailAddress: '' }), {}, f.ai);
+});
+
+test('editing a referenced pin leaves existing order address snapshots and order version unchanged', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  const order = (
+    await pool.query('INSERT INTO orders(customer_seq) VALUES($1) RETURNING order_seq', [
+      f.customer,
+    ])
+  ).rows[0].order_seq;
+  const parcel = (
+    await pool.query(
+      `INSERT INTO order_parcels(order_seq,parcel_position,origin_pin_scope,origin_pin_seq,origin_detail_address)
+    VALUES($1,1,'PERSONAL',$2,'접수 당시 주소') RETURNING order_parcel_seq`,
+      [order, p.personalPinSeq],
+    )
+  ).rows[0].order_parcel_seq;
+  const beforeOrder = (await pool.query('SELECT * FROM orders WHERE order_seq=$1', [order]))
+    .rows[0];
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { addressData: address({ detailAddress: '수정된 주소' }) },
+      f.ai,
+    ),
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT origin_detail_address FROM order_parcels WHERE order_parcel_seq=$1',
+        [parcel],
+      )
+    ).rows[0].origin_detail_address,
+    '접수 당시 주소',
+  );
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM orders WHERE order_seq=$1', [order])).rows[0],
+    beforeOrder,
+  );
+});
+
+test('audit success is atomic with writes and contains no address or phone; failure rolls back changes', async () => {
+  const f = await fixture();
+  const p = await personal(f);
+  const requestId = randomUUID();
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { label: '기록' },
+      { ...f.ai, 'X-Request-Id': requestId },
+    ),
+  );
+  const audit = (
+    await pool.query("SELECT * FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+      requestId,
+    ])
+  ).rows;
+  assert.equal(audit.length, 1);
+  assert.equal(audit[0].actor_type, 'SYSTEM');
+  assert.equal(audit[0].target_seq, p.personalPinSeq);
+  assert.deepEqual(audit[0].metadata, {});
+  const service = app.get(AuditService);
+  const original = service.recordSuccess;
+  const before = await stored(p.personalPinSeq);
+  service.recordSuccess = async () => {
+    throw new Error('private audit failure');
+  };
+  try {
+    await error(
+      await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '롤백 대상' }),
+      500,
+      'INTERNAL_ERROR',
+    );
+    assert.deepEqual(await stored(p.personalPinSeq), before);
+    const data = address();
+    await error(
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }),
+      500,
+      'INTERNAL_ERROR',
+    );
+    assert.equal(
+      (
+        await pool.query(
+          'SELECT count(*) FROM personal_pins WHERE customer_seq=$1 AND address_data=$2',
+          [f.customer, data],
+        )
+      ).rows[0].count,
+      '0',
+    );
+  } finally {
+    service.recordSuccess = original;
+  }
 });
 
 test('Swagger exposes six operations and no required version/key or delete operation', async () => {
