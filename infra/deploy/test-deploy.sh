@@ -7,6 +7,7 @@ mkdir -p "$test_root/bin" "$test_root/site/shared" "$test_root/site/releases"
 printf 'DB_USER=test\nDB_PASSWORD=test-only\nDB_NAME=test\n' > "$test_root/site/shared/.env"
 export TEST_DOCKER_LOG="$test_root/docker.log"
 export TEST_CREATION_SCHEMA="$test_root/creation-schema"
+export TEST_MEMBERSHIP_TABLE="$test_root/membership-table"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -19,6 +20,11 @@ if [[ "$*" == *' up '* && "${!#}" == db && -n "${TEST_DB_STARTED:-}" ]]; then to
 if [[ "$1" == exec && "$*" == *creation_request_id* ]]; then
     [[ "${TEST_SCHEMA_QUERY_FAIL:-}" != 1 ]] || exit 1
     if [[ -f "$TEST_CREATION_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *membership_writes* ]]; then
+    [[ "${TEST_MEMBERSHIP_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_MEMBERSHIP_TABLE" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -63,11 +69,20 @@ fi
 printf 'MIGRATE %s\n' "$root" >> "$TEST_DOCKER_LOG"
 test "$(basename "$root")" != "${TEST_MIGRATION_FAIL_VERSION:-}"
 if [ -f "$root/backend/migrations/008-simplify-creation-requests.sql" ]; then touch "$TEST_CREATION_SCHEMA"; fi
+if [ -f "$root/backend/migrations/009-membership-write-requests.sql" ] &&
+   [ ! -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; then touch "$TEST_MEMBERSHIP_TABLE"; fi
+if [ -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; then rm -f "$TEST_MEMBERSHIP_TABLE"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
-    if [[ "${2:-}" == cutover ]]; then
+    if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup ]]; then
         mkdir -p "$directory/backend/migrations"
         printf 'SELECT 1;\n' > "$directory/backend/migrations/008-simplify-creation-requests.sql"
+    fi
+    if [[ "${2:-}" == membership || "${2:-}" == cleanup ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/009-membership-write-requests.sql"
+    fi
+    if [[ "${2:-}" == cleanup ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/010-remove-membership-write-requests.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -232,4 +247,44 @@ if grep -F '/releases/fresh/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then
     echo 'Incompatible old application was restored.' >&2; exit 1
 fi
 
-echo 'PASS: migration gating, fresh DB startup, compatible restore/rollback, checksum/SSH checks, cutover stop/backup order and incompatible restore protection.'
+make_release membership-old membership
+make_release membership-cleanup cleanup
+touch "$TEST_CREATION_SCHEMA" "$TEST_MEMBERSHIP_TABLE"
+printf 'membership-old\n' > "$test_root/site/current-release"
+: > "$TEST_DOCKER_LOG"
+if TEST_MEMBERSHIP_QUERY_FAIL=1 bash "$test_root/site/releases/membership-cleanup/deploy.sh"; then exit 1; fi
+if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+assert_current membership-old
+: > "$TEST_DOCKER_LOG"
+if TEST_BACKUP_FAIL=1 bash "$test_root/site/releases/membership-cleanup/deploy.sh"; then exit 1; fi
+test -f "$TEST_MEMBERSHIP_TABLE"
+grep -F '/releases/membership-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+: > "$TEST_DOCKER_LOG"
+if TEST_MIGRATION_FAIL_VERSION=membership-cleanup bash "$test_root/site/releases/membership-cleanup/deploy.sh"; then exit 1; fi
+test -f "$TEST_MEMBERSHIP_TABLE"
+grep -F '/releases/membership-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+: > "$TEST_DOCKER_LOG"
+bash "$test_root/site/releases/membership-cleanup/deploy.sh"
+assert_current membership-cleanup
+test ! -f "$TEST_MEMBERSHIP_TABLE"
+stop_line="$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+backup_line="$(grep -n '^BACKUP ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+migration_line="$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+app_line="$(grep -n ' up ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+[[ "$stop_line" -lt "$backup_line" && "$backup_line" -lt "$migration_line" && "$migration_line" -lt "$app_line" ]]
+: > "$TEST_DOCKER_LOG"
+if bash "$test_root/site/releases/membership-cleanup/deploy.sh" --rollback; then exit 1; fi
+if grep -E ' up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+assert_current membership-cleanup
+make_release membership-broken cleanup
+touch "$TEST_MEMBERSHIP_TABLE"
+printf 'membership-old\n' > "$test_root/site/current-release"
+: > "$TEST_DOCKER_LOG"
+if TEST_VERIFY_FAIL=1 bash "$test_root/site/releases/membership-broken/deploy.sh"; then exit 1; fi
+test ! -f "$TEST_MEMBERSHIP_TABLE"
+if grep ' up ' "$TEST_DOCKER_LOG"; then exit 1; fi
+touch "$TEST_MEMBERSHIP_TABLE"
+: > "$TEST_DOCKER_LOG"
+if TEST_FAIL_VERSION=membership-broken bash "$test_root/site/releases/membership-broken/deploy.sh"; then exit 1; fi
+if grep -F '/releases/membership-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then exit 1; fi
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010 stop-backup order and incompatible restore protection.'

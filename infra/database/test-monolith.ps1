@@ -28,6 +28,7 @@ try {
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/monolith-check.sql') "${containerName}:/tmp/dva129/check.sql"
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/runner-check.sh') "${containerName}:/tmp/dva129/runner-check.sh"
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/creation-upgrade-check.sh') "${containerName}:/tmp/dva129/creation-upgrade-check.sh"
+    Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/membership-upgrade-check.sh') "${containerName}:/tmp/dva129/membership-upgrade-check.sh"
     Invoke-Docker exec $containerName chmod +x /tmp/dva129/testbin/docker
     Invoke-Docker exec $containerName sh /tmp/dva129/runner-check.sh
 } finally {

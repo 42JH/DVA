@@ -45,6 +45,9 @@ release="$test_root/repo/.deploy/test-one"
 (cd "$release" && sha256sum --check --status release-files.sha256)
 cmp "$repo_root/backend/migrations/001-pbx-call-ended.sql" "$release/backend/migrations/001-pbx-call-ended.sql"
 test -f "$release/backend/migrations/004-organization-creation-requests.sql"
+cmp "$repo_root/backend/migrations/009-membership-write-requests.sql" "$release/backend/migrations/009-membership-write-requests.sql"
+test -f "$release/backend/migrations/010-remove-membership-write-requests.sql"
+grep -F 'backend/migrations/010-remove-membership-write-requests.sql' "$release/release-files.sha256" >/dev/null
 test "$(grep -c '_IMAGE=' "$release/release.env")" = 3
 if grep -E 'dva-ai|AI_IMAGE' "$TEST_COMMAND_LOG" "$release/release.env"; then
  echo 'Backend release must not package AI' >&2; exit 1

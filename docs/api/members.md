@@ -19,8 +19,8 @@ POST·PATCH·DELETE에는 설정된 허용 Origin이 필요하다. AI 무인증 
 | 메서드·경로 | 요청 | 성공 |
 | --- | --- | --- |
 | GET /api/companies/{id}/members | status, limit, offset | 200, `{ data: MemberView[], hasNext }` |
-| POST /api/companies/{id}/members | `{ employeeNo, customerSeq, role }`, Idempotency-Key UUID | 204 |
-| POST /api/companies/{id}/members/import | multipart/form-data의 file 1개, Idempotency-Key UUID | 204 |
+| POST /api/companies/{id}/members | `{ employeeNo, customerSeq, role }` | 204 |
+| POST /api/companies/{id}/members/import | multipart/form-data의 file 1개 | 204 |
 | PATCH /api/members/{id} | role 또는 status 중 한 개 이상 | 204 |
 | DELETE /api/members/{id} | 본문 없음 | 204 |
 
@@ -76,7 +76,7 @@ CSV 편집기에서 이미 잃어버린 선행 0은 복원하지 않는다.
 - 파일에 없는 직원은 삭제하지 않는다. 소속 해제는 DELETE로 명시적으로 수행한다.
 
 파일 내 중복 사번·전화번호는 내용이 같아도 422다. 모든 행을 먼저 검증하고 한 트랜잭션으로
-고객·소속·성공 감사·멱등 기록을 저장한다. 행 오류나 저장 실패가 하나라도 있으면 전체 롤백한다.
+고객·소속·성공 감사를 저장한다. 행 오류나 저장 실패가 하나라도 있으면 전체 롤백한다.
 고객 연락처 변경은 이후 고객 조회·발신번호 조회의 원본에 반영되며 과거 주문의 연락처 스냅샷·PIN은 바꾸지 않는다.
 고객의 일반 PATCH에서는 전화번호 변경 보류를 유지하고 관리자 CSV에서만 수정한다.
 33번 발신번호 식별/초기 데이터 제공 API 자체는 별도 범위다.
@@ -90,11 +90,10 @@ CSV 편집기에서 이미 잃어버린 선행 0은 복원하지 않는다.
 | 404 NOT_FOUND | 기업·고객·소속 없음 |
 | 409 INVALID_STATE | 비활성 기업·탈퇴 고객 등록 또는 소속 활성화 |
 | 409 DUPLICATE_RESOURCE | 개별 등록 고유 제약 또는 저장 시점의 고유 제약 충돌 |
-| 409 REQUEST_IN_PROGRESS | 같은 키 또는 다른 구성원 변경 작업 처리 중 |
+| 409 REQUEST_IN_PROGRESS | 다른 구성원 변경 작업 처리 중 |
 | 413 PAYLOAD_TOO_LARGE | 파일 크기·데이터 행 제한 초과 |
 | 415 UNSUPPORTED_MEDIA_TYPE | 지원하지 않는 파일 또는 요청 형식 |
 | 422 VALIDATION_FAILED | CSV 행 내용·고객·소속 충돌 |
-| 422 IDEMPOTENCY_KEY_REUSED | 같은 키에 다른 기업·작업·내용 |
 
 CSV 행 오류는 `error.details`의 field에 `rows[2].phoneNumber`처럼 헤더를 1로 센 CSV 레코드
 번호를 사용한다. 따옴표 내부 줄바꿈은 새 레코드가 아니다. reason은 REQUIRED,
@@ -107,13 +106,12 @@ MVP에서는 트랜잭션 advisory try-lock으로 모든 구성원 변경을 직
 이 방식은 회사 간 동일 고객 연결·CSV 번호 변경 경합을 단순하게 처리한다. 대규모 동시 처리의
 최적화는 이번 범위가 아니다. 기업·고객 행도 잠가 비활성화·탈퇴와 경합할 때 상태를 재검사한다.
 
-개별 등록과 CSV는 관리자별 UUID 키 공간을 공유한다. 작업 종류·기업·정규화 본문 또는
-CSV 파일 바이트의 해시를 비교하며 파일 이름·multipart boundary는 비교하지 않는다.
-같은 키·같은 내용은 원래 204를 반환하고 성공 감사를 추가하지 않는다. 다른 관리자는 독립된 키 공간이다.
-CSV 바이트가 다르면 줄바꿈/BOM 차이도 다른 내용이다. 다른 키로 같은 CSV를 재업로드해도
-기업·사번 기준으로 갱신하여 중복 생성하지 않는다. 완료 기록은 재시작과 소속 해제 후에도 유지한다.
-해제 후 과거 성공 키를 재시도해도 소속을 다시 만들지 않는다. 재등록에는 새 키를 사용한다.
-자동 만료는 없다. api_idempotency.membership_writes에는 관리자·UUID·기업·작업·해시·시각만 저장한다.
+개별 등록과 CSV는 Idempotency-Key를 요구·검증·저장하지 않는다. 기존 클라이언트가 보내는 헤더도 무시한다.
+개별 등록의 중복은 고객당 소속 1개·기업별 사번 UNIQUE로 거절하며 409 DUPLICATE_RESOURCE를 반환한다.
+CSV는 기업·사번을 기준으로 기존 고객 정보를 갱신하고 새 직원을 등록한다. 같은 파일을 다시 올려도
+고객·소속 행을 중복 생성하지 않으며 성공한 각 업로드는 별도 감사로 기록한다.
+최초 요청·응답을 재생하거나 과거 업로드인지 판별하지 않는다. 재업로드는 현재 요청의 내용을 적용한다.
+소속 해제 후 재등록도 새 요청 키 없이 처리한다.
 
 ## 감사·적용·검증
 
@@ -121,10 +119,11 @@ MEMBERSHIP_CREATED / MEMBERSHIP_UPDATED / MEMBERSHIP_REMOVED는 MEMBERSHIP 대�
 MEMBERS_IMPORTED는 ORGANIZATION 대상으로 기록한다. 성공은 업무와 같은 트랜잭션,
 실패·거부는 기존 공통 실패 감사 경로를 사용한다. 감사는 작업 기록이며 완전한 소속 이력은 아니다.
 
-기존 001~005·007·008은 변경하지 않고 009-membership-write-requests.sql을 기존 runner로 적용한다.
-미배포 구성원용 006은 최신 develop-backend 병합 시 009로 이동했다. 008이 과거 생성 요청
-스키마를 정리한 다음 009가 구성원 등록·CSV 전용 스키마와 테이블을 생성한다.
-public 테이블 변경은 없다. 자동 배포의 migration·스키마 검증에 새 기록 테이블을 포함한다.
+앱은 기존 업무 테이블을 사용하고 별도 구성원 요청 기록에 의존하지 않는다.
+이미 적용된 009 파일·체크섬·적용 이력을 보존하고, 새 010-remove-membership-write-requests.sql에서
+membership_writes 테이블과 전용 스키마를 제거한다. 009 적용 이력은 삭제하지 않고 010을 추가한다.
+010 최초 적용은 기존 백엔드 중지 → DB 백업 → 자동 migration·검증 → 새 앱 실행 순서다.
+010이 커밋된 후 요청 기록을 사용하는 구버전 앱으로의 수동·자동 복귀는 차단한다.
 내부 Nginx와 호스트 HTTPS 설정의 /api/ 본문 제한을 2MiB로 맞춰 multipart 헤더 공간을 확보한다.
 앱은 파일 자체를 1MiB로 제한한다. 호스트 설정은 앱 배포로 자동 갱신되지 않으므로 기존 서버
 설정에 해당 제한만 반영하고 nginx -t 후 reload해야 한다. 다른 팀 설정을 전체 덮어쓰지 않는다.
@@ -138,23 +137,19 @@ cd ..
 
 검증은 임시 DB·로컬 Docker에서 수행하며 운영 DB 적용·서버 배포·프론트/AI 실제 호출은 별도다.
 
-### 2026-10-27 검증 결과
+### 요청 키 제거 검증
 
-- 최초 구성원 개발 검증의 `node backend/scripts/check.cjs`: Linux Node.js 24에서 ESLint·Prettier·TypeScript 빌드 및
-  공통/CSV 17개, 인증·DB·PBX 31개, 기업 17개, 고객 10개, 구성원 22개,
-  운영 이미지/Nginx 7개로 총 104개 테스트 통과.
-- 구성원 검증: 관리자 인증·Origin·대표자 표시, 검색/페이지, 입력·상태 검증,
-  소속 해제 후 타 기업 등록·원본 보존, CSV 번호 수정·기존 ID/표시/상태 보존,
-  전체 검증·중복·소속/번호 충돌·동시 업로드·재시작·감사/멱등 실패 롤백,
-  고객 탈퇴와의 경합 시 잠금 후 상태 재검사, Swagger 계약 통과.
-- CSV 단위 검증: BOM·CRLF·따옴표·쉼표·필드 내 줄바꿈·오류 레코드 번호·원문 비노출,
-  1MiB/1,000행 경계 통과. 실제 운영 이미지·Nginx에서도 정확히 1MiB 파일 성공 및 초과 거부 통과.
-- `infra/database/test-monolith.ps1`: 009 제약·관리자별 키·소속 삭제 후 기록 보존·
-  재실행·기존 데이터 보존·백업 복원·체크섬 변경 거부·최초/후속 실패 롤백 통과.
-- 최신 develop-backend 병합 후 같은 두 검증 명령을 다시 실행하여 주문 생성·입력·최종 접수 준비
-  검증을 포함한 전체 API 테스트와 운영 이미지·Nginx 검증 통과. 기존 007·008 SQL은 원본과 동일하게
-  유지했으며, 008의 과거 요청 기록 제거 이후 009 구성원 기록 생성 순서도 임시 PostgreSQL에서 검증했다.
-- 백엔드 운영 배포·DB 적용·프론트/AI 실제 연동은 수행하지 않았다. 호스트 Nginx 반영은 아래 후속 기록을 참고한다.
+- `node backend/scripts/check.cjs`: 최신 develop-backend의 주문 조회 작업을 포함하여 정적 검사·빌드와
+  단위 26개, 인증·DB·PBX 31개, 기업 14개, 주문 31개, 고객 10개, 구성원 22개,
+  운영 이미지·Nginx 8개로 총 142개 테스트 통과.
+- 키 없는 개별 등록·CSV, 기존 키 헤더 무시, 중복 개별 등록 409, 소속 해제 후 재등록 통과.
+- API 통합 테스트는 membership_writes가 없는 DB에서 실행하여 과거 테이블 의존 제거를 검증했다.
+- CSV 재업로드의 ID 보존·각 성공 요청의 감사, 동시 요청 제약, 감사 실패 시 전체 롤백 통과.
+- 기존 고객·기업·주문 API, 운영 이미지·Nginx 업로드 제한 회귀 검증 통과.
+- `infra/database/test-monolith.ps1`: 001~009 원본 보존과 신규 010 적용·기존 이력 보존·업무 데이터 보존·백업 복원·실패 롤백 통과.
+- 배포 모의 테스트: 010 최초 적용 시 중지·백업 순서, 백업·SQL 실패 시 기존 앱 복구,
+  010 커밋 후 검증·앱 실패 시 구버전 복귀 차단 통과. Linux 패키징에서 009 원본·010 포함과 체크섬 검증 통과.
+- 서버에서는 적용 이력과 테이블 존재 여부만 읽었다. 코드 배포·운영 DB 변경은 수행하지 않았다.
 
 ### 2026-10-27 호스트 Nginx 후속 반영
 
