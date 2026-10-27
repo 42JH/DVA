@@ -3,7 +3,7 @@
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
-55번 AI 주문 검증·미완료 상담 저장과 관리자 조회는 [상담/주문 API 계약](../docs/api/orders.md)을 참고한다. 관리자 수기 주문 생성은 69번 별도 작업이다.
+55번 ORD-01 공통 주문 생성과 접수 전 검증은 [주문 API 계약](../docs/api/orders.md)을 참고한다. AI와 관리자는 같은 POST /api/orders를 사용하고, 미완료 주문도 orders·order_parcels에 COLLECTING으로 저장한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
@@ -124,7 +124,7 @@ backend/
 
 ### 업무 모듈과 데이터 책임
 
-[모놀리식 ERD](../docs/database/monolith.dbml)의 업무 테이블 19개를 다음 기준으로 묶는다.
+[모놀리식 ERD](../docs/database/monolith.dbml)의 업무 테이블 18개를 다음 기준으로 묶는다.
 테이블마다 Module을 만들지 않고 함께 변경되는 데이터와 업무 흐름을 기준으로 구분한다.
 
 | 모듈 | 담당 데이터·책임 |
@@ -132,7 +132,7 @@ backend/
 | `customers` | `customers`, `personal_pins` |
 | `organizations` | `organizations`, `memberships`, `company_pins` |
 | `orders` | `orders`, `order_parcels` |
-| `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests`, `incomplete_consultations` |
+| `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests` |
 | `deliveries` | `shipments`, `shipment_status_history` |
 | `admins` | `admin_users` 계정 관리 |
 | `auth` | 로그인·인증·권한 검사. 계정 접근은 `admins`가 공개한 기능 사용 |
@@ -290,7 +290,7 @@ DB UNIQUE/FK/CHECK 위반은 SQLSTATE로 분류하고 SQL·테이블명·파라�
 ApiException에는 사용자에게 공개할 수 있는 메시지/상세만 전달한다.
 
 X-Request-Id가 유효한 UUID면 유지하고 없거나 잘못된 값이면 새 UUID를 만든다. 모든 응답 헤더에 반환하며
-API 단건/오류 meta에도 넣는다. Idempotency-Key는 업무 중복 방지용으로 별개이며 이번 작업에서는 저장소나 처리기를 구현하지 않는다.
+API 단건/오류 meta에도 넣는다. Idempotency-Key는 업무 중복 방지용으로 별개이며, 기업·고객·주문 생성은 api_idempotency 스키마에 최초 결과를 저장한다. 주문 version은 수정 충돌용이므로 생성 재시도 키를 대신하지 않는다.
 요청 로그에는 method·route template·상태·소요시간·requestId만 남기고 실제 경로 ID·query·headers·body는 기록하지 않는다.
 신규 API 응답은 no-store다. 인프라 로그 수집·모니터링 설정은 112번 작업 범위다.
 

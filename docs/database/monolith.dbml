@@ -174,28 +174,6 @@ Table call_sessions {
   Note: 'consultation / 통화마다 새 행. 최초 문장 수신 시 최소 행 생성, 종료 결과로 실제 시각과 주문을 연결한다. / SQL 인덱스: CREATE INDEX calls_order_idx ON call_sessions(order_seq,started_at,call_session_seq); CREATE INDEX calls_retention_idx ON call_sessions(ended_at,provider_call_id);'
 }
 
-Table incomplete_consultations {
-  incomplete_consultation_seq integer [pk, increment, not null]
-  call_session_seq integer [not null, unique]
-  event_id text [not null, note: '재시도에 재사용하는 종료 이벤트 식별자']
-  ended_at timestamptz [not null]
-  end_type text [note: '시스템이 보고한 종료 유형. 미확인 시 NULL, 원인 추론 금지']
-  system_event text [note: '실제 관찰된 이벤트 코드. 미확인 시 NULL']
-  order_snapshot jsonb [not null, note: '접수 전 종료 당시 최종 정보. 주문이나 복원용 초안이 아님']
-  collection_analysis jsonb [not null, note: '종료 당시 collectedFields, missingFields, errors']
-  request_hash text [not null]
-  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
-  checks {
-    `btrim(event_id)<>''`
-    `end_type IS NULL OR btrim(end_type)<>''`
-    `system_event IS NULL OR btrim(system_event)<>''`
-    `jsonb_typeof(order_snapshot)='object'`
-    `jsonb_typeof(collection_analysis)='object'`
-    `request_hash ~ '^[a-f0-9]{64}$'`
-  }
-  Note: 'consultation / 006 migration. 통화당 종료 스냅샷 하나. 녹취·발화 복제와 재통화 자동 복원 없음. / SQL 인덱스: CREATE INDEX incomplete_consultations_ended_idx ON incomplete_consultations(ended_at DESC,incomplete_consultation_seq DESC);'
-}
-
 Table call_utterances {
   call_utterance_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   call_session_seq integer [not null, note: '연결 대상 ID']
@@ -391,7 +369,6 @@ Ref: customers.customer_seq ?< orders.customer_seq
 Ref: orders.order_seq < order_parcels.order_seq
 Ref: orders.order_seq ?< call_sessions.order_seq
 Ref: call_sessions.call_session_seq < call_utterances.call_session_seq
-Ref: call_sessions.call_session_seq - incomplete_consultations.call_session_seq
 Ref: call_sessions.call_session_seq < recordings.call_session_seq
 Ref: call_sessions.call_session_seq - handoff_requests.call_session_seq
 Ref: admin_users.admin_user_seq ?< handoff_requests.assigned_admin_user_seq

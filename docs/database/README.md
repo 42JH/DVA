@@ -5,7 +5,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 최신 ERD 원본이다. 단일 PostgreSQL DB,
-업무 테이블 19개(55번 미완료 상담 기록 포함)와 관리자 세션 테이블 1개, FK 19개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
+업무 테이블 18개와 관리자 세션 테이블 1개, FK 18개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -13,10 +13,11 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `003-admin-auth-sessions.sql`: 관리자 이름과 PostgreSQL 세션 저장소. 기존 관리자 데이터가 있다면 이름 보완 정책이 필요하며 자동 채우지 않는다.
 - `004-organization-creation-requests.sql`: 기업 등록 재시도 기록용 `api_idempotency.organization_creations`.
   public 테이블과 별도이며, 35번 기업 API의 운영 연동 전에 적용한다.
-- `006-incomplete-consultations.sql`: 55번의 `incomplete_consultations`. 실제 주문과 별개인 종료 스냅샷·수집 현황·이벤트를 기존 통화에 연결한다.
-  통화 UNIQUE 제약과 해시로 같은 종료 이벤트의 중복 저장을 방지한다. 005 번호는 고객 API MR !49가 사용하므로 비워 둔다.
-- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 19개와 별도다.
-- `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 19개와 별도다.
+- `005-customer-creation-requests.sql`: 고객 API의 `api_idempotency.customer_creations`.
+- `007-order-creation-requests.sql`: ORD-01의 `api_idempotency.order_creations`. AI는 통화 ID, 관리자는 인증된 관리자 ID와 UUID 멱등키를 묶어 최초 orderSeq·version을 보존한다. 주문·상세·고객·통화 연결·성공 감사와 같은 트랜잭션에 기록한다.
+- 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
+- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
+- `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 18개와 별도다.
 
 고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING이다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
@@ -35,11 +36,10 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 20개·FK 19개·트리거 9개, 기존 PBX 데이터 보존.
-- 미완료 상담의 통화별 고유성·이벤트/해시/JSON 제약·기존 통화 FK.
+- public 테이블 19개·FK 18개·트리거 9개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
-- 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지.
+- 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 멱등키의 유일성·주문 FK·요청 주체 형식.
 - 통화 시각 제약, 녹취 객체 경로, 배송 참조 무결성·작업 주체 제약.
 - 활성 프롬프트 최대 1개·기존 본문 수정 방지, FAQ 수정 시각·감사 JSON 객체.
 - 마이그레이션 전 백업의 별도 DB 복원, 재실행 건너뛰기, 적용 파일 변조 거부.
@@ -88,7 +88,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `007-설명.sql`부터 순서대로 추가한다. 병렬 작업의 예약 번호도 먼저 확인한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `008-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -110,8 +110,7 @@ sudo docker exec -i dva-prod-db-1 pg_restore --exit-on-error --no-owner -U dva -
 배송 상태와 이력의 원자적 저장, 인증·권한, CSV 업로드, 녹취 보관·삭제 작업은 관련 API에서 구현한다.
 DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다.
 
-통화 `provider_call_id` 계약과 주문 저장 방식에 관한 기존 Jira 설명과 ERD 차이도 별도 합의가 필요하다.
-이 작업에서 새로운 상태나 중도 종료 상담 테이블을 임의로 추가하지 않는다.
+주문 저장 방식은 사용자가 재확정한 ORD-01 → ORD-04 → ORD-06 계약을 따른다. Jira 55의 별도 상담 스냅샷 설명과는 충돌하며, 구현 기준은 docs/api/orders.md에 명시한다. 통화 식별자 연결은 AI 연동에서 확인해야 한다.
 
 관리자 세션 검증은 이름 필수·공백 거절, 토큰 해시·만료 시각·FK 제약, 관리자별 세션 삭제와 계정 삭제 cascade를 포함한다.
 003은 기존 관리자 행이 없는 DB를 전제로 한다. 운영 데이터가 있으면 사전 검토 후 이름 보완 migration으로 조정해야 한다.
