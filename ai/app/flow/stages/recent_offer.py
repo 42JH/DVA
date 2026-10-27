@@ -7,7 +7,7 @@ CHOICES = {"yes": "최근 배송과 같은 곳(보내는 곳·받는 곳)으로 
 async def on_answer(ctx, answer: str) -> list[str]:
     if answer == "yes" and ctx.recent:
         for role in ("sender", "receiver"):
-            ctx.order.set_place(role, ctx.recent.place(role))
+            ctx.use_place(role, ctx.recent.place(role))
         return ["recent.accepted"]
     return ["recent.declined"]
 

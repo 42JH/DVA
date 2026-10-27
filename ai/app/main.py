@@ -28,7 +28,7 @@ def check_definitions(cfg, texts) -> None:
     sample = Call("startup-check", None, cfg, texts, None).text_vars()
     engine.validate(set(TOOLS), texts, sample)
     engine.build()
-    texts.call_info.format(**sample)
+    texts.call_info.format(**sample, first="")
     unknown = [n for n in function_tool_names(load_live_toml()) if n not in TOOLS]
     if unknown:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")

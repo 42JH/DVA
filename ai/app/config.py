@@ -94,8 +94,12 @@ class Texts(_Strict):
     customer_types: dict[str, str]
     call_info: str
     progress: str
+    progress_then: str
     progress_item: str
     progress_sep: str
+    saved_value: str
+    caller_value: str
+    empty_value: str
     classifier: str
     answer_error: str
 

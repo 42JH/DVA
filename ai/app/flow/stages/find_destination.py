@@ -24,7 +24,7 @@ def choices(ctx) -> dict[str, str]:
 async def on_answer(ctx, answer: str) -> list[str]:
     ctx.dest_variant = None
     if answer.startswith("dest_"):
-        ctx.order.set_place("receiver", _dests(ctx)[int(answer.removeprefix("dest_")) - 1])
+        ctx.use_place("receiver", _dests(ctx)[int(answer.removeprefix("dest_")) - 1])
         return ["destination.found"]
     if answer == "new":
         return ["destination.new"]
