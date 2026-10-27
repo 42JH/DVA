@@ -156,3 +156,38 @@ test('production login through Nginx authorizes company operations and logout re
     401,
   );
 });
+
+test('production Nginx accepts MVP AI validation/end snapshots but protects administrator consultation reads', async () => {
+  const headers = { 'Content-Type': 'application/json' };
+  const validation = await fetch('http://proxy/api/orders/validation', {
+    method: 'POST',
+    headers,
+    body: '{}',
+  });
+  assert.equal(validation.status, 422);
+  assert.equal((await validation.json()).error.code, 'VALIDATION_FAILED');
+  const input = {
+    eventId: randomUUID(),
+    providerCallId: 'runtime-' + randomUUID(),
+    endedAt: new Date().toISOString(),
+    snapshot: {},
+  };
+  const request = () =>
+    fetch('http://proxy/api/consultations/incomplete', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(input),
+    });
+  const response = await request();
+  assert.equal(response.status, 201);
+  const first = (await response.json()).data;
+  assert.deepEqual((await (await request()).json()).data, first);
+  for (const path of [
+    '/api/consultations/incomplete',
+    '/api/consultations/incomplete/' + first.incompleteConsultationSeq,
+  ]) {
+    const read = await fetch('http://proxy' + path);
+    assert.equal(read.status, 401);
+    assert.equal((await read.json()).error.code, 'UNAUTHORIZED');
+  }
+});

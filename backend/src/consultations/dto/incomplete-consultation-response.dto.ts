@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { RequestMetaDto } from '../../common/dto/api-response.dto';
+import { ErrorDetailDto, RequestMetaDto } from '../../common/dto/api-response.dto';
+import { OrderInputDto } from '../../orders/dto/order-input.dto';
 
 export class IncompleteConsultationSavedDto {
   @ApiProperty() incompleteConsultationSeq!: number;
@@ -22,4 +23,26 @@ export class IncompleteConsultationListDto {
   @ApiProperty({ type: [IncompleteConsultationSummaryDto] })
   data!: IncompleteConsultationSummaryDto[];
   @ApiProperty() hasNext!: boolean;
+}
+
+class CollectionAnalysisDto {
+  @ApiProperty({ type: [String] }) collectedFields!: string[];
+  @ApiProperty({ type: [String] }) missingFields!: string[];
+  @ApiProperty({ type: [ErrorDetailDto] }) errors!: ErrorDetailDto[];
+}
+class ConsultationHistorySummaryDto {
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) startedAt!: string | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) endedAt!: string | null;
+  @ApiProperty() utteranceCount!: number;
+  @ApiProperty() recordingCount!: number;
+}
+class IncompleteConsultationDetailDto extends IncompleteConsultationSummaryDto {
+  @ApiProperty() eventId!: string;
+  @ApiProperty({ type: OrderInputDto }) snapshot!: OrderInputDto;
+  @ApiProperty({ type: CollectionAnalysisDto }) collectionAnalysis!: CollectionAnalysisDto;
+  @ApiProperty({ type: ConsultationHistorySummaryDto }) history!: ConsultationHistorySummaryDto;
+}
+export class IncompleteConsultationDetailResponseDto {
+  @ApiProperty({ type: IncompleteConsultationDetailDto }) data!: IncompleteConsultationDetailDto;
+  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
 }

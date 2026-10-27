@@ -1,5 +1,6 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 
 export class IncompleteConsultationQueryDto extends PaginationQueryDto {
@@ -16,4 +17,15 @@ export class IncompleteConsultationQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   to?: string;
+}
+
+export class IncompleteConsultationIdDto {
+  @ApiProperty({ minimum: 1, maximum: 2147483647 })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  id!: number;
 }

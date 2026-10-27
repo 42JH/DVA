@@ -16,18 +16,64 @@ interface SummaryRow {
   createdAt: Date;
 }
 
+interface DetailRow extends SummaryRow {
+  eventId: string;
+  snapshot: OrderSnapshot;
+  collectionAnalysis: ReturnType<typeof inspectOrder>;
+  startedAt: Date | null;
+  callEndedAt: Date | null;
+  utteranceCount: number;
+  recordingCount: number;
+}
+
 const SUMMARY_COLUMNS = `i.incomplete_consultation_seq AS "incompleteConsultationSeq",
  i.call_session_seq AS "callSessionSeq", c.provider_call_id AS "providerCallId",
  i.ended_at AS "endedAt", i.end_type AS "endType", i.system_event AS "systemEvent",
  i.collection_analysis->'missingFields' AS "missingFields", i.created_at AS "createdAt"`;
 
 function summary(row: SummaryRow) {
-  return { ...row, endedAt: row.endedAt.toISOString(), createdAt: row.createdAt.toISOString() };
+  return {
+    incompleteConsultationSeq: row.incompleteConsultationSeq,
+    callSessionSeq: row.callSessionSeq,
+    providerCallId: row.providerCallId,
+    endedAt: row.endedAt.toISOString(),
+    endType: row.endType,
+    systemEvent: row.systemEvent,
+    missingFields: row.missingFields,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 @Injectable()
 export class IncompleteConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async findOne(id: number) {
+    const row = (
+      await this.database.pool.query<DetailRow>(
+        `SELECT ${SUMMARY_COLUMNS}, i.event_id AS "eventId", i.order_snapshot AS snapshot,
+       i.collection_analysis AS "collectionAnalysis", c.started_at AS "startedAt", c.ended_at AS "callEndedAt",
+       (SELECT count(*)::int FROM call_utterances u WHERE u.call_session_seq=c.call_session_seq) AS "utteranceCount",
+       (SELECT count(*)::int FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordingCount"
+       FROM incomplete_consultations i JOIN call_sessions c ON c.call_session_seq=i.call_session_seq
+       WHERE i.incomplete_consultation_seq=$1`,
+        [id],
+      )
+    ).rows[0];
+    if (!row) return undefined;
+    return {
+      ...summary(row),
+      eventId: row.eventId,
+      snapshot: row.snapshot,
+      collectionAnalysis: row.collectionAnalysis,
+      history: {
+        startedAt: row.startedAt?.toISOString() ?? null,
+        endedAt: row.callEndedAt?.toISOString() ?? null,
+        utteranceCount: row.utteranceCount,
+        recordingCount: row.recordingCount,
+      },
+    };
+  }
 
   async findMany(query: IncompleteConsultationQueryDto) {
     const conditions: string[] = [];

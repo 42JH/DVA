@@ -370,3 +370,110 @@ test('administrator lists paginate stably, filter calls/time and omit raw snapsh
     );
   }
 });
+
+test('administrator detail exposes the frozen end snapshot and links existing history without raw recordings', async () => {
+  const input = payload();
+  const address = {
+    name: '조회 고객',
+    phoneNumber: '01099887766',
+    roadAddress: '검증로 1',
+    jibunAddress: '검증동 1',
+    dongName: '검증동',
+    postalCode: '00001',
+    latitude: 0,
+    longitude: 0,
+  };
+  input.snapshot = {
+    paymentMethodType: 'credit',
+    pickupRequestedAt: '2026-10-27T00:00:30Z',
+    parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+  };
+  const callId = (
+    await pool.query(
+      "INSERT INTO call_sessions(provider_call_id,started_at,ended_at) VALUES($1,'2026-10-26T23:59:00Z','2026-10-27T00:00:00Z') RETURNING call_session_seq",
+      [input.providerCallId],
+    )
+  ).rows[0].call_session_seq;
+  await pool.query(
+    "INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES($1,1,'CUSTOMER','비공개 발화 원문',1)",
+    [callId],
+  );
+  await pool.query('INSERT INTO recordings(call_session_seq,object_key) VALUES($1,$2)', [
+    callId,
+    'private/' + randomUUID() + '.wav',
+  ]);
+  const before = await counts(),
+    savedRow = await saved(input);
+  const path = '/api/consultations/incomplete/' + savedRow.incompleteConsultationSeq;
+  await error(await fetch(hosts[0] + path), 401, 'UNAUTHORIZED');
+  for (const Cookie of cookies) {
+    const response = await fetch(hosts[0] + path, { headers: { Cookie } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const body = await response.json(),
+      detail = body.data;
+    assert.match(body.meta.requestId, /^[0-9a-f-]{36}$/);
+    assert.equal(detail.snapshot.parcels[0].origin.phoneNumber, address.phoneNumber);
+    assert.equal(detail.callSessionSeq, callId);
+    assert.equal(detail.eventId, input.eventId);
+    assert.deepEqual(detail.collectionAnalysis.errors, []);
+    assert.deepEqual(detail.collectionAnalysis.missingFields, []);
+    assert.deepEqual(detail.history, {
+      startedAt: '2026-10-26T23:59:00.000Z',
+      endedAt: '2026-10-27T00:00:00.000Z',
+      utteranceCount: 1,
+      recordingCount: 1,
+    });
+    assert.ok(!JSON.stringify(body).includes('비공개 발화 원문'));
+    for (const forbidden of [
+      'requestHash',
+      'request_hash',
+      'objectKey',
+      'object_key',
+      'orderSeq',
+      'callEndedAt',
+    ])
+      assert.ok(!Object.hasOwn(detail, forbidden));
+  }
+  const after = await counts();
+  for (const key of ['orders', 'parcels', 'customers']) assert.equal(after[key], before[key]);
+  const empty = await saved(payload());
+  const emptyBody = await (
+    await fetch(hosts[0] + '/api/consultations/incomplete/' + empty.incompleteConsultationSeq, {
+      headers: { Cookie: cookies[0] },
+    })
+  ).json();
+  assert.deepEqual(emptyBody.data.history, {
+    startedAt: null,
+    endedAt: null,
+    utteranceCount: 0,
+    recordingCount: 0,
+  });
+});
+
+test('detail rejects invalid/missing IDs and revoked administrator sessions', async () => {
+  const headers = { Cookie: cookies[2] },
+    prefix = hosts[0] + '/api/consultations/incomplete/';
+  for (const id of ['0', '-1', '1e2', '2147483648', 'abc'])
+    await error(await fetch(prefix + id, { headers }), 400, 'INVALID_REQUEST');
+  await error(await fetch(prefix + '2147483647', { headers }), 404, 'NOT_FOUND');
+  const row = await saved(payload());
+  await pool.query(
+    "DELETE FROM admin_sessions WHERE admin_user_seq=(SELECT admin_user_seq FROM admin_users WHERE login_id='consultation2')",
+  );
+  await error(
+    await fetch(prefix + row.incompleteConsultationSeq, { headers }),
+    401,
+    'UNAUTHORIZED',
+  );
+  assert.equal(
+    (await fetch(prefix + row.incompleteConsultationSeq, { headers: { Cookie: cookies[0] } }))
+      .status,
+    200,
+  );
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  assert.deepEqual(spec.paths['/api/consultations/incomplete/{id}'].get.security, [
+    { adminSession: [] },
+  ]);
+  assert.ok(spec.components.schemas.IncompleteConsultationDetailDto.properties.collectionAnalysis);
+});

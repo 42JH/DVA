@@ -96,4 +96,10 @@ export class IncompleteConsultationsService {
       throw new ApiException(400, 'INVALID_REQUEST', '조회 시작은 종료보다 빨라야 합니다.');
     return new ListResponse(await this.repository.findMany(query), query.limit);
   }
+
+  async findOne(id: number) {
+    const row = await this.repository.findOne(id);
+    if (!row) throw new ApiException(404, 'NOT_FOUND', '미완료 상담 기록을 찾을 수 없습니다.');
+    return row;
+  }
 }
