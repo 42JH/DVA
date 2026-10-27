@@ -121,8 +121,8 @@ def test_record_order_address_change_clears_detail():
 def test_lookup_modify_cancel_scoped_to_caller():
     db = FakeBackend()
     order = Order(**{**FULL_ORDER, "sender_phone": CALLER, "receiver_phone": "01098765432"})
-    mine = run(db.create_order(CALLER, "s", order, 3500, None))
-    other = run(db.create_order("01099999999", "s", order, 3500, None))
+    mine = run(db.create_order(CALLER, "s", order, 4950, None))
+    other = run(db.create_order("01099999999", "s", order, 4950, None))
     call = at("modify", db)
     assert [o["order_no"] for o in call_tool(call, "lookup_orders", {})["orders"]] == [mine]
     args = {k: None for k in FULL_ORDER} | {"item": "책", "customer_confirmed": True}

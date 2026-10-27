@@ -36,7 +36,6 @@ class CallConfig(_Strict):
 
 class BusinessConfig(_Strict):
     company_name: str = Field(min_length=1)
-    fare: int = Field(ge=0)
     submitted_message: str
     goodbye_message: str
 
@@ -82,6 +81,30 @@ class ServerConfig(_Strict):
     monitor: MonitorConfig
     listener: ListenerConfig
     address: AddressConfig
+    rag: 'RagConfig'
+    client_backend: 'ClientBackendConfig'
+
+
+class RagConfig(_Strict):
+    collection: str = Field(min_length=1)
+    embedding_model: Literal['text-embedding-3-large']
+    dimensions: Literal[3072]
+    bm25_weight: float = Field(gt=0, lt=1)
+    rrf_c: int = Field(ge=1)
+    candidate_k: Literal[5]
+    context_k: Literal[3]
+    timeout_sec: float = Field(gt=0)
+    http_timeout_sec: float = Field(gt=0)
+    retry_cooldown_sec: float = Field(gt=0)
+
+
+class ClientBackendConfig(_Strict):
+    timeout_sec: float = Field(gt=0)
+    transcript_wait_sec: float = Field(gt=0)
+    history_chars: int = Field(ge=200, le=16000)
+    max_delegations: int = Field(ge=1, le=1000)
+    context_chunk_tokens: int = Field(ge=50, le=350)
+    append_timeout_sec: float = Field(gt=0)
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:

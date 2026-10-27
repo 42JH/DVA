@@ -1,5 +1,9 @@
 # 도구(tool) 구조
 
+## 현재 추가된 검색 도구
+
+`search_manual(question)`은 읽기 전용 FAQ 검색이다. 주문·상담원·대화 단계를 바꾸는 사건을 만들지 않는다. 기존 디스패처의 strict 인수/단계 검증을 거치고 raw Top3와 구간별 시간을 반환한다. 기본 client 모드는 `config/live.toml`의 `[backend.tools]`에서 도구 이름을 채우며, 결과를 Live에 직접 보낸다. 아래 Responses 결과 반환 설명은 복귀 모드에만 해당한다.
+
 도구는 늘어날 것이므로, **도구 하나를 추가할 때 파일 하나만 만들면** 되게 한다.
 
 - 모든 도구는 `app/tools/` 디렉토리에 둔다. 파일 하나에 도구 하나(가까운 도구 몇 개를 묶어도 되지만 파일 이름이 기능을 드러내게). 공용 부품(기반 클래스, 레지스트리, 전화번호 정규화 등)은 `app/tools/_base.py`처럼 `_`로 시작하는 파일에 둔다.
@@ -10,5 +14,5 @@
 - 외부 연동(요금 API, 알림톡, 상담원 전환 등)이 생기면 도구는 그대로 두고 그 연동 모듈만 바꾼다.
 - **도구는 값 기록과 주문 작업에만 쓴다.** 고객 답(예/아니오·확인·저장·상담원·종료·용건)에 따른 상태 전환은 도구 왕복의 지연을 피하려고 서버가 고객 말을 직접 판별한다(`spec/flow.md`). 새 질문 단계를 만들 때 도구를 만들지 말고 단계의 `choices`·`on_answer`로 만든다.
 - 고객 확인이 필요한 도구(수정·취소)는 인수에 `customer_confirmed`를 두고 도구 안에서 `require_confirmed`로 거절한다.
-- 지금 도구: `get_state`, `record_order`, `lookup_orders`, `modify_order`, `cancel_order`.
+- 지금 도구: `get_state`, `record_order`, `lookup_orders`, `modify_order`, `cancel_order`, `search_manual`.
 - 도구마다 단위 테스트 하나 이상(정상, 인수 오류, 허용되지 않은 상태). 레지스트리 테스트: 모든 도구의 스키마가 strict로 생성되는지, `live.toml`의 함수 도구 이름이 모두 레지스트리에 있는지.

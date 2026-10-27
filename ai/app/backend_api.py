@@ -45,11 +45,13 @@ class BackendAPI:
                 ctx.places[p["kind"]].append(Place(**{k: p[k] for k in ("name", "phone", "address", "address_detail")}))
         return ctx
 
-    async def create_order(self, caller: str | None, session_id: str, order: Order, fare: int,
+    async def create_order(self, caller: str | None, session_id: str, order: Order, fare: int | None,
                            idempotency_key: str) -> str:
         """접수. 접수번호는 백엔드가 발급한다. 같은 Idempotency-Key로 다시 오면 같은 접수번호를 돌려줘야 한다."""
-        body = {"caller_phone": caller, "session_id": session_id, "fare": fare,
+        body = {"caller_phone": caller, "session_id": session_id,
                 **{f: getattr(order, f) for f in ORDER_FIELDS}}
+        if fare is not None:
+            body['fare'] = fare
         resp = await self._post("/orders", body, headers={"Idempotency-Key": idempotency_key})
         return resp.json()["order_no"]
 

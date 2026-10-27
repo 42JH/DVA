@@ -1,5 +1,12 @@
 # sideband에서의 GPT-Live 동작
 
+## 기본 client 위임
+
+- `session.delegation.created`의 `target="client"`와 ID를 받아 서버 SDK로 도구를 선택한다. 위임 이벤트에 고객 질문 본문이 들어오는 것으로 가정하지 않고 최근 받아쓰기를 사용한다.
+- 결과를 `thinking.append`로 나누어 전달하고 `session.thinking.appended.client_event_id`가 송신 event_id와 일치하는지 확인한다. 이후 `commentary.append`로 Live가 결과를 판단해 안내하도록 한다. 결과는 백엔드 LLM으로 재전송하지 않는다. 작업 실패·오래된 위임·중복 이벤트도 처리한다.
+- 통화별 요청과 ACK는 분리하며, 전사·GPU·검색·백엔드·전달 timeout을 기록한다. ACK만으로 올바르게 말했거나 고객이 들었다고 판단하지 않는다.
+- 아래 `response.event` 함수 반환 규칙은 **복귀용 responses 위임에서만** 적용한다. client 위임에서는 이 중첩 함수 이벤트를 실행하지 않는다. `spec/rag.md`를 함께 참조한다.
+
 - 함수 호출: sideband의 `response.event` 안에 중첩된 백엔드 이벤트를 본다. **`response.output_item.done`(type `function_call`)에서만 실행**한다(인수 완료 이벤트엔 name·call_id가 없음). 결과는 `conn.response.item.create(function_call_output)` 후 **반드시 `conn.response.create()`**를 보낸다. 안 보내면 백엔드가 멈춘다. 오류나 없는 도구여도 결과는 꼭 돌려준다.
 - 관제 표시용: `response.output_item.added`(호출 시작), `response.function_call_arguments.delta`(인수 작성 중), `session.delegation.created`, `error`, `session.usage.updated`.
 - 음성 모델에 조용히 맥락 주기: `conn.session.thinking.append(content, delegation_id=None)`(Responses 위임에서는 `delegation_id`가 null이어야 함). **500토큰 한도**라 길이 상한을 테스트로 지킨다. `commentary.append`(말할 내용), `instructions.append`(압축 뒤에도 유지)도 같은 한도.

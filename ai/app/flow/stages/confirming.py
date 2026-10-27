@@ -10,7 +10,7 @@ async def submit(ctx) -> None:
     Idempotency-Key: 응답을 못 받고 고객이 다시 확인해도 같은 주문이 두 번 생기지 않게 이 통화의 n번째 주문으로 고정."""
     order, biz = ctx.order, ctx.cfg.business
     key = f"{ctx.session_id}-{len(ctx.submitted) + 1}"
-    order_no = await ctx.backend.create_order(ctx.caller, ctx.session_id, order, biz.fare, key)
+    order_no = await ctx.backend.create_order(ctx.caller, ctx.session_id, order, None, key)
     ctx.order = Order()
     ctx.from_saved = set()
     ctx.last_order_no = order_no

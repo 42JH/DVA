@@ -1,0 +1,11 @@
+{
+  "source_sha256": "ac236dbc52d10b762e2fb503e731a0c57e66a1ae012c8df7bac7e5afbc29dced",
+  "scope": "BM25 검색용 설명 1개만 보강. 원문 답변과 벡터는 유지.",
+  "entries": [
+    {
+      "faq_title": "Q. 이용 가능 시간은 언제인가요?",
+      "context_sha256": "85aa9f303ee130fd149b3cea5deceab73ac05e7edc56b53c7dc6be463210b20b",
+      "description": "택배 접수 및 신청 가능 시간 안내. 평일 접수 시간, 업무시간 외 접수 가능 여부와 신청 제한을 설명합니다."
+    }
+  ]
+}

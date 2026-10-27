@@ -398,6 +398,53 @@
 - 새 발화로 실제 통화 비교: 통화 시간·질문 수, 되읽기가 사라졌는지, 상세주소를 따로 묻지 않는지(백엔드 모델이 ""를 넣는지), 첫 인사가 첫 질문과 맞는지.
 - PoC 발화 자산 이식(voice.md·flow.toml·backend.md), 저장된 값 가림, 확인 단계 "아니요" 변형 문구, 종료 판별 확인.
 
+### RAG 전화 통합 브랜치 준비 — S15P31D109-122
+
+요청: 최신 develop-ai 위에서 검증한 RAG를 실제 수신 통화에 연결하고, 실험 잔여 코드를 정리한 뒤 커밋/병합 검토를 준비한다. develop-ai에 직접 병합·푸시·배포하지 않는다.
+
+- 최신 origin/develop-ai `2b111f6`로 로컬 develop-ai를 fast-forward하고 `feature/S15P31D109-122-rag-call-integration`을 만들었다. 마무리 fetch에서도 원격은 같았다.
+- 기존 feature/S15P31D109-122-rag-llm-context HEAD b9fbb9e와 미커밋 작업은 stash3c3cb3b 및 private ZIP에 보존했다. 기존 stash2개도 유지했다. stash를 새 develop에 통째로 덮지 않고 필요한 파일만 선택했다.
+- 팀원 변경(LangGraph/Studio, services/webhooks 분리, PBX 종료 인증, 판별 지연, 자동 배포)을 확인·유지했다. RAG가 없던 운영 브랜치에 검색/분할/임베딩만 LangChain으로 추가하고 LLM은 SDK를 유지했다.
+- 운영 RAG: 통합 Q+A large3072 Cosine, Kiwi/BM25+vector 0.4/0.6 가중 RRF c60 Top5, 고정 Qwen3-Reranker-0.6B 원문A/FP16/1024토큰, 원문 Top3. 알고리즘은 app/rag에 두고 운영 코드의 scripts 의존을 제거했다. PDF/HTML/질문 전용/C/BGE 비교·모델 가중치는 통합 대상에서 제외했다.
+- Live 기본을 client 위임으로 변경했다. 최근 전사+현재 상태를 SDK backend에 보내 도구를 한 번 선택하고 기존 디스패처로 실행한다. 반환 근거는 다시 backend 답변 생성에 보내지 않고 Live thinking 조각+ACK+commentary로 직접 전달한다. 기존 responses 경로는 복귀용으로 유지하며 그 경우 function_call_output/response.create 규칙도 유지한다.
+- 검색은 주문 상태/상담원 연결을 바꾸지 않는다. 중복 위임 방지, 새 위임의 옛 검색 취소, 늦은 결과 차단, 이미 시작한 쓰기의 재실행 방지, 통화별 ACK/정리, 검색/전달 실패 후 안내를 추가했다. 단계별 도구 권한·발신번호·확인 안전장치는 유지했다.
+- backend 선택/검색·임베딩·DB·리랭킹·맥락 전달 시간을 남긴다. 근거 뒤 첫 패킷/전사도 관측하되 정답 안내 시작/고객 재생 완료로 부르지 않는다.
+- 사용자가 GPU를 직접 준비하기로 했으므로 외부 /rerank 코드·인증·모델 버전/ID/점수 검증을 준비했다. RunPod과 Google Cloud 모두 같은 계약이다. 전화 이미지에는 torch를 넣지 않는다. 실제 외부 GPU는 미연결이다.
+- 사용자 추가 결정: 3,500원 고정 요금 삭제. 미확정 fare 전송과 확정 안내도 제거했다. 백엔드는 우선 유인 기준 서류3,850/소박스4,950/중박스6,050/대박스7,150원을 계산한다. 현재 AI 주문에는 별도 규격이 없으므로 규격 입력/전달과 backend fare 생략 수용·확정 금액 응답 계약을 맞춰야 한다. 임의 금액이나 가격 API를 만들어 대신하지 않았다.
+- 공개 원문 manuals/, 평가 데이터 evaluation/datasets/, 과거 집계·실제 Live 전사95개·근거·점수 evaluation/results/를 공유한다. 대용량 원시 실행/오디오/모델/비밀은 data/private에 보존하고 Docker context에서도 제외했다.
+- 기존 평가: Live RRF Recall5=95/95, Qwen Recall3=95/95, Hit1=92/95, MRR0.982456. Faithfulness0.857882, ContextPrecision0.989474, ContextRecall0.989474, Factual F1=0.721368. Relevancy0.482527은 보조 기록으로 둔다. 기준 답변 자체의 Relevancy도 평균0.521229이고0.8기준8/95만 통과해 보편적 합격선으로 쓰지 않았다. 의미/한계/오답 사례·지연 범위는 evaluation/results/analysis.md에 정리했다.
+- Windows CRLF와 manifest의 LF 해시가 달랐던 재현 문제를 발견했다. 과거 cases 바이트/점수를 보존하고 raw/내용 해시를 구분했다. 새 생성은 LF 바이트로 고정하고 .gitattributes로 공유 원문/평가 바이트를 보존한다.
+- 검증: 전체191 passed(7.46초), compileall, FAQ32개 dry-run, 평가95문항/근거/해시 검사 성공. Docker Linux/Python3.14 이미지 빌드 성공. --network none 실행으로 SDK 세션 구성, Kiwi, 캐시 토크나이저, FAQ32개, torch/scripts/data 부재를 확인했다. Docker credential 도우미 PATH 누락은 실행 프로세스 PATH만 보완해 해결했다.
+- docs/rag-handoff.md, spec/rag.md 및 관련spec, work.md, AGENTS 팀 규칙을 갱신했다. 기존95문항은 이전 실험이며 이번 통합/외부 GPU/실제 전화 평가를 새로 한 것이 아니다. .env는 읽거나 고치지 않았다.
+
+남은 운영 확인: 외부 GPU URL/키와 서버 용량·왕복 지연, 배포 서버 Qdrant의 원문 동일 색인, 규격/요금 백엔드 계약, 실제 전화 FAQ 끼어들기/정정/취소 상태/상담원 동의/장애 회귀. develop-ai 병합 시 자동 배포가 가능하므로 완료를 확인한 뒤 반영한다.
+
+### 2026-10-27 GCP 원격 리랭커와 develop-ai 연결 범위 확인
+
+- GCP L4에 Qwen3-Reranker-0.6B 고정 버전의 HTTPS /rerank API를 구축하고, 로컬 실제 RAG에서 Top5 요청 → 점수 검증 → Top3 반환을 확인했다. 전화 서버에 GPU 모델을 설치하지 않고 REST로 호출한다.
+- GPU 단독 준비 후 5회 평균 약 0.069초. 같은 RAG 서비스에서 시험한 3개 질문의 검색 전체 시간은 약 1.329/0.471/0.366초였다. 소수 연결 시험이며 전체 평가나 실제 통화 지연 수치가 아니다. 초기 임베딩 연결은 더 오래 걸렸다.
+- VM 자동 중지/재시작을 시험했다. 재시작 후 모델 준비까지 관측 약 56초. 최종 상태 TERMINATED, 시작마다 최대 실행 시간 900초 후 STOP 설정을 확인했다. 중지 후에도 디스크·예약 IP 등 잔여 비용은 발생할 수 있다.
+- 사용자는 운영 서버에 모델을 올리는 것이 아니라 기존 RAG가 REST 호출하도록 연결하려는 의도라고 정정했다. 운영 서버 접속·수정 없이 우선 저장소를 확인한다. PEM 파일은 사용하거나 읽지 않았다.
+- origin/develop-ai를 fetch한 결과 2b111f6 → cacc32f로 갱신됐다. 최신 원격 코드에는 app/rag 및 search_manual, 원격 리랭커 호출 구현이 없다. Qdrant 컨테이너 설정만 있다. 실제 배포 버전은 원격 서버를 조회하지 않아 확정하지 않는다.
+- 원격 호출 구현은 현재 통합 작업 브랜치의 app/rag/remote.py와 service.py에 있고, compose에는 RAG_RERANKER_URL/API_KEY 전달이 준비돼 있다. URL/키 설정만으로 현재 develop-ai에 연결되지는 않는다. 최신 팀원 변경과 RAG 통합 코드를 합친 후 배포해야 한다. 이번 확인에서 병합·커밋·푸시·운영 배포는 하지 않았다.
+
+### 2026-10-27 최신 develop-ai와 GCP REST RAG 통합 검증
+
+- 별도 feature/S15P31D109-122-rag-gcp-integration 브랜치를 만들고 GCP 미커밋 작업은 이름 있는 stash로 보존한 뒤 복원했다. 기존 브랜치와 stash를 삭제하지 않았다.
+- origin/develop-ai cacc32f를 작업 브랜치에 통합했다. call/sideband/webhook/flow·voice 프롬프트/server-config 문서의 충돌을 해결했다. 팀원이 추가한 mock 백엔드, 첫 질문·저장된 값 가림, 상담원 연결 실패 안내, 무응답 종료를 유지했다.
+- 통화 종료 시 기존 RAG/ACK 정리와 새 종료·무응답 감시 작업 정리를 함께 유지했다. 고객 전사는 input_ready 신호와 마지막 발화 시각을 모두 갱신한다. 최초 인사는 engine.next_text와 client 위임/RAG 설정을 함께 준비한다.
+- 최신 팀원 프롬프트에 있던 고정 3,500원 예시와 fare 자리표시자는 재도입하지 않았다. 요금은 백엔드 확정 전 추정하지 않는다. help 의도 설명에서 단순 FAQ를 제외해 정책 질문이 상담원 연결로 오해되지 않도록 했다. 다른 단계에서 주문 도구가 없더라도 허용된 search_manual은 사용할 수 있게 지침을 맞췄다.
+- 최초 전체 테스트에서 최신 확인 문구에 필요한 '이대로 접수'가 빠져 1개 실패했다. 테스트를 약하게 바꾸지 않고 고객 확인 질문을 실제 문구에 복원했다. 최종 203 passed (9.42초).
+- Linux Docker 이미지 dva-ai:rag-gcp-integration 빌드 성공. 네트워크 없는 컨테이너에서 단계·프롬프트 정의, client 위임, torch/private data/deploy 파일 제외를 확인했다. 첫 점검 명령의 build_session 필수 인수 누락은 점검 호출을 보완하여 통과했다.
+- 실제 운영 배포, develop-ai 최종 병합, 푸시, 새로운 유료 전체 평가/전화는 하지 않았다. GPU는 중지 상태이며 운영 비밀값 주입과 서버 Qdrant 동일 색인, 백엔드 규격·금액 계약, 실제 전화 검증이 남아 있다.
+
+### 2026-10-27 운영 SSH 및 RAG 준비 상태 실측
+
+- 사용자가 기존 PEM이 다른 서버용이라고 정정하고 바탕화면 dva-monolith.pem으로 교체했다. 기존 실패 원인은 파일 권한만이 아니라 인증 키 불일치였다. 교체 키를 현재 사용자 전용 ACL로 설정한 뒤 ubuntu@13.209.59.180 SSH 접속에 성공했다. 개인키는 출력하지 않았다.
+- 실행 AI 이미지 dva-ai-server:a056a36123c8-19 및 Qdrant1.13.4가 실행 중이다. 운영 이미지에 app/rag/service.py가 없고 RAG_RERANKER_URL/API_KEY와 QDRANT_API_KEY가 AI 실행 환경에 설정되지 않은 것을 값 출력 없이 확인했다.
+- AI 컨테이너 자격 없이 Qdrant 조회는 HTTP 오류였다. 이어서 Qdrant 컨테이너의 실행 인증값을 메모리에서만 사용한 읽기 전용 조회로 컬렉션 0개를 확인했다. 운영 DB에는 아직 FAQ 색인이 없다.
+- .env/비밀값 출력·수정, DB 등록/삭제, 서버 재시작, 운영 배포는 하지 않았다. 실제 운영 연결에는 통합 코드 배포, 실행 환경 설정, FAQ 최초 색인이 모두 필요하다. GCP 단독 연결 성공과 운영 RAG 준비 완료를 구분한다.
+
 ## 2026-10-27 (주소 보정, S15P31D109-14)
 
 ### 바꾼 것
@@ -427,3 +474,7 @@
 - `modify_order` 주소 보정, 아파트 이름으로 말한 주소. 지번 보정 오류 벤치.
 - 빠진 지역 단계 보정을 kakao_map_test 원본에도 반영(지금은 이 저장소에만 있음). 원본을 다시 가져올 때 `match_region`·`below_sido`·`GU_SKIP`을 다시 얹어야 한다.
 
+
+### develop-ai 병합 준비 최종 검증 — 주소 보정 포함
+
+사용자의 develop-ai 병합 요청에 따라 원격을 다시 가져왔고, 최신 a056a36의 주소 보정 기능까지 작업 브랜치에 합쳤다. address 단계·주소DB 읽기 전용 볼륨·최종 도로명 확인을 유지하면서 RAG/client 위임 설정과 함께 충돌을 해결했다. 고정3500원 안내는 재도입하지 않았다. 전체 가짜 테스트254개 통과(10.79초), Linux Docker 빌드 및 네트워크 차단 기동 정의 검증 통과. 운영 활성 통화 수0개를 확인했으며 개인 통화 내용은 출력하지 않았다. 팀 규칙대로 작업 브랜치→develop-ai MR로 반영하고 자동 배포 결과와 RAG 운영 준비를 구분한다. 운영 RAG 비밀값/색인은 아직 미설정·0컬렉션 상태다.
