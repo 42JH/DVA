@@ -922,7 +922,7 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
     '#/components/schemas/ParcelInputDto',
   );
   assert.equal(
-    spec.components.schemas.ParcelInputDto.properties.origin.$ref,
+    spec.components.schemas.ParcelInputDto.properties.origin.allOf[0].$ref,
     '#/components/schemas/OrderAddressPatchDto',
   );
 });

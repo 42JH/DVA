@@ -20,50 +20,71 @@ import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
 const present = (_object: unknown, value: unknown) => value !== undefined;
 
 export class OrderAddressPatchDto {
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({ description: '발송인 또는 수령인 이름.', type: String, nullable: true })
   @IsOptional()
   @IsString()
   name?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({
+    description: '연락처. 하이픈 없는 숫자 문자열.',
+    example: '01012345678',
+    type: String,
+    nullable: true,
+  })
   @IsOptional()
   @IsString()
   @Matches(/^[0-9]+$/)
   phoneNumber?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({ description: '도로명 주소.', type: String, nullable: true })
   @IsOptional()
   @IsString()
   roadAddress?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({ description: '지번 주소.', type: String, nullable: true })
   @IsOptional()
   @IsString()
   jibunAddress?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({ description: '상세 주소.', type: String, nullable: true })
   @IsOptional()
   @IsString()
   detailAddress?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({ description: '읍·면·동 이름.', type: String, nullable: true })
   @IsOptional()
   @IsString()
   dongName?: string | null;
 
-  @ApiPropertyOptional({ type: String, nullable: true })
+  @ApiPropertyOptional({
+    description: '우편번호. 선행 0을 보존하는 문자열.',
+    type: String,
+    nullable: true,
+  })
   @IsOptional()
   @IsString()
   postalCode?: string | null;
 
-  @ApiPropertyOptional({ type: Number, nullable: true, minimum: -90, maximum: 90 })
+  @ApiPropertyOptional({
+    description: '위도.',
+    type: Number,
+    nullable: true,
+    minimum: -90,
+    maximum: 90,
+  })
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(-90)
   @Max(90)
   latitude?: number | null;
 
-  @ApiPropertyOptional({ type: Number, nullable: true, minimum: -180, maximum: 180 })
+  @ApiPropertyOptional({
+    description: '경도.',
+    type: Number,
+    nullable: true,
+    minimum: -180,
+    maximum: 180,
+  })
   @IsOptional()
   @IsNumber({ allowNaN: false, allowInfinity: false })
   @Min(-180)
@@ -72,11 +93,18 @@ export class OrderAddressPatchDto {
 }
 
 export class OriginPinDto {
-  @ApiProperty({ enum: ['PERSONAL', 'COMPANY'] })
+  @ApiProperty({
+    description: '출발지 주소록 유형. PERSONAL: 개인, COMPANY: 기업.',
+    enum: ['PERSONAL', 'COMPANY'],
+  })
   @IsIn(['PERSONAL', 'COMPANY'])
   scope!: 'PERSONAL' | 'COMPANY';
 
-  @ApiProperty({ minimum: 1, maximum: 2147483647 })
+  @ApiProperty({
+    description: '선택한 주소록 번호(personalPinSeq 또는 companyPinSeq).',
+    minimum: 1,
+    maximum: 2147483647,
+  })
   @IsInt()
   @Min(1)
   @Max(2147483647)
@@ -84,66 +112,89 @@ export class OriginPinDto {
 }
 
 export class ParcelInputDto {
-  @ApiPropertyOptional({ type: () => OrderAddressPatchDto })
+  @ApiPropertyOptional({
+    description: '출발지 정보. 확인한 항목만 입력할 수 있습니다.',
+    type: () => OrderAddressPatchDto,
+  })
   @ValidateIf(present)
   @IsObject()
   @ValidateNested()
   @Type(() => OrderAddressPatchDto)
   origin?: OrderAddressPatchDto;
 
-  @ApiPropertyOptional({ type: () => OrderAddressPatchDto })
+  @ApiPropertyOptional({
+    description: '도착지 정보. 확인한 항목만 입력할 수 있습니다.',
+    type: () => OrderAddressPatchDto,
+  })
   @ValidateIf(present)
   @IsObject()
   @ValidateNested()
   @Type(() => OrderAddressPatchDto)
   destination?: OrderAddressPatchDto;
 
-  @ApiPropertyOptional({ type: () => OriginPinDto, nullable: true })
+  @ApiPropertyOptional({
+    description: '참조할 출발지 주소록. 주소 내용은 origin에 별도로 입력합니다.',
+    type: () => OriginPinDto,
+    nullable: true,
+  })
   @IsOptional()
   @IsObject()
   @ValidateNested()
   @Type(() => OriginPinDto)
   originPin?: OriginPinDto | null;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 2147483647 })
+  @ApiPropertyOptional({ description: '서류 수량. 생략 시 0.', minimum: 0, maximum: 2147483647 })
   @ValidateIf(present)
   @IsInt()
   @Min(0)
   @Max(2147483647)
   documentCount?: number;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 2147483647 })
+  @ApiPropertyOptional({
+    description: '소형 박스 수량. 생략 시 0.',
+    minimum: 0,
+    maximum: 2147483647,
+  })
   @ValidateIf(present)
   @IsInt()
   @Min(0)
   @Max(2147483647)
   smallBoxCount?: number;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 2147483647 })
+  @ApiPropertyOptional({
+    description: '중형 박스 수량. 생략 시 0.',
+    minimum: 0,
+    maximum: 2147483647,
+  })
   @ValidateIf(present)
   @IsInt()
   @Min(0)
   @Max(2147483647)
   mediumBoxCount?: number;
 
-  @ApiPropertyOptional({ minimum: 0, maximum: 2147483647 })
+  @ApiPropertyOptional({
+    description: '대형 박스 수량. 생략 시 0.',
+    minimum: 0,
+    maximum: 2147483647,
+  })
   @ValidateIf(present)
   @IsInt()
   @Min(0)
   @Max(2147483647)
   bigBoxCount?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: '기타 물품 설명. 생략 시 빈 문자열.' })
   @ValidateIf(present)
   @IsString()
   otherItemDescription?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: '배송 요청 사항. 생략 시 빈 문자열.' })
   @ValidateIf(present)
   @IsString()
   clientComment?: string;
 
   @ApiPropertyOptional({
+    description: '물품 가액(원). 0 이상의 정수이며 미입력 시 null.',
     type: Number,
     nullable: true,
     minimum: 0,
@@ -162,7 +213,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional({
     minimum: 1,
     maximum: 2147483647,
-    description: '기존 고객 ID. customerSeq와 customer 중 정확히 하나만 전달합니다.',
+    description: '기존 고객 번호. customerSeq와 customer 중 하나만 입력합니다.',
   })
   @ValidateIf(
     (input: CreateOrderDto, value: unknown) => value !== undefined || input.customer === undefined,
@@ -175,7 +226,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional({
     type: () => OrderCustomerDto,
     description:
-      '고객 ID를 모를 때 전달합니다. 미등록 전화번호면 주문 저장과 함께 고객을 생성합니다.',
+      '고객 번호를 모를 때 이름·전화번호 입력. 기존 번호는 고객을 연결하고, 미등록 번호는 고객을 생성합니다.',
   })
   @ValidateIf(present)
   @IsObject()
@@ -185,19 +236,29 @@ export class CreateOrderDto {
 
   @ApiPropertyOptional({
     enum: ['cat', 'billing', 'credit', 'groupBilling'],
-    description: '생략 시 credit으로 저장하며 최종 접수 전 고객 선택과 결제 자격을 재확인합니다.',
+    description: '결제 방식. 생략 시 credit. 최종 접수 전 결제 자격을 다시 확인해야 합니다.',
   })
   @ValidateIf(present)
   @IsIn(['cat', 'billing', 'credit', 'groupBilling'])
   paymentMethodType?: 'cat' | 'billing' | 'credit' | 'groupBilling';
 
-  @ApiPropertyOptional({ type: String, format: 'date-time', nullable: true })
+  @ApiPropertyOptional({
+    description: '수거 요청 시각. Z 또는 시간대 오프셋 필수. 미입력 시 null.',
+    example: '2026-10-28T10:00:00+09:00',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+  })
   @IsOptional()
   @IsISO8601({ strict: true, strictSeparator: true })
   @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/)
   pickupRequestedAt?: string | null;
 
-  @ApiPropertyOptional({ type: () => ParcelInputDto, isArray: true })
+  @ApiPropertyOptional({
+    description: '택배 상세 목록. 생략하거나 빈 배열로 저장할 수 있습니다.',
+    type: () => ParcelInputDto,
+    isArray: true,
+  })
   @ValidateIf(present)
   @IsArray()
   @IsObject({ each: true })
