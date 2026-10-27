@@ -86,6 +86,8 @@ call_session_seq: 7
 
 ## AI 연동과 후속 작업
 
+특정 시점에 사용한 출발지·도착지를 신규 주문에 재사용하려면 [42번 이전 주문 주소 조회](order-address-history.md)를 사용한다.
+
 1. 선행 통화 생성 측에서 `callSessionSeq`를 전달해야 한다. 이번 작업에 CALL-01은 포함하지 않는다.
 2. AI는 목록의 `data[]`에서 orderSeq를 선택하고, 상세의 `data`에서 주소·상세 번호·version을 읽는다.
 3. ORD-01 → ORD-03 → ORD-04 → ORD-06은 같은 orderSeq를 사용한다. 수정은 [61번 연동 문서](order-update.md)를 따르며 최종 접수는 57번 후속 작업이다.
