@@ -44,7 +44,7 @@ export class OrderSummaryDto {
   orderSeq!: number;
 
   @ApiProperty({
-    description: '주문 고객 번호. 연결되지 않은 기존 데이터는 null.',
+    description: '주문 고객 번호. 고객을 확인하지 못한 미완료·취소 주문은 null일 수 있습니다.',
     type: Number,
     nullable: true,
   })

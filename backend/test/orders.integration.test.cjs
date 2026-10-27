@@ -923,6 +923,16 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
   assert.equal(response.status, 200);
   const spec = await response.json(),
     operation = spec.paths['/api/orders'].post;
+  assert.equal(operation.summary, '주문 생성·AI 상담 결과 수신');
+  const orderOperations = Object.values(spec.paths)
+    .flatMap(Object.values)
+    .filter((item) => item.tags?.includes('Orders'));
+  for (const item of orderOperations) {
+    assert.deepEqual(item.tags, ['Orders']);
+    assert.doesNotMatch(JSON.stringify(item), /\b(?:ORD|ADDR)-\d+\b/);
+  }
+  for (const name of ['OrderSummaryDto', 'OrderDetailDto', 'OrderParcelDto'])
+    assert.doesNotMatch(JSON.stringify(spec.components.schemas[name]), /\b(?:ORD|ADDR)-\d+\b/);
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   const callHeaders = operation.parameters.filter(
     (p) => p.in === 'header' && p.name.toLowerCase() === 'call_session_seq',
@@ -2003,7 +2013,7 @@ test('ORD-04 all active administrator roles save without a call, inactive sessio
 test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields and one call header', async () => {
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders/{id}'].patch;
-  assert.ok(operation.summary.includes('ORD-04'));
+  assert.equal(operation.summary, '주문 정보 수정');
   assert.ok(operation.description.includes('COLLECTING'));
   assert.ok(operation.description.includes('아직 적용되지 않습니다'));
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
@@ -2807,7 +2817,7 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders/{id}/submit'].post;
   assert.deepEqual(operation.tags, ['Orders']);
-  assert.match(operation.summary, /ORD-06/);
+  assert.equal(operation.summary, '기존 미완료 주문 최종 접수');
   assert.ok(operation.description.includes('groupBilling'));
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.equal(headers.length, 1);

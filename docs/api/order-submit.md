@@ -95,7 +95,7 @@ call_session_seq: 7
 - `DVER_API_URL` 기본값은 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`이다. 운영·개발은 HTTPS를 요구한다.
 - 서버 비밀 환경변수 `DVER_API_KEY`를 설정한다. 빈 값이면 기존 API는 실행되고 신규 디버 접수만 503이다. 로컬·운영 Compose에서 두 변수를 backend에 전달한다. 키는 저장소에 넣지 않는다.
 - 키를 설정한 서버에서 `/submit`을 호출하면 실제 디버 주문 요청이 나간다. 자동 검증은 실제 키를 사용하지 않고 로컬 모의 서버로 실행한다.
-- Swagger `/api/docs`의 `Orders` → `기존 미완료 주문 최종 접수 (ORD-06)`에서 호출 규격·예시·상태·오류를 확인한다.
+- Swagger `/api/docs`의 `Orders` → `기존 미완료 주문 최종 접수`에서 호출 규격·예시·상태·오류를 확인한다.
 - `node scripts/check.cjs`: 빌드·린트·포맷, 실제 임시 DB, 모의 디버, 동시 요청·실패 롤백·재시작·기존 API·Nginx/PBX 회귀.
 - `./infra/database/test-monolith.ps1`: 기존 migration의 업무 데이터 보존, 제약, 반복 적용·체크섬·백업 복원·전체 롤백.
 
