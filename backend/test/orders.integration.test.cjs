@@ -1019,7 +1019,7 @@ test('ORD-02 paginates orders once each, including zero-detail drafts and equal 
     body.data.map((o) => o.parcelCount),
     [2, 1],
   );
-  assert.deepEqual(body.data[0].shipmentStatuses, []);
+  assert.equal(Object.hasOwn(body.data[0], 'shipmentStatuses'), false);
   assert.equal(body.data[0].pickupRequestedAt, null);
   assert.equal(body.data[0].status, 'COLLECTING');
   const last = await (await readOrders(`?customerSeq=${customer}&limit=2&offset=2`)).json();
@@ -1064,7 +1064,6 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
     from: '2026-10-27T09:00:00+09:00',
     to: '2026-10-28T00:00:00Z',
     status: 'ACCEPTED',
-    shipmentStatus: 'sent',
     recipientName: 'alice_100%',
   });
   const response = await readOrders('?' + filters);
@@ -1074,7 +1073,8 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
   assert.equal(data.length, 1);
   assert.equal(data[0].orderSeq, selected);
   assert.equal(data[0].parcelCount, 3);
-  assert.deepEqual(data[0].shipmentStatuses, ['paid', 'sent']);
+  assert.equal(data[0].status, 'ACCEPTED');
+  assert.equal(Object.hasOwn(data[0], 'shipmentStatuses'), false);
   const range = await (
     await readOrders(`?customerSeq=${customer}&from=2026-10-27T00:00:00Z&to=2026-10-28T00:00:00Z`)
   ).json();
@@ -1089,9 +1089,44 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
     assert.equal(result.data.length, text.includes('OR') ? 0 : 2);
   }
   assert.deepEqual(
-    (await (await readOrders(`?customerSeq=${customer}&shipmentStatus=canceled`)).json()).data,
+    (await (await readOrders(`?customerSeq=${customer}&status=CANCELLED`)).json()).data,
     [],
   );
+});
+
+test('order list filters every order status independently of shipment state', async () => {
+  const { customer } = await readCustomer();
+  const statuses = [
+    'COLLECTING',
+    'SUBMITTING',
+    'ACCEPTED',
+    'AUTH_FAILED',
+    'REVIEW_REQUIRED',
+    'CANCELLED',
+    'EXPIRED',
+  ];
+  const orders = new Map();
+  for (const status of statuses) {
+    const id = await readOrder(customer);
+    await pool.query(
+      `UPDATE orders SET status=$2,pickup_requested_at='2026-10-28T00:00:00Z',
+       parcel_no=CASE WHEN $2='ACCEPTED' THEN 'READ0058' END,
+       dver_received_at=CASE WHEN $2='ACCEPTED' THEN '2026-10-27T00:00:00Z'::timestamptz END
+       WHERE order_seq=$1`,
+      [id, status],
+    );
+    orders.set(status, id);
+  }
+  for (const status of statuses) {
+    const response = await readOrders(`?customerSeq=${customer}&status=${status}`);
+    assert.equal(response.status, 200);
+    const { data } = await response.json();
+    assert.deepEqual(
+      data.map((order) => [order.orderSeq, order.status]),
+      [[orders.get(status), status]],
+    );
+    assert.equal(Object.hasOwn(data[0], 'shipmentStatuses'), false);
+  }
 });
 
 test('ORD-02 AI scope comes from the active call customer, never arbitrary customer filters', async () => {
@@ -1142,6 +1177,7 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
     '?limit=101',
     '?offset=-1',
     '?status=unknown',
+    '?shipmentStatus=sent',
     '?recipientName=',
     '?unknown=1',
   ])
@@ -1166,7 +1202,7 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
 test('ORD-02 Swagger describes filters, a single call header and the actual list envelope', async () => {
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders'].get;
-  assert.ok(operation.summary.includes('ORD-02'));
+  assert.equal(operation.summary, '주문 목록 조회');
   assert.ok(operation.description.includes('AI'));
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.deepEqual(
@@ -1181,11 +1217,17 @@ test('ORD-02 Swagger describes filters, a single call header and the actual list
     'limit',
     'offset',
     'recipientName',
-    'shipmentStatus',
     'status',
     'to',
   ]);
   assert.ok(queries.every((p) => p.description && !p.required));
+  const summary = spec.components.schemas.OrderSummaryDto;
+  assert.deepEqual(
+    queries.find((p) => p.name === 'status').schema.enum,
+    summary.properties.status.enum,
+  );
+  assert.ok(summary.required.includes('status'));
+  assert.equal(summary.properties.shipmentStatuses, undefined);
   assert.deepEqual(operation.responses[200].content['application/json'].schema.required, [
     'data',
     'hasNext',

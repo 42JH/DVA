@@ -86,10 +86,10 @@ export class OrdersController {
   @Get()
   @MvpAiOrderAccess()
   @ApiOperation({
-    summary: '주문 목록 조회 (ORD-02)',
+    summary: '주문 목록 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '생성 시각·주문 번호 내림차순으로 조회합니다. 필터는 모두 AND 조건이며, 배송 상태는 팀 DB 저장값입니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '주문 상태·고객·생성 기간·수령인으로 검색하고, 생성 시각·주문 번호 내림차순으로 반환합니다. 필터는 모두 AND 조건입니다. 주소·물품은 주문 상세에서 조회합니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

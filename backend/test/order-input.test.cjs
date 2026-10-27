@@ -115,13 +115,13 @@ test('order queries validate dates, enum filters, integer pagination and unknown
     from: '2026-10-27T00:00:00+09:00',
     to: '2026-10-28T00:00:00Z',
     status: 'COLLECTING',
-    shipmentStatus: 'paid',
     recipientName: ' 수령인 ',
   });
   assert.equal(result.customerSeq, 31);
   assert.equal(result.limit, 100);
   assert.equal(result.offset, 2);
   assert.equal(result.recipientName, '수령인');
+  assert.equal(result.status, 'COLLECTING');
   for (const input of [
     { customerSeq: '0' },
     { customerSeq: '2147483648' },
@@ -133,7 +133,7 @@ test('order queries validate dates, enum filters, integer pagination and unknown
     { offset: '-1' },
     { offset: '1.5' },
     { status: 'paid' },
-    { shipmentStatus: 'ACCEPTED' },
+    { shipmentStatus: 'paid' },
     { recipientName: '   ' },
     { recipientName: ['a', 'b'] },
     { from: '2026-02-30T00:00:00Z' },

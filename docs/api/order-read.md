@@ -10,7 +10,7 @@
 - 관리자 쿠키가 있으면 반드시 정상 세션이어야 한다. 만료·잘못된 쿠키는 AI 요청으로 전환하지 않는다.
 - 서비스 인증은 기존 MVP 방침대로 미적용이다. 통화 번호를 아는 호출자를 인증하는 기능은 아니며, 발신번호의 진위도 보증하지 않는다. 이 한계는 [135번](https://ssafy.atlassian.net/browse/S15P31D109-135)의 서비스 인증과 통화 결속 작업에서 보완해야 한다.
 
-## ORD-02 주문 목록
+## 주문 목록
 
 ```http
 GET /api/orders?status=COLLECTING&limit=20&offset=0
@@ -22,11 +22,22 @@ call_session_seq: 7
 | customerSeq | 고객 번호. AI는 통화 고객과 다른 번호 지정 불가 |
 | from / to | 주문 생성 시각. from 포함·to 미포함. 시간대 포함 ISO 8601, from < to |
 | status | COLLECTING / SUBMITTING / ACCEPTED / AUTH_FAILED / REVIEW_REQUIRED / CANCELLED / EXPIRED |
-| shipmentStatus | notPaid / paid / received / waiting / sent / canceling / canceled 중 하나 |
 | recipientName | 수령인 이름 부분 검색. 앞뒤 공백 제거·대소문자 구분 없음. `%`, `_`는 일반 문자 |
 | limit / offset | 기본 20 / 0. limit 1~100, offset 0 이상 정수 |
 
-모든 필터는 AND다. 배송 상태와 수령인 필터는 각각 주문 내 일치하는 상세가 있는지 검사한다. 정렬은 `createdAt DESC, orderSeq DESC`이며, 상세가 여러 개여도 주문은 한 번만 반환한다.
+모든 필터는 AND다. 수령인 필터는 주문 내 일치하는 상세가 있는지 검사한다. 정렬은 `createdAt DESC, orderSeq DESC`이며, 상세가 여러 개여도 주문은 한 번만 반환한다. 배송 상태 필터 `shipmentStatus`는 지원하지 않으며 전달하면 400이다.
+
+`status`는 `orders.status`이며 배송 상태와 별개다.
+
+| status | 의미 |
+| --- | --- |
+| COLLECTING | 정보를 수집·보완 중인 미완료 주문 |
+| SUBMITTING | 디버 접수 처리 중 또는 결과 저장 미확정 |
+| ACCEPTED | 디버 접수 완료 |
+| AUTH_FAILED | 디버 인증 실패 |
+| REVIEW_REQUIRED | 디버 접수 결과 확인 필요 |
+| CANCELLED | 취소된 주문 |
+| EXPIRED | 만료된 주문. 자동 만료 처리는 별도 |
 
 ```json
 {
@@ -38,15 +49,14 @@ call_session_seq: 7
       "paymentMethodType": "credit",
       "pickupRequestedAt": null,
       "createdAt": "2026-10-27T00:00:00.000Z",
-      "parcelCount": 1,
-      "shipmentStatuses": []
+      "parcelCount": 1
     }
   ],
   "hasNext": false
 }
 ```
 
-`parcelCount`는 필터에 걸린 상세 수가 아닌 주문 전체 상세 수다. `shipmentStatuses`는 전체 상세에 저장된 배송 상태를 중복 없이 반환한다. 조회 결과가 없으면 `data: []`, `hasNext: false`다. 목록에는 meta나 page 객체를 붙이지 않는다. AI가 수령인·주소로 후보를 구분해야 하면 각 orderSeq로 ORD-03을 조회한다.
+`parcelCount`는 필터에 걸린 상세 수가 아닌 주문 전체 상세 수다. 목록은 주문 요약만 반환하며 `shipmentStatuses`는 제거했다. 조회 결과가 없으면 `data: []`, `hasNext: false`다. 목록에는 meta나 page 객체를 붙이지 않는다. 수령인·주소·물품을 확인하려면 각 orderSeq로 주문 상세를 조회한다.
 
 ## ORD-03 주문 상세·배송 상태
 

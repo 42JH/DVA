@@ -125,28 +125,21 @@ export class OrdersRepository {
         `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt",
-          (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount",
-          ARRAY(SELECT DISTINCT s.status FROM shipments s
-            JOIN order_parcels p ON p.order_parcel_seq=s.order_parcel_seq
-            WHERE p.order_seq=o.order_seq ORDER BY s.status) AS "shipmentStatuses"
+          (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
          FROM orders o
          WHERE ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)
            AND ($4::text IS NULL OR o.status=$4)
            AND ($5::text IS NULL OR EXISTS(
-             SELECT 1 FROM order_parcels p JOIN shipments s ON s.order_parcel_seq=p.order_parcel_seq
-             WHERE p.order_seq=o.order_seq AND s.status=$5))
-           AND ($6::text IS NULL OR EXISTS(
              SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq
-               AND strpos(lower(p.destination_name),lower($6)) > 0))
-         ORDER BY o.created_at DESC, o.order_seq DESC LIMIT $7 OFFSET $8`,
+               AND strpos(lower(p.destination_name),lower($5)) > 0))
+         ORDER BY o.created_at DESC, o.order_seq DESC LIMIT $6 OFFSET $7`,
         [
           customerId,
           query.from ?? null,
           query.to ?? null,
           query.status ?? null,
-          query.shipmentStatus ?? null,
           query.recipientName ?? null,
           query.limit + 1,
           query.offset,

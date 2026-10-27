@@ -50,7 +50,12 @@ export class OrderSummaryDto {
   })
   customerSeq!: number | null;
 
-  @ApiProperty({ description: '주문 처리 상태.', enum: ORDER_STATUSES })
+  @ApiProperty({
+    description:
+      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 디버 인증 실패, REVIEW_REQUIRED 접수 확인 필요, CANCELLED 취소, EXPIRED 만료.',
+    enum: ORDER_STATUSES,
+    example: 'COLLECTING',
+  })
   status!: OrderStatus;
 
   @ApiProperty({
@@ -76,13 +81,6 @@ export class OrderSummaryDto {
     minimum: 0,
   })
   parcelCount!: number;
-
-  @ApiProperty({
-    description: '저장된 배송 상태 목록(중복 제거). 배송이 없으면 빈 배열.',
-    enum: SHIPMENT_STATUSES,
-    isArray: true,
-  })
-  shipmentStatuses!: ShipmentStatus[];
 }
 
 export class OrderAddressValueDto {
@@ -210,10 +208,7 @@ export class OrderParcelDto {
   shipment!: OrderShipmentDto | null;
 }
 
-export class OrderDetailDto extends OmitType(OrderSummaryDto, [
-  'parcelCount',
-  'shipmentStatuses',
-] as const) {
+export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as const) {
   @ApiProperty({
     description:
       'DB의 현재 주문 버전. ORD-04 수정·ORD-06 최종 접수의 expectedVersion으로 사용합니다.',
