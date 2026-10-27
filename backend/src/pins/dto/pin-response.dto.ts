@@ -1,0 +1,48 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { RequestMetaDto } from '../../common/dto/api-response.dto';
+import { PinAddressInputDto } from './pin-request.dto';
+
+export class PinVersionDto {
+  @ApiProperty({
+    minimum: 1,
+    description: 'DB가 반환한 현재 버전. 수정 거절 조건으로 사용하지 않습니다.',
+  })
+  version!: number;
+}
+export class CreatedPersonalPinDto extends PinVersionDto {
+  @ApiProperty({ minimum: 1 }) personalPinSeq!: number;
+}
+export class CreatedCompanyPinDto extends PinVersionDto {
+  @ApiProperty({ minimum: 1 }) companyPinSeq!: number;
+}
+export class PersonalPinDto extends CreatedPersonalPinDto {
+  @ApiProperty({ minimum: 1 }) customerSeq!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty({ type: PinAddressInputDto }) addressData!: PinAddressInputDto;
+}
+export class CompanyPinDto extends CreatedCompanyPinDto {
+  @ApiProperty({ minimum: 1 }) organizationSeq!: number;
+  @ApiProperty({ type: String, nullable: true }) label!: string | null;
+  @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;
+  @ApiProperty({ type: PinAddressInputDto }) addressData!: PinAddressInputDto;
+}
+export class CreatedPersonalPinEnvelopeDto {
+  @ApiProperty({ type: CreatedPersonalPinDto }) data!: CreatedPersonalPinDto;
+  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
+}
+export class CreatedCompanyPinEnvelopeDto {
+  @ApiProperty({ type: CreatedCompanyPinDto }) data!: CreatedCompanyPinDto;
+  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
+}
+export class PinVersionEnvelopeDto {
+  @ApiProperty({ type: PinVersionDto }) data!: PinVersionDto;
+  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
+}
+export class PersonalPinsEnvelopeDto {
+  @ApiProperty({ type: [PersonalPinDto] }) data!: PersonalPinDto[];
+  @ApiProperty() hasNext!: boolean;
+}
+export class CompanyPinsEnvelopeDto {
+  @ApiProperty({ type: [CompanyPinDto] }) data!: CompanyPinDto[];
+  @ApiProperty() hasNext!: boolean;
+}
