@@ -36,7 +36,7 @@ export class CustomersService {
         : await this.repository.find(input.customerSeq!, client));
     if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
     if (customer.status !== 'ACTIVE')
-      throw new ApiException(403, 'FORBIDDEN', '활성 고객의 주문만 생성할 수 있습니다.');
+      throw new ApiException(403, 'FORBIDDEN', '주문에는 활성 고객이 필요합니다.');
     if (created)
       await this.audit.recordSuccess(
         {
