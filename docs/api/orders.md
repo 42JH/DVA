@@ -1,17 +1,17 @@
-# 주문 API 계약 — ORD-01
+# 주문 API 계약 — ORD-01~03
 
-관련 작업: [S15P31D109-55](https://ssafy.atlassian.net/browse/S15P31D109-55).
+관련 작업: [55번 주문 생성](https://ssafy.atlassian.net/browse/S15P31D109-55), [58번 주문 조회](https://ssafy.atlassian.net/browse/S15P31D109-58). 목록·상세 호출 방법은 [주문 조회 연동 문서](order-read.md)를 참고한다.
 
 ## 확정 기준
 
-사용자가 2026-10-27 다시 확정한 **기존 API 명세**를 따른다. Jira 55 본문의 별도 미완료 상담 스냅샷 방식과 충돌하므로 이 MR에서는 그 방식을 적용하지 않는다. Jira 본문·상태는 자동 변경하지 않았다.
+사용자가 2026-10-27 다시 확정한 **기존 API 명세와 이후 합의**를 따른다. Jira 55 본문의 별도 미완료 상담 스냅샷 방식은 적용하지 않는다. Jira 본문과 API 명세가 다르면 API 명세를 기준으로 구현한다.
 
 미완료 주문과 정상 접수 주문은 **같은 orders·order_parcels와 같은 orderSeq**를 사용한다. AI와 관리자도 같은 생성 API를 호출한다. 입력 정보가 일부뿐이든 모두 갖춰졌든 생성은 COLLECTING이며, 완료 여부를 판단해서 다른 API나 테이블로 보내지 않는다.
 
-| 단계 | API | 이번 MR |
+| 단계 | API | 구현 상태 |
 | --- | --- | --- |
 | ORD-01 주문 생성 | POST /api/orders | 구현. COLLECTING 저장, orderSeq·version 반환 |
-| ORD-02/03 목록·상세 | GET /api/orders, /api/orders/{id} | 58번. 미완료도 같은 주문 조회에서 status로 구분 |
+| ORD-02/03 목록·상세 | GET /api/orders, /api/orders/{id} | 58번 구현. 미완료도 같은 주문 조회에서 status로 구분 |
 | ORD-04 수집 정보 저장 | PATCH /api/orders/{id} | 61번. 같은 주문에 expectedVersion으로 수정 |
 | ORD-06 최종 접수 | POST /api/orders/{id}/submit | 57번. 같은 주문 재검증·디버 접수 |
 | 통화 종료 | CALL-02 | 기존 주문에 통화 종료 결과 연결. 별도 미완료 주문 생성 없음 |
@@ -124,5 +124,5 @@ ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각
 - 이전 초안의 미배포 006-incomplete-consultations.sql과 별도 상담 테이블 ERD는 제외했다. 운영 DB에 DROP·데이터 초기화를 실행하지 않았다. 별도 환경에 초안 006을 수동 적용했다면 이 MR이 자동 제거하지 않는다.
 - 기존 고객 API를 포함해 빌드·단위/HTTP·실제 DB·동시 요청·실패 롤백·Nginx/PBX 회귀를 node scripts/check.cjs로 검증한다.
 - DB migration·제약·반복 적용·체크섬·실패 롤백·백업 복원은 infra/database/test-monolith.ps1로 검증한다.
-- 이 MR의 HTTP 구현은 ORD-01이다. ORD-02/03/04/06 및 CALL-01/02 구현, 실제 AI 호출부의 통화 ID·경로·필드 연결, 디버 연동, 원격 DB 적용·운영 배포는 완료 범위가 아니다.
+- 현재 HTTP 구현은 ORD-01/02/03이다. ORD-04/06 및 CALL-01/02 구현, 실제 AI 호출부의 통화 ID·경로·필드 연결, 디버 연동, 운영 배포는 별도 작업이다. 58번 조회는 기존 스키마를 사용하며 신규 migration을 추가하지 않는다.
 - 기존 AI 제안의 /internal/ai·snake_case는 이 /api·camelCase·응답 envelope 계약과 자동 호환되지 않는다. 실제 호출부는 담당 연동 작업에서 맞춰야 한다.
