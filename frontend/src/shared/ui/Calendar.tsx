@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { Button } from './Button'
-import { fmtRange, monthGrid, pickRange, rangeDays, todayYmd, type Ymd } from '../lib/dateRange'
+import {
+  fmtRange,
+  monthGrid,
+  pickRange,
+  rangeDays,
+  todayYmd,
+  type Ymd,
+} from '@/shared/lib/dateRange'
 
 // 기간 선택 달력 (와이어프레임 12 Calendar · 02 대시보드) — 한 달 · 일요일 시작 · 칸 44
 // 오늘 = 남색 테두리 · 오늘 이후 = 흐리게(못 고름) · 시작/끝 = 남색 원 · 사이 = 옅은 띠 · 아래 '10.01 ~ 10.15 15일' + [취소] [적용]

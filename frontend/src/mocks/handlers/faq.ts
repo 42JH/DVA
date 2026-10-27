@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { API_BASE_URL } from '../../shared/api/client'
+import { API_BASE_URL } from '@/shared/api/client'
 
 // 가짜 FAQ — 명세서 FAQ-01 · 02 · 03 그대로 (+ 명세에 없는 DELETE · category). 메모리에만 있어서 새로고침하면 처음으로
 // 예시 질문은 와이어프레임 09 + 디버 FAQ 참고자료([프로젝트] 고정값) 기준. 분류는 10/27 확정 9개. 전부 예시

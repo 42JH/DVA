@@ -12,31 +12,36 @@ npm run dev                  # http://localhost:5173
 
 PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행합니다.
 
-| 환경 변수 | 뜻 |
-|---|---|
-| `VITE_API_BASE_URL` | API 기본 경로. 기본 `/api` (버전 접두사 없음) |
-| `VITE_USE_MOCK` | `true`면 MSW 가짜 API 사용. 가짜가 없는 요청은 백엔드로 감 |
+| 환경 변수           | 뜻                                                         |
+| ------------------- | ---------------------------------------------------------- |
+| `VITE_API_BASE_URL` | API 기본 경로. 기본 `/api` (버전 접두사 없음)              |
+| `VITE_USE_MOCK`     | `true`면 MSW 가짜 API 사용. 가짜가 없는 요청은 백엔드로 감 |
 
 개발 서버는 `/api`를 떼고 `http://localhost:3000`(백엔드)으로 넘깁니다 — 배포 nginx(`infra/nginx/default.conf`)와 같은 동작.
 
 가짜 로그인: 아이디 `jaehoon.lee@dver.co.kr`, 비밀번호는 아무 값.
 
-## 구조 — MVVM
+## 구조 — 기능 기준 폴더 (팀 컨벤션 v4, 노션)
 
 ```
 src/
-  app/              라우터 · 전역 Provider · 틀(레이아웃) · 로그인 확인
-  features/<기능>/
-    model/          타입 · API 호출 · 쿼리 키      — React를 모름
-    viewmodel/      use<화면>ViewModel 훅        — 상태 · 동작 · 서버 데이터(React Query)
-    view/           화면 컴포넌트                 — ViewModel 값만 그림
+  app/              Provider · 라우트 표(router.tsx) · 틀(AppLayout) · 가드(guards/) · 기능 밖 화면(routes/) · 에러 경계
   shared/
-    api/client.ts   공통 HTTP 클라이언트 (명세서 1장 공통 규약)
-    auth/token.ts   Access Token 보관
-    styles/global.css  Tailwind 진입점 + 디자인 토큰(@theme) + 기본 스타일
-    ui/             공통 컴포넌트 (만들 때 추가)
-  mocks/            MSW 가짜 API (handlers/<기능>.ts)
+    api/            client.ts(공통 HTTP · ApiError) · queryClient.ts · paging.ts
+    auth/           token.ts · sessionApi.ts · useSession.ts   — 세션은 여러 기능이 써서 여기
+    lib/            useListParams · format · dateRange
+    styles/         global.css (Tailwind 진입점 + 디자인 토큰 @theme)
+    ui/             공통 부품 (index.ts로만 import)
+  features/<기능>/
+    api/            타입 · API 호출 · xxxQueries(queryOptions)   — React를 모름
+    hooks/          use<기능>… 훅                                — 상태 · 판단 · 서버 데이터(React Query)
+    components/     화면 컴포넌트                                — 훅 값만 그림
+    labels.ts       상태 코드 → 화면 문구
+  mocks/            MSW 가짜 API: handlers/<기능>.ts → handlers/index.ts, browser.ts(개발) · node.ts(테스트)
 ```
+
+의존 방향은 `shared → features → app`, 기능 안에서는 `components → hooks → api`. 기능 폴더끼리는 import하지 않는다.
+`@/`는 `src/`. 규칙은 `eslint.config.js`가 검사한다. 자세한 규칙은 노션 '프론트엔드 컨벤션 v4'.
 
 ## 스타일 — Tailwind v4
 

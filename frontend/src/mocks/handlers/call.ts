@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw'
-import { API_BASE_URL } from '../../shared/api/client'
+import { API_BASE_URL } from '@/shared/api/client'
 
 // 가짜 통화 상세 — 와이어프레임 06 예시 장면 그대로. 통화 9101 = 주문 10519 (강도윤 · 10.20 13:12 · 3분 40초)
 // AI가 받는 분 번호를 두 번 못 알아들어 다시 묻자 고객이 짜증(불만 감지) → 접수는 성공.
