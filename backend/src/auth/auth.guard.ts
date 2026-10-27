@@ -10,6 +10,9 @@ import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/aud
 import { AuthService } from './auth.service';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
+// Temporary, explicit opt-in for customer registration/detail/name updates (Jira 135).
+// Do not apply this to administrator-only operations or to an entire controller.
+export const MvpAiCustomerAccess = () => SetMetadata('auth:mvp-ai-customer', true);
 export const Roles = (...roles: AdminRole[]) => SetMetadata('auth:roles', roles);
 export type AuthRequest = Request & { requestId: string; admin: AdminPublic; sessionToken: string };
 export function readSessionToken(request: Request): string | undefined {
@@ -54,13 +57,25 @@ export class AuthGuard implements CanActivate {
       )
     )
       return true;
+    request.sessionToken = readSessionToken(request) ?? '';
+    const targets = [context.getHandler(), context.getClass()];
+    if (this.reflector.getAllAndOverride<boolean>('auth:mvp-ai-customer', targets)) {
+      const hasSessionCookie = (request.headers.cookie ?? '')
+        .split(';')
+        .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`));
+      const changesStatus =
+        request.method === 'PATCH' &&
+        request.body !== null &&
+        typeof request.body === 'object' &&
+        Object.hasOwn(request.body, 'status');
+      // A missing/stale administrator session must never turn a status change into an AI write.
+      if (!hasSessionCookie && !changesStatus) return true;
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.get('Origin');
       if (!origin || !this.config.get('CORS_ORIGINS', { infer: true }).includes(origin))
         throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
     }
-    request.sessionToken = readSessionToken(request) ?? '';
-    const targets = [context.getHandler(), context.getClass()];
     if (this.reflector.getAllAndOverride<boolean>('auth:public', targets)) return true;
     request.admin = await this.auth.authenticate(request.sessionToken);
     const roles = this.reflector.getAllAndOverride<AdminRole[]>('auth:roles', targets);

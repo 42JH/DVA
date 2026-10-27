@@ -1,0 +1,71 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Transform, TransformFnParams } from 'class-transformer';
+import { IsIn, IsInt, IsNotEmpty, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
+import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { CUSTOMER_STATUSES, CustomerStatus } from '../customers.types';
+
+const trim = ({ value }: TransformFnParams): unknown =>
+  typeof value === 'string' ? value.trim() : value;
+
+export class CreateCustomerDto {
+  @ApiProperty({ description: '이름. 앞뒤 공백 제거, 빈 이름 불가.' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @ApiProperty({
+    description: '선행 0을 보존한 숫자 문자열. 하이픈·공백·국가번호 + 불가.',
+    pattern: '^[0-9]+$',
+  })
+  @IsString()
+  @Matches(/^[0-9]+$/)
+  phoneNumber!: string;
+}
+
+export class UpdateCustomerDto {
+  @ApiPropertyOptional({ description: '이름. null과 빈 이름 불가.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  name?: string;
+
+  @ApiPropertyOptional({
+    enum: CUSTOMER_STATUSES,
+    description: 'ACTIVE 관리자 전용. WITHDRAWN에서 ACTIVE로 복구는 지원하지 않습니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(CUSTOMER_STATUSES)
+  status?: CustomerStatus;
+}
+
+export class ListCustomersQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ description: '이름 부분 검색. 앞뒤 공백 제거.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @Transform(trim)
+  @IsString()
+  q?: string;
+
+  @ApiPropertyOptional({ description: '전화번호 정확히 일치 검색.', pattern: '^[0-9]+$' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @Matches(/^[0-9]+$/)
+  phoneNumber?: string;
+
+  @ApiPropertyOptional({ enum: CUSTOMER_STATUSES })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(CUSTOMER_STATUSES)
+  status?: CustomerStatus;
+}
+
+export class CustomerIdParamsDto {
+  @ApiProperty({ type: Number, minimum: 1, maximum: 2147483647, description: 'customerSeq' })
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  id!: number;
+}
