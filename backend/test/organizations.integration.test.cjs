@@ -13,7 +13,6 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
-const { OrganizationsRepository } = require('../dist/organizations/organizations.repository');
 const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 
@@ -24,7 +23,7 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-let app, appB, base, baseB, adminA, adminB, repository, hash, sessionA;
+let app, appB, base, baseB, adminA, adminB, hash, sessionA;
 const apps = [];
 const cookies = new Map();
 const password = 'company-test-only-password';
@@ -88,7 +87,6 @@ before(async () => {
   sessionA = await login('companyTestA');
   cookies.set(base, sessionA);
   cookies.set(baseB, await login('companyTestB', baseB));
-  repository = app.get(OrganizationsRepository);
 });
 after(async () => {
   for (const application of apps) await application.close();
@@ -104,7 +102,7 @@ const request = (path, options = {}, host = base) =>
       ),
     ),
   });
-const create = (name, key = randomUUID(), host = base, extra = {}) =>
+const create = (name, key = undefined, host = base, extra = {}) =>
   request(
     '',
     {
@@ -316,7 +314,7 @@ test('patch updates name/status with no response body and preserves memberships/
   assert.equal((await request('/' + id, { method: 'DELETE' })).status, 404);
 });
 
-test('invalid input, extra fields, missing keys and invalid IDs never create or change records', async () => {
+test('invalid input, extra fields and invalid IDs never create or change records', async () => {
   for (const body of [
     { name: '' },
     { name: ' ' },
@@ -329,14 +327,6 @@ test('invalid input, extra fields, missing keys and invalid IDs never create or 
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
       body: JSON.stringify(body),
-    });
-    assert.equal(response.status, 400);
-  }
-  for (const headers of [{}, { 'Idempotency-Key': 'invalid' }]) {
-    const response = await request('', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: '{"name":"valid"}',
     });
     assert.equal(response.status, 400);
   }
@@ -366,102 +356,32 @@ test('invalid input, extra fields, missing keys and invalid IDs never create or 
   assert.equal((await patch(2147483647, { name: 'missing' })).status, 404);
 });
 
-test('same key replays the original ID, different body conflicts, different keys may share a name', async () => {
-  const key = randomUUID();
-  const first = (await (await create('재시도 기업', key)).json()).data;
-  const retry = await create('재시도 기업', key.toUpperCase());
-  assert.equal(retry.status, 201);
-  assert.deepEqual((await retry.json()).data, first);
-  const conflict = await create('다른 기업', key);
-  assert.equal(conflict.status, 422);
-  assert.equal((await conflict.json()).error.code, 'IDEMPOTENCY_KEY_REUSED');
-  const duplicateName = (await (await create('재시도 기업')).json()).data;
-  assert.notEqual(duplicateName.organizationSeq, first.organizationSeq);
+test('registration needs no request key and repeated names or legacy headers create independent companies', async () => {
+  const name = '독립 등록 ' + randomUUID();
+  const first = await create(name);
+  const second = await create(name, 'legacy-key');
+  const third = await create(name, 'legacy-key', baseB);
+  for (const response of [first, second, third]) assert.equal(response.status, 201);
+  const ids = await Promise.all(
+    [first, second, third].map(async (response) => (await response.json()).data.organizationSeq),
+  );
+  assert.equal(new Set(ids).size, 3);
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
+    '3',
+  );
 });
 
-test('completed registration survives application restart and replays the same ID', async () => {
-  const key = randomUUID();
-  const original = (await (await create('재시작 검증 기업', key)).json()).data;
+test('registered companies remain readable after application restart', async () => {
+  const original = (await (await create('재시작 검증 기업')).json()).data;
   await app.close();
   apps.splice(apps.indexOf(app), 1);
   app = await start();
   base = await app.getUrl();
   cookies.set(base, sessionA);
-  repository = app.get(OrganizationsRepository);
-  const response = await create('재시작 검증 기업', key);
-  assert.equal(response.status, 201);
-  assert.deepEqual((await response.json()).data, original);
-});
-
-test('the same key is scoped by the actual logged-in administrator', async () => {
-  const key = randomUUID();
-  const first = (await (await create('관리자 A 기업', key)).json()).data;
-  const second = (await (await create('관리자 B 기업', key, baseB)).json()).data;
-  assert.notEqual(first.organizationSeq, second.organizationSeq);
-  const actors = await pool.query(
-    'SELECT admin_user_seq FROM api_idempotency.organization_creations WHERE idempotency_key=$1 ORDER BY admin_user_seq',
-    [key],
-  );
-  assert.deepEqual(
-    actors.rows.map((row) => row.admin_user_seq),
-    [adminA, adminB],
-  );
-  assert.equal(
-    (
-      await pool.query(
-        'SELECT count(*) FROM api_idempotency.organization_creations WHERE idempotency_key=$1',
-        [key],
-      )
-    ).rows[0].count,
-    '2',
-  );
-});
-
-test('concurrent retries create exactly one organization and busy requests return 409', async () => {
-  const key = randomUUID();
-  const responses = await Promise.all(
-    Array.from({ length: 12 }, () => create('동시 등록 기업', key)),
-  );
-  assert.ok(responses.every((response) => [201, 409].includes(response.status)));
-  assert.equal(
-    (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', ['동시 등록 기업']))
-      .rows[0].count,
-    '1',
-  );
-  const locked = randomUUID(),
-    client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    assert.equal(await repository.lockCreation(client, adminA, locked), true);
-    const response = await create('처리 중 기업', locked);
-    assert.equal(response.status, 409);
-    assert.equal((await response.json()).error.code, 'REQUEST_IN_PROGRESS');
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
-  assert.equal((await create('처리 중 기업', locked)).status, 201);
-});
-
-test('a failed idempotency write rolls back the organization, allowing a successful retry', async () => {
-  const key = randomUUID();
-  await pool.query(`CREATE FUNCTION fail_creation_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'private storage failure'; END $$;
-    CREATE TRIGGER fail_creation_receipt BEFORE INSERT ON api_idempotency.organization_creations FOR EACH ROW EXECUTE FUNCTION fail_creation_receipt()`);
-  try {
-    const response = await create('롤백 검증 기업', key);
-    assert.equal(response.status, 500);
-    assert.ok(!(await response.text()).includes('private storage failure'));
-    assert.equal(
-      (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', ['롤백 검증 기업']))
-        .rows[0].count,
-      '0',
-    );
-  } finally {
-    await pool.query(
-      'DROP TRIGGER fail_creation_receipt ON api_idempotency.organization_creations; DROP FUNCTION fail_creation_receipt()',
-    );
-  }
-  assert.equal((await create('롤백 검증 기업', key)).status, 201);
+  const response = await request('/' + original.organizationSeq);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).data.name, '재시작 검증 기업');
 });
 
 test('OpenAPI describes the four company operations and their actual envelopes', async () => {
@@ -481,14 +401,14 @@ test('OpenAPI describes the four company operations and their actual envelopes',
       .properties.hasNext,
   );
   assert.ok(
-    document.paths['/api/companies'].post.parameters.some(
-      (header) => header.name === 'Idempotency-Key' && header.required,
+    (document.paths['/api/companies'].post.parameters ?? []).every(
+      (header) => header.name !== 'Idempotency-Key',
     ),
   );
   assert.ok(document.paths['/api/companies/{id}'].patch.responses['204']);
 });
 
-test('company creation audit is atomic and idempotent retries record only one success', async () => {
+test('each company creation records its authenticated actor and request once', async () => {
   const key = randomUUID();
   const name = '감사 등록 ' + key;
   const first = await create(name, key);
@@ -505,8 +425,8 @@ test('company creation audit is atomic and idempotent retries record only one su
   assert.equal(rows[0].actor_seq, adminA);
   assert.equal(rows[0].request_id, first.headers.get('x-request-id'));
   assert.deepEqual(rows[0].metadata, {});
-  const rejected = await create(name + ' changed', key);
-  assert.equal(rejected.status, 422);
+  const rejected = await create(' ', key);
+  assert.equal(rejected.status, 400);
   const failures = (
     await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
       rejected.headers.get('x-request-id'),
@@ -517,7 +437,7 @@ test('company creation audit is atomic and idempotent retries record only one su
   assert.equal(failures[0].actor_seq, adminA);
 });
 
-test('company creation rolls back row and receipt when success audit cannot be saved', async () => {
+test('company creation rolls back when success audit cannot be saved', async () => {
   const { AuditService } = require('../dist/audit/audit.service');
   const audit = app.get(AuditService);
   const original = audit.recordSuccess;
@@ -532,15 +452,6 @@ test('company creation rolls back row and receipt when success audit cannot be s
     assert.ok(!(await response.text()).includes('private audit storage failure'));
     assert.equal(
       (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
-      '0',
-    );
-    assert.equal(
-      (
-        await pool.query(
-          'SELECT count(*) FROM api_idempotency.organization_creations WHERE idempotency_key=$1',
-          [key],
-        )
-      ).rows[0].count,
       '0',
     );
     const rows = (

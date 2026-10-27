@@ -29,7 +29,7 @@ AuthModule의 전역 Guard가 네 경로 모두에서 로그인·현재 계정 �
 | 메서드·경로 | 요청 | 성공 응답 |
 |---|---|---|
 | GET /api/companies | q, status, limit, offset | 200, `{ data: Organization[], hasNext }` |
-| POST /api/companies | `{ name }`, Idempotency-Key UUID 헤더 | 201, `{ data: { organizationSeq }, meta: { requestId } }` |
+| POST /api/companies | `{ name }` | 201, `{ data: { organizationSeq }, meta: { requestId } }` |
 | GET /api/companies/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Organization, meta: { requestId } }` |
 | PATCH /api/companies/{id} | name 또는 status 중 한 개 이상 | 204, 본문 없음 |
 
@@ -43,19 +43,13 @@ q는 대소문자를 구분하지 않는 기업명 부분 검색이며 `%`, `_`�
 수정 본문에 null, 공백 기업명, 지원하지 않는 상태, 빈 객체를 전달하면 400이다.
 대상이 없으면 404이며, 나머지 오류도 기존 error/meta 공통 형식을 따른다.
 
-## 기업 등록 멱등 처리
+## 기업 등록 중복 처리
 
-클라이언트는 같은 등록 의도를 재시도할 때 같은 Idempotency-Key UUID를 보낸다.
-같은 관리자·같은 키·같은 정규화된 기업명은 원래 기업 번호를 HTTP 201로 반환한다.
-다른 내용으로 키를 재사용하면 422 IDEMPOTENCY_KEY_REUSED, 처리 중인 키는 409 REQUEST_IN_PROGRESS다.
-다른 관리자 또는 새로운 키는 독립된 등록 요청이다. 같은 기업명을 새 키로 보내면 다른 기업이 생성된다.
-응답의 requestId는 HTTP 시도별 추적값이므로 재시도 때 달라질 수 있다.
-
-`api_idempotency.organization_creations`에 관리자 번호·UUID·요청 해시·기업 번호·생성 시각을 기록한다.
-원본 요청 본문, 비밀번호, 쿠키나 세션 ID는 기록하지 않는다. 현재 자동 만료 정책은 두지 않는다.
-트랜잭션 단위 advisory lock과 PK(admin_user_seq, idempotency_key)로 동시성을 제어한다.
-기업 생성과 기록 저장은 같은 PoolClient의 트랜잭션에서 성공하거나 함께 롤백한다.
-과거 응답 기록은 기업 정보 변경과 무관하게 원래 생성한 기업 번호를 반환한다.
+Idempotency-Key는 요구하거나 저장하지 않는다. 각 POST는 새로운 기업을 등록한다.
+현재 ERD는 같은 기업명을 허용하며 사업자번호 컬럼이 없다. 기업명 UNIQUE는 추가하지 않는다.
+관리자 화면은 처리 중 등록 버튼을 비활성화하고, 응답이 유실되면 목록을 확인한 뒤 다시 등록한다.
+동일 요청의 자동 재시도는 지원하지 않는다. 기존 클라이언트가 보내는 Idempotency-Key는 무시한다.
+기업 생성과 성공 감사는 같은 트랜잭션으로 커밋하거나 함께 롤백한다.
 
 ## 마이그레이션·검증
 
@@ -71,10 +65,10 @@ cd ..
 ./infra/database/test-monolith.ps1
 ```
 
-Docker 검증은 기존 테스트와 기업 API HTTP/DB·멱등·동시 요청·재시작·롤백·Swagger 계약 검증을 실행한다.
+Docker 검증은 기존 테스트와 기업 API HTTP/DB·독립 등록·재시작·감사 롤백·Swagger 계약 검증을 실행한다.
 실제 로그인 세션으로 모든 ACTIVE 역할의 기업 등록·목록·상세·수정 성공과 미인증·위조·만료·로그아웃·
 PENDING 계정 거절, Origin 없는 변경 거절을 확인한다. 운영 이미지와 실제 Nginx에서도 로그인 후
-기업 생성·재시도·조회·수정 및 로그아웃 후 접근 거절을 검증한다.
+기업 생성·조회·수정 및 로그아웃 후 접근 거절을 검증한다.
 별도 DB 검증은 migration 재실행, 체크섬 변경 거부, 백업 복원과 최초/후속 실패 롤백을 검증한다.
 기존 배포 Jenkins 검증 실행기도 같은 npm test:integration을 사용한다.
 인증 통합 테스트가 먼저 업무·세션 스키마를 준비한 뒤 기업 테스트가 004를 적용하며,
@@ -94,8 +88,7 @@ origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
    헤더는 `Content-Type: application/json`, `Origin: {{origin}}`을 넣는다.
 2. 응답의 `dva_session` 쿠키가 Postman 쿠키 저장소에 저장되면 같은 호스트의 기업 API를 호출한다.
    Bearer 토큰이나 관리자 ID 헤더는 필요하지 않다.
-3. 등록은 `{ "name": "테스트 기업" }`와 `Idempotency-Key: {{idempotencyKey}}`를 보낸다.
-   idempotencyKey는 UUID로 준비하며 같은 등록의 재시도에는 같은 값을 유지한다.
+3. 등록은 `{ "name": "테스트 기업" }`만 보낸다. 중복 클릭과 자동 재전송은 하지 않는다.
 4. 목록·상세는 GET으로, 수정은 PATCH와 `{ "name": "변경 기업", "status": "INACTIVE" }`로 확인한다.
    POST·PATCH에는 로그인 때와 동일한 Origin 헤더를 넣는다.
 5. 로그아웃하거나 쿠키를 제거하면 기업 API가 401을 반환하는지 확인한다.

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
@@ -51,25 +50,9 @@ export class OrganizationsService {
     });
   }
 
-  async create(adminId: number, key: string, input: CreateOrganizationDto, requestId: string) {
-    const hash = createHash('sha256')
-      .update(JSON.stringify({ name: input.name }))
-      .digest('hex');
+  async create(adminId: number, input: CreateOrganizationDto, requestId: string) {
     return this.database.transaction(async (client) => {
-      if (!(await this.repository.lockCreation(client, adminId, key)))
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 기업 등록 요청을 처리 중입니다.');
-      const previous = await this.repository.findCreation(client, adminId, key);
-      if (previous) {
-        if (previous.requestHash !== hash)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 요청 키에 다른 내용이 전달됐습니다.',
-          );
-        return { organizationSeq: previous.organizationSeq };
-      }
       const id = await this.repository.insert(client, input.name);
-      await this.repository.rememberCreation(client, adminId, key, hash, id);
       await this.audit.recordSuccess(
         {
           actorId: adminId,

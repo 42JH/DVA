@@ -159,7 +159,7 @@ test('production login through Nginx authorizes company operations and logout re
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
   const name = 'runtime-company-' + randomUUID();
   const key = randomUUID();
-  const companyHeaders = { ...headers, Cookie: session, 'Idempotency-Key': key };
+  const companyHeaders = { ...headers, Cookie: session };
   const register = () =>
     fetch('http://proxy/api/companies', {
       method: 'POST',
@@ -169,9 +169,6 @@ test('production login through Nginx authorizes company operations and logout re
   const created = await register();
   assert.equal(created.status, 201);
   const id = (await created.json()).data.organizationSeq;
-  const replay = await register();
-  assert.equal(replay.status, 201);
-  assert.equal((await replay.json()).data.organizationSeq, id);
   const list = await fetch('http://proxy/api/companies?q=' + encodeURIComponent(name), {
     headers: { Cookie: session },
   });
