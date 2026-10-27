@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
 import {
+  ApiCookieAuth,
   ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
@@ -12,13 +13,16 @@ import { AuthRequest } from '../auth/auth.guard';
 import { MvpAiPinAccess } from '../auth/mvp-ai-access';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import {
+  CreateCompanyPinDto,
   CreatePinDto,
   ListPinsQueryDto,
   PinIdParamsDto,
+  UpdateCompanyPinDto,
   UpdatePinDto,
 } from './dto/pin-request.dto';
 import {
   CompanyPinsEnvelopeDto,
+  CreatedCompanyPinEnvelopeDto,
   CreatedPersonalPinEnvelopeDto,
   PersonalPinsEnvelopeDto,
   PinVersionEnvelopeDto,
@@ -130,5 +134,38 @@ export class PinsController {
     @Headers('call_session_seq') header?: string,
   ) {
     return this.pins.listCompany(params.id, query, request.admin?.adminUserSeq ?? null, header);
+  }
+
+  @Post('companies/:id/pins')
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'COMPANY_PIN_CREATED', targetType: 'COMPANY_PIN', target: 'none' })
+  @ApiOperation({
+    summary: '기업 공유 주소록 등록',
+    description: '모든 ACTIVE 관리자만 허용. AI·대표자에게 쓰기 권한을 부여하지 않습니다.',
+  })
+  @ApiCreatedResponse({ type: CreatedCompanyPinEnvelopeDto })
+  createCompany(
+    @Param() params: PinIdParamsDto,
+    @Body() input: CreateCompanyPinDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.pins.createCompany(params.id, input, request.admin.adminUserSeq, request.requestId);
+  }
+
+  @Patch('company-pins/:id')
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'COMPANY_PIN_UPDATED', targetType: 'COMPANY_PIN', target: 'id' })
+  @ApiOperation({
+    summary: '기업 공유 주소록 수정',
+    description:
+      '모든 ACTIVE 관리자만 허용. 버전 비교 없이 지정한 필드만 수정. 소유 기업 변경 불가.',
+  })
+  @ApiOkResponse({ type: PinVersionEnvelopeDto })
+  updateCompany(
+    @Param() params: PinIdParamsDto,
+    @Body() input: UpdateCompanyPinDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.pins.updateCompany(params.id, input, request.admin.adminUserSeq, request.requestId);
   }
 }

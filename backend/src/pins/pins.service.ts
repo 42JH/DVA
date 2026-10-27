@@ -4,7 +4,13 @@ import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { DatabaseService } from '../database/database.service';
-import { CreatePinDto, ListPinsQueryDto, UpdatePinDto } from './dto/pin-request.dto';
+import {
+  CreateCompanyPinDto,
+  CreatePinDto,
+  ListPinsQueryDto,
+  UpdateCompanyPinDto,
+  UpdatePinDto,
+} from './dto/pin-request.dto';
 import { PinsRepository } from './pins.repository';
 
 @Injectable()
@@ -148,6 +154,20 @@ export class PinsService {
     });
   }
 
+  createCompany(
+    companyId: number,
+    input: CreateCompanyPinDto,
+    adminId: number | null,
+    requestId: string,
+  ) {
+    return this.database.transaction(async (client) => {
+      await this.companyAccess(client, companyId, adminId, undefined, true);
+      const result = await this.repository.createCompany(client, companyId, input);
+      await this.record(client, adminId, result.companyPinSeq, true, true, requestId);
+      return result;
+    });
+  }
+
   updatePersonal(
     id: number,
     input: UpdatePinDto,
@@ -165,6 +185,29 @@ export class PinsService {
       const result = await this.repository.updatePersonal(client, id, input);
       if (!result) throw new ApiException(404, 'NOT_FOUND', '개인 주소록을 찾을 수 없습니다.');
       await this.record(client, adminId, id, false, false, requestId);
+      return result;
+    });
+  }
+
+  updateCompany(id: number, input: UpdateCompanyPinDto, adminId: number | null, requestId: string) {
+    if (
+      input.label === undefined &&
+      input.addressData === undefined &&
+      input.departmentName === undefined
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '변경할 별칭·부서명 또는 완성 주소를 입력해 주세요.',
+      );
+    return this.database.transaction(async (client) => {
+      const companyId = await this.repository.owner(client, id, true);
+      if (companyId === undefined)
+        throw new ApiException(404, 'NOT_FOUND', '기업 주소록을 찾을 수 없습니다.');
+      await this.companyAccess(client, companyId, adminId, undefined, true);
+      const result = await this.repository.updateCompany(client, id, input);
+      if (!result) throw new ApiException(404, 'NOT_FOUND', '기업 주소록을 찾을 수 없습니다.');
+      await this.record(client, adminId, id, true, false, requestId);
       return result;
     });
   }
