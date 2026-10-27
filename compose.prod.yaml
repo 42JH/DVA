@@ -34,6 +34,8 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the environment file}
       DB_NAME: ${DB_NAME:?Set DB_NAME in the environment file}
       AI_AGENT_URL: http://ai:8000
+      DVER_API_URL: ${DVER_API_URL:-https://public-n8n.dvercorp.co.kr:47514/webhook/parcel}
+      DVER_API_KEY: ${DVER_API_KEY:-}
       PBX_WEBHOOK_TOKEN: ${PBX_WEBHOOK_TOKEN:?Set the server-only PBX webhook token}
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}

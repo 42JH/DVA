@@ -1,6 +1,7 @@
-# 주문 API 계약 — ORD-01~04
+# 주문 API 계약 — ORD-01~04·06
 
 관련 작업: [55번 주문 생성](https://ssafy.atlassian.net/browse/S15P31D109-55), [58번 주문 조회](https://ssafy.atlassian.net/browse/S15P31D109-58), [61번 주문 수정](https://ssafy.atlassian.net/browse/S15P31D109-61). [조회 연동 문서](order-read.md)와 [수정 연동 문서](order-update.md)를 참고한다.
+57번 최종 접수·디버 연동·결제 자격은 [최종 접수 문서](order-submit.md)를 따른다.
 
 ## 확정 기준
 
@@ -13,7 +14,7 @@
 | ORD-01 주문 생성 | POST /api/orders | 구현. COLLECTING 저장, orderSeq·version 반환 |
 | ORD-02/03 목록·상세 | GET /api/orders, /api/orders/{id} | 58번 구현. 미완료도 같은 주문 조회에서 status로 구분 |
 | ORD-04 수집 정보 저장 | PATCH /api/orders/{id} | 61번 구현. COLLECTING 주문을 expectedVersion으로 부분 수정·상세 추가 |
-| ORD-06 최종 접수 | POST /api/orders/{id}/submit | 57번. 같은 주문 재검증·디버 접수 |
+| ORD-06 최종 접수 | POST /api/orders/{id}/submit | 57번 구현. 같은 주문 재검증·디버 접수·배송 생성 |
 | 통화 종료 | CALL-02 | 기존 주문에 통화 종료 결과 연결. 별도 미완료 주문 생성 없음 |
 
 69번 관리자 수기 접수도 이 공통 생성과 최종 접수 흐름을 재사용한다. 69번이 별도 Jira라는 이유로 생성 URL을 분리하지 않는다. 이전 초안의 POST /api/orders/validation 및 /api/consultations/incomplete POST·GET·상세 GET은 제거했다.
@@ -59,7 +60,7 @@ call_session_seq: 7
 ```json
 {
   "customer": { "name": "신규 고객", "phoneNumber": "01012345678" },
-  "paymentMethodType": "cat",
+  "paymentMethodType": "credit",
   "pickupRequestedAt": null,
   "parcels": []
 }
@@ -71,7 +72,7 @@ customerSeq와 customer 중 정확히 하나를 전달한다. customer 입력은
 | --- | --- |
 | customerSeq | 기존 고객의 양의 정수 ID. customer와 동시 사용 불가 |
 | customer | 이름·숫자 문자열 전화번호. customerSeq와 동시 사용 불가 |
-| paymentMethodType | cat/billing/credit/groupBilling. 생략 시 명세·DB 기본값 credit |
+| paymentMethodType | credit: 공통 정산(기본), groupBilling: 기업 그룹카드, billing: 개인카드. cat 입력 불가 |
 | pickupRequestedAt | 선택/null. 전달 시 실제 해석 가능한 타임존 포함 ISO 8601 |
 | parcels | 선택. 생략·빈 배열이면 상세 0개 |
 | parcels[].origin/destination | 수집한 주소 필드만 전달. 내부 미수집 값은 null |
@@ -116,7 +117,7 @@ AI는 통화 존재·종료 여부·이미 연결된 주문을 확인한다. 통
 
 ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각이 모두 갖춰졌는지를 강제하지 않는다. 전달한 값의 타입·범위·고객/PIN 접근은 검증한다.
 
-내부 assertOrderSubmissionReady는 ORD-06이 **같은 저장 주문**을 최종 접수할 때 재사용할 검증 함수다. 미래 수거 시각, 상세 1개 이상, 출발/도착 필수 주소와 연락처, 우편번호, 수량 또는 물품 설명, 가격을 검사한다. 누락·업무 오류는 422의 field/reason 목록이다. 생성 요청에 이 완전성 검증을 적용하거나 별도 HTTP 검증 호출을 강제하지 않는다. 실제 결제 자격·고객 최종 동의·외부 접수는 57번에서 확인해야 한다.
+내부 assertOrderSubmissionReady는 ORD-06이 **같은 저장 주문**을 최종 접수할 때 사용하는 검증 함수다. 미래 수거 시각, 상세 1개 이상, 출발/도착 필수 주소와 연락처, 우편번호, 수량 또는 물품 설명, 가격을 검사한다. 누락·업무 오류는 422의 field/reason 목록이다. 생성 요청에 이 완전성 검증을 적용하거나 별도 HTTP 검증 호출을 강제하지 않는다. 57번의 ORD-06이 활성 소속에 따른 결제 자격을 확인하고 디버에 전송한다. 호출자는 고객이 확인한 version을 전달해야 한다.
 
 | HTTP/code | 상황 |
 | --- | --- |
@@ -133,5 +134,5 @@ ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각
 - 이전 초안의 미배포 006-incomplete-consultations.sql과 별도 상담 테이블 ERD는 제외했다. 운영 DB에 DROP·데이터 초기화를 실행하지 않았다. 별도 환경에 초안 006을 수동 적용했다면 이 MR이 자동 제거하지 않는다.
 - 기존 고객 API를 포함해 빌드·단위/HTTP·실제 DB·동시 요청·실패 롤백·Nginx/PBX 회귀를 node scripts/check.cjs로 검증한다.
 - DB migration·제약·반복 적용·체크섬·실패 롤백·백업 복원은 infra/database/test-monolith.ps1로 검증한다.
-- 현재 HTTP 구현은 ORD-01/02/03/04다. ORD-06 및 CALL-01/02 구현, 실제 AI 호출부의 통화 ID·경로·필드 연결, 디버 연동, 운영 배포는 별도 작업이다. 58번 조회와 61번 수정은 기존 스키마를 사용하며 신규 migration을 추가하지 않는다.
+- 현재 HTTP 구현은 ORD-01/02/03/04/06이다. ORD-06은 011 migration으로 같은 orders 행에 접수 정보를 저장한다. CALL-01/02, 실제 AI 호출부 연결, 실제 디버 서버 검증·운영 배포는 별도다. 58번 조회와 61번 수정에는 신규 migration이 없다.
 - 기존 AI 제안의 /internal/ai·snake_case는 이 /api·camelCase·응답 envelope 계약과 자동 호환되지 않는다. 실제 호출부는 담당 연동 작업에서 맞춰야 한다.
