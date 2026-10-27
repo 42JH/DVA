@@ -125,4 +125,26 @@ BEGIN
  IF EXISTS(SELECT 1 FROM admin_sessions WHERE admin_user_seq=second_id) THEN RAISE EXCEPTION 'Session cascade failed'; END IF;
  RAISE NOTICE 'PASS: admin names, session uniqueness, expiry, FK, scoped deletion and cascade';
 END $$;
+DO $$
+DECLARE a integer; b integer; co integer; cu integer; mem integer;
+BEGIN
+ INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('memberReceiptA','test-only','OPERATOR','ACTIVE','A') RETURNING admin_user_seq INTO a;
+ INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('memberReceiptB','test-only','OPERATOR','ACTIVE','B') RETURNING admin_user_seq INTO b;
+ INSERT INTO organizations(name,status) VALUES('Receipt company','ACTIVE') RETURNING organization_seq INTO co;
+ INSERT INTO customers(name,phone_number,status) VALUES('Receipt customer','01900000037','ACTIVE') RETURNING customer_seq INTO cu;
+ INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES(cu,co,'0037','MEMBER','ACTIVE') RETURNING membership_seq INTO mem;
+ INSERT INTO api_idempotency.membership_writes(admin_user_seq,idempotency_key,organization_seq,operation,request_hash)
+ VALUES(a,'00000000-0000-4000-8000-000000000037',co,'CREATE',repeat('a',64)),
+       (b,'00000000-0000-4000-8000-000000000037',co,'IMPORT',repeat('b',64));
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.membership_writes(admin_user_seq,idempotency_key,organization_seq,operation,request_hash) VALUES(%s,%L,%s,%L,%L)',a,'00000000-0000-4000-8000-000000000037',co,'IMPORT',repeat('b',64)),'23505');
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.membership_writes(admin_user_seq,idempotency_key,organization_seq,operation,request_hash) VALUES(%s,%L,%s,%L,%L)',a,'00000000-0000-4000-8000-000000000038',co,'INVALID',repeat('a',64)),'23514');
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.membership_writes(admin_user_seq,idempotency_key,organization_seq,operation,request_hash) VALUES(%s,%L,%s,%L,%L)',a,'00000000-0000-4000-8000-000000000038',co,'CREATE','bad'),'23514');
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.membership_writes(admin_user_seq,idempotency_key,organization_seq,operation,request_hash) VALUES(2147483647,%L,%s,%L,%L)','00000000-0000-4000-8000-000000000038',co,'CREATE',repeat('a',64)),'23503');
+ DELETE FROM memberships WHERE membership_seq=mem;
+ IF NOT EXISTS(SELECT 1 FROM customers WHERE customer_seq=cu) OR
+    (SELECT count(*) FROM api_idempotency.membership_writes WHERE organization_seq=co)<>2 THEN
+   RAISE EXCEPTION 'Unlink must preserve customer and completed receipts';
+ END IF;
+ RAISE NOTICE 'PASS: scoped membership receipts, operations, hashes, FK and unlink preservation';
+END $$;
 ROLLBACK;

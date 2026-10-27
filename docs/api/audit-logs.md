@@ -77,6 +77,15 @@ Nginx·CORS·본문 파싱 등 Guard 이전에 차단된 요청, 읽기 API 및 
 | ADMIN_PASSWORD_CHANGED | ADMIN_USER | 본인 변경·관리자 초기화 |
 | ORGANIZATION_CREATED | ORGANIZATION | 기업 등록 |
 | ORGANIZATION_UPDATED | ORGANIZATION | 기업명·상태 수정 |
+| MEMBERSHIP_CREATED | MEMBERSHIP | 기업 구성원 개별 등록 |
+| MEMBERSHIP_UPDATED | MEMBERSHIP | 대표자 표시·소속 상태 변경 |
+| MEMBERSHIP_REMOVED | MEMBERSHIP | 기업 소속 연결 해제 |
+| MEMBERS_IMPORTED | ORGANIZATION | 직원 CSV 등록·이름·전화번호 갱신 |
+
+구성원 API도 업무 변경·성공 감사·등록 멱등 기록을 같은 트랜잭션에서 저장한다.
+같은 성공 키의 재시도는 감사를 추가하지 않는다. CSV 원문과 이름·전화번호는 감사에 저장하지 않는다.
+소속 해제 감사는 작업 기록이며 과거 소속 전체를 복구할 수 있는 이력은 아니다.
+자세한 계약은 [기업 구성원 API](members.md)를 참고한다.
 
 Jira 101의 주문 수정·취소, 배송 상태 변경, AI 설정 적용은 현재 모놀리식에 해당 API가 없어
 실제 연동되지 않았다. 관련 작업(61·64·67·98)의 구현 시 이벤트 이름과 대상 계약을 확정하고,

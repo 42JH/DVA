@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+기업 구성원·대표자 표시·소속 해제·CSV 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
+
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.

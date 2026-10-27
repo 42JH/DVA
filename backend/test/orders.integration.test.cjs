@@ -54,20 +54,28 @@ before(async () => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const migrations = [
-      ['public.admin_users', '002-monolith-initial.sql'],
-      ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-      ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-      ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
-      ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
-    ];
+    const upgraded = (
+      await client.query(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id') AS ready",
+      )
+    ).rows[0].ready;
+    const migrations = upgraded
+      ? []
+      : [
+          ['public.admin_users', '002-monolith-initial.sql'],
+          ['public.admin_sessions', '003-admin-auth-sessions.sql'],
+          ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
+          ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
+          ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
+        ];
     for (const [table, file] of migrations) {
       if (!(await client.query('SELECT to_regclass($1) AS present', [table])).rows[0].present)
         await client.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
     }
-    await client.query(
-      readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
-    );
+    if (!upgraded)
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

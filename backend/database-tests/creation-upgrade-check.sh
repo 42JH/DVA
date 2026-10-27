@@ -76,3 +76,7 @@ BEGIN
 END $$;
 SQL
 echo 'PASS: legacy key backfill, business data preservation, ambiguous-key rejection and cleanup rollback'
+psql -X -v ON_ERROR_STOP=1 -1 -U dva -d "$DATABASE" -f "$MIGRATIONS/009-membership-write-requests.sql"
+test "$(psql -X -U dva -d "$DATABASE" -Atc "SELECT to_regclass('api_idempotency.membership_writes') IS NOT NULL")" = t
+test "$(psql -X -U dva -d "$DATABASE" -Atc "SELECT count(*) FROM pg_tables WHERE schemaname='api_idempotency'")" = 1
+echo 'PASS: membership receipts are created after the old creation schema is removed'

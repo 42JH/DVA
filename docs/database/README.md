@@ -13,6 +13,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `003-admin-auth-sessions.sql`: 관리자 이름과 PostgreSQL 세션 저장소. 기존 관리자 데이터가 있다면 이름 보완 정책이 필요하며 자동 채우지 않는다.
 - `004-organization-creation-requests.sql`, `005-customer-creation-requests.sql`, `007-order-creation-requests.sql`: 과거 기업·고객·주문 생성 요청 기록. 적용 이력과 체크섬 보존을 위해 파일을 유지한다.
 - `008-simplify-creation-requests.sql`: orders.creation_request_id UUID UNIQUE 추가 → 기존 주문 요청 키 이전 → 기업·고객·주문 요청 기록 테이블 및 api_idempotency 스키마 제거. 업무 데이터·주문 version·updated_at·감사·통화 연결·PBX 기록은 보존한다.
+- `009-membership-write-requests.sql`: 008 이후 api_idempotency 스키마와 membership_writes를 생성한다. 구성원 등록·CSV 완료 기록만 보관하며 기업·고객·주문 생성 기록은 복원하지 않는다. 미배포 구성원용 006을 병합 시 009로 이동했으며 기존 007·008 원본은 유지한다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
@@ -92,13 +93,13 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 생성 중복 처리 기준
 
-기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 별도 생성 요청 기록은 두지 않는다.
+기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객은 별도 생성 요청 기록을 두지 않으며, 구성원 개별 등록·CSV의 완료 기록은 009의 membership_writes에 보관한다.
 주문은 orders.creation_request_id와 통화 연결을 사용한다. 재시도는 기존 주문의 현재 버전을 반환하며 최초 본문·응답은 보관하지 않는다.
 배송 상태 이력의 request_id, PBX 수신 기록, 기존 version·감사·세션 테이블은 유지한다. 디버 최종 접수 구현은 별도 작업이며 기존 orders.status를 사용한다.
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `009-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `010-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.

@@ -24,6 +24,7 @@ BEGIN
   RAISE EXCEPTION 'Generated PIN search columns missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_users' AND column_name='name' AND is_nullable='NO') THEN RAISE EXCEPTION 'Admin name missing'; END IF;
  IF to_regclass('public.admin_sessions') IS NULL THEN RAISE EXCEPTION 'Admin sessions missing'; END IF;
+ IF to_regclass('api_idempotency.membership_writes') IS NULL THEN RAISE EXCEPTION 'Membership write receipts missing'; END IF;
  IF EXISTS(SELECT 1 FROM pg_tables WHERE schemaname='api_idempotency' AND tablename IN ('organization_creations','customer_creations','order_creations')) THEN
   RAISE EXCEPTION 'Obsolete creation receipt tables remain'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id' AND udt_name='uuid') THEN
@@ -32,7 +33,7 @@ BEGIN
   RAISE EXCEPTION 'Order creation request uniqueness missing'; END IF;
  IF to_regclass('pbx_webhooks.call_ended_events') IS NULL THEN RAISE EXCEPTION 'PBX table missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql'))<>7 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql'))<>8 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  RAISE NOTICE 'PASS: 19 public tables, 18 FKs, 9 triggers, employee identity, generated columns and migration ledger';
 END $$;

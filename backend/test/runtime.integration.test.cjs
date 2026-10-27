@@ -98,6 +98,81 @@ test('production company endpoints require a real session for every operation', 
   }
 });
 
+test('production member CSV supports a full 1MiB file through Nginx and preserves session/CRUD boundaries', async () => {
+  const root = 'http://proxy/api';
+  const origin = 'https://13.209.59.180';
+  const json = { 'Content-Type': 'application/json', Origin: origin };
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: json,
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const session = login.headers.get('set-cookie').split(';')[0];
+  const headers = { ...json, Cookie: session, 'Idempotency-Key': randomUUID() };
+  const company = await fetch(root + '/companies', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: 'runtime-members-' + randomUUID() }),
+  });
+  assert.equal(company.status, 201);
+  const companyId = (await company.json()).data.organizationSeq;
+  const number = '019' + String(require('node:crypto').randomInt(10000000, 100000000));
+  const prefix = 'employeeNo,name,phoneNumber\n001,';
+  const suffix = ',' + number;
+  const content = prefix + 'a'.repeat(1024 * 1024 - Buffer.byteLength(prefix + suffix)) + suffix;
+  assert.equal(Buffer.byteLength(content), 1024 * 1024);
+  const key = randomUUID();
+  const upload = async (data, uploadKey = key, authenticated = true) => {
+    const form = new FormData();
+    form.append('file', new Blob([data], { type: 'text/csv' }), 'members.csv');
+    return fetch(root + `/companies/${companyId}/members/import`, {
+      method: 'POST',
+      headers: {
+        Origin: origin,
+        'Idempotency-Key': uploadKey,
+        ...(authenticated ? { Cookie: session } : {}),
+      },
+      body: form,
+    });
+  };
+  assert.equal((await upload(content, key, false)).status, 401);
+  assert.equal((await upload(content)).status, 204);
+  assert.equal((await upload(content)).status, 204);
+  const tooLarge = await upload(content + 'a', randomUUID());
+  assert.equal(tooLarge.status, 413);
+  assert.equal((await tooLarge.json()).error.code, 'PAYLOAD_TOO_LARGE');
+  const list = await fetch(root + `/companies/${companyId}/members`, {
+    headers: { Cookie: session },
+  });
+  assert.equal(list.status, 200);
+  const row = (await list.json()).data[0];
+  const customerId = row.customer.customerSeq,
+    membershipId = row.membership.membershipSeq;
+  const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
+  assert.equal(
+    (await upload(`employeeNo,name,phoneNumber\n001,운영 이미지 고객,${nextPhone}`, randomUUID()))
+      .status,
+    204,
+  );
+  const customer = await fetch(root + '/customers/' + customerId);
+  assert.equal(customer.status, 200);
+  assert.equal((await customer.json()).data.phoneNumber, nextPhone);
+  const patch = await fetch(root + '/members/' + membershipId, {
+    method: 'PATCH',
+    headers,
+    body: '{"role":"ORG_ADMIN","status":"INACTIVE"}',
+  });
+  assert.equal(patch.status, 204);
+  const removed = await fetch(root + '/members/' + membershipId, { method: 'DELETE', headers });
+  assert.equal(removed.status, 204);
+  assert.equal((await fetch(root + '/customers/' + customerId)).status, 200);
+  const empty = await fetch(root + `/companies/${companyId}/members`, {
+    headers: { Cookie: session },
+  });
+  assert.deepEqual(await empty.json(), { data: [], hasNext: false });
+});
+
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
   const requestId = randomUUID();
   const response = await fetch('http://proxy/api/not-implemented', {

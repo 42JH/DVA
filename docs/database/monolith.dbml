@@ -1,12 +1,13 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '모놀리식: 단일 DB / 업무 테이블 18개 + 관리자 세션 1개. 서비스 간 FK 포함.'
+  Note: '모놀리식: 단일 DB / 업무 테이블 18개 + 관리자 세션 1개 + 구성원 등록·CSV 처리 기록 1개 = 20개. 서비스 간 FK 포함. PBX 수신·마이그레이션 이력은 별도.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
 // 2026-10-25 ERD 선반영: 기업별 사번 UNIQUE와 고객/기업/관리자 상태 축소. SQL·코드 반영은 후속 작업.
 // auth_version은 채택하지 않음. 기존 직원 사번 보완 및 제거 상태값의 데이터 이관 정책은 배포 전 확정.
 // CQRS 조회 테이블 / Kafka / Kubernetes는 검토 단계이며 이 확정 ERD에는 추가하지 않았다.
+// 2026-10-27 구성원 API: 009의 처리 기록과 대표자 표시 의미 반영. 다른 업무 영역의 멘토 피드백 반영은 후속 작업.
 
 Table customers {
   customer_seq integer [pk, increment, not null, note: '행의 고유 기본키']
@@ -45,7 +46,7 @@ Table memberships {
   indexes {
     (organization_seq,employee_no) [unique]
   }
-  Note: 'customer / 고객당 소속 최대 1개. MEMBER 일반 직원 / ORG_ADMIN 기업 관리자. 사번은 기업별 고유. 기존 데이터의 사번 보완 후 NOT NULL 적용. / SQL 인덱스: CREATE INDEX memberships_company_idx ON memberships(organization_seq,customer_seq);'
+  Note: 'customer / 고객당 소속 최대 1개. MEMBER 일반 직원 / ORG_ADMIN 대표자 표시. 대표자에게 관리자 계정이나 추가 API 권한을 부여하지 않는다. 사번은 기업별 고유. 기존 데이터의 사번 보완 후 NOT NULL 적용. / SQL 인덱스: CREATE INDEX memberships_company_idx ON memberships(organization_seq,customer_seq);'
 }
 
 Table personal_pins {
@@ -379,3 +380,24 @@ Ref: admin_users.admin_user_seq ?< shipment_status_history.actor_admin_user_seq
 Ref: ai_personas.ai_persona_seq < ai_prompt_versions.ai_persona_seq
 Ref: admin_users.admin_user_seq ?< ai_prompt_versions.created_by_admin_user_seq
 Ref: admin_users.admin_user_seq < faq_entries.updated_by_admin_user_seq
+
+// 009-membership-write-requests.sql: 구성원 개별 등록·CSV 재요청의 완료 기록.
+Table api_idempotency.membership_writes {
+  admin_user_seq integer [not null, note: '요청한 관리자 FK']
+  idempotency_key uuid [not null, note: '같은 구성원 등록·CSV 요청의 재시도를 구분하는 UUID']
+  organization_seq integer [not null, note: '대상 기업 FK']
+  operation text [not null, note: 'CREATE 개별 등록 / IMPORT CSV 등록·갱신']
+  request_hash text [not null, note: '작업·기업·본문 또는 CSV 바이트의 SHA-256 해시']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '완료 기록 생성 시각']
+  indexes {
+    (admin_user_seq,idempotency_key) [pk]
+  }
+  checks {
+    `operation IN ('CREATE','IMPORT')`
+    `request_hash ~ '^[a-f0-9]{64}$'`
+  }
+  Note: 'customer / 구성원 저장·성공 감사와 같은 트랜잭션으로 기록. 같은 관리자·키의 동일 요청은 추가 처리 없이 204를 반환한다. 소속 해제 후에도 완료 기록을 유지한다.'
+}
+
+Ref: api_idempotency.membership_writes.admin_user_seq > admin_users.admin_user_seq
+Ref: api_idempotency.membership_writes.organization_seq > organizations.organization_seq

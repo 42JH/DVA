@@ -1,0 +1,24 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { CustomerResponseDto } from '../../customers/dto/customer-response.dto';
+import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
+
+export class MembershipResponseDto {
+  @ApiProperty() membershipSeq!: number;
+  @ApiProperty() customerSeq!: number;
+  @ApiProperty() organizationSeq!: number;
+  @ApiProperty() employeeNo!: string;
+  @ApiProperty({
+    enum: MEMBER_ROLES,
+    description: 'ORG_ADMIN은 대표자 표시이며 별도 권한을 부여하지 않습니다.',
+  })
+  role!: MemberRole;
+  @ApiProperty({ enum: MEMBER_STATUSES }) status!: MemberStatus;
+}
+export class MemberViewDto {
+  @ApiProperty({ type: MembershipResponseDto }) membership!: MembershipResponseDto;
+  @ApiProperty({ type: CustomerResponseDto }) customer!: CustomerResponseDto;
+}
+export class MembersEnvelopeDto {
+  @ApiProperty({ type: [MemberViewDto] }) data!: MemberViewDto[];
+  @ApiProperty() hasNext!: boolean;
+}
