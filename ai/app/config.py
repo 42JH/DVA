@@ -44,6 +44,7 @@ class ProgressConfig(_Strict):
 
 
 class BackendConfig(_Strict):
+    mock: bool = False
     timeout_sec: float = Field(gt=0)
     lookup_limit: int = Field(ge=1, le=20)
     monitor_orders_limit: int = Field(ge=1, le=1000)

@@ -361,10 +361,19 @@
   - 마지막 받아쓰기 조각 시각(`heard_at`)부터 진행 상태를 보낼 때까지를 `total_ms`로 판별 기록에 남김. 멈춤 대기(`pause_ms`) + 판별 모델 + 답 처리(접수 등)를 모두 포함.
   - 판별마다 INFO 로그 한 줄: 단계·answer·intent·모델 시간(`elapsed_ms`)·`total_ms`·진행 상태가 바뀌었는지. 고객 말은 로그에 남기지 않음.
   - 관제 화면 도구 목록의 listener 항목에 "말 끝→진행 상태" 시간 표시.
+- 가짜 백엔드로 배포(`app/mock_backend.py`, `[backend] mock = true`)
+  - 백엔드 DB 연동 전이라 `/internal/ai/*`가 404(고객 조회·접수 실패). 연동 전까지 메모리 가짜 백엔드로 진행.
+  - `tests/conftest.py`의 `FakeBackend`를 그대로 옮김(테스트도 같은 것을 씀). `mock = true`면 `BACKEND_API_URL` 없이 뜨고 기동 로그에 경고.
+  - 재시작·재배포하면 주문·배송지가 사라진다. 같은 번호로 접수·저장한 뒤 다시 걸면 등록 고객 흐름을 볼 수 있다.
 
 ### 확인한 것
-- `uv run pytest -q` 120개 통과(판별 테스트에 `total_ms ≥ elapsed_ms` 확인 추가).
+- `uv run pytest -q` 121개 통과(판별 `total_ms ≥ elapsed_ms`, 가짜 백엔드 기동 테스트 추가).
+- 실제 통화 2건(판별 29번): 판별 모델 0.78~2.55초(중앙값 1.21초), 말 끝→진행 상태 1.38~3.15초(중앙값 1.81초 = 모델 + `pause_ms` 0.6초).
+  - 28번이 `collecting`(선택지 없음, 용건만 봄)에서 `none`. 고객이 말할 때마다 판별 호출 비용만 듦.
+  - 단계를 넘기는 판별은 접수 실패(`/internal/ai/orders` 404)로 측정 못 함.
+- PBX 종료 웹훅 뒤 hangup 404(세션 이미 끝남), `context_injection_incomplete`로 바로 끊긴 통화 1건.
 
 ### 남은 것
-- 실제 통화로 판별 지연 측정(`docker logs`에서 `판별` 줄, 또는 관제 화면). 결과에 따라 판별 모델·reasoning·`pause_ms` 조정.
+- 가짜 백엔드로 확인·저장·추가 주문 단계의 판별 지연 측정. 이후 판별 reasoning(`none`·`minimal`)·모델·`pause_ms` 조정, `collecting`의 불필요한 판별 줄이기.
+- 백엔드 DB 연동되면 `mock = false`.
 - PoC 발화 자산 이식(voice.md·flow.toml·backend.md), 저장된 값 가림, 확인 단계 "아니요" 변형 문구, 종료 판별 확인.
