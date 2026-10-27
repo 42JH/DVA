@@ -7,7 +7,7 @@ Jira: [S15P31D109-34](https://ssafy.atlassian.net/browse/S15P31D109-34).
 
 2026-10-27 합의에 따라 고객 등록·상세·이름 수정에 AI 서비스 인증을 요구하지 않는다.
 서버 간 호출에는 관리자 쿠키, Bearer 토큰, Origin, call_session_seq가 필요하지 않다.
-이 세 작업만 명시적으로 `MvpAiCustomerAccess`를 사용한다. 기존 관리자·기업·PBX 인증은 유지한다.
+이 세 작업과 [발신번호 초기 조회](caller-context.md)만 명시적으로 `MvpAiCustomerAccess`를 사용한다. 기존 관리자·기업·PBX 인증은 유지한다.
 서비스 인증 도입은 [S15P31D109-135](https://ssafy.atlassian.net/browse/S15P31D109-135)의 후속 작업이다.
 
 고객 목록과 status 변경은 모든 ACTIVE 관리자 역할에 허용한다.
@@ -17,7 +17,7 @@ Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 
 유효한 세션이 없는 요청은 401이다. 임의의 관리자 ID·AI 식별 헤더로 권한을 부여하지 않는다.
 
 이 MVP는 익명 고객 ID 접근의 통화별 소유권을 검증하지 않는다. 발신번호 식별과 고객·기업·PIN
-초기 데이터 제공(33번), 통화 시작·고객 연결, 실제 고객 본인인증은 별도 범위다.
+초기 데이터 제공은 [33번 API](caller-context.md)를 사용한다. 통화 시작·고객 연결, 실제 고객 본인인증은 별도 범위다.
 고객 목록의 phoneNumber 검색은 관리자용이며 AI 발신번호 식별 API를 대체하지 않는다.
 
 ## HTTP 계약
