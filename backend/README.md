@@ -295,7 +295,7 @@ DB UNIQUE/FK/CHECK 위반은 SQLSTATE로 분류하고 SQL·테이블명·파라�
 ApiException에는 사용자에게 공개할 수 있는 메시지/상세만 전달한다.
 
 X-Request-Id가 유효한 UUID면 유지하고 없거나 잘못된 값이면 새 UUID를 만든다. 모든 응답 헤더에 반환하며
-API 단건/오류 meta에도 넣는다. 기업·고객 등록에는 Idempotency-Key를 요구하지 않는다. 기업명 중복은 허용하며 고객은 전화번호 UNIQUE로 중복을 거절한다. 주문 생성 키는 orders.creation_request_id에 저장하고 재시도에는 기존 주문과 현재 version을 반환한다. 최종 접수 키는 orders.submission_request_id에 저장하며 같은 키·확인 버전은 외부 재전송 없이 결과만 반환한다. version은 수정 충돌용이다. 외부 웹훅·배송 이력의 기존 중복 방지는 유지한다.
+API 단건/오류 meta에도 넣는다. 기업·고객 등록에는 Idempotency-Key를 요구하지 않는다. 기업명 중복은 허용하며 고객은 전화번호 UNIQUE로 중복을 거절한다. 주문 생성 키는 orders.creation_request_id에 저장하고 재시도에는 기존 주문과 현재 version을 반환한다. 최종 접수는 별도 키 없이 기존 주문 행 잠금·status로 중복 전송을 막으며 같은 주문 재호출은 상태만 반환한다. version은 수정 충돌과 최초 접수 확인용이다. 외부 웹훅·배송 이력의 기존 중복 방지는 유지한다.
 요청 로그에는 method·route template·상태·소요시간·requestId만 남기고 실제 경로 ID·query·headers·body는 기록하지 않는다.
 신규 API 응답은 no-store다. 인프라 로그 수집·모니터링 설정은 112번 작업 범위다.
 

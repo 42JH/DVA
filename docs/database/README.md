@@ -97,11 +97,11 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 개별 등록·CSV는 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거하며 개별 등록 중복은 고유 제약, CSV 재업로드는 기업·사번 기준 갱신으로 처리한다.
 주문은 orders.creation_request_id와 통화 연결을 사용한다. 재시도는 기존 주문의 현재 버전을 반환하며 최초 본문·응답은 보관하지 않는다.
 배송 상태 이력의 request_id, PBX 수신 기록, 기존 version·감사·세션 테이블은 유지한다.
-57번 최종 접수는 011에서 orders에 submission_request_id(UUID UNIQUE)·submission_expected_version·submission_started_at을 추가한다. 세 값은 함께 저장하며 외부 전송 전 SUBMITTING을 커밋한다. 새 테이블은 없다. 기존 주문은 세 값 모두 NULL로 보존하며 과거 cat 결제도 일괄 변경하지 않는다. 상세 계약은 [ORD-06](../api/order-submit.md)을 따른다.
+57번 최종 접수는 기존 orders의 order_seq·status·version·updated_at을 사용한다. 주문 행을 잠근 뒤 SUBMITTING을 커밋한 요청만 외부로 전송한다. 재호출은 상태만 반환하며 별도 접수 키·컬럼·테이블·migration을 추가하지 않는다. 과거 cat 결제도 일괄 변경하지 않는다. 상세 계약은 [ORD-06](../api/order-submit.md)을 따른다.
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `012-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `011-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.

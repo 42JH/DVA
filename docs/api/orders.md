@@ -134,5 +134,5 @@ ORD-01은 수집 중 저장이므로 필수 배송 주소·수량·수거 시각
 - 이전 초안의 미배포 006-incomplete-consultations.sql과 별도 상담 테이블 ERD는 제외했다. 운영 DB에 DROP·데이터 초기화를 실행하지 않았다. 별도 환경에 초안 006을 수동 적용했다면 이 MR이 자동 제거하지 않는다.
 - 기존 고객 API를 포함해 빌드·단위/HTTP·실제 DB·동시 요청·실패 롤백·Nginx/PBX 회귀를 node scripts/check.cjs로 검증한다.
 - DB migration·제약·반복 적용·체크섬·실패 롤백·백업 복원은 infra/database/test-monolith.ps1로 검증한다.
-- 현재 HTTP 구현은 ORD-01/02/03/04/06이다. ORD-06은 011 migration으로 같은 orders 행에 접수 정보를 저장한다. CALL-01/02, 실제 AI 호출부 연결, 실제 디버 서버 검증·운영 배포는 별도다. 58번 조회와 61번 수정에는 신규 migration이 없다.
+- 현재 HTTP 구현은 ORD-01/02/03/04/06이다. ORD-06은 신규 migration 없이 기존 orders의 상태·버전·갱신 시각과 행 잠금으로 처리한다. CALL-01/02, 실제 AI 호출부 연결, 실제 디버 서버 검증·운영 배포는 별도다. 58번 조회와 61번 수정에도 신규 migration이 없다.
 - 기존 AI 제안의 /internal/ai·snake_case는 이 /api·camelCase·응답 envelope 계약과 자동 호환되지 않는다. 실제 호출부는 담당 연동 작업에서 맞춰야 한다.
