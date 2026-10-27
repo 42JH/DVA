@@ -9,7 +9,11 @@ function integer({ value }: TransformFnParams): unknown {
 }
 
 export class AuditQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ type: Number, minimum: 1 })
+  @ApiPropertyOptional({
+    description: '작업한 관리자 번호(adminUserSeq).',
+    type: Number,
+    minimum: 1,
+  })
   @IsOptional()
   @Transform(integer)
   @IsInt()
@@ -17,19 +21,29 @@ export class AuditQueryDto extends PaginationQueryDto {
   @Max(2147483647)
   actorSeq?: number;
 
-  @ApiPropertyOptional({ example: 'ADMIN_ACCESS_CHANGED' })
+  @ApiPropertyOptional({
+    description: '작업 코드. 정확히 일치하는 기록 조회.',
+    example: 'ADMIN_ACCESS_CHANGED',
+  })
   @IsOptional()
   @IsString()
   @Matches(/\S/u)
   action?: string;
 
-  @ApiPropertyOptional({ example: 'ADMIN_USER' })
+  @ApiPropertyOptional({
+    description: '대상 유형. 정확히 일치하는 기록 조회.',
+    example: 'ADMIN_USER',
+  })
   @IsOptional()
   @IsString()
   @Matches(/\S/u)
   targetType?: string;
 
-  @ApiPropertyOptional({ type: Number, minimum: 1 })
+  @ApiPropertyOptional({
+    description: '작업 대상 번호(targetType에 해당하는 식별자).',
+    type: Number,
+    minimum: 1,
+  })
   @IsOptional()
   @Transform(integer)
   @IsInt()
@@ -37,7 +51,10 @@ export class AuditQueryDto extends PaginationQueryDto {
   @Max(2147483647)
   targetSeq?: number;
 
-  @ApiPropertyOptional({ enum: AUDIT_RESULTS })
+  @ApiPropertyOptional({
+    description: '처리 결과. SUCCESS: 성공, DENIED: 접근 거절, FAILED: 실패.',
+    enum: AUDIT_RESULTS,
+  })
   @IsOptional()
   @IsIn(AUDIT_RESULTS)
   result?: AuditResult;

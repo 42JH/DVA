@@ -5,7 +5,9 @@ import {
   ApiCookieAuth,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiParam,
+  ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -26,13 +28,25 @@ function adminId(value: string): number {
     throw new ApiException(400, 'INVALID_REQUEST', '관리자 식별자를 확인해 주세요.');
   return Number(value);
 }
-@ApiTags('Admins')
+@ApiTags('관리자')
 @ApiCookieAuth('adminSession')
-@ApiResponse({ status: 400, type: ErrorResponseDto })
-@ApiResponse({ status: 401, type: ErrorResponseDto })
-@ApiResponse({ status: 403, type: ErrorResponseDto })
-@ApiResponse({ status: 404, type: ErrorResponseDto })
-@ApiResponse({ status: 409, type: ErrorResponseDto })
+@ApiResponse({
+  status: 400,
+  description: '요청 형식 오류 또는 변경 항목 누락.',
+  type: ErrorResponseDto,
+})
+@ApiResponse({ status: 401, description: '로그인 세션이 없거나 만료됨.', type: ErrorResponseDto })
+@ApiResponse({
+  status: 403,
+  description: 'SYSTEM_ADMIN 권한이 없거나 허용되지 않은 Origin.',
+  type: ErrorResponseDto,
+})
+@ApiResponse({ status: 404, description: '대상 관리자가 없음.', type: ErrorResponseDto })
+@ApiResponse({
+  status: 409,
+  description: '허용되지 않은 상태 변경 또는 마지막 SYSTEM_ADMIN의 권한 해제.',
+  type: ErrorResponseDto,
+})
 @Roles('SYSTEM_ADMIN')
 @Controller('admins')
 export class AdminAccessController {
@@ -42,23 +56,47 @@ export class AdminAccessController {
     private readonly config: ConfigService<Environment, true>,
   ) {}
   @Get()
-  @ApiOkResponse({ type: AdminListDto })
+  @ApiOperation({
+    summary: '관리자 목록 조회',
+    description: 'SYSTEM_ADMIN 전용. 권한·상태로 필터링하며 관리자 번호 내림차순으로 조회합니다.',
+  })
+  @ApiQuery({ name: 'limit', required: false, description: '조회 개수. 기본 20, 최대 100.' })
+  @ApiQuery({ name: 'offset', required: false, description: '건너뛸 개수. 기본 0.' })
+  @ApiOkResponse({ description: '관리자 목록과 다음 페이지 여부.', type: AdminListDto })
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
   }
   @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id')
   @HttpCode(204)
-  @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
-  @ApiNoContentResponse()
+  @ApiOperation({
+    summary: '관리자 권한 변경·가입 승인',
+    description:
+      'SYSTEM_ADMIN 전용. 권한을 변경하거나 PENDING 계정을 ACTIVE로 승인합니다. 마지막 활성 SYSTEM_ADMIN은 강등할 수 없습니다.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: '대상 관리자 번호(adminUserSeq).',
+    schema: { type: 'integer', minimum: 1 },
+  })
+  @ApiNoContentResponse({ description: '권한 변경 또는 가입 승인 완료.' })
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
   @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id/password')
   @HttpCode(204)
-  @ApiParam({ name: 'id', schema: { type: 'integer', minimum: 1 } })
-  @ApiNoContentResponse()
+  @ApiOperation({
+    summary: '관리자 비밀번호 초기화',
+    description:
+      'SYSTEM_ADMIN 전용. 입력한 새 비밀번호로 변경하고 대상 관리자의 모든 세션을 종료합니다.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: '대상 관리자 번호(adminUserSeq).',
+    schema: { type: 'integer', minimum: 1 },
+  })
+  @ApiNoContentResponse({ description: '비밀번호 초기화 및 대상 관리자의 전체 세션 종료.' })
   async password(
     @Param('id') id: string,
     @Body() input: ResetPasswordDto,
