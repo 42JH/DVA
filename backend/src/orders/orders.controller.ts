@@ -79,9 +79,10 @@ export class OrdersController {
       '생성 시각·주문 번호 내림차순으로 조회합니다. 필터는 모두 AND 조건이며, 배송 상태는 팀 DB 저장값입니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    description:
+      'DB call_sessions.call_session_seq 값. AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({ description: '통화가 없음.', type: ErrorResponseDto })
@@ -107,9 +108,9 @@ export class OrdersController {
   list(
     @Req() request: AuthRequest,
     @Query() query: OrderQueryDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionId);
+    return this.orders.list(request.admin?.adminUserSeq ?? null, query, callSessionSeq);
   }
 
   @Post()
@@ -147,9 +148,9 @@ export class OrdersController {
     schema: { type: 'string', format: 'uuid' },
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '기존 통화 번호(callSessionSeq). AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
+    description: 'DB call_sessions.call_session_seq 값. AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({ description: '고객 또는 통화가 없음.', type: ErrorResponseDto })
@@ -172,14 +173,14 @@ export class OrdersController {
     @Req() request: AuthRequest,
     @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrderDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
     return this.orders.create(
       request.admin?.adminUserSeq ?? null,
       key.toLowerCase(),
       input,
       request.requestId,
-      callSessionId,
+      callSessionSeq,
     );
   }
 
@@ -193,9 +194,9 @@ export class OrdersController {
       'AI·관리자 공통 API. COLLECTING 주문만 부분 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '통화 번호(callSessionSeq). AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
+    description: 'DB call_sessions.call_session_seq 값. AI 필수·관리자 선택. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiBody({
@@ -256,14 +257,14 @@ export class OrdersController {
     @Req() request: AuthRequest,
     @Param() params: OrderIdParamsDto,
     @Body() input: UpdateOrderDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
     return this.orders.update(
       request.admin?.adminUserSeq ?? null,
       params.id,
       input,
       request.requestId,
-      callSessionId,
+      callSessionSeq,
     );
   }
 
@@ -276,9 +277,10 @@ export class OrdersController {
       '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
   })
   @ApiHeader({
-    name: 'X-Call-Session-Id',
+    name: 'call_session_seq',
     required: false,
-    description: '통화 번호(callSessionSeq). AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
+    description:
+      'DB call_sessions.call_session_seq 값. AI 필수·관리자 불필요. 인증 토큰이 아닙니다.',
     schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
   })
   @ApiNotFoundResponse({
@@ -308,8 +310,8 @@ export class OrdersController {
   detail(
     @Req() request: AuthRequest,
     @Param() params: OrderIdParamsDto,
-    @Headers('X-Call-Session-Id') callSessionId?: string,
+    @Headers('call_session_seq') callSessionSeq?: string,
   ) {
-    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionId);
+    return this.orders.detail(request.admin?.adminUserSeq ?? null, params.id, callSessionSeq);
   }
 }

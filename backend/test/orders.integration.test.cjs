@@ -189,7 +189,7 @@ const aiCreate = (callId, body, key = randomUUID(), index = 0, extra = {}) =>
   create(body, key, index, {
     Cookie: undefined,
     Origin: undefined,
-    'X-Call-Session-Id': callId === undefined ? undefined : String(callId),
+    call_session_seq: callId === undefined ? undefined : String(callId),
     ...extra,
   });
 
@@ -546,7 +546,7 @@ test('AI replay stays bound to the original call even after restart and order ch
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
-      'X-Call-Session-Id': String(callId),
+      call_session_seq: String(callId),
     },
     body: JSON.stringify(body),
   });
@@ -890,10 +890,10 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
     operation = spec.paths['/api/orders'].post;
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   const callHeaders = operation.parameters.filter(
-    (p) => p.in === 'header' && p.name.toLowerCase() === 'x-call-session-id',
+    (p) => p.in === 'header' && p.name.toLowerCase() === 'call_session_seq',
   );
   assert.equal(callHeaders.length, 1);
-  assert.equal(callHeaders[0].name, 'X-Call-Session-Id');
+  assert.equal(callHeaders[0].name, 'call_session_seq');
   assert.equal(callHeaders[0].required, false);
   assert.equal(callHeaders[0].schema.type, 'integer');
   assert.equal(callHeaders[0].schema.minimum, 1);
@@ -949,7 +949,7 @@ const readOrders = (query = '', extra = {}, index = 0) =>
       Object.entries({ Cookie: cookies[index], ...extra }).filter(([, v]) => v !== undefined),
     ),
   });
-const aiReadHeaders = (callId) => ({ Cookie: undefined, 'X-Call-Session-Id': String(callId) });
+const aiReadHeaders = (callId) => ({ Cookie: undefined, call_session_seq: String(callId) });
 
 test('ORD-02 paginates orders once each, including zero-detail drafts and equal creation times', async () => {
   const { customer } = await readCustomer();
@@ -1106,7 +1106,7 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
     await errorCode(await readOrders(query), 400, 'INVALID_REQUEST');
   for (const callId of [undefined, '', 'abc', '0', '-1', '2147483648', '1,2']) {
     await errorCode(
-      await readOrders('', { Cookie: undefined, 'X-Call-Session-Id': callId }),
+      await readOrders('', { Cookie: undefined, call_session_seq: callId }),
       400,
       'INVALID_REQUEST',
     );
@@ -1129,7 +1129,7 @@ test('ORD-02 Swagger describes filters, a single call header and the actual list
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.deepEqual(
     headers.map((p) => p.name),
-    ['X-Call-Session-Id'],
+    ['call_session_seq'],
   );
   assert.equal(headers[0].schema.type, 'integer');
   const queries = operation.parameters.filter((p) => p.in === 'query');
@@ -1335,7 +1335,7 @@ test('ORD-03 Swagger includes required nullable fields, nested response descript
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   assert.deepEqual(
     operation.parameters.filter((p) => p.in === 'header').map((p) => p.name),
-    ['X-Call-Session-Id'],
+    ['call_session_seq'],
   );
   const id = operation.parameters.find((p) => p.in === 'path');
   assert.equal(id.name, 'id');
@@ -1861,7 +1861,7 @@ test('ORD-04 rejects AI calls without matching active customers, a valid call or
     await errorCode(await patchOrder(id, input, aiReadHeaders(callId)), 403, 'FORBIDDEN');
   for (const header of [undefined, 'abc', '0', '2147483648'])
     await errorCode(
-      await patchOrder(id, input, { Cookie: undefined, 'X-Call-Session-Id': header }),
+      await patchOrder(id, input, { Cookie: undefined, call_session_seq: header }),
       400,
       'INVALID_REQUEST',
     );
@@ -1921,7 +1921,7 @@ test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   assert.deepEqual(
     operation.parameters.filter((p) => p.in === 'header').map((p) => p.name),
-    ['X-Call-Session-Id'],
+    ['call_session_seq'],
   );
   assert.equal(
     operation.parameters.find((p) => p.in === 'path').description.includes('orderSeq'),
@@ -1951,4 +1951,52 @@ test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields
   assert.deepEqual(schema.required, ['data', 'meta']);
   assert.equal(schema.properties.data.$ref, '#/components/schemas/UpdatedOrderDto');
   assert.equal(Object.keys(operation.requestBody.content['application/json'].examples).length, 3);
+});
+
+test('order APIs use the literal DB column header and reject former or hyphenated names', async () => {
+  const { customer, phone } = await readCustomer();
+  const id = await readOrder(customer),
+    callId = await call(phone);
+  const before = await storedOrder(id),
+    beforeCounts = await counts();
+  for (const name of ['X-Call-Session-Id', 'X-Call-Session-Seq', 'call-session-seq']) {
+    const headers = { Cookie: undefined, [name]: String(callId) };
+    await errorCode(
+      await create({ customerSeq: customer }, randomUUID(), 0, headers),
+      400,
+      'INVALID_REQUEST',
+    );
+    await errorCode(await readOrders('', headers), 400, 'INVALID_REQUEST');
+    await errorCode(await readDetail(id, headers), 400, 'INVALID_REQUEST');
+    const response = await patchOrder(
+      id,
+      { expectedVersion: before.version, paymentMethodType: 'cat' },
+      headers,
+    );
+    assert.equal(response.status, 400);
+    const error = (await response.json()).error;
+    assert.equal(error.code, 'INVALID_REQUEST');
+    assert.ok(error.message.includes('call_session_seq'));
+  }
+  assert.deepEqual(await storedOrder(id), before);
+  assert.deepEqual(await counts(), beforeCounts);
+  // HTTP 헤더의 대소문자 구분 없음은 유지하며 밑줄 이름을 그대로 읽는다.
+  assert.equal(
+    (await readDetail(id, { Cookie: undefined, CALL_SESSION_SEQ: String(callId) })).status,
+    200,
+  );
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  for (const operation of [
+    spec.paths['/api/orders'].get,
+    spec.paths['/api/orders'].post,
+    spec.paths['/api/orders/{id}'].get,
+    spec.paths['/api/orders/{id}'].patch,
+  ]) {
+    const headers = operation.parameters.filter(
+      (parameter) => parameter.in === 'header' && parameter.name !== 'Idempotency-Key',
+    );
+    assert.equal(headers.length, 1);
+    assert.equal(headers[0].name, 'call_session_seq');
+    assert.ok(headers[0].description.includes('call_sessions.call_session_seq'));
+  }
 });

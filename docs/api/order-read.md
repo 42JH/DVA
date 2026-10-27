@@ -5,7 +5,7 @@
 ## 호출 범위
 
 - 관리자: ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN의 `dva_session` 쿠키로 전체 주문 조회. GET에는 Origin·Idempotency-Key가 필요하지 않다.
-- AI: 관리자 쿠키 없이 `X-Call-Session-Id`에 기존 `callSessionSeq`를 전달한다. 발신번호와 일치하는 ACTIVE 고객의 주문만 조회한다. 목록의 customerSeq를 생략해도 서버가 이 범위를 적용한다.
+- AI: 관리자 쿠키 없이 `call_session_seq` 헤더에 DB `call_sessions.call_session_seq` 값을 전달한다. 발신번호와 일치하는 ACTIVE 고객의 주문만 조회한다. 목록의 customerSeq를 생략해도 서버가 이 범위를 적용한다.
 - 발신번호가 없거나 활성 고객과 연결되지 않은 통화는 403이다. 종료된 통화는 기존 연결 주문 한 건의 상세만 조회할 수 있으며 목록·다른 주문은 409다. 이는 [ORD-04](order-update.md) 후처리의 응답 유실 복구를 위한 범위다. 같은 기업 소속이라는 이유로 다른 고객 주문을 공개하지 않는다.
 - 관리자 쿠키가 있으면 반드시 정상 세션이어야 한다. 만료·잘못된 쿠키는 AI 요청으로 전환하지 않는다.
 - 서비스 인증은 기존 MVP 방침대로 미적용이다. 통화 번호를 아는 호출자를 인증하는 기능은 아니며, 발신번호의 진위도 보증하지 않는다. 이 한계는 [135번](https://ssafy.atlassian.net/browse/S15P31D109-135)의 서비스 인증과 통화 결속 작업에서 보완해야 한다.
@@ -14,7 +14,7 @@
 
 ```http
 GET /api/orders?status=COLLECTING&limit=20&offset=0
-X-Call-Session-Id: 7
+call_session_seq: 7
 ```
 
 | Query | 의미 |
@@ -52,7 +52,7 @@ X-Call-Session-Id: 7
 
 ```http
 GET /api/orders/123
-X-Call-Session-Id: 7
+call_session_seq: 7
 ```
 
 응답은 `{ "data": Order, "meta": { "requestId": "UUID" } }`다.
@@ -91,7 +91,7 @@ X-Call-Session-Id: 7
 3. ORD-01 → ORD-03 → ORD-04 → ORD-06은 같은 orderSeq를 사용한다. 수정은 [61번 연동 문서](order-update.md)를 따르며 최종 접수는 57번 후속 작업이다.
 4. 현재 `develop-ai`의 제안 호출부는 `/internal/ai/orders/search` POST·snake_case를 사용한다. 담당 호출부를 이 문서의 `/api/orders` GET·camelCase·응답 구조에 맞춰야 하며, 이번 백엔드 변경만으로 자동 연결되지 않는다.
 
-Swagger `/api/docs`와 OpenAPI `/api/docs-json`에 각 API 요약·필터·헤더·응답 필드·오류를 등록했다. 헤더 이름은 기존 `X-Call-Session-Id`를 유지한다.
+Swagger `/api/docs`와 OpenAPI `/api/docs-json`에 각 API 요약·필터·헤더·응답 필드·오류를 등록했다. 통화 헤더 이름은 DB 컬럼명과 같은 `call_session_seq`다.
 
 ## 검증
 

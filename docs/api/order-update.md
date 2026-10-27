@@ -7,7 +7,7 @@
 ```http
 PATCH /api/orders/123
 Content-Type: application/json
-X-Call-Session-Id: 7
+call_session_seq: 7
 ```
 
 ```json
@@ -21,7 +21,7 @@ X-Call-Session-Id: 7
 ```
 
 - 관리자: ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN의 `dva_session` 쿠키와 허용된 `Origin`. 통화 헤더는 선택이다.
-- AI: 관리자 쿠키 없이 기존 `callSessionSeq`를 `X-Call-Session-Id`로 전달한다. 활성 고객의 전화번호와 통화 발신번호가 같아야 한다.
+- AI: 관리자 쿠키 없이 DB `call_sessions.call_session_seq` 값을 같은 이름의 `call_session_seq` 헤더로 전달한다. 활성 고객의 전화번호와 통화 발신번호가 같아야 한다.
 - `Idempotency-Key`와 `X-CSRF-Protection`은 요구하지 않는다. 수정의 동시 요청·재전송은 `expectedVersion`으로 처리한다.
 - 잘못되거나 만료된 관리자 쿠키가 있으면 인증 오류이며 AI 요청으로 바꾸지 않는다.
 

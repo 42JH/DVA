@@ -6,7 +6,7 @@ Jira: [S15P31D109-34](https://ssafy.atlassian.net/browse/S15P31D109-34).
 ## MVP 인증과 범위
 
 2026-10-27 합의에 따라 고객 등록·상세·이름 수정에 AI 서비스 인증을 요구하지 않는다.
-서버 간 호출에는 관리자 쿠키, Bearer 토큰, Origin, X-Call-Session-Id가 필요하지 않다.
+서버 간 호출에는 관리자 쿠키, Bearer 토큰, Origin, call_session_seq가 필요하지 않다.
 이 세 작업만 명시적으로 `MvpAiCustomerAccess`를 사용한다. 기존 관리자·기업·PBX 인증은 유지한다.
 서비스 인증 도입은 [S15P31D109-135](https://ssafy.atlassian.net/browse/S15P31D109-135)의 후속 작업이다.
 

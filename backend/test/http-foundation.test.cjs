@@ -233,12 +233,19 @@ test('CORS permits only the configured origin and required request headers', asy
     headers: {
       Origin: 'http://localhost:5173',
       'Access-Control-Request-Method': 'POST',
-      'Access-Control-Request-Headers': 'authorization,idempotency-key,x-call-session-id',
+      'Access-Control-Request-Headers': 'authorization,idempotency-key,call_session_seq',
     },
   });
   assert.equal(response.status, 204);
   assert.equal(response.headers.get('access-control-allow-origin'), 'http://localhost:5173');
   assert.ok(response.headers.get('access-control-allow-headers').includes('Idempotency-Key'));
+  const allowedHeaders = response.headers
+    .get('access-control-allow-headers')
+    .toLowerCase()
+    .split(',')
+    .map((header) => header.trim());
+  assert.ok(allowedHeaders.includes('call_session_seq'));
+  assert.ok(!allowedHeaders.includes('x-call-session-id'));
   const forbidden = await request('/api/checks/items', {
     headers: { Origin: 'https://untrusted.invalid' },
   });

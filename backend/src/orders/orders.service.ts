@@ -31,7 +31,7 @@ export class OrdersService {
       throw new ApiException(
         400,
         'INVALID_REQUEST',
-        'AI 주문 API에는 유효한 X-Call-Session-Id가 필요합니다.',
+        'AI 주문 API에는 유효한 call_session_seq가 필요합니다.',
       );
     return header === undefined ? null : Number(header);
   }
