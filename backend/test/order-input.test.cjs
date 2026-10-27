@@ -4,9 +4,102 @@ const assert = require('node:assert/strict');
 const { CreateOrderDto } = require('../dist/orders/dto/create-order.dto');
 const { OrderQueryDto, OrderIdParamsDto } = require('../dist/orders/dto/order-query.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
+const { UpdateOrderDto } = require('../dist/orders/dto/update-order.dto');
+const { assertOrderUpdate } = require('../dist/orders/order-update.validation');
 
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
+
+const validateUpdate = async (body) => {
+  const input = await pipe.transform(body, { type: 'body', metatype: UpdateOrderDto });
+  assertOrderUpdate(input);
+  return input;
+};
+
+test('order updates preserve omitted fields, nullable clears, zero and empty text', async () => {
+  const input = await validateUpdate({
+    expectedVersion: 4,
+    pickupRequestedAt: null,
+    parcels: [
+      { orderParcelSeq: 101, origin: { name: null, latitude: 0 }, clientComment: '' },
+      { originPin: null, documentCount: 0, itemPrice: null },
+    ],
+  });
+  assert.equal(input.paymentMethodType, undefined);
+  assert.equal(input.pickupRequestedAt, null);
+  assert.equal(input.parcels[0].smallBoxCount, undefined);
+  assert.equal(input.parcels[0].origin.name, null);
+  assert.equal(input.parcels[0].origin.phoneNumber, undefined);
+  assert.equal(input.parcels[0].origin.latitude, 0);
+  assert.equal(input.parcels[0].clientComment, '');
+  assert.equal(input.parcels[1].orderParcelSeq, undefined);
+  assert.equal(input.parcels[1].documentCount, 0);
+  assert.equal(input.parcels[1].itemPrice, null);
+  await validateUpdate({ expectedVersion: 1, paymentMethodType: 'cat', parcels: [] });
+});
+
+test('order updates reject missing changes, duplicate details, invalid fields and value types', async () => {
+  for (const input of [
+    {},
+    { paymentMethodType: 'cat' },
+    { expectedVersion: '1', paymentMethodType: 'cat' },
+    { expectedVersion: null, paymentMethodType: 'cat' },
+    { expectedVersion: 0, paymentMethodType: 'cat' },
+    { expectedVersion: 2147483648, paymentMethodType: 'cat' },
+    { expectedVersion: 1 },
+    { expectedVersion: 1, parcels: [] },
+    { expectedVersion: 1, parcels: [{}] },
+    { expectedVersion: 1, parcels: [{ origin: {} }] },
+    { expectedVersion: 1, parcels: [{ orderParcelSeq: 1, destination: {} }] },
+    { expectedVersion: 1, parcels: [{ orderParcelSeq: 1 }] },
+    { expectedVersion: 1, paymentMethodType: 'cat', parcels: [{}] },
+    { expectedVersion: 1, paymentMethodType: null },
+    { expectedVersion: 1, paymentMethodType: 'cash' },
+    { expectedVersion: 1, pickupRequestedAt: '2026-02-30T10:00:00Z' },
+    { expectedVersion: 1, pickupRequestedAt: '2026-10-28T10:00:00' },
+    { expectedVersion: 1, pickupRequestedAt: '2026-10-28T10:00:00+25:00' },
+    { expectedVersion: 1, customerSeq: 1 },
+    { expectedVersion: 1, status: 'ACCEPTED' },
+    { expectedVersion: 1, parcels: null },
+    { expectedVersion: 1, parcels: [null] },
+    { expectedVersion: 1, parcels: [[{}]] },
+    ...[null, 0, '1', 1.5, 2147483648].map((orderParcelSeq) => ({
+      expectedVersion: 1,
+      parcels: [{ orderParcelSeq, smallBoxCount: 1 }],
+    })),
+    ...[
+      { origin: null },
+      { destination: [] },
+      { origin: { extra: 1 } },
+      { origin: { phoneNumber: '010-1234' } },
+      { origin: { latitude: 91 } },
+      { originPin: {} },
+      { originPin: { scope: 'PERSONAL', pinSeq: null } },
+      { itemPrice: Number.MAX_SAFE_INTEGER + 1 },
+      { clientComment: null },
+      { smallBoxCount: null },
+      { smallBoxCount: -1 },
+      { notifiedPrice: 3500 },
+      { parcelPosition: 1 },
+    ].map((parcel) => ({ expectedVersion: 1, parcels: [parcel] })),
+    {
+      expectedVersion: 1,
+      parcels: [
+        { orderParcelSeq: 1, smallBoxCount: 1 },
+        { orderParcelSeq: 1, smallBoxCount: 2 },
+      ],
+    },
+  ])
+    await assert.rejects(
+      () => validateUpdate(input),
+      (error) => {
+        assert.equal(error.getStatus(), 400);
+        assert.equal(error.getResponse().code, 'INVALID_REQUEST');
+        return true;
+      },
+      JSON.stringify(input),
+    );
+});
 
 test('order queries validate dates, enum filters, integer pagination and unknown fields', async () => {
   const query = (value) => pipe.transform(value, { type: 'query', metatype: OrderQueryDto });
