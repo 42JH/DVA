@@ -37,7 +37,7 @@ export function Table<Row>({
   selectable?: boolean // 맨 앞 체크박스 열
   selected?: Set<string | number>
   onSelect?: (key: string | number) => void
-  onSelectAll?: () => void
+  onSelectAll?: () => void // 없으면 머리줄에 전체 선택 체크박스를 안 그림 (09: 실수로 전부 지우는 일 방지)
   subRows?: (row: Row, ctx: { tinted: boolean; gridCols: string }) => ReactNode // 05 질문 줄들 · 09 답변 띠 (같은 열 자리에 맞추도록 gridCols를 줌)
   expanded?: (row: Row) => boolean // 펼치는 목록(08 · 09): 줄 끝 ›가 ▾ · ▴
   head?: ReactNode // 카드 제목 줄 (08 · 09: '기업 목록 24곳' + 버튼) — 높이 40, 아래 20
@@ -66,9 +66,12 @@ export function Table<Row>({
         className="mb-4 grid h-6 items-center text-label font-semibold text-sub"
         style={{ gridTemplateColumns: gridCols }}
       >
-        {selectable && (
-          <Checkbox state={allState} onChange={() => onSelectAll?.()} label="전체 선택" />
-        )}
+        {selectable &&
+          (onSelectAll ? (
+            <Checkbox state={allState} onChange={onSelectAll} label="전체 선택" />
+          ) : (
+            <span />
+          ))}
         {columns.map((c) => (
           <span key={c.key} className={`pr-4 ${c.align === 'right' ? 'text-right' : ''}`}>
             {c.header}

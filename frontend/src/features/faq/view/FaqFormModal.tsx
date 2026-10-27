@@ -1,8 +1,8 @@
-import { Button, FormModal, TextArea, TextField } from '../../../shared/ui'
+import { Button, FormModal, SelectField, TextArea, TextField } from '../../../shared/ui'
 import { useFaqFormViewModel } from '../viewmodel/useFaqFormViewModel'
 import type { Faq } from '../viewmodel/useFaqListViewModel'
 
-// 09 질의 추가 · 질의 수정 창 (와이어프레임 09_FAQ관리_질의추가 · _질의수정) — 폭 680 · 질문 44 · 답변 180 · [취소] [추가/저장]
+// 09 질의 추가 · 질의 수정 창 (와이어프레임 09_FAQ관리_질의추가 v2) — 폭 680 · 분류 셀렉트(정의 한 줄) · 질문 44 · 답변 180 · [취소] [추가/저장]
 export function FaqFormModal({ faq, onClose }: { faq: Faq | null; onClose: () => void }) {
   const vm = useFaqFormViewModel(faq, onClose)
   return (
@@ -20,13 +20,21 @@ export function FaqFormModal({ faq, onClose }: { faq: Faq | null; onClose: () =>
       }
     >
       <div className="grid gap-5">
+        <SelectField
+          label="분류"
+          value={vm.category}
+          onChange={vm.setCategory}
+          options={vm.categoryOptions}
+          placeholder="분류를 고르세요"
+          error={vm.categoryError}
+        />
         <TextField
           label="질문"
           value={vm.question}
           onChange={(e) => vm.setQuestion(e.target.value)}
           placeholder="주말에도 방문 수거를 하나요?"
           error={vm.questionError}
-          autoFocus
+          autoFocus={!vm.isEdit && vm.category !== ''}
         />
         <TextArea
           label="답변"
