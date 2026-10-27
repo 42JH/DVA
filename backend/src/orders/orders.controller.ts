@@ -476,10 +476,10 @@ export class OrdersController {
   @Get(':id')
   @MvpAiOrderAccess()
   @ApiOperation({
-    summary: '주문 상세·배송 상태 조회 (ORD-03)',
+    summary: '주문 상세 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
+      '주문 상태·고객 번호·결제 방식·수거 요청 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

@@ -183,13 +183,9 @@ export class OrdersRepository {
               'documentCount',p.document_count,'smallBoxCount',p.small_box_count,
               'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,
               'otherItemDescription',p.other_item_description,'clientComment',p.client_comment,
-              'notifiedPrice',p.notified_price,'itemPrice',p.item_price,
-              'shipment',CASE WHEN s.shipment_seq IS NULL THEN NULL ELSE jsonb_build_object(
-                'shipmentSeq',s.shipment_seq,'orderParcelSeq',s.order_parcel_seq,
-                'trackingNumber',s.tracking_number,'status',s.status,'version',s.version,
-                'statusChangedAt',s.status_changed_at,'createdAt',s.created_at) END
+              'notifiedPrice',p.notified_price,'itemPrice',p.item_price
             ) ORDER BY p.parcel_position)
-            FROM order_parcels p LEFT JOIN shipments s ON s.order_parcel_seq=p.order_parcel_seq
+            FROM order_parcels p
             WHERE p.order_seq=o.order_seq
           ),'[]'::jsonb)
         ) AS detail FROM orders o

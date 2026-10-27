@@ -1,4 +1,4 @@
-# 주문 목록·상세 조회 — ORD-02/03
+# 주문 목록·상세 조회
 
 관련 Jira: [S15P31D109-58](https://ssafy.atlassian.net/browse/S15P31D109-58). 기준 브랜치: `develop-backend`, 작업 브랜치: `feature/order-read`.
 
@@ -58,7 +58,7 @@ call_session_seq: 7
 
 `parcelCount`는 필터에 걸린 상세 수가 아닌 주문 전체 상세 수다. 목록은 주문 요약만 반환하며 `shipmentStatuses`는 제거했다. 조회 결과가 없으면 `data: []`, `hasNext: false`다. 목록에는 meta나 page 객체를 붙이지 않는다. 수령인·주소·물품을 확인하려면 각 orderSeq로 주문 상세를 조회한다.
 
-## ORD-03 주문 상세·배송 상태
+## 주문 상세
 
 ```http
 GET /api/orders/123
@@ -71,7 +71,7 @@ call_session_seq: 7
 | --- | --- |
 | orderSeq / customerSeq | 주문·고객 번호 |
 | status / paymentMethodType / pickupRequestedAt | 저장된 주문 상태·결제 방식·수거 요청 시각 |
-| version | 현재 DB 버전. 이후 ORD-04의 expectedVersion으로 전달 |
+| version | 현재 DB 버전. 수정·최종 접수의 expectedVersion으로 전달 |
 | parcelNo / dverReceivedAt | 디버 접수 참고값·확인 시각. 접수 전에는 null. parcelNo는 식별 키가 아님 |
 | createdAt / updatedAt | 주문 생성·최종 변경 시각 |
 | parcels[] | parcelPosition 오름차순 상세 목록. 상세가 없으면 빈 배열 |
@@ -80,9 +80,10 @@ call_session_seq: 7
 | originPin | 원본 주소록 scope·pinSeq 또는 null. 원본 변경을 주문 주소에 덮어쓰지 않음 |
 | 수량·설명·clientComment·itemPrice | 저장된 물품 정보·요청 사항·가액. 0과 null을 구분 |
 | notifiedPrice | 상세별 고정 안내 요금 3500원 |
-| shipment | 저장된 배송 정보 또는 null. shipmentSeq·orderParcelSeq·trackingNumber·status·version·statusChangedAt·createdAt |
 
-배송 상태는 팀 DB 저장값이다. trackingNumber는 내부 추적번호이며, 택배사 송장·실시간 위치로 표시하지 않는다. MSA 전용 deliverySyncStatus를 만들지 않는다. 주문·상세·버전은 같은 DB 스냅샷에서 읽어 동시 수정으로 응답 내용이 섞이지 않게 한다.
+`parcels[].shipment`와 배송 추적번호·배송 상태는 반환하지 않는다. 출발지·도착지와 물품은 주문 내용이므로 유지한다. 주문·상세·버전은 같은 DB 스냅샷에서 읽어 동시 수정으로 응답 내용이 섞이지 않게 한다.
+
+배송 상태 조회는 Orders API의 책임에서 제외하며 별도 배송 API에서 다룬다. 기존 디버 접수 성공 시의 배송 데이터·초기 이력 저장과 중복 접수 방지는 유지한다. 배송 조회 API 자체는 이 변경에서 추가하지 않는다.
 
 ## 오류
 

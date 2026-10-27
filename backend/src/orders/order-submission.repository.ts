@@ -5,6 +5,16 @@ import { DverResult } from './dver.client';
 
 @Injectable()
 export class OrderSubmissionRepository {
+  async hasShipments(client: PoolClient, id: number): Promise<boolean> {
+    return (
+      await client.query<{ exists: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM shipments s JOIN order_parcels p USING(order_parcel_seq)
+         WHERE p.order_seq=$1) AS exists`,
+        [id],
+      )
+    ).rows[0].exists;
+  }
+
   async isCompanyCustomer(client: PoolClient, customerId: number): Promise<boolean> {
     try {
       const result = await client.query(
