@@ -305,6 +305,90 @@ test('production login through Nginx authorizes company operations and logout re
   );
 });
 
+test('production pin APIs preserve admin-only company writes and accept stale versions through Nginx', async () => {
+  const root = 'http://proxy/api';
+  const headers = { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' };
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const admin = { ...headers, Cookie: login.headers.get('set-cookie').split(';')[0] };
+  const number = '010' + String(require('node:crypto').randomInt(10000000, 100000000));
+  const customer = await fetch(root + '/customers', {
+    method: 'POST',
+    headers: admin,
+    body: JSON.stringify({ name: '주소록 운영 검증', phoneNumber: number }),
+  });
+  assert.equal(customer.status, 201);
+  const customerId = (await customer.json()).data.customerSeq;
+  const addressData = {
+    name: '검증 수령인',
+    phoneNumber: number,
+    roadAddress: '예시로 1',
+    jibunAddress: '예시동 1',
+    detailAddress: '101호',
+    dongName: '예시동',
+    postalCode: '01234',
+    latitude: 37.5,
+    longitude: 127,
+  };
+  const created = await fetch(root + `/customers/${customerId}/pins`, {
+    method: 'POST',
+    headers: admin,
+    body: JSON.stringify({ addressData }),
+  });
+  assert.equal(created.status, 201);
+  const pin = (await created.json()).data.personalPinSeq;
+  for (const label of ['먼저 수정', '나중 수정']) {
+    const updated = await fetch(root + `/pins/${pin}`, {
+      method: 'PATCH',
+      headers: admin,
+      body: JSON.stringify({ label, expectedVersion: 1 }),
+    });
+    assert.equal(updated.status, 200);
+  }
+  const listed = await fetch(root + `/customers/${customerId}/pins`, { headers: admin });
+  const stored = (await listed.json()).data[0];
+  assert.equal(stored.label, '나중 수정');
+  assert.equal(stored.version, 3);
+  assert.equal(stored.addressData.detailAddress, '101호');
+  const company = await fetch(root + '/companies', {
+    method: 'POST',
+    headers: admin,
+    body: JSON.stringify({ name: '주소록 기업 ' + randomUUID() }),
+  });
+  assert.equal(company.status, 201);
+  const companyId = (await company.json()).data.organizationSeq;
+  const shared = await fetch(root + `/companies/${companyId}/pins`, {
+    method: 'POST',
+    headers: admin,
+    body: JSON.stringify({ addressData }),
+  });
+  assert.equal(shared.status, 201);
+  const sharedId = (await shared.json()).data.companyPinSeq;
+  for (const [method, path, body] of [
+    ['POST', `/companies/${companyId}/pins`, { addressData }],
+    ['PATCH', `/company-pins/${sharedId}`, { label: '금지' }],
+  ]) {
+    const denied = await fetch(root + path, { method, headers, body: JSON.stringify(body) });
+    assert.equal(denied.status, 401);
+  }
+  for (const [method, path, body] of [
+    ['GET', `/customers/${customerId}/pins`, undefined],
+    ['GET', `/companies/${companyId}/pins`, undefined],
+    ['POST', `/customers/${customerId}/pins`, { addressData }],
+  ]) {
+    const unknown = await fetch(root + path, {
+      method,
+      headers: { ...headers, call_session_seq: '2147483647' },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    assert.equal(unknown.status, 404);
+  }
+});
+
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
