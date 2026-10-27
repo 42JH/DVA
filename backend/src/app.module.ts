@@ -6,6 +6,7 @@ import { HealthModule } from './health/health.module';
 import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { CustomersModule } from './customers/customers.module';
+import { MembersModule } from './members/members.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { CustomersModule } from './customers/customers.module';
     AuthModule,
     OrganizationsModule,
     CustomersModule,
+    MembersModule,
   ],
 })
 export class AppModule {}
