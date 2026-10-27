@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreatedOrderDto } from './dto/order-response.dto';
-import { orderDraft } from './order-draft';
+import { OrderQueryDto } from './dto/order-query.dto';
+import { ListResponse } from '../common/pagination';
+import { isZonedDate, orderDraft } from './order-draft';
 import { OrdersRepository } from './orders.repository';
 
 @Injectable()
@@ -16,6 +19,60 @@ export class OrdersService {
     private readonly audit: AuditService,
     private readonly customers: CustomersService,
   ) {}
+
+  private callId(adminId: number | null, header?: string): number | null {
+    if (
+      (adminId === null && header === undefined) ||
+      (header !== undefined &&
+        (!/^[0-9]+$/.test(header) || Number(header) < 1 || Number(header) > 2147483647))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'AI 주문 API에는 유효한 X-Call-Session-Id가 필요합니다.',
+      );
+    return header === undefined ? null : Number(header);
+  }
+
+  private async readCustomer(client: PoolClient, adminId: number | null, callId: number | null) {
+    if (adminId !== null) return null;
+    const call = await this.repository.readCustomer(client, callId!);
+    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+    if (call.endedAt !== null)
+      throw new ApiException(409, 'INVALID_STATE', '종료된 통화에서는 주문을 조회할 수 없습니다.');
+    if (call.customerSeq === null)
+      throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
+    return call.customerSeq;
+  }
+
+  async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
+    const callId = this.callId(adminId, callSessionHeader);
+    if (
+      (query.from !== undefined && !isZonedDate(query.from)) ||
+      (query.to !== undefined && !isZonedDate(query.to)) ||
+      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
+      );
+    return this.database.transaction(async (client) => {
+      // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const customerId = await this.readCustomer(client, adminId, callId);
+      if (
+        customerId !== null &&
+        query.customerSeq !== undefined &&
+        query.customerSeq !== customerId
+      )
+        throw new ApiException(403, 'FORBIDDEN', '다른 고객의 주문은 조회할 수 없습니다.');
+      return new ListResponse(
+        await this.repository.list(client, query, customerId ?? query.customerSeq ?? null),
+        query.limit,
+      );
+    });
+  }
 
   async create(
     adminId: number | null,
@@ -31,19 +88,7 @@ export class OrdersService {
         'customerSeq와 customer 중 하나만 전달해 주세요.',
         [{ field: 'customer', reason: 'exactlyOneCustomerReference' }],
       );
-    if (
-      (adminId === null && callSessionHeader === undefined) ||
-      (callSessionHeader !== undefined &&
-        (!/^[0-9]+$/.test(callSessionHeader) ||
-          Number(callSessionHeader) < 1 ||
-          Number(callSessionHeader) > 2147483647))
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        'AI 주문 생성에는 유효한 X-Call-Session-Id가 필요합니다.',
-      );
-    const callId = callSessionHeader === undefined ? null : Number(callSessionHeader);
+    const callId = this.callId(adminId, callSessionHeader);
     const draft = orderDraft(input);
     return this.database.transaction(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
@@ -87,6 +132,17 @@ export class OrdersService {
         client,
       );
       return result;
+    });
+  }
+
+  async detail(adminId: number | null, id: number, callSessionHeader?: string) {
+    const callId = this.callId(adminId, callSessionHeader);
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const customerId = await this.readCustomer(client, adminId, callId);
+      const order = await this.repository.detail(client, id, customerId);
+      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      return order;
     });
   }
 }
