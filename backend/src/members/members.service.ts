@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { ApiException, ErrorDetail } from '../common/errors/api.exception';
@@ -54,31 +53,11 @@ export class MembersService {
     );
   }
 
-  private async writeOnce(
-    companyId: number,
-    adminId: number,
-    key: string,
-    operation: 'CREATE' | 'IMPORT',
-    hash: string,
-    work: (client: PoolClient) => Promise<void>,
-  ) {
+  private async write(companyId: number, work: (client: PoolClient) => Promise<void>) {
     await this.database.transaction(async (client) => {
-      if (!(await this.repository.lockKey(client, adminId, key)))
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 요청을 처리 중입니다.');
-      const previous = await this.repository.receipt(adminId, key, client);
-      if (previous) {
-        if (previous.requestHash !== hash)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 키에 다른 기업·작업·내용이 전달됐습니다.',
-          );
-        return;
-      }
       await this.lockWrites(client);
       await this.company(companyId, client, true);
       await work(client);
-      await this.repository.remember(adminId, key, companyId, operation, hash, client);
     });
   }
 
@@ -86,21 +65,9 @@ export class MembersService {
     companyId: number,
     input: CreateMemberDto,
     adminId: number,
-    key: string,
     requestId: string,
   ): Promise<void> {
-    const hash = createHash('sha256')
-      .update(
-        JSON.stringify({
-          operation: 'CREATE',
-          companyId,
-          employeeNo: input.employeeNo,
-          customerSeq: input.customerSeq,
-          role: input.role,
-        }),
-      )
-      .digest('hex');
-    await this.writeOnce(companyId, adminId, key, 'CREATE', hash, async (client) => {
+    await this.write(companyId, async (client) => {
       const customer = await this.repository.customer(input.customerSeq, client);
       if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
       if (customer.status !== 'ACTIVE')
@@ -147,15 +114,10 @@ export class MembersService {
     companyId: number,
     file: CsvUpload | undefined,
     adminId: number,
-    key: string,
     requestId: string,
   ): Promise<void> {
     const rows = parseMemberCsv(file);
-    const hash = createHash('sha256')
-      .update(JSON.stringify({ operation: 'IMPORT', companyId }))
-      .update(file!.buffer)
-      .digest('hex');
-    await this.writeOnce(companyId, adminId, key, 'IMPORT', hash, async (client) => {
+    await this.write(companyId, async (client) => {
       const before = await this.repository.candidates(companyId, rows, client);
       await this.repository.lockCustomers(
         before.map((row) => row.customerSeq),
