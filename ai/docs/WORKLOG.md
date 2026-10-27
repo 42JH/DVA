@@ -322,3 +322,34 @@
   - PBX `callFrom`이 OpenAI 웹훅 SIP `From`의 발신번호와 같은지(다르면 종료 웹훅이 통화를 못 찾는다).
   - 고객이 먼저 끊으면 sideband `session.closed`(`remote_hangup`)가 바로 오는지.
 - Jenkins `DEPLOY_LIGHTSAIL` 배포가 끝까지 성공하는지(#12 이후 `--pull missing` 반영본), 백엔드 → AI(`http://ai:8000`)·AI → 백엔드 호출 확인.
+
+## 2026-10-26 (첫 배포, 웹훅 연결, 실제 통화)
+
+위 "남은 것"을 처리한 기록. 서버 설정(호스트 Nginx·인증서)은 저장소가 아니라 서버에서만 바꿨다.
+
+### 바꾼 것
+- 첫 배포: Jenkins `dva-ai` #14(`DEPLOY_LIGHTSAIL`, `6d3b148a517a-14`) 성공.
+  - Qdrant 이미지를 서버에서 처음 받음(`--pull missing`).
+  - `dva-ai-ai-1`이 `dva-prod_ai_net`에 별칭 `ai`로 붙고, 예전 `dva-prod-ai-1`은 멈춤(지우지 않음). 되돌리기: `sudo docker stop dva-ai-ai-1 && sudo docker start dva-prod-ai-1`.
+- 호스트 Nginx(`/etc/nginx/sites-available/dva-ip`, 원본은 백엔드 `infra/https/https.conf`). 고칠 때마다 `/root/dva-ip.bak.*`로 백업.
+  - `POST /api/webhooks/openai/call-incoming`, `POST /pbx/webhook/call-ended` → AI(`127.0.0.1:8000`). 기존 PBX 웹훅 블록과 같은 형식(POST만, 본문 16k, 10초).
+  - PBX는 백엔드 주소(`/api/webhooks/pbx/call-ended`)로만 보내고, 백엔드는 DB에 저장만 하고 AI에 넘기지 않는다. 그래서 그 경로에 `mirror`를 달아 같은 요청(본문·Bearer 토큰)을 AI `/pbx/webhook/call-ended`로 복사. PBX가 받는 응답은 백엔드 응답 그대로. 백엔드 `PBX_WEBHOOK_TOKEN`과 우리 `PBX_WEBHOOK_SECRET`이 같은 값이라 인증도 통과(해시로만 비교).
+- OpenAI 웹훅 주소를 `https://13-209-59-180.sslip.io/api/webhooks/openai/call-incoming`으로.
+  - `https://13.209.59.180/...`(IP 주소 URL)로는 테스트 전송이 "Failed to POST to webhook endpoint"였고, 서버 443에 TCP 연결(SYN)조차 오지 않았다(tcpdump, 테스트 3번).
+  - 같은 서버를 이름(sslip.io: 이름에 적은 IP를 돌려주는 공개 DNS)으로 바꾸자 바로 `9.129.x.x`에서 연결이 왔다. OpenAI가 IP 주소 URL로는 보내지 않는 것으로 본다(공식 문서에서는 못 찾음).
+  - Let's Encrypt 인증서 `dva-sslip`(webroot, 기존 갱신 타이머·nginx reload 훅 그대로) 발급. 이 이름의 443 블록은 전화 수신 웹훅만 열고 나머지는 404.
+
+### 확인한 것
+- 백엔드 → AI: 백엔드 컨테이너에서 `ai`가 새 컨테이너 IP 하나로만 풀리고 `/health` 200.
+- 실제 통화 2번: 수신 웹훅 200 → accept 200 → 통화 → 고객이 끊음 → PBX 종료 웹훅(mirror) 200 → 약 2.5초 뒤 sideband 종료로 `ended`(`remote_hangup`). 남는 세션 없음.
+  - PBX `callFrom`으로 통화를 찾았다(`pbx_ended` 기록됨). 발신번호 형식은 맞다.
+  - 종료 웹훅 뒤의 `hangup`은 이미 닫힌 세션이라 404. 동작에는 문제없고 모니터에 오류로만 남는다.
+- 테스트 전송 이벤트(`live_u0_abc123`)는 서명 검증까지 통과하고 accept만 503(없는 세션).
+
+### 남은 것
+- 백엔드에 `POST /internal/ai/callers/context`가 없어 404("고객 조회 실패"). 통화는 최근 주문·배송지 없이 진행된다. 주문 저장 등 다른 백엔드 API도 같은지 백엔드 담당과 확인.
+- 호스트 Nginx 변경(AI 웹훅 경로, mirror, sslip.io 블록)을 백엔드 저장소 `infra/https/https.conf`에도 반영. 안 하면 그 파일로 다시 설치할 때 사라진다.
+- `hangup_now`에서 404를 "이미 끝남"으로 처리해 오류로 남기지 않기.
+- Jenkins credential `dva-ai`의 `.env`가 CRLF. compose는 읽지만 셸에서 `source`하면 값 끝에 `\r`이 붙는다. LF로 다시 올리기.
+- sslip.io는 외부 무료 서비스(보장 없음). 오래 쓸 거면 정식 도메인으로.
+- PBX 종료 웹훅 토큰을 바꿀 때는 백엔드와 AI 값을 함께 바꾸기(다르면 AI 쪽 mirror만 조용히 401).
