@@ -389,6 +389,49 @@ test('production pin APIs preserve admin-only company writes and accept stale ve
   }
 });
 
+test('production order address history reads stored snapshots through Nginx and keeps customer scope', async () => {
+  const root = 'http://proxy/api';
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = { Cookie: login.headers.get('set-cookie').split(';')[0] };
+  const orders = await fetch(root + '/orders?status=ACCEPTED&limit=1', { headers });
+  const order = (await orders.json()).data[0];
+  assert.ok(order?.customerSeq);
+  const history = await fetch(
+    root + `/customers/${order.customerSeq}/addresses?direction=DESTINATION&limit=1`,
+    { headers },
+  );
+  assert.equal(history.status, 200);
+  assert.equal(history.headers.get('cache-control'), 'no-store');
+  const body = await history.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.equal(body.data[0].orderSeq, order.orderSeq);
+  const detail = await fetch(root + '/orders/' + order.orderSeq, { headers });
+  const parcel = (await detail.json()).data.parcels.find(
+    (p) => p.orderParcelSeq === body.data[0].orderParcelSeq,
+  );
+  assert.deepEqual(body.data[0].address, parcel.destination);
+  const missing = await fetch(
+    root + `/customers/${order.customerSeq}/addresses?direction=DESTINATION`,
+  );
+  assert.equal(missing.status, 400);
+  const unknown = await fetch(
+    root + `/customers/${order.customerSeq}/addresses?direction=DESTINATION`,
+    {
+      headers: { call_session_seq: '2147483647' },
+    },
+  );
+  assert.equal(unknown.status, 404);
+  const invalid = await fetch(root + `/customers/${order.customerSeq}/addresses?direction=BOTH`, {
+    headers,
+  });
+  assert.equal(invalid.status, 400);
+});
+
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
