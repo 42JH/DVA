@@ -72,6 +72,7 @@ BEGIN
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_pin_scope=%L WHERE order_parcel_seq=%s','PERSONAL',parcel_id),'23514');
  PERFORM pg_temp.expect_error(format('UPDATE orders SET status=%L WHERE order_seq=%s','ACCEPTED',order_id),'23514');
  UPDATE orders SET status='SUBMITTING' WHERE order_seq=order_id;
+ IF (SELECT version FROM orders WHERE order_seq=order_id)<>3 THEN RAISE EXCEPTION 'Submission changed content version'; END IF;
  UPDATE orders SET status='ACCEPTED',parcel_no='TEST0001',dver_received_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_name=%L WHERE order_parcel_seq=%s','Changed',parcel_id),'23514');
 

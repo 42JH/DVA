@@ -243,12 +243,13 @@ export class CreateOrderDto {
   customer?: OrderCustomerDto;
 
   @ApiPropertyOptional({
-    enum: ['cat', 'billing', 'credit', 'groupBilling'],
-    description: '결제 방식. 생략 시 credit. 최종 접수 전 결제 자격을 다시 확인해야 합니다.',
+    enum: ['billing', 'credit', 'groupBilling'],
+    description:
+      'credit: 정산(기업·개인 공통 기본값), groupBilling: 그룹카드(기업), billing: 개인카드(개인). 자격은 최종 접수 시 검증합니다.',
   })
   @ValidateIf(present)
-  @IsIn(['cat', 'billing', 'credit', 'groupBilling'])
-  paymentMethodType?: 'cat' | 'billing' | 'credit' | 'groupBilling';
+  @IsIn(['billing', 'credit', 'groupBilling'])
+  paymentMethodType?: 'billing' | 'credit' | 'groupBilling';
 
   @ApiPropertyOptional({
     description: '수거 요청 시각. Z 또는 시간대 오프셋 필수. 미입력 시 null.',

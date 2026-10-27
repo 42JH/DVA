@@ -32,7 +32,7 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      '결제 방식. cat: 방문, billing: 개인 카드, credit: 월정산, groupBilling: 그룹 카드.',
+      'credit: 공통 정산, groupBilling: 기업 그룹카드, billing: 개인카드. cat은 과거 저장값으로 조회만 가능하며 신규 입력·접수는 불가.',
     enum: ['cat', 'billing', 'credit', 'groupBilling'],
   })
   paymentMethodType!: 'cat' | 'billing' | 'credit' | 'groupBilling';
@@ -192,7 +192,8 @@ export class OrderDetailDto extends OmitType(OrderSummaryDto, [
   'shipmentStatuses',
 ] as const) {
   @ApiProperty({
-    description: 'DB의 현재 주문 버전. ORD-04의 expectedVersion으로 사용합니다.',
+    description:
+      'DB의 현재 주문 버전. ORD-04 수정·ORD-06 최종 접수의 expectedVersion으로 사용합니다.',
     minimum: 1,
   })
   version!: number;

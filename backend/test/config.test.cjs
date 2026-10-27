@@ -62,3 +62,31 @@ test('the actual process exits before listening when a required setting is missi
   assert.match(result.stdout + result.stderr, /Invalid environment variables: DB_PASSWORD/);
   assert.ok(!(result.stdout + result.stderr).includes(valid.DB_PASSWORD));
 });
+
+test('Dver requires HTTPS, rejects credential-bearing URLs and accepts empty keys as disabled', () => {
+  const disabled = validateEnvironment(valid);
+  assert.equal(disabled.DVER_API_URL, 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel');
+  assert.equal(disabled.DVER_API_KEY, undefined);
+  assert.equal(validateEnvironment({ ...valid, DVER_API_KEY: '' }).DVER_API_KEY, undefined);
+  assert.equal(
+    validateEnvironment({ ...valid, DVER_API_URL: 'http://127.0.0.1:1234/parcel' }).DVER_API_URL,
+    'http://127.0.0.1:1234/parcel',
+  );
+  for (const invalid of [
+    { DVER_API_URL: '' },
+    { DVER_API_URL: 'http://provider.invalid/parcel' },
+    { DVER_API_URL: 'https://user:secret@provider.invalid/parcel' },
+    { DVER_API_URL: 'https://provider.invalid/parcel?key=secret' },
+    { DVER_API_URL: 'https://provider.invalid/parcel#fragment' },
+    { NODE_ENV: 'production', DVER_API_URL: 'http://127.0.0.1:1234/parcel' },
+    { DVER_API_KEY: 'key\r\nInjected: value' },
+    { DVER_API_KEY: ' key ' },
+    { DVER_API_KEY: 123 },
+  ])
+    assert.throws(
+      () => validateEnvironment({ ...valid, ...invalid }),
+      (error) =>
+        /^Invalid environment variables: DVER_/.test(error.message) &&
+        !error.message.includes('secret'),
+    );
+});

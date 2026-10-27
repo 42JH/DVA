@@ -6,6 +6,9 @@ const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
+const { ConfigService } = require('@nestjs/config');
+const { createServer } = require('node:http');
+const { OrderSubmissionRepository } = require('../dist/orders/order-submission.repository');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -38,6 +41,9 @@ let customerId,
   personalPin,
   companyPin,
   otherPin;
+let dverServer, dverUrl, dverRespond, submissionRepository;
+let dverRequests = [];
+const dverSuccess = { ok: true, parcelNo: 'TEST0057', receivedAt: '2026-10-27T10:00:00+09:00' };
 const address = {
   name: '검증 고객',
   phoneNumber: '01000000001',
@@ -139,10 +145,25 @@ before(async () => {
       [organizationId, address],
     )
   ).rows[0].company_pin_seq;
+  dverServer = createServer(async (req, res) => {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    dverRequests.push({ headers: req.headers, body: JSON.parse(body) });
+    dverRespond(req, res);
+  });
+  await new Promise((resolve) => dverServer.listen(0, '127.0.0.1', resolve));
+  dverUrl = `http://127.0.0.1:${dverServer.address().port}/parcel`;
+  for (const app of apps) {
+    app.get(ConfigService).set('DVER_API_URL', dverUrl);
+    app.get(ConfigService).set('DVER_API_KEY', 'test-only-dver-key');
+  }
+  submissionRepository = apps[0].get(OrderSubmissionRepository);
 });
 after(async () => {
   for (const app of apps) await app.close();
   await pool.end();
+  dverServer?.closeAllConnections();
+  if (dverServer) await new Promise((resolve) => dverServer.close(resolve));
 });
 
 const create = (body = { customerSeq: customerId }, key = randomUUID(), index = 0, extra = {}) =>
@@ -269,7 +290,7 @@ test('call replay returns the first response after termination; a new key cannot
   assert.equal(replay.status, 201);
   assert.deepEqual((await replay.json()).data, data);
   await errorCode(await aiCreate(callId, body), 409, 'INVALID_STATE');
-  const unchanged = await aiCreate(callId, { ...body, paymentMethodType: 'cat' }, key);
+  const unchanged = await aiCreate(callId, { ...body, paymentMethodType: 'billing' }, key);
   assert.equal(unchanged.status, 201);
   assert.deepEqual((await unchanged.json()).data, data);
   assert.equal(
@@ -389,7 +410,7 @@ test('all active administrator roles create COLLECTING orders with defaults and 
 test('partial parcel snapshots retain field mapping, defaults and the actual trigger-updated version', async () => {
   const response = await create({
     customerSeq: customerId,
-    paymentMethodType: 'cat',
+    paymentMethodType: 'billing',
     pickupRequestedAt: '2026-10-28T10:00:00+09:00',
     parcels: [
       {
@@ -867,7 +888,7 @@ test('a fully populated new-customer order remains COLLECTING until a separate f
   const response = await create({
     customer: { name: '정보 완성 고객', phoneNumber: '01000550020' },
     pickupRequestedAt: '2026-10-28T10:00:00+09:00',
-    paymentMethodType: 'cat',
+    paymentMethodType: 'billing',
     parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
   });
   assert.equal(response.status, 201);
@@ -1407,7 +1428,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
     id,
     {
       expectedVersion: before.version,
-      paymentMethodType: 'cat',
+      paymentMethodType: 'billing',
       pickupRequestedAt: '2026-10-28T10:00:00+09:00',
       parcels: [
         {
@@ -1430,7 +1451,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
     after = await storedOrder(id);
   assert.deepEqual(result, { data: { version: after.version }, meta: { requestId } });
   assert.ok(after.version > before.version);
-  assert.equal(after.paymentMethodType, 'cat');
+  assert.equal(after.paymentMethodType, 'billing');
   assert.equal(Date.parse(after.pickupRequestedAt), Date.parse('2026-10-28T01:00:00Z'));
   assert.deepEqual(after.parcels[0], {
     ...before.parcels[0],
@@ -1553,7 +1574,7 @@ test('ORD-04 rejects foreign or missing details and malformed requests without p
     await errorCode(
       await patchOrder(id, {
         expectedVersion: before.version,
-        paymentMethodType: 'cat',
+        paymentMethodType: 'billing',
         parcels: [{ smallBoxCount: 3 }, { orderParcelSeq: parcelId, smallBoxCount: 4 }],
       }),
       404,
@@ -1577,13 +1598,13 @@ test('ORD-04 rejects foreign or missing details and malformed requests without p
   ])
     await errorCode(await patchOrder(id, input), 400, 'INVALID_REQUEST');
   await errorCode(
-    await patchOrder(2147483647, { expectedVersion: 1, paymentMethodType: 'cat' }),
+    await patchOrder(2147483647, { expectedVersion: 1, paymentMethodType: 'billing' }),
     404,
     'NOT_FOUND',
   );
   for (const invalidId of ['abc', '0', '2147483648'])
     await errorCode(
-      await patchOrder(invalidId, { expectedVersion: 1, paymentMethodType: 'cat' }),
+      await patchOrder(invalidId, { expectedVersion: 1, paymentMethodType: 'billing' }),
       400,
       'INVALID_REQUEST',
     );
@@ -1624,7 +1645,7 @@ test('ORD-04 rolls back header, details, call binding and success audit on stora
   const audit = apps[0].get(AuditService);
   const input = {
     expectedVersion: before.version,
-    paymentMethodType: 'cat',
+    paymentMethodType: 'billing',
     parcels: [
       { orderParcelSeq: before.parcels[0].orderParcelSeq, smallBoxCount: 2 },
       { smallBoxCount: 3 },
@@ -1767,7 +1788,7 @@ test('ORD-04 AI continues an explicitly selected customer order and cannot repla
   await errorCode(
     await patchOrder(
       another,
-      { expectedVersion: other.version, paymentMethodType: 'cat' },
+      { expectedVersion: other.version, paymentMethodType: 'billing' },
       aiReadHeaders(callId),
     ),
     409,
@@ -1778,7 +1799,7 @@ test('ORD-04 AI continues an explicitly selected customer order and cannot repla
   await errorCode(
     await patchOrder(
       id,
-      { expectedVersion: before.version, paymentMethodType: 'cat' },
+      { expectedVersion: before.version, paymentMethodType: 'billing' },
       aiReadHeaders(staleCall),
     ),
     409,
@@ -1843,7 +1864,7 @@ test('ORD-04 AI may finish a previously linked order after call end but cannot b
   await errorCode(
     await patchOrder(
       id,
-      { expectedVersion: before.version, paymentMethodType: 'cat' },
+      { expectedVersion: before.version, paymentMethodType: 'billing' },
       aiReadHeaders(unbound),
     ),
     409,
@@ -1856,7 +1877,7 @@ test('ORD-04 rejects AI calls without matching active customers, a valid call or
   const { customer, phone } = await readCustomer();
   const id = await readOrder(customer),
     before = await storedOrder(id);
-  const input = { expectedVersion: before.version, paymentMethodType: 'cat' };
+  const input = { expectedVersion: before.version, paymentMethodType: 'billing' };
   for (const callId of [await call(), await call('01000000003')])
     await errorCode(await patchOrder(id, input, aiReadHeaders(callId)), 403, 'FORBIDDEN');
   for (const header of [undefined, 'abc', '0', '2147483648'])
@@ -1890,7 +1911,7 @@ test('ORD-04 all active administrator roles save without a call, inactive sessio
       (
         await patchOrder(
           id,
-          { expectedVersion: before.version, paymentMethodType: 'cat' },
+          { expectedVersion: before.version, paymentMethodType: 'billing' },
           {},
           index,
         )
@@ -1902,7 +1923,7 @@ test('ORD-04 all active administrator roles save without a call, inactive sessio
   await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [adminId]);
   try {
     await errorCode(
-      await patchOrder(id, { expectedVersion: before.version, paymentMethodType: 'cat' }),
+      await patchOrder(id, { expectedVersion: before.version, paymentMethodType: 'billing' }),
       401,
       'UNAUTHORIZED',
     );
@@ -1970,7 +1991,7 @@ test('order APIs use the literal DB column header and reject former or hyphenate
     await errorCode(await readDetail(id, headers), 400, 'INVALID_REQUEST');
     const response = await patchOrder(
       id,
-      { expectedVersion: before.version, paymentMethodType: 'cat' },
+      { expectedVersion: before.version, paymentMethodType: 'billing' },
       headers,
     );
     assert.equal(response.status, 400);
@@ -1999,4 +2020,580 @@ test('order APIs use the literal DB column header and reject former or hyphenate
     assert.equal(headers[0].name, 'call_session_seq');
     assert.ok(headers[0].description.includes('call_sessions.call_session_seq'));
   }
+});
+
+const readyOrder = async (changes = {}) => {
+  const response = await create({
+    customerSeq: otherId,
+    pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+    parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+    ...changes,
+  });
+  assert.equal(response.status, 201);
+  return (await response.json()).data;
+};
+const submitOrder = (order, extra = {}, index = 0, body = { expectedVersion: order.version }) =>
+  fetch(hosts[index] + `/api/orders/${order.orderSeq}/submit`, {
+    method: 'POST',
+    headers: Object.fromEntries(
+      Object.entries({
+        Origin: origin,
+        Cookie: cookies[index],
+        'Content-Type': 'application/json',
+        ...extra,
+      }).filter(([, value]) => value !== undefined),
+    ),
+    body: JSON.stringify(body),
+  });
+const resetDver = () => {
+  dverRequests = [];
+  dverRespond = (_req, res) => res.end(JSON.stringify(dverSuccess));
+};
+const submissionRows = async (id) =>
+  (
+    await pool.query(
+      `SELECT
+  (SELECT status FROM orders WHERE order_seq=$1) AS status,
+  (SELECT count(*)::int FROM shipments s JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1) AS shipments,
+  (SELECT count(*)::int FROM shipment_status_history h JOIN shipments s USING(shipment_seq) JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1) AS history,
+  (SELECT count(*)::int FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 AND action='ORDER_SUBMISSION_ACCEPTED' AND result='SUCCESS') AS "acceptedAudit"`,
+      [id],
+    )
+  ).rows[0];
+
+test('ORD-06 submits the existing order and atomically creates each shipment and initial history', async () => {
+  resetDver();
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name LIKE 'submission_%'",
+      )
+    ).rowCount,
+    0,
+  );
+  const order = await readyOrder({
+    parcels: [
+      { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 },
+      { origin: address, destination: address, otherItemDescription: '기타', itemPrice: 3000 },
+    ],
+  });
+  const requestId = randomUUID(),
+    before = await counts();
+  const response = await submitOrder(order, { 'X-Request-Id': requestId });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { data: { status: 'ACCEPTED' }, meta: { requestId } });
+  assert.equal(dverRequests.length, 1);
+  assert.equal(dverRequests[0].headers['x-api-key'], 'test-only-dver-key');
+  assert.equal(dverRequests[0].body.outboundParcels.length, 2);
+  assert.equal(dverRequests[0].body.paymentMethodType, 'credit');
+  assert.ok(dverRequests[0].body.outboundParcels.every((p) => p.notifiedPrice === 3500));
+  assert.equal((await counts()).orders, before.orders);
+  assert.deepEqual(await submissionRows(order.orderSeq), {
+    status: 'ACCEPTED',
+    shipments: 2,
+    history: 2,
+    acceptedAudit: 1,
+  });
+  const detail = await storedOrder(order.orderSeq);
+  assert.equal(detail.parcelNo, dverSuccess.parcelNo);
+  assert.equal(Date.parse(detail.dverReceivedAt), Date.parse(dverSuccess.receivedAt));
+  assert.equal(new Set(detail.parcels.map((p) => p.shipment.trackingNumber)).size, 2);
+  for (const parcel of detail.parcels) {
+    assert.equal(parcel.shipment.status, 'notPaid');
+    assert.equal(parcel.shipment.version, 1);
+    assert.match(parcel.shipment.trackingNumber, /^DVA-[0-9a-f-]{36}$/);
+  }
+  await pool.query('UPDATE orders SET version=version+1 WHERE order_seq=$1', [order.orderSeq]);
+  const retry = await submitOrder(order, {}, 1);
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).data.status, 'ACCEPTED');
+  assert.equal(dverRequests.length, 1);
+  assert.equal((await submissionRows(order.orderSeq)).history, 2);
+  assert.equal((await submitOrder(order)).status, 200);
+});
+
+test('ORD-06 payment eligibility uses active enterprise membership and allows credit for both kinds', async () => {
+  resetDver();
+  const { customer: personalCustomer } = await readCustomer();
+  for (const [customerSeq, paymentMethodType, expected] of [
+    [customerId, 'credit', 200],
+    [personalCustomer, 'credit', 200],
+    [customerId, 'groupBilling', 200],
+    [personalCustomer, 'billing', 200],
+    [customerId, 'billing', 403],
+    [personalCustomer, 'groupBilling', 403],
+  ]) {
+    const order = await readyOrder({ customerSeq, paymentMethodType }),
+      before = dverRequests.length;
+    const response = await submitOrder(order);
+    assert.equal(response.status, expected, `${customerSeq} ${paymentMethodType}`);
+    if (expected === 200)
+      assert.equal(dverRequests.at(-1).body.paymentMethodType, paymentMethodType);
+    else {
+      assert.equal((await response.json()).error.code, 'FORBIDDEN');
+      assert.equal(dverRequests.length, before);
+      assert.equal((await submissionRows(order.orderSeq)).status, 'COLLECTING');
+    }
+  }
+  for (const [table, column, id] of [
+    ['memberships', 'customer_seq', customerId],
+    ['organizations', 'organization_seq', organizationId],
+  ]) {
+    const order = await readyOrder({ customerSeq: customerId, paymentMethodType: 'groupBilling' }),
+      before = dverRequests.length;
+    await pool.query(`UPDATE ${table} SET status='INACTIVE' WHERE ${column}=$1`, [id]);
+    try {
+      await errorCode(await submitOrder(order), 403, 'FORBIDDEN');
+    } finally {
+      await pool.query(`UPDATE ${table} SET status='ACTIVE' WHERE ${column}=$1`, [id]);
+    }
+    assert.equal(dverRequests.length, before);
+  }
+});
+
+test('ORD-06 checks saved completeness, legacy cat, active customer and PIN; validation failures preserve the collecting order', async () => {
+  resetDver();
+  const partial = await readyOrder({ pickupRequestedAt: null, parcels: [{}] });
+  const response = await submitOrder(partial);
+  assert.equal(response.status, 422);
+  const failure = (await response.json()).error;
+  assert.equal(failure.code, 'VALIDATION_FAILED');
+  assert.ok(failure.details.some((x) => x.field === 'parcels.0.origin.name'));
+  assert.equal((await submissionRows(partial.orderSeq)).status, 'COLLECTING');
+  const legacy = await readyOrder();
+  await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [
+    legacy.orderSeq,
+  ]);
+  legacy.version = (await storedOrder(legacy.orderSeq)).version;
+  await errorCode(await submitOrder(legacy), 422, 'VALIDATION_FAILED');
+  await errorCode(
+    await submitOrder(
+      await readyOrder({ pickupRequestedAt: new Date(Date.now() - 1000).toISOString() }),
+    ),
+    422,
+    'VALIDATION_FAILED',
+  );
+  const withdrawn = await readyOrder();
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [otherId]);
+  try {
+    await errorCode(await submitOrder(withdrawn), 403, 'FORBIDDEN');
+  } finally {
+    await pool.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=$1", [otherId]);
+  }
+  const pin = await readyOrder({
+    customerSeq: customerId,
+    parcels: [
+      {
+        origin: address,
+        destination: address,
+        smallBoxCount: 1,
+        itemPrice: 0,
+        originPin: { scope: 'COMPANY', pinSeq: companyPin },
+      },
+    ],
+  });
+  await pool.query("UPDATE memberships SET status='INACTIVE' WHERE customer_seq=$1", [customerId]);
+  try {
+    await errorCode(await submitOrder(pin), 403, 'FORBIDDEN');
+  } finally {
+    await pool.query("UPDATE memberships SET status='ACTIVE' WHERE customer_seq=$1", [customerId]);
+  }
+  assert.equal(dverRequests.length, 0);
+  const patched = await patchOrder(partial.orderSeq, {
+    expectedVersion: partial.version,
+    pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+    parcels: [
+      {
+        orderParcelSeq: (await storedOrder(partial.orderSeq)).parcels[0].orderParcelSeq,
+        origin: address,
+        destination: address,
+        smallBoxCount: 1,
+        itemPrice: 0,
+      },
+    ],
+  });
+  assert.equal(patched.status, 200);
+  partial.version = (await patched.json()).data.version;
+  assert.equal((await submitOrder(partial)).status, 200);
+});
+
+test('ORD-06 rejects invalid path/body and keeps session and Origin checks', async () => {
+  resetDver();
+  const order = await readyOrder();
+  for (const body of [
+    {},
+    { expectedVersion: '1' },
+    { expectedVersion: 0 },
+    { expectedVersion: 1.5 },
+    { expectedVersion: 2147483648 },
+    { expectedVersion: order.version, confirmed: true },
+    { expectedVersion: order.version, parcels: [] },
+  ])
+    await errorCode(await submitOrder(order, {}, 0, body), 400, 'INVALID_REQUEST');
+  await errorCode(await submitOrder({ ...order, orderSeq: 0 }), 400, 'INVALID_REQUEST');
+  await errorCode(await submitOrder({ ...order, orderSeq: 2147483647 }), 404, 'NOT_FOUND');
+  await errorCode(
+    await submitOrder({ ...order, version: order.version + 1 }),
+    409,
+    'VERSION_CONFLICT',
+  );
+  await errorCode(
+    await submitOrder(order, { Origin: 'https://untrusted.invalid' }),
+    403,
+    'FORBIDDEN',
+  );
+  await errorCode(await submitOrder(order, { Cookie: 'dva_session=broken' }), 401, 'UNAUTHORIZED');
+  await errorCode(
+    await submitOrder(order, { Cookie: undefined, Origin: undefined }),
+    400,
+    'INVALID_REQUEST',
+  );
+  assert.equal(dverRequests.length, 0);
+});
+
+test('ORD-06 AI requires matching phone and active call; an ended call can replay its bound order', async () => {
+  resetDver();
+  const { customer, phone } = await readCustomer();
+  const order = await readyOrder({ customerSeq: customer });
+  for (const callId of [await call(), await call('01099990000')])
+    await errorCode(await submitOrder(order, aiReadHeaders(callId)), 403, 'FORBIDDEN');
+  const ended = await call(phone, true);
+  await pool.query('UPDATE call_sessions SET order_seq=$2 WHERE call_session_seq=$1', [
+    ended,
+    order.orderSeq,
+  ]);
+  await errorCode(await submitOrder(order, aiReadHeaders(ended)), 409, 'INVALID_STATE');
+  const callId = await call(phone);
+  assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 200);
+  assert.equal(
+    (await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [callId]))
+      .rows[0].order_seq,
+    order.orderSeq,
+  );
+  await pool.query(
+    'UPDATE call_sessions SET started_at=now(),ended_at=now() WHERE call_session_seq=$1',
+    [callId],
+  );
+  assert.equal((await submitOrder(order, aiReadHeaders(callId), 1)).status, 200);
+  assert.equal(dverRequests.length, 1);
+  assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 200);
+  const unboundEnded = await call(phone, true);
+  await errorCode(await submitOrder(order, aiReadHeaders(unboundEnded)), 409, 'INVALID_STATE');
+  await errorCode(
+    await submitOrder(order, aiReadHeaders(await call('01099990000'))),
+    403,
+    'FORBIDDEN',
+  );
+});
+
+test('ORD-06 uses the order identity, ignores obsolete keys and rejects cancelled or expired orders', async () => {
+  resetDver();
+  const first = await readyOrder(),
+    second = await readyOrder();
+  const headers = { 'Idempotency-Key': randomUUID() };
+  assert.equal((await submitOrder(first, headers)).status, 200);
+  assert.equal((await submitOrder(second, headers)).status, 200);
+  const replay = await submitOrder({ ...first, version: first.version + 1 });
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).data.status, 'ACCEPTED');
+  for (const status of ['CANCELLED', 'EXPIRED']) {
+    const order = await readyOrder();
+    await pool.query('UPDATE orders SET status=$2 WHERE order_seq=$1', [order.orderSeq, status]);
+    await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+  }
+  assert.equal(dverRequests.length, 2);
+});
+
+test('ORD-06 commits SUBMITTING and releases locks before HTTP; concurrent retries only return status', async () => {
+  resetDver();
+  const order = await readyOrder();
+  let release, received;
+  const arrived = new Promise((resolve) => {
+    received = resolve;
+  });
+  dverRespond = (_req, res) => {
+    release = () => res.end(JSON.stringify(dverSuccess));
+    received();
+  };
+  const first = submitOrder(order);
+  try {
+    await Promise.race([
+      arrived,
+      first.then((response) => {
+        throw Error(`Request ended before external call: ${response.status}`);
+      }),
+    ]);
+    const locked = await pool.connect();
+    try {
+      await locked.query('BEGIN');
+      const row = (
+        await locked.query(
+          'SELECT status,version FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',
+          [order.orderSeq],
+        )
+      ).rows[0];
+      assert.equal(row.status, 'SUBMITTING');
+      assert.equal(row.version, order.version);
+      await locked.query('ROLLBACK');
+    } finally {
+      locked.release();
+    }
+    const retry = await submitOrder(order, {}, 1);
+    assert.equal(retry.status, 202);
+    assert.equal(retry.headers.get('location'), `/api/orders/${order.orderSeq}`);
+    assert.equal((await retry.json()).data.status, 'SUBMITTING');
+    assert.equal((await submitOrder(order, {}, 2)).status, 202);
+    await errorCode(
+      await patchOrder(order.orderSeq, {
+        expectedVersion: order.version,
+        paymentMethodType: 'credit',
+      }),
+      409,
+      'INVALID_STATE',
+    );
+    assert.equal(dverRequests.length, 1);
+  } finally {
+    release?.();
+    await first;
+  }
+  assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
+});
+
+test('ORD-06 serializes concurrent preparation on the existing order row', async () => {
+  resetDver();
+  const order = await readyOrder();
+  const originalStart = submissionRepository.start;
+  const secondRepository = apps[1].get(OrdersRepository);
+  const originalLock = secondRepository.lockOrder;
+  let release, entered, attempted;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const preparing = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const competing = new Promise((resolve) => {
+    attempted = resolve;
+  });
+  submissionRepository.start = async function (...args) {
+    await originalStart.apply(this, args);
+    entered();
+    await gate;
+  };
+  secondRepository.lockOrder = function (...args) {
+    const result = originalLock.apply(this, args);
+    attempted();
+    return result;
+  };
+  const first = submitOrder(order);
+  let second;
+  try {
+    await Promise.race([
+      preparing,
+      first.then((r) => {
+        throw Error(`Preparation failed: ${r.status}`);
+      }),
+    ]);
+    second = submitOrder(order, {}, 1);
+    await Promise.race([
+      competing,
+      second.then((r) => {
+        throw Error(`Competing request failed: ${r.status}`);
+      }),
+    ]);
+    assert.equal(dverRequests.length, 0);
+  } finally {
+    release();
+    submissionRepository.start = originalStart;
+    secondRepository.lockOrder = originalLock;
+  }
+  assert.equal((await first).status, 200);
+  const replay = await second;
+  assert.ok([200, 202].includes(replay.status));
+  assert.ok(['ACCEPTED', 'SUBMITTING'].includes((await replay.json()).data.status));
+  assert.equal((await submitOrder(order, {}, 2)).status, 200);
+  assert.equal(dverRequests.length, 1);
+});
+
+test('ORD-06 records auth failures and unknown outcomes without shipments or a second external request', async () => {
+  for (const mode of ['auth', 'error', 'invalid', 'disconnect']) {
+    resetDver();
+    const order = await readyOrder();
+    dverRespond = (req, res) => {
+      if (mode === 'disconnect') return req.socket.destroy();
+      res.statusCode = mode === 'auth' ? 403 : mode === 'error' ? 500 : 200;
+      res.end(mode === 'auth' ? 'Authorization data is wrong!' : '{}');
+    };
+    const response = await submitOrder(order);
+    assert.equal(response.status, 200);
+    const status = mode === 'auth' ? 'AUTH_FAILED' : 'REVIEW_REQUIRED';
+    assert.equal((await response.json()).data.status, status);
+    assert.deepEqual(await submissionRows(order.orderSeq), {
+      status,
+      shipments: 0,
+      history: 0,
+      acceptedAudit: 0,
+    });
+    assert.equal((await submitOrder(order, {}, 1)).status, 200);
+    assert.equal((await submitOrder(order)).status, 200);
+    assert.equal(dverRequests.length, 1);
+  }
+});
+
+test('ORD-06 disabled configuration and prepare audit failure preserve the collecting order and unbound call', async () => {
+  resetDver();
+  const { customer, phone } = await readCustomer();
+  const order = await readyOrder({ customerSeq: customer }),
+    callId = await call(phone);
+  const config = apps[0].get(ConfigService),
+    audit = apps[0].get(AuditService);
+  config.set('DVER_API_KEY', '');
+  try {
+    await errorCode(await submitOrder(order), 503, 'DEPENDENCY_UNAVAILABLE');
+  } finally {
+    config.set('DVER_API_KEY', 'test-only-dver-key');
+  }
+  const original = audit.recordSuccess;
+  audit.recordSuccess = async function (...args) {
+    await original.apply(this, args);
+    if (args[0].action === 'ORDER_SUBMISSION_STARTED') throw Error('submit-prepare-rollback');
+  };
+  try {
+    assert.equal((await submitOrder(order, aiReadHeaders(callId))).status, 500);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.deepEqual(await submissionRows(order.orderSeq), {
+    status: 'COLLECTING',
+    shipments: 0,
+    history: 0,
+    acceptedAudit: 0,
+  });
+  assert.equal(
+    (await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [callId]))
+      .rows[0].order_seq,
+    null,
+  );
+  assert.equal(dverRequests.length, 0);
+});
+
+test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITTING becomes review without resending', async () => {
+  for (const failure of ['shipment', 'audit']) {
+    resetDver();
+    const order = await readyOrder();
+    const owner = failure === 'shipment' ? submissionRepository : apps[0].get(AuditService);
+    const method = failure === 'shipment' ? 'finish' : 'recordSuccess',
+      original = owner[method];
+    owner[method] = async function (...args) {
+      await original.apply(this, args);
+      if (failure === 'shipment' || args[0].action === 'ORDER_SUBMISSION_ACCEPTED')
+        throw Error('submit-finalize-rollback');
+    };
+    try {
+      const response = await submitOrder(order);
+      assert.equal(response.status, 202);
+      assert.equal((await response.json()).data.status, 'SUBMITTING');
+    } finally {
+      owner[method] = original;
+    }
+    assert.deepEqual(await submissionRows(order.orderSeq), {
+      status: 'SUBMITTING',
+      shipments: 0,
+      history: 0,
+      acceptedAudit: 0,
+    });
+    assert.equal((await submitOrder(order, {}, 1)).status, 202);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      // Set an old timestamp only in the disposable fixture; restore the trigger before commit.
+      await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
+      await client.query(
+        "UPDATE orders SET updated_at=now()-interval '2 minutes' WHERE order_seq=$1",
+        [order.orderSeq],
+      );
+      await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const recovery = await submitOrder(order, {}, 1);
+    assert.equal(recovery.status, 200);
+    assert.equal((await recovery.json()).data.status, 'REVIEW_REQUIRED');
+    assert.equal((await submitOrder(order)).status, 200);
+    assert.equal(dverRequests.length, 1);
+  }
+});
+
+test('ORD-06 stored submission state survives a new application instance without a request key', async () => {
+  resetDver();
+  const order = await readyOrder();
+  assert.equal((await submitOrder(order)).status, 200);
+  const app = await NestFactory.create(AppModule, { logger: false });
+  apps.push(app);
+  configureApplication(app, { log: () => {} });
+  await app.listen(0, '127.0.0.1');
+  const response = await fetch((await app.getUrl()) + `/api/orders/${order.orderSeq}/submit`, {
+    method: 'POST',
+    headers: {
+      Origin: origin,
+      Cookie: cookies[0],
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ expectedVersion: order.version }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).data.status, 'ACCEPTED');
+  assert.equal(dverRequests.length, 1);
+});
+
+test('ORD-06 Swagger documents English tag, literal call header, version body, result envelope and errors', async () => {
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  const operation = spec.paths['/api/orders/{id}/submit'].post;
+  assert.deepEqual(operation.tags, ['Orders']);
+  assert.match(operation.summary, /ORD-06/);
+  assert.ok(operation.description.includes('groupBilling'));
+  const headers = operation.parameters.filter((p) => p.in === 'header');
+  assert.equal(headers.length, 1);
+  assert.equal(headers.find((p) => p.name === 'call_session_seq').schema.type, 'integer');
+  assert.equal(
+    headers.find((p) => p.name === 'Idempotency-Key'),
+    undefined,
+  );
+  assert.equal(
+    spec.paths['/api/orders'].post.parameters.find((p) => p.name === 'Idempotency-Key').required,
+    true,
+  );
+  assert.deepEqual(spec.components.schemas.SubmitOrderDto.required, ['expectedVersion']);
+  for (const status of [200, 202, 400, 401, 403, 404, 409, 422, 503])
+    assert.ok(operation.responses[status]?.description, status);
+  assert.ok(operation.responses[202].headers.Location);
+  assert.deepEqual(spec.components.schemas.CreateOrderDto.properties.paymentMethodType.enum, [
+    'billing',
+    'credit',
+    'groupBilling',
+  ]);
+});
+
+test('ORD-06 does not deadlock with a membership change and retries eligibility after it completes', async () => {
+  resetDver();
+  const order = await readyOrder({ customerSeq: customerId, paymentMethodType: 'groupBilling' });
+  const lock = await pool.connect();
+  try {
+    await lock.query('BEGIN');
+    await lock.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1 FOR UPDATE', [
+      customerId,
+    ]);
+    await errorCode(await submitOrder(order), 409, 'REQUEST_IN_PROGRESS');
+    assert.equal(dverRequests.length, 0);
+    assert.equal((await submissionRows(order.orderSeq)).status, 'COLLECTING');
+  } finally {
+    await lock.query('ROLLBACK');
+    lock.release();
+  }
+  assert.equal((await submitOrder(order)).status, 200);
+  assert.equal(dverRequests.length, 1);
 });

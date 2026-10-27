@@ -100,3 +100,16 @@ test('creation normalizes equivalent dates and rejects ISO strings JavaScript ca
       (error) => error.getStatus() === 400,
     );
 });
+
+test('legacy cat orders remain readable but cannot be submitted', () => {
+  const draft = complete();
+  draft.paymentMethodType = 'cat';
+  assert.throws(
+    () => assertOrderSubmissionReady(draft, now),
+    (error) =>
+      error.getStatus() === 422 &&
+      error
+        .getResponse()
+        .details.some((x) => x.field === 'paymentMethodType' && x.reason === 'unsupported'),
+  );
+});

@@ -8,12 +8,19 @@ const QUANTITY_FIELDS = [
 ] as const;
 
 // 생성 시에는 부분 입력을 허용한다. ORD-06에서 저장된 같은 주문을 검증할 때 사용한다.
-export function assertOrderSubmissionReady(snapshot: OrderDraft, now = Date.now()): void {
+export type OrderSubmissionSnapshot = Pick<OrderDraft, 'pickupRequestedAt' | 'parcels'> & {
+  paymentMethodType: string;
+};
+
+export function assertOrderSubmissionReady(
+  snapshot: OrderSubmissionSnapshot,
+  now = Date.now(),
+): void {
   const errors: ErrorDetail[] = [];
   const missing = (field: string) => errors.push({ field, reason: 'required' });
   const invalid = (field: string, reason: string) => errors.push({ field, reason });
   if (!snapshot.paymentMethodType?.trim()) missing('paymentMethodType');
-  else if (!['cat', 'billing', 'credit', 'groupBilling'].includes(snapshot.paymentMethodType))
+  else if (!['billing', 'credit', 'groupBilling'].includes(snapshot.paymentMethodType))
     invalid('paymentMethodType', 'unsupported');
   if (!snapshot.pickupRequestedAt?.trim()) missing('pickupRequestedAt');
   else if (!isZonedDate(snapshot.pickupRequestedAt)) invalid('pickupRequestedAt', 'zonedDateTime');

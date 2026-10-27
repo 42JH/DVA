@@ -30,7 +30,7 @@ call_session_seq: 7
 | 필드 | 의미 |
 | --- | --- |
 | expectedVersion | 필수. ORD-03 또는 직전 저장 응답의 실제 version |
-| paymentMethodType | cat / billing / credit / groupBilling. 생략하면 유지 |
+| paymentMethodType | credit(공통 정산) / groupBilling(기업 그룹카드) / billing(개인카드). 생략하면 유지. 자격은 [최종 접수](order-submit.md) 시 검증 |
 | pickupRequestedAt | 시간대를 포함한 ISO 8601. 생략하면 유지, null이면 비우기 |
 | parcels[].orderParcelSeq | 있으면 해당 주문의 기존 상세 수정, 없으면 마지막 순번 뒤에 추가 |
 | parcels[].origin / destination | 제공한 주소 하위 필드만 변경. 생략 유지, nullable 하위 필드의 null은 비우기 |

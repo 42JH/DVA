@@ -6,6 +6,7 @@
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
 55번 ORD-01 공통 주문 생성과 접수 전 검증은 [주문 API 계약](../docs/api/orders.md)을 참고한다. AI와 관리자는 같은 POST /api/orders를 사용하고, 미완료 주문도 orders·order_parcels에 COLLECTING으로 저장한다.
+57번 ORD-06은 [주문 최종 접수 계약](../docs/api/order-submit.md)을 따른다. 저장된 같은 주문을 검증해 디버에 전송하고 결과·배송·초기 이력을 함께 저장한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
@@ -43,6 +44,8 @@ npm run start:dev
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
+| `DVER_API_URL` | 기본 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용 |
+| `DVER_API_KEY` | 서버 전용 디버 키. 빈 값이면 신규 최종 접수만 503. 공백·제어문자 금지. Compose가 backend에 전달 |
 
 설정 검증 오류에는 변수 이름만 출력하고 값은 출력하지 않는다. 실제 `.env*`는 Git에서 제외하고 `.env.example`만 관리한다.
 관리자 인증은 PostgreSQL 서버 세션을 사용한다. JWT 비밀키는 필요하지 않으며 관리자 비밀번호를 환경 파일에 저장하지 않는다.
@@ -292,7 +295,7 @@ DB UNIQUE/FK/CHECK 위반은 SQLSTATE로 분류하고 SQL·테이블명·파라�
 ApiException에는 사용자에게 공개할 수 있는 메시지/상세만 전달한다.
 
 X-Request-Id가 유효한 UUID면 유지하고 없거나 잘못된 값이면 새 UUID를 만든다. 모든 응답 헤더에 반환하며
-API 단건/오류 meta에도 넣는다. 기업·고객 등록에는 Idempotency-Key를 요구하지 않는다. 기업명 중복은 허용하며 고객은 전화번호 UNIQUE로 중복을 거절한다. 주문만 Idempotency-Key를 orders.creation_request_id에 저장하고 재시도에는 기존 주문과 현재 version을 반환한다. version은 수정 충돌용이다. 외부 웹훅·배송 이력의 기존 중복 방지는 유지한다.
+API 단건/오류 meta에도 넣는다. 기업·고객 등록에는 Idempotency-Key를 요구하지 않는다. 기업명 중복은 허용하며 고객은 전화번호 UNIQUE로 중복을 거절한다. 주문 생성 키는 orders.creation_request_id에 저장하고 재시도에는 기존 주문과 현재 version을 반환한다. 최종 접수는 별도 키 없이 기존 주문 행 잠금·status로 중복 전송을 막으며 같은 주문 재호출은 상태만 반환한다. version은 수정 충돌과 최초 접수 확인용이다. 외부 웹훅·배송 이력의 기존 중복 방지는 유지한다.
 요청 로그에는 method·route template·상태·소요시간·requestId만 남기고 실제 경로 ID·query·headers·body는 기록하지 않는다.
 신규 API 응답은 no-store다. 인프라 로그 수집·모니터링 설정은 112번 작업 범위다.
 
