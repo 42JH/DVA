@@ -27,6 +27,8 @@ class CallConfig(_Strict):
     reject_status_code: int = Field(ge=300, le=699)
     hangup_silence_sec: float = Field(gt=0)
     hangup_max_wait_sec: float = Field(gt=0)
+    idle_hangup_sec: float = Field(gt=0)
+    max_call_sec: float = Field(gt=0)
     refer_target_uri: str = Field(pattern=r"^sips?:")
     webhook_dedupe_sec: int = Field(ge=60)
     tool_timeout_sec: float = Field(gt=0)

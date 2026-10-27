@@ -401,3 +401,16 @@ def test_progress_text_contains_next_question_and_values():
     call.order.sender_name = "김철수"
     text = engine.progress_text(call, CFG.progress.max_chars)
     assert "김철수" in text and TEXTS.fields["sender_phone"] in text
+
+
+def test_unhandled_request_offers_handoff_and_decline_returns():
+    """처리할 수 없는 요청(help) → 상담원 연결을 먼저 제안. 아니요면 하던 단계로, 예면 연결 안내."""
+    call = make_call(new_db())
+    run(apply_answer(call, "none", "help"))
+    assert call.flow.stage == "handoff" and "안내드리기 어려운" in engine.next_text(call)
+    run(apply_answer(call, "no", "none"))
+    assert call.flow.stage == "collecting"
+    run(apply_answer(call, "none", "handoff"))  # 고객이 직접 요청하면 제안 문구가 아니라 확인 문구
+    assert "안내드리기 어려운" not in engine.next_text(call)
+    run(apply_answer(call, "yes", "none"))
+    assert call.refer_requested.is_set() and "잠시만 기다려" in engine.next_text(call)

@@ -68,6 +68,11 @@ class Call:
         self.heard_stage = ""  # heard_text를 모은 단계
         self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
+        self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
+        self.answer_failures = 0  # 연달아 실패한 답 처리(접수·저장 등) 수
+        # 상담원 연결: offer = 처리할 수 없는 요청·반복 실패로 서버가 먼저 제안, refer_failed = 전환 실패
+        self.handoff_variant: str | None = None
+        self.refer_failed = False
         self.listen_timer: asyncio.Task | None = None
         self.listen_seq = 0  # 마지막으로 시작한 판별 번호(늦게 온 옛 판별은 버린다)
         self.listen_tasks: set[asyncio.Task] = set()
@@ -111,7 +116,9 @@ class Call:
         return getattr(self.order, name) is not None
 
     def stage_variant(self, stage: str) -> str | None:
-        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant}.get(stage)
+        ending = "refer_failed" if self.refer_failed else "handoff" if self.refer_requested.is_set() else None
+        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant,
+                "handoff": self.handoff_variant, "ending": ending}.get(stage)
 
     def recorded(self) -> list[tuple[str, str]]:
         labels = self.texts.labels
@@ -165,6 +172,7 @@ class Call:
         if self.status in ("ended", "failed"):
             return
         self.status, self.end_reason, self.ended_at = status, reason, time.time()
+        log.info("통화 종료 %s 이유=%s %.0f초", self.session_id, reason, self.ended_at - self.started_at)
         self.notify()
 
     def snapshot(self) -> dict:

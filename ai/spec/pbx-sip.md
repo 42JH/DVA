@@ -31,6 +31,6 @@ OpenAI는 통화 종료 웹훅을 보내지 않는다(종료는 sideband `sessio
   - 200: 처리함. 모르는 통화·이미 끝난 통화도 200이고, 같은 요청을 다시 보내도 된다.
   - 401: 토큰 오류. 400: 본문 오류. 503: 서버에 토큰이 설정되지 않음.
 - 동작
-  - 진행 중인 통화면 마무리 인사를 기다리지 않고 바로 `hangup`.
+  - 진행 중인 통화면 마무리 인사를 기다리지 않고 바로 `hangup`. 보통은 OpenAI가 고객의 SIP 종료로 세션을 이미 닫아서 404(`session_id_not_found`)이고, 이는 오류로 남기지 않는다.
   - accept 중인 통화면 accept가 끝나는 대로 `hangup`하고 sideband를 열지 않는다.
   - 관제 화면에 `pbx_ended`(`ended_at`, `recording_id`)로 남긴다.

@@ -50,6 +50,8 @@ class FakeSessions:
         self.calls: list[tuple] = []
         self.accept_error: Exception | None = None
         self.accept_delay = 0.0
+        self.hangup_error: Exception | None = None
+        self.refer_error: Exception | None = None
 
     async def accept(self, session_id, *, session):
         await asyncio.sleep(self.accept_delay)
@@ -62,9 +64,13 @@ class FakeSessions:
 
     async def hangup(self, session_id):
         self.calls.append(("hangup", session_id))
+        if self.hangup_error:
+            raise self.hangup_error
 
     async def refer(self, session_id, *, target_uri):
         self.calls.append(("refer", session_id, target_uri))
+        if self.refer_error:
+            raise self.refer_error
 
     def of(self, kind):
         return [c for c in self.calls if c[0] == kind]

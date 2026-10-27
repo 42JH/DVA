@@ -270,3 +270,82 @@ def test_tool_calls_in_one_call_run_in_order():
         await task
 
     run(scenario())
+
+
+class FailingSave(FakeBackend):
+    async def save_places(self, owner, places):
+        raise RuntimeError("백엔드 실패")
+
+
+def test_repeated_answer_failure_offers_handoff():
+    from app.order import Place
+
+    client, call = FakeClient(), make_call(FailingSave())
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "save_offer"
+        call.save_candidates = [("origin", Place(name="김", phone="01012345678", address="서울", address_detail=""))]
+        task, conn = await start(call, client)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네 저장해 주세요")
+        await until(lambda: call.answer_failures == 1)
+        assert conn.sent[-1][1]["content"] == call.texts.answer_error and call.flow.stage == "save_offer"
+        call.save_candidates = [("origin", Place(name="김", phone="01012345678", address="서울", address_detail=""))]
+        conn.push("session.input_transcript.delta", delta="네")
+        await until(lambda: call.flow.stage == "handoff")
+        await until(lambda: "안내드리기 어려운" in conn.sent[-1][1]["content"])
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_refer_failure_apologizes_then_hangs_up():
+    client, call = FakeClient(), make_call()
+    client.live.sessions.refer_error = RuntimeError("refer 실패")
+
+    async def scenario():
+        call.cfg = quick_cfg(hangup_silence_sec=0.05, hangup_max_wait_sec=0.2)
+        call.flow.stage = "handoff"
+        task, conn = await start(call, client)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네 연결해 주세요")
+        await until(lambda: client.live.sessions.of("hangup"))
+        assert call.refer_failed and any("연결이 어렵습니다" in s[1].get("content", "") for s in conn.sent)
+        conn.push("session.closed", reason="close_requested", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_customer_silence_ends_call_with_goodbye():
+    """SIP 종료·PBX 종료 웹훅이 모두 오지 않아도 고객 말이 없으면 마무리 인사 후 끊는다."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg(idle_hangup_sec=0.3, hangup_silence_sec=0.05, hangup_max_wait_sec=0.2)
+        task, conn = await start(call, client)
+        await until(lambda: client.live.sessions.of("hangup"))
+        assert call.flow.stage == "ending" and any("무응답" in e["message"] for e in call.errors)
+        conn.push("session.closed", reason="close_requested", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_customer_speech_keeps_call_open():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg(idle_hangup_sec=0.3)
+        answers(client, "none")
+        task, conn = await start(call, client)
+        for _ in range(6):
+            conn.push("session.input_transcript.delta", delta="음 ")
+            await asyncio.sleep(0.1)
+        assert client.live.sessions.of("hangup") == []
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
