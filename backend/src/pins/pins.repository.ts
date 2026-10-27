@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { ListPinsQueryDto } from './dto/pin-request.dto';
-import { CompanyPinDto, PersonalPinDto } from './dto/pin-response.dto';
+import { CreatePinDto, ListPinsQueryDto, UpdatePinDto } from './dto/pin-request.dto';
+import {
+  CompanyPinDto,
+  CreatedPersonalPinDto,
+  PersonalPinDto,
+  PinVersionDto,
+} from './dto/pin-response.dto';
 
 @Injectable()
 export class PinsRepository {
@@ -74,5 +79,31 @@ export class PinsRepository {
         [companyId, query.q || null, query.limit + 1, query.offset],
       )
     ).rows;
+  }
+  async createPersonal(client: PoolClient, customerId: number, input: CreatePinDto) {
+    return (
+      await client.query<CreatedPersonalPinDto>(
+        `INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)
+       RETURNING personal_pin_seq AS "personalPinSeq",version`,
+        [customerId, input.label ?? null, input.addressData],
+      )
+    ).rows[0];
+  }
+  async updatePersonal(client: PoolClient, id: number, input: UpdatePinDto) {
+    // 생략한 필드는 UPDATE 시점의 값을 유지한다. 이전 조회값으로 전체 행을 덮어쓰지 않는다.
+    return (
+      await client.query<PinVersionDto>(
+        `UPDATE personal_pins SET label=CASE WHEN $2 THEN $3 ELSE label END,
+        address_data=CASE WHEN $4 THEN $5::jsonb ELSE address_data END
+       WHERE personal_pin_seq=$1 RETURNING version`,
+        [
+          id,
+          input.label !== undefined,
+          input.label ?? null,
+          input.addressData !== undefined,
+          input.addressData ?? null,
+        ],
+      )
+    ).rows[0];
   }
 }

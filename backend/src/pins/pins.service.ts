@@ -4,7 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { DatabaseService } from '../database/database.service';
-import { ListPinsQueryDto } from './dto/pin-request.dto';
+import { CreatePinDto, ListPinsQueryDto, UpdatePinDto } from './dto/pin-request.dto';
 import { PinsRepository } from './pins.repository';
 
 @Injectable()
@@ -130,6 +130,42 @@ export class PinsService {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       await this.companyAccess(client, companyId, adminId, header, false);
       return new ListResponse(await this.repository.shared(client, companyId, query), query.limit);
+    });
+  }
+
+  createPersonal(
+    customerId: number,
+    input: CreatePinDto,
+    adminId: number | null,
+    requestId: string,
+    header?: string,
+  ) {
+    return this.database.transaction(async (client) => {
+      await this.personalAccess(client, customerId, adminId, header, true);
+      const result = await this.repository.createPersonal(client, customerId, input);
+      await this.record(client, adminId, result.personalPinSeq, false, true, requestId);
+      return result;
+    });
+  }
+
+  updatePersonal(
+    id: number,
+    input: UpdatePinDto,
+    adminId: number | null,
+    requestId: string,
+    header?: string,
+  ) {
+    if (input.label === undefined && input.addressData === undefined)
+      throw new ApiException(400, 'INVALID_REQUEST', '변경할 별칭 또는 완성 주소를 입력해 주세요.');
+    return this.database.transaction(async (client) => {
+      const customerId = await this.repository.owner(client, id, false);
+      if (customerId === undefined)
+        throw new ApiException(404, 'NOT_FOUND', '개인 주소록을 찾을 수 없습니다.');
+      await this.personalAccess(client, customerId, adminId, header, true);
+      const result = await this.repository.updatePersonal(client, id, input);
+      if (!result) throw new ApiException(404, 'NOT_FOUND', '개인 주소록을 찾을 수 없습니다.');
+      await this.record(client, adminId, id, false, false, requestId);
+      return result;
     });
   }
 }

@@ -1,11 +1,28 @@
-import { Controller, Get, Headers, Param, Query, Req } from '@nestjs/common';
-import { ApiHeader, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
-
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  ApiCreatedResponse,
+  ApiHeader,
+  ApiOkResponse,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest } from '../auth/auth.guard';
 import { MvpAiPinAccess } from '../auth/mvp-ai-access';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-import { ListPinsQueryDto, PinIdParamsDto } from './dto/pin-request.dto';
-import { CompanyPinsEnvelopeDto, PersonalPinsEnvelopeDto } from './dto/pin-response.dto';
+import {
+  CreatePinDto,
+  ListPinsQueryDto,
+  PinIdParamsDto,
+  UpdatePinDto,
+} from './dto/pin-request.dto';
+import {
+  CompanyPinsEnvelopeDto,
+  CreatedPersonalPinEnvelopeDto,
+  PersonalPinsEnvelopeDto,
+  PinVersionEnvelopeDto,
+} from './dto/pin-response.dto';
 import { PinsService } from './pins.service';
 
 const callHeader = {
@@ -43,6 +60,58 @@ export class PinsController {
     @Headers('call_session_seq') header?: string,
   ) {
     return this.pins.listPersonal(params.id, query, request.admin?.adminUserSeq ?? null, header);
+  }
+
+  @Post('customers/:id/pins')
+  @MvpAiPinAccess()
+  @AuditOperation({ action: 'PERSONAL_PIN_CREATED', targetType: 'PERSONAL_PIN', target: 'none' })
+  @ApiOperation({
+    summary: '개인 주소록 등록',
+    security: aiSecurity,
+    description:
+      '현재 통화 고객 또는 관리자. 완성 주소 필수. 요청 키 없이 DB 주소 중복 제약을 적용합니다.',
+  })
+  @ApiHeader(callHeader)
+  @ApiCreatedResponse({ type: CreatedPersonalPinEnvelopeDto })
+  createPersonal(
+    @Param() params: PinIdParamsDto,
+    @Body() input: CreatePinDto,
+    @Req() request: AuthRequest,
+    @Headers('call_session_seq') header?: string,
+  ) {
+    return this.pins.createPersonal(
+      params.id,
+      input,
+      request.admin?.adminUserSeq ?? null,
+      request.requestId,
+      header,
+    );
+  }
+
+  @Patch('pins/:id')
+  @MvpAiPinAccess()
+  @AuditOperation({ action: 'PERSONAL_PIN_UPDATED', targetType: 'PERSONAL_PIN', target: 'id' })
+  @ApiOperation({
+    summary: '개인 주소록 수정',
+    security: aiSecurity,
+    description:
+      '버전 비교 없이 지정한 필드만 수정합니다. addressData는 완성 주소 전체 교체. 소유 고객 변경 불가.',
+  })
+  @ApiHeader(callHeader)
+  @ApiOkResponse({ type: PinVersionEnvelopeDto })
+  updatePersonal(
+    @Param() params: PinIdParamsDto,
+    @Body() input: UpdatePinDto,
+    @Req() request: AuthRequest,
+    @Headers('call_session_seq') header?: string,
+  ) {
+    return this.pins.updatePersonal(
+      params.id,
+      input,
+      request.admin?.adminUserSeq ?? null,
+      request.requestId,
+      header,
+    );
   }
 
   @Get('companies/:id/pins')
