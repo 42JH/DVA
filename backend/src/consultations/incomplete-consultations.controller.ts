@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, Req } from '@nestjs/common';
 import { Request } from 'express';
 import {
   ApiBadRequestResponse,
@@ -6,6 +6,10 @@ import {
   ApiCreatedResponse,
   ApiOperation,
   ApiTags,
+  ApiCookieAuth,
+  ApiOkResponse,
+  ApiUnauthorizedResponse,
+  ApiForbiddenResponse,
 } from '@nestjs/swagger';
 import { MvpAiOrderIntake } from '../auth/mvp-ai-access';
 import { AuditOperation } from '../audit/audit-operation';
@@ -13,11 +17,29 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { CreateIncompleteConsultationDto } from './dto/create-incomplete-consultation.dto';
 import { IncompleteConsultationSavedResponseDto } from './dto/incomplete-consultation-response.dto';
 import { IncompleteConsultationsService } from './incomplete-consultations.service';
+import { Roles } from '../auth/auth.guard';
+import { IncompleteConsultationQueryDto } from './dto/incomplete-consultation-query.dto';
+import { IncompleteConsultationListDto } from './dto/incomplete-consultation-response.dto';
 
 @ApiTags('Incomplete consultations')
 @Controller('consultations/incomplete')
 export class IncompleteConsultationsController {
   constructor(private readonly consultations: IncompleteConsultationsService) {}
+
+  @Get()
+  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
+  @ApiCookieAuth('adminSession')
+  @ApiOperation({
+    summary: '관리자 미완료 상담 목록 조회',
+    description: '종료 시각 내림차순. 목록에는 주문 스냅샷과 발화·녹취 원문을 포함하지 않습니다.',
+  })
+  @ApiOkResponse({ type: IncompleteConsultationListDto })
+  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto })
+  @ApiForbiddenResponse({ type: ErrorResponseDto })
+  findMany(@Query() query: IncompleteConsultationQueryDto) {
+    return this.consultations.findMany(query);
+  }
 
   @Post()
   @MvpAiOrderIntake()

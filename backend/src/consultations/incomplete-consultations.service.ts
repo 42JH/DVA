@@ -7,6 +7,8 @@ import { isZonedDate, orderSnapshot } from '../orders/order-snapshot';
 import { inspectOrder } from '../orders/order-submission.validation';
 import { CreateIncompleteConsultationDto } from './dto/create-incomplete-consultation.dto';
 import { IncompleteConsultationsRepository } from './incomplete-consultations.repository';
+import { ListResponse } from '../common/pagination';
+import { IncompleteConsultationQueryDto } from './dto/incomplete-consultation-query.dto';
 
 @Injectable()
 export class IncompleteConsultationsService {
@@ -82,5 +84,16 @@ export class IncompleteConsultationsService {
       );
       return saved;
     });
+  }
+
+  async findMany(query: IncompleteConsultationQueryDto) {
+    for (const field of ['from', 'to'] as const)
+      if (query[field] !== undefined && !isZonedDate(query[field]))
+        throw new ApiException(400, 'INVALID_REQUEST', '조회 시각을 확인해 주세요.', [
+          { field, reason: 'zonedDateTime' },
+        ]);
+    if (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+      throw new ApiException(400, 'INVALID_REQUEST', '조회 시작은 종료보다 빨라야 합니다.');
+    return new ListResponse(await this.repository.findMany(query), query.limit);
   }
 }

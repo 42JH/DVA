@@ -10,6 +10,7 @@ assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
+process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const {
@@ -25,6 +26,7 @@ const pool = new Pool({
 });
 const apps = [],
   hosts = [];
+const cookies = [];
 let repository;
 async function start() {
   const app = await NestFactory.create(AppModule, { logger: false });
@@ -55,6 +57,22 @@ before(async () => {
   await start();
   await start();
   repository = apps[0].get(IncompleteConsultationsRepository);
+  const { hashPassword } = require('../dist/auth/password');
+  const password = 'consultation-test-only';
+  const hash = await hashPassword(password);
+  for (const [index, role] of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN'].entries()) {
+    await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'상담 검증',$2,$3,'ACTIVE')",
+      ['consultation' + index, hash, role],
+    );
+    const login = await fetch(hosts[0] + '/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: process.env.CORS_ORIGINS },
+      body: JSON.stringify({ loginId: 'consultation' + index, password }),
+    });
+    assert.equal(login.status, 200);
+    cookies.push(login.headers.get('set-cookie').split(';')[0]);
+  }
 });
 after(async () => {
   for (const app of apps) await app.close();
@@ -294,4 +312,61 @@ test('new calls do not restore or share the prior incomplete snapshot', async ()
     next = await saved(payload());
   assert.notEqual(first.callSessionSeq, next.callSessionSeq);
   assert.deepEqual((await stored(next.incompleteConsultationSeq)).order_snapshot.parcels, []);
+});
+
+test('only active administrator sessions can list snapshots; MVP AI write does not open reads', async () => {
+  const path = '/api/consultations/incomplete';
+  for (const Cookie of [undefined, 'dva_session=bad', 'dva_session=' + 'f'.repeat(64)]) {
+    const headers = Cookie ? { Cookie } : {};
+    await error(await fetch(hosts[0] + path, { headers }), 401, 'UNAUTHORIZED');
+  }
+  for (const Cookie of cookies)
+    assert.equal((await fetch(hosts[0] + path, { headers: { Cookie } })).status, 200);
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  assert.deepEqual(spec.paths[path].get.security, [{ adminSession: [] }]);
+  assert.equal(spec.paths[path].post.security, undefined);
+});
+
+test('administrator lists paginate stably, filter calls/time and omit raw snapshot/contact fields', async () => {
+  const headers = { Cookie: cookies[0] };
+  const first = payload();
+  first.endedAt = '2026-10-27T00:10:00Z';
+  first.snapshot = { parcels: [{ origin: { phoneNumber: '01099887766' } }] };
+  const one = await saved(first);
+  const second = payload();
+  second.endedAt = first.endedAt;
+  const two = await saved(second);
+  const read = async (query) =>
+    (await fetch(hosts[0] + '/api/consultations/incomplete?' + query, { headers })).json();
+  const page = await read('limit=1&from=2026-10-27T00%3A10%3A00Z&to=2026-10-27T00%3A11%3A00Z');
+  assert.deepEqual(Object.keys(page).sort(), ['data', 'hasNext']);
+  assert.equal(page.hasNext, true);
+  assert.equal(page.data[0].incompleteConsultationSeq, two.incompleteConsultationSeq);
+  assert.ok(!JSON.stringify(page).includes('01099887766'));
+  assert.ok(!Object.hasOwn(page.data[0], 'snapshot'));
+  const next = await read(
+    'limit=1&offset=1&from=2026-10-27T00%3A10%3A00Z&to=2026-10-27T00%3A11%3A00Z',
+  );
+  assert.equal(next.hasNext, false);
+  assert.equal(next.data[0].incompleteConsultationSeq, one.incompleteConsultationSeq);
+  const filtered = await read('providerCallId=' + encodeURIComponent(first.providerCallId));
+  assert.equal(filtered.data.length, 1);
+  assert.equal(filtered.data[0].callSessionSeq, one.callSessionSeq);
+  assert.deepEqual(await read('providerCallId=' + randomUUID()), { data: [], hasNext: false });
+  for (const query of [
+    'limit=0',
+    'limit=101',
+    'offset=-1',
+    'limit=1e2',
+    'from=2026-W43-2T00:00:00Z',
+    'from=bad',
+    'from=2026-10-28T00:00:00Z&to=2026-10-27T00:00:00Z',
+    'unknown=true',
+  ]) {
+    await error(
+      await fetch(hosts[0] + '/api/consultations/incomplete?' + query, { headers }),
+      400,
+      'INVALID_REQUEST',
+    );
+  }
 });

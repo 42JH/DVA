@@ -2,9 +2,60 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { OrderSnapshot } from '../orders/order-snapshot';
 import { inspectOrder } from '../orders/order-submission.validation';
+import { DatabaseService } from '../database/database.service';
+import { IncompleteConsultationQueryDto } from './dto/incomplete-consultation-query.dto';
+
+interface SummaryRow {
+  incompleteConsultationSeq: number;
+  callSessionSeq: number;
+  providerCallId: string;
+  endedAt: Date;
+  endType: string | null;
+  systemEvent: string | null;
+  missingFields: string[];
+  createdAt: Date;
+}
+
+const SUMMARY_COLUMNS = `i.incomplete_consultation_seq AS "incompleteConsultationSeq",
+ i.call_session_seq AS "callSessionSeq", c.provider_call_id AS "providerCallId",
+ i.ended_at AS "endedAt", i.end_type AS "endType", i.system_event AS "systemEvent",
+ i.collection_analysis->'missingFields' AS "missingFields", i.created_at AS "createdAt"`;
+
+function summary(row: SummaryRow) {
+  return { ...row, endedAt: row.endedAt.toISOString(), createdAt: row.createdAt.toISOString() };
+}
 
 @Injectable()
 export class IncompleteConsultationsRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  async findMany(query: IncompleteConsultationQueryDto) {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (query.providerCallId !== undefined) {
+      values.push(query.providerCallId);
+      conditions.push(`c.provider_call_id=$${values.length}`);
+    }
+    if (query.from !== undefined) {
+      values.push(query.from);
+      conditions.push(`i.ended_at>=$${values.length}`);
+    }
+    if (query.to !== undefined) {
+      values.push(query.to);
+      conditions.push(`i.ended_at<$${values.length}`);
+    }
+    values.push(query.limit + 1, query.offset);
+    const rows = await this.database.pool.query<SummaryRow>(
+      `SELECT ${SUMMARY_COLUMNS} FROM incomplete_consultations i
+       JOIN call_sessions c ON c.call_session_seq=i.call_session_seq
+       ${conditions.length ? 'WHERE ' + conditions.join(' AND ') : ''}
+       ORDER BY i.ended_at DESC,i.incomplete_consultation_seq DESC
+       LIMIT $${values.length - 1} OFFSET $${values.length}`,
+      values,
+    );
+    return rows.rows.map(summary);
+  }
+
   async lock(client: PoolClient, providerCallId: string): Promise<boolean> {
     return (
       await client.query<{ locked: boolean }>(
