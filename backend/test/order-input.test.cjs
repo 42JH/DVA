@@ -47,12 +47,29 @@ test('order inputs preserve zero, explicit timezone and PostgreSQL numeric bound
   assert.equal(result.parcels[0].itemPrice, Number.MAX_SAFE_INTEGER);
 });
 
+test('orders accept customer identity without an existing customer ID', async () => {
+  const input = { customer: { name: '신규 고객', phoneNumber: '01000550001' } };
+  const result = await validate(input);
+  assert.equal(result.customerSeq, undefined);
+  assert.equal(result.customer.name, input.customer.name);
+  assert.equal(result.customer.phoneNumber, input.customer.phoneNumber);
+});
+
 test('order inputs reject invalid types, nulls, ranges, nested arrays and extra fields', async () => {
   const bodies = [
     {},
     { customerSeq: '31' },
     { customerSeq: 0 },
     { customerSeq: 2147483648 },
+    { customer: null },
+    { customer: [] },
+    { customer: {} },
+    { customer: { name: ' \t', phoneNumber: '01000550001' } },
+    { customer: { name: 1, phoneNumber: '01000550001' } },
+    { customer: { name: '고객', phoneNumber: 1000550001 } },
+    { customer: { name: '고객', phoneNumber: '010-0055-0001' } },
+    { customer: { name: '고객', phoneNumber: '' } },
+    { customer: { name: '고객', phoneNumber: '01000550001', status: 'ACTIVE' } },
     { customerSeq: 31, paymentMethodType: null },
     { customerSeq: 31, paymentMethodType: 'cash' },
     { customerSeq: 31, pickupRequestedAt: '2026-10-28T10:00:00' },

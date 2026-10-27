@@ -26,15 +26,6 @@ export class OrdersRepository {
     ).rows[0];
   }
 
-  async customer(client: PoolClient, id: number) {
-    return (
-      await client.query<{ status: string }>(
-        'SELECT status FROM customers WHERE customer_seq=$1 FOR SHARE',
-        [id],
-      )
-    ).rows[0];
-  }
-
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
     const result =
       pin.scope === 'PERSONAL'
@@ -54,12 +45,16 @@ export class OrdersRepository {
     return result.rowCount === 1;
   }
 
-  async insert(client: PoolClient, draft: OrderDraft): Promise<CreatedOrderDto> {
+  async insert(
+    client: PoolClient,
+    draft: OrderDraft,
+    customerId: number,
+  ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
         `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status)
        VALUES($1,$2,$3,'COLLECTING') RETURNING order_seq AS id`,
-        [draft.customerSeq, draft.paymentMethodType, draft.pickupRequestedAt],
+        [customerId, draft.paymentMethodType, draft.pickupRequestedAt],
       )
     ).rows[0].id;
     for (const [index, parcel] of draft.parcels.entries()) {

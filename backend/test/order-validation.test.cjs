@@ -112,3 +112,24 @@ test('draft comparison ignores object key order, equivalent timestamps and expli
   second.parcels[0].origin.name += ' ';
   assert.notEqual(JSON.stringify(orderDraft(first)), JSON.stringify(orderDraft(second)));
 });
+
+test('customer identity is canonicalized without changing legacy customer-ID request fingerprints', () => {
+  const { createHash } = require('node:crypto');
+  const legacy = {
+    customerSeq: 31,
+    paymentMethodType: 'credit',
+    pickupRequestedAt: null,
+    parcels: [],
+  };
+  const hash = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  assert.equal(hash(orderDraft({ customerSeq: 31 })), hash(legacy));
+  const first = { customer: { name: '고객', phoneNumber: '01000550001' } };
+  const reordered = {
+    customer: { phoneNumber: '01000550001', name: '고객' },
+    parcels: [],
+    paymentMethodType: 'credit',
+  };
+  assert.equal(hash(orderDraft(first)), hash(orderDraft(reordered)));
+  reordered.customer.phoneNumber = '01000550002';
+  assert.notEqual(hash(orderDraft(first)), hash(orderDraft(reordered)));
+});

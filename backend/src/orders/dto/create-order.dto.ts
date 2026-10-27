@@ -155,12 +155,46 @@ export class ParcelInputDto {
   itemPrice?: number | null;
 }
 
+export class OrderCustomerDto {
+  @ApiProperty({
+    description: '신규 고객 등록에 사용할 이름. 기존 고객의 이름은 변경하지 않습니다.',
+  })
+  @IsString()
+  @Matches(/\S/)
+  name!: string;
+
+  @ApiProperty({
+    description: '하이픈 없는 숫자 문자열. 같은 전화번호의 기존 고객이 있으면 연결합니다.',
+  })
+  @IsString()
+  @Matches(/^[0-9]+$/)
+  phoneNumber!: string;
+}
+
 export class CreateOrderDto {
-  @ApiProperty({ minimum: 1, maximum: 2147483647 })
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: '기존 고객 ID. customerSeq와 customer 중 정확히 하나만 전달합니다.',
+  })
+  @ValidateIf(
+    (input: CreateOrderDto, value: unknown) => value !== undefined || input.customer === undefined,
+  )
   @IsInt()
   @Min(1)
   @Max(2147483647)
-  customerSeq!: number;
+  customerSeq?: number;
+
+  @ApiPropertyOptional({
+    type: () => OrderCustomerDto,
+    description:
+      '고객 ID를 모를 때 전달합니다. 미등록 전화번호면 주문 저장과 함께 고객을 생성합니다.',
+  })
+  @ValidateIf(present)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => OrderCustomerDto)
+  customer?: OrderCustomerDto;
 
   @ApiPropertyOptional({
     enum: ['cat', 'billing', 'credit', 'groupBilling'],

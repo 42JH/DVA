@@ -20,6 +20,7 @@ import {
   ApiCreatedResponse,
   ApiHeader,
   ApiOperation,
+  ApiBody,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -36,7 +37,7 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
 
 @ApiTags('Orders')
 @ApiCookieAuth('adminSession')
-@ApiExtraModels(CreatedOrderDto, RequestMetaDto, ErrorResponseDto)
+@ApiExtraModels(CreateOrderDto, CreatedOrderDto, RequestMetaDto, ErrorResponseDto)
 @ApiBadRequestResponse({ type: ErrorResponseDto })
 @ApiUnauthorizedResponse({ type: ErrorResponseDto })
 @ApiForbiddenResponse({ type: ErrorResponseDto })
@@ -50,7 +51,23 @@ export class OrdersController {
   @ApiOperation({
     summary: '미완료 주문 생성',
     description:
-      '활성 관리자 세션. COLLECTING으로 저장하며 디버 접수·배송 생성은 수행하지 않습니다. AI 서비스 인증은 아직 지원하지 않습니다.',
+      '활성 관리자 세션. customerSeq 또는 customer(이름·전화번호) 중 하나를 전달합니다. 미등록 전화번호면 고객과 주문을 함께 생성합니다. 정보가 모두 있어도 COLLECTING으로 저장하며 최종 접수는 별도입니다. AI 서비스 인증은 아직 지원하지 않습니다.',
+  })
+  @ApiBody({
+    schema: {
+      allOf: [{ $ref: getSchemaPath(CreateOrderDto) }],
+      oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
+    },
+    examples: {
+      existingCustomer: {
+        summary: '기존 고객 ID로 저장 (실제 ID로 변경)',
+        value: { customerSeq: 31, parcels: [] },
+      },
+      customerByPhone: {
+        summary: '전화번호로 고객 연결 또는 신규 등록',
+        value: { customer: { name: '예시 고객', phoneNumber: '01012345678' }, parcels: [] },
+      },
+    },
   })
   @ApiHeader({
     name: 'Idempotency-Key',

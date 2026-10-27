@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { DatabaseService } from '../database/database.service';
+import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreatedOrderDto } from './dto/order-response.dto';
 import { orderDraft } from './order-draft';
@@ -14,6 +15,7 @@ export class OrdersService {
     private readonly database: DatabaseService,
     private readonly repository: OrdersRepository,
     private readonly audit: AuditService,
+    private readonly customers: CustomersService,
   ) {}
 
   async create(
@@ -22,6 +24,13 @@ export class OrdersService {
     input: CreateOrderDto,
     requestId: string,
   ): Promise<CreatedOrderDto> {
+    if ((input.customerSeq === undefined) === (input.customer === undefined))
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'customerSeq와 customer 중 하나만 전달해 주세요.',
+        [{ field: 'customer', reason: 'exactlyOneCustomerReference' }],
+      );
     const draft = orderDraft(input);
     const hash = createHash('sha256').update(JSON.stringify(draft)).digest('hex');
     return this.database.transaction(async (client) => {
@@ -37,18 +46,15 @@ export class OrdersService {
           );
         return { orderSeq: previous.orderSeq, version: previous.version };
       }
-      const customer = await this.repository.customer(client, draft.customerSeq);
-      if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
-      if (customer.status !== 'ACTIVE')
-        throw new ApiException(403, 'FORBIDDEN', '활성 고객의 주문만 생성할 수 있습니다.');
+      const customerId = await this.customers.resolveForOrder(client, draft, adminId, requestId);
       for (const parcel of draft.parcels) {
         if (
           parcel.originPin &&
-          !(await this.repository.canUsePin(client, draft.customerSeq, parcel.originPin))
+          !(await this.repository.canUsePin(client, customerId, parcel.originPin))
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
-      const result = await this.repository.insert(client, draft);
+      const result = await this.repository.insert(client, draft, customerId);
       await this.repository.rememberCreation(client, adminId, key, hash, result);
       await this.audit.recordSuccess(
         {

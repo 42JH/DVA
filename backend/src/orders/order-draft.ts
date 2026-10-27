@@ -22,6 +22,9 @@ function address(value: OrderAddressPatchDto = {}): Required<OrderAddressPatchDt
 export function orderDraft(input: CreateOrderDto) {
   return {
     customerSeq: input.customerSeq,
+    ...(input.customer
+      ? { customer: { name: input.customer.name, phoneNumber: input.customer.phoneNumber } }
+      : {}),
     paymentMethodType: input.paymentMethodType ?? 'credit',
     pickupRequestedAt: input.pickupRequestedAt
       ? new Date(input.pickupRequestedAt).toISOString()

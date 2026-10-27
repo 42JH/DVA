@@ -152,6 +152,7 @@ const counts = async () =>
     await pool.query(`SELECT
   (SELECT count(*) FROM orders) AS orders, (SELECT count(*) FROM order_parcels) AS parcels,
   (SELECT count(*) FROM api_idempotency.order_creations) AS receipts,
+  (SELECT count(*) FROM customers) AS customers,
   (SELECT count(*) FROM shipments) AS shipments`)
   ).rows[0];
 const errorCode = async (response, status, code) => {
@@ -425,7 +426,253 @@ test('receipt and success-audit failures roll back header, parcels and receipt w
   }
 });
 
-test('Swagger advertises session authentication, UUID key, nested DTOs and the real response envelope', async () => {
+test('new customer and draft order are saved together, with one customer audit and an idempotent receipt', async () => {
+  const key = randomUUID(),
+    requestId = randomUUID();
+  const input = { customer: { name: '신규 주문 고객', phoneNumber: '01000550001' }, parcels: [{}] };
+  const before = await counts();
+  const response = await create(input, key, 0, { 'X-Request-Id': requestId });
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  const customer = (
+    await pool.query(
+      'SELECT c.customer_seq,c.name,c.phone_number,c.status FROM customers c JOIN orders o USING(customer_seq) WHERE o.order_seq=$1',
+      [data.orderSeq],
+    )
+  ).rows[0];
+  assert.equal(customer.name, input.customer.name);
+  assert.equal(customer.phone_number, input.customer.phoneNumber);
+  assert.equal(customer.status, 'ACTIVE');
+  assert.equal(Number((await counts()).customers), Number(before.customers) + 1);
+  const replay = await create(
+    {
+      customer: { phoneNumber: input.customer.phoneNumber, name: input.customer.name },
+      parcels: [{}],
+      paymentMethodType: 'credit',
+    },
+    key,
+  );
+  assert.equal(replay.status, 201);
+  assert.deepEqual((await replay.json()).data, data);
+  const afterReplay = await counts();
+  assert.equal(Number(afterReplay.orders), Number(before.orders) + 1);
+  assert.equal(Number(afterReplay.customers), Number(before.customers) + 1);
+  for (const changed of [
+    { ...input.customer, name: '다른 이름' },
+    { ...input.customer, phoneNumber: '01000550002' },
+  ])
+    await errorCode(
+      await create({ ...input, customer: changed }, key),
+      422,
+      'IDEMPOTENCY_KEY_REUSED',
+    );
+  assert.deepEqual(await counts(), afterReplay);
+  const logs = (
+    await pool.query(
+      'SELECT action,target_type,target_seq,actor_seq,result,metadata FROM audit_logs WHERE request_id=$1 ORDER BY action',
+      [requestId],
+    )
+  ).rows;
+  assert.deepEqual(logs, [
+    {
+      action: 'CUSTOMER_CREATED',
+      target_type: 'CUSTOMER',
+      target_seq: customer.customer_seq,
+      actor_seq: adminId,
+      result: 'SUCCESS',
+      metadata: {},
+    },
+    {
+      action: 'ORDER_CREATED',
+      target_type: 'ORDER',
+      target_seq: data.orderSeq,
+      actor_seq: adminId,
+      result: 'SUCCESS',
+      metadata: {},
+    },
+  ]);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*) FROM audit_logs WHERE target_type='CUSTOMER' AND target_seq=$1 AND action='CUSTOMER_CREATED'",
+        [customer.customer_seq],
+      )
+    ).rows[0].count,
+    '1',
+  );
+});
+
+test('existing phone links the same customer without overwriting identity, status or PIN scope', async () => {
+  const input = {
+    customer: { name: '기존 이름 덮어쓰기 시도', phoneNumber: '01000000001' },
+    parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: personalPin } }],
+  };
+  const before = await counts(),
+    requestId = randomUUID();
+  const response = await create(input, randomUUID(), 0, { 'X-Request-Id': requestId });
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  assert.equal(
+    (await pool.query('SELECT customer_seq FROM orders WHERE order_seq=$1', [data.orderSeq]))
+      .rows[0].customer_seq,
+    customerId,
+  );
+  assert.deepEqual(
+    (await pool.query('SELECT name,status FROM customers WHERE customer_seq=$1', [customerId]))
+      .rows[0],
+    { name: '주문 검증', status: 'ACTIVE' },
+  );
+  assert.equal((await counts()).customers, before.customers);
+  assert.deepEqual(
+    (await pool.query('SELECT action FROM audit_logs WHERE request_id=$1', [requestId])).rows,
+    [{ action: 'ORDER_CREATED' }],
+  );
+  await errorCode(
+    await create({ ...input, parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: otherPin } }] }),
+    403,
+    'FORBIDDEN',
+  );
+  await errorCode(
+    await create({ customer: { name: '탈퇴 복원 시도', phoneNumber: '01000000002' } }),
+    403,
+    'FORBIDDEN',
+  );
+  assert.equal(
+    (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [withdrawnId])).rows[0]
+      .status,
+    'WITHDRAWN',
+  );
+});
+
+test('invalid or ambiguous customer references never create customer or order rows', async () => {
+  const before = await counts();
+  for (const body of [
+    {},
+    { customerSeq: customerId, customer: { name: '신규', phoneNumber: '01000550100' } },
+    { customerSeq: null, customer: { name: '신규', phoneNumber: '01000550100' } },
+    { customer: null },
+    { customer: { name: ' ', phoneNumber: '01000550100' } },
+    { customer: { name: '신규', phoneNumber: '010-0055-0100' } },
+    { customer: { name: '신규', phoneNumber: '01000550100', status: 'ACTIVE' } },
+  ])
+    await errorCode(await create(body), 400, 'INVALID_REQUEST');
+  await errorCode(
+    await create({ customer: { name: '신규', phoneNumber: '01000550100' } }, randomUUID(), 0, {
+      Cookie: undefined,
+    }),
+    401,
+    'UNAUTHORIZED',
+  );
+  assert.deepEqual(await counts(), before);
+});
+
+test('concurrent distinct orders across instances share a single newly registered phone identity', async () => {
+  const customer = { name: '동시 주문 고객', phoneNumber: '01000550003' };
+  const responses = await Promise.all(
+    Array.from({ length: 6 }, (_, i) => create({ customer }, randomUUID(), i % 2)),
+  );
+  const ids = [];
+  for (const response of responses) {
+    assert.equal(response.status, 201);
+    ids.push((await response.json()).data.orderSeq);
+  }
+  assert.equal(new Set(ids).size, 6);
+  const rows = (
+    await pool.query('SELECT customer_seq,name FROM customers WHERE phone_number=$1', [
+      customer.phoneNumber,
+    ])
+  ).rows;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, customer.name);
+  const linked = (
+    await pool.query('SELECT DISTINCT customer_seq FROM orders WHERE order_seq=ANY($1::int[])', [
+      ids,
+    ])
+  ).rows;
+  assert.deepEqual(linked, [{ customer_seq: rows[0].customer_seq }]);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*) FROM audit_logs WHERE action='CUSTOMER_CREATED' AND target_seq=$1",
+        [rows[0].customer_seq],
+      )
+    ).rows[0].count,
+    '1',
+  );
+});
+
+test('PIN denial, receipt failure and order-audit failure roll back newly registered customers too', async () => {
+  const deniedBefore = await counts();
+  await errorCode(
+    await create({
+      customer: { name: '거절된 신규', phoneNumber: '01000550004' },
+      parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: personalPin } }],
+    }),
+    403,
+    'FORBIDDEN',
+  );
+  assert.deepEqual(await counts(), deniedBefore);
+  const audit = apps[0].get(AuditService);
+  for (const [index, [target, method]] of [
+    [repository, 'rememberCreation'],
+    [audit, 'recordSuccess'],
+  ].entries()) {
+    const original = target[method],
+      before = await counts(),
+      requestId = randomUUID(),
+      key = randomUUID();
+    const input = {
+      customer: { name: '롤백 고객', phoneNumber: `0100055001${index}` },
+      parcels: [{}],
+    };
+    target[method] = async function (...args) {
+      if (method === 'recordSuccess' && args[0].action !== 'ORDER_CREATED')
+        return original.apply(this, args);
+      throw new Error('private-customer-order-diagnostic');
+    };
+    try {
+      const response = await create(input, key, 0, { 'X-Request-Id': requestId });
+      assert.equal(response.status, 500);
+      assert.ok(!(await response.text()).includes('private-customer-order-diagnostic'));
+      assert.deepEqual(await counts(), before);
+      assert.deepEqual(
+        (
+          await pool.query('SELECT result,metadata FROM audit_logs WHERE request_id=$1', [
+            requestId,
+          ])
+        ).rows,
+        [{ result: 'FAILED', metadata: {} }],
+      );
+    } finally {
+      target[method] = original;
+    }
+    assert.equal((await create(input, key)).status, 201);
+    assert.equal(Number((await counts()).customers), Number(before.customers) + 1);
+  }
+});
+
+test('a fully populated new-customer order remains COLLECTING until a separate final submission', async () => {
+  const before = await counts();
+  const response = await create({
+    customer: { name: '정보 완성 고객', phoneNumber: '01000550020' },
+    pickupRequestedAt: '2026-10-28T10:00:00+09:00',
+    paymentMethodType: 'cat',
+    parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+  });
+  assert.equal(response.status, 201);
+  const { data } = await response.json();
+  assert.deepEqual(
+    (
+      await pool.query('SELECT status,parcel_no,dver_received_at FROM orders WHERE order_seq=$1', [
+        data.orderSeq,
+      ])
+    ).rows[0],
+    { status: 'COLLECTING', parcel_no: null, dver_received_at: null },
+  );
+  assert.equal((await counts()).shipments, before.shipments);
+});
+
+test('Swagger advertises session authentication, exclusive customer inputs, UUID key and the real response envelope', async () => {
   const response = await fetch(hosts[0] + '/api/docs-json');
   assert.equal(response.status, 200);
   const spec = await response.json(),
@@ -433,6 +680,18 @@ test('Swagger advertises session authentication, UUID key, nested DTOs and the r
   assert.deepEqual(operation.security, [{ adminSession: [] }]);
   assert.ok(operation.parameters.some((p) => p.name === 'Idempotency-Key' && p.required));
   assert.ok(!operation.parameters.some((p) => p.name === 'X-CSRF-Protection'));
+  const inputSchema = operation.requestBody.content['application/json'].schema;
+  const examples = operation.requestBody.content['application/json'].examples;
+  assert.equal(examples.existingCustomer.value.customer, undefined);
+  assert.equal(examples.customerByPhone.value.customerSeq, undefined);
+  assert.equal(typeof examples.customerByPhone.value.customer.phoneNumber, 'string');
+  assert.deepEqual(inputSchema.oneOf, [{ required: ['customerSeq'] }, { required: ['customer'] }]);
+  assert.equal(inputSchema.allOf[0].$ref, '#/components/schemas/CreateOrderDto');
+  assert.deepEqual(spec.components.schemas.OrderCustomerDto.required.sort(), [
+    'name',
+    'phoneNumber',
+  ]);
+  assert.ok(!(spec.components.schemas.CreateOrderDto.required ?? []).includes('customerSeq'));
   const schema = operation.responses['201'].content['application/json'].schema;
   assert.deepEqual(schema.required, ['data', 'meta']);
   assert.equal(
