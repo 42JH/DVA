@@ -75,7 +75,7 @@ Table company_pins {
     `valid_parcel_address(address_data)`
     `version > 0`
   }
-  Note: 'customer / 기업이 제출한 공유 핀. 부서명은 핀별 선택값이다. / SQL 인덱스: CREATE INDEX company_pins_scope_idx ON company_pins(organization_seq,company_pin_seq); CREATE UNIQUE INDEX company_pins_identity_uk ON company_pins(organization_seq,lower(btrim(regexp_replace(normalize(coalesce(department_name,\'\'),NFC),\'[[:space:]]+\',\' \',\'g\'))),pin_identity(address_data));'
+  Note: 'customer / 기업이 제출한 공식 배송지 공유 핀. 부서명은 선택값. 40번 합의: 활성 기업의 모든 공유 핀을 타 기업에서도 검색 가능. 등록·수정은 관리자 전용. / SQL 인덱스: CREATE INDEX company_pins_scope_idx ON company_pins(organization_seq,company_pin_seq); CREATE UNIQUE INDEX company_pins_identity_uk ON company_pins(organization_seq,lower(btrim(regexp_replace(normalize(coalesce(department_name,\'\'),NFC),\'[[:space:]]+\',\' \',\'g\'))),pin_identity(address_data));'
 }
 
 // End of customer service
