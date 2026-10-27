@@ -15,10 +15,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>20 THEN RAISE EXCEPTION 'Expected 20 public tables, got %',n; END IF;
+ IF n<>19 THEN RAISE EXCEPTION 'Expected 19 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, got %',n; END IF;
+ IF n<>18 THEN RAISE EXCEPTION 'Expected 18 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>9 THEN RAISE EXCEPTION 'Expected 9 business triggers, got %',n; END IF;
@@ -70,6 +70,14 @@ BEGIN
  INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,'Support',address);
 
  INSERT INTO orders(customer_seq) VALUES(customer_id) RETURNING order_seq INTO order_id;
+ INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version)
+ VALUES('call:1','00000000-0000-4000-8000-000000000055',repeat('a',64),order_id,1);
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version) VALUES(%L,%L,%L,%s,1)',
+  'call:1','00000000-0000-4000-8000-000000000055',repeat('a',64),order_id),'23505');
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version) VALUES(%L,%L,%L,%s,1)',
+  'spoofed','00000000-0000-4000-8000-000000000056',repeat('a',64),order_id),'23514');
+ PERFORM pg_temp.expect_error($q$INSERT INTO api_idempotency.order_creations(actor_key,idempotency_key,request_hash,order_seq,response_version)
+  VALUES('admin:1','00000000-0000-4000-8000-000000000057',repeat('a',64),2147483647,1)$q$,'23503');
  INSERT INTO order_parcels(order_seq,parcel_position) VALUES(order_id,1) RETURNING order_parcel_seq INTO parcel_id;
  IF (SELECT version FROM orders WHERE order_seq=order_id)<>2 THEN RAISE EXCEPTION 'Order content version failed'; END IF;
  UPDATE orders SET pickup_requested_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
@@ -130,20 +138,5 @@ BEGIN
  DELETE FROM admin_users WHERE admin_user_seq=second_id;
  IF EXISTS(SELECT 1 FROM admin_sessions WHERE admin_user_seq=second_id) THEN RAISE EXCEPTION 'Session cascade failed'; END IF;
  RAISE NOTICE 'PASS: admin names, session uniqueness, expiry, FK, scoped deletion and cascade';
-END $$;
-DO $$
-DECLARE call_id integer; statement text;
-BEGIN
- INSERT INTO call_sessions(provider_call_id) VALUES('incomplete-db-check') RETURNING call_session_seq INTO call_id;
- statement := format('INSERT INTO incomplete_consultations(call_session_seq,event_id,ended_at,order_snapshot,collection_analysis,request_hash) VALUES(%s,%L,CURRENT_TIMESTAMP,%L,%L,%L)',call_id,'end-1','{}','{}',repeat('a',64));
- EXECUTE statement;
- PERFORM pg_temp.expect_error(statement,'23505');
- PERFORM pg_temp.expect_error(format('UPDATE incomplete_consultations SET request_hash=%L WHERE call_session_seq=%s','invalid',call_id),'23514');
- PERFORM pg_temp.expect_error(format('UPDATE incomplete_consultations SET event_id=%L WHERE call_session_seq=%s',' ',call_id),'23514');
- PERFORM pg_temp.expect_error(format('UPDATE incomplete_consultations SET order_snapshot=%L WHERE call_session_seq=%s','[]',call_id),'23514');
- PERFORM pg_temp.expect_error(format('UPDATE incomplete_consultations SET collection_analysis=%L WHERE call_session_seq=%s','null',call_id),'23514');
- PERFORM pg_temp.expect_error(format('UPDATE incomplete_consultations SET call_session_seq=2147483647 WHERE call_session_seq=%s',call_id),'23503');
- PERFORM pg_temp.expect_error(format('DELETE FROM call_sessions WHERE call_session_seq=%s',call_id),'23503');
- RAISE NOTICE 'PASS: incomplete consultation call uniqueness, event/hash/JSON constraints and history foreign key';
 END $$;
 ROLLBACK;

@@ -15,6 +15,28 @@ const columns = 'customer_seq AS "customerSeq", name, phone_number AS "phoneNumb
 export class CustomersRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async insertForOrder(
+    client: PoolClient,
+    input: CreateCustomerDto,
+  ): Promise<Customer | undefined> {
+    return (
+      await client.query<Customer>(
+        `INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE')
+       ON CONFLICT(phone_number) DO NOTHING RETURNING ${columns}`,
+        [input.name, input.phoneNumber],
+      )
+    ).rows[0];
+  }
+
+  async findByPhoneForOrder(client: PoolClient, phone: string): Promise<Customer | undefined> {
+    return (
+      await client.query<Customer>(
+        `SELECT ${columns} FROM customers WHERE phone_number=$1 FOR SHARE`,
+        [phone],
+      )
+    ).rows[0];
+  }
+
   async list(query: ListCustomersQueryDto): Promise<Customer[]> {
     const result = await this.database.pool.query<Customer>(
       `SELECT ${columns} FROM customers

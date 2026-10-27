@@ -6,7 +6,6 @@ import { HealthModule } from './health/health.module';
 import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { OrdersModule } from './orders/orders.module';
-import { ConsultationsModule } from './consultations/consultations.module';
 import { CustomersModule } from './customers/customers.module';
 
 @Module({
@@ -18,7 +17,6 @@ import { CustomersModule } from './customers/customers.module';
     AuthModule,
     OrganizationsModule,
     OrdersModule,
-    ConsultationsModule,
     CustomersModule,
   ],
 })

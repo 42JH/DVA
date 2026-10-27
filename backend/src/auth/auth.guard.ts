@@ -58,7 +58,13 @@ export class AuthGuard implements CanActivate {
       )
     )
       return true;
-    if (this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler())) return true;
+    if (
+      this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler()) &&
+      !(request.headers.cookie ?? '')
+        .split(';')
+        .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
+    )
+      return true;
     request.sessionToken = readSessionToken(request) ?? '';
     const targets = [context.getHandler(), context.getClass()];
     if (this.reflector.getAllAndOverride<boolean>('auth:mvp-ai-customer', targets)) {

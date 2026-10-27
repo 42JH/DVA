@@ -197,6 +197,16 @@ test('production login through Nginx authorizes company operations and logout re
     headers: { Cookie: session },
   });
   assert.equal((await inactive.json()).data.status, 'INACTIVE');
+  const orderBody = { customer: { name: '주문 검증', phoneNumber: '01000880088' }, parcels: [] };
+  const order = () =>
+    fetch('http://proxy/api/orders', {
+      method: 'POST',
+      headers: { ...companyHeaders, 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify(orderBody),
+    });
+  const registered = await order();
+  assert.equal(registered.status, 201);
+  assert.ok((await registered.json()).data.orderSeq > 0);
   const logout = await fetch('http://proxy/api/auth/logout', {
     method: 'POST',
     headers: { ...headers, Cookie: session },
@@ -212,37 +222,16 @@ test('production login through Nginx authorizes company operations and logout re
   );
 });
 
-test('production Nginx accepts MVP AI validation/end snapshots but protects administrator consultation reads', async () => {
-  const headers = { 'Content-Type': 'application/json' };
-  const validation = await fetch('http://proxy/api/orders/validation', {
+test('production Nginx routes the shared ORD-01 API and forwards its call header', async () => {
+  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
+  const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
+  const missing = await fetch('http://proxy/api/orders', { method: 'POST', headers, body });
+  assert.equal(missing.status, 400);
+  const unknown = await fetch('http://proxy/api/orders', {
     method: 'POST',
-    headers,
-    body: '{}',
+    headers: { ...headers, 'X-Call-Session-Id': '2147483647' },
+    body,
   });
-  assert.equal(validation.status, 422);
-  assert.equal((await validation.json()).error.code, 'VALIDATION_FAILED');
-  const input = {
-    eventId: randomUUID(),
-    providerCallId: 'runtime-' + randomUUID(),
-    endedAt: new Date().toISOString(),
-    snapshot: {},
-  };
-  const request = () =>
-    fetch('http://proxy/api/consultations/incomplete', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(input),
-    });
-  const response = await request();
-  assert.equal(response.status, 201);
-  const first = (await response.json()).data;
-  assert.deepEqual((await (await request()).json()).data, first);
-  for (const path of [
-    '/api/consultations/incomplete',
-    '/api/consultations/incomplete/' + first.incompleteConsultationSeq,
-  ]) {
-    const read = await fetch('http://proxy' + path);
-    assert.equal(read.status, 401);
-    assert.equal((await read.json()).error.code, 'UNAUTHORIZED');
-  }
+  assert.equal(unknown.status, 404);
+  assert.equal((await unknown.json()).error.code, 'NOT_FOUND');
 });

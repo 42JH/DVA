@@ -1,12 +1,14 @@
 import { ApiException, ErrorDetail } from '../common/errors/api.exception';
-import {
-  isZonedDate,
-  ORDER_ADDRESS_FIELDS,
-  OrderSnapshot,
-  QUANTITY_FIELDS,
-} from './order-snapshot';
+import { isZonedDate, ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
+const QUANTITY_FIELDS = [
+  'documentCount',
+  'smallBoxCount',
+  'mediumBoxCount',
+  'bigBoxCount',
+] as const;
 
-export function inspectOrder(snapshot: OrderSnapshot, now: number) {
+// 생성 시에는 부분 입력을 허용한다. ORD-06에서 저장된 같은 주문을 검증할 때 사용한다.
+export function assertOrderSubmissionReady(snapshot: OrderDraft, now = Date.now()): void {
   const errors: ErrorDetail[] = [];
   const missing = (field: string) => errors.push({ field, reason: 'required' });
   const invalid = (field: string, reason: string) => errors.push({ field, reason });
@@ -53,27 +55,6 @@ export function inspectOrder(snapshot: OrderSnapshot, now: number) {
     if (parcel.notifiedPrice !== null && parcel.notifiedPrice !== 3500)
       invalid(`${prefix}.notifiedPrice`, 'fixedPrice3500');
   }
-  const collectedFields: string[] = [];
-  const collect = (value: unknown, path: string): void => {
-    if (value === null || value === undefined || (typeof value === 'string' && !value.trim()))
-      return;
-    if (typeof value === 'object') {
-      for (const [key, child] of Object.entries(value))
-        collect(child, path ? `${path}.${key}` : key);
-    } else collectedFields.push(path);
-  };
-  collect(snapshot, '');
-  return {
-    collectedFields,
-    missingFields: errors
-      .filter((error) => error.reason === 'required')
-      .map((error) => error.field),
-    errors,
-  };
-}
-
-export function assertOrderSubmissionReady(snapshot: OrderSnapshot, now = Date.now()): void {
-  const { errors } = inspectOrder(snapshot, now);
   if (errors.length)
     throw new ApiException(
       422,

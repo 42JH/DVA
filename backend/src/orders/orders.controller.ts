@@ -1,42 +1,113 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import {
-  ApiBadRequestResponse,
-  ApiOkResponse,
-  ApiOperation,
-  ApiProperty,
+  Body,
+  Headers,
+  Controller,
+  Post,
+  Req,
+  createParamDecorator,
+  ExecutionContext,
+  ParseUUIDPipe,
+} from '@nestjs/common';
+import {
   ApiTags,
+  ApiExtraModels,
+  ApiBadRequestResponse,
+  ApiUnauthorizedResponse,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiConflictResponse,
   ApiUnprocessableEntityResponse,
+  ApiCreatedResponse,
+  ApiHeader,
+  ApiOperation,
+  ApiBody,
+  getSchemaPath,
 } from '@nestjs/swagger';
+import { Request } from 'express';
 import { MvpAiOrderIntake } from '../auth/mvp-ai-access';
+import { AuditOperation } from '../audit/audit-operation';
+import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
-import { OrderInputDto } from './dto/order-input.dto';
+import { CreateOrderDto } from './dto/create-order.dto';
+import { CreatedOrderDto } from './dto/order-response.dto';
 import { OrdersService } from './orders.service';
 
-class OrderValidationResultDto {
-  @ApiProperty({ example: true }) valid!: boolean;
-}
-class OrderValidationResponseDto {
-  @ApiProperty({ type: OrderValidationResultDto }) data!: OrderValidationResultDto;
-  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
-}
+const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
+  context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
+);
 
 @ApiTags('Orders')
+@ApiExtraModels(CreateOrderDto, CreatedOrderDto, RequestMetaDto, ErrorResponseDto)
+@ApiBadRequestResponse({ type: ErrorResponseDto })
+@ApiUnauthorizedResponse({ type: ErrorResponseDto })
+@ApiForbiddenResponse({ type: ErrorResponseDto })
+@Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
-  @Post('validation')
-  @HttpCode(200)
+  @Post()
   @MvpAiOrderIntake()
+  @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
   @ApiOperation({
-    summary: 'AI 주문 정보 일괄 검증',
+    summary: 'ORD-01 주문 생성',
+    security: [{ adminSession: [] }, {}],
     description:
-      '주문·고객을 생성하지 않는 검증 API. MVP 서비스 인증은 135번에서 도입합니다. 실제 최종 접수(57번)는 같은 검증 로직을 서버 내부에서 다시 사용하며 별도 사전 검증 호출을 요구하지 않습니다.',
+      'AI와 관리자가 같은 경로를 사용합니다. AI는 기존 통화 ID(X-Call-Session-Id), 관리자는 활성 세션을 사용합니다. customerSeq 또는 customer 중 하나로 고객을 연결·등록합니다. 정보가 모두 있어도 COLLECTING이며 ORD-04/06은 같은 orderSeq를 이어받습니다. AI 서비스 인증은 MVP 이후 Jira 135 범위입니다.',
   })
-  @ApiOkResponse({ type: OrderValidationResponseDto })
-  @ApiBadRequestResponse({ type: ErrorResponseDto })
+  @ApiBody({
+    schema: {
+      allOf: [{ $ref: getSchemaPath(CreateOrderDto) }],
+      oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
+    },
+    examples: {
+      existingCustomer: {
+        summary: '기존 고객 ID로 저장 (실제 ID로 변경)',
+        value: { customerSeq: 31, parcels: [] },
+      },
+      customerByPhone: {
+        summary: '전화번호로 고객 연결 또는 신규 등록',
+        value: { customer: { name: '예시 고객', phoneNumber: '01012345678' }, parcels: [] },
+      },
+    },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+  })
+  @ApiHeader({
+    name: 'X-Call-Session-Id',
+    required: false,
+    description:
+      'AI 호출 시 필수인 기존 callSessionSeq. 관리자 호출 시 선택. 통화 ID 자체는 인증 수단이 아닙니다.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
   @ApiUnprocessableEntityResponse({ type: ErrorResponseDto })
-  validate(@Body() input: OrderInputDto) {
-    return this.orders.validate(input);
+  @ApiCreatedResponse({
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(CreatedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  create(
+    @Req() request: AuthRequest,
+    @CreationKey(new ParseUUIDPipe()) key: string,
+    @Body() input: CreateOrderDto,
+    @Headers('x-call-session-id') callSessionId?: string,
+  ) {
+    return this.orders.create(
+      request.admin?.adminUserSeq ?? null,
+      key.toLowerCase(),
+      input,
+      request.requestId,
+      callSessionId,
+    );
   }
 }
