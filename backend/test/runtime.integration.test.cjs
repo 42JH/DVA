@@ -109,7 +109,7 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   });
   assert.equal(login.status, 200);
   const session = login.headers.get('set-cookie').split(';')[0];
-  const headers = { ...json, Cookie: session, 'Idempotency-Key': randomUUID() };
+  const headers = { ...json, Cookie: session };
   const company = await fetch(root + '/companies', {
     method: 'POST',
     headers,
@@ -122,24 +122,22 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   const suffix = ',' + number;
   const content = prefix + 'a'.repeat(1024 * 1024 - Buffer.byteLength(prefix + suffix)) + suffix;
   assert.equal(Buffer.byteLength(content), 1024 * 1024);
-  const key = randomUUID();
-  const upload = async (data, uploadKey = key, authenticated = true) => {
+  const upload = async (data, authenticated = true) => {
     const form = new FormData();
     form.append('file', new Blob([data], { type: 'text/csv' }), 'members.csv');
     return fetch(root + `/companies/${companyId}/members/import`, {
       method: 'POST',
       headers: {
         Origin: origin,
-        'Idempotency-Key': uploadKey,
         ...(authenticated ? { Cookie: session } : {}),
       },
       body: form,
     });
   };
-  assert.equal((await upload(content, key, false)).status, 401);
+  assert.equal((await upload(content, false)).status, 401);
   assert.equal((await upload(content)).status, 204);
   assert.equal((await upload(content)).status, 204);
-  const tooLarge = await upload(content + 'a', randomUUID());
+  const tooLarge = await upload(content + 'a');
   assert.equal(tooLarge.status, 413);
   assert.equal((await tooLarge.json()).error.code, 'PAYLOAD_TOO_LARGE');
   const list = await fetch(root + `/companies/${companyId}/members`, {
@@ -151,8 +149,7 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
     membershipId = row.membership.membershipSeq;
   const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
   assert.equal(
-    (await upload(`employeeNo,name,phoneNumber\n001,운영 이미지 고객,${nextPhone}`, randomUUID()))
-      .status,
+    (await upload(`employeeNo,name,phoneNumber\n001,운영 이미지 고객,${nextPhone}`)).status,
     204,
   );
   const customer = await fetch(root + '/customers/' + customerId);

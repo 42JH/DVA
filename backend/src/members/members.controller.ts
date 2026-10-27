@@ -1,13 +1,10 @@
 import {
   Body,
   Controller,
-  createParamDecorator,
   Delete,
-  ExecutionContext,
   Get,
   HttpCode,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -20,7 +17,6 @@ import {
   ApiBody,
   ApiConsumes,
   ApiCookieAuth,
-  ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -41,10 +37,6 @@ import {
 import { MembersEnvelopeDto } from './dto/member-response.dto';
 import { CSV_MAX_BYTES } from './member-csv';
 import { CsvUpload } from './members.types';
-
-const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
-  context.switchToHttp().getRequest<AuthRequest>().get('Idempotency-Key'),
-);
 
 @ApiTags('Members')
 @ApiCookieAuth('adminSession')
@@ -91,11 +83,6 @@ export class MembersController {
       },
     },
   })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    required: true,
-    schema: { type: 'string', format: 'uuid' },
-  })
   @ApiOperation({
     summary: '기업 직원 CSV 등록·갱신',
     description:
@@ -106,29 +93,17 @@ export class MembersController {
   @ApiResponse({ status: 415, type: ErrorResponseDto })
   importCsv(
     @Param() params: MemberIdParamsDto,
-    @CreationKey(new ParseUUIDPipe()) key: string,
     @UploadedFile() file: CsvUpload | undefined,
     @Req() request: AuthRequest,
   ) {
     if (!request.is('multipart/form-data'))
       throw new ApiException(415, 'UNSUPPORTED_MEDIA_TYPE', 'multipart/form-data가 필요합니다.');
-    return this.members.importCsv(
-      params.id,
-      file,
-      request.admin.adminUserSeq,
-      key.toLowerCase(),
-      request.requestId,
-    );
+    return this.members.importCsv(params.id, file, request.admin.adminUserSeq, request.requestId);
   }
 
   @Post('companies/:id/members')
   @HttpCode(204)
   @AuditOperation({ action: 'MEMBERSHIP_CREATED', targetType: 'MEMBERSHIP', target: 'none' })
-  @ApiHeader({
-    name: 'Idempotency-Key',
-    required: true,
-    schema: { type: 'string', format: 'uuid' },
-  })
   @ApiOperation({
     summary: '기존 고객을 기업 구성원으로 등록',
     description: 'ACTIVE 고객과 기업만 허용. 같은 고객을 다른 기업으로 자동 이동하지 않습니다.',
@@ -136,17 +111,10 @@ export class MembersController {
   @ApiNoContentResponse()
   create(
     @Param() params: MemberIdParamsDto,
-    @CreationKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateMemberDto,
     @Req() request: AuthRequest,
   ) {
-    return this.members.create(
-      params.id,
-      input,
-      request.admin.adminUserSeq,
-      key.toLowerCase(),
-      request.requestId,
-    );
+    return this.members.create(params.id, input, request.admin.adminUserSeq, request.requestId);
   }
 
   @Patch('members/:id')

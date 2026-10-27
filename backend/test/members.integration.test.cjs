@@ -62,32 +62,6 @@ before(async () => {
       if (!rows[0].name)
         await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
     }
-    const upgraded = (
-      await client.query(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id') AS ready",
-      )
-    ).rows[0].ready;
-    if (!upgraded) {
-      for (const [table, migration] of [
-        ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-        ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
-        ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
-      ]) {
-        const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
-        if (!rows[0].name)
-          await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
-      }
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
-      );
-    }
-    if (
-      !(await client.query("SELECT to_regclass('api_idempotency.membership_writes') AS name"))
-        .rows[0].name
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/009-membership-write-requests.sql'), 'utf8'),
-      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -118,7 +92,7 @@ function create(
   companyId,
   customerSeq,
   employeeNo = '001',
-  key = randomUUID(),
+  key = undefined,
   role = 'MEMBER',
   host = base,
   session = cookie,
@@ -127,7 +101,10 @@ function create(
     `/companies/${companyId}/members`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(key === undefined ? {} : { 'Idempotency-Key': key }),
+      },
       body: JSON.stringify({ customerSeq, employeeNo, role }),
     },
     host,
@@ -137,7 +114,7 @@ function create(
 function upload(
   companyId,
   content,
-  key = randomUUID(),
+  key = undefined,
   host = base,
   session = cookie,
   filename = 'employees.csv',
@@ -147,7 +124,7 @@ function upload(
   form.append('file', new Blob([content], { type }), filename);
   return request(
     `/companies/${companyId}/members/import`,
-    { method: 'POST', headers: { 'Idempotency-Key': key }, body: form },
+    { method: 'POST', headers: key === undefined ? {} : { 'Idempotency-Key': key }, body: form },
     host,
     session,
   );
@@ -661,99 +638,71 @@ test('multipart validates file count, fields, type, encoding, byte cap and row c
     415,
     'UNSUPPORTED_MEDIA_TYPE',
   );
-  await error(await upload(co, content, 'bad'), 400, 'INVALID_REQUEST');
-  const noKey = new FormData();
-  noKey.append('file', new Blob([content], { type: 'text/csv' }), 'file.csv');
-  await error(
-    await request(`/companies/${co}/members/import`, { method: 'POST', body: noKey }),
-    400,
-    'INVALID_REQUEST',
-  );
   assert.deepEqual(await members(co), { data: [], hasNext: false });
 });
 
-test('manual/CSV keys are per admin and bind operation, company and content while ignoring multipart boundary/name', async () => {
+test('registration and CSV need no key and ignore legacy key headers', async () => {
+  assert.equal(
+    (await pool.query("SELECT to_regclass('api_idempotency.membership_writes') AS name")).rows[0]
+      .name,
+    null,
+  );
   const co = await company(),
-    other = await company(),
     cu = await customer(),
-    key = randomUUID();
-  await empty(await create(co, cu.id, '001', key));
-  await empty(await create(co, cu.id, ' 001 ', key.toUpperCase(), 'MEMBER', baseB));
-  await error(await create(co, cu.id, '002', key), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await error(await create(other, cu.id, '001', key), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await error(
-    await upload(co, header + `001,CSV,${cu.phoneNumber}`, key),
-    422,
-    'IDEMPOTENCY_KEY_REUSED',
+    other = await customer();
+  await empty(await create(co, cu.id));
+  await error(await create(co, cu.id, '001', 'legacy-header'), 409, 'DUPLICATE_RESOURCE');
+  await empty(await create(co, other.id, '002', 'legacy-header'));
+  await empty(await upload(co, header + '001,First,' + cu.phoneNumber, 'legacy-header'));
+  await empty(await upload(co, header + '001,Changed,' + cu.phoneNumber, 'legacy-header'));
+  assert.equal(
+    (await members(co)).data.find((row) => row.customer.customerSeq === cu.id).customer.name,
+    'Changed',
   );
-  const another = await account();
-  await error(
-    await create(co, cu.id, '001', key, 'MEMBER', base, another.cookie),
-    409,
-    'DUPLICATE_RESOURCE',
-  );
-  const importKey = randomUUID(),
-    content = header + `002,CSV,${phone()}`;
-  await empty(await upload(co, content, importKey));
-  await empty(await upload(co, content, importKey, baseB, cookie, 'renamed.csv'));
-  await error(await upload(co, content + '\n', importKey), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await error(await upload(other, content, importKey), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await empty(await upload(co, content, importKey, base, another.cookie));
   assert.equal((await members(co)).data.length, 2);
 });
 
-test('durable retries survive app restart and unlink without recreating a deleted membership or duplicate audit', async () => {
+test('repeated registration conflicts after restart and unlink permits a new registration', async () => {
   const co = await company(),
-    cu = await customer(),
-    key = randomUUID();
-  await empty(await create(co, cu.id, '001', key));
+    cu = await customer();
+  await empty(await create(co, cu.id));
   const m = await member(co, cu.id);
   const restarted = await start();
-  await empty(await create(co, cu.id, '001', key, 'MEMBER', await restarted.getUrl()));
-  const successful = await pool.query(
-    "SELECT count(*) FROM audit_logs WHERE action='MEMBERSHIP_CREATED' AND target_seq=$1 AND result='SUCCESS'",
-    [m.membershipSeq],
+  await error(
+    await create(co, cu.id, '001', undefined, 'MEMBER', await restarted.getUrl()),
+    409,
+    'DUPLICATE_RESOURCE',
   );
-  assert.equal(successful.rows[0].count, '1');
   await empty(await remove(m.membershipSeq));
-  await empty(await create(co, cu.id, '001', key));
-  assert.equal((await members(co)).data.length, 0);
-  await empty(await create(co, cu.id, '001'));
+  await empty(await create(co, cu.id));
   assert.notEqual((await member(co, cu.id)).membershipSeq, m.membershipSeq);
 });
 
-test('in-flight keys and membership writes return retryable conflicts without retaining failed receipts', async () => {
+test('concurrent membership writes still return retryable conflicts without a request key', async () => {
   const co = await company(),
     cu = await customer(),
-    key = randomUUID();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    assert.equal(await repository.lockKey(client, adminId, key), true);
-    await error(await create(co, cu.id, '001', key), 409, 'REQUEST_IN_PROGRESS');
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
-  await empty(await create(co, cu.id, '001', key));
-  const m = await member(co, cu.id);
-  const lock = await pool.connect();
+    other = await customer();
+  await empty(await create(co, cu.id));
+  const m = await member(co, cu.id),
+    lock = await pool.connect();
   try {
     await lock.query('BEGIN');
     assert.equal(await repository.lockWrites(lock), true);
+    await error(await create(co, other.id, '002'), 409, 'REQUEST_IN_PROGRESS');
     await error(await patch(m.membershipSeq, { role: 'ORG_ADMIN' }), 409, 'REQUEST_IN_PROGRESS');
-    await error(await upload(co, header + `002,새 고객,${phone()}`), 409, 'REQUEST_IN_PROGRESS');
+    await error(await upload(co, header + '003,New,' + phone()), 409, 'REQUEST_IN_PROGRESS');
   } finally {
     await lock.query('ROLLBACK');
     lock.release();
   }
   await empty(await patch(m.membershipSeq, { role: 'ORG_ADMIN' }));
+  await empty(await create(co, other.id, '002'));
 });
 
-test('concurrent uploads across app instances create one customer/membership and one successful batch audit', async () => {
+test('concurrent uploads keep one customer/membership and audit each successful import', async () => {
   const co = await company(),
     number = phone(),
-    key = randomUUID(),
+    key = undefined,
     content = header + `001,동시 고객,${number}`;
   const responses = await Promise.all(
     Array.from({ length: 6 }, (_, i) => upload(co, content, key, i % 2 ? base : baseB)),
@@ -774,7 +723,7 @@ test('concurrent uploads across app instances create one customer/membership and
         [co],
       )
     ).rows[0].count,
-    '1',
+    String(responses.filter((response) => response.status === 204).length + 1),
   );
 });
 
@@ -799,22 +748,21 @@ test('concurrent companies cannot acquire the same phone/customer and retries ne
   await error(await upload(loser, content), 422, 'VALIDATION_FAILED');
 });
 
-test('CSV receipt failure rolls back phone/name changes, new customers, memberships and success audit', async () => {
+test('CSV audit failure rolls back changed customers, new customers and memberships', async () => {
   const co = await company(),
     cu = await customer();
   await empty(await create(co, cu.id));
-  const key = randomUUID(),
-    newPhone = phone(),
+  const newPhone = phone(),
     otherPhone = phone();
-  const content = header + `001,실패 이름,${newPhone}\n002,실패 신규,${otherPhone}`;
+  const content = header + '001,Changed,' + newPhone + '\n002,New,' + otherPhone;
   await pool.query(
-    "CREATE FUNCTION api_idempotency.fail_members_receipt_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test receipt failure'; END $$",
+    "CREATE FUNCTION fail_member_csv_audit_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MEMBERS_IMPORTED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$",
   );
   try {
     await pool.query(
-      'CREATE TRIGGER fail_members_receipt_37 BEFORE INSERT ON api_idempotency.membership_writes FOR EACH ROW EXECUTE FUNCTION api_idempotency.fail_members_receipt_37()',
+      'CREATE TRIGGER fail_member_csv_audit_37 BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_member_csv_audit_37()',
     );
-    await error(await upload(co, content, key), 500, 'INTERNAL_ERROR');
+    await error(await upload(co, content), 500, 'INTERNAL_ERROR');
     const old = (
       await pool.query('SELECT name,phone_number FROM customers WHERE customer_seq=$1', [cu.id])
     ).rows[0];
@@ -828,15 +776,6 @@ test('CSV receipt failure rolls back phone/name changes, new customers, membersh
     assert.equal(
       (
         await pool.query(
-          'SELECT count(*) FROM api_idempotency.membership_writes WHERE idempotency_key=$1',
-          [key],
-        )
-      ).rows[0].count,
-      '0',
-    );
-    assert.equal(
-      (
-        await pool.query(
           "SELECT count(*) FROM audit_logs WHERE action='MEMBERS_IMPORTED' AND target_seq=$1 AND result='SUCCESS'",
           [co],
         )
@@ -844,12 +783,10 @@ test('CSV receipt failure rolls back phone/name changes, new customers, membersh
       '0',
     );
   } finally {
-    await pool.query(
-      'DROP TRIGGER IF EXISTS fail_members_receipt_37 ON api_idempotency.membership_writes',
-    );
-    await pool.query('DROP FUNCTION api_idempotency.fail_members_receipt_37()');
+    await pool.query('DROP TRIGGER IF EXISTS fail_member_csv_audit_37 ON audit_logs');
+    await pool.query('DROP FUNCTION fail_member_csv_audit_37()');
   }
-  await empty(await upload(co, content, key));
+  await empty(await upload(co, content));
   assert.equal((await members(co)).data.length, 2);
 });
 
@@ -947,7 +884,12 @@ test('OpenAPI contains five protected operations, CSV upload shape, representati
     upload.requestBody.content['multipart/form-data'].schema.properties.file.format,
     'binary',
   );
-  assert.equal(upload.parameters.find((item) => item.name === 'Idempotency-Key').required, true);
+  assert.ok(!(upload.parameters ?? []).some((item) => item.name === 'Idempotency-Key'));
+  assert.ok(
+    !(document.paths['/api/companies/{id}/members'].post.parameters ?? []).some(
+      (item) => item.name === 'Idempotency-Key',
+    ),
+  );
   assert.deepEqual(Object.keys(document.components.schemas.UpdateMemberDto.properties).sort(), [
     'role',
     'status',

@@ -13,7 +13,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `003-admin-auth-sessions.sql`: 관리자 이름과 PostgreSQL 세션 저장소. 기존 관리자 데이터가 있다면 이름 보완 정책이 필요하며 자동 채우지 않는다.
 - `004-organization-creation-requests.sql`, `005-customer-creation-requests.sql`, `007-order-creation-requests.sql`: 과거 기업·고객·주문 생성 요청 기록. 적용 이력과 체크섬 보존을 위해 파일을 유지한다.
 - `008-simplify-creation-requests.sql`: orders.creation_request_id UUID UNIQUE 추가 → 기존 주문 요청 키 이전 → 기업·고객·주문 요청 기록 테이블 및 api_idempotency 스키마 제거. 업무 데이터·주문 version·updated_at·감사·통화 연결·PBX 기록은 보존한다.
-- `009-membership-write-requests.sql`: 008 이후 api_idempotency 스키마와 membership_writes를 생성한다. 구성원 등록·CSV 완료 기록만 보관하며 기업·고객·주문 생성 기록은 복원하지 않는다. 미배포 구성원용 006을 병합 시 009로 이동했으며 기존 007·008 원본은 유지한다.
+- `009-membership-write-requests.sql`: 과거 구성원 등록·CSV 처리 기록. 이미 적용된 원본·체크섬·이력을 그대로 보존한다.
+- `010-remove-membership-write-requests.sql`: 구성원 요청 기록 테이블과 전용 스키마를 제거한다. 009를 포함한 기존 적용 이력과 고객·기업·소속·주문·감사·PBX 데이터는 보존한다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
@@ -51,7 +52,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 ## 서버 적용
 
-008은 구버전 앱이 사용하는 생성 요청 테이블을 삭제한다. 이 전환은 [릴리스 배포 절차](../../infra/deploy/README.md)에 따라
+008·010은 구버전 앱이 사용하는 요청 기록 테이블을 삭제한다. 이 전환은 [릴리스 배포 절차](../../infra/deploy/README.md)에 따라
 기존 백엔드 중지 → DB 백업 → migration/검증 → 새 앱 실행 순서로 적용한다. 아래 수동 runner만 실행해
 구버전 앱을 계속 켜 두면 등록 API가 실패할 수 있다. 직접 적용할 때도 같은 중지·백업·앱 교체 순서를 지킨다.
 
@@ -81,11 +82,11 @@ archive 목록 확인 후 advisory lock과 하나의 트랜잭션으로 미적�
 
 백엔드 자체는 시작 시 001만 실행한다. Jenkins 배포는 릴리스에 포함된 runner를 앱 교체 전에 실행한다.
 일반 개발 배포는 `--no-backup`으로 DB 백업을 생략하며, 적용 이력·체크섬·트랜잭션은 유지한다.
-008 최초 전환은 예외로 기존 백엔드를 중지하고 `shared/db-backups`에 백업한 뒤 실행한다.
+008과 010의 최초 전환은 예외로 기존 백엔드를 중지하고 `shared/db-backups`에 백업한 뒤 실행한다.
 마이그레이션 이후 `verify.sql` 검증까지 성공해야 새 앱을 시작한다. 앱을 직접 실행하는 경우에는 runner를 별도로 실행한다.
 
 ```sh
-# 중지·백업이 필요한 008 전환을 제외한 개발 DB 적용
+# 중지·백업이 필요한 008·010 전환을 제외한 개발 DB 적용
 sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 ```
 
@@ -93,13 +94,13 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 생성 중복 처리 기준
 
-기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객은 별도 생성 요청 기록을 두지 않으며, 구성원 개별 등록·CSV의 완료 기록은 009의 membership_writes에 보관한다.
+기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 개별 등록·CSV는 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거하며 개별 등록 중복은 고유 제약, CSV 재업로드는 기업·사번 기준 갱신으로 처리한다.
 주문은 orders.creation_request_id와 통화 연결을 사용한다. 재시도는 기존 주문의 현재 버전을 반환하며 최초 본문·응답은 보관하지 않는다.
 배송 상태 이력의 request_id, PBX 수신 기록, 기존 version·감사·세션 테이블은 유지한다. 디버 최종 접수 구현은 별도 작업이며 기존 orders.status를 사용한다.
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `010-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `011-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -109,8 +110,8 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 적용 중 실패하면 트랜잭션 롤백 후 원인을 수정한다. 성공 후에는 앱 이미지 롤백만으로 DB가
 되돌아가지 않는다. 보완 migration을 우선 고려하고, 백업 복원이 필요하면 서비스를 정지하고
 별도 DB에 복원·검증한 뒤 전환한다. 운영 DB에 `--clean`, 테이블 삭제 또는 볼륨 초기화를 실행하지 않는다.
-008 적용 후에는 구버전 앱 자동 복귀와 호환되지 않는 수동 롤백을 배포 스크립트에서 차단한다.
-백업/SQL 실패로 008이 커밋되지 않았으면 중지한 기존 앱을 다시 시작한다. 전환이 커밋된 뒤 실패하면
+008·010 적용 후에는 삭제된 테이블을 요구하는 구버전 앱 자동 복귀와 수동 롤백을 배포 스크립트에서 차단한다.
+백업/SQL 실패로 해당 전환이 커밋되지 않았으면 중지한 기존 앱을 다시 시작한다. 전환이 커밋된 뒤 실패하면
 API가 중지된 상태로 남을 수 있으므로 호환되는 앱을 재배포하거나 위 복구 절차를 수행한다.
 
 ```sh
