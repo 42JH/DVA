@@ -14,5 +14,6 @@
 - GPT-Live 세션의 `triggers`(type `decisions`)·Decision API는 SDK 타입에는 있으나 공개 문서에 없어 **미확인**이라 쓰지 않는다. 확인되면 판별 수단으로 바꿀 수 있다.
 - 받아쓰기: `session.input_transcript.delta` / `session.output_transcript.delta`. **문장 경계·item ID가 없다**(대신 `start_ms`·`end_ms`가 있다). 말하는 쪽의 마지막 말풍선이 맨 끝이거나, 그 말풍선의 끝과 새 조각의 간격이 서버 설정 `monitor.bubble_gap_ms` 안이면 이어 붙인다(겹쳐 말해도 쪼개지지 않게). 아니면 새 말풍선.
 - 먼저 인사: 세션 `input`에 developer 메시지("전화가 방금 연결됐습니다. 지금 바로 인사하세요.")를 넣는다.
-- 통화 종료: 종료 요청·"더 용건 없음"을 판별한 직후 끊으면 마무리 인사가 잘린다. **요청 뒤에 음성 출력(`session.output_audio.delta`·`output_transcript.delta`)이 한 번 이상 나오고** 서버 설정의 시간만큼 멈추면(최대 대기 있음) hangup한다. 상담원 연결 동의를 판별했을 때도 같은 기준으로 기다린 뒤 refer한다.
+- 통화 종료: 종료 요청·"더 용건 없음"을 판별한 직후 끊으면 마무리 인사가 잘린다. **요청 뒤에 음성 출력(`session.output_audio.delta`·`output_transcript.delta`)이 한 번 이상 나오고** 서버 설정의 시간만큼 멈추면(최대 대기 있음) hangup한다. 상담원 연결 동의를 판별했을 때도 같은 기준으로 기다린 뒤 refer한다. refer가 실패하면 실패 안내(진행 상태)와 마무리 인사를 기다린 뒤 hangup한다.
+- 고객 끊김: 보통 고객이 끊으면 OpenAI가 세션을 닫고(`session.closed` `remote_hangup`) PBX 종료 웹훅도 온다. 둘 다 오지 않는 경우의 안전장치로, 고객 받아쓰기가 `call.idle_hangup_sec` 동안 없거나 통화가 `call.max_call_sec`를 넘으면 `ending`으로 옮겨 마무리 인사 후 끊는다(`watch_idle`). 통화가 끝나면 이유를 INFO 로그로 남긴다.
 - 함수 호출은 통화별 작업으로 돌려 이벤트 받기를 막지 않고, 통화별 잠금(FIFO)으로 순서를 지킨다. 구현: `app/sideband.py`.

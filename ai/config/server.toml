@@ -10,7 +10,11 @@ reject_status_code = 486
 hangup_silence_sec = 1.5
 # 마무리 인사를 기다리는 최대 시간(초)
 hangup_max_wait_sec = 10.0
-# 상담원 전환(refer) 대상
+# 고객 끊김을 못 알아챈 경우(SIP 종료·PBX 종료 웹훅이 모두 안 옴)의 안전장치: 고객 말이 이만큼(초) 없으면 마무리 인사 후 끊는다
+idle_hangup_sec = 60.0
+# 통화 최대 길이(초). 넘으면 마무리 인사 후 끊는다
+max_call_sec = 1200.0
+# 상담원 전환(refer) 대상. 지금은 자리표시자(PBX 담당자에게 받을 값)
 refer_target_uri = "sip:agent@example.com"
 # 같은 webhook-id를 무시하는 시간(초)
 webhook_dedupe_sec = 3600
@@ -29,6 +33,8 @@ max_chars = 400
 
 [backend]
 # 고객·주문·배송지를 관리하는 백엔드 서버 API(spec/backend-api.md). 주소는 환경변수 BACKEND_API_URL
+# true면 백엔드 대신 메모리 가짜 백엔드(app/mock_backend.py). 백엔드 DB 연동 전까지. 재시작하면 데이터가 사라진다
+mock = true
 # 요청 하나의 시간 제한(초). 통화 시작 조회는 accept 전이라 짧게 둔다
 timeout_sec = 3.0
 # 조회 도구가 돌려주는 최근 주문 수

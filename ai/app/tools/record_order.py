@@ -17,6 +17,7 @@ async def record_order(ctx, args: OrderFields) -> Result:
             setattr(ctx.order, f"{role}_address_detail", None)
     for name, value in values.items():
         setattr(ctx.order, name, value)
+    ctx.from_saved -= set(values)
     events = ["order.updated"] if values else []
     if invalid:
         raise ToolError(f"전화번호 자릿수가 맞지 않아 기록하지 않음: {', '.join(invalid)}",

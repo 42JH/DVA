@@ -23,6 +23,7 @@ INTENTS = {
     "modify": "이미 접수한 주문을 고치려 함",
     "cancel": "이미 접수한 주문을 취소하려 함",
     "handoff": "상담원(사람)과 통화하려 함",
+    "help": "보상 판단·결제 오류·계약/정산 등 상담원 처리가 필요한 요청이나 불만. 단순 FAQ·요금표·배송·포장·이용 시간·취소 가능 조건 질문은 제외",
     "stop": "지금 하던 조회·수정·취소·상담원 연결을 그만두겠다고 함",
     "end": "통화를 끝내려 함",
 }
@@ -117,11 +118,18 @@ async def classify(call, conn, client, seq: int) -> None:
             log.exception("답 처리 실패 %s", call.session_id)
             record.update(status="error", output={**record["output"], "error": type(e).__name__})
             call.add_error(f"답 처리 실패: {type(e).__name__}")
+            call.answer_failures += 1
             try:
-                await conn.session.thinking.append(content=call.texts.answer_error, delegation_id=None)
+                if call.answer_failures >= 2:  # 다시 확인받아도 또 실패: 상담원 연결을 먼저 제안
+                    call.handoff_variant = "offer"
+                    await engine.apply(call, ["intent.handoff"], "listener")
+                    await send_progress(call, conn)
+                else:
+                    await conn.session.thinking.append(content=call.texts.answer_error, delegation_id=None)
             except Exception:
                 log.exception("오류 안내 전송 실패 %s", call.session_id)
             return
+        call.answer_failures = 0
         record["status"] = "done"
         record["output"]["events"] = events
         if events or answer != NO_ANSWER:
@@ -152,7 +160,9 @@ async def apply_answer(call, answer: str, intent: str) -> list[str]:
     if intent != "none" and engine.current(call).listen:  # 답으로 ending에 들어갔으면 용건은 무시
         if intent == "end":
             call.request_hangup()
-        more = ["call.ending" if intent == "end" else f"intent.{intent}"]
+        if intent in ("handoff", "help"):  # 처리할 수 없는 요청은 상담원 연결을 먼저 제안
+            call.handoff_variant = "offer" if intent == "help" else None
+        more = ["call.ending" if intent == "end" else "intent.handoff" if intent == "help" else f"intent.{intent}"]
         await engine.apply(call, more, "listener")
         events += more
     return events

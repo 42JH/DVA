@@ -1,4 +1,4 @@
-"""RunPod에서만 실행하는 Qwen 리랭킹 API. 전화 서버에는 torch가 필요 없다."""
+"""외부 GPU VM/RunPod의 Qwen 리랭킹 API. 전화 서버에는 torch가 필요 없다."""
 
 import asyncio
 import hmac
@@ -59,7 +59,7 @@ def create_gpu_app(predictor=None):
     @app.post('/rerank')
     async def rerank(body: RerankRequest, authorization: str | None = Header(default=None)):
         expected = 'Bearer '+os.getenv('RAG_RERANKER_API_KEY', '')
-        if not os.getenv('RAG_RERANKER_API_KEY') or not hmac.compare_digest(authorization or '', expected):
+        if not os.getenv('RAG_RERANKER_API_KEY') or not hmac.compare_digest((authorization or '').encode(), expected.encode()):
             raise HTTPException(401, detail='인증 실패')
         def infer():
             # HTTP 취소 뒤에도 GPU 작업은 계속될 수 있으므로 스레드 내부에서 잠근다.

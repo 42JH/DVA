@@ -47,7 +47,7 @@ class RagService:
 
                 cfg = self.cfg
                 reranker = RemoteReranker(os.getenv('RAG_RERANKER_URL'), os.getenv('RAG_RERANKER_API_KEY'), cfg.http_timeout_sec)
-                client = QdrantClient(url=os.getenv('QDRANT_URL', 'http://qdrant:6333'),
+                client = QdrantClient(url=os.getenv('QDRANT_URL') or 'http://127.0.0.1:6333',
                                       api_key=os.environ['QDRANT_API_KEY'], timeout=cfg.http_timeout_sec)
                 vectors = client.get_collection(cfg.collection).config.params.vectors
                 if not isinstance(vectors, models.VectorParams) or vectors.size != cfg.dimensions or vectors.distance != models.Distance.COSINE:

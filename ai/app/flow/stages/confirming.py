@@ -12,6 +12,7 @@ async def submit(ctx) -> None:
     key = f"{ctx.session_id}-{len(ctx.submitted) + 1}"
     order_no = await ctx.backend.create_order(ctx.caller, ctx.session_id, order, None, key)
     ctx.order = Order()
+    ctx.from_saved = set()
     ctx.last_order_no = order_no
     ctx.submitted.append(order_no)
     ctx.recent = order  # 이번 통화의 다음 주문에서 "최근 배송"

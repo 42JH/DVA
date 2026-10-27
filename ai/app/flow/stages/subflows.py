@@ -49,6 +49,7 @@ STAGES = [
         description="상담원 연결",
         tools=("get_state", "search_manual"),
         transitions=(Transition("handoff.requested", "ending"),) + BACK,
+        variants=("offer",),  # 처리할 수 없는 요청·반복 실패로 서버가 먼저 제안
         choices=lambda ctx: HANDOFF_CHOICES,
         on_answer=handoff_answer,
         subflow=True,

@@ -2,3 +2,5 @@
 manuals/*.md -text whitespace=-blank-at-eol,cr-at-eol
 config/rag-search-descriptions.json -text whitespace=cr-at-eol
 evaluation/datasets/** -text whitespace=cr-at-eol
+deploy/gcp/*.sh text eol=lf
+deploy/gcp/*.service text eol=lf

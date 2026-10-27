@@ -252,11 +252,15 @@ def progress_text(ctx: Any, max_chars: int) -> str:
     """음성 모델에 thinking.append로 줄 "다음에 물을 것 + 기록된 값". max_chars를 넘지 않는다."""
     texts = ctx.texts
     nxt = next_text(ctx)
+    m = missing(ctx)
+    # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다
+    then = texts.progress_then.format(next2=texts.fields[m[1]].format(**ctx.text_vars())) if len(m) > 1 else ""
     items = ctx.recorded()
     for cut in (None, 40, 24, 12, 6, 0):
         shown = [(k, v if cut is None else v[:cut]) for k, v in items] if cut != 0 else []
-        recorded = texts.progress_sep.join(texts.progress_item.format(label=k, value=v) for k, v in shown)
-        text = texts.progress.format(stage=current(ctx).description, recorded=recorded, next=nxt)
+        recorded = (texts.progress_sep.join(texts.progress_item.format(label=k, value=v) for k, v in shown)
+                    or texts.empty_value)
+        text = texts.progress.format(stage=current(ctx).description, recorded=recorded, next=nxt, then=then)
         if len(text) <= max_chars:
             return text
     return text[:max_chars]

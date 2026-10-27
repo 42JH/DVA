@@ -1,21 +1,19 @@
-"""테스트 공용: 실제 OpenAI·PBX·DB를 부르지 않는다(가짜 DB, 가짜 클라이언트, 서명한 가짜 웹훅)."""
+"""테스트 공용: 실제 OpenAI·PBX·DB를 부르지 않는다(가짜 백엔드 app/mock_backend.py, 가짜 클라이언트, 서명한 가짜 웹훅)."""
 
 import asyncio
 import base64
 import hashlib
 import hmac
-import itertools
 import json
 import time
 from types import SimpleNamespace
 
 from openai import AsyncOpenAI
 
-from app.backend_api import CallerContext
 from app.call import Call
 from app.config import load_server_config, load_texts
 from app.main import check_definitions
-from app.order import ORDER_FIELDS, Order, Place
+from app.mock_backend import MockBackend
 
 CFG = load_server_config()
 TEXTS = load_texts()
@@ -35,64 +33,7 @@ def run(coro):
     return asyncio.run(coro)
 
 
-class FakeBackend:
-    """app.backend_api.BackendAPI와 같은 메서드를 메모리로. 발신번호 기준으로만 보이고 고친다."""
-
-    def __init__(self):
-        self.orders: list[dict] = []
-        self.places: dict[str, list[tuple[str, Place]]] = {}  # 소유자 → [(종류, 배송지)]
-        self.keys: dict[str, str] = {}  # Idempotency-Key → 접수번호
-        self._seq = itertools.count(1)
-
-    def places_of(self, owner, kind):
-        return [p for k, p in self.places.get(owner, []) if k == kind]
-
-    async def caller_context(self, phone):
-        recent = next((o for o in reversed(self.orders) if o["caller_phone"] == phone and o["status"] == "received"),
-                      None)
-        return CallerContext(
-            recent=Order(**{f: recent[f] for f in ORDER_FIELDS}) if recent else None,
-            places={kind: self.places_of(phone, kind) for kind in ("origin", "destination")})
-
-    async def create_order(self, caller, session_id, order: Order, fare, idempotency_key):
-        if idempotency_key in self.keys:
-            return self.keys[idempotency_key]
-        no = f"Q{next(self._seq):06d}"
-        self.orders.append({"order_no": no, "caller_phone": caller, "session_id": session_id, "fare": fare,
-                            "status": "received", **order.model_dump()})
-        if idempotency_key:
-            self.keys[idempotency_key] = no
-        return no
-
-    async def list_orders(self, caller, limit):
-        mine = [o for o in reversed(self.orders) if o["caller_phone"] == caller]
-        return [{k: o[k] for k in ("order_no", "receiver_name", "item", "status")} for o in mine[:limit]]
-
-    def _status(self, caller, order_no):
-        o = next((o for o in self.orders if o["order_no"] == order_no and o["caller_phone"] == caller), None)
-        return o["status"] if o else "not_found"
-
-    async def update_order(self, caller, order_no, values):
-        if self._status(caller, order_no) != "received":
-            return self._status(caller, order_no)
-        o = next(o for o in self.orders if o["order_no"] == order_no)
-        o.update({k: v for k, v in values.items() if k in ORDER_FIELDS})
-        return "ok"
-
-    async def cancel_order(self, caller, order_no):
-        if self._status(caller, order_no) != "received":
-            return self._status(caller, order_no)
-        next(o for o in self.orders if o["order_no"] == order_no)["status"] = "cancelled"
-        return "ok"
-
-    async def save_places(self, owner, places):
-        mine = self.places.setdefault(owner, [])
-        new = [kp for kp in places if kp not in mine]
-        mine.extend(new)
-        return len(new)
-
-    async def recent_orders(self, limit):
-        return list(reversed(self.orders))[:limit]
+FakeBackend = MockBackend
 
 
 def make_call(backend=None, caller=CALLER, session_id="live_test") -> Call:
@@ -109,6 +50,8 @@ class FakeSessions:
         self.calls: list[tuple] = []
         self.accept_error: Exception | None = None
         self.accept_delay = 0.0
+        self.hangup_error: Exception | None = None
+        self.refer_error: Exception | None = None
 
     async def accept(self, session_id, *, session):
         await asyncio.sleep(self.accept_delay)
@@ -121,9 +64,13 @@ class FakeSessions:
 
     async def hangup(self, session_id):
         self.calls.append(("hangup", session_id))
+        if self.hangup_error:
+            raise self.hangup_error
 
     async def refer(self, session_id, *, target_uri):
         self.calls.append(("refer", session_id, target_uri))
+        if self.refer_error:
+            raise self.refer_error
 
     def of(self, kind):
         return [c for c in self.calls if c[0] == kind]

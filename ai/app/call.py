@@ -9,7 +9,7 @@ from typing import Any
 from app.config import ServerConfig, Texts
 from app.events import bus
 from app.flow import engine
-from app.order import ORDER_FIELDS, Order, Place
+from app.order import ORDER_FIELDS, PHONE_FIELDS, Order, Place
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ def mask_phone(phone: str | None) -> str:
     return phone[:3] + "*" * max(len(phone) - 7, 0) + phone[-4:] if len(phone) > 7 else "*" * len(phone)
 
 
+
+def _region(address: str | None) -> str:
+    """주소 앞 두 낱말(시·구 정도). 최근 배송을 말로 짧게 가리킬 때."""
+    return " ".join((address or "").split()[:2])
+
+
 class Call:
     def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any):
         self.session_id = session_id
@@ -69,6 +75,11 @@ class Call:
         self.heard_stage = ""  # heard_text를 모은 단계
         self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
+        self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
+        self.answer_failures = 0  # 연달아 실패한 답 처리(접수·저장 등) 수
+        # 상담원 연결: offer = 처리할 수 없는 요청·반복 실패로 서버가 먼저 제안, refer_failed = 전환 실패
+        self.handoff_variant: str | None = None
+        self.refer_failed = False
         self.listen_timer: asyncio.Task | None = None
         self.listen_seq = 0  # 마지막으로 시작한 판별 번호(늦게 온 옛 판별은 버린다)
         self.listen_tasks: set[asyncio.Task] = set()
@@ -113,6 +124,12 @@ class Call:
         self.dest_variant: str | None = None  # find_destination 안내(need_region · need_detail · need_more)
         self.origin_variant: str | None = None  # find_origin 안내(which)
         self.origin_checked = False  # 이번 주문에서 "보내는 곳이 지난번과 같은지"를 이미 물었음
+        self.from_saved: set[str] = set()  # 저장된 배송지·최근 배송으로 채운 항목(번호·상세주소는 읽지 않게 가린다)
+
+    def use_place(self, role: str, place: Place) -> None:
+        """저장된 배송지(또는 최근 배송)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
+        self.order.set_place(role, place)
+        self.from_saved |= {f"{role}_phone", f"{role}_address_detail"}
 
     # --- 상태 엔진이 쓰는 것 ---
 
@@ -120,11 +137,26 @@ class Call:
         return getattr(self.order, name) is not None
 
     def stage_variant(self, stage: str) -> str | None:
-        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant}.get(stage)
+        ending = "refer_failed" if self.refer_failed else "handoff" if self.refer_requested.is_set() else None
+        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant,
+                "handoff": self.handoff_variant, "ending": ending}.get(stage)
 
     def recorded(self) -> list[tuple[str, str]]:
-        labels = self.texts.labels
-        return [(labels[f], v) for f in ORDER_FIELDS if (v := getattr(self.order, f)) is not None]
+        """음성 모델·백엔드에 보여 줄 기록 값. 저장된 곳에서 온 번호·상세주소와 발신번호는 값 대신 표시만 한다
+        (고객이 직접 불러 주지 않은 값을 소리 내 읽지 않게. 실제 값은 임시 주문에 그대로 있다)."""
+        labels, out = self.texts.labels, []
+        for f in ORDER_FIELDS:
+            v = getattr(self.order, f)
+            if v is None:
+                continue
+            if not v:
+                v = self.texts.empty_value
+            elif f in self.from_saved:
+                v = self.texts.saved_value
+            elif f in PHONE_FIELDS and self.caller and v == self.caller:
+                v = self.texts.caller_value
+            out.append((labels[f], v))
+        return out
 
     def text_vars(self) -> dict:
         biz = self.cfg.business
@@ -133,12 +165,21 @@ class Call:
             "company": biz.company_name,
             "order_no": self.last_order_no or "",
             "goodbye_message": biz.goodbye_message,
-            "recent_order": f"{r.sender_address} → {r.receiver_name}, {r.receiver_address}" if r else "",
+            "recent_order": f"{_region(r.receiver_address)}의 {r.receiver_name} 님" if r else "",
+            "customer_name": self.customer_name() or "없음",
             "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
             "save_candidates": " / ".join(f"{p.name} {p.address}" for _, p in self.save_candidates),
             "caller": self.caller or "알 수 없음",
             "customer_type": self.texts.customer_types[self.customer_type],
         }
+
+    def customer_name(self) -> str | None:
+        """등록 고객 성함: 최근 배송의 보내는 분, 없으면 저장된 출발지의 이름."""
+        if self.customer_type != "registered":
+            return None
+        if self.recent and self.recent.sender_name:
+            return self.recent.sender_name
+        return self.places["origin"][0].name if self.places["origin"] else None
 
     # --- 도구가 요청하는 통화 조작(실행은 sideband 쪽) ---
 
@@ -175,6 +216,7 @@ class Call:
         if self.status in ("ended", "failed"):
             return
         self.status, self.end_reason, self.ended_at = status, reason, time.time()
+        log.info("통화 종료 %s 이유=%s %.0f초", self.session_id, reason, self.ended_at - self.started_at)
         self.notify()
 
     def snapshot(self) -> dict:

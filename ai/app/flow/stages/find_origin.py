@@ -18,7 +18,7 @@ def choices(ctx) -> dict[str, str]:
 
 async def on_answer(ctx, answer: str) -> list[str]:
     if answer.startswith("origin_"):
-        ctx.order.set_place("sender", _origins(ctx)[int(answer.removeprefix("origin_")) - 1])
+        ctx.use_place("sender", _origins(ctx)[int(answer.removeprefix("origin_")) - 1])
         ctx.origin_checked, ctx.origin_variant = True, None
         return ["origin.found"]
     if answer == "different":
