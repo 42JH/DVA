@@ -28,7 +28,7 @@ def check_definitions(cfg, texts) -> None:
     sample = Call("startup-check", None, cfg, texts, None).text_vars()
     engine.validate(set(TOOLS), texts, sample)
     engine.build()
-    texts.call_info.format(**sample)
+    texts.call_info.format(**sample, first="")
     unknown = [n for n in function_tool_names(load_live_toml()) if n not in TOOLS]
     if unknown:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")
@@ -46,7 +46,12 @@ def create_app(client: Any = None, backend: Any = None) -> FastAPI:
             from openai import AsyncOpenAI
 
             openai_client = AsyncOpenAI()  # OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET
-        if backend_api is None:
+        if backend_api is None and cfg.backend.mock:
+            from app.mock_backend import MockBackend
+
+            logging.getLogger(__name__).warning("가짜 백엔드(메모리) 사용 중: 재시작하면 주문·배송지가 사라진다")
+            backend_api = MockBackend()
+        elif backend_api is None:
             from app.backend_api import BackendAPI
 
             backend_api = BackendAPI(os.environ["BACKEND_API_URL"], cfg.backend.timeout_sec)

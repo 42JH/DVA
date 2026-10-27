@@ -3,7 +3,7 @@
 고객·주문·배송지는 AI 서버가 저장하지 않는다. 이 정보를 관리하는 **별개의 백엔드 서버**에서 API로 읽고 쓴다.
 이 문서는 AI 서버 쪽에서 필요한 API를 **제안**한 것이다. 백엔드 담당자가 검토해 확정하고, 바뀌면 이 문서와 `app/backend_api.py`를 같이 고친다.
 
-- 구현: `app/backend_api.py`(클라이언트), 테스트 `tests/test_backend_api.py`(가짜 HTTP), `tests/conftest.py`의 `FakeBackend`(가짜 백엔드)
+- 구현: `app/backend_api.py`(클라이언트), 테스트 `tests/test_backend_api.py`(가짜 HTTP), `app/mock_backend.py`의 `MockBackend`(메모리 가짜 백엔드, 테스트와 `[backend] mock = true` 배포에서 씀)
 - 주소: 환경변수 `BACKEND_API_URL`(예: `http://backend:3000`). 시간 제한: `config/server.toml`의 `[backend] timeout_sec`
 - HTTP: `openai`에 딸린 `httpx2`(의존성 추가 없음)
 

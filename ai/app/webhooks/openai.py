@@ -6,6 +6,7 @@ import logging
 from fastapi import APIRouter, Request, Response
 
 from app.call import Call, caller_from_headers
+from app.flow import engine
 from app.live_session import LiveConfigError, build_session
 from app.services import Services
 from app.sideband import hangup_now, run_call
@@ -52,7 +53,7 @@ async def handle_incoming(svc: Services, data) -> None:
         return
     try:
         await call.prepare()
-        call_info = svc.texts.call_info.format(**call.text_vars())
+        call_info = svc.texts.call_info.format(**call.text_vars(), first=engine.next_text(call))
         session = build_session(call_info)
     except LiveConfigError as e:
         log.error("세션 설정 오류, reject %s: %s", session_id, e)

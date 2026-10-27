@@ -210,7 +210,7 @@ def test_find_origin_one_vs_many():
     run(apply_answer(call, "dest_1", "none"))
     assert {"origin_1", "origin_2", "same", "different"} <= set(stage_choices(call))
     run(apply_answer(call, "same", "none"))
-    assert call.flow.stage == "find_origin" and engine.next_text(call).startswith("지난번 보낸 곳이 여러 곳")
+    assert call.flow.stage == "find_origin" and "어디일까요" in engine.next_text(call)
     run(apply_answer(call, "origin_2", "none"))
     assert call.flow.stage == "collecting" and call.order.sender_address == ORIGIN2.address
 
@@ -393,7 +393,7 @@ def test_progress_text_within_limit_with_longest_values():
     call.flow.stage = "confirming"
     text = engine.progress_text(call, CFG.progress.max_chars)
     assert len(text) <= CFG.progress.max_chars
-    assert "되읽" in text  # 다음에 할 일은 잘리지 않는다
+    assert "이대로 접수" in text  # 다음에 할 일은 잘리지 않는다
 
 
 def test_progress_text_contains_next_question_and_values():
@@ -401,3 +401,57 @@ def test_progress_text_contains_next_question_and_values():
     call.order.sender_name = "김철수"
     text = engine.progress_text(call, CFG.progress.max_chars)
     assert "김철수" in text and TEXTS.fields["sender_phone"] in text
+
+
+def test_unhandled_request_offers_handoff_and_decline_returns():
+    """처리할 수 없는 요청(help) → 상담원 연결을 먼저 제안. 아니요면 하던 단계로, 예면 연결 안내."""
+    call = make_call(new_db())
+    run(apply_answer(call, "none", "help"))
+    assert call.flow.stage == "handoff" and "안내드리기 어려운" in engine.next_text(call)
+    run(apply_answer(call, "no", "none"))
+    assert call.flow.stage == "collecting"
+    run(apply_answer(call, "none", "handoff"))  # 고객이 직접 요청하면 제안 문구가 아니라 확인 문구
+    assert "안내드리기 어려운" not in engine.next_text(call)
+    run(apply_answer(call, "yes", "none"))
+    assert call.refer_requested.is_set() and "잠시만 기다려" in engine.next_text(call)
+
+
+# --- 말하기: PoC 수준의 진행 안내 ---
+
+def test_caller_number_yes_is_recorded_by_server():
+    """"지금 전화하신 번호로 연락드리면 될까요?" → "네"는 서버가 판별해 발신번호로 기록(백엔드는 발신번호를 모른다)."""
+    call = make_call(new_db())
+    call.order.sender_name = "김철수"
+    assert "use_caller" in stage_choices(call)
+    run(apply_answer(call, "use_caller", "none"))
+    assert call.order.sender_phone == CALLER
+    assert ("보내는 분 번호", TEXTS.caller_value) in call.recorded()  # 발신번호는 읽지 않게 표시만
+    assert "use_caller" not in stage_choices(call)  # 연락처 차례가 지나면 선택지도 없다
+
+
+def test_saved_values_are_hidden_until_customer_says_them():
+    call = make_call(recent_db())
+    run(apply_answer(call, "yes", "none"))  # 최근 배송 그대로
+    shown = dict(call.recorded())
+    assert shown["받는 분 번호"] == TEXTS.saved_value and shown["받는 분"] == DEST.name
+    run(dispatch(call, "record_order", json.dumps({"receiver_phone": "01011112222"}), "c"))
+    assert dict(call.recorded())["받는 분 번호"] == "01011112222"  # 고객이 직접 불러 준 번호는 보인다
+
+
+def test_progress_tells_the_item_after_next():
+    call = make_call(new_db())
+    text = engine.progress_text(call, CFG.progress.max_chars)
+    assert "성함" in text and "그다음" in text and "지금 전화하신 번호로" in text
+
+
+def test_call_info_greets_registered_customer_by_name_with_first_question():
+    call = make_call(recent_db())
+    info = TEXTS.call_info.format(**call.text_vars(), first=engine.next_text(call))
+    assert FULL_ORDER["sender_name"] in info and "지난번처럼" in info and DEST.name in info
+
+
+def test_confirm_progress_fits_with_realistic_values():
+    call = make_call(new_db())
+    run(dispatch(call, "record_order", json.dumps(FULL_ORDER, ensure_ascii=False), "c"))
+    text = engine.progress_text(call, CFG.progress.max_chars)
+    assert call.flow.stage == "confirming" and FULL_ORDER["receiver_address"] in text  # 값이 잘리지 않는다

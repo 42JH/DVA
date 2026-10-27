@@ -110,3 +110,14 @@ def test_closed_without_secret(monkeypatch):
     monkeypatch.delenv("PBX_WEBHOOK_SECRET", raising=False)
     with TestClient(create_app(client=FakeClient(), backend=FakeBackend())) as http:
         assert end(http, ended_body()).status_code == 503
+
+
+def test_hangup_404_means_already_ended(env):
+    """고객이 끊으면 OpenAI가 세션을 먼저 닫아 hangup이 404다. 오류로 남기지 않는다."""
+    http, client = env
+    call = active(http, "live_404")
+    client.live.sessions.hangup_error = type("NotFound", (Exception,), {"status_code": 404})()
+    assert end(http, ended_body()).status_code == 200
+    wait(lambda: client.live.sessions.of("hangup"))
+    time.sleep(0.05)
+    assert call.errors == []

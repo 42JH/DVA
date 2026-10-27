@@ -44,3 +44,17 @@ def test_monitor_lists_calls_with_masked_caller(http):
 
 def test_health_is_public(http):
     assert http.get("/health").json()["status"] == "ok"
+
+
+def test_mock_backend_used_without_backend_url(monkeypatch):
+    """[backend] mock = true면 BACKEND_API_URL 없이 메모리 가짜 백엔드로 뜬다."""
+    import app.main
+    from app.config import load_server_config
+    from app.mock_backend import MockBackend
+
+    cfg = load_server_config()
+    cfg = cfg.model_copy(update={"backend": cfg.backend.model_copy(update={"mock": True})})
+    monkeypatch.setattr(app.main, "load_server_config", lambda: cfg)
+    monkeypatch.delenv("BACKEND_API_URL", raising=False)
+    with TestClient(create_app(client=FakeClient())) as http:
+        assert isinstance(http.app.state.svc.backend, MockBackend)
