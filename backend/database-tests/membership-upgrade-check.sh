@@ -39,7 +39,7 @@ snapshot() {
   'customers',(SELECT jsonb_agg(to_jsonb(c) ORDER BY customer_seq) FROM customers c),
   'organizations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY organization_seq) FROM organizations o),
   'memberships',(SELECT jsonb_agg(to_jsonb(m) ORDER BY membership_seq) FROM memberships m),
-  'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY order_seq) FROM orders o),
+  'orders',(SELECT jsonb_agg(to_jsonb(o)-ARRAY['submission_request_id','submission_expected_version','submission_started_at'] ORDER BY order_seq) FROM orders o),
   'parcels',(SELECT jsonb_agg(to_jsonb(p) ORDER BY order_parcel_seq) FROM order_parcels p),
   'calls',(SELECT jsonb_agg(to_jsonb(c) ORDER BY call_session_seq) FROM call_sessions c),
   'audits',(SELECT jsonb_agg(to_jsonb(a) ORDER BY audit_log_seq) FROM audit_logs a),
@@ -64,8 +64,8 @@ sql -f "$ROOT/infra/database/verify.sql"
 test "$(snapshot)" = "$BEFORE"
 test "$(sql -Atc "SELECT to_regclass('api_idempotency.membership_writes') IS NULL")" = t
 test "$(sql -Atc "SELECT count(*) FROM pg_namespace WHERE nspname='api_idempotency'")" = 0
-test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 9
-test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version<>'010-remove-membership-write-requests.sql'")" = "$HISTORY_BEFORE"
+test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 10
+test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-order-submission.sql')")" = "$HISTORY_BEFORE"
 test "$(sql -Atc "SELECT count(*) FROM db_migrations.applied_versions WHERE version IN ('009-membership-write-requests.sql','010-remove-membership-write-requests.sql')")" = 2
 HISTORY_AFTER=$(sql -Atc 'SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a')
 sh "$RUNNER" --no-backup dva-db-129-check > /dev/null

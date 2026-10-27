@@ -72,6 +72,12 @@ BEGIN
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_pin_scope=%L WHERE order_parcel_seq=%s','PERSONAL',parcel_id),'23514');
  PERFORM pg_temp.expect_error(format('UPDATE orders SET status=%L WHERE order_seq=%s','ACCEPTED',order_id),'23514');
  UPDATE orders SET status='SUBMITTING' WHERE order_seq=order_id;
+ PERFORM pg_temp.expect_error(format('UPDATE orders SET submission_request_id=%L WHERE order_seq=%s','00000000-0000-4000-8000-000000000057',order_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE orders SET submission_request_id=%L,submission_expected_version=0,submission_started_at=CURRENT_TIMESTAMP WHERE order_seq=%s','00000000-0000-4000-8000-000000000057',order_id),'23514');
+ UPDATE orders SET submission_request_id='00000000-0000-4000-8000-000000000057',submission_expected_version=version,submission_started_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
+ PERFORM pg_temp.expect_error(format('UPDATE orders SET status=%L WHERE order_seq=%s','COLLECTING',order_id),'23514');
+ PERFORM pg_temp.expect_error($q$INSERT INTO orders(status,pickup_requested_at,submission_request_id,submission_expected_version,submission_started_at) VALUES('SUBMITTING',CURRENT_TIMESTAMP,'00000000-0000-4000-8000-000000000057',1,CURRENT_TIMESTAMP)$q$,'23505');
+ IF (SELECT version FROM orders WHERE order_seq=order_id)<>3 THEN RAISE EXCEPTION 'Submission intent changed content version'; END IF;
  UPDATE orders SET status='ACCEPTED',parcel_no='TEST0001',dver_received_at=CURRENT_TIMESTAMP WHERE order_seq=order_id;
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_name=%L WHERE order_parcel_seq=%s','Changed',parcel_id),'23514');
 
