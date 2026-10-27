@@ -134,6 +134,7 @@ ORG_ADMIN은 대표자 표시이며 MEMBER와 같은 주소록 범위를 사용�
 AI는 lookupStatus를 기준으로 등록 여부를 판단하고 조회 실패는 확인 불가로 처리한다.
 현재 develop-ai의 `POST /internal/ai/callers/context`, `{ phone }`, `recent_order/places` 제안과는 계약이 다르다.
 AI 담당자는 요청 경로·본문·data/meta 해석을 변경하고, PIN 원본 ID·version과 개인/기업 구분을 보관해야 한다.
+대화 중 주소록 검색·등록·수정은 [39번 PIN API](pins.md)를 사용한다. version은 현재 값이며 수정 충돌 검사에는 사용하지 않는다.
 최근 주문 조회는 별도 주문 조회 API로 처리한다. 실제 AI 코드 수정·통화 연동 검증은 이 작업에 포함하지 않는다.
 
 ## DB와 검증
