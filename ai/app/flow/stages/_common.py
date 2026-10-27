@@ -42,6 +42,10 @@ def no_saved_destinations(ctx) -> bool:
     return not ctx.places["destination"]
 
 
+def address_pending(ctx) -> bool:
+    return bool(ctx.address_pending)
+
+
 def has_save_candidates(ctx) -> bool:
     return bool(ctx.save_candidates)
 

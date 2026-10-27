@@ -34,9 +34,10 @@ fi
 ssh "${options[@]}" "$server" "umask 077 && cat > $remote_root/shared/.env.tmp && mv $remote_root/shared/.env.tmp $remote_root/shared/.env" < "$AI_ENV_FILE"
 
 docker image inspect "$image" >/dev/null
-ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir -p $remote_root/releases/$version" </dev/null
+ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir -p $remote_root/releases/$version $remote_root/shared/data" </dev/null
 docker save "$image" | gzip | ssh "${options[@]}" "$server" 'gunzip | sudo -n docker image load >/dev/null'
-printf 'AI_IMAGE=%s\n' "$image" > "$key_dir/release.env"
+# 주소DB는 릴리스마다 보내지 않고 서버의 shared/data에 한 번 올려 둔다(spec/address.md)
+printf 'AI_IMAGE=%s\nADDRESS_DATA_DIR=%s\n' "$image" "$remote_root/shared/data" > "$key_dir/release.env"
 tar -C "$ai_root" -cf - compose.yaml config prompts \
  -C "$ai_root/deploy" deploy.sh compose.deploy.yaml -C "$key_dir" release.env \
  | ssh "${options[@]}" "$server" "tar -xf - -C $remote_root/releases/$version"

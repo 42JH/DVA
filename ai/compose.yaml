@@ -34,6 +34,8 @@ services:
       # 이미지 재빌드 없이 조정: GPT-Live 세션·서버 설정, 프롬프트
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
+      # 주소 보정용 행안부 주소DB(data/address.db, 약 600MB). 없으면 보정 없이 뜬다(spec/address.md)
+      - ${ADDRESS_DATA_DIR:-./data}:/app/data:ro
     ports:
       # 앞단 리버스 프록시(TLS)가 붙을 자리. 공인 HTTPS 연결은 아직 범위 밖
       # 같은 서버의 다른 서비스와 겹치면 .env의 AI_PORT로 바꾼다

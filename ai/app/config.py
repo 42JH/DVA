@@ -69,6 +69,10 @@ class ListenerConfig(_Strict):
     max_choices: int = Field(ge=2, le=100)
 
 
+class AddressConfig(_Strict):
+    db_path: str = Field(min_length=1)
+
+
 class ServerConfig(_Strict):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
     call: CallConfig
@@ -77,6 +81,7 @@ class ServerConfig(_Strict):
     backend: BackendConfig
     monitor: MonitorConfig
     listener: ListenerConfig
+    address: AddressConfig
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:

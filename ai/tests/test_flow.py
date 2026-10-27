@@ -58,13 +58,14 @@ SCENARIOS = [
         say("confirm", "save_offer"),
         say("yes", "after_order"),
         say("no_more", "ending"),
-    ], ["collecting", "confirming", "submitted", "save_offer", "after_order", "ending"]),
+    ], ["collecting", "address", "collecting", "address", "collecting", "confirming", "submitted", "save_offer",
+        "after_order", "ending"]),
     ("신규 접수, 저장 거절", new_db, [
         tool("record_order", FULL_ORDER, "confirming"),
         say("confirm", "save_offer"),
         say("no", "after_order"),
         say("none", "ending", intent="end"),
-    ], ["collecting", "confirming", "submitted", "save_offer", "after_order", "ending"]),
+    ], ["collecting", "address", "collecting", "confirming", "submitted", "save_offer", "after_order", "ending"]),
     ("등록, 최근 배송 그대로", recent_db, [
         say("yes", "collecting"),
         tool("record_order", ITEM, "confirming"),
@@ -86,24 +87,26 @@ SCENARIOS = [
         say("origin_1", "collecting"),
         tool("record_order", ITEM, "confirming"),
         say("confirm", "save_offer"),
-    ], ["find_destination", "collecting", "find_origin", "collecting", "confirming", "submitted", "save_offer"]),
+    ], ["find_destination", "collecting", "address", "collecting", "find_origin", "collecting", "confirming",
+        "submitted", "save_offer"]),
     ("등록, 출발지만 바뀜", saved_db, [
         say("dest_1", "find_origin"),
         say("different", "collecting"),
         tool("record_order", {**SENDER, "sender_address": "인천 연수구 송도동 1"} | ITEM, "confirming"),
         say("confirm", "save_offer"),
-    ], ["find_destination", "collecting", "find_origin", "collecting", "confirming", "submitted", "save_offer"]),
+    ], ["find_destination", "collecting", "find_origin", "collecting", "address", "collecting", "confirming",
+        "submitted", "save_offer"]),
     ("마지막 확인에서 정정", new_db, [
         tool("record_order", FULL_ORDER, "confirming"),
         say("correct", "confirming"),
         tool("record_order", {"item": "서류"}, "confirming"),
         say("confirm", "save_offer"),
-    ], ["collecting", "confirming", "submitted", "save_offer"]),
+    ], ["collecting", "address", "collecting", "confirming", "submitted", "save_offer"]),
     ("정정하다 빠진 항목이 생김(주소만 바꿈)", new_db, [
         tool("record_order", FULL_ORDER, "confirming"),
         tool("record_order", {"receiver_address": "대구 중구 동성로 1"}, "collecting"),
         tool("record_order", {"receiver_address_detail": "2층"}, "confirming"),
-    ], ["collecting", "confirming", "collecting", "confirming"]),
+    ], ["collecting", "address", "collecting", "confirming", "address", "confirming", "collecting", "confirming"]),
     ("추가 주문(신규, 저장 거절)", new_db, [
         tool("record_order", FULL_ORDER, "confirming"),
         say("confirm", "save_offer"),
@@ -113,8 +116,8 @@ SCENARIOS = [
         say("confirm", "save_offer"),
         say("no", "after_order"),
         say("no_more", "ending"),
-    ], ["collecting", "confirming", "submitted", "save_offer", "after_order", "collecting", "confirming",
-        "submitted", "save_offer", "after_order", "ending"]),
+    ], ["collecting", "address", "collecting", "confirming", "submitted", "save_offer", "after_order", "collecting",
+        "address", "collecting", "confirming", "submitted", "save_offer", "after_order", "ending"]),
     ("추가 주문(저장 동의로 등록 고객이 됨 → 최근 배송부터)", new_db, [
         tool("record_order", FULL_ORDER, "confirming"),
         say("confirm", "save_offer"),
@@ -123,8 +126,8 @@ SCENARIOS = [
         say("yes", "collecting"),
         tool("record_order", {"item": "책"}, "confirming"),
         say("confirm", "after_order"),
-    ], ["collecting", "confirming", "submitted", "save_offer", "after_order", "recent_offer", "collecting",
-        "confirming", "submitted", "after_order"]),
+    ], ["collecting", "address", "collecting", "confirming", "submitted", "save_offer", "after_order",
+        "recent_offer", "collecting", "confirming", "submitted", "after_order"]),
     ("접수 중 취소 요청", recent_db, [
         say("no", "find_destination"),
         say("new", "collecting"),
@@ -137,7 +140,7 @@ SCENARIOS = [
         tool("record_order", FULL_ORDER, "confirming"),
         say("none", "handoff", intent="handoff"),
         say("yes", "ending"),
-    ], ["collecting", "handoff", "collecting", "confirming", "handoff", "ending"]),
+    ], ["collecting", "handoff", "collecting", "address", "collecting", "confirming", "handoff", "ending"]),
 ]
 
 
@@ -372,8 +375,9 @@ def test_transition_chain_limit(moves):
         engine.build()
 
 
-def test_only_ending_does_not_listen():
-    assert [s.name for s in engine.STAGES.values() if not s.listen] == ["ending"]
+def test_only_ending_and_address_do_not_listen():
+    """ending은 마무리 인사 중, address는 머무르지 않는 단계(주소 확정 후 바로 돌아감)."""
+    assert sorted(s.name for s in engine.STAGES.values() if not s.listen) == ["address", "ending"]
 
 
 def test_validate_catches_missing_tool_and_text():
