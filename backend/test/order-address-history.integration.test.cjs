@@ -323,6 +323,89 @@ test('same address remains separate per order/parcel and stable pagination handl
   );
 });
 
+test('active administrator roles can choose a customer and inspect retained withdrawn-customer history', async () => {
+  const f = await fixture('WITHDRAWN');
+  const o = await order(f);
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const headers = await account(role);
+    assert.equal(
+      (await result(await request(f.customer, undefined, headers))).data[0].orderSeq,
+      o.orderSeq,
+    );
+    await error(await request(2147483647, undefined, headers), 404, 'NOT_FOUND');
+  }
+  const empty = await fixture();
+  assert.deepEqual(await result(await request(empty.customer)), { data: [], hasNext: false });
+});
+
+test('AI cannot access another customer history, even within the same company', async () => {
+  const f = await fixture(),
+    other = await fixture();
+  await order(f);
+  await order(other);
+  await error(await request(other.customer, undefined, f.ai), 403, 'FORBIDDEN');
+  const org = (
+    await pool.query(
+      "INSERT INTO organizations(name,status) VALUES('같은 회사','ACTIVE') RETURNING organization_seq",
+    )
+  ).rows[0].organization_seq;
+  for (const c of [f, other])
+    await pool.query(
+      `INSERT INTO memberships(customer_seq,organization_seq,employee_no,status)
+    VALUES($1,$2,$3,'ACTIVE')`,
+      [c.customer, org, randomUUID()],
+    );
+  await error(await request(other.customer, undefined, f.ai), 403, 'FORBIDDEN');
+  assert.equal((await result(await request(f.customer, undefined, f.ai))).data.length, 1);
+});
+
+test('AI calls require an existing ongoing call and an ACTIVE customer with matching phone', async () => {
+  const f = await fixture();
+  for (const header of [undefined, '0', '-1', 'abc', '1.5', '2147483648']) {
+    await error(
+      await request(
+        f.customer,
+        undefined,
+        header === undefined ? {} : { call_session_seq: header },
+      ),
+      400,
+      'INVALID_REQUEST',
+    );
+  }
+  await error(
+    await request(f.customer, undefined, { call_session_seq: '2147483647' }),
+    404,
+    'NOT_FOUND',
+  );
+  await pool.query('UPDATE call_sessions SET caller_phone_number=NULL WHERE call_session_seq=$1', [
+    f.call,
+  ]);
+  await error(await request(f.customer, undefined, f.ai), 403, 'FORBIDDEN');
+  await pool.query('UPDATE call_sessions SET caller_phone_number=$2 WHERE call_session_seq=$1', [
+    f.call,
+    f.phone,
+  ]);
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [f.customer]);
+  await error(await request(f.customer, undefined, f.ai), 403, 'FORBIDDEN');
+  const ended = await fixture();
+  await pool.query(
+    "UPDATE call_sessions SET started_at='2026-10-27T00:00:00Z',ended_at='2026-10-27T00:01:00Z' WHERE call_session_seq=$1",
+    [ended.call],
+  );
+  await error(await request(ended.customer, undefined, ended.ai), 409, 'INVALID_STATE');
+});
+
+test('invalid admin cookies never fall back to AI and untrusted Origins remain forbidden', async () => {
+  const f = await fixture();
+  for (const Cookie of ['dva_session=bad', 'dva_session=' + 'f'.repeat(64)])
+    await error(await request(f.customer, undefined, { ...f.ai, Cookie }), 401, 'UNAUTHORIZED');
+  await error(
+    await request(f.customer, undefined, { ...f.ai, Origin: 'https://untrusted.invalid' }),
+    403,
+    'FORBIDDEN',
+  );
+});
+
 test('query validation rejects invalid dates, ranges, pagination, directions and override fields', async () => {
   const f = await fixture();
   for (const query of [
@@ -366,6 +449,72 @@ test('historical empty addresses are skipped while nullable details are preserve
   assert.equal(body.data[0].orderSeq, valid.orderSeq);
   assert.equal(body.data[0].address.detailAddress, null);
   assert.equal(body.data[0].address.postalCode, '01234');
+});
+
+test('authorization and address data share one read snapshot during concurrent status/data changes', async () => {
+  const f = await fixture();
+  const existing = await order(f);
+  const repository = app.get(OrdersRepository),
+    original = repository.addressHistory;
+  let ready, release;
+  const entered = new Promise((resolve) => {
+    ready = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  repository.addressHistory = async function (...args) {
+    ready();
+    await gate;
+    return original.apply(this, args);
+  };
+  let pending;
+  try {
+    pending = request(f.customer, undefined, f.ai);
+    await Promise.race([
+      entered,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('history gate not reached')), 3000),
+      ),
+    ]);
+    await order(f, { createdAt: '2026-10-21T00:00:00Z' });
+    await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [f.customer]);
+    release();
+    assert.deepEqual(
+      (await result(await pending)).data.map((row) => row.orderSeq),
+      [existing.orderSeq],
+    );
+  } finally {
+    release();
+    repository.addressHistory = original;
+    if (pending) await pending;
+  }
+  await error(await request(f.customer, undefined, f.ai), 403, 'FORBIDDEN');
+});
+
+test('history reads are side-effect free and failures are not returned as empty success', async () => {
+  const f = await fixture();
+  const o = await order(f);
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM orders) AS orders,
+    (SELECT count(*) FROM personal_pins) AS pins,(SELECT count(*) FROM audit_logs) AS audits`)
+    ).rows[0];
+  const before = await counts();
+  await result(await request(f.customer, undefined, f.ai));
+  await result(await request(f.customer));
+  assert.deepEqual(await counts(), before);
+  const repository = app.get(OrdersRepository),
+    original = repository.addressHistory;
+  repository.addressHistory = async () => {
+    throw new Error('private database error');
+  };
+  try {
+    await error(await request(f.customer), 500, 'INTERNAL_ERROR');
+  } finally {
+    repository.addressHistory = original;
+  }
+  assert.equal((await result(await request(f.customer))).data[0].orderSeq, o.orderSeq);
 });
 
 test('Swagger publishes the GET contract and logs omit filters and personal values', async () => {
