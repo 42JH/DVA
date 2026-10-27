@@ -25,6 +25,11 @@ export function fmtDuration(seconds: number): string {
   return `${Math.floor(seconds / 60)}분 ${two(seconds % 60)}초`
 }
 
+/** 초 → '03:40' (06 통화 안 시각 · 재생 바) */
+export function fmtClock(seconds: number): string {
+  return `${two(Math.floor(seconds / 60))}:${two(seconds % 60)}`
+}
+
 /** 숫자 문자열 전화번호 → 010-1234-5678 (명세서: 전달 · 저장은 숫자만) */
 export function fmtPhone(digits: string): string {
   const d = digits.replace(/\D/g, '')
