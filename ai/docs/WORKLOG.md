@@ -271,56 +271,85 @@
 - 배포 전 테스트 stage 없음(서버에 uv 없음). 필요하면 추가.
 - OpenAI 웹훅은 공인 HTTPS 주소가 필요함. TLS를 어디서 처리할지 확인 필요.
 
-## 2026-10-26 (Jenkinsfile 교체, 백엔드 방식으로 배포)
+## 2026-10-26
+
+웹훅 주소·PBX 종료 웹훅·`app/` 구조 정리, LangGraph 브랜치 머지, Jenkins CI·Lightsail 배포. 아래는 하루가 끝난 시점(`develop-ai` `6d3b148`)의 최종 상태 기준.
 
 ### 바꾼 것
-- `ai/Jenkinsfile`: 백엔드 Jenkinsfile(`develop-backend`)과 같은 방식으로.
-  - `linux-docker-builder` 노드. 이미지 빌드(`dva-ai-server:<커밋12자리>-<빌드번호>`, linux/amd64) → 이미지 안에서 pytest → 배포 접속 확인(`--verify-only`).
-  - `DEPLOY_LIGHTSAIL`을 체크했을 때만 배포. 자격 증명은 백엔드와 같은 `dva-lightsail-ssh`.
-  - 예전 파일은 `agent any`라 레이블 전용 노드만 있는 Jenkins에서 대기열에 머물렀다.
-- `ai/deploy/`(백엔드 `infra/deploy/` 구조를 따름)
-  - `upload.sh`: 호스트 키 고정(`known_hosts`, `StrictHostKeyChecking=yes`) SSH로 이미지(`docker save | docker load`)와 릴리스(`compose.yaml`·`config/`·`prompts/`·`deploy.sh`·`compose.deploy.yaml`·`release.env`)를 `/home/ubuntu/dva-ai/releases/<version>`에 보내고 `deploy.sh` 실행.
-  - `deploy.sh`(대상 서버): `shared/.env` + `release.env`로 `docker compose --project-name dva-ai up --no-build --wait`. 성공하면 `current-release`·`previous-release` 기록, 지금·직전 이미지만 남김. 실패하면 직전 릴리스로 복구. `sudo -n docker`, `flock`으로 동시 배포 막음.
-  - `compose.deploy.yaml`: 배포 때만 외부 네트워크 `dva-shared`(별칭 `dva-ai`)에 붙임. 로컬 compose는 그대로.
-  - `known_hosts`: 백엔드와 같은 서버(`13.209.59.180`) 호스트 키.
-- `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`. `.env.example`에 `AI_PORT`. `.dockerignore`에 `deploy`.
-
-### 확인한 것
-- 백엔드 배포(`develop-backend`의 `infra/deploy/package.sh`, `compose.prod.yaml`)가 `ai/`를 `dva-ai` 이미지로 빌드해 `dva-prod` 스택에 `ai` 서비스로 띄우고 있다. 그 서비스에는 환경변수·config 볼륨·Qdrant가 없다.
-- `docker compose config`(가짜 env)로 `compose.yaml` + `compose.deploy.yaml` 병합, `AI_IMAGE`·`AI_PORT` 치환 확인.
-- `deploy.sh`를 가짜 docker로 시험: 첫 배포, 두 번째 배포(직전 기록·이미지 정리), 실패 시 직전 릴리스 복구.
-- `bash -n`으로 두 스크립트 문법 확인. 실제 서버 배포는 안 해 봄.
-
-### 남은 것
-- 백엔드 담당에 요청: `package.sh`·`compose.prod.yaml`에서 `ai` 빼기, `backend`를 `dva-shared` 네트워크에 붙이고 `AI_AGENT_URL=http://dva-ai:8000`. 호스트 Nginx에서 `/api/webhooks/openai/call-incoming`·`/pbx/webhook/call-ended`를 `127.0.0.1:8000`(AI)으로.
-- 대상 서버: `/home/ubuntu/dva-ai/shared/.env` 작성(`BACKEND_API_URL`은 `dva-shared`에서 백엔드 컨테이너 이름으로). 8000이 쓰이고 있으면 `AI_PORT`.
-- Jenkins에서 `DEPLOY_LIGHTSAIL` 체크해 첫 배포 확인.
-
-## 2026-10-26 (app/ 웹훅 정리)
-
-### 바꾼 것
-- 밖에서 오는 웹훅을 `app/webhooks/`로 모음: `app/webhook.py` → `app/webhooks/openai.py`(전화 수신), `app/pbx.py` → `app/webhooks/pbx.py`(통화 종료). 주소·동작은 그대로.
-- 앱 공용 객체 `Services`를 `app/webhook.py`에서 `app/services.py`로.
-- PBX 종료 때 세션을 바로 끊는 함수를 `pbx.hangup` → `sideband.hangup_now`로(OpenAI 세션을 다루는 일). 함수 안 import(순환 회피)를 없앰.
-- `spec/pbx-sip.md`, `docs/rag-handoff.md`의 경로 수정.
-
-### 확인한 것
-- `uv run pytest -q` 119개 통과.
-
-## 2026-10-26 (PBX 종료 웹훅: Bearer 인증, PBX 본문 형식)
-
-### 바꾼 것
-- PBX가 팀 백엔드에 보내는 통화 종료 웹훅을 같은 본문으로 우리에게도 보내기로 함(`/pbx/webhook/call-ended`, 주소 그대로).
+- 웹훅 주소(`3d81a32`)
+  - 전화 수신(OpenAI가 보냄): `POST /openai/webhook` → `POST /api/webhooks/openai/call-incoming`.
+  - 통화 종료(PBX가 보냄): `POST /pbx/webhook/call-ended` 그대로. 백엔드 서버가 보내게 바꾸려다 취소.
+  - `.gitignore`에 `.langgraph_api/`(LangGraph Studio 개발 서버 상태).
+- 브랜치
+  - `refactor/langchain` → `refactor/langgraph`로 이름 바꿔 푸시, `develop-ai`에 머지. 원격 `refactor/langchain`·`refactor/langgraph`는 머지 때 삭제됨.
+  - GitLab에서 `WORKLOG.md` 충돌을 풀며(`a7eac34`) 위 웹훅 주소 기록이 빠졌다. 이 항목으로 되살림.
+- `app/` 웹훅 정리(`716ea24`)
+  - `app/webhook.py` → `app/webhooks/openai.py`, `app/pbx.py` → `app/webhooks/pbx.py`.
+  - 앱 공용 객체 `Services`를 `app/services.py`로. PBX 종료 때 세션 끊기를 `sideband.hangup_now`로 옮겨 함수 안 import(순환 회피)를 없앰.
+- PBX 통화 종료 웹훅(`b481289`): PBX가 팀 백엔드에 보내는 것과 같은 본문을 우리에게도 보낸다.
   - 인증: HMAC 서명(`X-Pbx-*`) → `Authorization: Bearer <PBX_WEBHOOK_SECRET>`(상수 시간 비교). `[pbx] webhook_tolerance_sec` 삭제.
-  - 본문: `call_id`(SIP Call-ID) → PBX 형식(`callFrom`·`endedAt` 필수, `recordingId` 기록, 나머지 무시).
-  - 통화 찾기: SIP Call-ID 대신 발신번호. `endedAt` 전에 시작한 진행 중 통화만(웹훅이 몇 초 늦게 와서, 그사이 같은 번호로 다시 건 통화를 끊지 않게).
-  - SIP Call-ID 수집(`sip_call_id_from_headers`, `Call.sip_call_id`, `Registry.find_by_sip_call_id`) 삭제.
-  - 발신번호 정규화를 `call.normalize_phone`으로 빼서 SIP From과 PBX `callFrom`이 같이 씀.
-- `spec/pbx-sip.md` 종료 웹훅 절, compose·`.env.example` 주석.
+  - 본문: PBX 형식(`callFrom`·`endedAt` 필수, `recordingId` 기록, `recordingUrl` 등 나머지 무시).
+  - 통화 찾기: SIP Call-ID가 없어 발신번호로. `endedAt` 전에 시작한 진행 중 통화만 끊는다(웹훅이 녹취 준비 뒤 몇 초 늦게 와서, 그사이 같은 번호로 다시 건 통화를 보호).
+  - SIP Call-ID 수집 코드 삭제. 발신번호 정규화를 `call.normalize_phone`으로 빼서 SIP `From`과 `callFrom`이 같이 씀.
+- Jenkins CI·배포(`18ff124` `6114b5b` `13334bf` `20edfa5` `1ae73a8` `e3e6ebc`)
+  - 예전 `ai/Jenkinsfile`은 `agent any`라 레이블 전용 노드만 있는 팀 Jenkins에서 대기열에 머물렀다. 팀 최신 Jenkinsfile을 바탕으로, 백엔드 Jenkinsfile(`develop-backend`) 방식에 맞춤.
+  - 흐름: `linux-docker-builder` 노드 → 이미지 빌드(`dva-ai-server:<커밋12자리>-<빌드번호>`, linux/amd64) → 그 이미지 안에서 pytest → 접속 확인(`--verify-only`) → `DEPLOY_LIGHTSAIL`을 체크했을 때만 배포.
+  - 자격 증명: SSH는 백엔드와 같은 `dva-lightsail-ssh`, 비밀값은 Jenkins Secret file `dva-ai`. 배포 때 서버의 `/home/ubuntu/dva-ai/shared/.env`(600)로 올린다.
+  - `ai/deploy/upload.sh`: 고정 호스트 키(`deploy/known_hosts`, `StrictHostKeyChecking=yes`)로 `13.209.59.180`에 SSH. 이미지는 `docker save | docker load`, 릴리스(`compose.yaml`·`config/`·`prompts/`·`deploy.sh`·`compose.deploy.yaml`·`release.env`)는 `releases/<version>`에.
+  - `ai/deploy/deploy.sh`(서버): `docker compose --project-name dva-ai up --no-build --pull missing --wait`. 성공하면 현재·직전 릴리스 기록, 그 두 이미지만 남김. 실패하면 직전 릴리스로 복구. `sudo -n docker`, `flock`.
+    - `--pull never`였을 때 서버에 Qdrant 이미지가 없어 빌드 #12 배포가 실패했다 → `--pull missing`(AI 이미지는 미리 load 해 두므로 받지 않음).
+  - 백엔드와 연결: 백엔드(`ci/backend-external-ai`)가 정한 외부 네트워크 `dva-prod_ai_net`에 별칭 `ai`로 붙는다(`compose.deploy.yaml`, 배포 때만). 백엔드 → `http://ai:8000`, AI → `BACKEND_API_URL`(`http://backend:3000`).
+    - 새 AI가 정상 기동하면 백엔드 스택이 띄웠던 예전 `dva-prod-ai-1`을 멈춘다(지우지 않음, `docker start`로 되살릴 수 있음).
+  - `compose.yaml`: `ai`에 `image: ${AI_IMAGE:-dva-ai:local}`, 호스트 포트 `${AI_PORT:-8000}`. `.env.example`에 `AI_PORT`, `.dockerignore`에 `deploy`.
+  - 이미지 이름은 `dva-ai-server`(백엔드가 빌드하던 `dva-ai`와 겹치지 않게). 다른 관리자의 서버라 `docker image prune`은 쓰지 않음.
+- 문서: `spec/pbx-sip.md`(두 웹훅 구현 경로, 종료 웹훅 절), `docs/rag-handoff.md`(`Services` 위치).
 
 ### 확인한 것
-- `uv run pytest -q` 120개 통과(Bearer 성공·실패, `+82` 번호, 다시 건 통화 보호, accept 중 종료, 본문 오류).
+- `develop-ai`(`6d3b148`)에서 `uv run pytest -q` 120개 통과, 두 배포 스크립트 `bash -n` 통과.
+- 앱 기동·웹훅 응답: `/health` 200, 수신 웹훅 서명 없음 400, 옛 주소 `/openai/webhook` 404.
+- `docker compose config`(가짜 env)로 `compose.yaml` + `compose.deploy.yaml` 병합과 `AI_IMAGE`·`AI_PORT` 치환.
+- `deploy.sh`를 가짜 docker로 시험: 첫 배포, 두 번째 배포(직전 기록·이미지 정리), 실패 시 직전 릴리스 복구.
+- PBX 담당 회신
+  - 회사 번호를 OpenAI 프로젝트로 넘기는 SIP 설정 완료.
+  - 통화 종료 웹훅 본문: `recordingId`·`callFrom`·`callTo`(두 070 번호 구분)·`startedAt`·`endedAt`·`durationSeconds`·`recordingUrl`. 녹취가 준비된 뒤 보내 끊긴 시점보다 몇 초 늦다.
+  - 재전송: 2xx가 아니거나 연결 오류·30초 타임아웃이면 5초 간격 최대 5번. 리다이렉트는 따라가지 않는다 → 주소는 정확히 `https://…/pbx/webhook/call-ended`(끝 `/` 없음, `http` 아님). 우리 서버는 모르는·끝난 통화에도 200, 중복은 한 번만 처리.
 
 ### 남은 것
-- PBX `callFrom`이 OpenAI 웹훅 SIP `From`의 발신번호와 같은 번호인지 실제 통화로 확인(다르면 통화를 못 찾는다).
-- PBX 담당에 `Authorization: Bearer` 토큰 전달, 우리 서버 주소 전달.
+- OpenAI 프로젝트에 웹훅 `https://<도메인>/api/webhooks/openai/call-incoming` 등록(`live.transport.incoming` 구독), `OPENAI_WEBHOOK_SECRET`을 Jenkins `dva-ai`에.
+- 호스트 Nginx(백엔드 담당)에서 `/api/webhooks/openai/call-incoming`·`/pbx/webhook/call-ended`를 AI(`127.0.0.1:${AI_PORT}`)로.
+- PBX 담당에 우리 종료 웹훅 주소와 Bearer 토큰(`PBX_WEBHOOK_SECRET`과 같은 값) 전달, 우리 쪽 발송 설정 확인.
+- 실제 통화로 확인
+  - PBX `callFrom`이 OpenAI 웹훅 SIP `From`의 발신번호와 같은지(다르면 종료 웹훅이 통화를 못 찾는다).
+  - 고객이 먼저 끊으면 sideband `session.closed`(`remote_hangup`)가 바로 오는지.
+- Jenkins `DEPLOY_LIGHTSAIL` 배포가 끝까지 성공하는지(#12 이후 `--pull missing` 반영본), 백엔드 → AI(`http://ai:8000`)·AI → 백엔드 호출 확인.
+
+## 2026-10-26 (첫 배포, 웹훅 연결, 실제 통화)
+
+위 "남은 것"을 처리한 기록. 서버 설정(호스트 Nginx·인증서)은 저장소가 아니라 서버에서만 바꿨다.
+
+### 바꾼 것
+- 첫 배포: Jenkins `dva-ai` #14(`DEPLOY_LIGHTSAIL`, `6d3b148a517a-14`) 성공.
+  - Qdrant 이미지를 서버에서 처음 받음(`--pull missing`).
+  - `dva-ai-ai-1`이 `dva-prod_ai_net`에 별칭 `ai`로 붙고, 예전 `dva-prod-ai-1`은 멈춤(지우지 않음). 되돌리기: `sudo docker stop dva-ai-ai-1 && sudo docker start dva-prod-ai-1`.
+- 호스트 Nginx(`/etc/nginx/sites-available/dva-ip`, 원본은 백엔드 `infra/https/https.conf`). 고칠 때마다 `/root/dva-ip.bak.*`로 백업.
+  - `POST /api/webhooks/openai/call-incoming`, `POST /pbx/webhook/call-ended` → AI(`127.0.0.1:8000`). 기존 PBX 웹훅 블록과 같은 형식(POST만, 본문 16k, 10초).
+  - PBX는 백엔드 주소(`/api/webhooks/pbx/call-ended`)로만 보내고, 백엔드는 DB에 저장만 하고 AI에 넘기지 않는다. 그래서 그 경로에 `mirror`를 달아 같은 요청(본문·Bearer 토큰)을 AI `/pbx/webhook/call-ended`로 복사. PBX가 받는 응답은 백엔드 응답 그대로. 백엔드 `PBX_WEBHOOK_TOKEN`과 우리 `PBX_WEBHOOK_SECRET`이 같은 값이라 인증도 통과(해시로만 비교).
+- OpenAI 웹훅 주소를 `https://13-209-59-180.sslip.io/api/webhooks/openai/call-incoming`으로.
+  - `https://13.209.59.180/...`(IP 주소 URL)로는 테스트 전송이 "Failed to POST to webhook endpoint"였고, 서버 443에 TCP 연결(SYN)조차 오지 않았다(tcpdump, 테스트 3번).
+  - 같은 서버를 이름(sslip.io: 이름에 적은 IP를 돌려주는 공개 DNS)으로 바꾸자 바로 `9.129.x.x`에서 연결이 왔다. OpenAI가 IP 주소 URL로는 보내지 않는 것으로 본다(공식 문서에서는 못 찾음).
+  - Let's Encrypt 인증서 `dva-sslip`(webroot, 기존 갱신 타이머·nginx reload 훅 그대로) 발급. 이 이름의 443 블록은 전화 수신 웹훅만 열고 나머지는 404.
+
+### 확인한 것
+- 백엔드 → AI: 백엔드 컨테이너에서 `ai`가 새 컨테이너 IP 하나로만 풀리고 `/health` 200.
+- 실제 통화 2번: 수신 웹훅 200 → accept 200 → 통화 → 고객이 끊음 → PBX 종료 웹훅(mirror) 200 → 약 2.5초 뒤 sideband 종료로 `ended`(`remote_hangup`). 남는 세션 없음.
+  - PBX `callFrom`으로 통화를 찾았다(`pbx_ended` 기록됨). 발신번호 형식은 맞다.
+  - 종료 웹훅 뒤의 `hangup`은 이미 닫힌 세션이라 404. 동작에는 문제없고 모니터에 오류로만 남는다.
+- 테스트 전송 이벤트(`live_u0_abc123`)는 서명 검증까지 통과하고 accept만 503(없는 세션).
+
+### 남은 것
+- 백엔드에 `POST /internal/ai/callers/context`가 없어 404("고객 조회 실패"). 통화는 최근 주문·배송지 없이 진행된다. 주문 저장 등 다른 백엔드 API도 같은지 백엔드 담당과 확인.
+- 호스트 Nginx 변경(AI 웹훅 경로, mirror, sslip.io 블록)을 백엔드 저장소 `infra/https/https.conf`에도 반영. 안 하면 그 파일로 다시 설치할 때 사라진다.
+- `hangup_now`에서 404를 "이미 끝남"으로 처리해 오류로 남기지 않기.
+- Jenkins credential `dva-ai`의 `.env`가 CRLF. compose는 읽지만 셸에서 `source`하면 값 끝에 `\r`이 붙는다. LF로 다시 올리기.
+- sslip.io는 외부 무료 서비스(보장 없음). 오래 쓸 거면 정식 도메인으로.
+- PBX 종료 웹훅 토큰을 바꿀 때는 백엔드와 AI 값을 함께 바꾸기(다르면 AI 쪽 mirror만 조용히 401).
