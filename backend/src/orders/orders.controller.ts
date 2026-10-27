@@ -8,6 +8,7 @@ import {
   Query,
   Param,
   Req,
+  Res,
   createParamDecorator,
   ExecutionContext,
   ParseUUIDPipe,
@@ -22,12 +23,15 @@ import {
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
+  ApiAcceptedResponse,
+  ApiUnprocessableEntityResponse,
+  ApiServiceUnavailableResponse,
   ApiHeader,
   ApiOperation,
   ApiBody,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { MvpAiOrderAccess } from '../auth/mvp-ai-access';
 import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
@@ -37,8 +41,9 @@ import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-re
 import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
+import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 
-const CreationKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
+const OrderRequestKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
   context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
 );
 
@@ -50,6 +55,8 @@ const CreationKey = createParamDecorator((_data: unknown, context: ExecutionCont
   OrderDetailDto,
   UpdateOrderDto,
   UpdatedOrderDto,
+  SubmitOrderDto,
+  SubmittedOrderDto,
   RequestMetaDto,
   ErrorResponseDto,
 )
@@ -171,7 +178,7 @@ export class OrdersController {
   })
   create(
     @Req() request: AuthRequest,
-    @CreationKey(new ParseUUIDPipe()) key: string,
+    @OrderRequestKey(new ParseUUIDPipe()) key: string,
     @Body() input: CreateOrderDto,
     @Headers('call_session_seq') callSessionSeq?: string,
   ) {
@@ -266,6 +273,107 @@ export class OrdersController {
       request.requestId,
       callSessionSeq,
     );
+  }
+
+  @Post(':id/submit')
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_SUBMITTED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 최종 접수 (ORD-06)',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '고객이 확인한 기존 COLLECTING 주문을 검증하고 디버에 한 번 전송합니다. 새 주문을 만들지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 응답 유실 시 같은 키·본문으로 결과를 확인하며 자동 재접수하지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 선택. 종료된 통화는 기존 연결 주문의 같은 접수 키 재조회만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    required: true,
+    description:
+      '최종 접수 UUID. 생성 키와 별개이며 재시도는 같은 키와 expectedVersion을 사용합니다.',
+    schema: { type: 'string', format: 'uuid' },
+  })
+  @ApiBody({
+    type: SubmitOrderDto,
+    description:
+      '고객에게 저장된 주소·물품·결제·수거 시각을 확인한 뒤 호출합니다. 주문 본문은 다시 보내지 않습니다.',
+    examples: {
+      confirmedVersion: { summary: '최종 확인한 주문 버전 접수', value: { expectedVersion: 4 } },
+    },
+  })
+  @ApiNotFoundResponse({ description: '주문·고객·통화가 없음(NOT_FOUND).', type: ErrorResponseDto })
+  @ApiForbiddenResponse({
+    description: '고객·통화·PIN 범위 또는 결제 방식 사용 자격 불일치(FORBIDDEN).',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '버전 불일치(VERSION_CONFLICT), 재접수 불가(INVALID_STATE), 같은 키·소속 변경 처리 중(REQUEST_IN_PROGRESS).',
+    type: ErrorResponseDto,
+  })
+  @ApiUnprocessableEntityResponse({
+    description:
+      '필수 주문 정보 오류(VALIDATION_FAILED, details에 필드 경로) 또는 같은 키로 다른 주문·버전 전송(IDEMPOTENCY_KEY_REUSED).',
+    type: ErrorResponseDto,
+  })
+  @ApiServiceUnavailableResponse({
+    description: '디버 API 키 미설정. 주문은 COLLECTING 유지.',
+    type: ErrorResponseDto,
+  })
+  @ApiOkResponse({
+    description:
+      '결과 저장 완료. ACCEPTED만 접수 성공이며 AUTH_FAILED·REVIEW_REQUIRED는 확인이 필요합니다. 접수 참고번호·배송은 ORD-03에서 조회합니다.',
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  @ApiAcceptedResponse({
+    description:
+      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 중단 후 1분이 지난 요청은 같은 키 재조회 시 REVIEW_REQUIRED로 전환합니다.',
+    headers: {
+      Location: {
+        description: '현재 주문 상세 URL.',
+        schema: { type: 'string', example: '/api/orders/123' },
+      },
+    },
+    schema: {
+      type: 'object',
+      required: ['data', 'meta'],
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  async submit(
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+    @Param() params: OrderIdParamsDto,
+    @OrderRequestKey(new ParseUUIDPipe()) key: string,
+    @Body() input: SubmitOrderDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    const result = await this.orders.submit(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      key.toLowerCase(),
+      input,
+      request.requestId,
+      callSessionSeq,
+    );
+    response.status(result.status === 'SUBMITTING' ? 202 : 200);
+    if (result.status === 'SUBMITTING') response.setHeader('Location', `/api/orders/${params.id}`);
+    return result;
   }
 
   @Get(':id')

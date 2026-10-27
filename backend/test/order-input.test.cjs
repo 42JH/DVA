@@ -35,26 +35,27 @@ test('order updates preserve omitted fields, nullable clears, zero and empty tex
   assert.equal(input.parcels[1].orderParcelSeq, undefined);
   assert.equal(input.parcels[1].documentCount, 0);
   assert.equal(input.parcels[1].itemPrice, null);
-  await validateUpdate({ expectedVersion: 1, paymentMethodType: 'cat', parcels: [] });
+  await validateUpdate({ expectedVersion: 1, paymentMethodType: 'billing', parcels: [] });
 });
 
 test('order updates reject missing changes, duplicate details, invalid fields and value types', async () => {
   for (const input of [
     {},
-    { paymentMethodType: 'cat' },
-    { expectedVersion: '1', paymentMethodType: 'cat' },
-    { expectedVersion: null, paymentMethodType: 'cat' },
-    { expectedVersion: 0, paymentMethodType: 'cat' },
-    { expectedVersion: 2147483648, paymentMethodType: 'cat' },
+    { paymentMethodType: 'billing' },
+    { expectedVersion: '1', paymentMethodType: 'billing' },
+    { expectedVersion: null, paymentMethodType: 'billing' },
+    { expectedVersion: 0, paymentMethodType: 'billing' },
+    { expectedVersion: 2147483648, paymentMethodType: 'billing' },
     { expectedVersion: 1 },
     { expectedVersion: 1, parcels: [] },
     { expectedVersion: 1, parcels: [{}] },
     { expectedVersion: 1, parcels: [{ origin: {} }] },
     { expectedVersion: 1, parcels: [{ orderParcelSeq: 1, destination: {} }] },
     { expectedVersion: 1, parcels: [{ orderParcelSeq: 1 }] },
-    { expectedVersion: 1, paymentMethodType: 'cat', parcels: [{}] },
+    { expectedVersion: 1, paymentMethodType: 'billing', parcels: [{}] },
     { expectedVersion: 1, paymentMethodType: null },
     { expectedVersion: 1, paymentMethodType: 'cash' },
+    { expectedVersion: 1, paymentMethodType: 'cat' },
     { expectedVersion: 1, pickupRequestedAt: '2026-02-30T10:00:00Z' },
     { expectedVersion: 1, pickupRequestedAt: '2026-10-28T10:00:00' },
     { expectedVersion: 1, pickupRequestedAt: '2026-10-28T10:00:00+25:00' },
@@ -222,6 +223,7 @@ test('order inputs reject invalid types, nulls, ranges, nested arrays and extra 
     { customer: { name: '고객', phoneNumber: '01000550001', status: 'ACTIVE' } },
     { customerSeq: 31, paymentMethodType: null },
     { customerSeq: 31, paymentMethodType: 'cash' },
+    { customerSeq: 31, paymentMethodType: 'cat' },
     { customerSeq: 31, pickupRequestedAt: '2026-10-28T10:00:00' },
     { customerSeq: 31, pickupRequestedAt: '2026-02-30T10:00:00Z' },
     { customerSeq: 31, parcels: null },

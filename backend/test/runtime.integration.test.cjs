@@ -306,10 +306,11 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
   for (const [method, path, payload] of [
     ['GET', '/api/orders', undefined],
     ['GET', '/api/orders/2147483647', undefined],
+    ['POST', '/api/orders/2147483647/submit', JSON.stringify({ expectedVersion: 1 })],
     [
       'PATCH',
       '/api/orders/2147483647',
-      JSON.stringify({ expectedVersion: 1, paymentMethodType: 'cat' }),
+      JSON.stringify({ expectedVersion: 1, paymentMethodType: 'billing' }),
     ],
   ]) {
     const response = await fetch('http://proxy' + path, {

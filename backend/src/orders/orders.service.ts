@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
@@ -12,14 +12,20 @@ import { isZonedDate, orderDraft } from './order-draft';
 import { OrdersRepository } from './orders.repository';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
+import { DverClient, DverResult, dverPayload } from './dver.client';
+import { OrderSubmissionRepository } from './order-submission.repository';
+import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
   constructor(
     private readonly database: DatabaseService,
     private readonly repository: OrdersRepository,
     private readonly audit: AuditService,
     private readonly customers: CustomersService,
+    private readonly submissions: OrderSubmissionRepository,
+    private readonly dver: DverClient,
   ) {}
 
   private callId(adminId: number | null, header?: string): number | null {
@@ -233,5 +239,132 @@ export class OrdersService {
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       return order;
     });
+  }
+
+  async submit(
+    adminId: number | null,
+    id: number,
+    key: string,
+    input: SubmitOrderDto,
+    requestId: string,
+    callSessionHeader?: string,
+  ): Promise<SubmittedOrderDto> {
+    const callId = this.callId(adminId, callSessionHeader);
+    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
+    const prepared = await this.database.transaction<
+      SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
+    >(async (client) => {
+      if (!(await this.submissions.lockRequest(client, key)))
+        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 접수 요청을 처리 중입니다.');
+      const call = callId === null ? undefined : await this.repository.call(client, callId);
+      if (callId !== null && !call)
+        throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+      if (call && call.orderSeq !== null && call.orderSeq !== id)
+        throw new ApiException(409, 'INVALID_STATE', '통화에 이미 다른 주문이 연결되어 있습니다.');
+      const order = await this.repository.lockOrder(client, id);
+      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.customerSeq === null)
+        throw new ApiException(403, 'FORBIDDEN', '주문에 연결된 고객이 필요합니다.');
+      const customer = await this.customers.resolveForOrder(
+        client,
+        { customerSeq: order.customerSeq },
+        adminId,
+        requestId,
+      );
+      if (
+        (adminId === null && !call?.phone) ||
+        (call?.phone && call.phone !== customer.phoneNumber)
+      )
+        throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
+      const previous = await this.submissions.findRequest(client, key);
+      if (previous) {
+        if (previous.orderSeq !== id || previous.expectedVersion !== input.expectedVersion)
+          throw new ApiException(
+            422,
+            'IDEMPOTENCY_KEY_REUSED',
+            '같은 접수 키에는 같은 주문과 expectedVersion을 사용해 주세요.',
+          );
+        if (call && call.endedAt !== null && call.orderSeq !== id)
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '종료된 통화는 기존 연결 주문만 확인할 수 있습니다.',
+          );
+        if (await this.submissions.markStale(client, id)) {
+          await this.audit.recordSuccess(
+            { ...event, action: 'ORDER_SUBMISSION_REVIEW_REQUIRED' },
+            client,
+          );
+          return { status: 'REVIEW_REQUIRED' as const };
+        }
+        if (!['SUBMITTING', 'ACCEPTED', 'AUTH_FAILED', 'REVIEW_REQUIRED'].includes(order.status))
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '접수 결과를 확인할 수 없는 주문 상태입니다.',
+          );
+        return { status: order.status as SubmittedOrderDto['status'] };
+      }
+      if (order.status !== 'COLLECTING' || (call && call.endedAt !== null))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '진행 중 통화의 COLLECTING 주문만 새로 접수할 수 있습니다.',
+        );
+      if (order.version !== input.expectedVersion)
+        throw new ApiException(
+          409,
+          'VERSION_CONFLICT',
+          '주문이 변경되었습니다. 최신 내용을 조회하고 다시 확인해 주세요.',
+        );
+      const snapshot = (await this.repository.detail(client, id, null))!;
+      const payload = dverPayload(snapshot);
+      if (snapshot.paymentMethodType !== 'credit') {
+        const company = await this.submissions.isCompanyCustomer(client, customer.customerSeq);
+        if ((snapshot.paymentMethodType === 'groupBilling') !== company)
+          throw new ApiException(
+            403,
+            'FORBIDDEN',
+            '그룹카드는 기업 고객, 개인카드는 개인 고객만 사용할 수 있습니다.',
+          );
+      }
+      for (const parcel of snapshot.parcels) {
+        if (parcel.shipment)
+          throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
+        if (
+          parcel.originPin &&
+          !(await this.repository.canUsePin(client, customer.customerSeq, parcel.originPin))
+        )
+          throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+      }
+      this.dver.ensureConfigured();
+      await this.submissions.start(client, id, key, input.expectedVersion);
+      if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
+      await this.audit.recordSuccess({ ...event, action: 'ORDER_SUBMISSION_STARTED' }, client);
+      return { payload };
+    });
+    if ('status' in prepared) return { status: prepared.status };
+
+    // 접수 의도가 COMMIT된 후에만 전송하며 이 구간에는 DB 트랜잭션이 없다.
+    let result: DverResult;
+    try {
+      result = await this.dver.submit(prepared.payload);
+    } catch {
+      result = { status: 'REVIEW_REQUIRED' };
+    }
+    try {
+      await this.database.transaction(async (client) => {
+        await this.submissions.finish(client, id, key, result);
+        await this.audit.recordSuccess(
+          { ...event, action: `ORDER_SUBMISSION_${result.status}` },
+          client,
+        );
+      });
+      return { status: result.status };
+    } catch {
+      this.logger.error({ event: 'order_submission_result_save_failed', orderSeq: id, requestId });
+      // 외부 접수가 성공했을 수 있다. 저장 실패 후에도 같은 주문을 다시 전송하지 않는다.
+      return { status: 'SUBMITTING' };
+    }
   }
 }
