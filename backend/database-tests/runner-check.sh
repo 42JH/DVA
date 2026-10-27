@@ -40,8 +40,8 @@ grep -q 'Previously applied migration checksum changed' "$ROOT/drift.log"
 cp "$ROOT/original-002.sql" "$MIGRATIONS/002-monolith-initial.sql"
 echo 'PASS: changed applied SQL is rejected'
 
-printf 'CREATE TABLE migration_rollback_probe(id integer);\n' > "$MIGRATIONS/006-rollback-probe.sql"
-printf 'SELECT 1/0;\n' > "$MIGRATIONS/007-failure-probe.sql"
+printf 'CREATE TABLE migration_rollback_probe(id integer);\n' > "$MIGRATIONS/007-rollback-probe.sql"
+printf 'SELECT 1/0;\n' > "$MIGRATIONS/008-failure-probe.sql"
 if sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/backups" > "$ROOT/failure.log" 2>&1; then
  echo 'FAIL: invalid migration was accepted' >&2; exit 1
 fi
