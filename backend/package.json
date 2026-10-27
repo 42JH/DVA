@@ -10,13 +10,14 @@
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.cjs\" \"scripts/*.cjs\" \"*.json\" \"*.mjs\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.cjs\" \"scripts/*.cjs\" \"*.json\" \"*.mjs\"",
-    "test": "npm run build && node --test test/config.test.cjs test/http-foundation.test.cjs test/auth.test.cjs test/member-csv.test.cjs test/order-input.test.cjs test/order-validation.test.cjs test/dver.test.cjs",
-    "test:integration": "node --test --test-concurrency=1 test/database.integration.test.cjs test/webhook.integration.test.cjs test/auth.integration.test.cjs && node --test test/organizations.integration.test.cjs && node --test test/orders.integration.test.cjs && node --test test/customers.integration.test.cjs && node --test test/members.integration.test.cjs && node --test test/caller-context.integration.test.cjs",
+    "test": "npm run build && node --test test/config.test.cjs test/http-foundation.test.cjs test/auth.test.cjs test/member-csv.test.cjs test/order-input.test.cjs test/order-validation.test.cjs test/dver.test.cjs test/recording-storage.test.cjs",
+    "test:integration": "node --test --test-concurrency=1 test/database.integration.test.cjs test/webhook.integration.test.cjs test/auth.integration.test.cjs && node --test test/organizations.integration.test.cjs && node --test test/orders.integration.test.cjs && node --test test/customers.integration.test.cjs && node --test test/members.integration.test.cjs && node --test test/caller-context.integration.test.cjs && node --test test/recordings.integration.test.cjs",
     "check": "npm run lint && npm run format:check && npm test",
     "check:docker": "node scripts/check.cjs",
     "bootstrap:admin": "npm run build && node scripts/bootstrap-admin.cjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1157.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.1.0",

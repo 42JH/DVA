@@ -82,7 +82,7 @@ export function parseCallEndedPayload(input: unknown): CallEndedPayload {
       'recordingUrl must be HTTPS without user credentials or a fragment',
     );
   }
-  // No outbound fetch: provider download authentication/expiry and AI processing are not agreed yet.
+  // 다운로드 주소 허용 목록·크기 검증은 비동기 저장 단계에서 처리한다.
   // Extra provider fields are ignored; comparison uses these seven normalized contract fields.
   return { recordingId, callFrom, callTo, startedAt, endedAt, durationSeconds, recordingUrl };
 }
