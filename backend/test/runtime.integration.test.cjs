@@ -27,6 +27,61 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
+test('production customer MVP flow through Nginx needs no service token while admin operations remain protected', async () => {
+  const input = {
+    name: 'runtime-customer-' + randomUUID(),
+    phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
+  };
+  const key = randomUUID();
+  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+  const register = () =>
+    fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
+  const first = await register();
+  assert.equal(first.status, 201);
+  const id = (await first.json()).data.customerSeq;
+  const replay = await register();
+  assert.equal(replay.status, 201);
+  assert.equal((await replay.json()).data.customerSeq, id);
+  const detail = await fetch('http://proxy/api/customers/' + id);
+  assert.equal(detail.status, 200);
+  assert.equal((await detail.json()).data.phoneNumber, input.phoneNumber);
+  const rename = await fetch('http://proxy/api/customers/' + id, {
+    method: 'PATCH',
+    headers,
+    body: '{"name":"runtime renamed customer"}',
+  });
+  assert.equal(rename.status, 204);
+  assert.equal(await rename.text(), '');
+  assert.equal((await fetch('http://proxy/api/customers')).status, 401);
+  const anonymousStatus = await fetch('http://proxy/api/customers/' + id, {
+    method: 'PATCH',
+    headers: { ...headers, Origin: 'https://13.209.59.180' },
+    body: '{"status":"WITHDRAWN"}',
+  });
+  assert.equal(anonymousStatus.status, 401);
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers: { ...headers, Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const adminHeaders = {
+    ...headers,
+    Cookie: login.headers.get('set-cookie').split(';')[0],
+    Origin: 'https://13.209.59.180',
+  };
+  const withdrawn = await fetch('http://proxy/api/customers/' + id, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: '{"status":"WITHDRAWN"}',
+  });
+  assert.equal(withdrawn.status, 204);
+  assert.equal((await fetch('http://proxy/api/customers/' + id)).status, 404);
+  const adminDetail = await fetch('http://proxy/api/customers/' + id, { headers: adminHeaders });
+  assert.equal(adminDetail.status, 200);
+  assert.equal((await adminDetail.json()).data.status, 'WITHDRAWN');
+});
+
 test('production company endpoints require a real session for every operation', async () => {
   for (const [method, path] of [
     ['GET', '/api/companies'],

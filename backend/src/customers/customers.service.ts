@@ -1,0 +1,68 @@
+import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { DatabaseService } from '../database/database.service';
+import { ApiException } from '../common/errors/api.exception';
+import { ListResponse } from '../common/pagination';
+import { CustomersRepository } from './customers.repository';
+import {
+  CreateCustomerDto,
+  ListCustomersQueryDto,
+  UpdateCustomerDto,
+} from './dto/customer-request.dto';
+
+@Injectable()
+export class CustomersService {
+  constructor(
+    private readonly repository: CustomersRepository,
+    private readonly database: DatabaseService,
+  ) {}
+
+  list(query: ListCustomersQueryDto) {
+    return this.repository.list(query).then((rows) => new ListResponse(rows, query.limit));
+  }
+
+  async find(id: number, administrator: boolean) {
+    const customer = await this.repository.find(id);
+    if (!customer || (!administrator && customer.status === 'WITHDRAWN'))
+      throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+    return customer;
+  }
+
+  async create(key: string, input: CreateCustomerDto) {
+    const hash = createHash('sha256')
+      .update(JSON.stringify({ name: input.name, phoneNumber: input.phoneNumber }))
+      .digest('hex');
+    return this.database.transaction(async (client) => {
+      if (!(await this.repository.lockCreation(client, key)))
+        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 고객 등록 요청을 처리 중입니다.');
+      const previous = await this.repository.findCreation(client, key);
+      if (previous) {
+        if (previous.requestHash !== hash)
+          throw new ApiException(
+            422,
+            'IDEMPOTENCY_KEY_REUSED',
+            '같은 요청 키에 다른 내용이 전달됐습니다.',
+          );
+        return { customerSeq: previous.customerSeq };
+      }
+      const customerSeq = await this.repository.insert(client, input);
+      await this.repository.rememberCreation(client, key, hash, customerSeq);
+      return { customerSeq };
+    });
+  }
+
+  async update(id: number, changes: UpdateCustomerDto, administrator: boolean): Promise<void> {
+    if (changes.name === undefined && changes.status === undefined)
+      throw new ApiException(400, 'INVALID_REQUEST', '변경할 이름 또는 상태를 입력해 주세요.');
+    if (changes.status !== undefined && !administrator)
+      throw new ApiException(403, 'FORBIDDEN', '고객 상태 변경은 관리자만 가능합니다.');
+    await this.database.transaction(async (client) => {
+      const customer = await this.repository.find(id, client);
+      if (!customer || (!administrator && customer.status === 'WITHDRAWN'))
+        throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      if (customer.status === 'WITHDRAWN' && changes.status === 'ACTIVE')
+        throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 복구는 지원하지 않습니다.');
+      await this.repository.update(id, changes, client);
+    });
+  }
+}

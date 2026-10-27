@@ -35,6 +35,14 @@ DECLARE customer_id integer; other_customer integer; company_id integer; other_c
 BEGIN
  INSERT INTO customers(name,phone_number,status) VALUES('Test','01000000001','ACTIVE') RETURNING customer_seq INTO customer_id;
  INSERT INTO customers(name,phone_number,status) VALUES('Other','01000000002','ACTIVE') RETURNING customer_seq INTO other_customer;
+ INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq)
+ VALUES('00000000-0000-4000-8000-000000000034',repeat('a',64),customer_id);
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq) VALUES(%L,%L,%s)',
+  '00000000-0000-4000-8000-000000000034',repeat('a',64),customer_id),'23505');
+ PERFORM pg_temp.expect_error(format('INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq) VALUES(%L,%L,%s)',
+  '00000000-0000-4000-8000-000000000035','bad',customer_id),'23514');
+ PERFORM pg_temp.expect_error($q$INSERT INTO api_idempotency.customer_creations(idempotency_key,request_hash,customer_seq)
+  VALUES('00000000-0000-4000-8000-000000000036',repeat('b',64),2147483647)$q$,'23503');
  INSERT INTO organizations(name,status) VALUES('Company','ACTIVE') RETURNING organization_seq INTO company_id;
  INSERT INTO organizations(name,status) VALUES('Other company','ACTIVE') RETURNING organization_seq INTO other_company;
  PERFORM pg_temp.expect_error($q$INSERT INTO customers(name,phone_number,status) VALUES('X','01000000003','SUSPENDED')$q$,'23514');
