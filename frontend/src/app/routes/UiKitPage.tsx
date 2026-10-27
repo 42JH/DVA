@@ -17,7 +17,6 @@ import {
   Calendar,
   ConfirmDialog,
   FormModal,
-  PageHeader,
   Switch,
   TextArea,
   TextField,
@@ -158,12 +157,6 @@ export function UiKitPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="공통 부품"
-        back={{ to: '/', label: '목록으로' }}
-        right={<span>2026.10.20 (화) · 어제와 비교</span>}
-      />
-
       <Tabs
         items={[
           { key: 'all', label: '전체' },

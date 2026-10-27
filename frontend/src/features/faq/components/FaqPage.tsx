@@ -1,7 +1,6 @@
 import {
   Button,
   ConfirmDialog,
-  PageHeader,
   Pagination,
   SearchBox,
   Table,
@@ -62,8 +61,6 @@ export function FaqPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="FAQ 관리" />
-
       <Tabs items={tabs} value={vm.category} onChange={vm.setCategory} />
 
       <SearchBox value={vm.q} onChange={vm.setQ} placeholder="질문 · 답변 검색" />

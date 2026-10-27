@@ -1,5 +1,5 @@
 import { useParams } from 'react-router'
-import { PageHeader, Tag } from '@/shared/ui'
+import { Tag } from '@/shared/ui'
 import { useCallDetail } from '@/features/call/hooks/useCallDetail'
 import { CallResult } from './CallResult'
 import { CallScript } from './CallScript'
@@ -11,8 +11,6 @@ export function CallDetailPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="통화 상세" back={{ to: '/calls' }} />
-
       {vm.error ? (
         <p className="py-16 text-center text-body text-muted">{vm.error}</p>
       ) : vm.isLoading || !vm.summary ? (
