@@ -11,7 +11,7 @@ import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
-// Temporary, explicit opt-in for customer registration/detail/name updates (Jira 135).
+// Temporary, explicit opt-in for customer context/registration/detail/name updates (Jira 135).
 // Do not apply this to administrator-only operations or to an entire controller.
 export const MvpAiCustomerAccess = () => SetMetadata('auth:mvp-ai-customer', true);
 export const Roles = (...roles: AdminRole[]) => SetMetadata('auth:roles', roles);

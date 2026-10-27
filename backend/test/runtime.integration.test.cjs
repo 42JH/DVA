@@ -39,6 +39,20 @@ test('production customer MVP flow through Nginx needs no service token while ad
   const first = await register();
   assert.equal(first.status, 201);
   const id = (await first.json()).data.customerSeq;
+  const initial = await fetch('http://proxy/api/customers/context', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ phoneNumber: input.phoneNumber }),
+  });
+  assert.equal(initial.status, 200);
+  assert.equal(initial.headers.get('cache-control'), 'no-store');
+  const initialBody = await initial.json();
+  assert.equal(initialBody.data.lookupStatus, 'REGISTERED');
+  assert.equal(initialBody.data.customer.customerSeq, id);
+  assert.deepEqual(initialBody.data.availableUsageTypes, ['PERSONAL']);
+  assert.deepEqual(initialBody.data.personalPins, []);
+  assert.deepEqual(initialBody.data.companyPins, []);
+  assert.ok(initialBody.meta.requestId);
   const replay = await register();
   assert.equal(replay.status, 409);
   assert.equal((await replay.json()).error.code, 'DUPLICATE_RESOURCE');
