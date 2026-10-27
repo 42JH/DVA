@@ -1,10 +1,19 @@
-import { Outlet } from 'react-router'
+import { Outlet, useMatches } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
-import { Sidebar } from '@/shared/ui'
+import { PageHeader, Sidebar } from '@/shared/ui'
 
-// 로그인 뒤 틀: 사이드바 222 + 본문(안쪽 32). 화면 머리는 각 화면이 <PageHeader>로 그림
+/** 라우트마다 붙이는 정보 (router.tsx의 handle). 상단바 제목은 여기서만 정한다 */
+export type RouteHandle = { title: string }
+
+// 로그인 뒤 틀: 왼쪽 사이드바 + 오른쪽(상단바 64 고정 + 본문 스크롤). 상단바 · 사이드바는 화면이 그리지 않는다
 export function AppLayout() {
   const { me, isSystemAdmin, logout } = useSession()
+  // 지금 경로에 맞은 라우트 중 가장 안쪽의 제목 (예: /calls/9101 → '통화 상세')
+  const title =
+    useMatches()
+      .map((m) => (m.handle as RouteHandle | undefined)?.title)
+      .findLast(Boolean) ?? ''
+
   return (
     <div className="flex h-full">
       <Sidebar
@@ -12,9 +21,12 @@ export function AppLayout() {
         onLogout={logout}
         canSee={(to) => to !== '/admins' || isSystemAdmin} // 10 관리자 권한 관리는 슈퍼바이저만 (RequireRole과 짝)
       />
-      <main className="min-w-0 flex-1 overflow-auto p-content">
-        <Outlet />
-      </main>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <PageHeader title={title} />
+        <main className="min-h-0 flex-1 overflow-auto px-content pt-6 pb-content">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }
