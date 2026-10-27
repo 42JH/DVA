@@ -63,7 +63,15 @@ function Icon({ name }: { name: keyof typeof ICON }) {
   )
 }
 
-export function Sidebar({ userLabel, onLogout }: { userLabel?: string; onLogout: () => void }) {
+export function Sidebar({
+  userLabel,
+  onLogout,
+  canSee = () => true,
+}: {
+  userLabel?: string
+  onLogout: () => void
+  canSee?: (to: string) => boolean // 역할에 따라 숨길 메뉴 (예: 관리자 권한 관리는 슈퍼바이저만). 기본은 전부
+}) {
   const { pathname } = useLocation()
   const inDetail = MENU[2].subs!.some((s) => pathname.startsWith(s.to))
   const [open, setOpen] = useState(inDetail)
@@ -112,7 +120,7 @@ export function Sidebar({ userLabel, onLogout }: { userLabel?: string; onLogout:
       )}
 
       <ul className={`flex flex-col gap-1 pt-3 ${collapsed ? 'px-3' : 'px-1'}`}>
-        {MENU.map((m) =>
+        {MENU.filter((m) => canSee(m.to)).map((m) =>
           m.subs ? (
             <li key={m.label} className="relative">
               <button

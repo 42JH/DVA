@@ -1,19 +1,23 @@
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '../../../shared/api/client'
-import { login } from '../model/authApi'
+import { authKeys, login } from '../model/authApi'
 
 /** 00 로그인 ViewModel — 입력값 · 제출 · 오류 문구 */
 export function useLoginViewModel() {
   const [loginId, setLoginId] = useState('')
   const [password, setPassword] = useState('')
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/'
 
   const mutation = useMutation({
     mutationFn: () => login(loginId.trim(), password),
-    onSuccess: () => navigate(from, { replace: true }),
+    onSuccess: () => {
+      queryClient.removeQueries({ queryKey: authKeys.me }) // 이전 계정의 내 정보가 남지 않게
+      navigate(from, { replace: true })
+    },
   })
 
   const error = mutation.error
