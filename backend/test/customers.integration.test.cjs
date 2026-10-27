@@ -91,7 +91,7 @@ function request(path = '', options = {}, host = base) {
 }
 function create(
   input = { name: '고객', phoneNumber: phone() },
-  key = randomUUID(),
+  key = undefined,
   host = base,
   headers = {},
 ) {
@@ -99,7 +99,11 @@ function create(
     '',
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key, ...headers },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(key === undefined ? {} : { 'Idempotency-Key': key }),
+        ...headers,
+      },
       body: JSON.stringify(input),
     },
     host,
@@ -291,115 +295,66 @@ test('validation rejects invalid bodies, nulls, phone changes, unknown fields an
     await error(await request('/' + value), 400, 'INVALID_REQUEST');
     await error(await patch(value, { name: '실패' }), 400, 'INVALID_REQUEST');
   }
-  for (const key of ['', 'invalid'])
-    await error(await create(undefined, key), 400, 'INVALID_REQUEST');
-  const missingKey = await request('', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: '고객', phoneNumber: phone() }),
-  });
-  await error(missingKey, 400, 'INVALID_REQUEST');
   await error(await request('/2147483647'), 404, 'NOT_FOUND');
   await error(await patch(2147483647, { name: '실패' }), 404, 'NOT_FOUND');
   assert.equal((await pool.query('SELECT count(*) FROM customers')).rows[0].count, before);
 });
 
-test('registration replays across callers and restart, rejects changed payload and duplicate phone', async () => {
-  const input = { name: '재시도 고객', phoneNumber: phone() };
-  const key = randomUUID();
-  const first = await create(input, key);
-  assert.equal(first.status, 201);
-  const body = await first.json();
-  const replay = await create(
-    { ...input, name: '  재시도 고객  ' },
-    key.toUpperCase(),
-    baseB,
-    adminHeaders(),
-  );
-  assert.equal(replay.status, 201);
-  assert.deepEqual((await replay.json()).data, body.data);
-  await error(await create({ ...input, name: '다른 이름' }, key), 422, 'IDEMPOTENCY_KEY_REUSED');
-  await error(await create({ ...input, phoneNumber: phone() }, key), 422, 'IDEMPOTENCY_KEY_REUSED');
+test('registration uses phone uniqueness without a request key and preserves the existing customer', async () => {
+  const input = { name: '기존 고객', phoneNumber: phone() };
+  const id = await register(input);
   await error(await create(input), 409, 'DUPLICATE_RESOURCE');
-  const restarted = await start();
-  const afterRestart = await create(input, key, await restarted.getUrl());
-  assert.equal(afterRestart.status, 201);
-  assert.deepEqual((await afterRestart.json()).data, body.data);
-  const receipts = await pool.query(
-    'SELECT count(*) FROM api_idempotency.customer_creations WHERE customer_seq=$1',
-    [body.data.customerSeq],
+  await error(
+    await create({ ...input, name: '덮어쓰면 안 됨' }, 'legacy-key', baseB),
+    409,
+    'DUPLICATE_RESOURCE',
   );
-  assert.equal(receipts.rows[0].count, '1');
+  const restarted = await start();
+  await error(await create(input, undefined, await restarted.getUrl()), 409, 'DUPLICATE_RESOURCE');
+  const current = (await (await request('/' + id)).json()).data;
+  assert.equal(current.name, input.name);
+  assert.equal(current.status, 'ACTIVE');
+  assert.equal((await create({ name: '새 고객', phoneNumber: phone() }, 'legacy-key')).status, 201);
 });
 
-test('concurrent retries and different-key phone collisions create exactly one customer', async () => {
+test('concurrent phone collisions across application instances create exactly one customer', async () => {
   const input = { name: '동시 고객', phoneNumber: phone() };
-  const key = randomUUID();
   const results = await Promise.all(
-    Array.from({ length: 8 }, (_, i) => create(input, key, i % 2 ? base : baseB)),
+    Array.from({ length: 8 }, (_, i) => create(input, undefined, i % 2 ? base : baseB)),
   );
-  for (const response of results) assert.ok([201, 409].includes(response.status));
-  assert.ok(results.some((response) => response.status === 201));
-  assert.equal((await create(input, key)).status, 201);
+  assert.equal(results.filter((response) => response.status === 201).length, 1);
+  for (const response of results.filter((response) => response.status !== 201))
+    await error(response, 409, 'DUPLICATE_RESOURCE');
   assert.equal(
     (await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [input.phoneNumber]))
       .rows[0].count,
     '1',
   );
-  const other = { name: '번호 충돌', phoneNumber: phone() };
-  const collision = await Promise.all([create(other), create(other, randomUUID(), baseB)]);
-  assert.deepEqual(collision.map((response) => response.status).sort(), [201, 409]);
-  const failed = collision.find((response) => response.status === 409);
-  assert.equal((await failed.json()).error.code, 'DUPLICATE_RESOURCE');
 });
 
-test('an in-progress key returns 409 and a DB receipt failure rolls back the customer and allows retry', async () => {
-  const input = { name: '잠금 고객', phoneNumber: phone() };
-  const key = randomUUID();
-  const client = await pool.connect();
+test('customer transaction failure rolls back registration and leaves the phone available', async () => {
+  const input = { name: '롤백 고객', phoneNumber: phone() };
+  const original = repository.insert;
+  repository.insert = async (...args) => {
+    await original.apply(repository, args);
+    throw new Error('private customer failure');
+  };
   try {
-    await client.query('BEGIN');
-    assert.equal(await repository.lockCreation(client, key), true);
-    await error(await create(input, key), 409, 'REQUEST_IN_PROGRESS');
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
-  const failure = { name: '롤백 고객', phoneNumber: phone() };
-  const failureKey = randomUUID();
-  await pool.query(
-    `CREATE FUNCTION api_idempotency.fail_customer_receipt_34() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test receipt failure'; END $$`,
-  );
-  try {
-    await pool.query(
-      `CREATE TRIGGER fail_customer_receipt_34 BEFORE INSERT ON api_idempotency.customer_creations FOR EACH ROW EXECUTE FUNCTION api_idempotency.fail_customer_receipt_34()`,
-    );
-    await error(await create(failure, failureKey), 500, 'INTERNAL_ERROR');
+    const response = await create(input);
+    assert.equal(response.status, 500);
+    assert.ok(!(await response.text()).includes('private customer failure'));
     assert.equal(
       (
         await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [
-          failure.phoneNumber,
+          input.phoneNumber,
         ])
       ).rows[0].count,
       '0',
     );
-    assert.equal(
-      (
-        await pool.query(
-          'SELECT count(*) FROM api_idempotency.customer_creations WHERE idempotency_key=$1',
-          [failureKey],
-        )
-      ).rows[0].count,
-      '0',
-    );
   } finally {
-    await pool.query(
-      'DROP TRIGGER IF EXISTS fail_customer_receipt_34 ON api_idempotency.customer_creations',
-    );
-    await pool.query('DROP FUNCTION api_idempotency.fail_customer_receipt_34()');
+    repository.insert = original;
   }
-  assert.equal((await create(failure, failureKey)).status, 201);
-  assert.equal((await create(input, key)).status, 201);
+  assert.equal((await create(input)).status, 201);
 });
 
 test('withdrawal preserves related data, prevents AI access, duplicate registration and reactivation', async () => {
@@ -436,8 +391,7 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
   await error(await patch(id, { name: '재활성화 시도' }), 404, 'NOT_FOUND');
   await error(await create(input), 409, 'DUPLICATE_RESOURCE');
   const replay = await create(input, key);
-  assert.equal(replay.status, 201);
-  assert.equal((await replay.json()).data.customerSeq, id);
+  await error(replay, 409, 'DUPLICATE_RESOURCE');
   await error(
     await patch(id, { name: '실패', status: 'ACTIVE' }, adminHeaders()),
     409,
@@ -466,9 +420,10 @@ test('OpenAPI exposes four customer operations, minimal envelopes and conditiona
   assert.deepEqual(paths['/api/customers/{id}'].get.security, []);
   assert.deepEqual(paths['/api/customers/{id}'].patch.security, [{ adminSession: [] }, {}]);
   assert.equal(
-    paths['/api/customers'].post.parameters.find((header) => header.name === 'Idempotency-Key')
-      .required,
-    true,
+    (paths['/api/customers'].post.parameters ?? []).some(
+      (header) => header.name === 'Idempotency-Key',
+    ),
+    false,
   );
   assert.ok(!paths['/api/customers/{id}'].patch.responses['204'].content);
   assert.deepEqual(Object.keys(document.components.schemas.UpdateCustomerDto.properties).sort(), [

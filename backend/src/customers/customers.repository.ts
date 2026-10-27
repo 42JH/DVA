@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import {
@@ -70,24 +69,6 @@ export class CustomersRepository {
     );
   }
 
-  async lockCreation(client: PoolClient, key: string): Promise<boolean> {
-    const hash = createHash('sha256').update(`customers.create:${key}`).digest();
-    const result = await client.query<{ acquired: boolean }>(
-      'SELECT pg_try_advisory_xact_lock($1::int, $2::int) AS acquired',
-      [hash.readInt32BE(0), hash.readInt32BE(4)],
-    );
-    return result.rows[0].acquired;
-  }
-
-  async findCreation(client: PoolClient, key: string) {
-    const result = await client.query<{ requestHash: string; customerSeq: number }>(
-      `SELECT request_hash AS "requestHash", customer_seq AS "customerSeq"
-       FROM api_idempotency.customer_creations WHERE idempotency_key = $1::uuid`,
-      [key],
-    );
-    return result.rows[0];
-  }
-
   async insert(client: PoolClient, input: CreateCustomerDto): Promise<number> {
     const result = await client.query<{ customerSeq: number }>(
       `INSERT INTO customers (name, phone_number, status) VALUES ($1, $2, 'ACTIVE')
@@ -95,13 +76,5 @@ export class CustomersRepository {
       [input.name, input.phoneNumber],
     );
     return result.rows[0].customerSeq;
-  }
-
-  async rememberCreation(client: PoolClient, key: string, hash: string, id: number): Promise<void> {
-    await client.query(
-      `INSERT INTO api_idempotency.customer_creations (idempotency_key, request_hash, customer_seq)
-       VALUES ($1::uuid, $2, $3)`,
-      [key, hash, id],
-    );
   }
 }

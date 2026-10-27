@@ -33,15 +33,15 @@ test('production customer MVP flow through Nginx needs no service token while ad
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
   };
   const key = randomUUID();
-  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+  const headers = { 'Content-Type': 'application/json' };
   const register = () =>
     fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
   const first = await register();
   assert.equal(first.status, 201);
   const id = (await first.json()).data.customerSeq;
   const replay = await register();
-  assert.equal(replay.status, 201);
-  assert.equal((await replay.json()).data.customerSeq, id);
+  assert.equal(replay.status, 409);
+  assert.equal((await replay.json()).error.code, 'DUPLICATE_RESOURCE');
   const detail = await fetch('http://proxy/api/customers/' + id);
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.phoneNumber, input.phoneNumber);

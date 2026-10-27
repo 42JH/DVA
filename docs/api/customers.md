@@ -24,7 +24,7 @@ Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 
 
 | 메서드·경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
-| POST /api/customers | `{ name, phoneNumber }`, Idempotency-Key UUID 필수 | 201, `{ data: { customerSeq }, meta: { requestId } }` |
+| POST /api/customers | `{ name, phoneNumber }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
 | GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext }` |
 | GET /api/customers/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Customer, meta: { requestId } }` |
 | PATCH /api/customers/{id} | name 또는 관리자 전용 status 중 한 개 이상 | 204, 본문 없음 |
@@ -51,24 +51,13 @@ phoneNumber는 정확히 일치 검색하고 status는 ACTIVE/WITHDRAWN이다. �
 상태 변경으로 기존 주문·개인 PIN·기업 소속을 삭제하거나 상태를 일괄 변경하지 않는다.
 탈퇴한 고객도 전화번호 고유성을 유지하므로 새 키로 같은 번호를 등록하면 409 DUPLICATE_RESOURCE다.
 
-## 고객 등록 재시도
+## 고객 등록 중복 처리
 
-같은 등록 의도의 재시도는 같은 UUID Idempotency-Key와 같은 본문을 보낸다.
-같은 키·정규화된 이름·전화번호는 원래 customerSeq를 HTTP 201로 반환한다.
-키를 다른 내용에 재사용하면 422 IDEMPOTENCY_KEY_REUSED,
-같은 키를 처리 중이면 409 REQUEST_IN_PROGRESS다. 409 처리 중 응답은 같은 키로 재시도한다.
-다른 키로 이미 등록된 전화번호를 보내면 409 DUPLICATE_RESOURCE다.
-
-MVP에는 인증된 AI 주체가 없으므로 키는 고객 등록 API 전체 범위에서 고유하다.
-관리자·AI 요청 및 앱 인스턴스 간에도 같은 키를 공유한다. UUID 대소문자는 정규화한다.
-`api_idempotency.customer_creations`에 UUID·요청 해시·고객 번호·생성 시각을 저장하며
-이름·전화번호 원문이나 쿠키·토큰을 저장하지 않는다. 키는 인증 수단이 아니며 자동 만료는 두지 않는다.
-인증 도입 시 호출자별 키 범위와 기존 기록 처리 방법을 함께 검토한다.
-
-트랜잭션 advisory lock과 UUID PK, 고객 전화번호 UNIQUE 제약으로 동시성을 제어한다.
-고객과 멱등 기록은 같은 PoolClient에서 함께 커밋하거나 롤백한다.
-성공한 등록 응답은 재시작·이름 수정·탈퇴 이후에도 원래 번호를 반환하며 고객을 복구하지 않는다.
-requestId는 HTTP 시도마다 달라질 수 있으며 멱등키를 대체하지 않는다.
+등록 API는 Idempotency-Key를 요구하거나 저장하지 않는다. 기존 클라이언트가 보내는 헤더는 무시한다.
+customers.phone_number의 UNIQUE 제약으로 동시 등록까지 막는다. 이미 등록된 번호는
+이름이나 상태를 덮어쓰지 않고 409 DUPLICATE_RESOURCE를 반환한다. 탈퇴 고객도 재등록하지 않는다.
+응답 유실 시 최초 응답 재생은 지원하지 않으며 기존 고객 여부를 확인한다.
+주문 내부의 고객 연결은 기존 CustomersService.resolveForOrder를 사용하며, 활성 고객을 연결하거나 신규 고객과 주문을 함께 저장한다.
 
 ## DB 적용과 검증
 
@@ -101,12 +90,11 @@ cd ..
 
 ## AI 호출 예시
 
-서버 호출은 Content-Type과 등록용 Idempotency-Key만 보내면 된다.
+서버 호출은 Content-Type을 보내면 된다.
 
 ```http
 POST /api/customers
 Content-Type: application/json
-Idempotency-Key: 98c97572-700c-4c1a-82ad-522e06259f61
 
 {"name":"예시 고객","phoneNumber":"01012345678"}
 ```

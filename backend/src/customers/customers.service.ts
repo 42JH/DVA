@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { DatabaseService } from '../database/database.service';
@@ -63,27 +62,10 @@ export class CustomersService {
     return customer;
   }
 
-  async create(key: string, input: CreateCustomerDto) {
-    const hash = createHash('sha256')
-      .update(JSON.stringify({ name: input.name, phoneNumber: input.phoneNumber }))
-      .digest('hex');
-    return this.database.transaction(async (client) => {
-      if (!(await this.repository.lockCreation(client, key)))
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 고객 등록 요청을 처리 중입니다.');
-      const previous = await this.repository.findCreation(client, key);
-      if (previous) {
-        if (previous.requestHash !== hash)
-          throw new ApiException(
-            422,
-            'IDEMPOTENCY_KEY_REUSED',
-            '같은 요청 키에 다른 내용이 전달됐습니다.',
-          );
-        return { customerSeq: previous.customerSeq };
-      }
-      const customerSeq = await this.repository.insert(client, input);
-      await this.repository.rememberCreation(client, key, hash, customerSeq);
-      return { customerSeq };
-    });
+  async create(input: CreateCustomerDto) {
+    return this.database.transaction(async (client) => ({
+      customerSeq: await this.repository.insert(client, input),
+    }));
   }
 
   async update(id: number, changes: UpdateCustomerDto, administrator: boolean): Promise<void> {
