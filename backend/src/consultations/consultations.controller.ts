@@ -1,10 +1,11 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { ConsultationsService } from './consultations.service';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallListResponseDto } from './dto/call-response.dto';
+import { CallDetailResponseDto, CallListResponseDto } from './dto/call-response.dto';
+import { CallIdParamsDto } from './dto/call-id-params.dto';
 
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
@@ -32,5 +33,20 @@ export class ConsultationsController {
   })
   findMany(@Query() query: CallQueryDto) {
     return this.consultations.findMany(query);
+  }
+
+  @Get(':id')
+  @ApiOperation({
+    summary: '통화 상세 조회',
+    description:
+      '통화·연결 주문 번호·상담원 연결 기록과 녹취 목록을 조회합니다. 대화 내용과 녹취 재생 URL은 각각 별도 조회 API를 사용합니다.',
+  })
+  @ApiOkResponse({
+    description: '통화 정보와 녹취 목록. 미수집 정보는 null 또는 빈 배열.',
+    type: CallDetailResponseDto,
+  })
+  @ApiResponse({ status: 404, description: '해당 통화 기록이 없음.', type: ErrorResponseDto })
+  findOne(@Param() params: CallIdParamsDto) {
+    return this.consultations.findOne(params.id);
   }
 }

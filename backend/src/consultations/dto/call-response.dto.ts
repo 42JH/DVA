@@ -1,4 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 
 export class HandoffDto {
@@ -99,4 +100,39 @@ export class CallListResponseDto {
 
   @ApiProperty({ description: '다음 페이지 존재 여부.', example: false })
   hasNext!: boolean;
+}
+
+export class RecordingDto {
+  @ApiProperty({
+    description: '녹취 번호(recordings.recording_seq). 재생 URL 조회에 사용합니다.',
+    example: 7,
+  })
+  recordingSeq!: number;
+
+  @ApiProperty({
+    description: '녹취 참조가 DB에 저장된 시각. 통화 시작 시각과 다릅니다.',
+    type: String,
+    format: 'date-time',
+    example: '2026-10-28T01:04:00.000Z',
+  })
+  createdAt!: Date;
+}
+
+export class CallDetailDto {
+  @ApiProperty({ description: '통화 기본 정보와 상담원 연결 기록.', type: CallDto })
+  call!: CallDto;
+
+  @ApiProperty({
+    description: '저장된 녹취 목록. 미수집·미연결이면 빈 배열.',
+    type: [RecordingDto],
+  })
+  recordings!: RecordingDto[];
+}
+
+export class CallDetailResponseDto {
+  @ApiProperty({ description: '통화 상세.', type: CallDetailDto })
+  data!: CallDetailDto;
+
+  @ApiProperty({ description: '요청 추적 정보.', type: RequestMetaDto })
+  meta!: RequestMetaDto;
 }

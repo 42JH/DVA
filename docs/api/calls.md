@@ -45,6 +45,17 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 빈 목록은 `200 { "data": [], "hasNext": false }`다.
 잘못된 날짜·역전된 기간·중복 query·지원하지 않는 필드는 `400 INVALID_REQUEST`다.
 
+## GET /api/calls/{id} — 통화 상세 조회
+
+`id`는 `call_session_seq`다. 응답의 `data`는 `{ call, recordings }`다.
+`call`은 목록과 같은 필드이며, `recordings`는 `{ recordingSeq, createdAt }` 배열이다.
+녹취는 `recordingSeq` 오름차순으로 반환한다. 다른 통화의 녹취와 S3 `objectKey`는 포함하지 않는다.
+상세 조회는 S3에 접속하지 않고 저장된 메타데이터를 반환한다.
+
+통화 자체가 없으면 `404 NOT_FOUND`다. 통화는 있지만 녹취가 아직 없으면 `200`과 빈 배열을 반환한다.
+상담원 기록이 없으면 `call.handoff`는 null이다. 배정 관리자·요약이 없는 연결 기록도 그대로 null을 유지한다.
+연결 주문의 내용은 `GET /api/orders/{orderSeq}`로 조회한다.
+
 ## 수집 상태와 범위
 
 - 현재 모놀리식은 AI 주문 결과로 통화 행을 만들고 PBX 웹훅 매칭 후 실제 시작·종료 시각을 저장한다.

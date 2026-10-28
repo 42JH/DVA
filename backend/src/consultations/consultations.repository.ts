@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallDto, HandoffDto } from './dto/call-response.dto';
+import { CallDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
 
 type CallRow = Omit<CallDto, 'handoff'> & {
   handoffRequestSeq: number | null;
@@ -74,5 +74,23 @@ export class ConsultationsRepository {
       values,
     );
     return result.rows.map(callResult);
+  }
+
+  async findOne(id: number): Promise<CallDto | undefined> {
+    const result = await this.database.pool.query<CallRow>(
+      `${CALL_SELECT} WHERE c.call_session_seq=$1`,
+      [id],
+    );
+    return result.rows[0] ? callResult(result.rows[0]) : undefined;
+  }
+
+  async findRecordings(id: number): Promise<RecordingDto[]> {
+    return (
+      await this.database.pool.query<RecordingDto>(
+        `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt"
+       FROM recordings WHERE call_session_seq=$1 ORDER BY recording_seq`,
+        [id],
+      )
+    ).rows;
   }
 }

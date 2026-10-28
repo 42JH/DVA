@@ -3,6 +3,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { ConsultationsRepository } from './consultations.repository';
 import { CallQueryDto } from './dto/call-query.dto';
+import { CallDetailDto } from './dto/call-response.dto';
 
 @Injectable()
 export class ConsultationsService {
@@ -18,5 +19,11 @@ export class ConsultationsService {
     )
       throw new ApiException(400, 'INVALID_REQUEST', '시작 시각은 종료 시각보다 빨라야 합니다.');
     return new ListResponse(await this.repository.findMany(query), query.limit);
+  }
+
+  async findOne(id: number): Promise<CallDetailDto> {
+    const call = await this.repository.findOne(id);
+    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    return { call, recordings: await this.repository.findRecordings(id) };
   }
 }

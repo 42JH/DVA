@@ -309,3 +309,83 @@ test('request logs do not contain phone numbers, provider IDs or search text', a
   for (const value of [row.callerPhoneNumber, row.providerCallId, row.endReason])
     assert.equal(text.includes(value), false);
 });
+
+const detail = (id, headers = operator.headers) => fetch(base + '/api/calls/' + id, { headers });
+async function recording(callId) {
+  const row = (
+    await pool.query(
+      `INSERT INTO recordings(call_session_seq,object_key)
+     VALUES($1,$2) RETURNING recording_seq AS "recordingSeq",created_at AS "createdAt"`,
+      [callId, 'recordings/test-' + randomUUID()],
+    )
+  ).rows[0];
+  return { ...row, createdAt: row.createdAt.toISOString() };
+}
+
+test('detail returns only the selected call, saved handoff data and its recordings without object keys', async () => {
+  const orderSeq = (await pool.query('INSERT INTO orders DEFAULT VALUES RETURNING order_seq'))
+    .rows[0].order_seq;
+  const row = await call({ orderSeq });
+  await handoff(row, 'CONNECTED');
+  const summaryText = '고객 배송지 문의';
+  await pool.query(
+    'UPDATE handoff_requests SET assigned_admin_user_seq=$2,summary_text=$3 WHERE call_session_seq=$1',
+    [row.callSessionSeq, operator.id, summaryText],
+  );
+  Object.assign(row.handoff, { assignedAdminUserSeq: operator.id, summaryText });
+  const first = await recording(row.callSessionSeq);
+  const second = await recording(row.callSessionSeq);
+  await recording((await call()).callSessionSeq);
+  const body = await result(await detail(row.callSessionSeq), false);
+  assert.deepEqual(body.data, { call: row, recordings: [first, second] });
+  assert.equal(JSON.stringify(body).includes('objectKey'), false);
+  assert.equal(JSON.stringify(body).includes('recordings/test-'), false);
+  assert.equal(JSON.stringify(logs).includes(summaryText), false);
+});
+
+test('detail preserves missing times, phone, order and handoff while returning an empty recording list', async () => {
+  const row = await call({ callerPhoneNumber: null, startedAt: null, endedAt: null });
+  assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
+    call: row,
+    recordings: [],
+  });
+});
+
+test('detail distinguishes an absent call from an existing call without recordings', async () => {
+  await error(await detail(2147483647), 404, 'NOT_FOUND');
+  const row = await call();
+  assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data.recordings, []);
+});
+
+test('detail validates database IDs and checks the session before revealing existence', async () => {
+  const row = await call();
+  for (const id of [row.callSessionSeq, 2147483647]) {
+    await error(await detail(id, {}), 401, 'UNAUTHORIZED');
+    await error(
+      await detail(id, { call_session_seq: String(row.callSessionSeq) }),
+      401,
+      'UNAUTHORIZED',
+    );
+  }
+  for (const id of ['0', '-1', '1.5', '1e2', '2147483648', row.providerCallId])
+    await error(await detail(id), 400, 'INVALID_REQUEST');
+});
+
+test('Swagger documents call detail IDs, nullable handoff and recording metadata without exposing storage paths', async () => {
+  const spec = await (await fetch(base + '/api/docs-json')).json();
+  const operation = spec.paths['/api/calls/{id}'].get;
+  assert.deepEqual(operation.tags, ['Calls']);
+  assert.equal(operation.summary, '통화 상세 조회');
+  assert.deepEqual(operation.security, [{ adminSession: [] }]);
+  assert.equal(operation.parameters.length, 1);
+  assert.equal(operation.parameters[0].name, 'id');
+  assert.match(operation.parameters[0].description, /call_session_seq/);
+  assert.ok(operation.responses['404']);
+  for (const name of ['CallDetailDto', 'CallDetailResponseDto', 'RecordingDto'])
+    for (const property of Object.values(spec.components.schemas[name].properties))
+      assert.ok(property.description, name);
+  assert.deepEqual(Object.keys(spec.components.schemas.RecordingDto.properties).sort(), [
+    'createdAt',
+    'recordingSeq',
+  ]);
+});
