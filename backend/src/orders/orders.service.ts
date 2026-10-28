@@ -17,6 +17,7 @@ import { OrderSubmissionRepository } from './order-submission.repository';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
+import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 
 @Injectable()
 export class OrdersService {
@@ -135,6 +136,40 @@ export class OrdersService {
     requestId: string,
     callSessionHeader?: string,
   ): Promise<CreatedOrderDto | OrderResultDto> {
+    return this.createOrder(adminId, key, input, requestId, callSessionHeader);
+  }
+
+  async createManual(
+    adminId: number,
+    key: string,
+    input: CreateManualOrderDto,
+    requestId: string,
+  ): Promise<ManualOrderResultDto> {
+    const result = (await this.createOrder(
+      adminId,
+      key,
+      input,
+      requestId,
+      undefined,
+      true,
+    )) as OrderResultDto;
+    return {
+      orderSeq: result.orderSeq,
+      version: result.version,
+      status: result.status,
+      parcelNo: result.parcelNo,
+      creationSource: 'ADMIN',
+    };
+  }
+
+  private async createOrder(
+    adminId: number | null,
+    key: string,
+    input: CreateOrderDto,
+    requestId: string,
+    callSessionHeader?: string,
+    submitManual = false,
+  ): Promise<CreatedOrderDto | OrderResultDto> {
     const partialResult = input.call && input.outcome !== 'COMPLETE';
     if ((input.call === undefined) !== (input.outcome === undefined))
       throw new ApiException(
@@ -168,7 +203,9 @@ export class OrdersService {
       if (previous) {
         if (!previous.allowed)
           throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 주문에 접근할 수 없습니다.');
-        if (!input.call)
+        if (submitManual && previous.creationSource !== 'ADMIN')
+          throw new ApiException(409, 'INVALID_STATE', '관리자 수기 주문의 요청 키가 아닙니다.');
+        if (!input.call && !submitManual)
           return { result: { orderSeq: previous.orderSeq, version: previous.version } };
         if (await this.submissions.markStale(client, previous.orderSeq))
           await this.audit.recordSuccess(
@@ -212,7 +249,13 @@ export class OrdersService {
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
-      const result = await this.repository.insert(client, draft, customerId, key);
+      const result = await this.repository.insert(
+        client,
+        draft,
+        customerId,
+        key,
+        callId !== null ? 'AI' : 'ADMIN',
+      );
       if (callId !== null) await this.repository.linkCall(client, callId, result.orderSeq);
       await this.audit.recordSuccess(
         {
@@ -224,7 +267,7 @@ export class OrdersService {
         },
         client,
       );
-      if (!input.call) return { result };
+      if (!input.call && !submitManual) return { result };
       if (input.outcome === 'CANCELLED') {
         await this.repository.cancel(client, result.orderSeq);
         await this.audit.recordSuccess(
@@ -239,7 +282,7 @@ export class OrdersService {
         );
       }
       const payload =
-        input.outcome === 'COMPLETE'
+        input.outcome === 'COMPLETE' || submitManual
           ? await this.prepareSubmission(client, result.orderSeq, customerId!, adminId, requestId)
           : undefined;
       return { result: await this.repository.result(client, result.orderSeq, callId), payload };

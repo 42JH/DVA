@@ -96,6 +96,16 @@ before(async () => {
         readFileSync(join(__dirname, '../migrations/011-call-recording-correlation.sql'), 'utf8'),
       );
     }
+    if (
+      !(
+        await client.query(
+          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='orders' AND column_name='creation_source') AS ready",
+        )
+      ).rows[0].ready
+    )
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/012-order-creation-source.sql'), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

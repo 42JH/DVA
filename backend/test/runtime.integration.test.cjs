@@ -2,6 +2,21 @@ const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 
+test('Nginx preserves the admin-only manual order boundary without a service-token bypass', async () => {
+  const response = await fetch('http://proxy/api/admin/orders', {
+    method: 'POST',
+    headers: {
+      Origin: 'https://13.209.59.180',
+      'Content-Type': 'application/json',
+      'Idempotency-Key': randomUUID(),
+    },
+    body: JSON.stringify({}),
+  });
+  assert.equal(response.status, 401);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
+});
+
 test('Nginx forwards an AI consultation result in the JSON body without a call header', async () => {
   const key = randomUUID();
   const input = {
