@@ -7,6 +7,7 @@ import logging
 import time
 
 from app import listener
+from app import client_backend
 from app.call import Call
 from app.dispatcher import dispatch
 from app.flow import engine
@@ -35,11 +36,15 @@ async def run_call(call: Call, client) -> None:
                         reason = closed
                         break
             finally:
-                for w in watchers:
-                    w.cancel()
-                for t in [*tool_tasks, *call.listen_tasks, call.listen_timer]:
+                jobs = [t for t in [*watchers, *tool_tasks, *call.listen_tasks, call.listen_timer] if t]
+                for t in jobs:
                     if t:
                         t.cancel()
+                await asyncio.gather(*jobs, return_exceptions=True)
+                for future in call.pending_context.values():
+                    if not future.done():
+                        future.cancel()
+                call.pending_context.clear()
     except Exception as e:
         log.exception("sideband 오류 %s", call.session_id)
         call.add_error(f"sideband 오류: {type(e).__name__}")
@@ -55,7 +60,12 @@ async def run_call(call: Call, client) -> None:
 def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str | None:
     """이벤트 하나 처리. 통화가 닫혔으면 이유를 돌려준다. 도구 실행은 별도 작업으로(받기를 막지 않게)."""
     etype = getattr(event, "type", None)
-    if etype == "response.event":
+    if etype == 'session.delegation.created' and call.delegation_mode == 'client':
+        value = _dump(event)
+        client_backend.start_delegation(call, conn, value.get('delegation') or {}, tool_tasks, client)
+    elif etype in ('session.thinking.appended', 'session.commentary.appended'):
+        client_backend.acknowledge(call, _dump(event))
+    elif etype == "response.event" and call.delegation_mode == 'responses':
         inner = event.event or {}
         itype = inner.get("type")
         item = inner.get("item") or {}
@@ -76,11 +86,15 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
     elif etype == "session.input_transcript.delta":
         call.add_transcript("customer", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
         call.last_input_at = time.monotonic()
+        if event.delta.strip():
+            call.input_ready.set()
         listener.heard(call, event.delta, conn, client)
     elif etype == "session.output_transcript.delta":
         call.add_transcript("agent", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
+        client_backend.observe_output(call, 'transcript', getattr(event, 'start_ms', None))
     elif etype == "session.output_audio.delta":
         call.last_output_at = time.monotonic()
+        client_backend.observe_output(call, 'audio', getattr(event, 'start_ms', None))
     elif etype == "session.usage.updated":
         call.usage = _dump(getattr(event, "usage", None))
     elif etype == "error":

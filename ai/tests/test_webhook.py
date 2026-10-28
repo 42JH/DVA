@@ -103,7 +103,7 @@ def test_registered_caller_gets_registered_flow():
     from conftest import FULL_ORDER, run
 
     from app.order import Order
-    run(db.create_order(CALLER, "old", Order(**FULL_ORDER), 3500, None))
+    run(db.create_order(CALLER, "old", Order(**FULL_ORDER), 4950, None))
     with TestClient(create_app(client=client, backend=db)) as http:
         post(http, *signed_webhook("live.transport.incoming", "live_r"))
         wait(lambda: client.live.sessions.of("accept"))

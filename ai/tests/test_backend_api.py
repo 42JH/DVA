@@ -53,10 +53,16 @@ def test_caller_context_new_customer():
 
 def test_create_order_sends_draft_and_idempotency_key():
     client, seen = api(lambda req: httpx2.Response(201, json={"order_no": "Q000123"}))
-    assert run(client.create_order(CALLER, "live_1", ORDER, 3500, "live_1-1")) == "Q000123"
+    assert run(client.create_order(CALLER, "live_1", ORDER, 4950, "live_1-1")) == "Q000123"
     req = seen[0]
     assert req.url.path == "/internal/ai/orders" and req.headers["Idempotency-Key"] == "live_1-1"
-    assert body(req) == {"caller_phone": CALLER, "session_id": "live_1", "fare": 3500, **ORDER.model_dump()}
+    assert body(req) == {"caller_phone": CALLER, "session_id": "live_1", "fare": 4950, **ORDER.model_dump()}
+
+
+def test_unconfirmed_price_is_omitted_instead_of_fixed_or_zero_fare():
+    client, seen = api(lambda req: httpx2.Response(201, json={'order_no': 'Q000123'}))
+    assert run(client.create_order(CALLER, 'live_1', ORDER, None, 'live_1-1')) == 'Q000123'
+    assert 'fare' not in body(seen[0])
 
 
 @pytest.mark.parametrize("status, expected", [(200, "ok"), (404, "not_found"), (409, "cancelled")])
