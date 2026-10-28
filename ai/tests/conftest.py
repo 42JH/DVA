@@ -6,16 +6,19 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 from openai import AsyncOpenAI
 
 from app import address
+from app.address import kakao
 from app.call import Call
 from app.config import load_server_config, load_texts
 from app.main import check_definitions
 from app.mock_backend import MockBackend
+from app.order import Geo
 
 CFG = load_server_config()
 TEXTS = load_texts()
@@ -23,12 +26,20 @@ check_definitions(CFG, TEXTS)
 
 WEBHOOK_SECRET = "whsec_" + base64.b64encode(b"test-secret").decode()
 CALLER = "01012345678"
+INCOMING_AT = "2026-10-28T01:00:00Z"
+# 수거 희망 시각(미래). 기록하면 한국 시간으로 바뀐다
+PICKUP_AT = (datetime.now(timezone(timedelta(hours=9))) + timedelta(days=1)).replace(
+    hour=10, minute=0, second=0, microsecond=0).isoformat()
 
+# 택배 하나 + 수거 시각을 한 번에 말한 record_order 인수. 결제 방식은 고객 답(credit)으로 따로 받는다
 FULL_ORDER = {
     "sender_name": "김철수", "sender_phone": "공일공 일이삼사 오육칠팔", "sender_address": "서울 강남구 테헤란로 212",
     "sender_address_detail": "1201호", "receiver_name": "이영희", "receiver_phone": "010-9876-5432",
-    "receiver_address": "부산 해운대구 센텀로 10", "receiver_address_detail": "", "item": "옷",
+    "receiver_address": "부산 해운대구 센텀로 10", "receiver_address_detail": "", "small_box_count": 1,
+    "item_price": 30000, "pickup_at": PICKUP_AT,
 }
+GEO = Geo(jibun_address="서울 강남구 역삼동 737", dong_name="역삼동", postal_code="06236", latitude=37.5,
+          longitude=127.03)
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +47,15 @@ def no_address_db(monkeypatch):
     """개발 PC에 data/address.db가 있어도 테스트는 주소 보정 없이 돈다(보정 테스트는 test_address.py가 작은 DB로)."""
     monkeypatch.setattr(address, "_db", None)
     monkeypatch.setattr(address, "load", lambda path: False)
+
+
+@pytest.fixture(autouse=True)
+def fake_kakao(monkeypatch):
+    """카카오 주소 검색을 부르지 않는다. 확정한 주소마다 같은 지번·좌표를 돌려준다(못 찾음은 테스트가 바꾼다)."""
+    async def geocode(address_, timeout_sec, transport=None):
+        return GEO if address_ else None
+
+    monkeypatch.setattr(kakao, "geocode", geocode)
 
 
 def run(coro):
@@ -46,7 +66,7 @@ FakeBackend = MockBackend
 
 
 def make_call(backend=None, caller=CALLER, session_id="live_test") -> Call:
-    call = Call(session_id, caller, CFG, TEXTS, backend or FakeBackend())
+    call = Call(session_id, caller, CFG, TEXTS, backend or FakeBackend(), INCOMING_AT)
     run(call.prepare())
     return call
 

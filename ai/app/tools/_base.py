@@ -5,12 +5,13 @@ import pkgutil
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import openai
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.order import ORDER_FIELDS, PHONE_FIELDS
+from app.order import PHONE_FIELDS
 
 
 class Args(BaseModel):
@@ -34,19 +35,30 @@ class OrderFields(Args):
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
     receiver_address: str | None = Field(None, max_length=120, description="기본 주소(도로명·지번)")
     receiver_address_detail: str | None = Field(None, max_length=60, description="동·호수 등. 없다고 하면 빈 문자열")
-    item: str | None = Field(None, max_length=40, description="물품 종류")
+    document_count: int | None = Field(None, ge=0, le=99, description="서류 봉투 수")
+    small_box_count: int | None = Field(None, ge=0, le=99, description="소형 박스 수")
+    medium_box_count: int | None = Field(None, ge=0, le=99, description="중형 박스 수")
+    big_box_count: int | None = Field(None, ge=0, le=99, description="대형 박스 수")
+    other_item: str | None = Field(None, max_length=40, description="서류·박스가 아닌 물품일 때만 그 설명")
+    item_price: int | None = Field(None, ge=0, le=100_000_000, description="물품 가액(원). 예: 만 원 → 10000")
+    client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
+    pickup_at: str | None = Field(None, max_length=40, description="수거 희망 시각. 한국 시간 ISO 8601(예: 2026-10-29T14:00:00+09:00)")
+    customer_name: str | None = Field(None, max_length=30, description="전화 주신 분 성함(물었을 때만)")
 
-    def cleaned(self) -> tuple[dict[str, str], list[str]]:
-        """(저장할 값, 자릿수가 틀린 전화번호 항목). 전화번호는 숫자만 남긴다."""
+    def cleaned(self) -> tuple[dict, list[str]]:
+        """(저장할 값, 형식이 틀린 항목). 전화번호는 숫자만 남기고, 수거 시각은 미래의 시간대 포함 시각만 받는다."""
         values, invalid = {}, []
-        for name, value in self.model_dump(include=set(ORDER_FIELDS), exclude_none=True).items():
+        for name, value in self.model_dump(include=set(OrderFields.model_fields), exclude_none=True).items():
             if name in PHONE_FIELDS:
-                phone = normalize_phone(value)
-                if phone is None:
-                    invalid.append(name)
-                    continue
-                value = phone
-            values[name] = value.strip()
+                value = normalize_phone(value)
+            elif name == "pickup_at":
+                value = future_time(value)
+            elif isinstance(value, str):
+                value = value.strip()
+            if value is None:
+                invalid.append(name)
+                continue
+            values[name] = value
         return values, invalid
 
 
@@ -109,6 +121,20 @@ def require_caller(ctx: Any) -> str:
     if not ctx.caller:
         raise ToolError("발신번호를 알 수 없어 할 수 없음", "상담원 전환을 안내")
     return ctx.caller
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def future_time(raw: str) -> str | None:
+    """모델이 만든 시각(미신뢰): 시간대가 있고 지금보다 뒤여야 한다. 한국 시간 ISO 8601로 돌려준다."""
+    try:
+        at = datetime.fromisoformat(raw.strip())
+    except ValueError:
+        return None
+    if at.tzinfo is None or at <= datetime.now(timezone.utc):
+        return None
+    return at.astimezone(KST).isoformat(timespec="seconds")
 
 
 # --- 전화번호 ---

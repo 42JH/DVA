@@ -1,6 +1,8 @@
 """서명한 가짜 웹훅으로 accept·reject·중복 제거·동시 통화 상한을 확인한다."""
 
+import json
 import time
+from datetime import datetime, timezone
 
 import pytest
 from conftest import CALLER, FakeClient, FakeBackend, signed_webhook
@@ -100,13 +102,15 @@ def test_untrusted_from_header(env):
 
 def test_registered_caller_gets_registered_flow():
     client, db = FakeClient(), FakeBackend()
-    from conftest import FULL_ORDER, run
+    from app.order import Place
 
-    from app.order import Order
-    run(db.create_order(CALLER, "old", Order(**FULL_ORDER), 4950, None))
+    db.add_customer(CALLER, "김철수", [Place(name="이영희", phone="01098765432", address="부산", address_detail="")])
     with TestClient(create_app(client=client, backend=db)) as http:
-        post(http, *signed_webhook("live.transport.incoming", "live_r"))
+        body, headers = signed_webhook("live.transport.incoming", "live_r")
+        post(http, body, headers)
         wait(lambda: client.live.sessions.of("accept"))
         call = http.app.state.svc.registry.get("live_r")
-        assert call.customer_type == "registered" and call.flow.stage == "recent_offer"
+        assert call.customer_type == "registered" and call.flow.stage == "find_destination"
+        created = json.loads(body)["created_at"]  # 서버 수신 시각이 아니라 수신 이벤트 시각
+        assert call.incoming_at == datetime.fromtimestamp(created, timezone.utc).isoformat().replace("+00:00", "Z")
         assert "등록 고객" in client.live.sessions.of("accept")[0][2]["instructions"]

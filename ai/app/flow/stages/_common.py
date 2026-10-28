@@ -11,7 +11,7 @@ def is_registered(ctx) -> bool:
 
 
 def is_new(ctx) -> bool:
-    return not is_registered(ctx)
+    return ctx.customer_type == "new"
 
 
 def registered_with_recent(ctx) -> bool:
@@ -23,7 +23,8 @@ def registered_without_recent(ctx) -> bool:
 
 
 def complete(ctx) -> bool:
-    return ctx.order.complete()
+    """택배 항목과 통화 항목(성함·수거 시각·결제 방식)이 다 있음."""
+    return ctx.order.complete() and not ctx.call_fields_due()
 
 
 def incomplete(ctx) -> bool:
@@ -44,10 +45,6 @@ def no_saved_destinations(ctx) -> bool:
 
 def address_pending(ctx) -> bool:
     return bool(ctx.address_pending)
-
-
-def has_save_candidates(ctx) -> bool:
-    return bool(ctx.save_candidates)
 
 
 def reset_for_new_order(ctx, prev: str) -> None:

@@ -15,4 +15,6 @@
 - **도구는 값 기록과 주문 작업에만 쓴다.** 고객 답(예/아니오·확인·저장·상담원·종료·용건)에 따른 상태 전환은 도구 왕복의 지연을 피하려고 서버가 고객 말을 직접 판별한다(`spec/flow.md`). 새 질문 단계를 만들 때 도구를 만들지 말고 단계의 `choices`·`on_answer`로 만든다.
 - 고객 확인이 필요한 도구(수정·취소)는 인수에 `customer_confirmed`를 두고 도구 안에서 `require_confirmed`로 거절한다.
 - 지금 도구: `get_state`, `record_order`, `lookup_orders`, `modify_order`, `cancel_order`, `search_manual`.
+  - `record_order`: 택배 항목(이름·연락처·주소·규격별 수량·기타 물품·물품 가액·요청 사항)과 통화 항목(수거 희망 시각 `pickup_at`, 전화 주신 분 성함 `customer_name`)을 기록한다. 수거 시각은 시간대가 있는 미래 시각만 받아 한국 시간으로 바꾼다. 결제 방식은 도구가 아니라 고객 답 판별로 기록한다.
+  - `lookup_orders`·`modify_order`·`cancel_order`는 **사용 보류**다. 백엔드에 AI가 통화 중 쓸 API가 없어서, 이 도구를 허용하는 단계(`HELD`)를 흐름에서 뺐다(`spec/backend-api.md`). 도구와 테스트는 남겨 둔다.
 - 도구마다 단위 테스트 하나 이상(정상, 인수 오류, 허용되지 않은 상태). 레지스트리 테스트: 모든 도구의 스키마가 strict로 생성되는지, `live.toml`의 함수 도구 이름이 모두 레지스트리에 있는지.

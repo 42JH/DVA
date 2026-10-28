@@ -55,6 +55,10 @@ async def run_call(call: Call, client) -> None:
             log.warning("오류 후 hangup 실패 %s", call.session_id)
     finally:
         call.end(reason)
+        try:
+            await call.finish()  # 통화 결과를 백엔드에 한 번(접수·미완료·취소)
+        except Exception:
+            log.exception("통화 결과 전송 실패 %s", call.session_id)
 
 
 def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str | None:

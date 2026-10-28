@@ -47,6 +47,9 @@ class ProgressConfig(_Strict):
 class BackendConfig(_Strict):
     mock: bool = False
     timeout_sec: float = Field(gt=0)
+    submit_timeout_sec: float = Field(gt=0)
+    submit_retry_sec: float = Field(ge=0)
+    retry_interval_sec: float = Field(gt=0)
     lookup_limit: int = Field(ge=1, le=20)
     monitor_orders_limit: int = Field(ge=1, le=1000)
 
@@ -70,6 +73,7 @@ class ListenerConfig(_Strict):
 
 class AddressConfig(_Strict):
     db_path: str = Field(min_length=1)
+    kakao_timeout_sec: float = Field(gt=0)
 
 
 class ServerConfig(_Strict):

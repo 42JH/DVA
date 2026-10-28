@@ -6,13 +6,19 @@ import json
 import sqlite3
 from pathlib import Path
 
+import httpx2
 import pytest
 from conftest import FULL_ORDER, make_call, run
 
 from app import address
+from app.address import kakao
 from app.address.corrector import RoadDict, candidates, correct, jamo
 from app.address.db import INDEXES, SCHEMA, AddressDB
 from app.dispatcher import dispatch
+from app.flow import engine
+from app.order import Geo
+
+REAL_GEOCODE = kakao.geocode  # conftest의 fake_kakao가 바꾸기 전(모듈을 읽을 때) 진짜 함수를 잡아 둔다
 
 DATA = Path(__file__).parent / "data"
 
@@ -242,7 +248,7 @@ def test_address_stage_resolves_then_returns(corrector):
     call = make_call()
     assert record(call, sender_address="서울 강남구 태헤란노 211", sender_address_detail="")["ok"]
     assert [h["to"] for h in call.flow.history] == ["address", "collecting"] and call.flow.stage == "collecting"
-    assert call.address_results["sender_address"] == {"status": "confirmed", "changed": True}
+    assert call.address_results["sender_address"] == {"status": "confirmed", "changed": True, "geo": True}
     assert call.snapshot()["address"] == call.address_results and not call.address_pending
     record(call, sender_address="서울특별시 강남구 테헤란로 211")  # 같은 주소면 다시 거치지 않음
     assert [h["to"] for h in call.flow.history] == ["address", "collecting"]
@@ -251,7 +257,10 @@ def test_address_stage_resolves_then_returns(corrector):
 def test_address_stage_from_confirming_goes_back_when_detail_dropped(corrector):
     """마지막 확인에서 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 다시 받기."""
     call = make_call()
-    assert record(call, **FULL_ORDER)["ok"] and call.flow.stage == "confirming"
+    assert record(call, **FULL_ORDER)["ok"]
+    call.payment_method = "credit"
+    run(engine.apply(call, ["order.updated"]))
+    assert call.flow.stage == "confirming"
     assert record(call, receiver_address="서울 강남구 테헤란로 112")["ok"]
     assert [h["to"] for h in call.flow.history][-3:] == ["address", "confirming", "collecting"]
     assert call.order.receiver_address.startswith("서울특별시 강남구 테헤란로 11")  # 애매함 → 1등
@@ -261,4 +270,48 @@ def test_address_stage_from_confirming_goes_back_when_detail_dropped(corrector):
 def test_address_stage_without_db_keeps_heard():
     call = make_call()
     assert record(call, sender_address="서울 강남구 태헤란노 211")["ok"]
-    assert call.address_results["sender_address"] == {"status": "off", "changed": False}
+    assert call.address_results["sender_address"] == {"status": "off", "changed": False, "geo": True}
+
+
+# --- 카카오 주소 검색(지번·동명·우편번호·좌표) ---
+
+def kakao_api(handler):
+    seen = []
+
+    def wrapped(req):
+        seen.append(req)
+        return handler(req)
+
+    return httpx2.MockTransport(wrapped), seen
+
+
+KAKAO_DOC = {"address_name": "서울 강남구 테헤란로 212", "address_type": "ROAD_ADDR", "x": "127.0444", "y": "37.5013",
+             "address": {"address_name": "서울 강남구 역삼동 718-5", "region_3depth_name": "역삼동"},
+             "road_address": {"address_name": "서울 강남구 테헤란로 212", "region_3depth_name": "역삼동", "zone_no": "06220"}}
+
+
+def test_kakao_geocode_parses_first_complete_document(monkeypatch):
+    monkeypatch.setenv("KAKAO_REST_API_KEY", "k")
+    broken = {**KAKAO_DOC, "road_address": None}  # 도로명 정보(우편번호)가 없으면 건너뛴다
+    transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"meta": {}, "documents": [broken, KAKAO_DOC]}))
+    geo = run(REAL_GEOCODE("서울특별시 강남구 테헤란로 212", 3.0, transport))
+    assert geo == Geo(jibun_address="서울 강남구 역삼동 718-5", dong_name="역삼동", postal_code="06220",
+                      latitude=37.5013, longitude=127.0444)
+    assert seen[0].headers["Authorization"] == "KakaoAK k" and seen[0].url.params["query"].endswith("212")
+
+
+@pytest.mark.parametrize("response", [
+    httpx2.Response(200, json={"meta": {}, "documents": []}),
+    httpx2.Response(401, json={}),
+    httpx2.Response(200, json={"documents": [{**KAKAO_DOC, "y": "x"}]}),
+])
+def test_kakao_geocode_not_found_or_error_is_none(monkeypatch, response):
+    monkeypatch.setenv("KAKAO_REST_API_KEY", "k")
+    transport, _ = kakao_api(lambda req: response)
+    assert run(REAL_GEOCODE("서울", 3.0, transport)) is None
+
+
+def test_kakao_geocode_off_without_key(monkeypatch):
+    monkeypatch.delenv("KAKAO_REST_API_KEY", raising=False)
+    transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": [KAKAO_DOC]}))
+    assert run(REAL_GEOCODE("서울", 3.0, transport)) is None and not seen

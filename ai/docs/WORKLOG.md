@@ -524,3 +524,39 @@
 ### develop-ai 병합 준비 최종 검증 — 주소 보정 포함
 
 사용자의 develop-ai 병합 요청에 따라 원격을 다시 가져왔고, 최신 a056a36의 주소 보정 기능까지 작업 브랜치에 합쳤다. address 단계·주소DB 읽기 전용 볼륨·최종 도로명 확인을 유지하면서 RAG/client 위임 설정과 함께 충돌을 해결했다. 고정3500원 안내는 재도입하지 않았다. 전체 가짜 테스트254개 통과(10.79초), Linux Docker 빌드 및 네트워크 차단 기동 정의 검증 통과. 운영 활성 통화 수0개를 확인했으며 개인 통화 내용은 출력하지 않았다. 팀 규칙대로 작업 브랜치→develop-ai MR로 반영하고 자동 배포 결과와 RAG 운영 준비를 구분한다. 운영 RAG 비밀값/색인은 아직 미설정·0컬렉션 상태다.
+
+## 2026-10-28 (백엔드 연동 계약 반영, S15P31D109-132)
+
+### 바꾼 것
+- 백엔드 새 계약(`develop-backend`의 `docs/api/`)에 맞춤. 원문 `spec/orders.md`·`spec/ai-pbx-recordings.md`를 추가했고, `spec/backend-api.md`는 AI가 그 계약을 어떻게 쓰는지로 다시 씀.
+  - 고객 확인 `POST /api/customers/context`: 등록·미등록·탈퇴 구분, 주소록(PIN)은 출발지·도착지 후보 모두로 씀. 탈퇴 고객은 바로 상담원 연결.
+  - 통화 결과 `POST /api/orders`를 **통화당 한 번**(백엔드는 통화 한 건에 주문 한 건). 택배는 `parcels`로 묶음. 키는 통화마다 UUID 하나, 재확인에도 같은 키·같은 본문을 씀. `ACCEPTED`일 때만 접수 완료로 안내. 처리 중(연결 실패·504·202·409 처리 중)은 같은 키로 다시 확인함.
+  - `incomingAt`은 수신 웹훅 `created_at`(SDK 타입 `LiveTransportIncomingWebhookEvent.created_at: int` 확인)으로 만듦.
+- 흐름(`spec/scenario.md`)
+  - 택배를 확인하면 담고(`confirming` → `after_order`), "더 없어요"에서 한 번에 접수.
+  - 수거 희망 시각·결제 방식·전화 주신 분 성함(미등록이고 보내는 분 번호 ≠ 발신번호일 때만)은 첫 택배를 확인하기 전에 받음. 그래야 끊겨도 확인한 택배를 COMPLETE로 보낼 수 있다.
+  - 물품은 규격별 수량(서류·소형·중형·대형) 또는 기타 물품, 물품 가액도 받음.
+  - 통화가 끝날 때(`Call.finish`): 상담원 연결은 INCOMPLETE(확인한 택배 + 받는 중이던 택배), 고객이 그만두면 CANCELLED, 끊김·무응답은 확인한 택배를 COMPLETE로.
+  - `submitted`·`save_offer` 단계 삭제(배송지 저장 API 없음). 조회·수정·취소 단계는 `HELD`로 옮겨 흐름에서 뺌(도구·테스트는 남김). 그 용건은 상담원 연결 제안으로 감.
+- 주소: 확정한 주소로 카카오 주소 검색을 해 지번·동명·우편번호·좌표를 채움(`app/address/kakao.py`, 키 `KAKAO_REST_API_KEY`). 못 찾으면 임의 값을 넣지 않고 그 통화는 INCOMPLETE로 보냄.
+- 설정: `[backend] submit_timeout_sec`·`submit_retry_sec`·`retry_interval_sec`, `[address] kakao_timeout_sec`. `.env.example`·`compose.yaml`에 카카오 키.
+- 프롬프트(`voice.md`·`backend.md`·`flow.toml`), 관제 화면(담은 택배·통화 결과), Studio(고객 상황 `new`·`saved`·`withdrawn`)를 같이 고침.
+
+### 확인한 것
+- 백엔드 코드(`develop-backend` 3b76406)
+  - 이미 주문이 연결된 통화에 새 키로 보내면 409.
+  - 디버 접수는 order 단위로 한 번이고, 결과(`status`·`parcelNo`)와 결제 방식·수거 시각도 order에 하나.
+  - COMPLETE는 주소 9개 항목·우편번호 5자리·수량 또는 기타 설명·`itemPrice`·미래 수거 시각이 없으면 422.
+- 배포 서버 Swagger(`https://13.209.59.180/api/docs-json`): 스키마가 코드와 같음. 조회·이전 주소 API는 AI에게 `call_session_seq` 헤더를 요구하는데, 이 값은 `POST /api/orders` 응답으로만 받으므로 통화 중에는 쓸 수 없다(조회·수정·취소 보류의 근거).
+- 카카오 "주소로 좌표 변환" 응답 필드를 공식 문서로 확인함(`x`·`y`는 문자열, 우편번호 `road_address.zone_no`).
+- 테스트: `uv run pytest -q` 287개 통과(가짜 백엔드·가짜 HTTP·가짜 카카오).
+
+### 남은 것
+- 실제 백엔드·카카오·통화로는 확인하지 않음(사용자 확인 필요): `KAKAO_REST_API_KEY` 설정, `[backend] mock = false` 전환.
+- "더 없어요" 뒤 접수 응답을 기다리는 동안(디버 최대 10초 + 재확인) 고객은 대기한다. 실제 통화에서 체감 시간을 확인해야 함.
+- 결제 방식 선택지 규칙(개인카드 = 미등록 또는 PERSONAL)은 백엔드 설명에서 추정했고, 최종 판정은 백엔드가 한다(403이면 "확인 후 연락" 안내).
+- 관제 화면의 주문 목록은 실제 백엔드에서는 관리자 세션이 필요해 비어 있음.
+
+### 추가 정리
+- AGENTS.md: 문서 표·비밀값(`KAKAO_REST_API_KEY`)·저장·안전장치(택배 담기, 통화당 접수, `ACCEPTED`만 성공)·아직 없는 것(조회·수정·취소 보류)을 새 계약에 맞춤.
+- `work.md`: 백엔드 연동 현황 표 추가.

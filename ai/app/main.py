@@ -56,7 +56,9 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
         elif backend_api is None:
             from app.backend_api import BackendAPI
 
-            backend_api = BackendAPI(os.environ["BACKEND_API_URL"], cfg.backend.timeout_sec)
+            b = cfg.backend
+            backend_api = BackendAPI(os.environ["BACKEND_API_URL"], b.timeout_sec, submit_timeout_sec=b.submit_timeout_sec,
+                                     submit_retry_sec=b.submit_retry_sec, retry_interval_sec=b.retry_interval_sec)
         app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
         if rag is not None:
             app.state.svc.rag = rag

@@ -56,10 +56,11 @@ function render() {
   const c = calls.get(selected);
   if (!c) return;
   $("transcript").innerHTML = c.transcript.map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
-  const rows = Object.entries(c.order).map(([k, v]) => `<tr><th>${esc(LABELS[k] || k)}</th><td>${v === null ? "<span class=muted>-</span>" : esc(v || "(없음)")}</td></tr>`).join("");
+  const rows = Object.entries(c.order).map(([k, v]) => `<tr><th>${esc(LABELS[k] || k)}</th><td>${v === null ? "<span class=muted>-</span>" : typeof v === "object" ? "지번·좌표 있음" : esc(v === "" ? "(없음)" : v)}</td></tr>`).join("");
   $("detail").innerHTML = `<table>${rows}<tr><th>요금</th><td>${c.fare == null ? "백엔드 확인 필요" : esc(c.fare) + "원"}</td></tr>
     <tr><th>단계</th><td>${esc(c.stage)}</td></tr><tr><th>다음</th><td>${esc(c.next)}</td></tr>
-    <tr><th>접수번호</th><td>${esc(c.submitted.join(", "))}</td></tr>
+    <tr><th>담은 택배</th><td>${c.parcels.length}건 · 수거 ${esc(c.pickup_at || "-")} · 결제 ${esc(c.payment_method || "-")}</td></tr>
+    <tr><th>통화 결과</th><td>${c.result ? `${esc(c.result.status)} ${esc(c.result.parcelNo || "")}` : "<span class=muted>보내기 전</span>"}</td></tr>
     <tr><th>주소 확정</th><td>${esc(Object.entries(c.address || {}).map(([k, v]) => `${LABELS[k] || k} ${ADDRESS_STATUS[v.status] || v.status}${v.changed ? "(바뀜)" : ""}`).join(", "))}</td></tr></table>
     <h2>단계 기록</h2>${c.history.map((h) => `<div class="muted">${time(h.at)} ${esc(h.from)} → ${esc(h.to)} (${esc(h.tool)}, ${esc(h.event)})</div>`).join("")}
     ${c.errors.map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
@@ -77,11 +78,10 @@ $("toggle").addEventListener("click", async () => {
   if (box.style.display === "block") { box.style.display = "none"; return; }
   box.style.display = "block";
   const orders = await (await fetch("/monitor/api/orders")).json();
-  $("orderTable").innerHTML = `<tr><th>접수번호</th><th>시각</th><th>상태</th><th>보내는 분</th><th>출발지</th><th>받는 분</th><th>도착지</th><th>물품</th><th>요금</th></tr>` +
-    orders.map((o) => `<tr><td>${esc(o.order_no)}</td><td>${esc(o.created_at)}</td><td>${esc(o.status)}</td>
-      <td>${esc(o.sender_name)}<br>${esc(o.sender_phone)}</td><td>${esc(o.sender_address)} ${esc(o.sender_address_detail)}</td>
-      <td>${esc(o.receiver_name)}<br>${esc(o.receiver_phone)}</td><td>${esc(o.receiver_address)} ${esc(o.receiver_address_detail)}</td>
-      <td>${esc(o.item)}</td><td>${esc(o.fare)}</td></tr>`).join("");
+  // shortcut: 가짜 백엔드(mock)의 통화 결과만 보인다. 실제 백엔드 목록 API는 관리자 세션이 필요하다
+  $("orderTable").innerHTML = `<tr><th>주문번호</th><th>결과</th><th>상태</th><th>택배 수</th></tr>` +
+    orders.map((o) => `<tr><td>${esc(o.order_no)}</td><td>${esc(o.outcome)}</td><td>${esc(o.status)}</td>
+      <td>${esc(o.parcels)}</td></tr>`).join("");
 });
 
 const source = new EventSource("/monitor/api/stream");

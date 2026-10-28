@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Request, Response
 
-from app.call import Call, caller_from_headers
+from app.call import Call, caller_from_headers, iso_utc
 from app.flow import engine
 from app.live_session import LiveConfigError, build_session, build_backend, load_live_toml
 from app.services import Services
@@ -29,7 +29,7 @@ async def openai_webhook(request: Request) -> Response:
     if not svc.first_time(request.headers.get("webhook-id")):
         return Response(status_code=200)
     if event.type in INCOMING and getattr(event.data, "type", None) == "sip":
-        svc.spawn(handle_incoming(svc, event.data))
+        svc.spawn(handle_incoming(svc, event.data, iso_utc(event.created_at)))
     # realtime.call.incoming 등 다른 이벤트는 무시한다
     return Response(status_code=200)
 
@@ -41,9 +41,10 @@ async def _reject(svc: Services, session_id: str) -> None:
         log.exception("reject 실패 %s", session_id)
 
 
-async def handle_incoming(svc: Services, data) -> None:
+async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -> None:
+    """incoming_at: 수신 이벤트 created_at(ISO 8601). 서버 수신 시각이 아니라 이 값으로 백엔드가 녹취와 통화를 잇는다."""
     session_id = data.session_id
-    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend)
+    call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend, incoming_at)
     status = svc.registry.try_register(call)
     if status == "duplicate":
         return
