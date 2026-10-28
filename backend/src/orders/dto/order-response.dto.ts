@@ -125,6 +125,12 @@ export class OrderAddressValueDto {
 
 export class OrderParcelDto {
   @ApiProperty({
+    enum: ['ACTIVE', 'CANCELLED'],
+    description: '상세 취소 상태. ACTIVE는 취소되지 않음이며 결제·접수 완료를 뜻하지 않습니다.',
+  })
+  status!: 'ACTIVE' | 'CANCELLED';
+
+  @ApiProperty({
     description: '주문 상세 번호. 기존 상세의 주소·물품을 수정할 때 사용합니다.',
     minimum: 1,
   })
@@ -201,7 +207,7 @@ export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as
   parcelNo!: string | null;
 
   @ApiProperty({
-    description: '디버 접수 확인 시각. 접수 전에는 null.',
+    description: '디버 접수 확인 시각. 접수 전에는 null이며 접수 후 취소해도 보존합니다.',
     type: String,
     format: 'date-time',
     nullable: true,

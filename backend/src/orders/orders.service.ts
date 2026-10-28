@@ -392,6 +392,56 @@ export class OrdersService {
     });
   }
 
+  async cancel(
+    adminId: number | null,
+    id: number,
+    requestId: string,
+    callSessionHeader?: string,
+  ): Promise<void> {
+    const callId = this.callId(adminId, callSessionHeader);
+    await this.database.transaction(async (client) => {
+      const customerId = await this.readCustomer(client, adminId, callId, id);
+      const order = await this.repository.lockOrder(client, id);
+      if (!order || (customerId !== null && order.customerSeq !== customerId))
+        throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.status === 'CANCELLED')
+        throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
+      if (order.status !== 'COLLECTING' && order.status !== 'ACCEPTED')
+        throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
+
+      const parcels = await this.repository.lockParcels(client, id);
+      const targets = parcels.filter((parcel) => parcel.status === 'ACTIVE');
+      const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
+      const shipments = await this.repository.lockShipments(client, parcelIds);
+      const byParcel = new Map(shipments.map((shipment) => [shipment.orderParcelSeq, shipment]));
+      // shortcut: notPaid는 내부 기준이다. 실제 결제/취소 API가 제공되면 디버와 연동한다.
+      if (
+        (order.status === 'COLLECTING' && shipments.length > 0) ||
+        (order.status === 'ACCEPTED' &&
+          (parcels.length === 0 ||
+            targets.some((parcel) => byParcel.get(parcel.orderParcelSeq)?.status !== 'notPaid')))
+      )
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '결제 전 상태가 확인된 주문만 취소할 수 있습니다.',
+        );
+
+      await this.repository.cancelShipments(client, parcelIds, adminId);
+      await this.repository.cancel(client, id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          targetId: id,
+          targetType: 'ORDER',
+          action: 'ORDER_CANCELLED',
+          requestId,
+        },
+        client,
+      );
+    });
+  }
+
   async submit(
     adminId: number | null,
     id: number,

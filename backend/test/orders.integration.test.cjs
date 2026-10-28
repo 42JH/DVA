@@ -106,6 +106,16 @@ before(async () => {
       await client.query(
         readFileSync(join(__dirname, '../migrations/012-order-creation-source.sql'), 'utf8'),
       );
+    if (
+      !(
+        await client.query(
+          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='order_parcels' AND column_name='status') AS ready",
+        )
+      ).rows[0].ready
+    )
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/014-order-cancellation.sql'), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -1374,7 +1384,8 @@ test('order detail returns order snapshots and status without exposing stored sh
   for (const parcel of order.parcels) {
     assert.equal(Object.hasOwn(parcel, 'shipment'), false);
     assert.equal(Object.hasOwn(parcel, 'trackingNumber'), false);
-    assert.equal(Object.hasOwn(parcel, 'status'), false);
+    assert.equal(parcel.status, 'ACTIVE');
+    assert.equal(Object.hasOwn(parcel, 'shipmentStatus'), false);
   }
   assert.equal(JSON.stringify(order).includes(trackingNumber), false);
   assert.deepEqual(

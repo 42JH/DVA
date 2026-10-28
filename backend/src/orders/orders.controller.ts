@@ -10,6 +10,7 @@ import {
   Req,
   Res,
   ParseUUIDPipe,
+  HttpCode,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -27,6 +28,7 @@ import {
   ApiHeader,
   ApiOperation,
   ApiBody,
+  ApiNoContentResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { Response } from 'express';
@@ -374,6 +376,48 @@ export class OrdersController {
       request.admin?.adminUserSeq ?? null,
       params.id,
       input,
+      request.requestId,
+      callSessionSeq,
+    );
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(204)
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_CANCELLED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 전체 취소',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '미완료 주문 또는 모든 미취소 상세가 결제 전(notPaid)인 접수 주문을 즉시 취소합니다. 주문·상세·내부 배송 상태와 이력을 함께 저장하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 불필요. 종료된 통화는 기존 연결 주문만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({
+    description: '통화·주문이 없거나 AI 고객 범위 밖인 주문.',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '이미 취소된 주문, 취소 불가 주문·통화 상태 또는 결제 전 조건 불충족(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiNoContentResponse({
+    description: '취소 완료. 응답 본문 없음. 최신 상태·version은 주문 상세에서 조회합니다.',
+  })
+  cancel(
+    @Req() request: AuthRequest,
+    @Param() params: OrderIdParamsDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    return this.orders.cancel(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
       request.requestId,
       callSessionSeq,
     );
