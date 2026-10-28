@@ -55,11 +55,18 @@ async def run_call(call: Call, client) -> None:
             log.warning("오류 후 hangup 실패 %s", call.session_id)
     finally:
         call.end(reason)
+        try:
+            await call.finish()  # 통화 결과를 백엔드에 한 번(접수·미완료·취소)
+        except Exception:
+            log.exception("통화 결과 전송 실패 %s", call.session_id)
 
 
 def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str | None:
     """이벤트 하나 처리. 통화가 닫혔으면 이유를 돌려준다. 도구 실행은 별도 작업으로(받기를 막지 않게)."""
     etype = getattr(event, "type", None)
+    if etype not in call.event_types:  # 위임·도구 이벤트가 오는지 실제 통화에서 확인하려고
+        call.event_types.add(etype)
+        log.info("sideband 이벤트 %s %s", call.session_id, etype)
     if etype == 'session.delegation.created' and call.delegation_mode == 'client':
         value = _dump(event)
         client_backend.start_delegation(call, conn, value.get('delegation') or {}, tool_tasks, client)

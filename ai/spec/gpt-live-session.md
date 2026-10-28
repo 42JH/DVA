@@ -2,9 +2,9 @@
 
 ## 2026-10-27 적용 계약
 
-기본 위임은 `client`이다. `[backend]`는 서버 SDK 도구 선택용 설정이며 `build_session`에서 제거해 Live API에 보내지 않는다. `app/client_backend.py`가 도구 선택을 한 번 수행하고 원문 결과를 Live에 직접 전달한다. 상세 흐름은 `spec/rag.md` 및 `docs/rag-handoff.md`가 기준이다.
+2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아(도구 미실행) 운영 설정을 `responses`로 되돌렸다. 원인 확인 전까지 client는 보류(`docs/WORKLOG.md`). 아래는 client 모드 설명이다. client 모드에서 `[backend]`는 서버 SDK 도구 선택용 설정이며 `build_session`에서 제거해 Live API에 보내지 않는다. `app/client_backend.py`가 도구 선택을 한 번 수행하고 원문 결과를 Live에 직접 전달한다. 상세 흐름은 `spec/rag.md` 및 `docs/rag-handoff.md`가 기준이다.
 
-복귀할 때는 `[backend]`를 `[delegation.responses]`로 옮기고 `delegation.type="responses"`로 바꾼다. 이 모드에서는 기존 `function_call_output`과 `response.create`가 필수이며 직접 전달과 다르다. 아래 Responses 파라미터 설명은 이 복귀 모드 참고다. 두 모드 모두 지원하지 않는 delegation.type은 거절한다.
+`responses` 모드는 `delegation.type="responses"`만 바꾸면 된다(`build_session`이 `[backend]`를 `delegation.responses`로 넣는다). 이 모드에서는 기존 `function_call_output`과 `response.create`가 필수이며 직접 전달과 다르다. 아래 Responses 파라미터 설명은 이 복귀 모드 참고다. 두 모드 모두 지원하지 않는 delegation.type은 거절한다.
 
 - `gpt-live-1` 세션에 보낼 수 있는 **모든 파라미터**를 여기서 설정한다. 키 이름과 구조는 API의 SessionConfig와 똑같이 둔다(코드에서 키를 바꿔 끼우지 않는다). 각 키 위에 주석으로 허용값·기본값·한도·통화 중 변경 가능 여부를 적고, 기본값을 쓰는 항목은 주석 처리해 둔다.
 - 통화가 올 때마다(accept 직전) 읽는다. 고치면 다음 통화부터 반영된다.
@@ -22,7 +22,7 @@
 | `audio.output.voice` | 내장 31개: alloy ash ballad beacon bossa brise cedar cinder coral delta echo flitz gleam harema juni marin meridian nira noeul nuri quartz ripple sage shida shimmer sillage stone tempo verse vesper willow, 또는 `{ id = "voice_..." }`(권한 필요) | `marin` | 불가 |
 | `audio.format` | `audio/pcm`(16000·24000), `audio/pcmu`·`audio/pcma`(8000) | **WebSocket 전용. SIP는 협상하므로 넣지 않는다** | 불가 |
 | `store` | bool | `false`(개인정보라 끔). 켜면 녹음 30일 보관 | 불가 |
-| `delegation.type` | `client` · `responses` · `decisions` | 기본 client, 복귀용 responses | 불가 |
+| `delegation.type` | `client` · `responses` · `decisions` | 지금 responses(client 보류) | 불가 |
 | `delegation.responses.model` | 백엔드 Responses 모델 | 필수. 위임에서 쓸 수 있는 모델 목록은 **미확인**(지금 `gpt-6-luna`) | 가능 |
 | `delegation.responses.instructions` | 문자열 | | 가능 |
 | `delegation.responses.tools` | 도구 목록: SDK 3.35.1 타입은 `function`·`web_search`만 받는다(문서의 다른 종류는 미확인) | 이 서버가 실행하는 것은 function뿐 | 가능 |

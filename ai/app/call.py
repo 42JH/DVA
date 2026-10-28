@@ -4,12 +4,15 @@ import asyncio
 import logging
 import re
 import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.backend_api import BackendError, result_body
 from app.config import ServerConfig, Texts
 from app.events import bus
 from app.flow import engine
-from app.order import ORDER_FIELDS, PHONE_FIELDS, Order, Place
+from app.order import COUNT_FIELDS, ORDER_FIELDS, PHONE_FIELDS, Order, Place
 
 log = logging.getLogger(__name__)
 
@@ -42,28 +45,55 @@ def mask_phone(phone: str | None) -> str:
 
 
 
+KST = timezone(timedelta(hours=9))
+# 결제 방식(백엔드 paymentMethodType) → 고객에게 말하는 이름
+PAYMENT_NAMES = {"credit": "정산", "groupBilling": "그룹카드(기업)", "billing": "개인카드"}
+COUNT_NAMES = {"document_count": "서류", "small_box_count": "소형 박스", "medium_box_count": "중형 박스",
+               "big_box_count": "대형 박스"}
+# 택배가 아니라 통화(주문)에 하나인 질문 항목. 첫 택배를 확인하기 전에 받는다(끊겨도 확인된 택배를 접수할 수 있게)
+CALL_FIELDS = ("customer_name", "pickup_at", "payment_method")
+
+
+def iso_utc(ts: int | float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _region(address: str | None) -> str:
     """주소 앞 두 낱말(시·구 정도). 최근 배송을 말로 짧게 가리킬 때."""
     return " ".join((address or "").split()[:2])
 
 
 class Call:
-    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any):
+    def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any,
+                 incoming_at: str | None = None):
         self.session_id = session_id
         self.caller = caller
+        self.incoming_at = incoming_at  # OpenAI 수신 이벤트 created_at(ISO 8601). 백엔드가 녹취와 통화를 잇는 기준
         self.pbx_ended: dict | None = None  # PBX가 알린 통화 종료(spec/pbx-sip.md)
         self.cfg = cfg
         self.texts = texts
         self.backend = backend  # 백엔드 API(app/backend_api.py)
-        self.order = Order()
+        self.order = Order()  # 받는 중인 택배 하나
         self.flow = engine.FlowState(stage="")
-        self.customer_type = "new"
-        self.recent: Order | None = None  # 최근 배송(지난 주문, 이번 통화에서 접수하면 그 주문)
-        self.places: dict[str, list[Place]] = {"origin": [], "destination": []}  # 발신번호 주인의 저장된 배송지
-        self.save_candidates: list[tuple[str, Place]] = []  # 접수 후 저장을 제안할 (종류, 배송지)
+        self.customer_type = "new"  # new · registered · withdrawn
+        self.customer_seq: int | None = None  # 등록 고객 번호(백엔드)
+        self.registered_name: str | None = None
+        self.usage_types: list[str] = []
+        self.recent: Order | None = None  # 이번 통화에서 앞서 확인한 택배(다음 택배의 "최근 배송")
+        # 발신번호 주인의 주소록. 출발지·도착지 구분이 없어 두 쪽 모두 같은 목록을 본다
+        pins: list[Place] = []
+        self.places: dict[str, list[Place]] = {"origin": pins, "destination": pins}
         self.reset_order_flags()
-        self.submitted: list[str] = []
-        self.last_order_no: str | None = None
+        # 통화(주문)에 하나인 값. 백엔드 주문 하나에 이번 통화의 택배들이 parcels로 묶인다
+        self.customer_name: str | None = None  # 미등록 고객의 성함(보내는 분 번호가 발신번호면 보내는 분 성함)
+        self.pickup_at: str | None = None
+        self.payment_method: str | None = None
+        self.parcels: list[Order] = []  # 고객이 확인한 택배(통화 끝에 한 번에 접수)
+        self.cancelled = False  # 고객이 접수를 그만둠
+        self.result_key = str(uuid.uuid4())  # 통화 결과의 Idempotency-Key. 재시도에도 같은 키
+        self.result_body: dict | None = None  # 처음 보낸 본문(같은 키로 다시 확인할 때 그대로)
+        self.result: dict | None = None  # 백엔드 응답 data(status·parcelNo)
+        self.result_lock = asyncio.Lock()
         self.lock = asyncio.Lock()  # 한 통화 안의 도구 호출은 순서대로
         self.hangup_requested = asyncio.Event()
         self.refer_requested = asyncio.Event()
@@ -98,20 +128,25 @@ class Call:
         self.backend_settings: dict = {}
         self.latest_delegation: str | None = None
         self.delegations: dict[str, dict] = {}
+        self.event_types: set[str] = set()  # 받은 sideband 이벤트 종류(처음 한 번만 로그)
         self.pending_context: dict[str, asyncio.Future] = {}
         self.input_ready = asyncio.Event()
 
     # --- 시작 ---
 
     async def prepare(self) -> None:
-        """발신번호로 고객 유형·최근 배송·저장된 배송지를 백엔드에서 받고 시작 단계로 들어간다.
-        백엔드 실패면 신규 고객으로 진행. 등록 고객 = 지난 주문이나 저장된 배송지가 있음."""
+        """발신번호로 고객(등록·미등록·탈퇴)과 주소록을 백엔드에서 받고 시작 단계로 들어간다.
+        백엔드 실패면 신규 고객으로 진행. 탈퇴 고객은 신규로 다루지 않고 상담원에게 넘긴다."""
         if self.caller:
             try:
                 context = await self.backend.caller_context(self.caller)
-                self.recent, self.places = context.recent, context.places
-                if self.recent or any(self.places.values()):
-                    self.customer_type = "registered"
+                if context.status == "REGISTERED":
+                    self.customer_type, self.customer_seq = "registered", context.customer_seq
+                    self.registered_name, self.usage_types = context.name, context.usage_types
+                    self.places["origin"].extend(context.places)
+                elif context.status == "WITHDRAWN":
+                    self.customer_type = "withdrawn"
+                    self.request_refer()
             except Exception:
                 log.exception("고객 조회 실패 %s", self.session_id)
                 self.add_error("고객 조회 실패")
@@ -137,10 +172,36 @@ class Call:
     # --- 상태 엔진이 쓰는 것 ---
 
     def field_done(self, name: str) -> bool:
-        return getattr(self.order, name) is not None
+        if name in CALL_FIELDS:
+            return name not in self.call_fields_due()
+        return self.order.has(name)
+
+    def call_fields_due(self) -> list[str]:
+        """아직 받지 않은 통화 항목. 성함은 미등록 고객이고 보내는 분 번호가 발신번호와 다를 때만 묻는다."""
+        due = []
+        if self.customer_type != "registered" and not self.customer_name:
+            if self.caller and self.order.sender_phone == self.caller and self.order.sender_name:
+                self.customer_name = self.order.sender_name
+            else:
+                due.append("customer_name")
+        if self.pickup_at is None:
+            due.append("pickup_at")
+        if self.payment_method is None:
+            due.append("payment_method")
+        return due
+
+    def payment_options(self) -> dict[str, str]:
+        """이 고객이 쓸 수 있는 결제 방식. 정산은 공통, 그룹카드는 기업 소속, 개인카드는 개인 고객(백엔드가 다시 검사)."""
+        out = {"credit": PAYMENT_NAMES["credit"]}
+        if "COMPANY" in self.usage_types:
+            out["groupBilling"] = PAYMENT_NAMES["groupBilling"]
+        if self.customer_type != "registered" or "PERSONAL" in self.usage_types:
+            out["billing"] = PAYMENT_NAMES["billing"]
+        return out
 
     def stage_variant(self, stage: str) -> str | None:
-        ending = "refer_failed" if self.refer_failed else "handoff" if self.refer_requested.is_set() else None
+        ending = ("refer_failed" if self.refer_failed else "handoff" if self.refer_requested.is_set()
+                  else "cancelled" if self.cancelled else self.submit_variant())
         return {"find_destination": self.dest_variant, "find_origin": self.origin_variant,
                 "handoff": self.handoff_variant, "ending": ending}.get(stage)
 
@@ -148,8 +209,8 @@ class Call:
         """음성 모델·백엔드에 보여 줄 기록 값. 저장된 곳에서 온 번호·상세주소와 발신번호는 값 대신 표시만 한다
         (고객이 직접 불러 주지 않은 값을 소리 내 읽지 않게. 실제 값은 임시 주문에 그대로 있다)."""
         labels, out = self.texts.labels, []
-        for f in ORDER_FIELDS:
-            v = getattr(self.order, f)
+        for f in ORDER_FIELDS + CALL_FIELDS:
+            v = self._shown(f)
             if v is None:
                 continue
             if not v:
@@ -159,30 +220,102 @@ class Call:
             elif f in PHONE_FIELDS and self.caller and v == self.caller:
                 v = self.texts.caller_value
             out.append((labels[f], v))
+        if self.parcels:
+            out.append((labels["parcels"], f"{len(self.parcels)}건"))
         return out
+
+    def _shown(self, f: str) -> str | None:
+        o = self.order
+        if f == "item":
+            parts = [f"{COUNT_NAMES[c]} {getattr(o, c)}개" for c in COUNT_FIELDS if getattr(o, c)]
+            parts += [o.other_item] if o.other_item else []
+            return ", ".join(parts) or None
+        if f == "item_price":
+            return None if o.item_price is None else f"{o.item_price:,}원"
+        if f == "pickup_at":
+            if self.pickup_at is None:
+                return None
+            d = datetime.fromisoformat(self.pickup_at)
+            return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute:02d}분"
+        if f == "payment_method":
+            return self.payment_method and PAYMENT_NAMES[self.payment_method]
+        if f == "customer_name":
+            return self.customer_name
+        return getattr(o, f)
 
     def text_vars(self) -> dict:
         biz = self.cfg.business
         r = self.recent
         return {
             "company": biz.company_name,
-            "order_no": self.last_order_no or "",
+            "parcel_no": (self.result or {}).get("parcelNo") or "",
+            "parcel_count": len(self.parcels),
+            "now": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
+            "payment_options": " / ".join(self.payment_options().values()),
             "goodbye_message": biz.goodbye_message,
             "recent_order": f"{_region(r.receiver_address)}의 {r.receiver_name} 님" if r else "",
-            "customer_name": self.customer_name() or "없음",
+            "customer_name": self.display_name() or "없음",
             "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
-            "save_candidates": " / ".join(f"{p.name} {p.address}" for _, p in self.save_candidates),
             "caller": self.caller or "알 수 없음",
             "customer_type": self.texts.customer_types[self.customer_type],
         }
 
-    def customer_name(self) -> str | None:
-        """등록 고객 성함: 최근 배송의 보내는 분, 없으면 저장된 출발지의 이름."""
-        if self.customer_type != "registered":
+    def display_name(self) -> str | None:
+        """등록 고객 성함(백엔드 고객 정보)."""
+        return self.registered_name if self.customer_type == "registered" else None
+
+    # --- 통화 결과(백엔드 POST /api/orders, 통화당 한 번) ---
+
+    async def send_result(self, outcome: str) -> dict | None:
+        """통화 결과를 한 번 보낸다. 이미 보냈으면 같은 키·같은 본문으로 상태만 다시 확인한다.
+        발신번호·수신 시각을 모르면 백엔드가 받지 않으므로 보내지 않는다. 실패는 None(통화는 계속)."""
+        async with self.result_lock:
+            if self.result and self.result.get("status") != "SUBMITTING":
+                return self.result
+            if self.result_body is None:
+                if not self.caller or not self.incoming_at:
+                    log.error("발신번호·수신 시각을 몰라 결과를 보내지 않음 %s", self.session_id)
+                    self.add_error("결과 전송 불가(발신번호·수신 시각 없음)")
+                    return None
+                parcels = list(self.parcels)
+                if outcome == "INCOMPLETE" and not self.order.empty():
+                    parcels.append(self.order)  # 받는 중이던 택배도 상담원이 이어 받게
+                call = {"providerCallId": self.session_id, "callerPhoneNumber": self.caller,
+                        "incomingAt": self.incoming_at}
+                self.result_body = result_body(outcome, call, self.customer_seq, self.customer_name, self.caller,
+                                               self.payment_method, self.pickup_at, parcels)
+            try:
+                self.result = await self.backend.submit_result(self.result_body, self.result_key)
+            except BackendError as e:
+                log.error("결과 전송 실패 %s %s: %s", self.session_id, self.result_body["outcome"], e)
+                self.add_error(f"결과 전송 실패: {e}")
+                return None
+            log.info("결과 %s %s → %s", self.session_id, self.result_body["outcome"], self.result.get("status"))
+            self.notify()
+            return self.result
+
+    def submit_variant(self) -> str | None:
+        """접수를 시도했으면 마무리 안내: ACCEPTED만 접수 완료, 그 밖(처리 중·확인 필요·실패·미완료)은 확인 후 연락."""
+        if self.result_body is None:
             return None
-        if self.recent and self.recent.sender_name:
-            return self.recent.sender_name
-        return self.places["origin"][0].name if self.places["origin"] else None
+        return "accepted" if (self.result or {}).get("status") == "ACCEPTED" else "pending"
+
+    def end_outcome(self) -> str:
+        """통화가 끝날 때 보낼 결과. 상담원에게 넘긴 통화는 확인된 택배가 있어도 접수하지 않고 미완료로 넘긴다."""
+        if self.refer_requested.is_set():
+            return "INCOMPLETE"
+        if self.cancelled:
+            return "CANCELLED"
+        return "COMPLETE" if self.parcels and self.complete_ready() else "INCOMPLETE"
+
+    def complete_ready(self) -> bool:
+        """접수(COMPLETE)에 필요한 값이 다 있음. 주소의 지번·좌표 등을 못 찾았으면 임의 값 없이 미완료로 둔다."""
+        return bool(self.payment_method and self.pickup_at and (self.customer_seq or self.customer_name)
+                    and all(p.sender_geo and p.receiver_geo for p in self.parcels))
+
+    async def finish(self) -> None:
+        """통화가 끝나면 결과를 한 번 보낸다. 이미 보낸 통화는 같은 키로 확인만(접수 결과가 확정되지 않았을 때)."""
+        await self.send_result(self.result_body["outcome"] if self.result_body else self.end_outcome())
 
     # --- 도구가 요청하는 통화 조작(실행은 sideband 쪽) ---
 
@@ -237,8 +370,11 @@ class Call:
             "order": self.order.model_dump(),
             "address": self.address_results,
             "fare": None,  # 백엔드가 확인한 금액이 없으면 숫자를 만들지 않는다.
+            "parcels": [p.model_dump() for p in self.parcels],
+            "payment_method": self.payment_method,
+            "pickup_at": self.pickup_at,
+            "result": self.result,
             "next": engine.next_text(self) if self.flow.stage else "",
-            "submitted": self.submitted,
             "transcript": self.transcript,
             "tool_calls": list(self.tool_calls.values()),
             "errors": self.errors,

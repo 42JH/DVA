@@ -1,46 +1,70 @@
-"""메모리 가짜 백엔드. app.backend_api.BackendAPI와 같은 메서드, 발신번호 기준으로만 보이고 고친다.
-테스트와, 백엔드 DB 연동 전 배포(config/server.toml [backend] mock = true)에서 쓴다.
-shortcut: 프로세스 메모리라 재시작·재배포하면 주문·배송지가 사라진다. 백엔드 API가 준비되면 mock = false."""
+"""메모리 가짜 백엔드. app.backend_api.BackendAPI와 같은 메서드. 테스트와 config/server.toml [backend] mock = true에서 쓴다.
+새 계약(고객 확인·통화 결과)은 백엔드의 주요 검증(통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값)만 흉내 낸다.
+shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 mock = false."""
 
 import itertools
 
-from app.backend_api import CallerContext
-from app.order import ORDER_FIELDS, Order, Place
+from app.backend_api import BackendError, CallerContext
+from app.order import Place
+
+ADDRESS_REQUIRED = ("name", "phoneNumber", "roadAddress", "jibunAddress", "dongName", "postalCode", "latitude",
+                    "longitude")
 
 
 class MockBackend:
     def __init__(self):
-        self.orders: list[dict] = []
-        self.places: dict[str, list[tuple[str, Place]]] = {}  # 소유자 → [(종류, 배송지)]
-        self.keys: dict[str, str] = {}  # Idempotency-Key → 접수번호
+        self.customers: dict[str, dict] = {}  # 전화번호 → {seq, name, status}
+        self.pins: dict[str, list[Place]] = {}  # 전화번호 → 주소록
+        self.usage_types: dict[str, list[str]] = {}
+        self.results: list[dict] = []  # 받은 통화 결과(본문 + 결과)
+        self.keys: dict[str, dict] = {}  # Idempotency-Key → 결과 data
+        self.calls: set[str] = set()  # 주문이 연결된 providerCallId
+        self.dver_status = "ACCEPTED"  # 디버 접수 결과 흉내(테스트에서 바꾼다)
         self._seq = itertools.count(1)
+        # 보류한 조회·수정·취소 도구용(옛 계약)
+        self.orders: list[dict] = []
 
     async def close(self) -> None:
         pass
 
-    def places_of(self, owner, kind):
-        return [p for k, p in self.places.get(owner, []) if k == kind]
+    def add_customer(self, phone: str, name: str, pins: list[Place] = (), status: str = "ACTIVE",
+                     usage_types: list[str] = ("PERSONAL",)) -> int:
+        seq = next(self._seq)
+        self.customers[phone] = {"seq": seq, "name": name, "status": status}
+        self.pins[phone] = list(pins)
+        self.usage_types[phone] = list(usage_types)
+        return seq
 
     async def caller_context(self, phone):
-        recent = next((o for o in reversed(self.orders) if o["caller_phone"] == phone and o["status"] == "received"),
-                      None)
-        return CallerContext(
-            recent=Order(**{f: recent[f] for f in ORDER_FIELDS}) if recent else None,
-            places={kind: self.places_of(phone, kind) for kind in ("origin", "destination")})
+        c = self.customers.get(phone)
+        if c is None:
+            return CallerContext()
+        if c["status"] == "WITHDRAWN":
+            return CallerContext(status="WITHDRAWN")
+        return CallerContext(status="REGISTERED", customer_seq=c["seq"], name=c["name"],
+                             places=list(self.pins.get(phone, [])), usage_types=self.usage_types.get(phone, []))
 
-    async def create_order(self, caller, session_id, order: Order, fare, idempotency_key):
+    async def submit_result(self, body: dict, idempotency_key: str) -> dict:
         if idempotency_key in self.keys:
-            return self.keys[idempotency_key]
-        no = f"Q{next(self._seq):06d}"
-        self.orders.append({"order_no": no, "caller_phone": caller, "session_id": session_id, "fare": fare,
-                            "status": "received", **order.model_dump()})
-        if idempotency_key:
-            self.keys[idempotency_key] = no
-        return no
+            return self.keys[idempotency_key]  # 같은 키: 본문을 다시 적용하지 않는다
+        call_id = body["call"]["providerCallId"]
+        if call_id in self.calls:
+            raise BackendError("/api/orders 409 INVALID_STATE")  # 통화 한 건에 주문 한 건
+        if body["outcome"] == "COMPLETE":
+            _check_complete(body)
+        status = {"COMPLETE": self.dver_status, "INCOMPLETE": "COLLECTING", "CANCELLED": "CANCELLED"}[body["outcome"]]
+        data = {"orderSeq": next(self._seq), "version": 1, "status": status, "callSessionSeq": next(self._seq),
+                "parcelNo": "TEST0001" if status == "ACCEPTED" else None}
+        self.calls.add(call_id)
+        self.keys[idempotency_key] = data
+        self.results.append({"body": body, "key": idempotency_key, **data})
+        return data
+
+    # --- 보류한 조회·수정·취소 도구(옛 계약) ---
 
     async def list_orders(self, caller, limit):
         mine = [o for o in reversed(self.orders) if o["caller_phone"] == caller]
-        return [{k: o[k] for k in ("order_no", "receiver_name", "item", "status")} for o in mine[:limit]]
+        return [{k: o[k] for k in ("order_no", "receiver_name", "status")} for o in mine[:limit]]
 
     def _status(self, caller, order_no):
         o = next((o for o in self.orders if o["order_no"] == order_no and o["caller_phone"] == caller), None)
@@ -49,8 +73,7 @@ class MockBackend:
     async def update_order(self, caller, order_no, values):
         if self._status(caller, order_no) != "received":
             return self._status(caller, order_no)
-        o = next(o for o in self.orders if o["order_no"] == order_no)
-        o.update({k: v for k, v in values.items() if k in ORDER_FIELDS})
+        next(o for o in self.orders if o["order_no"] == order_no).update(values)
         return "ok"
 
     async def cancel_order(self, caller, order_no):
@@ -59,11 +82,25 @@ class MockBackend:
         next(o for o in self.orders if o["order_no"] == order_no)["status"] = "cancelled"
         return "ok"
 
-    async def save_places(self, owner, places):
-        mine = self.places.setdefault(owner, [])
-        new = [kp for kp in places if kp not in mine]
-        mine.extend(new)
-        return len(new)
-
     async def recent_orders(self, limit):
-        return list(reversed(self.orders))[:limit]
+        return [{"order_no": r["orderSeq"], "status": r["status"], "outcome": r["body"]["outcome"],
+                 "parcels": len(r["body"].get("parcels", []))} for r in reversed(self.results)][:limit]
+
+
+def _check_complete(body: dict) -> None:
+    """백엔드 COMPLETE 검증(order-submission.validation.ts)의 주요 부분. 어기면 422처럼 실패."""
+    if "customerSeq" not in body and "customer" not in body:
+        raise BackendError("/api/orders 400 INVALID_REQUEST")
+    missing = [k for k in ("paymentMethodType", "pickupRequestedAt") if not body.get(k)]
+    if not body.get("parcels"):
+        missing.append("parcels")
+    for i, p in enumerate(body.get("parcels", [])):
+        for side in ("origin", "destination"):
+            missing += [f"parcels.{i}.{side}.{k}" for k in ADDRESS_REQUIRED if p.get(side, {}).get(k) in (None, "")]
+        counts = [p.get(k, 0) for k in ("documentCount", "smallBoxCount", "mediumBoxCount", "bigBoxCount")]
+        if not any(counts) and not p.get("otherItemDescription"):
+            missing.append(f"parcels.{i}.items")
+        if p.get("itemPrice") is None:
+            missing.append(f"parcels.{i}.itemPrice")
+    if missing:
+        raise BackendError(f"/api/orders 422 VALIDATION_FAILED {missing}")

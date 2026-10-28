@@ -524,3 +524,56 @@
 ### develop-ai 병합 준비 최종 검증 — 주소 보정 포함
 
 사용자의 develop-ai 병합 요청에 따라 원격을 다시 가져왔고, 최신 a056a36의 주소 보정 기능까지 작업 브랜치에 합쳤다. address 단계·주소DB 읽기 전용 볼륨·최종 도로명 확인을 유지하면서 RAG/client 위임 설정과 함께 충돌을 해결했다. 고정3500원 안내는 재도입하지 않았다. 전체 가짜 테스트254개 통과(10.79초), Linux Docker 빌드 및 네트워크 차단 기동 정의 검증 통과. 운영 활성 통화 수0개를 확인했으며 개인 통화 내용은 출력하지 않았다. 팀 규칙대로 작업 브랜치→develop-ai MR로 반영하고 자동 배포 결과와 RAG 운영 준비를 구분한다. 운영 RAG 비밀값/색인은 아직 미설정·0컬렉션 상태다.
+
+## 2026-10-28 (백엔드 연동 계약 반영, S15P31D109-132)
+
+### 바꾼 것
+- 백엔드 새 계약(`develop-backend`의 `docs/api/`)에 맞춤. 원문 `spec/orders.md`·`spec/ai-pbx-recordings.md`를 추가했고, `spec/backend-api.md`는 AI가 그 계약을 어떻게 쓰는지로 다시 씀.
+  - 고객 확인 `POST /api/customers/context`: 등록·미등록·탈퇴 구분, 주소록(PIN)은 출발지·도착지 후보 모두로 씀. 탈퇴 고객은 바로 상담원 연결.
+  - 통화 결과 `POST /api/orders`를 **통화당 한 번**(백엔드는 통화 한 건에 주문 한 건). 택배는 `parcels`로 묶음. 키는 통화마다 UUID 하나, 재확인에도 같은 키·같은 본문을 씀. `ACCEPTED`일 때만 접수 완료로 안내. 처리 중(연결 실패·504·202·409 처리 중)은 같은 키로 다시 확인함.
+  - `incomingAt`은 수신 웹훅 `created_at`(SDK 타입 `LiveTransportIncomingWebhookEvent.created_at: int` 확인)으로 만듦.
+- 흐름(`spec/scenario.md`)
+  - 택배를 확인하면 담고(`confirming` → `after_order`), "더 없어요"에서 한 번에 접수.
+  - 수거 희망 시각·결제 방식·전화 주신 분 성함(미등록이고 보내는 분 번호 ≠ 발신번호일 때만)은 첫 택배를 확인하기 전에 받음. 그래야 끊겨도 확인한 택배를 COMPLETE로 보낼 수 있다.
+  - 물품은 규격별 수량(서류·소형·중형·대형) 또는 기타 물품, 물품 가액도 받음.
+  - 통화가 끝날 때(`Call.finish`): 상담원 연결은 INCOMPLETE(확인한 택배 + 받는 중이던 택배), 고객이 그만두면 CANCELLED, 끊김·무응답은 확인한 택배를 COMPLETE로.
+  - `submitted`·`save_offer` 단계 삭제(배송지 저장 API 없음). 조회·수정·취소 단계는 `HELD`로 옮겨 흐름에서 뺌(도구·테스트는 남김). 그 용건은 상담원 연결 제안으로 감.
+- 주소: 확정한 주소로 카카오 주소 검색을 해 지번·동명·우편번호·좌표를 채움(`app/address/kakao.py`, 키 `KAKAO_REST_API_KEY`). 못 찾으면 임의 값을 넣지 않고 그 통화는 INCOMPLETE로 보냄.
+- 설정: `[backend] submit_timeout_sec`·`submit_retry_sec`·`retry_interval_sec`, `[address] kakao_timeout_sec`. `.env.example`·`compose.yaml`에 카카오 키.
+- 프롬프트(`voice.md`·`backend.md`·`flow.toml`), 관제 화면(담은 택배·통화 결과), Studio(고객 상황 `new`·`saved`·`withdrawn`)를 같이 고침.
+
+### 확인한 것
+- 백엔드 코드(`develop-backend` 3b76406)
+  - 이미 주문이 연결된 통화에 새 키로 보내면 409.
+  - 디버 접수는 order 단위로 한 번이고, 결과(`status`·`parcelNo`)와 결제 방식·수거 시각도 order에 하나.
+  - COMPLETE는 주소 9개 항목·우편번호 5자리·수량 또는 기타 설명·`itemPrice`·미래 수거 시각이 없으면 422.
+- 배포 서버 Swagger(`https://13.209.59.180/api/docs-json`): 스키마가 코드와 같음. 조회·이전 주소 API는 AI에게 `call_session_seq` 헤더를 요구하는데, 이 값은 `POST /api/orders` 응답으로만 받으므로 통화 중에는 쓸 수 없다(조회·수정·취소 보류의 근거).
+- 카카오 "주소로 좌표 변환" 응답 필드를 공식 문서로 확인함(`x`·`y`는 문자열, 우편번호 `road_address.zone_no`).
+- 테스트: `uv run pytest -q` 287개 통과(가짜 백엔드·가짜 HTTP·가짜 카카오).
+
+### 남은 것
+- 실제 백엔드·카카오·통화로는 확인하지 않음(사용자 확인 필요): `KAKAO_REST_API_KEY` 설정, `[backend] mock = false` 전환.
+- "더 없어요" 뒤 접수 응답을 기다리는 동안(디버 최대 10초 + 재확인) 고객은 대기한다. 실제 통화에서 체감 시간을 확인해야 함.
+- 결제 방식 선택지 규칙(개인카드 = 미등록 또는 PERSONAL)은 백엔드 설명에서 추정했고, 최종 판정은 백엔드가 한다(403이면 "확인 후 연락" 안내).
+- 관제 화면의 주문 목록은 실제 백엔드에서는 관리자 세션이 필요해 비어 있음.
+
+### 추가 정리
+- AGENTS.md: 문서 표·비밀값(`KAKAO_REST_API_KEY`)·저장·안전장치(택배 담기, 통화당 접수, `ACCEPTED`만 성공)·아직 없는 것(조회·수정·취소 보류)을 새 계약에 맞춤.
+- `work.md`: 백엔드 연동 현황 표 추가.
+
+### 실제 통화 판별 시간 초과(13:19~13:21)
+- 증상: 컨테이너 로그에 "판별 실패 …:"가 빈 메시지로 17번(`TimeoutError`, `[listener] timeout_sec = 5`). 성공한 판별도 모델 4.6~5.0초(지난 실통화 중앙값 1.2초). 판별이 안 되어 통화가 `collecting`에 머물다 고객이 끊음 → INCOMPLETE.
+- 확인: 이번 변경으로 판별 입력은 의도 한 줄(`quit`)만 늘었다. 13:23에 컨테이너 안에서 같은 형태(지시문·선택지·스키마)로 재면 `gpt-6-luna` low 0.9~1.5초로 정상 → 그 시간대 OpenAI 응답 지연으로 보이나 확정은 못 함. 13:18 accept 503은 가짜 세션 id(`live_u0_abc123`) 시험 웹훅이라 무관.
+- 바꾼 것: 판별 실패 로그에 오류 이름과 걸린 시간을 남김(`app/listener.py`).
+- 남은 것: 컨테이너 다시 빌드 후 실제 통화로 재확인. 계속 느리면 `reasoning_effort = "none"`이나 더 작은 모델 검토.
+
+### 도구 미실행(13:26 통화) → 위임 방식 되돌림
+- 증상: 2분 통화에서 고객 말 12번 동안 위임 0건·도구 0건, 임시 주문이 끝까지 비어 있음. 음성 모델이 혼자 질문을 이어 가 마지막 확인까지 말함(결제 방식 "알림톡"도 지어냄). 서버 기록이 없어 INCOMPLETE.
+- 원인 범위: `config/live.toml` `[delegation] type`이 10-27 RAG 통합(`dee3f66`)에서 `responses` → `client`로 바뀌었다. client는 실제 통화로 확인된 적이 없다. OpenAI가 `session.delegation.created`를 안 보냈는지, 보냈는데 `target`이 달라 버렸는지는 로그가 없어 모름.
+- 바꾼 것: 운영 설정을 `responses`로 되돌림(`search_manual`은 responses에서도 백엔드 모델 도구로 쓰임). sideband 이벤트 종류를 통화마다 처음 한 번 INFO 로그, client가 아닌 위임은 `위임 무시` 경고. 테스트는 responses 기본·client 구성 유효로 고침(287개 통과). AGENTS.md·`spec/gpt-live-session.md`·`spec/sideband.md`·`spec/tools.md`·`docs/rag-handoff.md`에 보류 표시.
+- 남은 것: responses로 실제 통화 확인. RAG 담당자에게 client 미동작 전달, 새 로그로 원인 확인 뒤 복귀 판단.
+
+### 로컬 Qdrant에 매뉴얼 색인 복원
+- 배포 서버(13.209.59.180) Qdrant에 `manuals_dev_openai_large`(32개, green)가 있음을 읽기 전용으로 확인(10-27엔 0개였음). 서버에서 스냅숏을 만들어 내려받은 뒤 서버 쪽 스냅숏·임시 파일은 지움. SHA-256 일치(`09d6c6fd…`).
+- 로컬 `dva-ai-qdrant-1`에 `file://` 위치로 복원 → 32개 green. AI 컨테이너 재시작 후 "RAG 준비 미완료" 경고 사라짐. 인증키는 컨테이너 안에서만 썼다.
+- 남은 것: 실제 검색(임베딩·리랭커 GPU) 경로는 확인 안 함. 서버 docker는 `sudo`가 필요함.

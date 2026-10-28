@@ -196,20 +196,26 @@ def test_incoming_call_attaches_service_and_sends_only_live_session(monkeypatch)
         await webhook.handle_incoming(svc, NS(session_id='incoming', sip_headers=[]))
         await svc.registry.get('incoming').task
     run(scenario())
-    assert captured[0].rag is search and captured[0].delegation_mode == 'client'
+    assert captured[0].rag is search and captured[0].delegation_mode == 'responses'
     accepted = client.live.sessions.of('accept')[0][2]
-    assert accepted['delegation']['type'] == 'client' and 'backend' not in accepted
+    assert accepted['delegation']['type'] == 'responses' and 'backend' not in accepted
+    assert 'search_manual' in {t['name'] for t in accepted['delegation']['responses']['tools']}
     assert 'search_manual' in {t['name'] for t in captured[0].backend_settings['tools']}
 
 
 def test_new_delegation_does_not_cancel_already_started_mutation():
     from app.flow import engine
-    from app.order import Order
-    from conftest import FULL_ORDER, CALLER
+    from app.flow.stages.subflows import HELD
+    from conftest import CALLER
+    # 수정 도구는 보류 중: 이 테스트에서만 보류 단계를 넣어 "이미 시작한 쓰기는 끊지 않음"을 확인한다
+    engine.STAGES.update({s.name: s for s in HELD})
+    engine.build()
     call = setup()
     conn = Connection(call)
+    order_no = 'Q000001'
+    call.backend.orders.append({'order_no': order_no, 'caller_phone': CALLER, 'receiver_name': '이영희',
+                                'status': 'received'})
     async def scenario():
-        order_no = await call.backend.create_order(CALLER, 'previous', Order(**FULL_ORDER), 4950, 'previous1')
         await engine.apply(call, ['intent.modify'])
         started, release = asyncio.Event(), asyncio.Event()
         update = call.backend.update_order
@@ -220,7 +226,8 @@ def test_new_delegation_does_not_cancel_already_started_mutation():
             writes.append(args)
             return await update(*args)
         call.backend.update_order = slow
-        client, _ = client_for('modify_order', {'order_no': order_no, 'customer_confirmed': True, 'item': '책'})
+        client, _ = client_for('modify_order', {'order_no': order_no, 'customer_confirmed': True,
+                                                'receiver_name': '박민수'})
         tasks = set()
         client_backend.start_delegation(call, conn, {'id': 'write', 'target': 'client'}, tasks, client)
         await started.wait()
@@ -229,8 +236,13 @@ def test_new_delegation_does_not_cancel_already_started_mutation():
         release.set()
         await asyncio.gather(*tasks)
         assert len(writes) == 1
-    run(scenario())
-    assert call.backend.orders[0]['item'] == '책'
+    try:
+        run(scenario())
+    finally:
+        for s in HELD:
+            del engine.STAGES[s.name]
+        engine.build()
+    assert call.backend.orders[0]['receiver_name'] == '박민수'
     assert call.delegations['write']['status'] == 'stale'
     assert not [row for row in conn.sent if row['delegation_id'] == 'write' and row['content']]
 

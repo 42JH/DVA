@@ -22,6 +22,7 @@ def current(call, delegation_id):
 def start_delegation(call, conn, delegation, tasks, client):
     key = delegation.get('id')
     if delegation.get('target') != 'client' or not isinstance(key, str) or not key:
+        log.warning('위임 무시 %s target=%r id=%r', call.session_id, delegation.get('target'), key)
         return
     if key in call.delegations:
         return  # 같은 위임을 두 번 실행하지 않는다.

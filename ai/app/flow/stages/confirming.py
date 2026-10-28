@@ -1,32 +1,25 @@
 from app.flow.engine import ENTERED, Stage, Transition
 from app.flow.stages._common import COMMON_TOOLS, address_pending, incomplete
-from app.order import PLACE_KIND, Order
+from app.order import Order
 
 CHOICES = {"confirm": "되읽은 내용이 맞으니 이대로 접수해 달라고 함", "correct": "고칠 곳이 있다고 함"}
 
 
-async def submit(ctx) -> None:
-    """임시 주문 그대로 접수하고 비운다(중복 접수 방지). 접수번호는 백엔드가 발급한다.
-    Idempotency-Key: 응답을 못 받고 고객이 다시 확인해도 같은 주문이 두 번 생기지 않게 이 통화의 n번째 주문으로 고정."""
-    order, biz = ctx.order, ctx.cfg.business
-    key = f"{ctx.session_id}-{len(ctx.submitted) + 1}"
-    order_no = await ctx.backend.create_order(ctx.caller, ctx.session_id, order, None, key)
+def add_parcel(ctx) -> None:
+    """고객이 확인한 택배를 임시 주문 그대로 접수 목록에 담고 비운다(같은 택배를 두 번 담지 않게).
+    접수는 통화 끝에 한 번(백엔드는 통화당 주문 한 건, 택배는 parcels로 묶는다)."""
+    ctx.parcels.append(ctx.order)
+    ctx.recent = ctx.order  # 이번 통화의 다음 택배에서 "최근 배송"
     ctx.order = Order()
     ctx.from_saved = set()
-    ctx.last_order_no = order_no
-    ctx.submitted.append(order_no)
-    ctx.recent = order  # 이번 통화의 다음 주문에서 "최근 배송"
-    if ctx.caller:
-        ctx.save_candidates = [(kind, p) for role, kind in PLACE_KIND.items()
-                               if (p := order.place(role)) not in ctx.places[kind]]
 
 
 async def on_answer(ctx, answer: str) -> list[str]:
-    # 고칠 곳은 백엔드가 record_order로 기록한다. 접수는 이 단계의 확인 질문에 "맞다"고 답했을 때만
-    if answer != "confirm" or not ctx.order.complete():
+    # 고칠 곳은 백엔드가 record_order로 기록한다. 담는 것은 이 단계의 확인 질문에 "맞다"고 답했을 때만
+    if answer != "confirm" or incomplete(ctx):
         return []
-    await submit(ctx)
-    return ["order.submitted"]
+    add_parcel(ctx)
+    return ["parcel.confirmed"]
 
 
 STAGES = [
@@ -40,7 +33,7 @@ STAGES = [
             Transition(ENTERED, "collecting", incomplete),
             # 정정하다 빠진 항목이 생기면(예: 주소를 바꿔 상세 주소를 다시 물어야 함) 다시 받는다
             Transition("order.updated", "collecting", incomplete),
-            Transition("order.submitted", "submitted"),
+            Transition("parcel.confirmed", "after_order"),
         ),
         choices=lambda ctx: CHOICES,
         on_answer=on_answer,

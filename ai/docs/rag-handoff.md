@@ -19,7 +19,7 @@
 
 ## 변경한 연결 방식
 
-이전 `responses` 위임은 도구 결과를 백엔드에 반환하고 다시 실행해야 한다. 사용자 요구처럼 RAG 결과를 바로 Live가 판단하도록 기본을 `client` 위임으로 바꿨다. `[backend]` 설정은 서버 전용으로 사용하고 Live 세션 본문에는 보내지 않는다. `app/client_backend.py`가 백엔드를 한 번 호출해 도구를 선택하고 `app/dispatcher.py`가 실제 도구를 실행한다. 이후 응답 생성용 백엔드 호출 없이 결과를 Live에 직접 전달한다.
+이전 `responses` 위임은 도구 결과를 백엔드에 반환하고 다시 실행해야 한다. 사용자 요구처럼 RAG 결과를 바로 Live가 판단하도록 기본을 `client` 위임으로 바꿨다. **2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아(도구 미실행) 운영 설정을 `responses`로 되돌렸다. 원인 확인 전까지 client는 보류(`docs/WORKLOG.md`). responses 모드에서도 `search_manual`은 백엔드 모델 도구로 쓰인다.** `[backend]` 설정은 서버 전용으로 사용하고 Live 세션 본문에는 보내지 않는다. `app/client_backend.py`가 백엔드를 한 번 호출해 도구를 선택하고 `app/dispatcher.py`가 실제 도구를 실행한다. 이후 응답 생성용 백엔드 호출 없이 결과를 Live에 직접 전달한다.
 
 `config/live.toml`의 모델·도구, `config/server.toml`의 timeout, `prompts/voice.md`/`backend.md`를 같이 검토한다. RAG 원문 전달은 서버가 만들며 모델의 자유 생성 답변을 정책 근거로 사용하지 않는다. 기존 responses 이벤트 처리도 복귀용으로 남겼지만 그 모드는 직접 전달 방식이 아니다.
 

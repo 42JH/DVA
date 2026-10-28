@@ -1,6 +1,9 @@
-"""어느 단계에서나(ending 제외) 끼어드는 하위 흐름: 조회·수정·취소·상담원 연결.
+"""어느 단계에서나(ending 제외) 끼어드는 하위 흐름: 상담원 연결(조회·수정·취소는 보류).
 들어가는 것은 고객 말의 용건 판별(intent.*), 끝나면 들어온 단계로 돌아간다.
-돌아간 단계는 같은 사건을 다시 본다(예: "새 주문" → after_order에서 새 주문 시작)."""
+돌아간 단계는 같은 사건을 다시 본다(예: "새 주문" → after_order에서 새 주문 시작).
+
+조회·수정·취소(HELD)는 새 백엔드에 AI가 통화 중 쓸 API가 없어 보류했다(spec/backend-api.md).
+정의와 도구는 두고 STAGES에 넣지 않는다. 그 용건은 상담원 연결 제안으로 간다(app/listener.py)."""
 
 from app.flow.engine import ANY, RETURN, Stage, Transition
 
@@ -16,7 +19,7 @@ async def handoff_answer(ctx, answer: str) -> list[str]:
     return ["intent.stop"]
 
 
-STAGES = [
+HELD = [
     Stage(
         name="lookup",
         description="접수된 주문 조회",
@@ -44,6 +47,9 @@ STAGES = [
         enter_on="intent.cancel",
         enter_from=(ANY,),
     ),
+]
+
+STAGES = [
     Stage(
         name="handoff",
         description="상담원 연결",

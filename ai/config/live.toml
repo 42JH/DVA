@@ -29,7 +29,9 @@ voice = "noeul"
 
 [delegation]
 # client: 서버가 SDK로 도구 선택을 한 번 실행하고 Live에 결과를 직접 전달. 통화 중 type 변경 불가
-type = "client"
+# responses: Live 쪽 백엔드 모델이 도구를 고르고 서버가 실행(function_call_output). 아래 [backend]가 그 모델 설정
+# 2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아 responses로 되돌림(docs/WORKLOG.md)
+type = "responses"
 acknowledgement_delay_ms = 800
 
 # 서버 전용 설정. Live API 본문에서는 제거한다.

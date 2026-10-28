@@ -23,8 +23,8 @@ tool_timeout_sec = 10.0
 
 [business]
 company_name = "디포스트콜"
-# 확정 요금은 백엔드 확인 전 임의 안내하지 않는다. {order_no} 사용 가능
-submitted_message = "접수번호는 {order_no}입니다. 기사님이 방문해서 수거해 갑니다. 요금은 실제 접수 조건에 따라 확인 후 안내됩니다."
+# 확정 요금은 백엔드 확인 전 임의 안내하지 않는다. {parcel_no} 사용 가능
+submitted_message = "접수번호는 {parcel_no}입니다. 기사님이 방문해서 수거해 갑니다. 요금은 실제 접수 조건에 따라 확인 후 안내됩니다."
 goodbye_message = "디포스트콜을 이용해 주셔서 감사합니다. 좋은 하루 보내세요."
 
 [progress]
@@ -34,9 +34,15 @@ max_chars = 400
 [backend]
 # 고객·주문·배송지를 관리하는 백엔드 서버 API(spec/backend-api.md). 주소는 환경변수 BACKEND_API_URL
 # true면 백엔드 대신 메모리 가짜 백엔드(app/mock_backend.py). 백엔드 DB 연동 전까지. 재시작하면 데이터가 사라진다
-mock = true
+mock = false
 # 요청 하나의 시간 제한(초). 통화 시작 조회는 accept 전이라 짧게 둔다
 timeout_sec = 3.0
+# 상담 결과(POST /api/orders) 요청 하나의 시간 제한(초). 백엔드가 디버 응답을 최대 10초 기다리므로 그보다 길게
+submit_timeout_sec = 15.0
+# 결과가 불확실할 때(연결 실패·504·202 처리 중·409 처리 중) 같은 키로 다시 확인하는 총 시간(초)
+submit_retry_sec = 40.0
+# 다시 확인하는 간격(초)
+retry_interval_sec = 2.0
 # 조회 도구가 돌려주는 최근 주문 수
 lookup_limit = 5
 # 관제 화면 접수 주문 목록 개수
@@ -56,6 +62,8 @@ bubble_gap_ms = 1500
 # 고객이 말한 주소를 행안부 주소DB로 실제 도로명주소로 보정(spec/address.md). ai/ 기준 경로, 컨테이너에서는 /app/data(볼륨)
 # 파일이 없으면 보정을 끄고 들은 그대로 기록한다. 만들기: uv run python -X utf8 -m app.address.db <주소DB 텍스트 폴더> data/address.db
 db_path = "data/address.db"
+# 확정한 주소의 지번·동명·우편번호·좌표를 카카오 주소 검색으로 채운다. 키는 환경변수 KAKAO_REST_API_KEY(없으면 끔)
+kakao_timeout_sec = 3.0
 
 [listener]
 # 고객 답 판별(예/아니오·어느 곳·끼어드는 용건). 백엔드 도구 호출 없이 서버가 직접 판별해 대화 상태를 바꾼다

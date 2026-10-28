@@ -5,6 +5,7 @@
 import logging
 
 from app import address
+from app.address import kakao
 from app.flow.engine import ENTERED, RETURN, Stage, Transition
 from app.flow.stages._common import COMMON_TOOLS
 
@@ -12,15 +13,18 @@ log = logging.getLogger(__name__)
 
 
 async def resolve(ctx, prev: str) -> None:
-    """확정이면 그 주소, 애매하면 가장 가까운 후보, 못 찾으면(지역을 말하지 않음 등)·보정 꺼짐이면 들은 그대로."""
+    """확정이면 그 주소, 애매하면 가장 가까운 후보, 못 찾으면(지역을 말하지 않음 등)·보정 꺼짐이면 들은 그대로.
+    정한 주소로 카카오에서 지번·동명·우편번호·좌표를 찾는다(접수에 필요. 못 찾으면 비워 두고 접수 때 막는다)."""
     for key in sorted(ctx.address_pending):
         heard = getattr(ctx.order, key)
         result = await address.correct(heard) if heard else None
         if result and result["candidates"]:
             setattr(ctx.order, key, result["candidates"][0])
+        geo = await kakao.geocode(getattr(ctx.order, key), ctx.cfg.address.kakao_timeout_sec) if heard else None
+        setattr(ctx.order, key.replace("_address", "_geo"), geo)
         status = result["status"] if result else "off"
-        ctx.address_results[key] = {"status": status, "changed": getattr(ctx.order, key) != heard}
-        log.info("주소 확정 %s %s %s", ctx.session_id, key, status)  # 주소는 개인정보라 남기지 않는다
+        ctx.address_results[key] = {"status": status, "changed": getattr(ctx.order, key) != heard, "geo": geo is not None}
+        log.info("주소 확정 %s %s %s 좌표=%s", ctx.session_id, key, status, geo is not None)  # 주소는 개인정보라 남기지 않는다
     ctx.address_pending.clear()
 
 

@@ -5,7 +5,6 @@
 이 그래프의 단계 노드를 하나씩 지나가게 해 Studio에서 경로가 보이게 한다. 판별 모델(LLM)은 부르지 않는다.
 """
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -21,16 +20,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT), str(ROOT / "tests")]
 
 # 테스트의 설정·가짜 백엔드·고객 상황을 그대로 쓴다(Studio에서 보는 것 = 테스트한 것)
-from conftest import CALLER, CFG, FULL_ORDER, TEXTS  # noqa: E402
-from test_flow import new_db, recent_db, saved_db  # noqa: E402
+from conftest import CALLER, CFG, FULL_ORDER, INCOMING_AT, TEXTS  # noqa: E402
+from test_flow import new_db, saved_db, withdrawn_db  # noqa: E402
 
 from app.call import Call  # noqa: E402
+from app.order import COUNT_FIELDS  # noqa: E402
 from app.dispatcher import dispatch  # noqa: E402
 from app.flow import engine  # noqa: E402
 from app.listener import INTENTS, NO_ANSWER, apply_answer, stage_choices  # noqa: E402
 from app.tools._base import TOOLS  # noqa: E402
 
-CUSTOMERS = {"new": new_db, "recent": recent_db, "saved": saved_db}
+CUSTOMERS = {"new": new_db, "saved": saved_db, "withdrawn": withdrawn_db}
 CALLS: dict[str, Call] = {}  # 스레드 → 가짜 통화. 서버를 다시 띄우면 비므로 새 통화로 시작한다
 
 IntentName = Literal[tuple(k for k in INTENTS if k != "none")]
@@ -40,8 +40,8 @@ ToolName = Literal[tuple(TOOLS)]
 class StudioInput(BaseModel):
     """Studio 입력. 스레드 첫 실행은 customer만, 그다음부터는 answer·intent·tool 중 하나만 채워 실행한다."""
 
-    customer: Literal["new", "recent", "saved"] = Field(
-        "new", description="첫 실행에서만 쓴다. new 신규 고객, recent 최근 배송 있는 등록 고객, saved 저장된 배송지만 있는 등록 고객")
+    customer: Literal["new", "saved", "withdrawn"] = Field(
+        "new", description="첫 실행에서만 쓴다. new 신규 고객, saved 주소록이 있는 등록 고객, withdrawn 탈퇴 고객")
     answer: str | None = Field(None, description="지금 단계 질문에 대한 고객 답. 결과의 choices 중 하나")
     intent: IntentName | None = Field(None, description="끼어드는 용건(조회·수정·취소·상담원·그만·종료·새 주문)")
     tool: ToolName | None = Field(None, description="백엔드 모델의 도구 호출. 결과의 tools 중 하나")
@@ -56,7 +56,7 @@ class StudioView(BaseModel):
     choices: list[str] = []
     tools: list[str] = []
     recorded: dict[str, str] = {}
-    example_args: dict[str, str] = {}
+    example_args: dict = {}
     path: list[str] = []
     result: dict = {}
 
@@ -100,8 +100,8 @@ async def report(state: StudioState, config: RunnableConfig) -> Command:
     tid = _thread(config)
     call = CALLS.get(tid)
     if call is None:
-        db = await asyncio.to_thread(CUSTOMERS[state.customer])  # recent_db는 안에서 asyncio.run을 부른다
-        call = CALLS[tid] = Call(tid, CALLER, CFG, TEXTS, db)
+        db = CUSTOMERS[state.customer]()
+        call = CALLS[tid] = Call(tid, CALLER, CFG, TEXTS, db, INCOMING_AT)
         _, events = await _collect(call.prepare)
         return _next(call, events, {"result": {"started": state.customer, "start_stage": call.flow.stage}})
     given = [name for name in ("answer", "intent", "tool") if getattr(state, name)]
@@ -143,9 +143,15 @@ async def done(state: StudioState, config: RunnableConfig) -> dict:
         "choices": [c for c in stage_choices(call) if c != NO_ANSWER] if stage.listen else [],
         "tools": tools,
         "recorded": dict(call.recorded()),
-        "example_args": {f: FULL_ORDER[f] for f in engine.missing(call)} if "record_order" in tools else {},
+        "example_args": _example_args(engine.missing(call)) if "record_order" in tools else {},
         "path": [first] + [h["to"] for h in call.flow.history],
     }
+
+
+def _example_args(missing: list[str]) -> dict:
+    """빠진 항목을 채우는 record_order 인수 예(물품은 규격별 수량, 결제 방식은 도구가 아니라 고객 답)."""
+    field = {**{c: "item" for c in COUNT_FIELDS}, "other_item": "item"}
+    return {k: v for k, v in FULL_ORDER.items() if field.get(k, k) in missing}
 
 
 def builder() -> StateGraph:

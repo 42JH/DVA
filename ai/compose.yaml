@@ -26,6 +26,8 @@ services:
       OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
       # 백엔드 서버 API 주소(예: http://backend:3000). 인증 방식은 백엔드 담당자가 정한다
       BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
+      # 확정 주소의 지번·동명·우편번호·좌표(접수 필수값). 비어 있으면 접수가 미완료로 넘어간다
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       # RunPod 준비 전에는 검색만 오류로 안내하고 주문 접수는 계속한다.

@@ -231,24 +231,30 @@ def test_concurrent_calls_do_not_mix_and_slow_tool_does_not_block_others():
         # 0번 통화의 백엔드가 느려도(접수 지연) 다른 통화는 진행된다
 
         class SlowBackend(FakeBackend):
-            async def create_order(self, *a, **k):
+            async def submit_result(self, body, key):
                 await asyncio.sleep(0.5)
-                return await db.create_order(*a, **k)
+                return await db.submit_result(body, key)
 
         calls[0].backend = SlowBackend()
         for i, (call, (_, conn)) in enumerate(zip(calls, started)):
-            conn.function_call("record_order", {**FULL_ORDER, "item": f"물품{i}"}, f"r{i}")
+            call.payment_method, call.cfg = "credit", quick_cfg()
+            conn.function_call("record_order", {**FULL_ORDER, "sender_phone": call.caller, "small_box_count": 0,
+                                                "other_item": f"물품{i}"}, f"r{i}")
         await until(lambda: all(c.flow.stage == "confirming" for c in calls))
         answers(client, "confirm")
-        for call, (_, conn) in zip(calls, started):
-            call.cfg = quick_cfg()
+        for _, conn in started:
             conn.push("session.input_transcript.delta", delta="네 맞아요")
-        await until(lambda: all(c.submitted for c in calls[1:]), timeout=0.4)
-        assert not calls[0].submitted  # 아직 느린 DB 대기 중
-        await until(lambda: calls[0].submitted)
-        items = {o["session_id"]: o["item"] for o in db.orders}
+        # 판별이 끝날 때까지(판별에 쓴 말을 비우기 전에 다음 말을 넣으면 같이 지워진다)
+        await until(lambda: all(c.flow.stage == "after_order" and not c.listen_tasks for c in calls))
+        answers(client, "no_more")
+        for _, conn in started:
+            conn.push("session.input_transcript.delta", delta="없어요")
+        await until(lambda: all(c.result for c in calls[1:]), timeout=0.4)
+        assert not calls[0].result  # 아직 느린 백엔드 대기 중
+        await until(lambda: calls[0].result)
+        items = {r["body"]["call"]["providerCallId"]: r["body"]["parcels"][0]["otherItemDescription"] for r in db.results}
         assert items == {f"live_{i}": f"물품{i}" for i in range(5)}
-        assert len({o["order_no"] for o in db.orders}) == 5
+        assert len({r["key"] for r in db.results}) == 5
         for _, conn in started:
             conn.push("session.closed", reason="remote_hangup", usage=None)
         await asyncio.gather(*(t for t, _ in started))
@@ -272,27 +278,23 @@ def test_tool_calls_in_one_call_run_in_order():
     run(scenario())
 
 
-class FailingSave(FakeBackend):
-    async def save_places(self, owner, places):
+class FailingSubmit(FakeBackend):
+    async def submit_result(self, body, key):
         raise RuntimeError("백엔드 실패")
 
 
 def test_repeated_answer_failure_offers_handoff():
-    from app.order import Place
-
-    client, call = FakeClient(), make_call(FailingSave())
+    client, call = FakeClient(), make_call(FailingSubmit())
 
     async def scenario():
         call.cfg = quick_cfg()
-        call.flow.stage = "save_offer"
-        call.save_candidates = [("origin", Place(name="김", phone="01012345678", address="서울", address_detail=""))]
+        call.flow.stage = "after_order"
         task, conn = await start(call, client)
-        answers(client, "yes")
-        conn.push("session.input_transcript.delta", delta="네 저장해 주세요")
+        answers(client, "no_more")
+        conn.push("session.input_transcript.delta", delta="더 없어요")
         await until(lambda: call.answer_failures == 1)
-        assert conn.sent[-1][1]["content"] == call.texts.answer_error and call.flow.stage == "save_offer"
-        call.save_candidates = [("origin", Place(name="김", phone="01012345678", address="서울", address_detail=""))]
-        conn.push("session.input_transcript.delta", delta="네")
+        assert conn.sent[-1][1]["content"] == call.texts.answer_error and call.flow.stage == "after_order"
+        conn.push("session.input_transcript.delta", delta="없어요")
         await until(lambda: call.flow.stage == "handoff")
         await until(lambda: "안내드리기 어려운" in conn.sent[-1][1]["content"])
         conn.push("session.closed", reason="remote_hangup", usage=None)

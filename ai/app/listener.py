@@ -22,11 +22,16 @@ INTENTS = {
     "lookup": "이미 접수한 주문을 조회하려 함",
     "modify": "이미 접수한 주문을 고치려 함",
     "cancel": "이미 접수한 주문을 취소하려 함",
+    "quit": "지금 진행 중인 택배 접수를 그만두겠다고(취소하겠다고) 함",
     "handoff": "상담원(사람)과 통화하려 함",
     "help": "보상 판단·결제 오류·계약/정산 등 상담원 처리가 필요한 요청이나 불만. 단순 FAQ·요금표·배송·포장·이용 시간·취소 가능 조건 질문은 제외",
-    "stop": "지금 하던 조회·수정·취소·상담원 연결을 그만두겠다고 함",
+    "stop": "지금 하던 상담원 연결 확인을 그만두겠다고 함",
     "end": "통화를 끝내려 함",
 }
+
+
+# 조회·수정·취소는 보류(app/flow/stages/subflows.py HELD): 처리할 수 없는 요청처럼 상담원 연결을 먼저 제안한다
+OFFER_HANDOFF = ("help", "lookup", "modify", "cancel")
 
 
 def stage_choices(call) -> dict[str, str]:
@@ -101,7 +106,8 @@ async def classify(call, conn, client, seq: int) -> None:
         if answer not in choices or intent not in INTENTS:  # 모델 출력은 미신뢰 입력
             raise ValueError(f"선택지 밖 판별: {result}")
     except Exception as e:
-        log.warning("판별 실패 %s: %s", call.session_id, e)
+        log.warning("판별 실패 %s: %s %s %dms", call.session_id, type(e).__name__, e,
+                    (time.monotonic() - t0) * 1000)  # TimeoutError는 메시지가 비어 이름을 같이 남긴다
         record.update(status="error", output={"error": type(e).__name__})
         call.add_error(f"판별 실패: {type(e).__name__}")
         return
@@ -158,11 +164,14 @@ async def apply_answer(call, answer: str, intent: str) -> list[str]:
         events = await stage.on_answer(call, answer)
         await engine.apply(call, events, "listener")
     if intent != "none" and engine.current(call).listen:  # 답으로 ending에 들어갔으면 용건은 무시
-        if intent == "end":
+        if intent == "quit":  # 접수하지 않고 끝낸다(통화 결과 CANCELLED)
+            call.cancelled = True
+        if intent in ("end", "quit"):
             call.request_hangup()
-        if intent in ("handoff", "help"):  # 처리할 수 없는 요청은 상담원 연결을 먼저 제안
-            call.handoff_variant = "offer" if intent == "help" else None
-        more = ["call.ending" if intent == "end" else "intent.handoff" if intent == "help" else f"intent.{intent}"]
+        if intent == "handoff" or intent in OFFER_HANDOFF:  # 처리할 수 없는 요청은 상담원 연결을 먼저 제안
+            call.handoff_variant = "offer" if intent in OFFER_HANDOFF else None
+        more = ["call.ending" if intent in ("end", "quit")
+                else "intent.handoff" if intent in OFFER_HANDOFF else f"intent.{intent}"]
         await engine.apply(call, more, "listener")
         events += more
     return events
