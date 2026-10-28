@@ -1,6 +1,11 @@
 import { ApiProperty, OmitType } from '@nestjs/swagger';
 import { OriginPinDto } from './create-order.dto';
-import { ORDER_STATUSES, OrderStatus } from '../orders.types';
+import {
+  ORDER_CREATION_SOURCES,
+  OrderCreationSource,
+  ORDER_STATUSES,
+  OrderStatus,
+} from '../orders.types';
 
 export class CreatedOrderDto {
   @ApiProperty({
@@ -40,6 +45,12 @@ export class OrderResultDto extends CreatedOrderDto {
 }
 
 export class OrderSummaryDto {
+  @ApiProperty({
+    enum: ORDER_CREATION_SOURCES,
+    description: '접수 경로. AI: AI 상담, ADMIN: 관리자 수기, UNKNOWN: 기존 출처 미확인.',
+  })
+  creationSource!: OrderCreationSource;
+
   @ApiProperty({ description: '주문 번호(orderSeq).', minimum: 1 })
   orderSeq!: number;
 

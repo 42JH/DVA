@@ -212,7 +212,13 @@ export class OrdersService {
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
-      const result = await this.repository.insert(client, draft, customerId, key);
+      const result = await this.repository.insert(
+        client,
+        draft,
+        customerId,
+        key,
+        callId !== null ? 'AI' : 'ADMIN',
+      );
       if (callId !== null) await this.repository.linkCall(client, callId, result.orderSeq);
       await this.audit.recordSuccess(
         {

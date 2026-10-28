@@ -6,7 +6,7 @@ import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-re
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
-import { OrderStatus } from './orders.types';
+import { OrderCreationSource, OrderStatus } from './orders.types';
 import { OrderCallDto } from './dto/order-call.dto';
 import { callerPhone } from '../common/caller-phone';
 import { ApiException } from '../common/errors/api.exception';
@@ -123,6 +123,7 @@ export class OrdersRepository {
     return (
       await client.query<OrderSummaryDto>(
         `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
+          o.creation_source AS "creationSource",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
@@ -162,6 +163,7 @@ export class OrdersRepository {
       await client.query<{ detail: OrderDetailDto }>(
         `SELECT jsonb_build_object(
           'orderSeq',o.order_seq,'customerSeq',o.customer_seq,'status',o.status,
+          'creationSource',o.creation_source,
           'paymentMethodType',o.payment_method_type,'pickupRequestedAt',o.pickup_requested_at,
           'createdAt',o.created_at,'updatedAt',o.updated_at,'version',o.version,
           'parcelNo',o.parcel_no,'dverReceivedAt',o.dver_received_at,
@@ -202,8 +204,10 @@ export class OrdersRepository {
     callId: number | null,
   ) {
     return (
-      await client.query<CreatedOrderDto & { allowed: boolean }>(
-        `SELECT o.order_seq AS "orderSeq", o.version,
+      await client.query<
+        CreatedOrderDto & { allowed: boolean; creationSource: OrderCreationSource }
+      >(
+        `SELECT o.order_seq AS "orderSeq", o.version,o.creation_source AS "creationSource",
           CASE WHEN $2::int IS NULL THEN EXISTS(
             SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq)
           ELSE EXISTS(
@@ -343,12 +347,13 @@ export class OrdersRepository {
     draft: OrderDraft,
     customerId: number | null,
     key: string,
+    creationSource: OrderCreationSource,
   ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id)
-       VALUES($1,$2,$3,'COLLECTING',$4::uuid) RETURNING order_seq AS id`,
-        [customerId, draft.paymentMethodType, draft.pickupRequestedAt, key],
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source)
+       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5) RETURNING order_seq AS id`,
+        [customerId, draft.paymentMethodType, draft.pickupRequestedAt, key, creationSource],
       )
     ).rows[0].id;
     for (const [index, parcel] of draft.parcels.entries())
