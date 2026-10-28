@@ -22,12 +22,12 @@ export class CallQueryDto extends PaginationQueryDto {
   orderSeq?: number;
 
   @ApiPropertyOptional({
-    description: '숫자만 입력한 발신번호와 정확히 일치하는 통화.',
+    description: '저장된 발신번호와 정확히 일치하는 통화. 국제번호는 앞의 +를 포함합니다.',
     example: '01012345678',
   })
   @IsOptional()
   @IsString()
-  @Matches(/^[0-9]+$/)
+  @Matches(/^\+?[0-9]+$/)
   callerPhoneNumber?: string;
 
   @ApiPropertyOptional({

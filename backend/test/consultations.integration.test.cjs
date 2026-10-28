@@ -15,6 +15,7 @@ process.env.S3_RECORDINGS_BUCKET = '';
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
+const { callerPhone } = require('../dist/common/caller-phone');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const { RecordingPlaybackService } = require('../dist/consultations/recording-playback.service');
 const pool = new Pool({
@@ -214,6 +215,19 @@ test('list combines order, exact phone, end reason and handoff filters without c
   );
 });
 
+test('list searches international caller numbers preserved by the AI flow without dropping the country prefix', async () => {
+  const phone = callerPhone('+1' + randomInt(2000000000, 10000000000));
+  const row = await call({ callerPhoneNumber: phone });
+  assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
+    data: [row],
+    hasNext: false,
+  });
+  assert.deepEqual(await result(await list({ callerPhoneNumber: phone.slice(1) })), {
+    data: [],
+    hasNext: false,
+  });
+});
+
 test('date filters use actual started_at with inclusive from and exclusive to, without guessing missing times', async () => {
   const phone = phoneNumber();
   const first = await call({ callerPhoneNumber: phone });
@@ -255,6 +269,8 @@ test('list rejects invalid, repeated and unsupported query fields', async () => 
     'orderSeq=1e2',
     'orderSeq=1&orderSeq=2',
     'callerPhoneNumber=010-1234-5678',
+    'callerPhoneNumber=%2B%2B12125551234',
+    'callerPhoneNumber=1212%2B5551234',
     'callerPhoneNumber=',
     'endReason=',
     'endReason=%20',

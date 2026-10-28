@@ -18,7 +18,7 @@
 | 선택 query | 의미 |
 | --- | --- |
 | `orderSeq` | 연결된 주문 번호 정확히 일치 |
-| `callerPhoneNumber` | 숫자로만 된 발신번호 정확히 일치 |
+| `callerPhoneNumber` | 저장된 발신번호 정확히 일치. 숫자와 맨 앞의 `+` 허용 |
 | `from`, `to` | 실제 `started_at` 기준. from 포함·to 미포함, 시간대 필수 |
 | `endReason` | 저장된 종료 사유 정확히 일치. 종료 사유 코드 목록은 미확정 |
 | `handoffStatus` | REQUESTED / CONNECTED / FAILED |
