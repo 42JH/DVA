@@ -2,6 +2,56 @@ const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 
+test('production FAQ management through Nginx updates the AI read API without exposing admin metadata', async () => {
+  const root = 'http://proxy/api';
+  const origin = 'https://13.209.59.180';
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = {
+    Origin: origin,
+    'Content-Type': 'application/json',
+    Cookie: login.headers.get('set-cookie').split(';')[0],
+  };
+  const question = 'runtime-faq-' + randomUUID();
+  const created = await fetch(root + '/faqs', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ question, answer: '초기 답변' }),
+  });
+  assert.equal(created.status, 204);
+  assert.equal(await created.text(), '');
+  const location = created.headers.get('location');
+  const id = location.split('/').at(-1);
+  const changed = await fetch('http://proxy' + location, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ answer: '수정 답변\n- 상세' }),
+  });
+  assert.equal(changed.status, 204);
+  const latest = await fetch(root + '/ai/faqs/' + id);
+  assert.equal(latest.status, 200);
+  assert.equal(latest.headers.get('cache-control'), 'no-store');
+  const { data } = await latest.json();
+  assert.equal(data.question, question);
+  assert.equal(data.answer, '수정 답변\n- 상세');
+  assert.equal(Object.hasOwn(data, 'updatedByAdminUserSeq'), false);
+  const denied = await fetch(root + '/faqs', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, answer: '차단' }),
+  });
+  assert.equal(denied.status, 401);
+  const list = await fetch(root + '/ai/faqs?' + new URLSearchParams({ q: question }));
+  assert.deepEqual(
+    (await list.json()).data.map((r) => r.faqEntrySeq),
+    [Number(id)],
+  );
+});
+
 test('Nginx preserves the admin-only manual order boundary without a service-token bypass', async () => {
   const response = await fetch('http://proxy/api/admin/orders', {
     method: 'POST',

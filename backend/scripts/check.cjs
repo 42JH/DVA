@@ -177,8 +177,10 @@ try {
     application,
     'node',
     '-e',
-    'const fs=require("node:fs"); for(const p of ["test","scripts","node_modules/eslint",".env.development"]){ if(fs.existsSync(p)) process.exit(1); } console.log("PASS: production image excludes tests, development tools and environment files.");',
+    'const fs=require("node:fs"); for(const p of ["test","scripts","node_modules/eslint",".env.development"]){ if(fs.existsSync(p)) process.exit(1); } if(require("./data/delivery-faq.json").length!==32 || !fs.existsSync("dist/faqs/bootstrap-faq.js")) process.exit(1); console.log("PASS: production image includes the FAQ bootstrap data and excludes tests, development tools and environment files.");',
   ]);
+  // 임시 DB의 기존 FAQ를 보존하면서 운영 이미지에서도 초기 등록 명령이 실행되는지 확인한다.
+  docker(['exec', application, 'node', 'dist/faqs/bootstrap-faq.js', 'runtimeAdmin83']);
   console.log(
     'PASS: backend checks, isolated PostgreSQL, production image and Nginx/PBX contracts.',
   );

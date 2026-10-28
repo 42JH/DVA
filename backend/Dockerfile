@@ -12,6 +12,7 @@ COPY eslint.config.mjs .prettierrc.json ./
 COPY test ./test
 COPY scripts ./scripts
 COPY migrations ./migrations
+COPY data ./data
 RUN npm run check
 CMD ["npm", "run", "test:integration"]
 
@@ -22,6 +23,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 COPY migrations ./migrations
+COPY data ./data
 USER node
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
