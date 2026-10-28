@@ -4,6 +4,7 @@ import { ListResponse } from '../common/pagination';
 import { ConsultationsRepository } from './consultations.repository';
 import { CallQueryDto } from './dto/call-query.dto';
 import { CallDetailDto } from './dto/call-response.dto';
+import { TranscriptQueryDto } from './dto/transcript.dto';
 
 @Injectable()
 export class ConsultationsService {
@@ -25,5 +26,11 @@ export class ConsultationsService {
     const call = await this.repository.findOne(id);
     if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
     return { call, recordings: await this.repository.findRecordings(id) };
+  }
+
+  async findTranscript(id: number, query: TranscriptQueryDto) {
+    if (!(await this.repository.findOne(id)))
+      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    return new ListResponse(await this.repository.findTranscript(id, query), query.limit);
   }
 }

@@ -56,6 +56,18 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 상담원 기록이 없으면 `call.handoff`는 null이다. 배정 관리자·요약이 없는 연결 기록도 그대로 null을 유지한다.
 연결 주문의 내용은 `GET /api/orders/{orderSeq}`로 조회한다.
 
+## GET /api/calls/{id}/transcript — 통화 대화 내용 조회
+
+`id`는 `call_session_seq`, 선택 query는 `limit`·`offset`이다.
+응답은 `{ data: Utterance[], hasNext }`이며 `utteranceOrder` 오름차순이다.
+발화 구간별 `callUtteranceSeq`, `utteranceOrder`, `speaker`(CUSTOMER/AI),
+`utteranceText`, `lastSentenceSeq`, `receivedAt`을 반환한다.
+
+누적 대화 원문은 줄바꿈을 포함해 그대로 제공한다. `receivedAt`은 최초 구간 수신 시각이며,
+녹취의 재생 위치나 실제 발화 시작 시각을 뜻하지 않는다.
+통화가 없으면 404, 저장된 발화가 없거나 마지막 페이지 이후이면 빈 목록이다.
+빈 목록은 STT 기록이 없다는 뜻이며 통화가 무음이었거나 인식에 성공했다는 뜻이 아니다.
+
 ## 수집 상태와 범위
 
 - 현재 모놀리식은 AI 주문 결과로 통화 행을 만들고 PBX 웹훅 매칭 후 실제 시작·종료 시각을 저장한다.

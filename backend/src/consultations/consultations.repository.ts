@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
 import { CallDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
+import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
 
 type CallRow = Omit<CallDto, 'handoff'> & {
   handoffRequestSeq: number | null;
@@ -90,6 +91,18 @@ export class ConsultationsRepository {
         `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt"
        FROM recordings WHERE call_session_seq=$1 ORDER BY recording_seq`,
         [id],
+      )
+    ).rows;
+  }
+
+  async findTranscript(id: number, query: TranscriptQueryDto): Promise<UtteranceDto[]> {
+    return (
+      await this.database.pool.query<UtteranceDto>(
+        `SELECT call_utterance_seq AS "callUtteranceSeq",utterance_order AS "utteranceOrder",speaker,
+       utterance_text AS "utteranceText",last_sentence_seq AS "lastSentenceSeq",received_at AS "receivedAt"
+       FROM call_utterances WHERE call_session_seq=$1 ORDER BY utterance_order
+       LIMIT $2 OFFSET $3`,
+        [id, query.limit + 1, query.offset],
       )
     ).rows;
   }

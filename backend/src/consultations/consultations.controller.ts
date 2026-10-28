@@ -6,6 +6,7 @@ import { ConsultationsService } from './consultations.service';
 import { CallQueryDto } from './dto/call-query.dto';
 import { CallDetailResponseDto, CallListResponseDto } from './dto/call-response.dto';
 import { CallIdParamsDto } from './dto/call-id-params.dto';
+import { TranscriptQueryDto, TranscriptResponseDto } from './dto/transcript.dto';
 
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
@@ -48,5 +49,20 @@ export class ConsultationsController {
   @ApiResponse({ status: 404, description: '해당 통화 기록이 없음.', type: ErrorResponseDto })
   findOne(@Param() params: CallIdParamsDto) {
     return this.consultations.findOne(params.id);
+  }
+
+  @Get(':id/transcript')
+  @ApiOperation({
+    summary: '통화 대화 내용 조회',
+    description:
+      '저장된 STT 구간을 발화 순서로 조회합니다. 화자·누적 대화·최초 수신 시각을 반환하며, 기록이 없으면 빈 목록입니다. 녹취로부터 STT를 새로 생성하지 않습니다.',
+  })
+  @ApiOkResponse({
+    description: '발화 목록과 다음 페이지 여부. 미수집은 빈 배열이며 무음 통화라는 뜻이 아닙니다.',
+    type: TranscriptResponseDto,
+  })
+  @ApiResponse({ status: 404, description: '해당 통화 기록이 없음.', type: ErrorResponseDto })
+  findTranscript(@Param() params: CallIdParamsDto, @Query() query: TranscriptQueryDto) {
+    return this.consultations.findTranscript(params.id, query);
   }
 }

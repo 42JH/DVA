@@ -69,6 +69,16 @@ test('call list and detail through Nginx require a session and preserve response
   assert.deepEqual(detailBody.data.call, body.data[0]);
   assert.ok(Array.isArray(detailBody.data.recordings));
   assert.ok(detailBody.meta.requestId);
+  const transcript = await fetch(
+    'http://proxy/api/calls/' + body.data[0].callSessionSeq + '/transcript?limit=1',
+    {
+      headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+    },
+  );
+  assert.equal(transcript.status, 200);
+  const transcriptBody = await transcript.json();
+  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
+  assert.ok(Array.isArray(transcriptBody.data));
 });
 
 test('production image keeps health and disables Swagger by default', async () => {

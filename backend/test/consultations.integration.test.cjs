@@ -389,3 +389,109 @@ test('Swagger documents call detail IDs, nullable handoff and recording metadata
     'recordingSeq',
   ]);
 });
+
+const transcript = (id, query = {}, headers = operator.headers) =>
+  fetch(
+    base +
+      '/api/calls/' +
+      id +
+      '/transcript?' +
+      (typeof query === 'string' ? query : new URLSearchParams(query).toString()),
+    { headers },
+  );
+async function utterance(callId, order, text = '발화 ' + randomUUID()) {
+  const row = (
+    await pool.query(
+      `INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq)
+     VALUES($1,$2,$3,$4,1) RETURNING call_utterance_seq AS "callUtteranceSeq",utterance_order AS "utteranceOrder",
+     speaker,utterance_text AS "utteranceText",last_sentence_seq AS "lastSentenceSeq",received_at AS "receivedAt"`,
+      [callId, order, order % 2 ? 'CUSTOMER' : 'AI', text],
+    )
+  ).rows[0];
+  return { ...row, receivedAt: row.receivedAt.toISOString() };
+}
+
+test('transcript sorts by utterance order rather than insert time and never includes another call', async () => {
+  const row = await call();
+  const third = await utterance(row.callSessionSeq, 3);
+  const first = await utterance(row.callSessionSeq, 1, '택배 요청\n<script>plain text</script>');
+  const second = await utterance(row.callSessionSeq, 2);
+  await utterance((await call()).callSessionSeq, 1);
+  assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
+    data: [first, second, third],
+    hasNext: false,
+  });
+  for (let offset = 0; offset < 3; offset++)
+    assert.deepEqual(await result(await transcript(row.callSessionSeq, { limit: 1, offset })), {
+      data: [[first, second, third][offset]],
+      hasNext: offset < 2,
+    });
+  assert.deepEqual(await result(await transcript(row.callSessionSeq, { offset: 3 })), {
+    data: [],
+    hasNext: false,
+  });
+  assert.equal(JSON.stringify(logs).includes(first.utteranceText), false);
+});
+
+test('transcript returns the latest saved snapshot and its sentence sequence without changing the received time', async () => {
+  const row = await call();
+  const first = await utterance(row.callSessionSeq, 1);
+  const updated = first.utteranceText + '\n추가 문장';
+  await pool.query(
+    'UPDATE call_utterances SET utterance_text=$2,last_sentence_seq=2 WHERE call_utterance_seq=$1',
+    [first.callUtteranceSeq, updated],
+  );
+  assert.deepEqual((await result(await transcript(row.callSessionSeq))).data, [
+    { ...first, utteranceText: updated, lastSentenceSeq: 2 },
+  ]);
+});
+
+test('transcript distinguishes uncollected STT from a nonexistent call even when a recording exists', async () => {
+  const row = await call();
+  await recording(row.callSessionSeq);
+  assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
+    data: [],
+    hasNext: false,
+  });
+  await error(await transcript(2147483647), 404, 'NOT_FOUND');
+});
+
+test('transcript requires an active administrator and validates call IDs and pagination', async () => {
+  const row = await call();
+  for (const headers of [
+    {},
+    { call_session_seq: String(row.callSessionSeq) },
+    { Cookie: 'dva_session=' + '0'.repeat(64) },
+  ])
+    await error(await transcript(row.callSessionSeq, {}, headers), 401, 'UNAUTHORIZED');
+  for (const id of ['0', '-1', '1.5', '2147483648'])
+    await error(await transcript(id), 400, 'INVALID_REQUEST');
+  for (const query of [
+    'limit=101',
+    'limit=0',
+    'limit=1&limit=2',
+    'offset=-1',
+    'offset=1e2',
+    'speaker=AI',
+    'orderSeq=1',
+  ])
+    await error(await transcript(row.callSessionSeq, query), 400, 'INVALID_REQUEST');
+});
+
+test('Swagger documents transcript pagination, speakers and the difference between received time and audio position', async () => {
+  const spec = await (await fetch(base + '/api/docs-json')).json();
+  const operation = spec.paths['/api/calls/{id}/transcript'].get;
+  assert.deepEqual(operation.tags, ['Calls']);
+  assert.equal(operation.summary, '통화 대화 내용 조회');
+  assert.deepEqual(operation.security, [{ adminSession: [] }]);
+  assert.deepEqual(operation.parameters.map(({ name }) => name).sort(), ['id', 'limit', 'offset']);
+  assert.ok(operation.responses['404']);
+  assert.deepEqual(spec.components.schemas.UtteranceDto.properties.speaker.enum, [
+    'CUSTOMER',
+    'AI',
+  ]);
+  assert.match(spec.components.schemas.UtteranceDto.properties.receivedAt.description, /최초 수신/);
+  for (const name of ['UtteranceDto', 'TranscriptResponseDto'])
+    for (const property of Object.values(spec.components.schemas[name].properties))
+      assert.ok(property.description, name);
+});
