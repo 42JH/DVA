@@ -28,6 +28,8 @@ services:
       BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
       # 확정 주소의 지번·동명·우편번호·좌표(접수 필수값). 비어 있으면 접수가 미완료로 넘어간다
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      # 페르소나 연동 토큰(백엔드와 같은 값, 32자 이상). 비어 있으면 연동을 끄고 prompts/persona.md를 쓴다
+      AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       # RunPod 준비 전에는 검색만 오류로 안내하고 주문 접수는 계속한다.

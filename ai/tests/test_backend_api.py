@@ -159,3 +159,28 @@ def test_unexpected_status_raises():
         run(client.caller_context(CALLER))
     with pytest.raises(BackendError):
         run(client.update_order(CALLER, "Q1", {"receiver_name": "x"}))
+
+
+def test_persona_calls_use_service_token_and_map_404_409():
+    def handler(req):
+        if req.url.path == "/api/ai/config":
+            if req.url.params["status"] == "PENDING":
+                return httpx2.Response(404, json={"error": {"code": "NOT_FOUND"}})
+            return httpx2.Response(200, json={"data": {"aiPersonaVersionSeq": 3, "status": "ACTIVE"}, "meta": {}})
+        if body(req)["applicationId"] == "old":
+            return httpx2.Response(409, json={"error": {"code": "VERSION_CONFLICT"}})
+        return httpx2.Response(500)
+
+    client, seen = api(handler, persona_token="secret-token")
+    assert run(client.persona_config("ACTIVE"))["aiPersonaVersionSeq"] == 3
+    assert run(client.persona_config("PENDING")) is None
+    assert run(client.persona_result({"applicationId": "old"})) is None
+    with pytest.raises(BackendError):
+        run(client.persona_result({"applicationId": "new"}))
+    assert all(r.headers["authorization"] == "Bearer secret-token" for r in seen)
+
+
+def test_order_calls_do_not_send_persona_token():
+    client, seen = api(context({"lookupStatus": "UNREGISTERED"}), persona_token="secret-token")
+    run(client.caller_context(CALLER))
+    assert "authorization" not in seen[0].headers

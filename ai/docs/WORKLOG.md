@@ -577,3 +577,16 @@
 - 배포 서버(13.209.59.180) Qdrant에 `manuals_dev_openai_large`(32개, green)가 있음을 읽기 전용으로 확인(10-27엔 0개였음). 서버에서 스냅숏을 만들어 내려받은 뒤 서버 쪽 스냅숏·임시 파일은 지움. SHA-256 일치(`09d6c6fd…`).
 - 로컬 `dva-ai-qdrant-1`에 `file://` 위치로 복원 → 32개 green. AI 컨테이너 재시작 후 "RAG 준비 미완료" 경고 사라짐. 인증키는 컨테이너 안에서만 썼다.
 - 남은 것: 실제 검색(임베딩·리랭커 GPU) 경로는 확인 안 함. 서버 docker는 `sudo`가 필요함.
+
+### 페르소나 연동 준비(백엔드 94·98 병합 대기)
+- `spec/ai-persona-integration.md`(백엔드 전달 문서) 확인. 백엔드 페르소나 API는 아직 원격에 없음(develop-backend 병합 중) → `GET /api/ai/config`의 `data` 필드는 미확인.
+- 지원 옵션 판단: 음성은 내장 31개 중 선택, 말 속도는 GPT-Live 설정에 없어 `{min:null,max:null}`, 말끝 대기는 모델이 정해 `["NORMAL"]`만. `[listener] pause_ms`(서버 판별 대기)를 말끝 대기로 쓰지 않는다.
+- 사용자 결정: 관리자가 고치는 프롬프트는 말투·인사 부분만(업무 규칙은 고정). AI 쪽 DB는 두지 않고 백엔드 페르소나 설정(PENDING→ACTIVE)을 쓴다.
+- 바꾼 것: `prompts/voice.md`에서 말투·인사 문구를 `prompts/persona.md`로 빼고 `[[페르소나]]` 자리를 둠. `build_session(persona=...)`이 그 자리를 채운다(없으면 persona.md). 테스트 288개 통과.
+- 남은 것: 백엔드 병합 후 응답 필드 확인 → `/internal/persona/options`·`refresh`(Bearer `AI_PERSONA_TOKEN`), 적용 작업(통화 0건에 잠금·설치·apply-result·ACTIVE 확인), 통화별 설정 고정, 연동 확인 시나리오 테스트. 관리자에게 보일 음성 목록과 설정이 없을 때 통화 처리(로컬 기본값 권장)는 결정 대기.
+
+### 페르소나 연동 구현(백엔드 develop-backend 295b123 병합 확인)
+- 확인한 것: 백엔드 `backend/src/ai-settings/`(응답 `{data, meta}`, 필드 `aiPersonaVersionSeq`·`applicationId`·`promptText`·`voiceId`·`speakingRate`·`turnWaitLevel`·`status`·`applyErrorCode`), 알림은 5초마다 확인·30초 간격 재시도·응답 제한 2초·202 필요, APPLIED는 통화 0건만, 교체·불일치는 409, DB에 기본 페르소나 없음. 관리자가 페르소나를 만들 때 백엔드가 AI `/internal/persona/options`로 검증하므로 이 API가 있어야 관리 화면이 동작한다. 연동 문서는 로컬 사본과 같음.
+- 바꾼 것: `app/persona.py`(옵션: 음성 31개·속도 null·말끝 NORMAL, 검증, 통화 0건에서 잠그고 적용·회신·ACTIVE 확인, 409·회신 유실 재동기화), `app/webhooks/persona.py`(`/internal/persona/options`·`refresh`, Bearer `AI_PERSONA_TOKEN`), 웹훅에서 잠금 중 reject·통화별 설정(지시문·음성) 고정(`Call.persona_version`), `BackendAPI.persona_config/persona_result`(토큰은 페르소나 API에만), 가짜 백엔드 흉내, `build_session(voice=)`, 설정 `[persona]`, compose·.env.example에 `AI_PERSONA_TOKEN`. 문서 `spec/persona.md` 새로, AGENTS.md·`spec/server-config.md`.
+- 테스트 302개 통과(페르소나 12개, 클라이언트 2개 추가).
+- 남은 것: 실제 백엔드와 연동 확인(토큰 설정 → 관리자 화면 옵션 조회 → 적용 → 통화 중 수정 대기 → 마지막 통화 후 ACTIVE). 백엔드·프론트에 "promptText는 말투·인사 부분만" 전달. 음성 표시명은 지금 영문 이름 그대로.
