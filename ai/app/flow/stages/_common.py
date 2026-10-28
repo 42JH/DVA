@@ -14,12 +14,8 @@ def is_new(ctx) -> bool:
     return ctx.customer_type == "new"
 
 
-def registered_with_recent(ctx) -> bool:
-    return is_registered(ctx) and ctx.recent is not None
-
-
-def registered_without_recent(ctx) -> bool:
-    return is_registered(ctx) and ctx.recent is None
+def has_recent(ctx) -> bool:
+    return ctx.recent is not None
 
 
 def complete(ctx) -> bool:
@@ -56,9 +52,9 @@ def place_text(p) -> str:
     return f"{p.name}, {p.address} {p.address_detail}".strip()
 
 
-# 새 주문의 첫 단계(통화 시작과 같은 규칙)
+# 새 택배의 첫 단계: 앞 택배가 있으면 보내는 곳이 같은지부터, 없으면 통화 시작과 같은 규칙
 NEW_ORDER = (
+    Transition("intent.new_order", "recent_offer", has_recent),
     Transition("intent.new_order", "collecting", is_new),
-    Transition("intent.new_order", "recent_offer", registered_with_recent),
-    Transition("intent.new_order", "find_destination", registered_without_recent),
+    Transition("intent.new_order", "find_destination", is_registered),
 )

@@ -254,7 +254,7 @@ class Call:
             "now": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
             "payment_options": " / ".join(self.payment_options().values()),
             "goodbye_message": biz.goodbye_message,
-            "recent_order": f"{_region(r.receiver_address)}의 {r.receiver_name} 님" if r else "",
+            "recent_origin": f"{r.sender_name} 님, {_region(r.sender_address)}" if r else "",
             "customer_name": self.display_name() or "없음",
             "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
             "caller": self.caller or "알 수 없음",

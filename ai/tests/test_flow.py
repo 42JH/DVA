@@ -97,28 +97,47 @@ SCENARIOS = [
         tool("record_order", {"receiver_address": "대구 중구 동성로 1"}, "collecting"),
         tool("record_order", {"receiver_address_detail": "2층"}, "confirming"),
     ], ["collecting", "address", "collecting", "confirming", "address", "confirming", "collecting", "confirming"]),
-    ("택배 추가(신규): 공통값은 다시 묻지 않음", new_db, [
+    ("택배 추가(신규): 보내는 곳이 같으면 받는 곳부터, 공통값은 다시 묻지 않음", new_db, [
         tool("record_order", FULL_ORDER, "collecting"),
         say("credit", "confirming"),
         say("confirm", "after_order"),
-        say("more", "collecting"),
-        tool("record_order", {k: v for k, v in FULL_ORDER.items() if k != "pickup_at"}, "confirming"),
+        say("more", "recent_offer"),
+        say("yes", "collecting"),
+        tool("record_order", RECEIVER | ITEM, "confirming"),
         say("confirm", "after_order"),
         say("no_more", "ending"),
-    ], ["collecting", "address", "collecting", "confirming", "after_order", "collecting", "address", "collecting",
-        "confirming", "after_order", "ending"]),
-    ("택배 추가(등록): 이번에도 같은 곳부터", saved_db, [
+    ], ["collecting", "address", "collecting", "confirming", "after_order", "recent_offer", "collecting", "address",
+        "collecting", "confirming", "after_order", "ending"]),
+    ("택배 추가(신규): 보내는 곳이 다르면 처음부터", new_db, [
+        tool("record_order", FULL_ORDER, "collecting"),
+        say("credit", "confirming"),
+        say("confirm", "after_order"),
+        say("more", "recent_offer"),
+        say("no", "collecting"),
+        tool("record_order", {k: v for k, v in FULL_ORDER.items() if k != "pickup_at"}, "confirming"),
+    ], ["collecting", "address", "collecting", "confirming", "after_order", "recent_offer", "collecting", "address",
+        "collecting", "confirming"]),
+    ("택배 추가(등록): 보내는 곳이 같으면 주소록에서 받는 곳", saved_db, [
         say("dest_1", "find_origin"),
         say("origin_3", "collecting"),
         tool("record_order", ITEM | WHEN, "collecting"),
         say("credit", "confirming"),
         say("confirm", "after_order"),
         say("more", "recent_offer"),
-        say("yes", "collecting"),
+        say("yes", "find_destination"),
+        say("dest_2", "collecting"),
         tool("record_order", ITEM, "confirming"),
         say("confirm", "after_order"),
     ], ["find_destination", "collecting", "find_origin", "collecting", "confirming", "after_order", "recent_offer",
-        "collecting", "confirming", "after_order"]),
+        "find_destination", "collecting", "confirming", "after_order"]),
+    ("등록, 새 출발지에서 본인이 보냄", saved_db, [
+        say("dest_1", "find_origin"),
+        say("different", "collecting"),
+        tool("record_order", {"sender_address": "인천 연수구 송도동 1", "sender_address_detail": ""}, "collecting"),
+        say("use_customer", "collecting"),
+        tool("record_order", ITEM | WHEN, "collecting"),
+        say("credit", "confirming"),
+    ], ["find_destination", "collecting", "find_origin", "collecting", "address", "collecting", "confirming"]),
     ("조회·수정·취소 요청은 보류: 상담원 연결 제안", new_db, [
         say("none", "handoff", intent="lookup"),
         say("no", "collecting"),
@@ -307,7 +326,7 @@ NEW_ONE = [tool("record_order", FULL_ORDER, "collecting"), say("credit", "confir
 
 def test_no_more_submits_all_confirmed_parcels_once_as_complete():
     db = new_db()
-    call = play(db, NEW_ONE + [say("more", "collecting"),
+    call = play(db, NEW_ONE + [say("more", "recent_offer"), say("no", "collecting"),
                                tool("record_order", {**FULL_ORDER, "small_box_count": 2}, "confirming"),
                                say("confirm", "after_order"), say("no_more", "ending")])
     assert len(db.results) == 1 and call.hangup_requested.is_set()
@@ -360,7 +379,7 @@ def test_missing_geo_is_not_filled_and_sent_as_incomplete(monkeypatch):
 
 @pytest.mark.parametrize("steps, outcome, parcels", [
     (NEW_ONE, "COMPLETE", 1),  # 확인한 택배가 있는데 끊김 → 확인한 것만 접수
-    (NEW_ONE + [say("more", "collecting"), tool("record_order", SENDER, "collecting")], "COMPLETE", 1),
+    (NEW_ONE + [say("more", "recent_offer"), say("no", "collecting"), tool("record_order", SENDER, "collecting")], "COMPLETE", 1),
     ([tool("record_order", SENDER, "collecting")], "INCOMPLETE", 1),  # 받는 중이던 것만
     ([], "INCOMPLETE", 0),
     (NEW_ONE + [say("none", "handoff", intent="handoff"), say("yes", "ending")], "INCOMPLETE", 1),  # 상담원: 접수 안 함
@@ -382,7 +401,7 @@ def test_call_end_sends_one_result(steps, outcome, parcels):
 
 def test_incomplete_with_confirmed_and_partial_parcels_on_handoff():
     db = new_db()
-    call = play(db, NEW_ONE + [say("more", "collecting"), tool("record_order", {"receiver_name": "박민수"}, "collecting"),
+    call = play(db, NEW_ONE + [say("more", "recent_offer"), say("no", "collecting"), tool("record_order", {"receiver_name": "박민수"}, "collecting"),
                                say("none", "handoff", intent="handoff"), say("yes", "ending")])
     run(call.finish())
     parcels = db.results[0]["body"]["parcels"]
@@ -409,7 +428,7 @@ def test_answer_then_intent_in_one_utterance():
     run(dispatch(call, "record_order", json.dumps(FULL_ORDER, ensure_ascii=False), "c"))
     run(apply_answer(call, "credit", "none"))
     run(apply_answer(call, "confirm", "new_order"))  # "네 맞아요, 하나 더 보낼게요"
-    assert call.flow.stage == "collecting" and len(call.parcels) == 1
+    assert call.flow.stage == "recent_offer" and len(call.parcels) == 1
 
 
 def test_end_requests_hangup_and_ending_ignores_further_answers():
@@ -552,6 +571,15 @@ def test_caller_number_yes_is_recorded_by_server():
     assert "use_caller" not in stage_choices(call)  # 연락처 차례가 지나면 선택지도 없다
 
 
+def test_answer_before_previous_field_is_recorded_is_kept():
+    """성함이 아직 기록 중인데 상담원이 연락처를 먼저 묻고 고객이 "네"라고 하면, 그 답을 버리지 않는다(2026-10-28 통화)."""
+    call = make_call(new_db())
+    assert engine.missing(call)[0] == "sender_name"
+    assert "use_caller" in stage_choices(call) and "credit" in stage_choices(call)
+    run(apply_answer(call, "use_caller", "none"))
+    assert call.order.sender_phone == CALLER and engine.missing(call)[0] == "sender_name"
+
+
 def test_saved_values_are_hidden_until_customer_says_them():
     call = make_call(saved_db())
     run(apply_answer(call, "dest_1", "none"))  # 주소록의 받는 곳
@@ -581,3 +609,34 @@ def test_confirm_progress_fits_with_realistic_values():
     text = engine.progress_text(call, CFG.progress.max_chars)
     assert call.flow.stage == "confirming" and FULL_ORDER["receiver_address"] in text  # 값이 잘리지 않는다
     assert "소형 박스 1개" in text and "30,000원" in text and "정산" in text
+
+
+def test_customer_name_is_asked_right_after_other_sender_phone():
+    """미등록 고객이 보내는 분 번호로 다른 번호를 주면 전화 주신 분 성함을 바로 다음에 묻는다."""
+    call = make_call(new_db())
+    run(dispatch(call, "record_order", json.dumps({"sender_name": "박영수", "sender_phone": "01055556666"},
+                                                  ensure_ascii=False), "c"))
+    assert engine.missing(call)[0] == "customer_name"
+    call2 = make_call(new_db(), session_id="live_2")
+    run(dispatch(call2, "record_order", json.dumps({"sender_name": "김철수"}, ensure_ascii=False), "c"))
+    run(apply_answer(call2, "use_caller", "none"))
+    assert engine.missing(call2)[0] == "sender_address"  # 본인 번호면 보내는 분 성함을 쓰고 묻지 않는다
+
+
+def test_registered_sender_is_customer_fills_name_and_caller():
+    call = make_call(saved_db())
+    run(apply_answer(call, "dest_1", "none"))
+    run(apply_answer(call, "different", "none"))
+    run(dispatch(call, "record_order", json.dumps({"sender_address": "인천 연수구 송도동 1", "sender_address_detail": ""},
+                                                  ensure_ascii=False), "c"))
+    assert engine.missing(call)[0] == "sender_name" and "김철수 님 본인" in engine.next_text(call)
+    run(apply_answer(call, "use_customer", "none"))
+    assert call.order.sender_name == "김철수" and call.order.sender_phone == CALLER
+
+
+def test_more_parcel_offers_same_sender():
+    call = play(new_db(), NEW_ONE + [say("more", "recent_offer")])
+    assert "김철수 님" in engine.next_text(call)
+    run(apply_answer(call, "yes", "none"))
+    assert call.order.sender_name == "김철수" and call.order.sender_geo == GEO and call.order.receiver_name is None
+    assert engine.missing(call)[0] == "receiver_address"
