@@ -37,10 +37,10 @@ pipeline {
         stage('Test') {
             steps {
                 sh 'bash -n ai/deploy/upload.sh ai/deploy/deploy.sh'
-                // agent의 Python(3.13)이 아니라 방금 빌드한 3.14 이미지 안에서 dev 의존성을 더해 테스트한다
+                // agent의 Python(3.13)이 아니라 방금 빌드한 3.14 이미지 안에서 dev 의존성을 더해 테스트한다. uv 캐시 볼륨으로 재다운로드를 피한다
                 sh '''
                     set -eu
-                    tar -C ai --exclude=.venv -cf - . | docker run -i --rm --user root "$AI_IMAGE" \
+                    tar -C ai --exclude=.venv -cf - . | docker run -i --rm --user root -v dva-ai-uv-cache:/root/.cache/uv "$AI_IMAGE" \
                         sh -c 'tar -xf - -C /app && uv sync --frozen && uv run --frozen pytest -q'
                 '''
             }
