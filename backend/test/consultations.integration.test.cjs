@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const { randomInt, randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
+const { ConfigService } = require('@nestjs/config');
+const { S3Client, HeadObjectCommand } = require('@aws-sdk/client-s3');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -13,6 +15,8 @@ process.env.S3_RECORDINGS_BUCKET = '';
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
+const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
+const { RecordingPlaybackService } = require('../dist/consultations/recording-playback.service');
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
@@ -494,4 +498,140 @@ test('Swagger documents transcript pagination, speakers and the difference betwe
   for (const name of ['UtteranceDto', 'TranscriptResponseDto'])
     for (const property of Object.values(spec.components.schemas[name].properties))
       assert.ok(property.description, name);
+});
+
+const playback = (id, headers = operator.headers) =>
+  fetch(base + '/api/recordings/' + id + '/url', { headers });
+function playbackStorage(t) {
+  const service = app.get(RecordingPlaybackService);
+  const config = app.get(ConfigService);
+  const originalClient = service.s3;
+  const commands = [];
+  service.s3 = new S3Client({
+    region: 'ap-northeast-2',
+    credentials: { accessKeyId: 'http-test-only', secretAccessKey: 'http-test-only-secret' },
+    maxAttempts: 1,
+  });
+  config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
+  t.mock.method(service.s3, 'send', async (command) => {
+    assert.ok(command instanceof HeadObjectCommand);
+    commands.push(command.input);
+    return { $metadata: { httpStatusCode: 200 } };
+  });
+  t.after(() => {
+    service.s3.destroy();
+    service.s3 = originalClient;
+    config.set('S3_RECORDINGS_BUCKET', '');
+  });
+  return { service, commands, config };
+}
+
+test('all active administrator roles get a no-store playback URL for the database recording key', async (t) => {
+  const { commands } = playbackStorage(t);
+  const saved = await recording((await call()).callSessionSeq);
+  const key = (
+    await pool.query('SELECT object_key FROM recordings WHERE recording_seq=$1', [
+      saved.recordingSeq,
+    ])
+  ).rows[0].object_key;
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const admin = role === 'OPERATOR' ? operator : await account(role);
+    const body = await result(await playback(saved.recordingSeq, admin.headers), false);
+    assert.deepEqual(Object.keys(body.data).sort(), ['expiresAt', 'url']);
+    const url = new URL(body.data.url);
+    assert.equal(url.protocol, 'https:');
+    assert.equal(decodeURIComponent(url.pathname), '/' + key);
+    assert.equal(url.searchParams.get('X-Amz-Expires'), '300');
+    assert.ok(Date.parse(body.data.expiresAt) > Date.now());
+    assert.ok(Date.parse(body.data.expiresAt) <= Date.now() + 300000);
+    assert.equal(JSON.stringify(logs).includes(body.data.url), false);
+  }
+  assert.deepEqual(commands, Array(3).fill({ Bucket: 'test-recordings', Key: key }));
+});
+
+test('anonymous, AI, expired and pending sessions cannot read recording metadata or request S3 access', async (t) => {
+  const { commands } = playbackStorage(t);
+  const repository = app.get(ConsultationsRepository);
+  const find = repository.findRecording.bind(repository);
+  let reads = 0;
+  t.mock.method(repository, 'findRecording', (...args) => {
+    reads++;
+    return find(...args);
+  });
+  const saved = await recording((await call()).callSessionSeq);
+  const pending = await account();
+  await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [pending.id]);
+  const expired = await account();
+  await pool.query(
+    "UPDATE admin_sessions SET created_at=clock_timestamp()-interval '10 hours',expires_at=clock_timestamp()-interval '1 second' WHERE admin_user_seq=$1",
+    [expired.id],
+  );
+  for (const headers of [{}, { call_session_seq: '1' }, pending.headers, expired.headers])
+    await error(await playback(saved.recordingSeq, headers), 401, 'UNAUTHORIZED');
+  assert.equal(reads, 0);
+  assert.equal(commands.length, 0);
+});
+
+test('playback validates recording IDs and reports missing database records without contacting storage', async (t) => {
+  const { commands } = playbackStorage(t);
+  for (const id of ['0', '-1', '1.2', '1e2', '2147483648', 'recording-name'])
+    await error(await playback(id), 400, 'INVALID_REQUEST');
+  await error(await playback(2147483647), 404, 'NOT_FOUND');
+  assert.equal(commands.length, 0);
+});
+
+test('missing S3 settings are 503; a confirmed missing file is 404 and keeps its database metadata', async (t) => {
+  const { service, config, commands } = playbackStorage(t);
+  const row = await call();
+  const saved = await recording(row.callSessionSeq);
+  config.set('S3_RECORDINGS_BUCKET', '');
+  await error(await playback(saved.recordingSeq), 503, 'DEPENDENCY_UNAVAILABLE');
+  assert.equal(commands.length, 0);
+  config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
+  t.mock.method(service.s3, 'send', async () => {
+    throw Object.assign(new Error('private missing object'), {
+      $metadata: { httpStatusCode: 404 },
+    });
+  });
+  await error(await playback(saved.recordingSeq), 404, 'NOT_FOUND');
+  assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data.recordings, [
+    saved,
+  ]);
+});
+
+test('storage denial, outage and timeout produce a redacted 503 rather than a false not-found response', async (t) => {
+  const { service } = playbackStorage(t);
+  const saved = await recording((await call()).callSessionSeq);
+  const errors = [403, 500, undefined].map((status) =>
+    Object.assign(new Error('private secret object key'), {
+      $metadata: { httpStatusCode: status },
+    }),
+  );
+  for (const problem of errors) {
+    t.mock.method(service.s3, 'send', async () => {
+      throw problem;
+    });
+    const response = await playback(saved.recordingSeq);
+    assert.equal((await response.clone().text()).includes('private secret'), false);
+    await error(response, 503, 'DEPENDENCY_UNAVAILABLE');
+  }
+});
+
+test('Swagger separates Recordings from Calls and documents the database ID, expiry and dependency errors', async () => {
+  const spec = await (await fetch(base + '/api/docs-json')).json();
+  const operation = spec.paths['/api/recordings/{id}/url'].get;
+  assert.deepEqual(operation.tags, ['Recordings']);
+  assert.equal(operation.summary, '녹취 재생 URL 발급');
+  assert.deepEqual(operation.security, [{ adminSession: [] }]);
+  assert.equal(operation.parameters.length, 1);
+  assert.match(operation.parameters[0].description, /recording_seq/);
+  for (const status of ['200', '400', '401', '403', '404', '503'])
+    assert.ok(operation.responses[status]);
+  for (const name of ['PlaybackDto', 'PlaybackResponseDto'])
+    for (const property of Object.values(spec.components.schemas[name].properties))
+      assert.ok(property.description, name);
+  assert.deepEqual(Object.keys(spec.components.schemas.PlaybackDto.properties).sort(), [
+    'expiresAt',
+    'url',
+  ]);
 });

@@ -106,4 +106,13 @@ export class ConsultationsRepository {
       )
     ).rows;
   }
+
+  async findRecording(id: number): Promise<{ objectKey: string } | undefined> {
+    return (
+      await this.database.pool.query<{ objectKey: string }>(
+        'SELECT object_key AS "objectKey" FROM recordings WHERE recording_seq=$1',
+        [id],
+      )
+    ).rows[0];
+  }
 }

@@ -43,7 +43,7 @@ before(async () => {
   throw new Error('Production image did not become live');
 });
 
-test('call list and detail through Nginx require a session and preserve response contracts', async () => {
+test('call, transcript and playback routes through Nginx preserve session and response contracts', async () => {
   const anonymous = await fetch('http://proxy/api/calls', { headers: { call_session_seq: '1' } });
   assert.equal(anonymous.status, 401);
   const login = await fetch('http://proxy/api/auth/login', {
@@ -79,6 +79,13 @@ test('call list and detail through Nginx require a session and preserve response
   const transcriptBody = await transcript.json();
   assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
   assert.ok(Array.isArray(transcriptBody.data));
+  const anonymousPlayback = await fetch('http://proxy/api/recordings/2147483647/url');
+  assert.equal(anonymousPlayback.status, 401);
+  const missingPlayback = await fetch('http://proxy/api/recordings/2147483647/url', {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(missingPlayback.status, 404);
+  assert.equal((await missingPlayback.json()).error.code, 'NOT_FOUND');
 });
 
 test('production image keeps health and disables Swagger by default', async () => {

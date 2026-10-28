@@ -68,6 +68,54 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 통화가 없으면 404, 저장된 발화가 없거나 마지막 페이지 이후이면 빈 목록이다.
 빈 목록은 STT 기록이 없다는 뜻이며 통화가 무음이었거나 인식에 성공했다는 뜻이 아니다.
 
+## GET /api/recordings/{id}/url — 녹취 재생 URL 발급
+
+`id`는 통화 상세의 `recordings[].recordingSeq`다. 별도 body나 통화 헤더는 필요 없다.
+관리자 세션 확인 → DB 녹취 조회 → 기존 S3 객체 존재 확인 → 임시 GET URL 서명 순서로 처리한다.
+새 버킷·업로드 API·별도 토큰 테이블은 만들지 않는다.
+
+```json
+{
+  "data": {
+    "url": "https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
+    "expiresAt": "2026-10-28T01:09:00.000Z"
+  },
+  "meta": { "requestId": "00000000-0000-4000-8000-000000000088" }
+}
+```
+
+예시 URL은 실행용이 아니다. 실제 발급 URL을 프론트의 오디오 재생 주소로 사용한다.
+최대 5분 유효하며, 임시 AWS 자격 증명이 먼저 만료되면 URL 만료도 그 시각에 맞춘다.
+만료 후 다시 발급한다. S3 객체 삭제나 권한 철회가 있으면 만료 전에도 재생이 중단될 수 있다.
+발급된 URL은 소지자가 만료 전까지 접근할 수 있으므로 공유·로그·장기 저장을 피한다.
+발급 후 관리자 로그아웃만으로 기존 S3 URL이 즉시 폐기되지는 않는다.
+
+기존 `AWS_REGION`, `S3_RECORDINGS_BUCKET`, AWS 자격 증명 설정을 그대로 사용한다.
+IAM에는 해당 녹취 객체의 `s3:GetObject` 권한이 필요하다. 버킷은 비공개로 유지한다.
+일반 오디오 태그로 URL을 재생할 수 있으며, 프론트에서 fetch·오디오 분석을 사용하면 버킷 CORS 설정이 별도로 필요할 수 있다.
+설정 위치는 [기존 S3 연결 문서](recording-s3-setup.md)를 참고한다.
+서명은 [AWS 공식 SDK](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-aws-sdk-s3-request-presigner/)를 사용한다.
+
+| 응답 | 조건 |
+| --- | --- |
+| `400 INVALID_REQUEST` | 잘못된 녹취 번호 |
+| `401 UNAUTHORIZED` | 세션 없음·만료·비활성 관리자 |
+| `404 NOT_FOUND` | DB 기록 없음 또는 S3가 파일 미존재(404)를 확인 |
+| `503 DEPENDENCY_UNAVAILABLE` | 버킷 미설정, S3 접근 거부·장애·타임아웃, 자격 증명·서명 실패 |
+
+S3의 403은 파일 미존재로 단정하지 않는다. 재생 실패만으로 DB 녹취 기록을 삭제하지 않는다.
+`objectKey`를 별도 응답 필드로 제공하지 않으며, 서명된 재생 URL에는 S3 객체 경로가 포함된다.
+
+## 확인 방법
+
+1. Swagger에서 기존 로그인 API로 로그인한다. 태그는 `Calls`·`Recordings`다.
+2. 통화 목록에서 `callSessionSeq`를 선택하고 상세의 연결 주문·녹취 목록을 확인한다.
+3. 발화 조회에서 화자·문장·발화 순서를 확인한다. STT 미수집 통화는 빈 목록이다.
+4. 상세에서 받은 `recordingSeq`로 URL을 발급하고 오디오를 재생한다. 만료 후에는 재발급한다.
+
+자동 검증은 격리 PostgreSQL의 저장 데이터, 로컬 모의 S3와 실제 AWS SDK 서명,
+관리자 세션 및 실제 Nginx 경유를 사용한다. 운영 AWS 버킷의 실제 녹취 재생은 별도 확인 대상이다.
+
 ## 수집 상태와 범위
 
 - 현재 모놀리식은 AI 주문 결과로 통화 행을 만들고 PBX 웹훅 매칭 후 실제 시작·종료 시각을 저장한다.
