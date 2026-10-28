@@ -58,7 +58,7 @@ call_session_seq: 7
 }
 ```
 
-`parcelCount`는 필터에 걸린 상세 수가 아닌 주문 전체 상세 수다. 목록은 주문 요약만 반환하며 `shipmentStatuses`는 제거했다. 조회 결과가 없으면 `data: []`, `hasNext: false`다. 목록에는 meta나 page 객체를 붙이지 않는다. 수령인·주소·물품을 확인하려면 각 orderSeq로 주문 상세를 조회한다.
+`parcelCount`는 취소된 상세를 포함한 주문 전체 상세 수다. 일부 상세만 취소하면 주문 상태는 유지하고 전부 취소되었을 때 CANCELLED다. 목록은 주문 요약만 반환하며 `shipmentStatuses`는 제거했다. 조회 결과가 없으면 `data: []`, `hasNext: false`다. 목록에는 meta나 page 객체를 붙이지 않는다. 수령인·주소·물품을 확인하려면 각 orderSeq로 주문 상세를 조회한다.
 
 ## 주문 상세
 
@@ -78,12 +78,13 @@ call_session_seq: 7
 | createdAt / updatedAt | 주문 생성·최종 변경 시각 |
 | parcels[] | parcelPosition 오름차순 상세 목록. 상세가 없으면 빈 배열 |
 | parcels[].orderParcelSeq | 이후 수정할 기존 상세 번호 |
+| parcels[].status | ACTIVE: 미취소 / CANCELLED: 취소. 접수·결제·배송 상태와 별개 |
 | origin / destination | 저장된 주소 스냅샷. 9개 필드를 항상 반환하며 미수집 값은 null |
 | originPin | 원본 주소록 scope·pinSeq 또는 null. 원본 변경을 주문 주소에 덮어쓰지 않음 |
 | 수량·설명·clientComment·itemPrice | 저장된 물품 정보·요청 사항·가액. 0과 null을 구분 |
 | notifiedPrice | 상세별 고정 안내 요금 3500원 |
 
-`parcels[].shipment`와 배송 추적번호·배송 상태는 반환하지 않는다. 출발지·도착지와 물품은 주문 내용이므로 유지한다. 주문·상세·버전은 같은 DB 스냅샷에서 읽어 동시 수정으로 응답 내용이 섞이지 않게 한다.
+`parcels[].shipment`와 배송 추적번호·배송 상태는 반환하지 않는다. 취소된 상세의 주소·물품과 디버 접수번호·시각도 보존해 반환한다. 주문·상세·버전은 같은 DB 스냅샷에서 읽어 동시 수정으로 응답 내용이 섞이지 않게 한다. [전체·개별 취소](order-cancel.md) 이후에는 최신 version을 다시 조회한다.
 
 배송 상태 조회는 Orders API의 책임에서 제외하며 별도 배송 API에서 다룬다. 기존 디버 접수 성공 시의 배송 데이터·초기 이력 저장과 중복 접수 방지는 유지한다. 배송 조회 API 자체는 이 변경에서 추가하지 않는다.
 

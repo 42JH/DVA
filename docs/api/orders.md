@@ -11,6 +11,8 @@
 | `GET /api/orders`, `GET /api/orders/{id}` | 기존 목록·상세 조회. [조회 계약](order-read.md) |
 | `PATCH /api/orders/{id}` | 기존 미완료 주문 보완. [수정 계약](order-update.md) |
 | `POST /api/orders/{id}/submit` | 보완된 기존 주문의 최종 접수. AI의 새 완료 결과에는 추가 호출하지 않음. [접수 계약](order-submit.md) |
+| `POST /api/orders/{id}/cancel` | 결제 전 주문 전체 즉시 취소. [취소 계약](order-cancel.md) |
+| `POST /api/orders/{id}/parcels/{orderParcelSeq}/cancel` | 상세 하나 취소. 전부 취소되면 주문도 CANCELLED. [취소 계약](order-cancel.md) |
 
 AI가 변경할 호출부와 전체 예시는 [AI·PBX 연동 명세](ai-pbx-recordings.md)를 따른다.
 
@@ -25,7 +27,9 @@ Orders는 주문 상태·접수·주문 내용의 관리를 담당한다. 주소
 | `GET /api/orders/{id}` | Path `id=orderSeq` | 주문·고객 번호, `status`, 결제 방식, 수거 시각, `version`, 생성·변경 시각, 디버 접수 참고번호·확인 시각, `parcels[]` |
 | `PATCH /api/orders/{id}` | Path `id=orderSeq`, 필수 `expectedVersion`, 변경할 `paymentMethodType`, `pickupRequestedAt`, `parcels` | `{version}`. `COLLECTING`만 수정하며 상태는 유지. 수정 결과 전체는 상세 조회 |
 | `POST /api/orders/{id}/submit` | Path `id=orderSeq`, 필수 `expectedVersion` | `{status}`. `ACCEPTED`, `SUBMITTING`, `AUTH_FAILED`, `REVIEW_REQUIRED` 중 현재 접수 결과 |
-| `GET /api/customers/{id}/addresses` | Path `id=customerSeq`, 필수 Query `direction=ORIGIN 또는 DESTINATION`, 선택 `from`, `to`, `q`, `limit`, `offset` | `{data: [{orderSeq, orderParcelSeq, createdAt, address}], hasNext}`. 접수 완료 주문에 저장된 이전 주소만 조회 |
+| `POST /api/orders/{id}/cancel` | Path `id=orderSeq`. 본문 없음 | 204, 본문 없음. 전체 취소 재요청은 409 |
+| `POST /api/orders/{id}/parcels/{orderParcelSeq}/cancel` | 주문·상세 번호. 본문 없음 | 204, 본문 없음. 같은 상세 재요청도 204 |
+| `GET /api/customers/{id}/addresses` | Path `id=customerSeq`, 필수 Query `direction=ORIGIN 또는 DESTINATION`, 선택 `from`, `to`, `q`, `limit`, `offset` | `{data: [{orderSeq, orderParcelSeq, createdAt, address}], hasNext}`. 접수 완료 주문의 미취소 상세 주소만 조회 |
 
 - 단건 응답은 `{data, meta: {requestId}}`, 목록·이전 주소는 `{data: [], hasNext}`다.
 - 목록의 `limit` 기본값은 20(최대 100), `offset`은 0이다. `from` 포함·`to` 미포함이며 시간대 포함 ISO 8601을 사용한다. 최신 생성 시각·주문 번호 순으로 정렬한다.

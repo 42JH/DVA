@@ -29,6 +29,8 @@ call_session_seq: 7
 
 ## 변경 규칙
 
+`parcels[].status=CANCELLED`인 상세는 수정할 수 없다. 요청에 취소 상세가 하나라도 포함되면 409 INVALID_STATE로 전체 변경을 롤백한다. 새 상세 추가·미취소 상세 수정은 기존 규칙을 유지한다. [취소 API](order-cancel.md)도 주문 version을 변경하므로 최신 상세를 다시 조회한다.
+
 | 필드 | 의미 |
 | --- | --- |
 | expectedVersion | 필수. ORD-03 또는 직전 저장 응답의 실제 version |

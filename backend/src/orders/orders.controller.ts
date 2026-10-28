@@ -304,7 +304,7 @@ export class OrdersController {
     summary: '주문 정보 수정',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI·관리자 공통 API. COLLECTING 주문만 부분 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      'AI·관리자 공통 API. COLLECTING 주문의 미취소 상세만 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -475,7 +475,7 @@ export class OrdersController {
     summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
-      '기존 COLLECTING 주문을 보완한 뒤 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+      '기존 COLLECTING 주문의 미취소 상세만 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -565,7 +565,7 @@ export class OrdersController {
     summary: '주문 상세 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '주문 상태·고객 번호·결제 방식·수거 요청 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '주문·상세 취소 상태, 고객·결제·수거 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 취소된 상세도 보존해 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

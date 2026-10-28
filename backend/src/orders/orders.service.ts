@@ -58,7 +58,7 @@ export class OrdersService {
       throw new ApiException(
         409,
         'INVALID_STATE',
-        '종료된 통화는 기존 연결 주문의 상세만 조회할 수 있습니다.',
+        '종료된 통화는 기존 연결 주문만 사용할 수 있습니다.',
       );
     if (call.customerSeq === null)
       throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
