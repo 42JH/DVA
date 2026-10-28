@@ -62,6 +62,10 @@ BEGIN
  INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,'Support',address);
 
  INSERT INTO orders(customer_seq) VALUES(customer_id) RETURNING order_seq INTO order_id;
+ IF (SELECT creation_source FROM orders WHERE order_seq=order_id)<>'UNKNOWN' THEN
+  RAISE EXCEPTION 'Unspecified source must remain UNKNOWN'; END IF;
+ PERFORM pg_temp.expect_error(format('UPDATE orders SET creation_source=%L WHERE order_seq=%s','OTHER',order_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE orders SET creation_source=NULL WHERE order_seq=%s',order_id),'23502');
  UPDATE orders SET creation_request_id='00000000-0000-4000-8000-000000000055' WHERE order_seq=order_id;
  PERFORM pg_temp.expect_error($q$INSERT INTO orders(creation_request_id) VALUES('00000000-0000-4000-8000-000000000055')$q$,'23505');
  INSERT INTO order_parcels(order_seq,parcel_position) VALUES(order_id,1) RETURNING order_parcel_seq INTO parcel_id;
