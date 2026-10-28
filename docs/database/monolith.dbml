@@ -81,6 +81,7 @@ Table company_pins {
 // End of customer service
 
 Table orders {
+  creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
   creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '연결 대상 ID']
@@ -93,6 +94,7 @@ Table orders {
   created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
   updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '마지막 변경 시각']
   checks {
+    `creation_source IN ('AI','ADMIN','UNKNOWN')`
     `payment_method_type IN ('cat','billing','credit','groupBilling')`
     `status IN ('COLLECTING','SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED','CANCELLED','EXPIRED')`
     `version>0`

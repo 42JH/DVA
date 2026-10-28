@@ -4,6 +4,7 @@
 
 | 호출 | 처리 |
 | --- | --- |
+| `POST /api/admin/orders` | 관리자 FE 전용 수기 접수. 완성 주문 한 요청으로 디버 접수 결과까지 반환. [수기 접수 계약](manual-orders.md) |
 | `POST /api/orders`, `outcome=COMPLETE` | 통화·고객·완성 주문 검증 → 디버 접수 → 결과 응답 |
 | 같은 API, `INCOMPLETE` | 중도 종료·상담사 연결 시 수집한 항목을 `COLLECTING`으로 저장 |
 | 같은 API, `CANCELLED` | 상담 중 고객 취소를 `CANCELLED`로 저장. 디버 취소 API가 아님 |
@@ -137,6 +138,8 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000055
 - 세션 ID를 바꾸거나 다른 고객의 키를 이용할 수 없다. 기존 관리자 생성 키는 최초 생성자만 재사용할 수 있다.
 
 ## 기존 관리자·통화 헤더 호출
+
+관리자 FE의 신규 수기 접수는 [POST /api/admin/orders](manual-orders.md)를 사용한다. AI의 `call`·`outcome` 규격은 유지한다. 신규 주문의 접수 경로는 서버가 AI/ADMIN으로 저장하고 기존 주문 목록·상세의 `creationSource`로 반환한다. 012 이전 출처 미확인 주문은 UNKNOWN이다.
 
 `call`·`outcome` 없이 기존 `{customerSeq 또는 customer, parcels, ...}`를 보내면 종전처럼 COLLECTING을 저장하고 `{orderSeq,version}`을 반환한다. 관리자는 활성 세션과 허용 Origin이 필요하다. 이전 AI 헤더 방식도 호환 유지하지만 신규 상담 결과에는 사용하지 않는다.
 

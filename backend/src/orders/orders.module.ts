@@ -8,10 +8,11 @@ import { OrdersService } from './orders.service';
 import { OrderSubmissionRepository } from './order-submission.repository';
 import { DverClient } from './dver.client';
 import { OrderAddressesController } from './order-addresses.controller';
+import { AdminOrdersController } from './admin-orders.controller';
 
 @Module({
   imports: [DatabaseModule, AuditModule, CustomersModule],
-  controllers: [OrdersController, OrderAddressesController],
+  controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
   providers: [OrdersRepository, OrdersService, OrderSubmissionRepository, DverClient],
   exports: [OrdersService],
 })

@@ -1,6 +1,7 @@
 # 주문 최종 접수 — ORD-06
 
 관련 Jira: [S15P31D109-57](https://ssafy.atlassian.net/browse/S15P31D109-57).
+관리자 FE의 새 수기 접수는 [POST /api/admin/orders](manual-orders.md) 한 요청으로 처리한다. 이 API는 이미 저장된 미완료 주문의 최종 접수 경로로 유지한다.
 기존 미완료 주문을 보완해 접수할 때 사용하는 API다. **새 AI 상담 완료는 POST /api/orders에 COMPLETE 결과를 보내면 디버 접수까지 처리**하므로 이 API를 추가 호출하지 않는다. [AI·PBX 연동 명세](ai-pbx-recordings.md)를 따른다.
 디버 전송 형식은 팀 제공 「디버 택배 주문 접수 API 명세 v2」(2026-10-01), 결제 자격은 2026-10-27 사용자 확정 기준이다.
 최종 접수의 중복 처리는 사용자 확정에 따라 주문 번호·기존 상태로 처리한다. 초안의 별도 접수 키·추가 컬럼은 사용하지 않는다.
