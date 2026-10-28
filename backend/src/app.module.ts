@@ -10,6 +10,7 @@ import { CustomersModule } from './customers/customers.module';
 import { MembersModule } from './members/members.module';
 import { PinsModule } from './pins/pins.module';
 import { ConsultationsModule } from './consultations/consultations.module';
+import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { FaqsModule } from './faqs/faqs.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { FaqsModule } from './faqs/faqs.module';
     MembersModule,
     PinsModule,
     ConsultationsModule,
+    AiSettingsModule,
     FaqsModule,
   ],
 })

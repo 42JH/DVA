@@ -66,8 +66,8 @@ test "$(sql -Atc "SELECT to_regclass('api_idempotency.membership_writes') IS NUL
 test "$(sql -Atc 'SELECT count(*) FROM call_sessions WHERE incoming_at IS NOT NULL')" = 0
 test "$(sql -Atc 'SELECT count(*) FROM pbx_webhooks.call_ended_events WHERE call_session_seq IS NOT NULL OR last_attempt_at IS NOT NULL')" = 0
 test "$(sql -Atc "SELECT count(*) FROM pg_namespace WHERE nspname='api_idempotency'")" = 0
-test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 11
-test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql')")" = "$HISTORY_BEFORE"
+test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 12
+test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql')")" = "$HISTORY_BEFORE"
 test "$(sql -Atc "SELECT count(*) FROM db_migrations.applied_versions WHERE version IN ('009-membership-write-requests.sql','010-remove-membership-write-requests.sql')")" = 2
 HISTORY_AFTER=$(sql -Atc 'SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a')
 sh "$RUNNER" --no-backup dva-db-129-check > /dev/null

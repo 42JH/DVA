@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md), AI 서버 구현 항목은 [AI 페르소나 연동 명세](../docs/api/ai-persona-integration.md)를 참고한다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다. 실제 AI 통화 제어는 AI 팀 구현 후 연결한다.
+
 관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 녹취 재생 URL은 통화 상세에 포함한다.
 
 기업 구성원·대표자 표시·소속 해제·CSV 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
@@ -43,6 +45,7 @@ npm run start:dev
 | `PORT`, `DB_PORT` | 정수 1~65535, 기본 3000 / 5432 |
 | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | 필수, 누락/빈 값이면 시작 중단 |
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
+| `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |

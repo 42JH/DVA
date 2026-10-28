@@ -2,6 +2,36 @@ const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 
+test('persona runtime reads and acknowledgment authentication survive real Nginx forwarding', async () => {
+  const headers = { Authorization: `Bearer ${process.env.TEST_PERSONA_TOKEN}` };
+  const active = await fetch('http://proxy/api/ai/config', { headers });
+  assert.equal(active.status, 200, await active.clone().text());
+  assert.equal(active.headers.get('cache-control'), 'no-store');
+  const { data } = await active.json();
+  assert.equal(data.status, 'ACTIVE');
+  const body = JSON.stringify({
+    aiPersonaVersionSeq: data.aiPersonaVersionSeq,
+    applicationId: data.applicationId,
+    activeCallCount: 0,
+    result: 'APPLIED',
+  });
+  const duplicate = await fetch('http://proxy/api/ai/config/apply-result', {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(duplicate.status, 200, await duplicate.clone().text());
+  assert.equal((await duplicate.json()).data.appliedAt, data.appliedAt);
+  const denied = await fetch('http://proxy/api/ai/config/apply-result', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+  assert.equal(denied.status, 401);
+  assert.equal((await denied.json()).error.code, 'UNAUTHORIZED');
+  assert.equal((await fetch('http://proxy/api/personas', { headers })).status, 401);
+});
+
 test('production FAQ management through Nginx updates the AI read API without exposing admin metadata', async () => {
   const root = 'http://proxy/api';
   const origin = 'https://13.209.59.180';
