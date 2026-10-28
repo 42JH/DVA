@@ -7,7 +7,7 @@ GPT-Live 세션 바깥의 서버 동작 변수는 전부 여기에 둔다. 코�
 - 진행 상태: `thinking.append` 최대 길이(500토큰 한도 안쪽)
 - 주소 보정: 주소DB 파일 경로, 카카오 주소 검색 시간 제한(키는 환경변수 `KAKAO_REST_API_KEY`, `spec/address.md`)
 - 페르소나: 적용 대기 중 통화 확인 간격, 백엔드 재시도 간격, 결과 회신 시도 횟수, 관리자 프롬프트 최대 글자 수(토큰은 환경변수 `AI_PERSONA_TOKEN`, `spec/persona.md`)
-- 백엔드 API: 가짜 백엔드 사용 여부(`mock`), 고객 확인 시간 제한, 통화 결과 요청 시간 제한·다시 확인하는 총 시간·간격, 조회 개수(주소는 환경변수 `BACKEND_API_URL`, `spec/backend-api.md`)
+- 백엔드 API: 고객 확인 시간 제한, 통화 결과 요청 시간 제한·다시 확인하는 총 시간·간격, 조회 개수(주소는 환경변수 `BACKEND_API_URL`, 가짜 백엔드 사용 여부는 `BACKEND_MOCK`, `spec/backend-api.md`)
 - 관제: SSE keepalive 간격, 끝난 통화를 화면에 남겨 두는 시간
 - 고객 답 판별: 모델·추론 강도, 말이 멈췄다고 볼 시간(ms), 시간 제한, 넘기는 글자 수, 선택지 최대 개수
 - 로그 수준

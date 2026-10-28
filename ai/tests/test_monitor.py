@@ -47,14 +47,10 @@ def test_health_is_public(http):
 
 
 def test_mock_backend_used_without_backend_url(monkeypatch):
-    """[backend] mock = true면 BACKEND_API_URL 없이 메모리 가짜 백엔드로 뜬다."""
-    import app.main
-    from app.config import load_server_config
+    """BACKEND_MOCK=true면 BACKEND_API_URL 없이 메모리 가짜 백엔드로 뜬다."""
     from app.mock_backend import MockBackend
 
-    cfg = load_server_config()
-    cfg = cfg.model_copy(update={"backend": cfg.backend.model_copy(update={"mock": True})})
-    monkeypatch.setattr(app.main, "load_server_config", lambda: cfg)
+    monkeypatch.setenv("BACKEND_MOCK", "true")
     monkeypatch.delenv("BACKEND_API_URL", raising=False)
     with TestClient(create_app(client=FakeClient())) as http:
         assert isinstance(http.app.state.svc.backend, MockBackend)

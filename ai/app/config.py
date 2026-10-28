@@ -45,7 +45,6 @@ class ProgressConfig(_Strict):
 
 
 class BackendConfig(_Strict):
-    mock: bool = False
     timeout_sec: float = Field(gt=0)
     submit_timeout_sec: float = Field(gt=0)
     submit_retry_sec: float = Field(ge=0)
