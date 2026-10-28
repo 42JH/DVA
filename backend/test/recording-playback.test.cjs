@@ -28,10 +28,7 @@ async function setup(t, options = {}) {
     AWS_REGION: 'ap-northeast-2',
     S3_RECORDINGS_BUCKET: 'test-recordings',
   });
-  const service = new RecordingPlaybackService(
-    { findRecording: async (id) => (id === 7 ? { objectKey } : undefined) },
-    config,
-  );
+  const service = new RecordingPlaybackService(config);
   service.s3.destroy();
   service.s3 = new S3Client({
     region: 'ap-northeast-2',
@@ -47,17 +44,14 @@ async function setup(t, options = {}) {
   });
   return { service, config, requests };
 }
-const rejects = (promise, status, code) =>
-  assert.rejects(promise, (error) => {
-    assert.equal(error.getStatus(), status);
-    assert.equal(error.getResponse().code, code);
-    return true;
-  });
+const failure = async (promise, code) =>
+  assert.deepEqual(await promise, { url: null, expiresAt: null, playbackError: code });
 
 test('playback performs an authenticated S3 HEAD and signs a private HTTPS GET for five minutes', async (t) => {
   const { service, requests } = await setup(t);
   const before = Date.now();
-  const result = await service.create(7);
+  const result = await service.create(objectKey);
+  assert.equal(result.playbackError, null);
   const url = new URL(result.url);
   assert.equal(url.protocol, 'https:');
   assert.equal(url.hostname, 'test-recordings.s3.ap-northeast-2.amazonaws.com');
@@ -83,7 +77,7 @@ test('temporary credentials shorten both the signed URL and the returned expirat
   const { service } = await setup(t, {
     credentials: { ...credentials, sessionToken: 'temporary-test-only', expiration },
   });
-  const result = await service.create(7);
+  const result = await service.create(objectKey);
   const url = new URL(result.url);
   assert.ok(Number(url.searchParams.get('X-Amz-Expires')) > 0);
   assert.ok(Number(url.searchParams.get('X-Amz-Expires')) <= 60);
@@ -91,20 +85,18 @@ test('temporary credentials shorten both the signed URL and the returned expirat
   assert.equal(result.expiresAt.toISOString(), expiration.toISOString());
 });
 
-test('absent database records and missing bucket settings do not contact S3', async (t) => {
+test('missing bucket settings report an unavailable URL without contacting S3', async (t) => {
   const { service, config, requests } = await setup(t);
-  await rejects(service.create(99), 404, 'NOT_FOUND');
   config.set('S3_RECORDINGS_BUCKET', '');
-  await rejects(service.create(7), 503, 'DEPENDENCY_UNAVAILABLE');
+  await failure(service.create(objectKey), 'DEPENDENCY_UNAVAILABLE');
   assert.equal(requests.length, 0);
 });
 
-test('a confirmed missing S3 object is 404 while denied or unavailable storage is 503', async (t) => {
+test('missing S3 objects remain distinct from denied or unavailable storage', async (t) => {
   for (const status of [404, 403, 500]) {
     const { service } = await setup(t, { status });
-    await rejects(
-      service.create(7),
-      status === 404 ? 404 : 503,
+    await failure(
+      service.create(objectKey),
       status === 404 ? 'NOT_FOUND' : 'DEPENDENCY_UNAVAILABLE',
     );
   }
@@ -115,11 +107,11 @@ test('network timeouts and expired credentials never return a playback URL', asy
   t.mock.method(service.s3, 'send', async () => {
     throw new Error('private endpoint timeout');
   });
-  await rejects(service.create(7), 503, 'DEPENDENCY_UNAVAILABLE');
+  await failure(service.create(objectKey), 'DEPENDENCY_UNAVAILABLE');
   const expired = await setup(t, {
     credentials: { ...credentials, expiration: new Date(Date.now() - 10000) },
   });
-  await rejects(expired.service.create(7), 503, 'DEPENDENCY_UNAVAILABLE');
+  await failure(expired.service.create(objectKey), 'DEPENDENCY_UNAVAILABLE');
 });
 
 test('signing errors redact credentials and object paths', async (t) => {
@@ -127,11 +119,22 @@ test('signing errors redact credentials and object paths', async (t) => {
   t.mock.method(presigner, 'getSignedUrl', async () => {
     throw new Error(objectKey + credentials.secretAccessKey);
   });
-  await assert.rejects(service.create(7), (error) => {
-    assert.equal(error.getStatus(), 503);
-    const body = JSON.stringify(error.getResponse());
-    assert.equal(body.includes(objectKey), false);
-    assert.equal(body.includes(credentials.secretAccessKey), false);
-    return true;
-  });
+  const result = await service.create(objectKey);
+  assert.deepEqual(result, { url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' });
+  const body = JSON.stringify(result);
+  assert.equal(body.includes(objectKey), false);
+  assert.equal(body.includes(credentials.secretAccessKey), false);
+});
+
+test('reloading a recording signs a fresh URL and expiration instead of reusing a cached URL', async (t) => {
+  const { service } = await setup(t);
+  const now = Math.floor(Date.now() / 1000) * 1000;
+  t.mock.method(Date, 'now', () => now);
+  const first = await service.create(objectKey);
+  t.mock.method(Date, 'now', () => now + 60000);
+  const refreshed = await service.create(objectKey);
+  assert.equal(first.playbackError, null);
+  assert.equal(refreshed.playbackError, null);
+  assert.notEqual(refreshed.url, first.url);
+  assert.equal(refreshed.expiresAt.getTime() - first.expiresAt.getTime(), 60000);
 });

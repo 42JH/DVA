@@ -58,7 +58,7 @@ before(async () => {
   throw new Error('Production image did not become live');
 });
 
-test('call, transcript and playback routes through Nginx preserve session and response contracts', async () => {
+test('call detail and transcript work through Nginx while the standalone playback route is removed', async () => {
   const anonymous = await fetch('http://proxy/api/calls', { headers: { call_session_seq: '1' } });
   assert.equal(anonymous.status, 401);
   const login = await fetch('http://proxy/api/auth/login', {
@@ -83,6 +83,14 @@ test('call, transcript and playback routes through Nginx preserve session and re
   const detailBody = await detail.json();
   assert.deepEqual(detailBody.data.call, body.data[0]);
   assert.ok(Array.isArray(detailBody.data.recordings));
+  for (const recording of detailBody.data.recordings)
+    assert.deepEqual(Object.keys(recording).sort(), [
+      'createdAt',
+      'expiresAt',
+      'playbackError',
+      'recordingSeq',
+      'url',
+    ]);
   assert.ok(detailBody.meta.requestId);
   const transcript = await fetch(
     'http://proxy/api/calls/' + body.data[0].callSessionSeq + '/transcript?limit=1',
@@ -95,7 +103,7 @@ test('call, transcript and playback routes through Nginx preserve session and re
   assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
   assert.ok(Array.isArray(transcriptBody.data));
   const anonymousPlayback = await fetch('http://proxy/api/recordings/2147483647/url');
-  assert.equal(anonymousPlayback.status, 401);
+  assert.equal(anonymousPlayback.status, 404);
   const missingPlayback = await fetch('http://proxy/api/recordings/2147483647/url', {
     headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
   });

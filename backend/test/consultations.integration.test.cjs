@@ -342,7 +342,8 @@ async function recording(callId) {
   return { ...row, createdAt: row.createdAt.toISOString() };
 }
 
-test('detail returns only the selected call, saved handoff data and its recordings without object keys', async () => {
+test('detail returns only the selected call, saved handoff data and recordings with signed URLs', async (t) => {
+  const { commands } = playbackStorage(t);
   const orderSeq = (await pool.query('INSERT INTO orders DEFAULT VALUES RETURNING order_seq'))
     .rows[0].order_seq;
   const row = await call({ orderSeq });
@@ -357,9 +358,19 @@ test('detail returns only the selected call, saved handoff data and its recordin
   const second = await recording(row.callSessionSeq);
   await recording((await call()).callSessionSeq);
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data, { call: row, recordings: [first, second] });
+  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(
+    body.data.recordings.map(({ recordingSeq, createdAt }) => ({ recordingSeq, createdAt })),
+    [first, second],
+  );
+  assert.equal(commands.length, 2);
+  for (const [index, saved] of body.data.recordings.entries()) {
+    assert.equal(saved.playbackError, null);
+    assert.equal(decodeURIComponent(new URL(saved.url).pathname), '/' + commands[index].Key);
+    assert.ok(Date.parse(saved.expiresAt) > Date.now());
+    assert.equal(JSON.stringify(logs).includes(saved.url), false);
+  }
   assert.equal(JSON.stringify(body).includes('objectKey'), false);
-  assert.equal(JSON.stringify(body).includes('recordings/test-'), false);
   assert.equal(JSON.stringify(logs).includes(summaryText), false);
 });
 
@@ -391,7 +402,7 @@ test('detail validates database IDs and checks the session before revealing exis
     await error(await detail(id), 400, 'INVALID_REQUEST');
 });
 
-test('Swagger documents call detail IDs, nullable handoff and recording metadata without exposing storage paths', async () => {
+test('Swagger documents call detail IDs, handoff and recording URLs with expiry and per-file errors', async () => {
   const spec = await (await fetch(base + '/api/docs-json')).json();
   const operation = spec.paths['/api/calls/{id}'].get;
   assert.deepEqual(operation.tags, ['Calls']);
@@ -406,8 +417,13 @@ test('Swagger documents call detail IDs, nullable handoff and recording metadata
       assert.ok(property.description, name);
   assert.deepEqual(Object.keys(spec.components.schemas.RecordingDto.properties).sort(), [
     'createdAt',
+    'expiresAt',
+    'playbackError',
     'recordingSeq',
+    'url',
   ]);
+  for (const name of ['url', 'expiresAt', 'playbackError'])
+    assert.equal(spec.components.schemas.RecordingDto.properties[name].nullable, true);
 });
 
 const transcript = (id, query = {}, headers = operator.headers) =>
@@ -516,8 +532,6 @@ test('Swagger documents transcript pagination, speakers and the difference betwe
       assert.ok(property.description, name);
 });
 
-const playback = (id, headers = operator.headers) =>
-  fetch(base + '/api/recordings/' + id + '/url', { headers });
 function playbackStorage(t) {
   const service = app.get(RecordingPlaybackService);
   const config = app.get(ConfigService);
@@ -542,9 +556,10 @@ function playbackStorage(t) {
   return { service, commands, config };
 }
 
-test('all active administrator roles get a no-store playback URL for the database recording key', async (t) => {
+test('all active administrator roles get no-store playback URLs inside call detail', async (t) => {
   const { commands } = playbackStorage(t);
-  const saved = await recording((await call()).callSessionSeq);
+  const row = await call();
+  const saved = await recording(row.callSessionSeq);
   const key = (
     await pool.query('SELECT object_key FROM recordings WHERE recording_seq=$1', [
       saved.recordingSeq,
@@ -552,15 +567,24 @@ test('all active administrator roles get a no-store playback URL for the databas
   ).rows[0].object_key;
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const admin = role === 'OPERATOR' ? operator : await account(role);
-    const body = await result(await playback(saved.recordingSeq, admin.headers), false);
-    assert.deepEqual(Object.keys(body.data).sort(), ['expiresAt', 'url']);
-    const url = new URL(body.data.url);
+    const body = await result(await detail(row.callSessionSeq, admin.headers), false);
+    const item = body.data.recordings[0];
+    assert.deepEqual(Object.keys(item).sort(), [
+      'createdAt',
+      'expiresAt',
+      'playbackError',
+      'recordingSeq',
+      'url',
+    ]);
+    assert.equal(item.recordingSeq, saved.recordingSeq);
+    assert.equal(item.playbackError, null);
+    const url = new URL(item.url);
     assert.equal(url.protocol, 'https:');
     assert.equal(decodeURIComponent(url.pathname), '/' + key);
     assert.equal(url.searchParams.get('X-Amz-Expires'), '300');
-    assert.ok(Date.parse(body.data.expiresAt) > Date.now());
-    assert.ok(Date.parse(body.data.expiresAt) <= Date.now() + 300000);
-    assert.equal(JSON.stringify(logs).includes(body.data.url), false);
+    assert.ok(Date.parse(item.expiresAt) > Date.now());
+    assert.ok(Date.parse(item.expiresAt) <= Date.now() + 300000);
+    assert.equal(JSON.stringify(logs).includes(item.url), false);
   }
   assert.deepEqual(commands, Array(3).fill({ Bucket: 'test-recordings', Key: key }));
 });
@@ -568,13 +592,14 @@ test('all active administrator roles get a no-store playback URL for the databas
 test('anonymous, AI, expired and pending sessions cannot read recording metadata or request S3 access', async (t) => {
   const { commands } = playbackStorage(t);
   const repository = app.get(ConsultationsRepository);
-  const find = repository.findRecording.bind(repository);
+  const find = repository.findRecordings.bind(repository);
   let reads = 0;
-  t.mock.method(repository, 'findRecording', (...args) => {
+  t.mock.method(repository, 'findRecordings', (...args) => {
     reads++;
     return find(...args);
   });
-  const saved = await recording((await call()).callSessionSeq);
+  const row = await call();
+  await recording(row.callSessionSeq);
   const pending = await account();
   await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [pending.id]);
   const expired = await account();
@@ -583,25 +608,30 @@ test('anonymous, AI, expired and pending sessions cannot read recording metadata
     [expired.id],
   );
   for (const headers of [{}, { call_session_seq: '1' }, pending.headers, expired.headers])
-    await error(await playback(saved.recordingSeq, headers), 401, 'UNAUTHORIZED');
+    await error(await detail(row.callSessionSeq, headers), 401, 'UNAUTHORIZED');
   assert.equal(reads, 0);
   assert.equal(commands.length, 0);
 });
 
-test('playback validates recording IDs and reports missing database records without contacting storage', async (t) => {
+test('detail validates call IDs and reports missing calls without contacting storage', async (t) => {
   const { commands } = playbackStorage(t);
   for (const id of ['0', '-1', '1.2', '1e2', '2147483648', 'recording-name'])
-    await error(await playback(id), 400, 'INVALID_REQUEST');
-  await error(await playback(2147483647), 404, 'NOT_FOUND');
+    await error(await detail(id), 400, 'INVALID_REQUEST');
+  await error(await detail(2147483647), 404, 'NOT_FOUND');
+  const row = await call();
+  assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data.recordings, []);
   assert.equal(commands.length, 0);
 });
 
-test('missing S3 settings are 503; a confirmed missing file is 404 and keeps its database metadata', async (t) => {
+test('S3 settings and missing files are recording errors while call detail and metadata remain available', async (t) => {
   const { service, config, commands } = playbackStorage(t);
   const row = await call();
   const saved = await recording(row.callSessionSeq);
   config.set('S3_RECORDINGS_BUCKET', '');
-  await error(await playback(saved.recordingSeq), 503, 'DEPENDENCY_UNAVAILABLE');
+  assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
+    call: row,
+    recordings: [{ ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' }],
+  });
   assert.equal(commands.length, 0);
   config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
   t.mock.method(service.s3, 'send', async () => {
@@ -609,15 +639,20 @@ test('missing S3 settings are 503; a confirmed missing file is 404 and keeps its
       $metadata: { httpStatusCode: 404 },
     });
   });
-  await error(await playback(saved.recordingSeq), 404, 'NOT_FOUND');
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data.recordings, [
-    saved,
+    { ...saved, url: null, expiresAt: null, playbackError: 'NOT_FOUND' },
   ]);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM recordings WHERE recording_seq=$1', [saved.recordingSeq]))
+      .rowCount,
+    1,
+  );
 });
 
-test('storage denial, outage and timeout produce a redacted 503 rather than a false not-found response', async (t) => {
+test('storage denial, outage and timeout preserve call detail with a redacted recording error', async (t) => {
   const { service } = playbackStorage(t);
-  const saved = await recording((await call()).callSessionSeq);
+  const row = await call();
+  const saved = await recording(row.callSessionSeq);
   const errors = [403, 500, undefined].map((status) =>
     Object.assign(new Error('private secret object key'), {
       $metadata: { httpStatusCode: status },
@@ -627,27 +662,53 @@ test('storage denial, outage and timeout produce a redacted 503 rather than a fa
     t.mock.method(service.s3, 'send', async () => {
       throw problem;
     });
-    const response = await playback(saved.recordingSeq);
+    const response = await detail(row.callSessionSeq);
     assert.equal((await response.clone().text()).includes('private secret'), false);
-    await error(response, 503, 'DEPENDENCY_UNAVAILABLE');
+    assert.deepEqual((await result(response, false)).data, {
+      call: row,
+      recordings: [
+        { ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' },
+      ],
+    });
   }
 });
 
-test('Swagger separates Recordings from Calls and documents the database ID, expiry and dependency errors', async () => {
+test('one missing recording does not hide the call or another playable recording', async (t) => {
+  const { service } = playbackStorage(t);
+  const row = await call();
+  const first = await recording(row.callSessionSeq);
+  const second = await recording(row.callSessionSeq);
+  const missingKey = (
+    await pool.query('SELECT object_key FROM recordings WHERE recording_seq=$1', [
+      first.recordingSeq,
+    ])
+  ).rows[0].object_key;
+  t.mock.method(service.s3, 'send', async (command) => {
+    if (command.input.Key === missingKey)
+      throw Object.assign(new Error('private missing object'), {
+        $metadata: { httpStatusCode: 404 },
+      });
+    return { $metadata: { httpStatusCode: 200 } };
+  });
+  const body = await result(await detail(row.callSessionSeq), false);
+  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(body.data.recordings[0], {
+    ...first,
+    url: null,
+    expiresAt: null,
+    playbackError: 'NOT_FOUND',
+  });
+  assert.equal(body.data.recordings[1].recordingSeq, second.recordingSeq);
+  assert.equal(body.data.recordings[1].playbackError, null);
+  assert.ok(body.data.recordings[1].url.startsWith('https://'));
+  assert.ok(Date.parse(body.data.recordings[1].expiresAt) > Date.now());
+});
+
+test('standalone playback endpoint and its Swagger schemas are removed', async () => {
   const spec = await (await fetch(base + '/api/docs-json')).json();
-  const operation = spec.paths['/api/recordings/{id}/url'].get;
-  assert.deepEqual(operation.tags, ['Recordings']);
-  assert.equal(operation.summary, '녹취 재생 URL 발급');
-  assert.deepEqual(operation.security, [{ adminSession: [] }]);
-  assert.equal(operation.parameters.length, 1);
-  assert.match(operation.parameters[0].description, /recording_seq/);
-  for (const status of ['200', '400', '401', '403', '404', '503'])
-    assert.ok(operation.responses[status]);
-  for (const name of ['PlaybackDto', 'PlaybackResponseDto'])
-    for (const property of Object.values(spec.components.schemas[name].properties))
-      assert.ok(property.description, name);
-  assert.deepEqual(Object.keys(spec.components.schemas.PlaybackDto.properties).sort(), [
-    'expiresAt',
-    'url',
-  ]);
+  assert.equal(spec.paths['/api/recordings/{id}/url'], undefined);
+  assert.equal(spec.components.schemas.PlaybackDto, undefined);
+  assert.equal(spec.components.schemas.PlaybackResponseDto, undefined);
+  for (const headers of [{}, operator.headers])
+    await error(await fetch(base + '/api/recordings/1/url', { headers }), 404, 'NOT_FOUND');
 });

@@ -4,6 +4,8 @@ import { CallQueryDto } from './dto/call-query.dto';
 import { CallDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
 import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
 
+type RecordingRow = Pick<RecordingDto, 'recordingSeq' | 'createdAt'> & { objectKey: string };
+
 type CallRow = Omit<CallDto, 'handoff'> & {
   handoffRequestSeq: number | null;
   handoffReason: string;
@@ -85,10 +87,10 @@ export class ConsultationsRepository {
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
   }
 
-  async findRecordings(id: number): Promise<RecordingDto[]> {
+  async findRecordings(id: number): Promise<RecordingRow[]> {
     return (
-      await this.database.pool.query<RecordingDto>(
-        `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt"
+      await this.database.pool.query<RecordingRow>(
+        `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt",object_key AS "objectKey"
        FROM recordings WHERE call_session_seq=$1 ORDER BY recording_seq`,
         [id],
       )
@@ -105,14 +107,5 @@ export class ConsultationsRepository {
         [id, query.limit + 1, query.offset],
       )
     ).rows;
-  }
-
-  async findRecording(id: number): Promise<{ objectKey: string } | undefined> {
-    return (
-      await this.database.pool.query<{ objectKey: string }>(
-        'SELECT object_key AS "objectKey" FROM recordings WHERE recording_seq=$1',
-        [id],
-      )
-    ).rows[0];
   }
 }

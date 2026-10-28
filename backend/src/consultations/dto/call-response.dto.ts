@@ -104,7 +104,7 @@ export class CallListResponseDto {
 
 export class RecordingDto {
   @ApiProperty({
-    description: '녹취 번호(recordings.recording_seq). 재생 URL 조회에 사용합니다.',
+    description: '녹취 번호(recordings.recording_seq).',
     example: 7,
   })
   recordingSeq!: number;
@@ -116,6 +116,35 @@ export class RecordingDto {
     example: '2026-10-28T01:04:00.000Z',
   })
   createdAt!: Date;
+
+  @ApiProperty({
+    description: '비공개 S3 녹취의 임시 재생 URL. 최대 5분 유효하며 발급 실패 시 null.',
+    type: String,
+    format: 'uri',
+    nullable: true,
+    example:
+      'https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...',
+  })
+  url!: string | null;
+
+  @ApiProperty({
+    description:
+      'URL 만료 시각. AWS 자격 증명이 먼저 만료되면 그 시각에 맞춥니다. 발급 실패 시 null.',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    example: '2026-10-28T01:09:00.000Z',
+  })
+  expiresAt!: Date | null;
+
+  @ApiProperty({
+    description:
+      '발급 성공 시 null. NOT_FOUND 파일 없음, DEPENDENCY_UNAVAILABLE S3 설정·권한·연결·서명 실패.',
+    type: String,
+    enum: ['NOT_FOUND', 'DEPENDENCY_UNAVAILABLE'],
+    nullable: true,
+  })
+  playbackError!: 'NOT_FOUND' | 'DEPENDENCY_UNAVAILABLE' | null;
 }
 
 export class CallDetailDto {
@@ -123,7 +152,7 @@ export class CallDetailDto {
   call!: CallDto;
 
   @ApiProperty({
-    description: '저장된 녹취 목록. 미수집·미연결이면 빈 배열.',
+    description: '녹취별 재생 URL·만료 시각·오류. 미수집·미연결이면 빈 배열.',
     type: [RecordingDto],
   })
   recordings!: RecordingDto[];

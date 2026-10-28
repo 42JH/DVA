@@ -40,10 +40,10 @@ export class ConsultationsController {
   @ApiOperation({
     summary: '통화 상세 조회',
     description:
-      '통화·연결 주문 번호·상담원 연결 기록과 녹취 목록을 조회합니다. 대화 내용과 녹취 재생 URL은 각각 별도 조회 API를 사용합니다.',
+      '통화·연결 주문 번호·상담원 연결 기록과 녹취별 재생 URL을 조회합니다. URL은 최대 5분 유효하며 만료 후 상세를 다시 조회합니다. 녹취 오류는 해당 항목의 playbackError로 반환합니다.',
   })
   @ApiOkResponse({
-    description: '통화 정보와 녹취 목록. 미수집 정보는 null 또는 빈 배열.',
+    description: '통화 정보와 재생 URL을 포함한 녹취 목록. 녹취가 없으면 빈 배열.',
     type: CallDetailResponseDto,
   })
   @ApiResponse({ status: 404, description: '해당 통화 기록이 없음.', type: ErrorResponseDto })

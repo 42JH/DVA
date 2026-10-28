@@ -3,18 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Environment } from '../config/environment';
-import { ApiException } from '../common/errors/api.exception';
-import { ConsultationsRepository } from './consultations.repository';
-import { PlaybackDto } from './dto/playback.dto';
+import { RecordingDto } from './dto/call-response.dto';
 
 @Injectable()
 export class RecordingPlaybackService implements OnApplicationShutdown {
   private readonly s3: S3Client;
 
-  constructor(
-    private readonly repository: ConsultationsRepository,
-    private readonly config: ConfigService<Environment, true>,
-  ) {
+  constructor(private readonly config: ConfigService<Environment, true>) {
     this.s3 = new S3Client({
       region: config.get('AWS_REGION', { infer: true }),
       maxAttempts: 2,
@@ -22,15 +17,14 @@ export class RecordingPlaybackService implements OnApplicationShutdown {
     });
   }
 
-  async create(id: number): Promise<PlaybackDto> {
-    const recording = await this.repository.findRecording(id);
-    if (!recording) throw new ApiException(404, 'NOT_FOUND', '녹취 기록을 찾을 수 없습니다.');
+  async create(
+    objectKey: string,
+  ): Promise<Pick<RecordingDto, 'url' | 'expiresAt' | 'playbackError'>> {
     const bucket = this.config.get('S3_RECORDINGS_BUCKET', { infer: true });
-    if (!bucket)
-      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '녹취 저장소가 설정되지 않았습니다.');
+    if (!bucket) return { url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' };
 
     try {
-      await this.s3.send(new HeadObjectCommand({ Bucket: bucket, Key: recording.objectKey }), {
+      await this.s3.send(new HeadObjectCommand({ Bucket: bucket, Key: objectKey }), {
         abortSignal: AbortSignal.timeout(10000),
       });
       const credentials = await this.s3.config.credentials();
@@ -50,24 +44,30 @@ export class RecordingPlaybackService implements OnApplicationShutdown {
           signer,
           new GetObjectCommand({
             Bucket: bucket,
-            Key: recording.objectKey,
+            Key: objectKey,
             ResponseCacheControl: 'no-store',
           }),
           { signingDate, expiresIn },
         );
-        return { url, expiresAt: new Date(signingDate.getTime() + expiresIn * 1000) };
+        return {
+          url,
+          expiresAt: new Date(signingDate.getTime() + expiresIn * 1000),
+          playbackError: null,
+        };
       } finally {
         signer.destroy();
       }
     } catch (error) {
-      if (
+      const missing =
         error &&
         typeof error === 'object' &&
         '$metadata' in error &&
-        (error.$metadata as { httpStatusCode?: number }).httpStatusCode === 404
-      )
-        throw new ApiException(404, 'NOT_FOUND', '녹취 파일을 찾을 수 없습니다.');
-      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '녹취 재생 URL을 발급할 수 없습니다.');
+        (error.$metadata as { httpStatusCode?: number }).httpStatusCode === 404;
+      return {
+        url: null,
+        expiresAt: null,
+        playbackError: missing ? 'NOT_FOUND' : 'DEPENDENCY_UNAVAILABLE',
+      };
     }
   }
 

@@ -10,7 +10,7 @@
 - AI 통화 헤더나 Bearer 값만으로 관리자 통화 기록을 조회할 수 없다.
 - 목록: `{ data: [], hasNext }`. 단건: `{ data, meta: { requestId } }`.
 - 모든 응답은 `Cache-Control: no-store`. 전화번호·대화 내용·녹취 URL을 요청 로그에 남기지 않는다.
-- 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`, 녹취 경로의 `{id}`는 `recordings.recording_seq`다.
+- 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`다.
 - 기존 `call_sessions`, `call_utterances`, `handoff_requests`, `recordings`를 읽는다. 신규 테이블·마이그레이션은 없다.
 
 ## GET /api/calls — 통화 목록 조회
@@ -48,9 +48,17 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 ## GET /api/calls/{id} — 통화 상세 조회
 
 `id`는 `call_session_seq`다. 응답의 `data`는 `{ call, recordings }`다.
-`call`은 목록과 같은 필드이며, `recordings`는 `{ recordingSeq, createdAt }` 배열이다.
-녹취는 `recordingSeq` 오름차순으로 반환한다. 다른 통화의 녹취와 S3 `objectKey`는 포함하지 않는다.
-상세 조회는 S3에 접속하지 않고 저장된 메타데이터를 반환한다.
+`call`은 목록과 같은 필드다. `recordings`는 아래 필드를 가진 배열이며 `recordingSeq` 오름차순이다.
+
+| 필드 | 의미 |
+| --- | --- |
+| `recordingSeq`, `createdAt` | 녹취 번호와 DB 저장 시각 |
+| `url` | 최대 5분 유효한 S3 재생 URL. 발급 실패 시 null |
+| `expiresAt` | URL 만료 시각. 발급 실패 시 null |
+| `playbackError` | 성공 시 null, 실패 시 NOT_FOUND 또는 DEPENDENCY_UNAVAILABLE |
+
+해당 통화에 연결된 녹취만 읽고 S3 객체를 확인해 URL을 발급한다. `objectKey`는 별도 필드로 노출하지 않는다.
+녹취 하나의 발급이 실패해도 통화 정보와 다른 녹취를 반환한다. 이 경우 HTTP 200이며 해당 항목에 오류를 표시한다.
 
 통화 자체가 없으면 `404 NOT_FOUND`다. 통화는 있지만 녹취가 아직 없으면 `200`과 빈 배열을 반환한다.
 상담원 기록이 없으면 `call.handoff`는 null이다. 배정 관리자·요약이 없는 연결 기록도 그대로 null을 유지한다.
@@ -68,25 +76,29 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 통화가 없으면 404, 저장된 발화가 없거나 마지막 페이지 이후이면 빈 목록이다.
 빈 목록은 STT 기록이 없다는 뜻이며 통화가 무음이었거나 인식에 성공했다는 뜻이 아니다.
 
-## GET /api/recordings/{id}/url — 녹취 재생 URL 발급
+## 통화 상세의 녹취 재생 정보
 
-`id`는 통화 상세의 `recordings[].recordingSeq`다. 별도 body나 통화 헤더는 필요 없다.
-관리자 세션 확인 → DB 녹취 조회 → 기존 S3 객체 존재 확인 → 임시 GET URL 서명 순서로 처리한다.
-새 버킷·업로드 API·별도 토큰 테이블은 만들지 않는다.
+`GET /api/calls/{id}` 한 번으로 통화 정보와 녹취 재생 URL을 받는다.
+관리자 세션 확인 → 통화와 연결 녹취 조회 → 기존 S3 객체 존재 확인 → 임시 GET URL 서명 순서로 처리한다.
+별도 `GET /api/recordings/{id}/url` API는 제거했다. 새 버킷·업로드 API·토큰 테이블은 만들지 않는다.
+
+통화 상세 `data.recordings` 예시:
 
 ```json
-{
-  "data": {
+[
+  {
+    "recordingSeq": 7,
+    "createdAt": "2026-10-28T01:04:00.000Z",
     "url": "https://dva-d109-storage.s3.ap-northeast-2.amazonaws.com/recordings/example?X-Amz-Algorithm=AWS4-HMAC-SHA256&...",
-    "expiresAt": "2026-10-28T01:09:00.000Z"
-  },
-  "meta": { "requestId": "00000000-0000-4000-8000-000000000088" }
-}
+    "expiresAt": "2026-10-28T01:09:00.000Z",
+    "playbackError": null
+  }
+]
 ```
 
 예시 URL은 실행용이 아니다. 실제 발급 URL을 프론트의 오디오 재생 주소로 사용한다.
 최대 5분 유효하며, 임시 AWS 자격 증명이 먼저 만료되면 URL 만료도 그 시각에 맞춘다.
-만료 후 다시 발급한다. S3 객체 삭제나 권한 철회가 있으면 만료 전에도 재생이 중단될 수 있다.
+만료 후 통화 상세를 다시 조회해 새 URL을 받는다. S3 객체 삭제나 권한 철회가 있으면 만료 전에도 재생이 중단될 수 있다.
 발급된 URL은 소지자가 만료 전까지 접근할 수 있으므로 공유·로그·장기 저장을 피한다.
 발급 후 관리자 로그아웃만으로 기존 S3 URL이 즉시 폐기되지는 않는다.
 
@@ -96,22 +108,22 @@ IAM에는 해당 녹취 객체의 `s3:GetObject` 권한이 필요하다. 버킷�
 설정 위치는 [기존 S3 연결 문서](recording-s3-setup.md)를 참고한다.
 서명은 [AWS 공식 SDK](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/Package/-aws-sdk-s3-request-presigner/)를 사용한다.
 
-| 응답 | 조건 |
+| `playbackError` | 조건 |
 | --- | --- |
-| `400 INVALID_REQUEST` | 잘못된 녹취 번호 |
-| `401 UNAUTHORIZED` | 세션 없음·만료·비활성 관리자 |
-| `404 NOT_FOUND` | DB 기록 없음 또는 S3가 파일 미존재(404)를 확인 |
-| `503 DEPENDENCY_UNAVAILABLE` | 버킷 미설정, S3 접근 거부·장애·타임아웃, 자격 증명·서명 실패 |
+| null | URL 발급 성공 |
+| `NOT_FOUND` | S3가 파일 미존재(404)를 확인 |
+| `DEPENDENCY_UNAVAILABLE` | 버킷 미설정, S3 접근 거부·장애·타임아웃, 자격 증명·서명 실패 |
 
-S3의 403은 파일 미존재로 단정하지 않는다. 재생 실패만으로 DB 녹취 기록을 삭제하지 않는다.
+S3의 403은 파일 미존재로 단정하지 않는다. 실패 항목은 `url`·`expiresAt`이 null이며 DB 녹취 기록은 유지한다.
+통화 자체가 없는 경우의 HTTP 404와 녹취 파일만 없는 경우의 `playbackError: NOT_FOUND`를 구분한다.
 `objectKey`를 별도 응답 필드로 제공하지 않으며, 서명된 재생 URL에는 S3 객체 경로가 포함된다.
 
 ## 확인 방법
 
-1. Swagger에서 기존 로그인 API로 로그인한다. 태그는 `Calls`·`Recordings`다.
-2. 통화 목록에서 `callSessionSeq`를 선택하고 상세의 연결 주문·녹취 목록을 확인한다.
+1. Swagger에서 기존 로그인 API로 로그인한다. 태그는 `Calls`다.
+2. 통화 목록에서 `callSessionSeq`를 선택하고 상세의 연결 주문·녹취 목록·재생 URL을 확인한다.
 3. 발화 조회에서 화자·문장·발화 순서를 확인한다. STT 미수집 통화는 빈 목록이다.
-4. 상세에서 받은 `recordingSeq`로 URL을 발급하고 오디오를 재생한다. 만료 후에는 재발급한다.
+4. 상세의 `recordings[].url`로 오디오를 재생한다. 만료 후에는 상세를 다시 조회하고, URL이 null이면 `playbackError`를 확인한다.
 
 자동 검증은 격리 PostgreSQL의 저장 데이터, 로컬 모의 S3와 실제 AWS SDK 서명,
 관리자 세션 및 실제 Nginx 경유를 사용한다. 운영 AWS 버킷의 실제 녹취 재생은 별도 확인 대상이다.
