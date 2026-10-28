@@ -17,6 +17,7 @@
 | 관제 화면(임시), SSE | `spec/monitor.md` |
 | 고객 확인·통화 결과 접수(백엔드 서버 API) | `spec/backend-api.md` |
 | 주소 보정(행안부 주소DB), 지번·우편번호·좌표(카카오), `app/address/` | `spec/address.md` |
+| 페르소나(관리자가 고치는 말투·인사·음성), `/internal/persona` | `spec/persona.md` |
 | 매뉴얼 RAG(Qdrant) | `docs/rag-handoff.md`(RAG 담당자 인계) |
 
 설계가 바뀌면 해당 `spec/` 문서를 같이 고친다. 같은 내용을 두 곳에 쓰지 않는다.
@@ -39,7 +40,7 @@
 - 웹 서버: **FastAPI** 하나(PBX 웹훅, 관제 API·SSE, 관제 화면).
 - 배포: **Linux에서 Docker로 띄운다.** 개발 PC는 Windows이므로 경로는 `pathlib`, 인코딩은 UTF-8로 OS에 의존하지 않게 쓴다.
   - 이미지: uv로 `uv sync --frozen --no-dev` 설치, 컨테이너 안에서는 `uvicorn ... --host 0.0.0.0`.
-  - 비밀값은 이미지·설정 파일에 넣지 않고 실행 시 환경변수로: `OPENAI_API_KEY`, `OPENAI_WEBHOOK_SECRET`, `BACKEND_API_URL`, `KAKAO_REST_API_KEY`, `QDRANT_API_KEY`, 관제 화면 인증값.
+  - 비밀값은 이미지·설정 파일에 넣지 않고 실행 시 환경변수로: `OPENAI_API_KEY`, `OPENAI_WEBHOOK_SECRET`, `BACKEND_API_URL`, `KAKAO_REST_API_KEY`, `AI_PERSONA_TOKEN`, `QDRANT_API_KEY`, 관제 화면 인증값.
   - 설정 파일 두 개(`config/live.toml`: GPT-Live 세션, `config/server.toml`: 서버 변수)와 프롬프트는 볼륨으로 마운트한다(이미지 재빌드 없이 조정).
   - docker compose로 서버와 매뉴얼 RAG용 `qdrant`를 함께 띄운다(`ai/compose.yaml`, 루트 compose와 별개). Qdrant 데이터는 볼륨에, 포트는 밖으로 열지 않는다(내부 네트워크).
   - 통화별 상태가 프로세스 메모리에 있으므로 **워커는 1개**로 띄운다. 동시 통화는 워커를 늘리지 않고 asyncio로 처리한다(`spec/concurrency.md`).

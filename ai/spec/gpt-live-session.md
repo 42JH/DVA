@@ -11,6 +11,7 @@
 - 서버가 바꿔 넣는 것만 예외: `instructions_file`(파일 내용을 `instructions`로), 함수 도구는 이름만 적으면 코드의 설명·인수 스키마를 채움, 지시문 끝에 통화 정보(발신번호·등록 고객) 덧붙임.
 - 잘못된 설정(파일 없음·문법 오류·없는 함수 도구·지원하지 않는 delegation.type·SDK SessionConfig 형식 오류)은 그 통화를 reject하고 로그를 남긴다. 함수 도구 이름은 기동 시에도 검사한다.
 - 지시문 파일(`instructions_file`, `delegation.responses.instructions_file`)은 `prompts/` 기준 파일 이름. 구현: `app/live_session.py`.
+- 페르소나: 음성 지시문(`voice.md`)의 `[[페르소나]]` 자리에 말투·인사 문구를 넣는다. 관리자가 고칠 수 있는 것은 이 부분뿐이고(2026-10-28 사용자 결정), 나머지 업무 규칙(진행 상태 따르기·개인정보·접수 전 성공 안내 금지 등)은 고정이다. 지금은 `prompts/persona.md`, 백엔드 페르소나 연동(`spec/ai-persona-integration.md`) 후에는 백엔드 ACTIVE 설정의 `promptText`가 들어간다. 페르소나가 다른 규칙과 부딪히면 업무 규칙이 우선이라고 지시문에 적어 둔다.
 
 설정 가능한 파라미터(공식 레퍼런스 기준):
 

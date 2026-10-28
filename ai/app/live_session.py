@@ -14,6 +14,11 @@ class LiveConfigError(Exception):
     pass
 
 
+# 음성 지시문에서 페르소나(말투·인사 문구)가 들어갈 자리. 페르소나는 관리자가 고칠 수 있는 부분이고 나머지 업무 규칙은 고정이다
+PERSONA_MARK = "[[페르소나]]"
+PERSONA_FILE = "persona.md"  # 백엔드 페르소나 설정이 없을 때 쓰는 기본값(prompts 디렉터리)
+
+
 def _read_prompt(name: str, base: Path) -> str:
     path = base / name
     if not path.is_file():
@@ -54,8 +59,9 @@ def load_live_toml(path: Path | None = None) -> dict:
         raise LiveConfigError(f"live.toml 읽기 실패: {e}") from e
 
 
-def build_session(call_info: str, path: Path | None = None, prompts: Path | None = None, *, data: dict | None = None) -> dict:
-    """서버가 바꿔 넣는 것만 바꾸고 나머지 키는 그대로 보낸다."""
+def build_session(call_info: str, path: Path | None = None, prompts: Path | None = None, *, data: dict | None = None,
+                  persona: str | None = None, voice: str | None = None) -> dict:
+    """서버가 바꿔 넣는 것만 바꾸고 나머지 키는 그대로 보낸다. persona가 없으면 prompts/persona.md, voice가 없으면 live.toml 음성."""
     import copy
     data = copy.deepcopy(data) if data is not None else load_live_toml(path)
     prompts = prompts or prompts_dir()
@@ -67,6 +73,11 @@ def build_session(call_info: str, path: Path | None = None, prompts: Path | None
 
     if "instructions_file" in data:
         data["instructions"] = _read_prompt(data.pop("instructions_file"), prompts)
+    if data.get("instructions", "").count(PERSONA_MARK) == 1:
+        text = persona if persona is not None else _read_prompt(PERSONA_FILE, prompts)
+        data["instructions"] = data["instructions"].replace(PERSONA_MARK, text.strip())
+    elif PERSONA_MARK in data.get("instructions", ""):
+        raise LiveConfigError(f"지시문에 {PERSONA_MARK} 자리가 여러 개")
     data["instructions"] = (data.get("instructions") or "") + call_info
     if delegation['type'] == 'responses':
         delegation.pop('acknowledgement_delay_ms', None)  # client 전용 맞장구 지연 설정
@@ -74,6 +85,8 @@ def build_session(call_info: str, path: Path | None = None, prompts: Path | None
     else:
         delegation.pop('responses', None)
 
+    if voice:
+        data.setdefault("audio", {}).setdefault("output", {})["voice"] = voice
     # audio.format은 WebSocket 전용. SIP는 협상하므로 뺀다
     (data.get("audio") or {}).pop("format", None)
     try:

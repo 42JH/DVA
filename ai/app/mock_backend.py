@@ -21,11 +21,34 @@ class MockBackend:
         self.calls: set[str] = set()  # 주문이 연결된 providerCallId
         self.dver_status = "ACCEPTED"  # 디버 접수 결과 흉내(테스트에서 바꾼다)
         self._seq = itertools.count(1)
+        self.personas: dict[str, dict] = {}  # "ACTIVE"·"PENDING" → 백엔드 응답 data 모양
         # 보류한 조회·수정·취소 도구용(옛 계약)
         self.orders: list[dict] = []
 
     async def close(self) -> None:
         pass
+
+    # --- 페르소나: ACTIVE·PENDING 하나씩, 회신 검증만 흉내 낸다 ---
+
+    async def persona_config(self, status):
+        found = self.personas.get(status)
+        return dict(found) if found else None
+
+    async def persona_result(self, body):
+        personas = self.personas
+        pending = personas.get("PENDING")
+        active = personas.get("ACTIVE")
+        if active and active["applicationId"] == body["applicationId"] and body["result"] == "APPLIED":
+            return dict(active)  # 같은 성공 회신은 반복 가능
+        if not pending or pending["applicationId"] != body["applicationId"]                 or pending["aiPersonaVersionSeq"] != body["aiPersonaVersionSeq"]:
+            return None  # 409 VERSION_CONFLICT
+        if body["result"] == "FAILED":
+            pending["applyErrorCode"] = body["errorCode"]
+            return dict(pending)
+        if body["activeCallCount"] != 0:
+            return None  # 409 INVALID_STATE
+        personas["ACTIVE"] = {**personas.pop("PENDING"), "status": "ACTIVE", "applyErrorCode": None}
+        return dict(personas["ACTIVE"])
 
     def add_customer(self, phone: str, name: str, pins: list[Place] = (), status: str = "ACTIVE",
                      usage_types: list[str] = ("PERSONAL",)) -> int:

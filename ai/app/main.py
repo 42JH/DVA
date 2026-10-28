@@ -13,10 +13,12 @@ from app.config import ROOT, load_server_config, load_texts
 from app.flow import engine
 from app.live_session import LiveConfigError, function_tool_names, load_live_toml
 from app.monitor.router import router as monitor_router
+from app.persona import PersonaManager
 from app.services import Services
 from app.tools._base import TOOLS, load_tools
 from app.webhooks.openai import router as webhook_router
 from app.webhooks.pbx import router as pbx_router
+from app.webhooks.persona import router as persona_router
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +60,14 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
 
             b = cfg.backend
             backend_api = BackendAPI(os.environ["BACKEND_API_URL"], b.timeout_sec, submit_timeout_sec=b.submit_timeout_sec,
-                                     submit_retry_sec=b.submit_retry_sec, retry_interval_sec=b.retry_interval_sec)
+                                     submit_retry_sec=b.submit_retry_sec, retry_interval_sec=b.retry_interval_sec,
+                                     persona_token=os.environ.get("AI_PERSONA_TOKEN"))
         app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
+        svc = app.state.svc
+        svc.persona = PersonaManager(backend_api, svc.registry, cfg.persona, enabled=bool(os.environ.get("AI_PERSONA_TOKEN")))
+        if not svc.persona.enabled:
+            log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: prompts/persona.md 사용")
+        svc.spawn(svc.persona.run())
         if rag is not None:
             app.state.svc.rag = rag
         elif client is None:
@@ -87,6 +95,7 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
     app = FastAPI(title="디포스트콜 전화 접수", lifespan=lifespan)
     app.include_router(webhook_router)
     app.include_router(pbx_router)
+    app.include_router(persona_router)
     app.include_router(monitor_router)
 
     @app.get("/health")

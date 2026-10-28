@@ -76,6 +76,13 @@ class AddressConfig(_Strict):
     kakao_timeout_sec: float = Field(gt=0)
 
 
+class PersonaConfig(_Strict):
+    wait_poll_sec: float = Field(gt=0)
+    retry_sec: float = Field(gt=0)
+    report_attempts: int = Field(ge=1, le=10)
+    max_prompt_chars: int = Field(ge=100, le=20000)
+
+
 class ServerConfig(_Strict):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
     call: CallConfig
@@ -85,6 +92,7 @@ class ServerConfig(_Strict):
     monitor: MonitorConfig
     listener: ListenerConfig
     address: AddressConfig
+    persona: PersonaConfig
     rag: 'RagConfig'
     client_backend: 'ClientBackendConfig'
 

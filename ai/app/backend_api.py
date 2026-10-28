@@ -93,8 +93,10 @@ def result_body(outcome: str, call: dict, customer_seq: int | None, customer_nam
 
 class BackendAPI:
     def __init__(self, base_url: str, timeout_sec: float, transport: httpx2.AsyncBaseTransport | None = None,
-                 submit_timeout_sec: float = 15.0, submit_retry_sec: float = 40.0, retry_interval_sec: float = 2.0):
+                 submit_timeout_sec: float = 15.0, submit_retry_sec: float = 40.0, retry_interval_sec: float = 2.0,
+                 persona_token: str | None = None):
         self.http = httpx2.AsyncClient(base_url=base_url, timeout=timeout_sec, transport=transport)
+        self.persona_token = persona_token  # 페르소나 API 전용 서비스 토큰(주문·고객 API에는 보내지 않는다)
         self.submit_timeout_sec = submit_timeout_sec
         self.submit_retry_sec = submit_retry_sec
         self.retry_interval_sec = retry_interval_sec
@@ -149,6 +151,32 @@ class BackendAPI:
                     return last
                 raise BackendError("/api/orders 결과 확인 시간 초과")
             await asyncio.sleep(self.retry_interval_sec)
+
+    # --- 페르소나(spec/persona.md) ---
+
+    def _persona_headers(self) -> dict:
+        return {"Authorization": f"Bearer {self.persona_token}"}
+
+    async def persona_config(self, status: str) -> dict | None:
+        """서비스 전체의 ACTIVE 또는 PENDING 한 버전. 없으면 None."""
+        resp = await self.http.get("/api/ai/config", params={"status": status}, headers=self._persona_headers())
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise BackendError(f"/api/ai/config {resp.status_code} {_error_code(resp)}")
+        return _data(resp)
+
+    async def persona_result(self, body: dict) -> dict | None:
+        """적용 결과 회신. 응답 data(status로 실제 적용 여부 확인). 409(교체됨·통화 중)는 None."""
+        try:
+            resp = await self.http.post("/api/ai/config/apply-result", json=body, headers=self._persona_headers())
+        except httpx2.TransportError as e:
+            raise BackendError(f"/api/ai/config/apply-result {type(e).__name__}") from e
+        if resp.status_code == 409:
+            return None
+        if resp.status_code != 200:
+            raise BackendError(f"/api/ai/config/apply-result {resp.status_code} {_error_code(resp)}")
+        return _data(resp)
 
     # --- 보류: 조회·수정·취소 도구(옛 계약, 새 백엔드에 AI용 API 없음) ---
 

@@ -45,6 +45,10 @@ async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -
     """incoming_at: 수신 이벤트 created_at(ISO 8601). 서버 수신 시각이 아니라 이 값으로 백엔드가 녹취와 통화를 잇는다."""
     session_id = data.session_id
     call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend, incoming_at)
+    if svc.persona is not None and svc.persona.locked:  # 페르소나 설치 중(spec/persona.md). 등록 전에 봐서 사이에 await가 없다
+        log.warning("페르소나 적용 중이라 reject %s", session_id)
+        await _reject(svc, session_id)
+        return
     status = svc.registry.try_register(call)
     if status == "duplicate":
         return
@@ -56,7 +60,10 @@ async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -
         await call.prepare()
         call_info = svc.texts.call_info.format(**call.text_vars(), first=engine.next_text(call))
         settings = load_live_toml()
-        session = build_session(call_info, data=settings)
+        persona = svc.persona.active if svc.persona is not None else None  # 이 통화는 끝까지 이 설정
+        call.persona_version = persona.version_seq if persona else None
+        session = build_session(call_info, data=settings, persona=persona and persona.prompt,
+                                voice=persona and persona.voice)
         call.backend_settings = build_backend(settings)
         call.delegation_mode = session['delegation']['type']
         call.rag = svc.rag
