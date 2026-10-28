@@ -14,7 +14,8 @@
     "test:integration": "node --test --test-concurrency=1 test/database.integration.test.cjs test/webhook.integration.test.cjs test/auth.integration.test.cjs && node --test test/organizations.integration.test.cjs && node --test test/orders.integration.test.cjs && node --test test/customers.integration.test.cjs && node --test test/members.integration.test.cjs && node --test test/caller-context.integration.test.cjs && node --test test/pins.integration.test.cjs && node --test test/order-address-history.integration.test.cjs && node --test test/recordings.integration.test.cjs && node --test test/company-directory.integration.test.cjs && node --test --test-concurrency=1 test/manual-orders.integration.test.cjs test/manual-orders-failures.integration.test.cjs && node --test test/consultations.integration.test.cjs",
     "check": "npm run lint && npm run format:check && npm test",
     "check:docker": "node scripts/check.cjs",
-    "bootstrap:admin": "npm run build && node scripts/bootstrap-admin.cjs"
+    "bootstrap:admin": "npm run build && node scripts/bootstrap-admin.cjs",
+    "bootstrap:faq": "npm run build && node dist/faqs/bootstrap-faq.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1157.0",
