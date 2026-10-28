@@ -18,7 +18,7 @@ BEGIN
  IF n<>19 THEN RAISE EXCEPTION 'Expected 19 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>18 THEN RAISE EXCEPTION 'Expected 18 foreign keys, got %',n; END IF;
+ IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>9 THEN RAISE EXCEPTION 'Expected 9 business triggers, got %',n; END IF;
@@ -101,10 +101,16 @@ BEGIN
  INSERT INTO shipment_status_history(shipment_seq,request_id,to_status,actor_type) VALUES(shipment_id,'00000000-0000-0000-0000-000000000001','notPaid','SYSTEM');
  PERFORM pg_temp.expect_error(format('INSERT INTO shipment_status_history(shipment_seq,request_id,to_status,actor_type) VALUES(%s,%L,%L,%L)',shipment_id,'00000000-0000-0000-0000-000000000002','paid','ADMIN'),'23514');
 
- INSERT INTO ai_personas(code,name) VALUES('test','Test persona') RETURNING ai_persona_seq INTO persona_id;
- INSERT INTO ai_prompt_versions(ai_persona_seq,version,prompt_text,is_active,created_by_admin_user_seq) VALUES(persona_id,1,'First',true,admin_id) RETURNING ai_prompt_version_seq INTO prompt_id;
- PERFORM pg_temp.expect_error(format('INSERT INTO ai_prompt_versions(ai_persona_seq,version,prompt_text,is_active) VALUES(%s,2,%L,true)',persona_id,'Second'),'23505');
- PERFORM pg_temp.expect_error(format('UPDATE ai_prompt_versions SET prompt_text=%L WHERE ai_prompt_version_seq=%s','Overwrite',prompt_id),'23514');
+ INSERT INTO ai_personas(code) VALUES('test') RETURNING ai_persona_seq INTO persona_id;
+ INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level,created_by_admin_user_seq)
+ VALUES(persona_id,1,'Test persona','First','NORMAL',admin_id) RETURNING ai_persona_version_seq INTO prompt_id;
+ PERFORM pg_temp.expect_error(format('UPDATE ai_persona_versions SET prompt_text=%L WHERE ai_persona_version_seq=%s','Overwrite',prompt_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE ai_persona_versions SET name=%L WHERE ai_persona_version_seq=%s','Overwrite',prompt_id),'23514');
+ PERFORM pg_temp.expect_error(format('UPDATE ai_persona_versions SET status=%L WHERE ai_persona_version_seq=%s','PENDING',prompt_id),'23514');
+ UPDATE ai_persona_versions SET status='PENDING',application_id='00000000-0000-4000-8000-000000000094',
+ requested_by_admin_user_seq=admin_id,requested_at=CURRENT_TIMESTAMP WHERE ai_persona_version_seq=prompt_id;
+ PERFORM pg_temp.expect_error(format('INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level,status,application_id,requested_by_admin_user_seq,requested_at) VALUES(%s,2,%L,%L,%L,%L,%L,%s,CURRENT_TIMESTAMP)',persona_id,'Second','Second','NORMAL','PENDING','00000000-0000-4000-8000-000000000098',admin_id),'23505');
+ UPDATE ai_persona_versions SET status='ACTIVE',applied_at=CURRENT_TIMESTAMP WHERE ai_persona_version_seq=prompt_id;
  INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES('Question','Answer',admin_id) RETURNING faq_entry_seq INTO faq_id;
  SELECT updated_at INTO before_time FROM faq_entries WHERE faq_entry_seq=faq_id;
  UPDATE faq_entries SET answer='Updated' WHERE faq_entry_seq=faq_id;
