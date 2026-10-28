@@ -6,3 +6,5 @@ export const MVP_AI_ACCESS = 'auth:mvp-ai-order-intake';
 export const MvpAiOrderAccess = () => SetMetadata(MVP_AI_ACCESS, true);
 export const MvpAiPinAccess = () => SetMetadata(MVP_AI_ACCESS, true);
 export const MvpAiDirectoryAccess = () => SetMetadata(MVP_AI_ACCESS, true);
+// 일반 FAQ 원본 조회만 허용한다. 관리자 등록·수정 경로에는 적용하지 않는다.
+export const MvpAiFaqAccess = () => SetMetadata(MVP_AI_ACCESS, true);
