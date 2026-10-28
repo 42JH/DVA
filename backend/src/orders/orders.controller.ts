@@ -9,8 +9,6 @@ import {
   Param,
   Req,
   Res,
-  createParamDecorator,
-  ExecutionContext,
   ParseUUIDPipe,
 } from '@nestjs/common';
 import {
@@ -31,7 +29,7 @@ import {
   ApiBody,
   getSchemaPath,
 } from '@nestjs/swagger';
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { MvpAiOrderAccess } from '../auth/mvp-ai-access';
 import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
@@ -48,9 +46,7 @@ import { OrdersService } from './orders.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 
-const OrderRequestKey = createParamDecorator((_data: unknown, context: ExecutionContext) =>
-  context.switchToHttp().getRequest<Request>().get('Idempotency-Key'),
-);
+import { OrderRequestKey } from './order-request-key';
 
 @ApiTags('Orders')
 @ApiExtraModels(
