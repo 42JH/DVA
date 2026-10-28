@@ -58,6 +58,59 @@ before(async () => {
   throw new Error('Production image did not become live');
 });
 
+test('call detail and transcript work through Nginx while the standalone playback route is removed', async () => {
+  const anonymous = await fetch('http://proxy/api/calls', { headers: { call_session_seq: '1' } });
+  assert.equal(anonymous.status, 401);
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const response = await fetch('http://proxy/api/calls?limit=1', {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.equal(body.data.length, 1);
+  assert.ok(body.data[0].callSessionSeq > 0);
+  const detail = await fetch('http://proxy/api/calls/' + body.data[0].callSessionSeq, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(detail.status, 200);
+  const detailBody = await detail.json();
+  assert.deepEqual(detailBody.data.call, body.data[0]);
+  assert.ok(Array.isArray(detailBody.data.recordings));
+  for (const recording of detailBody.data.recordings)
+    assert.deepEqual(Object.keys(recording).sort(), [
+      'createdAt',
+      'expiresAt',
+      'playbackError',
+      'recordingSeq',
+      'url',
+    ]);
+  assert.ok(detailBody.meta.requestId);
+  const transcript = await fetch(
+    'http://proxy/api/calls/' + body.data[0].callSessionSeq + '/transcript?limit=1',
+    {
+      headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+    },
+  );
+  assert.equal(transcript.status, 200);
+  const transcriptBody = await transcript.json();
+  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
+  assert.ok(Array.isArray(transcriptBody.data));
+  const anonymousPlayback = await fetch('http://proxy/api/recordings/2147483647/url');
+  assert.equal(anonymousPlayback.status, 404);
+  const missingPlayback = await fetch('http://proxy/api/recordings/2147483647/url', {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(missingPlayback.status, 404);
+  assert.equal((await missingPlayback.json()).error.code, 'NOT_FOUND');
+});
+
 test('production image keeps health and disables Swagger by default', async () => {
   const health = await fetch('http://backend:3000/health');
   assert.deepEqual(await health.json(), { status: 'ok', service: 'backend' });
