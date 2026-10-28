@@ -12,6 +12,8 @@
 
 ## 주문 목록
 
+목록·상세에 `creationSource`를 포함한다. `AI`는 통화 기반 접수, `ADMIN`은 관리자 수기, `UNKNOWN`은 012 이전 출처 미확인 주문이다. 관리자 신규 수기 접수는 [POST /api/admin/orders](manual-orders.md)를 사용한다.
+
 ```http
 GET /api/orders?status=COLLECTING&limit=20&offset=0
 call_session_seq: 7
