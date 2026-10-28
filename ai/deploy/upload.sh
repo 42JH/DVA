@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jenkins(빌더 노드)에서 실행: 빌드한 이미지와 릴리스 파일을 대상 서버로 보내고 deploy.sh를 부른다.
+# Jenkins(빌더 노드)에서 실행: 소스를 대상 서버로 보내 이미지를 빌드하고 릴리스 파일을 올린 뒤 deploy.sh를 부른다.
 # 백엔드 infra/deploy/upload.sh와 같은 방식(호스트 키 고정, --verify-only).
 # 사용: upload.sh <version> <ssh 개인 키 파일> <ssh 사용자> [--verify-only]
 set -euo pipefail
@@ -35,7 +35,9 @@ ssh "${options[@]}" "$server" "umask 077 && cat > $remote_root/shared/.env.tmp &
 
 docker image inspect "$image" >/dev/null
 ssh "${options[@]}" "$server" "test ! -e $remote_root/releases/$version && mkdir -p $remote_root/releases/$version $remote_root/shared/data" </dev/null
-docker save "$image" | gzip | ssh "${options[@]}" "$server" 'gunzip | sudo -n docker image load >/dev/null'
+# 2GB 이미지를 통째로 보내지 않고 소스(수 MB)만 보내 대상 서버에서 다시 빌드한다. 서버의 레이어 캐시로 바뀐 층만 빌드된다
+tar -C "$ai_root" --exclude=.venv -cf - . \
+ | ssh "${options[@]}" "$server" "sudo -n docker build --quiet --pull --platform linux/amd64 --tag $image - >/dev/null"
 # 주소DB는 릴리스마다 보내지 않고 서버의 shared/data에 한 번 올려 둔다(spec/address.md)
 printf 'AI_IMAGE=%s\nADDRESS_DATA_DIR=%s\n' "$image" "$remote_root/shared/data" > "$key_dir/release.env"
 tar -C "$ai_root" -cf - compose.yaml config prompts \

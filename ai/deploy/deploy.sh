@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 대상 서버에서 실행: AI 서버 릴리스를 띄우고, 실패하면 직전 릴리스로 되돌린다(백엔드 infra/deploy/deploy.sh와 같은 구조).
 # 배치: <root>/releases/<version>/{deploy.sh, release.env, compose.yaml, compose.deploy.yaml, config/, prompts/}, 비밀값 <root>/shared/.env
-# 이미지는 upload.sh가 미리 docker load 해 둔다.
+# 이미지는 upload.sh가 대상 서버에서 미리 빌드해 둔다.
 set -euo pipefail
 umask 077
 
