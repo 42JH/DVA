@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { ListResponse } from '../common/pagination';
 import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
+import { PersonaApplicationService } from './persona-application.service';
 import { PersonaSettings, PersonaVersion } from './ai-settings.types';
 import { CreatePersonaDto, PersonaListQueryDto, UpdatePersonaDto } from './dto/persona-request.dto';
 
@@ -18,6 +18,7 @@ export class AiSettingsService {
     private readonly repository: AiSettingsRepository,
     private readonly ai: AiPersonaClient,
     private readonly audit: AuditService,
+    private readonly applications: PersonaApplicationService,
   ) {}
 
   async list(query: PersonaListQueryDto) {
@@ -103,28 +104,7 @@ export class AiSettingsService {
       const active = await this.repository.live('ACTIVE', client);
       const pending = await this.repository.live('PENDING', client);
       if (active?.aiPersonaSeq === id || pending?.aiPersonaSeq === id) {
-        if (pending)
-          await this.audit.recordSuccess(
-            {
-              actorId,
-              targetId: pending.aiPersonaVersionSeq,
-              targetType: 'AI_PERSONA_VERSION',
-              action: 'PERSONA_PENDING_REPLACED',
-              requestId,
-            },
-            client,
-          );
-        await this.repository.queue(version.aiPersonaVersionSeq, randomUUID(), actorId, client);
-        await this.audit.recordSuccess(
-          {
-            actorId,
-            targetId: version.aiPersonaVersionSeq,
-            targetType: 'AI_PERSONA_VERSION',
-            action: 'PERSONA_APPLY_REQUESTED',
-            requestId,
-          },
-          client,
-        );
+        await this.applications.queue(version.aiPersonaVersionSeq, actorId, requestId, client);
       }
       return (await this.repository.version(version.aiPersonaVersionSeq, client))!;
     });

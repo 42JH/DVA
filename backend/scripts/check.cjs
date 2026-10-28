@@ -12,6 +12,7 @@ const proxy = run + '-proxy';
 const root = path.resolve(__dirname, '..');
 const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
+const personaToken = randomBytes(32).toString('hex');
 let networkCreated = false,
   databaseCreated = false,
   imageCreated = false;
@@ -133,6 +134,8 @@ try {
     'CORS_ORIGINS=https://13.209.59.180',
     '-e',
     `PBX_WEBHOOK_TOKEN=${webhookToken}`,
+    '-e',
+    `AI_PERSONA_TOKEN=${personaToken}`,
     runtimeImage,
   ]);
   applicationCreated = true;
@@ -167,6 +170,8 @@ try {
     'NODE_ENV=test',
     '-e',
     `TEST_WEBHOOK_TOKEN=${webhookToken}`,
+    '-e',
+    `TEST_PERSONA_TOKEN=${personaToken}`,
     image,
     'node',
     '--test',

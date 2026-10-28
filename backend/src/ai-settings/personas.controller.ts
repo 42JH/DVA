@@ -1,6 +1,19 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiCookieAuth,
+  ApiAcceptedResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -11,6 +24,8 @@ import { AuthRequest, Roles } from '../auth/auth.guard';
 import { AuditOperation } from '../audit/audit-operation';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { AiSettingsService } from './ai-settings.service';
+import { PersonaApplicationService } from './persona-application.service';
+import { ActivatePersonaDto } from './dto/persona-application.dto';
 import {
   CreatePersonaDto,
   PersonaIdDto,
@@ -41,7 +56,53 @@ import {
 @ApiResponse({ status: 404, description: '페르소나 또는 버전 없음.', type: ErrorResponseDto })
 @Controller('personas')
 export class PersonasController {
-  constructor(private readonly personas: AiSettingsService) {}
+  constructor(
+    private readonly personas: AiSettingsService,
+    private readonly applications: PersonaApplicationService,
+  ) {}
+
+  @Post(':id/activate')
+  @HttpCode(202)
+  @AuditOperation({ action: 'PERSONA_APPLY_REQUESTED', targetType: 'AI_PERSONA', target: 'id' })
+  @ApiOperation({
+    summary: '페르소나 적용·복원 요청',
+    description:
+      '선택한 전체 버전을 PENDING으로 지정하고 기존 대기를 INACTIVE로 바꿉니다. 과거 버전도 선택할 수 있습니다. AI가 통화 0건에서 적용을 확인해야 ACTIVE가 바뀌며, 같은 정상 대기 요청은 재사용합니다.',
+  })
+  @ApiAcceptedResponse({
+    description: '반영 대기 버전. 실제 적용 완료가 아닙니다.',
+    type: PersonaVersionResponseDto,
+  })
+  @ApiOkResponse({
+    description: '현재 ACTIVE를 유지하고 다른 대기가 있으면 취소합니다.',
+    type: PersonaVersionResponseDto,
+  })
+  @ApiResponse({ status: 409, description: '최신 저장 버전 충돌.', type: ErrorResponseDto })
+  @ApiResponse({
+    status: 422,
+    description: '현재 AI가 지원하지 않는 설정.',
+    type: ErrorResponseDto,
+  })
+  @ApiResponse({
+    status: 503,
+    description: 'AI 옵션 확인 실패 또는 연동 미설정.',
+    type: ErrorResponseDto,
+  })
+  async activate(
+    @Param() params: PersonaIdDto,
+    @Body() input: ActivatePersonaDto,
+    @Req() request: AuthRequest,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const version = await this.applications.request(
+      params.id,
+      input,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+    if (version.status === 'ACTIVE') response.status(200);
+    return version;
+  }
 
   @Get()
   @ApiOperation({

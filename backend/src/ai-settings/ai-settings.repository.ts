@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
-import { Persona, PersonaSettings, PersonaStatus, PersonaVersion } from './ai-settings.types';
+import {
+  ApplyError,
+  Persona,
+  PersonaSettings,
+  PersonaStatus,
+  PersonaVersion,
+} from './ai-settings.types';
 import { PersonaListQueryDto } from './dto/persona-request.dto';
 
 const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq",
@@ -16,6 +22,52 @@ const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq"
 @Injectable()
 export class AiSettingsRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async cancelPending(client: PoolClient): Promise<void> {
+    await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='PENDING'");
+  }
+
+  async apply(versionId: number, client: PoolClient): Promise<void> {
+    await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='ACTIVE'");
+    await client.query(
+      "UPDATE ai_persona_versions SET status='ACTIVE',applied_at=clock_timestamp(),apply_error_code=NULL WHERE ai_persona_version_seq=$1",
+      [versionId],
+    );
+  }
+
+  async applicationError(
+    versionId: number,
+    applicationId: string,
+    code: ApplyError,
+    client?: PoolClient,
+  ): Promise<void> {
+    await (client ?? this.database.pool).query(
+      `UPDATE ai_persona_versions SET apply_error_code=$3
+     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING'
+     AND ($3<>'AI_UNAVAILABLE' OR apply_error_code IS NULL OR apply_error_code='AI_UNAVAILABLE')`,
+      [versionId, applicationId, code],
+    );
+  }
+
+  async claimNotification(): Promise<
+    Pick<PersonaVersion, 'aiPersonaVersionSeq' | 'applicationId'> | undefined
+  > {
+    return (
+      await this.database.pool.query<
+        Pick<PersonaVersion, 'aiPersonaVersionSeq' | 'applicationId'>
+      >(`UPDATE ai_persona_versions SET last_notified_at=clock_timestamp()
+     WHERE status='PENDING' AND (last_notified_at IS NULL OR last_notified_at<clock_timestamp()-interval '30 seconds')
+     RETURNING ai_persona_version_seq AS "aiPersonaVersionSeq",application_id AS "applicationId"`)
+    ).rows[0];
+  }
+
+  async notificationRecovered(versionId: number, applicationId: string): Promise<void> {
+    await this.database.pool.query(
+      `UPDATE ai_persona_versions SET apply_error_code=NULL
+     WHERE ai_persona_version_seq=$1 AND application_id=$2 AND status='PENDING' AND apply_error_code='AI_UNAVAILABLE'`,
+      [versionId, applicationId],
+    );
+  }
 
   async lock(client: PoolClient): Promise<void> {
     // 다른 페르소나의 대기 교체·적용 회신도 같은 순서로 처리한다.
@@ -116,7 +168,7 @@ export class AiSettingsRepository {
     actorId: number,
     client: PoolClient,
   ): Promise<void> {
-    await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='PENDING'");
+    await this.cancelPending(client);
     await client.query(
       `UPDATE ai_persona_versions SET status='PENDING',application_id=$2,
      requested_by_admin_user_seq=$3,requested_at=clock_timestamp(),applied_at=NULL,last_notified_at=NULL,apply_error_code=NULL

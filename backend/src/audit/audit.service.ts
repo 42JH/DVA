@@ -3,7 +3,7 @@ import { PoolClient } from 'pg';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { AuditRepository } from './audit.repository';
-import { AuditEvent, AuditLog } from './audit.types';
+import { AuditEvent, AuditLog, AuditResult } from './audit.types';
 import { AuditQueryDto } from './dto/audit-query.dto';
 
 @Injectable()
@@ -23,6 +23,10 @@ export class AuditService {
 
   recordSuccess(event: AuditEvent, client: PoolClient): Promise<void> {
     return this.repository.insert(event, 'SUCCESS', client);
+  }
+
+  recordResult(event: AuditEvent, result: AuditResult, client: PoolClient): Promise<void> {
+    return this.repository.insert(event, result, client);
   }
 
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {

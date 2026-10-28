@@ -1,4 +1,5 @@
 -- 이전 프롬프트에는 당시 음성 설정이 없다. 이력이 있으면 임의로 복원하지 않는다.
+LOCK TABLE ai_personas, ai_prompt_versions IN ACCESS EXCLUSIVE MODE;
 DO $$
 BEGIN
  IF EXISTS(SELECT 1 FROM ai_prompt_versions) OR EXISTS(SELECT 1 FROM ai_personas) THEN
