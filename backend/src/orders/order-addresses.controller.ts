@@ -24,7 +24,7 @@ export class OrderAddressesController {
   @Get(':id/addresses')
   @MvpAiOrderAccess()
   @ApiOperation({
-    summary: '이전 주문 기반 출발지·도착지 조회 (ADDR-02)',
+    summary: '이전 주문 기반 출발지·도착지 조회',
     security: [{ adminSession: [] }, {}],
     description:
       'ACCEPTED 주문의 주소 스냅샷만 조회합니다. 기간은 주문 생성 시각 기준이며 같은 주소도 주문 상세별로 반환합니다. AI는 진행 중 통화 고객, 관리자는 지정 고객 범위입니다. PIN 저장 여부와 무관하며 외부 디버 API는 호출하지 않습니다.',

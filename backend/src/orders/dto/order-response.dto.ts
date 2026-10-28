@@ -1,6 +1,6 @@
 import { ApiProperty, OmitType } from '@nestjs/swagger';
 import { OriginPinDto } from './create-order.dto';
-import { ORDER_STATUSES, OrderStatus, SHIPMENT_STATUSES, ShipmentStatus } from '../orders.types';
+import { ORDER_STATUSES, OrderStatus } from '../orders.types';
 
 export class CreatedOrderDto {
   @ApiProperty({
@@ -44,13 +44,18 @@ export class OrderSummaryDto {
   orderSeq!: number;
 
   @ApiProperty({
-    description: '주문 고객 번호. 연결되지 않은 기존 데이터는 null.',
+    description: '주문 고객 번호. 고객을 확인하지 못한 미완료·취소 주문은 null일 수 있습니다.',
     type: Number,
     nullable: true,
   })
   customerSeq!: number | null;
 
-  @ApiProperty({ description: '주문 처리 상태.', enum: ORDER_STATUSES })
+  @ApiProperty({
+    description:
+      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 디버 인증 실패, REVIEW_REQUIRED 접수 확인 필요, CANCELLED 취소, EXPIRED 만료.',
+    enum: ORDER_STATUSES,
+    example: 'COLLECTING',
+  })
   status!: OrderStatus;
 
   @ApiProperty({
@@ -76,13 +81,6 @@ export class OrderSummaryDto {
     minimum: 0,
   })
   parcelCount!: number;
-
-  @ApiProperty({
-    description: '저장된 배송 상태 목록(중복 제거). 배송이 없으면 빈 배열.',
-    enum: SHIPMENT_STATUSES,
-    isArray: true,
-  })
-  shipmentStatuses!: ShipmentStatus[];
 }
 
 export class OrderAddressValueDto {
@@ -114,35 +112,9 @@ export class OrderAddressValueDto {
   longitude!: number | null;
 }
 
-export class OrderShipmentDto {
-  @ApiProperty({ description: '배송 번호(shipmentSeq).', minimum: 1 })
-  shipmentSeq!: number;
-
-  @ApiProperty({ description: '배송에 연결된 주문 상세 번호.', minimum: 1 })
-  orderParcelSeq!: number;
-
-  @ApiProperty({ description: '내부 고유 추적번호. 택배사 송장 번호가 아닙니다.' })
-  trackingNumber!: string;
-
-  @ApiProperty({
-    description: '팀 DB에 저장된 배송 상태. 실시간 택배사 조회 결과가 아닙니다.',
-    enum: SHIPMENT_STATUSES,
-  })
-  status!: ShipmentStatus;
-
-  @ApiProperty({ description: '배송 상태 변경 버전. 주문 version과 별개입니다.', minimum: 1 })
-  version!: number;
-
-  @ApiProperty({ description: '마지막 배송 상태 변경 시각.', format: 'date-time' })
-  statusChangedAt!: string;
-
-  @ApiProperty({ description: '배송 데이터 생성 시각.', format: 'date-time' })
-  createdAt!: string;
-}
-
 export class OrderParcelDto {
   @ApiProperty({
-    description: '주문 상세 번호. ORD-04에서 기존 상세를 수정할 때 사용합니다.',
+    description: '주문 상세 번호. 기존 상세의 주소·물품을 수정할 때 사용합니다.',
     minimum: 1,
   })
   orderParcelSeq!: number;
@@ -201,22 +173,11 @@ export class OrderParcelDto {
     maximum: Number.MAX_SAFE_INTEGER,
   })
   itemPrice!: number | null;
-
-  @ApiProperty({
-    description: '저장된 배송 정보. 배송 생성 전에는 null.',
-    type: OrderShipmentDto,
-    nullable: true,
-  })
-  shipment!: OrderShipmentDto | null;
 }
 
-export class OrderDetailDto extends OmitType(OrderSummaryDto, [
-  'parcelCount',
-  'shipmentStatuses',
-] as const) {
+export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as const) {
   @ApiProperty({
-    description:
-      'DB의 현재 주문 버전. ORD-04 수정·ORD-06 최종 접수의 expectedVersion으로 사용합니다.',
+    description: '현재 주문 버전. 수정·최종 접수의 expectedVersion으로 사용합니다.',
     minimum: 1,
   })
   version!: number;

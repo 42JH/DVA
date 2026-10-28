@@ -2,7 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { ORDER_STATUSES, OrderStatus, SHIPMENT_STATUSES, ShipmentStatus } from '../orders.types';
+import { ORDER_STATUSES, OrderStatus } from '../orders.types';
 
 export class OrderQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -41,20 +41,14 @@ export class OrderQueryDto extends PaginationQueryDto {
   to?: string;
 
   @ApiPropertyOptional({
-    description: '주문 상태. 수집 중 주문은 COLLECTING.',
+    description:
+      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 디버 인증 실패, REVIEW_REQUIRED 접수 확인 필요, CANCELLED 취소, EXPIRED 만료.',
     enum: ORDER_STATUSES,
+    example: 'COLLECTING',
   })
   @IsOptional()
   @IsIn(ORDER_STATUSES)
   status?: OrderStatus;
-
-  @ApiPropertyOptional({
-    description: '해당 배송 상태의 상세가 하나 이상 있는 주문을 조회합니다.',
-    enum: SHIPMENT_STATUSES,
-  })
-  @IsOptional()
-  @IsIn(SHIPMENT_STATUSES)
-  shipmentStatus?: ShipmentStatus;
 
   @ApiPropertyOptional({
     description: '수령인 이름 부분 검색. 앞뒤 공백 제거, 대소문자 구분 없음.',

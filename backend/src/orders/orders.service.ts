@@ -441,9 +441,9 @@ export class OrdersService {
           '그룹카드는 기업 고객, 개인카드는 개인 고객만 사용할 수 있습니다.',
         );
     }
+    if (await this.submissions.hasShipments(client, id))
+      throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
     for (const parcel of snapshot.parcels) {
-      if (parcel.shipment)
-        throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
       if (
         parcel.originPin &&
         !(await this.repository.canUsePin(client, customerId, parcel.originPin))

@@ -1,4 +1,4 @@
-# 주문 API 계약 — ORD-01~04·06
+# 주문 API 계약
 
 기준은 2026-10-27 사용자가 확정한 AI 호출 흐름이다. AI는 상담 중 주문을 계속 저장하지 않고, **상담 결과를 `POST /api/orders` 한 번으로 전달**한다. 백엔드가 완료 여부를 분기하고 디버를 호출한다. 미완료·취소·접수 주문은 같은 `orders`·`order_parcels`를 사용한다.
 
@@ -12,6 +12,47 @@
 | `POST /api/orders/{id}/submit` | 보완된 기존 주문의 최종 접수. AI의 새 완료 결과에는 추가 호출하지 않음. [접수 계약](order-submit.md) |
 
 AI가 변경할 호출부와 전체 예시는 [AI·PBX 연동 명세](ai-pbx-recordings.md)를 따른다.
+
+## API별 입력·응답
+
+Orders는 주문 상태·접수·주문 내용의 관리를 담당한다. 주소와 물품은 주문의 일부이며, 배송 상태·추적번호 조회는 별도 배송 API의 책임이다.
+
+| API | 받는 정보 | 반환하는 정보 |
+| --- | --- | --- |
+| `GET /api/orders` | 선택 Query: `customerSeq`, `status`, `from`, `to`, `recipientName`, `limit`, `offset` | `{data: [...], hasNext}`. 각 항목은 `orderSeq`, `customerSeq`, `status`, `paymentMethodType`, `pickupRequestedAt`, `createdAt`, `parcelCount` |
+| `POST /api/orders` | `Idempotency-Key` UUID. AI는 `call`, `outcome`, 고객 지정, 결제 방식, 수거 시각, `parcels` | AI 결과는 `{orderSeq, version, status, callSessionSeq, parcelNo}`. 기존 관리자 부분 저장은 `{orderSeq, version}`. 단건 응답의 `data`에 담음 |
+| `GET /api/orders/{id}` | Path `id=orderSeq` | 주문·고객 번호, `status`, 결제 방식, 수거 시각, `version`, 생성·변경 시각, 디버 접수 참고번호·확인 시각, `parcels[]` |
+| `PATCH /api/orders/{id}` | Path `id=orderSeq`, 필수 `expectedVersion`, 변경할 `paymentMethodType`, `pickupRequestedAt`, `parcels` | `{version}`. `COLLECTING`만 수정하며 상태는 유지. 수정 결과 전체는 상세 조회 |
+| `POST /api/orders/{id}/submit` | Path `id=orderSeq`, 필수 `expectedVersion` | `{status}`. `ACCEPTED`, `SUBMITTING`, `AUTH_FAILED`, `REVIEW_REQUIRED` 중 현재 접수 결과 |
+| `GET /api/customers/{id}/addresses` | Path `id=customerSeq`, 필수 Query `direction=ORIGIN 또는 DESTINATION`, 선택 `from`, `to`, `q`, `limit`, `offset` | `{data: [{orderSeq, orderParcelSeq, createdAt, address}], hasNext}`. 접수 완료 주문에 저장된 이전 주소만 조회 |
+
+- 단건 응답은 `{data, meta: {requestId}}`, 목록·이전 주소는 `{data: [], hasNext}`다.
+- 목록의 `limit` 기본값은 20(최대 100), `offset`은 0이다. `from` 포함·`to` 미포함이며 시간대 포함 ISO 8601을 사용한다. 최신 생성 시각·주문 번호 순으로 정렬한다.
+- 상세의 `parcels[]`에는 상세 번호·순번, `origin`, `destination`, `originPin`, 수량 4종, 기타 물품 설명, 요청 사항, 안내 요금, 물품 가액을 반환한다. 주소는 이름·전화번호·도로명·지번·상세 주소·동명·우편번호·위경도의 9개 필드다.
+- `PATCH`는 생략한 값을 유지하고 nullable 필드의 `null`은 비운다. 상세 번호가 있으면 수정하고 없으면 추가하며, 생략한 상세를 삭제하지 않는다. `status`를 임의로 바꾸는 API는 아니다.
+- 새 AI 상담 완료는 `POST /api/orders`의 `COMPLETE` 한 번으로 접수까지 처리한다. `/submit`은 이미 저장된 미완료 주문을 보완한 뒤 접수할 때 사용한다.
+- 이전 주소 조회는 배송 상태 조회가 아니다. 해당 고객의 `ACCEPTED` 주문에서 출발지 또는 도착지 스냅샷을 읽으며 배송 추적을 하지 않는다.
+
+### 주문 상태
+
+목록·상세의 `status`는 기존 DB `orders.status`를 그대로 반환한다. 새 상태 컬럼·마이그레이션은 필요 없다.
+
+| status | 의미 |
+| --- | --- |
+| COLLECTING | 미완료·정보 보완 중 |
+| SUBMITTING | 디버 접수 중 또는 결과 저장 미확정 |
+| ACCEPTED | 디버 접수 완료 |
+| AUTH_FAILED | 디버 인증 실패 |
+| REVIEW_REQUIRED | 접수 여부 확인 필요 |
+| CANCELLED | 취소된 주문 |
+| EXPIRED | 만료된 주문. 자동 만료 처리는 별도 |
+
+### 배송 조회 분리에 따른 호출부 변경
+
+- `GET /api/orders`의 `shipmentStatus` Query와 `shipmentStatuses` 응답을 제거했다. 이전 Query를 보내면 `400 INVALID_REQUEST`다.
+- `GET /api/orders/{id}`의 `parcels[].shipment`를 제거했다. 추적번호·배송 상태·배송 버전을 Orders에서 읽지 않는다.
+- 디버 접수 성공 시 기존 배송 데이터·초기 이력을 함께 저장하고, 이미 배송 데이터가 있는 주문의 중복 접수도 계속 차단한다. 기존 데이터를 삭제하지 않으며 별도 배송 조회 API는 이번 변경에서 추가하지 않는다.
+- Swagger 태그는 `Orders`를 유지하고 제목·설명의 명세 번호는 제거했다.
 
 ## AI 결과 요청
 

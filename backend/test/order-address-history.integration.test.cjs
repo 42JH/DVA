@@ -520,6 +520,7 @@ test('history reads are side-effect free and failures are not returned as empty 
 test('Swagger publishes the GET contract and logs omit filters and personal values', async () => {
   const document = await (await fetch(base + '/api/docs-json')).json();
   const operation = document.paths['/api/customers/{id}/addresses'].get;
+  assert.equal(operation.summary, '이전 주문 기반 출발지·도착지 조회');
   assert.deepEqual(operation.tags, ['Orders']);
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   assert.ok(operation.parameters.some((p) => p.name === 'direction' && p.required));

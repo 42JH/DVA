@@ -923,6 +923,16 @@ test('Swagger advertises session authentication, exclusive customer inputs, UUID
   assert.equal(response.status, 200);
   const spec = await response.json(),
     operation = spec.paths['/api/orders'].post;
+  assert.equal(operation.summary, '주문 생성·AI 상담 결과 수신');
+  const orderOperations = Object.values(spec.paths)
+    .flatMap(Object.values)
+    .filter((item) => item.tags?.includes('Orders'));
+  for (const item of orderOperations) {
+    assert.deepEqual(item.tags, ['Orders']);
+    assert.doesNotMatch(JSON.stringify(item), /\b(?:ORD|ADDR)-\d+\b/);
+  }
+  for (const name of ['OrderSummaryDto', 'OrderDetailDto', 'OrderParcelDto'])
+    assert.doesNotMatch(JSON.stringify(spec.components.schemas[name]), /\b(?:ORD|ADDR)-\d+\b/);
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   const callHeaders = operation.parameters.filter(
     (p) => p.in === 'header' && p.name.toLowerCase() === 'call_session_seq',
@@ -1019,7 +1029,7 @@ test('ORD-02 paginates orders once each, including zero-detail drafts and equal 
     body.data.map((o) => o.parcelCount),
     [2, 1],
   );
-  assert.deepEqual(body.data[0].shipmentStatuses, []);
+  assert.equal(Object.hasOwn(body.data[0], 'shipmentStatuses'), false);
   assert.equal(body.data[0].pickupRequestedAt, null);
   assert.equal(body.data[0].status, 'COLLECTING');
   const last = await (await readOrders(`?customerSeq=${customer}&limit=2&offset=2`)).json();
@@ -1064,7 +1074,6 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
     from: '2026-10-27T09:00:00+09:00',
     to: '2026-10-28T00:00:00Z',
     status: 'ACCEPTED',
-    shipmentStatus: 'sent',
     recipientName: 'alice_100%',
   });
   const response = await readOrders('?' + filters);
@@ -1074,7 +1083,8 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
   assert.equal(data.length, 1);
   assert.equal(data[0].orderSeq, selected);
   assert.equal(data[0].parcelCount, 3);
-  assert.deepEqual(data[0].shipmentStatuses, ['paid', 'sent']);
+  assert.equal(data[0].status, 'ACCEPTED');
+  assert.equal(Object.hasOwn(data[0], 'shipmentStatuses'), false);
   const range = await (
     await readOrders(`?customerSeq=${customer}&from=2026-10-27T00:00:00Z&to=2026-10-28T00:00:00Z`)
   ).json();
@@ -1089,9 +1099,44 @@ test('ORD-02 combines filters, keeps date boundaries and aggregates all parcels 
     assert.equal(result.data.length, text.includes('OR') ? 0 : 2);
   }
   assert.deepEqual(
-    (await (await readOrders(`?customerSeq=${customer}&shipmentStatus=canceled`)).json()).data,
+    (await (await readOrders(`?customerSeq=${customer}&status=CANCELLED`)).json()).data,
     [],
   );
+});
+
+test('order list filters every order status independently of shipment state', async () => {
+  const { customer } = await readCustomer();
+  const statuses = [
+    'COLLECTING',
+    'SUBMITTING',
+    'ACCEPTED',
+    'AUTH_FAILED',
+    'REVIEW_REQUIRED',
+    'CANCELLED',
+    'EXPIRED',
+  ];
+  const orders = new Map();
+  for (const status of statuses) {
+    const id = await readOrder(customer);
+    await pool.query(
+      `UPDATE orders SET status=$2,pickup_requested_at='2026-10-28T00:00:00Z',
+       parcel_no=CASE WHEN $2='ACCEPTED' THEN 'READ0058' END,
+       dver_received_at=CASE WHEN $2='ACCEPTED' THEN '2026-10-27T00:00:00Z'::timestamptz END
+       WHERE order_seq=$1`,
+      [id, status],
+    );
+    orders.set(status, id);
+  }
+  for (const status of statuses) {
+    const response = await readOrders(`?customerSeq=${customer}&status=${status}`);
+    assert.equal(response.status, 200);
+    const { data } = await response.json();
+    assert.deepEqual(
+      data.map((order) => [order.orderSeq, order.status]),
+      [[orders.get(status), status]],
+    );
+    assert.equal(Object.hasOwn(data[0], 'shipmentStatuses'), false);
+  }
 });
 
 test('ORD-02 AI scope comes from the active call customer, never arbitrary customer filters', async () => {
@@ -1142,6 +1187,7 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
     '?limit=101',
     '?offset=-1',
     '?status=unknown',
+    '?shipmentStatus=sent',
     '?recipientName=',
     '?unknown=1',
   ])
@@ -1166,7 +1212,7 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
 test('ORD-02 Swagger describes filters, a single call header and the actual list envelope', async () => {
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders'].get;
-  assert.ok(operation.summary.includes('ORD-02'));
+  assert.equal(operation.summary, '주문 목록 조회');
   assert.ok(operation.description.includes('AI'));
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.deepEqual(
@@ -1181,11 +1227,17 @@ test('ORD-02 Swagger describes filters, a single call header and the actual list
     'limit',
     'offset',
     'recipientName',
-    'shipmentStatus',
     'status',
     'to',
   ]);
   assert.ok(queries.every((p) => p.description && !p.required));
+  const summary = spec.components.schemas.OrderSummaryDto;
+  assert.deepEqual(
+    queries.find((p) => p.name === 'status').schema.enum,
+    summary.properties.status.enum,
+  );
+  assert.ok(summary.required.includes('status'));
+  assert.equal(summary.properties.shipmentStatuses, undefined);
   assert.deepEqual(operation.responses[200].content['application/json'].schema.required, [
     'data',
     'hasNext',
@@ -1219,6 +1271,7 @@ test('ORD-03 returns draft details, every nullable address field and the actual 
   const order = body.data;
   assert.equal(order.orderSeq, id);
   assert.equal(order.customerSeq, customer);
+  assert.equal(order.status, 'COLLECTING');
   assert.equal(order.version, before.version);
   assert.equal(Date.parse(order.updatedAt), before.updated_at.getTime());
   assert.equal(order.parcelNo, null);
@@ -1244,7 +1297,7 @@ test('ORD-03 returns draft details, every nullable address field and the actual 
     assert.equal(parcel.orderSeq, id);
     assert.ok(Number.isInteger(parcel.orderParcelSeq));
     assert.equal(parcel.originPin, null);
-    assert.equal(parcel.shipment, null);
+    assert.equal(Object.hasOwn(parcel, 'shipment'), false);
     assert.equal(parcel.notifiedPrice, 3500);
   }
   assert.equal(order.creationRequestId, undefined);
@@ -1259,7 +1312,7 @@ test('ORD-03 returns draft details, every nullable address field and the actual 
   assert.deepEqual((await (await readDetail(empty)).json()).data.parcels, []);
 });
 
-test('ORD-03 returns order address snapshots and stored shipment data without inventing a tracking result', async () => {
+test('order detail returns order snapshots and status without exposing stored shipment data', async () => {
   const { customer } = await readCustomer();
   const pin = (
     await pool.query(
@@ -1275,7 +1328,7 @@ test('ORD-03 returns order address snapshots and stored shipment data without in
       smallBoxCount: 1,
       itemPrice: 0,
     },
-    { destination: { name: '배송 대기 상세' } },
+    { destination: { name: '두 번째 수령인' } },
   ]);
   await pool.query('UPDATE personal_pins SET address_data=$2 WHERE personal_pin_seq=$1', [
     pin,
@@ -1291,27 +1344,33 @@ test('ORD-03 returns order address snapshots and stored shipment data without in
     "UPDATE orders SET status='ACCEPTED',pickup_requested_at='2026-10-28T00:00:00Z',parcel_no='READ0058',dver_received_at='2026-10-27T00:00:00Z' WHERE order_seq=$1",
     [id],
   );
-  const shipment = (
-    await pool.query(
-      "INSERT INTO shipments(order_parcel_seq,tracking_number,status,version,status_changed_at) VALUES($1,$2,'sent',3,'2026-10-27T01:00:00Z') RETURNING shipment_seq",
-      [parcel, randomUUID()],
-    )
-  ).rows[0].shipment_seq;
+  const trackingNumber = randomUUID();
+  await pool.query(
+    "INSERT INTO shipments(order_parcel_seq,tracking_number,status,version,status_changed_at) VALUES($1,$2,'sent',3,'2026-10-27T01:00:00Z')",
+    [parcel, trackingNumber],
+  );
+  const storedShipment = (
+    await pool.query('SELECT * FROM shipments WHERE order_parcel_seq=$1', [parcel])
+  ).rows[0];
   const order = (await (await readDetail(id)).json()).data;
   assert.equal(order.status, 'ACCEPTED');
   assert.equal(order.parcelNo, 'READ0058');
   assert.equal(Date.parse(order.dverReceivedAt), Date.parse('2026-10-27T00:00:00Z'));
   assert.deepEqual(order.parcels[0].origin, address);
   assert.deepEqual(order.parcels[0].originPin, { scope: 'PERSONAL', pinSeq: pin });
-  const stored = order.parcels[0].shipment;
-  assert.equal(stored.shipmentSeq, shipment);
-  assert.equal(stored.orderParcelSeq, parcel);
-  assert.equal(stored.status, 'sent');
-  assert.equal(stored.version, 3);
-  assert.equal(Date.parse(stored.statusChangedAt), Date.parse('2026-10-27T01:00:00Z'));
-  assert.ok(stored.trackingNumber);
-  assert.ok(Number.isFinite(Date.parse(stored.createdAt)));
-  assert.equal(order.parcels[1].shipment, null);
+  assert.deepEqual(order.parcels[0].destination, address);
+  assert.equal(order.parcels[0].smallBoxCount, 1);
+  assert.equal(order.parcels[0].itemPrice, 0);
+  for (const parcel of order.parcels) {
+    assert.equal(Object.hasOwn(parcel, 'shipment'), false);
+    assert.equal(Object.hasOwn(parcel, 'trackingNumber'), false);
+    assert.equal(Object.hasOwn(parcel, 'status'), false);
+  }
+  assert.equal(JSON.stringify(order).includes(trackingNumber), false);
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM shipments WHERE order_parcel_seq=$1', [parcel])).rows[0],
+    storedShipment,
+  );
   for (let i = 0; i < 3; i++) assert.equal((await readDetail(id, {}, i)).status, 200);
 });
 
@@ -1373,7 +1432,7 @@ test('ORD-03 keeps order version and parcels in one snapshot during a concurrent
 test('ORD-03 Swagger includes required nullable fields, nested response descriptions and the call header only once', async () => {
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders/{id}'].get;
-  assert.ok(operation.summary.includes('ORD-03'));
+  assert.equal(operation.summary, '주문 상세 조회');
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
   assert.deepEqual(
     operation.parameters.filter((p) => p.in === 'header').map((p) => p.name),
@@ -1387,12 +1446,7 @@ test('ORD-03 Swagger includes required nullable fields, nested response descript
   const schema = operation.responses[200].content['application/json'].schema;
   assert.deepEqual(schema.required, ['data', 'meta']);
   assert.equal(schema.properties.data.$ref, '#/components/schemas/OrderDetailDto');
-  for (const name of [
-    'OrderDetailDto',
-    'OrderParcelDto',
-    'OrderAddressValueDto',
-    'OrderShipmentDto',
-  ]) {
+  for (const name of ['OrderDetailDto', 'OrderParcelDto', 'OrderAddressValueDto']) {
     const model = spec.components.schemas[name];
     assert.ok(
       Object.values(model.properties).every((p) => p.description),
@@ -1402,7 +1456,9 @@ test('ORD-03 Swagger includes required nullable fields, nested response descript
   }
   for (const field of Object.values(spec.components.schemas.OrderAddressValueDto.properties))
     assert.equal(field.nullable, true);
-  assert.equal(spec.components.schemas.OrderParcelDto.properties.shipment.nullable, true);
+  assert.equal(spec.components.schemas.OrderShipmentDto, undefined);
+  assert.equal(spec.components.schemas.OrderParcelDto.properties.shipment, undefined);
+  assert.ok(spec.components.schemas.OrderDetailDto.required.includes('status'));
   assert.equal(spec.components.schemas.OrderDetailDto.properties.parcelCount, undefined);
   assert.equal(spec.components.schemas.OrderDetailDto.properties.shipmentStatuses, undefined);
 });
@@ -1494,7 +1550,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
   assert.equal(added.clientComment, '');
   assert.equal(added.notifiedPrice, 3500);
   assert.equal(added.itemPrice, Number.MAX_SAFE_INTEGER);
-  assert.equal(added.shipment, null);
+  assert.equal(Object.hasOwn(added, 'shipment'), false);
   assert.equal(after.parcelNo, null);
   assert.equal(after.dverReceivedAt, null);
   assert.equal(after.status, 'COLLECTING');
@@ -1957,7 +2013,7 @@ test('ORD-04 all active administrator roles save without a call, inactive sessio
 test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields and one call header', async () => {
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders/{id}'].patch;
-  assert.ok(operation.summary.includes('ORD-04'));
+  assert.equal(operation.summary, '주문 정보 수정');
   assert.ok(operation.description.includes('COLLECTING'));
   assert.ok(operation.description.includes('아직 적용되지 않습니다'));
   assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
@@ -2274,11 +2330,20 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
   const detail = await storedOrder(order.orderSeq);
   assert.equal(detail.parcelNo, dverSuccess.parcelNo);
   assert.equal(Date.parse(detail.dverReceivedAt), Date.parse(dverSuccess.receivedAt));
-  assert.equal(new Set(detail.parcels.map((p) => p.shipment.trackingNumber)).size, 2);
-  for (const parcel of detail.parcels) {
-    assert.equal(parcel.shipment.status, 'notPaid');
-    assert.equal(parcel.shipment.version, 1);
-    assert.match(parcel.shipment.trackingNumber, /^DVA-[0-9a-f-]{36}$/);
+  assert.equal(detail.status, 'ACCEPTED');
+  assert.ok(detail.parcels.every((parcel) => !Object.hasOwn(parcel, 'shipment')));
+  const shipments = (
+    await pool.query(
+      `SELECT s.status,s.version,s.tracking_number FROM shipments s
+       JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1`,
+      [order.orderSeq],
+    )
+  ).rows;
+  assert.equal(new Set(shipments.map((shipment) => shipment.tracking_number)).size, 2);
+  for (const shipment of shipments) {
+    assert.equal(shipment.status, 'notPaid');
+    assert.equal(shipment.version, 1);
+    assert.match(shipment.tracking_number, /^DVA-[0-9a-f-]{36}$/);
   }
   await pool.query('UPDATE orders SET version=version+1 WHERE order_seq=$1', [order.orderSeq]);
   const retry = await submitOrder(order, {}, 1);
@@ -2287,6 +2352,27 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
   assert.equal(dverRequests.length, 1);
   assert.equal((await submissionRows(order.orderSeq)).history, 2);
   assert.equal((await submitOrder(order)).status, 200);
+});
+
+test('submission still rejects existing shipments after removing them from order detail', async () => {
+  resetDver();
+  const order = await readyOrder();
+  await pool.query(
+    `INSERT INTO shipments(order_parcel_seq,tracking_number)
+     SELECT order_parcel_seq,$2 FROM order_parcels WHERE order_seq=$1`,
+    [order.orderSeq, randomUUID()],
+  );
+  const before = await storedOrder(order.orderSeq);
+  assert.ok(before.parcels.every((parcel) => !Object.hasOwn(parcel, 'shipment')));
+  await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
+  assert.equal(dverRequests.length, 0);
+  assert.deepEqual(await storedOrder(order.orderSeq), before);
+  assert.deepEqual(await submissionRows(order.orderSeq), {
+    status: 'COLLECTING',
+    shipments: 1,
+    history: 0,
+    acceptedAudit: 0,
+  });
 });
 
 test('ORD-06 payment eligibility uses active enterprise membership and allows credit for both kinds', async () => {
@@ -2731,7 +2817,7 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
   const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
   const operation = spec.paths['/api/orders/{id}/submit'].post;
   assert.deepEqual(operation.tags, ['Orders']);
-  assert.match(operation.summary, /ORD-06/);
+  assert.equal(operation.summary, '기존 미완료 주문 최종 접수');
   assert.ok(operation.description.includes('groupBilling'));
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.equal(headers.length, 1);

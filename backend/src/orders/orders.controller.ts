@@ -86,10 +86,10 @@ export class OrdersController {
   @Get()
   @MvpAiOrderAccess()
   @ApiOperation({
-    summary: '주문 목록 조회 (ORD-02)',
+    summary: '주문 목록 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '생성 시각·주문 번호 내림차순으로 조회합니다. 필터는 모두 AND 조건이며, 배송 상태는 팀 DB 저장값입니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '주문 상태·고객·생성 기간·수령인으로 검색하고, 생성 시각·주문 번호 내림차순으로 반환합니다. 필터는 모두 AND 조건입니다. 주소·물품은 주문 상세에서 조회합니다.\n\n관리자는 전체 주문, AI는 진행 중 통화의 발신번호와 일치하는 활성 고객의 주문만 조회합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -130,7 +130,7 @@ export class OrdersController {
   @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
   @ApiOperation({
-    summary: '주문 생성·AI 상담 결과 수신 (ORD-01)',
+    summary: '주문 생성·AI 상담 결과 수신',
     security: [{ adminSession: [] }, {}],
     description:
       'AI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 디버 접수 결과까지 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
@@ -302,7 +302,7 @@ export class OrdersController {
   @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_UPDATED', targetType: 'ORDER', target: 'id' })
   @ApiOperation({
-    summary: '주문 수집 정보 수정 (ORD-04)',
+    summary: '주문 정보 수정',
     security: [{ adminSession: [] }, {}],
     description:
       'AI·관리자 공통 API. COLLECTING 주문만 부분 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
@@ -357,7 +357,8 @@ export class OrdersController {
     type: ErrorResponseDto,
   })
   @ApiOkResponse({
-    description: '저장 후 실제 version. 새 상세 번호·저장 내용은 ORD-03으로 조회합니다.',
+    description:
+      '저장 후 실제 version. 주문 상태는 COLLECTING을 유지하며 새 상세 번호·저장 내용은 주문 상세에서 조회합니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],
@@ -386,7 +387,7 @@ export class OrdersController {
   @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_SUBMITTED', targetType: 'ORDER', target: 'id' })
   @ApiOperation({
-    summary: '기존 미완료 주문 최종 접수 (ORD-06)',
+    summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
       '기존 COLLECTING 주문을 보완한 뒤 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
@@ -426,7 +427,7 @@ export class OrdersController {
   })
   @ApiOkResponse({
     description:
-      '결과 저장 완료. ACCEPTED만 접수 성공이며 AUTH_FAILED·REVIEW_REQUIRED는 확인이 필요합니다. 접수 참고번호·배송은 ORD-03에서 조회합니다.',
+      '결과 저장 완료. ACCEPTED만 접수 성공이며 AUTH_FAILED·REVIEW_REQUIRED는 확인이 필요합니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],
@@ -476,10 +477,10 @@ export class OrdersController {
   @Get(':id')
   @MvpAiOrderAccess()
   @ApiOperation({
-    summary: '주문 상세·배송 상태 조회 (ORD-03)',
+    summary: '주문 상세 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '주문에 저장된 주소·물품·배송 정보와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증과 택배사 실시간 조회는 적용되지 않습니다.',
+      '주문 상태·고객 번호·결제 방식·수거 요청 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

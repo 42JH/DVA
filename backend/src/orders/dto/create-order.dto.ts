@@ -287,7 +287,8 @@ export class CreateOrderDto {
   pickupRequestedAt?: string | null;
 
   @ApiPropertyOptional({
-    description: '택배 상세 목록. 생략하거나 빈 배열로 저장할 수 있습니다.',
+    description:
+      '주문 상세(출발지·도착지·물품) 목록. 미완료는 생략·빈 배열 가능하며 최종 접수에는 한 건 이상 필요합니다.',
     type: () => ParcelInputDto,
     isArray: true,
   })

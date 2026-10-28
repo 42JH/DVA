@@ -65,7 +65,7 @@ call_session_seq: 7
 | 202 / `SUBMITTING` | 접수 처리 중 또는 결과 DB 저장 미확정. `Location: /api/orders/{id}` 반환 |
 
 **HTTP 200만으로 접수 성공이라고 판단하지 않는다.** `ACCEPTED`만 성공이다.
-ORD-03에서 디버 참고번호·접수 시각·배송을 조회한다. 배송은 택배 상세마다 하나씩 `notPaid`와 초기 이력을 생성한다.
+주문 상세에서 주문 상태·디버 참고번호·접수 시각을 조회한다. 배송 상태는 주문 응답에서 제외한다. 접수 성공 시의 내부 저장은 유지하여 택배 상세마다 배송 데이터 하나와 `notPaid` 초기 이력을 생성한다.
 배송 추적번호는 내부 고유 UUID 기반 번호이며 택배사 송장이 아니다. `parcelNo`는 중복 가능한 참고값이다.
 
 - **같은 주문 번호**를 재호출하면 `SUBMITTING`은 202, `ACCEPTED`·`AUTH_FAILED`·`REVIEW_REQUIRED`는 200으로 현재 상태를 반환한다. 디버에는 다시 전송하지 않는다.
@@ -95,7 +95,7 @@ ORD-03에서 디버 참고번호·접수 시각·배송을 조회한다. 배송�
 - `DVER_API_URL` 기본값은 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`이다. 운영·개발은 HTTPS를 요구한다.
 - 서버 비밀 환경변수 `DVER_API_KEY`를 설정한다. 빈 값이면 기존 API는 실행되고 신규 디버 접수만 503이다. 로컬·운영 Compose에서 두 변수를 backend에 전달한다. 키는 저장소에 넣지 않는다.
 - 키를 설정한 서버에서 `/submit`을 호출하면 실제 디버 주문 요청이 나간다. 자동 검증은 실제 키를 사용하지 않고 로컬 모의 서버로 실행한다.
-- Swagger `/api/docs`의 `Orders` → `기존 미완료 주문 최종 접수 (ORD-06)`에서 호출 규격·예시·상태·오류를 확인한다.
+- Swagger `/api/docs`의 `Orders` → `기존 미완료 주문 최종 접수`에서 호출 규격·예시·상태·오류를 확인한다.
 - `node scripts/check.cjs`: 빌드·린트·포맷, 실제 임시 DB, 모의 디버, 동시 요청·실패 롤백·재시작·기존 API·Nginx/PBX 회귀.
 - `./infra/database/test-monolith.ps1`: 기존 migration의 업무 데이터 보존, 제약, 반복 적용·체크섬·백업 복원·전체 롤백.
 
