@@ -47,6 +47,7 @@ import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
+import { CancelOrderParcelParamsDto } from './dto/cancel-order-parcel.dto';
 
 import { OrderRequestKey } from './order-request-key';
 
@@ -420,6 +421,50 @@ export class OrdersController {
       params.id,
       request.requestId,
       callSessionSeq,
+    );
+  }
+
+  @Post(':id/parcels/:orderParcelSeq/cancel')
+  @HttpCode(204)
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_PARCEL_CANCELLED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 상세 개별 취소',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '미완료 주문의 상세 또는 결제 전(notPaid)인 접수 상세 하나를 즉시 취소합니다. 다른 상세는 유지하고 전부 취소되면 주문도 CANCELLED로 바꿉니다. 같은 상세 재요청은 변경·이력 추가 없이 204입니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 전체, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. 취소된 상세는 수정·최종 접수에서 제외합니다. 디버 취소 API와 AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 불필요. 종료된 통화는 기존 연결 주문만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({
+    description: '통화·주문·해당 주문의 상세가 없거나 AI 고객 범위 밖.',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '취소 불가 주문·통화 상태 또는 대상 상세가 결제 전 조건을 충족하지 않음(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiNoContentResponse({
+    description:
+      '취소 완료 또는 이미 취소된 상세. 본문 없음. 최신 상태·version은 주문 상세에서 조회합니다.',
+  })
+  cancelParcel(
+    @Req() request: AuthRequest,
+    @Param() params: CancelOrderParcelParamsDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    return this.orders.cancel(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      request.requestId,
+      callSessionSeq,
+      params.orderParcelSeq,
     );
   }
 

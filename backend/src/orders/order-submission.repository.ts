@@ -68,7 +68,7 @@ export class OrderSubmissionRepository {
         `WITH created AS (
            INSERT INTO shipments(order_parcel_seq,tracking_number)
            SELECT order_parcel_seq,'DVA-'||gen_random_uuid()::text FROM order_parcels
-           WHERE order_seq=$1 RETURNING shipment_seq
+           WHERE order_seq=$1 AND status='ACTIVE' RETURNING shipment_seq
          ) INSERT INTO shipment_status_history(shipment_seq,request_id,to_status,actor_type)
            SELECT shipment_seq,gen_random_uuid(),'notPaid','SYSTEM' FROM created`,
         [id],

@@ -14,29 +14,31 @@ export function dverPayload(order: OrderSubmissionSnapshot) {
   return {
     paymentMethodType: order.paymentMethodType,
     pickupRequestedAt: order.pickupRequestedAt,
-    outboundParcels: order.parcels.map((parcel) => {
-      const address = (side: 'origin' | 'destination') =>
-        Object.fromEntries(
-          ORDER_ADDRESS_FIELDS.map((field) => [
-            field,
-            field === 'detailAddress' ? (parcel[side][field] ?? '') : parcel[side][field],
-          ]),
-        );
-      return {
-        origin: address('origin'),
-        destination: address('destination'),
-        item: {
-          document: parcel.documentCount,
-          smallBox: parcel.smallBoxCount,
-          mediumBox: parcel.mediumBoxCount,
-          bigBox: parcel.bigBoxCount,
-          etc: parcel.otherItemDescription,
-        },
-        clientComment: parcel.clientComment,
-        notifiedPrice: parcel.notifiedPrice,
-        itemPrice: parcel.itemPrice,
-      };
-    }),
+    outboundParcels: order.parcels
+      .filter((parcel) => parcel.status !== 'CANCELLED')
+      .map((parcel) => {
+        const address = (side: 'origin' | 'destination') =>
+          Object.fromEntries(
+            ORDER_ADDRESS_FIELDS.map((field) => [
+              field,
+              field === 'detailAddress' ? (parcel[side][field] ?? '') : parcel[side][field],
+            ]),
+          );
+        return {
+          origin: address('origin'),
+          destination: address('destination'),
+          item: {
+            document: parcel.documentCount,
+            smallBox: parcel.smallBoxCount,
+            mediumBox: parcel.mediumBoxCount,
+            bigBox: parcel.bigBoxCount,
+            etc: parcel.otherItemDescription,
+          },
+          clientComment: parcel.clientComment,
+          notifiedPrice: parcel.notifiedPrice,
+          itemPrice: parcel.itemPrice,
+        };
+      }),
   };
 }
 

@@ -356,6 +356,8 @@ export class OrdersService {
           change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
         if (change.orderParcelSeq !== undefined && !previous)
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+        if (previous?.status === 'CANCELLED')
+          throw new ApiException(409, 'INVALID_STATE', '취소된 주문 상세는 수정할 수 없습니다.');
         const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
         if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
@@ -397,6 +399,7 @@ export class OrdersService {
     id: number,
     requestId: string,
     callSessionHeader?: string,
+    orderParcelSeq?: number,
   ): Promise<void> {
     const callId = this.callId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
@@ -404,13 +407,21 @@ export class OrdersService {
       const order = await this.repository.lockOrder(client, id);
       if (!order || (customerId !== null && order.customerSeq !== customerId))
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      const parcels = await this.repository.lockParcels(client, id);
+      const selected = parcels.find((parcel) => parcel.orderParcelSeq === orderParcelSeq);
+      if (orderParcelSeq !== undefined) {
+        if (!selected)
+          throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+        if (selected.status === 'CANCELLED') return;
+      }
       if (order.status === 'CANCELLED')
         throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
       if (order.status !== 'COLLECTING' && order.status !== 'ACCEPTED')
         throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
 
-      const parcels = await this.repository.lockParcels(client, id);
-      const targets = parcels.filter((parcel) => parcel.status === 'ACTIVE');
+      const targets = selected
+        ? [selected]
+        : parcels.filter((parcel) => parcel.status === 'ACTIVE');
       const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
       const shipments = await this.repository.lockShipments(client, parcelIds);
       const byParcel = new Map(shipments.map((shipment) => [shipment.orderParcelSeq, shipment]));
@@ -428,17 +439,37 @@ export class OrdersService {
         );
 
       await this.repository.cancelShipments(client, parcelIds, adminId);
-      await this.repository.cancel(client, id);
-      await this.audit.recordSuccess(
-        {
-          actorId: adminId,
-          targetId: id,
-          targetType: 'ORDER',
-          action: 'ORDER_CANCELLED',
-          requestId,
-        },
-        client,
-      );
+      if (selected) {
+        await this.repository.cancelParcel(client, selected.orderParcelSeq);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: selected.orderParcelSeq,
+            targetType: 'ORDER_PARCEL',
+            action: 'ORDER_PARCEL_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      if (
+        !selected ||
+        parcels.every(
+          (parcel) => parcel.status === 'CANCELLED' || parcel.orderParcelSeq === orderParcelSeq,
+        )
+      ) {
+        await this.repository.cancel(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: id,
+            targetType: 'ORDER',
+            action: 'ORDER_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
     });
   }
 
@@ -537,6 +568,7 @@ export class OrdersService {
     if (await this.submissions.hasShipments(client, id))
       throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
     for (const parcel of snapshot.parcels) {
+      if (parcel.status === 'CANCELLED') continue;
       if (
         parcel.originPin &&
         !(await this.repository.canUsePin(client, customerId, parcel.originPin))

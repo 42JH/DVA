@@ -107,8 +107,8 @@ async function fixture({
   return { id, parcels };
 }
 
-function cancel(id, { cookie = cookies[0], call, requestId = randomUUID() } = {}) {
-  return fetch(`${base}/orders/${id}/cancel`, {
+function cancel(id, { cookie = cookies[0], call, requestId = randomUUID(), parcel } = {}) {
+  return fetch(`${base}/orders/${id}${parcel === undefined ? '' : `/parcels/${parcel}`}/cancel`, {
     method: 'POST',
     headers: {
       Origin: origin,
@@ -282,7 +282,16 @@ test('cancellation waits for a concurrent payment transaction and rechecks paid 
       parcels[0],
     ]);
     const pending = cancel(id);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    let waiting = false;
+    for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
+      waiting = (
+        await pool.query(
+          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM shipments%') AS waiting",
+        )
+      ).rows[0].waiting;
+      if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(waiting, true, 'cancellation must wait on the locked shipment');
     await client.query('COMMIT');
     assert.equal((await pending).status, 409);
   } finally {
@@ -316,4 +325,146 @@ test('path validation and Swagger describe empty 204 with one call header', asyn
     'ACTIVE',
     'CANCELLED',
   ]);
+});
+
+test('individual cancellation preserves siblings and completes the parent only on the last parcel', async () => {
+  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  const partial = await state(id);
+  assert.equal(partial.order.status, 'ACCEPTED');
+  assert.deepEqual(
+    partial.parcels.map((p) => p.status),
+    ['CANCELLED', 'ACTIVE'],
+  );
+  assert.deepEqual(
+    partial.shipments.map((s) => s.status),
+    ['canceled', 'notPaid'],
+  );
+  const repeated = await cancel(id, { parcel: parcels[0] });
+  assert.equal(repeated.status, 204);
+  assert.equal(await repeated.text(), '');
+  assert.deepEqual(await state(id), partial);
+  assert.equal((await cancel(id, { parcel: parcels[1] })).status, 204);
+  const complete = await state(id);
+  assert.equal(complete.order.status, 'CANCELLED');
+  assert.equal(complete.order.parcel_no, 'TEST0064');
+  assert.equal(complete.history.length, 2);
+  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  assert.deepEqual(await state(id), complete);
+  assert.equal((await cancel(id)).status, 409);
+  const audit = await pool.query(
+    "SELECT action,count(*)::int AS n FROM audit_logs WHERE result='SUCCESS' AND ((target_type='ORDER' AND target_seq=$1) OR (target_type='ORDER_PARCEL' AND target_seq=ANY($2::int[]))) GROUP BY action ORDER BY action",
+    [id, parcels],
+  );
+  assert.deepEqual(audit.rows, [
+    { action: 'ORDER_CANCELLED', n: 1 },
+    { action: 'ORDER_PARCEL_CANCELLED', n: 2 },
+  ]);
+});
+
+test('whole cancellation skips cancelled parcels, but a paid remaining parcel still blocks all writes', async () => {
+  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  assert.equal((await cancel(id)).status, 204);
+  assert.equal((await state(id)).history.length, 2);
+  const paid = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'paid'] });
+  assert.equal((await cancel(paid.id, { parcel: paid.parcels[0] })).status, 204);
+  const previous = await state(paid.id);
+  assert.equal((await cancel(paid.id)).status, 409);
+  assert.equal((await cancel(paid.id, { parcel: paid.parcels[1] })).status, 409);
+  assert.deepEqual(await state(paid.id), previous);
+});
+
+test('individual route validates parcel membership, IDs and AI ownership before any no-op or mutation', async () => {
+  const mine = await fixture();
+  const other = await fixture({ customer: otherId });
+  for (const parcel of ['0', '-1', 'bad', '2147483648'])
+    assert.equal((await cancel(mine.id, { parcel })).status, 400);
+  assert.equal((await cancel(mine.id, { parcel: other.parcels[0] })).status, 404);
+  assert.equal((await cancel(mine.id, { parcel: 2147483647 })).status, 404);
+  assert.equal(
+    (await cancel(other.id, { parcel: other.parcels[0], cookie: null, call: callId })).status,
+    404,
+  );
+  assert.equal((await cancel(other.id)).status, 204);
+  assert.equal(
+    (await cancel(other.id, { parcel: other.parcels[0], cookie: null, call: callId })).status,
+    404,
+  );
+  assert.equal(
+    (await cancel(mine.id, { parcel: mine.parcels[0], cookie: null, call: callId })).status,
+    204,
+  );
+  assert.equal((await state(mine.id)).order.status, 'COLLECTING');
+  const accepted = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  assert.equal(
+    (await cancel(accepted.id, { parcel: accepted.parcels[0], cookie: null, call: callId })).status,
+    204,
+  );
+  assert.equal((await state(accepted.id)).history[0].actor_type, 'SYSTEM');
+});
+
+test('individual retries and different-parcel cancellations serialize without duplicate history', async () => {
+  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const first = await Promise.all(
+    Array.from({ length: 3 }, () => cancel(id, { parcel: parcels[0] })),
+  );
+  assert.ok(first.every((r) => r.status === 204));
+  assert.equal((await state(id)).history.length, 1);
+  assert.equal((await cancel(id)).status, 204);
+  const second = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const different = await Promise.all(
+    second.parcels.map((parcel) => cancel(second.id, { parcel })),
+  );
+  assert.ok(different.every((r) => r.status === 204));
+  assert.equal((await state(second.id)).order.status, 'CANCELLED');
+  assert.equal((await state(second.id)).history.length, 2);
+});
+
+test('failure while completing the last parcel rolls back both cancellation audits and all states', async () => {
+  const { id, parcels } = await fixture({ status: 'ACCEPTED', count: 1, shipments: ['notPaid'] });
+  const previous = await state(id);
+  const requestId = randomUUID();
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'ORDER_CANCELLED') throw new Error('parent audit failure probe');
+    return original.call(this, event, client);
+  };
+  try {
+    assert.equal((await cancel(id, { parcel: parcels[0], requestId })).status, 500);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.deepEqual(await state(id), previous);
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        requestId,
+      ])
+    ).rowCount,
+    0,
+  );
+});
+
+test('individual Swagger has both database identifiers, no body and a single optional call header', async () => {
+  const doc = await (await fetch(base + '/docs-json')).json();
+  const operation = doc.paths['/api/orders/{id}/parcels/{orderParcelSeq}/cancel'].post;
+  assert.equal(operation.summary, '주문 상세 개별 취소');
+  assert.equal(operation.requestBody, undefined);
+  assert.equal(operation.responses['204'].content, undefined);
+  assert.equal(operation.responses['202'], undefined);
+  assert.deepEqual(
+    operation.parameters
+      .filter((p) => p.in === 'path')
+      .map((p) => p.name)
+      .sort(),
+    ['id', 'orderParcelSeq'],
+  );
+  const headers = operation.parameters.filter((p) => p.in === 'header');
+  assert.deepEqual(
+    headers.map((p) => p.name),
+    ['call_session_seq'],
+  );
+  assert.equal(headers[0].required, false);
 });

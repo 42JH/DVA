@@ -8,8 +8,9 @@ const QUANTITY_FIELDS = [
 ] as const;
 
 // 생성 시에는 부분 입력을 허용한다. ORD-06에서 저장된 같은 주문을 검증할 때 사용한다.
-export type OrderSubmissionSnapshot = Pick<OrderDraft, 'pickupRequestedAt' | 'parcels'> & {
+export type OrderSubmissionSnapshot = Pick<OrderDraft, 'pickupRequestedAt'> & {
   paymentMethodType: string;
+  parcels: (OrderDraft['parcels'][number] & { status?: 'ACTIVE' | 'CANCELLED' })[];
 };
 
 export function assertOrderSubmissionReady(
@@ -26,8 +27,9 @@ export function assertOrderSubmissionReady(
   else if (!isZonedDate(snapshot.pickupRequestedAt)) invalid('pickupRequestedAt', 'zonedDateTime');
   else if (Date.parse(snapshot.pickupRequestedAt) <= now)
     invalid('pickupRequestedAt', 'mustBeFuture');
-  if (!snapshot.parcels.length) missing('parcels');
+  if (!snapshot.parcels.some((parcel) => parcel.status !== 'CANCELLED')) missing('parcels');
   for (const [index, parcel] of snapshot.parcels.entries()) {
+    if (parcel.status === 'CANCELLED') continue;
     const prefix = `parcels.${index}`;
     for (const side of ['origin', 'destination'] as const) {
       const address = parcel[side];

@@ -665,6 +665,72 @@ test('production company directory searches official PINs through Nginx without 
   assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
 });
 
+test('production cancellation preserves AI phone scope and admin sessions through Nginx', async () => {
+  const root = 'http://proxy/api';
+  const create = async (phone) => {
+    const response = await fetch(root + '/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({
+        outcome: 'INCOMPLETE',
+        call: {
+          providerCallId: randomUUID(),
+          callerPhoneNumber: phone,
+          incomingAt: new Date().toISOString(),
+        },
+        customer: { name: '취소 프록시 검증', phoneNumber: phone },
+        parcels: [{}, {}],
+      }),
+    });
+    assert.equal(response.status, 201, await response.clone().text());
+    return (await response.json()).data;
+  };
+  const order = await create('01064000641');
+  const headers = { call_session_seq: String(order.callSessionSeq) };
+  const detail = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json()).data;
+  const partialPath = `/orders/${order.orderSeq}/parcels/${detail.parcels[0].orderParcelSeq}/cancel`;
+  assert.equal((await fetch(root + partialPath, { method: 'POST', headers })).status, 204);
+  const partial = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json())
+    .data;
+  assert.equal(partial.status, 'COLLECTING');
+  assert.deepEqual(
+    partial.parcels.map((p) => p.status),
+    ['CANCELLED', 'ACTIVE'],
+  );
+  const foreign = await create('01064000642');
+  assert.equal(
+    (await fetch(root + `/orders/${foreign.orderSeq}/cancel`, { method: 'POST', headers })).status,
+    404,
+  );
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { Origin: 'https://13.209.59.180', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const adminHeaders = {
+    Origin: 'https://13.209.59.180',
+    Cookie: login.headers.get('set-cookie').split(';')[0],
+  };
+  const whole = await fetch(root + `/orders/${order.orderSeq}/cancel`, {
+    method: 'POST',
+    headers: adminHeaders,
+  });
+  assert.equal(whole.status, 204);
+  assert.equal(await whole.text(), '');
+  assert.equal((await fetch(root + partialPath, { method: 'POST', headers })).status, 204);
+  assert.equal(
+    (await fetch(root + `/orders/${order.orderSeq}/cancel`, { method: 'POST', headers })).status,
+    409,
+  );
+  const sameCustomer = await create('01064000641');
+  assert.equal(
+    (await fetch(root + `/orders/${sameCustomer.orderSeq}/cancel`, { method: 'POST', headers }))
+      .status,
+    204,
+  );
+});
+
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
   const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
@@ -681,6 +747,8 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
     ['GET', '/api/orders', undefined],
     ['GET', '/api/orders/2147483647', undefined],
     ['POST', '/api/orders/2147483647/submit', JSON.stringify({ expectedVersion: 1 })],
+    ['POST', '/api/orders/2147483647/cancel', undefined],
+    ['POST', '/api/orders/2147483647/parcels/2147483647/cancel', undefined],
     [
       'PATCH',
       '/api/orders/2147483647',

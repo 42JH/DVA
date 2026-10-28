@@ -16,6 +16,18 @@ const validateUpdate = async (body) => {
   return input;
 };
 
+test('clients cannot inject parcel cancellation state through creation or editing', async () => {
+  await assert.rejects(
+    () => validate({ customerSeq: 1, parcels: [{ status: 'CANCELLED' }] }),
+    (error) => error.getStatus() === 400,
+  );
+  await assert.rejects(
+    () =>
+      validateUpdate({ expectedVersion: 1, parcels: [{ orderParcelSeq: 1, status: 'CANCELLED' }] }),
+    (error) => error.getStatus() === 400,
+  );
+});
+
 test('order updates preserve omitted fields, nullable clears, zero and empty text', async () => {
   const input = await validateUpdate({
     expectedVersion: 4,
