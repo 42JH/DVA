@@ -34,7 +34,7 @@ max_chars = 400
 [backend]
 # 고객·주문·배송지를 관리하는 백엔드 서버 API(spec/backend-api.md). 주소는 환경변수 BACKEND_API_URL
 # true면 백엔드 대신 메모리 가짜 백엔드(app/mock_backend.py). 백엔드 DB 연동 전까지. 재시작하면 데이터가 사라진다
-mock = true
+mock = false
 # 요청 하나의 시간 제한(초). 통화 시작 조회는 accept 전이라 짧게 둔다
 timeout_sec = 3.0
 # 상담 결과(POST /api/orders) 요청 하나의 시간 제한(초). 백엔드가 디버 응답을 최대 10초 기다리므로 그보다 길게
