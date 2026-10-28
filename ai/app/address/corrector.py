@@ -11,7 +11,7 @@ import functools
 import re
 from collections import defaultdict
 
-from app.address.stt_preprocess import korean_to_int, to_korean
+from app.address.stt_preprocess import DIG, korean_to_int, to_korean
 
 # --- 한글 자모 분해 / 발음 정규화 ---------------------------------------------
 CHO = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
@@ -71,6 +71,22 @@ def distance(q, cand):
     return 99 if d > allowed(cand) else d + 0.3 * lev(q.raw, cand.raw)
 
 
+def read_digits(text):
+    """도로명 안의 숫자를 읽는 소리로: "신정이펜1로" -> "신정이펜일로". 사전 도로명 쪽(값으로 읽는다)."""
+    return re.sub(r"\d+", lambda m: to_korean(int(m[0])), text)
+
+
+def road_readings(text):
+    """들은 도로명의 숫자를 읽을 수 있는 소리 전부: "신정201로" -> 신정이백일로·신정이공일로, "신정2-1로" -> 신정이일로.
+    모델이 "이펜일로"를 "2-1로"·"201로"처럼 숫자로 옮겨 적으면 소리 비교가 안 돼서(2026-10-28 통화) 숫자를 소리로 되돌린다."""
+    if not re.search(r"\d", text):
+        return [text]
+    value = re.sub(r"\d+", lambda m: to_korean(int(m[0])), text.replace("-", ""))
+    each = re.sub(r"\d", lambda m: "공" if m[0] == "0" else DIG[int(m[0])], text.replace("-", ""))
+    split = re.sub(r"\d+", lambda m: to_korean(int(m[0])), text).replace("-", "")  # "2-1" -> 이일(값마다)
+    return list(dict.fromkeys([value, each, split]))
+
+
 def allowed(cand):
     return max(2, len(cand.canon) // 4)
 
@@ -113,7 +129,7 @@ class RoadDict:
         for r in roads:
             if r not in self.parts:
                 m = BRANCH.fullmatch(r)
-                self.parts[r] = (Name(m[1]), branch_key(m[2], m[3])) if m else (Name(r), None)
+                self.parts[r] = (Name(read_digits(m[1])), branch_key(m[2], m[3])) if m else (Name(read_digits(r)), None)
 
     def set_regions(self, keys):
         """지역 트리: 시도 -> 시·군·구 -> 구 -> (도로는 self.roads[(시도, 시군구)]).
@@ -302,14 +318,14 @@ def candidates(rd, text, top=5):
         # 띄어쓰기가 잘못 들어가 도로명이 쪼개진 경우 대비: 끝에서 1~3토큰을 도로명으로 시도
         # 시군구와 도로 사이에 읍/면/동을 말했으면("익산시 왕궁면 ...") 짧은 분할에서 먼저 찾혀 무시됨
         for k in range(1, min(3, len(rest)) + 1):
-            q = Name("".join(rest[-k:]))
+            qs = [Name(t) for t in road_readings("".join(rest[-k:]))]
             for key in scopes:
                 for road in rd.roads[key]:
                     base, road_branch = rd.parts[road]
                     penalty = branch_penalty(branch, road_branch)
                     if penalty is None:
                         continue
-                    d = distance(q, base) + penalty
+                    d = min(distance(q, base) for q in qs) + penalty
                     if d < found.get((key, road), 99):
                         found[(key, road)] = d
             # 발음 정규화 거리 0인 후보(점수 < 1)를 찾았으면 더 긴 분할은 안 봄
