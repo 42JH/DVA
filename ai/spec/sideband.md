@@ -1,6 +1,8 @@
 # sideband에서의 GPT-Live 동작
 
-## 기본 client 위임
+## client 위임(보류)
+
+2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아(도구 미실행) 운영 설정을 `responses`로 되돌렸다. 원인 확인 전까지 client는 보류(`docs/WORKLOG.md`). 받은 이벤트 종류는 통화마다 처음 한 번 INFO 로그(`sideband 이벤트`), target이 client가 아닌 위임은 `위임 무시` 경고로 남긴다.
 
 - `session.delegation.created`의 `target="client"`와 ID를 받아 서버 SDK로 도구를 선택한다. 위임 이벤트에 고객 질문 본문이 들어오는 것으로 가정하지 않고 최근 받아쓰기를 사용한다.
 - 결과를 `thinking.append`로 나누어 전달하고 `session.thinking.appended.client_event_id`가 송신 event_id와 일치하는지 확인한다. 이후 `commentary.append`로 Live가 결과를 판단해 안내하도록 한다. 결과는 백엔드 LLM으로 재전송하지 않는다. 작업 실패·오래된 위임·중복 이벤트도 처리한다.

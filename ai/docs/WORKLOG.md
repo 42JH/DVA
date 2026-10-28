@@ -560,3 +560,20 @@
 ### 추가 정리
 - AGENTS.md: 문서 표·비밀값(`KAKAO_REST_API_KEY`)·저장·안전장치(택배 담기, 통화당 접수, `ACCEPTED`만 성공)·아직 없는 것(조회·수정·취소 보류)을 새 계약에 맞춤.
 - `work.md`: 백엔드 연동 현황 표 추가.
+
+### 실제 통화 판별 시간 초과(13:19~13:21)
+- 증상: 컨테이너 로그에 "판별 실패 …:"가 빈 메시지로 17번(`TimeoutError`, `[listener] timeout_sec = 5`). 성공한 판별도 모델 4.6~5.0초(지난 실통화 중앙값 1.2초). 판별이 안 되어 통화가 `collecting`에 머물다 고객이 끊음 → INCOMPLETE.
+- 확인: 이번 변경으로 판별 입력은 의도 한 줄(`quit`)만 늘었다. 13:23에 컨테이너 안에서 같은 형태(지시문·선택지·스키마)로 재면 `gpt-6-luna` low 0.9~1.5초로 정상 → 그 시간대 OpenAI 응답 지연으로 보이나 확정은 못 함. 13:18 accept 503은 가짜 세션 id(`live_u0_abc123`) 시험 웹훅이라 무관.
+- 바꾼 것: 판별 실패 로그에 오류 이름과 걸린 시간을 남김(`app/listener.py`).
+- 남은 것: 컨테이너 다시 빌드 후 실제 통화로 재확인. 계속 느리면 `reasoning_effort = "none"`이나 더 작은 모델 검토.
+
+### 도구 미실행(13:26 통화) → 위임 방식 되돌림
+- 증상: 2분 통화에서 고객 말 12번 동안 위임 0건·도구 0건, 임시 주문이 끝까지 비어 있음. 음성 모델이 혼자 질문을 이어 가 마지막 확인까지 말함(결제 방식 "알림톡"도 지어냄). 서버 기록이 없어 INCOMPLETE.
+- 원인 범위: `config/live.toml` `[delegation] type`이 10-27 RAG 통합(`dee3f66`)에서 `responses` → `client`로 바뀌었다. client는 실제 통화로 확인된 적이 없다. OpenAI가 `session.delegation.created`를 안 보냈는지, 보냈는데 `target`이 달라 버렸는지는 로그가 없어 모름.
+- 바꾼 것: 운영 설정을 `responses`로 되돌림(`search_manual`은 responses에서도 백엔드 모델 도구로 쓰임). sideband 이벤트 종류를 통화마다 처음 한 번 INFO 로그, client가 아닌 위임은 `위임 무시` 경고. 테스트는 responses 기본·client 구성 유효로 고침(287개 통과). AGENTS.md·`spec/gpt-live-session.md`·`spec/sideband.md`·`spec/tools.md`·`docs/rag-handoff.md`에 보류 표시.
+- 남은 것: responses로 실제 통화 확인. RAG 담당자에게 client 미동작 전달, 새 로그로 원인 확인 뒤 복귀 판단.
+
+### 로컬 Qdrant에 매뉴얼 색인 복원
+- 배포 서버(13.209.59.180) Qdrant에 `manuals_dev_openai_large`(32개, green)가 있음을 읽기 전용으로 확인(10-27엔 0개였음). 서버에서 스냅숏을 만들어 내려받은 뒤 서버 쪽 스냅숏·임시 파일은 지움. SHA-256 일치(`09d6c6fd…`).
+- 로컬 `dva-ai-qdrant-1`에 `file://` 위치로 복원 → 32개 green. AI 컨테이너 재시작 후 "RAG 준비 미완료" 경고 사라짐. 인증키는 컨테이너 안에서만 썼다.
+- 남은 것: 실제 검색(임베딩·리랭커 GPU) 경로는 확인 안 함. 서버 docker는 `sudo`가 필요함.

@@ -196,9 +196,10 @@ def test_incoming_call_attaches_service_and_sends_only_live_session(monkeypatch)
         await webhook.handle_incoming(svc, NS(session_id='incoming', sip_headers=[]))
         await svc.registry.get('incoming').task
     run(scenario())
-    assert captured[0].rag is search and captured[0].delegation_mode == 'client'
+    assert captured[0].rag is search and captured[0].delegation_mode == 'responses'
     accepted = client.live.sessions.of('accept')[0][2]
-    assert accepted['delegation']['type'] == 'client' and 'backend' not in accepted
+    assert accepted['delegation']['type'] == 'responses' and 'backend' not in accepted
+    assert 'search_manual' in {t['name'] for t in accepted['delegation']['responses']['tools']}
     assert 'search_manual' in {t['name'] for t in captured[0].backend_settings['tools']}
 
 

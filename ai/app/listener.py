@@ -106,7 +106,8 @@ async def classify(call, conn, client, seq: int) -> None:
         if answer not in choices or intent not in INTENTS:  # 모델 출력은 미신뢰 입력
             raise ValueError(f"선택지 밖 판별: {result}")
     except Exception as e:
-        log.warning("판별 실패 %s: %s", call.session_id, e)
+        log.warning("판별 실패 %s: %s %s %dms", call.session_id, type(e).__name__, e,
+                    (time.monotonic() - t0) * 1000)  # TimeoutError는 메시지가 비어 이름을 같이 남긴다
         record.update(status="error", output={"error": type(e).__name__})
         call.add_error(f"판별 실패: {type(e).__name__}")
         return

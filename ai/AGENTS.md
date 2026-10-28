@@ -63,7 +63,7 @@
 ```
 
 - 음성은 PBX와 OpenAI가 직접 주고받는다. 서버는 오디오를 다루지 않는다.
-- 생각·도구: 기본 `delegation.type = "client"`. 서버가 SDK Responses로 도구를 한 번 선택하고 기존 디스패처로 실행한 뒤 원문 결과를 Live에 직접 전달한다. 서버 전용 `[backend]`는 세션 API에 보내지 않는다. 구 `responses` 모드는 복귀용으로만 유지한다.
+- 생각·도구: 지금 `delegation.type = "responses"`. Live 쪽 백엔드 모델이 도구를 고르고 서버가 실행해 `function_call_output`으로 돌려준다(`[backend]` 설정을 `delegation.responses`로 넣어 보냄). `client`(서버가 SDK로 도구를 고르고 원문 결과를 Live에 직접 전달)는 코드는 있으나 2026-10-28 실제 통화에서 client 위임이 한 번도 생기지 않아 보류 중이다(`docs/WORKLOG.md`).
 - 저장: **AI 서버는 고객·주문·배송지를 저장하지 않는다.** 이 정보를 관리하는 별개의 백엔드 서버 API로 읽고 쓴다(`spec/backend-api.md`). 통화 시작에 고객 확인, 통화 끝에 결과(`POST /api/orders`, 택배들은 `parcels`) 한 번. 백엔드 호출은 모듈 하나(`app/backend_api.py`)에 모은다. 받는 중인 택배(임시 주문)와 확인한 택배 목록만 통화별 메모리.
   - 매뉴얼 RAG는 **Qdrant**(벡터 DB)에 둔다. 개인정보와 섞지 않는다. 구현은 RAG 담당자 몫(`docs/rag-handoff.md`).
 - 프롬프트는 파일 두 개: 음성 모델용(말투·맞장구·끼어들기·위임 정책)과 백엔드용(도구 규칙·결과 돌려주기).

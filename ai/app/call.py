@@ -128,6 +128,7 @@ class Call:
         self.backend_settings: dict = {}
         self.latest_delegation: str | None = None
         self.delegations: dict[str, dict] = {}
+        self.event_types: set[str] = set()  # 받은 sideband 이벤트 종류(처음 한 번만 로그)
         self.pending_context: dict[str, asyncio.Future] = {}
         self.input_ready = asyncio.Event()
 

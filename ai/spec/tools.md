@@ -2,7 +2,7 @@
 
 ## 현재 추가된 검색 도구
 
-`search_manual(question)`은 읽기 전용 FAQ 검색이다. 주문·상담원·대화 단계를 바꾸는 사건을 만들지 않는다. 기존 디스패처의 strict 인수/단계 검증을 거치고 raw Top3와 구간별 시간을 반환한다. 기본 client 모드는 `config/live.toml`의 `[backend.tools]`에서 도구 이름을 채우며, 결과를 Live에 직접 보낸다. 아래 Responses 결과 반환 설명은 복귀 모드에만 해당한다.
+`search_manual(question)`은 읽기 전용 FAQ 검색이다. 주문·상담원·대화 단계를 바꾸는 사건을 만들지 않는다. 기존 디스패처의 strict 인수/단계 검증을 거치고 raw Top3와 구간별 시간을 반환한다. client 모드(보류)는 `config/live.toml`의 `[backend.tools]`에서 도구 이름을 채우며, 결과를 Live에 직접 보낸다. 아래 Responses 결과 반환 설명은 복귀 모드에만 해당한다.
 
 도구는 늘어날 것이므로, **도구 하나를 추가할 때 파일 하나만 만들면** 되게 한다.
 
