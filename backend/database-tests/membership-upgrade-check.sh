@@ -40,7 +40,7 @@ snapshot() {
   'organizations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY organization_seq) FROM organizations o),
   'memberships',(SELECT jsonb_agg(to_jsonb(m) ORDER BY membership_seq) FROM memberships m),
   'orders',(SELECT jsonb_agg(to_jsonb(o)-'creation_source' ORDER BY order_seq) FROM orders o),
-  'parcels',(SELECT jsonb_agg(to_jsonb(p) ORDER BY order_parcel_seq) FROM order_parcels p),
+  'parcels',(SELECT jsonb_agg(to_jsonb(p)-'status' ORDER BY order_parcel_seq) FROM order_parcels p),
   'calls',(SELECT jsonb_agg(to_jsonb(c)-'incoming_at' ORDER BY call_session_seq) FROM call_sessions c),
   'audits',(SELECT jsonb_agg(to_jsonb(a) ORDER BY audit_log_seq) FROM audit_logs a),
   'pbx',(SELECT jsonb_agg(to_jsonb(p)-'call_session_seq'-'last_attempt_at' ORDER BY recording_id) FROM pbx_webhooks.call_ended_events p))"
@@ -66,8 +66,9 @@ test "$(sql -Atc "SELECT to_regclass('api_idempotency.membership_writes') IS NUL
 test "$(sql -Atc 'SELECT count(*) FROM call_sessions WHERE incoming_at IS NOT NULL')" = 0
 test "$(sql -Atc 'SELECT count(*) FROM pbx_webhooks.call_ended_events WHERE call_session_seq IS NOT NULL OR last_attempt_at IS NOT NULL')" = 0
 test "$(sql -Atc "SELECT count(*) FROM pg_namespace WHERE nspname='api_idempotency'")" = 0
-test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 12
-test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql')")" = "$HISTORY_BEFORE"
+test "$(sql -Atc "SELECT count(*) FROM order_parcels WHERE status<>'ACTIVE'")" = 0
+test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 13
+test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql')")" = "$HISTORY_BEFORE"
 test "$(sql -Atc "SELECT count(*) FROM db_migrations.applied_versions WHERE version IN ('009-membership-write-requests.sql','010-remove-membership-write-requests.sql')")" = 2
 HISTORY_AFTER=$(sql -Atc 'SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a')
 sh "$RUNNER" --no-backup dva-db-129-check > /dev/null
