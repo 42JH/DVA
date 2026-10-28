@@ -1,0 +1,102 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
+
+export class HandoffDto {
+  @ApiProperty({ description: '상담원 연결 요청 번호.', example: 5 })
+  handoffRequestSeq!: number;
+
+  @ApiProperty({ description: '저장된 연결 요청 사유.', example: '고객이 상담원 연결 요청' })
+  reason!: string;
+
+  @ApiProperty({
+    description: 'REQUESTED 요청, CONNECTED 연결 확인, FAILED 실패 확인.',
+    enum: HANDOFF_STATUSES,
+    example: 'REQUESTED',
+  })
+  status!: HandoffStatus;
+
+  @ApiProperty({ description: '배정 관리자 번호. 미확인 시 null.', type: Number, nullable: true })
+  assignedAdminUserSeq!: number | null;
+
+  @ApiProperty({
+    description: '상담원에게 전달할 요약. 없으면 null.',
+    type: String,
+    nullable: true,
+  })
+  summaryText!: string | null;
+
+  @ApiProperty({
+    description: '연결 요청 시각. 실제 연결 완료 시각과 다릅니다.',
+    type: String,
+    format: 'date-time',
+    example: '2026-10-28T01:02:00.000Z',
+  })
+  requestedAt!: Date;
+}
+
+export class CallDto {
+  @ApiProperty({ description: '통화 번호(call_sessions.call_session_seq).', example: 12 })
+  callSessionSeq!: number;
+
+  @ApiProperty({
+    description: 'OpenAI 통화 식별자. PBX 녹취 ID와 다릅니다.',
+    example: 'rtc_example',
+  })
+  providerCallId!: string;
+
+  @ApiProperty({
+    description: '통화 발신번호. 미확인 시 null.',
+    type: String,
+    nullable: true,
+    example: '01012345678',
+  })
+  callerPhoneNumber!: string | null;
+
+  @ApiProperty({
+    description: '연결 주문 번호. 주문이 없으면 null.',
+    type: Number,
+    nullable: true,
+    example: 10,
+  })
+  orderSeq!: number | null;
+
+  @ApiProperty({
+    description: '실제 통화 시작 시각. 미수집 시 null.',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    example: '2026-10-28T01:00:00.000Z',
+  })
+  startedAt!: Date | null;
+
+  @ApiProperty({
+    description: '실제 통화 종료 시각. null만으로 통화 진행 중이라고 판단할 수 없습니다.',
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    example: '2026-10-28T01:03:00.000Z',
+  })
+  endedAt!: Date | null;
+
+  @ApiProperty({
+    description: '저장된 통화 종료 사유. 미확인 시 null이며 주문 상태로 추정하지 않습니다.',
+    type: String,
+    nullable: true,
+  })
+  endReason!: string | null;
+
+  @ApiProperty({
+    description: '저장된 상담원 연결 요청·결과. 기록이 없으면 null.',
+    type: HandoffDto,
+    nullable: true,
+  })
+  handoff!: HandoffDto | null;
+}
+
+export class CallListResponseDto {
+  @ApiProperty({ description: '통화 목록.', type: [CallDto] })
+  data!: CallDto[];
+
+  @ApiProperty({ description: '다음 페이지 존재 여부.', example: false })
+  hasNext!: boolean;
+}

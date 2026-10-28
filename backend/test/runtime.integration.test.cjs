@@ -43,6 +43,26 @@ before(async () => {
   throw new Error('Production image did not become live');
 });
 
+test('call list through Nginx requires a session and preserves the list contract', async () => {
+  const anonymous = await fetch('http://proxy/api/calls', { headers: { call_session_seq: '1' } });
+  assert.equal(anonymous.status, 401);
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const response = await fetch('http://proxy/api/calls?limit=1', {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.equal(body.data.length, 1);
+  assert.ok(body.data[0].callSessionSeq > 0);
+});
+
 test('production image keeps health and disables Swagger by default', async () => {
   const health = await fetch('http://backend:3000/health');
   assert.deepEqual(await health.json(), { status: 'ok', service: 'backend' });
