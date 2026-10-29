@@ -61,7 +61,7 @@ export class OrderPaymentsService {
       )
         throw new ApiException(409, 'INVALID_STATE', '결제 승인 대상이 변경되었습니다.');
       await this.repository.complete(client, id, providerReference);
-      await this.repository.billed(client, request.orderSeq, null, null);
+      await this.repository.billed(client, request.orderSeq, null, null, requestId);
       await this.audit.recordSuccess(
         {
           actorId: null,

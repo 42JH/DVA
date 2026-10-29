@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
+import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
 
 export class HandoffDto {
   @ApiProperty({ description: '상담원 연결 요청 번호.', example: 5 })
@@ -36,6 +37,14 @@ export class HandoffDto {
 }
 
 export class CallDto {
+  @ApiProperty({
+    enum: ORDER_STATUSES,
+    nullable: true,
+    description: '연결 주문의 현재 결제·접수 상태. 통화 종료 사유와 별개.',
+  })
+  orderStatus!: OrderStatus | null;
+  @ApiProperty({ type: Number, nullable: true, description: '연결 주문의 현재 결제 금액(원).' })
+  orderTotalAmount!: number | null;
   @ApiProperty({ description: '통화 번호(call_sessions.call_session_seq).', example: 12 })
   callSessionSeq!: number;
 

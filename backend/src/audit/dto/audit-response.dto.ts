@@ -9,6 +9,11 @@ import {
 } from '../audit.types';
 
 export class AuditResponseDto implements AuditLog {
+  @ApiProperty({
+    enum: ['AI', 'SYSTEM', '운영자'],
+    description: '담당자 표시. 실제 운영자 이름·번호는 actorName·actorSeq로 확인.',
+  })
+  actorLabel!: 'AI' | 'SYSTEM' | '운영자';
   @ApiProperty({ description: '감사 기록 번호.' })
   auditLogSeq!: number;
 

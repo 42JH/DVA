@@ -670,7 +670,7 @@ export class OrdersService {
       return undefined;
     }
     this.dver.ensureConfigured();
-    await this.payments.billed(client, id, policy.organizationSeq, policy.departmentSeq);
+    await this.payments.billed(client, id, policy.organizationSeq, policy.departmentSeq, requestId);
     await this.audit.recordSuccess(
       {
         actorId: null,

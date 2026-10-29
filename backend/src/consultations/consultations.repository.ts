@@ -16,11 +16,11 @@ type CallRow = Omit<CallDto, 'handoff'> & {
 };
 
 const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
- c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",
+ c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  c.started_at AS "startedAt",c.ended_at AS "endedAt",c.end_reason AS "endReason",
  h.handoff_request_seq AS "handoffRequestSeq",h.reason AS "handoffReason",h.status AS "handoffStatus",
  h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
- FROM call_sessions c LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq`;
+ FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq`;
 
 function callResult(row: CallRow): CallDto {
   const {
@@ -57,6 +57,7 @@ export class ConsultationsRepository {
     const values: Array<string | number> = [];
     for (const [value, column, operator] of [
       [query.orderSeq, 'c.order_seq', '='],
+      [query.orderStatus, 'o.status', '='],
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
       [query.from, 'c.started_at', '>='],
       [query.to, 'c.started_at', '<'],

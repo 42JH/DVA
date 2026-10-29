@@ -128,6 +128,24 @@ Table orders {
 
 Ref: orders.(billing_department_seq,billing_organization_seq) > departments.(department_seq,organization_seq)
 
+Table organization_billing_months {
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  billing_month date [not null, note: 'KST 월의 1일']
+  monthly_amount bigint [not null, default: 0, note: '월결제 사용액. JS 안전 정수 범위']
+  group_billing_amount bigint [not null, default: 0, note: '그룹결제 사용액. JS 안전 정수 범위']
+  indexes { (organization_seq,billing_month) [pk] }
+}
+
+Table order_billing_charges {
+  order_seq integer [pk, ref: > orders.order_seq]
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  billing_month date [not null]
+  payment_method_type text [not null, note: 'credit / groupBilling']
+  amount integer [not null]
+  occurred_at timestamptz [not null]
+  Note: '결제 완료 트랜잭션에서 주문당 1회 기록. 재접수는 원장을 추가하지 않는다.'
+}
+
 Table order_payment_requests {
   payment_request_id uuid [pk, not null, default: `gen_random_uuid()`]
   order_seq integer [not null, ref: > orders.order_seq]

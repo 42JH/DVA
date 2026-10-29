@@ -9,10 +9,15 @@ const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 const { DverClient } = require('../dist/orders/dver.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
+const {
+  OrganizationBillingService,
+} = require('../dist/organizations/organization-billing.service');
+const { OrderMaintenanceWorker } = require('../dist/orders/order-maintenance.worker');
+const { AuditService } = require('../dist/audit/audit.service');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
-assert.equal(process.env.DB_HOST, '127.0.0.1');
+assert.ok(['127.0.0.1', 'db'].includes(process.env.DB_HOST));
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
 const pool = new Pool({
@@ -22,7 +27,7 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-let app, base, cookie, customerId, callId, payments;
+let app, base, cookie, customerId, callId, payments, billing, maintenance;
 let dverRequests = [];
 let dverReply = 'ACCEPTED';
 const origin = 'http://localhost:5173';
@@ -56,6 +61,8 @@ before(async () => {
   ).rows[0].call_session_seq;
   app = await NestFactory.create(AppModule, { logger: false });
   payments = app.get(OrderPaymentsService);
+  billing = app.get(OrganizationBillingService);
+  maintenance = app.get(OrderMaintenanceWorker);
   const dver = app.get(DverClient);
   dver.ensureConfigured = () => {};
   dver.submit = async (payload) => {
@@ -438,4 +445,171 @@ test('department membership scopes monthly and group eligibility and only admins
     ['billing', 'credit'],
   );
   await request(`/customers/${customerId}`, { monthlyBillingEnabled: false }, false, 'PATCH');
+});
+
+test('corporate totals count at payment completion once, retain previous months, and roll over at midnight KST', async () => {
+  const company = (
+    await request('/companies', { name: '월별 집계 검증', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  const department = (
+    await request(`/companies/${company}/departments`, {
+      name: '월별 검증팀',
+      groupBillingEnabled: true,
+    })
+  ).body.data.departmentSeq;
+  const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
+  const customer = (await request('/customers', { name: '월별 구성원', phoneNumber: phone })).body
+    .data.customerSeq;
+  await request(`/companies/${company}/members`, {
+    customerSeq: customer,
+    employeeNo: 'MONTH138',
+    role: 'MEMBER',
+    departmentSeq: department,
+  });
+  const [monthly, group] = await Promise.all([
+    createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'credit' })),
+    createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })),
+  ]);
+  assert.equal(monthly.body.data.status, 'ACCEPTED');
+  assert.equal(group.body.data.status, 'ACCEPTED');
+  let totals = (await request(`/companies/${company}/billing`, undefined, false, 'GET')).body.data;
+  assert.equal(totals.monthlyAmount, 12000);
+  assert.equal(totals.groupBillingAmount, 12000);
+  await request(`/admin/orders/${group.body.data.orderSeq}/retry`, {});
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT count(*)::int AS n FROM order_billing_charges WHERE organization_seq=$1',
+        [company],
+      )
+    ).rows[0].n,
+    2,
+  );
+  const oldMonth = totals.month;
+  const [year, month] = oldMonth.split('-').map(Number);
+  const nextBoundary = new Date(Date.UTC(year, month, 1) - 9 * 3600000);
+  await billing.rollover(new Date(nextBoundary.getTime() - 1));
+  assert.equal(
+    (await request(`/companies/${company}/billing?month=${oldMonth}`, undefined, false, 'GET')).body
+      .data.monthlyAmount,
+    12000,
+  );
+  await billing.rollover(nextBoundary);
+  await billing.rollover(nextBoundary);
+  const newMonth = new Date(nextBoundary.getTime() + 9 * 3600000).toISOString().slice(0, 7);
+  const fresh = (
+    await request(`/companies/${company}/billing?month=${newMonth}`, undefined, false, 'GET')
+  ).body.data;
+  assert.equal(fresh.monthlyAmount, 0);
+  assert.equal(fresh.groupBillingAmount, 0);
+  assert.equal(
+    (await request(`/companies/${company}/billing?month=${oldMonth}`, undefined, false, 'GET')).body
+      .data.groupBillingAmount,
+    12000,
+  );
+  const logs = await pool.query(
+    "SELECT actor_type,metadata FROM audit_logs WHERE target_type='ORGANIZATION' AND target_seq=$1 AND action='BILLING_MONTH_INITIALIZED' AND metadata->>'billingMonth'=$2",
+    [company, newMonth],
+  );
+  assert.equal(logs.rowCount, 2);
+  assert.ok(
+    logs.rows.every(
+      (l) =>
+        l.actor_type === 'SYSTEM' &&
+        l.metadata.amountBefore === 12000 &&
+        l.metadata.amountAfter === 0,
+    ),
+  );
+  const before = (await pool.query('SELECT count(*)::int AS n FROM orders')).rows[0].n;
+  const audit = app.get(AuditService),
+    record = audit.recordSuccess;
+  audit.recordSuccess = function (event, client) {
+    if (event.action === 'BILLING_AMOUNT_INCREASED') throw new Error('billing audit failure probe');
+    return record.call(this, event, client);
+  };
+  try {
+    assert.equal(
+      (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'credit' }))).status,
+      500,
+    );
+  } finally {
+    audit.recordSuccess = record;
+  }
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM orders')).rows[0].n, before);
+  totals = (
+    await request(`/companies/${company}/billing?month=${oldMonth}`, undefined, false, 'GET')
+  ).body.data;
+  assert.equal(totals.monthlyAmount, 12000);
+});
+
+test('expiry preserves consultation and recordings, closes the payment request, and records SYSTEM once', async () => {
+  const order = (await createFinal(finalBody(), true)).body.data;
+  await pool.query('INSERT INTO recordings(call_session_seq,object_key) VALUES($1,$2)', [
+    order.callSessionSeq,
+    'test/expiry-' + randomUUID() + '.webm',
+  ]);
+  const future = new Date(Date.now() + 25 * 3600000);
+  await maintenance.run(future);
+  await maintenance.run(future);
+  const detail = (await request(`/orders/${order.orderSeq}`, undefined, true, 'GET')).body.data;
+  assert.equal(detail.status, 'CANCELLED');
+  assert.equal(detail.totalAmount, 0);
+  assert.equal(detail.paymentRequest, null);
+  assert.ok(detail.parcels.every((p) => p.status === 'CANCELLED'));
+  assert.equal(
+    (
+      await pool.query('SELECT count(*)::int AS n FROM recordings WHERE call_session_seq=$1', [
+        order.callSessionSeq,
+      ])
+    ).rows[0].n,
+    1,
+  );
+  const calls = (
+    await request(
+      `/calls?orderSeq=${order.orderSeq}&orderStatus=CANCELLED`,
+      undefined,
+      false,
+      'GET',
+    )
+  ).body.data;
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].orderStatus, 'CANCELLED');
+  assert.equal(calls[0].orderTotalAmount, 0);
+  const logs = (
+    await request(
+      `/audit-logs?actorType=SYSTEM&targetType=ORDER&targetSeq=${order.orderSeq}&action=ORDER_CANCELLED`,
+      undefined,
+      false,
+      'GET',
+    )
+  ).body.data;
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].actorLabel, 'SYSTEM');
+  assert.equal(logs[0].metadata.reason, 'PAYMENT_EXPIRED');
+  await assert.rejects(
+    () => payments.beginPayment(order.paymentRequest.paymentRequestId, 12000),
+    (e) => e.getStatus() === 409,
+  );
+  const inFlight = (await createFinal()).body.data;
+  await payments.beginPayment(inFlight.paymentRequest.paymentRequestId, 12000);
+  await maintenance.run(future);
+  assert.equal(
+    (await request(`/orders/${inFlight.orderSeq}`, undefined, true, 'GET')).body.data.status,
+    'notPaid',
+  );
+  await payments.releaseDeclinedPayment(inFlight.paymentRequest.paymentRequestId);
+  await maintenance.run(future);
+  assert.equal(
+    (await request(`/orders/${inFlight.orderSeq}`, undefined, true, 'GET')).body.data.status,
+    'CANCELLED',
+  );
+  const operators = (
+    await request('/audit-logs?actorType=ADMIN&limit=100', undefined, false, 'GET')
+  ).body.data;
+  assert.ok(
+    operators.length > 0 &&
+      operators.every(
+        (l) => l.actorLabel === '운영자' && l.actorSeq !== null && l.actorName === '결제 운영자',
+      ),
+  );
 });

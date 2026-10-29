@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
+import { OrganizationBillingService } from '../organizations/organization-billing.service';
 
 export interface PaymentRequest {
   paymentRequestId: string;
@@ -14,6 +15,7 @@ export interface PaymentRequest {
 
 @Injectable()
 export class OrderPaymentsRepository {
+  constructor(private readonly billing: OrganizationBillingService) {}
   async eligibility(client: PoolClient, customerId: number) {
     const customer = (
       await client.query<{ monthlyBillingEnabled: boolean }>(
@@ -81,11 +83,13 @@ export class OrderPaymentsRepository {
     id: number,
     organizationId: number | null,
     departmentId: number | null,
+    requestId: string,
   ) {
     await client.query(
       "UPDATE orders SET status='PAID',paid_at=clock_timestamp(),billing_organization_seq=$2,billing_department_seq=$3 WHERE order_seq=$1",
       [id, organizationId, departmentId],
     );
+    await this.billing.recordCharge(client, id, requestId);
   }
   async request(client: PoolClient, id: string) {
     // All payment/cancellation paths lock the parent before its request.

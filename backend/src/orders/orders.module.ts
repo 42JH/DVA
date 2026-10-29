@@ -12,9 +12,11 @@ import { OrderAddressesController } from './order-addresses.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { OrderPaymentsService } from './order-payments.service';
+import { OrganizationsModule } from '../organizations/organizations.module';
+import { OrderMaintenanceWorker } from './order-maintenance.worker';
 
 @Module({
-  imports: [DatabaseModule, AuditModule, CustomersModule, ConsultationsModule],
+  imports: [DatabaseModule, AuditModule, CustomersModule, ConsultationsModule, OrganizationsModule],
   controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
   providers: [
     OrdersRepository,
@@ -23,6 +25,7 @@ import { OrderPaymentsService } from './order-payments.service';
     DverClient,
     OrderPaymentsRepository,
     OrderPaymentsService,
+    OrderMaintenanceWorker,
   ],
   exports: [OrdersService, OrderPaymentsService],
 })

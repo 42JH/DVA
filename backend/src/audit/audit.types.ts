@@ -18,10 +18,12 @@ export interface AuditEvent {
     orderParcelSeqs?: number[];
     billingMonth?: string;
     paymentMethodType?: string;
+    reason?: 'PAYMENT_EXPIRED';
   };
 }
 
 export interface AuditLog {
+  actorLabel: 'AI' | 'SYSTEM' | '운영자';
   auditLogSeq: number;
   actorType: AuditActorType;
   actorSeq: number | null;

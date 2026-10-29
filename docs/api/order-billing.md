@@ -55,3 +55,21 @@ OrderPaymentsService는 내부 함수만 제공한다. 결제 성공을 자가 �
 POST /api/admin/orders/{id}/retry는 접수 실패한 동일 주문의 미취소 상세를 다시 보낸다. 현재 SUBMITTING/ACCEPTED이면 전송 없이 상태만 반환한다. 결제 처리와 월별 집계를 다시 실행하지 않는다. 재접수 시작은 ADMIN, 디버 응답과 결제 결과 반영은 SYSTEM으로 기록한다. AI 요청으로 생성·취소한 업무는 AI, 관리자 페이지 요청은 ADMIN(화면: 운영자)이다.
 
 018 적용 전 기존 SUBMITTING/ACCEPTED/AUTH_FAILED/REVIEW_REQUIRED/EXPIRED 주문이 있으면 결제 여부를 추정하지 않고 이관을 중단한다. 이번 작업 전 업무 DB는 관리자만 남겨 초기화했으며, 이후 기존 서버에서 새 주문이 들어왔다면 배포 전에 별도 정합성 확인이 필요하다.
+
+## 자동 만료와 월별 사용액
+
+백엔드 시작 시 및 매 분 경계에 maintenance 작업을 실행한다. 중복 실행을 막고 여러 인스턴스 사이에는 DB 잠금·유일성 제약으로 직렬화한다. 테스트 환경에서는 타이머 대신 동일 작업 함수를 직접 호출한다.
+
+미결제 기한이 지난 notPaid 주문은 CANCELLED로 바꾸고 모든 상세·통화·녹취·감사를 보존한다. 합계는 0원, 결제 요청은 무효화되며 ORDER_CANCELLED를 SYSTEM과 reason=PAYMENT_EXPIRED로 기록한다. 이미 승인 선점된 요청은 임의로 취소하지 않는다. 추후 결제사 연동에서 승인 결과를 확인한 뒤 완료하거나 명확한 거절을 해제해야 한다. 작업은 한 번에 최대 100건을 처리하고 나머지는 다음 실행에서 처리한다.
+
+결제 완료 후 디버 전송을 시작하기 전에 프로세스가 종료되어 PAID로 남은 주문은 유지보수 작업이 전송을 이어간다. SUBMISSION_FAILED는 자동 재전송하지 않으며 관리자 재접수를 사용한다.
+
+기업 월결제·그룹결제는 결제 완료 트랜잭션 안에서 주문당 원장 한 건을 기록하고 해당 KST 월의 사용액을 증가시킨다. 디버 응답 전에도 집계하며 접수 실패·재접수로 사용액을 다시 늘리지 않는다. 개인 카드 및 소속 없는 개인 월결제는 기업 사용액에 넣지 않는다.
+
+GET /api/companies/{id}/billing?month=YYYY-MM으로 monthlyAmount·groupBillingAmount를 조회한다. 월 생략 시 현재 KST 월이며, 집계 행이 아직 없으면 두 금액을 0으로 반환한다. 조회는 원장을 변경하지 않는다. 금액은 JavaScript 안전 정수 범위의 원 단위 숫자다.
+
+새 월은 별도의 0원 행으로 시작한다. 이전 월을 덮어쓰지 않고, 재시작 시 누락된 월도 순서대로 생성한다. BILLING_MONTH_INITIALIZED는 각 결제 방식의 이전 월 금액→0원, BILLING_AMOUNT_INCREASED는 증가 전후 금액을 SYSTEM으로 기록한다. 원장·사용액·감사는 함께 커밋하거나 롤백한다.
+
+관리자 통화 조회에는 orderStatus와 orderTotalAmount를 반환한다. GET /api/calls의 orderStatus 필터로 상담에 연결된 결제 대기·접수·취소 주문을 검색할 수 있으며 통화 종료 사유는 그대로 보존한다.
+
+감사 조회는 actorType=AI/SYSTEM/ADMIN 필터와 actorLabel=AI/SYSTEM/운영자를 제공한다. 운영자의 실제 이름과 번호는 actorName·actorSeq로 유지한다.

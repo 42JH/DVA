@@ -7,6 +7,7 @@ import { AuditQueryDto } from './dto/audit-query.dto';
 const AUDIT_SELECT = `SELECT
         audit_log_seq AS "auditLogSeq",
         actor_type AS "actorType",
+        CASE WHEN actor_type='ADMIN' THEN '운영자' ELSE actor_type END AS "actorLabel",
         actor_seq AS "actorSeq",
         actor_name AS "actorName",
         action,
@@ -18,7 +19,7 @@ const AUDIT_SELECT = `SELECT
         jsonb_strip_nulls(jsonb_build_object(
           'amountBefore',metadata->'amountBefore','amountAfter',metadata->'amountAfter',
           'orderParcelSeqs',metadata->'orderParcelSeqs','billingMonth',metadata->'billingMonth',
-          'paymentMethodType',metadata->'paymentMethodType')) AS metadata,
+          'paymentMethodType',metadata->'paymentMethodType','reason',metadata->'reason')) AS metadata,
         occurred_at AS "occurredAt"
       FROM audit_logs`;
 
@@ -75,6 +76,10 @@ export class AuditRepository {
   async findMany(query: AuditQueryDto): Promise<AuditLog[]> {
     const conditions: string[] = [];
     const values: Array<string | number> = [];
+    if (query.actorType !== undefined) {
+      values.push(query.actorType);
+      conditions.push(`actor_type = $${values.length}`);
+    }
 
     if (query.actorSeq !== undefined) {
       values.push(query.actorSeq);
