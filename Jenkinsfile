@@ -42,6 +42,18 @@ pipeline {
                 sh 'node backend/scripts/check.cjs'
             }
         }
+        stage('Observability checks') {
+            when {
+                anyOf {
+                    changeset 'infra/observability/**'
+                    changeset 'infra/nginx/default.prod.conf'
+                }
+            }
+            steps {
+                sh 'bash -n infra/observability/deploy.sh'
+                sh 'node infra/observability/test.mjs'
+            }
+        }
         stage('Build and Package Images') {
             steps {
                 // NestJS compilation runs inside the backend Docker build stage.

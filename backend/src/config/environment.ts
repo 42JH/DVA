@@ -20,7 +20,7 @@ export interface Environment {
 }
 
 export class EnvironmentValidationError extends Error {
-  constructor(fields: string[]) {
+  constructor(readonly fields: string[]) {
     super(`Invalid environment variables: ${[...new Set(fields)].join(', ')}`);
     this.name = 'EnvironmentValidationError';
   }

@@ -91,7 +91,16 @@ test('the actual process exits before listening when a required setting is missi
     timeout: 15000,
   });
   assert.equal(result.status, 1, result.error?.message);
-  assert.match(result.stdout + result.stderr, /Invalid environment variables: DB_PASSWORD/);
+  const records = result.stdout
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.ok(
+    records.some(
+      (record) =>
+        record.event === 'backend_startup_failed' && record.invalidFields.includes('DB_PASSWORD'),
+    ),
+  );
   assert.ok(!(result.stdout + result.stderr).includes(valid.DB_PASSWORD));
 });
 

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,7 +22,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       max: 5,
     });
     // An idle connection error must not crash the process or log query parameters.
-    this.pool.on('error', () => console.error('Database connection unavailable.'));
+    this.pool.on('error', () =>
+      new Logger(DatabaseService.name).error({ event: 'database_connection_unavailable' }),
+    );
   }
 
   async onModuleInit(): Promise<void> {

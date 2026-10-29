@@ -12,12 +12,14 @@ import { PinsModule } from './pins/pins.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { FaqsModule } from './faqs/faqs.module';
+import { ObservabilityModule } from './observability/observability.module';
 
 @Module({
   imports: [
     ApplicationConfigModule,
     DatabaseModule,
     HealthModule,
+    ObservabilityModule,
     PbxWebhookModule,
     AuthModule,
     OrganizationsModule,

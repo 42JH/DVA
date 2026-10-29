@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
 import { ApiException } from '../common/errors/api.exception';
@@ -44,6 +44,7 @@ export function dverPayload(order: OrderSubmissionSnapshot) {
 
 @Injectable()
 export class DverClient {
+  private readonly logger = new Logger(DverClient.name);
   constructor(private readonly config: ConfigService<Environment, true>) {}
 
   ensureConfigured(): void {
@@ -55,6 +56,16 @@ export class DverClient {
     this.ensureConfigured();
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
+    const started = performance.now();
+    const finish = (result: DverResult, reason?: string): DverResult => {
+      this.logger.log({
+        event: 'dver_submission',
+        outcome: result.status,
+        reason,
+        durationMs: performance.now() - started,
+      });
+      return result;
+    };
     try {
       const response = await fetch(this.config.get('DVER_API_URL', { infer: true }), {
         method: 'POST',
@@ -68,7 +79,10 @@ export class DverClient {
       });
       if (response.status !== 200) {
         await response.body?.cancel();
-        return { status: response.status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED' };
+        return finish(
+          { status: response.status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED' },
+          response.status === 403 ? 'authentication_rejected' : 'http_error',
+        );
       }
       const chunks: Uint8Array[] = [];
       let length = 0;
@@ -79,11 +93,16 @@ export class DverClient {
         length += value.byteLength;
         if (length > 65_536) {
           await reader.cancel();
-          return { status: 'REVIEW_REQUIRED' };
+          return finish({ status: 'REVIEW_REQUIRED' }, 'response_too_large');
         }
         chunks.push(value);
       }
-      const result: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      let result: unknown;
+      try {
+        result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        return finish({ status: 'REVIEW_REQUIRED' }, 'invalid_response');
+      }
       if (
         typeof result === 'object' &&
         result !== null &&
@@ -96,11 +115,18 @@ export class DverClient {
         typeof result.receivedAt === 'string' &&
         isZonedDate(result.receivedAt)
       )
-        return { status: 'ACCEPTED', parcelNo: result.parcelNo, receivedAt: result.receivedAt };
-      return { status: 'REVIEW_REQUIRED' };
+        return finish({
+          status: 'ACCEPTED',
+          parcelNo: result.parcelNo,
+          receivedAt: result.receivedAt,
+        });
+      return finish({ status: 'REVIEW_REQUIRED' }, 'invalid_response');
     } catch {
       // 응답 유실은 접수 실패를 뜻하지 않으므로 자동으로 다시 전송하지 않는다.
-      return { status: 'REVIEW_REQUIRED' };
+      return finish(
+        { status: 'REVIEW_REQUIRED' },
+        controller.signal.aborted ? 'timeout' : 'transport_error',
+      );
     } finally {
       clearTimeout(timeout);
     }

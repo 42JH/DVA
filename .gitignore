@@ -48,6 +48,8 @@ yarn-error.log*
 *.tmp
 *.temp
 .deploy/
+infra/observability/.runtime/
+infra/observability/deploy.lock
 msa-release/
 infra/jenkins/home/
 infra/jenkins/bootstrap-output/

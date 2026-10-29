@@ -668,6 +668,12 @@ export class OrdersService {
           client,
         );
       });
+      this.logger.log({
+        event: 'order_submission_result',
+        orderSeq: id,
+        requestId,
+        outcome: result.status,
+      });
       return { status: result.status };
     } catch {
       this.logger.error({ event: 'order_submission_result_save_failed', orderSeq: id, requestId });
