@@ -229,7 +229,7 @@ Table handoff_requests {
   call_session_seq integer [not null, unique, note: '연결 대상 ID']
   reason text [not null, note: '상담원 연결 요청 사유']
   status text [not null, note: '업무 상태']
-  assigned_admin_user_seq integer [note: '연결 대상 ID']
+  assigned_admin_user_seq integer [note: '관리자 논리 참조. 계정 삭제 후에도 번호 보존']
   summary_text text [note: '상담원에게 전달할 AI 상담 요약']
   requested_at timestamptz [not null, note: '상담원 연결 요청 시각']
   checks {
@@ -263,7 +263,7 @@ Table shipment_status_history {
   from_status text [note: '변경 전 배송 상태. 최초 생성 이력은 NULL']
   to_status text [not null, note: '변경 후 배송 상태']
   actor_type text [not null, note: '작업 주체: ADMIN / SYSTEM']
-  actor_admin_user_seq integer [note: '변경한 관리자 ID. SYSTEM 작업은 NULL']
+  actor_admin_user_seq integer [note: '관리자 논리 참조. SYSTEM 작업은 NULL. 이름은 감사 로그에 보존']
   occurred_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '작업 발생 시각']
   checks {
     `from_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
@@ -288,9 +288,9 @@ Table admin_users {
   checks {
     `name ~ '[^[:space:]]'`
     `role IN ('OPERATOR','SUPERVISOR','SYSTEM_ADMIN')`
-    `status IN ('ACTIVE','PENDING')`
+    `status IN ('ACTIVE','PENDING','INACTIVE')`
   }
-  Note: 'operations / 관리자 계정. ACTIVE만 접근 허용 예정이며 PENDING은 승인 대기다.'
+  Note: 'operations / ACTIVE만 로그인 가능. PENDING은 가입 대기, INACTIVE는 비활성. SYSTEM_ADMIN은 삭제 불가. 계정 실제 삭제 시 세션만 함께 삭제하며 이름은 감사 로그에 보존.'
 }
 
 Table admin_sessions {
@@ -312,22 +312,24 @@ Ref: admin_sessions.admin_user_seq > admin_users.admin_user_seq [delete: cascade
 
 Table audit_logs {
   audit_log_seq integer [pk, increment, not null, note: '행의 고유 기본키']
-  actor_type text [not null, note: '작업 주체: ADMIN / SYSTEM']
-  actor_seq integer [note: 'ADMIN이면 관리자 번호, SYSTEM이면 NULL. 논리 참조']
+  actor_type text [not null, note: '작업 주체: ADMIN / AI / SYSTEM']
+  actor_seq integer [note: 'ADMIN이면 관리자 번호, AI·SYSTEM이면 NULL. 논리 참조']
+  actor_name text [note: '작업 당시 관리자 이름 또는 AI. 기존 식별 불가 기록은 NULL']
   action text [not null, note: '실행한 작업 코드']
   target_type text [not null, note: '작업 대상 종류']
   target_seq integer [note: '작업 대상의 번호. 논리 참조']
+  target_admin_name text [note: 'ADMIN_USER 대상의 당시 이름. 계정 삭제 후에도 보존']
   request_id uuid [not null, note: '작업을 발생시킨 요청 추적 UUID. 테이블 PK와 별개']
   result text [not null, note: '작업 결과: SUCCESS / DENIED / FAILED']
   metadata jsonb [not null, note: '감사에 필요한 추가 작업 정보. JSON 객체']
   occurred_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '작업 발생 시각']
   checks {
-    `actor_type IN ('ADMIN','SYSTEM')`
+    `actor_type IN ('ADMIN','AI','SYSTEM')`
     `result IN ('SUCCESS','DENIED','FAILED')`
     `jsonb_typeof(metadata)='object'`
-    `(actor_type='ADMIN' AND actor_seq IS NOT NULL AND actor_seq>0) OR (actor_type='SYSTEM' AND actor_seq IS NULL)`
+    `(actor_type='ADMIN' AND actor_seq IS NOT NULL AND actor_seq>0) OR (actor_type IN ('AI','SYSTEM') AND actor_seq IS NULL)`
   }
-  Note: 'operations / 관리자 또는 시스템의 작업을 자동 기록. actor_seq와 target_seq는 FK가 아닌 논리 참조다. / SQL 인덱스: CREATE INDEX audits_target_idx ON audit_logs(target_type,target_seq,occurred_at DESC);'
+  Note: 'operations / 관리자·AI·서버 작업의 감사 기록. actor_seq와 target_seq는 논리 참조이며 관리자 삭제 후에도 번호·이름을 보존. 기존 로그는 015 migration 당시 확인 가능한 이름만 보완. / SQL 인덱스: CREATE INDEX audits_target_idx ON audit_logs(target_type,target_seq,occurred_at DESC);'
 }
 
 Table ai_personas {
@@ -346,10 +348,10 @@ Table ai_persona_versions {
   speaking_rate numeric [note: 'AI 지원 속도. NULL은 기본 속도']
   turn_wait_level text [not null, note: 'SHORT / NORMAL / LONG. AI 지원 목록으로 검증']
   status text [not null, default: 'INACTIVE', note: 'ACTIVE / PENDING / INACTIVE. 서비스 전체 ACTIVE·PENDING 각각 최대 1개']
-  created_by_admin_user_seq integer [note: '연결 대상 ID']
+  created_by_admin_user_seq integer [note: '작성 관리자 논리 참조. 이름은 감사 로그에 보존']
   created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
   application_id uuid [note: '적용 요청 식별자. 같은 버전 재요청도 새 식별자 사용']
-  requested_by_admin_user_seq integer [note: '적용 요청 관리자']
+  requested_by_admin_user_seq integer [note: '적용 요청 관리자 논리 참조. 이름은 감사 로그에 보존']
   requested_at timestamptz [note: '최신 적용 요청 시각']
   applied_at timestamptz [note: 'AI 적용 확인 시각']
   last_notified_at timestamptz [note: 'AI 알림 재시도 시각']
@@ -371,7 +373,7 @@ Table faq_entries {
   faq_entry_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   question text [not null, note: 'FAQ 질문']
   answer text [not null, note: 'FAQ 답변']
-  updated_by_admin_user_seq integer [not null, note: '연결 대상 ID']
+  updated_by_admin_user_seq integer [not null, note: '수정 관리자 논리 참조. 이름은 감사 로그에 보존']
   created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '행 생성 시각']
   updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '마지막 변경 시각']
   checks {
@@ -393,11 +395,6 @@ Ref: orders.order_seq ?< call_sessions.order_seq
 Ref: call_sessions.call_session_seq < call_utterances.call_session_seq
 Ref: call_sessions.call_session_seq < recordings.call_session_seq
 Ref: call_sessions.call_session_seq - handoff_requests.call_session_seq
-Ref: admin_users.admin_user_seq ?< handoff_requests.assigned_admin_user_seq
 Ref: order_parcels.order_parcel_seq - shipments.order_parcel_seq
 Ref: shipments.shipment_seq < shipment_status_history.shipment_seq
-Ref: admin_users.admin_user_seq ?< shipment_status_history.actor_admin_user_seq
 Ref: ai_personas.ai_persona_seq < ai_persona_versions.ai_persona_seq
-Ref: admin_users.admin_user_seq ?< ai_persona_versions.created_by_admin_user_seq
-Ref: admin_users.admin_user_seq ?< ai_persona_versions.requested_by_admin_user_seq
-Ref: admin_users.admin_user_seq < faq_entries.updated_by_admin_user_seq

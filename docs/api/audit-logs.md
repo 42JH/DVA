@@ -1,104 +1,113 @@
-# 관리자 감사 로그 조회
+# 감사 로그
 
-Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101)
+관련 Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101).
+조회는 `dva_session`으로 인증한 ACTIVE 상태의 SUPERVISOR·SYSTEM_ADMIN만 가능하다.
 
-두 API 모두 `dva_session` 쿠키로 인증하며 활성 `SUPERVISOR`, `SYSTEM_ADMIN`만 조회할 수 있다.
+## 조회 API
 
-## 목록: GET /api/audit-logs
-
-선택 필터는 `actorSeq`, `action`, `targetType`, `targetSeq`, `result`, `from`, `to`다.
-기간은 시작 포함·종료 미포함이며 시간대가 포함된 datetime을 사용한다.
-`limit`은 기본 20, 범위 1~100이고 `offset`은 기본 0이다.
-발생 시각 내림차순, 동일 시각에서는 로그 식별자 내림차순으로 정렬한다.
-응답은 `{ data: Audit[], hasNext: boolean }`이다.
-
-## 상세: GET /api/audit-logs/{id}
-
-`id`는 `auditLogSeq`이며 1~2147483647 범위의 정수다.
-응답은 `{ data: Audit, meta: { requestId: string } }`이다.
-Audit에는 `auditLogSeq`, `actorType`, `actorSeq`, `action`, `targetType`,
-`targetSeq`, `requestId`, `result`, `metadata`, `occurredAt`이 포함된다.
-`actorSeq`, `targetSeq`는 null일 수 있다.
-기록의 `requestId`는 당시 작업의 추적 ID이고 `meta.requestId`는 현재 조회 요청의 추적 ID다.
-
-공개 필드 정책이 정해지기 전까지 목록·상세의 `metadata`는 빈 객체다.
-DB에 저장된 원문 JSON이나 비밀번호·토큰 등 비밀값은 반환하지 않는다.
-
-| HTTP | code | 조건 |
+| API | 입력 | 응답 |
 | --- | --- | --- |
-| 400 | INVALID_REQUEST | 잘못된 식별자·검색 조건 |
-| 401 | UNAUTHORIZED | 유효한 로그인 세션 없음 |
-| 403 | FORBIDDEN | 조회 역할 없음 |
-| 404 | NOT_FOUND | 상세 조회 대상 없음 |
+| GET /api/audit-logs | 선택: actorSeq, action, targetType, targetSeq, result, from, to, limit, offset | `{ data: Audit[], hasNext }` |
+| GET /api/audit-logs/{id} | auditLogSeq, 1~2147483647 정수 | `{ data: Audit, meta: { requestId } }` |
 
-조회 API는 원본을 수정하지 않는다. 감사 로그 수정·삭제 API는 제공하지 않는다.
+최신 발생 시각부터, 같은 시각이면 로그 번호 내림차순으로 정렬한다.
+limit은 기본 20·최대 100, offset은 기본 0이다. 기간은 시작 포함·종료 미포함이며 시간대를 명시한다.
+잘못된 입력은 400, 세션 없음은 401, 권한 없음은 403, 없는 상세는 404다.
 
-## 기록 규칙
+| Audit 필드 | 의미 |
+| --- | --- |
+| auditLogSeq | 로그 번호 |
+| actorType | ADMIN / AI / SYSTEM |
+| actorSeq | 작업한 관리자 번호. AI·SYSTEM은 null |
+| actorName | 작업 당시 관리자 이름, AI는 `AI`. 서버 작업·과거 미식별 기록은 null |
+| action | 작업 코드 |
+| targetType, targetSeq | 대상 종류·번호. 대상 번호가 확인되지 않으면 null |
+| targetAdminName | ADMIN_USER 대상의 당시 이름. 다른 대상·미식별 대상은 null |
+| requestId | 당시 업무 요청 ID. 조회 응답의 meta.requestId와 별개 |
+| result | SUCCESS / DENIED / FAILED |
+| metadata | 현재 공개 응답은 항상 빈 객체 |
+| occurredAt | 발생 시각 |
 
-관리자 가입·로그인·권한/상태 변경·비밀번호 변경/초기화·로그아웃을 기록한다.
-주소록 등록·수정은 [PIN API](pins.md)의 PERSONAL_PIN_CREATED·PERSONAL_PIN_UPDATED·COMPANY_PIN_CREATED·COMPANY_PIN_UPDATED로 기록한다.
-성공 기록은 기존 업무 트랜잭션에서 저장한다. 감사 저장 실패 시 업무 변경도 롤백한다.
-이미 만료되거나 삭제된 세션의 반복 로그아웃은 성공 기록을 추가하지 않는다.
+관리자 이름은 로그 자체에 저장하므로 계정을 삭제하거나 이름이 바뀌어도 기존 기록은 유지된다.
+작업자와 대상은 다를 수 있다. 최상위 관리자가 다른 관리자를 삭제하면
+actorName에는 삭제한 사람, targetAdminName에는 삭제된 사람의 이름이 남는다.
+감사 로그 수정·삭제 API는 제공하지 않는다.
 
-감사 대상 HTTP 메서드의 `@AuditOperation`은 실패 기록의 작업 종류와 대상 해석을 선언한다.
-Guard의 401/403은 `DENIED`, 이후 DTO/업무/저장 오류는 `FAILED`로 기록한다
-(이후 단계의 401/403도 `DENIED`). 실패 기록은 업무 롤백이 끝난 뒤 별도 쿼리로 저장한다.
-Guard 거부와 Interceptor 실패 경로는 겹치지 않으므로 같은 실패를 이중 기록하지 않는다.
-요청 본문·비밀번호·세션 쿠키·SQL 오류 메시지를 감사 레코드에 복사하지 않는다.
+## 작업 주체와 저장 규칙
 
-인증된 작업자는 세션에서 가져온다. 로그인 실패·가입 등 인증 주체를 확인할 수 없는 경우
-기존 스키마에 맞춰 `actorType=SYSTEM`, `actorSeq=null`로 기록한다.
-이 표기는 시스템이 보낸 요청이라는 뜻이 아니라, 식별된 관리자 주체가 없다는 뜻이다.
-유효한 형식의 대상 ID는 시도한 대상이며 해당 리소스가 실제 존재한다는 보장은 아니다.
-`requestId`는 추적용이며 멱등키나 중복 방지 키로 사용하지 않는다.
+- ADMIN: 서버가 확인한 관리자 번호와 이름을 기록한다. 클라이언트가 보낸 작업자 이름은 받지 않는다.
+- AI: 주문·개인 주소록·고객의 기존 AI 호출 경로와 페르소나 적용 회신. actorSeq=null, actorName=AI다.
+- SYSTEM: 초기 관리자 생성, 로그인 실패·가입 등 관리자 주체가 확인되지 않은 요청.
+  관리자 번호가 없다는 이유만으로 모든 서버 작업을 AI로 분류하지 않는다.
 
-DB 자체가 불능이면 실패 감사 저장도 실패할 수 있다. 원래 오류 응답을 유지하고,
-서버 로그에 `audit_write_failed`와 requestId만 남긴다. 영속 재시도 큐는 없다.
-Nginx·CORS·본문 파싱 등 Guard 이전에 차단된 요청, 읽기 API 및 내부 서비스 직접 호출은
-이 HTTP 실패 감사 범위에 포함되지 않는다.
+기존 MVP AI API의 서비스 인증 정책은 바꾸지 않는다. AI 표기는 해당 호출 경로를 나타내며
+새 인증 기능을 뜻하지 않는다. 페르소나 회신은 기존 서비스 토큰 검증에 성공한 뒤 AI로 식별한다.
+잘못된 관리자 쿠키는 AI 호출로 바뀌지 않는다.
 
-기업 등록은 `ORGANIZATION_CREATED` / `ORGANIZATION`으로 기록한다.
-기업 행·성공 감사는 같은 트랜잭션에 저장한다.
-기업 POST는 매번 독립 등록이며 생성된 기업마다 성공 감사를 남긴다.
-본문 불일치나 저장 실패는 별도 `FAILED`, 세션 거부는 `DENIED`로 기록한다.
+성공 로그는 업무 변경과 같은 트랜잭션으로 저장한다. 감사 저장 실패 시 DB 업무 변경도 롤백한다.
+외부 디버 호출은 트랜잭션 밖에서 실행하고, 이미 전송된 주문의 결과 저장에 실패하면 기존대로 SUBMITTING을 유지한다.
+API 반환 성공이 외부 요청 취소·롤백을 뜻하지 않는다.
 
-기업 수정은 `ORGANIZATION_UPDATED` / `ORGANIZATION`으로 기록한다.
-기업명·상태 변경과 성공 감사가 같은 트랜잭션에 저장되며 감사 저장 실패 시 변경도 롤백한다.
-기존 PATCH 계약에는 멱등키가 없으므로 독립된 PATCH 요청은 각각 작업으로 기록한다.
+`@AuditOperation`이 선언된 API의 실패는 업무 롤백 후 별도로 기록한다.
+401·403은 DENIED, 나머지 오류는 FAILED다. Guard와 Interceptor는 같은 실패를 중복 기록하지 않는다.
+페르소나 서비스 토큰 거부도 별도 Guard에서 기록한다.
+실패 로그의 targetSeq는 시도한 대상 번호이며 실제 존재를 보장하지 않는다.
 
-## 이벤트와 후속 연동
+비밀번호·쿠키·토큰·주소·전화번호·프롬프트·CSV 원문을 감사 로그에 복사하지 않는다.
+requestId는 추적용으로만 사용하며 별도 중복 방지 테이블은 추가하지 않는다.
+DB 자체가 불능이면 실패 로그도 저장하지 못할 수 있다. 원래 오류 응답을 유지하고 서버에 audit_write_failed를 남긴다.
 
-| 이벤트 | 대상 | 현재 연결 |
+## 현재 기록하는 업무
+
+| 업무/API | 작업 코드 | 대상 |
 | --- | --- | --- |
-| ADMIN_BOOTSTRAP | ADMIN_USER | 최초 관리자 CLI의 기존 성공 기록 |
-| ADMIN_SIGNUP | ADMIN_USER | 가입 |
-| ADMIN_LOGIN | ADMIN_USER | 로그인 |
-| ADMIN_LOGOUT | ADMIN_USER | 유효한 세션 로그아웃 |
-| ADMIN_ACCESS_CHANGED | ADMIN_USER | 역할·상태 변경 |
-| ADMIN_PASSWORD_CHANGED | ADMIN_USER | 본인 변경·관리자 초기화 |
-| ORGANIZATION_CREATED | ORGANIZATION | 기업 등록 |
-| ORGANIZATION_UPDATED | ORGANIZATION | 기업명·상태 수정 |
-| MEMBERSHIP_CREATED | MEMBERSHIP | 기업 구성원 개별 등록 |
-| MEMBERSHIP_UPDATED | MEMBERSHIP | 대표자 표시·소속 상태 변경 |
-| MEMBERSHIP_REMOVED | MEMBERSHIP | 기업 소속 연결 해제 |
-| MEMBERS_IMPORTED | ORGANIZATION | 직원 CSV 등록·이름·전화번호 갱신 |
+| 최초 관리자 CLI, POST /auth/signup | ADMIN_BOOTSTRAP, ADMIN_SIGNUP | ADMIN_USER |
+| POST /auth/login, /auth/logout | ADMIN_LOGIN, ADMIN_LOGOUT | ADMIN_USER |
+| PATCH /admins/{id}, /admins/{id}/role | ADMIN_ACCESS_CHANGED | ADMIN_USER |
+| PATCH /auth/password, /admins/{id}/password | ADMIN_PASSWORD_CHANGED | ADMIN_USER |
+| DELETE /admins/{id} | ADMIN_DELETED | ADMIN_USER |
+| 기업 등록·수정 | ORGANIZATION_CREATED, ORGANIZATION_UPDATED | ORGANIZATION |
+| 구성원 등록·수정·소속 해제 | MEMBERSHIP_CREATED, MEMBERSHIP_UPDATED, MEMBERSHIP_REMOVED | MEMBERSHIP |
+| 구성원 CSV 등록·갱신 | MEMBERS_IMPORTED | ORGANIZATION |
+| POST /customers, 주문 중 신규 고객 생성 | CUSTOMER_CREATED | CUSTOMER |
+| PATCH /customers/{id}: 이름·상태·탈퇴 | CUSTOMER_UPDATED | CUSTOMER |
+| POST /customers/context 또는 /orders에서 새 통화 생성 | CALL_STARTED | CALL_SESSION |
+| 개인·기업 주소록 등록·수정 | PERSONAL_PIN_CREATED/UPDATED, COMPANY_PIN_CREATED/UPDATED | PERSONAL_PIN / COMPANY_PIN |
+| POST /orders, /admin/orders | ORDER_CREATED | ORDER |
+| PATCH /orders/{id} | ORDER_UPDATED | ORDER |
+| 주문 전체·선택 상세 취소 | ORDER_CANCELLED, ORDER_PARCEL_CANCELLED | ORDER / ORDER_PARCEL |
+| 디버 접수 시작·결과 확정 | ORDER_SUBMISSION_STARTED, ORDER_SUBMISSION_ACCEPTED/AUTH_FAILED/REVIEW_REQUIRED | ORDER |
+| FAQ 등록·수정·초기 등록 | FAQ_CREATED, FAQ_UPDATED, FAQ_BOOTSTRAPPED | FAQ_ENTRY |
+| 페르소나 등록·설정 수정 | PERSONA_CREATED, PERSONA_UPDATED | AI_PERSONA_VERSION |
+| 페르소나 적용 요청·대기 교체·대기 취소 | PERSONA_APPLY_REQUESTED, PERSONA_PENDING_REPLACED, PERSONA_PENDING_CANCELLED | AI_PERSONA_VERSION |
+| POST /ai/config/apply-result: 적용 성공·실패 회신 | PERSONA_APPLIED, PERSONA_APPLY_FAILED | AI_PERSONA_VERSION |
 
-구성원 API는 업무 변경·성공 감사를 같은 트랜잭션에서 저장하며 별도 요청 키 기록은 사용하지 않는다.
-개별 등록 중복은 고유 제약으로 거절하고, 성공한 CSV 재업로드는 각각 성공 감사를 남긴다.
-CSV 원문과 이름·전화번호는 감사에 저장하지 않는다.
-소속 해제 감사는 작업 기록이며 과거 소속 전체를 복구할 수 있는 이력은 아니다.
-자세한 계약은 [기업 구성원 API](members.md)를 참고한다.
+경로는 모두 /api 아래다. 주문 submit의 HTTP 거부·실패 코드는 ORDER_SUBMITTED,
+페르소나 회신 자체의 인증·입력·처리 오류 코드는 PERSONA_APPLY_RESULT다.
+AI가 정상적으로 보낸 적용 실패는 PERSONA_APPLY_FAILED / FAILED로 별도 기록한다.
 
-Jira 101의 주문 수정·취소, 배송 상태 변경, AI 설정 적용은 현재 모놀리식에 해당 API가 없어
-실제 연동되지 않았다. 관련 작업(61·64·67·98)의 구현 시 이벤트 이름과 대상 계약을 확정하고,
-같은 트랜잭션에서 `AuditService.recordSuccess(event, client)`를 호출해야 한다.
-HTTP 실패 기록은 `@AuditOperation`을 함께 선언한다. 외부 MSA 이벤트의 중복 방지·전달 보장은
-별도 수신/outbox 계약이 필요하며 이 구현으로 해결됐다고 간주하지 않는다.
-따라서 이 MR 병합만으로 Jira 101의 모든 업무 연동이 완료되는 것은 아니다.
+같은 통화 재요청은 CALL_STARTED를 추가하지 않는다. 고객 확인의 조회만 수행하면 성공 감사를 만들지 않는다.
+이미 처리한 주문 요청 키, 이미 적용한 페르소나 성공 회신, 유효 세션 없는 반복 로그아웃도 성공 로그를 늘리지 않는다.
+CSV는 업로드 한 번에 집계 로그 한 건을 남기며 개별 고객 전체 변경 이력을 저장하지 않는다.
+기록은 누가 어떤 대상을 처리했는지 확인하기 위한 것이며 원문·변경 전후 데이터를 복구하는 저장소는 아니다.
+
+일반 조회·Nginx/본문 파싱 단계의 오류·주석이 없는 내부 호출은 HTTP 실패 감사 대상이 아니다.
+PBX 수신·S3 재처리는 기존 웹훅 수신함과 recordings에서 추적한다.
+별도 배송 상태 변경·상담원 배정 변경 API는 현재 구현되지 않아 새 감사 이벤트도 만들지 않는다.
+
+## 관리자 실제 삭제와 DB 적용
+
+새 앱과 초기 등록 CLI를 실행하기 전에 `015-admin-deletion-audit.sql`을 적용한다.
+새 테이블 없이 감사 로그에 actor_name·target_admin_name을 추가하고 기존 계정으로 확인 가능한 이름을 보완한다.
+이전 이름을 복원하는 것은 아니며, 기존 SYSTEM 기록을 근거 없이 AI로 바꾸지 않는다.
+
+관리자 참조 5곳(상담원 배정·배송 상태 이력·페르소나 작성자/적용 요청자·FAQ 수정자)은 번호를 보존하는 논리 참조다.
+admin_sessions는 ON DELETE CASCADE를 유지한다. 삭제 API는 먼저 이름을 감사에 기록하고 계정을 삭제하며 둘 다 함께 커밋한다.
+삭제 전에 인증을 마친 실행 중 작업은 계속될 수 있다. 뒤늦은 감사 저장 시에는 삭제 로그에서 이름을 찾을 수 있다.
+삭제 후 loginId를 다시 가입에 사용해도 새 adminUserSeq를 발급하므로 이전 감사와 혼동하지 않는다.
 
 ## 검증
 
-`node backend/scripts/check.cjs`는 격리 DB에서 인증·역할·검색·페이지·기간 경계·상세 404,
-민감 metadata 비노출, 실패 기록 단일 저장, 업무 롤백 후 FAILED 기록,
-기업 등록·수정과 감사의 원자성을 검사한다.
-기존 PBX, 세션 만료/비밀번호 변경, 기업 API, 운영 이미지와 Nginx 회귀도 함께 실행한다.
+`node backend/scripts/check.cjs`: 권한·이름 보존·물리 삭제·세션 종료·동시 로그인·감사 실패 롤백,
+AI/관리자/SYSTEM 구분, 기존 업무 API와 운영 이미지·Nginx 경로를 임시 DB와 모의 외부 서비스로 검증한다.
+`infra/database/test-monolith.ps1`: 신규 적용·기존 이름 보완·업무 이력 보존·세션 cascade·업그레이드 롤백·백업 복원을 검증한다.

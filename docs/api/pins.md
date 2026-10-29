@@ -153,7 +153,7 @@ AI는 등록 응답의 PIN 번호와 version, 수정 응답의 version으로 통
 
 개인 쓰기는 PERSONAL_PIN_CREATED·PERSONAL_PIN_UPDATED, 기업 쓰기는
 COMPANY_PIN_CREATED·COMPANY_PIN_UPDATED 감사 기록을 업무 변경과 같은 트랜잭션에 저장한다.
-AI는 SYSTEM, 관리자는 ADMIN으로 기록하며 주소·전화번호·본문은 감사 metadata에 담지 않는다.
+AI는 AI, 관리자는 ADMIN과 당시 이름으로 기록하며 주소·전화번호·본문은 감사 metadata에 담지 않는다.
 실패·거부 기록도 기존 감사 흐름을 따른다. 감사 성공 기록 저장에 실패하면 업무 변경도 롤백한다.
 
 기존 테이블·고유 인덱스·검색 생성 컬럼·버전 트리거를 사용하며 DB 마이그레이션은 추가하지 않는다.
