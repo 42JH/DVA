@@ -107,15 +107,17 @@ async function fixture({
   return { id, parcels };
 }
 
-function cancel(id, { cookie = cookies[0], call, requestId = randomUUID(), parcel } = {}) {
-  return fetch(`${base}/orders/${id}${parcel === undefined ? '' : `/parcels/${parcel}`}/cancel`, {
+function cancel(id, { cookie = cookies[0], call, requestId = randomUUID(), parcels } = {}) {
+  return fetch(`${base}/orders/${id}${parcels === undefined ? '' : '/parcels'}/cancel`, {
     method: 'POST',
     headers: {
       Origin: origin,
       'X-Request-Id': requestId,
+      'Content-Type': 'application/json',
       ...(cookie ? { Cookie: cookie } : {}),
       ...(call === undefined ? {} : { call_session_seq: String(call) }),
     },
+    body: parcels === undefined ? undefined : JSON.stringify({ orderParcelSeqs: parcels }),
   });
 }
 
@@ -146,6 +148,9 @@ test('all three admin roles cancel drafts immediately; empty drafts also cancel'
     const detail = await fetch(`${base}/orders/${id}`, { headers: { Cookie: cookie } });
     assert.equal(detail.status, 200);
     assert.ok((await detail.json()).data.parcels.every((p) => p.status === 'CANCELLED'));
+    const selected = await fixture();
+    assert.equal((await cancel(selected.id, { cookie, parcels: selected.parcels })).status, 204);
+    assert.equal((await state(selected.id)).order.status, 'CANCELLED');
   }
 });
 
@@ -273,7 +278,7 @@ test('audit failure rolls back order, parcel and shipment writes', async () => {
   assert.equal((await cancel(id)).status, 204);
 });
 
-test('cancellation waits for a concurrent payment transaction and rechecks paid state', async () => {
+test('batch cancellation waits for a concurrent payment transaction and rechecks paid state', async () => {
   const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
   const client = await pool.connect();
   try {
@@ -281,7 +286,7 @@ test('cancellation waits for a concurrent payment transaction and rechecks paid 
     await client.query("UPDATE shipments SET status='paid' WHERE order_parcel_seq=$1", [
       parcels[0],
     ]);
-    const pending = cancel(id);
+    const pending = cancel(id, { parcels });
     let waiting = false;
     for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
       waiting = (
@@ -329,7 +334,7 @@ test('path validation and Swagger describe empty 204 with one call header', asyn
 
 test('individual cancellation preserves siblings and completes the parent only on the last parcel', async () => {
   const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
-  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   const partial = await state(id);
   assert.equal(partial.order.status, 'ACCEPTED');
   assert.deepEqual(
@@ -340,16 +345,16 @@ test('individual cancellation preserves siblings and completes the parent only o
     partial.shipments.map((s) => s.status),
     ['canceled', 'notPaid'],
   );
-  const repeated = await cancel(id, { parcel: parcels[0] });
+  const repeated = await cancel(id, { parcels: [parcels[0]] });
   assert.equal(repeated.status, 204);
   assert.equal(await repeated.text(), '');
   assert.deepEqual(await state(id), partial);
-  assert.equal((await cancel(id, { parcel: parcels[1] })).status, 204);
+  assert.equal((await cancel(id, { parcels: [parcels[1]] })).status, 204);
   const complete = await state(id);
   assert.equal(complete.order.status, 'CANCELLED');
   assert.equal(complete.order.parcel_no, 'TEST0064');
   assert.equal(complete.history.length, 2);
-  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   assert.deepEqual(await state(id), complete);
   assert.equal((await cancel(id)).status, 409);
   const audit = await pool.query(
@@ -364,14 +369,14 @@ test('individual cancellation preserves siblings and completes the parent only o
 
 test('whole cancellation skips cancelled parcels, but a paid remaining parcel still blocks all writes', async () => {
   const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
-  assert.equal((await cancel(id, { parcel: parcels[0] })).status, 204);
+  assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   assert.equal((await cancel(id)).status, 204);
   assert.equal((await state(id)).history.length, 2);
   const paid = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'paid'] });
-  assert.equal((await cancel(paid.id, { parcel: paid.parcels[0] })).status, 204);
+  assert.equal((await cancel(paid.id, { parcels: [paid.parcels[0]] })).status, 204);
   const previous = await state(paid.id);
   assert.equal((await cancel(paid.id)).status, 409);
-  assert.equal((await cancel(paid.id, { parcel: paid.parcels[1] })).status, 409);
+  assert.equal((await cancel(paid.id, { parcels: [paid.parcels[1]] })).status, 409);
   assert.deepEqual(await state(paid.id), previous);
 });
 
@@ -379,26 +384,27 @@ test('individual route validates parcel membership, IDs and AI ownership before 
   const mine = await fixture();
   const other = await fixture({ customer: otherId });
   for (const parcel of ['0', '-1', 'bad', '2147483648'])
-    assert.equal((await cancel(mine.id, { parcel })).status, 400);
-  assert.equal((await cancel(mine.id, { parcel: other.parcels[0] })).status, 404);
-  assert.equal((await cancel(mine.id, { parcel: 2147483647 })).status, 404);
+    assert.equal((await cancel(mine.id, { parcels: [parcel] })).status, 400);
+  assert.equal((await cancel(mine.id, { parcels: [other.parcels[0]] })).status, 404);
+  assert.equal((await cancel(mine.id, { parcels: [2147483647] })).status, 404);
   assert.equal(
-    (await cancel(other.id, { parcel: other.parcels[0], cookie: null, call: callId })).status,
+    (await cancel(other.id, { parcels: [other.parcels[0]], cookie: null, call: callId })).status,
     404,
   );
   assert.equal((await cancel(other.id)).status, 204);
   assert.equal(
-    (await cancel(other.id, { parcel: other.parcels[0], cookie: null, call: callId })).status,
+    (await cancel(other.id, { parcels: [other.parcels[0]], cookie: null, call: callId })).status,
     404,
   );
   assert.equal(
-    (await cancel(mine.id, { parcel: mine.parcels[0], cookie: null, call: callId })).status,
+    (await cancel(mine.id, { parcels: [mine.parcels[0]], cookie: null, call: callId })).status,
     204,
   );
   assert.equal((await state(mine.id)).order.status, 'COLLECTING');
   const accepted = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
   assert.equal(
-    (await cancel(accepted.id, { parcel: accepted.parcels[0], cookie: null, call: callId })).status,
+    (await cancel(accepted.id, { parcels: [accepted.parcels[0]], cookie: null, call: callId }))
+      .status,
     204,
   );
   assert.equal((await state(accepted.id)).history[0].actor_type, 'SYSTEM');
@@ -407,14 +413,14 @@ test('individual route validates parcel membership, IDs and AI ownership before 
 test('individual retries and different-parcel cancellations serialize without duplicate history', async () => {
   const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
   const first = await Promise.all(
-    Array.from({ length: 3 }, () => cancel(id, { parcel: parcels[0] })),
+    Array.from({ length: 3 }, () => cancel(id, { parcels: [parcels[0]] })),
   );
   assert.ok(first.every((r) => r.status === 204));
   assert.equal((await state(id)).history.length, 1);
   assert.equal((await cancel(id)).status, 204);
   const second = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
   const different = await Promise.all(
-    second.parcels.map((parcel) => cancel(second.id, { parcel })),
+    second.parcels.map((parcel) => cancel(second.id, { parcels: [parcel] })),
   );
   assert.ok(different.every((r) => r.status === 204));
   assert.equal((await state(second.id)).order.status, 'CANCELLED');
@@ -432,7 +438,7 @@ test('failure while completing the last parcel rolls back both cancellation audi
     return original.call(this, event, client);
   };
   try {
-    assert.equal((await cancel(id, { parcel: parcels[0], requestId })).status, 500);
+    assert.equal((await cancel(id, { parcels: [parcels[0]], requestId })).status, 500);
   } finally {
     audit.recordSuccess = original;
   }
@@ -447,11 +453,193 @@ test('failure while completing the last parcel rolls back both cancellation audi
   );
 });
 
-test('individual Swagger has both database identifiers, no body and a single optional call header', async () => {
+test('batch cancellation skips prior cancellations, preserves siblings and audits only new changes', async () => {
+  const { id, parcels } = await fixture({
+    status: 'ACCEPTED',
+    count: 4,
+    shipments: Array(4).fill('notPaid'),
+  });
+  assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
+  const beforeBatch = await state(id);
+  const requestId = randomUUID();
+  const selection = [parcels[2], parcels[0], parcels[1]];
+  const response = await cancel(id, { parcels: selection, requestId });
+  assert.equal(response.status, 204);
+  assert.equal(await response.text(), '');
+  const partial = await state(id);
+  assert.equal(partial.order.status, 'ACCEPTED');
+  assert.deepEqual(
+    partial.parcels.map((p) => p.status),
+    ['CANCELLED', 'CANCELLED', 'CANCELLED', 'ACTIVE'],
+  );
+  assert.deepEqual(
+    partial.shipments.map((s) => s.status),
+    ['canceled', 'canceled', 'canceled', 'notPaid'],
+  );
+  assert.deepEqual(partial.parcels[3], beforeBatch.parcels[3]);
+  assert.deepEqual(partial.shipments[3], beforeBatch.shipments[3]);
+  assert.equal(partial.history.length, 3);
+  const audits = await pool.query(
+    "SELECT target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY target_seq",
+    [requestId],
+  );
+  assert.deepEqual(
+    audits.rows.map((row) => row.target_seq),
+    [parcels[1], parcels[2]],
+  );
+  const repeatId = randomUUID();
+  assert.equal(
+    (await cancel(id, { parcels: selection.toReversed(), requestId: repeatId })).status,
+    204,
+  );
+  assert.deepEqual(await state(id), partial);
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        repeatId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal((await cancel(id, { parcels: parcels.toReversed() })).status, 204);
+  const complete = await state(id);
+  assert.equal(complete.order.status, 'CANCELLED');
+  assert.equal(complete.order.parcel_no, beforeBatch.order.parcel_no);
+  assert.equal(complete.history.length, 4);
+  assert.equal((await cancel(id, { parcels })).status, 204);
+  assert.deepEqual(await state(id), complete);
+});
+
+test('batch validates every selected parcel before mutating or returning a no-op', async () => {
+  const mine = await fixture();
+  const foreign = await fixture({ customer: otherId });
+  const beforeMine = await state(mine.id),
+    beforeForeign = await state(foreign.id);
+  for (const selection of [
+    [mine.parcels[0], foreign.parcels[0]],
+    [mine.parcels[0], 2147483647],
+  ]) {
+    assert.equal(
+      (await cancel(mine.id, { parcels: selection, cookie: null, call: callId })).status,
+      404,
+    );
+    assert.deepEqual(await state(mine.id), beforeMine);
+    assert.deepEqual(await state(foreign.id), beforeForeign);
+  }
+  assert.equal((await cancel(mine.id, { parcels: mine.parcels })).status, 204);
+  const cancelled = await state(mine.id);
+  assert.equal(
+    (await cancel(mine.id, { parcels: [mine.parcels[0], foreign.parcels[0]] })).status,
+    404,
+  );
+  assert.deepEqual(await state(mine.id), cancelled);
+  for (const parcels of [[], null, [mine.parcels[0], mine.parcels[0]], [0], [1.5], ['1']])
+    assert.equal((await cancel(mine.id, { parcels })).status, 400);
+  const missingBody = await fetch(`${base}/orders/${mine.id}/parcels/cancel`, {
+    method: 'POST',
+    headers: { Cookie: cookies[0], Origin: origin },
+  });
+  assert.equal(missingBody.status, 400);
+  assert.deepEqual(await state(mine.id), cancelled);
+});
+
+test('batch cancellation rejects all selected writes when one parcel is paid or lacks payment state', async () => {
+  for (const blocked of ['paid', undefined]) {
+    const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', blocked] });
+    const previous = await state(id);
+    assert.equal((await cancel(id, { parcels })).status, 409);
+    assert.deepEqual(await state(id), previous);
+  }
+  const { id, parcels } = await fixture({
+    status: 'ACCEPTED',
+    count: 3,
+    shipments: ['notPaid', 'notPaid', 'paid'],
+  });
+  assert.equal((await cancel(id, { parcels: parcels.slice(0, 2) })).status, 204);
+  const saved = await state(id);
+  assert.equal(saved.order.status, 'ACCEPTED');
+  assert.deepEqual(
+    saved.shipments.map((s) => s.status),
+    ['canceled', 'canceled', 'paid'],
+  );
+});
+
+test('overlapping batches serialize and cancel each parcel exactly once', async () => {
+  const { id, parcels } = await fixture({
+    status: 'ACCEPTED',
+    count: 3,
+    shipments: Array(3).fill('notPaid'),
+  });
+  const responses = await Promise.all([
+    cancel(id, { parcels: [parcels[1], parcels[0]] }),
+    cancel(id, { parcels: [parcels[2], parcels[1]] }),
+  ]);
+  assert.ok(responses.every((response) => response.status === 204));
+  const saved = await state(id);
+  assert.equal(saved.order.status, 'CANCELLED');
+  assert.equal(saved.history.length, 3);
+  assert.ok(saved.shipments.every((shipment) => shipment.version === 2));
+  const audits = await pool.query(
+    "SELECT action,count(*)::int AS n FROM audit_logs WHERE result='SUCCESS' AND ((target_type='ORDER' AND target_seq=$1) OR (target_type='ORDER_PARCEL' AND target_seq=ANY($2::int[]))) GROUP BY action ORDER BY action",
+    [id, parcels],
+  );
+  assert.deepEqual(audits.rows, [
+    { action: 'ORDER_CANCELLED', n: 1 },
+    { action: 'ORDER_PARCEL_CANCELLED', n: 3 },
+  ]);
+});
+
+test('later parcel audit failure rolls back earlier parcel changes, shipment history and audits', async () => {
+  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const previous = await state(id),
+    requestId = randomUUID();
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  let reachedSecond = false;
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'ORDER_PARCEL_CANCELLED' && event.targetId === parcels[1]) {
+      reachedSecond = true;
+      throw new Error('second parcel audit failure probe');
+    }
+    return original.call(this, event, client);
+  };
+  try {
+    assert.equal((await cancel(id, { parcels, requestId })).status, 500);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal(reachedSecond, true);
+  assert.deepEqual(await state(id), previous);
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        requestId,
+      ])
+    ).rowCount,
+    0,
+  );
+});
+
+test('batch Swagger requires a unique array body and one optional call header', async () => {
   const doc = await (await fetch(base + '/docs-json')).json();
-  const operation = doc.paths['/api/orders/{id}/parcels/{orderParcelSeq}/cancel'].post;
-  assert.equal(operation.summary, '주문 상세 개별 취소');
-  assert.equal(operation.requestBody, undefined);
+  assert.equal(doc.paths['/api/orders/{id}/parcels/{orderParcelSeq}/cancel'], undefined);
+  const operation = doc.paths['/api/orders/{id}/parcels/cancel'].post;
+  assert.equal(operation.summary, '주문 상세 단건·복수 취소');
+  assert.equal(operation.requestBody.required, true);
+  assert.equal(
+    operation.requestBody.content['application/json'].schema.$ref,
+    '#/components/schemas/CancelOrderParcelsDto',
+  );
+  const schema = doc.components.schemas.CancelOrderParcelsDto;
+  assert.deepEqual(schema.required, ['orderParcelSeqs']);
+  assert.equal(schema.properties.orderParcelSeqs.type, 'array');
+  assert.equal(schema.properties.orderParcelSeqs.minItems, 1);
+  assert.equal(schema.properties.orderParcelSeqs.uniqueItems, true);
+  assert.deepEqual(schema.properties.orderParcelSeqs.items, {
+    type: 'integer',
+    minimum: 1,
+    maximum: 2147483647,
+  });
   assert.equal(operation.responses['204'].content, undefined);
   assert.equal(operation.responses['202'], undefined);
   assert.deepEqual(
@@ -459,7 +647,7 @@ test('individual Swagger has both database identifiers, no body and a single opt
       .filter((p) => p.in === 'path')
       .map((p) => p.name)
       .sort(),
-    ['id', 'orderParcelSeq'],
+    ['id'],
   );
   const headers = operation.parameters.filter((p) => p.in === 'header');
   assert.deepEqual(

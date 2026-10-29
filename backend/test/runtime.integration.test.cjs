@@ -679,23 +679,32 @@ test('production cancellation preserves AI phone scope and admin sessions throug
           incomingAt: new Date().toISOString(),
         },
         customer: { name: '취소 프록시 검증', phoneNumber: phone },
-        parcels: [{}, {}],
+        parcels: [{}, {}, {}],
       }),
     });
     assert.equal(response.status, 201, await response.clone().text());
     return (await response.json()).data;
   };
   const order = await create('01064000641');
-  const headers = { call_session_seq: String(order.callSessionSeq) };
+  const headers = {
+    call_session_seq: String(order.callSessionSeq),
+    'Content-Type': 'application/json',
+  };
   const detail = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json()).data;
-  const partialPath = `/orders/${order.orderSeq}/parcels/${detail.parcels[0].orderParcelSeq}/cancel`;
-  assert.equal((await fetch(root + partialPath, { method: 'POST', headers })).status, 204);
+  const partialPath = `/orders/${order.orderSeq}/parcels/cancel`;
+  const partialBody = JSON.stringify({
+    orderParcelSeqs: detail.parcels.slice(0, 2).map((parcel) => parcel.orderParcelSeq),
+  });
+  assert.equal(
+    (await fetch(root + partialPath, { method: 'POST', headers, body: partialBody })).status,
+    204,
+  );
   const partial = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json())
     .data;
   assert.equal(partial.status, 'COLLECTING');
   assert.deepEqual(
     partial.parcels.map((p) => p.status),
-    ['CANCELLED', 'ACTIVE'],
+    ['CANCELLED', 'CANCELLED', 'ACTIVE'],
   );
   const foreign = await create('01064000642');
   assert.equal(
@@ -718,7 +727,10 @@ test('production cancellation preserves AI phone scope and admin sessions throug
   });
   assert.equal(whole.status, 204);
   assert.equal(await whole.text(), '');
-  assert.equal((await fetch(root + partialPath, { method: 'POST', headers })).status, 204);
+  assert.equal(
+    (await fetch(root + partialPath, { method: 'POST', headers, body: partialBody })).status,
+    204,
+  );
   assert.equal(
     (await fetch(root + `/orders/${order.orderSeq}/cancel`, { method: 'POST', headers })).status,
     409,
@@ -748,7 +760,11 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
     ['GET', '/api/orders/2147483647', undefined],
     ['POST', '/api/orders/2147483647/submit', JSON.stringify({ expectedVersion: 1 })],
     ['POST', '/api/orders/2147483647/cancel', undefined],
-    ['POST', '/api/orders/2147483647/parcels/2147483647/cancel', undefined],
+    [
+      'POST',
+      '/api/orders/2147483647/parcels/cancel',
+      JSON.stringify({ orderParcelSeqs: [2147483647] }),
+    ],
     [
       'PATCH',
       '/api/orders/2147483647',

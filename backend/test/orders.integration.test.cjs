@@ -2143,14 +2143,12 @@ const submitOrder = (order, extra = {}, index = 0, body = { expectedVersion: ord
     ),
     body: JSON.stringify(body),
   });
-const cancelOrder = (id, parcel, index = 0) =>
-  fetch(
-    hosts[index] + `/api/orders/${id}${parcel === undefined ? '' : `/parcels/${parcel}`}/cancel`,
-    {
-      method: 'POST',
-      headers: { Origin: origin, Cookie: cookies[index] },
-    },
-  );
+const cancelOrder = (id, parcels, index = 0) =>
+  fetch(hosts[index] + `/api/orders/${id}${parcels === undefined ? '' : '/parcels'}/cancel`, {
+    method: 'POST',
+    headers: { Origin: origin, Cookie: cookies[index], 'Content-Type': 'application/json' },
+    body: parcels === undefined ? undefined : JSON.stringify({ orderParcelSeqs: parcels }),
+  });
 const resetDver = () => {
   dverRequests = [];
   dverRespond = (_req, res) => res.end(JSON.stringify(dverSuccess));
@@ -2335,7 +2333,7 @@ test('cancelled draft details cannot be edited or sent to Dver, and only remaini
     "UPDATE order_parcels SET origin_pin_scope='PERSONAL',origin_pin_seq=2147483647 WHERE order_parcel_seq=$1",
     [cancelled.orderParcelSeq],
   );
-  assert.equal((await cancelOrder(order.orderSeq, cancelled.orderParcelSeq)).status, 204);
+  assert.equal((await cancelOrder(order.orderSeq, [cancelled.orderParcelSeq])).status, 204);
   const partial = (await (await readDetail(order.orderSeq)).json()).data;
   assert.equal(partial.status, 'COLLECTING');
   assert.deepEqual(
@@ -2397,7 +2395,7 @@ test('cancelled accepted snapshots stay out of previous address suggestions whil
   const order = await readyOrder({ parcels: [parcel, parcel] });
   assert.equal((await submitOrder(order)).status, 200);
   const detail = (await (await readDetail(order.orderSeq)).json()).data;
-  assert.equal((await cancelOrder(order.orderSeq, detail.parcels[0].orderParcelSeq)).status, 204);
+  assert.equal((await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq])).status, 204);
   const history = await fetch(
     hosts[0] + `/api/customers/${otherId}/addresses?direction=DESTINATION&limit=100`,
     { headers: { Cookie: cookies[0] } },
@@ -2429,7 +2427,7 @@ test('whole and individual cancellation reject SUBMITTING while Dver is in fligh
   try {
     await errorCode(await cancelOrder(order.orderSeq, undefined, 1), 409, 'INVALID_STATE');
     await errorCode(
-      await cancelOrder(order.orderSeq, detail.parcels[0].orderParcelSeq, 2),
+      await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq], 2),
       409,
       'INVALID_STATE',
     );

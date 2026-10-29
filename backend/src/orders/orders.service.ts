@@ -399,7 +399,7 @@ export class OrdersService {
     id: number,
     requestId: string,
     callSessionHeader?: string,
-    orderParcelSeq?: number,
+    orderParcelSeqs?: number[],
   ): Promise<void> {
     const callId = this.callId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
@@ -408,20 +408,19 @@ export class OrdersService {
       if (!order || (customerId !== null && order.customerSeq !== customerId))
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       const parcels = await this.repository.lockParcels(client, id);
-      const selected = parcels.find((parcel) => parcel.orderParcelSeq === orderParcelSeq);
-      if (orderParcelSeq !== undefined) {
-        if (!selected)
-          throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
-        if (selected.status === 'CANCELLED') return;
-      }
+      const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
+      const selected = selectedIds
+        ? parcels.filter((parcel) => selectedIds.has(parcel.orderParcelSeq))
+        : parcels;
+      if (selectedIds && selected.length !== selectedIds.size)
+        throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+      const targets = selected.filter((parcel) => parcel.status === 'ACTIVE');
+      if (selectedIds && targets.length === 0) return;
       if (order.status === 'CANCELLED')
         throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
       if (order.status !== 'COLLECTING' && order.status !== 'ACCEPTED')
         throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
 
-      const targets = selected
-        ? [selected]
-        : parcels.filter((parcel) => parcel.status === 'ACTIVE');
       const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
       const shipments = await this.repository.lockShipments(client, parcelIds);
       const byParcel = new Map(shipments.map((shipment) => [shipment.orderParcelSeq, shipment]));
@@ -439,12 +438,12 @@ export class OrdersService {
         );
 
       await this.repository.cancelShipments(client, parcelIds, adminId);
-      if (selected) {
-        await this.repository.cancelParcel(client, selected.orderParcelSeq);
+      for (const parcel of selectedIds ? targets : []) {
+        await this.repository.cancelParcel(client, parcel.orderParcelSeq);
         await this.audit.recordSuccess(
           {
             actorId: adminId,
-            targetId: selected.orderParcelSeq,
+            targetId: parcel.orderParcelSeq,
             targetType: 'ORDER_PARCEL',
             action: 'ORDER_PARCEL_CANCELLED',
             requestId,
@@ -453,9 +452,9 @@ export class OrdersService {
         );
       }
       if (
-        !selected ||
+        !selectedIds ||
         parcels.every(
-          (parcel) => parcel.status === 'CANCELLED' || parcel.orderParcelSeq === orderParcelSeq,
+          (parcel) => parcel.status === 'CANCELLED' || selectedIds.has(parcel.orderParcelSeq),
         )
       ) {
         await this.repository.cancel(client, id);
