@@ -352,6 +352,21 @@ test('runtime settings and application callbacks enforce dedicated service authe
   await error(await call('GET', '/api/ai/config', undefined, 1), 403, 'FORBIDDEN');
   await error(await call('POST', '/api/ai/config/apply-result', {}), 401, 'UNAUTHORIZED');
   await error(await serviceCall('POST', '/api/personas', input()), 403, 'FORBIDDEN');
+  for (const [headers, expectedType, expectedStatus] of [
+    [{ Authorization: 'Bearer incorrect' }, 'SYSTEM', 401],
+    [{}, 'AI', 400],
+  ]) {
+    const response = await serviceCall('POST', '/api/ai/config/apply-result', {}, headers);
+    assert.equal(response.status, expectedStatus);
+    const logs = (
+      await pool.query('SELECT actor_type,result FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.deepEqual(logs, [
+      { actor_type: expectedType, result: expectedStatus === 401 ? 'DENIED' : 'FAILED' },
+    ]);
+  }
 });
 
 test('activation stays pending after notification and only an idle applied acknowledgment changes ACTIVE', async () => {
@@ -386,6 +401,13 @@ test('activation stays pending after notification and only an idle applied ackno
   );
   assert.equal((await data(await report(pending))).appliedAt, active.appliedAt);
   assert.equal((await data(await activate(version))).status, 'ACTIVE');
+  const appliedActor = (
+    await pool.query(
+      "SELECT actor_type,actor_name,actor_seq FROM audit_logs WHERE action='PERSONA_APPLIED' AND target_seq=$1",
+      [active.aiPersonaVersionSeq],
+    )
+  ).rows;
+  assert.deepEqual(appliedActor, [{ actor_type: 'AI', actor_name: 'AI', actor_seq: null }]);
   assert.equal(
     (
       await pool.query(
