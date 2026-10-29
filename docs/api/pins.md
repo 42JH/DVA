@@ -49,6 +49,7 @@ MVP 합의에 따라 AI 서비스 토큰은 요구하지 않는다. AI가 호출
 
 AI는 `call_session_seq` 헤더에 기존 DB 통화 번호를 전달한다. 양의 PostgreSQL integer 범위만
 허용한다. 진행 중 통화의 발신번호와 주소록 소유 고객의 전화번호가 같고 고객이 ACTIVE여야 한다.
+번호는 상담 시작 시 `POST /api/customers/context`에 phoneNumber와 call(providerCallId·incomingAt)을 보내 응답의 callSessionSeq에서 받는다. 신규 주문 생성이 선행될 필요는 없다.
 다른 고객의 개인 주소록은 같은 기업 구성원이라도 접근할 수 없다.
 통화 번호 자체는 인증 토큰이 아니며 이 API는 통화를 새로 만들거나 전화번호 본인인증을 수행하지 않는다.
 
