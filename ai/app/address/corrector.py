@@ -376,7 +376,32 @@ def number_distance(heard, real):
     return num_distance(hm, rm) + num_distance(hs, rs)
 
 
+NUMBER_SYLLABLES = set("영공일이삼사오육칠팔구십백")
+
+
+def unlink_gil(text):
+    """연음으로 바뀌어 받아써진 길 번호를 되돌린다: "인동 국일" -> "인동 구길"(구길이 [구길]→"국일"로 들림).
+    ㄱ받침 음절 + "일"에서 받침을 떼면 숫자 글자가 되는 경우만. 바뀐 게 없으면 None."""
+    def fix(m):
+        code = ord(m[1]) - 0xAC00
+        if code % 28 != 1:  # 받침 ㄱ
+            return m[0]
+        base = chr(ord(m[1]) - 1)
+        return " " + base + "길" if base in NUMBER_SYLLABLES else m[0]  # 도로명과 길 번호를 띄운다("인동국일")
+
+    fixed = re.sub(r"([가-힣])일(?=\s|$|\d)", fix, text)
+    return fixed if fixed != text else None
+
+
 def correct(db, text):
+    """못 찾으면 연음으로 바뀐 길 번호를 되돌려 한 번 더(기존 결과는 그대로 두고 못 찾을 때만)."""
+    result = _correct(db, text)
+    if result["status"] == "not_found" and (fixed := unlink_gil(text)):
+        return _correct(db, fixed)
+    return result
+
+
+def _correct(db, text):
     """받아쓴 주소 -> {"status": "confirmed"|"ambiguous"|"not_found", "address": 확정 주소 or None, "candidates": [...]}.
 
     도로 후보마다 실제 건물번호 전부와 소리 거리를 재서 (도로명 거리 + 길 번호 거리 + 건물번호 거리)가
@@ -401,6 +426,10 @@ def correct(db, text):
     if not ranked:
         return {"status": "not_found", "address": None, "candidates": []}
     best, best_n = ranked[0][1]
+    if best > CONFIRM_MAX and best_n > 0:
+        # 도로명을 많이 고치고 건물번호까지 바꿔야 맞는 주소는 실제로 없는 주소를 비슷한 곳에 억지로 맞춘 것이다
+        # ("구미시 없는길 99" -> 임은길 19). 엉뚱한 실제 주소로 바꾸지 않고 못 찾음으로(2026-10-28)
+        return {"status": "not_found", "address": None, "candidates": [], "weak": ranked[0][0]}
     close = [a for a, (c, _) in ranked if c - best < MARGIN][:3]
     if len(close) == 1 and best <= CONFIRM_MAX and best_n <= NUM_CONFIRM_MAX:
         return {"status": "confirmed", "address": close[0], "candidates": close}

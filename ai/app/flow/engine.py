@@ -193,9 +193,12 @@ def missing(ctx: Any) -> list[str]:
 
 
 def field_text(ctx: Any, field: str) -> str:
-    """항목 질문 문구. 고객 유형별 문구("항목.registered")가 있으면 그것."""
+    """항목 질문 문구. 상황별 문구("항목.retry" 못 찾은 주소 다시 묻기, "항목.registered" 등록 고객)가 있으면 그것."""
     fields = ctx.texts.fields
-    return fields.get(f"{field}.{ctx.customer_type}") or fields[field]
+    for variant in ctx.field_variants(field):
+        if f"{field}.{variant}" in fields:
+            return fields[f"{field}.{variant}"]
+    return fields[field]
 
 
 def next_text(ctx: Any) -> str:

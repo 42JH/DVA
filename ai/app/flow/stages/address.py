@@ -13,11 +13,20 @@ log = logging.getLogger(__name__)
 
 
 async def resolve(ctx, prev: str) -> None:
-    """확정이면 그 주소, 애매하면 가장 가까운 후보, 못 찾으면(지역을 말하지 않음 등)·보정 꺼짐이면 들은 그대로.
+    """확정이면 그 주소, 애매하면 가장 가까운 후보, 못 찾으면 한 번 다시 묻고 그래도 못 찾거나 보정 꺼짐이면 들은 그대로.
     정한 주소로 카카오에서 지번·동명·우편번호·좌표를 찾는다(접수에 필요. 못 찾으면 비워 두고 접수 때 막는다)."""
     for key in sorted(ctx.address_pending):
         heard = getattr(ctx.order, key)
         result = await address.correct(heard) if heard else None
+        if result and result["status"] == "not_found" and key not in ctx.address_retry:
+            # 없는 주소를 그대로 받지 않고 한 번 더 묻는다(지우면 collecting이 그 항목을 다시 묻는다).
+            # 두 번째도 못 찾으면 들은 그대로 두고, 지번·좌표가 없어 접수는 미완료로 넘어간다
+            ctx.address_retry.add(key)
+            setattr(ctx.order, key, None)
+            setattr(ctx.order, key.replace("_address", "_geo"), None)
+            ctx.address_results[key] = {"status": "not_found", "changed": False, "geo": False, "retry": True}
+            log.info("주소 확정 %s %s not_found 다시 물음", ctx.session_id, key)
+            continue
         if result and result["candidates"]:
             setattr(ctx.order, key, result["candidates"][0])
         geo = await kakao.geocode(getattr(ctx.order, key), ctx.cfg.address.kakao_timeout_sec) if heard else None
