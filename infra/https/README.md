@@ -102,6 +102,13 @@ Nginx 설정 변경은 `/usr/sbin/nginx -t` 성공 후 reload한다. host 기본
 - DB 변경 전 서버에 custom-format dump를 만들고 pg_restore의 archive index 검사를 통과했다.
   실제 DB 복원 시험을 수행한 것은 아니며 정기 백업 구성도 별도 작업이다.
 
+## Grafana 관측 환경
+
+`https.conf`의 `/grafana/` 경로는 localhost `3001`의 Grafana로 전달한다.
+관측 스택은 앱 릴리스와 별도로 설치하며 [관측 환경 적용 절차](../observability/README.md)를 따른다.
+수집용 `/internal/metrics`와 `/api/internal/metrics`는 외부에서 차단한다.
+호스트 Nginx 반영은 `nginx -t` 성공 후 reload해야 하며 앱 MR 병합만으로 자동 적용되지 않는다.
+
 ## 정식 도메인으로 전환할 때
 
 구매한 도메인을 같은 IP에 연결하고 도메인용 인증서·Nginx server_name을 추가한다.
