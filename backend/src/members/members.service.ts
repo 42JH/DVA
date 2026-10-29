@@ -72,6 +72,8 @@ export class MembersService {
       const customer = await this.repository.customer(input.customerSeq, client);
       if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
       await this.company(companyId, client, true);
+      if (!(await this.repository.department(companyId, input.departmentSeq, client)))
+        throw new ApiException(422, 'VALIDATION_FAILED', '해당 기업의 부서를 지정해 주세요.');
       if (customer.status !== 'ACTIVE')
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객은 등록할 수 없습니다.');
       const id = await this.repository.create(companyId, input, client);
@@ -85,7 +87,7 @@ export class MembersService {
     adminId: number,
     requestId: string,
   ): Promise<void> {
-    if (input.role === undefined && input.status === undefined)
+    if (input.role === undefined && input.status === undefined && input.departmentSeq === undefined)
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 표시 역할 또는 상태를 입력해 주세요.');
     await this.write(async (client) => {
       const member = await this.repository.member(id, client);
@@ -93,6 +95,11 @@ export class MembersService {
       // 고객을 기업·소속보다 먼저 잠가 주문과 잠금 순서가 뒤집히지 않게 한다.
       const customer = await this.repository.customer(member.customerSeq, client);
       await this.company(member.organizationSeq, client, input.status === 'ACTIVE');
+      if (
+        input.departmentSeq !== undefined &&
+        !(await this.repository.department(member.organizationSeq, input.departmentSeq, client))
+      )
+        throw new ApiException(422, 'VALIDATION_FAILED', '해당 기업의 부서를 지정해 주세요.');
       if (input.status === 'ACTIVE') {
         if (!customer || customer.status !== 'ACTIVE')
           throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 소속을 활성화할 수 없습니다.');
@@ -127,6 +134,15 @@ export class MembersService {
       );
       const candidates = await this.repository.candidates(companyId, rows, client);
       await this.company(companyId, client, true);
+      for (const departmentId of [...new Set(rows.map((row) => row.departmentSeq))].sort(
+        (a, b) => a - b,
+      ))
+        if (!(await this.repository.department(companyId, departmentId, client)))
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            'CSV에 해당 기업의 부서 번호를 지정해 주세요.',
+          );
       const byPhone = new Map(candidates.map((row) => [row.phoneNumber, row]));
       const byEmployee = new Map(
         candidates
@@ -168,7 +184,18 @@ export class MembersService {
         if (!existing?.membershipSeq)
           await this.repository.create(
             companyId,
-            { customerSeq, employeeNo: row.employeeNo, role: 'MEMBER' },
+            {
+              customerSeq,
+              employeeNo: row.employeeNo,
+              role: 'MEMBER',
+              departmentSeq: row.departmentSeq,
+            },
+            client,
+          );
+        else
+          await this.repository.update(
+            existing.membershipSeq,
+            { departmentSeq: row.departmentSeq },
             client,
           );
       }

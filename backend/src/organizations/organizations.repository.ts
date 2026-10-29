@@ -32,7 +32,7 @@ export class OrganizationsRepository {
 
   async list(query: ListOrganizationsQueryDto): Promise<Organization[]> {
     const result = await this.database.pool.query<Organization>(
-      `SELECT organization_seq AS "organizationSeq", name, status FROM organizations
+      `SELECT organization_seq AS "organizationSeq", name, status,monthly_billing_enabled AS "monthlyBillingEnabled" FROM organizations
        WHERE ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
          AND ($2::text IS NULL OR status = $2)
        ORDER BY organization_seq DESC LIMIT $3 OFFSET $4`,
@@ -43,7 +43,7 @@ export class OrganizationsRepository {
 
   async find(id: number): Promise<Organization | undefined> {
     const result = await this.database.pool.query<Organization>(
-      `SELECT organization_seq AS "organizationSeq", name, status
+      `SELECT organization_seq AS "organizationSeq", name, status,monthly_billing_enabled AS "monthlyBillingEnabled"
        FROM organizations WHERE organization_seq = $1`,
       [id],
     );
@@ -52,18 +52,18 @@ export class OrganizationsRepository {
 
   async update(id: number, changes: UpdateOrganizationDto, client: PoolClient): Promise<boolean> {
     const result = await client.query(
-      `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status)
+      `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled)
        WHERE organization_seq = $1 RETURNING organization_seq`,
-      [id, changes.name ?? null, changes.status ?? null],
+      [id, changes.name ?? null, changes.status ?? null, changes.monthlyBillingEnabled ?? null],
     );
     return result.rowCount === 1;
   }
 
-  async insert(client: PoolClient, name: string): Promise<number> {
+  async insert(client: PoolClient, name: string, monthlyBillingEnabled = false): Promise<number> {
     const result = await client.query<{ organizationSeq: number }>(
-      `INSERT INTO organizations (name, status) VALUES ($1, 'ACTIVE')
+      `INSERT INTO organizations (name, status,monthly_billing_enabled) VALUES ($1, 'ACTIVE',$2)
        RETURNING organization_seq AS "organizationSeq"`,
-      [name],
+      [name, monthlyBillingEnabled],
     );
     return result.rows[0].organizationSeq;
   }

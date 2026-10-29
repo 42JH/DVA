@@ -6,6 +6,7 @@ import { MembershipResponseDto } from '../../members/dto/member-response.dto';
 import { OrganizationResponseDto } from '../../organizations/dto/organization-response.dto';
 import { CustomerResponseDto } from './customer-response.dto';
 import { CallIdentityDto } from '../../consultations/dto/call-identity.dto';
+import { DepartmentDto } from '../../organizations/dto/department.dto';
 
 export class CallerContextRequestDto {
   @ApiProperty({
@@ -57,6 +58,14 @@ export class CompanyContextPinDto {
 }
 
 export class CallerContextDto {
+  @ApiProperty({ type: DepartmentDto, nullable: true }) department!: DepartmentDto | null;
+  @ApiProperty({
+    enum: ['billing', 'credit', 'groupBilling'],
+    isArray: true,
+    description:
+      'billing 개인 카드, credit 월결제, groupBilling 부서 그룹결제. 자격이 있는 방식만 포함.',
+  })
+  availablePaymentMethods!: ('billing' | 'credit' | 'groupBilling')[];
   @ApiPropertyOptional({
     type: Number,
     minimum: 1,

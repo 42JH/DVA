@@ -4,12 +4,20 @@ import { DatabaseModule } from '../database/database.module';
 import { OrganizationsController } from './organizations.controller';
 import { OrganizationsRepository } from './organizations.repository';
 import { OrganizationsService } from './organizations.service';
+import { DepartmentsController } from './departments.controller';
+import { DepartmentsService } from './departments.service';
+import { DepartmentsRepository } from './departments.repository';
 
 // AppModule's AuthModule provides the global session/CSRF guard for every company route.
 @Module({
   imports: [DatabaseModule, AuditModule],
-  controllers: [OrganizationsController],
-  providers: [OrganizationsService, OrganizationsRepository],
+  controllers: [OrganizationsController, DepartmentsController],
+  providers: [
+    OrganizationsService,
+    OrganizationsRepository,
+    DepartmentsService,
+    DepartmentsRepository,
+  ],
   exports: [OrganizationsService],
 })
 export class OrganizationsModule {}

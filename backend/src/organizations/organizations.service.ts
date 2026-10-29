@@ -37,7 +37,11 @@ export class OrganizationsService {
     adminId: number,
     requestId: string,
   ): Promise<void> {
-    if (changes.name === undefined && changes.status === undefined)
+    if (
+      changes.name === undefined &&
+      changes.status === undefined &&
+      changes.monthlyBillingEnabled === undefined
+    )
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 기업명 또는 상태를 입력해 주세요.');
     await this.database.transaction(async (client) => {
       if (!(await this.repository.update(id, changes, client)))
@@ -57,7 +61,11 @@ export class OrganizationsService {
 
   async create(adminId: number, input: CreateOrganizationDto, requestId: string) {
     return this.database.transaction(async (client) => {
-      const id = await this.repository.insert(client, input.name);
+      const id = await this.repository.insert(
+        client,
+        input.name,
+        input.monthlyBillingEnabled ?? false,
+      );
       await this.audit.recordSuccess(
         {
           actorId: adminId,

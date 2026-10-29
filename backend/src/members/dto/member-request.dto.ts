@@ -20,6 +20,11 @@ export class MemberIdParamsDto {
   id!: number;
 }
 export class CreateMemberDto {
+  @ApiProperty({ description: '같은 기업에 속한 필수 부서 번호.', minimum: 1, maximum: 2147483647 })
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  departmentSeq!: number;
   @ApiProperty({
     description: '기업 내 고유 사번. 선행 0과 대소문자를 보존하며 등록 후 변경 불가.',
   })
@@ -43,6 +48,16 @@ export class CreateMemberDto {
   role!: MemberRole;
 }
 export class UpdateMemberDto {
+  @ApiPropertyOptional({
+    description: '같은 기업 내 이동할 부서 번호.',
+    minimum: 1,
+    maximum: 2147483647,
+  })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  departmentSeq?: number;
   @ApiPropertyOptional({ enum: MEMBER_ROLES, description: '대표자 여부 표시. 별도 권한 없음.' })
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(MEMBER_ROLES)

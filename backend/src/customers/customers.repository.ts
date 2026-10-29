@@ -9,7 +9,8 @@ import {
 import { Customer } from './customers.types';
 import { CallerContextDto } from './dto/caller-context.dto';
 
-const columns = 'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status';
+const columns =
+  'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled"';
 
 @Injectable()
 export class CustomersRepository {
@@ -21,12 +22,21 @@ export class CustomersRepository {
       `SELECT jsonb_build_object(
         'lookupStatus', CASE WHEN c.status='ACTIVE' THEN 'REGISTERED' ELSE 'WITHDRAWN' END,
         'customer', CASE WHEN c.status='ACTIVE' THEN jsonb_build_object(
-          'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status) END,
+          'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled) END,
         'membership', CASE WHEN c.status='ACTIVE' AND m.membership_seq IS NOT NULL THEN jsonb_build_object(
           'membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,'organizationSeq',m.organization_seq,
-          'employeeNo',m.employee_no,'role',m.role,'status',m.status) END,
+          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq) END,
         'organization', CASE WHEN c.status='ACTIVE' AND o.organization_seq IS NOT NULL THEN jsonb_build_object(
-          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status) END,
+          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled) END,
+        'department',CASE WHEN c.status='ACTIVE' AND d.department_seq IS NOT NULL THEN jsonb_build_object(
+          'departmentSeq',d.department_seq,'organizationSeq',d.organization_seq,'name',d.name,'groupBillingEnabled',d.group_billing_enabled) END,
+        'availablePaymentMethods',CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
+          '["billing"]'::jsonb || CASE WHEN
+            (m.membership_seq IS NULL AND c.monthly_billing_enabled)
+            OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
+            THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
+          || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
+            THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END,
         'availableUsageTypes', CASE
           WHEN c.status<>'ACTIVE' THEN '[]'::jsonb
           WHEN m.status='ACTIVE' AND o.status='ACTIVE' THEN '["PERSONAL","COMPANY"]'::jsonb
@@ -44,6 +54,7 @@ export class CustomersRepository {
       FROM customers c
       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq
       LEFT JOIN organizations o ON o.organization_seq=m.organization_seq
+      LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq
       WHERE c.phone_number=$1`,
       [phoneNumber],
     );
@@ -53,6 +64,8 @@ export class CustomersRepository {
         customer: null,
         membership: null,
         organization: null,
+        department: null,
+        availablePaymentMethods: [],
         availableUsageTypes: [],
         personalPins: [],
         companyPins: [],
@@ -110,16 +123,16 @@ export class CustomersRepository {
 
   async update(id: number, changes: UpdateCustomerDto, client: PoolClient): Promise<void> {
     await client.query(
-      'UPDATE customers SET name = COALESCE($2, name), status = COALESCE($3, status) WHERE customer_seq = $1',
-      [id, changes.name ?? null, changes.status ?? null],
+      'UPDATE customers SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled) WHERE customer_seq = $1',
+      [id, changes.name ?? null, changes.status ?? null, changes.monthlyBillingEnabled ?? null],
     );
   }
 
   async insert(client: PoolClient, input: CreateCustomerDto): Promise<number> {
     const result = await client.query<{ customerSeq: number }>(
-      `INSERT INTO customers (name, phone_number, status) VALUES ($1, $2, 'ACTIVE')
+      `INSERT INTO customers (name, phone_number, status,monthly_billing_enabled) VALUES ($1, $2, 'ACTIVE',$3)
        RETURNING customer_seq AS "customerSeq"`,
-      [input.name, input.phoneNumber],
+      [input.name, input.phoneNumber, input.monthlyBillingEnabled ?? false],
     );
     return result.rows[0].customerSeq;
   }

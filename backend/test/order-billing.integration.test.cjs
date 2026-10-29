@@ -131,3 +131,79 @@ test('partial cancellation preserves parcel prices, recalculates the remainder a
   assert.equal(detail.totalAmount, 0);
   assert.ok(detail.parcels.every((p) => p.status === 'CANCELLED'));
 });
+
+test('department membership scopes monthly and group eligibility and only admins can change policy', async () => {
+  const company = (await request('/companies', { name: '부서 결제 검증' })).body.data
+    .organizationSeq;
+  const other = (await request('/companies', { name: '다른 기업' })).body.data.organizationSeq;
+  const first = await request(`/companies/${company}/departments`, { name: '개발팀' });
+  assert.equal(first.status, 201);
+  const department = first.body.data.departmentSeq;
+  assert.equal(
+    (await request(`/companies/${company}/departments`, undefined, false, 'GET')).body.data[0]
+      .groupBillingEnabled,
+    false,
+  );
+  const wrongDepartment = (await request(`/companies/${other}/departments`, { name: '외부팀' }))
+    .body.data.departmentSeq;
+  const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
+  const customer = (await request('/customers', { name: '기업 고객', phoneNumber: phone })).body
+    .data.customerSeq;
+  const member = {
+    customerSeq: customer,
+    employeeNo: '001',
+    role: 'MEMBER',
+    departmentSeq: wrongDepartment,
+  };
+  assert.equal((await request(`/companies/${company}/members`, member)).status, 422);
+  member.departmentSeq = department;
+  assert.equal((await request(`/companies/${company}/members`, member)).status, 204);
+  let context = (await request('/customers/context', { phoneNumber: phone }, true)).body.data;
+  assert.equal(context.membership.departmentSeq, department);
+  assert.deepEqual(context.availablePaymentMethods, ['billing']);
+  assert.equal(
+    (await request(`/companies/${company}`, { monthlyBillingEnabled: true }, false, 'PATCH'))
+      .status,
+    204,
+  );
+  assert.equal(
+    (await request(`/departments/${department}`, { groupBillingEnabled: true }, false, 'PATCH'))
+      .status,
+    204,
+  );
+  context = (await request('/customers/context', { phoneNumber: phone }, true)).body.data;
+  assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit', 'groupBilling']);
+  assert.equal(
+    (await request(`/departments/${department}`, { groupBillingEnabled: false }, false, 'PATCH'))
+      .status,
+    204,
+  );
+  context = (await request('/customers/context', { phoneNumber: phone }, true)).body.data;
+  assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit']);
+  assert.equal(
+    (await request(`/customers/${customer}`, { monthlyBillingEnabled: true }, true, 'PATCH'))
+      .status,
+    403,
+  );
+  assert.equal(
+    (
+      await request(
+        '/customers',
+        { name: '임의 자격 상승', phoneNumber: phone + '1', monthlyBillingEnabled: true },
+        true,
+      )
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await request(`/customers/${customerId}`, { monthlyBillingEnabled: true }, false, 'PATCH'))
+      .status,
+    204,
+  );
+  assert.deepEqual(
+    (await request('/customers/context', { phoneNumber: '01000138001' }, true)).body.data
+      .availablePaymentMethods,
+    ['billing', 'credit'],
+  );
+  await request(`/customers/${customerId}`, { monthlyBillingEnabled: false }, false, 'PATCH');
+});

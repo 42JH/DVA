@@ -10,6 +10,7 @@ Project dva_monolith {
 // 2026-10-27 구성원 API: 대표자 표시 의미 반영. 009 이력은 유지하고 010으로 요청 기록 테이블을 제거한다.
 
 Table customers {
+  monthly_billing_enabled boolean [not null, default: false]
   customer_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   name text [not null, note: '이름 또는 표시명']
   phone_number text [not null, unique, note: '고객 전화번호. 숫자 문자열로 선행 0 보존']
@@ -22,6 +23,7 @@ Table customers {
 }
 
 Table organizations {
+  monthly_billing_enabled boolean [not null, default: false]
   organization_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   name text [not null, note: '이름 또는 표시명']
   status text [not null, note: '업무 상태']
@@ -31,7 +33,21 @@ Table organizations {
   Note: 'customer / 디버 등록 기업 디렉터리. 기업 공유 핀의 제출 기업을 식별한다.'
 }
 
+Table departments {
+  department_seq integer [pk, increment, not null]
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  name text [not null]
+  group_billing_enabled boolean [not null, default: false]
+  indexes {
+    (organization_seq,name) [unique]
+    (department_seq,organization_seq) [unique]
+  }
+}
+
+Ref: memberships.(department_seq,organization_seq) > departments.(department_seq,organization_seq)
+
 Table memberships {
+  department_seq integer [not null]
   membership_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [not null, unique, note: '연결 대상 ID']
   organization_seq integer [not null, note: '연결 대상 ID']

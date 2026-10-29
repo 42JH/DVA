@@ -14,7 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
 import { OrderCallDto } from './order-call.dto';
 
@@ -228,7 +228,9 @@ export class ParcelInputDto {
   itemPrice?: number | null;
 }
 
-export class OrderCustomerDto extends CreateCustomerDto {}
+export class OrderCustomerDto extends OmitType(CreateCustomerDto, [
+  'monthlyBillingEnabled',
+] as const) {}
 
 export class CreateOrderDto {
   @ApiPropertyOptional({
