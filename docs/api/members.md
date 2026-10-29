@@ -90,7 +90,7 @@ CSV 편집기에서 이미 잃어버린 선행 0은 복원하지 않는다.
 | 404 NOT_FOUND | 기업·고객·소속 없음 |
 | 409 INVALID_STATE | 비활성 기업·탈퇴 고객 등록 또는 소속 활성화 |
 | 409 DUPLICATE_RESOURCE | 개별 등록 고유 제약 또는 저장 시점의 고유 제약 충돌 |
-| 409 REQUEST_IN_PROGRESS | 다른 구성원 변경 작업 처리 중 |
+| 409 REQUEST_IN_PROGRESS | DB 잠금 획득 대기 2초 초과. 이번 변경 전체 롤백 |
 | 413 PAYLOAD_TOO_LARGE | 파일 크기·데이터 행 제한 초과 |
 | 415 UNSUPPORTED_MEDIA_TYPE | 지원하지 않는 파일 또는 요청 형식 |
 | 422 VALIDATION_FAILED | CSV 행 내용·고객·소속 충돌 |
@@ -101,10 +101,14 @@ INVALID_PHONE_NUMBER, DUPLICATE_EMPLOYEE_NO, DUPLICATE_PHONE_NUMBER,
 EMPLOYEE_NO_CONFLICT, OTHER_COMPANY_MEMBERSHIP, PHONE_NUMBER_CONFLICT,
 CUSTOMER_WITHDRAWN이다. 이름·전화번호·CSV 원문은 오류·요청 로그·감사 metadata에 복사하지 않는다.
 
-MVP에서는 트랜잭션 advisory try-lock으로 모든 구성원 변경을 직렬화한다. 다른 기업의
-동시 업로드도 409 REQUEST_IN_PROGRESS가 될 수 있으며 잠시 후 재시도한다.
-이 방식은 회사 간 동일 고객 연결·CSV 번호 변경 경합을 단순하게 처리한다. 대규모 동시 처리의
-최적화는 이번 범위가 아니다. 기업·고객 행도 잠가 비활성화·탈퇴와 경합할 때 상태를 재검사한다.
+MVP에서는 트랜잭션 advisory lock으로 모든 구성원 변경을 직렬화한다. 다른 기업의 동시
+업로드도 앞선 변경이 끝날 때까지 기다린 뒤 같은 요청을 이어서 처리한다.
+등록·수정·소속 해제는 고객을 먼저 잠그고, 필요한 기업·소속을 이후에 잠근다.
+CSV는 대상 고객 번호 순으로 잠근 뒤 기업을 확인하고 소속을 저장한다. 주문의 고객 잠금과
+반대 순서로 기업·소속을 선점하지 않아 교착을 피한다. 대기 후 최신 상태·중복 조건을 재검사한다.
+각 잠금 획득은 최대 2초 기다린다. 초과하면 이번 변경·성공 감사를 모두 롤백하고
+409 REQUEST_IN_PROGRESS를 반환한다. 요청 전체의 실행 시간이 2초로 제한되는 것은 아니다.
+DB 구조·요청/응답 필드는 바뀌지 않으며 별도 대기 테이블·Redis는 추가하지 않는다.
 
 개별 등록과 CSV는 Idempotency-Key를 요구·검증·저장하지 않는다. 기존 클라이언트가 보내는 헤더도 무시한다.
 개별 등록의 중복은 고객당 소속 1개·기업별 사번 UNIQUE로 거절하며 409 DUPLICATE_RESOURCE를 반환한다.

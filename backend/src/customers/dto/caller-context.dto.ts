@@ -1,9 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import { IsObject, IsString, Matches, ValidateIf, ValidateNested } from 'class-validator';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { MembershipResponseDto } from '../../members/dto/member-response.dto';
 import { OrganizationResponseDto } from '../../organizations/dto/organization-response.dto';
 import { CustomerResponseDto } from './customer-response.dto';
+import { CallIdentityDto } from '../../consultations/dto/call-identity.dto';
 
 export class CallerContextRequestDto {
   @ApiProperty({
@@ -14,6 +16,17 @@ export class CallerContextRequestDto {
   @IsString()
   @Matches(/^[0-9]+(?![\s\S])/)
   phoneNumber!: string;
+
+  @ApiPropertyOptional({
+    type: () => CallIdentityDto,
+    description:
+      'AI 통화 시작 시 전달. 통화를 생성·재사용하고 callSessionSeq를 반환합니다. 생략하면 기존 고객 조회만 수행합니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CallIdentityDto)
+  call?: CallIdentityDto;
 }
 
 export class PinAddressDto {
@@ -44,6 +57,14 @@ export class CompanyContextPinDto {
 }
 
 export class CallerContextDto {
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    description:
+      'call을 보낸 경우에만 반환하는 DB call_sessions.call_session_seq. 이후 주문 조회·취소·주소록 요청의 call_session_seq 헤더에 사용.',
+  })
+  callSessionSeq?: number;
+
   @ApiProperty({
     enum: ['REGISTERED', 'UNREGISTERED', 'WITHDRAWN'],
     description: '고객 등록 상태. 주문·주소록 유무로 판단하지 않습니다.',

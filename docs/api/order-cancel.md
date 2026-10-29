@@ -24,7 +24,7 @@ Content-Type: application/json
 - 관리자: ACTIVE OPERATOR·SUPERVISOR·SYSTEM_ADMIN 세션과 기존 허용 Origin. 관리자에게 통화 헤더는 필요 없다.
 - AI: 기존 주문 상세 조회와 동일하게 `call_session_seq`를 전달한다. 발신번호와 일치하는 ACTIVE 고객의 주문만 허용하며 다른 고객 주문은 404다. 진행 중 통화는 같은 고객의 다른 통화에서 만든 주문도 취소할 수 있다.
 - 종료된 통화는 기존 연결 주문만 허용한다. 없는 통화는 404, 활성 고객이 없는 통화는 403이다. 잘못된 관리자 쿠키를 AI 요청으로 우회하지 않는다.
-- 통화 번호는 DB 식별자이며 인증 토큰이 아니다. 이번 변경은 기존 AI 서비스 인증 미적용 범위를 유지한다. AI 코드나 통화 생성 시점은 바꾸지 않는다. 고객 확인 API만으로 통화가 생성되는 것은 아니므로 기존 연동에서 확보한 유효한 call_session_seq를 사용한다.
+- 통화 번호는 DB 식별자이며 인증 토큰이 아니다. 기존 AI 서비스 인증 미적용 범위를 유지한다. 상담 시작 시 POST /api/customers/context에 phoneNumber와 call(providerCallId·incomingAt)을 보내고, 응답의 callSessionSeq를 헤더로 사용한다. 주문을 새로 만들지 않고도 기존 주문을 조회·취소할 수 있다.
 
 ## 취소 조건
 

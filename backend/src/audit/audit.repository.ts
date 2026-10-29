@@ -9,9 +9,11 @@ const AUDIT_SELECT = `SELECT
         audit_log_seq AS "auditLogSeq",
         actor_type AS "actorType",
         actor_seq AS "actorSeq",
+        actor_name AS "actorName",
         action,
         target_type AS "targetType",
         target_seq AS "targetSeq",
+        target_admin_name AS "targetAdminName",
         request_id AS "requestId",
         result,
         '{}'::jsonb AS metadata,
@@ -37,17 +39,32 @@ export class AuditRepository {
   }
 
   async insert(event: AuditEvent, result: AuditResult, client?: PoolClient): Promise<void> {
+    const actorType = event.actorType ?? (event.actorId === null ? 'SYSTEM' : 'ADMIN');
     await (client ?? this.database.pool).query(
-      `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata)
-       VALUES($1,$2,$3,$4,$5,$6,$7,'{}')`,
+      `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata,
+         actor_name,target_admin_name)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'{}',
+         CASE WHEN $1='AI' THEN 'AI' WHEN $1='ADMIN' THEN COALESCE($8::text,
+           (SELECT name FROM admin_users WHERE admin_user_seq=$2),
+           (SELECT target_admin_name FROM audit_logs
+            WHERE target_type='ADMIN_USER' AND target_seq=$2
+              AND action='ADMIN_DELETED' AND result='SUCCESS'
+            ORDER BY occurred_at DESC,audit_log_seq DESC LIMIT 1)) END,
+         CASE WHEN $4='ADMIN_USER' THEN COALESCE(
+           (SELECT name FROM admin_users WHERE admin_user_seq=$5),
+           (SELECT target_admin_name FROM audit_logs
+            WHERE target_type='ADMIN_USER' AND target_seq=$5
+              AND action='ADMIN_DELETED' AND result='SUCCESS'
+            ORDER BY occurred_at DESC,audit_log_seq DESC LIMIT 1)) END)`,
       [
-        event.actorId === null ? 'SYSTEM' : 'ADMIN',
+        actorType,
         event.actorId,
         event.action,
         event.targetType,
         event.targetId,
         event.requestId,
         result,
+        event.actorName ?? null,
       ],
     );
   }

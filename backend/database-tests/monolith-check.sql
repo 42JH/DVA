@@ -18,7 +18,7 @@ BEGIN
  IF n<>19 THEN RAISE EXCEPTION 'Expected 19 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, got %',n; END IF;
+ IF n<>14 THEN RAISE EXCEPTION 'Expected 14 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
@@ -81,7 +81,8 @@ BEGIN
  PERFORM pg_temp.expect_error(format('UPDATE order_parcels SET origin_name=%L WHERE order_parcel_seq=%s','Changed',parcel_id),'23514');
 
  INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('testAdmin','test-only-hash','SYSTEM_ADMIN','ACTIVE','Test Admin') RETURNING admin_user_seq INTO admin_id;
- PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('disabled','x','OPERATOR','INACTIVE','Test Admin')$q$,'23514');
+ INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('disabled','x','OPERATOR','INACTIVE','Test Admin');
+ PERFORM pg_temp.expect_error($q$INSERT INTO admin_users(login_id,password_hash,role,status,name) VALUES('badStatus','x','OPERATOR','SUSPENDED','Test Admin')$q$,'23514');
  INSERT INTO call_sessions(order_seq,provider_call_id) VALUES(order_id,'test-call') RETURNING call_session_seq INTO call_id;
  UPDATE call_sessions SET incoming_at='2026-10-27T01:00:00Z' WHERE call_session_seq=call_id;
  IF NOT EXISTS(SELECT 1 FROM call_sessions WHERE call_session_seq=call_id AND incoming_at IS NOT NULL AND started_at IS NULL AND ended_at IS NULL) THEN

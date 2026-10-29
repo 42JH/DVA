@@ -3,7 +3,7 @@ process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.SWAGGER_ENABLED = 'true';
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { migrate } = require('./helpers/migrations.cjs');
 const { join } = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { NestFactory } = require('@nestjs/core');
@@ -93,10 +93,7 @@ before(async () => {
   await app.init();
   db = app.get(DatabaseService);
   // The Docker runner supplies an isolated empty database, never a production connection.
-  for (const name of ['002-monolith-initial.sql', '003-admin-auth-sessions.sql'])
-    await db.transaction((client) =>
-      client.query(readFileSync(join(__dirname, '../migrations', name), 'utf8')),
-    );
+  await migrate(db.pool);
   hash = await hashPassword(password);
   await app.listen(0, '0.0.0.0');
   base = await app.getUrl();
@@ -491,8 +488,7 @@ test('password reset waits for in-flight login and invalidates its session after
     admins.recordLogin = original;
   }
 });
-test('concurrent self-demotions preserve the last active system administrator', async () => {
-  await db.pool.query("UPDATE admin_users SET role='OPERATOR' WHERE role='SYSTEM_ADMIN'");
+test('concurrent self-demotions cannot change either system administrator', async () => {
   const first = await account('lastOne', 'SYSTEM_ADMIN');
   const second = await account('lastTwo', 'SYSTEM_ADMIN');
   const firstSession = (await login(first)).session;
@@ -505,17 +501,171 @@ test('concurrent self-demotions preserve the last active system administrator', 
       call('PATCH', `/api/admins/${user.id}`, { role: 'OPERATOR' }, cookie),
     ),
   );
-  assert.deepEqual(responses.map((r) => r.status).sort(), [204, 409]);
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [403, 403],
+  );
   assert.equal(
     (
       await db.pool.query(
-        "SELECT count(*) FROM admin_users WHERE role='SYSTEM_ADMIN' AND status='ACTIVE'",
+        "SELECT count(*) FROM admin_users WHERE admin_user_seq=ANY($1::int[]) AND role='SYSTEM_ADMIN' AND status='ACTIVE'",
+        [[first.id, second.id]],
       )
     ).rows[0].count,
-    '1',
+    '2',
   );
 });
-test('OpenAPI documents all eight contracts and logs contain no passwords or tokens', async () => {
+test('dedicated role change requires an active system administrator', async () => {
+  const target = await account('accessTarget');
+  for (const [method, path, body] of [
+    ['PATCH', `/api/admins/${target.id}/role`, { role: 'SUPERVISOR' }],
+  ]) {
+    assert.equal((await call(method, path, body)).status, 401);
+    assert.equal((await call(method, path, body, 'dva_session=invalid')).status, 401);
+    for (const role of ['OPERATOR', 'SUPERVISOR']) {
+      const actor = await account(`${method}${role === 'OPERATOR' ? 'Op' : 'Sup'}`, role);
+      const session = (await login(actor)).session;
+      assert.equal((await call(method, path, body, session)).status, 403);
+    }
+  }
+  assert.equal((await login(target)).status, 200);
+  assert.equal(
+    (await db.pool.query('SELECT role FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rows[0].role,
+    'OPERATOR',
+  );
+});
+
+test('dedicated role changes take effect on existing sessions without changing account status', async () => {
+  const system = await account('roleManager', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleTarget');
+  const targetSession = (await login(target)).session;
+  const path = `/api/admins/${target.id}/role`;
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
+  const promoted = await call('PATCH', path, { role: 'SUPERVISOR' }, session);
+  assert.equal(promoted.status, 204);
+  assert.equal(promoted.text, '');
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 200);
+  assert.equal(
+    (await call('GET', '/api/auth/me', undefined, targetSession)).body.data.status,
+    'ACTIVE',
+  );
+  assert.equal((await call('PATCH', path, { role: 'OPERATOR' }, session)).status, 204);
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
+  const pending = await account('pendingRole', 'OPERATOR', 'PENDING');
+  assert.equal(
+    (await call('PATCH', `/api/admins/${pending.id}/role`, { role: 'SUPERVISOR' }, session)).status,
+    204,
+  );
+  assert.equal((await login(pending)).status, 401);
+  assert.deepEqual(
+    (
+      await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+        pending.id,
+      ])
+    ).rows[0],
+    { role: 'SUPERVISOR', status: 'PENDING' },
+  );
+});
+
+test('both role routes protect system administrators and forbid promotion to system administrator', async () => {
+  const system = await account('roleProtection', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const operator = await account('noSystem');
+  for (const status of ['ACTIVE', 'PENDING']) {
+    const target = await account(`system${status}`, 'SYSTEM_ADMIN', status);
+    for (const suffix of ['', '/role']) {
+      assert.equal(
+        (await call('PATCH', `/api/admins/${target.id}${suffix}`, { role: 'OPERATOR' }, session))
+          .status,
+        403,
+      );
+      assert.equal(
+        (
+          await call(
+            'PATCH',
+            `/api/admins/${operator.id}${suffix}`,
+            { role: 'SYSTEM_ADMIN' },
+            session,
+          )
+        ).status,
+        400,
+      );
+    }
+    assert.deepEqual(
+      (
+        await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+          target.id,
+        ])
+      ).rows[0],
+      { role: 'SYSTEM_ADMIN', status },
+    );
+  }
+});
+
+test('dedicated role change validates its body, target and Origin', async () => {
+  const system = await account('roleValidation', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleInput');
+  const path = `/api/admins/${target.id}/role`;
+  for (const body of [
+    {},
+    { role: null },
+    { role: '' },
+    { role: 'operator' },
+    { role: 1 },
+    { role: 'SUPERVISOR', status: 'ACTIVE' },
+    { role: 'OPERATOR', name: 'changed' },
+  ])
+    assert.equal((await call('PATCH', path, body, session)).status, 400);
+  for (const id of ['0', '-1', '1e2', '2147483648'])
+    assert.equal(
+      (await call('PATCH', `/api/admins/${id}/role`, { role: 'SUPERVISOR' }, session)).status,
+      400,
+    );
+  assert.equal(
+    (await call('PATCH', '/api/admins/2147483647/role', { role: 'SUPERVISOR' }, session)).status,
+    404,
+  );
+  for (const Origin of ['', 'https://untrusted.invalid'])
+    assert.equal(
+      (await call('PATCH', path, { role: 'SUPERVISOR' }, session, { Origin })).status,
+      403,
+    );
+});
+
+test('dedicated role change and its success audit commit or roll back together', async () => {
+  const system = await account('roleAtomicAdmin', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleAtomicUser');
+  const path = `/api/admins/${target.id}/role`;
+  const audit = app.get(AuditService);
+  const original = audit.record;
+  audit.record = async () => {
+    throw new Error('audit unavailable');
+  };
+  try {
+    assert.equal((await call('PATCH', path, { role: 'SUPERVISOR' }, session)).status, 500);
+  } finally {
+    audit.record = original;
+  }
+  assert.equal(
+    (await db.pool.query('SELECT role FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rows[0].role,
+    'OPERATOR',
+  );
+  assert.equal((await call('PATCH', path, { role: 'SUPERVISOR' }, session)).status, 204);
+  const records = (
+    await db.pool.query(
+      "SELECT actor_seq,target_seq FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
+      [target.id],
+    )
+  ).rows;
+  assert.deepEqual(records, [{ actor_seq: system.id, target_seq: target.id }]);
+});
+
+test('OpenAPI documents authentication and admin contracts without leaking passwords or tokens', async () => {
   const document = await (await fetch(base + '/api/docs-json')).json();
   for (const [path, method] of [
     ['/api/auth/login', 'post'],
@@ -526,9 +676,22 @@ test('OpenAPI documents all eight contracts and logs contain no passwords or tok
     ['/api/admins', 'get'],
     ['/api/admins/{id}', 'patch'],
     ['/api/admins/{id}/password', 'patch'],
+    ['/api/admins/{id}/role', 'patch'],
   ])
     assert.ok(document.paths[path][method]);
   assert.equal(document.components.securitySchemes.adminSession.in, 'cookie');
+  const role = document.paths['/api/admins/{id}/role'].patch;
+  assert.deepEqual(role.tags, ['Admins']);
+  assert.ok(role.responses['204']);
+  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.required, ['role']);
+  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.properties.role.enum, [
+    'OPERATOR',
+    'SUPERVISOR',
+  ]);
+  assert.deepEqual(document.components.schemas.UpdateAdminDto.properties.role.enum, [
+    'OPERATOR',
+    'SUPERVISOR',
+  ]);
   const serialized = JSON.stringify(logs);
   assert.ok(!serialized.includes(password));
   assert.ok(!serialized.includes('dva_session='));
@@ -926,4 +1089,220 @@ test('logout records one success with session deletion and failed audit storage 
   } finally {
     repository.insert = original;
   }
+});
+
+test('admin deletion physically removes every allowed role/status and sessions while preserving audit names', async () => {
+  const system = await account('deleteSystem', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    for (const status of ['ACTIVE', 'PENDING', 'INACTIVE']) {
+      const target = await account('del' + role[0] + status[0], role);
+      const session = (await login(target)).session;
+      await db.pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+        target.id,
+        status,
+      ]);
+      const response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      assert.equal(response.status, 204, response.text);
+      assert.equal(
+        (await db.pool.query('SELECT 1 FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+          .rowCount,
+        0,
+      );
+      assert.equal(
+        (await db.pool.query('SELECT 1 FROM admin_sessions WHERE admin_user_seq=$1', [target.id]))
+          .rowCount,
+        0,
+      );
+      assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+      assert.equal((await login(target)).status, 401);
+      assert.equal(
+        (await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status,
+        404,
+      );
+      const logs = (
+        await db.pool.query(
+          "SELECT * FROM audit_logs WHERE target_type='ADMIN_USER' AND target_seq=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+          [target.id],
+        )
+      ).rows;
+      assert.deepEqual(
+        logs.map((log) => log.action),
+        ['ADMIN_LOGIN', 'ADMIN_DELETED'],
+      );
+      assert.equal(logs[0].actor_name, '테스트 del' + role[0] + status[0]);
+      assert.equal(logs[1].actor_name, '테스트 deleteSystem');
+      assert.equal(logs[1].target_admin_name, logs[0].actor_name);
+      const detail = await call(
+        'GET',
+        '/api/audit-logs/' + logs[1].audit_log_seq,
+        undefined,
+        cookie,
+      );
+      assert.equal(detail.body.data.targetAdminName, logs[0].actor_name);
+    }
+  }
+  const listing = await call('GET', '/api/admins?status=INACTIVE', undefined, cookie);
+  assert.equal(listing.status, 200);
+  assert.ok(!listing.body.data.some((row) => row.loginId.startsWith(prefix + 'del')));
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  assert.equal(document.paths['/api/admins/{id}'].delete.summary, '관리자 삭제');
+  assert.ok(document.paths['/api/admins/{id}'].delete.responses['204']);
+  assert.deepEqual(document.components.schemas.AuditResponseDto.properties.actorType.enum, [
+    'ADMIN',
+    'AI',
+    'SYSTEM',
+  ]);
+  assert.ok(document.components.schemas.AuditResponseDto.properties.actorName);
+  assert.ok(document.components.schemas.AuditResponseDto.properties.targetAdminName);
+});
+
+test('admin deletion rejects other roles, missing sessions, system targets and malformed IDs', async () => {
+  const system = await account('deleteChecks', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  const target = await account('deleteTarget');
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    const actor = await account('deniedDel' + role[0], role);
+    assert.equal(
+      (await call('DELETE', '/api/admins/' + target.id, undefined, (await login(actor)).session))
+        .status,
+      403,
+    );
+  }
+  assert.equal((await call('DELETE', '/api/admins/' + target.id)).status, 401);
+  assert.equal((await call('DELETE', '/api/admins/' + system.id, undefined, cookie)).status, 403);
+  const otherSystem = await account('otherDelSystem', 'SYSTEM_ADMIN', 'PENDING');
+  assert.equal(
+    (await call('DELETE', '/api/admins/' + otherSystem.id, undefined, cookie)).status,
+    403,
+  );
+  for (const id of ['0', '-1', '1.5', 'bad', '2147483648'])
+    assert.equal((await call('DELETE', '/api/admins/' + id, undefined, cookie)).status, 400);
+  assert.equal(
+    (
+      await call('DELETE', '/api/admins/' + target.id, undefined, cookie, {
+        Origin: 'https://untrusted.invalid',
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await db.pool.query('SELECT 1 FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rowCount,
+    1,
+  );
+});
+
+test('admin deletion and success audit roll back together on audit or account deletion failure', async () => {
+  const system = await account('deleteRollback', 'SYSTEM_ADMIN');
+  const target = await account('keptOnDelError');
+  const cookie = (await login(system)).session;
+  const session = (await login(target)).session;
+  for (const [instance, method] of [
+    [app.get(AuditService), 'record'],
+    [app.get(AdminsService), 'remove'],
+  ]) {
+    const original = instance[method];
+    instance[method] = async () => {
+      throw new Error('simulated storage failure');
+    };
+    let response;
+    try {
+      response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      assert.equal(response.status, 500);
+    } finally {
+      instance[method] = original;
+    }
+    assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 200);
+    const logs = (
+      await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.body.meta.requestId,
+      ])
+    ).rows;
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].action, 'ADMIN_DELETED');
+    assert.equal(logs[0].result, 'FAILED');
+    assert.equal(logs[0].target_admin_name, '테스트 keptOnDelError');
+  }
+});
+
+test('a login already in progress cannot leave a usable session after admin deletion', async () => {
+  const system = await account('deleteRace', 'SYSTEM_ADMIN');
+  const target = await account('loginDelRace');
+  const cookie = (await login(system)).session;
+  const repository = app.get(AuthRepository);
+  const original = repository.create;
+  let unblock, notify;
+  const held = new Promise((resolve) => {
+    unblock = resolve;
+  });
+  const entered = new Promise((resolve) => {
+    notify = resolve;
+  });
+  repository.create = async function (hash, id, client) {
+    if (id === target.id) {
+      notify();
+      await held;
+    }
+    return original.call(this, hash, id, client);
+  };
+  try {
+    const loggingIn = login(target);
+    await entered;
+    const deleting = call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+    unblock();
+    const [signedIn, deleted] = await Promise.all([loggingIn, deleting]);
+    assert.equal(signedIn.status, 200);
+    assert.equal(deleted.status, 204, deleted.text);
+    assert.equal((await call('GET', '/api/auth/me', undefined, signedIn.session)).status, 401);
+  } finally {
+    unblock();
+    repository.create = original;
+  }
+});
+
+test('audit snapshots survive later deletion and in-flight work can retain the deleted actor name', async () => {
+  const system = await account('snapshotSystem', 'SYSTEM_ADMIN');
+  const target = await account('snapshotTarget');
+  const cookie = (await login(system)).session;
+  const audit = app.get(AuditService);
+  const { randomUUID } = require('node:crypto');
+  const event = {
+    actorId: target.id,
+    targetId: 1,
+    targetType: 'ORDER',
+    action: 'ORDER_UPDATED',
+    requestId: randomUUID(),
+  };
+  await db.transaction((client) => audit.recordSuccess(event, client));
+  await db.pool.query('UPDATE admin_users SET name=$2 WHERE admin_user_seq=$1', [
+    target.id,
+    '변경 후 이름',
+  ]);
+  assert.equal((await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status, 204);
+  await db.transaction((client) =>
+    audit.recordSuccess({ ...event, requestId: randomUUID() }, client),
+  );
+  const logs = (
+    await db.pool.query(
+      "SELECT actor_name FROM audit_logs WHERE actor_seq=$1 AND action='ORDER_UPDATED' ORDER BY audit_log_seq",
+      [target.id],
+    )
+  ).rows;
+  assert.deepEqual(
+    logs.map((log) => log.actor_name),
+    ['테스트 snapshotTarget', '변경 후 이름'],
+  );
+  const signup = await call('POST', '/api/auth/signup', {
+    loginId: target.loginId,
+    name: '다른 관리자',
+    password,
+  });
+  assert.equal(signup.status, 204);
+  const replacement = (
+    await db.pool.query('SELECT admin_user_seq FROM admin_users WHERE login_id=$1', [
+      target.loginId,
+    ])
+  ).rows[0];
+  assert.notEqual(replacement.admin_user_seq, target.id);
 });

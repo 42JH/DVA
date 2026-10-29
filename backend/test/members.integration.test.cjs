@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -51,24 +50,7 @@ async function account(role = 'OPERATOR') {
   return { id: rows[0].admin_user_seq, cookie: response.headers.get('set-cookie').split(';')[0] };
 }
 before(async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const [table, migration] of [
-      ['public.customers', '002-monolith-initial.sql'],
-      ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-    ]) {
-      const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
-      if (!rows[0].name)
-        await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
-    }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  await migrate(pool);
   passwordHash = await hashPassword(password);
   app = await start();
   base = await app.getUrl();
@@ -678,7 +660,7 @@ test('repeated registration conflicts after restart and unlink permits a new reg
   assert.notEqual((await member(co, cu.id)).membershipSeq, m.membershipSeq);
 });
 
-test('concurrent membership writes still return retryable conflicts without a request key', async () => {
+test('membership writes wait before returning a bounded lock timeout without a request key', async () => {
   const co = await company(),
     cu = await customer(),
     other = await customer();
@@ -687,10 +669,15 @@ test('concurrent membership writes still return retryable conflicts without a re
     lock = await pool.connect();
   try {
     await lock.query('BEGIN');
-    assert.equal(await repository.lockWrites(lock), true);
-    await error(await create(co, other.id, '002'), 409, 'REQUEST_IN_PROGRESS');
-    await error(await patch(m.membershipSeq, { role: 'ORG_ADMIN' }), 409, 'REQUEST_IN_PROGRESS');
-    await error(await upload(co, header + '003,New,' + phone()), 409, 'REQUEST_IN_PROGRESS');
+    await repository.lockWrites(lock);
+    const started = Date.now();
+    const responses = await Promise.all([
+      create(co, other.id, '002'),
+      patch(m.membershipSeq, { role: 'ORG_ADMIN' }),
+      upload(co, header + '003,New,' + phone()),
+    ]);
+    assert.ok(Date.now() - started >= 1500);
+    for (const response of responses) await error(response, 409, 'REQUEST_IN_PROGRESS');
   } finally {
     await lock.query('ROLLBACK');
     lock.release();
@@ -708,7 +695,7 @@ test('concurrent uploads keep one customer/membership and audit each successful 
     Array.from({ length: 6 }, (_, i) => upload(co, content, key, i % 2 ? base : baseB)),
   );
   assert.ok(responses.some((response) => response.status === 204));
-  for (const response of responses) assert.ok([204, 409].includes(response.status));
+  for (const response of responses) assert.equal(response.status, 204);
   await empty(await upload(co, content, key));
   assert.equal((await members(co)).data.length, 1);
   assert.equal(

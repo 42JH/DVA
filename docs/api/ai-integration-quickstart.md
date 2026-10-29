@@ -11,10 +11,20 @@
 `POST /api/customers/context`
 
 ```json
-{"phoneNumber":"01012345678"}
+{
+  "phoneNumber": "01012345678",
+  "call": {
+    "providerCallId": "call_example",
+    "incomingAt": "2026-10-29T01:00:00Z"
+  }
+}
 ```
 
-`+8210...`는 `010...`으로 변환한다. 응답의 `data.lookupStatus`는 `REGISTERED`, `UNREGISTERED`, `WITHDRAWN`이다. 등록 고객 번호는 `data.customer.customerSeq`, 주소록은 `data.personalPins`·`data.companyPins`에서 읽는다. 이 호출은 고객·통화를 생성하지 않는다. 탈퇴 고객을 신규 고객으로 취급하지 않는다.
+`+8210...`는 `010...`으로 변환한다. 응답의 `data.lookupStatus`는 `REGISTERED`, `UNREGISTERED`, `WITHDRAWN`이다. 등록 고객 번호는 `data.customer.customerSeq`, 주소록은 `data.personalPins`·`data.companyPins`에서 읽는다. 고객이나 주문을 새로 만들지는 않는다.
+
+**`data.callSessionSeq`를 보관하고 상담 중 주문 조회·취소·주소록 API의 `call_session_seq` 헤더에 전달한다.** call에는 최초 수신 이벤트의 통화 ID와 created_at을 변환한 시각을 넣는다. 같은 통화의 재요청은 같은 번호를 반환하고, 발신번호·수신 시각이 달라지면 409다. 미등록·탈퇴 고객도 통화 번호는 반환하지만 기존 고객의 주문·주소록 접근 권한을 부여하지 않는다.
+
+phoneNumber만 보내던 기존 요청도 동작하지만 통화를 만들거나 callSessionSeq를 반환하지 않는다. AI가 상담 중 업무 API를 사용하려면 위 call을 추가해야 한다.
 
 ## 2. 상담 결과: 주문 전송
 
@@ -34,11 +44,11 @@
   "call": {
     "providerCallId": "call_example",
     "callerPhoneNumber": "01012345678",
-    "incomingAt": "2026-10-27T01:00:00Z"
+    "incomingAt": "2026-10-29T01:00:00Z"
   },
   "customer": {"name":"발신 고객","phoneNumber":"01012345678"},
   "paymentMethodType": "credit",
-  "pickupRequestedAt": "2026-10-28T10:00:00+09:00",
+  "pickupRequestedAt": "2026-10-30T10:00:00+09:00",
   "parcels": [{
     "origin": {
       "name":"발송인","phoneNumber":"01012345678",
@@ -60,6 +70,7 @@
 ```
 
 - `call`의 세 값은 모든 결과에 필수다. `providerCallId`는 최초 수신한 OpenAI 통화 식별자이며 재전송 때 유지한다. `incomingAt`은 수신 이벤트의 `created_at`(Unix 초)을 ISO 8601로 변환한다. 결과 전송 시각이나 AI 서버의 현재 시각을 넣지 않는다.
+- 고객 확인에서 보낸 것과 같은 통화 ID·발신번호·수신 시각을 사용한다. 백엔드는 앞서 만든 통화를 재사용해 주문을 연결한다.
 - 기존 고객은 `customer` 대신 `"customerSeq": 12`를 보낸다. 두 필드는 동시 입력하지 않는다. 미등록 고객은 이름·전화번호로 주문과 함께 등록한다.
 - 미완료·취소는 `outcome`과 `call`만으로 전송할 수 있다. 수집한 값이 있으면 같은 구조에 추가하고, 미수집 필드는 생략한다.
 - 완료는 출발지·도착지의 이름·전화번호·도로명·지번·동명·우편번호·좌표, 물품 종류/수량·가액, 미래 수거 시각이 필요하다. 결제는 `credit`(기업·개인 기본), `groupBilling`(기업), `billing`(개인)이다.
@@ -86,7 +97,7 @@ HTTP 201만으로 접수 성공을 판단하지 않는다. 오류 본문은 `err
 
 ## 기존 주문 취소 추가
 
-기존 조회에 쓰는 DB `call_session_seq` 헤더로 호출한다. 전화번호가 같은 활성 고객의 주문만 허용한다. Idempotency-Key는 없다.
+1번 고객 확인 응답의 `data.callSessionSeq`를 `call_session_seq` 헤더로 전달한다. 전화번호가 같은 활성 고객의 주문만 허용한다. Idempotency-Key는 없다.
 
 | 호출 | 처리 |
 | --- | --- |
@@ -100,5 +111,6 @@ HTTP 201만으로 접수 성공을 판단하지 않는다. 오류 본문은 `err
 ## 4. 녹취 처리
 
 통화 종료 웹훅은 PBX가 기존 `POST /api/webhooks/pbx/call-ended`로 보낸다. 백엔드가 발신번호·시작 시각으로 연결하고 녹취를 S3에 저장하므로 AI가 별도 녹취 저장 API를 호출할 필요는 없다.
+조회·취소만 한 상담도 1번에서 통화가 저장되므로 신규 주문 없이 녹취를 연결할 수 있다.
 
 기존 AI의 `/internal/ai/callers/context`·`/internal/ai/orders`, `phone`·snake_case 주문, `order_no` 응답 처리를 위 계약으로 변경한다. 상세 필드는 [주문 명세](orders.md), 전체 흐름은 [AI·PBX 연동 명세](ai-pbx-recordings.md)를 참고한다.

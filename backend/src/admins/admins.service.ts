@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ApiException } from '../common/errors/api.exception';
 import { AdminsRepository } from './admins.repository';
-import { AdminAccount, publicAdmin } from './admins.types';
+import { AdminAccount, ASSIGNABLE_ADMIN_ROLES, publicAdmin } from './admins.types';
 import { AdminQueryDto, UpdateAdminDto } from './dto/admin-query.dto';
 @Injectable()
 export class AdminsService {
@@ -36,15 +36,13 @@ export class AdminsService {
     const role = input.role ?? target.role;
     const status = input.status ?? target.status;
     if (
-      target.role === 'SYSTEM_ADMIN' &&
-      target.status === 'ACTIVE' &&
-      role !== 'SYSTEM_ADMIN' &&
-      (await this.repository.activeSystemAdmins(client)) <= 1
+      input.role !== undefined &&
+      (target.role === 'SYSTEM_ADMIN' || !ASSIGNABLE_ADMIN_ROLES.includes(input.role))
     )
       throw new ApiException(
-        409,
-        'INVALID_STATE',
-        '마지막 활성 최상위 관리자의 권한은 해제할 수 없습니다.',
+        403,
+        'FORBIDDEN',
+        'OPERATOR와 SUPERVISOR 사이에서만 권한을 변경할 수 있습니다.',
       );
     await this.repository.setAccess(target.adminUserSeq, role, status, client);
   }
@@ -53,5 +51,8 @@ export class AdminsService {
   }
   recordLogin(id: number, client: PoolClient) {
     return this.repository.recordLogin(id, client);
+  }
+  remove(id: number, client: PoolClient) {
+    return this.repository.remove(id, client);
   }
 }

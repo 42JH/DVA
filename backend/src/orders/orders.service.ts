@@ -18,6 +18,7 @@ import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
+import { CallSessionRepository } from '../consultations/call-session.repository';
 
 @Injectable()
 export class OrdersService {
@@ -29,6 +30,7 @@ export class OrdersService {
     private readonly customers: CustomersService,
     private readonly submissions: OrderSubmissionRepository,
     private readonly dver: DverClient,
+    private readonly calls: CallSessionRepository,
   ) {}
 
   private callId(adminId: number | null, header?: string): number | null {
@@ -43,6 +45,23 @@ export class OrdersService {
         'AI 주문 API에는 유효한 call_session_seq가 필요합니다.',
       );
     return header === undefined ? null : Number(header);
+  }
+
+  private async write<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout = '2s'");
+        return work(client);
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '다른 작업의 완료 대기 시간을 초과했습니다. 잠시 후 재시도해 주세요.',
+        );
+      throw error;
+    }
   }
 
   private async readCustomer(
@@ -189,10 +208,23 @@ export class OrdersService {
       );
     const headerId = this.callId(input.call ? 0 : adminId, callSessionHeader);
     const draft = orderDraft(input);
-    const prepared = await this.database.transaction(async (client) => {
+    const prepared = await this.write(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
-      const callId = input.call ? await this.repository.ensureCall(client, input.call) : headerId;
+      const session = input.call ? await this.calls.ensureCall(client, input.call) : undefined;
+      const callId = session?.id ?? headerId;
+      if (session?.created)
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            action: 'CALL_STARTED',
+            targetType: 'CALL_SESSION',
+            targetId: session.id,
+            requestId,
+          },
+          client,
+        );
       if (input.call && headerId !== null && headerId !== callId)
         throw new ApiException(
           409,
@@ -211,6 +243,7 @@ export class OrdersService {
           await this.audit.recordSuccess(
             {
               actorId: adminId,
+              actorType: adminId === null ? 'AI' : 'ADMIN',
               targetId: previous.orderSeq,
               targetType: 'ORDER',
               action: 'ORDER_SUBMISSION_REVIEW_REQUIRED',
@@ -260,6 +293,7 @@ export class OrdersService {
       await this.audit.recordSuccess(
         {
           actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
           targetId: result.orderSeq,
           action: 'ORDER_CREATED',
           targetType: 'ORDER',
@@ -273,6 +307,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: result.orderSeq,
             targetType: 'ORDER',
             action: 'ORDER_CANCELLED',
@@ -312,7 +347,7 @@ export class OrdersService {
   ): Promise<UpdatedOrderDto> {
     assertOrderUpdate(input);
     const callId = this.callId(adminId, callSessionHeader);
-    return this.database.transaction(async (client) => {
+    return this.write(async (client) => {
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
@@ -376,7 +411,14 @@ export class OrdersService {
       }
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
       await this.audit.recordSuccess(
-        { actorId: adminId, targetId: id, action: 'ORDER_UPDATED', targetType: 'ORDER', requestId },
+        {
+          actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
+          targetId: id,
+          action: 'ORDER_UPDATED',
+          targetType: 'ORDER',
+          requestId,
+        },
         client,
       );
       return this.repository.currentVersion(client, id);
@@ -443,6 +485,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: parcel.orderParcelSeq,
             targetType: 'ORDER_PARCEL',
             action: 'ORDER_PARCEL_CANCELLED',
@@ -461,6 +504,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: id,
             targetType: 'ORDER',
             action: 'ORDER_CANCELLED',
@@ -480,8 +524,14 @@ export class OrdersService {
     callSessionHeader?: string,
   ): Promise<SubmittedOrderDto> {
     const callId = this.callId(adminId, callSessionHeader);
-    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
-    const prepared = await this.database.transaction<
+    const event = {
+      actorId: adminId,
+      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
+      targetId: id,
+      targetType: 'ORDER',
+      requestId,
+    };
+    const prepared = await this.write<
       SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
     >(async (client) => {
       const call = callId === null ? undefined : await this.repository.call(client, callId);
@@ -579,6 +629,7 @@ export class OrdersService {
     await this.audit.recordSuccess(
       {
         actorId: adminId,
+        actorType: adminId === null ? 'AI' : 'ADMIN',
         targetId: id,
         targetType: 'ORDER',
         action: 'ORDER_SUBMISSION_STARTED',
@@ -595,7 +646,13 @@ export class OrdersService {
     requestId: string,
     payload: ReturnType<typeof dverPayload>,
   ): Promise<SubmittedOrderDto> {
-    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
+    const event = {
+      actorId: adminId,
+      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
+      targetId: id,
+      targetType: 'ORDER',
+      requestId,
+    };
     // SUBMITTING을 COMMIT한 요청만 전송하며 이 구간에는 DB 트랜잭션이 없다.
     let result: DverResult;
     try {

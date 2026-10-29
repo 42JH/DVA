@@ -49,6 +49,7 @@ MVP 합의에 따라 AI 서비스 토큰은 요구하지 않는다. AI가 호출
 
 AI는 `call_session_seq` 헤더에 기존 DB 통화 번호를 전달한다. 양의 PostgreSQL integer 범위만
 허용한다. 진행 중 통화의 발신번호와 주소록 소유 고객의 전화번호가 같고 고객이 ACTIVE여야 한다.
+번호는 상담 시작 시 `POST /api/customers/context`에 phoneNumber와 call(providerCallId·incomingAt)을 보내 응답의 callSessionSeq에서 받는다. 신규 주문 생성이 선행될 필요는 없다.
 다른 고객의 개인 주소록은 같은 기업 구성원이라도 접근할 수 없다.
 통화 번호 자체는 인증 토큰이 아니며 이 API는 통화를 새로 만들거나 전화번호 본인인증을 수행하지 않는다.
 
@@ -152,7 +153,7 @@ AI는 등록 응답의 PIN 번호와 version, 수정 응답의 version으로 통
 
 개인 쓰기는 PERSONAL_PIN_CREATED·PERSONAL_PIN_UPDATED, 기업 쓰기는
 COMPANY_PIN_CREATED·COMPANY_PIN_UPDATED 감사 기록을 업무 변경과 같은 트랜잭션에 저장한다.
-AI는 SYSTEM, 관리자는 ADMIN으로 기록하며 주소·전화번호·본문은 감사 metadata에 담지 않는다.
+AI는 AI, 관리자는 ADMIN과 당시 이름으로 기록하며 주소·전화번호·본문은 감사 metadata에 담지 않는다.
 실패·거부 기록도 기존 감사 흐름을 따른다. 감사 성공 기록 저장에 실패하면 업무 변경도 롤백한다.
 
 기존 테이블·고유 인덱스·검색 생성 컬럼·버전 트리거를 사용하며 DB 마이그레이션은 추가하지 않는다.

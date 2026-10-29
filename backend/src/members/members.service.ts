@@ -30,15 +30,6 @@ export class MembersService {
     return new ListResponse(await this.repository.list(companyId, query), query.limit);
   }
 
-  private async lockWrites(client: PoolClient) {
-    if (!(await this.repository.lockWrites(client)))
-      throw new ApiException(
-        409,
-        'REQUEST_IN_PROGRESS',
-        '다른 구성원 변경을 처리 중입니다. 잠시 후 재시도해 주세요.',
-      );
-  }
-
   private record(
     action: string,
     targetType: string,
@@ -53,12 +44,22 @@ export class MembersService {
     );
   }
 
-  private async write(companyId: number, work: (client: PoolClient) => Promise<void>) {
-    await this.database.transaction(async (client) => {
-      await this.lockWrites(client);
-      await this.company(companyId, client, true);
-      await work(client);
-    });
+  private async write(work: (client: PoolClient) => Promise<void>) {
+    try {
+      await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout = '2s'");
+        await this.repository.lockWrites(client);
+        await work(client);
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '다른 작업의 완료 대기 시간을 초과했습니다. 잠시 후 재시도해 주세요.',
+        );
+      throw error;
+    }
   }
 
   async create(
@@ -67,9 +68,10 @@ export class MembersService {
     adminId: number,
     requestId: string,
   ): Promise<void> {
-    await this.write(companyId, async (client) => {
+    await this.write(async (client) => {
       const customer = await this.repository.customer(input.customerSeq, client);
       if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      await this.company(companyId, client, true);
       if (customer.status !== 'ACTIVE')
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객은 등록할 수 없습니다.');
       const id = await this.repository.create(companyId, input, client);
@@ -85,13 +87,13 @@ export class MembersService {
   ): Promise<void> {
     if (input.role === undefined && input.status === undefined)
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 표시 역할 또는 상태를 입력해 주세요.');
-    await this.database.transaction(async (client) => {
-      await this.lockWrites(client);
+    await this.write(async (client) => {
       const member = await this.repository.member(id, client);
       if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      // 고객을 기업·소속보다 먼저 잠가 주문과 잠금 순서가 뒤집히지 않게 한다.
+      const customer = await this.repository.customer(member.customerSeq, client);
       await this.company(member.organizationSeq, client, input.status === 'ACTIVE');
       if (input.status === 'ACTIVE') {
-        const customer = await this.repository.customer(member.customerSeq, client);
         if (!customer || customer.status !== 'ACTIVE')
           throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 소속을 활성화할 수 없습니다.');
       }
@@ -101,10 +103,10 @@ export class MembersService {
   }
 
   async remove(id: number, adminId: number, requestId: string): Promise<void> {
-    await this.database.transaction(async (client) => {
-      await this.lockWrites(client);
+    await this.write(async (client) => {
       const member = await this.repository.member(id, client);
       if (!member) throw new ApiException(404, 'NOT_FOUND', '구성원을 찾을 수 없습니다.');
+      await this.repository.customer(member.customerSeq, client);
       await this.repository.remove(id, client);
       await this.record('MEMBERSHIP_REMOVED', 'MEMBERSHIP', id, adminId, requestId, client);
     });
@@ -117,13 +119,14 @@ export class MembersService {
     requestId: string,
   ): Promise<void> {
     const rows = parseMemberCsv(file);
-    await this.write(companyId, async (client) => {
+    await this.write(async (client) => {
       const before = await this.repository.candidates(companyId, rows, client);
       await this.repository.lockCustomers(
         before.map((row) => row.customerSeq),
         client,
       );
       const candidates = await this.repository.candidates(companyId, rows, client);
+      await this.company(companyId, client, true);
       const byPhone = new Map(candidates.map((row) => [row.phoneNumber, row]));
       const byEmployee = new Map(
         candidates

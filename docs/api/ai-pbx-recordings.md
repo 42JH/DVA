@@ -12,10 +12,15 @@ sequenceDiagram
   participant D as 디버
   participant P as PBX
   participant S as 비공개 S3
-  AI->>N: POST /api/customers/context (발신번호)
-  N->>B: 고객 조회
-  B-->>AI: 고객·소속·주소록
-  Note over AI: 상담 중 주문 정보 수집
+  AI->>N: POST /api/customers/context (phoneNumber + call)
+  N->>B: 고객 조회 + 통화 생성/재사용
+  B-->>AI: 고객·소속·주소록 + callSessionSeq
+  opt 상담 중 기존 주문·주소록 사용
+    AI->>N: 조회·취소·주소록 API (call_session_seq 헤더)
+    N->>B: 발신번호에 따른 고객 범위 확인
+    B-->>AI: 조회·처리 결과
+  end
+  opt 신규 주문 상담 결과
   AI->>N: POST /api/orders (call + outcome + 주문)
   N->>B: 주문 결과 수신
   alt COMPLETE
@@ -27,6 +32,7 @@ sequenceDiagram
   else INCOMPLETE / CANCELLED
     B->>B: 미완료 / 취소 저장
     B-->>AI: 저장 결과
+  end
   end
   P->>N: POST /api/webhooks/pbx/call-ended
   N->>B: POST /webhooks/pbx/call-ended
@@ -42,9 +48,21 @@ sequenceDiagram
 
 ## 1. 고객 확인
 
-`POST /api/customers/context`, `{ "phoneNumber": "01012345678" }`.
+`POST /api/customers/context`:
 
-번호는 국내 숫자 문자열로 변환한다. `+8210...`는 `010...`이다. 응답은 `data.lookupStatus`, `data.customer`, `personalPins`, `companyPins` 등을 포함한다. 자세한 필드는 [고객 초기 조회 계약](caller-context.md)을 따른다. 이 호출은 고객이나 통화를 생성하지 않는다.
+```json
+{
+  "phoneNumber": "01012345678",
+  "call": {
+    "providerCallId": "sess_example",
+    "incomingAt": "2026-10-29T01:00:00Z"
+  }
+}
+```
+
+번호는 국내 숫자 문자열로 변환한다. `+8210...`는 `010...`이다. 응답은 `data.lookupStatus`, `data.customer`, `personalPins`, `companyPins`, `callSessionSeq`를 포함한다. 자세한 필드는 [고객 초기 조회 계약](caller-context.md)을 따른다. 통화를 생성·재사용하며 고객·주문은 생성하지 않는다.
+
+상담 중 주문 조회·취소·주소록 API는 응답의 callSessionSeq를 `call_session_seq` 헤더로 받는다. 같은 통화 ID·발신번호·수신 시각의 재요청은 같은 번호를 반환한다. 기존 phoneNumber만 보낸 요청은 조회만 수행하고 통화 번호를 반환하지 않는다.
 
 ## 2. 상담 결과 전송
 
@@ -57,11 +75,11 @@ sequenceDiagram
   "call": {
     "providerCallId": "sess_example",
     "callerPhoneNumber": "01012345678",
-    "incomingAt": "2026-10-27T01:00:00Z"
+    "incomingAt": "2026-10-29T01:00:00Z"
   },
   "customer": { "name": "발신 고객", "phoneNumber": "01012345678" },
   "paymentMethodType": "credit",
-  "pickupRequestedAt": "2026-10-28T10:00:00+09:00",
+  "pickupRequestedAt": "2026-10-30T10:00:00+09:00",
   "parcels": [{
     "origin": {
       "name": "발송인", "phoneNumber": "01012345678",
@@ -87,6 +105,7 @@ sequenceDiagram
 - `INCOMPLETE`: 중도 종료·상담사 연결. 같은 구조로 수집한 항목만 전송한다. 고객 이름이 없으면 customer를 생략할 수 있다.
 - `CANCELLED`: 디버에 접수하기 전 상담 중 취소. 접수된 주문을 취소하는 기능이 아니다.
 - `call.incomingAt`은 수신 이벤트 **`created_at`(Unix 초)**으로 만든 ISO 8601이다. 세션 ID·발신번호와 함께 최초 수신 때 보관하고, 종료 결과 전송까지 유지한다.
+- 고객 확인 때와 같은 통화 정보를 보내면 기존 통화에 주문을 연결한다. 고객 확인 없이 결과를 먼저 보낸 기존 호출도 통화를 생성할 수 있다.
 - 세션 ID와 요청 UUID는 다른 값이다. 주문 한 건의 재시도는 같은 UUID·같은 call을 사용한다. 같은 통화의 여러 택배는 `parcels`에 묶는다.
 - COMPLETE 전송을 시작한 뒤 전화가 끊겨도 별도 INCOMPLETE/CANCELLED 주문을 만들지 않는다. 기존 UUID로 상태를 확인한다.
 - 네트워크 실패·504·409 처리 중·202는 새 키를 만들지 말고 기존 키로 재확인한다. `REVIEW_REQUIRED`는 자동 재접수하지 않는다.
@@ -100,7 +119,7 @@ sequenceDiagram
 
 | 기존 AI 호출/가정 | 적용할 계약 |
 | --- | --- |
-| `/internal/ai/callers/context`, `{phone}` | `/api/customers/context`, `{phoneNumber}` |
+| `/internal/ai/callers/context`, `{phone}` | `/api/customers/context`, `{phoneNumber,call:{providerCallId,incomingAt}}`. 응답 callSessionSeq 보관 |
 | `/internal/ai/orders`, 납작한 snake_case 주소 | `/api/orders`, 위 camelCase·parcels 구조 |
 | 세션 ID-순번을 요청 키로 사용 | 주문별 UUID를 생성·보관하고 재전송 시 유지 |
 | 납작한 `order_no` 응답 | `data.orderSeq`, `data.status`, `data.parcelNo` |

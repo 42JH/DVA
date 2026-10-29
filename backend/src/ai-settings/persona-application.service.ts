@@ -125,6 +125,7 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
         throw new ApiException(409, 'VERSION_CONFLICT', '현재 대기 중인 적용 요청이 아닙니다.');
       const event = {
         actorId: null,
+        actorType: 'AI' as const,
         targetId: target.aiPersonaVersionSeq,
         targetType: 'AI_PERSONA_VERSION',
         action: input.result === 'APPLIED' ? 'PERSONA_APPLIED' : 'PERSONA_APPLY_FAILED',

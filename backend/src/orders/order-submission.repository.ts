@@ -16,24 +16,13 @@ export class OrderSubmissionRepository {
   }
 
   async isCompanyCustomer(client: PoolClient, customerId: number): Promise<boolean> {
-    try {
-      const result = await client.query(
-        `SELECT m.membership_seq FROM memberships m JOIN organizations o USING(organization_seq)
+    const result = await client.query(
+      `SELECT m.membership_seq FROM memberships m JOIN organizations o USING(organization_seq)
          WHERE m.customer_seq=$1 AND m.status='ACTIVE' AND o.status='ACTIVE'
-         FOR SHARE OF m,o NOWAIT`,
-        [customerId],
-      );
-      return result.rowCount === 1;
-    } catch (error) {
-      // 구성원 변경은 기업→고객 순으로 잠그므로 여기서는 기다려 교착시키지 않는다.
-      if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
-        throw new ApiException(
-          409,
-          'REQUEST_IN_PROGRESS',
-          '고객 소속을 변경 중입니다. 잠시 후 재시도해 주세요.',
-        );
-      throw error;
-    }
+         FOR SHARE OF m,o`,
+      [customerId],
+    );
+    return result.rowCount === 1;
   }
 
   async start(client: PoolClient, id: number) {

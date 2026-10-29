@@ -7,6 +7,7 @@ import { AdminPublic, AdminRole } from '../admins/admins.types';
 import { ApiException } from '../common/errors/api.exception';
 import { AuditService } from '../audit/audit.service';
 import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/audit-operation';
+import { AuditActorType } from '../audit/audit.types';
 import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 export const SESSION_COOKIE = 'dva_session';
@@ -15,7 +16,12 @@ export const PublicAuth = () => SetMetadata('auth:public', true);
 // Do not apply this to administrator-only operations or to an entire controller.
 export const MvpAiCustomerAccess = () => SetMetadata('auth:mvp-ai-customer', true);
 export const Roles = (...roles: AdminRole[]) => SetMetadata('auth:roles', roles);
-export type AuthRequest = Request & { requestId: string; admin: AdminPublic; sessionToken: string };
+export type AuthRequest = Request & {
+  requestId: string;
+  admin: AdminPublic;
+  sessionToken: string;
+  auditActorType?: AuditActorType;
+};
 export function readSessionToken(request: Request): string | undefined {
   const values = (request.headers.cookie ?? '')
     .split(';')
@@ -63,8 +69,10 @@ export class AuthGuard implements CanActivate {
       !(request.headers.cookie ?? '')
         .split(';')
         .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`))
-    )
+    ) {
+      request.auditActorType = 'AI';
       return true;
+    }
     request.sessionToken = readSessionToken(request) ?? '';
     const targets = [context.getHandler(), context.getClass()];
     if (this.reflector.getAllAndOverride<boolean>('auth:mvp-ai-customer', targets)) {
@@ -77,7 +85,10 @@ export class AuthGuard implements CanActivate {
         typeof request.body === 'object' &&
         Object.hasOwn(request.body, 'status');
       // A missing/stale administrator session must never turn a status change into an AI write.
-      if (!hasSessionCookie && !changesStatus) return true;
+      if (!hasSessionCookie && !changesStatus) {
+        request.auditActorType = 'AI';
+        return true;
+      }
     }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.get('Origin');

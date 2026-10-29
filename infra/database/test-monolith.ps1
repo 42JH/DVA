@@ -32,6 +32,7 @@ try {
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/order-source-upgrade-check.sh') "${containerName}:/tmp/dva129/order-source-upgrade-check.sh"
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/persona-upgrade-check.sh') "${containerName}:/tmp/dva129/persona-upgrade-check.sh"
     Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/cancellation-upgrade-check.sh') "${containerName}:/tmp/dva129/cancellation-upgrade-check.sh"
+    Invoke-Docker cp (Join-Path $repoRoot 'backend/database-tests/admin-audit-upgrade-check.sh') "${containerName}:/tmp/dva129/admin-audit-upgrade-check.sh"
     Invoke-Docker exec $containerName chmod +x /tmp/dva129/testbin/docker
     Invoke-Docker exec $containerName sh /tmp/dva129/runner-check.sh
 } finally {

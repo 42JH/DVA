@@ -70,6 +70,7 @@ AI 전용 POST `/api/ai/config/apply-result`는 [AI 명세](ai-persona-integrati
 
 각 버전은 `applicationId`, `requestedByAdminUserSeq`, `requestedAt`, `appliedAt`, `lastNotifiedAt`, `applyErrorCode`를 반환한다.
 적용 요청·대기 교체/취소·성공·실패는 기존 감사 로그에 버전 번호를 대상으로 기록한다. 본문·토큰은 감사에 저장하지 않는다.
+관리자 요청은 ADMIN과 당시 이름, 서비스 토큰을 확인한 AI 적용 회신은 AI로 기록한다. 회신 자체의 인증·입력·처리 오류는 PERSONA_APPLY_RESULT로 남긴다.
 버전 행의 요청 메타데이터는 최신 적용 요청 기준이며 과거 적용 요청자·시각·결과는 감사 로그에서 조회한다.
 
 - `AI_UNAVAILABLE`: 알림 실패 또는 응답 불명. 같은 applicationId로 다시 알린다.

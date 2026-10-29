@@ -6,6 +6,7 @@ import { AiSettingsAccess } from './ai-settings-access';
 import { PersonaApplicationService } from './persona-application.service';
 import { PersonaApplyResultDto, RuntimeConfigQueryDto } from './dto/persona-application.dto';
 import { PersonaVersionResponseDto } from './dto/persona-response.dto';
+import { AuditOperation } from '../audit/audit-operation';
 
 @ApiTags('AI Settings')
 @Roles('SYSTEM_ADMIN')
@@ -47,6 +48,11 @@ export class AiRuntimeController {
   }
 
   @Post('apply-result')
+  @AuditOperation({
+    action: 'PERSONA_APPLY_RESULT',
+    targetType: 'AI_PERSONA_VERSION',
+    target: 'none',
+  })
   @HttpCode(200)
   @AiSettingsAccess()
   @ApiBearerAuth()

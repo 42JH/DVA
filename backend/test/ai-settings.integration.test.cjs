@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
-const { readFileSync, readdirSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { createServer } = require('node:http');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
@@ -74,28 +73,7 @@ const create = async (changes = {}) =>
   data(await call('POST', '/api/personas', input(changes)), 201);
 const patch = (id, body) => call('PATCH', `/api/personas/${id}`, body);
 before(async () => {
-  if (!(await pool.query("SELECT to_regclass('public.ai_personas') AS name")).rows[0].name) {
-    for (const file of readdirSync(join(__dirname, '../migrations'))
-      .filter((f) => /^\d{3}-.+\.sql$/.test(f))
-      .sort())
-      await pool.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
-  } else if (
-    !(await pool.query("SELECT to_regclass('public.ai_persona_versions') AS name")).rows[0].name
-  ) {
-    const client = await pool.connect();
-    await client.query('BEGIN');
-    try {
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/013-ai-persona-versions.sql'), 'utf8'),
-      );
-      await client.query('COMMIT');
-    } catch (failure) {
-      await client.query('ROLLBACK');
-      throw failure;
-    } finally {
-      client.release();
-    }
-  }
+  await migrate(pool);
   ai = createServer(async (request, response) => {
     assert.equal(request.headers.authorization, `Bearer ${token}`);
     if (request.url === '/internal/persona/options') {
@@ -374,6 +352,21 @@ test('runtime settings and application callbacks enforce dedicated service authe
   await error(await call('GET', '/api/ai/config', undefined, 1), 403, 'FORBIDDEN');
   await error(await call('POST', '/api/ai/config/apply-result', {}), 401, 'UNAUTHORIZED');
   await error(await serviceCall('POST', '/api/personas', input()), 403, 'FORBIDDEN');
+  for (const [headers, expectedType, expectedStatus] of [
+    [{ Authorization: 'Bearer incorrect' }, 'SYSTEM', 401],
+    [{}, 'AI', 400],
+  ]) {
+    const response = await serviceCall('POST', '/api/ai/config/apply-result', {}, headers);
+    assert.equal(response.status, expectedStatus);
+    const logs = (
+      await pool.query('SELECT actor_type,result FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.deepEqual(logs, [
+      { actor_type: expectedType, result: expectedStatus === 401 ? 'DENIED' : 'FAILED' },
+    ]);
+  }
 });
 
 test('activation stays pending after notification and only an idle applied acknowledgment changes ACTIVE', async () => {
@@ -408,6 +401,13 @@ test('activation stays pending after notification and only an idle applied ackno
   );
   assert.equal((await data(await report(pending))).appliedAt, active.appliedAt);
   assert.equal((await data(await activate(version))).status, 'ACTIVE');
+  const appliedActor = (
+    await pool.query(
+      "SELECT actor_type,actor_name,actor_seq FROM audit_logs WHERE action='PERSONA_APPLIED' AND target_seq=$1",
+      [active.aiPersonaVersionSeq],
+    )
+  ).rows;
+  assert.deepEqual(appliedActor, [{ actor_type: 'AI', actor_name: 'AI', actor_seq: null }]);
   assert.equal(
     (
       await pool.query(

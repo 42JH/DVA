@@ -12,6 +12,7 @@
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
 AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 디버 접수 결과까지 반환하고, INCOMPLETE·CANCELLED는 저장만 한다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
+상담 시작에는 [고객 확인 API](../docs/api/caller-context.md)에 phoneNumber와 call(providerCallId·incomingAt)을 보내 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 전화번호만 보낸 기존 조회는 그대로 유지한다.
 PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
@@ -354,6 +355,7 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
 | GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext }` |
 | PATCH /api/admins/:id | SYSTEM_ADMIN, role/status 변경, 204 |
+| PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
 | PATCH /api/admins/:id/password | SYSTEM_ADMIN, newPassword로 대상 비밀번호 변경, 204 |
@@ -396,12 +398,23 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 비밀번호 변경은 대상 계정의 모든 세션 삭제·해시 갱신·감사 기록을 동일 트랜잭션으로 처리한다.
 로그인도 같은 계정 잠금을 사용해 이전 비밀번호로 검증 중인 로그인이 변경 후 살아남지 않게 한다.
 동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
-이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 마지막 활성 SYSTEM_ADMIN의 강등은 409다.
+이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 두 권한 변경 경로 모두 OPERATOR ↔ SUPERVISOR만 허용한다.
+SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
+전용 `/admins/:id/role`은 `role`만 필수로 받으며 계정 상태를 변경하지 않는다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
+
+DELETE /api/admins/:id는 SYSTEM_ADMIN만 사용하며 OPERATOR·SUPERVISOR를 상태와 관계없이 실제 삭제한다.
+SYSTEM_ADMIN은 본인·타인 모두 삭제할 수 없다. 성공 응답은 본문 없는 204이며 없는 계정은 404다.
+계정과 모든 세션을 삭제하고 목록·로그인에서 제외한다. 이미 인증한 요청은 소급 취소하지 않지만 후속 인증은 실패한다.
+업무 기록의 관리자 번호는 논리 참조로 보존하며 감사 로그의 actorName·targetAdminName으로 당시 이름을 확인한다.
+삭제 성공 감사와 계정 삭제는 같은 트랜잭션이다. 로그인·권한 변경과 겹쳐도 계정 잠금 뒤 재검증한다.
+INACTIVE는 로그인할 수 없으며 목록 필터·권한 변경·삭제 대상으로 지원한다. 비활성 전환 API는 이번 범위에 추가하지 않는다.
+삭제된 loginId는 재가입에 사용할 수 있지만 adminUserSeq는 새 번호를 사용하므로 이전 기록과 연결되지 않는다.
+감사 기록 범위와 AI 구분은 [감사 로그 계약](../docs/api/audit-logs.md)을 참고한다.
 
 ### DB 적용·최초 관리자 생성
 
-앱 시작은 기존 001만 적용한다. 002·003은 `infra/database/migrate.sh`로 별도 적용해야 한다.
+앱 시작은 기존 001만 적용한다. 새 앱·관리자 CLI 실행 전 `infra/database/migrate.sh`로 015까지 적용해야 한다.
 003은 기존 관리자 데이터가 없는 상태를 전제로 하며 운영 DB 적용은 이번 MR에 포함하지 않는다.
 이름이 없는 기존 행이 있으면 적용이 실패하므로 데이터 보완 계획을 먼저 세운다.
 
@@ -422,5 +435,5 @@ CLI는 SYSTEM_ADMIN이 이미 있으면 중단하고 기존 계정을 변경하�
 
 `npm run check`는 설정·공통 HTTP·비밀번호/쿠키 단위 검증을 수행한다.
 `node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, Origin 검증, 만료·삭제, 동시 로그인/비밀번호 변경,
-동시 관리자 강등, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
+최상위 관리자 권한 보호, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
 저장소 루트의 `./infra/database/test-monolith.ps1`은 migration·백업 복구·체크섬·실패 롤백을 검증한다.

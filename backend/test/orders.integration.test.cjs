@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
@@ -57,72 +56,7 @@ const address = {
 };
 
 before(async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const upgraded = (
-      await client.query(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id') AS ready",
-      )
-    ).rows[0].ready;
-    const migrations = upgraded
-      ? []
-      : [
-          ['public.admin_users', '002-monolith-initial.sql'],
-          ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-          ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-          ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
-          ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
-        ];
-    for (const [table, file] of migrations) {
-      if (!(await client.query('SELECT to_regclass($1) AS present', [table])).rows[0].present)
-        await client.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
-    }
-    if (!upgraded)
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
-      );
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='incoming_at') AS ready",
-        )
-      ).rows[0].ready
-    ) {
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/001-pbx-call-ended.sql'), 'utf8'),
-      );
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/011-call-recording-correlation.sql'), 'utf8'),
-      );
-    }
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='orders' AND column_name='creation_source') AS ready",
-        )
-      ).rows[0].ready
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/012-order-creation-source.sql'), 'utf8'),
-      );
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='order_parcels' AND column_name='status') AS ready",
-        )
-      ).rows[0].ready
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/014-order-cancellation.sql'), 'utf8'),
-      );
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  await migrate(pool);
   const hash = await hashPassword(password);
   for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
     const result = await pool.query(
@@ -2192,6 +2126,21 @@ test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result wi
   assert.equal(stored.caller_phone_number, '01000000001');
   assert.equal(stored.incoming_at.toISOString(), input.call.incomingAt.replace('00Z', '00.000Z'));
   assert.equal(stored.order_seq, data.orderSeq);
+  const events = (
+    await pool.query(
+      "SELECT action,actor_type,actor_seq,actor_name FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+      [response.headers.get('x-request-id')],
+    )
+  ).rows;
+  assert.deepEqual(
+    events.map((event) => event.action),
+    ['CALL_STARTED', 'ORDER_CREATED', 'ORDER_SUBMISSION_STARTED', 'ORDER_SUBMISSION_ACCEPTED'],
+  );
+  assert.ok(
+    events.every(
+      (event) => event.actor_type === 'AI' && event.actor_seq === null && event.actor_name === 'AI',
+    ),
+  );
   assert.deepEqual(
     (await (await aiCreate(undefined, { ...input, outcome: 'CANCELLED' }, key, 1)).json()).data,
     data,
@@ -2987,6 +2936,13 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
     true,
   );
   assert.deepEqual(spec.components.schemas.SubmitOrderDto.required, ['expectedVersion']);
+  for (const operation of [
+    spec.paths['/api/orders'].post,
+    spec.paths['/api/orders/{id}'].patch,
+    spec.paths['/api/orders/{id}/submit'].post,
+    spec.paths['/api/members/{id}'].patch,
+  ])
+    assert.ok(operation.responses[409].description.includes('잠금 대기 2초 초과'));
   for (const status of [200, 202, 400, 401, 403, 404, 409, 422, 503])
     assert.ok(operation.responses[status]?.description, status);
   assert.ok(operation.responses[202].headers.Location);
@@ -2997,22 +2953,562 @@ test('ORD-06 Swagger documents English tag, literal call header, version body, r
   ]);
 });
 
-test('ORD-06 does not deadlock with a membership change and retries eligibility after it completes', async () => {
+test('ORD-06 waits for membership eligibility and continues the original request', async () => {
   resetDver();
   const order = await readyOrder({ customerSeq: customerId, paymentMethodType: 'groupBilling' });
   const lock = await pool.connect();
+  let pending;
   try {
     await lock.query('BEGIN');
     await lock.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1 FOR UPDATE', [
       customerId,
     ]);
-    await errorCode(await submitOrder(order), 409, 'REQUEST_IN_PROGRESS');
+    pending = submitOrder(order);
+    await waitForBlockedBy(lock.processID);
     assert.equal(dverRequests.length, 0);
     assert.equal((await submissionRows(order.orderSeq)).status, 'COLLECTING');
   } finally {
     await lock.query('ROLLBACK');
     lock.release();
+    if (pending) await pending;
   }
-  assert.equal((await submitOrder(order)).status, 200);
+  assert.equal((await pending).status, 200);
   assert.equal(dverRequests.length, 1);
+});
+
+async function waitForBlockedBy(pid) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const { rows } = await pool.query(
+      'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting',
+      [pid],
+    );
+    if (rows[0].waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail('Expected a database lock wait');
+}
+
+for (const operation of ['create', 'update', 'submit']) {
+  test(
+    'lock ordering lets ' + operation + ' finish before a waiting membership change',
+    async () => {
+      resetDver();
+      const { CustomersRepository } = require('../dist/customers/customers.repository');
+      const customers = apps[0].get(CustomersRepository);
+      const { customer, phone } = await readCustomer();
+      const employeeNo = String(customer);
+      const membership = (
+        await pool.query(
+          "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,$3,'ACTIVE') RETURNING membership_seq",
+          [customer, organizationId, employeeNo],
+        )
+      ).rows[0].membership_seq;
+      const parcel = {
+        originPin: { scope: 'COMPANY', pinSeq: companyPin },
+        origin: address,
+        destination: address,
+        smallBoxCount: 1,
+        itemPrice: 0,
+      };
+      const order =
+        operation === 'create'
+          ? null
+          : await readyOrder({
+              customerSeq: customer,
+              paymentMethodType: 'groupBilling',
+              parcels: [parcel],
+            });
+      const original = customers.find;
+      let unlock, reached;
+      const gate = new Promise((resolve) => {
+        unlock = resolve;
+      });
+      const locked = new Promise((resolve) => {
+        reached = resolve;
+      });
+      customers.find = async function (id, client) {
+        const result = await original.call(this, id, client);
+        if (id === customer && client) {
+          reached(client.processID);
+          await gate;
+        }
+        return result;
+      };
+      let pendingOrder, pendingMember;
+      try {
+        pendingOrder =
+          operation === 'create'
+            ? create({ customerSeq: customer, parcels: [parcel] })
+            : operation === 'submit'
+              ? submitOrder(order)
+              : fetch(hosts[0] + '/api/orders/' + order.orderSeq, {
+                  method: 'PATCH',
+                  headers: {
+                    Origin: origin,
+                    Cookie: cookies[0],
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ expectedVersion: order.version, parcels: [parcel] }),
+                });
+        const pid = await locked;
+        if (operation === 'update') {
+          const form = new FormData();
+          form.append(
+            'file',
+            new Blob(['employeeNo,name,phoneNumber\n' + employeeNo + ',변경 고객,' + phone], {
+              type: 'text/csv',
+            }),
+            'members.csv',
+          );
+          pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members/import', {
+            method: 'POST',
+            headers: { Origin: origin, Cookie: cookies[1] },
+            body: form,
+          });
+        } else {
+          pendingMember = fetch(hosts[1] + '/api/members/' + membership, {
+            method: 'PATCH',
+            headers: { Origin: origin, Cookie: cookies[1], 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'ACTIVE' }),
+          });
+        }
+        await waitForBlockedBy(pid);
+        unlock();
+        const [orderResponse, memberResponse] = await Promise.all([pendingOrder, pendingMember]);
+        assert.equal(orderResponse.status, operation === 'create' ? 201 : 200);
+        assert.equal(memberResponse.status, 204);
+        assert.equal(dverRequests.length, operation === 'submit' ? 1 : 0);
+        if (operation === 'submit') {
+          assert.equal((await submitOrder(order)).status, 200);
+          assert.equal(dverRequests.length, 1);
+        }
+      } finally {
+        unlock();
+        await Promise.allSettled([pendingOrder, pendingMember]);
+        customers.find = original;
+      }
+    },
+  );
+}
+
+for (const status of ['ACTIVE', 'INACTIVE']) {
+  test(
+    'lock ordering resumes AI completion using the committed ' + status + ' membership',
+    async () => {
+      resetDver();
+      const { MembersRepository } = require('../dist/members/members.repository');
+      const members = apps[1].get(MembersRepository);
+      const { customer, phone } = await readCustomer();
+      const membership = (
+        await pool.query(
+          "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,$3,'ACTIVE') RETURNING membership_seq",
+          [customer, organizationId, String(customer)],
+        )
+      ).rows[0].membership_seq;
+      const original = members.update;
+      let unlock, reached;
+      const gate = new Promise((resolve) => {
+        unlock = resolve;
+      });
+      const locked = new Promise((resolve) => {
+        reached = resolve;
+      });
+      members.update = async function (id, input, client) {
+        if (id === membership) {
+          reached(client.processID);
+          await gate;
+        }
+        return original.call(this, id, input, client);
+      };
+      const input = aiResult('COMPLETE', {
+        customerSeq: customer,
+        call: {
+          providerCallId: randomUUID(),
+          incomingAt: new Date().toISOString(),
+          callerPhoneNumber: phone,
+        },
+        paymentMethodType: 'groupBilling',
+        parcels: [
+          {
+            originPin: { scope: 'COMPANY', pinSeq: companyPin },
+            origin: address,
+            destination: address,
+            smallBoxCount: 1,
+            itemPrice: 0,
+          },
+        ],
+      });
+      const key = randomUUID();
+      let pendingOrder, pendingMember;
+      try {
+        pendingMember = fetch(hosts[1] + '/api/members/' + membership, {
+          method: 'PATCH',
+          headers: { Origin: origin, Cookie: cookies[1], 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status }),
+        });
+        const pid = await locked;
+        pendingOrder = aiCreate(undefined, input, key);
+        await waitForBlockedBy(pid);
+        assert.equal(dverRequests.length, 0);
+        unlock();
+        const [orderResponse, memberResponse] = await Promise.all([pendingOrder, pendingMember]);
+        assert.equal(memberResponse.status, 204);
+        if (status === 'ACTIVE') {
+          assert.equal(orderResponse.status, 201);
+          assert.equal((await orderResponse.json()).data.status, 'ACCEPTED');
+          assert.equal((await aiCreate(undefined, input, key, 1)).status, 201);
+          assert.equal(dverRequests.length, 1);
+        } else {
+          await errorCode(orderResponse, 403, 'FORBIDDEN');
+          assert.equal(dverRequests.length, 0);
+          assert.equal(
+            (await pool.query('SELECT 1 FROM orders WHERE creation_request_id=$1', [key])).rowCount,
+            0,
+          );
+        }
+      } finally {
+        unlock();
+        await Promise.allSettled([pendingOrder, pendingMember]);
+        members.update = original;
+      }
+    },
+  );
+}
+
+test('lock ordering times out without partial writes or Dver calls and permits a later retry', async () => {
+  resetDver();
+  const { customer, phone } = await readCustomer();
+  const input = aiResult('COMPLETE', {
+    customerSeq: customer,
+    call: {
+      providerCallId: randomUUID(),
+      incomingAt: new Date().toISOString(),
+      callerPhoneNumber: phone,
+    },
+  });
+  const key = randomUUID();
+  const lock = await pool.connect();
+  try {
+    await lock.query('BEGIN');
+    await lock.query('SELECT customer_seq FROM customers WHERE customer_seq=$1 FOR UPDATE', [
+      customer,
+    ]);
+    const started = Date.now();
+    await errorCode(await aiCreate(undefined, input, key), 409, 'REQUEST_IN_PROGRESS');
+    assert.ok(Date.now() - started >= 1500);
+    assert.equal(dverRequests.length, 0);
+    assert.equal(
+      (await pool.query('SELECT 1 FROM orders WHERE creation_request_id=$1', [key])).rowCount,
+      0,
+    );
+    assert.equal(
+      (
+        await pool.query('SELECT 1 FROM call_sessions WHERE provider_call_id=$1', [
+          input.call.providerCallId,
+        ])
+      ).rowCount,
+      0,
+    );
+  } finally {
+    await lock.query('ROLLBACK');
+    lock.release();
+  }
+  assert.equal((await aiCreate(undefined, input, key)).status, 201);
+  assert.equal(dverRequests.length, 1);
+});
+
+const contextCall = () => ({ providerCallId: randomUUID(), incomingAt: new Date().toISOString() });
+const startCallContext = (phoneNumber, call, index = 0, extra = {}) =>
+  fetch(hosts[index] + '/api/customers/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...extra },
+    body: JSON.stringify({ phoneNumber, call }),
+  });
+
+test('call context starts a session before AI reads and cancels an existing order', async () => {
+  const { customer, phone } = await readCustomer();
+  const orderId = await readOrder(customer, [{}]);
+  const before = await counts();
+  const response = await startCallContext(phone, contextCall());
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.equal(data.customer.customerSeq, customer);
+  assert.ok(Number.isInteger(data.callSessionSeq) && data.callSessionSeq > 0);
+  assert.deepEqual(await counts(), before);
+  const headers = aiReadHeaders(data.callSessionSeq);
+  const list = await readOrders('', headers);
+  assert.equal(list.status, 200);
+  assert.deepEqual(
+    (await list.json()).data.map((order) => order.orderSeq),
+    [orderId],
+  );
+  const detail = await readDetail(orderId, headers);
+  assert.equal(detail.status, 200);
+  assert.equal((await detail.json()).data.customerSeq, customer);
+  const cancelled = await fetch(hosts[0] + `/api/orders/${orderId}/cancel`, {
+    method: 'POST',
+    headers: { call_session_seq: String(data.callSessionSeq) },
+  });
+  assert.equal(cancelled.status, 204);
+  assert.equal((await (await readDetail(orderId, headers)).json()).data.status, 'CANCELLED');
+  const session = (
+    await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [
+      data.callSessionSeq,
+    ])
+  ).rows[0];
+  assert.equal(session.order_seq, null);
+});
+
+test('call context reuses one session across retries and rejects changed caller or event time', async () => {
+  const { phone } = await readCustomer();
+  const identity = contextCall();
+  const responses = await Promise.all(
+    [0, 1, 2].map((index) => startCallContext(phone, identity, index)),
+  );
+  assert.ok(responses.every((response) => response.status === 200));
+  const ids = await Promise.all(
+    responses.map(async (response) => (await response.json()).data.callSessionSeq),
+  );
+  assert.equal(new Set(ids).size, 1);
+  const starts = (
+    await pool.query(
+      "SELECT actor_type,actor_name FROM audit_logs WHERE target_type='CALL_SESSION' AND target_seq=$1 AND action='CALL_STARTED'",
+      [ids[0]],
+    )
+  ).rows;
+  assert.deepEqual(starts, [{ actor_type: 'AI', actor_name: 'AI' }]);
+  const sameInstant = {
+    ...identity,
+    incomingAt: new Date(Date.parse(identity.incomingAt) + 9 * 3600000)
+      .toISOString()
+      .replace('Z', '+09:00'),
+  };
+  const repeated = await startCallContext(phone, sameInstant);
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).data.callSessionSeq, ids[0]);
+  const international = await startCallContext('0082' + phone.slice(1), identity);
+  assert.equal(international.status, 200);
+  const internationalData = (await international.json()).data;
+  assert.equal(internationalData.callSessionSeq, ids[0]);
+  assert.equal(internationalData.customer.phoneNumber, phone);
+  await errorCode(await startCallContext('01099990000', identity), 409, 'INVALID_STATE');
+  await errorCode(
+    await startCallContext(phone, {
+      ...identity,
+      incomingAt: new Date(Date.parse(identity.incomingAt) + 1000).toISOString(),
+    }),
+    409,
+    'INVALID_STATE',
+  );
+  const stored = (
+    await pool.query(
+      'SELECT call_session_seq,caller_phone_number,incoming_at,order_seq FROM call_sessions WHERE provider_call_id=$1',
+      [identity.providerCallId],
+    )
+  ).rows;
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].call_session_seq, ids[0]);
+  assert.equal(stored[0].caller_phone_number, phone);
+  assert.equal(stored[0].incoming_at.toISOString(), identity.incomingAt);
+  assert.equal(stored[0].order_seq, null);
+  const another = await startCallContext(phone, contextCall());
+  assert.equal(another.status, 200);
+  assert.notEqual((await another.json()).data.callSessionSeq, ids[0]);
+});
+
+test('call context preserves customer scope for orders and personal address changes', async () => {
+  const { customer, phone } = await readCustomer();
+  const other = await readCustomer();
+  const otherOrder = await readOrder(other.customer);
+  const response = await startCallContext(phone, contextCall());
+  assert.equal(response.status, 200);
+  const { callSessionSeq } = (await response.json()).data;
+  const headers = { 'Content-Type': 'application/json', call_session_seq: String(callSessionSeq) };
+  await errorCode(await readDetail(otherOrder, aiReadHeaders(callSessionSeq)), 404, 'NOT_FOUND');
+  await errorCode(
+    await fetch(hosts[0] + `/api/orders/${otherOrder}/cancel`, { method: 'POST', headers }),
+    404,
+    'NOT_FOUND',
+  );
+  const pinResponse = await fetch(hosts[0] + `/api/customers/${customer}/pins`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ label: '통화 주소', addressData: address }),
+  });
+  assert.equal(pinResponse.status, 201);
+  const pinId = (await pinResponse.json()).data.personalPinSeq;
+  const changed = await fetch(hosts[0] + `/api/pins/${pinId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ label: '수정 주소' }),
+  });
+  assert.equal(changed.status, 200);
+  const pins = await fetch(hosts[0] + `/api/customers/${customer}/pins`, { headers });
+  assert.equal(pins.status, 200);
+  assert.equal((await pins.json()).data[0].label, '수정 주소');
+  await errorCode(
+    await fetch(hosts[0] + `/api/customers/${other.customer}/pins`, { headers }),
+    403,
+    'FORBIDDEN',
+  );
+});
+
+test('call context does not register unknown or withdrawn customers and supports registration later', async () => {
+  const phone = '01099117733';
+  const before = await counts();
+  const response = await startCallContext(phone, contextCall());
+  assert.equal(response.status, 200);
+  const data = (await response.json()).data;
+  assert.equal(data.lookupStatus, 'UNREGISTERED');
+  assert.equal(data.customer, null);
+  assert.ok(data.callSessionSeq > 0);
+  assert.deepEqual(await counts(), before);
+  await errorCode(await readOrders('', aiReadHeaders(data.callSessionSeq)), 403, 'FORBIDDEN');
+  const registered = await fetch(hosts[0] + '/api/customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: '통화 중 등록', phoneNumber: phone }),
+  });
+  assert.equal(registered.status, 201);
+  const list = await readOrders('', aiReadHeaders(data.callSessionSeq));
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).data, []);
+  const withdrawn = await startCallContext('01000000002', contextCall());
+  assert.equal(withdrawn.status, 200);
+  const withdrawnData = (await withdrawn.json()).data;
+  assert.equal(withdrawnData.lookupStatus, 'WITHDRAWN');
+  assert.equal(withdrawnData.customer, null);
+  assert.ok(withdrawnData.callSessionSeq > 0);
+  await errorCode(
+    await readOrders('', aiReadHeaders(withdrawnData.callSessionSeq)),
+    403,
+    'FORBIDDEN',
+  );
+});
+
+test('call context and every AI order outcome share the same session without changing the result contract', async () => {
+  for (const outcome of ['COMPLETE', 'INCOMPLETE', 'CANCELLED']) {
+    resetDver();
+    const { customer, phone } = await readCustomer();
+    const identity = contextCall();
+    const initial = await startCallContext(phone, identity);
+    assert.equal(initial.status, 200);
+    const callSessionSeq = (await initial.json()).data.callSessionSeq;
+    const input = aiResult(outcome, {
+      customerSeq: customer,
+      call: { ...identity, callerPhoneNumber: '+82' + phone.slice(1) },
+    });
+    const key = randomUUID();
+    const result = await aiCreate(undefined, input, key);
+    assert.equal(result.status, 201);
+    const data = (await result.json()).data;
+    assert.equal(data.callSessionSeq, callSessionSeq);
+    assert.equal(
+      data.status,
+      { COMPLETE: 'ACCEPTED', INCOMPLETE: 'COLLECTING', CANCELLED: 'CANCELLED' }[outcome],
+    );
+    const retried = await aiCreate(undefined, input, key, 1);
+    assert.deepEqual((await retried.json()).data, data);
+    const contextAgain = await startCallContext(phone, identity, 1);
+    assert.equal(contextAgain.status, 200);
+    assert.equal((await contextAgain.json()).data.callSessionSeq, callSessionSeq);
+    const sessions = (
+      await pool.query(
+        'SELECT call_session_seq,order_seq FROM call_sessions WHERE provider_call_id=$1',
+        [identity.providerCallId],
+      )
+    ).rows;
+    assert.deepEqual(sessions, [{ call_session_seq: callSessionSeq, order_seq: data.orderSeq }]);
+    assert.equal(dverRequests.length, outcome === 'COMPLETE' ? 1 : 0);
+  }
+});
+
+test('call context rejects malformed identities and untrusted cookies without persisting a session', async () => {
+  const before = (await pool.query('SELECT count(*) FROM call_sessions')).rows[0].count;
+  const identity = contextCall();
+  for (const invalid of [
+    null,
+    [],
+    '',
+    {},
+    { providerCallId: identity.providerCallId },
+    { incomingAt: identity.incomingAt },
+    { ...identity, providerCallId: '' },
+    { ...identity, providerCallId: 'x'.repeat(201) },
+    { ...identity, providerCallId: 'call id' },
+    { ...identity, providerCallId: 'call\u0000id' },
+    { ...identity, incomingAt: '2026-02-30T01:00:00Z' },
+    { ...identity, incomingAt: '2026-10-29T01:00:00' },
+    { ...identity, incomingAt: null },
+    { ...identity, callerPhoneNumber: '01099990000' },
+    { ...identity, orderSeq: 1 },
+  ])
+    await errorCode(await startCallContext('01000000001', invalid), 400, 'INVALID_REQUEST');
+  for (const phone of ['12', '0'.repeat(21)])
+    await errorCode(await startCallContext(phone, identity), 400, 'INVALID_REQUEST');
+  await errorCode(
+    await startCallContext('01000000001', identity, 0, {
+      Cookie: 'dva_session=expired',
+      Origin: origin,
+    }),
+    401,
+    'UNAUTHORIZED',
+  );
+  await errorCode(
+    await startCallContext('01000000001', identity, 0, {
+      Origin: 'https://untrusted.invalid',
+    }),
+    403,
+    'FORBIDDEN',
+  );
+  assert.equal((await pool.query('SELECT count(*) FROM call_sessions')).rows[0].count, before);
+});
+
+test('call context rolls back a new session if the customer lookup fails', async () => {
+  const { CustomersRepository } = require('../dist/customers/customers.repository');
+  const customers = apps[0].get(CustomersRepository);
+  const original = customers.context;
+  const identity = contextCall();
+  customers.context = async function (...args) {
+    await original.apply(this, args);
+    throw new Error('private-query-data');
+  };
+  try {
+    const response = await startCallContext('01000000001', identity);
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.error.code, 'DEPENDENCY_UNAVAILABLE');
+    assert.ok(!JSON.stringify(body).includes('private-query-data'));
+    assert.equal(body.data, undefined);
+  } finally {
+    customers.context = original;
+  }
+  assert.equal(
+    (
+      await pool.query('SELECT count(*) FROM call_sessions WHERE provider_call_id=$1', [
+        identity.providerCallId,
+      ])
+    ).rows[0].count,
+    '0',
+  );
+});
+
+test('call context Swagger documents optional identity, database sequence and unchanged legacy lookup', async () => {
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  const operation = spec.paths['/api/customers/context'].post;
+  assert.deepEqual(operation.tags, ['Customers']);
+  assert.equal(operation.summary, '고객 확인·주소록 조회 및 통화 시작');
+  assert.ok(operation.description.includes('call_session_seq'));
+  assert.ok(operation.responses['409']);
+  const schemas = spec.components.schemas;
+  assert.deepEqual(schemas.CallerContextRequestDto.required, ['phoneNumber']);
+  assert.ok(
+    JSON.stringify(schemas.CallerContextRequestDto.properties.call).includes('CallIdentityDto'),
+  );
+  assert.deepEqual(schemas.CallIdentityDto.required.sort(), ['incomingAt', 'providerCallId']);
+  assert.equal(schemas.CallerContextDto.properties.callSessionSeq.type, 'number');
+  assert.ok(!schemas.CallerContextDto.required.includes('callSessionSeq'));
+  const legacy = await startCallContext('01000000001', undefined);
+  assert.equal(legacy.status, 200);
+  assert.equal(Object.hasOwn((await legacy.json()).data, 'callSessionSeq'), false);
 });

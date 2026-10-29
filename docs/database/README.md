@@ -4,8 +4,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 
 ## 적용 기준
 
-`monolith.dbml`은 사용자가 전달한 2026-10-25 최신 ERD 원본이다. 단일 PostgreSQL DB,
-업무 테이블 18개와 관리자 세션 테이블 1개, FK 19개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
+`monolith.dbml`은 사용자가 전달한 2026-10-25 ERD에 현재 migration을 반영한 문서다. 단일 PostgreSQL DB,
+업무 테이블 18개와 관리자 세션 테이블 1개, public FK 14개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -16,12 +16,13 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `009-membership-write-requests.sql`: 과거 구성원 등록·CSV 처리 기록. 이미 적용된 원본·체크섬·이력을 그대로 보존한다.
 - `010-remove-membership-write-requests.sql`: 구성원 요청 기록 테이블과 전용 스키마를 제거한다. 009를 포함한 기존 적용 이력과 고객·기업·소속·주문·감사·PBX 데이터는 보존한다.
 - `011-call-recording-correlation.sql`: `call_sessions.incoming_at`에 OpenAI 이벤트 시각을 보관하고, 기존 PBX 수신함에 `call_session_seq`·`last_attempt_at`을 추가한다. 녹취 연결 고정과 재처리에 필요한 변경이며 테이블은 추가하지 않는다. 기존 행은 새 컬럼을 NULL로 유지한다.
+- `015-admin-deletion-audit.sql`: 감사 작업자·대상 관리자 이름 보존, AI 주체 구분, 관리자 INACTIVE 상태 허용, 관리자 참조 5개를 논리 참조로 변경. 세션의 삭제 cascade는 유지하며 테이블은 추가하지 않는다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
 - `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
 - `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 18개와 별도다.
 
-고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING이다.
+고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING/INACTIVE다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
 CSV 갱신 방식은 API 구현 시 결정한다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
 
@@ -38,7 +39,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 19개·FK 19개·트리거 10개, 기존 PBX 데이터 보존.
+- public 테이블 19개·FK 14개·트리거 10개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 UUID 유일성, 기존 요청 키 이전·업무 데이터 보존·키 충돌 거절·테이블 삭제 롤백.
@@ -130,7 +131,21 @@ DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다
 새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
 
 관리자 세션 검증은 이름 필수·공백 거절, 토큰 해시·만료 시각·FK 제약, 관리자별 세션 삭제와 계정 삭제 cascade를 포함한다.
+015 전환은 과거 로그의 확인 가능한 이름 보완, 업무 참조·페르소나 이력 보존, 계정 삭제 시 세션만 제거되는지, 전환 실패의 전체 롤백까지 검증한다.
 003은 기존 관리자 행이 없는 DB를 전제로 한다. 운영 데이터가 있으면 사전 검토 후 이름 보완 migration으로 조정해야 한다.
+
+## 관리자 삭제·감사 이름 보존
+
+새 앱·관리자/FAQ 초기 등록 CLI 실행 전 015까지 적용한다. 기존 migration 파일은 수정하지 않는다.
+audit_logs.actor_name은 작업 당시 관리자 이름 또는 AI, target_admin_name은 ADMIN_USER 대상 이름이다.
+기존 로그는 전환 시점의 admin_users.name으로만 보완하며 이미 알 수 없는 이름은 NULL로 남긴다.
+다른 업무 테이블에 관리자 이름 컬럼을 중복 추가하지 않는다.
+
+handoff_requests.assigned_admin_user_seq, shipment_status_history.actor_admin_user_seq,
+ai_persona_versions.created_by_admin_user_seq·requested_by_admin_user_seq, faq_entries.updated_by_admin_user_seq는
+FK를 제거하고 번호를 보존한다. 계정 삭제로 해당 이력·업무 행을 지우지 않는다.
+admin_sessions의 ON DELETE CASCADE는 유지한다.
+관리자 삭제 API는 SYSTEM_ADMIN만 사용하고 SYSTEM_ADMIN 대상은 거절한다. 상세는 [감사 계약](../api/audit-logs.md)을 참고한다.
 
 ## 주문 취소 — 64
 

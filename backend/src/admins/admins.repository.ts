@@ -50,15 +50,6 @@ export class AdminsRepository {
       status,
     ]);
   }
-  async activeSystemAdmins(client: PoolClient): Promise<number> {
-    return Number(
-      (
-        await client.query(
-          "SELECT count(*) FROM admin_users WHERE role='SYSTEM_ADMIN' AND status='ACTIVE'",
-        )
-      ).rows[0].count,
-    );
-  }
   async serializeAccessChanges(client: PoolClient) {
     await client.query('SELECT pg_advisory_xact_lock(20261026,83)');
   }
@@ -73,5 +64,8 @@ export class AdminsRepository {
       'UPDATE admin_users SET last_login_at=clock_timestamp() WHERE admin_user_seq=$1',
       [id],
     );
+  }
+  async remove(id: number, client: PoolClient) {
+    await client.query('DELETE FROM admin_users WHERE admin_user_seq=$1', [id]);
   }
 }
