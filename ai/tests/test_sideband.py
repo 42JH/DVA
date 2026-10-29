@@ -351,3 +351,30 @@ def test_customer_speech_keeps_call_open():
         await task
 
     run(scenario())
+
+
+def test_heard_order_info_goes_to_backend_when_voice_model_did_not_delegate():
+    """수집 단계에서 이 단계의 답이 아닌 고객 말을 음성 모델이 위임하지 않으면 서버가 백엔드에 넘긴다."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "collecting"
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="서울 양천구 신정이펜일로 오십이요")
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        item = next(kw["item"] for p, kw in conn.sent if p == "response.item.create")
+        assert item["role"] == "user" and "신정이펜일로" in item["content"][0]["text"]
+        assert [p for p, _ in conn.sent if p.startswith("response.")] == ["response.item.create", "response.create"]
+        # 음성 모델이 이미 위임했으면 넘기지 않는다
+        conn.sent.clear()
+        conn.push("session.input_transcript.delta", delta="받는 분은 김도윤이요")
+        await until(lambda: call.heard_text)
+        conn.push("session.delegation.created", delegation={"target": "responses"})
+        await until(lambda: any(r["name"] == "listener" and r["status"] == "done" and "김도윤" in r["arguments"]
+                                for r in call.tool_calls.values()))
+        assert not [p for p, _ in conn.sent if p.startswith("response.")]
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())

@@ -127,6 +127,7 @@ class Call:
         self.delegation_mode = 'responses'
         self.backend_settings: dict = {}
         self.latest_delegation: str | None = None
+        self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
         self.delegations: dict[str, dict] = {}
         self.event_types: set[str] = set()
         self.persona_version: int | None = None  # 이 통화가 쓴 백엔드 페르소나 버전(None이면 로컬 기본값)  # 받은 sideband 이벤트 종류(처음 한 번만 로그)

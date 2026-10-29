@@ -140,6 +140,8 @@ async def classify(call, conn, client, seq: int) -> None:
         record["output"]["events"] = events
         if events or answer != NO_ANSWER:
             call.heard_text = ""  # 판별에 쓴 말은 소비
+        elif await record_heard(call, conn, text, heard_at):
+            call.heard_text = ""  # 백엔드에 넘긴 말은 다시 넘기지 않게
         before = call.last_progress
         try:
             await send_progress(call, conn)
@@ -151,6 +153,25 @@ async def classify(call, conn, client, seq: int) -> None:
                  call.session_id, stage_name, answer, intent, record["elapsed_ms"], record["total_ms"],
                  call.last_progress != before)
         call.notify()
+
+
+async def record_heard(call, conn, text: str, heard_at: float) -> bool:
+    """이 단계의 답이 아닌 고객 말(주문 정보일 수 있음)을 음성 모델이 위임하지 않았으면 서버가 백엔드에 넘긴다.
+    음성 모델이 위임을 자주 빠뜨려 주소 보정·기록이 안 되던 것(2026-10-28 13:26·17:44 통화).
+    백엔드가 record_order를 부르면 기존 함수 호출 경로(sideband.run_tool)로 실행된다."""
+    if (call.delegation_mode != "responses" or "record_order" not in engine.current(call).tools
+            or call.delegated_at >= heard_at):  # 말이 끝난 뒤 음성 모델이 이미 위임함
+        return False
+    try:
+        await conn.response.item.create(item={"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": call.texts.record_heard.format(heard=text)}]})
+        await conn.response.create()
+    except Exception:
+        log.exception("서버 기록 요청 실패 %s", call.session_id)
+        call.add_error("서버 기록 요청 실패")
+        return False
+    log.info("서버 기록 요청 %s 단계=%s", call.session_id, call.flow.stage)
+    return True
 
 
 async def apply_answer(call, answer: str, intent: str) -> list[str]:

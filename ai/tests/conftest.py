@@ -134,7 +134,8 @@ class FakeConn:
             "call_id": call_id}})
 
     def outputs(self):
-        return [json.loads(kw["item"]["output"]) for path, kw in self.sent if path == "response.item.create"]
+        return [json.loads(kw["item"]["output"]) for path, kw in self.sent
+                if path == "response.item.create" and kw["item"]["type"] == "function_call_output"]
 
     async def __aenter__(self):
         return self

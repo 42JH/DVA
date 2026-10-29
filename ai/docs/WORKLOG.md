@@ -608,3 +608,9 @@
 - 등록 고객이 새 출발지에서 보낼 때: "보내시는 분은 ○○ 님 본인이신가요?" 한 번(`use_customer` → 성함·발신번호). 항목 문구에 고객 유형별 변형(`sender_name.registered`, `engine.field_text`)을 둠.
 - 물품 질문 문구를 "소형 박스 두 개"처럼 크기·개수를 한 번에 말하게 바꿈.
 - 테스트 315개 통과(시나리오 4개 갱신·추가, 단위 3개). `spec/scenario.md`, AGENTS.md "아직 없는 것", voice.md 갱신.
+
+### 음성 모델 위임 누락 → 서버가 기록을 맡김(17:44 통화)
+- 증상: 141초 통화에서 고객 말 11번 동안 위임 0건(마지막 매뉴얼 검색 1건뿐) → `record_order`·주소 보정 0건, INCOMPLETE. 13:26 통화와 같은 증상. 같은 통화의 `search_manual` 오류는 외부 리랭커(`RAG_RERANKER_URL`) 연결 시간 초과(코드 문제 아님).
+- 확인한 것: 공식 문서(live-delegation "Accept typed input", sideband 참조)에 Responses 위임에서 `response.item.create`(user 메시지) 후 `response.create`로 백엔드를 돌리는 방법이 있음. 서버가 시작한 응답의 글이 음성으로 나가는지, 진행 중 응답과 겹칠 때 동작은 문서에 없음.
+- 바꾼 것: `app/listener.py` `record_heard` — collecting·confirming에서 판별이 none/none이고 말이 끝난 뒤 위임이 없었으면 고객 말을 백엔드에 넘김(문구 `prompts/flow.toml` `record_heard`). `Call.delegated_at`, `spec/sideband.md`. 테스트 316개 통과(1개 추가, 가짜 conn `outputs()`는 함수 결과만).
+- 남은 것: 실제 통화로 확인 — `서버 기록 요청` 로그 뒤 `record_order` 실행·주소 보정, 백엔드 글이 이상하게 말해지지 않는지, 위임과 겹쳐 두 번 기록되는지.

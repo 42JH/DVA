@@ -67,6 +67,8 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
     if etype not in call.event_types:  # 위임·도구 이벤트가 오는지 실제 통화에서 확인하려고
         call.event_types.add(etype)
         log.info("sideband 이벤트 %s %s", call.session_id, etype)
+    if etype == 'session.delegation.created':
+        call.delegated_at = time.monotonic()
     if etype == 'session.delegation.created' and call.delegation_mode == 'client':
         value = _dump(event)
         client_backend.start_delegation(call, conn, value.get('delegation') or {}, tool_tasks, client)

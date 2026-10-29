@@ -141,6 +141,7 @@ class Texts(_Strict):
     empty_value: str
     classifier: str
     answer_error: str
+    record_heard: str
 
 
 def load_texts(path: Path | None = None) -> Texts:
