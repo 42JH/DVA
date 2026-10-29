@@ -60,7 +60,7 @@ HTTP 200, `{ data: OrderAddress[], hasNext }` 형식이며 meta·총건수·page
 }
 ```
 
-- 접수 완료가 확인된 ACCEPTED 주문만 반환한다. COLLECTING·SUBMITTING·AUTH_FAILED·REVIEW_REQUIRED·CANCELLED·EXPIRED는 제외한다.
+- 접수 완료가 확인된 ACCEPTED 주문만 반환한다. COLLECTING·notPaid·PAID·SUBMITTING·SUBMISSION_FAILED·CANCELLED는 제외한다.
 - 주문 생성 시각 내림차순, 주문 번호 내림차순, 상세 순번·상세 번호 오름차순으로 정렬한다.
 - 페이지 단위는 주문 상세별 주소다. 같은 주소도 주문·상세가 다르면 각각 반환하며 합치지 않는다.
 - 해당 방향의 도로명·지번이 모두 없는 과거 예외 행은 후보에서 제외한다. 나머지 원본의 null은 그대로 보존하고 없는 정보를 만들지 않는다.

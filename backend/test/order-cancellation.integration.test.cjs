@@ -80,13 +80,16 @@ async function fixture({
   shipments = [],
 } = {}) {
   const id = (
-    await pool.query('INSERT INTO orders(customer_seq) VALUES($1) RETURNING order_seq', [customer])
+    await pool.query(
+      'INSERT INTO orders(customer_seq,total_amount) VALUES($1,0) RETURNING order_seq',
+      [customer],
+    )
   ).rows[0].order_seq;
   const parcels = [];
   for (let position = 1; position <= count; position++) {
     const parcel = (
       await pool.query(
-        "INSERT INTO order_parcels(order_seq,parcel_position,other_item_description) VALUES($1,$2,'보존할 물품') RETURNING order_parcel_seq",
+        "INSERT INTO order_parcels(order_seq,parcel_position,other_item_description,notified_price) VALUES($1,$2,'보존할 물품',3500) RETURNING order_parcel_seq",
         [id, position],
       )
     ).rows[0].order_parcel_seq;
@@ -97,6 +100,7 @@ async function fixture({
         [parcel, randomUUID(), shipments[position - 1]],
       );
   }
+  await pool.query('UPDATE orders SET total_amount=$2 WHERE order_seq=$1', [id, count * 3500]);
   if (status !== 'COLLECTING')
     await pool.query(
       `UPDATE orders SET status=$2,pickup_requested_at=clock_timestamp()+interval '1 day',
@@ -104,6 +108,17 @@ async function fixture({
       dver_received_at=CASE WHEN $2='ACCEPTED' THEN clock_timestamp() ELSE NULL END WHERE order_seq=$1`,
       [id, status],
     );
+  if (status === 'notPaid') {
+    await pool.query(
+      "UPDATE orders SET payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
+      [id],
+    );
+    if (count > 0)
+      await pool.query(
+        'INSERT INTO order_payment_requests(order_seq,amount,expires_at) SELECT order_seq,total_amount,payment_due_at FROM orders WHERE order_seq=$1',
+        [id],
+      );
+  }
   return { id, parcels };
 }
 
@@ -127,6 +142,7 @@ async function state(id) {
       `SELECT jsonb_build_object(
     'order',(SELECT to_jsonb(o) FROM orders o WHERE order_seq=$1),
     'parcels',(SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY order_parcel_seq),'[]') FROM order_parcels p WHERE order_seq=$1),
+    'requests',(SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY created_at,payment_request_id),'[]') FROM order_payment_requests r WHERE order_seq=$1),
     'shipments',(SELECT coalesce(jsonb_agg(to_jsonb(s) ORDER BY shipment_seq),'[]') FROM shipments s JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1),
     'history',(SELECT coalesce(jsonb_agg(to_jsonb(h) ORDER BY shipment_status_history_seq),'[]') FROM shipment_status_history h JOIN shipments s USING(shipment_seq) JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1)
   ) AS snapshot`,
@@ -154,39 +170,35 @@ test('all three admin roles cancel drafts immediately; empty drafts also cancel'
   }
 });
 
-test('unpaid accepted order preserves receipt and snapshots; history and audit commit once', async () => {
-  const { id } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
-  const previous = await state(id);
-  const requestId = randomUUID();
+test('unpaid order preserves snapshots and invalidates its payment request with operator audits once', async () => {
+  const { id } = await fixture({ status: 'notPaid' });
+  const previous = await state(id),
+    requestId = randomUUID();
   assert.equal((await cancel(id, { requestId })).status, 204);
   const saved = await state(id);
   assert.equal(saved.order.status, 'CANCELLED');
-  assert.equal(saved.order.parcel_no, previous.order.parcel_no);
-  assert.equal(saved.order.dver_received_at, previous.order.dver_received_at);
+  assert.equal(saved.order.total_amount, 0);
+  assert.equal(saved.order.payment_due_at, previous.order.payment_due_at);
   assert.deepEqual(
     saved.parcels.map(({ status, ...p }) => p),
     previous.parcels.map(({ status, ...p }) => p),
   );
-  assert.ok(saved.shipments.every((s) => s.status === 'canceled' && s.version === 2));
-  assert.equal(saved.history.length, 2);
-  assert.equal(new Set(saved.history.map((h) => h.request_id)).size, 2);
-  assert.ok(
-    saved.history.every(
-      (h) =>
-        h.from_status === 'notPaid' &&
-        h.to_status === 'canceled' &&
-        h.actor_type === 'ADMIN' &&
-        h.actor_admin_user_seq === adminIds[0],
-    ),
-  );
-  const audit = (
-    await pool.query("SELECT * FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
-      requestId,
-    ])
+  assert.deepEqual(saved.shipments, []);
+  assert.deepEqual(saved.history, []);
+  assert.ok(saved.requests.every((r) => r.invalidated_at !== null));
+  const audits = (
+    await pool.query(
+      "SELECT * FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+      [requestId],
+    )
   ).rows;
-  assert.equal(audit.length, 1);
-  assert.equal(audit[0].action, 'ORDER_CANCELLED');
-  assert.equal(audit[0].target_seq, id);
+  assert.deepEqual(
+    audits.map((a) => a.action),
+    ['ORDER_CANCELLED', 'ORDER_AMOUNT_CHANGED'],
+  );
+  assert.ok(audits.every((a) => a.actor_type === 'ADMIN' && a.actor_seq === adminIds[0]));
+  assert.deepEqual(audits[1].metadata.amountBefore, 7000);
+  assert.deepEqual(audits[1].metadata.amountAfter, 0);
   const repeat = await cancel(id);
   assert.equal(repeat.status, 409);
   assert.equal((await repeat.json()).error.message, '이미 취소된 주문입니다.');
@@ -204,7 +216,7 @@ test('whole cancellation is all-or-nothing for paid, missing and uncertain state
     { status: 'ACCEPTED', shipments: ['notPaid'] },
     { status: 'ACCEPTED', count: 0 },
     { shipments: ['notPaid'] },
-    ...['SUBMITTING', 'REVIEW_REQUIRED', 'AUTH_FAILED', 'EXPIRED'].map((status) => ({ status })),
+    ...['PAID', 'SUBMITTING', 'SUBMISSION_FAILED', 'CANCELLED'].map((status) => ({ status })),
   ]) {
     const { id } = await fixture(input);
     const previous = await state(id);
@@ -249,10 +261,10 @@ test('AI uses the same caller/customer scope as order detail and cannot spoof an
 });
 
 test('duplicate concurrent whole requests change state/history once', async () => {
-  const { id } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const { id } = await fixture({ status: 'notPaid' });
   const responses = await Promise.all([cancel(id), cancel(id), cancel(id)]);
   assert.deepEqual(responses.map((r) => r.status).sort(), [204, 409, 409]);
-  assert.equal((await state(id)).history.length, 2);
+  assert.equal((await state(id)).history.length, 0);
   const audits = await pool.query(
     "SELECT count(*)::int AS n FROM audit_logs WHERE target_seq=$1 AND target_type='ORDER' AND action='ORDER_CANCELLED' AND result='SUCCESS'",
     [id],
@@ -261,7 +273,7 @@ test('duplicate concurrent whole requests change state/history once', async () =
 });
 
 test('audit failure rolls back order, parcel and shipment writes', async () => {
-  const { id } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const { id } = await fixture({ status: 'notPaid' });
   const previous = await state(id);
   const audit = app.get(AuditService),
     original = audit.recordSuccess;
@@ -279,34 +291,37 @@ test('audit failure rolls back order, parcel and shipment writes', async () => {
 });
 
 test('batch cancellation waits for a concurrent payment transaction and rechecks paid state', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const { id, parcels } = await fixture({ status: 'notPaid' });
   const client = await pool.connect();
+  let pending;
   try {
     await client.query('BEGIN');
-    await client.query("UPDATE shipments SET status='paid' WHERE order_parcel_seq=$1", [
-      parcels[0],
-    ]);
-    const pending = cancel(id, { parcels });
+    await client.query(
+      "UPDATE orders SET status='PAID',paid_at=clock_timestamp() WHERE order_seq=$1",
+      [id],
+    );
+    pending = cancel(id, { parcels });
     let waiting = false;
     for (let attempt = 0; attempt < 100 && !waiting; attempt++) {
       waiting = (
         await pool.query(
-          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM shipments%') AS waiting",
+          "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM orders%') AS waiting",
         )
       ).rows[0].waiting;
       if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    assert.equal(waiting, true, 'cancellation must wait on the locked shipment');
+    assert.equal(waiting, true, 'cancellation must wait on the locked order');
     await client.query('COMMIT');
     assert.equal((await pending).status, 409);
   } finally {
     await client.query('ROLLBACK');
     client.release();
+    if (pending) await pending;
   }
   const saved = await state(id);
-  assert.equal(saved.order.status, 'ACCEPTED');
+  assert.equal(saved.order.status, 'PAID');
   assert.ok(saved.parcels.every((p) => p.status === 'ACTIVE'));
-  assert.equal(saved.history.length, 0);
+  assert.deepEqual(saved.history, []);
 });
 
 test('path validation and Swagger describe empty 204 with one call header', async () => {
@@ -333,18 +348,20 @@ test('path validation and Swagger describe empty 204 with one call header', asyn
 });
 
 test('individual cancellation preserves siblings and completes the parent only on the last parcel', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const { id, parcels } = await fixture({ status: 'notPaid' });
+  const initial = await state(id);
   assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   const partial = await state(id);
-  assert.equal(partial.order.status, 'ACCEPTED');
+  assert.equal(partial.order.status, 'notPaid');
+  assert.equal(partial.order.total_amount, 3500);
+  assert.equal(partial.order.payment_due_at, initial.order.payment_due_at);
   assert.deepEqual(
     partial.parcels.map((p) => p.status),
     ['CANCELLED', 'ACTIVE'],
   );
-  assert.deepEqual(
-    partial.shipments.map((s) => s.status),
-    ['canceled', 'notPaid'],
-  );
+  assert.deepEqual(partial.shipments, []);
+  assert.equal(partial.requests.filter((r) => !r.invalidated_at).length, 1);
+  assert.equal(partial.requests.find((r) => !r.invalidated_at).amount, 3500);
   const repeated = await cancel(id, { parcels: [parcels[0]] });
   assert.equal(repeated.status, 204);
   assert.equal(await repeated.text(), '');
@@ -352,8 +369,8 @@ test('individual cancellation preserves siblings and completes the parent only o
   assert.equal((await cancel(id, { parcels: [parcels[1]] })).status, 204);
   const complete = await state(id);
   assert.equal(complete.order.status, 'CANCELLED');
-  assert.equal(complete.order.parcel_no, 'TEST0064');
-  assert.equal(complete.history.length, 2);
+  assert.equal(complete.order.total_amount, 0);
+  assert.ok(complete.requests.every((r) => r.invalidated_at));
   assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   assert.deepEqual(await state(id), complete);
   assert.equal((await cancel(id)).status, 409);
@@ -362,21 +379,25 @@ test('individual cancellation preserves siblings and completes the parent only o
     [id, parcels],
   );
   assert.deepEqual(audit.rows, [
+    { action: 'ORDER_AMOUNT_CHANGED', n: 2 },
     { action: 'ORDER_CANCELLED', n: 1 },
     { action: 'ORDER_PARCEL_CANCELLED', n: 2 },
   ]);
 });
 
-test('whole cancellation skips cancelled parcels, but a paid remaining parcel still blocks all writes', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+test('whole cancellation skips cancelled parcels while paid orders block whole and partial writes', async () => {
+  const { id, parcels } = await fixture({ status: 'notPaid' });
   assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   assert.equal((await cancel(id)).status, 204);
-  assert.equal((await state(id)).history.length, 2);
-  const paid = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'paid'] });
-  assert.equal((await cancel(paid.id, { parcels: [paid.parcels[0]] })).status, 204);
+  assert.deepEqual(
+    (await state(id)).parcels.map((p) => p.status),
+    ['CANCELLED', 'CANCELLED'],
+  );
+  const paid = await fixture({ status: 'ACCEPTED', shipments: ['paid', 'paid'] });
   const previous = await state(paid.id);
   assert.equal((await cancel(paid.id)).status, 409);
-  assert.equal((await cancel(paid.id, { parcels: [paid.parcels[1]] })).status, 409);
+  for (const parcel of paid.parcels)
+    assert.equal((await cancel(paid.id, { parcels: [parcel] })).status, 409);
   assert.deepEqual(await state(paid.id), previous);
 });
 
@@ -401,34 +422,58 @@ test('individual route validates parcel membership, IDs and AI ownership before 
     204,
   );
   assert.equal((await state(mine.id)).order.status, 'COLLECTING');
-  const accepted = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const accepted = await fixture({ status: 'notPaid' });
   assert.equal(
     (await cancel(accepted.id, { parcels: [accepted.parcels[0]], cookie: null, call: callId }))
       .status,
     204,
   );
-  assert.equal((await state(accepted.id)).history[0].actor_type, 'SYSTEM');
+  const events = (
+    await pool.query(
+      "SELECT actor_type FROM audit_logs WHERE target_type='ORDER_PARCEL' AND target_seq=$1 AND action='ORDER_PARCEL_CANCELLED'",
+      [accepted.parcels[0]],
+    )
+  ).rows;
+  assert.deepEqual(events, [{ actor_type: 'AI' }]);
 });
 
-test('individual retries and different-parcel cancellations serialize without duplicate history', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+test('individual retries and different-parcel cancellations serialize without duplicate audits', async () => {
+  const { id, parcels } = await fixture({ status: 'notPaid' });
   const first = await Promise.all(
     Array.from({ length: 3 }, () => cancel(id, { parcels: [parcels[0]] })),
   );
   assert.ok(first.every((r) => r.status === 204));
-  assert.equal((await state(id)).history.length, 1);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_type='ORDER_PARCEL' AND target_seq=$1 AND action='ORDER_PARCEL_CANCELLED'",
+        [parcels[0]],
+      )
+    ).rows[0].n,
+    1,
+  );
   assert.equal((await cancel(id)).status, 204);
-  const second = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const second = await fixture({ status: 'notPaid' });
   const different = await Promise.all(
     second.parcels.map((parcel) => cancel(second.id, { parcels: [parcel] })),
   );
   assert.ok(different.every((r) => r.status === 204));
-  assert.equal((await state(second.id)).order.status, 'CANCELLED');
-  assert.equal((await state(second.id)).history.length, 2);
+  const saved = await state(second.id);
+  assert.equal(saved.order.status, 'CANCELLED');
+  assert.ok(saved.requests.every((r) => r.invalidated_at));
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_type='ORDER_PARCEL' AND target_seq=ANY($1::int[]) AND action='ORDER_PARCEL_CANCELLED'",
+        [second.parcels],
+      )
+    ).rows[0].n,
+    2,
+  );
 });
 
 test('failure while completing the last parcel rolls back both cancellation audits and all states', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', count: 1, shipments: ['notPaid'] });
+  const { id, parcels } = await fixture({ status: 'notPaid', count: 1 });
   const previous = await state(id);
   const requestId = randomUUID();
   const audit = app.get(AuditService),
@@ -455,9 +500,8 @@ test('failure while completing the last parcel rolls back both cancellation audi
 
 test('batch cancellation skips prior cancellations, preserves siblings and audits only new changes', async () => {
   const { id, parcels } = await fixture({
-    status: 'ACCEPTED',
+    status: 'notPaid',
     count: 4,
-    shipments: Array(4).fill('notPaid'),
   });
   assert.equal((await cancel(id, { parcels: [parcels[0]] })).status, 204);
   const beforeBatch = await state(id);
@@ -467,20 +511,17 @@ test('batch cancellation skips prior cancellations, preserves siblings and audit
   assert.equal(response.status, 204);
   assert.equal(await response.text(), '');
   const partial = await state(id);
-  assert.equal(partial.order.status, 'ACCEPTED');
+  assert.equal(partial.order.status, 'notPaid');
   assert.deepEqual(
     partial.parcels.map((p) => p.status),
     ['CANCELLED', 'CANCELLED', 'CANCELLED', 'ACTIVE'],
   );
-  assert.deepEqual(
-    partial.shipments.map((s) => s.status),
-    ['canceled', 'canceled', 'canceled', 'notPaid'],
-  );
+  assert.deepEqual(partial.shipments, []);
   assert.deepEqual(partial.parcels[3], beforeBatch.parcels[3]);
-  assert.deepEqual(partial.shipments[3], beforeBatch.shipments[3]);
-  assert.equal(partial.history.length, 3);
+  assert.equal(partial.order.total_amount, 3500);
+  assert.equal(partial.requests.find((r) => !r.invalidated_at).amount, 3500);
   const audits = await pool.query(
-    "SELECT target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY target_seq",
+    "SELECT target_seq FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' AND action='ORDER_PARCEL_CANCELLED' ORDER BY target_seq",
     [requestId],
   );
   assert.deepEqual(
@@ -505,7 +546,7 @@ test('batch cancellation skips prior cancellations, preserves siblings and audit
   const complete = await state(id);
   assert.equal(complete.order.status, 'CANCELLED');
   assert.equal(complete.order.parcel_no, beforeBatch.order.parcel_no);
-  assert.equal(complete.history.length, 4);
+  assert.equal(complete.history.length, 0);
   assert.equal((await cancel(id, { parcels })).status, 204);
   assert.deepEqual(await state(id), complete);
 });
@@ -543,32 +584,23 @@ test('batch validates every selected parcel before mutating or returning a no-op
   assert.deepEqual(await state(mine.id), cancelled);
 });
 
-test('batch cancellation rejects all selected writes when one parcel is paid or lacks payment state', async () => {
+test('batch cancellation rejects all selected writes after payment even with legacy shipment data', async () => {
   for (const blocked of ['paid', undefined]) {
     const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', blocked] });
     const previous = await state(id);
     assert.equal((await cancel(id, { parcels })).status, 409);
     assert.deepEqual(await state(id), previous);
   }
-  const { id, parcels } = await fixture({
-    status: 'ACCEPTED',
-    count: 3,
-    shipments: ['notPaid', 'notPaid', 'paid'],
-  });
-  assert.equal((await cancel(id, { parcels: parcels.slice(0, 2) })).status, 204);
-  const saved = await state(id);
-  assert.equal(saved.order.status, 'ACCEPTED');
-  assert.deepEqual(
-    saved.shipments.map((s) => s.status),
-    ['canceled', 'canceled', 'paid'],
-  );
+  const { id, parcels } = await fixture({ status: 'PAID', count: 3 });
+  const previous = await state(id);
+  assert.equal((await cancel(id, { parcels: parcels.slice(0, 2) })).status, 409);
+  assert.deepEqual(await state(id), previous);
 });
 
 test('overlapping batches serialize and cancel each parcel exactly once', async () => {
   const { id, parcels } = await fixture({
-    status: 'ACCEPTED',
+    status: 'notPaid',
     count: 3,
-    shipments: Array(3).fill('notPaid'),
   });
   const responses = await Promise.all([
     cancel(id, { parcels: [parcels[1], parcels[0]] }),
@@ -577,20 +609,21 @@ test('overlapping batches serialize and cancel each parcel exactly once', async 
   assert.ok(responses.every((response) => response.status === 204));
   const saved = await state(id);
   assert.equal(saved.order.status, 'CANCELLED');
-  assert.equal(saved.history.length, 3);
-  assert.ok(saved.shipments.every((shipment) => shipment.version === 2));
+  assert.equal(saved.history.length, 0);
+  assert.ok(saved.requests.every((r) => r.invalidated_at));
   const audits = await pool.query(
     "SELECT action,count(*)::int AS n FROM audit_logs WHERE result='SUCCESS' AND ((target_type='ORDER' AND target_seq=$1) OR (target_type='ORDER_PARCEL' AND target_seq=ANY($2::int[]))) GROUP BY action ORDER BY action",
     [id, parcels],
   );
   assert.deepEqual(audits.rows, [
+    { action: 'ORDER_AMOUNT_CHANGED', n: 2 },
     { action: 'ORDER_CANCELLED', n: 1 },
     { action: 'ORDER_PARCEL_CANCELLED', n: 3 },
   ]);
 });
 
 test('later parcel audit failure rolls back earlier parcel changes, shipment history and audits', async () => {
-  const { id, parcels } = await fixture({ status: 'ACCEPTED', shipments: ['notPaid', 'notPaid'] });
+  const { id, parcels } = await fixture({ status: 'notPaid' });
   const previous = await state(id),
     requestId = randomUUID();
   const audit = app.get(AuditService),

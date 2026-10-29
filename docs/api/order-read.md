@@ -23,7 +23,7 @@ call_session_seq: 7
 | --- | --- |
 | customerSeq | 고객 번호. AI는 통화 고객과 다른 번호 지정 불가 |
 | from / to | 주문 생성 시각. from 포함·to 미포함. 시간대 포함 ISO 8601, from < to |
-| status | COLLECTING / SUBMITTING / ACCEPTED / AUTH_FAILED / REVIEW_REQUIRED / CANCELLED / EXPIRED |
+| status | COLLECTING / notPaid / PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED / CANCELLED |
 | recipientName | 수령인 이름 부분 검색. 앞뒤 공백 제거·대소문자 구분 없음. `%`, `_`는 일반 문자 |
 | limit / offset | 기본 20 / 0. limit 1~100, offset 0 이상 정수 |
 
@@ -36,10 +36,10 @@ call_session_seq: 7
 | COLLECTING | 정보를 수집·보완 중인 미완료 주문 |
 | SUBMITTING | 디버 접수 처리 중 또는 결과 저장 미확정 |
 | ACCEPTED | 디버 접수 완료 |
-| AUTH_FAILED | 디버 인증 실패 |
-| REVIEW_REQUIRED | 디버 접수 결과 확인 필요 |
+| notPaid | 개인 카드 결제 대기 |
+| PAID | 결제 완료 |
+| SUBMISSION_FAILED | 디버 접수 실패 |
 | CANCELLED | 취소된 주문 |
-| EXPIRED | 만료된 주문. 자동 만료 처리는 별도 |
 
 ```json
 {
@@ -51,6 +51,10 @@ call_session_seq: 7
       "paymentMethodType": "credit",
       "pickupRequestedAt": null,
       "createdAt": "2026-10-27T00:00:00.000Z",
+      "creationSource": "AI",
+      "totalAmount": null,
+      "paidAt": null,
+      "paymentDueAt": null,
       "parcelCount": 1
     }
   ],
@@ -82,7 +86,9 @@ call_session_seq: 7
 | origin / destination | 저장된 주소 스냅샷. 9개 필드를 항상 반환하며 미수집 값은 null |
 | originPin | 원본 주소록 scope·pinSeq 또는 null. 원본 변경을 주문 주소에 덮어쓰지 않음 |
 | 수량·설명·clientComment·itemPrice | 저장된 물품 정보·요청 사항·가액. 0과 null을 구분 |
-| notifiedPrice | 상세별 고정 안내 요금 3500원 |
+| notifiedPrice | AI가 전달한 상세별 배송비. 수집 중 미확인은 null, 취소 상세도 원가 보존 |
+| totalAmount / paidAt / paymentDueAt | 미취소 상세의 합계, 결제 완료 시각, 최초 결제 대기 기한 |
+| paymentRequest | 현재 유효한 미완료·미만료 결제 요청 또는 null. 상세 응답에서 ID·금액·만료 시각 제공 |
 
 `parcels[].shipment`와 배송 추적번호·배송 상태는 반환하지 않는다. 취소된 상세의 주소·물품과 디버 접수번호·시각도 보존해 반환한다. 주문·상세·버전은 같은 DB 스냅샷에서 읽어 동시 수정으로 응답 내용이 섞이지 않게 한다. [전체·상세 단건/복수 취소](order-cancel.md) 이후에는 최신 version을 다시 조회한다.
 
@@ -113,4 +119,4 @@ Swagger `/api/docs`와 OpenAPI `/api/docs-json`에 각 API 요약·필터·헤�
 
 `backend`에서 `node scripts/check.cjs`를 실행한다. 임시 PostgreSQL과 실제 NestJS HTTP 요청으로 필터·페이지·고객 범위·주소 스냅샷·동시 수정·Swagger를 검사하고, 기존 인증·주문 생성·기업·고객·구성원·PBX·Nginx를 회귀 검증한다.
 
-새 테이블·migration·외부 연동 호출은 없다. 운영 데이터와 배포 설정을 변경하지 않는다. 실제 AI 컨테이너와의 통화 연동 및 운영 배포 검증은 별도다.
+이번 결제 구조는 016~019 migration을 요구하며 조회 자체는 데이터를 바꾸거나 외부 연동을 호출하지 않는다. 운영 데이터와 배포 설정을 변경하지 않는다. 실제 AI 컨테이너와의 통화 연동 및 운영 배포 검증은 별도다.

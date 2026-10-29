@@ -20,7 +20,7 @@ Jira: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138).
 
 AI는 기존 POST /api/orders의 outcome=COMPLETE, 관리자 수기는 POST /api/admin/orders를 사용한다. 기존 미완료 주문은 PATCH /api/orders/{id}로 보완한 뒤 POST /api/orders/{id}/submit에 최신 expectedVersion을 보낸다.
 
-최종 확정에는 totalAmount와 각 parcels[].notifiedPrice가 필수다. 배송비는 1~2,147,483,647원 정수이며 합계도 이 범위 안이어야 한다. totalAmount는 미취소 상세의 합계와 정확히 일치해야 한다. itemPrice는 별도의 물품 가액이다. 누락·범위·합계 오류는 422로 거절하고 최종 확정·디버 전송을 하지 않는다.
+최종 확정에는 totalAmount와 각 parcels[].notifiedPrice가 필수다. 배송비는 1~2,147,483,647원 정수이며 합계도 이 범위 안이어야 한다. totalAmount는 미취소 상세의 합계와 정확히 일치해야 한다. itemPrice는 별도의 물품 가액이다. JSON 형식·입력 범위 오류는 400, 저장된 배송비 누락·합계 오류는 422로 거절하고 최종 확정·디버 전송을 하지 않는다.
 
 - billing: 개인 카드. 개인·기업 고객 모두 사용하며 notPaid로 저장한다.
 - credit: 월결제. 개인 고객은 본인 설정, 기업 구성원은 활성 소속·활성 기업의 설정을 검증한 뒤 PAID로 저장한다.

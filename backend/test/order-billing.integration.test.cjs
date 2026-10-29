@@ -603,8 +603,16 @@ test('expiry preserves consultation and recordings, closes the payment request, 
     (await request(`/orders/${inFlight.orderSeq}`, undefined, true, 'GET')).body.data.status,
     'CANCELLED',
   );
+  const actor = (
+    await pool.query("SELECT admin_user_seq FROM admin_users WHERE login_id='billing138'")
+  ).rows[0].admin_user_seq;
   const operators = (
-    await request('/audit-logs?actorType=ADMIN&limit=100', undefined, false, 'GET')
+    await request(
+      `/audit-logs?actorType=ADMIN&actorSeq=${actor}&limit=100`,
+      undefined,
+      false,
+      'GET',
+    )
   ).body.data;
   assert.ok(
     operators.length > 0 &&

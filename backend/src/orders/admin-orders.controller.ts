@@ -64,7 +64,7 @@ export class AdminOrdersController {
   @ApiOperation({
     summary: '관리자 수기 주문 접수',
     description:
-      '활성 관리자 세션과 허용 Origin 필수. 완성된 주문을 검증·저장하고 디버에 한 번 접수합니다. 통화 정보·outcome은 받지 않습니다. ACCEPTED만 접수 성공이며 결과가 불명확하면 재접수하지 않습니다. 같은 UUID는 최초 생성자에게 현재 결과만 반환합니다.',
+      '활성 관리자 세션과 허용 Origin 필수. 완성된 주문을 검증·저장합니다. 개인 카드는 결제를 대기하고 월·그룹결제는 즉시 결제 완료 후 디버에 접수합니다. 통화 정보·outcome은 받지 않습니다. ACCEPTED만 접수 성공이며 실패 주문은 관리자 재접수 API를 사용합니다. 같은 UUID는 최초 생성자에게 현재 결과만 반환합니다.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -79,7 +79,7 @@ export class AdminOrdersController {
       oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
     },
     description:
-      'customerSeq 또는 customer 중 하나와 완성된 택배 상세·미래 수거 시각. 택배 상세별 배송비 3,500원은 서버 지정.',
+      'customerSeq 또는 customer 중 하나와 완성된 택배 상세·미래 수거 시각. totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
   })
   @ApiCreatedResponse({
     description: '현재 접수 결과. HTTP 201만으로 성공을 판단하지 않습니다.',

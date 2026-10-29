@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '모놀리식: 단일 DB / 업무 테이블 18개 + 관리자 세션 1개 = 19개. 서비스 간 FK 포함. PBX 수신·마이그레이션 이력은 별도.'
+  Note: '모놀리식: 단일 DB / 업무 테이블 22개 + 관리자 세션 1개 = 23개. 서비스 간 FK 포함. PBX 수신·마이그레이션 이력은 별도.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.

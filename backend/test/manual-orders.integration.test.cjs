@@ -12,6 +12,7 @@ test('69: each active admin role submits a complete manual order without a call'
       ...structuredClone(input.parcels[0]),
       destination: { ...f.address, roadAddress: '다른 도착로 2' },
     });
+    input.totalAmount = 7000;
     const response = await f.send(input, randomUUID(), actor);
     assert.equal(response.status, 201);
     assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -51,18 +52,26 @@ test('69: each active admin role submits a complete manual order without a call'
       [data.orderSeq],
     );
     assert.equal(history.rowCount, 2);
-    assert.ok(history.rows.every((h) => h.to_status === 'notPaid' && h.actor_type === 'SYSTEM'));
+    assert.ok(history.rows.every((h) => h.to_status === 'paid' && h.actor_type === 'SYSTEM'));
     const audit = (
       await f.pool.query(
-        "SELECT action,actor_seq,result FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 ORDER BY audit_log_seq",
+        "SELECT action,actor_type,actor_seq,result FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 ORDER BY audit_log_seq",
         [data.orderSeq],
       )
     ).rows;
     assert.deepEqual(
       audit.map((a) => a.action),
-      ['ORDER_CREATED', 'ORDER_SUBMISSION_STARTED', 'ORDER_SUBMISSION_ACCEPTED'],
+      [
+        'ORDER_CREATED',
+        'ORDER_PAYMENT_COMPLETED',
+        'ORDER_SUBMISSION_STARTED',
+        'ORDER_SUBMISSION_ACCEPTED',
+      ],
     );
-    assert.ok(audit.every((a) => a.actor_seq === f.adminIds[actor] && a.result === 'SUCCESS'));
+    assert.equal(audit[0].actor_seq, f.adminIds[actor]);
+    assert.equal(audit[0].actor_type, 'ADMIN');
+    assert.ok(audit.slice(1).every((a) => a.actor_type === 'SYSTEM' && a.actor_seq === null));
+    assert.ok(audit.every((a) => a.result === 'SUCCESS'));
   }
   assert.equal(f.requests.length, 3);
 });
@@ -72,10 +81,12 @@ test('69: new customers are registered atomically and an existing phone does not
   const input = f.body();
   delete input.customerSeq;
   input.customer = { name: '신규 수기 고객', phoneNumber };
+  input.paymentMethodType = 'billing';
   const before = await f.counts();
   const created = await f.send(input);
   assert.equal(created.status, 201);
-  assert.equal((await created.json()).data.status, 'ACCEPTED');
+  assert.equal((await created.json()).data.status, 'notPaid');
+  assert.equal(f.requests.length, 0);
   assert.equal((await f.counts()).customers, before.customers + 1);
   const replayCustomer = await f.send({
     ...input,

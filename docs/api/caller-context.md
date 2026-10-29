@@ -62,12 +62,14 @@ HTTP 200, `{ data: CustomerContext, meta: { requestId } }` 형식이다.
       "customerSeq": 12,
       "name": "김철수",
       "phoneNumber": "01012345678",
-      "status": "ACTIVE"
+      "status": "ACTIVE",
+      "monthlyBillingEnabled": false
     },
     "membership": {
       "membershipSeq": 7,
       "customerSeq": 12,
       "organizationSeq": 3,
+      "departmentSeq": 5,
       "employeeNo": "0012",
       "role": "MEMBER",
       "status": "ACTIVE"
@@ -75,9 +77,12 @@ HTTP 200, `{ data: CustomerContext, meta: { requestId } }` 형식이다.
     "organization": {
       "organizationSeq": 3,
       "name": "예시 기업",
-      "status": "ACTIVE"
+      "status": "ACTIVE",
+      "monthlyBillingEnabled": false
     },
+    "department": {"departmentSeq":5,"organizationSeq":3,"name":"개발팀","groupBillingEnabled":false},
     "availableUsageTypes": ["PERSONAL", "COMPANY"],
+    "availablePaymentMethods": ["billing"],
     "personalPins": [
       {
         "personalPinSeq": 21,
@@ -109,12 +114,14 @@ HTTP 200, `{ data: CustomerContext, meta: { requestId } }` 형식이다.
 | customer | 활성 고객의 기본 정보. 미등록·탈퇴 고객은 null |
 | membership | 활성 고객의 현재 소속. 없으면 null. INACTIVE 소속도 상태를 함께 반환 |
 | organization | 현재 소속 기업 정보. 소속이 없으면 null. INACTIVE 기업도 상태를 함께 반환 |
+| department | 현재 소속 부서와 그룹결제 자격. 소속 없거나 미등록·탈퇴면 null |
+| availablePaymentMethods | 현재 사용 가능한 billing·credit·groupBilling. 최종 확정 때 서버가 다시 자격 검사 |
 | availableUsageTypes | 현재 사용 가능한 PERSONAL·COMPANY 범위. 주소록 유무와 무관 |
 | personalPins | 본인의 개인 PIN 전체. 없거나 고객이 비활성이면 빈 배열 |
 | companyPins | 접근 가능한 소속 기업의 공유 PIN 전체. 없거나 접근 불가면 빈 배열 |
 
 고객은 주문 이력이나 PIN이 없어도 REGISTERED다. 미등록과 탈퇴는 모두 customer·membership·organization이
-null이고 availableUsageTypes·personalPins·companyPins가 빈 배열이지만 lookupStatus로 구분한다.
+null이고 department도 null이며 availablePaymentMethods·availableUsageTypes·personalPins·companyPins가 빈 배열이지만 lookupStatus로 구분한다.
 탈퇴 고객을 자동 등록하거나 복구하지 않는다.
 
 개인 PIN 항목은 `personalPinSeq`, `label`, `addressData`, `version`이다.

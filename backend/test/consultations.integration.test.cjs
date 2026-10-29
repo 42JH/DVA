@@ -72,7 +72,13 @@ async function call(input = {}) {
       ],
     )
   ).rows[0].call_session_seq;
-  return { callSessionSeq: id, ...row, handoff: null };
+  return {
+    callSessionSeq: id,
+    ...row,
+    orderStatus: row.orderSeq === null ? null : 'COLLECTING',
+    orderTotalAmount: null,
+    handoff: null,
+  };
 }
 async function handoff(row, status = 'REQUESTED') {
   const value = {
@@ -307,6 +313,7 @@ test('Swagger describes the list contract, cookie authentication and English mod
     parameters.sort(),
     [
       'orderSeq',
+      'orderStatus',
       'callerPhoneNumber',
       'from',
       'to',

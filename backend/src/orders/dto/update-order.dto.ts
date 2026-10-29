@@ -34,7 +34,7 @@ export class UpdateOrderDto extends PickType(CreateOrderDto, [
 
   @ApiPropertyOptional({
     description:
-      'credit: 공통 정산, groupBilling: 기업 그룹카드, billing: 개인카드. 생략하면 유지하며 최종 접수 시 자격을 검증합니다.',
+      'billing: 개인·기업 개인 카드, credit: 월결제, groupBilling: 부서 그룹결제. 생략하면 유지하며 최종 확정 시 자격을 검증합니다.',
     enum: ['billing', 'credit', 'groupBilling'],
   })
   paymentMethodType?: CreateOrderDto['paymentMethodType'];

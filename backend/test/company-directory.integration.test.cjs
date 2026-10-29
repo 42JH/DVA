@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -217,11 +218,7 @@ test('only explicit public PIN fields are projected; member and private PIN valu
       [secret, phone],
     )
   ).rows[0].customer_seq;
-  await pool.query(
-    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,status)
-    VALUES($1,$2,$3,'ACTIVE')`,
-    [customer, c.id, secret],
-  );
+  await testMembership(pool, { customerSeq: customer, organizationSeq: c.id, employeeNo: secret });
   await pool.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)', [
     customer,
     secret,

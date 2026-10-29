@@ -5,7 +5,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 ERD에 현재 migration을 반영한 문서다. 단일 PostgreSQL DB,
-업무 테이블 18개와 관리자 세션 테이블 1개, public FK 14개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
+업무 테이블 22개와 관리자 세션 테이블 1개, public FK 22개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -19,14 +19,27 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `015-admin-deletion-audit.sql`: 감사 작업자·대상 관리자 이름 보존, AI 주체 구분, 관리자 INACTIVE 상태 허용, 관리자 참조 5개를 논리 참조로 변경. 세션의 삭제 cascade는 유지하며 테이블은 추가하지 않는다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
-- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 18개와 별도다.
-- `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 18개와 별도다.
+- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 22개와 별도다.
+- `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 22개와 별도다.
 
 고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING/INACTIVE다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
 CSV 갱신 방식은 API 구현 시 결정한다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
 
-## 검증
+## 부서·주문 결제 전환 — 138
+
+현재 배포에는 016~019가 함께 필요하다. 적용된 001~015의 파일·체크섬은 변경하지 않는다.
+
+- 016: 상세별 가변 배송비와 주문 total_amount, AI 배송 이력 주체를 추가한다.
+- 017: departments와 구성원의 필수 department_seq, 개인·기업 월결제 및 부서 그룹결제 자격을 추가한다. 기존 구성원이 있으면 [실제 부서 배정표](../api/departments.md)를 먼저 준비한다. 누락·기업 불일치·잘못된 이름은 추정하여 채우지 않고 중단한다.
+- 018: 주문 status를 결제 대기·완료·디버 접수중·완료·실패·취소로 연결하고 order_payment_requests를 추가한다. 기존 COLLECTING/CANCELLED 이외 주문이 있으면 결제 여부를 추정하지 않고 중단한다. 배포 전에 현황과 별도 이관 정책을 확인한다.
+- 019: order_billing_charges의 주문당 1회 기업 청구 원장과 organization_billing_months의 월결제·그룹결제 별도 합계를 추가한다. 이미 018에서 결제된 주문은 실제 paid_at과 기업 스냅샷으로 보완한다.
+
+월별 행은 KST 첫날 0원으로 시작하고 이전 월은 보존한다. 증가·새 월 초기화는 SYSTEM 감사와 함께 저장한다. 부분 취소는 상세 원래 금액을 보존하며 남은 합계로 결제 요청을 교체한다. 만료·취소가 상세·통화·녹취·감사를 삭제하지 않는다.
+
+최초 전환은 기존 백엔드 중지 → 백업 → 실제 배정 확인 → migration·검증 → 새 앱 실행 순서다. 전환 뒤에는 019가 없는 구버전 앱으로 복귀하지 않는다. 배포 스크립트가 해당 복귀를 차단하며, 실패 시 호환 앱으로 복구하거나 중지 후 백업을 별도 DB로 복원·검증한다. 이번 브랜치의 migration은 임시 DB에서 검증하며 실제 운영 적용은 별도다.
+
+## 검증 실행
 
 Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가 필요하다.
 
@@ -39,7 +52,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 19개·FK 14개·트리거 10개, 기존 PBX 데이터 보존.
+- public 테이블 23개·FK 22개·트리거 10개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 UUID 유일성, 기존 요청 키 이전·업무 데이터 보존·키 충돌 거절·테이블 삭제 롤백.
@@ -103,7 +116,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `015-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `020-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -128,7 +141,7 @@ sudo docker exec -i dva-prod-db-1 pg_restore --exit-on-error --no-owner -U dva -
 인증·권한, CSV 업로드, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
 DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다.
 
-새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
+새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 개인 카드는 결제를 기다리고 월·그룹결제는 결제 완료 후 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
 
 관리자 세션 검증은 이름 필수·공백 거절, 토큰 해시·만료 시각·FK 제약, 관리자별 세션 삭제와 계정 삭제 cascade를 포함한다.
 015 전환은 과거 로그의 확인 가능한 이름 보완, 업무 참조·페르소나 이력 보존, 계정 삭제 시 세션만 제거되는지, 전환 실패의 전체 롤백까지 검증한다.
@@ -136,7 +149,7 @@ DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다
 
 ## 관리자 삭제·감사 이름 보존
 
-새 앱·관리자/FAQ 초기 등록 CLI 실행 전 015까지 적용한다. 기존 migration 파일은 수정하지 않는다.
+관리자 이름 보존의 015를 포함하며 현재 새 앱 실행 전 019까지 적용한다. 기존 migration 파일은 수정하지 않는다.
 audit_logs.actor_name은 작업 당시 관리자 이름 또는 AI, target_admin_name은 ADMIN_USER 대상 이름이다.
 기존 로그는 전환 시점의 admin_users.name으로만 보완하며 이미 알 수 없는 이름은 NULL로 남긴다.
 다른 업무 테이블에 관리자 이름 컬럼을 중복 추가하지 않는다.
@@ -151,9 +164,9 @@ admin_sessions의 ON DELETE CASCADE는 유지한다.
 
 `014-order-cancellation.sql`은 새 테이블 없이 `order_parcels.status`를 추가한다. ACTIVE는 취소되지 않은 상세, CANCELLED는 취소된 상세다. 결제·배송 상태를 뜻하지 않는다. 기존 취소 주문의 상세만 CANCELLED로 보완하며 주문 버전·시각·주소·물품은 보존한다.
 
-접수 후 취소된 주문도 `parcel_no`와 `dver_received_at`을 함께 보존한다. 접수된 상세는 상태만 취소로 바꿀 수 있고 주소·물품 수정과 취소 복원은 막는다. 주문 전체가 CANCELLED로 바뀌면 DB 트리거가 남은 상세도 취소한다. 일부 상세 취소 시에는 기존 주문 상태를 유지한다.
+014는 과거 접수 취소 이력의 `parcel_no`와 `dver_received_at`을 보존한다. 현재 018 이후 정책은 COLLECTING·notPaid에서만 취소하고 결제 완료 이후 취소는 거절한다. 접수된 상세는 상태만 취소로 바꿀 수 있고 주소·물품 수정과 취소 복원은 막는다. 주문 전체가 CANCELLED로 바뀌면 DB 트리거가 남은 상세도 취소한다. 일부 상세 취소 시에는 기존 주문 상태를 유지한다.
 
-API는 주문·배송 행 잠금으로 결제 전 조건을 확인하고, 취소 상태·배송 이력·감사를 한 트랜잭션에 저장한다. 배송의 `notPaid`는 현재 내부 기준이며 실제 디버 결제 확인·취소 연동을 대신하지 않는다. 운영 적용 전 기존 runner의 백업·검증 절차를 따른다.
+현재 API는 주문 잠금으로 미결제·승인 선점 여부를 확인하고 취소·합계 재계산·결제 요청 교체·감사를 함께 저장한다. 접수 성공 시 초기 배송 상태는 paid이며 주문 진행은 orders.status 하나로 관리한다. 운영 적용 전 기존 runner의 백업·검증 절차를 따른다.
 
 ## 페르소나 전체 버전 — 94·98
 

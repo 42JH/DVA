@@ -7,7 +7,7 @@
 
 | API | 입력 | 응답 |
 | --- | --- | --- |
-| GET /api/audit-logs | 선택: actorSeq, action, targetType, targetSeq, result, from, to, limit, offset | `{ data: Audit[], hasNext }` |
+| GET /api/audit-logs | 선택: actorType, actorSeq, action, targetType, targetSeq, result, from, to, limit, offset | `{ data: Audit[], hasNext }` |
 | GET /api/audit-logs/{id} | auditLogSeq, 1~2147483647 정수 | `{ data: Audit, meta: { requestId } }` |
 
 최신 발생 시각부터, 같은 시각이면 로그 번호 내림차순으로 정렬한다.
@@ -18,6 +18,7 @@ limit은 기본 20·최대 100, offset은 기본 0이다. 기간은 시작 포�
 | --- | --- |
 | auditLogSeq | 로그 번호 |
 | actorType | ADMIN / AI / SYSTEM |
+| actorLabel | 운영자 / AI / SYSTEM. 실제 운영자 번호·이름은 별도 보존 |
 | actorSeq | 작업한 관리자 번호. AI·SYSTEM은 null |
 | actorName | 작업 당시 관리자 이름, AI는 `AI`. 서버 작업·과거 미식별 기록은 null |
 | action | 작업 코드 |
@@ -25,7 +26,7 @@ limit은 기본 20·최대 100, offset은 기본 0이다. 기간은 시작 포�
 | targetAdminName | ADMIN_USER 대상의 당시 이름. 다른 대상·미식별 대상은 null |
 | requestId | 당시 업무 요청 ID. 조회 응답의 meta.requestId와 별개 |
 | result | SUCCESS / DENIED / FAILED |
-| metadata | 현재 공개 응답은 항상 빈 객체 |
+| metadata | 허용한 금액·기간·사유만 공개: amountBefore·amountAfter·orderParcelSeqs·billingMonth·paymentMethodType·reason. 그 외 빈 객체 |
 | occurredAt | 발생 시각 |
 
 관리자 이름은 로그 자체에 저장하므로 계정을 삭제하거나 이름이 바뀌어도 기존 기록은 유지된다.
@@ -37,7 +38,7 @@ actorName에는 삭제한 사람, targetAdminName에는 삭제된 사람의 이�
 
 - ADMIN: 서버가 확인한 관리자 번호와 이름을 기록한다. 클라이언트가 보낸 작업자 이름은 받지 않는다.
 - AI: 주문·개인 주소록·고객의 기존 AI 호출 경로와 페르소나 적용 회신. actorSeq=null, actorName=AI다.
-- SYSTEM: 초기 관리자 생성, 로그인 실패·가입 등 관리자 주체가 확인되지 않은 요청.
+- SYSTEM: 결제 결과·디버 결과 반영·자동 만료·월별 금액 증가/초기화, 초기 관리자 생성, 로그인 실패·가입 등 관리자 주체가 확인되지 않은 요청.
   관리자 번호가 없다는 이유만으로 모든 서버 작업을 AI로 분류하지 않는다.
 
 기존 MVP AI API의 서비스 인증 정책은 바꾸지 않는다. AI 표기는 해당 호출 경로를 나타내며
@@ -56,6 +57,8 @@ API 반환 성공이 외부 요청 취소·롤백을 뜻하지 않는다.
 비밀번호·쿠키·토큰·주소·전화번호·프롬프트·CSV 원문을 감사 로그에 복사하지 않는다.
 requestId는 추적용으로만 사용하며 별도 중복 방지 테이블은 추가하지 않는다.
 DB 자체가 불능이면 실패 로그도 저장하지 못할 수 있다. 원래 오류 응답을 유지하고 서버에 audit_write_failed를 남긴다.
+
+AI 생성·취소는 AI, 관리자 페이지 변경·재접수 시작은 ADMIN(운영자), 자동 상태 변경은 SYSTEM이다. 자동 만료 ORDER_CANCELLED는 reason=PAYMENT_EXPIRED를 남긴다. 월별 합계와 원장·SYSTEM 감사는 함께 저장하며 재접수로 금액을 중복 증가시키지 않는다.
 
 ## 현재 기록하는 업무
 
@@ -76,7 +79,11 @@ DB 자체가 불능이면 실패 로그도 저장하지 못할 수 있다. 원�
 | POST /orders, /admin/orders | ORDER_CREATED | ORDER |
 | PATCH /orders/{id} | ORDER_UPDATED | ORDER |
 | 주문 전체·선택 상세 취소 | ORDER_CANCELLED, ORDER_PARCEL_CANCELLED | ORDER / ORDER_PARCEL |
-| 디버 접수 시작·결과 확정 | ORDER_SUBMISSION_STARTED, ORDER_SUBMISSION_ACCEPTED/AUTH_FAILED/REVIEW_REQUIRED | ORDER |
+| 디버 접수 시작·결과 확정 | ORDER_SUBMISSION_STARTED, ORDER_SUBMISSION_ACCEPTED/FAILED | ORDER |
+| 결제 대기·완료 | ORDER_PAYMENT_PENDING, ORDER_PAYMENT_COMPLETED | ORDER |
+| 취소 금액 변경 | ORDER_AMOUNT_CHANGED | ORDER |
+| 기업 월별 0원 시작·사용액 증가 | BILLING_MONTH_INITIALIZED, BILLING_AMOUNT_INCREASED | ORGANIZATION |
+| 부서 등록·수정 | DEPARTMENT_CREATED, DEPARTMENT_UPDATED | DEPARTMENT |
 | FAQ 등록·수정·초기 등록 | FAQ_CREATED, FAQ_UPDATED, FAQ_BOOTSTRAPPED | FAQ_ENTRY |
 | 페르소나 등록·설정 수정 | PERSONA_CREATED, PERSONA_UPDATED | AI_PERSONA_VERSION |
 | 페르소나 적용 요청·대기 교체·대기 취소 | PERSONA_APPLY_REQUESTED, PERSONA_PENDING_REPLACED, PERSONA_PENDING_CANCELLED | AI_PERSONA_VERSION |

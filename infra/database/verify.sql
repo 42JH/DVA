@@ -58,7 +58,7 @@ BEGIN
   AND table_name='order_parcels' AND column_name='status' AND is_nullable='NO')
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='orders'::regclass AND conname='orders_receipt_status_check') THEN
   RAISE EXCEPTION 'Order cancellation schema missing'; END IF;
- RAISE NOTICE 'PASS: 19 public tables, 14 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ RAISE NOTICE 'PASS: 23 public tables, 22 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

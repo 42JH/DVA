@@ -132,7 +132,7 @@ export class OrdersController {
     summary: '주문 생성·AI 상담 결과 수신',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 디버 접수 결과까지 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      'AI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 개인 카드 결제를 대기하거나 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiBody({
     description:
@@ -159,7 +159,8 @@ export class OrdersController {
             incomingAt: '2026-10-27T01:00:00Z',
           },
           customer: { name: '발신 고객', phoneNumber: '01012345678' },
-          paymentMethodType: 'credit',
+          paymentMethodType: 'billing',
+          totalAmount: 3500,
           pickupRequestedAt: '2026-10-28T10:00:00+09:00',
           parcels: [
             {
@@ -185,6 +186,7 @@ export class OrdersController {
                 latitude: 37.6,
                 longitude: 127.1,
               },
+              notifiedPrice: 3500,
               smallBoxCount: 1,
               itemPrice: 10000,
             },
@@ -277,7 +279,7 @@ export class OrdersController {
     type: ErrorResponseDto,
   })
   @ApiServiceUnavailableResponse({
-    description: 'COMPLETE 요청 시 디버 설정 누락. 저장·디버 호출 없음.',
+    description: '월·그룹결제 COMPLETE 요청 시 디버 설정 누락. 저장·디버 호출 없음.',
     type: ErrorResponseDto,
   })
   async create(
@@ -391,7 +393,7 @@ export class OrdersController {
     summary: '주문 전체 취소',
     security: [{ adminSession: [] }, {}],
     description:
-      '미완료 주문 또는 모든 미취소 상세가 결제 전(notPaid)인 접수 주문을 즉시 취소합니다. 주문·상세·내부 배송 상태와 이력을 함께 저장하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      'COLLECTING 또는 notPaid 주문을 즉시 취소합니다. 주문·상세는 보존하고 총액을 0원으로 변경하며 결제 요청을 닫습니다. 결제 완료 이후 취소는 거절하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -478,7 +480,7 @@ export class OrdersController {
     summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
-      '기존 COLLECTING 주문의 미취소 상세만 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+      '기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 기본값은 billing이며 주소·물품·미래 수거 시각·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -515,7 +517,7 @@ export class OrdersController {
   })
   @ApiOkResponse({
     description:
-      '결과 저장 완료. ACCEPTED만 접수 성공이며 AUTH_FAILED·REVIEW_REQUIRED는 확인이 필요합니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
+      '결과 저장 완료. ACCEPTED만 접수 성공이며 notPaid는 결제 대기, SUBMISSION_FAILED는 관리자 재접수 대상입니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],
@@ -527,7 +529,7 @@ export class OrdersController {
   })
   @ApiAcceptedResponse({
     description:
-      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 1분 넘게 갱신되지 않은 SUBMITTING은 이 API 재호출 시 REVIEW_REQUIRED로 전환합니다.',
+      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 1분 넘게 갱신되지 않은 SUBMITTING은 이 API 재호출 시 SUBMISSION_FAILED로 전환합니다.',
     headers: {
       Location: {
         description: '현재 주문 상세 URL.',

@@ -25,7 +25,14 @@ const pool = new Pool({
 const apps = [];
 const password = 'member-test-only-password';
 const origin = 'http://localhost:5173';
-const header = 'employeeNo,name,phoneNumber\n';
+const header = 'employeeNo,name,phoneNumber,departmentSeq\n';
+const departments = new Map();
+const csv = (companyId, rows) =>
+  header +
+  rows
+    .split('\n')
+    .map((row) => `${row},${departments.get(companyId)}`)
+    .join('\n');
 const phone = () => '010' + String(randomInt(10000000, 100000000));
 let app, base, baseB, cookie, adminId, repository, passwordHash;
 async function start() {
@@ -87,7 +94,12 @@ function create(
         'Content-Type': 'application/json',
         ...(key === undefined ? {} : { 'Idempotency-Key': key }),
       },
-      body: JSON.stringify({ customerSeq, employeeNo, role }),
+      body: JSON.stringify({
+        customerSeq,
+        employeeNo,
+        role,
+        departmentSeq: departments.get(companyId) ?? departments.values().next().value,
+      }),
     },
     host,
     session,
@@ -127,12 +139,18 @@ function remove(id, session = cookie) {
   return request('/members/' + id, { method: 'DELETE' }, base, session);
 }
 async function company(status = 'ACTIVE') {
-  return (
+  const id = (
     await pool.query(
       'INSERT INTO organizations(name,status) VALUES($1,$2) RETURNING organization_seq',
       ['구성원 기업 ' + randomUUID(), status],
     )
   ).rows[0].organization_seq;
+  const department = await pool.query(
+    "INSERT INTO departments(organization_seq,name) VALUES($1,'검증 부서') RETURNING department_seq",
+    [id],
+  );
+  departments.set(id, department.rows[0].department_seq);
+  return id;
 }
 async function customer(status = 'ACTIVE', number = phone(), name = '기존 고객') {
   const result = await pool.query(
@@ -214,7 +232,7 @@ test('every active admin role can manage members and representative labels creat
       ),
     );
     await empty(
-      await upload(co, header + `002,새 고객,${phone()}`, randomUUID(), base, admin.cookie),
+      await upload(co, csv(co, `002,새 고객,${phone()}`), randomUUID(), base, admin.cookie),
     );
     await empty(await remove(row.membership.membershipSeq, admin.cookie));
   }
@@ -246,7 +264,7 @@ test('expired, pending and logged-out sessions cannot upload or modify membershi
         204,
       );
     await error(
-      await upload(co, header + `002,실패,${phone()}`, randomUUID(), base, admin.cookie),
+      await upload(co, csv(co, `002,실패,${phone()}`), randomUUID(), base, admin.cookie),
       401,
       'UNAUTHORIZED',
     );
@@ -428,7 +446,7 @@ test('CSV creates new customers and links existing unaffiliated customers with d
     existing = await customer(),
     number = phone();
   const content =
-    '\ufeff' + header + `001a," 김,민수 ",${number}\n002,변경 고객,${existing.phoneNumber}`;
+    '\ufeff' + csv(co, `001a," 김,민수 ",${number}\n002,변경 고객,${existing.phoneNumber}`);
   await empty(await upload(co, content));
   const list = await members(co);
   assert.equal(list.data.length, 2);
@@ -461,7 +479,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     [order, cu.name, cu.phoneNumber],
   );
   const next = phone();
-  await empty(await upload(co, header + `001,새 이름,${next}`));
+  await empty(await upload(co, csv(co, `001,새 이름,${next}`)));
   const after = await member(co, cu.id);
   assert.equal(after.membershipSeq, m.membershipSeq);
   assert.equal(after.role, 'ORG_ADMIN');
@@ -473,6 +491,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     name: '새 이름',
     phoneNumber: next,
     status: 'ACTIVE',
+    monthlyBillingEnabled: false,
   });
   assert.equal((await members(co)).data.length, 2);
   const old = (
@@ -482,7 +501,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     )
   ).rows[0];
   assert.deepEqual(old, { origin_name: cu.name, origin_phone_number: cu.phoneNumber });
-  await empty(await upload(co, header + `001,새 이름,${next}`));
+  await empty(await upload(co, csv(co, `001,새 이름,${next}`)));
   assert.equal((await member(co, cu.id)).membershipSeq, m.membershipSeq);
   const blocked = await request('/customers/' + cu.id, {
     method: 'PATCH',
@@ -496,9 +515,9 @@ test('CSV validates the whole batch before changes and never echoes bad phone/na
   const co = await company(),
     number = phone();
   for (const content of [
-    header + `001,PrivateName,${number}\n001,Other,${phone()}`,
-    header + `001,PrivateName,${number}\n002,Other,${number}`,
-    header + `001,PrivateName,${number}\n002,Other,010-bad`,
+    csv(co, `001,PrivateName,${number}\n001,Other,${phone()}`),
+    csv(co, `001,PrivateName,${number}\n002,Other,${number}`),
+    csv(co, `001,PrivateName,${number}\n002,Other,010-bad`),
   ]) {
     const body = await error(await upload(co, content), 422, 'VALIDATION_FAILED');
     assert.ok(!JSON.stringify(body).includes('PrivateName'));
@@ -526,7 +545,7 @@ test('CSV rejects other-company membership, another employee number and phone ow
     [`001,Other,${b.phoneNumber}`, 'PHONE_NUMBER_CONFLICT'],
   ]) {
     const body = await error(
-      await upload(co, header + `NEW,새 고객,${number}\n` + row),
+      await upload(co, csv(co, `NEW,새 고객,${number}\n` + row)),
       422,
       'VALIDATION_FAILED',
     );
@@ -545,13 +564,13 @@ test('CSV refuses withdrawn customers and inactive companies without reviving or
     inactive = await company('INACTIVE'),
     cu = await customer('WITHDRAWN');
   const body = await error(
-    await upload(co, header + `001,신규,${phone()}\n002,탈퇴,${cu.phoneNumber}`),
+    await upload(co, csv(co, `001,신규,${phone()}\n002,탈퇴,${cu.phoneNumber}`)),
     422,
     'VALIDATION_FAILED',
   );
   assert.ok(body.error.details.some((item) => item.reason === 'CUSTOMER_WITHDRAWN'));
   assert.equal((await members(co)).data.length, 0);
-  await error(await upload(inactive, header + `001,신규,${phone()}`), 409, 'INVALID_STATE');
+  await error(await upload(inactive, csv(inactive, `001,신규,${phone()}`)), 409, 'INVALID_STATE');
   assert.equal(
     (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [cu.id])).rows[0]
       .status,
@@ -560,12 +579,12 @@ test('CSV refuses withdrawn customers and inactive companies without reviving or
   const existing = await customer();
   await empty(await create(co, existing.id, '003'));
   await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [existing.id]);
-  await error(await upload(co, header + `003,복구 시도,${phone()}`), 422, 'VALIDATION_FAILED');
+  await error(await upload(co, csv(co, `003,복구 시도,${phone()}`)), 422, 'VALIDATION_FAILED');
 });
 
 test('multipart validates file count, fields, type, encoding, byte cap and row cap with no persistence', async () => {
   const co = await company();
-  const content = header + `001,고객,${phone()}`;
+  const content = csv(co, `001,고객,${phone()}`);
   await error(
     await upload(co, content, randomUUID(), base, cookie, 'employees.xlsx'),
     415,
@@ -589,7 +608,7 @@ test('multipart validates file count, fields, type, encoding, byte cap and row c
     { length: 1001 },
     (_, i) => `${i},Name,010${String(i).padStart(8, '0')}`,
   ).join('\n');
-  await error(await upload(co, header + rows), 413, 'PAYLOAD_TOO_LARGE');
+  await error(await upload(co, csv(co, rows)), 413, 'PAYLOAD_TOO_LARGE');
   for (const mode of ['missing', 'extra', 'double', 'wrong']) {
     const form = new FormData();
     if (mode !== 'missing')
@@ -635,8 +654,8 @@ test('registration and CSV need no key and ignore legacy key headers', async () 
   await empty(await create(co, cu.id));
   await error(await create(co, cu.id, '001', 'legacy-header'), 409, 'DUPLICATE_RESOURCE');
   await empty(await create(co, other.id, '002', 'legacy-header'));
-  await empty(await upload(co, header + '001,First,' + cu.phoneNumber, 'legacy-header'));
-  await empty(await upload(co, header + '001,Changed,' + cu.phoneNumber, 'legacy-header'));
+  await empty(await upload(co, csv(co, '001,First,' + cu.phoneNumber), 'legacy-header'));
+  await empty(await upload(co, csv(co, '001,Changed,' + cu.phoneNumber), 'legacy-header'));
   assert.equal(
     (await members(co)).data.find((row) => row.customer.customerSeq === cu.id).customer.name,
     'Changed',
@@ -674,7 +693,7 @@ test('membership writes wait before returning a bounded lock timeout without a r
     const responses = await Promise.all([
       create(co, other.id, '002'),
       patch(m.membershipSeq, { role: 'ORG_ADMIN' }),
-      upload(co, header + '003,New,' + phone()),
+      upload(co, csv(co, '003,New,' + phone())),
     ]);
     assert.ok(Date.now() - started >= 1500);
     for (const response of responses) await error(response, 409, 'REQUEST_IN_PROGRESS');
@@ -690,7 +709,7 @@ test('concurrent uploads keep one customer/membership and audit each successful 
   const co = await company(),
     number = phone(),
     key = undefined,
-    content = header + `001,동시 고객,${number}`;
+    content = csv(co, `001,동시 고객,${number}`);
   const responses = await Promise.all(
     Array.from({ length: 6 }, (_, i) => upload(co, content, key, i % 2 ? base : baseB)),
   );
@@ -718,10 +737,10 @@ test('concurrent companies cannot acquire the same phone/customer and retries ne
   const co = await company(),
     other = await company(),
     number = phone(),
-    content = header + `001,경합 고객,${number}`;
+    content = csv(co, `001,경합 고객,${number}`);
   const responses = await Promise.all([
     upload(co, content),
-    upload(other, content, randomUUID(), baseB),
+    upload(other, csv(other, `001,경합 고객,${number}`), randomUUID(), baseB),
   ]);
   assert.equal(responses.filter((response) => response.status === 204).length, 1);
   for (const response of responses) assert.ok([204, 409, 422].includes(response.status));
@@ -732,7 +751,7 @@ test('concurrent companies cannot acquire the same phone/customer and retries ne
     '1',
   );
   const loser = (await members(co)).data.length ? other : co;
-  await error(await upload(loser, content), 422, 'VALIDATION_FAILED');
+  await error(await upload(loser, csv(loser, `001,경합 고객,${number}`)), 422, 'VALIDATION_FAILED');
 });
 
 test('CSV audit failure rolls back changed customers, new customers and memberships', async () => {
@@ -741,7 +760,7 @@ test('CSV audit failure rolls back changed customers, new customers and membersh
   await empty(await create(co, cu.id));
   const newPhone = phone(),
     otherPhone = phone();
-  const content = header + '001,Changed,' + newPhone + '\n002,New,' + otherPhone;
+  const content = csv(co, '001,Changed,' + newPhone + '\n002,New,' + otherPhone);
   await pool.query(
     "CREATE FUNCTION fail_member_csv_audit_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MEMBERS_IMPORTED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$",
   );
@@ -825,7 +844,7 @@ test('CSV rechecks customer status after acquiring a row locked by a concurrent 
     await lock.query('SELECT customer_seq FROM customers WHERE customer_seq=$1 FOR UPDATE', [
       cu.id,
     ]);
-    pending = upload(co, header + `001,변경 시도,${newPhone}`);
+    pending = upload(co, csv(co, `001,변경 시도,${newPhone}`));
     let waiting = false;
     for (let attempt = 0; attempt < 50; attempt++) {
       const result = await pool.query(
@@ -878,6 +897,7 @@ test('OpenAPI contains five protected operations, CSV upload shape, representati
     ),
   );
   assert.deepEqual(Object.keys(document.components.schemas.UpdateMemberDto.properties).sort(), [
+    'departmentSeq',
     'role',
     'status',
   ]);

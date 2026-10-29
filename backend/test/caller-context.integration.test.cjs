@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -49,7 +50,8 @@ after(async () => {
 async function customer(status = 'ACTIVE') {
   const { rows } = await pool.query(
     `INSERT INTO customers(name,phone_number,status) VALUES('초기 조회 고객',$1,$2)
-     RETURNING customer_seq AS "customerSeq",name,phone_number AS "phoneNumber",status`,
+     RETURNING customer_seq AS "customerSeq",name,phone_number AS "phoneNumber",status,
+       monthly_billing_enabled AS "monthlyBillingEnabled"`,
     [phone(), status],
   );
   return rows[0];
@@ -64,11 +66,13 @@ async function organization(status = 'ACTIVE') {
 }
 async function member(customerSeq, organizationSeq, status = 'ACTIVE', role = 'MEMBER') {
   return (
-    await pool.query(
-      `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status)
-       VALUES($1,$2,$3,$4,$5) RETURNING membership_seq`,
-      [customerSeq, organizationSeq, '00' + randomUUID(), role, status],
-    )
+    await testMembership(pool, {
+      customerSeq,
+      organizationSeq,
+      employeeNo: '00' + randomUUID(),
+      role,
+      status,
+    })
   ).rows[0].membership_seq;
 }
 async function pin(scope, owner, label = null, version = 1) {
@@ -109,7 +113,9 @@ const emptyContext = (lookupStatus) => ({
   customer: null,
   membership: null,
   organization: null,
+  department: null,
   availableUsageTypes: [],
+  availablePaymentMethods: [],
   personalPins: [],
   companyPins: [],
 });
@@ -133,6 +139,7 @@ test('registered caller without orders, pins or membership remains registered', 
     ...emptyContext('REGISTERED'),
     customer: c,
     availableUsageTypes: ['PERSONAL'],
+    availablePaymentMethods: ['billing'],
   });
 });
 

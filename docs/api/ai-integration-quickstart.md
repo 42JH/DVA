@@ -1,5 +1,7 @@
 # AI 서버 연동 변경 요약
 
+결제·가격·부분 취소의 현재 규격과 요청·응답 전체 예시는 [AI 주문 결제 연동 규격](ai-order-billing-integration.md)을 따른다. COMPLETE는 개인 카드 결제 완료를 뜻하지 않는다.
+
 이번 MR 배포 후 적용한다. AI는 상담 결과를 백엔드에 전달하고, 디버 접수·녹취 다운로드·S3 저장은 백엔드가 처리한다.
 
 - 내부 주소: 같은 Docker 네트워크에서 `http://backend:3000`
@@ -47,7 +49,8 @@ phoneNumber만 보내던 기존 요청도 동작하지만 통화를 만들거나
     "incomingAt": "2026-10-29T01:00:00Z"
   },
   "customer": {"name":"발신 고객","phoneNumber":"01012345678"},
-  "paymentMethodType": "credit",
+  "paymentMethodType": "billing",
+  "totalAmount": 3500,
   "pickupRequestedAt": "2026-10-30T10:00:00+09:00",
   "parcels": [{
     "origin": {
@@ -64,6 +67,7 @@ phoneNumber만 보내던 기존 요청도 동작하지만 통화를 만들거나
     },
     "smallBoxCount": 1,
     "itemPrice": 10000,
+    "notifiedPrice": 3500,
     "clientComment": "문 앞 배송"
   }]
 }
@@ -73,7 +77,7 @@ phoneNumber만 보내던 기존 요청도 동작하지만 통화를 만들거나
 - 고객 확인에서 보낸 것과 같은 통화 ID·발신번호·수신 시각을 사용한다. 백엔드는 앞서 만든 통화를 재사용해 주문을 연결한다.
 - 기존 고객은 `customer` 대신 `"customerSeq": 12`를 보낸다. 두 필드는 동시 입력하지 않는다. 미등록 고객은 이름·전화번호로 주문과 함께 등록한다.
 - 미완료·취소는 `outcome`과 `call`만으로 전송할 수 있다. 수집한 값이 있으면 같은 구조에 추가하고, 미수집 필드는 생략한다.
-- 완료는 출발지·도착지의 이름·전화번호·도로명·지번·동명·우편번호·좌표, 물품 종류/수량·가액, 미래 수거 시각이 필요하다. 결제는 `credit`(기업·개인 기본), `groupBilling`(기업), `billing`(개인)이다.
+- 완료는 출발지·도착지의 이름·전화번호·도로명·지번·동명·우편번호·좌표, 물품 종류/수량·가액, 미래 수거 시각이 필요하다. 결제는 `billing`(개인·기업 카드, 기본값), `credit`(월결제 자격), `groupBilling`(부서 그룹결제 자격)이다.
 - 이 결과 전송에는 `call_session_seq` 헤더나 별도 `/submit` 호출이 필요 없다. 통화 한 건의 여러 택배는 `parcels`에 묶는다.
 
 ## 3. 응답과 재시도
@@ -90,7 +94,7 @@ phoneNumber만 보내던 기존 요청도 동작하지만 통화를 만들거나
 | `data.status=ACCEPTED` | 접수 성공 안내. `parcelNo`는 디버 접수 참고번호 |
 | `COLLECTING` / `CANCELLED` | 미완료·취소 저장 완료 |
 | HTTP 202 / `SUBMITTING` | 처리 중. 같은 UUID·같은 요청으로 잠시 후 재확인 |
-| `AUTH_FAILED` / `REVIEW_REQUIRED` | 성공 안내 금지, 담당자 확인. 새 주문으로 자동 재접수하지 않음 |
+| `SUBMISSION_FAILED` | 성공 안내 금지, 담당자 확인. 새 주문으로 자동 재접수하지 않음 |
 | 네트워크 실패·504·409 `REQUEST_IN_PROGRESS` | 같은 UUID·같은 요청으로 재시도 |
 
 HTTP 201만으로 접수 성공을 판단하지 않는다. 오류 본문은 `error.code`·`error.message`를 읽는다. UUID는 최초 전송 전에 한 번 만들고 재시도에 재사용한다. 같은 UUID로 바꾼 본문은 재적용되지 않는다. COMPLETE 전송 후 통화가 끊겨도 별도 INCOMPLETE/CANCELLED를 보내지 않는다. HTTP timeout은 10초보다 여유 있게 둔다.

@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -111,11 +112,13 @@ async function fixture({
       [companyStatus],
     )
   ).rows[0].organization_seq;
-  await pool.query(
-    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status)
-    VALUES($1,$2,$3,$4,$5)`,
-    [customer, company, randomUUID(), role, memberStatus],
-  );
+  await testMembership(pool, {
+    customerSeq: customer,
+    organizationSeq: company,
+    employeeNo: randomUUID(),
+    role,
+    status: memberStatus,
+  });
   const call = (
     await pool.query(
       `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at)
@@ -277,10 +280,10 @@ test('another caller cannot list, create or edit private pins or read another co
   ])
     await error(await request(method, path, body, other.ai), 403, 'FORBIDDEN');
   assert.equal((await stored(p.personalPinSeq)).label, null);
-  await pool.query('UPDATE memberships SET organization_seq=$1 WHERE customer_seq=$2', [
-    owner.company,
-    other.customer,
-  ]);
+  await pool.query(
+    'UPDATE memberships SET organization_seq=$1,department_seq=(SELECT department_seq FROM departments WHERE organization_seq=$1 LIMIT 1) WHERE customer_seq=$2',
+    [owner.company, other.customer],
+  );
   await error(
     await request('GET', `/customers/${owner.customer}/pins`, undefined, other.ai),
     403,

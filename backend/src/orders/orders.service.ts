@@ -310,6 +310,7 @@ export class OrdersService {
       if (!input.call && !submitManual) return { result };
       if (input.outcome === 'CANCELLED') {
         await this.repository.cancel(client, result.orderSeq);
+        await this.repository.recalculateAmount(client, result.orderSeq);
         await this.audit.recordSuccess(
           {
             actorId: adminId,
@@ -318,6 +319,7 @@ export class OrdersService {
             targetType: 'ORDER',
             action: 'ORDER_CANCELLED',
             requestId,
+            metadata: { amountBefore: draft.totalAmount, amountAfter: 0 },
           },
           client,
         );
@@ -555,6 +557,20 @@ export class OrdersService {
       if (order.status !== 'COLLECTING') {
         if (order.status === 'CANCELLED')
           throw new ApiException(409, 'INVALID_STATE', '취소된 주문입니다.');
+        if (order.status === 'SUBMITTING' && (await this.submissions.markStale(client, id))) {
+          await this.audit.recordSuccess(
+            {
+              actorId: null,
+              actorType: 'SYSTEM',
+              targetId: id,
+              targetType: 'ORDER',
+              action: 'ORDER_SUBMISSION_FAILED',
+              requestId,
+            },
+            client,
+          );
+          return { status: 'SUBMISSION_FAILED' as const };
+        }
         return { status: order.status };
       }
       const call = callId === null ? undefined : await this.repository.call(client, callId);

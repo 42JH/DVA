@@ -303,9 +303,16 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   });
   assert.equal(company.status, 201);
   const companyId = (await company.json()).data.organizationSeq;
+  const department = await fetch(root + `/companies/${companyId}/departments`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ name: '운영 이미지 검증팀' }),
+  });
+  assert.equal(department.status, 201);
+  const departmentId = (await department.json()).data.departmentSeq;
   const number = '019' + String(require('node:crypto').randomInt(10000000, 100000000));
-  const prefix = 'employeeNo,name,phoneNumber\n001,';
-  const suffix = ',' + number;
+  const prefix = 'employeeNo,name,phoneNumber,departmentSeq\n001,';
+  const suffix = ',' + number + ',' + departmentId;
   const content = prefix + 'a'.repeat(1024 * 1024 - Buffer.byteLength(prefix + suffix)) + suffix;
   assert.equal(Buffer.byteLength(content), 1024 * 1024);
   const upload = async (data, authenticated = true) => {
@@ -335,7 +342,11 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
     membershipId = row.membership.membershipSeq;
   const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
   assert.equal(
-    (await upload(`employeeNo,name,phoneNumber\n001,운영 이미지 고객,${nextPhone}`)).status,
+    (
+      await upload(
+        `employeeNo,name,phoneNumber,departmentSeq\n001,운영 이미지 고객,${nextPhone},${departmentId}`,
+      )
+    ).status,
     204,
   );
   const customer = await fetch(root + '/customers/' + customerId);

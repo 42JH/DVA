@@ -88,7 +88,18 @@ test('69: customer state, PIN ownership and company payment eligibility reuse co
   const wrongPin = f.body();
   wrongPin.parcels[0].originPin = { scope: 'PERSONAL', pinSeq: f.otherPinId };
   await f.error(await f.send(wrongPin), 403, 'FORBIDDEN');
-  await f.error(await f.send({ ...f.body(), paymentMethodType: 'billing' }), 403, 'FORBIDDEN');
+  await f.pool.query(
+    'UPDATE organizations SET monthly_billing_enabled=false WHERE organization_seq=$1',
+    [f.organizationId],
+  );
+  try {
+    await f.error(await f.send(f.body()), 403, 'FORBIDDEN');
+  } finally {
+    await f.pool.query(
+      'UPDATE organizations SET monthly_billing_enabled=true WHERE organization_seq=$1',
+      [f.organizationId],
+    );
+  }
   await f.error(
     await f.send({ ...f.body(), customerSeq: f.otherId, paymentMethodType: 'groupBilling' }),
     403,
@@ -102,28 +113,31 @@ test('69: customer state, PIN ownership and company payment eligibility reuse co
     customerSeq: f.otherId,
     paymentMethodType: 'billing',
   });
-  assert.equal((await personal.json()).data.status, 'ACCEPTED');
-  assert.equal(f.requests.length, 2);
+  assert.equal((await personal.json()).data.status, 'notPaid');
+  assert.equal(f.requests.length, 1);
 });
 
-test('69: configuration or preparation failures roll back customer, order and creation key together', async () => {
-  const input = f.body();
-  delete input.customerSeq;
-  input.customer = { name: '롤백 고객', phoneNumber: f.phone() };
-  const before = await f.counts();
-  const key = randomUUID();
+test('69: configuration or payment preparation failures roll back the collecting order and creation key', async () => {
+  const before = await f.counts(),
+    key = randomUUID();
   const config = f.app.get(ConfigService);
   config.set('DVER_API_KEY', '');
   try {
-    await f.error(await f.send(input, key), 503, 'DEPENDENCY_UNAVAILABLE');
+    await f.error(await f.send(f.body(), key), 503, 'DEPENDENCY_UNAVAILABLE');
   } finally {
     config.set('DVER_API_KEY', 'manual-test-only-key');
   }
   assert.deepEqual(await f.counts(), before);
+  const input = {
+    ...f.body(),
+    customerSeq: undefined,
+    customer: { name: '롤백 고객', phoneNumber: f.phone() },
+    paymentMethodType: 'billing',
+  };
   const audit = f.app.get(AuditService),
     record = audit.recordSuccess;
   audit.recordSuccess = async function (...args) {
-    if (args[0].action === 'ORDER_SUBMISSION_STARTED') throw Error('manual-prepare-failure');
+    if (args[0].action === 'ORDER_PAYMENT_PENDING') throw Error('manual-prepare-failure');
     return record.apply(this, args);
   };
   try {
@@ -134,8 +148,9 @@ test('69: configuration or preparation failures roll back customer, order and cr
   assert.deepEqual(await f.counts(), before);
   assert.equal(f.requests.length, 0);
   const retry = await f.send(input, key);
-  assert.equal((await retry.json()).data.status, 'ACCEPTED');
-  assert.equal(f.requests.length, 1);
+  assert.equal((await retry.json()).data.status, 'notPaid');
+  assert.equal((await f.counts()).customers, before.customers + 1);
+  assert.equal(f.requests.length, 0);
 });
 
 test('69: retrying a key returns the saved result, survives restart and prevents cross-admin reuse', async () => {
@@ -227,10 +242,10 @@ test('69: external rejection, invalid response and timeout are recorded without 
         res.writeHead(403);
         res.end('{}');
       },
-      'AUTH_FAILED',
+      'SUBMISSION_FAILED',
     ],
-    [(_req, res) => res.end('<html>failed</html>'), 'REVIEW_REQUIRED'],
-    [() => {}, 'REVIEW_REQUIRED'],
+    [(_req, res) => res.end('<html>failed</html>'), 'SUBMISSION_FAILED'],
+    [() => {}, 'SUBMISSION_FAILED'],
   ]) {
     f.respond = respond;
     const key = randomUUID(),
@@ -284,7 +299,7 @@ test('69: result persistence failure leaves SUBMITTING and stale recovery never 
   }
   const retry = await f.send(f.body(), key);
   assert.equal(retry.status, 201);
-  assert.equal((await retry.json()).data.status, 'REVIEW_REQUIRED');
+  assert.equal((await retry.json()).data.status, 'SUBMISSION_FAILED');
   assert.equal(f.requests.length, 1);
   assert.equal((await f.counts()).shipments, before.shipments);
 });

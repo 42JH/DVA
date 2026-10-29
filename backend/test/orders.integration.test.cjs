@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,6 +9,7 @@ const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { createServer } = require('node:http');
 const { OrderSubmissionRepository } = require('../dist/orders/order-submission.repository');
+const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -93,9 +95,19 @@ before(async () => {
       "INSERT INTO organizations(name,status) VALUES('주문 검증 기업','ACTIVE') RETURNING organization_seq",
     )
   ).rows[0].organization_seq;
+  await testMembership(pool, {
+    customerSeq: customerId,
+    organizationSeq: organizationId,
+    employeeNo: 'order-test',
+    groupBillingEnabled: true,
+  });
   await pool.query(
-    "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,'order-test','ACTIVE')",
-    [customerId, organizationId],
+    'UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=ANY($1::int[])',
+    [[customerId, withdrawnId, otherId]],
+  );
+  await pool.query(
+    'UPDATE organizations SET monthly_billing_enabled=true WHERE organization_seq=$1',
+    [organizationId],
   );
   for (const id of [customerId, otherId]) {
     const pin = (
@@ -264,7 +276,7 @@ test('call replay returns the first response after termination; a new key cannot
   assert.equal(
     (await pool.query('SELECT payment_method_type FROM orders WHERE order_seq=$1', [data.orderSeq]))
       .rows[0].payment_method_type,
-    'credit',
+    'billing',
   );
   assert.equal(
     (await pool.query('SELECT status FROM orders WHERE order_seq=$1', [data.orderSeq])).rows[0]
@@ -363,7 +375,7 @@ test('all active administrator roles create COLLECTING orders with defaults and 
     ).rows[0];
     assert.deepEqual(row, {
       customer_seq: customerId,
-      payment_method_type: 'credit',
+      payment_method_type: 'billing',
       pickup_requested_at: null,
       status: 'COLLECTING',
       version: 1,
@@ -414,7 +426,7 @@ test('partial parcel snapshots retain field mapping, defaults and the actual tri
   assert.equal(rows[1].parcel_position, 2);
   assert.equal(rows[1].document_count, 0);
   assert.equal(rows[1].item_price, null);
-  assert.ok(rows.every((row) => row.notified_price === 3500));
+  assert.ok(rows.every((row) => row.notified_price === null));
   const header = (
     await pool.query('SELECT version,pickup_requested_at FROM orders WHERE order_seq=$1', [
       data.orderSeq,
@@ -430,7 +442,7 @@ test('invalid bodies and keys fail before order writes', async () => {
   for (const body of [
     { customerSeq: '1' },
     { customerSeq: customerId, parcels: [{ origin: { extra: 1 } }] },
-    { customerSeq: customerId, parcels: [{ notifiedPrice: 1 }] },
+    { customerSeq: customerId, parcels: [{ notifiedPrice: 0 }] },
   ])
     await errorCode(await create(body), 400, 'INVALID_REQUEST');
   for (const key of ['bad', ''])
@@ -938,7 +950,7 @@ const readCustomer = async () => {
   const phone = '010' + String(++readPhone).padStart(8, '0');
   const customer = (
     await pool.query(
-      "INSERT INTO customers(name,phone_number,status) VALUES('조회 고객',$1,'ACTIVE') RETURNING customer_seq",
+      "INSERT INTO customers(name,phone_number,status,monthly_billing_enabled) VALUES('조회 고객',$1,'ACTIVE',true) RETURNING customer_seq",
       [phone],
     )
   ).rows[0].customer_seq;
@@ -1062,12 +1074,12 @@ test('order list filters every order status independently of shipment state', as
   const { customer } = await readCustomer();
   const statuses = [
     'COLLECTING',
+    'notPaid',
+    'PAID',
     'SUBMITTING',
     'ACCEPTED',
-    'AUTH_FAILED',
-    'REVIEW_REQUIRED',
+    'SUBMISSION_FAILED',
     'CANCELLED',
-    'EXPIRED',
   ];
   const orders = new Map();
   for (const status of statuses) {
@@ -1121,10 +1133,11 @@ test('ORD-02 AI scope comes from the active call customer, never arbitrary custo
   await errorCode(await readOrders('', aiReadHeaders(callId)), 403, 'FORBIDDEN');
   // The same organization does not grant access to another customer's orders.
   const organizationCall = await call('01000000003');
-  await pool.query(
-    "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,'read-other','ACTIVE')",
-    [otherId, organizationId],
-  );
+  await testMembership(pool, {
+    customerSeq: otherId,
+    organizationSeq: organizationId,
+    employeeNo: 'read-other',
+  });
   await errorCode(
     await readOrders(`?customerSeq=${customerId}`, aiReadHeaders(organizationCall)),
     403,
@@ -1252,7 +1265,7 @@ test('ORD-03 returns draft details, every nullable address field and the actual 
     assert.ok(Number.isInteger(parcel.orderParcelSeq));
     assert.equal(parcel.originPin, null);
     assert.equal(Object.hasOwn(parcel, 'shipment'), false);
-    assert.equal(parcel.notifiedPrice, 3500);
+    assert.equal(parcel.notifiedPrice, null);
   }
   assert.equal(order.creationRequestId, undefined);
   assert.equal(order.deliverySyncStatus, undefined);
@@ -1503,7 +1516,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
   assert.equal(added.originPin, null);
   assert.equal(added.documentCount, 0);
   assert.equal(added.clientComment, '');
-  assert.equal(added.notifiedPrice, 3500);
+  assert.equal(added.notifiedPrice, null);
   assert.equal(added.itemPrice, Number.MAX_SAFE_INTEGER);
   assert.equal(Object.hasOwn(added, 'shipment'), false);
   assert.equal(after.parcelNo, null);
@@ -1723,12 +1736,12 @@ test('ORD-04 rolls back header, details, call binding and success audit on stora
 test('ORD-04 rejects every non-COLLECTING state without changing orders or shipments', async () => {
   const { customer } = await readCustomer();
   for (const status of [
+    'notPaid',
+    'PAID',
     'SUBMITTING',
     'ACCEPTED',
-    'AUTH_FAILED',
-    'REVIEW_REQUIRED',
+    'SUBMISSION_FAILED',
     'CANCELLED',
-    'EXPIRED',
   ]) {
     const id = await readOrder(customer, [{ smallBoxCount: 1 }]);
     await pool.query(
@@ -2055,11 +2068,16 @@ test('order APIs use the literal DB column header and reject former or hyphenate
 });
 
 const readyOrder = async (changes = {}) => {
+  const parcels = (
+    changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }]
+  ).map((p) => ({ notifiedPrice: 3500, ...p }));
   const response = await create({
     customerSeq: otherId,
+    paymentMethodType: 'credit',
     pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
-    parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
     ...changes,
+    parcels,
+    totalAmount: changes.totalAmount ?? parcels.reduce((n, p) => n + (p.notifiedPrice ?? 0), 0),
   });
   assert.equal(response.status, 201);
   return (await response.json()).data;
@@ -2088,18 +2106,25 @@ const resetDver = () => {
   dverRespond = (_req, res) => res.end(JSON.stringify(dverSuccess));
 };
 
-const aiResult = (outcome = 'COMPLETE', changes = {}) => ({
-  outcome,
-  call: {
-    providerCallId: randomUUID(),
-    callerPhoneNumber: '+821000000001',
-    incomingAt: '2026-10-27T01:00:00Z',
-  },
-  customerSeq: customerId,
-  pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
-  parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
-  ...changes,
-});
+const aiResult = (outcome = 'COMPLETE', changes = {}) => {
+  const parcels = (
+    changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }]
+  ).map((p) => ({ notifiedPrice: 3500, ...p }));
+  return {
+    outcome,
+    call: {
+      providerCallId: randomUUID(),
+      callerPhoneNumber: '+821000000001',
+      incomingAt: '2026-10-27T01:00:00Z',
+    },
+    customerSeq: customerId,
+    paymentMethodType: 'credit',
+    pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+    ...changes,
+    parcels,
+    totalAmount: changes.totalAmount ?? parcels.reduce((n, p) => n + (p.notifiedPrice ?? 0), 0),
+  };
+};
 
 test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result without submit', async () => {
   resetDver();
@@ -2134,12 +2159,27 @@ test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result wi
   ).rows;
   assert.deepEqual(
     events.map((event) => event.action),
-    ['CALL_STARTED', 'ORDER_CREATED', 'ORDER_SUBMISSION_STARTED', 'ORDER_SUBMISSION_ACCEPTED'],
+    [
+      'CALL_STARTED',
+      'ORDER_CREATED',
+      'BILLING_MONTH_INITIALIZED',
+      'BILLING_MONTH_INITIALIZED',
+      'BILLING_AMOUNT_INCREASED',
+      'ORDER_PAYMENT_COMPLETED',
+      'ORDER_SUBMISSION_STARTED',
+      'ORDER_SUBMISSION_ACCEPTED',
+    ],
   );
   assert.ok(
-    events.every(
-      (event) => event.actor_type === 'AI' && event.actor_seq === null && event.actor_name === 'AI',
-    ),
+    events
+      .slice(0, 2)
+      .every(
+        (event) =>
+          event.actor_type === 'AI' && event.actor_seq === null && event.actor_name === 'AI',
+      ),
+  );
+  assert.ok(
+    events.slice(2).every((event) => event.actor_type === 'SYSTEM' && event.actor_seq === null),
   );
   assert.deepEqual(
     (await (await aiCreate(undefined, { ...input, outcome: 'CANCELLED' }, key, 1)).json()).data,
@@ -2167,6 +2207,25 @@ test('AI incomplete and cancelled calls survive without a known customer and nev
     const { data } = await response.json();
     assert.equal(data.status, outcome === 'INCOMPLETE' ? 'COLLECTING' : 'CANCELLED');
     assert.equal(data.parcelNo, null);
+    assert.equal(data.totalAmount, outcome === 'CANCELLED' ? 0 : input.totalAmount);
+    if (outcome === 'CANCELLED') {
+      const event = (
+        await pool.query(
+          "SELECT actor_type,metadata FROM audit_logs WHERE target_seq=$1 AND action='ORDER_CANCELLED'",
+          [data.orderSeq],
+        )
+      ).rows[0];
+      assert.equal(event.actor_type, 'AI');
+      assert.deepEqual(event.metadata, { amountBefore: input.totalAmount, amountAfter: 0 });
+      assert.equal(
+        (
+          await pool.query('SELECT notified_price FROM order_parcels WHERE order_seq=$1', [
+            data.orderSeq,
+          ])
+        ).rows[0].notified_price,
+        input.parcels[0].notifiedPrice,
+      );
+    }
     const stored = (
       await pool.query('SELECT customer_seq FROM orders WHERE order_seq=$1', [data.orderSeq])
     ).rows[0];
@@ -2184,6 +2243,7 @@ test('AI COMPLETE validation rolls back call, customer and order before any Dver
     customerSeq: undefined,
     customer: { name: '검증 실패', phoneNumber: '01088990011' },
     parcels: [],
+    totalAmount: 3500,
   });
   input.call.callerPhoneNumber = input.customer.phoneNumber;
   await errorCode(await aiCreate(undefined, input), 422, 'VALIDATION_FAILED');
@@ -2252,7 +2312,7 @@ test('AI COMPLETE reports upstream rejection or uncertainty and never resends on
       key = randomUUID();
     const response = await aiCreate(undefined, input, key);
     const { data } = await response.json();
-    assert.equal(data.status, status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED');
+    assert.equal(data.status, status === 403 ? 'SUBMISSION_FAILED' : 'SUBMISSION_FAILED');
     assert.equal((await submissionRows(data.orderSeq)).shipments, 0);
     assert.deepEqual((await (await aiCreate(undefined, input, key)).json()).data, data);
     assert.equal(dverRequests.length, 1);
@@ -2341,10 +2401,20 @@ test('cancelled draft details cannot be edited or sent to Dver, and only remaini
 test('cancelled accepted snapshots stay out of previous address suggestions while siblings remain', async () => {
   resetDver();
   const parcel = { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 };
-  const order = await readyOrder({ parcels: [parcel, parcel] });
+  const order = await readyOrder({ paymentMethodType: 'billing', parcels: [parcel, parcel] });
   assert.equal((await submitOrder(order)).status, 200);
   const detail = (await (await readDetail(order.orderSeq)).json()).data;
   assert.equal((await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq])).status, 204);
+  const remaining = (await (await readDetail(order.orderSeq)).json()).data;
+  const payments = apps[0].get(OrderPaymentsService);
+  await payments.beginPayment(remaining.paymentRequest.paymentRequestId, remaining.totalAmount);
+  await payments.confirmPayment(
+    remaining.paymentRequest.paymentRequestId,
+    remaining.totalAmount,
+    'verified-' + randomUUID(),
+    randomUUID(),
+  );
+  assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
   const history = await fetch(
     hosts[0] + `/api/customers/${otherId}/addresses?direction=DESTINATION&limit=100`,
     { headers: { Cookie: cookies[0] } },
@@ -2355,7 +2425,7 @@ test('cancelled accepted snapshots stay out of previous address suggestions whil
       .map((p) => p.orderParcelSeq),
     [detail.parcels[1].orderParcelSeq],
   );
-  assert.equal((await cancelOrder(order.orderSeq)).status, 204);
+  await errorCode(await cancelOrder(order.orderSeq), 409, 'INVALID_STATE');
   assert.equal(dverRequests.length, 1, 'cancellation must not contact Dver');
 });
 
@@ -2446,7 +2516,7 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
   ).rows;
   assert.equal(new Set(shipments.map((shipment) => shipment.tracking_number)).size, 2);
   for (const shipment of shipments) {
-    assert.equal(shipment.status, 'notPaid');
+    assert.equal(shipment.status, 'paid');
     assert.equal(shipment.version, 1);
     assert.match(shipment.tracking_number, /^DVA-[0-9a-f-]{36}$/);
   }
@@ -2488,16 +2558,21 @@ test('ORD-06 payment eligibility uses active enterprise membership and allows cr
     [personalCustomer, 'credit', 200],
     [customerId, 'groupBilling', 200],
     [personalCustomer, 'billing', 200],
-    [customerId, 'billing', 403],
+    [customerId, 'billing', 200],
     [personalCustomer, 'groupBilling', 403],
   ]) {
     const order = await readyOrder({ customerSeq, paymentMethodType }),
       before = dverRequests.length;
     const response = await submitOrder(order);
     assert.equal(response.status, expected, `${customerSeq} ${paymentMethodType}`);
-    if (expected === 200)
-      assert.equal(dverRequests.at(-1).body.paymentMethodType, paymentMethodType);
-    else {
+    if (expected === 200) {
+      assert.equal(
+        (await response.json()).data.status,
+        paymentMethodType === 'billing' ? 'notPaid' : 'ACCEPTED',
+      );
+      if (paymentMethodType === 'billing') assert.equal(dverRequests.length, before);
+      else assert.equal(dverRequests.at(-1).body.paymentMethodType, paymentMethodType);
+    } else {
       assert.equal((await response.json()).error.code, 'FORBIDDEN');
       assert.equal(dverRequests.length, before);
       assert.equal((await submissionRows(order.orderSeq)).status, 'COLLECTING');
@@ -2664,7 +2739,7 @@ test('ORD-06 uses the order identity, ignores obsolete keys and rejects cancelle
   const replay = await submitOrder({ ...first, version: first.version + 1 });
   assert.equal(replay.status, 200);
   assert.equal((await replay.json()).data.status, 'ACCEPTED');
-  for (const status of ['CANCELLED', 'EXPIRED']) {
+  for (const status of ['CANCELLED']) {
     const order = await readyOrder();
     await pool.query('UPDATE orders SET status=$2 WHERE order_seq=$1', [order.orderSeq, status]);
     await errorCode(await submitOrder(order), 409, 'INVALID_STATE');
@@ -2794,7 +2869,7 @@ test('ORD-06 records auth failures and unknown outcomes without shipments or a s
     };
     const response = await submitOrder(order);
     assert.equal(response.status, 200);
-    const status = mode === 'auth' ? 'AUTH_FAILED' : 'REVIEW_REQUIRED';
+    const status = 'SUBMISSION_FAILED';
     assert.equal((await response.json()).data.status, status);
     assert.deepEqual(await submissionRows(order.orderSeq), {
       status,
@@ -2808,7 +2883,7 @@ test('ORD-06 records auth failures and unknown outcomes without shipments or a s
   }
 });
 
-test('ORD-06 disabled configuration and prepare audit failure preserve the collecting order and unbound call', async () => {
+test('ORD-06 configuration failure prevents payment; dispatch audit failure preserves paid order for recovery', async () => {
   resetDver();
   const { customer, phone } = await readCustomer();
   const order = await readyOrder({ customerSeq: customer }),
@@ -2832,7 +2907,7 @@ test('ORD-06 disabled configuration and prepare audit failure preserve the colle
     audit.recordSuccess = original;
   }
   assert.deepEqual(await submissionRows(order.orderSeq), {
-    status: 'COLLECTING',
+    status: 'PAID',
     shipments: 0,
     history: 0,
     acceptedAudit: 0,
@@ -2840,9 +2915,21 @@ test('ORD-06 disabled configuration and prepare audit failure preserve the colle
   assert.equal(
     (await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [callId]))
       .rows[0].order_seq,
-    null,
+    order.orderSeq,
   );
   assert.equal(dverRequests.length, 0);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_seq=$1 AND action='ORDER_PAYMENT_COMPLETED'",
+        [order.orderSeq],
+      )
+    ).rows[0].n,
+    1,
+  );
+  assert.equal((await submitOrder(order)).status, 200);
+  assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
+  assert.equal(dverRequests.length, 1);
 });
 
 test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITTING becomes review without resending', async () => {
@@ -2890,7 +2977,7 @@ test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITT
     }
     const recovery = await submitOrder(order, {}, 1);
     assert.equal(recovery.status, 200);
-    assert.equal((await recovery.json()).data.status, 'REVIEW_REQUIRED');
+    assert.equal((await recovery.json()).data.status, 'SUBMISSION_FAILED');
     assert.equal((await submitOrder(order)).status, 200);
     assert.equal(dverRequests.length, 1);
   }
@@ -2998,11 +3085,17 @@ for (const operation of ['create', 'update', 'submit']) {
       const { customer, phone } = await readCustomer();
       const employeeNo = String(customer);
       const membership = (
-        await pool.query(
-          "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,$3,'ACTIVE') RETURNING membership_seq",
-          [customer, organizationId, employeeNo],
-        )
+        await testMembership(pool, {
+          customerSeq: customer,
+          organizationSeq: organizationId,
+          employeeNo,
+        })
       ).rows[0].membership_seq;
+      const department = (
+        await pool.query('SELECT department_seq FROM memberships WHERE membership_seq=$1', [
+          membership,
+        ])
+      ).rows[0].department_seq;
       const parcel = {
         originPin: { scope: 'COMPANY', pinSeq: companyPin },
         origin: address,
@@ -3055,9 +3148,19 @@ for (const operation of ['create', 'update', 'submit']) {
           const form = new FormData();
           form.append(
             'file',
-            new Blob(['employeeNo,name,phoneNumber\n' + employeeNo + ',변경 고객,' + phone], {
-              type: 'text/csv',
-            }),
+            new Blob(
+              [
+                'employeeNo,name,phoneNumber,departmentSeq\n' +
+                  employeeNo +
+                  ',변경 고객,' +
+                  phone +
+                  ',' +
+                  department,
+              ],
+              {
+                type: 'text/csv',
+              },
+            ),
             'members.csv',
           );
           pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members/import', {
@@ -3100,10 +3203,11 @@ for (const status of ['ACTIVE', 'INACTIVE']) {
       const members = apps[1].get(MembersRepository);
       const { customer, phone } = await readCustomer();
       const membership = (
-        await pool.query(
-          "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,$3,'ACTIVE') RETURNING membership_seq",
-          [customer, organizationId, String(customer)],
-        )
+        await testMembership(pool, {
+          customerSeq: customer,
+          organizationSeq: organizationId,
+          employeeNo: String(customer),
+        })
       ).rows[0].membership_seq;
       const original = members.update;
       let unlock, reached;

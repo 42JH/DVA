@@ -1,3 +1,4 @@
+const { testMembership } = require('./membership.cjs');
 require('reflect-metadata');
 const { before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -41,6 +42,7 @@ module.exports = function manualOrders() {
   f.body = () => ({
     customerSeq: f.customerId,
     paymentMethodType: 'credit',
+    totalAmount: 3500,
     pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
     parcels: [
       {
@@ -48,6 +50,7 @@ module.exports = function manualOrders() {
         destination: { ...f.address },
         smallBoxCount: 2,
         itemPrice: 10000,
+        notifiedPrice: 3500,
       },
     ],
   });
@@ -161,9 +164,19 @@ module.exports = function manualOrders() {
         "INSERT INTO organizations(name,status) VALUES('수기 기업','ACTIVE') RETURNING organization_seq",
       )
     ).rows[0].organization_seq;
+    await testMembership(pool, {
+      customerSeq: f.customerId,
+      organizationSeq: f.organizationId,
+      employeeNo: 'manual69',
+      groupBillingEnabled: true,
+    });
     await pool.query(
-      "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,'manual69','ACTIVE')",
-      [f.customerId, f.organizationId],
+      'UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=ANY($1::int[])',
+      [[f.customerId, f.otherId]],
+    );
+    await pool.query(
+      'UPDATE organizations SET monthly_billing_enabled=true WHERE organization_seq=$1',
+      [f.organizationId],
     );
     f.pinId = (
       await pool.query(

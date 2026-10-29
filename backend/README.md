@@ -13,7 +13,7 @@
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
-AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 디버 접수 결과까지 반환하고, INCOMPLETE·CANCELLED는 저장만 한다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
+AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 개인 카드 결제 대기 또는 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE·CANCELLED는 저장만 한다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
 상담 시작에는 [고객 확인 API](../docs/api/caller-context.md)에 phoneNumber와 call(providerCallId·incomingAt)을 보내 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 전화번호만 보낸 기존 조회는 그대로 유지한다.
 PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
@@ -23,6 +23,8 @@ Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.
 NestJS 11 호환성을 유지하면서 전이 의존성의 알려진 DoS 취약점을 수정하기 위해 overrides로
 multer 2.5.0, body-parser 2.4.0, js-yaml 5.5.0을 지정한다. 상위 패키지가 수정 버전을 포함하면 override 제거 여부를 검토한다.
 Swagger 12는 NestJS 12를 요구하므로 이번 기반에서 프레임워크 major를 올리지 않는다.
+
+결제·부서·부분 취소는 [현재 주문 결제 계약](../docs/api/order-billing.md)을 따른다. AI 담당자용 별도 [연동 규격](../docs/api/ai-order-billing-integration.md)을 제공한다. 기존 migration은 수정하지 않고 016~019까지 적용해야 한다. 실제 결제사 승인·결제 URL·카카오톡 발송은 추후 확정한다.
 
 ## 로컬 실행
 
@@ -151,7 +153,7 @@ backend/
 | 모듈 | 담당 데이터·책임 |
 |---|---|
 | `customers` | `customers`, `personal_pins` |
-| `organizations` | `organizations`, `memberships`, `company_pins` |
+| `organizations` | `organizations`, `departments`, `memberships`, `company_pins`, `organization_billing_months`, `order_billing_charges` |
 | `orders` | `orders`, `order_parcels` |
 | `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests` |
 | `deliveries` | `shipments`, `shipment_status_history` |

@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -125,6 +126,7 @@ test('MVP AI can register, read and rename without cookie, token, call header or
     name: '새 고객',
     phoneNumber: input.phoneNumber,
     status: 'ACTIVE',
+    monthlyBillingEnabled: false,
   });
   const updated = await patch(id, { name: '  변경 고객  ' });
   assert.equal(updated.status, 204);
@@ -346,10 +348,7 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
     "INSERT INTO organizations(name,status) VALUES('탈퇴 관계 기업','ACTIVE') RETURNING organization_seq",
   );
   const companyId = company.rows[0].organization_seq;
-  await pool.query(
-    "INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES($1,$2,'001','MEMBER','ACTIVE')",
-    [id, companyId],
-  );
+  await testMembership(pool, { customerSeq: id, organizationSeq: companyId, employeeNo: '001' });
   await pool.query('INSERT INTO orders(customer_seq) VALUES($1)', [id]);
   const address = {
     name: '수령인',
@@ -379,7 +378,12 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
   );
   const detail = await request('/' + id, { headers: adminHeaders() });
   assert.equal(detail.status, 200);
-  assert.deepEqual((await detail.json()).data, { customerSeq: id, ...input, status: 'WITHDRAWN' });
+  assert.deepEqual((await detail.json()).data, {
+    customerSeq: id,
+    ...input,
+    status: 'WITHDRAWN',
+    monthlyBillingEnabled: false,
+  });
   assert.equal(
     (await pool.query('SELECT status FROM memberships WHERE customer_seq=$1', [id])).rows[0].status,
     'ACTIVE',
@@ -407,6 +411,7 @@ test('OpenAPI exposes four customer operations, minimal envelopes and conditiona
   );
   assert.ok(!paths['/api/customers/{id}'].patch.responses['204'].content);
   assert.deepEqual(Object.keys(document.components.schemas.UpdateCustomerDto.properties).sort(), [
+    'monthlyBillingEnabled',
     'name',
     'status',
   ]);
