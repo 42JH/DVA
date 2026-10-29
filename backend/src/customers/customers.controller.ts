@@ -39,14 +39,14 @@ export class CustomersController {
   @HttpCode(200)
   @MvpAiCustomerAccess()
   @ApiOperation({
-    summary: '발신번호 기반 고객 식별 및 초기 주소록 조회',
+    summary: '고객 확인·주소록 조회 및 통화 시작',
     security: [],
     description:
-      'MVP 서비스 인증 없음(Jira 135). 등록·미등록·탈퇴를 구분하고 활성 고객의 기본 정보·소속·허용 PIN 전체를 제공합니다. 통화 생성·본인인증·최근 주문 조회는 수행하지 않습니다.',
+      '고객 등록 상태·소속·주소록을 조회합니다. call을 함께 보내면 통화를 생성·재사용하고 callSessionSeq를 반환합니다. AI는 이 번호를 주문 조회·취소·주소록 API의 call_session_seq 헤더에 사용합니다. 같은 통화 ID의 발신번호·수신 시각이 다르면 409입니다. 고객·주문은 생성하지 않으며 MVP 서비스 인증은 아직 적용하지 않습니다.',
   })
   @ApiOkResponse({ type: CallerContextEnvelopeDto })
   context(@Body() input: CallerContextRequestDto) {
-    return this.customers.context(input.phoneNumber);
+    return this.customers.context(input);
   }
 
   @Get()

@@ -18,6 +18,7 @@ import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
+import { CallSessionRepository } from '../consultations/call-session.repository';
 
 @Injectable()
 export class OrdersService {
@@ -29,6 +30,7 @@ export class OrdersService {
     private readonly customers: CustomersService,
     private readonly submissions: OrderSubmissionRepository,
     private readonly dver: DverClient,
+    private readonly calls: CallSessionRepository,
   ) {}
 
   private callId(adminId: number | null, header?: string): number | null {
@@ -192,7 +194,7 @@ export class OrdersService {
     const prepared = await this.database.transaction(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
-      const callId = input.call ? await this.repository.ensureCall(client, input.call) : headerId;
+      const callId = input.call ? await this.calls.ensureCall(client, input.call) : headerId;
       if (input.call && headerId !== null && headerId !== callId)
         throw new ApiException(
           409,

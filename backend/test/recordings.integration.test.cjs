@@ -175,6 +175,50 @@ test('webhook arriving before the AI result remains pending and reconciles on th
   assert.equal((await state(data.recordingId)).processing_status, 'PROCESSED');
 });
 
+test('call context without an order is matched to its recording and retries never reopen the call', async () => {
+  const input = {
+    phoneNumber: '01098880001',
+    call: { providerCallId: randomUUID(), incomingAt: '2026-10-27T01:00:02Z' },
+  };
+  const start = () =>
+    fetch(urls[0] + '/api/customers/context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  const response = await start();
+  assert.equal(response.status, 200);
+  const callId = (await response.json()).data.callSessionSeq;
+  const data = payload();
+  await receipt(data);
+  await workers[0].processPending();
+  const stored = await state(data.recordingId);
+  assert.equal(stored.processing_status, 'PROCESSED');
+  assert.equal(stored.call_session_seq, callId);
+  assert.equal(stored.recordings, 1);
+  assert.equal(uploads, 1);
+  const session = async () =>
+    (
+      await pool.query(
+        'SELECT order_seq,started_at,ended_at FROM call_sessions WHERE call_session_seq=$1',
+        [callId],
+      )
+    ).rows[0];
+  const ended = await session();
+  assert.equal(ended.order_seq, null);
+  assert.equal(ended.ended_at.toISOString(), '2026-10-27T01:03:00.000Z');
+  const repeated = await start();
+  assert.equal(repeated.status, 200);
+  assert.equal((await repeated.json()).data.callSessionSeq, callId);
+  assert.deepEqual(await session(), ended);
+  const orders = await fetch(urls[0] + '/api/orders', {
+    headers: { call_session_seq: String(callId) },
+  });
+  assert.equal(orders.status, 409);
+  await workers[1].processPending();
+  assert.equal(uploads, 1);
+});
+
 test('matching refuses ambiguous candidates, a wrong phone and timestamps outside the window', async () => {
   const data = payload();
   await call('01098880002', 0);

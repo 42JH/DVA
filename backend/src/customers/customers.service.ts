@@ -5,6 +5,9 @@ import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { CustomersRepository } from './customers.repository';
+import { CallerContextRequestDto } from './dto/caller-context.dto';
+import { CallSessionRepository } from '../consultations/call-session.repository';
+import { callerPhone } from '../common/caller-phone';
 import {
   CreateCustomerDto,
   ListCustomersQueryDto,
@@ -17,12 +20,26 @@ export class CustomersService {
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly calls: CallSessionRepository,
   ) {}
 
-  async context(phoneNumber: string) {
+  async context(input: CallerContextRequestDto) {
     try {
-      return await this.repository.context(phoneNumber);
-    } catch {
+      const call = input.call;
+      if (!call) return await this.repository.context(input.phoneNumber);
+      const phoneNumber = callerPhone(input.phoneNumber);
+      if (!/^[0-9]{3,20}$/.test(phoneNumber))
+        throw new ApiException(400, 'INVALID_REQUEST', '통화 발신번호는 3~20자리 숫자여야 합니다.');
+      return await this.database.transaction(async (client) => {
+        const callSessionSeq = await this.calls.ensureCall(client, {
+          ...call,
+          callerPhoneNumber: phoneNumber,
+        });
+        const context = await this.repository.context(phoneNumber, client);
+        return { ...context, callSessionSeq };
+      });
+    } catch (error) {
+      if (error instanceof ApiException) throw error;
       // 조회 장애를 미등록 고객으로 바꾸거나 일부 주소록만 성공으로 반환하지 않는다.
       throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '고객 초기 정보를 조회할 수 없습니다.');
     }

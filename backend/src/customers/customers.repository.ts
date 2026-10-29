@@ -15,9 +15,9 @@ const columns = 'customer_seq AS "customerSeq", name, phone_number AS "phoneNumb
 export class CustomersRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async context(phoneNumber: string): Promise<CallerContextDto> {
+  async context(phoneNumber: string, client?: PoolClient): Promise<CallerContextDto> {
     // 한 SQL 문장의 스냅샷으로 고객·소속 상태와 허용 주소록을 함께 읽는다.
-    const result = await this.database.pool.query<{ context: CallerContextDto }>(
+    const result = await (client ?? this.database.pool).query<{ context: CallerContextDto }>(
       `SELECT jsonb_build_object(
         'lookupStatus', CASE WHEN c.status='ACTIVE' THEN 'REGISTERED' ELSE 'WITHDRAWN' END,
         'customer', CASE WHEN c.status='ACTIVE' THEN jsonb_build_object(

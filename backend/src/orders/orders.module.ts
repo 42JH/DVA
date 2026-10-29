@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { DatabaseModule } from '../database/database.module';
 import { CustomersModule } from '../customers/customers.module';
+import { ConsultationsModule } from '../consultations/consultations.module';
 import { OrdersController } from './orders.controller';
 import { OrdersRepository } from './orders.repository';
 import { OrdersService } from './orders.service';
@@ -11,7 +12,7 @@ import { OrderAddressesController } from './order-addresses.controller';
 import { AdminOrdersController } from './admin-orders.controller';
 
 @Module({
-  imports: [DatabaseModule, AuditModule, CustomersModule],
+  imports: [DatabaseModule, AuditModule, CustomersModule, ConsultationsModule],
   controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
   providers: [OrdersRepository, OrdersService, OrderSubmissionRepository, DverClient],
   exports: [OrdersService],
