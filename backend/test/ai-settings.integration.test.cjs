@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
-const { readFileSync, readdirSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { createServer } = require('node:http');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
@@ -74,28 +73,7 @@ const create = async (changes = {}) =>
   data(await call('POST', '/api/personas', input(changes)), 201);
 const patch = (id, body) => call('PATCH', `/api/personas/${id}`, body);
 before(async () => {
-  if (!(await pool.query("SELECT to_regclass('public.ai_personas') AS name")).rows[0].name) {
-    for (const file of readdirSync(join(__dirname, '../migrations'))
-      .filter((f) => /^\d{3}-.+\.sql$/.test(f))
-      .sort())
-      await pool.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
-  } else if (
-    !(await pool.query("SELECT to_regclass('public.ai_persona_versions') AS name")).rows[0].name
-  ) {
-    const client = await pool.connect();
-    await client.query('BEGIN');
-    try {
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/013-ai-persona-versions.sql'), 'utf8'),
-      );
-      await client.query('COMMIT');
-    } catch (failure) {
-      await client.query('ROLLBACK');
-      throw failure;
-    } finally {
-      client.release();
-    }
-  }
+  await migrate(pool);
   ai = createServer(async (request, response) => {
     assert.equal(request.headers.authorization, `Bearer ${token}`);
     if (request.url === '/internal/persona/options') {

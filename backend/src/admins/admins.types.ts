@@ -2,7 +2,7 @@ export const ADMIN_ROLES = ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 export const ASSIGNABLE_ADMIN_ROLES = ['OPERATOR', 'SUPERVISOR'] as const;
 export type AssignableAdminRole = (typeof ASSIGNABLE_ADMIN_ROLES)[number];
-export const ADMIN_STATUSES = ['ACTIVE', 'PENDING'] as const;
+export const ADMIN_STATUSES = ['ACTIVE', 'PENDING', 'INACTIVE'] as const;
 export type AdminStatus = (typeof ADMIN_STATUSES)[number];
 export interface AdminAccount {
   adminUserSeq: number;

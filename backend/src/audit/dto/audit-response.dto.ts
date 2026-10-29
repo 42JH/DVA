@@ -13,7 +13,7 @@ export class AuditResponseDto implements AuditLog {
   auditLogSeq!: number;
 
   @ApiProperty({
-    description: '작업 주체. 관리자 식별 시 ADMIN, 그 외 SYSTEM.',
+    description: '작업 주체. 관리자 ADMIN, AI 업무 호출 AI, 서버 작업·미식별 요청 SYSTEM.',
     enum: AUDIT_ACTOR_TYPES,
   })
   actorType!: AuditActorType;
@@ -24,6 +24,14 @@ export class AuditResponseDto implements AuditLog {
     nullable: true,
   })
   actorSeq!: number | null;
+
+  @ApiProperty({
+    description:
+      '작업 당시 관리자 이름 또는 AI. 과거 미식별 기록은 null. 계정 삭제 후에도 유지됩니다.',
+    type: String,
+    nullable: true,
+  })
+  actorName!: string | null;
 
   @ApiProperty({ description: '수행한 작업 코드.', example: 'ADMIN_ACCESS_CHANGED' })
   action!: string;
@@ -37,6 +45,13 @@ export class AuditResponseDto implements AuditLog {
     nullable: true,
   })
   targetSeq!: number | null;
+
+  @ApiProperty({
+    description: '대상 관리자 당시 이름. ADMIN_USER 이외의 대상 또는 미식별 대상은 null.',
+    type: String,
+    nullable: true,
+  })
+  targetAdminName!: string | null;
 
   @ApiProperty({
     description: '요청 추적 ID. 같은 요청에서 발생한 기록을 연결합니다.',

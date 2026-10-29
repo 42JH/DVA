@@ -41,8 +41,8 @@ async function main() {
       [loginId, name, hash],
     );
     await client.query(
-      "INSERT INTO audit_logs(actor_type,action,target_type,target_seq,request_id,result,metadata) VALUES('SYSTEM','ADMIN_BOOTSTRAP','ADMIN_USER',$1,$2,'SUCCESS','{}')",
-      [result.rows[0].admin_user_seq, randomUUID()],
+      "INSERT INTO audit_logs(actor_type,action,target_type,target_seq,request_id,result,metadata,target_admin_name) VALUES('SYSTEM','ADMIN_BOOTSTRAP','ADMIN_USER',$1,$2,'SUCCESS','{}',$3)",
+      [result.rows[0].admin_user_seq, randomUUID(), name],
     );
     await client.query('COMMIT');
     console.log('Initial administrator created.');

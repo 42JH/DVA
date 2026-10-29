@@ -65,6 +65,14 @@ test('21 seed: CLI inserts 32 pairs in source order, records the chosen admin an
   );
   assert.ok(rows.every((r) => r.updated_by_admin_user_seq === f.ids[0]));
   assert.equal((await f.counts()).audits, before.audits + 32);
+  const snapshots = (
+    await f.pool.query(
+      "SELECT a.actor_name=u.name AS matches FROM audit_logs a JOIN admin_users u ON u.admin_user_seq=a.actor_seq WHERE a.action='FAQ_BOOTSTRAPPED' AND a.target_seq=ANY($1::int[])",
+      [rows.map((row) => row.faq_entry_seq)],
+    )
+  ).rows;
+  assert.equal(snapshots.length, 32);
+  assert.ok(snapshots.every((row) => row.matches));
   const updated = await f.patch(rows[0].faq_entry_seq, { answer: '관리자가 수정한 답변' }, 1);
   assert.equal(updated.status, 204);
   const snapshot = (

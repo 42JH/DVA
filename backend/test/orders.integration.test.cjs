@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
@@ -57,72 +56,7 @@ const address = {
 };
 
 before(async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const upgraded = (
-      await client.query(
-        "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='creation_request_id') AS ready",
-      )
-    ).rows[0].ready;
-    const migrations = upgraded
-      ? []
-      : [
-          ['public.admin_users', '002-monolith-initial.sql'],
-          ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-          ['api_idempotency.organization_creations', '004-organization-creation-requests.sql'],
-          ['api_idempotency.customer_creations', '005-customer-creation-requests.sql'],
-          ['api_idempotency.order_creations', '007-order-creation-requests.sql'],
-        ];
-    for (const [table, file] of migrations) {
-      if (!(await client.query('SELECT to_regclass($1) AS present', [table])).rows[0].present)
-        await client.query(readFileSync(join(__dirname, '../migrations', file), 'utf8'));
-    }
-    if (!upgraded)
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/008-simplify-creation-requests.sql'), 'utf8'),
-      );
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='incoming_at') AS ready",
-        )
-      ).rows[0].ready
-    ) {
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/001-pbx-call-ended.sql'), 'utf8'),
-      );
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/011-call-recording-correlation.sql'), 'utf8'),
-      );
-    }
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='orders' AND column_name='creation_source') AS ready",
-        )
-      ).rows[0].ready
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/012-order-creation-source.sql'), 'utf8'),
-      );
-    if (
-      !(
-        await client.query(
-          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='order_parcels' AND column_name='status') AS ready",
-        )
-      ).rows[0].ready
-    )
-      await client.query(
-        readFileSync(join(__dirname, '../migrations/014-order-cancellation.sql'), 'utf8'),
-      );
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  await migrate(pool);
   const hash = await hashPassword(password);
   for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
     const result = await pool.query(

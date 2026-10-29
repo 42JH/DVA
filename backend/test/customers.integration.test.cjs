@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 
@@ -52,24 +51,7 @@ async function account(role = 'OPERATOR') {
   return { id: rows[0].admin_user_seq, cookie: response.headers.get('set-cookie').split(';')[0] };
 }
 before(async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const [table, migration] of [
-      ['public.customers', '002-monolith-initial.sql'],
-      ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-    ]) {
-      const { rows } = await client.query('SELECT to_regclass($1) AS name', [table]);
-      if (!rows[0].name)
-        await client.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
-    }
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  await migrate(pool);
   passwordHash = await hashPassword(password);
   app = await start();
   base = await app.getUrl();

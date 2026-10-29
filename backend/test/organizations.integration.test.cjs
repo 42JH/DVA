@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 
@@ -53,26 +52,7 @@ async function account(loginId, role = 'OPERATOR', status = 'ACTIVE') {
   return result.rows[0].admin_user_seq;
 }
 before(async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    // The auth suite runs first in CI and leaves its schema/runtime account for later suites.
-    // A standalone invocation against an empty disposable DB also applies the prerequisites.
-    const initialized = await client.query(
-      "SELECT to_regclass('public.admin_sessions') IS NOT NULL AS ready",
-    );
-    const migrations = initialized.rows[0].ready
-      ? []
-      : ['002-monolith-initial.sql', '003-admin-auth-sessions.sql'];
-    for (const name of migrations)
-      await client.query(readFileSync(join(__dirname, '../migrations', name), 'utf8'));
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  await migrate(pool);
   hash = await hashPassword(password);
   adminA = await account('companyTestA');
   adminB = await account('companyTestB', 'SYSTEM_ADMIN');

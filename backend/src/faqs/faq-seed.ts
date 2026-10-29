@@ -65,7 +65,7 @@ export async function seedFaqs(
         )
       ).rows[0].id;
       await client.query(
-        "INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata) VALUES('ADMIN',$1,'FAQ_BOOTSTRAPPED','FAQ_ENTRY',$2,$3,'SUCCESS','{}')",
+        "INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata,actor_name) VALUES('ADMIN',$1,'FAQ_BOOTSTRAPPED','FAQ_ENTRY',$2,$3,'SUCCESS','{}',(SELECT name FROM admin_users WHERE admin_user_seq=$1))",
         [admin.id, id, requestId],
       );
     }

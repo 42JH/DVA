@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { migrate } = require('./helpers/migrations.cjs');
 const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 
@@ -37,14 +36,7 @@ const address = {
   longitude: 127,
 };
 before(async () => {
-  for (const [table, migration] of [
-    ['public.customers', '002-monolith-initial.sql'],
-    ['public.admin_sessions', '003-admin-auth-sessions.sql'],
-  ]) {
-    const { rows } = await pool.query('SELECT to_regclass($1) AS name', [table]);
-    if (!rows[0].name)
-      await pool.query(readFileSync(join(__dirname, '../migrations', migration), 'utf8'));
-  }
+  await migrate(pool);
   app = await NestFactory.create(AppModule, { logger: false });
   configureApplication(app, { log: (entry) => logs.push(entry) });
   await app.listen(0, '127.0.0.1');

@@ -3,7 +3,7 @@ process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.SWAGGER_ENABLED = 'true';
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { migrate } = require('./helpers/migrations.cjs');
 const { join } = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { NestFactory } = require('@nestjs/core');
@@ -93,10 +93,7 @@ before(async () => {
   await app.init();
   db = app.get(DatabaseService);
   // The Docker runner supplies an isolated empty database, never a production connection.
-  for (const name of ['002-monolith-initial.sql', '003-admin-auth-sessions.sql'])
-    await db.transaction((client) =>
-      client.query(readFileSync(join(__dirname, '../migrations', name), 'utf8')),
-    );
+  await migrate(db.pool);
   hash = await hashPassword(password);
   await app.listen(0, '0.0.0.0');
   base = await app.getUrl();
