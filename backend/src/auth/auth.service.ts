@@ -104,6 +104,17 @@ export class AuthService {
       await this.audit.record(actor.adminUserSeq, id, 'ADMIN_ACCESS_CHANGED', requestId, client);
     });
   }
+  async deleteAdmin(token: string, id: number, requestId: string): Promise<void> {
+    await this.database.transaction(async (client) => {
+      await this.admins.serializeAccessChanges(client);
+      const { actor, target } = await this.lockAuthorized(token, id, true, client);
+      if (target.role === 'SYSTEM_ADMIN')
+        throw new ApiException(403, 'FORBIDDEN', '최상위 관리자는 삭제할 수 없습니다.');
+      // 계정이 존재할 때 이름을 기록하며, 삭제 실패 시 감사와 세션 삭제도 함께 롤백한다.
+      await this.audit.record(actor.adminUserSeq, id, 'ADMIN_DELETED', requestId, client);
+      await this.admins.remove(id, client);
+    });
+  }
   private async savePassword(
     actor: AdminPublic,
     target: AdminAccount,

@@ -1090,3 +1090,219 @@ test('logout records one success with session deletion and failed audit storage 
     repository.insert = original;
   }
 });
+
+test('admin deletion physically removes every allowed role/status and sessions while preserving audit names', async () => {
+  const system = await account('deleteSystem', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    for (const status of ['ACTIVE', 'PENDING', 'INACTIVE']) {
+      const target = await account('del' + role[0] + status[0], role);
+      const session = (await login(target)).session;
+      await db.pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+        target.id,
+        status,
+      ]);
+      const response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      assert.equal(response.status, 204, response.text);
+      assert.equal(
+        (await db.pool.query('SELECT 1 FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+          .rowCount,
+        0,
+      );
+      assert.equal(
+        (await db.pool.query('SELECT 1 FROM admin_sessions WHERE admin_user_seq=$1', [target.id]))
+          .rowCount,
+        0,
+      );
+      assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+      assert.equal((await login(target)).status, 401);
+      assert.equal(
+        (await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status,
+        404,
+      );
+      const logs = (
+        await db.pool.query(
+          "SELECT * FROM audit_logs WHERE target_type='ADMIN_USER' AND target_seq=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+          [target.id],
+        )
+      ).rows;
+      assert.deepEqual(
+        logs.map((log) => log.action),
+        ['ADMIN_LOGIN', 'ADMIN_DELETED'],
+      );
+      assert.equal(logs[0].actor_name, '테스트 del' + role[0] + status[0]);
+      assert.equal(logs[1].actor_name, '테스트 deleteSystem');
+      assert.equal(logs[1].target_admin_name, logs[0].actor_name);
+      const detail = await call(
+        'GET',
+        '/api/audit-logs/' + logs[1].audit_log_seq,
+        undefined,
+        cookie,
+      );
+      assert.equal(detail.body.data.targetAdminName, logs[0].actor_name);
+    }
+  }
+  const listing = await call('GET', '/api/admins?status=INACTIVE', undefined, cookie);
+  assert.equal(listing.status, 200);
+  assert.ok(!listing.body.data.some((row) => row.loginId.startsWith(prefix + 'del')));
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  assert.equal(document.paths['/api/admins/{id}'].delete.summary, '관리자 삭제');
+  assert.ok(document.paths['/api/admins/{id}'].delete.responses['204']);
+  assert.deepEqual(document.components.schemas.AuditResponseDto.properties.actorType.enum, [
+    'ADMIN',
+    'AI',
+    'SYSTEM',
+  ]);
+  assert.ok(document.components.schemas.AuditResponseDto.properties.actorName);
+  assert.ok(document.components.schemas.AuditResponseDto.properties.targetAdminName);
+});
+
+test('admin deletion rejects other roles, missing sessions, system targets and malformed IDs', async () => {
+  const system = await account('deleteChecks', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  const target = await account('deleteTarget');
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    const actor = await account('deniedDel' + role[0], role);
+    assert.equal(
+      (await call('DELETE', '/api/admins/' + target.id, undefined, (await login(actor)).session))
+        .status,
+      403,
+    );
+  }
+  assert.equal((await call('DELETE', '/api/admins/' + target.id)).status, 401);
+  assert.equal((await call('DELETE', '/api/admins/' + system.id, undefined, cookie)).status, 403);
+  const otherSystem = await account('otherDelSystem', 'SYSTEM_ADMIN', 'PENDING');
+  assert.equal(
+    (await call('DELETE', '/api/admins/' + otherSystem.id, undefined, cookie)).status,
+    403,
+  );
+  for (const id of ['0', '-1', '1.5', 'bad', '2147483648'])
+    assert.equal((await call('DELETE', '/api/admins/' + id, undefined, cookie)).status, 400);
+  assert.equal(
+    (
+      await call('DELETE', '/api/admins/' + target.id, undefined, cookie, {
+        Origin: 'https://untrusted.invalid',
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (await db.pool.query('SELECT 1 FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rowCount,
+    1,
+  );
+});
+
+test('admin deletion and success audit roll back together on audit or account deletion failure', async () => {
+  const system = await account('deleteRollback', 'SYSTEM_ADMIN');
+  const target = await account('keptOnDelError');
+  const cookie = (await login(system)).session;
+  const session = (await login(target)).session;
+  for (const [instance, method] of [
+    [app.get(AuditService), 'record'],
+    [app.get(AdminsService), 'remove'],
+  ]) {
+    const original = instance[method];
+    instance[method] = async () => {
+      throw new Error('simulated storage failure');
+    };
+    let response;
+    try {
+      response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+      assert.equal(response.status, 500);
+    } finally {
+      instance[method] = original;
+    }
+    assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 200);
+    const logs = (
+      await db.pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.body.meta.requestId,
+      ])
+    ).rows;
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0].action, 'ADMIN_DELETED');
+    assert.equal(logs[0].result, 'FAILED');
+    assert.equal(logs[0].target_admin_name, '테스트 keptOnDelError');
+  }
+});
+
+test('a login already in progress cannot leave a usable session after admin deletion', async () => {
+  const system = await account('deleteRace', 'SYSTEM_ADMIN');
+  const target = await account('loginDelRace');
+  const cookie = (await login(system)).session;
+  const repository = app.get(AuthRepository);
+  const original = repository.create;
+  let unblock, notify;
+  const held = new Promise((resolve) => {
+    unblock = resolve;
+  });
+  const entered = new Promise((resolve) => {
+    notify = resolve;
+  });
+  repository.create = async function (hash, id, client) {
+    if (id === target.id) {
+      notify();
+      await held;
+    }
+    return original.call(this, hash, id, client);
+  };
+  try {
+    const loggingIn = login(target);
+    await entered;
+    const deleting = call('DELETE', '/api/admins/' + target.id, undefined, cookie);
+    unblock();
+    const [signedIn, deleted] = await Promise.all([loggingIn, deleting]);
+    assert.equal(signedIn.status, 200);
+    assert.equal(deleted.status, 204, deleted.text);
+    assert.equal((await call('GET', '/api/auth/me', undefined, signedIn.session)).status, 401);
+  } finally {
+    unblock();
+    repository.create = original;
+  }
+});
+
+test('audit snapshots survive later deletion and in-flight work can retain the deleted actor name', async () => {
+  const system = await account('snapshotSystem', 'SYSTEM_ADMIN');
+  const target = await account('snapshotTarget');
+  const cookie = (await login(system)).session;
+  const audit = app.get(AuditService);
+  const { randomUUID } = require('node:crypto');
+  const event = {
+    actorId: target.id,
+    targetId: 1,
+    targetType: 'ORDER',
+    action: 'ORDER_UPDATED',
+    requestId: randomUUID(),
+  };
+  await db.transaction((client) => audit.recordSuccess(event, client));
+  await db.pool.query('UPDATE admin_users SET name=$2 WHERE admin_user_seq=$1', [
+    target.id,
+    '변경 후 이름',
+  ]);
+  assert.equal((await call('DELETE', '/api/admins/' + target.id, undefined, cookie)).status, 204);
+  await db.transaction((client) =>
+    audit.recordSuccess({ ...event, requestId: randomUUID() }, client),
+  );
+  const logs = (
+    await db.pool.query(
+      "SELECT actor_name FROM audit_logs WHERE actor_seq=$1 AND action='ORDER_UPDATED' ORDER BY audit_log_seq",
+      [target.id],
+    )
+  ).rows;
+  assert.deepEqual(
+    logs.map((log) => log.actor_name),
+    ['테스트 snapshotTarget', '변경 후 이름'],
+  );
+  const signup = await call('POST', '/api/auth/signup', {
+    loginId: target.loginId,
+    name: '다른 관리자',
+    password,
+  });
+  assert.equal(signup.status, 204);
+  const replacement = (
+    await db.pool.query('SELECT admin_user_seq FROM admin_users WHERE login_id=$1', [
+      target.loginId,
+    ])
+  ).rows[0];
+  assert.notEqual(replacement.admin_user_seq, target.id);
+});

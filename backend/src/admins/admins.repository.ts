@@ -65,4 +65,7 @@ export class AdminsRepository {
       [id],
     );
   }
+  async remove(id: number, client: PoolClient) {
+    await client.query('DELETE FROM admin_users WHERE admin_user_seq=$1', [id]);
+  }
 }

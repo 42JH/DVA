@@ -1,5 +1,16 @@
 import { AuditOperation } from '../audit/audit-operation';
-import { Body, Controller, Get, HttpCode, Param, Patch, Query, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
@@ -38,7 +49,7 @@ function adminId(value: string): number {
 @ApiResponse({ status: 401, description: '로그인 세션이 없거나 만료됨.', type: ErrorResponseDto })
 @ApiResponse({
   status: 403,
-  description: 'SYSTEM_ADMIN 권한이 없거나 최상위 관리자 권한 변경 시도, 허용되지 않은 Origin.',
+  description: 'SYSTEM_ADMIN 권한 없음, 최상위 관리자 권한 변경·삭제 시도, 허용되지 않은 Origin.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 404, description: '대상 관리자가 없음.', type: ErrorResponseDto })
@@ -65,6 +76,23 @@ export class AdminAccessController {
   @ApiOkResponse({ description: '관리자 목록과 다음 페이지 여부.', type: AdminListDto })
   async list(@Query() query: AdminQueryDto) {
     return new ListResponse(await this.admins.list(query), query.limit);
+  }
+  @Delete(':id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'ADMIN_DELETED', targetType: 'ADMIN_USER', target: 'id' })
+  @ApiOperation({
+    summary: '관리자 삭제',
+    description:
+      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR를 상태와 관계없이 실제 삭제하고 모든 세션을 종료합니다. SYSTEM_ADMIN은 삭제할 수 없으며 업무 기록과 감사 로그의 이름은 유지됩니다.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: '삭제할 관리자 번호(adminUserSeq).',
+    schema: { type: 'integer', minimum: 1 },
+  })
+  @ApiNoContentResponse({ description: '계정·세션 삭제 완료. 응답 본문 없음.' })
+  remove(@Param('id') id: string, @Req() request: AuthRequest) {
+    return this.auth.deleteAdmin(request.sessionToken, adminId(id), request.requestId);
   }
   @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
   @Patch(':id')

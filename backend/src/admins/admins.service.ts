@@ -52,4 +52,7 @@ export class AdminsService {
   recordLogin(id: number, client: PoolClient) {
     return this.repository.recordLogin(id, client);
   }
+  remove(id: number, client: PoolClient) {
+    return this.repository.remove(id, client);
+  }
 }
