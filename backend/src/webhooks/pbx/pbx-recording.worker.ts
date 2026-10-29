@@ -23,15 +23,13 @@ export class PbxRecordingWorker implements OnApplicationBootstrap, OnModuleDestr
 
   onApplicationBootstrap(): void {
     if (!this.storage.configured) {
-      this.logger.warn('Recording S3 storage is not configured; webhook receipts remain pending.');
+      this.logger.warn({ event: 'recording_storage_unconfigured' });
       return;
     }
     const tick = () => {
       if (this.stopped || this.running) return;
       this.running = this.processPending()
-        .catch(() =>
-          this.logger.error('Recording worker unavailable; durable receipts will be retried.'),
-        )
+        .catch(() => this.logger.error({ event: 'recording_worker_unavailable' }))
         .finally(() => {
           this.running = undefined;
         });
