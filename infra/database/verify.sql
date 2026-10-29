@@ -49,7 +49,7 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql'))<>14 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql'))<>15 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  IF to_regclass('public.ai_persona_versions') IS NULL OR to_regclass('public.ai_prompt_versions') IS NOT NULL
   OR to_regclass('public.ai_persona_live_status_uk') IS NULL THEN

@@ -28,6 +28,7 @@ const complete = () =>
         destination: address,
         smallBoxCount: 1,
         itemPrice: 0,
+        notifiedPrice: 3500,
         originPin: { scope: 'PERSONAL', pinSeq: 1 },
       },
       {
@@ -35,6 +36,7 @@ const complete = () =>
         destination: address,
         otherItemDescription: '기타 물품',
         itemPrice: Number.MAX_SAFE_INTEGER,
+        notifiedPrice: 3500,
       },
     ],
   });

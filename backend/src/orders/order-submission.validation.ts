@@ -61,8 +61,13 @@ export function assertOrderSubmissionReady(
     if (parcel.itemPrice === null) missing(`${prefix}.itemPrice`);
     else if (!Number.isSafeInteger(parcel.itemPrice) || parcel.itemPrice < 0)
       invalid(`${prefix}.itemPrice`, 'priceRange');
-    if (parcel.notifiedPrice !== null && parcel.notifiedPrice !== 3500)
-      invalid(`${prefix}.notifiedPrice`, 'fixedPrice3500');
+    if (parcel.notifiedPrice === null) missing(`${prefix}.notifiedPrice`);
+    else if (
+      !Number.isInteger(parcel.notifiedPrice) ||
+      parcel.notifiedPrice <= 0 ||
+      parcel.notifiedPrice > 2147483647
+    )
+      invalid(`${prefix}.notifiedPrice`, 'deliveryFeeRange');
   }
   if (errors.length)
     throw new ApiException(

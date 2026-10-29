@@ -17,7 +17,7 @@ export class OrdersRepository {
   async result(client: PoolClient, id: number, callId: number | null) {
     return (
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
-        `SELECT order_seq AS "orderSeq",version,status,parcel_no AS "parcelNo",$2::int AS "callSessionSeq"
+        `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq"
        FROM orders WHERE order_seq=$1`,
         [id, callId],
       )
@@ -33,8 +33,12 @@ export class OrdersRepository {
 
   async lockParcels(client: PoolClient, id: number) {
     return (
-      await client.query<{ orderParcelSeq: number; status: 'ACTIVE' | 'CANCELLED' }>(
-        `SELECT order_parcel_seq AS "orderParcelSeq",status FROM order_parcels
+      await client.query<{
+        orderParcelSeq: number;
+        status: 'ACTIVE' | 'CANCELLED';
+        notifiedPrice: number | null;
+      }>(
+        `SELECT order_parcel_seq AS "orderParcelSeq",status,notified_price AS "notifiedPrice" FROM order_parcels
          WHERE order_seq=$1 ORDER BY order_parcel_seq FOR UPDATE`,
         [id],
       )
@@ -64,7 +68,7 @@ export class OrdersRepository {
          WHERE order_parcel_seq=ANY($1::int[]) AND status='notPaid' RETURNING shipment_seq
        ) INSERT INTO shipment_status_history(shipment_seq,request_id,from_status,to_status,actor_type,actor_admin_user_seq)
          SELECT shipment_seq,gen_random_uuid(),'notPaid','canceled',
-           CASE WHEN $2::int IS NULL THEN 'SYSTEM' ELSE 'ADMIN' END,$2 FROM cancelled`,
+           CASE WHEN $2::int IS NULL THEN 'AI' ELSE 'ADMIN' END,$2 FROM cancelled`,
       [parcelIds, adminId],
     );
   }
@@ -76,6 +80,18 @@ export class OrdersRepository {
         [phone],
       )
     ).rows[0];
+  }
+
+  async recalculateAmount(client: PoolClient, id: number): Promise<number | null> {
+    return (
+      await client.query<{ amount: number | null }>(
+        `UPDATE orders SET total_amount=(SELECT CASE WHEN count(*)=0 THEN 0
+         WHEN count(notified_price)=count(*) THEN sum(notified_price)::int END
+         FROM order_parcels WHERE order_seq=$1 AND status='ACTIVE')
+       WHERE order_seq=$1 RETURNING total_amount AS amount`,
+        [id],
+      )
+    ).rows[0].amount;
   }
 
   async customerExists(client: PoolClient, id: number): Promise<boolean> {
@@ -137,7 +153,7 @@ export class OrdersRepository {
     return (
       await client.query<OrderSummaryDto>(
         `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
-          o.creation_source AS "creationSource",
+          o.creation_source AS "creationSource",o.total_amount AS "totalAmount",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
@@ -177,7 +193,7 @@ export class OrdersRepository {
       await client.query<{ detail: OrderDetailDto }>(
         `SELECT jsonb_build_object(
           'orderSeq',o.order_seq,'customerSeq',o.customer_seq,'status',o.status,
-          'creationSource',o.creation_source,
+          'creationSource',o.creation_source,'totalAmount',o.total_amount,
           'paymentMethodType',o.payment_method_type,'pickupRequestedAt',o.pickup_requested_at,
           'createdAt',o.created_at,'updatedAt',o.updated_at,'version',o.version,
           'parcelNo',o.parcel_no,'dverReceivedAt',o.dver_received_at,
@@ -273,8 +289,13 @@ export class OrdersRepository {
 
   async lockOrder(client: PoolClient, id: number) {
     return (
-      await client.query<{ customerSeq: number | null; status: OrderStatus; version: number }>(
-        'SELECT customer_seq AS "customerSeq",status,version FROM orders WHERE order_seq=$1 FOR UPDATE',
+      await client.query<{
+        customerSeq: number | null;
+        status: OrderStatus;
+        version: number;
+        totalAmount: number | null;
+      }>(
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount" FROM orders WHERE order_seq=$1 FOR UPDATE',
         [id],
       )
     ).rows[0];
@@ -302,13 +323,16 @@ export class OrdersRepository {
     await client.query(
       `UPDATE orders SET version=version+1,
          payment_method_type=COALESCE($2,payment_method_type),
-         pickup_requested_at=CASE WHEN $3 THEN $4::timestamptz ELSE pickup_requested_at END
+         pickup_requested_at=CASE WHEN $3 THEN $4::timestamptz ELSE pickup_requested_at END,
+         total_amount=CASE WHEN $5 THEN $6::int ELSE total_amount END
        WHERE order_seq=$1`,
       [
         id,
         input.paymentMethodType ?? null,
         input.pickupRequestedAt !== undefined,
         input.pickupRequestedAt ?? null,
+        input.totalAmount !== undefined,
+        input.totalAmount ?? null,
       ],
     );
   }
@@ -336,6 +360,7 @@ export class OrdersRepository {
       'otherItemDescription',
       'clientComment',
       'itemPrice',
+      'notifiedPrice',
     ] as const)
       set(
         field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase()),
@@ -366,9 +391,16 @@ export class OrdersRepository {
   ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source)
-       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5) RETURNING order_seq AS id`,
-        [customerId, draft.paymentMethodType, draft.pickupRequestedAt, key, creationSource],
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount)
+       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6) RETURNING order_seq AS id`,
+        [
+          customerId,
+          draft.paymentMethodType,
+          draft.pickupRequestedAt,
+          key,
+          creationSource,
+          draft.totalAmount,
+        ],
       )
     ).rows[0].id;
     for (const [index, parcel] of draft.parcels.entries())
@@ -392,7 +424,7 @@ export class OrdersRepository {
           destination_dong_name,destination_postal_code,destination_latitude,destination_longitude,
           origin_pin_scope,origin_pin_seq,document_count,small_box_count,medium_box_count,big_box_count,
           other_item_description,client_comment,item_price,notified_price)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,3500)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
       [
         id,
         position,
@@ -407,6 +439,7 @@ export class OrdersRepository {
         parcel.otherItemDescription,
         parcel.clientComment,
         parcel.itemPrice,
+        parcel.notifiedPrice,
       ],
     );
   }

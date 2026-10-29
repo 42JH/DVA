@@ -114,6 +114,18 @@ export class OriginPinDto {
 
 export class ParcelInputDto {
   @ApiPropertyOptional({
+    description: '이 배송 항목의 배송비(원). 최종 확정 시 필수.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  notifiedPrice?: number | null;
+
+  @ApiPropertyOptional({
     description: '출발지 정보. 확인한 항목만 입력할 수 있습니다.',
     type: () => OrderAddressPatchDto,
   })
@@ -219,6 +231,18 @@ export class ParcelInputDto {
 export class OrderCustomerDto extends CreateCustomerDto {}
 
 export class CreateOrderDto {
+  @ApiPropertyOptional({
+    description: '취소되지 않은 상세 배송비 합계(원). 최종 확정 시 필수.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  totalAmount?: number | null;
+
   @ApiPropertyOptional({
     enum: ['COMPLETE', 'INCOMPLETE', 'CANCELLED'],
     description:

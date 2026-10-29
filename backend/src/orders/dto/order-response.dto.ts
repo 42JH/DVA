@@ -23,6 +23,12 @@ export class CreatedOrderDto {
 
 export class OrderResultDto extends CreatedOrderDto {
   @ApiProperty({
+    description: '취소되지 않은 상세의 결제 금액(원). 미완료 수집 중에는 null.',
+    type: Number,
+    nullable: true,
+  })
+  totalAmount!: number | null;
+  @ApiProperty({
     enum: ORDER_STATUSES,
     description:
       'ACCEPTED만 디버 접수 성공. SUBMITTING은 처리 중, AUTH_FAILED·REVIEW_REQUIRED는 성공으로 안내하지 않습니다.',
@@ -45,6 +51,12 @@ export class OrderResultDto extends CreatedOrderDto {
 }
 
 export class OrderSummaryDto {
+  @ApiProperty({
+    description: '현재 결제 대상 금액(원). 미완료 수집 중에는 null.',
+    type: Number,
+    nullable: true,
+  })
+  totalAmount!: number | null;
   @ApiProperty({
     enum: ORDER_CREATION_SOURCES,
     description: '접수 경로. AI: AI 상담, ADMIN: 관리자 수기, UNKNOWN: 기존 출처 미확인.',
@@ -179,8 +191,14 @@ export class OrderParcelDto {
   @ApiProperty({ description: '배송 요청 사항. 미입력 시 빈 문자열.' })
   clientComment!: string;
 
-  @ApiProperty({ description: '상세별 안내 배송비(원). 다중 물품 총액이 아닙니다.', enum: [3500] })
-  notifiedPrice!: number;
+  @ApiProperty({
+    description: '상세별 배송비(원). 취소 후에도 원래 금액 보존. 미수집 시 null.',
+    minimum: 1,
+    maximum: 2147483647,
+    type: Number,
+    nullable: true,
+  })
+  notifiedPrice!: number | null;
 
   @ApiProperty({
     description: '물품 가액(원). 미수집 시 null.',

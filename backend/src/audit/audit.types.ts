@@ -12,6 +12,13 @@ export interface AuditEvent {
   action: string;
   targetType: string;
   requestId: string;
+  metadata?: {
+    amountBefore?: number | null;
+    amountAfter?: number | null;
+    orderParcelSeqs?: number[];
+    billingMonth?: string;
+    paymentMethodType?: string;
+  };
 }
 
 export interface AuditLog {

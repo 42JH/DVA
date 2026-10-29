@@ -19,6 +19,7 @@ import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { CallSessionRepository } from '../consultations/call-session.repository';
+import { assertOrderAmount } from './order-pricing';
 
 @Injectable()
 export class OrdersService {
@@ -178,6 +179,7 @@ export class OrdersService {
       status: result.status,
       parcelNo: result.parcelNo,
       creationSource: 'ADMIN',
+      totalAmount: result.totalAmount,
     };
   }
 
@@ -513,6 +515,20 @@ export class OrdersService {
           client,
         );
       }
+      const amountAfter = await this.repository.recalculateAmount(client, id);
+      if (targets.length > 0)
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: id,
+            targetType: 'ORDER',
+            action: 'ORDER_AMOUNT_CHANGED',
+            requestId,
+            metadata: { amountBefore: order.totalAmount, amountAfter, orderParcelSeqs: parcelIds },
+          },
+          client,
+        );
     });
   }
 
@@ -605,6 +621,7 @@ export class OrdersService {
   ) {
     const snapshot = (await this.repository.detail(client, id, null))!;
     const payload = dverPayload(snapshot);
+    assertOrderAmount(snapshot);
     if (snapshot.paymentMethodType !== 'credit') {
       const company = await this.submissions.isCompanyCustomer(client, customerId);
       if ((snapshot.paymentMethodType === 'groupBilling') !== company)

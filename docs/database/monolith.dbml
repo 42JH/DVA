@@ -81,6 +81,7 @@ Table company_pins {
 // End of customer service
 
 Table orders {
+  total_amount integer [note: '미취소 상세의 배송비 합계. 전체 취소 0원, 수집 중 미확정 null']
   creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
   creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
@@ -136,7 +137,7 @@ Table order_parcels {
   big_box_count integer [not null, default: 0, note: '대형 박스 수량']
   other_item_description text [not null, default: '', note: '기타 물품 설명']
   client_comment text [not null, default: '', note: '고객 요청 사항']
-  notified_price integer [not null, default: 3500, note: '안내 가격. 현재 기본값과 허용값 3500']
+  notified_price integer [note: '개별 배송비(원). 양의 정수. 미완료 수집 중에는 null, 취소 후 원래 금액 보존']
   item_price bigint [note: '물품 가액. 요금과 구분하며 JavaScript 안전 정수 범위까지 허용']
   indexes {
     (order_seq,parcel_position) [unique]
@@ -156,7 +157,7 @@ Table order_parcels {
     `small_box_count>=0`
     `medium_box_count>=0`
     `big_box_count>=0`
-    `notified_price=3500`
+    `notified_price>0`
     `item_price BETWEEN 0 AND 9007199254740991`
     `num_nonnulls(origin_pin_scope,origin_pin_seq) IN (0,2)`
   }
@@ -268,8 +269,8 @@ Table shipment_status_history {
   checks {
     `from_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
     `to_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
-    `actor_type IN ('ADMIN','SYSTEM')`
-    `(actor_type='ADMIN' AND actor_admin_user_seq IS NOT NULL AND actor_admin_user_seq>0) OR (actor_type='SYSTEM' AND actor_admin_user_seq IS NULL)`
+    `actor_type IN ('ADMIN','AI','SYSTEM')`
+    `(actor_type='ADMIN' AND actor_admin_user_seq IS NOT NULL AND actor_admin_user_seq>0) OR (actor_type IN ('AI','SYSTEM') AND actor_admin_user_seq IS NULL)`
   }
   Note: 'delivery / 배송 생성 및 상태 변경 이력. 상태와 이력은 같은 트랜잭션으로 저장. request_id로 재시도 중복 방지. / SQL 인덱스: CREATE INDEX shipment_history_lookup_idx ON shipment_status_history(shipment_seq,occurred_at,shipment_status_history_seq);'
 }

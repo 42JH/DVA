@@ -19,7 +19,15 @@ const complete = () =>
     customerSeq: 31,
     paymentMethodType: 'credit',
     pickupRequestedAt: '2026-10-28T10:00:00+09:00',
-    parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+    parcels: [
+      {
+        origin: address,
+        destination: address,
+        smallBoxCount: 1,
+        itemPrice: 0,
+        notifiedPrice: 3500,
+      },
+    ],
   });
 test('the same stored order can be checked for final submission without changing it', () => {
   const draft = complete(),
@@ -86,7 +94,7 @@ test('final validation rejects expired pickup, invalid address, quantities and p
     smallBoxCount: -1,
     documentCount: 2147483648,
     itemPrice: Number.MAX_SAFE_INTEGER + 1,
-    notifiedPrice: 1,
+    notifiedPrice: 0,
   });
   assert.throws(
     () => assertOrderSubmissionReady(value, now),
@@ -101,7 +109,7 @@ test('final validation rejects expired pickup, invalid address, quantities and p
         'longitudeRange',
         'quantityRange',
         'priceRange',
-        'fixedPrice3500',
+        'deliveryFeeRange',
       ])
         assert.ok(reasons.includes(reason), reason);
       return true;

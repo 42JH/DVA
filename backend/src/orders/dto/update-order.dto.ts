@@ -19,6 +19,7 @@ export class ParcelChangeDto extends ParcelInputDto {
 export class UpdateOrderDto extends PickType(CreateOrderDto, [
   'paymentMethodType',
   'pickupRequestedAt',
+  'totalAmount',
 ] as const) {
   @ApiProperty({
     description: '상세 조회 또는 직전 저장 응답의 version. 일치하지 않으면 409.',
