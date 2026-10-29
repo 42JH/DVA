@@ -491,8 +491,7 @@ test('password reset waits for in-flight login and invalidates its session after
     admins.recordLogin = original;
   }
 });
-test('concurrent self-demotions preserve the last active system administrator', async () => {
-  await db.pool.query("UPDATE admin_users SET role='OPERATOR' WHERE role='SYSTEM_ADMIN'");
+test('concurrent self-demotions cannot change either system administrator', async () => {
   const first = await account('lastOne', 'SYSTEM_ADMIN');
   const second = await account('lastTwo', 'SYSTEM_ADMIN');
   const firstSession = (await login(first)).session;
@@ -505,17 +504,171 @@ test('concurrent self-demotions preserve the last active system administrator', 
       call('PATCH', `/api/admins/${user.id}`, { role: 'OPERATOR' }, cookie),
     ),
   );
-  assert.deepEqual(responses.map((r) => r.status).sort(), [204, 409]);
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [403, 403],
+  );
   assert.equal(
     (
       await db.pool.query(
-        "SELECT count(*) FROM admin_users WHERE role='SYSTEM_ADMIN' AND status='ACTIVE'",
+        "SELECT count(*) FROM admin_users WHERE admin_user_seq=ANY($1::int[]) AND role='SYSTEM_ADMIN' AND status='ACTIVE'",
+        [[first.id, second.id]],
       )
     ).rows[0].count,
-    '1',
+    '2',
   );
 });
-test('OpenAPI documents all eight contracts and logs contain no passwords or tokens', async () => {
+test('dedicated role change requires an active system administrator', async () => {
+  const target = await account('accessTarget');
+  for (const [method, path, body] of [
+    ['PATCH', `/api/admins/${target.id}/role`, { role: 'SUPERVISOR' }],
+  ]) {
+    assert.equal((await call(method, path, body)).status, 401);
+    assert.equal((await call(method, path, body, 'dva_session=invalid')).status, 401);
+    for (const role of ['OPERATOR', 'SUPERVISOR']) {
+      const actor = await account(`${method}${role === 'OPERATOR' ? 'Op' : 'Sup'}`, role);
+      const session = (await login(actor)).session;
+      assert.equal((await call(method, path, body, session)).status, 403);
+    }
+  }
+  assert.equal((await login(target)).status, 200);
+  assert.equal(
+    (await db.pool.query('SELECT role FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rows[0].role,
+    'OPERATOR',
+  );
+});
+
+test('dedicated role changes take effect on existing sessions without changing account status', async () => {
+  const system = await account('roleManager', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleTarget');
+  const targetSession = (await login(target)).session;
+  const path = `/api/admins/${target.id}/role`;
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
+  const promoted = await call('PATCH', path, { role: 'SUPERVISOR' }, session);
+  assert.equal(promoted.status, 204);
+  assert.equal(promoted.text, '');
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 200);
+  assert.equal(
+    (await call('GET', '/api/auth/me', undefined, targetSession)).body.data.status,
+    'ACTIVE',
+  );
+  assert.equal((await call('PATCH', path, { role: 'OPERATOR' }, session)).status, 204);
+  assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
+  const pending = await account('pendingRole', 'OPERATOR', 'PENDING');
+  assert.equal(
+    (await call('PATCH', `/api/admins/${pending.id}/role`, { role: 'SUPERVISOR' }, session)).status,
+    204,
+  );
+  assert.equal((await login(pending)).status, 401);
+  assert.deepEqual(
+    (
+      await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+        pending.id,
+      ])
+    ).rows[0],
+    { role: 'SUPERVISOR', status: 'PENDING' },
+  );
+});
+
+test('both role routes protect system administrators and forbid promotion to system administrator', async () => {
+  const system = await account('roleProtection', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const operator = await account('noSystem');
+  for (const status of ['ACTIVE', 'PENDING']) {
+    const target = await account(`system${status}`, 'SYSTEM_ADMIN', status);
+    for (const suffix of ['', '/role']) {
+      assert.equal(
+        (await call('PATCH', `/api/admins/${target.id}${suffix}`, { role: 'OPERATOR' }, session))
+          .status,
+        403,
+      );
+      assert.equal(
+        (
+          await call(
+            'PATCH',
+            `/api/admins/${operator.id}${suffix}`,
+            { role: 'SYSTEM_ADMIN' },
+            session,
+          )
+        ).status,
+        400,
+      );
+    }
+    assert.deepEqual(
+      (
+        await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+          target.id,
+        ])
+      ).rows[0],
+      { role: 'SYSTEM_ADMIN', status },
+    );
+  }
+});
+
+test('dedicated role change validates its body, target and Origin', async () => {
+  const system = await account('roleValidation', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleInput');
+  const path = `/api/admins/${target.id}/role`;
+  for (const body of [
+    {},
+    { role: null },
+    { role: '' },
+    { role: 'operator' },
+    { role: 1 },
+    { role: 'SUPERVISOR', status: 'ACTIVE' },
+    { role: 'OPERATOR', name: 'changed' },
+  ])
+    assert.equal((await call('PATCH', path, body, session)).status, 400);
+  for (const id of ['0', '-1', '1e2', '2147483648'])
+    assert.equal(
+      (await call('PATCH', `/api/admins/${id}/role`, { role: 'SUPERVISOR' }, session)).status,
+      400,
+    );
+  assert.equal(
+    (await call('PATCH', '/api/admins/2147483647/role', { role: 'SUPERVISOR' }, session)).status,
+    404,
+  );
+  for (const Origin of ['', 'https://untrusted.invalid'])
+    assert.equal(
+      (await call('PATCH', path, { role: 'SUPERVISOR' }, session, { Origin })).status,
+      403,
+    );
+});
+
+test('dedicated role change and its success audit commit or roll back together', async () => {
+  const system = await account('roleAtomicAdmin', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('roleAtomicUser');
+  const path = `/api/admins/${target.id}/role`;
+  const audit = app.get(AuditService);
+  const original = audit.record;
+  audit.record = async () => {
+    throw new Error('audit unavailable');
+  };
+  try {
+    assert.equal((await call('PATCH', path, { role: 'SUPERVISOR' }, session)).status, 500);
+  } finally {
+    audit.record = original;
+  }
+  assert.equal(
+    (await db.pool.query('SELECT role FROM admin_users WHERE admin_user_seq=$1', [target.id]))
+      .rows[0].role,
+    'OPERATOR',
+  );
+  assert.equal((await call('PATCH', path, { role: 'SUPERVISOR' }, session)).status, 204);
+  const records = (
+    await db.pool.query(
+      "SELECT actor_seq,target_seq FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
+      [target.id],
+    )
+  ).rows;
+  assert.deepEqual(records, [{ actor_seq: system.id, target_seq: target.id }]);
+});
+
+test('OpenAPI documents authentication and admin contracts without leaking passwords or tokens', async () => {
   const document = await (await fetch(base + '/api/docs-json')).json();
   for (const [path, method] of [
     ['/api/auth/login', 'post'],
@@ -526,9 +679,22 @@ test('OpenAPI documents all eight contracts and logs contain no passwords or tok
     ['/api/admins', 'get'],
     ['/api/admins/{id}', 'patch'],
     ['/api/admins/{id}/password', 'patch'],
+    ['/api/admins/{id}/role', 'patch'],
   ])
     assert.ok(document.paths[path][method]);
   assert.equal(document.components.securitySchemes.adminSession.in, 'cookie');
+  const role = document.paths['/api/admins/{id}/role'].patch;
+  assert.deepEqual(role.tags, ['Admins']);
+  assert.ok(role.responses['204']);
+  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.required, ['role']);
+  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.properties.role.enum, [
+    'OPERATOR',
+    'SUPERVISOR',
+  ]);
+  assert.deepEqual(document.components.schemas.UpdateAdminDto.properties.role.enum, [
+    'OPERATOR',
+    'SUPERVISOR',
+  ]);
   const serialized = JSON.stringify(logs);
   assert.ok(!serialized.includes(password));
   assert.ok(!serialized.includes('dva_session='));

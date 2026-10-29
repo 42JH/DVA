@@ -355,6 +355,7 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
 | GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext }` |
 | PATCH /api/admins/:id | SYSTEM_ADMIN, role/status 변경, 204 |
+| PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
 | PATCH /api/admins/:id/password | SYSTEM_ADMIN, newPassword로 대상 비밀번호 변경, 204 |
@@ -397,7 +398,9 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 비밀번호 변경은 대상 계정의 모든 세션 삭제·해시 갱신·감사 기록을 동일 트랜잭션으로 처리한다.
 로그인도 같은 계정 잠금을 사용해 이전 비밀번호로 검증 중인 로그인이 변경 후 살아남지 않게 한다.
 동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
-이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 마지막 활성 SYSTEM_ADMIN의 강등은 409다.
+이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 두 권한 변경 경로 모두 OPERATOR ↔ SUPERVISOR만 허용한다.
+SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
+전용 `/admins/:id/role`은 `role`만 필수로 받으며 계정 상태를 변경하지 않는다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
 
 ### DB 적용·최초 관리자 생성
@@ -423,5 +426,5 @@ CLI는 SYSTEM_ADMIN이 이미 있으면 중단하고 기존 계정을 변경하�
 
 `npm run check`는 설정·공통 HTTP·비밀번호/쿠키 단위 검증을 수행한다.
 `node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, Origin 검증, 만료·삭제, 동시 로그인/비밀번호 변경,
-동시 관리자 강등, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
+최상위 관리자 권한 보호, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
 저장소 루트의 `./infra/database/test-monolith.ps1`은 migration·백업 복구·체크섬·실패 롤백을 검증한다.

@@ -98,7 +98,6 @@ export class AuthService {
   }
   async updateAdmin(token: string, id: number, input: UpdateAdminDto, requestId: string) {
     await this.database.transaction(async (client) => {
-      // Serialize role changes so concurrent demotions cannot remove the last administrator.
       await this.admins.serializeAccessChanges(client);
       const { actor, target } = await this.lockAuthorized(token, id, true, client);
       await this.admins.updateAccess(target, input, client);

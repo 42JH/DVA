@@ -13,7 +13,7 @@ import {
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AdminsService } from '../admins/admins.service';
-import { AdminQueryDto, UpdateAdminDto } from '../admins/dto/admin-query.dto';
+import { AdminQueryDto, UpdateAdminDto, UpdateAdminRoleDto } from '../admins/dto/admin-query.dto';
 import { ListResponse } from '../common/pagination';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { ApiException } from '../common/errors/api.exception';
@@ -38,13 +38,13 @@ function adminId(value: string): number {
 @ApiResponse({ status: 401, description: '로그인 세션이 없거나 만료됨.', type: ErrorResponseDto })
 @ApiResponse({
   status: 403,
-  description: 'SYSTEM_ADMIN 권한이 없거나 허용되지 않은 Origin.',
+  description: 'SYSTEM_ADMIN 권한이 없거나 최상위 관리자 권한 변경 시도, 허용되지 않은 Origin.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 404, description: '대상 관리자가 없음.', type: ErrorResponseDto })
 @ApiResponse({
   status: 409,
-  description: '허용되지 않은 상태 변경 또는 마지막 SYSTEM_ADMIN의 권한 해제.',
+  description: '허용되지 않은 계정 상태 변경.',
   type: ErrorResponseDto,
 })
 @Roles('SYSTEM_ADMIN')
@@ -72,7 +72,7 @@ export class AdminAccessController {
   @ApiOperation({
     summary: '관리자 권한 변경·가입 승인',
     description:
-      'SYSTEM_ADMIN 전용. 권한을 변경하거나 PENDING 계정을 ACTIVE로 승인합니다. 마지막 활성 SYSTEM_ADMIN은 강등할 수 없습니다.',
+      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR의 권한 변경 또는 PENDING 계정의 ACTIVE 승인을 처리합니다. SYSTEM_ADMIN의 권한은 변경할 수 없습니다.',
   })
   @ApiParam({
     name: 'id',
@@ -81,6 +81,23 @@ export class AdminAccessController {
   })
   @ApiNoContentResponse({ description: '권한 변경 또는 가입 승인 완료.' })
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
+    return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
+  }
+  @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
+  @Patch(':id/role')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: '관리자 권한 변경',
+    description:
+      'SYSTEM_ADMIN 전용. OPERATOR ↔ SUPERVISOR만 변경하며 계정 상태는 유지합니다. 변경된 권한은 기존 세션의 다음 요청부터 적용됩니다.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: '대상 관리자 번호(adminUserSeq). SYSTEM_ADMIN은 변경 불가.',
+    schema: { type: 'integer', minimum: 1 },
+  })
+  @ApiNoContentResponse({ description: '권한 변경 완료. 응답 본문 없음.' })
+  role(@Param('id') id: string, @Body() input: UpdateAdminRoleDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
   @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
