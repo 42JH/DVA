@@ -5,16 +5,66 @@ const { CreateOrderDto } = require('../dist/orders/dto/create-order.dto');
 const { OrderQueryDto, OrderIdParamsDto } = require('../dist/orders/dto/order-query.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 const { UpdateOrderDto } = require('../dist/orders/dto/update-order.dto');
+const { CancelOrderParcelsDto } = require('../dist/orders/dto/cancel-order-parcels.dto');
 const { assertOrderUpdate } = require('../dist/orders/order-update.validation');
 
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
+
+test('parcel cancellation requires a nonempty unique array of database integers', async () => {
+  const validateCancellation = (body) =>
+    pipe.transform(body, { type: 'body', metatype: CancelOrderParcelsDto });
+  for (const orderParcelSeqs of [[1], [3, 1, 2147483647]])
+    assert.deepEqual(
+      (await validateCancellation({ orderParcelSeqs })).orderParcelSeqs,
+      orderParcelSeqs,
+    );
+  for (const body of [
+    {},
+    null,
+    [],
+    { orderParcelSeq: 1 },
+    { orderParcelSeqs: [1], status: 'CANCELLED' },
+    ...[
+      null,
+      [],
+      1,
+      '1',
+      {},
+      [1, 1],
+      [0],
+      [-1],
+      [1.5],
+      ['1'],
+      [true],
+      [null],
+      [[1]],
+      [2147483648],
+    ].map((orderParcelSeqs) => ({ orderParcelSeqs })),
+  ])
+    await assert.rejects(
+      () => validateCancellation(body),
+      (error) => error.getStatus() === 400,
+    );
+});
 
 const validateUpdate = async (body) => {
   const input = await pipe.transform(body, { type: 'body', metatype: UpdateOrderDto });
   assertOrderUpdate(input);
   return input;
 };
+
+test('clients cannot inject parcel cancellation state through creation or editing', async () => {
+  await assert.rejects(
+    () => validate({ customerSeq: 1, parcels: [{ status: 'CANCELLED' }] }),
+    (error) => error.getStatus() === 400,
+  );
+  await assert.rejects(
+    () =>
+      validateUpdate({ expectedVersion: 1, parcels: [{ orderParcelSeq: 1, status: 'CANCELLED' }] }),
+    (error) => error.getStatus() === 400,
+  );
+});
 
 test('order updates preserve omitted fields, nullable clears, zero and empty text', async () => {
   const input = await validateUpdate({

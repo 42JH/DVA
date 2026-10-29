@@ -59,6 +59,18 @@ after(async () => {
   await new Promise((resolve) => server.close(resolve));
 });
 
+test('Dver excludes cancelled snapshots without changing the stored order', () => {
+  const input = complete();
+  input.parcels[0].status = 'CANCELLED';
+  input.parcels[0].origin.name = null;
+  const before = structuredClone(input);
+  const payload = dverPayload(input);
+  assert.equal(payload.outboundParcels.length, 1);
+  assert.equal(payload.outboundParcels[0].item.etc, input.parcels[1].otherItemDescription);
+  assert.equal(Object.hasOwn(payload.outboundParcels[0], 'status'), false);
+  assert.deepEqual(input, before);
+});
+
 test('Dver v2 mapping sends each parcel and its own fee without internal identifiers', () => {
   const input = complete();
   const before = structuredClone(input);

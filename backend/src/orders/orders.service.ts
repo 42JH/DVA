@@ -58,7 +58,7 @@ export class OrdersService {
       throw new ApiException(
         409,
         'INVALID_STATE',
-        '종료된 통화는 기존 연결 주문의 상세만 조회할 수 있습니다.',
+        '종료된 통화는 기존 연결 주문만 사용할 수 있습니다.',
       );
     if (call.customerSeq === null)
       throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
@@ -356,6 +356,8 @@ export class OrdersService {
           change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
         if (change.orderParcelSeq !== undefined && !previous)
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+        if (previous?.status === 'CANCELLED')
+          throw new ApiException(409, 'INVALID_STATE', '취소된 주문 상세는 수정할 수 없습니다.');
         const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
         if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
@@ -389,6 +391,84 @@ export class OrdersService {
       const order = await this.repository.detail(client, id, customerId);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       return order;
+    });
+  }
+
+  async cancel(
+    adminId: number | null,
+    id: number,
+    requestId: string,
+    callSessionHeader?: string,
+    orderParcelSeqs?: number[],
+  ): Promise<void> {
+    const callId = this.callId(adminId, callSessionHeader);
+    await this.database.transaction(async (client) => {
+      const customerId = await this.readCustomer(client, adminId, callId, id);
+      const order = await this.repository.lockOrder(client, id);
+      if (!order || (customerId !== null && order.customerSeq !== customerId))
+        throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      const parcels = await this.repository.lockParcels(client, id);
+      const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
+      const selected = selectedIds
+        ? parcels.filter((parcel) => selectedIds.has(parcel.orderParcelSeq))
+        : parcels;
+      if (selectedIds && selected.length !== selectedIds.size)
+        throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+      const targets = selected.filter((parcel) => parcel.status === 'ACTIVE');
+      if (selectedIds && targets.length === 0) return;
+      if (order.status === 'CANCELLED')
+        throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
+      if (order.status !== 'COLLECTING' && order.status !== 'ACCEPTED')
+        throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
+
+      const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
+      const shipments = await this.repository.lockShipments(client, parcelIds);
+      const byParcel = new Map(shipments.map((shipment) => [shipment.orderParcelSeq, shipment]));
+      // shortcut: notPaid는 내부 기준이다. 실제 결제/취소 API가 제공되면 디버와 연동한다.
+      if (
+        (order.status === 'COLLECTING' && shipments.length > 0) ||
+        (order.status === 'ACCEPTED' &&
+          (parcels.length === 0 ||
+            targets.some((parcel) => byParcel.get(parcel.orderParcelSeq)?.status !== 'notPaid')))
+      )
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '결제 전 상태가 확인된 주문만 취소할 수 있습니다.',
+        );
+
+      await this.repository.cancelShipments(client, parcelIds, adminId);
+      for (const parcel of selectedIds ? targets : []) {
+        await this.repository.cancelParcel(client, parcel.orderParcelSeq);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: parcel.orderParcelSeq,
+            targetType: 'ORDER_PARCEL',
+            action: 'ORDER_PARCEL_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      if (
+        !selectedIds ||
+        parcels.every(
+          (parcel) => parcel.status === 'CANCELLED' || selectedIds.has(parcel.orderParcelSeq),
+        )
+      ) {
+        await this.repository.cancel(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: id,
+            targetType: 'ORDER',
+            action: 'ORDER_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
     });
   }
 
@@ -487,6 +567,7 @@ export class OrdersService {
     if (await this.submissions.hasShipments(client, id))
       throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
     for (const parcel of snapshot.parcels) {
+      if (parcel.status === 'CANCELLED') continue;
       if (
         parcel.originPin &&
         !(await this.repository.canUsePin(client, customerId, parcel.originPin))

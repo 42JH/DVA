@@ -63,7 +63,7 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 디버 인증 실패, REVIEW_REQUIRED 접수 확인 필요, CANCELLED 취소, EXPIRED 만료.',
+      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 인증 실패, REVIEW_REQUIRED 확인 필요, CANCELLED 전체 취소, EXPIRED 만료. 일부 상세만 취소하면 기존 상태 유지.',
     enum: ORDER_STATUSES,
     example: 'COLLECTING',
   })
@@ -88,7 +88,7 @@ export class OrderSummaryDto {
   createdAt!: string;
 
   @ApiProperty({
-    description: '주문에 저장된 전체 상세 수. 수집 중에는 0일 수 있습니다.',
+    description: '취소된 상세를 포함한 전체 상세 수. 수집 중에는 0일 수 있습니다.',
     minimum: 0,
   })
   parcelCount!: number;
@@ -124,6 +124,12 @@ export class OrderAddressValueDto {
 }
 
 export class OrderParcelDto {
+  @ApiProperty({
+    enum: ['ACTIVE', 'CANCELLED'],
+    description: '상세 취소 상태. ACTIVE는 취소되지 않음이며 결제·접수 완료를 뜻하지 않습니다.',
+  })
+  status!: 'ACTIVE' | 'CANCELLED';
+
   @ApiProperty({
     description: '주문 상세 번호. 기존 상세의 주소·물품을 수정할 때 사용합니다.',
     minimum: 1,
@@ -201,7 +207,7 @@ export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as
   parcelNo!: string | null;
 
   @ApiProperty({
-    description: '디버 접수 확인 시각. 접수 전에는 null.',
+    description: '디버 접수 확인 시각. 접수 전에는 null이며 접수 후 취소해도 보존합니다.',
     type: String,
     format: 'date-time',
     nullable: true,
@@ -212,7 +218,8 @@ export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as
   updatedAt!: string;
 
   @ApiProperty({
-    description: 'parcelPosition 오름차순의 상세 목록. 수집 중에는 빈 배열일 수 있습니다.',
+    description:
+      '취소된 상세도 포함한 parcelPosition 오름차순 목록. 수집 중에는 빈 배열일 수 있습니다.',
     type: [OrderParcelDto],
   })
   parcels!: OrderParcelDto[];

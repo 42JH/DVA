@@ -10,6 +10,7 @@ import {
   Req,
   Res,
   ParseUUIDPipe,
+  HttpCode,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -27,6 +28,7 @@ import {
   ApiHeader,
   ApiOperation,
   ApiBody,
+  ApiNoContentResponse,
   getSchemaPath,
 } from '@nestjs/swagger';
 import { Response } from 'express';
@@ -45,6 +47,7 @@ import { OrderIdParamsDto, OrderQueryDto } from './dto/order-query.dto';
 import { OrdersService } from './orders.service';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
+import { CancelOrderParcelsDto } from './dto/cancel-order-parcels.dto';
 
 import { OrderRequestKey } from './order-request-key';
 
@@ -301,7 +304,7 @@ export class OrdersController {
     summary: '주문 정보 수정',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI·관리자 공통 API. COLLECTING 주문만 부분 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      'AI·관리자 공통 API. COLLECTING 주문의 미취소 상세만 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -379,6 +382,94 @@ export class OrdersController {
     );
   }
 
+  @Post(':id/cancel')
+  @HttpCode(204)
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_CANCELLED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 전체 취소',
+    security: [{ adminSession: [] }, {}],
+    description:
+      '미완료 주문 또는 모든 미취소 상세가 결제 전(notPaid)인 접수 주문을 즉시 취소합니다. 주문·상세·내부 배송 상태와 이력을 함께 저장하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 불필요. 종료된 통화는 기존 연결 주문만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({
+    description: '통화·주문이 없거나 AI 고객 범위 밖인 주문.',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '이미 취소된 주문, 취소 불가 주문·통화 상태 또는 결제 전 조건 불충족(INVALID_STATE).',
+    type: ErrorResponseDto,
+  })
+  @ApiNoContentResponse({
+    description: '취소 완료. 응답 본문 없음. 최신 상태·version은 주문 상세에서 조회합니다.',
+  })
+  cancel(
+    @Req() request: AuthRequest,
+    @Param() params: OrderIdParamsDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    return this.orders.cancel(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      request.requestId,
+      callSessionSeq,
+    );
+  }
+
+  @Post(':id/parcels/cancel')
+  @HttpCode(204)
+  @MvpAiOrderAccess()
+  @AuditOperation({ action: 'ORDER_PARCEL_CANCELLED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 상세 단건·복수 취소',
+    security: [{ adminSession: [] }, {}],
+    description:
+      'orderParcelSeqs에 같은 주문의 상세번호를 한 개 이상 보냅니다. 이미 취소된 상세는 건너뛰고, 남은 대상이 모두 미완료 또는 결제 전(notPaid)일 때 한 번에 취소합니다. 하나라도 없거나 취소할 수 없으면 전부 변경하지 않습니다. 모든 상세가 취소되면 주문도 CANCELLED입니다. 전부 이미 취소된 요청은 변경·이력 추가 없이 204입니다.\n\n관리자는 전체, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. Idempotency-Key·expectedVersion은 필요하지 않습니다. 디버 취소 API와 AI 서비스 인증은 아직 적용되지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    description:
+      'DB call_sessions.call_session_seq. AI 필수·관리자 불필요. 종료된 통화는 기존 연결 주문만 허용.',
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+  })
+  @ApiNotFoundResponse({
+    description:
+      '통화·주문이 없거나 AI 고객 범위 밖. 상세 중 하나라도 해당 주문에 없으면 전체 거절.',
+    type: ErrorResponseDto,
+  })
+  @ApiConflictResponse({
+    description:
+      '취소 불가 주문·통화 상태 또는 미취소 대상 중 하나라도 결제 전 조건 불충족(INVALID_STATE). 전체 거절.',
+    type: ErrorResponseDto,
+  })
+  @ApiNoContentResponse({
+    description:
+      '선택한 상세 취소 완료 또는 모두 이미 취소됨. 본문 없음. 최신 상태·version은 주문 상세에서 조회합니다.',
+  })
+  cancelParcels(
+    @Req() request: AuthRequest,
+    @Param() params: OrderIdParamsDto,
+    @Body() input: CancelOrderParcelsDto,
+    @Headers('call_session_seq') callSessionSeq?: string,
+  ) {
+    return this.orders.cancel(
+      request.admin?.adminUserSeq ?? null,
+      params.id,
+      request.requestId,
+      callSessionSeq,
+      input.orderParcelSeqs,
+    );
+  }
+
   @Post(':id/submit')
   @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_SUBMITTED', targetType: 'ORDER', target: 'id' })
@@ -386,7 +477,7 @@ export class OrdersController {
     summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
-      '기존 COLLECTING 주문을 보완한 뒤 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+      '기존 COLLECTING 주문의 미취소 상세만 디버에 한 번 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 공통 기본값, groupBilling은 활성 기업 소속 고객, billing은 개인 고객 전용입니다. 주소·물품·미래 수거 시각이 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -476,7 +567,7 @@ export class OrdersController {
     summary: '주문 상세 조회',
     security: [{ adminSession: [] }, {}],
     description:
-      '주문 상태·고객 번호·결제 방식·수거 요청 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '주문·상세 취소 상태, 고객·결제·수거 시각·주소·물품·디버 접수 결과와 현재 version을 반환합니다. 취소된 상세도 보존해 반환합니다. 미수집 값은 null, 상세가 없으면 parcels는 빈 배열입니다. 원본 PIN 변경은 주문 주소에 반영하지 않습니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 조회합니다. 종료된 통화는 저장 결과 확인을 위해 기존 연결 주문 한 건만 조회할 수 있습니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

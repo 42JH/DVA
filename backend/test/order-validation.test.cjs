@@ -44,6 +44,34 @@ test('the same stored order can be checked for final submission without changing
     },
   );
 });
+test('cancelled snapshots are skipped and remaining errors keep original detail indexes', () => {
+  const value = complete();
+  value.parcels.unshift({
+    ...structuredClone(value.parcels[0]),
+    status: 'CANCELLED',
+    origin: { name: null },
+  });
+  assert.doesNotThrow(() => assertOrderSubmissionReady(value, now));
+  value.parcels[1].origin.name = null;
+  assert.throws(
+    () => assertOrderSubmissionReady(value, now),
+    (error) => {
+      assert.deepEqual(error.getResponse().details, [
+        { field: 'parcels.1.origin.name', reason: 'required' },
+      ]);
+      return true;
+    },
+  );
+  value.parcels[1].status = 'CANCELLED';
+  assert.throws(
+    () => assertOrderSubmissionReady(value, now),
+    (error) => {
+      assert.deepEqual(error.getResponse().details, [{ field: 'parcels', reason: 'required' }]);
+      return true;
+    },
+  );
+});
+
 test('final validation rejects expired pickup, invalid address, quantities and prices', () => {
   const value = complete();
   value.paymentMethodType = 'invalid';

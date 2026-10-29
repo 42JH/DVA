@@ -106,6 +106,16 @@ before(async () => {
       await client.query(
         readFileSync(join(__dirname, '../migrations/012-order-creation-source.sql'), 'utf8'),
       );
+    if (
+      !(
+        await client.query(
+          "SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='order_parcels' AND column_name='status') AS ready",
+        )
+      ).rows[0].ready
+    )
+      await client.query(
+        readFileSync(join(__dirname, '../migrations/014-order-cancellation.sql'), 'utf8'),
+      );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -1374,7 +1384,8 @@ test('order detail returns order snapshots and status without exposing stored sh
   for (const parcel of order.parcels) {
     assert.equal(Object.hasOwn(parcel, 'shipment'), false);
     assert.equal(Object.hasOwn(parcel, 'trackingNumber'), false);
-    assert.equal(Object.hasOwn(parcel, 'status'), false);
+    assert.equal(parcel.status, 'ACTIVE');
+    assert.equal(Object.hasOwn(parcel, 'shipmentStatus'), false);
   }
   assert.equal(JSON.stringify(order).includes(trackingNumber), false);
   assert.deepEqual(
@@ -2132,6 +2143,12 @@ const submitOrder = (order, extra = {}, index = 0, body = { expectedVersion: ord
     ),
     body: JSON.stringify(body),
   });
+const cancelOrder = (id, parcels, index = 0) =>
+  fetch(hosts[index] + `/api/orders/${id}${parcels === undefined ? '' : '/parcels'}/cancel`, {
+    method: 'POST',
+    headers: { Origin: origin, Cookie: cookies[index], 'Content-Type': 'application/json' },
+    body: parcels === undefined ? undefined : JSON.stringify({ orderParcelSeqs: parcels }),
+  });
 const resetDver = () => {
   dverRequests = [];
   dverRespond = (_req, res) => res.end(JSON.stringify(dverSuccess));
@@ -2303,6 +2320,135 @@ const submissionRows = async (id) =>
       [id],
     )
   ).rows[0];
+
+test('cancelled draft details cannot be edited or sent to Dver, and only remaining details get shipments', async () => {
+  resetDver();
+  const order = await readyOrder({
+    parcels: [{}, { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+  });
+  const before = (await (await readDetail(order.orderSeq)).json()).data;
+  const [cancelled, active] = before.parcels;
+  // A deleted/obsolete PIN on a cancelled snapshot must not block the remaining parcel.
+  await pool.query(
+    "UPDATE order_parcels SET origin_pin_scope='PERSONAL',origin_pin_seq=2147483647 WHERE order_parcel_seq=$1",
+    [cancelled.orderParcelSeq],
+  );
+  assert.equal((await cancelOrder(order.orderSeq, [cancelled.orderParcelSeq])).status, 204);
+  const partial = (await (await readDetail(order.orderSeq)).json()).data;
+  assert.equal(partial.status, 'COLLECTING');
+  assert.deepEqual(
+    partial.parcels.map((p) => p.status),
+    ['CANCELLED', 'ACTIVE'],
+  );
+  await errorCode(
+    await patchOrder(order.orderSeq, {
+      expectedVersion: partial.version,
+      paymentMethodType: 'billing',
+      parcels: [
+        { orderParcelSeq: active.orderParcelSeq, clientComment: 'must roll back' },
+        { orderParcelSeq: cancelled.orderParcelSeq, clientComment: 'must reject' },
+      ],
+    }),
+    409,
+    'INVALID_STATE',
+  );
+  assert.deepEqual((await (await readDetail(order.orderSeq)).json()).data, partial);
+  await errorCode(await submitOrder(order), 409, 'VERSION_CONFLICT');
+  assert.equal(dverRequests.length, 0);
+  assert.equal((await submitOrder({ ...order, version: partial.version })).status, 200);
+  assert.equal(dverRequests.length, 1);
+  assert.equal(dverRequests[0].body.outboundParcels.length, 1);
+  assert.equal(dverRequests[0].body.outboundParcels[0].item.smallBox, 1);
+  assert.deepEqual(await submissionRows(order.orderSeq), {
+    status: 'ACCEPTED',
+    shipments: 1,
+    history: 1,
+    acceptedAudit: 1,
+  });
+  assert.equal(
+    (
+      await pool.query('SELECT 1 FROM shipments WHERE order_parcel_seq=$1', [
+        cancelled.orderParcelSeq,
+      ])
+    ).rowCount,
+    0,
+  );
+  const accepted = (await (await readDetail(order.orderSeq)).json()).data;
+  assert.deepEqual(
+    accepted.parcels.map((p) => p.status),
+    ['CANCELLED', 'ACTIVE'],
+  );
+  const history = await fetch(
+    hosts[0] + `/api/customers/${otherId}/addresses?direction=DESTINATION&limit=100`,
+    { headers: { Cookie: cookies[0] } },
+  );
+  const historical = (await history.json()).data.filter((p) => p.orderSeq === order.orderSeq);
+  assert.deepEqual(
+    historical.map((p) => p.orderParcelSeq),
+    [active.orderParcelSeq],
+  );
+});
+
+test('cancelled accepted snapshots stay out of previous address suggestions while siblings remain', async () => {
+  resetDver();
+  const parcel = { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 };
+  const order = await readyOrder({ parcels: [parcel, parcel] });
+  assert.equal((await submitOrder(order)).status, 200);
+  const detail = (await (await readDetail(order.orderSeq)).json()).data;
+  assert.equal((await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq])).status, 204);
+  const history = await fetch(
+    hosts[0] + `/api/customers/${otherId}/addresses?direction=DESTINATION&limit=100`,
+    { headers: { Cookie: cookies[0] } },
+  );
+  assert.deepEqual(
+    (await history.json()).data
+      .filter((p) => p.orderSeq === order.orderSeq)
+      .map((p) => p.orderParcelSeq),
+    [detail.parcels[1].orderParcelSeq],
+  );
+  assert.equal((await cancelOrder(order.orderSeq)).status, 204);
+  assert.equal(dverRequests.length, 1, 'cancellation must not contact Dver');
+});
+
+test('whole and individual cancellation reject SUBMITTING while Dver is in flight', async () => {
+  resetDver();
+  let received, finish;
+  const arrived = new Promise((resolve) => {
+    received = resolve;
+  });
+  dverRespond = (_req, res) => {
+    finish = () => res.end(JSON.stringify(dverSuccess));
+    received();
+  };
+  const order = await readyOrder();
+  const detail = (await (await readDetail(order.orderSeq)).json()).data;
+  const pending = submitOrder(order);
+  await arrived;
+  try {
+    await errorCode(await cancelOrder(order.orderSeq, undefined, 1), 409, 'INVALID_STATE');
+    await errorCode(
+      await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq], 2),
+      409,
+      'INVALID_STATE',
+    );
+  } finally {
+    finish();
+  }
+  assert.equal((await pending).status, 200);
+  assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
+  assert.equal(dverRequests.length, 1);
+});
+
+test('AI CANCELLED consultation creates cancelled details and stays separate from cancelling an existing order', async () => {
+  resetDver();
+  const result = await aiCreate(undefined, aiResult('CANCELLED', { parcels: [{}] }));
+  assert.equal(result.status, 201);
+  const { data } = await result.json();
+  const detail = (await (await readDetail(data.orderSeq)).json()).data;
+  assert.equal(detail.status, 'CANCELLED');
+  assert.equal(detail.parcels[0].status, 'CANCELLED');
+  assert.equal(dverRequests.length, 0);
+});
 
 test('ORD-06 submits the existing order and atomically creates each shipment and initial history', async () => {
   resetDver();

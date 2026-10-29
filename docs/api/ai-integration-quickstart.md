@@ -84,6 +84,19 @@
 
 HTTP 201만으로 접수 성공을 판단하지 않는다. 오류 본문은 `error.code`·`error.message`를 읽는다. UUID는 최초 전송 전에 한 번 만들고 재시도에 재사용한다. 같은 UUID로 바꾼 본문은 재적용되지 않는다. COMPLETE 전송 후 통화가 끊겨도 별도 INCOMPLETE/CANCELLED를 보내지 않는다. HTTP timeout은 10초보다 여유 있게 둔다.
 
+## 기존 주문 취소 추가
+
+기존 조회에 쓰는 DB `call_session_seq` 헤더로 호출한다. 전화번호가 같은 활성 고객의 주문만 허용한다. Idempotency-Key는 없다.
+
+| 호출 | 처리 |
+| --- | --- |
+| `POST /api/orders/{orderSeq}/cancel` | 전체 취소. 204, 본문 없음. 이미 전체 취소면 409 |
+| `POST /api/orders/{orderSeq}/parcels/cancel` | 본문 `{"orderParcelSeqs":[456,457]}`. 한 개면 단건, 여러 개면 복수 취소. 마지막 상세까지 취소하면 주문도 취소. 성공 204 |
+
+상세 취소는 `Content-Type: application/json`과 같은 주문의 번호 배열이 필수다. 빈 배열·중복 번호는 400이다. 이미 취소된 상세는 건너뛰며, 선택한 상세 중 하나라도 없거나 취소 불가이면 전체 요청을 거절한다. 기존 URL의 상세번호 자리는 제거하고 단건도 배열로 보낸다.
+
+번호는 주문 목록·상세 응답에서 선택한다. 결제 전만 취소하며 접수 처리 중·결과 미확정은 409다. 성공 후 상세를 재조회한다. `parcels[].status`는 ACTIVE/CANCELLED이고 부분 취소 시 주문 상태는 유지된다. 새 상담의 `outcome=CANCELLED`는 기존 주문을 취소하는 호출이 아니다. 실제 디버 취소 연동은 없으며 [상세 계약](order-cancel.md)을 따른다.
+
 ## 4. 녹취 처리
 
 통화 종료 웹훅은 PBX가 기존 `POST /api/webhooks/pbx/call-ended`로 보낸다. 백엔드가 발신번호·시작 시각으로 연결하고 녹취를 S3에 저장하므로 AI가 별도 녹취 저장 API를 호출할 필요는 없다.

@@ -21,7 +21,7 @@ BEGIN
  IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
- IF n<>9 THEN RAISE EXCEPTION 'Expected 9 business triggers, got %',n; END IF;
+ IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
  IF NOT EXISTS(SELECT 1 FROM pbx_webhooks.call_ended_events WHERE recording_id='migration-preservation-test') THEN
   RAISE EXCEPTION 'Existing PBX receipt was lost'; END IF;
 END $$;
