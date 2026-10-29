@@ -39,7 +39,7 @@ export class MembersRepository {
 
   async member(id: number, client?: PoolClient): Promise<Membership | undefined> {
     const result = await (client ?? this.database.pool).query<Membership>(
-      `SELECT ${memberColumns} FROM memberships WHERE membership_seq=$1${client ? ' FOR UPDATE' : ''}`,
+      `SELECT ${memberColumns} FROM memberships WHERE membership_seq=$1`,
       [id],
     );
     return result.rows[0];
@@ -73,13 +73,9 @@ export class MembersRepository {
     await client.query('DELETE FROM memberships WHERE membership_seq=$1', [id]);
   }
 
-  async lockWrites(client: PoolClient): Promise<boolean> {
-    // MVP: serialize all membership mutations, including cross-company CSV phone changes.
-    // Try-lock avoids waiting on another upload and returns a retryable 409 instead.
-    const result = await client.query<{ acquired: boolean }>(
-      'SELECT pg_try_advisory_xact_lock(20261027,37) AS acquired',
-    );
-    return result.rows[0].acquired;
+  async lockWrites(client: PoolClient): Promise<void> {
+    // 고객을 잠그기 전에 소속·CSV 변경을 직렬화해 조회한 소속의 고객 연결을 유지한다.
+    await client.query('SELECT pg_advisory_xact_lock(20261027,37)');
   }
 
   async candidates(

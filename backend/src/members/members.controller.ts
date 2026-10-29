@@ -44,7 +44,12 @@ import { CsvUpload } from './members.types';
 @ApiResponse({ status: 401, type: ErrorResponseDto })
 @ApiResponse({ status: 403, type: ErrorResponseDto })
 @ApiResponse({ status: 404, type: ErrorResponseDto })
-@ApiResponse({ status: 409, type: ErrorResponseDto })
+@ApiResponse({
+  status: 409,
+  description:
+    '등록 중복·비활성 기업/고객 또는 DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS). 다른 변경은 완료 후 이어서 처리합니다.',
+  type: ErrorResponseDto,
+})
 @ApiResponse({ status: 422, type: ErrorResponseDto })
 @Controller()
 export class MembersController {

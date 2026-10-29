@@ -678,7 +678,7 @@ test('repeated registration conflicts after restart and unlink permits a new reg
   assert.notEqual((await member(co, cu.id)).membershipSeq, m.membershipSeq);
 });
 
-test('concurrent membership writes still return retryable conflicts without a request key', async () => {
+test('membership writes wait before returning a bounded lock timeout without a request key', async () => {
   const co = await company(),
     cu = await customer(),
     other = await customer();
@@ -687,10 +687,15 @@ test('concurrent membership writes still return retryable conflicts without a re
     lock = await pool.connect();
   try {
     await lock.query('BEGIN');
-    assert.equal(await repository.lockWrites(lock), true);
-    await error(await create(co, other.id, '002'), 409, 'REQUEST_IN_PROGRESS');
-    await error(await patch(m.membershipSeq, { role: 'ORG_ADMIN' }), 409, 'REQUEST_IN_PROGRESS');
-    await error(await upload(co, header + '003,New,' + phone()), 409, 'REQUEST_IN_PROGRESS');
+    await repository.lockWrites(lock);
+    const started = Date.now();
+    const responses = await Promise.all([
+      create(co, other.id, '002'),
+      patch(m.membershipSeq, { role: 'ORG_ADMIN' }),
+      upload(co, header + '003,New,' + phone()),
+    ]);
+    assert.ok(Date.now() - started >= 1500);
+    for (const response of responses) await error(response, 409, 'REQUEST_IN_PROGRESS');
   } finally {
     await lock.query('ROLLBACK');
     lock.release();
@@ -708,7 +713,7 @@ test('concurrent uploads keep one customer/membership and audit each successful 
     Array.from({ length: 6 }, (_, i) => upload(co, content, key, i % 2 ? base : baseB)),
   );
   assert.ok(responses.some((response) => response.status === 204));
-  for (const response of responses) assert.ok([204, 409].includes(response.status));
+  for (const response of responses) assert.equal(response.status, 204);
   await empty(await upload(co, content, key));
   assert.equal((await members(co)).data.length, 1);
   assert.equal(

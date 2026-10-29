@@ -47,6 +47,23 @@ export class OrdersService {
     return header === undefined ? null : Number(header);
   }
 
+  private async write<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.database.transaction(async (client) => {
+        await client.query("SET LOCAL lock_timeout = '2s'");
+        return work(client);
+      });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '다른 작업의 완료 대기 시간을 초과했습니다. 잠시 후 재시도해 주세요.',
+        );
+      throw error;
+    }
+  }
+
   private async readCustomer(
     client: PoolClient,
     adminId: number | null,
@@ -191,7 +208,7 @@ export class OrdersService {
       );
     const headerId = this.callId(input.call ? 0 : adminId, callSessionHeader);
     const draft = orderDraft(input);
-    const prepared = await this.database.transaction(async (client) => {
+    const prepared = await this.write(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
       const callId = input.call ? await this.calls.ensureCall(client, input.call) : headerId;
@@ -314,7 +331,7 @@ export class OrdersService {
   ): Promise<UpdatedOrderDto> {
     assertOrderUpdate(input);
     const callId = this.callId(adminId, callSessionHeader);
-    return this.database.transaction(async (client) => {
+    return this.write(async (client) => {
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
@@ -483,7 +500,7 @@ export class OrdersService {
   ): Promise<SubmittedOrderDto> {
     const callId = this.callId(adminId, callSessionHeader);
     const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
-    const prepared = await this.database.transaction<
+    const prepared = await this.write<
       SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
     >(async (client) => {
       const call = callId === null ? undefined : await this.repository.call(client, callId);

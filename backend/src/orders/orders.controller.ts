@@ -240,7 +240,8 @@ export class OrdersController {
   })
   @ApiNotFoundResponse({ description: '고객 또는 통화가 없음.', type: ErrorResponseDto })
   @ApiConflictResponse({
-    description: '같은 키 처리 중이거나 고객·통화 상태가 주문 생성 조건에 맞지 않음.',
+    description:
+      '같은 키 처리 중, DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS) 또는 고객·통화 상태 불일치. 소속 변경은 완료 후 이어서 처리합니다.',
     type: ErrorResponseDto,
   })
   @ApiCreatedResponse({
@@ -352,7 +353,7 @@ export class OrdersController {
   })
   @ApiConflictResponse({
     description:
-      '저장 버전 불일치(VERSION_CONFLICT), 주문·통화 상태 또는 연결 충돌(INVALID_STATE).',
+      '저장 버전 불일치(VERSION_CONFLICT), 주문·통화 상태 충돌(INVALID_STATE), DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS).',
     type: ErrorResponseDto,
   })
   @ApiOkResponse({
@@ -501,7 +502,7 @@ export class OrdersController {
   })
   @ApiConflictResponse({
     description:
-      '버전 불일치(VERSION_CONFLICT), 접수 불가 상태·통화 연결 충돌(INVALID_STATE), 소속 변경 처리 중(REQUEST_IN_PROGRESS).',
+      '버전 불일치(VERSION_CONFLICT), 접수 불가 상태·통화 연결 충돌(INVALID_STATE), DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS). 소속 변경은 완료 후 이어서 처리합니다.',
     type: ErrorResponseDto,
   })
   @ApiUnprocessableEntityResponse({
