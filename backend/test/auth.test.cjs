@@ -35,3 +35,28 @@ test('cookie flags retain exact clearing scope and enable Secure in production',
   });
   assert.equal(cookieOptions(false).secure, false);
 });
+
+test('audit failure attribution uses the accepted server-side actor, never a caller-supplied header', () => {
+  const { auditEvent } = require('../dist/audit/audit-operation');
+  const operation = { action: 'CHANGE', targetType: 'CUSTOMER', target: 'id' };
+  const request = { params: { id: '1' }, headers: { 'x-actor-type': 'AI' }, requestId: 'request' };
+  assert.equal(auditEvent(operation, request).actorType, 'SYSTEM');
+  const ai = auditEvent(operation, { ...request, auditActorType: 'AI' });
+  assert.equal(ai.actorType, 'AI');
+  assert.equal(ai.actorId, null);
+  const admin = auditEvent(operation, {
+    ...request,
+    admin: { adminUserSeq: 7, name: '관리자' },
+  });
+  assert.equal(admin.actorType, 'ADMIN');
+  assert.equal(admin.actorId, 7);
+  assert.equal(admin.actorName, '관리자');
+  assert.equal(
+    auditEvent(operation, {
+      ...request,
+      auditActorType: 'AI',
+      admin: { adminUserSeq: 7, name: '관리자' },
+    }).actorId,
+    null,
+  );
+});

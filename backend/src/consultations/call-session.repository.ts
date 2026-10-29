@@ -9,9 +9,9 @@ export class CallSessionRepository {
   async ensureCall(
     client: PoolClient,
     input: CallIdentityDto & { callerPhoneNumber: string },
-  ): Promise<number> {
+  ): Promise<{ id: number; created: boolean }> {
     const phone = callerPhone(input.callerPhoneNumber);
-    await client.query(
+    const inserted = await client.query(
       `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at)
        VALUES($1,$2,$3) ON CONFLICT(provider_call_id) DO NOTHING`,
       [input.providerCallId, phone, input.incomingAt],
@@ -30,6 +30,6 @@ export class CallSessionRepository {
         'INVALID_STATE',
         '같은 세션의 발신번호·수신 이벤트 시각은 변경할 수 없습니다.',
       );
-    return call.id;
+    return { id: call.id, created: inserted.rowCount === 1 };
   }
 }

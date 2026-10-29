@@ -2126,6 +2126,21 @@ test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result wi
   assert.equal(stored.caller_phone_number, '01000000001');
   assert.equal(stored.incoming_at.toISOString(), input.call.incomingAt.replace('00Z', '00.000Z'));
   assert.equal(stored.order_seq, data.orderSeq);
+  const events = (
+    await pool.query(
+      "SELECT action,actor_type,actor_seq,actor_name FROM audit_logs WHERE request_id=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+      [response.headers.get('x-request-id')],
+    )
+  ).rows;
+  assert.deepEqual(
+    events.map((event) => event.action),
+    ['CALL_STARTED', 'ORDER_CREATED', 'ORDER_SUBMISSION_STARTED', 'ORDER_SUBMISSION_ACCEPTED'],
+  );
+  assert.ok(
+    events.every(
+      (event) => event.actor_type === 'AI' && event.actor_seq === null && event.actor_name === 'AI',
+    ),
+  );
   assert.deepEqual(
     (await (await aiCreate(undefined, { ...input, outcome: 'CANCELLED' }, key, 1)).json()).data,
     data,
@@ -3255,6 +3270,13 @@ test('call context reuses one session across retries and rejects changed caller 
     responses.map(async (response) => (await response.json()).data.callSessionSeq),
   );
   assert.equal(new Set(ids).size, 1);
+  const starts = (
+    await pool.query(
+      "SELECT actor_type,actor_name FROM audit_logs WHERE target_type='CALL_SESSION' AND target_seq=$1 AND action='CALL_STARTED'",
+      [ids[0]],
+    )
+  ).rows;
+  assert.deepEqual(starts, [{ actor_type: 'AI', actor_name: 'AI' }]);
   const sameInstant = {
     ...identity,
     incomingAt: new Date(Date.parse(identity.incomingAt) + 9 * 3600000)

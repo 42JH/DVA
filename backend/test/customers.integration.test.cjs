@@ -415,3 +415,81 @@ test('OpenAPI exposes four customer operations, minimal envelopes and conditiona
     ['data', 'hasNext'],
   );
 });
+
+test('customer create/name/status writes record AI or the administrator name without retaining request payloads', async () => {
+  const created = await create();
+  assert.equal(created.status, 201);
+  const id = (await created.json()).data.customerSeq;
+  const renamed = await patch(id, { name: 'AI 수정 이름' });
+  assert.equal(renamed.status, 204);
+  const withdrawn = await patch(id, { status: 'WITHDRAWN' }, adminHeaders());
+  assert.equal(withdrawn.status, 204);
+  const adminCreated = await create(undefined, undefined, base, adminHeaders());
+  assert.equal(adminCreated.status, 201);
+  for (const [response, action, actorType] of [
+    [created, 'CUSTOMER_CREATED', 'AI'],
+    [renamed, 'CUSTOMER_UPDATED', 'AI'],
+    [withdrawn, 'CUSTOMER_UPDATED', 'ADMIN'],
+    [adminCreated, 'CUSTOMER_CREATED', 'ADMIN'],
+  ]) {
+    const rows = (
+      await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+        response.headers.get('x-request-id'),
+      ])
+    ).rows;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].action, action);
+    assert.equal(rows[0].actor_type, actorType);
+    assert.equal(rows[0].actor_seq, actorType === 'AI' ? null : adminId);
+    assert.equal(rows[0].actor_name, actorType === 'AI' ? 'AI' : '고객 테스트');
+    assert.deepEqual(rows[0].metadata, {});
+    assert.equal(rows[0].result, 'SUCCESS');
+  }
+});
+
+test('customer audit failure rolls back creation or changes; rejected sessions never fall back to AI', async () => {
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService);
+  const original = audit.recordSuccess;
+  const existing = await register({ name: '원래 이름', phoneNumber: phone() });
+  const input = { name: '저장 실패', phoneNumber: phone() };
+  audit.recordSuccess = async () => {
+    throw new Error('simulated audit failure');
+  };
+  try {
+    for (const response of [await create(input), await patch(existing, { name: '롤백될 이름' })]) {
+      await error(response, 500, 'INTERNAL_ERROR');
+      const rows = (
+        await pool.query('SELECT * FROM audit_logs WHERE request_id=$1', [
+          response.headers.get('x-request-id'),
+        ])
+      ).rows;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].actor_type, 'AI');
+      assert.equal(rows[0].result, 'FAILED');
+    }
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal(
+    (await pool.query('SELECT 1 FROM customers WHERE phone_number=$1', [input.phoneNumber]))
+      .rowCount,
+    0,
+  );
+  assert.equal(
+    (await pool.query('SELECT name FROM customers WHERE customer_seq=$1', [existing])).rows[0].name,
+    '원래 이름',
+  );
+  const denied = await patch(
+    existing,
+    { name: '실패' },
+    { Origin: origin, Cookie: 'dva_session=invalid' },
+  );
+  await error(denied, 401, 'UNAUTHORIZED');
+  const rows = (
+    await pool.query('SELECT actor_type,result FROM audit_logs WHERE request_id=$1', [
+      denied.headers.get('x-request-id'),
+    ])
+  ).rows;
+  assert.deepEqual(rows, [{ actor_type: 'SYSTEM', result: 'DENIED' }]);
+});

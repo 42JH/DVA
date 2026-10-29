@@ -721,7 +721,8 @@ test('audit success is atomic with writes and contains no address or phone; fail
     ])
   ).rows;
   assert.equal(audit.length, 1);
-  assert.equal(audit[0].actor_type, 'SYSTEM');
+  assert.equal(audit[0].actor_type, 'AI');
+  assert.equal(audit[0].actor_name, 'AI');
   assert.equal(audit[0].target_seq, p.personalPinSeq);
   assert.deepEqual(audit[0].metadata, {});
   const service = app.get(AuditService);

@@ -106,6 +106,7 @@ export class PinsService {
     return this.audit.recordSuccess(
       {
         actorId: adminId,
+        actorType: adminId === null ? 'AI' : 'ADMIN',
         targetId: id,
         targetType,
         action: `${targetType}_${created ? 'CREATED' : 'UPDATED'}`,

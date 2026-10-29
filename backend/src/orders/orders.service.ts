@@ -211,7 +211,20 @@ export class OrdersService {
     const prepared = await this.write(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
-      const callId = input.call ? await this.calls.ensureCall(client, input.call) : headerId;
+      const session = input.call ? await this.calls.ensureCall(client, input.call) : undefined;
+      const callId = session?.id ?? headerId;
+      if (session?.created)
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            action: 'CALL_STARTED',
+            targetType: 'CALL_SESSION',
+            targetId: session.id,
+            requestId,
+          },
+          client,
+        );
       if (input.call && headerId !== null && headerId !== callId)
         throw new ApiException(
           409,
@@ -230,6 +243,7 @@ export class OrdersService {
           await this.audit.recordSuccess(
             {
               actorId: adminId,
+              actorType: adminId === null ? 'AI' : 'ADMIN',
               targetId: previous.orderSeq,
               targetType: 'ORDER',
               action: 'ORDER_SUBMISSION_REVIEW_REQUIRED',
@@ -279,6 +293,7 @@ export class OrdersService {
       await this.audit.recordSuccess(
         {
           actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
           targetId: result.orderSeq,
           action: 'ORDER_CREATED',
           targetType: 'ORDER',
@@ -292,6 +307,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: result.orderSeq,
             targetType: 'ORDER',
             action: 'ORDER_CANCELLED',
@@ -395,7 +411,14 @@ export class OrdersService {
       }
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
       await this.audit.recordSuccess(
-        { actorId: adminId, targetId: id, action: 'ORDER_UPDATED', targetType: 'ORDER', requestId },
+        {
+          actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
+          targetId: id,
+          action: 'ORDER_UPDATED',
+          targetType: 'ORDER',
+          requestId,
+        },
         client,
       );
       return this.repository.currentVersion(client, id);
@@ -462,6 +485,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: parcel.orderParcelSeq,
             targetType: 'ORDER_PARCEL',
             action: 'ORDER_PARCEL_CANCELLED',
@@ -480,6 +504,7 @@ export class OrdersService {
         await this.audit.recordSuccess(
           {
             actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
             targetId: id,
             targetType: 'ORDER',
             action: 'ORDER_CANCELLED',
@@ -499,7 +524,13 @@ export class OrdersService {
     callSessionHeader?: string,
   ): Promise<SubmittedOrderDto> {
     const callId = this.callId(adminId, callSessionHeader);
-    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
+    const event = {
+      actorId: adminId,
+      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
+      targetId: id,
+      targetType: 'ORDER',
+      requestId,
+    };
     const prepared = await this.write<
       SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
     >(async (client) => {
@@ -598,6 +629,7 @@ export class OrdersService {
     await this.audit.recordSuccess(
       {
         actorId: adminId,
+        actorType: adminId === null ? 'AI' : 'ADMIN',
         targetId: id,
         targetType: 'ORDER',
         action: 'ORDER_SUBMISSION_STARTED',
@@ -614,7 +646,13 @@ export class OrdersService {
     requestId: string,
     payload: ReturnType<typeof dverPayload>,
   ): Promise<SubmittedOrderDto> {
-    const event = { actorId: adminId, targetId: id, targetType: 'ORDER', requestId };
+    const event = {
+      actorId: adminId,
+      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
+      targetId: id,
+      targetType: 'ORDER',
+      requestId,
+    };
     // SUBMITTING을 COMMIT한 요청만 전송하며 이 구간에는 DB 트랜잭션이 없다.
     let result: DverResult;
     try {
