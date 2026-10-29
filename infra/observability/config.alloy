@@ -1,0 +1,168 @@
+logging {
+	level  = "warn"
+	format = "json"
+}
+
+discovery.docker "application" {
+	host             = "http://docker-reader:2375"
+	refresh_interval = "15s"
+
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=" + sys.env("APP_PROJECT")]
+	}
+}
+
+discovery.relabel "logs" {
+	targets = discovery.docker.application.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "backend|db|nginx"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		target_label = "environment"
+		replacement  = "production"
+	}
+
+	rule {
+		action = "labelkeep"
+		regex  = "service|environment|__.*"
+	}
+}
+
+loki.source.docker "application" {
+	host             = "http://docker-reader:2375"
+	targets          = discovery.relabel.logs.output
+	forward_to       = [loki.process.privacy.receiver]
+	refresh_interval = "15s"
+}
+
+loki.process "privacy" {
+	// 원본 출력에 민감정보가 섞여도 중앙 저장소에는 선택한 필드만 전달한다.
+	stage.match {
+		selector = "{service=\"backend\"}"
+
+		stage.json {
+			expressions    = {event = "event", requestId = "requestId", orderSeq = "orderSeq", callSessionSeq = "callSessionSeq", level = "level", route = "route", method = "method", statusCode = "statusCode", durationMs = "durationMs", outcome = "outcome", reason = "reason", receipt = "receipt"}
+			drop_malformed = true
+		}
+
+		stage.template {
+			source   = "sanitized"
+			template = `{{ dict "event" (.event | default "") "requestId" (.requestId | default "") "orderSeq" (.orderSeq | default "") "callSessionSeq" (.callSessionSeq | default "") "level" (.level | default "") "route" (.route | default "") "method" (.method | default "") "statusCode" (.statusCode | default "") "durationMs" (.durationMs | default "") "outcome" (.outcome | default "") "reason" (.reason | default "") "receipt" (.receipt | default "") | toJson }}`
+		}
+
+		stage.output {
+			source = "sanitized"
+		}
+	}
+
+	stage.match {
+		selector = "{service=\"db\"}"
+		// SQLSTATE만 보존한다. PostgreSQL 오류 문장 자체에도 전화번호가 들어갈 수 있다.
+		stage.regex {
+			expression = "(?P<sqlstate>[0-9A-Z]{5}) (?P<level>LOG|WARNING|ERROR|FATAL|PANIC):"
+		}
+
+		stage.template {
+			source   = "sanitized"
+			template = `{{ dict "event" "database_event" "sqlstate" (.sqlstate | default "") "level" (.level | default "") | toJson }}`
+		}
+
+		stage.output {
+			source = "sanitized"
+		}
+	}
+
+	stage.match {
+		selector = "{service=\"nginx\"}"
+
+		stage.json {
+			expressions    = {event = "event", statusCode = "statusCode", durationSeconds = "durationSeconds", requestId = "requestId"}
+			drop_malformed = true
+		}
+
+		stage.template {
+			source   = "sanitized"
+			template = `{{ dict "event" "proxy_request" "statusCode" (.statusCode | default "") "durationSeconds" (.durationSeconds | default "") "requestId" (.requestId | default "") | toJson }}`
+		}
+
+		stage.output {
+			source = "sanitized"
+		}
+	}
+
+	stage.label_keep {
+		values = ["service", "environment"]
+	}
+	forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+	endpoint {
+		url                 = "http://loki:3100/loki/api/v1/push"
+		min_backoff_period  = "1s"
+		max_backoff_period  = "30s"
+		max_backoff_retries = 10
+	}
+}
+
+prometheus.exporter.unix "host" {
+	procfs_path    = "/host/proc"
+	sysfs_path     = "/host/sys"
+	set_collectors = ["cpu", "meminfo", "loadavg", "diskstats", "stat", "time", "uname"]
+}
+
+prometheus.exporter.blackbox "services" {
+	config = "modules:\n  http_2xx:\n    prober: http\n    timeout: 3s\n    http:\n      preferred_ip_protocol: ip4\n      valid_status_codes: [200]\n      follow_redirects: false\n"
+
+	target {
+		name    = "nginx"
+		address = "http://nginx/nginx-health"
+		module  = "http_2xx"
+		labels  = {service = "nginx"}
+	}
+
+	target {
+		name    = "backend"
+		address = "http://backend:3000/health"
+		module  = "http_2xx"
+		labels  = {service = "backend"}
+	}
+}
+
+prometheus.scrape "host" {
+	targets         = prometheus.exporter.unix.host.targets
+	job_name        = "host"
+	scrape_interval = "15s"
+	forward_to      = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.scrape "services" {
+	targets         = prometheus.exporter.blackbox.services.targets
+	job_name        = "service_probe"
+	scrape_interval = "15s"
+	forward_to      = [prometheus.relabel.services.receiver]
+}
+
+prometheus.relabel "services" {
+	rule {
+		target_label = "job"
+		replacement  = "service_probe"
+	}
+	forward_to = [prometheus.remote_write.local.receiver]
+}
+
+prometheus.remote_write "local" {
+	endpoint {
+		url = "http://prometheus:9090/api/v1/write"
+	}
+}
