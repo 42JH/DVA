@@ -33,6 +33,8 @@ def rd():
     rows += [("서울특별시", "강남구", f"테헤란로{i}길") for i in range(1, 41)]
     # 가나다 길, 숫자 글자로만 된 도로명 (테스트용 가상 배치)
     rows += [("서울특별시", "강남구", r) for r in ("개봉로1나길", "개봉로1다길", "개봉로1라길", "오천3길", "오천길")]
+    # 도로명 안에 숫자가 있는 도로(이펜1로)와 비슷한 이름들
+    rows += [("서울특별시", "양천구", r) for r in ("신정이펜1로", "신정이펜2로", "신정로", "신정중앙로")]
     return RoadDict(rows)
 
 
@@ -74,6 +76,12 @@ def rd():
     "서울 강남구 개봉로1따 길 22": ("강남구", "개봉로1다길", "22"),
     "서울 강남구 오천3길 21-2": ("강남구", "오천3길", "21-2"),
     "서울 강남구 오천길 21": ("강남구", "오천길", "21"),
+    # 모델이 "이펜일로"를 숫자로 옮겨 적은 경우(2026-10-28 통화)
+    "서울시 양천구 신정 201로 50": ("양천구", "신정이펜1로", "50"),
+    "서울시 양천구 신정 2-1로 50": ("양천구", "신정이펜1로", "50"),
+    "서울 양천구 신정이펜일로 50": ("양천구", "신정이펜1로", "50"),
+    "서울 양천구 신정이팬1로 50": ("양천구", "신정이펜1로", "50"),
+    "서울 양천구 신정이펜이로 50": ("양천구", "신정이펜2로", "50"),
 }.items())
 def test_candidates_correct_misheard_road(rd, heard, want):
     got = candidates(rd, heard)
@@ -182,6 +190,12 @@ def test_correct_statuses(db):
     assert correct(db, "서울 강남구 테헤란로 99999") == {"status": "not_found", "address": None, "candidates": []}
     assert correct(db, "서울 강남구 없는로 12")["status"] == "not_found"
     assert correct(db, "전북 익산시 왕궁로 100")["address"] == "전북특별자치도 익산시 왕궁면 왕궁로 100"  # 읍면은 주소에 들어감
+    # 도로명을 많이 고치고 건물번호까지 바꿔야 맞는 주소는 억지로 맞추지 않는다(없는 주소). 번호가 맞으면 후보로 둔다
+    weak = correct(db, "서울 강남구 대해남노 112")
+    assert weak["status"] == "not_found" and weak["weak"] == "서울특별시 강남구 테헤란로 111"
+    assert correct(db, "서울 강남구 대해남노 211")["candidates"] == ["서울특별시 강남구 테헤란로 211"]
+    # 연음으로 받아쓴 길 번호("구길" -> "국일")
+    assert correct(db, "경북 구미시 인동 국일 7-3")["address"] == "경상북도 구미시 인동9길 7-3"
 
 
 def test_jibun_address_resolves_to_road_address(db):
@@ -231,7 +245,9 @@ def test_ambiguous_address_is_decided_by_server_without_asking(corrector, db):
 
 def test_not_found_address_is_recorded_as_heard(corrector):
     call = make_call()
-    assert record(call, sender_address="테헤란로 212")["ok"]  # 지역을 말하지 않아 찾지 못함
+    assert record(call, sender_address="테헤란로 212")["ok"]  # 지역을 말하지 않아 찾지 못함 → 한 번 다시 묻는다
+    assert call.order.sender_address is None
+    assert record(call, sender_address="테헤란로 212")["ok"]  # 두 번째도 못 찾으면 들은 그대로
     assert call.order.sender_address == "테헤란로 212"
 
 
@@ -257,6 +273,7 @@ def test_address_stage_resolves_then_returns(corrector):
 def test_address_stage_from_confirming_goes_back_when_detail_dropped(corrector):
     """마지막 확인에서 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 다시 받기."""
     call = make_call()
+    call.address_retry |= {"sender_address", "receiver_address"}  # 작은 시험 DB에 없는 주소: 이미 한 번 다시 물은 것으로
     assert record(call, **FULL_ORDER)["ok"]
     call.payment_method = "credit"
     run(engine.apply(call, ["order.updated"]))
@@ -315,3 +332,27 @@ def test_kakao_geocode_off_without_key(monkeypatch):
     monkeypatch.delenv("KAKAO_REST_API_KEY", raising=False)
     transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": [KAKAO_DOC]}))
     assert run(REAL_GEOCODE("서울", 3.0, transport)) is None and not seen
+
+
+def test_linked_gil_number_is_unlinked_only_when_not_found():
+    from app.address.corrector import unlink_gil
+    assert unlink_gil("경북 구미시 인동 국일 7-3") == "경북 구미시 인동  구길 7-3"
+    assert unlink_gil("경북 구미시 인동국일 7-3") == "경북 구미시 인동 구길 7-3"
+    assert unlink_gil("서울 강남구 테헤란로 212") is None
+    assert unlink_gil("인천 남동구 만수일로 3") is None  # 받침 ㄱ이 아니면 그대로
+
+
+def test_not_found_address_is_asked_once_more(corrector, monkeypatch):
+    async def none(text):
+        return {"status": "not_found", "address": None, "candidates": []}
+
+    monkeypatch.setattr(address, "correct", none)
+    call = make_call()
+    run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 인동 국일 7-3"}, ensure_ascii=False), "c1"))
+    assert call.order.receiver_address is None and "receiver_address" in engine.missing(call)
+    call.order.sender_name, call.order.sender_phone = "김철수", "01012345678"
+    call.order.sender_address, call.order.sender_address_detail = "서울 강남구 테헤란로 212", ""
+    assert engine.missing(call)[0] == "receiver_address"
+    assert "찾지 못했습니다" in engine.next_text(call)
+    run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 없는로 1"}, ensure_ascii=False), "c2"))
+    assert call.order.receiver_address == "경북 구미시 없는로 1"  # 두 번째는 들은 그대로(접수는 미완료로)

@@ -26,6 +26,8 @@ services:
       OPENAI_WEBHOOK_SECRET: ${OPENAI_WEBHOOK_SECRET:?Set OPENAI_WEBHOOK_SECRET in .env}
       # 백엔드 서버 API 주소(예: http://backend:3000). 인증 방식은 백엔드 담당자가 정한다
       BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
+      # true면 메모리 가짜 백엔드(재시작하면 데이터가 사라짐)
+      BACKEND_MOCK: ${BACKEND_MOCK:-false}
       # 확정 주소의 지번·동명·우편번호·좌표(접수 필수값). 비어 있으면 접수가 미완료로 넘어간다
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
       # 페르소나 연동 토큰(백엔드와 같은 값, 32자 이상). 비어 있으면 연동을 끄고 prompts/persona.md를 쓴다

@@ -4,7 +4,7 @@
 계약의 원문은 백엔드 문서다: `spec/orders.md`(주문 API), `spec/ai-pbx-recordings.md`(AI·PBX 연동). 백엔드 저장소 `develop-backend`의 `docs/api/`·`backend/src/orders/`에서 옮겨 왔다. 이 문서에는 AI 서버가 그 계약을 어떻게 쓰는지만 적는다. 계약이 바뀌면 원문을 다시 받아 오고 이 문서와 `app/backend_api.py`를 같이 고친다.
 
 - 구현: `app/backend_api.py`(클라이언트·본문 만들기), 테스트 `tests/test_backend_api.py`(가짜 HTTP)
-- 가짜 백엔드: `app/mock_backend.py`의 `MockBackend`. 테스트와 `[backend] mock = true` 배포에서 쓴다. 통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값 같은 주요 검증만 흉내 낸다.
+- 가짜 백엔드: `app/mock_backend.py`의 `MockBackend`. 테스트와 환경변수 `BACKEND_MOCK=true` 배포에서 쓴다. 통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값 같은 주요 검증만 흉내 낸다.
 - 주소: 환경변수 `BACKEND_API_URL`(같은 Docker 네트워크에서 `http://backend:3000`). 설정: `config/server.toml` `[backend]`
 - HTTP: `openai`에 딸린 `httpx2`(의존성 추가 없음)
 - 인증: MVP 합의로 아래 두 호출은 인증이 없다(백엔드 Jira S15P31D109-135에서 추가 예정).

@@ -45,7 +45,6 @@ class ProgressConfig(_Strict):
 
 
 class BackendConfig(_Strict):
-    mock: bool = False
     timeout_sec: float = Field(gt=0)
     submit_timeout_sec: float = Field(gt=0)
     submit_retry_sec: float = Field(ge=0)
@@ -142,6 +141,7 @@ class Texts(_Strict):
     empty_value: str
     classifier: str
     answer_error: str
+    record_heard: str
 
 
 def load_texts(path: Path | None = None) -> Texts:

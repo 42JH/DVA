@@ -1,6 +1,6 @@
-"""메모리 가짜 백엔드. app.backend_api.BackendAPI와 같은 메서드. 테스트와 config/server.toml [backend] mock = true에서 쓴다.
+"""메모리 가짜 백엔드. app.backend_api.BackendAPI와 같은 메서드. 테스트와 환경변수 BACKEND_MOCK=true에서 쓴다.
 새 계약(고객 확인·통화 결과)은 백엔드의 주요 검증(통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값)만 흉내 낸다.
-shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 mock = false."""
+shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
 import itertools
 

@@ -2,8 +2,7 @@
 결과에 따른 다음 안내는 코드가 정한다(spec/scenario.md)."""
 
 from app.flow.engine import ENTERED, Stage, Transition
-from app.flow.stages._common import (COMMON_TOOLS, no_saved_destinations, place_text, registered_without_recent,
-                                     reset_for_new_order)
+from app.flow.stages._common import COMMON_TOOLS, is_registered, no_saved_destinations, place_text, reset_for_new_order
 
 FIXED = {
     "name_only": "받는 분 이름만 말했고 그 이름의 저장된 곳이 여러 곳",
@@ -54,7 +53,7 @@ STAGES = [
         ),
         choices=choices,
         on_answer=on_answer,
-        start_if=registered_without_recent,
+        start_if=is_registered,
         on_enter=reset_for_new_order,
     ),
 ]

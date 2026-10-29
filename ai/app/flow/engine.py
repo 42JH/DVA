@@ -110,8 +110,10 @@ def validate(tool_names: set[str], texts: Any, sample_vars: dict) -> None:
         if s.enter_on and not s.enter_from:
             errors.append(f"{s.name}: enter_from 없음")
         names = [s.name] + [f"{s.name}.{v}" for v in s.variants]
-        templates = [texts.stages.get(n) for n in names] + [texts.fields.get(f) for f in s.fields]
-        names += list(s.fields)
+        # 항목 문구와 고객 유형별 문구("sender_name.registered")
+        field_keys = list(s.fields) + [k for k in texts.fields if k.partition(".")[0] in s.fields and "." in k]
+        templates = [texts.stages.get(n) for n in names] + [texts.fields.get(f) for f in field_keys]
+        names += field_keys
         for name, tpl in zip(names, templates):
             if tpl is None:
                 errors.append(f"문구 없음: {name}")
@@ -190,10 +192,19 @@ def missing(ctx: Any) -> list[str]:
     return [f for f in fields if not ctx.field_done(f)]
 
 
+def field_text(ctx: Any, field: str) -> str:
+    """항목 질문 문구. 상황별 문구("항목.retry" 못 찾은 주소 다시 묻기, "항목.registered" 등록 고객)가 있으면 그것."""
+    fields = ctx.texts.fields
+    for variant in ctx.field_variants(field):
+        if f"{field}.{variant}" in fields:
+            return fields[f"{field}.{variant}"]
+    return fields[field]
+
+
 def next_text(ctx: Any) -> str:
     m = missing(ctx)
     if m:
-        tpl = ctx.texts.fields[m[0]]
+        tpl = field_text(ctx, m[0])
     else:
         variant = ctx.stage_variant(ctx.flow.stage)
         tpl = ctx.texts.stages[f"{ctx.flow.stage}.{variant}" if variant else ctx.flow.stage]
@@ -255,7 +266,7 @@ def progress_text(ctx: Any, max_chars: int) -> str:
     nxt = next_text(ctx)
     m = missing(ctx)
     # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다
-    then = texts.progress_then.format(next2=texts.fields[m[1]].format(**ctx.text_vars())) if len(m) > 1 else ""
+    then = texts.progress_then.format(next2=field_text(ctx, m[1]).format(**ctx.text_vars())) if len(m) > 1 else ""
     items = ctx.recorded()
     for cut in (None, 40, 24, 12, 6, 0):
         shown = [(k, v if cut is None else v[:cut]) for k, v in items] if cut != 0 else []

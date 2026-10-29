@@ -50,7 +50,7 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
             from openai import AsyncOpenAI
 
             openai_client = AsyncOpenAI()  # OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET
-        if backend_api is None and cfg.backend.mock:
+        if backend_api is None and os.environ.get("BACKEND_MOCK", "").lower() in ("1", "true"):
             from app.mock_backend import MockBackend
 
             logging.getLogger(__name__).warning("가짜 백엔드(메모리) 사용 중: 재시작하면 주문·배송지가 사라진다")

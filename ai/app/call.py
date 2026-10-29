@@ -127,9 +127,10 @@ class Call:
         self.delegation_mode = 'responses'
         self.backend_settings: dict = {}
         self.latest_delegation: str | None = None
+        self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
         self.delegations: dict[str, dict] = {}
-        self.event_types: set[str] = set()
-        self.persona_version: int | None = None  # 이 통화가 쓴 백엔드 페르소나 버전(None이면 로컬 기본값)  # 받은 sideband 이벤트 종류(처음 한 번만 로그)
+        self.event_types: set[str] = set()  # 받은 sideband 이벤트 종류(처음 한 번만 로그)
+        self.persona_version: int | None = None  # 이 통화가 쓴 백엔드 페르소나 버전(None이면 로컬 기본값)
         self.pending_context: dict[str, asyncio.Future] = {}
         self.input_ready = asyncio.Event()
 
@@ -163,6 +164,7 @@ class Call:
         self.from_saved: set[str] = set()  # 저장된 배송지·최근 배송으로 채운 항목(번호·상세주소는 읽지 않게 가린다)
         # 주소 확정(address 단계): 새로 기록돼 아직 주소DB로 확정하지 않은 주소 항목, 항목별 확정 결과(관제용)
         self.address_pending: set[str] = set()
+        self.address_retry: set[str] = set()  # 못 찾아 한 번 다시 물은 주소 항목(택배마다)
         self.address_results: dict[str, dict] = {}
 
     def use_place(self, role: str, place: Place) -> None:
@@ -190,6 +192,10 @@ class Call:
         if self.payment_method is None:
             due.append("payment_method")
         return due
+
+    def field_variants(self, field: str) -> list[str]:
+        """항목 질문 문구를 고를 상황(앞선 것 우선): 못 찾아 다시 묻는 주소, 고객 유형."""
+        return (["retry"] if field in self.address_retry else []) + [self.customer_type]
 
     def payment_options(self) -> dict[str, str]:
         """이 고객이 쓸 수 있는 결제 방식. 정산은 공통, 그룹카드는 기업 소속, 개인카드는 개인 고객(백엔드가 다시 검사)."""
@@ -254,7 +260,7 @@ class Call:
             "now": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
             "payment_options": " / ".join(self.payment_options().values()),
             "goodbye_message": biz.goodbye_message,
-            "recent_order": f"{_region(r.receiver_address)}의 {r.receiver_name} 님" if r else "",
+            "recent_origin": f"{r.sender_name} 님, {_region(r.sender_address)}" if r else "",
             "customer_name": self.display_name() or "없음",
             "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
             "caller": self.caller or "알 수 없음",
