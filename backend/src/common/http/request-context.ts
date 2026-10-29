@@ -2,6 +2,8 @@ import { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { isUUID } from 'class-validator';
 import { NextFunction, Request, Response } from 'express';
+import { logContext } from '../../observability/json-logger';
+import { recordHttp } from '../../observability/http-metrics';
 
 export const API_PREFIX = 'api';
 export type ContextRequest = Request & { requestId?: string };
@@ -22,15 +24,21 @@ export function requestContext(logger: Pick<Logger, 'log'>) {
       const route: unknown = request.route;
       const template =
         route && typeof route === 'object' && 'path' in route ? route.path : undefined;
-      logger.log({
+      const event = {
         event: 'http_request',
         requestId: request.requestId,
         method: request.method,
         route: typeof template === 'string' ? template : 'unmatched',
         statusCode: response.statusCode,
         durationMs: Math.round(performance.now() - start),
-      });
+      };
+      recordHttp(event.route, event.method, event.statusCode, event.durationMs);
+      try {
+        logger.log(event);
+      } catch {
+        /* 관측 장애로 완료된 응답을 실패시키지 않는다. */
+      }
     });
-    next();
+    logContext.run({ requestId: request.requestId }, next);
   };
 }

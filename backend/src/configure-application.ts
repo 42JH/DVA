@@ -36,6 +36,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
     exclude: [
       { path: 'health', method: RequestMethod.ALL },
       { path: 'health/ready', method: RequestMethod.ALL },
+      { path: 'internal/metrics', method: RequestMethod.ALL },
       { path: 'webhooks/pbx/call-ended', method: RequestMethod.ALL },
     ],
   });
