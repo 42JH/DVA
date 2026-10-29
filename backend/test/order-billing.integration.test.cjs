@@ -7,6 +7,8 @@ const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
+const { DverClient } = require('../dist/orders/dver.client');
+const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -20,7 +22,9 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 });
-let app, base, cookie, customerId, callId;
+let app, base, cookie, customerId, callId, payments;
+let dverRequests = [];
+let dverReply = 'ACCEPTED';
 const origin = 'http://localhost:5173';
 async function request(path, body, ai = false, method = 'POST') {
   const response = await fetch(base + path, {
@@ -51,6 +55,15 @@ before(async () => {
     )
   ).rows[0].call_session_seq;
   app = await NestFactory.create(AppModule, { logger: false });
+  payments = app.get(OrderPaymentsService);
+  const dver = app.get(DverClient);
+  dver.ensureConfigured = () => {};
+  dver.submit = async (payload) => {
+    dverRequests.push(structuredClone(payload));
+    return dverReply === 'ACCEPTED'
+      ? { status: 'ACCEPTED', parcelNo: 'MOCK0138', receivedAt: new Date().toISOString() }
+      : { status: 'SUBMISSION_FAILED' };
+  };
   configureApplication(app, { log: () => {} });
   await app.listen(0, '127.0.0.1');
   base = (await app.getUrl()) + '/api';
@@ -61,6 +74,225 @@ before(async () => {
   });
   assert.equal(login.status, 200);
   cookie = login.headers.get('set-cookie').split(';')[0];
+});
+
+function finalBody(overrides = {}) {
+  const address = {
+    name: '결제 고객',
+    phoneNumber: '01000138001',
+    roadAddress: '검증로 1',
+    jibunAddress: '검증동 1',
+    detailAddress: '',
+    dongName: '검증동',
+    postalCode: '00138',
+    latitude: 37.5,
+    longitude: 127,
+  };
+  return {
+    customerSeq: customerId,
+    paymentMethodType: 'billing',
+    pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+    totalAmount: 12000,
+    parcels: [3000, 5000, 4000].map((notifiedPrice) => ({
+      origin: { ...address },
+      destination: { ...address },
+      smallBoxCount: 1,
+      itemPrice: 0,
+      notifiedPrice,
+    })),
+    ...overrides,
+  };
+}
+async function createFinal(body = finalBody(), ai = false, key = randomUUID()) {
+  const response = await fetch(base + (ai ? '/orders' : '/admin/orders'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': key,
+      ...(ai ? {} : { Cookie: cookie, Origin: origin }),
+    },
+    body: JSON.stringify(
+      ai
+        ? {
+            ...body,
+            outcome: 'COMPLETE',
+            call: {
+              providerCallId: randomUUID(),
+              callerPhoneNumber: '01000138001',
+              incomingAt: new Date().toISOString(),
+            },
+          }
+        : body,
+    ),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+test('personal card waits, partial cancellation replaces the request, and only the remaining amount can complete', async () => {
+  const count = dverRequests.length;
+  const created = await createFinal(finalBody(), true);
+  assert.equal(created.status, 201, JSON.stringify(created.body));
+  const order = created.body.data;
+  assert.equal(order.status, 'notPaid');
+  assert.equal(order.totalAmount, 12000);
+  assert.equal(dverRequests.length, count);
+  const original = order.paymentRequest;
+  let detail = (await request(`/orders/${order.orderSeq}`, undefined, true, 'GET')).body.data;
+  assert.equal(
+    (
+      await request(
+        `/orders/${order.orderSeq}`,
+        {
+          expectedVersion: detail.version,
+          parcels: [{ orderParcelSeq: detail.parcels[0].orderParcelSeq, clientComment: '변경' }],
+        },
+        true,
+        'PATCH',
+      )
+    ).status,
+    409,
+  );
+  const parcel = detail.parcels[1].orderParcelSeq;
+  assert.equal(
+    (await request(`/orders/${order.orderSeq}/parcels/cancel`, { orderParcelSeqs: [parcel] }, true))
+      .status,
+    204,
+  );
+  detail = (await request(`/orders/${order.orderSeq}`, undefined, true, 'GET')).body.data;
+  assert.equal(detail.totalAmount, 7000);
+  assert.equal(detail.paymentRequest.amount, 7000);
+  assert.notEqual(detail.paymentRequest.paymentRequestId, original.paymentRequestId);
+  assert.equal(detail.paymentRequest.expiresAt, original.expiresAt);
+  await assert.rejects(
+    () => payments.beginPayment(original.paymentRequestId, 12000),
+    (e) => e.getStatus() === 409,
+  );
+  await assert.rejects(
+    () => payments.beginPayment(detail.paymentRequest.paymentRequestId, 12000),
+    (e) => e.getStatus() === 409,
+  );
+  const current = detail.paymentRequest.paymentRequestId;
+  await payments.beginPayment(current, 7000);
+  assert.equal((await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status, 409);
+  await assert.rejects(
+    () => payments.confirmPayment(current, 12000, 'test-' + current, randomUUID()),
+    (e) => e.getStatus() === 409,
+  );
+  const result = await payments.confirmPayment(current, 7000, 'test-' + current, randomUUID());
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(dverRequests.length, count + 1);
+  assert.deepEqual(
+    dverRequests.at(-1).outboundParcels.map((p) => p.notifiedPrice),
+    [3000, 4000],
+  );
+  assert.equal(
+    (await payments.confirmPayment(current, 7000, 'test-' + current, randomUUID())).status,
+    'ACCEPTED',
+  );
+  assert.equal(dverRequests.length, count + 1);
+  assert.equal((await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status, 409);
+  const rows = await pool.query(
+    "SELECT actor_type FROM audit_logs WHERE target_seq=$1 AND action='ORDER_PAYMENT_COMPLETED'",
+    [order.orderSeq],
+  );
+  assert.deepEqual(rows.rows, [{ actor_type: 'SYSTEM' }]);
+  const shipments = await pool.query(
+    'SELECT s.status FROM shipments s JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1',
+    [order.orderSeq],
+  );
+  assert.deepEqual(shipments.rows, [{ status: 'paid' }, { status: 'paid' }]);
+});
+
+test('monthly and group settlement require their own eligibility while corporate personal card remains allowed', async () => {
+  const company = (await request('/companies', { name: '결제 자격 기업' })).body.data
+    .organizationSeq;
+  const department = (await request(`/companies/${company}/departments`, { name: '정산팀' })).body
+    .data.departmentSeq;
+  const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
+  const customer = (await request('/customers', { name: '정산 구성원', phoneNumber: phone })).body
+    .data.customerSeq;
+  assert.equal(
+    (
+      await request(`/companies/${company}/members`, {
+        customerSeq: customer,
+        employeeNo: 'B138',
+        role: 'MEMBER',
+        departmentSeq: department,
+      })
+    ).status,
+    204,
+  );
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'credit' }))).status,
+    403,
+  );
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })))
+      .status,
+    403,
+  );
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer }))).body.data.status,
+    'notPaid',
+  );
+  await request(`/companies/${company}`, { monthlyBillingEnabled: true }, false, 'PATCH');
+  const monthly = await createFinal(
+    finalBody({ customerSeq: customer, paymentMethodType: 'credit' }),
+  );
+  assert.equal(monthly.body.data.status, 'ACCEPTED', JSON.stringify(monthly.body));
+  assert.equal(monthly.body.data.paymentRequest, null);
+  await request(`/departments/${department}`, { groupBillingEnabled: true }, false, 'PATCH');
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })))
+      .body.data.status,
+    'ACCEPTED',
+  );
+  assert.equal((await createFinal(finalBody({ paymentMethodType: 'groupBilling' }))).status, 403);
+});
+
+test('submission failure is retried on the same paid order without repeating payment or completed submissions', async () => {
+  await request(`/customers/${customerId}`, { monthlyBillingEnabled: true }, false, 'PATCH');
+  dverReply = 'SUBMISSION_FAILED';
+  const failed = await createFinal(finalBody({ paymentMethodType: 'credit' }));
+  assert.equal(failed.body.data.status, 'SUBMISSION_FAILED');
+  const id = failed.body.data.orderSeq;
+  const count = dverRequests.length;
+  dverReply = 'ACCEPTED';
+  assert.equal((await request(`/admin/orders/${id}/retry`, {})).body.data.status, 'ACCEPTED');
+  assert.equal(dverRequests.length, count + 1);
+  assert.equal((await request(`/admin/orders/${id}/retry`, {})).body.data.status, 'ACCEPTED');
+  assert.equal(dverRequests.length, count + 1);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action='ORDER_PAYMENT_COMPLETED' AND target_seq=$1",
+        [id],
+      )
+    ).rows[0].n,
+    1,
+  );
+  await request(`/customers/${customerId}`, { monthlyBillingEnabled: false }, false, 'PATCH');
+});
+
+test('cancellation and payment approval serialize and invalid sums never create a finalized order', async () => {
+  const invalid = finalBody({ totalAmount: 13000 });
+  assert.equal((await createFinal(invalid)).status, 422);
+  const missing = finalBody();
+  delete missing.parcels[0].notifiedPrice;
+  assert.equal((await createFinal(missing)).status, 422);
+  const order = (await createFinal()).body.data;
+  const [approval, cancel] = await Promise.allSettled([
+    payments.beginPayment(order.paymentRequest.paymentRequestId, 12000),
+    request(`/orders/${order.orderSeq}/cancel`, undefined, true),
+  ]);
+  if (approval.status === 'fulfilled') {
+    assert.equal(cancel.value.status, 409);
+    await payments.releaseDeclinedPayment(order.paymentRequest.paymentRequestId);
+    assert.equal((await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status, 204);
+  } else {
+    assert.equal(approval.reason.getStatus(), 409);
+    assert.equal(cancel.value.status, 204);
+  }
 });
 after(async () => {
   await app?.close();

@@ -1,4 +1,4 @@
-import { Body, Controller, ParseUUIDPipe, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, Param, ParseUUIDPipe, Post, Req, Res } from '@nestjs/common';
 import {
   ApiAcceptedResponse,
   ApiBadRequestResponse,
@@ -11,6 +11,7 @@ import {
   ApiHeader,
   ApiNotFoundResponse,
   ApiOperation,
+  ApiOkResponse,
   ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
@@ -25,6 +26,8 @@ import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { OrdersService } from './orders.service';
 import { OrderRequestKey } from './order-request-key';
+import { OrderIdParamsDto } from './dto/order-query.dto';
+import { SubmittedOrderDto } from './dto/submit-order.dto';
 
 @ApiTags('Admin Orders')
 @ApiCookieAuth('adminSession')
@@ -33,6 +36,28 @@ import { OrderRequestKey } from './order-request-key';
 @Controller('admin/orders')
 export class AdminOrdersController {
   constructor(private readonly orders: OrdersService) {}
+
+  @Post(':id/retry')
+  @HttpCode(200)
+  @AuditOperation({ action: 'ORDER_RESUBMISSION_STARTED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '디버 접수 실패 주문 재접수',
+    description:
+      '결제된 같은 주문의 미취소 상세를 재전송합니다. 결제·월별 사용액을 다시 처리하지 않습니다. 처리 중·완료 주문은 현재 상태만 반환합니다.',
+  })
+  @ApiExtraModels(SubmittedOrderDto)
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        data: { $ref: getSchemaPath(SubmittedOrderDto) },
+        meta: { $ref: getSchemaPath(RequestMetaDto) },
+      },
+    },
+  })
+  retry(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
+    return this.orders.retry(params.id, request.admin!.adminUserSeq, request.requestId);
+  }
 
   @Post()
   @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })

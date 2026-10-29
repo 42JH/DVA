@@ -32,7 +32,7 @@ export class OrderSubmissionRepository {
   async markStale(client: PoolClient, id: number): Promise<boolean> {
     // shortcut: 중단된 접수는 재호출 때 확인 필요로 전환한다. 상시 감시가 필요해지면 별도 작업으로 이동한다.
     const result = await client.query(
-      `UPDATE orders SET status='REVIEW_REQUIRED' WHERE order_seq=$1 AND status='SUBMITTING'
+      `UPDATE orders SET status='SUBMISSION_FAILED' WHERE order_seq=$1 AND status='SUBMITTING'
        AND updated_at < clock_timestamp()-interval '1 minute'`,
       [id],
     );
@@ -42,7 +42,7 @@ export class OrderSubmissionRepository {
   async finish(client: PoolClient, id: number, result: DverResult): Promise<void> {
     const saved = await client.query(
       `UPDATE orders SET status=$2,parcel_no=$3,dver_received_at=$4
-       WHERE order_seq=$1 AND status IN ('SUBMITTING','REVIEW_REQUIRED')`,
+       WHERE order_seq=$1 AND status IN ('SUBMITTING','SUBMISSION_FAILED')`,
       [
         id,
         result.status,
@@ -55,11 +55,11 @@ export class OrderSubmissionRepository {
     if (result.status === 'ACCEPTED') {
       await client.query(
         `WITH created AS (
-           INSERT INTO shipments(order_parcel_seq,tracking_number)
-           SELECT order_parcel_seq,'DVA-'||gen_random_uuid()::text FROM order_parcels
+           INSERT INTO shipments(order_parcel_seq,tracking_number,status)
+           SELECT order_parcel_seq,'DVA-'||gen_random_uuid()::text,'paid' FROM order_parcels
            WHERE order_seq=$1 AND status='ACTIVE' RETURNING shipment_seq
          ) INSERT INTO shipment_status_history(shipment_seq,request_id,to_status,actor_type)
-           SELECT shipment_seq,gen_random_uuid(),'notPaid','SYSTEM' FROM created`,
+           SELECT shipment_seq,gen_random_uuid(),'paid','SYSTEM' FROM created`,
         [id],
       );
     }

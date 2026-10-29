@@ -97,12 +97,16 @@ Table company_pins {
 // End of customer service
 
 Table orders {
+  payment_due_at timestamptz [note: '최초 결제 대기 시작 +24시간. 부분 취소 후에도 유지']
+  paid_at timestamptz [note: '결제 완료 시각']
+  billing_organization_seq integer [ref: > organizations.organization_seq]
+  billing_department_seq integer
   total_amount integer [note: '미취소 상세의 배송비 합계. 전체 취소 0원, 수집 중 미확정 null']
   creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
   creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '연결 대상 ID']
-  payment_method_type text [not null, default: 'credit', note: '디버 API 결제 방식. 기본 credit(월정산)']
+  payment_method_type text [not null, default: 'billing', note: 'billing 개인 카드 / credit 월결제 / groupBilling 부서 그룹결제']
   pickup_requested_at timestamptz [note: '고객이 요청한 수거 시각']
   status text [not null, default: 'COLLECTING', note: '업무 상태']
   version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
@@ -113,13 +117,28 @@ Table orders {
   checks {
     `creation_source IN ('AI','ADMIN','UNKNOWN')`
     `payment_method_type IN ('cat','billing','credit','groupBilling')`
-    `status IN ('COLLECTING','SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED','CANCELLED','EXPIRED')`
+    `status IN ('COLLECTING','notPaid','PAID','SUBMITTING','ACCEPTED','SUBMISSION_FAILED','CANCELLED')`
     `version>0`
     `parcel_no ~ '^[A-Za-z0-9]{8}$'`
     `status NOT IN ('SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED') OR pickup_requested_at IS NOT NULL`
     `(status='ACCEPTED' AND parcel_no IS NOT NULL AND dver_received_at IS NOT NULL) OR (status='CANCELLED' AND ((parcel_no IS NULL AND dver_received_at IS NULL) OR (parcel_no IS NOT NULL AND dver_received_at IS NOT NULL))) OR (status NOT IN ('ACCEPTED','CANCELLED') AND parcel_no IS NULL AND dver_received_at IS NULL)`
   }
   Note: 'order / 수집부터 디버 접수 성공까지 같은 주문 행 사용. EXPIRED는 기존 SQL에 남아 있는 주문 상태로, 통화 상태가 아니다. / SQL 인덱스: CREATE INDEX orders_resume_idx ON orders(customer_seq,updated_at DESC,order_seq) WHERE status=\'COLLECTING\'; CREATE INDEX orders_list_idx ON orders(created_at DESC,order_seq DESC);'
+}
+
+Ref: orders.(billing_department_seq,billing_organization_seq) > departments.(department_seq,organization_seq)
+
+Table order_payment_requests {
+  payment_request_id uuid [pk, not null, default: `gen_random_uuid()`]
+  order_seq integer [not null, ref: > orders.order_seq]
+  amount integer [not null, note: '이 요청의 확정 결제 금액(양의 정수 원)']
+  expires_at timestamptz [not null]
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  approval_started_at timestamptz
+  invalidated_at timestamptz
+  completed_at timestamptz
+  provider_reference text [unique, note: '검증된 결제사 거래 식별자. 성공 시에만 저장']
+  Note: '주문별 활성 요청 1개: invalidated_at/completed_at IS NULL 부분 UNIQUE. AI·관리자 HTTP로 결제 성공을 입력하지 않는다.'
 }
 
 Table order_parcels {

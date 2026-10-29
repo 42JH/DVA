@@ -21,7 +21,16 @@ export class CreatedOrderDto {
   version!: number;
 }
 
+export class OrderPaymentRequestDto {
+  @ApiProperty({ format: 'uuid' }) paymentRequestId!: string;
+  @ApiProperty({ minimum: 1 }) amount!: number;
+  @ApiProperty({ format: 'date-time' }) expiresAt!: string;
+}
+
 export class OrderResultDto extends CreatedOrderDto {
+  @ApiProperty({ type: OrderPaymentRequestDto, nullable: true })
+  paymentRequest!: OrderPaymentRequestDto | null;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) paymentDueAt!: string | null;
   @ApiProperty({
     description: '취소되지 않은 상세의 결제 금액(원). 미완료 수집 중에는 null.',
     type: Number,
@@ -51,6 +60,8 @@ export class OrderResultDto extends CreatedOrderDto {
 }
 
 export class OrderSummaryDto {
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) paymentDueAt!: string | null;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) paidAt!: string | null;
   @ApiProperty({
     description: '현재 결제 대상 금액(원). 미완료 수집 중에는 null.',
     type: Number,
@@ -211,6 +222,8 @@ export class OrderParcelDto {
 }
 
 export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as const) {
+  @ApiProperty({ type: OrderPaymentRequestDto, nullable: true })
+  paymentRequest!: OrderPaymentRequestDto | null;
   @ApiProperty({
     description: '현재 주문 버전. 수정·최종 접수의 expectedVersion으로 사용합니다.',
     minimum: 1,

@@ -37,7 +37,7 @@ export function orderDraft(input: CreateOrderDto) {
     ...(input.customer
       ? { customer: { name: input.customer.name, phoneNumber: input.customer.phoneNumber } }
       : {}),
-    paymentMethodType: input.paymentMethodType ?? 'credit',
+    paymentMethodType: input.paymentMethodType ?? 'billing',
     totalAmount: input.totalAmount ?? null,
     pickupRequestedAt: input.pickupRequestedAt
       ? new Date(input.pickupRequestedAt).toISOString()

@@ -21,6 +21,7 @@ const address = {
 const complete = () =>
   orderDraft({
     customerSeq: 31,
+    paymentMethodType: 'credit',
     pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
     parcels: [
       {
@@ -138,7 +139,7 @@ test('Dver posts JSON with the configured key and accepts only the v2 success re
   assert.deepEqual(requests[0].body, payload);
 });
 
-test('403 is AUTH_FAILED; errors, redirects and malformed success are never retried', async () => {
+test('non-200 is SUBMISSION_FAILED; errors, redirects and malformed success are never retried', async () => {
   for (const [status, body] of [
     [403, 'Authorization data is wrong!'],
     [500, 'internal error'],
@@ -159,7 +160,7 @@ test('403 is AUTH_FAILED; errors, redirects and malformed success are never retr
       res.end(body);
     };
     assert.deepEqual(await client.submit(dverPayload(complete())), {
-      status: status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED',
+      status: status === 403 ? 'SUBMISSION_FAILED' : 'SUBMISSION_FAILED',
     });
     assert.equal(requests.length, 1, `status ${status}`);
   }
@@ -168,7 +169,7 @@ test('403 is AUTH_FAILED; errors, redirects and malformed success are never retr
 test('a lost response or a stalled body is REVIEW_REQUIRED without a second external call', async () => {
   requests = [];
   respond = (req) => req.socket.destroy();
-  assert.deepEqual(await client.submit(dverPayload(complete())), { status: 'REVIEW_REQUIRED' });
+  assert.deepEqual(await client.submit(dverPayload(complete())), { status: 'SUBMISSION_FAILED' });
   assert.equal(requests.length, 1);
   requests = [];
   respond = (_req, res) => {
@@ -176,7 +177,7 @@ test('a lost response or a stalled body is REVIEW_REQUIRED without a second exte
     res.write('{');
   };
   const start = Date.now();
-  assert.deepEqual(await client.submit(dverPayload(complete())), { status: 'REVIEW_REQUIRED' });
+  assert.deepEqual(await client.submit(dverPayload(complete())), { status: 'SUBMISSION_FAILED' });
   assert.ok(Date.now() - start < 15000);
   assert.equal(requests.length, 1);
 });

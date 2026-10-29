@@ -20,6 +20,7 @@ import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
 import { CallSessionRepository } from '../consultations/call-session.repository';
 import { assertOrderAmount } from './order-pricing';
+import { OrderPaymentsRepository } from './order-payments.repository';
 
 @Injectable()
 export class OrdersService {
@@ -32,6 +33,7 @@ export class OrdersService {
     private readonly submissions: OrderSubmissionRepository,
     private readonly dver: DverClient,
     private readonly calls: CallSessionRepository,
+    private readonly payments: OrderPaymentsRepository,
   ) {}
 
   private callId(adminId: number | null, header?: string): number | null {
@@ -180,6 +182,8 @@ export class OrdersService {
       parcelNo: result.parcelNo,
       creationSource: 'ADMIN',
       totalAmount: result.totalAmount,
+      paymentRequest: result.paymentRequest,
+      paymentDueAt: result.paymentDueAt,
     };
   }
 
@@ -244,11 +248,11 @@ export class OrdersService {
         if (await this.submissions.markStale(client, previous.orderSeq))
           await this.audit.recordSuccess(
             {
-              actorId: adminId,
-              actorType: adminId === null ? 'AI' : 'ADMIN',
+              actorId: null,
+              actorType: 'SYSTEM',
               targetId: previous.orderSeq,
               targetType: 'ORDER',
-              action: 'ORDER_SUBMISSION_REVIEW_REQUIRED',
+              action: 'ORDER_SUBMISSION_FAILED',
               requestId,
             },
             client,
@@ -325,7 +329,7 @@ export class OrdersService {
       return { result: await this.repository.result(client, result.orderSeq, callId), payload };
     });
     if (!prepared.payload) return prepared.result;
-    await this.finishSubmission(prepared.result.orderSeq, adminId, requestId, prepared.payload);
+    await this.submitPaidOrder(prepared.result.orderSeq, requestId);
     try {
       return await this.database.transaction((client) =>
         this.repository.result(
@@ -462,18 +466,20 @@ export class OrdersService {
       if (selectedIds && targets.length === 0) return;
       if (order.status === 'CANCELLED')
         throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
-      if (order.status !== 'COLLECTING' && order.status !== 'ACCEPTED')
+      if (order.status !== 'COLLECTING' && order.status !== 'notPaid')
         throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
 
+      if (await this.payments.isApproving(client, id))
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '결제 승인 처리 중에는 취소할 수 없습니다.',
+        );
       const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
       const shipments = await this.repository.lockShipments(client, parcelIds);
-      const byParcel = new Map(shipments.map((shipment) => [shipment.orderParcelSeq, shipment]));
-      // shortcut: notPaid는 내부 기준이다. 실제 결제/취소 API가 제공되면 디버와 연동한다.
       if (
         (order.status === 'COLLECTING' && shipments.length > 0) ||
-        (order.status === 'ACCEPTED' &&
-          (parcels.length === 0 ||
-            targets.some((parcel) => byParcel.get(parcel.orderParcelSeq)?.status !== 'notPaid')))
+        (order.status === 'notPaid' && (parcels.length === 0 || shipments.length > 0))
       )
         throw new ApiException(
           409,
@@ -516,6 +522,7 @@ export class OrdersService {
         );
       }
       const amountAfter = await this.repository.recalculateAmount(client, id);
+      if (order.status === 'notPaid') await this.payments.replaceRequest(client, id);
       if (targets.length > 0)
         await this.audit.recordSuccess(
           {
@@ -540,76 +547,84 @@ export class OrdersService {
     callSessionHeader?: string,
   ): Promise<SubmittedOrderDto> {
     const callId = this.callId(adminId, callSessionHeader);
-    const event = {
-      actorId: adminId,
-      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
-      targetId: id,
-      targetType: 'ORDER',
-      requestId,
-    };
-    const prepared = await this.write<
-      SubmittedOrderDto | { payload: ReturnType<typeof dverPayload> }
-    >(async (client) => {
-      const call = callId === null ? undefined : await this.repository.call(client, callId);
-      if (callId !== null && !call)
-        throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
-      if (call && call.orderSeq !== null && call.orderSeq !== id)
-        throw new ApiException(409, 'INVALID_STATE', '통화에 이미 다른 주문이 연결되어 있습니다.');
+    const prepared = await this.write(async (client) => {
+      const customerId = await this.readCustomer(client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
-      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (!order || (customerId !== null && order.customerSeq !== customerId))
+        throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.status !== 'COLLECTING') {
+        if (order.status === 'CANCELLED')
+          throw new ApiException(409, 'INVALID_STATE', '취소된 주문입니다.');
+        return { status: order.status };
+      }
+      const call = callId === null ? undefined : await this.repository.call(client, callId);
+      if (call && (call.endedAt !== null || (call.orderSeq !== null && call.orderSeq !== id)))
+        throw new ApiException(409, 'INVALID_STATE', '진행 중인 연결 통화가 필요합니다.');
       if (order.customerSeq === null)
-        throw new ApiException(403, 'FORBIDDEN', '주문에 연결된 고객이 필요합니다.');
-      const customer = await this.customers.resolveForOrder(
+        throw new ApiException(403, 'FORBIDDEN', '주문 고객이 필요합니다.');
+      if (order.version !== input.expectedVersion)
+        throw new ApiException(409, 'VERSION_CONFLICT', '최신 주문 내용을 다시 확인해 주세요.');
+      await this.customers.resolveForOrder(
         client,
         { customerSeq: order.customerSeq },
         adminId,
         requestId,
       );
-      if (
-        (adminId === null && !call?.phone) ||
-        (call?.phone && call.phone !== customer.phoneNumber)
-      )
-        throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
-      if (['SUBMITTING', 'ACCEPTED', 'AUTH_FAILED', 'REVIEW_REQUIRED'].includes(order.status)) {
-        if (call && call.endedAt !== null && call.orderSeq !== id)
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '종료된 통화는 기존 연결 주문만 확인할 수 있습니다.',
-          );
-        if (await this.submissions.markStale(client, id)) {
-          await this.audit.recordSuccess(
-            { ...event, action: 'ORDER_SUBMISSION_REVIEW_REQUIRED' },
-            client,
-          );
-          return { status: 'REVIEW_REQUIRED' as const };
-        }
-        return { status: order.status as SubmittedOrderDto['status'] };
-      }
-      if (order.status !== 'COLLECTING' || (call && call.endedAt !== null))
-        throw new ApiException(
-          409,
-          'INVALID_STATE',
-          '진행 중 통화의 COLLECTING 주문만 새로 접수할 수 있습니다.',
-        );
-      if (order.version !== input.expectedVersion)
-        throw new ApiException(
-          409,
-          'VERSION_CONFLICT',
-          '주문이 변경되었습니다. 최신 내용을 조회하고 다시 확인해 주세요.',
-        );
       const payload = await this.prepareSubmission(
         client,
         id,
-        customer.customerSeq,
+        order.customerSeq,
         adminId,
         requestId,
       );
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
+      return { status: payload ? ('PAID' as const) : ('notPaid' as const) };
+    });
+    return prepared.status === 'PAID' ? this.submitPaidOrder(id, requestId) : prepared;
+  }
+
+  async submitPaidOrder(
+    id: number,
+    requestId: string,
+    adminId: number | null = null,
+    retry = false,
+  ): Promise<SubmittedOrderDto> {
+    const prepared = await this.write(async (client) => {
+      const order = await this.repository.lockOrder(client, id);
+      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.status !== 'PAID' && !(retry && order.status === 'SUBMISSION_FAILED'))
+        return { status: order.status };
+      const snapshot = (await this.repository.detail(client, id, null))!;
+      // The pickup time was validated before payment; send the frozen snapshot after waiting.
+      const payload = dverPayload(snapshot, 0);
+      assertOrderAmount(snapshot);
+      this.dver.ensureConfigured();
+      await this.submissions.start(client, id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          actorType: adminId === null ? 'SYSTEM' : 'ADMIN',
+          targetId: id,
+          targetType: 'ORDER',
+          action: retry ? 'ORDER_RESUBMISSION_STARTED' : 'ORDER_SUBMISSION_STARTED',
+          requestId,
+        },
+        client,
+      );
       return { payload };
     });
-    if ('status' in prepared) return { status: prepared.status };
-    return this.finishSubmission(id, adminId, requestId, prepared.payload);
+    if ('status' in prepared) return { status: prepared.status! };
+    return this.finishSubmission(id, requestId, prepared.payload);
+  }
+
+  async retry(id: number, adminId: number, requestId: string) {
+    const order = await this.database.transaction((client) =>
+      this.repository.lockOrder(client, id),
+    );
+    if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+    if (!['SUBMISSION_FAILED', 'SUBMITTING', 'ACCEPTED'].includes(order.status))
+      throw new ApiException(409, 'INVALID_STATE', '디버 접수 실패 주문만 재접수할 수 있습니다.');
+    return this.submitPaidOrder(id, requestId, adminId, true);
   }
 
   private async prepareSubmission(
@@ -622,15 +637,12 @@ export class OrdersService {
     const snapshot = (await this.repository.detail(client, id, null))!;
     const payload = dverPayload(snapshot);
     assertOrderAmount(snapshot);
-    if (snapshot.paymentMethodType !== 'credit') {
-      const company = await this.submissions.isCompanyCustomer(client, customerId);
-      if ((snapshot.paymentMethodType === 'groupBilling') !== company)
-        throw new ApiException(
-          403,
-          'FORBIDDEN',
-          '그룹카드는 기업 고객, 개인카드는 개인 고객만 사용할 수 있습니다.',
-        );
-    }
+    const policy = await this.payments.eligibility(client, customerId);
+    if (
+      (snapshot.paymentMethodType === 'credit' && !policy.monthly) ||
+      (snapshot.paymentMethodType === 'groupBilling' && !policy.group)
+    )
+      throw new ApiException(403, 'FORBIDDEN', '선택한 결제 방식의 사용 자격이 없습니다.');
     if (await this.submissions.hasShipments(client, id))
       throw new ApiException(409, 'INVALID_STATE', '이미 배송 정보가 생성된 주문입니다.');
     for (const parcel of snapshot.parcels) {
@@ -641,16 +653,33 @@ export class OrdersService {
       )
         throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
     }
+    if (snapshot.paymentMethodType === 'billing') {
+      await this.payments.waitForPayment(client, id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          actorType: adminId === null ? 'AI' : 'ADMIN',
+          targetId: id,
+          targetType: 'ORDER',
+          action: 'ORDER_PAYMENT_PENDING',
+          requestId,
+          metadata: { amountAfter: snapshot.totalAmount },
+        },
+        client,
+      );
+      return undefined;
+    }
     this.dver.ensureConfigured();
-    await this.submissions.start(client, id);
+    await this.payments.billed(client, id, policy.organizationSeq, policy.departmentSeq);
     await this.audit.recordSuccess(
       {
-        actorId: adminId,
-        actorType: adminId === null ? 'AI' : 'ADMIN',
+        actorId: null,
+        actorType: 'SYSTEM',
         targetId: id,
         targetType: 'ORDER',
-        action: 'ORDER_SUBMISSION_STARTED',
+        action: 'ORDER_PAYMENT_COMPLETED',
         requestId,
+        metadata: { amountAfter: snapshot.totalAmount },
       },
       client,
     );
@@ -659,13 +688,12 @@ export class OrdersService {
 
   private async finishSubmission(
     id: number,
-    adminId: number | null,
     requestId: string,
     payload: ReturnType<typeof dverPayload>,
   ): Promise<SubmittedOrderDto> {
     const event = {
-      actorId: adminId,
-      actorType: adminId === null ? ('AI' as const) : ('ADMIN' as const),
+      actorId: null,
+      actorType: 'SYSTEM' as const,
       targetId: id,
       targetType: 'ORDER',
       requestId,
@@ -675,13 +703,19 @@ export class OrdersService {
     try {
       result = await this.dver.submit(payload);
     } catch {
-      result = { status: 'REVIEW_REQUIRED' };
+      result = { status: 'SUBMISSION_FAILED' };
     }
     try {
       await this.database.transaction(async (client) => {
         await this.submissions.finish(client, id, result);
         await this.audit.recordSuccess(
-          { ...event, action: `ORDER_SUBMISSION_${result.status}` },
+          {
+            ...event,
+            action:
+              result.status === 'ACCEPTED'
+                ? 'ORDER_SUBMISSION_ACCEPTED'
+                : 'ORDER_SUBMISSION_FAILED',
+          },
           client,
         );
       });

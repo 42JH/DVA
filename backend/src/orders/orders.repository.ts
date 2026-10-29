@@ -7,6 +7,8 @@ import { OrderQueryDto } from './dto/order-query.dto';
 import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { OrderCreationSource, OrderStatus } from './orders.types';
+const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at)
+ FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 import {
   OrderAddressHistoryQueryDto,
   PreviousOrderAddressDto,
@@ -17,8 +19,9 @@ export class OrdersRepository {
   async result(client: PoolClient, id: number, callId: number | null) {
     return (
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
-        `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq"
-       FROM orders WHERE order_seq=$1`,
+        `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
+        payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
+       FROM orders o WHERE order_seq=$1`,
         [id, callId],
       )
     ).rows[0];
@@ -153,7 +156,7 @@ export class OrdersRepository {
     return (
       await client.query<OrderSummaryDto>(
         `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
-          o.creation_source AS "creationSource",o.total_amount AS "totalAmount",
+          o.creation_source AS "creationSource",o.total_amount AS "totalAmount",o.payment_due_at AS "paymentDueAt",o.paid_at AS "paidAt",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
@@ -193,7 +196,8 @@ export class OrdersRepository {
       await client.query<{ detail: OrderDetailDto }>(
         `SELECT jsonb_build_object(
           'orderSeq',o.order_seq,'customerSeq',o.customer_seq,'status',o.status,
-          'creationSource',o.creation_source,'totalAmount',o.total_amount,
+          'creationSource',o.creation_source,'totalAmount',o.total_amount,'paidAt',o.paid_at,
+          'paymentDueAt',o.payment_due_at,'paymentRequest',${paymentRequestJson},
           'paymentMethodType',o.payment_method_type,'pickupRequestedAt',o.pickup_requested_at,
           'createdAt',o.created_at,'updatedAt',o.updated_at,'version',o.version,
           'parcelNo',o.parcel_no,'dverReceivedAt',o.dver_received_at,

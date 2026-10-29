@@ -121,7 +121,7 @@ test('creation normalizes equivalent dates and rejects ISO strings JavaScript ca
   const b = orderDraft({
     parcels: [],
     pickupRequestedAt: '2026-10-28T01:00:00Z',
-    paymentMethodType: 'credit',
+    paymentMethodType: 'billing',
     customerSeq: 31,
   });
   assert.deepEqual(a, b);
