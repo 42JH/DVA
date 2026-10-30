@@ -2,5 +2,6 @@
 // (06 통화 상세 · 09 AI 미답변은 명세 전이라 MSW 대신 각 features/*/api 파일 안 메모리 가짜 — 10/30)
 import { authHandlers } from './auth'
 import { faqHandlers } from './faq'
+import { homeHandlers } from './home'
 
-export const handlers = [...authHandlers, ...faqHandlers]
+export const handlers = [...authHandlers, ...faqHandlers, ...homeHandlers]

@@ -63,3 +63,14 @@ export function fmtPhone(digits: string): string {
   if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
   return digits
 }
+
+/** '10.20 (화)' (01 홈 '오늘' 기준일) */
+export function fmtDateDay(d: Date): string {
+  return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]})`
+}
+
+/** 'HH:MM' (오늘 안의 시각) */
+export function fmtTime(iso: string): string {
+  const d = new Date(iso)
+  return `${two(d.getHours())}:${two(d.getMinutes())}`
+}

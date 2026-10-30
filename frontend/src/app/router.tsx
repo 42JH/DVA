@@ -8,6 +8,7 @@ import { CallListPage } from '@/features/call/components/CallListPage'
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
+import { HomePage } from '@/features/home/components/HomePage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -31,7 +32,7 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-          { index: true, element: <Placeholder />, handle: { title: '홈' } satisfies RouteHandle },
+          { index: true, element: <HomePage />, handle: { title: '홈' } satisfies RouteHandle },
           {
             path: 'dashboard',
             element: <DashboardPage />,
