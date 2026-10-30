@@ -1,21 +1,34 @@
-import { Navigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { Button } from '@/shared/ui'
-import { useSession } from '@/shared/auth/useSession'
+import { AuthLayout } from './AuthLayout'
 
-// 00 승인 대기 View — 가입은 됐지만 슈퍼바이저 승인 전. 모양은 임시(와이어프레임 '00_로그인_승인대기' 반영은 00 작업 때)
+// 00 승인 대기 중 (디자인/목업 '00_회원가입_완료&로그인_승인대기' 10/30) — 가입 직후 · PENDING 계정이 로그인했을 때 같은 화면
+// 로그인 안 한 채로도 오므로(가입 직후) 세션을 보지 않는 그냥 안내 화면
 export function PendingPage() {
-  const vm = useSession()
-  if (vm.isLoading) return null
-  if (!vm.isPending) return <Navigate to="/" replace /> // 승인된 계정이 주소로 들어오면 홈으로
+  const navigate = useNavigate()
   return (
-    <main className="grid h-full place-items-center">
-      <section className="grid w-[440px] justify-items-start gap-4">
-        <h1 className="text-title font-bold">승인 대기 중</h1>
-        <p className="text-body text-sub">
-          {vm.me?.loginId} 계정은 아직 승인 전이에요. 슈퍼바이저가 승인하면 바로 쓸 수 있어요.
-        </p>
-        <Button onClick={vm.logout}>로그아웃</Button>
-      </section>
-    </main>
+    <AuthLayout
+      icon={
+        <svg
+          viewBox="0 0 48 48"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinejoin="round"
+          aria-hidden
+          className="size-12 text-brand"
+        >
+          <path d="M14 6h20c0 9-6 12-6 18s6 9 6 18H14c0-9 6-12 6-18s-6-9-6-18z" />
+        </svg>
+      }
+      title="승인 대기 중"
+      sub={
+        '가입 신청이 완료되었습니다.\n최고 관리자 승인 후 로그인할 수 있으며,\n승인 여부는 로그인을 시도해 확인해 주세요.'
+      }
+    >
+      <Button kind="primary" tall className="w-full" onClick={() => navigate('/login')}>
+        로그인으로
+      </Button>
+    </AuthLayout>
   )
 }

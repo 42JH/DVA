@@ -10,7 +10,7 @@ export interface AdminMe {
   adminUserSeq: number
   loginId: string
   role: AdminRole
-  status: 'ACTIVE' | 'PENDING'
+  status: 'ACTIVE' | 'PENDING' | 'INACTIVE' // INACTIVE = 최고 관리자가 비활성화 (10/30 00 디자인)
 }
 
 export const sessionQueries = {

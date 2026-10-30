@@ -1,6 +1,8 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 import { LoginPage } from '@/features/auth/components/LoginPage'
+import { InactivePage } from '@/features/auth/components/InactivePage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
+import { SignupPage } from '@/features/auth/components/SignupPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { CallListPage } from '@/features/call/components/CallListPage'
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
@@ -20,8 +22,9 @@ export const router = createBrowserRouter([
     errorElement: <RouteError />, // 루트 에러 경계 (컨벤션 7.3)
     children: [
       { path: '/login', element: <LoginPage /> },
-      { path: '/signup', element: <Placeholder /> },
-      { path: '/pending', element: <PendingPage /> }, // 승인 대기 (RequireAuth가 PENDING 계정을 여기로)
+      { path: '/signup', element: <SignupPage /> },
+      { path: '/pending', element: <PendingPage /> }, // 승인 대기 (가입 직후 · RequireAuth가 PENDING 계정을 여기로)
+      { path: '/inactive', element: <InactivePage /> }, // 비활성화 (RequireAuth가 INACTIVE 계정을 여기로)
       {
         element: (
           <RequireAuth>

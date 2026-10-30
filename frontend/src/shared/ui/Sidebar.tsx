@@ -74,7 +74,7 @@ export function Sidebar({
 }: {
   userLabel?: string
   onLogout: () => void
-  canSee?: (to: string) => boolean // 역할에 따라 숨길 메뉴 (예: 관리자 권한 관리는 슈퍼바이저만). 기본은 전부
+  canSee?: (to: string) => boolean // 역할에 따라 숨길 메뉴 (예: 관리자 권한 관리는 최고 관리자만). 기본은 전부
   badges?: Record<string, number> // 하위 메뉴 경로 → 빨간 숫자 (0이면 안 그림)
 }) {
   const { pathname } = useLocation()
