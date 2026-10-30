@@ -93,6 +93,7 @@ export function ConfirmDialog({
 
 export function FormModal({
   title,
+  titleExtra,
   description,
   width = 600,
   onClose,
@@ -100,6 +101,7 @@ export function FormModal({
   footer,
 }: {
   title: string
+  titleExtra?: ReactNode // 제목 옆 태그 (06 주문 상세 [전화] [주문 취소])
   description?: string // 제목 아래 회색 한 줄 (03 주문 추가)
   width?: number // 600 · 680 · 960
   onClose: () => void
@@ -111,7 +113,10 @@ export function FormModal({
       <div className="flex flex-col gap-6" style={{ width: width - 64 }}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-card font-bold">{title}</h2>
+            <h2 className="flex items-center gap-3 text-card font-bold">
+              {title}
+              {titleExtra}
+            </h2>
             {description && <p className="mt-1 text-label text-sub">{description}</p>}
           </div>
           <button
