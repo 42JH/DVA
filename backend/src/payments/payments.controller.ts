@@ -48,6 +48,28 @@ const paymentEnvelope = {
 @ApiServiceUnavailableResponse({ type: ErrorResponseDto })
 @Controller('payments')
 export class PaymentsController {
+  @Post('notifications/:id/completion/retry')
+  @HttpCode(200)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({
+    action: 'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
+    targetType: 'ORDER',
+    target: 'none',
+  })
+  @ApiOperation({
+    summary: '관리자 결제 완료 안내 재발송',
+    description:
+      '결제 완료가 저장된 요청만 재발송합니다. 결제·디버 접수는 다시 처리하지 않습니다. UNKNOWN은 채널 수신 여부를 확인한 뒤 요청하며 중복 메시지 가능성이 있습니다.',
+  })
+  @ApiOkResponse(paymentEnvelope)
+  retryCompletionNotification(
+    @Param() p: PaymentIdDto,
+    @Body() _body: EmptyPaymentDto,
+    @Req() req: AuthRequest,
+  ) {
+    return this.payments.retryCompletionNotification(p.id, req.admin!.adminUserSeq, req.requestId);
+  }
+
   @Post('notifications/:id/retry')
   @HttpCode(200)
   @ApiCookieAuth('adminSession')

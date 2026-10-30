@@ -39,4 +39,10 @@ export class PaymentStatusDto {
     string | null;
   @ApiProperty({ enum: ['PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN'] })
   notificationStatus!: string;
+  @ApiProperty({
+    enum: ['WAITING', 'PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN'],
+    description:
+      '결제 완료 안내 발송 상태. WAITING은 미결제이며 결제 요청 안내와 별도로 관리합니다.',
+  })
+  completionNotificationStatus!: string;
 }
