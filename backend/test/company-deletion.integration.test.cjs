@@ -204,3 +204,449 @@ test('settled company and department names are snapshots independent of subseque
     '기록 보존 기업',
   );
 });
+
+async function history(f) {
+  return (
+    await pool.query(
+      `SELECT jsonb_build_object(
+    'customer',(SELECT to_jsonb(c) FROM customers c WHERE customer_seq=$1),
+    'personalPins',(SELECT jsonb_agg(to_jsonb(p) ORDER BY personal_pin_seq) FROM personal_pins p WHERE customer_seq=$1),
+    'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY order_seq) FROM orders o WHERE customer_seq=$1),
+    'parcels',(SELECT jsonb_agg(to_jsonb(p) ORDER BY order_parcel_seq) FROM order_parcels p JOIN orders o USING(order_seq) WHERE o.customer_seq=$1),
+    'shipments',(SELECT jsonb_agg(to_jsonb(s) ORDER BY shipment_seq) FROM shipments s JOIN order_parcels p USING(order_parcel_seq) JOIN orders o USING(order_seq) WHERE o.customer_seq=$1),
+    'charges',(SELECT jsonb_agg(to_jsonb(b) ORDER BY order_seq) FROM order_billing_charges b WHERE organization_seq=$2),
+    'months',(SELECT jsonb_agg(to_jsonb(b) ORDER BY billing_month) FROM organization_billing_months b WHERE organization_seq=$2),
+    'calls',(SELECT jsonb_agg(to_jsonb(c) ORDER BY call_session_seq) FROM call_sessions c WHERE caller_phone_number=$3),
+    'utterances',(SELECT jsonb_agg(to_jsonb(u) ORDER BY call_utterance_seq) FROM call_utterances u JOIN call_sessions c USING(call_session_seq) WHERE caller_phone_number=$3),
+    'recordings',(SELECT jsonb_agg(to_jsonb(r) ORDER BY recording_seq) FROM recordings r JOIN call_sessions c USING(call_session_seq) WHERE caller_phone_number=$3)
+  ) AS snapshot`,
+      [f.customer, f.company, f.phone],
+    )
+  ).rows[0].snapshot;
+}
+
+test('company deletion physically clears company data while preserving personal, order, call and billing history', async () => {
+  const f = await fixture();
+  const pin = await companyPin(f, { departmentSeq: f.department });
+  const parcels = [
+    {
+      origin: address,
+      destination: address,
+      originPin: { scope: 'COMPANY', pinSeq: pin },
+      smallBoxCount: 1,
+      notifiedPrice: 5000,
+      itemPrice: 0,
+    },
+  ];
+  await companyPin(f);
+  await companyPin(f, { departmentName: '배정 미확인' });
+  assert.equal(
+    (await request('POST', `/customers/${f.customer}/pins`, { addressData: address })).status,
+    201,
+  );
+  const accepted = await order(f, 'credit', { parcels });
+  reply = 'SUBMISSION_FAILED';
+  let failed;
+  try {
+    failed = await order(f, 'groupBilling');
+  } finally {
+    reply = 'ACCEPTED';
+  }
+  const pending = await order(f, 'billing', { parcels });
+  const call = (
+    await pool.query(
+      'INSERT INTO call_sessions(order_seq,provider_call_id,caller_phone_number) VALUES($1,$2,$3) RETURNING call_session_seq',
+      [accepted.orderSeq, randomUUID(), f.phone],
+    )
+  ).rows[0].call_session_seq;
+  await pool.query(
+    "INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES($1,1,'CUSTOMER','보존할 상담',1)",
+    [call],
+  );
+  await pool.query('INSERT INTO recordings(call_session_seq,object_key) VALUES($1,$2)', [
+    call,
+    'test/company-history-' + randomUUID() + '.webm',
+  ]);
+  const before = await history(f);
+  const oldLogs = (
+    await pool.query(
+      "SELECT * FROM audit_logs WHERE target_type='ORGANIZATION' AND target_seq=$1 ORDER BY audit_log_seq",
+      [f.company],
+    )
+  ).rows;
+  const response = await request('DELETE', `/companies/${f.company}`);
+  assert.equal(response.status, 204, JSON.stringify(response.body));
+  assert.deepEqual(await history(f), before);
+  assert.deepEqual(
+    (
+      await pool.query(
+        'SELECT * FROM audit_logs WHERE audit_log_seq=ANY($1::int[]) ORDER BY audit_log_seq',
+        [oldLogs.map((x) => x.audit_log_seq)],
+      )
+    ).rows,
+    oldLogs,
+  );
+  assert.equal((await request('GET', `/companies/${f.company}`)).status, 404);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM departments WHERE organization_seq=$1', [f.company])).rowCount,
+    0,
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM company_pins WHERE organization_seq=$1', [f.company]))
+      .rowCount,
+    0,
+  );
+  const context = (await request('POST', '/customers/context', { phoneNumber: f.phone })).body.data;
+  assert.equal(context.customer.customerSeq, f.customer);
+  assert.equal(context.membership, null);
+  assert.equal(context.organization, null);
+  assert.equal(context.department, null);
+  assert.equal(context.companyPins.length, 0);
+  assert.equal(context.personalPins.length, 1);
+  assert.deepEqual(context.availablePaymentMethods, ['billing']);
+  assert.equal((await request('GET', `/calls/${call}`)).status, 200);
+  assert.equal(
+    (await request('GET', `/calls/${call}/transcript`)).body.data[0].utteranceText,
+    '보존할 상담',
+  );
+  const total = (await request('GET', `/companies/${f.company}/billing`)).body.data;
+  assert.equal(total.monthlyAmount, 5000);
+  assert.equal(total.groupBillingAmount, 5000);
+  assert.equal(total.organizationName, '기록 보존 기업');
+  const log = (
+    await request(
+      'GET',
+      `/audit-logs?targetType=ORGANIZATION&targetSeq=${f.company}&action=ORGANIZATION_DELETED`,
+    )
+  ).body.data[0];
+  assert.equal(log.actorType, 'ADMIN');
+  assert.equal(log.actorLabel, '운영자');
+  assert.equal(log.actorSeq, adminId);
+  assert.equal(log.actorName, '삭제 운영자');
+  assert.equal(log.metadata.organizationName, '기록 보존 기업');
+  const events = (
+    await pool.query(
+      "SELECT action,target_seq,metadata FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'",
+      [log.requestId],
+    )
+  ).rows;
+  assert.equal(events.filter((x) => x.action === 'COMPANY_PIN_DELETED').length, 3);
+  assert.equal(events.filter((x) => x.action === 'MEMBERSHIP_REMOVED').length, 1);
+  assert.equal(
+    events.find((x) => x.action === 'DEPARTMENT_DELETED').metadata.departmentName,
+    '개발팀',
+  );
+  assert.equal(
+    (await request('POST', `/admin/orders/${failed.orderSeq}/retry`)).body.data.status,
+    'ACCEPTED',
+  );
+  const payments = app.get(OrderPaymentsService);
+  await payments.beginPayment(pending.paymentRequest.paymentRequestId, 5000);
+  assert.equal(
+    (
+      await payments.confirmPayment(
+        pending.paymentRequest.paymentRequestId,
+        5000,
+        'delete-test-' + randomUUID(),
+        randomUUID(),
+      )
+    ).status,
+    'ACCEPTED',
+  );
+  assert.equal(
+    (await request('GET', `/companies/${f.company}/billing`)).body.data.groupBillingAmount,
+    5000,
+  );
+  const priorMonths = (
+    await pool.query('SELECT * FROM organization_billing_months WHERE organization_seq=$1', [
+      f.company,
+    ])
+  ).rows;
+  await app.get(OrganizationBillingService).rollover(new Date(Date.now() + 35 * 86400000));
+  assert.deepEqual(
+    (
+      await pool.query('SELECT * FROM organization_billing_months WHERE organization_seq=$1', [
+        f.company,
+      ])
+    ).rows,
+    priorMonths,
+  );
+  assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 404);
+});
+
+test('department deletion detaches its employees and deletes only its pins while other departments and common pins remain', async () => {
+  const f = await fixture();
+  const other = (await request('POST', `/companies/${f.company}/departments`, { name: '영업팀' }))
+    .body.data.departmentSeq;
+  const coworker = (
+    await request('POST', '/customers', { name: '남는 사원', phoneNumber: '010' + phoneSequence++ })
+  ).body.data.customerSeq;
+  assert.equal(
+    (
+      await request('POST', `/companies/${f.company}/members`, {
+        customerSeq: coworker,
+        employeeNo: 'EMP-2',
+        role: 'MEMBER',
+        departmentSeq: other,
+      })
+    ).status,
+    204,
+  );
+  const target = await companyPin(f, { departmentSeq: f.department });
+  const common = await companyPin(f);
+  const retained = await companyPin(f, { departmentSeq: other });
+  const settled = await order(f, 'groupBilling');
+  const before = await detail(settled.orderSeq);
+  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
+  assert.deepEqual(await detail(settled.orderSeq), before);
+  assert.equal((await request('GET', `/companies/${f.company}`)).status, 200);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    0,
+  );
+  assert.equal((await request('GET', `/customers/${f.customer}`)).status, 200);
+  assert.equal(
+    (await pool.query('SELECT department_seq FROM memberships WHERE customer_seq=$1', [coworker]))
+      .rows[0].department_seq,
+    other,
+  );
+  assert.deepEqual(
+    (await request('GET', `/companies/${f.company}/pins`)).body.data
+      .map((p) => p.companyPinSeq)
+      .sort((a, b) => a - b),
+    [common, retained].sort((a, b) => a - b),
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM company_pins WHERE company_pin_seq=$1', [target])).rowCount,
+    0,
+  );
+  assert.equal(
+    (await request('GET', `/companies/${f.company}/departments`)).body.data[0].departmentSeq,
+    other,
+  );
+  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 404);
+});
+
+test('collecting orders stay unchanged but must replace deleted company eligibility and PIN before submission', async () => {
+  const f = await fixture(),
+    pin = await companyPin(f, { departmentSeq: f.department });
+  const draft = await request(
+    'POST',
+    '/orders',
+    {
+      customerSeq: f.customer,
+      paymentMethodType: 'credit',
+      pickupRequestedAt: new Date(Date.now() + 86400000).toISOString(),
+      totalAmount: 5000,
+      parcels: [
+        {
+          origin: address,
+          destination: address,
+          originPin: { scope: 'COMPANY', pinSeq: pin },
+          smallBoxCount: 1,
+          notifiedPrice: 5000,
+          itemPrice: 0,
+        },
+      ],
+    },
+    { 'Idempotency-Key': randomUUID() },
+  );
+  assert.equal(draft.status, 201, JSON.stringify(draft.body));
+  const id = draft.body.data.orderSeq,
+    before = await detail(id);
+  assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 204);
+  assert.deepEqual(await detail(id), before);
+  assert.equal(
+    (await request('POST', `/orders/${id}/submit`, { expectedVersion: before.version })).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request('PATCH', `/orders/${id}`, {
+        expectedVersion: before.version,
+        paymentMethodType: 'billing',
+      })
+    ).status,
+    200,
+  );
+  let current = await detail(id);
+  assert.equal(
+    (await request('POST', `/orders/${id}/submit`, { expectedVersion: current.version })).status,
+    403,
+  );
+  assert.equal(
+    (
+      await request('PATCH', `/orders/${id}`, {
+        expectedVersion: current.version,
+        parcels: [{ orderParcelSeq: current.parcels[0].orderParcelSeq, originPin: null }],
+      })
+    ).status,
+    200,
+  );
+  current = await detail(id);
+  assert.deepEqual(current.parcels[0].origin, before.parcels[0].origin);
+  assert.equal(
+    (await request('POST', `/orders/${id}/submit`, { expectedVersion: current.version })).body.data
+      .status,
+    'notPaid',
+  );
+});
+
+test('detachment preserves the customer personal monthly policy without carrying company billing identity forward', async () => {
+  const f = await fixture();
+  assert.equal(
+    (await request('PATCH', `/customers/${f.customer}`, { monthlyBillingEnabled: true })).status,
+    204,
+  );
+  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
+  const context = (await request('POST', '/customers/context', { phoneNumber: f.phone })).body.data;
+  assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit']);
+  const settled = await order(f, 'credit');
+  const saved = await detail(settled.orderSeq);
+  assert.equal(saved.billingOrganizationSeq, null);
+  assert.equal(saved.billingDepartmentSeq, null);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM order_billing_charges WHERE order_seq=$1', [settled.orderSeq]))
+      .rowCount,
+    0,
+  );
+});
+
+test('unassigned legacy PIN names block department deletion until explicitly assigned or made common', async () => {
+  const f = await fixture();
+  const pin = await companyPin(f, { departmentName: '어느 부서인지 모름' });
+  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 409);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    1,
+  );
+  assert.equal(
+    (await request('PATCH', `/company-pins/${pin}`, { departmentSeq: f.department })).status,
+    200,
+  );
+  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
+});
+
+test('audit failure after all company deletes rolls back the complete operation', async () => {
+  const f = await fixture();
+  const pin = await companyPin(f, { departmentSeq: f.department });
+  await order(f);
+  const before = await history(f),
+    audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = function (event, client) {
+    if (event.action === 'ORGANIZATION_DELETED') throw new Error('synthetic-audit-failure');
+    return original.call(this, event, client);
+  };
+  try {
+    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 500);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.deepEqual(await history(f), before);
+  assert.equal((await request('GET', `/companies/${f.company}`)).status, 200);
+  assert.equal(
+    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    1,
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM company_pins WHERE company_pin_seq=$1', [pin])).rowCount,
+    1,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT 1 FROM audit_logs WHERE metadata->>'organizationSeq'=$1 AND result='SUCCESS' AND action IN ('ORGANIZATION_DELETED','DEPARTMENT_DELETED','COMPANY_PIN_DELETED','MEMBERSHIP_REMOVED')",
+        [String(f.company)],
+      )
+    ).rowCount,
+    0,
+  );
+});
+
+test('company may disappear during the Dver HTTP request without interrupting the paid order', async () => {
+  const f = await fixture();
+  dverHook = async () => {
+    dverHook = undefined;
+    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 204);
+  };
+  try {
+    const created = await order(f, 'groupBilling');
+    assert.equal(created.status, 'ACCEPTED');
+    const saved = await detail(created.orderSeq);
+    assert.equal(saved.billingOrganizationSeq, f.company);
+    assert.equal(saved.billingDepartmentName, '개발팀');
+  } finally {
+    dverHook = undefined;
+  }
+});
+
+test('busy customers prevent partial deletion and concurrent deletes produce one successful operation', async () => {
+  const f = await fixture(),
+    blocker = await pool.connect();
+  try {
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [f.customer]);
+    assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 409);
+    assert.equal(
+      (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+      1,
+    );
+  } finally {
+    await blocker.query('ROLLBACK');
+    blocker.release();
+  }
+  const results = await Promise.all([
+    request('DELETE', `/companies/${f.company}`),
+    request('DELETE', `/companies/${f.company}`),
+  ]);
+  assert.deepEqual(results.map((x) => x.status).sort(), [204, 404]);
+});
+
+test('deletion requires an active admin session, valid origin and valid ID; all admin roles are allowed', async () => {
+  const f = await fixture();
+  assert.equal(
+    (await request('DELETE', `/companies/${f.company}`, undefined, { Cookie: '' })).status,
+    401,
+  );
+  assert.equal(
+    (await request('DELETE', `/departments/${f.department}`, undefined, { Cookie: '' })).status,
+    401,
+  );
+  assert.equal(
+    (await request('DELETE', `/companies/${f.company}`, undefined, { Origin: '' })).status,
+    403,
+  );
+  assert.equal((await request('DELETE', '/companies/invalid')).status, 400);
+  assert.equal((await request('DELETE', '/departments/0')).status, 400);
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const data = await fixture();
+    const loginId = 'del' + randomUUID().slice(0, 8);
+    await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'역할 검증',$2,$3,'ACTIVE')",
+      [loginId, await hashPassword('role-test-only'), role],
+    );
+    const login = await fetch(base + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: origin },
+      body: JSON.stringify({ loginId, password: 'role-test-only' }),
+    });
+    assert.equal(login.status, 200);
+    const token = login.headers.get('set-cookie').split(';')[0];
+    assert.equal(
+      (await request('DELETE', `/departments/${data.department}`, undefined, { Cookie: token }))
+        .status,
+      204,
+    );
+    assert.equal(
+      (await request('DELETE', `/companies/${data.company}`, undefined, { Cookie: token })).status,
+      204,
+    );
+    await pool.query("UPDATE admin_users SET status='INACTIVE' WHERE login_id=$1", [loginId]);
+    assert.ok(
+      [401, 403].includes(
+        (await request('DELETE', `/companies/${f.company}`, undefined, { Cookie: token })).status,
+      ),
+    );
+  }
+});

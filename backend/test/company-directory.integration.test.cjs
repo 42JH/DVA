@@ -116,6 +116,7 @@ async function pin(c, { label = null, departmentName = null, addressData = addre
     organizationName: c.name,
     label,
     departmentName,
+    departmentSeq: null,
     addressData,
   };
 }
@@ -230,6 +231,7 @@ test('only explicit public PIN fields are projected; member and private PIN valu
     'addressData',
     'companyPinSeq',
     'departmentName',
+    'departmentSeq',
     'label',
     'organizationName',
     'organizationSeq',
