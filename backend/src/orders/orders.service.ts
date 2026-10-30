@@ -21,6 +21,7 @@ import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.d
 import { CallSessionRepository } from '../consultations/call-session.repository';
 import { assertOrderAmount } from './order-pricing';
 import { OrderPaymentsRepository } from './order-payments.repository';
+import { assertOrderSubmissionReady } from './order-submission.validation';
 
 @Injectable()
 export class OrdersService {
@@ -611,7 +612,7 @@ export class OrdersService {
       if (order.status !== 'PAID' && !(retry && order.status === 'SUBMISSION_FAILED'))
         return { status: order.status };
       const snapshot = (await this.repository.detail(client, id, null))!;
-      // The pickup time was validated before payment; send the frozen snapshot after waiting.
+      // Payment fixes pickup at paid_at + 1 hour. Retries preserve that snapshot.
       const payload = dverPayload(snapshot, 0);
       assertOrderAmount(snapshot);
       this.dver.ensureConfigured();
@@ -651,7 +652,7 @@ export class OrdersService {
     requestId: string,
   ) {
     const snapshot = (await this.repository.detail(client, id, null))!;
-    const payload = dverPayload(snapshot);
+    assertOrderSubmissionReady(snapshot, Date.now(), false);
     assertOrderAmount(snapshot);
     const policy = await this.payments.eligibility(client, customerId);
     if (
@@ -699,7 +700,7 @@ export class OrdersService {
       },
       client,
     );
-    return payload;
+    return true;
   }
 
   private async finishSubmission(

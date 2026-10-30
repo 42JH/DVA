@@ -480,7 +480,7 @@ export class OrdersController {
     summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
-      '기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 기본값은 billing이며 주소·물품·미래 수거 시각·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+      '기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 기본값은 billing이며 주소·물품·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

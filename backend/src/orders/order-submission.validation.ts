@@ -16,6 +16,7 @@ export type OrderSubmissionSnapshot = Pick<OrderDraft, 'pickupRequestedAt'> & {
 export function assertOrderSubmissionReady(
   snapshot: OrderSubmissionSnapshot,
   now = Date.now(),
+  requirePickup = true,
 ): void {
   const errors: ErrorDetail[] = [];
   const missing = (field: string) => errors.push({ field, reason: 'required' });
@@ -23,10 +24,13 @@ export function assertOrderSubmissionReady(
   if (!snapshot.paymentMethodType?.trim()) missing('paymentMethodType');
   else if (!['billing', 'credit', 'groupBilling'].includes(snapshot.paymentMethodType))
     invalid('paymentMethodType', 'unsupported');
-  if (!snapshot.pickupRequestedAt?.trim()) missing('pickupRequestedAt');
-  else if (!isZonedDate(snapshot.pickupRequestedAt)) invalid('pickupRequestedAt', 'zonedDateTime');
-  else if (Date.parse(snapshot.pickupRequestedAt) <= now)
-    invalid('pickupRequestedAt', 'mustBeFuture');
+  if (requirePickup) {
+    if (!snapshot.pickupRequestedAt?.trim()) missing('pickupRequestedAt');
+    else if (!isZonedDate(snapshot.pickupRequestedAt))
+      invalid('pickupRequestedAt', 'zonedDateTime');
+    else if (Date.parse(snapshot.pickupRequestedAt) <= now)
+      invalid('pickupRequestedAt', 'mustBeFuture');
+  }
   if (!snapshot.parcels.some((parcel) => parcel.status !== 'CANCELLED')) missing('parcels');
   for (const [index, parcel] of snapshot.parcels.entries()) {
     if (parcel.status === 'CANCELLED') continue;

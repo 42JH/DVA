@@ -117,7 +117,7 @@ test('69: request and response DTOs expose no AI fields and Swagger requires an 
   for (const field of ['call', 'outcome', 'status', 'creationSource'])
     assert.equal(request.properties[field], undefined);
   assert.ok(request.required.includes('parcels'));
-  assert.ok(request.required.includes('pickupRequestedAt'));
+  assert.equal(request.required.includes('pickupRequestedAt'), false);
   assert.equal(request.properties.parcels.minItems, 1);
   const result = spec.components.schemas.ManualOrderResultDto;
   assert.equal(result.properties.callSessionSeq, undefined);

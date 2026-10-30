@@ -301,7 +301,8 @@ export class CreateOrderDto {
   paymentMethodType?: 'billing' | 'credit' | 'groupBilling';
 
   @ApiPropertyOptional({
-    description: '수거 요청 시각. Z 또는 시간대 오프셋 필수. 미입력 시 null.',
+    description:
+      '기존 요청 호환용 수거 시각. 최종 수거 시각은 서버가 결제 완료 시각 + 1시간으로 결정하므로 생략 가능합니다.',
     example: '2026-10-28T10:00:00+09:00',
     type: String,
     format: 'date-time',

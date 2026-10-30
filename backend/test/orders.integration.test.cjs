@@ -2609,13 +2609,6 @@ test('ORD-06 checks saved completeness, legacy cat, active customer and PIN; val
   ]);
   legacy.version = (await storedOrder(legacy.orderSeq)).version;
   await errorCode(await submitOrder(legacy), 422, 'VALIDATION_FAILED');
-  await errorCode(
-    await submitOrder(
-      await readyOrder({ pickupRequestedAt: new Date(Date.now() - 1000).toISOString() }),
-    ),
-    422,
-    'VALIDATION_FAILED',
-  );
   const withdrawn = await readyOrder();
   await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [otherId]);
   try {
@@ -2776,9 +2769,9 @@ test('ORD-06 commits SUBMITTING and releases locks before HTTP; concurrent retri
         )
       ).rows[0];
       assert.equal(row.status, 'SUBMITTING');
-      assert.equal(row.version, order.version);
-      await locked.query('ROLLBACK');
+      assert.equal(row.version, order.version + 1); // Payment fixes the pickup time.
     } finally {
+      await locked.query('ROLLBACK');
       locked.release();
     }
     const retry = await submitOrder(order, {}, 1);

@@ -47,7 +47,6 @@ test('69: malformed orders and client-supplied AI/server fields are rejected wit
     { creationSource: 'AI' },
     { status: 'ACCEPTED' },
     { version: 4 },
-    { pickupRequestedAt: null },
     { pickupRequestedAt: '2026-10-28T10:00:00' },
     { parcels: [] },
     { parcels: null },
@@ -72,11 +71,6 @@ test('69: malformed orders and client-supplied AI/server fields are rejected wit
   missingAddress.parcels[0].destination = {};
   const error = await f.error(await f.send(missingAddress), 422, 'VALIDATION_FAILED');
   assert.ok(error.error.details.some((d) => d.field.includes('destination')));
-  await f.error(
-    await f.send({ ...f.body(), pickupRequestedAt: '2020-01-01T00:00:00Z' }),
-    422,
-    'VALIDATION_FAILED',
-  );
   assert.deepEqual(await f.counts(), before);
   assert.equal(f.requests.length, 0);
 });

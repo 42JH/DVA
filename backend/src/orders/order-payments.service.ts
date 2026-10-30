@@ -5,8 +5,8 @@ import { ApiException } from '../common/errors/api.exception';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { OrdersService } from './orders.service';
 
-// Internal seam only: a verified payment-provider integration must call these methods.
-// No HTTP route accepts an AI/admin claim that a card payment succeeded.
+// Internal domain seam. PaymentsService reserves a durable provider key and lease
+// before calling confirmPayment; no route accepts an AI/admin claim of success.
 @Injectable()
 export class OrderPaymentsService {
   constructor(
@@ -41,7 +41,13 @@ export class OrderPaymentsService {
       await this.repository.release(client, id);
     });
   }
-  async confirmPayment(id: string, amount: number, providerReference: string, requestId: string) {
+  async confirmPayment(
+    id: string,
+    amount: number,
+    providerReference: string,
+    requestId: string,
+    approvedAt?: string,
+  ) {
     if (!providerReference || providerReference.length > 200)
       throw new ApiException(400, 'INVALID_REQUEST', '검증된 결제 거래 식별자가 필요합니다.');
     const orderId = await this.database.transaction(async (client) => {
@@ -61,7 +67,7 @@ export class OrderPaymentsService {
       )
         throw new ApiException(409, 'INVALID_STATE', '결제 승인 대상이 변경되었습니다.');
       await this.repository.complete(client, id, providerReference);
-      await this.repository.billed(client, request.orderSeq, null, null, requestId);
+      await this.repository.billed(client, request.orderSeq, null, null, requestId, approvedAt);
       await this.audit.recordSuccess(
         {
           actorId: null,

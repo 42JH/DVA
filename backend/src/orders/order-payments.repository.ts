@@ -11,6 +11,11 @@ export interface PaymentRequest {
   invalidatedAt: Date | null;
   completedAt: Date | null;
   providerReference: string | null;
+  providerPaymentKey: string | null;
+  providerApprovedAt: Date | null;
+  approvalClaimId: string | null;
+  approvalClaimedUntil: Date | null;
+  notificationStatus: string;
 }
 
 @Injectable()
@@ -52,7 +57,7 @@ export class OrderPaymentsRepository {
   }
   async waitForPayment(client: PoolClient, id: number) {
     await client.query(
-      "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
+      "UPDATE orders SET status='notPaid',pickup_requested_at=NULL,payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
       [id],
     );
     await this.replaceRequest(client, id);
@@ -84,12 +89,16 @@ export class OrderPaymentsRepository {
     organizationId: number | null,
     departmentId: number | null,
     requestId: string,
+    approvedAt?: string,
   ) {
     await client.query(
-      `UPDATE orders SET status='PAID',paid_at=clock_timestamp(),billing_organization_seq=$2,billing_department_seq=$3,
+      `WITH paid AS (SELECT COALESCE($4::timestamptz,clock_timestamp()) AS at)
+       UPDATE orders SET status='PAID',paid_at=paid.at,pickup_requested_at=paid.at+interval '1 hour',
+       billing_organization_seq=$2,billing_department_seq=$3,
        billing_organization_name=(SELECT name FROM organizations WHERE organization_seq=$2),
-       billing_department_name=(SELECT name FROM departments WHERE department_seq=$3) WHERE order_seq=$1`,
-      [id, organizationId, departmentId],
+       billing_department_name=(SELECT name FROM departments WHERE department_seq=$3)
+       FROM paid WHERE order_seq=$1`,
+      [id, organizationId, departmentId, approvedAt ?? null],
     );
     await this.billing.recordCharge(client, id, requestId);
   }
@@ -110,7 +119,7 @@ export class OrderPaymentsRepository {
     ).rows[0];
     const request = (
       await client.query<PaymentRequest>(
-        `SELECT payment_request_id AS "paymentRequestId",order_seq AS "orderSeq",amount,expires_at AS "expiresAt",approval_started_at AS "approvalStartedAt",invalidated_at AS "invalidatedAt",completed_at AS "completedAt",provider_reference AS "providerReference" FROM order_payment_requests WHERE payment_request_id=$1 FOR UPDATE`,
+        `SELECT payment_request_id AS "paymentRequestId",order_seq AS "orderSeq",amount,expires_at AS "expiresAt",approval_started_at AS "approvalStartedAt",invalidated_at AS "invalidatedAt",completed_at AS "completedAt",provider_reference AS "providerReference",provider_payment_key AS "providerPaymentKey",provider_approved_at AS "providerApprovedAt",approval_claim_id AS "approvalClaimId",approval_claimed_until AS "approvalClaimedUntil",notification_status AS "notificationStatus" FROM order_payment_requests WHERE payment_request_id=$1 FOR UPDATE`,
         [id],
       )
     ).rows[0];
@@ -130,7 +139,7 @@ export class OrderPaymentsRepository {
   }
   async complete(client: PoolClient, id: string, reference: string) {
     await client.query(
-      'UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2 WHERE payment_request_id=$1',
+      'UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL WHERE payment_request_id=$1',
       [id, reference],
     );
   }
