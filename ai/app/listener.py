@@ -127,6 +127,7 @@ async def classify(call, conn, client, seq: int) -> None:
             call.answer_failures += 1
             try:
                 if call.answer_failures >= 2:  # 다시 확인받아도 또 실패: 상담원 연결을 먼저 제안
+                    call.answer_failures = 0  # 거절하고 돌아간 뒤 한 번 실패로 바로 다시 제안하지 않게
                     call.handoff_variant = "offer"
                     await engine.apply(call, ["intent.handoff"], "listener")
                     await send_progress(call, conn)
@@ -159,7 +160,8 @@ async def record_heard(call, conn, text: str, heard_at: float) -> bool:
     """이 단계의 답이 아닌 고객 말(주문 정보일 수 있음)을 음성 모델이 위임하지 않았으면 서버가 백엔드에 넘긴다.
     음성 모델이 위임을 자주 빠뜨려 주소 보정·기록이 안 되던 것(2026-10-28 13:26·17:44 통화).
     백엔드가 record_order를 부르면 기존 함수 호출 경로(sideband.run_tool)로 실행된다."""
-    if (call.delegation_mode != "responses" or "record_order" not in engine.current(call).tools
+    if (not call.cfg.listener.record_heard or call.delegation_mode != "responses"
+            or "record_order" not in engine.current(call).tools
             or call.delegated_at >= heard_at):  # 말이 끝난 뒤 음성 모델이 이미 위임함
         return False
     try:
@@ -183,6 +185,11 @@ async def apply_answer(call, answer: str, intent: str) -> list[str]:
     events: list[str] = []
     if answer != NO_ANSWER and stage.on_answer and answer in stage_choices(call):  # 이 단계의 선택지만
         events = await stage.on_answer(call, answer)
+        await engine.apply(call, events, "listener")
+    elif stage.name == "handoff" and answer == NO_ANSWER and intent == "none":
+        # 연결 질문에 답하지 않고 다른 말(주소 등)을 하면 거절로 보고 하던 단계로 돌아간다.
+        # 머물면 진행 상태가 계속 "연결해 드릴까요?"라 모든 말에 같은 제안을 되풀이했다(2026-10-29)
+        events = ["intent.stop"]
         await engine.apply(call, events, "listener")
     if intent != "none" and engine.current(call).listen:  # 답으로 ending에 들어갔으면 용건은 무시
         if intent == "quit":  # 접수하지 않고 끝낸다(통화 결과 CANCELLED)

@@ -358,7 +358,8 @@ def test_heard_order_info_goes_to_backend_when_voice_model_did_not_delegate():
     client, call = FakeClient(), make_call()
 
     async def scenario():
-        call.cfg = quick_cfg()
+        cfg = quick_cfg()
+        call.cfg = cfg.model_copy(update={"listener": cfg.listener.model_copy(update={"record_heard": True})})
         call.flow.stage = "collecting"
         task, conn = await start(call, client)
         conn.push("session.input_transcript.delta", delta="서울 양천구 신정이펜일로 오십이요")
@@ -373,6 +374,23 @@ def test_heard_order_info_goes_to_backend_when_voice_model_did_not_delegate():
         conn.push("session.delegation.created", delegation={"target": "responses"})
         await until(lambda: any(r["name"] == "listener" and r["status"] == "done" and "김도윤" in r["arguments"]
                                 for r in call.tool_calls.values()))
+        assert not [p for p, _ in conn.sent if p.startswith("response.")]
+        conn.push("session.closed", reason="remote_hangup", usage=None)
+        await task
+
+    run(scenario())
+
+
+def test_heard_talk_is_not_sent_to_backend_by_default():
+    """기본은 끔: 위임된 백엔드 응답 중에 서버 요청이 끼어들어 상담원이 멈춘 통화(2026-10-29) 뒤로."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage = "collecting"
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="서울 양천구 신정이펜일로 오십이요")
+        await until(lambda: any(r["name"] == "listener" and r["status"] == "done" for r in call.tool_calls.values()))
         assert not [p for p, _ in conn.sent if p.startswith("response.")]
         conn.push("session.closed", reason="remote_hangup", usage=None)
         await task
