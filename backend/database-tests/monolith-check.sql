@@ -15,7 +15,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>23 THEN RAISE EXCEPTION 'Expected 23 public tables, got %',n; END IF;
+ IF n<>24 THEN RAISE EXCEPTION 'Expected 24 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>22 THEN RAISE EXCEPTION 'Expected 22 foreign keys, got %',n; END IF;
@@ -120,6 +120,12 @@ BEGIN
  SELECT updated_at INTO before_time FROM faq_entries WHERE faq_entry_seq=faq_id;
  UPDATE faq_entries SET answer='Updated' WHERE faq_entry_seq=faq_id;
  IF (SELECT updated_at FROM faq_entries WHERE faq_entry_seq=faq_id)<=before_time THEN RAISE EXCEPTION 'FAQ timestamp failed'; END IF;
+ INSERT INTO faq_change_notifications(operation,faq_entry_seqs,request_id)
+ VALUES('DELETE',ARRAY[faq_id],'00000000-0000-4000-8000-000000000020');
+ DELETE FROM faq_entries WHERE faq_entry_seq=faq_id;
+ IF NOT EXISTS(SELECT 1 FROM faq_change_notifications WHERE faq_entry_seqs=ARRAY[faq_id] AND sent_at IS NULL) THEN
+  RAISE EXCEPTION 'Deleted FAQ notification was lost'; END IF;
+ PERFORM pg_temp.expect_error($q$INSERT INTO faq_change_notifications(operation,faq_entry_seqs,request_id) VALUES('UPDATE',ARRAY[1,2],'00000000-0000-4000-8000-000000000021')$q$,'23514');
  PERFORM pg_temp.expect_error($q$INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata) VALUES('SYSTEM','TEST','TEST','00000000-0000-0000-0000-000000000003','SUCCESS','[]')$q$,'23514');
  RAISE NOTICE 'PASS: schema, preservation, customer states, employee identity, PINs, order versions/snapshots, calls, recordings, delivery FK/history, prompts, FAQ and audit checks';
 END $$;

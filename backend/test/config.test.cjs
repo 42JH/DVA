@@ -12,6 +12,21 @@ const valid = {
   AI_AGENT_URL: 'http://ai:8000',
 };
 
+test('FAQ notification token is optional, validated and never echoed in configuration errors', () => {
+  assert.equal(validateEnvironment(valid).AI_FAQ_TOKEN, undefined);
+  assert.equal(validateEnvironment({ ...valid, AI_FAQ_TOKEN: '' }).AI_FAQ_TOKEN, undefined);
+  const token = 'faq-test-only-token-with-at-least-32-characters';
+  assert.equal(validateEnvironment({ ...valid, AI_FAQ_TOKEN: token }).AI_FAQ_TOKEN, token);
+  for (const value of ['short', token + ' ', token + '\n', '한'.repeat(32), 123])
+    assert.throws(
+      () => validateEnvironment({ ...valid, AI_FAQ_TOKEN: value }),
+      (error) => {
+        assert.equal(error.message, 'Invalid environment variables: AI_FAQ_TOKEN');
+        return true;
+      },
+    );
+});
+
 test('recording config is disabled until a bucket is set and bounds correlation settings', () => {
   const defaults = validateEnvironment(valid);
   assert.equal(defaults.S3_RECORDINGS_BUCKET, undefined);

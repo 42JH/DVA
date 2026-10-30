@@ -82,7 +82,7 @@ module.exports = function faqFixture() {
   f.counts = async () =>
     (
       await pool.query(
-        "SELECT (SELECT count(*)::int FROM faq_entries) AS faqs,(SELECT count(*)::int FROM audit_logs WHERE target_type='FAQ_ENTRY' AND result='SUCCESS') AS audits",
+        "SELECT (SELECT count(*)::int FROM faq_entries) AS faqs,(SELECT count(*)::int FROM audit_logs WHERE target_type='FAQ_ENTRY' AND result='SUCCESS') AS audits,(SELECT count(*)::int FROM faq_change_notifications) AS notifications",
       )
     ).rows[0];
   before(async () => {

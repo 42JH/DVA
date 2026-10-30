@@ -52,6 +52,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
         ? exception.code
         : undefined;
     if (!(exception instanceof HttpException)) {
+      if (
+        exception &&
+        typeof exception === 'object' &&
+        'type' in exception &&
+        exception.type === 'entity.too.large'
+      )
+        status = 413;
       if (sqlState === '23505') status = 409;
       if (sqlState === '23503') status = 409;
       if (sqlState === '23514') status = 422;

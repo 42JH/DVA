@@ -84,7 +84,8 @@ AI 생성·취소는 AI, 관리자 페이지 변경·재접수 시작은 ADMIN(�
 | 취소 금액 변경 | ORDER_AMOUNT_CHANGED | ORDER |
 | 기업 월별 0원 시작·사용액 증가 | BILLING_MONTH_INITIALIZED, BILLING_AMOUNT_INCREASED | ORGANIZATION |
 | 부서 등록·수정 | DEPARTMENT_CREATED, DEPARTMENT_UPDATED | DEPARTMENT |
-| FAQ 등록·수정·초기 등록 | FAQ_CREATED, FAQ_UPDATED, FAQ_BOOTSTRAPPED | FAQ_ENTRY |
+| FAQ 단건·복수 등록·삭제, 단건 수정·초기 등록 | FAQ_CREATED, FAQ_UPDATED, FAQ_DELETED, FAQ_BOOTSTRAPPED | FAQ_ENTRY |
+| FAQ AI 알림 점유·수신 확인·전송 실패 | FAQ_NOTIFICATION_ATTEMPTED, FAQ_NOTIFICATION_SENT, FAQ_NOTIFICATION_FAILED | FAQ_CHANGE_NOTIFICATION |
 | 페르소나 등록·설정 수정 | PERSONA_CREATED, PERSONA_UPDATED | AI_PERSONA_VERSION |
 | 페르소나 적용 요청·대기 교체·대기 취소 | PERSONA_APPLY_REQUESTED, PERSONA_PENDING_REPLACED, PERSONA_PENDING_CANCELLED | AI_PERSONA_VERSION |
 | POST /ai/config/apply-result: 적용 성공·실패 회신 | PERSONA_APPLIED, PERSONA_APPLY_FAILED | AI_PERSONA_VERSION |
@@ -92,6 +93,8 @@ AI 생성·취소는 AI, 관리자 페이지 변경·재접수 시작은 ADMIN(�
 경로는 모두 /api 아래다. 주문 submit의 HTTP 거부·실패 코드는 ORDER_SUBMITTED,
 페르소나 회신 자체의 인증·입력·처리 오류 코드는 PERSONA_APPLY_RESULT다.
 AI가 정상적으로 보낸 적용 실패는 PERSONA_APPLY_FAILED / FAILED로 별도 기록한다.
+FAQ 관리 성공은 대상 FAQ마다 ADMIN(운영자)과 실제 계정을 남긴다. AI 알림 점유·전송 결과는 SYSTEM이며,
+실패 결과는 FAILED다. 해당 대기 상태 변경과 감사 기록은 같은 트랜잭션으로 저장한다.
 
 같은 통화 재요청은 CALL_STARTED를 추가하지 않는다. 고객 확인의 조회만 수행하면 성공 감사를 만들지 않는다.
 이미 처리한 주문 요청 키, 이미 적용한 페르소나 성공 회신, 유효 세션 없는 반복 로그아웃도 성공 로그를 늘리지 않는다.

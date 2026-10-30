@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 020 migration 적용 후 새 앱을 실행한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
+
 부서 관리·구성원 배정·개인/기업 월결제 및 부서 그룹결제 설정은 [부서와 결제 자격](../docs/api/departments.md)을 따른다. 신규 구성원과 CSV에 부서 번호가 필수다.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
@@ -53,6 +55,7 @@ npm run start:dev
 | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | 필수, 누락/빈 값이면 시작 중단 |
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
 | `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
+| `AI_FAQ_TOKEN` | 선택, 32자 이상 공백 없는 ASCII 토큰. FAQ 변경 알림 전용. 비어 있으면 FAQ 쓰기·알림 대기는 보존하고 전송 워커만 비활성 |
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
@@ -147,7 +150,7 @@ backend/
 
 ### 업무 모듈과 데이터 책임
 
-[모놀리식 ERD](../docs/database/monolith.dbml)의 업무 테이블 18개를 다음 기준으로 묶는다.
+[모놀리식 ERD](../docs/database/monolith.dbml)의 업무·운영 테이블을 다음 기준으로 묶는다.
 테이블마다 Module을 만들지 않고 함께 변경되는 데이터와 업무 흐름을 기준으로 구분한다.
 
 | 모듈 | 담당 데이터·책임 |
@@ -160,7 +163,7 @@ backend/
 | `admins` | `admin_users` 계정 관리 |
 | `auth` | 로그인·인증·권한 검사. 계정 접근은 `admins`가 공개한 기능 사용 |
 | `ai-settings` | `ai_personas`, `ai_prompt_versions` |
-| `faqs` | `faq_entries` |
+| `faqs` | `faq_entries`, `faq_change_notifications` |
 | `audit` | `audit_logs` |
 
 기존 `webhooks/pbx/`의 수신 저장과 `consultations`의 업무 처리는 구분한다.

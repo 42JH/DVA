@@ -11,6 +11,8 @@ const events = new Set([
   'recording_storage_unconfigured',
   'recording_worker_unavailable',
   'persona_notification_failed',
+  'faq_notification_deferred',
+  'faq_notification_retry',
   'database_connection_unavailable',
   'backend_started',
   'backend_startup_failed',
@@ -50,6 +52,7 @@ export function logRecord(level: string, input: unknown): Record<string, unknown
       .filter((field: unknown) => typeof field === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(field))
       .slice(0, 40);
   if (typeof requestId === 'string' && isUUID(requestId)) record.requestId = requestId;
+  if (typeof value.eventId === 'string' && isUUID(value.eventId)) record.eventId = value.eventId;
   for (const key of ['orderSeq', 'callSessionSeq']) {
     const number = value[key];
     if (

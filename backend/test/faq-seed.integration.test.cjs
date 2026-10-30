@@ -64,6 +64,16 @@ test('21 seed: CLI inserts 32 pairs in source order, records the chosen admin an
     entries,
   );
   assert.ok(rows.every((r) => r.updated_by_admin_user_seq === f.ids[0]));
+  const notification = (
+    await f.pool.query(
+      "SELECT faq_entry_seqs FROM faq_change_notifications WHERE operation='INSERT' AND faq_entry_seqs @> $1::int[]",
+      [[rows[0].faq_entry_seq]],
+    )
+  ).rows;
+  assert.deepEqual(
+    notification.map((row) => row.faq_entry_seqs),
+    [rows.map((row) => row.faq_entry_seq)],
+  );
   assert.equal((await f.counts()).audits, before.audits + 32);
   const snapshots = (
     await f.pool.query(

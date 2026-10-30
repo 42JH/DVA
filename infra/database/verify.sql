@@ -4,7 +4,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>23 THEN RAISE EXCEPTION 'Expected 23 public tables, found %',n; END IF;
+ IF n<>24 THEN RAISE EXCEPTION 'Expected 24 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>22 THEN RAISE EXCEPTION 'Expected 22 foreign keys, found %',n; END IF;
@@ -49,7 +49,7 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql'))<>18 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql'))<>19 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  IF to_regclass('public.ai_persona_versions') IS NULL OR to_regclass('public.ai_prompt_versions') IS NOT NULL
   OR to_regclass('public.ai_persona_live_status_uk') IS NULL THEN
@@ -58,7 +58,10 @@ BEGIN
   AND table_name='order_parcels' AND column_name='status' AND is_nullable='NO')
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='orders'::regclass AND conname='orders_receipt_status_check') THEN
   RAISE EXCEPTION 'Order cancellation schema missing'; END IF;
- RAISE NOTICE 'PASS: 23 public tables, 22 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ IF to_regclass('public.faq_change_notifications') IS NULL
+  OR to_regclass('public.faq_change_notifications_pending_idx') IS NULL THEN
+  RAISE EXCEPTION 'FAQ notification queue or pending index missing'; END IF;
+ RAISE NOTICE 'PASS: 24 public tables, 22 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
