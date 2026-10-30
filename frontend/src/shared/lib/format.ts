@@ -1,9 +1,19 @@
 // 날짜 · 번호 표시 규칙 (와이어프레임 10/23 결정 #7)
 // 목록의 활동 시각 = 'MM.DD HH:MM' · 오래 남는 날짜(등록일 · 가입 신청일 · 버전 생성일) = 'YYYY.MM.DD'
 // 상세 화면의 시각 = 'MM.DD (요일) HH:MM' (06 · 05 상세) — 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
+// 10/30 연도 규칙 (모든 페이지): 올해면 연도 생략, 다른 해(작년 포함)면 'YYYY.MM.DD' → 새 목록은 fmtListTime
 
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = ['일', '월', '화', '수', '목', '금', '토']
+
+/** 목록 시각 칸 (10/30 연도 규칙): 올해면 ['10.20 14:33'] 한 줄, 다른 해면 ['2025.12.29', '13:40'] 날짜 위 · 시각 아래 두 줄 (칸 폭 그대로) */
+export function fmtListTime(iso: string, now = new Date()): [string] | [string, string] {
+  const d = new Date(iso)
+  const hm = `${two(d.getHours())}:${two(d.getMinutes())}`
+  return d.getFullYear() === now.getFullYear()
+    ? [`${two(d.getMonth() + 1)}.${two(d.getDate())} ${hm}`]
+    : [fmtDate(iso), hm]
+}
 
 export function fmtDateTime(iso: string): string {
   const d = new Date(iso)

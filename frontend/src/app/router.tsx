@@ -3,6 +3,7 @@ import { LoginPage } from '@/features/auth/components/LoginPage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
+import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -47,16 +48,6 @@ export const router = createBrowserRouter([
             handle: { title: '통화 상세' } satisfies RouteHandle,
           },
           {
-            path: 'inquiries',
-            element: <Placeholder />,
-            handle: { title: '통화 문의' } satisfies RouteHandle,
-          },
-          {
-            path: 'inquiries/:callId',
-            element: <Placeholder />,
-            handle: { title: '통화 상세' } satisfies RouteHandle,
-          },
-          {
             path: 'companies',
             element: <Placeholder />,
             handle: { title: '기업관리' } satisfies RouteHandle,
@@ -66,10 +57,16 @@ export const router = createBrowserRouter([
             element: <Placeholder />,
             handle: { title: '페르소나 관리' } satisfies RouteHandle,
           },
+          // 09 FAQ 관리 ▸ FAQ 목록 · AI 미답변 (10/28 A안) — 상단바 제목 = 하위 메뉴 이름
           {
             path: 'faqs',
             element: <FaqPage />,
-            handle: { title: 'FAQ 관리' } satisfies RouteHandle,
+            handle: { title: 'FAQ 목록' } satisfies RouteHandle,
+          },
+          {
+            path: 'faqs/unanswered',
+            element: <UnansweredPage />,
+            handle: { title: 'AI 미답변' } satisfies RouteHandle,
           },
           {
             path: 'admins',

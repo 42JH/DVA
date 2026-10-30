@@ -4,19 +4,27 @@ import { ApiError } from '@/shared/api/client'
 import {
   FAQ_CATEGORIES,
   createFaq,
+  deleteFaq,
   faqQueries,
   updateFaq,
   type Faq,
   type FaqCategory,
   type FaqInput,
 } from '@/features/faq/api/faqApi'
+import {
+  resolveUnanswered,
+  unansweredQueries,
+  type UnansweredQuestion,
+} from '@/features/faq/api/unansweredApi'
 
-/** 09 질의 추가 · 수정 폼 훅 — 분류 · 질문 · 답변, 공백 검사(명세서: question/answer 공백 불가) · 서버 칸별 오류 · 저장 */
-export function useFaqForm(faq: Faq | null, onDone: () => void) {
+/** 09 FAQ 추가 · 수정 창 훅 — 분류 · 질문 · 답변, 공백 검사(명세서: question/answer 공백 불가) · 서버 칸별 오류 · 저장
+ * 10/30: 수정 창 안 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움, 추가하면 그 질문은 처리됨 */
+export function useFaqForm(faq: Faq | null, onDone: () => void, from?: UnansweredQuestion) {
   const qc = useQueryClient()
   const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? '') // 추가는 비워 두고 고르게 (기본값이 쓰레기통이 되지 않게)
-  const [question, setQuestion] = useState(faq?.question ?? '')
+  const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
   const [answer, setAnswer] = useState(faq?.answer ?? '')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   // FAQ-02 멱등키 — 창을 열 때 하나. 본문이 바뀌면 새 키 (같은 키에 다른 본문은 422)
   const [key, setKey] = useState(() => crypto.randomUUID())
   const edit =
@@ -33,13 +41,28 @@ export function useFaqForm(faq: Faq | null, onDone: () => void) {
         question: question.trim(),
         answer: answer.trim(),
       }
-      if (!faq) return createFaq(input, key)
+      if (!faq) {
+        await createFaq(input, key)
+        if (from) await resolveUnanswered(from.unansweredQuestionSeq) // ponytail: 두 번 부름 — BE가 FAQ 추가에서 한 번에 처리하면 하나로
+        return
+      }
       const patch: Partial<FaqInput> = {}
       if (input.category !== faq.category) patch.category = input.category
       if (input.question !== faq.question) patch.question = input.question
       if (input.answer !== faq.answer) patch.answer = input.answer
       if (Object.keys(patch).length) await updateFaq(faq.faqEntrySeq, patch) // 안 바뀌었으면 요청 없이 닫음
     },
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: faqQueries.all() }),
+        from && qc.invalidateQueries({ queryKey: unansweredQueries.all() }),
+      ])
+      onDone()
+    },
+  })
+
+  const remove = useMutation({
+    mutationFn: () => deleteFaq(faq!.faqEntrySeq),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: faqQueries.all() })
       onDone()
@@ -74,5 +97,17 @@ export function useFaqForm(faq: Faq | null, onDone: () => void) {
       category !== '' && question.trim() !== '' && answer.trim() !== '' && !mutation.isPending,
     isSubmitting: mutation.isPending,
     submit: () => mutation.mutate(),
+
+    // 삭제 (수정 창에서만): [삭제] → 확인 창 → [삭제]. [취소]는 수정 창으로 돌아감 (적던 내용 그대로)
+    confirmingDelete,
+    askDelete: () => {
+      remove.reset() // 지난번 실패 문구가 새 확인 창에 먼저 뜨지 않게
+      setConfirmingDelete(true)
+    },
+    cancelDelete: () => setConfirmingDelete(false),
+    confirmDelete: () => remove.mutate(),
+    isDeleting: remove.isPending,
+    deleteError: remove.error?.message ?? null,
+    deleteTarget: `“${faq?.question ?? ''}”`,
   }
 }
