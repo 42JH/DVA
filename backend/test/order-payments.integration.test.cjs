@@ -385,6 +385,7 @@ test('approval followed by DB transaction failure is reconciled without charging
     audit.recordSuccess = original;
   }
   assert.equal((await stored(r.orderSeq)).status, 'notPaid');
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'WAITING');
   assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 200);
   assert.equal((await stored(r.orderSeq)).status, 'ACCEPTED');
   assert.equal(calls.filter((c) => c.method === 'POST' && c.body.orderId === id).length, 1);
@@ -594,6 +595,12 @@ test('Swagger documents real payment envelopes, nullable times and the protected
   assert.equal(properties.pickupRequestedAt.type, 'string');
   assert.equal(properties.pickupRequestedAt.nullable, true);
   assert.ok(properties.notificationStatus.enum.includes('UNKNOWN'));
+  assert.ok(properties.completionNotificationStatus.enum.includes('WAITING'));
+  assert.ok(
+    doc.paths['/api/payments/notifications/{id}/completion/retry'].post.security.some(
+      (x) => 'adminSession' in x,
+    ),
+  );
   assert.ok(properties.orderStatus.enum.includes('SUBMISSION_FAILED'));
   assert.ok(
     doc.paths['/api/payments/notifications/{id}/retry'].post.security.some(
@@ -602,4 +609,178 @@ test('Swagger documents real payment envelopes, nullable times and the protected
   );
   assert.equal(doc.paths['/api/payments/p/{id}'], undefined);
   assert.ok(!JSON.stringify(doc).includes('test_gsk_fixture'));
+});
+
+const completionMessages = (id) =>
+  messages.filter((s) => s.includes('결제 완료 안내') && s.includes(`/p/${id}`));
+
+test('completion notices wait for committed approval and survive repeated confirm/reconcile calls', async () => {
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  await worker.run();
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'WAITING');
+  assert.equal(completionMessages(id).length, 0);
+  assert.equal((await confirm(r)).status, 200);
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'PENDING');
+  await Promise.all([worker.run(), worker.run()]);
+  await confirm(r);
+  await payments.reconcile(id, randomUUID());
+  await worker.run();
+  assert.equal(completionMessages(id).length, 1);
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'SENT');
+  assert.ok(completionMessages(id)[0].includes('3,500원'));
+  assert.ok(!completionMessages(id)[0].includes('[결제하기]'));
+});
+
+test('payment completion notice is independent of missing Dver configuration and Dver rejection', async () => {
+  const config = app.get(ConfigService),
+    oldKey = config.get('DVER_API_KEY');
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  config.set('DVER_API_KEY', '');
+  try {
+    assert.equal((await confirm(r)).status, 503);
+    assert.equal((await stored(r.orderSeq)).status, 'PAID');
+    await worker.run();
+    assert.equal(completionMessages(id).length, 1);
+    assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'SENT');
+  } finally {
+    config.set('DVER_API_KEY', oldKey);
+  }
+  const failed = await create(),
+    fid = failed.paymentRequest.paymentRequestId;
+  rejectDver = true;
+  try {
+    assert.equal((await confirm(failed)).status, 200);
+  } finally {
+    rejectDver = false;
+  }
+  await worker.run();
+  assert.equal((await stored(failed.orderSeq)).status, 'SUBMISSION_FAILED');
+  assert.equal(completionMessages(fid).length, 1);
+  assert.ok(!completionMessages(fid)[0].includes('접수가 완료'));
+});
+
+test('completion delivery timeout is UNKNOWN without automatic resend and admin retry is isolated/audited', async () => {
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  await worker.run();
+  await confirm(r);
+  const providerCalls = () =>
+    calls.filter((c) => c.body.orderId === id || c.path.endsWith('ok_' + id)).length;
+  const providerCount = providerCalls(),
+    parcelCount = parcels.length;
+  messageMode = 'timeout';
+  client.timeout = 80;
+  try {
+    await worker.run();
+  } finally {
+    messageMode = 'ok';
+    client.timeout = 10000;
+  }
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'UNKNOWN');
+  await worker.run();
+  assert.equal(completionMessages(id).length, 1);
+  const path = `/payments/notifications/${id}/completion/retry`;
+  assert.equal((await request(path, {})).status, 401);
+  assert.equal((await request(path, {}, true, 'POST', false)).status, 403);
+  assert.equal((await request(path, {}, true)).status, 200);
+  assert.equal((await request(path, {}, true)).status, 200);
+  await worker.run();
+  assert.equal(completionMessages(id).length, 2);
+  const view = (await lookup(id)).body.data;
+  assert.equal(view.completionNotificationStatus, 'SENT');
+  assert.equal(view.notificationStatus, 'SENT');
+  assert.equal(providerCalls(), providerCount);
+  assert.equal(parcels.length, parcelCount);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_seq=$1 AND action='ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED' AND result='SUCCESS'",
+        [r.orderSeq],
+      )
+    ).rows[0].n,
+    1,
+  );
+});
+
+test('completion notices recover pending work after restart and two instances cannot both send it', async () => {
+  await worker.run();
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  await confirm(r);
+  // Retain eligibility even after the original payment-link expiration.
+  await pool.query(
+    "UPDATE order_payment_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE payment_request_id=$1",
+    [id],
+  );
+  const { AppModule } = require('../dist/app.module');
+  const peer = await NestFactory.create(AppModule, { logger: false });
+  try {
+    await Promise.all([
+      payments.notifyCompletionOne(),
+      peer.get(PaymentsService).notifyCompletionOne(),
+    ]);
+    assert.equal(completionMessages(id).length, 1);
+    assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'SENT');
+  } finally {
+    await peer.close();
+  }
+});
+
+test('crashed completion sender becomes UNKNOWN; legacy completed requests can still be sent', async () => {
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  await confirm(r);
+  await pool.query(
+    "UPDATE order_payment_requests SET completion_notification_status='SENDING',completion_notification_attempted_at=clock_timestamp()-interval '46 seconds' WHERE payment_request_id=$1",
+    [id],
+  );
+  await worker.run();
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'UNKNOWN');
+  assert.equal(completionMessages(id).length, 0);
+  const legacy = await create(),
+    lid = legacy.paymentRequest.paymentRequestId;
+  await confirm(legacy);
+  await pool.query(
+    "UPDATE order_payment_requests SET completion_notification_status='WAITING' WHERE payment_request_id=$1",
+    [lid],
+  );
+  await worker.run();
+  assert.equal(completionMessages(lid).length, 1);
+  assert.equal((await lookup(lid)).body.data.completionNotificationStatus, 'SENT');
+});
+
+test('completion retries reject unpaid/in-flight work and roll back when audit storage fails', async () => {
+  const r = await create(),
+    id = r.paymentRequest.paymentRequestId;
+  const path = `/payments/notifications/${id}/completion/retry`;
+  assert.equal((await request(path, {}, true)).status, 409);
+  await worker.run();
+  await confirm(r);
+  messageMode = 'reject';
+  try {
+    await worker.run();
+  } finally {
+    messageMode = 'ok';
+  }
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'FAILED');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (event, ...args) {
+    if (event.action === 'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED')
+      throw Error('Audit failed');
+    return original.call(this, event, ...args);
+  };
+  try {
+    assert.equal((await request(path, {}, true)).status, 500);
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'FAILED');
+  assert.equal((await request(path, {}, true)).status, 200);
+  const repository = app.get(PaymentsRepository);
+  assert.equal(await repository.claimCompletionNotification(), id);
+  assert.equal((await request(path, {}, true)).status, 409);
+  await repository.finishCompletionNotification(id, 'FAILED');
 });
