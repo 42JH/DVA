@@ -23,9 +23,19 @@ const CALLS_LINK: Record<TodayCardKind, string> = {
 }
 
 const count = (n: number | undefined) => (n === undefined ? '–' : n.toLocaleString('ko-KR'))
-const avg = (n: number | undefined) => (n === undefined ? '–' : n.toFixed(1))
+// 평균 = [숫자, 단위] 조각들 — 02 대시보드와 같은 모양 ('2 분 51 초' · '1.3 회')
+type Parts = [string, string][]
+const minSec = (n: number | undefined): Parts => {
+  if (n === undefined) return [['–', '']]
+  const s = Math.round(n)
+  return [
+    [String(Math.floor(s / 60)), '분'],
+    [String(s % 60).padStart(2, '0'), '초'],
+  ]
+}
+const times = (n: number | undefined): Parts => [[n === undefined ? '–' : n.toFixed(1), '회']]
 
-/** 01 홈 위쪽 — 검색(→ 03 주문 내역) · 오늘 숫자. 처리할 AI 미답변은 features/faq의 UnansweredPreview */
+/** 01 홈 위쪽 — 검색(→ 03 주문 내역) · 오늘 숫자(카드 · 평균 모두 오늘 0시부터 시작한 통화 기준). 처리할 AI 미답변은 features/faq의 UnansweredPreview */
 export function useHome() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
@@ -56,8 +66,8 @@ export function useHome() {
     todayLabel: fmtDateDay(new Date()),
     cards,
     averages: [
-      { label: '평균 통화 시간', value: avg(s?.avgCallSeconds), unit: '초' },
-      { label: '평균 되묻기 횟수', value: avg(s?.avgReaskCount), unit: '회' },
+      { label: '평균 통화 시간', parts: minSec(s?.avgCallSeconds) },
+      { label: '평균 되묻기 횟수', parts: times(s?.avgReaskCount) },
     ],
     todayError: today.error?.message ?? null,
   }
