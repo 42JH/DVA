@@ -38,6 +38,7 @@ export class PaymentsWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
   private async work() {
     if (!this.config.get('ORDER_PAYMENTS_ENABLED', { infer: true })) return;
+    for (let i = 0; i < 10; i++) if (!(await this.payments.notifyCompletionOne())) break;
     for (let i = 0; i < 10; i++) if (!(await this.payments.notifyOne())) break;
     for (const { id } of await this.repository.pendingApprovals()) {
       try {
