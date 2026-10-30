@@ -6,6 +6,7 @@
 ## 확정 정책
 
 - 개인 카드 `billing`: 주문 확정 → `notPaid` 및 결제 요청 저장 → Mattermost 안내 자동 발송 → 토스 테스트 승인 확인 → DB 결제 완료 → 디버 POST.
+- 검증된 결제 완료를 DB에 저장한 뒤 같은 Mattermost 결제 채널로 완료 안내도 자동 발송한다. 결제 완료와 디버 접수 완료는 구분하며, 디버 설정 누락·접수 실패가 완료 안내를 막지 않는다.
 - 월결제 `credit`·부서 그룹결제 `groupBilling`: 기존 자격 검증 후 바로 결제 완료·디버 접수. 토스 링크나 결제 메시지를 생성하지 않는다.
 - 디버가 제공한 API는 목 접수 API이며 이번 흐름에서는 실제 접수 단계처럼 취급한다.
 - 수거 시각은 **결제 완료 시각 + 1시간**이다. 카드에서는 토스의 검증된 `approvedAt`, 월·그룹에서는 DB 결제 처리 시각을 기준으로 한다. 디버 재접수 때 다시 계산하지 않는다.
@@ -34,6 +35,7 @@ AI `POST /api/orders`의 `outcome=COMPLETE`, 관리자 `POST /api/admin/orders`,
 | `POST /api/payments/requests/{id}/confirm` | 서버의 토스 승인 확인·DB 반영·디버 접수 |
 | `POST /api/payments/requests/{id}/reconcile` | 저장된 결제 키로 결과 조회만 수행 |
 | `POST /api/payments/notifications/{id}/retry` | 관리자 로그인·허용 Origin 필수. 같은 유효 링크의 안내 재발송 대기 |
+| `POST /api/payments/notifications/{id}/completion/retry` | 관리자 로그인·허용 Origin 필수. 이미 결제된 요청의 완료 안내만 재발송 대기 |
 
 `id`는 `paymentRequestId`(UUID v4)다. 고객 경로는 링크 소유자가 관리자 로그인·통화 번호 없이 사용한다. 토스 승인·재조회 POST에는 `PAYMENT_PUBLIC_URL`과 정확히 같은 Origin이 필요하다. 결제 페이지 자체가 이 요청을 보내며 FE나 AI가 결제 완료 여부를 자가 신고하지 않는다. 관리자 재발송 경로에는 익명·AI 접근 예외를 적용하지 않는다.
 
@@ -50,6 +52,8 @@ AI `POST /api/orders`의 `outcome=COMPLETE`, 관리자 `POST /api/admin/orders`,
 `orderId`는 경로의 요청 ID와 같아야 하며 금액은 DB 요청·주문의 현재 합계와 일치해야 한다. `reconcile`·관리자 재발송 본문은 `{}`다. 추가 필드는 거절한다.
 
 JSON 성공 응답은 기존 `{data,meta:{requestId}}` 형식이다. `data`에는 `token`, `orderId`, `orderSeq`, `orderName`, `amount`, `senderName`, `recipientSummary`, `parcelCount`, `expiresAt`, `approvedAt`, `pickupRequestedAt`, `status`, `orderStatus`, `notificationStatus`가 있다. `token`은 경로의 무작위 요청 ID와 같은 값이며 별도 서비스 인증 토큰이 아니다. 시크릿·웹훅·토스 결제 키·전체 결제 응답은 반환하지 않는다.
+
+`completionNotificationStatus`는 별도의 결제 완료 안내 상태다. `WAITING`(미결제), `PENDING`, `SENDING`, `SENT`, `FAILED`, `UNKNOWN`을 반환한다. 기존 `notificationStatus`는 결제 링크 안내의 상태를 그대로 나타낸다.
 
 결제 `status`는 `PENDING`, `REVIEW_REQUIRED`, `PAID`, `EXPIRED`, `CANCELLED`다. `orderStatus`는 기존 주문 상태이며 결제 완료와 디버 접수 완료를 구분한다. 결제 결과가 `PAID`여도 디버 상태는 `SUBMITTING`·`SUBMISSION_FAILED`일 수 있다. 프론트는 접수 성공을 `ACCEPTED`에서만 표시한다.
 
@@ -75,9 +79,21 @@ DB에서 `PENDING`을 한 워커만 `SENDING`으로 바꾼 뒤 발송한다. Mat
 
 발송 실패가 주문을 삭제하거나 롤백하지 않는다. 결제 진행·완료·취소·만료 요청은 재발송 대기로 바꿀 수 없다. 메시지 전송과 취소가 동시에 일어나 이미 발송 중인 안내가 도착할 수 있지만 해당 링크의 결제는 서버에서 차단한다.
 
+### 결제 완료 안내
+
+토스 승인 검증 후 `completed_at`, 주문 결제 상태·감사 기록과 같은 트랜잭션에서 완료 안내를 `PENDING`으로 저장한다. 승인 거절·미확정·결제 DB 저장 롤백 시 완료 안내를 보내지 않는다. 워커가 최대 5초 간격으로 발송하며, 콜백 재호출·재조회·새로고침은 완료 안내를 새로 생성하지 않는다.
+
+완료 안내에는 친근한 인삿말, 주문번호·발송인·수령인·건수·결제금액·결제 완료 시각·수거 요청 시각과 주문 확인 링크를 담는다. 두 시각은 한국 시간으로 표시한다. 주문 확인 링크는 기존 결제 페이지의 현재 결제·접수 상태로 연결하며 추가 결제를 요청하지 않는다. 디버 상태가 `PAID`·`SUBMISSION_FAILED`여도 결제 완료 안내를 보내며, 메시지에서 디버 접수 성공을 주장하지 않는다.
+
+결제 요청 안내와 완료 안내는 발송 상태·시도 시각·성공 시각을 각각 관리한다. 같은 완료 안내는 DB 행 잠금으로 한 워커만 발송한다. 발송 후 DB 기록 전 중단 또는 응답 유실은 `UNKNOWN`으로 남기며 자동 재발송하지 않는다. 만료된 결제 링크라도 이미 승인·저장된 결제의 완료 안내는 발송할 수 있다.
+
+완료 안내 재발송 API는 결제가 저장된 요청만 허용한다. 미결제·발송 중은 409이며, 이미 발송 대기 중이면 아무것도 추가하지 않는다. 관리자 권한·Origin을 검증하고 `ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED` 감사를 같은 트랜잭션에 저장한다. 이 API는 토스 승인이나 디버 접수를 다시 수행하지 않는다. `UNKNOWN`은 채널 수신 여부를 확인한 뒤 재발송한다.
+
 ## 배포
 
 022 마이그레이션은 기존 `order_payment_requests`에 결제 식별자·승인 시각·처리권과 발송 상태 컬럼·인덱스를 추가한다. 새 업무 테이블이나 기능별 등록 요청 키 테이블은 만들지 않는다. 기존 마이그레이션은 수정하지 않는다.
+
+023은 같은 테이블에 완료 안내 상태·시도 시각·성공 시각 3개 컬럼과 대기 인덱스를 추가한다. 새 앱 실행 전에 자동 마이그레이션으로 적용한다. **이미 `completed_at`이 저장된 기존 결제 요청도 `PENDING`으로 이관하므로 배포·활성화 후 완료 안내를 한 번 발송한다.** 주문·결제 금액·승인 결과·기존 안내 상태는 변경하지 않는다. 배포 전 구 앱이 막 완료한 결제도 워커가 `WAITING`에서 복구한다.
 
 정식 BE의 서버 전용 환경 설정에 아래 항목을 넣는다. 실제 값을 Git·채팅·공유 로그에 출력하지 않는다.
 
@@ -92,6 +108,8 @@ PAYMENT_MATTERMOST_WEBHOOK_URL=<기존 결제 전용 웹훅>
 `CORS_ORIGINS`에 `https://13.209.59.180`을 포함한다. 토스 주소는 운영 설정에서 변경할 수 없고 라이브 키도 거절한다. 모형 주소는 `NODE_ENV=test`의 loopback에서만 허용한다. 현재 `/srv/dva-payment-test/settings`에 있는 키·웹훅은 배포 때 서버 내부에서 정식 BE 환경 설정으로 이관해야 한다. 이번 코드 작업에서 서버 설정을 변경하거나 메시지·디버 요청을 발송하지 않는다.
 
 기본 활성화는 false이며 비활성 상태에서도 주문·결제 요청을 보존한다. 활성화하면 아직 유효한 기존 `PENDING` 요청도 발송 대상으로 처리한다. 기존 3002 포트의 샘플 서비스는 실제 주문과 무관하며, 새 흐름 확인 후 운영자가 중지할 수 있다. 기존 샘플 JSON 파일을 업무 주문으로 이관하지 않는다. 카카오 알림톡은 후속 발송 채널 연동 범위다.
+
+완료 안내는 기존 `ORDER_PAYMENTS_ENABLED`·`PAYMENT_MATTERMOST_WEBHOOK_URL`을 사용하므로 추가 환경변수는 필요 없다. 디버 접수는 별도로 정식 BE의 `DVER_API_KEY` 설정이 필요하다. 키가 비어 있으면 결제는 `PAID`로 보존되고 기존 유지보수 작업이 설정 적용 후 접수를 이어간다.
 
 ## 검증과 범위
 

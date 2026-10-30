@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-30 / backend/migrations/001~022 기준. public 업무·관리자 24개 + PBX 수신 1개 = ERD 25개, FK 20개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-30 / backend/migrations/001~023 기준. public 업무·관리자 24개 + PBX 수신 1개 = ERD 25개, FK 20개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
@@ -188,6 +188,9 @@ Table order_payment_requests {
   notification_status text [not null, default: 'PENDING', note: 'PENDING/SENDING/SENT/FAILED/UNKNOWN']
   notification_attempted_at timestamptz
   notification_sent_at timestamptz
+  completion_notification_status text [not null, default: 'WAITING', note: '결제 완료 안내: WAITING/PENDING/SENDING/SENT/FAILED/UNKNOWN. 기존 완료 결제는 023에서 PENDING 이관']
+  completion_notification_attempted_at timestamptz
+  completion_notification_sent_at timestamptz
   checks {
     `amount>0`
     `length(provider_reference) BETWEEN 1 AND 200`
@@ -196,8 +199,9 @@ Table order_payment_requests {
     `length(provider_payment_key) BETWEEN 1 AND 200`
     `(approval_claim_id IS NULL)=(approval_claimed_until IS NULL)`
     `notification_status IN ('PENDING','SENDING','SENT','FAILED','UNKNOWN')`
+    `completion_notification_status IN ('WAITING','PENDING','SENDING','SENT','FAILED','UNKNOWN')`
   }
-  Note: 'order / 개인 카드 결제 요청과 안내 발송. 부분 취소는 이전 링크를 닫고 남은 금액의 새 요청·안내를 만든다. 최초 만료를 유지하고 승인·취소를 직렬화한다. 토스 승인 전 결제 키와 45초 처리권을 저장하며 응답 유실은 조회로 복구한다. UNKNOWN 메시지는 자동 재발송하지 않는다. SQL 부분 인덱스: one_active_order_payment_request, order_payment_notification_pending_idx, order_payment_reconcile_idx. 카카오 알림톡은 후속 범위.'
+  Note: 'order / 개인 카드 결제 요청과 요청·완료 안내 발송. 부분 취소는 이전 링크를 닫고 남은 금액의 새 요청·안내를 만든다. 최초 만료를 유지하고 승인·취소를 직렬화한다. 토스 승인 전 결제 키와 45초 처리권을 저장하며 응답 유실은 조회로 복구한다. 결제 완료와 같은 트랜잭션에 완료 안내 대기를 저장하며 디버 결과와 독립 발송한다. UNKNOWN 메시지는 자동 재발송하지 않는다. SQL 부분 인덱스: one_active_order_payment_request, order_payment_notification_pending_idx, order_payment_reconcile_idx, order_payment_completion_pending_idx. 카카오 알림톡은 후속 범위.'
 }
 
 Table order_parcels {

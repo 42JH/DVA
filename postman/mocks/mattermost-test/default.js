@@ -6,7 +6,11 @@ http
     if (req.method === "POST" && req.url === "/hooks/test") {
       if (
         typeof req.body?.text !== "string" ||
-        !req.body.text.includes("[결제하기](")
+        !(
+          req.body.text.includes("[결제하기](") ||
+          (req.body.text.includes("결제 완료 안내") &&
+            req.body.text.includes("[주문 확인]("))
+        )
       ) {
         res.writeHead(400);
         return res.end("invalid text");

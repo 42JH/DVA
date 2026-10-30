@@ -6,7 +6,7 @@ import { OrderPaymentsService } from '../orders/order-payments.service';
 import { isZonedDate } from '../orders/order-draft';
 import { PaymentsRepository } from './payments.repository';
 import { PaymentClient } from './payment.client';
-import { paymentMessage } from './payment-message';
+import { paymentCompletionMessage, paymentMessage } from './payment-message';
 
 @Injectable()
 export class PaymentsService {
@@ -108,5 +108,24 @@ export class PaymentsService {
   retryNotification(id: string, adminId: number, requestId: string) {
     this.ensureEnabled();
     return this.repository.retryNotification(id, adminId, requestId);
+  }
+  async notifyCompletionOne() {
+    this.ensureEnabled();
+    const id = await this.repository.claimCompletionNotification();
+    if (!id) return false;
+    const view = await this.repository.read(id);
+    if (view.status !== 'PAID') {
+      await this.repository.finishCompletionNotification(id, 'FAILED');
+      return true;
+    }
+    const result = await this.client.notify(
+      paymentCompletionMessage(view, this.config.get('PAYMENT_PUBLIC_URL', { infer: true })),
+    );
+    await this.repository.finishCompletionNotification(id, result);
+    return true;
+  }
+  retryCompletionNotification(id: string, adminId: number, requestId: string) {
+    this.ensureEnabled();
+    return this.repository.retryCompletionNotification(id, adminId, requestId);
   }
 }
