@@ -75,8 +75,7 @@ type Speed = (typeof SPEEDS)[number]
 function toSegments(utterances: Utterance[], complaints: Complaint[]): ScriptSegment[] {
   const segments: ScriptSegment[] = []
   utterances.forEach((u, i) => {
-    const complaint =
-      complaints.find((c) => c.fromSec <= u.atSec && u.atSec <= c.toSec) ?? null
+    const complaint = complaints.find((c) => c.fromSec <= u.atSec && u.atSec <= c.toSec) ?? null
     const line: ScriptLine = {
       key: i,
       time: fmtClock(u.atSec),
@@ -131,7 +130,11 @@ export function useCallDetail(callId: number) {
           ...(r.kind === 'UNANSWERED'
             ? {
                 question: r.question,
-                link: { label: 'AI 미답변 보기', onClick: () => navigate('/faqs/unanswered') },
+                // 그 통화의 질문만 (10/30 사용자: 미답변 보기를 누르면 해당 통화 것만)
+                link: {
+                  label: 'AI 미답변 보기',
+                  onClick: () => navigate(`/faqs/unanswered?call=${callId}`),
+                },
               }
             : { link: { label: '주문 보기', onClick: () => setOrderId(r.orderSeq) } }),
         }))
@@ -197,14 +200,12 @@ export function useCallDetail(callId: number) {
 
     // 처리 내용
     results,
-    actions: (call?.actions ?? []).map(
-      (a, i): ActionView => ({
-        key: i,
-        time: fmtClock(a.atSec),
-        tag: ACTION_LABEL[a.kind],
-        text: actionText(a),
-      }),
-    ),
+    actions: (call?.actions ?? []).map((a, i): ActionView => ({
+      key: i,
+      time: fmtClock(a.atSec),
+      tag: ACTION_LABEL[a.kind],
+      text: actionText(a),
+    })),
 
     // 주문 팝업
     order: orderView, // 다 받으면 팝업이 뜸
