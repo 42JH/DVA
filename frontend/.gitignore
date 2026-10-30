@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# 개인 개발 기록 (포트폴리오용, 공유하지 않음)
+jiw/
