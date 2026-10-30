@@ -1,4 +1,5 @@
 import {
+  AppliedFilters,
   Button,
   ConfirmDialog,
   Pagination,
@@ -13,6 +14,7 @@ import { FaqFormModal } from './FaqFormModal'
 // 09 AI 미답변 (와이어프레임 09_AI미답변 · _FAQ추가 · _삭제확인, 10/30) — 탭 줄 없음, 맨 윗줄 = 검색
 // 카드 'AI 미답변 질문 n개' · 오래된 순 · 줄 = 통화 시작 시각 | 고객 · 발신번호 | “질문”(고객 말 그대로) | [FAQ 추가] [삭제]
 // 줄을 누르면 그 통화의 06 통화 상세 (줄 끝 › 없음)
+// 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화의 질문만 + 검색칸 아래 '적용된 필터' 칩 (✕ = 전체 미답변으로)
 export function UnansweredPage() {
   const vm = useUnansweredList()
 
@@ -63,6 +65,7 @@ export function UnansweredPage() {
   return (
     <div className="flex flex-col gap-6">
       <SearchBox value={vm.q} onChange={vm.setQ} placeholder="질문 · 이름 · 전화번호" />
+      <AppliedFilters chips={vm.callChips} onRemove={vm.clearCall} onClear={vm.clearCall} />
 
       <Table
         head={
@@ -77,8 +80,7 @@ export function UnansweredPage() {
         onRowClick={vm.openCall}
         loading={vm.isLoading}
         empty={
-          vm.listError ??
-          (vm.q ? '해당하는 질문이 없습니다.' : 'AI가 답하지 못한 질문이 없습니다.')
+          vm.listError ?? (vm.q ? '해당하는 질문이 없습니다.' : 'AI가 답하지 못한 질문이 없습니다.')
         }
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />

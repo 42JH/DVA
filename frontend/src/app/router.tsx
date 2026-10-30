@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router'
 import { LoginPage } from '@/features/auth/components/LoginPage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
+import { CallListPage } from '@/features/call/components/CallListPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
@@ -39,7 +40,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'calls',
-            element: <Placeholder />,
+            element: <CallListPage />,
             handle: { title: '통화 내역' } satisfies RouteHandle,
           },
           {

@@ -2,6 +2,8 @@
 // 명세 초안(CALL-08/09 · ORD-03)에 고객 이름 · 통화 결과 · 처리 내용 · AI 동작이 없음 → BE가 명세를 짜서 주기로 함 (10/30)
 // 지금은 네트워크 없이 메모리 가짜 데이터 (와이어프레임 06 세 장면). 명세가 오면 fetchCallDetail · fetchOrder 몸통만 바꾸면 됨
 import { queryOptions } from '@tanstack/react-query'
+import { addDays, todayYmd } from '@/shared/lib/dateRange'
+import { fmtDetailTime } from '@/shared/lib/format'
 
 /** 통화 결과 = 04와 같은 5개. 한 통화 = 결과 하나, 기록으로 우선순위: 이관 > 접수 성공 > 접수 실패 > 주문 취소 > 문의 */
 export type Outcome = 'HANDOFF' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'INQUIRY'
@@ -125,7 +127,11 @@ export async function fetchOrder(id: number): Promise<OrderDetail> {
 }
 
 // ---------- 가짜 데이터 = 와이어프레임 06 세 장면 (build_call_detail SCENES) ----------
-const t = (hm: string) => `2026-10-20T${hm}+09:00`
+// 날짜는 오늘 기준 (04 통화 내역 가짜 목록과 같은 날 — 목록에서 눌러 들어와도 날짜가 맞게). 수거 희망 = 내일
+const t = (hms: string) => `${todayYmd()}T${hms}+09:00`
+const tomorrow = (hm: string) => `${addDays(todayYmd(), 1)}T${hm}:00+09:00`
+const pickup = new Date(tomorrow('09:00')) // 강도윤이 말한 '내일 오전 9시'
+const pickupSaid = `${pickup.getMonth() + 1}월 ${pickup.getDate()}일 ${'일월화수목금토'[pickup.getDay()]}요일 오전 9시`
 const say = (atSec: number, speaker: 'AI' | 'CUSTOMER', text: string): Utterance => ({
   atSec,
   speaker,
@@ -176,7 +182,7 @@ const CALLS: CallDetail[] = [
       say(65, 'CUSTOMER', '402호요.'),
       say(67, 'AI', '물건은 언제 가져가면 될까요?'),
       say(71, 'CUSTOMER', '내일 오전 9시에 와 주세요.'),
-      say(73, 'AI', '10월 21일 수요일 오전 9시 맞으실까요?'),
+      say(73, 'AI', `${pickupSaid} 맞으실까요?`),
       say(77, 'CUSTOMER', '네.'),
       say(78, 'AI', '보내실 물건은 서류, 소박스, 중박스, 대박스 중 어떤 크기인가요?'),
       say(84, 'CUSTOMER', '서류 하나요.'),
@@ -202,7 +208,7 @@ const CALLS: CallDetail[] = [
       act(57, 'SEARCH', "주소 검색 '독막로 301' → 1건"),
       save(58, 'destination.roadAddress', '서울 마포구 독막로 301'),
       save(66, 'destination.detailAddress', '402호'),
-      save(77, 'pickupRequestedAt', '10.21 (수) 09:00'),
+      save(77, 'pickupRequestedAt', fmtDetailTime(tomorrow('09:00'))),
       save(85, 'parcels', '서류 1'),
       save(91, 'clientComment', '경비실에 맡겨 주세요'),
       act(96, 'SEARCH', "FAQ 검색 '착불 요금' → 0건"),
@@ -289,7 +295,7 @@ const ORDERS: OrderDetail[] = [
       detailAddress: '402호',
     },
     items: { document: 1, small: 0, medium: 0, big: 0, other: null },
-    pickupRequestedAt: '2026-10-21T09:00:00+09:00',
+    pickupRequestedAt: tomorrow('09:00'),
     itemPrice: 30000,
     clientComment: '경비실에 맡겨 주세요',
     paymentMethod: 'MONTHLY',
@@ -314,7 +320,7 @@ const ORDERS: OrderDetail[] = [
       detailAddress: null,
     },
     items: { document: 0, small: 0, medium: 1, big: 0, other: null },
-    pickupRequestedAt: '2026-10-21T11:00:00+09:00',
+    pickupRequestedAt: tomorrow('11:00'),
     itemPrice: 50000,
     clientComment: null,
     paymentMethod: 'PERSONAL_CARD',

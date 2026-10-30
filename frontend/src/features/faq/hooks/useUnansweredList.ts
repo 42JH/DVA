@@ -16,7 +16,8 @@ export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
 export type UnansweredRow = UnansweredQuestion & { time: string[]; phone: string }
 
 const PAGE_SIZE = 20
-const DEFAULTS = { q: '' } // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙)
+// URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
+const DEFAULTS = { q: '', call: '' }
 
 type Modal = { kind: 'add' | 'delete'; item: UnansweredQuestion } | null
 
@@ -32,7 +33,9 @@ export function useUnansweredList() {
 
   const needle = params.q.trim().toLowerCase()
   const digits = params.q.replace(/\D/g, '') // '010-1458' · '01014582209' 둘 다 찾게
-  const hit = (list.data ?? [])
+  const call = params.call ? Number(params.call) : null
+  const ofCall = (list.data ?? []).filter((u) => call === null || u.callSessionSeq === call)
+  const hit = ofCall
     .filter(
       (u) =>
         !needle ||
@@ -41,6 +44,19 @@ export function useUnansweredList() {
         (digits !== '' && u.callerNumber.includes(digits)),
     )
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  // 통화 칩 글: '강도윤 · 13:13 통화의 질문만' (질문이 다 처리돼 없으면 '이 통화의 질문만')
+  const first = ofCall[0]
+  const callChips =
+    call === null
+      ? []
+      : [
+          {
+            key: 'call',
+            label: first
+              ? `${first.customerName} · ${fmtListTime(first.startedAt).join(' ')} 통화의 질문만`
+              : '이 통화의 질문만',
+          },
+        ]
   const sliced = pageSlice(hit, page, PAGE_SIZE)
   const rows: UnansweredRow[] = sliced.rows.map((u) => ({
     ...u,
@@ -57,6 +73,8 @@ export function useUnansweredList() {
   return {
     q: params.q,
     setQ: (v: string) => set({ q: v }),
+    callChips, // 적용된 필터 줄 (06에서 왔을 때만)
+    clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     rows,
     count: hit.length, // 'AI 미답변 질문 22개' (검색 중엔 결과 수)
     isLoading: list.isPending,
