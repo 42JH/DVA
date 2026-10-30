@@ -54,6 +54,17 @@ pipeline {
                 sh 'node infra/observability/test.mjs'
             }
         }
+        stage('Payment demo checks') {
+            when {
+                anyOf {
+                    changeset 'infra/payment-test/**'
+                    changeset 'backend/payment-test/**'
+                }
+            }
+            steps {
+                sh 'node infra/payment-test/check.mjs'
+            }
+        }
         stage('Build and Package Images') {
             steps {
                 // NestJS compilation runs inside the backend Docker build stage.
