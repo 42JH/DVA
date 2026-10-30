@@ -41,7 +41,8 @@ src/
   shared/
     api/            client.ts(공통 HTTP · ApiError) · queryClient.ts · paging.ts
     auth/           token.ts · sessionApi.ts · useSession.ts   — 세션은 여러 기능이 써서 여기
-    lib/            useListParams · format · dateRange
+    lib/            useListParams · format · dateRange · search(띄어쓰기 · 초성) · recentSearches
+    order/          orderApi.ts · useOrderDetail.ts · OrderDetailModal.tsx   — 주문 상세 팝업, 03 · 06이 같이 써서 여기
     styles/         global.css (Tailwind 진입점 + 디자인 토큰 @theme)
     ui/             공통 부품 (index.ts로만 import)
   features/<기능>/

@@ -64,7 +64,13 @@ export default defineConfig([
         {
           patterns: [
             {
-              group: ['**/api/*', '@/features/*/api/*', '@/shared/api/*', '@/shared/auth/sessionApi'],
+              group: [
+                '**/api/*',
+                '@/features/*/api/*',
+                '@/shared/api/*',
+                '@/shared/auth/sessionApi',
+                '@/shared/order/orderApi',
+              ],
               allowTypeImports: true,
               message: 'components는 hooks를 통해서만 서버 데이터를 쓴다.',
             },
@@ -80,7 +86,12 @@ export default defineConfig([
   },
   // 4.3 api는 React를 모른다 (queryOptions는 React가 아니라 허용)
   {
-    files: ['src/features/*/api/**/*.ts', 'src/shared/api/**/*.ts', 'src/shared/auth/sessionApi.ts'],
+    files: [
+      'src/features/*/api/**/*.ts',
+      'src/shared/api/**/*.ts',
+      'src/shared/auth/sessionApi.ts',
+      'src/shared/order/orderApi.ts',
+    ],
     rules: {
       'no-restricted-imports': 'off',
       '@typescript-eslint/no-restricted-imports': [

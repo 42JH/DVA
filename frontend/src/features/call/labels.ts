@@ -1,13 +1,6 @@
 // 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
 import type { TagKind } from '@/shared/ui'
-import type {
-  AiAction,
-  OrderField,
-  Outcome,
-  PaymentMethod,
-  PaymentState,
-  ResultBlock,
-} from './api/callApi'
+import type { AiAction, OrderField, Outcome, ResultBlock } from './api/callApi'
 
 /** 통화 결과 (04와 같은 5개) + 태그 색 (04 태그와 같음: 문의 = 흰 바탕 회색 선) */
 export const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -56,20 +49,3 @@ export const FIELD_LABEL: Record<OrderField, string> = {
   clientComment: '고객 요청 사항',
   paymentMethodType: '결제 방식',
 }
-
-export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
-  MONTHLY: '월정산',
-  GROUP_CARD: '그룹카드',
-  PERSONAL_CARD: '개인카드',
-}
-export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
-  PAID: '결제 완료',
-  UNPAID: '결제 대기',
-  CANCELLED_BEFORE_PAYMENT: '결제 전 취소',
-}
-
-/** 주문 상세 '관련 통화' 줄: 구분 태그 · 내용 */
-export const RELATED_CALL_LABEL = {
-  ACCEPT: { tag: '접수', text: '새 주문 접수' },
-  CANCEL: { tag: '취소', text: '주문 취소' },
-} as const

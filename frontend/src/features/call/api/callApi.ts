@@ -1,7 +1,9 @@
-// 06 통화 상세 Model — 통화 하나 = 요약 · 스크립트 · 처리 내용(결과 블록 + AI 동작) / '주문 보기'용 주문 하나. React를 모르는 데이터 층
+// 06 통화 상세 Model — 통화 하나 = 요약 · 스크립트 · 처리 내용(결과 블록 + AI 동작). React를 모르는 데이터 층
+// '주문 보기'의 주문은 shared/order (03 주문 내역과 같이 씀, 10/30)
 // 명세 초안(CALL-08/09 · ORD-03)에 고객 이름 · 통화 결과 · 처리 내용 · AI 동작이 없음 → BE가 명세를 짜서 주기로 함 (10/30)
-// 지금은 네트워크 없이 메모리 가짜 데이터 (와이어프레임 06 세 장면). 명세가 오면 fetchCallDetail · fetchOrder 몸통만 바꾸면 됨
+// 지금은 네트워크 없이 메모리 가짜 데이터 (와이어프레임 06 세 장면). 명세가 오면 fetchCallDetail 몸통만 바꾸면 됨
 import { queryOptions } from '@tanstack/react-query'
+import { NotFoundError } from '@/shared/api/client'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
 import { fmtDetailTime } from '@/shared/lib/format'
 
@@ -62,33 +64,6 @@ export interface CallDetail {
   results: ResultBlock[]
 }
 
-export interface Party {
-  name: string
-  phoneNumber: string // 숫자만
-  roadAddress: string
-  detailAddress: string | null
-}
-
-export type PaymentMethod = 'MONTHLY' | 'GROUP_CARD' | 'PERSONAL_CARD' // 월정산 · 그룹카드 · 개인카드 (디버 10/27)
-export type PaymentState = 'PAID' | 'UNPAID' | 'CANCELLED_BEFORE_PAYMENT'
-
-/** 주문 상세 (06 '주문 보기' 팝업 — 03 주문 상세와 같은 내용, 읽기 전용) */
-export interface OrderDetail {
-  orderSeq: number
-  route: 'PHONE' | 'MANUAL' // 전화 · 수기
-  acceptedAt: string
-  cancelled: boolean
-  sender: Party
-  receiver: Party
-  items: { document: number; small: number; medium: number; big: number; other: string | null }
-  pickupRequestedAt: string
-  itemPrice: number
-  clientComment: string | null
-  paymentMethod: PaymentMethod
-  paymentState: PaymentState
-  relatedCalls: { callSessionSeq: number; startedAt: string; kind: 'ACCEPT' | 'CANCEL' }[]
-}
-
 export const callQueries = {
   all: () => ['calls'] as const,
   detail: (id: number) =>
@@ -98,18 +73,6 @@ export const callQueries = {
     }),
 }
 
-export const orderQueries = {
-  all: () => ['orders'] as const,
-  detail: (id: number) =>
-    queryOptions({
-      queryKey: [...orderQueries.all(), id],
-      queryFn: () => fetchOrder(id),
-    }),
-}
-
-/** 찾는 통화 · 주문이 없을 때 (화면은 '찾을 수 없습니다') */
-export class NotFoundError extends Error {}
-
 const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연 ('불러오는 중' 확인용)
 
 export async function fetchCallDetail(id: number): Promise<CallDetail> {
@@ -117,13 +80,6 @@ export async function fetchCallDetail(id: number): Promise<CallDetail> {
   const call = CALLS.find((c) => c.callSessionSeq === id)
   if (!call) throw new NotFoundError('통화를 찾을 수 없습니다.')
   return call
-}
-
-export async function fetchOrder(id: number): Promise<OrderDetail> {
-  await wait()
-  const order = ORDERS.find((o) => o.orderSeq === id)
-  if (!order) throw new NotFoundError('주문을 찾을 수 없습니다.')
-  return order
 }
 
 // ---------- 가짜 데이터 = 와이어프레임 06 세 장면 (build_call_detail SCENES) ----------
@@ -273,61 +229,5 @@ const CALLS: CallDetail[] = [
       act(23, 'CANCEL', '주문 취소 (결제 전)'),
     ],
     results: [{ atSec: 23, kind: 'CANCELLED', orderSeq: 10531 }],
-  },
-]
-
-const ORDERS: OrderDetail[] = [
-  {
-    orderSeq: 10519,
-    route: 'PHONE',
-    acceptedAt: t('13:12:00'),
-    cancelled: false,
-    sender: {
-      name: '강도윤',
-      phoneNumber: '01066382047',
-      roadAddress: '서울 강남구 역삼로 150',
-      detailAddress: '5층',
-    },
-    receiver: {
-      name: '이영희',
-      phoneNumber: '01023456789',
-      roadAddress: '서울 마포구 독막로 301',
-      detailAddress: '402호',
-    },
-    items: { document: 1, small: 0, medium: 0, big: 0, other: null },
-    pickupRequestedAt: tomorrow('09:00'),
-    itemPrice: 30000,
-    clientComment: '경비실에 맡겨 주세요',
-    paymentMethod: 'MONTHLY',
-    paymentState: 'PAID',
-    relatedCalls: [{ callSessionSeq: 9101, startedAt: t('13:12:08'), kind: 'ACCEPT' }],
-  },
-  {
-    orderSeq: 10531,
-    route: 'PHONE',
-    acceptedAt: t('14:22:00'),
-    cancelled: true,
-    sender: {
-      name: '박지호',
-      phoneNumber: '01041832290',
-      roadAddress: '서울 동작구 상도로 55',
-      detailAddress: null,
-    },
-    receiver: {
-      name: '조하은',
-      phoneNumber: '01033775120',
-      roadAddress: '부산 해운대구 센텀중앙로 79',
-      detailAddress: null,
-    },
-    items: { document: 0, small: 0, medium: 1, big: 0, other: null },
-    pickupRequestedAt: tomorrow('11:00'),
-    itemPrice: 50000,
-    clientComment: null,
-    paymentMethod: 'PERSONAL_CARD',
-    paymentState: 'CANCELLED_BEFORE_PAYMENT',
-    relatedCalls: [
-      { callSessionSeq: 9103, startedAt: t('14:22:10'), kind: 'ACCEPT' }, // 접수 통화 — 가짜 데이터엔 없음
-      { callSessionSeq: 9105, startedAt: t('14:35:20'), kind: 'CANCEL' },
-    ],
   },
 ]

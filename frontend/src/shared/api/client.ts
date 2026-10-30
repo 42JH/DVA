@@ -34,6 +34,9 @@ export class ApiError extends Error {
   }
 }
 
+/** 메모리 가짜 api가 '찾는 것이 없음'을 알릴 때 (화면은 그 문구 그대로). 실서버로 바꾸면 ApiError 404가 이 자리 */
+export class NotFoundError extends Error {}
+
 export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>
   body?: unknown

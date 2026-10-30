@@ -1,9 +1,9 @@
 import { useParams } from 'react-router'
+import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { Tag } from '@/shared/ui'
 import { useCallDetail } from '@/features/call/hooks/useCallDetail'
 import { CallActions } from './CallActions'
 import { CallScript } from './CallScript'
-import { OrderPopup } from './OrderPopup'
 
 // 06 통화 상세 (와이어프레임 06_통화상세 · _주문취소 · _문의 · _주문상세, 10/30)
 // 위 요약 카드: 고객 + 통화 결과 · 통화 시작 시각 · 통화 시간 · 발신번호 (+ 불만 줄) / 왼쪽 통화 스크립트 598 / 오른쪽 처리 내용
@@ -72,7 +72,9 @@ export function CallDetailPage() {
         <CallActions className="min-w-0 flex-1" results={vm.results} actions={vm.actions} />
       </div>
 
-      {vm.order && <OrderPopup order={vm.order} onClose={vm.closeOrder} onEdit={vm.editOrder} />}
+      {vm.orderId !== null && (
+        <OrderDetailModal orderId={vm.orderId} onClose={vm.closeOrder} onEdit={vm.editOrder} />
+      )}
     </div>
   )
 }
