@@ -24,7 +24,7 @@ type Modal = { kind: 'add' | 'delete'; item: UnansweredQuestion } | null
 /** 09 AI 미답변 목록 훅 (와이어프레임 09_AI미답변, 10/30) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [FAQ 추가](창 → 추가하면 처리됨) · [삭제](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
-export function useUnansweredList() {
+export function useUnansweredList(pageSize = PAGE_SIZE) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { params, page, set } = useListParams(DEFAULTS)
@@ -57,7 +57,7 @@ export function useUnansweredList() {
               : '이 통화의 질문만',
           },
         ]
-  const sliced = pageSlice(hit, page, PAGE_SIZE)
+  const sliced = pageSlice(hit, page, pageSize)
   const rows: UnansweredRow[] = sliced.rows.map((u) => ({
     ...u,
     time: fmtListTime(u.startedAt),
