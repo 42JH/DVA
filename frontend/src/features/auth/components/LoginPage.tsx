@@ -1,57 +1,80 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
+import { Button } from '@/shared/ui'
 import { useLogin } from '@/features/auth/hooks/useLogin'
+import { AuthField } from './AuthField'
+import { AuthError, AuthFooter, AuthLayout } from './AuthLayout'
 
-// 00 로그인 View — 모양은 임시. 디자인(와이어프레임 v2 '00_로그인')이 나오면 클래스만 바꿈
+// 00 로그인 (디자인/목업 '00_로그인' · '_입력오류' · '_비밀번호를 잊으셨나요' 10/30)
+// '비밀번호를 잊으셨나요?' = 안내 말풍선만 (로그인 전 비밀번호 찾기 없음 — 초기화는 최고 관리자, AUTH-08)
 export function LoginPage() {
   const vm = useLogin()
+  const [tip, setTip] = useState(false)
 
   return (
-    <main className="grid h-full place-items-center">
+    <AuthLayout title="관리자 로그인" sub="디버 택배 AI 전화 접수 관리자 웹">
       <form
-        className="grid w-[440px] gap-4"
+        className="flex flex-col"
         onSubmit={(e) => {
           e.preventDefault()
           if (vm.canSubmit) vm.submit()
         }}
       >
-        <h1 className="text-title font-bold">관리자 로그인</h1>
-        <label className="grid gap-1 text-label">
-          이메일
-          <input
-            className="border-b border-line py-2 text-body outline-none focus:border-action"
-            value={vm.loginId}
-            onChange={(e) => vm.setLoginId(e.target.value)}
+        <div className="flex flex-col gap-8">
+          <AuthField
+            label="아이디"
+            icon="id"
+            placeholder="아이디를 입력해주세요"
             autoComplete="username"
+            value={vm.loginId}
+            onValue={vm.setLoginId}
           />
-        </label>
-        <label className="grid gap-1 text-label">
-          비밀번호
-          <input
-            className="border-b border-line py-2 text-body outline-none focus:border-action"
-            type="password"
-            value={vm.password}
-            onChange={(e) => vm.setPassword(e.target.value)}
+          <AuthField
+            label="비밀번호"
+            icon="lock"
+            secret
+            placeholder="비밀번호를 입력해주세요"
             autoComplete="current-password"
+            value={vm.password}
+            onValue={vm.setPassword}
           />
-        </label>
-        {vm.errorMessage && (
-          <p role="alert" className="text-label text-danger">
-            {vm.errorMessage}
-          </p>
-        )}
-        <div className="flex items-center justify-between">
-          <Link to="/signup" className="text-label font-semibold text-action">
-            회원가입
-          </Link>
-          <button
-            type="submit"
-            disabled={!vm.canSubmit}
-            className="h-10 rounded-lg bg-action px-5 text-label font-semibold text-white disabled:bg-bg disabled:text-muted"
-          >
-            {vm.isSubmitting ? '로그인 중…' : '로그인'}
-          </button>
         </div>
+
+        <div className="relative mt-2 self-end">
+          <button
+            type="button"
+            onClick={() => setTip((v) => !v)}
+            onBlur={() => setTip(false)}
+            aria-expanded={tip}
+            aria-describedby={tip ? 'pw-tip' : undefined}
+            className="px-2 text-caption text-sub hover:text-ink"
+          >
+            비밀번호를 잊으셨나요?
+          </button>
+          {tip && (
+            <p
+              id="pw-tip"
+              role="tooltip"
+              className="absolute top-full right-0 z-10 mt-2.5 rounded-lg bg-ink px-3 py-2 text-caption whitespace-nowrap text-white"
+            >
+              <i className="absolute -top-1 right-5 size-2 rotate-45 bg-ink" />
+              비밀번호 초기화는 최고 관리자에게 요청해 주세요.
+            </p>
+          )}
+        </div>
+
+        <AuthError message={vm.errorMessage} />
+        <Button kind="primary" tall type="submit" disabled={!vm.canSubmit} className="mt-3 w-full">
+          {vm.isSubmitting ? '로그인 중…' : '로그인'}
+        </Button>
       </form>
-    </main>
+
+      <AuthFooter>
+        계정이 없으신가요?
+        <Link to="/signup" className="font-bold text-action hover:underline">
+          회원가입
+        </Link>
+      </AuthFooter>
+    </AuthLayout>
   )
 }

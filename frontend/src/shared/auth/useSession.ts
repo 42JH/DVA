@@ -5,10 +5,10 @@ import { logout, sessionQueries, type AdminRole } from './sessionApi'
 /**
  * 로그인한 관리자 정보 · 역할 · 로그아웃 (사이드바 · 권한 가드 · 삭제 버튼 노출에서 사용)
  * hooks 역할 — shared/auth는 층 규칙의 예외라 useQuery를 여기서 쓴다 (컨벤션 4.4)
- * 사용법: const { role, isSystemAdmin, isPending } = useSession()
+ * 사용법: const { role, isSystemAdmin, status } = useSession()
  *  - me는 React Query가 한 번 받아 캐시 → 어디서 불러도 요청은 한 번
- *  - isSystemAdmin: 슈퍼바이저(명세 SYSTEM_ADMIN)만 하는 일(삭제 · 관리자 권한 관리)의 조건
- *  - isPending: 가입은 했지만 승인 전 → RequireAuth가 승인 대기 화면으로 보냄
+ *  - isSystemAdmin: 최고 관리자(명세 SYSTEM_ADMIN)만 하는 일(삭제 · 관리자 권한 관리)의 조건
+ *  - status: PENDING(승인 전) · INACTIVE(비활성화) → RequireAuth가 안내 화면으로 보냄
  */
 export function useSession() {
   const queryClient = useQueryClient()
@@ -29,7 +29,7 @@ export function useSession() {
     isLoading: me.isPending,
     role,
     isSystemAdmin: role === 'SYSTEM_ADMIN',
-    isPending: me.data?.status === 'PENDING',
+    status: me.data?.status,
     logout: () => logoutMutation.mutate(),
   }
 }

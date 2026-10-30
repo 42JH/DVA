@@ -6,7 +6,7 @@ export function ForbiddenPage() {
   return (
     <section className="grid justify-items-start gap-4">
       <p className="text-body text-sub">
-        이 화면은 슈퍼바이저만 볼 수 있어요. 필요하면 슈퍼바이저에게 요청해 주세요.
+        이 화면은 최고 관리자만 볼 수 있어요. 필요하면 최고 관리자에게 요청해 주세요.
       </p>
       <Link to="/">
         <Button>홈으로</Button>
