@@ -1,30 +1,13 @@
-import { Link } from 'react-router'
-import { Button, SearchBox, Table, TwoLines, type Column } from '@/shared/ui'
-import { useHome, type UnansweredRow } from '@/features/home/hooks/useHome'
+import { Button, SearchBox } from '@/shared/ui'
+import { useHome } from '@/features/home/hooks/useHome'
 import { TodayStatCard } from './TodayStatCard'
 
-// 01 홈 (와이어프레임 01_홈, 10/30) — 검색칸 → 오늘 숫자(카드 4 + 평균 2) → 처리할 AI 미답변 6줄
-export function HomePage() {
+// 01 홈 위쪽 (와이어프레임 01_홈, 10/30) — 검색칸 → 오늘 숫자(카드 4 + 평균 2). 아래 AI 미답변은 app/routes/HomePage가 붙임
+export function HomeToday() {
   const vm = useHome()
 
-  const columns: Column<UnansweredRow>[] = [
-    {
-      key: 'time',
-      header: '통화 시작 시각',
-      width: 180,
-      cell: (r) => <span className="text-sub">{r.time}</span>,
-    },
-    {
-      key: 'customer',
-      header: '고객 · 발신번호',
-      width: 170,
-      cell: (r) => <TwoLines top={r.name} bottom={r.phone} />,
-    },
-    { key: 'question', header: '질문', cell: (r) => <p className="truncate">{r.question}</p> },
-  ]
-
   return (
-    <div className="flex flex-col gap-8">
+    <>
       <form
         className="flex gap-3"
         onSubmit={(e) => {
@@ -68,29 +51,6 @@ export function HomePage() {
         </div>
         {vm.todayError && <p className="text-label text-danger">{vm.todayError}</p>}
       </section>
-
-      <Table
-        head={
-          <>
-            <h2 className="flex items-baseline gap-3.5 text-card font-bold">
-              처리할 AI 미답변
-              {vm.unansweredCount !== undefined && (
-                <span className="text-label font-normal text-sub">{vm.unansweredCount}개</span>
-              )}
-            </h2>
-            <Link to={vm.unansweredAllLink} className="text-label font-bold text-action">
-              자세히 보기 ›
-            </Link>
-          </>
-        }
-        columns={columns}
-        rows={vm.rows}
-        rowKey={(r) => r.callSeq}
-        onRowClick={vm.openUnanswered}
-        loading={vm.isUnansweredLoading}
-        empty={vm.unansweredError ?? '처리할 AI 미답변이 없습니다.'}
-      />
-    </div>
+    </>
   )
 }
-

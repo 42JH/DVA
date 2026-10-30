@@ -68,9 +68,3 @@ export function fmtPhone(digits: string): string {
 export function fmtDateDay(d: Date): string {
   return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]})`
 }
-
-/** 'HH:MM' (오늘 안의 시각) */
-export function fmtTime(iso: string): string {
-  const d = new Date(iso)
-  return `${two(d.getHours())}:${two(d.getMinutes())}`
-}
