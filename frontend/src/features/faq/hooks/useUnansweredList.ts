@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageSlice } from '@/shared/api/paging'
+import { todayYmd, ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
@@ -24,7 +25,10 @@ type Modal = { kind: 'add' | 'delete'; item: UnansweredQuestion } | null
 /** 09 AI 미답변 목록 훅 (와이어프레임 09_AI미답변, 10/30) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [FAQ 추가](창 → 추가하면 처리됨) · [삭제](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
-export function useUnansweredList(pageSize = PAGE_SIZE) {
+export function useUnansweredList({
+  pageSize = PAGE_SIZE,
+  todayOnly = false, // 01 홈: 오늘 통화에서 나온 질문만
+}: { pageSize?: number; todayOnly?: boolean } = {}) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { params, page, set } = useListParams(DEFAULTS)
@@ -34,7 +38,12 @@ export function useUnansweredList(pageSize = PAGE_SIZE) {
   const needle = params.q.trim().toLowerCase()
   const digits = params.q.replace(/\D/g, '') // '010-1458' · '01014582209' 둘 다 찾게
   const call = params.call ? Number(params.call) : null
-  const ofCall = (list.data ?? []).filter((u) => call === null || u.callSessionSeq === call)
+  const today = todayYmd()
+  const ofCall = (list.data ?? []).filter(
+    (u) =>
+      (call === null || u.callSessionSeq === call) &&
+      (!todayOnly || ymd(new Date(u.startedAt)) === today),
+  )
   const hit = ofCall
     .filter(
       (u) =>

@@ -4,9 +4,9 @@ import { UnansweredTable } from './UnansweredTable'
 
 const PREVIEW = 6 // 01 홈 미리보기 6줄 (와이어프레임 01)
 
-// 01 홈 '처리할 AI 미답변' — 09 AI 미답변의 앞 6줄(오래된 순). [FAQ 추가] · [삭제]도 그 화면과 똑같이 동작
+// 01 홈 '처리할 AI 미답변' — 오늘 통화에서 나온 미답변만, 앞 6줄(오래된 순). 'n개'도 오늘 것만. [FAQ 추가] · [삭제]도 그 화면과 똑같이 동작
 export function UnansweredPreview() {
-  const vm = useUnansweredList(PREVIEW)
+  const vm = useUnansweredList({ pageSize: PREVIEW, todayOnly: true })
 
   return (
     <UnansweredTable
@@ -22,7 +22,7 @@ export function UnansweredPreview() {
           </Link>
         </>
       }
-      empty="처리할 AI 미답변이 없습니다."
+      empty="오늘 처리할 AI 미답변이 없습니다."
     />
   )
 }
