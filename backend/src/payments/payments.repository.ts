@@ -20,6 +20,7 @@ export interface PaymentView {
   status: string;
   orderStatus: string;
   notificationStatus: string;
+  completionNotificationStatus: string;
 }
 @Injectable()
 export class PaymentsRepository {
@@ -37,7 +38,7 @@ export class PaymentsRepository {
         WHEN r.invalidated_at IS NOT NULL OR o.status='CANCELLED' THEN 'CANCELLED'
         WHEN r.approval_started_at IS NOT NULL THEN 'REVIEW_REQUIRED'
         WHEN r.expires_at<=clock_timestamp() THEN 'EXPIRED' ELSE 'PENDING' END AS status,
-       r.notification_status AS "notificationStatus",r.expires_at AS "expiresAt",
+       r.notification_status AS "notificationStatus",r.completion_notification_status AS "completionNotificationStatus",r.expires_at AS "expiresAt",
        o.pickup_requested_at AS "pickupRequestedAt",o.paid_at AS "approvedAt",
        (SELECT p.origin_name FROM order_parcels p WHERE p.order_seq=o.order_seq AND p.status='ACTIVE' ORDER BY p.order_parcel_seq LIMIT 1) AS "senderName",
        (SELECT p.destination_name FROM order_parcels p WHERE p.order_seq=o.order_seq AND p.status='ACTIVE' ORDER BY p.order_parcel_seq LIMIT 1) AS "recipientSummary",
@@ -157,6 +158,71 @@ export class PaymentsRepository {
           targetType: 'ORDER',
           targetId: r.orderSeq,
           action: 'ORDER_PAYMENT_NOTIFICATION_RETRIED',
+          requestId,
+        },
+        client,
+      );
+    });
+    return this.read(id);
+  }
+  async claimCompletionNotification() {
+    return this.database.transaction(async (client) => {
+      await client.query(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
+        WHERE completion_notification_status='SENDING'
+        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+      const row = (
+        await client.query<{
+          id: string;
+        }>(`SELECT payment_request_id AS id FROM order_payment_requests
+        WHERE completion_notification_status IN ('WAITING','PENDING') AND completed_at IS NOT NULL
+        ORDER BY completed_at LIMIT 1 FOR UPDATE SKIP LOCKED`)
+      ).rows[0];
+      if (!row) return;
+      await client.query(
+        `UPDATE order_payment_requests SET completion_notification_status='SENDING',
+        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+        [row.id],
+      );
+      return row.id;
+    });
+  }
+  async finishCompletionNotification(id: string, status: string) {
+    await this.database.pool.query(
+      `UPDATE order_payment_requests SET completion_notification_status=$2,
+      completion_notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
+      WHERE payment_request_id=$1 AND completion_notification_status='SENDING'`,
+      [id, status],
+    );
+  }
+  async retryCompletionNotification(id: string, adminId: number, requestId: string) {
+    await this.database.transaction(async (client) => {
+      const r = await this.payments.request(client, id);
+      if (!r) throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
+      const row = (
+        await client.query<{ status: string }>(
+          'SELECT completion_notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1',
+          [id],
+        )
+      ).rows[0];
+      if (!r.completedAt || row.status === 'SENDING')
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '결제 완료 후 발송 중이 아닐 때만 재발송할 수 있습니다.',
+        );
+      if (['WAITING', 'PENDING'].includes(row.status)) return;
+      await client.query(
+        `UPDATE order_payment_requests SET completion_notification_status='PENDING',
+        completion_notification_attempted_at=NULL,completion_notification_sent_at=NULL WHERE payment_request_id=$1`,
+        [id],
+      );
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          actorType: 'ADMIN',
+          targetType: 'ORDER',
+          targetId: r.orderSeq,
+          action: 'ORDER_PAYMENT_COMPLETION_NOTIFICATION_RETRIED',
           requestId,
         },
         client,

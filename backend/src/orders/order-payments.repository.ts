@@ -139,7 +139,7 @@ export class OrderPaymentsRepository {
   }
   async complete(client: PoolClient, id: string, reference: string) {
     await client.query(
-      'UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL WHERE payment_request_id=$1',
+      "UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL,completion_notification_status='PENDING' WHERE payment_request_id=$1",
       [id, reference],
     );
   }
