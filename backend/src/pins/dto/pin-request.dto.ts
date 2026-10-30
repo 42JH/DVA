@@ -63,6 +63,18 @@ export class CreatePinDto {
 }
 
 export class CreateCompanyPinDto extends CreatePinDto {
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '소속 부서 번호. null은 기업 공용 PIN.',
+  })
+  @ValidateIf(nonNull)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  departmentSeq?: number | null;
   @ApiPropertyOptional({ type: String, nullable: true, description: '부서명. 중복 구분에 포함.' })
   @ValidateIf(nonNull)
   @Transform(trim)
@@ -103,6 +115,18 @@ export class UpdatePinDto {
 }
 
 export class UpdateCompanyPinDto extends UpdatePinDto {
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '생략하면 유지, null이면 기업 공용 PIN으로 변경.',
+  })
+  @ValidateIf(nonNull)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  departmentSeq?: number | null;
   @ApiPropertyOptional({
     type: String,
     nullable: true,

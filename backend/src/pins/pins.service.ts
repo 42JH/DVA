@@ -163,7 +163,11 @@ export class PinsService {
   ) {
     return this.database.transaction(async (client) => {
       await this.companyAccess(client, companyId, adminId, undefined, true);
-      const result = await this.repository.createCompany(client, companyId, input);
+      const department = await this.resolveDepartment(client, companyId, input);
+      const result = await this.repository.createCompany(client, companyId, {
+        ...input,
+        ...department,
+      });
       await this.record(client, adminId, result.companyPinSeq, true, true, requestId);
       return result;
     });
@@ -194,6 +198,7 @@ export class PinsService {
     if (
       input.label === undefined &&
       input.addressData === undefined &&
+      input.departmentSeq === undefined &&
       input.departmentName === undefined
     )
       throw new ApiException(
@@ -206,10 +211,49 @@ export class PinsService {
       if (companyId === undefined)
         throw new ApiException(404, 'NOT_FOUND', '기업 주소록을 찾을 수 없습니다.');
       await this.companyAccess(client, companyId, adminId, undefined, true);
-      const result = await this.repository.updateCompany(client, id, input);
+      const department =
+        input.departmentSeq !== undefined || input.departmentName !== undefined
+          ? await this.resolveDepartment(client, companyId, input)
+          : {};
+      const result = await this.repository.updateCompany(client, id, { ...input, ...department });
       if (!result) throw new ApiException(404, 'NOT_FOUND', '기업 주소록을 찾을 수 없습니다.');
       await this.record(client, adminId, id, true, false, requestId);
       return result;
     });
+  }
+
+  private async resolveDepartment(
+    client: PoolClient,
+    companyId: number,
+    input: { departmentSeq?: number | null; departmentName?: string | null },
+  ) {
+    if (input.departmentSeq === null) {
+      if (input.departmentName?.trim())
+        throw new ApiException(
+          422,
+          'VALIDATION_FAILED',
+          '기업 공용 PIN에는 부서명을 지정할 수 없습니다.',
+        );
+      return { departmentSeq: null, departmentName: null };
+    }
+    const rows = await this.repository.department(
+      client,
+      companyId,
+      input.departmentSeq ?? null,
+      input.departmentName ?? null,
+    );
+    if (input.departmentSeq !== undefined && !rows.length)
+      throw new ApiException(422, 'VALIDATION_FAILED', '해당 기업의 부서를 지정해 주세요.');
+    if (rows.length === 1) {
+      if (
+        input.departmentSeq !== undefined &&
+        input.departmentName != null &&
+        input.departmentName !== rows[0].name
+      )
+        throw new ApiException(422, 'VALIDATION_FAILED', '부서 번호와 이름이 일치하지 않습니다.');
+      return { departmentSeq: rows[0].departmentSeq, departmentName: rows[0].name };
+    }
+    // Legacy free-text names stay unassigned until an operator confirms their department.
+    return { departmentSeq: null, departmentName: input.departmentName ?? null };
   }
 }

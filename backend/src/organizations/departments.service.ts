@@ -47,7 +47,21 @@ export class DepartmentsService {
       const department = await this.repository.find(client, id);
       if (!department) throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
       await this.repository.company(client, department.organizationSeq);
+      if (!(await this.repository.find(client, id)))
+        throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
       await this.repository.update(client, id, input);
+      if (input.name !== undefined)
+        for (const pin of await this.repository.renamePins(client, id, input.name))
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              targetId: pin.id,
+              targetType: 'COMPANY_PIN',
+              action: 'COMPANY_PIN_UPDATED',
+              requestId,
+            },
+            client,
+          );
       await this.audit.recordSuccess(
         {
           actorId: adminId,

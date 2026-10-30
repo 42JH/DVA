@@ -199,6 +199,8 @@ export class OrdersRepository {
           'creationSource',o.creation_source,'totalAmount',o.total_amount,'paidAt',o.paid_at,
           'paymentDueAt',o.payment_due_at,'paymentRequest',${paymentRequestJson},
           'paymentMethodType',o.payment_method_type,'pickupRequestedAt',o.pickup_requested_at,
+           'billingOrganizationSeq',o.billing_organization_seq,'billingOrganizationName',o.billing_organization_name,
+           'billingDepartmentSeq',o.billing_department_seq,'billingDepartmentName',o.billing_department_name,
           'createdAt',o.created_at,'updatedAt',o.updated_at,'version',o.version,
           'parcelNo',o.parcel_no,'dverReceivedAt',o.dver_received_at,
           'parcels',COALESCE((

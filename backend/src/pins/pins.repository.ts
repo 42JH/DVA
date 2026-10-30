@@ -17,6 +17,17 @@ import {
 
 @Injectable()
 export class PinsRepository {
+  async department(client: PoolClient, companyId: number, id: number | null, name: string | null) {
+    return (
+      await client.query<{ departmentSeq: number; name: string }>(
+        `SELECT department_seq AS "departmentSeq",name FROM departments WHERE organization_seq=$1
+       AND (($2::int IS NOT NULL AND department_seq=$2) OR ($2::int IS NULL AND
+        lower(btrim(regexp_replace(normalize(name,NFC),'[[:space:]]+',' ','g')))=
+        lower(btrim(regexp_replace(normalize($3::text,NFC),'[[:space:]]+',' ','g'))))) FOR SHARE`,
+        [companyId, id, name],
+      )
+    ).rows;
+  }
   async call(client: PoolClient, id: number, lock: boolean) {
     return (
       await client.query<{ phone: string | null; endedAt: Date | null }>(
@@ -80,7 +91,7 @@ export class PinsRepository {
     return (
       await client.query<CompanyPinDto>(
         `SELECT company_pin_seq AS "companyPinSeq",organization_seq AS "organizationSeq",label,
-        department_name AS "departmentName",address_data AS "addressData",version FROM company_pins
+        department_name AS "departmentName",department_seq AS "departmentSeq",address_data AS "addressData",version FROM company_pins
        WHERE organization_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)
        ORDER BY company_pin_seq LIMIT $3 OFFSET $4`,
         [companyId, query.q || null, query.limit + 1, query.offset],
@@ -99,9 +110,15 @@ export class PinsRepository {
   async createCompany(client: PoolClient, companyId: number, input: CreateCompanyPinDto) {
     return (
       await client.query<CreatedCompanyPinDto>(
-        `INSERT INTO company_pins(organization_seq,label,department_name,address_data) VALUES($1,$2,$3,$4)
+        `INSERT INTO company_pins(organization_seq,label,department_name,address_data,department_seq) VALUES($1,$2,$3,$4,$5)
        RETURNING company_pin_seq AS "companyPinSeq",version`,
-        [companyId, input.label ?? null, input.departmentName ?? null, input.addressData],
+        [
+          companyId,
+          input.label ?? null,
+          input.departmentName ?? null,
+          input.addressData,
+          input.departmentSeq ?? null,
+        ],
       )
     ).rows[0];
   }
@@ -127,7 +144,8 @@ export class PinsRepository {
       await client.query<PinVersionDto>(
         `UPDATE company_pins SET label=CASE WHEN $2 THEN $3 ELSE label END,
         address_data=CASE WHEN $4 THEN $5::jsonb ELSE address_data END,
-        department_name=CASE WHEN $6 THEN $7 ELSE department_name END
+        department_name=CASE WHEN $6 THEN $7 ELSE department_name END,
+        department_seq=CASE WHEN $6 THEN $8 ELSE department_seq END
        WHERE company_pin_seq=$1 RETURNING version`,
         [
           id,
@@ -137,6 +155,7 @@ export class PinsRepository {
           input.addressData ?? null,
           input.departmentName !== undefined,
           input.departmentName ?? null,
+          input.departmentSeq ?? null,
         ],
       )
     ).rows[0];

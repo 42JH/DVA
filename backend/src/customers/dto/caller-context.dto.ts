@@ -50,6 +50,7 @@ export class PersonalContextPinDto {
 }
 
 export class CompanyContextPinDto {
+  @ApiProperty({ type: Number, nullable: true }) departmentSeq!: number | null;
   @ApiProperty({ minimum: 1 }) companyPinSeq!: number;
   @ApiProperty({ type: String, nullable: true }) label!: string | null;
   @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;

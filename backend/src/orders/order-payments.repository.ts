@@ -86,7 +86,9 @@ export class OrderPaymentsRepository {
     requestId: string,
   ) {
     await client.query(
-      "UPDATE orders SET status='PAID',paid_at=clock_timestamp(),billing_organization_seq=$2,billing_department_seq=$3 WHERE order_seq=$1",
+      `UPDATE orders SET status='PAID',paid_at=clock_timestamp(),billing_organization_seq=$2,billing_department_seq=$3,
+       billing_organization_name=(SELECT name FROM organizations WHERE organization_seq=$2),
+       billing_department_name=(SELECT name FROM departments WHERE department_seq=$3) WHERE order_seq=$1`,
       [id, organizationId, departmentId],
     );
     await this.billing.recordCharge(client, id, requestId);

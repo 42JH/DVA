@@ -7,7 +7,7 @@ BEGIN
  IF n<>24 THEN RAISE EXCEPTION 'Expected 24 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>22 THEN RAISE EXCEPTION 'Expected 22 foreign keys, found %',n; END IF;
+ IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -61,7 +61,13 @@ BEGIN
  IF to_regclass('public.faq_change_notifications') IS NULL
   OR to_regclass('public.faq_change_notifications_pending_idx') IS NULL THEN
   RAISE EXCEPTION 'FAQ notification queue or pending index missing'; END IF;
- RAISE NOTICE 'PASS: 24 public tables, 22 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='billing_organization_name')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='company_pins'::regclass AND conname='company_pins_department_company_fk')
+  OR EXISTS(SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid IN ('orders'::regclass,'order_billing_charges'::regclass,'organization_billing_months'::regclass) AND confrelid IN ('organizations'::regclass,'departments'::regclass)) THEN
+  RAISE EXCEPTION 'Company deletion history/department PIN schema missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='021-company-deletion-history.sql') THEN
+  RAISE EXCEPTION 'Company deletion migration missing'; END IF;
+ RAISE NOTICE 'PASS: 24 public tables, 19 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

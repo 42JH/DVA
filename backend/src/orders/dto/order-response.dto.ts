@@ -250,6 +250,22 @@ export class OrderParcelDto {
 
 export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as const) {
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '결제 당시 기업 번호. 삭제 후에도 보존.',
+  })
+  billingOrganizationSeq!: number | null;
+  @ApiProperty({ type: String, nullable: true, description: '결제 당시 기업명.' })
+  billingOrganizationName!: string | null;
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '결제 당시 부서 번호. 삭제 후에도 보존.',
+  })
+  billingDepartmentSeq!: number | null;
+  @ApiProperty({ type: String, nullable: true, description: '결제 당시 부서명.' })
+  billingDepartmentName!: string | null;
+  @ApiProperty({
     type: OrderPaymentRequestDto,
     nullable: true,
     description: '현재 미완료·미만료 결제 요청. 그 외 null.',

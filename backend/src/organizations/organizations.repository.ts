@@ -16,7 +16,7 @@ export class OrganizationsRepository {
     return (
       await this.database.pool.query<CompanyDirectoryEntryDto>(
         `SELECT o.organization_seq AS "organizationSeq",o.name AS "organizationName",
-        p.company_pin_seq AS "companyPinSeq",p.label,p.department_name AS "departmentName",
+        p.company_pin_seq AS "companyPinSeq",p.label,p.department_name AS "departmentName",p.department_seq AS "departmentSeq",
         p.address_data AS "addressData",p.version
        FROM organizations o JOIN company_pins p ON p.organization_seq=o.organization_seq
        WHERE o.status='ACTIVE' AND NOT EXISTS(

@@ -11,7 +11,7 @@ async function migrate(pool) {
     await client.query('BEGIN');
     if ((await client.query("SELECT to_regclass('public.admin_users') AS name")).rows[0].name) {
       const latest = await client.query(
-        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='audit_logs' AND column_name='actor_name' AND to_regclass('public.order_billing_charges') IS NOT NULL AND to_regclass('public.faq_change_notifications') IS NOT NULL",
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='billing_organization_name' AND to_regclass('public.order_billing_charges') IS NOT NULL AND to_regclass('public.faq_change_notifications') IS NOT NULL",
       );
       assert.equal(latest.rowCount, 1, 'Use an empty isolated DB or apply all migrations first');
     } else {
