@@ -13,6 +13,7 @@ COPY test ./test
 COPY scripts ./scripts
 COPY migrations ./migrations
 COPY data ./data
+COPY payment-test ./payment-test
 RUN npm run check
 CMD ["npm", "run", "test:integration"]
 
