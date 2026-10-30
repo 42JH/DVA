@@ -42,8 +42,12 @@ export function HomeToday() {
               <div key={a.label} className="flex flex-col gap-2">
                 <span className="text-label font-bold text-sub">{a.label}</span>
                 <span className="flex items-baseline gap-1">
-                  <span className="text-[32px] leading-[1.4] font-bold text-ink">{a.value}</span>
-                  <span className="text-label font-bold text-sub">{a.unit}</span>
+                  {a.parts.map(([value, unit]) => (
+                    <span key={unit} className="flex items-baseline gap-1">
+                      <span className="text-[32px] leading-[1.4] font-bold text-ink">{value}</span>
+                      <span className="text-label font-bold text-sub">{unit}</span>
+                    </span>
+                  ))}
                 </span>
               </div>
             ))}
