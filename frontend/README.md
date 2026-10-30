@@ -5,12 +5,15 @@ React 19 · TypeScript · Vite · Tailwind CSS v4 · React Router · TanStack Qu
 ## 실행
 
 ```bash
-cp .env.example .env.local   # PowerShell: copy .env.example .env.local
 npm install
 npm run dev                  # http://localhost:5173
 ```
 
 PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행합니다.
+
+환경 변수는 `.env.development`(git에 있음, 팀 공통 기본값 — 가짜 API 켬)를 `npm run dev`가 자동으로 읽습니다. 따로 만들 파일은 없습니다.
+내 컴퓨터에서만 바꿀 값은 `.env.development.local`에 둡니다(git에 안 올라감, `.env.development`보다 우선). 예: 실제 백엔드에 붙일 때 `VITE_USE_MOCK=false`.
+`.env.local`은 `.env.development`보다 약해서 `VITE_USE_MOCK`을 못 바꿉니다 (Vite 규칙: `.env.development.local` > `.env.development` > `.env.local` > `.env`).
 
 | 환경 변수           | 뜻                                                         |
 | ------------------- | ---------------------------------------------------------- |
@@ -29,11 +32,6 @@ PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행�
 | `inactive` | 비활성화                   | 비활성화 화면              |
 
 회원가입으로 만든 계정은 가입할 때 넣은 비밀번호로 로그인되고(승인 대기), 새로고침하면 사라집니다.
-
-로그인에서 **'요청을 처리하지 못했어요.'** 가 뜨면 가짜 API가 꺼져서 요청이 백엔드(3000)로 간 것입니다.
-
-- `.env.local`이 없거나 `VITE_USE_MOCK=true`가 아님 → `.env.example`을 `.env.local`로 복사하고 `npm run dev` 재시작 (`.env.local`은 git에 안 올라가서 pull로 안 생김)
-- 브라우저 콘솔에 `[MSW] Mocking enabled.` 가 떠야 켜진 것. `[MSW] 가짜 API를 켜지 못했습니다` 면 주소를 `http://localhost:5173`으로 열기 (IP 주소로 열면 서비스 워커가 막힘)
 
 ## 구조 — 기능 기준 폴더 (팀 컨벤션 v4, 노션)
 
