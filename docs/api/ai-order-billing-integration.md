@@ -113,7 +113,7 @@ Idempotency-Key: 069192b9-09cc-4585-b557-2876f5e5a1b1
 
 예시의 번호·주소·시각은 실제 통화와 고객 데이터로 교체한다. customerSeq 또는 customer 중 하나만 보낸다. customer는 name·phoneNumber만 받으며 통화 발신번호와 일치해야 한다. call과 outcome은 함께 보낸다. body.call이 있으면 통화 헤더는 생략할 수 있고 둘 다 보내면 같은 통화여야 한다.
 
-최종 주소에는 name, phoneNumber, roadAddress, jibunAddress, dongName, postalCode(5자리), latitude, longitude가 필요하다. detailAddress는 비어 있을 수 있다. documentCount/smallBoxCount/mediumBoxCount/bigBoxCount 중 양수가 있거나 otherItemDescription이 필요하다. pickupRequestedAt은 최초 확정 시 미래의 시간대 포함 ISO 시각이어야 한다.
+최종 주소에는 name, phoneNumber, roadAddress, jibunAddress, dongName, postalCode(5자리), latitude, longitude가 필요하다. detailAddress는 비어 있을 수 있다. documentCount/smallBoxCount/mediumBoxCount/bigBoxCount 중 양수가 있거나 otherItemDescription이 필요하다. pickupRequestedAt은 생략 가능하다. 서버가 결제 완료 시각 + 1시간으로 결정하고 재접수 때도 저장된 값을 유지한다.
 
 같은 주문 의도는 Idempotency-Key UUID를 재사용한다. 재요청은 기존 주문의 현재 결과를 반환하며 본문을 재적용하지 않는다. 상담 중 수집 내용을 바꾸려면 기존 미완료 주문 수정 경로를 사용한다.
 
@@ -139,7 +139,7 @@ Idempotency-Key: 069192b9-09cc-4585-b557-2876f5e5a1b1
 }
 ```
 
-paymentDueAt은 실제 결제 대기 시작 +24시간이다. paymentRequestId는 내부 요청 식별자이고 결제 URL이 아니다. 결제 완료·취소 후 현재 paymentRequest는 null이다. 실제 결제사·카카오톡 발송은 아직 연결하지 않았다. 따라서 AI는 현재 응답만으로 메시지 발송 완료나 결제 완료를 안내하면 안 된다.
+paymentDueAt은 실제 결제 대기 시작 +24시간이다. paymentRequestId는 무작위 결제 요청 식별자이고 `/api/payments/p/{id}` 링크로 연결한다. 결제 완료·취소 후 현재 paymentRequest는 null이다. 연동 설정 활성화 시 백엔드가 Mattermost로 안내를 자동 발송하고, 토스 승인 확인 후 디버에 전송한다. 카카오 알림톡은 후속 범위다. AI가 별도 메시지 발송이나 결제 성공 신고 API를 호출할 필요가 없으며, 주문 저장 응답만으로 발송·결제 완료를 안내해서는 안 된다. 상세는 [실제 주문 결제 계약](order-payment-integration.md)을 따른다.
 
 ## 5. 상태 확인과 안내
 
