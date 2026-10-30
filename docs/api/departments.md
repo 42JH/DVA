@@ -9,8 +9,9 @@ Jira: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138).
 | GET /api/companies/{id}/departments | 기업 번호, limit/offset | data에 부서 목록, hasNext |
 | POST /api/companies/{id}/departments | name, groupBillingEnabled(선택) | 201, data.departmentSeq |
 | PATCH /api/departments/{id} | name 또는 groupBillingEnabled | 204 |
+| DELETE /api/departments/{id} | 부서 번호 | 204 |
 
-부서는 기업에 속하며 기업 내 이름이 고유하다. 이름은 앞뒤 공백 제거 후 1~100자다. 그룹결제 설정은 boolean만 허용하며 생성 시 생략하면 false, PATCH에서 생략하면 유지한다. 부서 삭제 기능은 제공하지 않는다.
+부서는 기업에 속하며 기업 내 이름이 고유하다. 이름은 앞뒤 공백 제거 후 1~100자다. 그룹결제 설정은 boolean만 허용하며 생성 시 생략하면 false, PATCH에서 생략하면 유지한다. 삭제하면 소속 사원의 기업·부서 소속을 해제하고 해당 부서 PIN만 삭제한다. 개인 고객·다른 부서·기업 공용 PIN·업무 이력은 보존하며 [삭제 API와 기록 보존](company-deletion.md)을 따른다.
 
 기업 구성원 생성에는 departmentSeq가 필수이며 같은 기업의 부서여야 한다. 기존 구성원 PATCH에서 departmentSeq를 보내 같은 기업 안에서 부서를 이동할 수 있다. 고객당 소속은 하나이고 모든 기업 구성원은 부서 하나에 속한다. 부서의 기업을 바꾸거나 다른 기업의 부서에 연결할 수 없다.
 

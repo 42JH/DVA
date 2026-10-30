@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
+
 FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 020 migration 적용 후 새 앱을 실행한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
 
 부서 관리·구성원 배정·개인/기업 월결제 및 부서 그룹결제 설정은 [부서와 결제 자격](../docs/api/departments.md)을 따른다. 신규 구성원과 CSV에 부서 번호가 필수다.

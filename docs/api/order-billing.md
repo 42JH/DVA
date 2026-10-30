@@ -2,6 +2,8 @@
 
 Jira: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138).
 
+021부터 기업·부서 삭제 후에도 주문·청구 원장·월별 합계와 당시 기업/부서 번호·이름을 보존한다. 주문 상세에 billingOrganizationSeq·billingOrganizationName·billingDepartmentSeq·billingDepartmentName, 월별 사용액에 organizationName을 추가한다. 삭제된 기업의 기록된 청구 월도 기존 billing API로 조회할 수 있다. [삭제·진행 중 주문·배포 계약](company-deletion.md)을 따른다.
+
 ## 상태
 
 | status | 표시 | 다음 처리 |
