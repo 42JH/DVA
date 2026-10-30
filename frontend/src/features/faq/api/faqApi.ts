@@ -3,7 +3,8 @@ import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
 
 /**
- * 분류 9개 (10/27 확정) — 축 = 고객 의도(택배 단계), 05 AI 답변 실패 태그와 같은 목록. '기타' 없음
+ * 분류 10개 고정 (10/27 확정 · 10/28 '기타' 추가, 맨 끝) — 축 = 고객 의도(택배 단계). 화면에서 추가 · 수정 · 삭제 없음
+ * AI 미답변 질문엔 분류가 없음 — 관리자가 [FAQ 추가] 창에서 고름 (10/28)
  * 명세에 없음 → BE 요청안: faq_entries.category · FAQ-01 category 필터 · FAQ-02/03 본문 category
  */
 export const FAQ_CATEGORIES = [
@@ -16,6 +17,7 @@ export const FAQ_CATEGORIES = [
   { name: '변경·취소' },
   { name: '요금·결제' },
   { name: '이용 안내' },
+  { name: '기타' },
 ] as const
 export type FaqCategory = (typeof FAQ_CATEGORIES)[number]['name']
 

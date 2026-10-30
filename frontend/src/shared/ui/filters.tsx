@@ -202,7 +202,7 @@ export function AppliedFilters({
   onClear,
 }: {
   chips: { key: string; label: string }[]
-  count: string // '8건' · '통화 17건 · 질문 22개' (D2 결정 전까지 글자로 받음)
+  count?: string // 예전 04 칩 줄의 '8건'. 목록 공통 상단(10/27)에선 개수를 카드 제목에 두므로 보통 안 넘김
   onRemove: (key: string) => void
   onClear: () => void
 }) {
@@ -233,7 +233,7 @@ export function AppliedFilters({
           <span className="sr-only">필터 해제</span>
         </button>
       ))}
-      <span className="ml-2 text-label font-bold text-ink">{count}</span>
+      {count && <span className="ml-2 text-label font-bold text-ink">{count}</span>}
       <button
         type="button"
         onClick={onClear}

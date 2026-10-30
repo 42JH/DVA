@@ -58,4 +58,17 @@
     color: var(--color-ink);
     background: var(--color-surface);
   }
+
+  /* Tailwind v4는 버튼의 손가락 커서를 기본에서 뺐음 → 누를 수 있는 것 전부에 한 번에 (화면마다 cursor-pointer를 붙이지 않게)
+     비활성 버튼은 기본 화살표 그대로 — 눌러도 아무 일 없다는 뜻 (10/30 사용자: 버튼에 마우스를 대면 손 모양) */
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  [role='tab'],
+  [role='radio'],
+  [role='checkbox'],
+  a[href],
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
 }

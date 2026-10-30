@@ -3,7 +3,8 @@ import { NavLink, useLocation } from 'react-router'
 import { MENU, type MenuIcon } from './menu'
 
 // 사이드바 (와이어프레임 15 Sidebar · 10/20 확정 메뉴) — 폭 222 · 머리 64(로고 + '관리자' + 접기 28) · 줄 44(아이콘 16 + 14 + 글자) · 하위 줄 40
-// '상세내역'은 하위 3개(주문 내역 · 통화 내역 · 통화 문의)를 ▾로 펼침. 하위가 선택되면 위 메뉴는 글자만 진하게
+// 하위가 있는 메뉴(상세내역 · FAQ 관리)는 ▾로 펼침. 하위가 선택되면 위 메뉴는 글자만 진하게
+// 하위 메뉴 옆 빨간 숫자(AI 미답변 22)는 badges로 받기만 함 — 숫자를 세는 건 features(app이 넘겨줌, shared는 features를 모름)
 // 접으면(머리 오른쪽 버튼 · 1280 아래 기본) 폭 72 아이콘 줄: 줄 48×44 가운데 아이콘, 펼치기 버튼 가운데
 // 로그아웃은 맨 아래
 
@@ -63,21 +64,41 @@ function Icon({ name }: { name: keyof typeof ICON }) {
   )
 }
 
+type Sub = { to: string; label: string }
+
 export function Sidebar({
   userLabel,
   onLogout,
   canSee = () => true,
+  badges = {},
 }: {
   userLabel?: string
   onLogout: () => void
   canSee?: (to: string) => boolean // 역할에 따라 숨길 메뉴 (예: 관리자 권한 관리는 슈퍼바이저만). 기본은 전부
+  badges?: Record<string, number> // 하위 메뉴 경로 → 빨간 숫자 (0이면 안 그림)
 }) {
   const { pathname } = useLocation()
-  const inDetail = MENU[2].subs!.some((s) => pathname.startsWith(s.to))
-  const [open, setOpen] = useState(inDetail)
+  const inGroup = (subs: Sub[]) => subs.some((s) => pathname.startsWith(s.to))
+  // 펼친 그룹 (그룹 이름 → 펼침). 처음엔 지금 경로가 들어 있는 그룹만 펼침
+  const [open, setOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(MENU.filter((m) => m.subs).map((m) => [m.label, inGroup(m.subs!)])),
+  )
   // 1280 아래(반응형 규칙 10/23)에선 접힌 채로 시작. 그 뒤는 사용자가 버튼으로
   const [collapsed, setCollapsed] = useState(() => window.matchMedia('(max-width: 1279px)').matches)
-  const [fly, setFly] = useState(false) // 접힌 채 상세내역을 누르면 옆에 뜨는 하위 메뉴 (사이드바는 그대로 접힌 채)
+  const [fly, setFly] = useState<string | null>(null) // 접힌 채 그룹을 누르면 옆에 뜨는 하위 메뉴 (사이드바는 그대로 접힌 채)
+  // '/faqs'(FAQ 목록)는 '/faqs/unanswered'에서도 켜지면 안 됨 → 더 깊은 형제가 있는 하위만 경로가 딱 맞을 때 켬
+  const isEnd = (s: Sub, subs: Sub[]) => subs.some((o) => o !== s && o.to.startsWith(s.to + '/'))
+  const subLabel = (s: Sub) => (
+    <>
+      <span className="truncate">{s.label}</span>
+      {!!badges[s.to] && (
+        // 와이어프레임 red_badge: 높이 24 · 빨강 바탕 · 흰 숫자
+        <span className="ml-2 grid h-6 min-w-6 place-items-center rounded-full bg-danger px-2 text-caption font-bold text-white">
+          {badges[s.to]}
+        </span>
+      )}
+    </>
+  )
 
   // 줄: 펼침 = 4..218 (pl 24 → 아이콘 28, 글자 58) · 접힘 = 48×44 가운데
   const row = (active: boolean, bold: boolean) =>
@@ -108,7 +129,7 @@ export function Sidebar({
         <div className="flex h-16 items-center justify-center">
           {toggleBtn('expand', () => {
             setCollapsed(false)
-            setFly(false)
+            setFly(null)
           })}
         </div>
       ) : (
@@ -126,9 +147,13 @@ export function Sidebar({
               <button
                 type="button"
                 title={collapsed ? m.label : undefined}
-                aria-expanded={collapsed ? fly : open}
-                onClick={() => (collapsed ? setFly((f) => !f) : setOpen((o) => !o))}
-                className={`${row(collapsed && inDetail, inDetail)} w-full`}
+                aria-expanded={collapsed ? fly === m.label : !!open[m.label]}
+                onClick={() =>
+                  collapsed
+                    ? setFly((f) => (f === m.label ? null : m.label))
+                    : setOpen((o) => ({ ...o, [m.label]: !o[m.label] }))
+                }
+                className={`${row(collapsed && inGroup(m.subs), inGroup(m.subs))} w-full`}
               >
                 <Icon name={m.icon} />
                 {label(m.label)}
@@ -136,7 +161,7 @@ export function Sidebar({
                   // 펼침 화살표 — 글자(▾)가 아니라 16 칸 아이콘, 펼치면 뒤집음
                   <svg
                     viewBox="0 0 20 20"
-                    className={`ml-auto size-4 stroke-sub ${open ? 'rotate-180' : ''}`}
+                    className={`ml-auto size-4 stroke-sub ${open[m.label] ? 'rotate-180' : ''}`}
                     fill="none"
                     strokeWidth={1.6}
                     strokeLinecap="round"
@@ -147,42 +172,44 @@ export function Sidebar({
                   </svg>
                 )}
               </button>
-              {collapsed && fly && (
+              {collapsed && fly === m.label && (
                 <>
                   {/* 바깥을 누르면 닫힘 */}
-                  <div className="fixed inset-0 z-40" onClick={() => setFly(false)} />
+                  <div className="fixed inset-0 z-40" onClick={() => setFly(null)} />
                   <ul
                     role="menu"
-                    className="absolute top-0 left-full z-50 ml-2 w-44 rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset"
+                    className="absolute top-0 left-full z-50 ml-2 w-48 rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset"
                   >
                     {m.subs.map((s) => (
                       <li key={s.to}>
                         <NavLink
                           to={s.to}
-                          onClick={() => setFly(false)}
+                          end={isEnd(s, m.subs!)}
+                          onClick={() => setFly(null)}
                           className={({ isActive }) =>
                             `flex h-10 items-center rounded-lg px-3 text-label whitespace-nowrap ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
                           }
                         >
-                          {s.label}
+                          {subLabel(s)}
                         </NavLink>
                       </li>
                     ))}
                   </ul>
                 </>
               )}
-              {open && !collapsed && (
+              {open[m.label] && !collapsed && (
                 // 안내선 x=20(4 + 16) · 하위 글자 x=58 (위 메뉴 글자와 같은 자리)
                 <ul className="ml-4 flex flex-col gap-1 border-l border-line">
                   {m.subs.map((s) => (
                     <li key={s.to}>
                       <NavLink
                         to={s.to}
+                        end={isEnd(s, m.subs!)}
                         className={({ isActive }) =>
                           `flex h-10 items-center rounded-lg pr-3 pl-[37px] text-label ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
                         }
                       >
-                        {s.label}
+                        {subLabel(s)}
                       </NavLink>
                     </li>
                   ))}
