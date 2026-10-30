@@ -3,6 +3,7 @@ import { LoginPage } from '@/features/auth/components/LoginPage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
+import { HomePage } from '@/features/home/components/HomePage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -25,7 +26,7 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-          { index: true, element: <Placeholder />, handle: { title: '홈' } satisfies RouteHandle },
+          { index: true, element: <HomePage />, handle: { title: '홈' } satisfies RouteHandle },
           {
             path: 'dashboard',
             element: <Placeholder />,

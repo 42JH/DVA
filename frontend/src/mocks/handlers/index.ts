@@ -2,5 +2,6 @@
 import { authHandlers } from './auth'
 import { callHandlers } from './call'
 import { faqHandlers } from './faq'
+import { homeHandlers } from './home'
 
-export const handlers = [...authHandlers, ...callHandlers, ...faqHandlers]
+export const handlers = [...authHandlers, ...callHandlers, ...faqHandlers, ...homeHandlers]
