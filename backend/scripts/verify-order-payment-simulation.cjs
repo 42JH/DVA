@@ -133,6 +133,15 @@ async function run() {
     ).rows[0];
     assert.equal(o.status, mode === 'dver-reject' ? 'SUBMISSION_FAILED' : 'ACCEPTED');
     assert.equal(o.pickup_requested_at.getTime() - o.paid_at.getTime(), 3600000);
+    await app.get(PaymentsWorker).run();
+    await app.get(PaymentsWorker).run();
+    const notice = (
+      await pool.query(
+        'SELECT completion_notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1',
+        [id],
+      )
+    ).rows[0];
+    assert.equal(notice.status, 'SENT');
     console.log('Verified real order with Postman simulation: ' + mode);
   }
   if (process.env.PAYMENT_TEST_PLAYWRIGHT_MODULE) {

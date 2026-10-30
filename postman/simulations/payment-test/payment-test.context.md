@@ -61,6 +61,10 @@ the deployment README).
 ## Observations
 
 <!-- begin:observations -->
+2026-10-30: the real-order verifier also sent one completion notice after normal
+approval, uncertain approval recovered by inquiry, and Dver rejection. Each
+completion notice received Mattermost HTTP 200 and was persisted as SENT;
+running the worker again did not send it again. No real channel was contacted.
 2026-10-30: the real Nest/DB verifier called all three members: Mattermost notices,
 Toss approval and inquiry, then Dver acceptance/rejection. Chrome completed a
 real-order callback and confirmed the Dver result without repeat approval on reload.
