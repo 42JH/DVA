@@ -19,7 +19,21 @@ PowerShell에서 `npm`이 실행 정책 때문에 막히면 `npm.cmd`로 실행�
 
 개발 서버는 `/api`를 떼고 `http://localhost:3000`(백엔드)으로 넘깁니다 — 배포 nginx(`infra/nginx/default.conf`)와 같은 동작.
 
-가짜 로그인: 아이디 `jaehoon.lee@dver.co.kr`, 비밀번호는 아무 값.
+가짜 로그인 (`VITE_USE_MOCK=true`일 때, `src/mocks/handlers/auth.ts`). 비밀번호는 모두 `test1234`.
+
+| 아이디     | 계정                       | 로그인하면                 |
+| ---------- | -------------------------- | -------------------------- |
+| `admin`    | 최고 관리자 (SYSTEM_ADMIN) | 홈 · 관리자 권한 관리 보임 |
+| `manager`  | 일반 관리자 (SUPERVISOR)   | 홈 · 관리자 권한 관리 숨김 |
+| `pending`  | 승인 대기                  | 승인 대기 중 화면          |
+| `inactive` | 비활성화                   | 비활성화 화면              |
+
+회원가입으로 만든 계정은 가입할 때 넣은 비밀번호로 로그인되고(승인 대기), 새로고침하면 사라집니다.
+
+로그인에서 **'요청을 처리하지 못했어요.'** 가 뜨면 가짜 API가 꺼져서 요청이 백엔드(3000)로 간 것입니다.
+
+- `.env.local`이 없거나 `VITE_USE_MOCK=true`가 아님 → `.env.example`을 `.env.local`로 복사하고 `npm run dev` 재시작 (`.env.local`은 git에 안 올라가서 pull로 안 생김)
+- 브라우저 콘솔에 `[MSW] Mocking enabled.` 가 떠야 켜진 것. `[MSW] 가짜 API를 켜지 못했습니다` 면 주소를 `http://localhost:5173`으로 열기 (IP 주소로 열면 서비스 워커가 막힘)
 
 ## 구조 — 기능 기준 폴더 (팀 컨벤션 v4, 노션)
 
