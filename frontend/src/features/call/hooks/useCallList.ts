@@ -5,6 +5,7 @@ import { pageCount } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
 import { todayYmd } from '@/shared/lib/dateRange'
 import { fmtDuration, fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
 import { OUTCOME_LABEL, OUTCOME_TAG } from '@/features/call/labels'
@@ -33,6 +34,13 @@ const PAGE_SIZE = 20
 const DEFAULTS = { tab: 'all', q: '', from: '', to: '', outcome: 'ALL' }
 // 통화 결과 드롭다운 = 전체 + 와이어프레임 04 순서 (6개)
 const OUTCOME_ORDER: Outcome[] = ['SUCCESS', 'FAILED', 'HANDOFF', 'CANCELLED', 'INQUIRY']
+
+/** 숫자만 쳤으면 그 숫자가 든 번호 추천 (새 결과가 오기 전 이전 줄이 남아 있어도 맞는 것만, 다 친 번호는 빼고). 숫자가 아니면 null */
+function phoneSuggestions(rows: CallListRow[], digits: string): string[] | null {
+  if (!digits) return null
+  const hit = rows.filter((r) => r.callerNumber.includes(digits) && r.callerNumber !== digits)
+  return [...new Set(hit.map((r) => r.phone))].slice(0, 5)
+}
 
 /** 04 통화 내역 훅 (와이어프레임 04_통화내역 · _불만 · _기간선택, 10/30)
  * 탭 [전체 | 불만 통화] · 검색(이름 · 전화번호) · 날짜 칸(기본 오늘) · 통화 결과 · 쪽은 URL에 (06 갔다가 뒤로가기 하면 그대로)
@@ -96,6 +104,13 @@ export function useCallList() {
     setTab: (t: CallTab) => set({ tab: t }),
     q: params.q,
     setQ: (v: string) => set({ q: v }),
+    // 추천 = 지금 결과(첫 쪽)의 이름, 숫자만 쳤으면 번호 — 결과가 이미 검색어로 걸러져 있어 BE가 붙어도 그대로 됨
+    suggestions:
+      phoneSuggestions(rows, phoneDigits(params.q)) ??
+      suggest(
+        rows.map((r) => r.customerName),
+        params.q,
+      ),
     range, // 날짜 칸 (null = 오늘)
     setRange: (r: { from: string; to: string }) =>
       // 오늘 하루를 고르면 기본값(빈 값)으로 → 주소가 깨끗하고 내일 열어도 '오늘'

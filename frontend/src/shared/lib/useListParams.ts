@@ -43,7 +43,9 @@ export function useListParams<T extends Record<string, string>>(defaults: T) {
           else next.set('page', String(p))
           return next
         },
-        { replace: true },
+        // flushSync: 라우터는 기본으로 주소 변경을 startTransition으로 늦게 반영 → 검색칸처럼 값이 주소에서 오는 입력은
+        // 칠 때마다 이전 값으로 되돌아갔다가 다시 바뀌어 한글 조합이 깨지고 커서가 끝으로 튐. 바로 반영해서 막음
+        { replace: true, flushSync: true },
       )
     },
     [setSp, defaults, page],
