@@ -80,6 +80,41 @@ test('production FAQ management through Nginx updates the AI read API without ex
     (await list.json()).data.map((r) => r.faqEntrySeq),
     [Number(id)],
   );
+  const bulk = await fetch(root + '/faqs', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      items: [
+        { question: question + '-one', answer: '첫 답변' },
+        { question: question + '-two', answer: '둘째 답변' },
+      ],
+    }),
+  });
+  assert.equal(bulk.status, 204, await bulk.clone().text());
+  const all = (
+    await (await fetch(root + '/ai/faqs?' + new URLSearchParams({ q: question }))).json()
+  ).data;
+  assert.equal(all.length, 3);
+  const ids = all.map((row) => row.faqEntrySeq);
+  const filtered = await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','));
+  const filteredBody = await filtered.json();
+  assert.deepEqual(Object.keys(filteredBody).sort(), ['data', 'hasNext']);
+  assert.deepEqual(
+    filteredBody.data.map((row) => row.faqEntrySeq),
+    ids,
+  );
+  for (const faqEntrySeqs of [[ids[0]], ids.slice(1)]) {
+    const deleted = await fetch(root + '/faqs', {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ faqEntrySeqs }),
+    });
+    assert.equal(deleted.status, 204, await deleted.clone().text());
+  }
+  assert.deepEqual(await (await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','))).json(), {
+    data: [],
+    hasNext: false,
+  });
 });
 
 test('Nginx preserves the admin-only manual order boundary without a service-token bypass', async () => {

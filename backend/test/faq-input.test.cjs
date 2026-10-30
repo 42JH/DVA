@@ -3,9 +3,38 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const seed = require('../data/delivery-faq.json');
 const { validateFaqSeed } = require('../dist/faqs/faq-seed');
-const { CreateFaqDto, UpdateFaqDto } = require('../dist/faqs/dto/faq-request.dto');
+const {
+  AiFaqQueryDto,
+  CreateFaqDto,
+  DeleteFaqsDto,
+  UpdateFaqDto,
+} = require('../dist/faqs/dto/faq-request.dto');
+const { CreateFaqPipe } = require('../dist/faqs/create-faq.pipe');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 const pipe = createValidationPipe();
+
+test('AI FAQ filtering validates a bounded, unique CSV list without coercing malformed query values', async () => {
+  const query = await pipe.transform(
+    { faqEntrySeqs: '3,1', limit: '100' },
+    { type: 'query', metatype: AiFaqQueryDto },
+  );
+  assert.deepEqual(query.faqEntrySeqs, [3, 1]);
+  for (const faqEntrySeqs of [
+    '',
+    '0',
+    '2147483648',
+    '1.5',
+    '1,',
+    '1,1',
+    '1, 2',
+    ['1', '2'],
+    { id: 1 },
+    Array.from({ length: 101 }, (_, i) => i + 1).join(','),
+  ])
+    await assert.rejects(() =>
+      pipe.transform({ faqEntrySeqs }, { type: 'query', metatype: AiFaqQueryDto }),
+    );
+});
 
 test('FAQ initial data contains all 32 question-answer pairs with provenance removed and rich answers preserved', () => {
   assert.equal(validateFaqSeed(seed).length, 32);
@@ -34,6 +63,53 @@ test('FAQ initial data contains all 32 question-answer pairs with provenance rem
     seed.find((r) => r.question === '주문 상태는 어떻게 나뉘나요?').answer,
     /취소완료 \(canceled\)/,
   );
+});
+
+test('FAQ creation accepts one or many items and the legacy object through the same validated path', async () => {
+  const creation = new CreateFaqPipe();
+  const item = { question: '질문', answer: '답변' };
+  assert.deepEqual(JSON.parse(JSON.stringify(await creation.transform(item))), [item]);
+  for (const length of [1, 2, 100])
+    assert.equal((await creation.transform({ items: Array(length).fill(item) })).length, length);
+  for (const input of [
+    null,
+    [],
+    [item],
+    {},
+    { items: [] },
+    { items: null },
+    { items: item },
+    { items: [null] },
+    { items: [[item]] },
+    { items: [item, { question: '질문' }] },
+    { items: [{ ...item, updatedByAdminUserSeq: 1 }] },
+    { items: [item], ...item },
+    { items: Array(101).fill(item) },
+  ])
+    await assert.rejects(() => creation.transform(input));
+});
+
+test('FAQ deletion requires 1-100 unique positive integer IDs and rejects delete-all or coerced values', async () => {
+  for (const ids of [[1], [1, 2], Array.from({ length: 100 }, (_, i) => i + 1)])
+    assert.deepEqual(
+      (await pipe.transform({ faqEntrySeqs: ids }, { type: 'body', metatype: DeleteFaqsDto }))
+        .faqEntrySeqs,
+      ids,
+    );
+  for (const input of [
+    {},
+    { faqEntrySeqs: [] },
+    { faqEntrySeqs: null },
+    { faqEntrySeqs: 1 },
+    { faqEntrySeqs: [1, 1] },
+    { faqEntrySeqs: ['1'] },
+    { faqEntrySeqs: [0] },
+    { faqEntrySeqs: [1.5] },
+    { faqEntrySeqs: [2147483648] },
+    { faqEntrySeqs: [1], all: true },
+    { faqEntrySeqs: Array.from({ length: 101 }, (_, i) => i + 1) },
+  ])
+    await assert.rejects(() => pipe.transform(input, { type: 'body', metatype: DeleteFaqsDto }));
 });
 
 test('FAQ input allows multiline text but rejects nulls, empty text, server fields and invalid seed structures', async () => {

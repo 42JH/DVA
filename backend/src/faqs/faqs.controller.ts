@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -12,21 +13,33 @@ import {
 } from '@nestjs/common';
 import {
   ApiCookieAuth,
+  ApiBody,
+  ApiExtraModels,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
+  getSchemaPath,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-import { CreateFaqDto, FaqIdParamsDto, FaqQueryDto, UpdateFaqDto } from './dto/faq-request.dto';
+import {
+  CreateFaqDto,
+  CreateFaqsDto,
+  DeleteFaqsDto,
+  FaqIdParamsDto,
+  FaqQueryDto,
+  UpdateFaqDto,
+} from './dto/faq-request.dto';
+import { CreateFaqPipe } from './create-faq.pipe';
 import { FaqListResponseDto, FaqResponseDto } from './dto/faq-response.dto';
 import { FaqsService } from './faqs.service';
 
 @ApiTags('FAQs')
+@ApiExtraModels(CreateFaqDto, CreateFaqsDto)
 @ApiCookieAuth('adminSession')
 @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
 @ApiResponse({
@@ -62,18 +75,37 @@ export class FaqsController {
   @HttpCode(204)
   @AuditOperation({ action: 'FAQ_CREATED', targetType: 'FAQ_ENTRY', target: 'none' })
   @ApiOperation({
-    summary: '관리자 FAQ 등록',
+    summary: '관리자 FAQ 단건·복수 등록',
     description:
-      '질문·답변만 전달합니다. 수정 관리자는 세션에서 기록합니다. 별도 요청 키는 받지 않습니다.',
+      'items에 1~100건을 전달합니다. 기존 질문·답변 단건 본문도 지원합니다. 전체 저장·감사 기록은 함께 커밋하거나 롤백합니다.',
   })
-  @ApiNoContentResponse({ description: '저장 완료. Location 헤더로 새 FAQ 상세 조회 경로 반환.' })
+  @ApiBody({
+    schema: {
+      oneOf: [{ $ref: getSchemaPath(CreateFaqDto) }, { $ref: getSchemaPath(CreateFaqsDto) }],
+    },
+  })
+  @ApiNoContentResponse({ description: '저장 완료. 한 건이면 Location에 새 FAQ 상세 경로 반환.' })
   async create(
-    @Body() input: CreateFaqDto,
+    @Body(new CreateFaqPipe()) items: CreateFaqDto[],
     @Req() request: AuthRequest,
     @Res({ passthrough: true }) response: Response,
   ): Promise<void> {
-    const id = await this.faqs.create(input, request.admin.adminUserSeq, request.requestId);
-    response.location(`/api/faqs/${id}`);
+    const ids = await this.faqs.create(items, request.admin.adminUserSeq, request.requestId);
+    if (ids.length === 1) response.location(`/api/faqs/${ids[0]}`);
+  }
+
+  @Delete()
+  @HttpCode(204)
+  @AuditOperation({ action: 'FAQ_DELETED', targetType: 'FAQ_ENTRY', target: 'none' })
+  @ApiOperation({
+    summary: '관리자 FAQ 단건·복수 삭제',
+    description:
+      'faqEntrySeqs에 중복 없는 번호 1~100개를 전달합니다. 대상이 하나라도 없으면 전체 롤백합니다. 감사 로그는 보존합니다.',
+  })
+  @ApiNoContentResponse({ description: '전체 삭제 완료.' })
+  @ApiResponse({ status: 404, type: ErrorResponseDto, description: '삭제 대상 FAQ 없음.' })
+  async delete(@Body() input: DeleteFaqsDto, @Req() request: AuthRequest): Promise<void> {
+    await this.faqs.delete(input.faqEntrySeqs, request.admin.adminUserSeq, request.requestId);
   }
 
   @Patch(':id')

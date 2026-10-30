@@ -134,6 +134,19 @@ after(async () => {
 });
 const request = (path, options) => fetch(base + path, options);
 
+test('JSON bodies above the existing 100 KiB limit return a redacted 413 instead of a server error', async () => {
+  const response = await request('/api/checks/items', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'private-oversize'.repeat(8000) }),
+  });
+  assert.equal(response.status, 413);
+  const body = await response.json();
+  assert.equal(body.error.code, 'PAYLOAD_TOO_LARGE');
+  assert.doesNotMatch(JSON.stringify(body), /private-oversize/);
+  assert.ok(body.meta.requestId);
+});
+
 test('API single response propagates a UUID and never changes the health contract', async () => {
   const requestId = randomUUID();
   const response = await request('/api/checks/items/1', {

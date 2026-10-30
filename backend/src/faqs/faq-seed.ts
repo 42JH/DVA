@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { queueFaqChange } from './faq-change';
 
 export interface FaqSeedEntry {
   question: string;
@@ -57,6 +58,7 @@ export async function seedFaqs(
       return { inserted: 0, skipped: true };
     }
     const requestId = randomUUID();
+    const ids: number[] = [];
     for (const entry of entries) {
       const id = (
         await client.query<{ id: number }>(
@@ -64,11 +66,14 @@ export async function seedFaqs(
           [entry.question, entry.answer, admin.id],
         )
       ).rows[0].id;
+      ids.push(id);
       await client.query(
         "INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata,actor_name) VALUES('ADMIN',$1,'FAQ_BOOTSTRAPPED','FAQ_ENTRY',$2,$3,'SUCCESS','{}',(SELECT name FROM admin_users WHERE admin_user_seq=$1))",
         [admin.id, id, requestId],
       );
     }
+    for (let offset = 0; offset < ids.length; offset += 100)
+      await queueFaqChange(client, 'INSERT', ids.slice(offset, offset + 100), requestId);
     await client.query('COMMIT');
     return { inserted: entries.length, skipped: false };
   } catch (error) {

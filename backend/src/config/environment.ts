@@ -8,6 +8,7 @@ export interface Environment {
   DB_NAME: string;
   AI_AGENT_URL: string;
   AI_PERSONA_TOKEN?: string;
+  AI_FAQ_TOKEN?: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   PBX_WEBHOOK_TOKEN?: string;
@@ -84,6 +85,13 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const token = raw.PBX_WEBHOOK_TOKEN;
   const personaToken = raw.AI_PERSONA_TOKEN;
+  const faqToken = raw.AI_FAQ_TOKEN;
+  if (
+    faqToken !== undefined &&
+    faqToken !== '' &&
+    (typeof faqToken !== 'string' || faqToken.length < 32 || !/^[\x21-\x7e]+$/.test(faqToken))
+  )
+    errors.push('AI_FAQ_TOKEN');
   if (
     personaToken !== undefined &&
     personaToken !== '' &&
@@ -136,6 +144,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_NAME: required('DB_NAME'),
     AI_AGENT_URL: aiUrl.replace(/\/$/, ''),
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
+    AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     CORS_ORIGINS: [...new Set(origins)],
     SWAGGER_ENABLED: swagger === 'true',
     PBX_WEBHOOK_TOKEN: typeof token === 'string' && token ? token : undefined,

@@ -5,7 +5,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 ERD에 현재 migration을 반영한 문서다. 단일 PostgreSQL DB,
-업무 테이블 22개와 관리자 세션 테이블 1개, public FK 22개를 사용한다. 원본의 `service` 표기는 업무 영역을 구분하는 주석이다.
+public 업무·운영 테이블 23개와 관리자 세션 테이블 1개, public FK 22개를 사용한다. PBX 수신함까지 ERD 25개 테이블과 FK 23개이며, 고객·주문·상담·배송·운영 모듈별 주석으로 구분한다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -19,8 +19,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 - `015-admin-deletion-audit.sql`: 감사 작업자·대상 관리자 이름 보존, AI 주체 구분, 관리자 INACTIVE 상태 허용, 관리자 참조 5개를 논리 참조로 변경. 세션의 삭제 cascade는 유지하며 테이블은 추가하지 않는다.
 - 과거 actor별 키가 서로 다른 주문에서 중복되거나 한 주문에 여러 키가 있으면 008 전체를 롤백하고 중단한다. 임의 키 재발급이나 주문 병합은 하지 않는다. 기존 생성 키가 없는 주문은 NULL을 유지하고 신규 API 생성은 키를 필수로 저장한다.
 - 미완료 주문은 기존 orders·order_parcels의 COLLECTING 상태다. 별도 상담 테이블은 추가하지 않는다. MR 초안의 미배포 006-incomplete-consultations.sql은 제외했으며 운영 DROP/초기화는 수행하지 않는다.
-- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. 업무 테이블 22개와 별도다.
-- `pbx_webhooks.call_ended_events`: 기존 연동 수신 테이블이며 업무 테이블 22개와 별도다.
+- `db_migrations.applied_versions`: 파일명·SHA-256·적용 시각. ERD 업무·운영 테이블과 별도다.
+- `pbx_webhooks.call_ended_events`: 기존 연동 수신함이며 ERD에는 상담 모듈로 표시한다.
 
 고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING/INACTIVE다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
@@ -39,6 +39,12 @@ CSV 갱신 방식은 API 구현 시 결정한다. `auth_version`과 기본 관�
 
 최초 전환은 기존 백엔드 중지 → 백업 → 실제 배정 확인 → migration·검증 → 새 앱 실행 순서다. 전환 뒤에는 019가 없는 구버전 앱으로 복귀하지 않는다. 배포 스크립트가 해당 복귀를 차단하며, 실패 시 호환 앱으로 복구하거나 중지 후 백업을 별도 DB로 복원·검증한다. 이번 브랜치의 migration은 임시 DB에서 검증하며 실제 운영 적용은 별도다.
 
+## FAQ 변경 알림 — 020
+
+`020-faq-change-notifications.sql`은 `faq_change_notifications` 한 테이블과 미전송 행의 부분 인덱스를 추가한다. 기존 FAQ·관리자·감사 데이터는 바꾸지 않는다. FAQ 번호 배열은 삭제 후에도 보존해야 하므로 FAQ에 실제 FK를 두지 않는다.
+
+관리자 API와 초기 등록 명령은 FAQ·감사·알림 대기를 같은 트랜잭션에 저장한다. 워커는 점유·결과와 SYSTEM 감사를 각각 커밋하고 외부 HTTP는 트랜잭션 밖에서 호출한다. `sent_at`은 AI 202 수신 확인이며 색인 완료가 아니다. 새 앱 실행 전에 020을 적용한다. 이미 존재하던 FAQ의 알림을 소급 생성하지 않으므로 최초 AI 원본 확인은 [연동 규격](../api/ai-faq-integration.md)을 따른다.
+
 ## 검증 실행
 
 Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가 필요하다.
@@ -52,12 +58,13 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 23개·FK 22개·트리거 10개, 기존 PBX 데이터 보존.
+- public 테이블 24개·FK 22개·트리거 10개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 UUID 유일성, 기존 요청 키 이전·업무 데이터 보존·키 충돌 거절·테이블 삭제 롤백.
 - 통화 시각 제약, 녹취 객체 경로, 배송 참조 무결성·작업 주체 제약.
 - 전역 ACTIVE·PENDING 각각 최대 1개·페르소나 전체 설정 이력 수정 방지, FAQ 수정 시각·감사 JSON 객체.
+- FAQ 삭제 후에도 알림 번호 보존, UPDATE 알림 단건 제약, 점유·전송 상태와 입력 배열 제약.
 - 마이그레이션 전 백업의 별도 DB 복원, 재실행 건너뛰기, 적용 파일 변조 거부.
 - 후속 SQL 실패 시 신규 변경 전체 롤백, 최초 적용 실패 시 테이블·이력 전체 롤백.
 
@@ -116,7 +123,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 이후 변경 및 복구
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `020-설명.sql`부터 순서대로 추가한다.
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `021-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.

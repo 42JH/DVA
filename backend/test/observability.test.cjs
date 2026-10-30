@@ -9,6 +9,24 @@ const { ObservabilityService } = require('../dist/observability/observability.se
 const { recordHttp, httpMetrics } = require('../dist/observability/http-metrics');
 const { requestContext } = require('../dist/common/http/request-context');
 
+test('FAQ retry logs preserve only a validated event ID and discard content and credentials', () => {
+  const eventId = randomUUID();
+  const record = logRecord('warn', {
+    event: 'faq_notification_retry',
+    eventId,
+    question: 'private FAQ content',
+    token: 'private token',
+  });
+  assert.equal(record.event, 'faq_notification_retry');
+  assert.equal(record.eventId, eventId);
+  assert.equal(record.question, undefined);
+  assert.equal(record.token, undefined);
+  assert.equal(
+    logRecord('warn', { event: 'faq_notification_deferred', eventId: 'private' }).eventId,
+    undefined,
+  );
+});
+
 test('structured output never serializes nested PII, raw errors, signed URLs or credentials', () => {
   const lines = [];
   const logger = new JsonLogger((line) => lines.push(line));

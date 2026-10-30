@@ -113,6 +113,146 @@ test('21: partial concurrent edits preserve omitted fields without a version che
   assert.equal(data.answer, '새 답변');
 });
 
+test('AI fetches changed FAQ IDs in the existing data/hasNext envelope with bounded pagination and deleted IDs omitted', async () => {
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push(await f.createdId({ question: f.marker(), answer: '답변' }));
+  const query = `?faqEntrySeqs=${[ids[2], ids[0]].join(',')}`;
+  const body = await (await f.ai(query)).json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(
+    body.data.map((row) => row.faqEntrySeq),
+    [ids[0], ids[2]],
+  );
+  assert.equal(body.hasNext, false);
+  for (const row of body.data)
+    assert.deepEqual(Object.keys(row).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
+  const first = await (await f.ai(query + '&limit=1')).json();
+  assert.equal(first.hasNext, true);
+  assert.deepEqual(
+    first.data.map((row) => row.faqEntrySeq),
+    [ids[0]],
+  );
+  const last = await (await f.ai(query + '&limit=1&offset=1')).json();
+  assert.equal(last.hasNext, false);
+  assert.deepEqual(
+    last.data.map((row) => row.faqEntrySeq),
+    [ids[2]],
+  );
+  assert.equal((await f.write('DELETE', '/api/faqs', { faqEntrySeqs: [ids[0]] })).status, 204);
+  assert.deepEqual(
+    (await (await f.ai(query)).json()).data.map((row) => row.faqEntrySeq),
+    [ids[2]],
+  );
+  assert.deepEqual(await (await f.ai('?faqEntrySeqs=' + ids[0])).json(), {
+    data: [],
+    hasNext: false,
+  });
+  assert.deepEqual(await (await f.ai(query + '&q=nonexistent-filter')).json(), {
+    data: [],
+    hasNext: false,
+  });
+  for (const value of ['1,1', '0', '', '1,', '1.5'])
+    await f.error(await f.ai('?faqEntrySeqs=' + encodeURIComponent(value)), 400, 'INVALID_REQUEST');
+  await f.error(await f.ai('?faqEntrySeqs=1&faqEntrySeqs=2'), 400, 'INVALID_REQUEST');
+});
+
+test('one create and delete API supports single and multiple FAQs for every active administrator role', async () => {
+  for (let actor = 0; actor < 3; actor++) {
+    const marker = f.marker();
+    const one = await f.create(
+      { items: [{ question: marker + ' single', answer: '답변' }] },
+      actor,
+    );
+    assert.equal(one.status, 204, await one.clone().text());
+    assert.match(one.headers.get('location'), /^\/api\/faqs\/\d+$/);
+    const many = await f.create(
+      {
+        items: [
+          { question: marker + ' first', answer: '첫 답변' },
+          { question: marker + ' second', answer: '둘째 답변' },
+        ],
+      },
+      actor,
+    );
+    assert.equal(many.status, 204, await many.clone().text());
+    assert.equal(many.headers.get('location'), null);
+    const rows = (await (await f.get('/api/faqs?q=' + marker)).json()).data;
+    assert.equal(rows.length, 3);
+    const ids = rows.map((row) => row.faqEntrySeq);
+    for (const faqEntrySeqs of [[ids[0]], ids.slice(1)]) {
+      const deleted = await f.write('DELETE', '/api/faqs', { faqEntrySeqs }, actor);
+      assert.equal(deleted.status, 204, await deleted.clone().text());
+      assert.equal(await deleted.text(), '');
+    }
+    assert.deepEqual(await (await f.ai('?q=' + marker)).json(), { data: [], hasNext: false });
+    for (const id of ids) {
+      await f.error(await f.ai('/' + id), 404, 'NOT_FOUND');
+      const history = (
+        await f.pool.query(
+          "SELECT action,actor_type,actor_seq,actor_name FROM audit_logs WHERE target_type='FAQ_ENTRY' AND target_seq=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
+          [id],
+        )
+      ).rows;
+      assert.deepEqual(
+        history.map((row) => row.action),
+        ['FAQ_CREATED', 'FAQ_DELETED'],
+      );
+      assert.ok(
+        history.every(
+          (row) =>
+            row.actor_type === 'ADMIN' &&
+            row.actor_seq === f.ids[actor] &&
+            row.actor_name === 'FAQ 관리자',
+        ),
+      );
+    }
+  }
+});
+
+test('bulk writes reject invalid or missing entries and audit failure rolls back every FAQ in the request', async () => {
+  const ids = [];
+  for (let i = 0; i < 2; i++) ids.push(await f.createdId({ question: f.marker(), answer: '유지' }));
+  const before = await f.counts();
+  await f.error(
+    await f.create({ items: [{ question: f.marker(), answer: '답변' }, { question: '누락' }] }),
+    400,
+    'INVALID_REQUEST',
+  );
+  for (const faqEntrySeqs of [[], [ids[0], ids[0]], ['1']])
+    await f.error(await f.write('DELETE', '/api/faqs', { faqEntrySeqs }), 400, 'INVALID_REQUEST');
+  await f.error(
+    await f.write('DELETE', '/api/faqs', { faqEntrySeqs: [ids[0], 2147483647] }),
+    404,
+    'NOT_FOUND',
+  );
+  const audit = f.app.get(AuditService),
+    record = audit.recordSuccess;
+  for (const operation of [
+    () =>
+      f.create({
+        items: [
+          { question: f.marker(), answer: '롤백' },
+          { question: f.marker(), answer: '롤백' },
+        ],
+      }),
+    () => f.write('DELETE', '/api/faqs', { faqEntrySeqs: ids }),
+  ]) {
+    let calls = 0;
+    audit.recordSuccess = async (...args) => {
+      if (++calls === 2) throw Error('private-faq-batch-audit-failure');
+      return record.apply(audit, args);
+    };
+    try {
+      await f.error(await operation(), 500, 'INTERNAL_ERROR');
+    } finally {
+      audit.recordSuccess = record;
+    }
+  }
+  assert.deepEqual(await f.counts(), before);
+  for (const id of ids) assert.equal((await f.ai('/' + id)).status, 200);
+  await f.error(await f.patch(ids[0], [{ answer: '복수 수정 금지' }]), 400, 'INVALID_REQUEST');
+});
+
 test('21: administrator sessions and Origins protect reads and writes; AI cookies cannot bypass authentication', async () => {
   const before = await f.counts();
   await f.error(await f.get('/api/faqs', 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
@@ -133,9 +273,22 @@ test('21: administrator sessions and Origins protect reads and writes; AI cookie
   );
   await f.error(await f.ai('', { Cookie: 'dva_session=invalid' }), 401, 'UNAUTHORIZED');
   await f.error(await f.ai('', { Origin: 'https://foreign.invalid' }), 403, 'FORBIDDEN');
+  for (const headers of [
+    { Cookie: undefined },
+    { Origin: undefined },
+    { Origin: 'https://foreign.invalid' },
+  ])
+    await f.error(
+      await f.write('DELETE', '/api/faqs', { faqEntrySeqs: [1] }, 0, headers),
+      headers.Cookie === undefined && Object.hasOwn(headers, 'Cookie') ? 401 : 403,
+      headers.Cookie === undefined && Object.hasOwn(headers, 'Cookie')
+        ? 'UNAUTHORIZED'
+        : 'FORBIDDEN',
+    );
   await f.pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [f.ids[0]]);
   try {
     await f.error(await f.get('/api/faqs'), 401, 'UNAUTHORIZED');
+    await f.error(await f.write('DELETE', '/api/faqs', { faqEntrySeqs: [1] }), 401, 'UNAUTHORIZED');
   } finally {
     await f.pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
       f.ids[0],
@@ -222,11 +375,12 @@ test('21: FAQ contents persist across application restarts and HTTP logs omit qu
   assert.doesNotMatch(JSON.stringify(f.logs), new RegExp(secret));
 });
 
-test('21: Swagger separates four protected management operations and two read-only AI operations', async () => {
+test('21: Swagger documents single/bulk management bodies and two read-only AI operations', async () => {
   const spec = await (await fetch(f.base + '/api/docs-json')).json();
   for (const [path, method] of [
     ['/api/faqs', 'get'],
     ['/api/faqs', 'post'],
+    ['/api/faqs', 'delete'],
     ['/api/faqs/{id}', 'get'],
     ['/api/faqs/{id}', 'patch'],
   ])
@@ -236,6 +390,12 @@ test('21: Swagger separates four protected management operations and two read-on
     assert.ok(spec.paths[path].get.security.some((s) => Object.keys(s).length === 0));
   }
   assert.ok(spec.paths['/api/faqs'].post.responses['204']);
+  assert.equal(
+    spec.paths['/api/faqs'].post.requestBody.content['application/json'].schema.oneOf.length,
+    2,
+  );
+  assert.equal(spec.paths['/api/faqs/{id}'].delete, undefined);
+  assert.equal(spec.paths['/api/faqs'].patch, undefined);
   assert.equal(
     (spec.paths['/api/faqs'].post.parameters ?? []).some((p) => p.name === 'Idempotency-Key'),
     false,
