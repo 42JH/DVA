@@ -67,12 +67,10 @@ function Icon({ name }: { name: keyof typeof ICON }) {
 type Sub = { to: string; label: string }
 
 export function Sidebar({
-  userLabel,
   onLogout,
   canSee = () => true,
   badges = {},
 }: {
-  userLabel?: string
   onLogout: () => void
   canSee?: (to: string) => boolean // 역할에 따라 숨길 메뉴 (예: 관리자 권한 관리는 최고 관리자만). 기본은 전부
   badges?: Record<string, number> // 하위 메뉴 경로 → 빨간 숫자 (0이면 안 그림)
@@ -232,11 +230,8 @@ export function Sidebar({
         )}
       </ul>
 
-      {/* 위 메뉴 줄과 같은 좌우 여백 → 로그아웃 글자도 메뉴 글자와 같은 x */}
+      {/* 위 메뉴 줄과 같은 좌우 여백 → 로그아웃 글자도 메뉴 글자와 같은 x. 로그인 아이디는 안 보임 (10/30 사용자) */}
       <div className={`mt-auto flex flex-col gap-1 pb-6 ${collapsed ? 'px-3' : 'px-1'}`}>
-        {userLabel && !collapsed && (
-          <span className="truncate pl-6 text-caption text-muted">{userLabel}</span>
-        )}
         <button
           type="button"
           onClick={onLogout}
