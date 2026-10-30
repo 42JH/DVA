@@ -1,10 +1,10 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-30 / backend/migrations/001~021 기준. public 업무·관리자 24개 + PBX 수신 1개 = ERD 25개, FK 20개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-30 / backend/migrations/001~022 기준. public 업무·관리자 24개 + PBX 수신 1개 = ERD 25개, FK 20개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
-// 021까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 022까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
 // 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
 // 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
 
@@ -110,7 +110,7 @@ Table orders {
   creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
   customer_seq integer [note: '연결 대상 ID']
   payment_method_type text [not null, default: 'billing', note: 'billing 개인 카드 / credit 월결제 / groupBilling 부서 그룹결제']
-  pickup_requested_at timestamptz [note: '고객이 요청한 수거 시각']
+  pickup_requested_at timestamptz [note: '결제 완료 시각 + 1시간. 결제 전 null, 재접수 때 유지']
   status text [not null, default: 'COLLECTING', note: 'COLLECTING 수집 중 / notPaid 결제 대기 / PAID 결제 완료 / SUBMITTING 디버 접수중 / ACCEPTED 디버 접수 완료 / SUBMISSION_FAILED 디버 접수 실패 / CANCELLED 취소됨']
   total_amount integer [note: '미취소 상세의 배송비 합계. 전체 취소 0원, 수집 중 미확정 NULL']
   payment_due_at timestamptz [note: '최초 결제 대기 시작 +24시간. 부분 취소 후에도 유지']
@@ -181,13 +181,23 @@ Table order_payment_requests {
   invalidated_at timestamptz
   completed_at timestamptz
   provider_reference text [unique, note: '검증된 결제사 거래 식별자. 성공 시에만 저장']
+  provider_payment_key text [unique, note: '토스 승인 전에 저장. 응답 유실 시 결과 조회에 사용']
+  provider_approved_at timestamptz [note: '검증한 토스 승인 시각']
+  approval_claim_id uuid [note: '외부 승인·조회 처리권']
+  approval_claimed_until timestamptz [note: '프로세스 종료 후 조회 복구 가능한 처리권 만료']
+  notification_status text [not null, default: 'PENDING', note: 'PENDING/SENDING/SENT/FAILED/UNKNOWN']
+  notification_attempted_at timestamptz
+  notification_sent_at timestamptz
   checks {
     `amount>0`
     `length(provider_reference) BETWEEN 1 AND 200`
     `completed_at IS NULL OR (invalidated_at IS NULL AND provider_reference IS NOT NULL)`
     `provider_reference IS NULL OR completed_at IS NOT NULL`
+    `length(provider_payment_key) BETWEEN 1 AND 200`
+    `(approval_claim_id IS NULL)=(approval_claimed_until IS NULL)`
+    `notification_status IN ('PENDING','SENDING','SENT','FAILED','UNKNOWN')`
   }
-  Note: 'order / 개인 카드 결제 요청. 주문별 활성 요청 1개: invalidated_at/completed_at IS NULL 부분 UNIQUE. 일부 상세 취소 시 이전 요청을 무효화하고 남은 합계로 교체하며 최초 만료는 유지한다. 승인 선점과 취소는 직렬화한다. 실제 결제 URL·PG·카카오톡은 후속 연동이며 AI·관리자 HTTP로 결제 성공을 입력하지 않는다.'
+  Note: 'order / 개인 카드 결제 요청과 안내 발송. 부분 취소는 이전 링크를 닫고 남은 금액의 새 요청·안내를 만든다. 최초 만료를 유지하고 승인·취소를 직렬화한다. 토스 승인 전 결제 키와 45초 처리권을 저장하며 응답 유실은 조회로 복구한다. UNKNOWN 메시지는 자동 재발송하지 않는다. SQL 부분 인덱스: one_active_order_payment_request, order_payment_notification_pending_idx, order_payment_reconcile_idx. 카카오 알림톡은 후속 범위.'
 }
 
 Table order_parcels {

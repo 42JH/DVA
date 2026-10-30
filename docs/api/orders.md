@@ -87,12 +87,12 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000055
 - 상담 시작 시 POST /api/customers/context에 phoneNumber와 call(providerCallId·incomingAt)을 보내 통화 번호를 먼저 받는다. 결과 전송은 같은 통화 정보를 사용하며 기존 통화에 주문을 연결한다. 기존처럼 고객 확인 없이 call·outcome을 보낸 요청도 지원한다.
 - `customerSeq` 또는 `customer` 중 하나로 고객을 지정한다. 고객의 번호는 발신번호와 같아야 한다. 이름·번호로 미등록 고객을 지정하면 주문과 같은 트랜잭션에서 생성한다. 기존 고객 이름·상태는 덮어쓰지 않는다.
 - `INCOMPLETE`·`CANCELLED`는 고객을 생략할 수 있다. 발신번호와 일치하는 활성 고객이 있으면 연결하고, 없으면 `customer_seq=NULL`로 보존한다. 알 수 없는 이름을 만들어 고객으로 등록하지 않는다.
-- `COMPLETE`는 고객 지정과 필수 주문 정보가 필요하다. 디버 전달 형식의 주소·물품·미래 수거 시각·가격·결제 자격을 검증한다. 부족하면 `422 VALIDATION_FAILED`이며 해당 요청에서 새로 저장한 통화·고객·주문을 롤백한다. 고객 확인에서 이미 저장한 통화는 보존한다.
+- `COMPLETE`는 고객 지정과 필수 주문 정보가 필요하다. 디버 전달 형식의 주소·물품·가격·결제 자격을 검증한다. 부족하면 `422 VALIDATION_FAILED`이며 해당 요청에서 새로 저장한 통화·고객·주문을 롤백한다. 고객 확인에서 이미 저장한 통화는 보존한다.
 
 | 주문 필드 | 규칙 |
 | --- | --- |
 | `paymentMethodType` | `billing`: 개인·기업 개인 카드, 기본값 / `credit`: 월결제 사용 자격 필요 / `groupBilling`: 활성 소속 부서의 그룹결제 자격 필요 |
-| `pickupRequestedAt` | 시간대 포함 ISO 8601. 미완료는 생략·null 가능, 완료는 미래 시각 필수 |
+| `pickupRequestedAt` | 시간대 포함 ISO 8601. 생략·null 가능. 최종 수거 시각은 결제 완료 시각 + 1시간으로 서버가 결정 |
 | `parcels` | 상세 목록. 미완료는 생략·빈 배열 가능, 완료는 한 건 이상 |
 | `origin`, `destination` | 이름·숫자 전화번호·도로명·지번 주소·동명·5자리 우편번호·위경도. 완료 시 모두 필요하며 상세 주소는 선택 |
 | `originPin` | 선택. `scope`(PERSONAL/COMPANY), `pinSeq`. 해당 고객의 사용 권한 검사 |

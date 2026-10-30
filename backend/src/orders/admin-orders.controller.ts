@@ -79,7 +79,7 @@ export class AdminOrdersController {
       oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
     },
     description:
-      'customerSeq 또는 customer 중 하나와 완성된 택배 상세·미래 수거 시각. totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
+      'customerSeq 또는 customer 중 하나와 완성된 택배 상세 (수거 시각은 결제 완료 후 1시간으로 서버가 결정). totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
   })
   @ApiCreatedResponse({
     description: '현재 접수 결과. HTTP 201만으로 성공을 판단하지 않습니다.',
@@ -120,7 +120,7 @@ export class AdminOrdersController {
     type: ErrorResponseDto,
   })
   @ApiUnprocessableEntityResponse({
-    description: '완성 주문의 필수 주소·물품·미래 수거 시각 미충족. 저장·외부 호출 없음.',
+    description: '완성 주문의 필수 주소·물품 미충족. 저장·외부 호출 없음.',
     type: ErrorResponseDto,
   })
   @ApiServiceUnavailableResponse({

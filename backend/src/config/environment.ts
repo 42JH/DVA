@@ -1,4 +1,5 @@
-export interface Environment {
+import { PaymentEnvironment, paymentEnvironment } from '../payments/payment-config';
+export interface Environment extends PaymentEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
   DB_HOST: string;
@@ -135,6 +136,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   )
     errors.push('DVER_API_KEY');
   const config: Environment = {
+    ...paymentEnvironment(raw, errors),
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3000),
     DB_HOST: required('DB_HOST'),

@@ -5,9 +5,11 @@ Generated 2026-10-30 from local contract mocks. No real payments or messages.
 ## Purpose
 
 Runs the actual payment demo HTTP service against Toss (`api.tosspayments.com`)
-and Mattermost incoming-webhook stand-ins. Contract fields and modeled failure
+and Mattermost incoming-webhook stand-ins. It also supports the real-order Nest
+backend with a local Dver v2 stand-in. Contract fields and modeled failure
 triggers are in `postman/mocks/`; the local API contract is in
 `backend/payment-test/CONTRACT.md`.
+The real-order contract is `docs/api/order-payment-integration.md`.
 
 ## Execution
 
@@ -22,6 +24,13 @@ In another terminal:
 ```sh
 node postman/simulations/payment-test/verify.mjs
 ```
+
+For real-order verification, configure an isolated `dva_webhook_test` PostgreSQL
+and `NODE_ENV=test`, then run `node scripts/verify-order-payment-simulation.cjs`
+from `backend/` after `npm run build`. It starts Nest, creates actual fixture
+orders, sends payment notices and confirms Toss before posting Dver. Optional
+`PAYMENT_TEST_PLAYWRIGHT_MODULE`/`PAYMENT_TEST_CHROME_PATH` enables real-browser
+verification with the SDK replaced. The contract document lists the setup.
 
 The verifier starts a real temporary HTTP service, sends fixture creation,
 notification, approval and result-inquiry requests, and cleans up its own data.
@@ -39,7 +48,8 @@ the deployment README).
 - 2026-10-30: mock state is process-local and resets on restart. Restart after
   handler edits. It models only consumed Payment fields, not full card/PG rules.
 - 2026-10-30: ports 4598 (simulation) and 4599 (optional browser) must be free.
-  No application database is required; all names, keys and payment IDs are fake.
+  The original demo verifier needs no DB; the real-order verifier requires an
+  isolated PostgreSQL. All names, keys and payment IDs are fixtures.
 - 2026-10-30: official Toss/Mattermost documentation supplied the contract.
   Postman catalog search returned no applicable provider contract; the CLI was
   signed out, so a workspace-owned published mock could not be checked.
@@ -51,6 +61,9 @@ the deployment README).
 ## Observations
 
 <!-- begin:observations -->
+2026-10-30: the real Nest/DB verifier called all three members: Mattermost notices,
+Toss approval and inquiry, then Dver acceptance/rejection. Chrome completed a
+real-order callback and confirmed the Dver result without repeat approval on reload.
 2026-10-30: both members served actual application HTTP traffic. Toss served
 normal approval, an uncertain 500 followed by a successful GET inquiry, and a
 card rejection. Mattermost served one formatted message; the duplicate attempt

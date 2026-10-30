@@ -21,6 +21,8 @@ const events = new Set([
   'dver_submission',
   'order_maintenance_failed',
   'paid_order_submission_deferred',
+  'payment_worker_failed',
+  'payment_reconcile_deferred',
 ]);
 const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING']);
 const reasons = new Set([

@@ -7,7 +7,7 @@ import { OrderQueryDto } from './dto/order-query.dto';
 import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { OrderCreationSource, OrderStatus } from './orders.types';
-const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at)
+const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 import {
   OrderAddressHistoryQueryDto,

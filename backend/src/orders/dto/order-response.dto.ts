@@ -22,6 +22,11 @@ export class CreatedOrderDto {
 }
 
 export class OrderPaymentRequestDto {
+  @ApiProperty({
+    enum: ['PENDING', 'SENDING', 'SENT', 'FAILED', 'UNKNOWN'],
+    description: '결제 안내 발송 상태. UNKNOWN은 자동 재발송하지 않습니다.',
+  })
+  notificationStatus!: string;
   @ApiProperty({ format: 'uuid', description: '현재 유효한 내부 결제 요청 식별자.' })
   paymentRequestId!: string;
   @ApiProperty({ minimum: 1, description: '이 요청의 결제 금액(원).' }) amount!: number;

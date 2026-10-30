@@ -5,6 +5,7 @@ COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts/copy-payment-assets.cjs ./scripts/copy-payment-assets.cjs
 RUN npm run build
 
 FROM builder AS checks

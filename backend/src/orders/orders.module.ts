@@ -27,6 +27,6 @@ import { OrderMaintenanceWorker } from './order-maintenance.worker';
     OrderPaymentsService,
     OrderMaintenanceWorker,
   ],
-  exports: [OrdersService, OrderPaymentsService],
+  exports: [OrdersService, OrderPaymentsService, OrderPaymentsRepository],
 })
 export class OrdersModule {}

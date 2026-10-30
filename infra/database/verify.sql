@@ -49,7 +49,7 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql'))<>19 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql','021-company-deletion-history.sql','022-order-toss-payments.sql'))<>21 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  IF to_regclass('public.ai_persona_versions') IS NULL OR to_regclass('public.ai_prompt_versions') IS NOT NULL
   OR to_regclass('public.ai_persona_live_status_uk') IS NULL THEN
@@ -67,6 +67,10 @@ BEGIN
   RAISE EXCEPTION 'Company deletion history/department PIN schema missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='021-company-deletion-history.sql') THEN
   RAISE EXCEPTION 'Company deletion migration missing'; END IF;
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='order_payment_requests'
+  AND column_name IN ('provider_payment_key','provider_approved_at','approval_claim_id','approval_claimed_until','notification_status','notification_attempted_at','notification_sent_at'))<>7
+  OR to_regclass('public.order_payment_notification_pending_idx') IS NULL OR to_regclass('public.order_payment_reconcile_idx') IS NULL THEN
+  RAISE EXCEPTION 'Order payment provider/notification schema missing'; END IF;
  RAISE NOTICE 'PASS: 24 public tables, 19 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;

@@ -13,6 +13,7 @@ import { ConsultationsModule } from './consultations/consultations.module';
 import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { PaymentsModule } from './payments/payments.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { ObservabilityModule } from './observability/observability.module';
     AuthModule,
     OrganizationsModule,
     OrdersModule,
+    PaymentsModule,
     CustomersModule,
     MembersModule,
     PinsModule,

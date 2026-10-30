@@ -31,7 +31,7 @@ AI는 기존 POST /api/orders의 outcome=COMPLETE, 관리자 수기는 POST /api
 
 PAID 저장과 결제 완료 감사는 먼저 커밋한다. 그 다음 SUBMITTING 저장·감사 커밋 후 DB 트랜잭션 밖에서 디버를 호출한다. 성공 시 미취소 상세만 배송·초기 paid 이력을 생성한다. 실패는 SUBMISSION_FAILED로 저장하며 외부 오류 코드를 업무 응답에 추가하지 않는다. 자동 재전송은 하지 않는다.
 
-결과에는 totalAmount, paymentDueAt, paymentRequest를 추가한다. paymentRequest는 현재 미완료·미만료 요청의 paymentRequestId(UUID), amount, expiresAt이며 결제 완료·취소 상태에는 null이다. 이 값은 결제 요청 식별자이며 실제 결제 URL은 아니다.
+결과에는 totalAmount, paymentDueAt, paymentRequest를 추가한다. paymentRequest는 현재 미완료·미만료 요청의 paymentRequestId(UUID), amount, expiresAt, notificationStatus이며 결제 완료·취소 상태에는 null이다. 설정된 정식 결제 페이지 `/api/payments/p/{paymentRequestId}`로 연결한다. 안내 발송·토스 승인은 [주문 결제 연동](order-payment-integration.md)을 따른다.
 
 ## 부분 취소
 
@@ -41,11 +41,11 @@ COLLECTING 또는 notPaid에서만 취소한다. 일부 취소하면 상세 가�
 
 주문 잠금 → 상세/결제 요청 순서로 직렬화한다. 결제 승인이 먼저 시작되면 취소는 409, 취소가 먼저 확정되면 이전 결제 요청의 승인 시작은 409다. 결제 완료 이후 취소·수정은 지원하지 않는다.
 
-## 결제사 연동 보류 범위
+## 결제사 연동
 
-OrderPaymentsService는 내부 함수만 제공한다. 결제 성공을 자가 신고하는 HTTP endpoint는 없다. 결제사·카카오톡 발송 설정·결제 URL·실제 승인/환불은 이번 변경에 포함하지 않는다.
+정식 토스 테스트 연동은 [140번 계약](order-payment-integration.md)으로 제공한다. OrderPaymentsService는 검증된 승인 결과를 반영하는 내부 함수이며 클라이언트의 결제 성공 자가 신고를 신뢰하지 않는다. 결제 안내는 현재 Mattermost를 사용하고 카카오 알림톡·환불은 후속 범위다. 수거 시각은 결제 완료 시각 + 1시간으로 확정한다.
 
-추후 검증된 결제 연동은 다음 순서를 지켜야 한다.
+결제 연동은 DB 처리권과 승인 전에 저장된 결제 키를 사용한다. 아래 내부 함수는 기존 도메인 경계를 설명하며 실제 호출 순서와 복구 계약은 140번 문서를 따른다.
 
 1. beginPayment(paymentRequestId, amount)로 유효한 최신 요청·금액·기한을 확인하고 승인 작업을 선점한다.
 2. 서버에서 결제사 승인을 호출하고 신뢰 가능한 결제 결과를 검증한다. 클라이언트 성공 화면만으로 확정하지 않는다.
