@@ -21,7 +21,7 @@ export function AppLayout() {
       <Sidebar
         userLabel={me?.loginId}
         onLogout={logout}
-        canSee={(to) => to !== '/admins' || isSystemAdmin} // 10 관리자 권한 관리는 슈퍼바이저만 (RequireRole과 짝)
+        canSee={(to) => to !== '/admins' || isSystemAdmin} // 10 관리자 권한 관리는 최고 관리자만 (RequireRole과 짝)
         badges={{ '/faqs/unanswered': unanswered }}
       />
       <div className="flex min-w-0 flex-1 flex-col">

@@ -22,11 +22,11 @@ export function useLogin() {
   })
 
   const error = mutation.error
-  // 승인 대기 계정도 명세서상 같은 401 — '승인 대기 중' 안내는 대조표 D7 결정 후
+  // 승인 대기 · 비활성화 계정은 로그인은 되고 내 정보(status)로 안내 화면에 감 (RequireAuth)
   const errorMessage = !error
     ? null
     : error instanceof ApiError && error.status === 401
-      ? '이메일 또는 비밀번호를 확인해 주세요.'
+      ? '아이디 또는 비밀번호가 일치하지 않습니다.'
       : error.message
 
   return {
