@@ -13,6 +13,7 @@ const temporaryRoot = process.env.PAYMENT_TEST_TMP_ROOT || tmpdir();
 const directory = mkdtempSync(join(temporaryRoot, "dva-payment-infra-"));
 const settings = join(directory, "settings");
 const env = { ...process.env, PAYMENT_TEST_SETTINGS: settings };
+const checks = new Set();
 let built = false,
   started = false;
 function docker(args, expected = 0) {
@@ -27,6 +28,30 @@ function docker(args, expected = 0) {
     );
   }
   return result.stdout;
+}
+function checkContainer(suffix, entrypoint, containerImage, args) {
+  const name = run + "-" + suffix;
+  docker([
+    "create",
+    "--name",
+    name,
+    "--network=none",
+    "--user=0",
+    "--security-opt=no-new-privileges",
+    "--memory=128m",
+    "--pids-limit=64",
+    "--entrypoint",
+    entrypoint,
+    containerImage,
+    ...args,
+  ]);
+  checks.add(name);
+  return name;
+}
+// The CLI streams these files to the daemon. A Jenkins agent's paths are not
+// necessarily present on its separate Docker-in-Docker daemon's filesystem.
+function copyTo(name, source, destination) {
+  docker(["cp", source, `${name}:${destination}`]);
 }
 try {
   writeFileSync(
@@ -94,38 +119,30 @@ try {
     "if(process.getuid()!==1000)process.exit(1);if((require('fs').statSync('/data/requests.json').mode&511)!==384)process.exit(1)",
   ]);
   docker(["exec", run, "flock", "-n", "/data/service.lock", "true"], 1);
-  docker([
-    "run",
-    "--rm",
-    "--mount",
-    `type=bind,src=${resolve(root, "infra/payment-test")},dst=/check,readonly`,
-    "--entrypoint",
-    "bash",
-    image,
+  const shell = checkContainer("shell", "bash", image, [
     "-n",
-    "/check/deploy.sh",
+    "/tmp/deploy.sh",
   ]);
+  copyTo(shell, join(root, "infra/payment-test/deploy.sh"), "/tmp/deploy.sh");
+  docker(["start", "--attach", shell]);
   const original = readFileSync(settings, "utf8");
   writeFileSync(
     settings,
     original.replace(/^PAYMENT_TEST_OPERATOR_TOKEN=.*\n/m, ""),
   );
-  const configureArgs = [
-    "run",
-    "--rm",
-    "--user",
-    "0",
-    "--entrypoint",
-    "node",
-    "--mount",
-    `type=bind,src=${resolve(root, "infra/payment-test")},dst=/setup,readonly`,
-    "--mount",
-    `type=bind,src=${directory},dst=/settings`,
-    image,
-    "/setup/configure.mjs",
-  ];
-  docker(configureArgs);
-  const prepared = readFileSync(settings, "utf8");
+  const configure = checkContainer("configure", "node", image, [
+    "/tmp/configure.mjs",
+  ]);
+  copyTo(
+    configure,
+    join(root, "infra/payment-test/configure.mjs"),
+    "/tmp/configure.mjs",
+  );
+  copyTo(configure, directory, "/settings");
+  docker(["start", "--attach", configure]);
+  const configured = join(directory, "configured.settings");
+  docker(["cp", `${configure}:/settings/settings`, configured]);
+  const prepared = readFileSync(configured, "utf8");
   assert.ok(
     prepared.includes(
       "MATTERMOST_WEBHOOK_URL=https://mattermost.invalid/hooks/test",
@@ -133,9 +150,10 @@ try {
   );
   assert.ok(prepared.includes("TOSS_TEST_SECRET_KEY=test_gsk_fixture"));
   assert.match(prepared, /^PAYMENT_TEST_OPERATOR_TOKEN=[a-f0-9]{64}$/m);
-  docker(configureArgs);
+  docker(["start", "--attach", configure]);
+  docker(["cp", `${configure}:/settings/settings`, configured]);
   assert.equal(
-    readFileSync(settings, "utf8"),
+    readFileSync(configured, "utf8"),
     prepared,
     "Settings initialization must preserve existing values",
   );
@@ -144,21 +162,19 @@ try {
     readFileSync(join(root, "infra/payment-test/nginx.conf"), "utf8") +
     "\n} }\n";
   writeFileSync(join(directory, "nginx.conf"), nginx);
-  docker([
-    "run",
-    "--rm",
-    "--mount",
-    `type=bind,src=${directory},dst=/check,readonly`,
-    "nginx:alpine",
-    "nginx",
+  const proxy = checkContainer("nginx", "nginx", "nginx:alpine", [
     "-t",
     "-c",
-    "/check/nginx.conf",
+    "/tmp/payment-nginx.conf",
   ]);
+  copyTo(proxy, join(directory, "nginx.conf"), "/tmp/payment-nginx.conf");
+  docker(["start", "--attach", proxy]);
   console.log(
     "Payment Docker build, Compose, non-root health, file permissions, process lock, Bash and Nginx checks passed",
   );
 } finally {
+  for (const name of checks)
+    spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" });
   if (started) spawnSync("docker", ["rm", "-f", run], { stdio: "ignore" });
   if (built) spawnSync("docker", ["image", "rm", image], { stdio: "ignore" });
   assert.ok(

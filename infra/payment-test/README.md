@@ -72,6 +72,10 @@ sudo env PAYMENT_TEST_SETTINGS=/srv/dva-payment-test/settings \
 
 ## 검증
 
+Jenkins 에이전트와 Docker 데몬은 서로 다른 파일시스템을 사용한다. 검사 스크립트는 파일을 `docker cp`로 임시 컨테이너에 전달하므로 에이전트 경로를 데몬에 bind mount하지 않는다. Bash·설정 초기화·Nginx 검사를 각각 수행하고, 설정 초기화 재실행은 같은 컨테이너의 저장 결과를 사용해 검증한다. 임시 컨테이너와 이미지는 종료 시 정리한다.
+
+2026-10-30 추가 검증: 실제 Jenkins 에이전트의 별도 임시 디렉터리에서 기존 bind 경로 오류를 재현한 뒤, 수정한 Docker 검사 전체의 통과를 확인했다. 정식 Jenkins 파이프라인의 재실행·배포 결과는 수정 MR 반영 후 확인한다.
+
 ```bash
 # 신규 결제 테스트는 기존 backend check에도 포함된다.
 cd backend
