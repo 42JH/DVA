@@ -4,6 +4,7 @@ import {
   fmtDate,
   fmtDateTime,
   fmtDateTimeDay,
+  fmtDay,
   fmtDetailTime,
   fmtDuration,
   fmtListTime,
@@ -27,5 +28,7 @@ assert.deepEqual(fmtListTime(t, now), ['10.20 14:33'])
 assert.deepEqual(fmtListTime('2025-12-29T13:40:00+09:00', now), ['2025.12.29', '13:40'])
 assert.equal(fmtDetailTime(t, { seconds: true, now }), '10.20 (화) 14:33:05')
 assert.equal(fmtDetailTime('2025-12-29T13:40:00+09:00', { now }), '2025.12.29 (월) 13:40')
+assert.equal(fmtDay('2026-10-02T00:00:00+09:00', now), '10.02 (금)')
+assert.equal(fmtDay('2025-12-29T00:00:00+09:00', now), '2025.12.29 (월)')
 
 console.log('format.test ok')

@@ -6,6 +6,11 @@
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = ['일', '월', '화', '수', '목', '금', '토']
 
+/** 날짜 + 요일 (10/30 연도 규칙): 올해 '10.02 (금)', 다른 해 '2025.12.29 (월)' — 02 버전 운영 기간 */
+export function fmtDay(iso: string, now = new Date()): string {
+  return fmtDetailTime(iso, { now }).slice(0, -6) // 'HH:MM' 앞 공백까지 뗌
+}
+
 /** 상세 화면 시각 (10/30 연도 규칙): 올해 '10.20 (화) 13:12', 다른 해 '2025.12.29 (월) 13:12'. seconds면 '13:12:08' (06 통화 시작 시각) */
 export function fmtDetailTime(iso: string, { seconds = false, now = new Date() } = {}): string {
   const d = new Date(iso)
