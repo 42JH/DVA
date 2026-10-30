@@ -131,7 +131,9 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 022은 실제 주문의 토스 결제 식별자·처리권·안내 발송 상태를 기존 `order_payment_requests`에 추가한다. 새 테이블은 만들지 않는다. [결제 연동](../api/order-payment-integration.md)을 따른다.
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `023-설명.sql`부터 순서대로 추가한다.
+023은 결제 완료 안내 상태·시도 시각·성공 시각을 같은 `order_payment_requests`에 추가한다. 이미 완료된 결제 요청은 완료 안내 발송 대기로 이관하며, 기존 결제·주문·요청 안내 발송 이력은 보존한다.
+
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `024-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -164,7 +166,7 @@ DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다
 
 ## 관리자 삭제·감사 이름 보존
 
-관리자 이름 보존의 015를 포함하며 현재 새 앱 실행 전 022까지 적용한다. 기존 migration 파일은 수정하지 않는다.
+관리자 이름 보존의 015를 포함하며 현재 새 앱 실행 전 023까지 적용한다. 기존 migration 파일은 수정하지 않는다.
 audit_logs.actor_name은 작업 당시 관리자 이름 또는 AI, target_admin_name은 ADMIN_USER 대상 이름이다.
 기존 로그는 전환 시점의 admin_users.name으로만 보완하며 이미 알 수 없는 이름은 NULL로 남긴다.
 다른 업무 테이블에 관리자 이름 컬럼을 중복 추가하지 않는다.
