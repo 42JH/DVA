@@ -1,0 +1,44 @@
+name: dva-payment-test
+services:
+  payment-test:
+    image: ${PAYMENT_TEST_IMAGE:-dva-payment-test:local}
+    build:
+      context: ../..
+      dockerfile: infra/payment-test/Dockerfile
+    env_file:
+      - path: ${PAYMENT_TEST_SETTINGS:?Set PAYMENT_TEST_SETTINGS}
+        format: raw
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      PAYMENT_TEST_DATA_DIR: /data
+      # Mock upstream overrides are permitted only in NODE_ENV=test.
+      PAYMENT_TEST_TOSS_BASE_URL: https://api.tosspayments.com
+    ports: ["127.0.0.1:3002:3000"]
+    volumes: ["/srv/dva-payment-test/data:/data"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 64
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"
+        mode: non-blocking
+        max-buffer-size: 1m

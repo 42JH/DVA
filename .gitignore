@@ -50,6 +50,7 @@ yarn-error.log*
 .deploy/
 infra/observability/.runtime/
 infra/observability/deploy.lock
+infra/payment-test/deploy.lock
 msa-release/
 infra/jenkins/home/
 infra/jenkins/bootstrap-output/
