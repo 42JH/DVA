@@ -17,6 +17,8 @@ const AUDIT_SELECT = `SELECT
         request_id AS "requestId",
         result,
         jsonb_strip_nulls(jsonb_build_object(
+          'organizationSeq',metadata->'organizationSeq','organizationName',metadata->'organizationName',
+          'departmentSeq',metadata->'departmentSeq','departmentName',metadata->'departmentName','customerSeq',metadata->'customerSeq',
           'amountBefore',metadata->'amountBefore','amountAfter',metadata->'amountAfter',
           'orderParcelSeqs',metadata->'orderParcelSeqs','billingMonth',metadata->'billingMonth',
           'paymentMethodType',metadata->'paymentMethodType','reason',metadata->'reason')) AS metadata,

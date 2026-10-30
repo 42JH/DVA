@@ -13,6 +13,11 @@ export interface AuditEvent {
   targetType: string;
   requestId: string;
   metadata?: {
+    organizationSeq?: number;
+    organizationName?: string;
+    departmentSeq?: number | null;
+    departmentName?: string | null;
+    customerSeq?: number;
     amountBefore?: number | null;
     amountAfter?: number | null;
     orderParcelSeqs?: number[];

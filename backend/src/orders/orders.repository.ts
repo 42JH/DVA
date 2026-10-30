@@ -199,6 +199,8 @@ export class OrdersRepository {
           'creationSource',o.creation_source,'totalAmount',o.total_amount,'paidAt',o.paid_at,
           'paymentDueAt',o.payment_due_at,'paymentRequest',${paymentRequestJson},
           'paymentMethodType',o.payment_method_type,'pickupRequestedAt',o.pickup_requested_at,
+           'billingOrganizationSeq',o.billing_organization_seq,'billingOrganizationName',o.billing_organization_name,
+           'billingDepartmentSeq',o.billing_department_seq,'billingDepartmentName',o.billing_department_name,
           'createdAt',o.created_at,'updatedAt',o.updated_at,'version',o.version,
           'parcelNo',o.parcel_no,'dverReceivedAt',o.dver_received_at,
           'parcels',COALESCE((
@@ -281,11 +283,12 @@ export class OrdersRepository {
             [pin.pinSeq, customerId],
           )
         : await client.query(
-            `SELECT p.company_pin_seq FROM company_pins p
-         JOIN organizations o ON o.organization_seq=p.organization_seq
-         JOIN memberships m ON m.organization_seq=o.organization_seq
-         WHERE p.company_pin_seq=$1 AND m.customer_seq=$2 AND m.status='ACTIVE' AND o.status='ACTIVE'
-         FOR SHARE OF p,o,m`,
+            // Lock company access before the PIN, matching department rename and deletion.
+            `WITH allowed AS MATERIALIZED (
+              SELECT o.organization_seq FROM memberships m JOIN organizations o USING(organization_seq)
+              WHERE m.customer_seq=$2 AND m.status='ACTIVE' AND o.status='ACTIVE' FOR SHARE OF m,o
+            ) SELECT p.company_pin_seq FROM company_pins p JOIN allowed a USING(organization_seq)
+            WHERE p.company_pin_seq=$1 FOR SHARE OF p`,
             [pin.pinSeq, customerId],
           );
     return result.rowCount === 1;

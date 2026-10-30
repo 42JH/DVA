@@ -9,17 +9,22 @@ export class OrganizationBillingRepository {
   async read(id: number, month?: string) {
     return (
       await this.database.pool.query<BillingMonthDto>(
-        `SELECT o.organization_seq AS "organizationSeq",to_char(m.month,'YYYY-MM') AS month,
+        `SELECT coalesce(o.organization_seq,b.organization_seq) AS "organizationSeq",
+       coalesce(b.organization_name,o.name) AS "organizationName",to_char(m.month,'YYYY-MM') AS month,
        coalesce(b.monthly_amount,0)::float8 AS "monthlyAmount",coalesce(b.group_billing_amount,0)::float8 AS "groupBillingAmount"
-       FROM organizations o CROSS JOIN LATERAL (SELECT coalesce(to_date($2,'YYYY-MM'),date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date) AS month) m
-       LEFT JOIN organization_billing_months b ON b.organization_seq=o.organization_seq AND b.billing_month=m.month WHERE o.organization_seq=$1`,
+       FROM (SELECT coalesce(to_date($2,'YYYY-MM'),date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date) AS month) m
+       LEFT JOIN organizations o ON o.organization_seq=$1
+       LEFT JOIN organization_billing_months b ON b.organization_seq=$1 AND b.billing_month=m.month
+       WHERE o.organization_seq IS NOT NULL OR b.organization_seq IS NOT NULL`,
         [id, month ?? null],
       )
     ).rows[0];
   }
   async ensureMonth(client: PoolClient, id: number, month: string) {
     const created = await client.query(
-      `INSERT INTO organization_billing_months(organization_seq,billing_month) VALUES($1,$2::date) ON CONFLICT DO NOTHING RETURNING organization_seq`,
+      `INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name)
+       SELECT organization_seq,$2::date,name FROM organizations WHERE organization_seq=$1
+       ON CONFLICT DO NOTHING RETURNING organization_seq`,
       [id, month],
     );
     if (!created.rowCount) return undefined;

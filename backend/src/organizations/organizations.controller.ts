@@ -1,6 +1,18 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiExtraModels,
@@ -26,6 +38,7 @@ import { AuditOperation } from '../audit/audit-operation';
 import { MvpAiDirectoryAccess } from '../auth/mvp-ai-access';
 import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 import { OrganizationBillingService } from './organization-billing.service';
+import { OrganizationDeletionService } from './organization-deletion.service';
 import { BillingMonthQueryDto, BillingMonthEnvelopeDto } from './dto/billing-month.dto';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
@@ -49,6 +62,7 @@ export class OrganizationsController {
   constructor(
     private readonly organizations: OrganizationsService,
     private readonly billing: OrganizationBillingService,
+    private readonly deletion: OrganizationDeletionService,
   ) {}
 
   @Get(':id/billing')
@@ -131,5 +145,20 @@ export class OrganizationsController {
       request.admin.adminUserSeq,
       request.requestId,
     );
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'ORGANIZATION_DELETED', targetType: 'ORGANIZATION', target: 'id' })
+  @ApiOperation({
+    summary: '기업 삭제',
+    description:
+      '모든 활성 관리자. 소속·부서·기업 PIN을 삭제하고 개인 회원·개인 PIN·주문·통화·녹취·감사·청구 이력을 보존합니다.',
+  })
+  @ApiNoContentResponse({ description: '삭제 완료. 응답 본문 없음.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto })
+  @ApiConflictResponse({ type: ErrorResponseDto })
+  remove(@Param() params: OrganizationIdParamsDto, @Req() request: AuthRequest) {
+    return this.deletion.remove(params.id, false, request.admin.adminUserSeq, request.requestId);
   }
 }

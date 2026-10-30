@@ -75,6 +75,11 @@ export class AuditResponseDto implements AuditLog {
     type: 'object',
     additionalProperties: false,
     properties: {
+      organizationSeq: { type: 'integer', minimum: 1 },
+      organizationName: { type: 'string' },
+      departmentSeq: { type: 'integer', minimum: 1 },
+      departmentName: { type: 'string' },
+      customerSeq: { type: 'integer', minimum: 1 },
       amountBefore: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
       amountAfter: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
       orderParcelSeqs: {
@@ -86,7 +91,7 @@ export class AuditResponseDto implements AuditLog {
       reason: { type: 'string', enum: ['PAYMENT_EXPIRED'] },
     },
     description:
-      '허용한 금액·대상 상세·청구 월·결제 방식·자동 만료 사유만 제공하며 그 외 정보는 제외합니다.',
+      '허용한 금액·대상 상세·청구 월·결제 방식·자동 만료 사유·삭제 당시 기업/부서/고객 번호와 기업/부서명만 제공합니다.',
     example: {},
   })
   metadata!: Record<string, unknown>;

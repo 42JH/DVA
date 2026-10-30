@@ -9,6 +9,7 @@ export TEST_DOCKER_LOG="$test_root/docker.log"
 export TEST_CREATION_SCHEMA="$test_root/creation-schema"
 export TEST_MEMBERSHIP_TABLE="$test_root/membership-table"
 export TEST_BILLING_SCHEMA="$test_root/billing-schema"
+export TEST_COMPANY_HISTORY_SCHEMA="$test_root/company-history-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -31,6 +32,11 @@ fi
 if [[ "$1" == exec && "$*" == *public.departments* ]]; then
     [[ "${TEST_BILLING_QUERY_FAIL:-}" != 1 ]] || exit 1
     if [[ -f "$TEST_BILLING_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *billing_organization_name* ]]; then
+    [[ "${TEST_COMPANY_HISTORY_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_COMPANY_HISTORY_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -79,20 +85,24 @@ if [ -f "$root/backend/migrations/009-membership-write-requests.sql" ] &&
    [ ! -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; then touch "$TEST_MEMBERSHIP_TABLE"; fi
 if [ -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; then rm -f "$TEST_MEMBERSHIP_TABLE"; fi
 if [ -f "$root/backend/migrations/019-organization-monthly-billing.sql" ]; then touch "$TEST_BILLING_SCHEMA"; fi
+if [ -f "$root/backend/migrations/021-company-deletion-history.sql" ]; then touch "$TEST_COMPANY_HISTORY_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
-    if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing ]]; then
+    if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
         mkdir -p "$directory/backend/migrations"
         printf 'SELECT 1;\n' > "$directory/backend/migrations/008-simplify-creation-requests.sql"
     fi
-    if [[ "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing ]]; then
+    if [[ "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/009-membership-write-requests.sql"
     fi
-    if [[ "${2:-}" == cleanup || "${2:-}" == billing ]]; then
+    if [[ "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/010-remove-membership-write-requests.sql"
     fi
-    if [[ "${2:-}" == billing ]]; then
+    if [[ "${2:-}" == billing || "${2:-}" == history ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/019-organization-monthly-billing.sql"
+    fi
+    if [[ "${2:-}" == history ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/021-company-deletion-history.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -335,4 +345,25 @@ printf 'membership-cleanup\n' > "$test_root/site/current-release"
 if TEST_FAIL_VERSION=billing-compatible-broken bash "$test_root/site/releases/billing-compatible-broken/deploy.sh"; then exit 1; fi
 [[ -f "$TEST_BILLING_SCHEMA" ]]
 if grep -F '/releases/membership-cleanup/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then exit 1; fi
-echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019 stop-backup order and incompatible restore protection.'
+# 021 conversion stops old writers, takes a backup and blocks older images afterward.
+printf 'billing\n' > "$test_root/site/current-release"
+make_release company-history history
+: > "$TEST_DOCKER_LOG"
+if TEST_COMPANY_HISTORY_QUERY_FAIL=1 bash "$test_root/site/releases/company-history/deploy.sh"; then exit 1; fi
+if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+: > "$TEST_DOCKER_LOG"
+bash "$test_root/site/releases/company-history/deploy.sh"
+assert_current company-history
+[[ -f "$TEST_COMPANY_HISTORY_SCHEMA" ]]
+stop_line="$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+backup_line="$(grep -n '^BACKUP ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+migration_line="$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+[[ "$stop_line" -lt "$backup_line" && "$backup_line" -lt "$migration_line" ]]
+: > "$TEST_DOCKER_LOG"
+if bash "$test_root/site/releases/company-history/deploy.sh" --rollback; then exit 1; fi
+if grep -E ' up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+make_release history-compatible-broken history
+: > "$TEST_DOCKER_LOG"
+if TEST_FAIL_VERSION=history-compatible-broken bash "$test_root/site/releases/history-compatible-broken/deploy.sh"; then exit 1; fi
+grep -F '/releases/company-history/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021 stop-backup order and incompatible restore protection.'

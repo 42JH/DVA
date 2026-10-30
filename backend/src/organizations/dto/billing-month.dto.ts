@@ -11,6 +11,12 @@ export class BillingMonthQueryDto {
 }
 export class BillingMonthDto {
   @ApiProperty() organizationSeq!: number;
+  @ApiProperty({
+    description: '해당 청구 월에 보존한 기업명. 기업 삭제 후에도 유지.',
+    type: String,
+    nullable: true,
+  })
+  organizationName!: string | null;
   @ApiProperty({ example: '2026-11' }) month!: string;
   @ApiProperty({ description: '월결제 사용액(원).', minimum: 0 }) monthlyAmount!: number;
   @ApiProperty({ description: '부서 그룹결제 사용액 합계(원).', minimum: 0 })

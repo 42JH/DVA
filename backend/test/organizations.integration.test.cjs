@@ -296,7 +296,8 @@ test('patch updates name/status with no response body and preserves memberships/
   const filtered = await (await request('?status=INACTIVE')).json();
   assert.ok(filtered.data.some((row) => row.organizationSeq === id));
   assert.equal((await patch(id, { status: 'ACTIVE' })).status, 204);
-  assert.equal((await request('/' + id, { method: 'DELETE' })).status, 404);
+  assert.equal((await request('/' + id, { method: 'DELETE' })).status, 204);
+  assert.equal((await request('/' + id)).status, 404);
 });
 
 test('invalid input, extra fields and invalid IDs never create or change records', async () => {

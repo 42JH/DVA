@@ -21,6 +21,7 @@ export class PersonalPinDto extends CreatedPersonalPinDto {
   @ApiProperty({ type: PinAddressInputDto }) addressData!: PinAddressInputDto;
 }
 export class CompanyPinDto extends CreatedCompanyPinDto {
+  @ApiProperty({ type: Number, nullable: true }) departmentSeq!: number | null;
   @ApiProperty({ minimum: 1 }) organizationSeq!: number;
   @ApiProperty({ type: String, nullable: true }) label!: string | null;
   @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;

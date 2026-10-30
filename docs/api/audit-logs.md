@@ -1,5 +1,7 @@
 # 감사 로그
 
+기업·부서 삭제는 `ORGANIZATION_DELETED`, `DEPARTMENT_DELETED`, 연결 정리는 `MEMBERSHIP_REMOVED`, `COMPANY_PIN_DELETED`로 기록한다. 같은 requestId와 당시 기업/부서 번호·이름으로 삭제 후에도 추적한다. 요청 관리자는 ADMIN·표시명 운영자이며 작업자 번호·이름을 보존한다. [삭제 감사와 트랜잭션 계약](company-deletion.md)을 따른다.
+
 관련 Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101).
 조회는 `dva_session`으로 인증한 ACTIVE 상태의 SUPERVISOR·SYSTEM_ADMIN만 가능하다.
 
@@ -26,7 +28,7 @@ limit은 기본 20·최대 100, offset은 기본 0이다. 기간은 시작 포�
 | targetAdminName | ADMIN_USER 대상의 당시 이름. 다른 대상·미식별 대상은 null |
 | requestId | 당시 업무 요청 ID. 조회 응답의 meta.requestId와 별개 |
 | result | SUCCESS / DENIED / FAILED |
-| metadata | 허용한 금액·기간·사유만 공개: amountBefore·amountAfter·orderParcelSeqs·billingMonth·paymentMethodType·reason. 그 외 빈 객체 |
+| metadata | 허용한 금액·기간·사유와 삭제 당시 연결 정보만 공개: amountBefore·amountAfter·orderParcelSeqs·billingMonth·paymentMethodType·reason·organizationSeq·organizationName·departmentSeq·departmentName·customerSeq. 그 외 빈 객체 |
 | occurredAt | 발생 시각 |
 
 관리자 이름은 로그 자체에 저장하므로 계정을 삭제하거나 이름이 바뀌어도 기존 기록은 유지된다.

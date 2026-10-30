@@ -81,8 +81,15 @@ export class OrganizationBillingService {
         ).rows[0].locked
       )
         return;
-      for (const month of await this.repository.missingMonths(client, now))
-        await this.ensureMonth(client, month.organizationSeq, month.billingMonth, randomUUID());
+      for (const month of await this.repository.missingMonths(client, now)) {
+        // Serialize month creation with company deletion, including after its billing FKs are removed.
+        const company = await client.query(
+          'SELECT 1 FROM organizations WHERE organization_seq=$1 FOR SHARE',
+          [month.organizationSeq],
+        );
+        if (company.rowCount)
+          await this.ensureMonth(client, month.organizationSeq, month.billingMonth, randomUUID());
+      }
     });
   }
 }

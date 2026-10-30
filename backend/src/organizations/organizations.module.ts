@@ -9,12 +9,16 @@ import { DepartmentsService } from './departments.service';
 import { DepartmentsRepository } from './departments.repository';
 import { OrganizationBillingRepository } from './organization-billing.repository';
 import { OrganizationBillingService } from './organization-billing.service';
+import { OrganizationDeletionService } from './organization-deletion.service';
+import { OrganizationDeletionRepository } from './organization-deletion.repository';
 
 // AppModule's AuthModule provides the global session/CSRF guard for every company route.
 @Module({
   imports: [DatabaseModule, AuditModule],
   controllers: [OrganizationsController, DepartmentsController],
   providers: [
+    OrganizationDeletionService,
+    OrganizationDeletionRepository,
     OrganizationsService,
     OrganizationsRepository,
     DepartmentsService,

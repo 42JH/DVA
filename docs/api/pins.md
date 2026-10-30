@@ -21,8 +21,8 @@ Jira: [S15P31D109-39](https://ssafy.atlassian.net/browse/S15P31D109-39).
 | PATCH /api/company-pins/{id} | 관리자만 | 200, `{ version }` |
 
 PersonalPin은 `{ personalPinSeq, customerSeq, label, addressData, version }`이다.
-CompanyPin은 `{ companyPinSeq, organizationSeq, label, departmentName, addressData, version }`이다.
-label과 departmentName은 null일 수 있다. 소유 고객·기업은 변경할 수 없다. 삭제 API는 제공하지 않는다.
+CompanyPin은 `{ companyPinSeq, organizationSeq, departmentSeq, label, departmentName, addressData, version }`이다.
+label과 departmentName·departmentSeq는 null일 수 있다. 소유 고객·기업은 변경할 수 없다. PIN 단독 삭제 API는 제공하지 않으며 기업·부서 삭제 시 대상 기업 PIN을 함께 삭제한다. [부서 연결과 삭제 규칙](company-deletion.md)을 따른다. 생성·수정에 departmentSeq를 선택값으로 전달하고 null로 기업 공용 PIN을 지정할 수 있다.
 
 ### 목록과 검색
 
@@ -86,7 +86,7 @@ call_session_seq: 31
 }
 ```
 
-개인 등록 본문은 `{ label?, addressData }`, 기업은 `{ label?, departmentName?, addressData }`다.
+개인 등록 본문은 `{ label?, addressData }`, 기업은 `{ label?, departmentSeq?, departmentName?, addressData }`다.
 label·departmentName은 생략하거나 null로 보낼 수 있다.
 주소는 고객 확인이 끝난 완성 주소 전체를 받는다. 수집 중인 정보는 주문에 보관한다.
 도로명·지번·동명·수령인 이름은 앞뒤 공백과 NFC를 정리하고 빈 문자열을 거절한다.
@@ -117,7 +117,7 @@ call_session_seq: 31
 {"label":"자택"}
 ```
 
-개인 수정 본문은 `{ label?, addressData? }`, 기업은 `{ label?, departmentName?, addressData? }`다.
+개인 수정 본문은 `{ label?, addressData? }`, 기업은 `{ label?, departmentSeq?, departmentName?, addressData? }`다.
 수정할 필드는 하나 이상 필요하다. 생략한 필드는 유지하고 label·departmentName의 null은 값을 지운다.
 addressData를 보내면 검증된 완성 주소 전체로 교체한다. 상세주소 한 필드만 담은 부분 객체는 400이다.
 소유 고객·기업을 옮기는 수정은 허용하지 않는다.
