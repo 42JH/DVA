@@ -9,9 +9,11 @@ import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
 export function DateField({
   value,
   onChange,
+  compact,
 }: {
   value: { from: Ymd; to: Ymd } | null
   onChange: (range: { from: Ymd; to: Ymd }) => void
+  compact?: boolean // 탭 줄 안에 둘 때 높이 40 (02 대시보드). 기본 48 = 목록 맨 윗줄
 }) {
   const [open, setOpen] = useState(false)
   const today = todayYmd()
@@ -30,7 +32,7 @@ export function DateField({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={`flex h-12 items-center gap-2 rounded-lg bg-surface px-5 text-body whitespace-nowrap ${
+        className={`flex ${compact ? 'h-10' : 'h-12'} items-center gap-2 rounded-lg bg-surface px-5 text-body whitespace-nowrap ${
           open ? 'ring-[1.5px] ring-action ring-inset' : 'ring-1 ring-line ring-inset'
         }`}
       >

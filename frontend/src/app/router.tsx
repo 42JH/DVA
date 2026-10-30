@@ -3,6 +3,7 @@ import { LoginPage } from '@/features/auth/components/LoginPage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { CallListPage } from '@/features/call/components/CallListPage'
+import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
@@ -30,7 +31,7 @@ export const router = createBrowserRouter([
           { index: true, element: <Placeholder />, handle: { title: '홈' } satisfies RouteHandle },
           {
             path: 'dashboard',
-            element: <Placeholder />,
+            element: <DashboardPage />,
             handle: { title: '대시보드' } satisfies RouteHandle,
           },
           {
