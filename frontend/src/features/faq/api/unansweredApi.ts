@@ -22,7 +22,7 @@ export const unansweredQueries = {
 }
 
 // 가짜 예시 = 와이어프레임 09_AI미답변 8줄 + 같은 말투 14줄 (22 = 사이드바 숫자). 분류 없음 (관리자가 FAQ 추가 창에서 고름)
-// 통화 상세 가짜 데이터가 9101 하나뿐이라 줄을 누르면 전부 9101로 감
+// 통화 상세 가짜 데이터는 06 세 장면뿐 → (주)한빛상사 줄은 그 통화(9104, 06 문의 장면), 나머지는 9101(06 기본 장면)로 감
 const SEED: [string, string, string, string][] = [
   ['2025-12-29T13:40', '오민재', '01066271180', '어… 대형 두 개… 음, 같이 보내면 할인 돼요?'], // 작년 = 날짜 · 시각 두 줄
   ['2026-10-19T15:22', '한소율', '01066041975', '착불로 보내면 받는 사람이 얼마 내요?'],
@@ -50,7 +50,7 @@ const SEED: [string, string, string, string][] = [
 
 let store: UnansweredQuestion[] = SEED.map(([at, name, phone, question], i) => ({
   unansweredQuestionSeq: 7001 + i,
-  callSessionSeq: 9101,
+  callSessionSeq: name === '(주)한빛상사' ? 9104 : 9101,
   startedAt: `${at}:00+09:00`,
   customerName: name,
   callerNumber: phone,

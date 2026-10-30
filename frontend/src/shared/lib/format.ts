@@ -6,6 +6,17 @@
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = ['일', '월', '화', '수', '목', '금', '토']
 
+/** 상세 화면 시각 (10/30 연도 규칙): 올해 '10.20 (화) 13:12', 다른 해 '2025.12.29 (월) 13:12'. seconds면 '13:12:08' (06 통화 시작 시각) */
+export function fmtDetailTime(iso: string, { seconds = false, now = new Date() } = {}): string {
+  const d = new Date(iso)
+  const date =
+    d.getFullYear() === now.getFullYear()
+      ? `${two(d.getMonth() + 1)}.${two(d.getDate())}`
+      : fmtDate(iso)
+  const time = `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? `:${two(d.getSeconds())}` : ''}`
+  return `${date} (${DAY[d.getDay()]}) ${time}`
+}
+
 /** 목록 시각 칸 (10/30 연도 규칙): 올해면 ['10.20 14:33'] 한 줄, 다른 해면 ['2025.12.29', '13:40'] 날짜 위 · 시각 아래 두 줄 (칸 폭 그대로) */
 export function fmtListTime(iso: string, now = new Date()): [string] | [string, string] {
   const d = new Date(iso)
