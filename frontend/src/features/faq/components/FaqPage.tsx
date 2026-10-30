@@ -62,6 +62,8 @@ export function FaqPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          recentKey="faq"
+          suggestions={vm.suggestions}
           placeholder="질문 · 답변 검색"
           className="min-w-0 flex-1"
         />

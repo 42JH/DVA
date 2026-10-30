@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { pageSlice } from '@/shared/api/paging'
+import { matchKo, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { FAQ_CATEGORIES, faqQueries, type Faq, type FaqCategory } from '@/features/faq/api/faqApi'
 
@@ -29,15 +30,11 @@ export function useFaqList() {
 
   const list = useQuery(faqQueries.list())
 
-  const needle = q.trim().toLowerCase()
-  const searched = (list.data?.data ?? []).filter(
-    (f) =>
-      !needle ||
-      f.question.toLowerCase().includes(needle) ||
-      f.answer.toLowerCase().includes(needle),
+  const inCategory = (list.data?.data ?? []).filter(
+    (f) => category === '전체' || f.category === category,
   )
-  const hit = searched
-    .filter((f) => category === '전체' || f.category === category)
+  const hit = inCategory
+    .filter((f) => matchKo(f.question, q) || matchKo(f.answer, q)) // 띄어쓰기 · 초성 규칙 (shared/lib/search)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) // 최근 만든 것이 1번. 수정은 자리 유지
   const sliced = pageSlice(hit, page, PAGE_SIZE) // 지워서 쪽이 줄면 마지막 쪽으로
   const rows: FaqRow[] = sliced.rows.map((faq, i) => ({
@@ -52,6 +49,10 @@ export function useFaqList() {
 
   return {
     q,
+    suggestions: suggest(
+      inCategory.map((f) => f.question),
+      q,
+    ), // 지금 분류의 질문 중 맞는 것
     setQ: (v: string) => {
       set({ q: v })
       setOpenId(null)

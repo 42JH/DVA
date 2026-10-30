@@ -1,4 +1,6 @@
 // 관리자 Access Token 보관 (명세서 1.4: 자동 갱신 없음 — 만료되면 다시 로그인)
+import { clearRecentSearches } from '@/shared/lib/recentSearches'
+
 const KEY = 'dva.accessToken'
 
 /** AUTH-01 응답 data 그대로 */
@@ -23,4 +25,8 @@ export function getToken(): string | null {
 export const setToken = (token: AccessToken): void =>
   localStorage.setItem(KEY, JSON.stringify(token))
 
-export const clearToken = (): void => localStorage.removeItem(KEY)
+/** 세션이 끝나는 모든 길(로그아웃 · 401 · 만료)이 여기를 지남 → 최근 검색어도 같이 지움 (다음 사람에게 안 보이게) */
+export const clearToken = (): void => {
+  localStorage.removeItem(KEY)
+  clearRecentSearches()
+}

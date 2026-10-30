@@ -81,6 +81,7 @@ export function CallListPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          suggestions={vm.suggestions}
           placeholder="이름 · 전화번호"
           className="min-w-0 flex-1"
         />

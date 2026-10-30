@@ -27,7 +27,7 @@ export async function fetchMe(signal?: AbortSignal): Promise<AdminMe> {
   return (await api.get<ApiItem<AdminMe>>('/auth/me', { signal })).data
 }
 
-/** AUTH-02 — 응답 성공 · 실패와 관계없이 로컬 토큰은 지움 (명세서 p10) */
+/** AUTH-02 — 응답 성공 · 실패와 관계없이 로컬 토큰은 지움 (명세서 p10). 최근 검색어도 clearToken이 같이 지움 */
 export async function logout(): Promise<void> {
   try {
     await api.post('/auth/logout')

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageSlice } from '@/shared/api/paging'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
   deleteUnanswered,
@@ -31,16 +32,15 @@ export function useUnansweredList(pageSize = PAGE_SIZE) {
   const [modal, setModal] = useState<Modal>(null)
   const list = useQuery(unansweredQueries.list())
 
-  const needle = params.q.trim().toLowerCase()
-  const digits = params.q.replace(/\D/g, '') // '010-1458' · '01014582209' 둘 다 찾게
+  const q = params.q
+  const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
   const call = params.call ? Number(params.call) : null
   const ofCall = (list.data ?? []).filter((u) => call === null || u.callSessionSeq === call)
   const hit = ofCall
     .filter(
       (u) =>
-        !needle ||
-        u.question.toLowerCase().includes(needle) ||
-        u.customerName.toLowerCase().includes(needle) ||
+        matchKo(u.question, q) ||
+        matchKo(u.customerName, q) ||
         (digits !== '' && u.callerNumber.includes(digits)),
     )
     .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
@@ -71,8 +71,12 @@ export function useUnansweredList(pageSize = PAGE_SIZE) {
   })
 
   return {
-    q: params.q,
+    q,
     setQ: (v: string) => set({ q: v }),
+    suggestions: suggest(
+      [...ofCall.map((u) => u.question), ...ofCall.map((u) => u.customerName)],
+      q,
+    ),
     callChips, // 적용된 필터 줄 (06에서 왔을 때만)
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     rows,
