@@ -68,6 +68,7 @@ class ListenerConfig(_Strict):
     max_heard_chars: int = Field(ge=50, le=2000)
     max_agent_chars: int = Field(ge=0, le=2000)
     max_choices: int = Field(ge=2, le=100)
+    record_heard: bool = False
 
 
 class AddressConfig(_Strict):

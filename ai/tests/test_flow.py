@@ -558,6 +558,16 @@ def test_unhandled_request_offers_handoff_and_decline_returns():
     assert call.refer_requested.is_set() and "잠시만 기다려" in engine.next_text(call)
 
 
+def test_other_talk_during_handoff_offer_returns_instead_of_repeating():
+    """연결 제안에 답하지 않고 다른 말을 하면 거절로 보고 돌아간다(모든 말에 제안을 되풀이하지 않게)."""
+    call = make_call(new_db())
+    run(apply_answer(call, "none", "help"))
+    assert call.flow.stage == "handoff"
+    run(apply_answer(call, "none", "none"))  # 예: 제안을 무시하고 주소를 말함
+    assert call.flow.stage == "collecting" and "상담원" not in engine.next_text(call)
+    assert not call.refer_requested.is_set()
+
+
 # --- 말하기: PoC 수준의 진행 안내 ---
 
 def test_caller_number_yes_is_recorded_by_server():

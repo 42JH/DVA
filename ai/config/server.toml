@@ -91,6 +91,9 @@ max_heard_chars = 400
 max_agent_chars = 200
 # 저장된 배송지를 선택지로 넘길 때 최대 개수
 max_choices = 30
+# 음성 모델이 위임하지 않은 고객 말을 서버가 백엔드에 직접 넘길지(listener.record_heard).
+# 끔: 2026-10-29 통화에서 위임된 FAQ 응답 중에 서버 요청이 끼어들어 답이 돌아오지 않고 상담원이 멈췄다(docs/WORKLOG.md)
+record_heard = false
 
 [rag]
 # large 통합 Q+A → Kiwi BM25 + 벡터 RRF → Qwen Top5 → 원문 Top3
