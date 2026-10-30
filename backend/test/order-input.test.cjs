@@ -130,7 +130,7 @@ test('order updates reject missing changes, duplicate details, invalid fields an
       { clientComment: null },
       { smallBoxCount: null },
       { smallBoxCount: -1 },
-      { notifiedPrice: 3500 },
+      { notifiedPrice: 0 },
       { parcelPosition: 1 },
     ].map((parcel) => ({ expectedVersion: 1, parcels: [parcel] })),
     {
@@ -291,7 +291,7 @@ test('order inputs reject invalid types, nulls, ranges, nested arrays and extra 
     { customerSeq: 31, parcels: [{ documentCount: 1.5 }] },
     { customerSeq: 31, parcels: [{ documentCount: '1' }] },
     { customerSeq: 31, parcels: [{ itemPrice: Number.MAX_SAFE_INTEGER + 1 }] },
-    { customerSeq: 31, parcels: [{ notifiedPrice: 1 }] },
+    { customerSeq: 31, parcels: [{ notifiedPrice: 0 }] },
     { customerSeq: 31, parcels: [{ origin: { unexpected: true } }] },
     { customerSeq: 31, status: 'ACCEPTED' },
   ];

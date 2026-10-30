@@ -120,7 +120,7 @@ try {
     paused.contactPoints[0].receivers[0].disableResolveMessage,
     true,
   );
-  assert.equal(checks.length, 7);
+  assert.equal(checks.length, 6);
   for (const uid of ["backend_down", "database_down", "nginx_down"])
     assert.equal(checks.find((row) => row[0] === uid)[3], "1m");
   assert.throws(() => resources("http://example.invalid/hooks/test"));
@@ -432,7 +432,7 @@ try {
   copy(alerting + "/.", grafana, "/etc/grafana/provisioning/alerting");
   start(grafana);
   await until(
-    "Grafana provisions dashboard, sources and seven alert rules",
+    "Grafana provisions dashboard, sources and six alert rules",
     () => {
       if (get("http://grafana:3000/api/health").status !== 200) return false;
       const rules = get(
@@ -441,7 +441,7 @@ try {
       );
       return (
         rules.status === 200 &&
-        JSON.parse(rules.text).length === 7 &&
+        JSON.parse(rules.text).length === 6 &&
         get("http://grafana:3000/api/dashboards/uid/dva-operations", true)
           .status === 200
       );
@@ -490,9 +490,9 @@ try {
     inside(
       `const r=await fetch('http://localhost:3000/control/state',{method:'POST',body:${JSON.stringify(JSON.stringify(body))}});return r.status;`,
     );
-  states({ review: 1 });
+  states({ failed: 1 });
   await until(
-    "HTTP success with REVIEW_REQUIRED produces a Mattermost-compatible alert",
+    "HTTP success with SUBMISSION_FAILED produces a Mattermost-compatible alert",
     () => {
       const messages = JSON.parse(
         get("http://localhost:3000/control/messages").text,
@@ -500,7 +500,7 @@ try {
       return messages.some(
         (message) =>
           typeof message.text === "string" &&
-          message.text.includes("submission_review_required"),
+          message.text.includes("submission_failed"),
       );
     },
     100,
@@ -530,7 +530,7 @@ try {
   );
   assert.equal(contacts[0].disableResolveMessage, true);
   const beforeResolved = messages.length;
-  states({ review: 0, db: 0 });
+  states({ failed: 0, db: 0 });
   await until(
     "DB outage enters pending state before the one-minute threshold",
     () => {
@@ -560,7 +560,7 @@ try {
   );
   assert.equal(
     finalMessages.filter((message) =>
-      message.text.includes("submission_review_required"),
+      message.text.includes("submission_failed"),
     ).length,
     1,
   );

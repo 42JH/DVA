@@ -21,11 +21,41 @@ export class CreatedOrderDto {
   version!: number;
 }
 
+export class OrderPaymentRequestDto {
+  @ApiProperty({ format: 'uuid', description: '현재 유효한 내부 결제 요청 식별자.' })
+  paymentRequestId!: string;
+  @ApiProperty({ minimum: 1, description: '이 요청의 결제 금액(원).' }) amount!: number;
+  @ApiProperty({
+    format: 'date-time',
+    description: '최초 결제 대기 기한. 부분 취소로 연장하지 않습니다.',
+  })
+  expiresAt!: string;
+}
+
 export class OrderResultDto extends CreatedOrderDto {
+  @ApiProperty({
+    type: OrderPaymentRequestDto,
+    nullable: true,
+    description: '현재 미완료·미만료 결제 요청. 그 외 null.',
+  })
+  paymentRequest!: OrderPaymentRequestDto | null;
+  @ApiProperty({
+    description: '최초 결제 대기 만료 시각. 부분 취소로 연장하지 않습니다.',
+    type: String,
+    nullable: true,
+    format: 'date-time',
+  })
+  paymentDueAt!: string | null;
+  @ApiProperty({
+    description: '취소되지 않은 상세의 결제 금액(원). 미완료 수집 중에는 null.',
+    type: Number,
+    nullable: true,
+  })
+  totalAmount!: number | null;
   @ApiProperty({
     enum: ORDER_STATUSES,
     description:
-      'ACCEPTED만 디버 접수 성공. SUBMITTING은 처리 중, AUTH_FAILED·REVIEW_REQUIRED는 성공으로 안내하지 않습니다.',
+      'notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 디버 접수 실패. 접수 성공은 ACCEPTED만 안내합니다.',
   })
   status!: OrderStatus;
 
@@ -46,6 +76,26 @@ export class OrderResultDto extends CreatedOrderDto {
 
 export class OrderSummaryDto {
   @ApiProperty({
+    description: '최초 결제 대기 만료 시각. 부분 취소로 연장하지 않습니다.',
+    type: String,
+    nullable: true,
+    format: 'date-time',
+  })
+  paymentDueAt!: string | null;
+  @ApiProperty({
+    description: '결제 완료 시각. 결제 전에는 null.',
+    type: String,
+    nullable: true,
+    format: 'date-time',
+  })
+  paidAt!: string | null;
+  @ApiProperty({
+    description: '현재 결제 대상 금액(원). 미완료 수집 중에는 null.',
+    type: Number,
+    nullable: true,
+  })
+  totalAmount!: number | null;
+  @ApiProperty({
     enum: ORDER_CREATION_SOURCES,
     description: '접수 경로. AI: AI 상담, ADMIN: 관리자 수기, UNKNOWN: 기존 출처 미확인.',
   })
@@ -63,7 +113,7 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 인증 실패, REVIEW_REQUIRED 확인 필요, CANCELLED 전체 취소, EXPIRED 만료. 일부 상세만 취소하면 기존 상태 유지.',
+      '주문 상태: COLLECTING 수집 중, notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 디버 접수 실패, CANCELLED 취소됨. 일부 상세만 취소하면 결제 대기 상태 유지.',
     enum: ORDER_STATUSES,
     example: 'COLLECTING',
   })
@@ -71,7 +121,7 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      'credit: 공통 정산, groupBilling: 기업 그룹카드, billing: 개인카드. cat은 과거 저장값으로 조회만 가능하며 신규 입력·접수는 불가.',
+      'credit: 월결제, groupBilling: 부서 그룹결제, billing: 개인 카드 결제. cat은 과거 저장값으로 조회만 가능하며 신규 입력·접수는 불가.',
     enum: ['cat', 'billing', 'credit', 'groupBilling'],
   })
   paymentMethodType!: 'cat' | 'billing' | 'credit' | 'groupBilling';
@@ -179,8 +229,14 @@ export class OrderParcelDto {
   @ApiProperty({ description: '배송 요청 사항. 미입력 시 빈 문자열.' })
   clientComment!: string;
 
-  @ApiProperty({ description: '상세별 안내 배송비(원). 다중 물품 총액이 아닙니다.', enum: [3500] })
-  notifiedPrice!: number;
+  @ApiProperty({
+    description: '상세별 배송비(원). 취소 후에도 원래 금액 보존. 미수집 시 null.',
+    minimum: 1,
+    maximum: 2147483647,
+    type: Number,
+    nullable: true,
+  })
+  notifiedPrice!: number | null;
 
   @ApiProperty({
     description: '물품 가액(원). 미수집 시 null.',
@@ -193,6 +249,12 @@ export class OrderParcelDto {
 }
 
 export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as const) {
+  @ApiProperty({
+    type: OrderPaymentRequestDto,
+    nullable: true,
+    description: '현재 미완료·미만료 결제 요청. 그 외 null.',
+  })
+  paymentRequest!: OrderPaymentRequestDto | null;
   @ApiProperty({
     description: '현재 주문 버전. 수정·최종 접수의 expectedVersion으로 사용합니다.',
     minimum: 1,
@@ -207,7 +269,7 @@ export class OrderDetailDto extends OmitType(OrderSummaryDto, ['parcelCount'] as
   parcelNo!: string | null;
 
   @ApiProperty({
-    description: '디버 접수 확인 시각. 접수 전에는 null이며 접수 후 취소해도 보존합니다.',
+    description: '디버 접수 확인 시각. 접수 전에는 null.',
     type: String,
     format: 'date-time',
     nullable: true,

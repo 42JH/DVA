@@ -106,6 +106,26 @@ check_membership_compatibility() {
     }
 }
 
+read_billing_schema() {
+    local db_container state
+    db_container="$(database_container)" || return 1
+    state="$("${docker_cmd[@]}" exec "$db_container" sh -c \
+        'exec psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh \
+        "SELECT to_regclass('public.departments') IS NOT NULL" </dev/null)" || return 1
+    [[ "$state" == t || "$state" == f ]] || return 1
+    printf '%s' "$state"
+}
+
+check_billing_compatibility() {
+    local directory="$1" state
+    [[ -f "$directory/backend/migrations/$billing_migration" ]] && return 0
+    state="$(read_billing_schema)" || return 1
+    [[ "$state" == f ]] || {
+        echo 'Deployment/restore blocked: the target app does not support departments and paid order states. Repair forward or restore the backup during maintenance.' >&2
+        return 1
+    }
+}
+
 restore_previous() {
     local state
     if [[ -z "$old_version" || "$old_version" == "$version" ]]; then
@@ -119,6 +139,7 @@ restore_previous() {
         return 1
     fi
     check_membership_compatibility "$releases_dir/$old_version" || return 1
+    check_billing_compatibility "$releases_dir/$old_version" || return 1
     echo "Restoring previous running release: $old_version" >&2
     if apply_release "$releases_dir/$old_version"; then
         echo 'Previous release restored. Deployment still reports failure.' >&2
@@ -140,6 +161,7 @@ read_version() {
 old_version="$(read_version "$current_file" || true)"
 creation_migration=008-simplify-creation-requests.sql
 membership_migration=010-remove-membership-write-requests.sql
+billing_migration=019-organization-monthly-billing.sql
 backup_required=false
 case "${1:-}" in
     '') ;;
@@ -164,6 +186,8 @@ if [[ "$schema_state" == t && ! -f "$release_dir/backend/migrations/$creation_mi
     exit 1
 fi
 check_membership_compatibility "$release_dir" || exit 1
+check_billing_compatibility "$release_dir" || exit 1
+billing_state="$(read_billing_schema)" || { echo 'Cannot verify billing schema. Deployment stopped.' >&2; exit 1; }
 membership_state=f
 if [[ -f "$release_dir/backend/migrations/$membership_migration" ]]; then
     membership_state="$(read_membership_schema)" || { echo 'Cannot verify membership schema. Deployment stopped.' >&2; exit 1; }
@@ -171,7 +195,8 @@ fi
 
 if [[ "${1:-}" != --rollback ]]; then
     if [[ "$schema_state" == f && -f "$release_dir/backend/migrations/$creation_migration" ]] ||
-       [[ "$membership_state" == t && -f "$release_dir/backend/migrations/$membership_migration" ]]; then
+       [[ "$membership_state" == t && -f "$release_dir/backend/migrations/$membership_migration" ]] ||
+       [[ "$billing_state" == f && -f "$release_dir/backend/migrations/$billing_migration" ]]; then
         # Quiesce old writers before the backup and breaking schema conversion.
         compose "$release_dir" stop backend
         backup_required=true

@@ -4,10 +4,10 @@ import { DatabaseService } from '../database/database.service';
 import { AuditEvent, AuditLog, AuditResult } from './audit.types';
 import { AuditQueryDto } from './dto/audit-query.dto';
 
-// shortcut: metadata는 공개 필드 정책이 정해지면 허용 필드만 선택해 반환한다.
 const AUDIT_SELECT = `SELECT
         audit_log_seq AS "auditLogSeq",
         actor_type AS "actorType",
+        CASE WHEN actor_type='ADMIN' THEN '운영자' ELSE actor_type END AS "actorLabel",
         actor_seq AS "actorSeq",
         actor_name AS "actorName",
         action,
@@ -16,7 +16,10 @@ const AUDIT_SELECT = `SELECT
         target_admin_name AS "targetAdminName",
         request_id AS "requestId",
         result,
-        '{}'::jsonb AS metadata,
+        jsonb_strip_nulls(jsonb_build_object(
+          'amountBefore',metadata->'amountBefore','amountAfter',metadata->'amountAfter',
+          'orderParcelSeqs',metadata->'orderParcelSeqs','billingMonth',metadata->'billingMonth',
+          'paymentMethodType',metadata->'paymentMethodType','reason',metadata->'reason')) AS metadata,
         occurred_at AS "occurredAt"
       FROM audit_logs`;
 
@@ -43,7 +46,7 @@ export class AuditRepository {
     await (client ?? this.database.pool).query(
       `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata,
          actor_name,target_admin_name)
-       VALUES($1,$2,$3,$4,$5,$6,$7,'{}',
+       VALUES($1,$2,$3,$4,$5,$6,$7,$9::jsonb,
          CASE WHEN $1='AI' THEN 'AI' WHEN $1='ADMIN' THEN COALESCE($8::text,
            (SELECT name FROM admin_users WHERE admin_user_seq=$2),
            (SELECT target_admin_name FROM audit_logs
@@ -65,6 +68,7 @@ export class AuditRepository {
         event.requestId,
         result,
         event.actorName ?? null,
+        JSON.stringify(event.metadata ?? {}),
       ],
     );
   }
@@ -72,6 +76,10 @@ export class AuditRepository {
   async findMany(query: AuditQueryDto): Promise<AuditLog[]> {
     const conditions: string[] = [];
     const values: Array<string | number> = [];
+    if (query.actorType !== undefined) {
+      values.push(query.actorType);
+      conditions.push(`actor_type = $${values.length}`);
+    }
 
     if (query.actorSeq !== undefined) {
       values.push(query.actorSeq);

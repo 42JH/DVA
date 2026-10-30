@@ -1,6 +1,6 @@
 # 주문 수집 정보 수정 — ORD-04
 
-관련 Jira: [S15P31D109-61](https://ssafy.atlassian.net/browse/S15P31D109-61). 기준은 API 명세이며, `COLLECTING` 주문의 정보를 같은 `orderSeq`에 저장한다. 디버 전송·접수 후 수정·취소는 이 API의 범위가 아니다.
+관련 Jira: [S15P31D109-61](https://ssafy.atlassian.net/browse/S15P31D109-61). 기준은 API 명세이며, 결제 대기 이후에는 수정할 수 없으며 `COLLECTING` 주문의 정보를 같은 `orderSeq`에 저장한다. 디버 전송·접수 후 수정·취소는 이 API의 범위가 아니다.
 
 새 AI 상담은 중간에 이 API를 반복 호출하지 않고 수집 완료·중도 종료·취소 결과를 [POST /api/orders](orders.md)에 한 번 전달한다. 이 PATCH는 기존 미완료 주문의 보완 경로로 유지한다.
 
@@ -34,7 +34,9 @@ call_session_seq: 7
 | 필드 | 의미 |
 | --- | --- |
 | expectedVersion | 필수. ORD-03 또는 직전 저장 응답의 실제 version |
-| paymentMethodType | credit(공통 정산) / groupBilling(기업 그룹카드) / billing(개인카드). 생략하면 유지. 자격은 [최종 접수](order-submit.md) 시 검증 |
+| paymentMethodType | credit(월결제) / groupBilling(부서 그룹결제) / billing(개인·기업 개인 카드). 생략하면 유지. 자격은 [최종 접수](order-submit.md) 시 검증 |
+| totalAmount | 전체 결제 대상 합계. 생략 유지, null은 미확인으로 비우기. 최종 확정 시 미취소 상세 배송비 합계와 일치해야 함 |
+| parcels[].notifiedPrice | 상세 배송비. 생략 유지, null은 미확인. 최종 확정 시 양의 정수 필수 |
 | pickupRequestedAt | 시간대를 포함한 ISO 8601. 생략하면 유지, null이면 비우기 |
 | parcels[].orderParcelSeq | 있으면 해당 주문의 기존 상세 수정, 없으면 마지막 순번 뒤에 추가 |
 | parcels[].origin / destination | 제공한 주소 하위 필드만 변경. 생략 유지, nullable 하위 필드의 null은 비우기 |
@@ -44,8 +46,8 @@ call_session_seq: 7
 | itemPrice | 0~9007199254740991 정수 또는 null. 기존 상세는 생략 유지, 새 상세는 기본 null |
 
 - `expectedVersion` 외 변경 필드가 하나 이상 필요하다. 빈 배열만으로는 저장하지 않는다. 배열의 각 상세에도 변경값이 필요하며, 상세 번호·빈 주소 객체만 있는 항목은 400이다.
-- 주소 객체 자체의 null, 중복 상세 번호, 변경 불가 필드(customerSeq·status·parcelPosition·notifiedPrice 등)는 400이다. 타 주문의 상세와 없는 상세는 모두 404다.
-- 생략한 상세는 삭제하지 않는다. 새 상세의 순번은 현재 최대 순번+1이며 기본 안내 요금은 3500원이다.
+- 주소 객체 자체의 null, 중복 상세 번호, 변경 불가 필드(customerSeq·status·parcelPosition 등)는 400이다. 타 주문의 상세와 없는 상세는 모두 404다.
+- 생략한 상세는 삭제하지 않는다. 새 상세의 순번은 현재 최대 순번+1이며 새 상세 배송비 기본값은 null이다.
 - 수정 대상 상세의 PIN 접근 권한을 다시 확인한다. 권한이 사라졌다면 `originPin: null`로 참조를 해제할 수 있다. 주문 주소 수정은 원본 PIN에 반영되지 않는다.
 - 주문에 활성 고객이 연결되어 있어야 한다. 결제 자격·입력 완전성·최종 동의·디버 접수는 ORD-06에서 다룬다.
 

@@ -15,10 +15,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>19 THEN RAISE EXCEPTION 'Expected 19 public tables, got %',n; END IF;
+ IF n<>23 THEN RAISE EXCEPTION 'Expected 23 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>14 THEN RAISE EXCEPTION 'Expected 14 foreign keys, got %',n; END IF;
+ IF n<>22 THEN RAISE EXCEPTION 'Expected 22 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
@@ -28,6 +28,7 @@ END $$;
 
 DO $$
 DECLARE customer_id integer; other_customer integer; company_id integer; other_company integer;
+ department_id integer; other_department integer;
  pin_id integer; order_id integer; parcel_id integer; call_id integer; admin_id integer;
  shipment_id integer; persona_id integer; prompt_id integer; faq_id integer;
  current_version integer; before_time timestamptz;
@@ -37,15 +38,18 @@ BEGIN
  INSERT INTO customers(name,phone_number,status) VALUES('Other','01000000002','ACTIVE') RETURNING customer_seq INTO other_customer;
  INSERT INTO organizations(name,status) VALUES('Company','ACTIVE') RETURNING organization_seq INTO company_id;
  INSERT INTO organizations(name,status) VALUES('Other company','ACTIVE') RETURNING organization_seq INTO other_company;
+ INSERT INTO departments(organization_seq,name) VALUES(company_id,'검증팀') RETURNING department_seq INTO department_id;
+ INSERT INTO departments(organization_seq,name) VALUES(other_company,'다른 검증팀') RETURNING department_seq INTO other_department;
  PERFORM pg_temp.expect_error($q$INSERT INTO customers(name,phone_number,status) VALUES('X','01000000003','SUSPENDED')$q$,'23514');
  PERFORM pg_temp.expect_error($q$INSERT INTO organizations(name,status) VALUES('X','SUSPENDED')$q$,'23514');
- INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status)
- VALUES(customer_id,company_id,'001A','MEMBER','ACTIVE');
- PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES(%s,%s,%L,%L,%L)',other_customer,company_id,'001A','MEMBER','ACTIVE'),'23505');
- PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES(%s,%s,%L,%L,%L)',other_customer,other_company,'  ','MEMBER','ACTIVE'),'23514');
- PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES(%s,%s,NULL,%L,%L)',other_customer,other_company,'MEMBER','ACTIVE'),'23502');
- INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status)
- VALUES(other_customer,other_company,'001A','ORG_ADMIN','ACTIVE');
+ INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq)
+ VALUES(customer_id,company_id,'001A','MEMBER','ACTIVE',department_id);
+ PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq) VALUES(%s,%s,%L,%L,%L,%s)',other_customer,company_id,'001A','MEMBER','ACTIVE',department_id),'23505');
+ PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq) VALUES(%s,%s,%L,%L,%L,%s)',other_customer,other_company,'  ','MEMBER','ACTIVE',other_department),'23514');
+ PERFORM pg_temp.expect_error(format('INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq) VALUES(%s,%s,NULL,%L,%L,%s)',other_customer,other_company,'MEMBER','ACTIVE',other_department),'23502');
+ INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status,department_seq)
+ VALUES(other_customer,other_company,'001A','ORG_ADMIN','ACTIVE',other_department);
+ PERFORM pg_temp.expect_error(format('UPDATE memberships SET department_seq=%s WHERE customer_seq=%s',other_department,customer_id),'23503');
 
  IF valid_parcel_address('{}'::jsonb) OR valid_parcel_address(jsonb_set(address,'{latitude}','91'))
   OR valid_parcel_address(jsonb_set(address,'{phoneNumber}','"bad"')) THEN

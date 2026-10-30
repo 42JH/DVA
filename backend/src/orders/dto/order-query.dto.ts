@@ -42,7 +42,7 @@ export class OrderQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     description:
-      '주문 상태: COLLECTING 미완료, SUBMITTING 접수 중, ACCEPTED 접수 완료, AUTH_FAILED 디버 인증 실패, REVIEW_REQUIRED 접수 확인 필요, CANCELLED 취소, EXPIRED 만료.',
+      '주문 상태: COLLECTING 수집 중, notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 디버 접수 실패, CANCELLED 취소됨.',
     enum: ORDER_STATUSES,
     example: 'COLLECTING',
   })

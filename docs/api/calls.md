@@ -18,6 +18,7 @@
 | 선택 query | 의미 |
 | --- | --- |
 | `orderSeq` | 연결된 주문 번호 정확히 일치 |
+| `orderStatus` | 연결된 주문의 COLLECTING / notPaid / PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED / CANCELLED |
 | `callerPhoneNumber` | 저장된 발신번호 정확히 일치. 숫자와 맨 앞의 `+` 허용 |
 | `from`, `to` | 실제 `started_at` 기준. from 포함·to 미포함, 시간대 필수 |
 | `endReason` | 저장된 종료 사유 정확히 일치. 종료 사유 코드 목록은 미확정 |
@@ -34,6 +35,7 @@
 | `callSessionSeq`, `providerCallId` | 내부 통화 번호와 OpenAI 통화 식별자 |
 | `callerPhoneNumber` | 발신번호, 미확인 시 null |
 | `orderSeq` | 연결 주문 번호, 없으면 null. 주문 내용은 기존 주문 상세 API에서 조회 |
+| `orderStatus`, `orderTotalAmount` | 연결 주문의 현재 결제·접수 상태와 미취소 상세 합계. 주문 없으면 null |
 | `startedAt`, `endedAt` | 실제 통화 시각. 미수집 시 null |
 | `endReason` | 저장된 종료 사유. 미확인 시 null |
 | `handoff` | 연결 기록이 없으면 null. 있으면 아래 연결 정보 |
@@ -41,6 +43,8 @@
 `handoff`는 `handoffRequestSeq`, `reason`, `status`, `assignedAdminUserSeq`, `summaryText`,
 `requestedAt`을 반환한다. REQUESTED는 요청 기록이며 연결 성공이 아니다.
 CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연결 완료 시각으로 대신하지 않는다.
+
+통화·상담 상태에 연결된 주문의 결제 대기·디버 접수·취소 상태를 함께 제공한다. 저장된 endReason은 바꾸지 않는다. 결제 상태는 [주문 결제 계약](order-billing.md)을 따른다.
 
 빈 목록은 `200 { "data": [], "hasNext": false }`다.
 잘못된 날짜·역전된 기간·중복 query·지원하지 않는 필드는 `400 INVALID_REQUEST`다.

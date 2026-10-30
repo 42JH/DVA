@@ -58,13 +58,12 @@ Grafana가 조회한 수치가 0보다 크면 해당 규칙이 작동한다. 서
 | BE 중단/응답 실패 | `/health` HTTP 프로브 실패가 1분 지속 |
 | DB 연결 실패 | BE 수집은 정상이고 DB 연결 실패가 1분 지속 |
 | Nginx 중단/응답 실패 | Nginx HTTP 프로브 실패가 1분 지속 |
-| 디버 인증 거절 | `AUTH_FAILED` 상태인 주문 존재 |
-| 접수 결과 불명 | `REVIEW_REQUIRED` 상태인 주문 존재 |
+| 디버 접수 실패 | `SUBMISSION_FAILED` 상태인 주문 존재 |
 | 접수 지연 | `SUBMITTING`이며 최종 변경 시각에서 1분 경과 |
 | 접수 API 서버 오류 | 주문 생성·수기 생성·최종 접수 API의 최근 5분 5xx |
 
 일반 입력 오류·4xx·고객 취소·CPU/메모리/디스크 사용량은 Mattermost 알림 대상이 아니다.
-`AUTH_FAILED`·`REVIEW_REQUIRED`는 HTTP 201일 때도 감지한다. 주문 지표는 DB를 읽기만 하며
+`SUBMISSION_FAILED`는 HTTP 201일 때도 감지한다. 주문 지표는 DB를 읽기만 하며
 관측기가 주문을 취소하거나 접수 상태를 변경하거나 디버 요청을 재전송하지 않는다.
 상태별 주문 수는 과거 주문도 포함하므로 첫 적용 때 기존 미해결 주문으로 알림이 발생할 수 있다.
 이 알림은 해당 상태의 주문이 남아 있는 동안 지속된다. 해결 절차가 없는 과거 테스트 주문은
@@ -134,7 +133,7 @@ sudo bash /opt/dva-observability/deploy.sh /srv/dva-observability/settings
 1. 비공개 채널에서 서비스·장애 종류·발생 시각을 확인한다.
 2. Grafana `DVA BE 운영 상태`에서 같은 시간대 상태·주문 지표·로그를 확인한다. 정상과 수집 안 됨을 구분한다.
 3. BE 요청 ID를 필터에 입력해 HTTP 결과와 `dver_submission`, `order_submission_result`를 연결한다.
-   REVIEW_REQUIRED나 저장 실패는 외부 접수 성공 가능성이 있으므로 자동 재접수하지 않는다.
+   SUBMISSION_FAILED는 관리자 재접수로 처리하고 자동 재전송하지 않는다. 결과 저장 실패로 SUBMITTING이 남으면 기존 주문·생성 키로 상태를 확인한다.
 4. DB 장애라면 DB 컨테이너 상태와 연결 설정을 확인한다. SQLSTATE `08...`는 연결 계열, `23...`는 제약 계열이다.
    원본 DB 오류를 조회해야 한다면 제한된 운영 계정으로 확인하고 값이 포함될 수 있음을 고려한다.
 5. 로그만 안 보이면 Alloy/Loki 상태, 앱 Compose project 이름, Docker 읽기 중계기, 저장 공간을 확인한다.

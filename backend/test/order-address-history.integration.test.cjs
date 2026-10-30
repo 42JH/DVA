@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -191,11 +192,11 @@ test('only ACCEPTED orders yield snapshots, even when no PIN was saved', async (
   const accepted = await order(f);
   for (const status of [
     'COLLECTING',
+    'notPaid',
+    'PAID',
     'SUBMITTING',
-    'AUTH_FAILED',
-    'REVIEW_REQUIRED',
+    'SUBMISSION_FAILED',
     'CANCELLED',
-    'EXPIRED',
   ])
     await order(f, { status });
   const body = await result(await request(f.customer, { direction: 'DESTINATION' }, f.ai));
@@ -350,11 +351,11 @@ test('AI cannot access another customer history, even within the same company', 
     )
   ).rows[0].organization_seq;
   for (const c of [f, other])
-    await pool.query(
-      `INSERT INTO memberships(customer_seq,organization_seq,employee_no,status)
-    VALUES($1,$2,$3,'ACTIVE')`,
-      [c.customer, org, randomUUID()],
-    );
+    await testMembership(pool, {
+      customerSeq: c.customer,
+      organizationSeq: org,
+      employeeNo: randomUUID(),
+    });
   await error(await request(other.customer, undefined, f.ai), 403, 'FORBIDDEN');
   assert.equal((await result(await request(f.customer, undefined, f.ai))).data.length, 1);
 });

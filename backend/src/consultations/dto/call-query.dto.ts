@@ -3,8 +3,16 @@ import { Transform, TransformFnParams } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
+import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
 
 export class CallQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    enum: ORDER_STATUSES,
+    description: '연결 주문의 현재 결제·접수 상태로 검색.',
+  })
+  @IsOptional()
+  @IsIn(ORDER_STATUSES)
+  orderStatus?: OrderStatus;
   @ApiPropertyOptional({
     description: '연결된 주문 번호(orderSeq).',
     type: Number,

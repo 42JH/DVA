@@ -24,16 +24,18 @@ Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 
 
 | 메서드·경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
-| POST /api/customers | `{ name, phoneNumber }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
+| POST /api/customers | `{ name, phoneNumber, monthlyBillingEnabled? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
 | GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext }` |
 | GET /api/customers/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Customer, meta: { requestId } }` |
-| PATCH /api/customers/{id} | name 또는 관리자 전용 status 중 한 개 이상 | 204, 본문 없음 |
+| PATCH /api/customers/{id} | name 또는 관리자 전용 status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
-Customer는 `{ customerSeq, name, phoneNumber, status }`다. 주소록과 기업 소속을 포함하지 않는다.
+Customer는 `{ customerSeq, name, phoneNumber, status, monthlyBillingEnabled }`다. 주소록과 기업 소속을 포함하지 않는다.
 조회·오류의 Cache-Control은 공통 `no-store`를 따른다.
 
 이름은 앞뒤 공백을 제거하고 빈 문자열·null을 거절한다. 전화번호는 선행 0을 보존하는
 숫자 문자열이며 하이픈·공백·`+`·숫자 타입을 거절한다. 자동 국가번호 변환이나 하이픈 제거는 하지 않는다.
+monthlyBillingEnabled는 개인 월결제 자격이며 미입력은 false다. 생성 시 true 또는 자격 변경은 유효한 관리자만 허용한다. boolean 문자열·null은 거절하며 PATCH 생략은 기존 값을 유지한다. 기업 소속 고객의 월결제는 기업 자격을 사용한다.
+
 신규 고객 상태는 ACTIVE이며 등록 본문의 status 등 추가 필드는 400이다.
 PATCH의 phoneNumber, null, 빈 객체, 지원하지 않는 필드는 400이며 일부 필드만 저장하지 않는다.
 대상이 없으면 404다. 실제 삭제와 전화번호 변경 API는 제공하지 않는다.

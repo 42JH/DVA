@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsIn, IsInt, IsNotEmpty, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { CUSTOMER_STATUSES, CustomerStatus } from '../customers.types';
 
@@ -8,6 +18,13 @@ const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 export class CreateCustomerDto {
+  @ApiPropertyOptional({
+    description: '개인 월결제 자격. 관리자만 true로 설정 가능. 미입력 시 false.',
+    default: false,
+  })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
   @ApiProperty({ description: '이름. 앞뒤 공백 제거, 빈 이름 불가.' })
   @Transform(trim)
   @IsString()
@@ -24,6 +41,10 @@ export class CreateCustomerDto {
 }
 
 export class UpdateCustomerDto {
+  @ApiPropertyOptional({ description: '개인 월결제 자격. 관리자만 변경 가능. 생략 시 유지.' })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
   @ApiPropertyOptional({ description: '이름. null과 빈 이름 불가.' })
   @ValidateIf((_object, value) => value !== undefined)
   @Transform(trim)

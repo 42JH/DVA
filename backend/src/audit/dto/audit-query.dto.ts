@@ -2,13 +2,20 @@ import { Transform, TransformFnParams } from 'class-transformer';
 import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { AUDIT_RESULTS, AuditResult } from '../audit.types';
+import { AUDIT_RESULTS, AuditResult, AUDIT_ACTOR_TYPES, AuditActorType } from '../audit.types';
 
 function integer({ value }: TransformFnParams): unknown {
   return typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
 }
 
 export class AuditQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    enum: AUDIT_ACTOR_TYPES,
+    description: '담당 주체: AI, SYSTEM, ADMIN(운영자).',
+  })
+  @IsOptional()
+  @IsIn(AUDIT_ACTOR_TYPES)
+  actorType?: AuditActorType;
   @ApiPropertyOptional({
     description: '작업한 관리자 번호(adminUserSeq).',
     type: Number,

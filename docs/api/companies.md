@@ -30,17 +30,17 @@ AuthModule의 전역 Guard가 네 경로 모두에서 로그인·현재 계정 �
 | 메서드·경로 | 요청 | 성공 응답 |
 |---|---|---|
 | GET /api/companies | q, status, limit, offset | 200, `{ data: Organization[], hasNext }` |
-| POST /api/companies | `{ name }` | 201, `{ data: { organizationSeq }, meta: { requestId } }` |
+| POST /api/companies | `{ name, monthlyBillingEnabled? }` | 201, `{ data: { organizationSeq }, meta: { requestId } }` |
 | GET /api/companies/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Organization, meta: { requestId } }` |
-| PATCH /api/companies/{id} | name 또는 status 중 한 개 이상 | 204, 본문 없음 |
+| PATCH /api/companies/{id} | name·status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
-Organization은 `{ organizationSeq, name, status }`다. 내부 주소록·구성원 정보는 조회하지 않는다.
+Organization은 `{ organizationSeq, name, status, monthlyBillingEnabled }`다. 내부 주소록·구성원 정보는 조회하지 않는다.
 삭제는 DELETE 대신 PATCH의 INACTIVE 상태 변경으로 처리한다. ACTIVE로 다시 변경할 수 있다.
 목록은 기업 번호 내림차순, limit 기본 20·최대 100, offset 기본 0이다. 목록에 meta·page·총건수를 추가하지 않는다.
 q는 대소문자를 구분하지 않는 기업명 부분 검색이며 `%`, `_`도 검색어 자체로 취급한다.
 공백만 있는 q는 전체 조회다. status는 ACTIVE 또는 INACTIVE만 허용한다.
 
-등록 본문에는 name만 허용한다. status·주소·관리자 ID 등 추가 필드는 400이다.
+등록 본문에는 name과 선택 monthlyBillingEnabled를 허용한다. 기업 전체 월결제 자격은 boolean이며 신규 미입력은 false, PATCH 생략은 유지한다. 부서 그룹결제·구성원 배정은 [부서 API](departments.md), 월별 사용액은 [결제 계약](order-billing.md)을 따른다. status·주소·관리자 ID 등 추가 필드는 400이다.
 수정 본문에 null, 공백 기업명, 지원하지 않는 상태, 빈 객체를 전달하면 400이다.
 대상이 없으면 404이며, 나머지 오류도 기존 error/meta 공통 형식을 따른다.
 

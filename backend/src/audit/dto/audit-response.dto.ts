@@ -9,6 +9,11 @@ import {
 } from '../audit.types';
 
 export class AuditResponseDto implements AuditLog {
+  @ApiProperty({
+    enum: ['AI', 'SYSTEM', '운영자'],
+    description: '담당자 표시. 실제 운영자 이름·번호는 actorName·actorSeq로 확인.',
+  })
+  actorLabel!: 'AI' | 'SYSTEM' | '운영자';
   @ApiProperty({ description: '감사 기록 번호.' })
   auditLogSeq!: number;
 
@@ -69,7 +74,19 @@ export class AuditResponseDto implements AuditLog {
   @ApiProperty({
     type: 'object',
     additionalProperties: false,
-    description: '추가 정보. 현재는 빈 객체만 반환합니다.',
+    properties: {
+      amountBefore: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+      amountAfter: { type: 'integer', minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+      orderParcelSeqs: {
+        type: 'array',
+        items: { type: 'integer', minimum: 1, maximum: 2147483647 },
+      },
+      billingMonth: { type: 'string', pattern: '^\\d{4}-\\d{2}$' },
+      paymentMethodType: { type: 'string', enum: ['credit', 'groupBilling'] },
+      reason: { type: 'string', enum: ['PAYMENT_EXPIRED'] },
+    },
+    description:
+      '허용한 금액·대상 상세·청구 월·결제 방식·자동 만료 사유만 제공하며 그 외 정보는 제외합니다.',
     example: {},
   })
   metadata!: Record<string, unknown>;

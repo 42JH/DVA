@@ -36,10 +36,10 @@ END $$;
 SQL
 snapshot() {
  sql -Atc "SELECT jsonb_build_object(
-  'customers',(SELECT jsonb_agg(to_jsonb(c) ORDER BY customer_seq) FROM customers c),
-  'organizations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY organization_seq) FROM organizations o),
-  'memberships',(SELECT jsonb_agg(to_jsonb(m) ORDER BY membership_seq) FROM memberships m),
-  'orders',(SELECT jsonb_agg(to_jsonb(o)-'creation_source' ORDER BY order_seq) FROM orders o),
+  'customers',(SELECT jsonb_agg(to_jsonb(c)-'monthly_billing_enabled' ORDER BY customer_seq) FROM customers c),
+  'organizations',(SELECT jsonb_agg(to_jsonb(o)-'monthly_billing_enabled' ORDER BY organization_seq) FROM organizations o),
+  'memberships',(SELECT jsonb_agg(to_jsonb(m)-'department_seq' ORDER BY membership_seq) FROM memberships m),
+  'orders',(SELECT jsonb_agg(to_jsonb(o)-'creation_source'-'total_amount'-'payment_due_at'-'paid_at'-'billing_organization_seq'-'billing_department_seq' ORDER BY order_seq) FROM orders o),
   'parcels',(SELECT jsonb_agg(to_jsonb(p)-'status' ORDER BY order_parcel_seq) FROM order_parcels p),
   'calls',(SELECT jsonb_agg(to_jsonb(c)-'incoming_at' ORDER BY call_session_seq) FROM call_sessions c),
   'audits',(SELECT jsonb_agg(to_jsonb(a)-'actor_name'-'target_admin_name' ORDER BY audit_log_seq) FROM audit_logs a),
@@ -59,6 +59,10 @@ test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 8
 test "$(snapshot)" = "$BEFORE"
 
 BACKUP_DIR=$ROOT/membership-upgrade-backups
+sql <<'SQL'
+CREATE TABLE migration_department_assignments(customer_seq integer PRIMARY KEY,organization_seq integer NOT NULL,department_name text NOT NULL);
+INSERT INTO migration_department_assignments SELECT customer_seq,organization_seq,'이관 검증 부서' FROM memberships;
+SQL
 sh "$RUNNER" dva-db-129-check "$BACKUP_DIR"
 sql -f "$ROOT/infra/database/verify.sql"
 test "$(snapshot)" = "$BEFORE"
@@ -67,9 +71,9 @@ test "$(sql -Atc 'SELECT count(*) FROM call_sessions WHERE incoming_at IS NOT NU
 test "$(sql -Atc 'SELECT count(*) FROM pbx_webhooks.call_ended_events WHERE call_session_seq IS NOT NULL OR last_attempt_at IS NOT NULL')" = 0
 test "$(sql -Atc "SELECT count(*) FROM pg_namespace WHERE nspname='api_idempotency'")" = 0
 test "$(sql -Atc "SELECT count(*) FROM order_parcels WHERE status<>'ACTIVE'")" = 0
-test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 14
+test "$(sql -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 18
 test "$(sql -Atc "SELECT count(*) FROM audit_logs WHERE actor_name='fixture' AND target_admin_name IS NULL")" = 1
-test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql')")" = "$HISTORY_BEFORE"
+test "$(sql -Atc "SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a WHERE version NOT IN ('010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql')")" = "$HISTORY_BEFORE"
 test "$(sql -Atc "SELECT count(*) FROM db_migrations.applied_versions WHERE version IN ('009-membership-write-requests.sql','010-remove-membership-write-requests.sql')")" = 2
 HISTORY_AFTER=$(sql -Atc 'SELECT jsonb_agg(to_jsonb(a) ORDER BY version) FROM db_migrations.applied_versions a')
 sh "$RUNNER" --no-backup dva-db-129-check > /dev/null

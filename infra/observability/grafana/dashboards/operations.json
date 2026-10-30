@@ -215,7 +215,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "dva_orders_attention{status=~\"AUTH_FAILED|REVIEW_REQUIRED\"} and on(job,instance) (up{job=\"backend\"} == 1)",
+          "expr": "dva_orders_attention{status=~\"SUBMISSION_FAILED\"} and on(job,instance) (up{job=\"backend\"} == 1)",
           "legendFormat": "{{service}}{{status}}{{mode}}",
           "range": true,
           "instant": false
@@ -533,7 +533,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "AI 파이프라인과 서버 전체 중단은 이번 범위에서 제외합니다. 수집되지 않음은 정상/0건을 뜻하지 않습니다. REVIEW_REQUIRED는 접수 결과가 불명확한 상태입니다. 원본 오류·주소·전화번호는 기록하지 않습니다. 보관: 로그/지표 최대 7일(지표는 용량 제한에 따라 더 짧아질 수 있음)."
+        "content": "AI 파이프라인과 서버 전체 중단은 이번 범위에서 제외합니다. 수집되지 않음은 정상/0건을 뜻하지 않습니다. SUBMISSION_FAILED는 결제 완료 후 디버 접수에 실패한 상태이며 관리자 재접수로 처리합니다. 원본 오류·주소·전화번호는 기록하지 않습니다. 보관: 로그/지표 최대 7일(지표는 용량 제한에 따라 더 짧아질 수 있음)."
       }
     }
   ]

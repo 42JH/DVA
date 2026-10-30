@@ -14,7 +14,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
 import { OrderCallDto } from './order-call.dto';
 
@@ -113,6 +113,18 @@ export class OriginPinDto {
 }
 
 export class ParcelInputDto {
+  @ApiPropertyOptional({
+    description: '이 배송 항목의 배송비(원). 최종 확정 시 필수.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  notifiedPrice?: number | null;
+
   @ApiPropertyOptional({
     description: '출발지 정보. 확인한 항목만 입력할 수 있습니다.',
     type: () => OrderAddressPatchDto,
@@ -216,9 +228,23 @@ export class ParcelInputDto {
   itemPrice?: number | null;
 }
 
-export class OrderCustomerDto extends CreateCustomerDto {}
+export class OrderCustomerDto extends OmitType(CreateCustomerDto, [
+  'monthlyBillingEnabled',
+] as const) {}
 
 export class CreateOrderDto {
+  @ApiPropertyOptional({
+    description: '취소되지 않은 상세 배송비 합계(원). 최종 확정 시 필수.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  totalAmount?: number | null;
+
   @ApiPropertyOptional({
     enum: ['COMPLETE', 'INCOMPLETE', 'CANCELLED'],
     description:
@@ -268,7 +294,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional({
     enum: ['billing', 'credit', 'groupBilling'],
     description:
-      'credit: 정산(기업·개인 공통 기본값), groupBilling: 그룹카드(기업), billing: 개인카드(개인). 자격은 최종 접수 시 검증합니다.',
+      'billing: 개인·기업 개인 카드(기본값), credit: 월결제, groupBilling: 소속 부서 그룹결제. 최종 확정 시 자격을 검증합니다.',
   })
   @ValidateIf(present)
   @IsIn(['billing', 'credit', 'groupBilling'])

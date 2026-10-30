@@ -7,7 +7,7 @@ import { CsvMemberRow, MemberCandidate, Membership } from './members.types';
 import { MemberViewDto } from './dto/member-response.dto';
 
 const memberColumns =
-  'membership_seq AS "membershipSeq", customer_seq AS "customerSeq", organization_seq AS "organizationSeq", employee_no AS "employeeNo", role, status';
+  'membership_seq AS "membershipSeq", customer_seq AS "customerSeq", organization_seq AS "organizationSeq",department_seq AS "departmentSeq", employee_no AS "employeeNo", role, status';
 
 @Injectable()
 export class MembersRepository {
@@ -27,8 +27,8 @@ export class MembersRepository {
   async list(companyId: number, query: ListMembersQueryDto): Promise<MemberViewDto[]> {
     const result = await this.database.pool.query<MemberViewDto>(
       `SELECT jsonb_build_object('membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,
-        'organizationSeq',m.organization_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
-        jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status) AS customer
+        'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
+        jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled) AS customer
        FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
        WHERE m.organization_seq=$1 AND ($2::text IS NULL OR m.status=$2)
        ORDER BY m.membership_seq DESC LIMIT $3 OFFSET $4`,
@@ -55,22 +55,33 @@ export class MembersRepository {
 
   async create(companyId: number, input: CreateMemberDto, client: PoolClient): Promise<number> {
     const result = await client.query<{ id: number }>(
-      `INSERT INTO memberships (organization_seq,customer_seq,employee_no,role,status)
-       VALUES ($1,$2,$3,$4,'ACTIVE') RETURNING membership_seq AS id`,
-      [companyId, input.customerSeq, input.employeeNo, input.role],
+      `INSERT INTO memberships (organization_seq,customer_seq,employee_no,role,status,department_seq)
+       VALUES ($1,$2,$3,$4,'ACTIVE',$5) RETURNING membership_seq AS id`,
+      [companyId, input.customerSeq, input.employeeNo, input.role, input.departmentSeq],
     );
     return result.rows[0].id;
   }
 
   async update(id: number, changes: UpdateMemberDto, client: PoolClient): Promise<void> {
     await client.query(
-      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status) WHERE membership_seq=$1',
-      [id, changes.role ?? null, changes.status ?? null],
+      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status),department_seq=COALESCE($4,department_seq) WHERE membership_seq=$1',
+      [id, changes.role ?? null, changes.status ?? null, changes.departmentSeq ?? null],
     );
   }
 
   async remove(id: number, client: PoolClient): Promise<void> {
     await client.query('DELETE FROM memberships WHERE membership_seq=$1', [id]);
+  }
+
+  async department(companyId: number, departmentId: number, client: PoolClient): Promise<boolean> {
+    return (
+      (
+        await client.query(
+          'SELECT 1 FROM departments WHERE organization_seq=$1 AND department_seq=$2 FOR SHARE',
+          [companyId, departmentId],
+        )
+      ).rowCount === 1
+    );
   }
 
   async lockWrites(client: PoolClient): Promise<void> {

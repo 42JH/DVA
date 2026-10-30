@@ -33,18 +33,11 @@ export const checks = [
     "웹 서버 상태 확인에 1분 이상 실패했습니다.",
   ],
   [
-    "submission_auth_failed",
+    "submission_failed",
     "backend",
-    'max(dva_orders_attention{status="AUTH_FAILED"}) or vector(0)',
+    'max(dva_orders_attention{status="SUBMISSION_FAILED"}) or vector(0)',
     "0s",
-    "디버 인증이 거절된 주문이 있습니다.",
-  ],
-  [
-    "submission_review_required",
-    "backend",
-    'max(dva_orders_attention{status="REVIEW_REQUIRED"}) or vector(0)',
-    "0s",
-    "외부 접수 결과가 불명확한 주문이 있습니다. 확인 전 재접수하지 마세요.",
+    "디버 접수에 실패한 결제 완료 주문이 있습니다. 관리자 재접수를 확인하세요.",
   ],
   [
     "submission_stalled",

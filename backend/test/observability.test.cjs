@@ -68,7 +68,7 @@ test('asynchronous logs keep concurrent request IDs separate', async () => {
         logger.log({
           event: 'dver_submission',
           orderSeq: index + 1,
-          outcome: 'REVIEW_REQUIRED',
+          outcome: 'SUBMISSION_FAILED',
           reason: 'timeout',
         });
       }),
@@ -157,7 +157,7 @@ test('concurrent metrics requests share one bounded database read', async () => 
           queries.push(sql);
           return {
             rows: sql.includes('GROUP BY')
-              ? [{ status: 'REVIEW_REQUIRED', count: '2' }]
+              ? [{ status: 'SUBMISSION_FAILED', count: '2' }]
               : [{ count: '1' }],
           };
         },
@@ -166,7 +166,7 @@ test('concurrent metrics requests share one bounded database read', async () => 
   const results = await Promise.all(Array.from({ length: 10 }, () => service.snapshot()));
   assert.equal(reads, 1);
   assert.ok(results.every((body) => body === results[0]));
-  assert.match(results[0], /dva_orders_attention\{status="REVIEW_REQUIRED"\} 2/);
+  assert.match(results[0], /dva_orders_attention\{status="SUBMISSION_FAILED"\} 2/);
   assert.match(results[0], /dva_orders_stale_submitting 1/);
   assert.match(queries[0], /READ ONLY/);
   assert.ok(queries.every((sql) => !/UPDATE|INSERT|DELETE/.test(sql)));

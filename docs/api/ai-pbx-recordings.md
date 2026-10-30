@@ -1,5 +1,7 @@
 # AI·PBX 주문 결과 및 녹취 연동
 
+결제·가격·부분 취소의 현재 규격과 요청·응답 전체 예시는 [AI 주문 결제 연동 규격](ai-order-billing-integration.md)을 따른다. COMPLETE는 개인 카드 결제 완료를 뜻하지 않는다.
+
 AI 팀 전달용 요청·응답 요약은 [짧은 연동 명세](ai-integration-quickstart.md)를 참고한다.
 
 ## 호출 순서
@@ -78,7 +80,8 @@ sequenceDiagram
     "incomingAt": "2026-10-29T01:00:00Z"
   },
   "customer": { "name": "발신 고객", "phoneNumber": "01012345678" },
-  "paymentMethodType": "credit",
+  "paymentMethodType": "billing",
+  "totalAmount": 3500,
   "pickupRequestedAt": "2026-10-30T10:00:00+09:00",
   "parcels": [{
     "origin": {
@@ -95,20 +98,21 @@ sequenceDiagram
     },
     "smallBoxCount": 1,
     "itemPrice": 10000,
+    "notifiedPrice": 3500,
     "clientComment": "문 앞 배송"
   }]
 }
 ```
 
 - 기존 고객 번호를 아는 경우 `customer` 대신 `customerSeq`를 보낸다.
-- `COMPLETE`: 고객이 최종 내용을 확인한 뒤 전송. 백엔드가 디버를 호출하고 `data.status=ACCEPTED`일 때만 AI가 성공을 안내한다.
+- `COMPLETE`: 고객이 최종 내용을 확인한 뒤 전송. 개인 카드는 결제를 기다리고 월·그룹결제는 결제 완료 후 백엔드가 디버를 호출하며 `data.status=ACCEPTED`일 때만 AI가 성공을 안내한다.
 - `INCOMPLETE`: 중도 종료·상담사 연결. 같은 구조로 수집한 항목만 전송한다. 고객 이름이 없으면 customer를 생략할 수 있다.
 - `CANCELLED`: 디버에 접수하기 전 상담 중 취소. 접수된 주문을 취소하는 기능이 아니다.
 - `call.incomingAt`은 수신 이벤트 **`created_at`(Unix 초)**으로 만든 ISO 8601이다. 세션 ID·발신번호와 함께 최초 수신 때 보관하고, 종료 결과 전송까지 유지한다.
 - 고객 확인 때와 같은 통화 정보를 보내면 기존 통화에 주문을 연결한다. 고객 확인 없이 결과를 먼저 보낸 기존 호출도 통화를 생성할 수 있다.
 - 세션 ID와 요청 UUID는 다른 값이다. 주문 한 건의 재시도는 같은 UUID·같은 call을 사용한다. 같은 통화의 여러 택배는 `parcels`에 묶는다.
 - COMPLETE 전송을 시작한 뒤 전화가 끊겨도 별도 INCOMPLETE/CANCELLED 주문을 만들지 않는다. 기존 UUID로 상태를 확인한다.
-- 네트워크 실패·504·409 처리 중·202는 새 키를 만들지 말고 기존 키로 재확인한다. `REVIEW_REQUIRED`는 자동 재접수하지 않는다.
+- 네트워크 실패·504·409 처리 중·202는 새 키를 만들지 말고 기존 키로 재확인한다. `SUBMISSION_FAILED`는 자동 재접수하지 않는다.
 - AI HTTP timeout은 디버 대기 10초보다 여유 있게 설정한다. 현재 호스트 프록시 제한에서 응답이 먼저 끊겨도 같은 키 재확인으로 결과를 얻는다.
 
 응답은 `{data:{orderSeq,version,status,callSessionSeq,parcelNo},meta:{requestId}}`다. 실패한 HTTP 요청은 기존 `{error:{code,message,details},meta}` 계약이다. 주문 입력·오류 상세는 [주문 계약](orders.md)을 따른다.
@@ -126,7 +130,7 @@ sequenceDiagram
 | 로컬 `time.time()`을 통화 기준으로 사용 | OpenAI 수신 이벤트 `created_at` 전달 |
 | 중간 주문 저장 후 별도 submit | 상담 결과 한 번 전송, 완료 결과에서 백엔드가 디버 접수 |
 
-완료 입력에는 도로명·지번 주소·동명·우편번호·좌표·미래 수거 시각·물품 가액까지 필요하다. 문자열 주소만 보내거나 미수집 값을 임의 기본값으로 채우지 않는다. 카드 방식은 `credit`(공통 기본), `groupBilling`(기업), `billing`(개인)만 사용한다.
+완료 입력에는 도로명·지번 주소·동명·우편번호·좌표·미래 수거 시각·물품 가액까지 필요하다. 문자열 주소만 보내거나 미수집 값을 임의 기본값으로 채우지 않는다. 카드 방식은 `billing`(개인·기업 카드, 기본값), `credit`(월결제 자격), `groupBilling`(부서 그룹결제 자격)만 사용한다.
 
 ## 3. PBX 종료 웹훅
 

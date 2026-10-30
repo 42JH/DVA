@@ -25,6 +25,7 @@ export function assertOrderUpdate(input: UpdateOrderDto): void {
   if (
     input.paymentMethodType === undefined &&
     input.pickupRequestedAt === undefined &&
+    input.totalAmount === undefined &&
     !input.parcels?.length
   )
     throw new ApiException(400, 'INVALID_REQUEST', '변경할 필드를 하나 이상 전달해 주세요.');

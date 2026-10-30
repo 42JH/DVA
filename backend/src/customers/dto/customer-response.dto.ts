@@ -7,6 +7,7 @@ export class CreatedCustomerDto {
   customerSeq!: number;
 }
 export class CustomerResponseDto extends CreatedCustomerDto {
+  @ApiProperty({ description: '개인 월결제 사용 자격.' }) monthlyBillingEnabled!: boolean;
   @ApiProperty()
   name!: string;
   @ApiProperty()

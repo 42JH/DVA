@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '모놀리식: 단일 DB / 업무 테이블 18개 + 관리자 세션 1개 = 19개. 서비스 간 FK 포함. PBX 수신·마이그레이션 이력은 별도.'
+  Note: '모놀리식: 단일 DB / 업무 테이블 22개 + 관리자 세션 1개 = 23개. 서비스 간 FK 포함. PBX 수신·마이그레이션 이력은 별도.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
@@ -10,6 +10,7 @@ Project dva_monolith {
 // 2026-10-27 구성원 API: 대표자 표시 의미 반영. 009 이력은 유지하고 010으로 요청 기록 테이블을 제거한다.
 
 Table customers {
+  monthly_billing_enabled boolean [not null, default: false]
   customer_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   name text [not null, note: '이름 또는 표시명']
   phone_number text [not null, unique, note: '고객 전화번호. 숫자 문자열로 선행 0 보존']
@@ -22,6 +23,7 @@ Table customers {
 }
 
 Table organizations {
+  monthly_billing_enabled boolean [not null, default: false]
   organization_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   name text [not null, note: '이름 또는 표시명']
   status text [not null, note: '업무 상태']
@@ -31,7 +33,21 @@ Table organizations {
   Note: 'customer / 디버 등록 기업 디렉터리. 기업 공유 핀의 제출 기업을 식별한다.'
 }
 
+Table departments {
+  department_seq integer [pk, increment, not null]
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  name text [not null]
+  group_billing_enabled boolean [not null, default: false]
+  indexes {
+    (organization_seq,name) [unique]
+    (department_seq,organization_seq) [unique]
+  }
+}
+
+Ref: memberships.(department_seq,organization_seq) > departments.(department_seq,organization_seq)
+
 Table memberships {
+  department_seq integer [not null]
   membership_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [not null, unique, note: '연결 대상 ID']
   organization_seq integer [not null, note: '연결 대상 ID']
@@ -81,11 +97,16 @@ Table company_pins {
 // End of customer service
 
 Table orders {
+  payment_due_at timestamptz [note: '최초 결제 대기 시작 +24시간. 부분 취소 후에도 유지']
+  paid_at timestamptz [note: '결제 완료 시각']
+  billing_organization_seq integer [ref: > organizations.organization_seq]
+  billing_department_seq integer
+  total_amount integer [note: '미취소 상세의 배송비 합계. 전체 취소 0원, 수집 중 미확정 null']
   creation_source text [not null, default: 'UNKNOWN', note: '접수 경로: AI / ADMIN(관리자 수기) / UNKNOWN(기존 출처 미확인). 호출 API와 서버 주체로 결정']
   creation_request_id uuid [unique, note: '주문 생성 요청 키. 기존 행은 NULL 허용. 같은 키의 재요청은 기존 주문과 현재 버전을 반환']
   order_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '연결 대상 ID']
-  payment_method_type text [not null, default: 'credit', note: '디버 API 결제 방식. 기본 credit(월정산)']
+  payment_method_type text [not null, default: 'billing', note: 'billing 개인 카드 / credit 월결제 / groupBilling 부서 그룹결제']
   pickup_requested_at timestamptz [note: '고객이 요청한 수거 시각']
   status text [not null, default: 'COLLECTING', note: '업무 상태']
   version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
@@ -96,13 +117,46 @@ Table orders {
   checks {
     `creation_source IN ('AI','ADMIN','UNKNOWN')`
     `payment_method_type IN ('cat','billing','credit','groupBilling')`
-    `status IN ('COLLECTING','SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED','CANCELLED','EXPIRED')`
+    `status IN ('COLLECTING','notPaid','PAID','SUBMITTING','ACCEPTED','SUBMISSION_FAILED','CANCELLED')`
     `version>0`
     `parcel_no ~ '^[A-Za-z0-9]{8}$'`
     `status NOT IN ('SUBMITTING','ACCEPTED','AUTH_FAILED','REVIEW_REQUIRED') OR pickup_requested_at IS NOT NULL`
     `(status='ACCEPTED' AND parcel_no IS NOT NULL AND dver_received_at IS NOT NULL) OR (status='CANCELLED' AND ((parcel_no IS NULL AND dver_received_at IS NULL) OR (parcel_no IS NOT NULL AND dver_received_at IS NOT NULL))) OR (status NOT IN ('ACCEPTED','CANCELLED') AND parcel_no IS NULL AND dver_received_at IS NULL)`
   }
   Note: 'order / 수집부터 디버 접수 성공까지 같은 주문 행 사용. EXPIRED는 기존 SQL에 남아 있는 주문 상태로, 통화 상태가 아니다. / SQL 인덱스: CREATE INDEX orders_resume_idx ON orders(customer_seq,updated_at DESC,order_seq) WHERE status=\'COLLECTING\'; CREATE INDEX orders_list_idx ON orders(created_at DESC,order_seq DESC);'
+}
+
+Ref: orders.(billing_department_seq,billing_organization_seq) > departments.(department_seq,organization_seq)
+
+Table organization_billing_months {
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  billing_month date [not null, note: 'KST 월의 1일']
+  monthly_amount bigint [not null, default: 0, note: '월결제 사용액. JS 안전 정수 범위']
+  group_billing_amount bigint [not null, default: 0, note: '그룹결제 사용액. JS 안전 정수 범위']
+  indexes { (organization_seq,billing_month) [pk] }
+}
+
+Table order_billing_charges {
+  order_seq integer [pk, ref: > orders.order_seq]
+  organization_seq integer [not null, ref: > organizations.organization_seq]
+  billing_month date [not null]
+  payment_method_type text [not null, note: 'credit / groupBilling']
+  amount integer [not null]
+  occurred_at timestamptz [not null]
+  Note: '결제 완료 트랜잭션에서 주문당 1회 기록. 재접수는 원장을 추가하지 않는다.'
+}
+
+Table order_payment_requests {
+  payment_request_id uuid [pk, not null, default: `gen_random_uuid()`]
+  order_seq integer [not null, ref: > orders.order_seq]
+  amount integer [not null, note: '이 요청의 확정 결제 금액(양의 정수 원)']
+  expires_at timestamptz [not null]
+  created_at timestamptz [not null, default: `clock_timestamp()`]
+  approval_started_at timestamptz
+  invalidated_at timestamptz
+  completed_at timestamptz
+  provider_reference text [unique, note: '검증된 결제사 거래 식별자. 성공 시에만 저장']
+  Note: '주문별 활성 요청 1개: invalidated_at/completed_at IS NULL 부분 UNIQUE. AI·관리자 HTTP로 결제 성공을 입력하지 않는다.'
 }
 
 Table order_parcels {
@@ -136,7 +190,7 @@ Table order_parcels {
   big_box_count integer [not null, default: 0, note: '대형 박스 수량']
   other_item_description text [not null, default: '', note: '기타 물품 설명']
   client_comment text [not null, default: '', note: '고객 요청 사항']
-  notified_price integer [not null, default: 3500, note: '안내 가격. 현재 기본값과 허용값 3500']
+  notified_price integer [note: '개별 배송비(원). 양의 정수. 미완료 수집 중에는 null, 취소 후 원래 금액 보존']
   item_price bigint [note: '물품 가액. 요금과 구분하며 JavaScript 안전 정수 범위까지 허용']
   indexes {
     (order_seq,parcel_position) [unique]
@@ -156,7 +210,7 @@ Table order_parcels {
     `small_box_count>=0`
     `medium_box_count>=0`
     `big_box_count>=0`
-    `notified_price=3500`
+    `notified_price>0`
     `item_price BETWEEN 0 AND 9007199254740991`
     `num_nonnulls(origin_pin_scope,origin_pin_seq) IN (0,2)`
   }
@@ -268,8 +322,8 @@ Table shipment_status_history {
   checks {
     `from_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
     `to_status IN ('notPaid','paid','received','waiting','sent','canceling','canceled')`
-    `actor_type IN ('ADMIN','SYSTEM')`
-    `(actor_type='ADMIN' AND actor_admin_user_seq IS NOT NULL AND actor_admin_user_seq>0) OR (actor_type='SYSTEM' AND actor_admin_user_seq IS NULL)`
+    `actor_type IN ('ADMIN','AI','SYSTEM')`
+    `(actor_type='ADMIN' AND actor_admin_user_seq IS NOT NULL AND actor_admin_user_seq>0) OR (actor_type IN ('AI','SYSTEM') AND actor_admin_user_seq IS NULL)`
   }
   Note: 'delivery / 배송 생성 및 상태 변경 이력. 상태와 이력은 같은 트랜잭션으로 저장. request_id로 재시도 중복 방지. / SQL 인덱스: CREATE INDEX shipment_history_lookup_idx ON shipment_status_history(shipment_seq,occurred_at,shipment_status_history_seq);'
 }

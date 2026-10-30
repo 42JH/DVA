@@ -1,3 +1,4 @@
+const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -218,6 +219,7 @@ test('registration returns only an ID; detail preserves the agreed name/status c
     organizationSeq: body.data.organizationSeq,
     name: '등록 기업',
     status: 'ACTIVE',
+    monthlyBillingEnabled: false,
   });
 });
 
@@ -239,7 +241,12 @@ test('lists use stable pagination, status and literal name searches without expo
   assert.equal(literal.data.length, 1);
   assert.equal(literal.data[0].name, 'literal %_ company');
   for (const row of first.data)
-    assert.deepEqual(Object.keys(row).sort(), ['name', 'organizationSeq', 'status']);
+    assert.deepEqual(Object.keys(row).sort(), [
+      'monthlyBillingEnabled',
+      'name',
+      'organizationSeq',
+      'status',
+    ]);
 });
 
 test('patch updates name/status with no response body and preserves memberships/pins', async () => {
@@ -247,10 +254,11 @@ test('patch updates name/status with no response body and preserves memberships/
   const customer = await pool.query(
     `INSERT INTO customers(name,phone_number,status) VALUES ('fixture','01000000000','ACTIVE') RETURNING customer_seq`,
   );
-  await pool.query(
-    `INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES ($1,$2,'0001','MEMBER','ACTIVE')`,
-    [customer.rows[0].customer_seq, id],
-  );
+  await testMembership(pool, {
+    customerSeq: customer.rows[0].customer_seq,
+    organizationSeq: id,
+    employeeNo: '0001',
+  });
   const address = {
     name: 'fixture',
     phoneNumber: '01000000000',
@@ -273,6 +281,7 @@ test('patch updates name/status with no response body and preserves memberships/
     organizationSeq: id,
     name: '수정된 기업',
     status: 'INACTIVE',
+    monthlyBillingEnabled: false,
   });
   assert.equal(
     (await pool.query('SELECT count(*) FROM memberships WHERE organization_seq=$1', [id])).rows[0]

@@ -6,11 +6,10 @@ import { isZonedDate, ORDER_ADDRESS_FIELDS } from './order-draft';
 import { assertOrderSubmissionReady, OrderSubmissionSnapshot } from './order-submission.validation';
 
 export type DverResult =
-  | { status: 'ACCEPTED'; parcelNo: string; receivedAt: string }
-  | { status: 'AUTH_FAILED' | 'REVIEW_REQUIRED' };
+  { status: 'ACCEPTED'; parcelNo: string; receivedAt: string } | { status: 'SUBMISSION_FAILED' };
 
-export function dverPayload(order: OrderSubmissionSnapshot) {
-  assertOrderSubmissionReady(order);
+export function dverPayload(order: OrderSubmissionSnapshot, now = Date.now()) {
+  assertOrderSubmissionReady(order, now);
   return {
     paymentMethodType: order.paymentMethodType,
     pickupRequestedAt: order.pickupRequestedAt,
@@ -80,7 +79,7 @@ export class DverClient {
       if (response.status !== 200) {
         await response.body?.cancel();
         return finish(
-          { status: response.status === 403 ? 'AUTH_FAILED' : 'REVIEW_REQUIRED' },
+          { status: 'SUBMISSION_FAILED' },
           response.status === 403 ? 'authentication_rejected' : 'http_error',
         );
       }
@@ -93,7 +92,7 @@ export class DverClient {
         length += value.byteLength;
         if (length > 65_536) {
           await reader.cancel();
-          return finish({ status: 'REVIEW_REQUIRED' }, 'response_too_large');
+          return finish({ status: 'SUBMISSION_FAILED' }, 'response_too_large');
         }
         chunks.push(value);
       }
@@ -101,7 +100,7 @@ export class DverClient {
       try {
         result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
-        return finish({ status: 'REVIEW_REQUIRED' }, 'invalid_response');
+        return finish({ status: 'SUBMISSION_FAILED' }, 'invalid_response');
       }
       if (
         typeof result === 'object' &&
@@ -120,11 +119,11 @@ export class DverClient {
           parcelNo: result.parcelNo,
           receivedAt: result.receivedAt,
         });
-      return finish({ status: 'REVIEW_REQUIRED' }, 'invalid_response');
+      return finish({ status: 'SUBMISSION_FAILED' }, 'invalid_response');
     } catch {
       // 응답 유실은 접수 실패를 뜻하지 않으므로 자동으로 다시 전송하지 않는다.
       return finish(
-        { status: 'REVIEW_REQUIRED' },
+        { status: 'SUBMISSION_FAILED' },
         controller.signal.aborted ? 'timeout' : 'transport_error',
       );
     } finally {

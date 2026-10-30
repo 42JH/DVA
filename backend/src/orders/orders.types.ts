@@ -3,11 +3,11 @@ export type OrderCreationSource = (typeof ORDER_CREATION_SOURCES)[number];
 
 export const ORDER_STATUSES = [
   'COLLECTING',
+  'notPaid',
+  'PAID',
   'SUBMITTING',
   'ACCEPTED',
-  'AUTH_FAILED',
-  'REVIEW_REQUIRED',
+  'SUBMISSION_FAILED',
   'CANCELLED',
-  'EXPIRED',
 ] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];

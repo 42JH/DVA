@@ -25,6 +25,8 @@ import { OrganizationsService } from './organizations.service';
 import { AuditOperation } from '../audit/audit-operation';
 import { MvpAiDirectoryAccess } from '../auth/mvp-ai-access';
 import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
+import { OrganizationBillingService } from './organization-billing.service';
+import { BillingMonthQueryDto, BillingMonthEnvelopeDto } from './dto/billing-month.dto';
 
 const single = (model: typeof CreatedOrganizationDto) => ({
   type: 'object',
@@ -44,7 +46,17 @@ const single = (model: typeof CreatedOrganizationDto) => ({
 @ApiServiceUnavailableResponse({ type: ErrorResponseDto })
 @Controller('companies')
 export class OrganizationsController {
-  constructor(private readonly organizations: OrganizationsService) {}
+  constructor(
+    private readonly organizations: OrganizationsService,
+    private readonly billing: OrganizationBillingService,
+  ) {}
+
+  @Get(':id/billing')
+  @ApiOperation({ summary: '기업 월결제·그룹결제 월별 사용액 조회' })
+  @ApiOkResponse({ type: BillingMonthEnvelopeDto })
+  billingMonth(@Param() params: OrganizationIdParamsDto, @Query() query: BillingMonthQueryDto) {
+    return this.billing.read(params.id, query.month);
+  }
 
   // 정적 경로를 :id보다 먼저 등록하여 search를 기업 번호로 해석하지 않는다.
   @Get('search')

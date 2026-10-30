@@ -102,6 +102,8 @@ export class CustomersService {
   }
 
   async create(input: CreateCustomerDto, actorId: number | null, requestId: string) {
+    if (actorId === null && input.monthlyBillingEnabled === true)
+      throw new ApiException(403, 'FORBIDDEN', '월결제 자격은 관리자만 설정할 수 있습니다.');
     return this.database.transaction(async (client) => {
       const customerSeq = await this.repository.insert(client, input);
       await this.audit.recordSuccess(
@@ -126,9 +128,16 @@ export class CustomersService {
     requestId: string,
   ): Promise<void> {
     const administrator = actorId !== null;
-    if (changes.name === undefined && changes.status === undefined)
+    if (
+      changes.name === undefined &&
+      changes.status === undefined &&
+      changes.monthlyBillingEnabled === undefined
+    )
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 이름 또는 상태를 입력해 주세요.');
-    if (changes.status !== undefined && !administrator)
+    if (
+      (changes.status !== undefined || changes.monthlyBillingEnabled !== undefined) &&
+      !administrator
+    )
       throw new ApiException(403, 'FORBIDDEN', '고객 상태 변경은 관리자만 가능합니다.');
     await this.database.transaction(async (client) => {
       const customer = await this.repository.find(id, client);

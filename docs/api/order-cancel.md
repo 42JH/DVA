@@ -1,67 +1,45 @@
 # 주문 전체·상세 취소
 
-관련 Jira: [S15P31D109-64](https://ssafy.atlassian.net/browse/S15P31D109-64). 2026-10-28 사용자 확정 정책을 따른다. 승인 대기 없이 내부 DB에서 즉시 처리하며 실제 디버 취소 API는 호출하지 않는다.
+관련 Jira: [64](https://ssafy.atlassian.net/browse/S15P31D109-64), [결제·부분 취소 개편 138](https://ssafy.atlassian.net/browse/S15P31D109-138). 현재 정책은 [주문 결제](order-billing.md)를 따른다.
 
 ## 요청·응답
 
-| API | 받는 값 | 결과 |
+| API | 입력 | 성공 |
 | --- | --- | --- |
-| `POST /api/orders/{id}/cancel` | `id`: orders.order_seq | 모든 미취소 상세와 주문을 CANCELLED로 변경. 204, 본문 없음 |
-| `POST /api/orders/{id}/parcels/cancel` | `id`: orders.order_seq, 본문 `orderParcelSeqs`: order_parcels.order_parcel_seq 배열 | 선택한 상세를 함께 CANCELLED로 변경. 마지막 미취소 상세까지 취소하면 주문도 CANCELLED. 204, 본문 없음 |
+| POST /api/orders/{id}/cancel | orderSeq. 본문 없음 | 전체 취소, 204 본문 없음 |
+| POST /api/orders/{id}/parcels/cancel | orderSeq와 orderParcelSeqs 배열 | 선택 상세 취소, 204 본문 없음 |
 
-전체 취소에는 본문이 없다. 상세 취소는 `orderParcelSeqs`에 같은 주문의 상세번호를 한 개 이상 넣는다. 한 개면 단건, 여러 개면 복수 취소이며 빈 배열·중복·문자열 번호는 400이다. 번호는 1~2147483647 정수다. 두 API 모두 Idempotency-Key·expectedVersion은 필요하지 않다. 상세 번호는 `GET /api/orders/{id}`의 `data.parcels[].orderParcelSeq`를 사용한다. 취소 후 주문 상세로 현재 상태·version을 다시 조회한다.
+~~~json
+{"orderParcelSeqs":[101,102]}
+~~~
 
-```http
-POST /api/orders/123/parcels/cancel
-call_session_seq: 7
-Content-Type: application/json
+한 개는 단건, 여러 개는 복수 취소다. 상세 번호는 GET /api/orders/{id}의 parcels[].orderParcelSeq를 사용한다. 빈 배열·중복·문자열 번호·잘못된 범위·추가 필드는 400이다. 하나라도 같은 주문에 속하지 않거나 없으면 404로 전체를 거절한다. Idempotency-Key·expectedVersion은 사용하지 않는다.
 
-{"orderParcelSeqs":[456,457]}
-```
+## 허용 상태와 금액
 
-기존 URL의 `/{orderParcelSeq}`는 제거한다. 단건도 새 경로에 `{"orderParcelSeqs":[456]}`을 보낸다.
+| orders.status | 전체·선택 상세 취소 |
+| --- | --- |
+| COLLECTING | 허용. 배송 행이 생긴 비정상 초안은 거절 |
+| notPaid | 허용. 결제 승인 중 또는 배송 행이 있으면 거절 |
+| PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED | 결제 완료 주문이므로 409 |
+| CANCELLED | 전체 재요청 409. 이미 취소된 상세만 선택한 반복 요청은 204 |
 
-- 관리자: ACTIVE OPERATOR·SUPERVISOR·SYSTEM_ADMIN 세션과 기존 허용 Origin. 관리자에게 통화 헤더는 필요 없다.
-- AI: 기존 주문 상세 조회와 동일하게 `call_session_seq`를 전달한다. 발신번호와 일치하는 ACTIVE 고객의 주문만 허용하며 다른 고객 주문은 404다. 진행 중 통화는 같은 고객의 다른 통화에서 만든 주문도 취소할 수 있다.
-- 종료된 통화는 기존 연결 주문만 허용한다. 없는 통화는 404, 활성 고객이 없는 통화는 403이다. 잘못된 관리자 쿠키를 AI 요청으로 우회하지 않는다.
-- 통화 번호는 DB 식별자이며 인증 토큰이 아니다. 기존 AI 서비스 인증 미적용 범위를 유지한다. 상담 시작 시 POST /api/customers/context에 phoneNumber와 call(providerCallId·incomingAt)을 보내고, 응답의 callSessionSeq를 헤더로 사용한다. 주문을 새로 만들지 않고도 기존 주문을 조회·취소할 수 있다.
+부분 취소 시 선택한 상세만 CANCELLED로 저장하고 나머지는 유지한다. 원래 상세 가격·주소·물품을 보존하며 totalAmount는 남은 미취소 상세의 합계다. 마지막 상세까지 취소하면 상위도 CANCELLED, totalAmount는 0원이다. 최초 AI 상담 결과가 CANCELLED인 경우도 총액은 0원으로 저장한다.
 
-## 취소 조건
+notPaid에서는 기존 결제 요청을 닫고 새 UUID·남은 합계로 요청을 만든다. 최초 결제 대기 시작 +24시간 기한은 연장하지 않는다. 전체 취소는 새 요청 없이 기존 요청만 닫는다. 결제 요청 ID는 내부 식별자이며 실제 PG URL은 추후 연동한다.
 
-| 현재 상태 | 전체 취소 | 상세 단건·복수 취소 |
-| --- | --- | --- |
-| COLLECTING, 대상 상세에 배송 없음 | 허용. 상세 0개도 허용 | 선택한 미취소 상세 허용 |
-| ACCEPTED, 대상 상세의 배송이 모두 notPaid | 허용 | 선택한 미취소 상세가 모두 notPaid이면 허용. 선택하지 않은 상세의 결제 상태는 무관 |
-| SUBMITTING·AUTH_FAILED·REVIEW_REQUIRED·EXPIRED | 409 | 미취소 상세는 409 |
-| 이미 전체 CANCELLED | 409, `이미 취소된 주문입니다.` | 선택한 상세가 모두 해당 주문의 CANCELLED이면 204 |
-| 일부 상세 CANCELLED | 기존 취소 상세는 건너뛰고 남은 상세 조건 확인 | 이미 취소된 상세를 건너뛰고 나머지만 취소. 모두 이미 취소됐으면 204, 변경 없음 |
+이미 취소된 상세는 건너뛰며 재요청으로 금액·감사·결제 요청을 중복 변경하지 않는다. 전체·부분 요청은 주문 행을 먼저 잠가 직렬화한다. 결제 승인이 먼저 선점되면 409이며, 취소가 먼저 끝나면 예전 결제 요청으로 결제를 시작할 수 없다. 취소·금액·요청 교체·감사 중 하나라도 실패하면 전체를 롤백한다.
 
-`notPaid`는 현재 내부 배송 데이터의 결제 전 표시다. 실제 디버 결제 확인·환불·취소를 대신하지 않는다. 접수 주문의 대상 배송이 없거나 결제 전 이외의 상태면 취소하지 않는다. 전체·복수 취소 모두 한 건이라도 조건을 충족하지 못하면 전체 요청을 거절하고 아무 상태도 바꾸지 않는다. 다른 주문의 상세나 없는 상세가 섞여 있어도 404로 전부 거절하며, 이미 취소됐다는 이유로 소속 확인을 생략하지 않는다.
+## 접근·보존·감사
 
-## 저장·중복·동시성
+관리자는 ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN 세션과 허용 Origin을 사용한다. AI는 call_session_seq 헤더의 발신번호와 활성 고객이 일치하는 주문만 취소한다. 진행 중 통화는 같은 고객 범위, 종료된 통화는 이미 연결된 주문 한 건만 허용한다. 잘못된 관리자 쿠키는 AI 호출로 전환하지 않는다. AI 서비스 인증은 기존 MVP 정책을 유지한다.
 
-1. 주문 행을 잠그고 고객 범위·주문 상태·상세 소속을 확인한다.
-2. 대상 상세와 배송 행을 잠근 뒤 결제 전 조건을 확인한다. 다른 결제 갱신이 먼저 잠금을 잡았다면 완료를 기다린 후 상태를 다시 확인한다.
-3. 상세의 `status=CANCELLED`, 관련 내부 배송의 `status=canceled`, 배송 버전·상태 이력·성공 감사를 같은 트랜잭션에 저장한다. 전체 취소 또는 마지막 상세 취소이면 주문도 CANCELLED다.
-4. 일부만 취소하면 주문은 기존 COLLECTING/ACCEPTED를 유지한다. PARTIALLY_CANCELLED·승인 대기는 만들지 않는다. 주문 내용·주소·디버 접수번호와 접수 시각은 보존한다.
+주문 상세·통화·녹취·감사를 삭제하지 않는다. 디버 접수 전의 내부 취소이며 외부 취소·환불은 지원하지 않는다. notPaid 이후 주문 내용 수정도 불가하다.
 
-동시 전체 취소는 한 요청만 204이고 나머지는 이미 취소된 주문으로 409다. 선택 상세가 겹치는 복수 요청은 순서대로 처리하고 이미 취소된 상세는 건너뛴다. 모두 이미 취소된 요청은 204이며 버전·배송 이력·성공 감사를 추가하지 않는다. 행 잠금과 기존 상태를 사용하므로 별도 요청 기록 테이블·메모리 대기열이 없다. 두 번째 상세의 감사 저장이 실패해도 먼저 변경한 상세·배송·이력·감사까지 함께 롤백한다.
+AI 요청은 AI, 관리자 요청은 ADMIN(화면 표시 운영자), 24시간 자동 만료는 SYSTEM으로 기록한다. 전체 취소는 ORDER_CANCELLED, 선택 상세는 ORDER_PARCEL_CANCELLED, 금액 변경은 ORDER_AMOUNT_CHANGED에 전후 금액·상세 번호를 남긴다. 자동 만료는 ORDER_CANCELLED에 PAYMENT_EXPIRED 사유와 금액을 남긴다. 실제 운영자 ID·이름은 보존한다.
 
-성공 감사는 전체 취소 `ORDER_CANCELLED / ORDER`, 선택 상세 취소는 새로 취소한 상세마다 `ORDER_PARCEL_CANCELLED / ORDER_PARCEL`이다. 마지막 미취소 상세까지 취소하면 주문 감사도 같은 requestId로 남긴다. 이미 취소된 상세에는 성공 감사를 추가하지 않는다. 실패 감사의 대상은 요청의 상위 ORDER이며 성공 기록과 구분된다.
+## 확인
 
-## 기존 API 영향
+취소 후 GET 상세로 최신 status·version·totalAmount·paymentRequest를 확인한다. 400 입력, 401 세션, 403 권한, 404 대상·고객 범위, 409 주문·통화 상태 또는 승인 처리 중 오류를 구분한다. 취소된 상세는 주소 이력 추천과 신규 디버 전송에서 제외한다.
 
-- `GET /api/orders`: `status=CANCELLED`는 전체 취소 주문이다. `parcelCount`는 취소된 상세를 포함한 전체 수다.
-- `GET /api/orders/{id}`: `parcels[].status`에 ACTIVE/CANCELLED를 추가한다. ACTIVE는 취소되지 않았다는 의미이며 접수·결제 완료가 아니다. 취소된 상세도 주소·물품과 함께 반환한다.
-- `PATCH /api/orders/{id}`: COLLECTING의 미취소 상세만 수정한다. 취소된 상세를 포함하면 409로 요청 전체를 롤백한다. 취소로 version이 달라지므로 최신 상세를 조회해야 한다.
-- `POST /api/orders/{id}/submit`: 취소되지 않은 상세만 필수 정보·PIN을 검증하고 디버로 보낸다. 초기 배송·이력도 해당 상세에만 생성한다. 오류의 `parcels.N`은 원래 상세 목록의 인덱스를 유지한다.
-- `GET /api/customers/{id}/addresses`: 접수된 주문의 미취소 상세만 주소 후보로 반환한다.
-- `POST /api/orders`의 `outcome=CANCELLED`: 새 상담 결과 저장이며 기존 주문 취소와 구별한다. 생성된 상세도 CANCELLED로 저장한다. 기존 COMPLETE/INCOMPLETE 전송 형식은 유지한다.
-
-## 오류·배포·검증
-
-400은 번호·헤더 형식 오류와 상세번호 배열 누락·빈 배열·중복, 401은 세션 오류, 403은 권한·Origin·활성 고객 오류, 404는 주문·통화·상세 없음 또는 AI 범위 밖, 409 INVALID_STATE는 취소 조건 불충족이다. 상세가 다른 주문에 속해도 404다.
-
-배포 전에 `014-order-cancellation.sql`을 기존 migration runner로 적용한다. 새 테이블 없이 상세 상태와 접수 이력 보존 제약·트리거만 추가한다. 적용된 001~013 파일은 바꾸지 않는다. 단건·복수 취소 통합에 추가 DB 변경은 없다. 부분 취소 데이터를 만든 뒤에는 상세 취소 상태를 모르는 구버전 앱으로 복귀하면 재접수에 취소 상세가 포함될 수 있으므로 호환되는 앱을 사용한다.
-
-검증: `infra/database/test-monolith.ps1`로 업그레이드·데이터 보존·롤백을 확인하고, backend의 `npm run check:docker`로 권한·반복·동시 요청·결제 경합·감사 실패·접수 제외·Swagger·실제 Nginx 경유를 검증한다. 운영 DB 적용·실제 디버 취소·실제 AI 통화는 별도다.
+관련 migration은 014의 상세 상태에 016~019의 가격·결제 구조를 추가한다. 적용된 이전 SQL은 수정하지 않으며 최초 전환·복구는 [DB 절차](../database/README.md)를 따른다.

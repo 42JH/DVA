@@ -53,8 +53,8 @@ test('stale detection reads committed order state without changing status, versi
     )
   ).rows[0].n;
   for (const [status, old] of [
-    ['AUTH_FAILED', false],
-    ['REVIEW_REQUIRED', false],
+    ['PAID', false],
+    ['SUBMISSION_FAILED', false],
     ['SUBMITTING', true],
     ['SUBMITTING', false],
   ]) {

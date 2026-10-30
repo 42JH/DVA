@@ -14,14 +14,16 @@ POST·PATCH·DELETE에는 설정된 허용 Origin이 필요하다. AI 무인증 
 앞뒤 공백만 제거하고 선행 0·대소문자는 보존한다. 다른 기업의 같은 사번은 허용한다.
 등록 후 사번·기업·고객 ID는 변경하지 않는다. 소속 이동은 기존 소속 해제 후 새로 등록한다.
 
+부서 등록·조회·그룹결제 자격은 [부서 API](departments.md)를 사용한다. 기존 구성원의 이관에는 실제 부서 배정표가 필요하며 임의 부서는 만들지 않는다.
+
 ## HTTP 계약
 
 | 메서드·경로 | 요청 | 성공 |
 | --- | --- | --- |
 | GET /api/companies/{id}/members | status, limit, offset | 200, `{ data: MemberView[], hasNext }` |
-| POST /api/companies/{id}/members | `{ employeeNo, customerSeq, role }` | 204 |
+| POST /api/companies/{id}/members | `{ employeeNo, customerSeq, departmentSeq, role }` | 204 |
 | POST /api/companies/{id}/members/import | multipart/form-data의 file 1개 | 204 |
-| PATCH /api/members/{id} | role 또는 status 중 한 개 이상 | 204 |
+| PATCH /api/members/{id} | role·status·departmentSeq 중 한 개 이상 | 204 |
 | DELETE /api/members/{id} | 본문 없음 | 204 |
 
 204 응답은 본문이 없다. ID는 양의 PostgreSQL integer 범위다. 목록은 membershipSeq 내림차순,
@@ -32,7 +34,7 @@ MemberView는 다음 형태다. 고객 이름·전화번호를 직접 변경하�
 
 ```json
 {
-  "membership": { "membershipSeq": 1, "customerSeq": 2, "organizationSeq": 3, "employeeNo": "001A", "role": "MEMBER", "status": "ACTIVE" },
+  "membership": { "membershipSeq": 1, "customerSeq": 2, "organizationSeq": 3, "departmentSeq": 5, "employeeNo": "001A", "role": "MEMBER", "status": "ACTIVE" },
   "customer": { "customerSeq": 2, "name": "예시 직원", "phoneNumber": "01012345678", "status": "ACTIVE" }
 }
 ```
@@ -42,7 +44,7 @@ MemberView는 다음 형태다. 고객 이름·전화번호를 직접 변경하�
 기존 소속이 있거나 기업·사번이 중복되면 409 DUPLICATE_RESOURCE다.
 role은 MEMBER/ORG_ADMIN만 허용한다. 이름·전화번호·status 등 추가 등록 필드는 400이다.
 
-PATCH는 role/status만 허용한다. 빈 객체·null·다른 필드는 400이다.
+PATCH는 role/status/departmentSeq를 허용한다. 같은 기업의 실제 부서 번호가 필수이며 기업이 다른 부서는 거절한다. 빈 객체·null·다른 필드는 400이다.
 소속 활성화는 기업과 고객이 모두 ACTIVE일 때만 허용한다. 비활성화와 대표자 표시 변경은
 기존 데이터를 삭제하지 않는다. DELETE는 memberships 연결 행만 실제 삭제하며 다른 기업으로
 재등록할 수 있게 한다. 고객·개인 PIN·주문·기업 공유 PIN은 보존하며 별도 소속 이력 테이블은 두지 않는다.
@@ -57,16 +59,16 @@ application/octet-stream, text/plain MIME을 허용한다. 실제 UTF-8·CSV 구
 따옴표 안 쉼표·줄바꿈·이스케이프 따옴표, LF/CRLF를 지원한다.
 
 ```csv
-employeeNo,name,phoneNumber
-001A,김민수,01012345678
-002A,이지은,01023456789
+employeeNo,name,phoneNumber,departmentSeq
+001A,김민수,01012345678,5
+002A,이지은,01023456789,6
 ```
 
-헤더는 위 순서의 세 컬럼과 정확히 일치해야 한다. 사번·이름은 trim하고 빈 값은 거절한다.
+헤더는 위 순서의 네 컬럼과 정확히 일치해야 한다. 사번·이름은 trim하고 빈 값은 거절한다.
 전화번호는 숫자 문자열만 허용하며 선행 0을 유지한다. 번호의 공백·하이픈·국가번호 +는 자동 변환하지 않는다.
 CSV 편집기에서 이미 잃어버린 선행 0은 복원하지 않는다.
 
-- 같은 기업·사번: customerSeq·membershipSeq를 유지하며 고객 이름·전화번호를 수정한다.
+- 같은 기업·사번: customerSeq·membershipSeq를 유지하며 고객 이름·전화번호·소속 부서를 수정한다.
   같은 값이면 갱신하지 않는다. 기존 대표자 표시·소속 상태는 유지한다.
 - 새 사번·미등록 번호: ACTIVE 고객과 MEMBER/ACTIVE 소속을 함께 생성한다.
 - 새 사번·소속 없는 ACTIVE 고객 번호: 기존 고객을 연결하고 이름을 반영한다.

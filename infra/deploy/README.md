@@ -107,7 +107,7 @@ if ($LASTEXITCODE -ne 0) { throw '배포 실패: 서버 상태를 확인하세�
 
 일반 개발 배포는 migration runner의 `--no-backup`을 사용한다. 다만 생성 요청 테이블을 제거하는
 `008-simplify-creation-requests.sql` 또는 구성원 요청 기록을 제거하는
-`010-remove-membership-write-requests.sql` 최초 적용은 기존 백엔드를 중지하고
+`010-remove-membership-write-requests.sql` 또는 부서·결제 개편 `019-organization-monthly-billing.sql`을 포함한 최초 전환은 기존 백엔드를 중지하고
 `shared/db-backups`에 백업·체크섬을 만든 뒤 실행한다. 이 전환에는 API 중단 시간이 있다.
 기존 DB가 있으면 새 앱을 교체하기 전에 미적용 SQL만 실행한다. 최초 배포에서는 DB만 먼저 시작한다.
 SQL은 기존 advisory lock과 하나의 트랜잭션을 사용하며 실패하면 신규 SQL/이력은 함께 롤백된다.
@@ -145,7 +145,7 @@ bash ~/dva-deploy/releases/<현재버전>/deploy.sh --rollback
 실패한 컨테이너는 로그를 조사할 수 있도록 남긴다. 이전 버전 복구도 실패하면
 명령은 실패를 반환하고 수동 점검이 필요하다.
 
-이 롤백은 DB 데이터를 복원하지 않는다. 008 적용 이후에는 해당 migration이 없는 릴리스로
+이 롤백은 DB 데이터를 복원하지 않는다. 017~019 부서·결제 전환 뒤에는 019가 없는 앱으로의 수동 배포·롤백과 자동 복귀를 차단한다. 구버전 구성원 등록·주문 상태가 호환되지 않으므로 호환 앱으로 복구하거나 중지 상태에서 백업을 별도 DB로 복원·검증해야 한다. 008 적용 이후에는 해당 migration이 없는 릴리스로
 앱만 되돌리는 수동 롤백도 차단한다. 실패한 신규 릴리스의 최신 `deploy.sh`로 재시도하거나 복구해야 하며,
 보호 로직이 없는 과거 `deploy.sh`를 직접 실행하지 않는다.
 호환되는 수정 앱 배포를 우선하고, DB 복원이 필요하면 서비스를 중지한 상태에서 백업을 별도 DB에

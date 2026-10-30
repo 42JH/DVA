@@ -17,8 +17,10 @@ const events = new Set([
   'order_submission_result',
   'order_submission_result_save_failed',
   'dver_submission',
+  'order_maintenance_failed',
+  'paid_order_submission_deferred',
 ]);
-const outcomes = new Set(['ACCEPTED', 'AUTH_FAILED', 'REVIEW_REQUIRED', 'SUBMITTING']);
+const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING']);
 const reasons = new Set([
   'authentication_rejected',
   'http_error',

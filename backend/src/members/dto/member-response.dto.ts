@@ -3,6 +3,7 @@ import { CustomerResponseDto } from '../../customers/dto/customer-response.dto';
 import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
 
 export class MembershipResponseDto {
+  @ApiProperty() departmentSeq!: number;
   @ApiProperty() membershipSeq!: number;
   @ApiProperty() customerSeq!: number;
   @ApiProperty() organizationSeq!: number;

@@ -3,6 +3,7 @@ export const MEMBER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 export type MemberStatus = (typeof MEMBER_STATUSES)[number];
 export interface Membership {
+  departmentSeq: number;
   membershipSeq: number;
   customerSeq: number;
   organizationSeq: number;
@@ -20,6 +21,7 @@ export interface MemberCandidate {
   employeeNo: string | null;
 }
 export interface CsvMemberRow {
+  departmentSeq: number;
   employeeNo: string;
   name: string;
   phoneNumber: string;

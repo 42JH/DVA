@@ -1,5 +1,5 @@
 const http = require("node:http");
-const state = { review: 0, auth: 0, stale: 0, db: 1, errors: 0 };
+const state = { failed: 0, stale: 0, db: 1, errors: 0 };
 const messages = [];
 http
   .createServer(async (req, res) => {
@@ -26,8 +26,7 @@ http
         [
           `dva_database_up ${state.db}`,
           "dva_order_metrics_success 1",
-          `dva_orders_attention{status="REVIEW_REQUIRED"} ${state.review}`,
-          `dva_orders_attention{status="AUTH_FAILED"} ${state.auth}`,
+          `dva_orders_attention{status="SUBMISSION_FAILED"} ${state.failed}`,
           `dva_orders_attention{status="SUBMITTING"} ${state.stale}`,
           `dva_orders_stale_submitting ${state.stale}`,
           "# TYPE dva_submission_http_errors_total counter",
