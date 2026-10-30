@@ -3,6 +3,7 @@
 // 지금은 네트워크 없이 메모리 가짜 데이터 — 서버가 할 거르기 · 쪽 나누기도 여기서 흉내. 명세가 오면 fetchCalls · fetchAllCalls 몸통만 바꾸면 됨
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { addDays, todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
+import { matchKo, phoneDigits } from '@/shared/lib/search'
 import type { Outcome } from './callApi'
 
 export interface CallRow {
@@ -37,8 +38,7 @@ const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지�
 
 /** 조건에 맞는 통화, 최신순 (서버가 할 일) */
 function filtered(query: CallListQuery): CallRow[] {
-  const needle = query.q.trim().toLowerCase()
-  const digits = query.q.replace(/\D/g, '')
+  const digits = phoneDigits(query.q) // 숫자만 쳤을 때만 번호로 (띄어쓰기 · 초성 규칙은 matchKo)
   return ROWS.filter((r) => {
     const day = ymd(new Date(r.startedAt))
     return (
@@ -46,9 +46,7 @@ function filtered(query: CallListQuery): CallRow[] {
       day <= query.to &&
       (query.outcome === 'ALL' || r.outcome === query.outcome) &&
       (!query.complaintOnly || r.complaint !== null) &&
-      (!needle ||
-        r.customerName.toLowerCase().includes(needle) ||
-        (digits !== '' && r.callerNumber.includes(digits)))
+      (matchKo(r.customerName, query.q) || (digits !== '' && r.callerNumber.includes(digits)))
     )
   }).sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
 }

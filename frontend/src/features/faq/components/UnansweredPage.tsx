@@ -10,7 +10,13 @@ export function UnansweredPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SearchBox value={vm.q} onChange={vm.setQ} placeholder="질문 · 이름 · 전화번호" />
+      <SearchBox
+        value={vm.q}
+        onChange={vm.setQ}
+        recentKey="unanswered"
+        suggestions={vm.suggestions}
+        placeholder="질문 · 이름 · 전화번호"
+      />
       <AppliedFilters chips={vm.callChips} onRemove={vm.clearCall} onClear={vm.clearCall} />
 
       <UnansweredTable
