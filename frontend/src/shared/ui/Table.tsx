@@ -3,7 +3,8 @@ import { Checkbox } from './Checkbox'
 
 // 목록 표 — 03 · 04 · 05 · 08 · 09 · 10 공통 (와이어프레임 build_calls.table)
 // 카드(흰 바탕 · 선 · 모서리 12 · 안쪽 32) 안에: 머리줄(18/600 회색) → 구분선 → 줄들 → 페이지 번호(바깥에서 children으로)
-// 줄: 높이는 내용에 맞춤(최소 66 — 고객 두 줄 칸) · 호버 = 옅은 바탕 + 이름 · › 남색 · 선택 = 옅은 남색 바탕
+// 줄: 높이는 내용에 맞춤(최소 66 — 고객 두 줄 칸) · 호버 = 옅은 바탕 + 이름 남색 · 선택 = 옅은 남색 바탕
+// 줄 끝 › · ▾ 없음 (10/29 목록 줄 끝 꺽쇠 뺌 · 10/30 09 펼침 꺽쇠 뺌) — 누를 수 있는 줄은 호버 바탕과 손가락 커서로 보임
 // 선택 · 호버 줄 위의 태그는 Tag onTinted로 흰 바탕 (줄 바탕과 겹쳐 사라지지 않게)
 
 export interface Column<Row> {
@@ -33,13 +34,13 @@ export function Table<Row>({
   columns: Column<Row>[]
   rows: Row[]
   rowKey: (row: Row) => string | number
-  onRowClick?: (row: Row) => void // 있으면 줄 끝 › + 호버
+  onRowClick?: (row: Row) => void // 있으면 호버 + 손가락 커서
   selectable?: boolean // 맨 앞 체크박스 열
   selected?: Set<string | number>
   onSelect?: (key: string | number) => void
   onSelectAll?: () => void // 없으면 머리줄에 전체 선택 체크박스를 안 그림 (09: 실수로 전부 지우는 일 방지)
   subRows?: (row: Row, ctx: { tinted: boolean; gridCols: string }) => ReactNode // 05 질문 줄들 · 09 답변 띠 (같은 열 자리에 맞추도록 gridCols를 줌)
-  expanded?: (row: Row) => boolean // 펼치는 목록(08 · 09): 줄 끝 ›가 ▾ · ▴
+  expanded?: (row: Row) => boolean // 펼치는 목록(09): 펼친 줄은 옅은 바탕
   head?: ReactNode // 카드 제목 줄 (08 · 09: '기업 목록 24곳' + 버튼) — 높이 40, 아래 20
   empty?: string
   loading?: boolean
@@ -52,7 +53,6 @@ export function Table<Row>({
     ...columns.map((c) =>
       typeof c.width === 'number' ? `${c.width}px` : (c.width ?? 'minmax(120px, 1fr)'),
     ),
-    onRowClick ? '24px' : null,
   ]
     .filter(Boolean)
     .join(' ')
@@ -77,7 +77,6 @@ export function Table<Row>({
             {c.header}
           </span>
         ))}
-        {onRowClick && <span />}
       </div>
       <div className="border-t border-line" />
 
@@ -122,26 +121,6 @@ export function Table<Row>({
                       {c.cell(row, { tinted })}
                     </div>
                   ))}
-                  {onRowClick && (
-                    <svg
-                      viewBox="0 0 20 20"
-                      className="size-4 justify-self-end stroke-sub group-hover:stroke-action"
-                      fill="none"
-                      strokeWidth={1.8}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      {expanded ? (
-                        expanded(row) ? (
-                          <path d="M5 12l5-5 5 5" />
-                        ) : (
-                          <path d="M5 8l5 5 5-5" />
-                        )
-                      ) : (
-                        <path d="M8 5l5 5-5 5" />
-                      )}
-                    </svg>
-                  )}
                 </div>
                 {subRows?.(row, { tinted, gridCols })}
               </li>
