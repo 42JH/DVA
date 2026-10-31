@@ -72,6 +72,7 @@ export function OrderFormModal({ onClose }: { onClose: () => void }) {
               inline
               type="datetime-local"
               min={vm.pickupMin}
+              hint="선택"
               value={vm.pickupAt}
               error={vm.pickupError}
               onChange={(e) => vm.setPickupAt(e.target.value)}

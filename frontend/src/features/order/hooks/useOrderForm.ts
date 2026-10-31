@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
+import type { Address } from 'react-daum-postcode'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import type { Option } from '@/shared/ui'
 import { PAYMENT_LABEL } from '@/features/order/labels'
@@ -25,7 +26,7 @@ const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
 const phoneOk = (p: string) => p.length === 10 || p.length === 11
 
 /** 03 주문 추가(수기 접수) 창 훅 (와이어프레임 03_주문내역_주문추가, 10/31)
- * 보내는 분 · 받는 분(이름 · 전화번호 · 주소 검색 · 상세주소) + 품목 수량 · 기타 품목 · 물품 가액 · 수거 희망 일시 · 결제 방식 · 요청 사항
+ * 보내는 분 · 받는 분(이름 · 전화번호 · 주소 검색 · 상세주소) + 품목 수량 · 기타 품목 · 물품 가액 · 수거 희망 일시(선택) · 결제 방식 · 요청 사항
  * 주소는 직접 칠 수 없고 검색으로만 고름 (오타 주소로 수거 실패 방지). 접수되면 목록을 다시 받고 창을 닫음 */
 export function useOrderForm(onDone: () => void) {
   const qc = useQueryClient()
@@ -58,7 +59,7 @@ export function useOrderForm(onDone: () => void) {
       items: BOX_TYPES.filter((b) => counts[b] > 0).map((b) => ({ box: b, count: counts[b] })),
       etcItem: etcItem.trim(),
       declaredValue: declaredValue ? Number(declaredValue) : null,
-      pickupAt: fromDateTimeLocal(pickupAt),
+      pickupAt: pickupAt ? fromDateTimeLocal(pickupAt) : null,
       paymentMethod: payment,
       request: request.trim(),
     }
@@ -122,7 +123,9 @@ export function useOrderForm(onDone: () => void) {
     // 주소 검색 창 (폼 창 대신 뜸 — 두 창이 겹치면 Esc가 둘 다 닫음)
     searching: searching !== null,
     searchTitle: searching === 'receiver' ? '받는 분 주소 검색' : '보내는 분 주소 검색',
-    pickAddress: (road: string) => {
+    pickAddress: (a: Address) => {
+      // 도로명이 기본. 지번 주소를 골랐으면 도로명이 비어 있을 수 있어 그땐 고른 주소 그대로
+      const road = a.roadAddress || a.address
       if (searching)
         setParties((all) => ({ ...all, [searching]: { ...all[searching], roadAddress: road } }))
       setSearching(null)
@@ -133,7 +136,6 @@ export function useOrderForm(onDone: () => void) {
       partyOk(parties.sender) &&
       partyOk(parties.receiver) &&
       hasItem &&
-      pickupAt !== '' &&
       !pickupPast &&
       !mutation.isPending,
     isSubmitting: mutation.isPending,

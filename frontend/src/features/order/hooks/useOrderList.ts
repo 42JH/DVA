@@ -30,7 +30,7 @@ export interface OrderListRow {
   receivedAt: string[] // 올해면 한 줄, 다른 해면 날짜 · 시각 두 줄
   sender: PartyCell
   receiver: PartyCell
-  pickupAt: string | null // null = 접수 중이라 아직 없음 → '—'
+  pickupAt: string | null // null = 접수 중이거나 비워 둔 수기 접수 → '—'
   items: string | null // '소박스 1 · 중박스 1'
 }
 
