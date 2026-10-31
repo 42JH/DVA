@@ -73,7 +73,7 @@ export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 사용 중인 페르소나
   const [version, setVersion] = useState<number | null>(null) // null = 맨 위(저장됨 또는 적용 중)
   const [showAll, setShowAll] = useState(false)
-  const [editing, setEditing] = useState(false) // 수정 화면 (오른쪽 패널 없이 넓게)
+  const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
   const [compareFrom, setCompareFrom] = useState<number | null>(null) // null = 적용 중인 버전
 
@@ -116,8 +116,10 @@ export function usePersonaPage() {
           personaSeq: persona.personaSeq,
           personaName: persona.name,
           prompt: viewing.prompt,
+          voice: viewing.voice,
           basedOn: viewing.version,
           saveTo: Math.max(0, ...all.map((v) => v.version)) + 1,
+          voiceFirst: editing === 'voice',
         }
       : null
 
@@ -137,11 +139,16 @@ export function usePersonaPage() {
     setCompareFrom: (v: string) => setCompareFrom(Number(v)),
     closeCompare: () => setComparing(false),
 
-    editing,
+    editing: editing !== false,
     editTarget,
     startEdit: () => {
       setComparing(false)
-      setEditing(true)
+      setEditing('prompt')
+    },
+    // 보기 화면 [음성 세부 조절] = 음성만 바꿔도 새 버전이라 수정 화면으로 들어가며 음성 창을 엶
+    startVoice: () => {
+      setComparing(false)
+      setEditing('voice')
     },
     // 저장하면 새로 생긴 버전을 보여 줌 (취소면 보던 버전 그대로)
     finishEdit: (savedVersion?: number) => {
@@ -154,7 +161,7 @@ export function usePersonaPage() {
       name: p.name,
       selected: p.personaSeq === persona?.personaSeq,
       inUse: p.inUse,
-      lines: [`${p.voice} · ${SPEED_LABEL[p.speed]}`, WAIT_LABEL[p.waitTime]],
+      lines: [`${p.voice.voice} · ${SPEED_LABEL[p.voice.speed]}`, WAIT_LABEL[p.voice.waitTime]],
       versionLine: `적용 버전 v${p.activeVersion}${p.pendingVersion ? ` · v${p.pendingVersion} 저장됨` : ''}`,
     })),
     selectPersona: (seq: number) => {

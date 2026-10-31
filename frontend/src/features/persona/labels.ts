@@ -23,3 +23,11 @@ export const VERSION_TAG: Record<VersionStatus, { label: string; kind: TagKind }
 }
 
 export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전 ('v8 · 작성 중')
+
+// 음성 세부 조절 칩 (와이어프레임 07_음성세부조절 순서 그대로)
+export const SPEED_CHOICE: Record<Speed, string> = {
+  SLOW: '느리게',
+  NORMAL: '보통',
+  FAST: '빠르게',
+}
+export const WAIT_CHOICE: Record<WaitTime, string> = { SHORT: '짧게', NORMAL: '보통', LONG: '길게' }

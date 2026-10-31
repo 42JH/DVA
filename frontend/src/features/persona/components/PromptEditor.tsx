@@ -1,5 +1,6 @@
 import { Button, ConfirmDialog, Tag } from '@/shared/ui'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
+import { VoiceModal } from './VoiceModal'
 
 const LINE = 27 // 줄 높이 px — 줄 번호 칸과 글 칸이 같은 높이여야 번호가 맞음
 
@@ -22,7 +23,7 @@ export function PromptEditor({
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-card font-bold">시스템 프롬프트</h2>
         <div className="flex gap-2">
-          <Button disabled>음성 세부 조절</Button>
+          <Button onClick={vm.openVoice}>음성 세부 조절</Button>
           {compareLabel && <Button disabled>{compareLabel}</Button>}
         </div>
       </div>
@@ -69,6 +70,7 @@ export function PromptEditor({
         </Button>
       </div>
 
+      {vm.voiceOpen && <VoiceModal vm={vm} subtitle={vm.subtitle} />}
       {vm.confirmingDiscard && (
         <ConfirmDialog
           title="저장하지 않고 나갈까요?"

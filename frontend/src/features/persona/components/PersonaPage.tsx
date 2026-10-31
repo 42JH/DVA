@@ -41,7 +41,12 @@ export function PersonaPage() {
         {vm.compare ? (
           <VersionDiffCard view={vm.compare} onFrom={vm.setCompareFrom} onClose={vm.closeCompare} />
         ) : (
-          <PromptCard prompt={vm.prompt} onEdit={vm.startEdit} onCompare={vm.startCompare} />
+          <PromptCard
+            prompt={vm.prompt}
+            onEdit={vm.startEdit}
+            onCompare={vm.startCompare}
+            onVoice={vm.startVoice}
+          />
         )}
       </div>
       <aside className="flex w-[346px] shrink-0 flex-col rounded-xl bg-surface px-5 pt-3 pb-5 ring-1 ring-line ring-inset">
