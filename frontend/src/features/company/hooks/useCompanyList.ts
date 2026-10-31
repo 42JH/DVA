@@ -1,9 +1,10 @@
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { pageCount } from '@/shared/api/paging'
 import { useListParams } from '@/shared/lib/useListParams'
 import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
-import { BILLING_LABEL } from '@/features/company/labels'
+import { BILLING_LABEL, errorText } from '@/features/company/labels'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
 const SEARCH_DELAY_MS = 300 // 서버 검색이라 칠 때마다 요청하지 않게 — 멈추고 0.3초 뒤
@@ -21,6 +22,7 @@ export interface CompanyRow {
 export function useCompanyList() {
   const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   // 검색칸은 바로 바뀌고(URL), 요청은 멈춘 뒤에
   const [searched, setSearched] = useState(params.q)
@@ -67,9 +69,7 @@ export function useCompanyList() {
         done++
       }
     } catch (e) {
-      setDeleteError(
-        `${ids.length}곳 중 ${done}곳 삭제했습니다. 나머지는 실패했어요: ${(e as Error).message}`,
-      )
+      setDeleteError(`${ids.length}곳 중 ${done}곳 삭제했습니다. 나머지는 ${errorText(e, '삭제')}`)
     } finally {
       setDeleting(false)
       setConfirming(false)
@@ -92,7 +92,7 @@ export function useCompanyList() {
     rows,
     total,
     isLoading: list.isPending,
-    loadError: list.error?.message ?? null,
+    loadError: list.error ? '기업 목록을 불러오지 못했습니다. 새로고침해 주세요.' : null,
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),
@@ -115,6 +115,8 @@ export function useCompanyList() {
     deleting,
     deleteError,
     selectedNames: rows.filter((r) => selected.has(r.id)).map((r) => r.name),
+
+    open: (id: number) => navigate(`/companies/${id}`), // 줄 클릭 → 상세
 
     csvOpen,
     openCsv: () => setCsvOpen(true),

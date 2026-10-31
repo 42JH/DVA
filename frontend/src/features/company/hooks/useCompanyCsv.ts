@@ -14,6 +14,7 @@ import {
   serverRowErrors,
   type CsvMember,
 } from '@/features/company/csvMembers'
+import { errorText } from '@/features/company/labels'
 
 /** 파일 상태 — 아직 없음 / 읽음(사원 목록) / 틀림(처음 3줄 + 나머지 건수) */
 type Picked =
@@ -71,11 +72,9 @@ export function useCompanyCsv(onDone: () => void) {
     ? reg.data
       ? `사원은 등록했지만 대표자 ${reg.data}명 지정에 실패했습니다. 기업 상세에서 다시 지정해 주세요.`
       : null
-    : err instanceof ApiError && err.code === 'REQUEST_IN_PROGRESS'
-      ? '다른 등록을 처리하는 중이에요. 잠시 뒤 다시 [등록]을 눌러 주세요.'
-      : createdId !== null
-        ? `기업은 만들었지만 사원을 등록하지 못했습니다. ${rowErrors[0] ?? err.message}`
-        : err.message
+    : createdId !== null
+      ? `기업은 만들었지만 사원을 등록하지 못했습니다. ${rowErrors[0] ?? errorText(err, '등록')}`
+      : errorText(err, '등록')
 
   return {
     name,

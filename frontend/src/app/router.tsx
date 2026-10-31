@@ -14,6 +14,7 @@ import { PersonaPage } from '@/features/persona/components/PersonaPage'
 import { MyInfoPage } from '@/features/me/components/MyInfoPage'
 import { AdminPage } from '@/features/admin/components/AdminPage'
 import { CompanyListPage } from '@/features/company/components/CompanyListPage'
+import { CompanyDetailPage } from '@/features/company/components/CompanyDetailPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -60,6 +61,11 @@ export const router = createBrowserRouter([
           {
             path: 'companies',
             element: <CompanyListPage />,
+            handle: { title: '기업관리' } satisfies RouteHandle,
+          },
+          {
+            path: 'companies/:companyId',
+            element: <CompanyDetailPage />,
             handle: { title: '기업관리' } satisfies RouteHandle,
           },
           {

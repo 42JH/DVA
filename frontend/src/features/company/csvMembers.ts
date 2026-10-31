@@ -18,6 +18,10 @@ export function decodeCsv(bytes: ArrayBuffer): string {
   }
 }
 
+/** 전화번호: 하이픈 · 공백을 빼고 0으로 시작하는 10~11자리 (CSV · 사원 추가 창 공용) */
+export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
+export const isPhone = (digits: string) => /^0\d{9,10}$/.test(digits)
+
 export interface CsvMember extends MemberInput {
   leader: boolean // 대표자 Y → 등록 후 PATCH role=ORG_ADMIN
   line: number // 파일의 행 번호 (오류 안내용)
@@ -56,10 +60,10 @@ export function readMembersCsv(text: string): CsvResult {
   const seenPhone = new Map<string, number>()
   body.forEach(([no = '', name = '', phone = '', leader = ''], i) => {
     const line = i + 2 // 머리줄 다음부터
-    const digits = phone.replace(/[-\s]/g, '')
+    const digits = phoneDigits(phone)
     if (!no) return errors.push(`${line}행 사번이 비어 있습니다.`)
     if (!name) return errors.push(`${line}행 사원명이 비어 있습니다.`)
-    if (!/^0\d{9,10}$/.test(digits)) return errors.push(`${line}행 전화번호 형식이 맞지 않습니다.`)
+    if (!isPhone(digits)) return errors.push(`${line}행 전화번호 형식이 맞지 않습니다.`)
     if (leader !== '' && leader.toUpperCase() !== 'Y')
       return errors.push(`${line}행 대표자는 Y 또는 빈칸이어야 합니다.`)
     // 명세: 요청 안의 사번 · 전화 중복은 보내기 전에 정리 → 겹치면 어느 줄인지 알려 줌

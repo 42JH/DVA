@@ -66,6 +66,7 @@ export function CompanyListPage() {
         columns={columns}
         rows={vm.rows}
         rowKey={(r) => r.id}
+        onRowClick={(r) => vm.open(r.id)}
         selectable
         selected={vm.selected}
         onSelect={(id) => vm.toggle(Number(id))}
