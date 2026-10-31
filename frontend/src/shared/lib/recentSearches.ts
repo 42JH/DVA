@@ -15,7 +15,7 @@ function load(key: string): string[] {
   }
 }
 
-/** 세션이 끝날 때 (shared/auth/token의 clearToken — 로그아웃 · 401 · 만료) */
+/** 세션이 끝날 때 (shared/auth/session의 clearSession — 로그아웃 · 401 · 만료) */
 export function clearRecentSearches(): void {
   try {
     for (const k of Object.keys(localStorage)) if (k.startsWith(PREFIX)) localStorage.removeItem(k)
