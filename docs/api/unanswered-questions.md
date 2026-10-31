@@ -66,7 +66,7 @@ X-Request-Id와 Cache-Control: no-store를 제공하며 오류도 기존 error/m
 7. REGISTERED·DELETED의 재전송에도 기존 번호를 반환하며 OPEN으로 되돌리거나 삭제한 원문을 복원하지 않는다. 삭제 후 원문 비교는 보존한 payload_hash로 처리한다.
 8. HTTP 로그·감사 metadata에 질문 원문·AI 세션 식별자·토큰을 복사하지 않는다.
 
-상태는 OPEN 수집됨, REGISTERED FAQ 전환됨, DELETED 업무 삭제됨이다. FAQ 전환·삭제 HTTP API는 후속 작업이다.
+상태는 OPEN 수집됨, REGISTERED FAQ 전환됨, DELETED 업무 삭제됨이다. [UNQ-03·UNQ-04](unanswered-questions-management.md)로 전환·삭제하며 질문 원문은 수집 재전송으로 복구하지 않는다.
 삭제는 발생 식별자·본문 해시를 보존하는 업무 삭제를 전제로 한다. DB 직접 물리 삭제는 중복 방지 이력까지 제거한다.
 
 ## 통화 처리 결과 연결
@@ -120,5 +120,5 @@ PBX 시각·주문·분석·페르소나·기존 발화는 변경하지 않는�
 
 검증 범위는 실제 Nest/DB의 201·200·인증·동시 재전송·상태 보존·충돌·원문 보존·51건 누적 수집,
 감사 실패 롤백, EVT-01 실패 후 재전송과 처리 결과 조회, 삭제 원문 비노출, OpenAPI·기존 기능 회귀다.
-REGISTERED·DELETED 상태 전환은 테스트 DB fixture로 재현하며 후속 관리 HTTP API 구현을 뜻하지 않는다.
+수집 테스트의 REGISTERED·DELETED fixture 외에 관리 API의 실제 전환·삭제·재전송도 별도 통합 검증한다.
 실제 AI 전송부·운영 DB 적용·배포는 별도 확인 대상이다.

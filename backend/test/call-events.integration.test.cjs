@@ -652,8 +652,8 @@ async function readSession(role) {
 async function createFaq() {
   return (
     await pool.query(
-      `INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq)
-       VALUES('현재 FAQ 질문','현재 FAQ 답변',(SELECT admin_user_seq FROM admin_users LIMIT 1)) RETURNING faq_entry_seq`,
+      `INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category)
+       VALUES('현재 FAQ 질문','현재 FAQ 답변',(SELECT admin_user_seq FROM admin_users LIMIT 1),'기타') RETURNING faq_entry_seq`,
     )
   ).rows[0].faq_entry_seq;
 }

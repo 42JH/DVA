@@ -9,7 +9,7 @@ test('21: all active roles create, view and edit FAQs while AI immediately reads
   for (let actor = 0; actor < 3; actor++) {
     const question = f.marker(),
       answer = '첫 문단\n\n- 안내\n\n| 항목 | 설명 |\n| --- | --- |\n| 내용 | 보존 |';
-    const id = await f.createdId({ question, answer }, actor);
+    const id = await f.createdId({ category: '기타', question, answer }, actor);
     const admin = await f.get(`/api/faqs/${id}`, actor);
     assert.equal(admin.status, 200);
     const original = (await admin.json()).data;
@@ -18,7 +18,11 @@ test('21: all active roles create, view and edit FAQs while AI immediately reads
     assert.equal(original.updatedByAdminUserSeq, f.ids[actor]);
     assert.ok(original.createdAt);
     const changed = '수정된 답변\n다음 문장';
-    const response = await f.patch(id, { answer: changed }, (actor + 1) % 3);
+    const response = await f.patch(
+      id,
+      { category: '접수', question, answer: changed },
+      (actor + 1) % 3,
+    );
     assert.equal(response.status, 204);
     assert.equal(await response.text(), '');
     const ai = await f.ai('/' + id);
@@ -64,7 +68,7 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
     [marker, '특수 %_ 문자'],
     [marker, '일반 문자'],
   ])
-    ids.push(await f.createdId({ question, answer }));
+    ids.push(await f.createdId({ category: '기타', question, answer }));
   const page = async (query, ai = false) => {
     const response = ai
       ? await f.ai('?' + new URLSearchParams(query))
@@ -98,24 +102,38 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
   assert.deepEqual(await page({ q: "' OR 1=1; --" }), { data: [], hasNext: false });
 });
 
-test('21: partial concurrent edits preserve omitted fields without a version check', async () => {
-  const id = await f.createdId({ question: f.marker(), answer: '기존' });
-  const results = await Promise.all([
-    f.patch(id, { question: '새 질문' }),
-    f.patch(id, { answer: '새 답변' }, 1),
-  ]);
+test('21: updates require all three fields and concurrent full edits commit a complete request without mixing fields', async () => {
+  const initial = { category: '기타', question: f.marker(), answer: '기존' };
+  const id = await f.createdId(initial);
+  for (const field of Object.keys(initial)) {
+    const body = { ...initial };
+    delete body[field];
+    await f.error(await f.patch(id, body), 400, 'INVALID_REQUEST');
+  }
+  const edits = [
+    { category: '접수', question: '새 질문 A', answer: '새 답변 A' },
+    { category: '주소', question: '새 질문 B', answer: '새 답변 B' },
+  ];
+  const results = await Promise.all(edits.map((body, actor) => f.patch(id, body, actor)));
   assert.deepEqual(
     results.map((r) => r.status),
     [204, 204],
   );
-  const { data } = await (await f.ai('/' + id)).json();
-  assert.equal(data.question, '새 질문');
-  assert.equal(data.answer, '새 답변');
+  const { data } = await (await f.get('/api/faqs/' + id)).json();
+  assert.ok(
+    edits.some(
+      (edit) =>
+        edit.category === data.category &&
+        edit.question === data.question &&
+        edit.answer === data.answer,
+    ),
+  );
 });
 
 test('AI fetches changed FAQ IDs in the existing data/hasNext envelope with bounded pagination and deleted IDs omitted', async () => {
   const ids = [];
-  for (let i = 0; i < 3; i++) ids.push(await f.createdId({ question: f.marker(), answer: '답변' }));
+  for (let i = 0; i < 3; i++)
+    ids.push(await f.createdId({ category: '기타', question: f.marker(), answer: '답변' }));
   const query = `?faqEntrySeqs=${[ids[2], ids[0]].join(',')}`;
   const body = await (await f.ai(query)).json();
   assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
@@ -160,7 +178,7 @@ test('one create and delete API supports single and multiple FAQs for every acti
   for (let actor = 0; actor < 3; actor++) {
     const marker = f.marker();
     const one = await f.create(
-      { items: [{ question: marker + ' single', answer: '답변' }] },
+      { items: [{ category: '기타', question: marker + ' single', answer: '답변' }] },
       actor,
     );
     assert.equal(one.status, 204, await one.clone().text());
@@ -168,8 +186,8 @@ test('one create and delete API supports single and multiple FAQs for every acti
     const many = await f.create(
       {
         items: [
-          { question: marker + ' first', answer: '첫 답변' },
-          { question: marker + ' second', answer: '둘째 답변' },
+          { category: '기타', question: marker + ' first', answer: '첫 답변' },
+          { category: '기타', question: marker + ' second', answer: '둘째 답변' },
         ],
       },
       actor,
@@ -211,10 +229,13 @@ test('one create and delete API supports single and multiple FAQs for every acti
 
 test('bulk writes reject invalid or missing entries and audit failure rolls back every FAQ in the request', async () => {
   const ids = [];
-  for (let i = 0; i < 2; i++) ids.push(await f.createdId({ question: f.marker(), answer: '유지' }));
+  for (let i = 0; i < 2; i++)
+    ids.push(await f.createdId({ category: '기타', question: f.marker(), answer: '유지' }));
   const before = await f.counts();
   await f.error(
-    await f.create({ items: [{ question: f.marker(), answer: '답변' }, { question: '누락' }] }),
+    await f.create({
+      items: [{ category: '기타', question: f.marker(), answer: '답변' }, { question: '누락' }],
+    }),
     400,
     'INVALID_REQUEST',
   );
@@ -231,8 +252,8 @@ test('bulk writes reject invalid or missing entries and audit failure rolls back
     () =>
       f.create({
         items: [
-          { question: f.marker(), answer: '롤백' },
-          { question: f.marker(), answer: '롤백' },
+          { category: '기타', question: f.marker(), answer: '롤백' },
+          { category: '기타', question: f.marker(), answer: '롤백' },
         ],
       }),
     () => f.write('DELETE', '/api/faqs', { faqEntrySeqs: ids }),
@@ -257,17 +278,23 @@ test('21: administrator sessions and Origins protect reads and writes; AI cookie
   const before = await f.counts();
   await f.error(await f.get('/api/faqs', 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
   await f.error(
-    await f.create({ question: '질문', answer: '답변' }, 0, { Cookie: undefined }),
+    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+      Cookie: undefined,
+    }),
     401,
     'UNAUTHORIZED',
   );
   await f.error(
-    await f.create({ question: '질문', answer: '답변' }, 0, { Origin: undefined }),
+    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+      Origin: undefined,
+    }),
     403,
     'FORBIDDEN',
   );
   await f.error(
-    await f.create({ question: '질문', answer: '답변' }, 0, { Origin: 'https://foreign.invalid' }),
+    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+      Origin: 'https://foreign.invalid',
+    }),
     403,
     'FORBIDDEN',
   );
@@ -296,19 +323,25 @@ test('21: administrator sessions and Origins protect reads and writes; AI cookie
   }
   assert.deepEqual(await f.counts(), before);
   await f.error(
-    await f.write('POST', '/api/ai/faqs', { question: '질문', answer: '답변' }, 0, {
-      Cookie: undefined,
-    }),
+    await f.write(
+      'POST',
+      '/api/ai/faqs',
+      { category: '기타', question: '질문', answer: '답변' },
+      0,
+      {
+        Cookie: undefined,
+      },
+    ),
     404,
     'NOT_FOUND',
   );
 });
 
 test('21: invalid bodies, IDs and search parameters fail without changing FAQs', async () => {
-  const id = await f.createdId({ question: f.marker(), answer: '답변' });
+  const id = await f.createdId({ category: '기타', question: f.marker(), answer: '답변' });
   const before = await f.counts();
+  await f.error(await f.patch(id, {}), 400, 'INVALID_REQUEST');
   for (const body of [
-    {},
     { question: '' },
     { question: null },
     { answer: null },
@@ -317,7 +350,11 @@ test('21: invalid bodies, IDs and search parameters fail without changing FAQs',
     { updatedByAdminUserSeq: f.ids[1] },
     { question: 'x\0y' },
   ])
-    await f.error(await f.patch(id, body), 400, 'INVALID_REQUEST');
+    await f.error(
+      await f.patch(id, { category: '기타', question: '질문', answer: '답변', ...body }),
+      400,
+      'INVALID_REQUEST',
+    );
   for (const suffix of [
     '/0',
     '/-1',
@@ -332,12 +369,16 @@ test('21: invalid bodies, IDs and search parameters fail without changing FAQs',
   ])
     await f.error(await f.ai(suffix), 400, 'INVALID_REQUEST');
   await f.error(await f.ai('/2147483647'), 404, 'NOT_FOUND');
-  await f.error(await f.patch(2147483647, { answer: '없음' }), 404, 'NOT_FOUND');
+  await f.error(
+    await f.patch(2147483647, { category: '기타', question: '질문', answer: '없음' }),
+    404,
+    'NOT_FOUND',
+  );
   assert.deepEqual(await f.counts(), before);
 });
 
 test('21: audit persistence failure rolls back content and reads never disguise DB failure as an empty FAQ list', async () => {
-  const id = await f.createdId({ question: f.marker(), answer: '유지' });
+  const id = await f.createdId({ category: '기타', question: f.marker(), answer: '유지' });
   const before = await f.counts();
   const audit = f.app.get(AuditService),
     record = audit.recordSuccess;
@@ -345,8 +386,16 @@ test('21: audit persistence failure rolls back content and reads never disguise 
     throw Error('private-faq-audit-failure');
   };
   try {
-    await f.error(await f.create({ question: f.marker(), answer: '롤백' }), 500, 'INTERNAL_ERROR');
-    await f.error(await f.patch(id, { answer: '롤백' }), 500, 'INTERNAL_ERROR');
+    await f.error(
+      await f.create({ category: '기타', question: f.marker(), answer: '롤백' }),
+      500,
+      'INTERNAL_ERROR',
+    );
+    await f.error(
+      await f.patch(id, { category: '기타', question: '질문', answer: '롤백' }),
+      500,
+      'INTERNAL_ERROR',
+    );
   } finally {
     audit.recordSuccess = record;
   }
@@ -367,7 +416,11 @@ test('21: audit persistence failure rolls back content and reads never disguise 
 
 test('21: FAQ contents persist across application restarts and HTTP logs omit questions and answers', async () => {
   const secret = f.marker();
-  const id = await f.createdId({ question: secret, answer: '비공개 로그 확인 ' + secret });
+  const id = await f.createdId({
+    category: '기타',
+    question: secret,
+    answer: '비공개 로그 확인 ' + secret,
+  });
   await f.ai('?' + new URLSearchParams({ q: secret }));
   const app = await f.start();
   const response = await fetch((await app.getUrl()) + '/api/ai/faqs/' + id);
@@ -403,8 +456,10 @@ test('21: Swagger documents single/bulk management bodies and two read-only AI o
   const ai = spec.components.schemas.AgentFaqDto;
   assert.equal(ai.properties.updatedByAdminUserSeq, undefined);
   assert.equal(ai.properties.isEnabled, undefined);
+  assert.equal(ai.properties.category, undefined);
   assert.deepEqual(Object.keys(spec.components.schemas.CreateFaqDto.properties).sort(), [
     'answer',
+    'category',
     'question',
   ]);
 });

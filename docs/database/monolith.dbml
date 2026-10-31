@@ -1,10 +1,10 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-31 / backend/migrations/001~026 기준. public 업무·관리자 27개 + PBX 수신 1개 = ERD 28개, FK 26개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-31 / backend/migrations/001~027 기준. public 업무·관리자 27개 + PBX 수신 1개 = ERD 28개, FK 26개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
-// 026까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 027까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
 // 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
 // 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
 
@@ -543,6 +543,7 @@ Table ai_persona_versions {
 
 Table faq_entries {
   faq_entry_seq integer [pk, increment, not null, note: '행의 고유 기본키']
+  category text [not null, note: '사진 기준 고정 10개 분류. 전체는 저장하지 않으며 AI 응답에는 제공하지 않음']
   question text [not null, note: 'FAQ 질문']
   answer text [not null, note: 'FAQ 답변']
   updated_by_admin_user_seq integer [not null, note: '수정 관리자 논리 참조. 이름은 감사 로그에 보존']
@@ -551,6 +552,7 @@ Table faq_entries {
   checks {
     `btrim(question)<>''`
     `btrim(answer)<>''`
+    `category IN ('접수','수거 일정','물품·박스','포장·파손','배송·운송장','주소','변경·취소','요금·결제','이용 안내','기타')`
   }
   Note: 'operations / FAQ 단건·복수 추가/삭제와 단건 수정. API·초기 등록은 변경·감사·AI 알림 대기를 함께 커밋한다. 임베딩은 AI 측에서 관리.'
 }

@@ -279,7 +279,7 @@ test('OPEN is the default, registered questions have a live FAQ link and deleted
   const deleted = await question(call, q + ' DELETED');
   const faq = (
     await pool.query(
-      'INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES($1,$2,$3) RETURNING faq_entry_seq',
+      "INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES($1,$2,$3,'기타') RETURNING faq_entry_seq",
       ['조회 fixture 질문', '조회 fixture 답변', adminId],
     )
   ).rows[0].faq_entry_seq;

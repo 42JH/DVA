@@ -263,7 +263,7 @@ test('registered and deleted questions remain in their workflow state when origi
   const id = await success(await post(body), 201);
   const faqId = (
     await pool.query(
-      "INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES('미답변 전환 테스트','답변',$1) RETURNING faq_entry_seq",
+      "INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES('미답변 전환 테스트','답변',$1,'기타') RETURNING faq_entry_seq",
       [adminId],
     )
   ).rows[0].faq_entry_seq;

@@ -9,6 +9,43 @@ import { UnansweredQuestionQueryDto } from './dto/unanswered-question-query.dto'
 export class UnansweredQuestionsRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async findForUpdate(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        status: 'OPEN' | 'REGISTERED' | 'DELETED';
+        faqId: number | null;
+        conversionHash: string | null;
+      }>(
+        `SELECT status,faq_entry_seq AS "faqId",faq_conversion_hash AS "conversionHash"
+       FROM unanswered_questions WHERE unanswered_question_seq=$1 FOR UPDATE`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async faqExists(client: PoolClient, id: number): Promise<boolean> {
+    return (
+      (await client.query('SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1 FOR KEY SHARE', [id]))
+        .rowCount === 1
+    );
+  }
+
+  async register(client: PoolClient, id: number, faqId: number, hash: string): Promise<void> {
+    await client.query(
+      `UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=$2,
+       faq_conversion_hash=$3,registered_at=clock_timestamp() WHERE unanswered_question_seq=$1`,
+      [id, faqId, hash],
+    );
+  }
+
+  async delete(client: PoolClient, id: number): Promise<void> {
+    await client.query(
+      `UPDATE unanswered_questions SET status='DELETED',question_text=NULL,deleted_at=clock_timestamp()
+       WHERE unanswered_question_seq=$1`,
+      [id],
+    );
+  }
+
   async findMany(query: UnansweredQuestionQueryDto): Promise<UnansweredQuestionDto[]> {
     return (
       await this.database.pool.query<UnansweredQuestionDto>(

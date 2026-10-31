@@ -119,7 +119,7 @@ BEGIN
  requested_by_admin_user_seq=admin_id,requested_at=CURRENT_TIMESTAMP WHERE ai_persona_version_seq=prompt_id;
  PERFORM pg_temp.expect_error(format('INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level,status,application_id,requested_by_admin_user_seq,requested_at) VALUES(%s,2,%L,%L,%L,%L,%L,%s,CURRENT_TIMESTAMP)',persona_id,'Second','Second','NORMAL','PENDING','00000000-0000-4000-8000-000000000098',admin_id),'23505');
  UPDATE ai_persona_versions SET status='ACTIVE',applied_at=CURRENT_TIMESTAMP WHERE ai_persona_version_seq=prompt_id;
- INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES('Question','Answer',admin_id) RETURNING faq_entry_seq INTO faq_id;
+ INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES('Question','Answer',admin_id,'기타') RETURNING faq_entry_seq INTO faq_id;
  SELECT updated_at INTO before_time FROM faq_entries WHERE faq_entry_seq=faq_id;
  UPDATE faq_entries SET answer='Updated' WHERE faq_entry_seq=faq_id;
  IF (SELECT updated_at FROM faq_entries WHERE faq_entry_seq=faq_id)<=before_time THEN RAISE EXCEPTION 'FAQ timestamp failed'; END IF;

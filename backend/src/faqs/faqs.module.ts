@@ -19,5 +19,6 @@ import { FaqNotificationsWorker } from './faq-notifications.worker';
     FaqNotificationsWorker,
   ],
   controllers: [FaqsController, AiFaqsController],
+  exports: [FaqsService],
 })
 export class FaqsModule {}

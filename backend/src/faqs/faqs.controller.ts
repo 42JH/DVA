@@ -31,7 +31,7 @@ import {
   CreateFaqsDto,
   DeleteFaqsDto,
   FaqIdParamsDto,
-  FaqQueryDto,
+  AdminFaqQueryDto,
   UpdateFaqDto,
 } from './dto/faq-request.dto';
 import { CreateFaqPipe } from './create-faq.pipe';
@@ -44,7 +44,7 @@ import { FaqsService } from './faqs.service';
 @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
-  description: '요청 형식·질문·답변·검색 조건 오류.',
+  description: '요청 형식·필수 분류·질문·답변·검색 조건 오류.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 401, description: '활성 관리자 세션 필요.', type: ErrorResponseDto })
@@ -56,10 +56,11 @@ export class FaqsController {
   @Get()
   @ApiOperation({
     summary: '관리자 FAQ 목록 조회',
-    description: '모든 활성 관리자 허용. 질문·답변을 검색하며 FAQ 번호 오름차순으로 조회합니다.',
+    description:
+      '모든 활성 관리자 허용. 분류·질문·답변으로 검색하며 FAQ 번호 오름차순으로 조회합니다. 전체 분류는 category를 생략합니다.',
   })
   @ApiOkResponse({ type: FaqListResponseDto })
-  list(@Query() query: FaqQueryDto) {
+  list(@Query() query: AdminFaqQueryDto) {
     return this.faqs.list(query);
   }
 
@@ -77,7 +78,7 @@ export class FaqsController {
   @ApiOperation({
     summary: '관리자 FAQ 단건·복수 등록',
     description:
-      'items에 1~100건을 전달합니다. 기존 질문·답변 단건 본문도 지원합니다. 전체 저장·감사 기록은 함께 커밋하거나 롤백합니다.',
+      '분류·질문·답변을 모두 전달합니다. 단건 객체 또는 items 1~100건을 지원합니다. 전체 저장·감사·알림 대기는 함께 커밋하거나 롤백합니다.',
   })
   @ApiBody({
     schema: {
@@ -114,7 +115,7 @@ export class FaqsController {
   @ApiOperation({
     summary: '관리자 FAQ 수정',
     description:
-      '전달한 질문·답변만 변경합니다. 버전 비교 없이 요청을 처리하고 AI 조회에는 커밋된 최신 내용이 보입니다.',
+      '분류·질문·답변이 모두 필수입니다. 부분 수정은 허용하지 않습니다. 버전 비교 없이 전체 입력을 저장하며 AI 응답 필드는 유지합니다.',
   })
   @ApiNoContentResponse({ description: '수정 완료.' })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: 'FAQ 없음.' })

@@ -69,8 +69,8 @@ test('FAQ changes queue one notification per request, preserve deleted IDs, and 
     (
       await f.create({
         items: [
-          { question: marker + '1', answer: '답변' },
-          { question: marker + '2', answer: '답변' },
+          { category: '기타', question: marker + '1', answer: '답변' },
+          { category: '기타', question: marker + '2', answer: '답변' },
         ],
       })
     ).status,
@@ -79,7 +79,10 @@ test('FAQ changes queue one notification per request, preserve deleted IDs, and 
   const ids = (await (await f.ai('?q=' + marker)).json()).data.map((row) => row.faqEntrySeq);
   assert.equal((await rows()).length, 1);
   assert.equal(requests.length, 0);
-  assert.equal((await f.patch(ids[0], { answer: '수정' })).status, 204);
+  assert.equal(
+    (await f.patch(ids[0], { category: '기타', question: marker + '1', answer: '수정' })).status,
+    204,
+  );
   assert.equal((await f.write('DELETE', '/api/faqs', { faqEntrySeqs: ids })).status, 204);
   const events = await rows();
   assert.deepEqual(
@@ -115,7 +118,7 @@ test('FAQ changes queue one notification per request, preserve deleted IDs, and 
 
 test('missing configuration retains notifications and FAQ writes; rollback never leaves an event or sends HTTP', async () => {
   config.set('AI_FAQ_TOKEN', '');
-  await f.createdId({ question: f.marker(), answer: '설정 없이도 저장' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '설정 없이도 저장' });
   await worker.run();
   assert.equal(requests.length, 0);
   assert.equal((await rows())[0].attempts, 0);
@@ -129,7 +132,7 @@ test('missing configuration retains notifications and FAQ writes; rollback never
     });
   try {
     await f.error(
-      await f.create({ items: [{ question: f.marker(), answer: '롤백' }] }),
+      await f.create({ items: [{ category: '기타', question: f.marker(), answer: '롤백' }] }),
       500,
       'INTERNAL_ERROR',
     );
@@ -157,7 +160,7 @@ test('uncommitted content and its notification cannot be observed by the deliver
     }
     return record.apply(audit, args);
   };
-  const creating = f.create({ question: f.marker(), answer: '커밋 후 전송' });
+  const creating = f.create({ category: '기타', question: f.marker(), answer: '커밋 후 전송' });
   try {
     await ready;
     await worker.run();
@@ -173,7 +176,8 @@ test('uncommitted content and its notification cannot be observed by the deliver
 });
 
 test('failures retry the same event after backoff and later notifications never overtake it', async () => {
-  for (let i = 0; i < 2; i++) await f.createdId({ question: f.marker(), answer: '유지' });
+  for (let i = 0; i < 2; i++)
+    await f.createdId({ category: '기타', question: f.marker(), answer: '유지' });
   status = 400;
   await worker.run();
   let pending = await rows();
@@ -201,7 +205,11 @@ test('failures retry the same event after backoff and later notifications never 
 });
 
 test('server errors, redirects and timeouts retain the same notification and do not expose its contents', async () => {
-  await f.createdId({ question: f.marker(), answer: '본문은 알림에 포함하지 않음' });
+  await f.createdId({
+    category: '기타',
+    question: f.marker(),
+    answer: '본문은 알림에 포함하지 않음',
+  });
   for (const code of [500, 307, 200]) {
     status = code;
     await worker.run();
@@ -218,7 +226,7 @@ test('server errors, redirects and timeouts retain the same notification and do 
 });
 
 test('another backend instance resumes a pending event with its original event ID', async () => {
-  await f.createdId({ question: f.marker(), answer: '재시작 보존' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '재시작 보존' });
   status = 400;
   await worker.run();
   await due();
@@ -234,14 +242,14 @@ test('another backend instance resumes a pending event with its original event I
 });
 
 test('concurrent instances claim one event; expired claims recover and stale owners cannot complete it', async () => {
-  await f.createdId({ question: f.marker(), answer: '중복 점유 방지' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '중복 점유 방지' });
   process.env.AI_FAQ_TOKEN = '';
   const app = await f.start();
   app.get(ConfigService).set('AI_AGENT_URL', aiUrl);
   app.get(ConfigService).set('AI_FAQ_TOKEN', token);
   await Promise.all([worker.run(), worker.run(), app.get(FaqNotificationsWorker).run()]);
   assert.equal(requests.length, 1);
-  await f.createdId({ question: f.marker(), answer: '점유 후 중단' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '점유 후 중단' });
   const repo = f.app.get(FaqNotificationsRepository);
   const first = await repo.claim();
   assert.ok(first);
@@ -260,7 +268,7 @@ test('concurrent instances claim one event; expired claims recover and stale own
 });
 
 test('notification audit failure rolls back a claim so no HTTP is sent and the next attempt can recover', async () => {
-  await f.createdId({ question: f.marker(), answer: '감사와 점유 원자성' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '감사와 점유 원자성' });
   const audit = f.app.get(AuditService),
     record = audit.recordSuccess;
   audit.recordSuccess = async () => {
@@ -293,7 +301,7 @@ test('database constraints forbid empty/multiple-update event payloads and incoh
         ),
       (error) => error.code === '23514',
     );
-  await f.createdId({ question: f.marker(), answer: '점유 제약' });
+  await f.createdId({ category: '기타', question: f.marker(), answer: '점유 제약' });
   await assert.rejects(
     () => f.pool.query('UPDATE faq_change_notifications SET claim_id=$1', [randomUUID()]),
     (error) => error.code === '23514',

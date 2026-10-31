@@ -1,12 +1,12 @@
 # 모놀리식 백엔드 공통 기반
 
-AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 새 앱 실행 전에 026까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
+AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 현재 앱 실행 전에는 FAQ 분류를 포함해 027까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
 
-AI 미답변 질문은 [UNQ-01 계약](../docs/api/unanswered-questions.md)에 따라 POST /api/ai/unanswered-questions로 수집한다. 같은 AI_INSIGHTS_TOKEN을 사용하며 최초 201·동일 발생 재전송 200이다. 신규 상태는 OPEN, 위치는 정수 초 또는 null이다. 프론트의 목록·검색은 [UNQ-02](../docs/api/unanswered-questions-read-spec.md) GET /api/unanswered-questions를 사용한다. 관리자 세션 전용, 기본 OPEN, 오래된 통화부터 조회하며 기간은 PBX 우선·AI 분석 대체의 통화 시작 기준이다. 기존 026을 사용하며 추가 migration은 없다. FAQ 전환·삭제 HTTP API와 검색 총건수 계약·통계 뷰는 후속 작업이다.
+AI 미답변 질문은 [UNQ-01 계약](../docs/api/unanswered-questions.md)에 따라 POST /api/ai/unanswered-questions로 수집한다. 같은 AI_INSIGHTS_TOKEN을 사용하며 최초 201·동일 발생 재전송 200이다. 신규 상태는 OPEN, 위치는 정수 초 또는 null이다. 프론트의 목록·검색은 [UNQ-02](../docs/api/unanswered-questions-read-spec.md) GET /api/unanswered-questions를 사용한다. 관리자 세션 전용, 기본 OPEN, 오래된 통화부터 조회하며 기간은 PBX 우선·AI 분석 대체의 통화 시작 기준이다. 전환·삭제는 [UNQ-03·UNQ-04](../docs/api/unanswered-questions-management.md)를 따른다. 전환은 분류·질문·답변 모두 필수이며 원문과 재전송 이력은 보존한다. 새 앱 전에 027까지 적용한다. 검색 총건수 계약·통계 뷰는 후속 작업이다.
 
 기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
 
-FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 020 migration 적용 후 새 앱을 실행한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
+FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 027 migration 적용 후 새 앱을 실행한다. 추가·수정은 category·question·answer가 모두 필수다. 관리자 조회에만 분류를 제공하고 AI 원본 응답·알림 형식은 유지한다. 기존 32개 질문은 [분류표](../docs/database/faq-category-assignments.md)대로 보완하며 미등록 질문이 있으면 임의 분류 없이 migration을 중단한다. 실제 DB 적용은 이번 작업에서 제외한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
 
 부서 관리·구성원 배정·개인/기업 월결제 및 부서 그룹결제 설정은 [부서와 결제 자격](../docs/api/departments.md)을 따른다. 신규 구성원과 CSV에 부서 번호가 필수다.
 

@@ -140,9 +140,11 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 025는 기존 분석의 불만 위치를 offsetMs에서 정수 초 offsetSeconds로 변환하고 같은 요청의 재전송 해시를 갱신한다. 분석 저장 시각은 보존한다.
 
-026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 질문은 [UNQ-01](../api/unanswered-questions.md)로 수집하고 [UNQ-02](../api/unanswered-questions-read-spec.md)로 목록·검색 조회한다. FAQ 전환·삭제 HTTP API는 후속 구현이다. FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다. UNQ-01·UNQ-02는 기존 026을 사용하며 추가 migration이 없다. 통계용 뷰는 별도 후속 작업이다.
+026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 질문은 [UNQ-01](../api/unanswered-questions.md)로 수집하고 [UNQ-02](../api/unanswered-questions-read-spec.md)로 목록·검색 조회한다. [UNQ-03·UNQ-04](../api/unanswered-questions-management.md)는 기존 전환·삭제 상태 필드를 사용한다. FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다. UNQ-01·UNQ-02는 기존 026을 사용하며 추가 migration이 없다. 통계용 뷰는 별도 후속 작업이다.
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `027-설명.sql`부터 순서대로 추가한다.
+027-faq-categories.sql은 faq_entries에 필수 category를 추가하고 기존 32개 질문을 [검토한 분류표](faq-category-assignments.md)대로 보완한다. 기본값은 없으며 미확인 추가 질문이 있으면 적용을 중단한다. 원문·관리자·시각·AI 알림 대기는 보존한다. 분류 보완 동안 두 FAQ 트리거만 같은 트랜잭션·배타 잠금 안에서 정지하고 복구하며 실패 시 스키마와 함께 롤백한다. SHA-256은 e6485628eb55e7bb930fc8499b0d39b8cb1a89de78b79b65c31302ab5df01dc9다. 실제 DB 적용은 이번 작업에서 제외한다.
+
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `028-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.

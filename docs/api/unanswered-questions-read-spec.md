@@ -120,7 +120,7 @@ eventId·providerCallId·본문 해시·전환 해시·관리자 내부 정보�
 기존 unanswered_questions·call_sessions·call_analyses·orders·customers·faq_entries를 조회한다.
 새 테이블·컬럼·뷰·migration·환경변수·의존성은 없다. 기존 migration은 변경하지 않는다.
 담당 2의 통계용 뷰는 이 목록 API와 별도의 남은 작업이다.
-FAQ 전환·질문 삭제 HTTP API는 아직 후속 작업이며 조회 테스트의 REGISTERED·DELETED는 DB fixture로 구성한다.
+FAQ 전환·질문 삭제는 [UNQ-03·UNQ-04](unanswered-questions-management.md)를 따른다. 조회 fixture 외에 실제 관리 API와 연결한 전환·삭제·재전송도 검증한다.
 
 | HTTP | code | 조건 |
 | --- | --- | --- |
