@@ -1,7 +1,7 @@
 [project]
 name = "dpostcall-ai"
 version = "0.1.0"
-description = "디포스트콜 전화 접수 서버"
+description = "디바콜 전화 접수 서버"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi",

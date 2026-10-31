@@ -22,10 +22,10 @@ webhook_dedupe_sec = 3600
 tool_timeout_sec = 10.0
 
 [business]
-company_name = "디포스트콜"
+company_name = "디바콜"
 # 확정 요금은 백엔드 확인 전 임의 안내하지 않는다. {parcel_no} 사용 가능
 submitted_message = "접수번호는 {parcel_no}입니다. 기사님이 방문해서 수거해 갑니다. 요금은 실제 접수 조건에 따라 확인 후 안내됩니다."
-goodbye_message = "디포스트콜을 이용해 주셔서 감사합니다. 좋은 하루 보내세요."
+goodbye_message = "디바콜을 이용해 주셔서 감사합니다. 좋은 하루 보내세요."
 
 [progress]
 # thinking.append 최대 글자 수(500토큰 한도 안쪽, 한글 1글자 ≈ 1토큰 이상으로 잡음)

@@ -104,11 +104,11 @@ def test_transcript_bubbles_append_to_open_bubble_of_speaker():
     async def scenario():
         task, conn = await start(call, client)
         # 상담원이 말하는 중 고객이 "네" 하고 끼어듦(겹침) → 상담원 말풍선은 이어진다. 그 뒤 한참 있다 고객 차례
-        for speaker, delta, ms in [("output", "안녕하세요 ", 0), ("input", "네 ", 300), ("output", "디포스트콜", 400),
+        for speaker, delta, ms in [("output", "안녕하세요 ", 0), ("input", "네 ", 300), ("output", "디바콜", 400),
                                    ("input", "택배요", 5000), ("output", "네 고객님", 8000)]:
             conn.push(f"session.{speaker}_transcript.delta", delta=delta, start_ms=ms, end_ms=ms + 200)
         await close(conn, task)
-        assert [(b["speaker"], b["text"]) for b in call.transcript] == [("agent", "안녕하세요 디포스트콜"), ("customer", "네 택배요"),
+        assert [(b["speaker"], b["text"]) for b in call.transcript] == [("agent", "안녕하세요 디바콜"), ("customer", "네 택배요"),
                                                                            ("agent", "네 고객님")]
 
     run(scenario())
