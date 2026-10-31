@@ -33,7 +33,7 @@ export function OrderFormModal({ onClose }: { onClose: () => void }) {
         </>
       }
     >
-      <div className="flex flex-col gap-6 border-t border-line pt-6">
+      <div className="flex flex-col gap-6">
         <div className="grid grid-cols-[1fr_1px_1fr] gap-8">
           <OrderPartyFields title="보내는 분" party={vm.sender} />
           <div className="bg-line" />
