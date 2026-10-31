@@ -42,3 +42,5 @@
 - 계획/작업: `test:compiled`에 기존 테스트 선택을 그대로 옮겨 Docker builder의 컴파일 결과를 재사용한다. 로컬 `npm test`는 컴파일부터 실행한다.
 - 검증: 기존 테스트 명령과 새 compiled 명령의 선택이 같음을 검사했고, 변경 후 lint·format·컴파일·단위 101개·결제 샘플 21개가 통과했다.
 - 판정: 채택. Docker 실행 경로는 같은 단계의 Linux CI에서 검증한다.
+
+- Linux CI #63에서 `JsonSlurperClassic` 생성이 Jenkins sandbox에 차단됨을 확인했다. 관리자 허용 목록을 바꾸지 않고 엄격한 3개 boolean·사유 문자열을 전달하도록 수정했다. CLI 전달 형식 회귀 검증을 추가하고 CI 재검증 전까지 다음 단계를 적용하지 않는다.

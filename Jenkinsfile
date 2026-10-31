@@ -20,12 +20,13 @@ pipeline {
                     env.CI_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     env.RELEASE_VERSION = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
                     env.SHOULD_DEPLOY = (sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0).toString()
-                    def checks = new groovy.json.JsonSlurperClassic().parseText(
-                        sh(script: 'node infra/jenkins/monolith-changes.cjs', returnStdout: true).trim())
-                    env.CHECK_BACKEND = checks.backend.toString()
-                    env.CHECK_OBSERVABILITY = checks.observability.toString()
-                    env.CHECK_PAYMENT_DEMO = checks.paymentDemo.toString()
-                    echo "CI selection: ${checks}"
+                    def selection = sh(script: 'node infra/jenkins/monolith-changes.cjs', returnStdout: true).trim()
+                    assert selection ==~ /(?:true|false),(?:true|false),(?:true|false),[a-z_]+/
+                    def checks = selection.split(',')
+                    env.CHECK_BACKEND = checks[0]
+                    env.CHECK_OBSERVABILITY = checks[1]
+                    env.CHECK_PAYMENT_DEMO = checks[2]
+                    echo "CI selection: ${selection}"
                 }
             }
         }

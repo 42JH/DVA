@@ -13,6 +13,14 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { changedPaths, selectChecks } = require('./monolith-changes.cjs');
 
+test('CLI returns strict scalar flags that Jenkins can read without a JSON parser', () => {
+  const output = execFileSync(process.execPath, [path.join(__dirname, 'monolith-changes.cjs')], {
+    encoding: 'utf8',
+    env: { ...process.env, CI_BASE_COMMIT: '', SOURCE_COMMIT: '', SHOULD_DEPLOY: 'false' },
+  });
+  assert.equal(output.trim(), 'true,true,true,missing_baseline_or_changes');
+});
+
 test('webhook includes every monolith infrastructure directory and preserves event guards', () => {
   const source = readFileSync(path.join(__dirname, 'configure-monolith-trigger.groovy'), 'utf8');
   const literal = source.match(/setRegexpFilterExpression\('(.+)'\)/)[1];

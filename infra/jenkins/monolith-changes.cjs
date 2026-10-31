@@ -51,7 +51,8 @@ function changedPaths(base, head, cwd = process.cwd()) {
 
 if (require.main === module) {
   const paths = changedPaths(process.env.CI_BASE_COMMIT, process.env.SOURCE_COMMIT);
-  console.log(JSON.stringify(selectChecks(paths, process.env.SHOULD_DEPLOY === 'true')));
+  const checks = selectChecks(paths, process.env.SHOULD_DEPLOY === 'true');
+  console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason].join(','));
 }
 
 module.exports = { changedPaths, selectChecks };
