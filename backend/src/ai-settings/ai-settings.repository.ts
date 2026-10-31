@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -104,27 +105,30 @@ export class AiSettingsRepository {
     ).rows[0];
   }
 
-  async personas(query: PersonaListQueryDto, id?: number): Promise<Persona[]> {
-    const result = await this.database.pool.query<Persona>(
+  async personas(query: PersonaListQueryDto, id?: number): Promise<PageRows<Persona>> {
+    const result = await readPage<Persona>(
+      this.database.pool,
       `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
        (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='ACTIVE') AS "activeVersionSeq",
        (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='PENDING') AS "pendingVersionSeq"
        FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
-       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)
-       ORDER BY p.ai_persona_seq DESC LIMIT $2 OFFSET $3`,
-      [id ?? null, query.limit + 1, query.offset],
+       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
+      [id ?? null],
+      query,
+      '"aiPersonaSeq" DESC',
     );
-    return result.rows;
+    return result;
   }
 
-  async versions(id: number, query: PersonaListQueryDto): Promise<PersonaVersion[]> {
-    return (
-      await this.database.pool.query<PersonaVersion>(
-        `${VERSION_SELECT} WHERE v.ai_persona_seq=$1 ORDER BY v.version DESC LIMIT $2 OFFSET $3`,
-        [id, query.limit + 1, query.offset],
-      )
-    ).rows;
+  async versions(id: number, query: PersonaListQueryDto): Promise<PageRows<PersonaVersion>> {
+    return await readPage<PersonaVersion>(
+      this.database.pool,
+      `${VERSION_SELECT} WHERE v.ai_persona_seq=$1`,
+      [id],
+      query,
+      'version DESC',
+    );
   }
 
   async create(code: string, client: PoolClient): Promise<number> {

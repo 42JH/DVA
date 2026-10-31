@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -29,26 +30,26 @@ export class CallEventsRepository {
     );
   }
 
-  async findActions(id: number, query: PaginationQueryDto): Promise<CallActionDto[]> {
-    return (
-      await this.database.pool.query<CallActionDto>(
-        `SELECT event_id AS "eventId",event_order AS "eventOrder",occurred_at AS "occurredAt",
+  async findActions(id: number, query: PaginationQueryDto): Promise<PageRows<CallActionDto>> {
+    return await readPage<CallActionDto>(
+      this.database.pool,
+      `SELECT event_id AS "eventId",event_order AS "eventOrder",occurred_at AS "occurredAt",
          offset_seconds::double precision AS "offsetSeconds",payload->>'action' AS action,
          payload->>'summaryText' AS "summaryText",(payload->>'orderSeq')::integer AS "orderSeq"
-         FROM call_insight_events WHERE call_session_seq=$1 AND kind='AI_ACTION'
-         ORDER BY event_order,event_id LIMIT $2 OFFSET $3`,
-        [id, query.limit + 1, query.offset],
-      )
-    ).rows;
+         FROM call_insight_events WHERE call_session_seq=$1 AND kind='AI_ACTION'`,
+      [id],
+      query,
+      '"eventOrder","eventId"',
+    );
   }
 
   async findProcessingResults(
     id: number,
     query: PaginationQueryDto,
-  ): Promise<CallProcessingResultDto[]> {
-    return (
-      await this.database.pool.query<CallProcessingResultDto>(
-        `SELECT e.event_id AS "eventId",e.event_order AS "eventOrder",e.occurred_at AS "occurredAt",
+  ): Promise<PageRows<CallProcessingResultDto>> {
+    return await readPage<CallProcessingResultDto>(
+      this.database.pool,
+      `SELECT e.event_id AS "eventId",e.event_order AS "eventOrder",e.occurred_at AS "occurredAt",
          e.offset_seconds::double precision AS "offsetSeconds",e.payload->>'action' AS action,
          e.payload->>'summaryText' AS "summaryText",(e.payload->>'orderSeq')::integer AS "orderSeq",
          e.unanswered_question_seq AS "unansweredQuestionSeq",
@@ -68,11 +69,11 @@ export class CallEventsRepository {
           AND answer.call_session_seq=e.call_session_seq
           AND answer.utterance_order=(e.payload->>'answerUtteranceOrder')::integer
           AND answer.speaker='AI'
-         WHERE e.call_session_seq=$1 AND e.kind='BUSINESS_RESULT'
-         ORDER BY e.event_order,e.event_id LIMIT $2 OFFSET $3`,
-        [id, query.limit + 1, query.offset],
-      )
-    ).rows;
+         WHERE e.call_session_seq=$1 AND e.kind='BUSINESS_RESULT'`,
+      [id],
+      query,
+      '"eventOrder","eventId"',
+    );
   }
 
   async findCall(client: PoolClient, id: number): Promise<EventCall | undefined> {

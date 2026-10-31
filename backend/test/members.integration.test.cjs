@@ -284,7 +284,7 @@ test('expired, pending and logged-out sessions cannot upload or modify membershi
 
 test('lists return nested member/customer views, status filters, stable pages and empty companies', async () => {
   const co = await company();
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
   const ids = [];
   for (const employee of ['001', '002', '003']) {
     const cu = await customer();
@@ -293,7 +293,7 @@ test('lists return nested member/customer views, status filters, stable pages an
   }
   await empty(await patch(ids[1], { status: 'INACTIVE' }));
   const first = await members(co, '?limit=2&offset=0');
-  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(
     first.data.map((row) => row.membership.membershipSeq),
     ids.toReversed().slice(0, 2),
@@ -303,7 +303,7 @@ test('lists return nested member/customer views, status filters, stable pages an
   assert.equal(second.hasNext, false);
   assert.equal(second.data[0].membership.membershipSeq, ids[0]);
   assert.equal((await members(co, '?status=INACTIVE')).data[0].membership.membershipSeq, ids[1]);
-  assert.deepEqual(await members(co, '?offset=1000'), { data: [], hasNext: false });
+  assert.deepEqual(await members(co, '?offset=1000'), { data: [], hasNext: false, total_count: 3 });
   for (const query of [
     'status=PENDING',
     'limit=0',
@@ -420,7 +420,7 @@ test('unlink deletes only membership, preserves customer/PIN/order and permits a
     )
   ).rows[0].personal_pin_seq;
   await empty(await remove(m.membershipSeq));
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
   assert.equal(
     (await pool.query('SELECT count(*) FROM customers WHERE customer_seq=$1', [cu.id])).rows[0]
       .count,
@@ -639,7 +639,7 @@ test('multipart validates file count, fields, type, encoding, byte cap and row c
     415,
     'UNSUPPORTED_MEDIA_TYPE',
   );
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
 });
 
 test('registration and CSV need no key and ignore legacy key headers', async () => {

@@ -1,3 +1,4 @@
+import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { PoolClient } from 'pg';
@@ -106,9 +107,9 @@ export class OrdersRepository {
   async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
     // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
     const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';
-    return (
-      await client.query<PreviousOrderAddressDto>(
-        `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",
+    const page = await readPage<PreviousOrderAddressDto & { __sort_position: number }>(
+      client,
+      `SELECT o.order_seq AS "orderSeq",p.order_parcel_seq AS "orderParcelSeq",o.created_at AS "createdAt",p.parcel_position AS __sort_position,
         jsonb_build_object('name',p.${side}_name,'phoneNumber',p.${side}_phone_number,
           'roadAddress',p.${side}_road_address,'jibunAddress',p.${side}_jibun_address,
           'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
@@ -121,19 +122,19 @@ export class OrdersRepository {
            OR NULLIF(btrim(p.${side}_jibun_address),'') IS NOT NULL)
          AND ($4::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
            p.${side}_name,p.${side}_phone_number,p.${side}_road_address,p.${side}_jibun_address,
-           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)
-       ORDER BY o.created_at DESC,o.order_seq DESC,p.parcel_position,p.order_parcel_seq
-       LIMIT $5 OFFSET $6`,
-        [
-          customerId,
-          query.from ?? null,
-          query.to ?? null,
-          query.q || null,
-          query.limit + 1,
-          query.offset,
-        ],
-      )
-    ).rows;
+           p.${side}_detail_address,p.${side}_dong_name,p.${side}_postal_code),NFC)),lower(normalize($4,NFC)))>0)`,
+      [customerId, query.from ?? null, query.to ?? null, query.q || null],
+      query,
+      '"createdAt" DESC,"orderSeq" DESC,__sort_position,"orderParcelSeq"',
+    );
+    return {
+      ...page,
+      rows: page.rows.map((row) => {
+        const address: PreviousOrderAddressDto & { __sort_position?: number } = { ...row };
+        delete address.__sort_position;
+        return address;
+      }),
+    };
   }
 
   async readCustomer(client: PoolClient, callId: number) {
@@ -153,9 +154,9 @@ export class OrdersRepository {
   }
 
   async list(client: PoolClient, query: OrderQueryDto, customerId: number | null) {
-    return (
-      await client.query<OrderSummaryDto>(
-        `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
+    return await readPage<OrderSummaryDto>(
+      client,
+      `SELECT o.order_seq AS "orderSeq", o.customer_seq AS "customerSeq", o.status,
           o.creation_source AS "creationSource",o.total_amount AS "totalAmount",o.payment_due_at AS "paymentDueAt",o.paid_at AS "paidAt",
           o.payment_method_type AS "paymentMethodType", o.pickup_requested_at AS "pickupRequestedAt",
           o.created_at AS "createdAt",
@@ -167,19 +168,17 @@ export class OrdersRepository {
            AND ($4::text IS NULL OR o.status=$4)
            AND ($5::text IS NULL OR EXISTS(
              SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq
-               AND strpos(lower(p.destination_name),lower($5)) > 0))
-         ORDER BY o.created_at DESC, o.order_seq DESC LIMIT $6 OFFSET $7`,
-        [
-          customerId,
-          query.from ?? null,
-          query.to ?? null,
-          query.status ?? null,
-          query.recipientName ?? null,
-          query.limit + 1,
-          query.offset,
-        ],
-      )
-    ).rows;
+               AND strpos(lower(p.destination_name),lower($5)) > 0))`,
+      [
+        customerId,
+        query.from ?? null,
+        query.to ?? null,
+        query.status ?? null,
+        query.recipientName ?? null,
+      ],
+      query,
+      '"createdAt" DESC,"orderSeq" DESC',
+    );
   }
 
   async lockCreation(client: PoolClient, key: string): Promise<boolean> {

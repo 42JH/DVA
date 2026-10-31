@@ -23,7 +23,8 @@ export class AdminsService {
     }
   }
   async list(query: AdminQueryDto) {
-    return (await this.repository.list(query)).map(publicAdmin);
+    const page = await this.repository.list(query);
+    return { ...page, rows: page.rows.map(publicAdmin) };
   }
   serializeAccessChanges(client: PoolClient) {
     return this.repository.serializeAccessChanges(client);

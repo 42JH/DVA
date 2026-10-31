@@ -2,7 +2,7 @@
 
 관련 작업: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138). 이 문서는 백엔드 변경을 AI 팀에 인계하는 규격이다. 이번 작업에서는 AI 폴더와 AI 서버를 수정하지 않았다.
 
-기본 경로는 `/api`다. 요청·응답 필드는 camelCase를 사용한다. 단건은 `{data,meta}`, 목록은 `{data,hasNext}`, 오류는 `{error,meta}`이며 204는 본문이 없다. meta.requestId와 응답 X-Request-Id로 문의할 요청을 연결할 수 있다.
+기본 경로는 `/api`다. 요청·응답 필드는 camelCase를 사용하며 목록의 total_count는 명시한 예외다. 단건은 `{data,meta}`, 목록은 `{ data, hasNext, total_count }`, 오류는 `{error,meta}`이며 204는 본문이 없다. meta.requestId와 응답 X-Request-Id로 문의할 요청을 연결할 수 있다.
 
 ## 1. 결제 방식과 자격
 
@@ -246,3 +246,6 @@ AI 취소에는 취소 항목과 금액 변경 전후를 함께 기록한다. AI
 - notPaid는 기존 요청·금액·만료 시각으로 개인 결제를 이어간다. 결제 완료 주문은 저장된 사본으로 디버 접수·운영자 재접수를 계속한다. 회사 삭제를 이유로 자동 취소하거나 재청구하지 않는다.
 
 이번 변경은 Backend와 문서만 포함하며 AI 팀은 고객 확인을 다시 호출하고 403 이후 자격/PIN 재확인 안내를 연결한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
@@ -97,7 +98,7 @@ function callResult(row: CallRow): CallListItemDto {
 export class ConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async findMany(query: CallQueryDto): Promise<CallListItemDto[]> {
+  async findMany(query: CallQueryDto): Promise<PageRows<CallListItemDto>> {
     const conditions: string[] = [];
     const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
@@ -124,14 +125,14 @@ export class ConsultationsRepository {
         OR strpos(c.caller_phone_number,${parameter})>0)`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    values.push(query.limit + 1, query.offset);
-    const result = await this.database.pool.query<CallRow>(
-      `${CALL_SELECT} ${where}
-       ORDER BY c.started_at DESC NULLS LAST,c.call_session_seq DESC
-       LIMIT $${values.length - 1} OFFSET $${values.length}`,
+    const result = await readPage<CallRow>(
+      this.database.pool,
+      `${CALL_SELECT} ${where}`,
       values,
+      query,
+      '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC',
     );
-    return result.rows.map(callResult);
+    return { ...result, rows: result.rows.map(callResult) };
   }
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {
@@ -161,18 +162,18 @@ export class ConsultationsRepository {
     ).rows[0].count;
   }
 
-  async findTranscript(id: number, query: TranscriptQueryDto): Promise<UtteranceDto[]> {
-    return (
-      await this.database.pool.query<UtteranceDto>(
-        `SELECT u.call_utterance_seq AS "callUtteranceSeq",u.utterance_order AS "utteranceOrder",u.speaker,
+  async findTranscript(id: number, query: TranscriptQueryDto): Promise<PageRows<UtteranceDto>> {
+    return await readPage<UtteranceDto>(
+      this.database.pool,
+      `SELECT u.call_utterance_seq AS "callUtteranceSeq",u.utterance_order AS "utteranceOrder",u.speaker,
        u.utterance_text AS "utteranceText",u.last_sentence_seq AS "lastSentenceSeq",u.received_at AS "receivedAt",
        e.offset_seconds::double precision AS "offsetSeconds"
        FROM call_utterances u LEFT JOIN call_insight_events e ON e.call_utterance_seq=u.call_utterance_seq
         AND e.call_session_seq=u.call_session_seq AND e.kind='UTTERANCE'
-       WHERE u.call_session_seq=$1 ORDER BY u.utterance_order,u.call_utterance_seq
-       LIMIT $2 OFFSET $3`,
-        [id, query.limit + 1, query.offset],
-      )
-    ).rows;
+       WHERE u.call_session_seq=$1`,
+      [id],
+      query,
+      '"utteranceOrder","callUtteranceSeq"',
+    );
   }
 }

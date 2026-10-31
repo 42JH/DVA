@@ -175,7 +175,7 @@ test('AI registers, searches and edits its active customer personal pins without
   );
   assert.equal(list.status, 200);
   const body = await list.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.hasNext, false);
   assert.deepEqual(body.data[0], {
     ...created,
@@ -554,6 +554,9 @@ test('literal search, pagination, generated search updates and company departmen
   let body = await response.json();
   assert.equal(body.data.length, 2);
   assert.equal(body.hasNext, true);
+  assert.equal(body.total_count, 3);
+  const pastEnd = await request('GET', `/customers/${f.customer}/pins?offset=100`, undefined, f.ai);
+  assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: 3 });
   assert.ok(body.data[0].personalPinSeq < body.data[1].personalPinSeq);
   response = await request(
     'GET',
@@ -567,6 +570,7 @@ test('literal search, pagination, generated search updates and company departmen
   response = await request('GET', `/customers/${f.customer}/pins?q=%25_`, undefined, f.ai);
   body = await response.json();
   assert.equal(body.data.length, 1);
+  assert.equal(body.total_count, 1);
   const id = body.data[0].personalPinSeq;
   await success(await request('PATCH', `/pins/${id}`, { label: '새검색어' }));
   assert.equal(

@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -14,25 +15,23 @@ export class FaqsRepository {
   async list(
     query: AiFaqQueryDto | AdminFaqQueryDto,
     agent: boolean,
-  ): Promise<Array<AgentFaqDto | FaqDto>> {
+  ): Promise<PageRows<AgentFaqDto | FaqDto>> {
     // 조회 열은 두 고정값만 사용하며 AI 응답에서는 관리자 정보를 DB에서 가져오지 않는다.
-    return (
-      await this.database.pool.query<AgentFaqDto | FaqDto>(
-        `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries
+    return await readPage<AgentFaqDto | FaqDto>(
+      this.database.pool,
+      `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries
        WHERE ($1::text IS NULL OR strpos(lower(normalize(question,NFC)),lower(normalize($1,NFC)))>0
          OR strpos(lower(normalize(answer,NFC)),lower(normalize($1,NFC)))>0)
-         AND ($4::int[] IS NULL OR faq_entry_seq=ANY($4::int[]))
-         AND ($5::text IS NULL OR category=$5)
-       ORDER BY faq_entry_seq LIMIT $2 OFFSET $3`,
-        [
-          query.q || null,
-          query.limit + 1,
-          query.offset,
-          'faqEntrySeqs' in query ? (query.faqEntrySeqs ?? null) : null,
-          !agent && 'category' in query ? (query.category ?? null) : null,
-        ],
-      )
-    ).rows;
+         AND ($2::int[] IS NULL OR faq_entry_seq=ANY($2::int[]))
+         AND ($3::text IS NULL OR category=$3)`,
+      [
+        query.q || null,
+        'faqEntrySeqs' in query ? (query.faqEntrySeqs ?? null) : null,
+        !agent && 'category' in query ? (query.category ?? null) : null,
+      ],
+      query,
+      '"faqEntrySeq"',
+    );
   }
 
   async find(id: number, agent: boolean): Promise<AgentFaqDto | FaqDto | undefined> {

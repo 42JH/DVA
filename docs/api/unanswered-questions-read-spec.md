@@ -8,7 +8,7 @@
 | 권한 | ACTIVE OPERATOR / SUPERVISOR / SYSTEM_ADMIN |
 | 사용처 | 홈 미리보기, AI 미답변 관리 목록, 통화 상세에서 선택한 질문 조회 |
 | 선행 | migration 026까지 적용, [UNQ-01](unanswered-questions.md) 질문 수집 |
-| 응답 | HTTP 200, 기존 목록 형식 { data, hasNext } |
+| 응답 | HTTP 200, 기존 목록 형식 { data, hasNext, total_count } |
 
 DB에 수집된 질문을 조회한다. AI 호출·추가 토큰 설정은 없으며 AI_INSIGHTS_TOKEN 미설정도 관리자 조회를 막지 않는다.
 AI 토큰만으로 조회할 수 없다. 조회는 질문·통화·분석·고객·FAQ·감사 기록을 변경하지 않는다.
@@ -66,7 +66,8 @@ GET /api/unanswered-questions?from=2026-10-30T15:00:00Z&to=2026-10-31T15:00:00Z
       "faqEntrySeq": null
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
@@ -84,14 +85,19 @@ GET /api/unanswered-questions?from=2026-10-30T15:00:00Z&to=2026-10-31T15:00:00Z
 | aiPersonaVersionSeq | integer / null | 실제 사용했다고 ANL-01에 보고한 버전 |
 | faqEntrySeq | integer / null | 전환한 FAQ가 현재 존재하면 번호, 미전환·FAQ 삭제 후 null |
 | hasNext | boolean | 같은 검색 조건에 다음 질문이 존재하는지 여부 |
+| total_count | number | 같은 검색 조건의 전체 질문 수. limit·offset 적용 전 0 이상 정수 |
 
 빈 결과는 아래와 같다. 질문 삭제·고객 미연결·분석 미수신을 서버 오류와 혼동하지 않는다.
 
 ```json
-{ "data": [], "hasNext": false }
+{
+  "data": [],
+  "hasNext": false,
+  "total_count": 0
+}
 ```
 
-목록에는 meta·totalCount·totalPages를 추가하지 않는다. 응답 헤더 X-Request-Id·Cache-Control: no-store는 제공한다.
+목록에는 total_count를 필수로 제공하며 meta·totalPages는 추가하지 않는다. 응답 헤더 X-Request-Id·Cache-Control: no-store는 제공한다.
 eventId·providerCallId·본문 해시·전환 해시·관리자 내부 정보는 반환하지 않는다.
 
 ## 연결·정렬·기간 규칙
@@ -111,9 +117,7 @@ eventId·providerCallId·본문 해시·전환 해시·관리자 내부 정보�
 8. limit보다 한 건 더 읽어 hasNext를 계산한다. limit는 페이지 크기이며 저장 누적 제한이 아니다.
    offset 페이지는 조회 시점 기준이며 여러 페이지가 하나의 고정 스냅샷인 것은 아니다.
 
-09 목업의 검색 결과 총건수·숫자 페이지에는 같은 검색 조건의 별도 총건수 계약이 필요하다.
-이 API의 hasNext나 담당 2 대시보드 전체 미처리 건수만으로 마지막 페이지를 계산할 수 없다.
-해당 경로·담당은 별도 확정 대상이며 목록에 총건수 필드를 임의 추가하지 않는다.
+total_count는 같은 검색·상태·통화·페르소나·기간 조건의 전체 질문 수다. limit·offset을 제외하며 마지막 페이지를 넘겨도 전체 건수는 유지한다. 숫자 페이지는 ceil(total_count/limit)으로 계산한다.
 
 ## DB·오류·검증
 
@@ -134,3 +138,6 @@ FAQ 전환·질문 삭제는 [UNQ-03·UNQ-04](unanswered-questions-management.md
 상태·삭제 비노출, 주문 고객 우선·발신번호 대조·이름 변경, 부분 검색·문자 그대로의 검색,
 PBX/AI 시각 우선순위·기간 경계·정렬, 실제 페르소나·늦은 분석, 페이지, 조회의 무변경성과 실패 비노출,
 OpenAPI 및 기존 수집·통화 조회 회귀다. 실제 AI 전송·운영 DB·배포 확인은 별도다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

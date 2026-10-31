@@ -22,16 +22,16 @@ Orders는 주문 상태·접수·주문 내용의 관리를 담당한다. 주소
 
 | API | 받는 정보 | 반환하는 정보 |
 | --- | --- | --- |
-| `GET /api/orders` | 선택 Query: `customerSeq`, `status`, `from`, `to`, `recipientName`, `limit`, `offset` | `{data: [...], hasNext}`. 각 항목은 `orderSeq`, `customerSeq`, `status`, `paymentMethodType`, `pickupRequestedAt`, `createdAt`, `parcelCount`, `creationSource`, `totalAmount`, `paidAt`, `paymentDueAt` |
+| `GET /api/orders` | 선택 Query: `customerSeq`, `status`, `from`, `to`, `recipientName`, `limit`, `offset` | `{data: [...], hasNext, total_count }`. 각 항목은 `orderSeq`, `customerSeq`, `status`, `paymentMethodType`, `pickupRequestedAt`, `createdAt`, `parcelCount`, `creationSource`, `totalAmount`, `paidAt`, `paymentDueAt` |
 | `POST /api/orders` | `Idempotency-Key` UUID. AI는 `call`, `outcome`, 고객 지정, 결제 방식, 수거 시각, `parcels` | AI 결과는 `{orderSeq, version, status, callSessionSeq, parcelNo, totalAmount, paymentDueAt, paymentRequest}`. 기존 관리자 부분 저장은 `{orderSeq, version}`. 단건 응답의 `data`에 담음 |
 | `GET /api/orders/{id}` | Path `id=orderSeq` | 주문·고객 번호, `status`, 결제 방식, 수거 시각, `version`, 생성·변경 시각, 디버 접수 참고번호·확인 시각, 총액·결제 완료 시각·대기 기한·현재 결제 요청, `parcels[]` |
 | `PATCH /api/orders/{id}` | Path `id=orderSeq`, 필수 `expectedVersion`, 변경할 `paymentMethodType`, `pickupRequestedAt`, `totalAmount`, `parcels` | `{version}`. `COLLECTING`만 수정하며 상태는 유지. 수정 결과 전체는 상세 조회 |
 | `POST /api/orders/{id}/submit` | Path `id=orderSeq`, 필수 `expectedVersion` | `{status}`. `notPaid`, `PAID`, `SUBMITTING`, `ACCEPTED`, `SUBMISSION_FAILED` 중 현재 접수 결과 |
 | `POST /api/orders/{id}/cancel` | Path `id=orderSeq`. 본문 없음 | 204, 본문 없음. 전체 취소 재요청은 409 |
 | `POST /api/orders/{id}/parcels/cancel` | Path `id=orderSeq`, 필수 본문 `orderParcelSeqs`: 중복 없는 상세번호 배열(1개 이상) | 204, 본문 없음. 이미 취소된 상세는 건너뛰며 하나라도 취소 불가이면 전체 거절 |
-| `GET /api/customers/{id}/addresses` | Path `id=customerSeq`, 필수 Query `direction=ORIGIN 또는 DESTINATION`, 선택 `from`, `to`, `q`, `limit`, `offset` | `{data: [{orderSeq, orderParcelSeq, createdAt, address}], hasNext}`. 접수 완료 주문의 미취소 상세 주소만 조회 |
+| `GET /api/customers/{id}/addresses` | Path `id=customerSeq`, 필수 Query `direction=ORIGIN 또는 DESTINATION`, 선택 `from`, `to`, `q`, `limit`, `offset` | `{data: [{orderSeq, orderParcelSeq, createdAt, address}], hasNext, total_count}`. 접수 완료 주문의 미취소 상세 주소만 조회 |
 
-- 단건 응답은 `{data, meta: {requestId}}`, 목록·이전 주소는 `{data: [], hasNext}`다.
+- 단건 응답은 `{data, meta: {requestId}}`, 목록·이전 주소는 `{ data: [], hasNext, total_count }`다.
 - 목록의 `limit` 기본값은 20(최대 100), `offset`은 0이다. `from` 포함·`to` 미포함이며 시간대 포함 ISO 8601을 사용한다. 최신 생성 시각·주문 번호 순으로 정렬한다.
 - 상세의 `parcels[]`에는 상세 번호·순번, `origin`, `destination`, `originPin`, 수량 4종, 기타 물품 설명, 요청 사항, 안내 요금, 물품 가액을 반환한다. 주소는 이름·전화번호·도로명·지번·상세 주소·동명·우편번호·위경도의 9개 필드다.
 - `PATCH`는 생략한 값을 유지하고 nullable 필드의 `null`은 비운다. 상세 번호가 있으면 수정하고 없으면 추가하며, 생략한 상세를 삭제하지 않는다. `status`를 임의로 바꾸는 API는 아니다.
@@ -170,3 +170,6 @@ MVP 합의에 따라 AI 서비스 인증은 아직 생략한다. 관리자 쿠�
 - `npm run check:docker`: 단위·HTTP·실제 임시 PostgreSQL·모의 디버/S3·동시 요청·실패 복구·Nginx 회귀.
 - `infra/database/test-monolith.ps1`: 데이터 보존·제약·반복 적용·체크섬·실패 롤백·백업 복원.
 - 실제 AI 클라이언트 수정, 실제 디버 전송, AWS 리소스 생성과 운영 배포는 수행하지 않는다. AI 측 변경점은 [연동 명세](ai-pbx-recordings.md), 사용자 AWS 설정은 [S3 설정](recording-s3-setup.md)에 정리한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

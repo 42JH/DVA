@@ -94,9 +94,10 @@ export class OrganizationsController {
   @ApiOkResponse({
     schema: {
       type: 'object',
-      required: ['data', 'hasNext'],
+      required: ['data', 'hasNext', 'total_count'],
       properties: {
         data: { type: 'array', items: { $ref: getSchemaPath(OrganizationResponseDto) } },
+        total_count: { type: 'integer', minimum: 0, description: '검색·필터 후 전체 건수.' },
         hasNext: { type: 'boolean' },
       },
     },

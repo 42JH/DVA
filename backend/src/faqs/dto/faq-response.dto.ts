@@ -28,10 +28,22 @@ export class FaqDto extends AgentFaqDto {
 export class FaqListResponseDto {
   @ApiProperty({ type: [FaqDto] }) data!: FaqDto[];
   @ApiProperty() hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }
 export class AgentFaqListResponseDto {
   @ApiProperty({ type: [AgentFaqDto] }) data!: AgentFaqDto[];
   @ApiProperty() hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }
 export class FaqResponseDto {
   @ApiProperty({ type: FaqDto }) data!: FaqDto;

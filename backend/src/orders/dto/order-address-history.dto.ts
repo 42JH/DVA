@@ -60,4 +60,10 @@ export class PreviousOrderAddressDto {
 export class OrderAddressHistoryEnvelopeDto {
   @ApiProperty({ type: [PreviousOrderAddressDto] }) data!: PreviousOrderAddressDto[];
   @ApiProperty() hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }

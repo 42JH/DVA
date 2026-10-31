@@ -21,7 +21,10 @@ async function ok(response, single = false) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), single ? ['data', 'meta'] : ['data', 'hasNext']);
+  assert.deepEqual(
+    Object.keys(body).sort(),
+    single ? ['data', 'meta'] : ['data', 'hasNext', 'total_count'],
+  );
   if (single) assert.equal(body.meta.requestId, response.headers.get('x-request-id'));
   return body;
 }
@@ -251,7 +254,7 @@ test('result and complaint filters distinguish missing analysis, unknown measure
   );
   assert.deepEqual(
     await ok(await list({ callerPhoneNumber: caller, hasComplaint: 'false', offset: '2' })),
-    { data: [], hasNext: false },
+    { data: [], hasNext: false, total_count: 2 },
   );
 });
 

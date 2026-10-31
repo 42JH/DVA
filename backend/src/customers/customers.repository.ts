@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -95,22 +96,18 @@ export class CustomersRepository {
     ).rows[0];
   }
 
-  async list(query: ListCustomersQueryDto): Promise<Customer[]> {
-    const result = await this.database.pool.query<Customer>(
+  async list(query: ListCustomersQueryDto): Promise<PageRows<Customer>> {
+    const result = await readPage<Customer>(
+      this.database.pool,
       `SELECT ${columns} FROM customers
        WHERE ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
          AND ($2::text IS NULL OR phone_number = $2)
-         AND ($3::text IS NULL OR status = $3)
-       ORDER BY customer_seq DESC LIMIT $4 OFFSET $5`,
-      [
-        query.q || null,
-        query.phoneNumber ?? null,
-        query.status ?? null,
-        query.limit + 1,
-        query.offset,
-      ],
+         AND ($3::text IS NULL OR status = $3)`,
+      [query.q || null, query.phoneNumber ?? null, query.status ?? null],
+      query,
+      '"customerSeq" DESC',
     );
-    return result.rows;
+    return result;
   }
 
   async find(id: number, client?: PoolClient): Promise<Customer | undefined> {

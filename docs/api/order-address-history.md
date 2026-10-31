@@ -34,7 +34,7 @@ from·to는 시간대가 있는 ISO 8601이어야 하며 Z와 명시적 오프�
 
 ## 응답과 조회 대상
 
-HTTP 200, `{ data: OrderAddress[], hasNext }` 형식이며 meta·총건수·page 객체를 추가하지 않는다.
+HTTP 200, `{ data: OrderAddress[], hasNext, total_count }` 형식이며 total_count를 포함하고 meta·page 객체는 추가하지 않는다.
 
 ```json
 {
@@ -56,7 +56,8 @@ HTTP 200, `{ data: OrderAddress[], hasNext }` 형식이며 meta·총건수·page
       }
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
@@ -66,7 +67,7 @@ HTTP 200, `{ data: OrderAddress[], hasNext }` 형식이며 meta·총건수·page
 - 해당 방향의 도로명·지번이 모두 없는 과거 예외 행은 후보에서 제외한다. 나머지 원본의 null은 그대로 보존하고 없는 정보를 만들지 않는다.
 - PIN 등록 여부와 무관하게 조회한다. 원본 PIN이 수정되어도 주문 당시 주소는 바뀌지 않는다.
 - 주문의 ACCEPTED 여부를 사용하며 이후 배송 상태로 필터링하지 않는다. 배송 행이 없어도 주문 주소를 조회할 수 있다.
-- 결과가 없으면 `{ "data": [], "hasNext": false }`다. 실제 조회 실패는 오류로 반환하며 빈 성공으로 대체하지 않는다.
+- 결과가 없으면 `{ "data": [], "hasNext": false, "total_count": 0 }`다. 실제 조회 실패는 오류로 반환하며 빈 성공으로 대체하지 않는다.
 
 이 API는 신규 주문이나 PIN을 생성·수정하지 않는다. 선택한 주소를 현재 주문에 적용하고 고객에게
 확인하는 것은 AI 호출 흐름의 역할이다. 주문 접수 후 AI가 개인 PIN 등록 API를 호출하는 흐름과도 독립적이다.
@@ -111,3 +112,6 @@ PIN 독립성·동시 변경 스냅샷·입력 오류·읽기 전용·Swagger를
 
 기존 orders·order_parcels·customers·call_sessions를 사용하며 테이블·컬럼·마이그레이션을 추가하지 않는다.
 외부 디버 API를 호출하지 않는다. 실제 운영 배포와 AI 클라이언트의 날짜 해석·후보 확인·주소 적용 연동은 별도다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

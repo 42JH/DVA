@@ -1,3 +1,4 @@
+import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -34,14 +35,14 @@ export class AdminsRepository {
     ).rows[0];
   }
   async list(query: AdminQueryDto) {
-    return (
-      await this.database.pool.query<AdminAccount>(
-        `SELECT ${columns} FROM admin_users
-   WHERE ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)
-   ORDER BY admin_user_seq DESC LIMIT $3 OFFSET $4`,
-        [query.role ?? null, query.status ?? null, query.limit + 1, query.offset],
-      )
-    ).rows;
+    return await readPage<AdminAccount>(
+      this.database.pool,
+      `SELECT ${columns} FROM admin_users
+   WHERE ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)`,
+      [query.role ?? null, query.status ?? null],
+      query,
+      '"adminUserSeq" DESC',
+    );
   }
   async setAccess(id: number, role: AdminRole, status: AdminStatus, client: PoolClient) {
     await client.query('UPDATE admin_users SET role=$2,status=$3 WHERE admin_user_seq=$1', [

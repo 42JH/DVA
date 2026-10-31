@@ -210,7 +210,7 @@ test('list supports literal name search, exact phone, state and stable offset pa
     const response = await request('?' + new URLSearchParams(query), { headers: adminHeaders() });
     assert.equal(response.status, 200);
     const result = await response.json();
-    assert.deepEqual(Object.keys(result).sort(), ['data', 'hasNext']);
+    assert.deepEqual(Object.keys(result).sort(), ['data', 'hasNext', 'total_count']);
     return result;
   };
   const first = await list({ q: prefix, limit: '2', offset: '0' });
@@ -232,7 +232,11 @@ test('list supports literal name search, exact phone, state and stable offset pa
     (await list({ q: prefix, status: 'WITHDRAWN' })).data.map((row) => row.customerSeq),
     [ids[1]],
   );
-  assert.deepEqual(await list({ q: prefix, offset: '1000' }), { data: [], hasNext: false });
+  assert.deepEqual(await list({ q: prefix, offset: '1000' }), {
+    data: [],
+    hasNext: false,
+    total_count: 3,
+  });
   for (const query of [
     'limit=0',
     'limit=101',
@@ -417,7 +421,7 @@ test('OpenAPI exposes four customer operations, minimal envelopes and conditiona
   ]);
   assert.deepEqual(
     Object.keys(document.components.schemas.CustomersEnvelopeDto.properties).sort(),
-    ['data', 'hasNext'],
+    ['data', 'hasNext', 'total_count'],
   );
 });
 

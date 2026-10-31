@@ -25,7 +25,7 @@ Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 
 | 메서드·경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
 | POST /api/customers | `{ name, phoneNumber, monthlyBillingEnabled? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
-| GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext }` |
+| GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext, total_count }` |
 | GET /api/customers/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Customer, meta: { requestId } }` |
 | PATCH /api/customers/{id} | name 또는 관리자 전용 status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
@@ -43,7 +43,7 @@ PATCH의 phoneNumber, null, 빈 객체, 지원하지 않는 필드는 400이며 
 목록은 고객 번호 내림차순이다. limit 기본 20·범위 1~100, offset 기본 0이다.
 q는 이름의 대소문자 무시 부분 검색이며 `%`·`_`도 문자 그대로 검색한다.
 phoneNumber는 정확히 일치 검색하고 status는 ACTIVE/WITHDRAWN이다. 필터는 AND로 결합한다.
-빈 목록은 `{ data: [], hasNext: false }`이며 meta·총건수·page 객체를 추가하지 않는다.
+조건에 맞는 결과가 없으면 `{ data: [], hasNext: false, total_count: 0 }`이며 total_count를 포함하고 meta·page 객체는 추가하지 않는다.
 
 ## 탈퇴 상태
 
@@ -97,3 +97,6 @@ Content-Type: application/json
 등록은 CUSTOMER_CREATED, 이름·상태·탈퇴 수정은 CUSTOMER_UPDATED를 고객 번호와 함께 기록한다.
 관리자 호출은 ADMIN과 당시 이름, 기존 AI 호출 경로는 AI로 구분한다. 성공 감사와 고객 변경은 같은 트랜잭션이다.
 실패·거부는 롤백 후 별도로 남기며 전화번호·요청 본문은 기록하지 않는다. 요청·응답 형식은 그대로 유지한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

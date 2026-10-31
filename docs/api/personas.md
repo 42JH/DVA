@@ -18,7 +18,7 @@ Swagger 태그는 `Personas`, `AI Settings`. AI 팀용 계약은 [별도 연동 
 
 ## 관리자 API
 
-단건은 `{ data, meta: { requestId } }`, 목록은 `{ data: [], hasNext }` 형식이다.
+단건은 `{ data, meta: { requestId } }`, 목록은 `{ data: [], hasNext, total_count }` 형식이다.
 
 | API | 받는 정보 | 처리·반환 |
 |---|---|---|
@@ -91,3 +91,6 @@ DB 트랜잭션 안에서 AI 응답을 기다리지 않는다. 새 테이블·�
 **AI 옵션 API가 없거나 토큰이 없으면 등록·수정·적용은 503이다. 조회는 기존 데이터를 반환한다.**
 이번 작업은 백엔드·Swagger·DBML·연동 명세까지다. `ai/` 코드, 실제 AI 엔진, 운영 DB·환경 파일은 변경하지 않는다.
 가짜 AI와 격리 PostgreSQL의 동시 요청·권한·재시작·실패 복구 및 실제 Nginx 전달을 검증한다. 실제 통화 중 적용은 AI 구현 후 별도로 검증한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

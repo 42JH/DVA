@@ -8,7 +8,7 @@
 
 - 경로: `/api`. OPERATOR·SUPERVISOR·SYSTEM_ADMIN의 활성 관리자 세션 쿠키 `dva_session`이 필요하다.
 - AI 통화 헤더나 Bearer 값만으로 관리자 통화 기록을 조회할 수 없다.
-- 목록: `{ data: [], hasNext }`. 단건: `{ data, meta: { requestId } }`.
+- 목록: `{ data: [], hasNext, total_count }`. 단건: `{ data, meta: { requestId } }`.
 - 모든 응답은 `Cache-Control: no-store`. 전화번호·대화 내용·녹취 URL을 요청 로그에 남기지 않는다.
 - 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`다.
 - 기존 통화·발화·녹취·이벤트와 `call_analyses`, `ai_persona_versions`, 고객·주문을 읽는다. 현재 앱은 FAQ 분류를 포함해 027까지 적용하며 이 조회 보완 자체의 추가 마이그레이션은 없다.
@@ -57,7 +57,7 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 
 통화·상담 상태에 연결된 주문의 결제 대기·디버 접수·취소 상태를 함께 제공한다. 저장된 endReason은 바꾸지 않는다. 결제 상태는 [주문 결제 계약](order-billing.md)을 따른다.
 
-빈 목록은 `200 { "data": [], "hasNext": false }`다.
+조건에 맞는 결과가 없으면 `200 { "data": [], "hasNext": false, "total_count": 0 }`다.
 잘못된 날짜·역전된 기간·중복 query·지원하지 않는 필드는 `400 INVALID_REQUEST`다.
 
 ## GET /api/calls/{id} — 통화 상세 조회
@@ -125,13 +125,13 @@ REGISTERED는 기존 ANL-01의 주문 저장 확인 기준이며 결제 대기�
 hash·프롬프트·AI 서비스 토큰은 반환하지 않는다. 근거·고객 이름·검색어를 일반 HTTP 로그에 복사하지 않는다.
 
 이번 보완은 기존 두 GET 경로의 응답·필터 확장이다. 새 HTTP 경로·테이블·뷰·컬럼·환경변수는 추가하지 않는다.
-목록의 {data,hasNext} 형식을 유지하므로 통화·미답변 검색 총건수 및 숫자 페이지의 별도 조회 계약은 남아 있다.
+목록의 total_count로 검색 총건수를 제공한다. 프론트는 ceil(total_count/limit)으로 숫자 페이지 수를 계산한다.
 담당 2용 통계 뷰 두 개도 별도 작업이며 이 API에서 평균·비율을 집계하지 않는다.
 
 ## GET /api/calls/{id}/transcript — 통화 대화 내용 조회
 
 `id`는 `call_session_seq`, 선택 query는 `limit`·`offset`이다.
-응답은 `{ data: Utterance[], hasNext }`이며 `utteranceOrder` 오름차순이다.
+응답은 `{ data: Utterance[], hasNext, total_count }`이며 `utteranceOrder` 오름차순이다.
 발화 구간별 `callUtteranceSeq`, `utteranceOrder`, `speaker`(CUSTOMER/AI),
 `utteranceText`, `lastSentenceSeq`, `receivedAt`, `offsetSeconds`를 반환한다.
 
@@ -203,3 +203,6 @@ S3의 403은 파일 미존재로 단정하지 않는다. 실패 항목은 `url`�
 - `customerSeq` 검색은 원본 API 명세대로 보류한다. 직접 고객-통화 관계가 없어 주문 없는 고객 통화를 완전하게 검색할 수 없다. 전달하면 400이다.
 - 실제 상담원 연결 시각은 현 스키마에 없으므로 제공하지 않는다. 수집 계약·저장 구조 확정이 별도로 필요하다.
 - 실시간 통화 추적, 상담원 연결 제어, STT 생성, 별도 상담원 이력 API, 관리 메모·콜백은 이번 조회 범위에 포함하지 않는다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

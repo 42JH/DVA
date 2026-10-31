@@ -227,18 +227,23 @@ test('lists use stable pagination, status and literal name searches without expo
   for (const name of ['검색 A', '검색 B', '검색 C', 'literal %_ company'])
     assert.equal((await create(name)).status, 201);
   const first = await (await request('?q=' + encodeURIComponent('검색') + '&limit=2')).json();
-  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(first.data.length, 2);
   assert.equal(first.hasNext, true);
+  assert.equal(first.total_count, 3);
   assert.ok(first.data[0].organizationSeq > first.data[1].organizationSeq);
   const last = await (
     await request('?q=' + encodeURIComponent('검색') + '&limit=2&offset=2')
   ).json();
   assert.equal(last.data.length, 1);
   assert.equal(last.hasNext, false);
+  assert.equal(last.total_count, 3);
+  const pastEnd = await (await request('?q=' + encodeURIComponent('검색') + '&offset=100')).json();
+  assert.deepEqual(pastEnd, { data: [], hasNext: false, total_count: 3 });
   assert.ok(!first.data.some((row) => row.organizationSeq === last.data[0].organizationSeq));
   const literal = await (await request('?q=%25_')).json();
   assert.equal(literal.data.length, 1);
+  assert.equal(literal.total_count, 1);
   assert.equal(literal.data[0].name, 'literal %_ company');
   for (const row of first.data)
     assert.deepEqual(Object.keys(row).sort(), [

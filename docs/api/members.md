@@ -20,7 +20,7 @@ POST·PATCH·DELETE에는 설정된 허용 Origin이 필요하다. AI 무인증 
 
 | 메서드·경로 | 요청 | 성공 |
 | --- | --- | --- |
-| GET /api/companies/{id}/members | status, limit, offset | 200, `{ data: MemberView[], hasNext }` |
+| GET /api/companies/{id}/members | status, limit, offset | 200, `{ data: MemberView[], hasNext, total_count }` |
 | POST /api/companies/{id}/members | `{ employeeNo, customerSeq, departmentSeq, role }` | 204 |
 | POST /api/companies/{id}/members/import | multipart/form-data의 file 1개 | 204 |
 | PATCH /api/members/{id} | role·status·departmentSeq 중 한 개 이상 | 204 |
@@ -170,3 +170,6 @@ cd ..
   이 브랜치의 내부 Nginx 2MiB 설정은 37번 배포 시 자동 반영된다. 파일 1MiB에 multipart
   헤더를 더한 실제 최대 크기 업로드는 이 컨테이너 설정도 반영된 뒤 가능하다.
 - 이번 후속 작업은 호스트 설정에 한정하며 앱·DB·컨테이너 배포는 수행하지 않았다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

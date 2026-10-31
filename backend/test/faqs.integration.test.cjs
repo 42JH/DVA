@@ -75,7 +75,7 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
       : await f.get('/api/faqs?' + new URLSearchParams(query));
     assert.equal(response.status, 200);
     const body = await response.json();
-    assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+    assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
     return body;
   };
   const first = await page({ q: marker, limit: '2' });
@@ -84,12 +84,19 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
     ids.slice(0, 2),
   );
   assert.equal(first.hasNext, true);
+  assert.equal(first.total_count, 3);
+  assert.deepEqual(await page({ q: marker, offset: '100' }), {
+    data: [],
+    hasNext: false,
+    total_count: 3,
+  });
   const last = await page({ q: marker, limit: '2', offset: '2' }, true);
   assert.deepEqual(
     last.data.map((r) => r.faqEntrySeq),
     ids.slice(2),
   );
   assert.equal(last.hasNext, false);
+  assert.equal(last.total_count, 3);
   assert.equal(Object.hasOwn(last.data[0], 'updatedByAdminUserSeq'), false);
   assert.ok((await page({ q: 'ALPHA' })).data.some((r) => r.faqEntrySeq === ids[0]));
   assert.ok(
@@ -99,7 +106,7 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
     (await page({ q: '%_' })).data.map((r) => r.faqEntrySeq),
     [ids[1]],
   );
-  assert.deepEqual(await page({ q: "' OR 1=1; --" }), { data: [], hasNext: false });
+  assert.deepEqual(await page({ q: "' OR 1=1; --" }), { data: [], hasNext: false, total_count: 0 });
 });
 
 test('21: updates require all three fields and concurrent full edits commit a complete request without mixing fields', async () => {
@@ -130,13 +137,13 @@ test('21: updates require all three fields and concurrent full edits commit a co
   );
 });
 
-test('AI fetches changed FAQ IDs in the existing data/hasNext envelope with bounded pagination and deleted IDs omitted', async () => {
+test('AI FAQ totals count only selected IDs across bounded pages and omit deleted IDs', async () => {
   const ids = [];
   for (let i = 0; i < 3; i++)
     ids.push(await f.createdId({ category: '기타', question: f.marker(), answer: '답변' }));
   const query = `?faqEntrySeqs=${[ids[2], ids[0]].join(',')}`;
   const body = await (await f.ai(query)).json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(
     body.data.map((row) => row.faqEntrySeq),
     [ids[0], ids[2]],
@@ -144,14 +151,22 @@ test('AI fetches changed FAQ IDs in the existing data/hasNext envelope with boun
   assert.equal(body.hasNext, false);
   for (const row of body.data)
     assert.deepEqual(Object.keys(row).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
+  assert.equal(body.total_count, 2);
   const first = await (await f.ai(query + '&limit=1')).json();
   assert.equal(first.hasNext, true);
+  assert.equal(first.total_count, 2);
+  assert.deepEqual(await (await f.ai(query + '&offset=100')).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 2,
+  });
   assert.deepEqual(
     first.data.map((row) => row.faqEntrySeq),
     [ids[0]],
   );
   const last = await (await f.ai(query + '&limit=1&offset=1')).json();
   assert.equal(last.hasNext, false);
+  assert.equal(last.total_count, 2);
   assert.deepEqual(
     last.data.map((row) => row.faqEntrySeq),
     [ids[2]],
@@ -164,10 +179,12 @@ test('AI fetches changed FAQ IDs in the existing data/hasNext envelope with boun
   assert.deepEqual(await (await f.ai('?faqEntrySeqs=' + ids[0])).json(), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
   assert.deepEqual(await (await f.ai(query + '&q=nonexistent-filter')).json(), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
   for (const value of ['1,1', '0', '', '1,', '1.5'])
     await f.error(await f.ai('?faqEntrySeqs=' + encodeURIComponent(value)), 400, 'INVALID_REQUEST');
@@ -202,7 +219,11 @@ test('one create and delete API supports single and multiple FAQs for every acti
       assert.equal(deleted.status, 204, await deleted.clone().text());
       assert.equal(await deleted.text(), '');
     }
-    assert.deepEqual(await (await f.ai('?q=' + marker)).json(), { data: [], hasNext: false });
+    assert.deepEqual(await (await f.ai('?q=' + marker)).json(), {
+      data: [],
+      hasNext: false,
+      total_count: 0,
+    });
     for (const id of ids) {
       await f.error(await f.ai('/' + id), 404, 'NOT_FOUND');
       const history = (

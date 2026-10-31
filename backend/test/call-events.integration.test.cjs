@@ -630,7 +630,7 @@ async function readBody(response) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   return body;
 }
 
@@ -689,6 +689,7 @@ test('separate reads require active admin sessions; AI service tokens cannot rea
       assert.deepEqual(await readBody(await readEvents(c, path, '', account.headers)), {
         data: [],
         hasNext: false,
+        total_count: 0,
       });
     }
     await error(await readEvents({ id: 2147483647 }, path), 404, 'NOT_FOUND');
@@ -734,6 +735,7 @@ test('separate read contracts reject kind filters, malformed pagination and unsu
     assert.deepEqual(await readBody(await readEvents(c, path, 'offset=9007199254740991')), {
       data: [],
       hasNext: false,
+      total_count: 0,
     });
   }
 });
@@ -781,6 +783,7 @@ test('PIN and previous-order actions page independently from speech/results and 
   assert.deepEqual(await readBody(await readEvents(c, 'actions', 'offset=120')), {
     data: [],
     hasNext: false,
+    total_count: 120,
   });
   const processing = await readBody(await readEvents(c, 'processing-results'));
   assert.equal(processing.data.length, 1);
@@ -878,6 +881,7 @@ test('FAQ results reference same-batch customer/AI speech and retain actual answ
       },
     ],
     hasNext: false,
+    total_count: 1,
   });
   assert.equal((await readBody(await readEvents(c, 'actions'))).data.length, 1);
   await pool.query(

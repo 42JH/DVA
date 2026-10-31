@@ -112,7 +112,10 @@ async function result(response, isList = true) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), isList ? ['data', 'hasNext'] : ['data', 'meta']);
+  assert.deepEqual(
+    Object.keys(body).sort(),
+    isList ? ['data', 'hasNext', 'total_count'] : ['data', 'meta'],
+  );
   if (!isList) assert.ok(body.meta.requestId);
   return body;
 }
@@ -152,7 +155,7 @@ test('call list requires a real administrator session, including AI/header calle
     const admin = role === 'OPERATOR' ? operator : await account(role);
     assert.deepEqual(
       await result(await list({ callerPhoneNumber: phoneNumber() }, admin.headers)),
-      { data: [], hasNext: false },
+      { data: [], hasNext: false, total_count: 0 },
     );
   }
 });
@@ -180,6 +183,7 @@ test('list preserves nullable call fields and distinguishes absent/requested/con
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
     data: rows,
     hasNext: false,
+    total_count: rows.length,
   });
   for (const status of ['REQUESTED', 'CONNECTED', 'FAILED'])
     assert.deepEqual(
@@ -205,7 +209,11 @@ test('list combines order, exact phone, end reason and handoff filters without c
     endReason: row.endReason,
     handoffStatus: 'CONNECTED',
   };
-  assert.deepEqual(await result(await list(query)), { data: [row], hasNext: false });
+  assert.deepEqual(await result(await list(query)), {
+    data: [row],
+    hasNext: false,
+    total_count: 1,
+  });
   for (const changed of [
     { endReason: 'CUSTOMER_ENDED' },
     { handoffStatus: 'FAILED' },
@@ -214,6 +222,7 @@ test('list combines order, exact phone, end reason and handoff filters without c
     assert.deepEqual(await result(await list({ ...query, ...changed })), {
       data: [],
       hasNext: false,
+      total_count: 0,
     });
   const literal = "test' OR true --";
   const quoted = await call({ endReason: literal });
@@ -230,10 +239,12 @@ test('list searches international caller numbers preserved by the AI flow withou
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
     data: [row],
     hasNext: false,
+    total_count: 1,
   });
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone.slice(1) })), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
 });
 
@@ -249,7 +260,7 @@ test('date filters use actual started_at with inclusive from and exclusive to, w
       to: '2026-10-28T10:01:00+09:00',
     }),
   );
-  assert.deepEqual(rows, { data: [first], hasNext: false });
+  assert.deepEqual(rows, { data: [first], hasNext: false, total_count: 1 });
 });
 
 test('pagination is deterministic for equal timestamps and null times, with no duplicate handoff rows', async () => {
@@ -263,11 +274,13 @@ test('pagination is deterministic for equal timestamps and null times, with no d
     assert.deepEqual(await result(await list({ callerPhoneNumber: phone, limit: 1, offset })), {
       data: [expected[offset]],
       hasNext: offset < 2,
+      total_count: 3,
     });
   }
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone, offset: 3 })), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
 });
 
@@ -474,15 +487,18 @@ test('transcript sorts by utterance order rather than insert time and never incl
   assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
     data: [first, second, third],
     hasNext: false,
+    total_count: 3,
   });
   for (let offset = 0; offset < 3; offset++)
     assert.deepEqual(await result(await transcript(row.callSessionSeq, { limit: 1, offset })), {
       data: [[first, second, third][offset]],
       hasNext: offset < 2,
+      total_count: 3,
     });
   assert.deepEqual(await result(await transcript(row.callSessionSeq, { offset: 3 })), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
   assert.equal(JSON.stringify(logs).includes(first.utteranceText), false);
 });
@@ -506,6 +522,7 @@ test('transcript distinguishes uncollected STT from a nonexistent call even when
   assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
   await error(await transcript(2147483647), 404, 'NOT_FOUND');
 });

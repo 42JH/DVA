@@ -110,9 +110,10 @@ export class OrdersController {
     description: '주문 요약과 다음 페이지 존재 여부. 검색 결과가 없으면 data는 빈 배열입니다.',
     schema: {
       type: 'object',
-      required: ['data', 'hasNext'],
+      required: ['data', 'hasNext', 'total_count'],
       properties: {
         data: { type: 'array', items: { $ref: getSchemaPath(OrderSummaryDto) } },
+        total_count: { type: 'integer', minimum: 0, description: '검색·필터 후 전체 건수.' },
         hasNext: { type: 'boolean', description: '이후 주문이 더 있으면 true.' },
       },
     },

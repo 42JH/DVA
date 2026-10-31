@@ -1,3 +1,4 @@
+import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -18,12 +19,13 @@ export class DepartmentsRepository {
     ).rows[0];
   }
   async list(id: number, query: PaginationQueryDto) {
-    return (
-      await this.database.pool.query<DepartmentDto>(
-        `SELECT ${columns} FROM departments WHERE organization_seq=$1 ORDER BY department_seq LIMIT $2 OFFSET $3`,
-        [id, query.limit + 1, query.offset],
-      )
-    ).rows;
+    return await readPage<DepartmentDto>(
+      this.database.pool,
+      `SELECT ${columns} FROM departments WHERE organization_seq=$1`,
+      [id],
+      query,
+      '"departmentSeq"',
+    );
   }
   async find(client: PoolClient, id: number) {
     return (

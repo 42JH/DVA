@@ -70,7 +70,7 @@ async function result(response) {
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.ok(response.headers.get('x-request-id'));
   return body;
 }
@@ -210,6 +210,7 @@ test('only ACCEPTED orders yield snapshots, even when no PIN was saved', async (
       },
     ],
     hasNext: false,
+    total_count: 1,
   });
   assert.equal(
     (await pool.query('SELECT count(*) FROM personal_pins WHERE customer_seq=$1', [f.customer]))
@@ -288,7 +289,7 @@ test('search is literal, normalized and restricted to the selected direction', a
   for (const q of ['출발 전용', "' OR TRUE --", '없는주소'])
     assert.deepEqual(
       await result(await request(f.customer, { direction: 'DESTINATION', q }, f.ai)),
-      { data: [], hasNext: false },
+      { data: [], hasNext: false, total_count: 0 },
     );
   assert.equal(
     (await result(await request(f.customer, { direction: 'ORIGIN', q: '출발 전용' }))).data.length,
@@ -320,7 +321,7 @@ test('same address remains separate per order/parcel and stable pagination handl
   assert.deepEqual(pages, all.data);
   assert.deepEqual(
     await result(await request(f.customer, { direction: 'DESTINATION', offset: '4' })),
-    { data: [], hasNext: false },
+    { data: [], hasNext: false, total_count: 4 },
   );
 });
 
@@ -336,7 +337,11 @@ test('active administrator roles can choose a customer and inspect retained with
     await error(await request(2147483647, undefined, headers), 404, 'NOT_FOUND');
   }
   const empty = await fixture();
-  assert.deepEqual(await result(await request(empty.customer)), { data: [], hasNext: false });
+  assert.deepEqual(await result(await request(empty.customer)), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
 });
 
 test('AI cannot access another customer history, even within the same company', async () => {
@@ -441,7 +446,11 @@ test('historical empty addresses are skipped while nullable details are preserve
   await order(f, {
     parcels: [{ destination: address('도착', { roadAddress: null, jibunAddress: '  ' }) }],
   });
-  assert.deepEqual(await result(await request(f.customer)), { data: [], hasNext: false });
+  assert.deepEqual(await result(await request(f.customer)), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
   const valid = await order(f, {
     parcels: [{ destination: address('도착', { detailAddress: null }) }],
   });
@@ -528,7 +537,7 @@ test('Swagger publishes the GET contract and logs omit filters and personal valu
   assert.ok(operation.parameters.some((p) => p.name === 'call_session_seq'));
   assert.ok(!(operation.parameters ?? []).some((p) => p.name === 'Idempotency-Key'));
   const schema = document.components.schemas.OrderAddressHistoryEnvelopeDto;
-  assert.deepEqual(Object.keys(schema.properties).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['data', 'hasNext', 'total_count']);
   const f = await fixture(),
     requestId = randomUUID(),
     term = '이력 개인정보검색';

@@ -74,7 +74,7 @@ Content-Type: application/json
 
 두 목록 모두 `q`(선택, 최대 200자), `limit`(기본 20, 1~100), `offset`(기본 0)을 지원한다. `q`는 앞뒤 공백과 유니코드 표기를 정규화하고 질문·답변을 대소문자 구분 없이 부분 검색한다. `%`·`_`는 일반 문자다. `faqEntrySeq` 오름차순으로 정렬하므로 수정 시 목록 위치가 바뀌지 않는다.
 
-AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정할 수 있다. 생략하면 전체 조회다. `q`와 함께 전달하면 두 조건 모두 만족하는 행을 반환한다. 삭제·미존재 번호는 제외하며 전부 없으면 `{data:[],hasNext:false}`다. 알림 대상은 `q` 없이 `limit=100&offset=0`으로 조회하면 한 응답으로 받을 수 있다.
+AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정할 수 있다. 생략하면 전체 조회다. `q`와 함께 전달하면 두 조건 모두 만족하는 행을 반환한다. 삭제·미존재 번호는 제외하며 전부 없으면 `{data:[],hasNext:false, total_count: 0}`다. 알림 대상은 `q` 없이 `limit=100&offset=0`으로 조회하면 한 응답으로 받을 수 있다.
 
 ```json
 {
@@ -86,11 +86,12 @@ AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정�
       "updatedAt": "2026-10-28T01:00:00.000Z"
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
-위 예시는 AI 목록 응답이다. 관리자 목록·상세에는 `category`, `createdAt`, `updatedByAdminUserSeq`가 추가된다. 단건 응답은 `{data: FAQ, meta: {requestId}}`이고 목록은 `{data: FAQ[], hasNext}`다. 모든 응답은 `Cache-Control: no-store`다.
+위 예시는 AI 목록 응답이다. 관리자 목록·상세에는 `category`, `createdAt`, `updatedByAdminUserSeq`가 추가된다. 단건 응답은 `{data: FAQ, meta: {requestId}}`이고 목록은 `{data: FAQ[], hasNext, total_count }`다. 모든 응답은 `Cache-Control: no-store`다.
 
 AI는 목록을 `hasNext=false`까지 순회해 원본을 가져가고 변경 알림에는 번호 필터로 최신 원본을 조회한다. 각 조회는 커밋된 최신 DB 값을 반환하며 여러 페이지 전체를 하나의 고정 시점으로 보장하지 않는다. 임베딩·검색 인덱스 반영은 AI 파트 책임이다.
 
@@ -146,3 +147,6 @@ node dist/faqs/bootstrap-faq.js operator01
 Swagger는 `FAQs`와 `AI FAQs` 태그로 분리한다. `node scripts/check.cjs`는 실제 임시 PostgreSQL·NestJS HTTP·운영 Docker 이미지·Nginx를 통해 관리자 권한, 단건·복수 추가·삭제, 최신 번호 필터 조회, 동시 수정, 감사·알림 롤백, 초기 등록과 기존 API 회귀를 검증한다. 모의 AI HTTP 서버로 재시도·시간 초과·재시작·중복 점유를 검증하며 실제 AI 검색 인덱스·운영 데이터·배포는 포함하지 않는다.
 
 미답변 전환·삭제는 [UNQ-03·UNQ-04](unanswered-questions-management.md)를 따른다. 실제 DB 적용은 이번 작업에서 제외한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

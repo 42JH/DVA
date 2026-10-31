@@ -50,7 +50,7 @@ async function result(response) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   return body;
 }
 async function error(response, status, code) {
@@ -124,11 +124,16 @@ async function pin(c, { label = null, departmentName = null, addressData = addre
 test('search returns active company official PINs without customer, membership or call prerequisites', async () => {
   const c = await company();
   const p = await pin(c, { label: '물류센터', departmentName: '배송부' });
-  assert.deepEqual(await result(await search({ q: c.name })), { data: [p], hasNext: false });
+  assert.deepEqual(await result(await search({ q: c.name })), {
+    data: [p],
+    hasNext: false,
+    total_count: 1,
+  });
   // 공개 디렉터리는 특정 통화나 소속에 결속하지 않는다.
   assert.deepEqual(await result(await search({ q: c.name }, { call_session_seq: '2147483647' })), {
     data: [p],
     hasNext: false,
+    total_count: 1,
   });
 });
 
@@ -152,7 +157,11 @@ test('inactive companies and companies without official PINs do not appear', asy
   const inactive = await company(token + ' 비활성', 'INACTIVE');
   await pin(inactive);
   await company(token + ' 빈기업');
-  assert.deepEqual(await result(await search({ q: token })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: token })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
 });
 
 test('homonymous companies remain separate and pagination has deterministic company/PIN ordering', async () => {
@@ -170,6 +179,7 @@ test('homonymous companies remain separate and pagination has deterministic comp
   assert.deepEqual(await result(await search({ q: name, offset: '3' })), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
 });
 
@@ -199,11 +209,17 @@ test('query matches company, department, label, official recipient/contact and a
   assert.deepEqual(await result(await search({ q: `${c.name} 없는부서` })), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
-  assert.deepEqual(await result(await search({ q: "' OR TRUE --" })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: "' OR TRUE --" })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
   assert.deepEqual(await result(await search({ q: `  ${c.name}\t\n 물류센터  ` })), {
     data: [p],
     hasNext: false,
+    total_count: 1,
   });
 });
 
@@ -239,8 +255,16 @@ test('only explicit public PIN fields are projected; member and private PIN valu
   ]);
   assert.ok(!JSON.stringify(body).includes(secret));
   assert.ok(!JSON.stringify(body).includes(phone));
-  assert.deepEqual(await result(await search({ q: secret })), { data: [], hasNext: false });
-  assert.deepEqual(await result(await search({ q: phone })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: secret })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  assert.deepEqual(await result(await search({ q: phone })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
 });
 
 test('company and PIN edits and deactivation are reflected by the next query', async () => {
@@ -254,7 +278,11 @@ test('company and PIN edits and deactivation are reflected by the next query', a
     });
   const renamed = marker();
   assert.equal((await mutate(`/companies/${c.id}`, { name: renamed })).status, 204);
-  assert.deepEqual(await result(await search({ q: c.name })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: c.name })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
   assert.equal((await result(await search({ q: renamed }))).data[0].organizationName, renamed);
   assert.equal(
     (
@@ -269,12 +297,17 @@ test('company and PIN edits and deactivation are reflected by the next query', a
   assert.deepEqual(await result(await search({ q: `${renamed} 이전` })), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
   const updated = (await result(await search({ q: `${renamed} 새공식로` }))).data[0];
   assert.equal(updated.departmentName, '새 부서');
   assert.equal(updated.version, 2);
   assert.equal((await mutate(`/companies/${c.id}`, { status: 'INACTIVE' })).status, 204);
-  assert.deepEqual(await result(await search({ q: renamed })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: renamed })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
   assert.equal((await mutate(`/companies/${c.id}`, { status: 'ACTIVE' })).status, 204);
   assert.equal((await result(await search({ q: renamed }))).data[0].companyPinSeq, p.companyPinSeq);
 });
@@ -343,7 +376,11 @@ test('query and pagination validation reject missing, blank, repeated and unsupp
     'q=a&organizationSeq=1',
   ])
     await error(await search(query), 400, 'INVALID_REQUEST');
-  assert.deepEqual(await result(await search({ q: marker() })), { data: [], hasNext: false });
+  assert.deepEqual(await result(await search({ q: marker() })), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
 });
 
 test('search is read-only and database failures are not transformed into empty successes', async () => {
@@ -380,7 +417,7 @@ test('Swagger exposes public PIN projection and static search remains separate f
   assert.ok(!operation.parameters.some((p) => p.name === 'call_session_seq'));
   assert.deepEqual(
     Object.keys(doc.components.schemas.CompanyDirectoryEnvelopeDto.properties).sort(),
-    ['data', 'hasNext'],
+    ['data', 'hasNext', 'total_count'],
   );
   assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.organizationName);
   assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.addressData);

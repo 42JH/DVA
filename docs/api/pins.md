@@ -8,15 +8,15 @@ Jira: [S15P31D109-39](https://ssafy.atlassian.net/browse/S15P31D109-39).
 
 ## HTTP 계약
 
-표의 모든 경로는 `/api`로 시작한다. 단건 성공은 `data/meta`, 목록은 `data/hasNext`,
+표의 모든 경로는 `/api`로 시작한다. 단건 성공은 `data/meta`, 목록은 `data/hasNext/total_count`,
 오류는 `error/meta` 형식이며 `Cache-Control: no-store`를 적용한다.
 
 | 메서드·경로 | 권한 | 성공 응답의 data |
 | --- | --- | --- |
-| GET /api/customers/{id}/pins | 관리자 또는 현재 통화 고객 | PersonalPin[], 최상위 hasNext |
+| GET /api/customers/{id}/pins | 관리자 또는 현재 통화 고객 | PersonalPin[], 최상위 hasNext, total_count |
 | POST /api/customers/{id}/pins | 관리자 또는 현재 통화 고객 | 201, `{ personalPinSeq, version }` |
 | PATCH /api/pins/{id} | 관리자 또는 현재 통화 고객 | 200, `{ version }` |
-| GET /api/companies/{id}/pins | 관리자 또는 활성 소속 기업의 통화 고객 | CompanyPin[], 최상위 hasNext |
+| GET /api/companies/{id}/pins | 관리자 또는 활성 소속 기업의 통화 고객 | CompanyPin[], 최상위 hasNext, total_count |
 | POST /api/companies/{id}/pins | 관리자만 | 201, `{ companyPinSeq, version }` |
 | PATCH /api/company-pins/{id} | 관리자만 | 200, `{ version }` |
 
@@ -30,7 +30,7 @@ label과 departmentName·departmentSeq는 null일 수 있다. 소유 고객·기
 앞뒤 공백과 Unicode NFC를 정리하고 대소문자를 구분하지 않는다. `%`·`_`는 일반 문자다.
 검색어가 없거나 공백이면 해당 주소록 전체를 페이지 조회한다. 결과는 PIN 번호 오름차순이다.
 limit 기본 20·범위 1~100, offset 기본 0이며 필터와 페이지 처리는 소유 범위 안에서 수행한다.
-검색 결과가 없으면 `{ "data": [], "hasNext": false }`를 반환한다.
+검색 결과가 없으면 `{ "data": [], "hasNext": false, "total_count": 0 }`를 반환한다.
 검색용 생성 컬럼 search_text는 반환하지 않는다.
 
 통화 시작 시 전체 주소록이 필요하면 [33번 초기 조회](caller-context.md)를 사용한다.
@@ -167,3 +167,6 @@ npm.cmd run check:docker
 오래된 버전 허용, 동시 부분 수정, 검색·페이지, 입력 오류, 주문 스냅샷 보존 및 감사 실패 롤백을 검사한다.
 운영 이미지·Nginx를 통한 등록·수정·관리자 경계·통화 헤더 전달도 검사한다.
 실제 운영 서버 배포 또는 AI 팀의 클라이언트 반영·통화 연동 완료를 의미하지 않는다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

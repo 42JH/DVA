@@ -9,7 +9,7 @@
 
 | API | 입력 | 응답 |
 | --- | --- | --- |
-| GET /api/audit-logs | 선택: actorType, actorSeq, action, targetType, targetSeq, result, from, to, limit, offset | `{ data: Audit[], hasNext }` |
+| GET /api/audit-logs | 선택: actorType, actorSeq, action, targetType, targetSeq, result, from, to, limit, offset | `{ data: Audit[], hasNext, total_count }` |
 | GET /api/audit-logs/{id} | auditLogSeq, 1~2147483647 정수 | `{ data: Audit, meta: { requestId } }` |
 
 최신 발생 시각부터, 같은 시각이면 로그 번호 내림차순으로 정렬한다.
@@ -123,3 +123,6 @@ admin_sessions는 ON DELETE CASCADE를 유지한다. 삭제 API는 먼저 이름
 `node backend/scripts/check.cjs`: 권한·이름 보존·물리 삭제·세션 종료·동시 로그인·감사 실패 롤백,
 AI/관리자/SYSTEM 구분, 기존 업무 API와 운영 이미지·Nginx 경로를 임시 DB와 모의 외부 서비스로 검증한다.
 `infra/database/test-monolith.ps1`: 신규 적용·기존 이름 보완·업무 이력 보존·세션 cascade·업그레이드 롤백·백업 복원을 검증한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

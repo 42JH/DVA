@@ -22,7 +22,7 @@ id는 기존 양의 int32 callSessionSeq다. 요청 본문은 없다.
 목록 세 API는 limit 기본 20·범위 1~100, offset 기본 0·범위 0~9007199254740991을 사용한다.
 kind·action 필터는 받지 않는다. 빈 값·소수·잘못된 숫자·중복 query·추가 필드는 400이다.
 
-목록 성공은 HTTP 200과 {data:[],hasNext:boolean}이며 meta·totalCount·totalPages는 추가하지 않는다.
+목록 성공은 HTTP 200과 {data:[],hasNext:boolean,total_count:number}다. total_count는 같은 통화·종류 조건의 전체 건수이며 limit·offset은 제외한다.
 단건 통화 상세는 기존 {data,meta:{requestId}} 형식을 유지한다.
 모든 응답은 Cache-Control: no-store, X-Request-Id를 제공한다.
 통화가 없으면 404, 기존 통화에 수집 기록이 없거나 마지막 페이지 이후면 빈 목록과 hasNext=false다.
@@ -67,7 +67,8 @@ Cookie: dva_session=<관리자 세션>
       "orderSeq": null
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 2
 }
 ```
 
@@ -117,7 +118,8 @@ status·offsetMs·레이턴시는 반환하지 않는다. 프론트는 summaryTe
       "answerText": "상담 당시 실제로 안내한 답변입니다."
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
@@ -163,3 +165,6 @@ HANDOFF_REQUESTED는 연결 완료가 아니며 ORDER_CREATED는 결제·디버 
 FAQ 참조 검증·동시 재전송·전체 롤백, FAQ 수정·삭제 후 상담 원문 보존, 미답변 삭제 후 원문 숨김,
 조회 실패 오류·로그 비노출 및 기존 통화·발화·분석 경로 회귀다.
 실제 AI 전송·운영 배포와 AI/PBX 음성 시작점의 정밀 매핑은 별도 확인 대상이다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

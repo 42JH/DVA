@@ -98,7 +98,7 @@ test('production FAQ management through Nginx updates the AI read API without ex
   const ids = all.map((row) => row.faqEntrySeq);
   const filtered = await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','));
   const filteredBody = await filtered.json();
-  assert.deepEqual(Object.keys(filteredBody).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(filteredBody).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(
     filteredBody.data.map((row) => row.faqEntrySeq),
     ids,
@@ -114,6 +114,7 @@ test('production FAQ management through Nginx updates the AI read API without ex
   assert.deepEqual(await (await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','))).json(), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
 });
 
@@ -188,7 +189,7 @@ test('call detail and transcript work through Nginx while the standalone playbac
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data.length, 1);
   assert.ok(body.data[0].callSessionSeq > 0);
   const detail = await fetch('http://proxy/api/calls/' + body.data[0].callSessionSeq, {
@@ -215,7 +216,7 @@ test('call detail and transcript work through Nginx while the standalone playbac
   );
   assert.equal(transcript.status, 200);
   const transcriptBody = await transcript.json();
-  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext', 'total_count']);
   assert.ok(Array.isArray(transcriptBody.data));
   const anonymousPlayback = await fetch('http://proxy/api/recordings/2147483647/url');
   assert.equal(anonymousPlayback.status, 404);
@@ -399,7 +400,7 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   const empty = await fetch(root + `/companies/${companyId}/members`, {
     headers: { Cookie: session },
   });
-  assert.deepEqual(await empty.json(), { data: [], hasNext: false });
+  assert.deepEqual(await empty.json(), { data: [], hasNext: false, total_count: 0 });
 });
 
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
@@ -626,7 +627,7 @@ test('production order address history reads stored snapshots through Nginx and 
   assert.equal(history.status, 200);
   assert.equal(history.headers.get('cache-control'), 'no-store');
   const body = await history.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data[0].orderSeq, order.orderSeq);
   const detail = await fetch(root + '/orders/' + order.orderSeq, { headers });
   const parcel = (await detail.json()).data.parcels.find(
@@ -694,7 +695,7 @@ test('production company directory searches official PINs through Nginx without 
   assert.equal(searched.status, 200);
   assert.equal(searched.headers.get('cache-control'), 'no-store');
   const body = await searched.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data[0].organizationSeq, id);
   assert.equal(body.data[0].companyPinSeq, pinId);
   assert.equal(body.data[0].organizationName, name);
@@ -707,7 +708,7 @@ test('production company directory searches official PINs through Nginx without 
     body: '{"status":"INACTIVE"}',
   });
   assert.equal(deactivated.status, 204);
-  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false });
+  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false, total_count: 0 });
   assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
 });
 

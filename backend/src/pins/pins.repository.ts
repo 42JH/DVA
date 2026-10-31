@@ -1,3 +1,4 @@
+import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import {
@@ -77,26 +78,26 @@ export class PinsRepository {
     ).rows[0]?.owner;
   }
   async personal(client: PoolClient, customerId: number, query: ListPinsQueryDto) {
-    return (
-      await client.query<PersonalPinDto>(
-        `SELECT personal_pin_seq AS "personalPinSeq",customer_seq AS "customerSeq",label,
+    return await readPage<PersonalPinDto>(
+      client,
+      `SELECT personal_pin_seq AS "personalPinSeq",customer_seq AS "customerSeq",label,
         address_data AS "addressData",version FROM personal_pins
-       WHERE customer_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)
-       ORDER BY personal_pin_seq LIMIT $3 OFFSET $4`,
-        [customerId, query.q || null, query.limit + 1, query.offset],
-      )
-    ).rows;
+       WHERE customer_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)`,
+      [customerId, query.q || null],
+      query,
+      '"personalPinSeq"',
+    );
   }
   async shared(client: PoolClient, companyId: number, query: ListPinsQueryDto) {
-    return (
-      await client.query<CompanyPinDto>(
-        `SELECT company_pin_seq AS "companyPinSeq",organization_seq AS "organizationSeq",label,
+    return await readPage<CompanyPinDto>(
+      client,
+      `SELECT company_pin_seq AS "companyPinSeq",organization_seq AS "organizationSeq",label,
         department_name AS "departmentName",department_seq AS "departmentSeq",address_data AS "addressData",version FROM company_pins
-       WHERE organization_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)
-       ORDER BY company_pin_seq LIMIT $3 OFFSET $4`,
-        [companyId, query.q || null, query.limit + 1, query.offset],
-      )
-    ).rows;
+       WHERE organization_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)`,
+      [companyId, query.q || null],
+      query,
+      '"companyPinSeq"',
+    );
   }
   async createPersonal(client: PoolClient, customerId: number, input: CreatePinDto) {
     return (

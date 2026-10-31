@@ -319,9 +319,17 @@ test('system admin approves pending accounts, filters lists, rejects empty/null 
     session,
   );
   assert.equal(list.status, 200);
-  assert.deepEqual(Object.keys(list.body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(list.body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(list.body.data.length, 1);
   assert.equal(list.body.hasNext, true);
+  assert.equal(
+    list.body.total_count,
+    (
+      await db.pool.query(
+        "SELECT count(*)::int AS n FROM admin_users WHERE role='OPERATOR' AND status='ACTIVE'",
+      )
+    ).rows[0].n,
+  );
   assert.equal(list.body.data[0].passwordHash, undefined);
   const audit = (
     await db.pool.query(
@@ -786,7 +794,8 @@ test('OPS-02 filters, paginates, orders ties and excludes private metadata', asy
     [inserted[2], inserted[1]],
   );
   assert.equal(first.body.hasNext, true);
-  assert.deepEqual(Object.keys(first.body).sort(), ['data', 'hasNext']);
+  assert.equal(first.body.total_count, 3);
+  assert.deepEqual(Object.keys(first.body).sort(), ['data', 'hasNext', 'total_count']);
   assert.ok(first.body.data.every((row) => Object.keys(row.metadata).length === 0));
   assert.ok(!first.text.includes('must-not-be-exposed'));
 
@@ -797,6 +806,7 @@ test('OPS-02 filters, paginates, orders ties and excludes private metadata', asy
     [inserted[0]],
   );
   assert.equal(second.body.hasNext, false);
+  assert.equal(second.body.total_count, 3);
 
   for (const [result, id] of [
     ['SUCCESS', inserted[0]],
@@ -805,6 +815,7 @@ test('OPS-02 filters, paginates, orders ties and excludes private metadata', asy
   ]) {
     const response = await read({ result });
     assert.equal(response.status, 200);
+    assert.equal(response.body.total_count, 1);
     assert.deepEqual(
       response.body.data.map((row) => row.auditLogSeq),
       [id],
@@ -820,7 +831,11 @@ test('OPS-02 filters, paginates, orders ties and excludes private metadata', asy
   ]) {
     const response = await read(extra);
     assert.equal(response.status, 200);
-    assert.deepEqual(response.body, { data: [], hasNext: false });
+    assert.deepEqual(response.body, {
+      data: [],
+      hasNext: false,
+      total_count: extra.offset === undefined ? 0 : 3,
+    });
   }
 
   const systemAction = action + '_SYSTEM';

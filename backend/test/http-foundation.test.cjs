@@ -46,10 +46,13 @@ ApiProperty({ type: String })(InputDto.prototype, 'name');
 class FixtureController {
   list(query) {
     return new ListResponse(
-      Array.from({ length: 21 }, (_, index) => ({ id: index + 1 })).slice(
-        query.offset,
-        query.offset + query.limit + 1,
-      ),
+      {
+        rows: Array.from({ length: 21 }, (_, index) => ({ id: index + 1 })).slice(
+          query.offset,
+          query.offset + query.limit + 1,
+        ),
+        total_count: 21,
+      },
       query.limit,
     );
   }
@@ -160,14 +163,16 @@ test('API single response propagates a UUID and never changes the health contrac
   assert.deepEqual(await health.json(), { status: 'ok', service: 'backend' });
 });
 
-test('pagination has only data/hasNext, strict decimal integers and empty-page behavior', async () => {
+test('pagination has data/hasNext/total_count, strict decimal integers and empty-page behavior', async () => {
   const first = await (await request('/api/checks/items')).json();
   assert.equal(first.data.length, 20);
+  assert.equal(first.total_count, 21);
   assert.equal(first.hasNext, true);
-  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(await (await request('/api/checks/items?offset=100')).json(), {
     data: [],
     hasNext: false,
+    total_count: 21,
   });
   for (const query of [
     'limit=0',

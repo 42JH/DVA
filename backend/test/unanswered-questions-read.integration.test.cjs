@@ -135,7 +135,7 @@ async function list(query = {}, headers = {}) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(typeof body.hasNext, 'boolean');
   for (const row of body.data) assert.deepEqual(Object.keys(row).sort(), rowKeys);
   return body;
@@ -314,6 +314,7 @@ test('OPEN is the default, registered questions have a live FAQ link and deleted
     assert.deepEqual(await list({ unansweredQuestionSeq: deleted, status }), {
       data: [],
       hasNext: false,
+      total_count: 0,
     });
 });
 
@@ -362,7 +363,7 @@ test('q searches question, current linked name or caller number and combines oth
     { callSessionSeq: 2147483647 },
     { aiPersonaVersionSeq: 2147483647 },
   ])
-    assert.deepEqual(await list(query), { data: [], hasNext: false });
+    assert.deepEqual(await list(query), { data: [], hasNext: false, total_count: 0 });
 });
 
 test('search treats percent, underscore and SQL-like input literally and matches normalized Korean', async () => {
@@ -481,6 +482,7 @@ test('pagination applies after filters, supports a six-item preview and does not
   assert.deepEqual(await list({ callSessionSeq: call.id, offset: Number.MAX_SAFE_INTEGER }), {
     data: [],
     hasNext: false,
+    total_count: 7,
   });
 });
 
@@ -550,6 +552,7 @@ test('OpenAPI separates administrator list authentication from AI collection and
   assert.deepEqual(Object.keys(schemas.UnansweredQuestionListResponseDto.properties).sort(), [
     'data',
     'hasNext',
+    'total_count',
   ]);
   for (const field of [
     'callStartedAt',

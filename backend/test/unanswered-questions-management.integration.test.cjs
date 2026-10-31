@@ -424,7 +424,7 @@ test('deletion clears only the work item text, hides linked result text and reta
   );
   assert.deepEqual(
     await (await f.get('/api/unanswered-questions?unansweredQuestionSeq=' + q.id)).json(),
-    { data: [], hasNext: false },
+    { data: [], hasNext: false, total_count: 0 },
   );
   await f.error(await convert(q.id, body()), 409, 'INVALID_STATE');
 });

@@ -6,7 +6,7 @@ Jira: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138).
 
 | API | 입력 | 응답 |
 | --- | --- | --- |
-| GET /api/companies/{id}/departments | 기업 번호, limit/offset | data에 부서 목록, hasNext |
+| GET /api/companies/{id}/departments | 기업 번호, limit/offset | data에 부서 목록, hasNext, total_count |
 | POST /api/companies/{id}/departments | name, groupBillingEnabled(선택) | 201, data.departmentSeq |
 | PATCH /api/departments/{id} | name 또는 groupBillingEnabled | 204 |
 | DELETE /api/departments/{id} | 부서 번호 | 204 |
@@ -39,3 +39,6 @@ CREATE TABLE migration_department_assignments (
 ```
 
 각 기존 구성원에 정확히 한 행을 제공한다. 이름은 실제 팀 이름이며 같은 기업·팀 이름은 같은 부서로 생성한다. 기존 소속과 다른 기업, 중복 고객, 누락된 구성원, 잘못된 팀 이름은 이관을 중단한다. 새 부서의 그룹결제와 기존 고객·기업의 월결제는 false로 시작한다. migration 전체가 성공하면 staging table을 제거한다. 실패하면 업무 데이터와 스키마는 롤백되고 입력한 배정표는 보존된다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

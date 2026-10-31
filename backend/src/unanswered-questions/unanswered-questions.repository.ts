@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -46,10 +47,10 @@ export class UnansweredQuestionsRepository {
     );
   }
 
-  async findMany(query: UnansweredQuestionQueryDto): Promise<UnansweredQuestionDto[]> {
-    return (
-      await this.database.pool.query<UnansweredQuestionDto>(
-        `SELECT u.unanswered_question_seq AS "unansweredQuestionSeq",u.call_session_seq AS "callSessionSeq",
+  async findMany(query: UnansweredQuestionQueryDto): Promise<PageRows<UnansweredQuestionDto>> {
+    return await readPage<UnansweredQuestionDto>(
+      this.database.pool,
+      `SELECT u.unanswered_question_seq AS "unansweredQuestionSeq",u.call_session_seq AS "callSessionSeq",
          COALESCE(c.started_at,a.ai_started_at) AS "callStartedAt",u.occurred_at AS "occurredAt",
          u.offset_seconds::double precision AS "offsetSeconds",customer.customer_seq AS "customerSeq",
          customer.name AS "customerName",c.caller_phone_number AS "callerPhoneNumber",u.question_text AS "questionText",
@@ -68,21 +69,19 @@ export class UnansweredQuestionsRepository {
              OR strpos(lower(normalize(customer.name,NFC)),lower(normalize($5,NFC)))>0
              OR strpos(c.caller_phone_number,$5)>0)
            AND ($6::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)>=$6)
-           AND ($7::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)<$7)
-         ORDER BY "callStartedAt" ASC NULLS LAST,u.unanswered_question_seq ASC LIMIT $8 OFFSET $9`,
-        [
-          query.status,
-          query.unansweredQuestionSeq ?? null,
-          query.callSessionSeq ?? null,
-          query.aiPersonaVersionSeq ?? null,
-          query.q || null,
-          query.from ?? null,
-          query.to ?? null,
-          query.limit + 1,
-          query.offset,
-        ],
-      )
-    ).rows;
+           AND ($7::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)<$7)`,
+      [
+        query.status,
+        query.unansweredQuestionSeq ?? null,
+        query.callSessionSeq ?? null,
+        query.aiPersonaVersionSeq ?? null,
+        query.q || null,
+        query.from ?? null,
+        query.to ?? null,
+      ],
+      query,
+      '"callStartedAt" ASC NULLS LAST,"unansweredQuestionSeq" ASC',
+    );
   }
 
   async findCall(client: PoolClient, id: number): Promise<string | undefined> {
