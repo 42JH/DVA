@@ -10,17 +10,15 @@ import {
 } from '@/shared/ui'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
-import { OrderCsvModal } from './OrderCsvModal'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 import { OrderPartyCell } from './OrderPartyCell'
 
 // 03 주문 내역 (와이어프레임 03_주문내역, 10/31)
-// 1줄 검색(이름 · 전화번호 · 주소) + 날짜 칸 + [CSV 내보내기] [CSV로 추가] [주문 추가] → 2줄 상태 칩 → 카드 '주문 목록 n건'
+// 1줄 검색(이름 · 전화번호 · 주소) + 날짜 칸 + [CSV 내보내기] [주문 추가] → 2줄 상태 칩 → 카드 '주문 목록 n건'
 // 줄 = 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
 // 줄을 누르면 주문 상세 창 (shared/order 공용 — 06 '주문 보기'와 같은 창). '접수 중' 줄은 아직 주문이 없어 안 열림
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
-// [CSV로 추가] → 파일을 골라 검사 후 한 번에 추가 (한 줄이라도 틀리면 전부 안 넣음)
 export function OrderListPage() {
   const vm = useOrderList()
 
@@ -74,7 +72,7 @@ export function OrderListPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 버튼 3개 (04 · 09와 같은 틀, 높이 48) */}
+      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 버튼 2개 (04 · 09와 같은 틀, 높이 48) */}
       <div className="flex items-center gap-3">
         <SearchBox
           value={vm.q}
@@ -90,9 +88,6 @@ export function OrderListPage() {
           onClick={vm.exportCsv}
         >
           {vm.exporting ? '내보내는 중…' : 'CSV 내보내기'}
-        </Button>
-        <Button tall onClick={vm.openCsv}>
-          CSV로 추가
         </Button>
         <Button tall kind="primary" onClick={vm.openAdd}>
           주문 추가
@@ -123,7 +118,6 @@ export function OrderListPage() {
       {vm.modal?.kind === 'add' && (
         <OrderFormModal onDone={vm.closeModal} onClose={vm.closeModal} />
       )}
-      {vm.modal?.kind === 'csv' && <OrderCsvModal onClose={vm.closeModal} />}
       {vm.modal?.kind === 'detail' && (
         <OrderDetailModal orderId={vm.modal.id} onClose={vm.closeModal} onEdit={vm.editOrder} />
       )}

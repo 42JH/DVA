@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import type { Address } from 'react-daum-postcode'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
+import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
 import type { Option } from '@/shared/ui'
@@ -27,6 +28,12 @@ const PAYMENT_OPTIONS: Option<PaymentMethod>[] = (
   ['MONTHLY', 'GROUP_CARD', 'PERSONAL_CARD'] as const
 ).map((v) => ({ value: v, label: PAYMENT_METHOD_LABEL[v] }))
 const orNull = (v: string) => v.trim() || null
+// 서버 422 details.field 중 이 창이 칸 아래에 보여 주는 것 (나머지는 아래 버튼 줄에 한 줄로)
+const SHOWN_FIELDS = new Set(
+  ['sender', 'receiver']
+    .flatMap((s) => ['name', 'phoneNumber', 'roadAddress', 'detailAddress'].map((f) => `${s}.${f}`))
+    .concat(['items.other', 'itemPrice', 'pickupRequestedAt', 'clientComment']),
+)
 const draftOf = (p: Party): PartyDraft => ({
   name: p.name,
   phone: p.phoneNumber,
@@ -109,6 +116,12 @@ export function useOrderForm(onDone: () => void, order?: OrderDetail) {
     },
   })
 
+  // 서버 칸별 오류 (명세서 error.details) — 칸 아래에. 화면 검사가 먼저 걸러서 보통은 안 옴
+  const err = mutation.error
+  const details = err instanceof ApiError ? err.details : []
+  const fieldError = (field: string) => details.find((d) => d.field === field)?.reason
+  const unshown = details.find((d) => !SHOWN_FIELDS.has(d.field))
+
   const party = (side: Side) => {
     const p = parties[side]
     const set = (patch: Partial<PartyDraft>) =>
@@ -116,9 +129,15 @@ export function useOrderForm(onDone: () => void, order?: OrderDetail) {
     return {
       name: p.name,
       setName: (v: string) => set({ name: v }),
+      nameError: fieldError(`${side}.name`),
       phone: p.phone,
       setPhone: (v: string) => set({ phone: digits(v, 11) }),
-      phoneError: p.phone && !phoneOk(p.phone) ? '10~11자리 숫자로 입력해 주세요.' : undefined,
+      phoneError:
+        p.phone && !phoneOk(p.phone)
+          ? '10~11자리 숫자로 입력해 주세요.'
+          : fieldError(`${side}.phoneNumber`),
+      addressError: fieldError(`${side}.roadAddress`),
+      detailError: fieldError(`${side}.detailAddress`),
       roadAddress: p.roadAddress,
       openSearch: () => setSearching(side),
       detailAddress: p.detailAddress,
@@ -144,7 +163,10 @@ export function useOrderForm(onDone: () => void, order?: OrderDetail) {
     pickupAt,
     setPickupAt,
     pickupMin: now,
-    pickupError: pickupPast ? '지금 이후 시각을 골라 주세요.' : undefined,
+    pickupError: pickupPast ? '지금 이후 시각을 골라 주세요.' : fieldError('pickupRequestedAt'),
+    etcError: fieldError('items.other'),
+    priceError: fieldError('itemPrice'),
+    requestError: fieldError('clientComment'),
     payment,
     paymentOptions: PAYMENT_OPTIONS,
     setPayment,
@@ -170,7 +192,16 @@ export function useOrderForm(onDone: () => void, order?: OrderDetail) {
       !pickupPast &&
       !mutation.isPending,
     isSubmitting: mutation.isPending,
-    submitError: mutation.error?.message ?? null,
+    // 칸에 못 붙인 오류 · 칸 오류가 없는 실패(연결 · 409 등)는 버튼 줄에 한 줄
+    submitError: !err
+      ? null
+      : unshown
+        ? unshown.reason
+        : details.length
+          ? null
+          : err instanceof ApiError && err.status === 409
+            ? '같은 요청을 처리하는 중입니다. 잠시 뒤 목록을 확인해 주세요.'
+            : err.message,
     submit: () => mutation.mutate(),
   }
 }

@@ -126,41 +126,38 @@ export async function fetchAllOrders(query: OrderListQuery): Promise<OrderRow[]>
   return filtered(query)
 }
 
-/** 주문 추가(수기 접수) — 접수되면 결제 대기. 멱등키: 같은 본문을 다시 보낼 땐 같은 키 (명세서 1.2)
- * shortcut: 가짜는 키를 확인하지 않음 — BE가 오면 같은 키 + 같은 본문이면 새로 만들지 않음 */
+// 가짜도 BE에 요청한 규칙(10/31)대로: 같은 멱등키로 다시 오면 새로 만들지 않고 처음 결과를 돌려줌
+// shortcut: 가짜는 본문 검증을 안 함 (화면 · CSV 검사가 먼저 거름) — 실제 422는 서버가 줌
+const replay = new Map<string, number>()
+
+const toNewOrder = (input: OrderInput, manualBy: string): Omit<OrderDetail, 'orderSeq'> => ({
+  route: 'MANUAL',
+  manualBy,
+  acceptedAt: new Date().toISOString(),
+  cancelled: false,
+  sender: input.sender,
+  receiver: input.receiver,
+  items: input.items,
+  pickupRequestedAt: input.pickupAt,
+  itemPrice: input.declaredValue,
+  clientComment: input.request,
+  paymentMethod: input.paymentMethod,
+  paymentState: 'UNPAID',
+  relatedCalls: [],
+})
+
+/** 주문 추가(수기 접수) — 접수되면 결제 대기. 멱등키: 같은 본문을 다시 보낼 땐 같은 키 (명세서 1.2) */
 export async function createOrder(
   input: OrderInput,
   idempotencyKey: string,
   manualBy: string,
 ): Promise<number> {
-  void idempotencyKey
   await wait()
-  return addOrder({
-    route: 'MANUAL',
-    manualBy,
-    acceptedAt: new Date().toISOString(),
-    cancelled: false,
-    sender: input.sender,
-    receiver: input.receiver,
-    items: input.items,
-    pickupRequestedAt: input.pickupAt,
-    itemPrice: input.declaredValue,
-    clientComment: input.request,
-    paymentMethod: input.paymentMethod,
-    paymentState: 'UNPAID',
-    relatedCalls: [],
-  })
-}
-
-/** CSV로 주문 추가 — 여러 건을 한 번에 (전부 결제 대기 · 수기). 멱등키는 파일 하나에 하나
- * shortcut: 가짜는 한 건씩 넣음 — BE 일괄 등록 API가 오면 한 번에 보내고, 중간 실패 시 전부 되돌리는지 확인 */
-export async function createOrders(
-  inputs: OrderInput[],
-  idempotencyKey: string,
-  manualBy: string,
-): Promise<number> {
-  for (const input of inputs) await createOrder(input, idempotencyKey, manualBy)
-  return inputs.length
+  const done = replay.get(idempotencyKey)
+  if (done) return done
+  const orderSeq = addOrder(toNewOrder(input, manualBy))
+  replay.set(idempotencyKey, orderSeq)
+  return orderSeq
 }
 
 /** 주문 수정 — 명세 ORD-04 PATCH /orders/{id} (응답 모양 확인 전). 수정은 재시도해도 결과가 같아 멱등키 없음 */

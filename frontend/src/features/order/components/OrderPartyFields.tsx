@@ -17,6 +17,7 @@ export function OrderPartyFields({
         inline
         placeholder="이름"
         value={party.name}
+        error={party.nameError}
         onChange={(e) => party.setName(e.target.value)}
       />
       <TextField
@@ -36,6 +37,7 @@ export function OrderPartyFields({
             readOnly
             placeholder="검색으로 고르기"
             value={party.roadAddress}
+            error={party.addressError}
             onClick={party.openSearch}
             className="cursor-pointer bg-bg!"
           />
@@ -62,6 +64,7 @@ export function OrderPartyFields({
         inline
         placeholder="선택 (동 · 호수 · 층)"
         value={party.detailAddress}
+        error={party.detailError}
         onChange={(e) => party.setDetailAddress(e.target.value)}
       />
     </section>

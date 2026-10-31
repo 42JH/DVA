@@ -1,4 +1,4 @@
-// CSV 내보내기 (04 통화 내역 · 03 주문 내역 공통) · 읽기 (03 CSV로 추가)
+// CSV 내보내기 (04 통화 내역 · 03 주문 내역 공통) · 읽기 (CSV 가져오기용 — 08 CSV 기업 등록 등)
 // 엑셀에서 한글이 깨지지 않게 맨 앞에 BOM, 쉼표 · 따옴표 · 줄바꿈이 든 칸은 따옴표로 감쌈 (따옴표는 두 번)
 
 export function toCsv(header: string[], rows: (string | number)[][]): string {

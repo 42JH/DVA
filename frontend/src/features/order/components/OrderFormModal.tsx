@@ -65,6 +65,7 @@ export function OrderFormModal({
               inline
               placeholder="기타 품목"
               value={vm.etcItem}
+              error={vm.etcError}
               onChange={(e) => vm.setEtcItem(e.target.value)}
             />
             <TextField
@@ -74,6 +75,7 @@ export function OrderFormModal({
               suffix="원"
               placeholder="숫자만 입력"
               value={vm.declaredValue}
+              error={vm.priceError}
               onChange={(e) => vm.setDeclaredValue(e.target.value)}
             />
             <TextField
@@ -99,6 +101,7 @@ export function OrderFormModal({
             inline
             placeholder="선택 (예: 경비실에 맡겨 주세요)"
             value={vm.request}
+            error={vm.requestError}
             onChange={(e) => vm.setRequest(e.target.value)}
           />
         </section>
