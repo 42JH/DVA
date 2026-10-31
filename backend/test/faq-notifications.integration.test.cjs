@@ -143,6 +143,44 @@ test('missing configuration retains notifications and FAQ writes; rollback never
   assert.equal(requests.length, 0);
 });
 
+test('one run drains at most ten notifications sequentially without changing the AI payload', async () => {
+  for (let index = 0; index < 12; index++)
+    await f.createdId({ category: '기타', question: f.marker(), answer: '순서대로 전달' });
+  const events = await rows();
+  await worker.run();
+  assert.deepEqual(
+    requests.map((row) => row.eventId),
+    events.slice(0, 10).map((row) => row.event_id),
+  );
+  assert.equal((await rows()).filter((row) => row.sent_at !== null).length, 10);
+  await worker.run();
+  assert.deepEqual(
+    requests.map((row) => row.eventId),
+    events.map((row) => row.event_id),
+  );
+  assert.ok((await rows()).every((row) => row.attempts === 1 && row.sent_at !== null));
+});
+
+test('shutdown finishes the claimed notification and leaves later work unclaimed', async () => {
+  for (let index = 0; index < 2; index++)
+    await f.createdId({ category: '기타', question: f.marker(), answer: '종료 경계' });
+  const local = new FaqNotificationsWorker(
+    f.app.get(FaqNotificationsRepository),
+    {
+      notify: async () => {
+        void local.onModuleDestroy();
+      },
+    },
+    config,
+  );
+  await local.run();
+  await local.run();
+  const pending = await rows();
+  assert.ok(pending[0].sent_at);
+  assert.equal(pending[1].attempts, 0);
+  assert.equal(pending[1].claim_id, null);
+});
+
 test('uncommitted content and its notification cannot be observed by the delivery worker', async () => {
   const audit = f.app.get(AuditService),
     record = audit.recordSuccess;

@@ -9,6 +9,7 @@ export class FaqNotificationsWorker implements OnApplicationBootstrap, OnModuleD
   private readonly logger = new Logger(FaqNotificationsWorker.name);
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
+  private stopped = false;
 
   constructor(
     private readonly repository: FaqNotificationsRepository,
@@ -35,18 +36,22 @@ export class FaqNotificationsWorker implements OnApplicationBootstrap, OnModuleD
 
   private async notify(): Promise<void> {
     if (!this.config.get('AI_FAQ_TOKEN', { infer: true })) return;
-    const pending = await this.repository.claim();
-    if (!pending) return;
-    try {
-      await this.ai.notify(pending);
-      await this.repository.finish(pending, true);
-    } catch {
-      await this.repository.finish(pending, false);
-      this.logger.warn({ event: 'faq_notification_retry', eventId: pending.eventId });
+    for (let index = 0; index < 10 && !this.stopped; index++) {
+      const pending = await this.repository.claim();
+      if (!pending) return;
+      try {
+        await this.ai.notify(pending);
+        await this.repository.finish(pending, true);
+      } catch {
+        await this.repository.finish(pending, false);
+        this.logger.warn({ event: 'faq_notification_retry', eventId: pending.eventId });
+        return;
+      }
     }
   }
 
   async onModuleDestroy(): Promise<void> {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     await this.running;
   }
