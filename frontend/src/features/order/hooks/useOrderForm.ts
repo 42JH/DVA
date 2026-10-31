@@ -2,25 +2,29 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import type { Address } from 'react-daum-postcode'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
+import { useSession } from '@/shared/auth/useSession'
+import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
 import type { Option } from '@/shared/ui'
-import { PAYMENT_LABEL } from '@/features/order/labels'
 import {
   BOX_TYPES,
   createOrder,
   orderQueries,
-  type BoxType,
+  type BoxKey,
   type OrderInput,
+  type Party,
   type PaymentMethod,
 } from '@/features/order/api/orderApi'
 
 type Side = 'sender' | 'receiver'
-type Party = OrderInput['sender']
+/** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */
+type PartyDraft = { name: string; phone: string; roadAddress: string; detailAddress: string }
 
-const EMPTY_PARTY: Party = { name: '', phone: '', roadAddress: '', detailAddress: '' }
-const NO_ITEMS = Object.fromEntries(BOX_TYPES.map((b) => [b, 0])) as Record<BoxType, number>
+const EMPTY_PARTY: PartyDraft = { name: '', phone: '', roadAddress: '', detailAddress: '' }
+const NO_ITEMS = Object.fromEntries(BOX_TYPES.map((b) => [b.key, 0])) as Record<BoxKey, number>
 const PAYMENT_OPTIONS: Option<PaymentMethod>[] = (
-  ['credit', 'groupBilling', 'billing'] as const
-).map((v) => ({ value: v, label: PAYMENT_LABEL[v] }))
+  ['MONTHLY', 'GROUP_CARD', 'PERSONAL_CARD'] as const
+).map((v) => ({ value: v, label: PAYMENT_METHOD_LABEL[v] }))
+const orNull = (v: string) => v.trim() || null
 
 const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
 const phoneOk = (p: string) => p.length === 10 || p.length === 11
@@ -30,7 +34,8 @@ const phoneOk = (p: string) => p.length === 10 || p.length === 11
  * 주소는 직접 칠 수 없고 검색으로만 고름 (오타 주소로 수거 실패 방지). 접수되면 목록을 다시 받고 창을 닫음 */
 export function useOrderForm(onDone: () => void) {
   const qc = useQueryClient()
-  const [parties, setParties] = useState<Record<Side, Party>>({
+  const { me } = useSession()
+  const [parties, setParties] = useState<Record<Side, PartyDraft>>({
     sender: EMPTY_PARTY,
     receiver: EMPTY_PARTY,
   })
@@ -38,30 +43,31 @@ export function useOrderForm(onDone: () => void) {
   const [etcItem, setEtcItem] = useState('')
   const [declaredValue, setDeclaredValue] = useState('') // 숫자만
   const [pickupAt, setPickupAt] = useState('') // datetime-local 값
-  const [payment, setPayment] = useState<PaymentMethod>('credit') // 와이어프레임 기본 = 월정산
+  const [payment, setPayment] = useState<PaymentMethod>('MONTHLY') // 와이어프레임 기본 = 월정산
   const [request, setRequest] = useState('')
   const [searching, setSearching] = useState<Side | null>(null) // 주소 검색 창이 열린 쪽
 
   const now = toDateTimeLocal(new Date())
   const pickupPast = pickupAt !== '' && pickupAt <= now // 같은 형식 문자열이라 비교 가능
-  const hasItem = BOX_TYPES.some((b) => counts[b] > 0) || etcItem.trim() !== ''
-  const partyOk = (p: Party) => p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
+  const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
+  const partyOk = (p: PartyDraft) =>
+    p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
 
   const input = (): OrderInput => {
-    const trim = (p: Party): Party => ({
-      ...p,
+    const party = (p: PartyDraft): Party => ({
       name: p.name.trim(),
-      detailAddress: p.detailAddress.trim(),
+      phoneNumber: p.phone,
+      roadAddress: p.roadAddress,
+      detailAddress: orNull(p.detailAddress),
     })
     return {
-      sender: trim(parties.sender),
-      receiver: trim(parties.receiver),
-      items: BOX_TYPES.filter((b) => counts[b] > 0).map((b) => ({ box: b, count: counts[b] })),
-      etcItem: etcItem.trim(),
+      sender: party(parties.sender),
+      receiver: party(parties.receiver),
+      items: { ...counts, other: orNull(etcItem) },
       declaredValue: declaredValue ? Number(declaredValue) : null,
       pickupAt: pickupAt ? fromDateTimeLocal(pickupAt) : null,
       paymentMethod: payment,
-      request: request.trim(),
+      request: orNull(request),
     }
   }
 
@@ -72,7 +78,7 @@ export function useOrderForm(onDone: () => void) {
       const body = input()
       const json = JSON.stringify(body)
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      return createOrder(body, sent.current.key)
+      return createOrder(body, sent.current.key, me?.loginId ?? '')
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: orderQueries.all() })
@@ -82,7 +88,7 @@ export function useOrderForm(onDone: () => void) {
 
   const party = (side: Side) => {
     const p = parties[side]
-    const set = (patch: Partial<Party>) =>
+    const set = (patch: Partial<PartyDraft>) =>
       setParties((all) => ({ ...all, [side]: { ...all[side], ...patch } }))
     return {
       name: p.name,
@@ -102,9 +108,10 @@ export function useOrderForm(onDone: () => void) {
     receiver: party('receiver'),
 
     items: BOX_TYPES.map((b) => ({
-      box: b,
-      count: counts[b],
-      setCount: (n: number) => setCounts((c) => ({ ...c, [b]: n })),
+      key: b.key,
+      label: b.label,
+      count: counts[b.key],
+      setCount: (n: number) => setCounts((c) => ({ ...c, [b.key]: n })),
     })),
     etcItem,
     setEtcItem,

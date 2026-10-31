@@ -8,12 +8,13 @@ import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
 import { ORDER_STATUS_LABEL, ORDER_STATUS_TAG } from '@/features/order/labels'
 import {
+  BOX_TYPES,
   fetchAllOrders,
   orderQueries,
   type OrderListQuery,
-  type OrderParty,
   type OrderRow,
   type OrderStatus,
+  type Party,
 } from '@/features/order/api/orderApi'
 
 export interface PartyCell {
@@ -25,6 +26,7 @@ export interface PartyCell {
 /** 목록 한 줄 = 화면용 글만 (그리기만 하도록) */
 export interface OrderListRow {
   orderSeq: number
+  canOpen: boolean // 접수 중은 아직 주문 상세가 없어 안 열림
   statusLabel: string
   statusTag: TagKind
   receivedAt: string[] // 올해면 한 줄, 다른 해면 날짜 · 시각 두 줄
@@ -46,9 +48,19 @@ const STATUS_OPTIONS: Option<StatusFilter>[] = [
   ...STATUS_ORDER.map((s) => ({ value: s, label: ORDER_STATUS_LABEL[s] })),
 ]
 
-const party = (p: OrderParty): PartyCell => ({ ...p, phone: fmtPhone(p.phone) })
-const itemsText = (o: OrderRow) =>
-  o.items.length ? o.items.map((i) => `${i.box} ${i.count}`).join(' · ') : null
+const party = (p: Party): PartyCell => ({
+  name: p.name,
+  phone: fmtPhone(p.phoneNumber),
+  address: [p.roadAddress, p.detailAddress].filter(Boolean).join(' '),
+})
+/** '소박스 1 · 중박스 1 · 기타 화분' — 0개는 뺌. 접수 중(품목 없음)이면 null */
+function itemsText(o: OrderRow) {
+  if (!o.items) return null
+  const items = o.items
+  const parts = BOX_TYPES.filter((b) => items[b.key] > 0).map((b) => `${b.label} ${items[b.key]}`)
+  if (items.other) parts.push(`기타 ${items.other}`)
+  return parts.join(' · ') || null
+}
 
 /** 03 주문 내역 훅 (와이어프레임 03_주문내역, 10/31)
  * 검색(이름 · 전화번호 · 주소, 숫자만 치면 주문 번호도) · 날짜 칸(기본 오늘) · 상태 칩 · 쪽은 URL에. CSV 내보내기 = 지금 조건의 전체 쪽 */
@@ -56,6 +68,7 @@ export function useOrderList() {
   const { params, page, set } = useListParams(DEFAULTS)
   const [exporting, setExporting] = useState(false)
   const [adding, setAdding] = useState(false) // 주문 추가 창
+  const [openedId, setOpenedId] = useState<number | null>(null) // 주문 상세 창 (shared/order 공용 창)
 
   const today = todayYmd()
   const range = params.from ? { from: params.from, to: params.to || params.from } : null
@@ -74,6 +87,7 @@ export function useOrderList() {
 
   const rows: OrderListRow[] = (list.data?.items ?? []).map((o) => ({
     orderSeq: o.orderSeq,
+    canOpen: o.status !== 'IN_PROGRESS',
     statusLabel: ORDER_STATUS_LABEL[o.status],
     statusTag: ORDER_STATUS_TAG[o.status],
     receivedAt: fmtListTime(o.receivedAt),
@@ -106,11 +120,11 @@ export function useOrderList() {
           ORDER_STATUS_LABEL[o.status],
           fmtListTime(o.receivedAt).join(' '),
           o.sender.name,
-          fmtPhone(o.sender.phone),
-          o.sender.address,
+          fmtPhone(o.sender.phoneNumber),
+          party(o.sender).address,
           o.receiver.name,
-          fmtPhone(o.receiver.phone),
-          o.receiver.address,
+          fmtPhone(o.receiver.phoneNumber),
+          party(o.receiver).address,
           o.pickupAt ? fmtListTime(o.pickupAt).join(' ') : '',
           itemsText(o) ?? '',
         ]),
@@ -148,5 +162,9 @@ export function useOrderList() {
     adding,
     openAdd: () => setAdding(true),
     closeAdd: () => setAdding(false),
+
+    openedId, // null이 아니면 주문 상세 창
+    openOrder: (r: OrderListRow) => r.canOpen && setOpenedId(r.orderSeq),
+    closeOrder: () => setOpenedId(null),
   }
 }

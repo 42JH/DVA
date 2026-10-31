@@ -8,6 +8,7 @@ import {
   Tag,
   type Column,
 } from '@/shared/ui'
+import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderFormModal } from './OrderFormModal'
 import { OrderPartyCell } from './OrderPartyCell'
@@ -15,7 +16,8 @@ import { OrderPartyCell } from './OrderPartyCell'
 // 03 주문 내역 (와이어프레임 03_주문내역, 10/31)
 // 1줄 검색(이름 · 전화번호 · 주소) + 날짜 칸 + [CSV 내보내기] [CSV로 추가] [주문 추가] → 2줄 상태 칩 → 카드 '주문 목록 n건'
 // 줄 = 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
-// shortcut: 주문 상세(줄 클릭) · CSV로 추가는 다음 작업 — 지금은 [CSV로 추가] 자리만 잡고 비활성
+// 줄을 누르면 주문 상세 창 (shared/order 공용 — 06 '주문 보기'와 같은 창). '접수 중' 줄은 아직 주문이 없어 안 열림
+// shortcut: 주문 수정 · CSV로 추가는 다음 작업 — 상세 창 [수정]은 onEdit을 안 넘겨 숨김, [CSV로 추가]는 자리만 잡고 비활성
 export function OrderListPage() {
   const vm = useOrderList()
 
@@ -108,12 +110,15 @@ export function OrderListPage() {
         columns={columns}
         rows={vm.rows}
         rowKey={(r) => r.orderSeq}
+        onRowClick={vm.openOrder}
+        canClick={(r) => r.canOpen}
         loading={vm.isLoading}
         empty={vm.listError ?? (vm.q ? '해당하는 주문이 없습니다.' : '주문 내역이 없습니다.')}
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
 
       {vm.adding && <OrderFormModal onClose={vm.closeAdd} />}
+      {vm.openedId !== null && <OrderDetailModal orderId={vm.openedId} onClose={vm.closeOrder} />}
     </div>
   )
 }

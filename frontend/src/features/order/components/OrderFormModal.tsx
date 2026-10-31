@@ -46,7 +46,7 @@ export function OrderFormModal({ onClose }: { onClose: () => void }) {
             <span className="text-label text-sub">품목</span>
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               {vm.items.map((i) => (
-                <Stepper key={i.box} label={i.box} value={i.count} onChange={i.setCount} />
+                <Stepper key={i.key} label={i.label} value={i.count} onChange={i.setCount} />
               ))}
             </div>
           </div>

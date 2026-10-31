@@ -20,6 +20,7 @@ export function Table<Row>({
   rows,
   rowKey,
   onRowClick,
+  canClick,
   selectable,
   selected,
   onSelect,
@@ -35,6 +36,7 @@ export function Table<Row>({
   rows: Row[]
   rowKey: (row: Row) => string | number
   onRowClick?: (row: Row) => void // 있으면 호버 + 손가락 커서
+  canClick?: (row: Row) => boolean // 줄마다 누를 수 있는지 (03 '접수 중'은 안 열림). 없으면 전부
   selectable?: boolean // 맨 앞 체크박스 열
   selected?: Set<string | number>
   onSelect?: (key: string | number) => void
@@ -91,16 +93,17 @@ export function Table<Row>({
             const isSelected = selected?.has(key) ?? false
             const tinted = isSelected // 호버는 CSS(group-hover)라 태그는 선택만 흰 바탕으로
             const isOpen = expanded?.(row) ?? false // 펼친 줄: 옅은 바탕, 아래 모서리는 각지게 → 아래 subRows 띠와 한 덩어리
+            const click = canClick?.(row) === false ? undefined : onRowClick
             return (
               <li key={key} className={i < rows.length - 1 ? 'border-b border-line' : ''}>
                 <div
-                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onClick={click ? () => click(row) : undefined}
                   className={`group -mx-4 grid min-h-[66px] items-center rounded-lg px-4 ${
                     isSelected
                       ? 'bg-action-soft'
                       : isOpen
                         ? 'cursor-pointer rounded-b-none bg-bg'
-                        : onRowClick
+                        : click
                           ? 'cursor-pointer hover:bg-bg'
                           : ''
                   }`}
