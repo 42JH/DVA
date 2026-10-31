@@ -9,6 +9,7 @@ import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
 import { FaqPage } from '@/features/faq/components/FaqPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { HomePage } from './routes/HomePage'
+import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -40,7 +41,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'orders',
-            element: <Placeholder />,
+            element: <OrderListPage />,
             handle: { title: '주문 내역' } satisfies RouteHandle,
           },
           {

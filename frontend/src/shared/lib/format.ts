@@ -68,3 +68,13 @@ export function fmtPhone(digits: string): string {
 export function fmtDateDay(d: Date): string {
   return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]})`
 }
+
+/** Date → datetime-local 칸 값 'YYYY-MM-DDTHH:mm' (브라우저 시간대 = 화면 시간대) */
+export function toDateTimeLocal(d: Date): string {
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`
+}
+
+/** datetime-local 칸 값 → 서버로 보낼 ISO 8601 (UTC) */
+export function fromDateTimeLocal(value: string): string {
+  return new Date(value).toISOString()
+}

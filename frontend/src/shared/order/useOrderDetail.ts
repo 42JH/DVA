@@ -46,9 +46,9 @@ function toView(o: OrderDetail): OrderView {
     receiver: partyRows(o.receiver),
     items: itemsText(o),
     info: [
-      ['수거 희망 일시', fmtDetailTime(o.pickupRequestedAt)],
+      ['수거 희망 일시', o.pickupRequestedAt ? fmtDetailTime(o.pickupRequestedAt) : '없음'],
       ['결제 방식', PAYMENT_METHOD_LABEL[o.paymentMethod]],
-      ['물품 가액', `${o.itemPrice.toLocaleString('ko-KR')}원`],
+      ['물품 가액', o.itemPrice === null ? '없음' : `${o.itemPrice.toLocaleString('ko-KR')}원`],
       ['결제', PAYMENT_STATE_LABEL[o.paymentState]],
     ],
     clientComment: o.clientComment ?? '없음',

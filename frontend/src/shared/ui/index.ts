@@ -8,6 +8,7 @@ export {
   PeriodFilter,
   Select,
   RadioGroup,
+  ChipGroup,
   AppliedFilters,
   type PeriodKey,
   type Option,
@@ -18,6 +19,8 @@ export { ConfirmDialog, FormModal } from './Modal'
 export { TextField, TextArea } from './FormField'
 export { SelectField } from './SelectField'
 export { Switch } from './Switch'
+export { Stepper } from './Stepper'
+export { FileDrop } from './FileDrop'
 export { Calendar } from './Calendar'
 export { DateField } from './DateField'
 export { PageHeader } from './PageHeader'

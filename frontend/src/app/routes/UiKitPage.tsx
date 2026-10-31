@@ -7,6 +7,9 @@ import {
   Pagination,
   PeriodFilter,
   RadioGroup,
+  ChipGroup,
+  Stepper,
+  FileDrop,
   SearchBox,
   Table,
   Tabs,
@@ -139,6 +142,8 @@ export function UiKitPage() {
   const [ctab, setCtab] = useState<'all' | 'wait' | 'admin'>('all')
   const [q, setQ] = useState('')
   const [period, setPeriod] = useState<PeriodKey>('today')
+  const [qty, setQty] = useState(0)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
   const [status, setStatus] = useState('all')
   const [kind, setKind] = useState('all')
   const [selected, setSelected] = useState<Set<string | number>>(new Set())
@@ -195,6 +200,32 @@ export function UiKitPage() {
           ]}
         />
       </div>
+
+      <div className="flex items-center gap-6">
+        <Stepper label="소박스" value={qty} onChange={setQty} />
+        <TextField label="물품 가액" inline suffix="원" placeholder="숫자만 입력" />
+      </div>
+
+      <div className="w-[520px]">
+        <FileDrop
+          file={csvFile}
+          accept=".csv"
+          error={csvFile ? '3행 전화번호 형식이 맞지 않아 등록하지 못했습니다.' : undefined}
+          onPick={setCsvFile}
+          onRemove={() => setCsvFile(null)}
+        />
+      </div>
+
+      <ChipGroup
+        name="상태"
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: 'all', label: '전체' },
+          { value: 'edit', label: '수정' },
+          { value: 'ask', label: '문의' },
+        ]}
+      />
 
       <div className="flex items-center justify-between">
         <RadioGroup
@@ -260,6 +291,7 @@ export function UiKitPage() {
         <Tag kind="red">조치 필요</Tag>
         <Tag kind="gray">해결</Tag>
         <Tag kind="outline">지식 없음</Tag>
+        <Tag kind="live">접수 중</Tag>
         <Pagination page={2} hasNext onChange={() => {}} />
       </div>
 

@@ -13,24 +13,38 @@ function Wrap({
   label,
   error,
   hint,
+  inline,
   children,
 }: {
   label: string
   error?: string
   hint?: string
+  inline?: boolean
   children: React.ReactNode
 }) {
+  const note = error ? (
+    <span role="alert" className="text-caption font-semibold text-danger">
+      {error}
+    </span>
+  ) : (
+    hint && <span className="text-caption text-muted">{hint}</span>
+  )
+  // inline = 라벨 왼쪽 120 칸 (03 주문 추가처럼 칸이 많은 창). 라벨은 칸 높이(44) 가운데
+  if (inline)
+    return (
+      <label className="grid grid-cols-[120px_1fr] items-start gap-x-4">
+        <span className="flex h-11 items-center text-label text-sub">{label}</span>
+        <span className="flex min-w-0 flex-col gap-2">
+          {children}
+          {note}
+        </span>
+      </label>
+    )
   return (
     <label className="flex flex-col gap-2">
       <span className="text-label font-semibold text-sub">{label}</span>
       {children}
-      {error ? (
-        <span role="alert" className="text-caption font-semibold text-danger">
-          {error}
-        </span>
-      ) : (
-        hint && <span className="text-caption text-muted">{hint}</span>
-      )}
+      {note}
     </label>
   )
 }
@@ -40,6 +54,8 @@ export function TextField({
   error,
   hint,
   locked,
+  inline,
+  suffix,
   className = '',
   ...rest
 }: InputHTMLAttributes<HTMLInputElement> & {
@@ -47,10 +63,12 @@ export function TextField({
   error?: string
   hint?: string
   locked?: boolean
+  inline?: boolean // 라벨 왼쪽
+  suffix?: string // 칸 안 오른쪽 단위 ('원')
 }) {
   if (locked) {
     return (
-      <Wrap label={label} hint={hint}>
+      <Wrap label={label} hint={hint} inline={inline}>
         <span className="relative block">
           <input
             {...rest}
@@ -72,13 +90,25 @@ export function TextField({
       </Wrap>
     )
   }
+  const input = (
+    <input
+      {...rest}
+      aria-invalid={!!error}
+      className={`${BOX} h-11 bg-surface ${STATE(error)} ${suffix ? 'pr-10' : ''} ${className}`}
+    />
+  )
   return (
-    <Wrap label={label} error={error} hint={hint}>
-      <input
-        {...rest}
-        aria-invalid={!!error}
-        className={`${BOX} h-11 bg-surface ${STATE(error)} ${className}`}
-      />
+    <Wrap label={label} error={error} hint={hint} inline={inline}>
+      {suffix ? (
+        <span className="relative block">
+          {input}
+          <span className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-body text-sub">
+            {suffix}
+          </span>
+        </span>
+      ) : (
+        input
+      )}
     </Wrap>
   )
 }

@@ -27,7 +27,8 @@ function Overlay({
         aria-modal="true"
         aria-label={label}
         onClick={(e) => e.stopPropagation()}
-        className="rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)]"
+        // 창 높이 = 브라우저 높이 - 위아래 32씩까지. 넘치면 FormModal의 내용 칸만 스크롤 (주문 상세처럼 긴 창)
+        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)]"
       >
         {children}
       </div>
@@ -110,7 +111,7 @@ export function FormModal({
 }) {
   return (
     <Overlay onClose={onClose} label={title}>
-      <div className="flex flex-col gap-6" style={{ width: width - 64 }}>
+      <div className="flex min-h-0 flex-col gap-6" style={{ width: width - 64 }}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="flex items-center gap-3 text-card font-bold">
@@ -138,7 +139,8 @@ export function FormModal({
           </button>
         </div>
         <div className="border-t border-line" />
-        {children}
+        {/* 제목줄 · 버튼줄은 고정, 내용만 스크롤. -mx-8 px-8: 스크롤 막대를 창 오른쪽 끝에 붙이고 글자 자리는 그대로 */}
+        <div className="-mx-8 flex min-h-0 flex-col gap-6 overflow-y-auto px-8">{children}</div>
         <div className="flex justify-end gap-3">{footer}</div>
       </div>
     </Overlay>
