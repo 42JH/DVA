@@ -356,6 +356,46 @@ def summary(ctx: Any) -> dict:
     }
 
 
+def preview(ctx: Any) -> list[tuple[str, list[str]]]:
+    """선택지를 묻는 단계에서 답마다 바로 이어서 할 말(문구 키들). 음성 모델은 고객 말이 끝나자마자 말을 시작해
+    판별·진행 상태보다 앞서고, 그때 다음 질문을 스스로 지었다(2026-10-31 통화: "접수할게요" 뒤 "어디에서 보내시나요?",
+    진행 상태가 온 뒤 다시 성함). 답의 사건은 on_answer가 정하지만 "<무엇>.<답>" 꼴이라 그 이름으로 전이를 찾는다."""
+    stage = current(ctx)
+    if not stage.choices or not listening(ctx):
+        return []
+    out = []
+    for choice, meaning in stage.choices(ctx).items():
+        t = next((t for t in stage.transitions if t.event.rsplit(".", 1)[-1] == choice and t.guard(ctx)), None)
+        keys = _ahead(ctx, t) if t else None
+        if keys:
+            out.append((meaning, keys))
+    return out
+
+
+def _ahead(ctx: Any, t: Transition) -> list[str] | None:
+    """이 전이로 가면 할 말. 가는 길이 답 처리 결과에 따라 갈릴 수 있으면(들어온 직후 전이가 둘 이상, 넘겨 받기,
+    확정 지연, 같은 단계 다시 묻기·복귀) 미리 말하지 않는다(None)."""
+    if t.target in (STAY, RETURN) or t.forward or t.commit:
+        return None
+    say = _keys(_key(ctx, t.say))
+    if say and t.asks:
+        return say
+    stage = STAGES[t.target]
+    for _ in range(MAX_HOPS):
+        entered = [e for e in stage.transitions if e.event == ENTERED]
+        if len(entered) > 1 or (entered and entered[0].guard(ctx) and (
+                entered[0].target in (STAY, RETURN) or entered[0].commit)):
+            return None
+        if not entered or not entered[0].guard(ctx):
+            break
+        say += _keys(_key(ctx, entered[0].say))
+        stage = STAGES[entered[0].target]
+    else:
+        return None
+    m = [f for f in stage.fields if not ctx.field_done(f)]
+    return say + ([_key(ctx, stage.field_texts[m[0]])] if m else _keys(_key(ctx, stage.ask))) or None
+
+
 def progress_text(ctx: Any, max_chars: int) -> str:
     """음성 모델에 thinking.append로 줄 "다음에 할 말 + 기록된 값". max_chars를 넘지 않는다."""
     texts = ctx.texts
@@ -363,6 +403,11 @@ def progress_text(ctx: Any, max_chars: int) -> str:
     m = missing(ctx)
     # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다
     then = texts.progress_then.format(next2=render(ctx, field_key(ctx, m[1]))) if len(m) > 1 else ""
+    ahead = preview(ctx)
+    if ahead:  # 답을 고르는 질문: 판별을 기다리지 않고 바로 맞는 다음 말을 하게
+        then += texts.progress_preview.format(items=texts.progress_sep.join(
+            texts.progress_preview_item.format(choice=c, next=" ".join(render(ctx, k) for k in keys))
+            for c, keys in ahead))
     items = ctx.recorded()
     for cut in (None, 40, 24, 12, 6, 0):
         shown = [(k, v if cut is None else v[:cut]) for k, v in items] if cut != 0 else []

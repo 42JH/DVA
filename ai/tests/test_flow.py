@@ -942,6 +942,23 @@ def test_progress_tells_the_question_after_next():
     assert "먼저 성함을" in text and "그다음" in text and TEXTS.say["A1_2"] in text
 
 
+def test_progress_tells_what_to_say_after_each_answer():
+    """답을 고르는 질문: 판별보다 먼저 말하는 음성 모델이 답에 맞는 다음 질문을 하게 답마다 미리 알려 준다
+    (2026-10-31 통화: "접수할게요" 뒤 스스로 "어디에서 보내시나요?"를 물음)."""
+    call = make_call(new_db())
+    assert dict(engine.preview(call))["택배를 보내겠다(접수)"] == ["A1_1"]
+    assert dict(engine.preview(call))["보낸 택배를 조회·취소하겠다"] == ["NEW_LOOKUP", "A1_1"]
+    assert TEXTS.say["A1_1"] in engine.progress_text(call, CFG.progress.max_chars)
+    # 가는 길이 답 처리 결과에 따라 갈리면(접수 → 기존/새 출발지) 미리 말하지 않는다
+    call = make_call(saved_db())
+    ahead = dict(engine.preview(call))
+    assert call.flow.stage == "B_GREET_CHOICE" and ahead["아니다·다른 곳에서 보내겠다·다른 용건이다"] == ["HUB_ASK"]
+    assert "예·맞다(그 출발지에서 보내겠다)" not in ahead
+    # 항목을 받는 단계에는 없다
+    call = play(new_db(), [say("order", "A_REGISTER_SENDER")])
+    assert engine.preview(call) == [] and "바로 이어서" not in engine.progress_text(call, CFG.progress.max_chars)
+
+
 def test_saved_values_are_hidden_until_customer_says_them():
     call = play(saved_db(), steps("1")[:2])
     shown = dict(call.recorded())
