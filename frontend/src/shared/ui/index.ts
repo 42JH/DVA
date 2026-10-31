@@ -16,6 +16,7 @@ export {
 export { Pagination } from './Pagination'
 export { Table, TwoLines, type Column } from './Table'
 export { ConfirmDialog, FormModal } from './Modal'
+export { MoreMenu, type MoreMenuItem } from './MoreMenu'
 export { TextField, TextArea } from './FormField'
 export { SelectField } from './SelectField'
 export { Switch } from './Switch'
