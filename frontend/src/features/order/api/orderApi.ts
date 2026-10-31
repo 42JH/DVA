@@ -146,6 +146,17 @@ export async function createOrder(
   })
 }
 
+/** CSV로 주문 추가 — 여러 건을 한 번에 (전부 결제 대기 · 수기). 멱등키는 파일 하나에 하나
+ * shortcut: 가짜는 한 건씩 넣음 — BE 일괄 등록 API가 오면 한 번에 보내고, 중간 실패 시 전부 되돌리는지 확인 */
+export async function createOrders(
+  inputs: OrderInput[],
+  idempotencyKey: string,
+  manualBy: string,
+): Promise<number> {
+  for (const input of inputs) await createOrder(input, idempotencyKey, manualBy)
+  return inputs.length
+}
+
 /** 주문 수정 — 명세 ORD-04 PATCH /orders/{id} (응답 모양 확인 전). 수정은 재시도해도 결과가 같아 멱등키 없음 */
 export async function saveOrder(orderSeq: number, input: OrderInput): Promise<void> {
   await wait()

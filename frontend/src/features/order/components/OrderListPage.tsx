@@ -10,6 +10,7 @@ import {
 } from '@/shared/ui'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
+import { OrderCsvModal } from './OrderCsvModal'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 import { OrderPartyCell } from './OrderPartyCell'
@@ -19,7 +20,7 @@ import { OrderPartyCell } from './OrderPartyCell'
 // 줄 = 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
 // 줄을 누르면 주문 상세 창 (shared/order 공용 — 06 '주문 보기'와 같은 창). '접수 중' 줄은 아직 주문이 없어 안 열림
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
-// shortcut: CSV로 추가는 다음 작업 — [CSV로 추가]는 자리만 잡고 비활성
+// [CSV로 추가] → 파일을 골라 검사 후 한 번에 추가 (한 줄이라도 틀리면 전부 안 넣음)
 export function OrderListPage() {
   const vm = useOrderList()
 
@@ -90,7 +91,7 @@ export function OrderListPage() {
         >
           {vm.exporting ? '내보내는 중…' : 'CSV 내보내기'}
         </Button>
-        <Button tall disabled>
+        <Button tall onClick={vm.openCsv}>
           CSV로 추가
         </Button>
         <Button tall kind="primary" onClick={vm.openAdd}>
@@ -122,6 +123,7 @@ export function OrderListPage() {
       {vm.modal?.kind === 'add' && (
         <OrderFormModal onDone={vm.closeModal} onClose={vm.closeModal} />
       )}
+      {vm.modal?.kind === 'csv' && <OrderCsvModal onClose={vm.closeModal} />}
       {vm.modal?.kind === 'detail' && (
         <OrderDetailModal orderId={vm.modal.id} onClose={vm.closeModal} onEdit={vm.editOrder} />
       )}

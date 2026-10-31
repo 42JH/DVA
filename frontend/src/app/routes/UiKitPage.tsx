@@ -9,6 +9,7 @@ import {
   RadioGroup,
   ChipGroup,
   Stepper,
+  FileDrop,
   SearchBox,
   Table,
   Tabs,
@@ -142,6 +143,7 @@ export function UiKitPage() {
   const [q, setQ] = useState('')
   const [period, setPeriod] = useState<PeriodKey>('today')
   const [qty, setQty] = useState(0)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
   const [status, setStatus] = useState('all')
   const [kind, setKind] = useState('all')
   const [selected, setSelected] = useState<Set<string | number>>(new Set())
@@ -202,6 +204,16 @@ export function UiKitPage() {
       <div className="flex items-center gap-6">
         <Stepper label="소박스" value={qty} onChange={setQty} />
         <TextField label="물품 가액" inline suffix="원" placeholder="숫자만 입력" />
+      </div>
+
+      <div className="w-[520px]">
+        <FileDrop
+          file={csvFile}
+          accept=".csv"
+          error={csvFile ? '3행 전화번호 형식이 맞지 않아 등록하지 못했습니다.' : undefined}
+          onPick={setCsvFile}
+          onRemove={() => setCsvFile(null)}
+        />
       </div>
 
       <ChipGroup

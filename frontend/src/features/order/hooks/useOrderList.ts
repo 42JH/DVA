@@ -38,7 +38,12 @@ export interface OrderListRow {
 
 type StatusFilter = OrderStatus | 'ALL'
 /** 지금 떠 있는 창 하나 (컨벤션 6.3: 불리언 여러 개 대신 구분 유니온). 수정은 상세에서만 들어가고 끝나면 상세로 돌아감 */
-type Modal = { kind: 'add' } | { kind: 'detail'; id: number } | { kind: 'edit'; id: number } | null
+type Modal =
+  | { kind: 'add' }
+  | { kind: 'csv' }
+  | { kind: 'detail'; id: number }
+  | { kind: 'edit'; id: number }
+  | null
 
 const PAGE_SIZE = 20
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
@@ -162,6 +167,7 @@ export function useOrderList() {
 
     modal,
     openAdd: () => setModal({ kind: 'add' }),
+    openCsv: () => setModal({ kind: 'csv' }),
     openOrder: (r: OrderListRow) => r.canOpen && setModal({ kind: 'detail', id: r.orderSeq }),
     editOrder: (id: number) => setModal({ kind: 'edit', id }), // 상세 창 [수정]
     // 수정 저장 · 취소 → 수정하던 그 주문 상세로
