@@ -158,7 +158,6 @@ try {
     `${proxy}:/etc/nginx/conf.d/default.conf`,
   ]);
   docker(['start', proxy]);
-  docker(['exec', proxy, 'nginx', '-t']);
   docker([
     'run',
     '--rm',
@@ -177,6 +176,7 @@ try {
     '--test',
     'test/runtime.integration.test.cjs',
   ]);
+  docker(['exec', proxy, 'nginx', '-t']);
   docker([
     'exec',
     application,

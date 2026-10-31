@@ -178,13 +178,16 @@ before(async () => {
       const response = await fetch('http://backend:3000/health', {
         signal: AbortSignal.timeout(1000),
       });
-      if (response.ok) return;
+      const proxy = await fetch('http://proxy/nginx-health', {
+        signal: AbortSignal.timeout(1000),
+      });
+      if (response.ok && proxy.ok) return;
     } catch {
-      /* Production container may still be initializing its database connection. */
+      /* Backend and Nginx may still be starting. */
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  throw new Error('Production image did not become live');
+  throw new Error('Production backend or Nginx did not become live');
 });
 
 test('call detail and transcript work through Nginx while the standalone playback route is removed', async () => {

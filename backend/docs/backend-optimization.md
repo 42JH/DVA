@@ -2,6 +2,7 @@
 
 - 기준: `develop-backend` / `f20206a3947dcf6467c9a1674aee76d280940252`
 - 브랜치: `refactor/backend-optimization`
+- 변경 범위: `backend/`, `infra/`, 루트 Jenkinsfile. 프론트·AI 코드는 수정하지 않는다.
 - API URL·요청·응답·인증·오류 코드·정확한 total_count·일괄 등록의 원자성을 유지한다.
 - 각 작업은 계획 → 구현 → 검증 → 채택 또는 복구 순으로 진행하고 독립 커밋으로 기록한다.
 - 실제 서비스 DB와 배포 작업은 이 기록의 로컬 적용·격리 검증과 구분한다.
@@ -44,3 +45,5 @@
 - 판정: 채택. Docker 실행 경로는 같은 단계의 Linux CI에서 검증한다.
 
 - Linux CI #63에서 `JsonSlurperClassic` 생성이 Jenkins sandbox에 차단됨을 확인했다. 관리자 허용 목록을 바꾸지 않고 엄격한 3개 boolean·사유 문자열을 전달하도록 수정했다. CLI 전달 형식 회귀 검증을 추가하고 CI 재검증 전까지 다음 단계를 적용하지 않는다.
+
+- Linux CI #64: 경로 판정·배포 셸 fixture·백엔드 기본 122개·DB 499개·운영 이미지/Nginx 17개 통과. 관측 fixture의 Nginx 시작 직후 `nginx -t`와 master의 listen이 겹치며 포트 충돌이 발생했다. 임시 컨테이너의 실제 HTTP 준비를 기다린 후 설정을 검사하도록 바꿨다. 백엔드 Docker 검증도 같은 시작 경쟁을 피하고 실제 HTTP 계약 검사는 유지한다. 최종 CI 재검증 전까지 다음 단계를 채택하지 않는다.
