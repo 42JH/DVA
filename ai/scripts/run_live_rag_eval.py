@@ -174,11 +174,12 @@ async def one_question(client, bridge, cfg, case, pcm, quiet, timeout):
 
 
 async def run(args):
-    from dotenv import load_dotenv
     from openai import AsyncOpenAI
     from scripts.remote_text_search import create_search
 
-    load_dotenv(AI_DIR/'.env', override=False)
+    if not args.process_env:
+        from dotenv import load_dotenv
+        load_dotenv(AI_DIR/'.env', override=False)
     if not os.getenv('OPENAI_API_KEY') or not os.getenv('QDRANT_API_KEY'):
         raise ValueError('API 인증 환경변수가 필요합니다.')
     cfg = load_lab_config()
@@ -200,6 +201,9 @@ async def run(args):
                     AI_DIR/'prompts'/cfg.backend_prompt, AI_DIR/'manuals/delivery_faq.md',
                     AI_DIR/'config/rag-search-descriptions.json')}}
     report = {'contract': contract, 'records': [], 'status': 'running'}
+    if args.managed_state_directory:
+        contract['managed_collection'] = args.managed_collection
+        contract['bm25_description_sha256'] = hashlib.sha256((AI_DIR/'config/faq-bm25-descriptions.json').read_bytes()).hexdigest()
     if args.output.exists():
         report = json.loads(args.output.read_text(encoding='utf-8'))
         if report['contract'] != contract:
@@ -209,7 +213,11 @@ async def run(args):
     if not pending:
         print('모두 완료했습니다. 추가 API 호출 없음.')
         return
-    search = await asyncio.to_thread(create_search, cfg)
+    if args.managed_state_directory:
+        from scripts.remote_text_search import ManagedRemoteTextSearch
+        search = await asyncio.to_thread(ManagedRemoteTextSearch, args.managed_state_directory, args.managed_collection)
+    else:
+        search = await asyncio.to_thread(create_search, cfg)
     report['search'] = search.info
     report['input_audio_validation'] = 'PCM16 정렬, 1~60초, 비무음; 비정상 캐시는 보존하고 최대2회 재생성'
     cache = AI_DIR/'data/private/evaluation/audio/live_v1'
@@ -280,6 +288,9 @@ def main():
     parser.add_argument('--quiet-seconds', type=float, default=6)
     parser.add_argument('--timeout-seconds', type=float, default=75)
     parser.add_argument('--concurrency', type=int, default=1)
+    parser.add_argument('--process-env', action='store_true', help='환경변수만 사용하고 .env를 열지 않음')
+    parser.add_argument('--managed-state-directory', type=Path)
+    parser.add_argument('--managed-collection', default='manuals_validation_faq_20261031')
     args = parser.parse_args()
     if (not 3 <= args.quiet_seconds <= 15 or not 30 <= args.timeout_seconds <= 120
             or not 1 <= args.concurrency <= 3 or (args.limit is not None and args.limit < 1)):
