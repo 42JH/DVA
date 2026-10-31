@@ -6,6 +6,9 @@ const {
   CreateUnansweredQuestionDto,
 } = require('../dist/unanswered-questions/dto/create-unanswered-question.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
+const {
+  UnansweredQuestionQueryDto,
+} = require('../dist/unanswered-questions/dto/unanswered-question-query.dto');
 const pipe = createValidationPipe();
 const input = (changes = {}) => ({
   eventId: randomUUID(),
@@ -78,4 +81,64 @@ test('question collection rejects event batches, workflow state, milliseconds, l
     { questions: [input()] },
   ])
     await assert.rejects(() => validate(input(change)), { status: 400 });
+});
+
+const validateQuery = (value) =>
+  pipe.transform(value, { type: 'query', metatype: UnansweredQuestionQueryDto });
+
+test('question queries default to OPEN and parse bounded integer parameters without accepting repeated values', async () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(await validateQuery({}))), {
+    limit: 20,
+    offset: 0,
+    status: 'OPEN',
+  });
+  const value = await validateQuery({
+    unansweredQuestionSeq: '1',
+    callSessionSeq: '2147483647',
+    aiPersonaVersionSeq: '7',
+    status: 'REGISTERED',
+    limit: '100',
+    offset: String(Number.MAX_SAFE_INTEGER),
+  });
+  assert.equal(value.unansweredQuestionSeq, 1);
+  assert.equal(value.callSessionSeq, 2147483647);
+  assert.equal(value.aiPersonaVersionSeq, 7);
+  assert.equal(value.offset, Number.MAX_SAFE_INTEGER);
+  for (const field of ['unansweredQuestionSeq', 'callSessionSeq', 'aiPersonaVersionSeq'])
+    for (const invalid of ['0', '-1', '1.5', '1e2', '2147483648', '', ['1', '2']])
+      await assert.rejects(() => validateQuery({ [field]: invalid }), { status: 400 });
+});
+
+test('question search normalizes Korean and trims input while preserving literal wildcard characters', async () => {
+  for (const [q, expected] of [
+    ['  주말%_  ', '주말%_'],
+    ['주말'.normalize('NFD'), '주말'],
+    [' \n\t', ''],
+    ['😊'.repeat(200), '😊'.repeat(200)],
+  ])
+    assert.equal((await validateQuery({ q })).q, expected);
+  for (const q of ['x'.repeat(201), 'x\0', ['one', 'two']])
+    await assert.rejects(() => validateQuery({ q }), { status: 400 });
+});
+
+test('question queries reject deleted state, unknown fields, malformed dates and pagination', async () => {
+  for (const value of [
+    { status: 'DELETED' },
+    { status: 'ALL' },
+    { status: ['OPEN', 'REGISTERED'] },
+    { customerSeq: '1' },
+    { offsetMs: '1' },
+    { sort: 'DESC' },
+    { from: '2026-02-30T00:00:00Z' },
+    { to: '2026-10-31T00:00:00' },
+    { from: ['2026-10-31T00:00:00Z', '2026-11-01T00:00:00Z'] },
+    { limit: '0' },
+    { limit: '101' },
+    { limit: '2.5' },
+    { limit: ['1', '2'] },
+    { offset: '-1' },
+    { offset: '1e2' },
+    { offset: String(Number.MAX_SAFE_INTEGER + 1) },
+  ])
+    await assert.rejects(() => validateQuery(value), { status: 400 });
 });

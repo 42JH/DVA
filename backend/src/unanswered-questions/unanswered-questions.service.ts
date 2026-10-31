@@ -2,8 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
+import { ListResponse } from '../common/pagination';
 import { DatabaseService } from '../database/database.service';
 import { CreateUnansweredQuestionDto } from './dto/create-unanswered-question.dto';
+import { UnansweredQuestionQueryDto } from './dto/unanswered-question-query.dto';
 import { UnansweredQuestionsRepository } from './unanswered-questions.repository';
 
 @Injectable()
@@ -13,6 +15,23 @@ export class UnansweredQuestionsService {
     private readonly repository: UnansweredQuestionsRepository,
     private readonly audit: AuditService,
   ) {}
+
+  async findMany(query: UnansweredQuestionQueryDto) {
+    const from = query.from === undefined ? undefined : Date.parse(query.from);
+    const to = query.to === undefined ? undefined : Date.parse(query.to);
+    if (
+      (from === undefined) !== (to === undefined) ||
+      (from !== undefined && (!Number.isFinite(from) || new Date(from).getUTCFullYear() < 1)) ||
+      (to !== undefined && (!Number.isFinite(to) || new Date(to).getUTCFullYear() < 1)) ||
+      (from !== undefined && to !== undefined && from >= to)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '기간은 시작·종료 시각을 함께 지정하고 시작이 종료보다 빨라야 합니다.',
+      );
+    return new ListResponse(await this.repository.findMany(query), query.limit);
+  }
 
   async collect(input: CreateUnansweredQuestionDto, requestId: string) {
     const occurredAt = new Date(input.occurredAt);

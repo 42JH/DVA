@@ -424,7 +424,9 @@ test('OpenAPI documents service authentication, six fields and 201/200 without w
   const operation = document.paths['/api/ai/unanswered-questions'].post;
   assert.deepEqual(operation.security, [{ bearer: [] }]);
   assert.equal(document.paths['/api/ai/unanswered-questions'].get, undefined);
-  assert.equal(document.paths['/api/unanswered-questions'], undefined);
+  assert.deepEqual(document.paths['/api/unanswered-questions'].get.security, [
+    { adminSession: [] },
+  ]);
   for (const status of [
     '200',
     '201',

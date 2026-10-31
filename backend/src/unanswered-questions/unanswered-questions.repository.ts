@@ -1,9 +1,53 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
+import { DatabaseService } from '../database/database.service';
 import { CreateUnansweredQuestionDto } from './dto/create-unanswered-question.dto';
+import { UnansweredQuestionDto } from './dto/unanswered-question-list-response.dto';
+import { UnansweredQuestionQueryDto } from './dto/unanswered-question-query.dto';
 
 @Injectable()
 export class UnansweredQuestionsRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  async findMany(query: UnansweredQuestionQueryDto): Promise<UnansweredQuestionDto[]> {
+    return (
+      await this.database.pool.query<UnansweredQuestionDto>(
+        `SELECT u.unanswered_question_seq AS "unansweredQuestionSeq",u.call_session_seq AS "callSessionSeq",
+         COALESCE(c.started_at,a.ai_started_at) AS "callStartedAt",u.occurred_at AS "occurredAt",
+         u.offset_seconds::double precision AS "offsetSeconds",customer.customer_seq AS "customerSeq",
+         customer.name AS "customerName",c.caller_phone_number AS "callerPhoneNumber",u.question_text AS "questionText",
+         u.status,a.ai_persona_version_seq AS "aiPersonaVersionSeq",f.faq_entry_seq AS "faqEntrySeq"
+         FROM unanswered_questions u JOIN call_sessions c ON c.call_session_seq=u.call_session_seq
+         LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
+         LEFT JOIN orders o ON o.order_seq=c.order_seq
+         LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,
+           (SELECT customer_seq FROM customers WHERE phone_number=c.caller_phone_number))
+         LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq
+         WHERE u.status=$1
+           AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
+           AND ($3::integer IS NULL OR u.call_session_seq=$3)
+           AND ($4::integer IS NULL OR a.ai_persona_version_seq=$4)
+           AND ($5::text IS NULL OR strpos(lower(normalize(u.question_text,NFC)),lower(normalize($5,NFC)))>0
+             OR strpos(lower(normalize(customer.name,NFC)),lower(normalize($5,NFC)))>0
+             OR strpos(c.caller_phone_number,$5)>0)
+           AND ($6::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)>=$6)
+           AND ($7::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)<$7)
+         ORDER BY "callStartedAt" ASC NULLS LAST,u.unanswered_question_seq ASC LIMIT $8 OFFSET $9`,
+        [
+          query.status,
+          query.unansweredQuestionSeq ?? null,
+          query.callSessionSeq ?? null,
+          query.aiPersonaVersionSeq ?? null,
+          query.q || null,
+          query.from ?? null,
+          query.to ?? null,
+          query.limit + 1,
+          query.offset,
+        ],
+      )
+    ).rows;
+  }
+
   async findCall(client: PoolClient, id: number): Promise<string | undefined> {
     return (
       await client.query<{ providerCallId: string }>(

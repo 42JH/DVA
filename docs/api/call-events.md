@@ -131,7 +131,7 @@ PBX 통화 시각·종료 사유, 주문 상태, 페르소나 상태는 변경�
 ## DB·기존 API 연결
 
 - 025는 ANL-01의 기존 complaints.offsetMs를 1000으로 나눠 버림하고 offsetSeconds로 전환한다. 정규화 해시도 갱신하며 analysed_at은 보존한다. 기존 024는 변경하지 않는다.
-- 026은 call_insight_events와 미답변 참조용 unanswered_questions를 추가한다. 질문은 [UNQ-01](unanswered-questions.md)로 수집하며 미답변 관리 API는 후속 작업이다.
+- 026은 call_insight_events와 미답변 참조용 unanswered_questions를 추가한다. 질문은 [UNQ-01](unanswered-questions.md)로 수집하고 [UNQ-02](unanswered-questions-read-spec.md)로 목록·검색 조회한다. FAQ 전환·삭제 HTTP API는 후속 작업이다.
 - call_insight_events의 위치는 bigint offset_seconds이며 안전한 정수 범위로 제한한다. AI 동작 status 컬럼·payload 필드는 없다.
 - 같은 발화의 이벤트는 한 건이다. call_utterances·unanswered_questions 참조는 물리 삭제를 연쇄 실행하지 않는다.
 - 미답변 전환 FAQ 번호와 FAQ_ANSWERED의 사용 FAQ 번호는 논리 참조여서 기존 FAQ 삭제를 막지 않는다.
