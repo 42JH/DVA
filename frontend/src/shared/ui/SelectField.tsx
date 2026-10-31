@@ -8,6 +8,7 @@ export function SelectField({
   placeholder = '선택',
   hint,
   error,
+  inline,
 }: {
   label: string
   value: string
@@ -16,10 +17,15 @@ export function SelectField({
   placeholder?: string
   hint?: string
   error?: string
+  inline?: boolean // 라벨 왼쪽 120 (TextField inline과 같은 줄 맞춤, 07 음성 세부 조절)
 }) {
   return (
-    <label className="flex flex-col gap-2">
-      <span className="text-label font-semibold text-sub">{label}</span>
+    <label
+      className={inline ? 'grid grid-cols-[120px_1fr] items-center gap-x-4' : 'flex flex-col gap-2'}
+    >
+      <span className={inline ? 'text-label text-sub' : 'text-label font-semibold text-sub'}>
+        {label}
+      </span>
       <span className="relative block">
         <select
           value={value}
