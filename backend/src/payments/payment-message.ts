@@ -1,4 +1,4 @@
-import { PaymentView } from './payments.repository';
+import { PaymentNoticeView } from './payments.repository';
 // User data cannot introduce extra lines, links, mentions or Markdown formatting.
 const plain = (s: string) =>
   s
@@ -7,8 +7,17 @@ const plain = (s: string) =>
     .replace(/https?:/gi, (value) => value.replace(':', '：'))
     .replace(/www\./gi, 'www．')
     .replace(/([\\`*_[\]<>!])/g, '\\$1');
-export function paymentMessage(view: PaymentView, base: string) {
-  const recipient = plain(view.recipientSummary || '수령인');
+const deliveryDetails = (view: PaymentNoticeView) =>
+  view.parcels
+    .map(
+      (parcel, index) =>
+        `${view.parcels.length > 1 ? `[배송 ${index + 1}]\n` : ''}• 보내는 분: ${plain(parcel.senderName || '발송인')}
+• 출발지 주소: ${plain(parcel.originAddress || '주문 내역에서 확인')}
+• 받는 분: ${plain(parcel.recipientName || '수령인')}
+• 도착지 주소: ${plain(parcel.destinationAddress || '주문 내역에서 확인')}`,
+    )
+    .join('\n\n');
+export function paymentMessage(view: PaymentNoticeView, base: string) {
   return `[DVA] 택배 결제 안내
 
 안녕하세요! DVA입니다.
@@ -18,9 +27,7 @@ export function paymentMessage(view: PaymentView, base: string) {
 아래 ‘결제하기’ 버튼을 눌러 결제를 진행해 주세요.
 
 • 주문번호: ${view.orderSeq}
-• 보내는 분: ${plain(view.senderName || '발송인')}
-• 받는 분: ${recipient}${view.parcelCount > 1 ? ` 외 ${view.parcelCount - 1}건` : ''}
-• 배송 건수: ${view.parcelCount}건
+${deliveryDetails(view)}
 • 수거 요청일시: 결제 완료 후 1시간 뒤
 • 결제금액: ${view.amount.toLocaleString('ko-KR')}원
 
@@ -29,7 +36,7 @@ export function paymentMessage(view: PaymentView, base: string) {
 오늘도 좋은 하루 보내세요. 감사합니다!`;
 }
 
-export function paymentCompletionMessage(view: PaymentView, base: string) {
+export function paymentCompletionMessage(view: PaymentNoticeView, base: string) {
   const time = (value: string | null) =>
     value
       ? new Intl.DateTimeFormat('ko-KR', {
@@ -37,7 +44,7 @@ export function paymentCompletionMessage(view: PaymentView, base: string) {
           dateStyle: 'medium',
           timeStyle: 'short',
           hour12: false,
-        }).format(new Date(value)) + ' (한국 시간)'
+        }).format(new Date(value))
       : '주문 내역에서 확인';
   return `[DVA] 택배 결제 완료 안내
 
@@ -45,9 +52,7 @@ export function paymentCompletionMessage(view: PaymentView, base: string) {
 신청하신 택배 요금의 결제가 완료되었습니다.
 
 • 주문번호: ${view.orderSeq}
-• 보내는 분: ${plain(view.senderName || '발송인')}
-• 받는 분: ${plain(view.recipientSummary || '수령인')}${view.parcelCount > 1 ? ` 외 ${view.parcelCount - 1}건` : ''}
-• 배송 건수: ${view.parcelCount}건
+${deliveryDetails(view)}
 • 결제금액: ${view.amount.toLocaleString('ko-KR')}원
 • 결제 완료일시: ${time(view.approvedAt)}
 • 수거 요청일시: ${time(view.pickupRequestedAt)}

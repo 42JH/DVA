@@ -38,11 +38,22 @@ test('real order messages use actual amounts and a relative pickup without injec
       recipientSummary: '수령인',
       parcelCount: 2,
       amount: 12800,
+      parcels: [
+        {
+          senderName: '@channel\n[click](https://evil.invalid)',
+          recipientName: '수령인',
+          originAddress: '서울 출발로 1 101호',
+          destinationAddress: '서울 도착로 2 202호',
+        },
+      ],
     },
     'https://example.com/api/payments',
   );
   assert.ok(message.includes('12,800원'));
   assert.ok(message.includes('결제 완료 후 1시간 뒤'));
+  assert.ok(message.includes('출발지 주소: 서울 출발로 1 101호'));
+  assert.ok(message.includes('도착지 주소: 서울 도착로 2 202호'));
+  assert.ok(!message.includes('배송 건수'));
   assert.ok(!message.includes('\n[click]'));
   assert.ok(!message.includes('@channel'));
   assert.ok(!message.includes('https://evil.invalid'));
@@ -62,6 +73,14 @@ test('completion notices use verified amounts and Korean times without claiming 
       approvedAt: '2026-10-30T08:24:25Z',
       pickupRequestedAt: '2026-10-30T09:24:25Z',
       orderStatus: 'SUBMISSION_FAILED',
+      parcels: [
+        {
+          senderName: '@channel\n[click](https://evil.invalid)',
+          recipientName: '수령인',
+          originAddress: '서울 출발로 1 101호',
+          destinationAddress: '서울 도착로 2 202호',
+        },
+      ],
     },
     'https://example.com/api/payments',
   );
@@ -76,7 +95,43 @@ test('completion notices use verified amounts and Korean times without claiming 
     '[결제하기]',
     '접수가 완료',
     '실제 금액',
+    '(한국 시간)',
+    '배송 건수',
   ])
     assert.ok(!message.includes(unwanted));
   assert.ok(message.includes('[주문 확인](https://example.com/api/payments/p/fixture)'));
+});
+
+test('both notices list every parcel and escape injected address content', () => {
+  const view = {
+    orderSeq: 1,
+    token: 'fixture',
+    amount: 5500,
+    approvedAt: null,
+    pickupRequestedAt: null,
+    parcels: [
+      {
+        senderName: '발송인 A',
+        recipientName: '수령인 A',
+        originAddress: '출발로 1',
+        destinationAddress: '도착로 1\n@channel https://evil.invalid',
+      },
+      {
+        senderName: '발송인 B',
+        recipientName: '수령인 B',
+        originAddress: '출발로 2',
+        destinationAddress: '도착로 2 202호',
+      },
+    ],
+  };
+  for (const render of [paymentMessage, paymentCompletionMessage]) {
+    const message = render(view, 'https://example.com/api/payments');
+    assert.ok(message.includes('[배송 1]'));
+    assert.ok(message.includes('[배송 2]'));
+    assert.ok(message.includes('출발지 주소: 출발로 1'));
+    assert.ok(message.includes('출발지 주소: 출발로 2'));
+    assert.ok(message.includes('도착지 주소: 도착로 2 202호'));
+    for (const unwanted of ['@channel', 'https://evil.invalid', '배송 건수', '(한국 시간)'])
+      assert.ok(!message.includes(unwanted));
+  }
 });

@@ -94,7 +94,7 @@ export class PaymentsService {
     this.ensureEnabled();
     const id = await this.repository.claimNotification();
     if (!id) return false;
-    const view = await this.repository.read(id);
+    const view = await this.repository.readNotice(id);
     if (view.status !== 'PENDING') {
       await this.repository.finishNotification(id, 'FAILED');
       return true;
@@ -113,7 +113,7 @@ export class PaymentsService {
     this.ensureEnabled();
     const id = await this.repository.claimCompletionNotification();
     if (!id) return false;
-    const view = await this.repository.read(id);
+    const view = await this.repository.readNotice(id);
     if (view.status !== 'PAID') {
       await this.repository.finishCompletionNotification(id, 'FAILED');
       return true;
