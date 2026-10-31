@@ -219,6 +219,12 @@ test('registration returns only an ID; detail preserves the agreed name/status c
     organizationSeq: body.data.organizationSeq,
     name: '등록 기업',
     status: 'ACTIVE',
+    memberCount: 0,
+    createdAt: (
+      await pool.query('SELECT created_at FROM organizations WHERE organization_seq=$1', [
+        body.data.organizationSeq,
+      ])
+    ).rows[0].created_at.toISOString(),
     monthlyBillingEnabled: false,
   });
 });
@@ -247,6 +253,8 @@ test('lists use stable pagination, status and literal name searches without expo
   assert.equal(literal.data[0].name, 'literal %_ company');
   for (const row of first.data)
     assert.deepEqual(Object.keys(row).sort(), [
+      'createdAt',
+      'memberCount',
       'monthlyBillingEnabled',
       'name',
       'organizationSeq',
@@ -286,6 +294,10 @@ test('patch updates name/status with no response body and preserves memberships/
     organizationSeq: id,
     name: '수정된 기업',
     status: 'INACTIVE',
+    memberCount: 1,
+    createdAt: (
+      await pool.query('SELECT created_at FROM organizations WHERE organization_seq=$1', [id])
+    ).rows[0].created_at.toISOString(),
     monthlyBillingEnabled: false,
   });
   assert.equal(

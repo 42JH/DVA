@@ -14,3 +14,20 @@ export class OrganizationResponseDto extends CreatedOrganizationDto {
   @ApiProperty({ enum: ORGANIZATION_STATUSES })
   status!: OrganizationStatus;
 }
+
+export class OrganizationSummaryDto extends OrganizationResponseDto {
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '현재 ACTIVE 구성원 수. 부서 없는 사원과 대표자도 포함합니다.',
+  })
+  memberCount!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: '기업 등록 시각(ISO 8601). 과거 생성 감사 이력이 없으면 null입니다.',
+  })
+  createdAt!: string | null;
+}
