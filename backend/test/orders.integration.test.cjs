@@ -19,6 +19,7 @@ process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const { AuditService } = require('../dist/audit/audit.service');
+const { DatabaseService } = require('../dist/database/database.service');
 const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 const pool = new Pool({
@@ -438,6 +439,56 @@ test('partial parcel snapshots retain field mapping, defaults and the actual tri
   assert.equal(header.pickup_requested_at.toISOString(), '2026-10-28T01:00:00.000Z');
   assert.equal(data.version, header.version);
   assert.equal(data.version, 3);
+});
+
+test('2500 details use bounded bulk inserts, preserve trigger versions and roll back earlier batches on failure', async () => {
+  const database = apps[0].get(DatabaseService),
+    transaction = database.transaction;
+  let writes = 0,
+    failAt = 0;
+  database.transaction = (work) =>
+    transaction.call(database, async (client) => {
+      const query = client.query;
+      client.query = async function (sql, ...args) {
+        const result = await query.call(this, sql, ...args);
+        if (/^\s*INSERT INTO order_parcels\b/.test(sql)) {
+          writes++;
+          assert.equal(args[0].length, 1);
+          if (writes === failAt) throw Error('bulk-parcel-rollback');
+        }
+        return result;
+      };
+      try {
+        return await work(client);
+      } finally {
+        client.query = query;
+      }
+    });
+  const input = {
+    customerSeq: customerId,
+    parcels: Array.from({ length: 2500 }, () => ({ smallBoxCount: 1 })),
+  };
+  try {
+    const response = await create(input);
+    assert.equal(response.status, 201, await response.clone().text());
+    const result = (await response.json()).data;
+    assert.equal(writes, 13);
+    const stored = (
+      await pool.query(
+        'SELECT count(*)::int AS count,min(parcel_position) AS first,max(parcel_position) AS last,sum(small_box_count)::int AS boxes FROM order_parcels WHERE order_seq=$1',
+        [result.orderSeq],
+      )
+    ).rows[0];
+    assert.deepEqual(stored, { count: 2500, first: 1, last: 2500, boxes: 2500 });
+    assert.equal(result.version, 2501);
+    const before = await counts();
+    writes = 0;
+    failAt = 2;
+    await errorCode(await create(input), 500, 'INTERNAL_ERROR');
+    assert.deepEqual(await counts(), before);
+  } finally {
+    database.transaction = transaction;
+  }
 });
 
 test('invalid bodies and keys fail before order writes', async () => {
@@ -1694,7 +1745,7 @@ test('ORD-04 rolls back header, details, call binding and success audit on stora
   };
   for (const [owner, method] of [
     [repository, 'updateParcel'],
-    [repository, 'insertParcel'],
+    [repository, 'insertParcels'],
     [audit, 'recordSuccess'],
   ]) {
     const original = owner[method];

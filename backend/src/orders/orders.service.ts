@@ -433,7 +433,7 @@ export class OrdersService {
       }
       const parcels = await this.repository.parcelReferences(client, id);
       const byId = new Map(parcels.map((parcel) => [parcel.orderParcelSeq, parcel]));
-      let position = parcels.at(-1)?.parcelPosition ?? 0;
+      const position = parcels.at(-1)?.parcelPosition ?? 0;
       for (const parcelId of input.removeParcelSeqs ?? [])
         if (!byId.has(parcelId))
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
@@ -456,14 +456,15 @@ export class OrdersService {
       for (const change of input.parcels ?? []) {
         if (change.orderParcelSeq !== undefined)
           await this.repository.updateParcel(client, id, change);
-        else
-          await this.repository.insertParcel(
-            client,
-            id,
-            ++position,
-            orderDraft({ parcels: [change] }).parcels[0],
-          );
       }
+      await this.repository.insertParcels(
+        client,
+        id,
+        position + 1,
+        orderDraft({
+          parcels: input.parcels?.filter((change) => change.orderParcelSeq === undefined),
+        }).parcels,
+      );
       for (const parcelId of input.removeParcelSeqs ?? []) {
         if (byId.get(parcelId)!.status === 'CANCELLED') continue;
         await this.repository.cancelParcel(client, parcelId);
