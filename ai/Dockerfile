@@ -8,12 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev \
-    && useradd --create-home --uid 10001 appuser
+    && useradd --create-home --uid 10001 appuser \
+    && mkdir -p /app/rag_state \
+    && chown appuser:appuser /app/rag_state \
+    && chmod 700 /app/rag_state
 # config/와 prompts/는 기본값으로 넣고, 운영에서는 볼륨으로 덮어써 재빌드 없이 조정한다
 COPY --chown=appuser:appuser app ./app
 COPY --chown=appuser:appuser config ./config
 COPY --chown=appuser:appuser prompts ./prompts
 COPY --chown=appuser:appuser manuals ./manuals
+COPY --chown=appuser:appuser scripts/bootstrap_faq.py ./scripts/bootstrap_faq.py
 # 첫 전화에서 토크나이저 파일을 받지 않도록 빌드 때 준비한다.
 ENV TIKTOKEN_CACHE_DIR=/app/tokenizer_cache
 RUN /app/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')" \

@@ -19,6 +19,7 @@
 | 주소 보정(행안부 주소DB), 지번·우편번호·좌표(카카오), `app/address/` | `spec/address.md` |
 | 페르소나(관리자가 고치는 말투·인사·음성), `/internal/persona` | `spec/persona.md` |
 | 매뉴얼 RAG(Qdrant) | `docs/rag-handoff.md`(RAG 담당자 인계) |
+| FAQ 변경 알림·영속 큐·추가/수정/삭제 동기화 | `spec/faq-sync.md`, `docs/faq-management-plan.md` |
 
 설계가 바뀌면 해당 `spec/` 문서를 같이 고친다. 같은 내용을 두 곳에 쓰지 않는다.
 

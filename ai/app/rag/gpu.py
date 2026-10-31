@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.rag.qwen import MODEL, REVISION, QwenReranker
+from app.rag.qwen import MODEL, REVISION, QUERY_RESERVE_TOKENS, TOKEN_MARGIN, QwenReranker
 
 
 class RerankDocument(BaseModel):
@@ -23,6 +23,17 @@ class RerankRequest(BaseModel):
     model_config = ConfigDict(extra='forbid', strict=True)
     question: str = Field(min_length=1, max_length=500)
     documents: list[RerankDocument] = Field(min_length=1, max_length=5)
+
+    @model_validator(mode='after')
+    def unique(self):
+        if len({d.chunk_id for d in self.documents}) != len(self.documents):
+            raise ValueError('문서 ID가 중복됩니다.')
+        return self
+
+
+class ValidateDocumentsRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    documents: list[RerankDocument] = Field(min_length=1, max_length=100)
 
     @model_validator(mode='after')
     def unique(self):
@@ -72,6 +83,23 @@ def create_gpu_app(predictor=None):
         return {'model': MODEL, 'revision': REVISION, 'results': [
             {'chunk_id': doc.chunk_id, 'score': float(score)}
             for doc, score in zip(body.documents, scores, strict=True)]}
+
+    @app.post('/validate-documents')
+    async def validate_documents(body: ValidateDocumentsRequest, authorization: str | None = Header(default=None)):
+        expected = 'Bearer '+os.getenv('RAG_RERANKER_API_KEY', '')
+        if not os.getenv('RAG_RERANKER_API_KEY') or not hmac.compare_digest((authorization or '').encode(), expected.encode()):
+            raise HTTPException(401, detail='인증 실패')
+        def check():
+            with lock:
+                return model.validate_documents([doc.content for doc in body.documents])
+        try:
+            lengths = await asyncio.to_thread(check)
+        except ValueError:
+            raise HTTPException(422, detail='원문이 등록 길이 한도를 넘습니다.') from None
+        return {'model': MODEL, 'revision': REVISION, 'max_length': model.max_length,
+                'query_reserve_tokens': QUERY_RESERVE_TOKENS, 'token_margin': TOKEN_MARGIN,
+                'results': [{'chunk_id': doc.chunk_id, 'tokens_without_query': length}
+                            for doc, length in zip(body.documents, lengths, strict=True)]}
     return app
 
 

@@ -17,9 +17,13 @@ from app.rag.schemas import Evidence
 
 
 class RagService:
-    def __init__(self, cfg):
+    def __init__(self, cfg, *, faq_index=None, reranker=None):
         self.cfg = cfg
-        self.client = self.reranker = self.search = None
+        self.client = self.search = None
+        self.reranker = reranker
+        self.faq_index = faq_index
+        if faq_index is not None and reranker is None:
+            raise ValueError('관리 FAQ 검색에는 리랭커가 필요합니다.')
         self.lock = threading.Lock()
         self.retry_after = 0.0
         self.closed = False
@@ -31,6 +35,10 @@ class RagService:
             logging.getLogger(__name__).warning('RAG 준비 미완료: %s. 주문 통화는 계속 허용합니다.', type(error).__name__)
 
     def _prepare(self):
+        if self.faq_index is not None:
+            if self.closed:
+                raise RuntimeError('검색 서비스가 종료됐습니다.')
+            return
         # 취소된 asyncio 작업의 준비 스레드도 끝까지 잠금을 지킨다.
         with self.lock:
             if self.closed:
@@ -76,12 +84,26 @@ class RagService:
     def _search(self, question):
         self._prepare()
         started = time.monotonic()
-        found = self.search.search(question, top_k=self.cfg.candidate_k)
+        if self.faq_index is None:
+            found = self.search.search(question, top_k=self.cfg.candidate_k)
+        else:
+            snapshot = self.faq_index.current()
+            if snapshot.search is None:
+                found = {'results': [], 'all_results': [], 'bm25_results': [], 'timings': {}}
+            else:
+                found = snapshot.search.search(question, top_k=self.cfg.candidate_k)
         start_rerank = time.monotonic()
-        ranked = self.reranker.rerank(question, found['results'])
+        ranked = self.reranker.rerank(question, found['results']) if found['results'] else []
         reranking_seconds = time.monotonic()-start_rerank
+        if self.faq_index is not None:
+            ranked = self.faq_index.filter_rows(ranked)
+            found['all_results'] = self.faq_index.filter_rows(found['all_results'])
+            allowed_ids = {row['chunk_id'] for row in found['all_results']}
+            found['results'] = [row for row in found['results'] if row['chunk_id'] in allowed_ids]
+            found['bm25_results'] = [row for row in found['bm25_results'] if row['chunk_id'] in allowed_ids]
         context = build_search_context(question, [Evidence(chunk_id=doc['chunk_id'],
-            source_id='delivery_faq', title=doc['title'], content=doc['context'],
+            source_id=doc['source'] if self.faq_index is not None else 'delivery_faq',
+            title=doc['title'], content=doc['context'],
             reranker_score=doc['reranker_score']) for doc in ranked])
         timings = {**found['timings'], 'reranking_seconds': reranking_seconds,
                    'retrieval_seconds': time.monotonic()-started}
@@ -102,6 +124,6 @@ class RagService:
                 self.closed = True
                 if self.client is not None:
                     self.client.close()
-                if self.reranker is not None:
+                if self.reranker is not None and self.faq_index is None:
                     self.reranker.close()
         await asyncio.to_thread(close_locked)

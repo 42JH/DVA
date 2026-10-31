@@ -36,6 +36,25 @@ class RemoteTextSearch:
             self.service.reranker.close()
 
 
+class ManagedRemoteTextSearch(RemoteTextSearch):
+    def __init__(self, state_directory, collection):
+        from app.rag.faq_events import FaqEventStore
+        from app.rag.faq_runtime import create_faq_runtime
+        if not collection.startswith('manuals_validation_faq_') or not (state_directory/'events.sqlite3').is_file():
+            raise ValueError('기존 검증 전용 색인과 상태 DB가 필요합니다.')
+        cfg = load_server_config()
+        events = FaqEventStore(state_directory/'events.sqlite3', max_pending=1000, busy_timeout_sec=.1)
+        self.runtime = create_faq_runtime(events, cfg.faq_sync.model_copy(update={'collection':collection}), cfg.rag)
+        self.service = RagService(cfg.rag, faq_index=self.runtime.index, reranker=self.runtime.reranker)
+        self.renderer = RagContextRenderer()
+        self.info = {'collection':collection,'mode':'managed_faq','candidate_k':5,'context_k':3,
+                     'versions':{faq.faq_id:faq.version for faq in self.runtime.index.current().faqs}}
+
+    def close(self):
+        self.service.closed = True
+        self.runtime.close()
+
+
 def create_search(cfg):
     if cfg.search_backend == 'remote':
         return RemoteTextSearch()

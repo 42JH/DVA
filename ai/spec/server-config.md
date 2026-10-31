@@ -15,6 +15,7 @@ GPT-Live 세션 바깥의 서버 동작 변수는 전부 여기에 둔다. 코�
 - 로그 수준
 - RAG: 컬렉션/large 모델/3072차원, BM25 비중·RRF c, Top5/Top3, 외부 HTTP/전체 검색 timeout, 재연결 대기.
 - client_backend: SDK 도구 선택 timeout, 전사 대기, 히스토리 길이, 통화별 위임 상한, 맥락 조각 토큰 수와 ACK timeout.
+- faq_sync: FAQ 알림 영속 접수/자동 처리 활성화, 저장 경로, 미완료 건수/본문 상한, 접수/SQLite 잠금 제한, 문서 청크 크기·겹침, 관리 전용 컬렉션·임베딩 묶음 크기, 소비자 폴링·재시도 최초/최대 간격·삭제 재점검 간격. 기존 RAG 컬렉션과 같은 이름은 거부한다. 비밀값은 환경변수 `AI_FAQ_TOKEN`. 현재 자동 처리에는 관리 색인 주입이 필요하며 기본값은 비활성이다. 계약과 구현 단계는 [FAQ 동기화](faq-sync.md).
 
 실제 항목은 `config/server.toml`의 주석과 `app/config.py`(검증 모델)가 기준이다.
 

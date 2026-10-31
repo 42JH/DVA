@@ -117,12 +117,47 @@ class ServerConfig(_Strict):
     fare: FareConfig = FareConfig()
     rag: 'RagConfig'
     client_backend: 'ClientBackendConfig'
+    faq_sync: 'FaqSyncConfig'
+
+    @model_validator(mode='after')
+    def separate_faq_collection(self):
+        if self.faq_sync.collection == self.rag.collection:
+            raise ValueError('FAQ 관리 컬렉션은 기존 MD 검색 컬렉션과 분리해야 합니다.')
+        return self
 
     @model_validator(mode="after")
     def _commit_after_pause(self):
         # 확정 지연 중 들어온 말을 판별하려면 말 멈춤 대기보다 길어야 한다(LANGGRAPH_REBUILD §9)
         if self.flow.commit_delay_ms <= self.listener.pause_ms:
             raise ValueError("flow.commit_delay_ms는 listener.pause_ms보다 길어야 한다")
+        return self
+
+
+class FaqSyncConfig(_Strict):
+    receive_enabled: bool
+    db_path: str = Field(min_length=1)
+    max_pending: int = Field(ge=1, le=100000)
+    max_body_bytes: int = Field(ge=4096, le=102400)
+    accept_timeout_sec: float = Field(gt=0, lt=2)
+    busy_timeout_sec: float = Field(gt=0, le=0.5)
+    chunk_size: int = Field(ge=1, le=20000)
+    chunk_overlap: int = Field(ge=0)
+    collection: str = Field(min_length=1)
+    embedding_batch_size: int = Field(ge=1, le=100)
+    process_enabled: bool
+    poll_sec: float = Field(gt=0, le=60)
+    retry_base_sec: float = Field(gt=0, le=300)
+    retry_max_sec: float = Field(gt=0, le=3600)
+    reconcile_sec: float = Field(gt=0, le=3600)
+
+    @model_validator(mode='after')
+    def valid_chunk_overlap(self):
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError('FAQ 청크 겹침은 청크 크기보다 작아야 합니다.')
+        if self.retry_max_sec < self.retry_base_sec:
+            raise ValueError('FAQ 재시도 최대 간격은 최초 간격 이상이어야 합니다.')
+        if self.process_enabled and not self.receive_enabled:
+            raise ValueError('FAQ 자동 처리를 켜려면 영속 접수도 켜야 합니다.')
         return self
 
 

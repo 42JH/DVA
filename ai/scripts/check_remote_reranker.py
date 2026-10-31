@@ -7,6 +7,7 @@ import os
 import statistics
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx2 as httpx
 from app.config import ROOT
@@ -33,8 +34,18 @@ def main():
             {'chunk_id': d['chunk_id'], 'content': d['context']} for d in candidates]})
         if denied.status_code != 401:
             raise RuntimeError('인증 없는 요청이 401로 거절되지 않았습니다.')
+        validate_body = {'documents':[{'chunk_id':'registration-check', 'content':'고객이 직접 포장해 주세요.'}]}
+        validate_denied = client.post(url+'/validate-documents', json=validate_body)
+        if validate_denied.status_code != 401:
+            raise RuntimeError('인증 없는 등록 길이 검증이 거절되지 않았습니다.')
+        too_long = client.post(url+'/validate-documents',
+            headers={'Authorization':'Bearer '+key}, json={'documents':[
+                {'chunk_id':'overlong-check', 'content':'가'*4000}]})
+        if too_long.status_code != 422:
+            raise RuntimeError('긴 원문이 등록 전에 거절되지 않았습니다.')
     reranker = RemoteReranker(url, key, 30)
     try:
+        reranker.validate_chunks((SimpleNamespace(point_id='registration-check', content='고객이 직접 포장해 주세요.'),))
         def one(kind, index):
             started = time.monotonic()
             ranked = reranker.rerank(question, candidates)
@@ -55,6 +66,8 @@ def main():
         summary[kind] = {'count': len(times), 'mean_seconds': statistics.fmean(times),
                          'p95_seconds': times[math.ceil(len(times)*.95)-1]}
     report = {'health': health.json(), 'unauthenticated_status': denied.status_code,
+              'registration_unauthenticated_status': validate_denied.status_code,
+              'registration_overlong_status': too_long.status_code, 'registration_validated': True,
               'question': question, 'records': results, 'summary': summary,
               'note': '외부 왕복 포함 표본9개 점검. 전체 FAQ 정확도/통화 용량/정답 발화 지연 검증 아님.'}
     args.output.parent.mkdir(parents=True, exist_ok=True)
