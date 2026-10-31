@@ -3716,9 +3716,11 @@ test('admin screen tabs group payment-complete states and retain actual receipt 
     'CANCELLED',
   ];
   for (const status of states) {
-    const id = await readOrder(customer);
+    const id = await readOrder(customer, [
+      { origin: address, destination: address, documentCount: 1, notifiedPrice: 1000 },
+    ]);
     await pool.query(
-      `UPDATE orders SET status=$2,created_at='2092-01-01T00:00:00Z',pickup_requested_at='2092-01-02T00:00:00Z',
+      `UPDATE orders SET status=$2,total_amount=1000,created_at='2092-01-01T00:00:00Z',pickup_requested_at='2092-01-02T00:00:00Z',
       parcel_no=CASE WHEN $2='ACCEPTED' THEN 'SCRN0058' END,
       dver_received_at=CASE WHEN $2='ACCEPTED' THEN '2092-01-01T00:00:00Z'::timestamptz END WHERE order_seq=$1`,
       [id, status],
@@ -3733,6 +3735,7 @@ test('admin screen tabs group payment-complete states and retain actual receipt 
         ? ['PAID', 'SUBMITTING', 'ACCEPTED', 'SUBMISSION_FAILED']
         : [statusGroup];
     assert.equal(body.total_count, expected.length);
+    assert.ok(body.data.every((order) => order.parcels.length === 1));
     assert.deepEqual(body.data.map((o) => o.status).sort(), expected.sort());
   }
 });
