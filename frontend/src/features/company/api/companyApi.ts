@@ -136,3 +136,18 @@ export const setMemberRole = (
 /** 기업 소속 해제 — 고객 · 개인 PIN · 과거 주문은 남음 */
 export const removeMember = (membershipSeq: number): Promise<void> =>
   api.delete(`/members/${membershipSeq}`)
+
+/** 사번들을 대표자로 지정 — 등록 응답에 번호가 없어 전체를 다시 받아 사번으로 찾음 (backend-todo 10: role을 등록에 실어 주면 없어짐)
+ * 이미 대표자면 건너뜀. 못 찾았거나 실패한 수를 돌려줌 (CSV 기업 등록 · CSV 사원 추가 · 사원 추가 창 공용) */
+export async function assignLeaders(id: number, employeeNos: string[]): Promise<number> {
+  if (employeeNos.length === 0) return 0
+  const byNo = new Map((await fetchAllMembers(id)).map((m) => [m.membership.employeeNo, m]))
+  let failed = 0
+  for (const no of employeeNos) {
+    const m = byNo.get(no)
+    if (!m) failed++
+    else if (m.membership.role !== 'ORG_ADMIN')
+      await setMemberRole(m.membership.membershipSeq, 'ORG_ADMIN').catch(() => failed++)
+  }
+  return failed
+}

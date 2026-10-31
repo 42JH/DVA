@@ -91,7 +91,7 @@ export function FileDrop({
         </div>
       )}
       {error && (
-        <p role="alert" className="text-label text-danger">
+        <p role="alert" className="text-label whitespace-pre-line text-danger">
           {error}
         </p>
       )}

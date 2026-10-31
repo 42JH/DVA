@@ -13,11 +13,12 @@ import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { PersonaPage } from '@/features/persona/components/PersonaPage'
 import { MyInfoPage } from '@/features/me/components/MyInfoPage'
 import { AdminPage } from '@/features/admin/components/AdminPage'
+import { CompanyListPage } from '@/features/company/components/CompanyListPage'
+import { CompanyDetailPage } from '@/features/company/components/CompanyDetailPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
 import { RouteError } from './RouteError'
-import { Placeholder } from './routes/Placeholder'
 import { UiKitPage } from './routes/UiKitPage'
 
 // 경로 = 와이어프레임 사이드바 메뉴. handle.title = 상단바 제목(AppLayout이 그림). 화면을 만들면 Placeholder를 그 화면으로 바꾼다
@@ -59,7 +60,12 @@ export const router = createBrowserRouter([
           },
           {
             path: 'companies',
-            element: <Placeholder />,
+            element: <CompanyListPage />,
+            handle: { title: '기업관리' } satisfies RouteHandle,
+          },
+          {
+            path: 'companies/:companyId',
+            element: <CompanyDetailPage />,
             handle: { title: '기업관리' } satisfies RouteHandle,
           },
           {

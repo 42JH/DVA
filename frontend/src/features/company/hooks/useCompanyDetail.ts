@@ -1,0 +1,115 @@
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { fmtPhone } from '@/shared/lib/format'
+import { pageCount } from '@/shared/api/paging'
+import { useListParams } from '@/shared/lib/useListParams'
+import { ApiError } from '@/shared/api/client'
+import { companyQueries, removeMember, type Member } from '@/features/company/api/companyApi'
+import { errorText } from '@/features/company/labels'
+
+const PAGE_SIZE = 10 // 디자인: 한 쪽 10명
+const DEFAULTS = {}
+
+export interface MemberRow {
+  id: number // membershipSeq
+  employeeNo: string
+  name: string
+  leader: boolean // '대표자' 태그 (여러 명 가능)
+  inactive: boolean // '비활성' 태그 (11/01 디자인 추가 d)
+  phone: string // '010-2481-3375'
+  address: string // 도로명 — 없으면 '없음' (보기만, 11/01 결정 A)
+  detail: string // 상세주소 — 없으면 '없음'
+  member: Member // 수정 창에 그대로 넘김
+}
+
+/** 창 — 한 번에 하나 (구분 유니온) */
+export type MemberModal =
+  | { kind: 'add' }
+  | { kind: 'edit'; member: Member }
+  | { kind: 'delete'; member: Member }
+  | { kind: 'csv' }
+  | null
+
+/** 08 기업 상세 훅 — 기업 · 제목 줄(사원 수 · 대표자) · 사원 표(쪽은 URL) · 창 상태 · 사원 삭제 */
+export function useCompanyDetail(id: number) {
+  const { page, set } = useListParams(DEFAULTS)
+  const qc = useQueryClient()
+  const [modal, setModal] = useState<MemberModal>(null)
+
+  const company = useQuery(companyQueries.detail(id))
+  const count = useQuery(companyQueries.memberCount(id)) // 목록 화면에서 받았으면 캐시 그대로
+  const members = useQuery({
+    ...companyQueries.members(id, { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  })
+  // 대표자는 쪽과 상관없이 전체에서 — 제목 줄 '대표자 이서미 외 1명' (11/01 디자인 추가 c)
+  const all = useQuery(companyQueries.allMembers(id))
+  const leaders = (all.data ?? [])
+    .filter((m) => m.membership.role === 'ORG_ADMIN' && m.membership.status === 'ACTIVE')
+    .map((m) => m.customer.name)
+
+  const total = members.data?.total_count ?? 0
+  const pages = pageCount(total, PAGE_SIZE)
+  useEffect(() => {
+    if (members.data && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
+  }, [members.data, page, pages, set])
+
+  const remove = useMutation({
+    mutationFn: (m: Member) => removeMember(m.membership.membershipSeq),
+    onSuccess: async () => {
+      // 이 기업(상세 · 사원 · 사원 수 · 전체) + 목록 화면의 사원 수까지 한 번에
+      await qc.invalidateQueries({ queryKey: companyQueries.all() })
+      setModal(null)
+    },
+    onError: () => setModal(null),
+  })
+
+  const rows: MemberRow[] = (members.data?.data ?? []).map((m) => ({
+    id: m.membership.membershipSeq,
+    employeeNo: m.membership.employeeNo,
+    name: m.customer.name,
+    leader: m.membership.role === 'ORG_ADMIN',
+    inactive: m.membership.status === 'INACTIVE',
+    phone: fmtPhone(m.customer.phoneNumber),
+    address: m.customer.address?.roadAddress ?? '없음',
+    detail: m.customer.address?.detailAddress || '없음', // 빈 문자열도 '없음'
+    member: m,
+  }))
+
+  return {
+    notFound: company.error instanceof ApiError && company.error.status === 404,
+    loadError:
+      (company.error ?? members.error)
+        ? '기업 정보를 불러오지 못했습니다. 새로고침해 주세요.'
+        : null,
+    name: company.data?.name ?? '',
+    inactive: company.data?.status === 'INACTIVE',
+    // 제목 줄 '사원 12명 · 대표자 이서미 외 1명' — 등록일은 서버에 없어 뺌 (backend-todo 10)
+    summary: [
+      count.data === undefined ? null : `사원 ${count.data}명`,
+      leaders.length === 0
+        ? null
+        : `대표자 ${leaders[0]}${leaders.length > 1 ? ` 외 ${leaders.length - 1}명` : ''}`,
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    total,
+
+    rows,
+    isLoading: members.isPending,
+    page: Math.min(page, pages),
+    pages,
+    setPage: (p: number) => set({ page: p }),
+
+    modal,
+    openAdd: () => setModal({ kind: 'add' }),
+    openEdit: (m: Member) => setModal({ kind: 'edit', member: m }),
+    askDelete: (m: Member) => setModal({ kind: 'delete', member: m }),
+    openCsv: () => setModal({ kind: 'csv' }),
+    close: () => setModal(null),
+
+    confirmDelete: () => modal?.kind === 'delete' && remove.mutate(modal.member),
+    deleting: remove.isPending,
+    deleteError: remove.error ? errorText(remove.error, '삭제') : null,
+  }
+}
