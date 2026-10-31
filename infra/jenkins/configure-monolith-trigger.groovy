@@ -41,7 +41,7 @@ trigger.setShouldNotFlatten(true)
 trigger.setAllowSeveralTriggersPerBuild(false)
 trigger.setRegexpFilterText('$monolith_event|$monolith_project|$monolith_ref|$monolith_after|$monolith_count|$monolith_paths')
 // GitLab truncates commits at 20. Larger pushes conservatively run to avoid missing builds.
-trigger.setRegexpFilterExpression('(?s)^push\\|1462697\\|refs/heads/develop-backend\\|(?!0{40}\\|)[0-9a-f]{40}\\|(?:[0-9]+\\|.*"(?:backend/[^"\\r\\n]*|Jenkinsfile|compose(?:\\.prod)?\\.yaml|infra/(?:deploy|nginx|https|jenkins)/[^"\\r\\n]*|\\.gitattributes)".*|(?:2[1-9]|[3-9][0-9]|[1-9][0-9]{2,})\\|.*)$')
+trigger.setRegexpFilterExpression('(?s)^push\\|1462697\\|refs/heads/develop-backend\\|(?!0{40}\\|)[0-9a-f]{40}\\|(?:[0-9]+\\|.*"(?:backend/[^"\\r\\n]*|Jenkinsfile|compose(?:\\.prod)?\\.yaml|infra/(?:deploy|nginx|https|jenkins|database|observability|payment-test)/[^"\\r\\n]*|\\.gitattributes)".*|(?:2[1-9]|[3-9][0-9]|[1-9][0-9]{2,})\\|.*)$')
 
 def backupDir = new File(instance.rootDir, 'monolith-trigger-backups')
 Files.createDirectories(backupDir.toPath())
