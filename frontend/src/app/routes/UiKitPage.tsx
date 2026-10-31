@@ -7,6 +7,7 @@ import {
   Pagination,
   PeriodFilter,
   RadioGroup,
+  ChipGroup,
   SearchBox,
   Table,
   Tabs,
@@ -196,6 +197,17 @@ export function UiKitPage() {
         />
       </div>
 
+      <ChipGroup
+        name="상태"
+        value={kind}
+        onChange={setKind}
+        options={[
+          { value: 'all', label: '전체' },
+          { value: 'edit', label: '수정' },
+          { value: 'ask', label: '문의' },
+        ]}
+      />
+
       <div className="flex items-center justify-between">
         <RadioGroup
           name="구분"
@@ -260,6 +272,7 @@ export function UiKitPage() {
         <Tag kind="red">조치 필요</Tag>
         <Tag kind="gray">해결</Tag>
         <Tag kind="outline">지식 없음</Tag>
+        <Tag kind="live">접수 중</Tag>
         <Pagination page={2} hasNext onChange={() => {}} />
       </div>
 

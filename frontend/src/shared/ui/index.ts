@@ -8,6 +8,7 @@ export {
   PeriodFilter,
   Select,
   RadioGroup,
+  ChipGroup,
   AppliedFilters,
   type PeriodKey,
   type Option,

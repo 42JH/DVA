@@ -1,0 +1,147 @@
+import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { pageCount } from '@/shared/api/paging'
+import { downloadCsv, toCsv } from '@/shared/lib/csv'
+import { todayYmd } from '@/shared/lib/dateRange'
+import { fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { useListParams } from '@/shared/lib/useListParams'
+import type { Option, TagKind } from '@/shared/ui'
+import { ORDER_STATUS_LABEL, ORDER_STATUS_TAG } from '@/features/order/labels'
+import {
+  fetchAllOrders,
+  orderQueries,
+  type OrderListQuery,
+  type OrderParty,
+  type OrderRow,
+  type OrderStatus,
+} from '@/features/order/api/orderApi'
+
+export interface PartyCell {
+  name: string
+  phone: string // 010-1234-5678
+  address: string
+}
+
+/** 목록 한 줄 = 화면용 글만 (그리기만 하도록) */
+export interface OrderListRow {
+  orderSeq: number
+  statusLabel: string
+  statusTag: TagKind
+  receivedAt: string[] // 올해면 한 줄, 다른 해면 날짜 · 시각 두 줄
+  sender: PartyCell
+  receiver: PartyCell
+  pickupAt: string | null // null = 접수 중이라 아직 없음 → '—'
+  items: string | null // '소박스 1 · 중박스 1'
+}
+
+type StatusFilter = OrderStatus | 'ALL'
+
+const PAGE_SIZE = 20
+// URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
+const DEFAULTS = { q: '', from: '', to: '', status: 'ALL' }
+// 상태 칩 = 전체 + 와이어프레임 03 순서
+const STATUS_ORDER: OrderStatus[] = ['IN_PROGRESS', 'PAYMENT_PENDING', 'PAID', 'CANCELLED']
+const STATUS_OPTIONS: Option<StatusFilter>[] = [
+  { value: 'ALL', label: '전체' },
+  ...STATUS_ORDER.map((s) => ({ value: s, label: ORDER_STATUS_LABEL[s] })),
+]
+
+const party = (p: OrderParty): PartyCell => ({ ...p, phone: fmtPhone(p.phone) })
+const itemsText = (o: OrderRow) =>
+  o.items.length ? o.items.map((i) => `${i.box} ${i.count}`).join(' · ') : null
+
+/** 03 주문 내역 훅 (와이어프레임 03_주문내역, 10/31)
+ * 검색(이름 · 전화번호 · 주소, 숫자만 치면 주문 번호도) · 날짜 칸(기본 오늘) · 상태 칩 · 쪽은 URL에. CSV 내보내기 = 지금 조건의 전체 쪽 */
+export function useOrderList() {
+  const { params, page, set } = useListParams(DEFAULTS)
+  const [exporting, setExporting] = useState(false)
+
+  const today = todayYmd()
+  const range = params.from ? { from: params.from, to: params.to || params.from } : null
+  // URL은 누구나 고칠 수 있으니 모르는 상태 값은 '전체'로 (컨벤션 4.7)
+  const status = STATUS_OPTIONS.some((o) => o.value === params.status)
+    ? (params.status as StatusFilter)
+    : 'ALL'
+  const query: OrderListQuery = {
+    q: params.q,
+    from: range?.from ?? today,
+    to: range?.to ?? today,
+    status,
+  }
+  const list = useQuery(orderQueries.list(query, page, PAGE_SIZE))
+  const total = list.data?.totalCount ?? 0
+
+  const rows: OrderListRow[] = (list.data?.items ?? []).map((o) => ({
+    orderSeq: o.orderSeq,
+    statusLabel: ORDER_STATUS_LABEL[o.status],
+    statusTag: ORDER_STATUS_TAG[o.status],
+    receivedAt: fmtListTime(o.receivedAt),
+    sender: party(o.sender),
+    receiver: party(o.receiver),
+    pickupAt: o.pickupAt && fmtListTime(o.pickupAt).join(' '),
+    items: itemsText(o),
+  }))
+
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const all = await fetchAllOrders(query)
+      const csv = toCsv(
+        [
+          '주문 번호',
+          '상태',
+          '접수 시각',
+          '보내는 분',
+          '보내는 분 전화번호',
+          '보내는 분 주소',
+          '받는 분',
+          '받는 분 전화번호',
+          '받는 분 주소',
+          '수거 희망 일시',
+          '품목',
+        ],
+        all.map((o) => [
+          o.orderSeq,
+          ORDER_STATUS_LABEL[o.status],
+          fmtListTime(o.receivedAt).join(' '),
+          o.sender.name,
+          fmtPhone(o.sender.phone),
+          o.sender.address,
+          o.receiver.name,
+          fmtPhone(o.receiver.phone),
+          o.receiver.address,
+          o.pickupAt ? fmtListTime(o.pickupAt).join(' ') : '',
+          itemsText(o) ?? '',
+        ]),
+      )
+      const span = query.from === query.to ? query.from : `${query.from}_${query.to}`
+      downloadCsv(`주문내역_${span}.csv`, csv)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return {
+    q: params.q,
+    setQ: (v: string) => set({ q: v }),
+    range, // 날짜 칸 (null = 오늘)
+    setRange: (r: { from: string; to: string }) =>
+      // 오늘 하루를 고르면 기본값(빈 값)으로 → 주소가 깨끗하고 내일 열어도 '오늘'
+      set(r.from === today && r.to === today ? { from: '', to: '' } : { from: r.from, to: r.to }),
+    status,
+    statusOptions: STATUS_OPTIONS,
+    setStatus: (s: StatusFilter) => set({ status: s }),
+
+    rows,
+    count: total, // '주문 목록 104건'
+    isLoading: list.isPending,
+    listError: list.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
+    page,
+    pages: pageCount(total, PAGE_SIZE),
+    goPage: (p: number) => set({ page: p }),
+
+    exportCsv,
+    exporting,
+    canExport: total > 0,
+  }
+}

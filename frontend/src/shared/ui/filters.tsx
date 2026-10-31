@@ -389,3 +389,41 @@ export function AppliedFilters({
     </div>
   )
 }
+
+/** 버튼 모양 한 개 고르기 — '상태 [전체] [접수 중] …' (03 주문 내역). 고른 칸 = 옅은 남색 바탕 + 남색 1.5 선 */
+export function ChipGroup<V extends string>({
+  name,
+  options,
+  value,
+  onChange,
+}: {
+  name: string
+  options: Option<V>[]
+  value: V
+  onChange: (v: V) => void
+}) {
+  return (
+    <div className="flex items-center gap-2" role="radiogroup" aria-label={name}>
+      <span className="mr-2 text-body text-sub">{name}</span>
+      {options.map((o) => {
+        const on = o.value === value
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(o.value)}
+            className={`h-12 rounded-lg px-5 text-body ${
+              on
+                ? `${LINE_ON} bg-action-soft font-semibold text-action`
+                : `${LINE} bg-surface text-ink`
+            }`}
+          >
+            {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
