@@ -197,7 +197,7 @@ test('signup preserves name, rejects bad IDs and elevation, duplicate signup is 
   assert.equal(row.role, 'OPERATOR');
   assert.equal(row.status, 'PENDING');
   assert.notEqual(row.password_hash, password);
-  assert.equal((await login({ loginId })).status, 401);
+  assert.equal((await login({ loginId })).status, 403);
   assert.equal((await login({ loginId: loginId.toUpperCase() })).status, 401);
 });
 test('login issues opaque cookie, me redacts secrets, expiry is fixed, logout revokes only current session', async () => {
@@ -292,7 +292,7 @@ test('new routes default to authenticated; roles and current DB status are enfor
   await db.pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [user.id]);
   assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
 });
-test('system admin approves pending accounts, filters lists, rejects empty/null patches and deactivation', async () => {
+test('system admin approves pending accounts, filters lists and rejects empty/null patches and returning to pending', async () => {
   const system = await account('system', 'SYSTEM_ADMIN');
   const session = (await login(system)).session;
   const pending = await account('pending', 'OPERATOR', 'PENDING');
@@ -340,6 +340,211 @@ test('system admin approves pending accounts, filters lists, rejects empty/null 
   assert.equal(audit.length, 1);
   assert.equal(audit[0].actor_seq, system.id);
 });
+test('login distinguishes pending and inactive accounts only after valid credentials', async () => {
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    for (const [status, code, message] of [
+      ['PENDING', 'ACCOUNT_PENDING', '승인 대기중입니다.'],
+      ['INACTIVE', 'ACCOUNT_INACTIVE', '비활성화된 계정입니다.'],
+    ]) {
+      const user = await account('state' + role.slice(0, 3) + status[0], role, status);
+      const wrong = await login(user, 'incorrect');
+      assert.equal(wrong.status, 401);
+      assert.equal(wrong.body.error.code, 'UNAUTHORIZED');
+      const response = await login(user);
+      assert.equal(response.status, 403);
+      assert.deepEqual(response.body.error, { code, message, details: [] });
+      assert.equal(response.cookie, null);
+      assert.equal(
+        (await db.pool.query('SELECT 1 FROM admin_sessions WHERE admin_user_seq=$1', [user.id]))
+          .rowCount,
+        0,
+      );
+    }
+  }
+});
+
+test('admin status changes revoke all sessions and reactivation requires a new login', async () => {
+  const system = await account('statusManager', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    const target = await account('cycle' + role, role);
+    const oldSessions = [(await login(target)).session, (await login(target)).session];
+    const path = `/api/admins/${target.id}`;
+    assert.equal((await call('PATCH', path, { status: 'INACTIVE' }, cookie)).status, 204);
+    assert.equal(
+      (await db.pool.query('SELECT 1 FROM admin_sessions WHERE admin_user_seq=$1', [target.id]))
+        .rowCount,
+      0,
+    );
+    for (const session of oldSessions)
+      assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+    const rejected = await login(target);
+    assert.equal(rejected.status, 403);
+    assert.equal(rejected.body.error.code, 'ACCOUNT_INACTIVE');
+    const list = await call('GET', '/api/admins?status=INACTIVE', undefined, cookie);
+    assert.ok(list.body.data.some((row) => row.adminUserSeq === target.id));
+    assert.equal((await call('PATCH', path, { status: 'ACTIVE' }, cookie)).status, 204);
+    for (const session of oldSessions)
+      assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 401);
+    assert.equal((await login(target)).status, 200);
+    assert.deepEqual(
+      (
+        await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+          target.id,
+        ])
+      ).rows[0],
+      { role, status: 'ACTIVE' },
+    );
+    const audit = await db.pool.query(
+      "SELECT actor_seq FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
+      [target.id],
+    );
+    assert.deepEqual(audit.rows, [{ actor_seq: system.id }, { actor_seq: system.id }]);
+  }
+});
+
+test('admin status changes enforce actor roles, system protection and allowed transitions', async () => {
+  const system = await account('statusGuard', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  const target = await account('statusTarget');
+  const path = `/api/admins/${target.id}`;
+  assert.equal((await call('PATCH', path, { status: 'INACTIVE' })).status, 401);
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    const actor = await account('actor' + role, role);
+    assert.equal(
+      (await call('PATCH', path, { status: 'INACTIVE' }, (await login(actor)).session)).status,
+      403,
+    );
+  }
+  for (const [from, to] of [
+    ['PENDING', 'PENDING'],
+    ['PENDING', 'INACTIVE'],
+    ['ACTIVE', 'ACTIVE'],
+    ['ACTIVE', 'PENDING'],
+    ['INACTIVE', 'INACTIVE'],
+    ['INACTIVE', 'PENDING'],
+  ]) {
+    await db.pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+      target.id,
+      from,
+    ]);
+    const response = await call('PATCH', path, { status: to }, cookie);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'INVALID_STATE');
+  }
+  for (const [from, to] of [
+    ['ACTIVE', 'INACTIVE'],
+    ['INACTIVE', 'ACTIVE'],
+  ]) {
+    const protectedUser = await account('protected' + from[0], 'SYSTEM_ADMIN', from);
+    assert.equal(
+      (await call('PATCH', `/api/admins/${protectedUser.id}`, { status: to }, cookie)).status,
+      403,
+    );
+    assert.equal(
+      (
+        await db.pool.query('SELECT status FROM admin_users WHERE admin_user_seq=$1', [
+          protectedUser.id,
+        ])
+      ).rows[0].status,
+      from,
+    );
+  }
+  assert.equal(
+    (await call('PATCH', `/api/admins/${system.id}`, { status: 'INACTIVE' }, cookie)).status,
+    403,
+  );
+  assert.equal((await call('GET', '/api/auth/me', undefined, cookie)).status, 200);
+});
+
+test('admin status, role, sessions and audit roll back together on storage failures', async () => {
+  const system = await account('statusAtomic', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  const target = await account('atomicTarget');
+  const targetCookie = (await login(target)).session;
+  for (const [service, method] of [
+    [app.get(AuthRepository), 'removeAll'],
+    [app.get(AuditService), 'record'],
+  ]) {
+    const original = service[method];
+    service[method] = async () => {
+      throw new Error('storage unavailable');
+    };
+    try {
+      assert.equal(
+        (
+          await call(
+            'PATCH',
+            `/api/admins/${target.id}`,
+            { role: 'SUPERVISOR', status: 'INACTIVE' },
+            cookie,
+          )
+        ).status,
+        500,
+      );
+    } finally {
+      service[method] = original;
+    }
+    assert.deepEqual(
+      (
+        await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
+          target.id,
+        ])
+      ).rows[0],
+      { role: 'OPERATOR', status: 'ACTIVE' },
+    );
+    assert.equal((await call('GET', '/api/auth/me', undefined, targetCookie)).status, 200);
+    assert.equal(
+      (
+        await db.pool.query(
+          "SELECT 1 FROM audit_logs WHERE target_seq=$1 AND action='ADMIN_ACCESS_CHANGED' AND result='SUCCESS'",
+          [target.id],
+        )
+      ).rowCount,
+      0,
+    );
+  }
+});
+
+test('admin deactivation waits for an in-flight login and invalidates its session', async () => {
+  const system = await account('statusRace', 'SYSTEM_ADMIN');
+  const cookie = (await login(system)).session;
+  const target = await account('raceTarget');
+  const admins = app.get(AdminsService);
+  const original = admins.recordLogin;
+  let entered, release;
+  const reached = new Promise((resolve) => (entered = resolve));
+  const hold = new Promise((resolve) => (release = resolve));
+  admins.recordLogin = async (id, client) => {
+    if (id === target.id) {
+      entered();
+      await hold;
+    }
+    return original.call(admins, id, client);
+  };
+  const loggingIn = login(target);
+  let changing;
+  try {
+    await Promise.race([
+      reached,
+      loggingIn.then((response) => {
+        throw new Error(`Login missed barrier: ${response.status}`);
+      }),
+    ]);
+    changing = call('PATCH', `/api/admins/${target.id}`, { status: 'INACTIVE' }, cookie);
+    release();
+    const response = await loggingIn;
+    assert.equal(response.status, 200);
+    assert.equal((await changing).status, 204);
+    assert.equal((await call('GET', '/api/auth/me', undefined, response.session)).status, 401);
+    assert.equal((await login(target)).body.error.code, 'ACCOUNT_INACTIVE');
+  } finally {
+    release();
+    await Promise.allSettled([loggingIn, changing]);
+    admins.recordLogin = original;
+  }
+});
+
 test('own password change validates confirmation, preserves failed sessions, revokes all sessions on success', async () => {
   const user = await account('ownpass');
   const first = (await login(user)).session;
@@ -405,7 +610,7 @@ test('system reset revokes only target sessions, preserves pending state, and se
     (await call('PATCH', `/api/admins/${pending.id}/password`, undefined, session)).status,
     204,
   );
-  assert.equal((await login(pending, 'dva1234')).status, 401);
+  assert.equal((await login(pending, 'dva1234')).status, 403);
   const self = await call('PATCH', `/api/admins/${system.id}/password`, undefined, session);
   assert.equal(self.status, 204);
   assert.match(self.cookie, /Expires=Thu, 01 Jan 1970/);
@@ -549,7 +754,7 @@ test('dedicated role changes take effect on existing sessions without changing a
     (await call('PATCH', `/api/admins/${pending.id}/role`, { role: 'SUPERVISOR' }, session)).status,
     204,
   );
-  assert.equal((await login(pending)).status, 401);
+  assert.equal((await login(pending)).status, 403);
   assert.deepEqual(
     (
       await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
@@ -671,6 +876,13 @@ test('OpenAPI documents authentication and admin contracts without leaking passw
   ])
     assert.ok(document.paths[path][method]);
   assert.equal(document.components.securitySchemes.adminSession.in, 'cookie');
+  const loginForbidden = document.paths['/api/auth/login'].post.responses['403'].description;
+  assert.match(loginForbidden, /ACCOUNT_INACTIVE/);
+  assert.match(loginForbidden, /ACCOUNT_PENDING/);
+  assert.match(
+    document.components.schemas.UpdateAdminDto.properties.status.description,
+    /INACTIVE/,
+  );
   const role = document.paths['/api/admins/{id}/role'].patch;
   assert.deepEqual(role.tags, ['Admins']);
   assert.ok(role.responses['204']);

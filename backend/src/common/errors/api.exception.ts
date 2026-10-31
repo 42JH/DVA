@@ -6,6 +6,8 @@ export interface ErrorDetail {
 }
 
 export type ErrorCode =
+  | 'ACCOUNT_INACTIVE'
+  | 'ACCOUNT_PENDING'
   | 'SIGNUP_UNAVAILABLE'
   | 'INVALID_REQUEST'
   | 'PAYLOAD_TOO_LARGE'

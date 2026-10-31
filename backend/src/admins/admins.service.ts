@@ -32,8 +32,14 @@ export class AdminsService {
   async updateAccess(target: AdminAccount, input: UpdateAdminDto, client: PoolClient) {
     if (input.role === undefined && input.status === undefined)
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 항목이 필요합니다.');
-    if (input.status !== undefined && !(target.status === 'PENDING' && input.status === 'ACTIVE'))
-      throw new ApiException(409, 'INVALID_STATE', '가입 대기 계정만 승인할 수 있습니다.');
+    if (input.status !== undefined) {
+      const activate = ['PENDING', 'INACTIVE'].includes(target.status) && input.status === 'ACTIVE';
+      const deactivate = target.status === 'ACTIVE' && input.status === 'INACTIVE';
+      if (!activate && !deactivate)
+        throw new ApiException(409, 'INVALID_STATE', '허용되지 않은 계정 상태 변경입니다.');
+      if (target.role === 'SYSTEM_ADMIN' && target.status !== 'PENDING')
+        throw new ApiException(403, 'FORBIDDEN', '최상위 관리자는 활성·비활성 전환할 수 없습니다.');
+    }
     const role = input.role ?? target.role;
     const status = input.status ?? target.status;
     if (
