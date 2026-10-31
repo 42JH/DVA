@@ -1,8 +1,10 @@
-import { Tabs } from '@/shared/ui'
+import { ConfirmDialog, Tabs } from '@/shared/ui'
 import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePersonaPage'
+import { AddPersonaModal } from './AddPersonaModal'
 import { PersonaList } from './PersonaList'
 import { PromptCard } from './PromptCard'
 import { PromptEditor } from './PromptEditor'
+import { TestCallModal } from './TestCallModal'
 import { VersionDiffCard } from './VersionDiffCard'
 import { VersionList } from './VersionList'
 
@@ -27,11 +29,7 @@ export function PersonaPage() {
   if (vm.editing)
     return (
       <div className="h-full min-h-[600px]">
-        <PromptEditor
-          compareLabel={vm.prompt.compareLabel}
-          target={vm.editTarget}
-          onDone={vm.finishEdit}
-        />
+        <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
       </div>
     )
 
@@ -39,7 +37,11 @@ export function PersonaPage() {
     <div className="flex h-full min-h-[600px] gap-6">
       <div className="min-w-0 flex-1">
         {vm.compare ? (
-          <VersionDiffCard view={vm.compare} onFrom={vm.setCompareFrom} onClose={vm.closeCompare} />
+          <VersionDiffCard
+            view={vm.compare}
+            onTarget={vm.setCompareTarget}
+            onClose={vm.closeCompare}
+          />
         ) : (
           <PromptCard
             prompt={vm.prompt}
@@ -53,17 +55,45 @@ export function PersonaPage() {
         <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
         <div className="min-h-0 flex-1 overflow-auto">
           {vm.tab === 'persona' ? (
-            <PersonaList items={vm.personas} onSelect={vm.selectPersona} />
+            <PersonaList
+              items={vm.personas}
+              onSelect={vm.selectPersona}
+              onUse={vm.askUse}
+              onAdd={vm.openAdd}
+            />
           ) : (
             <VersionList
               items={vm.versions}
               more={vm.moreVersions}
               onSelect={vm.selectVersion}
               onShowMore={vm.showAllVersions}
+              onTestCall={vm.startTestCall}
+              onApply={vm.askApply}
             />
           )}
         </div>
       </aside>
+      {vm.applyConfirm && (
+        <ConfirmDialog
+          title={vm.applyConfirm.title}
+          target={vm.applyConfirm.target}
+          note={vm.applyConfirm.note}
+          warn={vm.applyError ?? undefined}
+          okLabel={vm.applyConfirm.okLabel}
+          okKind="primary"
+          pending={vm.isApplying}
+          onOk={vm.confirmApply}
+          onClose={vm.cancelApply}
+        />
+      )}
+      {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
+      {vm.testCall && (
+        <TestCallModal
+          key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}
+          target={vm.testCall}
+          onEnd={vm.endTestCall}
+        />
+      )}
     </div>
   )
 }
