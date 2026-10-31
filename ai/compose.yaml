@@ -37,12 +37,14 @@ services:
       # RunPod 준비 전에는 검색만 오류로 안내하고 주문 접수는 계속한다.
       RAG_RERANKER_URL: ${RAG_RERANKER_URL:-}
       RAG_RERANKER_API_KEY: ${RAG_RERANKER_API_KEY:-}
+      AI_FAQ_TOKEN: ${AI_FAQ_TOKEN:-}
       # PBX 통화 종료 웹훅 인증 토큰(Authorization: Bearer, PBX와 공유)
       PBX_WEBHOOK_SECRET: ${PBX_WEBHOOK_SECRET:?Set PBX_WEBHOOK_SECRET in .env}
       MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
     volumes:
       # 이미지 재빌드 없이 조정: GPT-Live 세션·서버 설정, 프롬프트
+      - rag_state:/app/rag_state
       - ./config:/app/config:ro
       - ./prompts:/app/prompts:ro
       # 주소 보정용 행안부 주소DB(data/address.db, 약 600MB). 없으면 보정 없이 뜬다(spec/address.md)
@@ -71,4 +73,5 @@ networks:
     internal: true
 
 volumes:
+  rag_state:
   qdrant_data:

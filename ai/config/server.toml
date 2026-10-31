@@ -116,3 +116,25 @@ history_chars = 6000
 max_delegations = 100
 context_chunk_tokens = 350
 append_timeout_sec = 5.0
+
+[faq_sync]
+# 운영 관리 색인·실제 Qwen 길이 검증기·Live 연결 전에는 켜지 않는다.
+receive_enabled = false
+db_path = "rag_state/faq-events.sqlite3"
+max_pending = 1000
+max_body_bytes = 16384
+# 백엔드의2초 HTTP 제한보다 짧게 저장 성공/실패를 응답한다.
+accept_timeout_sec = 1.5
+busy_timeout_sec = 0.1
+# 질문/절 제목/표 머리글을 포함한 문자 수. Qwen 토큰 한도와는 다르다.
+chunk_size = 800
+chunk_overlap = 50
+# 기존 MD 컬렉션과 분리한다. 실제 생성/전환은 명시적인 최초 이전에서 수행한다.
+collection = "manuals_backend_faq_large"
+embedding_batch_size = 32
+# 자동 소비자 코드가 있어도 실제 운영 색인 주입/Live 연결 전에는 비활성이다.
+process_enabled = false
+poll_sec = 1.0
+retry_base_sec = 5.0
+retry_max_sec = 300.0
+reconcile_sec = 30.0

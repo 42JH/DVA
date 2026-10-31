@@ -8,6 +8,7 @@
 - 주소: 환경변수 `BACKEND_API_URL`(같은 Docker 네트워크에서 `http://backend:3000`). 설정: `config/server.toml` `[backend]`
 - HTTP: `openai`에 딸린 `httpx2`(의존성 추가 없음)
 - 인증: MVP 합의로 아래 두 호출은 인증이 없다(백엔드 Jira S15P31D109-135에서 추가 예정).
+- FAQ 변경 알림 처리용 `BackendAPI.faq_entries`: 번호 필터로 최신 원문을 조회한다. 별도 MVP 무인증 계약이며 상세는 [FAQ 동기화](faq-sync.md). 통화 중이 아니라 색인 준비에 사용한다.
 
 ## 공통
 

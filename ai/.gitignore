@@ -22,6 +22,7 @@ htmlcov/
 # AI artifacts
 models/
 /data/
+/rag_state/
 *.pt
 *.pth
 *.onnx

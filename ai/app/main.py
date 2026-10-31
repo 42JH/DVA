@@ -1,5 +1,6 @@
 """FastAPI 하나: PBX(OpenAI) 웹훅, 관제 API·SSE, 관제 화면. 워커 1개로 띄운다."""
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -19,6 +20,7 @@ from app.tools._base import TOOLS, load_tools
 from app.webhooks.openai import router as webhook_router
 from app.webhooks.pbx import router as pbx_router
 from app.webhooks.persona import router as persona_router
+from app.webhooks.faqs import router as faq_router, valid_token as valid_faq_token
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +39,8 @@ def check_definitions(cfg, texts) -> None:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")
 
 
-def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> FastAPI:
+def create_app(client: Any = None, backend: Any = None, rag: Any = None, faq_events: Any = None,
+               faq_index: Any = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         cfg = load_server_config()
@@ -45,6 +48,28 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
         texts = load_texts()
         check_definitions(cfg, texts)
         address.load(ROOT / cfg.address.db_path)
+        event_store = faq_events
+        if event_store is None and cfg.faq_sync.receive_enabled:
+            if not valid_faq_token(os.environ.get('AI_FAQ_TOKEN')):
+                raise RuntimeError('FAQ 알림 활성화에는 올바른 AI_FAQ_TOKEN이 필요합니다.')
+            from app.rag.faq_events import FaqEventStore
+
+            f = cfg.faq_sync
+            event_store = await asyncio.to_thread(
+                FaqEventStore, ROOT / f.db_path, max_pending=f.max_pending, busy_timeout_sec=f.busy_timeout_sec)
+            await asyncio.to_thread(event_store.recover_interrupted)
+        faq_runtime = None
+        if cfg.faq_sync.process_enabled and faq_index is None:
+            from app.rag.faq_runtime import create_faq_runtime
+
+            faq_runtime = await asyncio.to_thread(create_faq_runtime, event_store, cfg.faq_sync, cfg.rag)
+            managed_index = faq_runtime.index
+        else:
+            managed_index = faq_index
+        if cfg.faq_sync.process_enabled:
+            from app.rag.faq_processor import FaqProcessor
+
+            FaqProcessor.check_bindings(event_store, managed_index, cfg.faq_sync, cfg.rag)
         openai_client, backend_api = client, backend
         if openai_client is None:
             from openai import AsyncOpenAI
@@ -64,20 +89,28 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
                                      persona_token=os.environ.get("AI_PERSONA_TOKEN"))
         app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
         svc = app.state.svc
+        svc.faq_events = event_store
+        if cfg.faq_sync.process_enabled:
+            svc.faq_processor = FaqProcessor(event_store, backend_api, managed_index, cfg.faq_sync, cfg.rag)
         svc.persona = PersonaManager(backend_api, svc.registry, cfg.persona, enabled=bool(os.environ.get("AI_PERSONA_TOKEN")))
         if not svc.persona.enabled:
             log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: prompts/persona.md 사용")
         svc.spawn(svc.persona.run())
         if rag is not None:
             app.state.svc.rag = rag
+        elif faq_runtime is not None:
+            from app.rag.service import RagService
+
+            app.state.svc.rag = RagService(cfg.rag, faq_index=managed_index, reranker=faq_runtime.reranker)
         elif client is None:
             from app.rag.service import RagService
             app.state.svc.rag = RagService(cfg.rag)  # 첫 검색 전까지 외부 연결 없음
             app.state.svc.spawn(app.state.svc.rag.warmup())
         try:
+            if svc.faq_processor is not None:
+                svc.spawn(svc.faq_processor.run())
             yield
         finally:
-            import asyncio
             calls = list(app.state.svc.registry.calls.values())
             jobs = [c.task for c in calls if c.task is not None and not c.task.done()]
             jobs += [t for t in app.state.svc.tasks if not t.done()]
@@ -87,6 +120,8 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
                 await asyncio.gather(*jobs, return_exceptions=True)
             if rag is None and app.state.svc.rag is not None:
                 await app.state.svc.rag.close()
+            if faq_runtime is not None:
+                await asyncio.to_thread(faq_runtime.close)
             if backend is None:
                 await backend_api.close()
             if client is None:
@@ -96,6 +131,7 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None) -> Fast
     app.include_router(webhook_router)
     app.include_router(pbx_router)
     app.include_router(persona_router)
+    app.include_router(faq_router)
     app.include_router(monitor_router)
 
     @app.get("/health")

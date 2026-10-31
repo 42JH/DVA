@@ -20,6 +20,8 @@ class Services:
     tasks: set[asyncio.Task] = field(default_factory=set)
     rag: Any = None
     persona: Any = None  # PersonaManager(main이 만든다)
+    faq_events: Any = None  # FAQ 변경 알림 영속 접수함
+    faq_processor: Any = None  # 원문 조회/청킹/색인 순차 소비자
 
     def first_time(self, webhook_id: str | None) -> bool:
         """같은 webhook-id는 한 번만. 오래된 기록은 지운다."""

@@ -12,9 +12,11 @@ studio
 .langgraph_api
 deploy
 data
+rag_state
 models
 evaluation
-scripts
+scripts/*
+!scripts/bootstrap_faq.py
 gpu
 app/live_lab
 app/rag/gpu.py
