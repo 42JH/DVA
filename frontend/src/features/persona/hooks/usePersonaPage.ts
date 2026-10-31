@@ -118,7 +118,8 @@ export function usePersonaPage() {
     enabled: persona !== null,
     refetchInterval: (q) => (q.state.data?.some((v) => v.status === 'PENDING') ? POLL_MS : false),
   })
-  const all = versions.data ?? []
+  // 높은 번호가 위 — 히스토리 · 비교 드롭다운 · 처음 보는 버전(all[0])이 모두 이 순서에 기댐. 서버 응답 순서를 믿지 않고 여기서 정렬
+  const all = [...(versions.data ?? [])].sort((a, b) => b.version - a.version)
   const viewing = all.find((v) => v.version === version) ?? all[0] ?? null
   const testedSec = (v: number) => (persona ? tested[`${persona.personaSeq}-${v}`] : undefined)
   const testingVersion = all.find((v) => v.version === testing) ?? null
@@ -247,7 +248,12 @@ export function usePersonaPage() {
       setTesting(null)
     },
     startCompare: () => setComparing(true),
-    setCompareTarget: (v: string) => setVersion(Number(v)),
+    // 드롭다운으로 앞 6개 밖의 옛 버전을 고르면 히스토리를 펼쳐 선택 칸이 보이게 ('더 보기'를 누른 것과 같음)
+    setCompareTarget: (v: string) => {
+      const n = Number(v)
+      setVersion(n)
+      if (!all.slice(0, HISTORY_FIRST).some((x) => x.version === n)) setShowAll(true)
+    },
     closeCompare: () => setComparing(false),
 
     editing: editing !== false,
