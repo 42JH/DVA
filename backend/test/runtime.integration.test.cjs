@@ -47,19 +47,31 @@ test('production FAQ management through Nginx updates the AI read API without ex
     Cookie: login.headers.get('set-cookie').split(';')[0],
   };
   const question = 'runtime-faq-' + randomUUID();
+  const missingCategory = await fetch(root + '/faqs', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ items: [{ question, answer: '분류 누락' }] }),
+  });
+  assert.equal(missingCategory.status, 400, await missingCategory.clone().text());
   const created = await fetch(root + '/faqs', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, answer: '초기 답변' }),
+    body: JSON.stringify({ items: [{ category: '접수', question, answer: '초기 답변' }] }),
   });
   assert.equal(created.status, 204);
   assert.equal(await created.text(), '');
   const location = created.headers.get('location');
   const id = location.split('/').at(-1);
+  const partialUpdate = await fetch('http://proxy' + location, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ answer: '필수값 누락' }),
+  });
+  assert.equal(partialUpdate.status, 400, await partialUpdate.clone().text());
   const changed = await fetch('http://proxy' + location, {
     method: 'PATCH',
     headers,
-    body: JSON.stringify({ answer: '수정 답변\n- 상세' }),
+    body: JSON.stringify({ category: '접수', question, answer: '수정 답변\n- 상세' }),
   });
   assert.equal(changed.status, 204);
   const latest = await fetch(root + '/ai/faqs/' + id);
@@ -68,11 +80,12 @@ test('production FAQ management through Nginx updates the AI read API without ex
   const { data } = await latest.json();
   assert.equal(data.question, question);
   assert.equal(data.answer, '수정 답변\n- 상세');
+  assert.deepEqual(Object.keys(data).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
   assert.equal(Object.hasOwn(data, 'updatedByAdminUserSeq'), false);
   const denied = await fetch(root + '/faqs', {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, answer: '차단' }),
+    body: JSON.stringify({ items: [{ category: '접수', question, answer: '차단' }] }),
   });
   assert.equal(denied.status, 401);
   const list = await fetch(root + '/ai/faqs?' + new URLSearchParams({ q: question }));
@@ -85,8 +98,8 @@ test('production FAQ management through Nginx updates the AI read API without ex
     headers,
     body: JSON.stringify({
       items: [
-        { question: question + '-one', answer: '첫 답변' },
-        { question: question + '-two', answer: '둘째 답변' },
+        { category: '접수', question: question + '-one', answer: '첫 답변' },
+        { category: '접수', question: question + '-two', answer: '둘째 답변' },
       ],
     }),
   });
@@ -197,7 +210,11 @@ test('call detail and transcript work through Nginx while the standalone playbac
   });
   assert.equal(detail.status, 200);
   const detailBody = await detail.json();
-  assert.deepEqual(detailBody.data.call, body.data[0]);
+  const { analysis, ...call } = body.data[0];
+  assert.deepEqual(detailBody.data.call, call);
+  assert.deepEqual(detailBody.data.analysis, analysis);
+  assert.ok(Number.isInteger(detailBody.data.aiActionCount));
+  assert.ok(detailBody.data.aiActionCount >= 0);
   assert.ok(Array.isArray(detailBody.data.recordings));
   for (const recording of detailBody.data.recordings)
     assert.deepEqual(Object.keys(recording).sort(), [
