@@ -25,7 +25,7 @@ export class CallInsightsGuard implements CanActivate {
         throw new ApiException(
           503,
           'DEPENDENCY_UNAVAILABLE',
-          'AI 통화 분석 인증이 설정되지 않았습니다.',
+          'AI 통화 기록 인증이 설정되지 않았습니다.',
         );
       const authorization = request.get('Authorization') ?? '';
       const count = request.rawHeaders.filter(
@@ -39,7 +39,7 @@ export class CallInsightsGuard implements CanActivate {
           createHash('sha256').update(expected).digest(),
         )
       )
-        throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 통화 분석 인증이 필요합니다.');
+        throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 통화 기록 인증이 필요합니다.');
       request.auditActorType = 'AI';
       return true;
     } catch (error) {

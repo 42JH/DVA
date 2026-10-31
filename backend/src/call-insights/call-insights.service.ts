@@ -39,7 +39,7 @@ export class CallInsightsService {
       complaints: input.complaints.map((complaint) => ({
         type: complaint.type,
         evidenceText: complaint.evidenceText,
-        offsetMs: complaint.offsetMs,
+        offsetSeconds: complaint.offsetSeconds,
         utteranceOrders: [...complaint.utteranceOrders].sort((a, b) => a - b),
       })),
     };

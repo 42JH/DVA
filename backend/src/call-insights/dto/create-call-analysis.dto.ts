@@ -42,14 +42,14 @@ export class CallComplaintDto {
     nullable: true,
     minimum: 0,
     maximum: Number.MAX_SAFE_INTEGER,
-    description: 'AI 통화 시작부터 불만 구간까지의 위치(ms). 응답 레이턴시가 아닙니다.',
-    example: 31000,
+    description: 'AI 통화 시작부터 불만 구간까지의 정수 초. 확인할 수 없으면 null.',
+    example: 31,
   })
   @ValidateIf((_object: unknown, value: unknown) => value !== null)
   @IsInt()
   @Min(0)
   @Max(Number.MAX_SAFE_INTEGER)
-  offsetMs!: number | null;
+  offsetSeconds!: number | null;
 
   @ApiProperty({
     type: [Number],

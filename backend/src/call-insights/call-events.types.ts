@@ -1,0 +1,18 @@
+export const CALL_EVENT_KINDS = ['UTTERANCE', 'AI_ACTION', 'BUSINESS_RESULT'] as const;
+export const AI_ACTIONS = [
+  'ADDRESS_SEARCH',
+  'CUSTOMER_LOOKUP',
+  'ORDER_LOOKUP',
+  'FAQ_SEARCH',
+  'FIELD_SAVED',
+  'ORDER_SUBMITTED',
+  'ORDER_CANCELLED',
+] as const;
+export const BUSINESS_ACTIONS = [
+  'ORDER_CREATED',
+  'ORDER_CANCELLED',
+  'QUESTION_UNANSWERED',
+  'HANDOFF_REQUESTED',
+  'INQUIRY',
+] as const;
+export type CallEventKind = (typeof CALL_EVENT_KINDS)[number];

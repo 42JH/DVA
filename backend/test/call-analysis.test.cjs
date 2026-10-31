@@ -35,7 +35,7 @@ test('analysis token is optional and configuration errors disclose only its fiel
 const complaint = () => ({
   type: 'REPEATED_QUESTION',
   evidenceText: ' 같은 질문을 반복해 고객이 불편함을 표현함\n',
-  offsetMs: 31000,
+  offsetSeconds: 31,
   utteranceOrders: [3, 4, 5, 6],
 });
 const input = () => ({
@@ -61,7 +61,7 @@ test('analysis accepts explicit unknown values and preserves complaint evidence 
     complaints: [],
   };
   assert.deepEqual(JSON.parse(JSON.stringify(await validate(unknown))), unknown);
-  const unlinked = { ...complaint(), offsetMs: null, utteranceOrders: [] };
+  const unlinked = { ...complaint(), offsetSeconds: null, utteranceOrders: [] };
   assert.deepEqual(
     JSON.parse(JSON.stringify((await validate({ ...body, complaints: [unlinked] })).complaints[0])),
     unlinked,
@@ -112,9 +112,11 @@ test('complaint validation bounds evidence and requires unique integer reference
     { evidenceText: ' \n ' },
     { evidenceText: 'x'.repeat(1001) },
     { evidenceText: 'evidence\u0000text' },
-    { offsetMs: -1 },
-    { offsetMs: '31000' },
-    { offsetMs: Number.MAX_SAFE_INTEGER + 1 },
+    { offsetSeconds: -1 },
+    { offsetSeconds: '31' },
+    { offsetSeconds: Number.MAX_SAFE_INTEGER + 1 },
+    { offsetSeconds: 31.5 },
+    { offsetMs: 31000 },
     { utteranceOrders: null },
     { utteranceOrders: [1, 1] },
     { utteranceOrders: [0] },

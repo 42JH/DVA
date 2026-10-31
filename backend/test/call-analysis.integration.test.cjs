@@ -35,7 +35,7 @@ const input = (providerCallId, changes = {}) => ({
     {
       type: 'REPEATED_QUESTION',
       evidenceText: '분석-민감문구: 전화번호를 반복 질문해 불편함을 표현함',
-      offsetMs: 31000,
+      offsetSeconds: 31,
       utteranceOrders: [3, 4, 5, 6],
     },
   ],

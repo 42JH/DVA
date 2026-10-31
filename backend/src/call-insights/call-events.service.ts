@@ -1,0 +1,156 @@
+import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { AuditService } from '../audit/audit.service';
+import { ApiException } from '../common/errors/api.exception';
+import { DatabaseService } from '../database/database.service';
+import { CallEventsRepository } from './call-events.repository';
+import {
+  AiActionPayloadDto,
+  BusinessResultPayloadDto,
+  CallEventInputDto,
+  CreateCallEventsDto,
+  UtterancePayloadDto,
+} from './dto/create-call-events.dto';
+
+@Injectable()
+export class CallEventsService {
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly repository: CallEventsRepository,
+    private readonly audit: AuditService,
+  ) {}
+
+  async save(id: number, input: CreateCallEventsDto, requestId: string): Promise<void> {
+    const events = input.events.map((event): CallEventInputDto => {
+      const occurredAt = new Date(event.occurredAt);
+      if (!Number.isFinite(occurredAt.getTime()) || occurredAt.getUTCFullYear() < 1)
+        throw new ApiException(422, 'VALIDATION_FAILED', '이벤트 발생 시각을 확인해 주세요.');
+      let payload: CallEventInputDto['payload'];
+      if (event.kind === 'UTTERANCE') {
+        const value = event.payload as UtterancePayloadDto;
+        payload = {
+          utteranceOrder: value.utteranceOrder,
+          speaker: value.speaker,
+          utteranceText: value.utteranceText,
+          lastSentenceSeq: value.lastSentenceSeq,
+        };
+      } else if (event.kind === 'AI_ACTION') {
+        const value = event.payload as AiActionPayloadDto;
+        payload = {
+          action: value.action,
+          summaryText: value.summaryText,
+          orderSeq: value.orderSeq,
+        };
+      } else {
+        const value = event.payload as BusinessResultPayloadDto;
+        payload = {
+          action: value.action,
+          orderSeq: value.orderSeq,
+          unansweredQuestionSeq: value.unansweredQuestionSeq,
+          summaryText: value.summaryText,
+        };
+      }
+      return {
+        eventId: event.eventId.toLowerCase(),
+        eventOrder: event.eventOrder,
+        kind: event.kind,
+        occurredAt: occurredAt.toISOString(),
+        offsetSeconds: event.offsetSeconds,
+        payload,
+      };
+    });
+    if (
+      new Set(events.map((event) => event.eventId)).size !== events.length ||
+      new Set(events.map((event) => event.eventOrder)).size !== events.length
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '요청 묶음 안의 이벤트 ID·순번은 중복될 수 없습니다.',
+      );
+    const conflict = () =>
+      new ApiException(
+        409,
+        'EVENT_PAYLOAD_CONFLICT',
+        '이미 저장한 이벤트·순번·발화와 내용이 다릅니다.',
+      );
+    await this.database.transaction(async (client) => {
+      const call = await this.repository.findCall(client, id);
+      if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+      if (call.providerCallId !== input.providerCallId)
+        throw new ApiException(403, 'FORBIDDEN', '통화 번호와 AI 통화 ID가 일치하지 않습니다.');
+      let inserted = false;
+      // 서로 다른 통화에서 잘못 재사용한 UUID도 같은 잠금 순서로 처리한다.
+      for (const event of events.sort((a, b) => a.eventId.localeCompare(b.eventId))) {
+        const hash = createHash('sha256')
+          .update(
+            JSON.stringify({ callSessionSeq: id, providerCallId: input.providerCallId, ...event }),
+          )
+          .digest('hex');
+        const existing = await this.repository.findExisting(client, id, event);
+        const matches = (rows: typeof existing) =>
+          rows.length === 1 &&
+          rows[0].eventId === event.eventId &&
+          rows[0].callId === id &&
+          rows[0].eventOrder === event.eventOrder &&
+          rows[0].hash === hash;
+        if (existing.length) {
+          if (!matches(existing)) throw conflict();
+          continue;
+        }
+        let utteranceId: number | null = null;
+        let questionId: number | null = null;
+        if (event.kind === 'UTTERANCE') {
+          const payload = event.payload as UtterancePayloadDto;
+          const utterance = await this.repository.findOrInsertUtterance(client, id, payload);
+          if (
+            !utterance ||
+            utterance.speaker !== payload.speaker ||
+            utterance.text !== payload.utteranceText ||
+            utterance.lastSentenceSeq !== payload.lastSentenceSeq
+          )
+            throw conflict();
+          utteranceId = utterance.id;
+        } else {
+          const payload = event.payload as AiActionPayloadDto | BusinessResultPayloadDto;
+          if (payload.orderSeq !== null) {
+            const allowed = await this.repository.orderAccess(client, payload.orderSeq, call);
+            if (allowed === undefined)
+              throw new ApiException(404, 'NOT_FOUND', '참조 주문을 찾을 수 없습니다.');
+            if (!allowed)
+              throw new ApiException(403, 'FORBIDDEN', '통화 고객의 주문만 참조할 수 있습니다.');
+          }
+          if (event.kind === 'BUSINESS_RESULT') {
+            questionId = (payload as BusinessResultPayloadDto).unansweredQuestionSeq;
+            if (questionId !== null) {
+              const questionCall = await this.repository.questionCall(client, questionId);
+              if (questionCall === undefined)
+                throw new ApiException(404, 'NOT_FOUND', '참조 미답변 질문을 찾을 수 없습니다.');
+              if (questionCall !== id)
+                throw new ApiException(
+                  403,
+                  'FORBIDDEN',
+                  '같은 통화의 미답변 질문만 참조할 수 있습니다.',
+                );
+            }
+          }
+        }
+        if (!(await this.repository.insert(client, id, event, hash, utteranceId, questionId))) {
+          if (!matches(await this.repository.findExisting(client, id, event))) throw conflict();
+        } else inserted = true;
+      }
+      if (inserted)
+        await this.audit.recordSuccess(
+          {
+            actorId: null,
+            actorType: 'AI',
+            action: 'CALL_EVENTS_RECORDED',
+            targetType: 'CALL_SESSION',
+            targetId: id,
+            requestId,
+          },
+          client,
+        );
+    });
+  }
+}

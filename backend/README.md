@@ -1,6 +1,6 @@
 # 모놀리식 백엔드 공통 기반
 
-AI 통화 종료 분석 수집 ANL-01은 [통화 분석 API 계약](../docs/api/call-analysis.md)을 따른다. 새 앱 실행 전에 024 migration이 필요하며, 이벤트·미답변·대시보드는 후속 범위다.
+AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 새 앱 실행 전에 026까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 후속 EVT-02는 [상세 명세 초안](../docs/api/call-events-read-spec.md)으로 제공한다.
 
 기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
 
@@ -60,7 +60,7 @@ npm run start:dev
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
 | `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
 | `AI_FAQ_TOKEN` | 선택, 32자 이상 공백 없는 ASCII 토큰. FAQ 변경 알림 전용. 비어 있으면 FAQ 쓰기·알림 대기는 보존하고 전송 워커만 비활성 |
-| `AI_INSIGHTS_TOKEN` | 선택, 통화 분석 수집 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 ANL-01만 503 |
+| `AI_INSIGHTS_TOKEN` | 선택, 통화 분석·이벤트 수집 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 ANL-01·EVT-01은 503 |
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |

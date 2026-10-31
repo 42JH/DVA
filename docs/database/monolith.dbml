@@ -1,10 +1,10 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-31 / backend/migrations/001~024 기준. public 업무·관리자 25개 + PBX 수신 1개 = ERD 26개, FK 22개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-31 / backend/migrations/001~026 기준. public 업무·관리자 27개 + PBX 수신 1개 = ERD 28개, FK 26개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
-// 024까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 026까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
 // 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
 // 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
 
@@ -281,6 +281,45 @@ Table call_sessions {
   Note: 'consultation / 고객 확인 시 provider_call_id로 통화를 생성·재사용하고 call_session_seq를 AI에 반환한다. AI 결과는 같은 통화에 주문을 연결한다. PBX는 발신번호와 incoming_at 허용 구간 내 유일 후보에만 연결한다. 상담 조회는 연결 주문의 상태·총액을 함께 반환하며 별도 결제 상태 컬럼은 만들지 않는다. / SQL 인덱스: calls_order_idx, calls_retention_idx, call_sessions_caller_incoming_idx.'
 }
 
+Table unanswered_questions {
+  unanswered_question_seq integer [pk, increment, not null]
+  event_id uuid [unique, not null]
+  call_session_seq integer [not null]
+  question_text text [note: '최대 1000자. DELETED이면 NULL']
+  occurred_at timestamptz [not null]
+  offset_seconds bigint [note: '0 이상 안전한 정수 초. 미확인은 NULL']
+  status text [not null, default: 'OPEN', note: 'OPEN / REGISTERED / DELETED']
+  faq_entry_seq integer [note: 'FAQ 삭제 뒤에도 보존하는 논리 참조']
+  payload_hash text [not null]
+  faq_conversion_hash text
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  registered_at timestamptz
+  deleted_at timestamptz
+  indexes { (unanswered_question_seq, call_session_seq) [unique] }
+  Note: 'EVT-01 참조 기반만 준비. UNQ API는 후속 구현. 상태 조합·원문 삭제 제약은 026 SQL을 따른다.'
+}
+Ref: call_sessions.call_session_seq < unanswered_questions.call_session_seq
+
+Table call_insight_events {
+  call_insight_event_seq integer [pk, increment, not null]
+  event_id uuid [unique, not null]
+  call_session_seq integer [not null]
+  event_order integer [not null]
+  kind text [not null, note: 'UTTERANCE / AI_ACTION / BUSINESS_RESULT']
+  occurred_at timestamptz [not null]
+  offset_seconds bigint
+  call_utterance_seq integer [unique]
+  unanswered_question_seq integer
+  payload jsonb [note: '발화 원문은 call_utterances에서 참조. 동작 status 없음']
+  payload_hash text [not null]
+  received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  indexes { (call_session_seq, event_order) [unique] }
+  Note: '요청당 50개와 누적 개수는 별개. 이벤트·발화·성공 감사는 같은 트랜잭션.'
+}
+Ref: call_sessions.call_session_seq < call_insight_events.call_session_seq
+Ref: call_utterances.call_utterance_seq - call_insight_events.call_utterance_seq
+Ref: unanswered_questions.(unanswered_question_seq, call_session_seq) < call_insight_events.(unanswered_question_seq, call_session_seq)
+
 Table call_analyses {
   call_session_seq integer [pk, not null, note: '통화당 최종 분석 한 건']
   ai_persona_version_seq integer [note: '실제 사용한 설정 이력. 미확인은 NULL']
@@ -289,7 +328,7 @@ Table call_analyses {
   result text [not null, note: 'REGISTERED / REGISTRATION_FAILED / HANDOFF / CANCELLED / INQUIRY']
   repeat_question_count integer [note: '되묻기 횟수. 미측정은 NULL']
   has_complaint boolean [note: '미판정은 NULL, 확인한 불만 없음은 false']
-  complaints jsonb [not null, note: '유형·근거·위치·발화 순번. 최대 20개']
+  complaints jsonb [not null, note: '유형·근거·정수 초 위치·발화 순번. 최대 20개']
   payload_hash text [not null, note: '정규화 요청 SHA-256. 동일 통화 재전송 판별']
   analysed_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
   checks {

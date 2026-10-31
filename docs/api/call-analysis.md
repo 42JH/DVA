@@ -1,7 +1,7 @@
 # ANL-01 통화 종료 분석 결과 저장
 
 `POST /api/ai/calls/{id}/analysis`는 AI 서버가 기존 통화의 최종 분석을 저장하는 API다.
-프론트용 조회·대시보드·이벤트·미답변 API, FAQ 분류, 조회용 뷰는 이번 구현에 포함하지 않는다.
+이 문서는 ANL-01 계약이다. 이벤트 수집은 [EVT-01](call-events.md), 후속 이벤트 조회는 [EVT-02 상세 초안](call-events-read-spec.md)을 따른다.
 
 ## 인증과 통화 연결
 
@@ -29,7 +29,7 @@
     {
       "type": "REPEATED_QUESTION",
       "evidenceText": "전화번호를 반복 질문하자 고객이 불편함을 표현함",
-      "offsetMs": 31000,
+      "offsetSeconds": 31,
       "utteranceOrders": [3, 4, 5, 6]
     }
   ]
@@ -57,7 +57,7 @@ Complaint 항목의 모든 필드도 필수다.
 | --- | --- |
 | type | REPEATED_QUESTION, SPEAKING_TOO_FAST, RECOGNITION_FAILURE, SLOW_RESPONSE, AI_REFUSAL |
 | evidenceText | 공백 아닌 문자열, 최대 1,000자, NUL 금지. 공백·줄바꿈 등 원문 보존 |
-| offsetMs | 0 이상 안전한 정수 또는 null. 통화 시작부터 불만 구간까지의 위치이며 레이턴시가 아님 |
+| offsetSeconds | 0 이상 안전한 정수 또는 null. 통화 시작부터 불만 구간까지의 정수 초 위치이며 레이턴시가 아님 |
 | utteranceOrders | 중복 없는 양의 int32 배열. 발화 연결 미확인은 빈 배열 |
 
 AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는 고객이 느리다고 표현한 불만이며
@@ -92,4 +92,6 @@ AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는
 | 422 | VALIDATION_FAILED | 종료가 시작보다 빠르거나 저장할 수 없는 시각 |
 | 503 | DEPENDENCY_UNAVAILABLE | AI 수집 토큰 미설정 |
 
-새 앱 실행 전 024를 팀 migration runner로 적용한다. 운영 DB 적용·실제 AI 전송·조회 화면 연결은 별도다.
+ANL-01 초 단위 계약은 새 앱 실행 전에 025까지 적용한다. EVT-01도 포함한 현재 앱은 026까지 팀 migration runner로 적용한다. 운영 DB 적용·실제 AI 전송·조회 화면 연결은 별도다.
+
+025부터 불만 위치는 offsetSeconds(정수 초)다. offsetMs는 거절한다. AI에서 소수 초를 버린 뒤 전송한다. 기존 데이터는 025가 밀리초를 1000으로 나눠 버림하고 해시도 새 계약으로 갱신한다. 분석 저장 시각은 보존하며 기존 024 파일은 변경하지 않는다.

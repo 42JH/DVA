@@ -5,7 +5,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 ERD에 현재 migration을 반영한 문서다. 단일 PostgreSQL DB,
-public 업무·운영 테이블 24개와 관리자 세션 테이블 1개, public FK 21개를 사용한다. PBX 수신함까지 ERD 26개 테이블과 FK 22개이며, 고객·주문·상담·배송·운영 모듈별 주석으로 구분한다.
+public 업무·운영 테이블 26개와 관리자 세션 테이블 1개, public FK 25개를 사용한다. PBX 수신함까지 ERD 28개 테이블과 FK 26개이며, 고객·주문·상담·배송·운영 모듈별 주석으로 구분한다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -64,7 +64,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 25개·FK 21개·트리거 10개, 기존 PBX 데이터 보존.
+- public 테이블 27개·FK 25개·트리거 10개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 UUID 유일성, 기존 요청 키 이전·업무 데이터 보존·키 충돌 거절·테이블 삭제 롤백.
@@ -138,7 +138,11 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 기존 통화·주문·페르소나·FAQ 데이터는 수정하거나 추정 보완하지 않는다. 새 앱 실행 전에 024를 적용한다.
 이벤트·미답변 테이블과 조회용 뷰는 이 migration에 포함하지 않는다. [ANL-01](../api/call-analysis.md)을 따른다.
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `025-설명.sql`부터 순서대로 추가한다.
+025는 기존 분석의 불만 위치를 offsetMs에서 정수 초 offsetSeconds로 변환하고 같은 요청의 재전송 해시를 갱신한다. 분석 저장 시각은 보존한다.
+
+026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 미답변 수집·관리 HTTP API는 후속 구현이며 FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다.
+
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `027-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
