@@ -14,9 +14,17 @@ import { OrderPaymentsRepository } from './order-payments.repository';
 import { OrderPaymentsService } from './order-payments.service';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { OrderMaintenanceWorker } from './order-maintenance.worker';
+import { DeliveriesModule } from '../deliveries/deliveries.module';
 
 @Module({
-  imports: [DatabaseModule, AuditModule, CustomersModule, ConsultationsModule, OrganizationsModule],
+  imports: [
+    DatabaseModule,
+    AuditModule,
+    CustomersModule,
+    ConsultationsModule,
+    OrganizationsModule,
+    DeliveriesModule,
+  ],
   controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
   providers: [
     OrdersRepository,

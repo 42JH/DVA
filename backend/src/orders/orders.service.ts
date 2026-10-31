@@ -23,6 +23,7 @@ import { ConsultationsService } from '../consultations/consultations.service';
 import { assertOrderAmount } from './order-pricing';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { assertOrderSubmissionReady } from './order-submission.validation';
+import { DeliveriesService } from '../deliveries/deliveries.service';
 
 @Injectable()
 export class OrdersService {
@@ -36,6 +37,7 @@ export class OrdersService {
     private readonly dver: DverClient,
     private readonly calls: ConsultationsService,
     private readonly payments: OrderPaymentsRepository,
+    private readonly deliveries: DeliveriesService,
   ) {}
 
   private callId(adminId: number | null, header?: string): number | null {
@@ -567,7 +569,7 @@ export class OrdersService {
           '결제 승인 처리 중에는 취소할 수 없습니다.',
         );
       const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
-      const shipments = await this.repository.lockShipments(client, parcelIds);
+      const shipments = await this.deliveries.lockShipments(client, parcelIds);
       if (
         (order.status === 'COLLECTING' && shipments.length > 0) ||
         (order.status === 'notPaid' && (parcels.length === 0 || shipments.length > 0))
@@ -578,7 +580,7 @@ export class OrdersService {
           '결제 전 상태가 확인된 주문만 취소할 수 있습니다.',
         );
 
-      await this.repository.cancelShipments(client, parcelIds, adminId);
+      await this.deliveries.cancelShipments(client, parcelIds, adminId);
       for (const parcel of selectedIds ? targets : []) {
         await this.repository.cancelParcel(client, parcel.orderParcelSeq);
         await this.audit.recordSuccess(
