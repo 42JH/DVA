@@ -1,7 +1,8 @@
 """백엔드 서버 API 클라이언트(spec/backend-api.md). 고객·주문·배송지는 AI 서버가 저장하지 않고 백엔드에서 읽고 쓴다.
 HTTP는 openai에 딸린 httpx2. 전화번호는 URL에 넣지 않고 본문으로 보낸다(접근 로그에 개인정보가 남지 않게).
 
-AI가 부르는 것은 둘: 통화 시작의 고객 확인(POST /api/customers/context)과 통화 결과 한 번(POST /api/orders).
+통화에서는 고객 확인(POST /api/customers/context)과 통화 결과(POST /api/orders)를 부른다.
+FAQ 변경 알림 처리에서는 최신 원문(GET /api/ai/faqs)을 별도로 조회한다.
 조회·수정·취소(/internal/ai/...)는 새 백엔드에 AI용 API가 없어 도구 사용을 보류했다(코드는 둔다)."""
 
 import asyncio
@@ -13,6 +14,7 @@ from urllib.parse import quote
 import httpx2
 
 from app.order import COUNT_FIELDS, ORDER_FIELDS, Geo, Order, Place
+from app.rag.faq_source import FaqLookup, parse_faq_lookup, parse_initial_faqs, validate_faq_ids
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +153,40 @@ class BackendAPI:
                     return last
                 raise BackendError("/api/orders 결과 확인 시간 초과")
             await asyncio.sleep(self.retry_interval_sec)
+
+    # --- FAQ 최신 원문(spec/faq-sync.md) ---
+
+    async def initial_faq_entries(self):
+        request = httpx2.Request('GET', self.http.base_url.join('/api/ai/faqs'),
+            params={'limit':100, 'offset':0}, headers={'Accept':'application/json'})
+        try:
+            response = await self.http.send(request, auth=None, follow_redirects=False)
+        except httpx2.TransportError:
+            raise BackendError('FAQ_FETCH_FAILED') from None
+        if response.status_code != 200:
+            raise BackendError(f'FAQ_HTTP_ERROR:{response.status_code}')
+        try:
+            return parse_initial_faqs(response.json())
+        except (ValueError, TypeError):
+            raise BackendError('FAQ_INITIAL_INVALID_OR_INCOMPLETE') from None
+
+    async def faq_entries(self, ids: list[int]) -> FaqLookup:
+        requested = validate_faq_ids(ids)
+        # 별도 Request를 만들어 고객/관리자 쿠키·페르소나 토큰·통화 헤더를 상속하지 않는다.
+        request = httpx2.Request('GET', self.http.base_url.join('/api/ai/faqs'),
+            params={'faqEntrySeqs': ','.join(map(str, requested)), 'limit': 100, 'offset': 0},
+            headers={'Accept': 'application/json'})
+        try:
+            response = await self.http.send(request, auth=None, follow_redirects=False)
+        except httpx2.TransportError:
+            raise BackendError('FAQ_FETCH_FAILED') from None
+        if response.status_code != 200:
+            raise BackendError(f'FAQ_HTTP_ERROR:{response.status_code}')
+        try:
+            return parse_faq_lookup(response.json(), list(requested))
+        except (ValueError, TypeError):
+            # 파싱 예외에는 원문이 들어갈 수 있어 외부에 연결하지 않는다.
+            raise BackendError('FAQ_INVALID_RESPONSE') from None
 
     # --- 페르소나(spec/persona.md) ---
 

@@ -22,11 +22,22 @@ class MockBackend:
         self.dver_status = "ACCEPTED"  # 디버 접수 결과 흉내(테스트에서 바꾼다)
         self._seq = itertools.count(1)
         self.personas: dict[str, dict] = {}  # "ACTIVE"·"PENDING" → 백엔드 응답 data 모양
+        self.faqs: dict[int, dict] | None = None  # 명시적으로 설정한 테스트 원문만 조회한다.
         # 보류한 조회·수정·취소 도구용(옛 계약)
         self.orders: list[dict] = []
 
     async def close(self) -> None:
         pass
+
+    async def faq_entries(self, ids):
+        from app.rag.faq_source import parse_faq_lookup, validate_faq_ids
+
+        requested = validate_faq_ids(ids)
+        if self.faqs is None:
+            # 가짜 원문을 준비하지 않은 상태를 전체 삭제로 해석하지 않는다.
+            raise BackendError('FAQ_MOCK_NOT_CONFIGURED')
+        return parse_faq_lookup({'data': [self.faqs[value] for value in requested if value in self.faqs],
+                                 'hasNext': False}, list(requested))
 
     # --- 페르소나: ACTIVE·PENDING 하나씩, 회신 검증만 흉내 낸다 ---
 

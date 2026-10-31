@@ -64,7 +64,7 @@ def load_faq_documents(client, collection: str) -> list[Document]:
 class HybridSearchExperiment:
     """한 번 만든 BM25를 재사용하고 질문별 임베딩은 한 번만 요청한다."""
 
-    def __init__(self, documents, embed_query, dense_search, *, bm25_weight=0.5, c=60, use_dictionary=True, descriptions=None, expected_dimensions=1536):
+    def __init__(self, documents, embed_query, dense_search, *, bm25_weight=0.5, c=60, use_dictionary=True, descriptions=None, expected_dimensions=1536, search_inputs=None):
         from langchain_community.retrievers import BM25Retriever
 
         if not documents or not 0<bm25_weight<1 or c<0:
@@ -77,8 +77,17 @@ class HybridSearchExperiment:
         if len(self.by_chunk)!=len(documents):
             raise ValueError("청크 ID가 중복됩니다.")
         self.preprocess = lambda text: tokenize_for_bm25(text, use_user_dictionary=use_dictionary)
+        if search_inputs is None:
+            bm25_documents = search_documents(documents, descriptions or {})
+        else:
+            if descriptions or set(search_inputs) != set(self.by_chunk):
+                raise ValueError('청크별 검색 입력과 원문 목록이 다릅니다.')
+            if any(not isinstance(text, str) or not text.strip() for text in search_inputs.values()):
+                raise ValueError('청크별 검색 입력이 비어 있습니다.')
+            bm25_documents = [Document(page_content=search_inputs[doc.metadata['chunk_id']],
+                                       metadata=dict(doc.metadata)) for doc in documents]
         self.bm25 = BM25Retriever.from_documents(
-            search_documents(documents, descriptions or {}), preprocess_func=self.preprocess, bm25_params=BM25_PARAMS, k=len(documents),
+            bm25_documents, preprocess_func=self.preprocess, bm25_params=BM25_PARAMS, k=len(documents),
         )
         self.corpus_tokens = [set(freqs) for freqs in self.bm25.vectorizer.doc_freqs]
         if any(not tokens for tokens in self.corpus_tokens):
