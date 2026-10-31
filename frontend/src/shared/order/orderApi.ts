@@ -149,6 +149,25 @@ export function addOrder(order: Omit<OrderDetail, 'orderSeq'>): number {
   return orderSeq
 }
 
+/** 03 주문 수정 — 바꿀 수 있는 칸만 (경로 · 접수 시각 · 결제 상태 · 관련 통화는 그대로) */
+export function updateOrder(
+  orderSeq: number,
+  patch: Pick<
+    OrderDetail,
+    | 'sender'
+    | 'receiver'
+    | 'items'
+    | 'pickupRequestedAt'
+    | 'itemPrice'
+    | 'clientComment'
+    | 'paymentMethod'
+  >,
+): void {
+  const i = ORDERS.findIndex((o) => o.orderSeq === orderSeq)
+  if (i < 0) throw new NotFoundError('주문을 찾을 수 없습니다.')
+  ORDERS[i] = { ...ORDERS[i], ...patch }
+}
+
 // ---------- 03 목록 가짜 줄 (와이어프레임 03_주문내역 + 규칙 생성) ----------
 // 위 3건(10519 · 10530 · 10531)과 합쳐 오늘 103건 + 지난 6일. 목록의 '접수 중' 1줄은 아직 주문이 아니라 03 목록 쪽에 따로 있음
 const at = (day: string, hm: string) => `${day}T${hm}:00+09:00`

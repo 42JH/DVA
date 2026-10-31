@@ -8,12 +8,13 @@ import { matchKo, phoneDigits } from '@/shared/lib/search'
 import {
   addOrder,
   allOrders,
+  updateOrder,
   type OrderDetail,
   type Party,
   type PaymentMethod,
 } from '@/shared/order/orderApi'
 
-export type { Party, PaymentMethod } from '@/shared/order/orderApi'
+export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
 /** 접수 중(통화가 아직 주문을 만드는 중) · 결제 대기 · 결제 완료 · 주문 취소 */
 export type OrderStatus = 'IN_PROGRESS' | 'PAYMENT_PENDING' | 'PAID' | 'CANCELLED'
@@ -142,6 +143,20 @@ export async function createOrder(
     paymentMethod: input.paymentMethod,
     paymentState: 'UNPAID',
     relatedCalls: [],
+  })
+}
+
+/** 주문 수정 — 명세 ORD-04 PATCH /orders/{id} (응답 모양 확인 전). 수정은 재시도해도 결과가 같아 멱등키 없음 */
+export async function saveOrder(orderSeq: number, input: OrderInput): Promise<void> {
+  await wait()
+  updateOrder(orderSeq, {
+    sender: input.sender,
+    receiver: input.receiver,
+    items: input.items,
+    pickupRequestedAt: input.pickupAt,
+    itemPrice: input.declaredValue,
+    clientComment: input.request,
+    paymentMethod: input.paymentMethod,
   })
 }
 

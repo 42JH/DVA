@@ -1,13 +1,22 @@
 import { Button, ChipGroup, FormModal, Stepper, TextField } from '@/shared/ui'
 import { useOrderForm } from '@/features/order/hooks/useOrderForm'
+import type { OrderDetail } from '@/features/order/api/orderApi'
 import { AddressSearchModal } from './AddressSearchModal'
 import { OrderPartyFields } from './OrderPartyFields'
 
-// 03 주문 추가 (수기 접수) 창 (와이어프레임 03_주문내역_주문추가, 10/31) — 폭 960
+// 03 주문 추가 (수기 접수) · 주문 수정 창 (와이어프레임 03_주문내역_주문추가 · _주문수정, 10/31) — 폭 960. order를 주면 수정
 // 위: 보내는 분 | 받는 분 (가운데 세로선) → 가로선 → 접수 정보: 품목 수량 4 · 기타 품목 | 물품 가액 · 수거 희망 일시 | 결제 방식 · 고객 요청 사항
 // 아래 [취소] [접수]. 주소 칸을 누르면 이 창 대신 주소 검색 창 (고르면 돌아옴, 적던 내용 그대로)
-export function OrderFormModal({ onClose }: { onClose: () => void }) {
-  const vm = useOrderForm(onClose)
+export function OrderFormModal({
+  order,
+  onDone,
+  onClose,
+}: {
+  order?: OrderDetail
+  onDone: () => void // 접수 · 저장 성공
+  onClose: () => void
+}) {
+  const vm = useOrderForm(onDone, order)
 
   if (vm.searching)
     return (
@@ -16,7 +25,7 @@ export function OrderFormModal({ onClose }: { onClose: () => void }) {
 
   return (
     <FormModal
-      title="주문 추가 (수기 접수)"
+      title={vm.isEdit ? '주문 수정' : '주문 추가 (수기 접수)'}
       width={960}
       onClose={onClose}
       footer={
@@ -28,7 +37,7 @@ export function OrderFormModal({ onClose }: { onClose: () => void }) {
           )}
           <Button onClick={onClose}>취소</Button>
           <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
-            {vm.isSubmitting ? '접수 중…' : '접수'}
+            {vm.isSubmitting ? (vm.isEdit ? '저장 중…' : '접수 중…') : vm.isEdit ? '저장' : '접수'}
           </Button>
         </>
       }

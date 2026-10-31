@@ -10,6 +10,8 @@ import {
   createOrder,
   orderQueries,
   type BoxKey,
+  saveOrder,
+  type OrderDetail,
   type OrderInput,
   type Party,
   type PaymentMethod,
@@ -25,30 +27,50 @@ const PAYMENT_OPTIONS: Option<PaymentMethod>[] = (
   ['MONTHLY', 'GROUP_CARD', 'PERSONAL_CARD'] as const
 ).map((v) => ({ value: v, label: PAYMENT_METHOD_LABEL[v] }))
 const orNull = (v: string) => v.trim() || null
+const draftOf = (p: Party): PartyDraft => ({
+  name: p.name,
+  phone: p.phoneNumber,
+  roadAddress: p.roadAddress,
+  detailAddress: p.detailAddress ?? '',
+})
 
 const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max)
 const phoneOk = (p: string) => p.length === 10 || p.length === 11
 
-/** 03 주문 추가(수기 접수) 창 훅 (와이어프레임 03_주문내역_주문추가, 10/31)
+/** 03 주문 추가(수기 접수) · 주문 수정 창 훅 (와이어프레임 03_주문내역_주문추가 · _주문수정, 10/31)
+ * order를 주면 수정: 칸을 그 주문 값으로 채우고 [저장] = 수정 API. 없으면 추가: 빈 칸 · [접수] = 접수 API
  * 보내는 분 · 받는 분(이름 · 전화번호 · 주소 검색 · 상세주소) + 품목 수량 · 기타 품목 · 물품 가액 · 수거 희망 일시(선택) · 결제 방식 · 요청 사항
  * 주소는 직접 칠 수 없고 검색으로만 고름 (오타 주소로 수거 실패 방지). 접수되면 목록을 다시 받고 창을 닫음 */
-export function useOrderForm(onDone: () => void) {
+export function useOrderForm(onDone: () => void, order?: OrderDetail) {
   const qc = useQueryClient()
   const { me } = useSession()
-  const [parties, setParties] = useState<Record<Side, PartyDraft>>({
-    sender: EMPTY_PARTY,
-    receiver: EMPTY_PARTY,
-  })
-  const [counts, setCounts] = useState(NO_ITEMS)
-  const [etcItem, setEtcItem] = useState('')
-  const [declaredValue, setDeclaredValue] = useState('') // 숫자만
-  const [pickupAt, setPickupAt] = useState('') // datetime-local 값
-  const [payment, setPayment] = useState<PaymentMethod>('MONTHLY') // 와이어프레임 기본 = 월정산
-  const [request, setRequest] = useState('')
+  // 수정이면 처음 한 번 그 주문 값으로 채움 (창이 열려 있는 동안 서버 값이 바뀌어도 입력 중인 칸은 그대로)
+  const [parties, setParties] = useState<Record<Side, PartyDraft>>(() =>
+    order
+      ? { sender: draftOf(order.sender), receiver: draftOf(order.receiver) }
+      : { sender: EMPTY_PARTY, receiver: EMPTY_PARTY },
+  )
+  const [counts, setCounts] = useState<Record<BoxKey, number>>(() =>
+    order
+      ? (Object.fromEntries(BOX_TYPES.map((b) => [b.key, order.items[b.key]])) as Record<
+          BoxKey,
+          number
+        >)
+      : NO_ITEMS,
+  )
+  const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
+  const [declaredValue, setDeclaredValue] = useState(order?.itemPrice?.toString() ?? '') // 숫자만
+  const initialPickup = order?.pickupRequestedAt
+    ? toDateTimeLocal(new Date(order.pickupRequestedAt))
+    : ''
+  const [pickupAt, setPickupAt] = useState(initialPickup) // datetime-local 값
+  const [payment, setPayment] = useState<PaymentMethod>(order?.paymentMethod ?? 'MONTHLY') // 와이어프레임 기본 = 월정산
+  const [request, setRequest] = useState(order?.clientComment ?? '')
   const [searching, setSearching] = useState<Side | null>(null) // 주소 검색 창이 열린 쪽
 
   const now = toDateTimeLocal(new Date())
-  const pickupPast = pickupAt !== '' && pickupAt <= now // 같은 형식 문자열이라 비교 가능
+  // 같은 형식 문자열이라 비교 가능. 수정에서 원래 값을 안 건드렸으면 지났어도 통과 (이미 지난 주문의 다른 칸만 고칠 때)
+  const pickupPast = pickupAt !== '' && pickupAt !== initialPickup && pickupAt <= now
   const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
   const partyOk = (p: PartyDraft) =>
     p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
@@ -76,9 +98,10 @@ export function useOrderForm(onDone: () => void) {
   const mutation = useMutation({
     mutationFn: () => {
       const body = input()
+      if (order) return saveOrder(order.orderSeq, body)
       const json = JSON.stringify(body)
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      return createOrder(body, sent.current.key, me?.loginId ?? '')
+      return createOrder(body, sent.current.key, me?.loginId ?? '').then(() => undefined)
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: orderQueries.all() })
@@ -104,6 +127,7 @@ export function useOrderForm(onDone: () => void) {
   }
 
   return {
+    isEdit: order !== undefined,
     sender: party('sender'),
     receiver: party('receiver'),
 
