@@ -35,7 +35,12 @@ export class AuthService {
       // Password changes use the same lock, so old-password logins cannot survive a reset.
       const account = await this.admins.findForLogin(input.loginId, client);
       const valid = await verifyPassword(input.password, account?.passwordHash);
-      if (!account || !valid || account.status !== 'ACTIVE') throw unauthorized();
+      if (!account || !valid) throw unauthorized();
+      if (account.status === 'INACTIVE')
+        throw new ApiException(403, 'ACCOUNT_INACTIVE', '비활성화된 계정입니다.');
+      if (account.status === 'PENDING')
+        throw new ApiException(403, 'ACCOUNT_PENDING', '승인 대기중입니다.');
+      if (account.status !== 'ACTIVE') throw unauthorized();
       const token = randomBytes(32).toString('hex');
       if (previousToken) await this.repository.remove(tokenHash(previousToken), client);
       await this.repository.removeExpired(account.adminUserSeq, client);
@@ -101,6 +106,7 @@ export class AuthService {
       await this.admins.serializeAccessChanges(client);
       const { actor, target } = await this.lockAuthorized(token, id, true, client);
       await this.admins.updateAccess(target, input, client);
+      if (input.status === 'INACTIVE') await this.repository.removeAll(id, client);
       await this.audit.record(actor.adminUserSeq, id, 'ADMIN_ACCESS_CHANGED', requestId, client);
     });
   }

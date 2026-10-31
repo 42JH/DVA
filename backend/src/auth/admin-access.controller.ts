@@ -49,7 +49,8 @@ function adminId(value: string): number {
 @ApiResponse({ status: 401, description: '로그인 세션이 없거나 만료됨.', type: ErrorResponseDto })
 @ApiResponse({
   status: 403,
-  description: 'SYSTEM_ADMIN 권한 없음, 최상위 관리자 권한 변경·삭제 시도, 허용되지 않은 Origin.',
+  description:
+    'SYSTEM_ADMIN 권한 없음, 최상위 관리자 권한·활성 상태 변경·삭제 시도, 허용되지 않은 Origin.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 404, description: '대상 관리자가 없음.', type: ErrorResponseDto })
@@ -98,16 +99,16 @@ export class AdminAccessController {
   @Patch(':id')
   @HttpCode(204)
   @ApiOperation({
-    summary: '관리자 권한 변경·가입 승인',
+    summary: '관리자 권한·활성 상태 변경·가입 승인',
     description:
-      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR의 권한 변경 또는 PENDING 계정의 ACTIVE 승인을 처리합니다. SYSTEM_ADMIN의 권한은 변경할 수 없습니다.',
+      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR의 권한 변경·ACTIVE ↔ INACTIVE 전환 또는 PENDING → ACTIVE 승인을 처리합니다. 비활성화 시 대상의 모든 세션을 종료하며 재활성화해도 이전 세션은 복구하지 않습니다. SYSTEM_ADMIN의 권한·활성 상태 전환은 금지합니다.',
   })
   @ApiParam({
     name: 'id',
     description: '대상 관리자 번호(adminUserSeq).',
     schema: { type: 'integer', minimum: 1 },
   })
-  @ApiNoContentResponse({ description: '권한 변경 또는 가입 승인 완료.' })
+  @ApiNoContentResponse({ description: '권한·활성 상태 변경 또는 가입 승인 완료.' })
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }

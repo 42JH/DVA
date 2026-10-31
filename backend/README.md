@@ -371,7 +371,7 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | POST /api/auth/logout | 204, 현재 세션 삭제. 없는 세션도 204 |
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
 | GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext, total_count }` |
-| PATCH /api/admins/:id | SYSTEM_ADMIN, role/status 변경, 204 |
+| PATCH /api/admins/:id | SYSTEM_ADMIN, role 변경·PENDING → ACTIVE 승인·ACTIVE ↔ INACTIVE 전환, 204 |
 | PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
@@ -383,6 +383,11 @@ HTTP 요청 본문 크기 제한은 유지한다. 로그인·가입·비밀번�
 따라서 반복 로그인 추측과 자원 고갈 위험이 남으며 운영 확장 전에 별도 정책을 정해야 한다.
 
 세션 토큰은 32바이트 암호학적 난수이고 쿠키로만 전달한다. DB에는 SHA-256 해시만 저장한다.
+로그인 아이디·비밀번호가 맞을 때 INACTIVE는 `403 ACCOUNT_INACTIVE` / `비활성화된 계정입니다.`,
+PENDING은 `403 ACCOUNT_PENDING` / `승인 대기중입니다.`를 반환하며 세션을 발급하지 않는다.
+아이디가 없거나 비밀번호가 틀리면 상태와 관계없이 기존 `401 UNAUTHORIZED`를 반환한다.
+프론트는 로그인 실패의 `error.code`로 안내 화면을 선택하거나 `error.message`를 표시한다.
+비활성·승인 대기 계정은 로그인 성공 후 `/auth/me`로 상태를 조회하는 방식으로 처리할 수 없다.
 비밀번호는 Node 내장 scrypt(N=32768,r=8,p=3)와 무작위 salt로 저장한다.
 [OWASP scrypt 기준](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html#scrypt)을 따른다.
 최초 세션 생성부터 9시간 고정 만료이며 조회로 연장하지 않는다. 재로그인 시 제출된 기존 세션을 교체한다.
@@ -419,13 +424,18 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
 전용 `/admins/:id/role`은 `role`만 필수로 받으며 계정 상태를 변경하지 않는다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
+기존 PATCH /api/admins/:id의 status로 OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE를 전환한다.
+SYSTEM_ADMIN 본인·타인의 ACTIVE ↔ INACTIVE 전환은 403이며 기존 권한 변경·삭제 보호도 유지한다.
+PENDING → ACTIVE 가입 승인은 유지하고 같은 상태 지정·PENDING → INACTIVE·PENDING으로 되돌리기는 409다.
+비활성화는 계정 상태 변경·대상의 모든 세션 삭제·성공 감사 기록을 동일 트랜잭션에서 처리한다.
+재활성화해도 이전 세션은 복구하지 않으므로 다시 로그인해야 한다. 이미 인증한 실행 중 요청은 소급 취소하지 않는다.
 
 DELETE /api/admins/:id는 SYSTEM_ADMIN만 사용하며 OPERATOR·SUPERVISOR를 상태와 관계없이 실제 삭제한다.
 SYSTEM_ADMIN은 본인·타인 모두 삭제할 수 없다. 성공 응답은 본문 없는 204이며 없는 계정은 404다.
 계정과 모든 세션을 삭제하고 목록·로그인에서 제외한다. 이미 인증한 요청은 소급 취소하지 않지만 후속 인증은 실패한다.
 업무 기록의 관리자 번호는 논리 참조로 보존하며 감사 로그의 actorName·targetAdminName으로 당시 이름을 확인한다.
 삭제 성공 감사와 계정 삭제는 같은 트랜잭션이다. 로그인·권한 변경과 겹쳐도 계정 잠금 뒤 재검증한다.
-INACTIVE는 로그인할 수 없으며 목록 필터·권한 변경·삭제 대상으로 지원한다. 비활성 전환 API는 이번 범위에 추가하지 않는다.
+INACTIVE는 로그인할 수 없으며 목록 필터·권한 변경·재활성화·삭제 대상으로 지원한다. 별도 상태 전환 API는 추가하지 않는다.
 삭제된 loginId는 재가입에 사용할 수 있지만 adminUserSeq는 새 번호를 사용하므로 이전 기록과 연결되지 않는다.
 감사 기록 범위와 AI 구분은 [감사 로그 계약](../docs/api/audit-logs.md)을 참고한다.
 

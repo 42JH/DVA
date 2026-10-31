@@ -29,7 +29,8 @@ export class UpdateAdminDto {
   @IsIn(ASSIGNABLE_ADMIN_ROLES)
   role?: AssignableAdminRole;
   @ApiPropertyOptional({
-    description: '가입 승인 시 ACTIVE 지정. PENDING → ACTIVE만 가능합니다.',
+    description:
+      'PENDING → ACTIVE 가입 승인, OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE 전환. 같은 상태나 PENDING으로의 변경은 불가합니다.',
     enum: ADMIN_STATUSES,
   })
   @ValidateIf((_object, value) => value !== undefined)

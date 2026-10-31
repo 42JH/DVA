@@ -41,12 +41,18 @@ export class AuthController {
   @ApiOperation({
     summary: '로그인',
     description:
-      'ACTIVE 관리자만 로그인할 수 있습니다. 세션 쿠키는 로그인 후 9시간 동안 유효합니다.',
+      'ACTIVE 관리자만 로그인할 수 있습니다. 올바른 비밀번호를 입력한 INACTIVE·PENDING 계정은 각각 403 ACCOUNT_INACTIVE·ACCOUNT_PENDING을 반환하며 세션을 발급하지 않습니다. 세션 쿠키는 로그인 후 9시간 동안 유효합니다.',
     security: [],
   })
   @AuditOperation({ action: 'ADMIN_LOGIN', targetType: 'ADMIN_USER', target: 'none' })
   @Post('login')
   @HttpCode(200)
+  @ApiResponse({
+    status: 403,
+    description:
+      'ACCOUNT_INACTIVE: 비활성화된 계정입니다. ACCOUNT_PENDING: 승인 대기중입니다. FORBIDDEN: 허용되지 않은 Origin.',
+    type: ErrorResponseDto,
+  })
   @ApiOkResponse({
     description: '로그인 성공. 세션 쿠키 발급 및 만료 시각 반환.',
     type: LoginEnvelopeDto,
