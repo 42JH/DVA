@@ -51,6 +51,7 @@ services:
       AI_AGENT_URL: http://ai:8000
       AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
       AI_FAQ_TOKEN: ${AI_FAQ_TOKEN:-}
+      AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
       DVER_API_URL: ${DVER_API_URL:-https://public-n8n.dvercorp.co.kr:47514/webhook/parcel}
       DVER_API_KEY: ${DVER_API_KEY:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}

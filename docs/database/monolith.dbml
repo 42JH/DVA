@@ -1,10 +1,10 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-30 / backend/migrations/001~023 기준. public 업무·관리자 24개 + PBX 수신 1개 = ERD 25개, FK 20개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-31 / backend/migrations/001~024 기준. public 업무·관리자 25개 + PBX 수신 1개 = ERD 26개, FK 22개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
-// 022까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 024까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
 // 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
 // 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
 
@@ -280,6 +280,28 @@ Table call_sessions {
   }
   Note: 'consultation / 고객 확인 시 provider_call_id로 통화를 생성·재사용하고 call_session_seq를 AI에 반환한다. AI 결과는 같은 통화에 주문을 연결한다. PBX는 발신번호와 incoming_at 허용 구간 내 유일 후보에만 연결한다. 상담 조회는 연결 주문의 상태·총액을 함께 반환하며 별도 결제 상태 컬럼은 만들지 않는다. / SQL 인덱스: calls_order_idx, calls_retention_idx, call_sessions_caller_incoming_idx.'
 }
+
+Table call_analyses {
+  call_session_seq integer [pk, not null, note: '통화당 최종 분석 한 건']
+  ai_persona_version_seq integer [note: '실제 사용한 설정 이력. 미확인은 NULL']
+  ai_started_at timestamptz [not null, note: 'AI 측정 시작. PBX 원본은 별도 보존']
+  ai_ended_at timestamptz [not null, note: 'AI 측정 종료']
+  result text [not null, note: 'REGISTERED / REGISTRATION_FAILED / HANDOFF / CANCELLED / INQUIRY']
+  repeat_question_count integer [note: '되묻기 횟수. 미측정은 NULL']
+  has_complaint boolean [note: '미판정은 NULL, 확인한 불만 없음은 false']
+  complaints jsonb [not null, note: '유형·근거·위치·발화 순번. 최대 20개']
+  payload_hash text [not null, note: '정규화 요청 SHA-256. 동일 통화 재전송 판별']
+  analysed_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  checks {
+    `ai_ended_at>=ai_started_at`
+    `repeat_question_count>=0`
+    `result IN ('REGISTERED','REGISTRATION_FAILED','HANDOFF','CANCELLED','INQUIRY')`
+  }
+  Note: 'call-insights / ANL-01 분석 저장. 원문 발화는 call_utterances를 재사용한다. 불만 배열·해시 제약은 024 SQL을 따른다.'
+}
+
+Ref: call_sessions.call_session_seq - call_analyses.call_session_seq
+Ref: ai_persona_versions.ai_persona_version_seq < call_analyses.ai_persona_version_seq
 
 Table pbx_webhooks.call_ended_events {
   recording_id varchar(200) [pk, not null, note: 'PBX 녹취 고유 ID. 같은 ID와 같은 본문의 재전송은 한 번만 수신']

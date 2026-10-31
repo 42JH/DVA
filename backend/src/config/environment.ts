@@ -10,6 +10,7 @@ export interface Environment extends PaymentEnvironment {
   AI_AGENT_URL: string;
   AI_PERSONA_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
+  AI_INSIGHTS_TOKEN?: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   PBX_WEBHOOK_TOKEN?: string;
@@ -87,6 +88,15 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   const token = raw.PBX_WEBHOOK_TOKEN;
   const personaToken = raw.AI_PERSONA_TOKEN;
   const faqToken = raw.AI_FAQ_TOKEN;
+  const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  if (
+    insightsToken !== undefined &&
+    insightsToken !== '' &&
+    (typeof insightsToken !== 'string' ||
+      insightsToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(insightsToken))
+  )
+    errors.push('AI_INSIGHTS_TOKEN');
   if (
     faqToken !== undefined &&
     faqToken !== '' &&
@@ -147,6 +157,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     AI_AGENT_URL: aiUrl.replace(/\/$/, ''),
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
+    AI_INSIGHTS_TOKEN:
+      typeof insightsToken === 'string' && insightsToken ? insightsToken : undefined,
     CORS_ORIGINS: [...new Set(origins)],
     SWAGGER_ENABLED: swagger === 'true',
     PBX_WEBHOOK_TOKEN: typeof token === 'string' && token ? token : undefined,

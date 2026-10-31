@@ -14,6 +14,7 @@ import { AiSettingsModule } from './ai-settings/ai-settings.module';
 import { FaqsModule } from './faqs/faqs.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { PaymentsModule } from './payments/payments.module';
+import { CallInsightsModule } from './call-insights/call-insights.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { PaymentsModule } from './payments/payments.module';
     MembersModule,
     PinsModule,
     ConsultationsModule,
+    CallInsightsModule,
     AiSettingsModule,
     FaqsModule,
   ],
