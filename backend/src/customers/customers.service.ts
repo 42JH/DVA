@@ -8,6 +8,7 @@ import { CustomersRepository } from './customers.repository';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
 import { CallSessionRepository } from '../consultations/call-session.repository';
 import { callerPhone } from '../common/caller-phone';
+import { EmployeeCustomerIdentity } from './customers.types';
 import {
   CreateCustomerDto,
   ListCustomersQueryDto,
@@ -22,6 +23,20 @@ export class CustomersService {
     private readonly audit: AuditService,
     private readonly calls: CallSessionRepository,
   ) {}
+
+  // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
+  async importEmployeeIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]) {
+    await this.repository.updateIdentities(
+      client,
+      rows.filter((row) => row.customerSeq !== undefined),
+    );
+    const inserted = await this.repository.insertIdentities(
+      client,
+      rows.filter((row) => row.customerSeq === undefined),
+    );
+    const byPhone = new Map(inserted.map((row) => [row.phoneNumber, row.customerSeq]));
+    return rows.map((row) => row.customerSeq ?? byPhone.get(row.phoneNumber)!);
+  }
 
   async context(input: CallerContextRequestDto, actorId: number | null, requestId: string) {
     try {

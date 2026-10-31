@@ -12,6 +12,7 @@ import {
   UpdateMemberDto,
 } from './dto/member-request.dto';
 import { MemberCandidate } from './members.types';
+import { CustomersService } from '../customers/customers.service';
 
 @Injectable()
 export class MembersService {
@@ -19,6 +20,7 @@ export class MembersService {
     private readonly repository: MembersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly customers: CustomersService,
   ) {}
 
   private async company(id: number, client?: PoolClient, active = false) {
@@ -121,19 +123,19 @@ export class MembersService {
       );
       const candidates = await this.repository.candidates(companyId, rows, client);
       await this.company(companyId, client, true);
-      for (const departmentId of [
+      const departmentIds = [
         ...new Set(
           items
             .map((row) => row.departmentSeq)
             .filter((id): id is number => id !== undefined && id !== null),
         ),
-      ].sort((a, b) => a - b))
-        if (!(await this.repository.department(companyId, departmentId, client)))
-          throw new ApiException(
-            422,
-            'VALIDATION_FAILED',
-            '지정한 부서는 해당 기업에 속해야 합니다.',
-          );
+      ].sort((a, b) => a - b);
+      if (!(await this.repository.lockDepartments(companyId, departmentIds, client)))
+        throw new ApiException(
+          422,
+          'VALIDATION_FAILED',
+          '지정한 부서는 해당 기업에 속해야 합니다.',
+        );
       const byPhone = new Map(candidates.map((row) => [row.phoneNumber, row]));
       const byEmployee = new Map(
         candidates
@@ -177,27 +179,24 @@ export class MembersService {
         const id = await this.repository.create(companyId, input, client);
         await this.record('MEMBERSHIP_CREATED', 'MEMBERSHIP', id, adminId, requestId, client);
       }
-      for (const [index, row] of rows.entries()) {
-        const existing = plans[index];
-        const customerSeq = await this.repository.saveCustomer(row, existing, client);
-        if (!existing?.membershipSeq)
-          await this.repository.create(
-            companyId,
-            {
-              customerSeq,
-              employeeNo: row.employeeNo,
-              role: 'MEMBER',
-              departmentSeq: row.departmentSeq,
-            },
-            client,
-          );
-        else
-          await this.repository.update(
-            existing.membershipSeq,
-            { departmentSeq: row.departmentSeq },
-            client,
-          );
-      }
+      const customerIds = await this.customers.importEmployeeIdentities(
+        client,
+        rows.map((row, index) => ({
+          customerSeq: plans[index]?.customerSeq,
+          name: row.name,
+          phoneNumber: row.phoneNumber,
+        })),
+      );
+      await this.repository.importRows(
+        companyId,
+        rows.map((row, index) => ({
+          membershipSeq: plans[index]?.membershipSeq ?? null,
+          customerSeq: customerIds[index],
+          employeeNo: row.employeeNo,
+          departmentSeq: row.departmentSeq,
+        })),
+        client,
+      );
       if (rows.length)
         await this.record(
           'MEMBERS_IMPORTED',

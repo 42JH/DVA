@@ -2,6 +2,12 @@ export const MEMBER_ROLES = ['MEMBER', 'ORG_ADMIN'] as const;
 export const MEMBER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 export type MemberStatus = (typeof MEMBER_STATUSES)[number];
+export interface ImportedMembership {
+  membershipSeq: number | null;
+  customerSeq: number;
+  employeeNo: string;
+  departmentSeq?: number | null;
+}
 export interface Membership {
   departmentSeq: number | null;
   membershipSeq: number;

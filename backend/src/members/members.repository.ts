@@ -9,7 +9,7 @@ import {
   ListMembersQueryDto,
   UpdateMemberDto,
 } from './dto/member-request.dto';
-import { MemberCandidate, Membership } from './members.types';
+import { ImportedMembership, MemberCandidate, Membership } from './members.types';
 import { MemberViewDto } from './dto/member-response.dto';
 
 const memberColumns =
@@ -98,6 +98,15 @@ export class MembersRepository {
     );
   }
 
+  async lockDepartments(companyId: number, ids: number[], client: PoolClient): Promise<boolean> {
+    if (!ids.length) return true;
+    const result = await client.query(
+      'SELECT department_seq FROM departments WHERE organization_seq=$1 AND department_seq=ANY($2::int[]) ORDER BY department_seq FOR SHARE',
+      [companyId, ids],
+    );
+    return result.rowCount === ids.length;
+  }
+
   async lockWrites(client: PoolClient): Promise<void> {
     // 고객을 잠그기 전에 소속 변경을 직렬화해 조회한 소속의 고객 연결을 유지한다.
     await client.query('SELECT pg_advisory_xact_lock(20261027,37)');
@@ -125,24 +134,30 @@ export class MembersRepository {
     );
   }
 
-  async saveCustomer(
-    row: InlineMemberDto,
-    existing: MemberCandidate | undefined,
+  async importRows(
+    companyId: number,
+    rows: ImportedMembership[],
     client: PoolClient,
-  ): Promise<number> {
-    if (existing) {
-      if (existing.name !== row.name || existing.phoneNumber !== row.phoneNumber)
-        await client.query('UPDATE customers SET name=$2,phone_number=$3 WHERE customer_seq=$1', [
-          existing.customerSeq,
-          row.name,
-          row.phoneNumber,
-        ]);
-      return existing.customerSeq;
-    }
-    const result = await client.query<{ id: number }>(
-      "INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE') RETURNING customer_seq AS id",
-      [row.name, row.phoneNumber],
-    );
-    return result.rows[0].id;
+  ): Promise<void> {
+    const added = rows.filter((row) => row.membershipSeq === null);
+    if (added.length)
+      await client.query(
+        `INSERT INTO memberships(organization_seq,customer_seq,employee_no,role,status,department_seq)
+         SELECT $1,r."customerSeq",r."employeeNo",'MEMBER','ACTIVE',r."departmentSeq"
+         FROM jsonb_to_recordset($2::jsonb) AS r("customerSeq" int,"employeeNo" text,"departmentSeq" int)`,
+        [companyId, JSON.stringify(added)],
+      );
+    const updated = rows.filter((row) => row.membershipSeq !== null);
+    if (updated.length)
+      await client.query(
+        `UPDATE memberships m SET department_seq=CASE WHEN r."changeDepartment" THEN r."departmentSeq" ELSE m.department_seq END
+         FROM jsonb_to_recordset($1::jsonb) AS r("membershipSeq" int,"departmentSeq" int,"changeDepartment" boolean)
+         WHERE m.membership_seq=r."membershipSeq"`,
+        [
+          JSON.stringify(
+            updated.map((row) => ({ ...row, changeDepartment: row.departmentSeq !== undefined })),
+          ),
+        ],
+      );
   }
 }
