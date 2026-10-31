@@ -9,12 +9,13 @@ import {
   type Column,
 } from '@/shared/ui'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
+import { OrderFormModal } from './OrderFormModal'
 import { OrderPartyCell } from './OrderPartyCell'
 
 // 03 주문 내역 (와이어프레임 03_주문내역, 10/31)
 // 1줄 검색(이름 · 전화번호 · 주소) + 날짜 칸 + [CSV 내보내기] [CSV로 추가] [주문 추가] → 2줄 상태 칩 → 카드 '주문 목록 n건'
 // 줄 = 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
-// shortcut: 주문 상세(줄 클릭) · 주문 추가 · CSV로 추가는 다음 작업 — 지금은 버튼만 자리를 잡고 비활성
+// shortcut: 주문 상세(줄 클릭) · CSV로 추가는 다음 작업 — 지금은 [CSV로 추가] 자리만 잡고 비활성
 export function OrderListPage() {
   const vm = useOrderList()
 
@@ -88,7 +89,7 @@ export function OrderListPage() {
         <Button tall disabled>
           CSV로 추가
         </Button>
-        <Button tall kind="primary" disabled>
+        <Button tall kind="primary" onClick={vm.openAdd}>
           주문 추가
         </Button>
       </div>
@@ -111,6 +112,8 @@ export function OrderListPage() {
         empty={vm.listError ?? (vm.q ? '해당하는 주문이 없습니다.' : '주문 내역이 없습니다.')}
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
+
+      {vm.adding && <OrderFormModal onClose={vm.closeAdd} />}
     </div>
   )
 }

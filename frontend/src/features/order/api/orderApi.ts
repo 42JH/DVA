@@ -21,7 +21,26 @@ export interface OrderRow {
   sender: OrderParty
   receiver: OrderParty
   pickupAt: string | null // 수거 희망 일시. 접수 중이면 아직 없음
-  items: { box: string; count: number }[] // 접수 중이면 빈 배열
+  items: { box: BoxType; count: number }[] // 접수 중이면 빈 배열
+}
+
+/** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기'). 그 밖은 '기타 품목' 글로 */
+export const BOX_TYPES = ['서류', '소박스', '중박스', '대박스'] as const
+export type BoxType = (typeof BOX_TYPES)[number]
+
+/** 결제 방식 — 06 주문 상세와 같은 코드 (credit = 월정산 · groupBilling = 그룹카드 · billing = 개인카드) */
+export type PaymentMethod = 'credit' | 'groupBilling' | 'billing'
+
+/** 주문 추가(수기 접수) 본문 */
+export interface OrderInput {
+  sender: { name: string; phone: string; roadAddress: string; detailAddress: string }
+  receiver: { name: string; phone: string; roadAddress: string; detailAddress: string }
+  items: { box: BoxType; count: number }[] // 0개인 품목은 뺌
+  etcItem: string // 기타 품목 (선택)
+  declaredValue: number | null // 물품 가액 원 (선택)
+  pickupAt: string // ISO 8601
+  paymentMethod: PaymentMethod
+  request: string // 고객 요청 사항 (선택)
 }
 
 export interface OrderListQuery {
@@ -38,6 +57,13 @@ export const orderQueries = {
       queryKey: [...orderQueries.all(), 'list', query, page, size],
       queryFn: () => fetchOrders(query, page, size),
       placeholderData: keepPreviousData, // 쪽 · 필터를 바꾸는 동안 이전 목록을 그대로 (표가 깜빡이지 않게)
+    }),
+  address: (q: string) =>
+    queryOptions({
+      queryKey: [...orderQueries.all(), 'address', q],
+      queryFn: () => searchAddress(q),
+      enabled: q.trim().length >= 2, // 한 글자는 결과가 너무 많음
+      staleTime: Infinity, // 주소는 안 바뀜
     }),
 }
 
@@ -76,6 +102,30 @@ export async function fetchOrders(
 export async function fetchAllOrders(query: OrderListQuery): Promise<OrderRow[]> {
   await wait()
   return filtered(query)
+}
+
+/** 주문 추가(수기 접수) — 접수되면 결제 대기. 멱등키: 같은 본문을 다시 보낼 땐 같은 키 (명세서 1.2)
+ * shortcut: 가짜는 키를 확인하지 않음 — BE가 오면 같은 키 + 같은 본문이면 새로 만들지 않음 */
+export async function createOrder(input: OrderInput, idempotencyKey: string): Promise<void> {
+  void idempotencyKey
+  await wait()
+  const full = (p: OrderInput['sender']) =>
+    party(p.name, p.phone, [p.roadAddress, p.detailAddress].filter(Boolean).join(' '))
+  ROWS.push({
+    orderSeq: Math.max(...ROWS.map((o) => o.orderSeq)) + 1,
+    status: 'PAYMENT_PENDING',
+    receivedAt: new Date().toISOString(),
+    sender: full(input.sender),
+    receiver: full(input.receiver),
+    pickupAt: input.pickupAt,
+    items: input.items,
+  })
+}
+
+/** 도로명 주소 검색 — shortcut: 가짜 목록에서 찾음. 실제는 BE 주소 검색(AI가 통화 중 쓰는 것과 같은 API)으로 바꿀 것 */
+export async function searchAddress(q: string): Promise<string[]> {
+  await wait()
+  return ADDRESS_BOOK.filter((a) => matchKo(a, q)).slice(0, 10)
 }
 
 // ---------- 가짜 데이터: 오늘 104건 + 지난 6일 ----------
@@ -184,7 +234,6 @@ const ADDRS = [
   '광주 서구 상무중앙로 70',
   '경기 안양시 평촌대로 120',
 ]
-const BOXES = ['서류', '소박스', '중박스', '대박스']
 const STATUS_CYCLE: OrderStatus[] = [
   'PAID',
   'PAID',
@@ -217,7 +266,7 @@ function makeDay(day: Ymd, count: number, startSeq: number, endMinute: number): 
         ADDRS[(n + 3) % ADDRS.length],
       ),
       pickupAt: at(addDays(day, 1), `${pad(9 + (n % 8))}:00`),
-      items: [{ box: BOXES[n % BOXES.length], count: 1 + (n % 3) }],
+      items: [{ box: BOX_TYPES[n % BOX_TYPES.length], count: 1 + (n % 3) }],
     }
   })
 }
@@ -228,4 +277,26 @@ const ROWS: OrderRow[] = [
   ...[1, 2, 3, 4, 5, 6].flatMap((d) =>
     makeDay(addDays(today, -d), 60 + d * 3, 9000 + d * 100, 18 * 60),
   ),
+]
+
+// 주소 검색 가짜 = 위 주문들에 나오는 도로명 + 몇 개 더
+const ADDRESS_BOOK = [
+  ...new Set([
+    ...ADDRS,
+    '서울 강남구 역삼로 150',
+    '서울 마포구 독막로 301',
+    '경기 성남시 판교역로 166',
+    '서울 송파구 올림픽로 300',
+    '서울 서초구 반포대로 58',
+    '서울 동작구 상도로 55',
+    '부산 해운대구 센텀중앙로 79',
+    '서울 중구 을지로 100',
+    '대전 서구 둔산로 100',
+    '경기 고양시 중앙로 1275',
+    '경기 수원시 광교로 107',
+    '경기 용인시 포은대로 435',
+    '서울 강남구 테헤란로 152',
+    '서울 강남구 역삼로 160',
+    '서울 마포구 독막로 311',
+  ]),
 ]

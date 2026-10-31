@@ -396,15 +396,27 @@ export function ChipGroup<V extends string>({
   options,
   value,
   onChange,
+  compact,
 }: {
   name: string
   options: Option<V>[]
   value: V
   onChange: (v: V) => void
+  compact?: boolean // 폼 창 안 (03 주문 추가 결제 방식): 칸 44 · 라벨 왼쪽 120 — TextField inline과 줄이 맞게
 }) {
   return (
-    <div className="flex items-center gap-2" role="radiogroup" aria-label={name}>
-      <span className="mr-2 text-body text-sub">{name}</span>
+    <div
+      className={`flex items-center ${compact ? 'gap-1.5' : 'gap-2'}`}
+      role="radiogroup"
+      aria-label={name}
+    >
+      <span
+        className={
+          compact ? 'mr-4 w-[120px] shrink-0 text-label text-sub' : 'mr-2 text-body text-sub'
+        }
+      >
+        {name}
+      </span>
       {options.map((o) => {
         const on = o.value === value
         return (
@@ -414,7 +426,7 @@ export function ChipGroup<V extends string>({
             role="radio"
             aria-checked={on}
             onClick={() => onChange(o.value)}
-            className={`h-12 rounded-lg px-5 text-body ${
+            className={`${compact ? 'h-11 px-3.5' : 'h-12 px-5'} rounded-lg text-body ${
               on
                 ? `${LINE_ON} bg-action-soft font-semibold text-action`
                 : `${LINE} bg-surface text-ink`

@@ -55,6 +55,7 @@ const itemsText = (o: OrderRow) =>
 export function useOrderList() {
   const { params, page, set } = useListParams(DEFAULTS)
   const [exporting, setExporting] = useState(false)
+  const [adding, setAdding] = useState(false) // 주문 추가 창
 
   const today = todayYmd()
   const range = params.from ? { from: params.from, to: params.to || params.from } : null
@@ -143,5 +144,9 @@ export function useOrderList() {
     exportCsv,
     exporting,
     canExport: total > 0,
+
+    adding,
+    openAdd: () => setAdding(true),
+    closeAdd: () => setAdding(false),
   }
 }
