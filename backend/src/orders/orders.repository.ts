@@ -334,8 +334,9 @@ export class OrdersRepository {
         status: OrderStatus;
         version: number;
         totalAmount: number | null;
+        paymentMethodType: string;
       }>(
-        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount" FROM orders WHERE order_seq=$1 FOR UPDATE',
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 FOR UPDATE',
         [id],
       )
     ).rows[0];

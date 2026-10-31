@@ -1735,8 +1735,9 @@ test('ORD-04 rolls back header, details, call binding and success audit on stora
   assert.equal((await patchOrder(id, input, aiReadHeaders(callId))).status, 200);
 });
 
-test('ORD-04 rejects every non-COLLECTING state without changing orders or shipments', async () => {
-  const { customer } = await readCustomer();
+test('ORD-04 AI rejects every non-COLLECTING state without changing orders or shipments', async () => {
+  const { customer, phone } = await readCustomer();
+  const callId = await call(phone);
   for (const status of [
     'notPaid',
     'PAID',
@@ -1763,15 +1764,19 @@ test('ORD-04 rejects every non-COLLECTING state without changing orders or shipm
       );
     const snapshot = await storedOrder(id);
     await errorCode(
-      await patchOrder(id, {
-        expectedVersion: snapshot.version,
-        parcels: [
-          {
-            orderParcelSeq: snapshot.parcels[0].orderParcelSeq,
-            destination: { name: '변경 시도' },
-          },
-        ],
-      }),
+      await patchOrder(
+        id,
+        {
+          expectedVersion: snapshot.version,
+          parcels: [
+            {
+              orderParcelSeq: snapshot.parcels[0].orderParcelSeq,
+              destination: { name: '변경 시도' },
+            },
+          ],
+        },
+        aiReadHeaders(callId),
+      ),
       409,
       'INVALID_STATE',
     );
@@ -2018,7 +2023,7 @@ test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields
   const schema = operation.responses[200].content['application/json'].schema;
   assert.deepEqual(schema.required, ['data', 'meta']);
   assert.equal(schema.properties.data.$ref, '#/components/schemas/UpdatedOrderDto');
-  assert.equal(Object.keys(operation.requestBody.content['application/json'].examples).length, 3);
+  assert.equal(Object.keys(operation.requestBody.content['application/json'].examples).length, 4);
 });
 
 test('order APIs use the literal DB column header and reject former or hyphenated names', async () => {
@@ -2332,11 +2337,12 @@ const submissionRows = async (id) =>
     )
   ).rows[0];
 
-test('cancelled draft details cannot be edited or sent to Dver, and only remaining details get shipments', async () => {
+test('AI cannot edit cancelled draft details or sent to Dver, and only remaining details get shipments', async () => {
   resetDver();
   const order = await readyOrder({
     parcels: [{}, { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
   });
+  const callId = await call('01000000003');
   const before = (await (await readDetail(order.orderSeq)).json()).data;
   const [cancelled, active] = before.parcels;
   // A deleted/obsolete PIN on a cancelled snapshot must not block the remaining parcel.
@@ -2352,14 +2358,18 @@ test('cancelled draft details cannot be edited or sent to Dver, and only remaini
     ['CANCELLED', 'ACTIVE'],
   );
   await errorCode(
-    await patchOrder(order.orderSeq, {
-      expectedVersion: partial.version,
-      paymentMethodType: 'billing',
-      parcels: [
-        { orderParcelSeq: active.orderParcelSeq, clientComment: 'must roll back' },
-        { orderParcelSeq: cancelled.orderParcelSeq, clientComment: 'must reject' },
-      ],
-    }),
+    await patchOrder(
+      order.orderSeq,
+      {
+        expectedVersion: partial.version,
+        paymentMethodType: 'billing',
+        parcels: [
+          { orderParcelSeq: active.orderParcelSeq, clientComment: 'must roll back' },
+          { orderParcelSeq: cancelled.orderParcelSeq, clientComment: 'must reject' },
+        ],
+      },
+      aiReadHeaders(callId),
+    ),
     409,
     'INVALID_STATE',
   );
@@ -2782,10 +2792,11 @@ test('ORD-06 commits SUBMITTING and releases locks before HTTP; concurrent retri
     assert.equal((await retry.json()).data.status, 'SUBMITTING');
     assert.equal((await submitOrder(order, {}, 2)).status, 202);
     await errorCode(
-      await patchOrder(order.orderSeq, {
-        expectedVersion: order.version,
-        paymentMethodType: 'credit',
-      }),
+      await patchOrder(
+        order.orderSeq,
+        { expectedVersion: order.version, paymentMethodType: 'credit' },
+        aiReadHeaders(await call('01000000003')),
+      ),
       409,
       'INVALID_STATE',
     );
@@ -3769,4 +3780,333 @@ test('admin screen rejects AI access, invalid sessions and malformed query value
     Object.keys(document.components.schemas.AdminOrderListItemDto.properties).sort(),
     ['createdAt', 'orderSeq', 'parcels', 'pickupRequestedAt', 'status'],
   );
+});
+
+// Admin order edits: all states retain receipt/payment facts; fees follow active details.
+test('admins edit, append and remove details in all seven states and derive the total', async () => {
+  resetDver();
+  for (const [index, status] of [
+    'COLLECTING',
+    'notPaid',
+    'PAID',
+    'SUBMITTING',
+    'ACCEPTED',
+    'SUBMISSION_FAILED',
+    'CANCELLED',
+  ].entries()) {
+    const order = await readyOrder({
+      paymentMethodType: 'billing',
+      parcels: [
+        { origin: address, destination: address, documentCount: 1, notifiedPrice: 2500 },
+        { origin: address, destination: address, smallBoxCount: 1, notifiedPrice: 3500 },
+      ],
+    });
+    await pool.query(
+      "UPDATE orders SET status=$2,parcel_no=$3,dver_received_at=$4,paid_at=$5,payment_due_at=CASE WHEN $2='notPaid' THEN clock_timestamp()+interval '1 day' ELSE NULL END,created_at='2001-01-01T00:00:00Z' WHERE order_seq=$1",
+      [
+        order.orderSeq,
+        status,
+        status === 'ACCEPTED' ? 'ADM00030' : null,
+        status === 'ACCEPTED' ? '2026-10-30T00:00:00Z' : null,
+        ['COLLECTING', 'notPaid', 'CANCELLED'].includes(status) ? null : '2026-10-30T00:00:00Z',
+      ],
+    );
+    const before = await storedOrder(order.orderSeq);
+    const first = before.parcels[0],
+      removed = before.parcels[1];
+    const response = await patchOrder(
+      order.orderSeq,
+      {
+        expectedVersion: before.version,
+        parcels: [
+          {
+            orderParcelSeq: first.orderParcelSeq,
+            destination: { name: '관리자 수정' },
+            notifiedPrice: 3000,
+          },
+          { origin: address, destination: address, mediumBoxCount: 1, notifiedPrice: 4000 },
+        ],
+        removeParcelSeqs: [removed.orderParcelSeq],
+      },
+      {},
+      index % 3,
+    );
+    assert.equal(response.status, 200, status + ': ' + (await response.clone().text()));
+    const after = await storedOrder(order.orderSeq);
+    assert.equal(after.status, status);
+    assert.equal(after.paymentMethodType, before.paymentMethodType);
+    assert.equal(after.paidAt, before.paidAt);
+    assert.equal(after.parcelNo, before.parcelNo);
+    assert.equal(after.dverReceivedAt, before.dverReceivedAt);
+    assert.equal(after.parcels.length, 3);
+    assert.equal(after.parcels[0].destination.name, '관리자 수정');
+    assert.equal(after.parcels[1].status, 'CANCELLED');
+    assert.deepEqual({ ...after.parcels[1], status: removed.status }, removed);
+    assert.equal(after.totalAmount, status === 'CANCELLED' ? 0 : 7000);
+    assert.equal(after.parcels[2].status, status === 'CANCELLED' ? 'CANCELLED' : 'ACTIVE');
+    assert.equal((await response.json()).data.version, after.version);
+    assert.ok(after.version > before.version);
+    await errorCode(
+      await patchOrder(order.orderSeq, {
+        expectedVersion: before.version,
+        removeParcelSeqs: [removed.orderParcelSeq],
+      }),
+      409,
+      'VERSION_CONFLICT',
+    );
+  }
+  assert.equal(dverRequests.length, 0);
+});
+
+test('admin waiting-payment changes replace only changed amounts and keep the original expiry', async () => {
+  const order = await readyOrder({ paymentMethodType: 'billing' });
+  await pool.query(
+    "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '1 day' WHERE order_seq=$1",
+    [order.orderSeq],
+  );
+  const request = (
+    await pool.query(
+      'INSERT INTO order_payment_requests(order_seq,amount,expires_at) SELECT order_seq,total_amount,payment_due_at FROM orders WHERE order_seq=$1 RETURNING *',
+      [order.orderSeq],
+    )
+  ).rows[0];
+  let before = await storedOrder(order.orderSeq);
+  assert.equal(
+    (
+      await patchOrder(order.orderSeq, {
+        expectedVersion: before.version,
+        parcels: [
+          {
+            orderParcelSeq: before.parcels[0].orderParcelSeq,
+            destination: { name: '주소만 변경' },
+          },
+        ],
+      })
+    ).status,
+    200,
+  );
+  let after = await storedOrder(order.orderSeq);
+  assert.equal(after.paymentRequest.paymentRequestId, request.payment_request_id);
+  assert.equal(
+    (
+      await patchOrder(order.orderSeq, {
+        expectedVersion: after.version,
+        parcels: [{ orderParcelSeq: after.parcels[0].orderParcelSeq, notifiedPrice: 5000 }],
+      })
+    ).status,
+    200,
+  );
+  after = await storedOrder(order.orderSeq);
+  assert.equal(after.totalAmount, 5000);
+  assert.equal(after.paymentRequest.amount, 5000);
+  assert.notEqual(after.paymentRequest.paymentRequestId, request.payment_request_id);
+  assert.equal(Date.parse(after.paymentRequest.expiresAt), request.expires_at.getTime());
+  assert.ok(
+    (
+      await pool.query(
+        'SELECT invalidated_at FROM order_payment_requests WHERE payment_request_id=$1',
+        [request.payment_request_id],
+      )
+    ).rows[0].invalidated_at,
+  );
+  await pool.query(
+    'UPDATE order_payment_requests SET approval_started_at=clock_timestamp() WHERE payment_request_id=$1',
+    [after.paymentRequest.paymentRequestId],
+  );
+  before = await storedOrder(order.orderSeq);
+  await errorCode(
+    await patchOrder(order.orderSeq, {
+      expectedVersion: before.version,
+      removeParcelSeqs: [before.parcels[0].orderParcelSeq],
+    }),
+    409,
+    'REQUEST_IN_PROGRESS',
+  );
+  assert.deepEqual(await storedOrder(order.orderSeq), before);
+  await pool.query(
+    'UPDATE order_payment_requests SET approval_started_at=NULL WHERE payment_request_id=$1',
+    [after.paymentRequest.paymentRequestId],
+  );
+  assert.equal(
+    (
+      await patchOrder(order.orderSeq, {
+        expectedVersion: before.version,
+        removeParcelSeqs: [before.parcels[0].orderParcelSeq],
+      })
+    ).status,
+    200,
+  );
+  after = await storedOrder(order.orderSeq);
+  assert.equal(after.status, 'notPaid');
+  assert.equal(after.totalAmount, 0);
+  assert.equal(after.paymentRequest, null);
+});
+
+test('admin edits reject fee overflow, finalized missing fees and a mismatching caller total atomically', async () => {
+  const order = await readyOrder({ paymentMethodType: 'billing' });
+  await pool.query("UPDATE orders SET status='PAID' WHERE order_seq=$1", [order.orderSeq]);
+  const before = await storedOrder(order.orderSeq);
+  for (const change of [
+    { parcels: [{ orderParcelSeq: before.parcels[0].orderParcelSeq, notifiedPrice: null }] },
+    { parcels: [{ notifiedPrice: 2147483647 }] },
+    {
+      totalAmount: 4000,
+      parcels: [{ orderParcelSeq: before.parcels[0].orderParcelSeq, notifiedPrice: 5000 }],
+    },
+  ]) {
+    await errorCode(
+      await patchOrder(order.orderSeq, { expectedVersion: before.version, ...change }),
+      422,
+      'VALIDATION_FAILED',
+    );
+    assert.deepEqual(await storedOrder(order.orderSeq), before);
+  }
+  await errorCode(
+    await patchOrder(order.orderSeq, {
+      expectedVersion: before.version,
+      paymentMethodType: 'credit',
+    }),
+    409,
+    'INVALID_STATE',
+  );
+  assert.deepEqual(await storedOrder(order.orderSeq), before);
+});
+
+test('admin detail removals preserve same-order scope and rollback fees, details, requests and audit on failure', async () => {
+  const order = await readyOrder({ paymentMethodType: 'billing' }),
+    foreign = await storedOrder((await readyOrder()).orderSeq);
+  const before = await storedOrder(order.orderSeq);
+  for (const id of [foreign.parcels[0].orderParcelSeq, 2147483647]) {
+    await errorCode(
+      await patchOrder(order.orderSeq, {
+        expectedVersion: before.version,
+        parcels: [{ notifiedPrice: 7000 }],
+        removeParcelSeqs: [id],
+      }),
+      404,
+      'NOT_FOUND',
+    );
+    assert.deepEqual(await storedOrder(order.orderSeq), before);
+  }
+  const audit = apps[0].get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (...args) {
+    if (args[0].action === 'ORDER_UPDATED') throw Error('admin-edit-rollback');
+    return original.apply(this, args);
+  };
+  const audits = (
+    await pool.query(
+      "SELECT count(*)::int AS n FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 AND result='SUCCESS'",
+      [order.orderSeq],
+    )
+  ).rows[0].n;
+  try {
+    assert.equal(
+      (
+        await patchOrder(order.orderSeq, {
+          expectedVersion: before.version,
+          parcels: [{ notifiedPrice: 7000 }],
+          removeParcelSeqs: [before.parcels[0].orderParcelSeq],
+        })
+      ).status,
+      500,
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.deepEqual(await storedOrder(order.orderSeq), before);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE target_type='ORDER' AND target_seq=$1 AND result='SUCCESS'",
+        [order.orderSeq],
+      )
+    ).rows[0].n,
+    audits,
+  );
+});
+
+test('AI cannot use admin removals and admin database permission never survives its transaction', async () => {
+  const order = await readyOrder({ paymentMethodType: 'billing' }),
+    before = await storedOrder(order.orderSeq),
+    callId = await call('01000000003');
+  await errorCode(
+    await patchOrder(
+      order.orderSeq,
+      { expectedVersion: before.version, removeParcelSeqs: [before.parcels[0].orderParcelSeq] },
+      aiReadHeaders(callId),
+    ),
+    403,
+    'FORBIDDEN',
+  );
+  assert.deepEqual(await storedOrder(order.orderSeq), before);
+  await pool.query("UPDATE orders SET status='PAID' WHERE order_seq=$1", [order.orderSeq]);
+  let detail = await storedOrder(order.orderSeq);
+  const sql = 'UPDATE order_parcels SET client_comment=$2 WHERE order_parcel_seq=$1';
+  await assert.rejects(
+    () => pool.query(sql, [detail.parcels[0].orderParcelSeq, 'raw write forbidden']),
+    { code: '23514' },
+  );
+  assert.equal(
+    (
+      await patchOrder(order.orderSeq, {
+        expectedVersion: detail.version,
+        parcels: [
+          { orderParcelSeq: detail.parcels[0].orderParcelSeq, clientComment: 'admin saved' },
+        ],
+      })
+    ).status,
+    200,
+  );
+  await assert.rejects(
+    () => pool.query(sql, [detail.parcels[0].orderParcelSeq, 'raw write still forbidden']),
+    { code: '23514' },
+  );
+  detail = await storedOrder(order.orderSeq);
+  assert.equal(detail.parcels[0].clientComment, 'admin saved');
+});
+
+test('concurrent admin edits of a finalized order have one winner and retain amount consistency', async () => {
+  const order = await readyOrder({ paymentMethodType: 'billing' });
+  await pool.query("UPDATE orders SET status='PAID' WHERE order_seq=$1", [order.orderSeq]);
+  const before = await storedOrder(order.orderSeq);
+  const responses = await Promise.all(
+    [0, 1].map((index) =>
+      patchOrder(
+        order.orderSeq,
+        {
+          expectedVersion: before.version,
+          parcels: [
+            {
+              orderParcelSeq: before.parcels[0].orderParcelSeq,
+              notifiedPrice: 4000 + index * 1000,
+            },
+          ],
+        },
+        {},
+        index,
+      ),
+    ),
+  );
+  assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
+  const after = await storedOrder(order.orderSeq);
+  assert.equal(after.totalAmount, after.parcels[0].notifiedPrice);
+  assert.equal(after.status, 'PAID');
+});
+
+test('admin Swagger documents removal, recalculated amounts and protected receipt facts', async () => {
+  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  const operation = spec.paths['/api/orders/{id}'].patch;
+  assert.ok(operation.description.includes('모든 주문 상태'));
+  assert.ok(operation.description.includes('재계산'));
+  assert.ok(operation.responses['422']);
+  assert.equal(
+    spec.components.schemas.UpdateOrderDto.properties.removeParcelSeqs.uniqueItems,
+    true,
+  );
+  assert.equal(
+    spec.components.schemas.UpdateOrderDto.properties.removeParcelSeqs.items.type,
+    'integer',
+  );
+  assert.ok(operation.requestBody.content['application/json'].examples.adminEdit);
 });

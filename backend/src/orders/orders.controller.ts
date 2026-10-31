@@ -308,7 +308,7 @@ export class OrdersController {
     summary: '주문 정보 수정',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI·관리자 공통 API. COLLECTING 주문의 미취소 상세만 수정하며 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      'AI는 COLLECTING 주문의 미취소 상세만 수정합니다. 관리자는 모든 주문 상태에서 상세 추가·수정·제거가 가능하며 상태·확정 결제수단은 유지합니다. 관리자 총액은 미취소 상세 배송비로 재계산하고 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -319,7 +319,7 @@ export class OrdersController {
   @ApiBody({
     type: UpdateOrderDto,
     description:
-      'expectedVersion과 변경값이 필요합니다. 상세 번호가 없으면 새 상세를 추가합니다. 응답 유실·409 시 최신 상세를 조회해 재판단하며 새 상세를 무조건 재추가하지 않습니다.',
+      'expectedVersion과 변경값이 필요합니다. 상세 번호가 없으면 새 상세를 추가합니다. 관리자 removeParcelSeqs는 이력을 보존하는 제거이며 totalAmount를 생략하면 서버가 계산합니다. 응답 유실·409 시 최신 상세를 조회해 재판단하며 새 상세를 무조건 재추가하지 않습니다.',
     examples: {
       changeAddress: {
         summary: '기존 상세의 도착지 일부 수정',
@@ -333,6 +333,17 @@ export class OrdersController {
         value: {
           expectedVersion: 4,
           parcels: [{ destination: { name: '수령인' }, smallBoxCount: 1 }],
+        },
+      },
+      adminEdit: {
+        summary: '관리자 상세 추가·수정·제거와 총액 재계산',
+        value: {
+          expectedVersion: 4,
+          parcels: [
+            { orderParcelSeq: 101, notifiedPrice: 3000 },
+            { destination: { name: '새 수령인' }, smallBoxCount: 1, notifiedPrice: 4000 },
+          ],
+          removeParcelSeqs: [102],
         },
       },
       clearPickup: {
@@ -356,12 +367,16 @@ export class OrdersController {
   })
   @ApiConflictResponse({
     description:
-      '저장 버전 불일치(VERSION_CONFLICT), 주문·통화 상태 충돌(INVALID_STATE), DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS).',
+      '저장 버전 불일치(VERSION_CONFLICT), 주문·통화 상태 충돌(INVALID_STATE), 결제 승인 진행 중·DB 잠금 대기 2초 초과(REQUEST_IN_PROGRESS).',
     type: ErrorResponseDto,
+  })
+  @ApiUnprocessableEntityResponse({
+    type: ErrorResponseDto,
+    description: '관리자 상세 배송비 누락·합계 범위 초과·전달한 총액 불일치.',
   })
   @ApiOkResponse({
     description:
-      '저장 후 실제 version. 주문 상태는 COLLECTING을 유지하며 새 상세 번호·저장 내용은 주문 상세에서 조회합니다.',
+      '저장 후 실제 version. 주문 상태는 유지하며 새 상세 번호·재계산 총액·저장 내용은 주문 상세에서 조회합니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],

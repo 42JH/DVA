@@ -25,7 +25,7 @@ Orders는 주문 상태·접수·주문 내용의 관리를 담당한다. 주소
 | `GET /api/orders` | 선택 Query: `customerSeq`, `status`, `from`, `to`, `recipientName`, `limit`, `offset` | `{data: [...], hasNext, total_count }`. 각 항목은 `orderSeq`, `customerSeq`, `status`, `paymentMethodType`, `pickupRequestedAt`, `createdAt`, `parcelCount`, `creationSource`, `totalAmount`, `paidAt`, `paymentDueAt` |
 | `POST /api/orders` | `Idempotency-Key` UUID. AI는 `call`, `outcome`, 고객 지정, 결제 방식, 수거 시각, `parcels` | AI 결과는 `{orderSeq, version, status, callSessionSeq, parcelNo, totalAmount, paymentDueAt, paymentRequest}`. 기존 관리자 부분 저장은 `{orderSeq, version}`. 단건 응답의 `data`에 담음 |
 | `GET /api/orders/{id}` | Path `id=orderSeq` | 주문·고객 번호, `status`, 결제 방식, 수거 시각, `version`, 생성·변경 시각, 디버 접수 참고번호·확인 시각, 총액·결제 완료 시각·대기 기한·현재 결제 요청, `parcels[]` |
-| `PATCH /api/orders/{id}` | Path `id=orderSeq`, 필수 `expectedVersion`, 변경할 `paymentMethodType`, `pickupRequestedAt`, `totalAmount`, `parcels` | `{version}`. `COLLECTING`만 수정하며 상태는 유지. 수정 결과 전체는 상세 조회 |
+| `PATCH /api/orders/{id}` | Path `id=orderSeq`, 필수 `expectedVersion`, 변경할 `paymentMethodType`, `pickupRequestedAt`, `totalAmount`, `parcels`, 관리자 `removeParcelSeqs` | `{version}`. AI는 `COLLECTING`만, 관리자는 모든 상태에서 수정·추가·removeParcelSeqs 제거 가능. 관리자 총액 자동 재계산·상태 유지. 결과 전체는 상세 조회 |
 | `POST /api/orders/{id}/submit` | Path `id=orderSeq`, 필수 `expectedVersion` | `{status}`. `notPaid`, `PAID`, `SUBMITTING`, `ACCEPTED`, `SUBMISSION_FAILED` 중 현재 접수 결과 |
 | `POST /api/orders/{id}/cancel` | Path `id=orderSeq`. 본문 없음 | 204, 본문 없음. 전체 취소 재요청은 409 |
 | `POST /api/orders/{id}/parcels/cancel` | Path `id=orderSeq`, 필수 본문 `orderParcelSeqs`: 중복 없는 상세번호 배열(1개 이상) | 204, 본문 없음. 이미 취소된 상세는 건너뛰며 하나라도 취소 불가이면 전체 거절 |

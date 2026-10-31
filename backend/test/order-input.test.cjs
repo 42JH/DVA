@@ -339,3 +339,33 @@ test('admin order screen validates only bounded screen filters and preserves str
       { status: 400 },
     );
 });
+
+test('admin parcel removal validates IDs and rejects ambiguous update/remove operations', async () => {
+  assert.deepEqual(
+    (await validateUpdate({ expectedVersion: 1, removeParcelSeqs: [101, 102] })).removeParcelSeqs,
+    [101, 102],
+  );
+  for (const removeParcelSeqs of [
+    null,
+    [],
+    '101',
+    [101, 101],
+    [0],
+    [-1],
+    [1.5],
+    ['101'],
+    [2147483648],
+  ])
+    await assert.rejects(() => validateUpdate({ expectedVersion: 1, removeParcelSeqs }), {
+      status: 400,
+    });
+  await assert.rejects(
+    () =>
+      validateUpdate({
+        expectedVersion: 1,
+        removeParcelSeqs: [101],
+        parcels: [{ orderParcelSeq: 101, notifiedPrice: 3000 }],
+      }),
+    { status: 400 },
+  );
+});

@@ -49,7 +49,7 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql','021-company-deletion-history.sql','022-order-toss-payments.sql','023-payment-completion-notifications.sql','024-call-analyses.sql','025-call-analysis-seconds.sql','026-call-insight-events.sql','027-faq-categories.sql','028-customer-address-optional-department.sql','029-faq-question-uniqueness.sql'))<>28 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql','021-company-deletion-history.sql','022-order-toss-payments.sql','023-payment-completion-notifications.sql','024-call-analyses.sql','025-call-analysis-seconds.sql','026-call-insight-events.sql','027-faq-categories.sql','028-customer-address-optional-department.sql','029-faq-question-uniqueness.sql','030-admin-order-edit.sql'))<>29 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb' AND is_nullable='YES')
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='customers'::regclass AND conname='customers_address_data_check')
@@ -65,6 +65,8 @@ BEGIN
  IF to_regclass('public.faq_change_notifications') IS NULL
   OR to_regclass('public.faq_change_notifications_pending_idx') IS NULL THEN
   RAISE EXCEPTION 'FAQ notification queue or pending index missing'; END IF;
+ IF pg_get_functiondef('guard_order_parcel_edit()'::regprocedure) NOT LIKE '%dva.admin_order_edit%' THEN
+  RAISE EXCEPTION 'Admin order edit guard missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_index WHERE indrelid='public.faq_entries'::regclass AND indexrelid=to_regclass('public.faq_entries_question_identity_uq') AND indisunique AND indisvalid) THEN
   RAISE EXCEPTION 'FAQ question uniqueness index missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='billing_organization_name')
