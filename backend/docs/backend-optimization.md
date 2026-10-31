@@ -139,3 +139,8 @@
 - 공유 DB 읽기 JOIN, 일부 업무 집합의 공유 테이블, 모듈 간 FK와 PoolClient 공유 트랜잭션은 남아 있다. 이번 변경은 모듈 경계를 정리한 모놀리스이며 MSA 독립 배포가 완료된 상태가 아니다. 분리 시 조회 projection·서비스 간 계약·outbox 기반 일관성과 실패 보상을 별도 설계한다.
 - 실제 서비스 DB에는 031·032를 실행하지 않았고 배포도 하지 않았다. 운영 반영은 migration → 앱 교체 순서다. 앱 복구 시 추가 컬럼/인덱스를 먼저 제거하지 않는다. 032의 일반 인덱스 생성은 쓰기 잠금을 수반하므로 실제 테이블 규모·적용 시간을 확인한다.
 - Jenkins Job의 저장된 웹훅 설정은 변경하지 않았다. 경로 누락 보완은 저장소의 `infra/jenkins/configure-monolith-trigger.groovy` 재적용이 필요하다. 검증 Replay는 브랜치·커밋을 고정하고 배포 false를 확인한다.
+
+### 최종 빌드 입력 정리
+
+- 계획/작업: 로컬 격리 DB·검증 로그가 있는 `backend/.cache`를 Docker context에서 제외한다. Git 제외와 별도로 적용하며 실행 이미지의 기존 COPY 목록은 유지한다.
+- 검증: ignore 항목과 Dockerfile의 명시적 COPY 경로를 확인했다. 최종 Docker CI에서 기본 검사·DB·운영 이미지·실제 Nginx와 관련 인프라를 다시 검증한다.
