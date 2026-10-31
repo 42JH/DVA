@@ -1,9 +1,11 @@
 """백엔드 서버 API 클라이언트(spec/backend-api.md). 고객·주문·배송지는 AI 서버가 저장하지 않고 백엔드에서 읽고 쓴다.
 HTTP는 openai에 딸린 httpx2. 전화번호는 URL에 넣지 않고 본문으로 보낸다(접근 로그에 개인정보가 남지 않게).
 
-통화에서는 고객 확인(POST /api/customers/context)과 통화 결과(POST /api/orders)를 부른다.
+AI가 부르는 것: 통화 시작의 고객 확인(POST /api/customers/context, 통화 번호 callSessionSeq를 받는다)과 최근 접수 주소,
+통화 중 조회·취소(GET /api/orders, GET /api/orders/{id}, POST /api/orders/{id}/parcels/cancel), 통화 결과 한 번(POST /api/orders).
+통화 번호는 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더로 보낸다(인증 토큰이 아니라 고객 범위 확인용).
 FAQ 변경 알림 처리에서는 최신 원문(GET /api/ai/faqs)을 별도로 조회한다.
-조회·수정·취소(/internal/ai/...)는 새 백엔드에 AI용 API가 없어 도구 사용을 보류했다(코드는 둔다)."""
+보류한 수정 도구와 관제 화면 주문 목록만 옛 계약(/internal/ai/...)이다."""
 
 import asyncio
 import logging
@@ -18,7 +20,7 @@ from app.rag.faq_source import FaqLookup, parse_faq_lookup, parse_initial_faqs, 
 
 log = logging.getLogger(__name__)
 
-PREFIX = "/internal/ai"  # 보류한 조회·수정·취소 도구용(옛 계약)
+PREFIX = "/internal/ai"  # 보류한 수정 도구·관제 화면 주문 목록용(옛 계약)
 # 결과가 불확실해 같은 키로 다시 확인할 응답: 처리 중(202), 게이트웨이 시간 초과(504), 같은 키 처리 중(409)
 RETRY_STATUS = (202, 504)
 IN_PROGRESS = "REQUEST_IN_PROGRESS"
@@ -35,6 +37,11 @@ class CallerContext:
     name: str | None = None
     places: list[Place] = field(default_factory=list)  # 개인·기업 주소록(출발지·도착지 모두에 쓴다)
     usage_types: list[str] = field(default_factory=list)  # PERSONAL · COMPANY
+    call_session_seq: int | None = None  # DB 통화 번호. 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더
+    payment_methods: list[str] = field(default_factory=list)  # 지금 쓸 수 있는 billing · credit · groupBilling
+    # 이전 접수(ACCEPTED)의 출발지 1건·도착지 최근 것부터({기존 출발지}, "이번에도 {도착지 주소}로", 최근 핀)
+    recent_origin: Place | None = None
+    recent_destinations: list[Place] = field(default_factory=list)
 
 
 def _pin_place(data: dict) -> Place | None:
@@ -64,7 +71,8 @@ def _camel(name: str) -> str:
     return head + "".join(w.title() for w in rest)
 
 
-def parcel_body(order: Order) -> dict:
+def parcel_body(order: Order, fare: int | None = None) -> dict:
+    """택배 하나. fare = 이 택배의 배송비(notifiedPrice, 서버 요금표). 모르면 넣지 않는다."""
     out = {"origin": _address(order, "sender"), "destination": _address(order, "receiver")}
     out |= {_camel(f): getattr(order, f) for f in COUNT_FIELDS if getattr(order, f) is not None}
     if order.other_item is not None:
@@ -73,12 +81,16 @@ def parcel_body(order: Order) -> dict:
         out["clientComment"] = order.client_comment
     if order.item_price is not None:
         out["itemPrice"] = order.item_price
+    if fare is not None:
+        out["notifiedPrice"] = fare
     return {k: v for k, v in out.items() if v != {}}
 
 
 def result_body(outcome: str, call: dict, customer_seq: int | None, customer_name: str | None, caller: str,
-                payment: str | None, pickup_at: str | None, parcels: list[Order]) -> dict:
-    """통화 결과 본문. call = {providerCallId, callerPhoneNumber, incomingAt}. 고객은 번호(등록) 또는 이름·발신번호(미등록)."""
+                payment: str | None, pickup_at: str | None, parcels: list[Order],
+                fares: list[int | None] | None = None) -> dict:
+    """통화 결과 본문. call = {providerCallId, callerPhoneNumber, incomingAt}. 고객은 번호(등록) 또는 이름·발신번호(미등록).
+    fares = 택배별 배송비. 다 알 때만 totalAmount(합계)를 넣는다(백엔드가 합계와 상세 배송비가 같은지 검사한다)."""
     body: dict = {"outcome": outcome, "call": call}
     if customer_seq is not None:
         body["customerSeq"] = customer_seq
@@ -88,9 +100,27 @@ def result_body(outcome: str, call: dict, customer_seq: int | None, customer_nam
         body["paymentMethodType"] = payment
     if pickup_at:
         body["pickupRequestedAt"] = pickup_at
+    fares = fares or [None] * len(parcels)
     if parcels:
-        body["parcels"] = [parcel_body(p) for p in parcels]
+        body["parcels"] = [parcel_body(p, f) for p, f in zip(parcels, fares)]
+    if parcels and all(f is not None for f in fares):
+        body["totalAmount"] = sum(fares)
     return body
+
+
+def _parcels(detail: dict) -> list[dict]:
+    """주문 상세 → 조회·취소(C 흐름)가 쓰는 택배 단위. status는 취소한 상세면 CANCELLED, 아니면 주문 상태."""
+    out = []
+    for p in detail.get("parcels") or []:
+        dest = p.get("destination") or {}
+        out.append({"order_seq": detail["orderSeq"], "order_parcel_seq": p["orderParcelSeq"],
+                    "receiver_name": dest.get("name"), "receiver_address": dest.get("roadAddress"),
+                    "status": "CANCELLED" if p.get("status") == "CANCELLED" else detail.get("status")})
+    return out
+
+
+def _call(call_session_seq: int) -> dict:
+    return {"call_session_seq": str(int(call_session_seq))}
 
 
 class BackendAPI:
@@ -112,20 +142,100 @@ class BackendAPI:
             raise BackendError(f"{path} {resp.status_code}")
         return resp
 
-    async def caller_context(self, phone: str) -> CallerContext:
-        """통화 시작(accept 전)에 한 번. 등록·미등록·탈퇴와 주소록을 받는다. 고객·통화를 만들지 않는다."""
-        resp = await self.http.post("/api/customers/context", json={"phoneNumber": phone})
+    async def caller_context(self, phone: str, call: dict | None = None, recent_limit: int = 5) -> CallerContext:
+        """통화 시작(accept 전)에 한 번. 등록·미등록·탈퇴, 주소록, 결제 자격을 받는다. call = {providerCallId, incomingAt}을
+        보내면 백엔드가 통화를 만들거나 다시 쓰고 통화 번호(callSessionSeq)를 준다. 고객·주문은 만들지 않는다.
+        등록 고객이면 이전 접수의 출발지 1건·도착지 recent_limit건도 읽는다(실패해도 고객 확인은 그대로)."""
+        body = {"phoneNumber": phone} | ({"call": call} if call else {})
+        resp = await self.http.post("/api/customers/context", json=body)
         if resp.status_code != 200:
-            raise BackendError(f"/api/customers/context {resp.status_code}")
+            raise BackendError(f"/api/customers/context {resp.status_code} {_error_code(resp)}")
         data = resp.json()["data"]
         customer = data.get("customer") or {}
         places = []
         for pin in [*(data.get("personalPins") or []), *(data.get("companyPins") or [])]:
             if (p := _pin_place(pin.get("addressData") or {})) and p not in places:
                 places.append(p)
-        return CallerContext(status=data["lookupStatus"], customer_seq=customer.get("customerSeq"),
-                             name=customer.get("name"), places=places,
-                             usage_types=list(data.get("availableUsageTypes") or []))
+        ctx = CallerContext(status=data["lookupStatus"], customer_seq=customer.get("customerSeq"),
+                            name=customer.get("name"), places=places,
+                            usage_types=list(data.get("availableUsageTypes") or []),
+                            call_session_seq=data.get("callSessionSeq"),
+                            payment_methods=list(data.get("availablePaymentMethods") or []))
+        if ctx.status == "REGISTERED" and ctx.customer_seq and ctx.call_session_seq and recent_limit:
+            try:
+                origins = await self.address_history(ctx.call_session_seq, ctx.customer_seq, "ORIGIN", 1)
+                ctx.recent_origin = origins[0] if origins else None
+                ctx.recent_destinations = await self.address_history(ctx.call_session_seq, ctx.customer_seq,
+                                                                     "DESTINATION", recent_limit)
+            except (BackendError, httpx2.TransportError) as e:
+                log.warning("이전 접수 주소 조회 실패: %s", e)  # 최근 접수 없이 진행(출발지 없이 인사)
+        return ctx
+
+    async def create_customer(self, name: str, phone: str) -> int | None:
+        """신규 고객 등록(POST /api/customers, ACTIVE). 고객 번호. 이미 등록된 번호면(409) None."""
+        resp = await self.http.post("/api/customers", json={"name": name, "phoneNumber": phone})
+        if resp.status_code == 409:
+            return None
+        if resp.status_code != 201:
+            raise BackendError(f"/api/customers {resp.status_code} {_error_code(resp)}")
+        return _data(resp)["customerSeq"]
+
+    async def create_pin(self, call_session_seq: int, customer_seq: int, order: Order, role: str, label: str) -> None:
+        """주문의 보내는 곳(role=sender)·받는 곳을 그 고객의 개인 주소록에 저장한다. 같은 주소가 이미 있으면(409) 그대로."""
+        resp = await self.http.post(f"/api/customers/{int(customer_seq)}/pins",
+                                    json={"label": label, "addressData": _address(order, role)},
+                                    headers=_call(call_session_seq))
+        if resp.status_code not in (200, 201, 409):
+            raise BackendError(f"/api/customers/pins {resp.status_code} {_error_code(resp)}")
+
+    async def address_history(self, call_session_seq: int, customer_seq: int, direction: str, limit: int) -> list[Place]:
+        """이전 접수(ACCEPTED) 주문의 출발지(ORIGIN)·도착지(DESTINATION) 스냅샷, 최근 것부터. 같은 곳은 한 번만."""
+        resp = await self.http.get(f"/api/customers/{int(customer_seq)}/addresses",
+                                   params={"direction": direction, "limit": limit}, headers=_call(call_session_seq))
+        if resp.status_code != 200:
+            raise BackendError(f"/api/customers/addresses {resp.status_code} {_error_code(resp)}")
+        out: list[Place] = []
+        for row in resp.json().get("data") or []:
+            if (p := _pin_place(row.get("address") or {})) and p not in out:
+                out.append(p)
+        return out
+
+    # --- 통화 중 조회·취소(C 흐름). 통화 고객의 주문만(call_session_seq 헤더) ---
+
+    async def find_parcels(self, call_session_seq: int, limit: int) -> list[dict]:
+        """통화 고객의 최근 주문 limit건을 택배(주문 상세) 단위로, 최근 것부터. 목록에는 받는 분이 없어 주문마다 상세를 읽는다.
+        받는 분 성함으로 거르는 것은 부르는 쪽(Call.find_orders)이 한다: 이름을 URL(recipientName)에 넣지 않게."""
+        resp = await self.http.get("/api/orders", params={"limit": limit}, headers=_call(call_session_seq))
+        if resp.status_code != 200:
+            raise BackendError(f"/api/orders {resp.status_code} {_error_code(resp)}")
+        orders = resp.json().get("data") or []
+        details = await asyncio.gather(*(self.order_detail(call_session_seq, o["orderSeq"]) for o in orders))
+        return [p for d in details if d for p in _parcels(d)]
+
+    async def order_detail(self, call_session_seq: int, order_seq: int) -> dict | None:
+        """주문 상세(상태·금액·결제 요청·상세 목록). 없거나 다른 고객의 주문이면 None."""
+        resp = await self.http.get(f"/api/orders/{int(order_seq)}", headers=_call(call_session_seq))
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise BackendError(f"/api/orders/{{id}} {resp.status_code} {_error_code(resp)}")
+        return _data(resp)
+
+    async def parcel(self, call_session_seq: int, order_seq: int, order_parcel_seq: int) -> dict | None:
+        """택배 하나의 지금 상태(취소 전 확인·취소 뒤 확인)."""
+        detail = await self.order_detail(call_session_seq, order_seq)
+        return next((p for p in _parcels(detail or {}) if p["order_parcel_seq"] == order_parcel_seq), None)
+
+    async def cancel_parcels(self, call_session_seq: int, order_seq: int, order_parcel_seqs: list[int]) -> str:
+        """주문 상세 취소. 'ok'(204, 같은 상세를 다시 취소해도 204) · 'not_found'(404) · 'conflict'(409: 결제 완료·처리 중 등,
+        지금 상태는 다시 조회해서 본다)."""
+        resp = await self.http.post(f"/api/orders/{int(order_seq)}/parcels/cancel",
+                                    json={"orderParcelSeqs": [int(s) for s in order_parcel_seqs]},
+                                    headers=_call(call_session_seq))
+        result = {204: "ok", 404: "not_found", 409: "conflict"}.get(resp.status_code)
+        if result is None:
+            raise BackendError(f"/api/orders/{{id}}/parcels/cancel {resp.status_code} {_error_code(resp)}")
+        return result
 
     async def submit_result(self, body: dict, idempotency_key: str) -> dict:
         """통화 결과 한 번. 결과가 불확실하면(연결 실패·504·202·409 처리 중) 같은 키·같은 본문으로 다시 확인한다.
@@ -141,7 +251,7 @@ class BackendAPI:
                 log.warning("결과 전송 연결 실패, 다시 확인: %s", type(e).__name__)
             else:
                 data = _data(resp)
-                if resp.status_code == 201:
+                if resp.status_code in (200, 201):  # 같은 키의 재요청은 기존 주문의 현재 결과(200)
                     return data
                 code = _error_code(resp)
                 if resp.status_code not in RETRY_STATUS and not (resp.status_code == 409 and code == IN_PROGRESS):
@@ -214,23 +324,15 @@ class BackendAPI:
             raise BackendError(f"/api/ai/config/apply-result {resp.status_code} {_error_code(resp)}")
         return _data(resp)
 
-    # --- 보류: 조회·수정·취소 도구(옛 계약, 새 백엔드에 AI용 API 없음) ---
-
-    async def list_orders(self, caller: str, limit: int) -> list[dict]:
-        return (await self._post("/orders/search", {"caller_phone": caller, "limit": limit})).json()["orders"]
-
-    async def _change(self, path: str, body: dict) -> str:
-        """'ok' · 'not_found'(주문번호·발신번호 불일치) · 'cancelled'(취소된 주문)."""
-        resp = await self._post(path, body, ok=(200, 404, 409))
-        return {200: "ok", 404: "not_found", 409: "cancelled"}[resp.status_code]
+    # --- 보류한 수정 도구(옛 계약). shortcut: 새 백엔드의 수정은 COLLECTING 주문의 PATCH뿐이라 쓰지 못한다(수정 보류) ---
 
     async def update_order(self, caller: str, order_no: str, values: dict[str, str]) -> str:
+        """'ok' · 'not_found'(주문번호·발신번호 불일치) · 'cancelled'(취소된 주문)."""
         changes = {k: v for k, v in values.items() if k in ORDER_FIELDS}
         # order_no는 모델이 만든 미신뢰 값: 경로 조각으로 인코딩(../ 등으로 다른 API를 부르지 못하게)
-        return await self._change(f"/orders/{quote(order_no, safe='')}/update", {"caller_phone": caller, "changes": changes})
-
-    async def cancel_order(self, caller: str, order_no: str) -> str:
-        return await self._change(f"/orders/{quote(order_no, safe='')}/cancel", {"caller_phone": caller})
+        resp = await self._post(f"/orders/{quote(order_no, safe='')}/update", {"caller_phone": caller, "changes": changes},
+                                ok=(200, 404, 409))
+        return {200: "ok", 404: "not_found", 409: "cancelled"}[resp.status_code]
 
     async def recent_orders(self, limit: int) -> list[dict]:
         """관제 화면용 접수 주문 목록(옛 계약). shortcut: 새 백엔드는 관리자 세션이 필요해 실제 백엔드에서는 실패한다."""

@@ -137,6 +137,15 @@ def future_time(raw: str) -> str | None:
     return at.astimezone(KST).isoformat(timespec="seconds")
 
 
+def is_past(raw: str | None) -> bool:
+    """형식은 맞는데 지난 시각(고객이 지난 날짜를 말함)."""
+    try:
+        at = datetime.fromisoformat((raw or "").strip())
+    except ValueError:
+        return False
+    return at.tzinfo is not None and at <= datetime.now(timezone.utc)
+
+
 # --- 전화번호 ---
 
 _KOREAN_DIGITS = {"공": "0", "영": "0", "빵": "0", "일": "1", "이": "2", "삼": "3", "사": "4",

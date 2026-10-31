@@ -15,12 +15,14 @@ from openai import AsyncOpenAI
 from app import address
 from app.address import kakao
 from app.call import Call
-from app.config import load_server_config, load_texts
+from app.config import FareConfig, load_server_config, load_texts
 from app.main import check_definitions
 from app.mock_backend import MockBackend
 from app.order import Geo
 
-CFG = load_server_config()
+# 테스트용 요금표(실제 값은 운영이 정해 config/server.toml [fare]에 넣는다. 비어 있으면 접수는 미완료로 넘어간다)
+FARE = FareConfig(document=3000, small_box=4000, medium_box=5000, big_box=6000)
+CFG = load_server_config().model_copy(update={"fare": FARE})
 TEXTS = load_texts()
 check_definitions(CFG, TEXTS)
 
@@ -159,12 +161,12 @@ class FakeSideband:
 
 
 class FakeResponses:
-    """판별 모델(responses.create). decide(요청 인수) → {"answer", "intent"} 또는 예외. 기본은 아무 판별 없음."""
+    """판별 모델(responses.create). decide(요청 인수) → {"answer", "intent", "slot"} 또는 예외. 기본은 아무 판별 없음."""
 
     def __init__(self):
         self.requests: list[dict] = []
         self.delay = 0.0
-        self.decide = lambda kw: {"answer": "none", "intent": "none"}
+        self.decide = lambda kw: {"answer": "none", "intent": "none", "slot": "none"}
 
     async def create(self, **kw):
         self.requests.append(kw)

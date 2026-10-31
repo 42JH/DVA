@@ -4,16 +4,20 @@
 사건 하나 = 그래프 실행 한 번: 현재 단계 노드에서 시작해 전이가 없을 때까지 노드를 옮겨 다닌다.
 진행 상태(FlowState)는 통화 객체가 들고(가드·관제·도구 결과가 모두 본다), 그래프에는 통화 객체를 context로 넘긴다.
 
+할 말은 두 갈래다. 전이마다 붙은 말(say: 다이어그램 화살표의 문구)을 이번 실행 경로대로 모으고, 머무는 단계의
+질문(ask)을 붙인다. 질문은 그릴 때마다 다시 계산한다(예외 문구·정정 중 다시 묻기).
+
 ctx(통화 객체)에 기대하는 것: flow(FlowState), texts(Texts), field_done(name) -> bool,
-recorded() -> [(label, value)], text_vars() -> dict, stage_variant(stage) -> str | None.
+recorded() -> [(label, value)], text_vars() -> dict, now_ms() -> int(세션 타임라인, 받아쓰기 전에는 0), heard_rev(고객 말 리비전).
 """
 
+import dataclasses
 import importlib
 import inspect
 import pkgutil
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langgraph.errors import GraphRecursionError
@@ -22,10 +26,14 @@ from langgraph.runtime import Runtime
 from langgraph.types import Command
 from pydantic import BaseModel
 
-RETURN = "@return"  # 하위 흐름을 끝내고 들어온 단계로 돌아간다
-ANY = "*"  # enter_from에 쓰면 어느 단계에서나 들어올 수 있다(자기 자신 제외)
-ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(바로 다음 단계로 넘길 조건용)
-MAX_HOPS = 5  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
+RETURN = "@return"  # 하위 흐름(QnA·상담원 Hub)을 끝내고 들어오기 전 업무 단계로 돌아간다(RESUME_TASK)
+STAY = "@stay"  # 단계를 옮기지 않고 같은 단계를 예외 문구로 다시 묻는다(구간 예외)
+ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(머무르지 않는 단계·건너뛰기 조건용)
+COMMIT = "commit.due"  # 확정 지연이 끝남(§2.5(3)). 미뤄 둔 전이를 실행한다
+CORRECT_ASK = "CORRECT_ASK"  # 정정한다고만 하고 값을 말하지 않았을 때 그 항목을 다시 묻는 문구 키(§2.5(4))
+MAX_HOPS = 10  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
+
+Key = str | Callable[[Any], "str | tuple[str, ...] | None"] | None  # 문구 키, 또는 ctx → 문구 키(들)
 
 
 def always(ctx: Any) -> bool:
@@ -37,31 +45,48 @@ class Transition:
     event: str
     target: str
     guard: Callable[[Any], bool] = always
+    say: Key = None  # 이 전이에서 할 말(다이어그램 화살표의 문구)
+    asks: bool = False  # say가 들어간 단계의 질문까지 한다(그 단계의 ask를 덧붙이지 않는다)
+    action: Callable[[Any], None] | None = None  # 전이할 때 할 일(실패 횟수 등)
+    forward: bool = False  # 들어간 단계가 같은 사건을 먼저 본다(고른 업무를 HUB가 이어 받기 등)
+    commit: bool = False  # 바로 옮기지 않고 확정 지연 뒤에 옮긴다(되돌릴 수 없는 확정, §2.5(3))
 
 
 @dataclass(frozen=True)
 class Stage:
-    name: str
-    description: str  # 관제·문서용
-    tools: tuple[str, ...]
+    name: str  # 다이어그램 노드 ID
+    description: str  # 관제·진행 상태용
+    tools: tuple[str, ...] = ("get_state",)
     transitions: tuple[Transition, ...] = ()
-    fields: tuple[str, ...] = ()  # 받을 항목과 순서(수집 단계)
-    order: Callable[[Any], tuple[str, ...]] | None = None  # 상황에 따라 순서가 다르면(fields의 순열)
-    variants: tuple[str, ...] = ()  # 같은 단계 안의 결과별 안내 문구("단계.variant")
+    fields: tuple[str, ...] = ()  # 받을 항목과 순서(항목 받는 단계). 질문은 빠진 첫 항목의 문구
+    field_texts: dict = field(default_factory=dict)  # 항목 → 문구 키(또는 ctx → 문구 키)
+    ask: Key = None  # 머무를 때의 질문. 복귀(RESUME_TASK) 뒤에도 이것을 다시 묻는다
     # 고객 답 판별(app/listener.py): 이 단계에서 고객 말을 듣는지, 답 선택지(값 → 뜻), 답에 따른 처리(→ 사건)
-    listen: bool = True
+    listen: bool | Callable[[Any], bool] = True
     choices: Callable[[Any], dict[str, str]] | None = None
     on_answer: Callable[[Any, str], Awaitable[list[str]]] | None = None
-    subflow: bool = False  # 들어온 단계를 기억했다가 RETURN으로 돌아간다
-    enter_on: str | None = None  # 이 사건이 enter_from 단계에서 나면 이 단계로 들어온다
-    enter_from: tuple[str, ...] = ()
+    unheard_ok: tuple[str, ...] = ()  # 질문을 다 듣기 전에 말해도 받는 답(되돌릴 수 있는 거절, §2.5(1))
+    subflow: bool = False  # QnA·상담원 Hub: 들어오기 전 업무 단계를 기억했다가 RETURN으로 돌아간다
+    final: bool = False  # 통화를 끝내는 단계. 끼어드는 용건(enter_on)으로 나가지 않는다
+    enter_on: tuple[str, ...] = ()  # 이 사건이 나면 어느 단계에서나(final 제외) 이 단계로 들어온다
+    task: str | None = None  # 들어오면 진행 중 업무를 이것으로
     start_if: Callable[[Any], bool] | None = None  # 통화 시작 단계 조건
     on_enter: Callable[[Any, str], None | Awaitable[None]] | None = None  # (ctx, 이전 단계). async도 된다
 
 
 class FlowState(BaseModel):
     stage: str
-    return_to: str | None = None
+    task: str | None = None  # 진행 중 업무(new_order · order · lookup · cancel)
+    resume: dict | None = None  # {"task", "stage"}: QnA·상담원으로 빠지기 직전 업무 단계(§2.2)
+    say: list[str] = []  # 마지막 전이 경로에서 할 말(문구 키)
+    say_asks: bool = False  # say가 머무는 단계의 질문까지 했음
+    variant: str | None = None  # 같은 단계를 다시 물을 예외 문구(STAY 전이). 단계를 옮기면 지운다
+    variant_field: str | None = None  # 그 예외 문구가 묻던 항목(그 항목이 차면 예외 문구도 끝난다)
+    notice: list[str] = []  # 다음 진행 상태 한 번만 앞에 붙일 말(정정 확인). 보낸 뒤 지운다
+    correcting: str | None = None  # 고친다고만 하고 값을 아직 말하지 않은 항목(그 항목을 다시 묻는다)
+    pending: dict | None = None  # 확정 지연 중인 전이 {stage, transition, at, rev, suspended}
+    entered_ms: int | None = None  # 지금 단계에 들어온 세션 타임라인 시각(꼬리 조각·질문을 들었는지 판단)
+    reasked: bool = False  # 이 단계에서 "질문을 다 듣기 전 답"으로 한 번 다시 물었음
     history: list[dict] = []
 
 
@@ -71,6 +96,7 @@ class Step(BaseModel):
     stage: str
     event: str
     tool: str | None = None
+    moved: bool = False  # 이번 실행에서 이미 옮겼음(할 말을 새 경로로 모은다)
 
 
 class FlowError(Exception):
@@ -78,6 +104,7 @@ class FlowError(Exception):
 
 
 STAGES: dict[str, Stage] = {}
+GROUPS: dict[str, str] = {}  # 단계 → 정의한 모듈 이름(관제 그림에서 흐름별로 묶는다)
 GRAPH: Any = None  # build()가 만든 그래프(통화끼리 같이 쓴다. 통화별 상태는 context로)
 
 
@@ -93,35 +120,33 @@ def load_stages(package: str = "app.flow.stages") -> dict[str, Stage]:
             if stage.name in found:
                 raise FlowError(f"단계 이름 중복: {stage.name}")
             found[stage.name] = stage
+            GROUPS[stage.name] = info.name
     STAGES.clear()
     STAGES.update(found)
     return found
 
 
 def validate(tool_names: set[str], texts: Any, sample_vars: dict) -> None:
-    """정의가 가리키는 단계·도구·문구가 모두 있는지. 실패하면 기동을 멈춘다."""
+    """정의가 가리키는 단계·도구·문구가 모두 있는지, 문구의 자리표시자가 맞는지. 실패하면 기동을 멈춘다.
+    ctx를 받는 문구 키(callable)는 실행 때 정해지므로 시나리오 테스트가 확인한다."""
     errors = []
     if not any(s.start_if for s in STAGES.values()):
         errors.append("시작 단계가 없음")
+    known = set(texts.say) | set(texts.note)
     for s in STAGES.values():
         errors += [f"{s.name}: 없는 도구 {t}" for t in s.tools if t not in tool_names]
-        targets = [t.target for t in s.transitions] + list(s.enter_from)
-        errors += [f"{s.name}: 없는 단계 {t}" for t in targets if t not in (RETURN, ANY) and t not in STAGES]
-        if s.enter_on and not s.enter_from:
-            errors.append(f"{s.name}: enter_from 없음")
-        names = [s.name] + [f"{s.name}.{v}" for v in s.variants]
-        # 항목 문구와 고객 유형별 문구("sender_name.registered")
-        field_keys = list(s.fields) + [k for k in texts.fields if k.partition(".")[0] in s.fields and "." in k]
-        templates = [texts.stages.get(n) for n in names] + [texts.fields.get(f) for f in field_keys]
-        names += field_keys
-        for name, tpl in zip(names, templates):
-            if tpl is None:
-                errors.append(f"문구 없음: {name}")
-                continue
+        errors += [f"{s.name}: 없는 단계 {t.target}" for t in s.transitions
+                   if t.target not in (RETURN, STAY) and t.target not in STAGES]
+        keys = [k for k in (s.ask, *s.field_texts.values(), *(t.say for t in s.transitions)) if isinstance(k, str)]
+        errors += [f"{s.name}: 문구 없음 {k}" for k in keys if k not in known]
+        errors += [f"{s.name}: 항목 문구 없음 {f}" for f in s.fields if f not in s.field_texts]
+    errors += [f"핵심 구간의 질문 문구 없음: {k}" for k in texts.core if k not in texts.say]
+    for name, table in (("say", texts.say), ("note", texts.note), ("core", texts.core)):
+        for key, tpl in table.items():
             try:
                 tpl.format(**sample_vars)
             except (KeyError, IndexError, ValueError) as e:
-                errors.append(f"문구 자리표시자 오류 {name}: {e}")
+                errors.append(f"문구 자리표시자 오류 {name}.{key}: {e}")
     if errors:
         raise FlowError("; ".join(errors))
 
@@ -138,10 +163,10 @@ def build() -> None:
 
 
 def _destinations(stage: Stage) -> tuple[str, ...]:
-    """이 단계에서 갈 수 있는 단계: 전이 대상, 이 단계에서 들어올 수 있는 하위 흐름, 복귀면 하위 흐름이 아닌 단계."""
-    out = {t.target for t in stage.transitions if t.target != RETURN}
-    out |= {s.name for s in STAGES.values()
-            if s.enter_on and s.name != stage.name and (ANY in s.enter_from or stage.name in s.enter_from)}
+    """이 단계에서 갈 수 있는 단계: 전이 대상, 이 단계에서 들어갈 수 있는 끼어드는 단계, 복귀면 하위 흐름이 아닌 단계."""
+    out = {t.target for t in stage.transitions if t.target not in (RETURN, STAY)}
+    if not stage.final:
+        out |= {s.name for s in STAGES.values() if s.enter_on and s.name != stage.name}
     if any(t.target == RETURN for t in stage.transitions):
         out |= {s.name for s in STAGES.values() if not s.subflow}
     return (*sorted(out), END)
@@ -155,19 +180,40 @@ async def _step(step: Step, runtime: Runtime) -> Command:
     """현재 단계에서 사건 하나를 본다. 노드·라우터는 async여야 한다: ainvoke는 동기 함수를 다른 스레드에서 돌리는데
     통화 객체와 관제 버스는 스레드 안전하지 않다. 가드는 여기서 부른다(조건부 엣지 함수로 쓰지 않는다)."""
     ctx = runtime.context
-    target = _target(ctx, step.event)
-    if target is None:
+    t = _due_commit(ctx) if step.event == COMMIT else _target(ctx, step.event)
+    if t is None:
         return Command(goto=END)
-    await _move(ctx, target, step.event, step.tool)
-    # 하위 흐름에서 돌아왔으면 돌아간 단계가 같은 사건을 먼저 본다(예: 조회 중 "새 주문" → 복귀 후 새 주문).
-    # 아니면 들어온 직후 사건(ENTERED)을 한 번 더 본다
-    event = step.event if target == RETURN and _target(ctx, step.event) is not None else ENTERED
-    return Command(goto=ctx.flow.stage, update={"stage": ctx.flow.stage, "event": event})
+    if t.commit:  # 되돌릴 수 없는 확정: 새 입력 없이 commit_delay_ms가 지나면 COMMIT 사건으로 옮긴다
+        ctx.flow.pending = {"stage": ctx.flow.stage, "transition": t, "at": time.monotonic(),
+                            "rev": ctx.heard_rev, "suspended": False}
+        say = _key(ctx, t.say)
+        if say:  # 이 전이의 말(운임 안내)은 기다리는 동안 미리 하고, 옮긴 뒤에는 되풀이하지 않는다
+            ctx.flow.say, ctx.flow.say_asks = _keys(say), True
+        return Command(goto=END)
+    if t.target == STAY:  # 같은 단계를 예외 문구로 다시 묻는다
+        if t.action:
+            t.action(ctx)
+        m = missing(ctx)
+        ctx.flow.variant, ctx.flow.variant_field = _key(ctx, t.say), m[0] if m else None
+        ctx.flow.say, ctx.flow.say_asks = [], False
+        return Command(goto=END)
+    await _move(ctx, t, step)
+    # 끼어드는 단계로 들어왔거나 넘겨 받는 전이면 들어간 단계가 같은 사건을 먼저 본다. 아니면 들어온 직후 사건
+    event = step.event if t.forward and _target(ctx, step.event) is not None else ENTERED
+    return Command(goto=ctx.flow.stage, update={"stage": ctx.flow.stage, "event": event, "moved": True})
+
+
+def _due_commit(ctx: Any) -> Transition | None:
+    p = ctx.flow.pending
+    if not p or p["suspended"] or p["stage"] != ctx.flow.stage:
+        return None
+    return dataclasses.replace(p["transition"], commit=False, say=None)
 
 
 async def start(ctx: Any) -> None:
     """통화 시작 단계로 들어간다(들어온 직후 조건도 평가)."""
     ctx.flow.stage = start_stage(ctx)
+    ctx.flow.entered_ms = ctx.now_ms()
     await apply(ctx, [ENTERED])
 
 
@@ -182,58 +228,108 @@ def current(ctx: Any) -> Stage:
     return STAGES[ctx.flow.stage]
 
 
+def listening(ctx: Any) -> bool:
+    listen = current(ctx).listen
+    return listen(ctx) if callable(listen) else listen
+
+
 def allowed_tools(ctx: Any) -> tuple[str, ...]:
     return current(ctx).tools
 
 
 def missing(ctx: Any) -> list[str]:
-    stage = current(ctx)
-    fields = stage.order(ctx) if stage.order else stage.fields
-    return [f for f in fields if not ctx.field_done(f)]
+    return [f for f in current(ctx).fields if not ctx.field_done(f)]
 
 
-def field_text(ctx: Any, field: str) -> str:
-    """항목 질문 문구. 상황별 문구("항목.retry" 못 찾은 주소 다시 묻기, "항목.registered" 등록 고객)가 있으면 그것."""
-    fields = ctx.texts.fields
-    for variant in ctx.field_variants(field):
-        if f"{field}.{variant}" in fields:
-            return fields[f"{field}.{variant}"]
-    return fields[field]
+def _key(ctx: Any, key: Key) -> Any:
+    return key(ctx) if callable(key) else key
+
+
+def _keys(value: Any) -> list[str]:
+    return [] if not value else [value] if isinstance(value, str) else list(value)
+
+
+def field_key(ctx: Any, name: str) -> str:
+    return _key(ctx, current(ctx).field_texts[name])
+
+
+def question(ctx: Any) -> list[str]:
+    """머무는 단계의 질문(문구 키들): 정정 중이면 다시 묻기, 예외 문구, 항목 받는 단계면 빠진 첫 항목, 아니면 ask."""
+    if ctx.flow.correcting:
+        return [CORRECT_ASK]
+    m = missing(ctx)
+    if ctx.flow.variant and (m[0] if m else None) == ctx.flow.variant_field:
+        return [ctx.flow.variant]
+    if m:
+        return [field_key(ctx, m[0])]
+    return _keys(_key(ctx, current(ctx).ask))
+
+
+def question_key(ctx: Any) -> str | None:
+    """고객이 지금 답하는 질문의 문구 키(핵심 구간을 찾을 때). 들어오는 전이의 말이 질문까지 했으면 그 말."""
+    keys = ctx.flow.say if ctx.flow.say_asks else question(ctx)
+    return keys[-1] if keys else None
+
+
+def render(ctx: Any, key: str) -> str:
+    texts, values = ctx.texts, ctx.text_vars()
+    if key in texts.note:
+        return texts.note[key].format(**values)
+    return "'" + texts.say[key].format(**values) + "'"
 
 
 def next_text(ctx: Any) -> str:
-    m = missing(ctx)
-    if m:
-        tpl = field_text(ctx, m[0])
-    else:
-        variant = ctx.stage_variant(ctx.flow.stage)
-        tpl = ctx.texts.stages[f"{ctx.flow.stage}.{variant}" if variant else ctx.flow.stage]
-    return tpl.format(**ctx.text_vars())
+    """다음에 할 말: 한 번만 붙일 말 + 마지막 전이 경로의 말 + 머무는 단계의 질문."""
+    flow = ctx.flow
+    keys = [*flow.notice, *flow.say]
+    if not flow.say_asks or flow.correcting:
+        keys += [k for k in question(ctx) if k not in keys]
+    return " ".join(render(ctx, k) for k in keys) or current(ctx).description
 
 
-def _target(ctx: Any, event: str) -> str | None:
+def handles(ctx: Any, event: str) -> bool:
+    """지금 단계에서 이 사건으로 갈 곳이 있음."""
+    return _target(ctx, event) is not None
+
+
+def _target(ctx: Any, event: str) -> Transition | None:
     stage = current(ctx)
     for t in stage.transitions:
         if t.event == event and t.guard(ctx):
-            return t.target
-    for s in STAGES.values():
-        if s.enter_on == event and s.name != stage.name and (ANY in s.enter_from or stage.name in s.enter_from):
-            return s.name
+            return t
+    if not stage.final:
+        for s in STAGES.values():
+            if event in s.enter_on and s.name != stage.name:
+                return Transition(event, s.name, forward=True)
     return None
 
 
-async def _move(ctx: Any, target: str, event: str, tool: str | None) -> None:
+async def _move(ctx: Any, t: Transition, step: Step) -> None:
     state = ctx.flow
-    prev = state.stage
-    if target == RETURN:
-        target, state.return_to = state.return_to or start_stage(ctx), None
+    prev, target = state.stage, t.target
+    if t.action:
+        t.action(ctx)
+    if target == RETURN:  # RESUME_TASK: 저장해 둔 업무 단계로(고정 엣지 없이)
+        back = state.resume or {}
+        target = back.get("stage") or start_stage(ctx)
+        state.task = back.get("task", state.task)
+        state.resume = None
     elif STAGES[target].subflow:
-        if not STAGES[prev].subflow:
-            state.return_to = prev
+        if not STAGES[prev].subflow:  # 이미 QnA·상담원 흐름 안이면 덮어쓰지 않는다
+            state.resume = {"task": state.task, "stage": prev}
     else:
-        state.return_to = None
-    state.stage = target
-    state.history.append({"at": time.time(), "from": prev, "to": target, "event": event, "tool": tool})
+        state.resume = None
+    if not step.moved:
+        state.say = []
+    say = _key(ctx, t.say)
+    state.say += _keys(say)
+    state.say_asks = bool(say) and t.asks
+    state.stage, state.variant, state.pending, state.reasked, state.correcting = target, None, None, False, None
+    state.entered_ms = ctx.now_ms()
+    if STAGES[target].task:
+        state.task = STAGES[target].task
+    state.history.append({"at": time.time(), "ms": state.entered_ms, "from": prev, "to": target, "event": step.event,
+                          "tool": step.tool})
     if STAGES[target].on_enter and inspect.isawaitable(done := STAGES[target].on_enter(ctx, prev)):
         await done
 
@@ -261,12 +357,12 @@ def summary(ctx: Any) -> dict:
 
 
 def progress_text(ctx: Any, max_chars: int) -> str:
-    """음성 모델에 thinking.append로 줄 "다음에 물을 것 + 기록된 값". max_chars를 넘지 않는다."""
+    """음성 모델에 thinking.append로 줄 "다음에 할 말 + 기록된 값". max_chars를 넘지 않는다."""
     texts = ctx.texts
     nxt = next_text(ctx)
     m = missing(ctx)
     # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다
-    then = texts.progress_then.format(next2=field_text(ctx, m[1]).format(**ctx.text_vars())) if len(m) > 1 else ""
+    then = texts.progress_then.format(next2=render(ctx, field_key(ctx, m[1]))) if len(m) > 1 else ""
     items = ctx.recorded()
     for cut in (None, 40, 24, 12, 6, 0):
         shown = [(k, v if cut is None else v[:cut]) for k, v in items] if cut != 0 else []

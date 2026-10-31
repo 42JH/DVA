@@ -3,13 +3,15 @@
 import json
 
 import pytest
-from conftest import CALLER, FULL_ORDER, FakeBackend, make_call, run
+from conftest import FULL_ORDER, FakeBackend, make_call, run
+from test_flow import orders_db
 
+from app import address
 from app.dispatcher import dispatch
-from app.flow import engine
-from app.flow.stages.subflows import HELD
 from app.live_session import function_tool_names, load_live_toml
 from app.tools._base import TOOLS, normalize_phone
+
+SERVER_ONLY = {"cancel_order", "modify_order"}  # 서버만 부르거나(취소) 쓰지 않는(수정 보류) 도구
 
 
 def call_tool(call, name, args, call_id="c1"):
@@ -22,24 +24,6 @@ def at(stage, db=None, **order):
     for k, v in order.items():
         setattr(call.order, k, v)
     return call
-
-
-@pytest.fixture
-def held():
-    """보류한 조회·수정·취소 단계를 이 테스트에서만 흐름에 넣는다(도구 코드가 계속 동작하는지 확인)."""
-    engine.STAGES.update({s.name: s for s in HELD})
-    engine.build()
-    yield
-    for s in HELD:
-        del engine.STAGES[s.name]
-    engine.build()
-
-
-def old_orders(db):
-    """보류한 도구가 쓰는 옛 계약의 주문(가짜 백엔드 메모리)."""
-    db.orders += [{"order_no": "Q000001", "caller_phone": CALLER, "receiver_name": "이영희", "status": "received"},
-                  {"order_no": "Q000002", "caller_phone": "01099999999", "receiver_name": "남", "status": "received"}]
-    return "Q000001", "Q000002"
 
 
 # --- 레지스트리 ---
@@ -56,12 +40,13 @@ def test_all_tool_schemas_are_strict():
 def test_live_toml_function_tools_exist():
     names = function_tool_names(load_live_toml())
     assert names and all(n in TOOLS for n in names)
-    assert set(names) == set(TOOLS)  # 등록된 도구를 모두 쓴다
+    assert set(names) == set(TOOLS) - SERVER_ONLY  # 백엔드 모델은 서버 전용 도구를 고를 수 없다
 
 
 def test_action_tools_require_customer_confirmed():
     for name in ("modify_order", "cancel_order"):
         assert "customer_confirmed" in TOOLS[name].args.model_fields
+    assert "operation_id" in TOOLS["cancel_order"].args.model_fields  # 쓰기마다 작업 번호
 
 
 # --- 전화번호 ---
@@ -90,19 +75,18 @@ def test_unknown_tool_and_bad_args_and_not_allowed():
     bad = call_tool(call, "record_order", {"sender_name": 123})
     assert bad["ok"] is False and bad["error"] == "인수 오류"
     assert call_tool(call, "record_order", {"hacker": "x"})["ok"] is False
-    not_allowed = call_tool(call, "cancel_order", {"order_no": "Q000001", "customer_confirmed": True})
+    not_allowed = call_tool(call, "cancel_order", {"order_seq": 1, "order_parcel_seq": 2, "customer_confirmed": True,
+                                                   "operation_id": "op"})
     assert not_allowed["ok"] is False and "쓸 수 없는" in not_allowed["error"]
-    assert not_allowed["state"]["stage"] == "collecting"
+    assert not_allowed["state"]["stage"] == "A_NEW_ORDER"
 
 
-def test_tool_exception_becomes_error_result(held):
-    db = FakeBackend()
-
-    async def boom(*a, **k):
+def test_tool_exception_becomes_error_result(monkeypatch):
+    async def boom(text):
         raise RuntimeError("secret internal detail")
 
-    db.list_orders = boom
-    out = call_tool(at("lookup", db), "lookup_orders", {})
+    monkeypatch.setattr(address, "correct", boom)
+    out = call_tool(make_call(), "record_order", {"sender_address": "서울"})
     assert out["ok"] is False and out["error"] == "내부 오류"
     assert "secret" not in json.dumps(out, ensure_ascii=False)
 
@@ -113,18 +97,18 @@ def test_record_order():
     call = make_call()
     out = call_tool(call, "record_order", {"sender_name": "김철수", "sender_phone": "공일공 일이삼사 오육칠팔"})
     assert out["ok"] and call.order.sender_phone == "01012345678"
-    assert out["state"]["missing"][0] == "sender_address"
+    assert out["state"]["stage"] == "A_REGISTER_SENDER" and out["state"]["missing"][0] == "sender_address"
 
 
 def test_record_order_invalid_phone_not_saved_but_rest_recorded():
     call = make_call()
-    out = call_tool(call, "record_order", {"sender_name": "김철수", "sender_phone": "공일공 일이삼"})
-    assert out["ok"] is False and "sender_phone" in out["error"]
-    assert call.order.sender_name == "김철수" and call.order.sender_phone is None
+    out = call_tool(call, "record_order", {"receiver_name": "이영희", "receiver_phone": "공일공 일이삼"})
+    assert out["ok"] is False and "receiver_phone" in out["error"]
+    assert call.order.receiver_name == "이영희" and call.order.receiver_phone is None
 
 
-def test_record_order_not_allowed_outside_collecting_and_confirming():
-    for stage in ("after_order", "recent_offer", "find_origin", "ending"):
+def test_record_order_not_allowed_outside_order_steps():
+    for stage in ("HUB", "C_CHOICE", "D_AFTER_ANSWER", "RAG", "END_CALL"):
         assert call_tool(at(stage), "record_order", {"other_item": "옷"})["ok"] is False
 
 
@@ -139,6 +123,15 @@ def test_record_order_items_and_call_fields():
     assert call_tool(call, "record_order", {"small_box_count": -1})["ok"] is False  # 범위 밖은 스키마에서 거절
 
 
+def test_pickup_time_must_be_future_with_timezone():
+    call = make_call()
+    for bad in ("2020-01-01T10:00:00+09:00", "2099-01-01T10:00:00", "내일 오전"):
+        out = call_tool(call, "record_order", {"pickup_at": bad})
+        assert out["ok"] is False and "수거" in out["retry"] and call.pickup_at is None
+    call_tool(call, "record_order", {"pickup_at": "2099-01-01T01:00:00Z"})
+    assert call.pickup_at == "2099-01-01T10:00:00+09:00"  # 한국 시간으로
+
+
 def test_record_order_address_change_clears_detail():
     call = make_call()
     call_tool(call, "record_order", {"receiver_address": "부산", "receiver_address_detail": "1호"})
@@ -148,31 +141,45 @@ def test_record_order_address_change_clears_detail():
     assert call.order.receiver_address_detail is None
 
 
-def test_lookup_modify_cancel_scoped_to_caller(held):
-    db = FakeBackend()
-    mine, other = old_orders(db)
-    call = at("modify", db)
-    assert [o["order_no"] for o in call_tool(call, "lookup_orders", {})["orders"]] == [mine]
-    args = {k: None for k in FULL_ORDER} | {"receiver_name": "책", "customer_confirmed": True}
-    assert call_tool(call, "modify_order", args | {"order_no": other})["ok"] is False  # 다른 발신번호의 주문
-    assert call_tool(call, "modify_order", args | {"order_no": mine, "customer_confirmed": False})["ok"] is False
-    assert call_tool(call, "modify_order", args | {"order_no": mine, "receiver_phone": "010"})["ok"] is False
-    assert call_tool(call, "modify_order", args | {"order_no": mine.lower()})["ok"] is True
-    assert db.orders[0]["receiver_name"] == "책"
-
-    call = at("cancel", db)
-    assert call_tool(call, "cancel_order", {"order_no": other, "customer_confirmed": True})["ok"] is False
-    assert call_tool(call, "cancel_order", {"order_no": mine, "customer_confirmed": False})["ok"] is False
-    assert call_tool(call, "cancel_order", {"order_no": mine, "customer_confirmed": True})["ok"] is True
-    assert db.orders[0]["status"] == "cancelled" and db.orders[1]["status"] == "received"
+def test_lookup_is_scoped_to_caller_and_filters_by_receiver():
+    call = at("C_FIND_RECENT", orders_db())
+    out = call_tool(call, "lookup_orders", {"receiver_name": "이영희"})
+    assert out["ok"] and out["found"] == 1 and call.lookup["orders"][0]["receiver_name"] == "이영희"
+    call = at("C_FIND_RECENT", orders_db())
+    call_tool(call, "lookup_orders", {"receiver_name": None})
+    assert [o["receiver_name"] for o in call.lookup["orders"]] == ["박민수", "이영희"]  # 다른 고객의 주문은 없다
 
 
-def test_lookup_without_caller(held):
+def test_lookup_without_caller_is_a_failure():
     call = make_call(caller=None)
-    call.flow.stage = "lookup"
-    assert call_tool(call, "lookup_orders", {})["ok"] is False
+    call.flow.stage = "C_FIND_RECENT"
+    out = call_tool(call, "lookup_orders", {"receiver_name": "이영희"})
+    assert call.lookup["failed"] and "다시 한 번 확인해 드릴까요" in out["state"]["next"]
+
+
+def test_cancel_is_scoped_to_caller_and_needs_confirmation():
+    db = orders_db()
+    call = at("C_CANCEL", db)
+    seqs = [(o["orderSeq"], o["parcels"][0]["orderParcelSeq"]) for o in db.orders]
+    args = {"order_seq": seqs[2][0], "order_parcel_seq": seqs[2][1], "customer_confirmed": True, "operation_id": "op1"}
+    assert call_tool(call, "cancel_order", args)["ok"] is False  # 다른 고객의 주문
+    assert db.orders[2]["parcels"][0]["status"] == "ACTIVE"
+    mine = {"order_seq": seqs[1][0], "order_parcel_seq": seqs[1][1]}
+    assert call_tool(call, "cancel_order", {**args, **mine, "customer_confirmed": False})["ok"] is False
+    assert call_tool(call, "cancel_order", {**args, **mine, "operation_id": "op2"})["ok"] is True
+    assert db.orders[1]["parcels"][0]["status"] == "CANCELLED" and call.running_ops["op2"]["status"] == "done"
 
 
 def test_get_state():
     out = call_tool(make_call(), "get_state", {})
-    assert out["ok"] and out["state"]["stage"] == "collecting" and "record_order" in out["state"]["tools"]
+    assert out["ok"] and out["state"]["stage"] == "A_NEW_ORDER" and "record_order" in out["state"]["tools"]
+
+
+def test_match_pins_only_in_matching_steps():
+    assert call_tool(make_call(), "match_pins", {"name": "이영희"})["ok"] is False
+    call = at("B_DEST_MATCH", FakeBackend())
+    call.set_pin_role("destination")
+    out = call_tool(call, "match_pins", {"name": "이영희"})
+    assert out["ok"] and out["state"]["stage"] == "B_DEST_MATCH"  # 핀이 없고 이름만 말했으면 주소를 묻는다
+    out = call_tool(call, "match_pins", {"place": "대구 중구 동성로 1"})
+    assert out["ok"] and out["state"]["stage"] == "A_RECEIVER_HUB"  # 이름·주소로도 없으면 새 받는 분

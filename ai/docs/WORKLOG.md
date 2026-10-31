@@ -1,5 +1,10 @@
 # 작업 기록
 
+## 2026-10-31 LangGraph 재구성 브랜치에 develop-ai(FAQ 관리 a0b4f37) 병합 충돌 해결
+
+- 충돌 4곳(`backend_api.py` docstring, `mock_backend.py` `faqs` 필드, `spec/backend-api.md` 인증 문단, WORKLOG)은 양쪽 내용을 합쳤다.
+- 자동 병합된 `config.py`에서 `ServerConfig._commit_after_pause`가 새로 들어온 `FaqSyncConfig` 안으로 붙어 설정 로드가 깨졌다. `ServerConfig`로 되돌렸다. 전체 577개 테스트 통과.
+
 ## 2026-10-31 최신 develop-ai 통합·커밋/병합 준비
 
 - 사용자가 Jira를 반영한 커밋과 develop-ai 병합을 요청했다. 현재AI변경을 stash a3845b6으로 보존하고 작업브랜치를 최신origin/develop-ai e6ecf6b로 전진시킨뒤 적용했다. WORKLOG 충돌1건은 양쪽 기록을 모두 보존했다. 기존 stash/tmp/private는 유지했다.
@@ -740,6 +745,7 @@
 - 증상: 고객이 "오사카로 택배 보낼 수 있나요"라고 묻자 음성 모델이 위임 → 백엔드는 `get_state`만 부르고 답을 돌려주지 않음 → "확인해보고 안내드리겠습니다" 뒤 약 50초 대기, 이후 "가입부터 도와드릴까요?" 같은 엉뚱한 말. 기록 0건.
 - 원인(추정): 서버 기록 요청(`record_heard`)이 고객 말마다 5번 나갔다. 첫 요청은 음성 모델의 위임보다 0.3초 먼저, 나머지는 위임된 백엔드 응답 진행 중에 `response.create`를 보냈다(spec에 "미확인"으로 적혀 있던 경우). FAQ처럼 주문 정보가 아닌 말도 넘겼다.
 - 바꾼 것: 설정 `[listener] record_heard`(기본 false)로 끔. 코드는 유지. 켠 상태의 기존 테스트는 설정을 켜고 돌게, 꺼져 있으면 보내지 않는 테스트 추가(320개 통과). `spec/sideband.md`.
+
 ### 2026-10-30 FAQ 관리 1단계 구현: 알림 영속 접수
 
 - feature/S15P31D109-123-faq-management에서 실제 BE 계약의 POST /internal/faqs/refresh와 AI_FAQ_TOKEN 인증을 구현했다. INSERT/DELETE1~100건, UPDATE1건, UUID/정수 범위/중복/추가 필드를 엄격히 검증한다.
@@ -831,3 +837,101 @@
 - 첫 통합 실행에서 기존 시간 초과 테스트의 재시도도50ms로 묶여1건 실패했다. 고정 sleep 대신 스레드 시작/해제/완료 이벤트로 순서를 제어하고 재시도 전에 정상1.5초 설정을 복원해 불안정한 테스트를 고쳤다. 운영 제한을 완화한 변경은 아니다. 이후 전체489개, 손상 원문 경계 보강 후490개가 통과했다.
 - spec/faq-sync.md·계획서·work.md를 갱신했다. 논리 행/포인트 제거와 과거 MD/백업/WAL의 포렌식 소거는 구분하며, 이미 모델에 전달하거나 발화한 말은 소급 회수하지 않는다. 단일 프로세스/소비자 및 FAQ 번호 미재사용 전제다.
 - 다음은 FIFO 자동 소비자/실제 등록 길이 검증기/운영 검색과 리랭킹 후 반환 연결이다. 수신은 기본 비활성, 기존 MD 검색 유지이며 실제 운영 서버/API/비밀값/유료 임베딩·커밋·푸시·배포는 변경하지 않았다. 기존 langchain-community 경고1건은 숨기지 않았다.
+
+## 2026-10-30 (LangGraph 흐름 전면 재구성, `spec/LANGGRAPH_REBUILD.md`)
+
+### 바꾼 것
+- 통화 흐름을 flow_final.drawio(지시서 §4~§6)대로 교체: 노드 42개, 이름 = 다이어그램 ID. 단계 정의 `app/flow/stages/`를 `entry`(진입·HUB·END_CALL)·`new_order`(A)·`order`(B)·`lookup_orders`(C)·`qna`(D) 다섯 파일로 다시 씀. 옛 단계(collecting·confirming·after_order·recent_offer·find_*·address·handoff·ending·HELD) 삭제.
+- 엔진(`app/flow/engine.py`)은 LangGraph 구조(사건 하나 = 실행 한 번, 통화 객체를 context로)를 유지하고 넓힘: 전이 문구(`say`)와 단계 질문(`ask`), 같은 단계 예외(`STAY`), 확정 지연(`commit` → `COMMIT`), 사건 넘김(`forward`), 복귀(`resume` + `RETURN`, 고정 엣지 없음), 끝내는 단계(`final`), 진입 시각(`entered_ms`), 정정 중 다시 묻기. `MAX_HOPS` 10.
+- 판별(`app/listener.py`): 출력 스키마에 전역 의도(question·restricted·correction·wait·end)와 정정 항목(`slot`) 추가, 전역 의도 먼저. §2.5: 판별 리비전(`heard_rev`, 판별 중에 온 말이 지워지던 문제도 함께 고침), 질문 핵심 구간을 듣기 전 답(`[core]`, 한 번 다시 묻기), 늦게 온 꼬리 조각·듣지 않는 단계의 말 따로 쌓기, 확정 지연 멈춤·다시 재기, 정정. 옛 `answer_failures`→상담원 제안, `quit` 의도 삭제.
+- sideband: `watch_flow`(확정 지연·검색 대기·쌓인 말 판별), 서버 실행 도구(취소)와 통화 종료 시 쓰기 결과 기다리기, 마무리 인사 바로잡기(`instructions.append`).
+- 도구: `match_pins` 새로(핀 매칭 결과 분기), `lookup_orders`(받는 분 성함), `cancel_order`(서버만 실행·작업 번호·재시도 전 조회), `search_manual`(RAG Yes/No 사건), `record_order`(주소 확정 흡수·정정 감지·지난 수거 일시). `live.toml` 백엔드 도구에서 `cancel_order`·`modify_order` 뺌, `match_pins` 넣음.
+- 문구 `prompts/flow.toml` 새로(`[say]` 지시서 ID별 글자 그대로, `[note]`, `[core]`, `[status_names]` 등), `voice.md`·`backend.md`를 새 흐름에 맞춤(서비스 질문 직접 답 금지·스스로 끝내지 않기·값 바꾸지 않기, 위임할 것). 설정 `[flow]` 새로, `[rag] min_score`(선택).
+- 문서: `spec/flow.md`·`scenario.md`(구현 결정만)·`sideband.md`·`tools.md`·`backend-api.md`·`address.md`·`server-config.md`, AGENTS.md. Studio 그래프도 새 엔진에 맞춤.
+
+### 확인한 것
+- Phase 0: 진입 경로 셋(① `sideband.py:100`→`listener.py:77`→`listener.py:188`, ② `sideband.py:91`→`dispatcher.py:50`, ③ `sideband.py:204`)을 실행 추적으로 확인한 뒤 인터페이스는 유지.
+- SDK 타입으로 `session.input/output_transcript.delta`의 `start_ms`·`end_ms`(세션 타임라인 ms), `session.instructions.append`(500토큰, Responses 위임에서 `delegation_id` null) 확인.
+- 테스트 340개 통과(§8 시나리오 25건 포함, 시각을 쓰는 sideband 테스트 12회 반복 통과). 실제 OpenAI·PBX·백엔드는 부르지 않음.
+
+### 남은 것(결정 대기)
+- 지시서 §10 보완사항 28건: 택배 담기 전 최종 확인 없음(안전장치 충돌), 핀 매칭을 도구에 맡긴 위험, §2.5(1)과 시나리오 16 모순, 운임·현장 결제 값·조회/취소 API·핀 날짜·상담원 가능 여부 데이터 없음 등.
+- 실제 통화 확인: 받아쓰기 시각 지연, `commit_delay_ms` 적정값, 출력 받아쓰기 숫자 표기, 판별과 검색의 순서.
+- 개인 개발로그 경로(`C:/Users/SSAFY/Desktop/자율/개발로그.md`)가 없어 적지 못함.
+
+## 2026-10-31 (관제 화면: 상태 그래프)
+
+### 바꾼 것
+- 관제 화면에 "그래프" 버튼: 단계 정의의 전이로 그린 Mermaid 그림에 선택한 통화의 지금 노드(파랑)·거쳐 온 노드(옅은 파랑)를 칠하고, 지금 노드로 스크롤한다. SSE로 단계가 바뀔 때만 다시 그린다.
+- API `/monitor/api/graph`(인증 뒤). 흐름별 묶음을 위해 `engine.GROUPS`(단계 → 정의 모듈)를 추가.
+
+### 확인한 것
+- 전체 테스트 341개 통과(그래프 API 테스트 1개 추가). 생성한 Mermaid 글을 mermaid@11.4.1로 브라우저에서 그려 보고 칠하기·스크롤 확인.
+
+### 남은 것
+- Mermaid를 CDN(jsdelivr)에서 받으므로 관제 화면을 보는 PC가 인터넷에 닿아야 그림이 나온다.
+
+## 2026-10-31 (흐름 개정 반영: dva_mvp_flow.drawio)
+
+### 바꾼 것
+- 지시서(`spec/LANGGRAPH_REBUILD.md`) 개정 반영. 기존 고객 인사가 기존 출발지 확인 질문(`B_GREET_CHOICE`)이 됨: 예 → 바로 접수, 아니오 → "무엇을 도와드릴까요?" → HUB, 조회·취소 용건 → 조회.
+- B 흐름: 출발지 핀 매칭 7개 노드 삭제. `B_ORIGIN_ROUTE`(기존 출발지 / 새 출발지) → `B_ORIGIN_CHANGE`(보내는 분은 그대로, 주소만) → `B_LOAD_RECENT` → `B_DEST_CONFIRM_Q`("이번에도 {도착지 주소}로 보내시나요?") → 아니오면 도착지 핀 매칭.
+- 도착지 핀 매칭: 말한 이름·장소를 합쳐 찾고, 없는데 한쪽만 말했으면 빠진 쪽을 묻는다. 받는 분 확인 아니오(B11) → "{수신인}님으로 저장된 다른 배송지가 없으니 새로 접수하겠습니다." → 수신인 정보 Hub. 핀이 없으면 말한 이름·주소(숫자가 있는 장소만)를 가져간다. 최근 N개(`[flow] pin_recent_count`=5) 핀 먼저.
+- A 흐름: 보내는 분 전화번호 질문 삭제(발신번호로 등록). `A_RECEIVER_HUB`(받는 분 성함·연락처·주소 중 빈 것만) 추가, `A_REGISTER_RECEIVER`는 등록만.
+- 최근 접수 1건: 이번 통화에서 담은 택배, 없으면 백엔드 고객 확인의 최근 접수(`CallerContext.recent_origin`·`recent_destination`, 가짜 백엔드만 채움).
+- 첫 인사도 질문을 다 듣기 전 "예"는 다시 묻는다(받아쓰기 전 세션 시각을 0으로).
+- 보완사항을 지시서 §10에서 `spec/LANGGRAPH_REVIEW.md`로 옮기고 이번 결정 9건과 새 항목(29~32)을 적음. AGENTS.md·spec 참조 수정.
+
+### 확인한 것
+- 전체 테스트 356개 통과(DeprecationWarning 오류 처리). 시나리오 1~4(3-1·3-2 포함)·15·16·20 다시 작성, sideband 테스트 6회 반복 통과.
+
+### 남은 것
+- 백엔드 고객 확인 응답의 최근 접수 필드(미정). 받기 전에는 실제 통화에서 기존 고객도 출발지 없이 인사하고 새 출발지부터 받는다(보완사항 29).
+- 보완사항 1(택배 담기 전 최종 확인 없음) 등 결정 대기 항목은 그대로.
+
+## 2026-10-31 (백엔드 주문·결제·취소 연동 규격 반영, S15P31D109-138)
+
+### 바꾼 것
+- 백엔드 계약 원문을 `develop-backend`에서 다시 받아 옴: `spec/ai-order-billing-integration.md`(새), `spec/order-address-history.md`(새), `spec/orders.md`·`spec/ai-pbx-recordings.md`(갱신). `spec/backend-api.md`는 AI가 쓰는 방식으로 다시 씀.
+- 고객 확인에 통화(`providerCallId`·`incomingAt`)를 보내고 통화 번호(`callSessionSeq`)·결제 자격(`availablePaymentMethods`)을 받는다. 등록 고객이면 이전 접수 주소(`GET /api/customers/{id}/addresses`)로 기존 출발지·최근 도착지를 채운다.
+- 조회·취소를 새 API로: 목록 → 주문 상세로 택배 단위(받는 분·주소·상태), 상세 취소(`POST /api/orders/{id}/parcels/cancel`, 204·409·404). `call_session_seq` 헤더. 받는 분 성함은 URL에 넣지 않고 서버가 거른다. 취소 가능은 COLLECTING·notPaid, 결제가 끝난 뒤는 C7_LOCKED.
+- 배송비: 서버 요금표 `[fare]`로 택배별 `notifiedPrice`·`totalAmount`. 값이 비어 있으면 운임을 말하지 않고 미완료로 넘김(지금 비어 있음).
+- 결제 방식: 후불 자격이 하나면 그것, 둘이면 `A_PAYMENT`에서 묻고(고른 답은 확정 지연 뒤 정함), 없으면 개인 카드. A6 뒷문장을 방식별 안내로, 개인 카드 결제 대기(notPaid)는 END_NOT_PAID.
+- 통화 결과 응답 200(같은 키 재요청) 처리, 새 상태(notPaid·PAID·SUBMITTING·ACCEPTED·SUBMISSION_FAILED) 안내 표. 가짜 백엔드를 새 계약으로 다시 씀.
+
+### 확인한 것
+- 전체 테스트 368개 통과. 응답 필드·헤더·정렬은 `origin/develop-backend`의 DTO·저장소 코드로 확인(규격서에 없던 목록·상세·주소 이력의 응답 모양).
+
+### 남은 것
+- 요금표 값(운영 결정). 정해지기 전에는 모든 접수가 미완료로 넘어간다.
+- 수거 시각 계약 충돌(보완사항 33), 개인 카드 결제 메시지 미연결(34), 주소 이력이 ACCEPTED 주문만이라 결제 대기 고객은 최근 접수가 없음(29).
+- 실제 백엔드로 통화 확인은 하지 않음. `call_session_seq`(밑줄 헤더)가 프록시를 거치면 버려질 수 있음.
+
+## 2026-10-31 (운임표·수거 시각·신규 고객 등록 시점)
+
+### 바꾼 것
+- 운임표: `config/server.toml` `[fare]`에 유인 지점 요금(서류 3,850·소형 4,950·중형 6,050·대형 7,150원). 방문수거는 유인 지점 요금으로 결정. 이제 요금표로 운임을 안내하고 COMPLETE를 보낸다.
+- 수거 시각: 사용자가 전달한 S15P31D109-138 연동 규격(최초 확정 시 미래 시각 필수)으로 결정. 백엔드 원문을 옮긴 `spec/ai-order-billing-integration.md`·`spec/orders.md`의 "서버가 결제 완료 + 1시간" 문장을 고치고 AI 팀 결정이라고 표시. 코드는 그대로(고객이 말한 시각을 보냄).
+- 신규 고객은 보내는 분 정보(성함·주소)를 다 말한 순간 `POST /api/customers`로 등록하고 보내는 곳을 개인 주소록(`POST /api/customers/{id}/pins`)에 저장, 이때부터 기존 고객(결과는 customerSeq). 실패하면 신규로 계속.
+- 기존 출발지: 접수 완료 주문이 없으면 본인 주소록 주소(발신번호의 핀)로.
+
+### 확인한 것
+- 전체 테스트 373개 통과. 고객 등록·주소록 API의 요청·응답과 통화 고객 확인 방식(발신번호로 매번 찾음)은 `origin/develop-backend` 코드로 확인.
+
+### 남은 것
+- 백엔드 문서·구현의 수거 시각 규칙을 연동 규격과 맞추기(백엔드 팀).
+- 등록 뒤 보내는 곳을 고쳐도 주소록은 고치지 않는다(TODO(flow)). 기타 물품(규격 없음)은 운임을 몰라 미완료.
+
+## 2026-10-31 (관제 화면 수정·통화 로그 확인)
+
+### 바꾼 것
+- 관제 화면 스크립트 문법 오류 수정(그래프 추가 때 줄바꿈이 문자열에 들어가 화면 전체가 멈춤). 그래프 라이브러리(CDN)를 못 받아도 관제는 동작. 인라인 스크립트 문법 검사 테스트(`node --check`, node 없으면 건너뜀).
+- 관제 화면에 접수 완료해 담은 택배의 확정 내용(항목·운임)·운임 합계, 고객(신규·등록·고객번호)·수거 희망·결제 방식을 표시. 받는 중인 택배는 담은 뒤 비워져 확정 내용이 안 보이던 문제.
+- 신규 고객 등록(보내는 분 정보 등록 완료 시 백엔드로 한 번) 결과를 로그에 남김(고객번호·주소록 저장 여부만).
+
+### 확인한 것
+- 재빌드 뒤 통화 2건 로그: 1번은 늦게 온 말 조각이 받는 곳 주소 정정으로 판별돼 다시 물었고, 다시 기록된 주소("인동구길", 길 번호를 한글로)를 못 찾아 좌표 없이 담겨 미완료. 2번은 B6 뒤 판별이 제한된 요청으로 빠져 종료(받아쓰기 없이는 원인 불명). 매뉴얼 검색은 리랭커 접속 시간 초과.
+- 컨테이너가 가짜 백엔드(BACKEND_MOCK)로 떠 있어 실제 백엔드로는 아무것도 가지 않음.
+
+### 남은 것
+- 확정된 주소를 다시 기록하다 못 찾으면 지우지 말고 다시 묻기, 늦은 조각의 정정 판별 기준, 도구 호출 로그(이름·사건만) — 결정 대기.

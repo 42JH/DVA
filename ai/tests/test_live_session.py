@@ -29,7 +29,7 @@ def test_build_session_fills_server_owned_parts(tmp_path):
 
 @pytest.mark.parametrize("change, message", [
     (lambda t: t.replace('type = "responses"', 'type = "other"'), "delegation.type"),
-    (lambda t: t.replace('name = "cancel_order"', 'name = "launch_rocket"'), "launch_rocket"),
+    (lambda t: t.replace('name = "lookup_orders"', 'name = "launch_rocket"'), "launch_rocket"),
     (lambda t: t.replace('instructions_file = "voice.md"', 'instructions_file = "nope.md"'), "nope.md"),
     (lambda t: t + "\n[broken", "live.toml"),
     (lambda t: t.replace('model = "gpt-6-luna"', ""), "model"),

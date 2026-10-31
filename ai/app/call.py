@@ -1,4 +1,5 @@
-"""통화 하나 = 통화 객체 하나. 임시 주문·진행 상태·도구 기록·발신번호를 모두 여기에 둔다(spec/concurrency.md)."""
+"""통화 하나 = 통화 객체 하나. 임시 주문·진행 상태·도구 기록·발신번호를 모두 여기에 둔다(spec/concurrency.md).
+LANGGRAPH_REBUILD §3의 CallState는 이 객체와 진행 상태(engine.FlowState)에 나눠 있다(필드 이름은 기존 관례)."""
 
 import asyncio
 import logging
@@ -12,11 +13,12 @@ from app.backend_api import BackendError, result_body
 from app.config import ServerConfig, Texts
 from app.events import bus
 from app.flow import engine
-from app.order import COUNT_FIELDS, ORDER_FIELDS, PHONE_FIELDS, Order, Place
+from app.order import COUNT_FIELDS, ORDER_FIELDS, PHONE_FIELDS, Order, Place, match_places, pin_labels, words
 
 log = logging.getLogger(__name__)
 
 MAX_CALLER_DIGITS = 15
+MAX_AGENT_DELTAS = 200  # 질문을 들었는지 볼 때 쓰는 상담원 받아쓰기 조각(최근 것만)
 
 
 def caller_from_headers(headers: list[Any]) -> str | None:
@@ -44,23 +46,25 @@ def mask_phone(phone: str | None) -> str:
     return phone[:3] + "*" * max(len(phone) - 7, 0) + phone[-4:] if len(phone) > 7 else "*" * len(phone)
 
 
-
 KST = timezone(timedelta(hours=9))
-# 결제 방식(백엔드 paymentMethodType) → 고객에게 말하는 이름
-PAYMENT_NAMES = {"credit": "정산", "groupBilling": "그룹카드(기업)", "billing": "개인카드"}
 COUNT_NAMES = {"document_count": "서류", "small_box_count": "소형 박스", "medium_box_count": "중형 박스",
                "big_box_count": "대형 박스"}
-# 택배가 아니라 통화(주문)에 하나인 질문 항목. 첫 택배를 확인하기 전에 받는다(끊겨도 확인된 택배를 접수할 수 있게)
-CALL_FIELDS = ("customer_name", "pickup_at", "payment_method")
+# 정정 항목(판별의 slot): 상세주소는 주소에, 규격별 수량·기타 물품은 물품에 묶는다
+SLOT_OF = {"sender_address_detail": "sender_address", "receiver_address_detail": "receiver_address",
+           "other_item": "item", **{c: "item" for c in COUNT_FIELDS}}
+SHOWN = ORDER_FIELDS + ("pickup_at",)  # 기록 값으로 보여 줄 항목(수거 시각은 통화에 하나)
 
 
 def iso_utc(ts: int | float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _region(address: str | None) -> str:
-    """주소 앞 두 낱말(시·구 정도). 최근 배송을 말로 짧게 가리킬 때."""
-    return " ".join((address or "").split()[:2])
+def _unique(places: list[Place | None]) -> list[Place]:
+    out: list[Place] = []
+    for p in places:
+        if p is not None and p not in out:
+            out.append(p)
+    return out
 
 
 class Call:
@@ -73,46 +77,68 @@ class Call:
         self.cfg = cfg
         self.texts = texts
         self.backend = backend  # 백엔드 API(app/backend_api.py)
-        self.order = Order()  # 받는 중인 택배 하나
+        self.order = Order()  # 받는 중인 택배 하나(slots)
         self.flow = engine.FlowState(stage="")
         self.customer_type = "new"  # new · registered · withdrawn
         self.customer_seq: int | None = None  # 등록 고객 번호(백엔드)
+        self.call_session_seq: int | None = None  # 백엔드 통화 번호(고객 확인에서 받음). 조회·취소의 call_session_seq 헤더
+        self.payment_methods: list[str] = []  # 백엔드가 준 지금 쓸 수 있는 결제 방식(billing · credit · groupBilling)
+        self.recent_pins: list[Place] = []  # 이전 접수의 도착지(최근 것부터). 도착지 핀 후보 맨 앞
         self.registered_name: str | None = None
         self.usage_types: list[str] = []
-        self.recent: Order | None = None  # 이번 통화에서 앞서 확인한 택배(다음 택배의 "최근 배송")
-        # 발신번호 주인의 주소록. 출발지·도착지 구분이 없어 두 쪽 모두 같은 목록을 본다
-        pins: list[Place] = []
-        self.places: dict[str, list[Place]] = {"origin": pins, "destination": pins}
+        self.pins: list[Place] = []  # 발신번호 주인의 주소록(개인·기업 PIN). 출발지·도착지 구분이 없다
+        # 백엔드가 준 가장 최근 접수 1건의 출발지·도착지({기존 출발지}, "이번에도 {도착지 주소}로")
+        self.recent: dict[str, Place | None] = {"origin": None, "destination": None}
+        self.new_origin_requested = False  # 인사 질문에서 기존 출발지가 아니라고 함 → 다음 접수는 B_ORIGIN_CHANGE
+        self.places: dict[str, list[Place]] = {"destination": []}  # 이번 택배의 도착지 핀 후보(B_LOAD_RECENT)
         self.reset_order_flags()
         # 통화(주문)에 하나인 값. 백엔드 주문 하나에 이번 통화의 택배들이 parcels로 묶인다
-        self.customer_name: str | None = None  # 미등록 고객의 성함(보내는 분 번호가 발신번호면 보내는 분 성함)
+        self.customer_name: str | None = None  # 미등록 고객의 성함(MVP: 보내는 분 성함)
         self.pickup_at: str | None = None
         self.payment_method: str | None = None
-        self.parcels: list[Order] = []  # 고객이 확인한 택배(통화 끝에 한 번에 접수)
-        self.cancelled = False  # 고객이 접수를 그만둠
+        self.payment_pick: str | None = None  # 결제 방식 질문에 고객이 고른 것(확정 지연 뒤 payment_method가 된다)
+        self.parcels: list[Order] = []  # 접수 완료(A_DONE)한 택배(통화 끝에 한 번에 접수)
         self.result_key = str(uuid.uuid4())  # 통화 결과의 Idempotency-Key. 재시도에도 같은 키
         self.result_body: dict | None = None  # 처음 보낸 본문(같은 키로 다시 확인할 때 그대로)
         self.result: dict | None = None  # 백엔드 응답 data(status·parcelNo)
         self.result_lock = asyncio.Lock()
-        self.lock = asyncio.Lock()  # 한 통화 안의 도구 호출은 순서대로
+        # §2.4 도와드리지 못한 횟수, 직전 안내에 상담원 제안이 있었는지(D9 조건)
+        self.fail_count = 0
+        self.agent_offered = False
+        # 조회·취소(C): 찾은 택배 목록·지금 확인 중인 것, 확인한 택배, 취소 실행 상태
+        self.lookup: dict = {}
+        self.target_order: dict | None = None
+        self.cancel_state: str | None = None  # running · failed
+        self.cancel_attempts = 0
+        self.running_ops: dict[str, dict] = {}  # operation_id → {tool, args, status}: 쓰기 도구 기록(중복 취소 방지)
+        self.server_tool: tuple[str, dict, str] | None = None  # 서버가 실행할 도구(이름, 인수, 결과 없이 실패했을 때 사건)
+        self.write_tasks: set[asyncio.Task] = set()  # 실행 중인 서버 쓰기 도구(통화가 끝나도 결과를 기록한 뒤 끝낸다)
+        self.rag_deadline = 0.0  # 질문 뒤 검색 결과를 기다리는 끝(monotonic)
+        self.search_entry_at = 0.0  # 검색 결과가 먼저 와서 QnA로 들어간 시각(monotonic). 같은 질문을 두 번 처리하지 않게
+        self.lock = asyncio.Lock()  # 한 통화 안의 도구 호출·판별 반영은 순서대로
         self.hangup_requested = asyncio.Event()
         self.refer_requested = asyncio.Event()
         self.last_output_at = 0.0  # 음성 출력 이벤트를 마지막으로 본 시각(monotonic)
-        self.last_input_at = 0.0
         self.task: asyncio.Task | None = None
         self.last_progress = ""
-        # 고객 답 판별(app/listener.py)
+        self.refer_failed = False
+        # 고객 말 판별(app/listener.py, §2.5)
+        self.heard_rev = 0  # 고객 말 조각이 올 때마다 1 증가(판별 리비전): 늦게 온 옛 판별은 버린다
         self.heard_stage = ""  # heard_text를 모은 단계
         self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
+        self.heard_start: int | None = None  # 그 말의 첫 조각 시작(세션 타임라인 ms). 질문을 다 들었는지 판단
+        self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
         self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
-        self.answer_failures = 0  # 연달아 실패한 답 처리(접수·저장 등) 수
-        # 상담원 연결: offer = 처리할 수 없는 요청·반복 실패로 서버가 먼저 제안, refer_failed = 전환 실패
-        self.handoff_variant: str | None = None
-        self.refer_failed = False
+        # 지난 단계의 말(전환 전에 한 말의 늦은 조각, 듣지 않는 단계에서 쌓인 말): 전역 의도로만 판별한다
+        self.side: dict = {"stage": "", "text": "", "off": False, "since": 0.0, "flushing": False}
+        self.reask = False  # 질문을 다 듣기 전 답이라 받지 않았음: 같은 질문을 다시 하게 한다
         self.listen_timer: asyncio.Task | None = None
-        self.listen_seq = 0  # 마지막으로 시작한 판별 번호(늦게 온 옛 판별은 버린다)
+        self.side_timer: asyncio.Task | None = None
         self.listen_tasks: set[asyncio.Task] = set()
+        self.clock_offset: float | None = None  # 서버 시계(ms) - 세션 타임라인(ms)의 가장 작은 값
+        self.agent_deltas: list[tuple[str, int | None, int | None]] = []  # 상담원 받아쓰기 조각(글, 시작, 끝)
+        self.drift_fixed = ""  # 그래프와 다른 마무리 인사를 바로잡은 단계(단계마다 한 번)
         # 관제용 기록
         self.status = "accepting"  # accepting · active · ended · failed
         self.started_at = time.time()
@@ -137,18 +163,24 @@ class Call:
     # --- 시작 ---
 
     async def prepare(self) -> None:
-        """발신번호로 고객(등록·미등록·탈퇴)과 주소록을 백엔드에서 받고 시작 단계로 들어간다.
-        백엔드 실패면 신규 고객으로 진행. 탈퇴 고객은 신규로 다루지 않고 상담원에게 넘긴다."""
+        """발신번호로 고객(등록·미등록·탈퇴)과 주소록을 백엔드에서 받고 시작 단계(CALLER_ID)로 들어간다.
+        백엔드 실패면 신규 고객으로 진행. 탈퇴 고객은 신규로 다루지 않고 상담원에게 넘긴다(IS_REGISTERED)."""
         if self.caller:
             try:
-                context = await self.backend.caller_context(self.caller)
+                # 통화 식별(같은 통화는 같은 값으로 재요청): 백엔드가 통화를 만들고 통화 번호를 준다
+                call = {"providerCallId": self.session_id, "incomingAt": self.incoming_at} if self.incoming_at else None
+                context = await self.backend.caller_context(self.caller, call, self.cfg.flow.pin_recent_count)
+                self.call_session_seq, self.payment_methods = context.call_session_seq, context.payment_methods
                 if context.status == "REGISTERED":
                     self.customer_type, self.customer_seq = "registered", context.customer_seq
                     self.registered_name, self.usage_types = context.name, context.usage_types
-                    self.places["origin"].extend(context.places)
+                    self.pins, self.recent_pins = list(context.places), list(context.recent_destinations)
+                    # 접수 완료된 주문이 없으면(개인 카드 결제 대기뿐·등록만 한 고객) 본인 주소록의 주소가 기존 출발지(§9)
+                    own = next((p for p in self.pins if p.phone == self.caller), None)
+                    self.recent = {"origin": context.recent_origin or own,
+                                   "destination": context.recent_destinations[0] if context.recent_destinations else None}
                 elif context.status == "WITHDRAWN":
                     self.customer_type = "withdrawn"
-                    self.request_refer()
             except Exception:
                 log.exception("고객 조회 실패 %s", self.session_id)
                 self.add_error("고객 조회 실패")
@@ -156,67 +188,223 @@ class Call:
         self.notify()
 
     def reset_order_flags(self) -> None:
-        """주문 하나를 받는 동안만 쓰는 검색·확인 상태. 새 주문을 시작할 때 비운다."""
-        self.dest_misses = 0  # 저장된 받는 곳을 못 찾은 횟수
-        self.dest_variant: str | None = None  # find_destination 안내(need_region · need_detail · need_more)
-        self.origin_variant: str | None = None  # find_origin 안내(which)
-        self.origin_checked = False  # 이번 주문에서 "보내는 곳이 지난번과 같은지"를 이미 물었음
-        self.from_saved: set[str] = set()  # 저장된 배송지·최근 배송으로 채운 항목(번호·상세주소는 읽지 않게 가린다)
-        # 주소 확정(address 단계): 새로 기록돼 아직 주소DB로 확정하지 않은 주소 항목, 항목별 확정 결과(관제용)
+        """택배 하나를 받는 동안만 쓰는 상태. 새 택배를 시작할 때 비운다."""
+        self.from_saved: set[str] = set()  # 주소록·앞 택배로 채운 항목(번호·상세주소는 읽지 않게 가린다)
+        # 주소 확정: 새로 기록돼 아직 주소DB로 확정하지 않은 주소 항목, 못 찾아 한 번 다시 물은 주소 항목, 결과(관제용)
         self.address_pending: set[str] = set()
-        self.address_retry: set[str] = set()  # 못 찾아 한 번 다시 물은 주소 항목(택배마다)
+        self.address_retry: set[str] = set()
         self.address_results: dict[str, dict] = {}
+        # 도착지 핀 매칭: 지금 찾는 쪽(destination), 후보, 아니라고 한 핀, 고객이 말한 받는 분(이름·장소·층/호수)
+        self.pin_role: str | None = None
+        self.pin_candidates: list[Place] = []  # 차이 나는 값으로 다시 물을 후보(DIFF)
+        self.pin_offer: Place | None = None  # 맞는지 확인하는 핀(VERIFY)
+        self.pin_rejected: dict[str, list[Place]] = {"destination": []}
+        self.dest_said: dict[str, str] = {}  # 핀이 없으면 받는 분 정보로 가져간다(B12, 이미 받은 항목은 다시 묻지 않게)
+        self.corrected: tuple[str, str] | None = None  # 마지막으로 고친 항목과 값(정정 확인 문구)
+
+    def new_parcel(self) -> None:
+        self.order = Order()
+        self.reset_order_flags()
 
     def use_place(self, role: str, place: Place) -> None:
-        """저장된 배송지(또는 최근 배송)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
+        """저장된 배송지(또는 앞 택배)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
         self.order.set_place(role, place)
         self.from_saved |= {f"{role}_phone", f"{role}_address_detail"}
+
+    # --- B: 최근 접수·핀 ---
+
+    def recent_place(self, role: str) -> Place | None:
+        """가장 최근 접수 1건의 출발지(origin)·도착지(destination). 이번 통화에서 담은 택배가 가장 최근이다."""
+        if self.parcels:
+            return self.parcels[-1].place("sender" if role == "origin" else "receiver")
+        return self.recent[role]
+
+    def load_pins(self) -> None:
+        """도착지 핀 후보, 최근 것부터: 이번 통화에서 접수한 받는 곳, 이전 접수의 도착지(백엔드 주소 이력), 주소록.
+        주소록은 방향·날짜가 없어 발신번호와 다른 번호의 핀을 앞에 둔다(자기 집보다 남에게 보내는 곳이 먼저).
+        매칭은 앞쪽 flow.pin_recent_count개에서 먼저 찾는다(최근 N개 우선)."""
+        other = sorted(self.pins, key=lambda p: p.phone == self.caller)
+        recent = [p.place("receiver") for p in reversed(self.parcels)]
+        self.places = {"destination": _unique(recent + self.recent_pins + other)}
+
+    def pin_scope(self, role: str) -> list[Place]:
+        """아직 아니라고 하지 않은 핀."""
+        return [p for p in self.places[role] if p not in self.pin_rejected[role]]
+
+    def set_pin_role(self, role: str | None) -> None:
+        if role != self.pin_role:
+            self.pin_role, self.pin_candidates, self.pin_offer = role, [], None
+
+    def pins_found(self, found: list[Place], narrowing: bool = False) -> list[str]:
+        """핀 매칭 결과 → 분기 사건. 여러 개면 앞쪽(최근) 핀부터 몇 개만 후보로 묻는다. 후보 안에서 하나를 고른 것이면
+        나머지 후보는 남겨 둔다(확인에서 아니라고 하면 남은 후보로 다시 묻는다)."""
+        if len(found) == 1:
+            self.pin_offer = found[0]
+            if not narrowing:
+                self.pin_candidates = list(found)
+            return ["pins.one"]
+        self.pin_offer, self.pin_candidates = None, found[:self.cfg.flow.max_pin_options]
+        return ["pins.many" if found else "pins.none"]
+
+    def match_pins(self, name: str | None, place: str | None, detail: str | None) -> list[str]:
+        """앞서 말한 받는 분(이름·장소)과 합쳐 찾는다. 후보를 좁히는 중이면 후보 안에서, 아니면 아직 아니라고 하지 않은
+        핀에서 최근 N개를 먼저, 거기 없으면 전체에서. 못 찾았는데 이름·장소 중 한쪽만 말했으면 다른 쪽을 묻는다(B6 이후 규칙)."""
+        said = self.dest_said
+        said.update({k: v for k, v in (("name", name), ("place", place), ("detail", detail)) if v})
+        name, place, detail = said.get("name"), said.get("place"), said.get("detail")
+        found = match_places(self.pin_candidates, name, place, detail) if len(self.pin_candidates) > 1 else []
+        if found:
+            return self.pins_found(found, narrowing=True)
+        scope = self.pin_scope(self.pin_role)
+        found = match_places(scope[:self.cfg.flow.pin_recent_count], name, place, detail) \
+            or match_places(scope, name, place, detail)
+        if not found and not (name and place):
+            self.pin_offer, self.pin_candidates = None, []
+            return ["pins.ask_place" if name else "pins.ask_name"]
+        return self.pins_found(found)
+
+    def pin_labels(self) -> list[str]:
+        return pin_labels(self.pin_candidates) if len(self.pin_candidates) > 1 else []
+
+    def fill_sender(self) -> None:
+        """보내는 분 = 고객, 연락처 = 발신번호(묻지 않는다). MVP 전제(다이어그램 메모).
+        TODO(flow): 보내는 분이 고객과 다를 수 있다. 발신번호가 없는 통화는 고려하지 않는다(연락처가 비어 미완료 접수)."""
+        o = self.order
+        o.sender_name = o.sender_name or self.registered_name or self.customer_name
+        if o.sender_phone is None and self.caller:
+            o.sender_phone = self.caller
+
+    async def register_customer(self) -> None:
+        """신규 고객이 보내는 분 정보(성함·주소)를 다 말하면 백엔드에 고객으로 등록하고 보내는 곳을 개인 주소록에 저장한다.
+        이때부터 기존 고객으로 다룬다(통화 결과는 고객 번호로, 다음 통화는 이 주소가 기존 출발지, 2026-10-31 결정).
+        실패해도 통화는 신규 고객으로 이어 간다(결과는 이름·발신번호로 보낸다).
+        TODO(flow): 등록 뒤 보내는 곳을 고쳐도 주소록은 고치지 않는다."""
+        o = self.order
+        if self.customer_type != "new" or not (self.caller and self.call_session_seq and o.sender_name):
+            return
+        try:
+            await self.backend.create_customer(o.sender_name, self.caller)  # 이미 있으면 아래 고객 확인으로 번호를 받는다
+            call = {"providerCallId": self.session_id, "incomingAt": self.incoming_at}
+            context = await self.backend.caller_context(self.caller, call, 0)
+            if context.status != "REGISTERED":
+                return
+            self.customer_type, self.customer_seq, self.registered_name = "registered", context.customer_seq, context.name
+            self.payment_methods = context.payment_methods
+            if o.sender_geo:  # 주소록은 주소 9개 항목이 다 있어야 받는다
+                await self.backend.create_pin(self.call_session_seq, self.customer_seq, o, "sender", "보내는 곳")
+            # 이름·번호·주소는 개인정보라 남기지 않는다
+            log.info("고객 등록 %s 고객번호=%s 주소록=%s", self.session_id, self.customer_seq, bool(o.sender_geo))
+            self.notify()
+        except Exception:
+            log.exception("고객 등록 실패 %s", self.session_id)
+            self.add_error("고객 등록 실패")
+
+    async def carry_dest_said(self) -> None:
+        """도착지 핀이 없을 때(B12·B11) 고객이 말한 받는 분 이름·장소를 받는 분 정보로 가져간다. 주소는 record_order처럼
+        주소DB로 정한다(못 찾으면 받는 곳 주소를 다시 묻는다). 아니라고 한 핀의 값은 가져가지 않는다. 한 번만.
+        장소는 번지·건물번호(숫자)가 있을 때만 주소로 본다: "해운대"·"엄마 집" 같은 말을 주소DB가 엉뚱한 주소로 고르지 않게."""
+        from app.tools.record_order import resolve
+
+        said, o = self.dest_said, self.order
+        self.dest_said = {}
+        if said.get("name") and o.receiver_name is None:
+            o.receiver_name = said["name"]
+        if said.get("place") and re.search(r"\d", said["place"]) and o.receiver_address is None:
+            o.receiver_address, o.receiver_address_detail = said["place"], said.get("detail")
+            self.address_pending.add("receiver_address")
+            await resolve(self)
+
+    # --- C: 조회·취소 ---
+
+    async def find_orders(self, name: str | None, forgot: bool = False) -> list[str]:
+        """이 통화 고객의 택배(주문 상세)를 받는 분 성함으로 찾는다(최근 주문 lookup_limit건 안에서, 최근 것부터).
+        결과가 분기 사건이다(§2.1). 통화 번호가 없으면(고객 확인 실패) 조회할 수 없다."""
+        self.lookup.update(name=name, forgot=forgot, searched=True, index=0, orders=[], failed=False)
+        try:
+            if not self.call_session_seq:
+                raise BackendError("통화 번호 없음")
+            orders = await self.backend.find_parcels(self.call_session_seq, self.cfg.backend.lookup_limit)
+        except Exception:
+            log.exception("택배 조회 실패 %s", self.session_id)
+            self.lookup.update(failed=True, fails=self.lookup.get("fails", 0) + 1)
+            return ["lookup.failed"]
+        if name:
+            said = "".join(words(name))
+            orders = [o for o in orders if said and said in "".join(words(o.get("receiver_name")))]
+        self.lookup["orders"] = orders
+        return ["lookup.found" if orders else "lookup.none"]
+
+    def start_cancel(self) -> None:
+        """확인한 택배의 취소를 서버가 실행하게 한다(app/progress.py after_change). 쓰기마다 작업 번호(§2.5(5))."""
+        self.cancel_attempts += 1
+        self.cancel_state = "running"
+        op = f"{self.session_id}:cancel:{self.cancel_attempts}"
+        args = {"order_seq": self.target_order["order_seq"], "order_parcel_seq": self.target_order["order_parcel_seq"],
+                "customer_confirmed": True, "operation_id": op}
+        self.server_tool = ("cancel_order", args, "cancel.failed")
+
+    # --- §2.5(4) 정정 ---
+
+    def start_correction(self, slot: str) -> list[str]:
+        """고객이 이미 말한 항목을 고친다고 함(값은 백엔드가 record_order로 기록). 그 항목만 고치고 현재 단계로 돌아온다.
+        기존 고객(B)이 최근 접수·주소록에서 가져온 출발지·도착지를 바꾸면 출발지는 새 출발지 받기(B_ORIGIN_CHANGE),
+        도착지는 핀 매칭부터 다시 한다(이전 매칭 결과는 버린다)."""
+        if self.flow.task not in ("new_order", "order") or "record_order" not in engine.allowed_tools(self):
+            return []  # 접수 업무 밖(조회·취소, 취소 실행 뒤 포함)·QnA 중에는 받지 않는다
+        role = {"sender_address": "origin", "receiver_address": "destination"}.get(slot)
+        side = {"origin": "sender", "destination": "receiver"}.get(role)
+        if self.flow.task == "order" and role and engine.handles(self, f"correct.{role}") \
+                and f"{side}_phone" in self.from_saved:
+            # 출발지는 보내는 분(고객)을 그대로 두고 주소만, 도착지는 받는 분까지 다시 받는다
+            parts = ("address", "address_detail", "geo") if role == "origin" else \
+                ("name", "phone", "address", "address_detail", "geo")
+            for part in parts:
+                setattr(self.order, f"{side}_{part}", None)
+            self.from_saved -= {f"{side}_phone", f"{side}_address_detail"}
+            if role == "destination":
+                self.pin_rejected[role], self.pin_candidates, self.pin_offer, self.dest_said = [], [], None, {}
+            return [f"correct.{role}"]
+        self.flow.correcting = slot
+        return []
+
+    def snapshot_slots(self) -> dict:
+        return {**{f: getattr(self.order, f) for f in Order.model_fields}, "pickup_at": self.pickup_at}
+
+    def note_changes(self, before: dict) -> None:
+        """이미 채운 항목이 바뀌었으면(정정) 고친 값을 다음 진행 상태에서 한 번 확인한다(§2.5(4))."""
+        after = self.snapshot_slots()
+        for name, old in before.items():
+            # 못 찾아 지운 주소는 정정 확인 대신 그 항목을 구간 예외 문구로 다시 묻는다
+            if old is None or after[name] in (None, old) or name.endswith("_geo"):
+                continue
+            slot = SLOT_OF.get(name, name)
+            self.corrected = (slot, self._shown(slot) or "")
+            if "CORRECTED" not in self.flow.notice:
+                self.flow.notice.append("CORRECTED")
+        if self.flow.correcting and self.corrected and self.corrected[0] == self.flow.correcting:
+            self.flow.correcting = None
 
     # --- 상태 엔진이 쓰는 것 ---
 
     def field_done(self, name: str) -> bool:
-        if name in CALL_FIELDS:
-            return name not in self.call_fields_due()
-        return self.order.has(name)
+        return self.pickup_at is not None if name == "pickup_at" else self.order.has(name)
 
-    def call_fields_due(self) -> list[str]:
-        """아직 받지 않은 통화 항목. 성함은 미등록 고객이고 보내는 분 번호가 발신번호와 다를 때만 묻는다."""
-        due = []
-        if self.customer_type != "registered" and not self.customer_name:
-            if self.caller and self.order.sender_phone == self.caller and self.order.sender_name:
-                self.customer_name = self.order.sender_name
-            else:
-                due.append("customer_name")
-        if self.pickup_at is None:
-            due.append("pickup_at")
-        if self.payment_method is None:
-            due.append("payment_method")
-        return due
+    def now_ms(self) -> int:
+        """지금의 세션 타임라인 시각(ms). 받아쓰기 시각에서 추정한다. 아직 받은 것이 없으면 통화 시작(0):
+        그 전에 옮기는 것은 첫 인사까지뿐이라 첫 질문도 다 듣기 전 답을 가린다(§2.5(1))."""
+        return 0 if self.clock_offset is None else int(time.monotonic() * 1000 - self.clock_offset)
 
-    def field_variants(self, field: str) -> list[str]:
-        """항목 질문 문구를 고를 상황(앞선 것 우선): 못 찾아 다시 묻는 주소, 고객 유형."""
-        return (["retry"] if field in self.address_retry else []) + [self.customer_type]
-
-    def payment_options(self) -> dict[str, str]:
-        """이 고객이 쓸 수 있는 결제 방식. 정산은 공통, 그룹카드는 기업 소속, 개인카드는 개인 고객(백엔드가 다시 검사)."""
-        out = {"credit": PAYMENT_NAMES["credit"]}
-        if "COMPANY" in self.usage_types:
-            out["groupBilling"] = PAYMENT_NAMES["groupBilling"]
-        if self.customer_type != "registered" or "PERSONAL" in self.usage_types:
-            out["billing"] = PAYMENT_NAMES["billing"]
-        return out
-
-    def stage_variant(self, stage: str) -> str | None:
-        ending = ("refer_failed" if self.refer_failed else "handoff" if self.refer_requested.is_set()
-                  else "cancelled" if self.cancelled else self.submit_variant())
-        return {"find_destination": self.dest_variant, "find_origin": self.origin_variant,
-                "handoff": self.handoff_variant, "ending": ending}.get(stage)
+    def observe_clock(self, end_ms: int | None) -> None:
+        """받아쓰기는 말보다 늦게 오므로 (받은 시각 - 끝 시각)의 가장 작은 값이 실제 차이에 가장 가깝다."""
+        if end_ms is not None:
+            offset = time.monotonic() * 1000 - end_ms
+            self.clock_offset = offset if self.clock_offset is None else min(self.clock_offset, offset)
 
     def recorded(self) -> list[tuple[str, str]]:
         """음성 모델·백엔드에 보여 줄 기록 값. 저장된 곳에서 온 번호·상세주소와 발신번호는 값 대신 표시만 한다
         (고객이 직접 불러 주지 않은 값을 소리 내 읽지 않게. 실제 값은 임시 주문에 그대로 있다)."""
         labels, out = self.texts.labels, []
-        for f in ORDER_FIELDS + CALL_FIELDS:
+        for f in SHOWN:
             v = self._shown(f)
             if v is None:
                 continue
@@ -244,27 +432,41 @@ class Call:
                 return None
             d = datetime.fromisoformat(self.pickup_at)
             return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute:02d}분"
-        if f == "payment_method":
-            return self.payment_method and PAYMENT_NAMES[self.payment_method]
-        if f == "customer_name":
-            return self.customer_name
         return getattr(o, f)
 
     def text_vars(self) -> dict:
-        biz = self.cfg.business
-        r = self.recent
+        now = datetime.now(KST)
+        lookup = self.lookup
+        orders, index = lookup.get("orders") or [], lookup.get("index", 0)
+        found = orders[index] if index < len(orders) else {}
+        target = self.target_order or {}
+        slot, value = self.corrected or (self.flow.correcting, "")
+        origin, destination = self.recent_place("origin"), self.recent_place("destination")
+        rejected = self.pin_rejected["destination"]
+        verifying = self.pin_offer or (rejected[-1] if rejected else None)
         return {
-            "company": biz.company_name,
+            "company": self.cfg.business.company_name,
             "parcel_no": (self.result or {}).get("parcelNo") or "",
             "parcel_count": len(self.parcels),
-            "now": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
-            "payment_options": " / ".join(self.payment_options().values()),
-            "goodbye_message": biz.goodbye_message,
-            "recent_origin": f"{r.sender_name} 님, {_region(r.sender_address)}" if r else "",
+            "now": now.strftime("%Y-%m-%d %H:%M"),
             "customer_name": self.display_name() or "없음",
-            "saved_origins": " / ".join(p.address for p in self.places["origin"][:3]),
             "caller": self.caller or "알 수 없음",
             "customer_type": self.texts.customer_types[self.customer_type],
+            # 다이어그램 문구의 {…}
+            "성함": self.display_name() or "",
+            "기존 출발지": origin.address if origin else "",
+            "도착지 주소": destination.address if destination else "",
+            "수신인": verifying.name if verifying else "",  # 확인 중인 핀, 아니라고 한 뒤(B11)에는 그 핀의 받는 분
+            "후보": "·".join(self.pin_labels()),
+            "운임": f"{fare:,}" if (fare := self.parcel_fare(self.order)) else "",
+            "월": now.month,
+            "일": now.day,
+            "받는 분": found.get("receiver_name") or lookup.get("name") or "",
+            "주소": found.get("receiver_address") or "",
+            "배송 상태": self.texts.status_names.get(target.get("status"), target.get("status") or ""),
+            "업무": self.texts.task_names.get(self.flow.task or "", ""),
+            "항목": self.texts.correction_labels.get(slot or "", ""),
+            "새 값": value,
         }
 
     def display_name(self) -> str | None:
@@ -290,7 +492,8 @@ class Call:
                 call = {"providerCallId": self.session_id, "callerPhoneNumber": self.caller,
                         "incomingAt": self.incoming_at}
                 self.result_body = result_body(outcome, call, self.customer_seq, self.customer_name, self.caller,
-                                               self.payment_method, self.pickup_at, parcels)
+                                               self.payment_method, self.pickup_at, parcels,
+                                               [self.parcel_fare(p) for p in parcels])
             try:
                 self.result = await self.backend.submit_result(self.result_body, self.result_key)
             except BackendError as e:
@@ -302,26 +505,53 @@ class Call:
             return self.result
 
     def submit_variant(self) -> str | None:
-        """접수를 시도했으면 마무리 안내: ACCEPTED만 접수 완료, 그 밖(처리 중·확인 필요·실패·미완료)은 확인 후 연락."""
+        """접수를 시도했으면 마무리 안내: ACCEPTED만 접수 완료, 개인 카드 결제 대기(notPaid)는 결제 뒤 접수,
+        그 밖(결제 완료 후 접수 중·접수 실패·미완료·응답 없음)은 확인 후 연락."""
         if self.result_body is None:
             return None
-        return "accepted" if (self.result or {}).get("status") == "ACCEPTED" else "pending"
+        return {"ACCEPTED": "accepted", "notPaid": "not_paid"}.get((self.result or {}).get("status"), "pending")
 
     def end_outcome(self) -> str:
-        """통화가 끝날 때 보낼 결과. 상담원에게 넘긴 통화는 확인된 택배가 있어도 접수하지 않고 미완료로 넘긴다."""
+        """통화가 끝날 때 보낼 결과. 상담원에게 넘긴 통화는 접수한 택배가 있어도 접수하지 않고 미완료로 넘긴다."""
         if self.refer_requested.is_set():
             return "INCOMPLETE"
-        if self.cancelled:
-            return "CANCELLED"
         return "COMPLETE" if self.parcels and self.complete_ready() else "INCOMPLETE"
 
     def complete_ready(self) -> bool:
-        """접수(COMPLETE)에 필요한 값이 다 있음. 주소의 지번·좌표 등을 못 찾았으면 임의 값 없이 미완료로 둔다."""
+        """접수(COMPLETE)에 필요한 값이 다 있음. 주소의 지번·좌표 등이나 배송비(요금표)를 모르면 임의 값 없이 미완료로 둔다."""
         return bool(self.payment_method and self.pickup_at and (self.customer_seq or self.customer_name)
-                    and all(p.sender_geo and p.receiver_geo for p in self.parcels))
+                    and all(p.sender_geo and p.receiver_geo and self.parcel_fare(p) for p in self.parcels))
+
+    # --- 배송비·결제 방식 ---
+
+    def parcel_fare(self, order: Order) -> int | None:
+        """택배 하나의 배송비(notifiedPrice) = 규격별 개수 × 요금표([fare]). 요금이 없는 규격·기타 물품이 있거나
+        물품이 없으면 모른다(None): 금액을 지어 말하거나 보내지 않는다.
+        shortcut: 규격·개수만 본다(거리·무게 할증 없음). 백엔드나 운영이 요금 규칙을 주면 그것으로 바꾼다."""
+        fare = self.cfg.fare
+        total = 0
+        for name, field_ in (("document", "document_count"), ("small_box", "small_box_count"),
+                             ("medium_box", "medium_box_count"), ("big_box", "big_box_count")):
+            count = getattr(order, field_) or 0
+            if count:
+                if getattr(fare, name) is None:
+                    return None
+                total += count * getattr(fare, name)
+        return total if total and not order.other_item else None
+
+    def payment_choice(self) -> str | None:
+        """결제 방식: 후불(월결제 credit·부서 그룹결제 groupBilling) 자격이 하나면 그것, 둘 다면 None(고객에게 묻는다),
+        후불 자격이 없으면 개인 카드(billing). 백엔드가 접수 때 자격을 다시 검사한다.
+        TODO(flow): 다이어그램은 결제 분기 보류(MVP 현장 결제)인데 백엔드에 현장 결제가 없어 정한 규칙(2026-10-31 결정)."""
+        postpaid = [m for m in ("credit", "groupBilling") if m in self.payment_methods]
+        if len(postpaid) == 1:
+            return postpaid[0]
+        return None if postpaid else "billing"
 
     async def finish(self) -> None:
-        """통화가 끝나면 결과를 한 번 보낸다. 이미 보낸 통화는 같은 키로 확인만(접수 결과가 확정되지 않았을 때)."""
+        """통화가 끝나면 결과를 한 번 보낸다. 이미 보낸 통화는 같은 키로 확인만(접수 결과가 확정되지 않았을 때).
+        확정 지연 중인 전이는 실행하지 않고 버린다(§2.5(8))."""
+        self.flow.pending = None
         await self.send_result(self.result_body["outcome"] if self.result_body else self.end_outcome())
 
     # --- 도구가 요청하는 통화 조작(실행은 sideband 쪽) ---
@@ -337,6 +567,7 @@ class Call:
     def add_transcript(self, speaker: str, delta: str, start_ms: int | None = None, end_ms: int | None = None) -> None:
         """문장 경계·item ID가 없으므로 말하는 쪽의 마지막 말풍선에 이어 붙인다. 겹쳐 말해도 쪼개지지 않게,
         그 말풍선이 맨 끝이거나 직전 조각과의 간격이 짧으면 이어 붙이고, 아니면 새 말풍선(말 차례가 바뀜)."""
+        self.observe_clock(end_ms)
         last = next((b for b in reversed(self.transcript) if b["speaker"] == speaker), None)
         gap_ok = start_ms is not None and last is not None and last["end_ms"] is not None \
             and start_ms - last["end_ms"] <= self.cfg.monitor.bubble_gap_ms
@@ -347,6 +578,7 @@ class Call:
             self.transcript.append({"speaker": speaker, "text": delta, "at": time.time(), "end_ms": end_ms})
         if speaker == "agent":
             self.last_output_at = time.monotonic()
+            self.agent_deltas = [*self.agent_deltas[-MAX_AGENT_DELTAS + 1:], (delta, start_ms, end_ms)]
         elif speaker == 'customer':
             self.last_input_at = time.monotonic()
         self.notify()
@@ -367,17 +599,21 @@ class Call:
             "session_id": self.session_id,
             "caller": mask_phone(self.caller),
             "customer_type": self.customer_type,
+            "customer_seq": self.customer_seq,
             "status": self.status,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "end_reason": self.end_reason,
             "pbx_ended": self.pbx_ended,
             "stage": self.flow.stage,
+            "task": self.flow.task,
+            "fail_count": self.fail_count,
             "history": self.flow.history,
             "order": self.order.model_dump(),
             "address": self.address_results,
-            "fare": None,  # 백엔드가 확인한 금액이 없으면 숫자를 만들지 않는다.
-            "parcels": [p.model_dump() for p in self.parcels],
+            "fare": self.parcel_fare(self.order),  # 서버 요금표로 계산한 받는 중인 택배의 배송비(모르면 None)
+            # 접수 완료(A_DONE)해 담은 택배: 받는 중인 택배(order)는 담은 뒤 비우므로 확정 내용은 여기서 본다
+            "parcels": [{**p.model_dump(), "fare": self.parcel_fare(p)} for p in self.parcels],
             "payment_method": self.payment_method,
             "pickup_at": self.pickup_at,
             "result": self.result,
