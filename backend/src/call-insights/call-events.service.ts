@@ -186,15 +186,11 @@ export class CallEventsService {
       // 같은 묶음의 발화가 UUID 정렬 뒤에 있어도 참조할 수 있다.
       for (const result of faqResults) {
         const references = await this.repository.faqReferences(client, id, result);
-        if (
-          !references.faqExists ||
-          references.questionSpeaker === null ||
-          references.answerSpeaker === null
-        )
+        if (references.questionSpeaker === null || references.answerSpeaker === null)
           throw new ApiException(
             404,
             'NOT_FOUND',
-            '참조 FAQ 또는 같은 통화의 발화를 찾을 수 없습니다.',
+            '같은 통화의 질문·답변 발화를 찾을 수 없습니다.',
           );
         if (references.questionSpeaker !== 'CUSTOMER' || references.answerSpeaker !== 'AI')
           throw new ApiException(

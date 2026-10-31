@@ -502,3 +502,19 @@ test('OpenAPI documents management authentication, three required fields, 204 re
   ]);
   assert.doesNotMatch(JSON.stringify(f.logs), /private-unanswered-original|rtc_manage_|Bearer /);
 });
+
+test('converting an unanswered question to an existing FAQ question is rejected atomically', async () => {
+  const input = body();
+  await f.createdId(input);
+  const q = await question();
+  const original = await row(q.id),
+    before = await f.counts();
+  await f.error(
+    await convert(q.id, { ...input, category: '기타', answer: '다른 답변' }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  assert.deepEqual(await row(q.id), original);
+  assert.deepEqual(await f.counts(), before);
+  assert.equal((await successes(q.id, 'UNANSWERED_QUESTION_REGISTERED')).length, 0);
+});

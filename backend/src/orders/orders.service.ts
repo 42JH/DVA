@@ -1,3 +1,4 @@
+import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { Injectable, Logger } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
@@ -86,6 +87,23 @@ export class OrdersService {
     if (call.customerSeq === null)
       throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
     return call.customerSeq;
+  }
+
+  async adminList(query: AdminOrderListQueryDto) {
+    if (
+      (query.from !== undefined && !isZonedDate(query.from)) ||
+      (query.to !== undefined && !isZonedDate(query.to)) ||
+      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
+      );
+    return new ListResponse(
+      await this.repository.adminList(this.database.pool, query),
+      query.limit,
+    );
   }
 
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
@@ -355,6 +373,8 @@ export class OrdersService {
     callSessionHeader?: string,
   ): Promise<UpdatedOrderDto> {
     assertOrderUpdate(input);
+    if (adminId === null && input.removeParcelSeqs !== undefined)
+      throw new ApiException(403, 'FORBIDDEN', '배송상세 제거는 관리자만 할 수 있습니다.');
     const callId = this.callId(adminId, callSessionHeader);
     return this.write(async (client) => {
       const call = callId === null ? undefined : await this.repository.call(client, callId);
@@ -383,8 +403,8 @@ export class OrdersService {
         (call?.phone && call.phone !== customer.phoneNumber)
       )
         throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
-      if (order.status !== 'COLLECTING')
-        throw new ApiException(409, 'INVALID_STATE', 'COLLECTING 주문만 수정할 수 있습니다.');
+      if (adminId === null && order.status !== 'COLLECTING')
+        throw new ApiException(409, 'INVALID_STATE', 'AI는 COLLECTING 주문만 수정할 수 있습니다.');
       if (order.version !== input.expectedVersion)
         throw new ApiException(
           409,
@@ -392,21 +412,47 @@ export class OrdersService {
           '주문이 변경되었습니다. 최신 내용을 조회해 주세요.',
         );
 
+      if (adminId !== null) {
+        if (
+          order.status !== 'COLLECTING' &&
+          input.paymentMethodType !== undefined &&
+          input.paymentMethodType !== order.paymentMethodType
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '확정된 주문의 결제수단은 변경할 수 없습니다.',
+          );
+        if (await this.payments.isApproving(client, id))
+          throw new ApiException(
+            409,
+            'REQUEST_IN_PROGRESS',
+            '결제 승인 처리 중에는 수정할 수 없습니다.',
+          );
+        await client.query("SELECT set_config('dva.admin_order_edit', $1, true)", [String(id)]);
+      }
       const parcels = await this.repository.parcelReferences(client, id);
       const byId = new Map(parcels.map((parcel) => [parcel.orderParcelSeq, parcel]));
       let position = parcels.at(-1)?.parcelPosition ?? 0;
+      for (const parcelId of input.removeParcelSeqs ?? [])
+        if (!byId.has(parcelId))
+          throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
       for (const change of input.parcels ?? []) {
         const previous =
           change.orderParcelSeq === undefined ? undefined : byId.get(change.orderParcelSeq);
         if (change.orderParcelSeq !== undefined && !previous)
           throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
-        if (previous?.status === 'CANCELLED')
+        if (adminId === null && previous?.status === 'CANCELLED')
           throw new ApiException(409, 'INVALID_STATE', '취소된 주문 상세는 수정할 수 없습니다.');
         const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
         if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
-      await this.repository.updateHeader(client, id, input);
+      await this.repository.updateHeader(
+        client,
+        id,
+        adminId === null ? input : { ...input, totalAmount: undefined },
+      );
       for (const change of input.parcels ?? []) {
         if (change.orderParcelSeq !== undefined)
           await this.repository.updateParcel(client, id, change);
@@ -416,6 +462,58 @@ export class OrdersService {
             id,
             ++position,
             orderDraft({ parcels: [change] }).parcels[0],
+          );
+      }
+      for (const parcelId of input.removeParcelSeqs ?? []) {
+        if (byId.get(parcelId)!.status === 'CANCELLED') continue;
+        await this.repository.cancelParcel(client, parcelId);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: 'ADMIN',
+            targetId: parcelId,
+            targetType: 'ORDER_PARCEL',
+            action: 'ORDER_PARCEL_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      if (adminId !== null) {
+        const active = (await this.repository.lockParcels(client, id)).filter(
+          (parcel) => parcel.status === 'ACTIVE',
+        );
+        const sum = active.reduce((amount, parcel) => amount + (parcel.notifiedPrice ?? 0), 0);
+        if (
+          sum > 2147483647 ||
+          (order.status !== 'COLLECTING' && active.some((parcel) => parcel.notifiedPrice === null))
+        )
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            '상세별 배송비와 합계 범위를 확인해 주세요.',
+          );
+        const amount = await this.repository.recalculateAmount(client, id);
+        if (input.totalAmount !== undefined && input.totalAmount !== amount)
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            '주문 총액은 미취소 상세의 배송비 합계와 일치해야 합니다.',
+          );
+        if (order.status === 'notPaid' && order.totalAmount !== amount)
+          await this.payments.replaceRequest(client, id);
+        if (order.totalAmount !== amount)
+          await this.audit.recordSuccess(
+            {
+              actorId: adminId,
+              actorType: 'ADMIN',
+              targetId: id,
+              targetType: 'ORDER',
+              action: 'ORDER_AMOUNT_CHANGED',
+              requestId,
+              metadata: { amountBefore: order.totalAmount, amountAfter: amount },
+            },
+            client,
           );
       }
       if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);

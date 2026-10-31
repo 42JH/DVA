@@ -34,7 +34,7 @@ notPaid에서는 기존 결제 요청을 닫고 새 UUID·남은 합계로 요�
 
 관리자는 ACTIVE OPERATOR/SUPERVISOR/SYSTEM_ADMIN 세션과 허용 Origin을 사용한다. AI는 call_session_seq 헤더의 발신번호와 활성 고객이 일치하는 주문만 취소한다. 진행 중 통화는 같은 고객 범위, 종료된 통화는 이미 연결된 주문 한 건만 허용한다. 잘못된 관리자 쿠키는 AI 호출로 전환하지 않는다. AI 서비스 인증은 기존 MVP 정책을 유지한다.
 
-주문 상세·통화·녹취·감사를 삭제하지 않는다. 디버 접수 전의 내부 취소이며 외부 취소·환불은 지원하지 않는다. notPaid 이후 주문 내용 수정도 불가하다.
+주문 상세·통화·녹취·감사를 삭제하지 않는다. 디버 접수 전의 내부 취소이며 외부 취소·환불은 지원하지 않는다. 관리자 내부 주문 보정은 [PATCH 수정 규칙](order-update.md)을 따르며 이 취소 API의 허용 상태는 그대로다.
 
 AI 요청은 AI, 관리자 요청은 ADMIN(화면 표시 운영자), 24시간 자동 만료는 SYSTEM으로 기록한다. 전체 취소는 ORDER_CANCELLED, 선택 상세는 ORDER_PARCEL_CANCELLED, 금액 변경은 ORDER_AMOUNT_CHANGED에 전후 금액·상세 번호를 남긴다. 자동 만료는 ORDER_CANCELLED에 PAYMENT_EXPIRED 사유와 금액을 남긴다. 실제 운영자 ID·이름은 보존한다.
 

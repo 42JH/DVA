@@ -1,6 +1,6 @@
 # 주문 수집 정보 수정 — ORD-04
 
-관련 Jira: [S15P31D109-61](https://ssafy.atlassian.net/browse/S15P31D109-61). 기준은 API 명세이며, 결제 대기 이후에는 수정할 수 없으며 `COLLECTING` 주문의 정보를 같은 `orderSeq`에 저장한다. 디버 전송·접수 후 수정·취소는 이 API의 범위가 아니다.
+관련 Jira: [S15P31D109-61](https://ssafy.atlassian.net/browse/S15P31D109-61). AI는 `COLLECTING`에서만 수정한다. 관리자는 모든 주문 상태에서 배송상세를 추가·수정·제거하고 같은 `orderSeq`에 저장한다. 주문 상태·접수 번호·결제 완료 기록은 유지하며, 디버 변경 전송·실제 환불·추가 결제는 이번 범위에서 제외한다.
 
 새 AI 상담은 중간에 이 API를 반복 호출하지 않고 수집 완료·중도 종료·취소 결과를 [POST /api/orders](orders.md)에 한 번 전달한다. 이 PATCH는 기존 미완료 주문의 보완 경로로 유지한다.
 
@@ -29,13 +29,14 @@ call_session_seq: 7
 
 ## 변경 규칙
 
-`parcels[].status=CANCELLED`인 상세는 수정할 수 없다. 요청에 취소 상세가 하나라도 포함되면 409 INVALID_STATE로 전체 변경을 롤백한다. 새 상세 추가·미취소 상세 수정은 기존 규칙을 유지한다. [취소 API](order-cancel.md)도 주문 version을 변경하므로 최신 상세를 다시 조회한다.
+AI는 `parcels[].status=CANCELLED`인 상세를 수정할 수 없으며 전체 변경을 409로 롤백한다. 관리자는 취소된 상세의 내용도 정정할 수 있으나 상태를 ACTIVE로 되돌리지 않는다. `removeParcelSeqs`는 관리자 전용이며 실제 행을 보존하고 CANCELLED로 표시한다. 생략한 상세는 유지하고 같은 번호를 수정·제거 목록에 함께 넣으면 400이다. 취소된 상위 주문에 새로 추가한 상세도 CANCELLED로 보존한다. [취소 API](order-cancel.md)도 주문 version을 변경하므로 최신 상세를 다시 조회한다.
 
 | 필드 | 의미 |
 | --- | --- |
 | expectedVersion | 필수. ORD-03 또는 직전 저장 응답의 실제 version |
 | paymentMethodType | credit(월결제) / groupBilling(부서 그룹결제) / billing(개인·기업 개인 카드). 생략하면 유지. 자격은 [최종 접수](order-submit.md) 시 검증 |
-| totalAmount | 전체 결제 대상 합계. 생략 유지, null은 미확인으로 비우기. 최종 확정 시 미취소 상세 배송비 합계와 일치해야 함 |
+| totalAmount | AI는 기존 수집 값. 관리자는 미취소 상세의 notifiedPrice 합계를 서버가 계산하므로 생략 권장. 전달하면 계산 결과와 같아야 하며 불일치 시 422 |
+| removeParcelSeqs | 관리자 전용 제거 번호 배열. 1개 이상·중복 불가·같은 주문 소속 필수. 제거한 행은 이력으로 남음 |
 | parcels[].notifiedPrice | 상세 배송비. 생략 유지, null은 미확인. 최종 확정 시 양의 정수 필수 |
 | pickupRequestedAt | 시간대를 포함한 ISO 8601. 생략하면 유지, null이면 비우기 |
 | parcels[].orderParcelSeq | 있으면 해당 주문의 기존 상세 수정, 없으면 마지막 순번 뒤에 추가 |
@@ -90,9 +91,29 @@ HTTP 200이며 저장한 전체 본문을 다시 보내지 않는다. 반환 버
 | 403 FORBIDDEN | 관리자 권한·Origin, 활성 고객·통화 발신번호·PIN 범위 오류 |
 | 404 NOT_FOUND | 주문·통화 또는 해당 주문 소속 상세 없음 |
 | 409 VERSION_CONFLICT | 저장된 버전과 expectedVersion 불일치 |
-| 409 INVALID_STATE | COLLECTING이 아닌 주문, 통화 연결 충돌, 종료 후 새 연결 |
-| 409 REQUEST_IN_PROGRESS | DB 잠금 획득 대기 2초 초과 |
+| 409 INVALID_STATE | AI의 비 COLLECTING 수정·취소 상세 수정, 확정 주문 결제수단 변경, 통화 연결 충돌, 종료 후 새 연결 |
+| 409 REQUEST_IN_PROGRESS | 결제 승인 진행 중 또는 DB 잠금 획득 대기 2초 초과 |
+| 422 VALIDATION_FAILED | 확정 주문의 미취소 상세 배송비 누락, 합계 int32 초과 또는 전달 총액 불일치 |
 
 `backend`에서 `node scripts/check.cjs`로 빌드·린트·포맷·단위/HTTP·실제 PostgreSQL·Nginx/PBX 회귀를 검증한다. 주문 수정 테스트는 부분 병합, null/0/빈 문자열, 신규 상세, 동시 수정, 실패 롤백, PIN·통화·세션 범위, 종료 후 재조회, Swagger를 포함한다.
 
-기존 orders·order_parcels·version·통화 연결·감사 로그를 사용한다. 새 테이블·migration·의존성은 없으며 실제 AI 컨테이너 호출 및 운영 배포 검증은 별도다.
+기존 orders·order_parcels·version·통화 연결·감사 로그를 사용한다. 새 테이블·의존성은 없으며, 새 앱 전에 030 migration으로 관리자 트랜잭션의 주문별 편집 허용을 적용한다. 실제 AI 컨테이너 호출 및 운영 배포 검증은 별도다.
+
+## 관리자 금액 처리
+
+관리자는 상세 변경과 총액 재계산을 한 DB 트랜잭션으로 저장한다. 상세 요금이 미확인인 COLLECTING은 총액 null, 미취소 상세가 없으면 0원이다. 확정된 주문에는 남은 상세별 양의 정수 요금이 모두 필요하다. 전체 상세를 제거해도 이 수정 API는 상위 주문 상태를 바꾸지 않는다. 결제수단은 COLLECTING에서만 변경할 수 있다.
+
+notPaid의 금액이 달라지면 기존 미완료 결제 요청을 무효화하고 새 UUID·금액으로 교체한다. 최초 만료 시각은 유지한다. 금액이 같으면 결제 요청도 유지하고, 0원이면 새 결제 요청을 만들지 않는다. 이미 시작한 승인은 409로 보호한다. 승인 완료 원본·월 청구 원본·배송/접수 기록은 덮어쓰지 않는다. 이 변경은 내부 주문 금액 보정이며 외부 환불·추가 결제·청구 차액·디버 변경 동기화는 별도다.
+
+~~~json
+{
+  "expectedVersion": 4,
+  "parcels": [
+    { "orderParcelSeq": 101, "notifiedPrice": 3000 },
+    { "destination": { "name": "새 수령인" }, "smallBoxCount": 1, "notifiedPrice": 4000 }
+  ],
+  "removeParcelSeqs": [102]
+}
+~~~
+
+응답은 기존 {data:{version},meta:{requestId}}를 유지한다. 프론트는 GET /api/orders/{id}로 최종 totalAmount·parcels·paymentRequest를 갱신한다. 이력·결제·통화 참조는 삭제하지 않는다.

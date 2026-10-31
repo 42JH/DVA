@@ -65,8 +65,8 @@ test('21: stable pagination, NFC/case search and literal wildcards return matchi
   const ids = [];
   for (const [question, answer] of [
     [`${marker} 가나다`, 'Alpha'],
-    [marker, '특수 %_ 문자'],
-    [marker, '일반 문자'],
+    [marker + ' 특수', '특수 %_ 문자'],
+    [marker + ' 일반', '일반 문자'],
   ])
     ids.push(await f.createdId({ category: '기타', question, answer }));
   const page = async (query, ai = false) => {
@@ -299,21 +299,21 @@ test('21: administrator sessions and Origins protect reads and writes; AI cookie
   const before = await f.counts();
   await f.error(await f.get('/api/faqs', 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
   await f.error(
-    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+    await f.create({ items: [{ category: '기타', question: '질문', answer: '답변' }] }, 0, {
       Cookie: undefined,
     }),
     401,
     'UNAUTHORIZED',
   );
   await f.error(
-    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+    await f.create({ items: [{ category: '기타', question: '질문', answer: '답변' }] }, 0, {
       Origin: undefined,
     }),
     403,
     'FORBIDDEN',
   );
   await f.error(
-    await f.create({ category: '기타', question: '질문', answer: '답변' }, 0, {
+    await f.create({ items: [{ category: '기타', question: '질문', answer: '답변' }] }, 0, {
       Origin: 'https://foreign.invalid',
     }),
     403,
@@ -408,7 +408,7 @@ test('21: audit persistence failure rolls back content and reads never disguise 
   };
   try {
     await f.error(
-      await f.create({ category: '기타', question: f.marker(), answer: '롤백' }),
+      await f.create({ items: [{ category: '기타', question: f.marker(), answer: '롤백' }] }),
       500,
       'INTERNAL_ERROR',
     );
@@ -449,7 +449,7 @@ test('21: FAQ contents persist across application restarts and HTTP logs omit qu
   assert.doesNotMatch(JSON.stringify(f.logs), new RegExp(secret));
 });
 
-test('21: Swagger documents single/bulk management bodies and two read-only AI operations', async () => {
+test('21: Swagger documents one canonical create envelope and two read-only AI operations', async () => {
   const spec = await (await fetch(f.base + '/api/docs-json')).json();
   for (const [path, method] of [
     ['/api/faqs', 'get'],
@@ -465,8 +465,8 @@ test('21: Swagger documents single/bulk management bodies and two read-only AI o
   }
   assert.ok(spec.paths['/api/faqs'].post.responses['204']);
   assert.equal(
-    spec.paths['/api/faqs'].post.requestBody.content['application/json'].schema.oneOf.length,
-    2,
+    spec.paths['/api/faqs'].post.requestBody.content['application/json'].schema.$ref,
+    '#/components/schemas/CreateFaqsDto',
   );
   assert.equal(spec.paths['/api/faqs/{id}'].delete, undefined);
   assert.equal(spec.paths['/api/faqs'].patch, undefined);
@@ -483,4 +483,159 @@ test('21: Swagger documents single/bulk management bodies and two read-only AI o
     'category',
     'question',
   ]);
+});
+
+test('one canonical FAQ create envelope is required for single and multiple entries', async () => {
+  const item = { category: '접수', question: f.marker(), answer: '답변' };
+  const before = await f.counts();
+  for (const body of [item, [item], { items: [] }, { items: [item], ...item }])
+    await f.error(await f.create(body), 400, 'INVALID_REQUEST');
+  assert.deepEqual(await f.counts(), before);
+});
+
+test('FAQ question uniqueness covers normalization, batches, updates and concurrent writes without partial success', async () => {
+  const marker = f.marker();
+  const question = ' ' + marker + '   한글 질문\n';
+  const original = { category: '접수', question, answer: '원본 답변' };
+  const id = await f.createdId(original);
+  const duplicate = {
+    category: '주소',
+    question: marker.toUpperCase() + ' 한글 질문',
+    answer: '다른 답변',
+  };
+  const before = await f.counts();
+  await f.error(await f.create({ items: [duplicate] }), 409, 'DUPLICATE_RESOURCE');
+  await f.error(
+    await f.create({ items: [{ ...original, question: f.marker() }, duplicate] }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  const batchQuestion = f.marker();
+  await f.error(
+    await f.create({
+      items: [
+        { ...original, question: batchQuestion },
+        { ...duplicate, question: batchQuestion.toUpperCase() + ' ' },
+      ],
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  assert.deepEqual(await f.counts(), before);
+  const otherId = await f.createdId({ ...original, question: f.marker() });
+  const other = (await (await f.ai('/' + otherId)).json()).data;
+  const beforeUpdate = await f.counts();
+  await f.error(await f.patch(otherId, duplicate), 409, 'DUPLICATE_RESOURCE');
+  assert.deepEqual((await (await f.ai('/' + otherId)).json()).data, other);
+  assert.deepEqual(await f.counts(), beforeUpdate);
+  assert.equal((await f.patch(id, { ...original, answer: '자기 질문 수정 가능' })).status, 204);
+  assert.equal((await (await f.ai('/' + id)).json()).data.question, question);
+  const racing = { ...original, question: f.marker() };
+  const raceBefore = await f.counts();
+  const results = await Promise.all([
+    f.create({ items: [racing] }),
+    f.create({ items: [racing] }, 1),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [204, 409]);
+  await f.error(
+    results.find((r) => r.status === 409),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  const raceAfter = await f.counts();
+  assert.equal(raceAfter.faqs, raceBefore.faqs + 1);
+  assert.equal(raceAfter.audits, raceBefore.audits + 1);
+  assert.equal(raceAfter.notifications, raceBefore.notifications + 1);
+});
+
+async function faqUniquenessMigration(run) {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const client = await f.pool.connect();
+  const schema = 'question_' + f.marker();
+  try {
+    await client.query('BEGIN');
+    await client.query(`CREATE SCHEMA ${schema}`);
+    await client.query(
+      `CREATE TABLE ${schema}.faq_entries (LIKE public.faq_entries INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY INCLUDING CONSTRAINTS)`,
+    );
+    const sql = readFileSync(
+      join(__dirname, '../migrations/029-faq-question-uniqueness.sql'),
+      'utf8',
+    ).replaceAll('public.faq_entries', schema + '.faq_entries');
+    await run(client, schema, sql);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+}
+
+test('029 reports duplicate FAQ IDs and rolls back without changing any existing content or timestamps', async () => {
+  await faqUniquenessMigration(async (client, schema, sql) => {
+    await client.query(
+      `INSERT INTO ${schema}.faq_entries(question,answer,category,updated_by_admin_user_seq) VALUES('같은 질문','첫 답변','접수',$1),(' 같은   질문 ','다른 답변','주소',$1)`,
+      [f.ids[0]],
+    );
+    const snapshot = async () =>
+      (await client.query(`SELECT * FROM ${schema}.faq_entries ORDER BY faq_entry_seq`)).rows;
+    const before = await snapshot();
+    await client.query('SAVEPOINT duplicate_migration');
+    await assert.rejects(
+      () => client.query(sql),
+      (error) => {
+        assert.equal(error.code, '23505');
+        assert.match(error.message, /Duplicate FAQ question IDs: \[\[1, 2\]\]/);
+        assert.doesNotMatch(error.message, /같은 질문|답변/);
+        return true;
+      },
+    );
+    await client.query('ROLLBACK TO SAVEPOINT duplicate_migration');
+    assert.deepEqual(await snapshot(), before);
+    assert.equal(
+      (
+        await client.query('SELECT to_regclass($1) AS name', [
+          schema + '.faq_entries_question_identity_uq',
+        ])
+      ).rows[0].name,
+      null,
+    );
+  });
+});
+
+test('029 preserves clean FAQ rows and accepts the full 1000-character question limit', async () => {
+  await faqUniquenessMigration(async (client, schema, sql) => {
+    const longQuestion = Array.from({ length: 1000 }, (_, i) =>
+      String.fromCodePoint(0xac00 + i),
+    ).join('');
+    await client.query(
+      `INSERT INTO ${schema}.faq_entries(question,answer,category,updated_by_admin_user_seq) VALUES($1,'원본','기타',$2)`,
+      [longQuestion, f.ids[0]],
+    );
+    const snapshot = async () =>
+      (await client.query(`SELECT * FROM ${schema}.faq_entries ORDER BY faq_entry_seq`)).rows;
+    const before = await snapshot();
+    await client.query(sql);
+    assert.deepEqual(await snapshot(), before);
+    await assert.rejects(
+      () =>
+        client.query(
+          `INSERT INTO ${schema}.faq_entries(question,answer,category,updated_by_admin_user_seq) VALUES($1,'중복','주소',$2)`,
+          [longQuestion, f.ids[0]],
+        ),
+      { code: '23505' },
+    );
+  });
+});
+
+test('FAQ uniqueness preserves literal backslashes instead of interpreting byte escapes', async () => {
+  const question = String.raw`C:\temp\x61\001 질문 ` + f.marker();
+  const item = { category: '접수', question, answer: '역슬래시 원문' };
+  const id = await f.createdId(item);
+  assert.equal((await (await f.ai('/' + id)).json()).data.question, question);
+  await f.error(
+    await f.create({ items: [{ ...item, question: question.toUpperCase() }] }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  await f.createdId({ ...item, question: question.replaceAll(String.fromCharCode(92), '') });
 });

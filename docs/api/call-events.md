@@ -76,7 +76,7 @@ offsetMs, 응답 레이턴시, AI 동작 status, 원문 tool 인자·임의 추�
 | BUSINESS_RESULT | orderSeq | 양의 int32 또는 null |
 | BUSINESS_RESULT | unansweredQuestionSeq | 양의 int32 또는 null. 같은 통화의 기존 미답변 번호 |
 | BUSINESS_RESULT | summaryText | 처리 내용. 공백 아닌 문자열, NUL 금지, 최대 1,000자 |
-| BUSINESS_RESULT | faqEntrySeq | FAQ_ANSWERED에서만 필수인 양의 int32. 사용한 기존 FAQ 번호 |
+| BUSINESS_RESULT | faqEntrySeq | FAQ_ANSWERED에서만 필수인 양의 int32. 사용한 FAQ의 역사적 논리 번호. 현재 FAQ 존재 여부는 검사하지 않음 |
 | BUSINESS_RESULT | questionUtteranceOrder | FAQ_ANSWERED에서만 필수인 양의 int32. 같은 통화의 고객 질문 발화 순번 |
 | BUSINESS_RESULT | answerUtteranceOrder | FAQ_ANSWERED에서만 필수인 양의 int32. 같은 통화의 AI 답변 발화 순번 |
 
@@ -101,9 +101,9 @@ FAQ 답변 결과의 payload 예시:
 
 FAQ_ANSWERED의 orderSeq·unansweredQuestionSeq는 null이다. FAQ 참조 세 개를 다른 action에 보내면 400이다.
 질문·답변은 같은 요청 묶음 또는 이전에 저장한 완결 발화여야 한다. 요청 배열·UUID 순서와 무관하게 묶음 전체 저장 후 참조를 검사한다.
-참조 FAQ·같은 통화 발화가 없으면 404, 고객 질문·AI 답변의 화자가 다르면 422이며 묶음 전체를 롤백한다.
+같은 통화 발화가 없으면 404, 고객 질문·AI 답변의 화자가 다르면 422이며 묶음 전체를 롤백한다.
 FAQ 번호는 역사적 논리 참조이고 질문·답변 원문은 기존 발화에서 읽는다. FAQ 수정·삭제 뒤에도 실제 상담 답변은 바뀌지 않는다.
-같은 이벤트의 재전송은 FAQ 삭제 후에도 204이며, 삭제한 FAQ를 참조하는 새 이벤트는 404다.
+FAQ 번호는 양의 정수 형식만 검사한다. FAQ 삭제 후 도착한 새 이벤트·동일 재전송도 같은 통화의 고객 질문·AI 답변 발화가 유효하면 204다. FAQ 원문 조회나 복사 없이 저장된 실제 발화로 질문·답변을 제공하며, 사용 FAQ 번호의 정확성은 AI가 보장한다.
 
 AI 동작은 결과 기록 한 건씩 저장한다. 요청/성공 단계로 같은 동작을 두 번 보내지 않는다.
 실패·미확인 결과도 사실대로 summaryText에 기록할 수 있으며 UI가 문장을 파싱해 상태를 판정하지 않는다.
@@ -148,7 +148,7 @@ PBX 통화 시각·종료 사유, 주문 상태, 페르소나 상태는 변경�
 | 400 | INVALID_REQUEST | 필수값·타입·종류별 payload·요청 내 중복·금지 필드 |
 | 401 | UNAUTHORIZED | 토큰 누락·오류·중복 Authorization |
 | 403 | FORBIDDEN | 통화 ID 불일치, 다른 고객 주문·다른 통화 질문 |
-| 404 | NOT_FOUND | 통화·참조 주문·미답변·FAQ·같은 통화 발화 없음 |
+| 404 | NOT_FOUND | 통화·참조 주문·미답변·같은 통화 발화 없음 |
 | 409 | EVENT_PAYLOAD_CONFLICT | 이벤트·순번·완결 발화 충돌 |
 | 413 | PAYLOAD_TOO_LARGE | 본문 100KiB 초과 |
 | 422 | VALIDATION_FAILED | 저장할 수 없는 발생 시각, FAQ 답변에 주문·미답변 참조 또는 질문·답변 화자 오류 |

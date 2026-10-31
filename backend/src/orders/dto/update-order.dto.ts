@@ -1,5 +1,15 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsObject, Max, Min, ValidateIf, ValidateNested } from 'class-validator';
+import {
+  ArrayMinSize,
+  ArrayUnique,
+  IsArray,
+  IsInt,
+  IsObject,
+  Max,
+  Min,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { CreateOrderDto, ParcelInputDto } from './create-order.dto';
 
@@ -47,6 +57,33 @@ export class UpdateOrderDto extends PickType(CreateOrderDto, [
     example: '2026-10-28T10:00:00+09:00',
   })
   pickupRequestedAt?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'AI 수집 총액. 관리자는 미취소 상세 배송비 합계를 서버가 계산하므로 생략 권장. 전달하면 계산 결과와 같아야 합니다.',
+    minimum: 1,
+    maximum: 2147483647,
+    nullable: true,
+  })
+  totalAmount?: number | null;
+
+  @ApiPropertyOptional({
+    description:
+      '관리자 전용. 제거할 같은 주문의 상세 번호. 실제 행은 보존하고 CANCELLED로 표시합니다. 수정 목록과 중복 불가.',
+    type: 'array',
+    items: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    minItems: 1,
+    uniqueItems: true,
+    example: [102],
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  removeParcelSeqs?: number[];
 
   @ApiPropertyOptional({
     description:

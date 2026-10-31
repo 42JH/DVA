@@ -149,7 +149,9 @@ test('administrator category storage and filtering leave AI list/detail schemas 
   const marker = f.marker();
   const ids = [];
   for (const category of ['접수', '주소', '접수'])
-    ids.push(await f.createdId({ category, question: marker, answer: '분류 검색 확인' }));
+    ids.push(
+      await f.createdId({ category, question: marker + ids.length, answer: '분류 검색 확인' }),
+    );
   const response = await f.get(
     '/api/faqs?' + new URLSearchParams({ q: marker, category: '접수', limit: '1' }),
   );

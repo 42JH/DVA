@@ -14,13 +14,11 @@ import {
 import {
   ApiCookieAuth,
   ApiBody,
-  ApiExtraModels,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
-  getSchemaPath,
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AuditOperation } from '../audit/audit-operation';
@@ -39,7 +37,6 @@ import { FaqListResponseDto, FaqResponseDto } from './dto/faq-response.dto';
 import { FaqsService } from './faqs.service';
 
 @ApiTags('FAQs')
-@ApiExtraModels(CreateFaqDto, CreateFaqsDto)
 @ApiCookieAuth('adminSession')
 @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
 @ApiResponse({
@@ -78,12 +75,46 @@ export class FaqsController {
   @ApiOperation({
     summary: '관리자 FAQ 단건·복수 등록',
     description:
-      '분류·질문·답변을 모두 전달합니다. 단건 객체 또는 items 1~100건을 지원합니다. 전체 저장·감사·알림 대기는 함께 커밋하거나 롤백합니다.',
+      '분류·질문·답변을 모두 전달합니다. 단건·복수 모두 items 배열 1~100건을 사용합니다. 중복 질문은 409입니다. 전체 저장·감사·알림 대기는 함께 커밋하거나 롤백합니다.',
   })
   @ApiBody({
-    schema: {
-      oneOf: [{ $ref: getSchemaPath(CreateFaqDto) }, { $ref: getSchemaPath(CreateFaqsDto) }],
+    type: CreateFaqsDto,
+    examples: {
+      single: {
+        summary: '단건 등록도 items 배열',
+        value: {
+          items: [
+            {
+              category: '접수',
+              question: '택배 접수는 어떻게 하나요?',
+              answer: '전화 상담으로 접수합니다.',
+            },
+          ],
+        },
+      },
+      multiple: {
+        summary: '복수 등록',
+        value: {
+          items: [
+            {
+              category: '접수',
+              question: '택배 접수는 어떻게 하나요?',
+              answer: '전화 상담으로 접수합니다.',
+            },
+            {
+              category: '포장·파손',
+              question: '포장은 어떻게 하나요?',
+              answer: '완충재로 포장합니다.',
+            },
+          ],
+        },
+      },
     },
+  })
+  @ApiResponse({
+    status: 409,
+    type: ErrorResponseDto,
+    description: '이미 등록된 질문 또는 묶음 내 중복 질문.',
   })
   @ApiNoContentResponse({ description: '저장 완료. 한 건이면 Location에 새 FAQ 상세 경로 반환.' })
   async create(
@@ -117,6 +148,7 @@ export class FaqsController {
     description:
       '분류·질문·답변이 모두 필수입니다. 부분 수정은 허용하지 않습니다. 버전 비교 없이 전체 입력을 저장하며 AI 응답 필드는 유지합니다.',
   })
+  @ApiResponse({ status: 409, type: ErrorResponseDto, description: '다른 FAQ와 질문 중복.' })
   @ApiNoContentResponse({ description: '수정 완료.' })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: 'FAQ 없음.' })
   async update(

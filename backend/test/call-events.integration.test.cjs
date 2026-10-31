@@ -653,7 +653,8 @@ async function createFaq() {
   return (
     await pool.query(
       `INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category)
-       VALUES('현재 FAQ 질문','현재 FAQ 답변',(SELECT admin_user_seq FROM admin_users LIMIT 1),'기타') RETURNING faq_entry_seq`,
+       VALUES($1,'현재 FAQ 답변',(SELECT admin_user_seq FROM admin_users LIMIT 1),'기타') RETURNING faq_entry_seq`,
+      ['현재 FAQ 질문 ' + randomUUID()],
     )
   ).rows[0].faq_entry_seq;
 }
@@ -921,7 +922,6 @@ test('FAQ references validate within the selected call and failures roll back th
     ]),
   );
   for (const [change, status, code] of [
-    [{ faqEntrySeq: 2147483647 }, 404, 'NOT_FOUND'],
     [{ questionUtteranceOrder: 999 }, 404, 'NOT_FOUND'],
     [{ answerUtteranceOrder: 999 }, 404, 'NOT_FOUND'],
     [{ questionUtteranceOrder: 2 }, 422, 'VALIDATION_FAILED'],
@@ -1040,5 +1040,33 @@ test('OpenAPI exposes separate read shapes, search types, FAQ references, second
     assert.equal(schemas[name].properties.offsetMs, undefined);
     for (const property of Object.values(schemas[name].properties))
       assert.ok(property.description, name);
+  }
+});
+
+test('delayed FAQ results use logical FAQ IDs and saved speech even after the FAQ was deleted before first delivery', async () => {
+  const deletedId = await createFaq();
+  await pool.query('DELETE FROM faq_entries WHERE faq_entry_seq=$1', [deletedId]);
+  for (const faqId of [deletedId, 2147483647]) {
+    const c = await createCall();
+    const question = utterance(1);
+    const answer = utterance(2, 2, {
+      payload: {
+        utteranceOrder: 2,
+        speaker: 'AI',
+        utteranceText: '통화 당시 실제 답변',
+        lastSentenceSeq: 1,
+      },
+    });
+    const result = faqResult(3, faqId);
+    const values = [result, answer, question];
+    await success(await post(c, values));
+    const before = await rows(c.id);
+    const body = await readBody(await readEvents(c, 'processing-results'));
+    assert.equal(body.total_count, 1);
+    assert.equal(body.data[0].faqEntrySeq, faqId);
+    assert.equal(body.data[0].questionText, question.payload.utteranceText);
+    assert.equal(body.data[0].answerText, answer.payload.utteranceText);
+    await success(await post(c, values.toReversed()));
+    assert.deepEqual(await rows(c.id), before);
   }
 });
