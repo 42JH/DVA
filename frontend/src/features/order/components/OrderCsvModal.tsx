@@ -32,8 +32,8 @@ export function OrderCsvModal({ onClose }: { onClose: () => void }) {
           />
           {vm.summary && <p className="text-label font-semibold text-action">{vm.summary}</p>}
           <p className="text-caption text-muted">
-            주문 추가 창과 같은 칸을 열로 적습니다. 엑셀에서는 &lsquo;CSV UTF-8&rsquo;로 저장해
-            주세요.{' '}
+            주문 추가 창과 같은 칸을 열로 적습니다. &lsquo;CSV 내보내기&rsquo;로 받은 파일도 주문
+            번호 칸을 비우면 쓸 수 있습니다. 엑셀에서는 &lsquo;CSV UTF-8&rsquo;로 저장해 주세요.{' '}
             <button
               type="button"
               onClick={vm.downloadTemplate}

@@ -8,6 +8,12 @@ import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
 import { ORDER_STATUS_LABEL, ORDER_STATUS_TAG } from '@/features/order/labels'
 import {
+  ORDER_CSV_COLUMNS,
+  ORDER_CSV_EXPORT_PREFIX,
+  csvDateTime,
+  toOrderCsvCells,
+} from '@/features/order/api/orderCsv'
+import {
   BOX_TYPES,
   fetchAllOrders,
   orderQueries,
@@ -107,32 +113,14 @@ export function useOrderList() {
     setExporting(true)
     try {
       const all = await fetchAllOrders(query)
+      // 가져오기 양식과 같은 열 → 내보낸 파일을 고쳐서 'CSV로 추가'에 바로 쓸 수 있음 (주문 번호는 지워야 함)
       const csv = toCsv(
-        [
-          '주문 번호',
-          '상태',
-          '접수 시각',
-          '보내는 분',
-          '보내는 분 전화번호',
-          '보내는 분 주소',
-          '받는 분',
-          '받는 분 전화번호',
-          '받는 분 주소',
-          '수거 희망 일시',
-          '품목',
-        ],
+        [...ORDER_CSV_EXPORT_PREFIX, ...ORDER_CSV_COLUMNS],
         all.map((o) => [
-          o.orderSeq,
+          String(o.orderSeq),
           ORDER_STATUS_LABEL[o.status],
-          fmtListTime(o.receivedAt).join(' '),
-          o.sender.name,
-          fmtPhone(o.sender.phoneNumber),
-          party(o.sender).address,
-          o.receiver.name,
-          fmtPhone(o.receiver.phoneNumber),
-          party(o.receiver).address,
-          o.pickupAt ? fmtListTime(o.pickupAt).join(' ') : '',
-          itemsText(o) ?? '',
+          csvDateTime(o.receivedAt),
+          ...toOrderCsvCells(o),
         ]),
       )
       const span = query.from === query.to ? query.from : `${query.from}_${query.to}`

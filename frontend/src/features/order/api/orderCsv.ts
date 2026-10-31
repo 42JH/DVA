@@ -1,10 +1,11 @@
 // 03 CSV로 주문 추가 — CSV 글을 주문 추가 본문(OrderInput) 목록으로. React를 모르는 순수 함수 (실행해서 확인: orderCsv.test.ts)
 // 열은 이름으로 찾음 (순서 · 다른 열은 상관없음). 한 줄이라도 틀리면 전부 안 넣고 첫 오류를 'n행 …'으로 (디자인 08 CSV 오류와 같은 문장)
+// 내보내기도 같은 열(+ 앞에 주문 번호 · 상태 · 접수 시각)이라 내보낸 파일을 양식으로 쓸 수 있음. 주문 번호가 적힌 줄은 막음 (같은 주문 두 번 방지)
 import { parseCsv } from '@/shared/lib/csv'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
-import { fromDateTimeLocal } from '@/shared/lib/format'
+import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
-import type { OrderInput, Party, PaymentMethod } from './orderApi'
+import type { OrderInput, OrderRow, Party, PaymentMethod } from './orderApi'
 
 export const ORDER_CSV_MAX = 500 // 한 번에 넣는 줄 수 (실수로 큰 파일을 넣는 것 방지)
 
@@ -59,6 +60,37 @@ export const ORDER_CSV_EXAMPLE: Record<Column, string> = {
   '고객 요청 사항': '경비실에 맡겨 주세요',
 }
 
+/** 내보내기 앞 3열 — 가져오기에서 주문 번호 · 상태 · 접수 시각은 읽지 않음 (주문 번호가 있으면 막기만) */
+export const ORDER_CSV_EXPORT_PREFIX = ['주문 번호', '상태', '접수 시각'] as const
+
+/** CSV 날짜 모양 '2026-11-02 09:00' (가져오기와 같은 모양, 연도 포함) */
+export const csvDateTime = (iso: string) => toDateTimeLocal(new Date(iso)).replace('T', ' ')
+
+/** 주문 한 줄 → 양식 17열 (내보내기). 값이 없으면 빈칸 */
+export function toOrderCsvCells(o: OrderRow): string[] {
+  const i = o.items
+  const cells: Record<Column, string> = {
+    '보내는 분': o.sender.name,
+    '보내는 분 전화번호': o.sender.phoneNumber,
+    '보내는 분 주소': o.sender.roadAddress,
+    '보내는 분 상세주소': o.sender.detailAddress ?? '',
+    '받는 분': o.receiver.name,
+    '받는 분 전화번호': o.receiver.phoneNumber,
+    '받는 분 주소': o.receiver.roadAddress,
+    '받는 분 상세주소': o.receiver.detailAddress ?? '',
+    서류: i ? String(i.document) : '',
+    소박스: i ? String(i.small) : '',
+    중박스: i ? String(i.medium) : '',
+    대박스: i ? String(i.big) : '',
+    '기타 품목': i?.other ?? '',
+    '물품 가액': o.itemPrice?.toString() ?? '',
+    '수거 희망 일시': o.pickupAt ? csvDateTime(o.pickupAt) : '',
+    '결제 방식': o.paymentMethod ? PAYMENT_METHOD_LABEL[o.paymentMethod] : '',
+    '고객 요청 사항': o.clientComment ?? '',
+  }
+  return ORDER_CSV_COLUMNS.map((c) => cells[c])
+}
+
 const PAYMENT_BY_LABEL = Object.fromEntries(
   Object.entries(PAYMENT_METHOD_LABEL).map(([code, label]) => [label, code]),
 ) as Record<string, PaymentMethod>
@@ -83,6 +115,12 @@ export function parseOrderCsv(text: string, now = new Date()): CsvResult {
     const line = i + 2 // 엑셀 행 번호 (1행 = 머리줄)
     const get = (c: Column) => (index.has(c) ? (row[index.get(c)!] ?? '').trim() : '')
     const fail = (what: string) => ({ ok: false as const, error: `${line}행 ${what}` })
+
+    const existing = index.has('주문 번호') ? (row[index.get('주문 번호')!] ?? '').trim() : ''
+    if (existing)
+      return fail(
+        `이미 있는 주문(주문 번호 ${existing})입니다. 새로 추가하려면 주문 번호 칸을 비워 주세요.`,
+      )
 
     const party = (who: '보내는 분' | '받는 분'): Party | string => {
       const phone = get(`${who} 전화번호`).replace(/\D/g, '')

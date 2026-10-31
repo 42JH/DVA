@@ -36,6 +36,9 @@ export interface OrderRow {
   receiver: Party
   pickupAt: string | null // 접수 중이거나 수기 접수에서 비워 두면 없음
   items: OrderDetail['items'] | null // 접수 중이면 null
+  itemPrice: number | null // 아래 셋은 CSV 내보내기용 (접수 중이면 null)
+  paymentMethod: PaymentMethod | null
+  clientComment: string | null
 }
 
 /** 주문 추가(수기 접수) 본문 */
@@ -79,6 +82,9 @@ const toRow = (o: OrderDetail): OrderRow => ({
   receiver: o.receiver,
   pickupAt: o.pickupRequestedAt,
   items: o.items,
+  itemPrice: o.itemPrice,
+  paymentMethod: o.paymentMethod,
+  clientComment: o.clientComment,
 })
 
 const matchParty = (p: Party, q: string, digits: string) =>
@@ -191,5 +197,8 @@ const IN_PROGRESS: OrderRow[] = [
     },
     pickupAt: null,
     items: null,
+    itemPrice: null,
+    paymentMethod: null,
+    clientComment: null,
   },
 ]
