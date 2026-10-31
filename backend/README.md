@@ -14,7 +14,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md), AI 서버 구현 항목은 [AI 페르소나 연동 명세](../docs/api/ai-persona-integration.md)를 참고한다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다. 실제 AI 통화 제어는 AI 팀 구현 후 연결한다.
 
-관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 녹취 재생 URL은 통화 상세에 포함한다.
+관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·result·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 새 API·migration 없이 기존 두 GET 조회를 보완한다. 검색 총건수 API와 담당 2용 통계 뷰는 남은 작업이다.
 
 기업 구성원·대표자 표시·소속 해제·CSV 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
 

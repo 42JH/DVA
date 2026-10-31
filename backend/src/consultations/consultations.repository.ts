@@ -1,12 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
+import { CallDto, CallListItemDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
+import { CallAnalysisDto } from './dto/call-analysis-response.dto';
 import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
 
 type RecordingRow = Pick<RecordingDto, 'recordingSeq' | 'createdAt'> & { objectKey: string };
 
 type CallRow = Omit<CallDto, 'handoff'> & {
+  result: CallAnalysisDto['result'] | null;
+  aiPersonaVersionSeq: number | null;
+  personaName: string | null;
+  personaVersion: number | null;
+  aiStartedAt: Date | null;
+  aiEndedAt: Date | null;
+  repeatQuestionCount: number | null;
+  hasComplaint: boolean | null;
+  complaints: CallAnalysisDto['complaints'] | null;
+  analysedAt: Date | null;
   handoffRequestSeq: number | null;
   handoffReason: string;
   handoffStatus: HandoffDto['status'];
@@ -18,12 +29,31 @@ type CallRow = Omit<CallDto, 'handoff'> & {
 const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  c.started_at AS "startedAt",c.ended_at AS "endedAt",c.end_reason AS "endReason",
+ customer.customer_seq AS "customerSeq",customer.name AS "customerName",
+ a.result,a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
+ a.ai_started_at AS "aiStartedAt",a.ai_ended_at AS "aiEndedAt",a.repeat_question_count AS "repeatQuestionCount",
+ a.has_complaint AS "hasComplaint",a.complaints,a.analysed_at AS "analysedAt",
  h.handoff_request_seq AS "handoffRequestSeq",h.reason AS "handoffReason",h.status AS "handoffStatus",
  h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
- FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq`;
+ FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq
+ LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq
+ LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,
+   (SELECT customer_seq FROM customers WHERE phone_number=c.caller_phone_number))
+ LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
+ LEFT JOIN ai_persona_versions v ON v.ai_persona_version_seq=a.ai_persona_version_seq`;
 
-function callResult(row: CallRow): CallDto {
+function callResult(row: CallRow): CallListItemDto {
   const {
+    result,
+    aiPersonaVersionSeq,
+    personaName,
+    personaVersion,
+    aiStartedAt,
+    aiEndedAt,
+    repeatQuestionCount,
+    hasComplaint,
+    complaints,
+    analysedAt,
     handoffRequestSeq,
     handoffReason,
     handoffStatus,
@@ -34,6 +64,21 @@ function callResult(row: CallRow): CallDto {
   } = row;
   return {
     ...call,
+    analysis:
+      analysedAt === null
+        ? null
+        : {
+            result: result!,
+            aiPersonaVersionSeq,
+            personaName,
+            personaVersion,
+            aiStartedAt: aiStartedAt!,
+            aiEndedAt: aiEndedAt!,
+            repeatQuestionCount,
+            hasComplaint,
+            complaints: complaints!,
+            analysedAt,
+          },
     handoff:
       handoffRequestSeq === null
         ? null
@@ -52,9 +97,9 @@ function callResult(row: CallRow): CallDto {
 export class ConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async findMany(query: CallQueryDto): Promise<CallDto[]> {
+  async findMany(query: CallQueryDto): Promise<CallListItemDto[]> {
     const conditions: string[] = [];
-    const values: Array<string | number> = [];
+    const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
       [query.orderSeq, 'c.order_seq', '='],
       [query.orderStatus, 'o.status', '='],
@@ -63,11 +108,20 @@ export class ConsultationsRepository {
       [query.to, 'c.started_at', '<'],
       [query.endReason, 'c.end_reason', '='],
       [query.handoffStatus, 'h.status', '='],
+      [query.result, 'a.result', '='],
+      [query.hasComplaint, 'a.has_complaint', '='],
+      [query.aiPersonaVersionSeq, 'a.ai_persona_version_seq', '='],
     ] as const) {
       if (value !== undefined) {
         values.push(value);
         conditions.push(`${column} ${operator} $${values.length}`);
       }
+    }
+    if (query.q) {
+      values.push(query.q);
+      const parameter = `$${values.length}`;
+      conditions.push(`(strpos(lower(normalize(customer.name,NFC)),lower(normalize(${parameter},NFC)))>0
+        OR strpos(c.caller_phone_number,${parameter})>0)`);
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     values.push(query.limit + 1, query.offset);
@@ -80,7 +134,7 @@ export class ConsultationsRepository {
     return result.rows.map(callResult);
   }
 
-  async findOne(id: number): Promise<CallDto | undefined> {
+  async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
       `${CALL_SELECT} WHERE c.call_session_seq=$1`,
       [id],

@@ -77,6 +77,9 @@ async function call(input = {}) {
     ...row,
     orderStatus: row.orderSeq === null ? null : 'COLLECTING',
     orderTotalAmount: null,
+    customerSeq: null,
+    customerName: null,
+    analysis: null,
     handoff: null,
   };
 }
@@ -321,6 +324,10 @@ test('Swagger describes the list contract, cookie authentication and English mod
       'handoffStatus',
       'limit',
       'offset',
+      'q',
+      'result',
+      'hasComplaint',
+      'aiPersonaVersionSeq',
     ].sort(),
   );
   for (const name of ['CallDto', 'HandoffDto', 'CallListResponseDto'])
@@ -338,6 +345,7 @@ test('request logs do not contain phone numbers, provider IDs or search text', a
 });
 
 const detail = (id, headers = operator.headers) => fetch(base + '/api/calls/' + id, { headers });
+const callInfo = ({ analysis, ...value }) => value;
 async function recording(callId) {
   const row = (
     await pool.query(
@@ -365,7 +373,8 @@ test('detail returns only the selected call, saved handoff data and recordings w
   const second = await recording(row.callSessionSeq);
   await recording((await call()).callSessionSeq);
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(body.data.call, callInfo(row));
+  assert.equal(body.data.analysis, null);
   assert.deepEqual(
     body.data.recordings.map(({ recordingSeq, createdAt }) => ({ recordingSeq, createdAt })),
     [first, second],
@@ -384,7 +393,8 @@ test('detail returns only the selected call, saved handoff data and recordings w
 test('detail preserves missing times, phone, order and handoff while returning an empty recording list', async () => {
   const row = await call({ callerPhoneNumber: null, startedAt: null, endedAt: null });
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
-    call: row,
+    call: callInfo(row),
+    analysis: null,
     aiActionCount: 0,
     recordings: [],
   });
@@ -637,7 +647,8 @@ test('S3 settings and missing files are recording errors while call detail and m
   const saved = await recording(row.callSessionSeq);
   config.set('S3_RECORDINGS_BUCKET', '');
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
-    call: row,
+    call: callInfo(row),
+    analysis: null,
     aiActionCount: 0,
     recordings: [{ ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' }],
   });
@@ -674,7 +685,8 @@ test('storage denial, outage and timeout preserve call detail with a redacted re
     const response = await detail(row.callSessionSeq);
     assert.equal((await response.clone().text()).includes('private secret'), false);
     assert.deepEqual((await result(response, false)).data, {
-      call: row,
+      call: callInfo(row),
+      analysis: null,
       aiActionCount: 0,
       recordings: [
         { ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' },
@@ -701,7 +713,8 @@ test('one missing recording does not hide the call or another playable recording
     return { $metadata: { httpStatusCode: 200 } };
   });
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(body.data.call, callInfo(row));
+  assert.equal(body.data.analysis, null);
   assert.deepEqual(body.data.recordings[0], {
     ...first,
     url: null,

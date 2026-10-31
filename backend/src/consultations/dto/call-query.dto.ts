@@ -1,11 +1,70 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsIn, IsInt, IsISO8601, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Matches,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
+import { CALL_ANALYSIS_RESULTS, CallAnalysisResult } from '../../call-insights/call-insights.types';
 
 export class CallQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    maxLength: 200,
+    description: '현재 연결 고객 이름·발신번호 부분 검색. %·_는 일반 문자.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' ? value.normalize('NFC').trim() : value,
+  )
+  @IsString()
+  @MaxLength(200)
+  @Matches(/^[^\0]*$/u)
+  q?: string;
+
+  @ApiPropertyOptional({
+    enum: CALL_ANALYSIS_RESULTS,
+    description: '저장된 통화 분석 결과. 현재 주문 상태와 별개.',
+  })
+  @IsOptional()
+  @IsIn(CALL_ANALYSIS_RESULTS)
+  result?: CallAnalysisResult;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    description: '확인된 불만 여부. false는 미판정·미수신을 포함하지 않습니다.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
+  @IsBoolean()
+  hasComplaint?: boolean;
+
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '분석에 기록된 실제 사용 페르소나 버전의 DB 번호.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  aiPersonaVersionSeq?: number;
+
   @ApiPropertyOptional({
     enum: ORDER_STATUSES,
     description: '연결 주문의 현재 결제·접수 상태로 검색.',

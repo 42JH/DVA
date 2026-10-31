@@ -26,7 +26,7 @@ export class ConsultationsController {
   @ApiOperation({
     summary: '통화 목록 조회',
     description:
-      '주문·발신번호·시작 기간·종료 사유·상담원 연결 상태로 조회합니다. 시작 시각 최신순이며 시각 미수집 통화는 뒤에 표시합니다. 고객번호 검색은 미지원입니다.',
+      '고객 이름·발신번호 검색과 통화 분석 결과·불만 여부·실제 페르소나 버전 필터를 제공합니다. 기존 주문·PBX 시작 기간·종료 사유·상담원 상태 조건은 유지합니다. 분석 미수신은 analysis=null이며 PBX 시작 시각 최신순입니다.',
   })
   @ApiOkResponse({
     description: '통화 목록과 다음 페이지 여부. 연결 기록이 없으면 handoff는 null.',
@@ -40,7 +40,7 @@ export class ConsultationsController {
   @ApiOperation({
     summary: '통화 상세 조회',
     description:
-      '통화·연결 주문 번호·상담원 연결 기록과 녹취별 재생 URL을 조회합니다. URL은 최대 5분 유효하며 만료 후 상세를 다시 조회합니다. 녹취 오류는 해당 항목의 playbackError로 반환합니다.',
+      '고객·통화·저장된 AI 분석과 녹취별 재생 URL을 조회합니다. analysis는 미수신이면 null이며 실제 사용한 페르소나·불만 근거·정수 초 위치를 제공합니다. URL은 최대 5분 유효하며 녹취 오류는 개별 playbackError로 반환합니다.',
   })
   @ApiOkResponse({
     description: '통화 정보와 재생 URL을 포함한 녹취 목록. 녹취가 없으면 빈 배열.',
