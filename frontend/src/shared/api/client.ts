@@ -1,6 +1,6 @@
 // 공통 HTTP 클라이언트 — API 명세서 1장 공통 규약을 여기 한 곳에서 처리
-// 기본 경로 · Bearer 토큰 · X-Request-Id · 응답 10초 제한 · 오류 본문 → ApiError · 401이면 로그인 화면으로
-import { clearToken, getToken } from '@/shared/auth/token'
+// 기본 경로 · 세션 쿠키 · X-Request-Id · 응답 10초 제한 · 오류 본문 → ApiError · 401이면 로그인 화면으로
+import { clearSession } from '@/shared/auth/session'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api' // 10/26 BE 결정: v1 없음
 const TIMEOUT_MS = 10_000 // 명세서 1.4 일반 응답 10초
@@ -50,8 +50,6 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
     Accept: 'application/json',
     'X-Request-Id': crypto.randomUUID(),
   }
-  const token = getToken()
-  if (token) headers.Authorization = `Bearer ${token}`
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
 
@@ -67,6 +65,9 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
     res = await fetch(url, {
       method,
       headers,
+      // 로그인 = HttpOnly 쿠키 dva_session (API 연동 상세명세 1장). JS는 쿠키를 못 읽고, 브라우저가 붙여 보냄
+      // include: 개발 서버와 백엔드 주소가 달라도(교차 origin) 쿠키를 보냄. 같은 origin(/api 프록시 · 배포)이면 기본값과 같음
+      credentials: 'include',
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
     })
@@ -88,7 +89,7 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
   if (!res.ok) {
     // 로그인 요청 자체의 401(아이디 · 비밀번호 불일치)은 그 화면에서 보여 주고, 나머지 401은 토큰 만료로 보고 로그인 화면으로
     if (res.status === 401 && path !== '/auth/login') {
-      clearToken()
+      clearSession()
       if (window.location.pathname !== '/login') window.location.assign('/login')
     }
     const err = (json as { error?: { code: string; message: string; details?: FieldError[] } })

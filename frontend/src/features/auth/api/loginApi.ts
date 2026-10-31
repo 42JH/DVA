@@ -1,8 +1,10 @@
-// 로그인 — AUTH-01 (명세서 p9). 성공하면 토큰 저장. 세션(내 정보 · 로그아웃)은 shared/auth
+// 로그인 — API-01. 성공하면 서버가 쿠키를 심고 본문엔 만료 시각만 → 그것만 저장. 사용자 정보는 /auth/me (shared/auth)
 import { api, type ApiItem } from '@/shared/api/client'
-import { setToken, type AccessToken } from '@/shared/auth/token'
+import { saveSession } from '@/shared/auth/session'
 
 export async function login(loginId: string, password: string): Promise<void> {
-  const res = await api.post<ApiItem<AccessToken>>('/auth/login', { body: { loginId, password } })
-  setToken(res.data)
+  const res = await api.post<ApiItem<{ expiresAt: string }>>('/auth/login', {
+    body: { loginId, password },
+  })
+  saveSession(res.data.expiresAt)
 }
