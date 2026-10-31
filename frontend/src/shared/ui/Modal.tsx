@@ -42,6 +42,7 @@ export function ConfirmDialog({
   note,
   warn,
   okLabel,
+  okKind = 'danger',
   onOk,
   onClose,
   pending,
@@ -51,6 +52,7 @@ export function ConfirmDialog({
   note?: string // 회색 안내 (거절: '신청이 지워지며 …')
   warn?: string // 빨간 경고 (되돌릴 수 없음 · 미처리 질문 있음)
   okLabel: string // '삭제' · '거절'
+  okKind?: 'danger' | 'primary' // 되돌릴 수 없는 일(삭제 · 거절) = 빨강(기본), 아닌 일(07 적용) = 남색
   onOk: () => void
   onClose: () => void
   pending?: boolean
@@ -83,7 +85,7 @@ export function ConfirmDialog({
         {note && !warn && <p className="mt-3 text-label text-sub">{note}</p>}
         <div className="mt-8 flex justify-end gap-3">
           <Button onClick={onClose}>취소</Button>
-          <Button kind="danger" onClick={onOk} disabled={pending}>
+          <Button kind={okKind} onClick={onOk} disabled={pending}>
             {okLabel}
           </Button>
         </div>

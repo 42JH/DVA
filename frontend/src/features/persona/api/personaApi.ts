@@ -98,6 +98,24 @@ export async function savePromptVersion(
   return version
 }
 
+/** 버전 적용 — 이 버전으로 통화를 받게 함. 지난 버전도 다시 적용할 수 있음 (Swagger activate: '적용·복원')
+ * shortcut: 가짜는 바로 '적용 중'. 실제 `POST /api/personas/{id}/activate`는 먼저 PENDING(적용 대기) → AI가 통화 0건일 때 확인해야 ACTIVE
+ *   (+ expectedVersion 필수). BE 답(저장 = 자동 대기?) 받은 뒤 '적용 대기' 상태를 화면에 넣을 것 */
+export async function applyVersion(personaSeq: number, version: number): Promise<void> {
+  await wait()
+  const persona = PERSONAS.find((p) => p.personaSeq === personaSeq)
+  const list = VERSIONS[personaSeq]
+  const target = list?.find((x) => x.version === version)
+  if (!persona || !list || !target) throw new Error('버전을 찾을 수 없습니다.')
+  for (const x of list) if (x.status === 'ACTIVE') x.status = 'PAST'
+  target.status = 'ACTIVE'
+  persona.activeVersion = version
+  persona.voice = { ...target.voice }
+  // 다른 버전 상태는 그대로 (옛 버전으로 되돌려도 예전에 적용했던 버전이 '저장됨'이 되지 않게). 아직 적용 안 한 저장본만 '저장됨'
+  const saved = list.filter((x) => x.status === 'SAVED')
+  persona.pendingVersion = saved.length ? Math.max(...saved.map((x) => x.version)) : null
+}
+
 // ---------- 가짜 데이터 = 와이어프레임 07 ----------
 const voice = (name: string, speed: Speed, waitTime: WaitTime): VoiceSettings => ({
   voice: name,

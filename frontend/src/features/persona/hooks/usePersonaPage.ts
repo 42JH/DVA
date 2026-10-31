@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { fmtClock, fmtShortDate } from '@/shared/lib/format'
 import type { TagKind } from '@/shared/ui'
@@ -7,6 +7,7 @@ import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { lineDiff } from '@/features/persona/hooks/lineDiff'
 import {
+  applyVersion,
   personaQueries,
   type Persona,
   type PersonaVersion,
@@ -33,7 +34,8 @@ export interface VersionItem {
   author: string
   selected: boolean
   canApply: boolean // 적용 중인 버전은 [적용] 없음 (이미 통화에 쓰는 중)
-  testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전 (적용 버튼이 남색으로)
+  testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전
+  canApplyNow: boolean // 시험 통화를 끝낸 버전만 [적용]이 눌림 (10/31 결정)
 }
 
 /** 왼쪽 '시스템 프롬프트' 카드 */
@@ -46,6 +48,14 @@ export interface PromptView {
 
 // 'v6과' · 'v5와' — 숫자를 읽은 소리의 받침으로 조사를 고름 (영·일·삼·육·칠·팔 = 받침 있음)
 const withGwa = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '과' : '와'}`
+const withEul = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '을' : '를'}` // 'v7을' · 'v5를'
+
+/** [적용] 확인 창 문구 */
+export interface ApplyConfirm {
+  title: string // 'v7을 적용할까요?'
+  target: string // '빠른 접수형 · v7 (저장됨)'
+  note: string
+}
 
 const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
 
@@ -81,6 +91,8 @@ export function usePersonaPage() {
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
   const [tested, setTested] = useState<Record<string, number>>({})
+  const [confirming, setConfirming] = useState<number | null>(null) // [적용] 확인 창을 띄운 버전
+  const qc = useQueryClient()
 
   const personas = useQuery(personaQueries.list())
   const list = personas.data ?? []
@@ -94,6 +106,15 @@ export function usePersonaPage() {
   const viewing = all.find((v) => v.version === version) ?? all[0] ?? null
   const testedSec = (v: number) => (persona ? tested[`${persona.personaSeq}-${v}`] : undefined)
   const testingVersion = all.find((v) => v.version === testing) ?? null
+  const confirmingVersion = all.find((v) => v.version === confirming) ?? null
+  const active = all.find((v) => v.status === 'ACTIVE') ?? null
+  const apply = useMutation({
+    mutationFn: (v: number) => applyVersion(persona!.personaSeq, v),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: personaQueries.all() })
+      setConfirming(null)
+    },
+  })
   const testCall: TestCallTarget | null =
     persona && testingVersion
       ? {
@@ -151,6 +172,24 @@ export function usePersonaPage() {
     prompt: persona && viewing ? toPromptView(persona, viewing) : null,
 
     compare: compare(),
+
+    // [적용] → 확인 창 → 적용
+    applyConfirm:
+      persona && confirmingVersion
+        ? ({
+            title: `${withEul(confirmingVersion.version)} 적용할까요?`,
+            target: `${persona.name} · v${confirmingVersion.version} (${VERSION_TAG[confirmingVersion.status]?.label ?? '지난 버전'})`,
+            note: `적용하면 다음 통화부터 이 버전으로 응대합니다.${active ? ` 지금 적용 중인 v${active.version}은 지난 버전이 됩니다.` : ''}`,
+          } satisfies ApplyConfirm)
+        : null,
+    askApply: (v: number) => {
+      apply.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
+      setConfirming(v)
+    },
+    confirmApply: () => confirming !== null && apply.mutate(confirming),
+    cancelApply: () => setConfirming(null),
+    isApplying: apply.isPending,
+    applyError: apply.error?.message ?? null,
 
     testCall,
     // 버전 칸 [시험 통화] — 그 버전을 고르고 통화 창
@@ -215,6 +254,7 @@ export function usePersonaPage() {
       canApply: v.status !== 'ACTIVE',
       testResult:
         testedSec(v.version) !== undefined ? `완료 · ${fmtClock(testedSec(v.version)!)}` : null,
+      canApplyNow: v.status !== 'ACTIVE' && testedSec(v.version) !== undefined,
     })),
     moreVersions: showAll ? 0 : Math.max(0, all.length - HISTORY_FIRST),
     showAllVersions: () => setShowAll(true),

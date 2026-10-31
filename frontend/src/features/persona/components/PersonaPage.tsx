@@ -1,4 +1,4 @@
-import { Tabs } from '@/shared/ui'
+import { ConfirmDialog, Tabs } from '@/shared/ui'
 import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePersonaPage'
 import { PersonaList } from './PersonaList'
 import { PromptCard } from './PromptCard'
@@ -62,10 +62,24 @@ export function PersonaPage() {
               onSelect={vm.selectVersion}
               onShowMore={vm.showAllVersions}
               onTestCall={vm.startTestCall}
+              onApply={vm.askApply}
             />
           )}
         </div>
       </aside>
+      {vm.applyConfirm && (
+        <ConfirmDialog
+          title={vm.applyConfirm.title}
+          target={vm.applyConfirm.target}
+          note={vm.applyConfirm.note}
+          warn={vm.applyError ?? undefined}
+          okLabel="적용"
+          okKind="primary"
+          pending={vm.isApplying}
+          onOk={vm.confirmApply}
+          onClose={vm.cancelApply}
+        />
+      )}
       {vm.testCall && (
         <TestCallModal
           key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}

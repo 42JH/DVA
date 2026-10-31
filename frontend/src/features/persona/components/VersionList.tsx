@@ -4,19 +4,21 @@ import type { VersionItem } from '@/features/persona/hooks/usePersonaPage'
 // 오른쪽 '버전 히스토리' 탭 — 최신부터. 칸을 누르면 그 버전의 프롬프트 + 그 칸에만 [시험 통화] [적용] (10/31)
 // 적용 중인 버전은 [적용] 없음. 지난 버전의 [적용] = 그 버전으로 다시 통화에 씀
 // 6개 넘으면 '이전 버전 n개 더 보기 ›'
-// [시험 통화] → 시험 통화 창, 끝나면 '시험 통화 완료 · 01:12' + [적용] 남색 (07_적용가능). shortcut: [적용]은 BE 답(저장 = 적용 대기?) 뒤에 켬
+// [시험 통화] → 시험 통화 창, 끝나면 '시험 통화 완료 · 01:12' + [적용] 남색 (07_적용가능). [적용]은 시험 통화를 끝낸 버전만 → 확인 창 (10/31)
 export function VersionList({
   items,
   more,
   onSelect,
   onShowMore,
   onTestCall,
+  onApply,
 }: {
   items: VersionItem[]
   more: number
   onSelect: (version: number) => void
   onShowMore: () => void
   onTestCall: (version: number) => void
+  onApply: (version: number) => void
 }) {
   return (
     <div className="flex flex-col">
@@ -70,7 +72,13 @@ export function VersionList({
                 시험 통화
               </Button>
               {v.canApply && (
-                <Button small kind={v.testResult ? 'primary' : 'normal'} disabled>
+                <Button
+                  small
+                  kind={v.canApplyNow ? 'primary' : 'normal'}
+                  disabled={!v.canApplyNow}
+                  title={v.canApplyNow ? undefined : '시험 통화를 끝내면 적용할 수 있습니다'}
+                  onClick={() => onApply(v.version)}
+                >
                   적용
                 </Button>
               )}
