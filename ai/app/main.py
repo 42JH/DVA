@@ -127,7 +127,7 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None, faq_eve
             if client is None:
                 await openai_client.close()
 
-    app = FastAPI(title="디포스트콜 전화 접수", lifespan=lifespan)
+    app = FastAPI(title="디바콜 전화 접수", lifespan=lifespan)
     app.include_router(webhook_router)
     app.include_router(pbx_router)
     app.include_router(persona_router)
