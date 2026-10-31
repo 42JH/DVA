@@ -7,13 +7,14 @@ import { API_BASE_URL } from '@/shared/api/client'
 const ACCOUNTS: {
   adminUserSeq: number
   loginId: string
+  name: string
   role: 'OPERATOR' | 'SUPERVISOR' | 'SYSTEM_ADMIN'
   status: 'ACTIVE' | 'PENDING' | 'INACTIVE'
 }[] = [
-  { adminUserSeq: 1, loginId: 'admin', role: 'SYSTEM_ADMIN', status: 'ACTIVE' },
-  { adminUserSeq: 2, loginId: 'manager', role: 'SUPERVISOR', status: 'ACTIVE' },
-  { adminUserSeq: 3, loginId: 'pending', role: 'OPERATOR', status: 'PENDING' },
-  { adminUserSeq: 4, loginId: 'inactive', role: 'OPERATOR', status: 'INACTIVE' },
+  { adminUserSeq: 1, loginId: 'admin', name: '김관리', role: 'SYSTEM_ADMIN', status: 'ACTIVE' },
+  { adminUserSeq: 2, loginId: 'manager', name: '이매니', role: 'SUPERVISOR', status: 'ACTIVE' },
+  { adminUserSeq: 3, loginId: 'pending', name: '박대기', role: 'OPERATOR', status: 'PENDING' },
+  { adminUserSeq: 4, loginId: 'inactive', name: '최비활', role: 'OPERATOR', status: 'INACTIVE' },
 ]
 // 비밀번호는 계정과 따로 — /auth/me 응답에 섞이지 않게
 const PASSWORDS = new Map(ACCOUNTS.map((a) => [a.loginId, 'test1234']))
@@ -44,13 +45,18 @@ export const authHandlers = [
   }),
   // AUTH-06 — 204 본문 없음 · 아이디 중복 409 (명세서 p13)
   http.post(`${API_BASE_URL}/auth/signup`, async ({ request }) => {
-    const { loginId, password } = (await request.json()) as { loginId: string; password: string }
+    const { loginId, password, name } = (await request.json()) as {
+      loginId: string
+      password: string
+      name: string
+    }
     if (ACCOUNTS.some((a) => a.loginId === loginId))
       return fail(409, 'SIGNUP_UNAVAILABLE', '가입 신청을 할 수 없습니다.')
     PASSWORDS.set(loginId, password)
     ACCOUNTS.push({
       adminUserSeq: ACCOUNTS.length + 1,
       loginId,
+      name,
       role: 'OPERATOR',
       status: 'PENDING',
     })
