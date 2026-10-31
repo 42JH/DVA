@@ -14,19 +14,29 @@ import { OrderPaymentsRepository } from './order-payments.repository';
 import { OrderPaymentsService } from './order-payments.service';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { OrderMaintenanceWorker } from './order-maintenance.worker';
+import { DeliveriesModule } from '../deliveries/deliveries.module';
+import { OrderSubmissionService } from './order-submission.service';
 
 @Module({
-  imports: [DatabaseModule, AuditModule, CustomersModule, ConsultationsModule, OrganizationsModule],
+  imports: [
+    DatabaseModule,
+    AuditModule,
+    CustomersModule,
+    ConsultationsModule,
+    OrganizationsModule,
+    DeliveriesModule,
+  ],
   controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
   providers: [
     OrdersRepository,
     OrdersService,
     OrderSubmissionRepository,
+    OrderSubmissionService,
     DverClient,
     OrderPaymentsRepository,
     OrderPaymentsService,
     OrderMaintenanceWorker,
   ],
-  exports: [OrdersService, OrderPaymentsService, OrderPaymentsRepository],
+  exports: [OrderPaymentsService],
 })
 export class OrdersModule {}

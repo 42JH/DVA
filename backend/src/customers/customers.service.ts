@@ -6,8 +6,9 @@ import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { CustomersRepository } from './customers.repository';
 import { CallerContextRequestDto } from './dto/caller-context.dto';
-import { CallSessionRepository } from '../consultations/call-session.repository';
+import { ConsultationsService } from '../consultations/consultations.service';
 import { callerPhone } from '../common/caller-phone';
+import { EmployeeCustomerIdentity } from './customers.types';
 import {
   CreateCustomerDto,
   ListCustomersQueryDto,
@@ -20,8 +21,22 @@ export class CustomersService {
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
-    private readonly calls: CallSessionRepository,
+    private readonly calls: ConsultationsService,
   ) {}
+
+  // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
+  async importEmployeeIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]) {
+    await this.repository.updateIdentities(
+      client,
+      rows.filter((row) => row.customerSeq !== undefined),
+    );
+    const inserted = await this.repository.insertIdentities(
+      client,
+      rows.filter((row) => row.customerSeq === undefined),
+    );
+    const byPhone = new Map(inserted.map((row) => [row.phoneNumber, row.customerSeq]));
+    return rows.map((row) => row.customerSeq ?? byPhone.get(row.phoneNumber)!);
+  }
 
   async context(input: CallerContextRequestDto, actorId: number | null, requestId: string) {
     try {
@@ -31,24 +46,17 @@ export class CustomersService {
       if (!/^[0-9]{3,20}$/.test(phoneNumber))
         throw new ApiException(400, 'INVALID_REQUEST', '통화 발신번호는 3~20자리 숫자여야 합니다.');
       return await this.database.transaction(async (client) => {
-        const session = await this.calls.ensureCall(client, {
-          ...call,
-          callerPhoneNumber: phoneNumber,
-        });
+        const callSessionSeq = await this.calls.ensureCall(
+          client,
+          {
+            ...call,
+            callerPhoneNumber: phoneNumber,
+          },
+          actorId,
+          requestId,
+        );
         const context = await this.repository.context(phoneNumber, client);
-        if (session.created)
-          await this.audit.recordSuccess(
-            {
-              actorId,
-              actorType: actorId === null ? 'AI' : 'ADMIN',
-              action: 'CALL_STARTED',
-              targetType: 'CALL_SESSION',
-              targetId: session.id,
-              requestId,
-            },
-            client,
-          );
-        return { ...context, callSessionSeq: session.id };
+        return { ...context, callSessionSeq };
       });
     } catch (error) {
       if (error instanceof ApiException) throw error;

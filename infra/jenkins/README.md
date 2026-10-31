@@ -70,6 +70,15 @@ sudo bash infra/jenkins/install.sh /보호된경로/jenkins-settings.tar.gz /별
 `home/init.groovy.d/lightsail-migration.groovy`도 제거하여 재시작 시 계정·Job 설정을 다시 적용하지 않는다.
 agent-secret은 에이전트 실행에 필요하므로 유지한다.
 
+## 변경 범위와 최적화
+
+- 마지막 성공 커밋부터 현재 커밋까지 모든 변경·삭제·이동을 비교한다. 기준 누락·이력 분기·알 수 없는 경로는 전체 검증한다.
+- 백엔드 모듈 변경은 호출자를 포함한 백엔드 전체 회귀를 실행한다. 인증·공통·DB·설정·의존성 변경과 배포 요청은 전체 검증한다.
+- 관측 인프라만 변경되면 해당 검증만, 결제 데모 인프라만 변경되면 해당 검증만 실행한다.
+- 배포 없는 검증은 운영 이미지·Nginx smoke를 포함하는 Backend checks를 유지하고 릴리스 archive·SSH 접근 단계만 생략한다. 수동 릴리스 파일은 기존 package 스크립트로 만들 수 있다.
+- Docker checks는 builder가 컴파일한 결과로 `test:compiled`를 실행한다. 로컬 `npm test`는 컴파일부터 실행하는 기존 동작을 유지한다.
+- 웹훅 경로에 `infra/database`, `infra/observability`, `infra/payment-test`를 포함한다. 저장소의 설정 스크립트 변경과 실제 Jenkins Job 재설정은 별도다.
+
 ## 파이프라인 변경
 
 `Jenkinsfile`은 Windows `docker-builder` 및 PowerShell 단계 대신 Linux agent 하나를 사용한다.
@@ -93,7 +102,7 @@ Job의 GitLab credential ID는 `gitlab-dva-readonly`, 배포 credential ID는 `d
 
 `dva-ci-linux-validation`은 Generic Webhook Trigger로 프로젝트 `1462697`의
 `develop-backend` Push 중 `backend/`, 루트 `Jenkinsfile`, `compose.yaml`, `compose.prod.yaml`,
-`infra/deploy/`, `infra/nginx/`, `infra/https/`, `infra/jenkins/`, `.gitattributes` 변경만 선택한다.
+`infra/deploy/`, `infra/nginx/`, `infra/https/`, `infra/jenkins/`, `infra/database/`, `infra/observability/`, `infra/payment-test/`, `.gitattributes` 변경만 선택한다.
 일반적인 `msa/` 단독 변경·다른 브랜치·MR 이벤트·브랜치 삭제는 선택하지 않는다.
 [GitLab Push payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#push-events)가
 commits를 최대 20개만 제공하므로, 총 커밋이 20개를 넘으면

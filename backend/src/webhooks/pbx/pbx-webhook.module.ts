@@ -6,9 +6,10 @@ import { PbxWebhookService } from './pbx-webhook.service';
 import { PbxWebhookRepository } from './pbx-webhook.repository';
 import { PbxRecordingWorker } from './pbx-recording.worker';
 import { RecordingStorage } from './recording-storage';
+import { ConsultationsModule } from '../../consultations/consultations.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, ConsultationsModule],
   controllers: [PbxWebhookController],
   providers: [
     PbxWebhookGuard,

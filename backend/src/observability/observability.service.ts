@@ -47,6 +47,21 @@ export class ObservabilityService {
       `dva_database_up ${databaseUp}`,
       '# TYPE dva_order_metrics_success gauge',
       `dva_order_metrics_success ${ordersOk}`,
+      '# TYPE dva_database_pool_connections gauge',
+      `dva_database_pool_connections{state="total"} ${this.database.pool.totalCount}`,
+      `dva_database_pool_connections{state="idle"} ${this.database.pool.idleCount}`,
+      '# TYPE dva_database_pool_waiting_requests gauge',
+      `dva_database_pool_waiting_requests ${this.database.pool.waitingCount}`,
+      '# TYPE dva_database_transactions_total counter',
+      `dva_database_transactions_total ${this.database.transactionStatistics.count}`,
+      '# TYPE dva_database_transaction_failures_total counter',
+      `dva_database_transaction_failures_total ${this.database.transactionStatistics.failures}`,
+      '# TYPE dva_database_transaction_duration_seconds_total counter',
+      `dva_database_transaction_duration_seconds_total ${this.database.transactionStatistics.seconds}`,
+      '# TYPE dva_database_transaction_duration_seconds_max gauge',
+      `dva_database_transaction_duration_seconds_max ${this.database.transactionStatistics.maxSeconds}`,
+      '# TYPE dva_database_transaction_connection_wait_seconds_total counter',
+      `dva_database_transaction_connection_wait_seconds_total ${this.database.transactionStatistics.connectionWaitSeconds}`,
     ];
     // 수집 실패를 주문 수 0으로 표시하지 않는다.
     if (ordersOk) {

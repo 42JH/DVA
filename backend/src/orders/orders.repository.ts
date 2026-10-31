@@ -56,28 +56,6 @@ export class OrdersRepository {
     ]);
   }
 
-  async lockShipments(client: PoolClient, parcelIds: number[]) {
-    return (
-      await client.query<{ orderParcelSeq: number; status: string }>(
-        `SELECT order_parcel_seq AS "orderParcelSeq",status FROM shipments
-         WHERE order_parcel_seq=ANY($1::int[]) ORDER BY shipment_seq FOR UPDATE`,
-        [parcelIds],
-      )
-    ).rows;
-  }
-
-  async cancelShipments(client: PoolClient, parcelIds: number[], adminId: number | null) {
-    await client.query(
-      `WITH cancelled AS (
-         UPDATE shipments SET status='canceled',version=version+1,status_changed_at=clock_timestamp()
-         WHERE order_parcel_seq=ANY($1::int[]) AND status='notPaid' RETURNING shipment_seq
-       ) INSERT INTO shipment_status_history(shipment_seq,request_id,from_status,to_status,actor_type,actor_admin_user_seq)
-         SELECT shipment_seq,gen_random_uuid(),'notPaid','canceled',
-           CASE WHEN $2::int IS NULL THEN 'AI' ELSE 'ADMIN' END,$2 FROM cancelled`,
-      [parcelIds, adminId],
-    );
-  }
-
   async customerByPhone(client: PoolClient, phone: string) {
     return (
       await client.query<{ customerSeq: number }>(
@@ -300,13 +278,6 @@ export class OrdersRepository {
     ).rows[0];
   }
 
-  async linkCall(client: PoolClient, callId: number, orderId: number) {
-    await client.query('UPDATE call_sessions SET order_seq=$2 WHERE call_session_seq=$1', [
-      callId,
-      orderId,
-    ]);
-  }
-
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
     const result =
       pin.scope === 'PERSONAL'
@@ -444,44 +415,53 @@ export class OrdersRepository {
         ],
       )
     ).rows[0].id;
-    for (const [index, parcel] of draft.parcels.entries())
-      await this.insertParcel(client, id, index + 1, parcel);
+    await this.insertParcels(client, id, 1, draft.parcels);
     // 상세 추가 트리거가 버전을 올리므로 초기값이나 상세 수로 추정하지 않는다.
     return { orderSeq: id, ...(await this.currentVersion(client, id)) };
   }
 
-  async insertParcel(
+  async insertParcels(
     client: PoolClient,
     id: number,
     position: number,
-    parcel: OrderDraft['parcels'][number],
+    parcels: OrderDraft['parcels'],
   ) {
-    await client.query(
-      `INSERT INTO order_parcels (
-          order_seq,parcel_position,
+    const columns = `order_seq,parcel_position,
           origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_detail_address,
           origin_dong_name,origin_postal_code,origin_latitude,origin_longitude,
           destination_name,destination_phone_number,destination_road_address,destination_jibun_address,destination_detail_address,
           destination_dong_name,destination_postal_code,destination_latitude,destination_longitude,
           origin_pin_scope,origin_pin_seq,document_count,small_box_count,medium_box_count,big_box_count,
-          other_item_description,client_comment,item_price,notified_price)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)`,
-      [
-        id,
-        position,
-        ...ORDER_ADDRESS_FIELDS.map((field) => parcel.origin[field]),
-        ...ORDER_ADDRESS_FIELDS.map((field) => parcel.destination[field]),
-        parcel.originPin?.scope ?? null,
-        parcel.originPin?.pinSeq ?? null,
-        parcel.documentCount,
-        parcel.smallBoxCount,
-        parcel.mediumBoxCount,
-        parcel.bigBoxCount,
-        parcel.otherItemDescription,
-        parcel.clientComment,
-        parcel.itemPrice,
-        parcel.notifiedPrice,
-      ],
-    );
+          other_item_description,client_comment,item_price,notified_price`;
+    // 행 트리거 비용을 문장별 timeout 안에 나누되 요청 전체는 같은 트랜잭션에 둔다.
+    for (let offset = 0; offset < parcels.length; offset += 200) {
+      const rows = parcels.slice(offset, offset + 200).map((parcel, index) => ({
+        order_seq: id,
+        parcel_position: position + offset + index,
+        ...Object.fromEntries(
+          (['origin', 'destination'] as const).flatMap((side) =>
+            ORDER_ADDRESS_FIELDS.map((field) => [
+              `${side}_${field.replace(/[A-Z]/g, (letter) => '_' + letter.toLowerCase())}`,
+              parcel[side][field],
+            ]),
+          ),
+        ),
+        origin_pin_scope: parcel.originPin?.scope ?? null,
+        origin_pin_seq: parcel.originPin?.pinSeq ?? null,
+        document_count: parcel.documentCount,
+        small_box_count: parcel.smallBoxCount,
+        medium_box_count: parcel.mediumBoxCount,
+        big_box_count: parcel.bigBoxCount,
+        other_item_description: parcel.otherItemDescription,
+        client_comment: parcel.clientComment,
+        item_price: parcel.itemPrice,
+        notified_price: parcel.notifiedPrice,
+      }));
+      await client.query(
+        `INSERT INTO order_parcels (${columns}) SELECT ${columns}
+         FROM jsonb_populate_recordset(NULL::order_parcels,$1::jsonb) ORDER BY parcel_position`,
+        [JSON.stringify(rows)],
+      );
+    }
   }
 }

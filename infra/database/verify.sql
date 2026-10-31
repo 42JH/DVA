@@ -46,6 +46,13 @@ BEGIN
   RAISE EXCEPTION 'OpenAI incoming event timestamp missing'; END IF;
  IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events' AND column_name IN ('call_session_seq','last_attempt_at'))<>2 THEN
   RAISE EXCEPTION 'Recording correlation/retry columns missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND conname='call_ended_claim_pair_check')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='031-recording-worker-claims.sql') THEN
+  RAISE EXCEPTION 'Recording worker claim schema or migration missing'; END IF;
+ IF to_regclass('public.call_sessions_started_list_idx') IS NULL
+  OR to_regclass('public.orders_customer_created_list_idx') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='032-list-read-indexes.sql') THEN
+  RAISE EXCEPTION 'List read indexes or migration missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions

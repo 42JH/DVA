@@ -40,6 +40,7 @@ import { OrdersService } from './orders.service';
 import { OrderRequestKey } from './order-request-key';
 import { OrderIdParamsDto } from './dto/order-query.dto';
 import { SubmittedOrderDto } from './dto/submit-order.dto';
+import { OrderSubmissionService } from './order-submission.service';
 
 @ApiTags('Admin Orders')
 @ApiCookieAuth('adminSession')
@@ -47,7 +48,10 @@ import { SubmittedOrderDto } from './dto/submit-order.dto';
 @ApiExtraModels(CreateManualOrderDto, ManualOrderResultDto, RequestMetaDto)
 @Controller('admin/orders')
 export class AdminOrdersController {
-  constructor(private readonly orders: OrdersService) {}
+  constructor(
+    private readonly orders: OrdersService,
+    private readonly submissions: OrderSubmissionService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -84,7 +88,7 @@ export class AdminOrdersController {
     },
   })
   retry(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
-    return this.orders.retry(params.id, request.admin!.adminUserSeq, request.requestId);
+    return this.submissions.retry(params.id, request.admin!.adminUserSeq, request.requestId);
   }
 
   @Post()

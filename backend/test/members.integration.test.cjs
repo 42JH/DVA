@@ -13,6 +13,7 @@ process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { MembersRepository } = require('../dist/members/members.repository');
+const { DatabaseService } = require('../dist/database/database.service');
 const { hashPassword } = require('../dist/auth/password');
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -472,6 +473,62 @@ test('JSON batch creates new customers and links existing unaffiliated customers
     assert.equal(row.membership.status, 'ACTIVE');
     assert.equal(row.customer.status, 'ACTIVE');
   }
+});
+
+test('1000 inline employees use two data writes per import and keep every identity mapped correctly', async () => {
+  const co = await company();
+  const prefix = '019' + randomInt(10000000, 100000000);
+  const input = Array.from({ length: 1000 }, (_, index) => ({
+    employeeNo: String(index).padStart(4, '0'),
+    name: '일괄 직원 ' + index,
+    phoneNumber: prefix + String(index).padStart(4, '0'),
+  }));
+  const database = app.get(DatabaseService),
+    transaction = database.transaction;
+  let writes = 0;
+  database.transaction = (work) =>
+    transaction.call(database, async (client) => {
+      const query = client.query;
+      client.query = function (sql, ...args) {
+        if (/^\s*(?:INSERT INTO|UPDATE) (?:customers|memberships)\b/i.test(sql)) writes++;
+        return query.call(this, sql, ...args);
+      };
+      try {
+        return await work(client);
+      } finally {
+        client.query = query;
+      }
+    });
+  try {
+    await empty(await registerMany(co, input));
+    assert.equal(writes, 2);
+    writes = 0;
+    await empty(
+      await registerMany(
+        co,
+        input.map((row) => ({ ...row, name: row.name + ' 수정' })),
+      ),
+    );
+    assert.equal(writes, 2);
+  } finally {
+    database.transaction = transaction;
+  }
+  const stored = (
+    await pool.query(
+      'SELECT m.employee_no,c.phone_number,c.name FROM memberships m JOIN customers c USING(customer_seq) WHERE m.organization_seq=$1 ORDER BY m.employee_no',
+      [co],
+    )
+  ).rows;
+  assert.equal(stored.length, 1000);
+  assert.deepEqual(
+    stored,
+    input.map((row) => ({
+      employee_no: row.employeeNo,
+      phone_number: row.phoneNumber,
+      name: row.name + ' 수정',
+    })),
+  );
+  assert.equal((await members(co)).total_count, 1000);
 });
 
 test('JSON batch updates existing employee name/phone while retaining IDs, representative/status and historical order snapshot', async () => {

@@ -188,6 +188,13 @@ try {
     "/etc/nginx/conf.d/default.conf",
   );
   start(nginx);
+  // nginx -t도 listen 소켓을 열 수 있어 실제 master의 시작과 겹치지 않게 한다.
+  await until(
+    "Nginx is accepting requests",
+    () => get("http://nginx/nginx-health").status === 200,
+    30,
+    nginx,
+  );
   docker(["exec", nginx, "nginx", "-t"]);
   for (const route of [
     "/internal/metrics",

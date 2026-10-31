@@ -17,7 +17,16 @@ pipeline {
                     def source = checkout scm
                     env.SOURCE_BRANCH = source.GIT_BRANCH ?: ''
                     env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.CI_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     env.RELEASE_VERSION = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
+                    env.SHOULD_DEPLOY = (sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0).toString()
+                    def selection = sh(script: 'node infra/jenkins/monolith-changes.cjs', returnStdout: true).trim()
+                    assert selection ==~ /(?:true|false),(?:true|false),(?:true|false),[a-z_]+/
+                    def checks = selection.split(',')
+                    env.CHECK_BACKEND = checks[0]
+                    env.CHECK_OBSERVABILITY = checks[1]
+                    env.CHECK_PAYMENT_DEMO = checks[2]
+                    echo "CI selection: ${selection}"
                 }
             }
         }
@@ -32,40 +41,33 @@ pipeline {
                     bash infra/deploy/test-deploy-trigger.sh
                     bash infra/deploy/test-deploy.sh
                     bash infra/deploy/test-linux-release.sh
+                    node --test infra/jenkins/test-monolith-ci.cjs
                     node --version
                     docker version
                 '''
             }
         }
         stage('Backend checks') {
+            when { expression { env.CHECK_BACKEND == 'true' } }
             steps {
                 sh 'node backend/scripts/check.cjs'
             }
         }
         stage('Observability checks') {
-            when {
-                anyOf {
-                    changeset 'infra/observability/**'
-                    changeset 'infra/nginx/default.prod.conf'
-                }
-            }
+            when { expression { env.CHECK_OBSERVABILITY == 'true' } }
             steps {
                 sh 'bash -n infra/observability/deploy.sh'
                 sh 'node infra/observability/test.mjs'
             }
         }
         stage('Payment demo checks') {
-            when {
-                anyOf {
-                    changeset 'infra/payment-test/**'
-                    changeset 'backend/payment-test/**'
-                }
-            }
+            when { expression { env.CHECK_PAYMENT_DEMO == 'true' } }
             steps {
                 sh 'node infra/payment-test/check.mjs'
             }
         }
         stage('Build and Package Images') {
+            when { expression { env.SHOULD_DEPLOY == 'true' } }
             steps {
                 // NestJS compilation runs inside the backend Docker build stage.
                 sh 'bash infra/deploy/package.sh "$RELEASE_VERSION"'
@@ -73,6 +75,7 @@ pipeline {
             }
         }
         stage('Verify Deployment Access') {
+            when { expression { env.SHOULD_DEPLOY == 'true' } }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',
                     keyFileVariable: 'LIGHTSAIL_SSH_KEY', usernameVariable: 'LIGHTSAIL_SSH_USER')]) {
@@ -81,11 +84,7 @@ pipeline {
             }
         }
         stage('Deploy to Lightsail') {
-            when {
-                expression {
-                    sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0
-                }
-            }
+            when { expression { env.SHOULD_DEPLOY == 'true' } }
             options { timeout(time: 15, unit: 'MINUTES') }
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',

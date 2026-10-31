@@ -22,6 +22,14 @@ async function migrate(pool) {
         "SELECT 1 WHERE pg_get_functiondef('guard_order_parcel_edit()'::regprocedure) LIKE '%dva.admin_order_edit%'",
       );
       assert.equal(adminEdit.rowCount, 1, 'Apply migration 030 to the isolated DB first');
+      const recordingClaims = await client.query(
+        "SELECT 1 WHERE EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND conname='call_ended_claim_pair_check')",
+      );
+      assert.equal(recordingClaims.rowCount, 1, 'Apply migration 031 to the isolated DB first');
+      const listIndexes = await client.query(
+        "SELECT 1 WHERE to_regclass('public.call_sessions_started_list_idx') IS NOT NULL AND to_regclass('public.orders_customer_created_list_idx') IS NOT NULL",
+      );
+      assert.equal(listIndexes.rowCount, 1, 'Apply migration 032 to the isolated DB first');
       const customerMembership = await client.query(
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='department_seq' AND is_nullable='YES')",
       );

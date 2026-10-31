@@ -7,7 +7,7 @@ import {
   ListCustomersQueryDto,
   UpdateCustomerDto,
 } from './dto/customer-request.dto';
-import { Customer } from './customers.types';
+import { Customer, EmployeeCustomerIdentity } from './customers.types';
 import { CallerContextDto } from './dto/caller-context.dto';
 
 const columns =
@@ -16,6 +16,29 @@ const columns =
 @Injectable()
 export class CustomersRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async updateIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]): Promise<void> {
+    if (!rows.length) return;
+    await client.query(
+      `UPDATE customers c SET name=r.name,phone_number=r."phoneNumber"
+       FROM jsonb_to_recordset($1::jsonb) AS r("customerSeq" int,name text,"phoneNumber" text)
+       WHERE c.customer_seq=r."customerSeq"
+         AND (c.name IS DISTINCT FROM r.name OR c.phone_number IS DISTINCT FROM r."phoneNumber")`,
+      [JSON.stringify(rows)],
+    );
+  }
+
+  async insertIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]) {
+    if (!rows.length) return [];
+    return (
+      await client.query<{ customerSeq: number; phoneNumber: string }>(
+        `INSERT INTO customers(name,phone_number,status)
+         SELECT name,"phoneNumber",'ACTIVE' FROM jsonb_to_recordset($1::jsonb) AS r(name text,"phoneNumber" text)
+         RETURNING customer_seq AS "customerSeq",phone_number AS "phoneNumber"`,
+        [JSON.stringify(rows)],
+      )
+    ).rows;
+  }
 
   async context(phoneNumber: string, client?: PoolClient): Promise<CallerContextDto> {
     // 한 SQL 문장의 스냅샷으로 고객·소속 상태와 허용 주소록을 함께 읽는다.

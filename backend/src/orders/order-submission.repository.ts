@@ -2,9 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { ApiException } from '../common/errors/api.exception';
 import { DverResult } from './dver.client';
+import { DeliveriesService } from '../deliveries/deliveries.service';
 
 @Injectable()
 export class OrderSubmissionRepository {
+  constructor(private readonly deliveries: DeliveriesService) {}
   async hasShipments(client: PoolClient, id: number): Promise<boolean> {
     return (
       await client.query<{ exists: boolean }>(
@@ -53,15 +55,7 @@ export class OrderSubmissionRepository {
     if (saved.rowCount !== 1)
       throw new ApiException(409, 'INVALID_STATE', '접수 결과를 저장할 수 없는 주문 상태입니다.');
     if (result.status === 'ACCEPTED') {
-      await client.query(
-        `WITH created AS (
-           INSERT INTO shipments(order_parcel_seq,tracking_number,status)
-           SELECT order_parcel_seq,'DVA-'||gen_random_uuid()::text,'paid' FROM order_parcels
-           WHERE order_seq=$1 AND status='ACTIVE' RETURNING shipment_seq
-         ) INSERT INTO shipment_status_history(shipment_seq,request_id,to_status,actor_type)
-           SELECT shipment_seq,gen_random_uuid(),'paid','SYSTEM' FROM created`,
-        [id],
-      );
+      await this.deliveries.createForOrder(client, id);
     }
   }
 }

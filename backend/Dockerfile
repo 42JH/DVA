@@ -15,7 +15,7 @@ COPY scripts ./scripts
 COPY migrations ./migrations
 COPY data ./data
 COPY payment-test ./payment-test
-RUN npm run check
+RUN npm run lint && npm run format:check && npm run test:compiled
 CMD ["npm", "run", "test:integration"]
 
 FROM node:24-bookworm-slim

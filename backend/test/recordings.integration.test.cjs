@@ -7,6 +7,8 @@ const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worker');
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
+const { DatabaseService } = require('../dist/database/database.service');
+const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -280,7 +282,7 @@ test('S3 success followed by a DB failure rolls back the reference and reuses th
   assert.equal(uploads, 1);
 });
 
-test('only one application instance processes the durable queue at a time', async () => {
+test('two instances never upload the same live claim and storage I/O holds no pool connection', async () => {
   await call();
   const data = payload();
   await receipt(data);
@@ -300,6 +302,8 @@ test('only one application instance processes the durable queue at a time', asyn
   const first = workers[0].processPending();
   await started;
   try {
+    const connections = apps[0].get(DatabaseService).pool;
+    assert.equal(connections.totalCount - connections.idleCount, 0);
     await workers[1].processPending();
     assert.equal((await state(data.recordingId)).recordings, 0);
   } finally {
@@ -308,6 +312,87 @@ test('only one application instance processes the durable queue at a time', asyn
   await first;
   assert.equal(uploads, 1);
   assert.equal((await state(data.recordingId)).recordings, 1);
+});
+
+test('a different receipt progresses while another instance waits for storage', async () => {
+  await call();
+  const firstData = payload();
+  await receipt(firstData);
+  const original = saving;
+  let entered, release;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const wait = new Promise((resolve) => {
+    release = resolve;
+  });
+  saving = async (...args) => {
+    if (args[0] === firstData.recordingId) {
+      entered();
+      await wait;
+    }
+    return original(...args);
+  };
+  const first = workers[0].processPending();
+  await started;
+  try {
+    const second = { ...payload(), callFrom: '01098880004' };
+    await call(second.callFrom);
+    await receipt(second);
+    await workers[1].processPending();
+    assert.equal((await state(second.recordingId)).processing_status, 'PROCESSED');
+    assert.equal((await state(firstData.recordingId)).recordings, 0);
+  } finally {
+    release();
+    await first;
+  }
+  assert.equal(uploads, 2);
+});
+
+test('expired claims recover and stale completion, failure and release cannot replace a new owner', async () => {
+  const callId = await call(),
+    data = payload();
+  await receipt(data);
+  const repo = apps[0].get(PbxWebhookRepository);
+  const first = await repo.next();
+  assert.equal(await repo.next(), undefined);
+  assert.equal(await repo.match(data, 30, first.claimId), callId);
+  await pool.query(
+    "UPDATE pbx_webhooks.call_ended_events SET claimed_until=clock_timestamp()-interval '1 second',last_attempt_at=clock_timestamp()-interval '6 minutes' WHERE recording_id=$1",
+    [data.recordingId],
+  );
+  assert.equal(
+    await repo.processed(data.recordingId, callId, 'recordings/stale', first.claimId),
+    false,
+  );
+  const second = await repo.next();
+  assert.notEqual(second.claimId, first.claimId);
+  await repo.failed(data.recordingId, first.claimId);
+  await repo.release(data.recordingId, first.claimId);
+  assert.equal(await repo.match(data, 30, first.claimId), null);
+  assert.equal(
+    await repo.processed(data.recordingId, callId, 'recordings/stale', first.claimId),
+    false,
+  );
+  assert.equal((await state(data.recordingId)).recordings, 0);
+  assert.equal(
+    await repo.processed(
+      data.recordingId,
+      callId,
+      'recordings/current-' + randomUUID(),
+      second.claimId,
+    ),
+    true,
+  );
+  assert.equal((await state(data.recordingId)).processing_status, 'PROCESSED');
+  assert.equal((await state(data.recordingId)).recordings, 1);
+  await assert.rejects(
+    pool.query('UPDATE pbx_webhooks.call_ended_events SET claim_id=$2 WHERE recording_id=$1', [
+      data.recordingId,
+      randomUUID(),
+    ]),
+    (error) => error.code === '23514',
+  );
 });
 
 test('disabled S3 and recent receipts remain durable; retry cooldown does not starve later events', async () => {

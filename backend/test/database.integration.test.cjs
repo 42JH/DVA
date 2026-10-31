@@ -67,3 +67,26 @@ test('a business failure also rolls back the entire transaction', async () => {
     'committed',
   );
 });
+
+test('transaction observations count completed successes and rollbacks without retaining SQL or identities', async () => {
+  const before = { ...database.transactionStatistics };
+  await database.transaction((client) => client.query('SELECT pg_sleep(0.01)'));
+  await assert.rejects(
+    database.transaction(async () => {
+      throw Error('observation-test');
+    }),
+    /observation-test/,
+  );
+  const after = database.transactionStatistics;
+  assert.equal(after.count, before.count + 2);
+  assert.equal(after.failures, before.failures + 1);
+  assert.ok(after.seconds > before.seconds);
+  assert.ok(after.maxSeconds > 0);
+  assert.ok(after.connectionWaitSeconds >= before.connectionWaitSeconds);
+  assert.ok(
+    Object.values(after).every(
+      (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0,
+    ),
+  );
+  assert.equal(database.pool.totalCount - database.pool.idleCount, 0);
+});
