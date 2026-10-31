@@ -3,13 +3,17 @@ import type { PersonaItem } from '@/features/persona/hooks/usePersonaPage'
 
 // 오른쪽 '페르소나' 탭 — 칸을 누르면 그 페르소나의 프롬프트. 고른 칸 = 옅은 남색 바탕
 // 통화에 쓰는 페르소나는 '통화에 사용 중' 태그, 나머지는 [사용하기]. 아래 [+ 페르소나 추가]
-// shortcut: [사용하기] · [+ 페르소나 추가]는 다음 단계에서 켬
+// [사용하기] → 확인 창 → 그 페르소나 적용 대기('v3 적용 대기') → AI 확인 후 통화에 사용. [+ 페르소나 추가] → 추가 창
 export function PersonaList({
   items,
   onSelect,
+  onUse,
+  onAdd,
 }: {
   items: PersonaItem[]
   onSelect: (personaSeq: number) => void
+  onUse: (personaSeq: number) => void
+  onAdd: () => void
 }) {
   return (
     <div className="flex flex-col">
@@ -28,10 +32,14 @@ export function PersonaList({
           <div onClick={(e) => e.stopPropagation()}>
             {p.inUse ? (
               <Tag kind="live">통화에 사용 중</Tag>
+            ) : p.applying ? (
+              <Tag kind="outline">{p.applying}</Tag>
             ) : (
-              <Button small disabled>
-                사용하기
-              </Button>
+              p.canUse && (
+                <Button small onClick={() => onUse(p.personaSeq)}>
+                  사용하기
+                </Button>
+              )
             )}
           </div>
           {p.lines.map((line) => (
@@ -42,7 +50,7 @@ export function PersonaList({
           <p className="text-caption text-sub">{p.versionLine}</p>
         </div>
       ))}
-      <Button className="mt-4 self-start" disabled>
+      <Button className="mt-4 self-start" onClick={onAdd}>
         + 페르소나 추가
       </Button>
     </div>

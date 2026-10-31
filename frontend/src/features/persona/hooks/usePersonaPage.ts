@@ -7,8 +7,8 @@ import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { lineDiff } from '@/features/persona/hooks/lineDiff'
 import {
-  applyVersion,
   personaQueries,
+  requestApply,
   type Persona,
   type PersonaVersion,
 } from '@/features/persona/api/personaApi'
@@ -20,9 +20,11 @@ export interface PersonaItem {
   personaSeq: number
   name: string
   selected: boolean
-  inUse: boolean // '통화에 사용 중' 태그 (아니면 [사용하기])
+  inUse: boolean // '통화에 사용 중' 태그
+  applying: string | null // 'v3 적용 대기' — 통화에 쓰려고 AI 확인을 기다리는 중
+  canUse: boolean // [사용하기] (쓰는 중 · 대기 중이 아니고 적용할 버전이 있을 때)
   lines: string[] // 'marin · 속도 보통' · '기다리기 보통'
-  versionLine: string // '적용 버전 v6 · v7 저장됨'
+  versionLine: string // '적용 버전 v6 · v7 저장됨' · '적용 버전 없음 · v1 저장됨'
 }
 
 /** 오른쪽 '버전 히스토리' 탭 한 칸 */
@@ -33,7 +35,7 @@ export interface VersionItem {
   summary: string
   author: string
   selected: boolean
-  canApply: boolean // 적용 중인 버전은 [적용] 없음 (이미 통화에 쓰는 중)
+  canApply: boolean // 적용 중 · 적용 대기인 버전은 [적용] 없음
   testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전
   canApplyNow: boolean // 시험 통화를 끝낸 버전만 [적용]이 눌림 (10/31 결정)
 }
@@ -49,12 +51,21 @@ export interface PromptView {
 // 'v6과' · 'v5와' — 숫자를 읽은 소리의 받침으로 조사를 고름 (영·일·삼·육·칠·팔 = 받침 있음)
 const withGwa = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '과' : '와'}`
 const withEul = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '을' : '를'}` // 'v7을' · 'v5를'
+const withI = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '이' : '가'}` // 'v6이' · 'v5가'
 
-/** [적용] 확인 창 문구 */
+/** [적용] · [사용하기] 확인 창 문구 */
 export interface ApplyConfirm {
-  title: string // 'v7을 적용할까요?'
+  title: string // 'v7을 적용할까요?' · '친절 안내형을 통화에 쓸까요?'
   target: string // '빠른 접수형 · v7 (저장됨)'
   note: string
+  okLabel: string // '적용' · '사용하기'
+}
+type Confirming = { kind: 'version' | 'persona'; personaSeq: number; version: number } | null
+const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
+// '친절 안내형을' · '빠른 접수형을' — 이름 끝 글자의 받침으로 을/를
+const nameEul = (name: string) => {
+  const c = name.charCodeAt(name.length - 1) - 0xac00
+  return `${name}${c >= 0 && c < 11172 && c % 28 !== 0 ? '을' : '를'}`
 }
 
 const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
@@ -91,25 +102,34 @@ export function usePersonaPage() {
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
   const [tested, setTested] = useState<Record<string, number>>({})
-  const [confirming, setConfirming] = useState<number | null>(null) // [적용] 확인 창을 띄운 버전
+  const [confirming, setConfirming] = useState<Confirming>(null) // [적용] · [사용하기] 확인 창
+  const [adding, setAdding] = useState(false) // 페르소나 추가 창
   const qc = useQueryClient()
 
-  const personas = useQuery(personaQueries.list())
+  const personas = useQuery({
+    ...personaQueries.list(),
+    refetchInterval: (q) => (q.state.data?.some((p) => p.applyingVersion) ? POLL_MS : false),
+  })
   const list = personas.data ?? []
   const persona =
     list.find((p) => p.personaSeq === personaSeq) ?? list.find((p) => p.inUse) ?? list[0] ?? null
   const versions = useQuery({
     ...personaQueries.versions(persona?.personaSeq ?? 0),
     enabled: persona !== null,
+    refetchInterval: (q) => (q.state.data?.some((v) => v.status === 'PENDING') ? POLL_MS : false),
   })
   const all = versions.data ?? []
   const viewing = all.find((v) => v.version === version) ?? all[0] ?? null
   const testedSec = (v: number) => (persona ? tested[`${persona.personaSeq}-${v}`] : undefined)
   const testingVersion = all.find((v) => v.version === testing) ?? null
-  const confirmingVersion = all.find((v) => v.version === confirming) ?? null
-  const active = all.find((v) => v.status === 'ACTIVE') ?? null
+  const inUse = list.find((p) => p.inUse) ?? null
+  const confirmingPersona = list.find((p) => p.personaSeq === confirming?.personaSeq) ?? null
+  const confirmingVersion =
+    confirming?.kind === 'version'
+      ? (all.find((v) => v.version === confirming.version) ?? null)
+      : null
   const apply = useMutation({
-    mutationFn: (v: number) => applyVersion(persona!.personaSeq, v),
+    mutationFn: (c: NonNullable<Confirming>) => requestApply(c.personaSeq, c.version),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
       setConfirming(null)
@@ -173,23 +193,51 @@ export function usePersonaPage() {
 
     compare: compare(),
 
-    // [적용] → 확인 창 → 적용
-    applyConfirm:
-      persona && confirmingVersion
-        ? ({
-            title: `${withEul(confirmingVersion.version)} 적용할까요?`,
-            target: `${persona.name} · v${confirmingVersion.version} (${VERSION_TAG[confirmingVersion.status]?.label ?? '지난 버전'})`,
-            note: `적용하면 다음 통화부터 이 버전으로 응대합니다.${active ? ` 지금 적용 중인 v${active.version}은 지난 버전이 됩니다.` : ''}`,
-          } satisfies ApplyConfirm)
-        : null,
+    // [적용](버전) · [사용하기](페르소나) → 확인 창 → 적용 요청(적용 대기) → AI가 확인하면 적용 중
+    applyConfirm: ((): ApplyConfirm | null => {
+      if (!confirming || !confirmingPersona) return null
+      const until = inUse?.activeVersion
+        ? ` 그 전까지는 ${inUse.name} ${withI(inUse.activeVersion)} 계속 쓰입니다.`
+        : ''
+      if (confirming.kind === 'persona')
+        return {
+          title: `${nameEul(confirmingPersona.name)} 통화에 쓸까요?`,
+          target: `${confirmingPersona.name} · v${confirming.version}`,
+          note: `진행 중인 통화가 끝나면(AI 확인 후) 이 페르소나로 응대합니다.${until}`,
+          okLabel: '사용하기',
+        }
+      return {
+        title: `${withEul(confirming.version)} 적용할까요?`,
+        target: `${confirmingPersona.name} · v${confirming.version} (${(confirmingVersion && VERSION_TAG[confirmingVersion.status]?.label) ?? '지난 버전'})`,
+        note: `적용 대기가 되고, 진행 중인 통화가 끝나면(AI 확인 후) 이 버전으로 응대합니다.${until}`,
+        okLabel: '적용',
+      }
+    })(),
     askApply: (v: number) => {
       apply.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
-      setConfirming(v)
+      if (persona) setConfirming({ kind: 'version', personaSeq: persona.personaSeq, version: v })
     },
-    confirmApply: () => confirming !== null && apply.mutate(confirming),
+    askUse: (seq: number) => {
+      const p = list.find((x) => x.personaSeq === seq)
+      const v = p?.activeVersion ?? p?.savedVersion // 그 페르소나의 적용 버전 (한 번도 적용 안 했으면 최신 저장본)
+      apply.reset()
+      if (p && v) setConfirming({ kind: 'persona', personaSeq: seq, version: v })
+    },
+    confirmApply: () => confirming && apply.mutate(confirming),
     cancelApply: () => setConfirming(null),
     isApplying: apply.isPending,
     applyError: apply.error?.message ?? null,
+
+    adding,
+    openAdd: () => setAdding(true),
+    closeAdd: () => setAdding(false),
+    // 추가하면 그 페르소나를 골라 보여 줌
+    added: (seq: number) => {
+      setAdding(false)
+      setPersonaSeq(seq)
+      setVersion(null)
+      setTab('persona')
+    },
 
     testCall,
     // 버전 칸 [시험 통화] — 그 버전을 고르고 통화 창
@@ -231,8 +279,10 @@ export function usePersonaPage() {
       name: p.name,
       selected: p.personaSeq === persona?.personaSeq,
       inUse: p.inUse,
+      applying: p.applyingVersion ? `v${p.applyingVersion} 적용 대기` : null,
+      canUse: !p.inUse && !p.applyingVersion && (p.activeVersion ?? p.savedVersion) !== null,
       lines: [`${p.voice.voice} · ${SPEED_LABEL[p.voice.speed]}`, WAIT_LABEL[p.voice.waitTime]],
-      versionLine: `적용 버전 v${p.activeVersion}${p.pendingVersion ? ` · v${p.pendingVersion} 저장됨` : ''}`,
+      versionLine: `${p.activeVersion ? `적용 버전 v${p.activeVersion}` : '적용 버전 없음'}${p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''}`,
     })),
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
@@ -251,10 +301,11 @@ export function usePersonaPage() {
       summary: v.summary,
       author: v.author,
       selected: v.version === viewing?.version,
-      canApply: v.status !== 'ACTIVE',
+      canApply: v.status !== 'ACTIVE' && v.status !== 'PENDING',
       testResult:
         testedSec(v.version) !== undefined ? `완료 · ${fmtClock(testedSec(v.version)!)}` : null,
-      canApplyNow: v.status !== 'ACTIVE' && testedSec(v.version) !== undefined,
+      canApplyNow:
+        v.status !== 'ACTIVE' && v.status !== 'PENDING' && testedSec(v.version) !== undefined,
     })),
     moreVersions: showAll ? 0 : Math.max(0, all.length - HISTORY_FIRST),
     showAllVersions: () => setShowAll(true),
@@ -276,6 +327,9 @@ function toPromptView(p: Persona, v: PersonaVersion): PromptView {
     lines: v.prompt
       .split('\n')
       .map((text, i) => ({ no: i + 1, text, heading: text.startsWith('# ') })),
-    compareLabel: v.version === p.activeVersion ? null : `${withGwa(p.activeVersion)} 비교`,
+    compareLabel:
+      p.activeVersion === null || v.version === p.activeVersion
+        ? null
+        : `${withGwa(p.activeVersion)} 비교`,
   }
 }

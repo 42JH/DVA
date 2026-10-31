@@ -18,6 +18,7 @@ export const WAIT_LABEL: Record<WaitTime, string> = {
 // '작성 중'은 수정 화면의 저장 전 상태라 여기 없음 (DRAFT_TAG)
 export const VERSION_TAG: Record<VersionStatus, { label: string; kind: TagKind } | null> = {
   SAVED: { label: '저장됨', kind: 'outline' },
+  PENDING: { label: '적용 대기', kind: 'live' }, // AI가 확인하면 적용 중 (그동안 지금 버전이 계속 쓰임)
   ACTIVE: { label: '적용 중', kind: 'blue' },
   PAST: null,
 }

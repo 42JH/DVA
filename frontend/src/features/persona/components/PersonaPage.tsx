@@ -1,5 +1,6 @@
 import { ConfirmDialog, Tabs } from '@/shared/ui'
 import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePersonaPage'
+import { AddPersonaModal } from './AddPersonaModal'
 import { PersonaList } from './PersonaList'
 import { PromptCard } from './PromptCard'
 import { PromptEditor } from './PromptEditor'
@@ -54,7 +55,12 @@ export function PersonaPage() {
         <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
         <div className="min-h-0 flex-1 overflow-auto">
           {vm.tab === 'persona' ? (
-            <PersonaList items={vm.personas} onSelect={vm.selectPersona} />
+            <PersonaList
+              items={vm.personas}
+              onSelect={vm.selectPersona}
+              onUse={vm.askUse}
+              onAdd={vm.openAdd}
+            />
           ) : (
             <VersionList
               items={vm.versions}
@@ -73,13 +79,14 @@ export function PersonaPage() {
           target={vm.applyConfirm.target}
           note={vm.applyConfirm.note}
           warn={vm.applyError ?? undefined}
-          okLabel="적용"
+          okLabel={vm.applyConfirm.okLabel}
           okKind="primary"
           pending={vm.isApplying}
           onOk={vm.confirmApply}
           onClose={vm.cancelApply}
         />
       )}
+      {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
       {vm.testCall && (
         <TestCallModal
           key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}
