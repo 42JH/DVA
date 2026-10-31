@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { OrganizationBillingService } from '../organizations/organization-billing.service';
-import { OrdersService } from './orders.service';
+import { OrderSubmissionService } from './order-submission.service';
 import { OrdersRepository } from './orders.repository';
 import { OrderPaymentsRepository } from './order-payments.repository';
 
@@ -18,7 +18,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
     private readonly billing: OrganizationBillingService,
-    private readonly orders: OrdersService,
+    private readonly submissions: OrderSubmissionService,
     private readonly repository: OrdersRepository,
     private readonly payments: OrderPaymentsRepository,
     private readonly config: ConfigService,
@@ -100,7 +100,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     );
     for (const order of paid.rows) {
       try {
-        await this.orders.submitPaidOrder(order.id, randomUUID());
+        await this.submissions.submitPaidOrder(order.id, randomUUID());
       } catch {
         this.logger.error({ event: 'paid_order_submission_deferred', orderSeq: order.id });
       }

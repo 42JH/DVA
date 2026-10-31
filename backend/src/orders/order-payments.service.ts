@@ -3,7 +3,7 @@ import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { OrderPaymentsRepository } from './order-payments.repository';
-import { OrdersService } from './orders.service';
+import { OrderSubmissionService } from './order-submission.service';
 import { randomUUID } from 'node:crypto';
 
 // Internal domain seam. PaymentsService reserves a durable provider key and lease
@@ -14,7 +14,7 @@ export class OrderPaymentsService {
     private readonly database: DatabaseService,
     private readonly repository: OrderPaymentsRepository,
     private readonly audit: AuditService,
-    private readonly orders: OrdersService,
+    private readonly submissions: OrderSubmissionService,
   ) {}
 
   async claimApproval(id: string, amount: number, key?: string) {
@@ -186,6 +186,6 @@ export class OrderPaymentsService {
       );
       return request.orderSeq;
     });
-    return this.orders.submitPaidOrder(orderId, requestId);
+    return this.submissions.submitPaidOrder(orderId, requestId);
   }
 }
