@@ -11,7 +11,7 @@
 - 목록: `{ data: [], hasNext }`. 단건: `{ data, meta: { requestId } }`.
 - 모든 응답은 `Cache-Control: no-store`. 전화번호·대화 내용·녹취 URL을 요청 로그에 남기지 않는다.
 - 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`다.
-- 기존 `call_sessions`, `call_utterances`, `handoff_requests`, `recordings`를 읽는다. 신규 테이블·마이그레이션은 없다.
+- 기존 `call_sessions`, `call_utterances`, `handoff_requests`, `recordings`와 026의 `call_insight_events`를 읽는다. 새 앱 실행 전 026까지 적용하며 조회 보완 자체의 추가 마이그레이션은 없다.
 
 ## GET /api/calls — 통화 목록 조회
 
@@ -51,7 +51,8 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 
 ## GET /api/calls/{id} — 통화 상세 조회
 
-`id`는 `call_session_seq`다. 응답의 `data`는 `{ call, recordings }`다.
+`id`는 `call_session_seq`다. 응답의 `data`는 `{ call, recordings, aiActionCount }`다.
+`aiActionCount`는 현재 수집된 AI 동작 전체 건수이며 `/actions`의 페이지 크기와 별개다. 수집 기록이 없으면 0이다.
 `call`은 목록과 같은 필드다. `recordings`는 아래 필드를 가진 배열이며 `recordingSeq` 오름차순이다.
 
 | 필드 | 의미 |
@@ -73,10 +74,12 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 `id`는 `call_session_seq`, 선택 query는 `limit`·`offset`이다.
 응답은 `{ data: Utterance[], hasNext }`이며 `utteranceOrder` 오름차순이다.
 발화 구간별 `callUtteranceSeq`, `utteranceOrder`, `speaker`(CUSTOMER/AI),
-`utteranceText`, `lastSentenceSeq`, `receivedAt`을 반환한다.
+`utteranceText`, `lastSentenceSeq`, `receivedAt`, `offsetSeconds`를 반환한다.
 
 누적 대화 원문은 줄바꿈을 포함해 그대로 제공한다. `receivedAt`은 최초 구간 수신 시각이며,
 녹취의 재생 위치나 실제 발화 시작 시각을 뜻하지 않는다.
+`offsetSeconds`는 AI 통화 시작부터 정수 초이며 이벤트 미수집·위치 미확인이면 null이다. receivedAt으로 위치를 추정하지 않는다.
+AI 동작은 `GET /api/calls/{id}/actions`, 주문·FAQ 처리 결과는 `GET /api/calls/{id}/processing-results`로 별도 조회한다. [분리 조회 계약](call-events-read-spec.md)을 따른다.
 통화가 없으면 404, 저장된 발화가 없거나 마지막 페이지 이후이면 빈 목록이다.
 빈 목록은 STT 기록이 없다는 뜻이며 통화가 무음이었거나 인식에 성공했다는 뜻이 아니다.
 

@@ -2,6 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { ListResponse } from '../common/pagination';
 import { DatabaseService } from '../database/database.service';
 import { CallEventsRepository } from './call-events.repository';
 import {
@@ -19,6 +21,18 @@ export class CallEventsService {
     private readonly repository: CallEventsRepository,
     private readonly audit: AuditService,
   ) {}
+
+  async findActions(id: number, query: PaginationQueryDto) {
+    if (!(await this.repository.callExists(id)))
+      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    return new ListResponse(await this.repository.findActions(id, query), query.limit);
+  }
+
+  async findProcessingResults(id: number, query: PaginationQueryDto) {
+    if (!(await this.repository.callExists(id)))
+      throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    return new ListResponse(await this.repository.findProcessingResults(id, query), query.limit);
+  }
 
   async save(id: number, input: CreateCallEventsDto, requestId: string): Promise<void> {
     const events = input.events.map((event): CallEventInputDto => {
@@ -49,6 +63,28 @@ export class CallEventsService {
           unansweredQuestionSeq: value.unansweredQuestionSeq,
           summaryText: value.summaryText,
         };
+        if (value.action === 'FAQ_ANSWERED') {
+          if (value.orderSeq !== null || value.unansweredQuestionSeq !== null)
+            throw new ApiException(
+              422,
+              'VALIDATION_FAILED',
+              'FAQ 답변 결과의 주문·미답변 번호는 null이어야 합니다.',
+            );
+          Object.assign(payload, {
+            faqEntrySeq: value.faqEntrySeq,
+            questionUtteranceOrder: value.questionUtteranceOrder,
+            answerUtteranceOrder: value.answerUtteranceOrder,
+          });
+        } else if (
+          [value.faqEntrySeq, value.questionUtteranceOrder, value.answerUtteranceOrder].some(
+            (field) => field !== undefined,
+          )
+        )
+          throw new ApiException(
+            400,
+            'INVALID_REQUEST',
+            'FAQ 답변 참조는 FAQ_ANSWERED에만 보냅니다.',
+          );
       }
       return {
         eventId: event.eventId.toLowerCase(),
@@ -80,6 +116,7 @@ export class CallEventsService {
       if (call.providerCallId !== input.providerCallId)
         throw new ApiException(403, 'FORBIDDEN', '통화 번호와 AI 통화 ID가 일치하지 않습니다.');
       let inserted = false;
+      const faqResults: BusinessResultPayloadDto[] = [];
       // 서로 다른 통화에서 잘못 재사용한 UUID도 같은 잠금 순서로 처리한다.
       for (const event of events.sort((a, b) => a.eventId.localeCompare(b.eventId))) {
         const hash = createHash('sha256')
@@ -137,7 +174,34 @@ export class CallEventsService {
         }
         if (!(await this.repository.insert(client, id, event, hash, utteranceId, questionId))) {
           if (!matches(await this.repository.findExisting(client, id, event))) throw conflict();
-        } else inserted = true;
+        } else {
+          inserted = true;
+          if (
+            event.kind === 'BUSINESS_RESULT' &&
+            (event.payload as BusinessResultPayloadDto).action === 'FAQ_ANSWERED'
+          )
+            faqResults.push(event.payload as BusinessResultPayloadDto);
+        }
+      }
+      // 같은 묶음의 발화가 UUID 정렬 뒤에 있어도 참조할 수 있다.
+      for (const result of faqResults) {
+        const references = await this.repository.faqReferences(client, id, result);
+        if (
+          !references.faqExists ||
+          references.questionSpeaker === null ||
+          references.answerSpeaker === null
+        )
+          throw new ApiException(
+            404,
+            'NOT_FOUND',
+            '참조 FAQ 또는 같은 통화의 발화를 찾을 수 없습니다.',
+          );
+        if (references.questionSpeaker !== 'CUSTOMER' || references.answerSpeaker !== 'AI')
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            '질문은 고객 발화, 답변은 AI 발화여야 합니다.',
+          );
       }
       if (inserted)
         await this.audit.recordSuccess(

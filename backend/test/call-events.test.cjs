@@ -11,11 +11,49 @@ const event = (changes = {}) => ({
   kind: 'AI_ACTION',
   occurredAt: '2026-10-31T10:00:31+09:00',
   offsetSeconds: 31,
-  payload: { action: 'ADDRESS_SEARCH', summaryText: '검색 결과 1건\n', orderSeq: null },
+  payload: { action: 'PIN_SEARCH', summaryText: '이름 검색 결과 1건\n', orderSeq: null },
   ...changes,
 });
 const body = (value = event()) => ({ providerCallId: 'rtc_event_test', events: [value] });
 const validate = (value) => pipe.transform(value, { type: 'body', metatype: CreateCallEventsDto });
+
+test('PIN and previous-order searches accept names and order context without address fields', async () => {
+  for (const action of ['PIN_SEARCH', 'PREVIOUS_ORDER_SEARCH']) {
+    const input = body(
+      event({ payload: { action, summaryText: '지난주 김담당 주문 2건', orderSeq: null } }),
+    );
+    assert.deepEqual(JSON.parse(JSON.stringify(await validate(input))), input);
+  }
+});
+
+test('FAQ answers require FAQ and question/answer utterance references without adding a status', async () => {
+  const payload = {
+    action: 'FAQ_ANSWERED',
+    orderSeq: null,
+    unansweredQuestionSeq: null,
+    summaryText: 'FAQ로 안내',
+    faqEntrySeq: 1,
+    questionUtteranceOrder: 2,
+    answerUtteranceOrder: 3,
+  };
+  const input = body(event({ kind: 'BUSINESS_RESULT', payload }));
+  assert.deepEqual(JSON.parse(JSON.stringify(await validate(input))), input);
+  for (const key of ['faqEntrySeq', 'questionUtteranceOrder', 'answerUtteranceOrder']) {
+    for (const value of [undefined, null, 0, '1', 2147483648])
+      await assert.rejects(
+        () =>
+          validate(body(event({ kind: 'BUSINESS_RESULT', payload: { ...payload, [key]: value } }))),
+        { status: 400 },
+      );
+  }
+  await assert.rejects(
+    () =>
+      validate(
+        body(event({ kind: 'BUSINESS_RESULT', payload: { ...payload, status: 'SUCCEEDED' } })),
+      ),
+    { status: 400 },
+  );
+});
 
 test('events accept each discriminated payload, integer seconds, explicit nulls and 50 items', async () => {
   for (const value of [

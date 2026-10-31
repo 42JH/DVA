@@ -32,6 +32,7 @@ export class ConsultationsService {
     const recordings = await this.repository.findRecordings(id);
     return {
       call,
+      aiActionCount: await this.repository.countActions(id),
       recordings: await Promise.all(
         recordings.map(async ({ objectKey, ...recording }) => ({
           ...recording,

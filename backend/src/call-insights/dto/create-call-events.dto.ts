@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -55,7 +55,11 @@ export class UtterancePayloadDto {
 }
 
 export class AiActionPayloadDto {
-  @ApiProperty({ enum: AI_ACTIONS })
+  @ApiProperty({
+    enum: AI_ACTIONS,
+    description:
+      'PIN_SEARCH는 저장 PIN 검색, PREVIOUS_ORDER_SEARCH는 이전 주문 검색이며 주소에 한정하지 않는다. ADDRESS_SEARCH·ORDER_LOOKUP은 기존 기록 호환용이다.',
+  })
   @IsIn(AI_ACTIONS)
   action!: (typeof AI_ACTIONS)[number];
 
@@ -99,6 +103,48 @@ export class BusinessResultPayloadDto {
   @Matches(/\S/u)
   @NotContains('\u0000')
   summaryText!: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: 'FAQ_ANSWERED에서 필수인 사용 FAQ 번호. 다른 action에서는 생략한다.',
+  })
+  @ValidateIf(
+    (payload: BusinessResultPayloadDto, value: unknown) =>
+      payload.action === 'FAQ_ANSWERED' || value !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  faqEntrySeq?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: 'FAQ_ANSWERED에서 필수인 같은 통화 고객 질문의 utteranceOrder.',
+  })
+  @ValidateIf(
+    (payload: BusinessResultPayloadDto, value: unknown) =>
+      payload.action === 'FAQ_ANSWERED' || value !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  questionUtteranceOrder?: number;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: 'FAQ_ANSWERED에서 필수인 같은 통화 AI 답변의 utteranceOrder.',
+  })
+  @ValidateIf(
+    (payload: BusinessResultPayloadDto, value: unknown) =>
+      payload.action === 'FAQ_ANSWERED' || value !== undefined,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  answerUtteranceOrder?: number;
 }
 
 export class CallEventInputDto {

@@ -98,12 +98,24 @@ export class ConsultationsRepository {
     ).rows;
   }
 
+  async countActions(id: number): Promise<number> {
+    return (
+      await this.database.pool.query<{ count: number }>(
+        "SELECT count(*)::integer AS count FROM call_insight_events WHERE call_session_seq=$1 AND kind='AI_ACTION'",
+        [id],
+      )
+    ).rows[0].count;
+  }
+
   async findTranscript(id: number, query: TranscriptQueryDto): Promise<UtteranceDto[]> {
     return (
       await this.database.pool.query<UtteranceDto>(
-        `SELECT call_utterance_seq AS "callUtteranceSeq",utterance_order AS "utteranceOrder",speaker,
-       utterance_text AS "utteranceText",last_sentence_seq AS "lastSentenceSeq",received_at AS "receivedAt"
-       FROM call_utterances WHERE call_session_seq=$1 ORDER BY utterance_order
+        `SELECT u.call_utterance_seq AS "callUtteranceSeq",u.utterance_order AS "utteranceOrder",u.speaker,
+       u.utterance_text AS "utteranceText",u.last_sentence_seq AS "lastSentenceSeq",u.received_at AS "receivedAt",
+       e.offset_seconds::double precision AS "offsetSeconds"
+       FROM call_utterances u LEFT JOIN call_insight_events e ON e.call_utterance_seq=u.call_utterance_seq
+        AND e.call_session_seq=u.call_session_seq AND e.kind='UTTERANCE'
+       WHERE u.call_session_seq=$1 ORDER BY u.utterance_order,u.call_utterance_seq
        LIMIT $2 OFFSET $3`,
         [id, query.limit + 1, query.offset],
       )

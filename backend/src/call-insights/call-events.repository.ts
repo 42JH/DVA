@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import { CallEventInputDto, UtterancePayloadDto } from './dto/create-call-events.dto';
+import { DatabaseService } from '../database/database.service';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { CallActionDto, CallProcessingResultDto } from './dto/call-event-response.dto';
+import {
+  BusinessResultPayloadDto,
+  CallEventInputDto,
+  UtterancePayloadDto,
+} from './dto/create-call-events.dto';
 
 export interface EventCall {
   providerCallId: string;
@@ -10,6 +17,64 @@ export interface EventCall {
 
 @Injectable()
 export class CallEventsRepository {
+  constructor(private readonly database: DatabaseService) {}
+
+  async callExists(id: number): Promise<boolean> {
+    return (
+      (
+        await this.database.pool.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1', [
+          id,
+        ])
+      ).rowCount === 1
+    );
+  }
+
+  async findActions(id: number, query: PaginationQueryDto): Promise<CallActionDto[]> {
+    return (
+      await this.database.pool.query<CallActionDto>(
+        `SELECT event_id AS "eventId",event_order AS "eventOrder",occurred_at AS "occurredAt",
+         offset_seconds::double precision AS "offsetSeconds",payload->>'action' AS action,
+         payload->>'summaryText' AS "summaryText",(payload->>'orderSeq')::integer AS "orderSeq"
+         FROM call_insight_events WHERE call_session_seq=$1 AND kind='AI_ACTION'
+         ORDER BY event_order,event_id LIMIT $2 OFFSET $3`,
+        [id, query.limit + 1, query.offset],
+      )
+    ).rows;
+  }
+
+  async findProcessingResults(
+    id: number,
+    query: PaginationQueryDto,
+  ): Promise<CallProcessingResultDto[]> {
+    return (
+      await this.database.pool.query<CallProcessingResultDto>(
+        `SELECT e.event_id AS "eventId",e.event_order AS "eventOrder",e.occurred_at AS "occurredAt",
+         e.offset_seconds::double precision AS "offsetSeconds",e.payload->>'action' AS action,
+         e.payload->>'summaryText' AS "summaryText",(e.payload->>'orderSeq')::integer AS "orderSeq",
+         e.unanswered_question_seq AS "unansweredQuestionSeq",
+         CASE WHEN e.payload->>'action'='FAQ_ANSWERED' THEN question.utterance_text
+          WHEN u.status IN ('OPEN','REGISTERED') THEN u.question_text ELSE NULL END AS "questionText",
+         answer.utterance_text AS "answerText",(e.payload->>'faqEntrySeq')::integer AS "faqEntrySeq",
+         (e.payload->>'questionUtteranceOrder')::integer AS "questionUtteranceOrder",
+         (e.payload->>'answerUtteranceOrder')::integer AS "answerUtteranceOrder"
+         FROM call_insight_events e
+         LEFT JOIN unanswered_questions u ON u.unanswered_question_seq=e.unanswered_question_seq
+          AND u.call_session_seq=e.call_session_seq
+         LEFT JOIN call_utterances question ON e.payload->>'action'='FAQ_ANSWERED'
+          AND question.call_session_seq=e.call_session_seq
+          AND question.utterance_order=(e.payload->>'questionUtteranceOrder')::integer
+          AND question.speaker='CUSTOMER'
+         LEFT JOIN call_utterances answer ON e.payload->>'action'='FAQ_ANSWERED'
+          AND answer.call_session_seq=e.call_session_seq
+          AND answer.utterance_order=(e.payload->>'answerUtteranceOrder')::integer
+          AND answer.speaker='AI'
+         WHERE e.call_session_seq=$1 AND e.kind='BUSINESS_RESULT'
+         ORDER BY e.event_order,e.event_id LIMIT $2 OFFSET $3`,
+        [id, query.limit + 1, query.offset],
+      )
+    ).rows;
+  }
+
   async findCall(client: PoolClient, id: number): Promise<EventCall | undefined> {
     // 같은 통화 이벤트를 직렬화하면서 PBX·주문의 일반 갱신과 잠금을 분리한다.
     await client.query('SELECT pg_advisory_xact_lock(20261031,$1)', [id]);
@@ -54,6 +119,21 @@ export class CallEventsRepository {
         [id],
       )
     ).rows[0]?.call_session_seq;
+  }
+
+  async faqReferences(client: PoolClient, callId: number, payload: BusinessResultPayloadDto) {
+    return (
+      await client.query<{
+        faqExists: boolean;
+        questionSpeaker: string | null;
+        answerSpeaker: string | null;
+      }>(
+        `SELECT EXISTS(SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1) AS "faqExists",
+         (SELECT speaker FROM call_utterances WHERE call_session_seq=$2 AND utterance_order=$3) AS "questionSpeaker",
+         (SELECT speaker FROM call_utterances WHERE call_session_seq=$2 AND utterance_order=$4) AS "answerSpeaker"`,
+        [payload.faqEntrySeq, callId, payload.questionUtteranceOrder, payload.answerUtteranceOrder],
+      )
+    ).rows[0];
   }
 
   async findOrInsertUtterance(client: PoolClient, callId: number, payload: UtterancePayloadDto) {

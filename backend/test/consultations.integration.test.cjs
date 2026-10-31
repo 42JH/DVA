@@ -385,6 +385,7 @@ test('detail preserves missing times, phone, order and handoff while returning a
   const row = await call({ callerPhoneNumber: null, startedAt: null, endedAt: null });
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
     call: row,
+    aiActionCount: 0,
     recordings: [],
   });
 });
@@ -451,7 +452,7 @@ async function utterance(callId, order, text = '발화 ' + randomUUID()) {
       [callId, order, order % 2 ? 'CUSTOMER' : 'AI', text],
     )
   ).rows[0];
-  return { ...row, receivedAt: row.receivedAt.toISOString() };
+  return { ...row, receivedAt: row.receivedAt.toISOString(), offsetSeconds: null };
 }
 
 test('transcript sorts by utterance order rather than insert time and never includes another call', async () => {
@@ -637,6 +638,7 @@ test('S3 settings and missing files are recording errors while call detail and m
   config.set('S3_RECORDINGS_BUCKET', '');
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
     call: row,
+    aiActionCount: 0,
     recordings: [{ ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' }],
   });
   assert.equal(commands.length, 0);
@@ -673,6 +675,7 @@ test('storage denial, outage and timeout preserve call detail with a redacted re
     assert.equal((await response.clone().text()).includes('private secret'), false);
     assert.deepEqual((await result(response, false)).data, {
       call: row,
+      aiActionCount: 0,
       recordings: [
         { ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' },
       ],

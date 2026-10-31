@@ -44,6 +44,15 @@ export class UtteranceDto {
     example: '2026-10-28T01:00:10.000Z',
   })
   receivedAt!: Date;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    description: 'AI 통화 시작부터 정수 초. 이벤트 미수집·위치 미확인 시 null.',
+    example: 31,
+  })
+  offsetSeconds!: number | null;
 }
 
 export class TranscriptResponseDto {

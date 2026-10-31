@@ -37,8 +37,8 @@ id는 기존 양의 int32 callSessionSeq다. providerCallId와 같은 통화여�
       "occurredAt": "2026-10-31T10:00:32+09:00",
       "offsetSeconds": 32,
       "payload": {
-        "action": "ADDRESS_SEARCH",
-        "summaryText": "주소 검색 결과 1건",
+        "action": "PIN_SEARCH",
+        "summaryText": "PIN 별칭 '본사' 검색 결과 1건",
         "orderSeq": null
       }
     }
@@ -55,7 +55,7 @@ id는 기존 양의 int32 callSessionSeq다. providerCallId와 같은 통화여�
 | kind | UTTERANCE / AI_ACTION / BUSINESS_RESULT |
 | occurredAt | 시간대 포함 ISO 8601 발생 시각. UTC 밀리초 표기로 정규화하며 수신 시각과 구분 |
 | offsetSeconds | 필수, 0 이상 안전한 정수 초 또는 null. 소수 초는 AI가 버림한 뒤 전송 |
-| payload | 아래 종류별 허용 필드만 전송. 모든 필드 필수이며 허용한 값만 null 사용 |
+| payload | 아래 종류별 허용 필드만 전송. 기본 필드는 필수이며 허용한 값만 null 사용. FAQ_ANSWERED 전용 참조 세 개는 해당 action에서만 필수 |
 
 한 통화의 120개 이벤트는 50·50·20개로 나누어 보낼 수 있다. 본문 크기 제한도 함께 만족해야 한다.
 같은 초에 여러 기록이 있어도 eventOrder로 순서를 구분한다. 위치를 알 수 없으면 0 대신 null을 보낸다.
@@ -69,13 +69,41 @@ offsetMs, 응답 레이턴시, AI 동작 status, 원문 tool 인자·임의 추�
 | UTTERANCE | speaker | CUSTOMER / AI |
 | UTTERANCE | utteranceText | 공백 아닌 문자열, NUL 금지, 최대 20,000자. 원문 공백·줄바꿈 보존 |
 | UTTERANCE | lastSentenceSeq | 양의 int32. 기존 발화 구간에 마지막으로 반영된 문장 순번 |
-| AI_ACTION | action | ADDRESS_SEARCH / CUSTOMER_LOOKUP / ORDER_LOOKUP / FAQ_SEARCH / FIELD_SAVED / ORDER_SUBMITTED / ORDER_CANCELLED |
+| AI_ACTION | action | PIN_SEARCH / PREVIOUS_ORDER_SEARCH / CUSTOMER_LOOKUP / FAQ_SEARCH / FIELD_SAVED / ORDER_SUBMITTED / ORDER_CANCELLED. ADDRESS_SEARCH·ORDER_LOOKUP은 기존 계약 호환용 |
 | AI_ACTION | summaryText | 동작 결과 설명. 공백 아닌 문자열, NUL 금지, 최대 1,000자 |
 | AI_ACTION | orderSeq | 양의 int32 또는 null |
-| BUSINESS_RESULT | action | ORDER_CREATED / ORDER_CANCELLED / QUESTION_UNANSWERED / HANDOFF_REQUESTED / INQUIRY |
+| BUSINESS_RESULT | action | ORDER_CREATED / ORDER_CANCELLED / QUESTION_UNANSWERED / HANDOFF_REQUESTED / INQUIRY / FAQ_ANSWERED |
 | BUSINESS_RESULT | orderSeq | 양의 int32 또는 null |
 | BUSINESS_RESULT | unansweredQuestionSeq | 양의 int32 또는 null. 같은 통화의 기존 미답변 번호 |
 | BUSINESS_RESULT | summaryText | 처리 내용. 공백 아닌 문자열, NUL 금지, 최대 1,000자 |
+| BUSINESS_RESULT | faqEntrySeq | FAQ_ANSWERED에서만 필수인 양의 int32. 사용한 기존 FAQ 번호 |
+| BUSINESS_RESULT | questionUtteranceOrder | FAQ_ANSWERED에서만 필수인 양의 int32. 같은 통화의 고객 질문 발화 순번 |
+| BUSINESS_RESULT | answerUtteranceOrder | FAQ_ANSWERED에서만 필수인 양의 int32. 같은 통화의 AI 답변 발화 순번 |
+
+PIN_SEARCH는 개인·기업 저장 PIN 검색이며, 별칭·이름 등으로 찾은 동작도 포함한다.
+PREVIOUS_ORDER_SEARCH는 이전 주문 검색이며, 기간·이름·주문 내역 등으로 찾은 동작도 포함한다. 두 검색을 주소 검색으로 한정하지 않는다.
+기존 ADDRESS_SEARCH·ORDER_LOOKUP을 PIN 검색·이전 주문 검색으로 임의 치환하지 않는다. 신규 생산자는 실제 검색 목적에 맞는 새 코드를 보낸다.
+FAQ_SEARCH는 FAQ 검색 동작이며 FAQ를 사용해 답변을 마친 결과는 별도 FAQ_ANSWERED다. 검색 두 번으로 답변 한 건을 처리했다면 동작 두 건·답변 결과 한 건이다.
+
+FAQ 답변 결과의 payload 예시:
+
+```json
+{
+  "action": "FAQ_ANSWERED",
+  "orderSeq": null,
+  "unansweredQuestionSeq": null,
+  "summaryText": "FAQ로 요금 문의 안내 완료",
+  "faqEntrySeq": 12,
+  "questionUtteranceOrder": 5,
+  "answerUtteranceOrder": 6
+}
+```
+
+FAQ_ANSWERED의 orderSeq·unansweredQuestionSeq는 null이다. FAQ 참조 세 개를 다른 action에 보내면 400이다.
+질문·답변은 같은 요청 묶음 또는 이전에 저장한 완결 발화여야 한다. 요청 배열·UUID 순서와 무관하게 묶음 전체 저장 후 참조를 검사한다.
+참조 FAQ·같은 통화 발화가 없으면 404, 고객 질문·AI 답변의 화자가 다르면 422이며 묶음 전체를 롤백한다.
+FAQ 번호는 역사적 논리 참조이고 질문·답변 원문은 기존 발화에서 읽는다. FAQ 수정·삭제 뒤에도 실제 상담 답변은 바뀌지 않는다.
+같은 이벤트의 재전송은 FAQ 삭제 후에도 204이며, 삭제한 FAQ를 참조하는 새 이벤트는 404다.
 
 AI 동작은 결과 기록 한 건씩 저장한다. 요청/성공 단계로 같은 동작을 두 번 보내지 않는다.
 실패·미확인 결과도 사실대로 summaryText에 기록할 수 있으며 UI가 문장을 파싱해 상태를 판정하지 않는다.
@@ -106,9 +134,10 @@ PBX 통화 시각·종료 사유, 주문 상태, 페르소나 상태는 변경�
 - 026은 call_insight_events와 미답변 참조용 unanswered_questions를 추가한다. 미답변 수집·관리 API는 아직 제공하지 않는다.
 - call_insight_events의 위치는 bigint offset_seconds이며 안전한 정수 범위로 제한한다. AI 동작 status 컬럼·payload 필드는 없다.
 - 같은 발화의 이벤트는 한 건이다. call_utterances·unanswered_questions 참조는 물리 삭제를 연쇄 실행하지 않는다.
-- FAQ 번호는 미래 전환 이력을 위한 논리 참조여서 기존 FAQ 삭제를 막지 않는다.
-- 기존 GET /api/calls/{id}/transcript에서 수집된 완결 발화를 조회한다.
-- [후속 EVT-02](call-events-read-spec.md)가 AI 동작·처리 내용·초 위치를 프론트에 반환한다. 해당 GET은 이번 구현에 포함하지 않는다.
+- 미답변 전환 FAQ 번호와 FAQ_ANSWERED의 사용 FAQ 번호는 논리 참조여서 기존 FAQ 삭제를 막지 않는다.
+- 기존 GET /api/calls/{id}/transcript에서 완결 발화와 offsetSeconds를 조회한다. 이벤트 없는 과거 발화는 위치 null이다.
+- [분리 조회 계약](call-events-read-spec.md)에 따라 /actions는 AI 동작, /processing-results는 처리 결과를 반환한다. 통화 상세 data.aiActionCount는 수집된 AI 동작 전체 건수다.
+- 신규 검색 코드·FAQ 답변 payload와 조회 분리는 기존 026 스키마를 사용하며 추가 migration이 없다.
 
 ## Response·오류
 
@@ -119,10 +148,10 @@ PBX 통화 시각·종료 사유, 주문 상태, 페르소나 상태는 변경�
 | 400 | INVALID_REQUEST | 필수값·타입·종류별 payload·요청 내 중복·금지 필드 |
 | 401 | UNAUTHORIZED | 토큰 누락·오류·중복 Authorization |
 | 403 | FORBIDDEN | 통화 ID 불일치, 다른 고객 주문·다른 통화 질문 |
-| 404 | NOT_FOUND | 통화·참조 주문·질문 없음 |
+| 404 | NOT_FOUND | 통화·참조 주문·미답변·FAQ·같은 통화 발화 없음 |
 | 409 | EVENT_PAYLOAD_CONFLICT | 이벤트·순번·완결 발화 충돌 |
 | 413 | PAYLOAD_TOO_LARGE | 본문 100KiB 초과 |
-| 422 | VALIDATION_FAILED | 저장할 수 없는 발생 시각 |
+| 422 | VALIDATION_FAILED | 저장할 수 없는 발생 시각, FAQ 답변에 주문·미답변 참조 또는 질문·답변 화자 오류 |
 | 500 | INTERNAL_ERROR | 저장·감사 실패. 묶음 롤백 |
 | 503 | DEPENDENCY_UNAVAILABLE | 수집 토큰 미설정 |
 

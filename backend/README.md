@@ -1,6 +1,6 @@
 # 모놀리식 백엔드 공통 기반
 
-AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 새 앱 실행 전에 026까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 후속 EVT-02는 [상세 명세 초안](../docs/api/call-events-read-spec.md)으로 제공한다.
+AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 새 앱 실행 전에 026까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
 
 기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
 

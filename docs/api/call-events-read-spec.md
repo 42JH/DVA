@@ -1,197 +1,165 @@
-# EVT-02 시간순 통화 이벤트 조회 — 다음 작업 상세 명세서
+# 통화 발화·처리 결과·AI 동작 분리 조회
 
-작성일: 2026-10-31 · 상태: 구현 전 검토용 상세 계약.
-EVT-01에서 저장한 통화 이벤트를 프론트가 읽는 API다. 이번 EVT-01 커밋은 이 GET을 구현하지 않는다.
-기준: [노션 담당 1 명세](https://app.notion.com/p/e7f88d0e227b82349af30127eb29c3d3), [디자인/목업 06 통화 상세](https://www.figma.com/design/KF2OWGsro61o3hYGPZQyp9?node-id=984-1971), 현재 [EVT-01](call-events.md).
+기준은 디자인/목업 06 통화 상세와 사용자 확정 사항이다. 통합 GET /api/calls/{id}/events 초안은 아래 용도별 조회로 대체한다.
+AI 서버의 수집은 기존 [EVT-01](call-events.md) POST /api/ai/calls/{id}/events 한 개를 유지한다.
 
-## API 명세표
+## API와 인증
 
-| 항목 | 내용 |
-| --- | --- |
-| API 번호 | EVT-02 |
-| Method | GET |
-| Path | /api/calls/{id}/events |
-| 역할 | 저장된 발화·AI 동작·처리 결과를 통화 전체 순서로 조회 |
-| 방향 | 프론트 → 백엔드 |
-| 인증 | 기존 dva_session 관리자 세션 쿠키 |
-| 권한 | ACTIVE OPERATOR / SUPERVISOR / SYSTEM_ADMIN |
-| 관련 화면 | 06 통화 상세의 AI 동작·처리 내용·시간 위치 |
-| 성공 | 200, 공통 목록 {data,hasNext} |
-| 선행 | EVT-01 및 025·026 마이그레이션 |
+| 용도 | 프론트 → 백엔드 API | 내용 |
+| --- | --- | --- |
+| 대화 내용 | GET /api/calls/{id}/transcript | 기존 API 보완. 고객·AI 발화와 통화 내 초 위치 |
+| 처리 내용·FAQ 처리 | GET /api/calls/{id}/processing-results | 주문 처리, FAQ 답변·미답변, 상담원 연결 요청 등 업무 결과 |
+| AI 동작 | GET /api/calls/{id}/actions | PIN·이전 주문·FAQ 검색, 고객 조회, 정보 저장 등의 동작 |
+| 동작 전체 건수 | GET /api/calls/{id} | 기존 통화 상세 data.aiActionCount |
 
-## Request
+모든 조회는 활성 OPERATOR·SUPERVISOR·SYSTEM_ADMIN의 dva_session 쿠키가 필요하다.
+AI_INSIGHTS_TOKEN이나 call_session_seq 헤더만으로는 조회할 수 없다. 프론트에 AI 토큰을 제공하지 않는다.
+로그인·권한 확인을 통화 존재 확인보다 먼저 수행한다. 비활성 계정은 기존 인증 정책대로 401이다.
+
+## 공통 Path·Query·응답
+
+id는 기존 양의 int32 callSessionSeq다. 요청 본문은 없다.
+목록 세 API는 limit 기본 20·범위 1~100, offset 기본 0·범위 0~9007199254740991을 사용한다.
+kind·action 필터는 받지 않는다. 빈 값·소수·잘못된 숫자·중복 query·추가 필드는 400이다.
+
+목록 성공은 HTTP 200과 {data:[],hasNext:boolean}이며 meta·totalCount·totalPages는 추가하지 않는다.
+단건 통화 상세는 기존 {data,meta:{requestId}} 형식을 유지한다.
+모든 응답은 Cache-Control: no-store, X-Request-Id를 제공한다.
+통화가 없으면 404, 기존 통화에 수집 기록이 없거나 마지막 페이지 이후면 빈 목록과 hasNext=false다.
+빈 기록을 무음 통화·AI 동작 없음·수집 완료로 단정하지 않는다.
+
+## 1. GET /api/calls/{id}/transcript
+
+기존 응답의 callUtteranceSeq·utteranceOrder·speaker·utteranceText·lastSentenceSeq·receivedAt을 유지하고 offsetSeconds를 추가한다.
+speaker는 CUSTOMER/AI이며 고객·AI 발화를 같은 목록에서 반환한다.
+utteranceOrder ASC, callUtteranceSeq ASC로 정렬하며 원문의 공백·줄바꿈을 보존한다.
+
+offsetSeconds는 해당 발화 이벤트의 정수 초 또는 null이다. 이벤트가 없는 기존 발화도 LEFT JOIN으로 유지한다.
+receivedAt은 DB 최초 수신 시각이며 통화 내 재생 위치로 환산하지 않는다.
+ANL-01 complaints[].utteranceOrders는 이 utteranceOrder와 연결해 불만 발화를 강조한다.
+
+## 2. GET /api/calls/{id}/actions
 
 ```http
-GET /api/calls/120/events?kind=AI_ACTION&limit=20&offset=0
-Accept: application/json
-Cookie: dva_session=<로그인 세션>
+GET /api/calls/120/actions?limit=20&offset=0
+Cookie: dva_session=<관리자 세션>
 ```
-
-프론트는 기존 로그인 세션을 credentials: include로 전달한다.
-AI_INSIGHTS_TOKEN은 프론트에 주지 않으며 Bearer 토큰만으로 이 GET을 호출할 수 없다.
-관리자 GET에 변경용 Origin 필수 조건을 추가하지 않는다. 브라우저 CORS는 기존 설정을 따른다.
-요청 본문은 없다.
-
-| 위치 | 필드 | 타입 | 필수·기본값 | 설명 |
-| --- | --- | --- | --- | --- |
-| Path | id | integer | 필수 | 기존 callSessionSeq, 1~2147483647 |
-| Query | kind | string | 선택 | UTTERANCE / AI_ACTION / BUSINESS_RESULT. 생략하면 전체 |
-| Query | limit | integer | 기본 20 | 한 페이지의 개수. 1~100 |
-| Query | offset | integer | 기본 0 | 건너뛸 개수. 0~Number.MAX_SAFE_INTEGER |
-
-kind=, 알 수 없는 kind, 문자열·소수·범위 밖 숫자, 반복 query, 알 수 없는 query는 400이다.
-기존 PaginationQueryDto·CallIdParamsDto와 목록 응답 클래스를 재사용한다.
-EVT-01의 요청당 50개 제한은 이 GET의 페이지 크기와 별개다.
-
-## Response — HTTP 200
 
 ```json
 {
   "data": [
     {
-      "eventId": "ea692c7e-4852-4b48-8e44-b3d6b63e9256",
-      "eventOrder": 1,
-      "kind": "UTTERANCE",
+      "eventId": "a148d5b1-7b06-4eb7-aef8-ef9d736fc6af",
+      "eventOrder": 3,
       "occurredAt": "2026-10-31T01:00:31.000Z",
       "offsetSeconds": 31,
-      "payload": {
-        "utteranceOrder": 1,
-        "speaker": "CUSTOMER",
-        "utteranceText": "택배를 접수하고 싶어요.",
-        "lastSentenceSeq": 1
-      }
+      "action": "PIN_SEARCH",
+      "summaryText": "PIN 별칭 '본사' 검색 결과 1건",
+      "orderSeq": null
     },
     {
-      "eventId": "a148d5b1-7b06-4eb7-aef8-ef9d736fc6af",
-      "eventOrder": 2,
-      "kind": "AI_ACTION",
-      "occurredAt": "2026-10-31T01:00:32.000Z",
-      "offsetSeconds": 32,
-      "payload": {
-        "action": "ADDRESS_SEARCH",
-        "summaryText": "주소 검색 결과 1건",
-        "orderSeq": null
-      }
-    },
-    {
-      "eventId": "b8e86a1b-05d4-47c2-a1a1-13a0885c9e93",
-      "eventOrder": 3,
-      "kind": "BUSINESS_RESULT",
-      "occurredAt": "2026-10-31T01:01:20.000Z",
-      "offsetSeconds": 80,
-      "payload": {
-        "action": "QUESTION_UNANSWERED",
-        "orderSeq": null,
-        "unansweredQuestionSeq": 51,
-        "summaryText": "AI가 답변하지 못한 질문이 있습니다.",
-        "questionText": "착불로 보내면 받는 사람이 얼마 내요?"
-      }
+      "eventId": "b148d5b1-7b06-4eb7-aef8-ef9d736fc6af",
+      "eventOrder": 8,
+      "occurredAt": "2026-10-31T01:00:48.000Z",
+      "offsetSeconds": 48,
+      "action": "PREVIOUS_ORDER_SEARCH",
+      "summaryText": "지난주 김담당 주문 검색 결과 2건",
+      "orderSeq": null
     }
   ],
   "hasNext": false
 }
 ```
 
-공통 목록 계약대로 data·hasNext만 사용한다. meta·totalCount·totalPages를 목록 envelope에 추가하지 않는다.
-X-Request-Id는 응답 헤더에 제공하며 모든 응답은 Cache-Control: no-store다.
-
-| 필드 | 타입 | 의미 |
-| --- | --- | --- |
-| data | CallEvent[] | 필터·페이지에 해당하는 기록 |
-| hasNext | boolean | 동일 필터에 다음 페이지가 있는지 |
-| eventId | UUID string | EVT-01이 보존한 이벤트 식별자 |
-| eventOrder | integer | 통화 전체 순번. 필터 후 1부터 다시 매기지 않음 |
-| kind | enum | UTTERANCE / AI_ACTION / BUSINESS_RESULT |
-| occurredAt | datetime | AI가 보고한 발생 시각. UTC ISO 8601로 반환 |
-| offsetSeconds | integer / null | AI 통화 시작부터의 위치. 확인 불가면 null |
-| payload | 종류별 객체 | 아래 응답 필드 |
-
-### UTTERANCE payload
-
-| 필드 | 타입 | 설명 |
-| --- | --- | --- |
-| utteranceOrder | integer | 발화끼리 매긴 통화 내 순번 |
-| speaker | CUSTOMER / AI | 발화자 |
-| utteranceText | string | call_utterances에서 읽는 원문. 공백·줄바꿈 보존 |
-| lastSentenceSeq | integer | 완결 구간에 마지막으로 반영된 문장 순번 |
-
-이벤트의 call_utterance_seq와 같은 통화의 발화를 JOIN한다. 원문을 새로 만들거나 수정하지 않는다.
-기존 GET /api/calls/{id}/transcript는 유지한다. 화면의 스크립트는 해당 API를 계속 사용할 수 있다.
-ANL-01의 complaints[].utteranceOrders와 이 순번을 맞춰 불만 발화를 강조한다.
-
-### AI_ACTION payload
-
-| 필드 | 타입 | 설명 |
-| --- | --- | --- |
-| action | EVT-01의 AI 동작 코드 | 동작 종류 |
-| summaryText | string | 기록된 동작 결과. 평문으로 표시 |
-| orderSeq | integer / null | 주문 상세 연결 번호 |
-
-status·offsetMs·레이턴시를 반환하지 않는다. 프론트가 summaryText를 파싱해서 성공·실패를 추정하지 않는다.
-FIELD_SAVED는 저장, ADDRESS_SEARCH·CUSTOMER_LOOKUP·ORDER_LOOKUP·FAQ_SEARCH는 해당 조회/검색 문구로 표시할 수 있다.
-성공·실패 필터는 이 계약에 없다.
-
-### BUSINESS_RESULT payload
-
-| 필드 | 타입 | 설명 |
-| --- | --- | --- |
-| action | EVT-01의 업무 결과 코드 | ORDER_CREATED / ORDER_CANCELLED / QUESTION_UNANSWERED / HANDOFF_REQUESTED / INQUIRY |
-| orderSeq | integer / null | 주문 보기 연결 번호 |
-| unansweredQuestionSeq | integer / null | AI 미답변 보기 연결 번호 |
-| summaryText | string | 처리 설명 |
-| questionText | string / null | 조회 전용 제안 필드. 연결 질문이 OPEN/REGISTERED이면 현재 원문, 연결 없음·DELETED이면 null |
-
-questionText는 목업의 처리 내용 아래 질문 원문을 표시하기 위한 응답 보완안이다.
-EVT-01 입력에 추가하지 않으며 unanswered_questions에서 JOIN해서 읽는다. 삭제된 질문 원문을 이벤트에 복사하거나 복구하지 않는다.
-이 추가 필드는 기존 노션 EVT-02의 payload 설명보다 구체화한 안이므로 다음 구현 검토 때 함께 확인한다.
-HANDOFF_REQUESTED는 실제 연결 완료로, ORDER_CREATED는 결제·디버 최종 접수 성공으로 표시하지 않는다.
-
-## 조회·정렬·페이지 처리
-
-1. 관리자 인증·권한을 먼저 확인한다. 인증되지 않은 요청에 통화 존재 여부를 노출하지 않는다.
-2. 통화가 없으면 404다. 통화는 있으나 수집 기록이 없거나 필터 결과가 없으면 {data:[],hasNext:false}다.
-3. kind 필터를 먼저 적용하고 eventOrder ASC, eventId ASC로 정렬한다. 저장 PK·수신 시각·offsetSeconds로 순서를 대체하지 않는다.
-4. 같은 초의 이벤트, 위치 null, 순번 누락도 보존한다. 51번 다음 53번이어도 빈 52번을 만들지 않는다.
-5. limit+1개를 조회해 hasNext를 계산한다. DB 오류를 빈 목록 성공으로 바꾸지 않는다.
-6. 한 번의 이벤트 조회 SQL에서 원문·질문 JOIN을 처리해 건별 추가 쿼리를 만들지 않는다. 통화 범위를 모든 JOIN에 적용한다.
-7. 늦게 도착한 이벤트로 다음 페이지의 위치가 바뀔 수 있다. 서로 다른 HTTP 요청 사이의 고정 스냅샷은 제공하지 않으며 화면 갱신 시 처음부터 다시 읽을 수 있다.
-8. GET은 이벤트·발화·질문·주문 상태를 변경하지 않는다. 조회마다 업무 성공 감사를 생성하지 않는다.
-
-AI 동작 전체 건수는 이 페이지의 data.length와 다르다. 목업의 전체 건수는 기존 통화 상세의 aiActionCount 보완 등 별도 합의로 제공해야 한다.
-현재 hasNext로 전체 건수·마지막 페이지 번호를 추정하지 않는다.
-
-## 프론트 사용 예
-
-| 화면 영역 | 요청·표시 |
+| 필드 | 의미 |
 | --- | --- |
-| AI 동작 | ?kind=AI_ACTION. offsetSeconds·action·summaryText 표시 |
-| 처리 내용 | ?kind=BUSINESS_RESULT. 주문·질문 번호로 연결 |
-| 스크립트 | 기존 /transcript 또는 이 GET의 ?kind=UTTERANCE |
-| 통합 타임라인 | kind 생략. eventOrder로 표시 |
+| eventId | 수집 시 보존한 UUID |
+| eventOrder | 통화 전체 순번. 동작만 조회해도 1부터 다시 매기지 않음 |
+| occurredAt | AI가 보고한 발생 시각. UTC ISO 8601 |
+| offsetSeconds | AI 통화 시작부터 정수 초 또는 null |
+| action | 아래 동작 코드 |
+| summaryText | AI가 보고한 동작 설명. 평문 표시 |
+| orderSeq | 관련 주문 상세 연결 번호 또는 null |
 
-offsetSeconds=31은 00:31, 80은 01:20으로 표시한다. null이면 위치 미확인으로 표시하며 00:00을 만들지 않는다.
-이 위치는 AI 통화 기준이다. PBX 녹취 시작점과 매핑이 확인되기 전에는 정확한 오디오 점프 위치를 보장하지 않는다.
-원문·요약은 HTML로 해석하지 않고 평문으로 렌더링한다.
+| 신규 전송 action | 의미 |
+| --- | --- |
+| PIN_SEARCH | 저장된 개인·기업 PIN 검색. 별칭·이름 등도 포함 |
+| PREVIOUS_ORDER_SEARCH | 이전 주문 검색. 기간·이름·주문 내역 등도 포함 |
+| CUSTOMER_LOOKUP | 고객 조회 |
+| FAQ_SEARCH | FAQ 검색 동작 |
+| FIELD_SAVED | 수집 정보 저장 |
+| ORDER_SUBMITTED | 주문 제출 동작 기록 |
+| ORDER_CANCELLED | 주문 취소 동작 기록 |
 
-## 오류
+PIN·이전 주문 검색을 주소 검색으로 제한하지 않는다. 검색어·검색 대상 주소 필드는 필수로 요구하지 않는다.
+기존 ADDRESS_SEARCH·ORDER_LOOKUP은 수집·재전송 호환을 위해 허용하며 조회에서도 원래 코드로 보존한다. 자동 치환하지 않는다.
+status·offsetMs·레이턴시는 반환하지 않는다. 프론트는 summaryText로 성공·실패를 추론하지 않는다.
+이 API는 저장된 동작 기록을 읽으며 PIN·주문 검색 명령을 새로 실행하지 않는다.
 
-기존 오류 envelope {error:{code,message,details},meta:{requestId}}를 사용한다.
+## 3. GET /api/calls/{id}/processing-results
 
-| HTTP | code | 상황 |
-| --- | --- | --- |
-| 400 | INVALID_REQUEST | 잘못된 통화 번호·kind·limit·offset·반복/추가 query |
-| 401 | UNAUTHORIZED | 로그인 세션 없음·만료·위조 |
-| 403 | FORBIDDEN | 현재 계정의 권한·상태로 접근 불가 또는 허용되지 않은 Origin |
-| 404 | NOT_FOUND | 통화 없음 |
-| 500 | INTERNAL_ERROR | 분류되지 않은 조회 오류. 원문·SQL·토큰 미노출 |
+```json
+{
+  "data": [
+    {
+      "eventId": "c148d5b1-7b06-4eb7-aef8-ef9d736fc6af",
+      "eventOrder": 12,
+      "occurredAt": "2026-10-31T01:01:20.000Z",
+      "offsetSeconds": 80,
+      "action": "FAQ_ANSWERED",
+      "summaryText": "FAQ로 요금 문의 안내 완료",
+      "orderSeq": null,
+      "unansweredQuestionSeq": null,
+      "faqEntrySeq": 12,
+      "questionUtteranceOrder": 5,
+      "answerUtteranceOrder": 6,
+      "questionText": "착불 요금은 어떻게 되나요?",
+      "answerText": "상담 당시 실제로 안내한 답변입니다."
+    }
+  ],
+  "hasNext": false
+}
+```
 
-DB 연결 장애는 실제 기존 예외 분류를 따르며 성공 빈 목록으로 숨기지 않는다.
+eventId·eventOrder·occurredAt·offsetSeconds·summaryText·orderSeq는 동작 응답과 같은 의미다.
+action은 ORDER_CREATED / ORDER_CANCELLED / QUESTION_UNANSWERED / HANDOFF_REQUESTED / INQUIRY / FAQ_ANSWERED다.
 
-## 구현 범위·검증 기준
+| 추가 응답 필드 | 규칙 |
+| --- | --- |
+| unansweredQuestionSeq | 연결 미답변 번호 또는 null. 삭제 후에도 역사적 번호 보존 |
+| faqEntrySeq | FAQ_ANSWERED에 사용한 FAQ 번호. 나머지는 null |
+| questionUtteranceOrder | FAQ_ANSWERED의 같은 통화 고객 질문 순번. 나머지는 null |
+| answerUtteranceOrder | FAQ_ANSWERED의 같은 통화 AI 답변 순번. 나머지는 null |
+| questionText | FAQ_ANSWERED는 연결 고객 발화 원문. 연결 미답변은 OPEN/REGISTERED일 때 현재 원문, DELETED·연결 없음은 null |
+| answerText | FAQ_ANSWERED의 실제 AI 답변 발화 원문. 나머지는 null |
 
-- call-insights에 이벤트 Query DTO·응답 DTO·조회 Repository/Service/Controller를 추가한다. 기존 세션 인증·페이지 규약을 재사용한다.
-- 현재 026의 통화별 순번 UNIQUE 인덱스를 우선 사용한다. 새 DB 테이블·뷰·수집 API·AI 동작 status는 추가하지 않는다.
-- 검증: 관리자 3개 역할, AI 토큰만 있는 호출, 만료 세션, 다른 통화 혼입 차단, 세 kind 필터, 120개 이상의 페이지 경계, 같은 초·null·역순 도착, 미수집/미존재 구분.
-- 검증: 원문 보존, 질문 삭제 후 null, 주문·미답변 링크, 조회 실패 시 오류, HTTP 로그의 원문·토큰 미노출, GET 전후 DB 값 동일.
-- 기존 /transcript·통화 상세·EVT-01 재전송·ANL-01 초 단위 계약을 회귀 검증한다.
-- 아직 구현·검증·운영 배포된 API가 아니다. 실제 AI 생산 규칙·녹취 위치 매핑은 별도 확인 대상이다.
+FAQ_SEARCH는 검색 동작이고 FAQ_ANSWERED는 답변 처리 결과다. 검색만으로 답변 완료 결과를 만들지 않는다.
+질문·답변은 같은 통화의 발화에서 읽으며 FAQ의 현재 질문·답변으로 대신하지 않는다. FAQ 수정·삭제 후에도 상담 원문은 유지된다.
+FAQ를 삭제했으면 FAQ 번호의 연결 화면은 404일 수 있다. 통화 당시 원문과 역사적 번호는 보존한다.
+미답변 원문을 이벤트 JSON에 복사하거나 삭제 후 복원하지 않는다. 미답변의 FAQ 전환은 기존 상담의 미답변 사실을 바꾸지 않는다.
+HANDOFF_REQUESTED는 연결 완료가 아니며 ORDER_CREATED는 결제·디버 접수 성공을 뜻하지 않는다.
+
+## 조회·화면 규칙
+
+1. 동작은 AI_ACTION, 처리 결과는 BUSINESS_RESULT로 먼저 범위를 제한한 후 eventOrder ASC, eventId ASC로 정렬한다.
+2. 같은 초·위치 null·순번 누락을 그대로 보존한다. 3번 다음 8번이어도 빈 순번을 만들지 않는다.
+3. limit+1개로 hasNext를 계산한다. 50개는 AI 수집 요청당 한도이며 조회·통화 누적 한도가 아니다.
+4. 모든 JOIN을 선택 통화로 제한하고 결과 조회 한 번에서 질문·답변을 가져온다. 건별 추가 조회를 만들지 않는다.
+5. GET은 업무 기록·상태를 변경하거나 업무 성공 감사를 추가하지 않는다. DB 실패를 빈 성공 응답으로 숨기지 않는다.
+6. 늦은 이벤트는 중간에 들어올 수 있어 offset 페이지가 바뀔 수 있다. 여러 HTTP 페이지의 고정 스냅샷은 보장하지 않는다.
+7. 통화 상세 data.aiActionCount는 현재 수집된 AI 동작 전체 건수다. 목록 data.length와 다르며 통화 전체 활동 완료를 뜻하지 않는다.
+8. offsetSeconds=31은 00:31, 80은 01:20이다. null은 위치 미확인으로 표시한다. 원문·요약을 HTML로 해석하지 않는다.
+
+## 오류·DB·검증 범위
+
+기존 {error:{code,message,details},meta:{requestId}} 오류 계약을 사용한다.
+400 INVALID_REQUEST 입력 오류, 401 UNAUTHORIZED 세션 없음·만료·비활성, 403 FORBIDDEN 권한 오류,
+404 NOT_FOUND 통화 없음, 500 INTERNAL_ERROR 분류되지 않은 조회 오류다. 연결 장애 분류는 공통 예외 정책을 따른다.
+
+026까지 적용한 기존 call_insight_events·call_utterances·unanswered_questions를 사용한다. 추가 테이블·뷰·migration은 없다.
+신규 FAQ 답변 참조 세 개는 기존 이벤트 JSONB에 저장한다. [EVT-01의 참조·재전송 규칙](call-events.md)을 따른다.
+
+검증 대상은 실제 관리자 인증, 두 검색 코드, 종류별 조회 분리·페이지 경계, 정수 초·null·과거 발화 보존,
+FAQ 참조 검증·동시 재전송·전체 롤백, FAQ 수정·삭제 후 상담 원문 보존, 미답변 삭제 후 원문 숨김,
+조회 실패 오류·로그 비노출 및 기존 통화·발화·분석 경로 회귀다.
+실제 AI 전송·운영 배포와 AI/PBX 음성 시작점의 정밀 매핑은 별도 확인 대상이다.

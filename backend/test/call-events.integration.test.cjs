@@ -621,3 +621,420 @@ test('database rejects cross-call question links, action status and invalid seco
     client.release();
   }
 });
+
+const readEvents = (call, path, query = '', headers = { Cookie: cookie }) =>
+  fetch(`${base}/api/calls/${call.id}/${path}?${query}`, { headers });
+
+async function readBody(response) {
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.ok(response.headers.get('x-request-id'));
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  return body;
+}
+
+async function readSession(role) {
+  const id = (
+    await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'조회 관리자','test-only',$2,'ACTIVE') RETURNING admin_user_seq",
+      ['view' + randomUUID().replaceAll('-', '').slice(0, 15), role],
+    )
+  ).rows[0].admin_user_seq;
+  const value = randomBytes(32).toString('hex');
+  await pool.query('INSERT INTO admin_sessions(session_token_hash,admin_user_seq) VALUES($1,$2)', [
+    createHash('sha256').update(value).digest('hex'),
+    id,
+  ]);
+  return { id, headers: { Cookie: 'dva_session=' + value } };
+}
+
+async function createFaq() {
+  return (
+    await pool.query(
+      `INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq)
+       VALUES('현재 FAQ 질문','현재 FAQ 답변',(SELECT admin_user_seq FROM admin_users LIMIT 1)) RETURNING faq_entry_seq`,
+    )
+  ).rows[0].faq_entry_seq;
+}
+
+const faqResult = (order, faqId, changes = {}) =>
+  business(order, {
+    payload: {
+      action: 'FAQ_ANSWERED',
+      orderSeq: null,
+      unansweredQuestionSeq: null,
+      summaryText: 'FAQ 안내 완료',
+      faqEntrySeq: faqId,
+      questionUtteranceOrder: 1,
+      answerUtteranceOrder: 2,
+      ...changes,
+    },
+  });
+
+test('separate reads require active admin sessions; AI service tokens cannot read call records', async () => {
+  const c = await createCall();
+  for (const path of ['actions', 'processing-results', 'transcript']) {
+    for (const headers of [
+      {},
+      { Authorization: 'Bearer ' + token },
+      { call_session_seq: String(c.id) },
+      { Cookie: 'dva_session=' + '0'.repeat(64) },
+    ]) {
+      await error(await readEvents(c, path, '', headers), 401, 'UNAUTHORIZED');
+      await error(await readEvents({ id: 2147483647 }, path, '', headers), 401, 'UNAUTHORIZED');
+    }
+    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+      const account = await readSession(role);
+      assert.deepEqual(await readBody(await readEvents(c, path, '', account.headers)), {
+        data: [],
+        hasNext: false,
+      });
+    }
+    await error(await readEvents({ id: 2147483647 }, path), 404, 'NOT_FOUND');
+  }
+  for (const inactive of ['PENDING', 'INACTIVE']) {
+    const account = await readSession('OPERATOR');
+    await pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+      account.id,
+      inactive,
+    ]);
+    for (const path of ['actions', 'processing-results'])
+      await error(await readEvents(c, path, '', account.headers), 401, 'UNAUTHORIZED');
+  }
+  const expired = await readSession('OPERATOR');
+  await pool.query(
+    "UPDATE admin_sessions SET expires_at=clock_timestamp()-interval '1 second',created_at=clock_timestamp()-interval '10 hours' WHERE admin_user_seq=$1",
+    [expired.id],
+  );
+  for (const path of ['actions', 'processing-results'])
+    await error(await readEvents(c, path, '', expired.headers), 401, 'UNAUTHORIZED');
+});
+
+test('separate read contracts reject kind filters, malformed pagination and unsupported fields', async () => {
+  const c = await createCall();
+  for (const path of ['actions', 'processing-results']) {
+    for (const id of ['0', '-1', '1.5', '2147483648', 'abc'])
+      await error(await readEvents({ id }, path), 400, 'INVALID_REQUEST');
+    for (const query of [
+      'kind=AI_ACTION',
+      'action=PIN_SEARCH',
+      'limit=',
+      'limit=0',
+      'limit=101',
+      'limit=1.5',
+      'limit=1&limit=2',
+      'offset=-1',
+      'offset=1e2',
+      'offset=abc',
+      'offset=0&offset=1',
+      'offset=9007199254740992',
+    ])
+      await error(await readEvents(c, path, query), 400, 'INVALID_REQUEST');
+    assert.deepEqual(await readBody(await readEvents(c, path, 'offset=9007199254740991')), {
+      data: [],
+      hasNext: false,
+    });
+  }
+});
+
+test('PIN and previous-order actions page independently from speech/results and retain full-call order and seconds', async () => {
+  const c = await createCall();
+  const values = Array.from({ length: 120 }, (_, index) =>
+    event(10 + index * 2, {
+      offsetSeconds:
+        index === 0 ? 0 : index === 1 ? null : index === 2 ? Number.MAX_SAFE_INTEGER : 31,
+      payload: {
+        action: index % 2 ? 'PREVIOUS_ORDER_SEARCH' : 'PIN_SEARCH',
+        summaryText: index % 2 ? '지난주 김담당 주문 2건' : 'PIN 별칭 본사 1건',
+        orderSeq: null,
+      },
+    }),
+  );
+  for (let index = 100; index >= 0; index -= 50)
+    await success(await post(c, values.slice(index, index + 50).toReversed()));
+  await success(
+    await post(c, [
+      business(5),
+      utterance(1, 1, { offsetSeconds: 0 }),
+      utterance(3, 2, { offsetSeconds: null }),
+    ]),
+  );
+  const other = await createCall();
+  await success(await post(other, [event(), business(2), utterance(3)]));
+  const actual = [];
+  for (let offset = 0; offset < 120; offset += 37) {
+    const page = await readBody(await readEvents(c, 'actions', `limit=37&offset=${offset}`));
+    assert.equal(page.hasNext, offset + 37 < 120);
+    actual.push(...page.data);
+  }
+  assert.deepEqual(
+    actual,
+    values.map((value) => ({
+      eventId: value.eventId,
+      eventOrder: value.eventOrder,
+      occurredAt: '2026-10-31T01:00:31.000Z',
+      offsetSeconds: value.offsetSeconds,
+      ...value.payload,
+    })),
+  );
+  assert.deepEqual(await readBody(await readEvents(c, 'actions', 'offset=120')), {
+    data: [],
+    hasNext: false,
+  });
+  const processing = await readBody(await readEvents(c, 'processing-results'));
+  assert.equal(processing.data.length, 1);
+  assert.equal(processing.data[0].eventOrder, 5);
+  assert.equal(processing.data[0].questionText, null);
+  assert.equal(processing.data[0].answerText, null);
+  await success(await post(c, [business(6), business(7)]));
+  const resultPage = await readBody(await readEvents(c, 'processing-results', 'limit=2'));
+  assert.deepEqual(
+    resultPage.data.map(({ eventOrder }) => eventOrder),
+    [5, 6],
+  );
+  assert.equal(resultPage.hasNext, true);
+  const lastResultPage = await readBody(
+    await readEvents(c, 'processing-results', 'limit=2&offset=2'),
+  );
+  assert.deepEqual(
+    lastResultPage.data.map(({ eventOrder }) => eventOrder),
+    [7],
+  );
+  assert.equal(lastResultPage.hasNext, false);
+  const transcript = await readBody(await readEvents(c, 'transcript'));
+  assert.deepEqual(
+    transcript.data.map(({ offsetSeconds }) => offsetSeconds),
+    [0, null],
+  );
+  const detail = await (
+    await fetch(`${base}/api/calls/${c.id}`, { headers: { Cookie: cookie } })
+  ).json();
+  assert.equal(detail.data.aiActionCount, 120);
+  const late = event(9, { offsetSeconds: null });
+  await success(await post(c, [late]));
+  const refreshed = await readBody(await readEvents(c, 'actions', 'limit=1'));
+  assert.equal(refreshed.data[0].eventId, late.eventId);
+  assert.equal(refreshed.data[0].eventOrder, 9);
+  assert.equal(refreshed.data[0].offsetSeconds, null);
+  assert.equal(refreshed.hasNext, true);
+  assert.doesNotMatch(
+    JSON.stringify(logs),
+    /지난주 김담당|PIN 별칭 본사|민감-이벤트-본문|rtc_events_|Bearer /,
+  );
+});
+
+test('FAQ results reference same-batch customer/AI speech and retain actual answers after FAQ edit or deletion', async () => {
+  const c = await createCall();
+  const faqId = await createFaq();
+  const ids = Array.from({ length: 3 }, () => randomUUID()).sort();
+  const result = { ...faqResult(3, faqId), eventId: ids[0] };
+  const question = utterance(1, 1, {
+    eventId: ids[1],
+    payload: {
+      utteranceOrder: 1,
+      speaker: 'CUSTOMER',
+      utteranceText: ' 민감-이벤트-본문: 착불 요금은요?\n',
+      lastSentenceSeq: 1,
+    },
+  });
+  const answer = utterance(2, 2, {
+    eventId: ids[2],
+    payload: {
+      utteranceOrder: 2,
+      speaker: 'AI',
+      utteranceText: ' 민감-이벤트-본문: 실제 안내한 답변\n',
+      lastSentenceSeq: 1,
+    },
+  });
+  const search = event(4, {
+    payload: { action: 'FAQ_SEARCH', summaryText: 'FAQ 검색 1건', orderSeq: null },
+  });
+  const values = [result, question, answer, search];
+  await Promise.all(
+    [post(c, values), post(c, values, { base: secondBase })].map(async (promise) =>
+      success(await promise),
+    ),
+  );
+  const beforeRows = await rows(c.id);
+  const beforeAudits = await audits(c.id);
+  const body = await readBody(await readEvents(c, 'processing-results'));
+  assert.deepEqual(body, {
+    data: [
+      {
+        eventId: result.eventId,
+        eventOrder: 3,
+        occurredAt: '2026-10-31T01:00:31.000Z',
+        offsetSeconds: 31,
+        action: 'FAQ_ANSWERED',
+        orderSeq: null,
+        unansweredQuestionSeq: null,
+        summaryText: 'FAQ 안내 완료',
+        faqEntrySeq: faqId,
+        questionUtteranceOrder: 1,
+        answerUtteranceOrder: 2,
+        questionText: question.payload.utteranceText,
+        answerText: answer.payload.utteranceText,
+      },
+    ],
+    hasNext: false,
+  });
+  assert.equal((await readBody(await readEvents(c, 'actions'))).data.length, 1);
+  await pool.query(
+    "UPDATE faq_entries SET question='수정된 FAQ',answer='수정된 답변' WHERE faq_entry_seq=$1",
+    [faqId],
+  );
+  assert.deepEqual(await readBody(await readEvents(c, 'processing-results')), body);
+  await pool.query('DELETE FROM faq_entries WHERE faq_entry_seq=$1', [faqId]);
+  assert.deepEqual(await readBody(await readEvents(c, 'processing-results')), body);
+  await success(
+    await post(
+      c,
+      values.toReversed().map((value) => ({
+        ...value,
+        payload: Object.fromEntries(Object.entries(value.payload).reverse()),
+      })),
+    ),
+  );
+  assert.deepEqual(await rows(c.id), beforeRows);
+  assert.deepEqual(await audits(c.id), beforeAudits);
+});
+
+test('FAQ references validate within the selected call and failures roll back the whole new batch', async () => {
+  const faqId = await createFaq();
+  const foreign = await createCall();
+  await success(
+    await post(foreign, [
+      utterance(1),
+      utterance(2, 2, {
+        payload: {
+          utteranceOrder: 2,
+          speaker: 'AI',
+          utteranceText: '다른 통화 답변',
+          lastSentenceSeq: 1,
+        },
+      }),
+    ]),
+  );
+  for (const [change, status, code] of [
+    [{ faqEntrySeq: 2147483647 }, 404, 'NOT_FOUND'],
+    [{ questionUtteranceOrder: 999 }, 404, 'NOT_FOUND'],
+    [{ answerUtteranceOrder: 999 }, 404, 'NOT_FOUND'],
+    [{ questionUtteranceOrder: 2 }, 422, 'VALIDATION_FAILED'],
+    [{ answerUtteranceOrder: 1 }, 422, 'VALIDATION_FAILED'],
+    [{ orderSeq: 1 }, 422, 'VALIDATION_FAILED'],
+    [{ unansweredQuestionSeq: 1 }, 422, 'VALIDATION_FAILED'],
+  ]) {
+    const c = await createCall();
+    await error(
+      await post(c, [
+        event(4),
+        faqResult(3, faqId, change),
+        utterance(1),
+        utterance(2, 2, {
+          payload: { utteranceOrder: 2, speaker: 'AI', utteranceText: '답변', lastSentenceSeq: 1 },
+        }),
+      ]),
+      status,
+      code,
+    );
+    assert.deepEqual(await rows(c.id), []);
+    assert.equal(
+      (await pool.query('SELECT 1 FROM call_utterances WHERE call_session_seq=$1', [c.id]))
+        .rowCount,
+      0,
+    );
+    assert.equal((await audits(c.id)).length, 0);
+  }
+  const c = await createCall();
+  await error(await post(c, [faqResult(3, faqId)]), 404, 'NOT_FOUND');
+  await error(
+    await post(c, [business(1, { payload: { ...business(1).payload, faqEntrySeq: faqId } })]),
+    400,
+    'INVALID_REQUEST',
+  );
+});
+
+test('unanswered result reads preserve references while hiding deleted question text', async () => {
+  const c = await createCall();
+  const id = await createQuestion(c.id);
+  await success(
+    await post(c, [
+      business(7, {
+        payload: {
+          action: 'QUESTION_UNANSWERED',
+          orderSeq: null,
+          unansweredQuestionSeq: id,
+          summaryText: '미답변 기록',
+        },
+      }),
+    ]),
+  );
+  const first = await readBody(await readEvents(c, 'processing-results'));
+  assert.equal(first.data[0].questionText, '테스트 미답변');
+  assert.equal(first.data[0].answerText, null);
+  await pool.query(
+    "UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=$2,faq_conversion_hash=$3,registered_at=clock_timestamp() WHERE unanswered_question_seq=$1",
+    [id, await createFaq(), 'c'.repeat(64)],
+  );
+  assert.deepEqual(await readBody(await readEvents(c, 'processing-results')), first);
+  await pool.query(
+    "UPDATE unanswered_questions SET status='DELETED',question_text=NULL,faq_entry_seq=NULL,faq_conversion_hash=NULL,registered_at=NULL,deleted_at=clock_timestamp() WHERE unanswered_question_seq=$1",
+    [id],
+  );
+  const next = await readBody(await readEvents(c, 'processing-results'));
+  assert.equal(next.data[0].questionText, null);
+  assert.equal(next.data[0].unansweredQuestionSeq, id);
+  assert.equal(next.data[0].faqEntrySeq, null);
+});
+
+test('read failures use the common error response instead of returning a successful empty page', async (t) => {
+  const c = await createCall();
+  const { CallEventsRepository } = require('../dist/call-insights/call-events.repository');
+  const repository = apps[0].get(CallEventsRepository);
+  for (const [path, method] of [
+    ['actions', 'findActions'],
+    ['processing-results', 'findProcessingResults'],
+  ]) {
+    const mock = t.mock.method(repository, method, async () => {
+      throw new Error('민감-이벤트-본문 SELECT secret');
+    });
+    try {
+      await error(await readEvents(c, path), 500, 'INTERNAL_ERROR');
+    } finally {
+      mock.mock.restore();
+    }
+  }
+});
+
+test('OpenAPI exposes separate read shapes, search types, FAQ references, seconds and the full action count', async () => {
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  for (const path of ['actions', 'processing-results']) {
+    const operation = document.paths[`/api/calls/{id}/${path}`].get;
+    assert.deepEqual(operation.security, [{ adminSession: [] }]);
+    assert.deepEqual(operation.parameters.map(({ name }) => name).sort(), [
+      'id',
+      'limit',
+      'offset',
+    ]);
+  }
+  assert.equal(document.paths['/api/calls/{id}/events'], undefined);
+  const schemas = document.components.schemas;
+  for (const name of ['AiActionPayloadDto', 'CallActionDto']) {
+    assert.ok(schemas[name].properties.action.enum.includes('PIN_SEARCH'));
+    assert.ok(schemas[name].properties.action.enum.includes('PREVIOUS_ORDER_SEARCH'));
+    assert.equal(schemas[name].properties.status, undefined);
+  }
+  assert.ok(schemas.BusinessResultPayloadDto.properties.action.enum.includes('FAQ_ANSWERED'));
+  for (const name of ['faqEntrySeq', 'questionUtteranceOrder', 'answerUtteranceOrder'])
+    assert.ok(schemas.BusinessResultPayloadDto.properties[name]);
+  assert.ok(schemas.UtteranceDto.properties.offsetSeconds.nullable);
+  assert.ok(schemas.CallDetailDto.properties.aiActionCount);
+  for (const name of ['CallActionDto', 'CallProcessingResultDto']) {
+    assert.equal(schemas[name].properties.payload, undefined);
+    assert.equal(schemas[name].properties.kind, undefined);
+    assert.equal(schemas[name].properties.offsetMs, undefined);
+    for (const property of Object.values(schemas[name].properties))
+      assert.ok(property.description, name);
+  }
+});

@@ -161,6 +161,12 @@ export class CallDetailDto {
   call!: CallDto;
 
   @ApiProperty({
+    minimum: 0,
+    description: '현재 수집된 AI 동작 전체 건수. 동작 조회의 페이지 크기와 별개.',
+  })
+  aiActionCount!: number;
+
+  @ApiProperty({
     description: '녹취별 재생 URL·만료 시각·오류. 미수집·미연결이면 빈 배열.',
     type: [RecordingDto],
   })
