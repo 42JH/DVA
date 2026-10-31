@@ -114,8 +114,10 @@ const PHONE = '- 전화번호는 세 자리, 네 자리, 네 자리로 끊어 �
 const ADDRESS =
   '# 주소 확인\n- 검색 결과가 1건이면 다시 묻지 않고 확정한다.\n- 여러 건이면 동 이름으로 한 번만 좁혀 묻는다.\n- 상세주소는 고객이 말한 그대로 받는다.'
 const V7 = [ROLE, steps('한 번에'), `${ASK}\n${PHONE}`, ADDRESS].join('\n\n')
-const V6 = [ROLE, steps('항목마다'), ASK, ADDRESS].join('\n\n')
-const V3 = [ROLE, steps('항목마다'), ASK].join('\n\n')
+// v6 되묻기는 '확인된 항목도 한 번 더 확인' → v7에서 '다시 묻지 않는다' + 전화번호 줄 (디자인 07 버전 비교: 빠진 줄 2 · 더한 줄 3)
+const ASK_V6 = '# 되묻기\n- 잘 들리지 않은 항목만 다시 묻는다.\n- 확인된 항목도 한 번 더 확인한다.'
+const V6 = [ROLE, steps('항목마다'), ASK_V6, ADDRESS].join('\n\n')
+const V3 = [ROLE, steps('항목마다'), ASK_V6].join('\n\n')
 
 const v = (
   version: number,

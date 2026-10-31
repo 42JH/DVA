@@ -3,11 +3,12 @@ import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePerso
 import { PersonaList } from './PersonaList'
 import { PromptCard } from './PromptCard'
 import { PromptEditor } from './PromptEditor'
+import { VersionDiffCard } from './VersionDiffCard'
 import { VersionList } from './VersionList'
 
 // 07 페르소나 관리 (와이어프레임 07_페르소나관리 · _버전히스토리, 10/31)
 // 왼쪽 시스템 프롬프트 카드 | 오른쪽 346 카드 [페르소나 | 버전 히스토리] 탭. 두 카드 모두 화면 높이에 맞추고 안쪽만 스크롤
-// [수정] → 오른쪽 패널 없이 넓은 수정 화면 (저장 · 취소하면 돌아옴)
+// [수정] → 오른쪽 패널 없이 넓은 수정 화면 (저장 · 취소하면 돌아옴). [v6과 비교] → 왼쪽 카드가 버전 비교로
 const TABS: { key: PanelTab; label: string }[] = [
   { key: 'persona', label: '페르소나' },
   { key: 'history', label: '버전 히스토리' },
@@ -37,7 +38,11 @@ export function PersonaPage() {
   return (
     <div className="flex h-full min-h-[600px] gap-6">
       <div className="min-w-0 flex-1">
-        <PromptCard prompt={vm.prompt} onEdit={vm.startEdit} />
+        {vm.compare ? (
+          <VersionDiffCard view={vm.compare} onFrom={vm.setCompareFrom} onClose={vm.closeCompare} />
+        ) : (
+          <PromptCard prompt={vm.prompt} onEdit={vm.startEdit} onCompare={vm.startCompare} />
+        )}
       </div>
       <aside className="flex w-[346px] shrink-0 flex-col rounded-xl bg-surface px-5 pt-3 pb-5 ring-1 ring-line ring-inset">
         <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
