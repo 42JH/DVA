@@ -155,8 +155,8 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
         stage_name, text, start_ms, started = call.side["stage"], call.side["text"].strip(), None, call.side["since"]
         choices = {NO_ANSWER: "단계 답으로 쓰지 않음"}
     else:
-        stage_name, text = call.flow.stage, call.heard_text.strip()
-        start_ms, started = call.heard_start, call.heard_started_at
+        stage_name, raw = call.flow.stage, call.heard_text
+        text, start_ms, started = raw.strip(), call.heard_start, call.heard_started_at
         choices = stage_choices(call)
     if not text:
         return
@@ -219,9 +219,9 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                     log.exception("오류 안내 전송 실패 %s", call.session_id)
                 return
             if events or answer != NO_ANSWER or intent != "none":
-                call.heard_text = ""  # 판별에 쓴 말은 소비
+                _consume(call, raw)  # 판별에 쓴 말은 소비
             elif await record_heard(call, conn, text, call.heard_at):
-                call.heard_text = ""  # 백엔드에 넘긴 말은 다시 넘기지 않게
+                _consume(call, raw)  # 백엔드에 넘긴 말은 다시 넘기지 않게
         record["status"] = "done"
         record["output"]["events"] = events
         before = call.last_progress
@@ -239,6 +239,11 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                  call.session_id, stage_name, answer, intent, slot, side, record["elapsed_ms"],
                  call.last_progress != before)
         call.notify()
+
+
+def _consume(call, raw: str) -> None:
+    """판별한 말만 지운다. 결과를 적용하는(await) 사이에 붙은 새 말은 남겨 다음 판별이 보게 한다."""
+    call.heard_text = call.heard_text[len(raw):] if call.heard_text.startswith(raw) else call.heard_text
 
 
 def _move_to_side(call, conn, client, stage_name: str) -> None:
