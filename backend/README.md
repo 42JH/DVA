@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+백엔드 최적화 브랜치는 새 앱 실행 전에 `031-recording-worker-claims.sql`까지 적용한다. 녹취 처리의 수신 건별 lease를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼은 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
+
 AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 현재 앱 실행 전에는 FAQ 분류·고객 내 주소·선택 부서를 포함해 028까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
 
 AI 미답변 질문은 [UNQ-01 계약](../docs/api/unanswered-questions.md)에 따라 POST /api/ai/unanswered-questions로 수집한다. 같은 AI_INSIGHTS_TOKEN을 사용하며 최초 201·동일 발생 재전송 200이다. 신규 상태는 OPEN, 위치는 정수 초 또는 null이다. 프론트의 목록·검색은 [UNQ-02](../docs/api/unanswered-questions-read-spec.md) GET /api/unanswered-questions를 사용한다. 관리자 세션 전용, 기본 OPEN, 오래된 통화부터 조회하며 기간은 PBX 우선·AI 분석 대체의 통화 시작 기준이다. 전환·삭제는 [UNQ-03·UNQ-04](../docs/api/unanswered-questions-management.md)를 따른다. 전환은 분류·질문·답변 모두 필수이며 원문과 재전송 이력은 보존한다. 새 앱 전에 028까지 적용한다. 목록의 total_count로 검색 총건수를 제공하며 통계 뷰는 후속 작업이다.

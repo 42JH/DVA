@@ -1,35 +1,49 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
-import { PoolClient } from 'pg';
 import { CallEndedPayload } from './pbx-webhook.payload';
 import { callerPhone } from '../../common/caller-phone';
+import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class PbxWebhookRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async next(client: PoolClient) {
+  async next() {
     // 짧은 도착 순서 역전을 기다린다. 실패한 한 건이 뒤의 수신을 계속 막지 않게 순환한다.
+    // 5분 lease는 저장소의 HEAD·다운로드·업로드 제한(최대 150초)보다 길게 둔다.
     return (
-      await client.query<{ recordingId: string; payload: unknown; callSessionSeq: number | null }>(
-        `UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=clock_timestamp()
+      await this.database.pool.query<{
+        recordingId: string;
+        payload: unknown;
+        claimId: string;
+      }>(
+        `UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=clock_timestamp(),
+          claim_id=$1,claimed_until=clock_timestamp()+interval '5 minutes'
        WHERE recording_id=(SELECT recording_id FROM pbx_webhooks.call_ended_events
          WHERE processing_status<>'PROCESSED' AND received_at<clock_timestamp()-interval '1 minute'
            AND (last_attempt_at IS NULL OR last_attempt_at<clock_timestamp()-interval '1 minute')
-         ORDER BY last_attempt_at NULLS FIRST,received_at,recording_id LIMIT 1)
-       RETURNING recording_id AS "recordingId",payload,call_session_seq AS "callSessionSeq"`,
+           AND (claimed_until IS NULL OR claimed_until<=clock_timestamp())
+         ORDER BY last_attempt_at NULLS FIRST,received_at,recording_id LIMIT 1 FOR UPDATE SKIP LOCKED)
+       RETURNING recording_id AS "recordingId",payload,claim_id AS "claimId"`,
+        [randomUUID()],
       )
     ).rows[0];
   }
 
-  async match(payload: CallEndedPayload, windowSeconds: number): Promise<number | null> {
+  async match(
+    payload: CallEndedPayload,
+    windowSeconds: number,
+    claimId: string,
+  ): Promise<number | null> {
     return this.database.transaction(async (client) => {
       const event = (
         await client.query<{ callId: number | null }>(
-          `SELECT call_session_seq AS "callId" FROM pbx_webhooks.call_ended_events WHERE recording_id=$1 FOR UPDATE`,
-          [payload.recordingId],
+          `SELECT call_session_seq AS "callId" FROM pbx_webhooks.call_ended_events
+           WHERE recording_id=$1 AND claim_id=$2 AND claimed_until>clock_timestamp() FOR UPDATE`,
+          [payload.recordingId, claimId],
         )
       ).rows[0];
+      if (!event) return null;
       if (event.callId !== null) return event.callId;
       const candidates = (
         await client.query<{ id: number; startedAt: Date | null; endedAt: Date | null }>(
@@ -59,13 +73,20 @@ export class PbxWebhookRepository {
     });
   }
 
-  async processed(recordingId: string, callId: number, objectKey: string): Promise<void> {
-    await this.database.transaction(async (client) => {
+  async processed(
+    recordingId: string,
+    callId: number,
+    objectKey: string,
+    claimId: string,
+  ): Promise<boolean> {
+    return this.database.transaction(async (client) => {
       const event = await client.query(
-        'SELECT recording_id FROM pbx_webhooks.call_ended_events WHERE recording_id=$1 AND call_session_seq=$2 FOR UPDATE',
-        [recordingId, callId],
+        `SELECT recording_id FROM pbx_webhooks.call_ended_events
+         WHERE recording_id=$1 AND call_session_seq=$2 AND claim_id=$3
+           AND claimed_until>clock_timestamp() FOR UPDATE`,
+        [recordingId, callId, claimId],
       );
-      if (event.rowCount !== 1) throw new Error('recording_assignment_changed');
+      if (event.rowCount !== 1) return false;
       await client.query(
         `INSERT INTO recordings(call_session_seq,object_key) VALUES($1,$2) ON CONFLICT(object_key) DO NOTHING`,
         [callId, objectKey],
@@ -76,16 +97,25 @@ export class PbxWebhookRepository {
       );
       if (recording.rowCount !== 1) throw new Error('recording_assignment_conflict');
       await client.query(
-        "UPDATE pbx_webhooks.call_ended_events SET processing_status='PROCESSED' WHERE recording_id=$1",
+        "UPDATE pbx_webhooks.call_ended_events SET processing_status='PROCESSED',claim_id=NULL,claimed_until=NULL WHERE recording_id=$1",
         [recordingId],
       );
+      return true;
     });
   }
 
-  async failed(recordingId: string): Promise<void> {
+  async failed(recordingId: string, claimId: string): Promise<void> {
     await this.database.pool.query(
-      "UPDATE pbx_webhooks.call_ended_events SET processing_status='FAILED' WHERE recording_id=$1 AND processing_status<>'PROCESSED'",
-      [recordingId],
+      `UPDATE pbx_webhooks.call_ended_events SET processing_status='FAILED',claim_id=NULL,claimed_until=NULL
+       WHERE recording_id=$1 AND claim_id=$2 AND claimed_until>clock_timestamp() AND processing_status<>'PROCESSED'`,
+      [recordingId, claimId],
+    );
+  }
+
+  async release(recordingId: string, claimId: string): Promise<void> {
+    await this.database.pool.query(
+      'UPDATE pbx_webhooks.call_ended_events SET claim_id=NULL,claimed_until=NULL WHERE recording_id=$1 AND claim_id=$2',
+      [recordingId, claimId],
     );
   }
 
