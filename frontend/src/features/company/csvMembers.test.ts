@@ -1,6 +1,6 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/company/csvMembers.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { readMembersCsv, serverRowErrors, type CsvMember } from './csvMembers'
+import { decodeCsv, readMembersCsv, serverRowErrors, type CsvMember } from './csvMembers'
 
 const HEAD = '사번,사원명,전화번호,대표자'
 const ok = (text: string) => {
@@ -84,5 +84,11 @@ assert.deepEqual(
   ),
   ['3행 전화번호를 확인해 주세요.', '2행 내용을 확인해 주세요.'],
 )
+
+// 인코딩: UTF-8은 그대로, EUC-KR(엑셀 기본)은 다시 읽음
+const utf8 = new TextEncoder().encode(HEAD).buffer as ArrayBuffer
+assert.equal(decodeCsv(utf8), HEAD)
+const eucKr = new Uint8Array([0xbb, 0xe7, 0xb9, 0xf8]).buffer // '사번'을 EUC-KR로
+assert.equal(decodeCsv(eucKr), '사번')
 
 console.log('csvMembers OK')

@@ -8,6 +8,16 @@ export const CSV_HEADER = ['사번', '사원명', '전화번호', '대표자'] a
 export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
 const SHOW_ERRORS = 3 // 오류는 처음 3줄까지 (11/01 결정), 나머지는 '외 n건'
 
+/** 파일 바이트 → 글자. UTF-8로 읽어 보고 깨지면(잘못된 바이트) EUC-KR로 (11/01 결정 A)
+ * 엑셀 '다른 이름으로 저장 → CSV'의 기본이 EUC-KR(한국어 Windows)이라 그대로 읽으면 한글이 깨짐. 브라우저 기본 TextDecoder만 씀 */
+export function decodeCsv(bytes: ArrayBuffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes) // fatal: 잘못된 바이트면 '�' 대신 오류
+  } catch {
+    return new TextDecoder('euc-kr').decode(bytes)
+  }
+}
+
 export interface CsvMember extends MemberInput {
   leader: boolean // 대표자 Y → 등록 후 PATCH role=ORG_ADMIN
   line: number // 파일의 행 번호 (오류 안내용)
