@@ -15,6 +15,7 @@ import { FaqsModule } from './faqs/faqs.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { PaymentsModule } from './payments/payments.module';
 import { CallInsightsModule } from './call-insights/call-insights.module';
+import { UnansweredQuestionsModule } from './unanswered-questions/unanswered-questions.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { CallInsightsModule } from './call-insights/call-insights.module';
     PinsModule,
     ConsultationsModule,
     CallInsightsModule,
+    UnansweredQuestionsModule,
     AiSettingsModule,
     FaqsModule,
   ],

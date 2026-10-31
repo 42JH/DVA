@@ -20,5 +20,6 @@ import { CallEventsService } from './call-events.service';
     CallEventsRepository,
     CallEventsService,
   ],
+  exports: [CallInsightsGuard],
 })
 export class CallInsightsModule {}

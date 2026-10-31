@@ -140,7 +140,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 025는 기존 분석의 불만 위치를 offsetMs에서 정수 초 offsetSeconds로 변환하고 같은 요청의 재전송 해시를 갱신한다. 분석 저장 시각은 보존한다.
 
-026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 미답변 수집·관리 HTTP API는 후속 구현이며 FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다.
+026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 질문은 [UNQ-01](../api/unanswered-questions.md)로 수집하며 미답변 관리 HTTP API는 후속 구현이다. FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다. UNQ-01은 기존 026을 사용하며 추가 migration이 없다.
 
 이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `027-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
