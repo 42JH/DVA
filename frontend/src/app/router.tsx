@@ -11,6 +11,7 @@ import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { HomePage } from './routes/HomePage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { PersonaPage } from '@/features/persona/components/PersonaPage'
+import { MyInfoPage } from '@/features/me/components/MyInfoPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -87,7 +88,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'me',
-            element: <Placeholder />,
+            element: <MyInfoPage />,
             handle: { title: '내 정보' } satisfies RouteHandle,
           },
           ...(import.meta.env.DEV
