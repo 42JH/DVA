@@ -5,14 +5,13 @@ import { VoiceModal } from './VoiceModal'
 const LINE = 27 // 줄 높이 px — 줄 번호 칸과 글 칸이 같은 높이여야 번호가 맞음
 
 // 07 프롬프트 수정 (와이어프레임 07_페르소나관리_수정, 10/31) — 오른쪽 패널 없이 넓게
-// 제목 줄 [음성 세부 조절] [v6과 비교] → 줄 번호 + 글 칸(커서 줄 번호 남색) → [취소] [저장 → v7]
+// 제목 줄 [음성 세부 조절] → 줄 번호 + 글 칸(커서 줄 번호 남색) → [취소] [저장 → v7]
+// 와이어프레임의 [v6과 비교]는 뺌 (10/31 결정): 비교는 저장 후 보기 화면에서
 // 줄은 접지 않음(wrap off): 접으면 한 줄이 여러 줄로 보여 줄 번호가 어긋남
 export function PromptEditor({
-  compareLabel,
   target,
   onDone,
 }: {
-  compareLabel: string | null
   target: EditTarget
   onDone: (savedVersion?: number) => void
 }) {
@@ -22,10 +21,7 @@ export function PromptEditor({
     <section className="flex h-full min-h-0 flex-col gap-4 rounded-xl bg-surface p-7 ring-1 ring-line ring-inset">
       <div className="flex items-center justify-between gap-4">
         <h2 className="text-card font-bold">시스템 프롬프트</h2>
-        <div className="flex gap-2">
-          <Button onClick={vm.openVoice}>음성 세부 조절</Button>
-          {compareLabel && <Button disabled>{compareLabel}</Button>}
-        </div>
+        <Button onClick={vm.openVoice}>음성 세부 조절</Button>
       </div>
       <p className="-mt-2 flex items-center gap-3">
         <Tag kind="gray">{vm.tag}</Tag>

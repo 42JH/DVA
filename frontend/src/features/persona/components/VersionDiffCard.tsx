@@ -2,7 +2,8 @@ import { Button, Select, Tag } from '@/shared/ui'
 import type { CompareView } from '@/features/persona/hooks/usePersonaPage'
 
 // 07 버전 비교 (와이어프레임 07_페르소나관리_버전비교, 10/31) — 프롬프트 카드 자리에. 오른쪽 패널은 그대로
-// 제목 줄 [v6 ▾] → v7 (최신) · [비교 닫기] → 머리줄 v6 | v7 | 프롬프트 · '빠진 줄 n' '더한 줄 n'
+// 제목 줄 v6 [적용 중] → [v8 ▾] · [비교 닫기] → 머리줄 v6 | v8 | 프롬프트 · '빠진 줄 n' '더한 줄 n'
+// 앞(적용 버전)은 고정, 드롭다운은 비교할 버전 (10/31 결정 — 와이어프레임은 앞쪽이 드롭다운)
 // 줄 = 앞 번호 | 뒤 번호 | −/+ | 글. 빠진 줄 빨간 바탕, 더한 줄 옅은 남색 바탕
 const ROW = {
   same: '',
@@ -12,24 +13,24 @@ const ROW = {
 
 export function VersionDiffCard({
   view,
-  onFrom,
+  onTarget,
   onClose,
 }: {
   view: CompareView
-  onFrom: (version: string) => void
+  onTarget: (version: string) => void
   onClose: () => void
 }) {
-  const fromLabel = view.fromOptions.find((o) => o.value === view.from)?.label
+  const targetLabel = `v${view.target}`
   return (
     <section className="flex h-full min-h-0 flex-col gap-4 rounded-xl bg-surface p-7 ring-1 ring-line ring-inset">
       <div className="flex items-center gap-4">
         <h2 className="text-card font-bold">버전 비교</h2>
-        <Select name="기준" options={view.fromOptions} value={view.from} onChange={onFrom} />
-        <span className="text-body text-sub">→</span>
         <span className="flex items-center gap-2 text-body font-bold">
-          {view.to}
-          {view.toTag && <Tag kind="blue">{view.toTag}</Tag>}
+          {view.base}
+          <Tag kind="blue">{view.baseTag}</Tag>
         </span>
+        <span className="text-body text-sub">→</span>
+        <Select name="비교할 버전" options={view.options} value={view.target} onChange={onTarget} />
         <Button className="ml-auto" onClick={onClose}>
           비교 닫기
         </Button>
@@ -37,8 +38,8 @@ export function VersionDiffCard({
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex h-10 items-center border-b border-line text-label font-semibold text-sub">
-          <span className="w-12 text-right">{fromLabel}</span>
-          <span className="w-12 text-right">{view.to}</span>
+          <span className="w-12 text-right">{view.base}</span>
+          <span className="w-12 text-right">{targetLabel}</span>
           <span className="ml-14">프롬프트</span>
           <span className="ml-auto flex gap-2">
             <Tag kind="red">{`빠진 줄 ${view.removed}`}</Tag>

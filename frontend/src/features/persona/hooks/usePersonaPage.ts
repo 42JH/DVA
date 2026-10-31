@@ -70,12 +70,13 @@ const nameEul = (name: string) => {
 
 const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
 
-/** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — [v6 ▾] → 지금 보는 버전 */
+/** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v6 [적용 중] → [v8 ▾]
+ * 기준은 늘 그 페르소나의 적용 버전(통화에 안 쓰는 페르소나면 마지막으로 적용했던 버전), 드롭다운 = 지금 보는 버전 (10/31 결정) */
 export interface CompareView {
-  fromOptions: { value: string; label: string }[] // 적용 중인 버전이 맨 앞 (기본값)
-  from: string
-  to: string // 'v7'
-  toTag: string | null // '최신' · '적용 중' · '저장됨'
+  base: string // 'v6' — 고정
+  baseTag: string // '적용 중' · '마지막 적용'
+  options: { value: string; label: string }[] // 기준을 뺀 모든 버전
+  target: string // 드롭다운 값 = 지금 보는 버전 번호
   removed: number // '빠진 줄 2'
   added: number // '더한 줄 3'
   rows: {
@@ -98,7 +99,6 @@ export function usePersonaPage() {
   const [showAll, setShowAll] = useState(false)
   const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
-  const [compareFrom, setCompareFrom] = useState<number | null>(null) // null = 적용 중인 버전
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
   const [tested, setTested] = useState<Record<string, number>>({})
@@ -148,22 +148,18 @@ export function usePersonaPage() {
         }
       : null
 
-  // 비교: 앞 = 고른 버전(기본 적용 중), 뒤 = 지금 보는 버전. 히스토리에서 다른 버전을 누르면 뒤가 바뀜
-  const others = all.filter((v) => v.version !== viewing?.version)
-  const fromOptions = [
-    ...others.filter((v) => v.status === 'ACTIVE'),
-    ...others.filter((v) => v.status !== 'ACTIVE'),
-  ]
-  const from = fromOptions.find((v) => v.version === compareFrom) ?? fromOptions[0] ?? null
+  // 비교: 앞 = 적용 버전(고정), 뒤 = 지금 보는 버전. 드롭다운 · 히스토리 클릭 모두 '지금 보는 버전'(version)을 바꿈 → 둘이 늘 같음
+  const base = all.find((v) => v.version === persona?.activeVersion) ?? null
   const compare = (): CompareView | null => {
-    if (!comparing || !viewing || !from) return null
-    const rows = lineDiff(from.prompt.split('\n'), viewing.prompt.split('\n'))
-    const latest = viewing.version === Math.max(...all.map((v) => v.version))
+    if (!comparing || !persona || !viewing || !base || viewing === base) return null
+    const rows = lineDiff(base.prompt.split('\n'), viewing.prompt.split('\n'))
     return {
-      fromOptions: fromOptions.map((v) => ({ value: String(v.version), label: `v${v.version}` })),
-      from: String(from.version),
-      to: `v${viewing.version}`,
-      toTag: latest ? '최신' : (VERSION_TAG[viewing.status]?.label ?? null),
+      base: `v${base.version}`,
+      baseTag: persona.inUse ? '적용 중' : '마지막 적용',
+      options: all
+        .filter((v) => v !== base)
+        .map((v) => ({ value: String(v.version), label: `v${v.version}` })),
+      target: String(viewing.version),
       removed: rows.filter((r) => r.kind === 'del').length,
       added: rows.filter((r) => r.kind === 'add').length,
       rows: rows.map((r, i) => ({ ...r, key: String(i), heading: r.text.startsWith('# ') })),
@@ -250,11 +246,8 @@ export function usePersonaPage() {
         setTested((t) => ({ ...t, [`${persona.personaSeq}-${testing}`]: seconds }))
       setTesting(null)
     },
-    startCompare: () => {
-      setCompareFrom(null)
-      setComparing(true)
-    },
-    setCompareFrom: (v: string) => setCompareFrom(Number(v)),
+    startCompare: () => setComparing(true),
+    setCompareTarget: (v: string) => setVersion(Number(v)),
     closeCompare: () => setComparing(false),
 
     editing: editing !== false,
@@ -309,7 +302,11 @@ export function usePersonaPage() {
     })),
     moreVersions: showAll ? 0 : Math.max(0, all.length - HISTORY_FIRST),
     showAllVersions: () => setShowAll(true),
-    selectVersion: setVersion,
+    // 비교 중에 적용 버전을 누르면 자기 자신과 비교가 되므로 비교를 닫고 그 버전을 봄
+    selectVersion: (v: number) => {
+      setVersion(v)
+      if (v === persona?.activeVersion) setComparing(false)
+    },
   }
 }
 

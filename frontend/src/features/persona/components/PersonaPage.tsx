@@ -29,11 +29,7 @@ export function PersonaPage() {
   if (vm.editing)
     return (
       <div className="h-full min-h-[600px]">
-        <PromptEditor
-          compareLabel={vm.prompt.compareLabel}
-          target={vm.editTarget}
-          onDone={vm.finishEdit}
-        />
+        <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
       </div>
     )
 
@@ -41,7 +37,11 @@ export function PersonaPage() {
     <div className="flex h-full min-h-[600px] gap-6">
       <div className="min-w-0 flex-1">
         {vm.compare ? (
-          <VersionDiffCard view={vm.compare} onFrom={vm.setCompareFrom} onClose={vm.closeCompare} />
+          <VersionDiffCard
+            view={vm.compare}
+            onTarget={vm.setCompareTarget}
+            onClose={vm.closeCompare}
+          />
         ) : (
           <PromptCard
             prompt={vm.prompt}
