@@ -19,7 +19,7 @@ import { SubmitOrderDto, SubmittedOrderDto } from './dto/submit-order.dto';
 import { callerPhone } from '../common/caller-phone';
 import { OrderAddressHistoryQueryDto } from './dto/order-address-history.dto';
 import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.dto';
-import { CallSessionRepository } from '../consultations/call-session.repository';
+import { ConsultationsService } from '../consultations/consultations.service';
 import { assertOrderAmount } from './order-pricing';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { assertOrderSubmissionReady } from './order-submission.validation';
@@ -34,7 +34,7 @@ export class OrdersService {
     private readonly customers: CustomersService,
     private readonly submissions: OrderSubmissionRepository,
     private readonly dver: DverClient,
-    private readonly calls: CallSessionRepository,
+    private readonly calls: ConsultationsService,
     private readonly payments: OrderPaymentsRepository,
   ) {}
 
@@ -236,20 +236,9 @@ export class OrdersService {
     const prepared = await this.write(async (client) => {
       if (!(await this.repository.lockCreation(client, key)))
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '같은 주문 생성 요청을 처리 중입니다.');
-      const session = input.call ? await this.calls.ensureCall(client, input.call) : undefined;
-      const callId = session?.id ?? headerId;
-      if (session?.created)
-        await this.audit.recordSuccess(
-          {
-            actorId: adminId,
-            actorType: adminId === null ? 'AI' : 'ADMIN',
-            action: 'CALL_STARTED',
-            targetType: 'CALL_SESSION',
-            targetId: session.id,
-            requestId,
-          },
-          client,
-        );
+      const callId = input.call
+        ? await this.calls.ensureCall(client, input.call, adminId, requestId)
+        : headerId;
       if (input.call && headerId !== null && headerId !== callId)
         throw new ApiException(
           409,
@@ -314,7 +303,7 @@ export class OrdersService {
         key,
         callId !== null ? 'AI' : 'ADMIN',
       );
-      if (callId !== null) await this.repository.linkCall(client, callId, result.orderSeq);
+      if (callId !== null) await this.calls.attachOrder(client, callId, result.orderSeq);
       await this.audit.recordSuccess(
         {
           actorId: adminId,
@@ -517,7 +506,7 @@ export class OrdersService {
             client,
           );
       }
-      if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
+      if (call && call.orderSeq === null) await this.calls.attachOrder(client, callId!, id);
       await this.audit.recordSuccess(
         {
           actorId: adminId,
@@ -693,7 +682,7 @@ export class OrdersService {
         adminId,
         requestId,
       );
-      if (call && call.orderSeq === null) await this.repository.linkCall(client, callId!, id);
+      if (call && call.orderSeq === null) await this.calls.attachOrder(client, callId!, id);
       return { status: payload ? ('PAID' as const) : ('notPaid' as const) };
     });
     return prepared.status === 'PAID' ? this.submitPaidOrder(id, requestId) : prepared;

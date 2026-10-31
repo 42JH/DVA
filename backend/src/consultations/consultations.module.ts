@@ -5,9 +5,10 @@ import { ConsultationsRepository } from './consultations.repository';
 import { ConsultationsService } from './consultations.service';
 import { RecordingPlaybackService } from './recording-playback.service';
 import { CallSessionRepository } from './call-session.repository';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, AuditModule],
   controllers: [ConsultationsController],
   providers: [
     ConsultationsRepository,
@@ -15,6 +16,6 @@ import { CallSessionRepository } from './call-session.repository';
     RecordingPlaybackService,
     CallSessionRepository,
   ],
-  exports: [CallSessionRepository],
+  exports: [ConsultationsService],
 })
 export class ConsultationsModule {}

@@ -1,12 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../../database/database.service';
 import { CallEndedPayload } from './pbx-webhook.payload';
-import { callerPhone } from '../../common/caller-phone';
+import { ConsultationsService } from '../../consultations/consultations.service';
 import { randomUUID } from 'node:crypto';
 
 @Injectable()
 export class PbxWebhookRepository {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly calls: ConsultationsService,
+  ) {}
 
   async next() {
     // 짧은 도착 순서 역전을 기다린다. 실패한 한 건이 뒤의 수신을 계속 막지 않게 순환한다.
@@ -45,31 +48,18 @@ export class PbxWebhookRepository {
       ).rows[0];
       if (!event) return null;
       if (event.callId !== null) return event.callId;
-      const candidates = (
-        await client.query<{ id: number; startedAt: Date | null; endedAt: Date | null }>(
-          `SELECT call_session_seq AS id,started_at AS "startedAt",ended_at AS "endedAt" FROM call_sessions
-         WHERE caller_phone_number=$1 AND incoming_at BETWEEN $2::timestamptz-make_interval(secs=>$3) AND $2::timestamptz+make_interval(secs=>$3)
-         ORDER BY incoming_at,call_session_seq LIMIT 2 FOR UPDATE`,
-          [callerPhone(payload.callFrom), payload.startedAt, windowSeconds],
-        )
-      ).rows;
-      // 가장 가까운 후보라도 두 건 이상이면 추정 연결하지 않는다.
-      if (candidates.length !== 1) return null;
-      const call = candidates[0];
-      if (
-        (call.startedAt && call.startedAt.toISOString() !== payload.startedAt) ||
-        (call.endedAt && call.endedAt.toISOString() !== payload.endedAt)
-      )
-        throw new Error('recording_call_time_conflict');
-      await client.query(
-        'UPDATE call_sessions SET started_at=$2,ended_at=$3 WHERE call_session_seq=$1',
-        [call.id, payload.startedAt, payload.endedAt],
-      );
+      const callId = await this.calls.matchRecording(client, {
+        callerPhoneNumber: payload.callFrom,
+        startedAt: payload.startedAt,
+        endedAt: payload.endedAt,
+        windowSeconds,
+      });
+      if (callId === null) return null;
       await client.query(
         'UPDATE pbx_webhooks.call_ended_events SET call_session_seq=$2 WHERE recording_id=$1',
-        [payload.recordingId, call.id],
+        [payload.recordingId, callId],
       );
-      return call.id;
+      return callId;
     });
   }
 
@@ -87,15 +77,7 @@ export class PbxWebhookRepository {
         [recordingId, callId, claimId],
       );
       if (event.rowCount !== 1) return false;
-      await client.query(
-        `INSERT INTO recordings(call_session_seq,object_key) VALUES($1,$2) ON CONFLICT(object_key) DO NOTHING`,
-        [callId, objectKey],
-      );
-      const recording = await client.query(
-        'SELECT 1 FROM recordings WHERE object_key=$1 AND call_session_seq=$2',
-        [objectKey, callId],
-      );
-      if (recording.rowCount !== 1) throw new Error('recording_assignment_conflict');
+      await this.calls.attachRecording(client, callId, objectKey);
       await client.query(
         "UPDATE pbx_webhooks.call_ended_events SET processing_status='PROCESSED',claim_id=NULL,claimed_until=NULL WHERE recording_id=$1",
         [recordingId],

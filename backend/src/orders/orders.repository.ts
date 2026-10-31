@@ -300,13 +300,6 @@ export class OrdersRepository {
     ).rows[0];
   }
 
-  async linkCall(client: PoolClient, callId: number, orderId: number) {
-    await client.query('UPDATE call_sessions SET order_seq=$2 WHERE call_session_seq=$1', [
-      callId,
-      orderId,
-    ]);
-  }
-
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
     const result =
       pin.scope === 'PERSONAL'
