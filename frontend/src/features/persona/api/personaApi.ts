@@ -199,3 +199,29 @@ const VERSIONS: Record<number, PersonaVersion[]> = {
     }),
   ],
 }
+
+// ---------- 시험 통화 ----------
+/** 시험 통화 한 줄 — AI 말 · 내 말 + 통화 시작부터 몇 초 */
+export interface TestCallLine {
+  atSec: number
+  speaker: 'AI' | 'ME'
+  text: string
+}
+
+/** 시험 통화 대본 — shortcut: 시험 통화 API(마이크 ↔ AI 실시간 음성)가 Swagger에 없어 정해진 대본이 시간에 맞춰 흐르는 가짜.
+ * BE가 시험 통화 세션 API를 주면 이 함수 대신 실시간으로 받은 말을 쌓으면 됨 (훅 · 화면은 그대로) */
+export function fakeTestCallScript(): TestCallLine[] {
+  return [
+    {
+      atSec: 0,
+      speaker: 'AI',
+      text: '안녕하세요, 디버 택배 접수입니다. 보내는 분 성함을 말씀해 주세요.',
+    },
+    { atSec: 5, speaker: 'ME', text: '강도윤이요.' },
+    { atSec: 8, speaker: 'AI', text: '강도윤 님, 전화번호를 말씀해 주세요.' },
+    { atSec: 13, speaker: 'ME', text: '공일공 육육삼팔 이공사칠이요.' },
+    { atSec: 19, speaker: 'AI', text: '공일공, 육육삼팔, 이공사칠 맞으실까요?' },
+    { atSec: 24, speaker: 'ME', text: '네, 맞아요.' },
+    { atSec: 26, speaker: 'AI', text: '받는 분 성함을 말씀해 주세요.' },
+  ]
+}

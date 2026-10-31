@@ -3,6 +3,7 @@ import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePerso
 import { PersonaList } from './PersonaList'
 import { PromptCard } from './PromptCard'
 import { PromptEditor } from './PromptEditor'
+import { TestCallModal } from './TestCallModal'
 import { VersionDiffCard } from './VersionDiffCard'
 import { VersionList } from './VersionList'
 
@@ -60,10 +61,18 @@ export function PersonaPage() {
               more={vm.moreVersions}
               onSelect={vm.selectVersion}
               onShowMore={vm.showAllVersions}
+              onTestCall={vm.startTestCall}
             />
           )}
         </div>
       </aside>
+      {vm.testCall && (
+        <TestCallModal
+          key={`${vm.testCall.personaSeq}-${vm.testCall.version}`}
+          target={vm.testCall}
+          onEnd={vm.endTestCall}
+        />
+      )}
     </div>
   )
 }

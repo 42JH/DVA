@@ -1,8 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fmtShortDate } from '@/shared/lib/format'
+import { fmtClock, fmtShortDate } from '@/shared/lib/format'
 import type { TagKind } from '@/shared/ui'
-import { SPEED_LABEL, VERSION_TAG, WAIT_LABEL } from '@/features/persona/labels'
+import { SPEED_CHOICE, SPEED_LABEL, VERSION_TAG, WAIT_LABEL } from '@/features/persona/labels'
+import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { lineDiff } from '@/features/persona/hooks/lineDiff'
 import {
@@ -32,6 +33,7 @@ export interface VersionItem {
   author: string
   selected: boolean
   canApply: boolean // 적용 중인 버전은 [적용] 없음 (이미 통화에 쓰는 중)
+  testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전 (적용 버튼이 남색으로)
 }
 
 /** 왼쪽 '시스템 프롬프트' 카드 */
@@ -76,6 +78,9 @@ export function usePersonaPage() {
   const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
   const [compareFrom, setCompareFrom] = useState<number | null>(null) // null = 적용 중인 버전
+  const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
+  // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
+  const [tested, setTested] = useState<Record<string, number>>({})
 
   const personas = useQuery(personaQueries.list())
   const list = personas.data ?? []
@@ -87,6 +92,20 @@ export function usePersonaPage() {
   })
   const all = versions.data ?? []
   const viewing = all.find((v) => v.version === version) ?? all[0] ?? null
+  const testedSec = (v: number) => (persona ? tested[`${persona.personaSeq}-${v}`] : undefined)
+  const testingVersion = all.find((v) => v.version === testing) ?? null
+  const testCall: TestCallTarget | null =
+    persona && testingVersion
+      ? {
+          personaSeq: persona.personaSeq,
+          version: testingVersion.version,
+          subtitle: [
+            `${persona.name} v${testingVersion.version} (${VERSION_TAG[testingVersion.status]?.label ?? '지난 버전'})`,
+            testingVersion.voice.voice,
+            SPEED_CHOICE[testingVersion.voice.speed],
+          ].join(' · '),
+        }
+      : null
 
   // 비교: 앞 = 고른 버전(기본 적용 중), 뒤 = 지금 보는 버전. 히스토리에서 다른 버전을 누르면 뒤가 바뀜
   const others = all.filter((v) => v.version !== viewing?.version)
@@ -132,6 +151,18 @@ export function usePersonaPage() {
     prompt: persona && viewing ? toPromptView(persona, viewing) : null,
 
     compare: compare(),
+
+    testCall,
+    // 버전 칸 [시험 통화] — 그 버전을 고르고 통화 창
+    startTestCall: (v: number) => {
+      setVersion(v)
+      setTesting(v)
+    },
+    endTestCall: (seconds: number) => {
+      if (persona && testing !== null)
+        setTested((t) => ({ ...t, [`${persona.personaSeq}-${testing}`]: seconds }))
+      setTesting(null)
+    },
     startCompare: () => {
       setCompareFrom(null)
       setComparing(true)
@@ -182,6 +213,8 @@ export function usePersonaPage() {
       author: v.author,
       selected: v.version === viewing?.version,
       canApply: v.status !== 'ACTIVE',
+      testResult:
+        testedSec(v.version) !== undefined ? `완료 · ${fmtClock(testedSec(v.version)!)}` : null,
     })),
     moreVersions: showAll ? 0 : Math.max(0, all.length - HISTORY_FIRST),
     showAllVersions: () => setShowAll(true),
