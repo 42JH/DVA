@@ -8,6 +8,13 @@ import { Environment } from '../config/environment';
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   readonly pool: Pool;
+  readonly transactionStatistics = {
+    count: 0,
+    failures: 0,
+    seconds: 0,
+    maxSeconds: 0,
+    connectionWaitSeconds: 0,
+  };
 
   constructor(config: ConfigService<Environment, true>) {
     this.pool = new Pool({
@@ -37,7 +44,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    const queued = performance.now();
     const client = await this.pool.connect();
+    const started = performance.now();
+    this.transactionStatistics.connectionWaitSeconds += (started - queued) / 1000;
     let releaseError: Error | undefined;
     try {
       await client.query('BEGIN');
@@ -45,6 +55,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       await client.query('COMMIT');
       return result;
     } catch (error) {
+      this.transactionStatistics.failures++;
       try {
         await client.query('ROLLBACK');
       } catch {
@@ -53,6 +64,13 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       }
       throw error;
     } finally {
+      const seconds = (performance.now() - started) / 1000;
+      this.transactionStatistics.count++;
+      this.transactionStatistics.seconds += seconds;
+      this.transactionStatistics.maxSeconds = Math.max(
+        this.transactionStatistics.maxSeconds,
+        seconds,
+      );
       client.release(releaseError);
     }
   }

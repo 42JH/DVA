@@ -85,3 +85,9 @@
 ### 3-6. 최적화 관측 근거
 
 - 계획: HTTP 지연 histogram, 프로세스의 DB 연결/대기 수, 트랜잭션 횟수·실패·합계/최장 시간·연결 대기 합계를 기존 내부 metrics에 더한다. 업무 식별자·SQL·본문을 라벨에 넣지 않고 추가 DB 조회 없이 수집한다. 내부 지표는 프론트·AI API 계약에 포함하지 않는다.
+- 검증/판정: lint·format·컴파일·기본 123개, DB/관측 6개 통과. HTTP 누적 bucket·count·sum과 DB 성공/롤백 통계, 풀 반납, 기존 지표 실패 구분·공개 Swagger 제외를 검증했다. 최초 기본 검사는 제한 실행 환경의 localhost 접속(EACCES)으로 실패했으며 네트워크가 허용된 격리 테스트로 재검증해 채택.
+- 확인 예: `histogram_quantile(0.95, sum by (le, route, method) (rate(dva_http_request_duration_seconds_bucket[5m])))`. bucket 범위 밖의 지연은 상한 bucket 때문에 정밀도가 제한된다. DB duration 합계는 연결 획득 뒤부터 COMMIT/ROLLBACK까지, max는 프로세스 시작 이후 최장 값이다. 연결 대기는 별도 누적 counter와 현재 대기 gauge로 본다.
+
+### 4. 조회 실행 계획 비교
+
+- 계획: 격리 DB에 통화·주문 각각 100,000건을 만들고 실제 저장소의 total_count 포함 SQL을 비교한다. 통화 시작 내림차순과 고객별 주문 최신순 인덱스는 EXPLAIN ANALYZE·BUFFERS에서 이득이 확인된 것만 새 migration으로 채택한다. 인덱스 전후 응답·검색 총건수는 같아야 한다.

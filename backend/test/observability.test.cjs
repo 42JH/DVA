@@ -8,6 +8,14 @@ const { JsonLogger, logRecord, logContext } = require('../dist/observability/jso
 const { ObservabilityService } = require('../dist/observability/observability.service');
 const { recordHttp, httpMetrics } = require('../dist/observability/http-metrics');
 const { requestContext } = require('../dist/common/http/request-context');
+const transactionStatistics = {
+  count: 7,
+  failures: 2,
+  seconds: 1.25,
+  maxSeconds: 0.75,
+  connectionWaitSeconds: 0.1,
+};
+const poolStatistics = { totalCount: 5, idleCount: 2, waitingCount: 3 };
 
 test('FAQ retry logs preserve only a validated event ID and discard content and credentials', () => {
   const eventId = randomUUID();
@@ -119,6 +127,30 @@ test('an unavailable log sink does not escape into a request or response finish 
   assert.doesNotThrow(() => response.emit('finish'));
 });
 
+test('HTTP duration histogram exposes cumulative buckets, count and sum for percentile queries', () => {
+  recordHttp('/api/histogram-contract', 'GET', 200, 25);
+  recordHttp('/api/histogram-contract', 'GET', 200, 600);
+  const metrics = httpMetrics();
+  const labels = 'route="/api/histogram-contract",method="GET",status="200"';
+  for (const [bound, count] of [
+    ['0.01', 0],
+    ['0.05', 1],
+    ['0.1', 1],
+    ['0.5', 1],
+    ['1', 2],
+    ['2', 2],
+    ['5', 2],
+    ['+Inf', 2],
+  ])
+    assert.ok(
+      metrics.includes(
+        `dva_http_request_duration_seconds_bucket{${labels},le="${bound}"} ${count}\n`,
+      ),
+    );
+  assert.ok(metrics.includes(`dva_http_request_duration_seconds_count{${labels}} 2\n`));
+  assert.ok(metrics.includes(`dva_http_request_duration_seconds_sum{${labels}} 0.625\n`));
+});
+
 test('HTTP error metrics count only submission server failures and have bounded cardinality', () => {
   for (const status of [201, 400, 401, 403, 409, 422])
     recordHttp('/api/admin/orders', 'POST', status, 1);
@@ -137,7 +169,9 @@ test('HTTP error metrics count only submission server failures and have bounded 
 
 test('DB failure and order-query failure are distinct and never report an empty successful snapshot', async () => {
   const disconnected = new ObservabilityService({
+    transactionStatistics,
     pool: {
+      ...poolStatistics,
       query: async () => {
         throw new Error('private SQL');
       },
@@ -148,7 +182,8 @@ test('DB failure and order-query failure are distinct and never report an empty 
   assert.match(down, /dva_order_metrics_success 0/);
   assert.ok(!down.includes('dva_orders_attention'));
   const badQuery = new ObservabilityService({
-    pool: { query: async () => ({}) },
+    transactionStatistics,
+    pool: { ...poolStatistics, query: async () => ({}) },
     transaction: async () => {
       throw new Error('private parameters');
     },
@@ -163,7 +198,9 @@ test('concurrent metrics requests share one bounded database read', async () => 
   let reads = 0;
   const queries = [];
   const service = new ObservabilityService({
+    transactionStatistics,
     pool: {
+      ...poolStatistics,
       query: async () => {
         reads++;
         await delay(5);
@@ -186,6 +223,14 @@ test('concurrent metrics requests share one bounded database read', async () => 
   assert.ok(results.every((body) => body === results[0]));
   assert.match(results[0], /dva_orders_attention\{status="SUBMISSION_FAILED"\} 2/);
   assert.match(results[0], /dva_orders_stale_submitting 1/);
+  assert.match(results[0], /dva_database_pool_connections\{state="total"\} 5/);
+  assert.match(results[0], /dva_database_pool_connections\{state="idle"\} 2/);
+  assert.match(results[0], /dva_database_pool_waiting_requests 3/);
+  assert.match(results[0], /dva_database_transactions_total 7/);
+  assert.match(results[0], /dva_database_transaction_failures_total 2/);
+  assert.match(results[0], /dva_database_transaction_duration_seconds_total 1.25/);
+  assert.match(results[0], /dva_database_transaction_duration_seconds_max 0.75/);
+  assert.match(results[0], /dva_database_transaction_connection_wait_seconds_total 0.1/);
   assert.match(queries[0], /READ ONLY/);
   assert.ok(queries.every((sql) => !/UPDATE|INSERT|DELETE/.test(sql)));
 });
