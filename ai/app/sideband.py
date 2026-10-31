@@ -11,7 +11,7 @@ from app import client_backend
 from app.call import Call
 from app.dispatcher import dispatch
 from app.flow import engine
-from app.progress import after_change, send_progress
+from app.progress import after_change, customer_speaking, send_progress
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +101,7 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
         call.add_transcript("customer", event.delta, start_ms, getattr(event, "end_ms", None))
         call.last_input_at = time.monotonic()
         if event.delta.strip():
+            call.customer_said_at = time.monotonic()
             call.input_ready.set()
         listener.heard(call, event.delta, conn, client, start_ms)
     elif etype == "session.output_transcript.delta":
@@ -170,7 +171,8 @@ async def run_tool(call: Call, conn, item: dict) -> None:
                 "output": json.dumps(output, ensure_ascii=False, default=str),
             })
             await conn.response.create()
-            await after_change(call, conn)
+            # 도구 결과의 state.next가 백엔드 모델을 거쳐 음성 모델에 간다. 같은 내용을 진행 상태로 또 보내면 두 번 말한다
+            await after_change(call, conn, delivered="state" in output)
         except Exception:
             log.exception("도구 결과 전송 실패 %s", call.session_id)
             call.add_error("도구 결과 전송 실패")
@@ -253,6 +255,10 @@ async def watch_flow(call: Call, conn, client) -> None:
             await _fire(call, conn, engine.COMMIT, "commit")
         elif call.rag_deadline and now >= call.rag_deadline and engine.handles(call, "rag.timeout"):
             await _fire(call, conn, "rag.timeout", "watchdog")
+        if call.progress_due and not customer_speaking(call):
+            async with call.lock:
+                if call.progress_due:
+                    await send_progress(call, conn)
         side = call.side
         if side["off"] and not side["flushing"] and side["text"].strip() and side["stage"] != call.flow.stage \
                 and engine.listening(call):

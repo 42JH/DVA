@@ -129,6 +129,8 @@ class Call:
         self.heard_start: int | None = None  # 그 말의 첫 조각 시작(세션 타임라인 ms). 질문을 다 들었는지 판단
         self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
+        self.customer_said_at = 0.0  # 내용 있는 고객 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
+        self.progress_due = False  # 고객이 말하는 중이라 미뤄 둔 진행 상태가 있음(말이 멈추면 보낸다)
         self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
         # 지난 단계의 말(전환 전에 한 말의 늦은 조각, 듣지 않는 단계에서 쌓인 말): 전역 의도로만 판별한다
         self.side: dict = {"stage": "", "text": "", "off": False, "since": 0.0, "flushing": False}
@@ -351,6 +353,8 @@ class Call:
         도착지는 핀 매칭부터 다시 한다(이전 매칭 결과는 버린다)."""
         if self.flow.task not in ("new_order", "order") or "record_order" not in engine.allowed_tools(self):
             return []  # 접수 업무 밖(조회·취소, 취소 실행 뒤 포함)·QnA 중에는 받지 않는다
+        if slot in engine.missing(self) or (slot == "item" and "item" in engine.current(self).fields):
+            return []  # 지금 묻는 항목을 다시 말한 것은 정정이 아니라 답이다(다시 묻지 않는다, 2026-10-31 통화)
         role = {"sender_address": "origin", "receiver_address": "destination"}.get(slot)
         side = {"origin": "sender", "destination": "receiver"}.get(role)
         if self.flow.task == "order" and role and engine.handles(self, f"correct.{role}") \
@@ -440,7 +444,7 @@ class Call:
         orders, index = lookup.get("orders") or [], lookup.get("index", 0)
         found = orders[index] if index < len(orders) else {}
         target = self.target_order or {}
-        slot, value = self.corrected or (self.flow.correcting, "")
+        slot, value = (self.flow.correcting, "") if self.flow.correcting else (self.corrected or (None, ""))
         origin, destination = self.recent_place("origin"), self.recent_place("destination")
         rejected = self.pin_rejected["destination"]
         verifying = self.pin_offer or (rejected[-1] if rejected else None)

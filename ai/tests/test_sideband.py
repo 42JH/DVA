@@ -10,6 +10,7 @@ from test_flow import FakeRag, orders_db, saved_db, no_recent_db
 
 from app.dispatcher import dispatch
 from app.listener import apply_answer
+from app.progress import send_progress
 from app.sideband import run_call
 
 
@@ -82,11 +83,12 @@ def test_function_call_returns_output_then_response_create_and_progress():
         conn.push("response.event", event={"type": "response.function_call_arguments.delta", "item_id": "it1", "delta": "{"})
         conn.function_call("record_order", {"sender_name": "김철수"}, "c1")
         await until(lambda: conn.outputs())
-        await until(lambda: len(conn.sent) >= 4)
+        await until(lambda: len(conn.sent) >= 3)
         paths = [p for p, _ in conn.sent]
-        assert paths[1:4] == ["response.item.create", "response.create", "session.thinking.append"]
+        # 도구 결과의 state.next로 다음 질문이 전해지므로 같은 진행 상태를 또 보내지 않는다(두 번 말하기 방지)
+        assert paths[1:] == ["response.item.create", "response.create"]
         assert conn.sent[1][1]["item"]["call_id"] == "c1"
-        assert "김철수" in conn.sent[3][1]["content"]
+        assert "김철수" in json.dumps(conn.outputs()[0]["state"], ensure_ascii=False)
         conn.function_call("no_such_tool", {}, "c2")  # 없는 도구여도 결과는 꼭 돌려준다
         await until(lambda: len(conn.outputs()) == 2)
         assert conn.outputs()[1]["ok"] is False
@@ -684,9 +686,9 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         conn.push("session.input_transcript.delta", delta="택배요")
         await until(lambda: call.flow.stage == "A_REGISTER_SENDER")
         conn.function_call("record_order", FULL_ORDER, "r1")
-        # 단계·확정 지연은 진행 상태를 보내기(await) 전에 바뀐다: 문구가 도착할 때까지 기다린다
-        await until(lambda: call.flow.pending and thoughts(conn) and "운임은 4,000원이에요" in thoughts(conn)[-1])
-        assert call.texts.say["PAY_BILLING"] in thoughts(conn)[-1]
+        await until(lambda: call.flow.pending and conn.outputs())
+        nxt = conn.outputs()[-1]["state"]["next"]  # 운임·결제 안내는 도구 결과로 전해진다(진행 상태로 또 보내지 않음)
+        assert "운임은 4,000원이에요" in nxt and call.texts.say["PAY_BILLING"] in nxt
         await until(lambda: call.flow.stage == "A_CHOICE" and call.texts.say["A8"] in thoughts(conn)[-1])
         assert "운임은" not in thoughts(conn)[-1]
         await close(conn, task)
@@ -761,6 +763,29 @@ def test_voice_model_goodbye_outside_end_call_is_corrected_once():
         await asyncio.sleep(0.1)
         fixes = [kw for p, kw in conn.sent if p == "session.instructions.append"]
         assert len(fixes) == 1 and fixes[0]["content"] == call.texts.drift_fix and fixes[0]["delegation_id"] is None
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_progress_waits_while_customer_is_speaking():
+    """고객이 말하는 중에는 진행 상태를 미뤘다가 말이 멈추면 보낸다(음성 모델이 고객 말 위로 말하지 않게)."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        task, conn = await start(call, client)
+        before = len(thoughts(conn))
+        conn.push("session.input_transcript.delta", delta="어 잠깐")  # 고객이 말하는 중
+        await until(lambda: call.customer_said_at)
+        call.flow.notice.append("CORRECTED")  # 진행 상태가 바뀔 일이 생김
+        call.corrected = ("receiver_phone", "01011112222")
+        async with call.lock:
+            call.customer_said_at = time.monotonic()  # 방금도 말함(말 멈춤 대기 안)
+            await send_progress(call, conn)
+        assert call.progress_due and len(thoughts(conn)) == before
+        await until(lambda: not call.progress_due, timeout=3)  # 말이 멈추면 보낸다
+        assert len(thoughts(conn)) == before + 1 and "01011112222" in thoughts(conn)[-1]
         await close(conn, task)
 
     run(scenario())
