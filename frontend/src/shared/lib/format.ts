@@ -78,3 +78,9 @@ export function toDateTimeLocal(d: Date): string {
 export function fromDateTimeLocal(value: string): string {
   return new Date(value).toISOString()
 }
+
+/** 날짜만 (10/30 연도 규칙): 올해 '10.02', 다른 해 '2025.12.29' — 07 버전 저장일. 'YYYY-MM-DD'를 받음 */
+export function fmtShortDate(ymd: string, now = new Date()): string {
+  const [y, m, d] = ymd.split('-')
+  return Number(y) === now.getFullYear() ? `${m}.${d}` : `${y}.${m}.${d}`
+}

@@ -10,6 +10,7 @@ import { FaqPage } from '@/features/faq/components/FaqPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { HomePage } from './routes/HomePage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
+import { PersonaPage } from '@/features/persona/components/PersonaPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -61,7 +62,7 @@ export const router = createBrowserRouter([
           },
           {
             path: 'personas',
-            element: <Placeholder />,
+            element: <PersonaPage />,
             handle: { title: '페르소나 관리' } satisfies RouteHandle,
           },
           // 09 FAQ 관리 ▸ FAQ 목록 · AI 미답변 (10/28 A안) — 상단바 제목 = 하위 메뉴 이름
