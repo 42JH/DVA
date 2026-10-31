@@ -1,3 +1,4 @@
+import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { Injectable, Logger } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
@@ -86,6 +87,23 @@ export class OrdersService {
     if (call.customerSeq === null)
       throw new ApiException(403, 'FORBIDDEN', '통화 발신번호에 연결된 활성 고객이 필요합니다.');
     return call.customerSeq;
+  }
+
+  async adminList(query: AdminOrderListQueryDto) {
+    if (
+      (query.from !== undefined && !isZonedDate(query.from)) ||
+      (query.to !== undefined && !isZonedDate(query.to)) ||
+      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
+      );
+    return new ListResponse(
+      await this.repository.adminList(this.database.pool, query),
+      query.limit,
+    );
   }
 
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {

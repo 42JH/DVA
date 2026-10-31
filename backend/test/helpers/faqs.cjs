@@ -71,7 +71,7 @@ module.exports = function faqFixture() {
     return body;
   };
   f.createdId = async (input, actor = 0) => {
-    const response = await f.create(input, actor);
+    const response = await f.create({ items: [input] }, actor);
     assert.equal(response.status, 204, await response.clone().text());
     assert.equal(await response.text(), '');
     assert.equal(response.headers.get('cache-control'), 'no-store');

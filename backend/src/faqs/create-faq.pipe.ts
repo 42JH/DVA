@@ -6,12 +6,7 @@ export class CreateFaqPipe implements PipeTransform<unknown, Promise<CreateFaqDt
   private readonly validation = createValidationPipe();
 
   async transform(value: unknown): Promise<CreateFaqDto[]> {
-    // 기존 단건 본문도 같은 배열 검증과 트랜잭션을 사용한다.
-    const input =
-      value !== null && typeof value === 'object' && !Array.isArray(value) && 'items' in value
-        ? value
-        : { items: [value] };
-    const result: CreateFaqsDto = await this.validation.transform(input, {
+    const result: CreateFaqsDto = await this.validation.transform(value, {
       type: 'body',
       metatype: CreateFaqsDto,
     });

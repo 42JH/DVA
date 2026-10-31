@@ -160,7 +160,9 @@ test('uncommitted content and its notification cannot be observed by the deliver
     }
     return record.apply(audit, args);
   };
-  const creating = f.create({ category: '기타', question: f.marker(), answer: '커밋 후 전송' });
+  const creating = f.create({
+    items: [{ category: '기타', question: f.marker(), answer: '커밋 후 전송' }],
+  });
   try {
     await ready;
     await worker.run();

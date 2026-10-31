@@ -121,13 +121,13 @@ test('FAQ initial data contains all 32 question-answer pairs with provenance rem
   );
 });
 
-test('FAQ creation accepts one or many items and the legacy object through the same validated path', async () => {
+test('FAQ creation uses the same items envelope for one or many entries and rejects legacy objects', async () => {
   const creation = new CreateFaqPipe();
   const item = { category: '기타', question: '질문', answer: '답변' };
-  assert.deepEqual(JSON.parse(JSON.stringify(await creation.transform(item))), [item]);
   for (const length of [1, 2, 100])
     assert.equal((await creation.transform({ items: Array(length).fill(item) })).length, length);
   for (const input of [
+    item,
     null,
     [],
     [item],

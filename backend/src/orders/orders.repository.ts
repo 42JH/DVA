@@ -1,7 +1,8 @@
+import { AdminOrderListItemDto, AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { PoolClient } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { OriginPinDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
@@ -151,6 +152,39 @@ export class OrdersRepository {
         [callId],
       )
     ).rows[0];
+  }
+
+  async adminList(client: Pool | PoolClient, query: AdminOrderListQueryDto) {
+    const phoneQuery =
+      query.q && /^[0-9+() -]+$/.test(query.q) ? query.q.replace(/[^0-9]/g, '') : null;
+    return readPage<AdminOrderListItemDto>(
+      client,
+      `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
+       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+         'orderParcelSeq',p.order_parcel_seq,'status',p.status,
+         'origin',jsonb_build_object('name',p.origin_name,'phoneNumber',p.origin_phone_number,'roadAddress',p.origin_road_address,'jibunAddress',p.origin_jibun_address,'detailAddress',p.origin_detail_address),
+         'destination',jsonb_build_object('name',p.destination_name,'phoneNumber',p.destination_phone_number,'roadAddress',p.destination_road_address,'jibunAddress',p.destination_jibun_address,'detailAddress',p.destination_detail_address),
+         'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
+         ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=o.order_seq),'[]'::jsonb) AS parcels
+       FROM orders o
+       WHERE ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
+         EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
+           p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
+           WHERE strpos(lower(normalize(v.value,NFC)),lower($1))>0)
+         OR ($5::text IS NOT NULL AND (strpos(p.origin_phone_number,$5)>0 OR strpos(p.destination_phone_number,$5)>0)))))
+        AND ($2::timestamptz IS NULL OR o.created_at >= $2)
+        AND ($3::timestamptz IS NULL OR o.created_at < $3)
+        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','ACCEPTED','SUBMISSION_FAILED')))`,
+      [
+        query.q || null,
+        query.from ?? null,
+        query.to ?? null,
+        query.statusGroup ?? null,
+        phoneQuery || null,
+      ],
+      query,
+      '"createdAt" DESC,"orderSeq" DESC',
+    );
   }
 
   async list(client: PoolClient, query: OrderQueryDto, customerId: number | null) {

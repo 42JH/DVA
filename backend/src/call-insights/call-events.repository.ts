@@ -125,14 +125,13 @@ export class CallEventsRepository {
   async faqReferences(client: PoolClient, callId: number, payload: BusinessResultPayloadDto) {
     return (
       await client.query<{
-        faqExists: boolean;
         questionSpeaker: string | null;
         answerSpeaker: string | null;
       }>(
-        `SELECT EXISTS(SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1) AS "faqExists",
-         (SELECT speaker FROM call_utterances WHERE call_session_seq=$2 AND utterance_order=$3) AS "questionSpeaker",
-         (SELECT speaker FROM call_utterances WHERE call_session_seq=$2 AND utterance_order=$4) AS "answerSpeaker"`,
-        [payload.faqEntrySeq, callId, payload.questionUtteranceOrder, payload.answerUtteranceOrder],
+        `SELECT
+         (SELECT speaker FROM call_utterances WHERE call_session_seq=$1 AND utterance_order=$2) AS "questionSpeaker",
+         (SELECT speaker FROM call_utterances WHERE call_session_seq=$1 AND utterance_order=$3) AS "answerSpeaker"`,
+        [callId, payload.questionUtteranceOrder, payload.answerUtteranceOrder],
       )
     ).rows[0];
   }

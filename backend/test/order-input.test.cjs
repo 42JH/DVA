@@ -307,3 +307,35 @@ test('order inputs reject invalid types, nulls, ranges, nested arrays and extra 
     );
   }
 });
+
+test('admin order screen validates only bounded screen filters and preserves strict pagination', async () => {
+  const { AdminOrderListQueryDto } = require('../dist/orders/dto/admin-order-list.dto');
+  const input = {
+    q: '  한글 ',
+    statusGroup: 'PAID',
+    from: '2026-10-31T00:00:00+09:00',
+    to: '2026-11-01T00:00:00+09:00',
+    limit: '1',
+    offset: '2',
+  };
+  const result = await pipe.transform(input, { type: 'query', metatype: AdminOrderListQueryDto });
+  assert.equal(result.q, '한글');
+  assert.equal(result.limit, 1);
+  assert.equal(result.offset, 2);
+  for (const patch of [
+    { q: ['a'] },
+    { q: 'x\0' },
+    { q: 'x'.repeat(201) },
+    { statusGroup: ['PAID'] },
+    { statusGroup: 'SUBMITTING' },
+    { status: 'PAID' },
+    { limit: '1.0' },
+    { offset: '-1' },
+    { from: '2026-10-31' },
+  ])
+    await assert.rejects(
+      () =>
+        pipe.transform({ ...input, ...patch }, { type: 'query', metatype: AdminOrderListQueryDto }),
+      { status: 400 },
+    );
+});

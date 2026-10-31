@@ -15,9 +15,9 @@ async function migrate(pool) {
       );
       assert.equal(latest.rowCount, 1, 'Use an empty isolated DB or apply all migrations first');
       const events = await client.query(
-        "SELECT 1 WHERE to_regclass('public.call_analyses') IS NOT NULL AND to_regclass('public.call_insight_events') IS NOT NULL AND to_regclass('public.unanswered_questions') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='faq_entries' AND column_name='category' AND is_nullable='NO')",
+        "SELECT 1 WHERE to_regclass('public.call_analyses') IS NOT NULL AND to_regclass('public.call_insight_events') IS NOT NULL AND to_regclass('public.unanswered_questions') IS NOT NULL AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='faq_entries' AND column_name='category' AND is_nullable='NO') AND to_regclass('public.faq_entries_question_identity_uq') IS NOT NULL",
       );
-      assert.equal(events.rowCount, 1, 'Apply migrations through 028 to the isolated DB first');
+      assert.equal(events.rowCount, 1, 'Apply migrations through 029 to the isolated DB first');
       const customerMembership = await client.query(
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='department_seq' AND is_nullable='YES')",
       );

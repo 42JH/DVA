@@ -3597,3 +3597,173 @@ test('call context Swagger documents optional identity, database sequence and un
   assert.equal(legacy.status, 200);
   assert.equal(Object.hasOwn((await legacy.json()).data, 'callSessionSeq'), false);
 });
+
+const screenOrders = (query = {}, headers = {}, index = 0) =>
+  fetch(hosts[index] + '/api/admin/orders?' + new URLSearchParams(query), {
+    headers: { Cookie: cookies[index], ...headers },
+  });
+
+test('admin screen lists one row per stored order and all saved parcel parties/items with matching totals', async () => {
+  const { customer } = await readCustomer();
+  const marker = 'screen' + randomUUID();
+  const parcels = [
+    {
+      origin: {
+        name: marker + ' 발송인',
+        phoneNumber: '01098765432',
+        roadAddress: '출발 도로',
+        jibunAddress: '출발 지번',
+        detailAddress: '101호',
+      },
+      destination: { name: '첫 수령인', roadAddress: '첫 도착지' },
+      documentCount: 1,
+    },
+    {
+      origin: { name: '둘째 발송인' },
+      destination: {
+        name: marker + ' 두번째 한글',
+        roadAddress: marker + ' 도로_%',
+        phoneNumber: '01098765433',
+      },
+      smallBoxCount: 2,
+      otherItemDescription: '기타 물품',
+    },
+  ];
+  const id = await readOrder(customer, parcels);
+  const emptyId = await readOrder(customer);
+  await pool.query(
+    "UPDATE orders SET created_at='2091-01-01T00:00:00Z' WHERE order_seq=ANY($1::int[])",
+    [[id, emptyId]],
+  );
+  const range = { from: '2091-01-01T00:00:00Z', to: '2091-01-02T00:00:00Z' };
+  const response = await screenOrders({ ...range, limit: '1' });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const first = await response.json();
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
+  assert.equal(first.total_count, 2);
+  assert.equal(first.hasNext, true);
+  assert.equal(first.data[0].orderSeq, emptyId);
+  assert.deepEqual(first.data[0].parcels, []);
+  const second = await (await screenOrders({ ...range, limit: '1', offset: '1' })).json();
+  assert.equal(second.total_count, 2);
+  assert.equal(second.hasNext, false);
+  const row = second.data[0];
+  assert.deepEqual(Object.keys(row).sort(), [
+    'createdAt',
+    'orderSeq',
+    'parcels',
+    'pickupRequestedAt',
+    'status',
+  ]);
+  assert.equal(row.orderSeq, id);
+  assert.equal(row.parcels.length, 2);
+  assert.equal(row.parcels[0].origin.name, parcels[0].origin.name);
+  assert.equal(row.parcels[1].destination.name, parcels[1].destination.name);
+  assert.equal(row.parcels[1].smallBoxCount, 2);
+  for (const parcel of row.parcels) {
+    assert.deepEqual(Object.keys(parcel).sort(), [
+      'bigBoxCount',
+      'destination',
+      'documentCount',
+      'mediumBoxCount',
+      'orderParcelSeq',
+      'origin',
+      'otherItemDescription',
+      'smallBoxCount',
+      'status',
+    ]);
+    assert.deepEqual(Object.keys(parcel.origin).sort(), [
+      'detailAddress',
+      'jibunAddress',
+      'name',
+      'phoneNumber',
+      'roadAddress',
+    ]);
+  }
+  for (const q of [marker.toUpperCase() + ' 두번째 한글', marker + ' 도로_%', '010-9876-5433']) {
+    const found = await (await screenOrders({ ...range, q })).json();
+    assert.equal(found.total_count, 1);
+    assert.deepEqual(
+      found.data.map((o) => o.orderSeq),
+      [id],
+    );
+    assert.equal(found.data[0].parcels.length, 2);
+  }
+  assert.deepEqual(await (await screenOrders({ ...range, offset: '100' })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 2,
+  });
+  assert.deepEqual(await (await screenOrders({ ...range, q: "' OR 1=1 --" })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  for (let index = 0; index < 3; index++)
+    assert.equal((await screenOrders(range, {}, index)).status, 200);
+});
+
+test('admin screen tabs group payment-complete states and retain actual receipt statuses', async () => {
+  const { customer } = await readCustomer();
+  const states = [
+    'COLLECTING',
+    'notPaid',
+    'PAID',
+    'SUBMITTING',
+    'ACCEPTED',
+    'SUBMISSION_FAILED',
+    'CANCELLED',
+  ];
+  for (const status of states) {
+    const id = await readOrder(customer);
+    await pool.query(
+      `UPDATE orders SET status=$2,created_at='2092-01-01T00:00:00Z',pickup_requested_at='2092-01-02T00:00:00Z',
+      parcel_no=CASE WHEN $2='ACCEPTED' THEN 'SCRN0058' END,
+      dver_received_at=CASE WHEN $2='ACCEPTED' THEN '2092-01-01T00:00:00Z'::timestamptz END WHERE order_seq=$1`,
+      [id, status],
+    );
+  }
+  for (const statusGroup of ['COLLECTING', 'notPaid', 'PAID', 'CANCELLED']) {
+    const body = await (
+      await screenOrders({ from: '2092-01-01T00:00:00Z', to: '2092-01-02T00:00:00Z', statusGroup })
+    ).json();
+    const expected =
+      statusGroup === 'PAID'
+        ? ['PAID', 'SUBMITTING', 'ACCEPTED', 'SUBMISSION_FAILED']
+        : [statusGroup];
+    assert.equal(body.total_count, expected.length);
+    assert.deepEqual(body.data.map((o) => o.status).sort(), expected.sort());
+  }
+});
+
+test('admin screen rejects AI access, invalid sessions and malformed query values and documents its exact projection', async () => {
+  for (const headers of [
+    { Cookie: '' },
+    { Cookie: '', call_session_seq: '1' },
+    { Cookie: 'dva_session=invalid' },
+  ])
+    await errorCode(await screenOrders({}, headers), 401, 'UNAUTHORIZED');
+  for (const query of [
+    { statusGroup: 'SUBMITTING' },
+    { status: 'PAID' },
+    { customerSeq: '1' },
+    { limit: '0' },
+    { offset: '-1' },
+    { from: '2026-01-02T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+    { from: '2026-01-01' },
+    { q: 'x'.repeat(201) },
+  ])
+    await errorCode(await screenOrders(query), 400, 'INVALID_REQUEST');
+  const document = await (await fetch(hosts[0] + '/api/docs-json')).json();
+  const operation = document.paths['/api/admin/orders'].get;
+  assert.deepEqual(operation.security, [{ adminSession: [] }]);
+  assert.equal(
+    operation.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/AdminOrderListResponseDto',
+  );
+  assert.deepEqual(
+    Object.keys(document.components.schemas.AdminOrderListItemDto.properties).sort(),
+    ['createdAt', 'orderSeq', 'parcels', 'pickupRequestedAt', 'status'],
+  );
+});

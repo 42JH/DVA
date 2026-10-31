@@ -1,4 +1,16 @@
-import { Body, Controller, HttpCode, Param, ParseUUIDPipe, Post, Req, Res } from '@nestjs/common';
+import { AdminOrderListQueryDto, AdminOrderListResponseDto } from './dto/admin-order-list.dto';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import {
   ApiAcceptedResponse,
   ApiBadRequestResponse,
@@ -36,6 +48,22 @@ import { SubmittedOrderDto } from './dto/submit-order.dto';
 @Controller('admin/orders')
 export class AdminOrdersController {
   constructor(private readonly orders: OrdersService) {}
+
+  @Get()
+  @ApiOperation({
+    summary: '관리자 주문 목록 화면 조회',
+    description:
+      '디자인/목업 03 주문 내역용. 저장된 주문당 한 줄이며 모든 배송상세를 parcels로 제공합니다. 생성 시각·주문 번호 내림차순. 검색·기간·상태 탭을 AND로 적용합니다. 주문 저장 전 통화는 포함하지 않습니다.',
+  })
+  @ApiOkResponse({ type: AdminOrderListResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: '검색·기간·상태 탭·페이지 조건 오류.',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: '활성 관리자 세션 필요.' })
+  list(@Query() query: AdminOrderListQueryDto) {
+    return this.orders.adminList(query);
+  }
 
   @Post(':id/retry')
   @HttpCode(200)
