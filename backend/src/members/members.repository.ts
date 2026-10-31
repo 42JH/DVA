@@ -3,8 +3,13 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { Customer } from '../customers/customers.types';
-import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
-import { CsvMemberRow, MemberCandidate, Membership } from './members.types';
+import {
+  CreateMemberDto,
+  InlineMemberDto,
+  ListMembersQueryDto,
+  UpdateMemberDto,
+} from './dto/member-request.dto';
+import { MemberCandidate, Membership } from './members.types';
 import { MemberViewDto } from './dto/member-response.dto';
 
 const memberColumns =
@@ -30,7 +35,7 @@ export class MembersRepository {
       this.database.pool,
       `SELECT jsonb_build_object('membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,
         'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
-        jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled) AS customer
+        jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) AS customer
        FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
        WHERE m.organization_seq=$1 AND ($2::text IS NULL OR m.status=$2)`,
       [companyId, query.status ?? null],
@@ -67,8 +72,14 @@ export class MembersRepository {
 
   async update(id: number, changes: UpdateMemberDto, client: PoolClient): Promise<void> {
     await client.query(
-      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status),department_seq=COALESCE($4,department_seq) WHERE membership_seq=$1',
-      [id, changes.role ?? null, changes.status ?? null, changes.departmentSeq ?? null],
+      'UPDATE memberships SET role=COALESCE($2,role),status=COALESCE($3,status),department_seq=CASE WHEN $5::boolean THEN $4::int ELSE department_seq END WHERE membership_seq=$1',
+      [
+        id,
+        changes.role ?? null,
+        changes.status ?? null,
+        changes.departmentSeq ?? null,
+        changes.departmentSeq !== undefined,
+      ],
     );
   }
 
@@ -88,13 +99,13 @@ export class MembersRepository {
   }
 
   async lockWrites(client: PoolClient): Promise<void> {
-    // 고객을 잠그기 전에 소속·CSV 변경을 직렬화해 조회한 소속의 고객 연결을 유지한다.
+    // 고객을 잠그기 전에 소속 변경을 직렬화해 조회한 소속의 고객 연결을 유지한다.
     await client.query('SELECT pg_advisory_xact_lock(20261027,37)');
   }
 
   async candidates(
     companyId: number,
-    rows: CsvMemberRow[],
+    rows: InlineMemberDto[],
     client: PoolClient,
   ): Promise<MemberCandidate[]> {
     const result = await client.query<MemberCandidate>(
@@ -114,8 +125,8 @@ export class MembersRepository {
     );
   }
 
-  async saveCsvCustomer(
-    row: CsvMemberRow,
+  async saveCustomer(
+    row: InlineMemberDto,
     existing: MemberCandidate | undefined,
     client: PoolClient,
   ): Promise<number> {

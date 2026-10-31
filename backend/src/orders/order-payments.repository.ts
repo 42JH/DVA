@@ -31,26 +31,33 @@ export class OrderPaymentsRepository {
     const member = (
       await client.query<{
         organizationSeq: number;
-        departmentSeq: number;
+        departmentSeq: number | null;
         membershipStatus: string;
         organizationStatus: string;
         monthlyBillingEnabled: boolean;
-        groupBillingEnabled: boolean;
       }>(
         `SELECT m.organization_seq AS "organizationSeq",m.department_seq AS "departmentSeq",m.status AS "membershipStatus",o.status AS "organizationStatus",
-       o.monthly_billing_enabled AS "monthlyBillingEnabled",d.group_billing_enabled AS "groupBillingEnabled"
+       o.monthly_billing_enabled AS "monthlyBillingEnabled"
        FROM memberships m JOIN organizations o USING(organization_seq)
-       JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq
-       WHERE m.customer_seq=$1 FOR SHARE OF m,o,d`,
+       WHERE m.customer_seq=$1 FOR SHARE OF m,o`,
         [customerId],
       )
     ).rows[0];
+    const department =
+      member?.departmentSeq != null
+        ? (
+            await client.query<{ groupBillingEnabled: boolean }>(
+              'SELECT group_billing_enabled AS "groupBillingEnabled" FROM departments WHERE department_seq=$1 FOR SHARE',
+              [member.departmentSeq],
+            )
+          ).rows[0]
+        : undefined;
     const active = member?.membershipStatus === 'ACTIVE' && member.organizationStatus === 'ACTIVE';
     return {
       monthly:
         !!customer &&
         (member ? active && member.monthlyBillingEnabled : customer.monthlyBillingEnabled),
-      group: !!customer && active && member.groupBillingEnabled,
+      group: !!customer && !!active && department?.groupBillingEnabled === true,
       organizationSeq: active ? member.organizationSeq : null,
       departmentSeq: active ? member.departmentSeq : null,
     };

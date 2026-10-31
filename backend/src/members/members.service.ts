@@ -5,9 +5,13 @@ import { ApiException, ErrorDetail } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { AuditService } from '../audit/audit.service';
 import { MembersRepository } from './members.repository';
-import { CreateMemberDto, ListMembersQueryDto, UpdateMemberDto } from './dto/member-request.dto';
-import { CsvUpload, MemberCandidate } from './members.types';
-import { parseMemberCsv } from './member-csv';
+import {
+  CreateMemberDto,
+  InlineMemberDto,
+  ListMembersQueryDto,
+  UpdateMemberDto,
+} from './dto/member-request.dto';
+import { MemberCandidate } from './members.types';
 
 @Injectable()
 export class MembersService {
@@ -62,25 +66,6 @@ export class MembersService {
     }
   }
 
-  async create(
-    companyId: number,
-    input: CreateMemberDto,
-    adminId: number,
-    requestId: string,
-  ): Promise<void> {
-    await this.write(async (client) => {
-      const customer = await this.repository.customer(input.customerSeq, client);
-      if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
-      await this.company(companyId, client, true);
-      if (!(await this.repository.department(companyId, input.departmentSeq, client)))
-        throw new ApiException(422, 'VALIDATION_FAILED', '해당 기업의 부서를 지정해 주세요.');
-      if (customer.status !== 'ACTIVE')
-        throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객은 등록할 수 없습니다.');
-      const id = await this.repository.create(companyId, input, client);
-      await this.record('MEMBERSHIP_CREATED', 'MEMBERSHIP', id, adminId, requestId, client);
-    });
-  }
-
   async update(
     id: number,
     input: UpdateMemberDto,
@@ -97,6 +82,7 @@ export class MembersService {
       await this.company(member.organizationSeq, client, input.status === 'ACTIVE');
       if (
         input.departmentSeq !== undefined &&
+        input.departmentSeq !== null &&
         !(await this.repository.department(member.organizationSeq, input.departmentSeq, client))
       )
         throw new ApiException(422, 'VALIDATION_FAILED', '해당 기업의 부서를 지정해 주세요.');
@@ -119,29 +105,34 @@ export class MembersService {
     });
   }
 
-  async importCsv(
+  async create(
     companyId: number,
-    file: CsvUpload | undefined,
+    items: Array<CreateMemberDto | InlineMemberDto>,
     adminId: number,
     requestId: string,
   ): Promise<void> {
-    const rows = parseMemberCsv(file);
+    const rows = items.filter((row): row is InlineMemberDto => !('customerSeq' in row));
+    const references = items.filter((row): row is CreateMemberDto => 'customerSeq' in row);
     await this.write(async (client) => {
       const before = await this.repository.candidates(companyId, rows, client);
       await this.repository.lockCustomers(
-        before.map((row) => row.customerSeq),
+        [...before.map((row) => row.customerSeq), ...references.map((row) => row.customerSeq)],
         client,
       );
       const candidates = await this.repository.candidates(companyId, rows, client);
       await this.company(companyId, client, true);
-      for (const departmentId of [...new Set(rows.map((row) => row.departmentSeq))].sort(
-        (a, b) => a - b,
-      ))
+      for (const departmentId of [
+        ...new Set(
+          items
+            .map((row) => row.departmentSeq)
+            .filter((id): id is number => id !== undefined && id !== null),
+        ),
+      ].sort((a, b) => a - b))
         if (!(await this.repository.department(companyId, departmentId, client)))
           throw new ApiException(
             422,
             'VALIDATION_FAILED',
-            'CSV에 해당 기업의 부서 번호를 지정해 주세요.',
+            '지정한 부서는 해당 기업에 속해야 합니다.',
           );
       const byPhone = new Map(candidates.map((row) => [row.phoneNumber, row]));
       const byEmployee = new Map(
@@ -151,12 +142,12 @@ export class MembersService {
       );
       const errors: ErrorDetail[] = [];
       const plans: Array<MemberCandidate | undefined> = [];
-      rows.forEach((row, index) => {
+      rows.forEach((row) => {
         const employee = byEmployee.get(row.employeeNo);
         const phoneOwner = byPhone.get(row.phoneNumber);
         const existing = employee ?? phoneOwner;
         const add = (field: string, reason: string) =>
-          errors.push({ field: `rows[${index + 2}].${field}`, reason });
+          errors.push({ field: `items[${items.indexOf(row)}].${field}`, reason });
         if (existing?.customerStatus === 'WITHDRAWN') add('phoneNumber', 'CUSTOMER_WITHDRAWN');
         if (employee) {
           if (phoneOwner && phoneOwner.customerSeq !== employee.customerSeq)
@@ -175,12 +166,20 @@ export class MembersService {
         throw new ApiException(
           422,
           'VALIDATION_FAILED',
-          'CSV 행의 고객·소속 충돌을 확인해 주세요.',
+          '직원 입력값의 고객·소속 충돌을 확인해 주세요.',
           errors,
         );
+      for (const input of references) {
+        const customer = await this.repository.customer(input.customerSeq, client);
+        if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+        if (customer.status !== 'ACTIVE')
+          throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객은 등록할 수 없습니다.');
+        const id = await this.repository.create(companyId, input, client);
+        await this.record('MEMBERSHIP_CREATED', 'MEMBERSHIP', id, adminId, requestId, client);
+      }
       for (const [index, row] of rows.entries()) {
         const existing = plans[index];
-        const customerSeq = await this.repository.saveCsvCustomer(row, existing, client);
+        const customerSeq = await this.repository.saveCustomer(row, existing, client);
         if (!existing?.membershipSeq)
           await this.repository.create(
             companyId,
@@ -199,7 +198,15 @@ export class MembersService {
             client,
           );
       }
-      await this.record('MEMBERS_IMPORTED', 'ORGANIZATION', companyId, adminId, requestId, client);
+      if (rows.length)
+        await this.record(
+          'MEMBERS_IMPORTED',
+          'ORGANIZATION',
+          companyId,
+          adminId,
+          requestId,
+          client,
+        );
     });
   }
 }

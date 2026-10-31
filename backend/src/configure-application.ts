@@ -1,6 +1,7 @@
 import { ForbiddenException, INestApplication, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { json, Request, Response, NextFunction } from 'express';
 import { Environment } from './config/environment';
 import { ApiExceptionFilter } from './common/http/api-exception.filter';
 import { ResponseEnvelopeInterceptor } from './common/http/response-envelope.interceptor';
@@ -11,6 +12,13 @@ import { ErrorResponseDto, RequestMetaDto } from './common/dto/api-response.dto'
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
   app.use(requestContext(logger));
+  const parseMembers = json({ limit: '1mb' });
+  // Nest detects global parsers by function name; wrap the route-specific parser.
+  app.use(
+    '/api/companies/:id/members',
+    (request: Request, response: Response, next: NextFunction) =>
+      parseMembers(request, response, next),
+  );
   app.enableCors({
     origin: (
       origin: string | undefined,

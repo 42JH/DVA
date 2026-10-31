@@ -1,10 +1,10 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-10-31 / backend/migrations/001~027 기준. public 업무·관리자 27개 + PBX 수신 1개 = ERD 28개, FK 26개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
+  Note: '2026-10-31 / backend/migrations/001~028 기준. public 업무·관리자 27개 + PBX 수신 1개 = ERD 28개, FK 26개. 고객·주문·상담·배송·운영 모듈은 같은 PostgreSQL을 사용한다. 마이그레이션 이력은 생략.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
-// 027까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
+// 028까지 적용한 구현 스키마를 표시한다. 실제 운영 DB 적용 여부와는 별개다.
 // 무료 dbdiagram에서도 사용할 수 있도록 모듈별 주석 구간과 테이블 배치로 구분한다.
 // 관리자·역사 청구 기업/부서·원본 PIN 출처는 논리 참조이므로 관계선을 추가하지 않는다.
 
@@ -15,9 +15,11 @@ Table customers {
   phone_number text [not null, unique, note: '고객 전화번호. 숫자 문자열로 선행 0 보존']
   status text [not null, note: '업무 상태']
   monthly_billing_enabled boolean [not null, default: false, note: '개인 월결제 사용 여부. 기업 소속은 기업 월결제 정책 적용']
+  address_data jsonb [note: '고객의 내 주소. PIN과 독립. 미등록 NULL. 도로명·지번·상세·동·우편번호·위경도']
   checks {
     `phone_number ~ '^[0-9]+$'`
     `status IN ('ACTIVE','WITHDRAWN')`
+    `address_data IS NULL OR valid_customer_address(address_data)`
   }
   Note: 'customer / 전화를 거는 개인 고객. 기업 자체를 고객으로 취급하지 않는다.'
 }
@@ -45,7 +47,7 @@ Table departments {
     (organization_seq,name) [unique]
     (department_seq,organization_seq) [unique]
   }
-  Note: 'customer / 기업별 실제 부서. 구성원은 소속 기업의 부서 한 곳에 배정한다.'
+  Note: 'customer / 기업별 실제 부서. 구성원의 부서 연결은 선택이다.'
 }
 
 Ref: memberships.(department_seq,organization_seq) > departments.(department_seq,organization_seq)
@@ -54,8 +56,8 @@ Table memberships {
   membership_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [not null, unique, note: '연결 대상 ID']
   organization_seq integer [not null, note: '연결 대상 ID']
-  department_seq integer [not null, note: '기업과 부서를 복합 FK로 검증. 기업과 다른 부서에 배정할 수 없음']
-  employee_no text [not null, note: '기업 내 사번. 선행 0과 영문 보존. 같은 기업·사번 CSV 재업로드는 기존 직원 정보 갱신']
+  department_seq integer [note: '선택 부서. NULL은 부서 없음. 제공 시 기업과 부서를 복합 FK로 검증']
+  employee_no text [not null, note: '기업 내 사번. 선행 0과 영문 보존. 같은 기업·사번 JSON 재등록는 기존 직원 정보 갱신']
   role text [not null, default: 'MEMBER', note: '역할']
   status text [not null, note: '업무 상태']
   checks {

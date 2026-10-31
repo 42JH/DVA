@@ -39,7 +39,7 @@ phoneNumber는 숫자 문자열이다. call은 실제 통화 이벤트의 식별
 | --- | --- |
 | customer.monthlyBillingEnabled | 개인 고객의 월결제 설정 |
 | organization.monthlyBillingEnabled | 기업 전체 월결제 설정 |
-| membership.departmentSeq | 소속 부서 번호 |
+| membership.departmentSeq | 소속 부서 번호. 부서가 없으면 null |
 | department | departmentSeq, organizationSeq, name, groupBillingEnabled. 부서가 없으면 null |
 | availablePaymentMethods | 현재 사용할 수 있는 billing/credit/groupBilling 배열 |
 
@@ -249,3 +249,5 @@ AI 취소에는 취소 항목과 금액 변경 전후를 함께 기록한다. AI
 
 
 모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.
+
+028 적용 후 customer.address는 PIN과 독립된 내 주소 객체 또는 null이다. 부서 없는 기업 구성원도 기업 월결제 자격을 적용하지만 groupBilling은 사용할 수 없다. 주문 본문의 인라인 customer에는 address를 보내지 않는다.

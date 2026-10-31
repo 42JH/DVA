@@ -127,6 +127,7 @@ test('MVP AI can register, read and rename without cookie, token, call header or
     phoneNumber: input.phoneNumber,
     status: 'ACTIVE',
     monthlyBillingEnabled: false,
+    address: null,
   });
   const updated = await patch(id, { name: '  변경 고객  ' });
   assert.equal(updated.status, 204);
@@ -387,6 +388,7 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
     ...input,
     status: 'WITHDRAWN',
     monthlyBillingEnabled: false,
+    address: null,
   });
   assert.equal(
     (await pool.query('SELECT status FROM memberships WHERE customer_seq=$1', [id])).rows[0].status,
@@ -415,10 +417,13 @@ test('OpenAPI exposes four customer operations, minimal envelopes and conditiona
   );
   assert.ok(!paths['/api/customers/{id}'].patch.responses['204'].content);
   assert.deepEqual(Object.keys(document.components.schemas.UpdateCustomerDto.properties).sort(), [
+    'address',
     'monthlyBillingEnabled',
     'name',
     'status',
   ]);
+  assert.equal(document.components.schemas.CustomerResponseDto.properties.address.nullable, true);
+  assert.ok(document.components.schemas.CustomerResponseDto.required.includes('address'));
   assert.deepEqual(
     Object.keys(document.components.schemas.CustomersEnvelopeDto.properties).sort(),
     ['data', 'hasNext', 'total_count'],
@@ -501,4 +506,102 @@ test('customer audit failure rolls back creation or changes; rejected sessions n
     ])
   ).rows;
   assert.deepEqual(rows, [{ actor_type: 'SYSTEM', result: 'DENIED' }]);
+});
+
+test('own address is nullable, validated, available in reads and independent of PINs', async () => {
+  const address = {
+    roadAddress: '내주소로 1',
+    jibunAddress: '내주소동 1',
+    detailAddress: '101호',
+    dongName: '내주소동',
+    postalCode: '01234',
+    latitude: 37.5,
+    longitude: 127,
+  };
+  const number = phone();
+  const id = await register({ name: '주소 고객', phoneNumber: number, address });
+  const detail = async () => (await (await request('/' + id)).json()).data;
+  assert.deepEqual((await detail()).address, address);
+  const pin = { ...address, roadAddress: '다른배송로 2', name: '배송 수령인', phoneNumber: number };
+  await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2)', [id, pin]);
+  const contextResponse = await fetch(base + '/api/customers/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumber: number }),
+  });
+  const context = (await contextResponse.json()).data;
+  assert.deepEqual(context.customer.address, address);
+  assert.equal(context.personalPins[0].addressData.roadAddress, '다른배송로 2');
+  const listing = (
+    await (await request('?phoneNumber=' + number, { headers: adminHeaders() })).json()
+  ).data;
+  assert.deepEqual(listing[0].address, address);
+  assert.equal((await patch(id, { name: '이름만 변경' })).status, 204);
+  assert.deepEqual((await detail()).address, address);
+  const replacement = { ...address, roadAddress: '새내주소로 3' };
+  assert.equal((await patch(id, { address: replacement })).status, 204);
+  assert.deepEqual((await detail()).address, replacement);
+  assert.deepEqual(
+    (await pool.query('SELECT address_data FROM personal_pins WHERE customer_seq=$1', [id])).rows[0]
+      .address_data,
+    pin,
+  );
+  for (const invalid of [
+    {},
+    [],
+    'text',
+    { ...address, latitude: 91 },
+    { ...address, longitude: -181 },
+    { ...address, postalCode: '1234' },
+    { ...address, detailAddress: null },
+    { ...address, name: '중복 이름' },
+    { ...address, longitude: '127' },
+  ]) {
+    await error(await patch(id, { address: invalid }), 400, 'INVALID_REQUEST');
+    assert.deepEqual((await detail()).address, replacement);
+    await assert.rejects(
+      () =>
+        pool.query('UPDATE customers SET address_data=$2::jsonb WHERE customer_seq=$1', [
+          id,
+          JSON.stringify(invalid),
+        ]),
+      (e) => e.code === '23514',
+    );
+  }
+  assert.equal((await patch(id, { address: null })).status, 204);
+  assert.equal((await detail()).address, null);
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM personal_pins WHERE customer_seq=$1', [id])).rows[0]
+      .count,
+    '1',
+  );
+});
+
+test('address-only updates roll back when success audit fails', async () => {
+  const id = await register();
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async () => {
+    throw new Error('test address audit failure');
+  };
+  try {
+    await error(
+      await patch(id, {
+        address: {
+          roadAddress: '원자성로 1',
+          jibunAddress: '원자성동 1',
+          dongName: '원자성동',
+          postalCode: '01234',
+          latitude: 37.5,
+          longitude: 127,
+        },
+      }),
+      500,
+      'INTERNAL_ERROR',
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await (await request('/' + id)).json()).data.address, null);
 });

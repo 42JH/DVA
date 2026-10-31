@@ -650,3 +650,46 @@ test('deletion requires an active admin session, valid origin and valid ID; all 
     );
   }
 });
+
+test('deleting a company without departments unlinks employees and preserves customers and credit history', async () => {
+  const company = (
+    await request('POST', '/companies', {
+      name: '부서 없는 삭제 기업',
+      monthlyBillingEnabled: true,
+    })
+  ).body.data.organizationSeq;
+  const phone = '016' + phoneSequence++;
+  const customer = (
+    await request('POST', '/customers', { name: '부서 없는 삭제 직원', phoneNumber: phone })
+  ).body.data.customerSeq;
+  assert.equal(
+    (
+      await request('POST', `/companies/${company}/members`, {
+        customerSeq: customer,
+        employeeNo: 'NO-DEPT',
+        role: 'MEMBER',
+      })
+    ).status,
+    204,
+  );
+  const member = (
+    await pool.query('SELECT membership_seq FROM memberships WHERE customer_seq=$1', [customer])
+  ).rows[0].membership_seq;
+  const saved = await order({ company, customer });
+  assert.equal((await request('DELETE', `/companies/${company}`)).status, 204);
+  assert.equal((await request('GET', '/customers/' + customer)).status, 200);
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM memberships WHERE customer_seq=$1', [customer])).rows[0]
+      .count,
+    '0',
+  );
+  assert.ok(await detail(saved.orderSeq));
+  const audit = (
+    await pool.query(
+      "SELECT metadata FROM audit_logs WHERE action='MEMBERSHIP_REMOVED' AND target_seq=$1 AND result='SUCCESS'",
+      [member],
+    )
+  ).rows[0];
+  assert.equal(audit.metadata.departmentSeq, null);
+  assert.equal(audit.metadata.departmentName, null);
+});

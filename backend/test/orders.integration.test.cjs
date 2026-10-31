@@ -3140,28 +3140,14 @@ for (const operation of ['create', 'update', 'submit']) {
                 });
         const pid = await locked;
         if (operation === 'update') {
-          const form = new FormData();
-          form.append(
-            'file',
-            new Blob(
-              [
-                'employeeNo,name,phoneNumber,departmentSeq\n' +
-                  employeeNo +
-                  ',변경 고객,' +
-                  phone +
-                  ',' +
-                  department,
-              ],
-              {
-                type: 'text/csv',
-              },
-            ),
-            'members.csv',
-          );
-          pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members/import', {
+          pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members', {
             method: 'POST',
-            headers: { Origin: origin, Cookie: cookies[1] },
-            body: form,
+            headers: { Origin: origin, Cookie: cookies[1], 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: [
+                { employeeNo, name: '변경 고객', phoneNumber: phone, departmentSeq: department },
+              ],
+            }),
           });
         } else {
           pendingMember = fetch(hosts[1] + '/api/members/' + membership, {

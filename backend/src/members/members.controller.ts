@@ -9,13 +9,11 @@ import {
   Post,
   Query,
   Req,
-  UploadedFile,
-  UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBody,
-  ApiConsumes,
+  ApiExtraModels,
+  getSchemaPath,
   ApiCookieAuth,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -25,20 +23,22 @@ import {
 } from '@nestjs/swagger';
 import { AuthRequest } from '../auth/auth.guard';
 import { AuditOperation } from '../audit/audit-operation';
-import { ApiException } from '../common/errors/api.exception';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { MembersService } from './members.service';
 import {
   CreateMemberDto,
+  CreateMembersDto,
+  InlineMemberDto,
   ListMembersQueryDto,
   MemberIdParamsDto,
   UpdateMemberDto,
 } from './dto/member-request.dto';
 import { MembersEnvelopeDto } from './dto/member-response.dto';
-import { CSV_MAX_BYTES } from './member-csv';
-import { CsvUpload } from './members.types';
+
+import { CreateMemberPipe } from './create-member.pipe';
 
 @ApiTags('Members')
+@ApiExtraModels(CreateMemberDto, CreateMembersDto, InlineMemberDto)
 @ApiCookieAuth('adminSession')
 @ApiResponse({ status: 400, type: ErrorResponseDto })
 @ApiResponse({ status: 401, type: ErrorResponseDto })
@@ -65,58 +65,27 @@ export class MembersController {
     return this.members.list(params.id, query);
   }
 
-  @Post('companies/:id/members/import')
-  @HttpCode(204)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: CSV_MAX_BYTES + 1, files: 1, fields: 0, parts: 2 },
-    }),
-  )
-  @AuditOperation({ action: 'MEMBERS_IMPORTED', targetType: 'ORGANIZATION', target: 'id' })
-  @ApiConsumes('multipart/form-data')
-  @ApiBody({
-    schema: {
-      type: 'object',
-      required: ['file'],
-      additionalProperties: false,
-      properties: {
-        file: {
-          type: 'string',
-          format: 'binary',
-          description: 'UTF-8 CSV. employeeNo,name,phoneNumber. 최대 1MiB·1,000행.',
-        },
-      },
-    },
-  })
-  @ApiOperation({
-    summary: '기업 직원 CSV 등록·갱신',
-    description:
-      '관리자 CSV에서 기존 사번의 이름·전화번호 수정 허용. 파일 전체를 한 트랜잭션으로 저장합니다.',
-  })
-  @ApiNoContentResponse()
-  @ApiResponse({ status: 413, type: ErrorResponseDto })
-  @ApiResponse({ status: 415, type: ErrorResponseDto })
-  importCsv(
-    @Param() params: MemberIdParamsDto,
-    @UploadedFile() file: CsvUpload | undefined,
-    @Req() request: AuthRequest,
-  ) {
-    if (!request.is('multipart/form-data'))
-      throw new ApiException(415, 'UNSUPPORTED_MEDIA_TYPE', 'multipart/form-data가 필요합니다.');
-    return this.members.importCsv(params.id, file, request.admin.adminUserSeq, request.requestId);
-  }
-
   @Post('companies/:id/members')
   @HttpCode(204)
   @AuditOperation({ action: 'MEMBERSHIP_CREATED', targetType: 'MEMBERSHIP', target: 'none' })
   @ApiOperation({
-    summary: '기존 고객을 기업 구성원으로 등록',
-    description: 'ACTIVE 고객과 기업만 허용. 같은 고객을 다른 기업으로 자동 이동하지 않습니다.',
+    summary: '기업 직원 단건·복수 JSON 등록',
+    description:
+      '단건 객체 또는 items 1~1,000건, JSON 최대 1MiB. 기존 고객 번호 또는 사번·이름·전화번호로 등록합니다. 부서는 선택입니다. 전체 요청을 함께 저장·롤백하며 다른 기업 소속은 자동 이동하지 않습니다.',
   })
   @ApiNoContentResponse()
+  @ApiBody({
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(CreateMemberDto) },
+        { $ref: getSchemaPath(InlineMemberDto) },
+        { $ref: getSchemaPath(CreateMembersDto) },
+      ],
+    },
+  })
   create(
     @Param() params: MemberIdParamsDto,
-    @Body() input: CreateMemberDto,
+    @Body(new CreateMemberPipe()) input: Array<CreateMemberDto | InlineMemberDto>,
     @Req() request: AuthRequest,
   ) {
     return this.members.create(params.id, input, request.admin.adminUserSeq, request.requestId);

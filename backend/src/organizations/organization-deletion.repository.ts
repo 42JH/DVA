@@ -12,7 +12,7 @@ export class OrganizationDeletionRepository {
     ).rows[0];
   }
   async lockMembers(client: PoolClient, company: number, department: number | null) {
-    // Share the membership/CSV lock, then lock customers before company rows as payment does.
+    // Share the membership lock, then lock customers before company rows as payment does.
     await client.query('SELECT pg_advisory_xact_lock(20261027,37)');
     await client.query(
       `SELECT c.customer_seq FROM customers c JOIN memberships m USING(customer_seq)
@@ -46,7 +46,7 @@ export class OrganizationDeletionRepository {
   }
   async removeMembers(client: PoolClient, company: number, department: number | null) {
     return (
-      await client.query<{ id: number; customerSeq: number; departmentSeq: number }>(
+      await client.query<{ id: number; customerSeq: number; departmentSeq: number | null }>(
         `DELETE FROM memberships WHERE organization_seq=$1 AND ($2::int IS NULL OR department_seq=$2)
        RETURNING membership_seq AS id,customer_seq AS "customerSeq",department_seq AS "departmentSeq"`,
         [company, department],

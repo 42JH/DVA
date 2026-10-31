@@ -386,36 +386,31 @@ test('system reset revokes only target sessions, preserves pending state, and se
       await call(
         'PATCH',
         `/api/admins/${target.id}/password`,
-        { newPassword: 'reset pass' },
+        { newPassword: 'custom-secret' },
         session,
       )
     ).status,
+    400,
+  );
+  assert.equal((await call('GET', '/api/auth/me', undefined, old)).status, 200);
+  assert.equal(
+    (await call('PATCH', `/api/admins/${target.id}/password`, undefined, session)).status,
     204,
   );
   assert.equal((await call('GET', '/api/auth/me', undefined, old)).status, 401);
   assert.equal((await call('GET', '/api/auth/me', undefined, session)).status, 200);
-  assert.equal((await login(target, 'reset pass')).status, 200);
+  assert.equal((await login(target, 'dva1234')).status, 200);
   const pending = await account('resetPending', 'OPERATOR', 'PENDING');
   assert.equal(
-    (
-      await call(
-        'PATCH',
-        `/api/admins/${pending.id}/password`,
-        { newPassword: 'reset pass' },
-        session,
-      )
-    ).status,
+    (await call('PATCH', `/api/admins/${pending.id}/password`, undefined, session)).status,
     204,
   );
-  assert.equal((await login(pending, 'reset pass')).status, 401);
-  const self = await call(
-    'PATCH',
-    `/api/admins/${system.id}/password`,
-    { newPassword: 'reset self' },
-    session,
-  );
+  assert.equal((await login(pending, 'dva1234')).status, 401);
+  const self = await call('PATCH', `/api/admins/${system.id}/password`, undefined, session);
   assert.equal(self.status, 204);
   assert.match(self.cookie, /Expires=Thu, 01 Jan 1970/);
+  assert.equal((await login(system, 'dva1234')).status, 200);
+  assert.equal((await login(target)).status, 401);
 });
 test('audit failure rolls back password and session deletion; logout storage failure is not success', async () => {
   const system = await account('atomic', 'SYSTEM_ADMIN');
@@ -427,14 +422,7 @@ test('audit failure rolls back password and session deletion; logout storage fai
   };
   try {
     assert.equal(
-      (
-        await call(
-          'PATCH',
-          `/api/admins/${system.id}/password`,
-          { newPassword: 'rollback pass' },
-          session,
-        )
-      ).status,
+      (await call('PATCH', `/api/admins/${system.id}/password`, undefined, session)).status,
       500,
     );
   } finally {
@@ -479,12 +467,7 @@ test('password reset waits for in-flight login and invalidates its session after
         throw new Error(`Login did not reach transaction barrier: ${result.status}`);
       }),
     ]);
-    const resetting = call(
-      'PATCH',
-      `/api/admins/${target.id}/password`,
-      { newPassword: 'concurrent pass' },
-      adminSession,
-    );
+    const resetting = call('PATCH', `/api/admins/${target.id}/password`, undefined, adminSession);
     release();
     const loggedIn = await loggingIn;
     assert.equal(loggedIn.status, 200);

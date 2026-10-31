@@ -24,7 +24,7 @@ public 업무·운영 테이블 26개와 관리자 세션 테이블 1개, public
 
 고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING/INACTIVE다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
-CSV 갱신 방식은 API 구현 시 결정한다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
+직원 JSON 단건·복수 등록·갱신은 [구성원 계약](../api/members.md)을 따른다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
 
 ## 부서·주문 결제 전환 — 138
 
@@ -122,7 +122,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 생성 중복 처리 기준
 
-기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 개별 등록·CSV는 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거하며 개별 등록 중복은 고유 제약, CSV 재업로드는 기업·사번 기준 갱신으로 처리한다.
+기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 등록은 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거했으며 기존 고객 연결 중복은 고유 제약, 이름·전화번호 JSON 재등록은 기업·사번 기준 갱신으로 처리한다.
 주문은 orders.creation_request_id와 통화 연결을 사용한다. 재시도는 기존 주문의 현재 버전을 반환하며 최초 본문·응답은 보관하지 않는다.
 배송 상태 이력의 request_id, PBX 수신 기록, 기존 version·감사·세션 테이블은 유지한다.
 57번 최종 접수는 기존 orders의 order_seq·status·version·updated_at을 사용한다. 주문 행을 잠근 뒤 SUBMITTING을 커밋한 요청만 외부로 전송한다. 재호출은 상태만 반환하며 별도 접수 키·컬럼·테이블·migration을 추가하지 않는다. 과거 cat 결제도 일괄 변경하지 않는다. 상세 계약은 [ORD-06](../api/order-submit.md)을 따른다.
@@ -166,7 +166,7 @@ sudo docker exec -i dva-prod-db-1 pg_restore --exit-on-error --no-owner -U dva -
 ## 업무 기능 구현과의 경계
 
 주문의 허용 상태 전이·접수 시 필수 내용 검증, 디버 접수 재시도, 배송 상태와 이력의 원자적 저장,
-인증·권한, CSV 업로드, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
+인증·권한, 직원 JSON 복수 등록, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
 DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다.
 
 새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 개인 카드는 결제를 기다리고 월·그룹결제는 결제 완료 후 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
@@ -202,3 +202,11 @@ admin_sessions의 ON DELETE CASCADE는 유지한다.
 013-ai-persona-versions.sql은 기존 ai_prompt_versions를 ai_persona_versions로 이름 변경하고 이름·음성·속도·대기·프롬프트를 버전별로 보관한다. 새 테이블은 추가하지 않는다. ACTIVE와 PENDING은 서비스 전체에서 각각 최대 1개다.
 
 과거 프롬프트 기록에는 당시 음성 설정이 없으므로 기존 ai_personas 또는 ai_prompt_versions에 데이터가 있으면 013은 변경 전에 중단한다. 배포 전 두 테이블이 비어 있는지 확인해야 하며, 데이터가 있으면 원본을 보존한 별도 전환 정책이 필요하다. 과거 설정을 현재 값으로 추정하거나 삭제하지 않는다. 운영 DB 적용은 별도다.
+
+## 028 고객 내 주소와 선택 부서
+
+028-customer-address-optional-department.sql은 customers.address_data jsonb와 주소 형식 CHECK를 추가한다.
+미등록은 SQL NULL이며 기존 PIN·주문에서 채우지 않는다. memberships.department_seq의 NOT NULL만 제거하고 같은 기업 부서 복합 FK는 유지한다.
+기존 고객·소속·부서 배정·PIN·주문·감사 데이터는 수정/삭제하지 않는다. 001~027 원본과 체크섬은 유지한다.
+DB 백업 → 028 migration·verify → 새 앱 순서다. 실제 DB 적용은 이번 작업에서 제외한다.
+부서 없는 구성원을 생성한 후에는 부서 필수 가정의 구버전 앱으로 복귀하지 않는다. 복귀 전 실제 배정과 호환성 확인이 필요하다.

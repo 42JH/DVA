@@ -3,7 +3,7 @@ export const MEMBER_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
 export type MemberStatus = (typeof MEMBER_STATUSES)[number];
 export interface Membership {
-  departmentSeq: number;
+  departmentSeq: number | null;
   membershipSeq: number;
   customerSeq: number;
   organizationSeq: number;
@@ -19,15 +19,4 @@ export interface MemberCandidate {
   membershipSeq: number | null;
   organizationSeq: number | null;
   employeeNo: string | null;
-}
-export interface CsvMemberRow {
-  departmentSeq: number;
-  employeeNo: string;
-  name: string;
-  phoneNumber: string;
-}
-export interface CsvUpload {
-  buffer: Buffer;
-  originalname: string;
-  mimetype: string;
 }

@@ -11,7 +11,7 @@ import { Customer } from './customers.types';
 import { CallerContextDto } from './dto/caller-context.dto';
 
 const columns =
-  'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled"';
+  'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled",address_data AS address';
 
 @Injectable()
 export class CustomersRepository {
@@ -23,7 +23,7 @@ export class CustomersRepository {
       `SELECT jsonb_build_object(
         'lookupStatus', CASE WHEN c.status='ACTIVE' THEN 'REGISTERED' ELSE 'WITHDRAWN' END,
         'customer', CASE WHEN c.status='ACTIVE' THEN jsonb_build_object(
-          'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled) END,
+          'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) END,
         'membership', CASE WHEN c.status='ACTIVE' AND m.membership_seq IS NOT NULL THEN jsonb_build_object(
           'membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,'organizationSeq',m.organization_seq,
           'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq) END,
@@ -120,16 +120,23 @@ export class CustomersRepository {
 
   async update(id: number, changes: UpdateCustomerDto, client: PoolClient): Promise<void> {
     await client.query(
-      'UPDATE customers SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled) WHERE customer_seq = $1',
-      [id, changes.name ?? null, changes.status ?? null, changes.monthlyBillingEnabled ?? null],
+      'UPDATE customers SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled),address_data=CASE WHEN $5::boolean THEN $6::jsonb ELSE address_data END WHERE customer_seq = $1',
+      [
+        id,
+        changes.name ?? null,
+        changes.status ?? null,
+        changes.monthlyBillingEnabled ?? null,
+        changes.address !== undefined,
+        changes.address ?? null,
+      ],
     );
   }
 
   async insert(client: PoolClient, input: CreateCustomerDto): Promise<number> {
     const result = await client.query<{ customerSeq: number }>(
-      `INSERT INTO customers (name, phone_number, status,monthly_billing_enabled) VALUES ($1, $2, 'ACTIVE',$3)
+      `INSERT INTO customers (name, phone_number, status,monthly_billing_enabled,address_data) VALUES ($1, $2, 'ACTIVE',$3,$4)
        RETURNING customer_seq AS "customerSeq"`,
-      [input.name, input.phoneNumber, input.monthlyBillingEnabled ?? false],
+      [input.name, input.phoneNumber, input.monthlyBillingEnabled ?? false, input.address ?? null],
     );
     return result.rows[0].customerSeq;
   }

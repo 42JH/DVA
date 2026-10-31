@@ -20,12 +20,6 @@ export class SignupDto extends LoginDto {
   @Matches(/\S/u)
   name!: string;
 }
-export class ResetPasswordDto {
-  @ApiProperty({ description: '초기화할 새 비밀번호. 최소 6자.', minLength: 6, format: 'password' })
-  @IsString()
-  @MinLength(6)
-  newPassword!: string;
-}
 export class ChangePasswordDto {
   @ApiProperty({ description: '현재 비밀번호.', format: 'password' })
   @IsString()
