@@ -784,3 +784,71 @@ test('completion retries reject unpaid/in-flight work and roll back when audit s
   assert.equal((await request(path, {}, true)).status, 409);
   await repository.finishCompletionNotification(id, 'FAILED');
 });
+
+test('notices include all active parcel addresses and remove cancelled addresses without exposing them publicly', async () => {
+  const body = orderBody();
+  body.parcels[0].origin = {
+    ...body.parcels[0].origin,
+    roadAddress: '출발검증로 101',
+    detailAddress: '출발 101호',
+  };
+  body.parcels[0].destination = {
+    ...body.parcels[0].destination,
+    roadAddress: '도착검증로 201',
+    detailAddress: '도착 201호',
+  };
+  body.parcels.push({
+    ...body.parcels[0],
+    notifiedPrice: 2000,
+    origin: {
+      ...body.parcels[0].origin,
+      roadAddress: '출발검증로 102',
+      detailAddress: '출발 102호',
+    },
+    destination: {
+      ...body.parcels[0].destination,
+      roadAddress: '도착검증로 202',
+      detailAddress: '도착 202호',
+    },
+  });
+  body.totalAmount = 5500;
+  const r = await create(body),
+    oldId = r.paymentRequest.paymentRequestId;
+  await worker.run();
+  const first = messages.find((s) => s.includes(`/p/${oldId}`));
+  for (const address of [
+    '출발검증로 101 출발 101호',
+    '도착검증로 201 도착 201호',
+    '출발검증로 102 출발 102호',
+    '도착검증로 202 도착 202호',
+  ])
+    assert.ok(first.includes(address));
+  assert.ok(!first.includes('배송 건수'));
+  assert.equal(Object.hasOwn((await lookup(oldId)).body.data, 'parcels'), false);
+  const page = await fetch(base + '/payments/p/' + oldId);
+  assert.ok(!(await page.text()).includes('도착검증로 202'));
+  const detail = (await request(`/orders/${r.orderSeq}`, undefined, true, 'GET')).body.data;
+  assert.equal(
+    (
+      await request(
+        `/orders/${r.orderSeq}/parcels/cancel`,
+        { orderParcelSeqs: [detail.parcels[1].orderParcelSeq] },
+        true,
+      )
+    ).status,
+    204,
+  );
+  const remaining = (await request(`/orders/${r.orderSeq}`, undefined, true, 'GET')).body.data;
+  const id = remaining.paymentRequest.paymentRequestId;
+  await worker.run();
+  const next = messages.find((s) => s.includes(`/p/${id}`));
+  assert.ok(next.includes('도착검증로 201 도착 201호'));
+  assert.ok(!next.includes('도착검증로 202'));
+  assert.equal((await confirm(remaining)).status, 200);
+  await worker.run();
+  const completion = completionMessages(id)[0];
+  assert.ok(completion.includes('출발검증로 101 출발 101호'));
+  assert.ok(completion.includes('도착검증로 201 도착 201호'));
+  for (const unwanted of ['도착검증로 202', '배송 건수', '(한국 시간)'])
+    assert.ok(!completion.includes(unwanted));
+});

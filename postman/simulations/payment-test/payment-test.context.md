@@ -61,6 +61,10 @@ the deployment README).
 ## Observations
 
 <!-- begin:observations -->
+2026-10-31: the real-order verifier sent request and completion notices with
+stored shipment addresses through the Mattermost mock in all three flows.
+Native HTTP/DB tests also checked multiple addresses, excluded cancelled
+shipments, and kept addresses out of public payment status/page responses.
 2026-10-30: the real-order verifier also sent one completion notice after normal
 approval, uncertain approval recovered by inquiry, and Dver rejection. Each
 completion notice received Mattermost HTTP 200 and was persisted as SENT;
