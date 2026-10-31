@@ -22,6 +22,15 @@ export interface PaymentView {
   notificationStatus: string;
   completionNotificationStatus: string;
 }
+export interface PaymentNoticeParcel {
+  senderName: string | null;
+  recipientName: string | null;
+  originAddress: string;
+  destinationAddress: string;
+}
+export interface PaymentNoticeView extends PaymentView {
+  parcels: PaymentNoticeParcel[];
+}
 @Injectable()
 export class PaymentsRepository {
   constructor(
@@ -49,6 +58,21 @@ export class PaymentsRepository {
     ).rows[0];
     if (!result) throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
     return result;
+  }
+  async readNotice(id: string): Promise<PaymentNoticeView> {
+    const view = await this.read(id);
+    const parcels = (
+      await this.database.pool.query<PaymentNoticeParcel>(
+        `SELECT origin_name AS "senderName",destination_name AS "recipientName",
+        concat_ws(' ',COALESCE(NULLIF(btrim(origin_road_address),''),NULLIF(btrim(origin_jibun_address),'')),
+          NULLIF(btrim(origin_detail_address),'')) AS "originAddress",
+        concat_ws(' ',COALESCE(NULLIF(btrim(destination_road_address),''),NULLIF(btrim(destination_jibun_address),'')),
+          NULLIF(btrim(destination_detail_address),'')) AS "destinationAddress"
+        FROM order_parcels WHERE order_seq=$1 AND status='ACTIVE' ORDER BY order_parcel_seq`,
+        [view.orderSeq],
+      )
+    ).rows;
+    return { ...view, parcels };
   }
   async claim(id: string, amount: number, key?: string) {
     return this.database.transaction(async (client) => {
