@@ -5,8 +5,7 @@ import {
   addMembers,
   companyQueries,
   createCompany,
-  fetchAllMembers,
-  setMemberRole,
+  assignLeaders,
 } from '@/features/company/api/companyApi'
 import {
   decodeCsv,
@@ -45,17 +44,11 @@ export function useCompanyCsv(onDone: () => void) {
         id,
         members.map(({ employeeNo, name, phoneNumber }) => ({ employeeNo, name, phoneNumber })),
       ) // ② 전체 트랜잭션: 한 줄이라도 틀리면 전부 안 들어감
-      // ③ 등록 응답엔 번호가 없어 전체 사원을 다시 받아 사번으로 찾음 (backend-todo 10: role을 등록에 실어 주면 없어짐)
-      const leaders = members.filter((m) => m.leader).map((m) => m.employeeNo)
-      if (leaders.length === 0) return 0
-      const byNo = new Map((await fetchAllMembers(id)).map((m) => [m.membership.employeeNo, m]))
-      let failed = 0
-      for (const no of leaders) {
-        const seq = byNo.get(no)?.membership.membershipSeq
-        if (seq === undefined) failed++
-        else await setMemberRole(seq, 'ORG_ADMIN').catch(() => failed++)
-      }
-      return failed
+      // ③ 대표자 지정 — 실패 수를 돌려줌
+      return assignLeaders(
+        id,
+        members.filter((m) => m.leader).map((m) => m.employeeNo),
+      )
     },
     onSettled: () => qc.invalidateQueries({ queryKey: companyQueries.all() }), // 실패해도 ①은 됐을 수 있음
     onSuccess: (failedLeaders) => {

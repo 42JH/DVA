@@ -1,6 +1,13 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/company/csvMembers.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { decodeCsv, readMembersCsv, serverRowErrors, type CsvMember } from './csvMembers'
+import type { Member } from './api/companyApi'
+import {
+  decodeCsv,
+  previewAgainst,
+  readMembersCsv,
+  serverRowErrors,
+  type CsvMember,
+} from './csvMembers'
 
 const HEAD = '사번,사원명,전화번호,대표자'
 const ok = (text: string) => {
@@ -90,5 +97,49 @@ const utf8 = new TextEncoder().encode(HEAD).buffer as ArrayBuffer
 assert.equal(decodeCsv(utf8), HEAD)
 const eucKr = new Uint8Array([0xbb, 0xe7, 0xb9, 0xf8]).buffer // '사번'을 EUC-KR로
 assert.equal(decodeCsv(eucKr), '사번')
+
+// 미리 보기: 기존 사원과 비교
+const existing = (
+  [
+    ['00121', '이서미', '01011110001', 'ORG_ADMIN'],
+    ['00134', '박준호', '01011110002', 'MEMBER'],
+    ['00152', '김하린', '01011110003', 'MEMBER'],
+  ] as const
+).map(([employeeNo, name, phoneNumber, role], i): Member => ({
+  membership: {
+    membershipSeq: i + 1,
+    customerSeq: i + 1,
+    organizationSeq: 1,
+    departmentSeq: null,
+    employeeNo,
+    role,
+    status: 'ACTIVE',
+  },
+  customer: { customerSeq: i + 1, name, phoneNumber, address: null, status: 'ACTIVE' },
+}))
+const csv = ok(
+  [
+    HEAD,
+    '00121,이서미,01011110001,Y', // 그대로 · 이미 대표자 → 지정 안 함
+    '00134,박준호,01099990002,Y', // 전화 바뀜 · 대표자 새로
+    '00160,정우석,01011110004,', // 신규
+    '00170,오세린,01011110003,', // CSV엔 없는 김하린(00152)의 번호 → 거절될 줄
+  ].join('\n'),
+)
+const pv = previewAgainst(csv, existing)
+assert.deepEqual(
+  pv.added.map((r) => r.employeeNo),
+  ['00160'],
+)
+assert.deepEqual(
+  pv.changed.map((c) => [c.row.employeeNo, c.before.phoneNumber]),
+  [['00134', '01011110002']],
+)
+assert.deepEqual(
+  pv.same.map((r) => r.employeeNo),
+  ['00121'],
+)
+assert.deepEqual(pv.leaders, ['00134'])
+assert.deepEqual(pv.errors, ['5행 전화번호를 이미 김하린(사번 00152) 님이 쓰고 있습니다.'])
 
 console.log('csvMembers OK')

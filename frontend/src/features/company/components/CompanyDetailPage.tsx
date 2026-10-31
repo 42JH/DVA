@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router'
 import { Button, ConfirmDialog, Pagination, Table, Tag, type Column } from '@/shared/ui'
 import { INACTIVE_TAG, MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyDetail, type MemberRow } from '@/features/company/hooks/useCompanyDetail'
+import { MemberCsvModal } from './MemberCsvModal'
 import { MemberFormModal } from './MemberFormModal'
 
 // 08 기업 상세 (Figma 08_기업관리_기업상세, 11/01) — ‹ 기업 목록 | 기업명 · '사원 12명 · 대표자 이서미 외 1명' + [CSV로 사원 추가] [사원 추가]
@@ -86,8 +87,7 @@ export function CompanyDetailPage() {
         </h2>
         <span className="text-label text-sub">{vm.summary}</span>
         <span className="ml-auto flex gap-3">
-          {/* CSV로 사원 추가는 다음 단계(미리 보기 B)에서 연결 */}
-          <Button tall disabled title="준비 중">
+          <Button tall onClick={vm.openCsv}>
             CSV로 사원 추가
           </Button>
           <Button kind="primary" tall onClick={vm.openAdd}>
@@ -124,6 +124,9 @@ export function CompanyDetailPage() {
           member={vm.modal.kind === 'edit' ? vm.modal.member : null}
           onClose={vm.close}
         />
+      )}
+      {vm.modal?.kind === 'csv' && (
+        <MemberCsvModal companyId={id} companyName={vm.name} onClose={vm.close} />
       )}
       {target && (
         <ConfirmDialog

@@ -4,7 +4,7 @@ import { ApiError } from '@/shared/api/client'
 import {
   addMembers,
   companyQueries,
-  fetchAllMembers,
+  assignLeaders,
   setMemberRole,
   type Member,
 } from '@/features/company/api/companyApi'
@@ -49,15 +49,10 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
           await setMemberRole(target.membership.membershipSeq, form.role)
         return
       }
-      if (form.role === 'ORG_ADMIN') {
-        // 등록 응답엔 번호가 없음 → 전체를 다시 받아 사번으로 찾음 (backend-todo 10)
-        const m = (await fetchAllMembers(companyId)).find((x) => x.membership.employeeNo === no)
-        if (!m)
-          throw new Error(
-            '사원은 추가했지만 대표자로 지정하지 못했습니다. [수정]에서 다시 지정해 주세요.',
-          )
-        await setMemberRole(m.membership.membershipSeq, 'ORG_ADMIN')
-      }
+      if (form.role === 'ORG_ADMIN' && (await assignLeaders(companyId, [no])) > 0)
+        throw new Error(
+          '사원은 추가했지만 대표자로 지정하지 못했습니다. [수정]에서 다시 지정해 주세요.',
+        )
     },
     onSettled: () => qc.invalidateQueries({ queryKey: companyQueries.all() }), // 실패해도 등록은 됐을 수 있음
     onSuccess: onDone,

@@ -2,7 +2,7 @@
 // 모양 (11/01 결정): 사번,사원명,전화번호,대표자   — 대표자 열은 없어도 됨, 'Y'면 대표자(여러 명 가능)
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
-import type { MemberInput } from '@/features/company/api/companyApi'
+import type { Member, MemberInput } from '@/features/company/api/companyApi'
 
 export const CSV_HEADER = ['사번', '사원명', '전화번호', '대표자'] as const
 export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
@@ -89,4 +89,44 @@ export function serverRowErrors(
     const field = FIELD[m![2] as keyof MemberInput]
     return [`${row.line}행 ${field ?? '내용을'} 확인해 주세요.`]
   })
+}
+
+/** CSV 사원 추가 미리 보기 (11/01 결정 B) — 기존 사원과 비교해 신규 · 정보 바뀜 · 변경 없음으로 나눔
+ * 서버는 같은 사번이면 조용히 덮어써서, 무엇이 바뀌는지 [등록] 전에 보여 줌 */
+export interface CsvChange {
+  row: CsvMember
+  before: { name: string; phoneNumber: string }
+}
+export interface CsvPreview {
+  added: CsvMember[] // 새 사번
+  changed: CsvChange[] // 같은 사번, 이름이나 전화가 다름 → 덮어씀
+  same: CsvMember[] // 같은 사번, 그대로 → 보내지 않음
+  leaders: string[] // 대표자로 새로 지정할 사번 (이미 대표자면 뺌). 빈칸은 '지정 안 함' — 기존 대표자를 내리지 않음
+  errors: string[] // 보내면 서버가 전체를 거절할 줄 (다른 사원이 쓰는 전화)
+}
+
+export function previewAgainst(rows: CsvMember[], existing: Member[]): CsvPreview {
+  const byNo = new Map(existing.map((m) => [m.membership.employeeNo, m]))
+  const byPhone = new Map(existing.map((m) => [m.customer.phoneNumber, m]))
+  const out: CsvPreview = { added: [], changed: [], same: [], leaders: [], errors: [] }
+  for (const r of rows) {
+    const old = byNo.get(r.employeeNo)
+    const owner = byPhone.get(r.phoneNumber)
+    // 이 번호를 다른 사번의 사원이 이미 씀 → 서버가 전체 거절 (명세 7장)
+    if (owner && owner.membership.employeeNo !== r.employeeNo) {
+      out.errors.push(
+        `${r.line}행 전화번호를 이미 ${owner.customer.name}(사번 ${owner.membership.employeeNo}) 님이 쓰고 있습니다.`,
+      )
+      continue
+    }
+    if (!old) out.added.push(r)
+    else if (old.customer.name !== r.name || old.customer.phoneNumber !== r.phoneNumber)
+      out.changed.push({
+        row: r,
+        before: { name: old.customer.name, phoneNumber: old.customer.phoneNumber },
+      })
+    else out.same.push(r)
+    if (r.leader && old?.membership.role !== 'ORG_ADMIN') out.leaders.push(r.employeeNo)
+  }
+  return out
 }
