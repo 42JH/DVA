@@ -37,28 +37,68 @@ def context(data):
     return lambda req: httpx2.Response(200, json={"data": data, "meta": {"requestId": "r"}})
 
 
-def test_caller_context_registered_with_pins():
-    client, seen = api(context({
-        "lookupStatus": "REGISTERED", "customer": {"customerSeq": 12, "name": "김철수", "phoneNumber": CALLER},
-        "availableUsageTypes": ["PERSONAL", "COMPANY"],
-        "personalPins": [{"personalPinSeq": 1, "label": "집", "addressData": PIN},
-                         {"personalPinSeq": 2, "label": "중복", "addressData": PIN},
-                         {"personalPinSeq": 3, "label": "불완전", "addressData": {"name": "x"}}],
-        "companyPins": [{"companyPinSeq": 4, "addressData": {**PIN, "roadAddress": "회사로 1", "latitude": None}}]}))
-    ctx = run(client.caller_context(CALLER))
+REGISTERED = {
+    "lookupStatus": "REGISTERED", "customer": {"customerSeq": 12, "name": "김철수", "phoneNumber": CALLER},
+    "availableUsageTypes": ["PERSONAL", "COMPANY"], "callSessionSeq": 20,
+    "availablePaymentMethods": ["billing", "credit"],
+    "personalPins": [{"personalPinSeq": 1, "label": "집", "addressData": PIN},
+                     {"personalPinSeq": 2, "label": "중복", "addressData": PIN},
+                     {"personalPinSeq": 3, "label": "불완전", "addressData": {"name": "x"}}],
+    "companyPins": [{"companyPinSeq": 4, "addressData": {**PIN, "roadAddress": "회사로 1", "latitude": None}}]}
+CALL_ID = {"providerCallId": "live_1", "incomingAt": INCOMING_AT}
+
+
+def history(rows):
+    return {"data": [{"orderSeq": i + 1, "orderParcelSeq": i + 1, "createdAt": "2026-10-30T00:00:00Z", "address": r}
+                     for i, r in enumerate(rows)], "hasNext": False}
+
+
+def test_caller_context_registered_with_pins_call_and_recent_addresses():
+    def handler(req):
+        if req.url.path == "/api/customers/context":
+            return httpx2.Response(200, json={"data": REGISTERED, "meta": {"requestId": "r"}})
+        if req.url.params["direction"] == "ORIGIN":
+            return httpx2.Response(200, json=history([PIN]))
+        return httpx2.Response(200, json=history([{**PIN, "roadAddress": "부산 도착로 1"}, {**PIN, "roadAddress": "부산 도착로 1"},
+                                                  {**PIN, "roadAddress": "대구 도착로 2", "name": None}]))
+
+    client, seen = api(handler)
+    ctx = run(client.caller_context(CALLER, CALL_ID, recent_limit=5))
     assert (ctx.status, ctx.customer_seq, ctx.name, ctx.usage_types) == ("REGISTERED", 12, "김철수", ["PERSONAL", "COMPANY"])
+    assert ctx.call_session_seq == 20 and ctx.payment_methods == ["billing", "credit"]
     assert [p.address for p in ctx.places] == ["서울 예시로 12", "회사로 1"]  # 같은 곳·불완전한 곳은 뺀다
     assert ctx.places[0].geo.postal_code == "01234" and ctx.places[0].address_detail == "101호"
     assert ctx.places[1].geo is None  # 좌표가 없으면 다시 찾게 비워 둔다
     assert seen[0].method == "POST" and seen[0].url.path == "/api/customers/context"
-    assert CALLER not in str(seen[0].url) and body(seen[0]) == {"phoneNumber": CALLER}  # 전화번호는 URL에 넣지 않는다
+    assert CALLER not in str(seen[0].url) and body(seen[0]) == {"phoneNumber": CALLER, "call": CALL_ID}
+    # 이전 접수 주소: 통화 번호 헤더, 출발지 1건·도착지 최근 N건(같은 곳·불완전한 곳은 뺀다)
+    assert ctx.recent_origin.address == "서울 예시로 12" and [p.address for p in ctx.recent_destinations] == ["부산 도착로 1"]
+    assert [(r.url.path, r.url.params["direction"], r.url.params["limit"], r.headers["call_session_seq"])
+            for r in seen[1:]] == [("/api/customers/12/addresses", "ORIGIN", "1", "20"),
+                                   ("/api/customers/12/addresses", "DESTINATION", "5", "20")]
+
+
+def test_caller_context_survives_address_history_failure_and_skips_it_without_call():
+    def handler(req):
+        if req.url.path == "/api/customers/context":
+            return httpx2.Response(200, json={"data": REGISTERED, "meta": {}})
+        return httpx2.Response(503, json={"error": {"code": "SERVICE_UNAVAILABLE"}})
+
+    client, _ = api(handler)
+    ctx = run(client.caller_context(CALLER, CALL_ID))
+    assert ctx.customer_seq == 12 and ctx.recent_origin is None and ctx.recent_destinations == []
+    client, seen = api(context({**REGISTERED, "callSessionSeq": None}))
+    run(client.caller_context(CALLER))
+    assert len(seen) == 1 and body(seen[0]) == {"phoneNumber": CALLER}  # 통화 번호가 없으면 이력을 읽지 않는다
 
 
 @pytest.mark.parametrize("status", ["UNREGISTERED", "WITHDRAWN"])
 def test_caller_context_unregistered_and_withdrawn(status):
-    client, _ = api(context({"lookupStatus": status, "customer": None, "personalPins": [], "companyPins": []}))
-    ctx = run(client.caller_context(CALLER))
-    assert ctx.status == status and ctx.customer_seq is None and ctx.places == []
+    client, seen = api(context({"lookupStatus": status, "customer": None, "personalPins": [], "companyPins": [],
+                                "callSessionSeq": 21, "availablePaymentMethods": []}))
+    ctx = run(client.caller_context(CALLER, CALL_ID))
+    assert ctx.status == status and ctx.customer_seq is None and ctx.places == [] and ctx.payment_methods == []
+    assert ctx.call_session_seq == 21 and len(seen) == 1
 
 
 def test_result_body_complete_new_customer():
@@ -70,6 +110,14 @@ def test_result_body_complete_new_customer():
                                 "postalCode": GEO.postal_code, "latitude": GEO.latitude, "longitude": GEO.longitude}
     assert p["smallBoxCount"] == 1 and p["itemPrice"] == 30000 and "otherItemDescription" not in p
     assert (b["paymentMethodType"], b["pickupRequestedAt"]) == ("credit", PICKUP_AT)
+    assert "totalAmount" not in b and "notifiedPrice" not in p  # 배송비를 모르면 넣지 않는다
+
+
+def test_result_body_fares_and_total():
+    b = result_body("COMPLETE", CALL, 12, None, CALLER, "billing", PICKUP_AT, [ORDER, ORDER], [4000, 5000])
+    assert [p["notifiedPrice"] for p in b["parcels"]] == [4000, 5000] and b["totalAmount"] == 9000
+    b = result_body("INCOMPLETE", CALL, 12, None, CALLER, None, None, [ORDER, ORDER], [4000, None])
+    assert b["parcels"][0]["notifiedPrice"] == 4000 and "totalAmount" not in b  # 하나라도 모르면 합계를 보내지 않는다
 
 
 def test_result_body_registered_and_partial():
@@ -79,9 +127,11 @@ def test_result_body_registered_and_partial():
     assert result_body("CANCELLED", CALL, None, None, CALLER, None, None, []) == {"outcome": "CANCELLED", "call": CALL}
 
 
-def test_submit_result_sends_key_and_returns_data():
-    data = {"orderSeq": 1, "version": 1, "status": "ACCEPTED", "callSessionSeq": 7, "parcelNo": "TEST0057"}
-    client, seen = api(lambda req: httpx2.Response(201, json={"data": data, "meta": {}}))
+@pytest.mark.parametrize("code", [201, 200])  # 같은 키의 재요청은 기존 주문의 현재 결과(200)
+def test_submit_result_sends_key_and_returns_data(code):
+    data = {"orderSeq": 1, "version": 2, "status": "notPaid", "totalAmount": 5000, "callSessionSeq": 7,
+            "parcelNo": None, "paymentRequest": {"paymentRequestId": "x", "amount": 5000}}
+    client, seen = api(lambda req: httpx2.Response(code, json={"data": data, "meta": {}}))
     assert run(client.submit_result({"outcome": "COMPLETE"}, "uuid-1")) == data
     assert seen[0].url.path == "/api/orders" and seen[0].headers["Idempotency-Key"] == "uuid-1"
 
@@ -127,30 +177,92 @@ def test_submit_result_does_not_retry_rejections(status, code):
     assert len(seen) == 1
 
 
-# --- 보류한 조회·수정·취소 도구(옛 계약) ---
+# --- 신규 고객 등록과 개인 주소록 ---
+
+@pytest.mark.parametrize("status, expected", [(201, 33), (409, None)])  # 이미 등록된 번호는 None
+def test_create_customer(status, expected):
+    client, seen = api(lambda req: httpx2.Response(status, json={"data": {"customerSeq": 33}, "meta": {}}))
+    assert run(client.create_customer("김철수", CALLER)) == expected
+    assert seen[0].url.path == "/api/customers" and body(seen[0]) == {"name": "김철수", "phoneNumber": CALLER}
+
+
+def test_create_pin_sends_sender_address_with_call_header():
+    client, seen = api(lambda req: httpx2.Response(201, json={"data": {}, "meta": {}}))
+    run(client.create_pin(20, 33, ORDER, "sender", "보내는 곳"))
+    assert seen[0].url.path == "/api/customers/33/pins" and seen[0].headers["call_session_seq"] == "20"
+    assert body(seen[0]) == {"label": "보내는 곳", "addressData": {
+        "name": "김철수", "phoneNumber": CALLER, "roadAddress": ORDER.sender_address, "detailAddress": "1201호",
+        "jibunAddress": GEO.jibun_address, "dongName": GEO.dong_name, "postalCode": GEO.postal_code,
+        "latitude": GEO.latitude, "longitude": GEO.longitude}}
+    client, _ = api(lambda req: httpx2.Response(403, json={"error": {"code": "FORBIDDEN"}}))
+    with pytest.raises(BackendError):
+        run(client.create_pin(20, 33, ORDER, "sender", "보내는 곳"))
+
+
+# --- 통화 중 조회·취소(통화 고객 범위, call_session_seq 헤더) ---
+
+def detail(order_seq, status, parcels):
+    return {"orderSeq": order_seq, "status": status, "version": 3, "totalAmount": 9000, "parcels": [
+        {"orderParcelSeq": seq, "status": st, "destination": {"name": name, "roadAddress": addr}}
+        for seq, st, name, addr in parcels]}
+
+
+def test_find_parcels_reads_details_without_name_in_url():
+    def handler(req):
+        if req.url.path == "/api/orders":
+            return httpx2.Response(200, json={"data": [{"orderSeq": 101}, {"orderSeq": 100}], "hasNext": False})
+        if req.url.path == "/api/orders/101":
+            return httpx2.Response(200, json={"data": detail(101, "notPaid", [(301, "ACTIVE", "박민수", "대구로 1"),
+                                                                            (302, "CANCELLED", "최지우", "서울로 2")])})
+        return httpx2.Response(404, json={"error": {"code": "NOT_FOUND"}})
+
+    client, seen = api(handler)
+    parcels = run(client.find_parcels(20, 5))
+    assert parcels == [
+        {"order_seq": 101, "order_parcel_seq": 301, "receiver_name": "박민수", "receiver_address": "대구로 1",
+         "status": "notPaid"},
+        {"order_seq": 101, "order_parcel_seq": 302, "receiver_name": "최지우", "receiver_address": "서울로 2",
+         "status": "CANCELLED"}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
+    assert dict(seen[0].url.params) == {"limit": "5"}  # 받는 분 이름(개인정보)을 URL에 넣지 않는다
+    assert all(r.headers["call_session_seq"] == "20" for r in seen)
+    assert run(client.parcel(20, 101, 302))["status"] == "CANCELLED" and run(client.parcel(20, 9, 1)) is None
+
+
+@pytest.mark.parametrize("status, expected", [(204, "ok"), (404, "not_found"), (409, "conflict")])
+def test_cancel_parcels_mapping(status, expected):
+    client, seen = api(lambda req: httpx2.Response(status) if status == 204 else httpx2.Response(status, json={}))
+    assert run(client.cancel_parcels(20, 100, [300])) == expected
+    assert seen[0].method == "POST" and seen[0].url.path == "/api/orders/100/parcels/cancel"
+    assert body(seen[0]) == {"orderParcelSeqs": [300]} and seen[0].headers["call_session_seq"] == "20"
+
+
+def test_order_lookup_and_cancel_errors_raise():
+    client, _ = api(lambda req: httpx2.Response(500, json={}))
+    for coro in (client.find_parcels(20, 5), client.order_detail(20, 1), client.cancel_parcels(20, 1, [2])):
+        with pytest.raises(BackendError):
+            run(coro)
+
+
+# --- 보류한 수정 도구·관제 화면(옛 계약) ---
 
 @pytest.mark.parametrize("status, expected", [(200, "ok"), (404, "not_found"), (409, "cancelled")])
-def test_update_and_cancel_status_mapping(status, expected):
+def test_update_status_mapping(status, expected):
     client, seen = api(lambda req: httpx2.Response(status, json={}))
     assert run(client.update_order(CALLER, "Q000001", {"receiver_name": "박", "status": "x"})) == expected
-    assert run(client.cancel_order(CALLER, "Q000001")) == expected
     assert seen[0].url.path == "/internal/ai/orders/Q000001/update"
     assert body(seen[0]) == {"caller_phone": CALLER, "changes": {"receiver_name": "박"}}  # 정해진 항목만
-    assert seen[1].url.path == "/internal/ai/orders/Q000001/cancel"
 
 
 def test_order_no_cannot_escape_path():
     client, seen = api(lambda req: httpx2.Response(404, json={}))
-    run(client.cancel_order(CALLER, "../callers/places"))
+    run(client.update_order(CALLER, "../callers/places", {}))
     assert seen[0].url.raw_path.startswith(b"/internal/ai/orders/..%2Fcallers%2Fplaces/")
 
 
-def test_lists():
+def test_monitor_list():
     client, seen = api(lambda req: httpx2.Response(200, json={"orders": [{"order_no": "Q1"}]}))
-    assert run(client.list_orders(CALLER, 5)) == [{"order_no": "Q1"}]
-    assert body(seen[0]) == {"caller_phone": CALLER, "limit": 5}
     assert run(client.recent_orders(10)) == [{"order_no": "Q1"}]
-    assert seen[1].method == "GET" and seen[1].url.params["limit"] == "10"
+    assert seen[0].method == "GET" and seen[0].url.params["limit"] == "10"
 
 
 def test_unexpected_status_raises():

@@ -11,7 +11,7 @@ from app import client_backend
 from app.call import Call
 from app.dispatcher import dispatch
 from app.flow import engine
-from app.progress import send_progress
+from app.progress import after_change, send_progress
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,8 @@ async def run_call(call: Call, client) -> None:
             call.last_input_at = time.monotonic()
             call.notify()
             await send_progress(call, conn)
-            watchers = [asyncio.create_task(watch_end(call, client, conn)), asyncio.create_task(watch_idle(call, conn))]
+            watchers = [asyncio.create_task(watch_end(call, client, conn)), asyncio.create_task(watch_idle(call, conn)),
+                        asyncio.create_task(watch_flow(call, conn, client))]
             tool_tasks: set[asyncio.Task] = set()
             try:
                 async for event in conn:
@@ -36,7 +37,10 @@ async def run_call(call: Call, client) -> None:
                         reason = closed
                         break
             finally:
-                jobs = [t for t in [*watchers, *tool_tasks, *call.listen_tasks, call.listen_timer] if t]
+                if call.write_tasks:  # 실행 중인 쓰기(취소)는 끊지 않고 결과를 기록한 뒤 끝낸다(§2.5(8))
+                    await asyncio.wait(list(call.write_tasks), timeout=call.cfg.call.tool_timeout_sec)
+                jobs = [t for t in [*watchers, *tool_tasks, *call.listen_tasks, call.listen_timer, call.side_timer,
+                                    *call.write_tasks] if t]
                 for t in jobs:
                     if t:
                         t.cancel()
@@ -93,14 +97,16 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
             tool_tasks.add(task)
             task.add_done_callback(tool_tasks.discard)
     elif etype == "session.input_transcript.delta":
-        call.add_transcript("customer", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
+        start_ms = getattr(event, "start_ms", None)
+        call.add_transcript("customer", event.delta, start_ms, getattr(event, "end_ms", None))
         call.last_input_at = time.monotonic()
         if event.delta.strip():
             call.input_ready.set()
-        listener.heard(call, event.delta, conn, client)
+        listener.heard(call, event.delta, conn, client, start_ms)
     elif etype == "session.output_transcript.delta":
         call.add_transcript("agent", event.delta, getattr(event, "start_ms", None), getattr(event, "end_ms", None))
         client_backend.observe_output(call, 'transcript', getattr(event, 'start_ms', None))
+        check_drift(call, conn, tool_tasks)
     elif etype == "session.output_audio.delta":
         call.last_output_at = time.monotonic()
         client_backend.observe_output(call, 'audio', getattr(event, 'start_ms', None))
@@ -122,6 +128,37 @@ def _dump(obj):
     return obj.model_dump() if hasattr(obj, "model_dump") else obj
 
 
+def check_drift(call: Call, conn, tasks: set) -> None:
+    """음성 모델이 그래프와 다르게 스스로 마무리 인사를 하면(출력 받아쓰기로 감지) 지시를 덧붙여 바로잡는다(§2.5(7)).
+    단계마다 한 번만. 받아쓰기 조각이 잘려 와도 보이게 마지막 말풍선을 본다."""
+    stage = call.flow.stage
+    if not stage or engine.STAGES[stage].final or call.drift_fixed == stage or not call.transcript:
+        return  # 끝내는 단계(마무리 인사·상담원 이관)의 인사는 맞다
+    last = call.transcript[-1]
+    if last["speaker"] != "agent" or not any(m in last["text"] for m in call.texts.drift_markers):
+        return
+    call.drift_fixed = stage
+    task = asyncio.create_task(fix_drift(call, conn, stage))
+    tasks.add(task)
+    task.add_done_callback(tasks.discard)
+
+
+async def fix_drift(call: Call, conn, stage: str) -> None:
+    """고객이 "더 없어요"라고 해서 음성 모델이 먼저 인사했을 수 있다: 아직 판별하지 않은 고객 말의 판별을 기다린 뒤에도
+    같은 단계(끝내는 단계가 아님)일 때만 바로잡는다."""
+    cfg = call.cfg.listener
+    deadline = time.monotonic() + cfg.pause_ms / 1000 + cfg.timeout_sec
+    while (call.listen_tasks or call.heard_text.strip()) and time.monotonic() < deadline:
+        await asyncio.sleep(POLL_SEC)
+    if call.flow.stage != stage:
+        return
+    log.info("음성 모델 마무리 인사 바로잡기 %s 단계=%s", call.session_id, stage)
+    try:
+        await conn.session.instructions.append(content=call.texts.drift_fix, delegation_id=None)
+    except Exception:
+        log.exception("마무리 인사 바로잡기 실패 %s", call.session_id)
+
+
 async def run_tool(call: Call, conn, item: dict) -> None:
     """한 통화 안의 도구는 순서대로(통화별 잠금, FIFO). 결과는 꼭 돌려주고 response.create를 보낸다."""
     async with call.lock:
@@ -133,7 +170,7 @@ async def run_tool(call: Call, conn, item: dict) -> None:
                 "output": json.dumps(output, ensure_ascii=False, default=str),
             })
             await conn.response.create()
-            await send_progress(call, conn)
+            await after_change(call, conn)
         except Exception:
             log.exception("도구 결과 전송 실패 %s", call.session_id)
             call.add_error("도구 결과 전송 실패")
@@ -199,10 +236,47 @@ async def watch_idle(call: Call, conn) -> None:
     reason = f"고객 무응답 {cfg.idle_hangup_sec:.0f}초" if idle else f"최대 통화 시간 {cfg.max_call_sec:.0f}초"
     log.info("%s로 종료 %s", reason, call.session_id)
     call.add_error(f"{reason}로 종료")
-    async with call.lock:
+    async with call.lock:  # 실행 중인 쓰기 도구가 있으면 그 결과를 기록한 뒤에 들어온다(통화별 잠금, §2.5(8))
         call.request_hangup()
         await engine.apply(call, ["call.ending"], "watchdog")
-        await send_progress(call, conn)
+        await after_change(call, conn)
+
+
+async def watch_flow(call: Call, conn, client) -> None:
+    """시간으로 정해지는 흐름: 미뤄 둔 확정(§2.5(3)), 검색 결과 대기 시간(RAG), 듣지 않던 단계에서 쌓인 말(§2.5(6))."""
+    cfg = call.cfg
+    while True:
+        await asyncio.sleep(POLL_SEC)
+        now = time.monotonic()
+        p = call.flow.pending
+        if p and not p["suspended"] and now - p["at"] >= cfg.flow.commit_delay_ms / 1000:
+            await _fire(call, conn, engine.COMMIT, "commit")
+        elif call.rag_deadline and now >= call.rag_deadline and engine.handles(call, "rag.timeout"):
+            await _fire(call, conn, "rag.timeout", "watchdog")
+        side = call.side
+        if side["off"] and not side["flushing"] and side["text"].strip() and side["stage"] != call.flow.stage \
+                and engine.listening(call):
+            # 결과를 안내한 다음에 판별한다(§2.5(5)): 바뀐 단계의 안내를 상담원이 마쳤거나 기다릴 만큼 기다렸으면
+            since = time.time() - (call.flow.history[-1]["at"] if call.flow.history else 0.0)  # 단계가 바뀐 지 몇 초
+            spoke = now - call.last_output_at < since
+            quiet = now - call.last_output_at >= cfg.listener.pause_ms / 1000
+            if (spoke and quiet) or since >= cfg.flow.flush_wait_sec:
+                side["flushing"] = True
+                listener.spawn_classify(call, conn, client, side=True)
+
+
+async def _fire(call: Call, conn, event: str, by: str) -> None:
+    async with call.lock:
+        if event == engine.COMMIT:
+            if not (call.flow.pending and not call.flow.pending["suspended"]):
+                return  # 잠금을 기다리는 사이 새 말이 와서 멈췄다
+        elif not engine.handles(call, event):
+            return  # 잠금을 기다리는 사이 검색 결과가 와서 단계가 바뀌었다
+        try:
+            await engine.apply(call, [event], by)
+            await after_change(call, conn)
+        except Exception:
+            log.exception("흐름 사건 처리 실패 %s %s", call.session_id, event)
 
 
 async def hangup_now(svc, call) -> None:

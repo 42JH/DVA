@@ -5,7 +5,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -83,6 +83,26 @@ class PersonaConfig(_Strict):
     max_prompt_chars: int = Field(ge=100, le=20000)
 
 
+class FlowConfig(_Strict):
+    pin_recent_count: int = Field(ge=1, le=50)
+    commit_delay_ms: int = Field(ge=100, le=5000)
+    max_pin_options: int = Field(ge=2, le=10)
+    rag_wait_sec: float = Field(gt=0)
+    retry_limit: int = Field(ge=0, le=5)
+    agent_open_hour: int = Field(ge=0, le=24)
+    agent_close_hour: int = Field(ge=0, le=24)
+    heard_grace_ms: int = Field(ge=0, le=2000)
+    flush_wait_sec: float = Field(gt=0)
+
+
+class FareConfig(_Strict):
+    """규격 하나당 배송비(원). 없으면 그 규격의 배송비를 모른다(미완료로 넘김)."""
+    document: int | None = Field(None, gt=0, le=2_147_483_647)
+    small_box: int | None = Field(None, gt=0, le=2_147_483_647)
+    medium_box: int | None = Field(None, gt=0, le=2_147_483_647)
+    big_box: int | None = Field(None, gt=0, le=2_147_483_647)
+
+
 class ServerConfig(_Strict):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
     call: CallConfig
@@ -93,8 +113,17 @@ class ServerConfig(_Strict):
     listener: ListenerConfig
     address: AddressConfig
     persona: PersonaConfig
+    flow: FlowConfig
+    fare: FareConfig = FareConfig()
     rag: 'RagConfig'
     client_backend: 'ClientBackendConfig'
+
+    @model_validator(mode="after")
+    def _commit_after_pause(self):
+        # 확정 지연 중 들어온 말을 판별하려면 말 멈춤 대기보다 길어야 한다(LANGGRAPH_REBUILD §9)
+        if self.flow.commit_delay_ms <= self.listener.pause_ms:
+            raise ValueError("flow.commit_delay_ms는 listener.pause_ms보다 길어야 한다")
+        return self
 
 
 class RagConfig(_Strict):
@@ -108,6 +137,7 @@ class RagConfig(_Strict):
     timeout_sec: float = Field(gt=0)
     http_timeout_sec: float = Field(gt=0)
     retry_cooldown_sec: float = Field(gt=0)
+    min_score: float | None = None  # 1등 근거의 리랭커 점수가 이보다 낮으면 답할 자료 없음(RAG No). 없으면 근거 유무만 본다
 
 
 class ClientBackendConfig(_Strict):
@@ -126,11 +156,16 @@ def load_server_config(path: Path | None = None) -> ServerConfig:
 
 
 class Texts(_Strict):
-    """모델에게 줄 진행 문구. 단계 정의에 문구를 박지 않고 여기서 가져온다."""
+    """모델에게 줄 진행 문구. 단계 정의에 문구를 박지 않고 여기서 가져온다.
+    say: 고객에게 할 말(키 = LANGGRAPH_REBUILD 표의 ID), note: 따옴표 없이 주는 할 일, core: 질문의 핵심 구간."""
 
     labels: dict[str, str]
-    fields: dict[str, str]
-    stages: dict[str, str]
+    say: dict[str, str]
+    note: dict[str, str]
+    core: dict[str, str]
+    correction_labels: dict[str, str]
+    task_names: dict[str, str]
+    status_names: dict[str, str]
     customer_types: dict[str, str]
     call_info: str
     progress: str
@@ -143,6 +178,9 @@ class Texts(_Strict):
     classifier: str
     answer_error: str
     record_heard: str
+    reask: str
+    drift_fix: str
+    drift_markers: list[str]
 
 
 def load_texts(path: Path | None = None) -> Texts:

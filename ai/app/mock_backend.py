@@ -1,5 +1,6 @@
 """메모리 가짜 백엔드. app.backend_api.BackendAPI와 같은 메서드. 테스트와 환경변수 BACKEND_MOCK=true에서 쓴다.
-새 계약(고객 확인·통화 결과)은 백엔드의 주요 검증(통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값)만 흉내 낸다.
+백엔드의 주요 검증만 흉내 낸다: 통화당 주문 한 건, 같은 키는 기존 결과, COMPLETE 필수값(배송비·합계 포함),
+결제 방식별 상태(billing → notPaid, 후불 → 디버 접수), 통화 고객 범위의 조회·상세 취소(COLLECTING·notPaid만).
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
 import itertools
@@ -9,6 +10,7 @@ from app.order import Place
 
 ADDRESS_REQUIRED = ("name", "phoneNumber", "roadAddress", "jibunAddress", "dongName", "postalCode", "latitude",
                     "longitude")
+CANCELLABLE = ("COLLECTING", "notPaid")
 
 
 class MockBackend:
@@ -16,13 +18,16 @@ class MockBackend:
         self.customers: dict[str, dict] = {}  # 전화번호 → {seq, name, status}
         self.pins: dict[str, list[Place]] = {}  # 전화번호 → 주소록
         self.usage_types: dict[str, list[str]] = {}
+        self.payment_methods: dict[str, list[str]] = {}  # 전화번호 → availablePaymentMethods
+        self.recent: dict[str, tuple[Place, Place]] = {}  # 전화번호 → 이전 접수(출발지, 도착지)
+        self.call_sessions: dict[int, str] = {}  # callSessionSeq → 발신번호
         self.results: list[dict] = []  # 받은 통화 결과(본문 + 결과)
         self.keys: dict[str, dict] = {}  # Idempotency-Key → 결과 data
         self.calls: set[str] = set()  # 주문이 연결된 providerCallId
-        self.dver_status = "ACCEPTED"  # 디버 접수 결과 흉내(테스트에서 바꾼다)
+        self.dver_status = "ACCEPTED"  # 후불 주문의 디버 접수 결과 흉내(테스트에서 바꾼다)
         self._seq = itertools.count(1)
         self.personas: dict[str, dict] = {}  # "ACTIVE"·"PENDING" → 백엔드 응답 data 모양
-        # 보류한 조회·수정·취소 도구용(옛 계약)
+        # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
 
     async def close(self) -> None:
@@ -50,60 +55,136 @@ class MockBackend:
         personas["ACTIVE"] = {**personas.pop("PENDING"), "status": "ACTIVE", "applyErrorCode": None}
         return dict(personas["ACTIVE"])
 
+    # --- 테스트 준비 ---
+
     def add_customer(self, phone: str, name: str, pins: list[Place] = (), status: str = "ACTIVE",
-                     usage_types: list[str] = ("PERSONAL",)) -> int:
+                     usage_types: list[str] = ("PERSONAL",), recent: tuple[Place, Place] | None = None,
+                     payment_methods: list[str] = ("billing",)) -> int:
         seq = next(self._seq)
         self.customers[phone] = {"seq": seq, "name": name, "status": status}
         self.pins[phone] = list(pins)
         self.usage_types[phone] = list(usage_types)
+        self.payment_methods[phone] = list(payment_methods)
+        if recent:
+            self.recent[phone] = recent
         return seq
 
-    async def caller_context(self, phone):
+    def add_order(self, phone: str, status: str, receivers: list[tuple[str, str]]) -> int:
+        """받는 분(이름, 도로명주소)마다 상세 하나인 주문. 주문 번호를 돌려준다."""
+        seq = next(self._seq)
+        self.orders.append({"orderSeq": seq, "phone": phone, "status": status, "parcels": [
+            {"orderParcelSeq": next(self._seq), "status": "ACTIVE", "destination": {"name": n, "roadAddress": a}}
+            for n, a in receivers]})
+        return seq
+
+    # --- 고객 확인 ---
+
+    async def caller_context(self, phone, call=None, recent_limit=5):
+        session = None
+        if call:
+            session = next((s for s, p in self.call_sessions.items() if p == phone), None) or next(self._seq)
+            self.call_sessions[session] = phone
         c = self.customers.get(phone)
         if c is None:
-            return CallerContext()
+            return CallerContext(call_session_seq=session)
         if c["status"] == "WITHDRAWN":
-            return CallerContext(status="WITHDRAWN")
+            return CallerContext(status="WITHDRAWN", call_session_seq=session)
+        origin, destination = self.recent.get(phone, (None, None))
         return CallerContext(status="REGISTERED", customer_seq=c["seq"], name=c["name"],
-                             places=list(self.pins.get(phone, [])), usage_types=self.usage_types.get(phone, []))
+                             places=list(self.pins.get(phone, [])), usage_types=self.usage_types.get(phone, []),
+                             call_session_seq=session, payment_methods=self.payment_methods.get(phone, []),
+                             recent_origin=origin if session else None,
+                             recent_destinations=[destination] if session and destination else [])
+
+    async def create_customer(self, name, phone):
+        if phone in self.customers:
+            return None  # 409 DUPLICATE_RESOURCE
+        return self.add_customer(phone, name)
+
+    async def create_pin(self, call_session_seq, customer_seq, order, role, label):
+        phone = self._phone(call_session_seq)
+        if self.customers.get(phone, {}).get("seq") != customer_seq:
+            raise BackendError("/api/customers/pins 403 FORBIDDEN")  # 통화 고객의 주소록만
+        place = order.place(role)
+        if place and place not in self.pins[phone]:
+            self.pins[phone].append(place)
+
+    # --- 통화 중 조회·취소(통화 고객 범위) ---
+
+    def _phone(self, call_session_seq):
+        if call_session_seq not in self.call_sessions:
+            raise BackendError("/api/orders 400 INVALID_REQUEST")  # 통화 번호 없음·잘못됨
+        return self.call_sessions[call_session_seq]
+
+    def _order(self, call_session_seq, order_seq):
+        phone = self._phone(call_session_seq)
+        return next((o for o in self.orders if o["orderSeq"] == order_seq and o["phone"] == phone), None)
+
+    @staticmethod
+    def _parcels(order):
+        return [{"order_seq": order["orderSeq"], "order_parcel_seq": p["orderParcelSeq"],
+                 "receiver_name": p["destination"]["name"], "receiver_address": p["destination"]["roadAddress"],
+                 "status": "CANCELLED" if p["status"] == "CANCELLED" else order["status"]} for p in order["parcels"]]
+
+    async def find_parcels(self, call_session_seq, limit):
+        phone = self._phone(call_session_seq)
+        mine = [o for o in reversed(self.orders) if o["phone"] == phone][:limit]
+        return [p for o in mine for p in self._parcels(o)]
+
+    async def parcel(self, call_session_seq, order_seq, order_parcel_seq):
+        order = self._order(call_session_seq, order_seq)
+        return next((p for p in self._parcels(order) if p["order_parcel_seq"] == order_parcel_seq), None) \
+            if order else None
+
+    async def cancel_parcels(self, call_session_seq, order_seq, order_parcel_seqs):
+        order = self._order(call_session_seq, order_seq)
+        targets = [p for p in (order or {}).get("parcels", []) if p["orderParcelSeq"] in order_parcel_seqs]
+        if not order or len(targets) != len(set(order_parcel_seqs)):
+            return "not_found"
+        if order["status"] not in CANCELLABLE:
+            return "conflict"  # 결제 완료 이후·이미 전체 취소
+        for p in targets:
+            p["status"] = "CANCELLED"  # 같은 상세를 다시 취소해도 204
+        if all(p["status"] == "CANCELLED" for p in order["parcels"]):
+            order["status"] = "CANCELLED"
+        return "ok"
+
+    # --- 통화 결과 ---
 
     async def submit_result(self, body: dict, idempotency_key: str) -> dict:
         if idempotency_key in self.keys:
             return self.keys[idempotency_key]  # 같은 키: 본문을 다시 적용하지 않는다
-        call_id = body["call"]["providerCallId"]
-        if call_id in self.calls:
+        call = body["call"]
+        if call["providerCallId"] in self.calls:
             raise BackendError("/api/orders 409 INVALID_STATE")  # 통화 한 건에 주문 한 건
         if body["outcome"] == "COMPLETE":
             _check_complete(body)
-        status = {"COMPLETE": self.dver_status, "INCOMPLETE": "COLLECTING", "CANCELLED": "CANCELLED"}[body["outcome"]]
-        data = {"orderSeq": next(self._seq), "version": 1, "status": status, "callSessionSeq": next(self._seq),
-                "parcelNo": "TEST0001" if status == "ACCEPTED" else None}
-        self.calls.add(call_id)
+            if body["paymentMethodType"] not in self._allowed(call["callerPhoneNumber"], body):
+                raise BackendError("/api/orders 403 FORBIDDEN")  # 결제 방식 사용 자격 없음
+            status = "notPaid" if body["paymentMethodType"] == "billing" else self.dver_status
+        else:
+            status = {"INCOMPLETE": "COLLECTING", "CANCELLED": "CANCELLED"}[body["outcome"]]
+        order_seq = self.add_order(call["callerPhoneNumber"], status,
+                                   [(p.get("destination", {}).get("name"), p.get("destination", {}).get("roadAddress"))
+                                    for p in body.get("parcels", [])])
+        data = {"orderSeq": order_seq, "version": 1, "status": status, "totalAmount": body.get("totalAmount"),
+                "callSessionSeq": next(self._seq), "parcelNo": "TEST0001" if status == "ACCEPTED" else None,
+                "paymentRequest": None}
+        if status == "notPaid":
+            data["paymentRequest"] = {"paymentRequestId": "mock", "amount": body["totalAmount"]}
+        self.calls.add(call["providerCallId"])
         self.keys[idempotency_key] = data
         self.results.append({"body": body, "key": idempotency_key, **data})
         return data
 
-    # --- 보류한 조회·수정·취소 도구(옛 계약) ---
+    def _allowed(self, phone: str, body: dict) -> list[str]:
+        """신규 고객(이름·전화번호로 등록)은 개인 카드만."""
+        return self.payment_methods.get(phone, []) if "customerSeq" in body else ["billing"]
 
-    async def list_orders(self, caller, limit):
-        mine = [o for o in reversed(self.orders) if o["caller_phone"] == caller]
-        return [{k: o[k] for k in ("order_no", "receiver_name", "status")} for o in mine[:limit]]
-
-    def _status(self, caller, order_no):
-        o = next((o for o in self.orders if o["order_no"] == order_no and o["caller_phone"] == caller), None)
-        return o["status"] if o else "not_found"
+    # --- 보류한 수정 도구·관제 화면(옛 계약) ---
 
     async def update_order(self, caller, order_no, values):
-        if self._status(caller, order_no) != "received":
-            return self._status(caller, order_no)
-        next(o for o in self.orders if o["order_no"] == order_no).update(values)
-        return "ok"
-
-    async def cancel_order(self, caller, order_no):
-        if self._status(caller, order_no) != "received":
-            return self._status(caller, order_no)
-        next(o for o in self.orders if o["order_no"] == order_no)["status"] = "cancelled"
-        return "ok"
+        return "not_found"  # 수정 보류: 새 계약의 수정(COLLECTING PATCH)은 쓰지 않는다
 
     async def recent_orders(self, limit):
         return [{"order_no": r["orderSeq"], "status": r["status"], "outcome": r["body"]["outcome"],
@@ -111,7 +192,7 @@ class MockBackend:
 
 
 def _check_complete(body: dict) -> None:
-    """백엔드 COMPLETE 검증(order-submission.validation.ts)의 주요 부분. 어기면 422처럼 실패."""
+    """백엔드 COMPLETE 검증(order-submission.validation.ts·order-pricing.ts)의 주요 부분. 어기면 422처럼 실패."""
     if "customerSeq" not in body and "customer" not in body:
         raise BackendError("/api/orders 400 INVALID_REQUEST")
     missing = [k for k in ("paymentMethodType", "pickupRequestedAt") if not body.get(k)]
@@ -125,5 +206,9 @@ def _check_complete(body: dict) -> None:
             missing.append(f"parcels.{i}.items")
         if p.get("itemPrice") is None:
             missing.append(f"parcels.{i}.itemPrice")
+        if not isinstance(p.get("notifiedPrice"), int) or p["notifiedPrice"] <= 0:
+            missing.append(f"parcels.{i}.notifiedPrice")
+    if body.get("totalAmount") != sum(p.get("notifiedPrice") or 0 for p in body.get("parcels", [])):
+        missing.append("totalAmount")  # 미취소 상세 배송비의 합계와 같아야 한다
     if missing:
         raise BackendError(f"/api/orders 422 VALIDATION_FAILED {missing}")

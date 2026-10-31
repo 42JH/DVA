@@ -95,6 +95,36 @@ max_choices = 30
 # 끔: 2026-10-29 통화에서 위임된 FAQ 응답 중에 서버 요청이 끼어들어 답이 돌아오지 않고 상담원이 멈췄다(docs/WORKLOG.md)
 record_heard = false
 
+[flow]
+# 통화 흐름(spec/LANGGRAPH_REBUILD.md). 다이어그램 밖 기본값은 §9
+# 도착지 핀 매칭에서 먼저 찾을 최근 핀 개수(여기서 못 찾으면 주소록 전체). TODO(flow): 주소록에 날짜가 없어 백엔드가 준 순서를 최근 순으로 본다
+pin_recent_count = 5
+# 되돌릴 수 없는 확정(취소 "예", 결제 단계 진입)을 미루는 시간(ms). 그사이 고객이 말하면 보류하고 다시 판별한다. pause_ms보다 길게
+commit_delay_ms = 700
+# 여러 핀 중 어느 곳인지 물을 때 말로 늘어놓는 최대 개수
+max_pin_options = 3
+# 질문 뒤 매뉴얼 검색 결과를 기다리는 최대 시간(초). 넘으면 답할 자료 없음(RAG No)으로 본다. [rag] timeout_sec보다 길게
+rag_wait_sec = 15.0
+# 다시 조회·다시 취소 시도 상한. 넘으면 업무 처리 불가로 보고 HUB
+retry_limit = 2
+# 상담원 연결 가능 시간(한국 시간, 시작 시 이상 ~ 끝 시 미만). TODO(flow): 실제 상담 시간 확인
+agent_open_hour = 9
+agent_close_hour = 18
+# 질문을 다 들었는지 볼 때 상담원 말이 고객 말 시작보다 이만큼(ms) 늦게 끝나도 겹친 것으로 보지 않는다(맞장구·빠른 답)
+heard_grace_ms = 300
+# 듣지 않는 단계(검색·취소 처리 중)에서 쌓인 고객 말은 그 단계가 끝나고 상담원 안내가 끝난 뒤 판별한다. 그 최대 대기(초)
+flush_wait_sec = 3.0
+
+[fare]
+# 배송비 요금표(원, 규격 하나당, VAT 포함). 택배 배송비(notifiedPrice) = 규격별 개수 × 요금의 합, 주문 총액(totalAmount) = 택배 합계.
+# 백엔드는 배송비를 계산하지 않고 접수(COMPLETE) 때 검사만 한다(spec/backend-api.md). 값이 없는 규격이나 기타 물품이 있으면
+# 배송비를 모르는 것으로 보고 금액을 말하지 않으며, 통화 결과는 미완료(INCOMPLETE)로 넘긴다(운영자가 금액을 보완).
+# 방문수거는 유인 지점 요금(2026-10-31 결정). 무인 지점은 서류 4950·소형 5500·중형 6600·대형 8800
+document = 3850
+small_box = 4950
+medium_box = 6050
+big_box = 7150
+
 [rag]
 # large 통합 Q+A → Kiwi BM25 + 벡터 RRF → Qwen Top5 → 원문 Top3
 collection = "manuals_dev_openai_large"
@@ -107,6 +137,9 @@ context_k = 3
 timeout_sec = 12.0
 http_timeout_sec = 5.0
 retry_cooldown_sec = 30.0
+# RAG Yes/No: 1등 근거의 리랭커 점수(yes/no 로짓 차이)가 이보다 낮으면 답할 자료 없음. 주석이면 근거 유무만 본다
+# TODO(flow): 평가셋으로 임계값을 정한다(scripts/calibrate_relevancy.py)
+# min_score = 0.0
 
 [client_backend]
 # 백엔드는 도구 선택만 한 번. 결과를 받은 뒤의 답변 생성은 Live가 한다.

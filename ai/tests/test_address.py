@@ -257,29 +257,29 @@ def test_without_db_address_is_recorded_as_heard():
     assert call.order.sender_address == "서울 강남구 태헤란노 211"
 
 
-# --- 그래프의 주소 확정 단계(address) ---
+# --- 기록할 때의 주소 확정(record_order) ---
 
-def test_address_stage_resolves_then_returns(corrector):
-    """새 주소가 기록되면 address 단계를 거쳐(고객에게 묻지 않음) 들어온 단계로 돌아가고, 결과가 관제에 남는다."""
+def test_address_is_resolved_when_recorded(corrector):
+    """새 주소는 기록하면서 주소DB로 확정하고(고객에게 묻지 않음), 결과가 관제에 남는다."""
     call = make_call()
     assert record(call, sender_address="서울 강남구 태헤란노 211", sender_address_detail="")["ok"]
-    assert [h["to"] for h in call.flow.history] == ["address", "collecting"] and call.flow.stage == "collecting"
+    assert call.flow.stage == "A_REGISTER_SENDER" and call.order.sender_address == "서울특별시 강남구 테헤란로 211"
     assert call.address_results["sender_address"] == {"status": "confirmed", "changed": True, "geo": True}
     assert call.snapshot()["address"] == call.address_results and not call.address_pending
-    record(call, sender_address="서울특별시 강남구 테헤란로 211")  # 같은 주소면 다시 거치지 않음
-    assert [h["to"] for h in call.flow.history] == ["address", "collecting"]
+    assert not call.flow.notice  # 서버가 바로잡은 주소는 고객 정정이 아니다
+    record(call, sender_address="서울특별시 강남구 테헤란로 211")  # 같은 주소면 다시 확정하지 않음
+    assert not call.address_pending and not call.flow.notice
 
 
-def test_address_stage_from_confirming_goes_back_when_detail_dropped(corrector):
-    """마지막 확인에서 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 다시 받기."""
+def test_changed_address_drops_detail_and_goes_back_to_receiver_step(corrector):
+    """가액 단계에서 받는 곳 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 받는 분 정보 단계로 되돌아가 다시 받는다."""
     call = make_call()
     call.address_retry |= {"sender_address", "receiver_address"}  # 작은 시험 DB에 없는 주소: 이미 한 번 다시 물은 것으로
-    assert record(call, **FULL_ORDER)["ok"]
-    call.payment_method = "credit"
-    run(engine.apply(call, ["order.updated"]))
-    assert call.flow.stage == "confirming"
+    run(engine.apply(call, ["new.order"]))
+    assert record(call, **{k: v for k, v in FULL_ORDER.items() if k not in ("item_price", "pickup_at")})["ok"]
+    assert call.flow.stage == "A_ITEM_VALUE"
     assert record(call, receiver_address="서울 강남구 테헤란로 112")["ok"]
-    assert [h["to"] for h in call.flow.history][-3:] == ["address", "confirming", "collecting"]
+    assert call.flow.stage == "A_RECEIVER_HUB" and "상세주소" in engine.next_text(call)
     assert call.order.receiver_address.startswith("서울특별시 강남구 테헤란로 11")  # 애매함 → 1등
     assert call.address_results["receiver_address"]["status"] == "ambiguous"
 
@@ -348,11 +348,12 @@ def test_not_found_address_is_asked_once_more(corrector, monkeypatch):
 
     monkeypatch.setattr(address, "correct", none)
     call = make_call()
-    run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 인동 국일 7-3"}, ensure_ascii=False), "c1"))
-    assert call.order.receiver_address is None and "receiver_address" in engine.missing(call)
+    call.flow.stage, call.flow.say, call.flow.say_asks = "A_RECEIVER_HUB", [], False  # 받는 분 정보 단계에 있는 것으로
     call.order.sender_name, call.order.sender_phone = "김철수", "01012345678"
     call.order.sender_address, call.order.sender_address_detail = "서울 강남구 테헤란로 212", ""
-    assert engine.missing(call)[0] == "receiver_address"
-    assert "찾지 못했습니다" in engine.next_text(call)
+    call.order.receiver_name, call.order.receiver_phone = "이영희", "01098765432"
+    run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 인동 국일 7-3"}, ensure_ascii=False), "c1"))
+    assert call.order.receiver_address is None and engine.missing(call)[0] == "receiver_address"
+    assert "받으시는 곳 주소를 찾지 못했습니다" in engine.next_text(call)
     run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 없는로 1"}, ensure_ascii=False), "c2"))
     assert call.order.receiver_address == "경북 구미시 없는로 1"  # 두 번째는 들은 그대로(접수는 미완료로)

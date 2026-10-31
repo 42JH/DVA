@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.events import bus
+from app.flow import engine
 
 STATIC = Path(__file__).with_name("static")
 _basic = HTTPBasic()
@@ -44,6 +45,35 @@ async def calls(request: Request) -> list[dict]:
 async def orders(request: Request) -> list[dict]:
     svc = request.app.state.svc
     return await svc.backend.recent_orders(svc.cfg.backend.monitor_orders_limit)
+
+
+@router.get("/api/graph")
+async def graph() -> dict:
+    """상태 그래프 그림(Mermaid 글). 단계 정의의 전이만 그린다. 어디서나 들어가는 단계(enter_on)와
+    복귀(RETURN)는 엣지가 너무 많아 노드 이름 옆에 표시만 한다. 같은 단계에 머무는 STAY는 그리지 않는다."""
+    lines = ["flowchart TD"]
+    groups: dict[str, list[str]] = {}
+    for s in engine.STAGES.values():
+        groups.setdefault(engine.GROUPS.get(s.name, ""), []).append(s.name)
+    for group, names in groups.items():
+        lines.append(f"  subgraph {group}")
+        for name in names:
+            s = engine.STAGES[name]
+            mark = " ⟵ 어디서나" if s.enter_on else ""
+            mark += " ⟶ 복귀" if any(t.target == engine.RETURN for t in s.transitions) else ""
+            lines.append(f'    {name}["{name}{_q(mark)}"]')
+        lines.append("  end")
+    edges: dict[tuple[str, str], list[str]] = {}
+    for s in engine.STAGES.values():
+        for t in s.transitions:
+            if t.target in engine.STAGES:
+                edges.setdefault((s.name, t.target), []).append("자동" if t.event == engine.ENTERED else t.event)
+    lines += [f'  {a} -->|"{_q(", ".join(dict.fromkeys(ev)))}"| {b}' for (a, b), ev in edges.items()]
+    return {"mermaid": "\n".join(lines), "stages": list(engine.STAGES)}
+
+
+def _q(text: str) -> str:
+    return text.replace('"', "#quot;")
 
 
 def _sse(message: dict) -> str:

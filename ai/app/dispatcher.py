@@ -51,7 +51,7 @@ async def dispatch(call, name: str, arguments: str, call_id: str) -> dict:
     except Exception:
         log.exception("상태 전이 오류 %s %s %s", call.session_id, name, events)
     output["state"] = engine.summary(call)
-    record.update(status="done" if output["ok"] else "error", output=output,
+    record.update(status="done" if output["ok"] else "error", output=output, events=events,
                   elapsed_ms=round((time.monotonic() - t0) * 1000))
     call.notify()
     return output

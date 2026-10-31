@@ -110,7 +110,8 @@ def test_registered_caller_gets_registered_flow():
         post(http, body, headers)
         wait(lambda: client.live.sessions.of("accept"))
         call = http.app.state.svc.registry.get("live_r")
-        assert call.customer_type == "registered" and call.flow.stage == "find_destination"
+        assert call.customer_type == "registered" and call.flow.stage == "HUB"
         created = json.loads(body)["created_at"]  # 서버 수신 시각이 아니라 수신 이벤트 시각
         assert call.incoming_at == datetime.fromtimestamp(created, timezone.utc).isoformat().replace("+00:00", "Z")
         assert "등록 고객" in client.live.sessions.of("accept")[0][2]["instructions"]
+        assert "김철수님, 안녕하세요" in client.live.sessions.of("accept")[0][2]["instructions"]  # 첫 질문(인사)

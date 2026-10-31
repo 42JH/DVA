@@ -70,7 +70,9 @@ def test_actual_tool_preserves_top3_raw_tables_and_order_state():
     assert output['ok']
     assert len(output['context']['evidence']) == 3
     assert output['context']['evidence'][0]['content'] == BODY+'0'
-    assert (call.order.model_dump(), call.flow.stage) == before
+    # 주문 값은 그대로, 검색 결과(RAG Yes)는 QnA로 들어가 답한 뒤 들어오기 전 단계로 돌아갈 수 있게 기억한다
+    assert call.order.model_dump() == before[0] and call.flow.stage == 'D_AFTER_ANSWER'
+    assert call.flow.resume == {'task': 'new_order', 'stage': before[1]}
     assert not call.refer_requested.is_set() and not call.hangup_requested.is_set()
 
 
@@ -155,8 +157,8 @@ def test_missing_rag_is_failure_without_order_or_transfer_change():
     call = setup()
     call.rag = None
     output = run(dispatch(call, 'search_manual', '{"question":"배송은?"}', 'x'))
-    assert output['ok'] is False and call.flow.stage == 'collecting'
-    assert not call.refer_requested.is_set()
+    assert output['ok'] is False and call.flow.stage == 'D_AGENT_OFFER'  # 검색 실패 = RAG No(상담원 제안은 3번째부터)
+    assert not call.refer_requested.is_set() and not call.agent_offered
 
 
 def test_sideband_client_ignores_responses_function_event():
@@ -203,31 +205,22 @@ def test_incoming_call_attaches_service_and_sends_only_live_session(monkeypatch)
     assert 'search_manual' in {t['name'] for t in captured[0].backend_settings['tools']}
 
 
-def test_new_delegation_does_not_cancel_already_started_mutation():
-    from app.flow import engine
-    from app.flow.stages.subflows import HELD
-    from conftest import CALLER
-    # 수정 도구는 보류 중: 이 테스트에서만 보류 단계를 넣어 "이미 시작한 쓰기는 끊지 않음"을 확인한다
-    engine.STAGES.update({s.name: s for s in HELD})
-    engine.build()
+def test_new_delegation_does_not_cancel_already_started_mutation(monkeypatch):
+    from app.address import kakao
     call = setup()
     conn = Connection(call)
-    order_no = 'Q000001'
-    call.backend.orders.append({'order_no': order_no, 'caller_phone': CALLER, 'receiver_name': '이영희',
-                                'status': 'received'})
+
     async def scenario():
-        await engine.apply(call, ['intent.modify'])
         started, release = asyncio.Event(), asyncio.Event()
-        update = call.backend.update_order
         writes = []
-        async def slow(*args):
+
+        async def slow(address_, timeout_sec, transport=None):  # 기록 중 주소 좌표 찾기가 오래 걸린다
             started.set()
             await release.wait()
-            writes.append(args)
-            return await update(*args)
-        call.backend.update_order = slow
-        client, _ = client_for('modify_order', {'order_no': order_no, 'customer_confirmed': True,
-                                                'receiver_name': '박민수'})
+            writes.append(address_)
+            return None
+        monkeypatch.setattr(kakao, 'geocode', slow)
+        client, _ = client_for('record_order', {'sender_address': '서울 강남구 테헤란로 212'})
         tasks = set()
         client_backend.start_delegation(call, conn, {'id': 'write', 'target': 'client'}, tasks, client)
         await started.wait()
@@ -236,13 +229,8 @@ def test_new_delegation_does_not_cancel_already_started_mutation():
         release.set()
         await asyncio.gather(*tasks)
         assert len(writes) == 1
-    try:
-        run(scenario())
-    finally:
-        for s in HELD:
-            del engine.STAGES[s.name]
-        engine.build()
-    assert call.backend.orders[0]['receiver_name'] == '박민수'
+    run(scenario())
+    assert call.order.sender_address == '서울 강남구 테헤란로 212'
     assert call.delegations['write']['status'] == 'stale'
     assert not [row for row in conn.sent if row['delegation_id'] == 'write' and row['content']]
 
