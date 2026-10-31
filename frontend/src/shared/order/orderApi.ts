@@ -12,7 +12,8 @@ export interface Party {
   detailAddress: string | null
 }
 
-export type PaymentMethod = 'MONTHLY' | 'GROUP_CARD' | 'PERSONAL_CARD' // 월정산 · 그룹카드 · 개인카드 (디버 10/27)
+// 월정산 · 그룹카드 · 개인카드 (디버 10/27) + 지점 방문(예전 주문 조회만 — 서버 cat, 새로 고를 수 없음)
+export type PaymentMethod = 'MONTHLY' | 'GROUP_CARD' | 'PERSONAL_CARD' | 'BRANCH_VISIT'
 export type PaymentState = 'PAID' | 'UNPAID' | 'CANCELLED_BEFORE_PAYMENT'
 
 /** 주문 상세 (디자인 03_주문내역_주문상세 · _전화, 06 '주문 보기' 팝업과 같은 내용 · 읽기 전용) */

@@ -5,6 +5,7 @@ export const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   MONTHLY: '월정산',
   GROUP_CARD: '그룹카드',
   PERSONAL_CARD: '개인카드',
+  BRANCH_VISIT: '지점 방문',
 }
 export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   PAID: '결제 완료',
