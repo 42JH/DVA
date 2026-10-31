@@ -14,6 +14,7 @@ const {
 } = require('../dist/organizations/organization-billing.service');
 const { OrderMaintenanceWorker } = require('../dist/orders/order-maintenance.worker');
 const { AuditService } = require('../dist/audit/audit.service');
+const { DatabaseService } = require('../dist/database/database.service');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -619,6 +620,122 @@ test('expiry preserves consultation and recordings, closes the payment request, 
       operators.every(
         (l) => l.actorLabel === '운영자' && l.actorSeq !== null && l.actorName === '결제 운영자',
       ),
+  );
+});
+
+test('expiry commits ten independent orders before a later batch failure and retries the remainder atomically', async () => {
+  const orders = [];
+  for (let index = 0; index < 25; index++) {
+    const response = await createFinal();
+    assert.equal(response.status, 201);
+    orders.push(response.body.data.orderSeq);
+  }
+  await pool.query("UPDATE orders SET payment_due_at='2000-01-01' WHERE order_seq=ANY($1::int[])", [
+    orders,
+  ]);
+  const audit = app.get(AuditService),
+    record = audit.recordSuccess;
+  let attempts = 0;
+  audit.recordSuccess = async function (event, ...args) {
+    if (event.action === 'ORDER_CANCELLED' && orders.includes(event.targetId) && ++attempts === 11)
+      throw Error('maintenance-batch-rollback');
+    return record.call(this, event, ...args);
+  };
+  try {
+    await assert.rejects(maintenance.run(), /maintenance-batch-rollback/);
+  } finally {
+    audit.recordSuccess = record;
+  }
+  const states = (
+    await pool.query(
+      'SELECT status,count(*)::int AS n FROM orders WHERE order_seq=ANY($1::int[]) GROUP BY status ORDER BY status',
+      [orders],
+    )
+  ).rows;
+  assert.deepEqual(states, [
+    { status: 'CANCELLED', n: 10 },
+    { status: 'notPaid', n: 15 },
+  ]);
+  await maintenance.run();
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM orders WHERE order_seq=ANY($1::int[]) AND status='CANCELLED' AND total_amount=0",
+        [orders],
+      )
+    ).rows[0].n,
+    25,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT count(*)::int AS n FROM order_payment_requests WHERE order_seq=ANY($1::int[]) AND invalidated_at IS NULL AND completed_at IS NULL',
+        [orders],
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action='ORDER_CANCELLED' AND result='SUCCESS' AND target_seq=ANY($1::int[])",
+        [orders],
+      )
+    ).rows[0].n,
+    25,
+  );
+});
+
+test('monthly initialization commits at most ten records per transaction and preserves all companies and audit pairs', async () => {
+  const companies = (
+    await pool.query(
+      "INSERT INTO organizations(name,status) SELECT '월 배치 검증 '||n,'ACTIVE' FROM generate_series(1,25) n RETURNING organization_seq",
+    )
+  ).rows.map((row) => row.organization_seq);
+  const database = app.get(DatabaseService),
+    transaction = database.transaction,
+    batches = [];
+  database.transaction = (work) =>
+    transaction.call(database, async (client) => {
+      const query = client.query;
+      let inserted = 0;
+      client.query = async function (sql, ...args) {
+        const result = await query.call(this, sql, ...args);
+        if (/^\s*INSERT INTO organization_billing_months\b/.test(sql)) inserted += result.rowCount;
+        return result;
+      };
+      try {
+        return await work(client);
+      } finally {
+        client.query = query;
+        batches.push(inserted);
+      }
+    });
+  try {
+    await billing.rollover();
+  } finally {
+    database.transaction = transaction;
+  }
+  assert.ok(batches.filter((count) => count > 0).length >= 3);
+  assert.ok(batches.every((count) => count <= 10));
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT count(*)::int AS n FROM organization_billing_months WHERE organization_seq=ANY($1::int[])',
+        [companies],
+      )
+    ).rows[0].n,
+    25,
+  );
+  await billing.rollover();
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs WHERE action='BILLING_MONTH_INITIALIZED' AND target_seq=ANY($1::int[]) AND result='SUCCESS'",
+        [companies],
+      )
+    ).rows[0].n,
+    50,
   );
 });
 

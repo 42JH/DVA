@@ -72,24 +72,29 @@ export class OrganizationBillingService {
     );
   }
   async rollover(now = new Date()) {
-    await this.database.transaction(async (client) => {
-      if (
-        !(
-          await client.query<{ locked: boolean }>(
-            'SELECT pg_try_advisory_xact_lock(20261030,139) AS locked',
-          )
-        ).rows[0].locked
-      )
-        return;
-      for (const month of await this.repository.missingMonths(client, now)) {
-        // Serialize month creation with company deletion, including after its billing FKs are removed.
-        const company = await client.query(
-          'SELECT 1 FROM organizations WHERE organization_seq=$1 FOR SHARE',
-          [month.organizationSeq],
-        );
-        if (company.rowCount)
-          await this.ensureMonth(client, month.organizationSeq, month.billingMonth, randomUUID());
-      }
-    });
+    const months = await this.repository.missingMonths(this.database.pool, now);
+    for (let offset = 0; offset < months.length; offset += 10) {
+      const acquired = await this.database.transaction(async (client) => {
+        if (
+          !(
+            await client.query<{ locked: boolean }>(
+              'SELECT pg_try_advisory_xact_lock(20261030,139) AS locked',
+            )
+          ).rows[0].locked
+        )
+          return false;
+        for (const month of months.slice(offset, offset + 10)) {
+          // Serialize month creation with company deletion, including after its billing FKs are removed.
+          const company = await client.query(
+            'SELECT 1 FROM organizations WHERE organization_seq=$1 FOR SHARE',
+            [month.organizationSeq],
+          );
+          if (company.rowCount)
+            await this.ensureMonth(client, month.organizationSeq, month.billingMonth, randomUUID());
+        }
+        return true;
+      });
+      if (!acquired) return;
+    }
   }
 }

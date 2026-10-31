@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { PoolClient } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { BillingMonthDto } from './dto/billing-month.dto';
 
@@ -70,7 +70,7 @@ export class OrganizationBillingRepository {
       )
     ).rows[0];
   }
-  async missingMonths(client: PoolClient, now: Date) {
+  async missingMonths(client: Pool | PoolClient, now: Date) {
     return (
       await client.query<{ organizationSeq: number; billingMonth: string }>(
         `SELECT o.organization_seq AS "organizationSeq",m.month::date::text AS "billingMonth"

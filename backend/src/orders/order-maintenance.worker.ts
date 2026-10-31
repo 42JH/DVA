@@ -54,43 +54,47 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
   private async work(now: Date) {
     // Rollover commits before locking orders, preserving the payment lock order.
     await this.billing.rollover(now);
-    await this.database.transaction(async (client) => {
-      if (
-        !(
-          await client.query<{ locked: boolean }>(
-            'SELECT pg_try_advisory_xact_lock(20261030,140) AS locked',
-          )
-        ).rows[0].locked
-      )
-        return;
-      const pending = await client.query<{ orderSeq: number; totalAmount: number }>(
-        `SELECT o.order_seq AS "orderSeq",o.total_amount AS "totalAmount" FROM orders o
+    for (let batch = 0; batch < 10 && !this.stopped; batch++) {
+      const count = await this.database.transaction(async (client) => {
+        if (
+          !(
+            await client.query<{ locked: boolean }>(
+              'SELECT pg_try_advisory_xact_lock(20261030,140) AS locked',
+            )
+          ).rows[0].locked
+        )
+          return 0;
+        const pending = await client.query<{ orderSeq: number; totalAmount: number }>(
+          `SELECT o.order_seq AS "orderSeq",o.total_amount AS "totalAmount" FROM orders o
        WHERE status='notPaid' AND payment_due_at<=$1 AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NOT NULL)
-       ORDER BY payment_due_at,order_seq LIMIT 100 FOR UPDATE OF o SKIP LOCKED`,
-        [now],
-      );
-      for (const order of pending.rows) {
-        await this.repository.cancel(client, order.orderSeq);
-        await this.repository.recalculateAmount(client, order.orderSeq);
-        await this.payments.replaceRequest(client, order.orderSeq);
-        await this.audit.recordSuccess(
-          {
-            actorId: null,
-            actorType: 'SYSTEM',
-            targetId: order.orderSeq,
-            targetType: 'ORDER',
-            action: 'ORDER_CANCELLED',
-            requestId: randomUUID(),
-            metadata: {
-              amountBefore: order.totalAmount,
-              amountAfter: 0,
-              reason: 'PAYMENT_EXPIRED',
-            },
-          },
-          client,
+       ORDER BY payment_due_at,order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`,
+          [now],
         );
-      }
-    });
+        for (const order of pending.rows) {
+          await this.repository.cancel(client, order.orderSeq);
+          await this.repository.recalculateAmount(client, order.orderSeq);
+          await this.payments.replaceRequest(client, order.orderSeq);
+          await this.audit.recordSuccess(
+            {
+              actorId: null,
+              actorType: 'SYSTEM',
+              targetId: order.orderSeq,
+              targetType: 'ORDER',
+              action: 'ORDER_CANCELLED',
+              requestId: randomUUID(),
+              metadata: {
+                amountBefore: order.totalAmount,
+                amountAfter: 0,
+                reason: 'PAYMENT_EXPIRED',
+              },
+            },
+            client,
+          );
+        }
+        return pending.rows.length;
+      });
+      if (count < 10) break;
+    }
     const paid = await this.database.pool.query<{ id: number }>(
       "SELECT order_seq AS id FROM orders WHERE status='PAID' ORDER BY order_seq LIMIT 20",
     );
