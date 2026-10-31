@@ -186,3 +186,9 @@ npm.cmd run check:docker
 타인 데이터 차단, 전체 PIN 반환, 상태 변경 반영, 입력 검증, 장애 응답과 로그 비노출을 검증한다.
 통화 시작 후 기존 주문 조회·취소·PIN 수정, 통화 재요청·불일치·동시성, 주문 결과 연결, 조회 실패 롤백과 주문 없는 통화의 PBX/녹취 연결도 검증한다.
 운영 이미지와 Nginx를 거친 MVP 조회도 검증한다. 실제 운영 서버 배포·AI 팀 연동 완료를 뜻하지 않는다.
+
+## 028 내 주소·선택 부서
+
+등록 고객의 customer.address는 PIN과 독립된 내 주소 객체 또는 null이다. 개인·기업 PIN 배열은 그대로다.
+기업 소속이 있어도 membership.departmentSeq와 department는 null일 수 있다.
+이 경우 COMPANY 사용과 활성 기업의 credit 자격은 유지하고 groupBilling은 제외한다.

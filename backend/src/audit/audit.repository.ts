@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -75,7 +76,7 @@ export class AuditRepository {
     );
   }
 
-  async findMany(query: AuditQueryDto): Promise<AuditLog[]> {
+  async findMany(query: AuditQueryDto): Promise<PageRows<AuditLog>> {
     const conditions: string[] = [];
     const values: Array<string | number> = [];
     if (query.actorType !== undefined) {
@@ -120,22 +121,16 @@ export class AuditRepository {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    values.push(query.limit + 1);
-    const limitParameter = `$${values.length}`;
-
-    values.push(query.offset);
-    const offsetParameter = `$${values.length}`;
-
-    const result = await this.database.pool.query<AuditLog>(
+    const result = await readPage<AuditLog>(
+      this.database.pool,
       `${AUDIT_SELECT}
-      ${where}
-      ORDER BY occurred_at DESC, audit_log_seq DESC
-      LIMIT ${limitParameter}
-      OFFSET ${offsetParameter}`,
+      ${where}`,
       values,
+      query,
+      '"occurredAt" DESC,"auditLogSeq" DESC',
     );
 
-    return result.rows;
+    return result;
   }
   async findOne(id: number): Promise<AuditLog | undefined> {
     const result = await this.database.pool.query<AuditLog>(

@@ -96,7 +96,7 @@ export class CustomersController {
     summary: '고객 이름·상태 변경',
     security: [{ adminSession: [] }, {}],
     description:
-      '이름 수정은 MVP 서비스 인증 없음. status는 ACTIVE 관리자 세션과 허용 Origin 필수. 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
+      '이름·내 주소 수정은 MVP 서비스 인증 없음. status는 ACTIVE 관리자 세션과 허용 Origin 필수. 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
   })
   @ApiNoContentResponse()
   update(

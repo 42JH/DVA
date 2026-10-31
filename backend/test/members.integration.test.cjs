@@ -14,7 +14,6 @@ const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { MembersRepository } = require('../dist/members/members.repository');
 const { hashPassword } = require('../dist/auth/password');
-const { CSV_MAX_BYTES } = require('../dist/members/member-csv');
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT),
@@ -25,14 +24,12 @@ const pool = new Pool({
 const apps = [];
 const password = 'member-test-only-password';
 const origin = 'http://localhost:5173';
-const header = 'employeeNo,name,phoneNumber,departmentSeq\n';
 const departments = new Map();
-const csv = (companyId, rows) =>
-  header +
-  rows
-    .split('\n')
-    .map((row) => `${row},${departments.get(companyId)}`)
-    .join('\n');
+const employees = (companyId, fixture) =>
+  fixture.split('\n').map((row) => {
+    const [employeeNo, name, phoneNumber] = row.split(',');
+    return { employeeNo, name, phoneNumber, departmentSeq: departments.get(companyId) };
+  });
 const phone = () => '010' + String(randomInt(10000000, 100000000));
 let app, base, baseB, cookie, adminId, repository, passwordHash;
 async function start() {
@@ -105,20 +102,17 @@ function create(
     session,
   );
 }
-function upload(
-  companyId,
-  content,
-  key = undefined,
-  host = base,
-  session = cookie,
-  filename = 'employees.csv',
-  type = 'text/csv',
-) {
-  const form = new FormData();
-  form.append('file', new Blob([content], { type }), filename);
+function registerMany(companyId, items, key = undefined, host = base, session = cookie) {
   return request(
-    `/companies/${companyId}/members/import`,
-    { method: 'POST', headers: key === undefined ? {} : { 'Idempotency-Key': key }, body: form },
+    `/companies/${companyId}/members`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(key === undefined ? {} : { 'Idempotency-Key': key }),
+      },
+      body: JSON.stringify({ items }),
+    },
     host,
     session,
   );
@@ -181,12 +175,11 @@ async function error(response, status, code) {
   return body;
 }
 
-test('all five member operations require real sessions and writes preserve Origin protection', async () => {
+test('all four member operations require real sessions and writes preserve Origin protection', async () => {
   for (const session of [null, 'dva_session=invalid', 'dva_session=' + 'f'.repeat(64)]) {
     for (const [method, path] of [
       ['GET', '/companies/1/members'],
       ['POST', '/companies/1/members'],
-      ['POST', '/companies/1/members/import'],
       ['PATCH', '/members/1'],
       ['DELETE', '/members/1'],
     ])
@@ -203,7 +196,6 @@ test('all five member operations require real sessions and writes preserve Origi
   }
   for (const [method, path] of [
     ['POST', '/companies/1/members'],
-    ['POST', '/companies/1/members/import'],
     ['PATCH', '/members/1'],
     ['DELETE', '/members/1'],
   ]) {
@@ -232,7 +224,13 @@ test('every active admin role can manage members and representative labels creat
       ),
     );
     await empty(
-      await upload(co, csv(co, `002,새 고객,${phone()}`), randomUUID(), base, admin.cookie),
+      await registerMany(
+        co,
+        employees(co, `002,새 고객,${phone()}`),
+        randomUUID(),
+        base,
+        admin.cookie,
+      ),
     );
     await empty(await remove(row.membership.membershipSeq, admin.cookie));
   }
@@ -264,7 +262,13 @@ test('expired, pending and logged-out sessions cannot upload or modify membershi
         204,
       );
     await error(
-      await upload(co, csv(co, `002,실패,${phone()}`), randomUUID(), base, admin.cookie),
+      await registerMany(
+        co,
+        employees(co, `002,실패,${phone()}`),
+        randomUUID(),
+        base,
+        admin.cookie,
+      ),
       401,
       'UNAUTHORIZED',
     );
@@ -284,7 +288,7 @@ test('expired, pending and logged-out sessions cannot upload or modify membershi
 
 test('lists return nested member/customer views, status filters, stable pages and empty companies', async () => {
   const co = await company();
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
   const ids = [];
   for (const employee of ['001', '002', '003']) {
     const cu = await customer();
@@ -293,7 +297,7 @@ test('lists return nested member/customer views, status filters, stable pages an
   }
   await empty(await patch(ids[1], { status: 'INACTIVE' }));
   const first = await members(co, '?limit=2&offset=0');
-  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(
     first.data.map((row) => row.membership.membershipSeq),
     ids.toReversed().slice(0, 2),
@@ -303,7 +307,7 @@ test('lists return nested member/customer views, status filters, stable pages an
   assert.equal(second.hasNext, false);
   assert.equal(second.data[0].membership.membershipSeq, ids[0]);
   assert.equal((await members(co, '?status=INACTIVE')).data[0].membership.membershipSeq, ids[1]);
-  assert.deepEqual(await members(co, '?offset=1000'), { data: [], hasNext: false });
+  assert.deepEqual(await members(co, '?offset=1000'), { data: [], hasNext: false, total_count: 3 });
   for (const query of [
     'status=PENDING',
     'limit=0',
@@ -420,7 +424,7 @@ test('unlink deletes only membership, preserves customer/PIN/order and permits a
     )
   ).rows[0].personal_pin_seq;
   await empty(await remove(m.membershipSeq));
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
   assert.equal(
     (await pool.query('SELECT count(*) FROM customers WHERE customer_seq=$1', [cu.id])).rows[0]
       .count,
@@ -441,13 +445,20 @@ test('unlink deletes only membership, preserves customer/PIN/order and permits a
   assert.notEqual((await member(other, cu.id)).membershipSeq, m.membershipSeq);
 });
 
-test('CSV creates new customers and links existing unaffiliated customers with default display/state', async () => {
+test('JSON batch creates new customers and links existing unaffiliated customers with default display/state', async () => {
   const co = await company(),
     existing = await customer(),
     number = phone();
-  const content =
-    '\ufeff' + csv(co, `001a," 김,민수 ",${number}\n002,변경 고객,${existing.phoneNumber}`);
-  await empty(await upload(co, content));
+  const content = [
+    {
+      employeeNo: '001a',
+      name: ' 김,민수 ',
+      phoneNumber: number,
+      departmentSeq: departments.get(co),
+    },
+    ...employees(co, `002,변경 고객,${existing.phoneNumber}`),
+  ];
+  await empty(await registerMany(co, content));
   const list = await members(co);
   assert.equal(list.data.length, 2);
   const linked = list.data.find((row) => row.customer.customerSeq === existing.id);
@@ -463,7 +474,7 @@ test('CSV creates new customers and links existing unaffiliated customers with d
   }
 });
 
-test('CSV updates existing employee name/phone while retaining IDs, representative/status and historical order snapshot', async () => {
+test('JSON batch updates existing employee name/phone while retaining IDs, representative/status and historical order snapshot', async () => {
   const co = await company(),
     cu = await customer(),
     omitted = await customer();
@@ -479,7 +490,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     [order, cu.name, cu.phoneNumber],
   );
   const next = phone();
-  await empty(await upload(co, csv(co, `001,새 이름,${next}`)));
+  await empty(await registerMany(co, employees(co, `001,새 이름,${next}`)));
   const after = await member(co, cu.id);
   assert.equal(after.membershipSeq, m.membershipSeq);
   assert.equal(after.role, 'ORG_ADMIN');
@@ -492,6 +503,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     phoneNumber: next,
     status: 'ACTIVE',
     monthlyBillingEnabled: false,
+    address: null,
   });
   assert.equal((await members(co)).data.length, 2);
   const old = (
@@ -501,7 +513,7 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
     )
   ).rows[0];
   assert.deepEqual(old, { origin_name: cu.name, origin_phone_number: cu.phoneNumber });
-  await empty(await upload(co, csv(co, `001,새 이름,${next}`)));
+  await empty(await registerMany(co, employees(co, `001,새 이름,${next}`)));
   assert.equal((await member(co, cu.id)).membershipSeq, m.membershipSeq);
   const blocked = await request('/customers/' + cu.id, {
     method: 'PATCH',
@@ -511,15 +523,15 @@ test('CSV updates existing employee name/phone while retaining IDs, representati
   await error(blocked, 400, 'INVALID_REQUEST');
 });
 
-test('CSV validates the whole batch before changes and never echoes bad phone/name fields', async () => {
+test('JSON batch validates the whole batch before changes and never echoes bad phone/name fields', async () => {
   const co = await company(),
     number = phone();
   for (const content of [
-    csv(co, `001,PrivateName,${number}\n001,Other,${phone()}`),
-    csv(co, `001,PrivateName,${number}\n002,Other,${number}`),
-    csv(co, `001,PrivateName,${number}\n002,Other,010-bad`),
+    employees(co, `001,PrivateName,${number}\n001,Other,${phone()}`),
+    employees(co, `001,PrivateName,${number}\n002,Other,${number}`),
+    employees(co, `001,PrivateName,${number}\n002,Other,010-bad`),
   ]) {
-    const body = await error(await upload(co, content), 422, 'VALIDATION_FAILED');
+    const body = await error(await registerMany(co, content), 400, 'INVALID_REQUEST');
     assert.ok(!JSON.stringify(body).includes('PrivateName'));
     assert.ok(!JSON.stringify(body).includes(number));
     assert.equal((await members(co)).data.length, 0);
@@ -531,7 +543,7 @@ test('CSV validates the whole batch before changes and never echoes bad phone/na
   }
 });
 
-test('CSV rejects other-company membership, another employee number and phone ownership conflicts atomically', async () => {
+test('JSON batch rejects other-company membership, another employee number and phone ownership conflicts atomically', async () => {
   const co = await company(),
     other = await company(),
     a = await customer(),
@@ -545,7 +557,7 @@ test('CSV rejects other-company membership, another employee number and phone ow
     [`001,Other,${b.phoneNumber}`, 'PHONE_NUMBER_CONFLICT'],
   ]) {
     const body = await error(
-      await upload(co, csv(co, `NEW,새 고객,${number}\n` + row)),
+      await registerMany(co, employees(co, `NEW,새 고객,${number}\n` + row)),
       422,
       'VALIDATION_FAILED',
     );
@@ -559,18 +571,22 @@ test('CSV rejects other-company membership, another employee number and phone ow
   }
 });
 
-test('CSV refuses withdrawn customers and inactive companies without reviving or partially saving rows', async () => {
+test('JSON batch refuses withdrawn customers and inactive companies without reviving or partially saving rows', async () => {
   const co = await company(),
     inactive = await company('INACTIVE'),
     cu = await customer('WITHDRAWN');
   const body = await error(
-    await upload(co, csv(co, `001,신규,${phone()}\n002,탈퇴,${cu.phoneNumber}`)),
+    await registerMany(co, employees(co, `001,신규,${phone()}\n002,탈퇴,${cu.phoneNumber}`)),
     422,
     'VALIDATION_FAILED',
   );
   assert.ok(body.error.details.some((item) => item.reason === 'CUSTOMER_WITHDRAWN'));
   assert.equal((await members(co)).data.length, 0);
-  await error(await upload(inactive, csv(inactive, `001,신규,${phone()}`)), 409, 'INVALID_STATE');
+  await error(
+    await registerMany(inactive, employees(inactive, `001,신규,${phone()}`)),
+    409,
+    'INVALID_STATE',
+  );
   assert.equal(
     (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [cu.id])).rows[0]
       .status,
@@ -579,70 +595,123 @@ test('CSV refuses withdrawn customers and inactive companies without reviving or
   const existing = await customer();
   await empty(await create(co, existing.id, '003'));
   await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [existing.id]);
-  await error(await upload(co, csv(co, `003,복구 시도,${phone()}`)), 422, 'VALIDATION_FAILED');
+  await error(
+    await registerMany(co, employees(co, `003,복구 시도,${phone()}`)),
+    422,
+    'VALIDATION_FAILED',
+  );
 });
 
-test('multipart validates file count, fields, type, encoding, byte cap and row cap with no persistence', async () => {
+test('JSON batches reject malformed, duplicate and oversized input without persistence; CSV route is removed', async () => {
   const co = await company();
-  const content = csv(co, `001,고객,${phone()}`);
-  await error(
-    await upload(co, content, randomUUID(), base, cookie, 'employees.xlsx'),
-    415,
-    'UNSUPPORTED_MEDIA_TYPE',
-  );
-  await error(
-    await upload(co, content, randomUUID(), base, cookie, 'employees.csv', 'application/pdf'),
-    415,
-    'UNSUPPORTED_MEDIA_TYPE',
-  );
-  for (const bad of [
-    '',
-    header,
-    'name,phoneNumber\nA,0101',
-    header + '001,"unclosed,0101',
-    Buffer.from([0xff, 0xfe, 0x61]),
-  ])
-    await error(await upload(co, bad), 400, 'INVALID_REQUEST');
-  await error(await upload(co, 'x'.repeat(CSV_MAX_BYTES + 1)), 413, 'PAYLOAD_TOO_LARGE');
-  const rows = Array.from(
-    { length: 1001 },
-    (_, i) => `${i},Name,010${String(i).padStart(8, '0')}`,
-  ).join('\n');
-  await error(await upload(co, csv(co, rows)), 413, 'PAYLOAD_TOO_LARGE');
-  for (const mode of ['missing', 'extra', 'double', 'wrong']) {
-    const form = new FormData();
-    if (mode !== 'missing')
-      form.append(
-        mode === 'wrong' ? 'other' : 'file',
-        new Blob([content], { type: 'text/csv' }),
-        'file.csv',
-      );
-    if (mode === 'double')
-      form.append('file', new Blob([content], { type: 'text/csv' }), 'other.csv');
-    if (mode === 'extra') form.append('role', 'ORG_ADMIN');
-    await error(
-      await request(`/companies/${co}/members/import`, {
-        method: 'POST',
-        headers: { 'Idempotency-Key': randomUUID() },
-        body: form,
-      }),
-      400,
-      'INVALID_REQUEST',
-    );
+  const input = { employeeNo: '001', name: '개인 이름', phoneNumber: phone() };
+  for (const items of [
+    [],
+    [null],
+    [42],
+    [input, input],
+    [{ ...input, phoneNumber: '010-bad' }],
+    [{ ...input, extra: 'bad' }],
+    Array.from({ length: 1001 }, (_, i) => ({ ...input, employeeNo: String(i) })),
+  ]) {
+    const body = await error(await registerMany(co, items), 400, 'INVALID_REQUEST');
+    assert.ok(!JSON.stringify(body).includes(input.name));
+    assert.ok(!JSON.stringify(body).includes(input.phoneNumber));
   }
   await error(
-    await request(`/companies/${co}/members/import`, {
-      method: 'POST',
-      headers: { 'Idempotency-Key': randomUUID(), 'Content-Type': 'application/json' },
-      body: '{}',
-    }),
-    415,
-    'UNSUPPORTED_MEDIA_TYPE',
+    await registerMany(co, [{ ...input, name: 'x'.repeat(1024 * 1024) }]),
+    413,
+    'PAYLOAD_TOO_LARGE',
   );
-  assert.deepEqual(await members(co), { data: [], hasNext: false });
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob(['employeeNo,name,phoneNumber\n001,Name,0101'], { type: 'text/csv' }),
+    'members.csv',
+  );
+  await error(
+    await request(`/companies/${co}/members/import`, { method: 'POST', body: form }),
+    404,
+    'NOT_FOUND',
+  );
+  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
 });
 
-test('registration and CSV need no key and ignore legacy key headers', async () => {
+test('employee JSON accepts more than the general 100 KiB limit on its own route', async () => {
+  const co = await company();
+  const name = '직'.repeat(40000);
+  const number = phone();
+  await empty(await registerMany(co, [{ employeeNo: 'LARGE', name, phoneNumber: number }]));
+  assert.equal(
+    (await pool.query('SELECT name FROM customers WHERE phone_number=$1', [number])).rows[0].name,
+    name,
+  );
+});
+
+test('single JSON and mixed customer-reference batches support optional departments atomically', async () => {
+  const co = (
+    await pool.query(
+      "INSERT INTO organizations(name,status) VALUES('부서 없는 기업','ACTIVE') RETURNING organization_seq",
+    )
+  ).rows[0].organization_seq;
+  const existing = await customer();
+  const post = (input) =>
+    request(`/companies/${co}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+  await empty(await post({ employeeNo: '001', name: '신규 직원', phoneNumber: phone() }));
+  await empty(
+    await post({
+      items: [
+        { customerSeq: existing.id, employeeNo: '002', role: 'ORG_ADMIN', departmentSeq: null },
+        { employeeNo: '003', name: '또 다른 직원', phoneNumber: phone() },
+      ],
+    }),
+  );
+  assert.equal((await members(co)).data.length, 3);
+  for (const row of (await members(co)).data) assert.equal(row.membership.departmentSeq, null);
+  const another = await customer();
+  const number = phone();
+  await error(
+    await post({
+      items: [
+        { employeeNo: '004', name: '롤백 직원', phoneNumber: number },
+        { customerSeq: another.id, employeeNo: '002', role: 'MEMBER' },
+      ],
+    }),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [number])).rows[0]
+      .count,
+    '0',
+  );
+  assert.equal((await members(co)).data.length, 3);
+  const withDept = await company();
+  const person = await customer();
+  await empty(await create(withDept, person.id));
+  const m = await member(withDept, person.id);
+  await empty(await patch(m.membershipSeq, { departmentSeq: null }));
+  assert.equal((await member(withDept, person.id)).departmentSeq, null);
+  await empty(
+    await registerMany(withDept, [
+      { employeeNo: '001', name: '보존 직원', phoneNumber: person.phoneNumber },
+    ]),
+  );
+  assert.equal((await member(withDept, person.id)).departmentSeq, null);
+  await empty(await patch(m.membershipSeq, { departmentSeq: departments.get(withDept) }));
+  await empty(
+    await registerMany(withDept, [
+      { employeeNo: '001', name: '보존 직원', phoneNumber: person.phoneNumber },
+    ]),
+  );
+  assert.equal((await member(withDept, person.id)).departmentSeq, departments.get(withDept));
+});
+
+test('registration and JSON batch need no key and ignore legacy key headers', async () => {
   assert.equal(
     (await pool.query("SELECT to_regclass('api_idempotency.membership_writes') AS name")).rows[0]
       .name,
@@ -654,8 +723,12 @@ test('registration and CSV need no key and ignore legacy key headers', async () 
   await empty(await create(co, cu.id));
   await error(await create(co, cu.id, '001', 'legacy-header'), 409, 'DUPLICATE_RESOURCE');
   await empty(await create(co, other.id, '002', 'legacy-header'));
-  await empty(await upload(co, csv(co, '001,First,' + cu.phoneNumber), 'legacy-header'));
-  await empty(await upload(co, csv(co, '001,Changed,' + cu.phoneNumber), 'legacy-header'));
+  await empty(
+    await registerMany(co, employees(co, '001,First,' + cu.phoneNumber), 'legacy-header'),
+  );
+  await empty(
+    await registerMany(co, employees(co, '001,Changed,' + cu.phoneNumber), 'legacy-header'),
+  );
   assert.equal(
     (await members(co)).data.find((row) => row.customer.customerSeq === cu.id).customer.name,
     'Changed',
@@ -693,7 +766,7 @@ test('membership writes wait before returning a bounded lock timeout without a r
     const responses = await Promise.all([
       create(co, other.id, '002'),
       patch(m.membershipSeq, { role: 'ORG_ADMIN' }),
-      upload(co, csv(co, '003,New,' + phone())),
+      registerMany(co, employees(co, '003,New,' + phone())),
     ]);
     assert.ok(Date.now() - started >= 1500);
     for (const response of responses) await error(response, 409, 'REQUEST_IN_PROGRESS');
@@ -705,17 +778,17 @@ test('membership writes wait before returning a bounded lock timeout without a r
   await empty(await create(co, other.id, '002'));
 });
 
-test('concurrent uploads keep one customer/membership and audit each successful import', async () => {
+test('concurrent JSON batches keep one customer/membership and audit each successful import', async () => {
   const co = await company(),
     number = phone(),
     key = undefined,
-    content = csv(co, `001,동시 고객,${number}`);
+    content = employees(co, `001,동시 고객,${number}`);
   const responses = await Promise.all(
-    Array.from({ length: 6 }, (_, i) => upload(co, content, key, i % 2 ? base : baseB)),
+    Array.from({ length: 6 }, (_, i) => registerMany(co, content, key, i % 2 ? base : baseB)),
   );
   assert.ok(responses.some((response) => response.status === 204));
   for (const response of responses) assert.equal(response.status, 204);
-  await empty(await upload(co, content, key));
+  await empty(await registerMany(co, content, key));
   assert.equal((await members(co)).data.length, 1);
   assert.equal(
     (await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [number])).rows[0]
@@ -737,10 +810,10 @@ test('concurrent companies cannot acquire the same phone/customer and retries ne
   const co = await company(),
     other = await company(),
     number = phone(),
-    content = csv(co, `001,경합 고객,${number}`);
+    content = employees(co, `001,경합 고객,${number}`);
   const responses = await Promise.all([
-    upload(co, content),
-    upload(other, csv(other, `001,경합 고객,${number}`), randomUUID(), baseB),
+    registerMany(co, content),
+    registerMany(other, employees(other, `001,경합 고객,${number}`), randomUUID(), baseB),
   ]);
   assert.equal(responses.filter((response) => response.status === 204).length, 1);
   for (const response of responses) assert.ok([204, 409, 422].includes(response.status));
@@ -751,24 +824,28 @@ test('concurrent companies cannot acquire the same phone/customer and retries ne
     '1',
   );
   const loser = (await members(co)).data.length ? other : co;
-  await error(await upload(loser, csv(loser, `001,경합 고객,${number}`)), 422, 'VALIDATION_FAILED');
+  await error(
+    await registerMany(loser, employees(loser, `001,경합 고객,${number}`)),
+    422,
+    'VALIDATION_FAILED',
+  );
 });
 
-test('CSV audit failure rolls back changed customers, new customers and memberships', async () => {
+test('JSON batch audit failure rolls back changed customers, new customers and memberships', async () => {
   const co = await company(),
     cu = await customer();
   await empty(await create(co, cu.id));
   const newPhone = phone(),
     otherPhone = phone();
-  const content = csv(co, '001,Changed,' + newPhone + '\n002,New,' + otherPhone);
+  const content = employees(co, '001,Changed,' + newPhone + '\n002,New,' + otherPhone);
   await pool.query(
-    "CREATE FUNCTION fail_member_csv_audit_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MEMBERS_IMPORTED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$",
+    "CREATE FUNCTION fail_member_batch_audit_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MEMBERS_IMPORTED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$",
   );
   try {
     await pool.query(
-      'CREATE TRIGGER fail_member_csv_audit_37 BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_member_csv_audit_37()',
+      'CREATE TRIGGER fail_member_batch_audit_37 BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION fail_member_batch_audit_37()',
     );
-    await error(await upload(co, content), 500, 'INTERNAL_ERROR');
+    await error(await registerMany(co, content), 500, 'INTERNAL_ERROR');
     const old = (
       await pool.query('SELECT name,phone_number FROM customers WHERE customer_seq=$1', [cu.id])
     ).rows[0];
@@ -789,10 +866,10 @@ test('CSV audit failure rolls back changed customers, new customers and membersh
       '0',
     );
   } finally {
-    await pool.query('DROP TRIGGER IF EXISTS fail_member_csv_audit_37 ON audit_logs');
-    await pool.query('DROP FUNCTION fail_member_csv_audit_37()');
+    await pool.query('DROP TRIGGER IF EXISTS fail_member_batch_audit_37 ON audit_logs');
+    await pool.query('DROP FUNCTION fail_member_batch_audit_37()');
   }
-  await empty(await upload(co, content));
+  await empty(await registerMany(co, content));
   assert.equal((await members(co)).data.length, 2);
 });
 
@@ -831,7 +908,7 @@ test('audit failure rolls back representative/status changes and unlink, recordi
   }
 });
 
-test('CSV rechecks customer status after acquiring a row locked by a concurrent withdrawal', async () => {
+test('JSON batch rechecks customer status after acquiring a row locked by a concurrent withdrawal', async () => {
   const co = await company(),
     cu = await customer(),
     newPhone = phone();
@@ -844,7 +921,7 @@ test('CSV rechecks customer status after acquiring a row locked by a concurrent 
     await lock.query('SELECT customer_seq FROM customers WHERE customer_seq=$1 FOR UPDATE', [
       cu.id,
     ]);
-    pending = upload(co, csv(co, `001,변경 시도,${newPhone}`));
+    pending = registerMany(co, employees(co, `001,변경 시도,${newPhone}`));
     let waiting = false;
     for (let attempt = 0; attempt < 50; attempt++) {
       const result = await pool.query(
@@ -872,12 +949,11 @@ test('CSV rechecks customer status after acquiring a row locked by a concurrent 
   }
 });
 
-test('OpenAPI contains five protected operations, CSV upload shape, representative labels and 204 responses', async () => {
+test('OpenAPI contains four protected operations, JSON batch shape, representative labels and 204 responses', async () => {
   const document = await (await fetch(base + '/api/docs-json')).json();
   for (const [path, method] of [
     ['/api/companies/{id}/members', 'get'],
     ['/api/companies/{id}/members', 'post'],
-    ['/api/companies/{id}/members/import', 'post'],
     ['/api/members/{id}', 'patch'],
     ['/api/members/{id}', 'delete'],
   ]) {
@@ -885,12 +961,16 @@ test('OpenAPI contains five protected operations, CSV upload shape, representati
     assert.deepEqual(operation.security, [{ adminSession: [] }]);
     if (method !== 'get') assert.ok(!operation.responses['204'].content);
   }
-  const upload = document.paths['/api/companies/{id}/members/import'].post;
+  assert.equal(document.paths['/api/companies/{id}/members/import'], undefined);
+  const create = document.paths['/api/companies/{id}/members'].post;
+  assert.equal(create.requestBody.content['application/json'].schema.oneOf.length, 3);
   assert.equal(
-    upload.requestBody.content['multipart/form-data'].schema.properties.file.format,
-    'binary',
+    document.components.schemas.MembershipResponseDto.properties.departmentSeq.nullable,
+    true,
   );
-  assert.ok(!(upload.parameters ?? []).some((item) => item.name === 'Idempotency-Key'));
+  assert.ok(
+    !(document.components.schemas.CreateMemberDto.required ?? []).includes('departmentSeq'),
+  );
   assert.ok(
     !(document.paths['/api/companies/{id}/members'].post.parameters ?? []).some(
       (item) => item.name === 'Idempotency-Key',

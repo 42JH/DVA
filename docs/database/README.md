@@ -5,7 +5,7 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 ## 적용 기준
 
 `monolith.dbml`은 사용자가 전달한 2026-10-25 ERD에 현재 migration을 반영한 문서다. 단일 PostgreSQL DB,
-public 업무·운영 테이블 23개와 관리자 세션 테이블 1개, public FK 19개를 사용한다. PBX 수신함까지 ERD 25개 테이블과 FK 20개이며, 고객·주문·상담·배송·운영 모듈별 주석으로 구분한다.
+public 업무·운영 테이블 26개와 관리자 세션 테이블 1개, public FK 25개를 사용한다. PBX 수신함까지 ERD 28개 테이블과 FK 26개이며, 고객·주문·상담·배송·운영 모듈별 주석으로 구분한다.
 실제 모놀리식 배포 원본은 `backend/migrations/`이며 `msa/`는 적용하지 않는다.
 
 - `001-pbx-call-ended.sql`: 기존 PBX 웹훅 수신 테이블. 기존 앱 시작 시의 생성 동작을 유지한다.
@@ -24,7 +24,7 @@ public 업무·운영 테이블 23개와 관리자 세션 테이블 1개, public
 
 고객 상태는 ACTIVE/WITHDRAWN, 기업 상태는 ACTIVE/INACTIVE, 관리자 상태는 ACTIVE/PENDING/INACTIVE다.
 사번은 TEXT NOT NULL이며 기업별로 고유하다. 문자열 그대로 비교하므로 공백 제거·대소문자 통합,
-CSV 갱신 방식은 API 구현 시 결정한다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
+직원 JSON 단건·복수 등록·갱신은 [구성원 계약](../api/members.md)을 따른다. `auth_version`과 기본 관리자 계정은 생성하지 않는다.
 
 ## 부서·주문 결제 전환 — 138
 
@@ -64,7 +64,7 @@ Docker Desktop의 Linux 컨테이너 모드와 `postgres:17-alpine` 이미지가
 
 검증 범위:
 
-- public 테이블 24개·FK 19개·트리거 10개, 기존 PBX 데이터 보존.
+- public 테이블 27개·FK 25개·트리거 10개, 기존 PBX 데이터 보존.
 - 고객·기업·관리자 상태값, 기업별 사번 중복·공백·NULL.
 - 주소 검증·정규화된 PIN 중복 방지·검색용 생성 컬럼·PIN 소유권 및 버전.
 - 주문 헤더·상세 변경 버전, 접수 후 상세 복사본 수정 방지, 주문 생성 UUID 유일성, 기존 요청 키 이전·업무 데이터 보존·키 충돌 거절·테이블 삭제 롤백.
@@ -122,7 +122,7 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 ## 생성 중복 처리 기준
 
-기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 개별 등록·CSV는 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거하며 개별 등록 중복은 고유 제약, CSV 재업로드는 기업·사번 기준 갱신으로 처리한다.
+기업 등록은 독립 요청이며 같은 이름을 허용한다. 고객은 phone_number UNIQUE, 직원은 기업+사번, PIN은 기존 주소 UNIQUE를 사용한다. 기업·고객·구성원 등록은 별도 요청 기록을 사용하지 않는다. 구성원 기록은 010으로 제거했으며 기존 고객 연결 중복은 고유 제약, 이름·전화번호 JSON 재등록은 기업·사번 기준 갱신으로 처리한다.
 주문은 orders.creation_request_id와 통화 연결을 사용한다. 재시도는 기존 주문의 현재 버전을 반환하며 최초 본문·응답은 보관하지 않는다.
 배송 상태 이력의 request_id, PBX 수신 기록, 기존 version·감사·세션 테이블은 유지한다.
 57번 최종 접수는 기존 orders의 order_seq·status·version·updated_at을 사용한다. 주문 행을 잠근 뒤 SUBMITTING을 커밋한 요청만 외부로 전송한다. 재호출은 상태만 반환하며 별도 접수 키·컬럼·테이블·migration을 추가하지 않는다. 과거 cat 결제도 일괄 변경하지 않는다. 상세 계약은 [ORD-06](../api/order-submit.md)을 따른다.
@@ -133,7 +133,18 @@ sudo sh infra/database/migrate.sh --no-backup dva-prod-db-1
 
 023은 결제 완료 안내 상태·시도 시각·성공 시각을 같은 `order_payment_requests`에 추가한다. 이미 완료된 결제 요청은 완료 안내 발송 대기로 이관하며, 기존 결제·주문·요청 안내 발송 이력은 보존한다.
 
-이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `024-설명.sql`부터 순서대로 추가한다.
+024-call-analyses.sql은 통화당 최종 분석을 저장하는 call_analyses 한 테이블을 추가한다.
+통화·실제 사용 페르소나 버전 FK, 통화당 PK, 시각·횟수·불만 배열·본문 해시 제약을 둔다.
+기존 통화·주문·페르소나·FAQ 데이터는 수정하거나 추정 보완하지 않는다. 새 앱 실행 전에 024를 적용한다.
+이벤트·미답변 테이블과 조회용 뷰는 이 migration에 포함하지 않는다. [ANL-01](../api/call-analysis.md)을 따른다.
+
+025는 기존 분석의 불만 위치를 offsetMs에서 정수 초 offsetSeconds로 변환하고 같은 요청의 재전송 해시를 갱신한다. 분석 저장 시각은 보존한다.
+
+026은 call_insight_events와 미답변 참조 기반 unanswered_questions를 추가한다. 이벤트 UUID·통화별 순번·발화 연결을 고유하게 보존하고, 위치는 정수 초다. AI 동작 status는 저장하지 않는다. 질문은 [UNQ-01](../api/unanswered-questions.md)로 수집하고 [UNQ-02](../api/unanswered-questions-read-spec.md)로 목록·검색 조회한다. [UNQ-03·UNQ-04](../api/unanswered-questions-management.md)는 기존 전환·삭제 상태 필드를 사용한다. FAQ 삭제를 막는 FK는 추가하지 않는다. [EVT-01](../api/call-events.md)을 따른다. UNQ-01·UNQ-02는 기존 026을 사용하며 추가 migration이 없다. 통계용 뷰는 별도 후속 작업이다.
+
+027-faq-categories.sql은 faq_entries에 필수 category를 추가하고 기존 32개 질문을 [검토한 분류표](faq-category-assignments.md)대로 보완한다. 기본값은 없으며 미확인 추가 질문이 있으면 적용을 중단한다. 원문·관리자·시각·AI 알림 대기는 보존한다. 분류 보완 동안 두 FAQ 트리거만 같은 트랜잭션·배타 잠금 안에서 정지하고 복구하며 실패 시 스키마와 함께 롤백한다. SHA-256은 e6485628eb55e7bb930fc8499b0d39b8cb1a89de78b79b65c31302ab5df01dc9다. 실제 DB 적용은 이번 작업에서 제외한다.
+
+이미 적용한 SQL 파일을 수정하지 않고 다음 migration은 `028-설명.sql`부터 순서대로 추가한다.
 체크섬은 파일의 실제 바이트를 사용한다. `.gitattributes`로 신규 migration의 줄바꿈을 LF로 고정하고,
 기존 001은 최초 서버 적용 바이트와 같은 CRLF로 유지한다. 플랫폼 간 줄바꿈 변환으로 인한
 허위 체크섬 불일치를 방지하기 위한 설정이다.
@@ -155,7 +166,7 @@ sudo docker exec -i dva-prod-db-1 pg_restore --exit-on-error --no-owner -U dva -
 ## 업무 기능 구현과의 경계
 
 주문의 허용 상태 전이·접수 시 필수 내용 검증, 디버 접수 재시도, 배송 상태와 이력의 원자적 저장,
-인증·권한, CSV 업로드, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
+인증·권한, 직원 JSON 복수 등록, 녹취 보관·삭제 작업은 관련 API에서 구현한다. 57번은 접수 결과·초기 배송·이력·감사를 함께 저장하며 결과 불명인 요청을 자동 재전송하지 않는다.
 DB의 CHECK와 FK만으로 전체 업무 흐름이 완성되는 것은 아니다.
 
 새 AI 상담 결과는 ORD-01 한 번으로 저장하며 COMPLETE일 때 개인 카드는 결제를 기다리고 월·그룹결제는 결제 완료 후 디버 접수까지 처리한다. 기존 주문 보완은 ORD-04·ORD-06을 유지한다. OpenAI 세션 ID·이벤트 시각과 PBX 발신번호·시각 매칭은 [AI·PBX 계약](../api/ai-pbx-recordings.md)을 따른다. 녹취와 DB의 객체 참조는 업로드 성공 후 연결한다.
@@ -191,3 +202,11 @@ admin_sessions의 ON DELETE CASCADE는 유지한다.
 013-ai-persona-versions.sql은 기존 ai_prompt_versions를 ai_persona_versions로 이름 변경하고 이름·음성·속도·대기·프롬프트를 버전별로 보관한다. 새 테이블은 추가하지 않는다. ACTIVE와 PENDING은 서비스 전체에서 각각 최대 1개다.
 
 과거 프롬프트 기록에는 당시 음성 설정이 없으므로 기존 ai_personas 또는 ai_prompt_versions에 데이터가 있으면 013은 변경 전에 중단한다. 배포 전 두 테이블이 비어 있는지 확인해야 하며, 데이터가 있으면 원본을 보존한 별도 전환 정책이 필요하다. 과거 설정을 현재 값으로 추정하거나 삭제하지 않는다. 운영 DB 적용은 별도다.
+
+## 028 고객 내 주소와 선택 부서
+
+028-customer-address-optional-department.sql은 customers.address_data jsonb와 주소 형식 CHECK를 추가한다.
+미등록은 SQL NULL이며 기존 PIN·주문에서 채우지 않는다. memberships.department_seq의 NOT NULL만 제거하고 같은 기업 부서 복합 FK는 유지한다.
+기존 고객·소속·부서 배정·PIN·주문·감사 데이터는 수정/삭제하지 않는다. 001~027 원본과 체크섬은 유지한다.
+DB 백업 → 028 migration·verify → 새 앱 순서다. 실제 DB 적용은 이번 작업에서 제외한다.
+부서 없는 구성원을 생성한 후에는 부서 필수 가정의 구버전 앱으로 복귀하지 않는다. 복귀 전 실제 배정과 호환성 확인이 필요하다.

@@ -51,7 +51,7 @@ async function customer(status = 'ACTIVE') {
   const { rows } = await pool.query(
     `INSERT INTO customers(name,phone_number,status) VALUES('초기 조회 고객',$1,$2)
      RETURNING customer_seq AS "customerSeq",name,phone_number AS "phoneNumber",status,
-       monthly_billing_enabled AS "monthlyBillingEnabled"`,
+       monthly_billing_enabled AS "monthlyBillingEnabled", address_data AS address`,
     [phone(), status],
   );
   return rows[0];

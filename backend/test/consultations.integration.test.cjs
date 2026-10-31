@@ -77,6 +77,9 @@ async function call(input = {}) {
     ...row,
     orderStatus: row.orderSeq === null ? null : 'COLLECTING',
     orderTotalAmount: null,
+    customerSeq: null,
+    customerName: null,
+    analysis: null,
     handoff: null,
   };
 }
@@ -109,7 +112,10 @@ async function result(response, isList = true) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.ok(response.headers.get('x-request-id'));
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), isList ? ['data', 'hasNext'] : ['data', 'meta']);
+  assert.deepEqual(
+    Object.keys(body).sort(),
+    isList ? ['data', 'hasNext', 'total_count'] : ['data', 'meta'],
+  );
   if (!isList) assert.ok(body.meta.requestId);
   return body;
 }
@@ -149,7 +155,7 @@ test('call list requires a real administrator session, including AI/header calle
     const admin = role === 'OPERATOR' ? operator : await account(role);
     assert.deepEqual(
       await result(await list({ callerPhoneNumber: phoneNumber() }, admin.headers)),
-      { data: [], hasNext: false },
+      { data: [], hasNext: false, total_count: 0 },
     );
   }
 });
@@ -177,6 +183,7 @@ test('list preserves nullable call fields and distinguishes absent/requested/con
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
     data: rows,
     hasNext: false,
+    total_count: rows.length,
   });
   for (const status of ['REQUESTED', 'CONNECTED', 'FAILED'])
     assert.deepEqual(
@@ -202,7 +209,11 @@ test('list combines order, exact phone, end reason and handoff filters without c
     endReason: row.endReason,
     handoffStatus: 'CONNECTED',
   };
-  assert.deepEqual(await result(await list(query)), { data: [row], hasNext: false });
+  assert.deepEqual(await result(await list(query)), {
+    data: [row],
+    hasNext: false,
+    total_count: 1,
+  });
   for (const changed of [
     { endReason: 'CUSTOMER_ENDED' },
     { handoffStatus: 'FAILED' },
@@ -211,6 +222,7 @@ test('list combines order, exact phone, end reason and handoff filters without c
     assert.deepEqual(await result(await list({ ...query, ...changed })), {
       data: [],
       hasNext: false,
+      total_count: 0,
     });
   const literal = "test' OR true --";
   const quoted = await call({ endReason: literal });
@@ -227,10 +239,12 @@ test('list searches international caller numbers preserved by the AI flow withou
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
     data: [row],
     hasNext: false,
+    total_count: 1,
   });
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone.slice(1) })), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
 });
 
@@ -246,7 +260,7 @@ test('date filters use actual started_at with inclusive from and exclusive to, w
       to: '2026-10-28T10:01:00+09:00',
     }),
   );
-  assert.deepEqual(rows, { data: [first], hasNext: false });
+  assert.deepEqual(rows, { data: [first], hasNext: false, total_count: 1 });
 });
 
 test('pagination is deterministic for equal timestamps and null times, with no duplicate handoff rows', async () => {
@@ -260,11 +274,13 @@ test('pagination is deterministic for equal timestamps and null times, with no d
     assert.deepEqual(await result(await list({ callerPhoneNumber: phone, limit: 1, offset })), {
       data: [expected[offset]],
       hasNext: offset < 2,
+      total_count: 3,
     });
   }
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone, offset: 3 })), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
 });
 
@@ -321,6 +337,10 @@ test('Swagger describes the list contract, cookie authentication and English mod
       'handoffStatus',
       'limit',
       'offset',
+      'q',
+      'result',
+      'hasComplaint',
+      'aiPersonaVersionSeq',
     ].sort(),
   );
   for (const name of ['CallDto', 'HandoffDto', 'CallListResponseDto'])
@@ -338,6 +358,7 @@ test('request logs do not contain phone numbers, provider IDs or search text', a
 });
 
 const detail = (id, headers = operator.headers) => fetch(base + '/api/calls/' + id, { headers });
+const callInfo = ({ analysis, ...value }) => value;
 async function recording(callId) {
   const row = (
     await pool.query(
@@ -365,7 +386,8 @@ test('detail returns only the selected call, saved handoff data and recordings w
   const second = await recording(row.callSessionSeq);
   await recording((await call()).callSessionSeq);
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(body.data.call, callInfo(row));
+  assert.equal(body.data.analysis, null);
   assert.deepEqual(
     body.data.recordings.map(({ recordingSeq, createdAt }) => ({ recordingSeq, createdAt })),
     [first, second],
@@ -384,7 +406,9 @@ test('detail returns only the selected call, saved handoff data and recordings w
 test('detail preserves missing times, phone, order and handoff while returning an empty recording list', async () => {
   const row = await call({ callerPhoneNumber: null, startedAt: null, endedAt: null });
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
-    call: row,
+    call: callInfo(row),
+    analysis: null,
+    aiActionCount: 0,
     recordings: [],
   });
 });
@@ -451,7 +475,7 @@ async function utterance(callId, order, text = '발화 ' + randomUUID()) {
       [callId, order, order % 2 ? 'CUSTOMER' : 'AI', text],
     )
   ).rows[0];
-  return { ...row, receivedAt: row.receivedAt.toISOString() };
+  return { ...row, receivedAt: row.receivedAt.toISOString(), offsetSeconds: null };
 }
 
 test('transcript sorts by utterance order rather than insert time and never includes another call', async () => {
@@ -463,15 +487,18 @@ test('transcript sorts by utterance order rather than insert time and never incl
   assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
     data: [first, second, third],
     hasNext: false,
+    total_count: 3,
   });
   for (let offset = 0; offset < 3; offset++)
     assert.deepEqual(await result(await transcript(row.callSessionSeq, { limit: 1, offset })), {
       data: [[first, second, third][offset]],
       hasNext: offset < 2,
+      total_count: 3,
     });
   assert.deepEqual(await result(await transcript(row.callSessionSeq, { offset: 3 })), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
   assert.equal(JSON.stringify(logs).includes(first.utteranceText), false);
 });
@@ -495,6 +522,7 @@ test('transcript distinguishes uncollected STT from a nonexistent call even when
   assert.deepEqual(await result(await transcript(row.callSessionSeq)), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
   await error(await transcript(2147483647), 404, 'NOT_FOUND');
 });
@@ -636,7 +664,9 @@ test('S3 settings and missing files are recording errors while call detail and m
   const saved = await recording(row.callSessionSeq);
   config.set('S3_RECORDINGS_BUCKET', '');
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
-    call: row,
+    call: callInfo(row),
+    analysis: null,
+    aiActionCount: 0,
     recordings: [{ ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' }],
   });
   assert.equal(commands.length, 0);
@@ -672,7 +702,9 @@ test('storage denial, outage and timeout preserve call detail with a redacted re
     const response = await detail(row.callSessionSeq);
     assert.equal((await response.clone().text()).includes('private secret'), false);
     assert.deepEqual((await result(response, false)).data, {
-      call: row,
+      call: callInfo(row),
+      analysis: null,
+      aiActionCount: 0,
       recordings: [
         { ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' },
       ],
@@ -698,7 +730,8 @@ test('one missing recording does not hide the call or another playable recording
     return { $metadata: { httpStatusCode: 200 } };
   });
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, row);
+  assert.deepEqual(body.data.call, callInfo(row));
+  assert.equal(body.data.analysis, null);
   assert.deepEqual(body.data.recordings[0], {
     ...first,
     url: null,

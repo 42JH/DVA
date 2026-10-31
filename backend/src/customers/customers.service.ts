@@ -131,9 +131,14 @@ export class CustomersService {
     if (
       changes.name === undefined &&
       changes.status === undefined &&
-      changes.monthlyBillingEnabled === undefined
+      changes.monthlyBillingEnabled === undefined &&
+      changes.address === undefined
     )
-      throw new ApiException(400, 'INVALID_REQUEST', '변경할 이름 또는 상태를 입력해 주세요.');
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '변경할 이름·상태·월결제 자격·주소를 입력해 주세요.',
+      );
     if (
       (changes.status !== undefined || changes.monthlyBillingEnabled !== undefined) &&
       !administrator

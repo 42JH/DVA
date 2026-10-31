@@ -27,11 +27,14 @@ export class ConsultationsService {
   }
 
   async findOne(id: number): Promise<CallDetailDto> {
-    const call = await this.repository.findOne(id);
-    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    const row = await this.repository.findOne(id);
+    if (!row) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
+    const { analysis, ...call } = row;
     const recordings = await this.repository.findRecordings(id);
     return {
       call,
+      analysis,
+      aiActionCount: await this.repository.countActions(id),
       recordings: await Promise.all(
         recordings.map(async ({ objectKey, ...recording }) => ({
           ...recording,

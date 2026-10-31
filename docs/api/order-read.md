@@ -58,7 +58,8 @@ call_session_seq: 7
       "parcelCount": 1
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
@@ -120,3 +121,6 @@ Swagger `/api/docs`와 OpenAPI `/api/docs-json`에 각 API 요약·필터·헤�
 `backend`에서 `node scripts/check.cjs`를 실행한다. 임시 PostgreSQL과 실제 NestJS HTTP 요청으로 필터·페이지·고객 범위·주소 스냅샷·동시 수정·Swagger를 검사하고, 기존 인증·주문 생성·기업·고객·구성원·PBX·Nginx를 회귀 검증한다.
 
 이번 결제 구조는 016~019 migration을 요구하며 조회 자체는 데이터를 바꾸거나 외부 연동을 호출하지 않는다. 운영 데이터와 배포 설정을 변경하지 않는다. 실제 AI 컨테이너와의 통화 연동 및 운영 배포 검증은 별도다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

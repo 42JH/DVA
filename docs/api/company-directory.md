@@ -37,7 +37,7 @@ status·customerSeq·organizationSeq 등 지원하지 않는 필터나 반복 q 
 
 ## 응답
 
-HTTP 200, `{ data: CompanyDirectoryEntry[], hasNext }`이며 meta·총건수·page 객체를 추가하지 않는다.
+HTTP 200, `{ data: CompanyDirectoryEntry[], hasNext, total_count }`이며 total_count를 포함하고 meta·page 객체는 추가하지 않는다.
 
 ```json
 {
@@ -62,7 +62,8 @@ HTTP 200, `{ data: CompanyDirectoryEntry[], hasNext }`이며 meta·총건수·pa
       "version": 1
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
@@ -70,7 +71,7 @@ HTTP 200, `{ data: CompanyDirectoryEntry[], hasNext }`이며 meta·총건수·pa
 동명 기업은 organizationSeq로, 같은 기업의 여러 배송지는 companyPinSeq·부서명·주소로 구분한다.
 정렬은 소문자·NFC 기업명, 기업 번호, PIN 번호 오름차순이며 페이지를 이동해도 동일 조건의 순서가 고정된다.
 label·departmentName은 null일 수 있다. addressData는 저장된 검증 주소를 그대로 반환하며 상세주소는 생략될 수 있다.
-조회 결과가 없거나 기업이 비활성이거나 PIN이 없으면 `{ "data": [], "hasNext": false }`다.
+조회 결과가 없거나 기업이 비활성이거나 PIN이 없으면 `{ "data": [], "hasNext": false, "total_count": 0 }`다.
 고유한 기업명·PIN을 임의로 선택하거나 합치지 않는다.
 
 기업명과 PIN의 변경·기업 비활성화는 다음 조회에 반영한다. 별도 캐시를 두지 않으며
@@ -118,3 +119,6 @@ npm.cmd run check:docker
 검색 정규화·변경 반영·세션 및 관리 권한 경계·입력 오류·읽기 전용·Swagger를 검증한다.
 운영 이미지·실제 Nginx에서도 검색과 비활성화 반영 및 기존 관리 API 보호를 검증한다.
 실제 운영 배포와 AI 클라이언트의 기업 선택·주문 적용 연동은 별도 확인 사항이다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

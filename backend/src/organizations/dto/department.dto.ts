@@ -34,4 +34,10 @@ export class DepartmentEnvelopeDto {
 export class DepartmentsEnvelopeDto {
   @ApiProperty({ type: [DepartmentDto] }) data!: DepartmentDto[];
   @ApiProperty({ description: '다음 페이지 존재 여부.' }) hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }

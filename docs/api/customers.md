@@ -5,7 +5,7 @@ Jira: [S15P31D109-34](https://ssafy.atlassian.net/browse/S15P31D109-34).
 
 ## MVP 인증과 범위
 
-2026-10-27 합의에 따라 고객 등록·상세·이름 수정에 AI 서비스 인증을 요구하지 않는다.
+2026-10-27 합의에 따라 고객 등록·상세·이름·내 주소 수정에 AI 서비스 인증을 요구하지 않는다.
 서버 간 호출에는 관리자 쿠키, Bearer 토큰, Origin, call_session_seq가 필요하지 않다.
 이 세 작업과 [발신번호 초기 조회](caller-context.md)만 명시적으로 `MvpAiCustomerAccess`를 사용한다. 기존 관리자·기업·PBX 인증은 유지한다.
 서비스 인증 도입은 [S15P31D109-135](https://ssafy.atlassian.net/browse/S15P31D109-135)의 후속 작업이다.
@@ -24,12 +24,12 @@ Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 
 
 | 메서드·경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
-| POST /api/customers | `{ name, phoneNumber, monthlyBillingEnabled? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
-| GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext }` |
+| POST /api/customers | `{ name, phoneNumber, monthlyBillingEnabled?, address? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
+| GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext, total_count }` |
 | GET /api/customers/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Customer, meta: { requestId } }` |
-| PATCH /api/customers/{id} | name 또는 관리자 전용 status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
+| PATCH /api/customers/{id} | name·address 또는 관리자 전용 status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
-Customer는 `{ customerSeq, name, phoneNumber, status, monthlyBillingEnabled }`다. 주소록과 기업 소속을 포함하지 않는다.
+Customer는 `{ customerSeq, name, phoneNumber, status, monthlyBillingEnabled, address }`다. address는 내 주소 객체 또는 null이며 PIN 주소록·기업 소속은 별도다.
 조회·오류의 Cache-Control은 공통 `no-store`를 따른다.
 
 이름은 앞뒤 공백을 제거하고 빈 문자열·null을 거절한다. 전화번호는 선행 0을 보존하는
@@ -37,13 +37,13 @@ Customer는 `{ customerSeq, name, phoneNumber, status, monthlyBillingEnabled }`�
 monthlyBillingEnabled는 개인 월결제 자격이며 미입력은 false다. 생성 시 true 또는 자격 변경은 유효한 관리자만 허용한다. boolean 문자열·null은 거절하며 PATCH 생략은 기존 값을 유지한다. 기업 소속 고객의 월결제는 기업 자격을 사용한다.
 
 신규 고객 상태는 ACTIVE이며 등록 본문의 status 등 추가 필드는 400이다.
-PATCH의 phoneNumber, null, 빈 객체, 지원하지 않는 필드는 400이며 일부 필드만 저장하지 않는다.
+PATCH의 phoneNumber 변경, 본문 전체 null·빈 객체, 지원하지 않는 필드는 400이며 일부 필드만 저장하지 않는다. address 필드의 null은 내 주소 삭제다.
 대상이 없으면 404다. 실제 삭제와 전화번호 변경 API는 제공하지 않는다.
 
 목록은 고객 번호 내림차순이다. limit 기본 20·범위 1~100, offset 기본 0이다.
 q는 이름의 대소문자 무시 부분 검색이며 `%`·`_`도 문자 그대로 검색한다.
 phoneNumber는 정확히 일치 검색하고 status는 ACTIVE/WITHDRAWN이다. 필터는 AND로 결합한다.
-빈 목록은 `{ data: [], hasNext: false }`이며 meta·총건수·page 객체를 추가하지 않는다.
+조건에 맞는 결과가 없으면 `{ data: [], hasNext: false, total_count: 0 }`이며 total_count를 포함하고 meta·page 객체는 추가하지 않는다.
 
 ## 탈퇴 상태
 
@@ -97,3 +97,22 @@ Content-Type: application/json
 등록은 CUSTOMER_CREATED, 이름·상태·탈퇴 수정은 CUSTOMER_UPDATED를 고객 번호와 함께 기록한다.
 관리자 호출은 ADMIN과 당시 이름, 기존 AI 호출 경로는 AI로 구분한다. 성공 감사와 고객 변경은 같은 트랜잭션이다.
 실패·거부는 롤백 후 별도로 남기며 전화번호·요청 본문은 기록하지 않는다. 요청·응답 형식은 그대로 유지한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.
+
+## 고객의 내 주소
+
+028 migration의 customers.address_data(jsonb)에 저장하며 개인/기업 PIN과 독립이다.
+기존 고객은 null이며 PIN·과거 주문에서 추측해 채우지 않는다. PIN 생성·변경·삭제는 내 주소를 변경하지 않는다.
+POST /api/customers와 PATCH /api/customers/{id}에 선택 address를 보낼 수 있다. 객체는 전체 교체, 생략은 유지(신규는 null), null은 삭제다.
+
+```json
+{"address":{"roadAddress":"서울시 예시로 1","jibunAddress":"서울시 예시동 1","detailAddress":"101호","dongName":"예시동","postalCode":"01234","latitude":37.5,"longitude":127}}
+```
+
+객체 안에서 detailAddress만 선택이며 생략/빈 문자열은 허용하고 null은 거절한다. 나머지 문자열·좌표는 필수다.
+우편번호는 숫자 5자리, 위도 -90~90·경도 -180~180이다. 이름·전화번호를 주소에 중복 저장하지 않는다.
+고객 목록·상세·발신자 context·직원 목록의 customer.address는 항상 주소 객체 또는 null이다.
+주문 본문의 인라인 customer에는 address를 받지 않으며, 주문 주소·과거 스냅샷은 이 기능으로 변경하지 않는다.
+고객 주소 수정도 기존 CUSTOMER_UPDATED 성공 감사와 같은 트랜잭션으로 처리한다.

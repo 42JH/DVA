@@ -47,7 +47,8 @@ export class OrganizationDeletionService {
                 ...context,
                 customerSeq: member.customerSeq,
                 departmentSeq: member.departmentSeq,
-                departmentName: departments.find((d) => d.id === member.departmentSeq)!.name,
+                departmentName:
+                  departments.find((d) => d.id === member.departmentSeq)?.name ?? null,
               },
             },
             client,

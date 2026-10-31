@@ -2,7 +2,7 @@
 
 관련 이슈: [S15P31D109-21](https://ssafy.atlassian.net/browse/S15P31D109-21).
 
-FAQ 원본은 `faq_entries`에 저장한다. 모든 ACTIVE 관리자 역할(`OPERATOR`, `SUPERVISOR`, `SYSTEM_ADMIN`)이 등록·수정·삭제·조회할 수 있다. 추가·삭제는 각각 하나의 API로 1~100건을 처리하고 수정은 단건만 허용한다. 변경과 함께 `faq_change_notifications`에 AI 알림 대기를 저장한다. 새 앱 실행 전에 020 migration이 필요하다. FAQ 자체의 활성·비활성·분류·태그 기능은 없다.
+FAQ 원본은 `faq_entries`에 저장한다. 모든 ACTIVE 관리자 역할(`OPERATOR`, `SUPERVISOR`, `SYSTEM_ADMIN`)이 등록·수정·삭제·조회할 수 있다. 추가·삭제는 각각 하나의 API로 1~100건을 처리하고 수정은 단건만 허용한다. 변경과 함께 `faq_change_notifications`에 AI 알림 대기를 저장한다. 새 앱 실행 전에 027 migration까지 적용한다. 분류는 접수·수거 일정·물품·박스·포장·파손·배송·운송장·주소·변경·취소·요금·결제·이용 안내·기타의 고정 10개이며 전체는 조회 조건이다. 활성·비활성·태그 기능은 없다.
 
 AI 담당자에게 전달할 수신 API·재시도·원본 반영 규칙은 [별도 AI FAQ 연동 규격](ai-faq-integration.md)을 따른다.
 
@@ -13,7 +13,7 @@ AI 담당자에게 전달할 수신 API·재시도·원본 반영 규칙은 [별
 | `GET /api/faqs` | 관리자 세션 | 질문·답변 검색 및 목록 |
 | `GET /api/faqs/{id}` | 관리자 세션 | 관리자용 상세 |
 | `POST /api/faqs` | 관리자 세션 + 허용 Origin | 단건·복수 추가, 204. 한 건이면 Location에 상세 경로 |
-| `PATCH /api/faqs/{id}` | 관리자 세션 + 허용 Origin | 204, 전달한 질문·답변만 변경 |
+| `PATCH /api/faqs/{id}` | 관리자 세션 + 허용 Origin | 204, 필수 분류·질문·답변 전체 변경 |
 | `DELETE /api/faqs` | 관리자 세션 + 허용 Origin | 번호 배열로 단건·복수 삭제, 204 |
 | `GET /api/ai/faqs` | AI MVP 조회 | 관리자 식별자를 제외한 전체/지정 번호 목록 |
 | `GET /api/ai/faqs/{id}` | AI MVP 조회 | 관리자 식별자를 제외한 최신 상세 |
@@ -33,10 +33,12 @@ Content-Type: application/json
 {
   "items": [
     {
+      "category": "접수",
       "question": "택배 접수는 어떻게 하나요?",
       "answer": "전화 상담으로 접수를 요청할 수 있습니다.\n\n- 출발지와 도착지를 알려주세요."
     },
     {
+      "category": "포장·파손",
       "question": "깨지기 쉬운 물건은 어떻게 포장하나요?",
       "answer": "각 물품을 완충재로 감싸 주세요."
     }
@@ -44,11 +46,11 @@ Content-Type: application/json
 }
 ```
 
-- 등록은 질문과 답변 모두 필수다. 공백만 있는 문자열·null·NUL 문자는 거부한다. 질문은 최대 1,000자, 답변은 최대 20,000자다.
-- `items`에 한 건 또는 최대 100건을 넣는다. 기존 `{question,answer}` 단건 본문도 같은 API에서 지원한다. 두 형식을 섞거나 배열 자체를 최상위 본문으로 보내면 400이다.
+- 추가와 수정은 category·question·answer 모두 필수다. 분류 누락·null·전체·허용값 외 입력은 400이다. 공백만 있는 문자열·null·NUL 문자는 거부한다. 질문은 최대 1,000자, 답변은 최대 20,000자다.
+- `items`에 한 건 또는 최대 100건을 넣는다. `{category,question,answer}` 단건 본문도 같은 API에서 지원한다. 분류 없는 이전 요청은 400이다. 두 형식을 섞거나 배열 자체를 최상위 본문으로 보내면 400이다.
 - 기존 JSON 본문 제한 100KiB가 함께 적용된다. 초과 시 413이며 큰 묶음은 나눠 요청한다. 단건·복수 추가·삭제 모두 일부 성공 없이 전체 커밋 또는 전체 롤백한다.
-- `PATCH /api/faqs/123`에 `{ "answer": "수정된 답변" }`만 보내면 질문은 유지한다. 질문·답변 중 하나 이상 필요하며 버전 비교는 하지 않는다. 동시에 서로 다른 필드를 바꿔도 생략한 필드는 덮어쓰지 않는다.
-- `updatedByAdminUserSeq`는 서버가 로그인 계정에서 결정한다. 각 FAQ 항목은 질문·답변만 받으며 `isEnabled`, `expectedVersion`, 요청 키 등은 거부한다. 수정은 기존 질문·답변 객체 하나만 받는다. 복수 수정 API는 없다.
+- `PATCH /api/faqs/123`에도 `{ "category": "접수", "question": "질문", "answer": "수정된 답변" }` 세 필드를 모두 보낸다. 부분 수정은 400이다. 버전 비교 없이 전체 입력을 저장하므로 동시 전체 수정은 나중에 저장한 한 요청의 내용이 적용된다.
+- `updatedByAdminUserSeq`는 서버가 로그인 계정에서 결정한다. 각 FAQ 항목은 분류·질문·답변만 받으며 `isEnabled`, `expectedVersion`, 요청 키 등은 거부한다. 수정은 분류·질문·답변 객체 하나만 받는다. 복수 수정 API는 없다.
 - 별도 `Idempotency-Key`를 요구하지 않는다. 기존 DB에 질문 고유 제약은 없으며 같은 질문의 별도 등록을 자동으로 합치지 않는다. FE는 등록 중 버튼 중복 클릭을 막는다.
 - 성공 응답은 본문 없는 204다. 등록이 한 건이면 `Location: /api/faqs/123`을 반환하고 복수 등록은 Location 없이 목록을 다시 조회한다. FAQ 생성·수정·삭제, 대상별 성공 감사, AI 알림 대기는 같은 트랜잭션으로 저장한다. 하나라도 저장 실패하면 전체 롤백한다.
 - 답변의 문단·목록·Markdown 표는 문자열 그대로 보존한다. FE가 Markdown을 표시할 때는 HTML을 정제해 렌더링한다.
@@ -68,9 +70,11 @@ Content-Type: application/json
 
 ## 목록·상세 및 AI 제공
 
+관리자 목록은 선택 `category` 필터를 지원하며 전체는 생략한다. AI 조회 query·응답과 변경 알림에는 category를 추가하지 않는다.
+
 두 목록 모두 `q`(선택, 최대 200자), `limit`(기본 20, 1~100), `offset`(기본 0)을 지원한다. `q`는 앞뒤 공백과 유니코드 표기를 정규화하고 질문·답변을 대소문자 구분 없이 부분 검색한다. `%`·`_`는 일반 문자다. `faqEntrySeq` 오름차순으로 정렬하므로 수정 시 목록 위치가 바뀌지 않는다.
 
-AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정할 수 있다. 생략하면 전체 조회다. `q`와 함께 전달하면 두 조건 모두 만족하는 행을 반환한다. 삭제·미존재 번호는 제외하며 전부 없으면 `{data:[],hasNext:false}`다. 알림 대상은 `q` 없이 `limit=100&offset=0`으로 조회하면 한 응답으로 받을 수 있다.
+AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정할 수 있다. 생략하면 전체 조회다. `q`와 함께 전달하면 두 조건 모두 만족하는 행을 반환한다. 삭제·미존재 번호는 제외하며 전부 없으면 `{data:[],hasNext:false, total_count: 0}`다. 알림 대상은 `q` 없이 `limit=100&offset=0`으로 조회하면 한 응답으로 받을 수 있다.
 
 ```json
 {
@@ -82,11 +86,12 @@ AI 목록은 `faqEntrySeqs=123,124`로 중복 없는 번호 1~100개를 지정�
       "updatedAt": "2026-10-28T01:00:00.000Z"
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 1
 }
 ```
 
-위 예시는 AI 목록 응답이다. 관리자 목록·상세에는 `createdAt`, `updatedByAdminUserSeq`가 추가된다. 단건 응답은 `{data: FAQ, meta: {requestId}}`이고 목록은 `{data: FAQ[], hasNext}`다. 모든 응답은 `Cache-Control: no-store`다.
+위 예시는 AI 목록 응답이다. 관리자 목록·상세에는 `category`, `createdAt`, `updatedByAdminUserSeq`가 추가된다. 단건 응답은 `{data: FAQ, meta: {requestId}}`이고 목록은 `{data: FAQ[], hasNext, total_count }`다. 모든 응답은 `Cache-Control: no-store`다.
 
 AI는 목록을 `hasNext=false`까지 순회해 원본을 가져가고 변경 알림에는 번호 필터로 최신 원본을 조회한다. 각 조회는 커밋된 최신 DB 값을 반환하며 여러 페이지 전체를 하나의 고정 시점으로 보장하지 않는다. 임베딩·검색 인덱스 반영은 AI 파트 책임이다.
 
@@ -104,7 +109,7 @@ FAQ별 감사는 ADMIN(표시: 운영자)과 실제 계정을 남기며, 전송 
 
 ## 초기 FAQ 32건 등록
 
-사용자가 제공한 `delivery_faq.md`에서 질문과 답변 32건을 [초기 데이터](../../backend/data/delivery-faq.json)로 추출했다. `[일반]`, `[디포스트]`, `[디버]`, `[프로젝트]`, `[기업 추가 답변]` 출처 표기와 문서 소개·출처 설명·분류 제목을 제거하고 답변의 여러 문단·목록·표는 유지했다. 파일에는 `question`, `answer`만 있다.
+사용자가 제공한 `delivery_faq.md`에서 질문과 답변 32건을 [초기 데이터](../../backend/data/delivery-faq.json)로 추출했다. `[일반]`, `[디포스트]`, `[디버]`, `[프로젝트]`, `[기업 추가 답변]` 출처 표기와 문서 소개·출처 설명·분류 제목을 제거하고 답변의 여러 문단·목록·표는 유지했다. 파일에는 원문을 보존한 `question`, `answer`와 내용에 맞춰 지정한 `category`가 있다. 027은 기존 32개 질문을 같은 분류로 채우며 알 수 없는 기존 질문은 검토 전 적용을 중단한다.
 
 최초 등록 명령은 **FAQ 테이블이 비어 있을 때만** 전체 자료를 저장한다. ACTIVE 관리자 로그인 ID를 지정하면 실제 계정 번호를 찾아 `updated_by_admin_user_seq`와 감사 기록에 남긴다. 계정을 임의로 생성하거나 고정 관리자 번호를 사용하지 않는다.
 
@@ -140,3 +145,8 @@ node dist/faqs/bootstrap-faq.js operator01
 | 500 / `INTERNAL_ERROR` | DB·감사 저장 실패. 빈 검색 결과나 성공으로 응답하지 않음 |
 
 Swagger는 `FAQs`와 `AI FAQs` 태그로 분리한다. `node scripts/check.cjs`는 실제 임시 PostgreSQL·NestJS HTTP·운영 Docker 이미지·Nginx를 통해 관리자 권한, 단건·복수 추가·삭제, 최신 번호 필터 조회, 동시 수정, 감사·알림 롤백, 초기 등록과 기존 API 회귀를 검증한다. 모의 AI HTTP 서버로 재시도·시간 초과·재시작·중복 점유를 검증하며 실제 AI 검색 인덱스·운영 데이터·배포는 포함하지 않는다.
+
+미답변 전환·삭제는 [UNQ-03·UNQ-04](unanswered-questions-management.md)를 따른다. 실제 DB 적용은 이번 작업에서 제외한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

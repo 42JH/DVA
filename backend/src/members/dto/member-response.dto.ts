@@ -3,7 +3,8 @@ import { CustomerResponseDto } from '../../customers/dto/customer-response.dto';
 import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
 
 export class MembershipResponseDto {
-  @ApiProperty() departmentSeq!: number;
+  @ApiProperty({ type: Number, nullable: true, description: '부서가 없으면 null.' })
+  departmentSeq!: number | null;
   @ApiProperty() membershipSeq!: number;
   @ApiProperty() customerSeq!: number;
   @ApiProperty() organizationSeq!: number;
@@ -22,4 +23,10 @@ export class MemberViewDto {
 export class MembersEnvelopeDto {
   @ApiProperty({ type: [MemberViewDto] }) data!: MemberViewDto[];
   @ApiProperty() hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }

@@ -156,8 +156,8 @@ export class AuthService {
       await this.savePassword(actor, target, hash, requestId, client);
     });
   }
-  async resetPassword(token: string, id: number, password: string, requestId: string) {
-    const hash = await hashPassword(password);
+  async resetPassword(token: string, id: number, requestId: string) {
+    const hash = await hashPassword('dva1234');
     return this.database.transaction(async (client) => {
       const { actor, target } = await this.lockAuthorized(token, id, true, client);
       await this.savePassword(actor, target, hash, requestId, client);

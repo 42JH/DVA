@@ -1,10 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
+  ValidateNested,
   IsString,
   Matches,
   Max,
@@ -14,10 +16,23 @@ import {
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { CUSTOMER_STATUSES, CustomerStatus } from '../customers.types';
 
+import { CustomerAddressDto } from './customer-address.dto';
+
 const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 export class CreateCustomerDto {
+  @ApiPropertyOptional({
+    type: CustomerAddressDto,
+    nullable: true,
+    description:
+      '고객의 내 주소. PIN과 독립. 생략 시 유지(생성 시 null), null로 삭제, 객체는 전체 교체.',
+  })
+  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CustomerAddressDto)
+  address?: CustomerAddressDto | null;
   @ApiPropertyOptional({
     description: '개인 월결제 자격. 관리자만 true로 설정 가능. 미입력 시 false.',
     default: false,
@@ -41,6 +56,17 @@ export class CreateCustomerDto {
 }
 
 export class UpdateCustomerDto {
+  @ApiPropertyOptional({
+    type: CustomerAddressDto,
+    nullable: true,
+    description:
+      '고객의 내 주소. PIN과 독립. 생략 시 유지(생성 시 null), null로 삭제, 객체는 전체 교체.',
+  })
+  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CustomerAddressDto)
+  address?: CustomerAddressDto | null;
   @ApiPropertyOptional({ description: '개인 월결제 자격. 관리자만 변경 가능. 생략 시 유지.' })
   @ValidateIf((_o, value) => value !== undefined)
   @IsBoolean()

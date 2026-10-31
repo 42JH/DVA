@@ -230,6 +230,7 @@ export class ParcelInputDto {
 
 export class OrderCustomerDto extends OmitType(CreateCustomerDto, [
   'monthlyBillingEnabled',
+  'address',
 ] as const) {}
 
 export class CreateOrderDto {

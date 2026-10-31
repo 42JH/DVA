@@ -98,7 +98,7 @@ test('production FAQ management through Nginx updates the AI read API without ex
   const ids = all.map((row) => row.faqEntrySeq);
   const filtered = await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','));
   const filteredBody = await filtered.json();
-  assert.deepEqual(Object.keys(filteredBody).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(filteredBody).sort(), ['data', 'hasNext', 'total_count']);
   assert.deepEqual(
     filteredBody.data.map((row) => row.faqEntrySeq),
     ids,
@@ -114,6 +114,7 @@ test('production FAQ management through Nginx updates the AI read API without ex
   assert.deepEqual(await (await fetch(root + '/ai/faqs?faqEntrySeqs=' + ids.join(','))).json(), {
     data: [],
     hasNext: false,
+    total_count: 0,
   });
 });
 
@@ -188,7 +189,7 @@ test('call detail and transcript work through Nginx while the standalone playbac
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data.length, 1);
   assert.ok(body.data[0].callSessionSeq > 0);
   const detail = await fetch('http://proxy/api/calls/' + body.data[0].callSessionSeq, {
@@ -215,7 +216,7 @@ test('call detail and transcript work through Nginx while the standalone playbac
   );
   assert.equal(transcript.status, 200);
   const transcriptBody = await transcript.json();
-  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(transcriptBody).sort(), ['data', 'hasNext', 'total_count']);
   assert.ok(Array.isArray(transcriptBody.data));
   const anonymousPlayback = await fetch('http://proxy/api/recordings/2147483647/url');
   assert.equal(anonymousPlayback.status, 404);
@@ -319,7 +320,7 @@ test('production company endpoints require a real session for every operation', 
   }
 });
 
-test('production member CSV supports a full 1MiB file through Nginx and preserves session/CRUD boundaries', async () => {
+test('production member JSON supports single and bulk registration through Nginx and preserves session/CRUD boundaries', async () => {
   const root = 'http://proxy/api';
   const origin = 'https://13.209.59.180';
   const json = { 'Content-Type': 'application/json', Origin: origin };
@@ -346,26 +347,29 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   assert.equal(department.status, 201);
   const departmentId = (await department.json()).data.departmentSeq;
   const number = '019' + String(require('node:crypto').randomInt(10000000, 100000000));
-  const prefix = 'employeeNo,name,phoneNumber,departmentSeq\n001,';
-  const suffix = ',' + number + ',' + departmentId;
-  const content = prefix + 'a'.repeat(1024 * 1024 - Buffer.byteLength(prefix + suffix)) + suffix;
-  assert.equal(Buffer.byteLength(content), 1024 * 1024);
-  const upload = async (data, authenticated = true) => {
-    const form = new FormData();
-    form.append('file', new Blob([data], { type: 'text/csv' }), 'members.csv');
-    return fetch(root + `/companies/${companyId}/members/import`, {
+  const register = async (items, authenticated = true) =>
+    fetch(root + `/companies/${companyId}/members`, {
       method: 'POST',
-      headers: {
-        Origin: origin,
-        ...(authenticated ? { Cookie: session } : {}),
-      },
-      body: form,
+      headers: { ...json, ...(authenticated ? { Cookie: session } : {}) },
+      body: JSON.stringify({ items }),
     });
-  };
-  assert.equal((await upload(content, false)).status, 401);
-  assert.equal((await upload(content)).status, 204);
-  assert.equal((await upload(content)).status, 204);
-  const tooLarge = await upload(content + 'a');
+  const content = [
+    {
+      employeeNo: '001',
+      name: '운영 이미지 고객',
+      phoneNumber: number,
+      departmentSeq: departmentId,
+    },
+  ];
+  assert.equal((await register(content, false)).status, 401);
+  assert.equal((await register(content)).status, 204);
+  assert.equal((await register(content)).status, 204);
+  assert.equal(
+    (await fetch(root + `/companies/${companyId}/members/import`, { method: 'POST', headers }))
+      .status,
+    404,
+  );
+  const tooLarge = await register([{ ...content[0], name: 'x'.repeat(1024 * 1024) }]);
   assert.equal(tooLarge.status, 413);
   assert.equal((await tooLarge.json()).error.code, 'PAYLOAD_TOO_LARGE');
   const list = await fetch(root + `/companies/${companyId}/members`, {
@@ -378,9 +382,14 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
   assert.equal(
     (
-      await upload(
-        `employeeNo,name,phoneNumber,departmentSeq\n001,운영 이미지 고객,${nextPhone},${departmentId}`,
-      )
+      await register([
+        {
+          employeeNo: '001',
+          name: '운영 이미지 고객',
+          phoneNumber: nextPhone,
+          departmentSeq: departmentId,
+        },
+      ])
     ).status,
     204,
   );
@@ -399,7 +408,7 @@ test('production member CSV supports a full 1MiB file through Nginx and preserve
   const empty = await fetch(root + `/companies/${companyId}/members`, {
     headers: { Cookie: session },
   });
-  assert.deepEqual(await empty.json(), { data: [], hasNext: false });
+  assert.deepEqual(await empty.json(), { data: [], hasNext: false, total_count: 0 });
 });
 
 test('real Nginx preserves /api, strips the legacy prefix and hides readiness', async () => {
@@ -626,7 +635,7 @@ test('production order address history reads stored snapshots through Nginx and 
   assert.equal(history.status, 200);
   assert.equal(history.headers.get('cache-control'), 'no-store');
   const body = await history.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data[0].orderSeq, order.orderSeq);
   const detail = await fetch(root + '/orders/' + order.orderSeq, { headers });
   const parcel = (await detail.json()).data.parcels.find(
@@ -694,7 +703,7 @@ test('production company directory searches official PINs through Nginx without 
   assert.equal(searched.status, 200);
   assert.equal(searched.headers.get('cache-control'), 'no-store');
   const body = await searched.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data[0].organizationSeq, id);
   assert.equal(body.data[0].companyPinSeq, pinId);
   assert.equal(body.data[0].organizationName, name);
@@ -707,7 +716,7 @@ test('production company directory searches official PINs through Nginx without 
     body: '{"status":"INACTIVE"}',
   });
   assert.equal(deactivated.status, 204);
-  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false });
+  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false, total_count: 0 });
   assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
 });
 

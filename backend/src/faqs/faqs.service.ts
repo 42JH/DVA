@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
 import { DatabaseService } from '../database/database.service';
-import { AiFaqQueryDto, CreateFaqDto, UpdateFaqDto } from './dto/faq-request.dto';
+import { AdminFaqQueryDto, AiFaqQueryDto, CreateFaqDto, UpdateFaqDto } from './dto/faq-request.dto';
 import { FaqsRepository } from './faqs.repository';
 import { queueFaqChange } from './faq-change';
 
@@ -15,7 +16,7 @@ export class FaqsService {
     private readonly audit: AuditService,
   ) {}
 
-  async list(query: AiFaqQueryDto, agent = false) {
+  async list(query: AiFaqQueryDto | AdminFaqQueryDto, agent = false) {
     return new ListResponse(await this.repository.list(query, agent), query.limit);
   }
 
@@ -26,25 +27,34 @@ export class FaqsService {
   }
 
   async create(items: CreateFaqDto[], adminId: number, requestId: string) {
-    return this.database.transaction(async (client) => {
-      const ids: number[] = [];
-      for (const item of items) {
-        const id = await this.repository.insert(client, item, adminId);
-        ids.push(id);
-        await this.audit.recordSuccess(
-          {
-            actorId: adminId,
-            targetId: id,
-            targetType: 'FAQ_ENTRY',
-            action: 'FAQ_CREATED',
-            requestId,
-          },
-          client,
-        );
-      }
-      await queueFaqChange(client, 'INSERT', ids, requestId);
-      return ids;
-    });
+    return this.database.transaction((client) =>
+      this.createInTransaction(client, items, adminId, requestId),
+    );
+  }
+
+  async createInTransaction(
+    client: PoolClient,
+    items: CreateFaqDto[],
+    adminId: number,
+    requestId: string,
+  ) {
+    const ids: number[] = [];
+    for (const item of items) {
+      const id = await this.repository.insert(client, item, adminId);
+      ids.push(id);
+      await this.audit.recordSuccess(
+        {
+          actorId: adminId,
+          targetId: id,
+          targetType: 'FAQ_ENTRY',
+          action: 'FAQ_CREATED',
+          requestId,
+        },
+        client,
+      );
+    }
+    await queueFaqChange(client, 'INSERT', ids, requestId);
+    return ids;
   }
 
   async delete(ids: number[], adminId: number, requestId: string) {
@@ -68,8 +78,6 @@ export class FaqsService {
   }
 
   async update(id: number, input: UpdateFaqDto, adminId: number, requestId: string) {
-    if (input.question === undefined && input.answer === undefined)
-      throw new ApiException(400, 'INVALID_REQUEST', '변경할 질문 또는 답변을 입력해 주세요.');
     await this.database.transaction(async (client) => {
       if (!(await this.repository.update(client, id, input, adminId)))
         throw new ApiException(404, 'NOT_FOUND', 'FAQ를 찾을 수 없습니다.');

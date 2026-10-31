@@ -1,18 +1,22 @@
 # 모놀리식 백엔드 공통 기반
 
+AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 현재 앱 실행 전에는 FAQ 분류·고객 내 주소·선택 부서를 포함해 028까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
+
+AI 미답변 질문은 [UNQ-01 계약](../docs/api/unanswered-questions.md)에 따라 POST /api/ai/unanswered-questions로 수집한다. 같은 AI_INSIGHTS_TOKEN을 사용하며 최초 201·동일 발생 재전송 200이다. 신규 상태는 OPEN, 위치는 정수 초 또는 null이다. 프론트의 목록·검색은 [UNQ-02](../docs/api/unanswered-questions-read-spec.md) GET /api/unanswered-questions를 사용한다. 관리자 세션 전용, 기본 OPEN, 오래된 통화부터 조회하며 기간은 PBX 우선·AI 분석 대체의 통화 시작 기준이다. 전환·삭제는 [UNQ-03·UNQ-04](../docs/api/unanswered-questions-management.md)를 따른다. 전환은 분류·질문·답변 모두 필수이며 원문과 재전송 이력은 보존한다. 새 앱 전에 028까지 적용한다. 목록의 total_count로 검색 총건수를 제공하며 통계 뷰는 후속 작업이다.
+
 기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
 
-FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 020 migration 적용 후 새 앱을 실행한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
+FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 027 migration 적용 후 새 앱을 실행한다. 추가·수정은 category·question·answer가 모두 필수다. 관리자 조회에만 분류를 제공하고 AI 원본 응답·알림 형식은 유지한다. 기존 32개 질문은 [분류표](../docs/database/faq-category-assignments.md)대로 보완하며 미등록 질문이 있으면 임의 분류 없이 migration을 중단한다. 실제 DB 적용은 이번 작업에서 제외한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
 
-부서 관리·구성원 배정·개인/기업 월결제 및 부서 그룹결제 설정은 [부서와 결제 자격](../docs/api/departments.md)을 따른다. 신규 구성원과 CSV에 부서 번호가 필수다.
+부서 관리·구성원 배정·개인/기업 월결제 및 부서 그룹결제 설정은 [부서와 결제 자격](../docs/api/departments.md)을 따른다. 구성원의 부서 번호는 선택이며 부서 없는 기업도 직원 등록·기업 월결제를 사용할 수 있다. 새 앱 전에 028까지 적용한다.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
 
 페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md), AI 서버 구현 항목은 [AI 페르소나 연동 명세](../docs/api/ai-persona-integration.md)를 참고한다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다. 실제 AI 통화 제어는 AI 팀 구현 후 연결한다.
 
-관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 녹취 재생 URL은 통화 상세에 포함한다.
+관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·result·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 새 API·migration 없이 기존 두 GET 조회를 보완한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
 
-기업 구성원·대표자 표시·소속 해제·CSV 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
+기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
 
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
@@ -58,6 +62,7 @@ npm run start:dev
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
 | `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
 | `AI_FAQ_TOKEN` | 선택, 32자 이상 공백 없는 ASCII 토큰. FAQ 변경 알림 전용. 비어 있으면 FAQ 쓰기·알림 대기는 보존하고 전송 워커만 비활성 |
+| `AI_INSIGHTS_TOKEN` | 선택, 통화 분석·이벤트·미답변 수집 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 ANL-01·EVT-01·UNQ-01은 503 |
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
@@ -297,14 +302,15 @@ DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션�
 | 응답 | 형식 |
 |---|---|
 | 단건 | Controller가 반환한 값을 `{ data, meta: { requestId } }`로 감싼다 |
-| 목록 | `new ListResponse(rows, limit)`를 반환하면 `{ data: [], hasNext }`만 반환한다 |
+| 목록 | `new ListResponse(page, limit)`에 저장소의 {rows,total_count}를 전달하면 `{ data: [], hasNext, total_count }`만 반환한다 |
 | 오류 | `{ error: { code, message, details: [] }, meta: { requestId } }` |
 | 204 | `@HttpCode(204)`, 본문 없음 |
 
-성공 값에 result/code/message/timestamp를 추가하지 않는다. ListResponse는 같은 조건과 고정 정렬로 `limit + 1`개를 조회한 결과를 받는다.
+성공 값에 result/code/message/timestamp를 추가하지 않는다. ListResponse는 `{rows,total_count}`를 받으며 rows는 같은 조건과 고정 정렬로 `limit + 1`개를 조회한 결과다.
+저장소의 readPage는 검색·필터 SELECT와 고정 정렬을 받아 페이지와 COUNT(*)를 같은 SQL 스냅샷에서 읽는다. 검색값은 바인딩하고 SELECT에는 페이지용 LIMIT·OFFSET을 넣지 않는다.
 SQL의 limit/offset은 검증된 PaginationQueryDto를 사용하고 정렬에 고유 ID를 포함한다.
 기본 limit=20, 1~100, offset=0 이상 안전한 정수다. 빈 값·소수·지수 표기·반복 query·추가 속성은 400이다.
-총건수·총페이지수·page 객체를 반환하지 않는다.
+total_count는 limit·offset 적용 전 전체 건수다. 총페이지수·page 객체는 반환하지 않으며 프론트에서 ceil(total_count/limit)으로 페이지 수를 계산한다.
 
 DTO는 런타임 class로 선언하고 class-validator 데코레이터를 지정한다. 전역 ValidationPipe는
 명시적 변환만 사용하고 등록하지 않은 필드를 거절한다. 식별자·전화번호 등 문자열을 임의로 숫자로 바꾸지 않는다.
@@ -362,12 +368,12 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | POST /api/auth/login | 200 `{ data: { expiresAt }, meta }`, ACTIVE만 로그인 |
 | POST /api/auth/logout | 204, 현재 세션 삭제. 없는 세션도 204 |
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
-| GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext }` |
+| GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext, total_count }` |
 | PATCH /api/admins/:id | SYSTEM_ADMIN, role/status 변경, 204 |
 | PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
-| PATCH /api/admins/:id/password | SYSTEM_ADMIN, newPassword로 대상 비밀번호 변경, 204 |
+| PATCH /api/admins/:id/password | SYSTEM_ADMIN, 본문 없이 dva1234로 초기화·대상 전체 세션 종료, 204 |
 
 ID는 영문 대소문자·숫자 1~20자이고 대소문자를 구분한다. 이름은 필수이며 공백만인 값은 거절한다.
 비밀번호는 최소 6자이고 별도 문자 조합·길이 상한을 두지 않으며 원문을 trim하지 않는다.
@@ -446,3 +452,8 @@ CLI는 SYSTEM_ADMIN이 이미 있으면 중단하고 기존 계정을 변경하�
 `node scripts/check.cjs`는 격리 PostgreSQL에서 AUTH-01~08, 권한, Origin 검증, 만료·삭제, 동시 로그인/비밀번호 변경,
 최상위 관리자 권한 보호, 감사 실패 롤백 및 기존 PBX를 검증하고 운영 이미지/Nginx의 쿠키 전달도 확인한다.
 저장소 루트의 `./infra/database/test-monolith.ps1`은 migration·백업 복구·체크섬·실패 롤백을 검증한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.
+
+관리자 비밀번호 초기화 PATCH /api/admins/{id}/password는 본문 없이 호출하며 서버가 dva1234로 설정한다. SYSTEM_ADMIN만 가능하고 대상 전체 세션을 종료한다. 일반 비밀번호 변경은 기존 계약을 유지한다. 고객 내 주소·선택 부서에는 028 migration이 필요하고 직원 CSV 업로드는 제거되어 프론트에서 JSON을 전송한다.

@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { queueFaqChange } from './faq-change';
+import { FAQ_CATEGORIES, FaqCategory } from './faq-categories';
 
 export interface FaqSeedEntry {
+  category: FaqCategory;
   question: string;
   answer: string;
 }
@@ -15,7 +17,8 @@ export function validateFaqSeed(input: unknown): FaqSeedEntry[] {
       !entry ||
       typeof entry !== 'object' ||
       Array.isArray(entry) ||
-      Object.keys(entry).sort().join(',') !== 'answer,question' ||
+      Object.keys(entry).sort().join(',') !== 'answer,category,question' ||
+      !FAQ_CATEGORIES.includes(entry.category) ||
       typeof entry.question !== 'string' ||
       !/\S/u.test(entry.question) ||
       entry.question.includes('\0') ||
@@ -62,8 +65,8 @@ export async function seedFaqs(
     for (const entry of entries) {
       const id = (
         await client.query<{ id: number }>(
-          'INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES($1,$2,$3) RETURNING faq_entry_seq AS id',
-          [entry.question, entry.answer, admin.id],
+          'INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES($1,$2,$3,$4) RETURNING faq_entry_seq AS id',
+          [entry.question, entry.answer, admin.id, entry.category],
         )
       ).rows[0].id;
       ids.push(id);

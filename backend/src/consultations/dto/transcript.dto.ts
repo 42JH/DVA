@@ -44,6 +44,15 @@ export class UtteranceDto {
     example: '2026-10-28T01:00:10.000Z',
   })
   receivedAt!: Date;
+
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    description: 'AI 통화 시작부터 정수 초. 이벤트 미수집·위치 미확인 시 null.',
+    example: 31,
+  })
+  offsetSeconds!: number | null;
 }
 
 export class TranscriptResponseDto {
@@ -55,4 +64,10 @@ export class TranscriptResponseDto {
 
   @ApiProperty({ description: '다음 페이지 존재 여부.', example: false })
   hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }

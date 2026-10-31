@@ -18,7 +18,9 @@ const clear = () => f.pool.query('DELETE FROM faq_entries');
 test('21 seed: audit failure rolls back all rows and malformed data or missing/inactive actors cannot initialize', async () => {
   await clear();
   const before = await f.counts();
-  await assert.rejects(() => seedFaqs(f.pool, f.loginIds[0], [{ question: '질문', answer: '' }]));
+  await assert.rejects(() =>
+    seedFaqs(f.pool, f.loginIds[0], [{ category: '기타', question: '질문', answer: '' }]),
+  );
   await assert.rejects(() => seedFaqs(f.pool, 'NoSuchFaqAdmin', entries));
   await f.pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [f.ids[0]]);
   try {
@@ -56,11 +58,11 @@ test('21 seed: CLI inserts 32 pairs in source order, records the chosen admin an
   assert.match(result.stdout, /32건/);
   const rows = (
     await f.pool.query(
-      'SELECT faq_entry_seq,question,answer,updated_by_admin_user_seq FROM faq_entries ORDER BY faq_entry_seq',
+      'SELECT faq_entry_seq,question,answer,category,updated_by_admin_user_seq FROM faq_entries ORDER BY faq_entry_seq',
     )
   ).rows;
   assert.deepEqual(
-    rows.map(({ question, answer }) => ({ question, answer })),
+    rows.map(({ category, question, answer }) => ({ category, question, answer })),
     entries,
   );
   assert.ok(rows.every((r) => r.updated_by_admin_user_seq === f.ids[0]));
@@ -83,7 +85,11 @@ test('21 seed: CLI inserts 32 pairs in source order, records the chosen admin an
   ).rows;
   assert.equal(snapshots.length, 32);
   assert.ok(snapshots.every((row) => row.matches));
-  const updated = await f.patch(rows[0].faq_entry_seq, { answer: '관리자가 수정한 답변' }, 1);
+  const updated = await f.patch(
+    rows[0].faq_entry_seq,
+    { category: rows[0].category, question: rows[0].question, answer: '관리자가 수정한 답변' },
+    1,
+  );
   assert.equal(updated.status, 204);
   const snapshot = (
     await f.pool.query(
@@ -120,7 +126,7 @@ test('21 seed: concurrent initializers create one batch and any existing FAQ pre
   );
   assert.equal((await f.counts()).faqs, 32);
   await clear();
-  const id = await f.createdId({ question: '운영 FAQ', answer: '보존' });
+  const id = await f.createdId({ category: '기타', question: '운영 FAQ', answer: '보존' });
   assert.deepEqual(await seedFaqs(f.pool, f.loginIds[0], entries), { inserted: 0, skipped: true });
   assert.equal((await f.counts()).faqs, 1);
   assert.equal((await (await f.ai('/' + id)).json()).data.answer, '보존');
@@ -133,7 +139,7 @@ test('21 seed: an in-flight administrator insert wins without being overwritten 
   try {
     await client.query('BEGIN');
     await client.query(
-      'INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES($1,$2,$3)',
+      "INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES($1,$2,$3,'기타')",
       ['관리자 선행 등록', '유지', f.ids[0]],
     );
     pending = seedFaqs(f.pool, f.loginIds[1], entries);

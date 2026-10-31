@@ -985,7 +985,7 @@ test('ORD-02 paginates orders once each, including zero-detail drafts and equal 
   const first = await readOrders(`?customerSeq=${customer}&limit=2`);
   assert.equal(first.status, 200);
   const body = await first.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.hasNext, true);
   assert.deepEqual(
     body.data.map((o) => o.orderSeq),
@@ -1008,6 +1008,7 @@ test('ORD-02 paginates orders once each, including zero-detail drafts and equal 
   assert.deepEqual(await (await readOrders(`?customerSeq=${customer}&offset=3`)).json(), {
     data: [],
     hasNext: false,
+    total_count: 3,
   });
 });
 
@@ -1208,6 +1209,7 @@ test('ORD-02 Swagger describes filters, a single call header and the actual list
   assert.deepEqual(operation.responses[200].content['application/json'].schema.required, [
     'data',
     'hasNext',
+    'total_count',
   ]);
   assert.ok(
     Object.values(spec.components.schemas.OrderSummaryDto.properties).every((p) => p.description),
@@ -3138,28 +3140,14 @@ for (const operation of ['create', 'update', 'submit']) {
                 });
         const pid = await locked;
         if (operation === 'update') {
-          const form = new FormData();
-          form.append(
-            'file',
-            new Blob(
-              [
-                'employeeNo,name,phoneNumber,departmentSeq\n' +
-                  employeeNo +
-                  ',변경 고객,' +
-                  phone +
-                  ',' +
-                  department,
-              ],
-              {
-                type: 'text/csv',
-              },
-            ),
-            'members.csv',
-          );
-          pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members/import', {
+          pendingMember = fetch(hosts[1] + '/api/companies/' + organizationId + '/members', {
             method: 'POST',
-            headers: { Origin: origin, Cookie: cookies[1] },
-            body: form,
+            headers: { Origin: origin, Cookie: cookies[1], 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: [
+                { employeeNo, name: '변경 고객', phoneNumber: phone, departmentSeq: department },
+              ],
+            }),
           });
         } else {
           pendingMember = fetch(hosts[1] + '/api/members/' + membership, {

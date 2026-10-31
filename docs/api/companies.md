@@ -29,14 +29,14 @@ AuthModule의 전역 Guard가 네 경로 모두에서 로그인·현재 계정 �
 
 | 메서드·경로 | 요청 | 성공 응답 |
 |---|---|---|
-| GET /api/companies | q, status, limit, offset | 200, `{ data: Organization[], hasNext }` |
+| GET /api/companies | q, status, limit, offset | 200, `{ data: Organization[], hasNext, total_count }` |
 | POST /api/companies | `{ name, monthlyBillingEnabled? }` | 201, `{ data: { organizationSeq }, meta: { requestId } }` |
 | GET /api/companies/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Organization, meta: { requestId } }` |
 | PATCH /api/companies/{id} | name·status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
 
 Organization은 `{ organizationSeq, name, status, monthlyBillingEnabled }`다. 내부 주소록·구성원 정보는 조회하지 않는다.
 PATCH의 INACTIVE는 비활성화이며 ACTIVE로 다시 변경할 수 있다. 실제 삭제는 `DELETE /api/companies/{id}`를 사용한다. 소속·부서·기업 PIN을 정리하고 개인 고객·주문·통화·녹취·감사·청구 기록을 보존한다. [삭제 API와 기록 보존](company-deletion.md)을 따른다.
-목록은 기업 번호 내림차순, limit 기본 20·최대 100, offset 기본 0이다. 목록에 meta·page·총건수를 추가하지 않는다.
+목록은 기업 번호 내림차순, limit 기본 20·최대 100, offset 기본 0이다. 목록에 total_count를 포함하며 meta·page 객체는 추가하지 않는다.
 q는 대소문자를 구분하지 않는 기업명 부분 검색이며 `%`, `_`도 검색어 자체로 취급한다.
 공백만 있는 q는 전체 조회다. status는 ACTIVE 또는 INACTIVE만 허용한다.
 
@@ -93,3 +93,6 @@ origin 값은 백엔드의 CORS_ORIGINS에 등록된 값과 같아야 한다.
 운영의 Secure 쿠키는 HTTPS에서만 사용한다. [자동 배포 파이프라인](../../infra/deploy/README.md)이
 반영된 이후에는 Jenkins가 앱 교체 전에 미적용 migration을 실행한다. 서버에서 확인하려면 해당
 소스를 배포하고 인증·기업 API의 호스트 Nginx 공개 경로도 설정해야 한다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

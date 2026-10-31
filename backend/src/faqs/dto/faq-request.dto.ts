@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -6,6 +6,7 @@ import {
   ArrayUnique,
   IsArray,
   IsInt,
+  IsIn,
   IsObject,
   IsOptional,
   IsString,
@@ -16,8 +17,13 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { FAQ_CATEGORIES, FaqCategory } from '../faq-categories';
 
 export class CreateFaqDto {
+  @ApiProperty({ enum: FAQ_CATEGORIES, description: 'FAQ 분류. 전체는 저장하지 않습니다.' })
+  @IsIn(FAQ_CATEGORIES)
+  category!: FaqCategory;
+
   @ApiProperty({
     description: 'FAQ 질문. 공백만 입력 불가.',
     maxLength: 1000,
@@ -41,7 +47,7 @@ export class CreateFaqDto {
   answer!: string;
 }
 
-export class UpdateFaqDto extends PartialType(CreateFaqDto, { skipNullProperties: false }) {}
+export class UpdateFaqDto extends CreateFaqDto {}
 
 export class CreateFaqsDto {
   @ApiProperty({ type: [CreateFaqDto], minItems: 1, maxItems: 100 })
@@ -79,6 +85,16 @@ export class FaqQueryDto extends PaginationQueryDto {
   @Matches(/^[^\0]*$/u)
   @MaxLength(200)
   q?: string;
+}
+
+export class AdminFaqQueryDto extends FaqQueryDto {
+  @ApiPropertyOptional({
+    enum: FAQ_CATEGORIES,
+    description: '분류별 조회. 전체는 파라미터를 생략합니다.',
+  })
+  @IsOptional()
+  @IsIn(FAQ_CATEGORIES)
+  category?: FaqCategory;
 }
 
 export class AiFaqQueryDto extends FaqQueryDto {

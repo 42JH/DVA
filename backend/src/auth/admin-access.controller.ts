@@ -14,6 +14,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   ApiCookieAuth,
+  ApiBody,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -32,7 +33,6 @@ import { Environment } from '../config/environment';
 import { AuthService } from './auth.service';
 import { AuthRequest, Roles, SESSION_COOKIE } from './auth.guard';
 import { cookieOptions } from './auth.controller';
-import { ResetPasswordDto } from './dto/auth-request.dto';
 import { AdminListDto } from './dto/auth-response.dto';
 function adminId(value: string): number {
   if (!/^[1-9][0-9]*$/.test(value) || Number(value) > 2147483647)
@@ -134,7 +134,7 @@ export class AdminAccessController {
   @ApiOperation({
     summary: '관리자 비밀번호 초기화',
     description:
-      'SYSTEM_ADMIN 전용. 입력한 새 비밀번호로 변경하고 대상 관리자의 모든 세션을 종료합니다.',
+      'SYSTEM_ADMIN 전용. 입력 없이 dva1234로 초기화하고 대상 관리자의 모든 세션을 종료합니다.',
   })
   @ApiParam({
     name: 'id',
@@ -142,20 +142,22 @@ export class AdminAccessController {
     schema: { type: 'integer', minimum: 1 },
   })
   @ApiNoContentResponse({ description: '비밀번호 초기화 및 대상 관리자의 전체 세션 종료.' })
+  @ApiBody({ required: false, schema: { type: 'object', additionalProperties: false } })
   async password(
     @Param('id') id: string,
-    @Body() input: ResetPasswordDto,
+    @Body() input: Record<string, unknown> | undefined,
     @Req() request: AuthRequest,
     @Res({ passthrough: true }) response: Response,
   ) {
     if (
-      await this.auth.resetPassword(
-        request.sessionToken,
-        adminId(id),
-        input.newPassword,
-        request.requestId,
-      )
+      input !== undefined &&
+      (input === null ||
+        Array.isArray(input) ||
+        typeof input !== 'object' ||
+        Object.keys(input).length > 0)
     )
+      throw new ApiException(400, 'INVALID_REQUEST', '비밀번호 초기화는 입력값을 받지 않습니다.');
+    if (await this.auth.resetPassword(request.sessionToken, adminId(id), request.requestId))
       response.clearCookie(
         SESSION_COOKIE,
         cookieOptions(this.config.get('NODE_ENV', { infer: true }) === 'production'),

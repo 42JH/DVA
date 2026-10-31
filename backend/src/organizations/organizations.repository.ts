@@ -1,3 +1,4 @@
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -10,35 +11,38 @@ import { CompanyDirectoryEntryDto, CompanyDirectoryQueryDto } from './dto/compan
 export class OrganizationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  async searchDirectory(query: CompanyDirectoryQueryDto): Promise<CompanyDirectoryEntryDto[]> {
+  async searchDirectory(
+    query: CompanyDirectoryQueryDto,
+  ): Promise<PageRows<CompanyDirectoryEntryDto>> {
     // 기업 공유 PIN 전체가 공식 공개 배송지라는 40번 합의를 적용한다.
     // 구성원·개인 PIN과 조인하지 않고 기업 상태와 PIN을 한 SQL 스냅샷에서 읽는다.
-    return (
-      await this.database.pool.query<CompanyDirectoryEntryDto>(
-        `SELECT o.organization_seq AS "organizationSeq",o.name AS "organizationName",
+    return await readPage<CompanyDirectoryEntryDto>(
+      this.database.pool,
+      `SELECT o.organization_seq AS "organizationSeq",o.name AS "organizationName",
         p.company_pin_seq AS "companyPinSeq",p.label,p.department_name AS "departmentName",p.department_seq AS "departmentSeq",
         p.address_data AS "addressData",p.version
        FROM organizations o JOIN company_pins p ON p.organization_seq=o.organization_seq
        WHERE o.status='ACTIVE' AND NOT EXISTS(
          SELECT 1 FROM unnest($1::text[]) AS terms(term)
          WHERE strpos(lower(normalize(concat_ws(' ',o.name,p.search_text,
-           p.address_data->>'dongName',p.address_data->>'postalCode'),NFC)),lower(normalize(term,NFC)))=0)
-       ORDER BY lower(normalize(o.name,NFC)),o.organization_seq,p.company_pin_seq
-       LIMIT $2 OFFSET $3`,
-        [query.q.split(' '), query.limit + 1, query.offset],
-      )
-    ).rows;
+           p.address_data->>'dongName',p.address_data->>'postalCode'),NFC)),lower(normalize(term,NFC)))=0)`,
+      [query.q.split(' ')],
+      query,
+      'lower(normalize("organizationName",NFC)),"organizationSeq","companyPinSeq"',
+    );
   }
 
-  async list(query: ListOrganizationsQueryDto): Promise<Organization[]> {
-    const result = await this.database.pool.query<Organization>(
+  async list(query: ListOrganizationsQueryDto): Promise<PageRows<Organization>> {
+    const result = await readPage<Organization>(
+      this.database.pool,
       `SELECT organization_seq AS "organizationSeq", name, status,monthly_billing_enabled AS "monthlyBillingEnabled" FROM organizations
        WHERE ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
-         AND ($2::text IS NULL OR status = $2)
-       ORDER BY organization_seq DESC LIMIT $3 OFFSET $4`,
-      [query.q || null, query.status ?? null, query.limit + 1, query.offset],
+         AND ($2::text IS NULL OR status = $2)`,
+      [query.q || null, query.status ?? null],
+      query,
+      '"organizationSeq" DESC',
     );
-    return result.rows;
+    return result;
   }
 
   async find(id: number): Promise<Organization | undefined> {

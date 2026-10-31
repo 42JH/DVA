@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
+import { CallAnalysisDto } from './call-analysis-response.dto';
 
 export class HandoffDto {
   @ApiProperty({ description: '상담원 연결 요청 번호.', example: 5 })
@@ -37,6 +38,20 @@ export class HandoffDto {
 }
 
 export class CallDto {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '연결 주문 고객 우선, 없으면 발신번호와 일치한 고객 번호.',
+  })
+  customerSeq!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '연결 고객의 현재 이름. 미확인은 null.',
+  })
+  customerName!: string | null;
+
   @ApiProperty({
     enum: ORDER_STATUSES,
     nullable: true,
@@ -103,12 +118,27 @@ export class CallDto {
   handoff!: HandoffDto | null;
 }
 
+export class CallListItemDto extends CallDto {
+  @ApiProperty({
+    type: CallAnalysisDto,
+    nullable: true,
+    description: '저장된 통화 분석. 아직 수신하지 않았으면 null.',
+  })
+  analysis!: CallAnalysisDto | null;
+}
+
 export class CallListResponseDto {
-  @ApiProperty({ description: '통화 목록.', type: [CallDto] })
-  data!: CallDto[];
+  @ApiProperty({ description: '통화 목록.', type: [CallListItemDto] })
+  data!: CallListItemDto[];
 
   @ApiProperty({ description: '다음 페이지 존재 여부.', example: false })
   hasNext!: boolean;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
+  })
+  total_count!: number;
 }
 
 export class RecordingDto {
@@ -159,6 +189,19 @@ export class RecordingDto {
 export class CallDetailDto {
   @ApiProperty({ description: '통화 기본 정보와 상담원 연결 기록.', type: CallDto })
   call!: CallDto;
+
+  @ApiProperty({
+    type: CallAnalysisDto,
+    nullable: true,
+    description: '저장된 통화 분석. 아직 수신하지 않았으면 null.',
+  })
+  analysis!: CallAnalysisDto | null;
+
+  @ApiProperty({
+    minimum: 0,
+    description: '현재 수집된 AI 동작 전체 건수. 동작 조회의 페이지 크기와 별개.',
+  })
+  aiActionCount!: number;
 
   @ApiProperty({
     description: '녹취별 재생 URL·만료 시각·오류. 미수집·미연결이면 빈 배열.',

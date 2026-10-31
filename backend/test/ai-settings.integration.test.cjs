@@ -204,9 +204,14 @@ test('PATCH appends whole snapshots, preserves omitted values, and rejects stale
   );
   assert.equal(v3.voiceId, null);
   assert.equal(v3.speakingRate, null);
-  const history = await data(
-    await call('GET', `/api/personas/${v1.aiPersonaSeq}/versions?limit=2`),
-  );
+  const historyResponse = await call('GET', `/api/personas/${v1.aiPersonaSeq}/versions?limit=2`);
+  assert.equal(historyResponse.status, 200);
+  const historyPage = await historyResponse.json();
+  assert.equal(historyPage.total_count, 3);
+  assert.equal(historyPage.hasNext, true);
+  const history = historyPage.data;
+  const pastEnd = await call('GET', `/api/personas/${v1.aiPersonaSeq}/versions?offset=100`);
+  assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: 3 });
   assert.deepEqual(
     history.map((v) => v.version),
     [3, 2],
@@ -284,9 +289,13 @@ test('pagination, unknown fields and missing persona IDs are validated', async (
   await error(await call('GET', '/api/personas/0'), 400, 'INVALID_REQUEST');
   const response = await call('GET', '/api/personas?limit=1');
   const body = await response.json();
-  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext']);
+  assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data.length, 1);
   assert.equal(body.hasNext, true);
+  const total = (await pool.query('SELECT count(*)::int AS n FROM ai_personas')).rows[0].n;
+  assert.equal(body.total_count, total);
+  const pastEnd = await call('GET', `/api/personas?offset=${total}`);
+  assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: total });
 });
 
 test('Swagger documents persona inputs, whole versions and concise English tags without spec IDs', async () => {

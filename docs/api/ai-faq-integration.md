@@ -66,7 +66,8 @@ GET /api/ai/faqs?faqEntrySeqs=123,124&limit=100&offset=0
       "updatedAt": "2026-10-30T01:00:00.000Z"
     }
   ],
-  "hasNext": false
+  "hasNext": false,
+  "total_count": 2
 }
 ```
 
@@ -112,3 +113,6 @@ AI는 수신 이벤트를 순서대로 처리하고, 같은 FAQ에 대한 조회
 4. 관리자 추가·수정·단건/복수 삭제 후 원본 조회, AI 수신 202, 검색 반영을 함께 확인한다.
 
 백엔드 테스트는 임시 PostgreSQL과 모의 AI HTTP 서버를 사용한다. 실제 AI 서버·검색 인덱스·운영 DB에는 적용하지 않는다. 운영 확인에는 실제 수신 API와 AI 반영 검증이 별도로 필요하다.
+
+
+모든 목록 응답의 최상위 total_count는 필수인 0 이상 정수이며 같은 검색·필터·권한 범위의 전체 결과 수다. limit·offset 적용 전 COUNT(*)를 목록 데이터와 같은 SQL 스냅샷에서 계산한다. 검색 결과 없음은 0이며 offset이 전체 건수를 넘어 data가 비어도 total_count는 유지한다. 기존 hasNext는 유지한다.

@@ -621,3 +621,52 @@ test('expiry preserves consultation and recordings, closes the payment request, 
       ),
   );
 });
+
+test('employees without departments retain corporate credit and cannot use group billing', async () => {
+  const company = (
+    await request('/companies', { name: '부서 없는 월결제 기업', monthlyBillingEnabled: true })
+  ).body.data.organizationSeq;
+  const phone = '017' + String(Math.floor(Math.random() * 90000000) + 10000000);
+  const customer = (await request('/customers', { name: '부서 없는 직원', phoneNumber: phone }))
+    .body.data.customerSeq;
+  assert.equal(
+    (
+      await request(`/companies/${company}/members`, {
+        customerSeq: customer,
+        employeeNo: 'NO-DEPT',
+        role: 'MEMBER',
+      })
+    ).status,
+    204,
+  );
+  const context = (await request('/customers/context', { phoneNumber: phone })).body.data;
+  assert.equal(context.membership.departmentSeq, null);
+  assert.equal(context.department, null);
+  assert.deepEqual(context.availablePaymentMethods, ['billing', 'credit']);
+  const monthly = await createFinal(
+    finalBody({ customerSeq: customer, paymentMethodType: 'credit' }),
+  );
+  assert.equal(monthly.status, 201, JSON.stringify(monthly.body));
+  assert.equal(monthly.body.data.status, 'ACCEPTED');
+  const saved = (
+    await pool.query(
+      'SELECT billing_organization_seq,billing_department_seq FROM orders WHERE order_seq=$1',
+      [monthly.body.data.orderSeq],
+    )
+  ).rows[0];
+  assert.deepEqual(saved, { billing_organization_seq: company, billing_department_seq: null });
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'groupBilling' })))
+      .status,
+    403,
+  );
+  assert.equal(
+    (await request(`/companies/${company}`, { monthlyBillingEnabled: false }, false, 'PATCH'))
+      .status,
+    204,
+  );
+  assert.equal(
+    (await createFinal(finalBody({ customerSeq: customer, paymentMethodType: 'credit' }))).status,
+    403,
+  );
+});

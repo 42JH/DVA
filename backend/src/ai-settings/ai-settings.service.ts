@@ -26,7 +26,7 @@ export class AiSettingsService {
   }
 
   async detail(id: number) {
-    const persona = (await this.repository.personas({ limit: 1, offset: 0 }, id))[0];
+    const persona = (await this.repository.personas({ limit: 1, offset: 0 }, id)).rows[0];
     if (!persona) throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
     return persona;
   }

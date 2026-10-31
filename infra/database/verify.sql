@@ -4,10 +4,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>24 THEN RAISE EXCEPTION 'Expected 24 public tables, found %',n; END IF;
+ IF n<>27 THEN RAISE EXCEPTION 'Expected 27 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>19 THEN RAISE EXCEPTION 'Expected 19 foreign keys, found %',n; END IF;
+ IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -49,8 +49,12 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions
-  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql','021-company-deletion-history.sql','022-order-toss-payments.sql','023-payment-completion-notifications.sql'))<>22 THEN
+  WHERE version IN ('001-pbx-call-ended.sql','002-monolith-initial.sql','003-admin-auth-sessions.sql','004-organization-creation-requests.sql','005-customer-creation-requests.sql','007-order-creation-requests.sql','008-simplify-creation-requests.sql','009-membership-write-requests.sql','010-remove-membership-write-requests.sql','011-call-recording-correlation.sql','012-order-creation-source.sql','013-ai-persona-versions.sql','014-order-cancellation.sql','015-admin-deletion-audit.sql','016-order-pricing-audit.sql','017-department-billing-policy.sql','018-order-payment-flow.sql','019-organization-monthly-billing.sql','020-faq-change-notifications.sql','021-company-deletion-history.sql','022-order-toss-payments.sql','023-payment-completion-notifications.sql','024-call-analyses.sql','025-call-analysis-seconds.sql','026-call-insight-events.sql','027-faq-categories.sql','028-customer-address-optional-department.sql'))<>27 THEN
   RAISE EXCEPTION 'Migration ledger incomplete'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb' AND is_nullable='YES')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='customers'::regclass AND conname='customers_address_data_check')
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='department_seq' AND is_nullable='YES') THEN
+  RAISE EXCEPTION 'Customer address or optional department schema missing'; END IF;
  IF to_regclass('public.ai_persona_versions') IS NULL OR to_regclass('public.ai_prompt_versions') IS NOT NULL
   OR to_regclass('public.ai_persona_live_status_uk') IS NULL THEN
   RAISE EXCEPTION 'Persona version schema missing'; END IF;
@@ -75,7 +79,14 @@ BEGIN
   AND column_name IN ('completion_notification_status','completion_notification_attempted_at','completion_notification_sent_at'))<>3
   OR to_regclass('public.order_payment_completion_pending_idx') IS NULL THEN
   RAISE EXCEPTION 'Payment completion notification schema missing'; END IF;
- RAISE NOTICE 'PASS: 24 public tables, 19 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ IF to_regclass('public.call_insight_events') IS NULL OR to_regclass('public.unanswered_questions') IS NULL THEN
+  RAISE EXCEPTION 'Call events or unanswered reference schema missing'; END IF;
+ IF to_regclass('public.call_analyses') IS NULL
+  OR (SELECT count(*) FROM pg_constraint WHERE conrelid='public.call_analyses'::regclass AND contype='f')<>2
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_analyses'::regclass AND contype='p'
+    AND pg_get_constraintdef(oid)='PRIMARY KEY (call_session_seq)') THEN
+  RAISE EXCEPTION 'Call analysis table, identity or foreign keys missing'; END IF;
+ RAISE NOTICE 'PASS: 27 public tables, 25 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
