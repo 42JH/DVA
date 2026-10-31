@@ -2,8 +2,8 @@ import { Button, Tag } from '@/shared/ui'
 import type { PromptView } from '@/features/persona/hooks/usePersonaPage'
 
 // 왼쪽 '시스템 프롬프트' 카드 — 제목 줄 [음성 세부 조절] [v6과 비교] [수정] → 버전 태그 · 한 줄 설명 → 줄 번호 붙은 프롬프트(읽기 전용)
-// shortcut: 버튼 셋은 다음 단계(수정 · 비교 · 음성 세부 조절 화면)에서 켬
-export function PromptCard({ prompt }: { prompt: PromptView }) {
+// shortcut: [음성 세부 조절] · [비교]는 다음 단계에서 켬
+export function PromptCard({ prompt, onEdit }: { prompt: PromptView; onEdit: () => void }) {
   return (
     <section className="flex h-full min-h-0 flex-col gap-4 rounded-xl bg-surface p-7 ring-1 ring-line ring-inset">
       <div className="flex items-center justify-between gap-4">
@@ -11,7 +11,7 @@ export function PromptCard({ prompt }: { prompt: PromptView }) {
         <div className="flex gap-2">
           <Button disabled>음성 세부 조절</Button>
           {prompt.compareLabel && <Button disabled>{prompt.compareLabel}</Button>}
-          <Button kind="primary" disabled>
+          <Button kind="primary" onClick={onEdit}>
             수정
           </Button>
         </div>

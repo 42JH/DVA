@@ -1,7 +1,8 @@
 import { Button, Tag } from '@/shared/ui'
 import type { VersionItem } from '@/features/persona/hooks/usePersonaPage'
 
-// 오른쪽 '버전 히스토리' 탭 — 최신부터. 칸을 누르면 그 버전의 프롬프트. 작성 중 칸엔 [시험 통화] [적용]
+// 오른쪽 '버전 히스토리' 탭 — 최신부터. 칸을 누르면 그 버전의 프롬프트 + 그 칸에만 [시험 통화] [적용] (10/31)
+// 적용 중인 버전은 [적용] 없음. 지난 버전의 [적용] = 그 버전으로 다시 통화에 씀
 // 6개 넘으면 '이전 버전 n개 더 보기 ›'
 // shortcut: [시험 통화] · [적용]은 다음 단계(시험 통화 · 적용 화면)에서 켬
 export function VersionList({
@@ -38,8 +39,8 @@ export function VersionList({
             <span className="ml-auto text-caption text-sub">{v.date}</span>
           </p>
           <p className="text-label">{v.summary}</p>
-          {v.author && <p className="text-caption text-sub">{v.author}</p>}
-          {v.isDraft && (
+          <p className="text-caption text-sub">{v.author}</p>
+          {v.selected && (
             <div className="mt-2 flex justify-between" onClick={(e) => e.stopPropagation()}>
               <Button small disabled className="flex items-center gap-1.5">
                 <svg
@@ -56,9 +57,11 @@ export function VersionList({
                 </svg>
                 시험 통화
               </Button>
-              <Button small disabled>
-                적용
-              </Button>
+              {v.canApply && (
+                <Button small disabled>
+                  적용
+                </Button>
+              )}
             </div>
           )}
         </div>

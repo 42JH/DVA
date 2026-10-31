@@ -14,9 +14,12 @@ export const WAIT_LABEL: Record<WaitTime, string> = {
   LONG: '기다리기 길게',
 }
 
-// 버전 태그 (와이어프레임 07 버전 히스토리): 작성 중 = 회색, 적용 중 = 파랑. 지난 버전은 태그 없음
+// 버전 태그 (와이어프레임 07 버전 히스토리): 저장됨(미적용) = 회색 선, 적용 중 = 파랑. 지난 버전은 태그 없음
+// '작성 중'은 수정 화면의 저장 전 상태라 여기 없음 (DRAFT_TAG)
 export const VERSION_TAG: Record<VersionStatus, { label: string; kind: TagKind } | null> = {
-  DRAFT: { label: '작성 중', kind: 'gray' },
+  SAVED: { label: '저장됨', kind: 'outline' },
   ACTIVE: { label: '적용 중', kind: 'blue' },
   PAST: null,
 }
+
+export const DRAFT_TAG = '작성 중' // 수정 화면에서 저장하기 전 ('v8 · 작성 중')

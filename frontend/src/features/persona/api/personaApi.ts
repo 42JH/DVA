@@ -14,20 +14,21 @@ export interface Persona {
   waitTime: WaitTime
   inUse: boolean // 지금 통화에 쓰는 페르소나 (한 번에 하나)
   activeVersion: number // 적용 중인 버전
-  draftVersion: number | null // 작성 중(아직 적용 안 한) 버전
+  pendingVersion: number | null // 저장됐지만 아직 적용 안 한 최신 버전 ('v7 저장됨')
 }
 
-/** 버전 상태: 작성 중(저장 전) · 적용 중 · 지난 버전 */
-export type VersionStatus = 'DRAFT' | 'ACTIVE' | 'PAST'
+/** 서버에 있는 버전의 상태: 저장됨(아직 적용 안 함) · 적용 중 · 지난 버전
+ * '작성 중'은 서버에 없음 — 수정 화면에서 저장하기 전 상태일 뿐 (10/31 결정) */
+export type VersionStatus = 'SAVED' | 'ACTIVE' | 'PAST'
 
 export interface PersonaVersion {
   version: number
   status: VersionStatus
   voiceOnly: boolean // 프롬프트는 그대로, 음성 설정만 바꾼 버전 ('음성 설정' 태그)
   summary: string // 무엇을 바꿨는지 한 줄
-  author: string | null // 작성 중이면 null
-  savedAt: string | null // 'YYYY-MM-DD'. 작성 중이면 null ('저장 전')
-  basedOn: number | null // 어느 버전에서 시작했는지 (작성 중일 때 'v6에서 시작')
+  author: string
+  savedAt: string // 'YYYY-MM-DD'
+  basedOn: number | null // 어느 버전에서 시작해 고쳤는지 ('v6에서 시작'). 처음 만든 버전은 null
   prompt: string
 }
 
@@ -58,6 +59,27 @@ export async function fetchVersions(personaSeq: number): Promise<PersonaVersion[
   return (VERSIONS[personaSeq] ?? []).map((v) => ({ ...v }))
 }
 
+/** 수정한 프롬프트를 새 버전으로 저장 — 저장할 때마다 항상 '가장 큰 번호 + 1' (덮어쓰지 않음, 10/31 결정). 저장된 번호를 돌려줌
+ * 저장 = '저장됨'(아직 통화엔 안 씀). 적용(통화에 쓰기)은 따로. 저장 전 '작성 중'은 화면에만 있고 여기로 오지 않음 */
+export async function savePromptVersion(
+  personaSeq: number,
+  input: { prompt: string; basedOn: number; author: string },
+): Promise<number> {
+  await wait()
+  const persona = PERSONAS.find((p) => p.personaSeq === personaSeq)
+  const list = VERSIONS[personaSeq]
+  if (!persona || !list) throw new Error('페르소나를 찾을 수 없습니다.')
+  const version = Math.max(...list.map((x) => x.version)) + 1
+  const today = new Date().toLocaleDateString('sv-SE') // 'YYYY-MM-DD' (화면 시간대)
+  list.unshift(
+    v(version, 'SAVED', `v${input.basedOn}에서 수정`, input.author, today, input.prompt, {
+      basedOn: input.basedOn,
+    }),
+  )
+  persona.pendingVersion = version
+  return version
+}
+
 // ---------- 가짜 데이터 = 와이어프레임 07 ----------
 const PERSONAS: Persona[] = [
   {
@@ -68,7 +90,7 @@ const PERSONAS: Persona[] = [
     waitTime: 'NORMAL',
     inUse: true,
     activeVersion: 6,
-    draftVersion: 7,
+    pendingVersion: 7,
   },
   {
     personaSeq: 2,
@@ -78,11 +100,12 @@ const PERSONAS: Persona[] = [
     waitTime: 'LONG',
     inUse: false,
     activeVersion: 3,
-    draftVersion: null,
+    pendingVersion: null,
   },
 ]
 
 // 프롬프트 조각 — 버전마다 조금씩 다름 (v6 → v7: 복창을 한 번에, 전화번호 끊어 복창 추가)
+// v7 = 저장됐지만 아직 적용 안 한 버전 (디자인의 '작성 중 v7'은 저장 전 화면 상태라 서버 가짜에선 '저장됨')
 const ROLE = '# 역할\n너는 디버 택배 전화 접수 AI다. 짧고 또렷하게 말한다.'
 const steps = (readBack: string) =>
   `# 접수 순서\n1. 보내는 분 이름과 전화번호를 받는다.\n2. 받는 분 이름, 전화번호, 주소를 받는다.\n3. 물품 종류와 박스 크기를 묻는다.\n4. 보내기 전에 받은 내용을 ${readBack} 복창한다.`
@@ -98,8 +121,8 @@ const v = (
   version: number,
   status: VersionStatus,
   summary: string,
-  author: string | null,
-  savedAt: string | null,
+  author: string,
+  savedAt: string,
   prompt: string,
   extra: Partial<PersonaVersion> = {},
 ): PersonaVersion => ({
@@ -116,9 +139,17 @@ const v = (
 
 const VERSIONS: Record<number, PersonaVersion[]> = {
   1: [
-    v(7, 'DRAFT', '복창 한 번에, 전화번호 끊어 복창, 발화 속도 보통 → 빠르게', null, null, V7, {
-      basedOn: 6,
-    }),
+    v(
+      7,
+      'SAVED',
+      '복창 한 번에, 전화번호 끊어 복창, 발화 속도 보통 → 빠르게',
+      '김지훈',
+      '2026-10-30',
+      V7,
+      {
+        basedOn: 6,
+      },
+    ),
     v(6, 'ACTIVE', '품목 분류 문장 정리', '김지훈', '2026-10-02', V6),
     v(5, 'PAST', '말 끝 기다리기 짧게 → 보통', '한예린', '2026-09-17', V6, { voiceOnly: true }),
     v(4, 'PAST', '첫 인사 문구 단축', '오승현', '2026-09-01', V6),
