@@ -116,3 +116,8 @@
 ### 5-3. 주문 결제 상태 경계
 
 - 계획: 결제 어댑터의 승인 선점·알림 상태 변경을 주문 결제 모듈로 이동한다. 결제 어댑터는 외부 결제사 호출과 조회 projection을 맡고, 상태 변경은 OrderPaymentsService로 요청한다. 다른 모듈의 Repository export/import를 제거하고 기존 lease·검증·감사·멱등성을 유지한다.
+- 검증/판정: lint·컴파일·format, 주문/청구/실결제 130개 통과. 외부 POST 중복 방지·만료 후 GET 복구·알림 UNKNOWN 보존·재전송 감사 롤백을 유지했다. payments 모듈에서 주문 결제 Repository import와 상태 SQL 쓰기를 제거했고, 전체 모듈에서 다른 모듈 Repository import/export가 없음을 검색해 채택했다.
+
+### 5-4. 주문 접수 책임 분리
+
+- 계획: 주문 서비스의 결제 후 디버 접수·재접수·최종 저장·사전 검증을 OrderSubmissionService로 옮긴다. 준비 COMMIT → 외부 I/O → 결과 트랜잭션 순서와 저장 실패 시 SUBMITTING 보존을 유지한다. 컨트롤러 계약을 바꾸지 않고 관리자 재접수·결제 완료·유지보수 호출자도 함께 연결한다.

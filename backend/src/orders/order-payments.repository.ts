@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { DatabaseService } from '../database/database.service';
 import { PoolClient } from 'pg';
 import { OrganizationBillingService } from '../organizations/organization-billing.service';
 
@@ -20,7 +21,42 @@ export interface PaymentRequest {
 
 @Injectable()
 export class OrderPaymentsRepository {
-  constructor(private readonly billing: OrganizationBillingService) {}
+  async reserveApproval(client: PoolClient, id: string, key: string, claimId: string) {
+    await client.query(
+      `UPDATE order_payment_requests SET provider_payment_key=$2,
+        approval_started_at=COALESCE(approval_started_at,clock_timestamp()),approval_claim_id=$3,
+        approval_claimed_until=clock_timestamp()+interval '45 seconds' WHERE payment_request_id=$1`,
+      [id, key, claimId],
+    );
+  }
+
+  async queueNotification(client: PoolClient, id: string) {
+    await client.query(
+      "UPDATE order_payment_requests SET notification_status='PENDING',notification_attempted_at=NULL,notification_sent_at=NULL WHERE payment_request_id=$1",
+      [id],
+    );
+  }
+
+  async completionStatus(client: PoolClient, id: string): Promise<string> {
+    return (
+      await client.query<{ status: string }>(
+        'SELECT completion_notification_status AS status FROM order_payment_requests WHERE payment_request_id=$1',
+        [id],
+      )
+    ).rows[0].status;
+  }
+
+  async queueCompletionNotification(client: PoolClient, id: string) {
+    await client.query(
+      `UPDATE order_payment_requests SET completion_notification_status='PENDING',
+        completion_notification_attempted_at=NULL,completion_notification_sent_at=NULL WHERE payment_request_id=$1`,
+      [id],
+    );
+  }
+  constructor(
+    private readonly billing: OrganizationBillingService,
+    private readonly database: DatabaseService,
+  ) {}
   async eligibility(client: PoolClient, customerId: number) {
     const customer = (
       await client.query<{ monthlyBillingEnabled: boolean }>(
@@ -148,6 +184,84 @@ export class OrderPaymentsRepository {
     await client.query(
       "UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL,completion_notification_status='PENDING' WHERE payment_request_id=$1",
       [id, reference],
+    );
+  }
+
+  async releaseClaim(id: string, claimId: string, declined = false) {
+    await this.database.pool.query(
+      `UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL,
+      approval_started_at=CASE WHEN $3 THEN NULL ELSE approval_started_at END,
+      provider_payment_key=CASE WHEN $3 THEN NULL ELSE provider_payment_key END
+      WHERE payment_request_id=$1 AND approval_claim_id=$2 AND completed_at IS NULL`,
+      [id, claimId, declined],
+    );
+  }
+
+  async recordApproval(id: string, key: string, approvedAt: string) {
+    await this.database.pool.query(
+      'UPDATE order_payment_requests SET provider_approved_at=$3 WHERE payment_request_id=$1 AND provider_payment_key=$2',
+      [id, key, approvedAt],
+    );
+  }
+
+  async claimNotification() {
+    return this.database.transaction(async (client) => {
+      await client.query(`UPDATE order_payment_requests SET notification_status='UNKNOWN'
+        WHERE notification_status='SENDING' AND notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+      const row = (
+        await client.query<{
+          id: string;
+        }>(`SELECT r.payment_request_id AS id FROM order_payment_requests r
+        JOIN orders o USING(order_seq) WHERE r.notification_status='PENDING' AND r.invalidated_at IS NULL
+        AND r.completed_at IS NULL AND r.approval_started_at IS NULL AND r.expires_at>clock_timestamp() AND o.status='notPaid'
+        ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED`)
+      ).rows[0];
+      if (!row) return;
+      await client.query(
+        `UPDATE order_payment_requests SET notification_status='SENDING',notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+        [row.id],
+      );
+      return row.id;
+    });
+  }
+
+  async finishNotification(id: string, status: string) {
+    await this.database.pool.query(
+      `UPDATE order_payment_requests SET notification_status=$2,
+      notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
+      WHERE payment_request_id=$1 AND notification_status='SENDING'`,
+      [id, status],
+    );
+  }
+
+  async claimCompletionNotification() {
+    return this.database.transaction(async (client) => {
+      await client.query(`UPDATE order_payment_requests SET completion_notification_status='UNKNOWN'
+        WHERE completion_notification_status='SENDING'
+        AND completion_notification_attempted_at<clock_timestamp()-interval '45 seconds'`);
+      const row = (
+        await client.query<{
+          id: string;
+        }>(`SELECT payment_request_id AS id FROM order_payment_requests
+        WHERE completion_notification_status IN ('WAITING','PENDING') AND completed_at IS NOT NULL
+        ORDER BY completed_at LIMIT 1 FOR UPDATE SKIP LOCKED`)
+      ).rows[0];
+      if (!row) return;
+      await client.query(
+        `UPDATE order_payment_requests SET completion_notification_status='SENDING',
+        completion_notification_attempted_at=clock_timestamp() WHERE payment_request_id=$1`,
+        [row.id],
+      );
+      return row.id;
+    });
+  }
+
+  async finishCompletionNotification(id: string, status: string) {
+    await this.database.pool.query(
+      `UPDATE order_payment_requests SET completion_notification_status=$2,
+      completion_notification_sent_at=CASE WHEN $2='SENT' THEN clock_timestamp() ELSE NULL END
+      WHERE payment_request_id=$1 AND completion_notification_status='SENDING'`,
+      [id, status],
     );
   }
 }

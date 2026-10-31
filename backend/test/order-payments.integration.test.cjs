@@ -13,7 +13,7 @@ const { configureApplication } = require('../dist/configure-application');
 const { PaymentsService } = require('../dist/payments/payments.service');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
-const { PaymentsRepository } = require('../dist/payments/payments.repository');
+const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const { AuditService } = require('../dist/audit/audit.service');
 const { testMembership } = require('./helpers/membership.cjs');
 const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
@@ -541,7 +541,7 @@ test('a crashed approval owner is recovered after its lease expires with a GET a
   const r = await create(),
     id = r.paymentRequest.paymentRequestId,
     key = 'crash_' + id;
-  await app.get(PaymentsRepository).claim(id, 3500, key);
+  await app.get(OrderPaymentsService).claimApproval(id, 3500, key);
   providerPayments.set(key, {
     orderId: id,
     paymentKey: key,
@@ -779,7 +779,7 @@ test('completion retries reject unpaid/in-flight work and roll back when audit s
   }
   assert.equal((await lookup(id)).body.data.completionNotificationStatus, 'FAILED');
   assert.equal((await request(path, {}, true)).status, 200);
-  const repository = app.get(PaymentsRepository);
+  const repository = app.get(OrderPaymentsService);
   assert.equal(await repository.claimCompletionNotification(), id);
   assert.equal((await request(path, {}, true)).status, 409);
   await repository.finishCompletionNotification(id, 'FAILED');

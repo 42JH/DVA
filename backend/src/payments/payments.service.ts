@@ -48,7 +48,7 @@ export class PaymentsService {
     return this.process(id, view.amount, undefined, requestId);
   }
   private async process(id: string, amount: number, key: string | undefined, requestId: string) {
-    const claim = await this.repository.claim(id, amount, key);
+    const claim = await this.orders.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
     try {
       let result = await this.client.toss(id, amount, claim.key, claim.lookupOnly);
@@ -65,7 +65,7 @@ export class PaymentsService {
         typeof p.approvedAt === 'string' &&
         isZonedDate(p.approvedAt)
       ) {
-        await this.repository.recordApproval(id, claim.key, p.approvedAt);
+        await this.orders.recordApproval(id, claim.key, p.approvedAt);
         // Commit payment first. The existing PAID worker recovers a later Dver interruption.
         await this.orders.confirmPayment(id, amount, claim.key, requestId, p.approvedAt);
         return this.repository.read(id);
@@ -82,50 +82,52 @@ export class PaymentsService {
           p.paymentKey === claim.key &&
           p.totalAmount === amount);
       if (declined) {
-        await this.repository.releaseClaim(id, claim.claimId!, true);
+        await this.orders.releaseClaim(id, claim.claimId!, true);
         throw new ApiException(422, 'PAYMENT_FAILED', '결제가 승인되지 않았습니다.');
       }
       throw new ApiException(502, 'PAYMENT_RESULT_UNKNOWN', '결제 결과를 조회로 확인해 주세요.');
     } finally {
-      await this.repository.releaseClaim(id, claim.claimId!);
+      await this.orders.releaseClaim(id, claim.claimId!);
     }
   }
   async notifyOne() {
     this.ensureEnabled();
-    const id = await this.repository.claimNotification();
+    const id = await this.orders.claimNotification();
     if (!id) return false;
     const view = await this.repository.readNotice(id);
     if (view.status !== 'PENDING') {
-      await this.repository.finishNotification(id, 'FAILED');
+      await this.orders.finishNotification(id, 'FAILED');
       return true;
     }
     const result = await this.client.notify(
       paymentMessage(view, this.config.get('PAYMENT_PUBLIC_URL', { infer: true })),
     );
-    await this.repository.finishNotification(id, result);
+    await this.orders.finishNotification(id, result);
     return true;
   }
-  retryNotification(id: string, adminId: number, requestId: string) {
+  async retryNotification(id: string, adminId: number, requestId: string) {
     this.ensureEnabled();
-    return this.repository.retryNotification(id, adminId, requestId);
+    await this.orders.retryNotification(id, adminId, requestId);
+    return this.repository.read(id);
   }
   async notifyCompletionOne() {
     this.ensureEnabled();
-    const id = await this.repository.claimCompletionNotification();
+    const id = await this.orders.claimCompletionNotification();
     if (!id) return false;
     const view = await this.repository.readNotice(id);
     if (view.status !== 'PAID') {
-      await this.repository.finishCompletionNotification(id, 'FAILED');
+      await this.orders.finishCompletionNotification(id, 'FAILED');
       return true;
     }
     const result = await this.client.notify(
       paymentCompletionMessage(view, this.config.get('PAYMENT_PUBLIC_URL', { infer: true })),
     );
-    await this.repository.finishCompletionNotification(id, result);
+    await this.orders.finishCompletionNotification(id, result);
     return true;
   }
-  retryCompletionNotification(id: string, adminId: number, requestId: string) {
+  async retryCompletionNotification(id: string, adminId: number, requestId: string) {
     this.ensureEnabled();
-    return this.repository.retryCompletionNotification(id, adminId, requestId);
+    await this.orders.retryCompletionNotification(id, adminId, requestId);
+    return this.repository.read(id);
   }
 }

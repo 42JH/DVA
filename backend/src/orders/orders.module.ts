@@ -35,6 +35,6 @@ import { DeliveriesModule } from '../deliveries/deliveries.module';
     OrderPaymentsService,
     OrderMaintenanceWorker,
   ],
-  exports: [OrdersService, OrderPaymentsService, OrderPaymentsRepository],
+  exports: [OrdersService, OrderPaymentsService],
 })
 export class OrdersModule {}
