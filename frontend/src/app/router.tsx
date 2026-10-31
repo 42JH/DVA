@@ -12,6 +12,7 @@ import { HomePage } from './routes/HomePage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { PersonaPage } from '@/features/persona/components/PersonaPage'
 import { MyInfoPage } from '@/features/me/components/MyInfoPage'
+import { AdminPage } from '@/features/admin/components/AdminPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
 import { RequireRole } from './guards/RequireRole'
@@ -82,7 +83,7 @@ export const router = createBrowserRouter([
             handle: { title: '관리자 권한 관리' } satisfies RouteHandle,
             element: (
               <RequireRole roles={['SYSTEM_ADMIN']}>
-                <Placeholder />
+                <AdminPage />
               </RequireRole>
             ),
           },
