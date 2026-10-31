@@ -1,5 +1,12 @@
 # 작업 기록
 
+## 2026-10-31 Jenkins(Linux) 테스트 간헐 실패 수정
+
+- 증상: Windows에서는 전부 통과, Jenkins와 같은 Linux 컨테이너에서는 `test_sideband.py` 3개가 실행마다 0~3개 실패(AssertionError).
+- 실제 버그(`test_17`): 판별 결과를 적용하는(await) 사이에 붙은 다음 말까지 `heard_text = ""`로 지워, "네" 직후 "아 잠깐만요"가 사라지고 확정 지연이 멈춘 채 남았다. `listener._consume`으로 판별한 말만 지운다. 재현 테스트 `test_words_heard_while_answer_is_applied_are_not_lost` 추가(수정 전 실패 확인).
+- 테스트 경쟁 상태(운임 안내·RAG 시간 초과): 단계·확정 지연은 진행 상태를 보내기 전에 바뀌므로, 단계가 아니라 문구 도착을 기다리게 했다.
+- 확인: 로컬 578개 통과, Linux 컨테이너 전체 통과 + sideband 8회 반복 모두 통과.
+
 ## 2026-10-31 LangGraph 재구성 브랜치에 develop-ai(FAQ 관리 a0b4f37) 병합 충돌 해결
 
 - 충돌 4곳(`backend_api.py` docstring, `mock_backend.py` `faqs` 필드, `spec/backend-api.md` 인증 문단, WORKLOG)은 양쪽 내용을 합쳤다.

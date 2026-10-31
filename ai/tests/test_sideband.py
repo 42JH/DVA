@@ -504,6 +504,37 @@ def test_17_cancel_yes_then_wait_within_commit_delay_does_not_cancel():
     run(scenario())
 
 
+def test_words_heard_while_answer_is_applied_are_not_lost(monkeypatch):
+    """판별 결과를 적용하는(await) 사이에 붙은 말을 소비하면서 지우지 않는다(지우면 확정 지연이 멈춘 채 남았다)."""
+    from app.flow import engine
+
+    db = orders_db()
+    client, call = FakeClient(), to_cancel_confirm(db)
+    apply = engine.apply
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        task, conn = await start(call, client)
+
+        async def apply_then_talk(ctx, events, by, *a, **kw):
+            await apply(ctx, events, by, *a, **kw)
+            if by == "listener" and events:  # "네" 적용 직후, 소비 전에 다음 말이 온다
+                answers(client, "none", "wait")
+                conn.push("session.input_transcript.delta", delta=" 아 잠깐만요")
+                await asyncio.sleep(0.05)
+
+        monkeypatch.setattr(engine, "apply", apply_then_talk)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네")
+        await until(lambda: len(client.responses.requests) == 2 and not call.listen_tasks)
+        assert "아 잠깐만요" in client.responses.requests[1]["input"] and call.flow.pending is None
+        await asyncio.sleep(call.cfg.flow.commit_delay_ms / 1000 + 0.2)
+        assert db.orders[1]["parcels"][0]["status"] == "ACTIVE"
+        await close(conn, task)
+
+    run(scenario())
+
+
 def test_18_customer_talk_during_cancel_does_not_stop_it_and_result_is_told():
     db = slow_orders(0.5)
     client, call = FakeClient(), to_cancel_confirm(db)
@@ -653,10 +684,11 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         conn.push("session.input_transcript.delta", delta="택배요")
         await until(lambda: call.flow.stage == "A_REGISTER_SENDER")
         conn.function_call("record_order", FULL_ORDER, "r1")
-        await until(lambda: call.flow.pending)
-        assert "운임은 4,000원이에요" in thoughts(conn)[-1] and call.texts.say["PAY_BILLING"] in thoughts(conn)[-1]
-        await until(lambda: call.flow.stage == "A_CHOICE")
-        assert call.texts.say["A8"] in thoughts(conn)[-1] and "운임은" not in thoughts(conn)[-1]
+        # 단계·확정 지연은 진행 상태를 보내기(await) 전에 바뀐다: 문구가 도착할 때까지 기다린다
+        await until(lambda: call.flow.pending and thoughts(conn) and "운임은 4,000원이에요" in thoughts(conn)[-1])
+        assert call.texts.say["PAY_BILLING"] in thoughts(conn)[-1]
+        await until(lambda: call.flow.stage == "A_CHOICE" and call.texts.say["A8"] in thoughts(conn)[-1])
+        assert "운임은" not in thoughts(conn)[-1]
         await close(conn, task)
 
     run(scenario())
@@ -670,8 +702,9 @@ def test_rag_wait_times_out_as_no_answer():
         task, conn = await start(call, client)
         answers(client, "none", "question")
         conn.push("session.input_transcript.delta", delta="해외 배송 되나요?")
-        await until(lambda: call.flow.stage == "D_AGENT_OFFER", timeout=2)  # 검색 결과가 오지 않음
-        assert call.texts.say["D5"] in thoughts(conn)[-1] and call.fail_count == 1
+        await until(lambda: call.flow.stage == "D_AGENT_OFFER" and call.texts.say["D5"] in thoughts(conn)[-1],
+                    timeout=2)  # 검색 결과가 오지 않음
+        assert call.fail_count == 1
         await close(conn, task)
 
     run(scenario())
