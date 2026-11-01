@@ -48,9 +48,11 @@ def test_studio_runs_each_stage_node_and_rejects_bad_input():
         view = await g.ainvoke({"tool": "record_order", "args": {**view["example_args"], "small_box_count": 1,
                                                                  "item_price": 1000, "pickup_at": None}}, conf)
         view = await g.ainvoke({"tool": "record_order", "args": view["example_args"]}, conf)
-        assert view["stage"] == "A_PICKUP_TIME" and view["pending"]
+        assert view["stage"] == "A_CONFIRM" and not view["pending"]
+        view = await g.ainvoke({"answer": "yes"}, conf)
+        assert view["stage"] == "A_CONFIRM" and view["pending"]
         nodes = [list(u)[0] async for u in g.astream({"commit": True}, conf, stream_mode="updates")]
         return nodes
 
     # 사건 하나가 지나간 단계 노드가 Studio에 하나씩 보인다
-    assert run(play()) == ["report", "A_PICKUP_TIME", "A_PAYMENT", "A_DONE", "A_CHOICE", "done"]
+    assert run(play()) == ["report", "A_CONFIRM", "A_PAYMENT", "A_DONE", "A_CHOICE", "done"]
