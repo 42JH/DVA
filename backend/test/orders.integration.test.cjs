@@ -3782,14 +3782,11 @@ test('admin screen tabs group payment-complete states and retain actual receipt 
       [id, status],
     );
   }
-  for (const statusGroup of ['COLLECTING', 'notPaid', 'PAID', 'CANCELLED']) {
+  for (const statusGroup of ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED']) {
     const body = await (
       await screenOrders({ from: '2092-01-01T00:00:00Z', to: '2092-01-02T00:00:00Z', statusGroup })
     ).json();
-    const expected =
-      statusGroup === 'PAID'
-        ? ['PAID', 'SUBMITTING', 'ACCEPTED', 'SUBMISSION_FAILED']
-        : [statusGroup];
+    const expected = statusGroup === 'PAID' ? ['PAID', 'SUBMITTING', 'ACCEPTED'] : [statusGroup];
     assert.equal(body.total_count, expected.length);
     assert.ok(body.data.every((order) => order.parcels.length === 1));
     assert.deepEqual(body.data.map((o) => o.status).sort(), expected.sort());
