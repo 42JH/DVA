@@ -32,6 +32,8 @@ services:
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
       # 페르소나 연동 토큰(백엔드와 같은 값, 32자 이상). 비어 있으면 연동을 끄고 prompts/voice.md를 쓴다
       AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
+      # 통화 기록·분석 전송 토큰(백엔드 AI_INSIGHTS_TOKEN과 같은 값). 비어 있으면 보내지 않는다(spec/insights.md)
+      AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:?Set QDRANT_API_KEY in .env}
       # RunPod 준비 전에는 검색만 오류로 안내하고 주문 접수는 계속한다.

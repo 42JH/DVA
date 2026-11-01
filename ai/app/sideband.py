@@ -8,6 +8,7 @@ import time
 
 from app import listener
 from app import client_backend
+from app import insights
 from app.call import Call
 from app.dispatcher import dispatch
 from app.flow import engine
@@ -64,6 +65,10 @@ async def run_call(call: Call, client) -> None:
             await call.finish()  # 통화 결과를 백엔드에 한 번(접수·미완료·취소)
         except Exception:
             log.exception("통화 결과 전송 실패 %s", call.session_id)
+        try:
+            await insights.send(call)  # 받아쓰기·도구 실행·분석(결과를 보낸 뒤라 접수 결과를 담는다)
+        except Exception:
+            log.exception("통화 기록 전송 오류 %s", call.session_id)
 
 
 def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str | None:

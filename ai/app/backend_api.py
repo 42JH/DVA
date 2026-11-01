@@ -4,6 +4,7 @@ HTTP는 openai에 딸린 httpx2. 전화번호는 URL에 넣지 않고 본문으�
 AI가 부르는 것: 통화 시작의 고객 확인(POST /api/customers/context, 통화 번호 callSessionSeq를 받는다)과 최근 접수 주소,
 통화 중 조회·취소(GET /api/orders, GET /api/orders/{id}, POST /api/orders/{id}/parcels/cancel), 통화 결과 한 번(POST /api/orders).
 통화 번호는 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더로 보낸다(인증 토큰이 아니라 고객 범위 확인용).
+통화가 끝나면 통화 기록·분석(POST /api/ai/calls/{id}/events·analysis)을 보낸다.
 FAQ 변경 알림 처리에서는 최신 원문(GET /api/ai/faqs)을 별도로 조회한다.
 보류한 수정 도구와 관제 화면 주문 목록만 옛 계약(/internal/ai/...)이다."""
 
@@ -24,6 +25,7 @@ PREFIX = "/internal/ai"  # 보류한 수정 도구·관제 화면 주문 목록�
 # 결과가 불확실해 같은 키로 다시 확인할 응답: 처리 중(202), 게이트웨이 시간 초과(504), 같은 키 처리 중(409)
 RETRY_STATUS = (202, 504)
 IN_PROGRESS = "REQUEST_IN_PROGRESS"
+INSIGHTS_ATTEMPTS = 3  # 통화 기록 전송 시도 횟수(연결 실패·5xx)
 
 
 class BackendError(Exception):
@@ -126,9 +128,10 @@ def _call(call_session_seq: int) -> dict:
 class BackendAPI:
     def __init__(self, base_url: str, timeout_sec: float, transport: httpx2.AsyncBaseTransport | None = None,
                  submit_timeout_sec: float = 15.0, submit_retry_sec: float = 40.0, retry_interval_sec: float = 2.0,
-                 persona_token: str | None = None):
+                 persona_token: str | None = None, insights_token: str | None = None):
         self.http = httpx2.AsyncClient(base_url=base_url, timeout=timeout_sec, transport=transport)
         self.persona_token = persona_token  # 페르소나 API 전용 서비스 토큰(주문·고객 API에는 보내지 않는다)
+        self.insights_token = insights_token  # 통화 기록·분석 API 전용 서비스 토큰(spec/insights.md)
         self.submit_timeout_sec = submit_timeout_sec
         self.submit_retry_sec = submit_retry_sec
         self.retry_interval_sec = retry_interval_sec
@@ -323,6 +326,36 @@ class BackendAPI:
         if resp.status_code != 200:
             raise BackendError(f"/api/ai/config/apply-result {resp.status_code} {_error_code(resp)}")
         return _data(resp)
+
+    # --- 통화 기록·분석(spec/insights.md) ---
+
+    @property
+    def insights_enabled(self) -> bool:
+        return bool(self.insights_token)
+
+    async def _insights(self, path: str, body: dict) -> None:
+        """204면 성공(같은 내용 재전송도 204). 연결 실패·5xx는 같은 본문으로 몇 번 다시, 그 밖(400·403·404·409 등)은 실패."""
+        headers = {"Authorization": f"Bearer {self.insights_token}"}
+        for attempt in range(INSIGHTS_ATTEMPTS):
+            try:
+                resp = await self.http.post(path, json=body, headers=headers)
+            except httpx2.TransportError as e:
+                error = f"{path} {type(e).__name__}"
+            else:
+                if resp.status_code == 204:
+                    return
+                error = f"{path} {resp.status_code} {_error_code(resp)}"
+                if resp.status_code < 500:
+                    raise BackendError(error)
+            if attempt + 1 < INSIGHTS_ATTEMPTS:
+                await asyncio.sleep(self.retry_interval_sec)
+        raise BackendError(error)
+
+    async def send_call_events(self, call_session_seq: int, body: dict) -> None:
+        await self._insights(f"/api/ai/calls/{int(call_session_seq)}/events", body)
+
+    async def send_call_analysis(self, call_session_seq: int, body: dict) -> None:
+        await self._insights(f"/api/ai/calls/{int(call_session_seq)}/analysis", body)
 
     # --- 보류한 수정 도구(옛 계약). shortcut: 새 백엔드의 수정은 COLLECTING 주문의 PATCH뿐이라 쓰지 못한다(수정 보류) ---
 

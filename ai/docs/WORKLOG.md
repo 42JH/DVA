@@ -1116,3 +1116,19 @@
 - 백엔드에 지금 `voice.md` 전체를 v1 `promptText`로 넣고 publish해야 함(연동이 켜진 서버는 설정이 없으면 통화 거절).
 - 분석 API(ANL-01) 연동(`aiPersonaVersionSeq`는 `Call.persona_version`).
 - 실제 백엔드 연동 확인: 통화 중 publish → 진행 통화 유지·다음 통화 새 버전·음성.
+
+## 2026-11-01 (통화 기록·분석 전송)
+
+### 확인한 것
+- 백엔드 계약(develop-backend `docs/api/call-events.md` EVT-01, `docs/api/call-analysis.md` ANL-01): `POST /api/ai/calls/{callSessionSeq}/events`·`/analysis`, 토큰 `AI_INSIGHTS_TOKEN`, 204 성공·같은 내용 재전송 204·다른 내용 409.
+- 원격 서버 페르소나 거절은 백엔드에 publish한 버전이 없어서였음(404 "적용된 페르소나가 없습니다"). 사용자가 해결.
+
+### 바꾼 것
+- `app/insights.py`: 통화가 끝나고 결과를 보낸 뒤 받아쓰기(UTTERANCE)·고객 확인·도구 결과(AI_ACTION)·처리 결과(BUSINESS_RESULT)와 분석(result·페르소나 버전)을 보냄. 50개·90KiB로 나눔, eventId는 통화·순번 UUID5.
+- `BackendAPI.send_call_events`·`send_call_analysis`(5xx·연결 실패 3번 재시도), 가짜 백엔드, compose `AI_INSIGHTS_TOKEN`.
+- 테스트 604개 통과(6개 추가).
+
+### 남은 것
+- 서버 .env에 `AI_INSIGHTS_TOKEN`(백엔드와 같은 값) 설정. 없으면 보내지 않는다.
+- 불만·되묻기 판정(지금 null), FAQ_ANSWERED·QUESTION_UNANSWERED 이벤트.
+- 실제 백엔드로 전송 확인(발화 시각·offsetSeconds, 주문 범위 403 여부).

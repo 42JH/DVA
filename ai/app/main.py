@@ -88,7 +88,8 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None, faq_eve
             b = cfg.backend
             backend_api = BackendAPI(os.environ["BACKEND_API_URL"], b.timeout_sec, submit_timeout_sec=b.submit_timeout_sec,
                                      submit_retry_sec=b.submit_retry_sec, retry_interval_sec=b.retry_interval_sec,
-                                     persona_token=os.environ.get("AI_PERSONA_TOKEN"))
+                                     persona_token=os.environ.get("AI_PERSONA_TOKEN"),
+                                     insights_token=os.environ.get("AI_INSIGHTS_TOKEN"))
         app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
         svc = app.state.svc
         svc.faq_events = event_store
