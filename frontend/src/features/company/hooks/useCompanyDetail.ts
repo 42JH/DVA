@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { fmtPhone } from '@/shared/lib/format'
+import { fmtPhone, fmtShortDate } from '@/shared/lib/format'
+import { ymd } from '@/shared/lib/dateRange'
 import { pageCount } from '@/shared/api/paging'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ApiError } from '@/shared/api/client'
@@ -37,7 +38,6 @@ export function useCompanyDetail(id: number) {
   const [modal, setModal] = useState<MemberModal>(null)
 
   const company = useQuery(companyQueries.detail(id))
-  const count = useQuery(companyQueries.memberCount(id)) // 목록 화면에서 받았으면 캐시 그대로
   const members = useQuery({
     ...companyQueries.members(id, { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
     placeholderData: keepPreviousData,
@@ -84,9 +84,12 @@ export function useCompanyDetail(id: number) {
         : null,
     name: company.data?.name ?? '',
     inactive: company.data?.status === 'INACTIVE',
-    // 제목 줄 '사원 12명 · 대표자 이서미 외 1명' — 등록일은 서버에 없어 뺌 (backend-todo 10)
+    // 제목 줄 '사원 12명 · 등록 05.22 · 대표자 이서미 외 1명' (디자인 + 대표자, 11/01)
     summary: [
-      count.data === undefined ? null : `사원 ${count.data}명`,
+      company.data ? `사원 ${company.data.memberCount}명` : null,
+      company.data?.createdAt
+        ? `등록 ${fmtShortDate(ymd(new Date(company.data.createdAt)))}`
+        : null,
       leaders.length === 0
         ? null
         : `대표자 ${leaders[0]}${leaders.length > 1 ? ` 외 ${leaders.length - 1}명` : ''}`,
