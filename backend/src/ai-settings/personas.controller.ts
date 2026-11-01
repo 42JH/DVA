@@ -41,7 +41,7 @@ import {
 
 @ApiTags('Personas')
 @ApiCookieAuth('adminSession')
-@Roles('SYSTEM_ADMIN')
+@Roles('SUPERVISOR', 'SYSTEM_ADMIN')
 @ApiResponse({
   status: 400,
   description: '요청 형식 오류 또는 변경값 없음.',
@@ -51,7 +51,7 @@ import {
 @ApiResponse({
   status: 403,
   description:
-    '변경 요청의 최상위 관리자 권한 또는 허용 Origin 오류. 조회는 모든 활성 관리자에게 허용됩니다.',
+    '변경 요청의 개발자·최고 관리자 권한 또는 허용 Origin 오류. 조회는 모든 활성 관리자에게 허용됩니다.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 404, description: '페르소나 또는 버전 없음.', type: ErrorResponseDto })

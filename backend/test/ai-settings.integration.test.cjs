@@ -121,7 +121,7 @@ after(async () => {
   await pool.end();
 });
 
-test('persona reads allow every active administrator while writes remain SYSTEM_ADMIN only', async () => {
+test('persona reads allow every active administrator while OPERATOR cannot change settings', async () => {
   const version = await create();
   for (const actor of [0, 1, 2]) {
     const listed = await data(await call('GET', '/api/personas?limit=100', undefined, actor));
@@ -136,7 +136,7 @@ test('persona reads allow every active administrator while writes remain SYSTEM_
     );
     assert.equal(history[0].aiPersonaVersionSeq, version.aiPersonaVersionSeq);
   }
-  for (const actor of [1, 2]) {
+  for (const actor of [1]) {
     await error(await call('POST', '/api/personas', input(), actor), 403, 'FORBIDDEN');
     await error(
       await call(
@@ -935,7 +935,7 @@ test('automatic HEAD: publish validates authority, current HEAD identity and sta
   const second = await data(
     await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '현재 HEAD' }),
   );
-  for (const actor of [1, 2])
+  for (const actor of [1])
     await error(
       await call(
         'POST',
@@ -1191,6 +1191,59 @@ test('automatic HEAD: an accepted publish keeps its version and UUID when a newe
   assert.notEqual(next.applicationId, pending.applicationId);
   await data(await report(next));
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, third.aiPersonaVersionSeq);
+});
+
+test('SUPERVISOR developers create, edit and publish with their own identity and active sessions', async () => {
+  assert.deepEqual(await data(await call('GET', '/api/ai/options', undefined, 2)), options);
+  const first = await data(await call('POST', '/api/personas', input(), 2), 201);
+  assert.equal(first.createdByAdminUserSeq, actorIds[2]);
+  const second = await data(
+    await call(
+      'PATCH',
+      `/api/personas/${first.aiPersonaSeq}`,
+      {
+        expectedVersion: 1,
+        name: '개발자 수정',
+      },
+      2,
+    ),
+  );
+  assert.equal(second.version, 2);
+  assert.equal(second.createdByAdminUserSeq, actorIds[2]);
+  const published = await data(
+    await call(
+      'POST',
+      `/api/personas/${first.aiPersonaSeq}/activate`,
+      {
+        aiPersonaVersionSeq: second.aiPersonaVersionSeq,
+        expectedVersion: 2,
+      },
+      2,
+    ),
+    202,
+  );
+  assert.equal(published.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(published.status, 'PENDING');
+  try {
+    await pool.query("UPDATE admin_users SET status='INACTIVE' WHERE admin_user_seq=$1", [
+      actorIds[2],
+    ]);
+    for (const [method, path, body] of [
+      ['GET', '/api/ai/options', undefined],
+      ['POST', '/api/personas', input()],
+      ['PATCH', `/api/personas/${first.aiPersonaSeq}`, { expectedVersion: 2, name: '금지' }],
+      [
+        'POST',
+        `/api/personas/${first.aiPersonaSeq}/activate`,
+        { aiPersonaVersionSeq: second.aiPersonaVersionSeq, expectedVersion: 2 },
+      ],
+    ])
+      await error(await call(method, path, body, 2), 401, 'UNAUTHORIZED');
+  } finally {
+    await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
+      actorIds[2],
+    ]);
+  }
 });
 
 test('automatic HEAD: migrations 035/036 reconcile then remove stored heads without losing versions', async () => {
