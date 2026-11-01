@@ -151,13 +151,13 @@ TO_DEST = [say("yes", "B_DEST_CONFIRM_Q"), say("no", "B_DEST_MATCH")]  # 기존 
 ROUTE = ["B_ORIGIN_ROUTE", "B_LOAD_RECENT", "B_DEST_CONFIRM_Q"]
 NEW_TO_PICKUP = [say("order", "A_REGISTER_SENDER"), tool("record_order", SENDER, "A_RECEIVER_HUB"),
                  tool("record_order", RECEIVER, "A_ITEM_SIZE"), tool("record_order", ITEM, "A_PICKUP_TIME")]
-NEW_ONE = NEW_TO_PICKUP + [tool("record_order", WHEN, "A_PICKUP_TIME"), commit("A_CHOICE")]
+NEW_ONE = NEW_TO_PICKUP + [tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_CONFIRM"), commit("A_CHOICE")]
 FIND = [say("lookup", "C_FIND_RECENT"), tool("lookup_orders", {"receiver_name": "박민수"}, "C_CHECK_RECORD"),
         say("yes", "C_CHOICE")]
 ENTRY_SAVED = ["CALLER_ID", "IS_REGISTERED", "B_GREET_CHOICE"]
 ENTRY_NEW = ["CALLER_ID", "IS_REGISTERED", "A_NEW_ORDER"]
 NEW_INFO = ["A_REGISTER_SENDER", "A_RECEIVER_HUB", "A_REGISTER_RECEIVER"]
-TAIL = ["A_ITEM_SIZE", "A_ITEM_VALUE", "A_PICKUP_TIME", "A_PAYMENT", "A_DONE", "A_CHOICE"]
+TAIL = ["A_ITEM_SIZE", "A_ITEM_VALUE", "A_PICKUP_TIME", "A_CONFIRM", "A_PAYMENT", "A_DONE", "A_CHOICE"]
 QNA = ["GLOBAL_INTENT", "QNA", "RAG"]
 ANSWERED = QNA + ["RAG_LLM_ANSWER", "D_AFTER_ANSWER"]
 NO_ANSWER = QNA + ["D_AGENT_OFFER"]
@@ -169,7 +169,7 @@ SCENARIOS = [
         say("yes", "A_ITEM_SIZE"),
         tool("record_order", {"small_box_count": 1}, "A_ITEM_VALUE"),
         tool("record_order", {"item_price": 30000}, "A_PICKUP_TIME"),
-        tool("record_order", WHEN, "A_PICKUP_TIME"),
+        tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_CONFIRM"),
         commit("A_CHOICE"),
         say("no_more", "END_CALL"),
     ], ENTRY_SAVED + ROUTE + ["B_DEST_FIXED"] + TAIL + ["HUB", "END_CALL"], None),
@@ -194,7 +194,7 @@ SCENARIOS = [
         tool("match_pins", {"place": "대구 중구 동성로 1"}, "A_RECEIVER_HUB"),
         tool("record_order", {"receiver_phone": "010-5555-6666", "receiver_address_detail": ""}, "A_ITEM_SIZE"),
         tool("record_order", ITEM, "A_PICKUP_TIME"),
-        tool("record_order", WHEN, "A_PICKUP_TIME"),
+        tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_CONFIRM"),
         commit("A_CHOICE"),
     ], ENTRY_SAVED + ROUTE + ["B_DEST_MATCH", "A_RECEIVER_HUB", "A_REGISTER_RECEIVER"] + TAIL, None),
     ("5 신규 고객 조회 요청 → 안내 후 접수", new_db, [say("lookup", "A_REGISTER_SENDER")],
@@ -275,8 +275,8 @@ def test_1_registered_order_submits_once_and_hangs_up():
 
 
 def test_1_fare_notice_waits_for_commit_then_is_not_repeated():
-    call = play(saved_db(), steps("1")[:5])
-    assert call.flow.pending and call.flow.stage == "A_PICKUP_TIME"
+    call = play(saved_db(), steps("1")[:6])
+    assert call.flow.pending and call.flow.stage == "A_CONFIRM"
     # 확정을 기다리는 동안은 새 질문 없이 기다린다. 확정되면 운임(요금표: 소형 1개) → 결제 방식(월결제 자격 하나 → 자동)
     # → 추가 접수 질문을 한 진행 상태로 차례대로(2026-10-31 통화: 추가 접수 질문이 운임보다 먼저 나감)
     assert engine.next_text(call) == TEXTS.note["COMMIT_WAIT"]
@@ -298,10 +298,10 @@ def test_unknown_fare_is_not_said_and_result_is_incomplete():
     """요금표가 비어 있으면 금액을 지어 말하거나 보내지 않고 미완료로 넘긴다(운영이 보완)."""
     db = saved_db()
     no_fare = CFG.model_copy(update={"fare": FareConfig()})
-    call = play(db, steps("1")[:5], no_fare)
-    report(call, steps("1")[5])
+    call = play(db, steps("1")[:6], no_fare)
+    report(call, steps("1")[6])
     assert engine.next_text(call).startswith(f"'{TEXTS.say['PAY_CREDIT']}'") and "운임" not in engine.next_text(call)
-    for step in steps("1")[6:]:
+    for step in steps("1")[7:]:
         report(call, step)
     body = db.results[0]["body"]
     assert body["outcome"] == "INCOMPLETE" and "totalAmount" not in body and "notifiedPrice" not in body["parcels"][0]
@@ -310,7 +310,7 @@ def test_unknown_fare_is_not_said_and_result_is_incomplete():
 def test_both_postpaid_methods_ask_and_wait_reverts_choice():
     """기업 월결제와 부서 그룹결제를 둘 다 쓸 수 있으면 묻는다. 고른 답은 확정 지연 뒤에 정한다."""
     db = saved_db(payment_methods=("billing", "credit", "groupBilling"))
-    call = play(db, steps("1")[:4] + [tool("record_order", WHEN, "A_PAYMENT")])
+    call = play(db, steps("1")[:4] + [tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_PAYMENT")])
     assert engine.next_text(call) == f"'운임은 4,000원이에요.' '{TEXTS.say['PAY_ASK']}'"
     assert set(stage_choices(call)) == {"credit", "groupBilling", "none"}
     report(call, say("groupBilling", "A_PAYMENT"))
@@ -411,7 +411,7 @@ def test_4_new_customer_address_retry_texts_then_registered_like_flow(monkeypatc
     assert TEXTS.say["A_ADDR_RETRY_RECEIVER"] in engine.next_text(call)
     assert "보내시는 곳" not in engine.next_text(call)  # 단계에 맞는 쪽만
     for step in (tool("record_order", {"receiver_address": DEST.address, "receiver_address_detail": ""}, "A_ITEM_SIZE"),
-                 tool("record_order", ITEM, "A_PICKUP_TIME"), tool("record_order", WHEN, "A_PICKUP_TIME"),
+                 tool("record_order", ITEM, "A_PICKUP_TIME"), tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_CONFIRM"),
                  commit("A_CHOICE"), say("order", "B_DEST_CONFIRM_Q")):
         report(call, step)
     # 접수 완료 뒤에는 기존 고객처럼: 방금 보낸 택배가 최근 접수(출발지 그대로, "이번에도 {도착지}로")
@@ -649,8 +649,8 @@ def test_past_pickup_date_exception():
 def test_second_parcel_skips_pickup_and_keeps_call_values():
     db = new_db()
     call = play(db, NEW_ONE + [say("order", "B_DEST_CONFIRM_Q"), say("yes", "A_ITEM_SIZE"),
-                               tool("record_order", ITEM, "A_PICKUP_TIME")])
-    assert call.flow.pending  # 수거 일시는 통화에 하나: 이미 있어 결제 단계 진입만 기다린다
+                               tool("record_order", ITEM, "A_CONFIRM"), say("yes", "A_CONFIRM")])
+    assert call.flow.pending  # 수거 일시는 통화에 하나: 이미 있어 되읽기 확인 뒤 결제 단계 진입만 기다린다
     report(call, commit("A_CHOICE"))
     report(call, say("no_more", "END_CALL"))
     body = db.results[0]["body"]
@@ -766,7 +766,9 @@ def test_wait_drops_pending_commit_and_next_plain_answer_rearms():
     run(apply_answer(call, "none", "wait"))
     assert call.flow.pending is None
     run(apply_answer(call, "none", "none"))
-    assert call.flow.pending and call.flow.stage == "A_PICKUP_TIME"
+    assert call.flow.pending is None  # 되읽기 확정은 고객의 "예"로만 다시 건다
+    run(apply_answer(call, "yes", "none"))
+    assert call.flow.pending and call.flow.stage == "A_CONFIRM"
 
 
 def test_input_that_paused_commit_resumes_it_when_not_a_reversal():
@@ -866,7 +868,7 @@ def test_end_intent_goes_to_end_call_from_anywhere():
 def test_every_diagram_node_exists():
     nodes = """CALLER_ID IS_REGISTERED B_GREET_CHOICE HUB END_CALL B_ORIGIN_ROUTE B_ORIGIN_CHANGE B_LOAD_RECENT
     B_DEST_CONFIRM_Q B_DEST_MATCH B_DEST_DIFF B_DEST_VERIFY B_DEST_FIXED A_NEW_ORDER
-    A_REGISTER_SENDER A_RECEIVER_HUB A_REGISTER_RECEIVER A_ITEM_SIZE A_ITEM_VALUE A_PICKUP_TIME A_PAYMENT A_DONE A_CHOICE
+    A_REGISTER_SENDER A_RECEIVER_HUB A_REGISTER_RECEIVER A_ITEM_SIZE A_ITEM_VALUE A_PICKUP_TIME A_CONFIRM A_PAYMENT A_DONE A_CHOICE
     C_REQUIRED_INFO C_FIND_RECENT C_CHECK_RECORD C_CHOICE C_CANCEL_INFO C_CANCEL_CONFIRM C_CANCEL QNA RAG
     RAG_LLM_ANSWER D_AFTER_ANSWER RESTRICTED_REQUEST D_AGENT_OFFER D_AGENT_AVAILABLE AGENT_HANDOFF
     D_AFTER_NO_AGENT RESUME_TASK GLOBAL_INTENT""".split()
@@ -984,7 +986,7 @@ def test_new_customer_is_registered_when_sender_info_is_given():
     call = play(db, NEW_TO_PICKUP[:2])
     assert call.customer_type == "registered" and db.customers[CALLER]["name"] == "김철수"
     assert [p.address for p in db.pins[CALLER]] == [FULL_ORDER["sender_address"]]
-    for step in NEW_TO_PICKUP[2:] + [tool("record_order", WHEN, "A_PICKUP_TIME"), commit("A_CHOICE"),
+    for step in NEW_TO_PICKUP[2:] + [tool("record_order", WHEN, "A_CONFIRM"), say("yes", "A_CONFIRM"), commit("A_CHOICE"),
                                      say("no_more", "END_CALL")]:
         report(call, step)
     body = db.results[0]["body"]

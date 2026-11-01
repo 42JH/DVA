@@ -3,8 +3,8 @@
 항목 값은 백엔드가 record_order로 기록하고(②), 단계의 항목이 다 차면 다음 단계로 간다. 질문 하나가 한 턴이다."""
 
 from app.flow.engine import ENTERED, STAY, Stage, Transition, always
-from app.flow.stages._common import (COMMON_TOOLS, ORDER_TOOLS, ORIGIN, RECEIVER, SENDER, both, done, not_done,
-                                     on_updated, reset_fail, task_is)
+from app.flow.stages._common import (COMMON_TOOLS, ORDER_TOOLS, ORIGIN, RECEIVER, SENDER, YES_NO, both, done,
+                                     not_done, on_updated, reset_fail, task_is)
 from app.order import Order
 
 NEW_CHOICES = {"order": "택배를 보내겠다(접수)", "lookup": "보낸 택배를 조회·취소하겠다"}
@@ -190,12 +190,23 @@ STAGES = [
         field_texts={"pickup_at": "A5"},
         transitions=back(*SENDER_STEPS, "A_RECEIVER_HUB", "A_ITEM_SIZE", "A_ITEM_VALUE") + REMATCH + (
             Transition("pickup.past", STAY, say="A5_PAST"),
-        ) + on_updated(
+        ) + on_updated("A_CONFIRM", order_complete),
+    ),
+    Stage(
+        name="A_CONFIRM",
+        description="접수 내용 되읽고 확인(택배를 담기 전)",
+        tools=ORDER_TOOLS,  # 아니라고 하면 고칠 값을 기록한다
+        ask="A_CONFIRM",
+        choices=lambda ctx: YES_NO,
+        on_answer=event_answer,
+        transitions=back(*SENDER_STEPS, "A_RECEIVER_HUB", "A_ITEM_SIZE", "A_ITEM_VALUE") + REMATCH + (
             # 결제 방식을 물어야 하면(후불 자격 둘) 운임만 말하고 결제 단계에서 묻는다. 고른 답이 확정이다
-            "A_PAYMENT", both(order_complete, payment_asked), say=fare_text,
-        ) + on_updated(
+            Transition("answer.yes", "A_PAYMENT", payment_asked, say=fare_text),
             # A_PAYMENT 진입은 되돌릴 수 없는 확정으로 이어진다: commit_delay_ms 동안 새 입력이 없을 때만(§2.5(3))
-            "A_PAYMENT", order_complete, say=fare_and_payment, commit=True),
+            Transition("answer.yes", "A_PAYMENT", say=fare_and_payment, commit=True),
+            Transition("answer.no", STAY, say="A_CONFIRM_FIX"),
+            Transition("order.updated", STAY),  # 고친 뒤에는 바뀐 내용으로 다시 되읽는다
+        ),
     ),
     Stage(
         name="A_PAYMENT",
