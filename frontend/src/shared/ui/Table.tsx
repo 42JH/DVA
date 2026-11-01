@@ -98,7 +98,22 @@ export function Table<Row>({
               <li key={key} className={i < rows.length - 1 ? 'border-b border-line' : ''}>
                 <div
                   onClick={click ? () => click(row) : undefined}
-                  className={`group -mx-4 grid min-h-[66px] items-center rounded-lg px-4 ${
+                  // 키보드: Tab으로 줄에 가서 Enter · Space로 열기 (안쪽 체크박스 · [수정]의 키는 줄로 안 번짐)
+                  role={click ? 'button' : undefined}
+                  tabIndex={click ? 0 : undefined}
+                  aria-expanded={click && expanded ? isOpen : undefined}
+                  onKeyDown={
+                    click
+                      ? (e) => {
+                          if (e.target !== e.currentTarget) return
+                          if (e.key !== 'Enter' && e.key !== ' ') return
+                          e.preventDefault() // Space가 화면을 내리지 않게
+                          click(row)
+                        }
+                      : undefined
+                  }
+                  // 포커스 표시는 바탕색이 아니라 안쪽 선 (선택 · 펼친 줄의 바탕색을 덮지 않게)
+                  className={`group -mx-4 grid min-h-[66px] items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-action focus-visible:ring-inset ${
                     isSelected
                       ? 'bg-action-soft'
                       : isOpen

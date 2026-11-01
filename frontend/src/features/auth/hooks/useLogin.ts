@@ -19,7 +19,7 @@ export function useLogin() {
     (location.state as { from?: string } | null)?.from ?? (q && /^\/(?![/\\])/.test(q) ? q : '/')
 
   const mutation = useMutation({
-    mutationFn: () => login(loginId.trim(), password),
+    mutationFn: (v: { loginId: string; password: string }) => login(v.loginId.trim(), v.password),
     onSuccess: () => {
       queryClient.removeQueries({ queryKey: sessionQueries.all() }) // 이전 계정의 내 정보가 남지 않게
       navigate(from, { replace: true })
@@ -50,6 +50,15 @@ export function useLogin() {
     canSubmit: loginId.trim() !== '' && password !== '' && !mutation.isPending,
     isSubmitting: mutation.isPending,
     errorMessage,
-    submit: () => mutation.mutate(),
+    // 값은 누른 순간 칸에서 직접 읽음: 크롬 자동 완성은 사용자가 화면을 누르기 전엔 입력 이벤트가 없어 상태가 빈 채일 수 있음
+    submit: (form: HTMLFormElement) => {
+      const f = new FormData(form)
+      const id = String(f.get('loginId') ?? '')
+      const pw = String(f.get('password') ?? '')
+      setLoginId(id) // 화면 상태도 칸 값에 맞춤
+      setPassword(pw)
+      if (id.trim() !== '' && pw !== '' && !mutation.isPending)
+        mutation.mutate({ loginId: id, password: pw })
+    },
   }
 }
