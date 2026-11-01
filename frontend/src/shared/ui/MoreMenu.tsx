@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ExitGhost } from '@/shared/lib/useExitGhost'
 
 // ⋮ 더 보기 메뉴 (와이어프레임 10 관리자 권한 관리 — 줄 오른쪽 끝) — 버튼 32 · 펼침 카드 폭 192 · 줄 높이 40
 // 항목: 아이콘 + 글자. danger = 빨강 + 위에 구분선(삭제). soon = 꺼짐 + 오른쪽 '준비 중'(API가 아직 없는 기능)
@@ -33,6 +34,7 @@ export function MoreMenu({ label, items }: { label: string; items: MoreMenuItem[
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLUListElement>(null) // 닫힐 때 사라지는 애니메이션은 안의 <ExitGhost> (11/01)
 
   useEffect(() => {
     if (!open) return
@@ -72,10 +74,12 @@ export function MoreMenu({ label, items }: { label: string; items: MoreMenuItem[
 
       {open && (
         <ul
+          ref={menu}
           role="menu"
           aria-label={label}
-          className="absolute top-full right-0 z-20 mt-1 w-48 rounded-xl bg-surface p-2 shadow-[0_8px_24px_rgba(43,47,54,0.12)] ring-1 ring-line ring-inset"
+          className="absolute top-full right-0 z-20 mt-1 w-48 origin-top-right rounded-xl bg-surface p-2 shadow-[0_8px_24px_rgba(43,47,54,0.12)] ring-1 ring-line ring-inset motion-safe:animate-pop-in"
         >
+          <ExitGhost target={menu} />
           {items.map((it) => (
             <li key={it.key} role="none">
               {it.danger && <hr className="mx-2 my-2 border-line" />}

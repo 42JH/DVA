@@ -1,3 +1,4 @@
+import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
 import { ConfirmDialog, Tabs } from '@/shared/ui'
 import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersonaModal } from './AddPersonaModal'
@@ -18,6 +19,8 @@ const TABS: { key: PanelTab; label: string }[] = [
 
 export function PersonaPage() {
   const vm = usePersonaPage()
+  // 오른쪽 카드 탭을 바꾸면 내용이 그 방향에서 미끄러져 들어옴 (다른 화면 탭과 같은 전환, 11/01). 훅이라 이른 return 앞에
+  const slide = slideClass(useSlideDir(TABS.findIndex((t) => t.key === vm.tab)))
 
   if (vm.error || vm.isLoading || !vm.prompt || !vm.editTarget)
     return (
@@ -53,7 +56,7 @@ export function PersonaPage() {
       </div>
       <aside className="flex w-[346px] shrink-0 flex-col rounded-xl bg-surface px-5 pt-3 pb-5 ring-1 ring-line ring-inset">
         <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div key={vm.tab} className={`min-h-0 flex-1 overflow-auto ${slide}`}>
           {vm.tab === 'persona' ? (
             <PersonaList
               items={vm.personas}

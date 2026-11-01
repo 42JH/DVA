@@ -95,12 +95,7 @@ export function CallListPage() {
           onChange={vm.setOutcome}
           className="w-[220px]"
         />
-        <Button
-          tall
-          className="ml-3"
-          disabled={!vm.canExport || vm.exporting}
-          onClick={vm.exportCsv}
-        >
+        <Button tall disabled={!vm.canExport || vm.exporting} onClick={vm.exportCsv}>
           {vm.exporting ? '내보내는 중…' : 'CSV 내보내기'}
         </Button>
       </div>

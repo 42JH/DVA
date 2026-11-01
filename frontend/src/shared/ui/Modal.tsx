@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react'
+import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Button } from './Button'
 
 // 오버레이 두 가지 (와이어프레임 13 · 14)
@@ -11,6 +12,11 @@ const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
 const FIRST_FIELD =
   'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]):not([aria-label="닫기"])'
+// 닫힐 때 배경 · 창이 사라지는 애니메이션 (여는 쪽이 바로 지워도 복제본이 0.15초 사라짐, 11/01)
+const EXIT_SWAP = [
+  ['motion-safe:animate-dim-in', 'animate-dim-out'],
+  ['motion-safe:animate-pop-in', 'animate-pop-out'],
+] as const
 
 function Overlay({
   onClose,
@@ -21,8 +27,10 @@ function Overlay({
   children: ReactNode
   label: string
 }) {
+  const root = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const downOnDim = useRef(false) // 누르기 시작한 곳이 어두운 배경일 때만 닫음 (창 안에서 끌다가 밖에서 놓으면 안 닫힘)
+  useExitGhost(root, EXIT_SWAP, 200)
 
   // 열 때 한 번 (onClose가 렌더마다 새 함수여도 다시 안 돎)
   useEffect(() => {
@@ -54,6 +62,7 @@ function Overlay({
   }, [onClose])
   return (
     <div
+      ref={root}
       className="fixed inset-0 z-50 grid place-items-center bg-ink/40 motion-safe:animate-dim-in"
       onMouseDown={(e) => (downOnDim.current = e.target === e.currentTarget)}
       onClick={(e) => downOnDim.current && e.target === e.currentTarget && onClose()}
