@@ -224,13 +224,8 @@ export function useOrderForm(
         p.phone && !phoneOk(p.phone)
           ? '10~11자리 숫자로 입력해 주세요.'
           : fieldError(`${side}.phoneNumber`),
-      // 접수 중단 주문의 미완성 주소 · 검색 결과 없이 바뀐 도로명 → 다시 검색
-      addressError:
-        missing.includes(`${side === 'sender' ? '보내는 분' : '받는 분'} 주소(다시 검색)`) ||
-        (draft?.roadChanged &&
-          p.roadAddress !== (side === 'sender' ? order?.sender : order?.receiver)?.roadAddress)
-          ? '주소를 다시 검색해서 골라 주세요.'
-          : fieldError(`${side}.roadAddress`),
+      // 모자란 주소는 빨간 오류가 아니라 버튼 옆 회색 '접수하려면: … 주소(다시 검색)'로만 (다른 모자란 칸과 같게, 11/01)
+      addressError: fieldError(`${side}.roadAddress`),
       detailError: fieldError(`${side}.detailAddress`),
       roadAddress: p.roadAddress,
       openSearch: () => setSearching(side),
