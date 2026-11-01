@@ -18,11 +18,12 @@ import {
   type ResultBlock,
   type Utterance,
 } from '@/features/call/api/callApi'
+import { utteranceAt } from '@/features/call/api/callDto'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30) */
 export interface ScriptLine {
-  key: number
+  key: number // 발화 순번 (= 서버 order)
   time: string // '00:31' (위치를 모르면 '')
   who: 'AI' | '고객'
   text: string
@@ -42,16 +43,14 @@ export interface ResultView {
   question?: string // AI 미답변: 고객 질문
 }
 
-/** AI 동작 기록 한 줄 */
+/** AI 동작 기록 한 줄. onClick = 그 시각의 말로 스크립트를 넘기고 녹취를 거기서부터 재생 (시각을 모르면 없음) */
 export interface ActionView {
   key: number
   time: string
   tag: string // 저장 · 검색 · 조회 · 취소 · 전송
   text: string
+  onClick?: () => void
 }
-
-const SPEEDS = ['1.0x', '2.0x', '3.0x'] as const
-type Speed = (typeof SPEEDS)[number]
 
 /** 불만은 발화 순번(utteranceOrders)으로 묶음 (명세 §5.2: 실제 있는 발화만 강조) */
 function toSegments(utterances: Utterance[], complaints: Complaint[]): ScriptSegment[] {
@@ -83,14 +82,25 @@ const rank = (r: ResultBlock) => (r.kind === 'QUESTION_UNANSWERED' ? 1 : 0)
 /** 06 통화 상세 훅 — 요약 · 스크립트(불만 묶음) · 녹취 재생 · 처리 내용 · AI 동작 · 주문 팝업 */
 export function useCallDetail(callId: number) {
   const navigate = useNavigate()
-  const [speed, setSpeed] = useState<Speed>('1.0x')
   const [orderId, setOrderId] = useState<number | null>(null) // '주문 보기 ›'로 연 주문
+  // AI 동작을 눌러 짚은 통화 안 시각(초)과, 스크립트가 그 줄로 스크롤할 신호 (누를 때마다 n이 늘어 같은 줄도 다시 스크롤)
+  const [cursor, setCursor] = useState<number | null>(null)
+  const [jump, setJump] = useState<{ key: number; n: number } | null>(null)
 
   const detail = useQuery(callQueries.detail(callId))
   const call = detail.data
-  const player = useRecordingPlayer(call?.recording ?? null, parseFloat(speed), () => {
+  const player = useRecordingPlayer(call?.recording ?? null, () => {
     void detail.refetch()
   })
+  // 지금 짚은 줄: 녹취가 돌면 재생 위치, 아니면 누른 시각 (11/01 사용자: AI 동작을 누르면 왼쪽 그 부분 + 그 부분 음성)
+  const at = player.now > 0 ? player.now : cursor
+  const focusKey = at === null ? null : (utteranceAt(call?.utterances ?? [], at)?.order ?? null)
+  const jumpTo = (sec: number) => {
+    const line = utteranceAt(call?.utterances ?? [], sec)
+    setCursor(sec)
+    if (line) setJump((j) => ({ key: line.order, n: (j?.n ?? 0) + 1 }))
+    player.seek(sec)
+  }
 
   const error = !detail.error
     ? null
@@ -165,19 +175,22 @@ export function useCallDetail(callId: number) {
       handlers: player.handlers,
     },
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
-    speeds: SPEEDS,
-    speed,
-    setSpeed,
     segments: call ? toSegments(call.utterances, call.complaints) : [],
+    focusKey, // 옅은 남색으로 짚는 줄 (발화 순번)
+    jump, // 그 줄로 스크롤 (AI 동작을 눌렀을 때만 — 재생 중엔 강조만 따라가고 스크롤은 안 함)
 
     // 처리 내용
     results,
-    actions: (call?.actions ?? []).map((a): ActionView => ({
-      key: a.order,
-      time: a.atSec === null ? '' : fmtClock(a.atSec),
-      tag: ACTION_LABEL[a.kind],
-      text: a.text, // 서버 summaryText 그대로 (AI팀에 읽기 쉬운 문장으로 요청)
-    })),
+    actions: (call?.actions ?? []).map((a): ActionView => {
+      const sec = a.atSec
+      return {
+        key: a.order,
+        time: sec === null ? '' : fmtClock(sec),
+        tag: ACTION_LABEL[a.kind],
+        text: a.text, // 서버 summaryText 그대로 (AI팀에 읽기 쉬운 문장으로 요청)
+        onClick: sec === null ? undefined : () => jumpTo(sec),
+      }
+    }),
     actionCount: call?.aiActionCount ?? 0,
 
     // 주문 팝업 (shared/order/OrderDetailModal — 03 주문 내역과 같은 창). 06은 읽기만: [수정]은 03에서 (통화 ≠ 주문, 10/28)
