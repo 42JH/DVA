@@ -17,7 +17,7 @@ export function LoginPage() {
         className="flex flex-col"
         onSubmit={(e) => {
           e.preventDefault()
-          if (vm.canSubmit) vm.submit()
+          vm.submit(e.currentTarget)
         }}
       >
         <div className="flex flex-col gap-8">
@@ -25,6 +25,7 @@ export function LoginPage() {
             label="아이디"
             icon="id"
             placeholder="아이디를 입력해주세요"
+            name="loginId"
             autoComplete="username"
             value={vm.loginId}
             onValue={vm.setLoginId}
@@ -34,6 +35,7 @@ export function LoginPage() {
             icon="lock"
             secret
             placeholder="비밀번호를 입력해주세요"
+            name="password"
             autoComplete="current-password"
             value={vm.password}
             onValue={vm.setPassword}
@@ -68,7 +70,15 @@ export function LoginPage() {
         </div>
 
         <AuthError message={vm.errorMessage} />
-        <Button kind="primary" tall type="submit" disabled={!vm.canSubmit} className="mt-3 w-full">
+        {/* 입력 전엔 회색(디자인 10/30)이지만 누를 수는 있음 — 크롬 자동 완성으로 채워진 칸은 첫 클릭에 바로 로그인 */}
+        <Button
+          kind="primary"
+          tall
+          type="submit"
+          aria-disabled={!vm.canSubmit}
+          disabled={vm.isSubmitting}
+          className="mt-3 w-full"
+        >
           {vm.isSubmitting ? '로그인 중…' : '로그인'}
         </Button>
       </form>
