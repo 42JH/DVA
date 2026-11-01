@@ -11,11 +11,11 @@ export interface ApiItem<T> {
   meta?: { requestId: string }
 }
 
-/** 목록 응답 { data[], hasNext } — 총 건수(totalCount)는 대조표 D2로 BE에 요청 중. 오면 쪽 번호를 그리고, 없으면 ‹ 현재 › 만 */
+/** 목록 응답 { data[], hasNext, total_count } (연동 상세명세 10/31 §1). total_count = 검색 · 필터 후, limit · offset 전 전체 건수 */
 export interface ApiList<T> {
   data: T[]
   hasNext: boolean
-  totalCount?: number
+  total_count: number
 }
 
 type FieldError = { field: string; reason: string }

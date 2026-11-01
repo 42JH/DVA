@@ -12,27 +12,20 @@ import {
   type FaqInput,
 } from '@/features/faq/api/faqApi'
 import {
-  resolveUnanswered,
+  convertToFaq,
   unansweredQueries,
   type UnansweredQuestion,
 } from '@/features/faq/api/unansweredApi'
 
-/** 09 FAQ 추가 · 수정 창 훅 — 분류 · 질문 · 답변, 공백 검사(명세서: question/answer 공백 불가) · 서버 칸별 오류 · 저장
- * 10/30: 수정 창 안 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움, 추가하면 그 질문은 처리됨 */
+/** 09 FAQ 추가 · 수정 창 훅 — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
+ * 10/30: 수정 창 안 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
+ * 추가는 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
 export function useFaqForm(faq: Faq | null, onDone: () => void, from?: UnansweredQuestion) {
   const qc = useQueryClient()
   const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? '') // 추가는 비워 두고 고르게 (기본값이 쓰레기통이 되지 않게)
   const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
   const [answer, setAnswer] = useState(faq?.answer ?? '')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  // FAQ-02 멱등키 — 창을 열 때 하나. 본문이 바뀌면 새 키 (같은 키에 다른 본문은 422)
-  const [key, setKey] = useState(() => crypto.randomUUID())
-  const edit =
-    <T>(set: (v: T) => void) =>
-    (v: T) => {
-      set(v)
-      setKey(crypto.randomUUID())
-    }
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -42,15 +35,15 @@ export function useFaqForm(faq: Faq | null, onDone: () => void, from?: Unanswere
         answer: answer.trim(),
       }
       if (!faq) {
-        await createFaq(input, key)
-        if (from) await resolveUnanswered(from.unansweredQuestionSeq) // ponytail: 두 번 부름 — BE가 FAQ 추가에서 한 번에 처리하면 하나로
+        if (from) await convertToFaq(from.unansweredQuestionSeq, input)
+        else await createFaq(input)
         return
       }
-      const patch: Partial<FaqInput> = {}
-      if (input.category !== faq.category) patch.category = input.category
-      if (input.question !== faq.question) patch.question = input.question
-      if (input.answer !== faq.answer) patch.answer = input.answer
-      if (Object.keys(patch).length) await updateFaq(faq.faqEntrySeq, patch) // 안 바뀌었으면 요청 없이 닫음
+      const changed =
+        input.category !== faq.category ||
+        input.question !== faq.question ||
+        input.answer !== faq.answer
+      if (changed) await updateFaq(faq.faqEntrySeq, input) // 세 칸 다 보냄 (부분 수정 없음). 안 바뀌었으면 요청 없이 닫음
     },
     onSuccess: async () => {
       await Promise.all([
@@ -59,25 +52,35 @@ export function useFaqForm(faq: Faq | null, onDone: () => void, from?: Unanswere
       ])
       onDone()
     },
+    // 없어졌거나(404) 다른 관리자가 먼저 처리한(409 INVALID_STATE) 질문 · FAQ → 목록을 다시 받아 지금 상태로
+    onError: (e) => {
+      if (e instanceof ApiError && (e.status === 404 || e.code === 'INVALID_STATE')) {
+        void qc.invalidateQueries({ queryKey: faqQueries.all() })
+        if (from) void qc.invalidateQueries({ queryKey: unansweredQueries.all() })
+      }
+    },
   })
 
   const remove = useMutation({
     mutationFn: () => deleteFaq(faq!.faqEntrySeq),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: faqQueries.all() })
-      onDone()
-    },
+    onSuccess: onDone,
+    onSettled: () => qc.invalidateQueries({ queryKey: faqQueries.all() }), // 404(이미 지워짐)여도 목록은 다시 받음
   })
 
   const err = mutation.error
+  // 같은 질문의 FAQ가 이미 있음 (409 DUPLICATE_RESOURCE) → 질문 칸 아래에 서버 문구
+  const duplicate = err instanceof ApiError && err.code === 'DUPLICATE_RESOURCE'
+  // 칸별 오류 경로는 'question' 또는 'items.0.question' (추가는 items 배열이라)
   const fieldError = (field: keyof FaqInput) =>
-    err instanceof ApiError ? err.details.find((d) => d.field === field)?.reason : undefined
+    err instanceof ApiError
+      ? err.details.find((d) => d.field.replace(/^items\.\d+\./, '') === field)?.reason
+      : undefined
   const errorMessage = !err
     ? null
-    : err instanceof ApiError && err.details.length
+    : duplicate || (err instanceof ApiError && err.details.length)
       ? null // 칸별 오류는 칸 아래에
-      : err instanceof ApiError && err.status === 409
-        ? '같은 요청을 처리하는 중입니다. 잠시 뒤 목록을 확인해 주세요.'
+      : err instanceof ApiError && err.code === 'INVALID_STATE'
+        ? '이미 처리된 질문입니다. 목록을 확인해 주세요.'
         : err.message
 
   return {
@@ -86,11 +89,11 @@ export function useFaqForm(faq: Faq | null, onDone: () => void, from?: Unanswere
     categoryOptions: FAQ_CATEGORIES.map((c) => ({ value: c.name, label: c.name })),
     question,
     answer,
-    setCategory: edit((v: string) => setCategory(v as FaqCategory | '')),
-    setQuestion: edit(setQuestion),
-    setAnswer: edit(setAnswer),
+    setCategory: (v: string) => setCategory(v as FaqCategory | ''),
+    setQuestion,
+    setAnswer,
     categoryError: fieldError('category'),
-    questionError: fieldError('question'),
+    questionError: duplicate ? err.message : fieldError('question'),
     answerError: fieldError('answer'),
     errorMessage,
     canSubmit:

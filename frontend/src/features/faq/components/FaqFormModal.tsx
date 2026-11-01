@@ -60,6 +60,7 @@ export function FaqFormModal({
         />
         <TextField
           label="질문"
+          maxLength={1000}
           value={vm.question}
           onChange={(e) => vm.setQuestion(e.target.value)}
           placeholder="오늘 접수하면 오늘 수거해 가나요?"
@@ -68,6 +69,7 @@ export function FaqFormModal({
         />
         <TextArea
           label="답변"
+          maxLength={20000}
           value={vm.answer}
           onChange={(e) => vm.setAnswer(e.target.value)}
           placeholder="오전에 접수하시면 당일 수거하고, 오후에 접수하시면 다음 영업일에 수거합니다."
