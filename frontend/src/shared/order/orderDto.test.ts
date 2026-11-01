@@ -68,6 +68,10 @@ assert.deepEqual(a.sender, {
   phoneNumber: '01066382047',
   roadAddress: '서울 강남구 역삼로 150',
   detailAddress: '5층',
+  // 고객정보 저장용 주소 나머지 칸 (11/01)
+  jibunAddress: '서울 강남구 역삼동 737',
+  dongName: '역삼동',
+  postalCode: '06236',
 })
 assert.equal(a.receiver.detailAddress, null) // 빈 상세주소는 '없음'
 assert.equal(a.itemPrice, 30000)

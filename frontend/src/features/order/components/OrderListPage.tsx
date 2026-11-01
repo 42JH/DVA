@@ -129,6 +129,7 @@ export function OrderListPage() {
         <OrderEditModal
           key={vm.modal.id}
           orderId={vm.modal.id}
+          parcelSeq={vm.modal.parcelSeq}
           onDone={vm.backToDetail}
           onClose={vm.backToDetail}
         />

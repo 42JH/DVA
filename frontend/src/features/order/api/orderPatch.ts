@@ -1,0 +1,119 @@
+// 03 주문 수정 — 원래 값과 입력값을 비교해 바뀐 칸만 PATCH 본문으로 (연동 상세명세 4.3). React · 네트워크를 모르는 순수 함수
+// 서버는 보낸 하위 값만 병합(생략 = 유지) → 바뀐 것만 보내야 다른 관리자 · AI가 고친 칸을 덮지 않음. 빈 변경은 서버가 거절 → null
+import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
+import type { PaymentMethodDto } from '@/shared/order/orderDto'
+import type { OrderInput, PartyInput } from './orderApi'
+
+const METHOD: Record<Exclude<PaymentMethod, 'BRANCH_VISIT'>, PaymentMethodDto> = {
+  PERSONAL_CARD: 'billing',
+  MONTHLY: 'credit',
+  GROUP_CARD: 'groupBilling',
+}
+
+export interface OrderPatch {
+  expectedVersion: number
+  pickupRequestedAt?: string | null
+  paymentMethodType?: PaymentMethodDto
+  parcels?: Record<string, unknown>[] // ParcelChange 하나 (수기 = 받는 분 1명, 11/01)
+}
+
+// shortcut: 위도 · 경도는 1로 고정 (11/01 사용자 결정), 카카오 JS 키가 오면 주소 → 좌표 변환으로 바꿀 것
+export const FIXED_COORD = 1
+
+/** 바뀐 사람 칸만 (이름 · 전화 · 상세주소). 도로명이 바뀌면 주소 전체(지번 · 동 · 우편번호 · 좌표)를 함께 */
+function partyPatch(before: Party, after: PartyInput) {
+  const out: Record<string, string | number> = {}
+  if (after.name !== before.name) out.name = after.name
+  if (after.phoneNumber !== before.phoneNumber) out.phoneNumber = after.phoneNumber
+  if ((after.detailAddress ?? '') !== (before.detailAddress ?? ''))
+    out.detailAddress = after.detailAddress ?? '' // 빈 문자열 = 비우기 (null 불가, 명세)
+  if (after.roadAddress !== before.roadAddress && after.picked)
+    Object.assign(out, {
+      roadAddress: after.roadAddress,
+      ...after.picked,
+      latitude: FIXED_COORD,
+      longitude: FIXED_COORD,
+    })
+  return out
+}
+
+/** order = 수정 창을 연 그 배송 상세로 바꿔 끼운 주문(pickParcel), parcelSeq = 그 상세 번호 */
+export function buildOrderPatch(
+  order: OrderDetail,
+  parcelSeq: number | null,
+  input: OrderInput,
+): { patch: OrderPatch | null; roadChanged: boolean /* 주소 정보가 모자람 */ } {
+  const parcel: Record<string, unknown> = {}
+  const origin = partyPatch(order.sender, input.sender)
+  const destination = partyPatch(order.receiver, input.receiver)
+  if (Object.keys(origin).length) parcel.origin = origin
+  if (Object.keys(destination).length) parcel.destination = destination
+  const counts = [
+    ['document', 'documentCount'],
+    ['small', 'smallBoxCount'],
+    ['medium', 'mediumBoxCount'],
+    ['big', 'bigBoxCount'],
+  ] as const
+  for (const [key, field] of counts)
+    if (input.items[key] !== order.items[key]) parcel[field] = input.items[key]
+  if ((input.items.other ?? '') !== (order.items.other ?? ''))
+    parcel.otherItemDescription = input.items.other ?? ''
+  if ((input.request ?? '') !== (order.clientComment ?? ''))
+    parcel.clientComment = input.request ?? ''
+  if (input.declaredValue !== order.itemPrice) parcel.itemPrice = input.declaredValue
+
+  const patch: OrderPatch = { expectedVersion: order.version ?? 0 }
+  if (Object.keys(parcel).length)
+    patch.parcels = [parcelSeq === null ? parcel : { orderParcelSeq: parcelSeq, ...parcel }]
+  // 시각은 글자 모양이 달라도(Z · +09:00) 같은 순간이면 그대로
+  const before = order.pickupRequestedAt ? Date.parse(order.pickupRequestedAt) : null
+  const after = input.pickupAt ? Date.parse(input.pickupAt) : null
+  if (before !== after) patch.pickupRequestedAt = input.pickupAt
+  if (input.paymentMethod !== order.paymentMethod && input.paymentMethod !== 'BRANCH_VISIT')
+    patch.paymentMethodType = METHOD[input.paymentMethod]
+
+  // 도로명이 바뀌었는데 검색 결과(지번 · 동 · 우편번호)가 없으면 서버가 거절 → 보내지 않음 (검색으로만 고르므로 보통 없음)
+  const lost = (b: Party, a: PartyInput) => a.roadAddress !== b.roadAddress && !a.picked
+  const roadChanged = lost(order.sender, input.sender) || lost(order.receiver, input.receiver)
+  const empty = !patch.parcels && !('pickupRequestedAt' in patch) && !patch.paymentMethodType
+  return { patch: empty ? null : patch, roadChanged }
+}
+
+/** 고객정보에도 저장 — PATCH /customers/{customerSeq} 본문 (jiw/order-sender-customer-save.md 4장)
+ * 보내는 분의 이름 · 주소가 바뀐 것만. 전화번호는 고객 원본에서 못 바꿈(보내지 않음) → 전화만 바뀌면 null(묻지 않음)
+ * address는 전체 교체 객체 — 도로명을 다시 골랐으면 검색 결과, 상세주소만 바뀌었으면 원래 주소의 나머지 칸으로. 모자라면 address는 뺌 */
+export interface CustomerPatch {
+  name?: string
+  address?: {
+    roadAddress: string
+    jibunAddress: string
+    detailAddress: string
+    dongName: string
+    postalCode: string
+    latitude: number
+    longitude: number
+  }
+}
+
+export function buildCustomerPatch(order: OrderDetail, input: OrderInput): CustomerPatch | null {
+  const before = order.sender
+  const after = input.sender
+  const out: CustomerPatch = {}
+  if (after.name !== before.name) out.name = after.name
+  const roadChanged = after.roadAddress !== before.roadAddress
+  if (roadChanged || (after.detailAddress ?? '') !== (before.detailAddress ?? '')) {
+    const rest = roadChanged ? after.picked : before
+    if (rest?.jibunAddress && rest.dongName && rest.postalCode)
+      out.address = {
+        roadAddress: after.roadAddress,
+        jibunAddress: rest.jibunAddress,
+        detailAddress: after.detailAddress ?? '',
+        dongName: rest.dongName,
+        postalCode: rest.postalCode,
+        // shortcut: 1 고정 (사용자 결정 11/01) — 문서는 임의 좌표 저장을 막으라고 함, 카카오 키 오면 실제 좌표로 꼭 바꿀 것
+        latitude: FIXED_COORD,
+        longitude: FIXED_COORD,
+      }
+  }
+  return out.name !== undefined || out.address ? out : null
+}
