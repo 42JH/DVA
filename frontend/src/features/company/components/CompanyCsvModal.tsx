@@ -43,8 +43,9 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           />
           {/* 파일 모양 안내 — 엑셀이 사번 앞 0을 지우는 일이 많아 함께 알림 */}
           <p className="text-caption text-sub">
-            첫 줄: {CSV_HEADER.join(',')} · 대표자는 Y 또는 빈칸(여러 명 가능) · 사번 칸은 텍스트로
-            저장해야 앞자리 0이 남습니다.
+            첫 줄: {CSV_HEADER.join(',')} (상세주소 열은 빼도 됨) · 주소는 도로명 · 지번 · 동 ·
+            우편번호 모두 필수 · 대표자(Y) · 부서 · 상세주소는 빈칸 가능 · 없는 부서는 새로 만듦 ·
+            사번 칸은 텍스트로 저장해야 앞자리 0이 남습니다.
             {vm.count > 0 && ` · 사원 ${vm.count}명`}
           </p>
         </div>

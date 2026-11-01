@@ -10,7 +10,17 @@ import {
 } from './csvMembers'
 import { errorText } from './labels'
 
-const HEAD = '사번,사원명,전화번호,대표자'
+const HEAD = '사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호'
+const ADDR = '도로,지번,동,06236'
+// 사번,사원명,전화번호,대표자 → 부서 빈칸 + 주소 4칸을 붙인 한 줄
+const row = (s: string) => `${s}${s.split(',').length === 3 ? ',' : ''},,${ADDR}`
+const address = {
+  roadAddress: '도로',
+  jibunAddress: '지번',
+  dongName: '동',
+  postalCode: '06236',
+  detailAddress: '',
+}
 const ok = (text: string) => {
   const r = readMembersCsv(text)
   assert.ok(r.ok, JSON.stringify(r))
@@ -24,7 +34,7 @@ const errs = (text: string) => {
 
 // 정상: 사번 앞 0 보존 · 전화 하이픈 제거 · 대표자 여러 명 · 소문자 y · BOM
 const m = ok(
-  `\uFEFF${HEAD}\n00121,이서미,010-2481-3375,Y\n00134,박준호,01077135092,\n00152,김하린,010 3358 0164,y\n`,
+  `\uFEFF${HEAD}\n${row('00121,이서미,010-2481-3375,Y')}\n${row('00134,박준호,01077135092,')}\n${row('00152,김하린,010 3358 0164,y')}\n`,
 )
 assert.deepEqual(
   m.map((x) => [x.employeeNo, x.phoneNumber, x.leader, x.line]),
@@ -34,8 +44,8 @@ assert.deepEqual(
     ['00152', '01033580164', true, 4],
   ],
 )
-// 대표자 열이 없어도 됨
-assert.equal(ok('사번,사원명,전화번호\n1,가,0212345678')[0]!.leader, false)
+// 주소 열까지는 필수 — 예전 3 · 4열 파일은 거절
+assert.match(errs('사번,사원명,전화번호\n1,가,0212345678').errors[0]!, /첫 줄/)
 
 // 머리줄 · 빈 파일 · 1000명 초과
 assert.match(errs('번호,이름,전화\n1,가,01012345678').errors[0]!, /첫 줄/)
@@ -44,7 +54,7 @@ assert.match(
   errs(
     [
       HEAD,
-      ...Array.from({ length: 1001 }, (_, i) => `${i},가,010${String(i).padStart(8, '0')}`),
+      ...Array.from({ length: 1001 }, (_, i) => row(`${i},가,010${String(i).padStart(8, '0')}`)),
     ].join('\n'),
   ).errors[0]!,
   /1000명/,
@@ -52,14 +62,9 @@ assert.match(
 
 // 줄 오류: 처음 3줄 + 나머지 건수
 const e = errs(
-  [
-    HEAD,
-    ',가,01011112222',
-    '2,,01011112223',
-    '3,다,123',
-    '4,라,01011112224,X',
-    '4,마,01011112225',
-  ].join('\n'),
+  [HEAD, ',가,01011112222', '2,,01011112223', '3,다,123', '4,라,01011112224,X', '4,마,01011112225']
+    .map((r, i) => (i ? row(r) : r))
+    .join('\n'),
 )
 assert.deepEqual(e.errors, [
   '2행 사번이 비어 있습니다.',
@@ -69,17 +74,33 @@ assert.deepEqual(e.errors, [
 assert.equal(e.more, 1) // 5행 대표자 X (6행은 5행이 오류라 사번이 기록 안 돼 겹침 아님)
 
 // 겹침
-assert.deepEqual(errs(`${HEAD}\n1,가,01011112222\n1,나,01033334444`).errors, [
+assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('1,나,01033334444')}`).errors, [
   '3행 사번이 2행과 겹칩니다.',
 ])
-assert.deepEqual(errs(`${HEAD}\n1,가,01011112222\n2,나,010-1111-2222`).errors, [
+assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('2,나,010-1111-2222')}`).errors, [
   '3행 전화번호가 2행과 겹칩니다.',
 ])
 
 // 서버 오류 경로 → 행 번호 (items 순서 = members 순서)
 const rows: CsvMember[] = [
-  { employeeNo: '1', name: '가', phoneNumber: '01011112222', leader: false, line: 2 },
-  { employeeNo: '2', name: '나', phoneNumber: '01033334444', leader: false, line: 3 },
+  {
+    employeeNo: '1',
+    name: '가',
+    phoneNumber: '01011112222',
+    leader: false,
+    department: null,
+    address,
+    line: 2,
+  },
+  {
+    employeeNo: '2',
+    name: '나',
+    phoneNumber: '01033334444',
+    leader: false,
+    department: null,
+    address,
+    line: 3,
+  },
 ]
 assert.deepEqual(
   serverRowErrors(
@@ -92,6 +113,10 @@ assert.deepEqual(
   ),
   ['3행 전화번호를 확인해 주세요.', '2행 내용을 확인해 주세요.'],
 )
+// 기업 한 번에 등록의 경로(members.N)도 행으로
+assert.deepEqual(serverRowErrors([{ field: 'members.0.name', reason: 'X' }], rows), [
+  '2행 사원명을 확인해 주세요.',
+])
 // 이유 코드를 알면 그 문장 (백엔드 답 11/01)
 assert.deepEqual(
   serverRowErrors([{ field: 'items.1.phoneNumber', reason: 'OTHER_COMPANY_MEMBERSHIP' }], rows),
@@ -104,42 +129,53 @@ assert.equal(decodeCsv(utf8), HEAD)
 const eucKr = new Uint8Array([0xbb, 0xe7, 0xb9, 0xf8]).buffer // '사번'을 EUC-KR로
 assert.equal(decodeCsv(eucKr), '사번')
 
-// 미리 보기: 기존 사원과 비교
+// 미리 보기: 기존 사원과 비교 (이름 · 전화 · 대표자 · 부서 · 주소)
 const existing = (
   [
-    ['00121', '이서미', '01011110001', 'ORG_ADMIN'],
-    ['00134', '박준호', '01011110002', 'MEMBER'],
-    ['00152', '김하린', '01011110003', 'MEMBER'],
+    ['00121', '이서미', '01011110001', 'ORG_ADMIN', 10],
+    ['00134', '박준호', '01011110002', 'MEMBER', null],
+    ['00152', '김하린', '01011110003', 'MEMBER', null],
+    ['00180', '최유나', '01011110005', 'MEMBER', 10],
   ] as const
-).map(([employeeNo, name, phoneNumber, role], i): Member => ({
+).map(([employeeNo, name, phoneNumber, role, departmentSeq], i): Member => ({
   membership: {
     membershipSeq: i + 1,
     customerSeq: i + 1,
     organizationSeq: 1,
-    departmentSeq: null,
+    departmentSeq,
     employeeNo,
     role,
     status: 'ACTIVE',
   },
-  customer: { customerSeq: i + 1, name, phoneNumber, address: null, status: 'ACTIVE' },
+  customer: {
+    customerSeq: i + 1,
+    name,
+    phoneNumber,
+    address: { ...address, latitude: 1, longitude: 1 },
+    status: 'ACTIVE',
+  },
 }))
 const csv = ok(
   [
-    HEAD,
-    '00121,이서미,01011110001,Y', // 그대로 · 이미 대표자 → 지정 안 함
-    '00134,박준호,01099990002,Y', // 전화 바뀜 · 대표자 새로
-    '00160,정우석,01011110004,', // 신규
-    '00170,오세린,01011110003,', // CSV엔 없는 김하린(00152)의 번호 → 거절될 줄
+    HEAD + ',상세주소',
+    `00121,이서미,01011110001,Y,개발팀,${ADDR}`, // 그대로 · 이미 대표자 → 지정 안 함
+    `00134,박준호,01099990002,Y,,${ADDR}`, // 전화 바뀜 · 대표자 새로
+    `00160,정우석,01011110004,,,${ADDR}`, // 신규
+    `00170,오세린,01011110003,,,${ADDR}`, // CSV엔 없는 김하린(00152)의 번호 → 거절될 줄
+    `00180,최유나,01011110005,,,${ADDR},2층`, // 부서 빈칸 = 부서 없음 · 상세주소 바뀜
   ].join('\n'),
 )
-const pv = previewAgainst(csv, existing)
+const pv = previewAgainst(csv, existing, new Map([[10, '개발팀']]))
 assert.deepEqual(
   pv.added.map((r) => r.employeeNo),
   ['00160'],
 )
 assert.deepEqual(
-  pv.changed.map((c) => [c.row.employeeNo, c.before.phoneNumber]),
-  [['00134', '01011110002']],
+  pv.changed.map((c) => [c.row.employeeNo, c.fields, c.before.department]),
+  [
+    ['00134', ['전화번호', '대표자'], null],
+    ['00180', ['부서', '주소'], '개발팀'],
+  ],
 )
 assert.deepEqual(
   pv.same.map((r) => r.employeeNo),
@@ -157,5 +193,45 @@ assert.equal(
   '탈퇴한 고객의 전화번호라 등록할 수 없습니다.',
 )
 assert.match(errorText({ status: 422, details: [] }, '등록'), /등록 조건에 맞지 않아/)
+
+// 부서 · 주소 열 (11/01): 주소 4칸 필수, 부서 · 상세주소는 빈칸 가능, 상세주소 열은 생략 가능
+const FULL = '사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호,상세주소'
+const withAddr = ok(
+  [
+    FULL,
+    '001,가,01011110001,Y,개발팀,서울 강남구 역삼로 150,서울 강남구 역삼동 737,역삼동,06236,5층',
+    '002,나,01011110002,,,도로,지번,동,6236,', // 부서 없음 · 엑셀이 앞 0을 지운 우편번호 → 채움
+  ].join('\n'),
+)
+assert.deepEqual(
+  withAddr.map((m) => [m.department, m.address.postalCode, m.address.detailAddress]),
+  [
+    ['개발팀', '06236', '5층'],
+    [null, '06236', ''],
+  ],
+)
+assert.deepEqual(
+  errs([FULL, '003,다,01011110003,,,서울 강남구 역삼로 150,,역삼동,06236,'].join('\n')).errors,
+  ['2행 주소는 도로명 · 지번 · 동 · 우편번호를 모두 써 주세요.'],
+)
+for (const zip of ['236', '062360', '0623a'])
+  assert.match(
+    errs([FULL, `004,라,01011110004,,,도로,지번,동,${zip},`].join('\n')).errors[0]!,
+    /우편번호는 숫자 5자리/, // 4자리 말고는 원래 값을 알 수 없음
+  )
+assert.match(
+  errs([FULL, '006,바,01011110006,,,,,,,'].join('\n')).errors[0]!,
+  /도로명 · 지번 · 동 · 우편번호를 모두/, // 주소 없음
+)
+assert.match(
+  errs([FULL, '005,마,01011110005,,,,,,,7층'].join('\n')).errors[0]!,
+  /도로명 · 지번 · 동 · 우편번호를 모두/, // 상세주소만
+)
+assert.match(
+  errs([FULL, `007,사,01011110007,,${'가'.repeat(101)},도로,지번,동,06236,`].join('\n')).errors[0]!,
+  /부서 이름은 100자까지/,
+)
+// 머리줄 순서가 다르면 거절
+assert.match(errs('사번,사원명,전화번호,부서\n1,가,01011112222,개발팀').errors[0]!, /첫 줄/)
 
 console.log('csvMembers OK')
