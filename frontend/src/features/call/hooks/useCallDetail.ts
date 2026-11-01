@@ -180,10 +180,8 @@ export function useCallDetail(callId: number) {
     })),
     actionCount: call?.aiActionCount ?? 0,
 
-    // 주문 팝업 (shared/order/OrderDetailModal — 03 주문 내역과 같은 창)
+    // 주문 팝업 (shared/order/OrderDetailModal — 03 주문 내역과 같은 창). 06은 읽기만: [수정]은 03에서 (통화 ≠ 주문, 10/28)
     orderId, // null이 아니면 팝업
     closeOrder: () => setOrderId(null),
-    // 03 주문 수정 화면이 아직 없어 03 주문 내역으로 (팀원 03 작업 뒤 그 수정 화면으로 바꿀 것)
-    editOrder: () => navigate('/orders'),
   }
 }

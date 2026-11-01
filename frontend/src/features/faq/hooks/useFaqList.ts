@@ -24,7 +24,9 @@ export function useFaqList() {
   // 검색어 · 분류 · 쪽은 URL 쿼리에 (뒤로가기 · 새로고침 · 주소 공유에도 그대로). 필터를 바꾸면 쪽은 1로
   const { params, page, set } = useListParams(DEFAULTS)
   const q = params.q
-  const category = params.category as CategoryFilter
+  const category: CategoryFilter = FAQ_CATEGORIES.some((c) => c.name === params.category)
+    ? (params.category as FaqCategory)
+    : '전체' // 주소에 모르는 분류가 오면 전체로
   const [openId, setOpenId] = useState<number | null>(null) // 답변 펼친 줄 (한 번에 하나)
   const [modal, setModal] = useState<Modal>(null)
 
@@ -60,7 +62,11 @@ export function useFaqList() {
       set({ category: c })
       setOpenId(null)
     },
-    categories: FAQ_CATEGORIES.map((c) => c.name),
+    // 분류 탭. FAQ가 0건인 분류는 흐리게 (와이어프레임 09) — 검색어와 상관없이 전체 FAQ 기준, 받기 전엔 흐리게 안 함
+    categories: FAQ_CATEGORIES.map((c) => ({
+      name: c.name,
+      empty: !!list.data && !list.data.some((f) => f.category === c.name),
+    })),
 
     rows,
     count: hit.length, // 'FAQ 목록 23개' (검색 · 분류 중엔 결과 수)
@@ -80,5 +86,10 @@ export function useFaqList() {
     openAdd: () => setModal({ kind: 'add' }),
     openEdit: (faq: Faq) => setModal({ kind: 'edit', faq }),
     closeModal: () => setModal(null),
+    // 새 FAQ는 맨 위(1번)인데 지금 탭 · 검색 · 쪽에선 안 보일 수 있음 → 그 FAQ가 보이는 1쪽으로 (전체 탭이면 전체 그대로)
+    showAdded: (c: FaqCategory) => {
+      set({ q: '', category: category === '전체' ? '전체' : c })
+      setOpenId(null)
+    },
   }
 }

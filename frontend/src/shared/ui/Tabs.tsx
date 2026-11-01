@@ -7,6 +7,7 @@ export interface TabItem<K extends string = string> {
   label: string
   count?: number
   countKind?: 'badge' | 'red' // badge = 빨간 바탕 흰 숫자(05 AI 미답변), red = 빨간 숫자(10 승인 대기)
+  muted?: boolean // 흐린 글자 (09 FAQ가 0건인 분류). 누를 수는 있음
 }
 
 export function Tabs<K extends string>({
@@ -31,7 +32,7 @@ export function Tabs<K extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={`relative flex h-full items-center gap-2 text-body ${on ? 'font-bold text-action' : 'text-sub'}`}
+            className={`relative flex h-full items-center gap-2 text-body ${on ? 'font-bold text-action' : t.muted ? 'text-muted' : 'text-sub'}`}
           >
             {t.label}
             {t.count !== undefined &&

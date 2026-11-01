@@ -38,7 +38,7 @@ export function useUnansweredList({
 
   const q = params.q
   const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
-  const call = params.call ? Number(params.call) : null
+  const call = /^\d+$/.test(params.call) ? Number(params.call) : null // 숫자가 아니면(?call=abc) 통화 필터 없음
   const today = todayYmd()
   const ofCall = (list.data ?? []).filter(
     (u) =>

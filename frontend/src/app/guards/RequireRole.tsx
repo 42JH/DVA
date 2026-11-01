@@ -6,7 +6,7 @@ import { ForbiddenPage } from '@/app/routes/ForbiddenPage'
 /**
  * 역할 가드 — 라우트를 감싸면 허용된 역할만 화면을 본다. 나머지는 '권한 없음' 화면(주소는 그대로)
  * 사용법: { path: 'admins', element: <RequireRole roles={['SYSTEM_ADMIN']}><AdminsPage /></RequireRole> }
- * 버튼 하나만 숨길 때는 이걸 쓰지 말고 훅에서 useSession().isSystemAdmin 으로 (09 삭제 버튼처럼)
+ * 버튼 하나만 숨길 때는 이걸 쓰지 말고 훅에서 useSession().isSystemAdmin 으로 (02 대시보드 페르소나 탭처럼)
  */
 export function RequireRole({ roles, children }: { roles: AdminRole[]; children: ReactNode }) {
   const { role, isLoading } = useSession()

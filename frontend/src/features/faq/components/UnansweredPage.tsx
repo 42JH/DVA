@@ -27,7 +27,13 @@ export function UnansweredPage() {
             <span className="text-label font-normal text-sub">{vm.count}개</span>
           </h2>
         }
-        empty={vm.q ? '해당하는 질문이 없습니다.' : 'AI가 답하지 못한 질문이 없습니다.'}
+        empty={
+          vm.q
+            ? '해당하는 질문이 없습니다.'
+            : vm.callChips.length
+              ? '이 통화의 질문은 모두 처리됐습니다.'
+              : 'AI가 답하지 못한 질문이 없습니다.'
+        }
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
     </div>
