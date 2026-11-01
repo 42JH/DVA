@@ -26,12 +26,14 @@ export function SignupPage() {
             autoComplete="name"
             value={vm.form.name}
             onValue={vm.setName}
+            error={vm.errors.name}
           />
           <AuthField
             label="아이디"
             icon="id"
             placeholder="아이디를 입력해주세요"
             autoComplete="username"
+            maxLength={20}
             value={vm.form.loginId}
             onValue={vm.setLoginId}
             error={vm.errors.loginId}

@@ -40,7 +40,7 @@ export function CallListPage() {
       key: 'customer',
       header: '고객 · 발신번호',
       width: 170,
-      cell: (r) => <TwoLines top={r.customerName} bottom={r.phone} />,
+      cell: (r) => <TwoLines top={r.name} bottom={r.phone} />,
     },
     {
       key: 'outcome',
@@ -56,10 +56,10 @@ export function CallListPage() {
       key: 'complaint',
       header: '불만',
       cell: (r) =>
-        r.complaint && (
+        r.complaintView && (
           <div className="min-w-0">
-            <p className="truncate text-body font-semibold">{r.complaint.kind}</p>
-            <p className="truncate text-label text-sub">{r.complaint.reason}</p>
+            <p className="truncate text-body font-semibold">{r.complaintView.label}</p>
+            <p className="truncate text-label text-sub">{r.complaintView.reason}</p>
           </div>
         ),
     },

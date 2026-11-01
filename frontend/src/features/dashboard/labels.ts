@@ -10,18 +10,18 @@ export const OUTCOME_LABEL: Record<Outcome, string> = {
   INQUIRY: '문의',
 }
 
-/** 불만 유형 — 카드 줄 순서 그대로 (04 불만 열 · 06 불만 줄과 같은 말) */
+/** 불만 유형 — 카드 줄 순서 그대로 (04 불만 열 · 06 불만 줄과 같은 말). 키는 서버 CallComplaint.type */
 export const COMPLAINT_ORDER: ComplaintKind[] = [
-  'REPEAT',
-  'TOO_FAST',
-  'MISHEARD',
-  'SLOW',
-  'REFUSED_AI',
+  'REPEATED_QUESTION',
+  'SPEAKING_TOO_FAST',
+  'RECOGNITION_FAILURE',
+  'SLOW_RESPONSE',
+  'AI_REFUSAL',
 ]
 export const COMPLAINT_LABEL: Record<ComplaintKind, string> = {
-  REPEAT: '되묻기 반복',
-  TOO_FAST: '말이 빠름',
-  MISHEARD: '못 알아들음',
-  SLOW: '답답함 · 느림',
-  REFUSED_AI: 'AI라서 거부',
+  REPEATED_QUESTION: '되묻기 반복',
+  SPEAKING_TOO_FAST: '말이 빠름',
+  RECOGNITION_FAILURE: '못 알아들음',
+  SLOW_RESPONSE: '답답함 · 느림',
+  AI_REFUSAL: 'AI라서 거부',
 }

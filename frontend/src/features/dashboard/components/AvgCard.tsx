@@ -1,5 +1,5 @@
 // 평균 카드 (02 날짜별 오른쪽 위) — 위 평균 통화 시간 · 아래 평균 되묻기, 가로선으로 나눔
-// 칸마다 큰 값 + 오른쪽 작은 두 줄 = 접수 성공 · 접수 실패 통화만의 평균 (10/30 사용자 "여백이 적도록 채워봐줘"). 내용은 세로 가운데
+// 값이 있으면 큰 값 + 오른쪽 작은 두 줄(접수 성공 · 실패 평균). 통계 API가 없는 동안(명세 §10)은 '—'와 안내 한 줄 (성공하는 척 금지)
 
 const ICON = {
   clock: (
@@ -22,8 +22,9 @@ export function AvgCard({
     key: string
     icon: keyof typeof ICON
     label: string
-    value: [string, string][] // [['2', '분'], ['51', '초']]
-    split: [string, string][] // [['접수 성공', '3분 12초'], ['접수 실패', '1분 25초']]
+    value?: [string, string][] // [['2', '분'], ['51', '초']]. 없으면 '—'
+    split?: [string, string][] // [['접수 성공', '3분 12초'], ['접수 실패', '1분 25초']]
+    note?: string // 값 대신 보여 줄 안내 ('집계 API 없음')
   }[]
 }) {
   return (
@@ -51,22 +52,29 @@ export function AvgCard({
           </p>
           <div className="mt-2 flex items-center justify-between gap-4">
             <p className="flex items-baseline gap-1 whitespace-nowrap">
-              {it.value.map(([v, u]) => (
-                <span key={u} className="mr-1.5">
-                  <span className="text-title font-bold">{v}</span>
-                  <span className="ml-0.5 text-label font-semibold text-sub">{u}</span>
-                </span>
-              ))}
+              {it.value ? (
+                it.value.map(([v, u]) => (
+                  <span key={u} className="mr-1.5">
+                    <span className="text-title font-bold">{v}</span>
+                    <span className="ml-0.5 text-label font-semibold text-sub">{u}</span>
+                  </span>
+                ))
+              ) : (
+                <span className="text-title font-bold text-muted">—</span>
+              )}
             </p>
-            {/* 두 칸의 작은 줄 = 같은 세로선 (이름 칸 폭 고정) */}
-            <dl className="grid grid-cols-[auto_auto] gap-x-3 text-label">
-              {it.split.map(([name, val]) => (
-                <div key={name} className="contents">
-                  <dt className="text-sub">{name}</dt>
-                  <dd className="text-right font-semibold">{val}</dd>
-                </div>
-              ))}
-            </dl>
+            {it.split && (
+              // 두 칸의 작은 줄 = 같은 세로선 (이름 칸 폭 고정)
+              <dl className="grid grid-cols-[auto_auto] gap-x-3 text-label">
+                {it.split.map(([name, val]) => (
+                  <div key={name} className="contents">
+                    <dt className="text-sub">{name}</dt>
+                    <dd className="text-right font-semibold">{val}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {it.note && <span className="text-caption text-muted">{it.note}</span>}
           </div>
         </div>
       ))}

@@ -3,15 +3,18 @@ import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail
 
 // 처리 내용 카드 (06 오른쪽, 와이어프레임 06_통화상세 10/30) — 이 통화가 한 일
 // 위: 결과 블록 (굵은 종류 · 회색 통화 안 시각 · 오른쪽 링크). 접수 · 주문 취소 → '주문 보기 ›'(팝업), AI 미답변 → 질문 + 'AI 미답변 보기 ›'(09)
-// 아래: 'AI 동작 n' 읽기 쉬운 기록 (시각 · 회색 태그 · 내용). 길면 이 목록만 스크롤 — 결과 블록은 그대로
+//     상담원 이관 요청은 링크 없음 (연결 성공이 아니라 요청 기록). 블록이 없으면 안내 한 줄
+// 아래: 'AI 동작 n'(서버 전체 건수) 기록 (시각 · 회색 태그 · 내용). 길면 이 목록만 스크롤 — 결과 블록은 그대로
 export function CallActions({
   className = '',
   results,
   actions,
+  count,
 }: {
   className?: string
   results: ResultView[]
   actions: ActionView[]
+  count: number
 }) {
   return (
     <section
@@ -20,18 +23,25 @@ export function CallActions({
       <h2 className="flex h-10 items-center text-card font-bold">처리 내용</h2>
 
       <ul className="shrink-0">
+        {results.length === 0 && (
+          <li className="border-b border-line py-4 text-body text-muted">
+            이 통화로 처리된 주문 · 미답변이 없습니다.
+          </li>
+        )}
         {results.map((r) => (
           <li key={r.key} className="border-b border-line py-4">
             <div className="flex items-baseline gap-3">
               <span className="text-body font-bold">{r.label}</span>
               <span className="text-label text-sub">{r.time}</span>
-              <button
-                type="button"
-                onClick={r.link.onClick}
-                className="ml-auto text-label font-semibold text-action hover:underline"
-              >
-                {r.link.label} ›
-              </button>
+              {r.link && (
+                <button
+                  type="button"
+                  onClick={r.link.onClick}
+                  className="ml-auto text-label font-semibold text-action hover:underline"
+                >
+                  {r.link.label} ›
+                </button>
+              )}
             </div>
             {r.question && (
               <p className="mt-3 flex gap-6 text-body">
@@ -44,7 +54,7 @@ export function CallActions({
       </ul>
 
       <h3 className="mt-6 flex items-baseline gap-2.5 text-body font-bold">
-        AI 동작 <span className="text-label font-normal text-sub">{actions.length}</span>
+        AI 동작 <span className="text-label font-normal text-sub">{count}</span>
       </h3>
       <ul className="mt-3 min-h-0 flex-1 overflow-y-auto">
         {actions.length === 0 && <li className="py-6 text-body text-muted">기록이 없습니다.</li>}

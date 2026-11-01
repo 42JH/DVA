@@ -1,34 +1,53 @@
-// 02 대시보드 Model — 기간 집계 · 버전별 기록. React를 모르는 데이터 층
-// 명세 OPS-01은 주문 수 · 평균 상담 시간뿐 (통화 결과별 수 · 결과별 평균 · 되묻기 · 불만 · 미답변 · 버전 집계 없음) → BE가 명세를 짜서 주기로 함 (10/30)
-// 지금은 네트워크 없이 메모리 가짜 데이터. 명세가 오면 fetchDashboard · fetchVersions · fetchVersionStats 몸통만 바꾸면 됨
+// 02 대시보드 Model — 통계 API가 없음(연동 상세명세 10/31 §10) → 목록의 total_count를 조합해 건수만 셈. React를 모르는 데이터 층
+//   통화: API-21 GET /calls (result · hasComplaint · aiPersonaVersionSeq · from/to) / 미답변: API-26 / 버전: API-60 · 64 (최고 관리자 전용)
+//   평균 통화 시간 · 되묻기는 줄 수 없음 → 화면에서 '집계 API 없음' (성공하는 척 금지, §10)
+// 개발 중엔 MSW 가짜(mocks/handlers/calls.ts · faq.ts · personas.ts)가 같은 모양으로 응답
 import { queryOptions } from '@tanstack/react-query'
-import { addDays, rangeDays, todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { api, type ApiList } from '@/shared/api/client'
+import { fetchAll } from '@/shared/api/paging'
+import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
 
 /** 통화 결과 (04 · 06과 같은 5개). feature끼리 import 금지라 여기 따로 둠 */
 export type Outcome = 'SUCCESS' | 'FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
-export type ComplaintKind = 'REPEAT' | 'TOO_FAST' | 'MISHEARD' | 'SLOW' | 'REFUSED_AI'
+/** 불만 유형 — 서버 CallComplaint.type 그대로 */
+export type ComplaintKind =
+  'REPEATED_QUESTION' | 'SPEAKING_TOO_FAST' | 'RECOGNITION_FAILURE' | 'SLOW_RESPONSE' | 'AI_REFUSAL'
+const OUTCOMES: Outcome[] = ['SUCCESS', 'FAILED', 'HANDOFF', 'CANCELLED', 'INQUIRY']
+/** 버전별 기록 표의 세 결과 (= 게이지) */
+export type GaugeOutcome = 'SUCCESS' | 'FAILED' | 'HANDOFF'
+const GAUGE: GaugeOutcome[] = ['SUCCESS', 'FAILED', 'HANDOFF']
+const RESULT: Record<Outcome, string> = {
+  SUCCESS: 'REGISTERED',
+  FAILED: 'REGISTRATION_FAILED',
+  HANDOFF: 'HANDOFF',
+  CANCELLED: 'CANCELLED',
+  INQUIRY: 'INQUIRY',
+}
+const KINDS: ComplaintKind[] = [
+  'REPEATED_QUESTION',
+  'SPEAKING_TOO_FAST',
+  'RECOGNITION_FAILURE',
+  'SLOW_RESPONSE',
+  'AI_REFUSAL',
+]
 
-/** 그 범위(기간 또는 버전)의 통화 집계 */
+/** 그 범위(기간 또는 버전)의 통화 건수 */
 export interface Stats {
+  total: number // 결과 필터 없는 전체 (분석이 아직 안 온 통화도 포함) = 04 '전체'와 같은 수
   counts: Record<Outcome, number>
-  avgCallSec: number
-  avgCallSecBy: { success: number; failed: number } // 게이지의 두 결과 통화만의 평균
-  avgRepeat: number
-  avgRepeatBy: { success: number; failed: number }
-  complaints: Record<ComplaintKind, number>
-  unanswered: { count: number; recent: { at: string; question: string }[] } // 최신순, 최대 8개
+  complaintCalls: number // 불만이 확인된 통화 수 (hasComplaint=true)
+  complaints: Record<ComplaintKind, number> // 유형별 — 한 통화에 여러 유형이면 각각 셈 (합 ≥ complaintCalls)
+  unanswered: { count: number; recent: { at: string; question: string }[] } // 처리 안 된(OPEN) 질문, 최신순 최대 8개
 }
 
 export interface Version {
-  id: string // 'v6'
+  id: string // aiPersonaVersionSeq (서버 DB 번호 — 화면 'v6'의 6과 다를 수 있음)
   personaName: string
   version: number
   active: boolean
-  from: Ymd
-  to: Ymd | null // 적용 중이면 null
-  counts: Record<Outcome, number>
-  avgCallSec: number
-  avgRepeat: number
+  from: Ymd // 적용된 날
+  to: Ymd | null // 다음 버전이 적용된 날 (적용 중이면 null)
+  counts: Record<GaugeOutcome, number> // 표의 통화 · 성공 · 실패 · 이관
 }
 
 export const dashboardQueries = {
@@ -36,240 +55,145 @@ export const dashboardQueries = {
   stats: (from: Ymd, to: Ymd) =>
     queryOptions({
       queryKey: [...dashboardQueries.all(), 'stats', from, to],
-      queryFn: () => fetchDashboard(from, to),
+      queryFn: ({ signal }) => fetchDashboard(from, to, signal),
     }),
   versions: () =>
     queryOptions({
       queryKey: [...dashboardQueries.all(), 'versions'],
-      queryFn: fetchVersions,
+      queryFn: ({ signal }) => fetchVersions(signal),
     }),
   versionStats: (id: string) =>
     queryOptions({
       queryKey: [...dashboardQueries.all(), 'version', id],
-      queryFn: () => fetchVersionStats(id),
+      queryFn: ({ signal }) => fetchVersionStats(id, signal),
     }),
 }
 
-const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연 ('불러오는 중' 확인용)
-
-/** 기간 집계 (from · to 포함) — 날마다 집계를 더하고, 평균은 통화 수로 가중 */
-export async function fetchDashboard(from: Ymd, to: Ymd): Promise<Stats> {
-  await wait()
-  const days = Array.from({ length: rangeDays(from, to) }, (_, i) => dayStats(addDays(from, i)))
-  return merge(days)
+type Query = Record<string, string | number | boolean | undefined>
+/** 1건만 받아 total_count (검색 · 필터 후 전체 건수) */
+async function count(path: string, query: Query, signal?: AbortSignal): Promise<number> {
+  return (
+    await api.get<ApiList<unknown>>(path, { query: { ...query, limit: 1, offset: 0 }, signal })
+  ).total_count
 }
 
-/** 버전별 기록 — 최신 버전부터 최근 3개 (더 오래된 건 07 버전 히스토리) */
-export async function fetchVersions(): Promise<Version[]> {
-  await wait()
-  return VERSIONS
+interface ComplaintCallDto {
+  callSessionSeq: number
+  analysis: { complaints: { type: ComplaintKind }[] } | null
+}
+interface UnansweredDto {
+  callStartedAt: string | null
+  occurredAt: string
+  questionText: string
 }
 
-/** 고른 버전의 아래 두 카드 (그 버전이 받은 통화 전체) */
-export async function fetchVersionStats(id: string): Promise<Stats> {
-  await wait()
-  const v = VERSION_STATS[id]
-  if (!v) throw new Error('버전을 찾을 수 없습니다.')
-  return v
-}
-
-// ---------- 가짜 데이터 ----------
-// 날짜는 오늘 기준. 오늘 = 04 통화 내역 가짜와 같은 숫자(131 = 96 · 12 · 5 · 1 · 17, 불만 8),
-// 지난 날 = 04 가짜와 같은 규칙(성공 80 + 2d · 실패 10 · 이관 4 · 취소 1 · 문의 15) → 기간을 넓혀도 04 목록 건수와 맞음
-const zeroComplaints = (): Record<ComplaintKind, number> => ({
-  REPEAT: 0,
-  TOO_FAST: 0,
-  MISHEARD: 0,
-  SLOW: 0,
-  REFUSED_AI: 0,
-})
-const at = (day: Ymd, hm: string) => `${day}T${hm}:00+09:00`
-
-// 오늘 AI 미답변 = 와이어프레임 02 오늘 목록 7줄 (09:47 반품 질문은 이미 FAQ로 추가돼 09 큐엔 없음 — 대시보드는 그 기간에 생긴 것 전부)
-const TODAY_UA: [string, string][] = [
-  ['14:33', '기사님 오늘 몇 시쯤 도착하세요?'],
-  ['13:13', '착불로 보내면 받는 사람이 얼마 내요?'],
-  ['13:05', '주말에도 수거 와요?'],
-  ['12:48', '제주까지는 며칠 걸려요?'],
-  ['12:48', '제주도로 보내면 추가 요금이 얼마나 붙어요?'],
-  ['11:52', '문자를 다른 번호로 다시 보내 줄 수 있어요?'],
-  ['09:47', '반품도 전화로 접수돼요?'],
-]
-const PAST_UA = [
-  '박스를 따로 살 수 있나요?',
-  '해외로도 보낼 수 있어요?',
-  '포장 박스에 주소를 직접 써야 돼요?',
-  '경비실에 맡겨 두면 가져가 주시나요?',
-  '카드 말고 계좌이체로 해도 돼요?',
-]
-
-function dayStats(day: Ymd): Stats {
-  const d = rangeDays(day, todayYmd()) - 1 // 오늘 = 0, 어제 = 1 …
-  if (d === 0)
-    return {
-      counts: { SUCCESS: 96, FAILED: 12, HANDOFF: 5, CANCELLED: 1, INQUIRY: 17 },
-      avgCallSec: 171,
-      avgCallSecBy: { success: 192, failed: 85 },
-      avgRepeat: 1.3,
-      avgRepeatBy: { success: 1.1, failed: 2.4 },
-      complaints: { REPEAT: 3, TOO_FAST: 2, MISHEARD: 1, SLOW: 1, REFUSED_AI: 1 },
-      unanswered: {
-        count: TODAY_UA.length,
-        recent: TODAY_UA.map(([hm, q]) => ({ at: at(day, hm), question: q })),
-      },
-    }
-  if (d < 0 || d > 6) return empty() // 오늘 이후 · 7일보다 옛날은 통화 없음 (04 가짜 목록과 같은 범위)
-  const complaints = zeroComplaints()
-  ;(['REPEAT', 'TOO_FAST', 'MISHEARD'] as const).forEach((k, i) => (complaints[k] = (d + i) % 3))
+/** 범위 하나의 건수들 — 통화 1 + 결과 5 + 불만 목록 + 미답변 1~2 요청 */
+async function statsOf(calls: Query, unanswered: Query, signal?: AbortSignal): Promise<Stats> {
+  const [total, ...byResult] = await Promise.all([
+    count('/calls', calls, signal),
+    ...OUTCOMES.map((o) => count('/calls', { ...calls, result: RESULT[o] }, signal)),
+  ])
+  // 불만 유형 필터가 없어 불만 통화 목록을 받아 유형을 셈 (하루 ~8건이라 보통 1요청)
+  const complaintRows = await fetchAll<ComplaintCallDto>(
+    '/calls',
+    { ...calls, hasComplaint: true },
+    signal,
+  )
+  const complaints = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<ComplaintKind, number>
+  for (const r of complaintRows)
+    for (const k of new Set((r.analysis?.complaints ?? []).map((c) => c.type)))
+      if (k in complaints) complaints[k]++
+  // 미답변: 서버가 오래된 순이라 끝 8개를 받아 뒤집음
+  const first = await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
+    query: { ...unanswered, limit: 8, offset: 0 },
+    signal,
+  })
+  const tail =
+    first.total_count > 8
+      ? (
+          await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
+            query: { ...unanswered, limit: 8, offset: first.total_count - 8 },
+            signal,
+          })
+        ).data
+      : first.data
   return {
-    counts: { SUCCESS: 80 + 2 * d, FAILED: 10, HANDOFF: 4, CANCELLED: 1, INQUIRY: 15 },
-    avgCallSec: 160 + d * 2,
-    avgCallSecBy: { success: 180 + d, failed: 80 + d },
-    avgRepeat: 1.4,
-    avgRepeatBy: { success: 1.2, failed: 2.6 },
+    total,
+    counts: Object.fromEntries(OUTCOMES.map((o, i) => [o, byResult[i]])) as Record<Outcome, number>,
+    complaintCalls: complaintRows.length,
     complaints,
     unanswered: {
-      count: 4,
-      recent: [17, 15, 13, 10].map((h, i) => ({
-        at: at(day, `${h}:${String(10 + i * 11).padStart(2, '0')}`),
-        question: PAST_UA[(d + i) % PAST_UA.length],
-      })),
+      count: first.total_count,
+      recent: [...tail]
+        .reverse()
+        .map((u) => ({ at: u.callStartedAt ?? u.occurredAt, question: u.questionText })),
     },
   }
 }
 
-function empty(): Stats {
-  return {
-    counts: { SUCCESS: 0, FAILED: 0, HANDOFF: 0, CANCELLED: 0, INQUIRY: 0 },
-    avgCallSec: 0,
-    avgCallSecBy: { success: 0, failed: 0 },
-    avgRepeat: 0,
-    avgRepeatBy: { success: 0, failed: 0 },
-    complaints: zeroComplaints(),
-    unanswered: { count: 0, recent: [] },
-  }
+/** 기간 집계 (from · to 포함 → 서버엔 KST 자정 · to 미포함으로) */
+export function fetchDashboard(from: Ymd, to: Ymd, signal?: AbortSignal): Promise<Stats> {
+  const bounds = { from: kstDayStart(from), to: kstDayStart(addDays(to, 1)) }
+  return statsOf(bounds, bounds, signal)
 }
 
-function merge(days: Stats[]): Stats {
-  const out = empty()
-  let calls = 0
-  let success = 0
-  let failed = 0
-  for (const s of days) {
-    const n = Object.values(s.counts).reduce((a, b) => a + b, 0)
-    for (const k of Object.keys(out.counts) as Outcome[]) out.counts[k] += s.counts[k]
-    for (const k of Object.keys(out.complaints) as ComplaintKind[])
-      out.complaints[k] += s.complaints[k]
-    out.avgCallSec += s.avgCallSec * n
-    out.avgRepeat += s.avgRepeat * n
-    out.avgCallSecBy.success += s.avgCallSecBy.success * s.counts.SUCCESS
-    out.avgCallSecBy.failed += s.avgCallSecBy.failed * s.counts.FAILED
-    out.avgRepeatBy.success += s.avgRepeatBy.success * s.counts.SUCCESS
-    out.avgRepeatBy.failed += s.avgRepeatBy.failed * s.counts.FAILED
-    out.unanswered.count += s.unanswered.count
-    out.unanswered.recent.push(...s.unanswered.recent)
-    calls += n
-    success += s.counts.SUCCESS
-    failed += s.counts.FAILED
-  }
-  const avg = (sum: number, n: number) => (n ? sum / n : 0)
-  out.avgCallSec = Math.round(avg(out.avgCallSec, calls))
-  out.avgRepeat = Math.round(avg(out.avgRepeat, calls) * 10) / 10
-  out.avgCallSecBy = {
-    success: Math.round(avg(out.avgCallSecBy.success, success)),
-    failed: Math.round(avg(out.avgCallSecBy.failed, failed)),
-  }
-  out.avgRepeatBy = {
-    success: Math.round(avg(out.avgRepeatBy.success, success) * 10) / 10,
-    failed: Math.round(avg(out.avgRepeatBy.failed, failed) * 10) / 10,
-  }
-  out.unanswered.recent = out.unanswered.recent
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-    .slice(0, 8)
-  return out
+interface PersonaVersionDto {
+  aiPersonaSeq: number
+  aiPersonaVersionSeq: number
+  version: number
+  name: string
+  status: 'ACTIVE' | 'PENDING' | 'INACTIVE'
+  appliedAt: string | null
+}
+interface PersonaDto {
+  aiPersonaSeq: number
 }
 
-// 버전별 기록 = 와이어프레임 02 페르소나별 (v6 적용 중 10.02 ~, v5 · v4는 끝난 버전). 운영 기간은 고정 날짜
-const VERSIONS: Version[] = [
-  {
-    id: 'v6',
-    personaName: '빠른 접수형',
-    version: 6,
-    active: true,
-    from: '2026-10-02',
-    to: null,
-    counts: { SUCCESS: 1689, FAILED: 212, HANDOFF: 86, CANCELLED: 9, INQUIRY: 312 },
-    avgCallSec: 173,
-    avgRepeat: 1.4,
-  },
-  {
-    id: 'v5',
-    personaName: '빠른 접수형',
-    version: 5,
-    active: false,
-    from: '2026-09-17',
-    to: '2026-10-02',
-    counts: { SUCCESS: 1205, FAILED: 173, HANDOFF: 78, CANCELLED: 7, INQUIRY: 251 },
-    avgCallSec: 178,
-    avgRepeat: 1.5,
-  },
-  {
-    id: 'v4',
-    personaName: '빠른 접수형',
-    version: 4,
-    active: false,
-    from: '2026-09-01',
-    to: '2026-09-17',
-    counts: { SUCCESS: 932, FAILED: 149, HANDOFF: 66, CANCELLED: 5, INQUIRY: 198 },
-    avgCallSec: 184,
-    avgRepeat: 1.6,
-  },
-]
+/** 버전별 기록 — 적용된 적 있는 버전(appliedAt 있음)만, 최근 적용 순 3개. 운영 기간 = 적용일 ~ 다음 버전 적용일 (명세에 기간 필드 없음)
+ * API-60 · 64는 최고 관리자 전용 — 훅이 isSystemAdmin일 때만 부름 */
+export async function fetchVersions(signal?: AbortSignal): Promise<Version[]> {
+  const personas = await fetchAll<PersonaDto>('/personas', {}, signal)
+  const versions = (
+    await Promise.all(
+      personas.map((p) =>
+        fetchAll<PersonaVersionDto>(`/personas/${p.aiPersonaSeq}/versions`, {}, signal),
+      ),
+    )
+  ).flat()
+  const top = pickVersions(versions).slice(0, 3)
+  const counts = await Promise.all(top.map((v) => fetchVersionCounts(v.id, signal)))
+  return top.map((v, i) => ({ ...v, counts: counts[i] }))
+}
 
-const versionStats = (
-  v: Version,
-  complaints: [number, number, number, number, number],
-  unansweredCount: number,
-  questions: [string, string][],
-): Stats => ({
-  counts: v.counts,
-  avgCallSec: v.avgCallSec,
-  avgCallSecBy: { success: v.avgCallSec + 20, failed: v.avgCallSec - 90 },
-  avgRepeat: v.avgRepeat,
-  avgRepeatBy: { success: v.avgRepeat - 0.2, failed: v.avgRepeat + 1.1 },
-  complaints: {
-    REPEAT: complaints[0],
-    TOO_FAST: complaints[1],
-    MISHEARD: complaints[2],
-    SLOW: complaints[3],
-    REFUSED_AI: complaints[4],
-  },
-  unanswered: {
-    count: unansweredCount,
-    recent: questions.map(([day, q]) => ({ at: `${day}T12:00:00+09:00`, question: q })),
-  },
-})
-const today = todayYmd()
-const VERSION_STATS: Record<string, Stats> = {
-  v6: versionStats(VERSIONS[0], [34, 19, 12, 10, 6], 84, [
-    [today, '기사님 오늘 몇 시쯤 도착하세요?'],
-    [today, '착불로 보내면 받는 사람이 얼마 내요?'],
-    [today, '주말에도 수거 와요?'],
-    [today, '제주까지는 며칠 걸려요?'],
-    [today, '제주도로 보내면 추가 요금이 얼마나 붙어요?'],
-    [today, '문자를 다른 번호로 다시 보내 줄 수 있어요?'],
-    [addDays(today, -1), '박스를 따로 살 수 있나요?'],
-    [addDays(today, -2), '해외로도 보낼 수 있어요?'],
-  ]),
-  v5: versionStats(VERSIONS[1], [29, 17, 10, 8, 5], 71, [
-    ['2026-10-01', '포장 박스에 주소를 직접 써야 돼요?'],
-    ['2026-09-28', '경비실에 맡겨 두면 가져가 주시나요?'],
-    ['2026-09-24', '카드 말고 계좌이체로 해도 돼요?'],
-    ['2026-09-19', '반품도 전화로 접수돼요?'],
-  ]),
-  v4: versionStats(VERSIONS[2], [25, 15, 9, 7, 4], 66, [
-    ['2026-09-15', '세금계산서 발행돼요?'],
-    ['2026-09-09', '영수증 같은 거 문자로 받을 수 있나요?'],
-    ['2026-09-03', '매주 같은 시간에 수거 오게 예약할 수 있어요?'],
-  ]),
+/** 순수 함수 (dashboardApi.test.ts) — 적용된 버전을 최근 적용 순으로, 기간은 사슬로 */
+export function pickVersions(versions: PersonaVersionDto[]): Omit<Version, 'counts'>[] {
+  const applied = versions
+    .filter((v): v is PersonaVersionDto & { appliedAt: string } => v.appliedAt !== null)
+    .sort((a, b) => Date.parse(b.appliedAt) - Date.parse(a.appliedAt))
+  return applied.map((v, i) => ({
+    id: String(v.aiPersonaVersionSeq),
+    personaName: v.name,
+    version: v.version,
+    active: v.status === 'ACTIVE',
+    from: ymd(new Date(v.appliedAt)),
+    to: v.status === 'ACTIVE' || i === 0 ? null : ymd(new Date(applied[i - 1].appliedAt)),
+  }))
+}
+
+/** 고른 버전의 건수 (그 버전이 받은 통화 전체 — 기간 제한 없음) */
+export async function fetchVersionStats(id: string, signal?: AbortSignal): Promise<Stats> {
+  const q = { aiPersonaVersionSeq: Number(id) }
+  return statsOf(q, q, signal)
+}
+
+/** 버전별 기록 표의 결과 건수 (버전마다 게이지 결과 3개 = 3요청) */
+async function fetchVersionCounts(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Record<GaugeOutcome, number>> {
+  const q = { aiPersonaVersionSeq: Number(id) }
+  const n = await Promise.all(
+    GAUGE.map((o) => count('/calls', { ...q, result: RESULT[o] }, signal)),
+  )
+  return Object.fromEntries(GAUGE.map((o, i) => [o, n[i]])) as Record<GaugeOutcome, number>
 }

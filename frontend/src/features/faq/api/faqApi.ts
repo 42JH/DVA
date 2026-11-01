@@ -1,7 +1,8 @@
 // 09 FAQ 관리 Model — API-29 · 30 · 31 · 33 (연동 상세명세 10/31 §6.1~6.3). React를 모르는 데이터 · API 층
 // 개발 중엔 MSW 가짜(mocks/handlers/faq.ts)가 같은 모양으로 응답
 import { queryOptions } from '@tanstack/react-query'
-import { api, type ApiList } from '@/shared/api/client'
+import { api } from '@/shared/api/client'
+import { fetchAll } from '@/shared/api/paging'
 
 /**
  * 분류 10개 고정 (10/27 확정 · 10/28 '기타' 추가, 맨 끝) — 서버 허용값과 같은 글자(가운데점 · 띄어쓰기 그대로). 화면에서 추가 · 수정 · 삭제 없음
@@ -35,27 +36,6 @@ export interface FaqInput {
   category: FaqCategory
   question: string
   answer: string
-}
-
-const LIMIT = 100 // API 최대
-const MAX_PAGES = 20
-
-/** 목록을 hasNext가 꺼질 때까지 다 받음 (FAQ · AI 미답변 공통). ponytail: 최대 2,000건 — 넘으면 서버 q · offset 쪽 넘김으로 */
-export async function fetchAll<T>(
-  path: string,
-  query: Record<string, string | number>,
-  signal?: AbortSignal,
-): Promise<T[]> {
-  const out: T[] = []
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await api.get<ApiList<T>>(path, {
-      query: { ...query, limit: LIMIT, offset: page * LIMIT },
-      signal,
-    })
-    out.push(...res.data)
-    if (!res.hasNext) break
-  }
-  return out
 }
 
 export const faqQueries = {

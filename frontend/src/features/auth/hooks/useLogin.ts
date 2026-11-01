@@ -22,11 +22,12 @@ export function useLogin() {
   })
 
   const error = mutation.error
-  // 승인 대기 · 비활성화 계정은 로그인은 되고 내 정보(status)로 안내 화면에 감 (RequireAuth)
+  // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 계정도 틀린 비밀번호와 같은 401이라 문구에 함께 안내 (BE 요청 B1: 상태 코드가 오면 /pending으로)
+  // 400(아이디 형식 · 6자 미만)도 같은 문구 — 서버의 일반 문구를 그대로 띄우지 않게
   const errorMessage = !error
     ? null
-    : error instanceof ApiError && error.status === 401
-      ? '아이디 또는 비밀번호가 일치하지 않습니다.'
+    : error instanceof ApiError && (error.status === 401 || error.status === 400)
+      ? '아이디 또는 비밀번호가 일치하지 않거나, 아직 승인되지 않은 계정입니다.'
       : error.message
 
   return {

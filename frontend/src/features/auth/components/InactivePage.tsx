@@ -3,6 +3,7 @@ import { Button } from '@/shared/ui'
 import { AuthLayout } from './AuthLayout'
 
 // 00 비활성화 (디자인/목업 '00_로그인_승인거절' 10/30) — 최고 관리자가 비활성화한 계정이 로그인했을 때
+// 보류(11/01): 계정 비활성화 API가 없어(연동 상세명세 §10 · 409) 라우트에서 뺌. BE가 비활성화와 로그인 상태 코드를 주면 router에 /inactive로 다시 연결
 // 디자인의 주황 '!'는 토큰에 주황이 없어 빨강(danger)
 export function InactivePage() {
   const navigate = useNavigate()

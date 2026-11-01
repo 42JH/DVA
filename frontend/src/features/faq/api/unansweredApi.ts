@@ -2,7 +2,8 @@
 // 개발 중엔 MSW 가짜(mocks/handlers/faq.ts)가 같은 모양으로 응답
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
-import { fetchAll, type FaqInput } from './faqApi'
+import { fetchAll } from '@/shared/api/paging'
+import type { FaqInput } from './faqApi'
 
 /** 화면에서 쓰는 모양 (서버 UnansweredQuestion에서 바꿈 — 화면 이름은 그대로 두려고) */
 export interface UnansweredQuestion {

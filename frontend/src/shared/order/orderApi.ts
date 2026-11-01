@@ -1,9 +1,12 @@
 // 주문 상세 — 03 주문 내역(팀원) · 06 통화 상세 '주문 보기'가 같이 씀 (10/30 공통으로 올림, shared/auth와 같은 예외)
-// 명세 ORD-03 GET /orders/{id} — 응답 모양이 정해지면 fetchOrder 몸통만 바꿈. 지금은 네트워크 없이 메모리 가짜 데이터
+// GET /orders/{id} (연동 상세명세 10/31 §4.2) → orderDto.toOrderDetail, 관련 통화는 GET /calls?orderSeq (§2 03_주문상세_전화)
+// 아래 ORDERS 메모리 저장소는 03 주문 내역(팀원)의 가짜 목록 · 추가 · 수정용. MSW GET /orders/:id도 이 저장소를 읽음 (mocks/handlers/orders.ts)
 // api 역할: React를 모른다. 화면용 값은 useOrderDetail.ts
 import { queryOptions } from '@tanstack/react-query'
-import { NotFoundError } from '@/shared/api/client'
+import { api, NotFoundError, type ApiItem } from '@/shared/api/client'
+import { fetchAll } from '@/shared/api/paging'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
+import { toOrderDetail, type OrderDetailDto } from './orderDto'
 
 export interface Party {
   name: string
@@ -39,17 +42,33 @@ export const orderQueries = {
   detail: (id: number) =>
     queryOptions({
       queryKey: [...orderQueries.all(), id],
-      queryFn: () => fetchOrder(id),
+      queryFn: ({ signal }) => fetchOrder(id, signal),
     }),
 }
 
-const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연 ('불러오는 중' 확인용)
+/** 통화 목록 줄 중 관련 통화에 필요한 칸만 (CallListItem §13) */
+interface RelatedCallDto {
+  callSessionSeq: number
+  startedAt: string | null
+  analysis: { result: string } | null
+}
 
-export async function fetchOrder(id: number): Promise<OrderDetail> {
-  await wait()
-  const order = ORDERS.find((o) => o.orderSeq === id)
-  if (!order) throw new NotFoundError('주문을 찾을 수 없습니다.')
-  return order
+export async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail> {
+  const [res, calls] = await Promise.all([
+    api.get<ApiItem<OrderDetailDto>>(`/orders/${id}`, { signal }),
+    fetchAll<RelatedCallDto>('/calls', { orderSeq: id }, signal), // 응답에 관련 통화가 없어 통화 목록에서
+  ])
+  return {
+    ...toOrderDetail(res.data),
+    relatedCalls: calls
+      .filter((c): c is RelatedCallDto & { startedAt: string } => c.startedAt !== null)
+      .map((c) => ({
+        callSessionSeq: c.callSessionSeq,
+        startedAt: c.startedAt,
+        kind: c.analysis?.result === 'CANCELLED' ? ('CANCEL' as const) : ('ACCEPT' as const),
+      }))
+      .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)),
+  }
 }
 
 // ---------- 가짜 데이터 — 날짜는 오늘 기준 (06 · 04 가짜 통화와 같은 날), 수거 희망 = 내일 ----------

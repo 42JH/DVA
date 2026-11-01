@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { NotFoundError } from '@/shared/api/client'
+import { ApiError } from '@/shared/api/client'
 import { fmtDetailTime, fmtPhone } from '@/shared/lib/format'
 import type { TagKind } from '@/shared/ui'
 import { PAYMENT_METHOD_LABEL, PAYMENT_STATE_LABEL, RELATED_CALL_LABEL } from './labels'
@@ -27,8 +27,8 @@ export function useOrderDetail(orderId: number | null) {
     isLoading: orderId !== null && q.isPending,
     error: !q.error
       ? null
-      : q.error instanceof NotFoundError
-        ? q.error.message
+      : q.error instanceof ApiError && q.error.status === 404
+        ? '주문을 찾을 수 없습니다.'
         : '불러오지 못했습니다. 다시 시도해 주세요.',
   }
 }
