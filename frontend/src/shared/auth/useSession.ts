@@ -17,10 +17,11 @@ export function useSession() {
 
   const logoutMutation = useMutation({
     mutationFn: logout,
-    onSettled: () => {
+    onSuccess: () => {
       queryClient.clear() // 이전 관리자의 화면 데이터가 남지 않게
       navigate('/login', { replace: true })
     },
+    onError: () => window.alert('로그아웃하지 못했습니다. 잠시 뒤 다시 시도해 주세요.'), // 공통 토스트가 없어 alert
   })
 
   const role: AdminRole | undefined = me.data?.role

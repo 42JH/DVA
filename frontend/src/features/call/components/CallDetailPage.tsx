@@ -47,11 +47,11 @@ export function CallDetailPage() {
         </div>
         {s.complaints.length > 0 && (
           // 불만이 감지된 통화만: 가는 줄 아래 '불만 [유형] 감지 사유' (04 불만 열과 같은 내용)
-          <div className="flex h-[52px] items-center gap-4 border-t border-line text-body">
+          <div className="flex min-h-[52px] flex-wrap items-center gap-4 border-t border-line py-2 text-body">
             <span className="text-label text-sub">불만</span>
             {s.complaints.map((c, i) => (
               <span key={i} className="flex items-center gap-2.5">
-                <Tag kind="red">{c.kind}</Tag>
+                <Tag kind="red">{c.label}</Tag>
                 {c.reason}
               </span>
             ))}
@@ -64,12 +64,18 @@ export function CallDetailPage() {
           className="w-[598px] shrink-0"
           persona={vm.persona}
           player={vm.player}
+          audioRef={vm.audioRef}
           speeds={vm.speeds}
           speed={vm.speed}
           onSpeed={vm.setSpeed}
           segments={vm.segments}
         />
-        <CallActions className="min-w-0 flex-1" results={vm.results} actions={vm.actions} />
+        <CallActions
+          className="min-w-0 flex-1"
+          results={vm.results}
+          actions={vm.actions}
+          count={vm.actionCount}
+        />
       </div>
 
       {vm.orderId !== null && (

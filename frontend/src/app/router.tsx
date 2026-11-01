@@ -1,6 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router'
 import { LoginPage } from '@/features/auth/components/LoginPage'
-import { InactivePage } from '@/features/auth/components/InactivePage'
 import { PendingPage } from '@/features/auth/components/PendingPage'
 import { SignupPage } from '@/features/auth/components/SignupPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
@@ -29,7 +28,7 @@ export const router = createBrowserRouter([
       { path: '/login', element: <LoginPage /> },
       { path: '/signup', element: <SignupPage /> },
       { path: '/pending', element: <PendingPage /> }, // 승인 대기 (가입 직후 · RequireAuth가 PENDING 계정을 여기로)
-      { path: '/inactive', element: <InactivePage /> }, // 비활성화 (RequireAuth가 INACTIVE 계정을 여기로)
+      // /inactive(비활성화 안내)는 보류 — 계정 비활성화 API가 없어 도달 경로 없음 (연동 상세명세 §10, BE 요청 B2)
       {
         element: (
           <RequireAuth>

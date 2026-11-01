@@ -1,17 +1,12 @@
 import { DateField, Tabs } from '@/shared/ui'
-import { useDashboard, type DashboardTab } from '@/features/dashboard/hooks/useDashboard'
+import { useDashboard } from '@/features/dashboard/hooks/useDashboard'
 import { AvgCard } from './AvgCard'
 import { ComplaintCard, UnansweredCard } from './BottomCards'
 import { ResultCard } from './ResultCard'
 import { VersionTable } from './VersionTable'
 
-// 02 대시보드 (와이어프레임 02, 10/30 최종) — 1줄 탭 [날짜별 | 페르소나별] + 오른쪽 끝(날짜별 = 날짜 칸, 페르소나별 = 고른 버전의 운영 기간)
+// 02 대시보드 (와이어프레임 02, 10/30 최종) — 1줄 탭 [날짜별 | 페르소나별(최고 관리자만)] + 오른쪽 끝(날짜별 = 날짜 칸, 페르소나별 = 고른 버전의 운영 기간)
 // 날짜별: 통화 결과(8칸) · 평균(4칸) / AI 미답변 · 불만 내역(6칸씩). 페르소나별: 버전별 기록 / 고른 버전의 두 카드
-const TABS: { key: DashboardTab; label: string }[] = [
-  { key: 'date', label: '날짜별' },
-  { key: 'persona', label: '페르소나별' },
-]
-
 export function DashboardPage() {
   const vm = useDashboard()
 
@@ -24,7 +19,7 @@ export function DashboardPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} right={right} />
+      <Tabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} right={right} />
 
       {vm.error ? (
         <p className="py-16 text-center text-body text-muted">{vm.error}</p>

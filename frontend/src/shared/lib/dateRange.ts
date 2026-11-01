@@ -8,6 +8,9 @@ export const ymd = (d: Date): Ymd =>
 
 export const todayYmd = (): Ymd => ymd(new Date())
 
+/** 서버 기간 경계 — 그 날 한국 시각 00:00 (명세 §1: 시간대 포함 ISO, from 포함 · to 미포함 → to는 다음 날을 넣음) */
+export const kstDayStart = (day: Ymd) => `${day}T00:00:00+09:00`
+
 /** 'YYYY-MM-DD' + n일 */
 export function addDays(s: Ymd, n: number): Ymd {
   const [y, m, d] = s.split('-').map(Number)

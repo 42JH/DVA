@@ -88,7 +88,7 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
 
   if (!res.ok) {
     // 로그인 요청 자체의 401(아이디 · 비밀번호 불일치)은 그 화면에서 보여 주고, 나머지 401은 토큰 만료로 보고 로그인 화면으로
-    if (res.status === 401 && path !== '/auth/login') {
+    if (res.status === 401 && path !== '/auth/login' && path !== '/auth/signup') {
       clearSession()
       if (window.location.pathname !== '/login') window.location.assign('/login')
     }

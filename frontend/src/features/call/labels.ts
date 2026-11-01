@@ -1,8 +1,8 @@
-// 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
+// 04 · 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 서버 코드는 callDto.ts의 것 그대로
 import type { TagKind } from '@/shared/ui'
-import type { AiAction, OrderField, Outcome, ResultBlock } from './api/callApi'
+import type { CallActionKind, ComplaintType, Outcome, ProcessingKind } from './api/callDto'
 
-/** 통화 결과 (04와 같은 5개) + 태그 색 (04 태그와 같음: 문의 = 흰 바탕 회색 선) */
+/** 통화 결과 (04 · 02와 같은 5개) + 태그 색 (문의 = 흰 바탕 회색 선) */
 export const OUTCOME_LABEL: Record<Outcome, string> = {
   HANDOFF: '상담원 이관',
   SUCCESS: '접수 성공',
@@ -17,35 +17,35 @@ export const OUTCOME_TAG: Record<Outcome, TagKind> = {
   CANCELLED: 'gray',
   INQUIRY: 'outline',
 }
+/** 분석이 아직 안 온 통화(analysis = null) — 성공 · 불만 없음으로 보지 않음 (명세 §5.1) */
+export const NO_ANALYSIS = { label: '분석 전', tag: 'outline' as TagKind }
 
-/** 처리 내용 블록 머리 */
-export const RESULT_LABEL: Record<ResultBlock['kind'], string> = {
-  ACCEPTED: '접수',
-  CANCELLED: '주문 취소',
-  UNANSWERED: 'AI 미답변',
+/** 불만 유형 (02 대시보드 · 04 불만 열 · 06 불만 줄 같은 말) */
+export const COMPLAINT_LABEL: Record<ComplaintType, string> = {
+  REPEATED_QUESTION: '되묻기 반복',
+  SPEAKING_TOO_FAST: '말이 빠름',
+  RECOGNITION_FAILURE: '못 알아들음',
+  SLOW_RESPONSE: '답답함 · 느림',
+  AI_REFUSAL: 'AI라서 거부',
 }
 
-/** AI 동작 태그 */
-export const ACTION_LABEL: Record<AiAction['kind'], string> = {
-  SAVE: '저장',
-  SEARCH: '검색',
-  CANCEL: '취소',
-  SEND: '전송',
+/** 처리 내용 블록 머리 — 없는 종류(문의 · 답한 FAQ)는 블록으로 안 그림 (10/29 '미답변만 남기기') */
+export const RESULT_LABEL: Partial<Record<ProcessingKind, string>> = {
+  ORDER_CREATED: '접수',
+  ORDER_CANCELLED: '주문 취소',
+  QUESTION_UNANSWERED: 'AI 미답변',
+  HANDOFF_REQUESTED: '상담원 이관 요청', // 요청일 뿐 연결 성공이 아님 (명세 §5.3)
 }
 
-/** 저장한 칸 이름 — 'origin.name = 강도윤' → '보내는 분 이름 = 강도윤' (10/30 읽기 쉬운 기록) */
-export const FIELD_LABEL: Record<OrderField, string> = {
-  'origin.name': '보내는 분 이름',
-  'origin.phoneNumber': '보내는 분 전화번호',
-  'origin.roadAddress': '보내는 분 주소',
-  'origin.detailAddress': '보내는 분 상세주소',
-  'destination.name': '받는 분 이름',
-  'destination.phoneNumber': '받는 분 전화번호',
-  'destination.roadAddress': '받는 분 주소',
-  'destination.detailAddress': '받는 분 상세주소',
-  pickupRequestedAt: '수거 희망 일시',
-  parcels: '품목',
-  itemPrice: '물품 가액',
-  clientComment: '고객 요청 사항',
-  paymentMethodType: '결제 방식',
+/** AI 동작 태그 (서버 action 9종 → 저장 · 검색 · 조회 · 전송 · 취소) */
+export const ACTION_LABEL: Record<CallActionKind, string> = {
+  FIELD_SAVED: '저장',
+  PIN_SEARCH: '검색',
+  PREVIOUS_ORDER_SEARCH: '검색',
+  FAQ_SEARCH: '검색',
+  ADDRESS_SEARCH: '검색',
+  CUSTOMER_LOOKUP: '조회',
+  ORDER_LOOKUP: '조회',
+  ORDER_SUBMITTED: '전송',
+  ORDER_CANCELLED: '취소',
 }
