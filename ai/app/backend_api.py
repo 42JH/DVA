@@ -298,7 +298,7 @@ class BackendAPI:
             # 파싱 예외에는 원문이 들어갈 수 있어 외부에 연결하지 않는다.
             raise BackendError('FAQ_INVALID_RESPONSE') from None
 
-    # --- 페르소나(spec/persona.md) ---
+    # --- 페르소나(spec/persona.md, 계약 spec/ai-persona-next-call.md) ---
 
     def _persona_headers(self) -> dict:
         return {"Authorization": f"Bearer {self.persona_token}"}

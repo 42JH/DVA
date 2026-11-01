@@ -1,5 +1,11 @@
 # 작업 기록
 
+## 2026-11-01 FAQ 목록 응답의 total_count 수용
+
+- 백엔드 인계: 실제 `GET /api/ai/faqs` 응답의 최상위 `total_count`를 AI 파서(`extra='forbid'`)가 `extra_forbidden`으로 거절해, FAQ 저장·알림이 성공해도 원문 조회가 실패하고 검색에 반영되지 않았다.
+- 백엔드 계약(`docs/api/ai-faq-integration.md`, `faqs.md`)은 모든 목록에 `total_count`(필수, 0 이상 정수)를 둔다. `_FaqPage`에 필수 필드로 추가했다(값은 검증만, 사용하지 않음). 가짜 백엔드·`validate_faq_crud`·테스트 응답도 맞췄다.
+- 확인: 백엔드 문서 예시 응답 파싱 통과, 누락·음수·문자열·null 거절 테스트 추가, 전체 598개 통과.
+
 ## 2026-10-31 Jenkins(Linux) 테스트 간헐 실패 수정
 
 - 증상: Windows에서는 전부 통과, Jenkins와 같은 Linux 컨테이너에서는 `test_sideband.py` 3개가 실행마다 0~3개 실패(AssertionError).
@@ -1092,3 +1098,21 @@
 
 ### 남은 것(실제 통화로 확인)
 - session.update가 받아들여지는지(`세션 갱신 받음` 로그), 백엔드 응답 중 갱신이 어떻게 되는지, get_state·엉뚱한 도구가 실제로 줄었는지, 위임 구간 시간.
+
+## 2026-11-01 (페르소나: 다음 통화부터 적용, 지시문 전체 교체)
+
+### 확인한 것
+- 백엔드 새 계약(`spec/ai-persona-next-call.md`, `spec/persona-head-management.md`): 진행 통화 0건 대기 없이 새 통화 기본값만 전환, 통화 진입 때 PENDING 조회, 알림·진입 같은 잠금, `activeCallCount` 생략, 회신 불명확하면 새 통화 막기.
+- HEAD·publish 문서는 관리자·백엔드 쪽이라 AI 코드 변경 없음(AI는 ACTIVE·PENDING만 따름).
+- 분석 API(ANL-01)는 백엔드 `POST /api/ai/calls/{id}/analysis`(develop-backend). AI는 아직 부르지 않음.
+
+### 바꾼 것(사용자 결정: 조회 실패는 캐시로 받기, 설정이 다 없으면 거절, promptText는 voice.md 전체)
+- `PersonaManager`: 통화 0건 대기·`locked` 제거, `asyncio.Lock` + `entry()`(대기 맞추기 → 설정 고정 → 등록), 회신 불명확(`unresolved`) 동안 거절, 409면 다시 조회해 최신 적용, 회신에서 `activeCallCount` 뺌.
+- `[[페르소나]]` 자리·`prompts/persona.md` 제거: 말투·인사를 `voice.md`에 합치고 `promptText`가 지시문 전체를 대신함. `max_prompt_chars` 4000 → 20000, `wait_poll_sec` → `entry_wait_sec`(3초).
+- 옛 계약 `spec/ai-persona-integration.md` 삭제, `spec/persona.md` 다시 씀.
+- 테스트 593개 통과.
+
+### 남은 것
+- 백엔드에 지금 `voice.md` 전체를 v1 `promptText`로 넣고 publish해야 함(연동이 켜진 서버는 설정이 없으면 통화 거절).
+- 분석 API(ANL-01) 연동(`aiPersonaVersionSeq`는 `Call.persona_version`).
+- 실제 백엔드 연동 확인: 통화 중 publish → 진행 통화 유지·다음 통화 새 버전·음성.

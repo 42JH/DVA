@@ -17,7 +17,7 @@
 | 관제 화면(임시), SSE | `spec/monitor.md` |
 | 고객 확인·통화 결과 접수(백엔드 서버 API) | `spec/backend-api.md` |
 | 주소 보정(행안부 주소DB), 지번·우편번호·좌표(카카오), `app/address/` | `spec/address.md` |
-| 페르소나(관리자가 고치는 말투·인사·음성), `/internal/persona` | `spec/persona.md` |
+| 페르소나(관리자가 고치는 음성 지시문 전체·음성), `/internal/persona` | `spec/persona.md`, 백엔드 계약 `spec/ai-persona-next-call.md` |
 | 매뉴얼 RAG(Qdrant) | `docs/rag-handoff.md`(RAG 담당자 인계) |
 | FAQ 변경 알림·영속 큐·추가/수정/삭제 동기화 | `spec/faq-sync.md`, `docs/faq-management-plan.md` |
 

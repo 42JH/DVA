@@ -77,10 +77,10 @@ class AddressConfig(_Strict):
 
 
 class PersonaConfig(_Strict):
-    wait_poll_sec: float = Field(gt=0)
+    entry_wait_sec: float = Field(gt=0)
     retry_sec: float = Field(gt=0)
     report_attempts: int = Field(ge=1, le=10)
-    max_prompt_chars: int = Field(ge=100, le=20000)
+    max_prompt_chars: int = Field(ge=100, le=50000)
 
 
 class FlowConfig(_Strict):
