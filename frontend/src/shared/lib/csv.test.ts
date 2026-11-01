@@ -10,6 +10,9 @@ assert.equal(
   '사유\r\n"\'중간 박스\'를 ""못"" 들음"',
 )
 assert.equal(toCsv(['사유'], [['한 줄\n두 줄']]), '사유\r\n"한 줄\n두 줄"')
+// 수식으로 실행될 글은 앞에 ' (숫자 -3은 그대로)
+assert.equal(toCsv(['a', 'b'], [['=1+1', -3]]), "a,b\r\n'=1+1,-3")
+assert.equal(toCsv(['a'], [['@x,y']]), 'a\r\n"\'@x,y"')
 
 // parseCsv = toCsv의 반대 (따옴표 · 쉼표 · 줄바꿈 · BOM · CRLF · 빈 줄)
 const table = [
