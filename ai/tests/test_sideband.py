@@ -294,6 +294,10 @@ def test_concurrent_calls_do_not_mix_and_slow_backend_does_not_block_others():
         for i, (call, (_, conn)) in enumerate(zip(calls, started)):
             conn.function_call("record_order", {**FULL_ORDER, "sender_phone": call.caller, "small_box_count": 0,
                                                 "other_item": f"물품{i}"}, f"r{i}")
+        await until(lambda: all(c.flow.stage == "A_CONFIRM" for c in calls))
+        answers(client, "yes")
+        for _, conn in started:
+            conn.push("session.input_transcript.delta", delta="네 맞아요")
         # 결제 단계 진입은 확정 지연 뒤에(감시 작업이 COMMIT)
         await until(lambda: all(c.flow.stage == "A_CHOICE" for c in calls))
         answers(client, "no_more")
@@ -698,9 +702,13 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         conn.push("session.input_transcript.delta", delta="택배요")
         await until(lambda: call.flow.stage == "A_REGISTER_SENDER")
         conn.function_call("record_order", FULL_ORDER, "r1")
-        await until(lambda: call.flow.pending and conn.outputs())
-        nxt = conn.outputs()[-1]["state"]["next"]  # 기다리는 동안 새 질문 없음(방금 받은 번호 확인만)
-        assert nxt.endswith(call.texts.note["COMMIT_WAIT"]) and "010-9876-5432" in nxt
+        await until(lambda: call.flow.stage == "A_CONFIRM" and conn.outputs())
+        nxt = conn.outputs()[-1]["state"]["next"]  # 방금 받은 번호 확인 뒤 접수 내용 되읽기(임시 주문 그대로)
+        assert "010-9876-5432" in nxt and "받는 분 이영희님" in nxt and "이대로 접수할까요?" in nxt
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네 맞아요")
+        await until(lambda: call.flow.pending)
+        assert engine.next_text(call) == call.texts.note["COMMIT_WAIT"]  # 기다리는 동안 새 질문 없음
         await until(lambda: call.flow.stage == "A_CHOICE" and call.texts.say["A8"] in thoughts(conn)[-1])
         last = thoughts(conn)[-1]  # 확정 뒤 운임 → 결제 → 추가 접수 질문을 한 진행 상태로 차례대로
         assert last.index("운임은 4,000원이에요") < last.index(call.texts.say["PAY_BILLING"]) < last.index(call.texts.say["A8"])

@@ -517,7 +517,19 @@ class Call:
             "업무": self.texts.task_names.get(self.flow.task or "", ""),
             "항목": self.texts.correction_labels.get(slot or "", ""),
             "새 값": value,
+            # 접수 전 되읽기(A_CONFIRM)
+            "출발지": self._place("sender"),
+            "받는 분 성함": self.order.receiver_name or "",
+            "도착지": self._place("receiver"),
+            "물품": self._shown("item") or "",
+            "물품 가액": self._shown("item_price") or "",
+            "수거 시각": self._shown("pickup_at") or "",
         }
+
+    def _place(self, side: str) -> str:
+        """되읽을 주소: 고객이 말한 상세주소는 붙이고, 주소록·최근 접수에서 온 상세주소는 읽지 않는다."""
+        address, detail = getattr(self.order, f"{side}_address") or "", getattr(self.order, f"{side}_address_detail")
+        return f"{address} {detail}" if detail and f"{side}_address_detail" not in self.from_saved else address
 
     def display_name(self) -> str | None:
         """등록 고객 성함(백엔드 고객 정보)."""
