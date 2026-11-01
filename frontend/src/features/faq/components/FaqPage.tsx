@@ -1,5 +1,5 @@
 import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
-import { Button, Pagination, SearchBox, Table, Tabs, Tag, type Column } from '@/shared/ui'
+import { Button, Markdown, Pagination, SearchBox, Table, Tabs, Tag, type Column } from '@/shared/ui'
 import { useFaqList, type CategoryFilter, type FaqRow } from '@/features/faq/hooks/useFaqList'
 import { FaqFormModal } from './FaqFormModal'
 
@@ -96,10 +96,8 @@ export function FaqPage() {
                 <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
                   <span />
                   <span className="text-label font-semibold text-sub">답변</span>
-                  {/* break-words: 띄어쓰기 없는 긴 URL도 카드 안에서 줄바꿈 */}
-                  <p className="col-span-2 min-w-0 pr-4 text-body break-words whitespace-pre-wrap">
-                    {r.answer}
-                  </p>
+                  {/* 답변은 마크다운(표 · 목록 · 굵게)으로 그림 — 11/01 사용자: '| 표 |'가 글자 그대로 보임. 긴 URL도 안에서 줄바꿈 */}
+                  <Markdown text={r.answer} className="col-span-2 pr-4 text-body" />
                 </div>
               </div>
             ) : null

@@ -39,7 +39,7 @@ const hm = (iso: string) => {
 }
 /** 여러 날 목록 = 날짜만 (10/29: 'MM.DD HH:MM'이면 질문이 잘림). 다른 해면 연도 (10/30 연도 규칙) */
 const dayOnly = (iso: string) => fmtDay(iso).replace(/ \(.\)$/, '')
-const NO_STAT = '집계 API 없음' // 평균 되묻기: 명세 §10 — 성공하는 척 표시 금지
+const NO_STAT = '되묻기 미측정' // 평균 되묻기: AI가 repeatQuestionCount 를 안 준 기간 (성공하는 척 표시 금지, 명세 §10)
 /** 초 → 카드의 큰 값 [['3', '분'], ['40', '초']] */
 const clockParts = (sec: number): [string, string][] => [
   [String(Math.floor(Math.round(sec) / 60)), '분'],
@@ -151,7 +151,17 @@ export function useDashboard() {
               ] as [string, string][],
               note: s.avgSampled ? '최근 2,000건 기준' : undefined,
             },
-            { key: 'repeat', icon: 'repeat' as const, label: '평균 되묻기', note: NO_STAT },
+            {
+              key: 'repeat',
+              icon: 'repeat' as const,
+              label: '평균 되묻기',
+              // analysis.repeatQuestionCount 평균 (11/01). AI가 아직 안 재면 '—' + 안내
+              value:
+                s.avgRepeat === null
+                  ? undefined
+                  : ([[s.avgRepeat.toFixed(1), '회']] as [string, string][]),
+              note: s.avgRepeat === null ? NO_STAT : undefined,
+            },
           ],
           ...bottom(s, scopeOfRange, from !== to, { f: from, t: to }),
         }

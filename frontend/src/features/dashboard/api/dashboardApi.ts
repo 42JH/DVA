@@ -41,6 +41,7 @@ export interface Stats {
   avgDurationSec: number | null
   avgBy: Record<GaugeOutcome, number | null> // 결과별 평균 (접수 성공 · 실패 · 이관)
   avgSampled: boolean // 목록을 2,000건까지만 받아서 평균을 냈음 (fetchAll 상한) → 화면에 '최근 2,000건 기준'
+  avgRepeat: number | null // 평균 되묻기 횟수 = analysis.repeatQuestionCount 의 평균 (측정된 통화만, 없으면 null)
   unanswered: { count: number; recent: { at: string; question: string }[] } // 처리 안 된(OPEN) 질문, 최신순 (날짜별 8개 · 페르소나별 6개)
 }
 
@@ -88,7 +89,11 @@ interface CallRowDto {
   callSessionSeq: number
   startedAt: string | null
   endedAt: string | null
-  analysis: { result: string; complaints: { type: ComplaintKind }[] } | null
+  analysis: {
+    result: string
+    repeatQuestionCount: number | null
+    complaints: { type: ComplaintKind }[]
+  } | null
 }
 const RESULT_OF: Record<string, GaugeOutcome> = {
   REGISTERED: 'SUCCESS',
@@ -154,6 +159,11 @@ async function statsOf(
     avgDurationSec: avg(secsOf(() => true)),
     avgBy,
     avgSampled: rows.length < total,
+    avgRepeat: avg(
+      rows
+        .map((r) => r.analysis?.repeatQuestionCount ?? null)
+        .filter((n): n is number => n !== null),
+    ),
     unanswered: {
       count: first.total_count,
       recent: [...tail]
