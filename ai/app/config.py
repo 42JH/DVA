@@ -70,6 +70,8 @@ class ListenerConfig(_Strict):
     max_agent_chars: int = Field(ge=0, le=2000)
     max_choices: int = Field(ge=2, le=100)
     record_heard: bool = False
+    joined_sec: float = Field(ge=0)
+    delegate_wait_sec: float = Field(gt=0)
 
 
 class AddressConfig(_Strict):

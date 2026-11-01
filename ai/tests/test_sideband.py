@@ -17,16 +17,17 @@ from app.sideband import run_call
 
 def quick_cfg(pause_ms=100, flow=None, **call):
     return CFG.model_copy(update={"call": CFG.call.model_copy(update=call),
-                                  "listener": CFG.listener.model_copy(update={"pause_ms": pause_ms}),
+                                  "listener": CFG.listener.model_copy(update={"pause_ms": pause_ms,
+                                                                               "delegate_wait_sec": 0.2}),
                                   "flow": CFG.flow.model_copy(update={"agent_open_hour": 0, "agent_close_hour": 24,
                                                                       **(flow or {})})})
 
 
-def answers(client, answer, intent="none", slot="none"):
+def answers(client, answer, intent="none", slot="none", value=False):
     """판별 모델이 이 답을 돌려준다. 지난 단계의 말 판별처럼 그 답이 선택지에 없으면 none."""
     def decide(kw):
         enum = kw["text"]["format"]["schema"]["properties"]["answer"]["enum"]
-        return {"answer": answer if answer in enum else "none", "intent": intent, "slot": slot}
+        return {"answer": answer if answer in enum else "none", "intent": intent, "slot": slot, "value": value}
     client.responses.decide = decide
 
 
@@ -132,9 +133,10 @@ def test_customer_answer_changes_state_without_tool_call():
         req = client.responses.requests[0]
         assert "네 맞아요" in req["input"] and "보내시는 택배 맞으실까요" in req["input"]
         assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["yes", "no", "other", "none"]
-        # Decision API(설정 engine = decisions): 답·용건·정정 항목을 고르기 질문 셋으로
-        questions = {q["name"]: [c["value"] for c in q["choices"]] for q in req["questions"]}
-        assert set(questions) == {"answer", "intent", "slot"} and {"question", "lookup"} <= set(questions["intent"])
+        # Decision API(설정 engine = decisions): 답·용건·정정 항목은 고르기 질문, 기록할 값이 있는지는 예/아니오 질문
+        questions = {q["name"]: [c["value"] for c in q.get("choices", [])] for q in req["questions"]}
+        assert set(questions) == {"answer", "intent", "slot", "value"} and {"question", "lookup"} <= set(questions["intent"])
+        assert next(q for q in req["questions"] if q["name"] == "value")["type"] == "predicate"
         assert req["model"] == CFG.listener.model
         await until(lambda: "해운대" in thoughts(conn)[-1])
         assert conn.outputs() == []  # 백엔드 도구 호출 없음
@@ -902,6 +904,81 @@ def test_correction_is_sent_to_backend_when_voice_model_did_not_delegate():
     run(scenario())
 
 
+def test_value_the_voice_model_did_not_delegate_is_sent_after_wait():
+    """(가) 접수 정보 값이 든 고객 말을 음성 모델이 delegate_wait_sec 안에 위임하지 않으면 서버가 대신 넘긴다.
+    위임했으면 넘기지 않는다."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "ORDER", "order"
+        answers(client, "none", value=True)
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="받는 분은 김도윤이요")
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        item = next(kw["item"] for p, kw in conn.sent if p == "response.item.create")
+        assert "김도윤" in item["content"][0]["text"]
+        # 음성 모델이 기다리는 사이에 위임하면 넘기지 않는다
+        conn.sent.clear()
+        call.heard_before = ("", 0.0)
+        conn.push("session.input_transcript.delta", delta="받는 분 번호는 01022223333이요")
+        await until(lambda: call.forward_task and call.heard_text == "")
+        conn.push("session.delegation.created", delegation={"target": "responses"})
+        await asyncio.sleep(0.4)
+        assert not [p for p, _ in conn.sent if p.startswith("response.")]
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_server_forward_waits_while_backend_is_answering():
+    """백엔드 모델이 응답 중이면(response.created~done) 끝날 때까지 기다렸다 넘긴다(응답이 겹쳐 멈추던 2026-10-29 통화)."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "ORDER", "order"
+        answers(client, "none", value=True)
+        task, conn = await start(call, client)
+        conn.push("response.event", event={"type": "response.created", "response": {}})
+        conn.push("session.input_transcript.delta", delta="물건은 작은 상자 하나요")
+        await until(lambda: call.forward_task is not None)
+        await asyncio.sleep(0.4)
+        assert not [p for p, _ in conn.sent if p.startswith("response.")]
+        conn.push("response.event", event={"type": "response.done", "response": {}})
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_split_phone_correction_is_judged_with_previous_words_and_sent_joined():
+    """(나) 고객이 번호 중간에 쉬어 말이 나뉘면 앞말을 같이 보여 판별하고, 서버가 넘길 때도 이어서 넘긴다
+    (2026-11-01 22:41 통화: "…번호를 010" / "1234 5678"로 나뉘어 정정을 놓침)."""
+    client, call = FakeClient(), make_call()
+
+    def decide(kw):
+        joined = "번호를 010" in kw["input"] and "1234" in kw["input"]
+        return {"answer": "none", "intent": "correction" if joined else "none",
+                "slot": "sender_phone" if joined else "none", "value": joined}
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "ORDER", "order"
+        client.responses.decide = decide
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="아 제 번호를 010")
+        await until(lambda: call.heard_before[0] == "아 제 번호를 010")
+        conn.push("session.input_transcript.delta", delta="1234 5678로 바꿔 주세요")
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        assert "바로 앞에 한 말" in client.responses.requests[-1]["input"]
+        sent = [kw["item"]["content"][0]["text"] for p, kw in conn.sent if p == "response.item.create"]
+        assert len(sent) == 1 and "번호를 010" in sent[0] and "1234 5678" in sent[0]
+        await close(conn, task)
+
+    run(scenario())
+
+
 def test_listener_retries_once_on_timeout():
     """판별이 시간 초과면 같은 말을 한 번 더 판별한다(정정 판별이 시간 초과로 버려지던 것)."""
     client, call = FakeClient(), make_call()
@@ -1023,8 +1100,8 @@ def test_decisions_judge_drops_answer_question_without_choices_and_reads_refusal
                                             SimpleNamespace(type="choice", name="slot", choice="none")], usage=None)
 
     out = run(judge(call, SimpleNamespace(decisions=Decisions()), "ORDER", {"none": "답 없음"}, "잠깐만요", "질문"))
-    assert out[:3] == ("none", "none", "none")  # 거절은 none
-    assert [q["name"] for q in seen[0]["questions"]] == ["intent", "slot"]  # 고를 답이 없으면 답 질문을 뺀다
+    assert out[:4] == ("none", "none", "none", False)  # 거절·빠진 답은 none·false
+    assert [q["name"] for q in seen[0]["questions"]] == ["intent", "slot", "value"]  # 고를 답이 없으면 답 질문을 뺀다
     assert seen[0]["model"] == "gpt-6-luna" and "질문" in seen[0]["input"]
 
 

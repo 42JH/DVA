@@ -163,6 +163,8 @@ class Call:
         self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
         self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
+        self.backend_busy = False  # 백엔드 모델이 응답 중(response.created~done). 서버 기록 요청은 끝난 뒤에
+        self.heard_before: tuple[str, float] = ("", 0.0)  # 직전에 판별한 고객 말과 시각(monotonic). 나뉜 말 이어 보기
         self.customer_said_at = 0.0  # 내용 있는 고객 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
         self.phone_check = ""  # 방금 기록한 번호(한 번 읽어 확인, PHONE_CHECK)
         self.progress_speak = False  # 미뤄 둔 진행 상태를 보낼 때 말하게도 해야 함(서버가 옮긴 단계)
@@ -175,6 +177,7 @@ class Call:
         self.listen_timer: asyncio.Task | None = None
         self.side_timer: asyncio.Task | None = None
         self.listen_tasks: set[asyncio.Task] = set()
+        self.forward_task: asyncio.Task | None = None  # 서버가 대신 기록 요청(listener.forward_later) 대기 중
         self.clock_offset: float | None = None  # 서버 시계(ms) - 세션 타임라인(ms)의 가장 작은 값
         self.agent_deltas: list[tuple[str, int | None, int | None]] = []  # 상담원 받아쓰기 조각(글, 시작, 끝)
         self.drift_fixed = ""  # 그래프와 다른 마무리 인사를 바로잡은 단계(단계마다 한 번)

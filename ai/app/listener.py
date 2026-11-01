@@ -62,8 +62,9 @@ def _schema(choices: dict[str, str]) -> dict:
         "type": "object",
         "properties": {"answer": {"type": "string", "enum": list(choices)},
                        "intent": {"type": "string", "enum": list(INTENTS)},
-                       "slot": {"type": "string", "enum": list(SLOTS)}},
-        "required": ["answer", "intent", "slot"],
+                       "slot": {"type": "string", "enum": list(SLOTS)},
+                       "value": {"type": "boolean"}},
+        "required": ["answer", "intent", "slot", "value"],
         "additionalProperties": False,
     }
 
@@ -73,21 +74,32 @@ def _situation(call, stage_name: str, heard: str, asked: str) -> str:
     질문이다: 음성 모델은 판별보다 먼저 다음 질문을 말해, 그 말을 주면 "네"가 엉뚱한 질문의 답으로 읽혔다
     (2026-11-01 21:47 통화: 기존 출발지 확인의 "네"가 이미 나간 "어디로 보내실 건가요?" 때문에 none)."""
     asked = asked[-call.cfg.listener.max_agent_chars:] if call.cfg.listener.max_agent_chars else ""
+    before = recent_heard(call)
     return "\n".join([f"지금 단계: {engine.STAGES[stage_name].description}",
                       f"상담원이 물은 질문: {asked}",
+                      *([f"고객이 바로 앞에 한 말(이미 처리함, 이어지는 말일 수 있음): {before}"] if before else []),
                       f"고객이 한 말: {heard}"])
+
+
+def recent_heard(call) -> str:
+    """직전에 판별한 고객 말(listener.joined_sec 안). 고객이 번호 중간에 쉬면 말이 "…번호를 010" / "-1234-5678"로
+    나뉘어 판별돼 정정을 놓쳤다(2026-11-01 22:41 통화): 앞 말을 함께 보여 이어진 말로 판별하게 한다."""
+    text, at = call.heard_before
+    return text if text and time.monotonic() - at <= call.cfg.listener.joined_sec else ""
 
 
 def _prompt(call, stage_name: str, choices: dict[str, str], heard: str, asked: str) -> str:
     return "\n".join([_situation(call, stage_name, heard, asked),
                       "answer 선택지:", *(f"- {k}: {v}" for k, v in choices.items()),
                       "intent 선택지:", *(f"- {k}: {v}" for k, v in INTENTS.items()),
-                      "slot 선택지:", *(f"- {k}: {v}" for k, v in SLOTS.items())])
+                      "slot 선택지:", *(f"- {k}: {v}" for k, v in SLOTS.items()),
+                      "value: 고객 말에 접수 정보로 기록할 값(이름·연락처·주소·물품·가격·수거 일시)이 들어 있으면 true"])
 
 
 async def judge(call, client, stage_name: str, choices: dict[str, str], heard: str, asked: str):
-    """판별 한 번 → (answer, intent, slot, 응답). 설정 [listener] engine으로 Decision API(빠름) 또는 Responses API.
-    Decision API는 고를 답이 없는 단계면 답 질문을 뺀다(선택지는 2개 이상이어야 함). 거절한 질문은 none."""
+    """판별 한 번 → (answer, intent, slot, value, 응답). value: 고객 말에 기록할 접수 정보 값이 있음(음성 모델이 위임하지
+    않으면 서버가 대신 넘길지 정할 때). 설정 [listener] engine으로 Decision API(빠름) 또는 Responses API.
+    Decision API는 고를 답이 없는 단계면 답 질문을 뺀다(선택지는 2개 이상이어야 함). 거절한 질문은 none·false."""
     cfg = call.cfg.listener
     if cfg.engine == "decisions":
         texts = call.texts.classifier_questions
@@ -95,10 +107,13 @@ async def judge(call, client, stage_name: str, choices: dict[str, str], heard: s
         questions = [{"type": "choice", "name": name, "instructions": texts[name],
                       "choices": [{"value": k, "description": v} for k, v in opts.items()]}
                      for name, opts in options.items() if len(opts) > 1]
+        questions.append({"type": "predicate", "name": "value", "instructions": texts["value"]})
         resp = await client.decisions.create(model=cfg.model, input=_situation(call, stage_name, heard, asked),
                                              questions=questions)
-        got = {a.name: getattr(a, "choice", None) for a in resp.answers}
-        return got.get("answer") or NO_ANSWER, got.get("intent") or "none", got.get("slot") or NO_SLOT, resp
+        got = {a.name: a for a in resp.answers}
+        pick = {n: getattr(got.get(n), "choice", None) for n in options}
+        value = (getattr(got.get("value"), "probability", 0.0) or 0.0) >= 0.5
+        return (pick["answer"] or NO_ANSWER, pick["intent"] or "none", pick["slot"] or NO_SLOT, value, resp)
     resp = await client.responses.create(
         model=cfg.model,
         instructions=call.texts.classifier,
@@ -108,7 +123,7 @@ async def judge(call, client, stage_name: str, choices: dict[str, str], heard: s
         store=False,
     )
     result = json.loads(resp.output_text)
-    return result["answer"], result["intent"], result["slot"], resp
+    return result["answer"], result["intent"], result["slot"], bool(result.get("value")), resp
 
 
 def heard(call, delta: str, conn, client, start_ms: int | None = None) -> None:
@@ -207,7 +222,7 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
     call.tool_calls[record["call_id"]] = record
     t0 = time.monotonic()
     try:
-        answer, intent, slot, resp = await asyncio.wait_for(
+        answer, intent, slot, value, resp = await asyncio.wait_for(
             judge(call, client, stage_name, choices, text, asked), cfg.timeout_sec)
         if answer not in choices or intent not in INTENTS or slot not in SLOTS:  # 모델 출력은 미신뢰 입력
             raise ValueError(f"선택지 밖 판별: {(answer, intent, slot)}")
@@ -226,8 +241,10 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 await settle(call, None, blocking=False)
                 await after_change(call, conn)
         return
-    record.update(output={"answer": answer, "intent": intent, "slot": slot},
+    record.update(output={"answer": answer, "intent": intent, "slot": slot, "value": value},
                   elapsed_ms=round((time.monotonic() - t0) * 1000), usage=_usage(resp))
+    before = recent_heard(call)
+    joined = f"{before} {text}" if before and not side else text  # 서버가 대신 넘길 때는 나뉜 앞말까지
     async with call.lock:
         if side:
             if call.side["stage"] != stage_name or call.side["text"].strip() != text:
@@ -237,7 +254,7 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
             call.side["text"] = ""
             events = await apply_side(call, intent, slot, call.side["off"], started)
             if intent == "correction":
-                await record_heard(call, conn, text, call.heard_at, force=True)
+                forward_later(call, conn, text, started)
         else:
             if rev != call.heard_rev or call.flow.stage != stage_name:
                 record["status"] = "stale"  # 그사이 새 말이 왔거나(리비전) 다른 경로로 단계가 바뀜
@@ -257,8 +274,10 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 except Exception:
                     log.exception("오류 안내 전송 실패 %s", call.session_id)
                 return
-            if intent == "correction" or (not events and answer == NO_ANSWER and intent == "none"):
-                await record_heard(call, conn, text, call.heard_at, force=intent == "correction")
+            if intent == "correction" or value:
+                forward_later(call, conn, joined, started, joined=joined != text)  # 음성 모델이 위임하지 않으면 서버가 대신(말이 끝나고 잠시 뒤)
+            elif not events and answer == NO_ANSWER and intent == "none":
+                await record_heard(call, conn, text, call.heard_at)  # 설정 record_heard(기본 꺼짐): 판별할 것 없는 말 전부
             # 판별에 쓴 말은 소비한다. 남기면 지난 말이 다음 판별에 붙어 오판된다(2026-10-31: "저 말투가 그렇죠"가 다음
             # 주소 답에 붙어 제한된 요청으로 판별돼 상담원 제안으로 빠짐)
             _consume(call, raw)
@@ -294,6 +313,7 @@ def _usage(resp) -> dict | None:
 def _consume(call, raw: str) -> None:
     """판별한 말만 지운다. 결과를 적용하는(await) 사이에 붙은 새 말은 남겨 다음 판별이 보게 한다."""
     call.heard_text = call.heard_text[len(raw):] if call.heard_text.startswith(raw) else call.heard_text
+    call.heard_before = (raw.strip(), time.monotonic())
 
 
 def _move_to_side(call, conn, client, stage_name: str) -> None:
@@ -301,6 +321,28 @@ def _move_to_side(call, conn, client, stage_name: str) -> None:
                      since=call.heard_started_at, flushing=True)
     call.heard_text = ""
     spawn_classify(call, conn, client, side=True)
+
+
+def forward_later(call, conn, text: str, started: float, joined: bool = False) -> None:
+    """정정·접수 정보 값이 든 고객 말을 음성 모델이 위임하지 않으면 서버가 대신 백엔드에 넘긴다(말이 끝나고
+    delegate_wait_sec 뒤). 음성 모델이 말로만 "네, ○○님"하고 넘기지 않아 정정이 빠지던 것(2026-11-01 22:41 통화).
+    joined: 앞말까지 이은 글이면 앞말로 걸어 둔 요청은 취소한다(같은 값을 두 번 넘기지 않게)."""
+    old = call.forward_task
+    if joined and old and not old.done():
+        old.cancel()
+    task = asyncio.create_task(_forward(call, conn, text, started, call.heard_at))
+    call.forward_task = task
+    call.listen_tasks.add(task)
+    task.add_done_callback(call.listen_tasks.discard)
+
+
+async def _forward(call, conn, text: str, started: float, heard_at: float) -> None:
+    cfg = call.cfg.listener
+    await asyncio.sleep(max(0.0, heard_at + cfg.delegate_wait_sec - time.monotonic()))
+    deadline = time.monotonic() + cfg.timeout_sec
+    while call.backend_busy and call.delegated_at < started and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)  # 백엔드 응답 중에 response.create를 보내면 겹친다
+    await record_heard(call, conn, text, started, force=True)
 
 
 async def record_heard(call, conn, text: str, heard_at: float, force: bool = False) -> bool:
