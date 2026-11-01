@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 SYSTEM_ADMIN 전용이다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 `037-undecided-order-payment-method.sql`을 적용한다. 기존 결제수단은 변경하지 않으며 실제 서버 DB 적용은 별도다. 프론트의 대시보드 탭 제한 해제·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md)을 따른다.
+
 백엔드 최적화 브랜치는 새 앱 실행 전에 `032-list-read-indexes.sql`까지 적용한다. 031은 녹취 처리의 수신 건별 lease, 032는 검증된 조회 인덱스 두 개를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼·인덱스는 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
 
 AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 현재 앱 실행 전에는 FAQ 분류·고객 내 주소·선택 부서를 포함해 028까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.

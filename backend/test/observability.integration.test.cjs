@@ -60,7 +60,7 @@ test('stale detection reads committed order state without changing status, versi
   ]) {
     const row = (
       await database.pool.query(
-        "INSERT INTO orders(status,pickup_requested_at,updated_at) VALUES($1,now()+interval '1 day',now()-$2::interval) RETURNING order_seq",
+        "INSERT INTO orders(status,payment_method_type,pickup_requested_at,updated_at) VALUES($1,'billing',now()+interval '1 day',now()-$2::interval) RETURNING order_seq",
         [status, old ? '2 minutes' : '0 seconds'],
       )
     ).rows[0];

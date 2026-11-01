@@ -29,6 +29,27 @@ const complete = () =>
       },
     ],
   });
+test('an unspecified payment method stays undecided until final submission', () => {
+  const draft = complete();
+  const undecided = orderDraft({ customerSeq: 31, parcels: [] });
+  assert.equal(undecided.paymentMethodType, null);
+  for (const method of ['billing', 'credit', 'groupBilling'])
+    assert.equal(
+      orderDraft({ customerSeq: 31, paymentMethodType: method }).paymentMethodType,
+      method,
+    );
+  draft.paymentMethodType = null;
+  assert.throws(
+    () => assertOrderSubmissionReady(draft, now),
+    (error) =>
+      error.getStatus() === 422 &&
+      error
+        .getResponse()
+        .details.some(
+          (detail) => detail.field === 'paymentMethodType' && detail.reason === 'required',
+        ),
+  );
+});
 test('the same stored order can be checked for final submission without changing it', () => {
   const draft = complete(),
     before = structuredClone(draft);
@@ -117,7 +138,11 @@ test('final validation rejects expired pickup, invalid address, quantities and p
   );
 });
 test('creation normalizes equivalent dates and rejects ISO strings JavaScript cannot parse', () => {
-  const a = orderDraft({ customerSeq: 31, pickupRequestedAt: '2026-10-28T10:00:00+09:00' });
+  const a = orderDraft({
+    customerSeq: 31,
+    paymentMethodType: 'billing',
+    pickupRequestedAt: '2026-10-28T10:00:00+09:00',
+  });
   const b = orderDraft({
     parcels: [],
     pickupRequestedAt: '2026-10-28T01:00:00Z',

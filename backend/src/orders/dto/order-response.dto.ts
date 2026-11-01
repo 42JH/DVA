@@ -126,10 +126,12 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      'credit: 월결제, groupBilling: 부서 그룹결제, billing: 개인 카드 결제. cat은 과거 저장값으로 조회만 가능하며 신규 입력·접수는 불가.',
+      'credit: 월결제, groupBilling: 부서 그룹결제, billing: 개인 카드 결제. 미정은 null. cat은 과거 저장값으로 조회만 가능하며 신규 입력·접수는 불가.',
     enum: ['cat', 'billing', 'credit', 'groupBilling'],
+    type: String,
+    nullable: true,
   })
-  paymentMethodType!: 'cat' | 'billing' | 'credit' | 'groupBilling';
+  paymentMethodType!: 'cat' | 'billing' | 'credit' | 'groupBilling' | null;
 
   @ApiProperty({
     description: '수거 요청 시각. 미수집 시 null.',

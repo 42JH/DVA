@@ -38,6 +38,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='department_seq' AND is_nullable='YES')",
       );
       assert.equal(customerMembership.rowCount, 1, 'Apply migration 028 to the isolated DB first');
+      const undecidedPayment = await client.query(
+        "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='payment_method_type' AND is_nullable='YES' AND column_default IS NULL) AND EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.orders'::regclass AND conname='orders_payment_method_required_check')",
+      );
+      assert.equal(undecidedPayment.rowCount, 1, 'Apply migration 037 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
