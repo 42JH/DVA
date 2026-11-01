@@ -28,6 +28,7 @@ export function useSession() {
   return {
     me: me.data,
     isLoading: me.isPending,
+    error: me.error, // 내 정보를 못 받음 → RequireAuth가 오류 화면으로
     role,
     isSystemAdmin: role === 'SYSTEM_ADMIN',
     status: me.data?.status,

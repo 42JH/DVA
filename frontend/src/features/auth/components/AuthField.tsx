@@ -1,4 +1,4 @@
-import { useState, type InputHTMLAttributes } from 'react'
+import { useId, useState, type InputHTMLAttributes } from 'react'
 
 // 00 입력칸 (디자인 '03 기본 / Form field') — 라벨(17 회색) 위 · 아이콘 + 밑줄 칸. 입력 중 = 남색 밑줄 · 오류 = 빨간 밑줄 + 아래 빨간 글
 // secret: 비밀번호 칸 — 오른쪽 눈 버튼으로 보이기 · 숨기기
@@ -62,9 +62,13 @@ export function AuthField({
   onValue: (v: string) => void
 }) {
   const [shown, setShown] = useState(false)
+  const id = useId()
+  // 오류 문구는 라벨 밖에 두고 aria-describedby로 연결 (라벨 안이면 칸 이름에 오류 문구까지 섞여 읽힘)
   return (
-    <label className="flex flex-col gap-2">
-      <span className="text-caption text-sub">{label}</span>
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className="text-caption text-sub">
+        {label}
+      </label>
       <span
         className={`flex h-11 items-center gap-2.5 border-b px-2 ${
           error ? 'border-danger' : 'border-line focus-within:border-action'
@@ -73,6 +77,8 @@ export function AuthField({
         <Svg name={icon} className="text-sub" />
         <input
           {...rest}
+          id={id}
+          aria-describedby={error ? `${id}-err` : undefined}
           type={secret && !shown ? 'password' : 'text'}
           value={value}
           onChange={(e) => onValue(e.target.value)}
@@ -93,10 +99,10 @@ export function AuthField({
         )}
       </span>
       {error && (
-        <span role="alert" className="text-caption font-semibold text-danger">
+        <span id={`${id}-err`} role="alert" className="text-caption font-semibold text-danger">
           {error}
         </span>
       )}
-    </label>
+    </div>
   )
 }

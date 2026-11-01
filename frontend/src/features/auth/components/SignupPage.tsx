@@ -68,7 +68,11 @@ export function SignupPage() {
 
       <AuthFooter>
         계정이 있으신가요?
-        <Link to="/login" className="font-bold text-action hover:underline">
+        <Link
+          to={`/login${vm.carry.search}`}
+          state={vm.carry.state}
+          className="font-bold text-action hover:underline"
+        >
           로그인
         </Link>
       </AuthFooter>
