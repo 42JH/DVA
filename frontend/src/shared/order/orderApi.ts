@@ -35,6 +35,20 @@ export interface OrderDetail {
   paymentMethod: PaymentMethod
   paymentState: PaymentState
   relatedCalls: { callSessionSeq: number; startedAt: string; kind: 'ACCEPT' | 'CANCEL' }[]
+  /** 배송 상세마다 (03 목록 줄 = 상세 하나, 11/01). 위 sender · receiver · items는 첫 상세 · 합계(06 팝업 기본값)
+   * 메모리 가짜 주문엔 없음 → 없으면 위 값 그대로 */
+  parcels?: ParcelDetail[]
+}
+
+/** 배송 상세 하나 — 보내는 분 1 + 받는 분 1 */
+export interface ParcelDetail {
+  orderParcelSeq: number
+  cancelled: boolean
+  sender: Party
+  receiver: Party
+  items: OrderDetail['items']
+  itemPrice: number | null
+  clientComment: string | null
 }
 
 export const orderQueries = {

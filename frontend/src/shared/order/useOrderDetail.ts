@@ -19,11 +19,12 @@ export interface OrderView {
   canEdit: boolean // 취소된 주문은 [수정] 없음
 }
 
-/** 주문 하나 불러와 화면용 값으로 (shared/auth처럼 여러 기능이 쓰는 공통 훅이라 useQuery를 여기서). id가 null이면 안 부름 */
-export function useOrderDetail(orderId: number | null) {
+/** 주문 하나 불러와 화면용 값으로 (shared/auth처럼 여러 기능이 쓰는 공통 훅이라 useQuery를 여기서). id가 null이면 안 부름
+ * parcelSeq를 주면 그 배송 상세의 보내는 분 · 받는 분 · 품목 (03 목록에서 누른 줄, 11/01). 안 주면 첫 상세 · 합계 (06 팝업) */
+export function useOrderDetail(orderId: number | null, parcelSeq?: number | null) {
   const q = useQuery({ ...orderQueries.detail(orderId ?? 0), enabled: orderId !== null })
   return {
-    order: q.data ? toView(q.data) : null,
+    order: q.data ? toView(pickParcel(q.data, parcelSeq)) : null,
     isLoading: orderId !== null && q.isPending,
     error: !q.error
       ? null
@@ -33,7 +34,28 @@ export function useOrderDetail(orderId: number | null) {
   }
 }
 
-function toView(o: OrderDetail): OrderView {
+/** 고른 배송 상세로 바꿔 끼움. 상세가 여러 개면 '배송 2/3'을 함께 (어느 줄을 열었는지) */
+function pickParcel(
+  o: OrderDetail,
+  parcelSeq?: number | null,
+): OrderDetail & { position?: string } {
+  const list = o.parcels ?? []
+  const i = list.findIndex((p) => p.orderParcelSeq === parcelSeq)
+  const p = list[i]
+  if (!p) return o
+  return {
+    ...o,
+    sender: p.sender,
+    receiver: p.receiver,
+    items: p.items,
+    itemPrice: p.itemPrice,
+    clientComment: p.clientComment,
+    cancelled: o.cancelled || p.cancelled, // 이 상세만 취소돼도 [수정] 없음 · '주문 취소' 태그
+    position: list.length > 1 ? `배송 ${i + 1}/${list.length}` : undefined,
+  }
+}
+
+function toView(o: OrderDetail & { position?: string }): OrderView {
   const phone = o.route === 'PHONE'
   return {
     orderSeq: o.orderSeq,
@@ -41,7 +63,13 @@ function toView(o: OrderDetail): OrderView {
       { label: phone ? '전화' : '수기', kind: 'blue' },
       ...(o.cancelled ? [{ label: '주문 취소', kind: 'gray' as TagKind }] : []),
     ],
-    subtitle: `접수 ${fmtDetailTime(o.acceptedAt)} · ${phone ? 'AI 전화 접수' : `수기 접수 ${o.manualBy ?? ''}`.trim()}`,
+    subtitle: [
+      `접수 ${fmtDetailTime(o.acceptedAt)}`,
+      phone ? 'AI 전화 접수' : `수기 접수 ${o.manualBy ?? ''}`.trim(),
+      o.position,
+    ]
+      .filter(Boolean)
+      .join(' · '),
     sender: partyRows(o.sender),
     receiver: partyRows(o.receiver),
     items: itemsText(o),

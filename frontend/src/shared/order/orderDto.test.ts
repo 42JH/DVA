@@ -96,6 +96,16 @@ assert.equal(b.paymentMethod, 'PERSONAL_CARD')
 assert.deepEqual(b.items, { document: 0, small: 1, medium: 2, big: 0, other: '화분' })
 assert.equal(b.itemPrice, 30000) // 취소된 999999는 빠짐, null은 0으로 더하지 않음
 assert.equal(b.clientComment, '경비실') // 같은 요청은 한 번만
+// 배송 상세마다 (03 목록 줄 = 상세 하나, 11/01): 취소된 상세도 들어 있고, 품목 · 가액은 그 상세 것만
+assert.equal(b.parcels?.length, 3)
+assert.deepEqual(
+  b.parcels?.map((p) => [p.cancelled, p.items.big, p.items.other, p.itemPrice, p.clientComment]),
+  [
+    [false, 0, '화분', 30000, '경비실'],
+    [true, 5, null, 999999, null],
+    [false, 0, null, null, '경비실'],
+  ],
+)
 
 // 취소 · 도로명 없음(지번으로) · 상세 없음(수집 중 취소)
 const c = toOrderDetail(dto({ status: 'CANCELLED', paymentMethodType: 'cat', parcels: [] }))

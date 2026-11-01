@@ -1,13 +1,11 @@
-// 03 주문 내역 Model — 주문 목록 · 주문 추가. React를 모르는 데이터 층
-// 명세 확인 전 (04 · 09와 같은 방식, 10/30) → 지금은 네트워크 없이 메모리 가짜 데이터. 서버가 할 거르기 · 쪽 나누기도 여기서 흉내
-// 가짜 주문은 shared/order(주문 상세 · 06과 공용)의 저장소 하나만 씀 → 목록에서 누른 주문이 상세에도 그대로 있음
-// 명세가 오면 fetchOrders · fetchAllOrders · createOrder 몸통만 api 호출로 바꾸면 됨 (훅 · 화면은 그대로)
+// 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
+// 목록 = 실서버 GET /admin/orders (연동 상세명세 4.1, 11/01). 주문 추가 · 수정은 아직 shared/order 메모리 가짜 (다음 단계)
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
-import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
-import { matchKo, phoneDigits } from '@/shared/lib/search'
+import { api, type ApiList } from '@/shared/api/client'
+import { fetchAll, offsetOf } from '@/shared/api/paging'
+import { addDays, type Ymd } from '@/shared/lib/dateRange'
 import {
   addOrder,
-  allOrders,
   updateOrder,
   type OrderDetail,
   type Party,
@@ -16,8 +14,18 @@ import {
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
-/** 접수 중(통화가 아직 주문을 만드는 중) · 결제 대기 · 결제 완료 · 주문 취소 */
-export type OrderStatus = 'IN_PROGRESS' | 'PAYMENT_PENDING' | 'PAID' | 'CANCELLED'
+/** 실제 주문 상태 7개 (연동 상세명세 4.1). notPaid는 소문자 그대로 */
+export type OrderStatus =
+  | 'COLLECTING' // 접수 중 (AI 통화로 모으는 중, 저장된 것만 목록에 나옴)
+  | 'notPaid' // 결제 대기
+  | 'PAID' // 결제 완료
+  | 'SUBMITTING' // 디버 접수 중
+  | 'ACCEPTED' // 디버 접수 완료 — '접수 완료'는 이것만
+  | 'SUBMISSION_FAILED' // 디버 접수 실패
+  | 'CANCELLED' // 주문 취소
+
+/** 화면 탭 5개 = 서버 statusGroup. '결제 완료' 탭에는 PAID · SUBMITTING · ACCEPTED · SUBMISSION_FAILED가 함께 */
+export type StatusGroup = 'ALL' | 'COLLECTING' | 'notPaid' | 'PAID' | 'CANCELLED'
 
 /** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기') — 주문 상세의 items 키와 같은 순서. 그 밖은 '기타 품목' 글로 */
 export const BOX_TYPES = [
@@ -28,18 +36,75 @@ export const BOX_TYPES = [
 ] as const
 export type BoxKey = (typeof BOX_TYPES)[number]['key']
 
-export interface OrderRow {
+/** OrderListParty — 수집 중이면 칸마다 null일 수 있음 */
+export interface ListParty {
+  name: string | null
+  phoneNumber: string | null // 숫자만, 앞 0 보존
+  roadAddress: string | null
+  jibunAddress: string | null
+  detailAddress: string | null
+}
+
+/** OrderListParcel — 배송 상세 하나 = 보내는 분 1 + 받는 분 1 (화면 한 줄, 11/01 결정) */
+export interface ListParcel {
+  orderParcelSeq: number
+  status: 'ACTIVE' | 'CANCELLED' // 상세 취소 여부 (결제 · 접수 완료와 무관)
+  origin: ListParty
+  destination: ListParty
+  documentCount: number
+  smallBoxCount: number
+  mediumBoxCount: number
+  bigBoxCount: number
+  otherItemDescription: string // 없으면 ''
+}
+
+/** AdminOrderListItem — 주문 하나. 금액 · 결제 수단 · 좌표는 목록에 없음(상세에서) */
+export interface OrderListItem {
   orderSeq: number
   status: OrderStatus
-  receivedAt: string // 접수 시각 (ISO 8601)
-  sender: Party
-  receiver: Party
-  pickupAt: string | null // 접수 중이거나 수기 접수에서 비워 두면 없음
-  items: OrderDetail['items'] | null // 접수 중이면 null
-  itemPrice: number | null // 아래 셋은 CSV 내보내기용 (접수 중이면 null)
-  paymentMethod: PaymentMethod | null
-  clientComment: string | null
+  createdAt: string // 주문 생성 시각 (화면 '접수 시각')
+  pickupRequestedAt: string | null
+  parcels: ListParcel[] // 상세 순번대로, 취소된 상세도 포함
 }
+
+/** 화면 조건 (URL) — 날짜는 하루 단위, 종료일 포함 */
+export interface OrderListQuery {
+  q: string // 이름 · 전화번호 · 주소 (서버 검색, 주문 번호 검색 없음)
+  from: Ymd
+  to: Ymd
+  group: StatusGroup
+}
+
+/** 화면 조건 → 서버 query. 날짜는 한국 시각 '시작일 00:00 ~ 종료일 다음 날 00:00'(to는 미포함, 명세 1장) · 전체 탭은 statusGroup 생략 */
+export function toServerQuery(q: OrderListQuery) {
+  return {
+    q: q.q.trim() || undefined,
+    statusGroup: q.group === 'ALL' ? undefined : q.group,
+    from: `${q.from}T00:00:00+09:00`,
+    to: `${addDays(q.to, 1)}T00:00:00+09:00`,
+  }
+}
+
+export const orderQueries = {
+  all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
+  list: (query: OrderListQuery, page: number, size: number) =>
+    queryOptions({
+      queryKey: [...orderQueries.all(), 'list', query, page, size],
+      queryFn: ({ signal }) =>
+        api.get<ApiList<OrderListItem>>('/admin/orders', {
+          query: { ...toServerQuery(query), limit: size, offset: offsetOf(page, size) },
+          signal,
+        }),
+      placeholderData: keepPreviousData, // 쪽 · 필터를 바꾸는 동안 이전 목록을 그대로 (표가 깜빡이지 않게)
+    }),
+}
+
+/** CSV 내보내기 — 지금 조건의 전체 (100건씩 끝까지, 공용 fetchAll 최대 2,000건) */
+export const fetchAllOrders = (query: OrderListQuery): Promise<OrderListItem[]> =>
+  fetchAll<OrderListItem>('/admin/orders', toServerQuery(query))
+
+// ---------- 아래는 아직 가짜 (주문 추가 · 수정 단계에서 실서버로) ----------
+const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연
 
 /** 주문 추가(수기 접수) 본문 */
 export interface OrderInput {
@@ -50,80 +115,6 @@ export interface OrderInput {
   pickupAt: string | null // ISO 8601 (선택)
   paymentMethod: PaymentMethod
   request: string | null // 고객 요청 사항 (선택)
-}
-
-export interface OrderListQuery {
-  q: string // 이름 · 전화번호 · 주소 · 주문 번호
-  from: Ymd // 포함
-  to: Ymd // 포함
-  status: OrderStatus | 'ALL'
-}
-
-export const orderQueries = {
-  all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 접수 후 invalidate 한 번에 목록 · 상세 모두 갱신
-  list: (query: OrderListQuery, page: number, size: number) =>
-    queryOptions({
-      queryKey: [...orderQueries.all(), 'list', query, page, size],
-      queryFn: () => fetchOrders(query, page, size),
-      placeholderData: keepPreviousData, // 쪽 · 필터를 바꾸는 동안 이전 목록을 그대로 (표가 깜빡이지 않게)
-    }),
-}
-
-const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연 ('불러오는 중' 확인용)
-
-const statusOf = (o: OrderDetail): OrderStatus =>
-  o.cancelled ? 'CANCELLED' : o.paymentState === 'PAID' ? 'PAID' : 'PAYMENT_PENDING'
-
-const toRow = (o: OrderDetail): OrderRow => ({
-  orderSeq: o.orderSeq,
-  status: statusOf(o),
-  receivedAt: o.acceptedAt,
-  sender: o.sender,
-  receiver: o.receiver,
-  pickupAt: o.pickupRequestedAt,
-  items: o.items,
-  itemPrice: o.itemPrice,
-  paymentMethod: o.paymentMethod,
-  clientComment: o.clientComment,
-})
-
-const matchParty = (p: Party, q: string, digits: string) =>
-  matchKo(p.name, q) ||
-  matchKo(`${p.roadAddress} ${p.detailAddress ?? ''}`, q) ||
-  (digits !== '' && p.phoneNumber.includes(digits))
-
-/** 조건에 맞는 주문, 최신순 (서버가 할 일) */
-function filtered(query: OrderListQuery): OrderRow[] {
-  const digits = phoneDigits(query.q) // 숫자만 쳤을 때만 번호로
-  return [...allOrders().map(toRow), ...IN_PROGRESS]
-    .filter((o) => {
-      const day = ymd(new Date(o.receivedAt))
-      return (
-        day >= query.from &&
-        day <= query.to &&
-        (query.status === 'ALL' || o.status === query.status) &&
-        (matchParty(o.sender, query.q, digits) ||
-          matchParty(o.receiver, query.q, digits) ||
-          (digits !== '' && String(o.orderSeq) === digits))
-      )
-    })
-    .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))
-}
-
-export async function fetchOrders(
-  query: OrderListQuery,
-  page: number,
-  size: number,
-): Promise<{ items: OrderRow[]; totalCount: number }> {
-  await wait()
-  const all = filtered(query)
-  return { items: all.slice((page - 1) * size, page * size), totalCount: all.length }
-}
-
-/** CSV 내보내기 — 지금 조건의 전체 쪽 */
-export async function fetchAllOrders(query: OrderListQuery): Promise<OrderRow[]> {
-  await wait()
-  return filtered(query)
 }
 
 // 가짜도 BE에 요청한 규칙(10/31)대로: 같은 멱등키로 다시 오면 새로 만들지 않고 처음 결과를 돌려줌
@@ -173,29 +164,3 @@ export async function saveOrder(orderSeq: number, input: OrderInput): Promise<vo
     paymentMethod: input.paymentMethod,
   })
 }
-
-// '접수 중' = AI가 아직 통화로 주문을 만드는 중 (상세 · 품목 · 수거 일시 없음 → 목록에서 눌러도 안 열림). 와이어프레임 03의 강서윤 13:44
-const IN_PROGRESS: OrderRow[] = [
-  {
-    orderSeq: 10521,
-    status: 'IN_PROGRESS',
-    receivedAt: `${todayYmd()}T13:44:00+09:00`,
-    sender: {
-      name: '강서윤',
-      phoneNumber: '01077812290',
-      roadAddress: '경기 용인시 포은대로 435',
-      detailAddress: null,
-    },
-    receiver: {
-      name: '이준호',
-      phoneNumber: '01027182818',
-      roadAddress: '서울 동작구 상도로 55',
-      detailAddress: null,
-    },
-    pickupAt: null,
-    items: null,
-    itemPrice: null,
-    paymentMethod: null,
-    clientComment: null,
-  },
-]
