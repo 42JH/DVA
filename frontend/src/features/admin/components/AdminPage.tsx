@@ -1,7 +1,7 @@
 import {
   Button,
   ConfirmDialog,
-  CountTabs,
+  Tabs,
   MoreMenu,
   Pagination,
   Table,
@@ -120,7 +120,8 @@ export function AdminPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <CountTabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} />
+      {/* 04 통화 내역 · 09 FAQ처럼 밑줄 탭 (11/01, 칸 버튼 CountTabs에서 바꿈). 승인 대기 건수는 빨강 그대로 */}
+      <Tabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} />
 
       {(vm.jobError ?? vm.loadError) && (
         <p role="alert" className="text-label text-danger">
