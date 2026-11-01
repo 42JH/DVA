@@ -1,11 +1,11 @@
-// 통화 결과 카드 (02 날짜별 왼쪽 위, 와이어프레임 02 A안 10/30)
-// 왼쪽 반원 게이지 = 접수 성공 · 접수 실패 · 상담원 이관, 가운데 접수 성공률 + 'n건 중'
-// 오른쪽 = 게이지의 세 줄(이름 › · 건수 | 비율) → 진한 선 → 게이지 밖 통화 한 줄(□ 주문 취소 › · □ 문의 ›). 오른쪽 위 '총 n건' (= 다섯 합)
+// 통화 결과 카드 (02 날짜별 왼쪽 위, 와이어프레임 02 A안 10/30 → 11/01 사용자: 분석된 통화 전부를 링에)
+// 왼쪽 반원 게이지 = 분석된 통화 전부 다섯 조각(접수 성공 · 접수 실패 · 문의 · 상담원 이관 · 주문 취소), 가운데 접수 성공률(= 성공 줄 비율, 분모 같음) + 'n건 중 m건 접수 성공'
+// 오른쪽 = 다섯 줄(이름 › · 건수 | 비율, 분모 = 분석된 통화 → 합 100%). 오른쪽 위 '총 n건'(분석 전 포함) + '분석 전 n건'
 // 줄을 누르면 04 통화 내역을 그 결과 · 같은 기간으로
 
-const SEG = ['stroke-brand', 'stroke-danger', 'stroke-muted'] // 성공 · 실패 · 이관 (04 태그 색)
-const MARK = ['bg-brand', 'bg-danger', 'bg-muted']
-const CAP = ['fill-brand', 'fill-danger', 'fill-muted'] // 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지)
+const SEG = ['stroke-brand', 'stroke-danger', 'stroke-action', 'stroke-muted', 'stroke-line'] // 성공 · 실패 · 문의 · 이관 · 취소 (useDashboard all 순서)
+const MARK = ['bg-brand', 'bg-danger', 'bg-action', 'bg-muted', 'bg-line']
+const CAP = ['fill-brand', 'fill-danger', 'fill-action', 'fill-muted', 'fill-line'] // 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지)
 
 interface Row {
   key: string
@@ -22,7 +22,7 @@ export function ResultCard({
   base,
   gauge,
   rows,
-  others,
+  unanalysed,
 }: {
   className?: string
   scope: string
@@ -31,7 +31,7 @@ export function ResultCard({
   base: string
   gauge: { key: string; value: number }[]
   rows: (Row & { pct: string })[]
-  others: Row[]
+  unanalysed: string | null // '분석 전 5건' (없으면 null)
 }) {
   return (
     <section className={`rounded-xl bg-surface p-8 ring-1 ring-line ring-inset ${className}`}>
@@ -40,11 +40,14 @@ export function ResultCard({
           <h2 className="text-card font-bold">통화 결과</h2>
           <p className="mt-1 text-label text-sub">{scope}</p>
         </div>
-        <p className="flex items-baseline gap-1.5">
-          <span className="text-label font-semibold text-sub">총</span>
-          <span className="text-title font-bold">{total}</span>
-          <span className="text-label font-semibold text-sub">건</span>
-        </p>
+        <div className="text-right">
+          <p className="flex items-baseline justify-end gap-1.5">
+            <span className="text-label font-semibold text-sub">총</span>
+            <span className="text-title font-bold">{total}</span>
+            <span className="text-label font-semibold text-sub">건</span>
+          </p>
+          {unanalysed && <p className="text-caption text-muted">{unanalysed}</p>}
+        </div>
       </div>
 
       <div className="mt-4 flex items-center gap-10">
@@ -71,24 +74,6 @@ export function ResultCard({
               </li>
             ))}
           </ul>
-          {/* 진한 선 아래 = 게이지에 안 들어가는 통화 (빈 네모) */}
-          <div className="mt-1.5 flex h-[42px] items-center gap-10 border-t border-line pt-1.5">
-            {others.map((o) => (
-              <button
-                key={o.key}
-                type="button"
-                onClick={o.onClick}
-                className="group flex items-center text-left"
-              >
-                <span className="mr-2 size-2.5 shrink-0 rounded-sm bg-surface ring-[1.5px] ring-muted ring-inset" />
-                <span className="text-label font-semibold group-hover:text-action">
-                  {o.label} <span className="text-muted">›</span>
-                </span>
-                <span className="ml-3 text-strong font-semibold">{o.count}</span>
-                <span className="ml-1 text-label font-semibold text-sub">건</span>
-              </button>
-            ))}
-          </div>
         </div>
       </div>
     </section>
