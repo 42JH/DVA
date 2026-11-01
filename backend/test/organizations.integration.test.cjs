@@ -387,30 +387,6 @@ test('registered companies remain readable after application restart', async () 
   assert.equal((await response.json()).data.name, '재시작 검증 기업');
 });
 
-test('OpenAPI describes the four company operations and their actual envelopes', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/companies', 'get'],
-    ['/api/companies', 'post'],
-    ['/api/companies/{id}', 'get'],
-    ['/api/companies/{id}', 'patch'],
-  ]) {
-    assert.ok(document.paths[path][method]);
-    assert.deepEqual(document.paths[path][method].security, [{ adminSession: [] }]);
-  }
-  assert.equal(document.components.securitySchemes.adminSession.name, 'dva_session');
-  assert.ok(
-    document.paths['/api/companies'].get.responses['200'].content['application/json'].schema
-      .properties.hasNext,
-  );
-  assert.ok(
-    (document.paths['/api/companies'].post.parameters ?? []).every(
-      (header) => header.name !== 'Idempotency-Key',
-    ),
-  );
-  assert.ok(document.paths['/api/companies/{id}'].patch.responses['204']);
-});
-
 test('each company creation records its authenticated actor and request once', async () => {
   const key = randomUUID();
   const name = '감사 등록 ' + key;

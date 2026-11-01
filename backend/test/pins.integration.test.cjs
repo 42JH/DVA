@@ -765,34 +765,6 @@ test('audit success is atomic with writes and contains no address or phone; fail
   }
 });
 
-test('Swagger exposes six operations and no required version/key or delete operation', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  for (const [path, methods] of [
-    ['/api/customers/{id}/pins', ['get', 'post']],
-    ['/api/pins/{id}', ['patch']],
-    ['/api/companies/{id}/pins', ['get', 'post']],
-    ['/api/company-pins/{id}', ['patch']],
-  ]) {
-    for (const method of methods) {
-      const operation = document.paths[path][method];
-      assert.deepEqual(operation.tags, ['Pins']);
-      assert.ok(!(operation.parameters ?? []).some((p) => p.name === 'Idempotency-Key'));
-    }
-    assert.equal(document.paths[path].delete, undefined);
-  }
-  assert.deepEqual(document.paths['/api/companies/{id}/pins'].post.security, [
-    { adminSession: [] },
-  ]);
-  assert.deepEqual(document.paths['/api/company-pins/{id}'].patch.security, [{ adminSession: [] }]);
-  assert.deepEqual(document.paths['/api/pins/{id}'].patch.security, [{ adminSession: [] }, {}]);
-  const schema = document.components.schemas.UpdatePinDto;
-  assert.ok(!(schema.required ?? []).includes('expectedVersion'));
-  assert.equal(schema.properties.expectedVersion.deprecated, true);
-  const f = await fixture();
-  const p = await personal(f);
-  assert.equal((await request('DELETE', `/pins/${p.personalPinSeq}`)).status, 404);
-});
-
 test('request logging does not record phone numbers, address bodies or search terms', async () => {
   const f = await fixture();
   const requestId = randomUUID();

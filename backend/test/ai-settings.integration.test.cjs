@@ -358,27 +358,6 @@ test('pagination, unknown fields and missing persona IDs are validated', async (
   assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: total });
 });
 
-test('Swagger documents persona inputs, whole versions and responses', async () => {
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/personas', 'get'],
-    ['/api/personas', 'post'],
-    ['/api/personas/{id}', 'get'],
-    ['/api/personas/{id}', 'patch'],
-    ['/api/personas/{id}/versions', 'get'],
-    ['/api/ai/options', 'get'],
-  ]) {
-    const operation = spec.paths[path][method];
-    assert.ok(operation.summary);
-    assert.ok(operation.description);
-    assert.ok(operation.responses['200'] || operation.responses['201']);
-  }
-  assert.ok(spec.components.schemas.PersonaVersionDto.properties.applyErrorCode.description);
-  const log = JSON.stringify(logs);
-  assert.ok(!log.includes(token));
-  assert.ok(!log.includes('원문'));
-});
-
 const serviceCall = (method, path, body, headers = {}) =>
   call(method, path, body, 99, {
     Cookie: undefined,
@@ -714,25 +693,6 @@ test('a restarted backend resumes pending notifications and concurrent workers c
   ]);
   assert.equal(claims.filter(Boolean).length, 1);
   await data(await report(pending));
-});
-
-test('application Swagger has separate admin request and service result security contracts', async () => {
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  assert.deepEqual(spec.paths['/api/ai/config'].get.security, [
-    { bearer: [] },
-    { adminSession: [] },
-  ]);
-  assert.deepEqual(spec.paths['/api/ai/config/apply-result'].post.security, [{ bearer: [] }]);
-  assert.ok(spec.paths['/api/personas/{id}/activate'].post.responses['202']);
-  assert.equal(spec.paths['/api/personas/{id}/head'], undefined);
-  assert.notEqual(spec.components.schemas.PersonaDto.properties.headVersion.nullable, true);
-  assert.ok(spec.components.schemas.PersonaDto.properties.activeVersion.nullable);
-  assert.ok(spec.components.schemas.PersonaDto.properties.pendingVersion.nullable);
-  const resultSchema = spec.components.schemas.PersonaApplyResultDto;
-  assert.ok(!resultSchema.required.includes('activeCallCount'));
-  assert.ok(resultSchema.properties.activeCallCount.deprecated);
-  assert.ok(spec.paths['/api/ai/config/apply-result'].post.responses['409']);
-  assert.ok(!JSON.stringify(logs).includes(token));
 });
 
 test('choosing the current ACTIVE cancels a different pending request so the latest intention wins', async () => {

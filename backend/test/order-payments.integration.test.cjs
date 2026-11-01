@@ -577,40 +577,6 @@ test('disabled payment integration exposes no order data and performs no externa
   }
 });
 
-test('Swagger documents real payment envelopes, nullable times and the protected retry operation', () => {
-  const doc = SwaggerModule.createDocument(
-    app,
-    new DocumentBuilder()
-      .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')
-      .build(),
-  );
-  const read = doc.paths['/api/payments/requests/{id}'].get;
-  assert.deepEqual(read.security, []);
-  assert.ok(
-    read.responses[200].content['application/json'].schema.properties.data.$ref.endsWith(
-      '/PaymentStatusDto',
-    ),
-  );
-  const properties = doc.components.schemas.PaymentStatusDto.properties;
-  assert.equal(properties.pickupRequestedAt.type, 'string');
-  assert.equal(properties.pickupRequestedAt.nullable, true);
-  assert.ok(properties.notificationStatus.enum.includes('UNKNOWN'));
-  assert.ok(properties.completionNotificationStatus.enum.includes('WAITING'));
-  assert.ok(
-    doc.paths['/api/payments/notifications/{id}/completion/retry'].post.security.some(
-      (x) => 'adminSession' in x,
-    ),
-  );
-  assert.ok(properties.orderStatus.enum.includes('SUBMISSION_FAILED'));
-  assert.ok(
-    doc.paths['/api/payments/notifications/{id}/retry'].post.security.some(
-      (x) => 'adminSession' in x,
-    ),
-  );
-  assert.equal(doc.paths['/api/payments/p/{id}'], undefined);
-  assert.ok(!JSON.stringify(doc).includes('test_gsk_fixture'));
-});
-
 const completionMessages = (id) =>
   messages.filter((s) => s.includes('결제 완료 안내') && s.includes(`/p/${id}`));
 

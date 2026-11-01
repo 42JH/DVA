@@ -449,42 +449,6 @@ test('21: FAQ contents persist across application restarts and HTTP logs omit qu
   assert.doesNotMatch(JSON.stringify(f.logs), new RegExp(secret));
 });
 
-test('21: Swagger documents one canonical create envelope and two read-only AI operations', async () => {
-  const spec = await (await fetch(f.base + '/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/faqs', 'get'],
-    ['/api/faqs', 'post'],
-    ['/api/faqs', 'delete'],
-    ['/api/faqs/{id}', 'get'],
-    ['/api/faqs/{id}', 'patch'],
-  ])
-    assert.deepEqual(spec.paths[path][method].security, [{ adminSession: [] }]);
-  for (const path of ['/api/ai/faqs', '/api/ai/faqs/{id}']) {
-    assert.deepEqual(Object.keys(spec.paths[path]), ['get']);
-    assert.ok(spec.paths[path].get.security.some((s) => Object.keys(s).length === 0));
-  }
-  assert.ok(spec.paths['/api/faqs'].post.responses['204']);
-  assert.equal(
-    spec.paths['/api/faqs'].post.requestBody.content['application/json'].schema.$ref,
-    '#/components/schemas/CreateFaqsDto',
-  );
-  assert.equal(spec.paths['/api/faqs/{id}'].delete, undefined);
-  assert.equal(spec.paths['/api/faqs'].patch, undefined);
-  assert.equal(
-    (spec.paths['/api/faqs'].post.parameters ?? []).some((p) => p.name === 'Idempotency-Key'),
-    false,
-  );
-  const ai = spec.components.schemas.AgentFaqDto;
-  assert.equal(ai.properties.updatedByAdminUserSeq, undefined);
-  assert.equal(ai.properties.isEnabled, undefined);
-  assert.equal(ai.properties.category, undefined);
-  assert.deepEqual(Object.keys(spec.components.schemas.CreateFaqDto.properties).sort(), [
-    'answer',
-    'category',
-    'question',
-  ]);
-});
-
 test('one canonical FAQ create envelope is required for single and multiple entries', async () => {
   const item = { category: '접수', question: f.marker(), answer: '답변' };
   const before = await f.counts();

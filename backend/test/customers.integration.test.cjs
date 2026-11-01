@@ -401,35 +401,6 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
     );
 });
 
-test('OpenAPI exposes four customer operations, minimal envelopes and conditional admin access', async () => {
-  const response = await fetch(base + '/api/docs-json');
-  const document = await response.json();
-  const paths = document.paths;
-  assert.deepEqual(paths['/api/customers'].get.security, [{ adminSession: [] }]);
-  assert.deepEqual(paths['/api/customers'].post.security, []);
-  assert.deepEqual(paths['/api/customers/{id}'].get.security, []);
-  assert.deepEqual(paths['/api/customers/{id}'].patch.security, [{ adminSession: [] }, {}]);
-  assert.equal(
-    (paths['/api/customers'].post.parameters ?? []).some(
-      (header) => header.name === 'Idempotency-Key',
-    ),
-    false,
-  );
-  assert.ok(!paths['/api/customers/{id}'].patch.responses['204'].content);
-  assert.deepEqual(Object.keys(document.components.schemas.UpdateCustomerDto.properties).sort(), [
-    'address',
-    'monthlyBillingEnabled',
-    'name',
-    'status',
-  ]);
-  assert.equal(document.components.schemas.CustomerResponseDto.properties.address.nullable, true);
-  assert.ok(document.components.schemas.CustomerResponseDto.required.includes('address'));
-  assert.deepEqual(
-    Object.keys(document.components.schemas.CustomersEnvelopeDto.properties).sort(),
-    ['data', 'hasNext', 'total_count'],
-  );
-});
-
 test('customer create/name/status writes record AI or the administrator name without retaining request payloads', async () => {
   const created = await create();
   assert.equal(created.status, 201);

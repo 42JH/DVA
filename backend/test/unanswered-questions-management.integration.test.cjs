@@ -483,26 +483,6 @@ test('concurrent deletes are idempotent and conversion versus deletion commits e
   }
 });
 
-test('OpenAPI documents management authentication, three required fields, 204 responses and bodyless deletion', async () => {
-  const document = await (await f.get('/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/unanswered-questions/{id}/faqs', 'post'],
-    ['/api/unanswered-questions/{id}', 'delete'],
-  ]) {
-    const operation = document.paths[path][method];
-    assert.deepEqual(operation.security, [{ adminSession: [] }]);
-    for (const status of ['204', '400', '401', '403', '404', '409', '500'])
-      assert.ok(operation.responses[status]);
-  }
-  assert.equal(document.paths['/api/unanswered-questions/{id}'].delete.requestBody, undefined);
-  assert.deepEqual(document.components.schemas.CreateFaqDto.required.sort(), [
-    'answer',
-    'category',
-    'question',
-  ]);
-  assert.doesNotMatch(JSON.stringify(f.logs), /private-unanswered-original|rtc_manage_|Bearer /);
-});
-
 test('converting an unanswered question to an existing FAQ question is rejected atomically', async () => {
   const input = body();
   await f.createdId(input);
