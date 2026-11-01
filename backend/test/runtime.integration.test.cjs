@@ -184,7 +184,6 @@ test('Nginx preserves an empty AI call without an order and replays the same res
       incomingAt: '2026-10-27T01:00:00Z',
     },
     customer: { name: '빈 통화 검증', phoneNumber: '01099008878' },
-    paymentMethodType: null,
     totalAmount: null,
     pickupRequestedAt: null,
     parcels: [{ origin: { name: null }, destination: {}, smallBoxCount: 0 }],
