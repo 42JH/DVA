@@ -2,7 +2,7 @@
 //   통화: API-21 GET /calls (result · hasComplaint · aiPersonaVersionSeq · from/to) / 미답변: API-26 / 버전: API-60 · 64 (최고 관리자 전용)
 //   평균 통화 시간 · 되묻기는 줄 수 없음 → 화면에서 '집계 API 없음' (성공하는 척 금지, §10)
 // 개발 중엔 MSW 가짜(mocks/handlers/calls.ts · faq.ts · personas.ts)가 같은 모양으로 응답
-import { queryOptions } from '@tanstack/react-query'
+import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
@@ -15,7 +15,7 @@ export type ComplaintKind =
 const OUTCOMES: Outcome[] = ['SUCCESS', 'FAILED', 'HANDOFF', 'CANCELLED', 'INQUIRY']
 /** 버전별 기록 표의 세 결과 (= 게이지) */
 export type GaugeOutcome = 'SUCCESS' | 'FAILED' | 'HANDOFF'
-const GAUGE: GaugeOutcome[] = ['SUCCESS', 'FAILED', 'HANDOFF']
+export const GAUGE: GaugeOutcome[] = ['SUCCESS', 'FAILED', 'HANDOFF']
 const RESULT: Record<Outcome, string> = {
   SUCCESS: 'REGISTERED',
   FAILED: 'REGISTRATION_FAILED',
@@ -37,7 +37,7 @@ export interface Stats {
   counts: Record<Outcome, number>
   complaintCalls: number // 불만이 확인된 통화 수 (hasComplaint=true)
   complaints: Record<ComplaintKind, number> // 유형별 — 한 통화에 여러 유형이면 각각 셈 (합 ≥ complaintCalls)
-  unanswered: { count: number; recent: { at: string; question: string }[] } // 처리 안 된(OPEN) 질문, 최신순 최대 8개
+  unanswered: { count: number; recent: { at: string; question: string }[] } // 처리 안 된(OPEN) 질문, 최신순 (날짜별 8개 · 페르소나별 6개)
 }
 
 export interface Version {
@@ -56,6 +56,7 @@ export const dashboardQueries = {
     queryOptions({
       queryKey: [...dashboardQueries.all(), 'stats', from, to],
       queryFn: ({ signal }) => fetchDashboard(from, to, signal),
+      placeholderData: keepPreviousData, // 날짜를 바꿔도 이전 카드가 남아 '불러오는 중'으로 깜빡이지 않음 (04와 같음)
     }),
   versions: () =>
     queryOptions({
@@ -66,6 +67,7 @@ export const dashboardQueries = {
     queryOptions({
       queryKey: [...dashboardQueries.all(), 'version', id],
       queryFn: ({ signal }) => fetchVersionStats(id, signal),
+      placeholderData: keepPreviousData,
     }),
 }
 
@@ -87,8 +89,13 @@ interface UnansweredDto {
   questionText: string
 }
 
-/** 범위 하나의 건수들 — 통화 1 + 결과 5 + 불만 목록 + 미답변 1~2 요청 */
-async function statsOf(calls: Query, unanswered: Query, signal?: AbortSignal): Promise<Stats> {
+/** 범위 하나의 건수들 — 통화 1 + 결과 5 + 불만 목록 + 미답변 1~2 요청. recent = 미답변 카드 줄 수 */
+async function statsOf(
+  calls: Query,
+  unanswered: Query,
+  signal?: AbortSignal,
+  recent = 8,
+): Promise<Stats> {
   const [total, ...byResult] = await Promise.all([
     count('/calls', calls, signal),
     ...OUTCOMES.map((o) => count('/calls', { ...calls, result: RESULT[o] }, signal)),
@@ -103,16 +110,16 @@ async function statsOf(calls: Query, unanswered: Query, signal?: AbortSignal): P
   for (const r of complaintRows)
     for (const k of new Set((r.analysis?.complaints ?? []).map((c) => c.type)))
       if (k in complaints) complaints[k]++
-  // 미답변: 서버가 오래된 순이라 끝 8개를 받아 뒤집음
+  // 미답변: 서버가 오래된 순이라 끝 recent개를 받아 뒤집음
   const first = await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
-    query: { ...unanswered, limit: 8, offset: 0 },
+    query: { ...unanswered, limit: recent, offset: 0 },
     signal,
   })
   const tail =
-    first.total_count > 8
+    first.total_count > recent
       ? (
           await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
-            query: { ...unanswered, limit: 8, offset: first.total_count - 8 },
+            query: { ...unanswered, limit: recent, offset: first.total_count - recent },
             signal,
           })
         ).data
@@ -180,10 +187,10 @@ export function pickVersions(versions: PersonaVersionDto[]): Omit<Version, 'coun
   }))
 }
 
-/** 고른 버전의 건수 (그 버전이 받은 통화 전체 — 기간 제한 없음) */
+/** 고른 버전의 건수 (그 버전이 받은 통화 전체 — 기간 제한 없음). 미답변 6줄 (10/29 노트 — 8줄이면 1024 화면에서 스크롤) */
 export async function fetchVersionStats(id: string, signal?: AbortSignal): Promise<Stats> {
   const q = { aiPersonaVersionSeq: Number(id) }
-  return statsOf(q, q, signal)
+  return statsOf(q, q, signal, 6)
 }
 
 /** 버전별 기록 표의 결과 건수 (버전마다 게이지 결과 3개 = 3요청) */

@@ -1,6 +1,14 @@
 // 실행: npx tsx src/shared/lib/dateRange.test.ts
 import assert from 'node:assert/strict'
-import { addDays, fmtRange, monthGrid, periodToRange, pickRange, rangeDays } from './dateRange'
+import {
+  addDays,
+  fmtRange,
+  monthGrid,
+  parseRange,
+  periodToRange,
+  pickRange,
+  rangeDays,
+} from './dateRange'
 
 // 2026-10 달력: 10/1 목요일(firstDow 4), 31일
 const g = monthGrid(2026, 10)
@@ -37,6 +45,20 @@ assert.deepEqual(periodToRange('custom', { from: '2026-10-01', to: '2026-10-15' 
 })
 assert.equal(periodToRange('custom'), null)
 
-assert.equal(fmtRange('2026-10-01', '2026-10-15'), '10.01 ~ 10.15')
+const today = '2026-10-20'
+assert.equal(fmtRange('2026-10-01', '2026-10-15', today), '10.01 ~ 10.15')
+assert.equal(fmtRange('2025-12-29', '2026-01-04', today), '2025.12.29 ~ 2026.01.04') // 한쪽이 다른 해면 양쪽 다 연도
+
+// 주소의 기간 검증
+assert.deepEqual(parseRange('2026-10-01', '2026-10-15', today), {
+  from: '2026-10-01',
+  to: '2026-10-15',
+})
+assert.deepEqual(parseRange('2026-10-15', '', today), { from: '2026-10-15', to: '2026-10-15' }) // 하루
+assert.equal(parseRange('', '', today), null)
+assert.equal(parseRange('2026-10-15', '2026-10-01', today), null) // 뒤집힘
+assert.equal(parseRange('abc', '', today), null)
+assert.equal(parseRange('2026-02-30', '', today), null) // 없는 날짜
+assert.equal(parseRange('2026-10-25', '', today), null) // 미래
 
 console.log('dateRange.test ok')

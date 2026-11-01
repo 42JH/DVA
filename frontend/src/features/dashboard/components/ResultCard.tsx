@@ -123,6 +123,10 @@ function Gauge({
       <path key={p.key} d={d} className={SEG[i]} strokeWidth={sw} fill="none" />
     ) : null
   })
+  // 양 끝 마개는 실제로 그린 첫 · 마지막 조각 색 (0건 조각은 호가 없음)
+  const drawn = parts.map((p, i) => (p.value > 0 ? i : -1)).filter((i) => i >= 0)
+  const first = drawn[0] ?? 0
+  const last = drawn[drawn.length - 1] ?? parts.length - 1
   return (
     <div className="relative shrink-0" style={{ width: cx * 2, height: cy + sw / 2 + 4 }}>
       <svg width={cx * 2} height={cy + sw / 2} aria-hidden>
@@ -136,8 +140,8 @@ function Gauge({
         ) : (
           <>
             {arcs}
-            <circle cx={cx - r} cy={cy} r={sw / 2} className={CAP[0]} />
-            <circle cx={cx + r} cy={cy} r={sw / 2} className={CAP[parts.length - 1]} />
+            <circle cx={cx - r} cy={cy} r={sw / 2} className={CAP[first]} />
+            <circle cx={cx + r} cy={cy} r={sw / 2} className={CAP[last]} />
           </>
         )}
       </svg>
