@@ -41,14 +41,19 @@ const hm = (iso: string) => {
 const dayOnly = (iso: string) => fmtDay(iso).replace(/ \(.\)$/, '')
 const NO_STAT = '되묻기 미측정' // 평균 되묻기: AI가 repeatQuestionCount 를 안 준 기간 (성공하는 척 표시 금지, 명세 §10)
 /** 초 → 카드의 큰 값 [['3', '분'], ['40', '초']] */
-const clockParts = (sec: number): [string, string][] => [
-  [String(Math.floor(Math.round(sec) / 60)), '분'],
-  [two(Math.round(sec) % 60), '초'],
-]
+const clockParts = (sec: number): [string, string][] => {
+  const s = Math.round(sec)
+  const h = Math.floor(s / 3600) // 한 시간 넘으면 '1시간 5분 03초' (11/02)
+  return [
+    ...(h ? ([[String(h), '시간']] as [string, string][]) : []),
+    [String(Math.floor(s / 60) % 60), '분'],
+    [two(s % 60), '초'],
+  ]
+}
 const durationText = (sec: number | null) => (sec === null ? '—' : fmtDuration(Math.round(sec)))
 
 /** 02 대시보드 훅 (와이어프레임 02, 10/30) — [날짜별 | 페르소나별] · 날짜 칸(기본 오늘) · 고른 버전은 URL에
- * 날짜별: 통화 결과(게이지 = 성공 · 실패 · 이관) · 평균 두 칸(집계 API 없음 → '—') · AI 미답변 · 불만 내역. 다른 기간과 비교 없음 (10/30)
+ * 날짜별: 통화 결과(게이지 = 접수 시도 = 성공 · 실패 · 이관, 줄 = 다섯 결과 건수) · 평균 두 칸 · AI 미답변 · 불만 내역. 다른 기간과 비교 없음 (10/30)
  * 페르소나별(최고 관리자만): 버전별 기록(최근 3개) + 고른 버전의 AI 미답변 · 불만 내역
  * 숫자는 전부 목록 total_count (명세 §10: 통계 API 없음) */
 export function useDashboard() {
@@ -100,7 +105,8 @@ export function useDashboard() {
     complaints: {
       sub:
         `${scope} 불만 통화 ${num(s.complaintCalls)}건` +
-        (s.complaintCalls ? ` · 전체 통화의 ${pct(s.complaintCalls, s.total, 1)}` : ''),
+        (s.complaintCalls ? ` · 전체 통화의 ${pct(s.complaintCalls, s.total, 1)}` : '') +
+        (s.avgSampled ? ' · 유형별은 최근 2,000건 기준' : ''),
       total: s.complaintCalls,
       rows: COMPLAINT_ORDER.map((k) => ({
         key: k,
@@ -114,22 +120,22 @@ export function useDashboard() {
   const s = stats.data
   const date = s
     ? (() => {
-        // 링 · 줄 = 분석된 통화 전부 (11/01 사용자: 문의 · 취소도 통화니 결과 집계에 들어가야). 비율 분모 = 분석된 통화 → 다섯 줄 합 100%
-        const all: Outcome[] = ['SUCCESS', 'FAILED', 'INQUIRY', 'HANDOFF', 'CANCELLED'] // 줄 · 링 순서 (11/01 사용자). 색은 ResultCard SEG와 같은 순서
+        // 줄 = 분석된 통화 전부 다섯 결과의 건수 (11/01 사용자: 문의 · 취소도 통화니 결과 집계에 들어가야)
+        // 링 · 성공률 = 접수 시도(성공 · 실패 · 이관)만 — 문의 · 취소는 주문을 시도하지 않은 통화라 분모에 안 넣음 (11/01 결정, 11/02: 7/18 = 39%로 오해)
+        const all: Outcome[] = ['SUCCESS', 'FAILED', 'INQUIRY', 'HANDOFF', 'CANCELLED'] // 줄 순서 (11/01 사용자). 색은 ResultCard COLOR
         const analysed = all.reduce((a, k) => a + s.counts[k], 0)
-        const pcts = fmtPctSplit(all.map((k) => s.counts[k])) // 따로 반올림하면 99 · 101
+        const tried = GAUGE.reduce((a, k) => a + s.counts[k], 0)
         return {
           scope: `${scopeOfRange} 받은 AI 통화`,
           total: num(s.total), // 결과 필터 없는 전체 (분석 전 통화 포함) = 04 '전체'
           unanalysed: s.total > analysed ? `분석 전 ${num(s.total - analysed)}건` : null,
-          rate: pcts[0], // 성공률 = 오른쪽 '접수 성공' 줄과 같은 숫자 · 같은 분모 (11/01 사용자: 링 · 줄 · 가운데가 한 기준)
-          base: `${num(analysed)}건 중 ${num(s.counts.SUCCESS)}건 접수 성공`,
-          gauge: all.map((k) => ({ key: k, value: s.counts[k] })),
-          rows: all.map((k, i) => ({
+          rate: pct(s.counts.SUCCESS, tried), // 페르소나별 표의 성공 비율과 같은 분모
+          base: `접수 시도 ${num(tried)}건 중 ${num(s.counts.SUCCESS)}건 성공`,
+          gauge: GAUGE.map((k) => ({ key: k, value: s.counts[k] })),
+          rows: all.map((k) => ({
             key: k,
             label: OUTCOME_LABEL[k],
             count: num(s.counts[k]),
-            pct: pcts[i],
             onClick: () => toCalls({ outcome: k }, from, to),
           })),
           // 평균 두 칸: 통계 API가 없어 값 대신 안내 (BE 요청 B3)
@@ -180,8 +186,9 @@ export function useDashboard() {
       success: cell(0),
       failed: cell(1),
       handoff: cell(2),
-      avgTime: '—', // 집계 API 없음
-      avgRepeat: '—',
+      // 날짜별과 같은 방식 — 그 버전의 통화 목록으로 화면에서 평균 (11/02 사용자)
+      avgTime: durationText(v.avgDurationSec),
+      avgRepeat: v.avgRepeat === null ? '—' : `${v.avgRepeat.toFixed(1)}회`,
       selected: v.id === selected?.id,
       onSelect: () => set({ version: v.id }),
     }
@@ -194,10 +201,11 @@ export function useDashboard() {
           // 오른쪽 위 = 아래 두 카드의 범위 = 고른 버전의 운영 기간 (적용 중이면 오늘까지)
           header: `${selected.personaName} v${selected.version} · ${fmtDayRange(`${selected.from}T00:00`, `${selected.to ?? today}T00:00`)}`,
           rows: versions.data.map(versionRow),
+          note: versions.data.some((v) => v.avgSampled) ? '평균은 버전별 최근 2,000건 기준' : null,
           cards: vs ? bottom(vs, `v${selected.version}`, true, null) : null,
         }
       : versions.data && versions.data.length === 0
-        ? { header: '', rows: [], cards: null } // 적용된 버전이 아직 없음
+        ? { header: '', rows: [], note: null, cards: null } // 적용된 버전이 아직 없음
         : null
 
   return {
@@ -208,6 +216,11 @@ export function useDashboard() {
     setRange: (r: { from: string; to: string }) =>
       set(r.from === today && r.to === today ? { from: '', to: '' } : { from: r.from, to: r.to }),
     isLoading: tab === 'date' ? stats.isPending : versions.isPending,
+    // 날짜 · 버전을 바꿔 다시 받는 동안 (이전 카드가 남아 있음 → 흐리게. 큰 기간은 몇 초 걸림, 11/02)
+    isFetching:
+      tab === 'date'
+        ? stats.isFetching && !stats.isPending
+        : versionStats.isFetching && !versionStats.isPending,
     error: (tab === 'date' ? stats.error : (versions.error ?? versionStats.error))
       ? '불러오지 못했습니다. 다시 시도해 주세요.'
       : null,

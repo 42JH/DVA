@@ -18,6 +18,8 @@ export function pageSlice<T>(items: T[], page: number, size: number) {
 
 const LIMIT = 100 // API 최대 (명세 §1 limit 1~100)
 const MAX_PAGES = 20
+/** fetchAll이 받는 최대 건수 — 받은 수가 이 값이면 뒤가 더 있을 수 있음. 부르는 쪽이 안내하거나 막음 (11/02) */
+export const FETCH_ALL_MAX = LIMIT * MAX_PAGES
 
 /** 목록을 hasNext가 꺼질 때까지 다 받음 (09 FAQ · AI 미답변, 04 CSV, 06 대화 · 동작 · 처리 결과)
  * ponytail: 차례로 요청 — 최대 2,000건. 넘으면 서버 q · offset 쪽 넘김으로 바꿀 것 */

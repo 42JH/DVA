@@ -53,11 +53,13 @@ export function CallScript({
       className={`flex min-h-0 flex-col rounded-xl bg-surface p-8 ring-1 ring-line ring-inset ${className}`}
     >
       <div className="flex h-10 items-baseline gap-4">
-        <h2 className="text-card font-bold">통화 스크립트</h2>
+        <h2 className="shrink-0 text-card font-bold">통화 스크립트</h2>
         {persona && (
           <>
-            <span className="text-label text-sub">페르소나</span>
-            <span className="-ml-2 text-label font-bold">{persona}</span>
+            <span className="shrink-0 text-label text-sub">페르소나</span>
+            <span className="-ml-2 min-w-0 truncate text-label font-bold" title={persona}>
+              {persona}
+            </span>
           </>
         )}
       </div>

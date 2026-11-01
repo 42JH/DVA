@@ -235,8 +235,9 @@ export function Calendar({
         )}
       </div>
 
-      <div className="mt-3 flex items-center justify-between border-t border-line pt-4">
-        <span className="text-label">
+      {/* 기간 글은 버튼 옆이 아니라 위 한 줄에 — 다른 해가 섞이면 '2025.11.02 ~ 2026.11.02 366일'이 버튼 옆 폭에 안 들어가 두 줄로 접히며 높이가 뛰었음 (11/02) */}
+      <div className="mt-3 border-t border-line pt-4">
+        <p className="truncate text-label">
           {complete ? (
             <>
               <b className="font-bold text-ink">{fmtRange(complete.from, complete.to)}</b>{' '}
@@ -247,8 +248,8 @@ export function Calendar({
               {range.from ? '끝 날짜를 고르세요' : '시작 날짜를 고르세요'}
             </span>
           )}
-        </span>
-        <div className="flex gap-2">
+        </p>
+        <div className="mt-3 flex justify-end gap-2">
           <Button onClick={onCancel}>취소</Button>
           <Button kind="primary" disabled={!complete} onClick={() => complete && onApply(complete)}>
             적용

@@ -25,6 +25,9 @@ export function UnansweredPage() {
           <h2 className="flex items-baseline gap-3.5 text-card font-bold">
             AI 미답변 질문
             <span className="text-label font-normal text-sub">{vm.count}개</span>
+            {vm.listNote && (
+              <span className="text-caption font-normal text-muted">{vm.listNote}</span>
+            )}
           </h2>
         }
         empty={

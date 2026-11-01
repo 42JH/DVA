@@ -48,7 +48,7 @@ export function Pagination({
       {arrow('prev', prevOff)}
       {items.map((it, i) =>
         it === '…' ? (
-          <span key={`e${i}`} className="grid size-9 place-items-center text-label text-sub">
+          <span key={`e${i}`} className="grid h-9 min-w-9 place-items-center text-label text-sub">
             …
           </span>
         ) : (
@@ -57,7 +57,7 @@ export function Pagination({
             type="button"
             aria-current={it === page ? 'page' : undefined}
             onClick={() => onChange(it)}
-            className={`grid size-9 place-items-center rounded-lg text-label ${
+            className={`grid h-9 min-w-9 place-items-center rounded-lg px-1.5 text-label tabular-nums ${
               it === page ? 'bg-action font-bold text-white' : 'text-sub hover:bg-bg'
             }`}
           >

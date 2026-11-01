@@ -142,12 +142,14 @@ function Section({
   )
 }
 
-/** 항목 136 · 값 (없음 · — 은 회색) */
+/** 항목 136 · 값 (없음 · — 은 회색). 긴 주소 · 요청 사항은 줄바꿈 — 48px 고정이면 세 줄부터 옆 줄과 겹침 (11/02) */
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <p className="flex h-12 items-center">
+    <p className="flex min-h-12 items-start py-2.5">
       <span className="w-[136px] shrink-0 text-label text-sub">{label}</span>
-      <span className={`text-body ${value === '없음' || value === '—' ? 'text-sub' : ''}`}>
+      <span
+        className={`min-w-0 text-body break-words ${value === '없음' || value === '—' ? 'text-sub' : ''}`}
+      >
         {value}
       </span>
     </p>

@@ -1,6 +1,6 @@
 // 02 대시보드 Model — 통계 API가 없음(연동 상세명세 10/31 §10) → 목록의 total_count를 조합해 건수만 셈. React를 모르는 데이터 층
 //   통화: API-21 GET /calls (result · hasComplaint · aiPersonaVersionSeq · from/to) / 미답변: API-26 / 버전: API-60 · 64 (최고 관리자 전용)
-//   평균 통화 시간 · 되묻기는 줄 수 없음 → 화면에서 '집계 API 없음' (성공하는 척 금지, §10)
+//   평균 통화 시간 · 되묻기는 통계 API가 없어 목록(startedAt · endedAt · repeatQuestionCount)으로 화면에서 냄 — 기간 · 버전 둘 다 같은 함수(averagesOf)
 // 개발 중엔 MSW 가짜(mocks/handlers/calls.ts · faq.ts · personas.ts)가 같은 모양으로 응답
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
@@ -35,7 +35,7 @@ const KINDS: ComplaintKind[] = [
 export interface Stats {
   total: number // 결과 필터 없는 전체 (분석이 아직 안 온 통화도 포함) = 04 '전체'와 같은 수
   counts: Record<Outcome, number>
-  complaintCalls: number // 불만이 확인된 통화 수 (analysis.complaints 가 있는 통화)
+  complaintCalls: number // 불만이 확인된 통화 수 — 서버 hasComplaint 건수 (목록 2,000건 상한과 무관하게 정확히, 11/02)
   complaints: Record<ComplaintKind, number> // 유형별 — 한 통화에 여러 유형이면 각각 셈 (합 ≥ complaintCalls)
   // 평균 통화 시간(초) — 통계 API가 없어 목록의 startedAt · endedAt 으로 화면에서 냄 (11/01 사용자). 통화가 없으면 null
   avgDurationSec: number | null
@@ -53,6 +53,9 @@ export interface Version {
   from: Ymd // 적용된 날
   to: Ymd | null // 다음 버전이 적용된 날 (적용 중이면 null)
   counts: Record<GaugeOutcome, number> // 표의 통화 · 성공 · 실패 · 이관
+  avgDurationSec: number | null // 그 버전 통화의 평균 통화 시간(초) — Stats와 같은 계산
+  avgRepeat: number | null
+  avgSampled: boolean // 목록 2,000건 상한에 걸려 평균이 앞 2,000건 기준 → 표에 안내
 }
 
 export const dashboardQueries = {
@@ -109,6 +112,26 @@ interface UnansweredDto {
   questionText: string
 }
 
+/** 목록 줄들의 평균 — 통화 시간(전체 · 결과별) · 되묻기. 기간 카드와 버전 표가 같이 씀 */
+function averagesOf(rows: CallRowDto[]) {
+  const secsOf = (pick: (r: CallRowDto) => boolean) =>
+    rows
+      .filter(pick)
+      .map(durationSec)
+      .filter((s): s is number => s !== null && s >= 0)
+  return {
+    avgDurationSec: avg(secsOf(() => true)),
+    avgBy: Object.fromEntries(
+      GAUGE.map((o) => [o, avg(secsOf((r) => RESULT_OF[r.analysis?.result ?? ''] === o))]),
+    ) as Record<GaugeOutcome, number | null>,
+    avgRepeat: avg(
+      rows
+        .map((r) => r.analysis?.repeatQuestionCount ?? null)
+        .filter((n): n is number => n !== null),
+    ),
+  }
+}
+
 /** 범위 하나의 건수들 — 통화 1 + 결과 5 + 불만 목록 + 미답변 1~2 요청. recent = 미답변 카드 줄 수 */
 async function statsOf(
   calls: Query,
@@ -116,27 +139,18 @@ async function statsOf(
   signal?: AbortSignal,
   recent = 8,
 ): Promise<Stats> {
-  const [total, ...byResult] = await Promise.all([
+  const [total, complaintCalls, ...byResult] = await Promise.all([
     count('/calls', calls, signal),
+    count('/calls', { ...calls, hasComplaint: true }, signal), // 불만 통화 수 — 목록(≤2,000)으로 세면 큰 기간에서 비율이 낮게 나옴 (11/02)
     ...OUTCOMES.map((o) => count('/calls', { ...calls, result: RESULT[o] }, signal)),
   ])
   // 범위의 통화 목록을 다 받아 불만 유형과 평균 통화 시간을 셈 (하루 ~130건 = 2요청. ponytail: 2,000건 상한 — 넘으면 '최근 2,000건 기준')
   const rows = await fetchAll<CallRowDto>('/calls', calls, signal)
-  const complaints = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<ComplaintKind, number>
-  let complaintCalls = 0
+  const complaints = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<ComplaintKind, number> // 유형별은 받은 줄에서 — 상한에 걸리면 카드에 '최근 2,000건 기준'
   for (const r of rows) {
     const kinds = new Set((r.analysis?.complaints ?? []).map((c) => c.type))
-    if (kinds.size) complaintCalls++
     for (const k of kinds) if (k in complaints) complaints[k]++
   }
-  const secsOf = (pick: (r: CallRowDto) => boolean) =>
-    rows
-      .filter(pick)
-      .map(durationSec)
-      .filter((s): s is number => s !== null && s >= 0)
-  const avgBy = Object.fromEntries(
-    GAUGE.map((o) => [o, avg(secsOf((r) => RESULT_OF[r.analysis?.result ?? ''] === o))]),
-  ) as Record<GaugeOutcome, number | null>
   // 미답변: 서버가 오래된 순이라 끝 recent개를 받아 뒤집음
   const first = await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
     query: { ...unanswered, limit: recent, offset: 0 },
@@ -156,14 +170,8 @@ async function statsOf(
     counts: Object.fromEntries(OUTCOMES.map((o, i) => [o, byResult[i]])) as Record<Outcome, number>,
     complaintCalls,
     complaints,
-    avgDurationSec: avg(secsOf(() => true)),
-    avgBy,
+    ...averagesOf(rows),
     avgSampled: rows.length < total,
-    avgRepeat: avg(
-      rows
-        .map((r) => r.analysis?.repeatQuestionCount ?? null)
-        .filter((n): n is number => n !== null),
-    ),
     unanswered: {
       count: first.total_count,
       recent: [...tail]
@@ -203,12 +211,14 @@ export async function fetchVersions(signal?: AbortSignal): Promise<Version[]> {
     )
   ).flat()
   const top = pickVersions(versions).slice(0, 3)
-  const counts = await Promise.all(top.map((v) => fetchVersionCounts(v.id, signal)))
-  return top.map((v, i) => ({ ...v, counts: counts[i] }))
+  const extra = await Promise.all(top.map((v) => fetchVersionRow(v.id, signal)))
+  return top.map((v, i) => ({ ...v, ...extra[i] }))
 }
 
 /** 순수 함수 (dashboardApi.test.ts) — 적용된 버전을 최근 적용 순으로, 기간은 사슬로 */
-export function pickVersions(versions: PersonaVersionDto[]): Omit<Version, 'counts'>[] {
+export function pickVersions(
+  versions: PersonaVersionDto[],
+): Omit<Version, 'counts' | 'avgDurationSec' | 'avgRepeat' | 'avgSampled'>[] {
   const applied = versions
     .filter((v): v is PersonaVersionDto & { appliedAt: string } => v.appliedAt !== null)
     .sort((a, b) => Date.parse(b.appliedAt) - Date.parse(a.appliedAt))
@@ -228,14 +238,22 @@ export async function fetchVersionStats(id: string, signal?: AbortSignal): Promi
   return statsOf(q, q, signal, 6)
 }
 
-/** 버전별 기록 표의 결과 건수 (버전마다 게이지 결과 3개 = 3요청) */
-async function fetchVersionCounts(
+/** 버전별 기록 표 한 줄 — 결과 건수 3개(3요청) + 그 버전의 통화 목록으로 평균 (11/02 사용자: 날짜별 카드와 같은 방식) */
+async function fetchVersionRow(
   id: string,
   signal?: AbortSignal,
-): Promise<Record<GaugeOutcome, number>> {
+): Promise<Pick<Version, 'counts' | 'avgDurationSec' | 'avgRepeat' | 'avgSampled'>> {
   const q = { aiPersonaVersionSeq: Number(id) }
-  const n = await Promise.all(
-    GAUGE.map((o) => count('/calls', { ...q, result: RESULT[o] }, signal)),
-  )
-  return Object.fromEntries(GAUGE.map((o, i) => [o, n[i]])) as Record<GaugeOutcome, number>
+  const [n, rows, all] = await Promise.all([
+    Promise.all(GAUGE.map((o) => count('/calls', { ...q, result: RESULT[o] }, signal))),
+    fetchAll<CallRowDto>('/calls', q, signal),
+    count('/calls', q, signal),
+  ])
+  const { avgDurationSec, avgRepeat } = averagesOf(rows)
+  return {
+    counts: Object.fromEntries(GAUGE.map((o, i) => [o, n[i]])) as Record<GaugeOutcome, number>,
+    avgDurationSec,
+    avgRepeat,
+    avgSampled: rows.length < all,
+  }
 }

@@ -23,7 +23,10 @@ export function DashboardPage() {
     <div className="flex flex-col gap-6">
       <Tabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} right={right} />
 
-      <div key={vm.tab} className={`flex flex-col gap-6 ${slide}`}>
+      <div
+        key={vm.tab}
+        className={`flex flex-col gap-6 transition-opacity ${slide} ${vm.isFetching ? 'opacity-50' : ''}`}
+      >
         {vm.error ? (
           <p className="py-16 text-center text-body text-muted">{vm.error}</p>
         ) : vm.isLoading ? (
@@ -50,7 +53,7 @@ export function DashboardPage() {
           </>
         ) : vm.tab === 'persona' && vm.persona ? (
           <>
-            <VersionTable rows={vm.persona.rows} />
+            <VersionTable rows={vm.persona.rows} note={vm.persona.note} />
             {vm.persona.cards && (
               <div className="grid grid-cols-2 gap-6">
                 <UnansweredCard {...vm.persona.cards.unanswered} />

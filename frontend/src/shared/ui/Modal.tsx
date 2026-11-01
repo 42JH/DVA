@@ -108,7 +108,12 @@ export function ConfirmDialog({
     <Overlay onClose={onClose} label={title}>
       <div className="flex w-[496px] flex-col gap-2">
         <h2 className="text-card font-bold">{title}</h2>
-        {target && <p className="text-body text-sub">{target}</p>}
+        {target && (
+          // 질문 전문이 올 수 있음(최대 1,000자) — 세 줄까지만, 나머지는 title (11/02)
+          <p className="line-clamp-3 text-body break-words text-sub" title={target}>
+            {target}
+          </p>
+        )}
         {warn && (
           <p className="mt-3 flex items-start gap-2 text-label font-semibold text-danger">
             {/* 아이콘은 첫 줄 높이(1.4em) 칸 가운데 — 글꼴이 바뀌어도 첫 줄과 나란히 */}

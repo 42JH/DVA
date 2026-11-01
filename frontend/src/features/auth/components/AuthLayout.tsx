@@ -70,22 +70,24 @@ export function AuthError({ message }: { message: string | null }) {
   return (
     <p
       role="alert"
-      className="mt-8 flex h-6 items-center gap-1.5 text-label font-semibold text-danger"
+      className="mt-8 flex min-h-6 items-start gap-1.5 text-label font-semibold text-danger"
     >
       {message && (
         <>
-          <svg
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-            aria-hidden
-            className="size-[18px] shrink-0"
-          >
-            <circle cx="10" cy="10" r="8" />
-            <path d="M10 6v5M10 13.75v.1" />
-          </svg>
+          <span className="flex h-[1.4em] shrink-0 items-center">
+            <svg
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              aria-hidden
+              className="size-[18px] shrink-0"
+            >
+              <circle cx="10" cy="10" r="8" />
+              <path d="M10 6v5M10 13.75v.1" />
+            </svg>
+          </span>
           {message}
         </>
       )}

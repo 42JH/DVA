@@ -1,11 +1,17 @@
-// 통화 결과 카드 (02 날짜별 왼쪽 위, 와이어프레임 02 A안 10/30 → 11/01 사용자: 분석된 통화 전부를 링에)
-// 왼쪽 반원 게이지 = 분석된 통화 전부 다섯 조각(접수 성공 · 접수 실패 · 문의 · 상담원 이관 · 주문 취소), 가운데 접수 성공률(= 성공 줄 비율, 분모 같음) + 'n건 중 m건 접수 성공'
-// 오른쪽 = 다섯 줄(이름 › · 건수 | 비율, 분모 = 분석된 통화 → 합 100%). 오른쪽 위 '총 n건'(분석 전 포함) + '분석 전 n건'
+// 통화 결과 카드 (02 날짜별 왼쪽 위, 와이어프레임 02 A안 10/30 → 11/02: 링 = 접수 시도만)
+// 왼쪽 반원 게이지 = 접수 시도 세 조각(접수 성공 · 접수 실패 · 상담원 이관), 가운데 접수 성공률 = 성공 ÷ 접수 시도 + '접수 시도 n건 중 m건 접수 성공'
+//   문의 · 주문 취소는 주문을 시도하지 않은 통화라 링 · 성공률에 안 들어감 (11/01 결정: 분모에 넣으면 39%처럼 낮게 오해)
+// 오른쪽 = 다섯 줄(이름 › · 건수). 비율은 성공률 하나뿐 — 분모가 다른 비율 둘은 헷갈림. 오른쪽 위 '총 n건'(분석 전 포함) + '분석 전 n건'
 // 줄을 누르면 04 통화 내역을 그 결과 · 같은 기간으로
 
-const SEG = ['stroke-brand', 'stroke-danger', 'stroke-action', 'stroke-muted', 'stroke-line'] // 성공 · 실패 · 문의 · 이관 · 취소 (useDashboard all 순서)
-const MARK = ['bg-brand', 'bg-danger', 'bg-action', 'bg-muted', 'bg-line']
-const CAP = ['fill-brand', 'fill-danger', 'fill-action', 'fill-muted', 'fill-line'] // 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지)
+// 결과 → 색 (링 · 줄 · 마개). 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지)
+const COLOR: Record<string, { seg: string; mark: string; cap: string }> = {
+  SUCCESS: { seg: 'stroke-brand', mark: 'bg-brand', cap: 'fill-brand' },
+  FAILED: { seg: 'stroke-danger', mark: 'bg-danger', cap: 'fill-danger' },
+  INQUIRY: { seg: 'stroke-action', mark: 'bg-action', cap: 'fill-action' },
+  HANDOFF: { seg: 'stroke-muted', mark: 'bg-muted', cap: 'fill-muted' },
+  CANCELLED: { seg: 'stroke-line', mark: 'bg-line', cap: 'fill-line' },
+}
 
 interface Row {
   key: string
@@ -30,7 +36,7 @@ export function ResultCard({
   rate: string
   base: string
   gauge: { key: string; value: number }[]
-  rows: (Row & { pct: string })[]
+  rows: Row[]
   unanalysed: string | null // '분석 전 5건' (없으면 null)
 }) {
   return (
@@ -62,14 +68,14 @@ export function ResultCard({
                   onClick={r.onClick}
                   className="group flex h-[42px] w-full items-center text-left"
                 >
-                  <span className={`mr-2 size-2.5 shrink-0 rounded-sm ${MARK[i]}`} />
+                  <span className={`mr-2 size-2.5 shrink-0 rounded-sm ${COLOR[r.key].mark}`} />
                   <span className="w-[120px] text-label font-semibold group-hover:text-action">
                     {r.label} <span className="text-muted">›</span>
                   </span>
-                  <span className="w-16 text-right text-strong font-semibold">{r.count}</span>
+                  <span className="min-w-16 text-right text-strong font-semibold tabular-nums">
+                    {r.count}
+                  </span>
                   <span className="ml-1 text-label font-semibold text-sub">건</span>
-                  <span className="mx-2 h-4 w-px bg-line" />
-                  <span className="text-label font-semibold text-sub">{r.pct}</span>
                 </button>
               </li>
             ))}
@@ -80,7 +86,7 @@ export function ResultCard({
   )
 }
 
-/** 반원 게이지 (그래프 라이브러리 없이 SVG). 왼쪽 끝 = 0, 오른쪽 끝 = 전체. 조각 사이 1.6° 틈, 양 끝은 둥근 마개 */
+/** 반원 게이지 (그래프 라이브러리 없이 SVG). 왼쪽 끝 = 0, 오른쪽 끝 = 전체. 조각 사이 1.6° 틈, 양 끝은 둥근 마개. 설명 글(base)은 링 아래 */
 function Gauge({
   parts,
   rate,
@@ -105,7 +111,7 @@ function Gauge({
   const arcs = parts.map((p, i) => {
     const d = `M ${pt(edge(i) - (i ? 0.8 : 0))} A ${r} ${r} 0 0 1 ${pt(edge(i + 1) + (i < parts.length - 1 ? 0.8 : 0))}`
     return p.value > 0 ? (
-      <path key={p.key} d={d} className={SEG[i]} strokeWidth={sw} fill="none" />
+      <path key={p.key} d={d} className={COLOR[p.key].seg} strokeWidth={sw} fill="none" />
     ) : null
   })
   // 양 끝 마개는 실제로 그린 첫 · 마지막 조각 색 (0건 조각은 호가 없음)
@@ -113,28 +119,31 @@ function Gauge({
   const first = drawn[0] ?? 0
   const last = drawn[drawn.length - 1] ?? parts.length - 1
   return (
-    <div className="relative shrink-0" style={{ width: cx * 2, height: cy + sw / 2 + 4 }}>
-      <svg width={cx * 2} height={cy + sw / 2} aria-hidden>
-        {sum === 0 ? (
-          <path
-            d={`M ${pt(180)} A ${r} ${r} 0 0 1 ${pt(0)}`}
-            className="stroke-bg"
-            strokeWidth={sw}
-            fill="none"
-          />
-        ) : (
-          <>
-            {arcs}
-            <circle cx={cx - r} cy={cy} r={sw / 2} className={CAP[first]} />
-            <circle cx={cx + r} cy={cy} r={sw / 2} className={CAP[last]} />
-          </>
-        )}
-      </svg>
-      <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
-        <span className="text-title font-bold">{rate}</span>
-        <span className="text-label font-semibold text-sub">접수 성공률</span>
-        <span className="mt-1 text-caption text-muted">{base}</span>
+    <div className="shrink-0" style={{ width: cx * 2 }}>
+      <div className="relative" style={{ height: cy + sw / 2 }}>
+        <svg width={cx * 2} height={cy + sw / 2} aria-hidden>
+          {sum === 0 ? (
+            <path
+              d={`M ${pt(180)} A ${r} ${r} 0 0 1 ${pt(0)}`}
+              className="stroke-bg"
+              strokeWidth={sw}
+              fill="none"
+            />
+          ) : (
+            <>
+              {arcs}
+              <circle cx={cx - r} cy={cy} r={sw / 2} className={COLOR[parts[first].key].cap} />
+              <circle cx={cx + r} cy={cy} r={sw / 2} className={COLOR[parts[last].key].cap} />
+            </>
+          )}
+        </svg>
+        <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
+          <span className="text-title font-bold">{rate}</span>
+          <span className="text-label font-semibold text-sub">접수 성공률</span>
+        </div>
       </div>
+      {/* 설명은 링 밖 아래 — 링 안(폭 약 200px)에 두면 건수가 네 자리만 돼도 호에 걸침 (11/02 사용자). 길면 줄바꿈 */}
+      <p className="mt-2 text-center text-caption text-muted">{base}</p>
     </div>
   )
 }

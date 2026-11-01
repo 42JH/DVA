@@ -13,7 +13,7 @@ export function RouteError() {
     <main className="grid h-full place-items-center">
       <section className="grid w-[440px] justify-items-start gap-4">
         <h1 className="text-title font-bold">화면을 그리지 못했어요</h1>
-        <p className="text-body text-sub">{message}</p>
+        <p className="min-w-0 text-body break-words text-sub">{message}</p>
         {/* 새로고침으로 홈 — 망가진 화면 상태를 통째로 버림 */}
         <Button onClick={() => window.location.assign('/')}>홈으로</Button>
       </section>
