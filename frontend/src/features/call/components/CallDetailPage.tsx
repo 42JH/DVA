@@ -70,10 +70,9 @@ function CallDetailBody({ callId }: { callId: number }) {
           persona={vm.persona}
           player={vm.player}
           audioRef={vm.audioRef}
-          speeds={vm.speeds}
-          speed={vm.speed}
-          onSpeed={vm.setSpeed}
           segments={vm.segments}
+          focusKey={vm.focusKey}
+          jump={vm.jump}
         />
         <CallActions
           className="min-w-0 flex-1"

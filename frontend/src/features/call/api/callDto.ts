@@ -129,6 +129,12 @@ export interface Utterance {
   speaker: 'AI' | 'CUSTOMER'
   text: string
 }
+/** 그 시각(초)에 하던 말 = 시각을 아는 발화 중 sec 이전의 마지막 (06: AI 동작 → 스크립트 줄, 재생 위치 → 줄 강조). 없으면 null */
+export function utteranceAt(utterances: Utterance[], sec: number): Utterance | null {
+  let hit: Utterance | null = null
+  for (const u of utterances) if (u.atSec !== null && u.atSec <= sec) hit = u
+  return hit
+}
 export interface AiAction {
   order: number
   atSec: number | null

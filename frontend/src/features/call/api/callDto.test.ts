@@ -5,6 +5,7 @@ import {
   RESULT_OF,
   durationSec,
   toCallDetail,
+  utteranceAt,
   toCallRow,
   type CallDetailDto,
   type CallListItemDto,
@@ -143,5 +144,17 @@ assert.deepEqual(d.actions[0], {
   text: '보내는 분 이름 = 강도윤',
 })
 assert.equal(toCallDetail({ ...detail, recordings: [] }, [], [], []).recording, null)
+
+// 시각 → 그때 하던 말 (시각 모르는 발화는 건너뜀)
+const says = [
+  { order: 1, atSec: 0, speaker: 'AI' as const, text: 'a' },
+  { order: 2, atSec: 5, speaker: 'CUSTOMER' as const, text: 'b' },
+  { order: 3, atSec: null, speaker: 'AI' as const, text: 'c' },
+  { order: 4, atSec: 7, speaker: 'AI' as const, text: 'd' },
+]
+assert.equal(utteranceAt(says, 6)?.order, 2)
+assert.equal(utteranceAt(says, 7)?.order, 4)
+assert.equal(utteranceAt(says, 100)?.order, 4)
+assert.equal(utteranceAt(says, -1), null)
 
 console.log('callDto.test.ts OK')
