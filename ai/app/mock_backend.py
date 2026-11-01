@@ -30,6 +30,9 @@ class MockBackend:
         self.faqs: dict[int, dict] | None = None  # 명시적으로 설정한 테스트 원문만 조회한다.
         # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
+        self.insights_enabled = True
+        self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
+        self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
 
     async def close(self) -> None:
         pass
@@ -63,6 +66,19 @@ class MockBackend:
             return dict(pending)
         personas["ACTIVE"] = {**personas.pop("PENDING"), "status": "ACTIVE", "applyErrorCode": None}
         return dict(personas["ACTIVE"])
+
+    # --- 통화 기록·분석: 같은 순번에 다른 내용이면 409 흉내 ---
+
+    async def send_call_events(self, call_session_seq, body):
+        saved = self.events.setdefault(call_session_seq, {})
+        for event in body["events"]:
+            if saved.get(event["eventOrder"], event) != event:
+                raise BackendError("/events 409 EVENT_PAYLOAD_CONFLICT")
+        saved.update({e["eventOrder"]: e for e in body["events"]})
+
+    async def send_call_analysis(self, call_session_seq, body):
+        if self.analyses.setdefault(call_session_seq, body) != body:
+            raise BackendError("/analysis 409 EVENT_PAYLOAD_CONFLICT")
 
     # --- 테스트 준비 ---
 
