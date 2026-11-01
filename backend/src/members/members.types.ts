@@ -7,6 +7,7 @@ export interface ImportedMembership {
   customerSeq: number;
   employeeNo: string;
   departmentSeq?: number | null;
+  role?: MemberRole;
 }
 export interface Membership {
   departmentSeq: number | null;

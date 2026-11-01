@@ -194,6 +194,7 @@ export class MembersService {
           customerSeq: customerIds[index],
           employeeNo: row.employeeNo,
           departmentSeq: row.departmentSeq,
+          role: row.role,
         })),
         client,
       );

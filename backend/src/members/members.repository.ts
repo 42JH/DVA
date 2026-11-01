@@ -143,15 +143,16 @@ export class MembersRepository {
     if (added.length)
       await client.query(
         `INSERT INTO memberships(organization_seq,customer_seq,employee_no,role,status,department_seq)
-         SELECT $1,r."customerSeq",r."employeeNo",'MEMBER','ACTIVE',r."departmentSeq"
-         FROM jsonb_to_recordset($2::jsonb) AS r("customerSeq" int,"employeeNo" text,"departmentSeq" int)`,
+         SELECT $1,r."customerSeq",r."employeeNo",COALESCE(r.role,'MEMBER'),'ACTIVE',r."departmentSeq"
+         FROM jsonb_to_recordset($2::jsonb) AS r("customerSeq" int,"employeeNo" text,"departmentSeq" int,role text)`,
         [companyId, JSON.stringify(added)],
       );
     const updated = rows.filter((row) => row.membershipSeq !== null);
     if (updated.length)
       await client.query(
-        `UPDATE memberships m SET department_seq=CASE WHEN r."changeDepartment" THEN r."departmentSeq" ELSE m.department_seq END
-         FROM jsonb_to_recordset($1::jsonb) AS r("membershipSeq" int,"departmentSeq" int,"changeDepartment" boolean)
+        `UPDATE memberships m SET department_seq=CASE WHEN r."changeDepartment" THEN r."departmentSeq" ELSE m.department_seq END,
+         role=COALESCE(r.role,m.role)
+         FROM jsonb_to_recordset($1::jsonb) AS r("membershipSeq" int,"departmentSeq" int,"changeDepartment" boolean,role text)
          WHERE m.membership_seq=r."membershipSeq"`,
         [
           JSON.stringify(
