@@ -34,6 +34,8 @@ def check_definitions(cfg, texts) -> None:
     engine.validate(set(TOOLS), texts, sample)
     engine.build()
     texts.call_info.format(**sample, first="")
+    texts.backend_info.format(**sample)
+    texts.backend_state.format(state="")
     unknown = [n for n in function_tool_names(load_live_toml()) if n not in TOOLS]
     if unknown:
         raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")

@@ -203,6 +203,8 @@ class Texts(_Strict):
     status_names: dict[str, str]
     customer_types: dict[str, str]
     call_info: str
+    backend_info: str
+    backend_state: str
     progress: str
     progress_then: str
     progress_preview: str
@@ -216,6 +218,7 @@ class Texts(_Strict):
     answer_error: str
     record_heard: str
     reask: str
+    speak: str
     drift_fix: str
     drift_markers: list[str]
 

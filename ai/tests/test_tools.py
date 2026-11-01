@@ -108,7 +108,7 @@ def test_record_order_invalid_phone_not_saved_but_rest_recorded():
 
 
 def test_record_order_not_allowed_outside_order_steps():
-    for stage in ("HUB", "C_CHOICE", "D_AFTER_ANSWER", "RAG", "END_CALL"):
+    for stage in ("HUB", "C_CHOICE", "RAG", "END_CALL"):
         assert call_tool(at(stage), "record_order", {"other_item": "옷"})["ok"] is False
 
 

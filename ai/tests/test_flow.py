@@ -277,10 +277,12 @@ def test_1_registered_order_submits_once_and_hangs_up():
 def test_1_fare_notice_waits_for_commit_then_is_not_repeated():
     call = play(saved_db(), steps("1")[:5])
     assert call.flow.pending and call.flow.stage == "A_PICKUP_TIME"
-    # 확정을 기다리는 동안 운임(요금표: 소형 1개)과 결제 방식(월결제 자격 하나 → 자동)만 안내
-    assert engine.next_text(call) == f"'운임은 4,000원이에요.' '{TEXTS.say['PAY_CREDIT']}'"
+    # 확정을 기다리는 동안은 새 질문 없이 기다린다. 확정되면 운임(요금표: 소형 1개) → 결제 방식(월결제 자격 하나 → 자동)
+    # → 추가 접수 질문을 한 진행 상태로 차례대로(2026-10-31 통화: 추가 접수 질문이 운임보다 먼저 나감)
+    assert engine.next_text(call) == TEXTS.note["COMMIT_WAIT"]
     report(call, commit("A_CHOICE"))
-    assert engine.next_text(call) == f"'{TEXTS.say['A8']}'" and len(call.parcels) == 1
+    assert engine.next_text(call) == f"'운임은 4,000원이에요.' '{TEXTS.say['PAY_CREDIT']}' '{TEXTS.say['A8']}'"
+    assert len(call.parcels) == 1
     assert call.payment_method == "credit"
 
 
@@ -297,8 +299,9 @@ def test_unknown_fare_is_not_said_and_result_is_incomplete():
     db = saved_db()
     no_fare = CFG.model_copy(update={"fare": FareConfig()})
     call = play(db, steps("1")[:5], no_fare)
-    assert engine.next_text(call) == f"'{TEXTS.say['PAY_CREDIT']}'"
-    for step in steps("1")[5:]:
+    report(call, steps("1")[5])
+    assert engine.next_text(call).startswith(f"'{TEXTS.say['PAY_CREDIT']}'") and "운임" not in engine.next_text(call)
+    for step in steps("1")[6:]:
         report(call, step)
     body = db.results[0]["body"]
     assert body["outcome"] == "INCOMPLETE" and "totalAmount" not in body and "notifiedPrice" not in body["parcels"][0]
@@ -315,9 +318,9 @@ def test_both_postpaid_methods_ask_and_wait_reverts_choice():
     run(apply_answer(call, "none", "wait"))  # "잠깐만요": 고른 것을 정하지 않고 다시 묻는다
     assert call.flow.pending is None and call.payment_method is None and call.flow.stage == "A_PAYMENT"
     report(call, say("groupBilling", "A_PAYMENT"))
-    assert TEXTS.say["PAY_GROUP"] in engine.next_text(call)
     report(call, commit("A_CHOICE"))
     assert call.payment_method == "groupBilling"
+    assert engine.next_text(call) == f"'{TEXTS.say['PAY_GROUP']}' '{TEXTS.say['A8']}'"
 
 
 def test_1_greeting_asks_recent_origin_then_recent_destination():
@@ -401,9 +404,9 @@ def test_4_new_customer_address_retry_texts_then_registered_like_flow(monkeypatc
     report(call, tool("record_order", {"sender_address": ORIGIN.address, "sender_address_detail": "1201호"},
                       "A_RECEIVER_HUB"))
     assert engine.next_text(call) == f"'{TEXTS.say['A2_1']}'"
-    # 수신인 정보 Hub: 성함과 주소를 한 번에 말하면 연락처만 묻는다
+    # 수신인 정보 Hub: 성함과 주소를 한 번에 말했는데 주소를 못 찾으면 연락처보다 주소를 먼저 다시 묻는다
     report(call, tool("record_order", {"receiver_name": "이영희", "receiver_address": "없는 주소 2"}, "A_RECEIVER_HUB"))
-    assert engine.next_text(call) == f"'{TEXTS.say['A2_2']}'"
+    assert TEXTS.say["A_ADDR_RETRY_RECEIVER"] in engine.next_text(call)
     report(call, tool("record_order", {"receiver_phone": "010-9876-5432"}, "A_RECEIVER_HUB"))
     assert TEXTS.say["A_ADDR_RETRY_RECEIVER"] in engine.next_text(call)
     assert "보내시는 곳" not in engine.next_text(call)  # 단계에 맞는 쪽만
@@ -412,7 +415,7 @@ def test_4_new_customer_address_retry_texts_then_registered_like_flow(monkeypatc
                  commit("A_CHOICE"), say("order", "B_DEST_CONFIRM_Q")):
         report(call, step)
     # 접수 완료 뒤에는 기존 고객처럼: 방금 보낸 택배가 최근 접수(출발지 그대로, "이번에도 {도착지}로")
-    assert engine.next_text(call) == f"'이번에도 {DEST.address}로 보내시나요?'"
+    assert engine.next_text(call).endswith(f"'이번에도 {DEST.address}로 보내시나요?'")
     assert call.order.sender_address == ORIGIN.address and call.customer_type == "registered"
 
 
@@ -949,11 +952,12 @@ def test_progress_tells_what_to_say_after_each_answer():
     assert dict(engine.preview(call))["택배를 보내겠다(접수)"] == ["A1_1"]
     assert dict(engine.preview(call))["보낸 택배를 조회·취소하겠다"] == ["NEW_LOOKUP", "A1_1"]
     assert TEXTS.say["A1_1"] in engine.progress_text(call, CFG.progress.max_chars)
-    # 가는 길이 답 처리 결과에 따라 갈리면(접수 → 기존/새 출발지) 미리 말하지 않는다
+    # 들어온 직후 전이를 따라간다: 기존 출발지 → 최근 도착지 확인, 새 출발지 → 출발지 주소
     call = make_call(saved_db())
     ahead = dict(engine.preview(call))
-    assert call.flow.stage == "B_GREET_CHOICE" and ahead["아니다·다른 곳에서 보내겠다·다른 용건이다"] == ["HUB_ASK"]
-    assert "예·맞다(그 출발지에서 보내겠다)" not in ahead
+    assert call.flow.stage == "B_GREET_CHOICE" and ahead["예·맞다(그 출발지에서 보내겠다)"] == ["B4"]
+    assert ahead["아니다, 다른 곳에서 보내겠다·새로 접수하겠다(택배를 보내려는 것은 분명함)"] == ["A1_2"]
+    assert ahead["아니다(무엇을 할지 말하지 않음)·다른 용건이다"] == ["HUB_ASK"]
     # 항목을 받는 단계에는 없다
     call = play(new_db(), [say("order", "A_REGISTER_SENDER")])
     assert engine.preview(call) == [] and "바로 이어서" not in engine.progress_text(call, CFG.progress.max_chars)
@@ -1001,3 +1005,17 @@ def test_registration_failure_keeps_new_customer_flow():
     call = play(db, NEW_ONE + [say("no_more", "END_CALL")])
     assert call.customer_type == "new" and call.errors
     assert db.results[0]["body"]["customer"] == {"name": "김철수", "phoneNumber": CALLER}  # 결과는 이름·발신번호로
+
+
+def test_pickup_time_is_shown_relative_to_call_received_day():
+    """수거 일시는 전화 받은 날(한국 시간) 기준 "내일 오후 8시"·"26일 오전 9시"처럼 보여 준다(연·월을 말하지 않게)."""
+    from datetime import datetime
+    from app.call import KST, spoken_time
+    base = datetime(2026, 10, 31, 18, 5, tzinfo=KST)
+    assert spoken_time(datetime(2026, 10, 31, 20, 0, tzinfo=KST), base) == "오늘 오후 8시"
+    assert spoken_time(datetime(2026, 11, 1, 8, 30, tzinfo=KST), base) == "내일 오전 8시 30분"
+    assert spoken_time(datetime(2026, 11, 2, 12, 0, tzinfo=KST), base) == "모레 오후 12시"
+    assert spoken_time(datetime(2026, 11, 26, 21, 0, tzinfo=KST), base) == "11월 26일 오후 9시"
+    call = make_call()  # 수신 시각 2026-10-28T01:00:00Z = 한국 10시
+    assert call.text_vars()["received"] == "2026-10-28 10:00 (수요일)"
+    assert "2026-10-28 10:00" in TEXTS.backend_info.format(**call.text_vars())

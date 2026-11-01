@@ -2,6 +2,7 @@ import logging
 
 from app import address
 from app.address import kakao
+from app.order import PHONE_FIELDS
 from app.tools._base import OrderFields, Result, ToolError, is_past, tool
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,11 @@ async def record_order(ctx, args: OrderFields) -> Result:
         setattr(ctx.order, name, value)
     recorded = [*values, *(n for n in CALL_FIELDS if n in args.model_dump(exclude_none=True) and n not in invalid)]
     ctx.from_saved -= set(values)
+    phones = [n for n in PHONE_FIELDS if n in values and values[n] != before.get(n)]
+    if phones:  # 고객이 불러 준 번호는 한 번 읽어 확인한다(숫자 하나라도 틀리면 안 됨)
+        ctx.phone_check = values[phones[-1]]
+        if "PHONE_CHECK" not in ctx.flow.notice:
+            ctx.flow.notice.append("PHONE_CHECK")
     await resolve(ctx)
     ctx.note_changes(before)  # 이미 채운 항목이 바뀌었으면 정정(§2.5(4))
     events = ["order.updated"] if recorded else []
@@ -53,20 +59,21 @@ async def record_order(ctx, args: OrderFields) -> Result:
 
 async def resolve(ctx) -> None:
     """새로 기록된 주소를 주소DB로 실제 도로명주소로 정한다(spec/address.md). 확정이면 그 주소, 애매하면 가장 가까운 후보,
-    못 찾으면 한 번 다시 묻고(지우면 단계가 그 항목을 구간 예외 문구로 다시 묻는다) 그래도 못 찾거나 보정 꺼짐이면 들은 그대로.
+    못 찾으면 기록하지 않고 지워서 찾을 때까지 다시 묻는다(단계가 그 항목을 다른 빈 항목보다 먼저 구간 예외 문구로 묻는다.
+    2026-10-31: 확정되지 않은 주소로 다음 단계로 넘어가지 않게). 보정 꺼짐이면 들은 그대로.
     정한 주소로 카카오에서 지번·동명·우편번호·좌표를 찾는다(접수에 필요. 못 찾으면 비워 두고 접수 때 막는다)."""
     for key in sorted(ctx.address_pending):
         heard = getattr(ctx.order, key)
         result = await address.correct(heard) if heard else None
-        if result and result["status"] == "not_found" and key not in ctx.address_retry:
-            # 없는 주소를 그대로 받지 않고 한 번 더 묻는다. 두 번째도 못 찾으면 들은 그대로 두고,
-            # 지번·좌표가 없어 접수는 미완료로 넘어간다
+        if result and result["status"] == "not_found":
             ctx.address_retry.add(key)
             setattr(ctx.order, key, None)
+            setattr(ctx.order, f"{key}_detail", None)  # 못 찾은 주소에 붙은 상세주소도 믿을 수 없다(다시 받는다)
             setattr(ctx.order, key.replace("_address", "_geo"), None)
             ctx.address_results[key] = {"status": "not_found", "changed": False, "geo": False, "retry": True}
             log.info("주소 확정 %s %s not_found 다시 물음", ctx.session_id, key)
             continue
+        ctx.address_retry.discard(key)
         if result and result["candidates"]:
             setattr(ctx.order, key, result["candidates"][0])
         geo = await kakao.geocode(getattr(ctx.order, key), ctx.cfg.address.kakao_timeout_sec) if heard else None

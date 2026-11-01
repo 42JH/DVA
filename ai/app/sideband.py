@@ -11,7 +11,7 @@ from app import client_backend
 from app.call import Call
 from app.dispatcher import dispatch
 from app.flow import engine
-from app.progress import after_change, send_progress
+from app.progress import after_change, send_progress, speaking, update_backend
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ async def run_call(call: Call, client) -> None:
             call.status = "active"
             call.last_input_at = time.monotonic()
             call.notify()
+            await update_backend(call, conn)
             await send_progress(call, conn)
             watchers = [asyncio.create_task(watch_end(call, client, conn)), asyncio.create_task(watch_idle(call, conn)),
                         asyncio.create_task(watch_flow(call, conn, client))]
@@ -71,17 +72,27 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
     if etype not in call.event_types:  # 위임·도구 이벤트가 오는지 실제 통화에서 확인하려고
         call.event_types.add(etype)
         log.info("sideband 이벤트 %s %s", call.session_id, etype)
+    if etype == 'session.updated':  # 백엔드 상태 갱신(session.update)을 받았는지
+        log.info("세션 갱신 받음 %s", call.session_id)
     if etype == 'session.delegation.created':
         call.delegated_at = time.monotonic()
+        trace(call, "위임 생성")
     if etype == 'session.delegation.created' and call.delegation_mode == 'client':
         value = _dump(event)
         client_backend.start_delegation(call, conn, value.get('delegation') or {}, tool_tasks, client)
     elif etype in ('session.thinking.appended', 'session.commentary.appended'):
+        if etype == 'session.commentary.appended':  # 말하게 한 진행 상태를 GPT-Live가 받았는지(확정 뒤 멈춤 확인용)
+            log.info("commentary 받음 %s", call.session_id)
         client_backend.acknowledge(call, _dump(event))
     elif etype == "response.event" and call.delegation_mode == 'responses':
         inner = event.event or {}
         itype = inner.get("type")
         item = inner.get("item") or {}
+        if itype in TRACED:
+            usage = (inner.get("response") or {}).get("usage") or {}
+            trace(call, itype, item.get("type") or "", usage and {
+                "in": usage.get("input_tokens"), "out": usage.get("output_tokens"),
+                "reason": (usage.get("output_tokens_details") or {}).get("reasoning_tokens")})
         if itype == "response.output_item.added" and item.get("type") == "function_call":
             call.tool_calls[item.get("call_id") or item.get("id")] = {
                 "call_id": item.get("call_id"), "item_id": item.get("id"), "name": item.get("name"),
@@ -101,6 +112,7 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
         call.add_transcript("customer", event.delta, start_ms, getattr(event, "end_ms", None))
         call.last_input_at = time.monotonic()
         if event.delta.strip():
+            call.customer_said_at = time.monotonic()
             call.input_ready.set()
         listener.heard(call, event.delta, conn, client, start_ms)
     elif etype == "session.output_transcript.delta":
@@ -159,6 +171,22 @@ async def fix_drift(call: Call, conn, stage: str) -> None:
         log.exception("마무리 인사 바로잡기 실패 %s", call.session_id)
 
 
+# 위임 지연을 구간별로 보려고 남기는 백엔드 응답 이벤트(글자 조각 이벤트는 빼고)
+TRACED = ("response.created", "response.output_item.added", "response.output_item.done",
+          "response.output_text.delta", "response.done")
+
+
+def trace(call: Call, what: str, kind: str = "", usage=None) -> None:
+    """위임 구간 시각(통화 시작부터 ms)을 로그에 남긴다. 글자 조각(output_text.delta)은 응답마다 첫 조각만."""
+    if what == "response.output_text.delta":
+        if call.trace_text_started:
+            return
+        call.trace_text_started = True
+    elif what == "response.created":
+        call.trace_text_started = False
+    log.info("위임 %s +%dms %s %s %s", call.session_id, (time.time() - call.started_at) * 1000, what, kind, usage or "")
+
+
 async def run_tool(call: Call, conn, item: dict) -> None:
     """한 통화 안의 도구는 순서대로(통화별 잠금, FIFO). 결과는 꼭 돌려주고 response.create를 보낸다."""
     async with call.lock:
@@ -170,7 +198,9 @@ async def run_tool(call: Call, conn, item: dict) -> None:
                 "output": json.dumps(output, ensure_ascii=False, default=str),
             })
             await conn.response.create()
-            await after_change(call, conn)
+            trace(call, "도구 결과 보냄", item.get("name") or "")
+            # 도구 결과의 state.next가 백엔드 모델을 거쳐 음성 모델에 간다. 같은 내용을 진행 상태로 또 보내면 두 번 말한다
+            await after_change(call, conn, delivered="state" in output)
         except Exception:
             log.exception("도구 결과 전송 실패 %s", call.session_id)
             call.add_error("도구 결과 전송 실패")
@@ -206,7 +236,7 @@ async def watch_end(call: Call, client, conn) -> None:
                 log.exception("상담원 전환 실패 %s", call.session_id)
                 call.add_error("상담원 전환 실패")
             call.refer_failed = True
-            await send_progress(call, conn)
+            await send_progress(call, conn, speak=True)  # 고객 말 없이 보내는 안내: 말하게
             await wait_quiet(call)
         await client.live.sessions.hangup(call.session_id)
     except asyncio.CancelledError:
@@ -253,6 +283,10 @@ async def watch_flow(call: Call, conn, client) -> None:
             await _fire(call, conn, engine.COMMIT, "commit")
         elif call.rag_deadline and now >= call.rag_deadline and engine.handles(call, "rag.timeout"):
             await _fire(call, conn, "rag.timeout", "watchdog")
+        if call.progress_due and not speaking(call):
+            async with call.lock:
+                if call.progress_due:
+                    await send_progress(call, conn)
         side = call.side
         if side["off"] and not side["flushing"] and side["text"].strip() and side["stage"] != call.flow.stage \
                 and engine.listening(call):
@@ -274,7 +308,7 @@ async def _fire(call: Call, conn, event: str, by: str) -> None:
             return  # 잠금을 기다리는 사이 검색 결과가 와서 단계가 바뀌었다
         try:
             await engine.apply(call, [event], by)
-            await after_change(call, conn)
+            await after_change(call, conn, speak=True)  # 고객 말 없이 옮겼다: 다음 할 말을 말하게
         except Exception:
             log.exception("흐름 사건 처리 실패 %s %s", call.session_id, event)
 

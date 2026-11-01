@@ -243,12 +243,15 @@ def test_ambiguous_address_is_decided_by_server_without_asking(corrector, db):
     assert call.order.receiver_address == best and call.order.receiver_address_detail == "101호"
 
 
-def test_not_found_address_is_recorded_as_heard(corrector):
+def test_not_found_address_is_never_recorded(corrector):
+    """못 찾은 주소는 몇 번째든 기록하지 않는다(확정되지 않은 주소로 다음 단계로 넘어가지 않게, 2026-10-31)."""
     call = make_call()
-    assert record(call, sender_address="테헤란로 212")["ok"]  # 지역을 말하지 않아 찾지 못함 → 한 번 다시 묻는다
-    assert call.order.sender_address is None
-    assert record(call, sender_address="테헤란로 212")["ok"]  # 두 번째도 못 찾으면 들은 그대로
-    assert call.order.sender_address == "테헤란로 212"
+    for _ in range(3):
+        assert record(call, sender_address="테헤란로 212", sender_address_detail="동 403호")["ok"]  # 지역이 없어 못 찾음
+        assert call.order.sender_address is None and "sender_address" in call.address_retry
+        assert call.order.sender_address_detail is None  # 못 찾은 주소에 붙은 상세주소도 지운다
+    assert record(call, sender_address="서울 강남구 테헤란로 211")["ok"]  # 찾으면 다시 묻기 표시를 지운다
+    assert call.order.sender_address and "sender_address" not in call.address_retry
 
 
 def test_without_db_address_is_recorded_as_heard():
@@ -274,9 +277,9 @@ def test_address_is_resolved_when_recorded(corrector):
 def test_changed_address_drops_detail_and_goes_back_to_receiver_step(corrector):
     """가액 단계에서 받는 곳 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 받는 분 정보 단계로 되돌아가 다시 받는다."""
     call = make_call()
-    call.address_retry |= {"sender_address", "receiver_address"}  # 작은 시험 DB에 없는 주소: 이미 한 번 다시 물은 것으로
     run(engine.apply(call, ["new.order"]))
-    assert record(call, **{k: v for k, v in FULL_ORDER.items() if k not in ("item_price", "pickup_at")})["ok"]
+    here = {"sender_address": "서울 강남구 테헤란로 211", "receiver_address": "서울 강남구 테헤란로 211"}  # 작은 시험 DB에 있는 주소
+    assert record(call, **{k: here.get(k, v) for k, v in FULL_ORDER.items() if k not in ("item_price", "pickup_at")})["ok"]
     assert call.flow.stage == "A_ITEM_VALUE"
     assert record(call, receiver_address="서울 강남구 테헤란로 112")["ok"]
     assert call.flow.stage == "A_RECEIVER_HUB" and "상세주소" in engine.next_text(call)
@@ -342,7 +345,7 @@ def test_linked_gil_number_is_unlinked_only_when_not_found():
     assert unlink_gil("인천 남동구 만수일로 3") is None  # 받침 ㄱ이 아니면 그대로
 
 
-def test_not_found_address_is_asked_once_more(corrector, monkeypatch):
+def test_not_found_address_is_asked_until_found(corrector, monkeypatch):
     async def none(text):
         return {"status": "not_found", "address": None, "candidates": []}
 
@@ -356,4 +359,4 @@ def test_not_found_address_is_asked_once_more(corrector, monkeypatch):
     assert call.order.receiver_address is None and engine.missing(call)[0] == "receiver_address"
     assert "받으시는 곳 주소를 찾지 못했습니다" in engine.next_text(call)
     run(dispatch(call, "record_order", json.dumps({"receiver_address": "경북 구미시 없는로 1"}, ensure_ascii=False), "c2"))
-    assert call.order.receiver_address == "경북 구미시 없는로 1"  # 두 번째는 들은 그대로(접수는 미완료로)
+    assert call.order.receiver_address is None and engine.missing(call)[0] == "receiver_address"  # 두 번째도 다시 묻는다
