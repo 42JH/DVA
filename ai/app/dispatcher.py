@@ -32,6 +32,8 @@ async def dispatch(call, name: str, arguments: str, call_id: str) -> dict:
         except ValidationError as e:
             raise ToolError("인수 오류", _validation_hint(e)) from None
         if name not in engine.allowed_tools(call):
+            # 음성 모델은 거절된 위임 뒤 지시 없이 혼자 말한다(2026-11-01 20:05 통화): 진행 상태를 다시 보낸다
+            call.progress_stale = True
             raise ToolError(f"지금 단계({call.flow.stage})에서 쓸 수 없는 도구", "state.next를 따르기")
         timeout = call.cfg.rag.timeout_sec if name == 'search_manual' else call.cfg.call.tool_timeout_sec
         result = await asyncio.wait_for(tool.run(call, args), timeout)

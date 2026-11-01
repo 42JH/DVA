@@ -72,7 +72,7 @@ def test_actual_tool_preserves_top3_raw_tables_and_order_state():
     assert output['context']['evidence'][0]['content'] == BODY+'0'
     # 주문 값은 그대로, 검색 결과(RAG Yes)는 QnA로 들어가 답한 뒤 들어오기 전 단계로 돌아갈 수 있게 기억한다
     assert call.order.model_dump() == before[0] and call.flow.stage == 'D_AFTER_ANSWER'
-    assert call.flow.resume == {'task': 'new_order', 'stage': before[1]}
+    assert call.flow.resume == {'task': None, 'stage': before[1]}
     assert not call.refer_requested.is_set() and not call.hangup_requested.is_set()
 
 

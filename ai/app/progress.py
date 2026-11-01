@@ -36,13 +36,15 @@ async def send_progress(call, conn, delivered: bool = False, speak: bool = False
     음성 모델이 다음 고객 말까지 말하지 않아 통화가 멈췄다(2026-10-31). 다음 할 말을 commentary.append로도 보낸다."""
     text = engine.progress_text(call, call.cfg.progress.max_chars)
     call.progress_speak = call.progress_speak or speak
-    if text != call.last_progress and not delivered:
-        if speaking(call):
+    # 거절된 도구 뒤에는 바뀐 것이 없어도, 도구 결과로 전했어도 다시 보낸다(음성 모델이 지시 없이 말하지 않게)
+    if call.progress_stale or (text != call.last_progress and not delivered):
+        if speaking(call):  # 미뤘다가 말이 멈추면 보낸다(다시 보낼 표시는 그대로 둔다)
             if not call.progress_due:
                 log.info("진행 상태 미룸 %s 단계=%s 고객=%s 상담원=%s 말하게=%s", call.session_id, call.flow.stage,
                          customer_speaking(call), agent_speaking(call), call.progress_speak)
             call.progress_due = True
             return
+        call.progress_stale = False
         await conn.session.thinking.append(content=text, delegation_id=None)
         if call.progress_speak:
             await conn.session.commentary.append(content=call.texts.speak.format(next=engine.next_text(call)),

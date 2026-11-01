@@ -11,7 +11,7 @@ class MatchArgs(Args):
 
 @tool(
     "match_pins",
-    "고객 주소록에서 고객이 말한 보내는 곳·받는 곳을 찾는다(어느 쪽을 찾는 중인지는 서버가 안다). "
+    "고객 주소록에서 고객이 말한 받는 곳을 찾는다. "
     "고객이 말한 이름·장소·층/호수만 채우고 나머지는 null. 결과(하나·여러 곳·없음)에 따라 서버가 다음 질문을 정한다.",
     MatchArgs,
 )
@@ -20,4 +20,6 @@ async def match_pins(ctx, args: MatchArgs) -> Result:
     if not said:
         raise ToolError("찾을 말이 없음", "고객이 말한 이름이나 장소를 넣어 다시 호출")
     events = ctx.match_pins(said.get("name"), said.get("place"), said.get("detail"))
+    if events == ["pins.none"]:  # 저장된 곳이 없음: 고객이 말한 받는 분 이름·장소를 받는 분 정보로 가져간다(B12)
+        await ctx.carry_dest_said()
     return Result({"found": len(ctx.pin_candidates)}, events)

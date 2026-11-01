@@ -3,10 +3,11 @@
 from app.flow.engine import ENTERED, Transition
 
 COMMON_TOOLS = ("get_state", "search_manual")  # 질문(RAG)은 어느 단계에서나 들어올 수 있다(§2.2)
-ORDER_TOOLS = COMMON_TOOLS + ("record_order",)  # 접수 단계: 지난 항목 정정도 기록한다(§2.5(4))
+# 주문 값 기록: 접수 업무 중이면 단계와 상관없이 받는다(정정 포함, spec/flow.md "누가 무엇을 정하나")
+ORDER_TOOLS = COMMON_TOOLS + ("record_order",)
 YES_NO = {"yes": "예·맞다·그렇게 해 달라", "no": "아니다·다른 것이다"}
 
-# 보내는 분 연락처는 묻지 않고 발신번호로 채운다(fill_sender). 기존 고객은 보내는 분을 그대로 두고 출발지 주소만 바꾼다
+# 보내는 분 연락처는 묻지 않고 발신번호로 채운다(fill_sender). 등록 고객은 성함도 고객 정보로 채운다
 SENDER = ("sender_name", "sender_address", "sender_address_detail")
 ORIGIN = ("sender_address", "sender_address_detail")
 RECEIVER = ("receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail")
@@ -19,14 +20,6 @@ def is_registered(ctx) -> bool:
 def done(*names):
     """이 항목들이 다 있음."""
     return lambda ctx: all(ctx.field_done(n) for n in names)
-
-
-def not_done(*names):
-    return lambda ctx: not all(ctx.field_done(n) for n in names)
-
-
-def task_is(*tasks):
-    return lambda ctx: ctx.flow.task in tasks
 
 
 def both(*guards):

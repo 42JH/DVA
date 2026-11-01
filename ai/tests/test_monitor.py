@@ -54,7 +54,7 @@ def test_monitor_graph_draws_every_stage(http):
     assert g["stages"] == list(engine.STAGES)
     for name in engine.STAGES:
         assert f'    {name}["{name}' in g["mermaid"]
-    assert '  HUB -->|"hub.order"| B_ORIGIN_ROUTE' in g["mermaid"]
+    assert re.search(r'  HUB -->\|"hub\.order[^"]*"\| ORDER', g["mermaid"])  # 한 엣지에 여러 사건을 묶어 적는다
 
 
 def test_health_is_public(http):
