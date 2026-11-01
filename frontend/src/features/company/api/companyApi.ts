@@ -1,7 +1,8 @@
 // 08 기업관리 — API-36~40 기업 · API-45~48 구성원 (API 연동 상세명세 7장). React를 모르는 데이터 · API 층
-// 부서 · 기업 공유 주소록 · 월 사용액 API는 디자인에 화면이 없어 안 씀 (11/01 결정)
+// 부서는 CSV의 부서 이름 ↔ 번호에만 씀(화면 없음) · 기업 공유 주소록 · 월 사용액 API는 안 씀 (11/01 결정)
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
+import { fetchAll } from '@/shared/api/paging'
 
 export type ActiveStatus = 'ACTIVE' | 'INACTIVE'
 
@@ -53,11 +54,23 @@ export interface Page<T> {
   total_count: number
 }
 
-/** 이름 · 전화 등록 항목 — role을 못 실음 → 대표자는 등록 후 PATCH (backend-todo 10) */
+/** 이름 · 전화 등록 항목 */
 export interface MemberInput {
   employeeNo: string
   name: string
   phoneNumber: string // 숫자만
+}
+/** 사원 등록(POST /companies/{id}/members) 한 줄 — role 생략: 신규 MEMBER · 기존은 유지
+ * departmentSeq 생략 · null = 부서 없음 (기존 사원도 빠짐 — role과 다름) */
+export interface MemberItem extends MemberInput {
+  role?: Member['membership']['role']
+  departmentSeq?: number | null
+}
+
+/** 부서 — 이름은 기업 안에서 고유 */
+export interface Department {
+  departmentSeq: number
+  name: string
 }
 
 const MAX_LIMIT = 100 // 목록 limit 최대
@@ -86,6 +99,11 @@ export const companyQueries = {
         api.get<Page<Member>>(`/companies/${id}/members`, { query: q, signal }),
     }),
   // 대표자 이름(상세 제목 줄) · CSV 대표자 지정(사번 → membershipSeq)에 전체가 필요 → 100건씩 끝까지
+  departments: (id: number) =>
+    queryOptions({
+      queryKey: [...companyQueries.all(), id, 'departments'],
+      queryFn: ({ signal }) => fetchAll<Department>(`/companies/${id}/departments`, {}, signal),
+    }),
   allMembers: (id: number) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'members', 'all'],
@@ -106,16 +124,37 @@ export async function fetchAllMembers(id: number, signal?: AbortSignal): Promise
 }
 
 /** 기업 등록 — 201 data.organizationSeq. 같은 이름도 등록됨 */
-export const createCompany = async (name: string): Promise<number> =>
-  (await api.post<ApiItem<{ organizationSeq: number }>>('/companies', { body: { name } })).data
-    .organizationSeq
+/** 기업 + 부서 + 사원을 한 번에 — POST /companies (11/01 백엔드 확장). 하나의 트랜잭션: 전부 되거나 전부 안 됨
+ * departmentName은 같은 요청의 departments[].name, role 생략 = MEMBER. 201 data.organizationSeq. 같은 이름 기업도 등록됨 */
+export interface NewCompanyMember extends MemberInput {
+  role?: Member['membership']['role']
+  departmentName?: string
+}
+export const createCompany = async (
+  name: string,
+  departments: string[] = [],
+  members: NewCompanyMember[] = [],
+): Promise<number> =>
+  (
+    await api.post<ApiItem<{ organizationSeq: number }>>('/companies', {
+      body: { name, departments: departments.map((d) => ({ name: d })), members },
+    })
+  ).data.organizationSeq
 
 /** 기업 삭제 — 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
 export const deleteCompany = (id: number): Promise<void> => api.delete(`/companies/${id}`)
 
 /** 사원 등록 — 1~1000건 · 전체 트랜잭션 · 204. 같은 사번이면 고객 정보 갱신(= 수정) */
-export const addMembers = (id: number, items: MemberInput[]): Promise<void> =>
+export const addMembers = (id: number, items: MemberItem[]): Promise<void> =>
   api.post(`/companies/${id}/members`, { body: { items } })
+
+/** 부서 만들기 — 201 data.departmentSeq. 같은 이름이 이미 있으면 409 */
+export const createDepartment = async (id: number, name: string): Promise<number> =>
+  (
+    await api.post<ApiItem<{ departmentSeq: number }>>(`/companies/${id}/departments`, {
+      body: { name },
+    })
+  ).data.departmentSeq
 
 /** 대표자 표시 바꾸기 */
 export const setMemberRole = (
@@ -146,3 +185,24 @@ export async function assignLeaders(id: number, employeeNos: string[]): Promise<
  * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호 · 위도 · 경도). 03 주문 '고객정보에도 저장'과 같은 API (11/01) */
 export const saveCustomerAddress = (customerSeq: number, address: CustomerAddress): Promise<void> =>
   api.patch(`/customers/${customerSeq}`, { body: { address } })
+
+/** CSV 주소를 사원마다 고객 주소로 저장 — 등록 API에 주소 칸이 아직 없어서(백엔드 추가 예정) 등록 뒤 따로
+ * shortcut: 사원마다 PATCH 1번 · 등록과 묶이지 않음 · 좌표 1 고정 — 등록 API가 주소를 받으면 그 본문으로 옮기고 이 함수는 지울 것
+ * 사번 → 고객 번호는 전체 사원을 다시 받아 찾음. 저장하지 못한 사번 목록을 돌려줌 */
+export async function saveMemberAddresses(
+  id: number,
+  rows: { employeeNo: string; address: Omit<CustomerAddress, 'latitude' | 'longitude'> }[],
+): Promise<string[]> {
+  if (rows.length === 0) return []
+  const byNo = new Map((await fetchAllMembers(id)).map((m) => [m.membership.employeeNo, m]))
+  const failed: string[] = []
+  for (const r of rows) {
+    const seq = byNo.get(r.employeeNo)?.customer.customerSeq
+    if (seq === undefined) failed.push(r.employeeNo)
+    else
+      await saveCustomerAddress(seq, { ...r.address, latitude: 1, longitude: 1 }).catch(() =>
+        failed.push(r.employeeNo),
+      )
+  }
+  return failed
+}

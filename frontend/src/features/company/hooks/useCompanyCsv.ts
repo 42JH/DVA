@@ -2,10 +2,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import {
-  addMembers,
   companyQueries,
   createCompany,
-  assignLeaders,
+  saveMemberAddresses,
 } from '@/features/company/api/companyApi'
 import {
   decodeCsv,
@@ -21,14 +20,13 @@ type Picked =
   | { kind: 'ok'; file: File; members: CsvMember[] }
   | { kind: 'bad'; file: File; errors: string[]; more: number }
 
-/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → ① 기업 만들기 → ② 사원 등록 → ③ 대표자 지정
- * 서버엔 CSV API가 없어 브라우저에서 읽어 JSON으로 (명세 7장). ①②③은 묶인 요청이 아님 → 어디서 멈췄는지 안내 */
+/** 08 CSV로 기업 등록 훅 — 기업명 + 파일 → 기업 · 부서 · 사원(대표자 · 부서 포함)을 요청 한 번으로 (11/01 백엔드 확장)
+ * 하나의 트랜잭션이라 전부 되거나 전부 안 됨 → 예전의 '기업은 만들었지만…' · 대표자 따로 지정이 없어짐
+ * 주소만 아직 등록 API에 칸이 없어 등록 뒤 사원마다 저장(saveMemberAddresses, shortcut) */
 export function useCompanyCsv(onDone: () => void) {
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
-  // ①이 성공하고 ②에서 실패했을 때 다시 [등록]을 누르면 기업을 또 만들지 않게 기억
-  const [createdId, setCreatedId] = useState<number | null>(null)
 
   const pick = async (file: File) => {
     const r = readMembersCsv(decodeCsv(await file.arrayBuffer()))
@@ -38,43 +36,41 @@ export function useCompanyCsv(onDone: () => void) {
 
   const reg = useMutation({
     mutationFn: async (members: CsvMember[]) => {
-      const id = createdId ?? (await createCompany(name.trim())) // ①
-      setCreatedId(id)
-      await addMembers(
-        id,
-        members.map(({ employeeNo, name, phoneNumber }) => ({ employeeNo, name, phoneNumber })),
-      ) // ② 전체 트랜잭션: 한 줄이라도 틀리면 전부 안 들어감
-      // ③ 대표자 지정 — 실패 수를 돌려줌
-      return assignLeaders(
-        id,
-        members.filter((m) => m.leader).map((m) => m.employeeNo),
+      const departments = [...new Set(members.flatMap((m) => (m.department ? [m.department] : [])))]
+      const id = await createCompany(
+        name.trim(),
+        departments,
+        members.map((m) => ({
+          employeeNo: m.employeeNo,
+          name: m.name,
+          phoneNumber: m.phoneNumber,
+          ...(m.leader ? { role: 'ORG_ADMIN' as const } : {}),
+          ...(m.department ? { departmentName: m.department } : {}),
+        })),
       )
+      // 주소는 등록이 끝난 뒤 — 못 저장한 사번 수를 돌려줌
+      const failed = await saveMemberAddresses(
+        id,
+        members.map((m) => ({ employeeNo: m.employeeNo, address: m.address })),
+      )
+      return failed.length
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: companyQueries.all() }), // 실패해도 ①은 됐을 수 있음
-    onSuccess: (failedLeaders) => {
-      if (failedLeaders === 0) onDone() // 다 됐으면 창 닫기, 대표자 지정 실패는 창에 안내를 남김
+    onSettled: () => qc.invalidateQueries({ queryKey: companyQueries.all() }),
+    onSuccess: (failedAddresses) => {
+      if (failedAddresses === 0) onDone() // 주소 저장 실패만 창에 안내를 남김
     },
   })
 
   const err = reg.error
+  // 서버 오류 경로는 members.N.field (등록 본문의 사원 배열) → 파일의 행으로
   const rowErrors =
     err instanceof ApiError && picked.kind === 'ok'
       ? serverRowErrors(err.details, picked.members)
       : []
-  const errorMessage = !err
-    ? reg.data
-      ? `사원은 등록했지만 대표자 ${reg.data}명 지정에 실패했습니다. 기업 상세에서 다시 지정해 주세요.`
-      : null
-    : createdId !== null
-      ? `기업은 만들었지만 사원을 등록하지 못했습니다. ${rowErrors[0] ?? errorText(err, '등록')}`
-      : errorText(err, '등록')
 
   return {
     name,
-    setName: (v: string) => {
-      setName(v)
-      if (createdId !== null) setCreatedId(null) // 이름을 바꾸면 새 기업으로 (앞서 만든 빈 기업은 목록에서 지울 수 있음)
-    },
+    setName,
     file: picked.kind === 'none' ? null : picked.file,
     fileError:
       picked.kind === 'bad'
@@ -88,7 +84,13 @@ export function useCompanyCsv(onDone: () => void) {
       setPicked({ kind: 'none' })
       reg.reset()
     },
-    errorMessage,
+    errorMessage: err
+      ? rowErrors.length
+        ? null // 줄 오류는 파일 칸 아래에
+        : errorText(err, '등록')
+      : reg.data
+        ? `기업과 사원은 등록했지만 ${reg.data}명의 주소를 저장하지 못했습니다. 기업 상세의 [수정]에서 넣어 주세요.`
+        : null,
     canSubmit: name.trim() !== '' && picked.kind === 'ok' && !reg.isPending && !reg.data,
     isSubmitting: reg.isPending,
     submit: () => picked.kind === 'ok' && reg.mutate(picked.members),

@@ -44,7 +44,7 @@ export function CompanyDetailPage() {
     {
       key: 'phone',
       header: '전화번호',
-      width: 160,
+      width: 200, // 160은 '010-0000-0000' 뒤가 주소와 붙어 보임 (11/01) — 열 폭 = 다음 열까지 거리
       cell: (r) => <span className="tabular-nums">{r.phone}</span>,
     },
     { key: 'address', header: '발송/수신 주소', cell: (r) => r.address },
