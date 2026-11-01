@@ -97,10 +97,11 @@ export const toSpeed = (rate: number | null): Speed =>
   rate === null || rate === 1 ? 'NORMAL' : rate < 1 ? 'SLOW' : 'FAST'
 
 const RATE = { SLOW: 0.85, FAST: 1.2 } as const // 칩 → 숫자 (11/02 결정: 3단계 칩 유지)
-/** 칩 → 서버 숫자. 보통 = null(기본). AI가 숫자 속도를 지원 안 하면(range null) 언제나 null. 범위 밖이면 범위 끝으로 */
+/** 칩 → 서버 숫자. 보통 = null(기본). 범위 밖이면 범위 끝으로
+ * AI가 숫자 속도를 지원 안 하면(range null) 고른 값 그대로 보냄 → 서버가 422로 거절 (몰래 '보통'으로 바꿔 저장하지 않게, 11/02 사용자: 늘 세 칸) */
 export function toRate(speed: Speed, range: { min: number; max: number } | null): number | null {
-  if (speed === 'NORMAL' || !range) return null
-  return Math.min(range.max, Math.max(range.min, RATE[speed]))
+  if (speed === 'NORMAL') return null
+  return range ? Math.min(range.max, Math.max(range.min, RATE[speed])) : RATE[speed]
 }
 
 const toVoice = (v: PersonaVersionDto): VoiceSettings => ({

@@ -9,6 +9,7 @@ import {
   type VoiceSettings,
 } from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
+import { unsupportedText } from '@/features/persona/labels'
 
 // Swagger 등록 API의 code(바꿀 수 없는 고유 코드)는 화면에서 받지 않고 자동으로 (10/31 결정 — 관리자가 정할 이유가 없음)
 // 창을 열 때 한 번 만들어 재시도에도 같은 값 → 첫 요청이 사실 성공했으면 두 번째는 409(중복)로 막혀 페르소나가 둘 생기지 않음
@@ -61,8 +62,9 @@ export function useAddPersona(onDone: (personaSeq: number) => void) {
     isSubmitting: mutation.isPending,
     submitError: !mutation.error
       ? null
-      : mutation.error instanceof ApiError && mutation.error.status === 409
-        ? '이미 추가됐을 수 있습니다. 창을 닫고 목록을 확인해 주세요.' // 코드가 겹칠 일은 사실상 없음 → 첫 요청이 성공한 것
-        : '추가하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+      : (unsupportedText(mutation.error) ??
+        (mutation.error instanceof ApiError && mutation.error.status === 409
+          ? '이미 추가됐을 수 있습니다. 창을 닫고 목록을 확인해 주세요.' // 코드가 겹칠 일은 사실상 없음 → 첫 요청이 성공한 것
+          : '추가하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
   }
 }

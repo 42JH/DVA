@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useBlocker } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { DRAFT_TAG } from '@/features/persona/labels'
+import { DRAFT_TAG, unsupportedText } from '@/features/persona/labels'
 import { personaQueries, saveDraft, type VoiceSettings } from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 
@@ -114,9 +114,10 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     save: () => mutation.mutate(),
     saveError: !mutation.error
       ? null
-      : mutation.error instanceof ApiError && mutation.error.status === 409
-        ? '그새 다른 관리자가 이 페르소나를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
-        : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
+      : (unsupportedText(mutation.error) ??
+        (mutation.error instanceof ApiError && mutation.error.status === 409
+          ? '그새 다른 관리자가 이 페르소나를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
+          : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.')),
 
     // [취소]: 바뀐 게 없으면 바로 닫고, 있으면 확인 창. 화면 이동이 막혔을 때도 같은 창
     cancel: () => (dirty ? setAskingCancel(true) : onDone()),

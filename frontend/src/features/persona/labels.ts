@@ -1,4 +1,5 @@
 // 페르소나 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
+import { ApiError } from '@/shared/api/client'
 import type { TagKind } from '@/shared/ui'
 import type { Speed, VersionChange, VersionStatus, WaitTime } from './api/personaApi'
 
@@ -35,6 +36,22 @@ export const SPEED_CHOICE: Record<Speed, string> = {
 export const WAIT_CHOICE: Record<WaitTime, string> = { SHORT: '짧게', NORMAL: '보통', LONG: '길게' }
 
 export const DEFAULT_VOICE_LABEL = '기본 음성' // 서버 voiceId null (목소리 '' )
+
+const SETTING_LABEL: Record<string, string> = {
+  voiceId: '목소리',
+  speakingRate: '발화 속도',
+  turnWaitLevel: '말 끝 기다리기',
+}
+/** 서버 422 'AI가 지원하지 않는 설정'(details: field · reason 'unsupported') → 어느 칸인지 문구. 그 오류가 아니면 null */
+export function unsupportedText(e: unknown): string | null {
+  if (!(e instanceof ApiError) || e.status !== 422) return null
+  const fields = e.details
+    .filter((d) => d.reason === 'unsupported')
+    .map((d) => SETTING_LABEL[d.field] ?? d.field)
+  return fields.length
+    ? `AI가 아직 지원하지 않는 설정입니다: ${fields.join(' · ')}. 다른 값을 골라 주세요.`
+    : null
+}
 
 /** 버전 히스토리 한 줄 요약 — 서버에 요약 칸이 없어 바로 앞 버전과 비교해 만듦: '프롬프트 수정, 발화 속도 보통 → 빠르게' */
 export function versionSummary(c: VersionChange): string {
