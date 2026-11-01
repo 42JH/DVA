@@ -97,6 +97,10 @@ max_choices = 30
 # 음성 모델이 위임하지 않은 고객 말을 서버가 백엔드에 직접 넘길지(listener.record_heard).
 # 끔: 2026-10-29 통화에서 위임된 FAQ 응답 중에 서버 요청이 끼어들어 답이 돌아오지 않고 상담원이 멈췄다(docs/WORKLOG.md)
 record_heard = false
+# 직전에 판별한 고객 말을 이만큼(초) 안이면 이어지는 말로 같이 판별한다(번호 중간에 쉬어 말이 나뉜 경우)
+joined_sec = 6.0
+# 정정·접수 정보 값이 든 고객 말을 음성 모델이 이만큼(초) 안에 위임하지 않으면 서버가 대신 백엔드에 넘긴다(record_heard와 별개로 늘 켜짐)
+delegate_wait_sec = 2.5
 
 [flow]
 # 통화 흐름(spec/LANGGRAPH_REBUILD.md). 다이어그램 밖 기본값은 §9

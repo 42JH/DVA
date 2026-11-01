@@ -93,6 +93,8 @@ def handle_event(call: Call, conn, event, tool_tasks: set, client=None) -> str |
         inner = event.event or {}
         itype = inner.get("type")
         item = inner.get("item") or {}
+        if itype in ("response.created", "response.done"):  # 서버가 대신 기록 요청을 보낼 때 응답과 겹치지 않게
+            call.backend_busy = itype == "response.created"
         if itype in TRACED:
             usage = (inner.get("response") or {}).get("usage") or {}
             trace(call, itype, item.get("type") or "", usage and {

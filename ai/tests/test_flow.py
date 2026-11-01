@@ -135,12 +135,31 @@ def report(call, step, i=0):
     return out
 
 
+# 정보 받기 질문(문구 키) → 그 질문이 받는 항목. 질문은 늘 빠진 항목만 묻는다(이미 채운 항목을 다시 묻지 않는다)
+ASKS = {"A1_1": "sender_name", "A1_3": "sender_phone", "A1_2": "sender_address", "ORIGIN_ASK": "sender_address",
+        "GREET_REGISTERED": "sender_address", "A_ADDR_RETRY_SENDER": "sender_address",
+        "A_ADDR_DETAIL_SENDER": "sender_address_detail", "B4": "receiver_name", "B6": "receiver_name",
+        "B8": "receiver_name", "B9": "receiver_name", "A2_1": "receiver_name", "A2_2": "receiver_phone",
+        "A2_3": "receiver_address", "A_ADDR_RETRY_RECEIVER": "receiver_address",
+        "A_ADDR_DETAIL_RECEIVER": "receiver_address_detail", "A3": "item", "A4": "item_price", "A5": "pickup_at"}
+
+
+def check_question(call):
+    """정보 받기 중이면 지금 질문이 묻는 항목이 비어 있다(2026-11-01 통화: 받는 곳 주소를 받은 뒤에도 주소를 되풀이)."""
+    if call.flow.stage != "ORDER":
+        return
+    for key in engine.question(call):
+        field = ASKS.get(key)
+        assert field is None or not call.field_done(field), f"이미 채운 {field}를 묻는 {key}"
+
+
 def play(db, steps, cfg=None):
     call = make_call(db)
     call.rag, call.cfg = FakeRag(), cfg or call.cfg
     for i, step in enumerate(steps):
         report(call, step, i)
         assert call.flow.stage == step[3], f"{i}번째 {step}: {call.flow.stage}"
+        check_question(call)
     return call
 
 
@@ -262,7 +281,7 @@ SCENARIOS = [
         say("yes", "A_CONFIRM"),
         commit("A_CHOICE"),
     ], ENTRY_NEW + ["ORDER"] + TAIL, None),
-    ("27 인사에 예 + 질문 → 답변 → 접수로 복귀(출발지는 쓴 채)", saved_db, [
+    ("27 인사에 예 + 질문 → 질문만 받음 → 답변 → 인사 질문으로 복귀", saved_db, [
         say("yes", "RAG", intent="question"),
         tool("search_manual", {"question": "배송 며칠"}, "D_AFTER_ANSWER"),
         say("other_task", "ORDER"),
@@ -445,9 +464,10 @@ def test_23_greeting_yes_with_name_correction_keeps_answer_then_records_name():
     assert "박민수" in engine.next_text(call) and said(call, "B4")  # 고친 값을 한 번 확인하고 다음 질문
 
 
-def test_27_greeting_yes_with_question_answers_then_resumes():
+def test_27_answer_with_question_takes_only_the_question_then_asks_again():
+    """"네, 근데 요금은요?": 질문만 받고, 답변이 끝나면 그 질문(기존 출발지)으로 돌아와 다시 묻는다(2026-11-01 결정)."""
     call = play(saved_db(), steps("27"))
-    assert call.order.sender_address == ORIGIN.address and said(call, "B4")
+    assert call.order.sender_address is None and said(call, "ORIGIN_ASK")
 
 
 # --- 정보 받기(ORDER): 순서 밖·정정·예외 ---
@@ -1134,3 +1154,53 @@ def test_pickup_time_is_shown_relative_to_call_received_day():
     call = make_call()  # 수신 시각 2026-10-28T01:00:00Z = 한국 10시
     assert call.text_vars()["received"] == "2026-10-28 10:00 (수요일)"
     assert "2026-10-28 10:00" in TEXTS.backend_info.format(**call.text_vars())
+
+
+def test_more_question_with_question_resumes_more_question_not_hub():
+    """추가 접수 질문에 "하나만 더 여쭤볼게요"(다른 일 + 질문): 질문만 받고 답변 뒤 추가 접수 질문으로 돌아온다
+    (2026-11-01 통화: "다른 일"로도 적용돼 HUB로 돌아가 새 택배를 시작함)."""
+    call = play(new_db(), NEW_ONE + [say("other", "RAG", intent="question"),
+                                     tool("search_manual", {"question": "제주 운임"}, "D_AFTER_ANSWER"),
+                                     say("other_task", "A_CHOICE")])
+    assert said(call, "A8") and len(call.parcels) == 1 and call.order.receiver_name is None
+
+
+def test_name_by_pin_search_then_address_by_record_asks_next_field():
+    """주소록 찾기로 이름만 듣고(없음) 주소는 값 기록으로 들어와도 이름을 옮기고 다음 항목을 묻는다
+    (2026-11-01 마지막 통화: "받으시는 분 주소를 말씀해 주세요"만 되풀이)."""
+    call = play(saved_db(), [say("yes", "ORDER"), say("no", "ORDER"), tool("match_pins", {"name": "한승준"}, "ORDER")])
+    assert said(call, "A2_3")
+    report(call, tool("record_order", {"receiver_address": DEST3.address, "receiver_address_detail": ""}, "ORDER"))
+    assert call.order.receiver_name == "한승준" and call.pin_ask is None and said(call, "A2_2")
+
+
+def test_place_by_pin_search_then_name_by_record_asks_next_field():
+    call = play(saved_db(), [say("yes", "ORDER"), say("no", "ORDER"),
+                             tool("match_pins", {"place": "대구 중구 동성로 1"}, "ORDER")])
+    assert said(call, "A2_1")
+    report(call, tool("record_order", {"receiver_name": "한승준"}, "ORDER"))
+    assert call.order.receiver_address == "대구 중구 동성로 1" and call.pin_ask is None and said(call, "A2_2")
+
+
+@pytest.mark.parametrize("sender_first", [False, True])
+@pytest.mark.parametrize("db", [new_db, saved_db, floors_db])
+def test_question_never_asks_a_filled_item_whatever_order_values_come_in(db, sender_first):
+    """값이 어떤 순서·경로로 들어와도 질문은 빠진 항목만(한 항목씩 거꾸로·섞어 기록하며 매번 확인)."""
+    fields = [("pickup_at", WHEN), ("item", ITEM), ("receiver_address", {"receiver_address": DEST3.address,
+                                                                       "receiver_address_detail": ""}),
+              ("receiver_name", {"receiver_name": "한승준"}), ("receiver_phone", {"receiver_phone": "010-5555-6666"}),
+              ("sender_name", {"sender_name": "김철수"}),
+              ("sender_address", {"sender_address": ORIGIN.address, "sender_address_detail": "1201호"})]
+    if sender_first:  # 보내는 분부터 받고 받는 분은 주소 → 이름 순(받는 곳 질문이 지금 질문이 되게)
+        fields = fields[-2:] + fields[:-2]
+    call = make_call(db())
+    if call.flow.stage == "HUB":
+        report(call, say("order", "ORDER"))
+    for name, args in fields:
+        if name == "receiver_address" and call.pin_scope("destination"):
+            report(call, tool("match_pins", {"name": "한승준"}, "ORDER"))  # 주소록 찾기로 이름만 → 주소는 값 기록으로
+            check_question(call)
+        report(call, tool("record_order", args, call.flow.stage))
+        if call.flow.stage == "ORDER":
+            check_question(call)
+    assert call.flow.stage == "A_CONFIRM"

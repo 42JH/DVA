@@ -163,6 +163,8 @@ class Call:
         self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
         self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
+        self.backend_busy = False  # 백엔드 모델이 응답 중(response.created~done). 서버 기록 요청은 끝난 뒤에
+        self.heard_before: tuple[str, float] = ("", 0.0)  # 직전에 판별한 고객 말과 시각(monotonic). 나뉜 말 이어 보기
         self.customer_said_at = 0.0  # 내용 있는 고객 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
         self.phone_check = ""  # 방금 기록한 번호(한 번 읽어 확인, PHONE_CHECK)
         self.progress_speak = False  # 미뤄 둔 진행 상태를 보낼 때 말하게도 해야 함(서버가 옮긴 단계)
@@ -175,6 +177,7 @@ class Call:
         self.listen_timer: asyncio.Task | None = None
         self.side_timer: asyncio.Task | None = None
         self.listen_tasks: set[asyncio.Task] = set()
+        self.forward_task: asyncio.Task | None = None  # 서버가 대신 기록 요청(listener.forward_later) 대기 중
         self.clock_offset: float | None = None  # 서버 시계(ms) - 세션 타임라인(ms)의 가장 작은 값
         self.agent_deltas: list[tuple[str, int | None, int | None]] = []  # 상담원 받아쓰기 조각(글, 시작, 끝)
         self.drift_fixed = ""  # 그래프와 다른 마무리 인사를 바로잡은 단계(단계마다 한 번)
@@ -271,12 +274,19 @@ class Call:
         self.load_pins()
         self.set_pin_role("destination")
 
-    def drop_offers(self) -> None:
-        """제안한 항목이 기록되면(고객이 제안에 답하지 않고 새 값을 말함) 그 제안은 사라진다."""
-        if self.order.has("sender_address"):
+    async def sync_asking(self) -> None:
+        """값이 기록된 뒤(어느 경로로든: 값 기록·주소록 찾기·제안 답) 질문을 정하는 보조 상태를 값에 맞춘다. 질문은 늘
+        빠진 항목만 묻는다: 제안·주소록 찾기 중 표시는 그 항목이 채워지면 사라지고, 주소록 찾기에서 들어 둔 이름·장소는
+        받는 분 정보로 옮긴다(2026-11-01 통화: 이름은 주소록 찾기로, 주소는 값 기록으로 들어와 이름이 옮겨지지 않고
+        "받으시는 분 주소를 말씀해 주세요"만 되풀이)."""
+        o = self.order
+        if o.has("sender_address"):
             self.origin_offer = None
-        if self.order.has("receiver_name") or self.order.has("receiver_address"):
+        if o.has("receiver_name") or o.has("receiver_address"):
             self.dest_offer = None
+            if self.pin_ask or self.dest_said:  # 주소록 찾기 도중에 받는 분 값이 직접 기록됨: 들어 둔 나머지를 옮기고 끝낸다
+                await self.carry_dest_said()
+                self.pin_offer, self.pin_candidates = None, []
 
     def use_place(self, role: str, place: Place) -> None:
         """저장된 배송지(또는 앞 택배)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""

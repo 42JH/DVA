@@ -58,9 +58,9 @@ def receiver_name_text(ctx) -> str:
     kind = receiver_offer(ctx)
     if kind:
         return {"recent": "B4", "pin": "B9", "pins": "B8"}[kind]
-    if ctx.pin_ask:
-        return "A2_3" if ctx.pin_ask == "place" else "A2_1"
-    if ctx.order.has("receiver_address"):
+    if ctx.pin_ask == "place" and not ctx.order.has("receiver_address"):
+        return "A2_3"  # 이름만 들었고 주소록에 없음: 주소(이 질문은 받는 분 성함 자리지만 주소가 비었을 때만)
+    if ctx.pin_ask == "name" or ctx.order.has("receiver_address"):
         return "A2_1"
     return "B6" if ctx.pin_scope("destination") else "A2_1"
 
@@ -148,6 +148,7 @@ async def order_answer(ctx, answer: str) -> list[str]:
         else:
             ctx.pin_candidates = []
             await ctx.carry_dest_said()
+    await ctx.sync_asking()
     return ["order.updated"]
 
 

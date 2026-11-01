@@ -183,15 +183,17 @@ class FakeDecisions:
         self.responses = responses
 
     async def create(self, **kw):
-        options = {q["name"]: [c["value"] for c in q["choices"]] for q in kw["questions"]}
+        options = {q["name"]: [c["value"] for c in q["choices"]] for q in kw["questions"] if q["type"] == "choice"}
         seen = {**kw, "text": {"format": {"schema": {"properties": {"answer": {"enum": options.get("answer", ["none"])}}}}}}
         self.responses.requests.append(seen)
         await asyncio.sleep(self.responses.delay)
         result = self.responses.decide(seen)
         if not isinstance(result, dict):  # 깨진 출력 흉내: 선택지 밖 답
             result = {"answer": str(result), "intent": "none", "slot": "none"}
-        return SimpleNamespace(answers=[SimpleNamespace(type="choice", name=n, choice=result.get(n, "none"))
-                                        for n in options], usage=None)
+        answers = [SimpleNamespace(type="choice", name=n, choice=result.get(n, "none")) for n in options]
+        answers += [SimpleNamespace(type="predicate", name=q["name"], probability=1.0 if result.get(q["name"]) else 0.0)
+                    for q in kw["questions"] if q["type"] == "predicate"]
+        return SimpleNamespace(answers=answers, usage=None)
 
 
 class FakeClient:
