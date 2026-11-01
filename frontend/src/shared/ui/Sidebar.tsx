@@ -81,6 +81,14 @@ export function Sidebar({
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(MENU.filter((m) => m.subs).map((m) => [m.label, inGroup(m.subs!)])),
   )
+  // 다른 화면에서 그룹 안 화면으로 오면(02 · 06의 'AI 미답변 보기' 등) 그 그룹을 펼침. 사용자가 접은 다른 그룹은 그대로
+  // (사이드바는 화면을 옮겨도 다시 안 그려져 처음 값만으론 부족 — 렌더 중에 경로 바뀜을 보고 고침, React 문서 방식)
+  const [seenPath, setSeenPath] = useState(pathname)
+  if (seenPath !== pathname) {
+    setSeenPath(pathname)
+    const g = MENU.find((m) => m.subs && inGroup(m.subs))
+    if (g && !open[g.label]) setOpen({ ...open, [g.label]: true })
+  }
   // 1280 아래(반응형 규칙 10/23)에선 접힌 채로 시작. 그 뒤는 사용자가 버튼으로
   const [collapsed, setCollapsed] = useState(() => window.matchMedia('(max-width: 1279px)').matches)
   const [fly, setFly] = useState<string | null>(null) // 접힌 채 그룹을 누르면 옆에 뜨는 하위 메뉴 (사이드바는 그대로 접힌 채)

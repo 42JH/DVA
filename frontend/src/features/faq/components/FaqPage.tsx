@@ -22,7 +22,8 @@ export function FaqPage() {
       header: '질문',
       cell: (r) => (
         <span
-          className={`block truncate text-body group-hover:text-action ${vm.openId === r.faqEntrySeq ? 'font-semibold' : ''}`}
+          // 펼치면 질문 전체를 줄바꿈해서 (접힌 줄만 말줄임)
+          className={`block text-body group-hover:text-action ${vm.openId === r.faqEntrySeq ? 'font-semibold break-words' : 'truncate'}`}
         >
           {r.question}
         </span>
@@ -48,9 +49,9 @@ export function FaqPage() {
   ]
 
   // 분류 탭: 건수는 카드 제목('FAQ 목록 3개')에 — 탭에 숫자까지 붙이면 11개가 한 줄에 안 들어감
-  const tabs: { key: CategoryFilter; label: string }[] = [
+  const tabs: { key: CategoryFilter; label: string; muted?: boolean }[] = [
     { key: '전체', label: '전체' },
-    ...vm.categories.map((c) => ({ key: c, label: c })),
+    ...vm.categories.map((c) => ({ key: c.name, label: c.name, muted: c.empty })),
   ]
 
   return (
@@ -92,7 +93,10 @@ export function FaqPage() {
               <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
                 <span />
                 <span className="text-label font-semibold text-sub">답변</span>
-                <p className="col-span-2 pr-4 text-body whitespace-pre-wrap">{r.answer}</p>
+                {/* break-words: 띄어쓰기 없는 긴 URL도 카드 안에서 줄바꿈 */}
+                <p className="col-span-2 min-w-0 pr-4 text-body break-words whitespace-pre-wrap">
+                  {r.answer}
+                </p>
               </div>
             </div>
           ) : null
@@ -110,6 +114,7 @@ export function FaqPage() {
           key={vm.modal.kind === 'edit' ? vm.modal.faq.faqEntrySeq : 'add'} // 대상이 바뀌면 폼을 새로
           faq={vm.modal.kind === 'edit' ? vm.modal.faq : null}
           onClose={vm.closeModal}
+          onAdded={vm.showAdded}
         />
       )}
     </div>

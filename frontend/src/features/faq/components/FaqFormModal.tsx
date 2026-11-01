@@ -1,6 +1,6 @@
 import { Button, ConfirmDialog, FormModal, SelectField, TextArea, TextField } from '@/shared/ui'
 import { useFaqForm } from '@/features/faq/hooks/useFaqForm'
-import type { Faq } from '@/features/faq/hooks/useFaqList'
+import type { Faq, FaqCategory } from '@/features/faq/hooks/useFaqList'
 import type { UnansweredQuestion } from '@/features/faq/hooks/useUnansweredList'
 
 // 09 FAQ 추가 · FAQ 수정 창 (와이어프레임 09_FAQ관리_FAQ추가 · _FAQ수정 · _삭제확인, 10/30) — 폭 680 · 분류 셀렉트 · 질문 · 답변 · [취소] [추가/저장]
@@ -10,12 +10,14 @@ export function FaqFormModal({
   faq,
   from,
   onClose,
+  onAdded,
 }: {
   faq: Faq | null
   from?: UnansweredQuestion
   onClose: () => void
+  onAdded?: (category: FaqCategory) => void // 추가에 성공하면 그 분류
 }) {
-  const vm = useFaqForm(faq, onClose, from)
+  const vm = useFaqForm(faq, onClose, from, onAdded)
 
   if (vm.confirmingDelete)
     return (
