@@ -1,9 +1,10 @@
 // CSV 내보내기 (04 통화 내역 · 03 주문 내역 공통) · 읽기 (CSV 가져오기용 — 08 CSV 기업 등록 등)
 // 엑셀에서 한글이 깨지지 않게 맨 앞에 BOM, 쉼표 · 따옴표 · 줄바꿈이 든 칸은 따옴표로 감쌈 (따옴표는 두 번)
+// = + - @ 로 시작하는 글 칸은 앞에 ' 를 붙여 엑셀이 수식으로 실행하지 않게 (고객 이름 · 불만 사유는 통화에서 온 글)
 
 export function toCsv(header: string[], rows: (string | number)[][]): string {
   const cell = (v: string | number) => {
-    const s = String(v)
+    const s = typeof v === 'string' && /^[=+\-@\t\r]/.test(v) ? `'${v}` : String(v)
     return /[",\r\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s
   }
   return [header, ...rows].map((r) => r.map(cell).join(',')).join('\r\n')
