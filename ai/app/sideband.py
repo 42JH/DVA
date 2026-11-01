@@ -212,15 +212,18 @@ async def run_tool(call: Call, conn, item: dict) -> None:
 
 
 async def wait_quiet(call: Call) -> None:
-    """요청 뒤에 음성 출력이 한 번 이상 나오고, 그 뒤 설정한 시간만큼 멈출 때까지(최대 대기 있음)."""
+    """요청 뒤에 상담원 말(출력 받아쓰기)이 한 번 이상 나오고, 그 말이 실제로 다 나간 뒤 설정한 시간만큼 멈출 때까지
+    (최대 대기 있음). 음성 출력 이벤트는 말하지 않을 때도 와서 기준으로 쓰지 않고, 출력 받아쓰기는 음성보다 먼저 와서
+    받은 시각이 아니라 끝 시각(세션 타임라인)으로 본다. 받은 시각으로 재면 인사가 다 나가기 전에 끊긴다."""
     cfg = call.cfg.call
     requested = time.monotonic()
     while True:
         now = time.monotonic()
-        spoke = call.last_output_at > requested
-        if spoke and now - call.last_output_at >= cfg.hangup_silence_sec:
-            return
         if now - requested >= cfg.hangup_max_wait_sec:
+            return
+        end = call.agent_deltas[-1][2] if call.agent_deltas else None
+        played = call.clock_offset is None or end is None or call.now_ms() - end >= cfg.hangup_silence_sec * 1000
+        if call.agent_text_at > requested and now - call.agent_text_at >= cfg.hangup_silence_sec and played:
             return
         await asyncio.sleep(POLL_SEC)
 

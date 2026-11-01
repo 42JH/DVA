@@ -187,16 +187,19 @@ def test_hangup_waits_for_goodbye_to_finish():
         call.cfg = quick_cfg(hangup_silence_sec=0.2, hangup_max_wait_sec=3.0)
         task, conn = await start(call, client)
         answers(client, "no_more")
-        conn.push("session.input_transcript.delta", delta="없어요")
+        conn.push("session.input_transcript.delta", delta="없어요", start_ms=0, end_ms=1000)  # 세션 시계 맞춤
         await until(lambda: call.flow.stage == "END_CALL")
-        await asyncio.sleep(0.3)
-        assert client.live.sessions.of("hangup") == []  # 인사가 시작되기 전에는 끊지 않는다
-        for _ in range(3):
+        for _ in range(3):  # 음성 출력 이벤트는 말하지 않을 때도 온다: 이것만으로는 끊지 않는다
             conn.push("session.output_audio.delta", delta="")
             await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)
+        assert client.live.sessions.of("hangup") == []  # 인사가 시작되기 전에는 끊지 않는다
+        # 받아쓰기는 음성보다 먼저 온다: 인사 음성은 지금부터 0.6초 뒤에 끝난다
+        conn.push("session.output_transcript.delta", delta="이용해 주셔서 감사합니다",
+                  start_ms=call.now_ms(), end_ms=call.now_ms() + 600)
         t0 = time.monotonic()
         await until(lambda: client.live.sessions.of("hangup"))
-        assert time.monotonic() - t0 >= 0.1
+        assert time.monotonic() - t0 >= 0.6 + 0.2  # 음성이 다 나가고 멈춘 뒤에야 끊는다
         conn.push("session.input_transcript.delta", delta="네 수고하세요")  # END_CALL에서는 판별하지 않는다
         await asyncio.sleep(0.2)
         assert len(client.responses.requests) == 1

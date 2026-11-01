@@ -1132,3 +1132,16 @@
 - 서버 .env에 `AI_INSIGHTS_TOKEN`(백엔드와 같은 값) 설정. 없으면 보내지 않는다.
 - 불만·되묻기 판정(지금 null), FAQ_ANSWERED·QUESTION_UNANSWERED 이벤트.
 - 실제 백엔드로 전송 확인(발화 시각·offsetSeconds, 주문 범위 403 여부).
+
+## 2026-11-01 (마무리 인사 전에 끊김)
+
+### 확인한 것
+- 종료 대기(`wait_quiet`)가 마지막 음성 출력 이벤트(`output_audio.delta`·`output_transcript.delta`)를 *받은 시각*으로 조용함을 쟀다. 받아쓰기는 음성보다 먼저 오고(끝 시각이 미래, `agent_speaking`과 같은 이유), 오디오 이벤트는 말하지 않을 때도 와서 인사가 시작되기 전에 "말했다"로 칠 수 있었다. 그래서 인사가 다 나가기 전에 hangup.
+
+### 바꾼 것
+- `wait_quiet`: 요청 뒤 상담원 출력 받아쓰기가 나오고, 마지막 조각의 끝 시각(세션 타임라인)이 지나 `hangup_silence_sec`만큼 멈췄을 때 끊는다(최대 대기 `hangup_max_wait_sec`는 그대로). 상담원 연결(refer) 대기도 같은 함수.
+- `spec/sideband.md` 종료 기준 문구 수정, 테스트 `test_hangup_waits_for_goodbye_to_finish`를 받아쓰기 끝 시각 기준으로 고침. 테스트 604개 통과(develop-ai 기준).
+
+### 남은 것
+- 실제 통화로 인사 끝까지 들리는지 확인. 세션 시계(`clock_offset`)는 고객 받아쓰기로만 맞추므로 고객 말이 없던 통화는 받은 시각 기준으로 돌아간다.
+- 인사가 늦게 시작되거나 길면 `hangup_max_wait_sec`(10초)에 잘릴 수 있다. 실제 통화 로그로 요청~인사 끝 시간을 보고 조정.
