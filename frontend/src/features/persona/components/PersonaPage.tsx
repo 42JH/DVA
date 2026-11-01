@@ -40,11 +40,7 @@ export function PersonaPage() {
     <div className="flex h-full min-h-[600px] gap-6">
       <div className="min-w-0 flex-1">
         {vm.compare ? (
-          <VersionDiffCard
-            view={vm.compare}
-            onTarget={vm.setCompareTarget}
-            onClose={vm.closeCompare}
-          />
+          <VersionDiffCard view={vm.compare} onClose={vm.closeCompare} />
         ) : (
           <PromptCard
             prompt={vm.prompt}
@@ -87,6 +83,16 @@ export function PersonaPage() {
           pending={vm.isApplying}
           onOk={vm.confirmApply}
           onClose={vm.cancelApply}
+        />
+      )}
+      {vm.useGuide && (
+        <ConfirmDialog
+          title={vm.useGuide.title}
+          note={vm.useGuide.note}
+          okLabel="버전 히스토리로"
+          okKind="primary"
+          onOk={vm.followGuide}
+          onClose={vm.closeGuide}
         />
       )}
       {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
