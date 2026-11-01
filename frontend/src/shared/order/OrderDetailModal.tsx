@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { Button, FormModal, Tag } from '@/shared/ui'
 import { useOrderDetail } from './useOrderDetail'
 
@@ -18,6 +18,7 @@ export function OrderDetailModal({
   onEdit?: (orderSeq: number) => void
 }) {
   const navigate = useNavigate()
+  const { pathname } = useLocation() // 06에서 열렸으면 지금 보는 통화는 링크 대신 글자 (같은 화면이 기록에 또 쌓이지 않게)
   const { order, isLoading, error } = useOrderDetail(orderId, parcelSeq)
 
   const openCall = (callSessionSeq: number) => {
@@ -82,13 +83,17 @@ export function OrderDetailModal({
                     <span>{c.time}</span>
                     <Tag kind="gray">{c.tag}</Tag>
                     <span>{c.text}</span>
-                    <button
-                      type="button"
-                      onClick={() => openCall(c.callSessionSeq)}
-                      className="ml-auto text-label font-semibold text-action hover:underline"
-                    >
-                      통화 상세 ›
-                    </button>
+                    {pathname === `/calls/${c.callSessionSeq}` ? (
+                      <span className="ml-auto text-label text-sub">보고 있는 통화</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openCall(c.callSessionSeq)}
+                        className="ml-auto text-label font-semibold text-action hover:underline"
+                      >
+                        통화 상세 ›
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
