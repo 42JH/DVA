@@ -41,13 +41,10 @@ export function HomeToday() {
             {vm.averages.map((a) => (
               <div key={a.label} className="flex flex-col gap-2">
                 <span className="text-label font-bold text-sub">{a.label}</span>
-                <span className="flex items-baseline gap-1">
-                  {a.parts.map(([value, unit]) => (
-                    <span key={unit} className="flex items-baseline gap-1">
-                      <span className="text-[32px] leading-[1.4] font-bold text-ink">{value}</span>
-                      <span className="text-label font-bold text-sub">{unit}</span>
-                    </span>
-                  ))}
+                {/* 값 자리에 '—' + 이유 (02 대시보드 평균 카드와 같게) */}
+                <span className="flex items-baseline gap-2">
+                  <span className="text-[32px] leading-[1.4] font-bold text-muted">—</span>
+                  <span className="text-caption text-muted">{a.note}</span>
                 </span>
               </div>
             ))}

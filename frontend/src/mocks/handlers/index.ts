@@ -2,7 +2,6 @@
 import { authHandlers } from './auth'
 import { callHandlers } from './calls'
 import { faqHandlers } from './faq'
-import { homeHandlers } from './home'
 import { orderHandlers } from './orders'
 import { personaHandlers } from './personas'
 
@@ -10,7 +9,6 @@ export const handlers = [
   ...authHandlers,
   ...callHandlers,
   ...faqHandlers,
-  ...homeHandlers,
   ...orderHandlers,
   ...personaHandlers,
 ]
