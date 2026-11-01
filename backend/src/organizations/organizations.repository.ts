@@ -4,8 +4,13 @@ import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
-import { Organization } from './organizations.types';
+import { OrganizationSummaryDto } from './dto/organization-response.dto';
 import { CompanyDirectoryEntryDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
+
+const summaryColumns = `o.organization_seq AS "organizationSeq",o.name,o.status,
+  o.monthly_billing_enabled AS "monthlyBillingEnabled",o.created_at AS "createdAt",
+  (SELECT count(*)::integer FROM memberships m
+   WHERE m.organization_seq=o.organization_seq AND m.status='ACTIVE') AS "memberCount"`;
 
 @Injectable()
 export class OrganizationsRepository {
@@ -32,12 +37,12 @@ export class OrganizationsRepository {
     );
   }
 
-  async list(query: ListOrganizationsQueryDto): Promise<PageRows<Organization>> {
-    const result = await readPage<Organization>(
+  async list(query: ListOrganizationsQueryDto): Promise<PageRows<OrganizationSummaryDto>> {
+    const result = await readPage<OrganizationSummaryDto>(
       this.database.pool,
-      `SELECT organization_seq AS "organizationSeq", name, status,monthly_billing_enabled AS "monthlyBillingEnabled" FROM organizations
-       WHERE ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
-         AND ($2::text IS NULL OR status = $2)`,
+      `SELECT ${summaryColumns} FROM organizations o
+       WHERE ($1::text IS NULL OR strpos(lower(o.name), lower($1)) > 0)
+         AND ($2::text IS NULL OR o.status = $2)`,
       [query.q || null, query.status ?? null],
       query,
       '"organizationSeq" DESC',
@@ -45,10 +50,9 @@ export class OrganizationsRepository {
     return result;
   }
 
-  async find(id: number): Promise<Organization | undefined> {
-    const result = await this.database.pool.query<Organization>(
-      `SELECT organization_seq AS "organizationSeq", name, status,monthly_billing_enabled AS "monthlyBillingEnabled"
-       FROM organizations WHERE organization_seq = $1`,
+  async find(id: number): Promise<OrganizationSummaryDto | undefined> {
+    const result = await this.database.pool.query<OrganizationSummaryDto>(
+      `SELECT ${summaryColumns} FROM organizations o WHERE o.organization_seq = $1`,
       [id],
     );
     return result.rows[0];

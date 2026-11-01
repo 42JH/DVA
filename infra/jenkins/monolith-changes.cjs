@@ -4,8 +4,7 @@ function allChecks(reason) {
   return { backend: true, observability: true, paymentDemo: true, full: true, reason };
 }
 
-function selectChecks(paths, deploy = false) {
-  if (deploy) return allChecks('deployment');
+function selectChecks(paths) {
   if (!paths?.length) return allChecks('missing_baseline_or_changes');
   const checks = {
     backend: false,
@@ -23,13 +22,19 @@ function selectChecks(paths, deploy = false) {
       checks.paymentDemo = true;
     } else if (/^backend\//.test(path)) {
       if (
-        /^backend\/(?:migrations\/|package(?:-lock)?\.json$|Dockerfile$|src\/(?:auth\/|common\/|config\/|database\/|app\.module\.ts$|configure-application\.ts$|main\.ts$))/.test(
+        /^backend\/(?:migrations\/|package(?:-lock)?\.json$|tsconfig\.json$|Dockerfile$|src\/(?:config\/|app\.module\.ts$|configure-application\.ts$|main\.ts$))/.test(
           path,
         )
       )
         return allChecks('shared_backend');
       // Any backend module change runs all backend regressions, including its callers.
       checks.backend = true;
+      if (
+        /^backend\/(?:src\/(?:observability\/|common\/http\/|health\/)|test\/observability(?:\.integration)?\.test\.cjs$)/.test(
+          path,
+        )
+      )
+        checks.observability = true;
     } else return allChecks('infrastructure_or_unknown_path');
   }
   return checks;
@@ -51,7 +56,7 @@ function changedPaths(base, head, cwd = process.cwd()) {
 
 if (require.main === module) {
   const paths = changedPaths(process.env.CI_BASE_COMMIT, process.env.SOURCE_COMMIT);
-  const checks = selectChecks(paths, process.env.SHOULD_DEPLOY === 'true');
+  const checks = selectChecks(paths);
   console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason].join(','));
 }
 

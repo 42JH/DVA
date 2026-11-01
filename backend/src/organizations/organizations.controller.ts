@@ -31,7 +31,7 @@ import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
 import { OrganizationIdParamsDto } from './dto/organization-id-params.dto';
-import { CreatedOrganizationDto, OrganizationResponseDto } from './dto/organization-response.dto';
+import { CreatedOrganizationDto, OrganizationSummaryDto } from './dto/organization-response.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
 import { AuditOperation } from '../audit/audit-operation';
@@ -52,7 +52,7 @@ const single = (model: typeof CreatedOrganizationDto) => ({
 
 @ApiTags('Companies')
 @ApiCookieAuth('adminSession')
-@ApiExtraModels(CreatedOrganizationDto, OrganizationResponseDto, RequestMetaDto, ErrorResponseDto)
+@ApiExtraModels(CreatedOrganizationDto, OrganizationSummaryDto, RequestMetaDto, ErrorResponseDto)
 @ApiBadRequestResponse({ type: ErrorResponseDto })
 @ApiUnauthorizedResponse({ type: ErrorResponseDto })
 @ApiForbiddenResponse({ type: ErrorResponseDto })
@@ -96,7 +96,7 @@ export class OrganizationsController {
       type: 'object',
       required: ['data', 'hasNext', 'total_count'],
       properties: {
-        data: { type: 'array', items: { $ref: getSchemaPath(OrganizationResponseDto) } },
+        data: { type: 'array', items: { $ref: getSchemaPath(OrganizationSummaryDto) } },
         total_count: { type: 'integer', minimum: 0, description: '검색·필터 후 전체 건수.' },
         hasNext: { type: 'boolean' },
       },
@@ -120,7 +120,7 @@ export class OrganizationsController {
 
   @Get(':id')
   @ApiOperation({ summary: '기업 상세' })
-  @ApiOkResponse({ schema: single(OrganizationResponseDto) })
+  @ApiOkResponse({ schema: single(OrganizationSummaryDto) })
   @ApiNotFoundResponse({ type: ErrorResponseDto })
   find(@Param() params: OrganizationIdParamsDto) {
     return this.organizations.find(params.id);

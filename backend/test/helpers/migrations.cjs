@@ -30,6 +30,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE to_regclass('public.call_sessions_started_list_idx') IS NOT NULL AND to_regclass('public.orders_customer_created_list_idx') IS NOT NULL",
       );
       assert.equal(listIndexes.rowCount, 1, 'Apply migration 032 to the isolated DB first');
+      const registrationDates = await client.query(
+        "SELECT 1 WHERE (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('organizations','departments') AND column_name='created_at' AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NOT NULL)=2",
+      );
+      assert.equal(registrationDates.rowCount, 1, 'Apply migration 033 to the isolated DB first');
       const customerMembership = await client.query(
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data' AND udt_name='jsonb') AND EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='memberships' AND column_name='department_seq' AND is_nullable='YES')",
       );

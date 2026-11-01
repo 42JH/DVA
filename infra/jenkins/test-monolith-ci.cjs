@@ -59,7 +59,7 @@ test('webhook includes every monolith infrastructure directory and preserves eve
   assert.equal(matches(['docs/README.md'], { count: '21' }), true);
 });
 
-test('only isolated infrastructure checks may skip backend regression', () => {
+test('ordinary backend changes retain all backend regressions without unrelated infrastructure checks', () => {
   assert.deepEqual(selectChecks(['infra/observability/test.mjs']), {
     backend: false,
     observability: true,
@@ -72,6 +72,25 @@ test('only isolated infrastructure checks may skip backend regression', () => {
   assert.equal(selectChecks(['backend/payment-test/public/index.html']).backend, true);
   assert.equal(selectChecks(['backend/src/orders/orders.service.ts']).backend, true);
   assert.equal(selectChecks(['backend/src/orders/orders.service.ts']).full, false);
+  for (const file of [
+    'backend/src/auth/auth.service.ts',
+    'backend/src/admins/admins.service.ts',
+    'backend/src/common/pagination-query.ts',
+    'backend/src/common/errors/api.exception.ts',
+    'backend/src/database/database.service.ts',
+    'backend/test/auth.integration.test.cjs',
+  ])
+    assert.deepEqual(
+      selectChecks([file]),
+      {
+        backend: true,
+        observability: false,
+        paymentDemo: false,
+        full: false,
+        reason: 'changed_paths',
+      },
+      file,
+    );
   assert.equal(
     selectChecks(['infra/observability/test.mjs', 'backend/src/orders/orders.service.ts']).backend,
     true,
@@ -81,15 +100,13 @@ test('only isolated infrastructure checks may skip backend regression', () => {
     false,
   );
   for (const file of [
-    'backend/src/auth/auth.guard.ts',
-    'backend/src/common/pagination-query.ts',
     'backend/src/config/environment.ts',
-    'backend/src/database/database.service.ts',
     'backend/src/app.module.ts',
     'backend/src/main.ts',
     'backend/src/configure-application.ts',
     'backend/package.json',
     'backend/package-lock.json',
+    'backend/tsconfig.json',
     'backend/migrations/031-worker.sql',
     'backend/Dockerfile',
     'infra/database/migrate.sh',
@@ -101,7 +118,33 @@ test('only isolated infrastructure checks may skip backend regression', () => {
   ])
     assert.equal(selectChecks([file]).full, true, file);
   for (const files of [null, []]) assert.equal(selectChecks(files).full, true);
-  assert.equal(selectChecks(['infra/observability/test.mjs'], true).full, true);
+});
+
+test('backend observability contracts also select the real monitoring stack checks', () => {
+  for (const file of [
+    'backend/src/observability/json-logger.ts',
+    'backend/src/observability/observability.service.ts',
+    'backend/src/common/http/request-context.ts',
+    'backend/src/health/health.controller.ts',
+    'backend/test/observability.test.cjs',
+    'backend/test/observability.integration.test.cjs',
+  ])
+    assert.deepEqual(
+      selectChecks([file]),
+      {
+        backend: true,
+        observability: true,
+        paymentDemo: false,
+        full: false,
+        reason: 'changed_paths',
+      },
+      file,
+    );
+  for (const files of [
+    ['backend/src/auth/auth.service.ts', 'infra/observability/render.mjs'],
+    ['infra/observability/render.mjs', 'backend/src/auth/auth.service.ts'],
+  ])
+    assert.equal(selectChecks(files).observability, true);
 });
 
 test('git comparison covers all commits, deletions and renames; missing or divergent history fails closed', () => {
@@ -133,9 +176,21 @@ test('git comparison covers all commits, deletions and renames; missing or diver
   try {
     git('init', '-q');
     const base = save('backend/old.ts', 'old');
-    save('backend/src/orders/orders.service.ts', 'changed in first commit');
+    save('backend/src/auth/auth.service.ts', 'changed in first commit');
     const head = save('docs/notes.md', 'changed in second commit');
-    assert.ok(changedPaths(base, head, directory).includes('backend/src/orders/orders.service.ts'));
+    assert.ok(changedPaths(base, head, directory).includes('backend/src/auth/auth.service.ts'));
+    for (const deploy of ['true', 'false']) {
+      const output = execFileSync(
+        process.execPath,
+        [path.join(__dirname, 'monolith-changes.cjs')],
+        {
+          cwd: directory,
+          encoding: 'utf8',
+          env: { ...process.env, CI_BASE_COMMIT: base, SOURCE_COMMIT: head, SHOULD_DEPLOY: deploy },
+        },
+      );
+      assert.equal(output.trim(), 'true,false,false,changed_paths', `deploy=${deploy}`);
+    }
     renameSync(path.join(directory, 'backend/old.ts'), path.join(directory, 'docs/renamed.md'));
     const renamed = save('docs/notes.md', 'rename');
     const paths = changedPaths(head, renamed, directory);
