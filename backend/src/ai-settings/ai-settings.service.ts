@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { ListResponse } from '../common/pagination';
@@ -22,18 +23,53 @@ export class AiSettingsService {
   ) {}
 
   async list(query: PersonaListQueryDto) {
-    return new ListResponse(await this.repository.personas(query), query.limit);
+    const page = await this.repository.personas(query);
+    const versions = await this.withAuthors(page.rows.map((persona) => persona.latestVersion));
+    return new ListResponse(
+      {
+        ...page,
+        rows: page.rows.map((persona, index) => ({
+          ...persona,
+          latestVersion: versions[index],
+        })),
+      },
+      query.limit,
+    );
   }
 
   async detail(id: number) {
     const persona = (await this.repository.personas({ limit: 1, offset: 0 }, id)).rows[0];
     if (!persona) throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
-    return persona;
+    return { ...persona, latestVersion: await this.withAuthor(persona.latestVersion) };
   }
 
   async versions(id: number, query: PersonaListQueryDto) {
-    await this.detail(id);
-    return new ListResponse(await this.repository.versions(id, query), query.limit);
+    if (!(await this.repository.latest(id)))
+      throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
+    const page = await this.repository.versions(id, query);
+    return new ListResponse({ ...page, rows: await this.withAuthors(page.rows) }, query.limit);
+  }
+
+  async withAuthor(version: PersonaVersion, client?: PoolClient): Promise<PersonaVersion> {
+    return (await this.withAuthors([version], client))[0];
+  }
+
+  private async withAuthors(
+    versions: PersonaVersion[],
+    client?: PoolClient,
+  ): Promise<PersonaVersion[]> {
+    const names = await this.audit.actorNames(
+      'AI_PERSONA_VERSION',
+      versions.map((version) => ({
+        actorId: version.createdByAdminUserSeq,
+        targetId: version.aiPersonaVersionSeq,
+      })),
+      client,
+    );
+    return versions.map((version) => ({
+      ...version,
+      createdByAdminUserName: names.get(version.aiPersonaVersionSeq) ?? null,
+    }));
   }
 
   async create(
@@ -55,7 +91,7 @@ export class AiSettingsService {
         },
         client,
       );
-      return version;
+      return this.withAuthor(version, client);
     });
   }
 
@@ -81,7 +117,8 @@ export class AiSettingsService {
       await this.repository.lock(client);
       const current = await this.repository.latest(id, client);
       this.requireVersion(current, input.expectedVersion);
-      if (SETTINGS.every((key) => current[key] === settings[key])) return current;
+      if (SETTINGS.every((key) => current[key] === settings[key]))
+        return this.withAuthor(current, client);
       if (current.version === 2147483647)
         throw new ApiException(409, 'INVALID_STATE', '버전 번호 한도를 초과했습니다.');
       const version = await this.repository.append(
@@ -106,7 +143,10 @@ export class AiSettingsService {
       if (active?.aiPersonaSeq === id || pending?.aiPersonaSeq === id) {
         await this.applications.queue(version.aiPersonaVersionSeq, actorId, requestId, client);
       }
-      return (await this.repository.version(version.aiPersonaVersionSeq, client))!;
+      return this.withAuthor(
+        (await this.repository.version(version.aiPersonaVersionSeq, client))!,
+        client,
+      );
     });
   }
 

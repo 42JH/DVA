@@ -677,3 +677,127 @@ test('transport failure cannot erase a specific apply error and stale notificati
   assert.equal((await data(await runtime('PENDING'))).applyErrorCode, null);
   await data(await report(next));
 });
+
+test('creator names are included in administrator persona responses without leaking into AI configuration', async () => {
+  const version = await create();
+  assert.equal(version.createdByAdminUserSeq, actorIds[0]);
+  assert.equal(version.createdByAdminUserName, '설정 테스트 관리자');
+  const updated = await data(
+    await patch(version.aiPersonaSeq, { expectedVersion: 1, name: '작성자 확인 버전' }),
+  );
+  assert.equal(updated.createdByAdminUserName, '설정 테스트 관리자');
+  const detail = await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`));
+  assert.equal(detail.latestVersion.createdByAdminUserName, '설정 테스트 관리자');
+  const listed = await (await call('GET', '/api/personas?limit=100')).json();
+  assert.equal(
+    listed.data.find((row) => row.aiPersonaSeq === version.aiPersonaSeq).latestVersion
+      .createdByAdminUserName,
+    '설정 테스트 관리자',
+  );
+  const versions = await (
+    await call('GET', `/api/personas/${version.aiPersonaSeq}/versions`)
+  ).json();
+  assert.equal(versions.total_count, 2);
+  assert.ok(versions.data.every((row) => row.createdByAdminUserName === '설정 테스트 관리자'));
+  const pending = await data(await activate(updated), 202);
+  assert.equal(pending.createdByAdminUserName, '설정 테스트 관리자');
+  assert.equal('createdByAdminUserName' in (await data(await runtime('PENDING'))), false);
+  assert.equal('createdByAdminUserName' in (await data(await report(pending))), false);
+  assert.equal('createdByAdminUserName' in (await data(await runtime())), false);
+});
+
+async function legacyVersion(actorId, recordAudit = true) {
+  const { AiSettingsRepository } = require('../dist/ai-settings/ai-settings.repository');
+  const { AuditService } = require('../dist/audit/audit.service');
+  const { DatabaseService } = require('../dist/database/database.service');
+  return app.get(DatabaseService).transaction(async (client) => {
+    const repository = app.get(AiSettingsRepository);
+    const id = await repository.create('legacy-' + randomUUID(), client);
+    const version = await repository.append(id, 1, input(), actorId, client);
+    if (recordAudit)
+      await app.get(AuditService).recordSuccess(
+        {
+          actorId,
+          targetId: version.aiPersonaVersionSeq,
+          targetType: 'AI_PERSONA_VERSION',
+          action: 'PERSONA_CREATED',
+          requestId: randomUUID(),
+        },
+        client,
+      );
+    return version;
+  });
+}
+
+test('logical creator references and audit-backed names survive physical administrator deletion and login ID reuse', async () => {
+  const loginId = 'legacy-' + randomUUID();
+  const creator = (
+    await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'삭제 전 작성자','not-for-login','OPERATOR','ACTIVE') RETURNING admin_user_seq",
+      [loginId],
+    )
+  ).rows[0].admin_user_seq;
+  // 과거 작성자를 표현하는 DB fixture. 현재 SYSTEM_ADMIN 생성·삭제 권한 정책은 변경하지 않는다.
+  const version = await legacyVersion(creator);
+  assert.equal(
+    (await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`))).latestVersion
+      .createdByAdminUserName,
+    '삭제 전 작성자',
+  );
+  assert.equal((await call('DELETE', `/api/admins/${creator}`)).status, 204);
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM admin_users WHERE admin_user_seq=$1', [creator]))
+      .rows[0].count,
+    '0',
+  );
+  const rows = await (await call('GET', `/api/personas/${version.aiPersonaSeq}/versions`)).json();
+  assert.equal(rows.data[0].createdByAdminUserSeq, creator);
+  assert.equal(rows.data[0].createdByAdminUserName, '삭제 전 작성자');
+  const replacement = (
+    await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'새 관리자','not-for-login','OPERATOR','ACTIVE') RETURNING admin_user_seq",
+      [loginId],
+    )
+  ).rows[0].admin_user_seq;
+  assert.notEqual(replacement, creator);
+  assert.equal(
+    (await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`))).latestVersion
+      .createdByAdminUserName,
+    '삭제 전 작성자',
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions' AND column_name='created_by_admin_user_name'",
+      )
+    ).rows[0].count,
+    '0',
+  );
+});
+
+test('unknown legacy creator names remain null and another actor on the same version cannot be misattributed', async () => {
+  const version = await legacyVersion(2147483647, false);
+  const { AuditService } = require('../dist/audit/audit.service');
+  const { DatabaseService } = require('../dist/database/database.service');
+  await app.get(DatabaseService).transaction((client) =>
+    app.get(AuditService).recordSuccess(
+      {
+        actorId: actorIds[0],
+        targetId: version.aiPersonaVersionSeq,
+        targetType: 'AI_PERSONA_VERSION',
+        action: 'PERSONA_APPLY_REQUESTED',
+        requestId: randomUUID(),
+      },
+      client,
+    ),
+  );
+  const detail = await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`));
+  assert.equal(detail.latestVersion.createdByAdminUserSeq, 2147483647);
+  assert.equal(detail.latestVersion.createdByAdminUserName, null);
+  const noCreator = await legacyVersion(null, false);
+  assert.equal(
+    (await data(await call('GET', `/api/personas/${noCreator.aiPersonaSeq}`))).latestVersion
+      .createdByAdminUserName,
+    null,
+  );
+});

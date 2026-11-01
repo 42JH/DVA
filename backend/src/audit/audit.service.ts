@@ -64,4 +64,17 @@ export class AuditService {
     if (!row) throw new ApiException(404, 'NOT_FOUND', '감사 로그를 찾을 수 없습니다.');
     return row;
   }
+
+  async actorNames(
+    targetType: string,
+    references: Array<Pick<AuditEvent, 'actorId' | 'targetId'>>,
+    client?: PoolClient,
+  ): Promise<Map<number, string | null>> {
+    const known = references.filter(
+      (reference) => reference.actorId !== null && reference.targetId !== null,
+    );
+    if (!known.length) return new Map();
+    const rows = await this.repository.actorNames(targetType, known, client);
+    return new Map(rows.map((row) => [row.targetId, row.name]));
+  }
 }

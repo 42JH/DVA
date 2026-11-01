@@ -20,6 +20,7 @@ export interface PersonaVersion extends PersonaSettings {
   version: number;
   status: PersonaStatus;
   createdByAdminUserSeq: number | null;
+  createdByAdminUserName?: string | null;
   createdAt: Date;
   applicationId: string | null;
   requestedByAdminUserSeq: number | null;

@@ -139,4 +139,26 @@ export class AuditRepository {
     );
     return result.rows[0];
   }
+
+  async actorNames(
+    targetType: string,
+    references: Array<Pick<AuditEvent, 'actorId' | 'targetId'>>,
+    client?: PoolClient,
+  ) {
+    return (
+      await (client ?? this.database.pool).query<{ targetId: number; name: string | null }>(
+        `SELECT reference."targetId",COALESCE(event.actor_name,
+          (SELECT name FROM admin_users WHERE admin_user_seq=reference."actorId")) AS name
+         FROM jsonb_to_recordset($2::jsonb) AS reference("targetId" int,"actorId" int)
+         LEFT JOIN LATERAL (
+           SELECT actor_name FROM audit_logs
+           WHERE target_type=$1 AND target_seq=reference."targetId"
+             AND actor_type='ADMIN' AND actor_seq=reference."actorId"
+             AND result='SUCCESS' AND actor_name IS NOT NULL
+           ORDER BY occurred_at,audit_log_seq LIMIT 1
+         ) event ON true`,
+        [targetType, JSON.stringify(references)],
+      )
+    ).rows;
+  }
 }

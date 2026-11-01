@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { APPLY_ERRORS, PERSONA_STATUSES, TURN_WAIT_LEVELS } from '../ai-settings.types';
 
@@ -32,6 +32,13 @@ export class PersonaVersionDto {
   status!: string;
   @ApiProperty({ description: '버전 작성 관리자.', type: Number, nullable: true })
   createdByAdminUserSeq!: number | null;
+  @ApiPropertyOptional({
+    description:
+      '관리자 페르소나 응답의 작성자 이름. 논리 참조와 기존 감사 이력으로 조회하며 관리자 삭제 후에도 보존합니다. 확인할 수 없는 과거 작성자는 null. AI 설정 응답에는 제공하지 않습니다.',
+    type: String,
+    nullable: true,
+  })
+  createdByAdminUserName?: string | null;
   @ApiProperty({ description: '버전 생성 시각.', type: String, format: 'date-time' })
   createdAt!: Date;
   @ApiProperty({

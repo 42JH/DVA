@@ -101,7 +101,7 @@ export class PersonasController {
       request.requestId,
     );
     if (version.status === 'ACTIVE') response.status(200);
-    return version;
+    return this.personas.withAuthor(version);
   }
 
   @Get()
