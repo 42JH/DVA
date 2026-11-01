@@ -141,3 +141,8 @@ export async function assignLeaders(id: number, employeeNos: string[]): Promise<
   }
   return failed
 }
+
+/** 사원 주소 저장 — 주소는 사원 소속이 아니라 고객 정보에 있음: PATCH /customers/{customerSeq} { address } (204)
+ * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호 · 위도 · 경도). 03 주문 '고객정보에도 저장'과 같은 API (11/01) */
+export const saveCustomerAddress = (customerSeq: number, address: CustomerAddress): Promise<void> =>
+  api.patch(`/customers/${customerSeq}`, { body: { address } })

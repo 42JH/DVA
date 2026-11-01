@@ -1,7 +1,6 @@
-import { Button, ChipGroup, FormModal, Stepper, TextField } from '@/shared/ui'
+import { AddressSearchModal, Button, ChipGroup, FormModal, Stepper, TextField } from '@/shared/ui'
 import { useOrderForm } from '@/features/order/hooks/useOrderForm'
 import type { OrderDetail } from '@/features/order/api/orderApi'
-import { AddressSearchModal } from './AddressSearchModal'
 import { OrderPartyFields } from './OrderPartyFields'
 
 // 03 주문 추가 (수기 접수) · 주문 수정 창 (와이어프레임 03_주문내역_주문추가 · _주문수정, 10/31) — 폭 960. order를 주면 수정
