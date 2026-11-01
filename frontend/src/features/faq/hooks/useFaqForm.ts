@@ -20,7 +20,12 @@ import {
 /** 09 FAQ 추가 · 수정 창 훅 — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
  * 10/30: 수정 창 안 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
  * 추가는 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
-export function useFaqForm(faq: Faq | null, onDone: () => void, from?: UnansweredQuestion) {
+export function useFaqForm(
+  faq: Faq | null,
+  onDone: () => void,
+  from?: UnansweredQuestion,
+  onAdded?: (category: FaqCategory) => void, // 추가에 성공하면 (09 목록이 새 FAQ가 보이는 탭 · 쪽으로)
+) {
   const qc = useQueryClient()
   const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? '') // 추가는 비워 두고 고르게 (기본값이 쓰레기통이 되지 않게)
   const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
@@ -37,7 +42,7 @@ export function useFaqForm(faq: Faq | null, onDone: () => void, from?: Unanswere
       if (!faq) {
         if (from) await convertToFaq(from.unansweredQuestionSeq, input)
         else await createFaq(input)
-        return
+        return input
       }
       const changed =
         input.category !== faq.category ||
@@ -45,11 +50,12 @@ export function useFaqForm(faq: Faq | null, onDone: () => void, from?: Unanswere
         input.answer !== faq.answer
       if (changed) await updateFaq(faq.faqEntrySeq, input) // 세 칸 다 보냄 (부분 수정 없음). 안 바뀌었으면 요청 없이 닫음
     },
-    onSuccess: async () => {
+    onSuccess: async (added) => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: faqQueries.all() }),
         from && qc.invalidateQueries({ queryKey: unansweredQueries.all() }),
       ])
+      if (added) onAdded?.(added.category)
       onDone()
     },
     // 없어졌거나(404) 다른 관리자가 먼저 처리한(409 INVALID_STATE) 질문 · FAQ → 목록을 다시 받아 지금 상태로
