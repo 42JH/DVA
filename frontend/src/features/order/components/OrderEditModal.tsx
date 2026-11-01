@@ -13,7 +13,7 @@ export function OrderEditModal({
 }: {
   orderId: number
   parcelSeq: number | null
-  onDone: () => void
+  onDone: (notice?: string) => void
   onClose: () => void
 }) {
   const { order, notice, conflict, onConflict } = useOrderToEdit(orderId, parcelSeq)

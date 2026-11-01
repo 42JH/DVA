@@ -72,6 +72,7 @@ assert.deepEqual(a.sender, {
   jibunAddress: '서울 강남구 역삼동 737',
   dongName: '역삼동',
   postalCode: '06236',
+  hasCoords: false, // 테스트 주소엔 위도 · 경도가 없음
 })
 assert.equal(a.receiver.detailAddress, null) // 빈 상세주소는 '없음'
 assert.equal(a.itemPrice, 30000)

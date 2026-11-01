@@ -197,11 +197,13 @@ export function useOrderList() {
       setModal({ kind: 'detail', id: r.orderSeq, parcelSeq: r.parcelSeq }),
     editOrder: (id: number) =>
       setModal((m) => ({ kind: 'edit', id, parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null })), // 상세 창 [수정]
-    // 수정 저장 · 취소 → 수정하던 그 주문 상세로
-    backToDetail: () =>
+    // 수정 저장 · 취소 → 수정하던 그 주문 상세로. notice = 접수 중단 주문 접수 결과 (목록 위 한 줄)
+    backToDetail: (notice?: string) => {
+      if (notice) setNotice(notice)
       setModal((m) =>
         m?.kind === 'edit' ? { kind: 'detail', id: m.id, parcelSeq: m.parcelSeq } : null,
-      ),
+      )
+    },
     closeModal: () => setModal(null),
     // 상세 창 [주문 취소] · [다시 접수] → 확인 창 (상세 창 대신 띄움 — 겹치면 Esc가 둘 다 닫음)
     askCancel: (id: number, parcelCount: number) =>

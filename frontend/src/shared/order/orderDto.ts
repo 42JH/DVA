@@ -95,6 +95,7 @@ const party = (a: OrderAddressDto | undefined): Party => ({
   jibunAddress: a?.jibunAddress ?? undefined,
   dongName: a?.dongName ?? undefined,
   postalCode: a?.postalCode ?? undefined,
+  hasCoords: a?.latitude != null && a?.longitude != null,
 })
 
 const sum = (xs: (number | null)[]) =>
@@ -145,6 +146,8 @@ export function toOrderDetail(dto: OrderDetailDto): OrderDetail {
       },
       itemPrice: p.itemPrice,
       clientComment: p.clientComment.trim() || null,
+      notifiedPrice: p.notifiedPrice,
     })),
+    notifiedPrice: first?.notifiedPrice ?? null,
   }
 }

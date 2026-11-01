@@ -116,6 +116,7 @@ export interface OrderInput {
   receiver: PartyInput
   items: OrderDetail['items']
   declaredValue: number | null // 물품 가액 원 (11/01 필수)
+  shippingFee?: number | null // 배송비 — 접수 중단 주문을 수정해 접수할 때만 (추가는 createOrder 인자로)
   pickupAt: string | null // ISO 8601 (선택)
   paymentMethod: PaymentMethod
   request: string | null // 고객 요청 사항 (선택)
@@ -150,3 +151,11 @@ export const cancelOrder = (orderSeq: number): Promise<void> =>
  * 주의(백엔드): 디버 접수는 됐는데 DB 저장만 실패했을 수 있음 → 확인 창에서 디버 쪽을 먼저 확인하라고 안내 */
 export const retryOrder = (orderSeq: number): Promise<ApiItem<{ status: OrderStatus }>> =>
   api.post(`/admin/orders/${orderSeq}/retry`)
+
+/** 접수 중단 주문 최종 접수 — POST /orders/{id}/submit { expectedVersion }. 200 = 결과(ACCEPTED만 접수 완료), 202 = 처리 중
+ * expectedVersion은 직전 PATCH 응답의 version (프론트에서 +1 하지 않음) */
+export const submitOrder = (
+  orderSeq: number,
+  expectedVersion: number,
+): Promise<ApiItem<{ status: OrderStatus }>> =>
+  api.post(`/orders/${orderSeq}/submit`, { body: { expectedVersion } })

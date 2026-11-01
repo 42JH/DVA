@@ -17,6 +17,7 @@ export interface Party {
   jibunAddress?: string
   dongName?: string
   postalCode?: string
+  hasCoords?: boolean // 위도 · 경도가 있는지 — 접수 중단 주문을 접수할 때 주소가 완성됐는지 보려고
 }
 
 // 월정산 · 그룹카드 · 개인카드 (디버 10/27) + 지점 방문(예전 주문 조회만 — 서버 cat, 새로 고를 수 없음)
@@ -44,6 +45,7 @@ export interface OrderDetail {
   parcels?: ParcelDetail[]
   /** 수정용 (03 주문 수정, 11/01) — 메모리 가짜 주문엔 없음 */
   version?: number // 다음 수정의 expectedVersion
+  notifiedPrice?: number | null // 배송비 (첫 상세 · pickParcel이면 고른 상세) — 접수 중단 주문 접수에 필요
   customerSeq?: number | null // 주문 고객 — 보내는 분 수정을 고객정보에도 저장할 때 (미완료 주문은 null)
   status?: OrderStatusDto // 실제 상태 — 결제 방식은 COLLECTING에서만 바꿀 수 있음
 }
@@ -57,6 +59,7 @@ export interface ParcelDetail {
   items: OrderDetail['items']
   itemPrice: number | null
   clientComment: string | null
+  notifiedPrice: number | null
 }
 
 export const orderQueries = {

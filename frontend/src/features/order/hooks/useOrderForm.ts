@@ -9,6 +9,7 @@ import {
   BOX_TYPES,
   createOrder,
   patchCustomer,
+  submitOrder,
   orderQueries,
   type BoxKey,
   saveOrder,
@@ -23,6 +24,7 @@ import { orderErrorText } from '@/features/order/labels'
 import {
   buildCustomerPatch,
   buildOrderPatch,
+  submitMissing,
   type CustomerPatch,
 } from '@/features/order/api/orderPatch'
 
@@ -48,6 +50,15 @@ const SHOWN_FIELDS = new Set(
     .flatMap((s) => ['name', 'phoneNumber', 'roadAddress', 'detailAddress'].map((f) => `${s}.${f}`))
     .concat(['items.other', 'itemPrice', 'pickupRequestedAt', 'clientComment']),
 )
+// 접수 중단 주문 접수 결과(응답 status) → 목록 위 한 줄. ACCEPTED만 디버 접수 완료
+const SUBMIT_RESULT: Partial<Record<string, string>> = {
+  ACCEPTED: '접수했습니다.',
+  notPaid: '접수했습니다. 고객 결제를 기다리는 중이에요.',
+  PAID: '접수했습니다. 디버 접수를 이어서 진행해요.',
+  SUBMITTING: '접수를 처리하는 중이에요. 잠시 뒤 목록에서 확인해 주세요.',
+  SUBMISSION_FAILED: '접수는 됐지만 디버 전송이 실패했어요. 상세에서 [다시 접수]를 눌러 주세요.',
+}
+
 const draftOf = (p: Party): PartyDraft => ({
   name: p.name,
   phone: p.phoneNumber,
@@ -64,7 +75,7 @@ const phoneOk = (p: string) => p.length === 10 || p.length === 11
  * 보내는 분 · 받는 분(이름 · 전화번호 · 주소 검색 · 상세주소) + 품목 수량 · 기타 품목 · 물품 가액 · 수거 희망 일시(선택) · 결제 방식 · 요청 사항
  * 주소는 직접 칠 수 없고 검색으로만 고름 (오타 주소로 수거 실패 방지). 접수되면 목록을 다시 받고 창을 닫음 */
 export function useOrderForm(
-  onDone: () => void,
+  onDone: (notice?: string) => void, // notice = 접수 중단 주문 접수 결과 (목록 위 한 줄)
   order?: OrderDetail,
   parcelSeq: number | null = null,
   onConflict?: () => void,
@@ -86,7 +97,8 @@ export function useOrderForm(
   )
   const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
   const [declaredValue, setDeclaredValue] = useState(order?.itemPrice?.toString() ?? '') // 숫자만
-  const [shippingFee, setShippingFee] = useState('') // 배송비 — 추가에만 (수정은 그대로 유지), 숫자만 · 1원 이상
+  // 배송비 — 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지), 숫자만 · 1원 이상
+  const [shippingFee, setShippingFee] = useState(order?.notifiedPrice?.toString() ?? '')
   const initialPickup = order?.pickupRequestedAt
     ? toDateTimeLocal(new Date(order.pickupRequestedAt))
     : ''
@@ -109,6 +121,8 @@ export function useOrderForm(
     p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
   // 결제 방식은 접수 중단(COLLECTING)일 때만 바꿀 수 있음 (명세 4.3, 11/01). 가짜 주문(status 없음)은 그대로
   const paymentLocked = !!order?.status && order.status !== 'COLLECTING'
+  // 접수 중단 주문 수정 = 저장하면서 접수 (11/01 결정: 버튼 이름 [접수], 조건이 다 채워져야 켜짐)
+  const collecting = order?.status === 'COLLECTING'
 
   const input = (): OrderInput => {
     const party = (p: PartyDraft): PartyInput => ({
@@ -126,6 +140,7 @@ export function useOrderForm(
       pickupAt: pickupAt ? fromDateTimeLocal(pickupAt) : null,
       paymentMethod: payment,
       request: orNull(request),
+      shippingFee: collecting ? (shippingFee ? Number(shippingFee) : null) : undefined,
     }
   }
 
@@ -133,9 +148,12 @@ export function useOrderForm(
   const draft = order ? buildOrderPatch(order, parcelSeq, input()) : null
   // 보내는 분 이름 · 주소가 바뀌었고 주문 고객이 있으면 고객정보 저장 여부를 물음 (전화만 바뀌면 안 물음)
   const customerDraft = order?.customerSeq ? buildCustomerPatch(order, input()) : null
+  // 접수하려면 모자란 것 — 버튼 위에 보여 주고, 다 채워져야 [접수]
+  const missing = collecting && order ? submitMissing(order, input()) : []
+  const submitNotice = useRef<string | undefined>(undefined) // 접수 결과 — 고객정보 재시도 뒤 닫을 때도 전달
   const finish = async () => {
     await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
-    onDone()
+    onDone(submitNotice.current)
   }
 
   // 멱등키: 같은 본문을 다시 보내면(실패 후 재시도) 같은 키, 본문이 바뀌면 새 키 (명세서 1.2)
@@ -145,7 +163,18 @@ export function useOrderForm(
     mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
       const body = input()
       if (order) {
-        if (draft?.patch) await saveOrder(order.orderSeq, draft.patch)
+        let version = order.version ?? 0
+        if (draft?.patch) version = (await saveOrder(order.orderSeq, draft.patch)).data.version
+        // 접수 중단: 저장한 새 버전으로 최종 접수. 실패해도 저장은 유지 — 이유를 들고 상세로 (11/01 결정)
+        if (collecting) {
+          try {
+            const r = await submitOrder(order.orderSeq, version)
+            submitNotice.current =
+              SUBMIT_RESULT[r.data.status] ?? '접수를 요청했습니다. 목록에서 상태를 확인해 주세요.'
+          } catch (e) {
+            submitNotice.current = `저장은 됐지만 접수하지 못했어요. ${orderErrorText(e, '접수')}`
+          }
+        }
         if (alsoCustomer && customerDraft && order.customerSeq) {
           try {
             await patchCustomer(order.customerSeq, customerDraft)
@@ -195,9 +224,11 @@ export function useOrderForm(
         p.phone && !phoneOk(p.phone)
           ? '10~11자리 숫자로 입력해 주세요.'
           : fieldError(`${side}.phoneNumber`),
+      // 접수 중단 주문의 미완성 주소 · 검색 결과 없이 바뀐 도로명 → 다시 검색
       addressError:
-        draft?.roadChanged &&
-        p.roadAddress !== (side === 'sender' ? order?.sender : order?.receiver)?.roadAddress
+        missing.includes(`${side === 'sender' ? '보내는 분' : '받는 분'} 주소(다시 검색)`) ||
+        (draft?.roadChanged &&
+          p.roadAddress !== (side === 'sender' ? order?.sender : order?.receiver)?.roadAddress)
           ? '주소를 다시 검색해서 골라 주세요.'
           : fieldError(`${side}.roadAddress`),
       detailError: fieldError(`${side}.detailAddress`),
@@ -210,6 +241,9 @@ export function useOrderForm(
 
   return {
     isEdit: order !== undefined,
+    showFee: order === undefined || collecting, // 배송비 칸
+    submitLabel: order === undefined || collecting ? '접수' : '저장',
+    missing, // '접수하려면: 배송비 · 받는 분 주소(다시 검색)'
     sender: party('sender'),
     receiver: party('receiver'),
 
@@ -269,7 +303,10 @@ export function useOrderForm(
       (order !== undefined || (!!parties.sender.picked && !!parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
       !pickupPast &&
-      (!draft || (draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
+      (!draft ||
+        (collecting
+          ? missing.length === 0 // 접수 중단: 바뀐 게 없어도 조건만 채워지면 접수
+          : draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
       !customerFail && // 주문은 이미 저장됨 → 고객 재시도 · 닫기만
       !mutation.isPending,
     isSubmitting: mutation.isPending,

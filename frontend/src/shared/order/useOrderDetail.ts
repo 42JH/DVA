@@ -53,6 +53,7 @@ export function pickParcel(
     items: p.items,
     itemPrice: p.itemPrice,
     clientComment: p.clientComment,
+    notifiedPrice: p.notifiedPrice,
     cancelled: o.cancelled || p.cancelled, // 이 상세만 취소돼도 [수정] 없음 · '주문 취소' 태그
     position: list.length > 1 ? `배송 ${i + 1}/${list.length}` : undefined,
   }
