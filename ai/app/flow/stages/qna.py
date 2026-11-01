@@ -11,7 +11,7 @@ from app.flow.stages._common import COMMON_TOOLS, ORDER_TOOLS, count_fail_offer,
 
 KST = timezone(timedelta(hours=9))
 RAG_EVENTS = ("rag.found", "rag.none", "rag.failed")
-OTHER_TASK = {"other_task": "다른 업무를 하겠다·더 궁금한 것이 없다"}
+OTHER_TASK = {"other_task": "더 궁금한 것이 없다·하던 업무를 이어서 하겠다(\"이어서 접수할게요\")·다른 업무를 하겠다"}
 
 
 async def other_task(ctx, answer: str) -> list[str]:

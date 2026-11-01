@@ -132,8 +132,10 @@ def test_customer_answer_changes_state_without_tool_call():
         req = client.responses.requests[0]
         assert "네 맞아요" in req["input"] and "보내시는 택배 맞으실까요" in req["input"]
         assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["yes", "no", "other", "none"]
-        assert "question" in req["text"]["format"]["schema"]["properties"]["intent"]["enum"]
-        assert req["model"] == CFG.listener.model and req["store"] is False
+        # Decision API(설정 engine = decisions): 답·용건·정정 항목을 고르기 질문 셋으로
+        questions = {q["name"]: [c["value"] for c in q["choices"]] for q in req["questions"]}
+        assert set(questions) == {"answer", "intent", "slot"} and {"question", "lookup"} <= set(questions["intent"])
+        assert req["model"] == CFG.listener.model
         await until(lambda: "해운대" in thoughts(conn)[-1])
         assert conn.outputs() == []  # 백엔드 도구 호출 없음
         rec = next(t for t in call.tool_calls.values() if t["name"] == "listener")
@@ -667,16 +669,18 @@ def test_24_late_result_of_older_classification_is_ignored():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
 
-        async def create(**kw):
-            client.responses.requests.append(kw)
-            first = len(client.responses.requests) == 1
-            await asyncio.sleep(0.5 if first else 0)
-            return type("R", (), {"output_text": json.dumps(
-                {"answer": "order" if first else "lookup", "intent": "none", "slot": "none"})})()
+        order = iter(["order", "lookup"])  # 첫 판별("네")은 늦게, 다음 판별("아니 조회요")은 바로 끝난다
+        real = client.decisions.create
 
-        client.responses.create = create
+        async def create(**kw):
+            answer = next(order)
+            await asyncio.sleep(0.5 if answer == "order" else 0)
+            client.responses.decide = lambda seen: {"answer": answer, "intent": "none", "slot": "none"}
+            return await real(**kw)
+
+        client.decisions.create = create
         conn.push("session.input_transcript.delta", delta="네")
-        await until(lambda: client.responses.requests)
+        await until(lambda: any(r["name"] == "listener" for r in call.tool_calls.values()))  # 첫 판별이 시작됨
         conn.push("session.input_transcript.delta", delta=" 아니 조회요")
         await until(lambda: call.flow.stage == "C_FIND_RECENT")
         await until(lambda: any(r["status"] == "stale" for r in call.tool_calls.values()), timeout=2)
@@ -985,3 +989,50 @@ def test_rejected_tool_resends_progress():
         await close(conn, task)
 
     run(scenario())
+
+
+def test_listener_judges_against_server_question_not_what_voice_model_already_said():
+    """판별 기준은 고객이 말을 시작할 때 서버가 물은 질문이다. 음성 모델이 판별보다 먼저 다음 질문을 말해도 흔들리지 않게
+    (2026-11-01 21:47 통화: 기존 출발지 확인의 "네"가 이미 나간 "어디로 보내실 건가요?" 때문에 none)."""
+    client, call = FakeClient(), make_call(saved_db())
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        task, conn = await start(call, client)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네")
+        conn.push("session.output_transcript.delta", delta="어디로 보내실 건가요? 받으실 분이나 장소를 말씀해 주세요.")
+        await until(lambda: client.responses.requests)
+        situation = client.responses.requests[0]["input"]
+        assert "테헤란로 212에서 보내시는 택배 맞으실까요" in situation and "어디로 보내실" not in situation
+        await until(lambda: call.order.sender_address is not None)
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_decisions_judge_drops_answer_question_without_choices_and_reads_refusal_as_none():
+    from types import SimpleNamespace
+    from app.listener import judge
+    call, seen = make_call(), []
+
+    class Decisions:
+        async def create(self, **kw):
+            seen.append(kw)
+            return SimpleNamespace(answers=[SimpleNamespace(type="refusal", name="intent"),
+                                            SimpleNamespace(type="choice", name="slot", choice="none")], usage=None)
+
+    out = run(judge(call, SimpleNamespace(decisions=Decisions()), "ORDER", {"none": "답 없음"}, "잠깐만요", "질문"))
+    assert out[:3] == ("none", "none", "none")  # 거절은 none
+    assert [q["name"] for q in seen[0]["questions"]] == ["intent", "slot"]  # 고를 답이 없으면 답 질문을 뺀다
+    assert seen[0]["model"] == "gpt-6-luna" and "질문" in seen[0]["input"]
+
+
+def test_responses_engine_still_works():
+    client, call = FakeClient(), make_call(saved_db())
+    call.cfg = CFG.model_copy(update={"listener": CFG.listener.model_copy(update={"engine": "responses"})})
+    answers(client, "yes")
+    from app.listener import judge
+    out = run(judge(call, client, "ORDER", {"yes": "예", "none": "답 없음"}, "네", "질문"))
+    req = client.responses.requests[0]
+    assert out[:3] == ("yes", "none", "none") and req["store"] is False and "answer 선택지" in req["input"]

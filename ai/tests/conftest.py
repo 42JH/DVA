@@ -175,10 +175,30 @@ class FakeResponses:
         return SimpleNamespace(output_text=result if isinstance(result, str) else json.dumps(result))
 
 
+class FakeDecisions:
+    """판별 모델(decisions.create, 설정 [listener] engine = decisions). 판별 결과는 FakeResponses.decide를 같이 써서
+    테스트가 판별 API를 몰라도 되게 한다: decide에는 Responses 요청 모양(답 선택지 enum)으로 넘기고 그 요청을 기록한다."""
+
+    def __init__(self, responses: FakeResponses):
+        self.responses = responses
+
+    async def create(self, **kw):
+        options = {q["name"]: [c["value"] for c in q["choices"]] for q in kw["questions"]}
+        seen = {**kw, "text": {"format": {"schema": {"properties": {"answer": {"enum": options.get("answer", ["none"])}}}}}}
+        self.responses.requests.append(seen)
+        await asyncio.sleep(self.responses.delay)
+        result = self.responses.decide(seen)
+        if not isinstance(result, dict):  # 깨진 출력 흉내: 선택지 밖 답
+            result = {"answer": str(result), "intent": "none", "slot": "none"}
+        return SimpleNamespace(answers=[SimpleNamespace(type="choice", name=n, choice=result.get(n, "none"))
+                                        for n in options], usage=None)
+
+
 class FakeClient:
     def __init__(self):
         self.live = SimpleNamespace(sessions=FakeSessions(), sideband=FakeSideband())
         self.responses = FakeResponses()
+        self.decisions = FakeDecisions(self.responses)
         self.webhooks = AsyncOpenAI(api_key="test", webhook_secret=WEBHOOK_SECRET).webhooks
 
 
