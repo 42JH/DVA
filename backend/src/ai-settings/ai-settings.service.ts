@@ -6,8 +6,7 @@ import { ListResponse } from '../common/pagination';
 import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
-import { PersonaApplicationService } from './persona-application.service';
-import { PersonaSettings, PersonaVersion } from './ai-settings.types';
+import { Persona, PersonaSettings, PersonaVersion } from './ai-settings.types';
 import { CreatePersonaDto, PersonaListQueryDto, UpdatePersonaDto } from './dto/persona-request.dto';
 
 const SETTINGS = ['name', 'promptText', 'voiceId', 'speakingRate', 'turnWaitLevel'] as const;
@@ -19,20 +18,12 @@ export class AiSettingsService {
     private readonly repository: AiSettingsRepository,
     private readonly ai: AiPersonaClient,
     private readonly audit: AuditService,
-    private readonly applications: PersonaApplicationService,
   ) {}
 
   async list(query: PersonaListQueryDto) {
     const page = await this.repository.personas(query);
-    const versions = await this.withAuthors(page.rows.map((persona) => persona.latestVersion));
     return new ListResponse(
-      {
-        ...page,
-        rows: page.rows.map((persona, index) => ({
-          ...persona,
-          latestVersion: versions[index],
-        })),
-      },
+      { ...page, rows: await this.withPersonaAuthors(page.rows) },
       query.limit,
     );
   }
@@ -40,7 +31,7 @@ export class AiSettingsService {
   async detail(id: number) {
     const persona = (await this.repository.personas({ limit: 1, offset: 0 }, id)).rows[0];
     if (!persona) throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
-    return { ...persona, latestVersion: await this.withAuthor(persona.latestVersion) };
+    return (await this.withPersonaAuthors([persona]))[0];
   }
 
   async versions(id: number, query: PersonaListQueryDto) {
@@ -52,6 +43,22 @@ export class AiSettingsService {
 
   async withAuthor(version: PersonaVersion, client?: PoolClient): Promise<PersonaVersion> {
     return (await this.withAuthors([version], client))[0];
+  }
+
+  private async withPersonaAuthors(personas: Persona[]): Promise<Persona[]> {
+    const versions = await this.withAuthors(
+      personas.flatMap((persona) =>
+        persona.headVersion
+          ? [persona.latestVersion, persona.headVersion]
+          : [persona.latestVersion],
+      ),
+    );
+    const byId = new Map(versions.map((version) => [version.aiPersonaVersionSeq, version]));
+    return personas.map((persona) => ({
+      ...persona,
+      latestVersion: byId.get(persona.latestVersion.aiPersonaVersionSeq)!,
+      headVersion: persona.headVersion ? byId.get(persona.headVersion.aiPersonaVersionSeq)! : null,
+    }));
   }
 
   private async withAuthors(
@@ -138,15 +145,7 @@ export class AiSettingsService {
         },
         client,
       );
-      const active = await this.repository.live('ACTIVE', client);
-      const pending = await this.repository.live('PENDING', client);
-      if (active?.aiPersonaSeq === id || pending?.aiPersonaSeq === id) {
-        await this.applications.queue(version.aiPersonaVersionSeq, actorId, requestId, client);
-      }
-      return this.withAuthor(
-        (await this.repository.version(version.aiPersonaVersionSeq, client))!,
-        client,
-      );
+      return this.withAuthor(version, client);
     });
   }
 

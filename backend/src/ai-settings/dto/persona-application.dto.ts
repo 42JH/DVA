@@ -4,7 +4,8 @@ import { APPLY_ERRORS, ApplyError } from '../ai-settings.types';
 
 export class ActivatePersonaDto {
   @ApiProperty({
-    description: '적용할 전체 버전 식별자. 반드시 해당 페르소나의 버전이어야 합니다.',
+    description:
+      '해당 유형의 전체 버전 식별자. PUT head는 HEAD로 지정할 버전, POST activate는 현재 headVersion의 aiPersonaVersionSeq를 보냅니다.',
     minimum: 1,
     maximum: 2147483647,
     example: 3,

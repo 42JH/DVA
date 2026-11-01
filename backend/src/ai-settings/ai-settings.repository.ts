@@ -93,6 +93,22 @@ export class AiSettingsRepository {
     ).rows[0];
   }
 
+  async head(id: number, client?: PoolClient): Promise<PersonaVersion | undefined> {
+    return (
+      await (client ?? this.database.pool).query<PersonaVersion>(
+        `${VERSION_SELECT} WHERE v.ai_persona_seq=$1 AND v.ai_persona_version_seq=identity.head_version_seq`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async setHead(id: number, versionId: number, client: PoolClient): Promise<void> {
+    await client.query('UPDATE ai_personas SET head_version_seq=$2 WHERE ai_persona_seq=$1', [
+      id,
+      versionId,
+    ]);
+  }
+
   async live(
     status: Exclude<PersonaStatus, 'INACTIVE'>,
     client?: PoolClient,
@@ -109,10 +125,13 @@ export class AiSettingsRepository {
     const result = await readPage<Persona>(
       this.database.pool,
       `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
+       row_to_json(head) AS "headVersion",
        (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='ACTIVE') AS "activeVersionSeq",
        (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='PENDING') AS "pendingVersionSeq"
        FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
+       LEFT JOIN LATERAL (${VERSION_SELECT}
+        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.ai_persona_version_seq=p.head_version_seq) head ON true
        WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
       [id ?? null],
       query,

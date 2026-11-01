@@ -1,6 +1,6 @@
 # AI 팀 전달: 페르소나를 다음 통화부터 적용
 
-2026-11-01 백엔드 변경 계약이다. 기존 `docs/api/ai-persona-integration.md`의 **통화 0건까지 기다린다**는 조건을 이 문서로 대체한다. URL·인증·요청 필드는 유지한다. 이 작업은 백엔드와 전달 명세까지이며 AI 코드·실제 서버 배포는 포함하지 않는다.
+2026-11-01 백엔드 변경 계약이다. 기존 `docs/api/ai-persona-integration.md`의 **통화 0건까지 기다린다**는 조건을 이 문서로 대체한다. AI URL·인증·요청 필드는 유지한다. 관리자 유형별 HEAD·대표 선택은 [최신 관리 계약](persona-head-management.md)을 따른다. 이 작업은 백엔드와 전달 명세까지이며 AI 코드·실제 서버 배포는 포함하지 않는다.
 
 ## 원하는 동작
 
@@ -33,7 +33,7 @@
 
 ## 백엔드 API
 
-AI 서비스 Bearer 인증은 기존 `AI_PERSONA_TOKEN`을 그대로 사용한다. 관리자 화면의 적용 요청은 기존 `POST /api/personas/{id}/activate`이고 성공 202는 PENDING이다.
+AI 서비스 Bearer 인증은 기존 `AI_PERSONA_TOKEN`을 그대로 사용한다. 관리자 화면의 대표 선택은 `POST /api/personas/{id}/activate`이며 그 유형의 HEAD만 선택한다. 대표 유형의 HEAD 변경도 AI 반영 대기를 만든다. 비대표 유형의 HEAD 변경과 수정 저장은 AI에 통화 설정 변경을 요청하지 않는다.
 
 | API | 의미 |
 | --- | --- |
@@ -71,8 +71,8 @@ AI는 통화 시작 때 고정한 `call.persona_version`을 끝까지 유지한�
 - 새 페르소나는 전체 설정의 v1·INACTIVE로 저장한다.
 - PATCH는 최신 `expectedVersion`을 확인하고 변경한 값과 기존 생략값을 합쳐 vN+1 전체 설정을 추가한다. 이전 버전의 내용은 유지한다.
 - 동일값 저장은 버전을 늘리지 않는다. 최신 버전과 다르면 409 VERSION_CONFLICT다.
-- **ACTIVE/PENDING 페르소나의 수정·저장은 새 버전을 자동 PENDING으로 만든다.** 미사용 페르소나의 수정은 INACTIVE 저장만 하며 적용 버튼으로 요청한다.
-- 과거 버전 적용은 그 버전을 선택하는 동작이다. 버전 내용이나 번호를 다시 만들지 않는다.
+- **수정 저장은 항상 새 INACTIVE 버전 추가만 한다.** 유형별 HEAD와 실제 통화 설정은 변경하지 않는다.
+- PUT `/api/personas/{id}/head`로 유형 안의 버전을 적용하고 POST activate로 그 HEAD를 대표로 선택한다. 과거 버전을 HEAD로 선택해도 버전 내용이나 번호를 다시 만들지 않는다.
 
 ## AI 팀 확인 항목
 

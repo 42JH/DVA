@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -61,13 +62,42 @@ export class PersonasController {
     private readonly applications: PersonaApplicationService,
   ) {}
 
+  @Put(':id/head')
+  @AuditOperation({ action: 'PERSONA_HEAD_CHANGED', targetType: 'AI_PERSONA', target: 'id' })
+  @ApiOperation({
+    summary: '유형 내 버전 적용·HEAD 변경',
+    description:
+      '해당 유형의 HEAD를 선택한 전체 버전으로 변경합니다. 비대표 유형은 실제 통화 설정을 바꾸지 않습니다. 대표 또는 대표 전환 대기 유형이면 새 HEAD를 AI 적용 대기로 지정합니다. 수정 저장과 대표 선택은 별도 동작입니다.',
+  })
+  @ApiOkResponse({
+    description: 'HEAD 변경 완료. 반환 버전의 PENDING은 실제 AI 반영을 기다린다는 뜻입니다.',
+    type: PersonaVersionResponseDto,
+  })
+  @ApiResponse({ status: 409, description: '최신 저장 버전 충돌.', type: ErrorResponseDto })
+  @ApiResponse({ status: 422, description: 'AI 미지원 설정.', type: ErrorResponseDto })
+  @ApiResponse({ status: 503, description: 'AI 옵션 확인 실패.', type: ErrorResponseDto })
+  async setHead(
+    @Param() params: PersonaIdDto,
+    @Body() input: ActivatePersonaDto,
+    @Req() request: AuthRequest,
+  ) {
+    return this.personas.withAuthor(
+      await this.applications.setHead(
+        params.id,
+        input,
+        request.admin.adminUserSeq,
+        request.requestId,
+      ),
+    );
+  }
+
   @Post(':id/activate')
   @HttpCode(202)
   @AuditOperation({ action: 'PERSONA_APPLY_REQUESTED', targetType: 'AI_PERSONA', target: 'id' })
   @ApiOperation({
-    summary: '페르소나 적용·복원 요청',
+    summary: '통화용 대표 유형 선택',
     description:
-      '선택한 전체 버전을 PENDING으로 지정하고 기존 대기를 INACTIVE로 바꿉니다. 과거 버전도 선택할 수 있습니다. AI가 신규 통화 기본 설정 전환을 확인해야 ACTIVE가 바뀝니다. 진행 중 통화는 시작 시 버전을 유지하며 같은 정상 대기 요청은 재사용합니다.',
+      '해당 유형의 HEAD만 통화용 대표로 선택할 수 있습니다. aiPersonaVersionSeq는 현재 headVersion의 식별자를 보냅니다. HEAD가 없으면 먼저 버전 적용이 필요합니다. AI 확인 전에는 기존 ACTIVE를 유지하고 진행 중 통화는 시작 시 버전을 유지합니다.',
   })
   @ApiAcceptedResponse({
     description: '반영 대기 버전. 실제 적용 완료가 아닙니다.',
@@ -77,7 +107,11 @@ export class PersonasController {
     description: '현재 ACTIVE를 유지하고 다른 대기가 있으면 취소합니다.',
     type: PersonaVersionResponseDto,
   })
-  @ApiResponse({ status: 409, description: '최신 저장 버전 충돌.', type: ErrorResponseDto })
+  @ApiResponse({
+    status: 409,
+    description: '최신 저장 버전 또는 HEAD 충돌, HEAD 미지정.',
+    type: ErrorResponseDto,
+  })
   @ApiResponse({
     status: 422,
     description: '현재 AI가 지원하지 않는 설정.',
@@ -108,7 +142,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 목록 조회',
     description:
-      '최신 저장 설정과 적용·대기 버전 번호를 조회합니다. 최신 버전이 반드시 운영 버전은 아닙니다.',
+      '유형별 최신 저장 설정·HEAD와 실제 적용·대기 버전 번호를 조회합니다. HEAD는 마지막 버전 적용 결과이며 대표가 바뀌어도 유지합니다.',
   })
   @ApiOkResponse({ description: '페르소나 목록과 다음 페이지 여부.', type: PersonaListResponseDto })
   list(@Query() query: PersonaListQueryDto) {
@@ -120,7 +154,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 등록',
     description:
-      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장합니다. 지원 옵션을 검증하며 운영 적용은 별도 요청합니다.',
+      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장합니다. HEAD는 null이며 버전 적용과 대표 선택은 별도 요청합니다.',
   })
   @ApiCreatedResponse({ description: '생성한 전체 설정 버전.', type: PersonaVersionResponseDto })
   @ApiResponse({ status: 409, description: '고유 코드 중복.', type: ErrorResponseDto })
@@ -138,7 +172,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 상세 조회',
     description:
-      '최신 설정과 이 페르소나의 적용·대기 버전 번호를 반환합니다. 과거 설정은 버전 목록에서 조회합니다.',
+      '유형별 최신 저장 설정·HEAD와 실제 통화 적용·대기 버전 번호를 반환합니다. 과거 설정은 버전 목록에서 조회합니다.',
   })
   @ApiOkResponse({ description: '페르소나 상세.', type: PersonaResponseDto })
   detail(@Param() params: PersonaIdDto) {
@@ -150,7 +184,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 수정',
     description:
-      '생략한 값은 유지하고 전체 설정의 새 버전을 저장합니다. 적용·대기 중인 페르소나를 수정하면 기존 대기를 교체하며, 운영 버전은 AI 적용 확인까지 유지합니다. 동일값 수정은 버전을 늘리지 않습니다.',
+      '생략한 값은 유지하고 새 INACTIVE 버전을 저장합니다. HEAD·실제 ACTIVE·PENDING은 변경하지 않습니다. 버전 적용과 대표 선택은 별도이며 동일값 수정은 버전을 늘리지 않습니다.',
   })
   @ApiOkResponse({ description: '저장한 버전과 반영 상태.', type: PersonaVersionResponseDto })
   @ApiResponse({

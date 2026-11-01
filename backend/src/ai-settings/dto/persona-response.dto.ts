@@ -90,6 +90,13 @@ export class PersonaDto {
   })
   latestVersion!: PersonaVersionDto;
   @ApiProperty({
+    description:
+      '이 유형에서 마지막으로 버전 적용한 HEAD. 최신 저장 버전·실제 통화 적용 버전과 다를 수 있으며 대표가 바뀌어도 유지합니다. 한 번도 적용하지 않았으면 null.',
+    type: PersonaVersionDto,
+    nullable: true,
+  })
+  headVersion!: PersonaVersionDto | null;
+  @ApiProperty({
     description: '이 페르소나의 현재 적용 버전 식별자. 미적용은 null.',
     type: Number,
     nullable: true,
