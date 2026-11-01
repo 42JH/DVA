@@ -35,6 +35,20 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
     void a.play().catch(() => setFailed(true))
   }
 
+  /** 진행 바 드래그 — 비율(0~1)로 위치만 옮김. 재생 중이면 계속 재생, 멈춰 있으면 멈춘 채 (듣던 상태 유지) */
+  const scrub = (ratio: number) => {
+    const a = ref.current
+    if (!a || state !== 'ok' || !length) return
+    const sec = Math.max(0, Math.min(length, ratio * length))
+    if (expired()) {
+      resumeAt.current = sec
+      onExpired()
+      return
+    }
+    a.currentTime = sec
+    setNow(sec) // timeupdate가 오기 전에도 손잡이가 바로 따라오게
+  }
+
   const toggle = () => {
     const a = ref.current
     if (!a || state !== 'ok') return
@@ -76,6 +90,7 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
     progress: length > 0 ? Math.min(1, now / length) : 0,
     toggle,
     seek,
+    scrub,
     audioRef: ref,
     src: url ?? undefined,
     handlers,
