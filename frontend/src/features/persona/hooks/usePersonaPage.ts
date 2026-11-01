@@ -15,6 +15,7 @@ import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { lineDiff } from '@/features/persona/hooks/lineDiff'
 import {
+  applyLatest,
   personaQueries,
   requestApply,
   type Persona,
@@ -43,7 +44,7 @@ export interface VersionItem {
   summary: string
   author: string
   selected: boolean
-  canApply: boolean // [적용]은 적용 안 한 최신 저장본에만 (11/02 결정 — 지난 버전은 시험 통화만)
+  canApply: boolean // [적용]은 맨 위 '저장됨'(초안 등)에만 (11/02 결정 — 지난 버전은 시험 통화만)
   testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전
   canApplyNow: boolean // 시험 통화를 끝낸 버전만 [적용]이 눌림 (10/31 결정)
 }
@@ -53,8 +54,8 @@ export interface PromptView {
   tag: string // 'v7 · 저장됨' · 'v6 · 적용 중' · 'v4'
   subtitle: string // '빠른 접수형 · 10.30 김지훈'
   lines: { no: number; text: string; heading: boolean }[] // '# '로 시작하는 줄 = 굵게
-  canEdit: boolean // [수정] · [음성 세부 조절] — 최신본 · 마지막 적용 버전을 볼 때만 (지난 버전은 보기만)
-  compareLabel: string | null // 'v6과 비교' — 최신본이 적용 안 된 새 버전일 때만
+  canEdit: boolean // [수정] · [음성 세부 조절] — 맨 위 버전 · 적용본을 볼 때만 (지난 버전은 보기만)
+  compareLabel: string | null // 'v4와 비교' — 맨 위가 적용 안 된 새 버전(저장됨)일 때만
 }
 
 // 'v6과' · 'v5와' — 숫자를 읽은 소리의 받침으로 조사를 고름 (영·일·삼·육·칠·팔 = 받침 있음)
@@ -73,13 +74,9 @@ type Confirming = {
   kind: 'version' | 'persona'
   personaSeq: number
   head: { seq: number; version: number }
+  draftRevision: string | null // [적용]: 초안이 있으면 확정부터 · [사용하기]: 늘 null (HEAD만 적용, 초안은 안 따라감)
+  version: number // 창에 보일 번호 — 초안이면 HEAD + 1
 } | null
-
-/** [사용하기]를 바로 할 수 없을 때 안내 창 — 한 번도 적용 안 함 · 최신본이 마지막 적용 버전보다 새것(서버가 최신본만 적용) */
-export interface UseGuide {
-  title: string
-  note: string
-}
 const POLL_MS = 2000 // 적용 대기 중일 때만 다시 받는 간격 (AI 확인으로 서버 상태가 바뀌므로)
 // '친절 안내형을' · '빠른 접수형을' — 이름 끝 글자의 받침으로 을/를
 const hasBatchim = (name: string) => {
@@ -87,12 +84,11 @@ const hasBatchim = (name: string) => {
   return c >= 0 && c < 11172 && c % 28 !== 0
 }
 const nameEul = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
-const nameEun = (name: string) => `${name}${hasBatchim(name) ? '은' : '는'}` // '친절 안내형은'
 
 const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
 
-/** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v6 [적용 중] → v7 [저장됨]
- * 마지막 적용 버전 ↔ 최신 저장본만 (11/02 결정 — 고르는 드롭다운 없음) */
+/** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v4 [적용 중] → v5 [저장됨]
+ * 적용본 ↔ 맨 위(수정 중인 초안)만 (11/02 결정 — 고르는 드롭다운 없음) */
 export interface CompareView {
   base: string // 'v6'
   baseTag: string // '적용 중' · '마지막 적용'
@@ -111,12 +107,12 @@ export interface CompareView {
 }
 
 /** 07 페르소나 관리 훅 (와이어프레임 07_페르소나관리 · _버전히스토리, 10/31 · 11/02 규칙 · 실서버)
- * 오른쪽에서 페르소나 · 버전을 고르면 왼쪽에 그 프롬프트. 처음엔 통화에 사용 중인 페르소나의 최신 저장본
- * [수정] = 늘 최신 저장본에서 시작(지난 버전 기준 저장은 서버가 409) · [적용] = 적용 안 한 최신본만 · 지난 버전은 보기 + 시험 통화 */
+ * 오른쪽에서 페르소나 · 버전을 고르면 왼쪽에 그 프롬프트. 처음엔 통화에 사용 중인 페르소나의 맨 위 버전
+ * [수정] = 늘 맨 위(초안이 있으면 초안, 없으면 HEAD)에서 시작 · [저장] = 초안 덮어쓰기 · [적용] = 확정 + 적용 요청 · 지난 버전은 보기 + 시험 통화 */
 export function usePersonaPage() {
   const [tab, setTab] = useState<PanelTab>('persona')
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 사용 중인 페르소나
-  const [version, setVersion] = useState<number | null>(null) // null = 맨 위(최신 저장본)
+  const [version, setVersion] = useState<number | null>(null) // null = 맨 위(초안 또는 HEAD)
   const [showAll, setShowAll] = useState(false)
   const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
@@ -124,7 +120,6 @@ export function usePersonaPage() {
   // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
   const [tested, setTested] = useState<Record<string, number>>({})
   const [confirming, setConfirming] = useState<Confirming>(null) // [적용] · [사용하기] 확인 창
-  const [guide, setGuide] = useState<({ personaSeq: number } & UseGuide) | null>(null) // [사용하기] 안내 창
   const [adding, setAdding] = useState(false) // 페르소나 추가 창
   const qc = useQueryClient()
 
@@ -140,16 +135,19 @@ export function usePersonaPage() {
     enabled: persona !== null,
     refetchInterval: (q) => (q.state.data?.some((v) => v.status === 'PENDING') ? POLL_MS : false),
   })
-  const all = versions.data ?? [] // 높은 번호가 위 (personaMap이 정렬)
-  const viewing = all.find((v) => v.version === version) ?? all[0] ?? null
-  const head = all.find((v) => v.isHead) ?? null
+  const all = versions.data ?? [] // 높은 번호가 위 (personaMap이 정렬). 초안이 있으면 맨 위
+  const latest = all[0] ?? null // 수정 · 적용 · 비교의 대상
+  const viewing = all.find((v) => v.version === version) ?? latest
   const applied = all.find((v) => v.version === persona?.appliedVersion) ?? null
   const testedSec = (v: number) => (persona ? tested[`${persona.personaSeq}-${v}`] : undefined)
   const testingVersion = all.find((v) => v.version === testing) ?? null
   const inUse = list.find((p) => p.inUse) ?? null
   const confirmingPersona = list.find((p) => p.personaSeq === confirming?.personaSeq) ?? null
   const apply = useMutation({
-    mutationFn: (c: NonNullable<Confirming>) => requestApply(c.personaSeq, c.head),
+    mutationFn: (c: NonNullable<Confirming>) =>
+      c.kind === 'version'
+        ? applyLatest(c.personaSeq, c.head, c.draftRevision)
+        : requestApply(c.personaSeq, c.head),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
       setConfirming(null)
@@ -169,36 +167,37 @@ export function usePersonaPage() {
         }
       : null
 
-  // 비교: 마지막 적용 버전 ↔ 최신 저장본 (최신본이 적용 안 된 새 버전일 때만)
-  const canCompare = !!head && !!applied && head.version > applied.version
+  // 비교: 적용본 ↔ 맨 위 (맨 위가 적용 안 된 새 버전일 때만)
+  const canCompare = !!latest && !!applied && latest.version > applied.version
   const compare = (): CompareView | null => {
     if (!comparing || !persona || !canCompare) return null
-    const rows = lineDiff(applied.prompt.split('\n'), head.prompt.split('\n'))
+    const rows = lineDiff(applied.prompt.split('\n'), latest.prompt.split('\n'))
     return {
       base: `v${applied.version}`,
       baseTag: persona.inUse ? '적용 중' : '마지막 적용',
-      target: `v${head.version}`,
-      targetTag: VERSION_TAG[head.status]?.label ?? '',
+      target: `v${latest.version}`,
+      targetTag: VERSION_TAG[latest.status]?.label ?? '',
       removed: rows.filter((r) => r.kind === 'del').length,
       added: rows.filter((r) => r.kind === 'add').length,
       rows: rows.map((r, i) => ({ ...r, key: String(i), heading: r.text.startsWith('# ') })),
     }
   }
 
-  // [수정]은 어느 버전을 보든 최신 저장본에서 시작 (11/02 결정)
+  // [수정]은 어느 버전을 보든 맨 위에서 시작 — 초안이 있으면 그 내용, 없으면 HEAD (11/02 결정)
   const editTarget: EditTarget | null =
-    persona && head
+    persona && latest
       ? {
           personaSeq: persona.personaSeq,
           personaName: persona.name,
-          prompt: head.prompt,
-          voice: head.voice,
-          basedOn: head.version,
-          saveTo: head.version + 1,
+          prompt: latest.prompt,
+          voice: latest.voice,
+          basedOn: persona.head.version,
+          draftRevision: persona.draftRevision,
+          saveTo: persona.head.version + 1,
           voiceFirst: editing === 'voice',
         }
       : null
-  const canEdit = !!viewing && (viewing.isHead || viewing.version === persona?.appliedVersion)
+  const canEdit = !!viewing && (viewing === latest || viewing.version === persona?.appliedVersion)
 
   return {
     tab,
@@ -208,7 +207,12 @@ export function usePersonaPage() {
 
     prompt:
       persona && viewing
-        ? toPromptView(persona, viewing, canEdit, canCompare ? applied.version : null)
+        ? toPromptView(
+            persona,
+            viewing,
+            canEdit,
+            canCompare && viewing === latest ? applied.version : null,
+          )
         : null,
 
     compare: compare(),
@@ -219,12 +223,16 @@ export function usePersonaPage() {
       const until = inUse?.appliedVersion
         ? ` 그 전까지는 ${inUse.name} ${withI(inUse.appliedVersion)} 계속 쓰입니다.`
         : ''
-      const v = confirming.head.version
+      const v = confirming.version
       if (confirming.kind === 'persona')
         return {
           title: `${nameEul(confirmingPersona.name)} 통화에 쓸까요?`,
           target: `${confirmingPersona.name} · v${v} (마지막 적용)`,
-          note: `진행 중인 통화가 끝나면(AI 확인 후) 이 페르소나로 응대합니다.${until}`,
+          note: `진행 중인 통화가 끝나면(AI 확인 후) 이 페르소나로 응대합니다.${
+            confirmingPersona.savedVersion
+              ? ` 저장만 한 v${confirmingPersona.savedVersion}는 포함되지 않습니다.`
+              : ''
+          }${until}`,
           okLabel: '사용하기',
         }
       return {
@@ -236,28 +244,27 @@ export function usePersonaPage() {
     })(),
     askApply: () => {
       apply.reset() // 지난번 실패 문구가 새 창에 먼저 뜨지 않게
-      if (persona && head)
-        setConfirming({ kind: 'version', personaSeq: persona.personaSeq, head: persona.head })
+      if (persona && latest)
+        setConfirming({
+          kind: 'version',
+          personaSeq: persona.personaSeq,
+          head: persona.head,
+          draftRevision: persona.draftRevision,
+          version: latest.version,
+        })
     },
-    // [사용하기] = 그 페르소나의 마지막 적용 버전으로 (11/02 결정)
+    // [사용하기] = 그 페르소나의 적용본(HEAD)으로. 저장만 한 초안은 안 따라감 (11/02 결정 · 백엔드 activate 규칙)
     askUse: (seq: number) => {
       const p = list.find((x) => x.personaSeq === seq)
       if (!p) return
       apply.reset()
-      if (p.appliedVersion === null)
-        return setGuide({
-          personaSeq: seq,
-          title: `${nameEun(p.name)} 아직 적용한 적이 없습니다`,
-          note: '버전 히스토리에서 최신 버전을 시험 통화한 뒤 [적용]하면 통화에 쓰입니다.',
-        })
-      // shortcut: 서버 적용 요청은 최신 저장본만 받음 → 마지막 적용 버전보다 새 저장본이 있으면 지금은 그 버전을 적용하도록 안내 (backend-todo 07)
-      if (p.head.version !== p.appliedVersion)
-        return setGuide({
-          personaSeq: seq,
-          title: `${p.name}에 적용하지 않은 ${withI(p.head.version)} 있습니다`,
-          note: `지금은 마지막 적용 버전(v${p.appliedVersion})으로 바로 바꿀 수 없습니다. 버전 히스토리에서 ${withEul(p.head.version)} 시험 통화한 뒤 [적용]해 주세요.`,
-        })
-      setConfirming({ kind: 'persona', personaSeq: seq, head: p.head })
+      setConfirming({
+        kind: 'persona',
+        personaSeq: seq,
+        head: p.head,
+        draftRevision: null,
+        version: p.head.version,
+      })
     },
     confirmApply: () => confirming && apply.mutate(confirming),
     cancelApply: () => setConfirming(null),
@@ -265,21 +272,8 @@ export function usePersonaPage() {
     applyError: !apply.error
       ? null
       : apply.error instanceof ApiError && apply.error.status === 409
-        ? '그새 이 페르소나에 새 버전이 저장됐습니다. 창을 닫고 최신 버전을 확인해 주세요.'
+        ? '그새 다른 관리자가 이 페르소나를 저장 · 적용했습니다. 창을 닫고 최신 버전을 확인해 주세요.'
         : '적용 요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
-
-    useGuide: guide && { title: guide.title, note: guide.note },
-    // 안내 창 [버전 히스토리로] — 그 페르소나의 최신본을 골라 히스토리 탭
-    followGuide: () => {
-      if (!guide) return
-      setPersonaSeq(guide.personaSeq)
-      setVersion(null)
-      setShowAll(false)
-      setComparing(false)
-      setTab('history')
-      setGuide(null)
-    },
-    closeGuide: () => setGuide(null),
 
     adding,
     openAdd: () => setAdding(true),
@@ -336,11 +330,9 @@ export function usePersonaPage() {
         `${voiceName(p.voice.voice)} · ${SPEED_LABEL[p.voice.speed]}`,
         WAIT_LABEL[p.voice.waitTime],
       ],
-      versionLine: `${
-        p.appliedVersion === null
-          ? '적용 버전 없음'
-          : `${p.inUse ? '적용 버전' : '마지막 적용'} v${p.appliedVersion}`
-      }${p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''}`,
+      versionLine: `${p.inUse ? '적용 버전' : '마지막 적용'} v${p.appliedVersion}${
+        p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''
+      }`,
     })),
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
@@ -350,7 +342,7 @@ export function usePersonaPage() {
     },
 
     versions: (showAll ? all : all.slice(0, HISTORY_FIRST)).map((v): VersionItem => {
-      const canApply = v.isHead && v.status === 'SAVED'
+      const canApply = v === latest && v.status === 'SAVED'
       return {
         version: v.version,
         tags: [
@@ -391,7 +383,7 @@ function toPromptView(
       .split('\n')
       .map((text, i) => ({ no: i + 1, text, heading: text.startsWith('# ') })),
     canEdit,
-    // 최신본(저장됨)을 볼 때만 '마지막 적용 버전과 비교'
-    compareLabel: compareWith !== null && v.isHead ? `${withGwa(compareWith)} 비교` : null,
+    // 맨 위(저장됨)를 볼 때만 '적용본과 비교' — 부르는 쪽이 맨 위일 때만 compareWith를 줌
+    compareLabel: compareWith !== null ? `${withGwa(compareWith)} 비교` : null,
   }
 }

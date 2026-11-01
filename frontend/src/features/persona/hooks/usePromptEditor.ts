@@ -3,21 +3,18 @@ import { useEffect, useState } from 'react'
 import { useBlocker } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { DRAFT_TAG } from '@/features/persona/labels'
-import {
-  personaQueries,
-  savePromptVersion,
-  type VoiceSettings,
-} from '@/features/persona/api/personaApi'
+import { personaQueries, saveDraft, type VoiceSettings } from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 
-/** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 저장본(HEAD)에서 시작 (11/02 결정) */
+/** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 버전에서 시작: 초안이 있으면 초안, 없으면 HEAD (11/02 결정) */
 export interface EditTarget {
   personaSeq: number
   personaName: string
-  prompt: string // 시작 글 (최신본의 프롬프트)
-  voice: VoiceSettings // 시작 음성 설정 (최신본의 것)
-  basedOn: number // 최신본 번호 = 서버 expectedVersion (그새 누가 저장했으면 409)
-  saveTo: number // 저장하면 생길 번호. shortcut: 지금 서버는 저장마다 새 번호(basedOn + 1) — 적용 안 한 최신본 덮어쓰기가 되면 그 번호 (backend-todo 07)
+  prompt: string // 시작 글
+  voice: VoiceSettings // 시작 음성 설정
+  basedOn: number // HEAD 번호 = 서버 expectedVersion
+  draftRevision: string | null // 초안의 UUID = 서버 expectedDraftRevision (초안이 없으면 null). 그새 누가 저장했으면 409
+  saveTo: number // 화면 번호 = HEAD + 1. 몇 번을 저장해도 같은 번호(초안 덮어쓰기)
   voiceFirst: boolean // 보기 화면의 [음성 세부 조절]로 들어왔으면 음성 창부터 열기
 }
 
@@ -26,7 +23,7 @@ const SAMPLE = '받는 분 번호 공일공, 이삼사오, 육칠팔구 맞으�
 const RATE: Record<VoiceSettings['speed'], number> = { SLOW: 0.85, NORMAL: 1, FAST: 1.2 }
 
 /** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
- * 화면엔 바로 'v6 · 작성 중' — 저장 전엔 서버에 아무것도 없음. [저장] = PATCH(바뀐 칸만) → 새 버전(저장됨, 통화엔 아직 안 씀)
+ * 화면엔 바로 'v5 · 작성 중'. [저장] = PATCH(바뀐 칸만) → 초안 덮어쓰기('v5 저장됨', 통화엔 아직 안 씀). 다시 고쳐 저장해도 v5
  * 음성 세부 조절 창은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
@@ -47,8 +44,9 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const mutation = useMutation({
     // 바뀐 칸만 보냄 — 안 바꾼 음성 값(서버의 정확한 숫자 속도 등)은 그대로 둠
     mutationFn: () =>
-      savePromptVersion(target.personaSeq, {
+      saveDraft(target.personaSeq, {
         expectedVersion: target.basedOn,
+        expectedDraftRevision: target.draftRevision,
         prompt: promptChanged ? text : null,
         voice: {
           ...(voice.voice !== target.voice.voice && { voice: voice.voice }),
@@ -57,9 +55,9 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
         },
         rateRange: options.rateRange,
       }),
-    onSuccess: async (version) => {
+    onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
-      onDone(version)
+      onDone(target.saveTo)
     },
   })
 
@@ -117,7 +115,7 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     saveError: !mutation.error
       ? null
       : mutation.error instanceof ApiError && mutation.error.status === 409
-        ? '그새 다른 관리자가 이 페르소나를 저장했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
+        ? '그새 다른 관리자가 이 페르소나를 저장 · 적용했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
         : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
 
     // [취소]: 바뀐 게 없으면 바로 닫고, 있으면 확인 창. 화면 이동이 막혔을 때도 같은 창

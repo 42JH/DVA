@@ -1,6 +1,7 @@
-// 07 페르소나 — 서버 응답(Swagger 11/02) → 화면 모양. React · HTTP를 모르는 순수 함수 (personaMap.test.ts)
-// 규칙 (11/02 사용자 결정): 수정은 최신 버전(HEAD)에서만 · 지난 버전은 보기 + 시험 통화만 · 비교 = 마지막 적용 ↔ 수정 중
-// '적용 중'(ACTIVE)은 서비스 전체에 하나 → 통화에 안 쓰는 페르소나의 기준은 '마지막으로 적용됐던 버전'(appliedAt이 있는 가장 큰 번호)
+// 07 페르소나 — 서버 응답(develop-backend 11/02 초안 계약, docs/persona-head-management.md) → 화면 모양. React · HTTP를 모르는 순수 함수 (personaMap.test.ts)
+// 규칙 (11/02 사용자 결정): 수정은 최신 버전에서만 · 적용 전까지 새 버전 없음 · 지난 버전은 보기 + 시험 통화만 · 비교 = 적용본 ↔ 수정 중
+// 서버 칸 → 화면: draft(초안, 페르소나마다 1개) = 'v(HEAD+1) 저장됨' · headVersion = 적용본(통화에 안 쓰는 페르소나도) · activeVersion = 지금 통화에 쓰는 버전
+// appliedAt은 'AI가 적용에 성공한 시각'이라 적용본을 찾는 기준이 아님 (백엔드 11/02 답)
 import { ymd } from '@/shared/lib/dateRange'
 
 export type Speed = 'SLOW' | 'NORMAL' | 'FAST' // 발화 속도 3단계 칩 (서버는 숫자 · null = 기본)
@@ -29,23 +30,37 @@ export interface PersonaVersionDto {
   applyErrorCode: string | null
 }
 
+/** 서버 초안 (PersonaDraftDto) — 쓰는 칸만. 번호가 없음 (확정하면 HEAD + 1) */
+export interface PersonaDraftDto {
+  draftRevision: string // 저장마다 바뀌는 UUID — 다음 저장 · 확정의 expectedDraftRevision
+  baseVersion: number // 초안을 시작한 HEAD 번호
+  name: string
+  promptText: string
+  voiceId: string | null
+  speakingRate: number | null
+  turnWaitLevel: WaitTime
+  updatedAt: string
+}
+
 /** 서버 페르소나 (PersonaDto) — 쓰는 칸만 */
 export interface PersonaDto {
   aiPersonaSeq: number
   code: string
-  headVersion: PersonaVersionDto // 최신 저장본 (= latestVersion)
+  headVersion: PersonaVersionDto // 마지막 확정 버전 = 적용본 (= latestVersion)
   activeVersion: PersonaVersionDto | null // 지금 통화에 쓰는 버전 — 서비스 전체에서 한 페르소나만
   pendingVersion: PersonaVersionDto | null
+  draft: PersonaDraftDto | null // 저장만 하고 적용 안 한 수정본
 }
 
-/** 화면의 버전 상태: 저장됨(적용 안 한 최신) · 적용 대기 · 적용 중 · 마지막 적용(통화에 안 쓰는 페르소나의 기준) · 지난 버전 */
+/** 화면의 버전 상태: 저장됨(초안 · 또는 확정만 되고 적용 안 된 HEAD) · 적용 대기 · 적용 중 · 마지막 적용(통화에 안 쓰는 페르소나의 적용본) · 지난 버전 */
 export type VersionStatus = 'SAVED' | 'PENDING' | 'ACTIVE' | 'APPLIED' | 'PAST'
 
 export interface PersonaVersion {
   seq: number // aiPersonaVersionSeq — 적용 요청에 씀
   version: number
   status: VersionStatus
-  isHead: boolean // 최신 저장본 — 수정 · 적용은 여기서만
+  isHead: boolean // 서버 HEAD(확정 버전 중 최신)
+  isDraft: boolean // 초안 줄 — 번호는 화면이 붙인 HEAD + 1, 서버 버전 기록엔 없음
   voiceOnly: boolean // 바로 앞 버전과 프롬프트는 같고 음성만 다름 ('음성 설정' 태그)
   changes: VersionChange // 바로 앞 버전과 무엇이 다른지 (요약 문장은 화면 층에서)
   author: string // 확인할 수 없는 옛 작성자는 ''
@@ -66,12 +81,13 @@ export interface VersionChange {
 export interface Persona {
   personaSeq: number
   code: string
-  name: string // 최신 저장본의 이름
-  voice: VoiceSettings // 마지막 적용 버전의 음성 (적용한 적 없으면 최신 저장본)
+  name: string // HEAD의 이름
+  voice: VoiceSettings // 적용본의 음성
   inUse: boolean // 지금 통화에 쓰는 페르소나
-  appliedVersion: number | null // 적용 중 또는 마지막 적용 버전. 한 번도 적용 안 했으면 null
-  head: { version: number; seq: number } // 최신 저장본 — 수정의 expectedVersion · 적용 요청
-  savedVersion: number | null // 저장만 하고 아직 적용 안 한 최신본 ('v5 저장됨')
+  appliedVersion: number // 적용본 — 통화 중이면 activeVersion, 아니면 HEAD
+  head: { version: number; seq: number } // HEAD — 저장 · 확정의 expectedVersion, 적용 요청
+  draftRevision: string | null // 초안이 있으면 그 UUID (저장 · 확정에 보냄)
+  savedVersion: number | null // 저장만 하고 아직 적용 안 한 버전 ('v5 저장됨') — 초안이면 HEAD + 1
   applyingVersion: number | null // 적용 대기 ('v5 적용 대기')
   applyError: string | null // 적용 대기 중 AI 반영 오류 코드 (대기는 유지됨)
 }
@@ -93,16 +109,31 @@ const toVoice = (v: PersonaVersionDto): VoiceSettings => ({
   waitTime: v.turnWaitLevel,
 })
 
-/** 마지막으로 적용됐던 버전 번호 — 적용 중이면 그것, 아니면 appliedAt이 있는 가장 큰 번호 */
-export function lastApplied(versions: PersonaVersionDto[]): number | null {
-  const done = versions.filter((v) => v.status === 'ACTIVE' || v.appliedAt !== null)
-  return done.length ? Math.max(...done.map((v) => v.version)) : null
-}
+/** 초안을 버전 기록 한 줄 모양으로 — 번호는 HEAD + 1 (확정하면 받을 번호) */
+const draftRow = (d: PersonaDraftDto, headVersion: number): PersonaVersionDto => ({
+  aiPersonaVersionSeq: 0, // 서버 버전이 아님 — 적용은 확정(POST versions)부터
+  version: headVersion + 1,
+  name: d.name,
+  promptText: d.promptText,
+  voiceId: d.voiceId,
+  speakingRate: d.speakingRate,
+  turnWaitLevel: d.turnWaitLevel,
+  status: 'INACTIVE',
+  createdByAdminUserName: null, // 초안은 저장자 번호만 줌
+  createdAt: d.updatedAt,
+  appliedAt: null,
+  applyErrorCode: null,
+})
 
-/** 버전 기록 → 화면 버전 (높은 번호가 위). 서버 순서를 믿지 않고 정렬 */
-export function toVersions(list: PersonaVersionDto[], headVersion: number): PersonaVersion[] {
-  const sorted = [...list].sort((a, b) => b.version - a.version)
-  const applied = lastApplied(sorted)
+/** 버전 기록 (+ 초안이 있으면 맨 위 한 줄) → 화면 버전 (높은 번호가 위). 서버 순서를 믿지 않고 정렬 */
+export function toVersions(
+  list: PersonaVersionDto[],
+  headVersion: number,
+  draft: PersonaDraftDto | null,
+): PersonaVersion[] {
+  const draftDto = draft && draftRow(draft, headVersion)
+  const sorted = [...list, ...(draftDto ? [draftDto] : [])].sort((a, b) => b.version - a.version)
+  const active = list.find((v) => v.status === 'ACTIVE')?.version
   return sorted.map((v, i) => {
     const prev = sorted[i + 1] // 바로 앞(낮은) 버전
     const voice = toVoice(v)
@@ -115,19 +146,22 @@ export function toVersions(list: PersonaVersionDto[], headVersion: number): Pers
       waitTime:
         before && before.waitTime !== voice.waitTime ? [before.waitTime, voice.waitTime] : null,
     }
-    const isHead = v.version === headVersion
+    const isDraft = v === draftDto
+    const isHead = !isDraft && v.version === headVersion
     return {
       seq: v.aiPersonaVersionSeq,
       version: v.version,
-      status:
-        v.status !== 'INACTIVE'
+      status: isDraft
+        ? 'SAVED'
+        : v.status !== 'INACTIVE'
           ? v.status
-          : v.version === applied
-            ? 'APPLIED'
-            : isHead && (applied === null || v.version > applied)
-              ? 'SAVED'
-              : 'PAST',
+          : !isHead
+            ? 'PAST'
+            : active !== undefined && v.version > active
+              ? 'SAVED' // 확정됐지만 적용 요청이 안 된 HEAD (확정 뒤 적용 요청이 실패한 경우) → [적용] 다시
+              : 'APPLIED',
       isHead,
+      isDraft,
       voiceOnly:
         !changes.first && !changes.prompt && !!(changes.voice || changes.speed || changes.waitTime),
       changes,
@@ -139,21 +173,21 @@ export function toVersions(list: PersonaVersionDto[], headVersion: number): Pers
   })
 }
 
-/** 페르소나 + 그 버전 기록 → 화면 페르소나 */
-export function toPersona(p: PersonaDto, versions: PersonaVersionDto[]): Persona {
-  const applied = lastApplied(versions)
-  const base = versions.find((v) => v.version === applied) ?? p.headVersion
+/** 서버 페르소나 → 화면 페르소나 (버전 기록 없이 목록 한 번으로 — 적용본 = HEAD라서) */
+export function toPersona(p: PersonaDto): Persona {
+  const applied = p.activeVersion ?? p.headVersion // 통화 중이면 그 버전, 아니면 HEAD가 적용본 (백엔드 11/02)
   const pending = p.pendingVersion?.version ?? null
   const head = p.headVersion.version
   return {
     personaSeq: p.aiPersonaSeq,
     code: p.code,
     name: p.headVersion.name,
-    voice: toVoice(base),
+    voice: toVoice(applied),
     inUse: p.activeVersion !== null,
-    appliedVersion: applied,
+    appliedVersion: applied.version,
     head: { version: head, seq: p.headVersion.aiPersonaVersionSeq },
-    savedVersion: head !== applied && head !== pending ? head : null,
+    draftRevision: p.draft?.draftRevision ?? null,
+    savedVersion: p.draft ? head + 1 : head !== applied.version && head !== pending ? head : null,
     applyingVersion: pending,
     applyError: p.pendingVersion?.applyErrorCode ?? null,
   }

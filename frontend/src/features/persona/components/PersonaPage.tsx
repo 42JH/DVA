@@ -85,16 +85,6 @@ export function PersonaPage() {
           onClose={vm.cancelApply}
         />
       )}
-      {vm.useGuide && (
-        <ConfirmDialog
-          title={vm.useGuide.title}
-          note={vm.useGuide.note}
-          okLabel="버전 히스토리로"
-          okKind="primary"
-          onOk={vm.followGuide}
-          onClose={vm.closeGuide}
-        />
-      )}
       {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
       {vm.testCall && (
         <TestCallModal
