@@ -34,8 +34,8 @@ export function useOrderDetail(orderId: number | null, parcelSeq?: number | null
   }
 }
 
-/** 고른 배송 상세로 바꿔 끼움. 상세가 여러 개면 '배송 2/3'을 함께 (어느 줄을 열었는지) */
-function pickParcel(
+/** 고른 배송 상세로 바꿔 끼움 (03 주문 수정 창도 씀). 상세가 여러 개면 '배송 2/3'을 함께 (어느 줄을 열었는지) */
+export function pickParcel(
   o: OrderDetail,
   parcelSeq?: number | null,
 ): OrderDetail & { position?: string } {

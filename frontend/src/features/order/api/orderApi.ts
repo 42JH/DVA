@@ -1,16 +1,11 @@
 // 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
 // 목록 = 실서버 GET /admin/orders (연동 상세명세 4.1, 11/01). 주문 추가 · 수정은 아직 shared/order 메모리 가짜 (다음 단계)
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
-import { api, type ApiList } from '@/shared/api/client'
+import { api, type ApiItem, type ApiList } from '@/shared/api/client'
 import { fetchAll, offsetOf } from '@/shared/api/paging'
 import { addDays, type Ymd } from '@/shared/lib/dateRange'
-import {
-  addOrder,
-  updateOrder,
-  type OrderDetail,
-  type Party,
-  type PaymentMethod,
-} from '@/shared/order/orderApi'
+import type { OrderPatch } from './orderPatch'
+import { addOrder, type OrderDetail, type Party, type PaymentMethod } from '@/shared/order/orderApi'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
@@ -107,11 +102,21 @@ export const fetchAllOrders = (query: OrderListQuery): Promise<OrderListItem[]> 
 const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연
 
 /** 주문 추가(수기 접수) 본문 */
+/** 주소 검색으로 고른 주소의 나머지 칸 — 서버 주소는 지번 · 동 이름 · 우편번호 · 좌표가 필수 (명세 4.4) */
+export interface PickedAddress {
+  jibunAddress: string
+  dongName: string
+  postalCode: string // 5자리 문자열 (앞 0 보존)
+}
+
+/** 창에서 보내는 사람 — 주소를 새로 골랐으면 picked가 있음 */
+export type PartyInput = Party & { picked?: PickedAddress }
+
 export interface OrderInput {
-  sender: Party
-  receiver: Party
+  sender: PartyInput
+  receiver: PartyInput
   items: OrderDetail['items']
-  declaredValue: number | null // 물품 가액 원 (선택)
+  declaredValue: number | null // 물품 가액 원 (11/01 필수)
   pickupAt: string | null // ISO 8601 (선택)
   paymentMethod: PaymentMethod
   request: string | null // 고객 요청 사항 (선택)
@@ -151,16 +156,9 @@ export async function createOrder(
   return orderSeq
 }
 
-/** 주문 수정 — 명세 ORD-04 PATCH /orders/{id} (응답 모양 확인 전). 수정은 재시도해도 결과가 같아 멱등키 없음 */
-export async function saveOrder(orderSeq: number, input: OrderInput): Promise<void> {
-  await wait()
-  updateOrder(orderSeq, {
-    sender: input.sender,
-    receiver: input.receiver,
-    items: input.items,
-    pickupRequestedAt: input.pickupAt,
-    itemPrice: input.declaredValue,
-    clientComment: input.request,
-    paymentMethod: input.paymentMethod,
-  })
-}
+/** 주문 수정 — PATCH /orders/{id} (연동 상세명세 4.3). 본문은 buildOrderPatch(바뀐 칸만 + expectedVersion)
+ * 성공 200 { data: { version } } → 화면은 상세를 다시 받음. 버전이 낡았으면 409 VERSION_CONFLICT (자동 덮어쓰기 금지) */
+export const saveOrder = (
+  orderSeq: number,
+  patch: OrderPatch,
+): Promise<ApiItem<{ version: number }>> => api.patch(`/orders/${orderSeq}`, { body: patch })

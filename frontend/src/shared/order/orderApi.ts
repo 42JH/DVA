@@ -6,7 +6,7 @@ import { queryOptions } from '@tanstack/react-query'
 import { api, NotFoundError, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
-import { toOrderDetail, type OrderDetailDto } from './orderDto'
+import { toOrderDetail, type OrderDetailDto, type OrderStatusDto } from './orderDto'
 
 export interface Party {
   name: string
@@ -38,6 +38,9 @@ export interface OrderDetail {
   /** 배송 상세마다 (03 목록 줄 = 상세 하나, 11/01). 위 sender · receiver · items는 첫 상세 · 합계(06 팝업 기본값)
    * 메모리 가짜 주문엔 없음 → 없으면 위 값 그대로 */
   parcels?: ParcelDetail[]
+  /** 수정용 (03 주문 수정, 11/01) — 메모리 가짜 주문엔 없음 */
+  version?: number // 다음 수정의 expectedVersion
+  status?: OrderStatusDto // 실제 상태 — 결제 방식은 COLLECTING에서만 바꿀 수 있음
 }
 
 /** 배송 상세 하나 — 보내는 분 1 + 받는 분 1 */

@@ -9,14 +9,20 @@ import { OrderPartyFields } from './OrderPartyFields'
 // 아래 [취소] [접수]. 주소 칸을 누르면 이 창 대신 주소 검색 창 (고르면 돌아옴, 적던 내용 그대로)
 export function OrderFormModal({
   order,
+  parcelSeq = null,
+  notice,
+  onConflict,
   onDone,
   onClose,
 }: {
   order?: OrderDetail
+  parcelSeq?: number | null // 수정: 목록에서 누른 배송 상세
+  notice?: string | null // 수정: 버전 충돌로 최신 값을 다시 채웠다는 안내
+  onConflict?: () => void
   onDone: () => void // 접수 · 저장 성공
   onClose: () => void
 }) {
-  const vm = useOrderForm(onDone, order)
+  const vm = useOrderForm(onDone, order, parcelSeq, onConflict)
 
   if (vm.searching)
     return (
@@ -43,6 +49,11 @@ export function OrderFormModal({
       }
     >
       <div className="flex flex-col gap-6">
+        {notice && (
+          <p role="alert" className="rounded-lg bg-danger-soft px-4 py-3 text-label text-danger">
+            {notice}
+          </p>
+        )}
         <div className="grid grid-cols-[1fr_1px_1fr] gap-8">
           <OrderPartyFields title="보내는 분" party={vm.sender} />
           <div className="bg-line" />
@@ -88,13 +99,24 @@ export function OrderFormModal({
               error={vm.pickupError}
               onChange={(e) => vm.setPickupAt(e.target.value)}
             />
-            <ChipGroup
-              name="결제 방식"
-              compact
-              options={vm.paymentOptions}
-              value={vm.payment}
-              onChange={vm.setPayment}
-            />
+            {vm.paymentLocked ? (
+              // 결제 방식은 접수 중단 상태에서만 바꿀 수 있음 (명세 4.3) — 잠긴 값은 글자로
+              <TextField
+                label="결제 방식"
+                inline
+                locked
+                value={vm.paymentOptions.find((o) => o.value === vm.payment)?.label ?? vm.payment}
+                hint="결제 방식은 접수 중단 상태에서만 바꿀 수 있습니다."
+              />
+            ) : (
+              <ChipGroup
+                name="결제 방식"
+                compact
+                options={vm.paymentOptions}
+                value={vm.payment}
+                onChange={vm.setPayment}
+              />
+            )}
           </div>
           <TextField
             label="고객 요청 사항"
