@@ -121,10 +121,43 @@ after(async () => {
   await pool.end();
 });
 
-test('persona APIs require a valid SYSTEM_ADMIN session, never an AI token alone', async () => {
+test('persona reads allow every active administrator while writes remain SYSTEM_ADMIN only', async () => {
+  const version = await create();
+  for (const actor of [0, 1, 2]) {
+    const listed = await data(await call('GET', '/api/personas?limit=100', undefined, actor));
+    assert.ok(listed.some((persona) => persona.aiPersonaSeq === version.aiPersonaSeq));
+    assert.equal(
+      (await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`, undefined, actor)))
+        .aiPersonaSeq,
+      version.aiPersonaSeq,
+    );
+    const history = await data(
+      await call('GET', `/api/personas/${version.aiPersonaSeq}/versions`, undefined, actor),
+    );
+    assert.equal(history[0].aiPersonaVersionSeq, version.aiPersonaVersionSeq);
+  }
   for (const actor of [1, 2]) {
-    await error(await call('GET', '/api/personas', undefined, actor), 403, 'FORBIDDEN');
     await error(await call('POST', '/api/personas', input(), actor), 403, 'FORBIDDEN');
+    await error(
+      await call(
+        'PATCH',
+        `/api/personas/${version.aiPersonaSeq}`,
+        { expectedVersion: 1, name: '권한 없음' },
+        actor,
+      ),
+      403,
+      'FORBIDDEN',
+    );
+    await error(
+      await call(
+        'POST',
+        `/api/personas/${version.aiPersonaSeq}/activate`,
+        { aiPersonaVersionSeq: version.aiPersonaVersionSeq, expectedVersion: 1 },
+        actor,
+      ),
+      403,
+      'FORBIDDEN',
+    );
     await error(await call('GET', '/api/ai/options', undefined, actor), 403, 'FORBIDDEN');
   }
   await error(
@@ -137,6 +170,30 @@ test('persona APIs require a valid SYSTEM_ADMIN session, never an AI token alone
     403,
     'FORBIDDEN',
   );
+});
+
+test('PENDING and INACTIVE accounts cannot read personas even with an existing session', async () => {
+  const version = await create();
+  for (const actor of [0, 1, 2]) {
+    try {
+      for (const status of ['PENDING', 'INACTIVE']) {
+        await pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+          actorIds[actor],
+          status,
+        ]);
+        for (const path of [
+          '/api/personas',
+          `/api/personas/${version.aiPersonaSeq}`,
+          `/api/personas/${version.aiPersonaSeq}/versions`,
+        ])
+          await error(await call('GET', path, undefined, actor), 401, 'UNAUTHORIZED');
+      }
+    } finally {
+      await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
+        actorIds[actor],
+      ]);
+    }
+  }
 });
 
 test('persona creation preserves prompt and full settings in an inactive immutable version', async () => {

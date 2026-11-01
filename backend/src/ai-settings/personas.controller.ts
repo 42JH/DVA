@@ -50,7 +50,8 @@ import {
 @ApiResponse({ status: 401, description: '관리자 세션 없음·만료.', type: ErrorResponseDto })
 @ApiResponse({
   status: 403,
-  description: '최상위 관리자 권한 또는 변경 요청 Origin 오류.',
+  description:
+    '변경 요청의 최상위 관리자 권한 또는 허용 Origin 오류. 조회는 모든 활성 관리자에게 허용됩니다.',
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 404, description: '페르소나 또는 버전 없음.', type: ErrorResponseDto })
@@ -109,6 +110,7 @@ export class PersonasController {
   }
 
   @Get()
+  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 목록 조회',
     description:
@@ -139,6 +141,7 @@ export class PersonasController {
   }
 
   @Get(':id')
+  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 상세 조회',
     description:
@@ -173,6 +176,7 @@ export class PersonasController {
   }
 
   @Get(':id/versions')
+  @Roles('OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN')
   @ApiOperation({
     summary: '페르소나 버전 이력 조회',
     description:
