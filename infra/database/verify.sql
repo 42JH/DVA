@@ -4,7 +4,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>27 THEN RAISE EXCEPTION 'Expected 27 public tables, found %',n; END IF;
+ IF n<>28 THEN RAISE EXCEPTION 'Expected 28 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
@@ -58,6 +58,16 @@ BEGIN
   AND udt_name='timestamptz' AND is_nullable='YES' AND column_default='CURRENT_TIMESTAMP')<>2
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='033-organization-created-at.sql') THEN
   RAISE EXCEPTION 'Registration dates schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+  AND table_name='orders' AND column_name='payment_method_type' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.orders'::regclass AND conname='orders_payment_method_required_check')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='037-undecided-order-payment-method.sql') THEN
+  RAISE EXCEPTION 'Undecided payment schema or migration missing'; END IF;
+ IF to_regclass('public.empty_ai_order_results') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.empty_ai_order_results') AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (request_id)')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.empty_ai_order_results') AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (call_session_seq)')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='038-empty-ai-order-results.sql') THEN
+  RAISE EXCEPTION 'Empty AI order result schema or migration missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions

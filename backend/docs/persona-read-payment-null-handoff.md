@@ -1,6 +1,6 @@
 # 페르소나 통계 조회 권한·결제수단 미정 연동
 
-이번 변경 범위는 backend/다. 프론트·AI 소스와 실제 서버 DB는 변경하지 않는다.
+기능 변경 범위는 backend/다. 승인받은 infra/database/verify.sql의 스키마 검증도 함께 갱신한다. 프론트·AI 소스와 실제 서버 DB는 변경하지 않는다.
 
 ## 1. 활성 관리자 페르소나 조회
 
@@ -9,10 +9,10 @@
 | GET /api/personas | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
 | GET /api/personas/{id} | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
 | GET /api/personas/{id}/versions | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
-| POST /api/personas, PATCH /api/personas/{id}, POST /api/personas/{id}/activate | SYSTEM_ADMIN 유지 |
-| GET /api/ai/options | SYSTEM_ADMIN 유지 |
+| POST /api/personas, PATCH /api/personas/{id}, POST /api/personas/{id}/activate | ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN |
+| GET /api/ai/options | ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN |
 
-목록·상세·버전 응답 형식은 유지한다. 미로그인·만료 세션·PENDING·INACTIVE는 401이다. 일반 운영자의 생성·수정·publish는 403이다. AI 서비스 토큰만으로 관리자 조회를 할 수 없다.
+목록·상세·버전 응답 형식은 유지한다. 미로그인·만료 세션·PENDING·INACTIVE는 401이다. OPERATOR의 생성·수정·publish·AI 옵션 조회는 403이다. AI 서비스 토큰만으로 관리자 조회를 할 수 없다. 신규 DEVELOPER 코드는 만들지 않으며 기존 SUPERVISOR를 개발자로 사용한다. 프론트의 관리 메뉴·생성·수정·적용 버튼은 SUPERVISOR 또는 SYSTEM_ADMIN 조건을 사용하고, SUPERVISOR 표시 이름은 '개발자'로 바꾼다.
 
 프론트 `features/dashboard/hooks/useDashboard.ts`의 isSystemAdmin에 따른 페르소나 탭·조회 제한을 제거한다. 로그인 가드의 ACTIVE 세션 확인은 유지한다. 대시보드는 기존 GET /api/personas → 유형별 versions → aiPersonaVersionSeq로 calls·unanswered-questions를 조회하는 흐름을 사용한다.
 
@@ -41,10 +41,10 @@
 4. COLLECTING 주문을 최종 접수하기 전 billing·credit·groupBilling 중 하나를 선택해 PATCH한다. 선택한 방식을 저장한 뒤 응답 version으로 submit한다.
 5. 미선택 상태에서 최종 접수하면 422 VALIDATION_FAILED이며 error.details에 `{ "field": "paymentMethodType", "reason": "required" }`가 포함된다.
 
-AI의 결제수단 생략 요청은 그대로 사용할 수 있다. COMPLETE 결과와 관리자 수기 최종 접수에서는 결제수단이 필요하며 미정이면 저장·결제·디버 전송을 진행하지 않는다. 미완료·취소 결과와 수집 중 주문에는 null을 보존한다.
+AI의 결제수단 생략 요청은 그대로 사용할 수 있다. COMPLETE 결과와 관리자 수기 최종 접수에서는 결제수단이 필요하며 미정이면 저장·결제·디버 전송을 진행하지 않는다. 일부 정보가 있는 미완료·취소 주문에는 null을 보존한다. 주문 데이터가 전혀 없는 미완료·취소 통화는 [빈 통화 계약](empty-ai-order-results.md)에 따라 주문을 생성하지 않는다.
 
 ## 3. DB 적용과 범위
 
 새 migration 037은 orders.payment_method_type의 기본값·NOT NULL을 제거하고 COLLECTING·CANCELLED 이외 상태에는 결제수단을 요구한다. 이전 migration은 수정하지 않으며 기존 billing·credit·groupBilling·cat 값은 변경하지 않는다. 기존 개인카드 값이 실제 선택인지 과거 기본값인지 구분할 근거가 없으므로 소급해서 null로 바꾸지 않는다.
 
-037을 적용한 뒤 새 백엔드를 기동한다. 이 작업에서는 실제 서버에 SQL을 실행하지 않는다. 이번 변경은 무음·문의 통화의 주문 생성 자체를 중단하지 않으며, 생성된 미완료 주문의 미정 결제수단을 보존한다.
+038은 주문 없는 통화 결과의 재전송 식별자를 저장한다. 038까지 적용한 뒤 새 백엔드를 기동한다. 실제 서버 SQL 적용은 별도이며 과거에 생성된 빈 주문은 자동 삭제하지 않는다.

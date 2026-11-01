@@ -18,6 +18,32 @@ import {
 
 @Injectable()
 export class OrdersRepository {
+  async emptyResult(client: PoolClient, key: string) {
+    return (
+      await client.query<{ callSessionSeq: number; actorAdminUserSeq: number | null }>(
+        'SELECT call_session_seq AS "callSessionSeq",actor_admin_user_seq AS "actorAdminUserSeq" FROM empty_ai_order_results WHERE request_id=$1::uuid',
+        [key],
+      )
+    ).rows[0];
+  }
+
+  async hasEmptyResult(client: PoolClient, callId: number): Promise<boolean> {
+    return (
+      (
+        await client.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1', [
+          callId,
+        ])
+      ).rowCount === 1
+    );
+  }
+
+  async saveEmptyResult(client: PoolClient, key: string, callId: number, adminId: number | null) {
+    await client.query(
+      'INSERT INTO empty_ai_order_results(request_id,call_session_seq,actor_admin_user_seq) VALUES($1::uuid,$2,$3)',
+      [key, callId, adminId],
+    );
+  }
+
   async result(client: PoolClient, id: number, callId: number | null) {
     return (
       await client.query<import('./dto/order-response.dto').OrderResultDto>(

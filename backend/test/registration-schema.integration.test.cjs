@@ -27,7 +27,7 @@ const verification = (
 before(async () => migrate(pool));
 after(async () => pool.end());
 
-async function verify(changes = []) {
+async function verify(changes = [], message = 'Registration dates schema or migration missing') {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -47,7 +47,7 @@ async function verify(changes = []) {
     for (const sql of changes) await client.query(sql);
     if (changes.length)
       await assert.rejects(client.query(verification), {
-        message: 'Registration dates schema or migration missing',
+        message,
       });
     else await client.query(verification);
   } finally {
@@ -58,6 +58,22 @@ async function verify(changes = []) {
 
 test('deployment verification accepts migration 033 with nullable registration dates and live defaults', () =>
   verify());
+
+test('deployment verification requires migration 037 and an undecided payment default', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='037-undecided-order-payment-method.sql'",
+    "ALTER TABLE orders ALTER COLUMN payment_method_type SET DEFAULT 'billing'",
+  ])
+    await verify([sql], 'Undecided payment schema or migration missing');
+});
+
+test('deployment verification requires migration 038 and unique empty-result call identities', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='038-empty-ai-order-results.sql'",
+    'ALTER TABLE empty_ai_order_results DROP CONSTRAINT empty_ai_order_results_call_session_seq_key',
+  ])
+    await verify([sql], 'Empty AI order result schema or migration missing');
+});
 test('deployment verification rejects a missing migration 033 ledger entry', () =>
   verify([
     "DELETE FROM db_migrations.applied_versions WHERE version='033-organization-created-at.sql'",

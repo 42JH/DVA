@@ -42,6 +42,11 @@ async function migrate(pool) {
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='payment_method_type' AND is_nullable='YES' AND column_default IS NULL) AND EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.orders'::regclass AND conname='orders_payment_method_required_check')",
       );
       assert.equal(undecidedPayment.rowCount, 1, 'Apply migration 037 to the isolated DB first');
+      assert.ok(
+        (await client.query("SELECT to_regclass('public.empty_ai_order_results') AS name")).rows[0]
+          .name,
+        'Apply migration 038 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

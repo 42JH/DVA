@@ -37,6 +37,7 @@ import { AuditOperation } from '../audit/audit-operation';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto, RequestMetaDto } from '../common/dto/api-response.dto';
 import { CreateOrderDto } from './dto/create-order.dto';
+import { NoOrderResultDto } from './dto/no-order-result.dto';
 import {
   CreatedOrderDto,
   OrderResultDto,
@@ -54,6 +55,7 @@ import { OrderRequestKey } from './order-request-key';
 @ApiTags('Orders')
 @ApiExtraModels(
   CreateOrderDto,
+  NoOrderResultDto,
   CreatedOrderDto,
   OrderResultDto,
   OrderSummaryDto,
@@ -249,7 +251,7 @@ export class OrdersController {
   })
   @ApiCreatedResponse({
     description:
-      'AI 결과는 주문·통화 번호와 현재 상태. 기존 부분 저장은 주문 번호·버전. HTTP 201만으로 디버 접수 성공을 판단하지 않습니다.',
+      'AI 결과는 주문·통화 번호와 현재 상태. 주문 정보가 없는 미완료·취소 결과는 NO_ORDER와 orderSeq·version=null이며 통화만 보존합니다. 기존 부분 저장은 주문 번호·버전. HTTP 201만으로 디버 접수 성공을 판단하지 않습니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],
@@ -257,6 +259,7 @@ export class OrdersController {
         data: {
           anyOf: [
             { $ref: getSchemaPath(OrderResultDto) },
+            { $ref: getSchemaPath(NoOrderResultDto) },
             { $ref: getSchemaPath(CreatedOrderDto) },
           ],
         },
