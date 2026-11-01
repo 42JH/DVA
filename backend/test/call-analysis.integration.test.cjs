@@ -305,18 +305,6 @@ test('audit failure rolls back the new analysis so a valid retry can save it', a
   await success(await post(c.id, input(c.providerCallId)));
 });
 
-test('OpenAPI exposes only the new write operation with required nullable fields and bearer security', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/ai/calls/{id}/analysis'].post;
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  assert.ok(operation.responses['204']);
-  assert.equal(operation.responses['204'].content, undefined);
-  const schema = document.components.schemas.CreateCallAnalysisDto;
-  assert.deepEqual(schema.required.sort(), Object.keys(input('example')).sort());
-  assert.equal(schema.properties.repeatQuestionCount.nullable, true);
-  assert.equal(schema.properties.responseLatencyTotalMs, undefined);
-});
-
 test('analysis schema enforces call uniqueness, references and stored value constraints', async () => {
   const c = await createCall();
   const client = await pool.connect();

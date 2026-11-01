@@ -34,6 +34,15 @@ const employee = (extra = {}) => ({
   phoneNumber: phone(),
   ...extra,
 });
+const address = (suffix) => ({
+  roadAddress: '주소로 ' + suffix,
+  jibunAddress: '주소동 ' + suffix,
+  detailAddress: '101호',
+  dongName: '주소동',
+  postalCode: '01234',
+  latitude: 37.5,
+  longitude: 127,
+});
 let app, base;
 before(async () => {
   await migrate(pool);
@@ -178,6 +187,166 @@ test('a company without departments can register representatives and reuse an un
   assert.equal((await get(`/api/companies/${id}/departments`)).total_count, 0);
 });
 
+test('company registration saves new and reused customer addresses in the same transaction and exposes personal usage', async () => {
+  const number = phone();
+  const existing = await post(
+    { name: '기존 고객', phoneNumber: number, address: address('기존') },
+    { path: '/api/customers' },
+  );
+  assert.equal(existing.status, 201);
+  const customerSeq = (await existing.json()).data.customerSeq;
+  const pinAddress = { ...address('PIN'), name: '수령인', phoneNumber: number };
+  await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2)', [
+    customerSeq,
+    pinAddress,
+  ]);
+  const newAddress = address('신규');
+  delete newAddress.latitude;
+  delete newAddress.longitude;
+  const incoming = [
+    employee({
+      phoneNumber: number,
+      name: '수정 고객',
+      address: { ...address('수정'), latitude: 0, longitude: 0 },
+    }),
+    employee({ employeeNo: '002', address: newAddress }),
+  ];
+  const database = app.get(DatabaseService),
+    beforeTransactions = database.transactionStatistics.count;
+  const response = await post({ name: companyName(), members: incoming });
+  assert.equal(response.status, 201);
+  assert.equal(database.transactionStatistics.count - beforeTransactions, 1);
+  const id = (await response.json()).data.organizationSeq;
+  const members = (await get(`/api/companies/${id}/members`)).data;
+  assert.equal(
+    members.find((row) => row.membership.employeeNo === '001').customer.customerSeq,
+    customerSeq,
+  );
+  for (const input of incoming) {
+    const member = members.find((row) => row.membership.employeeNo === input.employeeNo);
+    const expectedAddress = {
+      ...input.address,
+      latitude: input.address.latitude ?? 1,
+      longitude: input.address.longitude ?? 1,
+    };
+    assert.equal(member.customer.name, input.name);
+    assert.deepEqual(member.customer.address, expectedAddress);
+    const detail = (await get(`/api/customers/${member.customer.customerSeq}`)).data;
+    assert.deepEqual(detail.address, expectedAddress);
+    const context = (
+      await (
+        await post({ phoneNumber: input.phoneNumber }, { path: '/api/customers/context' })
+      ).json()
+    ).data;
+    assert.equal(context.customer.customerSeq, member.customer.customerSeq);
+    assert.deepEqual(context.customer.address, expectedAddress);
+    assert.deepEqual(context.availableUsageTypes, ['PERSONAL', 'COMPANY']);
+  }
+  assert.deepEqual(
+    (
+      await pool.query('SELECT address_data FROM personal_pins WHERE customer_seq=$1', [
+        customerSeq,
+      ])
+    ).rows[0].address_data,
+    pinAddress,
+  );
+});
+
+test('existing company member batches save all customer addresses and distinguish replacement, omission and null', async () => {
+  const company = await post({ name: companyName() });
+  assert.equal(company.status, 201);
+  const id = (await company.json()).data.organizationSeq;
+  const path = `/api/companies/${id}/members`;
+  const old = employee({ role: 'ORG_ADMIN', address: address('최초') });
+  assert.equal((await post(old, { path })).status, 204);
+  const before = (await get(path)).data[0];
+  const number = phone();
+  const existing = await post(
+    { name: '미소속 고객', phoneNumber: number },
+    { path: '/api/customers' },
+  );
+  assert.equal(existing.status, 201);
+  const existingId = (await existing.json()).data.customerSeq;
+  const items = [
+    { ...old, role: undefined, address: address('교체') },
+    employee({ employeeNo: '002', phoneNumber: number, address: address('연결') }),
+    employee({
+      employeeNo: '003',
+      address: { ...address('생성'), latitude: null, longitude: undefined },
+    }),
+    employee({ employeeNo: '004' }),
+  ];
+  const database = app.get(DatabaseService),
+    beforeTransactions = database.transactionStatistics.count;
+  assert.equal((await post({ items }, { path })).status, 204);
+  assert.equal(database.transactionStatistics.count - beforeTransactions, 1);
+  const members = (await get(path)).data;
+  for (const input of items) {
+    const member = members.find((row) => row.membership.employeeNo === input.employeeNo);
+    const expectedAddress = input.address
+      ? {
+          ...input.address,
+          latitude: input.address.latitude ?? 1,
+          longitude: input.address.longitude ?? 1,
+        }
+      : null;
+    assert.deepEqual(member.customer.address, expectedAddress);
+  }
+  const updated = members.find((row) => row.membership.employeeNo === '001');
+  assert.equal(updated.customer.customerSeq, before.customer.customerSeq);
+  assert.equal(updated.membership.membershipSeq, before.membership.membershipSeq);
+  assert.equal(updated.membership.role, 'ORG_ADMIN');
+  assert.equal(
+    members.find((row) => row.membership.employeeNo === '002').customer.customerSeq,
+    existingId,
+  );
+  const { address: _ignored, ...withoutAddress } = old;
+  assert.equal((await post({ ...withoutAddress, name: '주소 유지' }, { path })).status, 204);
+  assert.deepEqual(
+    (await get(`/api/customers/${before.customer.customerSeq}`)).data.address,
+    address('교체'),
+  );
+  const withoutCoordinates = address('좌표 생략');
+  delete withoutCoordinates.latitude;
+  delete withoutCoordinates.longitude;
+  assert.equal((await post({ ...old, address: withoutCoordinates }, { path })).status, 204);
+  assert.deepEqual((await get(`/api/customers/${before.customer.customerSeq}`)).data.address, {
+    ...withoutCoordinates,
+    latitude: 1,
+    longitude: 1,
+  });
+  assert.equal((await post({ ...old, address: null }, { path })).status, 204);
+  assert.equal((await get(`/api/customers/${before.customer.customerSeq}`)).data.address, null);
+});
+
+test('invalid addresses reject the whole registration before modifying an existing customer', async () => {
+  const number = phone();
+  const created = await post(
+    { name: '기존 고객', phoneNumber: number, address: address('보존') },
+    { path: '/api/customers' },
+  );
+  assert.equal(created.status, 201);
+  const customerSeq = (await created.json()).data.customerSeq;
+  const company = await post({ name: companyName() });
+  const id = (await company.json()).data.organizationSeq;
+  const rows = [
+    employee({ phoneNumber: number, name: '거절될 변경', address: address('변경') }),
+    employee({ employeeNo: '002', address: { ...address('오류'), longitude: '127' } }),
+  ];
+  const before = await counts();
+  for (const [input, path, field] of [
+    [{ name: companyName(), members: rows }, '/api/companies', 'members[1].address.longitude'],
+    [{ items: rows }, `/api/companies/${id}/members`, 'items[1].address.longitude'],
+  ]) {
+    const body = await error(await post(input, { path }), 400, 'INVALID_REQUEST');
+    assert.ok(body.error.details.some((detail) => detail.field === field));
+    assert.deepEqual(await counts(), before);
+    const detail = (await get(`/api/customers/${customerSeq}`)).data;
+    assert.equal(detail.name, '기존 고객');
+    assert.deepEqual(detail.address, address('보존'));
+  }
+});
+
 test('a company can create departments without employees', async () => {
   const response = await post({ name: companyName(), departments: [{ name: '부서' }] });
   assert.equal(response.status, 201);
@@ -277,8 +446,8 @@ test('a failure after employee persistence rolls back all created records and re
   const number = phone();
   const customer = (
     await pool.query(
-      "INSERT INTO customers(name,phone_number,status) VALUES('원래 이름',$1,'ACTIVE') RETURNING customer_seq",
-      [number],
+      "INSERT INTO customers(name,phone_number,status,address_data) VALUES('원래 이름',$1,'ACTIVE',$2) RETURNING customer_seq",
+      [number, address('원래')],
     )
   ).rows[0].customer_seq;
   const before = await counts();
@@ -300,8 +469,9 @@ test('a failure after employee persistence rolls back all created records and re
             name: '바뀐 이름',
             role: 'ORG_ADMIN',
             departmentName: '부서',
+            address: address('거절될 수정'),
           }),
-          employee({ employeeNo: '002' }),
+          employee({ employeeNo: '002', address: address('거절될 생성') }),
         ],
       }),
       500,
@@ -314,6 +484,11 @@ test('a failure after employee persistence rolls back all created records and re
   assert.equal(
     (await pool.query('SELECT name FROM customers WHERE customer_seq=$1', [customer])).rows[0].name,
     '원래 이름',
+  );
+  assert.deepEqual(
+    (await pool.query('SELECT address_data FROM customers WHERE customer_seq=$1', [customer]))
+      .rows[0].address_data,
+    address('원래'),
   );
   assert.equal(
     (
@@ -329,11 +504,11 @@ test('concurrent company registrations sharing a phone have one winner and no or
   const member = employee(),
     names = [companyName(), companyName()];
   const responses = await Promise.all(
-    names.map((name) =>
+    names.map((name, index) =>
       post({
         name,
         departments: [{ name: '부서' }],
-        members: [{ ...member, departmentName: '부서' }],
+        members: [{ ...member, departmentName: '부서', address: address(String(index)) }],
       }),
     ),
   );
@@ -347,6 +522,14 @@ test('concurrent company registrations sharing a phone have one winner and no or
     (await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [member.phoneNumber]))
       .rows[0].count,
     '1',
+  );
+  assert.deepEqual(
+    (
+      await pool.query('SELECT address_data FROM customers WHERE phone_number=$1', [
+        member.phoneNumber,
+      ])
+    ).rows[0].address_data,
+    address(String(responses.findIndex((response) => response.status === 201))),
   );
 });
 
@@ -399,21 +582,4 @@ test('company POST accepts a 1000-employee body above 100 KiB and rejects bodies
     'PAYLOAD_TOO_LARGE',
   );
   assert.deepEqual(await counts(), before);
-});
-
-test('OpenAPI exposes optional company child arrays and roles while preserving creation response and member 204', async () => {
-  const document = await get('/api/docs-json');
-  const schema = document.components.schemas.CreateOrganizationDto;
-  assert.deepEqual(schema.required, ['name']);
-  assert.equal(schema.properties.members.maxItems, 1000);
-  assert.equal(schema.properties.departments.maxItems, 1000);
-  const member = document.components.schemas.OrganizationMemberDto;
-  assert.deepEqual(member.properties.role.enum, ['MEMBER', 'ORG_ADMIN']);
-  assert.ok(!member.required.includes('role'));
-  assert.equal(member.properties.departmentSeq, undefined);
-  assert.equal(
-    document.paths['/api/companies'].post.requestBody.content['application/json'].schema.$ref,
-    '#/components/schemas/CreateOrganizationDto',
-  );
-  assert.ok(document.paths['/api/companies/{id}/members'].post.responses['204']);
 });

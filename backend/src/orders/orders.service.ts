@@ -271,6 +271,8 @@ export class OrdersService {
       )
         throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 주문 고객이 일치하지 않습니다.');
       const customerId = customer?.customerSeq ?? null;
+      if (callId !== null && customerId !== null)
+        await this.calls.attachCustomer(client, callId, customerId);
       for (const parcel of draft.parcels) {
         if (
           parcel.originPin &&

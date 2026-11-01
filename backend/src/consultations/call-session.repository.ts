@@ -19,11 +19,20 @@ export class CallSessionRepository {
     if (recording.rowCount !== 1) throw new Error('recording_assignment_conflict');
   }
 
+  async attachCustomer(client: PoolClient, callId: number, customerId: number): Promise<void> {
+    await client.query(
+      'UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
+      [callId, customerId],
+    );
+  }
+
   async attachOrder(client: PoolClient, callId: number, orderId: number): Promise<void> {
-    await client.query('UPDATE call_sessions SET order_seq=$2 WHERE call_session_seq=$1', [
-      callId,
-      orderId,
-    ]);
+    await client.query(
+      `UPDATE call_sessions SET order_seq=$2,
+       customer_seq=COALESCE(customer_seq,(SELECT customer_seq FROM orders WHERE order_seq=$2))
+       WHERE call_session_seq=$1`,
+      [callId, orderId],
+    );
   }
 
   async matchRecording(client: PoolClient, input: RecordingCallMatch): Promise<number | null> {
@@ -56,8 +65,9 @@ export class CallSessionRepository {
   ): Promise<{ id: number; created: boolean }> {
     const phone = callerPhone(input.callerPhoneNumber);
     const inserted = await client.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at)
-       VALUES($1,$2,$3) ON CONFLICT(provider_call_id) DO NOTHING`,
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,customer_seq)
+       VALUES($1,$2,$3,(SELECT customer_seq FROM customers WHERE phone_number=$2))
+       ON CONFLICT(provider_call_id) DO NOTHING`,
       [input.providerCallId, phone, input.incomingAt],
     );
     const call = (

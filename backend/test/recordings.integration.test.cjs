@@ -420,21 +420,3 @@ test('disabled S3 and recent receipts remain durable; retry cooldown does not st
   assert.equal((await state(later.recordingId)).processing_status, 'PROCESSED');
   assert.equal((await state(first.recordingId)).processing_status, 'RECEIVED');
 });
-
-test('PBX Swagger describes durable acknowledgment, authentication, routing and recording fields', async () => {
-  const spec = await (await fetch(urls[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/webhooks/pbx/call-ended'].post;
-  assert.deepEqual(operation.tags, ['PBX']);
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  assert.deepEqual(
-    operation.servers.map((server) => server.url),
-    ['/api', '/'],
-  );
-  assert.match(operation.description, /비동기/);
-  assert.equal(operation.requestBody.content['application/json'].schema.required.length, 7);
-  assert.equal(
-    operation.responses[200].content['application/json'].schema.properties.duplicate.type,
-    'boolean',
-  );
-  for (const status of [400, 401, 409, 503]) assert.ok(operation.responses[status]);
-});

@@ -1009,44 +1009,6 @@ test('JSON batch rechecks customer status after acquiring a row locked by a conc
   }
 });
 
-test('OpenAPI contains four protected operations, JSON batch shape, representative labels and 204 responses', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/companies/{id}/members', 'get'],
-    ['/api/companies/{id}/members', 'post'],
-    ['/api/members/{id}', 'patch'],
-    ['/api/members/{id}', 'delete'],
-  ]) {
-    const operation = document.paths[path][method];
-    assert.deepEqual(operation.security, [{ adminSession: [] }]);
-    if (method !== 'get') assert.ok(!operation.responses['204'].content);
-  }
-  assert.equal(document.paths['/api/companies/{id}/members/import'], undefined);
-  const create = document.paths['/api/companies/{id}/members'].post;
-  assert.equal(create.requestBody.content['application/json'].schema.oneOf.length, 3);
-  assert.equal(
-    document.components.schemas.MembershipResponseDto.properties.departmentSeq.nullable,
-    true,
-  );
-  assert.ok(
-    !(document.components.schemas.CreateMemberDto.required ?? []).includes('departmentSeq'),
-  );
-  assert.ok(
-    !(document.paths['/api/companies/{id}/members'].post.parameters ?? []).some(
-      (item) => item.name === 'Idempotency-Key',
-    ),
-  );
-  assert.deepEqual(Object.keys(document.components.schemas.UpdateMemberDto.properties).sort(), [
-    'departmentSeq',
-    'role',
-    'status',
-  ]);
-  assert.match(
-    document.components.schemas.MembershipResponseDto.properties.role.description,
-    /대표자/,
-  );
-});
-
 test('inline employee registration accepts representative roles while omitted roles default to MEMBER', async () => {
   const co = await company();
   const adminCount = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;

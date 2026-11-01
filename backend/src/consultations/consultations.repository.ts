@@ -38,8 +38,7 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
  h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
  FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq
  LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq
- LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,
-   (SELECT customer_seq FROM customers WHERE phone_number=c.caller_phone_number))
+ LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq)
  LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
  LEFT JOIN ai_persona_versions v ON v.ai_persona_version_seq=a.ai_persona_version_seq`;
 

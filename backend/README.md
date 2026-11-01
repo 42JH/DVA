@@ -1,6 +1,8 @@
 # 모놀리식 백엔드 공통 기반
 
-페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 039까지 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
+통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
+
+페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 migration 039·040을 모두 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
 
 백엔드 최적화 브랜치는 새 앱 실행 전에 `032-list-read-indexes.sql`까지 적용한다. 031은 녹취 처리의 수신 건별 lease, 032는 검증된 조회 인덱스 두 개를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼·인덱스는 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
 

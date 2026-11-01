@@ -51,6 +51,10 @@ async function migrate(pool) {
         (await client.query("SELECT to_regclass('public.ai_persona_drafts') AS name")).rows[0].name,
         'Apply migration 039 to the isolated DB first',
       );
+      const callCustomer = await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='customer_seq' AND udt_name='int4' AND is_nullable='YES'",
+      );
+      assert.equal(callCustomer.rowCount, 1, 'Apply migration 040 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

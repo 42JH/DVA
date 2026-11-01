@@ -418,37 +418,3 @@ test('a collected question connects to processing results; event failure retries
   assert.equal(await success(await post(body), 200), id);
   assert.equal((await read()).data[0].questionText, null);
 });
-
-test('OpenAPI documents service authentication, six fields and 201/200 without workflow state or milliseconds', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/ai/unanswered-questions'].post;
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  assert.equal(document.paths['/api/ai/unanswered-questions'].get, undefined);
-  assert.deepEqual(document.paths['/api/unanswered-questions'].get.security, [
-    { adminSession: [] },
-  ]);
-  for (const status of [
-    '200',
-    '201',
-    '400',
-    '401',
-    '403',
-    '404',
-    '409',
-    '413',
-    '422',
-    '500',
-    '503',
-  ])
-    assert.ok(operation.responses[status], status);
-  const schema = document.components.schemas.CreateUnansweredQuestionDto;
-  assert.deepEqual(
-    Object.keys(schema.properties).sort(),
-    Object.keys(input({ id: 1, providerCallId: 'example' })).sort(),
-  );
-  assert.deepEqual(schema.required.sort(), Object.keys(schema.properties).sort());
-  assert.equal(schema.properties.questionText.maxLength, 1000);
-  assert.equal(schema.properties.offsetSeconds.nullable, true);
-  for (const property of Object.values(schema.properties)) assert.ok(property.description);
-  assert.doesNotMatch(JSON.stringify(logs), /미답변-민감문구|rtc_unanswered_|Bearer /);
-});

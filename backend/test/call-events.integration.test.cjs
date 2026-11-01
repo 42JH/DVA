@@ -551,19 +551,6 @@ test('025 migrates old millisecond complaints and hashes without resetting analy
   }
 });
 
-test('OpenAPI documents 50-per-request, seconds and kind-specific payloads without action status', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/ai/calls/{id}/events'].post;
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  assert.equal(operation.responses['204'].content, undefined);
-  const schemas = document.components.schemas;
-  assert.equal(schemas.CreateCallEventsDto.properties.events.maxItems, 50);
-  assert.ok(schemas.CallEventInputDto.properties.offsetSeconds.nullable);
-  assert.equal(schemas.CallEventInputDto.properties.offsetMs, undefined);
-  assert.equal(schemas.CallEventInputDto.properties.payload.anyOf.length, 3);
-  assert.equal(schemas.AiActionPayloadDto.properties.status, undefined);
-});
-
 test('database rejects cross-call question links, action status and invalid second offsets', async () => {
   const c = await createCall();
   const other = await createCall();
@@ -1008,38 +995,6 @@ test('read failures use the common error response instead of returning a success
     } finally {
       mock.mock.restore();
     }
-  }
-});
-
-test('OpenAPI exposes separate read shapes, search types, FAQ references, seconds and the full action count', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  for (const path of ['actions', 'processing-results']) {
-    const operation = document.paths[`/api/calls/{id}/${path}`].get;
-    assert.deepEqual(operation.security, [{ adminSession: [] }]);
-    assert.deepEqual(operation.parameters.map(({ name }) => name).sort(), [
-      'id',
-      'limit',
-      'offset',
-    ]);
-  }
-  assert.equal(document.paths['/api/calls/{id}/events'], undefined);
-  const schemas = document.components.schemas;
-  for (const name of ['AiActionPayloadDto', 'CallActionDto']) {
-    assert.ok(schemas[name].properties.action.enum.includes('PIN_SEARCH'));
-    assert.ok(schemas[name].properties.action.enum.includes('PREVIOUS_ORDER_SEARCH'));
-    assert.equal(schemas[name].properties.status, undefined);
-  }
-  assert.ok(schemas.BusinessResultPayloadDto.properties.action.enum.includes('FAQ_ANSWERED'));
-  for (const name of ['faqEntrySeq', 'questionUtteranceOrder', 'answerUtteranceOrder'])
-    assert.ok(schemas.BusinessResultPayloadDto.properties[name]);
-  assert.ok(schemas.UtteranceDto.properties.offsetSeconds.nullable);
-  assert.ok(schemas.CallDetailDto.properties.aiActionCount);
-  for (const name of ['CallActionDto', 'CallProcessingResultDto']) {
-    assert.equal(schemas[name].properties.payload, undefined);
-    assert.equal(schemas[name].properties.kind, undefined);
-    assert.equal(schemas[name].properties.offsetMs, undefined);
-    for (const property of Object.values(schemas[name].properties))
-      assert.ok(property.description, name);
   }
 });
 

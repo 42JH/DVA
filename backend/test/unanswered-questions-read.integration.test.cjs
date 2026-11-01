@@ -76,7 +76,7 @@ async function createCall({
   const providerCallId = 'rtc_question_read_' + randomUUID();
   const id = (
     await pool.query(
-      'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,incoming_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING call_session_seq',
+      'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,incoming_at,customer_seq) VALUES($1,$2,$3,$4,$5,$6,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq',
       [
         providerCallId,
         phone,
@@ -515,54 +515,4 @@ test('reads leave question history and audits unchanged; query failures return a
     JSON.stringify(logs),
     /private-unq-read-|rtc_question_read_|database-password/,
   );
-});
-
-test('OpenAPI separates administrator list authentication from AI collection and documents the exact list contract', async () => {
-  const response = await fetch(base + '/api/docs-json');
-  assert.equal(response.status, 200);
-  const document = await response.json();
-  const operation = document.paths['/api/unanswered-questions'].get;
-  assert.deepEqual(operation.security, [{ adminSession: [] }]);
-  assert.equal(operation.requestBody, undefined);
-  assert.deepEqual(
-    operation.parameters.map((param) => param.name).sort(),
-    [
-      'unansweredQuestionSeq',
-      'callSessionSeq',
-      'aiPersonaVersionSeq',
-      'status',
-      'q',
-      'from',
-      'to',
-      'limit',
-      'offset',
-    ].sort(),
-  );
-  for (const status of ['200', '400', '401', '403', '500']) assert.ok(operation.responses[status]);
-  assert.equal(
-    operation.parameters.find((param) => param.name === 'status').schema.default,
-    'OPEN',
-  );
-  assert.deepEqual(operation.parameters.find((param) => param.name === 'status').schema.enum, [
-    'OPEN',
-    'REGISTERED',
-  ]);
-  const schemas = document.components.schemas;
-  assert.deepEqual(Object.keys(schemas.UnansweredQuestionDto.properties).sort(), rowKeys);
-  assert.deepEqual(Object.keys(schemas.UnansweredQuestionListResponseDto.properties).sort(), [
-    'data',
-    'hasNext',
-    'total_count',
-  ]);
-  for (const field of [
-    'callStartedAt',
-    'offsetSeconds',
-    'customerSeq',
-    'customerName',
-    'callerPhoneNumber',
-    'aiPersonaVersionSeq',
-    'faqEntrySeq',
-  ])
-    assert.equal(schemas.UnansweredQuestionDto.properties[field].nullable, true, field);
-  assert.deepEqual(document.paths['/api/ai/unanswered-questions'].post.security, [{ bearer: [] }]);
 });

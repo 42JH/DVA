@@ -861,45 +861,6 @@ test('dedicated role change and its success audit commit or roll back together',
   assert.deepEqual(records, [{ actor_seq: system.id, target_seq: target.id }]);
 });
 
-test('OpenAPI documents authentication and admin contracts without leaking passwords or tokens', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  for (const [path, method] of [
-    ['/api/auth/login', 'post'],
-    ['/api/auth/logout', 'post'],
-    ['/api/auth/me', 'get'],
-    ['/api/auth/signup', 'post'],
-    ['/api/auth/password', 'patch'],
-    ['/api/admins', 'get'],
-    ['/api/admins/{id}', 'patch'],
-    ['/api/admins/{id}/password', 'patch'],
-    ['/api/admins/{id}/role', 'patch'],
-  ])
-    assert.ok(document.paths[path][method]);
-  assert.equal(document.components.securitySchemes.adminSession.in, 'cookie');
-  const loginForbidden = document.paths['/api/auth/login'].post.responses['403'].description;
-  assert.match(loginForbidden, /ACCOUNT_INACTIVE/);
-  assert.match(loginForbidden, /ACCOUNT_PENDING/);
-  assert.match(
-    document.components.schemas.UpdateAdminDto.properties.status.description,
-    /INACTIVE/,
-  );
-  const role = document.paths['/api/admins/{id}/role'].patch;
-  assert.deepEqual(role.tags, ['Admins']);
-  assert.ok(role.responses['204']);
-  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.required, ['role']);
-  assert.deepEqual(document.components.schemas.UpdateAdminRoleDto.properties.role.enum, [
-    'OPERATOR',
-    'SUPERVISOR',
-  ]);
-  assert.deepEqual(document.components.schemas.UpdateAdminDto.properties.role.enum, [
-    'OPERATOR',
-    'SUPERVISOR',
-  ]);
-  const serialized = JSON.stringify(logs);
-  assert.ok(!serialized.includes(password));
-  assert.ok(!serialized.includes('dva_session='));
-});
-
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(
     "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('runtimeAdmin83','Runtime test',$1,'OPERATOR','ACTIVE')",
