@@ -1,6 +1,7 @@
 // 아래 줄 두 카드 (02 날짜별 · 페르소나별 같은 모양, 6칸씩 — 10/30 필드별 수정률 뺌)
-// AI 미답변: 그 범위에 AI가 답하지 못한 질문, 최신순 8줄 + 'AI 미답변 보기 ›'(09). 줄은 누를 수 없음 (처리는 09에서)
+// AI 미답변: 그 범위에 AI가 답하지 못한 질문, 최신순 8줄(페르소나별 6줄) + 'AI 미답변 보기 ›'(09). 줄은 누를 수 없음 (처리는 09에서)
 // 불만 내역: 유형 5줄 + 막대(건수 열 앞까지) + '불만 통화 보기 ›'(04 불만 통화 탭, 같은 기간)
+// onMore가 없으면(페르소나별 — 04 · 09에 버전 필터가 없어 숫자가 안 맞음) 아래 링크 줄 자체가 없음
 
 function Card({
   title,
@@ -12,7 +13,7 @@ function Card({
   title: string
   sub: string
   more: string
-  onMore: () => void
+  onMore?: () => void
   children: React.ReactNode
 }) {
   return (
@@ -22,15 +23,17 @@ function Card({
         <p className="mt-1 text-label text-sub">{sub}</p>
       </div>
       <div className="flex-1 px-6 pt-5">{children}</div>
-      <div className="flex h-14 items-center border-t border-line px-6">
-        <button
-          type="button"
-          onClick={onMore}
-          className="text-label font-semibold text-action hover:underline"
-        >
-          {more} ›
-        </button>
-      </div>
+      {onMore && (
+        <div className="flex h-14 items-center border-t border-line px-6">
+          <button
+            type="button"
+            onClick={onMore}
+            className="text-label font-semibold text-action hover:underline"
+          >
+            {more} ›
+          </button>
+        </div>
+      )}
     </section>
   )
 }
@@ -51,7 +54,7 @@ export function UnansweredCard({
   sub: string
   timeHeader: string
   rows: { key: string; question: string; time: string }[]
-  onMore: () => void
+  onMore?: () => void
 }) {
   return (
     <Card title="AI 미답변" sub={sub} more="AI 미답변 보기" onMore={onMore}>
@@ -86,7 +89,7 @@ export function ComplaintCard({
   sub: string
   total: number
   rows: { key: string; label: string; count: number }[]
-  onMore: () => void
+  onMore?: () => void
 }) {
   const max = Math.max(1, ...rows.map((r) => r.count))
   return (
@@ -111,7 +114,9 @@ export function ComplaintCard({
                     />
                   )}
                 </span>
-                <span className="w-14 shrink-0 text-right font-semibold">{r.count}건</span>
+                <span className="w-14 shrink-0 text-right font-semibold">
+                  {r.count.toLocaleString('ko-KR')}건
+                </span>
               </li>
             ))}
           </ul>

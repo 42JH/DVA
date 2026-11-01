@@ -1,26 +1,26 @@
-import type { AudioHTMLAttributes, RefObject } from 'react'
+import { useEffect, useRef, type AudioHTMLAttributes, type RefObject } from 'react'
 import type { ScriptSegment } from '@/features/call/hooks/useCallDetail'
 import type { PlayerState } from '@/features/call/hooks/useRecordingPlayer'
 
-// 통화 스크립트 카드 (06 왼쪽, 와이어프레임 06_통화상세 10/30) — 제목 + '페르소나 빠른 접수형 v6' / 재생 바 + 속도 [1.0x|2.0x|3.0x] / 말 줄
+// 통화 스크립트 카드 (06 왼쪽, 와이어프레임 06_통화상세 10/30) — 제목 + '페르소나 빠른 접수형 v6' / 재생 바 (11/01 배속 뺌) / 말 줄
 // 말 줄: [AI·고객] 말 ……… 시각. AI 동작(저장 · 검색 · 전송)은 오른쪽 '처리 내용'의 AI 동작 기록으로 (10/30 'AI 동작 표시' 토글 없음)
 // 불만 구간: 옅은 빨강 바탕 + 빨간 선으로 묶고 머리에 '불만 · 유형' (10/21). 카드 안에서만 스크롤
 // 녹취: 서명 URL을 <audio>로 (명세 §5.3). 없거나 발급 실패면 ▶를 끄고 한 줄로 알림
+// 짚는 줄(focusKey): 재생 중인 말 또는 오른쪽 AI 동작을 눌러 고른 말 = 옅은 남색. jump가 바뀌면 그 줄로 스크롤 (11/01)
 const STATE_TEXT: Record<PlayerState, string | null> = {
   ok: null,
   none: '녹취 없음',
   failed: '녹취를 불러오지 못했습니다',
 }
 
-export function CallScript<S extends string>({
+export function CallScript({
   className = '',
   persona,
   player,
   audioRef,
-  speeds,
-  speed,
-  onSpeed,
   segments,
+  focusKey,
+  jump,
 }: {
   className?: string
   persona: string // '' 이면 표시 안 함 (분석 전 · 페르소나 미기록)
@@ -31,16 +31,23 @@ export function CallScript<S extends string>({
     length: string
     progress: number // 0 ~ 1
     toggle: () => void
+    scrub: (ratio: number) => void // 진행 바를 끌어 위치 옮김
     src?: string
     handlers: AudioHTMLAttributes<HTMLAudioElement>
   }
   audioRef: RefObject<HTMLAudioElement | null>
-  speeds: readonly S[]
-  speed: S
-  onSpeed: (s: S) => void
   segments: ScriptSegment[]
+  focusKey: number | null
+  jump: { key: number; n: number } | null
 }) {
   const canPlay = player.state === 'ok'
+  const list = useRef<HTMLUListElement>(null)
+  useEffect(() => {
+    if (!jump) return
+    list.current
+      ?.querySelector(`[data-key="${jump.key}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [jump])
   return (
     <section
       className={`flex min-h-0 flex-col rounded-xl bg-surface p-8 ring-1 ring-line ring-inset ${className}`}
@@ -76,6 +83,7 @@ export function CallScript<S extends string>({
               </svg>
             )}
           </button>
+          {/* 진행 바: 그림은 두 span, 조작은 그 위에 투명한 range (드래그 · 클릭 · 방향키, 11/01) */}
           <div className="relative h-1.5 flex-1 rounded-full bg-line">
             <span
               className="absolute inset-y-0 left-0 rounded-full bg-action"
@@ -85,30 +93,21 @@ export function CallScript<S extends string>({
               className="absolute top-1/2 size-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-surface ring-2 ring-action ring-inset"
               style={{ left: `${player.progress * 100}%` }}
             />
+            <input
+              type="range"
+              min={0}
+              max={1000}
+              value={Math.round(player.progress * 1000)}
+              onChange={(e) => player.scrub(Number(e.target.value) / 1000)}
+              disabled={!canPlay}
+              aria-label="재생 위치"
+              className="absolute inset-x-0 top-1/2 h-6 w-full -translate-y-1/2 cursor-pointer opacity-0 disabled:cursor-default"
+            />
           </div>
         </div>
-        <div className="mt-2 flex items-center justify-between pl-14 text-label">
+        <div className="mt-2 flex h-8 items-center pl-14 text-label">
           <span className={canPlay ? 'text-sub' : 'text-muted'}>
             {STATE_TEXT[player.state] ?? `${player.now} / ${player.length}`}
-          </span>
-          {/* 속도 = 붙은 칸 세 개 (고른 칸 = 남색 선 + 옅은 남색 바탕) */}
-          <span className="flex" role="radiogroup" aria-label="재생 속도">
-            {speeds.map((s) => (
-              <button
-                key={s}
-                type="button"
-                role="radio"
-                aria-checked={s === speed}
-                onClick={() => onSpeed(s)}
-                className={`-ml-px h-8 px-3 first:ml-0 first:rounded-l-md last:rounded-r-md ${
-                  s === speed
-                    ? 'relative z-10 bg-action-soft font-semibold text-action ring-1 ring-action ring-inset'
-                    : 'text-sub ring-1 ring-line ring-inset hover:bg-bg'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
           </span>
         </div>
       </div>
@@ -116,7 +115,7 @@ export function CallScript<S extends string>({
       <div className="mt-[18px] border-t border-line" />
 
       {/* 줄: 화자 칸 64 · 글자 · 시각 오른쪽 끝. 카드 안에서만 스크롤 */}
-      <ul className="mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <ul ref={list} className="mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto">
         {segments.length === 0 && (
           <li className="py-10 text-center text-body text-muted">발화가 없습니다.</li>
         )}
@@ -131,7 +130,7 @@ export function CallScript<S extends string>({
               </p>
               <ul>
                 {seg.lines.map((l) => (
-                  <Line key={l.key} line={l} />
+                  <Line key={l.key} line={l} active={l.key === focusKey} />
                 ))}
               </ul>
             </li>
@@ -139,7 +138,7 @@ export function CallScript<S extends string>({
             <li key={si}>
               <ul>
                 {seg.lines.map((l) => (
-                  <Line key={l.key} line={l} />
+                  <Line key={l.key} line={l} active={l.key === focusKey} />
                 ))}
               </ul>
             </li>
@@ -150,9 +149,10 @@ export function CallScript<S extends string>({
   )
 }
 
-function Line({ line }: { line: ScriptSegment['lines'][number] }) {
-  return (
-    <li className="flex items-start py-2">
+/** 말 한 줄. 시각을 알면(onClick) 누를 수 있고 — 그 말부터 듣기 — 짚은 줄(active)은 옅은 남색 */
+function Line({ line, active }: { line: ScriptSegment['lines'][number]; active: boolean }) {
+  const body = (
+    <>
       <span
         className={`w-16 shrink-0 pl-2.5 text-caption leading-[28px] ${line.who === 'AI' ? 'font-bold text-action' : 'font-semibold text-sub'}`}
       >
@@ -160,6 +160,22 @@ function Line({ line }: { line: ScriptSegment['lines'][number] }) {
       </span>
       <span className="min-w-0 flex-1 pl-3 text-body whitespace-pre-line">{line.text}</span>
       <span className="shrink-0 pr-3 pl-4 text-caption leading-[28px] text-muted">{line.time}</span>
+    </>
+  )
+  return (
+    <li data-key={line.key} className={`rounded-md ${active ? 'bg-action-soft' : ''}`}>
+      {line.onClick ? (
+        <button
+          type="button"
+          onClick={line.onClick}
+          title="이 말부터 듣기"
+          className={`flex w-full items-start rounded-md py-2 text-left ${active ? '' : 'hover:bg-bg'}`}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex items-start py-2">{body}</div>
+      )}
     </li>
   )
 }

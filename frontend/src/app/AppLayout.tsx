@@ -1,4 +1,5 @@
-import { Outlet, useMatches } from 'react-router'
+import { useLayoutEffect, useRef } from 'react'
+import { Outlet, useLocation, useMatches } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
 import { PageHeader, Sidebar } from '@/shared/ui'
 import { useUnansweredCount } from '@/features/faq/hooks/useUnansweredList'
@@ -16,6 +17,13 @@ export function AppLayout() {
       .map((m) => (m.handle as RouteHandle | undefined)?.title)
       .findLast(Boolean) ?? ''
 
+  // 본문이 유일한 스크롤 영역이라 화면 · 쪽 · 필터가 바뀌면 맨 위로 (브라우저 기본 동작은 window 스크롤에만 해당)
+  const main = useRef<HTMLElement>(null)
+  const { pathname, search } = useLocation()
+  useLayoutEffect(() => {
+    main.current?.scrollTo(0, 0)
+  }, [pathname, search])
+
   return (
     <div className="flex h-full">
       <Sidebar
@@ -25,7 +33,7 @@ export function AppLayout() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <PageHeader title={title} />
-        <main className="min-h-0 flex-1 overflow-auto px-content pt-6 pb-content">
+        <main ref={main} className="min-h-0 flex-1 overflow-auto px-content pt-6 pb-content">
           <Outlet />
         </main>
       </div>

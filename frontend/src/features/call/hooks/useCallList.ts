@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageCount } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
-import { todayYmd } from '@/shared/lib/dateRange'
+import { parseRange, todayYmd } from '@/shared/lib/dateRange'
 import { fmtDuration, fmtListTime, fmtPhone, toDateTimeLocal } from '@/shared/lib/format'
 import { phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -64,7 +64,7 @@ export function useCallList() {
   const [exportError, setExportError] = useState<string | null>(null)
 
   const today = todayYmd()
-  const range = params.from ? { from: params.from, to: params.to || params.from } : null
+  const range = parseRange(params.from, params.to, today) // 주소의 이상한 날짜(뒤집힘 · 미래 · 글자)는 오늘로
   const query: CallListQuery = {
     q: params.q,
     from: range?.from ?? today,
