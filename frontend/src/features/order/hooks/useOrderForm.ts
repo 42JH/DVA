@@ -8,6 +8,7 @@ import type { Option } from '@/shared/ui'
 import {
   BOX_TYPES,
   createOrder,
+  patchCustomer,
   orderQueries,
   type BoxKey,
   saveOrder,
@@ -19,7 +20,11 @@ import {
   type PickedAddress,
 } from '@/features/order/api/orderApi'
 import { orderErrorText } from '@/features/order/labels'
-import { buildOrderPatch } from '@/features/order/api/orderPatch'
+import {
+  buildCustomerPatch,
+  buildOrderPatch,
+  type CustomerPatch,
+} from '@/features/order/api/orderPatch'
 
 type Side = 'sender' | 'receiver'
 /** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */
@@ -89,6 +94,12 @@ export function useOrderForm(
   const [payment, setPayment] = useState<PaymentMethod>(order?.paymentMethod ?? 'MONTHLY') // 와이어프레임 기본 = 월정산
   const [request, setRequest] = useState(order?.clientComment ?? '')
   const [searching, setSearching] = useState<Side | null>(null) // 주소 검색 창이 열린 쪽
+  // 보내는 분 이름 · 주소를 고쳤을 때 '고객정보에도 저장할까요?' 창 (jiw/order-sender-customer-save.md)
+  const [asking, setAsking] = useState(false)
+  // 주문은 저장됐는데 고객정보 저장만 실패 — 고객만 다시 보냄(주문 PATCH는 다시 안 함)
+  const [customerFail, setCustomerFail] = useState<{ body: CustomerPatch; error: unknown } | null>(
+    null,
+  )
 
   const now = toDateTimeLocal(new Date())
   // 같은 형식 문자열이라 비교 가능. 수정에서 원래 값을 안 건드렸으면 지났어도 통과 (이미 지난 주문의 다른 칸만 고칠 때)
@@ -120,28 +131,48 @@ export function useOrderForm(
 
   // 수정: 지금 입력과 원래 값을 비교 — 바뀐 게 없으면 [저장] 꺼짐, 도로명이 바뀌면 좌표가 필요해 아직 못 보냄
   const draft = order ? buildOrderPatch(order, parcelSeq, input()) : null
+  // 보내는 분 이름 · 주소가 바뀌었고 주문 고객이 있으면 고객정보 저장 여부를 물음 (전화만 바뀌면 안 물음)
+  const customerDraft = order?.customerSeq ? buildCustomerPatch(order, input()) : null
+  const finish = async () => {
+    await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
+    onDone()
+  }
 
   // 멱등키: 같은 본문을 다시 보내면(실패 후 재시도) 같은 키, 본문이 바뀌면 새 키 (명세서 1.2)
   const sent = useRef<{ body: string; key: string } | null>(null)
   const mutation = useMutation({
-    mutationFn: () => {
+    // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
+    mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
       const body = input()
-      if (order)
-        return draft?.patch
-          ? saveOrder(order.orderSeq, draft.patch).then(() => undefined)
-          : Promise.resolve()
+      if (order) {
+        if (draft?.patch) await saveOrder(order.orderSeq, draft.patch)
+        if (alsoCustomer && customerDraft && order.customerSeq) {
+          try {
+            await patchCustomer(order.customerSeq, customerDraft)
+          } catch (error) {
+            setCustomerFail({ body: customerDraft, error })
+            return 'customerFailed'
+          }
+        }
+        return 'ok'
+      }
       const fee = Number(shippingFee)
       const json = JSON.stringify([body, fee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      return createOrder(body, fee, sent.current.key).then(() => undefined)
+      await createOrder(body, fee, sent.current.key)
+      return 'ok'
     },
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: orderQueries.all() })
-      onDone()
+    onSuccess: (result) => {
+      if (result === 'ok') void finish()
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'VERSION_CONFLICT') onConflict?.()
     },
+  })
+
+  const retry = useMutation({
+    mutationFn: (body: CustomerPatch) => patchCustomer(order!.customerSeq!, body),
+    onSuccess: () => void finish(),
   })
 
   // 서버 칸별 오류 (명세서 error.details) — 칸 아래에. 화면 검사가 먼저 걸러서 보통은 안 옴
@@ -239,6 +270,7 @@ export function useOrderForm(
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
       !pickupPast &&
       (!draft || (draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
+      !customerFail && // 주문은 이미 저장됨 → 고객 재시도 · 닫기만
       !mutation.isPending,
     isSubmitting: mutation.isPending,
     // 칸에 못 붙인 오류 · 칸 오류가 없는 실패(연결 · 409 등)는 버튼 줄에 한 줄
@@ -249,6 +281,19 @@ export function useOrderForm(
         : details.length && !unshown
           ? null // 칸 아래에 이미 보임
           : orderErrorText(err, order ? '저장' : '접수'),
-    submit: () => mutation.mutate(),
+    // 수정에서 보내는 분 이름 · 주소가 바뀌었으면 먼저 묻고, 아니면 바로 저장
+    submit: () => (customerDraft ? setAsking(true) : mutation.mutate(false)),
+    asking,
+    cancelAsk: () => setAsking(false),
+    answer: (alsoCustomer: boolean) => {
+      setAsking(false)
+      mutation.mutate(alsoCustomer)
+    },
+    customerFailMessage: customerFail
+      ? `주문은 수정됐지만 고객정보 저장에 실패했습니다. ${orderErrorText(retry.error ?? customerFail.error, '저장')}`
+      : null,
+    retryCustomer: () => customerFail && retry.mutate(customerFail.body),
+    retrying: retry.isPending,
+    finish: () => void finish(), // 고객 저장을 포기하고 닫기 (주문 수정은 유지)
   }
 }

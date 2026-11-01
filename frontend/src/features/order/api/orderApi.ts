@@ -5,7 +5,7 @@ import { api, type ApiItem, type ApiList } from '@/shared/api/client'
 import { fetchAll, offsetOf } from '@/shared/api/paging'
 import { addDays, type Ymd } from '@/shared/lib/dateRange'
 import { buildCreateOrder } from './orderCreate'
-import type { OrderPatch } from './orderPatch'
+import type { CustomerPatch, OrderPatch } from './orderPatch'
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
@@ -137,3 +137,7 @@ export const saveOrder = (
   orderSeq: number,
   patch: OrderPatch,
 ): Promise<ApiItem<{ version: number }>> => api.patch(`/orders/${orderSeq}`, { body: patch })
+
+/** 고객정보에도 저장 — PATCH /customers/{customerSeq}, 204 본문 없음. 주문 PATCH가 성공한 뒤에만 (별도 트랜잭션) */
+export const patchCustomer = (customerSeq: number, body: CustomerPatch): Promise<void> =>
+  api.patch(`/customers/${customerSeq}`, { body })

@@ -28,6 +28,28 @@ export function OrderFormModal({
     return (
       <AddressSearchModal title={vm.searchTitle} onPick={vm.pickAddress} onClose={vm.closeSearch} />
     )
+  // 보내는 분 이름 · 주소를 고쳤을 때 (jiw/order-sender-customer-save.md 1장 문구 그대로). 겹치면 Esc가 둘 다 닫아 폼 대신 띄움
+  if (vm.asking)
+    return (
+      <FormModal
+        title="변경한 이름과 주소를 고객정보에도 저장할까요?"
+        onClose={vm.cancelAsk}
+        footer={
+          <>
+            <Button onClick={vm.cancelAsk}>취소</Button>
+            <Button onClick={() => vm.answer(false)}>이번 주문에만 저장</Button>
+            <Button kind="primary" onClick={() => vm.answer(true)}>
+              고객정보에도 저장
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body text-sub">
+          고객정보에 저장하면 해당 고객의 기본 정보도 변경됩니다. 다른 주문의 배송정보와 PIN은
+          변경되지 않습니다.
+        </p>
+      </FormModal>
+    )
 
   return (
     <FormModal
@@ -35,20 +57,41 @@ export function OrderFormModal({
       width={960}
       onClose={onClose}
       footer={
-        <>
-          {vm.submitError && (
-            <p role="alert" className="mr-auto self-center text-label text-danger">
-              {vm.submitError}
-            </p>
-          )}
-          <Button onClick={onClose}>취소</Button>
-          <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
-            {vm.isSubmitting ? (vm.isEdit ? '저장 중…' : '접수 중…') : vm.isEdit ? '저장' : '접수'}
-          </Button>
-        </>
+        vm.customerFailMessage ? (
+          // 주문은 저장됨 — 고객정보만 다시 보내거나 닫기 (주문 PATCH는 다시 안 함)
+          <>
+            <Button onClick={vm.finish}>닫기</Button>
+            <Button kind="primary" disabled={vm.retrying} onClick={vm.retryCustomer}>
+              {vm.retrying ? '저장 중…' : '고객정보 다시 저장'}
+            </Button>
+          </>
+        ) : (
+          <>
+            {vm.submitError && (
+              <p role="alert" className="mr-auto self-center text-label text-danger">
+                {vm.submitError}
+              </p>
+            )}
+            <Button onClick={onClose}>취소</Button>
+            <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
+              {vm.isSubmitting
+                ? vm.isEdit
+                  ? '저장 중…'
+                  : '접수 중…'
+                : vm.isEdit
+                  ? '저장'
+                  : '접수'}
+            </Button>
+          </>
+        )
       }
     >
       <div className="flex flex-col gap-6">
+        {vm.customerFailMessage && (
+          <p role="alert" className="rounded-lg bg-danger-soft px-4 py-3 text-label text-danger">
+            {vm.customerFailMessage}
+          </p>
+        )}
         {notice && (
           <p role="alert" className="rounded-lg bg-danger-soft px-4 py-3 text-label text-danger">
             {notice}

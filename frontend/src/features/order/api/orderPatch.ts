@@ -78,3 +78,42 @@ export function buildOrderPatch(
   const empty = !patch.parcels && !('pickupRequestedAt' in patch) && !patch.paymentMethodType
   return { patch: empty ? null : patch, roadChanged }
 }
+
+/** 고객정보에도 저장 — PATCH /customers/{customerSeq} 본문 (jiw/order-sender-customer-save.md 4장)
+ * 보내는 분의 이름 · 주소가 바뀐 것만. 전화번호는 고객 원본에서 못 바꿈(보내지 않음) → 전화만 바뀌면 null(묻지 않음)
+ * address는 전체 교체 객체 — 도로명을 다시 골랐으면 검색 결과, 상세주소만 바뀌었으면 원래 주소의 나머지 칸으로. 모자라면 address는 뺌 */
+export interface CustomerPatch {
+  name?: string
+  address?: {
+    roadAddress: string
+    jibunAddress: string
+    detailAddress: string
+    dongName: string
+    postalCode: string
+    latitude: number
+    longitude: number
+  }
+}
+
+export function buildCustomerPatch(order: OrderDetail, input: OrderInput): CustomerPatch | null {
+  const before = order.sender
+  const after = input.sender
+  const out: CustomerPatch = {}
+  if (after.name !== before.name) out.name = after.name
+  const roadChanged = after.roadAddress !== before.roadAddress
+  if (roadChanged || (after.detailAddress ?? '') !== (before.detailAddress ?? '')) {
+    const rest = roadChanged ? after.picked : before
+    if (rest?.jibunAddress && rest.dongName && rest.postalCode)
+      out.address = {
+        roadAddress: after.roadAddress,
+        jibunAddress: rest.jibunAddress,
+        detailAddress: after.detailAddress ?? '',
+        dongName: rest.dongName,
+        postalCode: rest.postalCode,
+        // shortcut: 1 고정 (사용자 결정 11/01) — 문서는 임의 좌표 저장을 막으라고 함, 카카오 키 오면 실제 좌표로 꼭 바꿀 것
+        latitude: FIXED_COORD,
+        longitude: FIXED_COORD,
+      }
+  }
+  return out.name !== undefined || out.address ? out : null
+}

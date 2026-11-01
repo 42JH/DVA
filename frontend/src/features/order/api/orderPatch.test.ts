@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import type { OrderDetail } from '@/shared/order/orderApi'
 import type { OrderInput } from './orderApi'
-import { buildOrderPatch } from './orderPatch'
+import { buildCustomerPatch, buildOrderPatch } from './orderPatch'
 
 const order: OrderDetail = {
   orderSeq: 7,
@@ -124,5 +124,78 @@ assert.equal(
 assert.deepEqual(buildOrderPatch(order, null, { ...same, request: '문 앞' }).patch?.parcels, [
   { clientComment: '문 앞' },
 ])
+
+// 고객정보에도 저장 (jiw/order-sender-customer-save.md)
+const withRest: OrderDetail = {
+  ...order,
+  sender: {
+    ...order.sender,
+    jibunAddress: '서울 강남구 역삼동 737',
+    dongName: '역삼동',
+    postalCode: '06236',
+  },
+}
+// 전화만 바뀜 → 묻지 않음
+assert.equal(
+  buildCustomerPatch(withRest, {
+    ...same,
+    sender: { ...withRest.sender, phoneNumber: '01000000000' },
+  }),
+  null,
+)
+// 받는 분만 바뀜 → 묻지 않음
+assert.equal(
+  buildCustomerPatch(withRest, { ...same, receiver: { ...order.receiver, name: '박민수' } }),
+  null,
+)
+// 이름만 → name만
+assert.deepEqual(
+  buildCustomerPatch(withRest, { ...same, sender: { ...withRest.sender, name: '강도현' } }),
+  {
+    name: '강도현',
+  },
+)
+// 상세주소만 → 원래 주소의 나머지 칸으로 주소 전체 (전화는 안 보냄)
+assert.deepEqual(
+  buildCustomerPatch(withRest, {
+    ...same,
+    sender: { ...withRest.sender, detailAddress: '7층', phoneNumber: '01000000000' },
+  }),
+  {
+    address: {
+      roadAddress: '서울 강남구 역삼로 150',
+      jibunAddress: '서울 강남구 역삼동 737',
+      detailAddress: '7층',
+      dongName: '역삼동',
+      postalCode: '06236',
+      latitude: 1,
+      longitude: 1,
+    },
+  },
+)
+// 주소 다시 검색 → 검색 결과로
+assert.equal(
+  buildCustomerPatch(withRest, {
+    ...same,
+    sender: {
+      ...withRest.sender,
+      roadAddress: '서울 중구 세종대로 110',
+      picked: {
+        jibunAddress: '서울 중구 태평로1가 31',
+        dongName: '태평로1가',
+        postalCode: '04524',
+      },
+    },
+  })?.address?.postalCode,
+  '04524',
+)
+// 원래 주소의 나머지 칸이 없으면(가짜 주문 등) 주소는 빼고 이름만
+assert.deepEqual(
+  buildCustomerPatch(order, {
+    ...same,
+    sender: { ...order.sender, name: '강도현', detailAddress: '7층' },
+  }),
+  { name: '강도현' },
+)
 
 console.log('orderPatch OK')

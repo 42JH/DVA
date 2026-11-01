@@ -13,6 +13,10 @@ export interface Party {
   phoneNumber: string // 숫자만
   roadAddress: string
   detailAddress: string | null
+  // 서버 주소의 나머지 칸 (실서버 응답에만, 11/01) — 고객정보 저장은 주소 전체가 필요해서
+  jibunAddress?: string
+  dongName?: string
+  postalCode?: string
 }
 
 // 월정산 · 그룹카드 · 개인카드 (디버 10/27) + 지점 방문(예전 주문 조회만 — 서버 cat, 새로 고를 수 없음)
@@ -40,6 +44,7 @@ export interface OrderDetail {
   parcels?: ParcelDetail[]
   /** 수정용 (03 주문 수정, 11/01) — 메모리 가짜 주문엔 없음 */
   version?: number // 다음 수정의 expectedVersion
+  customerSeq?: number | null // 주문 고객 — 보내는 분 수정을 고객정보에도 저장할 때 (미완료 주문은 null)
   status?: OrderStatusDto // 실제 상태 — 결제 방식은 COLLECTING에서만 바꿀 수 있음
 }
 
