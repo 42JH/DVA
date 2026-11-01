@@ -53,6 +53,11 @@ BEGIN
   OR to_regclass('public.orders_customer_created_list_idx') IS NULL
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='032-list-read-indexes.sql') THEN
   RAISE EXCEPTION 'List read indexes or migration missing'; END IF;
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
+  AND table_name IN ('organizations','departments') AND column_name='created_at'
+  AND udt_name='timestamptz' AND is_nullable='YES' AND column_default='CURRENT_TIMESTAMP')<>2
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='033-organization-created-at.sql') THEN
+  RAISE EXCEPTION 'Registration dates schema or migration missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions

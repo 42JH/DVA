@@ -496,3 +496,5 @@ FAQ 등록은 단건·복수 모두 items 배열을 사용한다. 새 앱 전 02
 배포 전에 033-organization-created-at.sql을 적용해야 합니다. 실제 서버 DB 적용과 배포는 이 코드 변경의 로컬 검증에 포함하지 않습니다.
 
 관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않으며, 관리자가 접수 결과를 확인한 뒤 다시 재접수를 요청하면 전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+
+배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.

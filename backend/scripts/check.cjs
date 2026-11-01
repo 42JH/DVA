@@ -1,5 +1,6 @@
 // Cross-platform Docker verification. Creates only disposable resources with a random name.
 const { spawnSync } = require('node:child_process');
+const { readFileSync } = require('node:fs');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const run = 'dva-backend-check-' + randomBytes(6).toString('hex');
@@ -100,6 +101,8 @@ try {
     'AI_AGENT_URL=http://ai.invalid:8000',
     '-e',
     'SWAGGER_ENABLED=false',
+    '-e',
+    `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
     image,
   ]);
   docker(['build', '-t', runtimeImage, root]);
