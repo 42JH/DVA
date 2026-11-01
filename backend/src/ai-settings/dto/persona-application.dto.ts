@@ -57,7 +57,7 @@ export class PersonaApplyResultDto {
 
   @ApiProperty({
     description:
-      'APPLIED 실제 설정 설치 완료, FAILED 설치 실패. 알림 수신만으로 APPLIED를 보내면 안 됩니다.',
+      'APPLIED 신규 통화 기본 설정 설치 완료, FAILED 설치 실패. 기존 통화의 버전은 유지하며 알림 수신만으로 APPLIED를 보내면 안 됩니다.',
     enum: ['APPLIED', 'FAILED'],
   })
   @IsIn(['APPLIED', 'FAILED'])
@@ -65,7 +65,7 @@ export class PersonaApplyResultDto {
 
   @ApiProperty({
     description:
-      'AI의 현재 활성 통화 수. APPLIED는 0만 허용하며 신규 통화 진입을 잠근 상태여야 합니다.',
+      'AI의 현재 활성 통화 수. 0 이상이면 APPLIED를 허용합니다. 신규 통화 진입을 잠그고 기본 설정을 전환하며 기존 통화의 버전은 유지해야 합니다.',
     minimum: 0,
     maximum: 2147483647,
     example: 0,

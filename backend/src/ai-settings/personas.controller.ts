@@ -67,7 +67,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 적용·복원 요청',
     description:
-      '선택한 전체 버전을 PENDING으로 지정하고 기존 대기를 INACTIVE로 바꿉니다. 과거 버전도 선택할 수 있습니다. AI가 통화 0건에서 적용을 확인해야 ACTIVE가 바뀌며, 같은 정상 대기 요청은 재사용합니다.',
+      '선택한 전체 버전을 PENDING으로 지정하고 기존 대기를 INACTIVE로 바꿉니다. 과거 버전도 선택할 수 있습니다. AI가 신규 통화 기본 설정 전환을 확인해야 ACTIVE가 바뀝니다. 진행 중 통화는 시작 시 버전을 유지하며 같은 정상 대기 요청은 재사용합니다.',
   })
   @ApiAcceptedResponse({
     description: '반영 대기 버전. 실제 적용 완료가 아닙니다.',

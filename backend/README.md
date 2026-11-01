@@ -14,7 +14,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
 
-페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md), AI 서버 구현 항목은 [AI 페르소나 연동 명세](../docs/api/ai-persona-integration.md)를 참고한다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다. 실제 AI 통화 제어는 AI 팀 구현 후 연결한다.
+페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md)을 따른다. 통화 중 적용의 최신 계약은 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)가 기존 AI 연동 명세의 통화 0건 대기 조건을 대체한다. 신규 통화 기본 설정 전환을 확인하면 활성 통화 수와 관계없이 ACTIVE로 전환하며, 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다.
 
 관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
 

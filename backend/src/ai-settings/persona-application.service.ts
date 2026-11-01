@@ -106,11 +106,9 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
   }
 
   async result(input: PersonaApplyResultDto, requestId: string): Promise<PersonaVersion> {
-    // shortcut: 단일 AI 프로세스의 통화 진입 잠금을 신뢰한다. 다중 AI 인스턴스 전환 시 공통 게이트가 필요하다.
+    // shortcut: AI의 통화별 버전 고정과 신규 통화 진입 잠금을 신뢰한다. 다중 인스턴스 전환 시 동기화 검증이 필요하다.
     if ((input.result === 'FAILED') !== (input.errorCode !== undefined))
       throw new ApiException(400, 'INVALID_REQUEST', '실패 결과에만 errorCode가 필요합니다.');
-    if (input.result === 'APPLIED' && input.activeCallCount !== 0)
-      throw new ApiException(409, 'INVALID_STATE', '진행 중인 통화가 없어야 적용할 수 있습니다.');
     return this.database.transaction(async (client) => {
       await this.repository.lock(client);
       const target = await this.repository.version(input.aiPersonaVersionSeq, client);

@@ -376,7 +376,7 @@ test('runtime settings and application callbacks enforce dedicated service authe
   }
 });
 
-test('activation stays pending after notification and only an idle applied acknowledgment changes ACTIVE', async () => {
+test('activation stays pending until the AI acknowledges the new-call configuration, even with active calls', async () => {
   const version = await create();
   const pending = await data(await activate(version), 202);
   assert.equal(pending.status, 'PENDING');
@@ -395,10 +395,9 @@ test('activation stays pending after notification and only an idle applied ackno
     ),
   );
   await error(await runtime(), 404, 'NOT_FOUND');
-  await error(await report(pending, { activeCallCount: 1 }), 409, 'INVALID_STATE');
   const same = await data(await activate(version), 202);
   assert.equal(same.applicationId, pending.applicationId);
-  const active = await data(await report(pending));
+  const active = await data(await report(pending, { activeCallCount: 1 }));
   assert.equal(active.status, 'ACTIVE');
   assert.ok(active.appliedAt);
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, active.aiPersonaVersionSeq);
@@ -800,4 +799,35 @@ test('unknown legacy creator names remain null and another actor on the same ver
       .createdByAdminUserName,
     null,
   );
+});
+
+test('a new-call acknowledgment switches ACTIVE while old saved settings remain available for ongoing calls', async () => {
+  const original = await create();
+  await data(await report(await data(await activate(original), 202)));
+  const oldConfig = await data(await runtime());
+  const pending = await data(
+    await patch(original.aiPersonaSeq, { expectedVersion: 1, promptText: '새 통화용 프롬프트' }),
+  );
+  assert.equal(pending.status, 'PENDING');
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, original.aiPersonaVersionSeq);
+  const active = await data(await report(pending, { activeCallCount: 3 }));
+  assert.equal(active.status, 'ACTIVE');
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, pending.aiPersonaVersionSeq);
+  const versions = await (
+    await call('GET', `/api/personas/${original.aiPersonaSeq}/versions`)
+  ).json();
+  const oldVersion = versions.data.find(
+    (row) => row.aiPersonaVersionSeq === original.aiPersonaVersionSeq,
+  );
+  assert.equal(oldVersion.promptText, oldConfig.promptText);
+  assert.equal(oldVersion.status, 'INACTIVE');
+  assert.equal(
+    (await data(await report(pending, { activeCallCount: 2 }))).appliedAt,
+    active.appliedAt,
+  );
+  const replaced = await data(
+    await patch(original.aiPersonaSeq, { expectedVersion: 2, name: '대기 교체 전' }),
+  );
+  await data(await patch(original.aiPersonaSeq, { expectedVersion: 3, name: '최신 대기' }));
+  await error(await report(replaced, { activeCallCount: 3 }), 409, 'VERSION_CONFLICT');
 });
