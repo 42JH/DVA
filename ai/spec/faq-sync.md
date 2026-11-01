@@ -105,7 +105,7 @@ HTTP 제한 뒤 저장 스레드가 커밋한 경우에도202를 미리 응답�
 원문 모델 `FaqEntry`는 `faqEntrySeq`, `question`, `answer`, `updatedAt`만 받는다.
 번호/문자열 타입, 질문1000자·답변20000자, 공백만 있는 본문/NUL 금지, UTC ISO 시각을 검증한다.
 문자열을 strip하거나 Markdown/표/줄바꿈을 수정하지 않는다.
-목록은 명시적인 `data` 배열·`hasNext=false`, 요청 범위 내의 중복 없는 오름차순 번호여야 한다.
+목록은 명시적인 `data` 배열·`hasNext=false`·`total_count`(백엔드 목록 공통 필수, 0 이상 정수), 요청 범위 내의 중복 없는 오름차순 번호여야 한다.
 누락 필드·예상 밖 필드·잘못된 항목·부분 조회는 전부 오류다. 일부 항목만 성공 처리하지 않는다.
 
 - 완전한 정상200의 반환 항목: 갱신할 최신 원문.
@@ -153,7 +153,7 @@ DELETE는 원문이 이미 없으므로 조회 없이 받은 번호를 삭제 �
 uv run python -m scripts.inspect_faq_json data/private/faq-api-response.json --show-chunks
 ```
 
-파일은 실제 번호/질문/답변/updatedAt을 담은 JSON 배열 또는 `{data:[...],hasNext:false}`이며1~100건을 받는다.
+파일은 실제 번호/질문/답변/updatedAt을 담은 JSON 배열 또는 `{data:[...],hasNext:false,total_count:N}`이며1~100건을 받는다.
 `--chunk-size`, `--chunk-overlap`으로 값을 바꿔 볼 수 있다. API·임베딩·Qdrant를 호출하지 않고 원본 파일도 수정하지 않는다.
 
 2026-10-30 Git의 BE 초기32건과 기존 MD를 오프라인 비교했다. 질문32개가 연결됐고 새 청크32개, 본문 최대523자,

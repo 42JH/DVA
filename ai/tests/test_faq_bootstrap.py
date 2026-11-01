@@ -10,7 +10,7 @@ from test_faq_index import prepare, setup
 
 
 def payload():
-    return {'data':[prepare().source.model_dump(by_alias=True)], 'hasNext':False}
+    return {'data':[prepare().source.model_dump(by_alias=True)], 'hasNext':False, 'total_count':1}
 
 
 def test_initial_list_uses_bare_request_and_no_id_filter():
@@ -31,9 +31,10 @@ def test_initial_list_uses_bare_request_and_no_id_filter():
 
 
 @pytest.mark.parametrize('body', [
-    {'data':[], 'hasNext':True},
-    {'data':payload()['data']*2, 'hasNext':False},
-    {'data':[{'faqEntrySeq':1}], 'hasNext':False},
+    {'data':[], 'hasNext':True, 'total_count':1},
+    {'data':payload()['data']*2, 'hasNext':False, 'total_count':2},
+    {'data':[{'faqEntrySeq':1}], 'hasNext':False, 'total_count':1},
+    {'data':payload()['data'], 'hasNext':False},
 ])
 def test_invalid_or_partial_initial_list_is_not_enqueued(body):
     async def scenario():

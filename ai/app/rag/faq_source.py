@@ -50,6 +50,7 @@ class _FaqPage(BaseModel):
 
     data: list[FaqEntry] = Field(max_length=100)
     has_next: bool = Field(alias='hasNext')
+    total_count: int = Field(ge=0)  # 백엔드 목록 공통 필수 필드(limit·offset 전 전체 건수)
 
 
 @dataclass(frozen=True)
