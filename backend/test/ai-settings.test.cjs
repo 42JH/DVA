@@ -10,6 +10,7 @@ const {
 const {
   CreatePersonaDto,
   UpdatePersonaDto,
+  CommitPersonaDraftDto,
 } = require('../dist/ai-settings/dto/persona-request.dto');
 const { PersonaApplyResultDto } = require('../dist/ai-settings/dto/persona-application.dto');
 const { validateEnvironment } = require('../dist/config/environment');
@@ -71,7 +72,11 @@ test('create defaults do not leak into PATCH and prompt text remains unchanged',
   assert.equal(created.promptText, settings.promptText);
   assert.equal(created.voiceId, null);
   assert.equal(created.turnWaitLevel, 'NORMAL');
-  const patch = plainToInstance(UpdatePersonaDto, { expectedVersion: 1, promptText: '새 본문' });
+  const patch = plainToInstance(UpdatePersonaDto, {
+    expectedVersion: 1,
+    expectedDraftRevision: null,
+    promptText: '새 본문',
+  });
   assert.equal(validateSync(patch).length, 0);
   for (const field of ['voiceId', 'speakingRate', 'turnWaitLevel', 'name'])
     assert.equal(patch[field], undefined);
@@ -83,7 +88,56 @@ test('create defaults do not leak into PATCH and prompt text remains unchanged',
     { expectedVersion: '1' },
   ])
     assert.ok(
-      validateSync(plainToInstance(UpdatePersonaDto, { expectedVersion: 1, ...input })).length > 0,
+      validateSync(
+        plainToInstance(UpdatePersonaDto, {
+          expectedVersion: 1,
+          expectedDraftRevision: null,
+          ...input,
+        }),
+      ).length > 0,
+    );
+});
+
+test('draft writes require an explicit nullable revision and commits require an existing UUID revision', () => {
+  const revision = '00000000-0000-4000-8000-000000000039';
+  for (const expectedDraftRevision of [null, revision])
+    assert.equal(
+      validateSync(
+        plainToInstance(UpdatePersonaDto, {
+          expectedVersion: 4,
+          expectedDraftRevision,
+          name: '작성 중',
+        }),
+      ).length,
+      0,
+    );
+  for (const expectedDraftRevision of [undefined, '', 1, 'bad', [], {}])
+    assert.ok(
+      validateSync(
+        plainToInstance(UpdatePersonaDto, {
+          expectedVersion: 4,
+          expectedDraftRevision,
+          name: '작성 중',
+        }),
+      ).length > 0,
+    );
+  assert.equal(
+    validateSync(
+      plainToInstance(CommitPersonaDraftDto, {
+        expectedVersion: 4,
+        expectedDraftRevision: revision,
+      }),
+    ).length,
+    0,
+  );
+  for (const expectedDraftRevision of [undefined, null, 'bad', 1])
+    assert.ok(
+      validateSync(
+        plainToInstance(CommitPersonaDraftDto, {
+          expectedVersion: 4,
+          expectedDraftRevision,
+        }),
+      ).length > 0,
     );
 });
 test('apply results accept an omitted legacy call count and still validate supplied counts', () => {

@@ -47,6 +47,10 @@ async function migrate(pool) {
           .name,
         'Apply migration 038 to the isolated DB first',
       );
+      assert.ok(
+        (await client.query("SELECT to_regclass('public.ai_persona_drafts') AS name")).rows[0].name,
+        'Apply migration 039 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

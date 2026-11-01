@@ -4,7 +4,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>28 THEN RAISE EXCEPTION 'Expected 28 public tables, found %',n; END IF;
+ IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
@@ -68,6 +68,14 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.empty_ai_order_results') AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (call_session_seq)')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='038-empty-ai-order-results.sql') THEN
   RAISE EXCEPTION 'Empty AI order result schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.ai_persona_drafts')
+    AND contype='p' AND pg_get_constraintdef(oid)='PRIMARY KEY (ai_persona_seq)')
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='ai_persona_drafts' AND column_name='draft_revision' AND udt_name='uuid' AND is_nullable='NO')
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='ai_persona_drafts' AND column_name='base_version' AND udt_name='int4' AND is_nullable='NO')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='039-persona-drafts.sql') THEN
+  RAISE EXCEPTION 'Persona draft schema or migration missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND contype='f' AND confrelid='public.call_sessions'::regclass) THEN
   RAISE EXCEPTION 'PBX call correlation foreign key missing'; END IF;
  IF (SELECT count(*) FROM db_migrations.applied_versions

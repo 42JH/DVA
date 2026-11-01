@@ -71,7 +71,32 @@ const input = (changes = {}) => ({
 });
 const create = async (changes = {}) =>
   data(await call('POST', '/api/personas', input(changes)), 201);
-const patch = (id, body) => call('PATCH', `/api/personas/${id}`, body);
+const detail = async (id, actor = 0) =>
+  data(await call('GET', `/api/personas/${id}`, undefined, actor));
+const saveDraft = (id, body, actor = 0) => call('PATCH', `/api/personas/${id}`, body, actor);
+const commitDraft = (id, body, actor = 0) =>
+  call('POST', `/api/personas/${id}/versions`, body, actor);
+async function saveVersion(id, body, actor = 0) {
+  const current = await data(await call('GET', `/api/personas/${id}`, undefined, actor));
+  const response = await saveDraft(
+    id,
+    {
+      ...body,
+      expectedDraftRevision: current.draft?.draftRevision ?? null,
+    },
+    actor,
+  );
+  if (response.status !== 200) return response;
+  const draft = await data(response);
+  return commitDraft(
+    id,
+    {
+      expectedVersion: body.expectedVersion,
+      expectedDraftRevision: draft.draftRevision,
+    },
+    actor,
+  );
+}
 before(async () => {
   await migrate(pool);
   ai = createServer(async (request, response) => {
@@ -237,30 +262,32 @@ test('persona creation preserves prompt and full settings in an inactive immutab
   );
 });
 
-test('PATCH appends whole snapshots, preserves omitted values, and rejects stale or empty edits', async () => {
+test('draft commits append whole snapshots, preserve omitted values, and reject stale or empty edits', async () => {
   const v1 = await create();
   const v2 = await data(
-    await patch(v1.aiPersonaSeq, { expectedVersion: 1, promptText: '새로운 원문' }),
+    await saveVersion(v1.aiPersonaSeq, { expectedVersion: 1, promptText: '새로운 원문' }),
   );
   assert.equal(v2.version, 2);
   assert.equal(v2.status, 'INACTIVE');
   for (const key of ['name', 'voiceId', 'speakingRate', 'turnWaitLevel'])
     assert.equal(v2[key], v1[key]);
   await error(
-    await patch(v1.aiPersonaSeq, { expectedVersion: 1, name: '오래된 수정' }),
+    await saveVersion(v1.aiPersonaSeq, { expectedVersion: 1, name: '오래된 수정' }),
     409,
     'VERSION_CONFLICT',
   );
-  await error(await patch(v1.aiPersonaSeq, { expectedVersion: 2 }), 400, 'INVALID_REQUEST');
+  await error(await saveVersion(v1.aiPersonaSeq, { expectedVersion: 2 }), 400, 'INVALID_REQUEST');
   await error(
-    await patch(v1.aiPersonaSeq, { expectedVersion: 2, name: null }),
+    await saveVersion(v1.aiPersonaSeq, { expectedVersion: 2, name: null }),
     400,
     'INVALID_REQUEST',
   );
-  const same = await data(await patch(v1.aiPersonaSeq, { expectedVersion: 2, name: v2.name }));
+  const same = await data(
+    await saveVersion(v1.aiPersonaSeq, { expectedVersion: 2, name: v2.name }),
+  );
   assert.equal(same.version, 2);
   const v3 = await data(
-    await patch(v1.aiPersonaSeq, { expectedVersion: 2, voiceId: null, speakingRate: null }),
+    await saveVersion(v1.aiPersonaSeq, { expectedVersion: 2, voiceId: null, speakingRate: null }),
   );
   assert.equal(v3.voiceId, null);
   assert.equal(v3.speakingRate, null);
@@ -290,7 +317,7 @@ test('PATCH appends whole snapshots, preserves omitted values, and rejects stale
 test('concurrent editors get one new version and a conflict without losing either saved snapshot', async () => {
   const v = await create();
   const results = await Promise.all(
-    ['A', 'B'].map((name) => patch(v.aiPersonaSeq, { expectedVersion: 1, name })),
+    ['A', 'B'].map((name) => saveVersion(v.aiPersonaSeq, { expectedVersion: 1, name })),
   );
   assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
   assert.equal(
@@ -366,6 +393,7 @@ test('Swagger documents persona inputs, whole versions and responses', async () 
     ['/api/personas/{id}', 'get'],
     ['/api/personas/{id}', 'patch'],
     ['/api/personas/{id}/versions', 'get'],
+    ['/api/personas/{id}/versions', 'post'],
     ['/api/ai/options', 'get'],
   ]) {
     const operation = spec.paths[path][method];
@@ -488,7 +516,7 @@ test('activation stays pending until the AI acknowledges the new-call configurat
 test('saving advances HEAD without publishing and an explicit replacement rejects late acknowledgments', async () => {
   const active = await data(await runtime());
   const saved1 = await data(
-    await patch(active.aiPersonaSeq, { expectedVersion: active.version, name: '수정 1' }),
+    await saveVersion(active.aiPersonaSeq, { expectedVersion: active.version, name: '수정 1' }),
   );
   assert.equal(saved1.status, 'INACTIVE');
   await error(await runtime('PENDING'), 404, 'NOT_FOUND');
@@ -496,7 +524,10 @@ test('saving advances HEAD without publishing and an explicit replacement reject
   assert.equal(pending1.status, 'PENDING');
   assert.equal((await data(await runtime())).name, active.name);
   const saved2 = await data(
-    await patch(active.aiPersonaSeq, { expectedVersion: pending1.version, promptText: '수정 2' }),
+    await saveVersion(active.aiPersonaSeq, {
+      expectedVersion: pending1.version,
+      promptText: '수정 2',
+    }),
   );
   assert.equal(saved2.status, 'INACTIVE');
   assert.equal((await data(await runtime('PENDING'))).applicationId, pending1.applicationId);
@@ -625,12 +656,16 @@ test('two concurrent applications retain one pending and one active with atomic 
 test('old snapshots stay immutable but cannot be published or used as a stale editing base', async () => {
   const first = await create();
   const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '다른 이름', speakingRate: 0.8 }),
+    await saveVersion(first.aiPersonaSeq, {
+      expectedVersion: 1,
+      name: '다른 이름',
+      speakingRate: 0.8,
+    }),
   );
   await data(await report(await data(await activate(second), 202)));
   await error(await activate(first, 2), 409, 'VERSION_CONFLICT');
   await error(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 기준 수정' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 기준 수정' }),
     409,
     'VERSION_CONFLICT',
   );
@@ -773,7 +808,7 @@ test('creator names are included in administrator persona responses without leak
   assert.equal(version.createdByAdminUserSeq, actorIds[0]);
   assert.equal(version.createdByAdminUserName, '설정 테스트 관리자');
   const updated = await data(
-    await patch(version.aiPersonaSeq, { expectedVersion: 1, name: '작성자 확인 버전' }),
+    await saveVersion(version.aiPersonaSeq, { expectedVersion: 1, name: '작성자 확인 버전' }),
   );
   assert.equal(updated.createdByAdminUserName, '설정 테스트 관리자');
   const detail = await data(await call('GET', `/api/personas/${version.aiPersonaSeq}`));
@@ -897,7 +932,10 @@ test('a new-call acknowledgment switches ACTIVE while old saved settings remain 
   await data(await report(await data(await activate(original), 202)));
   const oldConfig = await data(await runtime());
   const saved = await data(
-    await patch(original.aiPersonaSeq, { expectedVersion: 1, promptText: '새 통화용 프롬프트' }),
+    await saveVersion(original.aiPersonaSeq, {
+      expectedVersion: 1,
+      promptText: '새 통화용 프롬프트',
+    }),
   );
   assert.equal(saved.status, 'INACTIVE');
   const pending = await data(await activate(saved), 202);
@@ -919,11 +957,11 @@ test('a new-call acknowledgment switches ACTIVE while old saved settings remain 
     active.appliedAt,
   );
   const oldCandidate = await data(
-    await patch(original.aiPersonaSeq, { expectedVersion: 2, name: '대기 교체 전' }),
+    await saveVersion(original.aiPersonaSeq, { expectedVersion: 2, name: '대기 교체 전' }),
   );
   const replaced = await data(await activate(oldCandidate), 202);
   const newCandidate = await data(
-    await patch(original.aiPersonaSeq, { expectedVersion: 3, name: '최신 대기' }),
+    await saveVersion(original.aiPersonaSeq, { expectedVersion: 3, name: '최신 대기' }),
   );
   await data(await activate(newCandidate), 202);
   await error(await report(replaced, { activeCallCount: 3 }), 409, 'VERSION_CONFLICT');
@@ -933,7 +971,7 @@ test('automatic HEAD: publish validates authority, current HEAD identity and sta
   const first = await create(),
     other = await create();
   const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '현재 HEAD' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '현재 HEAD' }),
   );
   for (const actor of [1])
     await error(
@@ -976,7 +1014,7 @@ test('automatic HEAD: publish validates authority, current HEAD identity and sta
     'INVALID_REQUEST',
   );
   await error(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 편집' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 편집' }),
     409,
     'VERSION_CONFLICT',
   );
@@ -998,11 +1036,11 @@ test('automatic HEAD: publish failure and replacement remain separate from later
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
   const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '대기 v2' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '대기 v2' }),
   );
   const pending = await data(await activate(second), 202);
   const third = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 2, name: 'HEAD v3' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 2, name: 'HEAD v3' }),
   );
   await data(await report(pending, { result: 'FAILED', errorCode: 'APPLY_FAILED' }));
   const detail = await data(await call('GET', '/api/personas/' + first.aiPersonaSeq));
@@ -1024,7 +1062,7 @@ test('automatic HEAD: a failed save keeps the latest version and publish unchang
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
   const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: 'HEAD v2' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: 'HEAD v2' }),
   );
   const pending = await data(await activate(second), 202);
   const { AuditService } = require('../dist/audit/audit.service');
@@ -1036,7 +1074,7 @@ test('automatic HEAD: a failed save keeps the latest version and publish unchang
   };
   try {
     await error(
-      await patch(first.aiPersonaSeq, { expectedVersion: 2, name: '실패 v3' }),
+      await saveVersion(first.aiPersonaSeq, { expectedVersion: 2, name: '실패 v3' }),
       500,
       'INTERNAL_ERROR',
     );
@@ -1063,7 +1101,7 @@ test('automatic HEAD: concurrent save and publish never silently select an unsee
   await data(await report(await data(await activate(active), 202)));
   const target = await create();
   const [savedResponse, publishResponse] = await Promise.all([
-    patch(target.aiPersonaSeq, { expectedVersion: 1, name: '새 HEAD v2' }),
+    saveVersion(target.aiPersonaSeq, { expectedVersion: 1, name: '새 HEAD v2' }),
     activate(target),
   ]);
   const saved = await data(savedResponse);
@@ -1128,13 +1166,13 @@ test('automatic HEAD: type saves advance their heads without changing the publis
   const friendly1 = await create(),
     fast1 = await create();
   const friendly2 = await data(
-    await patch(friendly1.aiPersonaSeq, { expectedVersion: 1, name: '친절 v2' }),
+    await saveVersion(friendly1.aiPersonaSeq, { expectedVersion: 1, name: '친절 v2' }),
   );
   const friendly3 = await data(
-    await patch(friendly1.aiPersonaSeq, { expectedVersion: 2, name: '친절 v3' }),
+    await saveVersion(friendly1.aiPersonaSeq, { expectedVersion: 2, name: '친절 v3' }),
   );
   const fast2 = await data(
-    await patch(fast1.aiPersonaSeq, { expectedVersion: 1, name: '빠른 v2' }),
+    await saveVersion(fast1.aiPersonaSeq, { expectedVersion: 1, name: '빠른 v2' }),
   );
   assert.equal(
     (await data(await call('GET', `/api/personas/${friendly1.aiPersonaSeq}`))).headVersion
@@ -1143,10 +1181,13 @@ test('automatic HEAD: type saves advance their heads without changing the publis
   );
   await data(await report(await data(await activate(fast2), 202)));
   const friendly4 = await data(
-    await patch(friendly1.aiPersonaSeq, { expectedVersion: friendly3.version, name: '친절 v4' }),
+    await saveVersion(friendly1.aiPersonaSeq, {
+      expectedVersion: friendly3.version,
+      name: '친절 v4',
+    }),
   );
   const fast3 = await data(
-    await patch(fast1.aiPersonaSeq, { expectedVersion: fast2.version, name: '빠른 v3' }),
+    await saveVersion(fast1.aiPersonaSeq, { expectedVersion: fast2.version, name: '빠른 v3' }),
   );
   const fast = await data(await call('GET', `/api/personas/${fast1.aiPersonaSeq}`));
   assert.equal(fast.headVersion.aiPersonaVersionSeq, fast3.aiPersonaVersionSeq);
@@ -1170,11 +1211,11 @@ test('automatic HEAD: an accepted publish keeps its version and UUID when a newe
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
   const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: 'publish v2' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: 'publish v2' }),
   );
   const pending = await data(await activate(second), 202);
   const third = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 2, name: '저장만 v3' }),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 2, name: '저장만 v3' }),
   );
   const waiting = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
   assert.equal(waiting.headVersion.aiPersonaVersionSeq, third.aiPersonaVersionSeq);
@@ -1198,15 +1239,7 @@ test('SUPERVISOR developers create, edit and publish with their own identity and
   const first = await data(await call('POST', '/api/personas', input(), 2), 201);
   assert.equal(first.createdByAdminUserSeq, actorIds[2]);
   const second = await data(
-    await call(
-      'PATCH',
-      `/api/personas/${first.aiPersonaSeq}`,
-      {
-        expectedVersion: 1,
-        name: '개발자 수정',
-      },
-      2,
-    ),
+    await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '개발자 수정' }, 2),
   );
   assert.equal(second.version, 2);
   assert.equal(second.createdByAdminUserSeq, actorIds[2]);
@@ -1234,6 +1267,11 @@ test('SUPERVISOR developers create, edit and publish with their own identity and
       ['PATCH', `/api/personas/${first.aiPersonaSeq}`, { expectedVersion: 2, name: '금지' }],
       [
         'POST',
+        `/api/personas/${first.aiPersonaSeq}/versions`,
+        { expectedVersion: 2, expectedDraftRevision: randomUUID() },
+      ],
+      [
+        'POST',
         `/api/personas/${first.aiPersonaSeq}/activate`,
         { aiPersonaVersionSeq: second.aiPersonaVersionSeq, expectedVersion: 2 },
       ],
@@ -1243,6 +1281,539 @@ test('SUPERVISOR developers create, edit and publish with their own identity and
     await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
       actorIds[2],
     ]);
+  }
+});
+
+const beginDraft = async (version, changes = {}, actor = 0) =>
+  data(
+    await saveDraft(
+      version.aiPersonaSeq,
+      {
+        expectedVersion: version.version,
+        expectedDraftRevision: null,
+        name: '작성 중 초안',
+        ...changes,
+      },
+      actor,
+    ),
+  );
+const draftInput = (draft, changes = {}) => ({
+  expectedVersion: draft.baseVersion,
+  expectedDraftRevision: draft.draftRevision,
+  ...changes,
+});
+const versionCount = async (id) =>
+  (
+    await pool.query('SELECT count(*)::int AS n FROM ai_persona_versions WHERE ai_persona_seq=$1', [
+      id,
+    ])
+  ).rows[0].n;
+
+test('draft saves overwrite one row without changing HEAD, history, ACTIVE or PENDING; commit consumes it atomically', async () => {
+  const head = await create();
+  await data(await report(await data(await activate(head), 202)));
+  const pending = await data(await activate(await create()), 202);
+  let draft = await beginDraft(head, { promptText: '초안 원문\n보존' });
+  const createdAt = draft.createdAt;
+  for (let i = 0; i < 5; i++) {
+    const previous = draft;
+    draft = await data(
+      await saveDraft(head.aiPersonaSeq, draftInput(draft, { name: '중간 수정 ' + i })),
+    );
+    assert.notEqual(draft.draftRevision, previous.draftRevision);
+    assert.equal(draft.createdAt, createdAt);
+  }
+  assert.equal(
+    (
+      await pool.query('SELECT count(*)::int AS n FROM ai_persona_drafts WHERE ai_persona_seq=$1', [
+        head.aiPersonaSeq,
+      ])
+    ).rows[0].n,
+    1,
+  );
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+  const editing = await detail(head.aiPersonaSeq);
+  assert.equal(editing.headVersion.aiPersonaVersionSeq, head.aiPersonaVersionSeq);
+  assert.deepEqual(editing.draft, draft);
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, head.aiPersonaVersionSeq);
+  assert.equal((await data(await runtime('PENDING'))).applicationId, pending.applicationId);
+  assert.equal('version' in draft, false);
+  assert.equal('status' in draft, false);
+  assert.equal('draft' in (await data(await runtime())), false);
+  const committed = await data(await commitDraft(head.aiPersonaSeq, draftInput(draft)));
+  assert.equal(committed.version, 2);
+  assert.equal(committed.promptText, draft.promptText);
+  assert.equal(committed.name, draft.name);
+  assert.equal(committed.status, 'INACTIVE');
+  assert.equal((await detail(head.aiPersonaSeq)).draft, null);
+  assert.equal(
+    (await detail(head.aiPersonaSeq)).headVersion.aiPersonaVersionSeq,
+    committed.aiPersonaVersionSeq,
+  );
+  assert.equal(await versionCount(head.aiPersonaSeq), 2);
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, head.aiPersonaVersionSeq);
+  assert.equal((await data(await runtime('PENDING'))).applicationId, pending.applicationId);
+});
+
+test('drafts are independent per type; partial edits merge the draft and unchanged saves do not rotate its revision', async () => {
+  const a = await create(),
+    b = await create();
+  const first = await beginDraft(a, { name: 'A 초안', voiceId: null });
+  const other = await beginDraft(b, { name: 'B 초안' }, 2);
+  const next = await data(
+    await saveDraft(
+      a.aiPersonaSeq,
+      draftInput(first, { promptText: '계속 작업', speakingRate: null }),
+      2,
+    ),
+  );
+  assert.equal(next.name, first.name);
+  assert.equal(next.voiceId, null);
+  assert.equal(next.speakingRate, null);
+  assert.equal(next.turnWaitLevel, a.turnWaitLevel);
+  assert.equal(next.updatedByAdminUserSeq, actorIds[2]);
+  assert.deepEqual(
+    await data(await saveDraft(a.aiPersonaSeq, draftInput(next, { name: next.name }))),
+    next,
+  );
+  assert.deepEqual((await detail(b.aiPersonaSeq)).draft, other);
+  const listed = await data(await call('GET', '/api/personas?limit=100'));
+  assert.deepEqual(listed.find((row) => row.aiPersonaSeq === a.aiPersonaSeq).draft, next);
+  const history = await (await call('GET', `/api/personas/${a.aiPersonaSeq}/versions`)).json();
+  assert.equal(history.total_count, 1);
+  assert.equal(history.data[0].name, a.name);
+});
+
+test('draft creation and overwrites each reject one simultaneous editor without lost updates', async () => {
+  const head = await create();
+  const created = await Promise.all(
+    ['A', 'B'].map((name) =>
+      saveDraft(head.aiPersonaSeq, {
+        expectedVersion: 1,
+        expectedDraftRevision: null,
+        name,
+      }),
+    ),
+  );
+  assert.deepEqual(created.map((response) => response.status).sort(), [200, 409]);
+  const first = (await detail(head.aiPersonaSeq)).draft;
+  const updated = await Promise.all(
+    ['C', 'D'].map((name) => saveDraft(head.aiPersonaSeq, draftInput(first, { name }))),
+  );
+  assert.deepEqual(updated.map((response) => response.status).sort(), [200, 409]);
+  const saved = await data(updated.find((response) => response.status === 200));
+  assert.deepEqual((await detail(head.aiPersonaSeq)).draft, saved);
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+});
+
+test('concurrent draft commits create one HEAD and consume the draft exactly once', async () => {
+  const head = await create();
+  const draft = await beginDraft(head);
+  const results = await Promise.all([
+    commitDraft(head.aiPersonaSeq, draftInput(draft)),
+    commitDraft(head.aiPersonaSeq, draftInput(draft)),
+  ]);
+  assert.deepEqual(results.map((response) => response.status).sort(), [200, 409]);
+  const committed = await data(results.find((response) => response.status === 200));
+  assert.equal(committed.version, 2);
+  assert.equal(await versionCount(head.aiPersonaSeq), 2);
+  assert.equal((await detail(head.aiPersonaSeq)).draft, null);
+  await error(await commitDraft(head.aiPersonaSeq, draftInput(draft)), 409, 'VERSION_CONFLICT');
+});
+
+test('a competing draft save and commit serialize without confirming unseen edits or resurrecting consumed drafts', async () => {
+  const head = await create();
+  const draft = await beginDraft(head);
+  const [saved, committed] = await Promise.all([
+    saveDraft(head.aiPersonaSeq, draftInput(draft, { name: '경쟁 수정' })),
+    commitDraft(head.aiPersonaSeq, draftInput(draft)),
+  ]);
+  assert.deepEqual([saved.status, committed.status].sort(), [200, 409]);
+  const state = await detail(head.aiPersonaSeq);
+  if (committed.status === 200) {
+    assert.equal(state.headVersion.name, draft.name);
+    assert.equal(state.headVersion.version, 2);
+    assert.equal(state.draft, null);
+  } else {
+    assert.equal(state.headVersion.version, 1);
+    assert.equal(state.draft.name, '경쟁 수정');
+  }
+});
+
+test('consumed revisions cannot overwrite or commit a later draft even with the current HEAD version', async () => {
+  const head = await create();
+  const first = await beginDraft(head);
+  const committed = await data(await commitDraft(head.aiPersonaSeq, draftInput(first)));
+  const next = await beginDraft(committed);
+  assert.notEqual(first.draftRevision, next.draftRevision);
+  for (const response of [
+    await saveDraft(head.aiPersonaSeq, {
+      expectedVersion: 2,
+      expectedDraftRevision: first.draftRevision,
+      name: '과거 요청',
+    }),
+    await commitDraft(head.aiPersonaSeq, {
+      expectedVersion: 2,
+      expectedDraftRevision: first.draftRevision,
+    }),
+  ])
+    await error(response, 409, 'VERSION_CONFLICT');
+  assert.deepEqual((await detail(head.aiPersonaSeq)).draft, next);
+});
+
+test('draft save audit failures roll back both a new draft and edits to an existing draft', async () => {
+  const empty = await create(),
+    existing = await create();
+  const draft = await beginDraft(existing);
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (event, ...args) {
+    if (event.action === 'PERSONA_DRAFT_SAVED') throw Error('draft-save-audit-failure');
+    return original.call(this, event, ...args);
+  };
+  try {
+    await error(
+      await saveDraft(empty.aiPersonaSeq, {
+        expectedVersion: 1,
+        expectedDraftRevision: null,
+        name: '실패',
+      }),
+      500,
+      'INTERNAL_ERROR',
+    );
+    await error(
+      await saveDraft(existing.aiPersonaSeq, draftInput(draft, { name: '실패' })),
+      500,
+      'INTERNAL_ERROR',
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await detail(empty.aiPersonaSeq)).draft, null);
+  assert.deepEqual((await detail(existing.aiPersonaSeq)).draft, draft);
+  assert.equal(await versionCount(existing.aiPersonaSeq), 1);
+});
+
+test('an audit failure after draft deletion rolls back HEAD creation, deletion and the version audit together', async () => {
+  const head = await create();
+  const draft = await beginDraft(head);
+  const { AuditService } = require('../dist/audit/audit.service');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  audit.recordSuccess = async function (event, ...args) {
+    if (event.action === 'PERSONA_DRAFT_COMMITTED') throw Error('draft-commit-audit-failure');
+    return original.call(this, event, ...args);
+  };
+  try {
+    await error(await commitDraft(head.aiPersonaSeq, draftInput(draft)), 500, 'INTERNAL_ERROR');
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.deepEqual((await detail(head.aiPersonaSeq)).draft, draft);
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+  assert.equal(
+    (await detail(head.aiPersonaSeq)).headVersion.aiPersonaVersionSeq,
+    head.aiPersonaVersionSeq,
+  );
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS n FROM audit_logs a JOIN ai_persona_versions v ON a.target_seq=v.ai_persona_version_seq WHERE v.ai_persona_seq=$1 AND a.action='PERSONA_UPDATED' AND a.result='SUCCESS'",
+        [head.aiPersonaSeq],
+      )
+    ).rows[0].n,
+    0,
+  );
+  assert.equal((await data(await commitDraft(head.aiPersonaSeq, draftInput(draft)))).version, 2);
+});
+
+test('an unchanged draft is consumed without adding a duplicate version or changing published settings', async () => {
+  const head = await create();
+  const draft = await beginDraft(head, { name: head.name });
+  const committed = await data(await commitDraft(head.aiPersonaSeq, draftInput(draft)));
+  assert.equal(committed.aiPersonaVersionSeq, head.aiPersonaVersionSeq);
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+  assert.equal((await detail(head.aiPersonaSeq)).draft, null);
+});
+
+test('missing, stale, foreign and malformed draft identities cannot create versions or overwrite settings', async () => {
+  const head = await create(),
+    other = await create();
+  await error(
+    await saveDraft(head.aiPersonaSeq, { expectedVersion: 1, name: '옛 형식' }),
+    400,
+    'INVALID_REQUEST',
+  );
+  await error(
+    await commitDraft(head.aiPersonaSeq, {
+      expectedVersion: 1,
+      expectedDraftRevision: randomUUID(),
+    }),
+    409,
+    'INVALID_STATE',
+  );
+  const draft = await beginDraft(head),
+    foreign = await beginDraft(other);
+  for (const body of [
+    draftInput(draft, { expectedDraftRevision: null, name: '덮어쓰기' }),
+    draftInput(draft, { expectedDraftRevision: foreign.draftRevision, name: '다른 유형' }),
+    draftInput(draft, { expectedVersion: 2, name: '틀린 HEAD' }),
+  ])
+    await error(await saveDraft(head.aiPersonaSeq, body), 409, 'VERSION_CONFLICT');
+  for (const body of [
+    draftInput(draft),
+    draftInput(draft, { name: null }),
+    draftInput(draft, { promptText: '  ' }),
+    draftInput(draft, { expectedDraftRevision: 'bad', name: '잘못된 UUID' }),
+    draftInput(draft, { code: '변경 불가', name: '임의 코드' }),
+  ])
+    await error(await saveDraft(head.aiPersonaSeq, body), 400, 'INVALID_REQUEST');
+  await error(
+    await commitDraft(head.aiPersonaSeq, { expectedVersion: 1, expectedDraftRevision: null }),
+    400,
+    'INVALID_REQUEST',
+  );
+  await error(
+    await saveDraft(2147483647, {
+      expectedVersion: 1,
+      expectedDraftRevision: null,
+      name: '없는 유형',
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  assert.deepEqual((await detail(head.aiPersonaSeq)).draft, draft);
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+});
+
+test('unavailable or changed AI capabilities leave the editable draft and HEAD intact', async () => {
+  const head = await create();
+  const draft = await beginDraft(head);
+  try {
+    aiStatus = 503;
+    await error(
+      await commitDraft(head.aiPersonaSeq, draftInput(draft)),
+      503,
+      'DEPENDENCY_UNAVAILABLE',
+    );
+    aiStatus = 200;
+    aiResponse = { ...options, voices: [] };
+    await error(
+      await commitDraft(head.aiPersonaSeq, draftInput(draft)),
+      422,
+      'BUSINESS_RULE_VIOLATION',
+    );
+  } finally {
+    aiStatus = 200;
+    aiResponse = options;
+  }
+  assert.deepEqual((await detail(head.aiPersonaSeq)).draft, draft);
+  assert.equal(await versionCount(head.aiPersonaSeq), 1);
+});
+
+test('draft writes and commits preserve admin roles, live account status, Origin and AI-token boundaries', async () => {
+  const head = await create();
+  const draft = await beginDraft(head, {}, 2);
+  for (const actor of [0, 1, 2])
+    assert.deepEqual((await detail(head.aiPersonaSeq, actor)).draft, draft);
+  for (const [method, path, body] of [
+    ['PATCH', `/api/personas/${head.aiPersonaSeq}`, draftInput(draft, { name: '권한 검사' })],
+    ['POST', `/api/personas/${head.aiPersonaSeq}/versions`, draftInput(draft)],
+  ]) {
+    await error(await call(method, path, body, 1), 403, 'FORBIDDEN');
+    await error(
+      await call(method, path, body, 0, { Origin: 'https://foreign.invalid' }),
+      403,
+      'FORBIDDEN',
+    );
+    await error(
+      await call(method, path, body, 99, { Cookie: undefined, Authorization: `Bearer ${token}` }),
+      401,
+      'UNAUTHORIZED',
+    );
+    for (const status of ['PENDING', 'INACTIVE']) {
+      await pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
+        actorIds[2],
+        status,
+      ]);
+      try {
+        await error(await call(method, path, body, 2), 401, 'UNAUTHORIZED');
+      } finally {
+        await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
+          actorIds[2],
+        ]);
+      }
+    }
+  }
+  assert.equal(
+    (await data(await commitDraft(head.aiPersonaSeq, draftInput(draft), 2))).createdByAdminUserSeq,
+    actorIds[2],
+  );
+});
+
+test('the draft primary key enforces one row per type and rejects invalid stored settings', async () => {
+  const head = await create();
+  await beginDraft(head);
+  await assert.rejects(
+    pool.query(
+      `INSERT INTO ai_persona_drafts SELECT * FROM ai_persona_drafts WHERE ai_persona_seq=$1`,
+      [head.aiPersonaSeq],
+    ),
+    { code: '23505' },
+  );
+  for (const sql of [
+    "UPDATE ai_persona_drafts SET name='  ' WHERE ai_persona_seq=$1",
+    'UPDATE ai_persona_drafts SET base_version=0 WHERE ai_persona_seq=$1',
+    "UPDATE ai_persona_drafts SET turn_wait_level='UNKNOWN' WHERE ai_persona_seq=$1",
+    "UPDATE ai_persona_drafts SET speaking_rate='Infinity' WHERE ai_persona_seq=$1",
+  ])
+    await assert.rejects(pool.query(sql, [head.aiPersonaSeq]), { code: '23514' });
+});
+
+test('Swagger distinguishes mutable drafts from final versions and does not offer direct HEAD edits', async () => {
+  const spec = await (await fetch(base + '/api/docs-json')).json();
+  const update = spec.components.schemas.UpdatePersonaDto;
+  assert.ok(update.required.includes('expectedDraftRevision'));
+  assert.ok(update.properties.expectedDraftRevision.nullable);
+  assert.ok(
+    spec.components.schemas.CommitPersonaDraftDto.required.includes('expectedDraftRevision'),
+  );
+  assert.ok(spec.components.schemas.PersonaDto.properties.draft.nullable);
+  assert.equal('version' in spec.components.schemas.PersonaDraftDto.properties, false);
+  assert.equal(
+    spec.paths['/api/personas/{id}'].patch.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/PersonaDraftResponseDto',
+  );
+  assert.equal(
+    spec.paths['/api/personas/{id}/versions'].post.responses['200'].content['application/json']
+      .schema.$ref,
+    '#/components/schemas/PersonaVersionResponseDto',
+  );
+  assert.equal(spec.paths['/api/personas/{id}/head'], undefined);
+});
+
+test(
+  'another backend resumes the draft and rechecks both identities after external validation without holding a DB lock',
+  { timeout: 15000 },
+  async () => {
+    const { AppModule } = require('../dist/app.module');
+    const { configureApplication } = require('../dist/configure-application');
+    const { AiPersonaClient } = require('../dist/ai-settings/ai-persona.client');
+    const second = await NestFactory.create(AppModule, { logger: false });
+    apps.push(second);
+    configureApplication(second, { log: (entry) => logs.push(entry) });
+    await second.listen(0, '127.0.0.1');
+    const secondBase = await second.getUrl();
+    const send = (method, path, body) =>
+      fetch(secondBase + path, {
+        method,
+        headers: {
+          Cookie: cookies[0],
+          Origin: process.env.CORS_ORIGINS,
+          'Content-Type': 'application/json',
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    const client = second.get(AiPersonaClient),
+      original = client.options;
+    for (const operation of ['save', 'commit']) {
+      const head = await create();
+      const draft = await beginDraft(head);
+      assert.deepEqual(
+        (await data(await send('GET', `/api/personas/${head.aiPersonaSeq}`))).draft,
+        draft,
+      );
+      let entered, release;
+      const selected = new Promise((resolve) => {
+        entered = resolve;
+      });
+      const resume = new Promise((resolve) => {
+        release = resolve;
+      });
+      client.options = async function () {
+        entered();
+        await resume;
+        return original.call(this);
+      };
+      const waiting =
+        operation === 'save'
+          ? send(
+              'PATCH',
+              `/api/personas/${head.aiPersonaSeq}`,
+              draftInput(draft, { name: '대기 중 수정' }),
+            )
+          : send('POST', `/api/personas/${head.aiPersonaSeq}/versions`, draftInput(draft));
+      try {
+        await Promise.race([
+          selected,
+          waiting.then(() => {
+            throw Error('request skipped external validation');
+          }),
+        ]);
+        if (operation === 'save') {
+          await data(await commitDraft(head.aiPersonaSeq, draftInput(draft)));
+        } else {
+          await data(
+            await saveDraft(head.aiPersonaSeq, draftInput(draft, { name: '다른 서버 수정' })),
+          );
+        }
+        release();
+        await error(await waiting, 409, 'VERSION_CONFLICT');
+        const state = await detail(head.aiPersonaSeq);
+        assert.equal(state.headVersion.version, operation === 'save' ? 2 : 1);
+        if (operation === 'save') assert.equal(state.draft, null);
+        else assert.equal(state.draft.name, '다른 서버 수정');
+      } finally {
+        release();
+        client.options = original;
+        await waiting;
+      }
+    }
+  },
+);
+
+test('version limit errors preserve the sole draft and existing HEAD', async () => {
+  const first = await create();
+  await pool.query(
+    `INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,turn_wait_level)
+    VALUES($1,2147483647,'상한 HEAD','기존 내용','NORMAL')`,
+    [first.aiPersonaSeq],
+  );
+  const head = (await detail(first.aiPersonaSeq)).headVersion;
+  const draft = await beginDraft(head);
+  await error(await commitDraft(first.aiPersonaSeq, draftInput(draft)), 409, 'INVALID_STATE');
+  assert.deepEqual((await detail(first.aiPersonaSeq)).draft, draft);
+  assert.equal((await detail(first.aiPersonaSeq)).headVersion.version, 2147483647);
+  assert.equal(await versionCount(first.aiPersonaSeq), 2);
+});
+
+test('migration 039 adds an empty draft store to populated personas without changing any committed version', async () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('LOCK TABLE ai_personas,ai_persona_versions IN SHARE ROW EXCLUSIVE MODE');
+    const snapshot = async () =>
+      (
+        await client.query(
+          'SELECT jsonb_agg(to_jsonb(v) ORDER BY ai_persona_version_seq) AS versions FROM ai_persona_versions v',
+        )
+      ).rows[0].versions;
+    const before = await snapshot();
+    await client.query('DROP TABLE ai_persona_drafts');
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/039-persona-drafts.sql'), 'utf8'),
+    );
+    assert.equal(
+      (await client.query('SELECT count(*)::int AS n FROM ai_persona_drafts')).rows[0].n,
+      0,
+    );
+    assert.deepEqual(await snapshot(), before);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
   }
 });
 

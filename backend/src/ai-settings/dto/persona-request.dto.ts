@@ -1,6 +1,16 @@
 import { ApiProperty, ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TURN_WAIT_LEVELS, TurnWaitLevel } from '../ai-settings.types';
 
@@ -63,7 +73,7 @@ export class UpdatePersonaDto extends PartialType(
   { skipNullProperties: false },
 ) {
   @ApiProperty({
-    description: '상세 조회의 latestVersion.version. 오래된 값은 409.',
+    description: '확인한 headVersion.version. HEAD가 달라지면 409.',
     minimum: 1,
     maximum: 2147483647,
     example: 1,
@@ -72,6 +82,17 @@ export class UpdatePersonaDto extends PartialType(
   @Min(1)
   @Max(2147483647)
   expectedVersion!: number;
+
+  @ApiProperty({
+    description:
+      '조회한 draft.draftRevision. 초안이 없으면 반드시 null, 있으면 해당 UUID를 보냅니다. 생략 불가이며 다른 수정·확정 이후의 오래된 값은 409입니다. 인증 토큰이 아닙니다.',
+    type: String,
+    format: 'uuid',
+    nullable: true,
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== null)
+  @IsUUID('4')
+  expectedDraftRevision!: string | null;
 
   @ApiPropertyOptional({
     description: '생략하면 유지, null이면 AI 기본 음성.',
@@ -100,6 +121,18 @@ export class UpdatePersonaDto extends PartialType(
   @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
   @IsIn(TURN_WAIT_LEVELS)
   turnWaitLevel?: TurnWaitLevel;
+}
+
+export class CommitPersonaDraftDto {
+  @ApiProperty({ description: '확인한 headVersion.version.', minimum: 1, maximum: 2147483647 })
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  expectedVersion!: number;
+
+  @ApiProperty({ description: '확정할 초안의 draftRevision.', type: String, format: 'uuid' })
+  @IsUUID('4')
+  expectedDraftRevision!: string;
 }
 
 export class PersonaIdDto {

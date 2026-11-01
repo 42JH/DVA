@@ -79,22 +79,67 @@ export class PersonaVersionDto {
   applyErrorCode!: string | null;
 }
 
+export class PersonaDraftDto {
+  @ApiProperty({ description: '초안이 속한 페르소나 유형 번호.' })
+  aiPersonaSeq!: number;
+  @ApiProperty({
+    description: '초안 수정 식별값. 변경 저장마다 바뀌며 인증 토큰이 아닙니다.',
+    format: 'uuid',
+  })
+  draftRevision!: string;
+  @ApiProperty({ description: '초안을 시작한 확정 HEAD 버전 번호.' })
+  baseVersion!: number;
+  @ApiProperty({ description: '작성 중 표시명.' })
+  name!: string;
+  @ApiProperty({ description: '작성 중 전체 프롬프트. 원문을 보존합니다.' })
+  promptText!: string;
+  @ApiProperty({ description: '작성 중 음성 ID.', type: String, nullable: true })
+  voiceId!: string | null;
+  @ApiProperty({ description: '작성 중 발화 속도.', type: Number, nullable: true })
+  speakingRate!: number | null;
+  @ApiProperty({ description: '작성 중 말끝 대기 단계.', enum: TURN_WAIT_LEVELS })
+  turnWaitLevel!: string;
+  @ApiProperty({ description: '마지막 저장 관리자 번호. 삭제 후에도 유지하는 논리 참조.' })
+  updatedByAdminUserSeq!: number;
+  @ApiProperty({ description: '초안 최초 생성 시각.', type: String, format: 'date-time' })
+  createdAt!: string;
+  @ApiProperty({ description: '초안 마지막 변경 저장 시각.', type: String, format: 'date-time' })
+  updatedAt!: string;
+}
+
+export class PersonaDraftResponseDto {
+  @ApiProperty({
+    description: '유형별 한 개의 작성 중 초안. 확정 버전 번호는 아직 없습니다.',
+    type: PersonaDraftDto,
+  })
+  data!: PersonaDraftDto;
+  @ApiProperty({ description: '요청 추적 정보.', type: RequestMetaDto })
+  meta!: RequestMetaDto;
+}
+
 export class PersonaDto {
   @ApiProperty({ description: '페르소나 번호.', example: 1 })
   aiPersonaSeq!: number;
   @ApiProperty({ description: '변경하지 않는 고유 코드.', example: 'parcel' })
   code!: string;
   @ApiProperty({
-    description: '최신 저장 버전. 운영 적용 버전과 다를 수 있습니다.',
+    description: '최신 확정 버전. 초안·운영 적용 버전과 다를 수 있습니다.',
     type: PersonaVersionDto,
   })
   latestVersion!: PersonaVersionDto;
   @ApiProperty({
     description:
-      '이 유형의 최신 저장 버전 HEAD. 생성·수정 저장 시 자동 이동하며 latestVersion과 같습니다. 실제 상담 적용·대기 버전은 별도입니다.',
+      '이 유형의 최신 확정 버전 HEAD. 유형 생성·초안 확정 시 이동하며 latestVersion과 같습니다. 초안 저장과 상담 적용·대기 버전은 별도입니다.',
     type: PersonaVersionDto,
   })
   headVersion!: PersonaVersionDto;
+  @ApiProperty({
+    description:
+      '유형별 작성 중 초안 한 개. 없거나 HEAD 확정 후에는 null. 버전 이력·AI 설정에는 포함되지 않습니다.',
+    type: PersonaDraftDto,
+    nullable: true,
+  })
+  draft!: PersonaDraftDto | null;
   @ApiProperty({
     description: '실제 AI 적용을 확인한 상담 버전. HEAD가 이동해도 유지하며 미사용 유형은 null.',
     type: PersonaVersionDto,

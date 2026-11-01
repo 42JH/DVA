@@ -74,6 +74,16 @@ test('deployment verification requires migration 038 and unique empty-result cal
   ])
     await verify([sql], 'Empty AI order result schema or migration missing');
 });
+
+test('deployment verification requires migration 039 and one revisioned draft per persona', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='039-persona-drafts.sql'",
+    'ALTER TABLE ai_persona_drafts DROP CONSTRAINT ai_persona_drafts_pkey',
+    'ALTER TABLE ai_persona_drafts ALTER COLUMN draft_revision DROP NOT NULL',
+    'ALTER TABLE ai_persona_drafts DROP COLUMN base_version',
+  ])
+    await verify([sql], 'Persona draft schema or migration missing');
+});
 test('deployment verification rejects a missing migration 033 ledger entry', () =>
   verify([
     "DELETE FROM db_migrations.applied_versions WHERE version='033-organization-created-at.sql'",
