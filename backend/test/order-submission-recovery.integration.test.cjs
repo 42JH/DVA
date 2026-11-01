@@ -1,9 +1,14 @@
 require('reflect-metadata');
-const { test } = require('node:test');
+const { beforeEach, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { OrderSubmissionRepository } = require('../dist/orders/order-submission.repository');
 const f = require('./helpers/manual-orders.cjs')();
+
+beforeEach(async () => {
+  // 워커는 DB 전체를 조회하므로 fixture가 확인한 임시 DB의 주문을 사례마다 비운다.
+  await f.pool.query('TRUNCATE TABLE orders CASCADE');
+});
 
 async function interruptedOrder(stale = false) {
   const repository = f.app.get(OrderSubmissionRepository);
