@@ -9,7 +9,14 @@ import {
   todayYmd,
   type Ymd,
 } from '@/shared/lib/dateRange'
-import { fmtDay, fmtDayRange, fmtDuration, fmtPctSplit, fmtShortDate } from '@/shared/lib/format'
+import {
+  fmtDay,
+  fmtDayRange,
+  fmtDuration,
+  fmtDurationParts,
+  fmtPctSplit,
+  fmtShortDate,
+} from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { COMPLAINT_LABEL, COMPLAINT_ORDER, OUTCOME_LABEL } from '@/features/dashboard/labels'
 import {
@@ -40,16 +47,6 @@ const hm = (iso: string) => {
 /** 여러 날 목록 = 날짜만 (10/29: 'MM.DD HH:MM'이면 질문이 잘림). 다른 해면 연도 (10/30 연도 규칙) */
 const dayOnly = (iso: string) => fmtDay(iso).replace(/ \(.\)$/, '')
 const NO_STAT = '되묻기 미측정' // 평균 되묻기: AI가 repeatQuestionCount 를 안 준 기간 (성공하는 척 표시 금지, 명세 §10)
-/** 초 → 카드의 큰 값 [['3', '분'], ['40', '초']] */
-const clockParts = (sec: number): [string, string][] => {
-  const s = Math.round(sec)
-  const h = Math.floor(s / 3600) // 한 시간 넘으면 '1시간 5분 03초' (11/02)
-  return [
-    ...(h ? ([[String(h), '시간']] as [string, string][]) : []),
-    [String(Math.floor(s / 60) % 60), '분'],
-    [two(s % 60), '초'],
-  ]
-}
 const durationText = (sec: number | null) => (sec === null ? '—' : fmtDuration(Math.round(sec)))
 
 /** 02 대시보드 훅 (와이어프레임 02, 10/30) — [날짜별 | 페르소나별] · 날짜 칸(기본 오늘) · 고른 버전은 URL에
@@ -145,7 +142,7 @@ export function useDashboard() {
               key: 'time',
               icon: 'clock' as const,
               label: '평균 통화 시간',
-              value: s.avgDurationSec === null ? undefined : clockParts(s.avgDurationSec),
+              value: s.avgDurationSec === null ? undefined : fmtDurationParts(s.avgDurationSec),
               split: [
                 ['접수 성공', durationText(s.avgBy.SUCCESS)],
                 ['접수 실패', durationText(s.avgBy.FAILED)],

@@ -5,6 +5,7 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
+import { avg, avgDurationSec } from '@/shared/lib/callStats'
 import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
 
 /** 통화 결과 (04 · 06과 같은 5개). feature끼리 import 금지라 여기 따로 둠 */
@@ -103,9 +104,6 @@ const RESULT_OF: Record<string, GaugeOutcome> = {
   REGISTRATION_FAILED: 'FAILED',
   HANDOFF: 'HANDOFF',
 }
-const durationSec = (r: CallRowDto) =>
-  r.startedAt && r.endedAt ? (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000 : null
-const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 interface UnansweredDto {
   callStartedAt: string | null
   occurredAt: string
@@ -114,15 +112,13 @@ interface UnansweredDto {
 
 /** 목록 줄들의 평균 — 통화 시간(전체 · 결과별) · 되묻기. 기간 카드와 버전 표가 같이 씀 */
 function averagesOf(rows: CallRowDto[]) {
-  const secsOf = (pick: (r: CallRowDto) => boolean) =>
-    rows
-      .filter(pick)
-      .map(durationSec)
-      .filter((s): s is number => s !== null && s >= 0)
   return {
-    avgDurationSec: avg(secsOf(() => true)),
+    avgDurationSec: avgDurationSec(rows),
     avgBy: Object.fromEntries(
-      GAUGE.map((o) => [o, avg(secsOf((r) => RESULT_OF[r.analysis?.result ?? ''] === o))]),
+      GAUGE.map((o) => [
+        o,
+        avgDurationSec(rows.filter((r) => RESULT_OF[r.analysis?.result ?? ''] === o)),
+      ]),
     ) as Record<GaugeOutcome, number | null>,
     avgRepeat: avg(
       rows

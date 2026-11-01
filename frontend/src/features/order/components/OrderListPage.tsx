@@ -88,6 +88,8 @@ export function OrderListPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          recentKey="orders" // 11/02 사용자: 04 · 09와 같은 모양 (최근 검색어 · 추천 · 초성). 숫자만 친 검색어는 안 남음
+          suggestions={vm.suggestions}
           placeholder="이름 · 전화번호 · 주소"
           className="min-w-0 flex-1"
         />

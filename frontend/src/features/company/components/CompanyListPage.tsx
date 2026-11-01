@@ -45,6 +45,8 @@ export function CompanyListPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          recentKey="companies" // 11/02 사용자: 04 · 09와 같은 모양 (최근 검색어 · 추천 · 초성)
+          suggestions={vm.suggestions}
           placeholder="기업명 검색"
           className="min-w-0 flex-1"
         />

@@ -18,6 +18,8 @@ export function HomeToday() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          recentKey="home" // 11/02 사용자: 홈만 따로 최근 검색어 (추천은 홈에 목록이 없어 안 띄움)
+          onPick={vm.searchFor}
           placeholder="디버 접수번호 · 주문 번호 · 이름 · 전화번호 · 주소"
           className="flex-1"
         />
@@ -41,11 +43,22 @@ export function HomeToday() {
             {vm.averages.map((a) => (
               <div key={a.label} className="flex flex-col gap-2">
                 <span className="text-label font-bold text-sub">{a.label}</span>
-                {/* 값 자리에 '—' + 이유 (02 대시보드 평균 카드와 같게) */}
-                <span className="flex items-baseline gap-2">
-                  <span className="text-[32px] leading-[1.4] font-bold text-muted">—</span>
-                  <span className="text-caption text-muted">{a.note}</span>
-                </span>
+                {/* 값이 있으면 큰 숫자 + 작은 단위 (위 카드의 '건'과 같게), 없으면 '—' + 이유 */}
+                {a.value ? (
+                  <span className="flex items-baseline gap-1">
+                    {a.value.map(([v, u]) => (
+                      <span key={u} className="mr-1">
+                        <span className="text-[32px] leading-[1.4] font-bold text-ink">{v}</span>
+                        <span className="ml-0.5 text-label font-bold text-sub">{u}</span>
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="flex items-baseline gap-2">
+                    <span className="text-[32px] leading-[1.4] font-bold text-muted">—</span>
+                    {a.note && <span className="text-caption text-muted">{a.note}</span>}
+                  </span>
+                )}
               </div>
             ))}
           </div>
