@@ -23,6 +23,7 @@ RETRY = {"pickup_at": "수거 희망 날짜와 시간을 다시 여쭤보기(지
 async def record_order(ctx, args: OrderFields) -> Result:
     values, invalid = args.cleaned()
     before = ctx.snapshot_slots()
+    pin_events = ctx.pins_for_address(values)  # 주소록에 비슷한 받는 곳이 있으면 기록하지 않고 그 핀을 확인한다
     for name in CALL_FIELDS:
         if name in values:
             setattr(ctx, name, values.pop(name))
@@ -51,12 +52,14 @@ async def record_order(ctx, args: OrderFields) -> Result:
     if all(ctx.field_done(f) for f in SENDER):
         # 신규 고객은 보내는 분 정보를 다 말한 순간 고객 등록 + 보내는 곳을 주소록에(2026-10-31 결정, 한 번만)
         await ctx.register_customer()
-    events = ["order.updated"] if recorded else []
+    events = (["order.updated"] if recorded else []) + pin_events
     if "pickup_at" in invalid and is_past(args.pickup_at):
         events.append("pickup.past")  # 지난 날짜(A5 구간 예외)
     if invalid:
         retry = "; ".join(RETRY.get(n, "해당 전화번호를 다시 또박또박 여쭤보기") for n in invalid)
         raise ToolError(f"형식이 맞지 않아 기록하지 않음: {', '.join(invalid)}", retry, events)
+    if pin_events:  # 받는 곳은 아직 기록하지 않았다: 주소록의 곳이 맞는지 고객에게 확인(state.next)
+        return Result({"recorded": recorded, "saved_place_found": len(ctx.pin_candidates)}, events)
     if not recorded:
         raise ToolError("기록할 항목이 없음", "고객이 말한 항목을 채워 다시 호출")
     return Result({"recorded": recorded}, events)

@@ -113,7 +113,8 @@ async def order_answer(ctx, answer: str) -> list[str]:
     elif kind == "pins":
         if answer.startswith("pin_"):
             ctx.pins_found([ctx.pin_candidates[int(answer.removeprefix("pin_")) - 1]], narrowing=True)
-        else:
+        else:  # 이 중에 없다: 후보들은 버린다(같은 주소를 다시 말해도 같은 후보를 또 묻지 않게)
+            ctx.pin_rejected["destination"] += ctx.pin_candidates
             ctx.pin_candidates = []
             await ctx.carry_dest_said()
     await ctx.sync_asking()

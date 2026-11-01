@@ -352,6 +352,27 @@ class Call:
             return ["pins.ask_place" if name else "pins.ask_name"]
         return self.pins_found(found)
 
+    def pins_for_address(self, values: dict) -> list[str]:
+        """받는 분이 정해지기 전에 받는 곳 주소가 값 기록(record_order)으로 들어오면, 기록하기 전에 주소록에서 비슷한 핀을
+        찾는다. 고객이 주소를 다 말하지 않아도("해운대 마린시티") 저장된 곳을 확인하게(B9·B8). 찾으면 받는 분 값(이름·
+        주소·상세)은 기록하지 않고 들어 둔다(아니라고 하면 carry_dest_said가 옮긴다). 못 찾으면 [](그대로 기록)."""
+        place = values.get("receiver_address")
+        if not place or self.order.has("receiver_name") or self.pin_offer:
+            return []
+        said = {**self.dest_said, "place": place}
+        for part, key in (("name", "receiver_name"), ("detail", "receiver_address_detail")):
+            if values.get(key):
+                said[part] = values[key]
+        scope = self.pin_scope("destination")
+        args = (said.get("name"), said["place"], said.get("detail"))
+        found = match_places(scope[:self.cfg.flow.pin_recent_count], *args) or match_places(scope, *args)
+        if not found:
+            return []
+        for key in ("receiver_name", "receiver_address", "receiver_address_detail"):
+            values.pop(key, None)
+        self.dest_said, self.dest_offer = said, None
+        return self.pins_found(found)
+
     async def reject_pin(self) -> None:
         """확인한 핀이 아니라고 함: 그 핀은 버린다. 후보를 좁히던 중이면 남은 후보로 다시 묻고, 없으면 "저장된 다른 배송지가
         없으니 새로 접수하겠습니다"(B11_NEW) 뒤 고객이 말한 받는 분 이름·장소를 가져가 빠진 것만 묻는다(2026-10-31 결정)."""
