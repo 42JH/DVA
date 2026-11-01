@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageCount } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
 import { todayYmd } from '@/shared/lib/dateRange'
-import { fmtDuration, fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { fmtDuration, fmtListTime, fmtPhone, toDateTimeLocal } from '@/shared/lib/format'
 import { phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
@@ -74,6 +74,10 @@ export function useCallList() {
   }
   const list = useQuery(callListQueries.list(query, page, PAGE_SIZE))
   const total = list.data?.totalCount ?? 0
+  const pages = pageCount(total, PAGE_SIZE)
+  useEffect(() => {
+    if (list.data && page > pages) set({ page: pages }) // 주소의 쪽이 범위 밖이면 마지막 쪽으로
+  }, [list.data, page, pages, set])
   const rows = (list.data?.items ?? []).map(toView)
 
   const outcomeOptions: Option<OutcomeFilter>[] = [
@@ -89,7 +93,8 @@ export function useCallList() {
       const csv = toCsv(
         ['통화 시작 시각', '고객', '발신번호', '통화 결과', '불만 유형', '불만 사유', '통화 시간'],
         all.map((c) => [
-          c.time.join(' '),
+          // CSV는 늘 연도까지 ('2026-10-20 14:33') — 화면의 올해 연도 생략 규칙은 목록에만
+          c.startedAt ? toDateTimeLocal(new Date(c.startedAt)).replace('T', ' ') : '—',
           c.name,
           c.phone,
           c.outcomeLabel,
@@ -131,8 +136,8 @@ export function useCallList() {
     count: total, // '통화 목록 131건'
     isLoading: list.isPending,
     listError: list.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
-    page,
-    pages: pageCount(total, PAGE_SIZE),
+    page: Math.min(page, pages),
+    pages,
     goPage: (p: number) => set({ page: p }),
 
     openCall: (c: CallRow) => navigate(`/calls/${c.callSessionSeq}`),

@@ -107,9 +107,11 @@ export function CallListPage() {
         head={
           <h2 className="flex items-baseline gap-3.5 text-card font-bold">
             통화 목록
-            <span className="text-label font-normal text-sub">
-              {vm.count.toLocaleString('ko-KR')}건
-            </span>
+            {!vm.isLoading && ( // 첫 로딩 중엔 '0건'을 보이지 않음
+              <span className="text-label font-normal text-sub">
+                {vm.count.toLocaleString('ko-KR')}건
+              </span>
+            )}
           </h2>
         }
         columns={columns}
@@ -119,7 +121,11 @@ export function CallListPage() {
         loading={vm.isLoading}
         empty={
           vm.listError ??
-          (vm.tab === 'complaint' ? '불만이 감지된 통화가 없습니다.' : '통화 내역이 없습니다.')
+          (vm.q.trim() || vm.outcome !== 'ALL' || vm.range
+            ? '조건에 맞는 통화가 없습니다.'
+            : vm.tab === 'complaint'
+              ? '불만이 감지된 통화가 없습니다.'
+              : '통화 내역이 없습니다.')
         }
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
