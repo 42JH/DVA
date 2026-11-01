@@ -6,7 +6,7 @@ import { useListParams } from '@/shared/lib/useListParams'
 import { useSession } from '@/shared/auth/useSession'
 import {
   adminQueries,
-  approveAdmin,
+  setAdminStatus,
   deleteAdmin,
   resetAdminPassword,
   type Admin,
@@ -17,12 +17,15 @@ import { ADMIN_TABS, ROLE_LABEL } from '@/features/admin/labels'
 const PAGE_SIZE = 11 // 디자인: 한 쪽 11명
 const DEFAULTS: { tab: AdminStatus } = { tab: 'ACTIVE' } // 디자인 첫 화면 = '관리자' 탭
 
-/** ⋮ 메뉴 항목. deactivate · activate는 API가 없어 꺼 둠(backend-todo 9) */
+/** ⋮ 메뉴 항목 (비활성화 · 활성화는 11/01 백엔드 반영으로 연결) */
 export type AdminAction = 'reset' | 'deactivate' | 'activate' | 'delete'
 
 /** 확인 창 — 승인은 바로(디자인), 나머지 셋은 확인 후 */
-type Confirming = { kind: 'reject' | 'delete' | 'reset'; admin: Admin } | null
-type Job = { kind: 'approve' | 'reject' | 'delete' | 'reset'; id: number }
+type Confirming = { kind: 'reject' | 'delete' | 'reset' | 'deactivate'; admin: Admin } | null
+type Job = {
+  kind: 'approve' | 'reject' | 'delete' | 'reset' | 'deactivate' | 'activate'
+  id: number
+}
 
 export interface AdminRow {
   id: number
@@ -68,11 +71,13 @@ export function useAdminList() {
 
   const job = useMutation({
     mutationFn: ({ kind, id }: Job) =>
-      kind === 'approve'
-        ? approveAdmin(id)
-        : kind === 'reset'
-          ? resetAdminPassword(id)
-          : deleteAdmin(id), // 거절 = 삭제 (같은 API)
+      kind === 'approve' || kind === 'activate'
+        ? setAdminStatus(id, 'ACTIVE')
+        : kind === 'deactivate'
+          ? setAdminStatus(id, 'INACTIVE')
+          : kind === 'reset'
+            ? resetAdminPassword(id)
+            : deleteAdmin(id), // 거절 = 삭제 (같은 API)
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: adminQueries.all() }) // 목록 + 탭 건수 한 번에
       setConfirming(null)
@@ -114,6 +119,7 @@ export function useAdminList() {
 
     // 승인: 확인 창 없이 바로. 그 줄만 '처리 중'
     approve: (id: number) => job.mutate({ kind: 'approve', id }),
+    activate: (id: number) => job.mutate({ kind: 'activate', id }), // 승인처럼 확인 없이 바로
     busyId: job.isPending ? job.variables?.id : undefined,
     jobError: job.error?.message ?? null,
 
