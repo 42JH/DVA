@@ -209,9 +209,6 @@ class Texts(_Strict):
     backend_info: str
     backend_state: str
     progress: str
-    progress_then: str
-    progress_preview: str
-    progress_preview_item: str
     progress_item: str
     progress_sep: str
     saved_value: str

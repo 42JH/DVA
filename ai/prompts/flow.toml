@@ -5,12 +5,8 @@
 # 쓸 수 있는 자리표시자: {company} {now} {caller} {customer_type} {customer_name} {parcel_no} {parcel_count}
 #   {성함} {기존 출발지} {도착지 주소} {수신인} {후보} {운임} {월} {일} {받는 분} {주소} {배송 상태} {업무} {항목} {새 값}
 
-# 진행 상태(thinking.append) 틀. then은 받을 항목이 두 개 이상 남았을 때만 붙는다(기록이 한 박자 늦어 같은 질문을 되풀이하지 않게)
-progress = "[진행 상태] {stage}. 기록: {recorded}. 다음: {next}{then}"
-progress_then = " (고객이 방금 답했고 아직 기록 전이면 그다음: {next2})"
-# 답을 고르는 질문일 때 답마다 바로 이어서 할 말(engine.preview). 판별보다 음성 모델이 먼저 말을 시작하므로
-progress_preview = " (고객 답에 따라 바로 이어서 할 말 — {items})"
-progress_preview_item = "{choice}이면 {next}"
+# 진행 상태(thinking.append) 틀. 결과가 오기 전에 미리 말할 것은 주지 않는다(위임한 턴의 대답은 결과 하나, spec/flow.md)
+progress = "[진행 상태] {stage}. 기록: {recorded}. 다음: {next}"
 progress_item = "{label} {value}"
 progress_sep = ", "
 # 기록된 값 대신 보여 줄 말(읽지 않을 값)
