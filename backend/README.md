@@ -14,7 +14,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
 
-페르소나 유형·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 실행 전 035 migration까지 적용한다. 생성·수정 저장 시 HEAD가 최신 버전으로 이동하고 실제 상담·publish 대기는 유지한다. POST activate는 확인한 HEAD를 publish하며 수락한 버전·UUID는 이후 저장으로 바뀌지 않는다. 수동 PUT head는 제거했다. 통화 중 적용은 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·publish 요청은 503이다.
+페르소나 유형·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 새 배포는 036 migration까지 반영하며, 구버전 앱을 모두 종료한 뒤 중복 HEAD 컬럼을 제거한다. 생성·수정 저장 시 HEAD가 최신 버전으로 이동하고 실제 상담·publish 대기는 유지한다. POST activate는 확인한 HEAD를 publish하며 수락한 버전·UUID는 이후 저장으로 바뀌지 않는다. 수동 PUT head는 제거했다. 통화 중 적용과 선택 호환값 activeCallCount는 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·publish 요청은 503이다.
 
 관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
 

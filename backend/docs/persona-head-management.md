@@ -30,8 +30,32 @@
 | publish | POST /api/personas/{id}/activate | 확인한 최신 HEAD의 적용 대기 요청. 202 PENDING, 이미 동일 버전 ACTIVE이면 200 |
 | 목록·상세 | GET /api/personas, GET /api/personas/{id} | 최신 HEAD, 실제 상담 버전, publish 대기·오류를 분리해 반환 |
 | 버전 이력 | GET /api/personas/{id}/versions | 기존 버전 내림차순 이력 유지 |
+| AI 지원 옵션 | GET /api/ai/options | voices, speakingRate의 min/max, turnWaitLevels. AI 연결 실패·잘못된 응답은 503 |
 
 기존 PUT /api/personas/{id}/head는 제거했으며 404다. 프론트는 저장 후 이 API를 호출하지 않는다.
+
+### 생성·수정 입력
+
+생성에는 code, name, promptText가 필수다. code는 고유하며 수정할 수 없고 중복은 409다. name·promptText는 공백만인 값을 거절하고 원문을 보존한다.
+
+```json
+{
+  "code": "parcel",
+  "name": "친절형",
+  "promptText": "차분한 한국어로 택배 접수를 안내합니다.",
+  "voiceId": null,
+  "speakingRate": null,
+  "turnWaitLevel": "NORMAL"
+}
+```
+
+수정에는 expectedVersion과 변경할 설정을 보낸다. 생략한 설정은 유지한다. voiceId·speakingRate의 null은 AI 기본값이다. turnWaitLevel은 SHORT/NORMAL/LONG 중 실제 AI 지원 목록의 값만 허용하며 생성 기본값은 NORMAL이다. 속도 min/max가 모두 null이면 숫자 속도를 지원하지 않는다. 변경값 없는 PATCH는 400이다. AI 옵션 API 미연결·토큰 미설정 시 생성·수정·publish는 503이며 조회는 기존 데이터를 반환한다.
+
+```json
+{ "expectedVersion": 3, "name": "수정한 친절형", "promptText": "수정한 전체 원문" }
+```
+
+### publish 입력
 
 publish 본문:
 
@@ -55,6 +79,7 @@ publish 본문:
 ## 프론트 조회 필드
 
 단건은 기존 data/meta, 목록은 data/hasNext/total_count 형식을 유지한다.
+목록의 limit은 기본 20·최대 100, offset은 기본 0이다. total_count는 같은 조회 조건에서 페이지 적용 전 전체 건수다. 버전 이력도 같은 목록 형식을 사용한다.
 
 | 필드 | 의미·화면 연결 |
 | --- | --- |
@@ -66,6 +91,7 @@ publish 본문:
 | pendingVersionSeq | 기존 호환 필드. pendingVersion의 식별자 또는 null |
 
 전체 버전 객체에는 version, aiPersonaVersionSeq, 이름·프롬프트·음성 설정, 작성자 번호·이름, 적용 요청 UUID·시각·오류 등이 포함된다. 작성자 이름은 기존 논리 참조·감사 이력으로 조회한다.
+적용 메타데이터는 applicationId, requestedByAdminUserSeq, requestedAt, appliedAt, lastNotifiedAt, applyErrorCode다. 버전 행에는 최신 요청을 표시하고 과거 요청·대기 교체·취소·성공·실패는 감사 기록으로 보존한다. 토큰·프롬프트 본문은 감사에 저장하지 않는다.
 
 화면에서는 **최신 저장 v4 / 상담 적용 v2 / 반영 대기 v3**을 구분해 보여준다. HEAD의 status가 INACTIVE여도 실제 상담은 activeVersion으로 계속 진행할 수 있다. HEAD와 ACTIVE가 다른 것은 정상 상태다.
 
@@ -77,11 +103,14 @@ publish 본문:
 - 반영 완료: activeVersion이 요청한 버전으로 바뀌었는지 확인한다. 그동안 저장된 최신 HEAD가 더 앞서 있을 수 있다.
 
 ACTIVE/PENDING/INACTIVE는 통화 적용 상태로 유지한다. 작성 중 상태나 별도의 HEAD 상태 값은 추가하지 않는다.
+latestVersion과 식별자 호환 필드는 현재 프론트 연동을 위해 유지한다. 소비자 전환을 확인하기 전에는 제거하지 않는다.
 
 ## DB 전환과 검증
 
-기존 migration 034는 수정하지 않는다. 새 앱 실행 전 035-persona-latest-heads.sql까지 적용한다. 035는 기존 유형의 head_version_seq를 최신 저장 버전으로 맞춘다. ACTIVE/PENDING 버전, UUID, 설정 이력, 감사, 통화 참조는 변경하지 않는다.
+기존 migration 034·035는 수정하지 않는다. 036-remove-redundant-persona-head.sql은 조회에 사용하지 않는 head_version_seq 복사 컬럼만 제거한다. HEAD는 기존 유형별 버전 고유 인덱스와 최신 버전 조회로 구한다. ACTIVE/PENDING 버전, UUID, 설정 이력, 감사, 통화 참조는 변경하지 않는다. 의존 객체가 있으면 CASCADE로 삭제하지 않고 migration을 중단한다.
 
-신규 생성·수정은 버전 추가와 저장된 HEAD 번호 갱신·감사를 같은 트랜잭션에서 처리한다. 실패하면 함께 복구한다. 조회의 HEAD는 최신 저장 버전으로 계산하고, 실제 상담·대기는 별도 상태에서 조회한다.
+신규 생성·수정은 버전 추가와 감사를 같은 트랜잭션에서 처리한다. 실패하면 함께 복구한다. 별도의 HEAD 갱신 쿼리는 없다. publish는 잠금 안에서 확인한 최신 버전 객체를 재사용하고 같은 버전을 다시 조회하지 않는다.
 
-AI 설정 조회·회신의 URL·인증·필드는 유지한다. 적용 회신은 원래 PENDING과 UUID를 검사하며 현재 HEAD와 비교하지 않는다. 실제 서버 DB 적용·프론트 수정·AI 코드 변경·배포는 이 작업에 포함하지 않는다.
+이 앱은 035 스키마에서도 실행할 수 있지만 이전 앱은 036 적용 후 버전 저장에 실패한다. 순차 전환 시 이전 앱을 모두 종료한 뒤 036을 적용한다. 036 이후 이전 앱으로 복구하려면 먼저 head_version_seq 양수 정수 컬럼을 복원하고 035의 최신 버전 채우기를 실행해야 한다. 실제 서버 적용 전 외부 SQL 의존성도 확인한다.
+
+AI 설정 조회·회신의 URL·인증은 유지한다. activeCallCount는 생략 가능한 호환 필드로 남기며 적용 판단에는 사용하지 않는다. 적용 회신은 원래 PENDING과 UUID를 검사하며 현재 HEAD와 비교하지 않는다. 실제 서버 DB 적용·프론트 수정·AI 코드 변경·배포는 이 작업에 포함하지 않는다.
