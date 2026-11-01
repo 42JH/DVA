@@ -1,11 +1,12 @@
 // 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
-// 목록 = 실서버 GET /admin/orders (연동 상세명세 4.1, 11/01). 주문 추가 · 수정은 아직 shared/order 메모리 가짜 (다음 단계)
+// 목록 GET /admin/orders · 추가 POST /admin/orders · 수정 PATCH /orders/{id} — 모두 실서버 (연동 상세명세 4장, 11/01)
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem, type ApiList } from '@/shared/api/client'
 import { fetchAll, offsetOf } from '@/shared/api/paging'
 import { addDays, type Ymd } from '@/shared/lib/dateRange'
+import { buildCreateOrder } from './orderCreate'
 import type { OrderPatch } from './orderPatch'
-import { addOrder, type OrderDetail, type Party, type PaymentMethod } from '@/shared/order/orderApi'
+import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
@@ -98,9 +99,7 @@ export const orderQueries = {
 export const fetchAllOrders = (query: OrderListQuery): Promise<OrderListItem[]> =>
   fetchAll<OrderListItem>('/admin/orders', toServerQuery(query))
 
-// ---------- 아래는 아직 가짜 (주문 추가 · 수정 단계에서 실서버로) ----------
-const wait = () => new Promise((r) => setTimeout(r, 200)) // 가짜 응답 지연
-
+// ---------- 주문 추가 · 수정 ----------
 /** 주문 추가(수기 접수) 본문 */
 /** 주소 검색으로 고른 주소의 나머지 칸 — 서버 주소는 지번 · 동 이름 · 우편번호 · 좌표가 필수 (명세 4.4) */
 export interface PickedAddress {
@@ -122,39 +121,15 @@ export interface OrderInput {
   request: string | null // 고객 요청 사항 (선택)
 }
 
-// 가짜도 BE에 요청한 규칙(10/31)대로: 같은 멱등키로 다시 오면 새로 만들지 않고 처음 결과를 돌려줌
-// shortcut: 가짜는 본문 검증을 안 함 (화면 · CSV 검사가 먼저 거름) — 실제 422는 서버가 줌
-const replay = new Map<string, number>()
-
-const toNewOrder = (input: OrderInput, manualBy: string): Omit<OrderDetail, 'orderSeq'> => ({
-  route: 'MANUAL',
-  manualBy,
-  acceptedAt: new Date().toISOString(),
-  cancelled: false,
-  sender: input.sender,
-  receiver: input.receiver,
-  items: input.items,
-  pickupRequestedAt: input.pickupAt,
-  itemPrice: input.declaredValue,
-  clientComment: input.request,
-  paymentMethod: input.paymentMethod,
-  paymentState: 'UNPAID',
-  relatedCalls: [],
-})
-
-/** 주문 추가(수기 접수) — 접수되면 결제 대기. 멱등키: 같은 본문을 다시 보낼 땐 같은 키 (명세서 1.2) */
-export async function createOrder(
+/** 주문 추가(수기 접수) — POST /admin/orders (연동 상세명세 4.4). 본문은 buildCreateOrder
+ * 멱등키: 한 번의 접수 의도에 UUID 하나, 재시도에도 같은 키 → 같은 키 재요청은 새 주문을 만들지 않고 처음 결과를 돌려줌
+ * 201이어도 결제 대기 · 접수 실패일 수 있음, 202는 처리 중 → 목록 태그로 보임 */
+export const createOrder = (
   input: OrderInput,
+  shippingFee: number,
   idempotencyKey: string,
-  manualBy: string,
-): Promise<number> {
-  await wait()
-  const done = replay.get(idempotencyKey)
-  if (done) return done
-  const orderSeq = addOrder(toNewOrder(input, manualBy))
-  replay.set(idempotencyKey, orderSeq)
-  return orderSeq
-}
+): Promise<ApiItem<{ orderSeq: number; status: OrderStatus }>> =>
+  api.post('/admin/orders', { body: buildCreateOrder(input, shippingFee), idempotencyKey })
 
 /** 주문 수정 — PATCH /orders/{id} (연동 상세명세 4.3). 본문은 buildOrderPatch(바뀐 칸만 + expectedVersion)
  * 성공 200 { data: { version } } → 화면은 상세를 다시 받음. 버전이 낡았으면 409 VERSION_CONFLICT (자동 덮어쓰기 금지) */

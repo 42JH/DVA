@@ -89,6 +89,19 @@ export function OrderFormModal({
               error={vm.priceError}
               onChange={(e) => vm.setDeclaredValue(e.target.value)}
             />
+            {!vm.isEdit && (
+              // 배송비 — 수기 접수는 요청자가 입력(자동 견적 API 없음, 명세 4.4). 수정 창에선 그대로 유지라 안 보임
+              <TextField
+                label="배송비"
+                inline
+                inputMode="numeric"
+                suffix="원"
+                placeholder="숫자만 입력"
+                value={vm.shippingFee}
+                error={vm.feeError}
+                onChange={(e) => vm.setShippingFee(e.target.value)}
+              />
+            )}
             <TextField
               label="수거 희망 일시"
               inline

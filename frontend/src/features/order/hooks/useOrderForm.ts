@@ -3,7 +3,6 @@ import { useRef, useState } from 'react'
 import type { Address } from 'react-daum-postcode'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
-import { useSession } from '@/shared/auth/useSession'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
 import type { Option } from '@/shared/ui'
 import {
@@ -19,6 +18,7 @@ import {
   type PaymentMethod,
   type PickedAddress,
 } from '@/features/order/api/orderApi'
+import { orderErrorText } from '@/features/order/labels'
 import { buildOrderPatch } from '@/features/order/api/orderPatch'
 
 type Side = 'sender' | 'receiver'
@@ -65,7 +65,6 @@ export function useOrderForm(
   onConflict?: () => void,
 ) {
   const qc = useQueryClient()
-  const { me } = useSession()
   // 수정이면 처음 한 번 그 주문 값으로 채움 (창이 열려 있는 동안 서버 값이 바뀌어도 입력 중인 칸은 그대로)
   const [parties, setParties] = useState<Record<Side, PartyDraft>>(() =>
     order
@@ -82,6 +81,7 @@ export function useOrderForm(
   )
   const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
   const [declaredValue, setDeclaredValue] = useState(order?.itemPrice?.toString() ?? '') // 숫자만
+  const [shippingFee, setShippingFee] = useState('') // 배송비 — 추가에만 (수정은 그대로 유지), 숫자만 · 1원 이상
   const initialPickup = order?.pickupRequestedAt
     ? toDateTimeLocal(new Date(order.pickupRequestedAt))
     : ''
@@ -130,9 +130,10 @@ export function useOrderForm(
         return draft?.patch
           ? saveOrder(order.orderSeq, draft.patch).then(() => undefined)
           : Promise.resolve()
-      const json = JSON.stringify(body)
+      const fee = Number(shippingFee)
+      const json = JSON.stringify([body, fee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      return createOrder(body, sent.current.key, me?.loginId ?? '').then(() => undefined)
+      return createOrder(body, fee, sent.current.key).then(() => undefined)
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: orderQueries.all() })
@@ -191,6 +192,9 @@ export function useOrderForm(
     setEtcItem,
     declaredValue,
     setDeclaredValue: (v: string) => setDeclaredValue(digits(v, 10)),
+    shippingFee,
+    setShippingFee: (v: string) => setShippingFee(digits(v, 9)),
+    feeError: fieldError('parcels.0.notifiedPrice') ?? fieldError('totalAmount'),
     pickupAt,
     setPickupAt,
     pickupMin: now,
@@ -230,6 +234,8 @@ export function useOrderForm(
       partyOk(parties.sender) &&
       partyOk(parties.receiver) &&
       hasItem &&
+      (order !== undefined || Number(shippingFee) >= 1) && // 추가: 배송비 필수 (명세 4.4, 자동 견적 없음)
+      (order !== undefined || (!!parties.sender.picked && !!parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
       !pickupPast &&
       (!draft || (draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
@@ -238,15 +244,11 @@ export function useOrderForm(
     // 칸에 못 붙인 오류 · 칸 오류가 없는 실패(연결 · 409 등)는 버튼 줄에 한 줄
     submitError: !err
       ? null
-      : unshown
-        ? unshown.reason
-        : details.length
-          ? null
-          : err instanceof ApiError && err.code === 'VERSION_CONFLICT'
-            ? null // 창 위에 안내(onConflict)
-            : err instanceof ApiError && err.status === 409
-              ? '같은 요청을 처리하는 중입니다. 잠시 뒤 목록을 확인해 주세요.'
-              : err.message,
+      : err instanceof ApiError && err.code === 'VERSION_CONFLICT'
+        ? null // 창 위에 안내(onConflict)
+        : details.length && !unshown
+          ? null // 칸 아래에 이미 보임
+          : orderErrorText(err, order ? '저장' : '접수'),
     submit: () => mutation.mutate(),
   }
 }
