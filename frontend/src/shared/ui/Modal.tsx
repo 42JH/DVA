@@ -54,7 +54,7 @@ function Overlay({
   }, [onClose])
   return (
     <div
-      className="fixed inset-0 z-50 grid place-items-center bg-ink/40"
+      className="fixed inset-0 z-50 grid place-items-center bg-ink/40 motion-safe:animate-dim-in"
       onMouseDown={(e) => (downOnDim.current = e.target === e.currentTarget)}
       onClick={(e) => downOnDim.current && e.target === e.currentTarget && onClose()}
     >
@@ -66,7 +66,7 @@ function Overlay({
         aria-label={label}
         onClick={(e) => e.stopPropagation()} // 창이 클릭되는 줄 안에 그려져도 그 줄의 클릭으로 안 번지게
         // 창 높이 = 브라우저 높이 - 위아래 32씩까지. 넘치면 FormModal의 내용 칸만 스크롤 (주문 상세처럼 긴 창)
-        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none"
+        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none motion-safe:animate-pop-in"
       >
         {children}
       </div>
