@@ -80,38 +80,6 @@ FIELD_TEXTS = {
 }
 
 
-def next_after(ctx, filled: tuple[str, ...]) -> list[str]:
-    """그 항목들이 채워졌다고 보고 다음에 물을 질문(문구 키). 다 차면 되읽기 확인."""
-    for f in missing(ctx):
-        if f not in filled:
-            text = FIELD_TEXTS[f]
-            return [text(ctx) if callable(text) else text]
-    return ["A_CONFIRM"]
-
-
-def order_preview(ctx) -> list[tuple[str, list[str]]]:
-    """제안 질문의 답마다 바로 이어서 할 말(engine.preview). 음성 모델은 판별보다 먼저 말을 시작해, 미리 알려 주지 않으면
-    다음 질문을 스스로 지었다(2026-10-31 통화). 받는 분 질문은 그때의 제안 상태로 계산한다."""
-    kind = offer(ctx)
-    if kind == "origin":
-        return [(ORIGIN_CHOICES["yes"], next_after(ctx, ("sender_phone", "sender_address", "sender_address_detail"))),
-                (ORIGIN_CHOICES["no"], ["A1_2"]), (ORIGIN_CHOICES["other"], ["HUB_ASK"])]
-    if kind in ("recent", "pin"):
-        receiver = ("receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail")
-        out = [(YES_NO["yes"], next_after(ctx, receiver))]
-        if kind == "recent":
-            out.append((YES_NO["no"], ["B6" if ctx.pin_scope("destination") else "A2_1"]))
-        return out
-    return []
-
-
-def then_hint(ctx) -> bool:
-    """"그다음" 항목 알림은 그냥 항목을 묻는 질문에만. 받는 곳을 열어 묻거나(B6) 제안·후보를 묻는 중이면 답에 따라 다음이
-    갈려(주소록 찾기·제안 답) 엉뚱한 항목을 미리 묻게 된다."""
-    m = missing(ctx)
-    return not m or m[0] != "receiver_name" or receiver_name_text(ctx) == "A2_1"
-
-
 def order_choices(ctx) -> dict[str, str]:
     kind = offer(ctx)
     if kind == "origin":
@@ -225,8 +193,6 @@ STAGES = [
         field_texts=FIELD_TEXTS,
         choices=order_choices,
         on_answer=order_answer,
-        preview=order_preview,
-        then=then_hint,
         on_enter=start_parcel,
         unheard_ok=("no", "other"),  # 제안을 듣기 전이어도 아니라는 답은 되돌릴 수 있다(§2.5(1))
         transitions=on_updated("A_CONFIRM", order_complete) + (

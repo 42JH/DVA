@@ -72,10 +72,6 @@ class Stage:
     # 확인 단계: 서버가 고객 답을 직접 듣고 판별한다(담기·결제·취소·상담원 연결 앞, AGENTS.md 안전장치). 아니면 답은
     # 음성 모델이 알아듣고 백엔드가 answer 도구로 보고한다
     confirm: bool = False
-    # 답마다 바로 이어서 할 말을 단계가 직접 계산할 때(전이로 갈 곳이 정해지지 않는 단계, 예: ORDER의 제안)
-    preview: Callable[[Any], list[tuple[str, list[str]]]] | None = None
-    # 받을 항목이 둘 이상 남았을 때 "그다음" 항목도 알려 줄지(답에 따라 다음이 갈리는 질문이면 False)
-    then: Callable[[Any], bool] | None = None
     subflow: bool = False  # QnA·상담원 Hub: 들어오기 전 업무 단계를 기억했다가 RETURN으로 돌아간다
     final: bool = False  # 통화를 끝내는 단계. 끼어드는 용건(enter_on)으로 나가지 않는다
     enter_on: tuple[str, ...] = ()  # 이 사건이 나면 어느 단계에서나(final 제외) 이 단계로 들어온다
@@ -383,69 +379,18 @@ def summary(ctx: Any) -> dict:
     return out
 
 
-def preview(ctx: Any) -> list[tuple[str, list[str]]]:
-    """선택지를 묻는 단계에서 답마다 바로 이어서 할 말(문구 키들). 음성 모델은 고객 말이 끝나자마자 말을 시작해
-    판별·진행 상태보다 앞서고, 그때 다음 질문을 스스로 지었다(2026-10-31 통화: "접수할게요" 뒤 "어디에서 보내시나요?",
-    진행 상태가 온 뒤 다시 성함). 답의 사건은 on_answer가 정하지만 "<무엇>.<답>" 꼴이라 그 이름으로 전이를 찾는다."""
-    stage = current(ctx)
-    if not stage.choices or not listening(ctx):
-        return []
-    if stage.preview:
-        return stage.preview(ctx)
-    out = []
-    for choice, meaning in stage.choices(ctx).items():
-        t = next((t for t in stage.transitions if t.event.rsplit(".", 1)[-1] == choice and t.guard(ctx)), None)
-        keys = _ahead(ctx, t) if t else None
-        if keys:
-            out.append((meaning, keys))
-    return out
-
-
-def _ahead(ctx: Any, t: Transition) -> list[str] | None:
-    """이 전이로 가면 할 말. 들어온 직후 전이는 지금 상태로 가드를 보고 따라간다(답 처리가 가드를 바꾸는 답은 갈 곳을
-    직접 가리키게 단계를 정의한다, 예: 인사의 new_origin). 넘겨 받기·확정 지연·같은 단계 다시 묻기·복귀는 미리 말하지
-    않는다(None)."""
-    if t.target in (STAY, RETURN) or t.forward or t.commit:
-        return None
-    say = _keys(_key(ctx, t.say))
-    if say and t.asks:
-        return say
-    stage = STAGES[t.target]
-    for _ in range(MAX_HOPS):
-        e = next((e for e in stage.transitions if e.event == ENTERED and e.guard(ctx)), None)
-        if e is None:
-            break
-        if e.target in (STAY, RETURN) or e.commit:
-            return None
-        say += _keys(_key(ctx, e.say))
-        stage = STAGES[e.target]
-    else:
-        return None
-    m = [f for f in stage.fields if not ctx.field_done(f)]
-    return say + ([_key(ctx, stage.field_texts[m[0]])] if m else _keys(_key(ctx, stage.ask))) or None
-
-
 def progress_text(ctx: Any, max_chars: int) -> str:
-    """음성 모델에 thinking.append로 줄 "다음에 할 말 + 기록된 값". max_chars를 넘지 않는다."""
+    """음성 모델에 thinking.append로 줄 "다음에 할 말 + 기록된 값". max_chars를 넘지 않는다.
+    결과가 오기 전에 미리 말할 것(그다음 항목·답마다 이어서 할 말)은 주지 않는다: 위임한 턴의 대답은 결과 하나다. 미리 준
+    말과 결과가 다르면(번호 자릿수 오류·정정) 음성 모델이 둘 다 말했다(2026-11-02 00:07 통화)."""
     texts = ctx.texts
     nxt = next_text(ctx)
-    m = missing(ctx)
-    ahead = preview(ctx)
-    stage = current(ctx)
-    asking = bool(stage.choices and listening(ctx) and stage.choices(ctx))
-    # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다(답을 고르는 질문 중에는 답마다 알려 줌)
-    hint = len(m) > 1 and not asking and (stage.then is None or stage.then(ctx))
-    then = texts.progress_then.format(next2=render(ctx, field_key(ctx, m[1]))) if hint else ""
-    if ahead:  # 답을 고르는 질문: 판별을 기다리지 않고 바로 맞는 다음 말을 하게
-        then += texts.progress_preview.format(items=texts.progress_sep.join(
-            texts.progress_preview_item.format(choice=c, next=" ".join(render(ctx, k) for k in keys))
-            for c, keys in ahead))
     items = ctx.recorded()
     for cut in (None, 40, 24, 12, 6, 0):
         shown = [(k, v if cut is None else v[:cut]) for k, v in items] if cut != 0 else []
         recorded = (texts.progress_sep.join(texts.progress_item.format(label=k, value=v) for k, v in shown)
                     or texts.empty_value)
-        text = texts.progress.format(stage=current(ctx).description, recorded=recorded, next=nxt, then=then)
+        text = texts.progress.format(stage=current(ctx).description, recorded=recorded, next=nxt)
         if len(text) <= max_chars:
             return text
     return text[:max_chars]
