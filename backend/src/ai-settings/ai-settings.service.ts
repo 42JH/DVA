@@ -6,8 +6,13 @@ import { ListResponse } from '../common/pagination';
 import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
-import { Persona, PersonaSettings, PersonaVersion } from './ai-settings.types';
-import { CreatePersonaDto, PersonaListQueryDto, UpdatePersonaDto } from './dto/persona-request.dto';
+import { Persona, PersonaDraft, PersonaSettings, PersonaVersion } from './ai-settings.types';
+import {
+  CommitPersonaDraftDto,
+  CreatePersonaDto,
+  PersonaListQueryDto,
+  UpdatePersonaDto,
+} from './dto/persona-request.dto';
 
 const SETTINGS = ['name', 'promptText', 'voiceId', 'speakingRate', 'turnWaitLevel'] as const;
 
@@ -113,46 +118,108 @@ export class AiSettingsService {
     input: UpdatePersonaDto,
     actorId: number,
     requestId: string,
-  ): Promise<PersonaVersion> {
+  ): Promise<PersonaDraft> {
     if (!SETTINGS.some((key) => input[key] !== undefined))
       throw new ApiException(400, 'INVALID_REQUEST', '변경할 설정이 필요합니다.');
     const base = await this.repository.latest(id);
     this.requireVersion(base, input.expectedVersion);
+    const draft = await this.repository.draft(id);
+    this.requireDraft(draft, input.expectedDraftRevision, base.version);
+    const source = draft ?? base;
     const settings: PersonaSettings = {
-      name: input.name ?? base.name,
-      promptText: input.promptText ?? base.promptText,
-      voiceId: input.voiceId === undefined ? base.voiceId : input.voiceId,
-      speakingRate: input.speakingRate === undefined ? base.speakingRate : input.speakingRate,
-      turnWaitLevel: input.turnWaitLevel ?? base.turnWaitLevel,
+      name: input.name ?? source.name,
+      promptText: input.promptText ?? source.promptText,
+      voiceId: input.voiceId === undefined ? source.voiceId : input.voiceId,
+      speakingRate: input.speakingRate === undefined ? source.speakingRate : input.speakingRate,
+      turnWaitLevel: input.turnWaitLevel ?? source.turnWaitLevel,
     };
     validatePersonaOptions(settings, await this.ai.options());
     return this.database.transaction(async (client) => {
       await this.repository.lock(client);
       const current = await this.repository.latest(id, client);
       this.requireVersion(current, input.expectedVersion);
-      if (SETTINGS.every((key) => current[key] === settings[key]))
-        return this.withAuthor(current, client);
-      if (current.version === 2147483647)
-        throw new ApiException(409, 'INVALID_STATE', '버전 번호 한도를 초과했습니다.');
-      const version = await this.repository.append(
-        id,
-        current.version + 1,
-        settings,
-        actorId,
-        client,
-      );
+      const currentDraft = await this.repository.draft(id, client);
+      this.requireDraft(currentDraft, input.expectedDraftRevision, current.version);
+      if (currentDraft && SETTINGS.every((key) => currentDraft[key] === settings[key]))
+        return currentDraft;
+      const saved = await this.repository.saveDraft(id, current.version, settings, actorId, client);
       await this.audit.recordSuccess(
         {
           actorId,
-          targetId: version.aiPersonaVersionSeq,
-          targetType: 'AI_PERSONA_VERSION',
-          action: 'PERSONA_UPDATED',
+          targetId: id,
+          targetType: 'AI_PERSONA',
+          action: 'PERSONA_DRAFT_SAVED',
+          requestId,
+        },
+        client,
+      );
+      return saved;
+    });
+  }
+
+  async commitDraft(
+    id: number,
+    input: CommitPersonaDraftDto,
+    actorId: number,
+    requestId: string,
+  ): Promise<PersonaVersion> {
+    const base = await this.repository.latest(id);
+    this.requireVersion(base, input.expectedVersion);
+    const draft = await this.repository.draft(id);
+    if (!draft) throw new ApiException(409, 'INVALID_STATE', '확정할 초안이 없습니다.');
+    this.requireDraft(draft, input.expectedDraftRevision, base.version);
+    validatePersonaOptions(draft, await this.ai.options());
+    return this.database.transaction(async (client) => {
+      await this.repository.lock(client);
+      const current = await this.repository.latest(id, client);
+      this.requireVersion(current, input.expectedVersion);
+      const currentDraft = await this.repository.draft(id, client);
+      if (!currentDraft) throw new ApiException(409, 'INVALID_STATE', '확정할 초안이 없습니다.');
+      this.requireDraft(currentDraft, input.expectedDraftRevision, current.version);
+      let version = current;
+      if (!SETTINGS.every((key) => current[key] === currentDraft[key])) {
+        if (current.version === 2147483647)
+          throw new ApiException(409, 'INVALID_STATE', '버전 번호 한도를 초과했습니다.');
+        version = await this.repository.append(
+          id,
+          current.version + 1,
+          currentDraft,
+          actorId,
+          client,
+        );
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: version.aiPersonaVersionSeq,
+            targetType: 'AI_PERSONA_VERSION',
+            action: 'PERSONA_UPDATED',
+            requestId,
+          },
+          client,
+        );
+      }
+      await this.repository.deleteDraft(id, client);
+      await this.audit.recordSuccess(
+        {
+          actorId,
+          targetId: id,
+          targetType: 'AI_PERSONA',
+          action: 'PERSONA_DRAFT_COMMITTED',
           requestId,
         },
         client,
       );
       return this.withAuthor(version, client);
     });
+  }
+
+  private requireDraft(
+    draft: PersonaDraft | undefined,
+    expected: string | null,
+    headVersion: number,
+  ): void {
+    if ((draft?.draftRevision ?? null) !== expected || (draft && draft.baseVersion !== headVersion))
+      throw new ApiException(409, 'VERSION_CONFLICT', '초안과 HEAD를 다시 조회해 주세요.');
   }
 
   private requireVersion(

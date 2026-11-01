@@ -30,6 +30,15 @@ export interface PersonaVersion extends PersonaSettings {
   applyErrorCode: ApplyError | null;
 }
 
+export interface PersonaDraft extends PersonaSettings {
+  aiPersonaSeq: number;
+  draftRevision: string;
+  baseVersion: number;
+  updatedByAdminUserSeq: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Persona {
   aiPersonaSeq: number;
   code: string;
@@ -39,6 +48,7 @@ export interface Persona {
   pendingVersion: PersonaVersion | null;
   activeVersionSeq: number | null;
   pendingVersionSeq: number | null;
+  draft: PersonaDraft | null;
 }
 
 export interface AiCapabilities {

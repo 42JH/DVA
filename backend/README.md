@@ -2,7 +2,7 @@
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 
-페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 038까지 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
+페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 migration 039·040을 모두 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
 
 백엔드 최적화 브랜치는 새 앱 실행 전에 `032-list-read-indexes.sql`까지 적용한다. 031은 녹취 처리의 수신 건별 lease, 032는 검증된 조회 인덱스 두 개를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼·인덱스는 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
 
@@ -18,7 +18,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
 
-페르소나 유형·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 새 배포는 036 migration까지 반영하며, 구버전 앱을 모두 종료한 뒤 중복 HEAD 컬럼을 제거한다. 생성·수정 저장 시 HEAD가 최신 버전으로 이동하고 실제 상담·publish 대기는 유지한다. POST activate는 확인한 HEAD를 publish하며 수락한 버전·UUID는 이후 저장으로 바뀌지 않는다. 수동 PUT head는 제거했다. 통화 중 적용과 선택 호환값 activeCallCount는 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·publish 요청은 503이다.
+페르소나 유형·초안·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 새 앱 전에 039 migration까지 적용한다. PATCH 수정 저장은 유형별 초안 한 개를 덮어쓰고 HEAD를 유지한다. POST versions가 초안을 정식 버전으로 확정하고 초안을 삭제하며, POST activate가 확인한 HEAD를 별도로 publish한다. 확정과 publish는 실제 상담·기존 대기를 구분한다. 프론트는 expectedDraftRevision과 초안 응답을 처리하고 HEAD 확정 호출을 추가해야 한다. 신·구 PATCH 계약의 앱을 동시에 운영하지 않는다. 수동 PUT head는 계속 제공하지 않는다. 통화 중 적용과 선택 호환값 activeCallCount는 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·확정·publish 요청은 503이다.
 
 관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
 

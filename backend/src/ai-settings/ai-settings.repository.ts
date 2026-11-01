@@ -1,10 +1,12 @@
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import {
   ApplyError,
   Persona,
+  PersonaDraft,
   PersonaSettings,
   PersonaStatus,
   PersonaVersion,
@@ -19,6 +21,12 @@ const VERSION_SELECT = `SELECT v.ai_persona_version_seq AS "aiPersonaVersionSeq"
  v.requested_at AS "requestedAt", v.applied_at AS "appliedAt", v.last_notified_at AS "lastNotifiedAt",
  v.apply_error_code AS "applyErrorCode"
  FROM ai_persona_versions v JOIN ai_personas identity USING(ai_persona_seq)`;
+
+const DRAFT_SELECT = `SELECT ai_persona_seq AS "aiPersonaSeq",draft_revision AS "draftRevision",
+ base_version AS "baseVersion",name,prompt_text AS "promptText",voice_id AS "voiceId",
+ speaking_rate::float8 AS "speakingRate",turn_wait_level AS "turnWaitLevel",
+ updated_by_admin_user_seq AS "updatedByAdminUserSeq",created_at AS "createdAt",updated_at AS "updatedAt"
+ FROM ai_persona_drafts`;
 
 @Injectable()
 export class AiSettingsRepository {
@@ -93,6 +101,50 @@ export class AiSettingsRepository {
     ).rows[0];
   }
 
+  async draft(id: number, client?: PoolClient): Promise<PersonaDraft | undefined> {
+    return (
+      await (client ?? this.database.pool).query<{ draft: PersonaDraft }>(
+        `SELECT row_to_json(draft) AS draft FROM (${DRAFT_SELECT} WHERE ai_persona_seq=$1) draft`,
+        [id],
+      )
+    ).rows[0]?.draft;
+  }
+
+  async saveDraft(
+    id: number,
+    baseVersion: number,
+    settings: PersonaSettings,
+    actorId: number,
+    client: PoolClient,
+  ): Promise<PersonaDraft> {
+    await client.query(
+      `INSERT INTO ai_persona_drafts(ai_persona_seq,draft_revision,base_version,name,prompt_text,
+       voice_id,speaking_rate,turn_wait_level,updated_by_admin_user_seq)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT(ai_persona_seq) DO UPDATE SET draft_revision=EXCLUDED.draft_revision,
+       base_version=EXCLUDED.base_version,name=EXCLUDED.name,prompt_text=EXCLUDED.prompt_text,
+       voice_id=EXCLUDED.voice_id,speaking_rate=EXCLUDED.speaking_rate,
+       turn_wait_level=EXCLUDED.turn_wait_level,updated_by_admin_user_seq=EXCLUDED.updated_by_admin_user_seq,
+       updated_at=clock_timestamp()`,
+      [
+        id,
+        randomUUID(),
+        baseVersion,
+        settings.name,
+        settings.promptText,
+        settings.voiceId,
+        settings.speakingRate,
+        settings.turnWaitLevel,
+        actorId,
+      ],
+    );
+    return (await this.draft(id, client))!;
+  }
+
+  async deleteDraft(id: number, client: PoolClient): Promise<void> {
+    await client.query('DELETE FROM ai_persona_drafts WHERE ai_persona_seq=$1', [id]);
+  }
+
   async live(
     status: Exclude<PersonaStatus, 'INACTIVE'>,
     client?: PoolClient,
@@ -111,7 +163,7 @@ export class AiSettingsRepository {
       `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
        row_to_json(latest) AS "headVersion",
        row_to_json(active) AS "activeVersion",row_to_json(pending) AS "pendingVersion",
-       active."aiPersonaVersionSeq" AS "activeVersionSeq",
+       row_to_json(draft) AS draft,active."aiPersonaVersionSeq" AS "activeVersionSeq",
        pending."aiPersonaVersionSeq" AS "pendingVersionSeq"
        FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
@@ -119,6 +171,7 @@ export class AiSettingsRepository {
         WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='ACTIVE') active ON true
        LEFT JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='PENDING') pending ON true
+       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=p.ai_persona_seq) draft ON true
        WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
       [id ?? null],
       query,

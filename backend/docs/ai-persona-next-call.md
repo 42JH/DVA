@@ -37,7 +37,7 @@
 - AI → BE 기준 경로는 `/api`, BE → AI는 `AI_AGENT_URL` + `/internal`이다. `/v1`은 붙이지 않는다.
 - AI 요청에는 관리자 쿠키·Origin을 넣지 않는다. 이 토큰은 페르소나 연동 전용이며 주문·관리자 편집 권한을 주지 않는다.
 
-관리자 publish는 `POST /api/personas/{id}/activate`로 확인한 최신 HEAD를 선택한다. 저장으로 HEAD가 이동해도 실제 상담 버전과 이미 수락한 PENDING·UUID는 바뀌지 않는다. AI는 편집 HEAD가 아닌 설정 조회의 ACTIVE/PENDING을 따른다.
+관리자 publish는 `POST /api/personas/{id}/activate`로 확인한 최신 확정 HEAD를 선택한다. 초안 저장은 HEAD를 바꾸지 않으며, 초안 확정으로 HEAD가 이동해도 실제 상담 버전과 이미 수락한 PENDING·UUID는 바뀌지 않는다. AI는 설정 조회의 ACTIVE/PENDING을 따르고 작성 중 초안은 받지 않는다.
 
 | API | 의미 |
 | --- | --- |
@@ -58,8 +58,8 @@
 성공 회신에는 aiPersonaVersionSeq, applicationId, result가 필수다. 현재 통화가 있어도 허용하며 activeCallCount는 필요 없다. 기존 AI가 전송하는 경우에는 0 이상 정수만 허용하지만 저장하거나 적용 여부 판단에 사용하지 않는다. null·문자열·음수는 400이다. Swagger에는 deprecated로 표시한다. 성공 응답의 `data.status`는 ACTIVE이고 `data.aiPersonaVersionSeq`·`applicationId`가 같은 요청인지 확인한다.
 
 - 동일 APPLIED 회신을 반복해도 최초 appliedAt·성공 감사를 다시 쓰지 않는다.
-- 다른 명시적 publish로 대기가 교체됐거나 applicationId가 다르면 **409 VERSION_CONFLICT**다. 새 통화를 열기 전에 ACTIVE/PENDING을 다시 조회한다. 저장으로 HEAD만 이동한 것은 대기 교체가 아니다.
-- v3 publish 요청 후 v4가 저장돼도 원래 v3·UUID의 적용 회신을 수락한다. AI와 백엔드는 적용 회신 버전을 현재 HEAD와 비교하지 않는다.
+- 다른 명시적 publish로 대기가 교체됐거나 applicationId가 다르면 **409 VERSION_CONFLICT**다. 새 통화를 열기 전에 ACTIVE/PENDING을 다시 조회한다. 초안 확정으로 HEAD만 이동한 것은 대기 교체가 아니다.
+- v3 publish 요청 후 초안이 v4로 확정돼도 원래 v3·UUID의 적용 회신을 수락한다. AI와 백엔드는 적용 회신 버전을 현재 HEAD와 비교하지 않는다.
 - 응답 유실·타임아웃은 적용 실패로 단정하지 않는다. 신규 통화 진입을 보호하면서 같은 회신을 재시도하거나 ACTIVE의 버전·applicationId로 확인한다. 예전 캐시로 통화를 먼저 시작하지 않는다.
 - 검증·설치 실패는 `result=FAILED`와 `errorCode=INVALID_CONFIG | UNSUPPORTED_OPTIONS | APPLY_FAILED`로 회신한다. 원문 프롬프트·예외 메시지는 보내지 않는다. 백엔드는 기존 ACTIVE와 PENDING을 보존한다.
 - FAILED에는 errorCode가 필수이며 APPLIED에는 보내지 않는다. FAILED의 200·PENDING은 적용 성공을 뜻하지 않는다. 기존 기본 설정으로 복구하지 못했거나 결과가 불명확하면 신규 통화 진입을 계속 막고 재동기화한다.
@@ -98,9 +98,9 @@ AI는 통화 시작 때 고정한 `call.persona_version`을 끝까지 유지한�
 ## 관리자 수정·저장 동작
 
 - 새 페르소나는 전체 설정의 v1·INACTIVE로 저장한다.
-- PATCH는 최신 `expectedVersion`을 확인하고 변경한 값과 기존 생략값을 합쳐 vN+1 전체 설정을 추가한다. 이전 버전의 내용은 유지한다.
-- 동일값 저장은 버전을 늘리지 않는다. 최신 버전과 다르면 409 VERSION_CONFLICT다.
-- **수정 저장은 새 INACTIVE 버전을 추가하고 그 유형의 HEAD를 이동한다.** 실제 통화 설정과 publish 대기는 변경하지 않는다.
+- PATCH는 `expectedVersion`·`expectedDraftRevision`을 확인하고 유형별 초안 한 개를 생성·덮어쓴다. 초안 저장은 HEAD·버전 이력·실제 상담·publish 대기를 바꾸지 않는다.
+- POST `/api/personas/{id}/versions`가 확인한 초안을 vN+1 전체 설정으로 확정하고 초안을 삭제한다. 같은 내용이면 버전 추가 없이 초안만 삭제한다. 오래된 HEAD·초안 식별값은 409 VERSION_CONFLICT다.
+- **초안 확정이 새 INACTIVE 버전을 해당 유형의 HEAD로 만든다.** 실제 통화 설정과 publish 대기는 변경하지 않는다. 프론트 요청·응답 전환은 [관리 계약](persona-head-management.md)을 따른다.
 - POST `/api/personas/{id}/activate`로 확인한 최신 HEAD를 publish한다. 같은 유형의 새 HEAD도 다시 publish할 수 있으며 수동 HEAD 변경과 과거 버전 재발행은 제공하지 않는다.
 
 ## AI 팀 확인 항목

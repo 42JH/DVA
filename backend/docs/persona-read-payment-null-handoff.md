@@ -9,10 +9,10 @@
 | GET /api/personas | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
 | GET /api/personas/{id} | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
 | GET /api/personas/{id}/versions | ACTIVE인 OPERATOR·SUPERVISOR·SYSTEM_ADMIN |
-| POST /api/personas, PATCH /api/personas/{id}, POST /api/personas/{id}/activate | ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN |
+| POST /api/personas, PATCH /api/personas/{id}, POST /api/personas/{id}/versions, POST /api/personas/{id}/activate | ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN |
 | GET /api/ai/options | ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN |
 
-목록·상세·버전 응답 형식은 유지한다. 미로그인·만료 세션·PENDING·INACTIVE는 401이다. OPERATOR의 생성·수정·publish·AI 옵션 조회는 403이다. AI 서비스 토큰만으로 관리자 조회를 할 수 없다. 신규 DEVELOPER 코드는 만들지 않으며 기존 SUPERVISOR를 개발자로 사용한다. 프론트의 관리 메뉴·생성·수정·적용 버튼은 SUPERVISOR 또는 SYSTEM_ADMIN 조건을 사용하고, SUPERVISOR 표시 이름은 '개발자'로 바꾼다.
+목록·상세에는 유형별 초안 draft가 추가되고 버전 이력은 확정 버전만 반환한다. PATCH는 초안 저장으로 변경됐으며 expectedDraftRevision이 필수다. HEAD 확정은 POST versions로 분리한다. 요청·응답 전환은 [초안·HEAD 관리 계약](persona-head-management.md)을 따른다. 미로그인·만료 세션·PENDING·INACTIVE는 401이다. OPERATOR의 생성·초안 저장·확정·publish·AI 옵션 조회는 403이다. AI 서비스 토큰만으로 관리자 조회를 할 수 없다. 신규 DEVELOPER 코드는 만들지 않으며 기존 SUPERVISOR를 개발자로 사용한다. 프론트의 관리 메뉴·생성·수정·적용 버튼은 SUPERVISOR 또는 SYSTEM_ADMIN 조건을 사용하고, SUPERVISOR 표시 이름은 '개발자'로 바꾼다.
 
 프론트 `features/dashboard/hooks/useDashboard.ts`의 isSystemAdmin에 따른 페르소나 탭·조회 제한을 제거한다. 로그인 가드의 ACTIVE 세션 확인은 유지한다. 대시보드는 기존 GET /api/personas → 유형별 versions → aiPersonaVersionSeq로 calls·unanswered-questions를 조회하는 흐름을 사용한다.
 
