@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from app.flow.engine import ENTERED, RETURN, Stage, Transition
-from app.flow.stages._common import COMMON_TOOLS, count_fail_offer, reset_fail
+from app.flow.stages._common import COMMON_TOOLS, ORDER_TOOLS, count_fail_offer, reset_fail
 
 KST = timezone(timedelta(hours=9))
 RAG_EVENTS = ("rag.found", "rag.none", "rag.failed")
@@ -26,6 +26,15 @@ def agent_available(ctx) -> bool:
     """TODO(flow): 상담원 연결 가능 여부를 알려 줄 PBX·백엔드 정보가 없어 설정한 상담 시간(한국 시간)으로만 본다."""
     hour = datetime.now(KST).hour
     return ctx.cfg.flow.agent_open_hour <= hour < ctx.cfg.flow.agent_close_hour
+
+
+def resuming_order(ctx) -> bool:
+    return (ctx.flow.resume or {}).get("task") in ("new_order", "order")
+
+
+# QnA·상담원 흐름 중에 고객이 주문 값(다시 말한 주소 등)을 말하면 서버가 기록하고 하던 접수로 돌아간다
+# (2026-10-31 통화: 받는 곳 주소를 다시 말했는데 상담원 제안 단계라 기록이 거절되고 접수로 돌아가지 못함)
+BACK_TO_ORDER = (Transition("order.updated", "RESUME_TASK", resuming_order),)
 
 
 def wait_rag(ctx, prev: str) -> None:
@@ -71,12 +80,12 @@ STAGES = [
     Stage(
         name="D_AFTER_ANSWER",
         description="답변 뒤 추가 질문·다른 업무",
-        tools=COMMON_TOOLS,
+        tools=ORDER_TOOLS,
         ask="D2",
         choices=lambda ctx: OTHER_TASK,  # 추가 질문은 GLOBAL_INTENT가 QNA로(D3)
         on_answer=other_task,
         subflow=True,
-        transitions=(Transition("qna.done", "RESUME_TASK"),),
+        transitions=(Transition("qna.done", "RESUME_TASK"),) + BACK_TO_ORDER,
     ),
     Stage(
         name="RESTRICTED_REQUEST",
@@ -88,7 +97,7 @@ STAGES = [
     Stage(
         name="D_AGENT_OFFER",
         description="다른 업무·질문 또는 상담원 연결 제안",
-        tools=COMMON_TOOLS,
+        tools=ORDER_TOOLS,
         # "예"는 직전 안내에 상담원 제안이 있었을 때만 선택지다(D9). 다른 질문은 GLOBAL_INTENT가 QNA로(D8)
         choices=lambda ctx: ({"yes": "상담원 연결을 원한다"} if ctx.agent_offered else {}) | OTHER_TASK,
         on_answer=other_task,
@@ -97,7 +106,7 @@ STAGES = [
             Transition("agent.yes", "D_AGENT_AVAILABLE", lambda ctx: ctx.agent_offered, say="D9"),
             Transition("qna.done", "RESUME_TASK",
                        say=lambda ctx: "D7" if (ctx.flow.resume or {}).get("task") else None),
-        ),
+        ) + BACK_TO_ORDER,
     ),
     Stage(
         name="D_AGENT_AVAILABLE",
@@ -117,12 +126,12 @@ STAGES = [
     Stage(
         name="D_AFTER_NO_AGENT",
         description="상담원 연결 불가 뒤 추가 질문·다른 업무",
-        tools=COMMON_TOOLS,
+        tools=ORDER_TOOLS,
         ask="D11",
         choices=lambda ctx: OTHER_TASK,  # 추가 질문은 GLOBAL_INTENT가 QNA로(D12)
         on_answer=other_task,
         subflow=True,
-        transitions=(Transition("qna.done", "RESUME_TASK"),),
+        transitions=(Transition("qna.done", "RESUME_TASK"),) + BACK_TO_ORDER,
     ),
     Stage(name="RESUME_TASK", description="기존 업무 복귀(진입 직전 단계로)", subflow=True,
           transitions=(Transition(ENTERED, RETURN),)),

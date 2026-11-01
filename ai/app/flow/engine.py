@@ -30,6 +30,7 @@ RETURN = "@return"  # 하위 흐름(QnA·상담원 Hub)을 끝내고 들어오�
 STAY = "@stay"  # 단계를 옮기지 않고 같은 단계를 예외 문구로 다시 묻는다(구간 예외)
 ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(머무르지 않는 단계·건너뛰기 조건용)
 COMMIT = "commit.due"  # 확정 지연이 끝남(§2.5(3)). 미뤄 둔 전이를 실행한다
+COMMIT_WAIT = "COMMIT_WAIT"  # 확정을 기다리는 동안의 할 일(새 질문 없이 기다림)
 CORRECT_ASK = "CORRECT_ASK"  # 정정한다고만 하고 값을 말하지 않았을 때 그 항목을 다시 묻는 문구 키(§2.5(4))
 MAX_HOPS = 10  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
 
@@ -186,9 +187,9 @@ async def _step(step: Step, runtime: Runtime) -> Command:
     if t.commit:  # 되돌릴 수 없는 확정: 새 입력 없이 commit_delay_ms가 지나면 COMMIT 사건으로 옮긴다
         ctx.flow.pending = {"stage": ctx.flow.stage, "transition": t, "at": time.monotonic(),
                             "rev": ctx.heard_rev, "suspended": False}
-        say = _key(ctx, t.say)
-        if say:  # 이 전이의 말(운임 안내)은 기다리는 동안 미리 하고, 옮긴 뒤에는 되풀이하지 않는다
-            ctx.flow.say, ctx.flow.say_asks = _keys(say), True
+        # 이 전이의 말(운임·결제 안내)은 옮길 때 다음 질문(추가 접수)과 한 진행 상태로 차례대로 준다. 기다리는 동안
+        # 미리 주면 도구 결과로 늦게 도착해, 확정 뒤의 다음 질문이 먼저 나갔다(2026-10-31 통화)
+        ctx.flow.say, ctx.flow.say_asks = [COMMIT_WAIT], True
         return Command(goto=END)
     if t.target == STAY:  # 같은 단계를 예외 문구로 다시 묻는다
         if t.action:
@@ -207,7 +208,7 @@ def _due_commit(ctx: Any) -> Transition | None:
     p = ctx.flow.pending
     if not p or p["suspended"] or p["stage"] != ctx.flow.stage:
         return None
-    return dataclasses.replace(p["transition"], commit=False, say=None)
+    return dataclasses.replace(p["transition"], commit=False)
 
 
 async def start(ctx: Any) -> None:
@@ -238,7 +239,9 @@ def allowed_tools(ctx: Any) -> tuple[str, ...]:
 
 
 def missing(ctx: Any) -> list[str]:
-    return [f for f in current(ctx).fields if not ctx.field_done(f)]
+    """빈 항목(단계의 순서대로). 못 찾아 지운 주소(ctx.address_retry)는 맨 앞: 다른 항목보다 먼저 다시 묻는다."""
+    retry = getattr(ctx, "address_retry", ())
+    return sorted((f for f in current(ctx).fields if not ctx.field_done(f)), key=lambda f: f not in retry)
 
 
 def _key(ctx: Any, key: Key) -> Any:
@@ -373,8 +376,9 @@ def preview(ctx: Any) -> list[tuple[str, list[str]]]:
 
 
 def _ahead(ctx: Any, t: Transition) -> list[str] | None:
-    """이 전이로 가면 할 말. 가는 길이 답 처리 결과에 따라 갈릴 수 있으면(들어온 직후 전이가 둘 이상, 넘겨 받기,
-    확정 지연, 같은 단계 다시 묻기·복귀) 미리 말하지 않는다(None)."""
+    """이 전이로 가면 할 말. 들어온 직후 전이는 지금 상태로 가드를 보고 따라간다(답 처리가 가드를 바꾸는 답은 갈 곳을
+    직접 가리키게 단계를 정의한다, 예: 인사의 new_origin). 넘겨 받기·확정 지연·같은 단계 다시 묻기·복귀는 미리 말하지
+    않는다(None)."""
     if t.target in (STAY, RETURN) or t.forward or t.commit:
         return None
     say = _keys(_key(ctx, t.say))
@@ -382,14 +386,13 @@ def _ahead(ctx: Any, t: Transition) -> list[str] | None:
         return say
     stage = STAGES[t.target]
     for _ in range(MAX_HOPS):
-        entered = [e for e in stage.transitions if e.event == ENTERED]
-        if len(entered) > 1 or (entered and entered[0].guard(ctx) and (
-                entered[0].target in (STAY, RETURN) or entered[0].commit)):
-            return None
-        if not entered or not entered[0].guard(ctx):
+        e = next((e for e in stage.transitions if e.event == ENTERED and e.guard(ctx)), None)
+        if e is None:
             break
-        say += _keys(_key(ctx, entered[0].say))
-        stage = STAGES[entered[0].target]
+        if e.target in (STAY, RETURN) or e.commit:
+            return None
+        say += _keys(_key(ctx, e.say))
+        stage = STAGES[e.target]
     else:
         return None
     m = [f for f in stage.fields if not ctx.field_done(f)]

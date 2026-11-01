@@ -7,7 +7,8 @@ HUB_CHOICES = {"order": "택배를 보내겠다(접수)",
                "lookup": "이미 보낸 택배에 대한 일(조회·배송 확인·취소·수정)",
                "no_more": "더 도와드릴 일이 없다·통화를 마치겠다"}
 GREET_CHOICES = {"yes": "예·맞다(그 출발지에서 보내겠다)",
-                 "no": "아니다·다른 곳에서 보내겠다·다른 용건이다",
+                 "new_origin": "아니다, 다른 곳에서 보내겠다·새로 접수하겠다(택배를 보내려는 것은 분명함)",
+                 "no": "아니다(무엇을 할지 말하지 않음)·다른 용건이다",
                  "lookup": "이미 보낸 택배에 대한 일(조회·배송 확인·취소·수정)"}
 
 
@@ -16,7 +17,7 @@ async def hub_answer(ctx, answer: str) -> list[str]:
 
 
 async def greet_answer(ctx, answer: str) -> list[str]:
-    if answer == "no":
+    if answer in ("no", "new_origin"):
         # 기존 출발지가 아니라고 했으니 이번 통화의 다음 접수는 새 출발지부터(§4.1 아니오, B1)
         ctx.new_origin_requested = True
     return [f"greet.{answer}"]
@@ -63,9 +64,11 @@ STAGES = [
         ask="GREET_REGISTERED",
         choices=lambda ctx: GREET_CHOICES,
         on_answer=greet_answer,
-        unheard_ok=("no", "lookup"),  # 출발지를 듣기 전이어도 아니라는 답·다른 용건은 되돌릴 수 있다
+        unheard_ok=("no", "new_origin", "lookup"),  # 출발지를 듣기 전이어도 아니라는 답·다른 용건은 되돌릴 수 있다
         transitions=(
             Transition("greet.yes", "B_ORIGIN_ROUTE"),  # HUB에서 의도를 다시 묻지 않고 바로 접수
+            # 접수하겠다고 분명히 했으면 "무엇을 도와드릴까요?"를 다시 묻지 않고 새 출발지부터(2026-10-31 통화)
+            Transition("greet.new_origin", "B_ORIGIN_CHANGE", action=lambda ctx: ctx.new_parcel()),
             Transition("greet.no", "HUB", say="HUB_ASK", asks=True),
             # 조회·취소처럼 이미 보낸 택배에 대한 용건이면 바로 조회로(다이어그램 밖, 2026-10-31 결정)
             Transition("greet.lookup", "C_REQUIRED_INFO"),

@@ -60,7 +60,7 @@ def load_live_toml(path: Path | None = None) -> dict:
 
 
 def build_session(call_info: str, path: Path | None = None, prompts: Path | None = None, *, data: dict | None = None,
-                  persona: str | None = None, voice: str | None = None) -> dict:
+                  persona: str | None = None, voice: str | None = None, backend_info: str = "") -> dict:
     """서버가 바꿔 넣는 것만 바꾸고 나머지 키는 그대로 보낸다. persona가 없으면 prompts/persona.md, voice가 없으면 live.toml 음성."""
     import copy
     data = copy.deepcopy(data) if data is not None else load_live_toml(path)
@@ -69,6 +69,7 @@ def build_session(call_info: str, path: Path | None = None, prompts: Path | None
     if delegation.get('type') not in ('responses', 'client'):
         raise LiveConfigError('delegation.type은 responses 또는 client만 쓴다')
     responses = build_backend(data, prompts)
+    responses['instructions'] = (responses.get('instructions') or "") + backend_info  # 전화 받은 시각(수거 일시 계산)
     data.pop('backend', None)  # 서버 전용 설정은 Live API에 보내지 않는다.
 
     if "instructions_file" in data:

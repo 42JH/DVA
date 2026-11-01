@@ -67,6 +67,34 @@ def _unique(places: list[Place | None]) -> list[Place]:
     return out
 
 
+WEEKDAYS = "월화수목금토일"
+
+
+def spoken_phone(digits: str) -> str:
+    """번호를 끊어 읽기 좋게: 010-1234-5678, 02-123-4567, 031-123-4567. 자릿수가 맞는 숫자만 온다(record_order)."""
+    if not digits:
+        return ""
+    if digits.startswith("02"):
+        head = 2
+    elif len(digits) == 8:  # 15xx·16xx·18xx
+        return f"{digits[:4]}-{digits[4:]}"
+    else:
+        head = 3
+    mid = len(digits) - head - 4
+    return f"{digits[:head]}-{digits[head:head + mid]}-{digits[-4:]}"
+
+
+def spoken_time(at: datetime, base: datetime) -> str:
+    """수거 일시를 말로: 전화 받은 날 기준 오늘·내일·모레, 그 밖에는 "11월 26일", 시각은 오전/오후(분은 있을 때만)."""
+    at = at.astimezone(KST)
+    days = (at.date() - base.date()).days
+    day = {0: "오늘", 1: "내일", 2: "모레"}.get(days) or (f"{at.day}일" if at.month == base.month and at.year == base.year
+                                                       else f"{at.month}월 {at.day}일")
+    hour = at.hour % 12 or 12
+    minute = f" {at.minute}분" if at.minute else ""
+    return f"{day} {'오전' if at.hour < 12 else '오후'} {hour}시{minute}"
+
+
 class Call:
     def __init__(self, session_id: str, caller: str | None, cfg: ServerConfig, texts: Texts, backend: Any,
                  incoming_at: str | None = None):
@@ -119,6 +147,8 @@ class Call:
         self.hangup_requested = asyncio.Event()
         self.refer_requested = asyncio.Event()
         self.last_output_at = 0.0  # 음성 출력 이벤트를 마지막으로 본 시각(monotonic)
+        self.trace_text_started = False  # 위임 구간 기록: 이번 백엔드 응답의 첫 글자 조각을 남겼음
+        self.agent_text_at = 0.0  # 상담원 출력 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
         self.task: asyncio.Task | None = None
         self.last_progress = ""
         self.refer_failed = False
@@ -129,7 +159,10 @@ class Call:
         self.heard_start: int | None = None  # 그 말의 첫 조각 시작(세션 타임라인 ms). 질문을 다 들었는지 판단
         self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용
+        self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
         self.customer_said_at = 0.0  # 내용 있는 고객 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
+        self.phone_check = ""  # 방금 기록한 번호(한 번 읽어 확인, PHONE_CHECK)
+        self.progress_speak = False  # 미뤄 둔 진행 상태를 보낼 때 말하게도 해야 함(서버가 옮긴 단계)
         self.progress_due = False  # 고객이 말하는 중이라 미뤄 둔 진행 상태가 있음(말이 멈추면 보낸다)
         self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
         # 지난 단계의 말(전환 전에 한 말의 늦은 조각, 듣지 않는 단계에서 쌓인 말): 전역 의도로만 판별한다
@@ -153,9 +186,10 @@ class Call:
         self.rag = None
         # 직접 만든 테스트 Call은 기존 responses 경로를 유지한다. 실제 accept에서 설정한다.
         self.delegation_mode = 'responses'
+        self.backend_instructions = ""  # 통화 시작 때 보낸 백엔드 지시문(여기에 "지금 상태"를 붙여 갱신)
+        self.backend_state = ""  # 마지막으로 백엔드에 보낸 "지금 상태"
         self.backend_settings: dict = {}
         self.latest_delegation: str | None = None
-        self.delegated_at = 0.0  # 음성 모델이 마지막으로 위임한 시각(monotonic). 서버 기록 요청과 겹치지 않게
         self.delegations: dict[str, dict] = {}
         self.event_types: set[str] = set()  # 받은 sideband 이벤트 종류(처음 한 번만 로그)
         self.persona_version: int | None = None  # 이 통화가 쓴 백엔드 페르소나 버전(None이면 로컬 기본값)
@@ -379,7 +413,8 @@ class Call:
         after = self.snapshot_slots()
         for name, old in before.items():
             # 못 찾아 지운 주소는 정정 확인 대신 그 항목을 구간 예외 문구로 다시 묻는다
-            if old is None or after[name] in (None, old) or name.endswith("_geo"):
+            # 비워 둔 상세주소("")를 나중에 채운 것은 고친 것이 아니다
+            if old in (None, "") or after[name] in (None, old) or name.endswith("_geo"):
                 continue
             slot = SLOT_OF.get(name, name)
             self.corrected = (slot, self._shown(slot) or "")
@@ -399,7 +434,8 @@ class Call:
         return 0 if self.clock_offset is None else int(time.monotonic() * 1000 - self.clock_offset)
 
     def observe_clock(self, end_ms: int | None) -> None:
-        """받아쓰기는 말보다 늦게 오므로 (받은 시각 - 끝 시각)의 가장 작은 값이 실제 차이에 가장 가깝다."""
+        """고객 받아쓰기는 말보다 늦게 오므로 (받은 시각 - 끝 시각)의 가장 작은 값이 실제 차이에 가장 가깝다.
+        상담원 받아쓰기는 음성보다 먼저 와서(끝 시각이 미래) 넣으면 시계가 앞서 나간다. 고객 것만 쓴다."""
         if end_ms is not None:
             offset = time.monotonic() * 1000 - end_ms
             self.clock_offset = offset if self.clock_offset is None else min(self.clock_offset, offset)
@@ -432,14 +468,20 @@ class Call:
         if f == "item_price":
             return None if o.item_price is None else f"{o.item_price:,}원"
         if f == "pickup_at":
-            if self.pickup_at is None:
-                return None
-            d = datetime.fromisoformat(self.pickup_at)
-            return f"{d.month}월 {d.day}일 {d.hour}시 {d.minute:02d}분"
+            return None if self.pickup_at is None else spoken_time(datetime.fromisoformat(self.pickup_at),
+                                                                    self.received_at())
         return getattr(o, f)
+
+    def received_at(self) -> datetime:
+        """전화 받은 시각(한국 시간). 수신 시각을 모르면 지금."""
+        try:
+            return datetime.fromisoformat(self.incoming_at.replace("Z", "+00:00")).astimezone(KST)
+        except (AttributeError, ValueError):
+            return datetime.now(KST)
 
     def text_vars(self) -> dict:
         now = datetime.now(KST)
+        received = self.received_at()
         lookup = self.lookup
         orders, index = lookup.get("orders") or [], lookup.get("index", 0)
         found = orders[index] if index < len(orders) else {}
@@ -453,6 +495,8 @@ class Call:
             "parcel_no": (self.result or {}).get("parcelNo") or "",
             "parcel_count": len(self.parcels),
             "now": now.strftime("%Y-%m-%d %H:%M"),
+            "received": f"{received:%Y-%m-%d %H:%M} ({WEEKDAYS[received.weekday()]}요일)",
+            "번호": spoken_phone(self.phone_check),
             "customer_name": self.display_name() or "없음",
             "caller": self.caller or "알 수 없음",
             "customer_type": self.texts.customer_types[self.customer_type],
@@ -462,7 +506,9 @@ class Call:
             "도착지 주소": destination.address if destination else "",
             "수신인": verifying.name if verifying else "",  # 확인 중인 핀, 아니라고 한 뒤(B11)에는 그 핀의 받는 분
             "후보": "·".join(self.pin_labels()),
-            "운임": f"{fare:,}" if (fare := self.parcel_fare(self.order)) else "",
+            # 운임 안내는 접수 목록에 담은 뒤(확정 뒤)에 나가므로, 받는 중인 택배가 비었으면 방금 담은 택배의 운임
+            "운임": f"{fare:,}" if (fare := self.parcel_fare(
+                self.parcels[-1] if self.parcels and not self.order.model_dump(exclude_none=True) else self.order)) else "",
             "월": now.month,
             "일": now.day,
             "받는 분": found.get("receiver_name") or lookup.get("name") or "",
@@ -571,7 +617,8 @@ class Call:
     def add_transcript(self, speaker: str, delta: str, start_ms: int | None = None, end_ms: int | None = None) -> None:
         """문장 경계·item ID가 없으므로 말하는 쪽의 마지막 말풍선에 이어 붙인다. 겹쳐 말해도 쪼개지지 않게,
         그 말풍선이 맨 끝이거나 직전 조각과의 간격이 짧으면 이어 붙이고, 아니면 새 말풍선(말 차례가 바뀜)."""
-        self.observe_clock(end_ms)
+        if speaker == "customer":
+            self.observe_clock(end_ms)
         last = next((b for b in reversed(self.transcript) if b["speaker"] == speaker), None)
         gap_ok = start_ms is not None and last is not None and last["end_ms"] is not None \
             and start_ms - last["end_ms"] <= self.cfg.monitor.bubble_gap_ms
@@ -581,7 +628,7 @@ class Call:
         else:
             self.transcript.append({"speaker": speaker, "text": delta, "at": time.time(), "end_ms": end_ms})
         if speaker == "agent":
-            self.last_output_at = time.monotonic()
+            self.last_output_at = self.agent_text_at = time.monotonic()
             self.agent_deltas = [*self.agent_deltas[-MAX_AGENT_DELTAS + 1:], (delta, start_ms, end_ms)]
         elif speaker == 'customer':
             self.last_input_at = time.monotonic()

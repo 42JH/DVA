@@ -25,11 +25,12 @@ NO_ANSWER = "none"
 NO_SLOT = "none"
 INTENTS = {
     "none": "끼어드는 용건 없음",
-    "question": "서비스·요금·배송·포장·이용 시간·취소 조건 등 안내를 묻는 질문",
+    "question": "서비스·요금·배송·포장·이용 시간·취소 조건 등 안내를 묻는 질문(상담원이 방금 한 질문에 되묻는 말, "
+                "예: \"어디 주소요?\" \"뭘 말하라는 거죠?\"는 질문이 아니라 none)",
     "restricted": "상담원 연결 요청, 또는 민원·보상·분실·결제 오류·지난 주문 수정처럼 AI가 직접 처리할 수 없는 요청",
     "correction": "이미 말한 접수 정보(이름·연락처·주소·물품·가액·수거 일시)를 고치려 함",
     "wait": "'잠깐만요'처럼 기다려 달라고 하거나 방금 한 답을 번복함",
-    "end": "통화를 끝내려 함",
+    "end": "통화를 끝내려 함(끊겠다·이만 됐다고 분명히 말할 때. \"그만하고요\"처럼 지금 안내를 멈추고 다른 것을 하자는 말은 아님)",
 }
 SLOTS = {
     NO_SLOT: "정정이 아님",
@@ -134,22 +135,23 @@ async def _after_pause(call, conn, client, side: bool) -> None:
     spawn_classify(call, conn, client, side)
 
 
-def spawn_classify(call, conn, client, side: bool = False) -> None:
-    task = asyncio.create_task(classify(call, conn, client, call.heard_rev, side))  # 이후 말로 취소되지 않게 따로
+def spawn_classify(call, conn, client, side: bool = False, retry: bool = True) -> None:
+    task = asyncio.create_task(classify(call, conn, client, call.heard_rev, side, retry))  # 이후 말로 취소되지 않게 따로
     call.listen_tasks.add(task)
     task.add_done_callback(call.listen_tasks.discard)
 
 
-async def classify(call, conn, client, rev: int, side: bool = False) -> None:
-    """판별 한 번. side면 지난 단계의 말을 전역 의도로만 본다. 그사이 새 말이 왔으면(리비전이 다르면) 결과를 버린다."""
+async def classify(call, conn, client, rev: int, side: bool = False, retry: bool = False) -> None:
+    """판별 한 번. side면 지난 단계의 말을 전역 의도로만 본다. 그사이 새 말이 왔으면(리비전이 다르면) 결과를 버린다.
+    retry: 시간 초과면 같은 말을 한 번 더 판별한다(2026-10-31 통화: 이름 정정 판별이 시간 초과로 버려짐)."""
     try:
-        await _classify(call, conn, client, rev, side)
+        await _classify(call, conn, client, rev, side, retry)
     finally:
         if side:
             call.side["flushing"] = False
 
 
-async def _classify(call, conn, client, rev: int, side: bool) -> None:
+async def _classify(call, conn, client, rev: int, side: bool, retry: bool = False) -> None:
     cfg = call.cfg.listener
     if side:
         stage_name, text, start_ms, started = call.side["stage"], call.side["text"].strip(), None, call.side["since"]
@@ -182,6 +184,9 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                     (time.monotonic() - t0) * 1000)  # TimeoutError는 메시지가 비어 이름을 같이 남긴다
         record.update(status="error", output={"error": type(e).__name__})
         call.add_error(f"판별 실패: {type(e).__name__}")
+        if isinstance(e, TimeoutError) and retry and not side and rev == call.heard_rev:
+            spawn_classify(call, conn, client, retry=False)
+            return
         if call.flow.pending and call.flow.pending["suspended"] and (side or rev == call.heard_rev):
             async with call.lock:
                 # 번복인지 모르는 채로 "예"에 걸린 확정(취소)은 하지 않는다. 다 찬 상태에 걸린 확정(결제 단계 진입)은 다시 건다
@@ -190,7 +195,7 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                 await after_change(call, conn)
         return
     record.update(output={"answer": answer, "intent": intent, "slot": slot},
-                  elapsed_ms=round((time.monotonic() - t0) * 1000))
+                  elapsed_ms=round((time.monotonic() - t0) * 1000), usage=_usage(resp))
     async with call.lock:
         if side:
             if call.side["stage"] != stage_name or call.side["text"].strip() != text:
@@ -199,6 +204,8 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                 return
             call.side["text"] = ""
             events = await apply_side(call, intent, slot, call.side["off"], started)
+            if intent == "correction":
+                await record_heard(call, conn, text, call.heard_at, force=True)
         else:
             if rev != call.heard_rev or call.flow.stage != stage_name:
                 record["status"] = "stale"  # 그사이 새 말이 왔거나(리비전) 다른 경로로 단계가 바뀜
@@ -218,10 +225,11 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
                 except Exception:
                     log.exception("오류 안내 전송 실패 %s", call.session_id)
                 return
-            if events or answer != NO_ANSWER or intent != "none":
-                _consume(call, raw)  # 판별에 쓴 말은 소비
-            elif await record_heard(call, conn, text, call.heard_at):
-                _consume(call, raw)  # 백엔드에 넘긴 말은 다시 넘기지 않게
+            if intent == "correction" or (not events and answer == NO_ANSWER and intent == "none"):
+                await record_heard(call, conn, text, call.heard_at, force=intent == "correction")
+            # 판별에 쓴 말은 소비한다. 남기면 지난 말이 다음 판별에 붙어 오판된다(2026-10-31: "저 말투가 그렇죠"가 다음
+            # 주소 답에 붙어 제한된 요청으로 판별돼 상담원 제안으로 빠짐)
+            _consume(call, raw)
         record["status"] = "done"
         record["output"]["events"] = events
         before = call.last_progress
@@ -235,10 +243,20 @@ async def _classify(call, conn, client, rev: int, side: bool) -> None:
             log.exception("진행 상태 전송 실패 %s", call.session_id)
         # 고객 말이 끝난 뒤(마지막 받아쓰기 조각) 진행 상태를 보낼 때까지. 멈춤 대기(pause_ms) + 판별 + 처리
         record["total_ms"] = round((time.monotonic() - call.heard_at) * 1000)
-        log.info("판별 %s 단계=%s answer=%s intent=%s slot=%s side=%s 모델=%dms 진행상태변경=%s",
-                 call.session_id, stage_name, answer, intent, slot, side, record["elapsed_ms"],
+        log.info("판별 %s 단계=%s answer=%s intent=%s slot=%s side=%s 모델=%dms 토큰=%s 진행상태변경=%s",
+                 call.session_id, stage_name, answer, intent, slot, side, record["elapsed_ms"], record["usage"],
                  call.last_progress != before)
         call.notify()
+
+
+def _usage(resp) -> dict | None:
+    """판별 응답의 토큰 수(입력·출력·추론). 응답이 느린 원인이 추론량인지 보려고 관제·로그에 남긴다."""
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return None
+    details = getattr(u, "output_tokens_details", None)
+    return {"input": getattr(u, "input_tokens", None), "output": getattr(u, "output_tokens", None),
+            "reasoning": getattr(details, "reasoning_tokens", None)}
 
 
 def _consume(call, raw: str) -> None:
@@ -253,11 +271,13 @@ def _move_to_side(call, conn, client, stage_name: str) -> None:
     spawn_classify(call, conn, client, side=True)
 
 
-async def record_heard(call, conn, text: str, heard_at: float) -> bool:
+async def record_heard(call, conn, text: str, heard_at: float, force: bool = False) -> bool:
     """이 단계의 답이 아닌 고객 말(주문 정보일 수 있음)을 음성 모델이 위임하지 않았으면 서버가 백엔드에 넘긴다.
     음성 모델이 위임을 자주 빠뜨려 주소 보정·기록이 안 되던 것(2026-10-28 13:26·17:44 통화).
-    백엔드가 record_order를 부르면 기존 함수 호출 경로(sideband.run_tool)로 실행된다."""
-    if (not call.cfg.listener.record_heard or call.delegation_mode != "responses"
+    백엔드가 record_order를 부르면 기존 함수 호출 경로(sideband.run_tool)로 실행된다.
+    force: 정정은 설정(record_heard)과 상관없이 넘긴다. 음성 모델이 "네, 현승준님"이라고 말로만 받고 넘기지 않아
+    틀린 이름("현승우")으로 접수됐다(2026-10-31 통화)."""
+    if (not (call.cfg.listener.record_heard or force) or call.delegation_mode != "responses"
             or "record_order" not in engine.current(call).tools
             or call.delegated_at >= heard_at):  # 말이 끝난 뒤 음성 모델이 이미 위임함
         return False

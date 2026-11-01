@@ -46,6 +46,11 @@ def test_incoming_call_is_accepted_with_session(env):
     _, sid, session = client.live.sessions.of("accept")[0]
     assert sid == "live_1" and session["type"] == "live"
     assert CALLER in session["instructions"]  # +82 → 0으로 바꾼 발신번호
+    # 전화 받은 시각(한국 시간): 음성 모델은 수거 일시를 "내일 오후 8시"처럼 말하고, 백엔드는 그 기준으로 계산한다
+    assert "전화 받은 시각" in session["instructions"]
+    assert "전화 받은 시각" in session["delegation"]["responses"]["instructions"]
+    call_ = http.app.state.svc.registry.get("live_1")  # 이 지시문 끝에 "지금 상태"를 붙여 갱신한다
+    assert call_.backend_instructions == session["delegation"]["responses"]["instructions"]
     call = http.app.state.svc.registry.get("live_1")
     assert call.caller == CALLER
     wait(lambda: call.status == "active")

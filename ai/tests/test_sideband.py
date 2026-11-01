@@ -9,6 +9,7 @@ from conftest import CFG, FULL_ORDER, FakeClient, FakeBackend, make_call, run, u
 from test_flow import FakeRag, orders_db, saved_db, no_recent_db
 
 from app.dispatcher import dispatch
+from app.flow import engine
 from app.listener import apply_answer
 from app.progress import send_progress
 from app.sideband import run_call
@@ -130,7 +131,7 @@ def test_customer_answer_changes_state_without_tool_call():
         assert len(client.responses.requests) == 1  # 말이 멈춘 뒤 한 번만 판별
         req = client.responses.requests[0]
         assert "네 맞아요" in req["input"] and "보내시는 택배 맞으실까요" in req["input"]
-        assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["yes", "no", "lookup", "none"]
+        assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["yes", "new_origin", "no", "lookup", "none"]
         assert "question" in req["text"]["format"]["schema"]["properties"]["intent"]["enum"]
         assert req["model"] == CFG.listener.model and req["store"] is False
         await until(lambda: "해운대" in thoughts(conn)[-1])
@@ -420,6 +421,17 @@ def test_heard_order_info_goes_to_backend_when_voice_model_did_not_delegate():
     run(scenario())
 
 
+def test_order_values_during_qna_return_to_order():
+    """QnA·상담원 제안 중에 고객이 주문 값(다시 말한 주소 등)을 말해 기록되면 하던 접수 단계로 돌아간다
+    (2026-10-31 통화: 상담원 제안 단계라 기록이 거절되고 접수로 돌아가지 못함)."""
+    call = make_call()
+    call.flow.stage, call.flow.task = "A_RECEIVER_HUB", "new_order"
+    run(engine.apply(call, ["intent.restricted"]))
+    assert call.flow.stage == "D_AGENT_OFFER"
+    out = run(dispatch(call, "record_order", json.dumps({"receiver_name": "현승준"}, ensure_ascii=False), "r"))
+    assert out["ok"] and call.order.receiver_name == "현승준" and call.flow.stage == "A_RECEIVER_HUB"
+
+
 def test_heard_talk_is_not_sent_to_backend_by_default():
     """기본은 끔: 위임된 백엔드 응답 중에 서버 요청이 끼어들어 상담원이 멈춘 통화(2026-10-29) 뒤로."""
     client, call = FakeClient(), make_call()
@@ -687,10 +699,14 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         await until(lambda: call.flow.stage == "A_REGISTER_SENDER")
         conn.function_call("record_order", FULL_ORDER, "r1")
         await until(lambda: call.flow.pending and conn.outputs())
-        nxt = conn.outputs()[-1]["state"]["next"]  # 운임·결제 안내는 도구 결과로 전해진다(진행 상태로 또 보내지 않음)
-        assert "운임은 4,000원이에요" in nxt and call.texts.say["PAY_BILLING"] in nxt
+        nxt = conn.outputs()[-1]["state"]["next"]  # 기다리는 동안 새 질문 없음(방금 받은 번호 확인만)
+        assert nxt.endswith(call.texts.note["COMMIT_WAIT"]) and "010-9876-5432" in nxt
         await until(lambda: call.flow.stage == "A_CHOICE" and call.texts.say["A8"] in thoughts(conn)[-1])
-        assert "운임은" not in thoughts(conn)[-1]
+        last = thoughts(conn)[-1]  # 확정 뒤 운임 → 결제 → 추가 접수 질문을 한 진행 상태로 차례대로
+        assert last.index("운임은 4,000원이에요") < last.index(call.texts.say["PAY_BILLING"]) < last.index(call.texts.say["A8"])
+        # 고객 말 없이 서버가 옮겼으므로 말하게도 한다(thinking.append만으로는 다음 고객 말까지 말하지 않아 멈춤)
+        spoken = [kw["content"] for p, kw in conn.sent if p == "session.commentary.append"]
+        assert spoken and call.texts.say["A8"] in spoken[-1]
         await close(conn, task)
 
     run(scenario())
@@ -786,6 +802,128 @@ def test_progress_waits_while_customer_is_speaking():
         assert call.progress_due and len(thoughts(conn)) == before
         await until(lambda: not call.progress_due, timeout=3)  # 말이 멈추면 보낸다
         assert len(thoughts(conn)) == before + 1 and "01011112222" in thoughts(conn)[-1]
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_heard_speech_is_consumed_even_without_answer():
+    """답·용건이 없던 말도 판별에 썼으면 비운다. 남기면 다음 말에 붙어 오판된다(2026-10-31: "저 말투가 그렇죠"가 다음
+    주소 답에 붙어 제한된 요청으로 판별됨)."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        answers(client, "none")
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="저 말투가 그렇죠")
+        await until(lambda: any(r["name"] == "listener" and r["status"] == "done" for r in call.tool_calls.values()))
+        assert call.heard_text == ""
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_agent_speaking_until_output_transcript_end_passes():
+    """상담원 음성이 아직 나가는 중(출력 받아쓰기의 끝 시각이 지금보다 뒤)이면 진행 상태를 미룬다(말 겹침 방지)."""
+    from app.progress import agent_speaking
+    call = make_call()
+    call.observe_clock(1000)  # 세션 타임라인 1초 = 지금
+    call.last_output_at = time.monotonic()  # 음성 출력 이벤트는 말하지 않을 때도 와서 기준이 아니다
+    call.agent_deltas = [("운임은", 500, call.now_ms() + 2000)]
+    assert agent_speaking(call)
+    call.agent_deltas = [("운임은", 500, call.now_ms() - 10)]
+    assert not agent_speaking(call)
+    call.agent_text_at = time.monotonic()  # 출력 받아쓰기 조각이 방금 옴
+    assert agent_speaking(call)
+
+
+def test_correction_is_sent_to_backend_when_voice_model_did_not_delegate():
+    """말 중간·직후 정정("아니요, 현승준이요")은 음성 모델이 넘기지 않았으면 서버가 백엔드에 넘긴다(record_heard 설정과
+    상관없이). 2026-10-31 통화: 말로만 받고 넘기지 않아 틀린 이름으로 접수됨."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "A_RECEIVER_HUB", "new_order"
+        call.order.sender_name = "현승우"
+        answers(client, "none", intent="correction", slot="sender_name")
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="아니요, 현승준이요")
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        item = next(kw["item"] for p, kw in conn.sent if p == "response.item.create")
+        assert "현승준" in item["content"][0]["text"]
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_listener_retries_once_on_timeout():
+    """판별이 시간 초과면 같은 말을 한 번 더 판별한다(정정 판별이 시간 초과로 버려지던 것)."""
+    client, call = FakeClient(), make_call()
+    calls = []
+
+    def decide(kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise TimeoutError
+        enum = kw["text"]["format"]["schema"]["properties"]["answer"]["enum"]
+        return {"answer": "order" if "order" in enum else "none", "intent": "none", "slot": "none"}
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        client.responses.decide = decide
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="택배 접수할게요")
+        await until(lambda: call.flow.stage == "A_REGISTER_SENDER")
+        assert len(calls) == 2
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_listener_records_token_usage():
+    """판별 기록에 토큰 수(입력·출력·추론)를 남긴다(시간 초과 원인이 추론량인지 보려고)."""
+    from types import SimpleNamespace
+    from app.listener import _usage
+    resp = SimpleNamespace(usage=SimpleNamespace(input_tokens=310, output_tokens=40,
+                                                 output_tokens_details=SimpleNamespace(reasoning_tokens=28)))
+    assert _usage(resp) == {"input": 310, "output": 40, "reasoning": 28}
+    assert _usage(SimpleNamespace()) is None
+
+
+def test_clock_uses_customer_transcripts_only():
+    """상담원 받아쓰기는 음성보다 먼저 와 끝 시각이 미래라 시계 추정에 쓰지 않는다(쓰면 시계가 앞서 나가 말 겹침 판단이 틀림)."""
+    call = make_call()
+    call.add_transcript("agent", "안녕하세요", 0, 60_000)
+    assert call.clock_offset is None
+    call.add_transcript("customer", "네", 1000, 1500)
+    assert call.clock_offset is not None and abs(call.now_ms() - 1500) < 200
+
+
+def test_backend_state_is_updated_when_state_changes():
+    """상태가 바뀔 때마다 백엔드 지시문 끝의 "지금 상태"를 session.update로 갱신한다(바뀌지 않으면 보내지 않음).
+    백엔드가 단계를 몰라 get_state부터 부르거나 엉뚱한 도구를 고르던 것(2026-10-31 실측)."""
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.backend_instructions = "백엔드 지시문"
+        task, conn = await start(call, client)
+        updates = lambda: [kw["session"] for p, kw in conn.sent if p == "session.update"]  # noqa: E731
+        await until(lambda: updates())
+        first = updates()[-1]["delegation"]
+        assert first["type"] == "responses" and first["responses"]["instructions"].startswith("백엔드 지시문")
+        assert "A_NEW_ORDER" in first["responses"]["instructions"]
+        answers(client, "order")
+        conn.push("session.input_transcript.delta", delta="택배요")
+        await until(lambda: call.flow.stage == "A_REGISTER_SENDER" and "A_REGISTER_SENDER" in json.dumps(
+            updates()[-1], ensure_ascii=False))
+        count = len(updates())
+        await send_progress(call, conn)  # 상태가 그대로면 다시 보내지 않는다
+        from app.progress import update_backend
+        await update_backend(call, conn)
+        assert len(updates()) == count
         await close(conn, task)
 
     run(scenario())

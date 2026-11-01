@@ -63,9 +63,11 @@ async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -
         persona = svc.persona.active if svc.persona is not None else None  # 이 통화는 끝까지 이 설정
         call.persona_version = persona.version_seq if persona else None
         session = build_session(call_info, data=settings, persona=persona and persona.prompt,
-                                voice=persona and persona.voice)
+                                voice=persona and persona.voice,
+                                backend_info=svc.texts.backend_info.format(**call.text_vars()))
         call.backend_settings = build_backend(settings)
         call.delegation_mode = session['delegation']['type']
+        call.backend_instructions = (session['delegation'].get('responses') or {}).get('instructions') or ""
         call.rag = svc.rag
     except LiveConfigError as e:
         log.error("세션 설정 오류, reject %s: %s", session_id, e)

@@ -8,7 +8,7 @@ from app.flow.stages._common import (COMMON_TOOLS, ORDER_TOOLS, ORIGIN, RECEIVER
 from app.order import Order
 
 NEW_CHOICES = {"order": "택배를 보내겠다(접수)", "lookup": "보낸 택배를 조회·취소하겠다"}
-ITEM_CHOICES = {"vague": "물건을 말했지만 크기와 개수를 말하지 않음", "partial": "크기와 개수 중 하나만 말함"}
+ITEM_CHOICES = {"vague": "물건을 말했지만 크기와 개수를 말하지 않음", "partial": "박스의 크기와 개수 중 하나만 말함(서류·서류 봉투는 크기가 없으므로 개수만 말해도 partial이 아님)"}
 VALUE_CHOICES = {"unclear": "가격을 말했지만 금액이 불명확하거나 모른다고 함"}
 MORE_CHOICES = {"order": "택배를 더 보내겠다", "lookup": "보낸 택배를 조회·취소하겠다",
                 "other": "다른 일을 도와 달라(무엇인지는 말하지 않음)", "no_more": "더 없다·통화를 마치겠다"}
@@ -27,7 +27,7 @@ async def more_answer(ctx, answer: str) -> list[str]:
 
 
 def address_text(role: str, normal: str, retry: str):
-    """주소DB에서 못 찾아 지운 주소는 구간 예외 문구로 한 번 다시 묻는다(보내는 곳/받는 곳 중 단계에 맞는 쪽)."""
+    """주소DB에서 못 찾아 지운 주소는 찾을 때까지 구간 예외 문구로 다시 묻는다(보내는 곳/받는 곳 중 단계에 맞는 쪽)."""
     return lambda ctx: retry if f"{role}_address" in ctx.address_retry else normal
 
 
