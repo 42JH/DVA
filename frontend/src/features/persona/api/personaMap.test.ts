@@ -34,7 +34,7 @@ assert.equal(toSpeed(1.1), 'FAST')
 assert.equal(toRate('NORMAL', { min: 0.5, max: 2 }), null)
 assert.equal(toRate('SLOW', { min: 0.5, max: 2 }), 0.85)
 assert.equal(toRate('FAST', { min: 0.5, max: 1.1 }), 1.1) // 범위 끝
-assert.equal(toRate('FAST', null), null) // 숫자 속도 미지원
+assert.equal(toRate('FAST', null), 1.2) // 숫자 속도 미지원이어도 그대로 → 서버가 거절
 
 const draft = (extra: Partial<PersonaDraftDto> = {}): PersonaDraftDto => ({
   draftRevision: 'rev-1',

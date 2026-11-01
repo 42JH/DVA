@@ -224,6 +224,7 @@ export function UiKitPage() {
           { value: 'all', label: '전체' },
           { value: 'edit', label: '수정' },
           { value: 'ask', label: '문의' },
+          { value: 'off', label: '끈 칩', disabledHint: 'AI 미지원' }, // disabledHint = 못 고르는 칩 + 이유
         ]}
       />
 

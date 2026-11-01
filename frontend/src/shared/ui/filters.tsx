@@ -250,6 +250,7 @@ export function PeriodFilter({
 export interface Option<V extends string = string> {
   value: V
   label: string
+  disabledHint?: string // ChipGroup만: 있으면 그 칩을 끄고 칩 안에 작게 이유 ('AI 미지원')
 }
 
 /** Select(드롭다운) — 피그마 07 Select — 이름(회색) + 값 + ▾. 선택지 4개 이상일 때. 값이 기본(첫 항목)이 아니면 applied 모양 */
@@ -423,20 +424,25 @@ export function ChipGroup<V extends string>({
       </span>
       {options.map((o) => {
         const on = o.value === value
+        const off = o.disabledHint !== undefined
         return (
           <button
             key={o.value}
             type="button"
             role="radio"
             aria-checked={on}
+            disabled={off}
             onClick={() => onChange(o.value)}
             className={`${compact ? 'h-11 px-3.5' : 'h-12 px-5'} rounded-lg text-body ${
               on
                 ? `${LINE_ON} bg-action-soft font-semibold text-action`
-                : `${LINE} bg-surface text-ink`
+                : off
+                  ? `${LINE} cursor-not-allowed bg-bg text-muted`
+                  : `${LINE} bg-surface text-ink`
             }`}
           >
             {o.label}
+            {off && <span className="ml-1.5 text-caption">{o.disabledHint}</span>}
           </button>
         )
       })}
