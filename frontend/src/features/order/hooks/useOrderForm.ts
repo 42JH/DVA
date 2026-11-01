@@ -1,10 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
-import type { Address } from 'react-daum-postcode'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
-import type { Option } from '@/shared/ui'
+import type { Option, SearchedAddress } from '@/shared/ui'
 import {
   BOX_TYPES,
   createOrder,
@@ -273,18 +272,11 @@ export function useOrderForm(
     // 주소 검색 창 (폼 창 대신 뜸 — 두 창이 겹치면 Esc가 둘 다 닫음)
     searching: searching !== null,
     searchTitle: searching === 'receiver' ? '받는 분 주소 검색' : '보내는 분 주소 검색',
-    pickAddress: (a: Address) => {
-      // 도로명이 기본. 지번 주소를 골랐으면 도로명이 비어 있을 수 있어 그땐 고른 주소 그대로
-      const road = a.roadAddress || a.address
-      const picked: PickedAddress = {
-        jibunAddress: a.jibunAddress || a.autoJibunAddress, // 도로명을 고르면 지번이 비고 auto에 있음
-        dongName: a.bname,
-        postalCode: a.zonecode,
-      }
+    pickAddress: ({ roadAddress, ...picked }: SearchedAddress) => {
       if (searching)
         setParties((all) => ({
           ...all,
-          [searching]: { ...all[searching], roadAddress: road, picked },
+          [searching]: { ...all[searching], roadAddress, picked },
         }))
       setSearching(null)
     },

@@ -1,4 +1,4 @@
-import { Button, TextField } from '@/shared/ui'
+import { AddressField, TextField } from '@/shared/ui'
 import type { useOrderForm } from '@/features/order/hooks/useOrderForm'
 
 // 주문 추가 창의 보내는 분 · 받는 분 칸 4줄 — 이름 · 전화번호 · 주소(검색으로만) · 상세주소
@@ -29,36 +29,12 @@ export function OrderPartyFields({
         error={party.phoneError}
         onChange={(e) => party.setPhone(e.target.value)}
       />
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <TextField
-            label="주소"
-            inline
-            readOnly
-            placeholder="검색으로 고르기"
-            value={party.roadAddress}
-            error={party.addressError}
-            onClick={party.openSearch}
-            className="cursor-pointer bg-bg!"
-          />
-        </div>
-        <Button
-          className="h-11! w-11 px-0!"
-          onClick={party.openSearch}
-          aria-label={`${title} 주소 검색`}
-        >
-          <svg
-            viewBox="0 0 20 20"
-            className="mx-auto size-5 stroke-ink"
-            fill="none"
-            strokeWidth={1.6}
-            strokeLinecap="round"
-          >
-            <circle cx="8.5" cy="8.5" r="6" />
-            <path d="M13 13l4.5 4.5" />
-          </svg>
-        </Button>
-      </div>
+      <AddressField
+        value={party.roadAddress}
+        error={party.addressError}
+        onSearch={party.openSearch}
+        searchLabel={`${title} 주소 검색`}
+      />
       <TextField
         label="상세주소"
         inline
