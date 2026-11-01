@@ -125,5 +125,20 @@ export function toOrderDetail(dto: OrderDetailDto): OrderDetail {
     paymentMethod: PAYMENT_METHOD[dto.paymentMethodType],
     paymentState: PAYMENT_STATE[dto.status],
     relatedCalls: [], // shortcut: 응답에 관련 통화가 없음 — 통화 API(calls)에서 orderSeq로 찾거나 BE에 요청
+    parcels: dto.parcels.map((p) => ({
+      orderParcelSeq: p.orderParcelSeq,
+      cancelled: p.status === 'CANCELLED',
+      sender: party(p.origin),
+      receiver: party(p.destination),
+      items: {
+        document: p.documentCount,
+        small: p.smallBoxCount,
+        medium: p.mediumBoxCount,
+        big: p.bigBoxCount,
+        other: p.otherItemDescription.trim() || null,
+      },
+      itemPrice: p.itemPrice,
+      clientComment: p.clientComment.trim() || null,
+    })),
   }
 }

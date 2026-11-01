@@ -28,7 +28,8 @@ export interface PartyCell {
 /** 목록 한 줄 = 배송 상세 하나(보내는 분 1 + 받는 분 1, 11/01 결정) · 화면용 글만 (그리기만 하도록) */
 export interface OrderListRow {
   key: string
-  orderSeq: number // 줄을 누르면 이 주문 상세 (접수 중 · 취소도 열림, 11/01 결정)
+  orderSeq: number // 줄을 누르면 이 주문 상세 (접수 중단 · 취소도 열림, 11/01 결정)
+  parcelSeq: number | null // 그 줄의 배송 상세 → 상세 창이 이 상세를 보여 줌 (상세 없는 주문은 null)
   statusLabel: string
   statusTag: TagKind
   receivedAt: string[] // 올해면 한 줄, 다른 해면 날짜 · 시각 두 줄
@@ -38,7 +39,11 @@ export interface OrderListRow {
   items: string | null // '소박스 1 · 중박스 1'
 }
 
-type Modal = { kind: 'add' } | { kind: 'detail'; id: number } | { kind: 'edit'; id: number } | null
+type Modal =
+  | { kind: 'add' }
+  | { kind: 'detail'; id: number; parcelSeq: number | null }
+  | { kind: 'edit'; id: number; parcelSeq: number | null } // 끝나면 같은 줄의 상세로 돌아가려고 같이 기억
+  | null
 
 const PAGE_SIZE = 20 // 주문 20개 — 상세가 여러 개면 줄은 더 많아짐
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
@@ -100,6 +105,7 @@ export function useOrderList() {
   const rows: OrderListRow[] = (list.data?.data ?? []).flatMap(parcelRows).map((r) => ({
     key: r.key,
     orderSeq: r.orderSeq,
+    parcelSeq: r.parcel?.orderParcelSeq ?? null,
     statusLabel: ORDER_STATUS_LABEL[r.status],
     statusTag: ORDER_STATUS_TAG[r.status],
     receivedAt: fmtListTime(r.createdAt),
@@ -149,10 +155,15 @@ export function useOrderList() {
 
     modal,
     openAdd: () => setModal({ kind: 'add' }),
-    openOrder: (r: OrderListRow) => setModal({ kind: 'detail', id: r.orderSeq }),
-    editOrder: (id: number) => setModal({ kind: 'edit', id }), // 상세 창 [수정]
+    openOrder: (r: OrderListRow) =>
+      setModal({ kind: 'detail', id: r.orderSeq, parcelSeq: r.parcelSeq }),
+    editOrder: (id: number) =>
+      setModal((m) => ({ kind: 'edit', id, parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null })), // 상세 창 [수정]
     // 수정 저장 · 취소 → 수정하던 그 주문 상세로
-    backToDetail: () => setModal((m) => (m?.kind === 'edit' ? { kind: 'detail', id: m.id } : null)),
+    backToDetail: () =>
+      setModal((m) =>
+        m?.kind === 'edit' ? { kind: 'detail', id: m.id, parcelSeq: m.parcelSeq } : null,
+      ),
     closeModal: () => setModal(null),
   }
 }

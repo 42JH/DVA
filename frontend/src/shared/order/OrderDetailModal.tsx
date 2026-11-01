@@ -8,15 +8,17 @@ import { useOrderDetail } from './useOrderDetail'
 //   onEdit을 넘긴 곳에서만 [수정]이 보임 (취소된 주문은 늘 없음). 주문 수정 화면은 03(팀원) 몫
 export function OrderDetailModal({
   orderId,
+  parcelSeq,
   onClose,
   onEdit,
 }: {
   orderId: number
+  parcelSeq?: number | null // 03 목록에서 누른 배송 상세 (없으면 첫 상세)
   onClose: () => void
   onEdit?: (orderSeq: number) => void
 }) {
   const navigate = useNavigate()
-  const { order, isLoading, error } = useOrderDetail(orderId)
+  const { order, isLoading, error } = useOrderDetail(orderId, parcelSeq)
 
   const openCall = (callSessionSeq: number) => {
     onClose()

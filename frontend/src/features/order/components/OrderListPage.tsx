@@ -118,7 +118,12 @@ export function OrderListPage() {
         <OrderFormModal onDone={vm.closeModal} onClose={vm.closeModal} />
       )}
       {vm.modal?.kind === 'detail' && (
-        <OrderDetailModal orderId={vm.modal.id} onClose={vm.closeModal} onEdit={vm.editOrder} />
+        <OrderDetailModal
+          orderId={vm.modal.id}
+          parcelSeq={vm.modal.parcelSeq}
+          onClose={vm.closeModal}
+          onEdit={vm.editOrder}
+        />
       )}
       {vm.modal?.kind === 'edit' && (
         <OrderEditModal
