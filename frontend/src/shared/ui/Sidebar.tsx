@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router'
 import { MENU, type MenuIcon } from './menu'
 
 // 사이드바 (와이어프레임 15 Sidebar · 10/20 확정 메뉴) — 폭 222 · 머리 64(로고 + '관리자' + 접기 28) · 줄 44(아이콘 16 + 14 + 글자) · 하위 줄 40
+// 11/01 Gmail식: 줄은 왼쪽 끝에서 시작해 오른쪽만 둥근 알약(선택 = 옅은 남색 · 굵게, 마우스 = 회색), 접고 펼 때 폭이 미끄러짐, 하위는 안내선 없이 더 들여쓴 알약
 // 하위가 있는 메뉴(상세내역 · FAQ 관리)는 ▾로 펼침. 하위가 선택되면 위 메뉴는 글자만 진하게
 // 하위 메뉴 옆 빨간 숫자(AI 미답변 22)는 badges로 받기만 함 — 숫자를 세는 건 features(app이 넘겨줌, shared는 features를 모름)
 // 접으면(머리 오른쪽 버튼 · 1280 아래 기본) 폭 72 아이콘 줄: 줄 48×44 가운데 아이콘, 펼치기 버튼 가운데
@@ -106,9 +107,9 @@ export function Sidebar({
     </>
   )
 
-  // 줄: 펼침 = 4..218 (pl 24 → 아이콘 28, 글자 58) · 접힘 = 48×44 가운데
+  // 줄 (11/01 Gmail식 알약): 펼침 = 왼쪽 끝 0..210, 오른쪽만 둥글게 (pl 28 → 아이콘 28, 글자 58) · 접힘 = 12..60 동그라미 (아이콘 x 28로 같음 → 접힐 때 아이콘이 안 움직임)
   const row = (active: boolean, bold: boolean) =>
-    `flex h-11 items-center rounded-lg text-body ${collapsed ? 'w-12 justify-center' : 'gap-3.5 pr-3 pl-6'} ${
+    `flex h-11 items-center text-body ${collapsed ? 'ml-3 w-12 justify-center rounded-full' : 'gap-3.5 rounded-r-full pr-3 pl-7'} ${
       active
         ? 'bg-action-soft font-bold text-action'
         : bold
@@ -129,7 +130,8 @@ export function Sidebar({
 
   return (
     <nav
-      className={`flex h-full shrink-0 flex-col border-r border-line bg-surface ${collapsed ? 'w-[72px]' : 'w-sidebar'}`}
+      // 접고 펼 때 폭이 미끄러짐 (Gmail식, 11/01). overflow-hidden: 줄어드는 동안 글자가 밖으로 안 삐져나옴
+      className={`flex h-full shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-200 ease-out ${collapsed ? 'w-[72px]' : 'w-sidebar'}`}
     >
       {collapsed ? (
         <div className="flex h-16 items-center justify-center">
@@ -139,14 +141,15 @@ export function Sidebar({
           })}
         </div>
       ) : (
-        <div className="flex h-16 items-center gap-2.5 pr-6 pl-6">
+        // whitespace-nowrap: 폭이 미끄러지는 동안 '관리자'가 세로로 꺾이지 않게 (잘리기만 함)
+        <div className="flex h-16 items-center gap-2.5 pr-6 pl-6 whitespace-nowrap">
           <span className="text-strong font-bold text-brand">dver</span>
           <span className="text-label font-semibold text-sub">관리자</span>
           <span className="ml-auto">{toggleBtn('collapse', () => setCollapsed(true))}</span>
         </div>
       )}
 
-      <ul className={`flex flex-col gap-1 pt-3 ${collapsed ? 'px-3' : 'px-1'}`}>
+      <ul className={`flex flex-col gap-1 pt-3 ${collapsed ? '' : 'pr-3'}`}>
         {MENU.filter((m) => canSee(m.to)).map((m) =>
           m.subs ? (
             <li key={m.label} className="relative">
@@ -159,7 +162,7 @@ export function Sidebar({
                     ? setFly((f) => (f === m.label ? null : m.label))
                     : setOpen((o) => ({ ...o, [m.label]: !o[m.label] }))
                 }
-                className={`${row(collapsed && inGroup(m.subs), inGroup(m.subs))} w-full`}
+                className={`${row(collapsed && inGroup(m.subs), inGroup(m.subs))} ${collapsed ? '' : 'w-full'}`} // 접히면 w-12 동그라미 그대로 (w-full이면 오른쪽으로 밀림)
               >
                 <Icon name={m.icon} />
                 {label(m.label)}
@@ -167,7 +170,7 @@ export function Sidebar({
                   // 펼침 화살표 — 글자(▾)가 아니라 16 칸 아이콘, 펼치면 뒤집음
                   <svg
                     viewBox="0 0 20 20"
-                    className={`ml-auto size-4 stroke-sub ${open[m.label] ? 'rotate-180' : ''}`}
+                    className={`ml-auto size-4 stroke-sub transition-transform duration-200 ${open[m.label] ? 'rotate-180' : ''}`}
                     fill="none"
                     strokeWidth={1.6}
                     strokeLinecap="round"
@@ -204,15 +207,15 @@ export function Sidebar({
                 </>
               )}
               {open[m.label] && !collapsed && (
-                // 안내선 x=20(4 + 16) · 하위 글자 x=58 (위 메뉴 글자와 같은 자리)
-                <ul className="ml-4 flex flex-col gap-1 border-l border-line">
+                // 하위 줄도 알약 (안내선 없음, Gmail식) · 하위 글자 x=58 (위 메뉴 글자와 같은 자리). 펼칠 때 떠오름
+                <ul className="mt-1 flex flex-col gap-1 motion-safe:animate-page-in">
                   {m.subs.map((s) => (
                     <li key={s.to}>
                       <NavLink
                         to={s.to}
                         end={isEnd(s, m.subs!)}
                         className={({ isActive }) =>
-                          `flex h-10 items-center rounded-lg pr-3 pl-[37px] text-label ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
+                          `flex h-10 items-center rounded-r-full pr-3 pl-[58px] text-label ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
                         }
                       >
                         {subLabel(s)}
@@ -239,7 +242,7 @@ export function Sidebar({
       </ul>
 
       {/* 위 메뉴 줄과 같은 좌우 여백 → 로그아웃 글자도 메뉴 글자와 같은 x. 로그인 아이디는 안 보임 (10/30 사용자) */}
-      <div className={`mt-auto flex flex-col gap-1 pb-6 ${collapsed ? 'px-3' : 'px-1'}`}>
+      <div className={`mt-auto flex flex-col gap-1 pb-6 ${collapsed ? '' : 'pr-3'}`}>
         <button
           type="button"
           onClick={onLogout}

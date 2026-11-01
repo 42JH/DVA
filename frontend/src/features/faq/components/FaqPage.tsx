@@ -1,3 +1,4 @@
+import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
 import { Button, Pagination, SearchBox, Table, Tabs, Tag, type Column } from '@/shared/ui'
 import { useFaqList, type CategoryFilter, type FaqRow } from '@/features/faq/hooks/useFaqList'
 import { FaqFormModal } from './FaqFormModal'
@@ -53,6 +54,7 @@ export function FaqPage() {
     { key: '전체', label: '전체' },
     ...vm.categories.map((c) => ({ key: c.name, label: c.name, muted: c.empty })),
   ]
+  const slide = slideClass(useSlideDir(tabs.findIndex((t) => t.key === vm.category))) // 탭을 바꾸면 목록이 그 방향에서 미끄러져 들어옴 (11/01)
 
   return (
     <div className="flex flex-col gap-6">
@@ -73,41 +75,43 @@ export function FaqPage() {
         </Button>
       </div>
 
-      <Table
-        head={
-          <h2 className="flex items-baseline gap-3.5 text-card font-bold">
-            FAQ 목록
-            <span className="text-label font-normal text-sub">{vm.count}개</span>
-          </h2>
-        }
-        columns={columns}
-        rows={vm.rows}
-        rowKey={(r) => r.faqEntrySeq}
-        onRowClick={(r) => vm.toggleOpen(r.faqEntrySeq)}
-        expanded={(r) => vm.openId === r.faqEntrySeq}
-        subRows={(r, { gridCols }) =>
-          vm.openId === r.faqEntrySeq ? (
-            // 펼친 줄과 같은 좌우(16 나옴) · 아래만 둥글게 → 줄 + 띠가 한 덩어리. 라벨은 첫 줄 기준선에
-            // 열 맞춤: 번호 칸 비움 · '답변' 라벨은 분류 칸 · 답변 글은 질문 칸부터 끝까지
-            <div className="-mx-4 rounded-b-lg bg-bg px-4 pt-1 pb-[22px]">
-              <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
-                <span />
-                <span className="text-label font-semibold text-sub">답변</span>
-                {/* break-words: 띄어쓰기 없는 긴 URL도 카드 안에서 줄바꿈 */}
-                <p className="col-span-2 min-w-0 pr-4 text-body break-words whitespace-pre-wrap">
-                  {r.answer}
-                </p>
+      <div key={vm.category} className={slide}>
+        <Table
+          head={
+            <h2 className="flex items-baseline gap-3.5 text-card font-bold">
+              FAQ 목록
+              <span className="text-label font-normal text-sub">{vm.count}개</span>
+            </h2>
+          }
+          columns={columns}
+          rows={vm.rows}
+          rowKey={(r) => r.faqEntrySeq}
+          onRowClick={(r) => vm.toggleOpen(r.faqEntrySeq)}
+          expanded={(r) => vm.openId === r.faqEntrySeq}
+          subRows={(r, { gridCols }) =>
+            vm.openId === r.faqEntrySeq ? (
+              // 펼친 줄과 같은 좌우(16 나옴) · 아래만 둥글게 → 줄 + 띠가 한 덩어리. 라벨은 첫 줄 기준선에
+              // 열 맞춤: 번호 칸 비움 · '답변' 라벨은 분류 칸 · 답변 글은 질문 칸부터 끝까지
+              <div className="-mx-4 rounded-b-lg bg-bg px-4 pt-1 pb-[22px]">
+                <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
+                  <span />
+                  <span className="text-label font-semibold text-sub">답변</span>
+                  {/* break-words: 띄어쓰기 없는 긴 URL도 카드 안에서 줄바꿈 */}
+                  <p className="col-span-2 min-w-0 pr-4 text-body break-words whitespace-pre-wrap">
+                    {r.answer}
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : null
-        }
-        loading={vm.isLoading}
-        empty={
-          vm.listError ??
-          (vm.q || vm.category !== '전체' ? '해당하는 FAQ가 없습니다.' : 'FAQ가 없습니다.')
-        }
-        footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
-      />
+            ) : null
+          }
+          loading={vm.isLoading}
+          empty={
+            vm.listError ??
+            (vm.q || vm.category !== '전체' ? '해당하는 FAQ가 없습니다.' : 'FAQ가 없습니다.')
+          }
+          footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
+        />
+      </div>
 
       {vm.modal && (
         <FaqFormModal
