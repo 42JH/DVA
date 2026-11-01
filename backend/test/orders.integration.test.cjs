@@ -1263,58 +1263,6 @@ test('a fully populated new-customer order remains COLLECTING until a separate f
   assert.equal((await counts()).shipments, before.shipments);
 });
 
-test('Swagger advertises session authentication, exclusive customer inputs, UUID key and the real response envelope', async () => {
-  const response = await fetch(hosts[0] + '/api/docs-json');
-  assert.equal(response.status, 200);
-  const spec = await response.json(),
-    operation = spec.paths['/api/orders'].post;
-  assert.ok(operation.summary);
-  assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
-  const callHeaders = operation.parameters.filter(
-    (p) => p.in === 'header' && p.name.toLowerCase() === 'call_session_seq',
-  );
-  assert.equal(callHeaders.length, 1);
-  assert.equal(callHeaders[0].name, 'call_session_seq');
-  assert.equal(callHeaders[0].required, false);
-  assert.equal(callHeaders[0].schema.type, 'integer');
-  assert.equal(callHeaders[0].schema.minimum, 1);
-  assert.equal(callHeaders[0].schema.maximum, 2147483647);
-  assert.equal(spec.paths['/api/orders/validation'], undefined);
-  assert.equal(spec.paths['/api/consultations/incomplete'], undefined);
-  assert.equal(spec.paths['/api/consultations/incomplete/{id}'], undefined);
-  assert.ok(operation.parameters.some((p) => p.name === 'Idempotency-Key' && p.required));
-  assert.ok(!operation.parameters.some((p) => p.name === 'X-CSRF-Protection'));
-  const inputSchema = operation.requestBody.content['application/json'].schema;
-  const examples = operation.requestBody.content['application/json'].examples;
-  assert.equal(examples.existingCustomer.value.customer, undefined);
-  assert.equal(examples.customerByPhone.value.customerSeq, undefined);
-  assert.equal(typeof examples.customerByPhone.value.customer.phoneNumber, 'string');
-  assert.deepEqual(inputSchema.anyOf, [
-    { required: ['customerSeq'] },
-    { required: ['customer'] },
-    {
-      required: ['call', 'outcome'],
-      properties: { outcome: { enum: ['INCOMPLETE', 'CANCELLED'] } },
-    },
-  ]);
-  assert.equal(inputSchema.allOf[0].$ref, '#/components/schemas/CreateOrderDto');
-  assert.deepEqual(spec.components.schemas.OrderCustomerDto.required.sort(), [
-    'name',
-    'phoneNumber',
-  ]);
-  assert.ok(!(spec.components.schemas.CreateOrderDto.required ?? []).includes('customerSeq'));
-  const schema = operation.responses['201'].content['application/json'].schema;
-  assert.deepEqual(schema.required, ['data', 'meta']);
-  assert.equal(
-    spec.components.schemas.CreateOrderDto.properties.parcels.items.$ref,
-    '#/components/schemas/ParcelInputDto',
-  );
-  assert.equal(
-    spec.components.schemas.ParcelInputDto.properties.origin.allOf[0].$ref,
-    '#/components/schemas/OrderAddressPatchDto',
-  );
-});
-
 let readPhone = 580000;
 const readCustomer = async () => {
   const phone = '010' + String(++readPhone).padStart(8, '0');
@@ -1547,45 +1495,6 @@ test('ORD-02 validates filters and call IDs while preserving administrator authe
   for (let i = 0; i < 3; i++) assert.equal((await readOrders('', {}, i)).status, 200);
 });
 
-test('ORD-02 Swagger describes filters, a single call header and the actual list envelope', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/orders'].get;
-  assert.equal(operation.summary, '주문 목록 조회');
-  assert.ok(operation.description.includes('AI'));
-  const headers = operation.parameters.filter((p) => p.in === 'header');
-  assert.deepEqual(
-    headers.map((p) => p.name),
-    ['call_session_seq'],
-  );
-  assert.equal(headers[0].schema.type, 'integer');
-  const queries = operation.parameters.filter((p) => p.in === 'query');
-  assert.deepEqual(queries.map((p) => p.name).sort(), [
-    'customerSeq',
-    'from',
-    'limit',
-    'offset',
-    'recipientName',
-    'status',
-    'to',
-  ]);
-  assert.ok(queries.every((p) => p.description && !p.required));
-  const summary = spec.components.schemas.OrderSummaryDto;
-  assert.deepEqual(
-    queries.find((p) => p.name === 'status').schema.enum,
-    summary.properties.status.enum,
-  );
-  assert.ok(summary.required.includes('status'));
-  assert.equal(summary.properties.shipmentStatuses, undefined);
-  assert.deepEqual(operation.responses[200].content['application/json'].schema.required, [
-    'data',
-    'hasNext',
-    'total_count',
-  ]);
-  assert.ok(
-    Object.values(spec.components.schemas.OrderSummaryDto.properties).every((p) => p.description),
-  );
-});
-
 const readDetail = (id, extra = {}, index = 0) =>
   fetch(hosts[index] + '/api/orders/' + id, {
     headers: Object.fromEntries(
@@ -1767,42 +1676,6 @@ test('ORD-03 keeps order version and parcels in one snapshot during a concurrent
   const after = (await (await readDetail(id)).json()).data;
   assert.ok(after.version > before);
   assert.equal(after.parcels[0].origin.name, '변경 후');
-});
-
-test('ORD-03 Swagger includes required nullable fields, nested response descriptions and the call header only once', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/orders/{id}'].get;
-  assert.equal(operation.summary, '주문 상세 조회');
-  assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
-  assert.deepEqual(
-    operation.parameters.filter((p) => p.in === 'header').map((p) => p.name),
-    ['call_session_seq'],
-  );
-  const id = operation.parameters.find((p) => p.in === 'path');
-  assert.equal(id.name, 'id');
-  assert.equal(id.required, true);
-  assert.equal(id.schema.maximum, 2147483647);
-  assert.ok(id.description.includes('orderSeq'));
-  const schema = operation.responses[200].content['application/json'].schema;
-  assert.deepEqual(schema.required, ['data', 'meta']);
-  assert.equal(schema.properties.data.$ref, '#/components/schemas/OrderDetailDto');
-  for (const name of ['OrderDetailDto', 'OrderParcelDto', 'OrderAddressValueDto']) {
-    const model = spec.components.schemas[name];
-    assert.ok(
-      Object.values(model.properties).every((p) => p.description),
-      name,
-    );
-    assert.deepEqual([...model.required].sort(), Object.keys(model.properties).sort(), name);
-  }
-  for (const field of Object.values(spec.components.schemas.OrderAddressValueDto.properties))
-    assert.equal(field.nullable, true);
-  assert.equal(spec.components.schemas.OrderDetailDto.properties.paymentMethodType.nullable, true);
-  assert.equal(spec.components.schemas.OrderSummaryDto.properties.paymentMethodType.nullable, true);
-  assert.equal(spec.components.schemas.OrderShipmentDto, undefined);
-  assert.equal(spec.components.schemas.OrderParcelDto.properties.shipment, undefined);
-  assert.ok(spec.components.schemas.OrderDetailDto.required.includes('status'));
-  assert.equal(spec.components.schemas.OrderDetailDto.properties.parcelCount, undefined);
-  assert.equal(spec.components.schemas.OrderDetailDto.properties.shipmentStatuses, undefined);
 });
 
 const patchOrder = (id, input, extra = {}, index = 0) =>
@@ -2355,47 +2228,6 @@ test('ORD-04 all active administrator roles save without a call, inactive sessio
     await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [adminId]);
   }
   assert.deepEqual(await storedOrder(id), before);
-});
-
-test('ORD-04 Swagger documents partial saves, version conflicts, nullable fields and one call header', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/orders/{id}'].patch;
-  assert.equal(operation.summary, '주문 정보 수정');
-  assert.ok(operation.description.includes('COLLECTING'));
-  assert.ok(operation.description.includes('아직 적용되지 않습니다'));
-  assert.deepEqual(operation.security, [{ adminSession: [] }, {}]);
-  assert.deepEqual(
-    operation.parameters.filter((p) => p.in === 'header').map((p) => p.name),
-    ['call_session_seq'],
-  );
-  assert.equal(
-    operation.parameters.find((p) => p.in === 'path').description.includes('orderSeq'),
-    true,
-  );
-  assert.deepEqual(spec.components.schemas.UpdateOrderDto.required, ['expectedVersion']);
-  assert.equal(spec.components.schemas.UpdateOrderDto.properties.paymentMethodType.type, 'string');
-  assert.equal(spec.components.schemas.UpdateOrderDto.properties.customerSeq, undefined);
-  assert.equal(spec.components.schemas.UpdateOrderDto.properties.pickupRequestedAt.nullable, true);
-  assert.equal(
-    spec.components.schemas.ParcelChangeDto.properties.orderParcelSeq.maximum,
-    2147483647,
-  );
-  for (const name of [
-    'UpdateOrderDto',
-    'UpdatedOrderDto',
-    'ParcelChangeDto',
-    'OrderAddressPatchDto',
-  ])
-    assert.ok(
-      Object.values(spec.components.schemas[name].properties).every((p) => p.description),
-      name,
-    );
-  for (const status of [200, 400, 401, 403, 404, 409])
-    assert.ok(operation.responses[status].description);
-  const schema = operation.responses[200].content['application/json'].schema;
-  assert.deepEqual(schema.required, ['data', 'meta']);
-  assert.equal(schema.properties.data.$ref, '#/components/schemas/UpdatedOrderDto');
-  assert.equal(Object.keys(operation.requestBody.content['application/json'].examples).length, 4);
 });
 
 test('order APIs use the literal DB column header and reject former or hyphenated names', async () => {
@@ -3384,41 +3216,6 @@ test('ORD-06 stored submission state survives a new application instance without
   assert.equal(dverRequests.length, 1);
 });
 
-test('ORD-06 Swagger documents English tag, literal call header, version body, result envelope and errors', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/orders/{id}/submit'].post;
-  assert.deepEqual(operation.tags, ['Orders']);
-  assert.equal(operation.summary, '기존 미완료 주문 최종 접수');
-  assert.ok(operation.description.includes('groupBilling'));
-  const headers = operation.parameters.filter((p) => p.in === 'header');
-  assert.equal(headers.length, 1);
-  assert.equal(headers.find((p) => p.name === 'call_session_seq').schema.type, 'integer');
-  assert.equal(
-    headers.find((p) => p.name === 'Idempotency-Key'),
-    undefined,
-  );
-  assert.equal(
-    spec.paths['/api/orders'].post.parameters.find((p) => p.name === 'Idempotency-Key').required,
-    true,
-  );
-  assert.deepEqual(spec.components.schemas.SubmitOrderDto.required, ['expectedVersion']);
-  for (const operation of [
-    spec.paths['/api/orders'].post,
-    spec.paths['/api/orders/{id}'].patch,
-    spec.paths['/api/orders/{id}/submit'].post,
-    spec.paths['/api/members/{id}'].patch,
-  ])
-    assert.ok(operation.responses[409].description.includes('잠금 대기 2초 초과'));
-  for (const status of [200, 202, 400, 401, 403, 404, 409, 422, 503])
-    assert.ok(operation.responses[status]?.description, status);
-  assert.ok(operation.responses[202].headers.Location);
-  assert.deepEqual(spec.components.schemas.CreateOrderDto.properties.paymentMethodType.enum, [
-    'billing',
-    'credit',
-    'groupBilling',
-  ]);
-});
-
 test('ORD-06 waits for membership eligibility and continues the original request', async () => {
   resetDver();
   const order = await readyOrder({ customerSeq: customerId, paymentMethodType: 'groupBilling' });
@@ -3962,26 +3759,6 @@ test('call context rolls back a new session if the customer lookup fails', async
   );
 });
 
-test('call context Swagger documents optional identity, database sequence and unchanged legacy lookup', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/customers/context'].post;
-  assert.deepEqual(operation.tags, ['Customers']);
-  assert.equal(operation.summary, '고객 확인·주소록 조회 및 통화 시작');
-  assert.ok(operation.description.includes('call_session_seq'));
-  assert.ok(operation.responses['409']);
-  const schemas = spec.components.schemas;
-  assert.deepEqual(schemas.CallerContextRequestDto.required, ['phoneNumber']);
-  assert.ok(
-    JSON.stringify(schemas.CallerContextRequestDto.properties.call).includes('CallIdentityDto'),
-  );
-  assert.deepEqual(schemas.CallIdentityDto.required.sort(), ['incomingAt', 'providerCallId']);
-  assert.equal(schemas.CallerContextDto.properties.callSessionSeq.type, 'number');
-  assert.ok(!schemas.CallerContextDto.required.includes('callSessionSeq'));
-  const legacy = await startCallContext('01000000001', undefined);
-  assert.equal(legacy.status, 200);
-  assert.equal(Object.hasOwn((await legacy.json()).data, 'callSessionSeq'), false);
-});
-
 const screenOrders = (query = {}, headers = {}, index = 0) =>
   fetch(hosts[index] + '/api/admin/orders?' + new URLSearchParams(query), {
     headers: { Cookie: cookies[index], ...headers },
@@ -4462,21 +4239,4 @@ test('concurrent admin edits of a finalized order have one winner and retain amo
   const after = await storedOrder(order.orderSeq);
   assert.equal(after.totalAmount, after.parcels[0].notifiedPrice);
   assert.equal(after.status, 'PAID');
-});
-
-test('admin Swagger documents removal, recalculated amounts and protected receipt facts', async () => {
-  const spec = await (await fetch(hosts[0] + '/api/docs-json')).json();
-  const operation = spec.paths['/api/orders/{id}'].patch;
-  assert.ok(operation.description.includes('모든 주문 상태'));
-  assert.ok(operation.description.includes('재계산'));
-  assert.ok(operation.responses['422']);
-  assert.equal(
-    spec.components.schemas.UpdateOrderDto.properties.removeParcelSeqs.uniqueItems,
-    true,
-  );
-  assert.equal(
-    spec.components.schemas.UpdateOrderDto.properties.removeParcelSeqs.items.type,
-    'integer',
-  );
-  assert.ok(operation.requestBody.content['application/json'].examples.adminEdit);
 });

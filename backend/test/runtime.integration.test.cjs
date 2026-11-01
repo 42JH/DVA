@@ -155,6 +155,7 @@ test('Nginx forwards an AI consultation result in the JSON body without a call h
       callerPhoneNumber: '01099008877',
       incomingAt: '2026-10-27T01:00:00Z',
     },
+    parcels: [{ smallBoxCount: 1 }],
   };
   const send = () =>
     fetch('http://proxy/api/orders', {
@@ -166,8 +167,59 @@ test('Nginx forwards an AI consultation result in the JSON body without a call h
   assert.equal(response.status, 201);
   const { data } = await response.json();
   assert.equal(data.status, 'COLLECTING');
+  assert.ok(data.orderSeq > 0);
   assert.ok(data.callSessionSeq > 0);
+  assert.equal(data.paymentRequest, null);
   assert.deepEqual((await (await send()).json()).data, data);
+});
+
+test('Nginx preserves an empty AI call without an order and replays the same result', async () => {
+  const root = 'http://proxy/api';
+  const key = randomUUID();
+  const input = {
+    outcome: 'INCOMPLETE',
+    call: {
+      providerCallId: `runtime-empty-${key}`,
+      callerPhoneNumber: '01099008878',
+      incomingAt: '2026-10-27T01:00:00Z',
+    },
+    customer: { name: '빈 통화 검증', phoneNumber: '01099008878' },
+    totalAmount: null,
+    pickupRequestedAt: null,
+    parcels: [{ origin: { name: null }, destination: {}, smallBoxCount: 0 }],
+  };
+  const send = () =>
+    fetch(root + '/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      body: JSON.stringify(input),
+    });
+  const first = await send();
+  assert.equal(first.status, 201, await first.clone().text());
+  const { data } = await first.json();
+  assert.equal(data.status, 'NO_ORDER');
+  assert.equal(data.orderSeq, null);
+  assert.equal(data.version, null);
+  assert.equal(data.paymentRequest, null);
+  assert.equal(data.totalAmount, null);
+  assert.ok(data.callSessionSeq > 0);
+  const replay = await send();
+  assert.equal(replay.status, 201, await replay.clone().text());
+  assert.deepEqual((await replay.json()).data, data);
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const detail = await fetch(root + '/calls/' + data.callSessionSeq, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(detail.status, 200);
+  const savedCall = (await detail.json()).data.call;
+  assert.equal(savedCall.callSessionSeq, data.callSessionSeq);
+  assert.equal(savedCall.providerCallId, input.call.providerCallId);
+  assert.equal(savedCall.orderSeq, null);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);
@@ -754,11 +806,14 @@ test('production cancellation preserves AI phone scope and admin sessions throug
           incomingAt: new Date().toISOString(),
         },
         customer: { name: '취소 프록시 검증', phoneNumber: phone },
-        parcels: [{}, {}, {}],
+        parcels: [{ smallBoxCount: 1 }, { smallBoxCount: 2 }, { smallBoxCount: 3 }],
       }),
     });
     assert.equal(response.status, 201, await response.clone().text());
-    return (await response.json()).data;
+    const { data } = await response.json();
+    assert.equal(data.status, 'COLLECTING');
+    assert.ok(data.orderSeq > 0);
+    return data;
   };
   const order = await create('01064000641');
   const headers = {

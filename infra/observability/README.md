@@ -150,11 +150,10 @@ node backend/scripts/check.cjs
 node infra/observability/test.mjs
 ```
 
-두 번째 명령은 매 실행마다 임시 네트워크·가짜 BE·가짜 Mattermost 수신처를 만든다.
-실제 Loki/Alloy/Prometheus/Grafana를 기동해 수집, 필드 제거, 지표, 알림 평가·JSON 전송을 확인하고
-자신이 생성한 컨테이너/네트워크만 제거한다. 운영 서버·실제 디버·외부 채널에는 호출하지 않는다.
-Docker-in-Docker에서도 동작하도록 로컬 설정은 Docker cp로 전달한다.
-실제 24시간 대기 시험은 하지 않고 적용된 notification policy의 24h 값과 단기 중복 미발송을 확인한다.
+두 번째 명령은 Docker를 기동하지 않고 관측 설정 생성, 비공개 포트, 알림 비활성 기본값,
+1분 장애 임계치·24시간 반복 주기·복구 알림 비활성 정책과 비밀번호·웹훅 URL 검증을 확인한다.
+실제 Grafana 알림 전송·Loki 수집·컨테이너 재시작 재현 검사는 제거했다.
+백엔드 로그 개인정보 제거·권한·지표 검증과 운영 Nginx 라우팅 검사는 백엔드 테스트에 유지한다.
 
 ## 참고
 

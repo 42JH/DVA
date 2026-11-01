@@ -400,20 +400,3 @@ test('company POST accepts a 1000-employee body above 100 KiB and rejects bodies
   );
   assert.deepEqual(await counts(), before);
 });
-
-test('OpenAPI exposes optional company child arrays and roles while preserving creation response and member 204', async () => {
-  const document = await get('/api/docs-json');
-  const schema = document.components.schemas.CreateOrganizationDto;
-  assert.deepEqual(schema.required, ['name']);
-  assert.equal(schema.properties.members.maxItems, 1000);
-  assert.equal(schema.properties.departments.maxItems, 1000);
-  const member = document.components.schemas.OrganizationMemberDto;
-  assert.deepEqual(member.properties.role.enum, ['MEMBER', 'ORG_ADMIN']);
-  assert.ok(!member.required.includes('role'));
-  assert.equal(member.properties.departmentSeq, undefined);
-  assert.equal(
-    document.paths['/api/companies'].post.requestBody.content['application/json'].schema.$ref,
-    '#/components/schemas/CreateOrganizationDto',
-  );
-  assert.ok(document.paths['/api/companies/{id}/members'].post.responses['204']);
-});

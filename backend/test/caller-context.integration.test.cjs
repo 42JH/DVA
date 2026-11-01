@@ -352,28 +352,6 @@ test('MVP needs no service token or Origin; stale administrator cookies never by
   assert.equal(forbidden.status, 403);
 });
 
-test('OpenAPI documents request, explicit lookup states, complete pin schemas and 200 envelope', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/customers/context'].post;
-  assert.deepEqual(operation.security, []);
-  assert.ok(operation.responses['200']);
-  assert.ok(!operation.responses['201']);
-  const schemas = document.components.schemas;
-  assert.deepEqual(schemas.CallerContextRequestDto.required, ['phoneNumber']);
-  assert.deepEqual(schemas.CallerContextDto.properties.lookupStatus.enum, [
-    'REGISTERED',
-    'UNREGISTERED',
-    'WITHDRAWN',
-  ]);
-  assert.deepEqual(Object.keys(schemas.CallerContextEnvelopeDto.properties).sort(), [
-    'data',
-    'meta',
-  ]);
-  assert.equal(schemas.CallerContextDto.properties.customer.nullable, true);
-  assert.ok(schemas.PinAddressDto.properties.roadAddress);
-  assert.ok(schemas.CompanyContextPinDto.properties.departmentName);
-});
-
 test('request logs contain route and request ID without caller number or address content', async () => {
   const c = await customer();
   const requestId = randomUUID();

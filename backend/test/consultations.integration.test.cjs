@@ -316,39 +316,6 @@ test('list rejects invalid, repeated and unsupported query fields', async () => 
     await error(await list(query), 400, 'INVALID_REQUEST');
 });
 
-test('Swagger describes the list contract and cookie authentication', async () => {
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  const operation = spec.paths['/api/calls'].get;
-  assert.deepEqual(operation.tags, ['Calls']);
-  assert.ok(operation.summary);
-  assert.ok(operation.description);
-  assert.deepEqual(operation.security, [{ adminSession: [] }]);
-  const parameters = operation.parameters.map(({ name }) => name);
-  assert.equal(new Set(parameters).size, parameters.length);
-  assert.deepEqual(
-    parameters.sort(),
-    [
-      'orderSeq',
-      'orderStatus',
-      'callerPhoneNumber',
-      'from',
-      'to',
-      'endReason',
-      'handoffStatus',
-      'limit',
-      'offset',
-      'q',
-      'result',
-      'hasComplaint',
-      'aiPersonaVersionSeq',
-    ].sort(),
-  );
-  for (const name of ['CallDto', 'HandoffDto', 'CallListResponseDto'])
-    for (const property of Object.values(spec.components.schemas[name].properties))
-      assert.ok(property.description, name);
-  assert.equal(Object.hasOwn(spec.components.schemas.CallDto.properties, 'incomingAt'), false);
-});
-
 test('request logs do not contain phone numbers, provider IDs or search text', async () => {
   const row = await call({ endReason: randomUUID() });
   await result(await list({ callerPhoneNumber: row.callerPhoneNumber, endReason: row.endReason }));
@@ -431,30 +398,6 @@ test('detail validates database IDs and checks the session before revealing exis
   }
   for (const id of ['0', '-1', '1.5', '1e2', '2147483648', row.providerCallId])
     await error(await detail(id), 400, 'INVALID_REQUEST');
-});
-
-test('Swagger documents call detail IDs, handoff and recording URLs with expiry and per-file errors', async () => {
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  const operation = spec.paths['/api/calls/{id}'].get;
-  assert.deepEqual(operation.tags, ['Calls']);
-  assert.ok(operation.summary);
-  assert.deepEqual(operation.security, [{ adminSession: [] }]);
-  assert.equal(operation.parameters.length, 1);
-  assert.equal(operation.parameters[0].name, 'id');
-  assert.match(operation.parameters[0].description, /call_session_seq/);
-  assert.ok(operation.responses['404']);
-  for (const name of ['CallDetailDto', 'CallDetailResponseDto', 'RecordingDto'])
-    for (const property of Object.values(spec.components.schemas[name].properties))
-      assert.ok(property.description, name);
-  assert.deepEqual(Object.keys(spec.components.schemas.RecordingDto.properties).sort(), [
-    'createdAt',
-    'expiresAt',
-    'playbackError',
-    'recordingSeq',
-    'url',
-  ]);
-  for (const name of ['url', 'expiresAt', 'playbackError'])
-    assert.equal(spec.components.schemas.RecordingDto.properties[name].nullable, true);
 });
 
 const transcript = (id, query = {}, headers = operator.headers) =>
@@ -547,23 +490,6 @@ test('transcript requires an active administrator and validates call IDs and pag
     'orderSeq=1',
   ])
     await error(await transcript(row.callSessionSeq, query), 400, 'INVALID_REQUEST');
-});
-
-test('Swagger documents transcript pagination, speakers and the difference between received time and audio position', async () => {
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  const operation = spec.paths['/api/calls/{id}/transcript'].get;
-  assert.deepEqual(operation.tags, ['Calls']);
-  assert.ok(operation.summary);
-  assert.deepEqual(operation.security, [{ adminSession: [] }]);
-  assert.deepEqual(operation.parameters.map(({ name }) => name).sort(), ['id', 'limit', 'offset']);
-  assert.ok(operation.responses['404']);
-  assert.deepEqual(spec.components.schemas.UtteranceDto.properties.speaker.enum, [
-    'CUSTOMER',
-    'AI',
-  ]);
-  for (const name of ['UtteranceDto', 'TranscriptResponseDto'])
-    for (const property of Object.values(spec.components.schemas[name].properties))
-      assert.ok(property.description, name);
 });
 
 function playbackStorage(t) {

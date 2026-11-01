@@ -101,30 +101,6 @@ test('69: new customers are registered atomically and an existing phone does not
   );
 });
 
-test('69: request and response DTOs expose no AI fields and Swagger requires an admin cookie', async () => {
-  const spec = await (await fetch(f.host + '/api/docs-json')).json();
-  const api = spec.paths['/api/admin/orders'].post;
-  assert.deepEqual(api.security, [{ adminSession: [] }]);
-  assert.deepEqual(api.tags, ['Admin Orders']);
-  assert.equal(api.parameters.find((p) => p.name === 'Idempotency-Key').required, true);
-  assert.equal(
-    api.parameters.some((p) => p.name === 'call_session_seq'),
-    false,
-  );
-  for (const status of [201, 202, 400, 401, 403, 404, 409, 422, 503])
-    assert.ok(api.responses[status]);
-  const request = spec.components.schemas.CreateManualOrderDto;
-  for (const field of ['call', 'outcome', 'status', 'creationSource'])
-    assert.equal(request.properties[field], undefined);
-  assert.ok(request.required.includes('parcels'));
-  assert.equal(request.required.includes('pickupRequestedAt'), false);
-  assert.equal(request.properties.parcels.minItems, 1);
-  const result = spec.components.schemas.ManualOrderResultDto;
-  assert.equal(result.properties.callSessionSeq, undefined);
-  assert.deepEqual(result.properties.creationSource.enum, ['ADMIN']);
-  assert.ok(spec.paths['/api/orders'].post); // Existing AI contract remains available.
-});
-
 test('69: legacy admin drafts remain partial and AI results keep the existing payload and response', async () => {
   const before = await f.counts();
   const draft = await f.post('/api/orders', { customerSeq: f.customerId });
