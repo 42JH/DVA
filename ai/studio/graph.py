@@ -3,6 +3,7 @@
 전화 없이 가짜 통화 하나를 스레드마다 두고, 실행 한 번에 보고 하나(고객 답·용건·도구 호출·확정 지연 끝)를 넣는다.
 보고 처리는 실제 코드(통화 준비·답 처리·디스패처)를 그대로 쓰고, 거기서 나온 사건은 실제 엔진 노드(engine._step)로
 이 그래프의 단계 노드를 하나씩 지나가게 해 Studio에서 경로가 보이게 한다. 판별 모델(LLM)은 부르지 않는다.
+고객 답은 확인 단계면 서버 판별(apply_answer), 아니면 백엔드 보고(answer·switch_task 도구)로 넣는다.
 """
 
 import json
@@ -27,7 +28,7 @@ from app.call import Call  # noqa: E402
 from app.order import COUNT_FIELDS  # noqa: E402
 from app.dispatcher import dispatch  # noqa: E402
 from app.flow import engine  # noqa: E402
-from app.listener import INTENTS, NO_ANSWER, SLOTS, apply_answer, stage_choices  # noqa: E402
+from app.listener import INTENTS, NO_ANSWER, apply_answer, stage_choices  # noqa: E402
 from app.tools._base import TOOLS  # noqa: E402
 
 CUSTOMERS = {"new": new_db, "saved": saved_db, "floors": floors_db, "orders": orders_db, "picked": picked_db,
@@ -35,7 +36,7 @@ CUSTOMERS = {"new": new_db, "saved": saved_db, "floors": floors_db, "orders": or
 CALLS: dict[str, Call] = {}  # 스레드 → 가짜 통화. 서버를 다시 띄우면 비므로 새 통화로 시작한다
 
 IntentName = Literal[tuple(k for k in INTENTS if k != "none")]
-SlotName = Literal[tuple(SLOTS)]
+TASKS = {"lookup": "lookup", "restricted": "agent", "end": "end"}  # 업무를 바꾸는 용건 → switch_task
 ToolName = Literal[tuple(TOOLS)]
 
 
@@ -46,9 +47,10 @@ class StudioInput(BaseModel):
         "new", description="첫 실행에서만 쓴다. new 신규, saved 최근 접수·주소록이 있는 등록 고객, floors 같은 건물 여러 층 핀, "
                            "orders 접수한 택배가 있는 등록 고객(조회·취소), picked 그 택배가 이미 수거됨, withdrawn 탈퇴, "
                            "no_recent 최근 접수 정보가 없는 등록 고객")
-    answer: str | None = Field(None, description="지금 단계 질문에 대한 고객 답. 결과의 choices 중 하나")
-    intent: IntentName | None = Field(None, description="전역 의도(질문·제한된 요청·정정·조회·기다림·종료). 답과 함께 줄 수 있다")
-    slot: SlotName = Field("none", description="intent가 correction일 때 고치는 항목")
+    answer: str | None = Field(None, description="지금 단계 질문에 대한 고객 답. 결과의 choices 중 하나(확인 단계면 서버 판별, "
+                                                 "아니면 백엔드의 answer 도구로)")
+    intent: IntentName | None = Field(None, description="고객 말의 용건. 조회·제한된 요청·종료는 백엔드의 switch_task로, 그 밖에는 "
+                                                        "확인 단계에서 답과 함께 들은 용건(확정을 막는다)")
     tool: ToolName | None = Field(None, description="백엔드 모델의 도구 호출. 결과의 tools 중 하나")
     args: dict = Field(default_factory=dict, description="도구 인수. record_order는 결과의 example_args를 붙여 넣으면 된다")
     commit: bool = Field(False, description="확정 지연이 끝남(결과의 pending이 true일 때). 결제 단계 진입·취소 실행")
@@ -119,21 +121,29 @@ async def report(state: StudioState, config: RunnableConfig) -> Command:
         call.rag = FakeRag()  # 질문에 "모르는"이 있으면 답할 자료 없음(RAG No)
         _, events = await _collect(call.prepare)
         return await _next(call, events, {"result": {"started": state.customer, "start_stage": call.flow.stage}})
-    # 답은 같이 들은 전역 의도와 함께 줄 수 있다(한 마디에 여러 행동, listener.apply_answer)
+    # 확인 단계의 답은 같이 들은 용건과 함께 줄 수 있다(listener.apply_answer)
     given = [name for name in ("answer", "tool", "commit") if getattr(state, name)] or (["intent"] if state.intent else [])
     if len(given) != 1 or (state.intent and given[0] in ("tool", "commit")):
         return await _next(call, [], {"result": {"error": "answer(+intent)·intent·tool·commit 중 하나만 채워 실행"}})
+    call_id = f"studio-{len(call.tool_calls) + 1}"
+    confirm = engine.current(call).confirm
     if state.answer:
         if state.answer == NO_ANSWER or state.answer not in stage_choices(call):
             return await _next(call, [], {"result": {"error": f"{call.flow.stage} 단계의 답이 아님. choices 중 하나"}})
-        out, events = await _collect(lambda: apply_answer(call, state.answer, state.intent or "none", state.slot))
+        if confirm:
+            out, events = await _collect(lambda: apply_answer(call, state.answer, state.intent or "none"))
+        else:
+            out, events = await _collect(lambda: dispatch(call, "answer", json.dumps({"choice": state.answer}), call_id))
+    elif state.intent in TASKS:
+        out, events = await _collect(lambda: dispatch(
+            call, "switch_task", json.dumps({"task": TASKS[state.intent]}), call_id))
     elif state.intent:
-        out, events = await _collect(lambda: apply_answer(call, NO_ANSWER, state.intent, state.slot))
+        out, events = await _collect(lambda: apply_answer(call, NO_ANSWER, state.intent))
     elif state.commit:
         out, events = None, [(engine.COMMIT, "commit")] if call.flow.pending else []
     else:
-        call_id = f"studio-{len(call.tool_calls) + 1}"
         out, events = await _collect(lambda: dispatch(call, state.tool, json.dumps(state.args, ensure_ascii=False), call_id))
+    if isinstance(out, dict):
         out = {k: v for k, v in out.items() if k != "state"}  # 단계를 옮기기 전 요약이라 뺀다(done에서 다시 만든다)
     return await _next(call, events, {"result": {given[0]: getattr(state, given[0]), "output": out}})
 
@@ -154,7 +164,7 @@ async def done(state: StudioState, config: RunnableConfig) -> dict:
     tools = list(engine.allowed_tools(call))
     first = call.flow.history[0]["from"] if call.flow.history else call.flow.stage
     return {
-        "answer": None, "intent": None, "slot": "none", "tool": None, "args": {}, "commit": False, "queue": [],
+        "answer": None, "intent": None, "tool": None, "args": {}, "commit": False, "queue": [],
         "stage": call.flow.stage,
         "next": engine.next_text(call),
         "choices": [c for c in stage_choices(call) if c != NO_ANSWER],

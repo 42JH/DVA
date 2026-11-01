@@ -1,5 +1,6 @@
 """분기 로직을 LLM 없이 검증(spec/flow.md): 시나리오마다 "보고 순서 → 단계 경로"를 데이터로 적는다.
-보고는 세 종류: 백엔드 도구 호출(tool), 서버의 고객 말 판별 결과(say), 확정 지연이 끝남(commit).
+보고는 세 종류: 백엔드 도구 호출(tool), 고객 답(say), 확정 지연이 끝남(commit). 고객 답은 확인 단계면 서버 판별로,
+아니면 음성 모델이 알아듣고 백엔드가 보고한 것으로(answer·switch_task 도구) 넣는다.
 서버가 실행하는 도구(취소)는 보고마다 바로 실행한다(sideband의 after_change와 같은 일).
 정보 받기는 단계 하나(ORDER)라 경로보다 "다음에 할 말"과 임시 주문으로 확인한다.
 끼어들기 시각이 필요한 시나리오는 tests/test_sideband.py에 있다."""
@@ -96,8 +97,9 @@ def tool(name, args, stage):
     return ("tool", name, args, stage)
 
 
-def say(answer, stage, intent="none", slot="none"):
-    return ("say", answer, (intent, slot), stage)
+def say(answer, stage, intent="none"):
+    """고객 답. intent: 업무 바꾸기(lookup·restricted·end → switch_task)나 확인 단계에서 섞인 용건."""
+    return ("say", answer, intent, stage)
 
 
 def commit(stage):
@@ -105,10 +107,12 @@ def commit(stage):
 
 
 def ask(question, found=True):
-    """질문 → QNA → RAG에서 검색 결과(백엔드의 search_manual)까지."""
-    return [say("none", "RAG", intent="question"),
-            tool("search_manual", {"question": question if found else f"모르는 {question}"},
+    """질문 → 백엔드의 search_manual → 결과로 QNA(검색 결과가 있으면 답변 뒤, 없으면 상담원 제안)."""
+    return [tool("search_manual", {"question": question if found else f"모르는 {question}"},
                  "D_AFTER_ANSWER" if found else "D_AGENT_OFFER")]
+
+
+TASKS = {"lookup": "lookup", "restricted": "agent", "end": "end", "order": "order"}
 
 
 def serve(call):
@@ -128,9 +132,16 @@ def report(call, step, i=0):
     elif kind == "commit":
         assert call.flow.pending, f"{call.flow.stage}에 미뤄 둔 확정이 없음"
         out = run(engine.apply(call, [engine.COMMIT], "commit"))
-    else:
+    elif engine.current(call).confirm:  # 확인 단계: 서버가 고객 말을 직접 판별
         assert a in stage_choices(call), f"{call.flow.stage}에 없는 답 {a}"
-        out = run(apply_answer(call, a, *b))
+        out = run(apply_answer(call, a, b))
+    else:  # 음성 모델이 알아들은 답을 백엔드가 보고
+        out = None
+        if a != "none":
+            out = run(dispatch(call, "answer", json.dumps({"choice": a}), f"a{i}"))
+            assert out["ok"], out
+    if kind == "say" and b in TASKS:
+        out = run(dispatch(call, "switch_task", json.dumps({"task": TASKS[b]}), f"t{i}"))
     serve(call)
     return out
 
@@ -253,17 +264,15 @@ SCENARIOS = [
                                "RESUME_TASK", "C_CHOICE"], None),
     ("21 받는 분 번호 정정 → 고친 값 확인 → 하던 질문으로", new_db, NEW_TO_PICKUP[:3] + [
         tool("record_order", {"small_box_count": 1}, "ORDER"),
-        say("none", "ORDER", intent="correction", slot="receiver_phone"),
         tool("record_order", {"receiver_phone": "010-1111-2222"}, "ORDER"),
     ], ENTRY_NEW + ["ORDER"], None),
     ("22 저장된 도착지 정정 → 주소록 찾기부터 다시", saved_db, SAVED_TO_ITEM + [
         tool("record_order", {"small_box_count": 1}, "ORDER"),
-        say("none", "ORDER", intent="correction", slot="receiver_address"),
         tool("match_pins", {"name": "이영희", "place": "마포"}, "ORDER"),
         say("yes", "ORDER"),
     ], ENTRY_SAVED, None),
     ("23 인사에 예 + 이름 정정(한 마디에 답과 정정)", saved_db, [
-        say("yes", "ORDER", intent="correction", slot="sender_name"),
+        say("yes", "ORDER"),
         tool("record_order", {"sender_name": "박민수"}, "ORDER"),
     ], ENTRY_SAVED, None),
     ("24 순서 밖 정보부터 말해도 기록 → 다 차면 되읽기", new_db, [
@@ -276,13 +285,12 @@ SCENARIOS = [
      ENTRY_NEW + ["ORDER"], None),
     ("26 되읽기에 예 + 정정 → 확정하지 않고 고친 뒤 다시 확인", new_db, NEW_TO_PICKUP + [
         tool("record_order", WHEN, "A_CONFIRM"),
-        say("yes", "A_CONFIRM", intent="correction", slot="receiver_name"),
+        say("yes", "A_CONFIRM", intent="correction"),
         tool("record_order", {"receiver_name": "이영수"}, "A_CONFIRM"),
         say("yes", "A_CONFIRM"),
         commit("A_CHOICE"),
     ], ENTRY_NEW + ["ORDER"] + TAIL, None),
-    ("27 인사에 예 + 질문 → 질문만 받음 → 답변 → 인사 질문으로 복귀", saved_db, [
-        say("yes", "RAG", intent="question"),
+    ("27 인사 질문 중 질문 → 답변 → 인사 질문으로 복귀", saved_db, [
         tool("search_manual", {"question": "배송 며칠"}, "D_AFTER_ANSWER"),
         say("other_task", "ORDER"),
     ], ENTRY_SAVED + ANSWERED + ["RESUME_TASK", "ORDER"], None),
@@ -323,7 +331,7 @@ def test_1_fare_notice_waits_for_commit_then_is_not_repeated():
     # 확정을 기다리는 동안은 새 질문 없이 기다린다. 확정되면 운임 → 결제 방식 → 추가 접수 질문을 한 진행 상태로
     assert engine.next_text(call) == TEXTS.note["COMMIT_WAIT"]
     report(call, commit("A_CHOICE"))
-    assert engine.next_text(call) == f"'운임은 4,000원이에요.' '{TEXTS.say['PAY_CREDIT']}' '{TEXTS.say['A8']}'"
+    assert engine.next_text(call) == f"'운임은 4,000원이에요.' '{TEXTS.say['PAY_CREDIT']}' '{TEXTS.say['A_ADDED']}' '{TEXTS.say['A8']}'"
     assert len(call.parcels) == 1 and call.payment_method == "credit"
 
 
@@ -360,7 +368,7 @@ def test_both_postpaid_methods_ask_and_wait_reverts_choice():
     report(call, say("groupBilling", "A_PAYMENT"))
     report(call, commit("A_CHOICE"))
     assert call.payment_method == "groupBilling"
-    assert engine.next_text(call) == f"'{TEXTS.say['PAY_GROUP']}' '{TEXTS.say['A8']}'"
+    assert engine.next_text(call) == f"'{TEXTS.say['PAY_GROUP']}' '{TEXTS.say['A_ADDED']}' '{TEXTS.say['A8']}'"
 
 
 def test_card_payment_order_is_saved_but_not_announced_as_accepted():
@@ -454,14 +462,21 @@ def test_registered_without_recent_order_asks_origin_then_open_destination():
 
 
 def test_23_greeting_yes_with_name_correction_keeps_answer_then_records_name():
-    """인사에 "네, 근데 이름이 박민수예요": 정정 때문에 "예"를 버리지 않고 출발지를 쓴 뒤 이름을 고친다
-    (2026-11-01 20:05 통화: 답·정정이 다 버려져 인사 질문에 머물고 음성 모델이 혼자 말함)."""
+    """인사에 "네, 근데 이름이 박민수예요": 백엔드가 답(예)과 고친 이름을 각각 보고한다. 출발지를 쓴 뒤 이름을 고친다."""
     call = play(saved_db(), steps("23")[:1])
-    assert call.order.sender_address == ORIGIN.address and call.flow.correcting == "sender_name"
-    assert said(call, "CORRECT_ASK")
+    assert call.order.sender_address == ORIGIN.address
     report(call, steps("23")[1])
-    assert call.order.sender_name == "박민수" and call.flow.correcting is None
+    assert call.order.sender_name == "박민수"
     assert "박민수" in engine.next_text(call) and said(call, "B4")  # 고친 값을 한 번 확인하고 다음 질문
+
+
+def test_greeting_name_correction_keeps_origin_question():
+    """출발지 확인에 "아니요, 제 이름이 틀렸어요": 질문의 답이 아니므로 단계는 그대로. 음성 모델이 고친 이름을 받아
+    백엔드가 기록하면 고친 값을 확인하고 출발지 확인을 다시 묻는다(2026-11-01 23:14 통화: 판별기가 "다른 일"로 읽어
+    HUB → 조회로 빠지고 정정이 버려짐)."""
+    call = play(saved_db(), [tool("record_order", {"sender_name": "최예린"}, "ORDER")])
+    assert call.flow.task == "order" and call.origin_offer and call.order.sender_name == "최예린"
+    assert "최예린" in engine.next_text(call) and said(call, "ORIGIN_ASK")
 
 
 def test_27_answer_with_question_takes_only_the_question_then_asks_again():
@@ -537,9 +552,8 @@ def test_second_parcel_skips_pickup_and_keeps_call_values():
     assert body["outcome"] == "COMPLETE" and len(body["parcels"]) == 2 and body["customerSeq"] == call.customer_seq
 
 
-def test_21_correction_asks_new_value_then_confirms_and_returns():
+def test_21_correction_confirms_new_value_and_returns():
     call = play(new_db(), steps("21")[:-1])
-    assert TEXTS.say["CORRECT_ASK"].format(**{"항목": "받으시는 분 연락처를"}) in engine.next_text(call)
     before = call.order.model_dump()
     report(call, steps("21")[-1])
     text = engine.next_text(call)
@@ -549,25 +563,17 @@ def test_21_correction_asks_new_value_then_confirms_and_returns():
     assert engine.next_text(call) == f"'{TEXTS.say['A4']}'"
 
 
-def test_correcting_the_asked_field_is_an_answer_not_a_correction():
-    call = play(new_db(), [say("order", "ORDER")])
-    run(apply_answer(call, "none", "correction", "sender_name"))  # 지금 묻는 항목을 다시 말함
-    assert call.flow.correcting is None
-
-
 def test_22_saved_destination_correction_drops_old_match():
+    """저장된 곳에서 가져온 받는 곳을 다른 곳으로 말하면(match_pins) 그 받는 분 묶음을 비우고 새로 찾는다."""
     call = play(saved_db(), steps("22")[:4])
-    assert call.order.receiver_address is None and call.order.receiver_name is None and not call.pin_candidates
-    assert said(call, "B6") and call.order.small_box_count == 1  # 물품은 그대로
+    assert call.pin_offer == DEST2 and said(call, "B9") and call.order.receiver_name is None
+    assert call.order.small_box_count == 1  # 물품은 그대로
     report(call, steps("22")[4])
-    assert call.pin_offer == DEST2 and said(call, "B9")
-    report(call, steps("22")[5])
     assert call.order.receiver_address == DEST2.address and said(call, "A4")
 
 
 def test_saved_origin_correction_asks_new_origin_keeping_sender():
     call = play(saved_db(), SAVED_TO_ITEM + [
-        say("none", "ORDER", intent="correction", slot="sender_address"),
         tool("record_order", {"sender_address": "인천 연수구 송도동 1", "sender_address_detail": ""}, "ORDER")])
     assert call.order.sender_name == "김철수" and call.order.sender_address == "인천 연수구 송도동 1"
     assert call.order.receiver_address == DEST.address  # 도착지는 그대로
@@ -647,7 +653,7 @@ def test_confirm_reads_back_order_and_no_asks_what_to_fix():
 
 def test_26_yes_with_correction_at_confirm_is_not_committed():
     call = play(new_db(), steps("26")[:6])
-    assert call.flow.pending is None and call.flow.correcting == "receiver_name"
+    assert call.flow.pending is None and call.flow.stage == "A_CONFIRM"
     report(call, steps("26")[6])
     assert call.order.receiver_name == "이영수" and "받는 분 이영수님" in engine.next_text(call)
 
@@ -680,24 +686,24 @@ def test_wait_drops_pending_commit_and_only_yes_rearms():
 
 
 def test_input_that_paused_commit_resumes_it_when_not_a_reversal():
-    """새 말(늦게 온 지난 단계의 조각 포함)이 멈춘 확정은, 그 말이 번복이 아니면 다시 잰다."""
+    """새 말(늦게 온 지난 단계의 조각 포함)이 멈춘 확정은, 그 말이 번복·끼어드는 용건이 아니면 다시 잰다."""
     from app.listener import apply_side
     call = play(new_db(), NEW_ONE[:-1])
     call.flow.pending["suspended"] = True
-    run(apply_side(call, "none", "none", False, None))
+    run(apply_side(call, "none"))
     assert call.flow.pending and not call.flow.pending["suspended"]
     call.flow.pending["suspended"] = True
-    run(apply_side(call, "wait", "none", False, None))  # 늦은 꼬리 조각의 기다림은 정정이 아니라 단계 답처럼 버린다
-    assert call.flow.pending and not call.flow.pending["suspended"]
-    call.flow.pending["suspended"] = True
-    run(apply_side(call, "wait", "none", True, None))  # 듣지 않던 단계에서 쌓인 "잠깐만요"는 확정을 버린다
+    run(apply_side(call, "wait"))  # "잠깐만요"는 확정을 버린다
     assert call.flow.pending is None
 
 
 def test_lookup_intent_during_pending_commit_drops_it():
+    """확정을 기다리는 중의 끼어드는 용건은 확정을 버리고(서버), 용건은 백엔드가 보고한다(switch_task)."""
     call = play(new_db(), NEW_ONE[:-1])
     run(apply_answer(call, "none", "lookup"))
-    assert call.flow.pending is None and call.flow.stage == "C_FIND_RECENT" and not call.parcels
+    assert call.flow.pending is None and call.flow.stage == "A_CONFIRM"
+    report(call, say("none", "C_FIND_RECENT", intent="lookup"))
+    assert not call.parcels
 
 
 # --- 주소록(핀) ---
@@ -911,14 +917,8 @@ def test_cancel_runs_only_after_confirmed_yes_and_commit():
 
 def test_cancel_yes_with_question_is_held():
     call = play(orders_db(), FIND + [say("cancel", "C_CANCEL_CONFIRM")])
-    run(apply_answer(call, "yes", "question"))  # "네, 근데 환불은요?": 취소를 확정하지 않고 질문부터
-    assert call.flow.pending is None and call.flow.stage == "RAG"
-
-
-def test_correction_outside_order_task_is_ignored():
-    call = play(orders_db(), FIND)
-    run(apply_answer(call, "none", "correction", "receiver_phone"))
-    assert call.flow.correcting is None and call.flow.stage == "C_CHOICE"
+    run(apply_answer(call, "yes", "question"))  # "네, 근데 환불은요?": 취소를 확정하지 않는다(질문은 음성 모델이 응대)
+    assert call.flow.pending is None and call.flow.stage == "C_CANCEL_CONFIRM"
 
 
 def test_resume_into_check_record_does_not_reset_failures():
@@ -981,50 +981,37 @@ def test_13_restricted_texts_and_consecutive_failures_across_kinds():
 # --- 끼어들기(판별 결과 단위) ---
 
 def test_unheard_yes_is_reasked_once_per_question_but_no_is_taken():
-    call = play(saved_db(), [say("yes", "ORDER")])
+    """확인 질문의 핵심 구간을 듣기 전의 "예"는 한 번 다시 묻고, 거절은 받는다(§2.5(1))."""
+    call = play(orders_db(), FIND + [say("cancel", "C_CANCEL_CONFIRM")])
     call.flow.entered_ms = 1000
-    call.agent_deltas = [("이번에도 ", 1000, 1400), ("부산 해운대구 센텀로 10로 보내시나요?", 1400, 4000)]
+    call.agent_deltas = [("이 택배 접수를 ", 1000, 1400), ("취소해 드릴까요?", 1400, 4000)]
     run(apply_answer(call, "yes", "none", start_ms=1500))
-    assert call.order.receiver_name is None and call.reask and call.flow.reasked
+    assert call.flow.pending is None and call.reask and call.flow.reasked
     run(apply_answer(call, "yes", "none", start_ms=1500))  # 한 번 다시 물은 뒤에는 받는다(되풀이 방지)
-    assert call.order.receiver_name == DEST.name and not call.flow.reasked  # 다음 질문에서 다시 따진다
-    call = play(saved_db(), [say("yes", "ORDER")])
-    call.flow.entered_ms, call.agent_deltas = 1000, [("이번에도 ", 1000, 1400), ("부산 해운대구", 1400, 4000)]
+    assert call.flow.pending
+    call = play(orders_db(), FIND + [say("cancel", "C_CANCEL_CONFIRM")])
+    call.flow.entered_ms, call.agent_deltas = 1000, [("이 택배 접수를 ", 1000, 1400), ("취소해", 1400, 4000)]
     run(apply_answer(call, "no", "none", start_ms=1500))  # 거절은 되돌릴 수 있어 받는다(시나리오 16)
-    assert call.dest_offer is None and said(call, "B6")
-
-
-def test_greeting_yes_before_origin_is_heard_is_reasked():
-    """첫 인사도 기존 출발지가 나오기 전의 "네"는 받지 않는다(받아쓰기가 오기 전 단계 진입 시각은 통화 시작 0)."""
-    call = make_call(saved_db())
-    assert call.flow.entered_ms == 0
-    call.agent_deltas = [("김철수님, 안녕하세요. ", 0, 1500), ("서울 강남구 테헤란로 212에서 보내시는 택배 맞으실까요?", 1500, 4500)]
-    run(apply_answer(call, "yes", "none", start_ms=1000))
-    assert call.origin_offer and call.reask
-    run(apply_answer(call, "none", "lookup", start_ms=1000))  # 다른 용건은 받는다
-    assert call.flow.stage == "C_FIND_RECENT"
+    assert call.flow.stage == "HUB"
 
 
 def test_heard_after_core_or_after_agent_finished():
-    call = play(saved_db(), [say("yes", "ORDER")])
+    call = play(orders_db(), FIND + [say("cancel", "C_CANCEL_CONFIRM")])
     call.flow.entered_ms = 1000
-    call.agent_deltas = [("이번에도 부산 해운대구 센텀로 십으로 보내시나요?", 1000, 3000)]
+    call.agent_deltas = [("이 택배 접수를 취소해 드릴까요?", 1000, 3000)]
     from app.listener import prompt_heard
-    assert prompt_heard(call, 3100)  # 숫자를 한글로 읽어도 핵심 구간을 들었다
-    call.agent_deltas = [("지난번 그 사무실에서 보내시나요?", 1000, 3000)]
+    assert prompt_heard(call, 3100)  # 핵심 구간을 들었다
+    call.agent_deltas = [("이걸 정말 없던 걸로 할까요?", 1000, 3000)]
     assert prompt_heard(call, 3500)  # 바꿔 말했어도 말을 마친 뒤의 답은 받는다
     assert not prompt_heard(call, 2000)  # 말하는 중에 끼어듦
     assert prompt_heard(call, None)  # 시각을 모르면 따지지 않는다
 
 
-def test_end_intent_drops_the_answer_and_goes_to_end_call():
-    call = play(new_db(), NEW_TO_PICKUP[:2])
-    run(apply_answer(call, "none", "end"))
-    assert call.flow.stage == "END_CALL" and call.hangup_requested.is_set()
-    assert run(apply_answer(call, "none", "question")) == [] and call.flow.stage == "END_CALL"
-    call = make_call(saved_db())
-    run(apply_answer(call, "yes", "end"))  # "네, 이만 끊을게요": 답은 버린다
-    assert call.order.sender_address is None and call.flow.stage == "END_CALL"
+def test_end_task_goes_to_end_call_and_nothing_moves_after():
+    call = play(new_db(), NEW_TO_PICKUP[:2] + [say("none", "END_CALL", intent="end")])
+    assert call.hangup_requested.is_set()
+    out = run(dispatch(call, "switch_task", json.dumps({"task": "lookup"}), "x"))  # 마무리 인사 중에는 업무를 바꾸지 않는다
+    assert not out["ok"] and call.flow.stage == "END_CALL"
 
 
 # --- 통화 결과(백엔드 POST /api/orders, 통화당 한 번) ---
@@ -1156,12 +1143,9 @@ def test_pickup_time_is_shown_relative_to_call_received_day():
     assert "2026-10-28 10:00" in TEXTS.backend_info.format(**call.text_vars())
 
 
-def test_more_question_with_question_resumes_more_question_not_hub():
-    """추가 접수 질문에 "하나만 더 여쭤볼게요"(다른 일 + 질문): 질문만 받고 답변 뒤 추가 접수 질문으로 돌아온다
-    (2026-11-01 통화: "다른 일"로도 적용돼 HUB로 돌아가 새 택배를 시작함)."""
-    call = play(new_db(), NEW_ONE + [say("other", "RAG", intent="question"),
-                                     tool("search_manual", {"question": "제주 운임"}, "D_AFTER_ANSWER"),
-                                     say("other_task", "A_CHOICE")])
+def test_question_at_more_question_resumes_more_question_not_hub():
+    """추가 접수 질문에 "하나만 더 여쭤볼게요": 질문 답변 뒤 추가 접수 질문으로 돌아온다(새 택배를 시작하지 않음)."""
+    call = play(new_db(), NEW_ONE + ask("제주 운임") + [say("other_task", "A_CHOICE")])
     assert said(call, "A8") and len(call.parcels) == 1 and call.order.receiver_name is None
 
 
@@ -1204,3 +1188,25 @@ def test_question_never_asks_a_filled_item_whatever_order_values_come_in(db, sen
         if call.flow.stage == "ORDER":
             check_question(call)
     assert call.flow.stage == "A_CONFIRM"
+
+
+# --- 음성 모델이 알아들은 답·업무 바꾸기(answer·switch_task 도구) ---
+
+def test_answer_tool_only_takes_current_choices_and_not_confirm_answers():
+    call = play(saved_db(), [])
+    state = engine.summary(call)
+    assert state["choices"].keys() == {"yes", "no", "other"} and "answer" in state["tools"]
+    out = run(dispatch(call, "answer", json.dumps({"choice": "pin_1"}), "x1"))  # 지금 질문의 선택지가 아님
+    assert not out["ok"] and call.origin_offer
+    call = play(new_db(), NEW_TO_PICKUP + [tool("record_order", WHEN, "A_CONFIRM")])
+    assert "answer" not in engine.allowed_tools(call) and "choices" not in engine.summary(call)  # 확인 단계는 서버가 듣는다
+    out = run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "x2"))
+    assert not out["ok"] and call.flow.pending is None and call.flow.stage == "A_CONFIRM"
+
+
+def test_switch_task_from_middle_of_order_and_back():
+    call = play(new_db(), NEW_TO_PICKUP[:2] + [say("none", "C_FIND_RECENT", intent="lookup")])
+    out = run(dispatch(call, "switch_task", json.dumps({"task": "lookup"}), "x1"))
+    assert out["ok"] and out["already"] and call.flow.stage == "C_FIND_RECENT"  # 같은 업무는 처음부터 다시 하지 않는다
+    report(call, say("none", "ORDER", intent="order"))
+    assert call.order.sender_name == SENDER["sender_name"]  # 받던 택배는 그대로 이어서

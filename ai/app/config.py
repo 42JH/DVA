@@ -72,6 +72,7 @@ class ListenerConfig(_Strict):
     record_heard: bool = False
     joined_sec: float = Field(ge=0)
     delegate_wait_sec: float = Field(gt=0)
+    cut_wait_ms: int = Field(ge=0, le=5000)
 
 
 class AddressConfig(_Strict):
@@ -90,7 +91,6 @@ class FlowConfig(_Strict):
     pin_recent_count: int = Field(ge=1, le=50)
     commit_delay_ms: int = Field(ge=100, le=5000)
     max_pin_options: int = Field(ge=2, le=10)
-    rag_wait_sec: float = Field(gt=0)
     retry_limit: int = Field(ge=0, le=5)
     agent_open_hour: int = Field(ge=0, le=24)
     agent_close_hour: int = Field(ge=0, le=24)

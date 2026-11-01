@@ -84,7 +84,7 @@ async def cancel_answer(ctx, answer: str) -> list[str]:
 
 STAGES = [
     Stage(name="C_REQUIRED_INFO", description="조회에 필요한 정보(받는 분 성함) 묻기", task="lookup",
-          # 어느 업무 중이든 이미 보낸 택배를 조회·취소하겠다고 하면(판별 lookup) 조회로(spec/flow.md 업무 전환)
+          # 어느 업무 중이든 이미 보낸 택배를 조회·취소하겠다고 하면(switch_task lookup) 조회로(spec/flow.md 업무 전환)
           enter_on=("intent.lookup",),
           on_enter=lambda ctx, prev: ctx.lookup.clear(), transitions=(Transition(ENTERED, "C_FIND_RECENT"),)),
     Stage(
@@ -152,6 +152,7 @@ STAGES = [
         ask="C7",
         choices=lambda ctx: YES_NO,
         on_answer=confirm_answer,
+        confirm=True,
         unheard_ok=("no",),
         transitions=(
             # 되돌릴 수 없는 확정: commit_delay_ms 동안 새 입력이 없을 때만 취소를 시작한다(§2.5(3))
@@ -168,6 +169,7 @@ STAGES = [
         listen=lambda ctx: ctx.cancel_state == "failed",
         choices=lambda ctx: YES_NO,
         on_answer=cancel_answer,
+        confirm=True,
         transitions=(
             Transition("cancel.done", "HUB", say="C9", asks=True, action=reset_fail),
             Transition("cancel.failed", STAY, action=cancel_failed),

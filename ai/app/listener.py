@@ -1,11 +1,9 @@
-"""고객 말 판별(spec/sideband.md, spec/LANGGRAPH_REBUILD.md §2.1·§2.5). 대화 상태는 백엔드 도구 호출이 아니라
-서버가 고객 말을 직접 듣고 바꾼다(① 받아쓰기 경로).
+"""고객 말 판별(spec/sideband.md, spec/flow.md "누가 무엇을 정하나"). 고객 말의 뜻은 음성 모델(Live-1)이 알아듣고
+백엔드 도구로 보고한다. 서버가 직접 듣고 상태를 바꾸는 것은 두 가지뿐이다.
 
-고객 받아쓰기를 모아 두었다가 말이 멈추면 작은 모델로 "이 단계의 답"과 "전역 의도"를 판별한다(spec/flow.md
-"한 마디에 여러 행동"): 질문 → QNA, 제한된 요청 → 상담원 Hub, 조회 → 조회 업무, 기다림·종료는 그 용건만 받고 답은 버린다
-(질문 응대 뒤 이 단계로 돌아와 다시 묻는다). 정정은 답과 함께 적용한다(답 먼저, 확정 관문 단계에서는 답 보류).
-판별은 정해진 선택지 중 하나만 고르게 하고(추측 금지, 애매하면 none),
-분기와 처리는 단계 정의와 상태 엔진이 한다.
+1. 확인 단계(Stage.confirm: 담기·결제·취소·상담원 연결 앞의 확인 질문)의 답. 다른 용건이 섞이지 않은 답만 받는다.
+2. 위임 안전망: 답·용건·기록할 값이 든 고객 말을 음성 모델이 맡기지 않았으면 잠시 뒤 서버가 백엔드에 넘긴다.
+판별은 정해진 선택지 중 하나만 고르게 하고(추측 금지, 애매하면 none) 분기는 단계 정의와 상태 엔진이 한다.
 
 끼어들기·정정(§2.5): 판별마다 그때의 말 리비전을 붙여 최신 결과만 쓰고, 질문의 핵심 구간을 듣기 전에 한 답은 다시 묻고,
 단계가 바뀌기 전에 한 말의 늦은 조각과 듣지 않는 단계에서 쌓인 말은 단계 답으로 쓰지 않는다. 새 말이 오면 미뤄 둔
@@ -43,12 +41,6 @@ SLOTS = {
 }
 # 미뤄 둔 확정을 버리는 용건(번복·끼어드는 용건, §2.5(3))
 BLOCKING = ("question", "restricted", "correction", "lookup", "wait", "end")
-# 같이 들은 단계 답을 버리는 의도. 단계 답과 함께 적용하는 것은 정정뿐이다: 질문·요청·조회는 그 용건만 받고 끝나면
-# 직전 단계(그 질문)로 돌아와 다시 묻는다(2026-11-01 통화: 추가 접수 질문에 "하나만 더 여쭤볼게요"가 "다른 일"로도
-# 적용돼 질문 응대 뒤 HUB로 돌아가 새 택배를 시작함)
-DROPS_ANSWER = ("question", "restricted", "lookup", "wait", "end")
-# 듣지 않는 단계에서 쌓인 말에서 받는 용건(§2.5(6)). 듣던 단계의 늦은 꼬리 조각은 정정만(§2.5(2))
-OFF_INTENTS = BLOCKING
 
 
 def stage_choices(call) -> dict[str, str]:
@@ -63,8 +55,8 @@ def _schema(choices: dict[str, str]) -> dict:
         "properties": {"answer": {"type": "string", "enum": list(choices)},
                        "intent": {"type": "string", "enum": list(INTENTS)},
                        "slot": {"type": "string", "enum": list(SLOTS)},
-                       "value": {"type": "boolean"}},
-        "required": ["answer", "intent", "slot", "value"],
+                       "value": {"type": "boolean"}, "cut": {"type": "boolean"}},
+        "required": ["answer", "intent", "slot", "value", "cut"],
         "additionalProperties": False,
     }
 
@@ -93,12 +85,13 @@ def _prompt(call, stage_name: str, choices: dict[str, str], heard: str, asked: s
                       "answer 선택지:", *(f"- {k}: {v}" for k, v in choices.items()),
                       "intent 선택지:", *(f"- {k}: {v}" for k, v in INTENTS.items()),
                       "slot 선택지:", *(f"- {k}: {v}" for k, v in SLOTS.items()),
-                      "value: 고객 말에 접수 정보로 기록할 값(이름·연락처·주소·물품·가격·수거 일시)이 들어 있으면 true"])
+                      "value: 고객 말에 접수 정보로 기록할 값(이름·연락처·주소·물품·가격·수거 일시)이 들어 있으면 true",
+                      "cut: 고객 말이 문장 중간에서 끊겼으면(\"보내는 곳 상세 주소가\") true"])
 
 
 async def judge(call, client, stage_name: str, choices: dict[str, str], heard: str, asked: str):
-    """판별 한 번 → (answer, intent, slot, value, 응답). value: 고객 말에 기록할 접수 정보 값이 있음(음성 모델이 위임하지
-    않으면 서버가 대신 넘길지 정할 때). 설정 [listener] engine으로 Decision API(빠름) 또는 Responses API.
+    """판별 한 번 → (answer, intent, slot, value, cut, 응답). value: 고객 말에 기록할 접수 정보 값이 있음(음성 모델이 위임하지
+    않으면 서버가 대신 넘길지 정할 때). cut: 말이 문장 중간에서 끊김(이어 말하는지 잠시 기다릴 때). 설정 [listener] engine으로 Decision API(빠름) 또는 Responses API.
     Decision API는 고를 답이 없는 단계면 답 질문을 뺀다(선택지는 2개 이상이어야 함). 거절한 질문은 none·false."""
     cfg = call.cfg.listener
     if cfg.engine == "decisions":
@@ -107,13 +100,13 @@ async def judge(call, client, stage_name: str, choices: dict[str, str], heard: s
         questions = [{"type": "choice", "name": name, "instructions": texts[name],
                       "choices": [{"value": k, "description": v} for k, v in opts.items()]}
                      for name, opts in options.items() if len(opts) > 1]
-        questions.append({"type": "predicate", "name": "value", "instructions": texts["value"]})
+        questions += [{"type": "predicate", "name": n, "instructions": texts[n]} for n in ("value", "cut")]
         resp = await client.decisions.create(model=cfg.model, input=_situation(call, stage_name, heard, asked),
                                              questions=questions)
         got = {a.name: a for a in resp.answers}
         pick = {n: getattr(got.get(n), "choice", None) for n in options}
-        value = (getattr(got.get("value"), "probability", 0.0) or 0.0) >= 0.5
-        return (pick["answer"] or NO_ANSWER, pick["intent"] or "none", pick["slot"] or NO_SLOT, value, resp)
+        value, cut = ((getattr(got.get(n), "probability", 0.0) or 0.0) >= 0.5 for n in ("value", "cut"))
+        return (pick["answer"] or NO_ANSWER, pick["intent"] or "none", pick["slot"] or NO_SLOT, value, cut, resp)
     resp = await client.responses.create(
         model=cfg.model,
         instructions=call.texts.classifier,
@@ -123,7 +116,8 @@ async def judge(call, client, stage_name: str, choices: dict[str, str], heard: s
         store=False,
     )
     result = json.loads(resp.output_text)
-    return result["answer"], result["intent"], result["slot"], bool(result.get("value")), resp
+    return (result["answer"], result["intent"], result["slot"], bool(result.get("value")), bool(result.get("cut")),
+            resp)
 
 
 def heard(call, delta: str, conn, client, start_ms: int | None = None) -> None:
@@ -222,7 +216,7 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
     call.tool_calls[record["call_id"]] = record
     t0 = time.monotonic()
     try:
-        answer, intent, slot, value, resp = await asyncio.wait_for(
+        answer, intent, slot, value, cut, resp = await asyncio.wait_for(
             judge(call, client, stage_name, choices, text, asked), cfg.timeout_sec)
         if answer not in choices or intent not in INTENTS or slot not in SLOTS:  # 모델 출력은 미신뢰 입력
             raise ValueError(f"선택지 밖 판별: {(answer, intent, slot)}")
@@ -241,8 +235,12 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 await settle(call, None, blocking=False)
                 await after_change(call, conn)
         return
-    record.update(output={"answer": answer, "intent": intent, "slot": slot, "value": value},
+    record.update(output={"answer": answer, "intent": intent, "slot": slot, "value": value, "cut": cut},
                   elapsed_ms=round((time.monotonic() - t0) * 1000), usage=_usage(resp))
+    if cut and not side:
+        # 문장 중간에서 끊긴 말("보내는 곳 상세 주소가")을 바로 적용하면 고객이 말하는 중에 "다시 말씀해 주세요"가 나간다
+        # (2026-11-01 23:09 통화). 잠시 기다려 이어 말하면 이 판별은 낡은 것이 되고(리비전), 합친 말을 다시 판별한다
+        await asyncio.sleep(cfg.cut_wait_ms / 1000)
     before = recent_heard(call)
     joined = f"{before} {text}" if before and not side else text  # 서버가 대신 넘길 때는 나뉜 앞말까지
     async with call.lock:
@@ -252,8 +250,8 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 call.notify()
                 return
             call.side["text"] = ""
-            events = await apply_side(call, intent, slot, call.side["off"], started)
-            if intent == "correction":
+            events = await apply_side(call, intent)
+            if intent == "correction" or value:
                 forward_later(call, conn, text, started)
         else:
             if rev != call.heard_rev or call.flow.stage != stage_name:
@@ -263,7 +261,7 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 call.notify()
                 return
             try:
-                events = await apply_answer(call, answer, intent, slot, start_ms=start_ms, started_at=started)
+                events = await apply_answer(call, answer, intent, start_ms=start_ms)
             except Exception as e:
                 # 예: 접수·저장 중 백엔드 실패. 상태는 그대로 두고 음성 모델에 오류 안내를 준다
                 log.exception("답 처리 실패 %s", call.session_id)
@@ -274,7 +272,7 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
                 except Exception:
                     log.exception("오류 안내 전송 실패 %s", call.session_id)
                 return
-            if intent == "correction" or value:
+            if reportable(call, stage_name, answer, intent, value):
                 forward_later(call, conn, joined, started, joined=joined != text)  # 음성 모델이 위임하지 않으면 서버가 대신(말이 끝나고 잠시 뒤)
             elif not events and answer == NO_ANSWER and intent == "none":
                 await record_heard(call, conn, text, call.heard_at)  # 설정 record_heard(기본 꺼짐): 판별할 것 없는 말 전부
@@ -323,8 +321,15 @@ def _move_to_side(call, conn, client, stage_name: str) -> None:
     spawn_classify(call, conn, client, side=True)
 
 
+def reportable(call, stage_name: str, answer: str, intent: str, value: bool) -> bool:
+    """백엔드에 보고할 것이 있는 말: 정정·기록할 값, 그리고 확인 단계가 아니면 질문의 답이나 끼어드는 용건(기다림 제외)."""
+    if intent == "correction" or value:
+        return True
+    return not engine.STAGES[stage_name].confirm and (answer != NO_ANSWER or intent not in ("none", "wait"))
+
+
 def forward_later(call, conn, text: str, started: float, joined: bool = False) -> None:
-    """정정·접수 정보 값이 든 고객 말을 음성 모델이 위임하지 않으면 서버가 대신 백엔드에 넘긴다(말이 끝나고
+    """보고할 것이 있는 고객 말을 음성 모델이 위임하지 않으면 서버가 대신 백엔드에 넘긴다(말이 끝나고
     delegate_wait_sec 뒤). 음성 모델이 말로만 "네, ○○님"하고 넘기지 않아 정정이 빠지던 것(2026-11-01 22:41 통화).
     joined: 앞말까지 이은 글이면 앞말로 걸어 둔 요청은 취소한다(같은 값을 두 번 넘기지 않게)."""
     old = call.forward_task
@@ -352,7 +357,7 @@ async def record_heard(call, conn, text: str, heard_at: float, force: bool = Fal
     force: 정정은 설정(record_heard)과 상관없이 넘긴다. 음성 모델이 "네, 현승준님"이라고 말로만 받고 넘기지 않아
     틀린 이름("현승우")으로 접수됐다(2026-10-31 통화)."""
     if (not (call.cfg.listener.record_heard or force) or call.delegation_mode != "responses"
-            or "record_order" not in engine.current(call).tools
+            or engine.current(call).final
             or call.delegated_at >= heard_at):  # 말이 끝난 뒤 음성 모델이 이미 위임함
         return False
     try:
@@ -367,51 +372,27 @@ async def record_heard(call, conn, text: str, heard_at: float, force: bool = Fal
     return True
 
 
-async def _intent_events(call, intent: str, slot: str, started_at: float | None) -> list[str] | None:
-    """전역 의도(§2.1)의 사건. 용건이 없거나 지금 받을 수 없으면 빈 목록."""
-    if intent == "question":
-        if started_at is not None and call.search_entry_at >= started_at:
-            return []  # 이 말의 검색 결과가 먼저 와서 이미 QnA로 들어갔다(같은 질문을 두 번 처리하지 않게)
-        return ["intent.question"]
-    if intent == "restricted":
-        return ["intent.restricted"]
-    if intent == "end":  # TODO(flow): 다이어그램에 없음. 통화를 끝내겠다고 하면 마무리 인사 후 종료
-        return ["call.ending"]
-    if intent == "correction":
-        return (call.start_correction(slot) or []) if slot != NO_SLOT else []
-    if intent == "lookup":  # 이미 조회·취소 중이면 그대로(같은 업무를 처음부터 다시 하지 않는다)
-        return [] if call.flow.task in ("lookup", "cancel") else ["intent.lookup"]
-    return []
-
-
-async def apply_answer(call, answer: str, intent: str, slot: str = NO_SLOT, *, start_ms: int | None = None,
-                       started_at: float | None = None) -> list[str]:
-    """판별 결과 → 사건 → 단계 전이. 단계 답(선택지 안의 것만)과 전역 의도:
-    1) 질문·요청·조회·기다림·종료면 답을 버리고 그 용건만(질문 응대가 끝나면 이 단계로 돌아와 다시 묻는다).
-    2) 정정이면 둘 다: 답을 먼저 적용하고 옮겨 간 단계에서 정정을 적용한다(2026-11-01 20:05 통화: 인사 질문의 "네, 근데
-    이름이…"에서 정정이 답을 지워 단계가 멈춤). 단, 확정 관문 단계(확정 지연 전이가 있음)에서는 답을 보류한다("네, 근데
-    받는 분이 틀렸어요"의 "네"로 접수가 확정되면 안 됨).
-    질문의 핵심 구간을 듣기 전에 한 답은 받지 않고 한 번 다시 묻는다(거절처럼 되돌릴 수 있는 답은 받는다)."""
-    if not engine.listening(call):
-        return []
+async def apply_answer(call, answer: str, intent: str = "none", *, start_ms: int | None = None) -> list[str]:
+    """확인 단계의 답(선택지 안의 것만) → 사건 → 단계 전이. 다른 용건이 섞인 말("네, 근데 받는 분이 틀렸어요")의 답은
+    받지 않는다: 그 용건은 음성 모델이 응대하고 백엔드가 보고하며, 확인은 다시 받는다. 확인 단계가 아니면 아무것도
+    하지 않는다(답은 백엔드가 answer 도구로 보고). 질문의 핵심 구간을 듣기 전에 한 답은 받지 않고 한 번 다시 묻는다
+    (거절처럼 되돌릴 수 있는 답은 받는다)."""
     stage = engine.current(call)
+    if not engine.listening(call) or not stage.confirm:
+        return []
     pending = call.flow.pending
     if intent in BLOCKING:
         call.flow.pending = None
     events: list[str] = []
-    take = (answer != NO_ANSWER and stage.on_answer is not None and answer in stage_choices(call)
-            and intent not in DROPS_ANSWER and not (intent != "none" and engine.gated(call)))
-    if take:
+    if answer != NO_ANSWER and stage.on_answer is not None and answer in stage_choices(call) and intent == "none":
         if answer not in stage.unheard_ok and not prompt_heard(call, start_ms) and not call.flow.reasked:
             call.flow.reasked = call.reask = True
             log.info("질문을 다 듣기 전 답 %s 단계=%s answer=%s", call.session_id, stage.name, answer)
         else:
             events = await stage.on_answer(call, answer)
             await engine.apply(call, events, "listener")
-    later = await _intent_events(call, intent, slot, started_at)
-    await engine.apply(call, later, "listener")
     await settle(call, pending, intent in BLOCKING)
-    return events + later
+    return events
 
 
 async def settle(call, pending: dict | None, blocking: bool) -> None:
@@ -424,20 +405,14 @@ async def settle(call, pending: dict | None, blocking: bool) -> None:
         await engine.apply(call, [engine.ENTERED], "listener")
 
 
-async def apply_side(call, intent: str, slot: str, off: bool, started_at: float | None) -> list[str]:
-    """지난 단계의 말은 단계 답으로 쓰지 않는다. 듣지 않던 단계에서 쌓인 말은 전역 의도(질문·제한된 요청·정정·종료·
-    기다림)를 받고(§2.5(6)), 듣던 단계의 늦은 꼬리 조각은 정정만 받는다(§2.5(2))."""
+async def apply_side(call, intent: str) -> list[str]:
+    """지난 단계의 말(전환 전 늦은 꼬리 조각, 듣지 않던 단계에서 쌓인 말)은 단계 답으로 쓰지 않는다. 끼어드는 용건이면
+    미뤄 둔 확정만 버린다(용건 자체는 음성 모델이 응대하고, 맡기지 않았으면 위임 안전망이 넘긴다)."""
     pending = call.flow.pending
-    if intent == "none" or not (intent == "correction" or (off and intent in OFF_INTENTS)) \
-            or engine.current(call).final:
-        await settle(call, pending, blocking=False)
-        return []
     if intent in BLOCKING:
         call.flow.pending = None
-    events = await _intent_events(call, intent, slot, started_at)
-    await engine.apply(call, events, "listener")
     await settle(call, pending, intent in BLOCKING)
-    return events
+    return []
 
 
 def prompt_heard(call, start_ms: int | None) -> bool:

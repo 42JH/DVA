@@ -18,7 +18,8 @@ from app.sideband import run_call
 def quick_cfg(pause_ms=100, flow=None, **call):
     return CFG.model_copy(update={"call": CFG.call.model_copy(update=call),
                                   "listener": CFG.listener.model_copy(update={"pause_ms": pause_ms,
-                                                                               "delegate_wait_sec": 0.2}),
+                                                                               "delegate_wait_sec": 0.2,
+                                                                               "cut_wait_ms": 300}),
                                   "flow": CFG.flow.model_copy(update={"agent_open_hour": 0, "agent_close_hour": 24,
                                                                       **(flow or {})})})
 
@@ -47,12 +48,11 @@ async def close(conn, task, reason="remote_hangup"):
 
 
 def to_cancel_confirm(db):
-    """조회 → 박민수께 보낸 택배 → 맞음 → 취소(확인 질문까지)."""
+    """조회 → 박민수께 보낸 택배 → 맞음 → 취소(확인 질문까지). 확인 질문 전의 답은 백엔드가 보고한다."""
     call = make_call(db)
-    run(apply_answer(call, "none", "lookup"))
-    run(dispatch(call, "lookup_orders", json.dumps({"receiver_name": "박민수"}, ensure_ascii=False), "l"))
-    run(apply_answer(call, "yes", "none"))
-    run(apply_answer(call, "cancel", "none"))
+    for i, (name, args) in enumerate([("switch_task", {"task": "lookup"}), ("lookup_orders", {"receiver_name": "박민수"}),
+                                      ("answer", {"choice": "yes"}), ("answer", {"choice": "cancel"})]):
+        run(dispatch(call, name, json.dumps(args, ensure_ascii=False), f"p{i}"))
     assert call.flow.stage == "C_CANCEL_CONFIRM"
     return call
 
@@ -118,7 +118,9 @@ def test_transcript_bubbles_append_to_open_bubble_of_speaker():
     run(scenario())
 
 
-def test_customer_answer_changes_state_without_tool_call():
+def test_unreported_answer_is_forwarded_to_backend_not_applied_by_server():
+    """확인 단계가 아닌 질문(기존 출발지 확인)의 답은 서버가 바로 적용하지 않는다. 음성 모델이 맡기지 않았으면 판별 결과를
+    근거로 잠시 뒤 서버가 백엔드에 넘긴다(위임 안전망). 상태는 백엔드의 answer 보고로 바뀐다."""
     client, call = FakeClient(), make_call(saved_db())
 
     async def scenario():
@@ -128,21 +130,22 @@ def test_customer_answer_changes_state_without_tool_call():
         answers(client, "yes")
         conn.push("session.input_transcript.delta", delta="네 ")
         conn.push("session.input_transcript.delta", delta="맞아요")
-        await until(lambda: call.order.sender_address is not None)  # 기존 출발지를 쓴다(단계는 그대로 ORDER)
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        assert call.order.sender_address is None  # 서버가 직접 옮기지 않는다
+        item = next(kw["item"] for p, kw in conn.sent if p == "response.item.create")
+        assert "네 맞아요" in item["content"][0]["text"]
         assert len(client.responses.requests) == 1  # 말이 멈춘 뒤 한 번만 판별
         req = client.responses.requests[0]
         assert "네 맞아요" in req["input"] and "보내시는 택배 맞으실까요" in req["input"]
         assert req["text"]["format"]["schema"]["properties"]["answer"]["enum"] == ["yes", "no", "other", "none"]
-        # Decision API(설정 engine = decisions): 답·용건·정정 항목은 고르기 질문, 기록할 값이 있는지는 예/아니오 질문
+        # Decision API(설정 engine = decisions): 답·용건·정정 항목은 고르기 질문, 기록할 값·끊김은 예/아니오 질문
         questions = {q["name"]: [c["value"] for c in q.get("choices", [])] for q in req["questions"]}
-        assert set(questions) == {"answer", "intent", "slot", "value"} and {"question", "lookup"} <= set(questions["intent"])
+        assert set(questions) == {"answer", "intent", "slot", "value", "cut"}
+        assert {"question", "lookup"} <= set(questions["intent"])
         assert next(q for q in req["questions"] if q["name"] == "value")["type"] == "predicate"
         assert req["model"] == CFG.listener.model
-        await until(lambda: "해운대" in thoughts(conn)[-1])
-        assert conn.outputs() == []  # 백엔드 도구 호출 없음
-        rec = next(t for t in call.tool_calls.values() if t["name"] == "listener")
-        await until(lambda: "total_ms" in rec)  # 진행 상태를 보낸 직후에 적는다(느린 CI에서 먼저 읽으면 없음)
-        assert rec["total_ms"] >= rec["elapsed_ms"]  # 지연 측정: 말 끝 → 진행 상태
+        conn.function_call("answer", {"choice": "yes"}, "a1")  # 백엔드 보고
+        await until(lambda: call.order.sender_address is not None)
         await close(conn, task)
 
     run(scenario())
@@ -193,6 +196,7 @@ def test_hangup_waits_for_goodbye_to_finish():
         task, conn = await start(call, client)
         answers(client, "no_more")
         conn.push("session.input_transcript.delta", delta="없어요", start_ms=0, end_ms=1000)  # 세션 시계 맞춤
+        conn.function_call("answer", {"choice": "no_more"}, "a1")
         await until(lambda: call.flow.stage == "END_CALL")
         for _ in range(3):  # 음성 출력 이벤트는 말하지 않을 때도 온다: 이것만으로는 끊지 않는다
             conn.push("session.output_audio.delta", delta="")
@@ -223,6 +227,7 @@ def test_late_goodbye_is_not_cut_by_max_wait():
         task, conn = await start(call, client)
         answers(client, "no_more")
         conn.push("session.input_transcript.delta", delta="없어요", start_ms=0, end_ms=1000)  # 세션 시계 맞춤
+        conn.function_call("answer", {"choice": "no_more"}, "a1")
         await until(lambda: call.flow.stage == "END_CALL" and call.progress_sent_at > 0)
         for _ in range(6):  # 인사 전 0.3초: 말하지 않을 때도 오는 오디오 이벤트
             conn.push("session.output_audio.delta", delta="")
@@ -247,8 +252,7 @@ def test_hangup_after_max_wait_even_without_speech():
     async def scenario():
         call.cfg = quick_cfg(hangup_silence_sec=0.1, hangup_max_wait_sec=0.3)
         task, conn = await start(call, client)
-        answers(client, "none", "end")
-        conn.push("session.input_transcript.delta", delta="그냥 끊을게요")
+        conn.function_call("switch_task", {"task": "end"}, "t1")  # "그냥 끊을게요"
         await until(lambda: client.live.sessions.of("hangup"), timeout=2)
         await close(conn, task, "close_requested")
 
@@ -323,10 +327,9 @@ def test_concurrent_calls_do_not_mix_and_slow_backend_does_not_block_others():
                 return await db.submit_result(body, key)
 
         calls[0].backend = SlowBackend()
-        answers(client, "order")
-        for _, conn in started:
-            conn.push("session.input_transcript.delta", delta="택배 보내려고요")
-        await until(lambda: all(c.flow.stage == "ORDER" and not c.listen_tasks for c in calls))
+        for i, (_, conn) in enumerate(started):
+            conn.function_call("answer", {"choice": "order"}, f"o{i}")  # "택배 보내려고요"
+        await until(lambda: all(c.flow.stage == "ORDER" for c in calls))
         for i, (call, (_, conn)) in enumerate(zip(calls, started)):
             conn.function_call("record_order", {**FULL_ORDER, "sender_phone": call.caller, "small_box_count": 0,
                                                 "other_item": f"물품{i}"}, f"r{i}")
@@ -336,9 +339,8 @@ def test_concurrent_calls_do_not_mix_and_slow_backend_does_not_block_others():
             conn.push("session.input_transcript.delta", delta="네 맞아요")
         # 결제 단계 진입은 확정 지연 뒤에(감시 작업이 COMMIT)
         await until(lambda: all(c.flow.stage == "A_CHOICE" for c in calls))
-        answers(client, "no_more")
-        for _, conn in started:
-            conn.push("session.input_transcript.delta", delta="없어요")
+        for i, (_, conn) in enumerate(started):
+            conn.function_call("answer", {"choice": "no_more"}, f"n{i}")  # "없어요"
         await until(lambda: all(c.result for c in calls[1:]), timeout=0.6)
         assert not calls[0].result  # 아직 느린 백엔드 대기 중
         await until(lambda: calls[0].result)
@@ -366,22 +368,25 @@ def test_tool_calls_in_one_call_run_in_order():
     run(scenario())
 
 
-def test_answer_processing_failure_tells_voice_model_and_keeps_stage():
-    client, call = FakeClient(), make_call(orders_db())
+def test_answer_processing_failure_tells_voice_model_and_keeps_stage(monkeypatch):
+    """확인 단계의 답 처리가 실패하면 상태는 그대로 두고 음성 모델에 오류 안내를 준다."""
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
     call.cfg = quick_cfg()
-    run(apply_answer(call, "none", "lookup"))
+    real = engine.apply
 
-    async def broken(name, forgot=False):
-        raise RuntimeError("처리 실패")
+    async def broken(ctx, events, tool=None):
+        if "cancel.yes" in events:
+            raise RuntimeError("처리 실패")
+        await real(ctx, events, tool)
 
-    call.find_orders = broken
+    monkeypatch.setattr(engine, "apply", broken)
 
     async def scenario():
         task, conn = await start(call, client)
-        answers(client, "forgot")
-        conn.push("session.input_transcript.delta", delta="기억이 안 나요")
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네 취소해 주세요")
         await until(lambda: call.texts.answer_error in thoughts(conn))
-        assert call.flow.stage == "C_FIND_RECENT"
+        assert call.flow.stage == "C_CANCEL_CONFIRM" and call.flow.pending is None
         await close(conn, task)
 
     run(scenario())
@@ -490,48 +495,43 @@ def test_heard_talk_is_not_sent_to_backend_by_default():
 
 # --- §2.5 끼어들기·정정(§8 시나리오) ---
 
-async def at_dest_question(call, client):
-    """등록 고객이 인사(기존 출발지 제안)를 다 듣고 "네"라고 해서 최근 도착지 확인 질문(B4)이 된 때.
-    그 질문의 시각(세션 ms, 정보 받기는 단계 하나라 질문이 바뀔 때 새로 잰다)을 돌려준다."""
+async def at_cancel_question(call, client):
+    """취소 확인 질문(확인 단계)에 들어온 때. 그 질문의 시각(세션 ms)을 1000으로 두고 돌려준다."""
     task, conn = await start(call, client)
-    conn.push("session.output_transcript.delta", delta="김철수님, 안녕하세요. 서울 강남구 테헤란로 212에서 보내시는 택배 맞으실까요?",
-              start_ms=0, end_ms=600)
-    answers(client, "yes")
-    conn.push("session.input_transcript.delta", delta="네 맞아요", start_ms=700, end_ms=800)
-    await until(lambda: call.dest_offer is not None and call.order.sender_address and not call.listen_tasks)
-    return task, conn, call.flow.entered_ms
+    conn.push("session.output_transcript.delta", delta="박민수님께 보낸 택배예요.", start_ms=0, end_ms=600)  # 세션 시계 맞춤
+    call.flow.entered_ms = 1000
+    return task, conn, 1000
 
 
 def test_15_yes_before_core_is_not_taken_and_question_is_asked_again():
-    client, call = FakeClient(), make_call(saved_db())
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
 
     async def scenario():
         call.cfg = quick_cfg()
-        task, conn, e = await at_dest_question(call, client)
-        conn.push("session.output_transcript.delta", delta="이번에도 ", start_ms=e + 100, end_ms=e + 500)
-        conn.push("session.output_transcript.delta", delta="부산 해운대구 센텀로 10로 보내시나요?",
-                  start_ms=e + 500, end_ms=e + 3000)
+        task, conn, e = await at_cancel_question(call, client)
+        conn.push("session.output_transcript.delta", delta="이 택배 접수를 ", start_ms=e + 100, end_ms=e + 500)
+        conn.push("session.output_transcript.delta", delta="취소해 드릴까요?", start_ms=e + 500, end_ms=e + 3000)
         answers(client, "yes")
         conn.push("session.input_transcript.delta", delta="네", start_ms=e + 700, end_ms=e + 900)
         await until(lambda: any("끝까지 듣기 전" in t for t in thoughts(conn)))
-        assert call.order.receiver_name is None and "해운대" in thoughts(conn)[-1]
-        conn.push("session.input_transcript.delta", delta="네 맞아요", start_ms=e + 3500, end_ms=e + 4000)
-        await until(lambda: call.order.receiver_name == "이영희")
+        assert call.flow.pending is None and "취소해 드릴까요" in thoughts(conn)[-1]
+        conn.push("session.input_transcript.delta", delta="네 취소해 주세요", start_ms=e + 3500, end_ms=e + 4000)
+        await until(lambda: call.flow.pending or call.flow.stage != "C_CANCEL_CONFIRM")
         await close(conn, task)
 
     run(scenario())
 
 
 def test_16_no_during_question_is_taken_as_no():
-    client, call = FakeClient(), make_call(saved_db())
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
 
     async def scenario():
         call.cfg = quick_cfg()
-        task, conn, e = await at_dest_question(call, client)
-        conn.push("session.output_transcript.delta", delta="이번에도 부산", start_ms=e + 100, end_ms=e + 2500)
+        task, conn, e = await at_cancel_question(call, client)
+        conn.push("session.output_transcript.delta", delta="이 택배 접수를", start_ms=e + 100, end_ms=e + 2500)
         answers(client, "no")
-        conn.push("session.input_transcript.delta", delta="아니 그거 말고 다른 거요", start_ms=e + 600, end_ms=e + 1500)
-        await until(lambda: call.dest_offer is None and call.order.receiver_name is None)
+        conn.push("session.input_transcript.delta", delta="아니요 안 할게요", start_ms=e + 600, end_ms=e + 1500)
+        await until(lambda: call.flow.stage == "HUB")
         assert not any("끝까지 듣기 전" in t for t in thoughts(conn))
         await close(conn, task)
 
@@ -611,82 +611,60 @@ def test_18_customer_talk_during_cancel_does_not_stop_it_and_result_is_told():
 
 
 def test_20_late_tail_of_previous_answer_is_not_used_in_new_step():
-    client, call = FakeClient(), make_call(saved_db())
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
 
     async def scenario():
         call.cfg = quick_cfg()
-        task, conn, e = await at_dest_question(call, client)
-        answers(client, "yes")  # 새 질문(B4)의 선택지에 있는 답이지만 앞 질문에 한 말이다
+        task, conn, e = await at_cancel_question(call, client)
+        answers(client, "yes")  # 확인 질문의 선택지에 있는 답이지만 앞 질문에 한 말이다
         conn.push("session.input_transcript.delta", delta=" 네네", start_ms=780, end_ms=790)
         await until(lambda: any(r["call_id"].endswith("-side") and r["status"] == "done"
                                 for r in call.tool_calls.values()))
-        assert call.dest_offer is not None and call.order.receiver_name is None
+        assert call.flow.stage == "C_CANCEL_CONFIRM" and call.flow.pending is None
         await close(conn, task)
 
     run(scenario())
 
 
 def test_late_tail_does_not_cancel_classification_of_new_answer():
-    client, call = FakeClient(), make_call(saved_db())
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
 
     async def scenario():
         call.cfg = quick_cfg()
-        task, conn, e = await at_dest_question(call, client)
-        conn.push("session.output_transcript.delta", delta="이번에도 부산 해운대구 센텀로 10로 보내시나요?",
-                  start_ms=e + 100, end_ms=e + 2500)
+        task, conn, e = await at_cancel_question(call, client)
+        conn.push("session.output_transcript.delta", delta="이 택배 접수를 취소해 드릴까요?", start_ms=e + 100, end_ms=e + 2500)
         answers(client, "yes")
         conn.push("session.input_transcript.delta", delta="네 맞아요", start_ms=e + 3000, end_ms=e + 3400)
         conn.push("session.input_transcript.delta", delta=" 그리고", start_ms=750, end_ms=790)  # 앞 질문에 한 말의 늦은 조각
-        await until(lambda: call.order.receiver_name == "이영희")
-        await close(conn, task)
-
-    run(scenario())
-
-
-def test_23_question_during_search_is_handled_after_the_answer():
-    client, call = FakeClient(), make_call(no_recent_db())
-
-    async def scenario():
-        call.cfg, call.rag = quick_cfg(flow={"flush_wait_sec": 0.3}), FakeRag()
-        task, conn = await start(call, client)
-        answers(client, "none", "question")
-        conn.push("session.input_transcript.delta", delta="배송은 며칠 걸려요?")
-        await until(lambda: call.flow.stage == "RAG" and not call.listen_tasks)
-        conn.push("session.input_transcript.delta", delta="그리고 반품은 어떻게 해요?")  # 검색 중(듣지 않는 단계)
-        await asyncio.sleep(0.3)
-        assert call.flow.stage == "RAG" and call.side["text"]
-        conn.function_call("search_manual", {"question": "배송 기간"}, "s1")
-        await until(lambda: call.flow.stage == "RAG" and call.flow.history[-4]["to"] == "D_AFTER_ANSWER", timeout=3)
-        assert [h["to"] for h in call.flow.history[-3:]] == ["GLOBAL_INTENT", "QNA", "RAG"]
-        assert call.flow.resume == {"task": None, "stage": "HUB"}  # QnA 안에서는 덮어쓰지 않는다
+        await until(lambda: call.flow.pending or call.flow.stage != "C_CANCEL_CONFIRM")
         await close(conn, task)
 
     run(scenario())
 
 
 def test_24_late_result_of_older_classification_is_ignored():
-    client, call = FakeClient(), make_call(no_recent_db())
+    client, call = FakeClient(), to_cancel_confirm(orders_db())
 
     async def scenario():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
 
-        order = iter(["order", "lookup"])  # 첫 판별("네")은 늦게, 다음 판별("아니 조회요")은 바로 끝난다
+        order = iter(["yes", "no"])  # 첫 판별("네")은 늦게, 다음 판별("아니 안 할래요")은 바로 끝난다
         real = client.decisions.create
 
         async def create(**kw):
             answer = next(order)
-            await asyncio.sleep(0.5 if answer == "order" else 0)
+            await asyncio.sleep(0.5 if answer == "yes" else 0)
             client.responses.decide = lambda seen: {"answer": answer, "intent": "none", "slot": "none"}
             return await real(**kw)
 
         client.decisions.create = create
         conn.push("session.input_transcript.delta", delta="네")
         await until(lambda: any(r["name"] == "listener" for r in call.tool_calls.values()))  # 첫 판별이 시작됨
-        conn.push("session.input_transcript.delta", delta=" 아니 조회요")
-        await until(lambda: call.flow.stage == "C_FIND_RECENT")
+        conn.push("session.input_transcript.delta", delta=" 아니 안 할래요")
+        await until(lambda: call.flow.stage == "HUB")
         await until(lambda: any(r["status"] == "stale" for r in call.tool_calls.values()), timeout=2)
-        assert call.flow.stage == "C_FIND_RECENT"
+        assert call.flow.stage == "HUB" and call.flow.pending is None
         await close(conn, task)
 
     run(scenario())
@@ -736,8 +714,7 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
     async def scenario():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
-        answers(client, "order")
-        conn.push("session.input_transcript.delta", delta="택배요")
+        conn.function_call("answer", {"choice": "order"}, "o1")  # "택배요"
         await until(lambda: call.flow.stage == "ORDER")
         conn.function_call("record_order", FULL_ORDER, "r1")
         await until(lambda: call.flow.stage == "A_CONFIRM" and conn.outputs())
@@ -753,22 +730,6 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         # 고객 말 없이 서버가 옮겼으므로 말하게도 한다(thinking.append만으로는 다음 고객 말까지 말하지 않아 멈춤)
         spoken = [kw["content"] for p, kw in conn.sent if p == "session.commentary.append"]
         assert spoken and call.texts.say["A8"] in spoken[-1]
-        await close(conn, task)
-
-    run(scenario())
-
-
-def test_rag_wait_times_out_as_no_answer():
-    client, call = FakeClient(), make_call(saved_db())
-
-    async def scenario():
-        call.cfg = quick_cfg(flow={"rag_wait_sec": 0.3})
-        task, conn = await start(call, client)
-        answers(client, "none", "question")
-        conn.push("session.input_transcript.delta", delta="해외 배송 되나요?")
-        await until(lambda: call.flow.stage == "D_AGENT_OFFER" and call.texts.say["D5"] in thoughts(conn)[-1],
-                    timeout=2)  # 검색 결과가 오지 않음
-        assert call.fail_count == 1
         await close(conn, task)
 
     run(scenario())
@@ -794,17 +755,20 @@ def test_search_result_before_classification_is_not_handled_twice():
 
 
 def test_goodbye_to_unclassified_no_more_is_not_corrected():
-    """고객이 "더 없어요"라고 해서 음성 모델이 판별보다 먼저 인사해도, 판별 결과 END_CALL이면 바로잡지 않는다."""
+    """고객이 "더 없어요"라고 해서 음성 모델이 백엔드 보고보다 먼저 인사해도, 보고 결과 END_CALL이면 바로잡지 않는다."""
     client, call = FakeClient(), make_call(no_recent_db())
 
     async def scenario():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
-        client.responses.delay = 0.3
         answers(client, "no_more")
         conn.push("session.input_transcript.delta", delta="더 없어요")
+        conn.push("response.event", event={"type": "response.created", "response": {}})  # 위임된 백엔드 응답 중
         await asyncio.sleep(0.15)
         conn.push("session.output_transcript.delta", delta="네, 이용해 주셔서 감사합니다. 좋은 하루 보내세요.")
+        await asyncio.sleep(0.3)
+        conn.function_call("answer", {"choice": "no_more"}, "a1")
+        conn.push("response.event", event={"type": "response.done", "response": {}})
         await until(lambda: call.flow.stage == "END_CALL")
         await asyncio.sleep(0.3)
         assert not any(p == "session.instructions.append" for p, _ in conn.sent)
@@ -979,6 +943,49 @@ def test_split_phone_correction_is_judged_with_previous_words_and_sent_joined():
     run(scenario())
 
 
+def test_cut_off_words_wait_and_are_judged_with_what_follows():
+    """문장 중간에서 끊긴 말("보내는 곳 상세 주소가")은 바로 적용하지 않고 잠시 기다린다. 이어 말하면 합친 말로 한 번만
+    판별·적용한다(2026-11-01 23:09 통화: 끊긴 조각을 정정으로 적용해 고객이 말하는 중에 "다시 말씀해 주세요")."""
+    client, call = FakeClient(), make_call()
+
+    def decide(kw):
+        cut = kw["input"].rstrip().endswith("주소가")
+        whole = "203호" in kw["input"]
+        return {"answer": "none", "intent": "correction" if cut or whole else "none",
+                "slot": "sender_address" if cut or whole else "none", "value": whole, "cut": cut}
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "ORDER", "order"
+        client.responses.decide = decide
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="보내는 곳 상세 주소가")
+        await until(lambda: client.responses.requests)
+        await asyncio.sleep(0.15)  # 판별은 끝났지만 끊긴 말이라 기다리는 중
+        conn.push("session.input_transcript.delta", delta=" 그냥 203호예요")
+        await until(lambda: any(p == "response.item.create" for p, _ in conn.sent))
+        recs = [r for r in call.tool_calls.values() if r["name"] == "listener"]
+        assert [r["status"] for r in recs] == ["stale", "done"] and "주소가 그냥 203호" in recs[1]["arguments"]
+        await close(conn, task)
+
+    run(scenario())
+
+
+def test_cut_off_words_are_applied_when_nothing_follows():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        call.flow.stage, call.flow.task = "ORDER", "order"
+        client.responses.decide = lambda kw: {"answer": "none", "intent": "wait", "slot": "none", "cut": True}
+        task, conn = await start(call, client)
+        conn.push("session.input_transcript.delta", delta="아 그 잠깐")
+        await until(lambda: any(r["name"] == "listener" and r["status"] == "done" for r in call.tool_calls.values()))
+        await close(conn, task)
+
+    run(scenario())
+
+
 def test_listener_retries_once_on_timeout():
     """판별이 시간 초과면 같은 말을 한 번 더 판별한다(정정 판별이 시간 초과로 버려지던 것)."""
     client, call = FakeClient(), make_call()
@@ -996,7 +1003,7 @@ def test_listener_retries_once_on_timeout():
         client.responses.decide = decide
         task, conn = await start(call, client)
         conn.push("session.input_transcript.delta", delta="택배 접수할게요")
-        await until(lambda: call.flow.stage == "ORDER")
+        await until(lambda: any(r["name"] == "listener" and r["status"] == "done" for r in call.tool_calls.values()))
         assert len(calls) == 2
         await close(conn, task)
 
@@ -1036,8 +1043,7 @@ def test_backend_state_is_updated_when_state_changes():
         first = updates()[-1]["delegation"]
         assert first["type"] == "responses" and first["responses"]["instructions"].startswith("백엔드 지시문")
         assert '"stage": "HUB"' in first["responses"]["instructions"]
-        answers(client, "order")
-        conn.push("session.input_transcript.delta", delta="택배요")
+        conn.function_call("answer", {"choice": "order"}, "o1")  # "택배요"
         await until(lambda: call.flow.stage == "ORDER"
                     and '"stage": "ORDER"' in updates()[-1]["delegation"]["responses"]["instructions"])
         count = len(updates())
@@ -1082,7 +1088,6 @@ def test_listener_judges_against_server_question_not_what_voice_model_already_sa
         await until(lambda: client.responses.requests)
         situation = client.responses.requests[0]["input"]
         assert "테헤란로 212에서 보내시는 택배 맞으실까요" in situation and "어디로 보내실" not in situation
-        await until(lambda: call.order.sender_address is not None)
         await close(conn, task)
 
     run(scenario())
@@ -1101,7 +1106,7 @@ def test_decisions_judge_drops_answer_question_without_choices_and_reads_refusal
 
     out = run(judge(call, SimpleNamespace(decisions=Decisions()), "ORDER", {"none": "답 없음"}, "잠깐만요", "질문"))
     assert out[:4] == ("none", "none", "none", False)  # 거절·빠진 답은 none·false
-    assert [q["name"] for q in seen[0]["questions"]] == ["intent", "slot", "value"]  # 고를 답이 없으면 답 질문을 뺀다
+    assert [q["name"] for q in seen[0]["questions"]] == ["intent", "slot", "value", "cut"]  # 고를 답이 없으면 답 질문을 뺀다
     assert seen[0]["model"] == "gpt-6-luna" and "질문" in seen[0]["input"]
 
 
