@@ -5,7 +5,7 @@ import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail
 // 위: 결과 블록 (굵은 종류 · 회색 통화 안 시각 · 오른쪽 링크). 접수 · 주문 취소 → '주문 보기 ›'(팝업), AI 미답변 → 질문 + 'AI 미답변 보기 ›'(09)
 //     상담원 이관 요청은 링크 없음 (연결 성공이 아니라 요청 기록). 블록이 없으면 안내 한 줄
 // 아래: 'AI 동작 n'(서버 전체 건수) 기록 (시각 · 회색 태그 · 내용). 길면 이 목록만 스크롤 — 결과 블록은 그대로
-//     줄을 누르면 왼쪽 스크립트가 그 시각의 말로 넘어가고 녹취가 거기서부터 (11/01). 시각을 모르는 줄은 누를 수 없음
+//     줄을 누르면 왼쪽 스크립트가 그 동작을 부른 고객 말로 넘어가고 녹취가 그 말부터 (11/01). 시각을 모르는 줄은 누를 수 없음
 export function CallActions({
   className = '',
   results,
@@ -75,7 +75,7 @@ export function CallActions({
                 <button
                   type="button"
                   onClick={a.onClick}
-                  title="스크립트에서 보기 · 여기부터 듣기"
+                  title="이 동작을 부른 고객 말로 가기 · 거기부터 듣기"
                   className="-mx-2 flex w-[calc(100%+16px)] items-start gap-3 rounded-md px-2 py-1 text-left hover:bg-bg"
                 >
                   {row}

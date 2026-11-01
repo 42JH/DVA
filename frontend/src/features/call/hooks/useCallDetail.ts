@@ -18,15 +18,17 @@ import {
   type ResultBlock,
   type Utterance,
 } from '@/features/call/api/callApi'
-import { utteranceAt } from '@/features/call/api/callDto'
+import { utteranceAt, utteranceForAction } from '@/features/call/api/callDto'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
-/** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30) */
+/** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
 export interface ScriptLine {
   key: number // 발화 순번 (= 서버 order)
+  atSec: number | null
   time: string // '00:31' (위치를 모르면 '')
   who: 'AI' | '고객'
   text: string
+  onClick?: () => void
 }
 /** 연속 구간: 불만이면 빨간 묶음으로 */
 export interface ScriptSegment {
@@ -43,7 +45,7 @@ export interface ResultView {
   question?: string // AI 미답변: 고객 질문
 }
 
-/** AI 동작 기록 한 줄. onClick = 그 시각의 말로 스크립트를 넘기고 녹취를 거기서부터 재생 (시각을 모르면 없음) */
+/** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
 export interface ActionView {
   key: number
   time: string
@@ -52,14 +54,28 @@ export interface ActionView {
   onClick?: () => void
 }
 
+/** 고객 말의 서버 시각(offsetSeconds)은 음성 인식이 끝난 뒤 찍혀서 실제 말보다 늦음 — 빨리 말하면 그 말을 놓침 (11/01 사용자, 실서버 녹취)
+ *  → 듣기 · 강조는 이만큼 앞에서부터. 앞 말의 시각보다 앞으로는 안 감. AI 말은 TTS 시작 시각이라 그대로 정확
+ *  ponytail: 눈대중 2초 — AI팀이 발화 시작 시각을 주면(A9) 0으로 */
+const CUSTOMER_LEAD_SEC = 2
+type Timed = Utterance & { labelSec: number | null } // atSec = 듣기 시작 시각, labelSec = 화면에 쓰는 서버 시각
+function withLead(utterances: Utterance[]): Timed[] {
+  return utterances.map((u, i) => {
+    if (u.atSec === null || u.speaker !== 'CUSTOMER') return { ...u, labelSec: u.atSec }
+    const prev = utterances.slice(0, i).findLast((p) => p.atSec !== null)?.atSec ?? 0
+    return { ...u, atSec: Math.max(prev, u.atSec - CUSTOMER_LEAD_SEC), labelSec: u.atSec }
+  })
+}
+
 /** 불만은 발화 순번(utteranceOrders)으로 묶음 (명세 §5.2: 실제 있는 발화만 강조) */
-function toSegments(utterances: Utterance[], complaints: Complaint[]): ScriptSegment[] {
+function toSegments(utterances: Timed[], complaints: Complaint[]): ScriptSegment[] {
   const segments: ScriptSegment[] = []
   for (const u of utterances) {
     const c = complaints.find((x) => x.utteranceOrders.includes(u.order))
     const line: ScriptLine = {
       key: u.order,
-      time: u.atSec === null ? '' : fmtClock(u.atSec),
+      atSec: u.atSec,
+      time: u.labelSec === null ? '' : fmtClock(u.labelSec),
       who: u.speaker === 'AI' ? 'AI' : '고객',
       text: u.text,
     }
@@ -92,13 +108,21 @@ export function useCallDetail(callId: number) {
   const player = useRecordingPlayer(call?.recording ?? null, () => {
     void detail.refetch()
   })
+  const says = withLead(call?.utterances ?? []) // 듣기 시각이 보정된 말들 (아래 전부 이걸 씀)
   // 지금 짚은 줄: 녹취가 돌면 재생 위치, 아니면 누른 시각 (11/01 사용자: AI 동작을 누르면 왼쪽 그 부분 + 그 부분 음성)
   const at = player.now > 0 ? player.now : cursor
-  const focusKey = at === null ? null : (utteranceAt(call?.utterances ?? [], at)?.order ?? null)
-  const jumpTo = (sec: number) => {
-    const line = utteranceAt(call?.utterances ?? [], sec)
-    setCursor(sec)
+  const focusKey = at === null ? null : (utteranceAt(says, at)?.order ?? null)
+  // AI 동작을 누르면 그 동작을 부른 '고객의 말'로 — AI 말이 아니라 (11/01 사용자). 고객 말 처음부터 듣게 그 말의 시각으로 감
+  const jumpTo = (sec: number, text: string) => {
+    const line = utteranceForAction(says, sec, text)
+    const at = line?.atSec ?? sec
+    setCursor(at)
     if (line) setJump((j) => ({ key: line.order, n: (j?.n ?? 0) + 1 }))
+    player.seek(at)
+  }
+  /** 스크립트 줄을 눌렀을 때 — 그 말부터 (스크롤은 안 함, 이미 보고 있는 줄) */
+  const listenFrom = (sec: number) => {
+    setCursor(sec)
     player.seek(sec)
   }
 
@@ -171,11 +195,21 @@ export function useCallDetail(callId: number) {
       length: fmtClock(Math.floor(player.length || call?.durationSec || 0)),
       progress: player.progress,
       toggle: player.toggle,
+      scrub: player.scrub, // 진행 바 드래그 (11/01)
       src: player.src,
       handlers: player.handlers,
     },
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
-    segments: call ? toSegments(call.utterances, call.complaints) : [],
+    // 스크립트 줄을 누르면 그 말부터 듣기 (11/01) — 시각을 아는 줄만
+    segments: call
+      ? toSegments(says, call.complaints).map((seg) => ({
+          ...seg,
+          lines: seg.lines.map((l) => {
+            const sec = l.atSec
+            return sec === null ? l : { ...l, onClick: () => listenFrom(sec) }
+          }),
+        }))
+      : [],
     focusKey, // 옅은 남색으로 짚는 줄 (발화 순번)
     jump, // 그 줄로 스크롤 (AI 동작을 눌렀을 때만 — 재생 중엔 강조만 따라가고 스크롤은 안 함)
 
@@ -188,7 +222,7 @@ export function useCallDetail(callId: number) {
         time: sec === null ? '' : fmtClock(sec),
         tag: ACTION_LABEL[a.kind],
         text: a.text, // 서버 summaryText 그대로 (AI팀에 읽기 쉬운 문장으로 요청)
-        onClick: sec === null ? undefined : () => jumpTo(sec),
+        onClick: sec === null ? undefined : () => jumpTo(sec, a.text),
       }
     }),
     actionCount: call?.aiActionCount ?? 0,

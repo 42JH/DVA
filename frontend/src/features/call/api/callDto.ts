@@ -129,11 +129,43 @@ export interface Utterance {
   speaker: 'AI' | 'CUSTOMER'
   text: string
 }
-/** 그 시각(초)에 하던 말 = 시각을 아는 발화 중 sec 이전의 마지막 (06: AI 동작 → 스크립트 줄, 재생 위치 → 줄 강조). 없으면 null */
+/** 그 시각(초)에 하던 말 = 시각을 아는 발화 중 sec 이전의 마지막 (06: 재생 위치 → 줄 강조). 없으면 null */
 export function utteranceAt(utterances: Utterance[], sec: number): Utterance | null {
   let hit: Utterance | null = null
   for (const u of utterances) if (u.atSec !== null && u.atSec <= sec) hit = u
   return hit
+}
+
+const norm = (s: string) => s.replace(/[^0-9A-Za-z가-힣]/g, '')
+/** AI 동작(시각 sec · 설명 text)을 부른 고객 말 (06 AI 동작 → 스크립트 줄). 동작 시각은 AI가 확인을 되묻고 고객이 "네." 한 뒤라서 바로 앞 말로는 안 맞음
+ *  ① 'field = 값'이면 값 조각(2자 이상)이 가장 많이 들어 있는 고객 말 (같으면 나중 것)
+ *  ② 없으면 짧은 대답("네." 같은 3자 이하)은 건너뛴 바로 앞 고객 말 ③ 그것도 없으면 그 시각의 아무 말
+ *  ponytail: 글자 맞추기 휴리스틱 — AI팀이 동작에 '부른 발화 순번'을 넣어 주면 그걸로 바꿀 것 */
+export function utteranceForAction(
+  utterances: Utterance[],
+  sec: number,
+  text: string,
+): Utterance | null {
+  const said = utterances.filter(
+    (u): u is Utterance & { atSec: number } =>
+      u.speaker === 'CUSTOMER' && u.atSec !== null && u.atSec <= sec,
+  )
+  const eq = text.indexOf('=')
+  const tokens = (eq < 0 ? '' : text.slice(eq + 1))
+    .split(/\s+/)
+    .map(norm)
+    .filter((t) => t.length >= 2)
+  if (tokens.length) {
+    let best: Utterance | null = null
+    let bestN = 0
+    for (const u of said) {
+      const n = tokens.filter((t) => norm(u.text).includes(t)).length
+      if (n > 0 && n >= bestN) [best, bestN] = [u, n]
+    }
+    if (best) return best
+  }
+  for (let i = said.length - 1; i >= 0; i--) if (norm(said[i].text).length > 3) return said[i]
+  return said[said.length - 1] ?? utteranceAt(utterances, sec)
 }
 export interface AiAction {
   order: number

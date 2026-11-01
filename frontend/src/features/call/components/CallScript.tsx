@@ -31,6 +31,7 @@ export function CallScript({
     length: string
     progress: number // 0 ~ 1
     toggle: () => void
+    scrub: (ratio: number) => void // 진행 바를 끌어 위치 옮김
     src?: string
     handlers: AudioHTMLAttributes<HTMLAudioElement>
   }
@@ -82,6 +83,7 @@ export function CallScript({
               </svg>
             )}
           </button>
+          {/* 진행 바: 그림은 두 span, 조작은 그 위에 투명한 range (드래그 · 클릭 · 방향키, 11/01) */}
           <div className="relative h-1.5 flex-1 rounded-full bg-line">
             <span
               className="absolute inset-y-0 left-0 rounded-full bg-action"
@@ -90,6 +92,16 @@ export function CallScript({
             <span
               className="absolute top-1/2 size-[18px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-surface ring-2 ring-action ring-inset"
               style={{ left: `${player.progress * 100}%` }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={1000}
+              value={Math.round(player.progress * 1000)}
+              onChange={(e) => player.scrub(Number(e.target.value) / 1000)}
+              disabled={!canPlay}
+              aria-label="재생 위치"
+              className="absolute inset-x-0 top-1/2 h-6 w-full -translate-y-1/2 cursor-pointer opacity-0 disabled:cursor-default"
             />
           </div>
         </div>
@@ -137,12 +149,10 @@ export function CallScript({
   )
 }
 
+/** 말 한 줄. 시각을 알면(onClick) 누를 수 있고 — 그 말부터 듣기 — 짚은 줄(active)은 옅은 남색 */
 function Line({ line, active }: { line: ScriptSegment['lines'][number]; active: boolean }) {
-  return (
-    <li
-      data-key={line.key}
-      className={`flex items-start rounded-md py-2 ${active ? 'bg-action-soft' : ''}`}
-    >
+  const body = (
+    <>
       <span
         className={`w-16 shrink-0 pl-2.5 text-caption leading-[28px] ${line.who === 'AI' ? 'font-bold text-action' : 'font-semibold text-sub'}`}
       >
@@ -150,6 +160,22 @@ function Line({ line, active }: { line: ScriptSegment['lines'][number]; active: 
       </span>
       <span className="min-w-0 flex-1 pl-3 text-body whitespace-pre-line">{line.text}</span>
       <span className="shrink-0 pr-3 pl-4 text-caption leading-[28px] text-muted">{line.time}</span>
+    </>
+  )
+  return (
+    <li data-key={line.key} className={`rounded-md ${active ? 'bg-action-soft' : ''}`}>
+      {line.onClick ? (
+        <button
+          type="button"
+          onClick={line.onClick}
+          title="이 말부터 듣기"
+          className={`flex w-full items-start rounded-md py-2 text-left ${active ? '' : 'hover:bg-bg'}`}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex items-start py-2">{body}</div>
+      )}
     </li>
   )
 }

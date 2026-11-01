@@ -6,6 +6,7 @@ import {
   durationSec,
   toCallDetail,
   utteranceAt,
+  utteranceForAction,
   toCallRow,
   type CallDetailDto,
   type CallListItemDto,
@@ -156,5 +157,35 @@ assert.equal(utteranceAt(says, 6)?.order, 2)
 assert.equal(utteranceAt(says, 7)?.order, 4)
 assert.equal(utteranceAt(says, 100)?.order, 4)
 assert.equal(utteranceAt(says, -1), null)
+
+// AI 동작 → 그 동작을 부른 고객 말: 값 조각이 든 말 > "네." 같은 짧은 대답은 건너뜀 > 그 시각의 말
+const C = (order: number, atSec: number, text: string) => ({
+  order,
+  atSec,
+  speaker: 'CUSTOMER' as const,
+  text,
+})
+const A = (order: number, atSec: number, text: string) => ({
+  order,
+  atSec,
+  speaker: 'AI' as const,
+  text,
+})
+const talk = [
+  A(1, 0, '보내는 분 성함을 말씀해 주세요.'),
+  C(2, 5, '강도윤이요.'),
+  A(3, 7, '물건을 가져갈 주소를 말씀해 주세요.'),
+  C(4, 11, '강남구 역삼로 150, 5층이에요.'),
+  A(5, 15, '서울 강남구 역삼로 150, 5층 맞으실까요?'),
+  C(6, 19, '네.'),
+  C(7, 71, '내일 오전 9시에 와 주세요.'),
+  A(8, 73, '내일 09:00 맞으실까요?'),
+  C(9, 77, '네.'),
+]
+assert.equal(utteranceForAction(talk, 20, '보내는 분 주소 = 서울 강남구 역삼로 150')?.order, 4) // 값 조각(강남구 · 역삼로 · 150)
+assert.equal(utteranceForAction(talk, 6, '보내는 분 이름 = 강도윤')?.order, 2)
+assert.equal(utteranceForAction(talk, 77, '수거 희망 일시 = 11.02 (월) 09:00')?.order, 7) // 값이 말에 없음 → "네." 건너뜀
+assert.equal(utteranceForAction(talk, 78, '디버 접수 완료')?.order, 7) // '=' 없음 → 짧은 대답 건너뜀
+assert.equal(utteranceForAction(talk, 3, '디버 접수 완료')?.order, 1) // 고객 말이 아직 없음 → 그 시각의 말
 
 console.log('callDto.test.ts OK')
