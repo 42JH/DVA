@@ -29,7 +29,7 @@ def agent_available(ctx) -> bool:
 
 
 def resuming_order(ctx) -> bool:
-    return (ctx.flow.resume or {}).get("task") in ("new_order", "order")
+    return (ctx.flow.resume or {}).get("task") == "order"
 
 
 # QnA·상담원 흐름 중에 고객이 주문 값(다시 말한 주소 등)을 말하면 서버가 기록하고 하던 접수로 돌아간다

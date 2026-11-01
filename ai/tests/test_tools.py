@@ -78,7 +78,7 @@ def test_unknown_tool_and_bad_args_and_not_allowed():
     not_allowed = call_tool(call, "cancel_order", {"order_seq": 1, "order_parcel_seq": 2, "customer_confirmed": True,
                                                    "operation_id": "op"})
     assert not_allowed["ok"] is False and "쓸 수 없는" in not_allowed["error"]
-    assert not_allowed["state"]["stage"] == "A_NEW_ORDER"
+    assert not_allowed["state"]["stage"] == "HUB"
 
 
 def test_tool_exception_becomes_error_result(monkeypatch):
@@ -97,7 +97,8 @@ def test_record_order():
     call = make_call()
     out = call_tool(call, "record_order", {"sender_name": "김철수", "sender_phone": "공일공 일이삼사 오육칠팔"})
     assert out["ok"] and call.order.sender_phone == "01012345678"
-    assert out["state"]["stage"] == "A_REGISTER_SENDER" and out["state"]["missing"][0] == "sender_address"
+    # 용건 없이 주문 정보부터 말해도 기록하고 접수로(HUB → ORDER)
+    assert out["state"]["stage"] == "ORDER" and out["state"]["missing"][0] == "sender_address"
 
 
 def test_record_order_invalid_phone_not_saved_but_rest_recorded():
@@ -108,7 +109,7 @@ def test_record_order_invalid_phone_not_saved_but_rest_recorded():
 
 
 def test_record_order_not_allowed_outside_order_steps():
-    for stage in ("HUB", "C_CHOICE", "RAG", "END_CALL"):
+    for stage in ("C_CHOICE", "RAG", "END_CALL"):
         assert call_tool(at(stage), "record_order", {"other_item": "옷"})["ok"] is False
 
 
@@ -172,14 +173,15 @@ def test_cancel_is_scoped_to_caller_and_needs_confirmation():
 
 def test_get_state():
     out = call_tool(make_call(), "get_state", {})
-    assert out["ok"] and out["state"]["stage"] == "A_NEW_ORDER" and "record_order" in out["state"]["tools"]
+    assert out["ok"] and out["state"]["stage"] == "HUB" and "record_order" in out["state"]["tools"]
 
 
-def test_match_pins_only_in_matching_steps():
-    assert call_tool(make_call(), "match_pins", {"name": "이영희"})["ok"] is False
-    call = at("B_DEST_MATCH", FakeBackend())
+def test_match_pins_only_while_taking_an_order():
+    assert call_tool(make_call(), "match_pins", {"name": "이영희"})["ok"] is False  # HUB에서는 찾지 않는다
+    call = at("ORDER", FakeBackend())
     call.set_pin_role("destination")
     out = call_tool(call, "match_pins", {"name": "이영희"})
-    assert out["ok"] and out["state"]["stage"] == "B_DEST_MATCH"  # 핀이 없고 이름만 말했으면 주소를 묻는다
+    assert out["ok"] and call.pin_ask == "place"  # 핀이 없고 이름만 말했으면 주소를 묻는다
     out = call_tool(call, "match_pins", {"place": "대구 중구 동성로 1"})
-    assert out["ok"] and out["state"]["stage"] == "A_RECEIVER_HUB"  # 이름·주소로도 없으면 새 받는 분
+    # 이름·주소로도 없으면 고객이 말한 값을 받는 분 정보로 가져간다
+    assert out["ok"] and call.order.receiver_name == "이영희" and call.pin_ask is None

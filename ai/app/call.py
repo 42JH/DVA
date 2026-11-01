@@ -117,11 +117,11 @@ class Call:
         self.pins: list[Place] = []  # 발신번호 주인의 주소록(개인·기업 PIN). 출발지·도착지 구분이 없다
         # 백엔드가 준 가장 최근 접수 1건의 출발지·도착지({기존 출발지}, "이번에도 {도착지 주소}로")
         self.recent: dict[str, Place | None] = {"origin": None, "destination": None}
-        self.new_origin_requested = False  # 인사 질문에서 기존 출발지가 아니라고 함 → 다음 접수는 B_ORIGIN_CHANGE
-        self.places: dict[str, list[Place]] = {"destination": []}  # 이번 택배의 도착지 핀 후보(B_LOAD_RECENT)
+        self.places: dict[str, list[Place]] = {"destination": []}  # 이번 택배의 도착지 핀 후보(최근 것부터)
         self.reset_order_flags()
         # 통화(주문)에 하나인 값. 백엔드 주문 하나에 이번 통화의 택배들이 parcels로 묶인다
         self.customer_name: str | None = None  # 미등록 고객의 성함(MVP: 보내는 분 성함)
+        self.register_tried = False  # 신규 고객 등록을 시도했음(통화에 한 번)
         self.pickup_at: str | None = None
         self.payment_method: str | None = None
         self.payment_pick: str | None = None  # 결제 방식 질문에 고객이 고른 것(확정 지연 뒤 payment_method가 된다)
@@ -164,6 +164,7 @@ class Call:
         self.phone_check = ""  # 방금 기록한 번호(한 번 읽어 확인, PHONE_CHECK)
         self.progress_speak = False  # 미뤄 둔 진행 상태를 보낼 때 말하게도 해야 함(서버가 옮긴 단계)
         self.progress_due = False  # 고객이 말하는 중이라 미뤄 둔 진행 상태가 있음(말이 멈추면 보낸다)
+        self.progress_stale = False  # 단계가 허용하지 않는 도구를 거절함: 바뀐 것이 없어도 진행 상태를 다시 보낸다
         self.last_input_at = 0.0  # 고객 받아쓰기를 마지막으로 받은 시각(monotonic). 무응답 종료용
         # 지난 단계의 말(전환 전에 한 말의 늦은 조각, 듣지 않는 단계에서 쌓인 말): 전역 의도로만 판별한다
         self.side: dict = {"stage": "", "text": "", "off": False, "since": 0.0, "flushing": False}
@@ -236,11 +237,43 @@ class Call:
         self.pin_offer: Place | None = None  # 맞는지 확인하는 핀(VERIFY)
         self.pin_rejected: dict[str, list[Place]] = {"destination": []}
         self.dest_said: dict[str, str] = {}  # 핀이 없으면 받는 분 정보로 가져간다(B12, 이미 받은 항목은 다시 묻지 않게)
+        self.pin_ask: str | None = None  # 주소록에서 못 찾았는데 한쪽만 들음: 빠진 쪽(name·place)을 묻는다
         self.corrected: tuple[str, str] | None = None  # 마지막으로 고친 항목과 값(정정 확인 문구)
+        # 제안(ORDER): 저장된 값을 쓸지 묻는 중인 기존 출발지·최근 도착지. 답하거나 그 항목이 기록되면 사라진다
+        self.origin_offer: Place | None = None
+        self.dest_offer: Place | None = None
+        self.parcel_started = False  # 이 택배의 보내는 분·제안을 준비했음(ORDER에 처음 들어올 때 한 번)
 
     def new_parcel(self) -> None:
         self.order = Order()
         self.reset_order_flags()
+
+    def start_parcel(self) -> None:
+        """ORDER에 들어올 때 새 택배면 한 번: 보내는 분(고객·발신번호), 출발지(두 번째 택배부터는 앞 택배의 출발지를
+        묻지 않고 쓰고, 등록 고객의 첫 택배는 기존 출발지를 제안), 최근 도착지 제안, 도착지 핀 후보를 준비한다.
+        받던 택배(질문 뒤 복귀·되읽기에서 고치기)는 건드리지 않는다."""
+        if self.parcel_started:
+            return
+        self.parcel_started = True
+        self.fill_sender()
+        origin = self.recent_place("origin")
+        if origin and not self.order.has("sender_address"):
+            if self.parcels:
+                self.use_place("sender", origin)
+            elif self.customer_type == "registered":
+                self.origin_offer = origin
+        destination = self.recent_place("destination")
+        if destination and not any(self.order.has(f) for f in ("receiver_name", "receiver_address")):
+            self.dest_offer = destination
+        self.load_pins()
+        self.set_pin_role("destination")
+
+    def drop_offers(self) -> None:
+        """제안한 항목이 기록되면(고객이 제안에 답하지 않고 새 값을 말함) 그 제안은 사라진다."""
+        if self.order.has("sender_address"):
+            self.origin_offer = None
+        if self.order.has("receiver_name") or self.order.has("receiver_address"):
+            self.dest_offer = None
 
     def use_place(self, role: str, place: Place) -> None:
         """저장된 배송지(또는 앞 택배)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
@@ -274,6 +307,7 @@ class Call:
     def pins_found(self, found: list[Place], narrowing: bool = False) -> list[str]:
         """핀 매칭 결과 → 분기 사건. 여러 개면 앞쪽(최근) 핀부터 몇 개만 후보로 묻는다. 후보 안에서 하나를 고른 것이면
         나머지 후보는 남겨 둔다(확인에서 아니라고 하면 남은 후보로 다시 묻는다)."""
+        self.pin_ask = None
         if len(found) == 1:
             self.pin_offer = found[0]
             if not narrowing:
@@ -286,6 +320,7 @@ class Call:
         """앞서 말한 받는 분(이름·장소)과 합쳐 찾는다. 후보를 좁히는 중이면 후보 안에서, 아니면 아직 아니라고 하지 않은
         핀에서 최근 N개를 먼저, 거기 없으면 전체에서. 못 찾았는데 이름·장소 중 한쪽만 말했으면 다른 쪽을 묻는다(B6 이후 규칙)."""
         said = self.dest_said
+        self.dest_offer = None  # 최근 도착지 확인에 답하지 않고 다른 곳을 말함
         said.update({k: v for k, v in (("name", name), ("place", place), ("detail", detail)) if v})
         name, place, detail = said.get("name"), said.get("place"), said.get("detail")
         found = match_places(self.pin_candidates, name, place, detail) if len(self.pin_candidates) > 1 else []
@@ -296,8 +331,26 @@ class Call:
             or match_places(scope, name, place, detail)
         if not found and not (name and place):
             self.pin_offer, self.pin_candidates = None, []
+            self.pin_ask = "place" if name else "name"
             return ["pins.ask_place" if name else "pins.ask_name"]
         return self.pins_found(found)
+
+    async def reject_pin(self) -> None:
+        """확인한 핀이 아니라고 함: 그 핀은 버린다. 후보를 좁히던 중이면 남은 후보로 다시 묻고, 없으면 "저장된 다른 배송지가
+        없으니 새로 접수하겠습니다"(B11_NEW) 뒤 고객이 말한 받는 분 이름·장소를 가져가 빠진 것만 묻는다(2026-10-31 결정)."""
+        rejected, self.pin_offer = self.pin_offer, None
+        self.pin_rejected["destination"].append(rejected)
+        left = [p for p in self.pin_candidates if p != rejected]
+        if len(left) > 1:
+            self.pin_candidates = left
+            return
+        if len(left) == 1:
+            self.pin_offer, self.pin_candidates = left[0], left
+            return
+        self.pin_candidates = []
+        if "B11_NEW" not in self.flow.notice:
+            self.flow.notice.append("B11_NEW")
+        await self.carry_dest_said()
 
     def pin_labels(self) -> list[str]:
         return pin_labels(self.pin_candidates) if len(self.pin_candidates) > 1 else []
@@ -316,8 +369,10 @@ class Call:
         실패해도 통화는 신규 고객으로 이어 간다(결과는 이름·발신번호로 보낸다).
         TODO(flow): 등록 뒤 보내는 곳을 고쳐도 주소록은 고치지 않는다."""
         o = self.order
-        if self.customer_type != "new" or not (self.caller and self.call_session_seq and o.sender_name):
+        if self.customer_type != "new" or self.register_tried or not (self.caller and self.call_session_seq
+                                                                       and o.sender_name):
             return
+        self.register_tried = True  # 보내는 분 정보가 찬 뒤 기록할 때마다 부르므로 한 번만(실패해도 다시 하지 않음)
         try:
             await self.backend.create_customer(o.sender_name, self.caller)  # 이미 있으면 아래 고객 확인으로 번호를 받는다
             call = {"providerCallId": self.session_id, "incomingAt": self.incoming_at}
@@ -342,7 +397,7 @@ class Call:
         from app.tools.record_order import resolve
 
         said, o = self.dest_said, self.order
-        self.dest_said = {}
+        self.dest_said, self.pin_ask = {}, None
         if said.get("name") and o.receiver_name is None:
             o.receiver_name = said["name"]
         if said.get("place") and re.search(r"\d", said["place"]) and o.receiver_address is None:
@@ -381,27 +436,27 @@ class Call:
 
     # --- §2.5(4) 정정 ---
 
-    def start_correction(self, slot: str) -> list[str]:
-        """고객이 이미 말한 항목을 고친다고 함(값은 백엔드가 record_order로 기록). 그 항목만 고치고 현재 단계로 돌아온다.
-        기존 고객(B)이 최근 접수·주소록에서 가져온 출발지·도착지를 바꾸면 출발지는 새 출발지 받기(B_ORIGIN_CHANGE),
-        도착지는 핀 매칭부터 다시 한다(이전 매칭 결과는 버린다)."""
-        if self.flow.task not in ("new_order", "order") or "record_order" not in engine.allowed_tools(self):
-            return []  # 접수 업무 밖(조회·취소, 취소 실행 뒤 포함)·QnA 중에는 받지 않는다
-        if slot in engine.missing(self) or (slot == "item" and "item" in engine.current(self).fields):
+    def start_correction(self, slot: str) -> list[str] | None:
+        """고객이 이미 말한 항목을 고친다고 함(값은 백엔드가 record_order로 기록). 고친 값이 아직 없으면 그 항목을 다시 묻는다.
+        저장된 곳(기존 출발지·최근 도착지·주소록)에서 가져온 출발지·도착지를 바꾸면 그 묶음을 비워 다시 받는다(출발지는
+        주소만, 도착지는 받는 분까지. 이전 주소록 찾기 결과는 버린다). 이 단계에서 정정을 받을 수 없으면 None."""
+        if self.flow.task != "order" or "record_order" not in engine.allowed_tools(self):
+            return None  # 접수 업무 밖(조회·취소, 취소 실행 뒤 포함)·QnA 중에는 받지 않는다
+        if slot in engine.missing(self)[:1]:
             return []  # 지금 묻는 항목을 다시 말한 것은 정정이 아니라 답이다(다시 묻지 않는다, 2026-10-31 통화)
-        role = {"sender_address": "origin", "receiver_address": "destination"}.get(slot)
-        side = {"origin": "sender", "destination": "receiver"}.get(role)
-        if self.flow.task == "order" and role and engine.handles(self, f"correct.{role}") \
-                and f"{side}_phone" in self.from_saved:
-            # 출발지는 보내는 분(고객)을 그대로 두고 주소만, 도착지는 받는 분까지 다시 받는다
-            parts = ("address", "address_detail", "geo") if role == "origin" else \
+        side = {"sender_address": "sender", "receiver_address": "receiver"}.get(slot)
+        if side and f"{side}_phone" in self.from_saved:
+            parts = ("address", "address_detail", "geo") if side == "sender" else \
                 ("name", "phone", "address", "address_detail", "geo")
             for part in parts:
                 setattr(self.order, f"{side}_{part}", None)
             self.from_saved -= {f"{side}_phone", f"{side}_address_detail"}
-            if role == "destination":
-                self.pin_rejected[role], self.pin_candidates, self.pin_offer, self.dest_said = [], [], None, {}
-            return [f"correct.{role}"]
+            if side == "receiver":
+                self.pin_rejected["destination"], self.pin_candidates, self.pin_offer = [], [], None
+                self.dest_said, self.pin_ask, self.dest_offer = {}, None, None
+            else:
+                self.origin_offer = None
+            return ["order.updated"]
         self.flow.correcting = slot
         return []
 

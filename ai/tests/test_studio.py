@@ -26,9 +26,10 @@ def test_studio_shows_same_path(name, make_db, steps, expected_path, cfg):
                 view = await g.ainvoke({"tool": a, "args": b}, conf)
             elif kind == "commit":
                 view = await g.ainvoke({"commit": True}, conf)
-            else:  # 전역 의도가 있으면 그것(답보다 먼저 본다, listener.apply_answer와 같은 순서)
+            else:  # 답과 같이 들은 전역 의도도 함께(한 마디에 여러 행동, listener.apply_answer와 같은 처리)
                 intent, slot = b
-                view = await g.ainvoke({"intent": intent, "slot": slot} if intent != "none" else {"answer": a}, conf)
+                given = {"answer": a} if a != "none" else {}
+                view = await g.ainvoke({**given, **({"intent": intent, "slot": slot} if intent != "none" else {})}, conf)
             assert view["stage"] == stage, f"{kind} {a} {b}"
         return view
 
@@ -39,14 +40,11 @@ def test_studio_runs_each_stage_node_and_rejects_bad_input():
     async def play():
         g, conf = thread("nodes")
         view = await g.ainvoke({"customer": "new"}, conf)
-        assert view["stage"] == "A_NEW_ORDER" and view["choices"] == ["order", "lookup"]
+        assert view["stage"] == "HUB" and view["choices"] == ["order", "lookup", "no_more"]
         assert (await g.ainvoke({"answer": "yes"}, conf))["result"]["error"]  # 이 단계엔 그 답이 없음
         assert (await g.ainvoke({"answer": "order", "tool": "get_state"}, conf))["result"]["error"]  # 하나만
         view = await g.ainvoke({"answer": "order"}, conf)
-        view = await g.ainvoke({"tool": "record_order", "args": view["example_args"]}, conf)
-        assert view["stage"] == "A_RECEIVER_HUB" and view["example_args"]
-        view = await g.ainvoke({"tool": "record_order", "args": {**view["example_args"], "small_box_count": 1,
-                                                                 "item_price": 1000, "pickup_at": None}}, conf)
+        assert view["stage"] == "ORDER" and view["example_args"]
         view = await g.ainvoke({"tool": "record_order", "args": view["example_args"]}, conf)
         assert view["stage"] == "A_CONFIRM" and not view["pending"]
         view = await g.ainvoke({"answer": "yes"}, conf)

@@ -2,6 +2,7 @@ import logging
 
 from app import address
 from app.address import kakao
+from app.flow.stages._common import SENDER
 from app.order import PHONE_FIELDS
 from app.tools._base import OrderFields, Result, ToolError, is_past, tool
 
@@ -46,6 +47,10 @@ async def record_order(ctx, args: OrderFields) -> Result:
             ctx.flow.notice.append("PHONE_CHECK")
     await resolve(ctx)
     ctx.note_changes(before)  # 이미 채운 항목이 바뀌었으면 정정(§2.5(4))
+    ctx.drop_offers()  # 제안(기존 출발지·최근 도착지)에 답하지 않고 새 값을 말했으면 기록된 값이 이긴다
+    if all(ctx.field_done(f) for f in SENDER):
+        # 신규 고객은 보내는 분 정보를 다 말한 순간 고객 등록 + 보내는 곳을 주소록에(2026-10-31 결정, 한 번만)
+        await ctx.register_customer()
     events = ["order.updated"] if recorded else []
     if "pickup_at" in invalid and is_past(args.pickup_at):
         events.append("pickup.past")  # 지난 날짜(A5 구간 예외)

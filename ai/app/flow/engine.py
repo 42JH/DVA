@@ -67,6 +67,10 @@ class Stage:
     choices: Callable[[Any], dict[str, str]] | None = None
     on_answer: Callable[[Any, str], Awaitable[list[str]]] | None = None
     unheard_ok: tuple[str, ...] = ()  # 질문을 다 듣기 전에 말해도 받는 답(되돌릴 수 있는 거절, §2.5(1))
+    # 답마다 바로 이어서 할 말을 단계가 직접 계산할 때(전이로 갈 곳이 정해지지 않는 단계, 예: ORDER의 제안)
+    preview: Callable[[Any], list[tuple[str, list[str]]]] | None = None
+    # 받을 항목이 둘 이상 남았을 때 "그다음" 항목도 알려 줄지(답에 따라 다음이 갈리는 질문이면 False)
+    then: Callable[[Any], bool] | None = None
     subflow: bool = False  # QnA·상담원 Hub: 들어오기 전 업무 단계를 기억했다가 RETURN으로 돌아간다
     final: bool = False  # 통화를 끝내는 단계. 끼어드는 용건(enter_on)으로 나가지 않는다
     enter_on: tuple[str, ...] = ()  # 이 사건이 나면 어느 단계에서나(final 제외) 이 단계로 들어온다
@@ -77,7 +81,7 @@ class Stage:
 
 class FlowState(BaseModel):
     stage: str
-    task: str | None = None  # 진행 중 업무(new_order · order · lookup · cancel)
+    task: str | None = None  # 진행 중 업무(order · lookup · cancel)
     resume: dict | None = None  # {"task", "stage"}: QnA·상담원으로 빠지기 직전 업무 단계(§2.2)
     say: list[str] = []  # 마지막 전이 경로에서 할 말(문구 키)
     say_asks: bool = False  # say가 머무는 단계의 질문까지 했음
@@ -196,7 +200,10 @@ async def _step(step: Step, runtime: Runtime) -> Command:
             t.action(ctx)
         m = missing(ctx)
         ctx.flow.variant, ctx.flow.variant_field = _key(ctx, t.say), m[0] if m else None
-        ctx.flow.say, ctx.flow.say_asks = [], False
+        # 새 질문(정보 받기는 단계 하나라 기록·제안 답마다 질문이 바뀐다): 다 듣기 전 답을 다시 묻는 것도 이 질문에서 한 번,
+        # 이 질문 전에 시작한 말(앞 답의 늦은 꼬리 "네네")은 이 질문의 답으로 쓰지 않는다(§2.5(2), 진입 시각을 새로)
+        ctx.flow.say, ctx.flow.say_asks, ctx.flow.reasked = [], False, False
+        ctx.flow.entered_ms = ctx.now_ms()
         return Command(goto=END)
     await _move(ctx, t, step)
     # 끼어드는 단계로 들어왔거나 넘겨 받는 전이면 들어간 단계가 같은 사건을 먼저 본다. 아니면 들어온 직후 사건
@@ -232,6 +239,11 @@ def current(ctx: Any) -> Stage:
 def listening(ctx: Any) -> bool:
     listen = current(ctx).listen
     return listen(ctx) if callable(listen) else listen
+
+
+def gated(ctx: Any) -> bool:
+    """지금 단계가 확정 관문(확정 지연 전이가 있음: 담기·결제·취소 확인). 여기서는 다른 용건이 섞인 답을 받지 않는다."""
+    return any(t.commit for t in current(ctx).transitions)
 
 
 def allowed_tools(ctx: Any) -> tuple[str, ...]:
@@ -366,6 +378,8 @@ def preview(ctx: Any) -> list[tuple[str, list[str]]]:
     stage = current(ctx)
     if not stage.choices or not listening(ctx):
         return []
+    if stage.preview:
+        return stage.preview(ctx)
     out = []
     for choice, meaning in stage.choices(ctx).items():
         t = next((t for t in stage.transitions if t.event.rsplit(".", 1)[-1] == choice and t.guard(ctx)), None)
@@ -404,9 +418,12 @@ def progress_text(ctx: Any, max_chars: int) -> str:
     texts = ctx.texts
     nxt = next_text(ctx)
     m = missing(ctx)
-    # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다
-    then = texts.progress_then.format(next2=render(ctx, field_key(ctx, m[1]))) if len(m) > 1 else ""
     ahead = preview(ctx)
+    stage = current(ctx)
+    asking = bool(stage.choices and listening(ctx) and stage.choices(ctx))
+    # 기록이 한 박자 늦어 방금 답한 항목을 또 묻지 않게 그다음 항목도 알려 준다(답을 고르는 질문 중에는 답마다 알려 줌)
+    hint = len(m) > 1 and not asking and (stage.then is None or stage.then(ctx))
+    then = texts.progress_then.format(next2=render(ctx, field_key(ctx, m[1]))) if hint else ""
     if ahead:  # 답을 고르는 질문: 판별을 기다리지 않고 바로 맞는 다음 말을 하게
         then += texts.progress_preview.format(items=texts.progress_sep.join(
             texts.progress_preview_item.format(choice=c, next=" ".join(render(ctx, k) for k in keys))

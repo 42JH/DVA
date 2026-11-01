@@ -32,7 +32,7 @@
 
 ## 1-1. 신규 고객 등록 — `POST /api/customers`, `POST /api/customers/{id}/pins`
 
-신규 고객이 보내는 분 정보(성함·보내는 곳 주소)를 다 말한 순간(`A_REGISTER_SENDER` → `A_RECEIVER_HUB`) 등록하고, 이때부터 기존 고객으로 다룬다(2026-10-31 결정, `Call.register_customer`).
+신규 고객이 보내는 분 정보(성함·보내는 곳 주소·상세주소)가 다 기록되는 순간(`record_order`, 통화에 한 번) 등록하고, 이때부터 기존 고객으로 다룬다(2026-10-31 결정, `Call.register_customer`).
 
 1. `POST /api/customers` `{name: 보내는 분 성함, phoneNumber: 발신번호}` → 201 `customerSeq`. 이미 등록된 번호면 409(그대로 진행).
 2. 고객 확인을 같은 통화로 다시 불러(이전 주소는 읽지 않음) 고객 번호·결제 자격을 받는다. 백엔드는 통화 고객을 발신번호로 찾으므로 등록 직후부터 통화 번호로 조회·주소록 API를 쓸 수 있다.

@@ -266,7 +266,7 @@ def test_address_is_resolved_when_recorded(corrector):
     """새 주소는 기록하면서 주소DB로 확정하고(고객에게 묻지 않음), 결과가 관제에 남는다."""
     call = make_call()
     assert record(call, sender_address="서울 강남구 태헤란노 211", sender_address_detail="")["ok"]
-    assert call.flow.stage == "A_REGISTER_SENDER" and call.order.sender_address == "서울특별시 강남구 테헤란로 211"
+    assert call.flow.stage == "ORDER" and call.order.sender_address == "서울특별시 강남구 테헤란로 211"
     assert call.address_results["sender_address"] == {"status": "confirmed", "changed": True, "geo": True}
     assert call.snapshot()["address"] == call.address_results and not call.address_pending
     assert not call.flow.notice  # 서버가 바로잡은 주소는 고객 정정이 아니다
@@ -274,15 +274,15 @@ def test_address_is_resolved_when_recorded(corrector):
     assert not call.address_pending and not call.flow.notice
 
 
-def test_changed_address_drops_detail_and_goes_back_to_receiver_step(corrector):
-    """가액 단계에서 받는 곳 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 받는 분 정보 단계로 되돌아가 다시 받는다."""
+def test_changed_address_drops_detail_and_asks_it_again(corrector):
+    """받는 곳 주소만 바꾸면 주소 확정 → 상세주소가 빠졌으니 가액보다 먼저(권장 순서) 그 상세주소를 다시 묻는다."""
     call = make_call()
-    run(engine.apply(call, ["new.order"]))
+    run(engine.apply(call, ["hub.order"]))
     here = {"sender_address": "서울 강남구 테헤란로 211", "receiver_address": "서울 강남구 테헤란로 211"}  # 작은 시험 DB에 있는 주소
     assert record(call, **{k: here.get(k, v) for k, v in FULL_ORDER.items() if k not in ("item_price", "pickup_at")})["ok"]
-    assert call.flow.stage == "A_ITEM_VALUE"
+    assert call.flow.stage == "ORDER" and engine.missing(call)[0] == "item_price"
     assert record(call, receiver_address="서울 강남구 테헤란로 112")["ok"]
-    assert call.flow.stage == "A_RECEIVER_HUB" and "상세주소" in engine.next_text(call)
+    assert engine.missing(call)[0] == "receiver_address_detail" and "받으시는 곳의 동이나 호수" in engine.next_text(call)
     assert call.order.receiver_address.startswith("서울특별시 강남구 테헤란로 11")  # 애매함 → 1등
     assert call.address_results["receiver_address"]["status"] == "ambiguous"
 
@@ -351,7 +351,7 @@ def test_not_found_address_is_asked_until_found(corrector, monkeypatch):
 
     monkeypatch.setattr(address, "correct", none)
     call = make_call()
-    call.flow.stage, call.flow.say, call.flow.say_asks = "A_RECEIVER_HUB", [], False  # 받는 분 정보 단계에 있는 것으로
+    call.flow.stage, call.flow.say, call.flow.say_asks = "ORDER", [], False  # 정보 받는 중인 것으로
     call.order.sender_name, call.order.sender_phone = "김철수", "01012345678"
     call.order.sender_address, call.order.sender_address_detail = "서울 강남구 테헤란로 212", ""
     call.order.receiver_name, call.order.receiver_phone = "이영희", "01098765432"

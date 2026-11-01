@@ -47,7 +47,7 @@ class StudioInput(BaseModel):
                            "orders 접수한 택배가 있는 등록 고객(조회·취소), picked 그 택배가 이미 수거됨, withdrawn 탈퇴, "
                            "no_recent 최근 접수 정보가 없는 등록 고객")
     answer: str | None = Field(None, description="지금 단계 질문에 대한 고객 답. 결과의 choices 중 하나")
-    intent: IntentName | None = Field(None, description="전역 의도(질문·제한된 요청·정정·기다림·종료)")
+    intent: IntentName | None = Field(None, description="전역 의도(질문·제한된 요청·정정·조회·기다림·종료). 답과 함께 줄 수 있다")
     slot: SlotName = Field("none", description="intent가 correction일 때 고치는 항목")
     tool: ToolName | None = Field(None, description="백엔드 모델의 도구 호출. 결과의 tools 중 하나")
     args: dict = Field(default_factory=dict, description="도구 인수. record_order는 결과의 example_args를 붙여 넣으면 된다")
@@ -119,13 +119,14 @@ async def report(state: StudioState, config: RunnableConfig) -> Command:
         call.rag = FakeRag()  # 질문에 "모르는"이 있으면 답할 자료 없음(RAG No)
         _, events = await _collect(call.prepare)
         return await _next(call, events, {"result": {"started": state.customer, "start_stage": call.flow.stage}})
-    given = [name for name in ("answer", "intent", "tool", "commit") if getattr(state, name)]
-    if len(given) != 1:
-        return await _next(call, [], {"result": {"error": "answer·intent·tool·commit 중 하나만 채워 실행"}})
+    # 답은 같이 들은 전역 의도와 함께 줄 수 있다(한 마디에 여러 행동, listener.apply_answer)
+    given = [name for name in ("answer", "tool", "commit") if getattr(state, name)] or (["intent"] if state.intent else [])
+    if len(given) != 1 or (state.intent and given[0] in ("tool", "commit")):
+        return await _next(call, [], {"result": {"error": "answer(+intent)·intent·tool·commit 중 하나만 채워 실행"}})
     if state.answer:
         if state.answer == NO_ANSWER or state.answer not in stage_choices(call):
             return await _next(call, [], {"result": {"error": f"{call.flow.stage} 단계의 답이 아님. choices 중 하나"}})
-        out, events = await _collect(lambda: apply_answer(call, state.answer, "none"))
+        out, events = await _collect(lambda: apply_answer(call, state.answer, state.intent or "none", state.slot))
     elif state.intent:
         out, events = await _collect(lambda: apply_answer(call, NO_ANSWER, state.intent, state.slot))
     elif state.commit:

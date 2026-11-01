@@ -1,9 +1,11 @@
 """고객 말 판별(spec/sideband.md, spec/LANGGRAPH_REBUILD.md §2.1·§2.5). 대화 상태는 백엔드 도구 호출이 아니라
 서버가 고객 말을 직접 듣고 바꾼다(① 받아쓰기 경로).
 
-고객 받아쓰기를 모아 두었다가 말이 멈추면 작은 모델로 "이 단계의 답"과 "전역 의도"를 판별한다. 판별 결과는 항상
-전역 의도가 먼저다: 질문 → QNA, 제한된 요청 → RESTRICTED_REQUEST, 정정 → 그 항목만 고치기, 그 밖에는 현재 단계의 답.
-판별은 정해진 선택지 중 하나만 고르게 하고(추측 금지, 애매하면 none), 분기와 처리는 단계 정의와 상태 엔진이 한다.
+고객 받아쓰기를 모아 두었다가 말이 멈추면 작은 모델로 "이 단계의 답"과 "전역 의도"를 판별한다. 한 마디에 둘 다
+있으면 둘 다 적용한다(spec/flow.md "한 마디에 여러 행동"): 단계 답을 먼저 적용하고 옮겨 간 단계에서 의도(질문 → QNA,
+제한된 요청 → 상담원 Hub, 정정 → 그 항목 고치기, 조회 → 조회 업무)를 적용한다. 기다림·종료면 답을 버리고, 확정 관문
+단계에서는 의도가 있으면 답을 보류한다. 판별은 정해진 선택지 중 하나만 고르게 하고(추측 금지, 애매하면 none),
+분기와 처리는 단계 정의와 상태 엔진이 한다.
 
 끼어들기·정정(§2.5): 판별마다 그때의 말 리비전을 붙여 최신 결과만 쓰고, 질문의 핵심 구간을 듣기 전에 한 답은 다시 묻고,
 단계가 바뀌기 전에 한 말의 늦은 조각과 듣지 않는 단계에서 쌓인 말은 단계 답으로 쓰지 않는다. 새 말이 오면 미뤄 둔
@@ -29,6 +31,7 @@ INTENTS = {
                 "예: \"어디 주소요?\" \"뭘 말하라는 거죠?\"는 질문이 아니라 none)",
     "restricted": "상담원 연결 요청, 또는 민원·보상·분실·결제 오류·지난 주문 수정처럼 AI가 직접 처리할 수 없는 요청",
     "correction": "이미 말한 접수 정보(이름·연락처·주소·물품·가액·수거 일시)를 고치려 함",
+    "lookup": "이미 보낸 택배를 조회·배송 확인·취소하려 함(지금 묻는 질문의 답이 아닐 때)",
     "wait": "'잠깐만요'처럼 기다려 달라고 하거나 방금 한 답을 번복함",
     "end": "통화를 끝내려 함(끊겠다·이만 됐다고 분명히 말할 때. \"그만하고요\"처럼 지금 안내를 멈추고 다른 것을 하자는 말은 아님)",
 }
@@ -39,7 +42,9 @@ SLOTS = {
     "item": "물건 크기·개수", "item_price": "물건 가격", "pickup_at": "수거 일시",
 }
 # 미뤄 둔 확정을 버리는 용건(번복·끼어드는 용건, §2.5(3))
-BLOCKING = ("question", "restricted", "correction", "wait", "end")
+BLOCKING = ("question", "restricted", "correction", "lookup", "wait", "end")
+# 같이 들은 단계 답을 버리는 의도(답이 무효가 됨)
+DROPS_ANSWER = ("wait", "end")
 # 듣지 않는 단계에서 쌓인 말에서 받는 용건(§2.5(6)). 듣던 단계의 늦은 꼬리 조각은 정정만(§2.5(2))
 OFF_INTENTS = BLOCKING
 
@@ -294,7 +299,7 @@ async def record_heard(call, conn, text: str, heard_at: float, force: bool = Fal
 
 
 async def _intent_events(call, intent: str, slot: str, started_at: float | None) -> list[str] | None:
-    """전역 의도(§2.1)의 사건. 용건이 없으면 None(현재 단계의 답으로 처리)."""
+    """전역 의도(§2.1)의 사건. 용건이 없거나 지금 받을 수 없으면 빈 목록."""
     if intent == "question":
         if started_at is not None and call.search_entry_at >= started_at:
             return []  # 이 말의 검색 결과가 먼저 와서 이미 QnA로 들어갔다(같은 질문을 두 번 처리하지 않게)
@@ -304,15 +309,18 @@ async def _intent_events(call, intent: str, slot: str, started_at: float | None)
     if intent == "end":  # TODO(flow): 다이어그램에 없음. 통화를 끝내겠다고 하면 마무리 인사 후 종료
         return ["call.ending"]
     if intent == "correction":
-        return call.start_correction(slot) if slot != NO_SLOT else []
-    if intent == "wait":
-        return []
-    return None
+        return (call.start_correction(slot) or []) if slot != NO_SLOT else []
+    if intent == "lookup":  # 이미 조회·취소 중이면 그대로(같은 업무를 처음부터 다시 하지 않는다)
+        return [] if call.flow.task in ("lookup", "cancel") else ["intent.lookup"]
+    return []
 
 
 async def apply_answer(call, answer: str, intent: str, slot: str = NO_SLOT, *, start_ms: int | None = None,
                        started_at: float | None = None) -> list[str]:
-    """판별 결과 → 사건 → 단계 전이. 전역 의도가 먼저, 그 밖에는 현재 단계의 답(선택지 안의 것만).
+    """판별 결과 → 사건 → 단계 전이. 단계 답(선택지 안의 것만)과 전역 의도를 둘 다 적용한다:
+    1) 기다림·종료면 답을 버린다. 2) 확정 관문 단계(확정 지연 전이가 있음)에서 의도가 있으면 답을 보류한다("네, 근데 받는
+    분이 틀렸어요"의 "네"로 접수가 확정되면 안 됨). 3) 그 밖에는 답을 먼저 적용하고, 옮겨 간 단계에서 의도를 적용한다
+    (2026-11-01 20:05 통화: 인사 질문의 "네, 근데 이름이…"에서 정정이 답을 지워 단계가 멈춤).
     질문의 핵심 구간을 듣기 전에 한 답은 받지 않고 한 번 다시 묻는다(거절처럼 되돌릴 수 있는 답은 받는다)."""
     if not engine.listening(call):
         return []
@@ -320,18 +328,20 @@ async def apply_answer(call, answer: str, intent: str, slot: str = NO_SLOT, *, s
     pending = call.flow.pending
     if intent in BLOCKING:
         call.flow.pending = None
-    events = await _intent_events(call, intent, slot, started_at)
-    if events is None:
-        events = []
-        if answer != NO_ANSWER and stage.on_answer and answer in stage_choices(call):
-            if answer not in stage.unheard_ok and not prompt_heard(call, start_ms) and not call.flow.reasked:
-                call.flow.reasked = call.reask = True
-                log.info("질문을 다 듣기 전 답 %s 단계=%s answer=%s", call.session_id, stage.name, answer)
-            else:
-                events = await stage.on_answer(call, answer)
-    await engine.apply(call, events, "listener")
+    events: list[str] = []
+    take = (answer != NO_ANSWER and stage.on_answer is not None and answer in stage_choices(call)
+            and intent not in DROPS_ANSWER and not (intent != "none" and engine.gated(call)))
+    if take:
+        if answer not in stage.unheard_ok and not prompt_heard(call, start_ms) and not call.flow.reasked:
+            call.flow.reasked = call.reask = True
+            log.info("질문을 다 듣기 전 답 %s 단계=%s answer=%s", call.session_id, stage.name, answer)
+        else:
+            events = await stage.on_answer(call, answer)
+            await engine.apply(call, events, "listener")
+    later = await _intent_events(call, intent, slot, started_at)
+    await engine.apply(call, later, "listener")
     await settle(call, pending, intent in BLOCKING)
-    return events
+    return events + later
 
 
 async def settle(call, pending: dict | None, blocking: bool) -> None:
@@ -354,7 +364,7 @@ async def apply_side(call, intent: str, slot: str, off: bool, started_at: float 
         return []
     if intent in BLOCKING:
         call.flow.pending = None
-    events = await _intent_events(call, intent, slot, started_at) or []
+    events = await _intent_events(call, intent, slot, started_at)
     await engine.apply(call, events, "listener")
     await settle(call, pending, intent in BLOCKING)
     return events
