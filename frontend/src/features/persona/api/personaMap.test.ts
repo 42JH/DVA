@@ -1,11 +1,11 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/persona/api/personaMap.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import {
-  lastApplied,
   toPersona,
   toRate,
   toSpeed,
   toVersions,
+  type PersonaDraftDto,
   type PersonaDto,
   type PersonaVersionDto,
 } from './personaMap'
@@ -36,74 +36,93 @@ assert.equal(toRate('SLOW', { min: 0.5, max: 2 }), 0.85)
 assert.equal(toRate('FAST', { min: 0.5, max: 1.1 }), 1.1) // 범위 끝
 assert.equal(toRate('FAST', null), null) // 숫자 속도 미지원
 
-// 쓰는 중인 페르소나: v4 적용 중 · v5 저장(적용 안 함, 최신) · v3 음성만 바뀜
-const a = [
-  ver(5, { promptText: 'B' }),
-  ver(4, { status: 'ACTIVE', appliedAt: '2026-11-01T00:00:00Z' }),
-  ver(3, { speakingRate: 1.2, appliedAt: '2026-10-01T00:00:00Z' }),
-  ver(2),
-  ver(1, { createdByAdminUserName: null }),
-]
-assert.equal(lastApplied(a), 4)
-const av = toVersions([...a].reverse(), 5) // 서버 순서와 상관없이 높은 번호가 위
-assert.deepEqual(
-  av.map((v) => [v.version, v.status, v.isHead]),
-  [
-    [5, 'SAVED', true],
-    [4, 'ACTIVE', false],
-    [3, 'PAST', false],
-    [2, 'PAST', false],
-    [1, 'PAST', false],
-  ],
-)
-assert.equal(av[0]!.changes.prompt, true)
-assert.deepEqual(av[1]!.changes.speed, ['FAST', 'NORMAL']) // v3 빠르게 → v4 보통
-assert.equal(av[1]!.voiceOnly, true)
-assert.equal(av[4]!.changes.first, true)
-assert.equal(av[4]!.author, '')
-
+const draft = (extra: Partial<PersonaDraftDto> = {}): PersonaDraftDto => ({
+  draftRevision: 'rev-1',
+  baseVersion: 4,
+  name: '빠른 접수형',
+  promptText: 'C',
+  voiceId: 'marin',
+  speakingRate: null,
+  turnWaitLevel: 'NORMAL',
+  updatedAt: '2026-11-02T03:00:00Z',
+  ...extra,
+})
 const dto = (
   head: PersonaVersionDto,
   active: PersonaVersionDto | null,
-  pending = null,
+  extra: Partial<PersonaDto> = {},
 ): PersonaDto => ({
   aiPersonaSeq: 1,
   code: 'parcel-fast',
   headVersion: head,
   activeVersion: active,
-  pendingVersion: pending,
+  pendingVersion: null,
+  draft: null,
+  ...extra,
 })
-const pa = toPersona(dto(a[0]!, a[1]!), a)
+
+// 쓰는 중인 페르소나: v4 적용 중(= HEAD) · 초안 저장됨 → 화면 'v5 저장됨' · v3 음성만 바뀜
+const a = [
+  ver(4, { status: 'ACTIVE', appliedAt: '2026-11-01T00:00:00Z' }),
+  ver(3, { speakingRate: 1.2 }),
+  ver(2),
+  ver(1, { createdByAdminUserName: null }),
+]
+const av = toVersions([...a].reverse(), 4, draft()) // 서버 순서와 상관없이 높은 번호가 위
 assert.deepEqual(
-  [pa.inUse, pa.appliedVersion, pa.savedVersion, pa.head, pa.applyingVersion],
-  [true, 4, 5, { version: 5, seq: 105 }, null],
+  av.map((v) => [v.version, v.status, v.isHead, v.isDraft]),
+  [
+    [5, 'SAVED', false, true], // 초안 = HEAD + 1
+    [4, 'ACTIVE', true, false],
+    [3, 'PAST', false, false],
+    [2, 'PAST', false, false],
+    [1, 'PAST', false, false],
+  ],
+)
+assert.equal(av[0]!.prompt, 'C')
+assert.equal(av[0]!.changes.prompt, true) // 초안도 바로 앞(HEAD)과 비교
+assert.deepEqual(av[1]!.changes.speed, ['FAST', 'NORMAL']) // v3 빠르게 → v4 보통
+assert.equal(av[1]!.voiceOnly, true)
+assert.equal(av[4]!.changes.first, true)
+assert.equal(av[4]!.author, '')
+const pa = toPersona(dto(a[0]!, a[0]!, { draft: draft() }))
+assert.deepEqual(
+  [pa.inUse, pa.appliedVersion, pa.savedVersion, pa.head, pa.draftRevision],
+  [true, 4, 5, { version: 4, seq: 104 }, 'rev-1'],
 )
 
-// 통화에 안 쓰는 페르소나: 예전에 v3 적용 → 기준 = v3('마지막 적용'), v4 저장됨
-const b = [ver(4), ver(3, { appliedAt: '2026-10-01T00:00:00Z', voiceId: null }), ver(2), ver(1)]
-const pb = toPersona(dto(b[0]!, null), b)
-assert.deepEqual([pb.inUse, pb.appliedVersion, pb.savedVersion], [false, 3, 4])
+// 초안이 없으면 버전 기록 그대로, 저장됨 없음
+assert.deepEqual(
+  toVersions(a, 4, null).map((v) => v.status),
+  ['ACTIVE', 'PAST', 'PAST', 'PAST'],
+)
+assert.equal(toPersona(dto(a[0]!, a[0]!)).savedVersion, null)
+
+// 통화에 안 쓰는 페르소나: 적용본 = HEAD(appliedAt이 없어도) → '마지막 적용'
+const b = [ver(3, { voiceId: null }), ver(2), ver(1)]
+const pb = toPersona(dto(b[0]!, null))
+assert.deepEqual([pb.inUse, pb.appliedVersion, pb.savedVersion], [false, 3, null])
 assert.equal(pb.voice.voice, '') // 기본 음성 = ''
 assert.deepEqual(
-  toVersions(b, 4).map((v) => v.status),
-  ['SAVED', 'APPLIED', 'PAST', 'PAST'],
+  toVersions(b, 3, null).map((v) => v.status),
+  ['APPLIED', 'PAST', 'PAST'],
 )
 
-// 한 번도 적용 안 한 페르소나: 기준 없음, 최신본 = 저장됨
-const c = [ver(2), ver(1)]
-const pc = toPersona(dto(c[0]!, null), c)
-assert.deepEqual([pc.appliedVersion, pc.savedVersion], [null, 2])
+// 확정은 됐는데 적용 요청이 실패: HEAD v5 > 적용 중 v4 → v5 '저장됨'(적용 다시), 적용본은 v4
+const c = [ver(5, { promptText: 'B' }), ver(4, { status: 'ACTIVE' })]
+const pc = toPersona(dto(c[0]!, c[1]!))
+assert.deepEqual([pc.appliedVersion, pc.savedVersion], [4, 5])
 assert.deepEqual(
-  toVersions(c, 2).map((v) => v.status),
-  ['SAVED', 'PAST'],
+  toVersions(c, 5, null).map((v) => v.status),
+  ['SAVED', 'ACTIVE'],
 )
 
-// 적용 대기 중인 최신본은 '저장됨'이 아님
+// 적용 대기 중인 HEAD는 '저장됨'이 아님
 const d = [
   ver(5, { status: 'PENDING', applyErrorCode: 'AI_UNAVAILABLE' }),
   ver(4, { status: 'ACTIVE' }),
 ]
-const pd = toPersona({ ...dto(d[0]!, d[1]!), pendingVersion: d[0]! }, d)
+const pd = toPersona(dto(d[0]!, d[1]!, { pendingVersion: d[0]! }))
 assert.deepEqual([pd.savedVersion, pd.applyingVersion, pd.applyError], [null, 5, 'AI_UNAVAILABLE'])
 
 console.log('personaMap OK')
