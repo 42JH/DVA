@@ -54,10 +54,8 @@ def test_client_delegation_remains_valid():
     assert session['delegation']['acknowledgement_delay_ms'] == 800
 
 
-def test_persona_fills_voice_instructions(tmp_path):
-    from app.live_session import PERSONA_MARK
-    default = build_session("")["instructions"]
-    assert PERSONA_MARK not in default and "## 인사 문구" in default
-    assert default.index("## 인사 문구") < default.index("# 업무 규칙")  # 고정 업무 규칙은 페르소나 뒤에 그대로
-    custom = build_session("", persona="## 말투\n- 밝게 말합니다.")["instructions"]
-    assert "- 밝게 말합니다." in custom and "## 인사 문구" not in custom and "# 업무 규칙" in custom
+def test_persona_replaces_whole_voice_instructions():
+    default = build_session("통화 정보")["instructions"]
+    assert "## 인사 문구" in default and "# 업무 규칙" in default and default.endswith("통화 정보")
+    custom = build_session("통화 정보", persona="- 밝게 말합니다.")["instructions"]
+    assert custom == "- 밝게 말합니다.통화 정보"  # 관리자 프롬프트가 voice.md 전체를 대신한다

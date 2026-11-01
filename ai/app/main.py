@@ -94,9 +94,9 @@ def create_app(client: Any = None, backend: Any = None, rag: Any = None, faq_eve
         svc.faq_events = event_store
         if cfg.faq_sync.process_enabled:
             svc.faq_processor = FaqProcessor(event_store, backend_api, managed_index, cfg.faq_sync, cfg.rag)
-        svc.persona = PersonaManager(backend_api, svc.registry, cfg.persona, enabled=bool(os.environ.get("AI_PERSONA_TOKEN")))
+        svc.persona = PersonaManager(backend_api, cfg.persona, enabled=bool(os.environ.get("AI_PERSONA_TOKEN")))
         if not svc.persona.enabled:
-            log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: prompts/persona.md 사용")
+            log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: prompts/voice.md 사용")
         svc.spawn(svc.persona.run())
         if rag is not None:
             app.state.svc.rag = rag

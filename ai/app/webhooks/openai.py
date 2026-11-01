@@ -1,6 +1,7 @@
 """OpenAI 웹훅: 서명 검증 → 바로 200 → accept는 백그라운드(spec/pbx-sip.md)."""
 
 import asyncio
+import contextlib
 import logging
 
 from fastapi import APIRouter, Request, Response
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Request, Response
 from app.call import Call, caller_from_headers, iso_utc
 from app.flow import engine
 from app.live_session import LiveConfigError, build_session, build_backend, load_live_toml
+from app.persona import PersonaUnavailable
 from app.services import Services
 from app.sideband import hangup_now, run_call
 
@@ -45,11 +47,15 @@ async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -
     """incoming_at: 수신 이벤트 created_at(ISO 8601). 서버 수신 시각이 아니라 이 값으로 백엔드가 녹취와 통화를 잇는다."""
     session_id = data.session_id
     call = Call(session_id, caller_from_headers(data.sip_headers), svc.cfg, svc.texts, svc.backend, incoming_at)
-    if svc.persona is not None and svc.persona.locked:  # 페르소나 설치 중(spec/persona.md). 등록 전에 봐서 사이에 await가 없다
-        log.warning("페르소나 적용 중이라 reject %s", session_id)
+    try:
+        # 최신 대기 페르소나를 맞추고 이 통화의 설정을 고정한 뒤 등록까지 같은 잠금 안에서(spec/persona.md)
+        async with svc.persona.entry() if svc.persona is not None else contextlib.nullcontext() as persona:
+            status = svc.registry.try_register(call)
+            call.persona_version = persona.version_seq if persona else None
+    except PersonaUnavailable as e:
+        log.warning("페르소나 설정을 쓸 수 없어 reject %s: %s", session_id, e)
         await _reject(svc, session_id)
         return
-    status = svc.registry.try_register(call)
     if status == "duplicate":
         return
     if status == "full":
@@ -60,8 +66,6 @@ async def handle_incoming(svc: Services, data, incoming_at: str | None = None) -
         await call.prepare()
         call_info = svc.texts.call_info.format(**call.text_vars(), first=engine.next_text(call))
         settings = load_live_toml()
-        persona = svc.persona.active if svc.persona is not None else None  # 이 통화는 끝까지 이 설정
-        call.persona_version = persona.version_seq if persona else None
         session = build_session(call_info, data=settings, persona=persona and persona.prompt,
                                 voice=persona and persona.voice,
                                 backend_info=svc.texts.backend_info.format(**call.text_vars()))

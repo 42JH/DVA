@@ -18,7 +18,7 @@ def entry(faq_id=123, **changes):
 
 
 def page(*entries, **changes):
-    return {'data':list(entries),'hasNext':False, **changes}
+    return {'data':list(entries),'hasNext':False, 'total_count':len(entries), **changes}
 
 
 async def fetch(payload, ids=None, *, status=200):
@@ -79,6 +79,7 @@ def test_one_hundred_items_in_one_filtered_page():
 @pytest.mark.parametrize('payload', [
     None, [], {}, {'data':[]}, {'hasNext':False}, page(hasNext=True),
     page(hasNext='false'), page(hasNext=0), page(hasNext=None), page(data=None),
+    {'data':[], 'hasNext':False}, page(total_count=-1), page(total_count='1'), page(total_count=None),
     page(entry(999)), page(entry(),entry()), page(entry(124),entry(123)),
     page(entry(faqEntrySeq=True)), page(entry(faqEntrySeq='123')), page(entry(faqEntrySeq=0)),
     page(entry(faqEntrySeq=2147483648)), page(entry(question=' ')), page(entry(answer='\t\n')),

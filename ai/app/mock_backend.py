@@ -41,8 +41,8 @@ class MockBackend:
         if self.faqs is None:
             # 가짜 원문을 준비하지 않은 상태를 전체 삭제로 해석하지 않는다.
             raise BackendError('FAQ_MOCK_NOT_CONFIGURED')
-        return parse_faq_lookup({'data': [self.faqs[value] for value in requested if value in self.faqs],
-                                 'hasNext': False}, list(requested))
+        rows = [self.faqs[value] for value in requested if value in self.faqs]
+        return parse_faq_lookup({'data': rows, 'hasNext': False, 'total_count': len(rows)}, list(requested))
 
     # --- 페르소나: ACTIVE·PENDING 하나씩, 회신 검증만 흉내 낸다 ---
 
@@ -61,8 +61,6 @@ class MockBackend:
         if body["result"] == "FAILED":
             pending["applyErrorCode"] = body["errorCode"]
             return dict(pending)
-        if body["activeCallCount"] != 0:
-            return None  # 409 INVALID_STATE
         personas["ACTIVE"] = {**personas.pop("PENDING"), "status": "ACTIVE", "applyErrorCode": None}
         return dict(personas["ACTIVE"])
 

@@ -42,7 +42,8 @@ async def run(directory, collection):
         if unavailable:
             return httpx2.Response(503)
         ids = [int(i) for i in request.url.params['faqEntrySeqs'].split(',')]
-        return httpx2.Response(200, json={'data':[source[i] for i in sorted(ids) if i in source], 'hasNext':False})
+        rows = [source[i] for i in sorted(ids) if i in source]
+        return httpx2.Response(200, json={'data':rows, 'hasNext':False, 'total_count':len(rows)})
     backend = BackendAPI('https://controlled-source.test', 5, transport=httpx2.MockTransport(respond))
     runtime = None
     original_token = os.environ.get('AI_FAQ_TOKEN')

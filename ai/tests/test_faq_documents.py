@@ -258,7 +258,7 @@ def test_batch_preserves_ids_and_deletes_and_does_not_skip_bad_faq():
 def test_inspection_cli_uses_config_and_prints_offline_result(tmp_path, monkeypatch, capsys):
     from scripts.inspect_faq_json import main
     path = tmp_path/'faq-api-response.json'
-    path.write_text(json.dumps({'data':[faq().model_dump(by_alias=True)],'hasNext':False}), encoding='utf-8')
+    path.write_text(json.dumps({'data':[faq().model_dump(by_alias=True)],'hasNext':False,'total_count':1}), encoding='utf-8')
     monkeypatch.setattr('sys.argv', ['inspect_faq_json', str(path), '--show-chunks'])
     main()
     printed = capsys.readouterr().out
