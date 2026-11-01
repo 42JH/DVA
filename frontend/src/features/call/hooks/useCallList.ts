@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { pageCount } from '@/shared/api/paging'
+import { FETCH_ALL_MAX, pageCount, pageSlice } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
 import { parseRange, todayYmd } from '@/shared/lib/dateRange'
 import { fmtDuration, fmtListTime, fmtPhone, toDateTimeLocal } from '@/shared/lib/format'
-import { phoneDigits, suggest } from '@/shared/lib/search'
+import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
 import { COMPLAINT_LABEL, NO_ANALYSIS, OUTCOME_LABEL, OUTCOME_TAG } from '@/features/call/labels'
@@ -72,13 +72,31 @@ export function useCallList() {
     outcome: params.outcome as OutcomeFilter,
     complaintOnly: params.tab === 'complaint',
   }
-  const list = useQuery(callListQueries.list(query, page, PAGE_SIZE))
-  const total = list.data?.totalCount ?? 0
+  // 검색어가 없을 땐 서버가 쪽을 나눔. 검색어가 있으면 같은 조건(기간 · 탭 · 결과)의 통화 전체를 받아 09와 같은 규칙(초성 · 띄어쓰기 무시)으로
+  // 앞에서 거르고 쪽을 나눔 — 서버 검색은 글자 그대로라 'ㅊㅇㅇ'이 안 됨 (11/02 사용자: 04도 09처럼). 전체는 5분 재사용
+  // ponytail: fetchAll 2,000건 상한 — 긴 기간의 검색은 앞 2,000건 안에서만. 넘으면 서버 검색으로 돌릴 것
+  const q = params.q.trim()
+  const searching = q !== ''
+  const list = useQuery({ ...callListQueries.list(query, page, PAGE_SIZE), enabled: !searching })
+  const pool = useQuery({
+    queryKey: [...callListQueries.all(), 'pool', { ...query, q: '' }],
+    queryFn: ({ signal }) => fetchAllCalls({ ...query, q: '' }, signal),
+    enabled: searching,
+    staleTime: 5 * 60_000,
+  })
+  const poolRows = (pool.data ?? []).map(toView)
+  const digits = phoneDigits(q) // 숫자만 쳤으면 번호로
+  const hit = searching
+    ? poolRows.filter((r) =>
+        digits ? r.callerNumber.includes(digits) : matchKo(r.customerName ?? '', q),
+      )
+    : null
+  const total = hit ? hit.length : (list.data?.totalCount ?? 0)
   const pages = pageCount(total, PAGE_SIZE)
   useEffect(() => {
-    if (list.data && page > pages) set({ page: pages }) // 주소의 쪽이 범위 밖이면 마지막 쪽으로
-  }, [list.data, page, pages, set])
-  const rows = (list.data?.items ?? []).map(toView)
+    if ((hit ?? list.data) && page > pages) set({ page: pages }) // 주소의 쪽이 범위 밖이면 마지막 쪽으로
+  }, [hit, list.data, page, pages, set])
+  const rows = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.items ?? []).map(toView)
 
   const outcomeOptions: Option<OutcomeFilter>[] = [
     { value: 'ALL', label: '전체' },
@@ -86,10 +104,17 @@ export function useCallList() {
   ]
 
   const exportCsv = async () => {
+    if (total > FETCH_ALL_MAX) {
+      // 목록은 100건씩 2,000건까지만 받을 수 있음 (CSV 엔드포인트 없음) — 조용히 잘린 파일을 주지 않게 막음 (11/02)
+      setExportError(
+        `통화가 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건을 넘어 내보낼 수 없습니다. 기간을 나눠 주세요.`,
+      )
+      return
+    }
     setExporting(true)
     setExportError(null)
     try {
-      const all = (await fetchAllCalls(query)).map(toView)
+      const all = hit ?? (await fetchAllCalls(query)).map(toView) // 검색 중이면 화면과 같은 목록
       const csv = toCsv(
         ['통화 시작 시각', '고객', '발신번호', '통화 결과', '불만 유형', '불만 사유', '통화 시간'],
         all.map((c) => [
@@ -117,11 +142,11 @@ export function useCallList() {
     setTab: (t: CallTab) => set({ tab: t }),
     q: params.q,
     setQ: (v: string) => set({ q: v }),
-    // 추천 = 지금 결과(첫 쪽)의 이름, 숫자만 쳤으면 번호 — 결과가 이미 검색어로 걸러져 있음
+    // 추천 = 같은 조건의 통화 전체에서 이름, 숫자만 쳤으면 번호
     suggestions:
-      phoneSuggestions(rows, phoneDigits(params.q)) ??
+      phoneSuggestions(poolRows, phoneDigits(params.q)) ??
       suggest(
-        rows.flatMap((r) => (r.customerName ? [r.customerName] : [])),
+        [...new Set(poolRows.flatMap((r) => (r.customerName ? [r.customerName] : [])))],
         params.q,
       ),
     range, // 날짜 칸 (null = 오늘)
@@ -134,8 +159,15 @@ export function useCallList() {
 
     rows,
     count: total, // '통화 목록 131건'
-    isLoading: list.isPending,
-    listError: list.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
+    // 검색 밑천이 상한에 걸림 → 그 뒤 통화는 검색에 안 잡힘 (11/02)
+    listNote:
+      searching && poolRows.length >= FETCH_ALL_MAX
+        ? `최근 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건 안에서만 검색됩니다. 기간을 줄여 주세요.`
+        : null,
+    isLoading: searching ? pool.isPending : list.isPending,
+    listError: (searching ? pool.error : list.error)
+      ? '불러오지 못했습니다. 다시 시도해 주세요.'
+      : null,
     page: Math.min(page, pages),
     pages,
     goPage: (p: number) => set({ page: p }),

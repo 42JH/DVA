@@ -62,7 +62,9 @@ export function CallActions({
         {actions.map((a) => {
           const row = (
             <>
-              <span className="w-12 shrink-0 text-label leading-7 text-sub">{a.time}</span>
+              <span className="w-16 shrink-0 text-label leading-7 text-sub tabular-nums">
+                {a.time}
+              </span>
               <span className="w-14 shrink-0">
                 <Tag kind="gray">{a.tag}</Tag>
               </span>

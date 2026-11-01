@@ -83,6 +83,7 @@ export function CallListPage() {
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
+          recentKey="calls" // 11/02 사용자: 09와 같은 모양 (최근 검색어 · 추천 · 초성)
           suggestions={vm.suggestions}
           placeholder="이름 · 전화번호"
           className="min-w-0 flex-1"
@@ -109,6 +110,9 @@ export function CallListPage() {
                 <span className="text-label font-normal text-sub">
                   {vm.count.toLocaleString('ko-KR')}건
                 </span>
+              )}
+              {vm.listNote && (
+                <span className="text-caption font-normal text-muted">{vm.listNote}</span>
               )}
             </h2>
           }

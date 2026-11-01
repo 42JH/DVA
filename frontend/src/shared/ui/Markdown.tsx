@@ -39,6 +39,11 @@ export function Markdown({ text, className = '' }: { text: string; className?: s
           code: ({ children }) => (
             <code className="rounded bg-bg px-1 py-0.5 font-mono text-caption">{children}</code>
           ),
+          // 들여쓴 줄 · ``` 은 <pre> — 기본 white-space: pre 라 긴 줄이 카드 밖으로 뻗음 → 줄바꿈 (11/02)
+          pre: ({ children }) => (
+            <pre className="overflow-x-auto rounded bg-bg p-3 whitespace-pre-wrap">{children}</pre>
+          ),
+          img: ({ src, alt }) => <img src={src} alt={alt ?? ''} className="h-auto max-w-full" />,
         }}
       >
         {text}

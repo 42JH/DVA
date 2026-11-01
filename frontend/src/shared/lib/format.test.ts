@@ -7,6 +7,7 @@ import {
   fmtDay,
   fmtDayRange,
   fmtDetailTime,
+  fmtClock,
   fmtDuration,
   fmtListTime,
   fmtPctSplit,
@@ -20,6 +21,9 @@ assert.equal(fmtDate(t), '2026.10.20')
 assert.equal(fmtDateTimeDay(t), '10.20 (화) 14:33')
 assert.equal(fmtDuration(220), '3분 40초')
 assert.equal(fmtDuration(52), '0분 52초')
+assert.equal(fmtDuration(3903), '1시간 5분 03초') // 한 시간 넘는 통화 (11/02)
+assert.equal(fmtClock(220), '03:40')
+assert.equal(fmtClock(3903), '1:05:03')
 assert.equal(fmtPhone('01066382047'), '010-6638-2047')
 assert.equal(fmtPhone('0312345678'), '031-234-5678') // 10자리
 assert.equal(fmtPhone('1588'), '1588') // 모르는 길이는 그대로

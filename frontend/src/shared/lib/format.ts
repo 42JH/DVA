@@ -60,14 +60,16 @@ export function fmtDateTimeDay(iso: string): string {
   return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
-/** 초 → '3분 40초' (04 통화 시간) */
+/** 초 → '3분 40초', 한 시간부터 '1시간 5분 03초' (04 통화 시간 · 02 평균 · CSV) */
 export function fmtDuration(seconds: number): string {
-  return `${Math.floor(seconds / 60)}분 ${two(seconds % 60)}초`
+  const h = Math.floor(seconds / 3600)
+  return `${h ? `${h}시간 ` : ''}${Math.floor(seconds / 60) % 60}분 ${two(seconds % 60)}초`
 }
 
-/** 초 → '03:40' (06 통화 안 시각 · 재생 바) */
+/** 초 → '03:40', 한 시간부터 '1:05:03' (06 통화 안 시각 · 재생 바) */
 export function fmtClock(seconds: number): string {
-  return `${two(Math.floor(seconds / 60))}:${two(seconds % 60)}`
+  const h = Math.floor(seconds / 3600)
+  return `${h ? `${h}:` : ''}${two(Math.floor(seconds / 60) % 60)}:${two(seconds % 60)}`
 }
 
 /** 숫자 문자열 전화번호 → 010-1234-5678 (명세서: 전달 · 저장은 숫자만) */

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useDeferredValue, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { pageSlice } from '@/shared/api/paging'
 import { matchKo, suggest } from '@/shared/lib/search'
@@ -24,6 +24,7 @@ export function useFaqList() {
   // 검색어 · 분류 · 쪽은 URL 쿼리에 (뒤로가기 · 새로고침 · 주소 공유에도 그대로). 필터를 바꾸면 쪽은 1로
   const { params, page, set } = useListParams(DEFAULTS)
   const q = params.q
+  const dq = useDeferredValue(q) // 글자마다 전체 FAQ를 거르니 수백 개가 되면 입력이 버벅임 → 목록 · 추천은 한 박자 늦게 (11/02)
   const category: CategoryFilter = FAQ_CATEGORIES.some((c) => c.name === params.category)
     ? (params.category as FaqCategory)
     : '전체' // 주소에 모르는 분류가 오면 전체로
@@ -34,7 +35,7 @@ export function useFaqList() {
 
   const inCategory = (list.data ?? []).filter((f) => category === '전체' || f.category === category)
   const hit = inCategory
-    .filter((f) => matchKo(f.question, q) || matchKo(f.answer, q)) // 띄어쓰기 · 초성 규칙 (shared/lib/search)
+    .filter((f) => matchKo(f.question, dq) || matchKo(f.answer, dq)) // 띄어쓰기 · 초성 규칙 (shared/lib/search)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)) // 최근 만든 것이 1번. 수정은 자리 유지
   const sliced = pageSlice(hit, page, PAGE_SIZE) // 지워서 쪽이 줄면 마지막 쪽으로
   const rows: FaqRow[] = sliced.rows.map((faq, i) => ({
@@ -51,7 +52,7 @@ export function useFaqList() {
     q,
     suggestions: suggest(
       inCategory.map((f) => f.question),
-      q,
+      dq,
     ), // 지금 분류의 질문 중 맞는 것
     setQ: (v: string) => {
       set({ q: v })

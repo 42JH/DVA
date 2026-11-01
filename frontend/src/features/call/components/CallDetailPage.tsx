@@ -38,14 +38,20 @@ function CallDetailBody({ callId }: { callId: number }) {
           ).map(([label, value], i) => (
             <div
               key={label}
-              className={`flex flex-col gap-1.5 ${i ? 'border-l border-line pl-8' : ''}`}
+              className={`flex flex-col gap-1.5 ${i ? 'border-l border-line pl-8' : 'min-w-0'}`} // 고객 칸만 줄어들 수 있게 — 긴 이름은 말줄임 (11/02)
             >
               <span className="text-label text-sub">{label}</span>
               <span
-                className={`flex items-center gap-2 text-strong ${i ? 'font-semibold' : 'font-bold'}`}
+                className={`flex min-w-0 items-center gap-2 text-strong ${i ? 'font-semibold' : 'font-bold'}`}
               >
-                {value}
-                {i === 0 && <Tag kind={s.outcomeTag}>{s.outcome}</Tag>}
+                <span className="truncate" title={value}>
+                  {value}
+                </span>
+                {i === 0 && (
+                  <span className="shrink-0">
+                    <Tag kind={s.outcomeTag}>{s.outcome}</Tag>
+                  </span>
+                )}
               </span>
             </div>
           ))}

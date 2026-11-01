@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { pageSlice } from '@/shared/api/paging'
+import { FETCH_ALL_MAX, pageSlice } from '@/shared/api/paging'
 import { todayYmd, ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
@@ -35,6 +35,9 @@ export function useUnansweredList({
   const { params, page, set } = useListParams(DEFAULTS)
   const [modal, setModal] = useState<Modal>(null)
   const list = useQuery(unansweredQueries.list())
+  const total = useQuery(unansweredQueries.count()) // 사이드바와 같은 쿼리(캐시 공유) — 목록이 상한(2,000)에 걸렸는지 보는 용도
+  const capped =
+    (list.data?.length ?? 0) >= FETCH_ALL_MAX && (total.data ?? 0) > (list.data?.length ?? 0)
 
   const q = params.q
   const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
@@ -88,6 +91,10 @@ export function useUnansweredList({
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로
     rows,
     count: hit.length, // 'AI 미답변 질문 22개' (검색 중엔 결과 수)
+    // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
+    listNote: capped
+      ? `오래된 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}개만 표시됩니다 (전체 ${(total.data ?? 0).toLocaleString('ko-KR')}개)`
+      : null,
     isLoading: list.isPending,
     listError: list.error?.message ?? null,
     page: sliced.page,

@@ -25,11 +25,19 @@ export interface VersionRowView {
 
 const COLS = 'grid-cols-[1.6fr_1.3fr_0.9fr_1fr_1fr_1fr_1.1fr_0.9fr]'
 
-export function VersionTable({ rows }: { rows: VersionRowView[] }) {
+export function VersionTable({
+  rows,
+  note = null,
+}: {
+  rows: VersionRowView[]
+  note?: string | null // '평균은 버전별 최근 2,000건 기준' (목록 상한에 걸린 버전이 있을 때)
+}) {
   return (
     <section className="rounded-xl bg-surface p-8 ring-1 ring-line ring-inset">
       <h2 className="text-card font-bold">버전별 기록</h2>
-      <p className="mt-1 text-label text-sub">최근 {rows.length}개 버전</p>
+      <p className="mt-1 text-label text-sub">
+        최근 {rows.length}개 버전{note ? ` · ${note}` : ''}
+      </p>
 
       <div
         className={`mt-5 grid ${COLS} h-8 items-center border-b border-line text-caption text-muted`}
@@ -63,9 +71,10 @@ export function VersionTable({ rows }: { rows: VersionRowView[] }) {
                 r.selected ? 'bg-action-soft' : 'hover:bg-bg'
               }`}
             >
-              <span className="flex items-center gap-2">
+              <span className="flex min-w-0 items-center gap-2">
                 <span
-                  className={`text-label ${r.selected ? 'font-bold text-action' : 'font-semibold'}`}
+                  className={`min-w-0 truncate text-label ${r.selected ? 'font-bold text-action' : 'font-semibold'}`}
+                  title={r.name}
                 >
                   {r.name}
                 </span>
