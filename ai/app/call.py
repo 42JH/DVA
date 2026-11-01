@@ -158,6 +158,7 @@ class Call:
         self.heard_rev = 0  # 고객 말 조각이 올 때마다 1 증가(판별 리비전): 늦게 온 옛 판별은 버린다
         self.heard_stage = ""  # heard_text를 모은 단계
         self.heard_text = ""  # 이번 단계에서 아직 판별에 쓰지 않은 고객 말
+        self.heard_asked = ""  # 그 말을 시작할 때 서버가 물은 질문(판별 기준. 음성 모델이 그사이 한 말이 아니라)
         self.heard_start: int | None = None  # 그 말의 첫 조각 시작(세션 타임라인 ms). 질문을 다 들었는지 판단
         self.heard_started_at = 0.0  # 그 말의 첫 조각을 받은 시각(monotonic)
         self.heard_at = 0.0  # 고객 말 조각을 마지막으로 받은 시각(monotonic). 판별 지연 측정용

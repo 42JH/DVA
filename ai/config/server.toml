@@ -78,8 +78,11 @@ max_prompt_chars = 20000
 
 [listener]
 # 고객 답 판별(예/아니오·어느 곳·끼어드는 용건). 백엔드 도구 호출 없이 서버가 직접 판별해 대화 상태를 바꾼다
+# 판별 API: decisions(Decision API, 2026-11-01 실측 중앙값 약 0.25초) · responses(Responses API strict JSON, 약 1.3초)
+engine = "decisions"
+# Decision API는 gpt-6-luna만 받는다
 model = "gpt-6-luna"
-# none · minimal · low · medium · high(모델마다 다름). 높을수록 판별이 늦다
+# responses일 때만 쓴다. none · minimal · low · medium · high(모델마다 다름). 높을수록 판별이 늦다
 reasoning_effort = "low"
 # 고객 말이 이만큼(ms) 멈추면 판별한다
 pause_ms = 600
@@ -87,7 +90,7 @@ pause_ms = 600
 timeout_sec = 5.0
 # 판별에 넘기는 고객 말(이번 단계에서 아직 판별하지 않은 말)의 최대 글자 수
 max_heard_chars = 400
-# 판별에 같이 넘기는 상담원의 직전 말 최대 글자 수
+# 판별에 같이 넘기는 "고객이 말을 시작할 때 서버가 물은 질문"의 최대 글자 수
 max_agent_chars = 200
 # 저장된 배송지를 선택지로 넘길 때 최대 개수
 max_choices = 30

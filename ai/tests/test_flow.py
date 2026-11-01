@@ -709,6 +709,14 @@ def test_address_only_without_pin_asks_name_and_partial_place_is_not_taken_as_ad
     assert engine.next_text(call) == f"'{TEXTS.say['A2_2']}'"
 
 
+def test_receiver_address_known_asks_only_name_not_where():
+    """받는 곳 주소를 이미 받았으면 "어디로 보내실 건가요?"를 다시 묻지 않고 성함만(2026-11-01 21:47 통화)."""
+    call = play(saved_db(), [say("yes", "ORDER"), say("no", "ORDER"),
+                             tool("record_order", {"receiver_address": DEST3.address, "receiver_address_detail": ""},
+                                  "ORDER")])
+    assert engine.next_text(call) == f"'{TEXTS.say['A2_1']}'"
+
+
 def test_place_said_at_recent_destination_question_is_matched_directly():
     call = play(saved_db(), [say("yes", "ORDER"), tool("match_pins", {"name": "이영희", "place": "마포"}, "ORDER")])
     assert call.pin_offer == DEST2 and call.dest_offer is None and said(call, "B9")

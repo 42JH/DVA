@@ -54,6 +54,7 @@
 4. 확정을 기다리는 중의 끼어드는 용건(`wait`·`question`·`restricted`·`correction`·`lookup`·`end`)은 확정을 버린다.
 
 - 전역 의도: `question` 질문, `restricted` 제한된 요청·상담원 요청, `correction` 정정, `lookup` 이미 보낸 택배 조회·취소, `wait`, `end`. `lookup`은 조회·취소 업무 중이면 무시한다.
+- 판별은 Decision API로 한다(설정 `[listener] engine`, 약 0.25초). 판별 기준은 음성 모델이 실제로 한 말이 아니라 고객이 말을 시작할 때 서버가 물은 질문이다(음성 모델이 먼저 다음 질문을 말해도 흔들리지 않게).
 - 판별마다 말 리비전·단계를 확인해 낡은 결과는 버리고, 단계가 바뀌기 전에 한 말은 전역 의도로만 본다(끼어들기 세부 규칙은 `spec/sideband.md`).
 
 ## 진행 상태와 멈춤 막기

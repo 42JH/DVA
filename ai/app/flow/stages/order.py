@@ -53,12 +53,15 @@ def sender_address_text(ctx) -> str:
 
 def receiver_name_text(ctx) -> str:
     """받는 분: 제안(최근 도착지·하나 남은 핀·후보들)이 있으면 그것, 주소록에서 찾다가 한쪽만 들었으면 빠진 쪽,
-    주소록이 있는 고객이면 받는 분·장소를 열어 묻고(B6, 백엔드가 match_pins), 아니면 성함."""
+    주소록이 있는 고객이면 받는 분·장소를 열어 묻고(B6, 백엔드가 match_pins), 아니면 성함.
+    받는 곳 주소를 이미 받았으면 성함만 묻는다(2026-11-01 21:47 통화: 주소를 말했는데 "어디로 보내실 건가요?"를 또 물음)."""
     kind = receiver_offer(ctx)
     if kind:
         return {"recent": "B4", "pin": "B9", "pins": "B8"}[kind]
     if ctx.pin_ask:
         return "A2_3" if ctx.pin_ask == "place" else "A2_1"
+    if ctx.order.has("receiver_address"):
+        return "A2_1"
     return "B6" if ctx.pin_scope("destination") else "A2_1"
 
 

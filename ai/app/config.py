@@ -61,6 +61,7 @@ class MonitorConfig(_Strict):
 
 
 class ListenerConfig(_Strict):
+    engine: Literal["decisions", "responses"]
     model: str = Field(min_length=1)
     reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
     pause_ms: int = Field(ge=100, le=5000)
@@ -215,6 +216,7 @@ class Texts(_Strict):
     caller_value: str
     empty_value: str
     classifier: str
+    classifier_questions: dict[str, str]
     answer_error: str
     record_heard: str
     reask: str

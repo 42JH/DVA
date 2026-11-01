@@ -66,16 +66,47 @@ def _schema(choices: dict[str, str]) -> dict:
     }
 
 
-def _prompt(call, stage_name: str, choices: dict[str, str], heard: str) -> str:
-    agent = next((b["text"] for b in reversed(call.transcript) if b["speaker"] == "agent"), "")
-    agent = agent[-call.cfg.listener.max_agent_chars:] if call.cfg.listener.max_agent_chars else ""
-    lines = [f"지금 단계: {engine.STAGES[stage_name].description}",
-             f"상담원이 방금 한 말: {agent}",
-             f"고객이 한 말: {heard}",
-             "answer 선택지:", *(f"- {k}: {v}" for k, v in choices.items()),
-             "intent 선택지:", *(f"- {k}: {v}" for k, v in INTENTS.items()),
-             "slot 선택지:", *(f"- {k}: {v}" for k, v in SLOTS.items())]
-    return "\n".join(lines)
+def _situation(call, stage_name: str, heard: str, asked: str) -> str:
+    """판별할 상황. 상담원의 질문은 출력 받아쓰기(음성 모델이 실제로 한 말)가 아니라 고객이 말을 시작할 때 서버가 물은
+    질문이다: 음성 모델은 판별보다 먼저 다음 질문을 말해, 그 말을 주면 "네"가 엉뚱한 질문의 답으로 읽혔다
+    (2026-11-01 21:47 통화: 기존 출발지 확인의 "네"가 이미 나간 "어디로 보내실 건가요?" 때문에 none)."""
+    asked = asked[-call.cfg.listener.max_agent_chars:] if call.cfg.listener.max_agent_chars else ""
+    return "\n".join([f"지금 단계: {engine.STAGES[stage_name].description}",
+                      f"상담원이 물은 질문: {asked}",
+                      f"고객이 한 말: {heard}"])
+
+
+def _prompt(call, stage_name: str, choices: dict[str, str], heard: str, asked: str) -> str:
+    return "\n".join([_situation(call, stage_name, heard, asked),
+                      "answer 선택지:", *(f"- {k}: {v}" for k, v in choices.items()),
+                      "intent 선택지:", *(f"- {k}: {v}" for k, v in INTENTS.items()),
+                      "slot 선택지:", *(f"- {k}: {v}" for k, v in SLOTS.items())])
+
+
+async def judge(call, client, stage_name: str, choices: dict[str, str], heard: str, asked: str):
+    """판별 한 번 → (answer, intent, slot, 응답). 설정 [listener] engine으로 Decision API(빠름) 또는 Responses API.
+    Decision API는 고를 답이 없는 단계면 답 질문을 뺀다(선택지는 2개 이상이어야 함). 거절한 질문은 none."""
+    cfg = call.cfg.listener
+    if cfg.engine == "decisions":
+        texts = call.texts.classifier_questions
+        options = {"answer": choices, "intent": INTENTS, "slot": SLOTS}
+        questions = [{"type": "choice", "name": name, "instructions": texts[name],
+                      "choices": [{"value": k, "description": v} for k, v in opts.items()]}
+                     for name, opts in options.items() if len(opts) > 1]
+        resp = await client.decisions.create(model=cfg.model, input=_situation(call, stage_name, heard, asked),
+                                             questions=questions)
+        got = {a.name: getattr(a, "choice", None) for a in resp.answers}
+        return got.get("answer") or NO_ANSWER, got.get("intent") or "none", got.get("slot") or NO_SLOT, resp
+    resp = await client.responses.create(
+        model=cfg.model,
+        instructions=call.texts.classifier,
+        input=_prompt(call, stage_name, choices, heard, asked),
+        text={"format": {"type": "json_schema", "name": "listener", "strict": True, "schema": _schema(choices)}},
+        reasoning={"effort": cfg.reasoning_effort},
+        store=False,
+    )
+    result = json.loads(resp.output_text)
+    return result["answer"], result["intent"], result["slot"], resp
 
 
 def heard(call, delta: str, conn, client, start_ms: int | None = None) -> None:
@@ -95,6 +126,7 @@ def heard(call, delta: str, conn, client, start_ms: int | None = None) -> None:
     if call.heard_stage != stage.name or not call.heard_text.strip():
         call.heard_stage, call.heard_text = stage.name, ""
         call.heard_start, call.heard_started_at = start_ms, time.monotonic()
+        call.heard_asked = engine.next_text(call)  # 고객이 답하는 질문(판별 기준, _situation)
     call.heard_text = (call.heard_text + delta)[-call.cfg.listener.max_heard_chars:]
     call.heard_at = time.monotonic()
     _schedule(call, conn, client)
@@ -105,7 +137,8 @@ def _side(call, delta: str, start_ms: int | None, late: bool) -> None:
     stage = _stage_at(call, start_ms) if late else call.flow.stage
     side = call.side
     if side["stage"] != stage or not side["text"].strip():
-        side.update(stage=stage, text="", off=not _listens(call, stage), since=time.monotonic(), flushing=False)
+        side.update(stage=stage, text="", off=not _listens(call, stage), since=time.monotonic(), flushing=False,
+                    asked=call.heard_asked)
     side["text"] = (side["text"] + delta)[-call.cfg.listener.max_heard_chars:]
 
 
@@ -160,11 +193,11 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
     cfg = call.cfg.listener
     if side:
         stage_name, text, start_ms, started = call.side["stage"], call.side["text"].strip(), None, call.side["since"]
-        choices = {NO_ANSWER: "단계 답으로 쓰지 않음"}
+        choices, asked = {NO_ANSWER: "단계 답으로 쓰지 않음"}, call.side.get("asked") or call.heard_asked
     else:
         stage_name, raw = call.flow.stage, call.heard_text
         text, start_ms, started = raw.strip(), call.heard_start, call.heard_started_at
-        choices = stage_choices(call)
+        choices, asked = stage_choices(call), call.heard_asked
     if not text:
         return
     record = {"call_id": f"listen-{rev}{'-side' if side else ''}", "name": "listener", "arguments": text,
@@ -172,18 +205,10 @@ async def _classify(call, conn, client, rev: int, side: bool, retry: bool = Fals
     call.tool_calls[record["call_id"]] = record
     t0 = time.monotonic()
     try:
-        resp = await asyncio.wait_for(client.responses.create(
-            model=cfg.model,
-            instructions=call.texts.classifier,
-            input=_prompt(call, stage_name, choices, text),
-            text={"format": {"type": "json_schema", "name": "listener", "strict": True, "schema": _schema(choices)}},
-            reasoning={"effort": cfg.reasoning_effort},
-            store=False,
-        ), cfg.timeout_sec)
-        result = json.loads(resp.output_text)
-        answer, intent, slot = result["answer"], result["intent"], result["slot"]
+        answer, intent, slot, resp = await asyncio.wait_for(
+            judge(call, client, stage_name, choices, text, asked), cfg.timeout_sec)
         if answer not in choices or intent not in INTENTS or slot not in SLOTS:  # 모델 출력은 미신뢰 입력
-            raise ValueError(f"선택지 밖 판별: {result}")
+            raise ValueError(f"선택지 밖 판별: {(answer, intent, slot)}")
     except Exception as e:
         log.warning("판별 실패 %s: %s %s %dms", call.session_id, type(e).__name__, e,
                     (time.monotonic() - t0) * 1000)  # TimeoutError는 메시지가 비어 이름을 같이 남긴다
