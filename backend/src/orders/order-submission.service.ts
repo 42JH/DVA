@@ -45,12 +45,14 @@ export class OrderSubmissionService {
     requestId: string,
     adminId: number | null = null,
     retry = false,
+    expectedUpdatedAt?: string,
   ): Promise<SubmittedOrderDto> {
     const prepared = await writeOrder(this.database, async (client) => {
       const order = await this.repository.lockOrder(client, id);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       if (
         retry &&
+        expectedUpdatedAt === undefined &&
         order.status === 'SUBMITTING' &&
         (await this.recoverStale(client, id, requestId))
       )
@@ -62,7 +64,9 @@ export class OrderSubmissionService {
       const payload = dverPayload(snapshot, 0);
       assertOrderAmount(snapshot);
       this.dver.ensureConfigured();
-      await this.submissions.start(client, id);
+      // A worker snapshot is consumed once even if another attempt has already failed again.
+      if (!(await this.submissions.start(client, id, expectedUpdatedAt)))
+        return { status: order.status };
       await this.audit.recordSuccess(
         {
           actorId: adminId,

@@ -497,6 +497,10 @@ FAQ 등록은 단건·복수 모두 items 배열을 사용한다. 새 앱 전 02
 
 배포 전에 033-organization-created-at.sql을 적용해야 합니다. 실제 서버 DB 적용과 배포는 이 코드 변경의 로컬 검증에 포함하지 않습니다.
 
-관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않으며, 관리자가 접수 결과를 확인한 뒤 다시 재접수를 요청하면 전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않습니다. SUBMISSION_FAILED는 다음 분의 자동 워커 또는 관리자 POST /api/admin/orders/{id}/retry로 재전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+
+GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 실패 주문만 조회합니다. PAID 그룹은 PAID·SUBMITTING·ACCEPTED만 포함하며 실패를 제외합니다. 검색·기간·페이지 조건과 응답 형식은 유지하고 total_count도 같은 필터의 총 주문 수입니다. 기존 docs/api/admin-order-list.md의 PAID 그룹 설명보다 이 계약과 Swagger를 우선합니다.
+
+자동 워커는 기동 시와 매분 PAID 및 이전 분까지의 SUBMISSION_FAILED를 오래된 갱신 시각 순으로 최대 20건 처리합니다. 실패 재시도 횟수 제한은 없고 ACCEPTED·SUBMITTING·notPaid·COLLECTING·CANCELLED는 자동 재전송하지 않습니다. 조회 시각 비교와 주문 잠금으로 다른 워커·관리자가 이미 처리한 스냅샷의 전송을 건너뛰며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 결제·청구·수거 시각은 재처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다. 스키마 변경이나 신규 migration은 없습니다.
 
 배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.

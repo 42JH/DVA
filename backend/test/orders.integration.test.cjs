@@ -2870,9 +2870,10 @@ test('ORD-06 serializes concurrent preparation on the existing order row', async
     attempted = resolve;
   });
   submissionRepository.start = async function (...args) {
-    await originalStart.apply(this, args);
+    const result = await originalStart.apply(this, args);
     entered();
     await gate;
+    return result;
   };
   secondRepository.lockOrder = function (...args) {
     const result = originalLock.apply(this, args);
