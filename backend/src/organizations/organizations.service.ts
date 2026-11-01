@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { MembersService } from '../members/members.service';
+import { DepartmentsRepository } from './departments.repository';
 import { DatabaseService } from '../database/database.service';
 import { ApiException } from '../common/errors/api.exception';
 import { ListResponse } from '../common/pagination';
@@ -15,6 +17,8 @@ export class OrganizationsService {
     private readonly repository: OrganizationsRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly members: MembersService,
+    private readonly departments: DepartmentsRepository,
   ) {}
 
   async searchDirectory(query: CompanyDirectoryQueryDto) {
@@ -61,6 +65,7 @@ export class OrganizationsService {
 
   async create(adminId: number, input: CreateOrganizationDto, requestId: string) {
     return this.database.transaction(async (client) => {
+      if (input.members?.length) await client.query("SET LOCAL lock_timeout = '2s'");
       const id = await this.repository.insert(
         client,
         input.name,
@@ -76,6 +81,33 @@ export class OrganizationsService {
         },
         client,
       );
+      const departmentIds = new Map<string, number>();
+      for (const department of input.departments ?? []) {
+        const created = await this.departments.insert(client, id, department);
+        departmentIds.set(department.name, created.departmentSeq);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            targetId: created.departmentSeq,
+            targetType: 'DEPARTMENT',
+            action: 'DEPARTMENT_CREATED',
+            requestId,
+          },
+          client,
+        );
+      }
+      if (input.members?.length)
+        await this.members.create(
+          id,
+          input.members.map(({ departmentName, ...member }) => ({
+            ...member,
+            departmentSeq: departmentName == null ? null : departmentIds.get(departmentName)!,
+          })),
+          adminId,
+          requestId,
+          client,
+          'members',
+        );
       return { organizationSeq: id };
     });
   }

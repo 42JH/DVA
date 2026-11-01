@@ -50,13 +50,15 @@ export class MembersService {
     );
   }
 
-  private async write(work: (client: PoolClient) => Promise<void>) {
+  private async write(work: (client: PoolClient) => Promise<void>, client?: PoolClient) {
     try {
-      await this.database.transaction(async (client) => {
-        await client.query("SET LOCAL lock_timeout = '2s'");
-        await this.repository.lockWrites(client);
-        await work(client);
-      });
+      const execute = async (transaction: PoolClient) => {
+        await transaction.query("SET LOCAL lock_timeout = '2s'");
+        await this.repository.lockWrites(transaction);
+        await work(transaction);
+      };
+      if (client) await execute(client);
+      else await this.database.transaction(execute);
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === '55P03')
         throw new ApiException(
@@ -112,6 +114,8 @@ export class MembersService {
     items: Array<CreateMemberDto | InlineMemberDto>,
     adminId: number,
     requestId: string,
+    client?: PoolClient,
+    fieldPrefix: 'items' | 'members' = 'items',
   ): Promise<void> {
     const rows = items.filter((row): row is InlineMemberDto => !('customerSeq' in row));
     const references = items.filter((row): row is CreateMemberDto => 'customerSeq' in row);
@@ -149,7 +153,7 @@ export class MembersService {
         const phoneOwner = byPhone.get(row.phoneNumber);
         const existing = employee ?? phoneOwner;
         const add = (field: string, reason: string) =>
-          errors.push({ field: `items[${items.indexOf(row)}].${field}`, reason });
+          errors.push({ field: `${fieldPrefix}[${items.indexOf(row)}].${field}`, reason });
         if (existing?.customerStatus === 'WITHDRAWN') add('phoneNumber', 'CUSTOMER_WITHDRAWN');
         if (employee) {
           if (phoneOwner && phoneOwner.customerSeq !== employee.customerSeq)
@@ -207,6 +211,6 @@ export class MembersService {
           requestId,
           client,
         );
-    });
+    }, client);
   }
 }

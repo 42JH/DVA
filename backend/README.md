@@ -18,7 +18,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·result·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 새 API·migration 없이 기존 두 GET 조회를 보완한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
 
-기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
+기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다. 이름·전화번호 등록의 선택 role과 기업·선택 부서·사원 통합 등록의 최신 입력·트랜잭션 계약은 [기업·사원 등록 명세](docs/company-registration.md)를 우선한다.
 
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
