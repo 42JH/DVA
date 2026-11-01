@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { signup } from '@/features/auth/api/signupApi'
 
@@ -16,6 +16,7 @@ const FIELD_TEXT: Record<string, string> = {
 export function useSignup() {
   const [form, setForm] = useState({ loginId: '', password: '', confirm: '', name: '' })
   const navigate = useNavigate()
+  const location = useLocation()
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -44,6 +45,7 @@ export function useSignup() {
 
   return {
     form,
+    carry: { search: location.search, state: location.state as unknown }, // 로그인으로 돌아가도 돌아갈 화면 그대로
     setLoginId: set('loginId'),
     setPassword: set('password'),
     setConfirm: set('confirm'),

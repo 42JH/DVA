@@ -9,14 +9,17 @@ import { hasSession } from '@/shared/auth/session'
  */
 export function RequireAuth({ children }: { children: ReactNode }) {
   const location = useLocation()
-  if (!hasSession()) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (!hasSession())
+    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
   return <StatusGate>{children}</StatusGate>
 }
 
 // 훅은 조건문 뒤에 못 부르므로 로그인 표시 검사 다음 단계로 분리
 function StatusGate({ children }: { children: ReactNode }) {
-  const { isLoading, status } = useSession()
+  const { me, isLoading, status, error } = useSession()
   if (isLoading) return null
+  // 내 정보를 못 받으면(500 · 연결 실패) 역할을 모른 채 열지 않고 오류 화면으로. 이미 받은 뒤의 재조회 실패는 그대로 둠
+  if (error && !me) throw error
   if (status === 'PENDING') return <Navigate to="/pending" replace />
   return children
 }

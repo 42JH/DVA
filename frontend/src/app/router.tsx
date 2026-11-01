@@ -16,6 +16,7 @@ import { CompanyListPage } from '@/features/company/components/CompanyListPage'
 import { CompanyDetailPage } from '@/features/company/components/CompanyDetailPage'
 import { AppLayout, type RouteHandle } from './AppLayout'
 import { RequireAuth } from './guards/RequireAuth'
+import { RequireGuest } from './guards/RequireGuest'
 import { RequireRole } from './guards/RequireRole'
 import { RouteError } from './RouteError'
 import { UiKitPage } from './routes/UiKitPage'
@@ -25,8 +26,22 @@ export const router = createBrowserRouter([
   {
     errorElement: <RouteError />, // 루트 에러 경계 (컨벤션 7.3)
     children: [
-      { path: '/login', element: <LoginPage /> },
-      { path: '/signup', element: <SignupPage /> },
+      {
+        path: '/login',
+        element: (
+          <RequireGuest>
+            <LoginPage />
+          </RequireGuest>
+        ),
+      },
+      {
+        path: '/signup',
+        element: (
+          <RequireGuest>
+            <SignupPage />
+          </RequireGuest>
+        ),
+      },
       { path: '/pending', element: <PendingPage /> }, // 승인 대기 (가입 직후 · RequireAuth가 PENDING 계정을 여기로)
       // /inactive(비활성화 안내)는 보류 — 계정 비활성화 API가 없어 도달 경로 없음 (연동 상세명세 §10, BE 요청 B2)
       {

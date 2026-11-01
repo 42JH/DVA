@@ -90,7 +90,10 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
     // 로그인 요청 자체의 401(아이디 · 비밀번호 불일치)은 그 화면에서 보여 주고, 나머지 401은 토큰 만료로 보고 로그인 화면으로
     if (res.status === 401 && path !== '/auth/login' && path !== '/auth/signup') {
       clearSession()
-      if (window.location.pathname !== '/login') window.location.assign('/login')
+      // 보던 화면(쿼리 포함)을 ?from=에 → 다시 로그인하면 그 화면으로 (useLogin)
+      const here = window.location.pathname + window.location.search
+      if (window.location.pathname !== '/login')
+        window.location.assign('/login?from=' + encodeURIComponent(here))
     }
     const err = (json as { error?: { code: string; message: string; details?: FieldError[] } })
       ?.error

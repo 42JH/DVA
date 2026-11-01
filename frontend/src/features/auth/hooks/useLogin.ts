@@ -11,7 +11,12 @@ export function useLogin() {
   const [password, setPassword] = useState('')
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const from = (useLocation().state as { from?: string } | null)?.from ?? '/'
+  const location = useLocation()
+  // 돌아갈 화면: 가드가 넘긴 state.from, 없으면 세션 만료 때 붙인 ?from= (client.ts)
+  // ?from=은 주소라 누구나 바꿀 수 있음 → 앱 안 경로만 ('//' · '/\'로 시작하면 다른 사이트로 가므로 버림)
+  const q = new URLSearchParams(location.search).get('from')
+  const from =
+    (location.state as { from?: string } | null)?.from ?? (q && /^\/(?![/\\])/.test(q) ? q : '/')
 
   const mutation = useMutation({
     mutationFn: () => login(loginId.trim(), password),
@@ -20,6 +25,12 @@ export function useLogin() {
       navigate(from, { replace: true })
     },
   })
+
+  // 고치기 시작하면 오류 문구는 지움 (회원가입과 같게)
+  const set = (fn: (v: string) => void) => (v: string) => {
+    fn(v)
+    if (mutation.error) mutation.reset()
+  }
 
   const error = mutation.error
   // 명세(API-01): ACTIVE 계정만 로그인됨 — 승인 대기 계정도 틀린 비밀번호와 같은 401이라 문구에 함께 안내 (BE 요청 B1: 상태 코드가 오면 /pending으로)
@@ -33,8 +44,9 @@ export function useLogin() {
   return {
     loginId,
     password,
-    setLoginId,
-    setPassword,
+    setLoginId: set(setLoginId),
+    setPassword: set(setPassword),
+    carry: { search: location.search, state: location.state as unknown }, // 회원가입으로 갔다 와도 돌아갈 화면 그대로
     canSubmit: loginId.trim() !== '' && password !== '' && !mutation.isPending,
     isSubmitting: mutation.isPending,
     errorMessage,

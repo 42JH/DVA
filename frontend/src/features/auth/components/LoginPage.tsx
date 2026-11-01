@@ -43,8 +43,12 @@ export function LoginPage() {
         <div className="relative mt-2 self-end">
           <button
             type="button"
-            onClick={() => setTip((v) => !v)}
+            onClick={(e) => {
+              e.currentTarget.focus() // Safari는 버튼을 눌러도 포커스를 안 줘서 바깥을 눌러도 onBlur가 안 뜸
+              setTip((v) => !v)
+            }}
             onBlur={() => setTip(false)}
+            onKeyDown={(e) => e.key === 'Escape' && setTip(false)}
             aria-expanded={tip}
             aria-describedby={tip ? 'pw-tip' : undefined}
             className="px-2 text-caption text-sub hover:text-ink"
@@ -71,7 +75,11 @@ export function LoginPage() {
 
       <AuthFooter>
         계정이 없으신가요?
-        <Link to="/signup" className="font-bold text-action hover:underline">
+        <Link
+          to={`/signup${vm.carry.search}`}
+          state={vm.carry.state}
+          className="font-bold text-action hover:underline"
+        >
           회원가입
         </Link>
       </AuthFooter>
