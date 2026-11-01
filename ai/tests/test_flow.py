@@ -781,6 +781,50 @@ def test_recent_pins_first():
     assert call.pin_candidates == [DEST, DEST2]  # 최근 N개에 없으면 전체에서
 
 
+TO_DEST = [say("yes", "ORDER"), say("no", "ORDER")]  # 기존 출발지 예 → 최근 도착지 아니요(받는 곳을 묻는 중)
+
+
+def test_partial_address_by_record_offers_similar_pin_first():
+    """받는 분이 정해지기 전에 주소를 일부만 말해 값 기록(record_order)으로 들어와도 주소록에서 비슷한 곳을 찾아
+    확인한다(B9). 받아쓰기 철자("센툼")·일반 낱말("아파트")은 넘어간다. 확인 전에는 받는 곳을 기록하지 않는다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "해운대 센툼 아파트"}, "ORDER")])
+    assert call.pin_offer == DEST and call.order.receiver_address is None and said(call, "B9")
+    report(call, say("yes", "ORDER"))
+    assert call.order.place("receiver") == DEST and call.pin_offer is None
+
+
+def test_partial_address_with_spoken_number_matches_pin_number():
+    """한글로 말한 번지도 숫자로 비교한다. 말한 숫자가 핀과 다르면 다른 곳이라 권하지 않고 그대로 기록한다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "센텀로 십"}, "ORDER")])
+    assert call.pin_offer == DEST
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "부산 센텀로 20"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "부산 센텀로 20"
+
+
+def test_region_only_matches_but_new_road_in_same_region_does_not():
+    """시·구만 말하면 그 지역의 핀을 확인하고, 도로까지 말했는데 그 도로의 핀이 없으면 같은 구라도 권하지 않는다."""
+    call = play(saved_db(), TO_DEST + [tool("match_pins", {"place": "서울 마포구"}, "ORDER")])
+    assert call.pin_offer == DEST2
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "서울 마포구 성미산로 3"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "서울 마포구 성미산로 3"
+
+
+def test_none_of_candidates_then_same_address_is_recorded_not_offered_again():
+    """여러 후보에 "이 중에 없다"고 하면 그 후보들은 버린다: 같은 주소를 다시 기록해도 또 묻지 않고 기록한다."""
+    call = play(floors_db(), TO_DEST + [tool("record_order", {"receiver_address": "센텀로 10"}, "ORDER")])
+    assert len(call.pin_candidates) == 3 and said(call, "B8", 후보="301호·502호·701호")
+    report(call, say("other", "ORDER"))
+    report(call, tool("record_order", {"receiver_address": "센텀로 10"}, "ORDER"))
+    assert call.pin_candidates == [] and call.order.receiver_address == "센텀로 10"
+
+
+def test_address_with_name_already_recorded_is_not_matched_to_pins():
+    """받는 분 성함을 이미 직접 기록했으면(주소록 확인 질문 자리가 지났음) 주소는 그대로 기록한다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_name": "한승준"}, "ORDER"),
+                                       tool("record_order", {"receiver_address": "해운대 센텀로"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "해운대 센텀로"
+
+
 def test_match_pins_strips_particles_but_not_names():
     other = DEST.model_copy(update={"name": "이영수"})
     call = play(saved_db(pins=(ORIGIN, DEST, other)), [say("yes", "ORDER"), say("no", "ORDER")])
