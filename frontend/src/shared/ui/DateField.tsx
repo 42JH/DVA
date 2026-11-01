@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Calendar } from './Calendar'
 import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
 
@@ -16,6 +16,27 @@ export function DateField({
   compact?: boolean // 탭 줄 안에 둘 때 높이 40 (02 대시보드). 기본 48 = 목록 맨 윗줄
 }) {
   const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const button = useRef<HTMLButtonElement>(null)
+
+  // 바깥을 누르거나 Esc면 닫음 (MoreMenu와 같은 방식). 달력 안 클릭은 root 안이라 그대로
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      button.current?.focus() // 키보드 사용자가 제자리로
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
   const today = todayYmd()
   const range = value ?? { from: today, to: today }
   const withYear = ![range.from, range.to].every((s) => s.slice(0, 4) === today.slice(0, 4))
@@ -26,8 +47,9 @@ export function DateField({
       : `${show(range.from)} ~ ${show(range.to)}`
 
   return (
-    <div className="relative">
+    <div ref={root} className="relative">
       <button
+        ref={button}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
