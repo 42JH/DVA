@@ -43,6 +43,10 @@ export class ConsultationsService {
     return session.id;
   }
 
+  attachCustomer(client: PoolClient, callId: number, customerId: number) {
+    return this.sessions.attachCustomer(client, callId, customerId);
+  }
+
   attachOrder(client: PoolClient, callId: number, orderId: number) {
     return this.sessions.attachOrder(client, callId, orderId);
   }

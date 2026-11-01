@@ -417,11 +417,12 @@ test('an empty AI result preserves its call without creating an order, payment o
   assert.equal(saved.totalAmount, null);
   assert.ok(saved.callSessionSeq > 0);
   const session = (
-    await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [
+    await pool.query('SELECT order_seq,customer_seq FROM call_sessions WHERE call_session_seq=$1', [
       saved.callSessionSeq,
     ])
   ).rows[0];
   assert.equal(session.order_seq, null);
+  assert.equal(session.customer_seq, customerId);
   const replay = await aiCreate(undefined, input, key, 1);
   assert.equal(replay.status, 201);
   assert.deepEqual((await replay.json()).data, saved);
