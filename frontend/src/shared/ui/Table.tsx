@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Checkbox } from './Checkbox'
 
 // 목록 표 — 03 · 04 · 05 · 08 · 09 · 10 공통 (와이어프레임 build_calls.table)
@@ -140,7 +141,11 @@ export function Table<Row>({
                     </div>
                   ))}
                 </div>
-                {subRows?.(row, { tinted, gridCols })}
+                {/* 펼침 띠는 내용이 있을 때만 SubRow를 붙이고, 닫히면 떼어 냄 → 퇴장 애니메이션이 돎 */}
+                {(() => {
+                  const sub = subRows?.(row, { tinted, gridCols })
+                  return sub ? <SubRow>{sub}</SubRow> : null
+                })()}
               </li>
             )
           })}
@@ -148,6 +153,19 @@ export function Table<Row>({
       )}
       {footer && <div className="pt-4">{footer}</div>}
     </section>
+  )
+}
+
+const SUB_SWAP = [['motion-safe:animate-expand', 'animate-collapse']] as const
+/** 줄 아래 펼침 띠(09 답변) — 열릴 때 높이가 0 → 내용만큼 자라고(grid 1fr), 닫힐 때 복제본이 접혀 사라짐 (11/01)
+ *  overflow-y-clip: 세로만 자름 — 띠가 -mx-4 로 좌우로 나오는 건 그대로 */
+function SubRow({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useExitGhost(ref, SUB_SWAP, 200)
+  return (
+    <div ref={ref} className="grid grid-rows-[1fr] motion-safe:animate-expand">
+      <div className="min-h-0 overflow-y-clip">{children}</div>
+    </div>
   )
 }
 

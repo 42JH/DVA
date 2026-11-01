@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Calendar } from './Calendar'
 import { fmtYmds, todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { ExitGhost } from '@/shared/lib/useExitGhost'
 
 // 날짜 칸 하나 — '날짜 10.20 (오늘) 📅' (04 · 02 · 03 공통). 오늘 · 1주일 · 기간 선택 버튼 셋을 대신함 (10/27)
 // 누르면 아래에 달력(하루는 같은 날을 두 번, 범위는 시작 · 끝). value가 null이면 오늘
@@ -18,6 +19,7 @@ export function DateField({
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const button = useRef<HTMLButtonElement>(null)
+  const pop = useRef<HTMLDivElement>(null) // 달력 팝오버 — 닫힐 때 사라지는 애니메이션은 안의 <ExitGhost> (11/01)
 
   // 바깥을 누르거나 Esc면 닫음 (MoreMenu와 같은 방식). 달력 안 클릭은 root 안이라 그대로
   useEffect(() => {
@@ -70,7 +72,11 @@ export function DateField({
         </svg>
       </button>
       {open && (
-        <div className="absolute top-full right-0 z-20 mt-2">
+        <div
+          ref={pop}
+          className="absolute top-full right-0 z-20 mt-2 origin-top-right motion-safe:animate-pop-in"
+        >
+          <ExitGhost target={pop} />
           <Calendar
             value={range}
             onApply={(r) => {

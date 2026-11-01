@@ -1,5 +1,6 @@
-import { useId, useState, type KeyboardEvent } from 'react'
+import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useRecentSearches } from '@/shared/lib/recentSearches'
+import { ExitGhost } from '@/shared/lib/useExitGhost'
 
 // 필터 줄 부품 — 높이 48 · 모서리 8. 적용된(applied) 상태 = 옅은 남색 바탕 + 남색 1.5 선 (와이어프레임 04 '불만 있음')
 // 상태는 훅(hooks/)이 들고, 여기는 그리기만
@@ -38,6 +39,7 @@ export function SearchBox({
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const listId = useId()
+  const pop = useRef<HTMLDivElement>(null) // 목록이 닫힐 때 사라지는 애니메이션은 안의 <ExitGhost> (11/01)
 
   const hasPopup = !!recentKey || suggestions !== undefined // 옵션을 안 켠 검색칸은 예전처럼 그냥 입력칸
   const isRecent = value.trim() === ''
@@ -131,9 +133,11 @@ export function SearchBox({
         // mousedown 기본 동작을 막아 누르는 동안 검색칸 포커스가 빠지지 않게 (빠지면 목록이 먼저 닫힘)
         // 안의 버튼은 tabIndex -1 — Tab은 목록을 건너 다음 칸으로 (목록은 ↑↓ · Delete로)
         <div
+          ref={pop}
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute inset-x-0 top-full z-20 mt-1 rounded-lg bg-surface py-2 shadow-[0_8px_24px_rgba(43,47,54,0.12)] ring-1 ring-line ring-inset"
+          className="absolute inset-x-0 top-full z-20 mt-1 origin-top rounded-lg bg-surface py-2 shadow-[0_8px_24px_rgba(43,47,54,0.12)] ring-1 ring-line ring-inset motion-safe:animate-pop-in"
         >
+          <ExitGhost target={pop} />
           {isRecent && (
             <div className="flex items-center justify-between px-4 pb-1 text-caption text-muted">
               <span>최근 검색어</span>

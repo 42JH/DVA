@@ -9,6 +9,7 @@ import {
   type Column,
   type MoreMenuItem,
 } from '@/shared/ui'
+import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
 import { RESET_PASSWORD } from '@/features/admin/labels'
 import { useAdminList, type AdminAction, type AdminRow } from '@/features/admin/hooks/useAdminList'
 
@@ -117,6 +118,8 @@ export function AdminPage() {
   ]
 
   const c = vm.confirming && CONFIRM[vm.confirming.kind]
+  // 탭을 바꾸면 목록이 그 방향에서 미끄러져 들어옴 (02 · 04 · 09와 같은 전환, 11/01)
+  const slide = slideClass(useSlideDir(vm.tabs.findIndex((t) => t.key === vm.tab)))
 
   return (
     <div className="flex flex-col gap-6">
@@ -129,14 +132,16 @@ export function AdminPage() {
         </p>
       )}
 
-      <Table
-        columns={columns}
-        rows={vm.rows}
-        rowKey={(r) => r.id}
-        loading={vm.isLoading}
-        empty={EMPTY[vm.tab]}
-        footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.setPage} />}
-      />
+      <div key={vm.tab} className={slide}>
+        <Table
+          columns={columns}
+          rows={vm.rows}
+          rowKey={(r) => r.id}
+          loading={vm.isLoading}
+          empty={EMPTY[vm.tab]}
+          footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.setPage} />}
+        />
+      </div>
 
       {vm.confirming && c && (
         <ConfirmDialog

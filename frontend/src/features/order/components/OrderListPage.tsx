@@ -9,6 +9,7 @@ import {
   Tag,
   type Column,
 } from '@/shared/ui'
+import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
@@ -71,6 +72,9 @@ export function OrderListPage() {
     { key: 'items', header: '품목', cell: (r) => orDash(r.items) },
   ]
 
+  // 탭을 바꾸면 목록이 그 방향에서 미끄러져 들어옴 (02 · 04 · 09와 같은 전환, 11/01)
+  const slide = slideClass(useSlideDir(vm.statusOptions.findIndex((o) => o.value === vm.status)))
+
   return (
     <div className="flex flex-col gap-4">
       {/* 상태 탭 — 04 통화 내역 · 09 FAQ처럼 맨 위 밑줄 탭 (11/01, 칩 버튼에서 바꿈) */}
@@ -88,12 +92,7 @@ export function OrderListPage() {
           className="min-w-0 flex-1"
         />
         <DateField value={vm.range} onChange={vm.setRange} />
-        <Button
-          tall
-          className="ml-3"
-          disabled={!vm.canExport || vm.exporting}
-          onClick={vm.exportCsv}
-        >
+        <Button tall disabled={!vm.canExport || vm.exporting} onClick={vm.exportCsv}>
           {vm.exporting ? '내보내는 중…' : 'CSV 내보내기'}
         </Button>
         <Button tall kind="primary" onClick={vm.openAdd}>
@@ -107,23 +106,25 @@ export function OrderListPage() {
         </p>
       )}
 
-      <Table
-        head={
-          <h2 className="flex items-baseline gap-3.5 text-card font-bold">
-            주문 목록
-            <span className="text-label font-normal text-sub">
-              {vm.count.toLocaleString('ko-KR')}건
-            </span>
-          </h2>
-        }
-        columns={columns}
-        rows={vm.rows}
-        rowKey={(r) => r.key}
-        onRowClick={vm.openOrder}
-        loading={vm.isLoading}
-        empty={vm.listError ?? (vm.q ? '해당하는 주문이 없습니다.' : '주문 내역이 없습니다.')}
-        footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
-      />
+      <div key={vm.status} className={slide}>
+        <Table
+          head={
+            <h2 className="flex items-baseline gap-3.5 text-card font-bold">
+              주문 목록
+              <span className="text-label font-normal text-sub">
+                {vm.count.toLocaleString('ko-KR')}건
+              </span>
+            </h2>
+          }
+          columns={columns}
+          rows={vm.rows}
+          rowKey={(r) => r.key}
+          onRowClick={vm.openOrder}
+          loading={vm.isLoading}
+          empty={vm.listError ?? (vm.q ? '해당하는 주문이 없습니다.' : '주문 내역이 없습니다.')}
+          footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
+        />
+      </div>
 
       {vm.modal?.kind === 'cancel' && (
         <ConfirmDialog

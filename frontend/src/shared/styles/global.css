@@ -62,6 +62,34 @@
       transform: translateX(-24px);
     }
   }
+  /* 퇴장 (shared/lib/useExitGhost 가 복제본에 붙임) · 펼침 띠 (shared/ui/Table SubRow — grid-rows 1fr ↔ 0fr) */
+  --animate-dim-out: dim-out 0.15s ease-in forwards;
+  --animate-pop-out: pop-out 0.15s ease-in forwards;
+  --animate-expand: expand 0.2s ease-out both;
+  --animate-collapse: collapse 0.15s ease-in forwards;
+  @keyframes dim-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-out {
+    to {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+  }
+  @keyframes expand {
+    from {
+      grid-template-rows: 0fr;
+      opacity: 0;
+    }
+  }
+  @keyframes collapse {
+    to {
+      grid-template-rows: 0fr;
+      opacity: 0;
+    }
+  }
   @keyframes page-in {
     from {
       opacity: 0;
