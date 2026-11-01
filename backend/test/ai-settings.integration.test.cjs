@@ -152,14 +152,6 @@ test('persona creation preserves prompt and full settings in an inactive immutab
   assert.deepEqual(detail.headVersion, detail.latestVersion);
   assert.equal(detail.activeVersion, null);
   assert.equal(detail.pendingVersion, null);
-  assert.equal(
-    (
-      await pool.query('SELECT head_version_seq FROM ai_personas WHERE ai_persona_seq=$1', [
-        v.aiPersonaSeq,
-      ])
-    ).rows[0].head_version_seq,
-    v.aiPersonaVersionSeq,
-  );
   assert.equal(detail.activeVersionSeq, null);
   assert.equal(detail.pendingVersionSeq, null);
   await error(await call('POST', '/api/personas', body), 409, 'DUPLICATE_RESOURCE');
@@ -337,12 +329,11 @@ const serviceCall = (method, path, body, headers = {}) =>
     Authorization: `Bearer ${token}`,
     ...headers,
   });
-const selectRepresentative = (version, expectedVersion = version.version) =>
+const activate = (version, expectedVersion = version.version) =>
   call('POST', `/api/personas/${version.aiPersonaSeq}/activate`, {
     aiPersonaVersionSeq: version.aiPersonaVersionSeq,
     expectedVersion,
   });
-const activate = selectRepresentative;
 const report = (version, changes = {}) =>
   serviceCall('POST', '/api/ai/config/apply-result', {
     aiPersonaVersionSeq: version.aiPersonaVersionSeq,
@@ -514,30 +505,42 @@ test('failure keeps the old ACTIVE and retry rotates the application ID without 
   );
 });
 
-test('application validation rejects mismatched personas, stale edits and invalid result combinations', async () => {
-  const a = await create(),
-    b = await create();
-  await error(
-    await call('POST', `/api/personas/${a.aiPersonaSeq}/activate`, {
-      aiPersonaVersionSeq: b.aiPersonaVersionSeq,
-      expectedVersion: 1,
-    }),
-    404,
-    'NOT_FOUND',
-  );
-  await error(await activate(a, 2), 409, 'VERSION_CONFLICT');
-  const pending = await data(await activate(a), 202);
+test('application validation rejects invalid result combinations without replacing PENDING', async () => {
+  const pending = await data(await activate(await create()), 202);
   for (const change of [
     { result: 'FAILED' },
     { errorCode: 'APPLY_FAILED' },
     { errorCode: null },
     { activeCallCount: '0' },
     { activeCallCount: -1 },
+    { activeCallCount: null },
     { applicationId: 'bad' },
   ])
     await error(await report(pending, change), 400, 'INVALID_REQUEST');
   await error(await report(pending, { applicationId: randomUUID() }), 409, 'VERSION_CONFLICT');
   assert.equal((await data(await runtime('PENDING'))).applicationId, pending.applicationId);
+});
+
+test('apply results can omit the legacy call count on failure, success and a duplicate success', async () => {
+  const previous = await data(await runtime());
+  const pending = await data(await activate(await create()), 202);
+  const failed = await data(
+    await report(pending, {
+      activeCallCount: undefined,
+      result: 'FAILED',
+      errorCode: 'APPLY_FAILED',
+    }),
+  );
+  assert.equal(failed.status, 'PENDING');
+  assert.equal(failed.applyErrorCode, 'APPLY_FAILED');
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, previous.aiPersonaVersionSeq);
+  const active = await data(await report(pending, { activeCallCount: undefined }));
+  assert.equal(active.status, 'ACTIVE');
+  assert.equal(active.applyErrorCode, null);
+  assert.equal(
+    (await data(await report(pending, { activeCallCount: undefined }))).appliedAt,
+    active.appliedAt,
+  );
 });
 
 test('two concurrent applications retain one pending and one active with atomic successful handover', async () => {
@@ -668,6 +671,9 @@ test('application Swagger has separate admin request and service result security
   assert.notEqual(spec.components.schemas.PersonaDto.properties.headVersion.nullable, true);
   assert.ok(spec.components.schemas.PersonaDto.properties.activeVersion.nullable);
   assert.ok(spec.components.schemas.PersonaDto.properties.pendingVersion.nullable);
+  const resultSchema = spec.components.schemas.PersonaApplyResultDto;
+  assert.ok(!resultSchema.required.includes('activeCallCount'));
+  assert.ok(resultSchema.properties.activeCallCount.deprecated);
   assert.ok(spec.paths['/api/ai/config/apply-result'].post.responses['409']);
   assert.ok(!JSON.stringify(logs).includes(token));
 });
@@ -957,7 +963,7 @@ test('automatic HEAD: publish failure and replacement remain separate from later
   await data(await report(replacement));
 });
 
-test('automatic HEAD: a failed save rolls back its version and stored HEAD without touching publish', async () => {
+test('automatic HEAD: a failed save keeps the latest version and publish unchanged', async () => {
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
   const second = await data(
@@ -984,14 +990,6 @@ test('automatic HEAD: a failed save rolls back its version and stored HEAD witho
   assert.equal(detail.headVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
   assert.equal(detail.activeVersionSeq, first.aiPersonaVersionSeq);
   assert.equal(detail.pendingVersion.applicationId, pending.applicationId);
-  assert.equal(
-    (
-      await pool.query('SELECT head_version_seq FROM ai_personas WHERE ai_persona_seq=$1', [
-        first.aiPersonaSeq,
-      ])
-    ).rows[0].head_version_seq,
-    second.aiPersonaVersionSeq,
-  );
   assert.equal(
     (
       await pool.query('SELECT count(*) FROM ai_persona_versions WHERE ai_persona_seq=$1', [
@@ -1086,7 +1084,7 @@ test('automatic HEAD: type saves advance their heads without changing the publis
       .aiPersonaVersionSeq,
     friendly3.aiPersonaVersionSeq,
   );
-  await data(await report(await data(await selectRepresentative(fast2), 202)));
+  await data(await report(await data(await activate(fast2), 202)));
   const friendly4 = await data(
     await patch(friendly1.aiPersonaSeq, { expectedVersion: friendly3.version, name: '친절 v4' }),
   );
@@ -1099,10 +1097,10 @@ test('automatic HEAD: type saves advance their heads without changing the publis
   assert.equal(fast.pendingVersion, null);
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, fast2.aiPersonaVersionSeq);
   await error(await runtime('PENDING'), 404, 'NOT_FOUND');
-  await error(await selectRepresentative(friendly2, friendly4.version), 409, 'VERSION_CONFLICT');
-  await data(await report(await data(await selectRepresentative(friendly4), 202)));
+  await error(await activate(friendly2, friendly4.version), 409, 'VERSION_CONFLICT');
+  await data(await report(await data(await activate(friendly4), 202)));
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, friendly4.aiPersonaVersionSeq);
-  await data(await report(await data(await selectRepresentative(fast3), 202)));
+  await data(await report(await data(await activate(fast3), 202)));
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, fast3.aiPersonaVersionSeq);
   const listed = await (await call('GET', '/api/personas?limit=100')).json();
   const row = listed.data.find((p) => p.aiPersonaSeq === friendly1.aiPersonaSeq);
@@ -1132,13 +1130,13 @@ test('automatic HEAD: an accepted publish keeps its version and UUID when a newe
   assert.equal(applied.headVersion.aiPersonaVersionSeq, third.aiPersonaVersionSeq);
   assert.equal(applied.activeVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
   assert.equal(applied.pendingVersion, null);
-  const next = await data(await selectRepresentative(third), 202);
+  const next = await data(await activate(third), 202);
   assert.notEqual(next.applicationId, pending.applicationId);
   await data(await report(next));
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, third.aiPersonaVersionSeq);
 });
 
-test('automatic HEAD: migration 035 reconciles old heads while preserving accepted and applied versions', async () => {
+test('automatic HEAD: migrations 035/036 reconcile then remove stored heads without losing versions', async () => {
   const { readFileSync } = require('node:fs');
   const { join } = require('node:path');
   const client = await pool.connect();
@@ -1166,6 +1164,21 @@ test('automatic HEAD: migration 035 reconciles old heads while preserving accept
         await client.query('SELECT head_version_seq FROM ai_personas ORDER BY ai_persona_seq')
       ).rows.map((r) => r.head_version_seq),
       [103, 202, 301, null],
+    );
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/036-remove-redundant-persona-head.sql'), 'utf8'),
+    );
+    assert.equal(
+      (
+        await client.query(
+          "SELECT 1 FROM pg_attribute WHERE attrelid='ai_personas'::regclass AND attname='head_version_seq' AND NOT attisdropped",
+        )
+      ).rowCount,
+      0,
+    );
+    assert.deepEqual(
+      (await client.query('SELECT ai_persona_seq FROM ai_personas ORDER BY ai_persona_seq')).rows,
+      [1, 2, 3, 4].map((ai_persona_seq) => ({ ai_persona_seq })),
     );
     assert.deepEqual(
       (

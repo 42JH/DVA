@@ -64,17 +64,19 @@ export class PersonaApplyResultDto {
   @IsIn(['APPLIED', 'FAILED'])
   result!: 'APPLIED' | 'FAILED';
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    deprecated: true,
     description:
-      'AI의 현재 활성 통화 수. 0 이상이면 APPLIED를 허용합니다. 신규 통화 진입을 잠그고 기본 설정을 전환하며 기존 통화의 버전은 유지해야 합니다.',
+      '기존 AI 연동 호환용 활성 통화 수. 생략 가능하며 적용 판단·저장에 사용하지 않습니다. 전송 시 0 이상 정수여야 합니다. 기존 통화의 버전은 유지해야 합니다.',
     minimum: 0,
     maximum: 2147483647,
     example: 0,
   })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
   @IsInt()
   @Min(0)
   @Max(2147483647)
-  activeCallCount!: number;
+  activeCallCount?: number;
 
   @ApiPropertyOptional({
     description: 'FAILED에만 필수. 프롬프트 원문·예외 메시지는 보내지 않습니다.',

@@ -169,10 +169,6 @@ export class AiSettingsRepository {
         ],
       )
     ).rows[0];
-    await client.query('UPDATE ai_personas SET head_version_seq=$2 WHERE ai_persona_seq=$1', [
-      id,
-      row.id,
-    ]);
     return (await this.version(row.id, client))!;
   }
 

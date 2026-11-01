@@ -52,8 +52,7 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
         throw new ApiException(409, 'VERSION_CONFLICT', '최신 저장 버전을 다시 조회해 주세요.');
       if (latest.aiPersonaVersionSeq !== input.aiPersonaVersionSeq)
         throw new ApiException(409, 'VERSION_CONFLICT', '현재 HEAD 버전을 다시 조회해 주세요.');
-      const target = (await this.repository.version(source.aiPersonaVersionSeq, client))!;
-      return this.queueOrReuse(target, actorId, requestId, client);
+      return this.queueOrReuse(latest, actorId, requestId, client);
     });
   }
 
