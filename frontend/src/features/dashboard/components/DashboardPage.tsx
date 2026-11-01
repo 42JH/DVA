@@ -39,7 +39,7 @@ export function DashboardPage() {
                 base={vm.date.base}
                 gauge={vm.date.gauge}
                 rows={vm.date.rows}
-                others={vm.date.others}
+                unanalysed={vm.date.unanalysed}
               />
               <AvgCard className="col-span-4" items={vm.date.avgs} />
             </div>

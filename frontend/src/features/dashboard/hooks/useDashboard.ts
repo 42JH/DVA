@@ -114,27 +114,22 @@ export function useDashboard() {
   const s = stats.data
   const date = s
     ? (() => {
-        const gauge: Outcome[] = GAUGE
-        const base = gauge.reduce((a, k) => a + s.counts[k], 0) // 게이지 = 성공 · 실패 · 이관 (주문 취소 · 문의 뺌)
-        const pcts = fmtPctSplit(gauge.map((k) => s.counts[k])) // 세 줄 합이 100이 되게 (따로 반올림하면 99 · 101)
+        // 링 · 줄 = 분석된 통화 전부 (11/01 사용자: 문의 · 취소도 통화니 결과 집계에 들어가야). 비율 분모 = 분석된 통화 → 다섯 줄 합 100%
+        const all: Outcome[] = ['SUCCESS', 'FAILED', 'INQUIRY', 'HANDOFF', 'CANCELLED'] // 줄 · 링 순서 (11/01 사용자). 색은 ResultCard SEG와 같은 순서
+        const analysed = all.reduce((a, k) => a + s.counts[k], 0)
+        const pcts = fmtPctSplit(all.map((k) => s.counts[k])) // 따로 반올림하면 99 · 101
         return {
           scope: `${scopeOfRange} 받은 AI 통화`,
           total: num(s.total), // 결과 필터 없는 전체 (분석 전 통화 포함) = 04 '전체'
-          rate: pcts[0], // 성공률 = 성공 줄과 같은 숫자
-          base: `${num(base)}건 중`,
-          gauge: gauge.map((k) => ({ key: k, value: s.counts[k] })),
-          rows: gauge.map((k, i) => ({
+          unanalysed: s.total > analysed ? `분석 전 ${num(s.total - analysed)}건` : null,
+          rate: pcts[0], // 성공률 = 오른쪽 '접수 성공' 줄과 같은 숫자 · 같은 분모 (11/01 사용자: 링 · 줄 · 가운데가 한 기준)
+          base: `${num(analysed)}건 중 ${num(s.counts.SUCCESS)}건 접수 성공`,
+          gauge: all.map((k) => ({ key: k, value: s.counts[k] })),
+          rows: all.map((k, i) => ({
             key: k,
             label: OUTCOME_LABEL[k],
             count: num(s.counts[k]),
             pct: pcts[i],
-            onClick: () => toCalls({ outcome: k }, from, to),
-          })),
-          // 게이지 밖 통화 (선 아래 한 줄)
-          others: (['CANCELLED', 'INQUIRY'] as const).map((k) => ({
-            key: k,
-            label: OUTCOME_LABEL[k],
-            count: num(s.counts[k]),
             onClick: () => toCalls({ outcome: k }, from, to),
           })),
           // 평균 두 칸: 통계 API가 없어 값 대신 안내 (BE 요청 B3)
