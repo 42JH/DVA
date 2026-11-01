@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 038까지 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.
+
 백엔드 최적화 브랜치는 새 앱 실행 전에 `032-list-read-indexes.sql`까지 적용한다. 031은 녹취 처리의 수신 건별 lease, 032는 검증된 조회 인덱스 두 개를 추가하며 API 형식은 바꾸지 않는다. 구버전 앱으로 복구할 때 추가 컬럼·인덱스는 보존해도 된다. 단계별 검증·보류 사항은 [최적화 기록](docs/backend-optimization.md)에 정리한다.
 
 AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤트 수집 EVT-01은 [이벤트 계약](../docs/api/call-events.md)을 따른다. 현재 앱 실행 전에는 FAQ 분류·고객 내 주소·선택 부서를 포함해 028까지 적용한다. 통화 위치는 offsetSeconds(정수 초)이며 AI 동작 status는 받지 않는다. 프론트는 [발화·처리 결과·AI 동작 조회](../docs/api/call-events-read-spec.md)를 각각 사용한다. 신규 업무 검색 코드는 PIN_SEARCH·PREVIOUS_ORDER_SEARCH이며 주소에 한정하지 않는다. FAQ_ANSWERED는 사용 FAQ와 같은 통화의 질문·답변 발화를 연결한다. 조회 분리에는 추가 migration이 없다.
@@ -25,7 +27,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
-AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 개인 카드 결제 대기 또는 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE·CANCELLED는 저장만 한다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
+AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 개인 카드 결제 대기 또는 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE·CANCELLED는 일부라도 수집한 주문을 저장한다. 주문 데이터가 없는 통화는 [빈 통화 계약](docs/empty-ai-order-results.md)에 따라 주문을 생성하지 않는다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
 상담 시작에는 [고객 확인 API](../docs/api/caller-context.md)에 phoneNumber와 call(providerCallId·incomingAt)을 보내 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 전화번호만 보낸 기존 조회는 그대로 유지한다.
 PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 

@@ -9,7 +9,7 @@ const QUANTITY_FIELDS = [
 
 // 생성 시에는 부분 입력을 허용한다. ORD-06에서 저장된 같은 주문을 검증할 때 사용한다.
 export type OrderSubmissionSnapshot = Pick<OrderDraft, 'pickupRequestedAt'> & {
-  paymentMethodType: string;
+  paymentMethodType: string | null;
   parcels: (OrderDraft['parcels'][number] & { status?: 'ACTIVE' | 'CANCELLED' })[];
 };
 

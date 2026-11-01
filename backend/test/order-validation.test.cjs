@@ -1,9 +1,41 @@
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { orderDraft } = require('../dist/orders/order-draft');
+const { orderDraft, hasOrderData } = require('../dist/orders/order-draft');
 const { assertOrderSubmissionReady } = require('../dist/orders/order-submission.validation');
 const now = Date.parse('2026-10-27T00:00:00Z');
+test('empty order detection ignores identity and zero quantities but preserves collected partial data', () => {
+  for (const input of [
+    { customerSeq: 31 },
+    { customer: { name: '고객', phoneNumber: '01012345678' }, parcels: [] },
+    {
+      parcels: [
+        {
+          origin: { name: null, detailAddress: ' ' },
+          destination: {},
+          smallBoxCount: 0,
+          itemPrice: null,
+          notifiedPrice: null,
+        },
+      ],
+    },
+  ])
+    assert.equal(hasOrderData(orderDraft(input)), false);
+  for (const input of [
+    { paymentMethodType: 'billing' },
+    { pickupRequestedAt: '2026-12-01T00:00:00Z' },
+    { totalAmount: 3500 },
+    { parcels: [{ origin: { name: '보내는 분' } }] },
+    { parcels: [{ destination: { latitude: 0 } }] },
+    { parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 1 } }] },
+    { parcels: [{ smallBoxCount: 1 }] },
+    { parcels: [{ clientComment: '주의' }] },
+    { parcels: [{ otherItemDescription: '기타' }] },
+    { parcels: [{ itemPrice: 0 }] },
+    { parcels: [{ notifiedPrice: 3500 }] },
+  ])
+    assert.equal(hasOrderData(orderDraft(input)), true, JSON.stringify(input));
+});
 const address = {
   name: '검증 고객',
   phoneNumber: '01012345678',
@@ -29,6 +61,27 @@ const complete = () =>
       },
     ],
   });
+test('an unspecified payment method stays undecided until final submission', () => {
+  const draft = complete();
+  const undecided = orderDraft({ customerSeq: 31, parcels: [] });
+  assert.equal(undecided.paymentMethodType, null);
+  for (const method of ['billing', 'credit', 'groupBilling'])
+    assert.equal(
+      orderDraft({ customerSeq: 31, paymentMethodType: method }).paymentMethodType,
+      method,
+    );
+  draft.paymentMethodType = null;
+  assert.throws(
+    () => assertOrderSubmissionReady(draft, now),
+    (error) =>
+      error.getStatus() === 422 &&
+      error
+        .getResponse()
+        .details.some(
+          (detail) => detail.field === 'paymentMethodType' && detail.reason === 'required',
+        ),
+  );
+});
 test('the same stored order can be checked for final submission without changing it', () => {
   const draft = complete(),
     before = structuredClone(draft);
@@ -117,7 +170,11 @@ test('final validation rejects expired pickup, invalid address, quantities and p
   );
 });
 test('creation normalizes equivalent dates and rejects ISO strings JavaScript cannot parse', () => {
-  const a = orderDraft({ customerSeq: 31, pickupRequestedAt: '2026-10-28T10:00:00+09:00' });
+  const a = orderDraft({
+    customerSeq: 31,
+    paymentMethodType: 'billing',
+    pickupRequestedAt: '2026-10-28T10:00:00+09:00',
+  });
   const b = orderDraft({
     parcels: [],
     pickupRequestedAt: '2026-10-28T01:00:00Z',

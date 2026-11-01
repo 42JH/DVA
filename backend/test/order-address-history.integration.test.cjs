@@ -141,8 +141,8 @@ async function order(
     await client.query('BEGIN');
     const id = (
       await client.query(
-        `INSERT INTO orders(customer_seq,created_at,pickup_requested_at)
-      VALUES($1,$2,'2026-12-01T00:00:00Z') RETURNING order_seq`,
+        `INSERT INTO orders(customer_seq,created_at,payment_method_type,pickup_requested_at)
+      VALUES($1,$2,'billing','2026-12-01T00:00:00Z') RETURNING order_seq`,
         [f.customer, createdAt],
       )
     ).rows[0].order_seq;

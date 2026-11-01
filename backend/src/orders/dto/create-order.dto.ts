@@ -295,7 +295,7 @@ export class CreateOrderDto {
   @ApiPropertyOptional({
     enum: ['billing', 'credit', 'groupBilling'],
     description:
-      'billing: 개인·기업 개인 카드(기본값), credit: 월결제, groupBilling: 소속 부서 그룹결제. 최종 확정 시 자격을 검증합니다.',
+      'billing: 개인·기업 개인 카드, credit: 월결제, groupBilling: 소속 부서 그룹결제. 생략하면 미정(null)으로 저장하며 최종 접수 전에 선택해야 합니다. 확정 시 자격을 검증합니다.',
   })
   @ValidateIf(present)
   @IsIn(['billing', 'credit', 'groupBilling'])

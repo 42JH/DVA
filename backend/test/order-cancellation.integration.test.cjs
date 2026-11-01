@@ -81,7 +81,7 @@ async function fixture({
 } = {}) {
   const id = (
     await pool.query(
-      'INSERT INTO orders(customer_seq,total_amount) VALUES($1,0) RETURNING order_seq',
+      "INSERT INTO orders(customer_seq,total_amount,payment_method_type) VALUES($1,0,'billing') RETURNING order_seq",
       [customer],
     )
   ).rows[0].order_seq;

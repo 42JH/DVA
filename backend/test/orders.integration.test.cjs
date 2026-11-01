@@ -280,7 +280,7 @@ test('call replay returns the first response after termination; a new key cannot
   assert.equal(
     (await pool.query('SELECT payment_method_type FROM orders WHERE order_seq=$1', [data.orderSeq]))
       .rows[0].payment_method_type,
-    'billing',
+    null,
   );
   assert.equal(
     (await pool.query('SELECT status FROM orders WHERE order_seq=$1', [data.orderSeq])).rows[0]
@@ -379,7 +379,7 @@ test('all active administrator roles create COLLECTING orders with defaults and 
     ).rows[0];
     assert.deepEqual(row, {
       customer_seq: customerId,
-      payment_method_type: 'billing',
+      payment_method_type: null,
       pickup_requested_at: null,
       status: 'COLLECTING',
       version: 1,
@@ -389,6 +389,331 @@ test('all active administrator roles create COLLECTING orders with defaults and 
     assert.equal(data.version, row.version);
   }
   assert.equal((await counts()).shipments, before.shipments);
+});
+
+const emptyAiResult = (changes = {}) => ({
+  outcome: 'INCOMPLETE',
+  call: {
+    providerCallId: randomUUID(),
+    callerPhoneNumber: '01000000001',
+    incomingAt: '2026-10-27T01:00:00Z',
+  },
+  customerSeq: customerId,
+  ...changes,
+});
+
+test('an empty AI result preserves its call without creating an order, payment or Dver submission', async () => {
+  resetDver();
+  const before = await counts();
+  const input = emptyAiResult();
+  const key = randomUUID();
+  const response = await aiCreate(undefined, input, key);
+  assert.equal(response.status, 201);
+  const saved = (await response.json()).data;
+  assert.equal(saved.status, 'NO_ORDER');
+  assert.equal(saved.orderSeq, null);
+  assert.equal(saved.version, null);
+  assert.equal(saved.paymentRequest, null);
+  assert.equal(saved.totalAmount, null);
+  assert.ok(saved.callSessionSeq > 0);
+  const session = (
+    await pool.query('SELECT order_seq FROM call_sessions WHERE call_session_seq=$1', [
+      saved.callSessionSeq,
+    ])
+  ).rows[0];
+  assert.equal(session.order_seq, null);
+  const replay = await aiCreate(undefined, input, key, 1);
+  assert.equal(replay.status, 201);
+  assert.deepEqual((await replay.json()).data, saved);
+  assert.deepEqual(await counts(), before);
+  assert.equal(dverRequests.length, 0);
+});
+
+test('empty incomplete and cancelled snapshots ignore blank parcels and preserve all existing orders', async () => {
+  const before = await counts();
+  for (const outcome of ['INCOMPLETE', 'CANCELLED']) {
+    for (const parcels of [
+      undefined,
+      [],
+      [{}],
+      [
+        {
+          origin: { name: null, detailAddress: ' ' },
+          destination: {},
+          smallBoxCount: 0,
+          itemPrice: null,
+          notifiedPrice: null,
+        },
+      ],
+    ]) {
+      const response = await aiCreate(undefined, emptyAiResult({ outcome, parcels }));
+      assert.equal(response.status, 201);
+      const result = (await response.json()).data;
+      assert.equal(result.status, 'NO_ORDER');
+      assert.equal(result.orderSeq, null);
+    }
+  }
+  assert.deepEqual(await counts(), before);
+});
+
+test('partly collected AI orders are retained without assigning an unspecified payment method', async () => {
+  resetDver();
+  for (const change of [
+    { parcels: [{ destination: { name: '수령인만 수집' } }] },
+    { parcels: [{ smallBoxCount: 1 }] },
+    { parcels: [{ itemPrice: 0 }] },
+    { paymentMethodType: 'billing' },
+    { pickupRequestedAt: '2026-12-01T00:00:00Z' },
+  ]) {
+    const response = await aiCreate(undefined, emptyAiResult(change));
+    assert.equal(response.status, 201);
+    const saved = (await response.json()).data;
+    assert.equal(saved.status, 'COLLECTING');
+    assert.ok(saved.orderSeq > 0);
+    const detail = (await (await readDetail(saved.orderSeq)).json()).data;
+    assert.equal(detail.paymentMethodType, change.paymentMethodType ?? null);
+    assert.equal(saved.paymentRequest, null);
+  }
+  assert.equal(dverRequests.length, 0);
+});
+
+test('empty AI results keep replay identity after call termination and reject key or call reuse', async () => {
+  const input = emptyAiResult(),
+    key = randomUUID();
+  const saved = (await (await aiCreate(undefined, input, key)).json()).data;
+  const before = await counts();
+  await pool.query(
+    "UPDATE call_sessions SET started_at=incoming_at,ended_at=incoming_at+interval '1 minute' WHERE call_session_seq=$1",
+    [saved.callSessionSeq],
+  );
+  const replay = await aiCreate(undefined, { ...input, paymentMethodType: 'billing' }, key, 1);
+  assert.equal(replay.status, 201);
+  assert.deepEqual((await replay.json()).data, saved);
+  await errorCode(await aiCreate(undefined, emptyAiResult(), key), 403, 'FORBIDDEN');
+  await errorCode(await create({ customerSeq: customerId }, key), 403, 'FORBIDDEN');
+  await errorCode(await aiCreate(undefined, input), 409, 'INVALID_STATE');
+  assert.deepEqual(await counts(), before);
+  assert.equal(
+    (
+      await pool.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1', [
+        saved.callSessionSeq,
+      ])
+    ).rowCount,
+    1,
+  );
+});
+
+test('concurrent empty and collected AI results serialize by request key and call identity', async () => {
+  for (const sameKey of [true, false]) {
+    const input = emptyAiResult(),
+      key = randomUUID(),
+      before = await counts();
+    const responses = await Promise.all([
+      aiCreate(undefined, input, key),
+      aiCreate(undefined, input, sameKey ? key : randomUUID(), 1),
+    ]);
+    assert.ok(responses.some((response) => response.status === 201));
+    for (const response of responses) {
+      assert.ok([201, 409].includes(response.status));
+      if (response.status === 201) assert.equal((await response.json()).data.status, 'NO_ORDER');
+    }
+    const session = (
+      await pool.query(
+        'SELECT call_session_seq,order_seq FROM call_sessions WHERE provider_call_id=$1',
+        [input.call.providerCallId],
+      )
+    ).rows;
+    assert.equal(session.length, 1);
+    assert.equal(session[0].order_seq, null);
+    assert.equal(
+      (
+        await pool.query('SELECT 1 FROM empty_ai_order_results WHERE call_session_seq=$1', [
+          session[0].call_session_seq,
+        ])
+      ).rowCount,
+      1,
+    );
+    assert.deepEqual(await counts(), before);
+  }
+  const input = emptyAiResult();
+  const responses = await Promise.all([
+    aiCreate(undefined, input),
+    aiCreate(undefined, { ...input, parcels: [{ smallBoxCount: 1 }] }, randomUUID(), 1),
+  ]);
+  assert.deepEqual(responses.map((response) => response.status).sort(), [201, 409]);
+  const saved = (await (await responses.find((response) => response.status === 201)).json()).data;
+  const session = (
+    await pool.query('SELECT order_seq FROM call_sessions WHERE provider_call_id=$1', [
+      input.call.providerCallId,
+    ])
+  ).rows[0];
+  assert.equal(session.order_seq, saved.orderSeq);
+});
+
+test('order-free calls still accept AI events and analysis and remain visible to administrators', async () => {
+  const input = emptyAiResult();
+  const result = (await (await aiCreate(undefined, input)).json()).data;
+  const config = apps[0].get(ConfigService),
+    previous = config.get('AI_INSIGHTS_TOKEN');
+  const token = 'test-only-empty-order-insights-token';
+  config.set('AI_INSIGHTS_TOKEN', token);
+  const post = (path, body) =>
+    fetch(hosts[0] + `/api/ai/calls/${result.callSessionSeq}/${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  try {
+    const events = await post('events', {
+      providerCallId: input.call.providerCallId,
+      events: [
+        {
+          eventId: randomUUID(),
+          eventOrder: 1,
+          kind: 'AI_ACTION',
+          occurredAt: input.call.incomingAt,
+          offsetSeconds: 0,
+          payload: {
+            action: 'ORDER_SUBMITTED',
+            orderSeq: null,
+            summaryText: '주문 없는 통화 결과 수신',
+          },
+        },
+      ],
+    });
+    assert.equal(events.status, 204, await events.text());
+    const analysis = await post('analysis', {
+      providerCallId: input.call.providerCallId,
+      startedAt: input.call.incomingAt,
+      endedAt: '2026-10-27T01:01:00Z',
+      aiPersonaVersionSeq: null,
+      result: 'INQUIRY',
+      repeatQuestionCount: 0,
+      hasComplaint: false,
+      complaints: [],
+    });
+    assert.equal(analysis.status, 204, await analysis.text());
+    const response = await fetch(hosts[0] + `/api/calls/${result.callSessionSeq}`, {
+      headers: { Cookie: cookies[0] },
+    });
+    assert.equal(response.status, 200);
+    const detail = (await response.json()).data;
+    assert.equal(detail.call.orderSeq, null);
+    assert.equal(detail.analysis.result, 'INQUIRY');
+    assert.equal(detail.aiActionCount, 1);
+  } finally {
+    config.set('AI_INSIGHTS_TOKEN', previous);
+  }
+});
+
+test('a failed empty-result receipt rolls back the new call and can be retried safely', async () => {
+  const input = emptyAiResult(),
+    key = randomUUID(),
+    before = await counts();
+  const save = repository.saveEmptyResult;
+  repository.saveEmptyResult = async () => {
+    throw Error('test-only-receipt-failure');
+  };
+  try {
+    assert.equal((await aiCreate(undefined, input, key)).status, 500);
+  } finally {
+    repository.saveEmptyResult = save;
+  }
+  assert.deepEqual(await counts(), before);
+  assert.equal(
+    (
+      await pool.query('SELECT 1 FROM call_sessions WHERE provider_call_id=$1', [
+        input.call.providerCallId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM empty_ai_order_results WHERE request_id=$1', [key])).rowCount,
+    0,
+  );
+  const replay = await aiCreate(undefined, input, key);
+  assert.equal(replay.status, 201);
+  assert.equal((await replay.json()).data.status, 'NO_ORDER');
+});
+
+test('complete AI results must select a payment method before anything is persisted', async () => {
+  resetDver();
+  const before = await counts();
+  const input = aiResult('COMPLETE', { paymentMethodType: undefined });
+  const response = await aiCreate(undefined, input);
+  assert.equal(response.status, 422);
+  const problem = await response.json();
+  assert.ok(
+    problem.error.details.some(
+      (entry) => entry.field === 'paymentMethodType' && entry.reason === 'required',
+    ),
+  );
+  assert.deepEqual(await counts(), before);
+  assert.equal(
+    (
+      await pool.query('SELECT 1 FROM call_sessions WHERE provider_call_id=$1', [
+        input.call.providerCallId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal(dverRequests.length, 0);
+});
+
+test('migration 037 preserves legacy choices and only permits undecided drafts or cancellations', async () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      "CREATE TEMP TABLE orders(order_seq integer GENERATED ALWAYS AS IDENTITY, payment_method_type text NOT NULL DEFAULT 'billing', status text NOT NULL DEFAULT 'COLLECTING')",
+    );
+    await client.query(
+      "INSERT INTO orders(payment_method_type) VALUES('billing'),('credit'),('groupBilling'),('cat')",
+    );
+    const before = (await client.query('SELECT * FROM orders ORDER BY order_seq')).rows;
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/037-undecided-order-payment-method.sql'), 'utf8'),
+    );
+    assert.deepEqual((await client.query('SELECT * FROM orders ORDER BY order_seq')).rows, before);
+    const created = (
+      await client.query('INSERT INTO orders DEFAULT VALUES RETURNING payment_method_type')
+    ).rows[0];
+    assert.equal(created.payment_method_type, null);
+    await client.query("INSERT INTO orders(status) VALUES('CANCELLED')");
+    for (const status of ['notPaid', 'PAID', 'SUBMITTING', 'ACCEPTED', 'SUBMISSION_FAILED']) {
+      await client.query('SAVEPOINT payment_check');
+      await assert.rejects(client.query('INSERT INTO orders(status) VALUES($1)', [status]), {
+        code: '23514',
+        constraint: 'orders_payment_method_required_check',
+      });
+      await client.query('ROLLBACK TO SAVEPOINT payment_check');
+    }
+    assert.equal(
+      (
+        await client.query(
+          "SELECT attnotnull FROM pg_attribute WHERE attrelid='pg_temp.orders'::regclass AND attname='payment_method_type'",
+        )
+      ).rows[0].attnotnull,
+      false,
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  const order = (
+    await pool.query(
+      'INSERT INTO orders(customer_seq) VALUES($1) RETURNING order_seq,payment_method_type',
+      [customerId],
+    )
+  ).rows[0];
+  assert.equal(order.payment_method_type, null);
+  await assert.rejects(
+    pool.query("UPDATE orders SET status='PAID' WHERE order_seq=$1", [order.order_seq]),
+    { code: '23514', constraint: 'orders_payment_method_required_check' },
+  );
 });
 
 test('partial parcel snapshots retain field mapping, defaults and the actual trigger-updated version', async () => {
@@ -1002,7 +1327,7 @@ const readCustomer = async () => {
   return { customer, phone };
 };
 const readOrder = async (customer, parcels = []) => {
-  const response = await create({ customerSeq: customer, parcels });
+  const response = await create({ customerSeq: customer, paymentMethodType: 'billing', parcels });
   assert.equal(response.status, 201);
   return (await response.json()).data.orderSeq;
 };
@@ -1471,6 +1796,8 @@ test('ORD-03 Swagger includes required nullable fields, nested response descript
   }
   for (const field of Object.values(spec.components.schemas.OrderAddressValueDto.properties))
     assert.equal(field.nullable, true);
+  assert.equal(spec.components.schemas.OrderDetailDto.properties.paymentMethodType.nullable, true);
+  assert.equal(spec.components.schemas.OrderSummaryDto.properties.paymentMethodType.nullable, true);
   assert.equal(spec.components.schemas.OrderShipmentDto, undefined);
   assert.equal(spec.components.schemas.OrderParcelDto.properties.shipment, undefined);
   assert.ok(spec.components.schemas.OrderDetailDto.required.includes('status'));

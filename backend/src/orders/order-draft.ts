@@ -37,7 +37,7 @@ export function orderDraft(input: CreateOrderDto) {
     ...(input.customer
       ? { customer: { name: input.customer.name, phoneNumber: input.customer.phoneNumber } }
       : {}),
-    paymentMethodType: input.paymentMethodType ?? 'billing',
+    paymentMethodType: input.paymentMethodType ?? null,
     totalAmount: input.totalAmount ?? null,
     pickupRequestedAt: input.pickupRequestedAt
       ? new Date(input.pickupRequestedAt).toISOString()
@@ -61,3 +61,28 @@ export function orderDraft(input: CreateOrderDto) {
 }
 
 export type OrderDraft = ReturnType<typeof orderDraft>;
+
+export function hasOrderData(draft: OrderDraft): boolean {
+  if (
+    draft.paymentMethodType !== null ||
+    draft.pickupRequestedAt !== null ||
+    draft.totalAmount !== null
+  )
+    return true;
+  return draft.parcels.some(
+    (parcel) =>
+      parcel.originPin !== null ||
+      [parcel.origin, parcel.destination].some((value) =>
+        Object.values(value).some((field) =>
+          typeof field === 'string' ? field.trim() !== '' : field !== null,
+        ),
+      ) ||
+      [parcel.documentCount, parcel.smallBoxCount, parcel.mediumBoxCount, parcel.bigBoxCount].some(
+        (count) => count > 0,
+      ) ||
+      parcel.otherItemDescription.trim() !== '' ||
+      parcel.clientComment.trim() !== '' ||
+      parcel.itemPrice !== null ||
+      parcel.notifiedPrice !== null,
+  );
+}

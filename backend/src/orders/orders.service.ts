@@ -9,9 +9,10 @@ import { DatabaseService } from '../database/database.service';
 import { CustomersService } from '../customers/customers.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
+import { NoOrderResultDto } from './dto/no-order-result.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ListResponse } from '../common/pagination';
-import { isZonedDate, orderDraft } from './order-draft';
+import { hasOrderData, isZonedDate, orderDraft } from './order-draft';
 import { OrdersRepository } from './orders.repository';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
@@ -157,7 +158,7 @@ export class OrdersService {
     input: CreateOrderDto,
     requestId: string,
     callSessionHeader?: string,
-  ): Promise<CreatedOrderDto | OrderResultDto> {
+  ): Promise<CreatedOrderDto | OrderResultDto | NoOrderResultDto> {
     return this.createOrder(adminId, key, input, requestId, callSessionHeader);
   }
 
@@ -194,7 +195,7 @@ export class OrdersService {
     requestId: string,
     callSessionHeader?: string,
     submitManual = false,
-  ): Promise<CreatedOrderDto | OrderResultDto> {
+  ): Promise<CreatedOrderDto | OrderResultDto | NoOrderResultDto> {
     const partialResult = input.call && input.outcome !== 'COMPLETE';
     if ((input.call === undefined) !== (input.outcome === undefined))
       throw new ApiException(
@@ -237,9 +238,21 @@ export class OrdersService {
         await this.submission.recoverStale(client, previous.orderSeq, requestId);
         return { result: await this.repository.result(client, previous.orderSeq, callId) };
       }
+      const empty = await this.repository.emptyResult(client, key);
+      if (empty) {
+        if (empty.callSessionSeq !== callId || empty.actorAdminUserSeq !== adminId)
+          throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 통화에 접근할 수 없습니다.');
+        return { result: new NoOrderResultDto(empty.callSessionSeq) };
+      }
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+      if (callId !== null && (await this.repository.hasEmptyResult(client, callId)))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '이미 주문 없는 통화 결과를 수신했습니다. 같은 요청 키를 사용해 주세요.',
+        );
       if (call && ((!input.call && call.endedAt !== null) || call.orderSeq !== null))
         throw new ApiException(
           409,
@@ -265,6 +278,10 @@ export class OrdersService {
             !(await this.repository.canUsePin(client, customerId, parcel.originPin)))
         )
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+      }
+      if (input.call && input.outcome !== 'COMPLETE' && !hasOrderData(draft)) {
+        await this.repository.saveEmptyResult(client, key, callId!, adminId);
+        return { result: new NoOrderResultDto(callId!) };
       }
       const result = await this.repository.insert(
         client,
@@ -314,7 +331,7 @@ export class OrdersService {
           : undefined;
       return { result: await this.repository.result(client, result.orderSeq, callId), payload };
     });
-    if (!prepared.payload) return prepared.result;
+    if (!prepared.payload || prepared.result.orderSeq === null) return prepared.result;
     await this.submission.submitPaidOrder(prepared.result.orderSeq, requestId);
     try {
       return await this.database.transaction((client) =>
