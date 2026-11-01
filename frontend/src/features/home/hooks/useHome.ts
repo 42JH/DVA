@@ -23,17 +23,8 @@ const CALLS_LINK: Record<TodayCardKind, string> = {
 }
 
 const count = (n: number | undefined) => (n === undefined ? '–' : n.toLocaleString('ko-KR'))
-// 평균 = [숫자, 단위] 조각들 — 02 대시보드와 같은 모양 ('2 분 51 초' · '1.3 회')
-type Parts = [string, string][]
-const minSec = (n: number | undefined): Parts => {
-  if (n === undefined) return [['–', '']]
-  const s = Math.round(n)
-  return [
-    [String(Math.floor(s / 60)), '분'],
-    [String(s % 60).padStart(2, '0'), '초'],
-  ]
-}
-const times = (n: number | undefined): Parts => [[n === undefined ? '–' : n.toFixed(1), '회']]
+// 평균 통화 시간 · 되묻기: 집계 API가 없어 숫자를 만들지 않음 (명세 §10 — 성공하는 척 금지, 02 대시보드와 같은 문구, 11/01 결정 A)
+const NO_STAT = '집계 API 없음'
 
 /** 01 홈 위쪽 — 검색(→ 03 주문 내역) · 오늘 숫자(카드 · 평균 모두 오늘 0시부터 시작한 통화 기준). 처리할 AI 미답변은 features/faq의 UnansweredPreview */
 export function useHome() {
@@ -66,9 +57,9 @@ export function useHome() {
     todayLabel: fmtDateDay(new Date()),
     cards,
     averages: [
-      { label: '평균 통화 시간', parts: minSec(s?.avgCallSeconds) },
-      { label: '평균 되묻기 횟수', parts: times(s?.avgReaskCount) },
+      { label: '평균 통화 시간', note: NO_STAT },
+      { label: '평균 되묻기 횟수', note: NO_STAT },
     ],
-    todayError: today.error?.message ?? null,
+    todayError: today.error ? '오늘 숫자를 불러오지 못했습니다. 새로고침해 주세요.' : null,
   }
 }
