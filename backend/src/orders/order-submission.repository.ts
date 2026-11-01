@@ -27,8 +27,13 @@ export class OrderSubmissionRepository {
     return result.rowCount === 1;
   }
 
-  async start(client: PoolClient, id: number) {
-    await client.query("UPDATE orders SET status='SUBMITTING' WHERE order_seq=$1", [id]);
+  async start(client: PoolClient, id: number, expectedUpdatedAt?: string): Promise<boolean> {
+    const result = await client.query(
+      `UPDATE orders SET status='SUBMITTING' WHERE order_seq=$1
+       AND ($2::timestamptz IS NULL OR updated_at=$2::timestamptz)`,
+      [id, expectedUpdatedAt ?? null],
+    );
+    return result.rowCount === 1;
   }
 
   async markStale(client: PoolClient, id: number): Promise<boolean> {

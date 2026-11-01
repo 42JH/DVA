@@ -95,12 +95,24 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
       });
       if (count < 10) break;
     }
-    const paid = await this.database.pool.query<{ id: number }>(
-      "SELECT order_seq AS id FROM orders WHERE status='PAID' ORDER BY order_seq LIMIT 20",
+    const pending = await this.database.pool.query<{
+      id: number;
+      status: 'PAID' | 'SUBMISSION_FAILED';
+      updatedAt: string;
+    }>(
+      `SELECT order_seq AS id,status,updated_at::text AS "updatedAt" FROM orders
+       WHERE status='PAID' OR (status='SUBMISSION_FAILED' AND updated_at<date_trunc('minute',CURRENT_TIMESTAMP))
+       ORDER BY updated_at,order_seq LIMIT 20`,
     );
-    for (const order of paid.rows) {
+    for (const order of pending.rows) {
       try {
-        await this.submissions.submitPaidOrder(order.id, randomUUID());
+        await this.submissions.submitPaidOrder(
+          order.id,
+          randomUUID(),
+          null,
+          order.status === 'SUBMISSION_FAILED',
+          order.updatedAt,
+        );
       } catch {
         this.logger.error({ event: 'paid_order_submission_deferred', orderSeq: order.id });
       }

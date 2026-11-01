@@ -25,13 +25,13 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   q?: string;
 
   @ApiPropertyOptional({
-    enum: ['COLLECTING', 'notPaid', 'PAID', 'CANCELLED'],
+    enum: ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'],
     description:
-      '목록 탭. PAID는 PAID·SUBMITTING·ACCEPTED·SUBMISSION_FAILED를 함께 조회합니다. 전체는 생략합니다.',
+      '목록 탭. PAID는 PAID·SUBMITTING·ACCEPTED를 함께 조회하고 SUBMISSION_FAILED는 접수 실패만 조회합니다. 전체는 생략합니다.',
   })
   @IsOptional()
-  @IsIn(['COLLECTING', 'notPaid', 'PAID', 'CANCELLED'])
-  statusGroup?: 'COLLECTING' | 'notPaid' | 'PAID' | 'CANCELLED';
+  @IsIn(['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'])
+  statusGroup?: 'COLLECTING' | 'notPaid' | 'PAID' | 'SUBMISSION_FAILED' | 'CANCELLED';
 }
 
 export class OrderListPartyDto extends PickType(OrderAddressValueDto, [

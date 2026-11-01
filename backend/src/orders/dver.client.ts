@@ -121,7 +121,7 @@ export class DverClient {
         });
       return finish({ status: 'SUBMISSION_FAILED' }, 'invalid_response');
     } catch {
-      // 응답 유실은 접수 실패를 뜻하지 않으므로 자동으로 다시 전송하지 않는다.
+      // 단일 HTTP 호출은 재시도하지 않는다. 다음 전송은 워커·관리자가 결정한다.
       return finish(
         { status: 'SUBMISSION_FAILED' },
         controller.signal.aborted ? 'timeout' : 'transport_error',
