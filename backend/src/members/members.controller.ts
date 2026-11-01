@@ -71,7 +71,7 @@ export class MembersController {
   @ApiOperation({
     summary: '기업 직원 단건·복수 JSON 등록',
     description:
-      '단건 객체 또는 items 1~1,000건, JSON 최대 1MiB. 기존 고객 번호 또는 사번·이름·전화번호로 등록합니다. 이름·전화번호 형식의 role은 선택이며 신규 생략은 MEMBER, 기존 직원 갱신에서 생략하면 유지합니다. 부서는 선택입니다. 전체 요청을 함께 저장·롤백하며 다른 기업 소속은 자동 이동하지 않습니다.',
+      '단건 객체 또는 items 1~1,000건, JSON 최대 1MiB. 기존 고객 번호 또는 사번·이름·전화번호로 등록합니다. 이름·전화번호 형식은 고객 address를 함께 저장하며 생략 시 유지(신규는 null), null로 삭제, 객체는 전체 교체합니다. role은 선택이며 신규 생략은 MEMBER, 기존 직원 갱신에서 생략하면 유지합니다. 부서는 선택입니다. 전체 요청을 함께 저장·롤백하며 다른 기업 소속은 자동 이동하지 않습니다.',
   })
   @ApiNoContentResponse()
   @ApiBody({

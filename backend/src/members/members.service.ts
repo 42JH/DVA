@@ -189,6 +189,7 @@ export class MembersService {
           customerSeq: plans[index]?.customerSeq,
           name: row.name,
           phoneNumber: row.phoneNumber,
+          address: row.address,
         })),
       );
       await this.repository.importRows(

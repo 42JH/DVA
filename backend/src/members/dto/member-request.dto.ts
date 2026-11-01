@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional, OmitType, getSchemaPath } from '@nestjs/swagger';
-import { Transform, TransformFnParams } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -13,9 +13,11 @@ import {
   Max,
   Min,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
+import { MemberAddressDto } from './member-address.dto';
 
 export class MemberIdParamsDto {
   @ApiProperty({
@@ -68,6 +70,18 @@ export class CreateMemberDto {
   role!: MemberRole;
 }
 export class InlineMemberDto extends OmitType(CreateMemberDto, ['customerSeq', 'role'] as const) {
+  @ApiPropertyOptional({
+    type: MemberAddressDto,
+    nullable: true,
+    description:
+      '고객의 내 주소. 고객·기업 소속과 함께 저장합니다. 생략 시 기존 주소 유지(신규는 null), null로 삭제, 객체는 전체 교체. 도로명·지번·동·우편번호 필수, 상세주소 선택. 위도·경도는 전달한 숫자를 유지하고 미전달·null은 각각 1로 저장합니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => MemberAddressDto)
+  address?: MemberAddressDto | null;
+
   @ApiPropertyOptional({
     enum: MEMBER_ROLES,
     description:
