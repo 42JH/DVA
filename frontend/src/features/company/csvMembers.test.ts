@@ -8,6 +8,7 @@ import {
   serverRowErrors,
   type CsvMember,
 } from './csvMembers'
+import { errorText } from './labels'
 
 const HEAD = '사번,사원명,전화번호,대표자'
 const ok = (text: string) => {
@@ -91,6 +92,11 @@ assert.deepEqual(
   ),
   ['3행 전화번호를 확인해 주세요.', '2행 내용을 확인해 주세요.'],
 )
+// 이유 코드를 알면 그 문장 (백엔드 답 11/01)
+assert.deepEqual(
+  serverRowErrors([{ field: 'items.1.phoneNumber', reason: 'OTHER_COMPANY_MEMBERSHIP' }], rows),
+  ['3행: 다른 기업에 소속된 고객의 전화번호입니다.'],
+)
 
 // 인코딩: UTF-8은 그대로, EUC-KR(엑셀 기본)은 다시 읽음
 const utf8 = new TextEncoder().encode(HEAD).buffer as ArrayBuffer
@@ -141,5 +147,15 @@ assert.deepEqual(
 )
 assert.deepEqual(pv.leaders, ['00134'])
 assert.deepEqual(pv.errors, ['5행 전화번호를 이미 김하린(사번 00152) 님이 쓰고 있습니다.'])
+
+// 창 한 줄 설명: 이유 코드가 있으면 그 문장, 없으면 상태 코드별 설명
+assert.equal(
+  errorText(
+    { status: 422, details: [{ field: 'items.0.phoneNumber', reason: 'CUSTOMER_WITHDRAWN' }] },
+    '등록',
+  ),
+  '탈퇴한 고객의 전화번호라 등록할 수 없습니다.',
+)
+assert.match(errorText({ status: 422, details: [] }, '등록'), /등록 조건에 맞지 않아/)
 
 console.log('csvMembers OK')
