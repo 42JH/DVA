@@ -26,10 +26,9 @@ def test_studio_shows_same_path(name, make_db, steps, expected_path, cfg):
                 view = await g.ainvoke({"tool": a, "args": b}, conf)
             elif kind == "commit":
                 view = await g.ainvoke({"commit": True}, conf)
-            else:  # 답과 같이 들은 전역 의도도 함께(한 마디에 여러 행동, listener.apply_answer와 같은 처리)
-                intent, slot = b
+            else:  # 고객 답(확인 단계면 같이 들은 용건도 함께)과 업무 바꾸기
                 given = {"answer": a} if a != "none" else {}
-                view = await g.ainvoke({**given, **({"intent": intent, "slot": slot} if intent != "none" else {})}, conf)
+                view = await g.ainvoke({**given, **({"intent": b} if b != "none" else {})}, conf)
             assert view["stage"] == stage, f"{kind} {a} {b}"
         return view
 

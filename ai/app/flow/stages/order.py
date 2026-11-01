@@ -220,6 +220,7 @@ STAGES = [
         description="택배 접수: 정보 받기",
         tools=ORDER_TOOLS + ("match_pins",),
         task="order",
+        enter_on=("intent.order",),  # 다른 업무 중에 택배를 보내겠다고 함(switch_task)
         fields=FIELDS,
         field_texts=FIELD_TEXTS,
         choices=order_choices,
@@ -244,6 +245,7 @@ STAGES = [
         ask="A_CONFIRM",
         choices=lambda ctx: YES_NO,
         on_answer=event_answer,
+        confirm=True,
         transitions=(
             Transition("order.updated", "ORDER", lambda ctx: not order_complete(ctx)),  # 고치다 값이 비면 다시 받기
             # 결제 방식을 물어야 하면(후불 자격 둘) 운임만 말하고 결제 단계에서 묻는다. 고른 답이 확정이다
@@ -262,6 +264,7 @@ STAGES = [
         listen=payment_asked,
         choices=lambda ctx: PAY_CHOICES if payment_asked(ctx) else {},
         on_answer=payment_answer,
+        confirm=True,
         on_enter=set_payment,
         transitions=(
             Transition(ENTERED, "A_DONE", lambda ctx: ctx.payment_method is not None),
@@ -270,7 +273,8 @@ STAGES = [
         ),
     ),
     Stage(name="A_DONE", description="접수 완료(접수 목록에 담음)", on_enter=add_parcel,
-          transitions=(Transition(ENTERED, "A_CHOICE"),)),
+          # 담았다고 분명히 말한다: 운임 안내 뒤 바로 추가 접수를 물어 고객이 "접수되지 않았나요"로 헷갈림(2026-11-01 23:09)
+          transitions=(Transition(ENTERED, "A_CHOICE", say="A_ADDED"),)),
     Stage(
         name="A_CHOICE",
         description="추가 접수·다른 업무 고르기",

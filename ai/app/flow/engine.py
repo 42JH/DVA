@@ -1,6 +1,9 @@
 """상태 엔진. 업무를 모른다: 단계 정의를 LangGraph 상태 그래프(단계 = 노드)로 엮어 "현재 단계 + 사건 → 다음 단계"를
 계산하고, 허용 도구 확인과 진행 상태 문구 생성만 한다(spec/flow.md).
 
+고객 말의 뜻은 음성 모델(Live-1)이 알아듣고 백엔드 도구로 보고한다(answer·switch_task·record_order…). 서버가 고객 말을
+직접 판별해 옮기는 것은 확인 단계(confirm: 되돌릴 수 없는 일 앞의 확인 질문)뿐이다.
+
 사건 하나 = 그래프 실행 한 번: 현재 단계 노드에서 시작해 전이가 없을 때까지 노드를 옮겨 다닌다.
 진행 상태(FlowState)는 통화 객체가 들고(가드·관제·도구 결과가 모두 본다), 그래프에는 통화 객체를 context로 넘긴다.
 
@@ -31,7 +34,6 @@ STAY = "@stay"  # 단계를 옮기지 않고 같은 단계를 예외 문구로 �
 ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(머무르지 않는 단계·건너뛰기 조건용)
 COMMIT = "commit.due"  # 확정 지연이 끝남(§2.5(3)). 미뤄 둔 전이를 실행한다
 COMMIT_WAIT = "COMMIT_WAIT"  # 확정을 기다리는 동안의 할 일(새 질문 없이 기다림)
-CORRECT_ASK = "CORRECT_ASK"  # 정정한다고만 하고 값을 말하지 않았을 때 그 항목을 다시 묻는 문구 키(§2.5(4))
 MAX_HOPS = 10  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
 
 Key = str | Callable[[Any], "str | tuple[str, ...] | None"] | None  # 문구 키, 또는 ctx → 문구 키(들)
@@ -67,6 +69,9 @@ class Stage:
     choices: Callable[[Any], dict[str, str]] | None = None
     on_answer: Callable[[Any, str], Awaitable[list[str]]] | None = None
     unheard_ok: tuple[str, ...] = ()  # 질문을 다 듣기 전에 말해도 받는 답(되돌릴 수 있는 거절, §2.5(1))
+    # 확인 단계: 서버가 고객 답을 직접 듣고 판별한다(담기·결제·취소·상담원 연결 앞, AGENTS.md 안전장치). 아니면 답은
+    # 음성 모델이 알아듣고 백엔드가 answer 도구로 보고한다
+    confirm: bool = False
     # 답마다 바로 이어서 할 말을 단계가 직접 계산할 때(전이로 갈 곳이 정해지지 않는 단계, 예: ORDER의 제안)
     preview: Callable[[Any], list[tuple[str, list[str]]]] | None = None
     # 받을 항목이 둘 이상 남았을 때 "그다음" 항목도 알려 줄지(답에 따라 다음이 갈리는 질문이면 False)
@@ -88,7 +93,6 @@ class FlowState(BaseModel):
     variant: str | None = None  # 같은 단계를 다시 물을 예외 문구(STAY 전이). 단계를 옮기면 지운다
     variant_field: str | None = None  # 그 예외 문구가 묻던 항목(그 항목이 차면 예외 문구도 끝난다)
     notice: list[str] = []  # 다음 진행 상태 한 번만 앞에 붙일 말(정정 확인). 보낸 뒤 지운다
-    correcting: str | None = None  # 고친다고만 하고 값을 아직 말하지 않은 항목(그 항목을 다시 묻는다)
     pending: dict | None = None  # 확정 지연 중인 전이 {stage, transition, at, rev, suspended}
     entered_ms: int | None = None  # 지금 단계에 들어온 세션 타임라인 시각(꼬리 조각·질문을 들었는지 판단)
     reasked: bool = False  # 이 단계에서 "질문을 다 듣기 전 답"으로 한 번 다시 물었음
@@ -241,13 +245,20 @@ def listening(ctx: Any) -> bool:
     return listen(ctx) if callable(listen) else listen
 
 
-def gated(ctx: Any) -> bool:
-    """지금 단계가 확정 관문(확정 지연 전이가 있음: 담기·결제·취소 확인). 여기서는 다른 용건이 섞인 답을 받지 않는다."""
-    return any(t.commit for t in current(ctx).transitions)
+def answers_by_tool(ctx: Any) -> bool:
+    """지금 단계의 답(제안 확인·업무 고르기 등)을 백엔드가 answer 도구로 보고한다(확인 단계가 아니고 고를 답이 있음)."""
+    stage = current(ctx)
+    return bool(stage.choices and stage.on_answer and not stage.confirm and listening(ctx) and stage.choices(ctx))
+
+
+ANYWHERE = ("get_state", "search_manual", "switch_task")  # 끝내는 단계 밖 어디서나(질문·업무 바꾸기는 언제든)
 
 
 def allowed_tools(ctx: Any) -> tuple[str, ...]:
-    return current(ctx).tools
+    """단계의 도구 + 답 보고(answer, 고를 답이 있을 때) + 어디서나 쓰는 도구(끝내는 단계 밖)."""
+    stage = current(ctx)
+    extra = (("answer",) if answers_by_tool(ctx) else ()) + (() if stage.final else ANYWHERE)
+    return tuple(dict.fromkeys(stage.tools + extra))
 
 
 def missing(ctx: Any) -> list[str]:
@@ -269,9 +280,7 @@ def field_key(ctx: Any, name: str) -> str:
 
 
 def question(ctx: Any) -> list[str]:
-    """머무는 단계의 질문(문구 키들): 정정 중이면 다시 묻기, 예외 문구, 항목 받는 단계면 빠진 첫 항목, 아니면 ask."""
-    if ctx.flow.correcting:
-        return [CORRECT_ASK]
+    """머무는 단계의 질문(문구 키들): 예외 문구, 항목 받는 단계면 빠진 첫 항목, 아니면 ask."""
     m = missing(ctx)
     if ctx.flow.variant and (m[0] if m else None) == ctx.flow.variant_field:
         return [ctx.flow.variant]
@@ -297,7 +306,7 @@ def next_text(ctx: Any) -> str:
     """다음에 할 말: 한 번만 붙일 말 + 마지막 전이 경로의 말 + 머무는 단계의 질문."""
     flow = ctx.flow
     keys = [*flow.notice, *flow.say]
-    if not flow.say_asks or flow.correcting:
+    if not flow.say_asks:
         keys += [k for k in question(ctx) if k not in keys]
     return " ".join(render(ctx, k) for k in keys) or current(ctx).description
 
@@ -339,7 +348,7 @@ async def _move(ctx: Any, t: Transition, step: Step) -> None:
     say = _key(ctx, t.say)
     state.say += _keys(say)
     state.say_asks = bool(say) and t.asks
-    state.stage, state.variant, state.pending, state.reasked, state.correcting = target, None, None, False, None
+    state.stage, state.variant, state.pending, state.reasked = target, None, None, False
     state.entered_ms = ctx.now_ms()
     if STAGES[target].task:
         state.task = STAGES[target].task
@@ -361,14 +370,17 @@ async def apply(ctx: Any, events: list[str], tool: str | None = None) -> None:
 
 
 def summary(ctx: Any) -> dict:
-    """모든 도구 결과에 붙이는 상태 요약(백엔드는 thinking.append를 받지 않는다)."""
-    return {
+    """모든 도구 결과에 붙이는 상태 요약(백엔드는 thinking.append를 받지 않는다). choices: answer로 보고할 수 있는 답."""
+    out = {
         "stage": ctx.flow.stage,
         "missing": missing(ctx),
         "tools": list(allowed_tools(ctx)),
         "recorded": dict(ctx.recorded()),
         "next": next_text(ctx),
     }
+    if answers_by_tool(ctx):
+        out["choices"] = current(ctx).choices(ctx)
+    return out
 
 
 def preview(ctx: Any) -> list[tuple[str, list[str]]]:

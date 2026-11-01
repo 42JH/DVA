@@ -141,8 +141,6 @@ class Call:
         self.running_ops: dict[str, dict] = {}  # operation_id → {tool, args, status}: 쓰기 도구 기록(중복 취소 방지)
         self.server_tool: tuple[str, dict, str] | None = None  # 서버가 실행할 도구(이름, 인수, 결과 없이 실패했을 때 사건)
         self.write_tasks: set[asyncio.Task] = set()  # 실행 중인 서버 쓰기 도구(통화가 끝나도 결과를 기록한 뒤 끝낸다)
-        self.rag_deadline = 0.0  # 질문 뒤 검색 결과를 기다리는 끝(monotonic)
-        self.search_entry_at = 0.0  # 검색 결과가 먼저 와서 QnA로 들어간 시각(monotonic). 같은 질문을 두 번 처리하지 않게
         self.lock = asyncio.Lock()  # 한 통화 안의 도구 호출·판별 반영은 순서대로
         self.hangup_requested = asyncio.Event()
         self.refer_requested = asyncio.Event()
@@ -332,6 +330,12 @@ class Call:
     def match_pins(self, name: str | None, place: str | None, detail: str | None) -> list[str]:
         """앞서 말한 받는 분(이름·장소)과 합쳐 찾는다. 후보를 좁히는 중이면 후보 안에서, 아니면 아직 아니라고 하지 않은
         핀에서 최근 N개를 먼저, 거기 없으면 전체에서. 못 찾았는데 이름·장소 중 한쪽만 말했으면 다른 쪽을 묻는다(B6 이후 규칙)."""
+        if "receiver_phone" in self.from_saved:  # 저장된 곳에서 가져온 받는 곳을 다른 곳으로 말함(정정): 그 묶음을 비운다
+            for part in ("name", "phone", "address", "address_detail", "geo"):
+                setattr(self.order, f"receiver_{part}", None)
+            self.from_saved -= {"receiver_phone", "receiver_address_detail"}
+            self.pin_rejected["destination"], self.pin_candidates, self.pin_offer = [], [], None
+            self.dest_said, self.pin_ask = {}, None
         said = self.dest_said
         self.dest_offer = None  # 최근 도착지 확인에 답하지 않고 다른 곳을 말함
         said.update({k: v for k, v in (("name", name), ("place", place), ("detail", detail)) if v})
@@ -449,30 +453,6 @@ class Call:
 
     # --- §2.5(4) 정정 ---
 
-    def start_correction(self, slot: str) -> list[str] | None:
-        """고객이 이미 말한 항목을 고친다고 함(값은 백엔드가 record_order로 기록). 고친 값이 아직 없으면 그 항목을 다시 묻는다.
-        저장된 곳(기존 출발지·최근 도착지·주소록)에서 가져온 출발지·도착지를 바꾸면 그 묶음을 비워 다시 받는다(출발지는
-        주소만, 도착지는 받는 분까지. 이전 주소록 찾기 결과는 버린다). 이 단계에서 정정을 받을 수 없으면 None."""
-        if self.flow.task != "order" or "record_order" not in engine.allowed_tools(self):
-            return None  # 접수 업무 밖(조회·취소, 취소 실행 뒤 포함)·QnA 중에는 받지 않는다
-        if slot in engine.missing(self)[:1]:
-            return []  # 지금 묻는 항목을 다시 말한 것은 정정이 아니라 답이다(다시 묻지 않는다, 2026-10-31 통화)
-        side = {"sender_address": "sender", "receiver_address": "receiver"}.get(slot)
-        if side and f"{side}_phone" in self.from_saved:
-            parts = ("address", "address_detail", "geo") if side == "sender" else \
-                ("name", "phone", "address", "address_detail", "geo")
-            for part in parts:
-                setattr(self.order, f"{side}_{part}", None)
-            self.from_saved -= {f"{side}_phone", f"{side}_address_detail"}
-            if side == "receiver":
-                self.pin_rejected["destination"], self.pin_candidates, self.pin_offer = [], [], None
-                self.dest_said, self.pin_ask, self.dest_offer = {}, None, None
-            else:
-                self.origin_offer = None
-            return ["order.updated"]
-        self.flow.correcting = slot
-        return []
-
     def snapshot_slots(self) -> dict:
         return {**{f: getattr(self.order, f) for f in Order.model_fields}, "pickup_at": self.pickup_at}
 
@@ -488,8 +468,6 @@ class Call:
             self.corrected = (slot, self._shown(slot) or "")
             if "CORRECTED" not in self.flow.notice:
                 self.flow.notice.append("CORRECTED")
-        if self.flow.correcting and self.corrected and self.corrected[0] == self.flow.correcting:
-            self.flow.correcting = None
 
     # --- 상태 엔진이 쓰는 것 ---
 
@@ -554,7 +532,7 @@ class Call:
         orders, index = lookup.get("orders") or [], lookup.get("index", 0)
         found = orders[index] if index < len(orders) else {}
         target = self.target_order or {}
-        slot, value = (self.flow.correcting, "") if self.flow.correcting else (self.corrected or (None, ""))
+        slot, value = self.corrected or (None, "")
         origin, destination = self.recent_place("origin"), self.recent_place("destination")
         rejected = self.pin_rejected["destination"]
         verifying = self.pin_offer or (rejected[-1] if rejected else None)

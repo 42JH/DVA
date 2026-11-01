@@ -163,11 +163,11 @@ def check_drift(call: Call, conn, tasks: set) -> None:
 
 
 async def fix_drift(call: Call, conn, stage: str) -> None:
-    """고객이 "더 없어요"라고 해서 음성 모델이 먼저 인사했을 수 있다: 아직 판별하지 않은 고객 말의 판별을 기다린 뒤에도
-    같은 단계(끝내는 단계가 아님)일 때만 바로잡는다."""
+    """고객이 "더 없어요"라고 해서 음성 모델이 먼저 인사했을 수 있다: 아직 판별하지 않은 고객 말의 판별과 백엔드 보고
+    (answer no_more)를 기다린 뒤에도 같은 단계(끝내는 단계가 아님)일 때만 바로잡는다."""
     cfg = call.cfg.listener
     deadline = time.monotonic() + cfg.pause_ms / 1000 + cfg.timeout_sec
-    while (call.listen_tasks or call.heard_text.strip()) and time.monotonic() < deadline:
+    while (call.listen_tasks or call.heard_text.strip() or call.backend_busy) and time.monotonic() < deadline:
         await asyncio.sleep(POLL_SEC)
     if call.flow.stage != stage:
         return
@@ -285,7 +285,7 @@ async def watch_idle(call: Call, conn) -> None:
 
 
 async def watch_flow(call: Call, conn, client) -> None:
-    """시간으로 정해지는 흐름: 미뤄 둔 확정(§2.5(3)), 검색 결과 대기 시간(RAG), 듣지 않던 단계에서 쌓인 말(§2.5(6))."""
+    """시간으로 정해지는 흐름: 미뤄 둔 확정(§2.5(3)), 듣지 않던 단계에서 쌓인 말(§2.5(6))."""
     cfg = call.cfg
     while True:
         await asyncio.sleep(POLL_SEC)
@@ -293,8 +293,6 @@ async def watch_flow(call: Call, conn, client) -> None:
         p = call.flow.pending
         if p and not p["suspended"] and now - p["at"] >= cfg.flow.commit_delay_ms / 1000:
             await _fire(call, conn, engine.COMMIT, "commit")
-        elif call.rag_deadline and now >= call.rag_deadline and engine.handles(call, "rag.timeout"):
-            await _fire(call, conn, "rag.timeout", "watchdog")
         if call.progress_due and not speaking(call):
             async with call.lock:
                 if call.progress_due:

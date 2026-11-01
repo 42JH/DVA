@@ -150,10 +150,15 @@ def is_past(raw: str | None) -> bool:
 
 _KOREAN_DIGITS = {"공": "0", "영": "0", "빵": "0", "일": "1", "이": "2", "삼": "3", "사": "4",
                   "오": "5", "육": "6", "륙": "6", "칠": "7", "팔": "8", "구": "9"}
+# 고유어 숫자("공일공삼 하나하나오오…", 2026-11-01 23:09 통화). 한 글자 숫자보다 먼저 바꾼다("일곱"의 "일")
+_NATIVE_DIGITS = {"하나": "1", "다섯": "5", "여섯": "6", "일곱": "7", "여덟": "8", "아홉": "9",
+                  "둘": "2", "셋": "3", "넷": "4"}
 
 
 def normalize_phone(raw: str) -> str | None:
     """한글 숫자·기호를 숫자만으로 바꾸고 자릿수를 검사한다. 틀리면 None(저장하지 않는다)."""
+    for word, digit in _NATIVE_DIGITS.items():
+        raw = raw.replace(word, digit)
     s = "".join(_KOREAN_DIGITS.get(ch, ch) for ch in raw)
     s = s.strip()
     if s.startswith("+82"):

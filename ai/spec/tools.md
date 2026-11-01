@@ -16,7 +16,9 @@
 - **도구는 값 기록과 주문 작업에만 쓴다.** 고객 답(예/아니오·고르기·용건·상담원·종료)에 따른 상태 전환은 도구 왕복의 지연을 피하려고 서버가 고객 말을 직접 판별한다(`spec/flow.md`). 새 질문을 만들 때 도구를 만들지 말고 단계의 `choices`·`on_answer`로 만든다. 예외: 주소록 찾기·조회·취소 결과로 정해지는 분기는 도구 결과 사건으로 정한다.
 - 주문 값 기록(`record_order`)은 단계가 막지 않는다: 접수 업무가 있을 수 있는 단계(`HUB`·`ORDER`·`A_CONFIRM`·`A_CHOICE`·QnA·상담원 제안)에서 모두 받는다. 단계가 허용하지 않는 도구는 거절하고 진행 상태를 음성 모델에 다시 보낸다(`spec/flow.md` 멈춤 막기).
 - 고객 확인이 필요한 도구(수정·취소)는 인수에 `customer_confirmed`를 두고 도구 안에서 `require_confirmed`로 거절한다. 쓰기 도구는 작업 번호(`operation_id`)를 받아 `Call.running_ops`에 남긴다.
-- 지금 도구: `get_state`, `record_order`, `match_pins`, `lookup_orders`, `cancel_order`, `search_manual`, (`modify_order` 보류).
+- 지금 도구: `get_state`, `record_order`, `match_pins`, `lookup_orders`, `answer`, `switch_task`, `cancel_order`, `search_manual`, (`modify_order` 보류). `get_state`·`search_manual`·`switch_task`는 끝내는 단계 밖 어디서나 쓴다(`engine.ANYWHERE`).
+  - `answer`: 음성 모델이 알아들은 고객 답(지금 질문의 답)을 보고한다. 인수 `choice`는 `state.choices`의 키 하나(서버가 다시 검사). 확인 단계가 아니고 고를 답이 있는 단계에서만 허용된다(`engine.answers_by_tool`). 확인 단계의 답은 서버가 직접 듣는다.
+  - `switch_task`: 하던 것과 다른 일로 바꾼다. `order`(→ `ORDER`), `lookup`(→ 조회), `agent`(→ 제한된 요청·상담원 제안), `end`(→ 마무리 인사 후 종료). 이미 그 업무 중이면 아무것도 하지 않는다.
   - `record_order`: 택배 항목(이름·연락처·주소·규격별 수량·기타 물품·물품 가액·요청 사항)과 통화 항목(수거 희망 시각 `pickup_at`, 전화 주신 분 성함 `customer_name`)을 기록한다. 수거 시각은 시간대가 있는 미래 시각만 받아 한국 시간으로 바꾸고, 지난 시각이면 `pickup.past` 사건(A5_PAST를 한 번 알림)을 낸다. 새 주소는 기록하면서 주소DB·카카오로 확정한다(`spec/address.md`). 이미 채운 값이 바뀌면 정정으로 보고 한 번 확인하게 한다. 제안(기존 출발지·최근 도착지)에 답하지 않고 새 값을 말했으면 제안을 지우고, 신규 고객의 보내는 분 정보가 다 차면 고객 등록(통화에 한 번)을 한다.
   - `match_pins`: 고객이 말한 받는 분 이름·장소·층/호수로 주소록 도착지 핀을 찾는다(`ORDER`에서만). 앞서 말한 것과 합쳐 찾는다. 결과 사건 `pins.one`(확인 B9)·`pins.many`(후보 B8)·`pins.none`(고객이 말한 이름·장소를 받는 분 정보로 가져감), 못 찾았는데 이름·장소 중 한쪽만 말했으면 `pins.ask_name`·`pins.ask_place`(빠진 쪽을 묻는다). 최근 도착지 제안 중에 다른 곳을 말한 것이면 제안을 지운다.
   - `lookup_orders`: 발신번호로 접수된 택배를 받는 분 성함으로 찾는다(성함이 null이면 최근 것부터). 결과 사건 `lookup.found`·`lookup.none`·`lookup.failed`. 백엔드 옛 계약(`/internal/ai/orders/search`)이라 실제 백엔드에서는 실패한다(`spec/backend-api.md`).
