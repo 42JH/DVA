@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AuditService } from '../audit/audit.service';
 import { ListResponse } from '../common/pagination';
 import { ApiException } from '../common/errors/api.exception';
 import { AiPersonaClient, validatePersonaOptions } from './ai-persona.client';
 import { AiSettingsRepository } from './ai-settings.repository';
-import { PersonaApplicationService } from './persona-application.service';
-import { PersonaSettings, PersonaVersion } from './ai-settings.types';
+import { Persona, PersonaSettings, PersonaVersion } from './ai-settings.types';
 import { CreatePersonaDto, PersonaListQueryDto, UpdatePersonaDto } from './dto/persona-request.dto';
 
 const SETTINGS = ['name', 'promptText', 'voiceId', 'speakingRate', 'turnWaitLevel'] as const;
@@ -18,22 +18,71 @@ export class AiSettingsService {
     private readonly repository: AiSettingsRepository,
     private readonly ai: AiPersonaClient,
     private readonly audit: AuditService,
-    private readonly applications: PersonaApplicationService,
   ) {}
 
   async list(query: PersonaListQueryDto) {
-    return new ListResponse(await this.repository.personas(query), query.limit);
+    const page = await this.repository.personas(query);
+    return new ListResponse(
+      { ...page, rows: await this.withPersonaAuthors(page.rows) },
+      query.limit,
+    );
   }
 
   async detail(id: number) {
     const persona = (await this.repository.personas({ limit: 1, offset: 0 }, id)).rows[0];
     if (!persona) throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
-    return persona;
+    return (await this.withPersonaAuthors([persona]))[0];
   }
 
   async versions(id: number, query: PersonaListQueryDto) {
-    await this.detail(id);
-    return new ListResponse(await this.repository.versions(id, query), query.limit);
+    if (!(await this.repository.latest(id)))
+      throw new ApiException(404, 'NOT_FOUND', '페르소나를 찾을 수 없습니다.');
+    const page = await this.repository.versions(id, query);
+    return new ListResponse({ ...page, rows: await this.withAuthors(page.rows) }, query.limit);
+  }
+
+  async withAuthor(version: PersonaVersion, client?: PoolClient): Promise<PersonaVersion> {
+    return (await this.withAuthors([version], client))[0];
+  }
+
+  private async withPersonaAuthors(personas: Persona[]): Promise<Persona[]> {
+    const versions = await this.withAuthors(
+      personas.flatMap((persona) =>
+        [persona.latestVersion, persona.activeVersion, persona.pendingVersion].filter(
+          (version): version is PersonaVersion => version !== null,
+        ),
+      ),
+    );
+    const byId = new Map(versions.map((version) => [version.aiPersonaVersionSeq, version]));
+    return personas.map((persona) => ({
+      ...persona,
+      latestVersion: byId.get(persona.latestVersion.aiPersonaVersionSeq)!,
+      headVersion: byId.get(persona.latestVersion.aiPersonaVersionSeq)!,
+      activeVersion: persona.activeVersion
+        ? byId.get(persona.activeVersion.aiPersonaVersionSeq)!
+        : null,
+      pendingVersion: persona.pendingVersion
+        ? byId.get(persona.pendingVersion.aiPersonaVersionSeq)!
+        : null,
+    }));
+  }
+
+  private async withAuthors(
+    versions: PersonaVersion[],
+    client?: PoolClient,
+  ): Promise<PersonaVersion[]> {
+    const names = await this.audit.actorNames(
+      'AI_PERSONA_VERSION',
+      versions.map((version) => ({
+        actorId: version.createdByAdminUserSeq,
+        targetId: version.aiPersonaVersionSeq,
+      })),
+      client,
+    );
+    return versions.map((version) => ({
+      ...version,
+      createdByAdminUserName: names.get(version.aiPersonaVersionSeq) ?? null,
+    }));
   }
 
   async create(
@@ -55,7 +104,7 @@ export class AiSettingsService {
         },
         client,
       );
-      return version;
+      return this.withAuthor(version, client);
     });
   }
 
@@ -81,7 +130,8 @@ export class AiSettingsService {
       await this.repository.lock(client);
       const current = await this.repository.latest(id, client);
       this.requireVersion(current, input.expectedVersion);
-      if (SETTINGS.every((key) => current[key] === settings[key])) return current;
+      if (SETTINGS.every((key) => current[key] === settings[key]))
+        return this.withAuthor(current, client);
       if (current.version === 2147483647)
         throw new ApiException(409, 'INVALID_STATE', '버전 번호 한도를 초과했습니다.');
       const version = await this.repository.append(
@@ -101,12 +151,7 @@ export class AiSettingsService {
         },
         client,
       );
-      const active = await this.repository.live('ACTIVE', client);
-      const pending = await this.repository.live('PENDING', client);
-      if (active?.aiPersonaSeq === id || pending?.aiPersonaSeq === id) {
-        await this.applications.queue(version.aiPersonaVersionSeq, actorId, requestId, client);
-      }
-      return (await this.repository.version(version.aiPersonaVersionSeq, client))!;
+      return this.withAuthor(version, client);
     });
   }
 

@@ -4,7 +4,8 @@ import { APPLY_ERRORS, ApplyError } from '../ai-settings.types';
 
 export class ActivatePersonaDto {
   @ApiProperty({
-    description: '적용할 전체 버전 식별자. 반드시 해당 페르소나의 버전이어야 합니다.',
+    description:
+      '사용자가 확인한 headVersion.aiPersonaVersionSeq. 요청 시 현재 HEAD와 다르면 409이며 수락 후에는 이후 저장과 무관하게 이 버전으로 고정됩니다.',
     minimum: 1,
     maximum: 2147483647,
     example: 3,
@@ -57,23 +58,25 @@ export class PersonaApplyResultDto {
 
   @ApiProperty({
     description:
-      'APPLIED 실제 설정 설치 완료, FAILED 설치 실패. 알림 수신만으로 APPLIED를 보내면 안 됩니다.',
+      'APPLIED 신규 통화 기본 설정 설치 완료, FAILED 설치 실패. 기존 통화의 버전은 유지하며 알림 수신만으로 APPLIED를 보내면 안 됩니다.',
     enum: ['APPLIED', 'FAILED'],
   })
   @IsIn(['APPLIED', 'FAILED'])
   result!: 'APPLIED' | 'FAILED';
 
-  @ApiProperty({
+  @ApiPropertyOptional({
+    deprecated: true,
     description:
-      'AI의 현재 활성 통화 수. APPLIED는 0만 허용하며 신규 통화 진입을 잠근 상태여야 합니다.',
+      '기존 AI 연동 호환용 활성 통화 수. 생략 가능하며 적용 판단·저장에 사용하지 않습니다. 전송 시 0 이상 정수여야 합니다. 기존 통화의 버전은 유지해야 합니다.',
     minimum: 0,
     maximum: 2147483647,
     example: 0,
   })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined)
   @IsInt()
   @Min(0)
   @Max(2147483647)
-  activeCallCount!: number;
+  activeCallCount?: number;
 
   @ApiPropertyOptional({
     description: 'FAILED에만 필수. 프롬프트 원문·예외 메시지는 보내지 않습니다.',

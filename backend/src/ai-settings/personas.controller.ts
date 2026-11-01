@@ -65,9 +65,9 @@ export class PersonasController {
   @HttpCode(202)
   @AuditOperation({ action: 'PERSONA_APPLY_REQUESTED', targetType: 'AI_PERSONA', target: 'id' })
   @ApiOperation({
-    summary: '페르소나 적용·복원 요청',
+    summary: '통화용 페르소나 publish',
     description:
-      '선택한 전체 버전을 PENDING으로 지정하고 기존 대기를 INACTIVE로 바꿉니다. 과거 버전도 선택할 수 있습니다. AI가 통화 0건에서 적용을 확인해야 ACTIVE가 바뀌며, 같은 정상 대기 요청은 재사용합니다.',
+      '사용자가 확인한 최신 HEAD의 식별자와 버전 번호를 보냅니다. 같은 유형도 새 HEAD를 다시 publish할 수 있습니다. 수락한 버전·UUID는 이후 저장과 무관하게 고정되며 AI 확인 전에는 기존 ACTIVE를 유지합니다. 요청 전에 HEAD가 달라졌으면 409입니다.',
   })
   @ApiAcceptedResponse({
     description: '반영 대기 버전. 실제 적용 완료가 아닙니다.',
@@ -77,7 +77,11 @@ export class PersonasController {
     description: '현재 ACTIVE를 유지하고 다른 대기가 있으면 취소합니다.',
     type: PersonaVersionResponseDto,
   })
-  @ApiResponse({ status: 409, description: '최신 저장 버전 충돌.', type: ErrorResponseDto })
+  @ApiResponse({
+    status: 409,
+    description: '확인한 HEAD 식별자 또는 최신 저장 버전 충돌.',
+    type: ErrorResponseDto,
+  })
   @ApiResponse({
     status: 422,
     description: '현재 AI가 지원하지 않는 설정.',
@@ -101,14 +105,14 @@ export class PersonasController {
       request.requestId,
     );
     if (version.status === 'ACTIVE') response.status(200);
-    return version;
+    return this.personas.withAuthor(version);
   }
 
   @Get()
   @ApiOperation({
     summary: '페르소나 목록 조회',
     description:
-      '최신 저장 설정과 적용·대기 버전 번호를 조회합니다. 최신 버전이 반드시 운영 버전은 아닙니다.',
+      '유형별 최신 저장 HEAD와 실제 상담 적용 버전·publish 대기 버전·오류를 구분해 조회합니다. 저장만으로 상담 버전은 바뀌지 않습니다.',
   })
   @ApiOkResponse({ description: '페르소나 목록과 다음 페이지 여부.', type: PersonaListResponseDto })
   list(@Query() query: PersonaListQueryDto) {
@@ -120,7 +124,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 등록',
     description:
-      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장합니다. 지원 옵션을 검증하며 운영 적용은 별도 요청합니다.',
+      '전체 프롬프트와 음성 설정을 버전 1·INACTIVE로 저장하고 HEAD로 지정합니다. 실제 상담 적용은 별도 publish 요청입니다.',
   })
   @ApiCreatedResponse({ description: '생성한 전체 설정 버전.', type: PersonaVersionResponseDto })
   @ApiResponse({ status: 409, description: '고유 코드 중복.', type: ErrorResponseDto })
@@ -138,7 +142,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 상세 조회',
     description:
-      '최신 설정과 이 페르소나의 적용·대기 버전 번호를 반환합니다. 과거 설정은 버전 목록에서 조회합니다.',
+      '최신 저장 HEAD와 실제 상담 적용 버전·publish 대기 버전·오류를 반환합니다. 최신 HEAD와 상담 버전은 다를 수 있습니다.',
   })
   @ApiOkResponse({ description: '페르소나 상세.', type: PersonaResponseDto })
   detail(@Param() params: PersonaIdDto) {
@@ -150,7 +154,7 @@ export class PersonasController {
   @ApiOperation({
     summary: '페르소나 수정',
     description:
-      '생략한 값은 유지하고 전체 설정의 새 버전을 저장합니다. 적용·대기 중인 페르소나를 수정하면 기존 대기를 교체하며, 운영 버전은 AI 적용 확인까지 유지합니다. 동일값 수정은 버전을 늘리지 않습니다.',
+      '현재 HEAD를 기준으로 생략한 값을 유지하고 새 INACTIVE 버전을 저장해 HEAD를 이동합니다. 실제 ACTIVE와 publish PENDING은 변경하지 않습니다. 동일값 수정은 버전을 늘리지 않으며 과거 버전 번호를 기준으로 수정하면 409입니다.',
   })
   @ApiOkResponse({ description: '저장한 버전과 반영 상태.', type: PersonaVersionResponseDto })
   @ApiResponse({

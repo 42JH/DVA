@@ -109,10 +109,16 @@ export class AiSettingsRepository {
     const result = await readPage<Persona>(
       this.database.pool,
       `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
-       (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='ACTIVE') AS "activeVersionSeq",
-       (SELECT ai_persona_version_seq FROM ai_persona_versions WHERE ai_persona_seq=p.ai_persona_seq AND status='PENDING') AS "pendingVersionSeq"
+       row_to_json(latest) AS "headVersion",
+       row_to_json(active) AS "activeVersion",row_to_json(pending) AS "pendingVersion",
+       active."aiPersonaVersionSeq" AS "activeVersionSeq",
+       pending."aiPersonaVersionSeq" AS "pendingVersionSeq"
        FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
         WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
+       LEFT JOIN LATERAL (${VERSION_SELECT}
+        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='ACTIVE') active ON true
+       LEFT JOIN LATERAL (${VERSION_SELECT}
+        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='PENDING') pending ON true
        WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
       [id ?? null],
       query,

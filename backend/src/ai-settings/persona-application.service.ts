@@ -50,31 +50,41 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
       const latest = await this.repository.latest(id, client);
       if (latest?.version !== input.expectedVersion)
         throw new ApiException(409, 'VERSION_CONFLICT', '최신 저장 버전을 다시 조회해 주세요.');
-      const target = (await this.repository.version(source.aiPersonaVersionSeq, client))!;
-      if (target.status === 'ACTIVE') {
-        const pending = await this.repository.live('PENDING', client);
-        if (pending) {
-          await this.repository.cancelPending(client);
-          await this.audit.recordSuccess(
-            {
-              actorId,
-              targetId: pending.aiPersonaVersionSeq,
-              targetType: 'AI_PERSONA_VERSION',
-              action: 'PERSONA_PENDING_CANCELLED',
-              requestId,
-            },
-            client,
-          );
-        }
-        return target;
-      }
-      if (target.status === 'PENDING' && target.applyErrorCode === null) return target;
-      await this.queue(target.aiPersonaVersionSeq, actorId, requestId, client);
-      return (await this.repository.version(target.aiPersonaVersionSeq, client))!;
+      if (latest.aiPersonaVersionSeq !== input.aiPersonaVersionSeq)
+        throw new ApiException(409, 'VERSION_CONFLICT', '현재 HEAD 버전을 다시 조회해 주세요.');
+      return this.queueOrReuse(latest, actorId, requestId, client);
     });
   }
 
-  async queue(
+  private async queueOrReuse(
+    target: PersonaVersion,
+    actorId: number,
+    requestId: string,
+    client: PoolClient,
+  ): Promise<PersonaVersion> {
+    if (target.status === 'ACTIVE') {
+      const pending = await this.repository.live('PENDING', client);
+      if (pending) {
+        await this.repository.cancelPending(client);
+        await this.audit.recordSuccess(
+          {
+            actorId,
+            targetId: pending.aiPersonaVersionSeq,
+            targetType: 'AI_PERSONA_VERSION',
+            action: 'PERSONA_PENDING_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      return target;
+    }
+    if (target.status === 'PENDING' && target.applyErrorCode === null) return target;
+    await this.queue(target.aiPersonaVersionSeq, actorId, requestId, client);
+    return (await this.repository.version(target.aiPersonaVersionSeq, client))!;
+  }
+
+  private async queue(
     versionId: number,
     actorId: number,
     requestId: string,
@@ -106,11 +116,9 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
   }
 
   async result(input: PersonaApplyResultDto, requestId: string): Promise<PersonaVersion> {
-    // shortcut: 단일 AI 프로세스의 통화 진입 잠금을 신뢰한다. 다중 AI 인스턴스 전환 시 공통 게이트가 필요하다.
+    // shortcut: AI의 통화별 버전 고정과 신규 통화 진입 잠금을 신뢰한다. 다중 인스턴스 전환 시 동기화 검증이 필요하다.
     if ((input.result === 'FAILED') !== (input.errorCode !== undefined))
       throw new ApiException(400, 'INVALID_REQUEST', '실패 결과에만 errorCode가 필요합니다.');
-    if (input.result === 'APPLIED' && input.activeCallCount !== 0)
-      throw new ApiException(409, 'INVALID_STATE', '진행 중인 통화가 없어야 적용할 수 있습니다.');
     return this.database.transaction(async (client) => {
       await this.repository.lock(client);
       const target = await this.repository.version(input.aiPersonaVersionSeq, client);

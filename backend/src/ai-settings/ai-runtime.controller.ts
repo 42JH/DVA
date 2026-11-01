@@ -59,7 +59,7 @@ export class AiRuntimeController {
   @ApiOperation({
     summary: 'AI 페르소나 적용 결과 수신',
     description:
-      'AI 전용. 통화 진입을 잠그고 설정을 설치한 뒤 호출합니다. APPLIED·통화 0건·현재 대기 요청이 모두 일치해야 ACTIVE를 전환합니다. 실패는 대기와 기존 운영 설정을 유지하며 같은 성공 회신은 재사용합니다.',
+      'AI 전용. 신규 통화 진입을 잠그고 새 통화의 기본 설정을 설치한 뒤 호출합니다. APPLIED와 현재 대기 요청이 일치하면 진행 중인 통화 수와 관계없이 ACTIVE를 전환합니다. 기존 통화는 시작 시 버전을 유지합니다. 실패는 대기와 기존 기본 설정을 유지하며 같은 성공 회신은 재사용합니다.',
   })
   @ApiOkResponse({
     description:
@@ -69,7 +69,7 @@ export class AiRuntimeController {
   @ApiResponse({
     status: 409,
     description:
-      '통화 진행 중, 교체된 대기 요청 또는 버전·applicationId 불일치. AI는 신규 통화를 열기 전에 다시 동기화해야 합니다.',
+      '교체된 대기 요청 또는 버전·applicationId 불일치. AI는 신규 통화를 열기 전에 다시 동기화해야 합니다.',
     type: ErrorResponseDto,
   })
   result(@Body() input: PersonaApplyResultDto, @Req() request: AuthRequest) {

@@ -61,3 +61,18 @@ test('department PATCH distinguishes omission and null and still rejects foreign
   for (const value of [0, -1, 2147483648, '1', true, {}, []])
     await assert.rejects(() => transform({ departmentSeq: value }));
 });
+
+test('inline employee role is optional, accepts only display roles and preserves omission', async () => {
+  const input = { employeeNo: '001', name: '대표자', phoneNumber: '01012345678' };
+  assert.equal((await pipe.transform(input))[0].role, undefined);
+  for (const role of ['MEMBER', 'ORG_ADMIN'])
+    assert.equal((await pipe.transform({ ...input, role }))[0].role, role);
+  for (const role of [null, 'SYSTEM_ADMIN', 'OPERATOR', '', 1, true])
+    await assert.rejects(
+      () => pipe.transform({ items: [input, { ...input, employeeNo: '002', role }] }),
+      (error) =>
+        error.getStatus() === 400 &&
+        error.getResponse().details.some((detail) => detail.field === 'items[1].role'),
+    );
+  await assert.rejects(() => pipe.transform({ customerSeq: 1, employeeNo: '001' }));
+});

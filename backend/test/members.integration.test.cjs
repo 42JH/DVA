@@ -895,6 +895,7 @@ test('JSON batch audit failure rolls back changed customers, new customers and m
   const newPhone = phone(),
     otherPhone = phone();
   const content = employees(co, '001,Changed,' + newPhone + '\n002,New,' + otherPhone);
+  content[0].role = 'ORG_ADMIN';
   await pool.query(
     "CREATE FUNCTION fail_member_batch_audit_37() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='MEMBERS_IMPORTED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'test audit failure'; END IF; RETURN NEW; END $$",
   );
@@ -908,6 +909,7 @@ test('JSON batch audit failure rolls back changed customers, new customers and m
     ).rows[0];
     assert.deepEqual(old, { name: cu.name, phone_number: cu.phoneNumber });
     assert.equal((await members(co)).data.length, 1);
+    assert.equal((await member(co, cu.id)).role, 'MEMBER');
     assert.equal(
       (await pool.query('SELECT count(*) FROM customers WHERE phone_number=$1', [otherPhone]))
         .rows[0].count,
@@ -928,6 +930,7 @@ test('JSON batch audit failure rolls back changed customers, new customers and m
   }
   await empty(await registerMany(co, content));
   assert.equal((await members(co)).data.length, 2);
+  assert.equal((await member(co, cu.id)).role, 'ORG_ADMIN');
 });
 
 test('audit failure rolls back representative/status changes and unlink, recording only the failed attempt', async () => {
@@ -1042,4 +1045,58 @@ test('OpenAPI contains four protected operations, JSON batch shape, representati
     document.components.schemas.MembershipResponseDto.properties.role.description,
     /대표자/,
   );
+});
+
+test('inline employee registration accepts representative roles while omitted roles default to MEMBER', async () => {
+  const co = await company();
+  const adminCount = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;
+  await empty(
+    await registerMany(co, [
+      { employeeNo: '001', name: '대표자', phoneNumber: phone(), role: 'ORG_ADMIN' },
+      { employeeNo: '002', name: '일반 사원', phoneNumber: phone() },
+      { employeeNo: '003', name: '명시 일반', phoneNumber: phone(), role: 'MEMBER' },
+    ]),
+  );
+  const rows = (await members(co)).data.sort((a, b) =>
+    a.membership.employeeNo.localeCompare(b.membership.employeeNo),
+  );
+  assert.deepEqual(
+    rows.map((row) => row.membership.role),
+    ['ORG_ADMIN', 'MEMBER', 'MEMBER'],
+  );
+  assert.equal((await pool.query('SELECT count(*) FROM admin_users')).rows[0].count, adminCount);
+});
+
+test('inline employee updates preserve an omitted role, membership identity, status and department', async () => {
+  const co = await company(),
+    cu = await customer();
+  await empty(await create(co, cu.id, '001', undefined, 'ORG_ADMIN'));
+  const original = await member(co, cu.id);
+  await empty(await patch(original.membershipSeq, { status: 'INACTIVE' }));
+  const input = { employeeNo: '001', name: '갱신 사원', phoneNumber: phone() };
+  await empty(await registerMany(co, [input]));
+  const omitted = await member(co, cu.id);
+  assert.deepEqual(omitted, { ...original, status: 'INACTIVE' });
+  await empty(await registerMany(co, [{ ...input, role: 'MEMBER' }]));
+  assert.deepEqual(await member(co, cu.id), { ...omitted, role: 'MEMBER' });
+});
+
+test('inline employee role validation rejects privilege names and null without partially registering a batch', async () => {
+  const co = await company();
+  for (const role of ['SYSTEM_ADMIN', null]) {
+    const result = await error(
+      await registerMany(co, [
+        { employeeNo: '001', name: '정상 사원', phoneNumber: phone() },
+        { employeeNo: '002', name: '잘못된 역할', phoneNumber: phone(), role },
+      ]),
+      400,
+      'INVALID_REQUEST',
+    );
+    assert.ok(result.error.details.some((detail) => detail.field === 'items[1].role'));
+    assert.equal((await members(co)).total_count, 0);
+  }
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const inline = document.components.schemas.InlineMemberDto;
+  assert.deepEqual(inline.properties.role.enum, ['MEMBER', 'ORG_ADMIN']);
+  assert.ok(!inline.required.includes('role'));
 });

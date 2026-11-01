@@ -19,6 +19,11 @@ export function configureApplication(app: INestApplication, logger = new Logger(
     (request: Request, response: Response, next: NextFunction) =>
       parseMembers(request, response, next),
   );
+  app.use('/api/companies', (request: Request, response: Response, next: NextFunction) =>
+    request.method === 'POST' && request.path === '/'
+      ? parseMembers(request, response, next)
+      : next(),
+  );
   app.enableCors({
     origin: (
       origin: string | undefined,

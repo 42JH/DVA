@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
 import { APPLY_ERRORS, PERSONA_STATUSES, TURN_WAIT_LEVELS } from '../ai-settings.types';
 
@@ -32,6 +32,13 @@ export class PersonaVersionDto {
   status!: string;
   @ApiProperty({ description: '버전 작성 관리자.', type: Number, nullable: true })
   createdByAdminUserSeq!: number | null;
+  @ApiPropertyOptional({
+    description:
+      '관리자 페르소나 응답의 작성자 이름. 논리 참조와 기존 감사 이력으로 조회하며 관리자 삭제 후에도 보존합니다. 확인할 수 없는 과거 작성자는 null. AI 설정 응답에는 제공하지 않습니다.',
+    type: String,
+    nullable: true,
+  })
+  createdByAdminUserName?: string | null;
   @ApiProperty({ description: '버전 생성 시각.', type: String, format: 'date-time' })
   createdAt!: Date;
   @ApiProperty({
@@ -82,6 +89,25 @@ export class PersonaDto {
     type: PersonaVersionDto,
   })
   latestVersion!: PersonaVersionDto;
+  @ApiProperty({
+    description:
+      '이 유형의 최신 저장 버전 HEAD. 생성·수정 저장 시 자동 이동하며 latestVersion과 같습니다. 실제 상담 적용·대기 버전은 별도입니다.',
+    type: PersonaVersionDto,
+  })
+  headVersion!: PersonaVersionDto;
+  @ApiProperty({
+    description: '실제 AI 적용을 확인한 상담 버전. HEAD가 이동해도 유지하며 미사용 유형은 null.',
+    type: PersonaVersionDto,
+    nullable: true,
+  })
+  activeVersion!: PersonaVersionDto | null;
+  @ApiProperty({
+    description:
+      'publish 요청 시 고정한 적용 대기 버전. 저장으로 교체되지 않으며 applyErrorCode로 반영 실패를 확인합니다. 없으면 null.',
+    type: PersonaVersionDto,
+    nullable: true,
+  })
+  pendingVersion!: PersonaVersionDto | null;
   @ApiProperty({
     description: '이 페르소나의 현재 적용 버전 식별자. 미적용은 null.',
     type: Number,

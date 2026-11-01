@@ -11,6 +11,7 @@ const {
   CreatePersonaDto,
   UpdatePersonaDto,
 } = require('../dist/ai-settings/dto/persona-request.dto');
+const { PersonaApplyResultDto } = require('../dist/ai-settings/dto/persona-application.dto');
 const { validateEnvironment } = require('../dist/config/environment');
 const options = {
   voices: [{ id: 'test-voice', label: '테스트 음성' }],
@@ -83,6 +84,24 @@ test('create defaults do not leak into PATCH and prompt text remains unchanged',
   ])
     assert.ok(
       validateSync(plainToInstance(UpdatePersonaDto, { expectedVersion: 1, ...input })).length > 0,
+    );
+});
+test('apply results accept an omitted legacy call count and still validate supplied counts', () => {
+  const result = {
+    aiPersonaVersionSeq: 1,
+    applicationId: '00000000-0000-4000-8000-000000000001',
+    result: 'APPLIED',
+  };
+  for (const activeCallCount of [undefined, 0, 2, 2147483647])
+    assert.deepEqual(
+      validateSync(plainToInstance(PersonaApplyResultDto, { ...result, activeCallCount })),
+      [],
+    );
+  for (const activeCallCount of [null, '0', -1, 0.5, 2147483648])
+    assert.ok(
+      validateSync(plainToInstance(PersonaApplyResultDto, { ...result, activeCallCount })).some(
+        (error) => error.property === 'activeCallCount',
+      ),
     );
 });
 test('persona service token is optional for existing services and is never echoed on validation failure', () => {

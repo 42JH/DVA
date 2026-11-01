@@ -68,6 +68,15 @@ export class CreateMemberDto {
   role!: MemberRole;
 }
 export class InlineMemberDto extends OmitType(CreateMemberDto, ['customerSeq', 'role'] as const) {
+  @ApiPropertyOptional({
+    enum: MEMBER_ROLES,
+    description:
+      '대표자 표시. 신규 생략은 MEMBER, 기존 직원 갱신에서 생략하면 현재 역할을 유지합니다. 관리자 웹 권한과 무관합니다.',
+  })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(MEMBER_ROLES)
+  role?: MemberRole;
+
   @ApiProperty({ description: '직원 이름. 앞뒤 공백 제거, 빈 값 불가.' })
   @Transform(({ value }: TransformFnParams) => (typeof value === 'string' ? value.trim() : value))
   @IsString()

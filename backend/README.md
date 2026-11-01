@@ -14,11 +14,13 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 주문 전체·상세 단건/복수 취소와 취소 후 조회·접수 규칙은 [주문 취소 API 계약](../docs/api/order-cancel.md)을 참고한다. 승인 대기 없이 결제 전 주문을 내부 DB에서 처리하며 디버 취소 연동은 포함하지 않는다.
 
-페르소나 전체 버전·적용 대기는 [페르소나 API 계약](../docs/api/personas.md), AI 서버 구현 항목은 [AI 페르소나 연동 명세](../docs/api/ai-persona-integration.md)를 참고한다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·적용 요청은 503이다. 실제 AI 통화 제어는 AI 팀 구현 후 연결한다.
+페르소나 유형·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 새 배포는 036 migration까지 반영하며, 구버전 앱을 모두 종료한 뒤 중복 HEAD 컬럼을 제거한다. 생성·수정 저장 시 HEAD가 최신 버전으로 이동하고 실제 상담·publish 대기는 유지한다. POST activate는 확인한 HEAD를 publish하며 수락한 버전·UUID는 이후 저장으로 바뀌지 않는다. 수동 PUT head는 제거했다. 통화 중 적용과 선택 호환값 activeCallCount는 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·publish 요청은 503이다.
+
+관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
 
 관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·result·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 새 API·migration 없이 기존 두 GET 조회를 보완한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
 
-기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다.
+기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다. 이름·전화번호 등록의 선택 role과 기업·선택 부서·사원 통합 등록의 최신 입력·트랜잭션 계약은 [기업·사원 등록 명세](docs/company-registration.md)를 우선한다.
 
 고객 등록·목록·상세·수정의 MVP 범위와 AI 호출 방법은 [고객 API 계약](../docs/api/customers.md)을 참고한다.
 
@@ -494,3 +496,7 @@ FAQ 등록은 단건·복수 모두 items 배열을 사용한다. 새 앱 전 02
 기업·부서의 기존 필드는 유지하며, AI 고객 컨텍스트의 기업·부서 응답은 기존 DTO를 사용합니다. 부서는 기존 목록 조회로 상세 제목 줄의 값을 가져오며 별도 단건 조회 API는 추가하지 않습니다. 데이터 집계는 기존 인덱스를 사용하는 같은 SQL에서 수행하며 별도 저장 카운터나 Redis를 추가하지 않습니다.
 
 배포 전에 033-organization-created-at.sql을 적용해야 합니다. 실제 서버 DB 적용과 배포는 이 코드 변경의 로컬 검증에 포함하지 않습니다.
+
+관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않으며, 관리자가 접수 결과를 확인한 뒤 다시 재접수를 요청하면 전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+
+배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.
