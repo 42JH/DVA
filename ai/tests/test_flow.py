@@ -495,10 +495,16 @@ def test_24_out_of_order_values_are_recorded_and_only_missing_asked():
     assert said(call, "A1_1") and "receiver_name" not in engine.missing(call)
 
 
-def test_progress_tells_the_question_after_next():
+def test_progress_gives_only_the_next_question_not_what_to_say_before_the_result():
+    """진행 상태는 지금 할 말만 준다. 결과가 오기 전에 미리 말할 것(그다음 항목·답마다 이어서 할 말)을 주면, 위임한 턴에
+    음성 모델이 그것을 먼저 말하고 결과도 말해 두 번 말했다(2026-11-02 00:07 통화: 번호 정정 중 "맞으신 거죠?" 뒤
+    "다시 불러 주시겠어요?")."""
     call = play(new_db(), [say("order", "ORDER")])
     text = engine.progress_text(call, CFG.progress.max_chars)
-    assert "먼저 성함을" in text and "그다음" in text and TEXTS.say["A1_2"] in text
+    assert "먼저 성함을" in text and TEXTS.say["A1_2"] not in text
+    call = make_call(saved_db())  # 제안 질문(기존 출발지)도 답마다 이어서 할 말을 미리 주지 않는다
+    text = engine.progress_text(call, CFG.progress.max_chars)
+    assert TEXTS.say["B4"].split("{")[0] not in text and TEXTS.say["A1_2"] not in text
 
 
 def test_sender_phone_is_caller_without_asking_and_asked_only_without_caller():
@@ -831,21 +837,6 @@ def test_match_pins_strips_particles_but_not_names():
     out = report(call, tool("match_pins", {"name": "이영희님", "place": "해운대로"}, "ORDER"))
     assert out["ok"] and call.pin_offer == DEST  # "이영희님"은 "이영희"로 보되 "이영"까지 줄여 이영수를 찾지 않는다
     assert run(dispatch(call, "match_pins", "{}", "x"))["ok"] is False  # 찾을 말이 없으면 오류
-
-
-def test_offer_preview_tells_what_to_say_after_each_answer():
-    """제안 질문: 판별보다 먼저 말하는 음성 모델이 답에 맞는 다음 질문을 하게 답마다 미리 알려 준다."""
-    call = make_call(saved_db())
-    ahead = dict(engine.preview(call))
-    assert ahead["예·맞다(그 출발지에서 보낸다)"] == ["B4"] and ahead["아니다, 다른 곳에서 보낸다"] == ["A1_2"]
-    assert "그다음" not in engine.progress_text(call, CFG.progress.max_chars)  # 고르는 질문에는 "그다음" 대신 답마다
-    report(call, say("yes", "ORDER"))
-    ahead = dict(engine.preview(call))
-    assert ahead["예·맞다·그렇게 해 달라"] == ["A3"] and ahead["아니다·다른 것이다"] == ["B6"]
-    report(call, say("no", "ORDER"))  # 받는 곳을 열어 묻는 중(B6): 답에 따라 다음이 갈려 "그다음"을 알려 주지 않는다
-    assert said(call, "B6") and "그다음" not in engine.progress_text(call, CFG.progress.max_chars)
-    call = make_call(new_db())  # HUB: 전이로 갈 곳을 따라간다
-    assert dict(engine.preview(call))["택배를 보내겠다(접수)"] == ["A1_1"]
 
 
 def test_saved_values_are_hidden_until_customer_says_them():
