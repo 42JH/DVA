@@ -49,6 +49,12 @@ export class OrderSubmissionService {
     const prepared = await writeOrder(this.database, async (client) => {
       const order = await this.repository.lockOrder(client, id);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (
+        retry &&
+        order.status === 'SUBMITTING' &&
+        (await this.recoverStale(client, id, requestId))
+      )
+        return { status: 'SUBMISSION_FAILED' as const };
       if (order.status !== 'PAID' && !(retry && order.status === 'SUBMISSION_FAILED'))
         return { status: order.status };
       const snapshot = (await this.repository.detail(client, id, null))!;
