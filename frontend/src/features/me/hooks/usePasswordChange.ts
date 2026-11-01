@@ -46,7 +46,9 @@ export function usePasswordChange() {
   }
   const onField =
     err instanceof ApiError &&
-    err.details.some((d) => d.field === 'currentPassword' || d.field === 'newPassword')
+    err.details.some((d) =>
+      ['currentPassword', 'newPassword', 'newPasswordConfirm'].includes(d.field),
+    )
   // 연결이 끊겨 결과를 모를 때: 이미 바뀌었을 수 있어 다시 보내면 '현재 비밀번호 불일치'로 헷갈림
   const unknown = err instanceof ApiError && err.status === 0
 
@@ -60,7 +62,9 @@ export function usePasswordChange() {
       new:
         serverError('newPassword') ??
         (tooShort ? `비밀번호는 ${MIN_PASSWORD}자 이상 입력해 주세요.` : undefined),
-      confirm: mismatch ? '비밀번호가 일치하지 않습니다.' : undefined,
+      confirm:
+        serverError('newPasswordConfirm') ??
+        (mismatch ? '비밀번호가 일치하지 않습니다.' : undefined),
     },
     errorMessage:
       !err || onField

@@ -1,7 +1,9 @@
-import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageCount } from '@/shared/api/paging'
+import { ymd } from '@/shared/lib/dateRange'
+import { fmtShortDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
 import { BILLING_LABEL, errorText } from '@/features/company/labels'
@@ -14,7 +16,8 @@ export interface CompanyRow {
   id: number
   name: string
   inactive: boolean // '비활성' 태그
-  members: number | undefined // 사원 수 (받는 중이면 undefined)
+  members: number // 사원 수 (서버 memberCount)
+  date: string // 등록일 '03.04' · 다른 해 '2025.12.29' · 없으면 '—'
   billing: string // 월결제 '사용' · '미사용'
 }
 
@@ -36,10 +39,6 @@ export function useCompanyList() {
     placeholderData: keepPreviousData, // 쪽 · 검색이 바뀌는 동안 이전 표 유지 (깜빡임 방지)
   })
   const companies = list.data?.data ?? []
-  // shortcut: 사원 수 = 기업마다 요청 1개 (backend-todo 10 — 서버가 주면 지울 것)
-  const counts = useQueries({
-    queries: companies.map((c) => companyQueries.memberCount(c.organizationSeq)),
-  })
 
   const total = list.data?.total_count ?? 0
   const pages = pageCount(total, PAGE_SIZE)
@@ -78,11 +77,12 @@ export function useCompanyList() {
     }
   }
 
-  const rows: CompanyRow[] = companies.map((c, i) => ({
+  const rows: CompanyRow[] = companies.map((c) => ({
     id: c.organizationSeq,
     name: c.name,
     inactive: c.status === 'INACTIVE',
-    members: counts[i]?.data,
+    members: c.memberCount,
+    date: c.createdAt ? fmtShortDate(ymd(new Date(c.createdAt))) : '—',
     billing: BILLING_LABEL(c.monthlyBillingEnabled),
   }))
 

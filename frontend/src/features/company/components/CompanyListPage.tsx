@@ -4,7 +4,7 @@ import { useCompanyList, type CompanyRow } from '@/features/company/hooks/useCom
 import { CompanyCsvModal } from './CompanyCsvModal'
 
 // 08 기업관리 목록 (Figma 08_기업관리, 11/01) — 검색 + [삭제] [CSV로 기업 등록] → 표 '기업 목록 24곳'(체크 · 기업명 · 사원 수 · 월결제) → 쪽 번호
-// 디자인과 다른 점 (11/01 결정): 등록일 열 뺌(서버에 없음) · 월결제 열 · 비활성 태그 추가
+// 디자인과 다른 점 (11/01 결정): 월결제 열 · 비활성 태그 추가 (등록일 · 사원 수는 11/01 백엔드 반영으로 서버 값)
 export function CompanyListPage() {
   const vm = useCompanyList()
 
@@ -24,7 +24,13 @@ export function CompanyListPage() {
       key: 'members',
       header: '사원 수',
       width: 160,
-      cell: (r) => (r.members === undefined ? '…' : `${r.members}명`),
+      cell: (r) => `${r.members}명`,
+    },
+    {
+      key: 'date',
+      header: '등록일',
+      width: 160,
+      cell: (r) => <span className="text-sub tabular-nums">{r.date}</span>,
     },
     {
       key: 'billing',

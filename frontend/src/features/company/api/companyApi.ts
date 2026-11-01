@@ -5,12 +5,14 @@ import { api, type ApiItem } from '@/shared/api/client'
 
 export type ActiveStatus = 'ACTIVE' | 'INACTIVE'
 
-/** OrganizationResponse — 사원 수 · 등록일은 서버에 없음 (backend-todo 10) */
+/** OrganizationSummary — 사원 수 · 등록일은 11/01 백엔드 반영 */
 export interface Company {
   organizationSeq: number
   name: string
   status: ActiveStatus
   monthlyBillingEnabled: boolean // 기업 월결제 자격 → 목록 '월결제' 열 (11/01 디자인 추가 b)
+  memberCount: number // 현재 ACTIVE 구성원 수 (부서 없는 사원 · 대표자 포함)
+  createdAt: string | null // 등록 시각 — 예전 기업은 이력이 없어 null
 }
 
 /** CustomerAddress — 사원 주소는 고객 정보에 있음. 보기만 (11/01 결정 A: 좌표가 필수라 화면에서 못 넣음) */
@@ -82,18 +84,6 @@ export const companyQueries = {
       queryKey: [...companyQueries.all(), id, 'members', q],
       queryFn: ({ signal }) =>
         api.get<Page<Member>>(`/companies/${id}/members`, { query: q, signal }),
-    }),
-  // 사원 수 = 재직(ACTIVE) 구성원 total_count. 1건만 받음 — shortcut: 기업마다 요청 1개, 서버가 사원 수를 주면 지울 것
-  memberCount: (id: number) =>
-    queryOptions({
-      queryKey: [...companyQueries.all(), id, 'memberCount'],
-      queryFn: async ({ signal }) =>
-        (
-          await api.get<Page<Member>>(`/companies/${id}/members`, {
-            query: { status: 'ACTIVE', limit: 1, offset: 0 },
-            signal,
-          })
-        ).total_count,
     }),
   // 대표자 이름(상세 제목 줄) · CSV 대표자 지정(사번 → membershipSeq)에 전체가 필요 → 100건씩 끝까지
   allMembers: (id: number) =>

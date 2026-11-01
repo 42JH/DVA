@@ -3,6 +3,7 @@
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
 import type { Member, MemberInput } from '@/features/company/api/companyApi'
+import { MEMBER_REASON } from '@/features/company/labels'
 
 export const CSV_HEADER = ['사번', '사원명', '전화번호', '대표자'] as const
 export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
@@ -86,6 +87,7 @@ export function serverRowErrors(
     const m = /^items\.(\d+)(?:\.(\w+))?/.exec(d.field)
     const row = m ? members[Number(m[1])] : undefined
     if (!row) return []
+    if (MEMBER_REASON[d.reason]) return [`${row.line}행: ${MEMBER_REASON[d.reason]}`] // 이유를 알면 그 문장
     const field = FIELD[m![2] as keyof MemberInput]
     return [`${row.line}행 ${field ?? '내용을'} 확인해 주세요.`]
   })
