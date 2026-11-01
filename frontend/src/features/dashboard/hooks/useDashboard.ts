@@ -1,13 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
-import { rangeDays, todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtDay } from '@/shared/lib/format'
+import {
+  fmtRange,
+  fmtYmds,
+  parseRange,
+  rangeDays,
+  todayYmd,
+  type Ymd,
+} from '@/shared/lib/dateRange'
+import { fmtDay, fmtDayRange, fmtPctSplit, fmtShortDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { COMPLAINT_LABEL, COMPLAINT_ORDER, OUTCOME_LABEL } from '@/features/dashboard/labels'
 import {
   dashboardQueries,
-  type GaugeOutcome,
+  GAUGE,
   type Outcome,
   type Stats,
   type Version,
@@ -45,7 +52,7 @@ export function useDashboard() {
   const tabs = isSystemAdmin ? TABS : TABS.filter((t) => t.key === 'date')
   const tab: DashboardTab = params.tab === 'persona' && isSystemAdmin ? 'persona' : 'date'
   const today = todayYmd()
-  const range = params.from ? { from: params.from, to: params.to || params.from } : null
+  const range = parseRange(params.from, params.to, today) // 주소의 이상한 날짜(뒤집힘 · 미래 · 글자)는 오늘로
   const from = range?.from ?? today
   const to = range?.to ?? today
 
@@ -69,10 +76,11 @@ export function useDashboard() {
   }
 
   const scopeOfRange =
-    from === to ? (from === today ? '오늘' : dayOnly(from)) : `${rangeDays(from, to)}일간`
+    from === to ? (from === today ? '오늘' : fmtShortDate(from)) : `${rangeDays(from, to)}일간`
 
-  /** 아래 두 카드 (날짜별 · 페르소나별 같은 모양) */
-  const bottom = (s: Stats, scope: string, multiDay: boolean, f: Ymd, t: Ymd) => ({
+  /** 아래 두 카드 (날짜별 · 페르소나별 같은 모양). more = '… 보기 ›'가 넘길 기간
+   * 페르소나별은 null → 링크 없음 (D2: 04 · 09에 버전 필터가 없어 카드 숫자와 목록이 안 맞음) */
+  const bottom = (s: Stats, scope: string, multiDay: boolean, more: { f: Ymd; t: Ymd } | null) => ({
     unanswered: {
       sub: `${scope} ${num(s.unanswered.count)}개`,
       timeHeader: multiDay ? '날짜' : '통화 시각',
@@ -81,7 +89,7 @@ export function useDashboard() {
         question: u.question,
         time: multiDay ? dayOnly(u.at) : hm(u.at),
       })),
-      onMore: () => navigate('/faqs/unanswered'),
+      onMore: more ? () => navigate('/faqs/unanswered') : undefined,
     },
     complaints: {
       sub:
@@ -93,26 +101,27 @@ export function useDashboard() {
         label: COMPLAINT_LABEL[k],
         count: s.complaints[k],
       })),
-      onMore: () => toCalls({ tab: 'complaint' }, f, t),
+      onMore: more ? () => toCalls({ tab: 'complaint' }, more.f, more.t) : undefined,
     },
   })
 
   const s = stats.data
   const date = s
     ? (() => {
-        const gauge: Outcome[] = ['SUCCESS', 'FAILED', 'HANDOFF']
+        const gauge: Outcome[] = GAUGE
         const base = gauge.reduce((a, k) => a + s.counts[k], 0) // 게이지 = 성공 · 실패 · 이관 (주문 취소 · 문의 뺌)
+        const pcts = fmtPctSplit(gauge.map((k) => s.counts[k])) // 세 줄 합이 100이 되게 (따로 반올림하면 99 · 101)
         return {
           scope: `${scopeOfRange} 받은 AI 통화`,
           total: num(s.total), // 결과 필터 없는 전체 (분석 전 통화 포함) = 04 '전체'
-          rate: pct(s.counts.SUCCESS, base),
+          rate: pcts[0], // 성공률 = 성공 줄과 같은 숫자
           base: `${num(base)}건 중`,
           gauge: gauge.map((k) => ({ key: k, value: s.counts[k] })),
-          rows: gauge.map((k) => ({
+          rows: gauge.map((k, i) => ({
             key: k,
             label: OUTCOME_LABEL[k],
             count: num(s.counts[k]),
-            pct: pct(s.counts[k], base),
+            pct: pcts[i],
             onClick: () => toCalls({ outcome: k }, from, to),
           })),
           // 게이지 밖 통화 (선 아래 한 줄)
@@ -127,28 +136,28 @@ export function useDashboard() {
             { key: 'time', icon: 'clock' as const, label: '평균 통화 시간', note: NO_STAT },
             { key: 'repeat', icon: 'repeat' as const, label: '평균 되묻기', note: NO_STAT },
           ],
-          ...bottom(s, scopeOfRange, from !== to, from, to),
+          ...bottom(s, scopeOfRange, from !== to, { f: from, t: to }),
         }
       })()
     : null
 
   const versionRow = (v: Version) => {
     const n = v.counts.SUCCESS + v.counts.FAILED + v.counts.HANDOFF // '통화' = 게이지와 같은 세 결과
-    const cell = (k: GaugeOutcome) => ({
-      pct: pct(v.counts[k], n, 1),
-      count: `${num(v.counts[k])}건`,
-    })
+    const pcts = fmtPctSplit(
+      GAUGE.map((k) => v.counts[k]),
+      1,
+    )
+    const cell = (i: number) => ({ pct: pcts[i], count: `${num(v.counts[GAUGE[i]])}건` })
     return {
       id: v.id,
       name: `${v.personaName} v${v.version}`,
       active: v.active,
-      period: v.to
-        ? `${dayOnly(`${v.from}T00:00`)} ~ ${dayOnly(`${v.to}T00:00`)}`
-        : `${dayOnly(`${v.from}T00:00`)} ~`,
+      // 운영 기간 (10/30 연도 규칙: 한쪽이라도 다른 해면 양쪽 다 연도). 적용 중이면 '~'만
+      period: v.to ? fmtRange(v.from, v.to, today) : `${fmtYmds([v.from], today)[0]} ~`,
       calls: `${num(n)}건`,
-      success: cell('SUCCESS'),
-      failed: cell('FAILED'),
-      handoff: cell('HANDOFF'),
+      success: cell(0),
+      failed: cell(1),
+      handoff: cell(2),
       avgTime: '—', // 집계 API 없음
       avgRepeat: '—',
       selected: v.id === selected?.id,
@@ -161,11 +170,9 @@ export function useDashboard() {
     versions.data && selected
       ? {
           // 오른쪽 위 = 아래 두 카드의 범위 = 고른 버전의 운영 기간 (적용 중이면 오늘까지)
-          header: `${selected.personaName} v${selected.version} · ${fmtDay(`${selected.from}T00:00`)} ~ ${fmtDay(`${selected.to ?? today}T00:00`)}`,
+          header: `${selected.personaName} v${selected.version} · ${fmtDayRange(`${selected.from}T00:00`, `${selected.to ?? today}T00:00`)}`,
           rows: versions.data.map(versionRow),
-          cards: vs
-            ? bottom(vs, `v${selected.version}`, true, selected.from, selected.to ?? today)
-            : null,
+          cards: vs ? bottom(vs, `v${selected.version}`, true, null) : null,
         }
       : versions.data && versions.data.length === 0
         ? { header: '', rows: [], cards: null } // 적용된 버전이 아직 없음

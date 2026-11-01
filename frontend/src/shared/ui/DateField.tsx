@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Calendar } from './Calendar'
-import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { fmtYmds, todayYmd, type Ymd } from '@/shared/lib/dateRange'
 
 // 날짜 칸 하나 — '날짜 10.20 (오늘) 📅' (04 · 02 · 03 공통). 오늘 · 1주일 · 기간 선택 버튼 셋을 대신함 (10/27)
 // 누르면 아래에 달력(하루는 같은 날을 두 번, 범위는 시작 · 끝). value가 null이면 오늘
@@ -39,12 +39,9 @@ export function DateField({
   }, [open])
   const today = todayYmd()
   const range = value ?? { from: today, to: today }
-  const withYear = ![range.from, range.to].every((s) => s.slice(0, 4) === today.slice(0, 4))
-  const show = (s: Ymd) => (withYear ? s : s.slice(5)).replaceAll('-', '.')
+  const [from, to] = fmtYmds([range.from, range.to], today)
   const text =
-    range.from === range.to
-      ? `${show(range.from)}${range.from === today ? ' (오늘)' : ''}`
-      : `${show(range.from)} ~ ${show(range.to)}`
+    range.from === range.to ? `${from}${range.from === today ? ' (오늘)' : ''}` : `${from} ~ ${to}`
 
   return (
     <div ref={root} className="relative">
