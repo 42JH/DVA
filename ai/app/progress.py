@@ -50,6 +50,8 @@ async def send_progress(call, conn, delivered: bool = False, speak: bool = False
             await conn.session.commentary.append(content=call.texts.speak.format(next=engine.next_text(call)),
                                                  delegation_id=None)
         log.info("진행 상태 보냄 %s 단계=%s 말하게=%s", call.session_id, call.flow.stage, call.progress_speak)
+    if text != call.last_progress:
+        call.progress_sent_at = time.monotonic()  # 보냈거나 도구 결과로 전해졌다
     call.last_progress, call.progress_due, call.progress_speak = text, False, False
     call.flow.notice = []
 
