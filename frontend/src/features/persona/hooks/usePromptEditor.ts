@@ -1,53 +1,37 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { useBlocker } from 'react-router'
-import { useSession } from '@/shared/auth/useSession'
-import type { Option } from '@/shared/ui'
-import { DRAFT_TAG, SPEED_CHOICE, WAIT_CHOICE } from '@/features/persona/labels'
+import { ApiError } from '@/shared/api/client'
+import { DRAFT_TAG } from '@/features/persona/labels'
 import {
-  VOICES,
   personaQueries,
   savePromptVersion,
-  type Speed,
   type VoiceSettings,
-  type WaitTime,
 } from '@/features/persona/api/personaApi'
+import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
 
-/** 수정 창이 무엇을 고치는지 — usePersonaPage가 지금 보는 버전으로 정함 */
+/** 수정 창이 무엇을 고치는지 — 늘 그 페르소나의 최신 저장본(HEAD)에서 시작 (11/02 결정) */
 export interface EditTarget {
   personaSeq: number
   personaName: string
-  prompt: string // 시작 글 (지금 보던 버전의 프롬프트)
-  voice: VoiceSettings // 시작 음성 설정 (지금 보던 버전의 것)
-  basedOn: number // 어느 버전에서 시작했는지
-  saveTo: number // 저장하면 생길 새 번호 = 가장 큰 번호 + 1 ('저장 → v8')
+  prompt: string // 시작 글 (최신본의 프롬프트)
+  voice: VoiceSettings // 시작 음성 설정 (최신본의 것)
+  basedOn: number // 최신본 번호 = 서버 expectedVersion (그새 누가 저장했으면 409)
+  saveTo: number // 저장하면 생길 번호. shortcut: 지금 서버는 저장마다 새 번호(basedOn + 1) — 적용 안 한 최신본 덮어쓰기가 되면 그 번호 (backend-todo 07)
   voiceFirst: boolean // 보기 화면의 [음성 세부 조절]로 들어왔으면 음성 창부터 열기
 }
 
 const SAMPLE = '받는 분 번호 공일공, 이삼사오, 육칠팔구 맞으실까요?' // 미리 듣기 문장 (와이어프레임 그대로)
 // shortcut: 미리 듣기는 브라우저 음성(speechSynthesis)으로 속도만 흉내 — 실제 목소리(marin 등) · 기다리기는 BE TTS 음성 파일로 바꿀 것
-const RATE: Record<Speed, number> = { SLOW: 0.85, NORMAL: 1, FAST: 1.2 }
+const RATE: Record<VoiceSettings['speed'], number> = { SLOW: 0.85, NORMAL: 1, FAST: 1.2 }
 
-/** 무엇을 바꿨는지 한 줄 (버전 히스토리 요약) — 디자인에 요약 칸이 없어 자동으로: '프롬프트 수정, 발화 속도 보통 → 빠르게' */
-function summaryOf(promptChanged: boolean, from: VoiceSettings, to: VoiceSettings): string {
-  return [
-    promptChanged && '프롬프트 수정',
-    from.voice !== to.voice && `목소리 ${from.voice} → ${to.voice}`,
-    from.speed !== to.speed && `발화 속도 ${SPEED_CHOICE[from.speed]} → ${SPEED_CHOICE[to.speed]}`,
-    from.waitTime !== to.waitTime &&
-      `말 끝 기다리기 ${WAIT_CHOICE[from.waitTime]} → ${WAIT_CHOICE[to.waitTime]}`,
-  ]
-    .filter(Boolean)
-    .join(', ')
-}
-
-/** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31)
- * 화면엔 바로 'v8 · 작성 중' — 저장 전엔 서버에 아무것도 없음. [저장] = 프롬프트 + 음성 설정을 그 번호로 새 버전(저장됨, 통화엔 아직 안 씀)
+/** 07 프롬프트 수정 · 음성 세부 조절 훅 (와이어프레임 07_페르소나관리_수정 · _음성세부조절, 10/31 · 11/02 실서버)
+ * 화면엔 바로 'v6 · 작성 중' — 저장 전엔 서버에 아무것도 없음. [저장] = PATCH(바뀐 칸만) → 새 버전(저장됨, 통화엔 아직 안 씀)
  * 음성 세부 조절 창은 저장 버튼 없이 바로 반영(작성 중에) → 수정 화면 [저장]으로 같이 저장
  * 저장 안 한 내용이 있으면 [취소] · 다른 화면 이동 · 탭 닫기를 한 번 막음 */
 export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: number) => void) {
   const qc = useQueryClient()
-  const { me } = useSession()
+  const options = useVoiceOptions()
   const [text, setText] = useState(target.prompt)
   const [voice, setVoice] = useState(target.voice)
   const [voiceOpen, setVoiceOpen] = useState(target.voiceFirst)
@@ -61,13 +45,17 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const dirty = promptChanged || voiceChanged
 
   const mutation = useMutation({
+    // 바뀐 칸만 보냄 — 안 바꾼 음성 값(서버의 정확한 숫자 속도 등)은 그대로 둠
     mutationFn: () =>
       savePromptVersion(target.personaSeq, {
-        prompt: text,
-        voice,
-        basedOn: target.basedOn,
-        author: me?.loginId ?? '',
-        summary: summaryOf(promptChanged, target.voice, voice),
+        expectedVersion: target.basedOn,
+        prompt: promptChanged ? text : null,
+        voice: {
+          ...(voice.voice !== target.voice.voice && { voice: voice.voice }),
+          ...(voice.speed !== target.voice.speed && { speed: voice.speed }),
+          ...(voice.waitTime !== target.voice.waitTime && { waitTime: voice.waitTime }),
+        },
+        rateRange: options.rateRange,
       }),
     onSuccess: async (version) => {
       await qc.invalidateQueries({ queryKey: personaQueries.all() })
@@ -107,18 +95,12 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     voiceTitle: `v${target.saveTo} ${DRAFT_TAG}`,
     voiceChanged, // '음성 설정 바뀜' 태그
     voice,
-    voiceOptions: VOICES.map((x) => ({ value: x, label: x })),
+    voiceOptions: options.voiceOptions(voice.voice),
     setVoiceName: (x: string) => setVoice((v) => ({ ...v, voice: x })),
-    speedOptions: (Object.keys(SPEED_CHOICE) as Speed[]).map((k): Option<Speed> => ({
-      value: k,
-      label: SPEED_CHOICE[k],
-    })),
-    setSpeed: (speed: Speed) => setVoice((v) => ({ ...v, speed })),
-    waitOptions: (Object.keys(WAIT_CHOICE) as WaitTime[]).map((k): Option<WaitTime> => ({
-      value: k,
-      label: WAIT_CHOICE[k],
-    })),
-    setWaitTime: (waitTime: WaitTime) => setVoice((v) => ({ ...v, waitTime })),
+    speedOptions: options.speedOptions(voice.speed),
+    setSpeed: (speed: VoiceSettings['speed']) => setVoice((v) => ({ ...v, speed })),
+    waitOptions: options.waitOptions(voice.waitTime),
+    setWaitTime: (waitTime: VoiceSettings['waitTime']) => setVoice((v) => ({ ...v, waitTime })),
     sample: SAMPLE,
     canPreview: typeof window !== 'undefined' && 'speechSynthesis' in window,
     preview: () => {
@@ -130,9 +112,13 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
     },
 
     saveLabel: mutation.isPending ? '저장 중…' : `저장 → v${target.saveTo}`,
-    canSave: dirty && text.trim() !== '' && !mutation.isPending,
+    canSave: dirty && text.trim() !== '' && !options.isPending && !mutation.isPending,
     save: () => mutation.mutate(),
-    saveError: mutation.error?.message ?? null,
+    saveError: !mutation.error
+      ? null
+      : mutation.error instanceof ApiError && mutation.error.status === 409
+        ? '그새 다른 관리자가 이 페르소나를 저장했습니다. 고친 글을 복사해 두고 [취소] 후 최신 버전에서 다시 수정해 주세요.'
+        : '저장하지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
 
     // [취소]: 바뀐 게 없으면 바로 닫고, 있으면 확인 창. 화면 이동이 막혔을 때도 같은 창
     cancel: () => (dirty ? setAskingCancel(true) : onDone()),

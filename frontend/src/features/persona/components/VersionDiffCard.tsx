@@ -1,9 +1,9 @@
-import { Button, Select, Tag } from '@/shared/ui'
+import { Button, Tag } from '@/shared/ui'
 import type { CompareView } from '@/features/persona/hooks/usePersonaPage'
 
 // 07 버전 비교 (와이어프레임 07_페르소나관리_버전비교, 10/31) — 프롬프트 카드 자리에. 오른쪽 패널은 그대로
-// 제목 줄 v6 [적용 중] → [v8 ▾] · [비교 닫기] → 머리줄 v6 | v8 | 프롬프트 · '빠진 줄 n' '더한 줄 n'
-// 앞(적용 버전)은 고정, 드롭다운은 비교할 버전 (10/31 결정 — 와이어프레임은 앞쪽이 드롭다운)
+// 제목 줄 v6 [적용 중] → v7 [저장됨] · [비교 닫기] → 머리줄 v6 | v7 | 프롬프트 · '빠진 줄 n' '더한 줄 n'
+// 마지막 적용 버전 ↔ 최신 저장본만 (11/02 결정 — 고르는 드롭다운 없앰)
 // 줄 = 앞 번호 | 뒤 번호 | −/+ | 글. 빠진 줄 빨간 바탕, 더한 줄 옅은 남색 바탕
 const ROW = {
   same: '',
@@ -11,16 +11,8 @@ const ROW = {
   add: 'bg-action-soft',
 } as const
 
-export function VersionDiffCard({
-  view,
-  onTarget,
-  onClose,
-}: {
-  view: CompareView
-  onTarget: (version: string) => void
-  onClose: () => void
-}) {
-  const targetLabel = `v${view.target}`
+export function VersionDiffCard({ view, onClose }: { view: CompareView; onClose: () => void }) {
+  const targetLabel = view.target
   return (
     <section className="flex h-full min-h-0 flex-col gap-4 rounded-xl bg-surface p-7 ring-1 ring-line ring-inset">
       <div className="flex items-center gap-4">
@@ -30,7 +22,10 @@ export function VersionDiffCard({
           <Tag kind="blue">{view.baseTag}</Tag>
         </span>
         <span className="text-body text-sub">→</span>
-        <Select name="비교할 버전" options={view.options} value={view.target} onChange={onTarget} />
+        <span className="flex items-center gap-2 text-body font-bold">
+          {view.target}
+          {view.targetTag && <Tag kind="outline">{view.targetTag}</Tag>}
+        </span>
         <Button className="ml-auto" onClick={onClose}>
           비교 닫기
         </Button>
