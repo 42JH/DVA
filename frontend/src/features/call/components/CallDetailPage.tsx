@@ -78,9 +78,7 @@ export function CallDetailPage() {
         />
       </div>
 
-      {vm.orderId !== null && (
-        <OrderDetailModal orderId={vm.orderId} onClose={vm.closeOrder} onEdit={vm.editOrder} />
-      )}
+      {vm.orderId !== null && <OrderDetailModal orderId={vm.orderId} onClose={vm.closeOrder} />}
     </div>
   )
 }
