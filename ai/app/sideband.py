@@ -211,19 +211,20 @@ async def run_tool(call: Call, conn, item: dict) -> None:
             call.add_error("도구 결과 전송 실패")
 
 
-async def wait_quiet(call: Call) -> None:
-    """요청 뒤에 상담원 말(출력 받아쓰기)이 한 번 이상 나오고, 그 말이 실제로 다 나간 뒤 설정한 시간만큼 멈출 때까지
-    (최대 대기 있음). 음성 출력 이벤트는 말하지 않을 때도 와서 기준으로 쓰지 않고, 출력 받아쓰기는 음성보다 먼저 와서
-    받은 시각이 아니라 끝 시각(세션 타임라인)으로 본다. 받은 시각으로 재면 인사가 다 나가기 전에 끊긴다."""
+async def wait_quiet(call: Call, since: float) -> None:
+    """마무리 안내(진행 상태)를 since 뒤에 음성 모델에 전한 다음 상담원 말(출력 받아쓰기)이 나오고, 그 말이 실제로 다 나간
+    뒤 설정한 시간만큼 멈출 때까지. 안내 전의 맞장구는 인사로 치지 않는다. 음성 출력 이벤트는 말하지 않을 때도 와서
+    기준으로 쓰지 않고, 받아쓰기는 음성보다 먼저 와서 받은 시각이 아니라 끝 시각(세션 타임라인)으로 본다.
+    최대 대기는 안내를 전한 때(못 전했으면 since)부터 재고 말하는 중에는 끊지 않는다. 요청부터 재면 인사가 늦게
+    시작될 때 중간에 잘린다(2026-11-01 통화들: "이용해 주셔서 감사합니다. 좋은"에서 끊김)."""
     cfg = call.cfg.call
-    requested = time.monotonic()
     while True:
         now = time.monotonic()
-        if now - requested >= cfg.hangup_max_wait_sec:
-            return
+        sent = call.progress_sent_at if call.progress_sent_at >= since else 0.0
         end = call.agent_deltas[-1][2] if call.agent_deltas else None
         played = call.clock_offset is None or end is None or call.now_ms() - end >= cfg.hangup_silence_sec * 1000
-        if call.agent_text_at > requested and now - call.agent_text_at >= cfg.hangup_silence_sec and played:
+        quiet = now - call.agent_text_at >= cfg.hangup_silence_sec and played
+        if quiet and (sent and call.agent_text_at > sent or now - (sent or since) >= cfg.hangup_max_wait_sec):
             return
         await asyncio.sleep(POLL_SEC)
 
@@ -235,7 +236,7 @@ async def watch_end(call: Call, client, conn) -> None:
     refer = asyncio.create_task(call.refer_requested.wait())
     try:
         done, _ = await asyncio.wait({hangup, refer}, return_when=asyncio.FIRST_COMPLETED)
-        await wait_quiet(call)
+        await wait_quiet(call, call.end_requested_at)
         if refer in done:
             try:
                 await client.live.sessions.refer(call.session_id, target_uri=call.cfg.call.refer_target_uri)
@@ -244,8 +245,9 @@ async def watch_end(call: Call, client, conn) -> None:
                 log.exception("상담원 전환 실패 %s", call.session_id)
                 call.add_error("상담원 전환 실패")
             call.refer_failed = True
+            failed_at = time.monotonic()
             await send_progress(call, conn, speak=True)  # 고객 말 없이 보내는 안내: 말하게
-            await wait_quiet(call)
+            await wait_quiet(call, failed_at)
         await client.live.sessions.hangup(call.session_id)
     except asyncio.CancelledError:
         raise

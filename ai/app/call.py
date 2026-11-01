@@ -151,6 +151,8 @@ class Call:
         self.agent_text_at = 0.0  # 상담원 출력 받아쓰기 조각을 마지막으로 받은 시각(monotonic). 말하는 중인지 판단
         self.task: asyncio.Task | None = None
         self.last_progress = ""
+        self.progress_sent_at = 0.0  # 진행 상태(다음 할 말)를 음성 모델에 전한 시각(monotonic). 마무리 인사 대기의 기준
+        self.end_requested_at = 0.0  # 종료·상담원 연결을 요청한 시각(monotonic)
         self.refer_failed = False
         # 고객 말 판별(app/listener.py, §2.5)
         self.heard_rev = 0  # 고객 말 조각이 올 때마다 1 증가(판별 리비전): 늦게 온 옛 판별은 버린다
@@ -607,9 +609,11 @@ class Call:
     # --- 도구가 요청하는 통화 조작(실행은 sideband 쪽) ---
 
     def request_hangup(self) -> None:
+        self.end_requested_at = time.monotonic()
         self.hangup_requested.set()
 
     def request_refer(self) -> None:
+        self.end_requested_at = time.monotonic()
         self.refer_requested.set()
 
     # --- 관제 기록 ---
