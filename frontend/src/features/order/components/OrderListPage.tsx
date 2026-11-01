@@ -16,8 +16,8 @@ import { OrderPartyCell } from './OrderPartyCell'
 
 // 03 주문 내역 (와이어프레임 03_주문내역, 10/31)
 // 1줄 검색(이름 · 전화번호 · 주소) + 날짜 칸 + [CSV 내보내기] [주문 추가] → 2줄 상태 칩 → 카드 '주문 목록 n건'
-// 줄 = 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
-// 줄을 누르면 주문 상세 창 (shared/order 공용 — 06 '주문 보기'와 같은 창). '접수 중' 줄은 아직 주문이 없어 안 열림
+// 줄 = 배송 상세 하나(보내는 분 1 + 받는 분 1, 11/01): 상태 | 접수 시각 | 보내는 분 | 받는 분 | 수거 희망 일시 | 품목
+// 줄을 누르면 주문 상세 창 (shared/order 공용 — 06 '주문 보기'와 같은 창). 접수 중 · 취소도 열림 (11/01)
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
 export function OrderListPage() {
   const vm = useOrderList()
@@ -107,9 +107,8 @@ export function OrderListPage() {
         }
         columns={columns}
         rows={vm.rows}
-        rowKey={(r) => r.orderSeq}
+        rowKey={(r) => r.key}
         onRowClick={vm.openOrder}
-        canClick={(r) => r.canOpen}
         loading={vm.isLoading}
         empty={vm.listError ?? (vm.q ? '해당하는 주문이 없습니다.' : '주문 내역이 없습니다.')}
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
