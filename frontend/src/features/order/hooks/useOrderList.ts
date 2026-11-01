@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { pageCount } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
@@ -6,7 +6,12 @@ import { todayYmd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
-import { ORDER_STATUS_LABEL, ORDER_STATUS_TAG, STATUS_GROUP_LABEL } from '@/features/order/labels'
+import {
+  ORDER_STATUS_LABEL,
+  ORDER_STATUS_TAG,
+  STATUS_GROUP_LABEL,
+  orderErrorText,
+} from '@/features/order/labels'
 import { ORDER_CSV_HEADER, toOrderCsvRow } from '@/features/order/api/orderCsv'
 import { parcelRows, type ParcelRow } from '@/features/order/api/parcelRows'
 import {
@@ -17,6 +22,8 @@ import {
   type ListParty,
   type OrderListQuery,
   type StatusGroup,
+  cancelOrder,
+  retryOrder,
 } from '@/features/order/api/orderApi'
 
 export interface PartyCell {
@@ -43,7 +50,16 @@ type Modal =
   | { kind: 'add' }
   | { kind: 'detail'; id: number; parcelSeq: number | null }
   | { kind: 'edit'; id: number; parcelSeq: number | null } // 끝나면 같은 줄의 상세로 돌아가려고 같이 기억
+  | { kind: 'cancel'; id: number; parcelSeq: number | null; parcelCount: number } // 취소 확인 창 (상세 창 대신)
+  | { kind: 'retry'; id: number; parcelSeq: number | null } // 다시 접수 확인 창
   | null
+
+// 다시 접수 결과 (응답 status) → 목록 위 안내. 201/200이어도 다시 실패할 수 있음
+const RETRY_RESULT: Partial<Record<string, string>> = {
+  ACCEPTED: '디버에 다시 접수했습니다.',
+  SUBMITTING: '디버 접수를 처리하는 중이에요. 잠시 뒤 목록에서 확인해 주세요.',
+  SUBMISSION_FAILED: '다시 접수했지만 또 실패했습니다. 백엔드 담당자에게 알려 주세요.',
+}
 
 const PAGE_SIZE = 20 // 주문 20개 — 상세가 여러 개면 줄은 더 많아짐
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
@@ -100,6 +116,28 @@ export function useOrderList() {
     group: status,
   }
   const list = useQuery(orderQueries.list(query, page, PAGE_SIZE))
+  const qc = useQueryClient()
+  const [notice, setNotice] = useState<string | null>(null) // 취소 · 다시 접수 결과 한 줄
+
+  // 취소 · 다시 접수 — 확인 창 [확인] → 요청 → 목록 · 상세 다시 받기 → 그 줄의 상세로 돌아감
+  const action = useMutation({
+    mutationFn: async (m: Extract<Modal, { kind: 'cancel' | 'retry' }>) => {
+      if (m.kind === 'cancel') {
+        await cancelOrder(m.id)
+        return `주문 ${m.id}번을 취소했습니다.`
+      }
+      const res = await retryOrder(m.id)
+      return (
+        RETRY_RESULT[res.data?.status ?? ''] ??
+        '다시 접수를 요청했습니다. 목록에서 상태를 확인해 주세요.'
+      )
+    },
+    onSuccess: async (message, m) => {
+      await qc.invalidateQueries({ queryKey: orderQueries.all() })
+      setNotice(message)
+      setModal({ kind: 'detail', id: m.id, parcelSeq: m.parcelSeq })
+    },
+  })
   const total = list.data?.total_count ?? 0 // 주문 수 (줄 수 아님)
 
   const rows: OrderListRow[] = (list.data?.data ?? []).flatMap(parcelRows).map((r) => ({
@@ -159,11 +197,41 @@ export function useOrderList() {
       setModal({ kind: 'detail', id: r.orderSeq, parcelSeq: r.parcelSeq }),
     editOrder: (id: number) =>
       setModal((m) => ({ kind: 'edit', id, parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null })), // 상세 창 [수정]
-    // 수정 저장 · 취소 → 수정하던 그 주문 상세로
-    backToDetail: () =>
+    // 수정 저장 · 취소 → 수정하던 그 주문 상세로. notice = 접수 중단 주문 접수 결과 (목록 위 한 줄)
+    backToDetail: (notice?: string) => {
+      if (notice) setNotice(notice)
       setModal((m) =>
         m?.kind === 'edit' ? { kind: 'detail', id: m.id, parcelSeq: m.parcelSeq } : null,
-      ),
+      )
+    },
     closeModal: () => setModal(null),
+    // 상세 창 [주문 취소] · [다시 접수] → 확인 창 (상세 창 대신 띄움 — 겹치면 Esc가 둘 다 닫음)
+    askCancel: (id: number, parcelCount: number) =>
+      setModal((m) => ({
+        kind: 'cancel',
+        id,
+        parcelCount,
+        parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null,
+      })),
+    askRetry: (id: number) =>
+      setModal((m) => ({
+        kind: 'retry',
+        id,
+        parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null,
+      })),
+    // 확인 창 [취소] → 그 상세로
+    backFromConfirm: () =>
+      setModal((m) =>
+        m?.kind === 'cancel' || m?.kind === 'retry'
+          ? { kind: 'detail', id: m.id, parcelSeq: m.parcelSeq }
+          : m,
+      ),
+    confirmAction: () =>
+      (modal?.kind === 'cancel' || modal?.kind === 'retry') && action.mutate(modal),
+    acting: action.isPending,
+    actionError: action.error
+      ? orderErrorText(action.error, modal?.kind === 'cancel' ? '취소' : '접수')
+      : null,
+    notice,
   }
 }

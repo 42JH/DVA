@@ -5,17 +5,21 @@ import { useOrderDetail } from './useOrderDetail'
 // 주문 상세 팝업 (디자인 03_주문내역_주문상세 · _전화 = 06 '주문 보기'와 같은 창, 10/30 공통으로 올림)
 // 보내는 분 | 받는 분 → 접수 정보 → 관련 통화(누르면 창을 닫고 그 통화의 06) · [닫기] [수정]. 읽기 전용
 // 쓰는 법: {orderId && <OrderDetailModal orderId={orderId} onClose={() => setOrderId(null)} onEdit={...} />}
-//   onEdit을 넘긴 곳에서만 [수정]이 보임 (취소된 주문은 늘 없음). 주문 수정 화면은 03(팀원) 몫
+//   onEdit · onCancel · onRetry를 넘긴 곳에서만 그 버튼이 보임 (06 통화 상세는 [수정]만). 상태에 따라 취소(결제 전) · 다시 접수(접수 실패)
 export function OrderDetailModal({
   orderId,
   parcelSeq,
   onClose,
   onEdit,
+  onCancel,
+  onRetry,
 }: {
   orderId: number
   parcelSeq?: number | null // 03 목록에서 누른 배송 상세 (없으면 첫 상세)
   onClose: () => void
   onEdit?: (orderSeq: number) => void
+  onCancel?: (orderSeq: number, parcelCount: number) => void // 결제 전 주문만 보임 (11/01)
+  onRetry?: (orderSeq: number) => void // 디버 접수 실패만 보임 (11/01)
 }) {
   const navigate = useNavigate()
   const { pathname } = useLocation() // 06에서 열렸으면 지금 보는 통화는 링크 대신 글자 (같은 화면이 기록에 또 쌓이지 않게)
@@ -39,7 +43,21 @@ export function OrderDetailModal({
       onClose={onClose}
       footer={
         <>
+          {order?.canCancel && onCancel && (
+            <Button
+              kind="dangerLine"
+              className="mr-auto"
+              onClick={() => onCancel(order.orderSeq, order.parcelCount)}
+            >
+              주문 취소
+            </Button>
+          )}
           <Button onClick={onClose}>닫기</Button>
+          {order?.canRetry && onRetry && (
+            <Button kind="primary" onClick={() => onRetry(order.orderSeq)}>
+              다시 접수
+            </Button>
+          )}
           {order?.canEdit && onEdit && (
             <Button kind="primary" onClick={() => onEdit(order.orderSeq)}>
               수정

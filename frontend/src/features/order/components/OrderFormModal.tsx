@@ -19,7 +19,7 @@ export function OrderFormModal({
   parcelSeq?: number | null // 수정: 목록에서 누른 배송 상세
   notice?: string | null // 수정: 버전 충돌로 최신 값을 다시 채웠다는 안내
   onConflict?: () => void
-  onDone: () => void // 접수 · 저장 성공
+  onDone: (notice?: string) => void // 접수 · 저장 성공 (notice = 접수 중단 주문 접수 결과)
   onClose: () => void
 }) {
   const vm = useOrderForm(onDone, order, parcelSeq, onConflict)
@@ -67,6 +67,12 @@ export function OrderFormModal({
           </>
         ) : (
           <>
+            {!vm.submitError && vm.missing.length > 0 && (
+              // 접수 중단 주문: 무엇을 채워야 [접수]가 켜지는지
+              <p className="mr-auto self-center text-label text-sub">
+                접수하려면: {vm.missing.join(' · ')}
+              </p>
+            )}
             {vm.submitError && (
               <p role="alert" className="mr-auto self-center text-label text-danger">
                 {vm.submitError}
@@ -74,13 +80,7 @@ export function OrderFormModal({
             )}
             <Button onClick={onClose}>취소</Button>
             <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
-              {vm.isSubmitting
-                ? vm.isEdit
-                  ? '저장 중…'
-                  : '접수 중…'
-                : vm.isEdit
-                  ? '저장'
-                  : '접수'}
+              {vm.isSubmitting ? `${vm.submitLabel} 중…` : vm.submitLabel}
             </Button>
           </>
         )
@@ -132,8 +132,8 @@ export function OrderFormModal({
               error={vm.priceError}
               onChange={(e) => vm.setDeclaredValue(e.target.value)}
             />
-            {!vm.isEdit && (
-              // 배송비 — 수기 접수는 요청자가 입력(자동 견적 API 없음, 명세 4.4). 수정 창에선 그대로 유지라 안 보임
+            {vm.showFee && (
+              // 배송비 — 요청자가 입력(자동 견적 API 없음, 명세 4.4). 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지)
               <TextField
                 label="배송비"
                 inline

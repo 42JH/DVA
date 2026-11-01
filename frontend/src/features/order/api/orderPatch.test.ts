@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import type { OrderDetail } from '@/shared/order/orderApi'
 import type { OrderInput } from './orderApi'
-import { buildCustomerPatch, buildOrderPatch } from './orderPatch'
+import { buildCustomerPatch, buildOrderPatch, submitMissing } from './orderPatch'
 
 const order: OrderDetail = {
   orderSeq: 7,
@@ -196,6 +196,65 @@ assert.deepEqual(
     sender: { ...order.sender, name: '강도현', detailAddress: '7층' },
   }),
   { name: '강도현' },
+)
+
+// 배송비 칸(접수 중단만): 바뀌면 notifiedPrice
+assert.deepEqual(
+  buildOrderPatch({ ...order, notifiedPrice: null }, 101, { ...same, shippingFee: 3500 }).patch
+    ?.parcels,
+  [{ orderParcelSeq: 101, notifiedPrice: 3500 }],
+)
+assert.equal(
+  buildOrderPatch({ ...order, notifiedPrice: 3500 }, 101, { ...same, shippingFee: 3500 }).patch,
+  null,
+)
+
+// 접수 중단 주문 접수 조건
+const full = { jibunAddress: '지번', dongName: '동', postalCode: '01234', hasCoords: true }
+const ready: OrderDetail = {
+  ...order,
+  sender: { ...order.sender, ...full },
+  receiver: { ...order.receiver, ...full },
+}
+assert.deepEqual(
+  submitMissing(ready, {
+    ...same,
+    sender: ready.sender,
+    receiver: ready.receiver,
+    shippingFee: 3500,
+  }),
+  [],
+)
+// AI가 모으다 끊긴 주소(좌표 없음) + 배송비 없음 + 가액 없음
+assert.deepEqual(
+  submitMissing(
+    { ...ready, receiver: { ...ready.receiver, hasCoords: false } },
+    {
+      ...same,
+      sender: ready.sender,
+      receiver: { ...ready.receiver, hasCoords: false },
+      declaredValue: null,
+      shippingFee: null,
+    },
+  ),
+  ['받는 분 주소(다시 검색)', '물품 가액', '배송비'],
+)
+// 다시 검색해 고르면 주소는 통과
+assert.deepEqual(
+  submitMissing(
+    { ...ready, receiver: { ...ready.receiver, hasCoords: false } },
+    {
+      ...same,
+      sender: ready.sender,
+      receiver: {
+        ...ready.receiver,
+        roadAddress: '새 주소',
+        picked: { jibunAddress: 'j', dongName: 'd', postalCode: '01234' },
+      },
+      shippingFee: 3500,
+    },
+  ),
+  [],
 )
 
 console.log('orderPatch OK')

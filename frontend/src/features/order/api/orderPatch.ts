@@ -61,6 +61,8 @@ export function buildOrderPatch(
   if ((input.request ?? '') !== (order.clientComment ?? ''))
     parcel.clientComment = input.request ?? ''
   if (input.declaredValue !== order.itemPrice) parcel.itemPrice = input.declaredValue
+  if (input.shippingFee !== undefined && input.shippingFee !== (order.notifiedPrice ?? null))
+    parcel.notifiedPrice = input.shippingFee // 접수 중단 주문만 칸이 있음
 
   const patch: OrderPatch = { expectedVersion: order.version ?? 0 }
   if (Object.keys(parcel).length)
@@ -116,4 +118,27 @@ export function buildCustomerPatch(order: OrderDetail, input: OrderInput): Custo
       }
   }
   return out.name !== undefined || out.address ? out : null
+}
+
+/** 접수 중단 주문을 접수하려면 모자란 것 (명세 API-16: 양쪽 완성 주소 · 물품 · 물품 가액 · 상세별 배송비)
+ * 빈 배열이면 [접수] 가능. 주소는 다시 검색해 골랐거나(picked) 원래 주소가 완성(지번 · 동 · 우편번호 · 좌표)이어야 함 */
+export function submitMissing(order: OrderDetail, input: OrderInput): string[] {
+  const addressOk = (before: Party, after: PartyInput) =>
+    after.picked
+      ? after.roadAddress !== ''
+      : after.roadAddress === before.roadAddress &&
+        !!(before.jibunAddress && before.dongName && before.postalCode && before.hasCoords)
+  const out: string[] = []
+  for (const [label, before, after] of [
+    ['보내는 분', order.sender, input.sender],
+    ['받는 분', order.receiver, input.receiver],
+  ] as const) {
+    if (!after.name || !after.phoneNumber) out.push(`${label} 이름 · 전화번호`)
+    if (!addressOk(before, after)) out.push(`${label} 주소(다시 검색)`)
+  }
+  const i = input.items
+  if (!(i.document || i.small || i.medium || i.big || i.other)) out.push('품목')
+  if (input.declaredValue === null) out.push('물품 가액')
+  if (!input.shippingFee || input.shippingFee < 1) out.push('배송비')
+  return out
 }

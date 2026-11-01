@@ -17,6 +17,9 @@ export interface OrderView {
   clientComment: string
   relatedCalls: { key: string; callSessionSeq: number; time: string; tag: string; text: string }[]
   canEdit: boolean // 취소된 주문은 [수정] 없음
+  canCancel: boolean // 결제 전(접수 중단 · 결제 대기)만 취소 가능 (명세 4.5, 11/01 결정)
+  canRetry: boolean // 디버 접수 실패만 [다시 접수] (11/01 결정)
+  parcelCount: number // 취소 확인 창 '배송 n건이 모두 취소' — 취소 안 된 상세 수
 }
 
 /** 주문 하나 불러와 화면용 값으로 (shared/auth처럼 여러 기능이 쓰는 공통 훅이라 useQuery를 여기서). id가 null이면 안 부름
@@ -50,6 +53,7 @@ export function pickParcel(
     items: p.items,
     itemPrice: p.itemPrice,
     clientComment: p.clientComment,
+    notifiedPrice: p.notifiedPrice,
     cancelled: o.cancelled || p.cancelled, // 이 상세만 취소돼도 [수정] 없음 · '주문 취소' 태그
     position: list.length > 1 ? `배송 ${i + 1}/${list.length}` : undefined,
   }
@@ -88,6 +92,9 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
       text: RELATED_CALL_LABEL[c.kind].text,
     })),
     canEdit: !o.cancelled,
+    canCancel: o.status === 'COLLECTING' || o.status === 'notPaid',
+    canRetry: o.status === 'SUBMISSION_FAILED',
+    parcelCount: o.parcels?.filter((p) => !p.cancelled).length || 1,
   }
 }
 
