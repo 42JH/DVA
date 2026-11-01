@@ -14,13 +14,13 @@ import { useAdminList, type AdminAction, type AdminRow } from '@/features/admin/
 
 // 10 관리자 권한 관리 (Figma 10, 11/01) — 건수 탭 → 표(이름 · 아이디 · 권한 · 가입 신청일 · 줄 끝) → 쪽 번호
 // 디자인과 다른 점 (11/01 결정): 전화 · 이메일 → 아이디 · 권한(서버에 없음) · '슈퍼바이저만' 안내 뺌(화면 자체가 최고 관리자 전용)
-// 비활성화 · 활성화는 API가 없어 ⋮ 메뉴에서 '준비 중'으로 꺼 둠 (backend-todo 9)
+// 비활성화(확인 창) · 활성화(바로)는 11/01 백엔드 반영으로 연결 — 처음엔 API가 없어 '준비 중'으로 꺼 뒀었음
 
 // ⋮ 메뉴 항목 모양 — 무엇을 할 수 있는지는 훅(actions), 모양 · 순서만 여기
 const MENU: Record<AdminAction, Omit<MoreMenuItem, 'key' | 'onSelect'>> = {
   reset: { label: '비밀번호 초기화', icon: 'key' },
-  deactivate: { label: '비활성화', icon: 'user', soon: true },
-  activate: { label: '활성화', icon: 'user', soon: true },
+  deactivate: { label: '비활성화', icon: 'user' },
+  activate: { label: '활성화', icon: 'user' },
   delete: { label: '삭제', icon: 'trash', danger: true },
 }
 
@@ -37,6 +37,13 @@ const CONFIRM = {
     warn: '삭제하면 이 계정으로 더 이상 로그인할 수 없습니다.',
     okLabel: '삭제',
     okKind: 'danger',
+  },
+  // 비활성화는 다시 켤 수 있어 남색, 대신 '바로 로그아웃'을 알림 (11/01)
+  deactivate: {
+    title: '관리자 계정을 비활성화할까요?',
+    note: '비활성화하면 이 계정은 바로 로그아웃되고, 다시 활성화할 때까지 로그인할 수 없습니다.',
+    okLabel: '비활성화',
+    okKind: 'primary',
   },
   reset: {
     title: '비밀번호를 초기화할까요?',
@@ -101,7 +108,7 @@ export function AdminPage() {
               items={r.actions.map((a) => ({
                 key: a,
                 ...MENU[a],
-                onSelect: () => (a === 'reset' || a === 'delete') && vm.ask(a, r.id),
+                onSelect: () => (a === 'activate' ? vm.activate(r.id) : vm.ask(a, r.id)),
               }))}
             />
           </span>

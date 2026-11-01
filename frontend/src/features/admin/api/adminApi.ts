@@ -39,9 +39,11 @@ export const adminQueries = {
     }),
 }
 
-/** 가입 승인 — 대상은 PENDING이어야 함 (아니면 409). status는 PENDING→ACTIVE만 허용 */
-export const approveAdmin = (id: number): Promise<void> =>
-  api.patch(`/admins/${id}`, { body: { status: 'ACTIVE' } })
+/** 상태 바꾸기 — PATCH /admins/{id} { status } (204)
+ * 가입 승인 = PENDING → ACTIVE, 비활성화 · 활성화 = OPERATOR · SUPERVISOR의 ACTIVE ↔ INACTIVE (11/01 백엔드 반영)
+ * 최고 관리자는 서버가 거절 · 비활성화하면 대상의 모든 세션이 끊김(재활성화해도 이전 세션은 복구 안 됨) */
+export const setAdminStatus = (id: number, status: 'ACTIVE' | 'INACTIVE'): Promise<void> =>
+  api.patch(`/admins/${id}`, { body: { status } })
 
 /** 비밀번호 초기화 — 본문 없음. 서버가 초기 비밀번호(dva1234)로 바꾸고 대상의 세션을 끊음 */
 export const resetAdminPassword = (id: number): Promise<void> => api.patch(`/admins/${id}/password`)
