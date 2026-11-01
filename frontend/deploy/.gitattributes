@@ -1,0 +1,2 @@
+# 서버(리눅스)에서 도는 파일 — Windows에서 받아도 LF 유지 (CRLF면 bash가 '\r' 오류)
+* text eol=lf
