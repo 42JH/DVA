@@ -271,12 +271,19 @@ class Call:
         self.load_pins()
         self.set_pin_role("destination")
 
-    def drop_offers(self) -> None:
-        """제안한 항목이 기록되면(고객이 제안에 답하지 않고 새 값을 말함) 그 제안은 사라진다."""
-        if self.order.has("sender_address"):
+    async def sync_asking(self) -> None:
+        """값이 기록된 뒤(어느 경로로든: 값 기록·주소록 찾기·제안 답) 질문을 정하는 보조 상태를 값에 맞춘다. 질문은 늘
+        빠진 항목만 묻는다: 제안·주소록 찾기 중 표시는 그 항목이 채워지면 사라지고, 주소록 찾기에서 들어 둔 이름·장소는
+        받는 분 정보로 옮긴다(2026-11-01 통화: 이름은 주소록 찾기로, 주소는 값 기록으로 들어와 이름이 옮겨지지 않고
+        "받으시는 분 주소를 말씀해 주세요"만 되풀이)."""
+        o = self.order
+        if o.has("sender_address"):
             self.origin_offer = None
-        if self.order.has("receiver_name") or self.order.has("receiver_address"):
+        if o.has("receiver_name") or o.has("receiver_address"):
             self.dest_offer = None
+            if self.pin_ask or self.dest_said:  # 주소록 찾기 도중에 받는 분 값이 직접 기록됨: 들어 둔 나머지를 옮기고 끝낸다
+                await self.carry_dest_said()
+                self.pin_offer, self.pin_candidates = None, []
 
     def use_place(self, role: str, place: Place) -> None:
         """저장된 배송지(또는 앞 택배)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
