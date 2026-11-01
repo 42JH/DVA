@@ -149,6 +149,17 @@ test('persona creation preserves prompt and full settings in an inactive immutab
   assert.equal(v.applicationId, null);
   const detail = await data(await call('GET', `/api/personas/${v.aiPersonaSeq}`));
   assert.equal(detail.latestVersion.aiPersonaVersionSeq, v.aiPersonaVersionSeq);
+  assert.deepEqual(detail.headVersion, detail.latestVersion);
+  assert.equal(detail.activeVersion, null);
+  assert.equal(detail.pendingVersion, null);
+  assert.equal(
+    (
+      await pool.query('SELECT head_version_seq FROM ai_personas WHERE ai_persona_seq=$1', [
+        v.aiPersonaSeq,
+      ])
+    ).rows[0].head_version_seq,
+    v.aiPersonaVersionSeq,
+  );
   assert.equal(detail.activeVersionSeq, null);
   assert.equal(detail.pendingVersionSeq, null);
   await error(await call('POST', '/api/personas', body), 409, 'DUPLICATE_RESOURCE');
@@ -331,16 +342,7 @@ const selectRepresentative = (version, expectedVersion = version.version) =>
     aiPersonaVersionSeq: version.aiPersonaVersionSeq,
     expectedVersion,
   });
-const setHead = (version, expectedVersion = version.version) =>
-  call('PUT', `/api/personas/${version.aiPersonaSeq}/head`, {
-    aiPersonaVersionSeq: version.aiPersonaVersionSeq,
-    expectedVersion,
-  });
-async function activate(version, expectedVersion = version.version) {
-  const head = await setHead(version, expectedVersion);
-  if (head.status !== 200) return head;
-  return selectRepresentative(version, expectedVersion);
-}
+const activate = selectRepresentative;
 const report = (version, changes = {}) =>
   serviceCall('POST', '/api/ai/config/apply-result', {
     aiPersonaVersionSeq: version.aiPersonaVersionSeq,
@@ -435,14 +437,14 @@ test('activation stays pending until the AI acknowledges the new-call configurat
   );
 });
 
-test('saving ACTIVE preserves its HEAD and explicitly replacing a pending HEAD rejects late acknowledgments', async () => {
+test('saving advances HEAD without publishing and an explicit replacement rejects late acknowledgments', async () => {
   const active = await data(await runtime());
   const saved1 = await data(
     await patch(active.aiPersonaSeq, { expectedVersion: active.version, name: '수정 1' }),
   );
   assert.equal(saved1.status, 'INACTIVE');
   await error(await runtime('PENDING'), 404, 'NOT_FOUND');
-  const pending1 = await data(await setHead(saved1));
+  const pending1 = await data(await activate(saved1), 202);
   assert.equal(pending1.status, 'PENDING');
   assert.equal((await data(await runtime())).name, active.name);
   const saved2 = await data(
@@ -450,7 +452,7 @@ test('saving ACTIVE preserves its HEAD and explicitly replacing a pending HEAD r
   );
   assert.equal(saved2.status, 'INACTIVE');
   assert.equal((await data(await runtime('PENDING'))).applicationId, pending1.applicationId);
-  const pending2 = await data(await setHead(saved2));
+  const pending2 = await data(await activate(saved2), 202);
   assert.notEqual(pending1.applicationId, pending2.applicationId);
   assert.equal(
     (
@@ -560,20 +562,26 @@ test('two concurrent applications retain one pending and one active with atomic 
   );
 });
 
-test('old whole versions can be restored without overwriting their snapshots', async () => {
+test('old snapshots stay immutable but cannot be published or used as a stale editing base', async () => {
   const first = await create();
   const second = await data(
     await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '다른 이름', speakingRate: 0.8 }),
   );
   await data(await report(await data(await activate(second), 202)));
-  const restored = await data(await activate(first, 2), 202);
-  const active = await data(await report(restored));
-  assert.equal(active.version, 1);
-  assert.equal(active.name, first.name);
-  assert.equal(active.speakingRate, first.speakingRate);
+  await error(await activate(first, 2), 409, 'VERSION_CONFLICT');
+  await error(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 기준 수정' }),
+    409,
+    'VERSION_CONFLICT',
+  );
+  const history = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}/versions`));
+  assert.equal(history.length, 2);
+  assert.equal(history[1].name, first.name);
+  assert.equal(history[1].speakingRate, first.speakingRate);
   const detail = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
   assert.equal(detail.latestVersion.version, 2);
-  assert.equal(detail.activeVersionSeq, first.aiPersonaVersionSeq);
+  assert.equal(detail.headVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(detail.activeVersionSeq, second.aiPersonaVersionSeq);
 });
 
 test('failed audit on applied acknowledgment rolls the entire ACTIVE switch back', async () => {
@@ -656,8 +664,10 @@ test('application Swagger has separate admin request and service result security
   ]);
   assert.deepEqual(spec.paths['/api/ai/config/apply-result'].post.security, [{ bearer: [] }]);
   assert.ok(spec.paths['/api/personas/{id}/activate'].post.responses['202']);
-  assert.ok(spec.paths['/api/personas/{id}/head'].put.responses['200']);
-  assert.ok(spec.components.schemas.PersonaDto.properties.headVersion.nullable);
+  assert.equal(spec.paths['/api/personas/{id}/head'], undefined);
+  assert.notEqual(spec.components.schemas.PersonaDto.properties.headVersion.nullable, true);
+  assert.ok(spec.components.schemas.PersonaDto.properties.activeVersion.nullable);
+  assert.ok(spec.components.schemas.PersonaDto.properties.pendingVersion.nullable);
   assert.ok(spec.paths['/api/ai/config/apply-result'].post.responses['409']);
   assert.ok(!JSON.stringify(logs).includes(token));
 });
@@ -827,7 +837,7 @@ test('a new-call acknowledgment switches ACTIVE while old saved settings remain 
     await patch(original.aiPersonaSeq, { expectedVersion: 1, promptText: '새 통화용 프롬프트' }),
   );
   assert.equal(saved.status, 'INACTIVE');
-  const pending = await data(await setHead(saved));
+  const pending = await data(await activate(saved), 202);
   assert.equal(pending.status, 'PENDING');
   assert.equal((await data(await runtime())).aiPersonaVersionSeq, original.aiPersonaVersionSeq);
   const active = await data(await report(pending, { activeCallCount: 3 }));
@@ -848,57 +858,28 @@ test('a new-call acknowledgment switches ACTIVE while old saved settings remain 
   const oldCandidate = await data(
     await patch(original.aiPersonaSeq, { expectedVersion: 2, name: '대기 교체 전' }),
   );
-  const replaced = await data(await setHead(oldCandidate));
+  const replaced = await data(await activate(oldCandidate), 202);
   const newCandidate = await data(
     await patch(original.aiPersonaSeq, { expectedVersion: 3, name: '최신 대기' }),
   );
-  await data(await setHead(newCandidate));
+  await data(await activate(newCandidate), 202);
   await error(await report(replaced, { activeCallCount: 3 }), 409, 'VERSION_CONFLICT');
 });
 
-test('persona HEAD: saved versions and type heads are independent from the representative', async () => {
-  const a = await create(),
-    b = await create();
-  const unselected = await data(await call('GET', `/api/personas/${a.aiPersonaSeq}`));
-  assert.equal(unselected.headVersion, null);
-  await error(await selectRepresentative(a), 409, 'INVALID_STATE');
-  await data(await setHead(a));
-  await data(await report(await data(await activate(a), 202)));
-  const saved = await data(
-    await patch(a.aiPersonaSeq, { expectedVersion: 1, name: '저장만 한 v2' }),
+test('automatic HEAD: publish validates authority, current HEAD identity and stale editing bases', async () => {
+  const first = await create(),
+    other = await create();
+  const second = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '현재 HEAD' }),
   );
-  assert.equal(saved.status, 'INACTIVE');
-  await error(await runtime('PENDING'), 404, 'NOT_FOUND');
-  const detail = await data(await call('GET', `/api/personas/${a.aiPersonaSeq}`));
-  assert.equal(detail.latestVersion.version, 2);
-  assert.equal(detail.headVersion.aiPersonaVersionSeq, a.aiPersonaVersionSeq);
-  assert.equal(detail.headVersion.createdByAdminUserName, '설정 테스트 관리자');
-  await data(await setHead(b));
-  const b2 = await data(await patch(b.aiPersonaSeq, { expectedVersion: 1, name: '다른 유형 v2' }));
-  await data(await setHead(b2));
-  assert.equal((await data(await runtime())).aiPersonaVersionSeq, a.aiPersonaVersionSeq);
-  await error(await runtime('PENDING'), 404, 'NOT_FOUND');
-  const listed = await (await call('GET', '/api/personas?limit=100')).json();
-  assert.equal(listed.data.find((p) => p.aiPersonaSeq === a.aiPersonaSeq).headVersion.version, 1);
-  assert.equal(listed.data.find((p) => p.aiPersonaSeq === b.aiPersonaSeq).headVersion.version, 2);
-  await error(await selectRepresentative(saved), 409, 'VERSION_CONFLICT');
-  await data(await report(await data(await activate(b2), 202)));
-  const previous = await data(await call('GET', `/api/personas/${a.aiPersonaSeq}`));
-  assert.equal(previous.headVersion.aiPersonaVersionSeq, a.aiPersonaVersionSeq);
-  assert.equal(previous.activeVersionSeq, null);
-});
-
-test('persona HEAD: head changes validate ownership, authority and stale versions', async () => {
-  const a = await create(),
-    b = await create();
   for (const actor of [1, 2])
     await error(
       await call(
-        'PUT',
-        `/api/personas/${a.aiPersonaSeq}/head`,
+        'POST',
+        '/api/personas/' + first.aiPersonaSeq + '/activate',
         {
-          aiPersonaVersionSeq: a.aiPersonaVersionSeq,
-          expectedVersion: 1,
+          aiPersonaVersionSeq: second.aiPersonaVersionSeq,
+          expectedVersion: 2,
         },
         actor,
       ),
@@ -906,135 +887,145 @@ test('persona HEAD: head changes validate ownership, authority and stale version
       'FORBIDDEN',
     );
   await error(
-    await serviceCall('PUT', `/api/personas/${a.aiPersonaSeq}/head`, {
-      aiPersonaVersionSeq: a.aiPersonaVersionSeq,
-      expectedVersion: 1,
+    await serviceCall('POST', '/api/personas/' + first.aiPersonaSeq + '/activate', {
+      aiPersonaVersionSeq: second.aiPersonaVersionSeq,
+      expectedVersion: 2,
     }),
     403,
     'FORBIDDEN',
   );
-  await error(await setHead(a, 2), 409, 'VERSION_CONFLICT');
+  await error(await activate(first), 409, 'VERSION_CONFLICT');
+  await error(await activate(first, 2), 409, 'VERSION_CONFLICT');
   await error(
-    await call('PUT', `/api/personas/${a.aiPersonaSeq}/head`, {
-      aiPersonaVersionSeq: b.aiPersonaVersionSeq,
-      expectedVersion: 1,
+    await call('POST', '/api/personas/' + first.aiPersonaSeq + '/activate', {
+      aiPersonaVersionSeq: other.aiPersonaVersionSeq,
+      expectedVersion: 2,
     }),
     404,
     'NOT_FOUND',
   );
   await error(
-    await call('PUT', `/api/personas/${a.aiPersonaSeq}/head`, {
-      aiPersonaVersionSeq: a.aiPersonaVersionSeq,
-      expectedVersion: '1',
+    await call('POST', '/api/personas/' + first.aiPersonaSeq + '/activate', {
+      aiPersonaVersionSeq: second.aiPersonaVersionSeq,
+      expectedVersion: '2',
     }),
     400,
     'INVALID_REQUEST',
   );
-  const detail = await data(await call('GET', `/api/personas/${a.aiPersonaSeq}`));
-  assert.equal(detail.headVersion, null);
-});
-
-test('persona HEAD: changing the outgoing type does not cancel a representative handover', async () => {
-  const a = await create(),
-    b = await create();
-  await data(await report(await data(await activate(a), 202)));
-  const pendingB = await data(await activate(b), 202);
-  const savedA = await data(
-    await patch(a.aiPersonaSeq, { expectedVersion: 1, name: '보관할 A HEAD' }),
+  await error(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 편집' }),
+    409,
+    'VERSION_CONFLICT',
   );
-  assert.equal((await data(await setHead(savedA))).status, 'INACTIVE');
-  assert.equal((await data(await runtime('PENDING'))).applicationId, pendingB.applicationId);
-  assert.equal((await data(await runtime())).aiPersonaVersionSeq, a.aiPersonaVersionSeq);
-  await data(await report(pendingB));
-  const detail = await data(await call('GET', `/api/personas/${a.aiPersonaSeq}`));
-  assert.equal(detail.headVersion.aiPersonaVersionSeq, savedA.aiPersonaVersionSeq);
-  assert.equal(detail.activeVersionSeq, null);
+  await error(
+    await call('PUT', '/api/personas/' + first.aiPersonaSeq + '/head', {
+      aiPersonaVersionSeq: first.aiPersonaVersionSeq,
+      expectedVersion: 2,
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  const detail = await data(await call('GET', '/api/personas/' + first.aiPersonaSeq));
+  assert.equal(detail.headVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(detail.activeVersion, null);
+  assert.equal(detail.pendingVersion, null);
 });
 
-test('persona HEAD: restoring the already active HEAD cancels pending without losing ACTIVE', async () => {
+test('automatic HEAD: publish failure and replacement remain separate from later saves', async () => {
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
-  const saved = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '돌리기 전 v2' }),
+  const second = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '대기 v2' }),
   );
-  const pending = await data(await setHead(saved));
-  assert.equal(pending.status, 'PENDING');
-  const restored = await data(await setHead(first, 2));
-  assert.equal(restored.status, 'ACTIVE');
-  await error(await runtime('PENDING'), 404, 'NOT_FOUND');
-  assert.equal((await data(await runtime())).aiPersonaVersionSeq, first.aiPersonaVersionSeq);
+  const pending = await data(await activate(second), 202);
+  const third = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 2, name: 'HEAD v3' }),
+  );
+  await data(await report(pending, { result: 'FAILED', errorCode: 'APPLY_FAILED' }));
+  const detail = await data(await call('GET', '/api/personas/' + first.aiPersonaSeq));
+  assert.equal(detail.headVersion.aiPersonaVersionSeq, third.aiPersonaVersionSeq);
+  assert.equal(detail.activeVersion.aiPersonaVersionSeq, first.aiPersonaVersionSeq);
+  assert.equal(detail.activeVersion.createdByAdminUserName, '설정 테스트 관리자');
+  assert.equal(detail.pendingVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(detail.pendingVersion.applicationId, pending.applicationId);
+  assert.equal(detail.pendingVersion.applyErrorCode, 'APPLY_FAILED');
+  assert.equal(detail.activeVersionSeq, detail.activeVersion.aiPersonaVersionSeq);
+  assert.equal(detail.pendingVersionSeq, detail.pendingVersion.aiPersonaVersionSeq);
+  await error(await activate(second, 3), 409, 'VERSION_CONFLICT');
+  const replacement = await data(await activate(third), 202);
   await error(await report(pending), 409, 'VERSION_CONFLICT');
-  const before = (
-    await pool.query(
-      "SELECT count(*) FROM audit_logs WHERE action='PERSONA_HEAD_CHANGED' AND target_seq=$1",
-      [first.aiPersonaVersionSeq],
-    )
-  ).rows[0].count;
-  await data(await setHead(first, 2));
-  assert.equal(
-    (
-      await pool.query(
-        "SELECT count(*) FROM audit_logs WHERE action='PERSONA_HEAD_CHANGED' AND target_seq=$1",
-        [first.aiPersonaVersionSeq],
-      )
-    ).rows[0].count,
-    before,
-  );
+  await data(await report(replacement));
 });
 
-test('persona HEAD: audit failure rolls back both the head and its queued application', async () => {
+test('automatic HEAD: a failed save rolls back its version and stored HEAD without touching publish', async () => {
   const first = await create();
   await data(await report(await data(await activate(first), 202)));
-  const saved = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '실패시 복원' }),
+  const second = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: 'HEAD v2' }),
   );
+  const pending = await data(await activate(second), 202);
   const { AuditService } = require('../dist/audit/audit.service');
   const audit = app.get(AuditService),
     original = audit.recordSuccess;
   audit.recordSuccess = async (event, client) => {
-    if (event.action === 'PERSONA_APPLY_REQUESTED') throw new Error('test-only failure');
+    if (event.action === 'PERSONA_UPDATED') throw new Error('test-only failure');
     return original.call(audit, event, client);
   };
   try {
-    await error(await setHead(saved), 500, 'INTERNAL_ERROR');
+    await error(
+      await patch(first.aiPersonaSeq, { expectedVersion: 2, name: '실패 v3' }),
+      500,
+      'INTERNAL_ERROR',
+    );
   } finally {
     audit.recordSuccess = original;
   }
-  const detail = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
-  assert.equal(detail.headVersion.aiPersonaVersionSeq, first.aiPersonaVersionSeq);
+  const detail = await data(await call('GET', '/api/personas/' + first.aiPersonaSeq));
+  assert.equal(detail.headVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
   assert.equal(detail.activeVersionSeq, first.aiPersonaVersionSeq);
-  await error(await runtime('PENDING'), 404, 'NOT_FOUND');
+  assert.equal(detail.pendingVersion.applicationId, pending.applicationId);
   assert.equal(
     (
-      await pool.query(
-        "SELECT count(*) FROM audit_logs WHERE action='PERSONA_HEAD_CHANGED' AND target_seq=$1 AND result='SUCCESS'",
-        [saved.aiPersonaVersionSeq],
-      )
-    ).rows[0].count,
-    '0',
+      await pool.query('SELECT head_version_seq FROM ai_personas WHERE ai_persona_seq=$1', [
+        first.aiPersonaSeq,
+      ])
+    ).rows[0].head_version_seq,
+    second.aiPersonaVersionSeq,
   );
+  assert.equal(
+    (
+      await pool.query('SELECT count(*) FROM ai_persona_versions WHERE ai_persona_seq=$1', [
+        first.aiPersonaSeq,
+      ])
+    ).rows[0].count,
+    '2',
+  );
+  await data(await report(pending));
 });
 
-test('persona HEAD: concurrent head changes leave one current request and reject the replaced callback', async () => {
-  const first = await create();
-  await data(await report(await data(await activate(first), 202)));
-  const second = await data(
-    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: '후보 2' }),
-  );
-  const third = await data(await patch(first.aiPersonaSeq, { expectedVersion: 2, name: '후보 3' }));
-  const candidates = await Promise.all([second, third].map(async (v) => data(await setHead(v, 3))));
-  const pending = await data(await runtime('PENDING'));
-  const detail = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
-  assert.equal(detail.headVersion.aiPersonaVersionSeq, pending.aiPersonaVersionSeq);
-  assert.equal(detail.activeVersionSeq, first.aiPersonaVersionSeq);
-  const stale = candidates.find((v) => v.applicationId !== pending.applicationId);
-  assert.ok(stale);
-  await error(await report(stale), 409, 'VERSION_CONFLICT');
-  await data(await report(pending, { activeCallCount: 2 }));
-  assert.equal(
-    (await data(await runtime())).aiPersonaVersionSeq,
-    detail.headVersion.aiPersonaVersionSeq,
-  );
+test('automatic HEAD: concurrent save and publish never silently select an unseen version', async () => {
+  const active = await create();
+  await data(await report(await data(await activate(active), 202)));
+  const target = await create();
+  const [savedResponse, publishResponse] = await Promise.all([
+    patch(target.aiPersonaSeq, { expectedVersion: 1, name: '새 HEAD v2' }),
+    activate(target),
+  ]);
+  const saved = await data(savedResponse);
+  assert.ok([202, 409].includes(publishResponse.status));
+  if (publishResponse.status === 202) {
+    const pending = await data(publishResponse, 202);
+    assert.equal(pending.aiPersonaVersionSeq, target.aiPersonaVersionSeq);
+    assert.equal((await data(await runtime('PENDING'))).applicationId, pending.applicationId);
+    await data(await report(pending));
+    assert.equal((await data(await runtime())).aiPersonaVersionSeq, target.aiPersonaVersionSeq);
+  } else {
+    await error(publishResponse, 409, 'VERSION_CONFLICT');
+    await error(await runtime('PENDING'), 404, 'NOT_FOUND');
+    assert.equal((await data(await runtime())).aiPersonaVersionSeq, active.aiPersonaVersionSeq);
+  }
+  const detail = await data(await call('GET', '/api/personas/' + target.aiPersonaSeq));
+  assert.equal(detail.headVersion.aiPersonaVersionSeq, saved.aiPersonaVersionSeq);
 });
 
 test('persona HEAD: migration preserves pending intent and restores only evidenced historical heads', async () => {
@@ -1071,6 +1062,118 @@ test('persona HEAD: migration preserves pending intent and restores only evidenc
     assert.equal(
       (await client.query('SELECT count(*) FROM ai_persona_versions')).rows[0].count,
       '11',
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});
+
+test('automatic HEAD: type saves advance their heads without changing the published call version', async () => {
+  const friendly1 = await create(),
+    fast1 = await create();
+  const friendly2 = await data(
+    await patch(friendly1.aiPersonaSeq, { expectedVersion: 1, name: '친절 v2' }),
+  );
+  const friendly3 = await data(
+    await patch(friendly1.aiPersonaSeq, { expectedVersion: 2, name: '친절 v3' }),
+  );
+  const fast2 = await data(
+    await patch(fast1.aiPersonaSeq, { expectedVersion: 1, name: '빠른 v2' }),
+  );
+  assert.equal(
+    (await data(await call('GET', `/api/personas/${friendly1.aiPersonaSeq}`))).headVersion
+      .aiPersonaVersionSeq,
+    friendly3.aiPersonaVersionSeq,
+  );
+  await data(await report(await data(await selectRepresentative(fast2), 202)));
+  const friendly4 = await data(
+    await patch(friendly1.aiPersonaSeq, { expectedVersion: friendly3.version, name: '친절 v4' }),
+  );
+  const fast3 = await data(
+    await patch(fast1.aiPersonaSeq, { expectedVersion: fast2.version, name: '빠른 v3' }),
+  );
+  const fast = await data(await call('GET', `/api/personas/${fast1.aiPersonaSeq}`));
+  assert.equal(fast.headVersion.aiPersonaVersionSeq, fast3.aiPersonaVersionSeq);
+  assert.equal(fast.activeVersion.aiPersonaVersionSeq, fast2.aiPersonaVersionSeq);
+  assert.equal(fast.pendingVersion, null);
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, fast2.aiPersonaVersionSeq);
+  await error(await runtime('PENDING'), 404, 'NOT_FOUND');
+  await error(await selectRepresentative(friendly2, friendly4.version), 409, 'VERSION_CONFLICT');
+  await data(await report(await data(await selectRepresentative(friendly4), 202)));
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, friendly4.aiPersonaVersionSeq);
+  await data(await report(await data(await selectRepresentative(fast3), 202)));
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, fast3.aiPersonaVersionSeq);
+  const listed = await (await call('GET', '/api/personas?limit=100')).json();
+  const row = listed.data.find((p) => p.aiPersonaSeq === friendly1.aiPersonaSeq);
+  assert.equal(row.headVersion.aiPersonaVersionSeq, friendly4.aiPersonaVersionSeq);
+  assert.equal(row.activeVersion, null);
+  assert.equal(row.pendingVersion, null);
+});
+
+test('automatic HEAD: an accepted publish keeps its version and UUID when a newer head is saved', async () => {
+  const first = await create();
+  await data(await report(await data(await activate(first), 202)));
+  const second = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 1, name: 'publish v2' }),
+  );
+  const pending = await data(await activate(second), 202);
+  const third = await data(
+    await patch(first.aiPersonaSeq, { expectedVersion: 2, name: '저장만 v3' }),
+  );
+  const waiting = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
+  assert.equal(waiting.headVersion.aiPersonaVersionSeq, third.aiPersonaVersionSeq);
+  assert.equal(waiting.activeVersion.aiPersonaVersionSeq, first.aiPersonaVersionSeq);
+  assert.equal(waiting.pendingVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(waiting.pendingVersion.applicationId, pending.applicationId);
+  assert.equal(waiting.pendingVersion.createdByAdminUserName, '설정 테스트 관리자');
+  await data(await report(pending, { activeCallCount: 2 }));
+  const applied = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
+  assert.equal(applied.headVersion.aiPersonaVersionSeq, third.aiPersonaVersionSeq);
+  assert.equal(applied.activeVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
+  assert.equal(applied.pendingVersion, null);
+  const next = await data(await selectRepresentative(third), 202);
+  assert.notEqual(next.applicationId, pending.applicationId);
+  await data(await report(next));
+  assert.equal((await data(await runtime())).aiPersonaVersionSeq, third.aiPersonaVersionSeq);
+});
+
+test('automatic HEAD: migration 035 reconciles old heads while preserving accepted and applied versions', async () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`
+      CREATE TEMP TABLE ai_personas(ai_persona_seq integer PRIMARY KEY,head_version_seq integer);
+      CREATE TEMP TABLE ai_persona_versions(ai_persona_version_seq integer PRIMARY KEY,ai_persona_seq integer,version integer,status text,application_id uuid);
+      INSERT INTO ai_personas VALUES(1,101),(2,201),(3,NULL),(4,NULL);
+      INSERT INTO ai_persona_versions VALUES
+        (101,1,1,'ACTIVE','00000000-0000-4000-8000-000000000001'),(103,1,3,'INACTIVE',NULL),
+        (201,2,1,'PENDING','00000000-0000-4000-8000-000000000002'),(202,2,2,'INACTIVE',NULL),
+        (301,3,1,'INACTIVE',NULL);
+    `);
+    const before = (
+      await client.query(
+        'SELECT jsonb_agg(to_jsonb(v) ORDER BY ai_persona_version_seq) AS versions FROM ai_persona_versions v',
+      )
+    ).rows[0].versions;
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/035-persona-latest-heads.sql'), 'utf8'),
+    );
+    assert.deepEqual(
+      (
+        await client.query('SELECT head_version_seq FROM ai_personas ORDER BY ai_persona_seq')
+      ).rows.map((r) => r.head_version_seq),
+      [103, 202, 301, null],
+    );
+    assert.deepEqual(
+      (
+        await client.query(
+          'SELECT jsonb_agg(to_jsonb(v) ORDER BY ai_persona_version_seq) AS versions FROM ai_persona_versions v',
+        )
+      ).rows[0].versions,
+      before,
     );
   } finally {
     await client.query('ROLLBACK');

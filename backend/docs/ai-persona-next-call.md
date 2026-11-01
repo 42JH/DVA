@@ -33,7 +33,7 @@
 
 ## 백엔드 API
 
-AI 서비스 Bearer 인증은 기존 `AI_PERSONA_TOKEN`을 그대로 사용한다. 관리자 화면의 대표 선택은 `POST /api/personas/{id}/activate`이며 그 유형의 HEAD만 선택한다. 대표 유형의 HEAD 변경도 AI 반영 대기를 만든다. 비대표 유형의 HEAD 변경과 수정 저장은 AI에 통화 설정 변경을 요청하지 않는다.
+AI 서비스 Bearer 인증은 기존 `AI_PERSONA_TOKEN`을 그대로 사용한다. 관리자 publish는 `POST /api/personas/{id}/activate`로 확인한 최신 HEAD를 선택한다. 저장으로 HEAD가 이동해도 실제 상담 버전과 이미 수락한 PENDING·UUID는 바뀌지 않는다. AI는 편집 HEAD가 아닌 설정 조회의 ACTIVE/PENDING을 따른다.
 
 | API | 의미 |
 | --- | --- |
@@ -53,7 +53,8 @@ AI 서비스 Bearer 인증은 기존 `AI_PERSONA_TOKEN`을 그대로 사용한�
 현재 통화가 2건이어도 위 요청을 허용한다. activeCallCount는 실제 현재 수를 보내며 0 이상의 정수다. 성공 응답의 `data.status`는 ACTIVE이고 `data.aiPersonaVersionSeq`·`applicationId`가 같은 요청인지 확인한다. 기존 URL·필수 필드는 추가하거나 제거하지 않았다.
 
 - 동일 APPLIED 회신을 반복해도 최초 appliedAt·성공 감사를 다시 쓰지 않는다.
-- 대기가 교체됐거나 applicationId가 다르면 **409 VERSION_CONFLICT**다. 새 통화를 열기 전에 ACTIVE/PENDING을 다시 조회한다.
+- 다른 명시적 publish로 대기가 교체됐거나 applicationId가 다르면 **409 VERSION_CONFLICT**다. 새 통화를 열기 전에 ACTIVE/PENDING을 다시 조회한다. 저장으로 HEAD만 이동한 것은 대기 교체가 아니다.
+- v3 publish 요청 후 v4가 저장돼도 원래 v3·UUID의 적용 회신을 수락한다. AI와 백엔드는 적용 회신 버전을 현재 HEAD와 비교하지 않는다.
 - 응답 유실·타임아웃은 적용 실패로 단정하지 않는다. 신규 통화 진입을 보호하면서 같은 회신을 재시도하거나 ACTIVE의 버전·applicationId로 확인한다. 예전 캐시로 통화를 먼저 시작하지 않는다.
 - 검증·설치 실패는 `result=FAILED`와 `errorCode=INVALID_CONFIG | UNSUPPORTED_OPTIONS | APPLY_FAILED`로 회신한다. 원문 프롬프트·예외 메시지는 보내지 않는다. 백엔드는 기존 ACTIVE와 PENDING을 보존한다.
 - 백엔드 알림 워커는 기존대로 5초마다 확인하고 같은 힌트를 최소 30초 간격으로 재전송한다. 알림 수신은 적용 완료가 아니며 통화 진입 조회를 대체하지 않는다.
@@ -71,8 +72,8 @@ AI는 통화 시작 때 고정한 `call.persona_version`을 끝까지 유지한�
 - 새 페르소나는 전체 설정의 v1·INACTIVE로 저장한다.
 - PATCH는 최신 `expectedVersion`을 확인하고 변경한 값과 기존 생략값을 합쳐 vN+1 전체 설정을 추가한다. 이전 버전의 내용은 유지한다.
 - 동일값 저장은 버전을 늘리지 않는다. 최신 버전과 다르면 409 VERSION_CONFLICT다.
-- **수정 저장은 항상 새 INACTIVE 버전 추가만 한다.** 유형별 HEAD와 실제 통화 설정은 변경하지 않는다.
-- PUT `/api/personas/{id}/head`로 유형 안의 버전을 적용하고 POST activate로 그 HEAD를 대표로 선택한다. 과거 버전을 HEAD로 선택해도 버전 내용이나 번호를 다시 만들지 않는다.
+- **수정 저장은 새 INACTIVE 버전을 추가하고 그 유형의 HEAD를 이동한다.** 실제 통화 설정과 publish 대기는 변경하지 않는다.
+- POST `/api/personas/{id}/activate`로 확인한 최신 HEAD를 publish한다. 같은 유형의 새 HEAD도 다시 publish할 수 있으며 수동 HEAD 변경과 과거 버전 재발행은 제공하지 않는다.
 
 ## AI 팀 확인 항목
 

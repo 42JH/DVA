@@ -34,7 +34,9 @@ export interface Persona {
   aiPersonaSeq: number;
   code: string;
   latestVersion: PersonaVersion;
-  headVersion: PersonaVersion | null;
+  headVersion: PersonaVersion;
+  activeVersion: PersonaVersion | null;
+  pendingVersion: PersonaVersion | null;
   activeVersionSeq: number | null;
   pendingVersionSeq: number | null;
 }

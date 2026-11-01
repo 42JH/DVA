@@ -48,16 +48,22 @@ export class AiSettingsService {
   private async withPersonaAuthors(personas: Persona[]): Promise<Persona[]> {
     const versions = await this.withAuthors(
       personas.flatMap((persona) =>
-        persona.headVersion
-          ? [persona.latestVersion, persona.headVersion]
-          : [persona.latestVersion],
+        [persona.latestVersion, persona.activeVersion, persona.pendingVersion].filter(
+          (version): version is PersonaVersion => version !== null,
+        ),
       ),
     );
     const byId = new Map(versions.map((version) => [version.aiPersonaVersionSeq, version]));
     return personas.map((persona) => ({
       ...persona,
       latestVersion: byId.get(persona.latestVersion.aiPersonaVersionSeq)!,
-      headVersion: persona.headVersion ? byId.get(persona.headVersion.aiPersonaVersionSeq)! : null,
+      headVersion: byId.get(persona.latestVersion.aiPersonaVersionSeq)!,
+      activeVersion: persona.activeVersion
+        ? byId.get(persona.activeVersion.aiPersonaVersionSeq)!
+        : null,
+      pendingVersion: persona.pendingVersion
+        ? byId.get(persona.pendingVersion.aiPersonaVersionSeq)!
+        : null,
     }));
   }
 

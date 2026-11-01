@@ -50,52 +50,10 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
       const latest = await this.repository.latest(id, client);
       if (latest?.version !== input.expectedVersion)
         throw new ApiException(409, 'VERSION_CONFLICT', '최신 저장 버전을 다시 조회해 주세요.');
-      const head = await this.repository.head(id, client);
-      if (!head)
-        throw new ApiException(409, 'INVALID_STATE', '먼저 이 유형의 HEAD 버전을 적용해 주세요.');
-      if (head.aiPersonaVersionSeq !== input.aiPersonaVersionSeq)
+      if (latest.aiPersonaVersionSeq !== input.aiPersonaVersionSeq)
         throw new ApiException(409, 'VERSION_CONFLICT', '현재 HEAD 버전을 다시 조회해 주세요.');
       const target = (await this.repository.version(source.aiPersonaVersionSeq, client))!;
       return this.queueOrReuse(target, actorId, requestId, client);
-    });
-  }
-
-  async setHead(
-    id: number,
-    input: ActivatePersonaDto,
-    actorId: number,
-    requestId: string,
-  ): Promise<PersonaVersion> {
-    const source = await this.repository.version(input.aiPersonaVersionSeq);
-    if (!source || source.aiPersonaSeq !== id)
-      throw new ApiException(404, 'NOT_FOUND', '해당 페르소나의 버전을 찾을 수 없습니다.');
-    validatePersonaOptions(source, await this.ai.options());
-    return this.database.transaction(async (client) => {
-      await this.repository.lock(client);
-      const latest = await this.repository.latest(id, client);
-      if (latest?.version !== input.expectedVersion)
-        throw new ApiException(409, 'VERSION_CONFLICT', '최신 저장 버전을 다시 조회해 주세요.');
-      const head = await this.repository.head(id, client);
-      if (head?.aiPersonaVersionSeq !== source.aiPersonaVersionSeq) {
-        await this.repository.setHead(id, source.aiPersonaVersionSeq, client);
-        await this.audit.recordSuccess(
-          {
-            actorId,
-            targetId: source.aiPersonaVersionSeq,
-            targetType: 'AI_PERSONA_VERSION',
-            action: 'PERSONA_HEAD_CHANGED',
-            requestId,
-          },
-          client,
-        );
-      }
-      const target = (await this.repository.version(source.aiPersonaVersionSeq, client))!;
-      const selected =
-        (await this.repository.live('PENDING', client)) ??
-        (await this.repository.live('ACTIVE', client));
-      if (selected?.aiPersonaSeq === id)
-        return this.queueOrReuse(target, actorId, requestId, client);
-      return target;
     });
   }
 
@@ -174,9 +132,6 @@ export class PersonaApplicationService implements OnApplicationBootstrap, OnModu
       if (target.status === 'ACTIVE' && input.result === 'APPLIED') return target;
       if (target.status !== 'PENDING')
         throw new ApiException(409, 'VERSION_CONFLICT', '현재 대기 중인 적용 요청이 아닙니다.');
-      const head = await this.repository.head(target.aiPersonaSeq, client);
-      if (head?.aiPersonaVersionSeq !== target.aiPersonaVersionSeq)
-        throw new ApiException(409, 'VERSION_CONFLICT', '현재 HEAD와 다른 적용 요청입니다.');
       const event = {
         actorId: null,
         actorType: 'AI' as const,

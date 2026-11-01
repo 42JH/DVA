@@ -91,11 +91,23 @@ export class PersonaDto {
   latestVersion!: PersonaVersionDto;
   @ApiProperty({
     description:
-      '이 유형에서 마지막으로 버전 적용한 HEAD. 최신 저장 버전·실제 통화 적용 버전과 다를 수 있으며 대표가 바뀌어도 유지합니다. 한 번도 적용하지 않았으면 null.',
+      '이 유형의 최신 저장 버전 HEAD. 생성·수정 저장 시 자동 이동하며 latestVersion과 같습니다. 실제 상담 적용·대기 버전은 별도입니다.',
+    type: PersonaVersionDto,
+  })
+  headVersion!: PersonaVersionDto;
+  @ApiProperty({
+    description: '실제 AI 적용을 확인한 상담 버전. HEAD가 이동해도 유지하며 미사용 유형은 null.',
     type: PersonaVersionDto,
     nullable: true,
   })
-  headVersion!: PersonaVersionDto | null;
+  activeVersion!: PersonaVersionDto | null;
+  @ApiProperty({
+    description:
+      'publish 요청 시 고정한 적용 대기 버전. 저장으로 교체되지 않으며 applyErrorCode로 반영 실패를 확인합니다. 없으면 null.',
+    type: PersonaVersionDto,
+    nullable: true,
+  })
+  pendingVersion!: PersonaVersionDto | null;
   @ApiProperty({
     description: '이 페르소나의 현재 적용 버전 식별자. 미적용은 null.',
     type: Number,
