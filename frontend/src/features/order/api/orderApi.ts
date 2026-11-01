@@ -141,3 +141,12 @@ export const saveOrder = (
 /** 고객정보에도 저장 — PATCH /customers/{customerSeq}, 204 본문 없음. 주문 PATCH가 성공한 뒤에만 (별도 트랜잭션) */
 export const patchCustomer = (customerSeq: number, body: CustomerPatch): Promise<void> =>
   api.patch(`/customers/${customerSeq}`, { body })
+
+/** 주문 전체 취소 — POST /orders/{id}/cancel, 본문 없음 · 204. 결제 전(COLLECTING · notPaid)만 (명세 4.5) */
+export const cancelOrder = (orderSeq: number): Promise<void> =>
+  api.post(`/orders/${orderSeq}/cancel`)
+
+/** 디버 재접수 — POST /admin/orders/{id}/retry, 본문 없음. 다시 결제하지 않음. 응답 status로 결과 확인
+ * 주의(백엔드): 디버 접수는 됐는데 DB 저장만 실패했을 수 있음 → 확인 창에서 디버 쪽을 먼저 확인하라고 안내 */
+export const retryOrder = (orderSeq: number): Promise<ApiItem<{ status: OrderStatus }>> =>
+  api.post(`/admin/orders/${orderSeq}/retry`)

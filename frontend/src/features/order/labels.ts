@@ -34,7 +34,7 @@ export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
 }
 
 /** 주문 추가 · 수정 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구 · 코드를 그대로 보이지 않음, 11/01 기업관리와 같은 기준) */
-export function orderErrorText(e: unknown, action: '접수' | '저장'): string {
+export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소'): string {
   const status = (e as { status?: number })?.status
   const code = (e as { code?: string })?.code
   if (code === 'REQUEST_IN_PROGRESS' || status === 409)

@@ -1,6 +1,7 @@
 import {
   Button,
   ChipGroup,
+  ConfirmDialog,
   DateField,
   Pagination,
   SearchBox,
@@ -96,6 +97,12 @@ export function OrderListPage() {
 
       <ChipGroup name="상태" options={vm.statusOptions} value={vm.status} onChange={vm.setStatus} />
 
+      {vm.notice && (
+        <p role="status" className="text-label text-action">
+          {vm.notice}
+        </p>
+      )}
+
       <Table
         head={
           <h2 className="flex items-baseline gap-3.5 text-card font-bold">
@@ -114,6 +121,37 @@ export function OrderListPage() {
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
 
+      {vm.modal?.kind === 'cancel' && (
+        <ConfirmDialog
+          title="주문을 취소하시겠습니까?"
+          target={`주문 ${vm.modal.id}번`}
+          warn={
+            vm.modal.parcelCount > 1
+              ? `이 주문의 배송 ${vm.modal.parcelCount}건이 모두 취소됩니다. 결제 전 주문만 취소할 수 있습니다.`
+              : '취소하면 되돌릴 수 없습니다. 결제 전 주문만 취소할 수 있습니다.'
+          }
+          note={vm.actionError ?? undefined}
+          okLabel="주문 취소"
+          pending={vm.acting}
+          onOk={vm.confirmAction}
+          onClose={vm.backFromConfirm}
+        />
+      )}
+      {vm.modal?.kind === 'retry' && (
+        <ConfirmDialog
+          title="디버에 다시 접수할까요?"
+          target={`주문 ${vm.modal.id}번`}
+          note={
+            vm.actionError ??
+            '결제는 다시 하지 않습니다. 디버에 이미 접수됐을 수 있으니, 디버에서 이 주문이 없는지 먼저 확인해 주세요.'
+          }
+          okLabel="다시 접수"
+          okKind="primary"
+          pending={vm.acting}
+          onOk={vm.confirmAction}
+          onClose={vm.backFromConfirm}
+        />
+      )}
       {vm.modal?.kind === 'add' && (
         <OrderFormModal onDone={vm.closeModal} onClose={vm.closeModal} />
       )}
@@ -123,6 +161,8 @@ export function OrderListPage() {
           parcelSeq={vm.modal.parcelSeq}
           onClose={vm.closeModal}
           onEdit={vm.editOrder}
+          onCancel={vm.askCancel}
+          onRetry={vm.askRetry}
         />
       )}
       {vm.modal?.kind === 'edit' && (
