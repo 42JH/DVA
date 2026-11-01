@@ -76,7 +76,7 @@ async function createCall({
   const providerCallId = 'rtc_question_read_' + randomUUID();
   const id = (
     await pool.query(
-      'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,incoming_at) VALUES($1,$2,$3,$4,$5,$6) RETURNING call_session_seq',
+      'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,incoming_at,customer_seq) VALUES($1,$2,$3,$4,$5,$6,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq',
       [
         providerCallId,
         phone,

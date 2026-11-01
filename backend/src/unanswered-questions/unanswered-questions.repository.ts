@@ -58,8 +58,7 @@ export class UnansweredQuestionsRepository {
          FROM unanswered_questions u JOIN call_sessions c ON c.call_session_seq=u.call_session_seq
          LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
          LEFT JOIN orders o ON o.order_seq=c.order_seq
-         LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,
-           (SELECT customer_seq FROM customers WHERE phone_number=c.caller_phone_number))
+         LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq)
          LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq
          WHERE u.status=$1
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)

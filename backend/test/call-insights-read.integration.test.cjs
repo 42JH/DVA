@@ -41,8 +41,8 @@ async function createCall(changes = {}) {
   };
   const id = (
     await f.pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason)
-     VALUES($1,$2,$3,$4,$5,$6) RETURNING call_session_seq`,
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason,customer_seq)
+     VALUES($1,$2,$3,$4,$5,$6,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq`,
       [
         input.providerCallId,
         input.phone,
@@ -288,6 +288,97 @@ test('customer linkage uses order ownership before the caller and follows curren
   assert.deepEqual(ids(updated), [ordered.id]);
   assert.equal(updated.data[0].customerName, currentName);
   assert.deepEqual(ids(await ok(await list({ q: caller.phone }))), [inquiry.id, ordered.id]);
+});
+
+test('inquiries keep the original customer after employee phone updates and never claim a later registrant', async () => {
+  const caller = await customer(marker());
+  const companyId = (
+    await f.pool.query(
+      "INSERT INTO organizations(name,status) VALUES($1,'ACTIVE') RETURNING organization_seq",
+      [marker()],
+    )
+  ).rows[0].organization_seq;
+  await f.pool.query(
+    "INSERT INTO memberships(customer_seq,organization_seq,employee_no,status) VALUES($1,$2,'001','ACTIVE')",
+    [caller.id, companyId],
+  );
+  const start = async (phoneNumber) => {
+    const call = { providerCallId: randomUUID(), incomingAt: '2026-10-31T01:00:00Z' };
+    const response = await f.write('POST', '/api/customers/context', { phoneNumber, call });
+    assert.equal(response.status, 200, await response.clone().text());
+    return { ...call, id: (await response.json()).data.callSessionSeq };
+  };
+  const call = await start(caller.phone);
+  const questionText = marker();
+  const question = await f.write(
+    'POST',
+    '/api/ai/unanswered-questions',
+    {
+      eventId: randomUUID(),
+      callSessionSeq: call.id,
+      providerCallId: call.providerCallId,
+      questionText,
+      occurredAt: '2026-10-31T01:01:20Z',
+      offsetSeconds: 80,
+    },
+    0,
+    { Cookie: undefined, Authorization: 'Bearer ' + token },
+  );
+  assert.equal(question.status, 201, await question.clone().text());
+  const changed = await f.write('POST', `/api/companies/${companyId}/members`, {
+    employeeNo: '001',
+    name: caller.name,
+    phoneNumber: phone(),
+  });
+  assert.equal(changed.status, 204, await changed.clone().text());
+  const replacement = await f.write('POST', '/api/customers', {
+    name: marker(),
+    phoneNumber: caller.phone,
+  });
+  assert.equal(replacement.status, 201, await replacement.clone().text());
+  const saved = (await ok(await detail(call), true)).data.call;
+  assert.equal(saved.customerSeq, caller.id);
+  assert.equal(saved.callerPhoneNumber, caller.phone);
+  assert.deepEqual(ids(await ok(await list({ q: caller.name }))), [call.id]);
+  const questions = await f.get(
+    '/api/unanswered-questions?' + new URLSearchParams({ q: questionText }),
+  );
+  assert.equal(questions.status, 200);
+  assert.equal((await questions.json()).data[0].customerSeq, caller.id);
+
+  const unknownPhone = phone();
+  const unknown = await start(unknownPhone);
+  await analyse(unknown);
+  const registeredLater = await f.write('POST', '/api/customers', {
+    name: marker(),
+    phoneNumber: unknownPhone,
+  });
+  assert.equal(registeredLater.status, 201, await registeredLater.clone().text());
+  const inquiry = (await ok(await detail(unknown), true)).data;
+  assert.equal(inquiry.call.customerSeq, null);
+  assert.equal(inquiry.call.orderSeq, null);
+  assert.equal(inquiry.analysis.result, 'INQUIRY');
+  const customerSeq = (await registeredLater.json()).data.customerSeq;
+  const finalResult = await f.write(
+    'POST',
+    '/api/orders',
+    {
+      outcome: 'INCOMPLETE',
+      call: {
+        providerCallId: unknown.providerCallId,
+        incomingAt: unknown.incomingAt,
+        callerPhoneNumber: unknownPhone,
+      },
+      customerSeq,
+    },
+    0,
+    { Cookie: undefined, 'Idempotency-Key': randomUUID() },
+  );
+  assert.equal(finalResult.status, 201, await finalResult.clone().text());
+  assert.equal((await finalResult.json()).data.status, 'NO_ORDER');
+  const linked = (await ok(await detail(unknown), true)).data.call;
+  assert.equal(linked.customerSeq, customerSeq);
+  assert.equal(linked.orderSeq, null);
 });
 
 test('q normalizes Korean and case while treating wildcards and SQL text literally and combining all old filters', async () => {

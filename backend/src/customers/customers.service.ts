@@ -56,6 +56,8 @@ export class CustomersService {
           requestId,
         );
         const context = await this.repository.context(phoneNumber, client);
+        if (context.customer)
+          await this.calls.attachCustomer(client, callSessionSeq, context.customer.customerSeq);
         return { ...context, callSessionSeq };
       });
     } catch (error) {
