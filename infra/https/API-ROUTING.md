@@ -21,10 +21,10 @@ NestJS로 전달하고, 관리자 인증·권한·CSRF 검사는 기존 전역 A
 
 ## 서버 적용
 
-대상 파일은 `/etc/nginx/sites-available/dva-ip`다. 서버에는 AI 웹훅·PBX mirror·
-별도 도메인 설정이 추가되어 있으므로 저장소의 `https.conf`로 전체를 덮어쓰지 않는다.
-서버 파일을 백업하고 IP HTTPS server 블록에 readiness 차단과 `/api/` 전달 블록만 추가한다.
-후보 설정을 검사한 뒤 실제 설정에서도 `sudo nginx -t`가 성공한 경우에만
+대상 파일은 `/etc/nginx/sites-available/dva-ip`다. 2026-11-01에 서버 파일(AI 웹훅·PBX mirror·
+결제 테스트·sslip.io 도메인)과 저장소의 `https.conf`를 같은 내용으로 맞췄다. 이후 경로 변경은
+저장소 `https.conf`에 먼저 반영하고, 서버 파일과 `diff`로 저장소 밖 변경이 없는지 확인한 뒤 교체한다.
+서버 파일을 백업하고 후보 설정을 검사한 뒤 실제 설정에서도 `sudo nginx -t`가 성공한 경우에만
 `sudo systemctl reload nginx`를 실행한다. 검사 실패 시 백업을 복원한다.
 다른 팀의 설정 변경과 겹치면 현재 서버 파일을 다시 읽어 차이를 확인한다.
 
