@@ -137,6 +137,7 @@ def test_customer_answer_changes_state_without_tool_call():
         await until(lambda: "해운대" in thoughts(conn)[-1])
         assert conn.outputs() == []  # 백엔드 도구 호출 없음
         rec = next(t for t in call.tool_calls.values() if t["name"] == "listener")
+        await until(lambda: "total_ms" in rec)  # 진행 상태를 보낸 직후에 적는다(느린 CI에서 먼저 읽으면 없음)
         assert rec["total_ms"] >= rec["elapsed_ms"]  # 지연 측정: 말 끝 → 진행 상태
         await close(conn, task)
 
