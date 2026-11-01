@@ -103,7 +103,7 @@ const ORDERS: OrderDetail[] = [
     orderSeq: 10519,
     route: 'PHONE',
     manualBy: null,
-    acceptedAt: t('13:12:00'),
+    acceptedAt: t('13:15:37'), // 통화 9101(13:12 시작)의 접수 시점 03:37 (mocks/handlers/calls.ts)
     cancelled: false,
     sender: {
       name: '강도윤',
@@ -123,7 +123,7 @@ const ORDERS: OrderDetail[] = [
     clientComment: '경비실에 맡겨 주세요',
     paymentMethod: 'MONTHLY',
     paymentState: 'PAID',
-    relatedCalls: [{ callSessionSeq: 9101, startedAt: t('13:12:08'), kind: 'ACCEPT' }],
+    relatedCalls: [{ callSessionSeq: 9101, startedAt: t('13:12:00'), kind: 'ACCEPT' }],
   },
   {
     orderSeq: 10530,
@@ -155,7 +155,7 @@ const ORDERS: OrderDetail[] = [
     orderSeq: 10531,
     route: 'PHONE',
     manualBy: null,
-    acceptedAt: t('14:22:00'),
+    acceptedAt: t('14:26:00'), // 통화 9103(14:22 시작) 안에서 접수
     cancelled: true,
     sender: {
       name: '박지호',
@@ -177,7 +177,7 @@ const ORDERS: OrderDetail[] = [
     paymentState: 'CANCELLED_BEFORE_PAYMENT',
     relatedCalls: [
       { callSessionSeq: 9103, startedAt: t('14:22:10'), kind: 'ACCEPT' }, // 접수 통화 — 06 가짜 장면은 없음
-      { callSessionSeq: 9105, startedAt: t('14:35:20'), kind: 'CANCEL' },
+      { callSessionSeq: 9105, startedAt: t('14:35:00'), kind: 'CANCEL' },
     ],
   },
 ]

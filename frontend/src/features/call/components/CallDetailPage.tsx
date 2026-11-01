@@ -10,7 +10,12 @@ import { CallScript } from './CallScript'
 // 통화 ≠ 주문 (10/28): 송장 칸 · 수정은 06에 없음. 주문은 '주문 보기 ›' 팝업으로만
 export function CallDetailPage() {
   const { callId } = useParams()
-  const vm = useCallDetail(Number(callId))
+  // 라우트는 하나(calls/:callId)라 통화가 바뀌어도(팝업의 관련 통화 · 뒤로가기) 언마운트되지 않음 → key로 다시 마운트해 팝업 · 재생 속도 · 플레이어를 초기화
+  return <CallDetailBody key={callId} callId={Number(callId)} />
+}
+
+function CallDetailBody({ callId }: { callId: number }) {
+  const vm = useCallDetail(callId)
 
   if (vm.error) return <p className="py-16 text-center text-body text-muted">{vm.error}</p>
   if (vm.isLoading || !vm.summary)
