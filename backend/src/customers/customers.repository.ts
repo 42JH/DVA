@@ -20,11 +20,13 @@ export class CustomersRepository {
   async updateIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]): Promise<void> {
     if (!rows.length) return;
     await client.query(
-      `UPDATE customers c SET name=r.name,phone_number=r."phoneNumber"
-       FROM jsonb_to_recordset($1::jsonb) AS r("customerSeq" int,name text,"phoneNumber" text)
+      `UPDATE customers c SET name=r.name,phone_number=r."phoneNumber",
+       address_data=CASE WHEN r."changeAddress" THEN r.address ELSE c.address_data END
+       FROM jsonb_to_recordset($1::jsonb) AS r("customerSeq" int,name text,"phoneNumber" text,address jsonb,"changeAddress" boolean)
        WHERE c.customer_seq=r."customerSeq"
-         AND (c.name IS DISTINCT FROM r.name OR c.phone_number IS DISTINCT FROM r."phoneNumber")`,
-      [JSON.stringify(rows)],
+         AND (c.name IS DISTINCT FROM r.name OR c.phone_number IS DISTINCT FROM r."phoneNumber"
+           OR (r."changeAddress" AND c.address_data IS DISTINCT FROM r.address))`,
+      [JSON.stringify(rows.map((row) => ({ ...row, changeAddress: row.address !== undefined })))],
     );
   }
 
@@ -32,8 +34,8 @@ export class CustomersRepository {
     if (!rows.length) return [];
     return (
       await client.query<{ customerSeq: number; phoneNumber: string }>(
-        `INSERT INTO customers(name,phone_number,status)
-         SELECT name,"phoneNumber",'ACTIVE' FROM jsonb_to_recordset($1::jsonb) AS r(name text,"phoneNumber" text)
+        `INSERT INTO customers(name,phone_number,status,address_data)
+         SELECT name,"phoneNumber",'ACTIVE',address FROM jsonb_to_recordset($1::jsonb) AS r(name text,"phoneNumber" text,address jsonb)
          RETURNING customer_seq AS "customerSeq",phone_number AS "phoneNumber"`,
         [JSON.stringify(rows)],
       )

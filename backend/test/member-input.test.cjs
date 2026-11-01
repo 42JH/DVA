@@ -76,3 +76,56 @@ test('inline employee role is optional, accepts only display roles and preserves
     );
   await assert.rejects(() => pipe.transform({ customerSeq: 1, employeeNo: '001' }));
 });
+
+test('inline employees accept the customer address object in single and batch requests', async () => {
+  const input = { employeeNo: '001', name: '주소 사원', phoneNumber: '01012345678' };
+  const address = {
+    roadAddress: '주소로 1',
+    jibunAddress: '주소동 1',
+    dongName: '주소동',
+    postalCode: '01234',
+    latitude: 37.5,
+    longitude: 127,
+  };
+  for (const request of [{ ...input, address }, { items: [{ ...input, address }] }])
+    assert.deepEqual(
+      JSON.parse(JSON.stringify((await pipe.transform(request))[0].address)),
+      address,
+    );
+  assert.equal((await pipe.transform(input))[0].address, undefined);
+  assert.equal((await pipe.transform({ ...input, address: null }))[0].address, null);
+  for (const coordinates of [
+    {},
+    { latitude: null, longitude: null },
+    { latitude: 0, longitude: 0 },
+    { latitude: 37.5 },
+    { longitude: -127 },
+  ]) {
+    const partial = { ...address, ...coordinates };
+    if (!('latitude' in coordinates)) delete partial.latitude;
+    if (!('longitude' in coordinates)) delete partial.longitude;
+    const actual = (await pipe.transform({ ...input, address: partial }))[0].address;
+    assert.equal(actual.latitude, coordinates.latitude ?? 1);
+    assert.equal(actual.longitude, coordinates.longitude ?? 1);
+  }
+  for (const field of ['roadAddress', 'jibunAddress', 'dongName', 'postalCode']) {
+    const partial = { ...address };
+    delete partial[field];
+    await assert.rejects(
+      () => pipe.transform({ items: [{ ...input, address: partial }] }),
+      (error) =>
+        error.getStatus() === 400 &&
+        error.getResponse().details.some((detail) => detail.field === `items[0].address.${field}`),
+    );
+  }
+  for (const invalid of [
+    '주소로 1',
+    [],
+    { ...address, latitude: '37.5' },
+    { ...address, longitude: 181 },
+    { ...address, postalCode: '1234' },
+    { ...address, detailAddress: null },
+    { ...address, unknown: true },
+  ])
+    await assert.rejects(() => pipe.transform({ ...input, address: invalid }));
+});

@@ -6,6 +6,7 @@ export interface EmployeeCustomerIdentity {
   customerSeq?: number;
   name: string;
   phoneNumber: string;
+  address?: CustomerAddressDto | null;
 }
 export interface Customer {
   address: CustomerAddressDto | null;
