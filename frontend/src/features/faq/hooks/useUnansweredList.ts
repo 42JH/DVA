@@ -43,16 +43,14 @@ export function useUnansweredList({
   const ofCall = (list.data ?? []).filter(
     (u) =>
       (call === null || u.callSessionSeq === call) &&
-      (!todayOnly || ymd(new Date(u.startedAt)) === today),
+      (!todayOnly || (u.startedAt !== null && ymd(new Date(u.startedAt)) === today)),
   )
-  const hit = ofCall
-    .filter(
-      (u) =>
-        matchKo(u.question, q) ||
-        matchKo(u.customerName, q) ||
-        (digits !== '' && u.callerNumber.includes(digits)),
-    )
-    .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  const hit = ofCall.filter(
+    (u) =>
+      matchKo(u.question, q) ||
+      matchKo(u.customerName, q) ||
+      (digits !== '' && u.callerNumber.includes(digits)),
+  ) // 순서 = 서버가 준 오래된 통화부터 (시각 모르는 질문은 뒤)
   // 통화 칩 글: '강도윤 · 13:13 통화의 질문만' (질문이 다 처리돼 없으면 '이 통화의 질문만')
   const first = ofCall[0]
   const callChips =
@@ -62,15 +60,15 @@ export function useUnansweredList({
           {
             key: 'call',
             label: first
-              ? `${first.customerName} · ${fmtListTime(first.startedAt).join(' ')} 통화의 질문만`
+              ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
               : '이 통화의 질문만',
           },
         ]
   const sliced = pageSlice(hit, page, pageSize)
   const rows: UnansweredRow[] = sliced.rows.map((u) => ({
     ...u,
-    time: fmtListTime(u.startedAt),
-    phone: fmtPhone(u.callerNumber),
+    time: u.startedAt ? fmtListTime(u.startedAt) : ['—'], // 시각을 못 받은 통화
+    phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
   }))
 
   const remove = useMutation({
@@ -111,7 +109,7 @@ export function useUnansweredList({
   }
 }
 
-/** 사이드바 'AI 미답변' 옆 빨간 숫자 — 목록과 같은 데이터라 처리하면 같이 줄어듦 (app/AppLayout이 사이드바에 넘김) */
+/** 사이드바 'AI 미답변' 옆 빨간 숫자 — total_count 1건 요청. 처리 · 삭제가 ['unanswered']를 무효화해 같이 줄어듦 (app/AppLayout이 사이드바에 넘김) */
 export function useUnansweredCount() {
-  return useQuery(unansweredQueries.list()).data?.length ?? 0
+  return useQuery(unansweredQueries.count()).data ?? 0
 }

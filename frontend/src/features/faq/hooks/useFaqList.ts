@@ -30,12 +30,10 @@ export function useFaqList() {
 
   const list = useQuery(faqQueries.list())
 
-  const inCategory = (list.data?.data ?? []).filter(
-    (f) => category === '전체' || f.category === category,
-  )
+  const inCategory = (list.data ?? []).filter((f) => category === '전체' || f.category === category)
   const hit = inCategory
     .filter((f) => matchKo(f.question, q) || matchKo(f.answer, q)) // 띄어쓰기 · 초성 규칙 (shared/lib/search)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) // 최근 만든 것이 1번. 수정은 자리 유지
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)) // 최근 만든 것이 1번. 수정은 자리 유지
   const sliced = pageSlice(hit, page, PAGE_SIZE) // 지워서 쪽이 줄면 마지막 쪽으로
   const rows: FaqRow[] = sliced.rows.map((faq, i) => ({
     ...faq,
