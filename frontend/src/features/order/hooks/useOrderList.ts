@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { pageCount } from '@/shared/api/paging'
+import { useDeferredValue, useState } from 'react'
+import { pageCount, pageSlice } from '@/shared/api/paging'
 import { downloadCsv, toCsv } from '@/shared/lib/csv'
 import { todayYmd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import type { Option, TagKind } from '@/shared/ui'
 import {
@@ -20,6 +21,7 @@ import {
   orderQueries,
   type ListParcel,
   type ListParty,
+  type OrderListItem,
   type OrderListQuery,
   type StatusGroup,
   cancelOrder,
@@ -64,7 +66,6 @@ const RETRY_RESULT: Partial<Record<string, string>> = {
 const PAGE_SIZE = 20 // 주문 20개 — 상세가 여러 개면 줄은 더 많아짐
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
 const DEFAULTS = { q: '', from: '', to: '', status: 'ALL' }
-const SEARCH_DELAY_MS = 300 // 서버 검색 — 멈추고 0.3초 뒤 (기업 목록과 같음)
 // 상태 탭 5개 = 서버 statusGroup
 const STATUS_OPTIONS: Option<StatusGroup>[] = (
   Object.keys(STATUS_GROUP_LABEL) as StatusGroup[]
@@ -103,19 +104,31 @@ export function useOrderList() {
   const status = STATUS_OPTIONS.some((o) => o.value === params.status)
     ? (params.status as StatusGroup)
     : 'ALL'
-  // 검색칸은 바로(URL), 요청은 멈춘 뒤에
-  const [searched, setSearched] = useState(params.q)
-  useEffect(() => {
-    const t = setTimeout(() => setSearched(params.q), SEARCH_DELAY_MS)
-    return () => clearTimeout(t)
-  }, [params.q])
+  // 검색어가 없으면 서버가 쪽을 나눔. 있으면 같은 조건의 주문 전체를 받아 04 · 09와 같은 규칙(초성 · 띄어쓰기 무시)으로 앞에서 거름 (11/02)
+  const q = useDeferredValue(params.q.trim()) // 칠 때마다 거르니 입력이 먼저, 목록은 한 박자 늦게
+  const searching = q !== ''
   const query: OrderListQuery = {
-    q: searched,
+    q: '',
     from: range?.from ?? today,
     to: range?.to ?? today,
     group: status,
   }
-  const list = useQuery(orderQueries.list(query, page, PAGE_SIZE))
+  const list = useQuery({ ...orderQueries.list(query, page, PAGE_SIZE), enabled: !searching })
+  const pool = useQuery({ ...orderQueries.pool(query), enabled: searching })
+  const parties = (o: OrderListItem) => o.parcels.flatMap((p) => [p.origin, p.destination])
+  const digits = phoneDigits(q) // 숫자만 쳤으면 전화번호로
+  const hit = searching
+    ? (pool.data ?? []).filter((o) =>
+        parties(o).some((p) =>
+          digits
+            ? (p.phoneNumber ?? '').includes(digits)
+            : [p.name, p.roadAddress, p.jibunAddress, p.detailAddress].some((t) =>
+                matchKo(t ?? '', q),
+              ),
+        ),
+      )
+    : null
+  const orders = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? [])
   const qc = useQueryClient()
   const [notice, setNotice] = useState<string | null>(null) // 취소 · 다시 접수 결과 한 줄
 
@@ -138,9 +151,9 @@ export function useOrderList() {
       setModal({ kind: 'detail', id: m.id, parcelSeq: m.parcelSeq })
     },
   })
-  const total = list.data?.total_count ?? 0 // 주문 수 (줄 수 아님)
+  const total = hit ? hit.length : (list.data?.total_count ?? 0) // 주문 수 (줄 수 아님)
 
-  const rows: OrderListRow[] = (list.data?.data ?? []).flatMap(parcelRows).map((r) => ({
+  const rows: OrderListRow[] = orders.flatMap(parcelRows).map((r) => ({
     key: r.key,
     orderSeq: r.orderSeq,
     parcelSeq: r.parcel?.orderParcelSeq ?? null,
@@ -156,7 +169,7 @@ export function useOrderList() {
   const exportCsv = async () => {
     setExporting(true)
     try {
-      const all: ParcelRow[] = (await fetchAllOrders(query)).flatMap(parcelRows)
+      const all: ParcelRow[] = (hit ?? (await fetchAllOrders(query))).flatMap(parcelRows) // 검색 중이면 걸러진 그대로
       const csv = toCsv(
         [...ORDER_CSV_HEADER],
         all.map((r) => toOrderCsvRow(r, ORDER_STATUS_LABEL[r.status])),
@@ -171,6 +184,17 @@ export function useOrderList() {
   return {
     q: params.q,
     setQ: (v: string) => set({ q: v }),
+    // 추천 = 같은 조건 주문의 이름 (주소는 길어서 뺌, 숫자만 치면 추천 없음)
+    suggestions: digits
+      ? []
+      : suggest(
+          [
+            ...new Set(
+              (pool.data ?? []).flatMap((o) => parties(o).flatMap((p) => (p.name ? [p.name] : []))),
+            ),
+          ],
+          q,
+        ),
     range, // 날짜 칸 (null = 오늘)
     setRange: (r: { from: string; to: string }) =>
       // 오늘 하루를 고르면 기본값(빈 값)으로 → 주소가 깨끗하고 내일 열어도 '오늘'
@@ -181,8 +205,10 @@ export function useOrderList() {
 
     rows,
     count: total, // '주문 목록 104건' — 주문 수
-    isLoading: list.isPending,
-    listError: list.error ? '주문 목록을 불러오지 못했습니다. 새로고침해 주세요.' : null,
+    isLoading: searching ? pool.isPending : list.isPending,
+    listError: (searching ? pool.error : list.error)
+      ? '주문 목록을 불러오지 못했습니다. 새로고침해 주세요.'
+      : null,
     page,
     pages: pageCount(total, PAGE_SIZE),
     goPage: (p: number) => set({ page: p }),

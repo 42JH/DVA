@@ -86,6 +86,14 @@ export const companyQueries = {
           signal,
         }),
     }),
+  // 검색용 전체 — 서버 검색은 글자 그대로라 초성이 안 돼서 다 받아 화면에서 거름 (11/02, 04와 같은 방식). 5분 재사용
+  // shortcut: fetchAll 2,000곳 상한 — 넘으면 앞 2,000곳 안에서만 찾음. 그때는 서버 초성 검색으로
+  pool: () =>
+    queryOptions({
+      queryKey: [...companyQueries.all(), 'pool'],
+      queryFn: ({ signal }) => fetchAll<Company>('/companies', {}, signal),
+      staleTime: 5 * 60_000,
+    }),
   detail: (id: number) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id],

@@ -83,6 +83,15 @@ export function toServerQuery(q: OrderListQuery) {
 
 export const orderQueries = {
   all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
+  // 검색용 전체 — 같은 조건(날짜 · 상태)의 주문을 다 받아 화면에서 초성 · 띄어쓰기 무시로 거름 (11/02, 04와 같은 방식). 5분 재사용
+  // shortcut: fetchAll 2,000건 상한 — 긴 기간이면 앞 2,000건 안에서만 찾음. 넘는 일이 잦으면 서버 초성 검색으로
+  pool: (query: OrderListQuery) =>
+    queryOptions({
+      queryKey: [...orderQueries.all(), 'pool', { ...query, q: '' }],
+      queryFn: ({ signal }) =>
+        fetchAll<OrderListItem>('/admin/orders', toServerQuery({ ...query, q: '' }), signal),
+      staleTime: 5 * 60_000,
+    }),
   list: (query: OrderListQuery, page: number, size: number) =>
     queryOptions({
       queryKey: [...orderQueries.all(), 'list', query, page, size],

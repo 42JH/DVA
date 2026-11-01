@@ -1,15 +1,15 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
+import { useDeferredValue, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { pageCount } from '@/shared/api/paging'
+import { pageCount, pageSlice } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
 import { fmtShortDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
+import { matchKo, suggest } from '@/shared/lib/search'
 import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
 import { BILLING_LABEL, errorText } from '@/features/company/labels'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
-const SEARCH_DELAY_MS = 300 // 서버 검색이라 칠 때마다 요청하지 않게 — 멈추고 0.3초 뒤
 const DEFAULTS = { q: '' }
 
 export interface CompanyRow {
@@ -27,24 +27,24 @@ export function useCompanyList() {
   const qc = useQueryClient()
   const navigate = useNavigate()
 
-  // 검색칸은 바로 바뀌고(URL), 요청은 멈춘 뒤에
-  const [searched, setSearched] = useState(params.q)
-  useEffect(() => {
-    const t = setTimeout(() => setSearched(params.q), SEARCH_DELAY_MS)
-    return () => clearTimeout(t)
-  }, [params.q])
-
+  // 검색어가 없으면 서버가 쪽을 나눔. 있으면 기업 전체를 받아 09 · 04와 같은 규칙(초성 · 띄어쓰기 무시)으로 앞에서 거름 (11/02)
+  const q = useDeferredValue(params.q.trim()) // 칠 때마다 거르니 입력이 먼저, 목록은 한 박자 늦게 (09와 같음)
+  const searching = q !== ''
   const list = useQuery({
-    ...companyQueries.list({ q: searched, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
-    placeholderData: keepPreviousData, // 쪽 · 검색이 바뀌는 동안 이전 표 유지 (깜빡임 방지)
+    ...companyQueries.list({ q: '', limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    placeholderData: keepPreviousData, // 쪽이 바뀌는 동안 이전 표 유지 (깜빡임 방지)
+    enabled: !searching,
   })
-  const companies = list.data?.data ?? []
+  const pool = useQuery({ ...companyQueries.pool(), enabled: searching })
+  const hit = searching ? (pool.data ?? []).filter((c) => matchKo(c.name, q)) : null
+  const companies = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? [])
 
-  const total = list.data?.total_count ?? 0
+  const total = hit ? hit.length : (list.data?.total_count ?? 0)
   const pages = pageCount(total, PAGE_SIZE)
+  const loaded = searching ? !!pool.data : !!list.data
   useEffect(() => {
-    if (list.data && page > pages) set({ page: pages }) // 지워서 마지막 쪽이 비면 앞쪽으로
-  }, [list.data, page, pages, set])
+    if (loaded && page > pages) set({ page: pages }) // 지워서 마지막 쪽이 비면 앞쪽으로
+  }, [loaded, page, pages, set])
 
   // 체크는 지금 보이는 줄 안에서만 — 쪽 · 검색이 바뀌면 안 보이는 기업이 지워지지 않게 걸러 씀
   const [checked, setChecked] = useState<Set<number>>(new Set())
@@ -88,11 +88,14 @@ export function useCompanyList() {
 
   return {
     q: params.q,
-    setQ: (q: string) => set({ q }), // 쪽은 1로
+    setQ: (v: string) => set({ q: v }), // 쪽은 1로
+    suggestions: suggest([...new Set((pool.data ?? []).map((c) => c.name))], q), // 추천 = 기업 이름
     rows,
     total,
-    isLoading: list.isPending,
-    loadError: list.error ? '기업 목록을 불러오지 못했습니다. 새로고침해 주세요.' : null,
+    isLoading: searching ? pool.isPending : list.isPending,
+    loadError: (searching ? pool.error : list.error)
+      ? '기업 목록을 불러오지 못했습니다. 새로고침해 주세요.'
+      : null,
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),

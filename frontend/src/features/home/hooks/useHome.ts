@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { fmtDateDay } from '@/shared/lib/format'
+import { fmtDateDay, fmtDurationParts } from '@/shared/lib/format'
 import { homeQueries } from '@/features/home/api/homeApi'
 import { TODAY_CARD_LABEL, type TodayCardKind } from '@/features/home/labels'
 
@@ -23,8 +23,15 @@ const CALLS_LINK: Record<TodayCardKind, string> = {
 }
 
 const count = (n: number | undefined) => (n === undefined ? '–' : n.toLocaleString('ko-KR'))
-// 평균 통화 시간 · 되묻기: 집계 API가 없어 숫자를 만들지 않음 (명세 §10 — 성공하는 척 금지, 02 대시보드와 같은 문구, 11/01 결정 A)
+// 평균 되묻기: 집계 API가 없어 숫자를 만들지 않음 (명세 §10 — 성공하는 척 금지, 11/01 결정 A)
+// 평균 통화 시간은 오늘 목록으로 화면에서 냄 (11/02, homeApi)
 const NO_STAT = '집계 API 없음'
+
+export interface HomeAverage {
+  label: string
+  value?: [string, string][] // [['3', '분'], ['40', '초']]. 없으면 '—' + note
+  note?: string
+}
 
 /** 01 홈 위쪽 — 검색(→ 03 주문 내역) · 오늘 숫자(카드 · 평균 모두 오늘 0시부터 시작한 통화 기준). 처리할 AI 미답변은 features/faq의 UnansweredPreview */
 export function useHome() {
@@ -46,20 +53,27 @@ export function useHome() {
     to: CALLS_LINK[kind],
   }))
 
+  const searchFor = (text: string) => {
+    const v = text.trim()
+    if (v) void navigate(`/orders?${new URLSearchParams({ q: v })}`)
+  }
+
   return {
     q,
     setQ,
-    search: () => {
-      const v = q.trim()
-      if (v) void navigate(`/orders?${new URLSearchParams({ q: v })}`)
-    },
+    search: () => searchFor(q),
+    searchFor, // 최근 검색어를 고르면 바로 03으로 (q 상태가 바뀌기 전이라 글을 직접 받음)
 
     todayLabel: fmtDateDay(new Date()),
     cards,
     averages: [
-      { label: '평균 통화 시간', note: NO_STAT },
+      {
+        label: '평균 통화 시간',
+        value: s?.avgDurationSec == null ? undefined : fmtDurationParts(s.avgDurationSec),
+        note: s && s.avgDurationSec === null ? '끝난 통화 없음' : undefined, // 불러오는 중엔 '—'만
+      },
       { label: '평균 되묻기 횟수', note: NO_STAT },
-    ],
+    ] satisfies HomeAverage[],
     todayError: today.error ? '오늘 숫자를 불러오지 못했습니다. 새로고침해 주세요.' : null,
   }
 }

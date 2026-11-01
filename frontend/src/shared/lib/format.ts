@@ -66,6 +66,17 @@ export function fmtDuration(seconds: number): string {
   return `${h ? `${h}시간 ` : ''}${Math.floor(seconds / 60) % 60}분 ${two(seconds % 60)}초`
 }
 
+/** 초 → 큰 숫자 · 작은 단위로 나눈 조각 [['3', '분'], ['40', '초']] (02 평균 카드 · 01 홈 평균) */
+export function fmtDurationParts(seconds: number): [string, string][] {
+  const s = Math.round(seconds)
+  const h = Math.floor(s / 3600) // 한 시간 넘으면 '1시간 5분 03초' (11/02)
+  return [
+    ...(h ? ([[String(h), '시간']] as [string, string][]) : []),
+    [String(Math.floor(s / 60) % 60), '분'],
+    [two(s % 60), '초'],
+  ]
+}
+
 /** 초 → '03:40', 한 시간부터 '1:05:03' (06 통화 안 시각 · 재생 바) */
 export function fmtClock(seconds: number): string {
   const h = Math.floor(seconds / 3600)
