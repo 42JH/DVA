@@ -35,8 +35,12 @@ const KINDS: ComplaintKind[] = [
 export interface Stats {
   total: number // 결과 필터 없는 전체 (분석이 아직 안 온 통화도 포함) = 04 '전체'와 같은 수
   counts: Record<Outcome, number>
-  complaintCalls: number // 불만이 확인된 통화 수 (hasComplaint=true)
+  complaintCalls: number // 불만이 확인된 통화 수 (analysis.complaints 가 있는 통화)
   complaints: Record<ComplaintKind, number> // 유형별 — 한 통화에 여러 유형이면 각각 셈 (합 ≥ complaintCalls)
+  // 평균 통화 시간(초) — 통계 API가 없어 목록의 startedAt · endedAt 으로 화면에서 냄 (11/01 사용자). 통화가 없으면 null
+  avgDurationSec: number | null
+  avgBy: Record<GaugeOutcome, number | null> // 결과별 평균 (접수 성공 · 실패 · 이관)
+  avgSampled: boolean // 목록을 2,000건까지만 받아서 평균을 냈음 (fetchAll 상한) → 화면에 '최근 2,000건 기준'
   unanswered: { count: number; recent: { at: string; question: string }[] } // 처리 안 된(OPEN) 질문, 최신순 (날짜별 8개 · 페르소나별 6개)
 }
 
@@ -79,10 +83,21 @@ async function count(path: string, query: Query, signal?: AbortSignal): Promise<
   ).total_count
 }
 
-interface ComplaintCallDto {
+/** 목록 한 줄에서 쓰는 것만 (API-21 CallListItem) */
+interface CallRowDto {
   callSessionSeq: number
-  analysis: { complaints: { type: ComplaintKind }[] } | null
+  startedAt: string | null
+  endedAt: string | null
+  analysis: { result: string; complaints: { type: ComplaintKind }[] } | null
 }
+const RESULT_OF: Record<string, GaugeOutcome> = {
+  REGISTERED: 'SUCCESS',
+  REGISTRATION_FAILED: 'FAILED',
+  HANDOFF: 'HANDOFF',
+}
+const durationSec = (r: CallRowDto) =>
+  r.startedAt && r.endedAt ? (Date.parse(r.endedAt) - Date.parse(r.startedAt)) / 1000 : null
+const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 interface UnansweredDto {
   callStartedAt: string | null
   occurredAt: string
@@ -100,16 +115,23 @@ async function statsOf(
     count('/calls', calls, signal),
     ...OUTCOMES.map((o) => count('/calls', { ...calls, result: RESULT[o] }, signal)),
   ])
-  // 불만 유형 필터가 없어 불만 통화 목록을 받아 유형을 셈 (하루 ~8건이라 보통 1요청)
-  const complaintRows = await fetchAll<ComplaintCallDto>(
-    '/calls',
-    { ...calls, hasComplaint: true },
-    signal,
-  )
+  // 범위의 통화 목록을 다 받아 불만 유형과 평균 통화 시간을 셈 (하루 ~130건 = 2요청. ponytail: 2,000건 상한 — 넘으면 '최근 2,000건 기준')
+  const rows = await fetchAll<CallRowDto>('/calls', calls, signal)
   const complaints = Object.fromEntries(KINDS.map((k) => [k, 0])) as Record<ComplaintKind, number>
-  for (const r of complaintRows)
-    for (const k of new Set((r.analysis?.complaints ?? []).map((c) => c.type)))
-      if (k in complaints) complaints[k]++
+  let complaintCalls = 0
+  for (const r of rows) {
+    const kinds = new Set((r.analysis?.complaints ?? []).map((c) => c.type))
+    if (kinds.size) complaintCalls++
+    for (const k of kinds) if (k in complaints) complaints[k]++
+  }
+  const secsOf = (pick: (r: CallRowDto) => boolean) =>
+    rows
+      .filter(pick)
+      .map(durationSec)
+      .filter((s): s is number => s !== null && s >= 0)
+  const avgBy = Object.fromEntries(
+    GAUGE.map((o) => [o, avg(secsOf((r) => RESULT_OF[r.analysis?.result ?? ''] === o))]),
+  ) as Record<GaugeOutcome, number | null>
   // 미답변: 서버가 오래된 순이라 끝 recent개를 받아 뒤집음
   const first = await api.get<ApiList<UnansweredDto>>('/unanswered-questions', {
     query: { ...unanswered, limit: recent, offset: 0 },
@@ -127,8 +149,11 @@ async function statsOf(
   return {
     total,
     counts: Object.fromEntries(OUTCOMES.map((o, i) => [o, byResult[i]])) as Record<Outcome, number>,
-    complaintCalls: complaintRows.length,
+    complaintCalls,
     complaints,
+    avgDurationSec: avg(secsOf(() => true)),
+    avgBy,
+    avgSampled: rows.length < total,
     unanswered: {
       count: first.total_count,
       recent: [...tail]

@@ -9,7 +9,7 @@ import {
   todayYmd,
   type Ymd,
 } from '@/shared/lib/dateRange'
-import { fmtDay, fmtDayRange, fmtPctSplit, fmtShortDate } from '@/shared/lib/format'
+import { fmtDay, fmtDayRange, fmtDuration, fmtPctSplit, fmtShortDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { COMPLAINT_LABEL, COMPLAINT_ORDER, OUTCOME_LABEL } from '@/features/dashboard/labels'
 import {
@@ -39,7 +39,13 @@ const hm = (iso: string) => {
 }
 /** 여러 날 목록 = 날짜만 (10/29: 'MM.DD HH:MM'이면 질문이 잘림). 다른 해면 연도 (10/30 연도 규칙) */
 const dayOnly = (iso: string) => fmtDay(iso).replace(/ \(.\)$/, '')
-const NO_STAT = '집계 API 없음' // 평균 통화 시간 · 되묻기: 명세 §10 — 성공하는 척 표시 금지
+const NO_STAT = '집계 API 없음' // 평균 되묻기: 명세 §10 — 성공하는 척 표시 금지
+/** 초 → 카드의 큰 값 [['3', '분'], ['40', '초']] */
+const clockParts = (sec: number): [string, string][] => [
+  [String(Math.floor(Math.round(sec) / 60)), '분'],
+  [two(Math.round(sec) % 60), '초'],
+]
+const durationText = (sec: number | null) => (sec === null ? '—' : fmtDuration(Math.round(sec)))
 
 /** 02 대시보드 훅 (와이어프레임 02, 10/30) — [날짜별 | 페르소나별] · 날짜 칸(기본 오늘) · 고른 버전은 URL에
  * 날짜별: 통화 결과(게이지 = 성공 · 실패 · 이관) · 평균 두 칸(집계 API 없음 → '—') · AI 미답변 · 불만 내역. 다른 기간과 비교 없음 (10/30)
@@ -132,8 +138,19 @@ export function useDashboard() {
             onClick: () => toCalls({ outcome: k }, from, to),
           })),
           // 평균 두 칸: 통계 API가 없어 값 대신 안내 (BE 요청 B3)
+          // 평균 통화 시간은 목록으로 화면에서 냄 (11/01 사용자) · 되묻기는 줄 데이터가 없어 아직 '—'
           avgs: [
-            { key: 'time', icon: 'clock' as const, label: '평균 통화 시간', note: NO_STAT },
+            {
+              key: 'time',
+              icon: 'clock' as const,
+              label: '평균 통화 시간',
+              value: s.avgDurationSec === null ? undefined : clockParts(s.avgDurationSec),
+              split: [
+                ['접수 성공', durationText(s.avgBy.SUCCESS)],
+                ['접수 실패', durationText(s.avgBy.FAILED)],
+              ] as [string, string][],
+              note: s.avgSampled ? '최근 2,000건 기준' : undefined,
+            },
             { key: 'repeat', icon: 'repeat' as const, label: '평균 되묻기', note: NO_STAT },
           ],
           ...bottom(s, scopeOfRange, from !== to, { f: from, t: to }),

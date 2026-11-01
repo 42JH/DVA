@@ -43,13 +43,14 @@
   --spacing-content: 32px; /* p-content */
 
   /* 움직임 (11/01 영상 예시): 페이지가 바뀌면 본문이 떠오르고, 모달은 배경이 어두워지며 창이 살짝 커지면서 뜸
+     등장은 전부 backwards(끝나면 애니메이션이 빠짐) — transform 애니메이션이 both/forwards 로 남아 있으면 그 요소가 fixed 자손의 기준이 되어 모달 배경이 스크롤과 함께 밀림(11/01 버그)
      쓰는 곳: app/AppLayout(animate-page-in) · shared/ui/Modal(animate-dim-in · animate-pop-in). 늘 motion-safe: 와 같이 (움직임 줄이기 설정이면 안 움직임) */
-  --animate-page-in: page-in 0.25s ease-out both;
-  --animate-dim-in: dim-in 0.2s ease-out both;
-  --animate-pop-in: pop-in 0.2s ease-out both;
+  --animate-page-in: page-in 0.25s ease-out backwards;
+  --animate-dim-in: dim-in 0.2s ease-out backwards;
+  --animate-pop-in: pop-in 0.2s ease-out backwards;
   /* 탭을 바꾸면 아래 내용이 그 방향에서 미끄러져 들어옴 (shared/lib/useSlideDir — 02 · 04 · 09) */
-  --animate-slide-in-r: slide-in-r 0.2s ease-out both;
-  --animate-slide-in-l: slide-in-l 0.2s ease-out both;
+  --animate-slide-in-r: slide-in-r 0.2s ease-out backwards;
+  --animate-slide-in-l: slide-in-l 0.2s ease-out backwards;
   @keyframes slide-in-r {
     from {
       opacity: 0;
@@ -65,7 +66,7 @@
   /* 퇴장 (shared/lib/useExitGhost 가 복제본에 붙임) · 펼침 띠 (shared/ui/Table SubRow — grid-rows 1fr ↔ 0fr) */
   --animate-dim-out: dim-out 0.15s ease-in forwards;
   --animate-pop-out: pop-out 0.15s ease-in forwards;
-  --animate-expand: expand 0.2s ease-out both;
+  --animate-expand: expand 0.2s ease-out backwards;
   --animate-collapse: collapse 0.15s ease-in forwards;
   @keyframes dim-out {
     to {
