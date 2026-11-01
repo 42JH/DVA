@@ -65,7 +65,6 @@ export function FaqFormModal({
           onChange={(e) => vm.setQuestion(e.target.value)}
           placeholder="오늘 접수하면 오늘 수거해 가나요?"
           error={vm.questionError}
-          autoFocus={!vm.isEdit && vm.category !== ''}
         />
         <TextArea
           label="답변"

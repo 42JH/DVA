@@ -1,10 +1,16 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { Button } from './Button'
 
 // 오버레이 두 가지 (와이어프레임 13 · 14)
 // ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]
 // FormModal:     600(08 사원 수정) / 680(09 질의) / 960(03 송장표 · 주문 추가) 폭 · 제목 + ✕ · 내용 · 아래 버튼 — 안쪽 여백 32
 // 둘 다 뒤 화면을 #2B2F36 40%로 가리고, Esc로 닫힘. 창 자체는 DOM 흐름 밖(fixed)
+// 키보드: 열면 창 안 첫 칸으로 포커스, Tab은 창 안에서만 돎, 닫으면 연 버튼으로 돌아감. 창이 겹치면 맨 위 창만 키를 받음
+
+const FOCUSABLE =
+  'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+const FIRST_FIELD =
+  'input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]):not([aria-label="닫기"])'
 
 function Overlay({
   onClose,
@@ -15,20 +21,52 @@ function Overlay({
   children: ReactNode
   label: string
 }) {
+  const box = useRef<HTMLDivElement>(null)
+  const downOnDim = useRef(false) // 누르기 시작한 곳이 어두운 배경일 때만 닫음 (창 안에서 끌다가 밖에서 놓으면 안 닫힘)
+
+  // 열 때 한 번 (onClose가 렌더마다 새 함수여도 다시 안 돎)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const prev = document.activeElement as HTMLElement | null
+    ;(box.current?.querySelector<HTMLElement>(FIRST_FIELD) ?? box.current)?.focus()
+    return () => prev?.focus()
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = box.current
+      const dialogs = document.querySelectorAll('[role="dialog"]')
+      if (!el || dialogs[dialogs.length - 1] !== el) return
+      if (e.key === 'Escape') return onClose()
+      if (e.key !== 'Tab') return
+      const els = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)]
+      const first = els[0]
+      const last = els[els.length - 1]
+      const cur = document.activeElement
+      const inside = cur !== el && el.contains(cur)
+      if (!first) e.preventDefault()
+      else if (e.shiftKey ? !inside || cur === first : !inside || cur === last) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+      }
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-ink/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-ink/40"
+      onMouseDown={(e) => (downOnDim.current = e.target === e.currentTarget)}
+      onClick={(e) => downOnDim.current && e.target === e.currentTarget && onClose()}
+    >
       <div
+        ref={box}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()} // 창이 클릭되는 줄 안에 그려져도 그 줄의 클릭으로 안 번지게
         // 창 높이 = 브라우저 높이 - 위아래 32씩까지. 넘치면 FormModal의 내용 칸만 스크롤 (주문 상세처럼 긴 창)
-        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)]"
+        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none"
       >
         {children}
       </div>
