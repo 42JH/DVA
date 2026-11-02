@@ -31,13 +31,13 @@ export function PersonaPage() {
 
   if (vm.editing)
     return (
-      <div className="h-full min-h-[600px]">
+      <div className="min-h-[600px] flex-1">
         <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
       </div>
     )
 
   return (
-    <div className="flex h-full min-h-[600px] gap-6">
+    <div className="flex min-h-[600px] flex-1 gap-6">
       <div className="min-w-0 flex-1">
         {vm.compare ? (
           <VersionDiffCard view={vm.compare} onClose={vm.closeCompare} />

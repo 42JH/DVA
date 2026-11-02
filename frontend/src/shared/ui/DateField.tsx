@@ -53,7 +53,7 @@ export function DateField({
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className={`flex ${compact ? 'h-10' : 'h-12'} items-center gap-2 rounded-lg bg-surface px-5 text-body whitespace-nowrap ${
+        className={`flex ${compact ? 'h-9' : 'h-10'} items-center gap-2 rounded-lg bg-surface px-5 text-body whitespace-nowrap ${
           open ? 'ring-[1.5px] ring-action ring-inset' : 'ring-1 ring-line ring-inset'
         }`}
       >

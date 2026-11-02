@@ -55,7 +55,7 @@ function Cell({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`h-11 rounded-lg text-label ${
+      className={`h-10 rounded-lg text-label ${
         selected
           ? 'bg-action-soft font-bold text-action'
           : disabled
@@ -156,7 +156,7 @@ export function Calendar({
           <>
             <div className="grid grid-cols-7 text-center text-caption text-sub">
               {DOW.map((d) => (
-                <span key={d} className="h-7 leading-7">
+                <span key={d} className="h-6 leading-6">
                   {d}
                 </span>
               ))}
@@ -176,7 +176,7 @@ export function Calendar({
                     type="button"
                     disabled={future}
                     onClick={() => setRange((r) => pickRange(r, k))}
-                    className={`relative grid h-11 place-items-center ${
+                    className={`relative grid h-10 place-items-center ${
                       inside ? 'bg-action-soft' : ''
                     } ${isFrom && range.to ? 'rounded-l-full bg-action-soft' : ''} ${isTo ? 'rounded-r-full bg-action-soft' : ''}`}
                   >

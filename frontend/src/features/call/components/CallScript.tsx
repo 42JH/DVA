@@ -52,7 +52,7 @@ export function CallScript({
     <section
       className={`flex min-h-0 flex-col rounded-xl bg-surface p-8 ring-1 ring-line ring-inset ${className}`}
     >
-      <div className="flex h-10 items-baseline gap-4">
+      <div className="flex h-9 items-baseline gap-4">
         <h2 className="shrink-0 text-card font-bold">통화 스크립트</h2>
         {persona && (
           <>
@@ -73,7 +73,7 @@ export function CallScript({
             aria-label={player.playing ? '일시정지' : '재생'}
             disabled={!canPlay}
             onClick={player.toggle}
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-action text-white disabled:bg-line disabled:text-muted"
+            className="grid size-9 shrink-0 place-items-center rounded-full bg-action text-white disabled:bg-line disabled:text-muted"
           >
             {player.playing ? (
               <svg viewBox="0 0 20 20" className="size-4" fill="currentColor" aria-hidden>
@@ -107,7 +107,7 @@ export function CallScript({
             />
           </div>
         </div>
-        <div className="mt-2 flex h-8 items-center pl-14 text-label">
+        <div className="mt-2 flex h-7 items-center pl-13 text-label">
           <span className={canPlay ? 'text-sub' : 'text-muted'}>
             {STATE_TEXT[player.state] ?? `${player.now} / ${player.length}`}
           </span>
@@ -127,7 +127,7 @@ export function CallScript({
               key={si}
               className="my-2 rounded-lg bg-danger-soft py-1 ring-1 ring-danger/40 ring-inset"
             >
-              <p className="h-7 px-2.5 text-caption leading-7 font-bold text-danger">
+              <p className="h-6 px-2.5 text-caption leading-6 font-bold text-danger">
                 불만 · {seg.complaint.label}
               </p>
               <ul>

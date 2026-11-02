@@ -24,7 +24,7 @@ function Card({
       </div>
       <div className="flex-1 px-6 pt-5">{children}</div>
       {onMore && (
-        <div className="flex h-14 items-center border-t border-line px-6">
+        <div className="flex h-12 items-center border-t border-line px-6">
           <button
             type="button"
             onClick={onMore}
@@ -39,7 +39,7 @@ function Card({
 }
 
 const Head = ({ left, right }: { left: string; right: string }) => (
-  <div className="flex h-8 items-center justify-between border-b border-line text-caption text-muted">
+  <div className="flex h-7 items-center justify-between border-b border-line text-caption text-muted">
     <span>{left}</span>
     <span>{right}</span>
   </div>

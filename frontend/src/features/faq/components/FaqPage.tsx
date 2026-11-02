@@ -1,5 +1,16 @@
 import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
-import { Button, Markdown, Pagination, SearchBox, Table, Tabs, Tag, type Column } from '@/shared/ui'
+import {
+  FilterBar,
+  ListPage,
+  Button,
+  Markdown,
+  Pagination,
+  SearchBox,
+  Table,
+  Tabs,
+  Tag,
+  type Column,
+} from '@/shared/ui'
 import { useFaqList, type CategoryFilter, type FaqRow } from '@/features/faq/hooks/useFaqList'
 import { FaqFormModal } from './FaqFormModal'
 
@@ -16,6 +27,7 @@ export function FaqPage() {
       key: 'category',
       header: '분류',
       width: 160, // 가장 긴 '배송·운송장' 태그 + 여백
+      pill: true,
       cell: (r) => <Tag kind="gray">{r.category}</Tag>,
     },
     {
@@ -57,11 +69,11 @@ export function FaqPage() {
   const slide = slideClass(useSlideDir(tabs.findIndex((t) => t.key === vm.category))) // 탭을 바꾸면 목록이 그 방향에서 미끄러져 들어옴 (11/01)
 
   return (
-    <div className="flex flex-col gap-6">
+    <ListPage>
       <Tabs items={tabs} value={vm.category} onChange={vm.setCategory} />
 
-      {/* 목록 맨 윗줄: 검색칸(버튼 앞까지) + [FAQ 추가] 48 — 08 · 04와 같은 틀 */}
-      <div className="flex gap-6">
+      {/* 목록 맨 윗줄: 검색칸(버튼 앞까지) + [FAQ 추가] — 여백은 FilterBar 한 곳 */}
+      <FilterBar>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
@@ -73,7 +85,7 @@ export function FaqPage() {
         <Button kind="primary" tall onClick={vm.openAdd}>
           FAQ 추가
         </Button>
-      </div>
+      </FilterBar>
 
       <div key={vm.category} className={slide}>
         <Table
@@ -119,6 +131,6 @@ export function FaqPage() {
           onAdded={vm.showAdded}
         />
       )}
-    </div>
+    </ListPage>
   )
 }

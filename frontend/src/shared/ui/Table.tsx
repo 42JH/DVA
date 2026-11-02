@@ -13,6 +13,7 @@ export interface Column<Row> {
   header: string
   width?: number | string // px 또는 '1fr'. 마지막 열은 보통 나머지
   align?: 'left' | 'right'
+  pill?: boolean // 셀이 알약(Tag)인 열 — 머리글을 알약 테두리가 아니라 안쪽 글자에 맞춤 (11/02 사용자: 머리글과 상태값 정렬)
   cell: (row: Row, ctx: { tinted: boolean }) => ReactNode
 }
 
@@ -63,7 +64,7 @@ export function Table<Row>({
 
   return (
     <section className="rounded-xl bg-surface px-8 pt-8 pb-7 ring-1 ring-line ring-inset">
-      {head && <div className="mb-5 flex h-10 items-center justify-between">{head}</div>}
+      {head && <div className="mb-4 flex h-9 items-center justify-between">{head}</div>}
       {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
       <div
         className="mb-4 grid h-6 items-center text-label font-semibold text-sub"
@@ -76,7 +77,10 @@ export function Table<Row>({
             <span />
           ))}
         {columns.map((c) => (
-          <span key={c.key} className={`pr-4 ${c.align === 'right' ? 'text-right' : ''}`}>
+          <span
+            key={c.key}
+            className={`pr-4 ${c.align === 'right' ? 'text-right' : ''} ${c.pill ? 'pl-2.5' : ''}`} // pl-2.5 = Tag px-2.5
+          >
             {c.header}
           </span>
         ))}
@@ -114,7 +118,7 @@ export function Table<Row>({
                       : undefined
                   }
                   // 포커스 표시는 바탕색이 아니라 안쪽 선 (선택 · 펼친 줄의 바탕색을 덮지 않게)
-                  className={`group -mx-4 grid min-h-[66px] items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-action focus-visible:ring-inset ${
+                  className={`group -mx-4 grid min-h-[56px] items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-action focus-visible:ring-inset ${
                     isSelected
                       ? 'bg-action-soft'
                       : isOpen

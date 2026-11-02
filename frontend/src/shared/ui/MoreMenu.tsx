@@ -91,7 +91,7 @@ export function MoreMenu({ label, items }: { label: string; items: MoreMenuItem[
                   setOpen(false)
                   it.onSelect()
                 }}
-                className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-label hover:bg-bg disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent ${it.danger ? 'text-danger' : 'text-ink'}`}
+                className={`flex h-9 w-full items-center gap-3 rounded-lg px-3 text-label hover:bg-bg disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent ${it.danger ? 'text-danger' : 'text-ink'}`}
               >
                 <svg
                   viewBox="0 0 20 20"

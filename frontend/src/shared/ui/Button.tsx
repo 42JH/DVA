@@ -22,7 +22,7 @@ export function Button({ kind = 'normal', small, tall, className = '', ...rest }
     <button
       type="button"
       {...rest}
-      className={`${small ? 'h-8' : tall ? 'h-12' : 'h-10'} rounded-lg px-5 text-label font-semibold whitespace-nowrap ${KIND[kind]} disabled:bg-bg disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset aria-disabled:bg-bg aria-disabled:text-muted aria-disabled:ring-1 aria-disabled:ring-line aria-disabled:ring-inset ${className}`}
+      className={`${small ? 'h-7' : tall ? 'h-10' : 'h-9'} rounded-lg px-5 text-label font-semibold whitespace-nowrap ${KIND[kind]} disabled:bg-bg disabled:text-muted disabled:ring-1 disabled:ring-line disabled:ring-inset aria-disabled:bg-bg aria-disabled:text-muted aria-disabled:ring-1 aria-disabled:ring-line aria-disabled:ring-inset ${className}`}
     />
   )
 }

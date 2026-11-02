@@ -1,5 +1,5 @@
 import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
-import { DateField, Tabs } from '@/shared/ui'
+import { ListPage, DateField, Tabs } from '@/shared/ui'
 import { useDashboard } from '@/features/dashboard/hooks/useDashboard'
 import { AvgCard } from './AvgCard'
 import { ComplaintCard, UnansweredCard } from './BottomCards'
@@ -20,7 +20,7 @@ export function DashboardPage() {
     )
 
   return (
-    <div className="flex flex-col gap-6">
+    <ListPage>
       <Tabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} right={right} />
 
       <div
@@ -63,6 +63,6 @@ export function DashboardPage() {
           </>
         ) : null}
       </div>
-    </div>
+    </ListPage>
   )
 }

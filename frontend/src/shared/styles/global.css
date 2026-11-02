@@ -23,18 +23,19 @@
   --color-surface: #ffffff;
 
   /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
-  --font-sans: 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
-  --text-title: 28px; /* 화면 제목 700 */
+  --font-sans:
+    'Pretendard Variable', 'Pretendard', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif; /* 웹폰트(index.html) 이름이 'Pretendard Variable' — 안 깔린 PC도 같은 글꼴 (11/02) */
+  --text-title: 24px; /* 화면 제목 700 (11/02: +4 되돌림 — 현업 피드백 '폰트 큼') */
   --text-title--line-height: 1.4;
-  --text-card: 24px; /* 카드 제목 700 */
+  --text-card: 20px; /* 카드 제목 700 */
   --text-card--line-height: 1.4;
-  --text-strong: 22px; /* 핵심 값 600 */
+  --text-strong: 18px; /* 핵심 값 600 */
   --text-strong--line-height: 1.4;
-  --text-body: 20px; /* 본문 400 */
+  --text-body: 16px; /* 본문 400 */
   --text-body--line-height: 1.4;
-  --text-label: 18px; /* 보조 500 */
+  --text-label: 14px; /* 보조 500 */
   --text-label--line-height: 1.4;
-  --text-caption: 17px; /* 캡션 500 */
+  --text-caption: 13px; /* 캡션 500 */
   --text-caption--line-height: 1.4;
 
   --tracking-tight: -0.025em;

@@ -40,7 +40,7 @@ export function VersionTable({
       </p>
 
       <div
-        className={`mt-5 grid ${COLS} h-8 items-center border-b border-line text-caption text-muted`}
+        className={`mt-4 grid ${COLS} h-7 items-center border-b border-line text-caption text-muted`}
       >
         <span>페르소나 · 버전</span>
         <span>운영 기간</span>
@@ -67,7 +67,7 @@ export function VersionTable({
               type="button"
               onClick={r.onSelect}
               aria-pressed={r.selected}
-              className={`-mx-4 grid w-[calc(100%+32px)] ${COLS} h-[72px] items-center rounded-lg px-4 text-left ${
+              className={`-mx-4 grid w-[calc(100%+32px)] ${COLS} h-[60px] items-center rounded-lg px-4 text-left ${
                 r.selected ? 'bg-action-soft' : 'hover:bg-bg'
               }`}
             >

@@ -80,7 +80,7 @@ export function AddressField({
           className="cursor-pointer bg-bg!"
         />
       </div>
-      <Button className="h-11! w-11 px-0!" onClick={onSearch} aria-label={searchLabel}>
+      <Button className="h-10! w-10 px-0!" onClick={onSearch} aria-label={searchLabel}>
         <svg
           viewBox="0 0 20 20"
           className="mx-auto size-5 stroke-ink"

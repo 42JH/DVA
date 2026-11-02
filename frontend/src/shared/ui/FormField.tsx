@@ -33,7 +33,7 @@ function Wrap({
   if (inline)
     return (
       <label className="grid grid-cols-[120px_1fr] items-start gap-x-4">
-        <span className="flex h-11 items-center text-label text-sub">{label}</span>
+        <span className="flex h-10 items-center text-label text-sub">{label}</span>
         <span className="flex min-w-0 flex-col gap-2">
           {children}
           {note}
@@ -73,7 +73,7 @@ export function TextField({
           <input
             {...rest}
             readOnly
-            className={`${BOX} h-11 bg-bg pr-10 text-sub ring-1 ring-line ${className}`} // 오른쪽은 자물쇠 자리(16) + 여백만큼 비움
+            className={`${BOX} h-10 bg-bg pr-10 text-sub ring-1 ring-line ${className}`} // 오른쪽은 자물쇠 자리(16) + 여백만큼 비움
           />
           <svg
             viewBox="0 0 20 20"
@@ -94,7 +94,7 @@ export function TextField({
     <input
       {...rest}
       aria-invalid={!!error}
-      className={`${BOX} h-11 bg-surface ${STATE(error)} ${suffix ? 'pr-10' : ''} ${className}`}
+      className={`${BOX} h-10 bg-surface ${STATE(error)} ${suffix ? 'pr-10' : ''} ${className}`}
     />
   )
   return (

@@ -22,7 +22,7 @@ export function Tabs<K extends string>({
   right?: React.ReactNode // [CSV 내보내기] [삭제] 등
 }) {
   return (
-    <div role="tablist" className="flex h-12 items-center gap-10 border-b border-line">
+    <div role="tablist" className="flex h-10 items-center gap-10 border-b border-line">
       {items.map((t) => {
         const on = t.key === value
         return (
@@ -74,7 +74,7 @@ export function CountTabs<K extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={`flex h-12 items-center gap-2 rounded-lg px-5 text-body ring-inset ${
+            className={`flex h-10 items-center gap-2 rounded-lg px-5 text-body ring-inset ${
               on
                 ? 'bg-action-soft font-semibold text-action ring-[1.5px] ring-action'
                 : 'bg-surface text-ink ring-1 ring-line'

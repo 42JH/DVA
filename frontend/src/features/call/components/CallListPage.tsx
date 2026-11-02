@@ -1,4 +1,6 @@
 import {
+  FilterBar,
+  ListPage,
   Button,
   DateField,
   Pagination,
@@ -48,6 +50,7 @@ export function CallListPage() {
       key: 'outcome',
       header: '통화 결과',
       width: 146,
+      pill: true,
       cell: (r, { tinted }) => (
         <Tag kind={r.outcomeTag} onTinted={tinted}>
           {r.outcomeLabel}
@@ -75,11 +78,11 @@ export function CallListPage() {
   ]
 
   return (
-    <div className="flex flex-col gap-6">
+    <ListPage>
       <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
 
-      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 통화 결과 + [CSV 내보내기] (03 · 08 · 09와 같은 틀, 높이 48) */}
-      <div className="flex items-center gap-3">
+      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 통화 결과 + [CSV 내보내기] — 여백은 FilterBar 한 곳 */}
+      <FilterBar>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
@@ -99,7 +102,7 @@ export function CallListPage() {
         <Button tall disabled={!vm.canExport || vm.exporting} onClick={vm.exportCsv}>
           {vm.exporting ? '내보내는 중…' : 'CSV 내보내기'}
         </Button>
-      </div>
+      </FilterBar>
 
       <div key={vm.tab} className={slide}>
         <Table
@@ -132,6 +135,6 @@ export function CallListPage() {
           footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
         />
       </div>
-    </div>
+    </ListPage>
   )
 }

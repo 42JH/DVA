@@ -1,4 +1,6 @@
 import {
+  FilterBar,
+  ListPage,
   Button,
   ConfirmDialog,
   DateField,
@@ -37,6 +39,7 @@ export function OrderListPage() {
       key: 'status',
       header: '상태',
       width: 112,
+      pill: true,
       cell: (r) => <Tag kind={r.statusTag}>{r.statusLabel}</Tag>,
     },
     {
@@ -76,15 +79,15 @@ export function OrderListPage() {
   const slide = slideClass(useSlideDir(vm.statusOptions.findIndex((o) => o.value === vm.status)))
 
   return (
-    <div className="flex flex-col gap-4">
+    <ListPage>
       {/* 상태 탭 — 04 통화 내역 · 09 FAQ처럼 맨 위 밑줄 탭 (11/01, 칩 버튼에서 바꿈) */}
       <Tabs
         items={vm.statusOptions.map((o) => ({ key: o.value, label: o.label }))}
         value={vm.status}
         onChange={vm.setStatus}
       />
-      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 버튼 2개 (04 · 09와 같은 틀, 높이 48) */}
-      <div className="flex items-center gap-3">
+      {/* 목록 맨 윗줄: 검색 + 날짜 칸 + 버튼 2개 — 여백은 FilterBar 한 곳 */}
+      <FilterBar>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
@@ -100,7 +103,7 @@ export function OrderListPage() {
         <Button tall kind="primary" onClick={vm.openAdd}>
           주문 추가
         </Button>
-      </div>
+      </FilterBar>
 
       {vm.notice && (
         <p role="status" className="text-label text-action">
@@ -181,6 +184,6 @@ export function OrderListPage() {
           onClose={vm.backToDetail}
         />
       )}
-    </div>
+    </ListPage>
   )
 }
