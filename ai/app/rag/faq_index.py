@@ -31,9 +31,9 @@ class FaqIndex:
         self.writer_lock, self.snapshot_lock = threading.Lock(), threading.Lock()
         generation, faqs = state.read(exclude_blocked=True)
         chunks = tuple(chunk for faq in faqs for chunk in faq.chunks)
-        # 재시작은 캐시/기존 포인트를 검증하며 문서를 재임베딩하지 않는다.
+        # 재시작은 캐시/기존 포인트를 검증하며 문서를 재임베딩하지 않는다. 등록 때 이미 통과한 길이 검증(GPU)은 다시 하지
+        # 않는다: GPU VM은 30분 뒤 자동 중지라 기동 때 부르면 전화 서버가 뜨지 못한다(2026-11-02 Jenkins #52·#53)
         if chunks:
-            self.validate_chunks(chunks)
             for start in range(0, len(chunks), self.batch_size):
                 batch = chunks[start:start+self.batch_size]
                 pairs = [(chunk, self._required_cache(chunk)) for chunk in batch]

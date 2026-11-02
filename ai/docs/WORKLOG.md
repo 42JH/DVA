@@ -1405,3 +1405,8 @@
 ### 남은 것
 - develop-ai 병합·배포(사용자). 배포 뒤 GPU가 꺼져 있어도 기동하는지, GPU를 켠 뒤 FAQ 처리 재시도가 성공하는지.
 - GPU가 꺼진 동안 FAQ 이벤트는 처리기 재시도 상한(`retry_max_sec`)까지 미뤄진다. 실패 이벤트가 큐를 막는 문제(검수 3번)는 그대로다.
+
+### 이어서: 재시작 경로의 GPU 호출(Jenkins #53)
+- #53(`7648752`)도 기동 실패: `FaqIndex.__init__`이 등록된 FAQ의 기존 조각 전체를 GPU로 다시 검증했다. 앞 수정의 테스트는 빈 색인이라 이 경로를 못 잡았다.
+- `FaqIndex.__init__`의 재검증을 뺐다(등록 때 이미 통과, 로컬 Qdrant 벡터 확인은 유지). `test_faq_runtime`은 빈 색인·등록된 FAQ가 있는 재시작 둘 다, `test_faq_index` 재시작 테스트는 GPU 검증을 다시 부르지 않음을 확인(이전 코드에서 2개 실패).
+- 기동 경로 전체 점검: GPU를 부르는 곳은 이제 FAQ 등록(`FaqIndex._apply_locked`, 처리기 백그라운드)과 통화 중 검색의 리랭킹(`RagService.search`)뿐. 기동 때 남은 외부 호출은 같은 compose의 로컬 Qdrant(컬렉션 확인·포인트 확인·삭제 정리)뿐이다. 페르소나 동기화·RAG warmup·FAQ 처리기는 백그라운드, `/health`는 고정 응답.

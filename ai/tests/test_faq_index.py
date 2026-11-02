@@ -78,10 +78,11 @@ def test_add_updates_bm25_and_dense_from_same_generation_and_restart(setup):
     assert snap.generation==1 and snap.point_ids==tuple(c.point_id for c in original.chunks)
     found=snap.search.search('접수',top_k=5)
     assert {row['chunk_id'] for row in found['all_results']}==set(snap.point_ids)
-    calls=list(env.embeddings.calls)
+    calls,validated=list(env.embeddings.calls),list(env.validated)
     restarted=env.new_index()
     assert restarted.current().point_ids==snap.point_ids
     assert env.embeddings.calls==calls
+    assert env.validated==validated  # 재시작은 GPU 길이 검증을 다시 부르지 않는다(GPU가 꺼져 있어도 기동)
     assert env.state.read()==(1,(original,))
 
 
