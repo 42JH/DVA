@@ -71,11 +71,7 @@ export class CustomersRepository {
           'personalPinSeq',p.personal_pin_seq,'label',p.label,'addressData',p.address_data,'version',p.version)
           ORDER BY p.personal_pin_seq)
           FROM personal_pins p WHERE p.customer_seq=c.customer_seq AND c.status='ACTIVE'), '[]'::jsonb),
-        'companyPins', COALESCE((SELECT jsonb_agg(jsonb_build_object(
-          'companyPinSeq',p.company_pin_seq,'label',p.label,'departmentName',p.department_name,'departmentSeq',p.department_seq,
-          'addressData',p.address_data,'version',p.version) ORDER BY p.company_pin_seq)
-          FROM company_pins p WHERE p.organization_seq=o.organization_seq
-            AND c.status='ACTIVE' AND m.status='ACTIVE' AND o.status='ACTIVE'), '[]'::jsonb)
+        'companyPins', '[]'::jsonb
       ) AS context
       FROM customers c
       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq

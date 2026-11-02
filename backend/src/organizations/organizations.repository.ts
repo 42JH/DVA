@@ -19,21 +19,25 @@ export class OrganizationsRepository {
   async searchDirectory(
     query: CompanyDirectoryQueryDto,
   ): Promise<PageRows<CompanyDirectoryEntryDto>> {
-    // 기업 공유 PIN 전체가 공식 공개 배송지라는 40번 합의를 적용한다.
-    // 구성원·개인 PIN과 조인하지 않고 기업 상태와 PIN을 한 SQL 스냅샷에서 읽는다.
+    // 사원 기본 주소를 복제하지 않고 현재 고객 정보와 활성 소속을 같은 스냅샷에서 읽는다.
     return await readPage<CompanyDirectoryEntryDto>(
       this.database.pool,
       `SELECT o.organization_seq AS "organizationSeq",o.name AS "organizationName",
-        p.company_pin_seq AS "companyPinSeq",p.label,p.department_name AS "departmentName",p.department_seq AS "departmentSeq",
-        p.address_data AS "addressData",p.version
-       FROM organizations o JOIN company_pins p ON p.organization_seq=o.organization_seq
-       WHERE o.status='ACTIVE' AND NOT EXISTS(
+        m.membership_seq AS "membershipSeq",c.customer_seq AS "customerSeq",
+        d.department_seq AS "departmentSeq",d.name AS "departmentName",
+        c.address_data || jsonb_build_object('name',c.name,'phoneNumber',c.phone_number) AS "addressData"
+       FROM organizations o JOIN memberships m ON m.organization_seq=o.organization_seq
+       JOIN customers c ON c.customer_seq=m.customer_seq
+       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=o.organization_seq
+       WHERE o.status='ACTIVE' AND m.status='ACTIVE' AND c.status='ACTIVE'
+         AND c.address_data IS NOT NULL AND NOT EXISTS(
          SELECT 1 FROM unnest($1::text[]) AS terms(term)
-         WHERE strpos(lower(normalize(concat_ws(' ',o.name,p.search_text,
-           p.address_data->>'dongName',p.address_data->>'postalCode'),NFC)),lower(normalize(term,NFC)))=0)`,
+         WHERE strpos(lower(normalize(concat_ws(' ',o.name,d.name,c.name,c.phone_number,
+           c.address_data->>'roadAddress',c.address_data->>'jibunAddress',c.address_data->>'detailAddress',
+           c.address_data->>'dongName',c.address_data->>'postalCode'),NFC)),lower(normalize(term,NFC)))=0)`,
       [query.q.split(' ')],
       query,
-      'lower(normalize("organizationName",NFC)),"organizationSeq","companyPinSeq"',
+      'lower(normalize("organizationName",NFC)),"organizationSeq","customerSeq"',
     );
   }
 

@@ -28,12 +28,6 @@ export class OrganizationDeletionService {
         const departments = await this.repository.departments(client, companyId, departmentId);
         if (departmentOnly && !departments.length)
           throw new ApiException(404, 'NOT_FOUND', '부서를 찾을 수 없습니다.');
-        if (departmentOnly && (await this.repository.hasUnassignedPins(client, companyId)))
-          throw new ApiException(
-            409,
-            'INVALID_STATE',
-            '부서가 연결되지 않은 기업 PIN을 먼저 실제 부서 또는 기업 공용으로 지정해 주세요.',
-          );
         const context = { organizationSeq: companyId, organizationName: company.name };
         for (const member of await this.repository.removeMembers(client, companyId, departmentId))
           await this.audit.recordSuccess(

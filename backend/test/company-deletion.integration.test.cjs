@@ -115,13 +115,19 @@ async function fixture() {
   ).rows[0].membership_seq;
   return { company, department, customer, member, phone };
 }
+// 폐기된 API 대신 과거 기업 PIN 행을 직접 준비해 삭제·이력 보존 경로를 검증한다.
 async function companyPin(f, fields = {}) {
-  const result = await request('POST', `/companies/${f.company}/pins`, {
-    addressData: address,
-    ...fields,
-  });
-  assert.equal(result.status, 201, JSON.stringify(result.body));
-  return result.body.data.companyPinSeq;
+  const departmentSeq = fields.departmentSeq ?? null;
+  const departmentName = departmentSeq
+    ? (await pool.query('SELECT name FROM departments WHERE department_seq=$1', [departmentSeq]))
+        .rows[0].name
+    : (fields.departmentName ?? null);
+  return (
+    await pool.query(
+      'INSERT INTO company_pins(organization_seq,department_seq,department_name,address_data) VALUES($1,$2,$3,$4) RETURNING company_pin_seq',
+      [f.company, departmentSeq, departmentName, fields.addressData ?? address],
+    )
+  ).rows[0].company_pin_seq;
 }
 async function order(f, method = 'credit', fields = {}) {
   const result = await request(
@@ -152,40 +158,18 @@ async function detail(id) {
   return (await request('GET', `/orders/${id}`)).body.data;
 }
 
-test('PIN department identity survives rename, supports legacy names and rejects cross-company assignment', async () => {
+test('legacy PIN department identity and display name survive a department rename', async () => {
   const f = await fixture(),
-    other = await fixture();
-  const pin = await companyPin(f, { departmentSeq: f.department });
+    pin = await companyPin(f, { departmentSeq: f.department });
   assert.equal(
-    (
-      await request('POST', `/companies/${f.company}/pins`, {
-        departmentSeq: other.department,
-        addressData: address,
-      })
-    ).status,
-    422,
-  );
-  assert.equal(
-    (await request('PATCH', `/departments/${f.department}`, { name: '플랫폼팀' })).status,
+    (await request('PATCH', '/departments/' + f.department, { name: '플랫폼팀' })).status,
     204,
   );
-  let pins = (await request('GET', `/companies/${f.company}/pins`)).body.data;
-  assert.equal(pins[0].departmentSeq, f.department);
-  assert.equal(pins[0].departmentName, '플랫폼팀');
-  assert.equal(pins[0].version, 2);
-  await companyPin(f, {
-    departmentName: '  플랫폼팀 ',
-    addressData: { ...address, roadAddress: '보존로 2' },
-  });
-  pins = (await request('GET', `/companies/${f.company}/pins`)).body.data;
-  assert.equal(pins[1].departmentSeq, f.department);
-  assert.equal(
-    (await request('PATCH', `/company-pins/${pin}`, { departmentSeq: null })).status,
-    200,
-  );
-  pins = (await request('GET', `/companies/${f.company}/pins`)).body.data;
-  assert.equal(pins[0].departmentSeq, null);
-  assert.equal(pins[0].departmentName, null);
+  const stored = (await pool.query('SELECT * FROM company_pins WHERE company_pin_seq=$1', [pin]))
+    .rows[0];
+  assert.equal(stored.department_seq, f.department);
+  assert.equal(stored.department_name, '플랫폼팀');
+  assert.equal(stored.version, 2);
 });
 
 test('settled company and department names are snapshots independent of subsequent renames', async () => {
@@ -411,8 +395,12 @@ test('department deletion detaches its employees and deletes only its pins while
     other,
   );
   assert.deepEqual(
-    (await request('GET', `/companies/${f.company}/pins`)).body.data
-      .map((p) => p.companyPinSeq)
+    (
+      await pool.query('SELECT company_pin_seq FROM company_pins WHERE organization_seq=$1', [
+        f.company,
+      ])
+    ).rows
+      .map((p) => p.company_pin_seq)
       .sort((a, b) => a - b),
     [common, retained].sort((a, b) => a - b),
   );
@@ -512,19 +500,20 @@ test('detachment preserves the customer personal monthly policy without carrying
   );
 });
 
-test('unassigned legacy PIN names block department deletion until explicitly assigned or made common', async () => {
-  const f = await fixture();
-  const pin = await companyPin(f, { departmentName: '어느 부서인지 모름' });
-  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 409);
+test('unassigned legacy PINs are preserved without blocking department deletion after PIN API retirement', async () => {
+  const f = await fixture(),
+    pin = await companyPin(f, { departmentName: '어느 부서인지 모름' });
+  const before = (await pool.query('SELECT * FROM company_pins WHERE company_pin_seq=$1', [pin]))
+    .rows[0];
+  assert.equal((await request('DELETE', '/departments/' + f.department)).status, 204);
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM company_pins WHERE company_pin_seq=$1', [pin])).rows[0],
+    before,
+  );
   assert.equal(
     (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
-    1,
+    0,
   );
-  assert.equal(
-    (await request('PATCH', `/company-pins/${pin}`, { departmentSeq: f.department })).status,
-    200,
-  );
-  assert.equal((await request('DELETE', `/departments/${f.department}`)).status, 204);
 });
 
 test('audit failure after all company deletes rolls back the complete operation', async () => {

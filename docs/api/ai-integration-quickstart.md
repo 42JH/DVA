@@ -22,7 +22,7 @@
 }
 ```
 
-`+8210...`는 `010...`으로 변환한다. 응답의 `data.lookupStatus`는 `REGISTERED`, `UNREGISTERED`, `WITHDRAWN`이다. 등록 고객 번호는 `data.customer.customerSeq`, 주소록은 `data.personalPins`·`data.companyPins`에서 읽는다. 고객이나 주문을 새로 만들지는 않는다.
+`+8210...`는 `010...`으로 변환한다. 응답의 `data.lookupStatus`는 `REGISTERED`, `UNREGISTERED`, `WITHDRAWN`이다. 등록 고객 번호는 `data.customer.customerSeq`, 기본 출발지는 `data.customer`의 현재 이름·전화번호·address를 사용한다. 개인 주소록은 `data.personalPins`, 기업 배송지는 `GET /api/companies/search`에서 읽는다. `companyPins`는 폐기된 호환 필드로 항상 빈 배열이다. 고객이나 주문을 새로 만들지는 않는다.
 
 **`data.callSessionSeq`를 보관하고 상담 중 주문 조회·취소·주소록 API의 `call_session_seq` 헤더에 전달한다.** call에는 최초 수신 이벤트의 통화 ID와 created_at을 변환한 시각을 넣는다. 같은 통화의 재요청은 같은 번호를 반환하고, 발신번호·수신 시각이 달라지면 409다. 미등록·탈퇴 고객도 통화 번호는 반환하지만 기존 고객의 주문·주소록 접근 권한을 부여하지 않는다.
 

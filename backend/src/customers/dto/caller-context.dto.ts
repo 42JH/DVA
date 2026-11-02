@@ -49,15 +49,6 @@ export class PersonalContextPinDto {
   @ApiProperty({ minimum: 1 }) version!: number;
 }
 
-export class CompanyContextPinDto {
-  @ApiProperty({ type: Number, nullable: true }) departmentSeq!: number | null;
-  @ApiProperty({ minimum: 1 }) companyPinSeq!: number;
-  @ApiProperty({ type: String, nullable: true }) label!: string | null;
-  @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;
-  @ApiProperty({ type: PinAddressDto }) addressData!: PinAddressDto;
-  @ApiProperty({ minimum: 1 }) version!: number;
-}
-
 export class CallerContextDto {
   @ApiProperty({ type: DepartmentDto, nullable: true }) department!: DepartmentDto | null;
   @ApiProperty({
@@ -81,7 +72,12 @@ export class CallerContextDto {
   })
   lookupStatus!: 'REGISTERED' | 'UNREGISTERED' | 'WITHDRAWN';
 
-  @ApiProperty({ type: CustomerResponseDto, nullable: true })
+  @ApiProperty({
+    type: CustomerResponseDto,
+    nullable: true,
+    description:
+      '현재 고객 정보. 기본 출발지는 이 이름·전화번호·address를 우선 사용하며 개인 PIN으로 덮어쓰지 않습니다.',
+  })
   customer!: CustomerResponseDto | null;
 
   @ApiProperty({
@@ -108,10 +104,13 @@ export class CallerContextDto {
   personalPins!: PersonalContextPinDto[];
 
   @ApiProperty({
-    type: [CompanyContextPinDto],
-    description: '접근 가능한 소속 기업 PIN 전체. 번호 오름차순.',
+    type: 'array',
+    items: {},
+    deprecated: true,
+    description:
+      '폐기된 기업 PIN 호환 필드. 항상 빈 배열이며 기업 공유 배송지는 GET /api/companies/search로 조회.',
   })
-  companyPins!: CompanyContextPinDto[];
+  companyPins!: never[];
 }
 
 export class CallerContextEnvelopeDto {

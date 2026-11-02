@@ -144,12 +144,6 @@ async function personal(f, data = address(), extra = {}, headers = adminHeaders)
     201,
   );
 }
-async function company(f, data = address(), extra = {}) {
-  return success(
-    await request('POST', `/companies/${f.company}/pins`, { addressData: data, ...extra }),
-    201,
-  );
-}
 async function stored(id, shared = false) {
   return (
     await pool.query(
@@ -198,77 +192,42 @@ test('AI registers, searches and edits its active customer personal pins without
   assert.equal((await stored(created.personalPinSeq)).address_data.detailAddress, '103호');
 });
 
-test('all active administrator roles can manage personal and company pins', async () => {
+test('all active administrator roles can manage personal pins', async () => {
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
-    const headers = await admin(role);
-    const f = await fixture();
-    const p = await personal(f, address(), {}, headers);
-    const c = await success(
-      await request('POST', `/companies/${f.company}/pins`, { addressData: address() }, headers),
-      201,
-    );
+    const headers = await admin(role),
+      f = await fixture(),
+      p = await personal(f, address(), {}, headers);
     assert.equal(
-      (await request('GET', `/companies/${f.company}/pins`, undefined, headers)).status,
+      (await request('GET', '/customers/' + f.customer + '/pins', undefined, headers)).status,
       200,
     );
     assert.equal(
-      (await request('PATCH', `/pins/${p.personalPinSeq}`, { label: role }, headers)).status,
-      200,
-    );
-    assert.equal(
-      (await request('PATCH', `/company-pins/${c.companyPinSeq}`, { label: role }, headers)).status,
+      (await request('PATCH', '/pins/' + p.personalPinSeq, { label: role }, headers)).status,
       200,
     );
   }
 });
 
-test('AI company reads require an active customer, membership and company, including representatives', async () => {
-  for (const role of ['MEMBER', 'ORG_ADMIN']) {
-    const f = await fixture({ role });
-    const pin = await company(f, address(), { departmentName: '개발부' });
-    const list = await request('GET', `/companies/${f.company}/pins`, undefined, f.ai);
-    assert.equal(list.status, 200);
-    assert.equal((await list.json()).data[0].companyPinSeq, pin.companyPinSeq);
-    for (const [table, key, id] of [
-      ['memberships', 'customer_seq', f.customer],
-      ['organizations', 'organization_seq', f.company],
-      ['customers', 'customer_seq', f.customer],
-    ]) {
-      const state = table === 'customers' ? 'WITHDRAWN' : 'INACTIVE';
-      await pool.query(`UPDATE ${table} SET status=$1 WHERE ${key}=$2`, [state, id]);
-      await error(
-        await request('GET', `/companies/${f.company}/pins`, undefined, f.ai),
-        403,
-        'FORBIDDEN',
-      );
-      await pool.query(`UPDATE ${table} SET status='ACTIVE' WHERE ${key}=$1`, [id]);
-    }
-  }
-});
-
-test('AI cannot create or modify company pins, even with representative status or forged admin headers', async () => {
+test('retired company PIN routes return 404 and leave legacy data intact', async () => {
   const f = await fixture({ role: 'ORG_ADMIN' });
-  const pin = await company(f);
-  const headers = {
-    ...f.ai,
-    Origin: origin,
-    'X-Admin-User-Seq': '1',
-    Authorization: 'Bearer fake',
-  };
-  await error(
-    await request('POST', `/companies/${f.company}/pins`, { addressData: address() }, headers),
-    401,
-    'UNAUTHORIZED',
-  );
-  await error(
-    await request('PATCH', `/company-pins/${pin.companyPinSeq}`, { label: '금지' }, headers),
-    401,
-    'UNAUTHORIZED',
-  );
-  assert.equal((await stored(pin.companyPinSeq, true)).label, null);
+  const id = (
+    await pool.query(
+      'INSERT INTO company_pins(organization_seq,address_data) VALUES($1,$2) RETURNING company_pin_seq',
+      [f.company, address()],
+    )
+  ).rows[0].company_pin_seq;
+  const before = await stored(id, true);
+  for (const headers of [f.ai, adminHeaders])
+    for (const [method, path, body] of [
+      ['GET', '/companies/' + f.company + '/pins'],
+      ['POST', '/companies/' + f.company + '/pins', { addressData: address() }],
+      ['PATCH', '/company-pins/' + id, { label: '금지' }],
+    ])
+      assert.equal((await request(method, path, body, headers)).status, 404);
+  assert.deepEqual(await stored(id, true), before);
 });
 
-test('another caller cannot list, create or edit private pins or read another company', async () => {
+test('another caller cannot list, create or edit private pins', async () => {
   const owner = await fixture();
   const other = await fixture();
   const p = await personal(owner);
@@ -276,7 +235,6 @@ test('another caller cannot list, create or edit private pins or read another co
     ['GET', `/customers/${owner.customer}/pins`],
     ['POST', `/customers/${owner.customer}/pins`, { addressData: address() }],
     ['PATCH', `/pins/${p.personalPinSeq}`, { label: '침범' }],
-    ['GET', `/companies/${owner.company}/pins`],
   ])
     await error(await request(method, path, body, other.ai), 403, 'FORBIDDEN');
   assert.equal((await stored(p.personalPinSeq)).label, null);
@@ -315,7 +273,6 @@ test('missing, invalid, unknown and ended call IDs are not accepted for AI opera
   );
   for (const [method, path, body] of [
     ['GET', `/customers/${f.customer}/pins`],
-    ['GET', `/companies/${f.company}/pins`],
     ['POST', `/customers/${f.customer}/pins`, { addressData: address() }],
     ['PATCH', `/pins/${p.personalPinSeq}`, { label: '끝난 통화' }],
   ])
@@ -338,7 +295,7 @@ test('stale administrator cookies cannot fall back to AI access; administrator w
   await error(
     await request(
       'POST',
-      `/companies/${f.company}/pins`,
+      `/customers/${f.customer}/pins`,
       { addressData: address() },
       { Cookie: adminHeaders.Cookie },
     ),
@@ -355,10 +312,9 @@ test('stale administrator cookies cannot fall back to AI access; administrator w
   );
 });
 
-test('withdrawal blocks personal access; inactive company permits admin reads but no writes', async () => {
+test('withdrawal blocks personal access for callers and administrators', async () => {
   const f = await fixture();
   const p = await personal(f);
-  const c = await company(f);
   await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [f.customer]);
   await error(
     await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '금지' }, f.ai),
@@ -367,20 +323,6 @@ test('withdrawal blocks personal access; inactive company permits admin reads bu
   );
   await error(
     await request('POST', `/customers/${f.customer}/pins`, { addressData: address() }),
-    409,
-    'INVALID_STATE',
-  );
-  await pool.query("UPDATE organizations SET status='INACTIVE' WHERE organization_seq=$1", [
-    f.company,
-  ]);
-  assert.equal((await request('GET', `/companies/${f.company}/pins`)).status, 200);
-  await error(
-    await request('POST', `/companies/${f.company}/pins`, { addressData: address() }),
-    409,
-    'INVALID_STATE',
-  );
-  await error(
-    await request('PATCH', `/company-pins/${c.companyPinSeq}`, { label: '금지' }),
     409,
     'INVALID_STATE',
   );
@@ -423,34 +365,6 @@ test('duplicate personal addresses use existing normalized DB identity, independ
   assert.deepEqual(results.map((r) => r.status).sort(), [201, 409]);
 });
 
-test('company duplicate identity includes normalized department; personal and other company scopes are independent', async () => {
-  const f = await fixture();
-  const other = await fixture();
-  const data = address();
-  await company(f, data, { departmentName: 'Dev Team' });
-  await error(
-    await request('POST', `/companies/${f.company}/pins`, {
-      addressData: data,
-      departmentName: ' dev   team ',
-    }),
-    409,
-    'DUPLICATE_RESOURCE',
-  );
-  await company(f, data, { departmentName: '영업부' });
-  await company(other, data, { departmentName: 'Dev Team' });
-  await personal(f, data);
-  const withoutDepartment = address();
-  await company(f, withoutDepartment);
-  await error(
-    await request('POST', `/companies/${f.company}/pins`, {
-      addressData: withoutDepartment,
-      departmentName: '',
-    }),
-    409,
-    'DUPLICATE_RESOURCE',
-  );
-});
-
 test('stale expectedVersion is accepted without a re-read and omitted fields survive', async () => {
   const f = await fixture();
   const data = address({ detailAddress: '101호' });
@@ -490,25 +404,6 @@ test('stale expectedVersion is accepted without a re-read and omitted fields sur
       .version,
     4,
   );
-  const c = await company(f, data, { label: '사무실', departmentName: '개발부' });
-  await success(
-    await request('PATCH', `/company-pins/${c.companyPinSeq}`, { departmentName: '영업부' }),
-  );
-  assert.equal(
-    (
-      await success(
-        await request('PATCH', `/company-pins/${c.companyPinSeq}`, {
-          label: null,
-          expectedVersion: 1,
-        }),
-      )
-    ).version,
-    3,
-  );
-  const final = await stored(c.companyPinSeq, true);
-  assert.equal(final.department_name, '영업부');
-  assert.equal(final.label, null);
-  assert.deepEqual(final.address_data, data);
 });
 
 test('concurrent partial updates preserve unrelated fields without a version conflict', async () => {
@@ -546,7 +441,7 @@ test('duplicate edits roll back all fields and version rather than partially sav
   assert.deepEqual(await stored(first.personalPinSeq), previous);
 });
 
-test('literal search, pagination, generated search updates and company department search stay scoped', async () => {
+test('literal search, pagination and generated search updates stay scoped', async () => {
   const f = await fixture();
   for (let i = 0; i < 3; i++)
     await personal(f, address({ name: '검색 수령인' }), { label: i === 0 ? '100%_특별' : '검색' });
@@ -590,25 +485,6 @@ test('literal search, pagination, generated search updates and company departmen
       ).json()
     ).data.length,
     1,
-  );
-  await company(f, address(), { departmentName: '개발팀' });
-  assert.equal(
-    (
-      await (
-        await request(
-          'GET',
-          `/companies/${f.company}/pins?q=${encodeURIComponent('개발팀')}`,
-          undefined,
-          f.ai,
-        )
-      ).json()
-    ).data.length,
-    1,
-  );
-  assert.equal(
-    (await (await request('GET', `/companies/${f.company}/pins?q=absent`, undefined, f.ai)).json())
-      .hasNext,
-    false,
   );
 });
 

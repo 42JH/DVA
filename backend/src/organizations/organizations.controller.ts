@@ -82,7 +82,7 @@ export class OrganizationsController {
     summary: '기업 공식 배송지 검색 (DIR-01)',
     security: [{ adminSession: [] }, {}],
     description:
-      '활성 기업의 공유 PIN 전체를 공식 공개 배송지로 검색합니다. 기업명과 PIN의 부서·수령인·연락처·주소만 제공하며 구성원·개인 PIN은 조회하지 않습니다. MVP AI 서비스 인증·통화 헤더는 요구하지 않습니다.',
+      '활성 기업·활성 소속·활성 고객의 현재 기본 주소를 기업 간 공유 배송지로 검색합니다. 사번·역할·개인 PIN은 제공하지 않습니다. MVP AI 서비스 인증·통화 헤더는 요구하지 않습니다.',
   })
   @ApiOkResponse({ type: CompanyDirectoryEnvelopeDto })
   search(@Query() query: CompanyDirectoryQueryDto) {
