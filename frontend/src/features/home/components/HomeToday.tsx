@@ -23,7 +23,7 @@ export function HomeToday() {
           placeholder="디버 접수번호 · 주문 번호 · 이름 · 전화번호 · 주소"
           className="flex-1"
         />
-        <Button kind="primary" type="submit" className="h-12!">
+        <Button kind="primary" type="submit" className="h-10!">
           검색
         </Button>
       </form>

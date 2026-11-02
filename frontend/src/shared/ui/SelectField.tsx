@@ -31,7 +31,7 @@ export function SelectField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           aria-invalid={!!error}
-          className={`h-11 w-full appearance-none rounded-lg bg-surface pr-10 pl-3.5 text-body outline-none ring-inset ${
+          className={`h-10 w-full appearance-none rounded-lg bg-surface pr-10 pl-3.5 text-body outline-none ring-inset ${
             error
               ? 'ring-[1.5px] ring-danger'
               : 'ring-1 ring-line focus:ring-[1.5px] focus:ring-action'

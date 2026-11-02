@@ -70,7 +70,7 @@ export function AuthField({
         {label}
       </label>
       <span
-        className={`flex h-11 items-center gap-2.5 border-b px-2 ${
+        className={`flex h-10 items-center gap-2.5 border-b px-2 ${
           error ? 'border-danger' : 'border-line focus-within:border-action'
         }`}
       >

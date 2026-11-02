@@ -66,7 +66,7 @@ export function FileDrop({
       </div>
       {file && (
         <div
-          className={`flex h-11 items-center justify-between rounded-lg px-3.5 ring-inset ${
+          className={`flex h-10 items-center justify-between rounded-lg px-3.5 ring-inset ${
             error ? 'ring-[1.5px] ring-danger' : 'ring-1 ring-line'
           }`}
         >

@@ -35,7 +35,7 @@ export function AppLayout() {
         <PageHeader title={title} />
         <main ref={main} className="min-h-0 flex-1 overflow-auto px-content pt-6 pb-content">
           {/* 경로(쿼리 제외)가 바뀌면 본문이 떠오름 (11/01). key로 새로 그려서 애니메이션이 다시 돎 — 쪽 · 필터 변경은 같은 경로라 안 돎 */}
-          <div key={pathname} className="h-full motion-safe:animate-page-in">
+          <div key={pathname} className="flex min-h-full flex-col motion-safe:animate-page-in">
             <Outlet />
           </div>
         </main>
