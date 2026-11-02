@@ -146,6 +146,27 @@ check_company_history_compatibility() {
     }
 }
 
+read_call_analysis_schema() {
+    local db_container state
+    db_container="$(database_container)" || return 1
+    state="$("${docker_cmd[@]}" exec "$db_container" sh -c \
+        'exec psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh \
+        "SELECT to_regclass('public.call_analyses') IS NOT NULL AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='result')" </dev/null)" || return 1
+    [[ "$state" == t || "$state" == f ]] || return 1
+    printf '%s' "$state"
+}
+
+check_call_analysis_compatibility() {
+    local directory="$1" state
+    [[ -f "$directory/backend/migrations/024-call-analyses.sql" &&
+       ! -f "$directory/backend/migrations/$call_analysis_migration" ]] || return 0
+    state="$(read_call_analysis_schema)" || return 1
+    [[ "$state" == f ]] || {
+        echo 'Deployment/restore blocked: the target app requires removed call analysis result. Repair forward or restore the backup during maintenance.' >&2
+        return 1
+    }
+}
+
 restore_previous() {
     local state
     if [[ -z "$old_version" || "$old_version" == "$version" ]]; then
@@ -161,6 +182,7 @@ restore_previous() {
     check_membership_compatibility "$releases_dir/$old_version" || return 1
     check_billing_compatibility "$releases_dir/$old_version" || return 1
     check_company_history_compatibility "$releases_dir/$old_version" || return 1
+    check_call_analysis_compatibility "$releases_dir/$old_version" || return 1
     echo "Restoring previous running release: $old_version" >&2
     if apply_release "$releases_dir/$old_version"; then
         echo 'Previous release restored. Deployment still reports failure.' >&2
@@ -184,6 +206,7 @@ creation_migration=008-simplify-creation-requests.sql
 membership_migration=010-remove-membership-write-requests.sql
 billing_migration=019-organization-monthly-billing.sql
 company_history_migration=021-company-deletion-history.sql
+call_analysis_migration=042-remove-call-analysis-result.sql
 backup_required=false
 case "${1:-}" in
     '') ;;
@@ -210,6 +233,11 @@ fi
 check_membership_compatibility "$release_dir" || exit 1
 check_billing_compatibility "$release_dir" || exit 1
 check_company_history_compatibility "$release_dir" || exit 1
+check_call_analysis_compatibility "$release_dir" || exit 1
+call_analysis_state=f
+if [[ -f "$release_dir/backend/migrations/$call_analysis_migration" ]]; then
+    call_analysis_state="$(read_call_analysis_schema)" || { echo 'Cannot verify call analysis schema. Deployment stopped.' >&2; exit 1; }
+fi
 company_history_state="$(read_company_history_schema)" || { echo 'Cannot verify company history schema. Deployment stopped.' >&2; exit 1; }
 billing_state="$(read_billing_schema)" || { echo 'Cannot verify billing schema. Deployment stopped.' >&2; exit 1; }
 membership_state=f
@@ -221,7 +249,8 @@ if [[ "${1:-}" != --rollback ]]; then
     if [[ "$schema_state" == f && -f "$release_dir/backend/migrations/$creation_migration" ]] ||
        [[ "$membership_state" == t && -f "$release_dir/backend/migrations/$membership_migration" ]] ||
        [[ "$billing_state" == f && -f "$release_dir/backend/migrations/$billing_migration" ]] ||
-       [[ "$company_history_state" == f && -f "$release_dir/backend/migrations/$company_history_migration" ]]; then
+       [[ "$company_history_state" == f && -f "$release_dir/backend/migrations/$company_history_migration" ]] ||
+       [[ "$call_analysis_state" == f && -f "$release_dir/backend/migrations/$call_analysis_migration" ]]; then
         # Quiesce old writers before the backup and breaking schema conversion.
         compose "$release_dir" stop backend
         backup_required=true

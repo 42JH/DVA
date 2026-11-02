@@ -85,8 +85,6 @@ async function run() {
     detailAddress: '',
     dongName: '검증동',
     postalCode: '00021',
-    latitude: 37.5,
-    longitude: 127,
   };
   const create = async (comment = '') => {
     const r = await post(

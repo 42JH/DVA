@@ -47,10 +47,6 @@ export function assertOrderSubmissionReady(
         invalid(`${prefix}.${side}.phoneNumber`, 'digitsOnly');
       if (address.postalCode?.trim() && !/^[0-9]{5}$/.test(address.postalCode))
         invalid(`${prefix}.${side}.postalCode`, 'postalCode');
-      if (address.latitude !== null && (address.latitude < -90 || address.latitude > 90))
-        invalid(`${prefix}.${side}.latitude`, 'latitudeRange');
-      if (address.longitude !== null && (address.longitude < -180 || address.longitude > 180))
-        invalid(`${prefix}.${side}.longitude`, 'longitudeRange');
     }
     for (const field of QUANTITY_FIELDS) {
       const value = parcel[field];

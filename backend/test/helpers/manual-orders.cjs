@@ -34,8 +34,6 @@ module.exports = function manualOrders() {
     detailAddress: '',
     dongName: '검증동',
     postalCode: '00069',
-    latitude: 37.5,
-    longitude: 127,
   };
   f.success = { ok: true, parcelNo: 'TEST0069', receivedAt: '2026-10-28T10:00:00+09:00' };
   f.phone = () => '010' + randomInt(10000000, 100000000);

@@ -63,7 +63,6 @@ async function analyse(call, changes = {}) {
     startedAt: '2026-10-31T10:00:00+09:00',
     endedAt: '2026-10-31T10:03:40+09:00',
     aiPersonaVersionSeq: null,
-    result: 'INQUIRY',
     repeatQuestionCount: null,
     hasComplaint: null,
     complaints: [],
@@ -137,7 +136,6 @@ test('detail and list expose the stored analysis and actual older persona withou
   const call = await createCall({ order });
   const input = await analyse(call, {
     aiPersonaVersionSeq: used[0],
-    result: 'REGISTERED',
     repeatQuestionCount: 2,
     hasComplaint: true,
     complaints: [
@@ -159,10 +157,15 @@ test('detail and list expose the stored analysis and actual older persona withou
   const audits = (await f.pool.query('SELECT count(*) AS n FROM audit_logs')).rows;
   const data = (await ok(await detail(call), true)).data;
   assert.deepEqual(data.analysis, {
-    result: input.result,
     aiPersonaVersionSeq: used[0],
     personaName: '당시 사용한 이름',
     personaVersion: 6,
+    isNewCustomer: null,
+    registeredParcelCount: null,
+    faqAnswerCount: null,
+    orderLookupCount: null,
+    cancelledParcelCount: null,
+    hasHandoffRequest: null,
     aiStartedAt: new Date(input.startedAt).toISOString(),
     aiEndedAt: new Date(input.endedAt).toISOString(),
     repeatQuestionCount: 2,
@@ -192,17 +195,56 @@ test('detail and list expose the stored analysis and actual older persona withou
   );
 });
 
-test('result and complaint filters distinguish missing analysis, unknown measurements, zero and false before pagination', async () => {
+test('list and detail preserve AI summary values including zero, false and unknown without exposing them inside call', async () => {
+  for (const values of [
+    {
+      isNewCustomer: true,
+      registeredParcelCount: 3,
+      faqAnswerCount: 2,
+      orderLookupCount: 1,
+      cancelledParcelCount: 1,
+      hasHandoffRequest: true,
+    },
+    {
+      isNewCustomer: false,
+      registeredParcelCount: 0,
+      faqAnswerCount: 0,
+      orderLookupCount: 0,
+      cancelledParcelCount: 0,
+      hasHandoffRequest: false,
+    },
+    {
+      isNewCustomer: null,
+      registeredParcelCount: null,
+      faqAnswerCount: null,
+      orderLookupCount: null,
+      cancelledParcelCount: null,
+      hasHandoffRequest: null,
+    },
+  ]) {
+    const call = await createCall();
+    await analyse(call, values);
+    const data = (await ok(await detail(call), true)).data;
+    const page = await ok(await list({ callerPhoneNumber: call.phone }));
+    assert.deepEqual(page.data[0].analysis, data.analysis);
+    for (const [key, value] of Object.entries(values)) {
+      assert.equal(data.analysis[key], value);
+      assert.equal(Object.hasOwn(data.call, key), false);
+      assert.equal(Object.hasOwn(page.data[0], key), false);
+    }
+    assert.equal(data.call.handoff, null);
+    assert.equal(data.call.orderSeq, null);
+  }
+});
+
+test('complaint and persona filters distinguish missing analysis, unknown measurements, zero and false before pagination', async () => {
   const caller = phone();
   const used = await versions();
   const missing = await createCall({ phone: caller });
   const rows = [];
-  const results = ['REGISTERED', 'REGISTRATION_FAILED', 'HANDOFF', 'CANCELLED', 'INQUIRY'];
-  for (const [i, result] of results.entries()) {
+  for (const hasComplaint of [null, false, true, false, null]) {
     const call = await createCall({ phone: caller });
-    const hasComplaint = i === 2 ? true : i % 2 === 0 ? null : false;
     await analyse(call, {
-      result,
       aiPersonaVersionSeq: used[0],
       hasComplaint,
       repeatQuestionCount: hasComplaint === false ? 0 : null,
@@ -219,13 +261,10 @@ test('result and complaint filters distinguish missing analysis, unknown measure
     });
     rows.push({ ...call, hasComplaint });
   }
-  for (const [i, result] of results.entries())
-    assert.deepEqual(
-      ids(
-        await ok(await list({ callerPhoneNumber: caller, result, aiPersonaVersionSeq: used[0] })),
-      ),
-      [rows[i].id],
-    );
+  assert.deepEqual(
+    ids(await ok(await list({ callerPhoneNumber: caller, aiPersonaVersionSeq: used[0] }))),
+    rows.toReversed().map((row) => row.id),
+  );
   const absent = (await ok(await detail(missing), true)).data;
   assert.equal(absent.analysis, null);
   const unknown = (await ok(await detail(rows[0]), true)).data.analysis;
@@ -244,12 +283,6 @@ test('result and complaint filters distinguish missing analysis, unknown measure
   assert.deepEqual(ids(await ok(await list({ callerPhoneNumber: caller, hasComplaint: 'true' }))), [
     rows[2].id,
   ]);
-  assert.deepEqual(
-    ids(
-      await ok(await list({ callerPhoneNumber: caller, result: 'INQUIRY', hasComplaint: 'true' })),
-    ),
-    [],
-  );
   assert.deepEqual(
     ids(await ok(await list({ callerPhoneNumber: caller, aiPersonaVersionSeq: used[1] }))),
     [],
@@ -359,7 +392,8 @@ test('inquiries keep the original customer after employee phone updates and neve
   const inquiry = (await ok(await detail(unknown), true)).data;
   assert.equal(inquiry.call.customerSeq, null);
   assert.equal(inquiry.call.orderSeq, null);
-  assert.equal(inquiry.analysis.result, 'INQUIRY');
+  assert.equal(inquiry.analysis.hasComplaint, null);
+  assert.equal(Object.hasOwn(inquiry.analysis, 'result'), false);
   const customerSeq = (await registeredLater.json()).data.customerSeq;
   const finalResult = await f.write(
     'POST',
@@ -392,20 +426,19 @@ test('q normalizes Korean and case while treating wildcards and SQL text literal
     ])
   ).rows[0].order_seq;
   const call = await createCall({ phone: owner.phone, order });
-  await analyse(call, { result: 'REGISTERED', hasComplaint: false, repeatQuestionCount: 0 });
+  await analyse(call, { hasComplaint: false, repeatQuestionCount: 0 });
   const query = {
     q: ('  ' + text.toUpperCase() + '  ').normalize('NFD'),
     orderSeq: order,
     orderStatus: 'COLLECTING',
     callerPhoneNumber: owner.phone,
     endReason: 'PBX_ENDED',
-    result: 'REGISTERED',
     hasComplaint: 'false',
     from: '2026-10-31T01:00:03Z',
     to: '2026-10-31T01:00:04Z',
   };
   assert.deepEqual(ids(await ok(await list(query))), [call.id]);
-  assert.deepEqual(ids(await ok(await list({ ...query, result: 'CANCELLED' }))), []);
+  assert.deepEqual(ids(await ok(await list({ ...query, hasComplaint: 'true' }))), []);
   assert.deepEqual(
     ids(await ok(await list({ ...query, to: query.from, from: '2026-10-31T01:00:02Z' }))),
     [],
@@ -432,6 +465,7 @@ test('new query fields reject ambiguous booleans, malformed versions, duplicates
     'hasComplaint=false&hasComplaint=true',
     'result=',
     'result=UNKNOWN',
+    'result=INQUIRY',
     'result=INQUIRY&result=HANDOFF',
     'aiPersonaVersionSeq=0',
     'aiPersonaVersionSeq=1.2',
@@ -557,7 +591,11 @@ test('fallback times share date boundaries, deterministic pagination and analysi
     endedAt: '2026-10-31T02:03:00Z',
   });
   const ai = await createCall({ phone: caller, startedAt: null, endedAt: null, endReason: null });
-  await analyse(ai, { startedAt: '2026-10-31T02:00:00Z', endedAt: '2026-10-31T02:03:00Z' });
+  await analyse(ai, {
+    startedAt: '2026-10-31T02:00:00Z',
+    endedAt: '2026-10-31T02:03:00Z',
+    hasComplaint: false,
+  });
   const incoming = await createCall({
     phone: caller,
     startedAt: null,
@@ -579,7 +617,7 @@ test('fallback times share date boundaries, deterministic pagination and analysi
     assert.equal(page.total_count, 3);
     assert.equal(page.hasNext, offset < 2);
   }
-  assert.deepEqual(ids(await ok(await list({ ...query, result: 'INQUIRY' }))), [ai.id]);
+  assert.deepEqual(ids(await ok(await list({ ...query, hasComplaint: 'false' }))), [ai.id]);
 });
 
 test('late analysis and utterances become readable without inventing a default persona or altering complaint references', async () => {
@@ -649,14 +687,19 @@ test('OpenAPI documents existing routes with the added filters and nullable shar
   const document = await (await f.get('/api/docs-json')).json();
   const query = document.paths['/api/calls'].get;
   assert.deepEqual(query.security, [{ adminSession: [] }]);
-  for (const name of ['q', 'result', 'hasComplaint', 'aiPersonaVersionSeq'])
+  for (const name of ['q', 'hasComplaint', 'aiPersonaVersionSeq'])
     assert.ok(query.parameters.some((item) => item.name === name));
+  assert.equal(
+    query.parameters.some((item) => item.name === 'result'),
+    false,
+  );
   const schemas = document.components.schemas;
   for (const name of ['CallListItemDto', 'CallDetailDto'])
     assert.equal(schemas[name].properties.analysis.nullable, true);
   for (const name of ['customerSeq', 'customerName'])
     assert.equal(schemas.CallDto.properties[name].nullable, true);
   assert.equal(schemas.CallAnalysisDto.properties.hasComplaint.nullable, true);
+  assert.equal(schemas.CallAnalysisDto.properties.result, undefined);
   assert.equal(schemas.CallComplaintDto.properties.offsetSeconds.minimum, 0);
   assert.equal(schemas.CallComplaintDto.properties.offsetMs, undefined);
   assert.equal(document.paths['/api/calls/{id}/analysis'], undefined);

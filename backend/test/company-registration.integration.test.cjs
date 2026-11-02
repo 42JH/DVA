@@ -40,8 +40,6 @@ const address = (suffix) => ({
   detailAddress: '101호',
   dongName: '주소동',
   postalCode: '01234',
-  latitude: 37.5,
-  longitude: 127,
 });
 let app, base;
 before(async () => {
@@ -201,13 +199,11 @@ test('company registration saves new and reused customer addresses in the same t
     pinAddress,
   ]);
   const newAddress = address('신규');
-  delete newAddress.latitude;
-  delete newAddress.longitude;
   const incoming = [
     employee({
       phoneNumber: number,
       name: '수정 고객',
-      address: { ...address('수정'), latitude: 0, longitude: 0 },
+      address: address('수정'),
     }),
     employee({ employeeNo: '002', address: newAddress }),
   ];
@@ -224,11 +220,7 @@ test('company registration saves new and reused customer addresses in the same t
   );
   for (const input of incoming) {
     const member = members.find((row) => row.membership.employeeNo === input.employeeNo);
-    const expectedAddress = {
-      ...input.address,
-      latitude: input.address.latitude ?? 1,
-      longitude: input.address.longitude ?? 1,
-    };
+    const expectedAddress = input.address;
     assert.equal(member.customer.name, input.name);
     assert.deepEqual(member.customer.address, expectedAddress);
     const detail = (await get(`/api/customers/${member.customer.customerSeq}`)).data;
@@ -272,7 +264,7 @@ test('existing company member batches save all customer addresses and distinguis
     employee({ employeeNo: '002', phoneNumber: number, address: address('연결') }),
     employee({
       employeeNo: '003',
-      address: { ...address('생성'), latitude: null, longitude: undefined },
+      address: address('생성'),
     }),
     employee({ employeeNo: '004' }),
   ];
@@ -283,13 +275,7 @@ test('existing company member batches save all customer addresses and distinguis
   const members = (await get(path)).data;
   for (const input of items) {
     const member = members.find((row) => row.membership.employeeNo === input.employeeNo);
-    const expectedAddress = input.address
-      ? {
-          ...input.address,
-          latitude: input.address.latitude ?? 1,
-          longitude: input.address.longitude ?? 1,
-        }
-      : null;
+    const expectedAddress = input.address ?? null;
     assert.deepEqual(member.customer.address, expectedAddress);
   }
   const updated = members.find((row) => row.membership.employeeNo === '001');
@@ -306,15 +292,12 @@ test('existing company member batches save all customer addresses and distinguis
     (await get(`/api/customers/${before.customer.customerSeq}`)).data.address,
     address('교체'),
   );
-  const withoutCoordinates = address('좌표 생략');
-  delete withoutCoordinates.latitude;
-  delete withoutCoordinates.longitude;
-  assert.equal((await post({ ...old, address: withoutCoordinates }, { path })).status, 204);
-  assert.deepEqual((await get(`/api/customers/${before.customer.customerSeq}`)).data.address, {
-    ...withoutCoordinates,
-    latitude: 1,
-    longitude: 1,
-  });
+  const replacement = address('주소 교체');
+  assert.equal((await post({ ...old, address: replacement }, { path })).status, 204);
+  assert.deepEqual(
+    (await get(`/api/customers/${before.customer.customerSeq}`)).data.address,
+    replacement,
+  );
   assert.equal((await post({ ...old, address: null }, { path })).status, 204);
   assert.equal((await get(`/api/customers/${before.customer.customerSeq}`)).data.address, null);
 });
@@ -331,7 +314,7 @@ test('invalid addresses reject the whole registration before modifying an existi
   const id = (await company.json()).data.organizationSeq;
   const rows = [
     employee({ phoneNumber: number, name: '거절될 변경', address: address('변경') }),
-    employee({ employeeNo: '002', address: { ...address('오류'), longitude: '127' } }),
+    employee({ employeeNo: '002', address: { ...address('오류'), longitude: 127 } }),
   ];
   const before = await counts();
   for (const [input, path, field] of [

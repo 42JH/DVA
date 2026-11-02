@@ -4,7 +4,6 @@ import {
   IsIn,
   IsInt,
   IsISO8601,
-  IsNumber,
   IsObject,
   IsOptional,
   IsString,
@@ -65,32 +64,6 @@ export class OrderAddressPatchDto {
   @IsOptional()
   @IsString()
   postalCode?: string | null;
-
-  @ApiPropertyOptional({
-    description: '위도.',
-    type: Number,
-    nullable: true,
-    minimum: -90,
-    maximum: 90,
-  })
-  @IsOptional()
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-90)
-  @Max(90)
-  latitude?: number | null;
-
-  @ApiPropertyOptional({
-    description: '경도.',
-    type: Number,
-    nullable: true,
-    minimum: -180,
-    maximum: 180,
-  })
-  @IsOptional()
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-180)
-  @Max(180)
-  longitude?: number | null;
 }
 
 export class OriginPinDto {

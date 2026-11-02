@@ -415,8 +415,6 @@ test('unlink deletes only membership, preserves customer/PIN/order and permits a
     detailAddress: '',
     dongName: '테스트동',
     postalCode: '12345',
-    latitude: 37.5,
-    longitude: 127,
   };
   const pin = (
     await pool.query(

@@ -10,6 +10,7 @@ export TEST_CREATION_SCHEMA="$test_root/creation-schema"
 export TEST_MEMBERSHIP_TABLE="$test_root/membership-table"
 export TEST_BILLING_SCHEMA="$test_root/billing-schema"
 export TEST_COMPANY_HISTORY_SCHEMA="$test_root/company-history-schema"
+export TEST_CALL_ANALYSIS_SCHEMA="$test_root/call-analysis-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -37,6 +38,11 @@ fi
 if [[ "$1" == exec && "$*" == *billing_organization_name* ]]; then
     [[ "${TEST_COMPANY_HISTORY_QUERY_FAIL:-}" != 1 ]] || exit 1
     if [[ -f "$TEST_COMPANY_HISTORY_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *public.call_analyses* ]]; then
+    [[ "${TEST_CALL_ANALYSIS_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_CALL_ANALYSIS_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -86,6 +92,7 @@ if [ -f "$root/backend/migrations/009-membership-write-requests.sql" ] &&
 if [ -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; then rm -f "$TEST_MEMBERSHIP_TABLE"; fi
 if [ -f "$root/backend/migrations/019-organization-monthly-billing.sql" ]; then touch "$TEST_BILLING_SCHEMA"; fi
 if [ -f "$root/backend/migrations/021-company-deletion-history.sql" ]; then touch "$TEST_COMPANY_HISTORY_SCHEMA"; fi
+if [ -f "$root/backend/migrations/042-remove-call-analysis-result.sql" ]; then touch "$TEST_CALL_ANALYSIS_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
     if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
@@ -103,6 +110,12 @@ MOCK
     fi
     if [[ "${2:-}" == history ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/021-company-deletion-history.sql"
+    fi
+    if [[ "${3:-}" == analysis || "${3:-}" == summary ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/024-call-analyses.sql"
+    fi
+    if [[ "${3:-}" == summary ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/042-remove-call-analysis-result.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -366,4 +379,52 @@ make_release history-compatible-broken history
 : > "$TEST_DOCKER_LOG"
 if TEST_FAIL_VERSION=history-compatible-broken bash "$test_root/site/releases/history-compatible-broken/deploy.sh"; then exit 1; fi
 grep -F '/releases/company-history/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
-echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021 stop-backup order and incompatible restore protection.'
+
+# 042 removes a column used by existing analysis apps; fail closed before mutation and after conversion.
+make_release analysis-old history analysis
+bash "$test_root/site/releases/analysis-old/deploy.sh"
+assert_current analysis-old
+make_release call-summary history summary
+: > "$TEST_DOCKER_LOG"
+if TEST_CALL_ANALYSIS_QUERY_FAIL=1 bash "$test_root/site/releases/call-summary/deploy.sh"; then exit 1; fi
+if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+: > "$TEST_DOCKER_LOG"
+if TEST_BACKUP_FAIL=1 bash "$test_root/site/releases/call-summary/deploy.sh"; then exit 1; fi
+test ! -f "$TEST_CALL_ANALYSIS_SCHEMA"
+grep -F '/releases/analysis-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+: > "$TEST_DOCKER_LOG"
+if TEST_MIGRATION_FAIL_VERSION=call-summary bash "$test_root/site/releases/call-summary/deploy.sh"; then exit 1; fi
+test ! -f "$TEST_CALL_ANALYSIS_SCHEMA"
+grep -F '/releases/analysis-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+: > "$TEST_DOCKER_LOG"
+bash "$test_root/site/releases/call-summary/deploy.sh"
+assert_current call-summary
+[[ -f "$TEST_CALL_ANALYSIS_SCHEMA" ]]
+stop_line="$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+backup_line="$(grep -n '^BACKUP ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+migration_line="$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+app_line="$(grep -n ' up ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+[[ "$stop_line" -lt "$backup_line" && "$backup_line" -lt "$migration_line" && "$migration_line" -lt "$app_line" ]]
+: > "$TEST_DOCKER_LOG"
+if bash "$test_root/site/releases/call-summary/deploy.sh" --rollback; then exit 1; fi
+if bash "$test_root/site/releases/analysis-old/deploy.sh"; then exit 1; fi
+if grep -E ' up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+assert_current call-summary
+make_release summary-compatible-broken history summary
+: > "$TEST_DOCKER_LOG"
+if TEST_FAIL_VERSION=summary-compatible-broken bash "$test_root/site/releases/summary-compatible-broken/deploy.sh"; then exit 1; fi
+grep '^NO_BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+grep -F '/releases/call-summary/compose.prod.yaml up ' "$TEST_DOCKER_LOG" >/dev/null
+for failure in verification app; do
+    rm -f -- "$TEST_CALL_ANALYSIS_SCHEMA"
+    printf 'analysis-old\n' > "$test_root/site/current-release"
+    : > "$TEST_DOCKER_LOG"
+    if [[ "$failure" == verification ]]; then
+        if TEST_VERIFY_FAIL=1 bash "$test_root/site/releases/call-summary/deploy.sh"; then exit 1; fi
+    else
+        if TEST_FAIL_VERSION=call-summary bash "$test_root/site/releases/call-summary/deploy.sh"; then exit 1; fi
+    fi
+    [[ -f "$TEST_CALL_ANALYSIS_SCHEMA" ]]
+    if grep -F '/releases/analysis-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then exit 1; fi
+done
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042 stop-backup order and incompatible restore protection.'

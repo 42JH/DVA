@@ -123,7 +123,7 @@ test('company registration accepts 1000 employees and rejects arrays above the p
   );
 });
 
-test('company members inherit address validation with default coordinates and indexed error paths', async () => {
+test('company members inherit address validation without coordinates and keep indexed error paths', async () => {
   const address = {
     roadAddress: '주소로 1',
     jibunAddress: '주소동 1',
@@ -132,7 +132,7 @@ test('company members inherit address validation with default coordinates and in
     postalCode: '01234',
   };
   const input = await pipe.transform({ name: '주소 기업', members: [employee({ address })] });
-  assert.deepEqual({ ...input.members[0].address }, { ...address, latitude: 1, longitude: 1 });
+  assert.deepEqual({ ...input.members[0].address }, address);
   assert.equal(
     (await pipe.transform({ name: '기업', members: [employee({ address: null })] })).members[0]
       .address,
@@ -142,7 +142,7 @@ test('company members inherit address validation with default coordinates and in
     () =>
       pipe.transform({
         name: '주소 기업',
-        members: [employee({ address: { ...address, latitude: '37.5' } })],
+        members: [employee({ address: { ...address, latitude: 37.5 } })],
       }),
     (error) =>
       error.getStatus() === 400 &&

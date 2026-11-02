@@ -54,8 +54,6 @@ const address = {
   detailAddress: '',
   dongName: '검증동',
   postalCode: '00001',
-  latitude: 37.5,
-  longitude: 127,
 };
 
 before(async () => {
@@ -588,7 +586,6 @@ test('order-free calls still accept AI events and analysis and remain visible to
       startedAt: input.call.incomingAt,
       endedAt: '2026-10-27T01:01:00Z',
       aiPersonaVersionSeq: null,
-      result: 'INQUIRY',
       repeatQuestionCount: 0,
       hasComplaint: false,
       complaints: [],
@@ -600,7 +597,8 @@ test('order-free calls still accept AI events and analysis and remain visible to
     assert.equal(response.status, 200);
     const detail = (await response.json()).data;
     assert.equal(detail.call.orderSeq, null);
-    assert.equal(detail.analysis.result, 'INQUIRY');
+    assert.equal(detail.analysis.repeatQuestionCount, 0);
+    assert.equal(Object.hasOwn(detail.analysis, 'result'), false);
     assert.equal(detail.aiActionCount, 1);
   } finally {
     config.set('AI_INSIGHTS_TOKEN', previous);
@@ -725,7 +723,7 @@ test('partial parcel snapshots retain field mapping, defaults and the actual tri
     parcels: [
       {
         origin: address,
-        destination: { name: '수령인', latitude: 0, longitude: 0 },
+        destination: { name: '수령인' },
         originPin: { scope: 'PERSONAL', pinSeq: personalPin },
         documentCount: 2,
         itemPrice: 123,
@@ -745,9 +743,11 @@ test('partial parcel snapshots retain field mapping, defaults and the actual tri
   assert.equal(rows[0].origin_phone_number, address.phoneNumber);
   assert.equal(rows[0].origin_road_address, address.roadAddress);
   assert.equal(rows[0].origin_postal_code, address.postalCode);
-  assert.equal(rows[0].origin_latitude, address.latitude);
+  assert.equal(Object.hasOwn(rows[0], 'origin_latitude'), false);
+  assert.equal(Object.hasOwn(rows[0], 'origin_longitude'), false);
   assert.equal(rows[0].destination_name, '수령인');
-  assert.equal(rows[0].destination_latitude, 0);
+  assert.equal(Object.hasOwn(rows[0], 'destination_latitude'), false);
+  assert.equal(Object.hasOwn(rows[0], 'destination_longitude'), false);
   assert.equal(rows[0].destination_phone_number, null);
   assert.equal(rows[0].origin_pin_seq, personalPin);
   assert.equal(rows[0].document_count, 2);
@@ -1288,6 +1288,25 @@ const readOrders = (query = '', extra = {}, index = 0) =>
   });
 const aiReadHeaders = (callId) => ({ Cookie: undefined, call_session_seq: String(callId) });
 
+test('Swagger omits coordinates from all address request and response schemas', async () => {
+  const response = await fetch(hosts[0] + '/api/docs-json');
+  assert.equal(response.status, 200);
+  const schemas = (await response.json()).components.schemas;
+  for (const name of [
+    'CustomerAddressDto',
+    'PinAddressInputDto',
+    'PinAddressDto',
+    'OrderAddressPatchDto',
+    'OrderAddressValueDto',
+  ])
+    assert.ok(schemas[name], name);
+  for (const [name, schema] of Object.entries(schemas))
+    for (const field of ['latitude', 'longitude']) {
+      assert.equal(Object.hasOwn(schema.properties ?? {}, field), false, name + '.' + field);
+      assert.equal((schema.required ?? []).includes(field), false, name + '.' + field);
+    }
+});
+
 test('ORD-02 paginates orders once each, including zero-detail drafts and equal creation times', async () => {
   const { customer } = await readCustomer();
   const ids = [];
@@ -1506,7 +1525,7 @@ const readDetail = (id, extra = {}, index = 0) =>
 test('ORD-03 returns draft details, every nullable address field and the actual version without writes', async () => {
   const { customer } = await readCustomer();
   const id = await readOrder(customer, [
-    { origin: { name: '수집한 이름', phoneNumber: '01000000001', latitude: 0 }, itemPrice: 0 },
+    { origin: { name: '수집한 이름', phoneNumber: '01000000001' }, itemPrice: 0 },
     { destination: address, itemPrice: Number.MAX_SAFE_INTEGER, documentCount: 2 },
     {},
   ]);
@@ -1535,7 +1554,6 @@ test('ORD-03 returns draft details, every nullable address field and the actual 
     ...emptyAddress,
     name: '수집한 이름',
     phoneNumber: '01000000001',
-    latitude: 0,
   });
   assert.deepEqual(order.parcels[0].destination, emptyAddress);
   assert.deepEqual(order.parcels[1].destination, address);
@@ -1727,7 +1745,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
         {
           orderParcelSeq: before.parcels[0].orderParcelSeq,
           destination: { roadAddress: "배송로 '); DROP TABLE orders; --", detailAddress: null },
-          origin: { latitude: 0 },
+          origin: { postalCode: '00000' },
           documentCount: 0,
         },
         {
@@ -1749,7 +1767,7 @@ test('ORD-04 merges addresses, preserves omitted parcels and appends after the l
   assert.deepEqual(after.parcels[0], {
     ...before.parcels[0],
     documentCount: 0,
-    origin: { ...before.parcels[0].origin, latitude: 0 },
+    origin: { ...before.parcels[0].origin, postalCode: '00000' },
     destination: {
       ...before.parcels[0].destination,
       roadAddress: "배송로 '); DROP TABLE orders; --",

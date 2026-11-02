@@ -33,7 +33,6 @@ export class CallInsightsService {
       startedAt: start.toISOString(),
       endedAt: end.toISOString(),
       aiPersonaVersionSeq: input.aiPersonaVersionSeq,
-      result: input.result,
       repeatQuestionCount: input.repeatQuestionCount,
       hasComplaint: input.hasComplaint,
       complaints: input.complaints.map((complaint) => ({
@@ -42,6 +41,13 @@ export class CallInsightsService {
         offsetSeconds: complaint.offsetSeconds,
         utteranceOrders: [...complaint.utteranceOrders].sort((a, b) => a - b),
       })),
+      // 미수집 요약 필드는 해시에서 생략하여 생략·null을 동일하게 취급한다.
+      isNewCustomer: input.isNewCustomer ?? undefined,
+      registeredParcelCount: input.registeredParcelCount ?? undefined,
+      faqAnswerCount: input.faqAnswerCount ?? undefined,
+      orderLookupCount: input.orderLookupCount ?? undefined,
+      cancelledParcelCount: input.cancelledParcelCount ?? undefined,
+      hasHandoffRequest: input.hasHandoffRequest ?? undefined,
     };
     const payloadHash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 

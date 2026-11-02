@@ -15,7 +15,6 @@ import {
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
-import { CALL_ANALYSIS_RESULTS, CallAnalysisResult } from '../../call-insights/call-insights.types';
 
 export class CallQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -30,14 +29,6 @@ export class CallQueryDto extends PaginationQueryDto {
   @MaxLength(200)
   @Matches(/^[^\0]*$/u)
   q?: string;
-
-  @ApiPropertyOptional({
-    enum: CALL_ANALYSIS_RESULTS,
-    description: '저장된 통화 분석 결과. 현재 주문 상태와 별개.',
-  })
-  @IsOptional()
-  @IsIn(CALL_ANALYSIS_RESULTS)
-  result?: CallAnalysisResult;
 
   @ApiPropertyOptional({
     type: Boolean,

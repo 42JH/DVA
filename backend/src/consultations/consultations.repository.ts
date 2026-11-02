@@ -9,10 +9,15 @@ import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
 type RecordingRow = Pick<RecordingDto, 'recordingSeq' | 'createdAt'> & { objectKey: string };
 
 type CallRow = Omit<CallDto, 'handoff'> & {
-  result: CallAnalysisDto['result'] | null;
   aiPersonaVersionSeq: number | null;
   personaName: string | null;
   personaVersion: number | null;
+  isNewCustomer: boolean | null;
+  registeredParcelCount: number | null;
+  faqAnswerCount: number | null;
+  orderLookupCount: number | null;
+  cancelledParcelCount: number | null;
+  hasHandoffRequest: boolean | null;
   aiStartedAt: Date | null;
   aiEndedAt: Date | null;
   repeatQuestionCount: number | null;
@@ -33,9 +38,12 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",c.end_reason AS "endReason",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",
- a.result,a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
+ a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
  a.ai_started_at AS "aiStartedAt",a.ai_ended_at AS "aiEndedAt",a.repeat_question_count AS "repeatQuestionCount",
  a.has_complaint AS "hasComplaint",a.complaints,a.analysed_at AS "analysedAt",
+ a.is_new_customer AS "isNewCustomer",a.registered_parcel_count AS "registeredParcelCount",
+ a.faq_answer_count AS "faqAnswerCount",a.order_lookup_count AS "orderLookupCount",
+ a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
  h.handoff_request_seq AS "handoffRequestSeq",h.reason AS "handoffReason",h.status AS "handoffStatus",
  h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
  FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq
@@ -46,10 +54,15 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
 
 function callResult(row: CallRow): CallListItemDto {
   const {
-    result,
     aiPersonaVersionSeq,
     personaName,
     personaVersion,
+    isNewCustomer,
+    registeredParcelCount,
+    faqAnswerCount,
+    orderLookupCount,
+    cancelledParcelCount,
+    hasHandoffRequest,
     aiStartedAt,
     aiEndedAt,
     repeatQuestionCount,
@@ -70,10 +83,15 @@ function callResult(row: CallRow): CallListItemDto {
       analysedAt === null
         ? null
         : {
-            result: result!,
             aiPersonaVersionSeq,
             personaName,
             personaVersion,
+            isNewCustomer,
+            registeredParcelCount,
+            faqAnswerCount,
+            orderLookupCount,
+            cancelledParcelCount,
+            hasHandoffRequest,
             aiStartedAt: aiStartedAt!,
             aiEndedAt: aiEndedAt!,
             repeatQuestionCount,
@@ -110,7 +128,6 @@ export class ConsultationsRepository {
       [query.to, CALL_STARTED_AT, '<'],
       [query.endReason, 'c.end_reason', '='],
       [query.handoffStatus, 'h.status', '='],
-      [query.result, 'a.result', '='],
       [query.hasComplaint, 'a.has_complaint', '='],
       [query.aiPersonaVersionSeq, 'a.ai_persona_version_seq', '='],
     ] as const) {

@@ -280,8 +280,6 @@ test('patch updates name/status with no response body and preserves memberships/
     detailAddress: '1층',
     dongName: '테스트동',
     postalCode: '00000',
-    latitude: 37,
-    longitude: 127,
   };
   await pool.query(
     `INSERT INTO company_pins(organization_seq,address_data) VALUES ($1,$2::jsonb)`,

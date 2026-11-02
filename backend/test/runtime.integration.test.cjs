@@ -630,8 +630,6 @@ test('production personal PIN APIs accept stale versions and company PIN routes 
     detailAddress: '101호',
     dongName: '예시동',
     postalCode: '01234',
-    latitude: 37.5,
-    longitude: 127,
   };
   const created = await fetch(root + `/customers/${customerId}/pins`, {
     method: 'POST',
@@ -757,8 +755,6 @@ test('production company directory searches current member addresses through Ngi
     detailAddress: '',
     dongName: '공식동',
     postalCode: '01234',
-    latitude: 37.5,
-    longitude: 127,
   };
   const { name: recipientName, phoneNumber, ...address } = addressData;
   const created = await fetch(root + '/companies/' + id + '/members', {

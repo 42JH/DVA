@@ -114,7 +114,6 @@ async function analyse(call, startedAt, aiPersonaVersionSeq = null) {
       startedAt,
       endedAt: new Date(Date.parse(startedAt) + 180000).toISOString(),
       aiPersonaVersionSeq,
-      result: 'INQUIRY',
       repeatQuestionCount: null,
       hasComplaint: null,
       complaints: [],

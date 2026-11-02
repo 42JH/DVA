@@ -34,8 +34,6 @@ const address = (overrides = {}) => ({
   detailAddress: randomUUID(),
   dongName: '예시동',
   postalCode: '01234',
-  latitude: 37.5,
-  longitude: 127,
   ...overrides,
 });
 async function request(method, path, body, headers = adminHeaders) {
@@ -328,7 +326,7 @@ test('withdrawal blocks personal access for callers and administrators', async (
   );
 });
 
-test('duplicate personal addresses use existing normalized DB identity, independent of labels, coordinates and request keys', async () => {
+test('duplicate personal addresses use existing normalized DB identity, independent of labels and request keys', async () => {
   const f = await fixture();
   const data = address({ name: 'TEST Name', detailAddress: '가 101호' });
   const p = await personal(
@@ -341,7 +339,6 @@ test('duplicate personal addresses use existing normalized DB identity, independ
     ...data,
     name: '  test   name  ',
     detailAddress: data.detailAddress.normalize('NFD'),
-    latitude: 38,
   };
   await error(
     await request(
@@ -495,8 +492,10 @@ test('invalid or incomplete addresses and scope overrides are rejected without s
     null,
     [],
     {},
-    { ...address(), latitude: '37' },
-    { ...address(), longitude: 181 },
+    { ...address(), latitude: 37.5 },
+    { ...address(), longitude: 127 },
+    { ...address(), latitude: null },
+    { ...address(), longitude: null },
     { ...address(), name: ' ' },
     { ...address(), phoneNumber: '010-1234-5678' },
     { ...address(), postalCode: '1234' },

@@ -22,7 +22,6 @@ export class PbxRecordingWorker implements OnApplicationBootstrap, OnModuleDestr
   onApplicationBootstrap(): void {
     if (!this.storage.configured) {
       this.logger.warn({ event: 'recording_storage_unconfigured' });
-      return;
     }
     const tick = () => {
       if (this.stopped || this.running) return;
@@ -38,9 +37,8 @@ export class PbxRecordingWorker implements OnApplicationBootstrap, OnModuleDestr
   }
 
   async processPending(): Promise<void> {
-    if (!this.storage.configured) return;
     for (let index = 0; index < 5 && !this.stopped; index++) {
-      const event = await this.repository.next();
+      const event = await this.repository.next(this.storage.configured);
       if (!event) break;
       try {
         const payload = parseCallEndedPayload(event.payload);
@@ -50,12 +48,18 @@ export class PbxRecordingWorker implements OnApplicationBootstrap, OnModuleDestr
           event.claimId,
         );
         if (callId === null) {
+          await this.repository.discardExpired(event.recordingId, event.claimId);
+          await this.repository.release(event.recordingId, event.claimId);
+          continue;
+        }
+        if (!this.storage.configured) {
           await this.repository.release(event.recordingId, event.claimId);
           continue;
         }
         const key = await this.storage.save(event.recordingId, callId, payload.recordingUrl);
         await this.repository.processed(event.recordingId, callId, key, event.claimId);
       } catch {
+        await this.repository.discardExpired(event.recordingId, event.claimId);
         await this.repository.failed(event.recordingId, event.claimId);
         this.logger.warn({
           event: 'recording_processing_failed',

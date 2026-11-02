@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsNotEmpty, IsNumber, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
+import { IsNotEmpty, IsString, Matches, ValidateIf } from 'class-validator';
 
 const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.normalize('NFC').trim() : value;
@@ -18,14 +18,4 @@ export class CustomerAddressDto {
   @IsString()
   @Matches(/^[0-9]{5}(?![\s\S])/)
   postalCode!: string;
-  @ApiProperty({ minimum: -90, maximum: 90 })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-90)
-  @Max(90)
-  latitude!: number;
-  @ApiProperty({ minimum: -180, maximum: 180 })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-180)
-  @Max(180)
-  longitude!: number;
 }

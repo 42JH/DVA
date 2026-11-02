@@ -55,6 +55,18 @@ async function migrate(pool) {
         "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='customer_seq' AND udt_name='int4' AND is_nullable='YES'",
       );
       assert.equal(callCustomer.rowCount, 1, 'Apply migration 040 to the isolated DB first');
+      const callSummary = await client.query(
+        "SELECT 1 WHERE (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name IN ('is_new_customer','registered_parcel_count','faq_answer_count','order_lookup_count','cancelled_parcel_count','has_handoff_request') AND is_nullable='YES' AND column_default IS NULL)=6",
+      );
+      assert.equal(callSummary.rowCount, 1, 'Apply migration 041 to the isolated DB first');
+      const noAnalysisResult = await client.query(
+        "SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='result')",
+      );
+      assert.equal(noAnalysisResult.rowCount, 1, 'Apply migration 042 to the isolated DB first');
+      const noCoordinates = await client.query(
+        'SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=\'order_parcels\' AND column_name IN (\'origin_latitude\',\'origin_longitude\',\'destination_latitude\',\'destination_longitude\')) AND valid_customer_address(\'{"roadAddress":"Road","jibunAddress":"Lot","dongName":"Dong","postalCode":"01234"}\'::jsonb)',
+      );
+      assert.equal(noCoordinates.rowCount, 1, 'Apply migration 043 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

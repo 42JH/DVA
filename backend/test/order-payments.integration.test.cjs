@@ -154,8 +154,6 @@ function orderBody() {
     detailAddress: '',
     dongName: '검증동',
     postalCode: '00021',
-    latitude: 37.5,
-    longitude: 127,
   };
   return {
     customerSeq: customerId,

@@ -118,7 +118,7 @@ export class OrdersRepository {
         jsonb_build_object('name',p.${side}_name,'phoneNumber',p.${side}_phone_number,
           'roadAddress',p.${side}_road_address,'jibunAddress',p.${side}_jibun_address,
           'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
-          'postalCode',p.${side}_postal_code,'latitude',p.${side}_latitude,'longitude',p.${side}_longitude) AS address
+          'postalCode',p.${side}_postal_code) AS address
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
        WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE'
          AND ($2::timestamptz IS NULL OR o.created_at >= $2)
@@ -247,12 +247,12 @@ export class OrdersRepository {
                 'name',p.origin_name,'phoneNumber',p.origin_phone_number,
                 'roadAddress',p.origin_road_address,'jibunAddress',p.origin_jibun_address,
                 'detailAddress',p.origin_detail_address,'dongName',p.origin_dong_name,
-                'postalCode',p.origin_postal_code,'latitude',p.origin_latitude,'longitude',p.origin_longitude),
+                'postalCode',p.origin_postal_code),
               'destination',jsonb_build_object(
                 'name',p.destination_name,'phoneNumber',p.destination_phone_number,
                 'roadAddress',p.destination_road_address,'jibunAddress',p.destination_jibun_address,
                 'detailAddress',p.destination_detail_address,'dongName',p.destination_dong_name,
-                'postalCode',p.destination_postal_code,'latitude',p.destination_latitude,'longitude',p.destination_longitude),
+                'postalCode',p.destination_postal_code),
               'originPin',CASE WHEN p.origin_pin_seq IS NULL THEN NULL
                 ELSE jsonb_build_object('scope',p.origin_pin_scope,'pinSeq',p.origin_pin_seq) END,
               'documentCount',p.document_count,'smallBoxCount',p.small_box_count,
@@ -454,9 +454,9 @@ export class OrdersRepository {
   ) {
     const columns = `order_seq,parcel_position,
           origin_name,origin_phone_number,origin_road_address,origin_jibun_address,origin_detail_address,
-          origin_dong_name,origin_postal_code,origin_latitude,origin_longitude,
+          origin_dong_name,origin_postal_code,
           destination_name,destination_phone_number,destination_road_address,destination_jibun_address,destination_detail_address,
-          destination_dong_name,destination_postal_code,destination_latitude,destination_longitude,
+          destination_dong_name,destination_postal_code,
           origin_pin_scope,origin_pin_seq,document_count,small_box_count,medium_box_count,big_box_count,
           other_item_description,client_comment,item_price,notified_price`;
     // 행 트리거 비용을 문장별 timeout 안에 나누되 요청 전체는 같은 트랜잭션에 둔다.

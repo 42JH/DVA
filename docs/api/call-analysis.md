@@ -14,7 +14,7 @@
 
 ## Request
 
-모든 필드는 필수다. 아래에서 허용하는 미확인 값은 생략 대신 null로 보낸다.
+아래 핵심 분석 필드는 모두 필수다. 041의 신규 요약 6개 필드는 생략·null을 허용하며 둘 다 미수집으로 저장한다. 변경된 AI는 최종값을 모두 명시한다. 숫자·boolean 문자열은 변환하지 않는다. 042부터 대표 분류 `result`는 받지 않으며, 기존 코드값을 보내면 `400 INVALID_REQUEST`다.
 
 ```json
 {
@@ -22,7 +22,12 @@
   "startedAt": "2026-10-30T10:00:00+09:00",
   "endedAt": "2026-10-30T10:03:40+09:00",
   "aiPersonaVersionSeq": 7,
-  "result": "REGISTERED",
+  "isNewCustomer": false,
+  "registeredParcelCount": 3,
+  "faqAnswerCount": 2,
+  "orderLookupCount": 1,
+  "cancelledParcelCount": 1,
+  "hasHandoffRequest": true,
   "repeatQuestionCount": 2,
   "hasComplaint": true,
   "complaints": [
@@ -41,15 +46,17 @@
 | providerCallId | 공백·NUL 없는 문자열, 최대 200자 | 기존 통화 ID 검증 |
 | startedAt / endedAt | 시간대 포함 ISO 8601, 종료 >= 시작 | AI 측정 통화 시간. PBX 원본은 보존 |
 | aiPersonaVersionSeq | 양의 int32 또는 null | 실제 사용한 버전. 현재 ACTIVE로 대신 채우지 않음 |
-| result | 아래 5개 코드 | 통화 종료 결과. 현재 주문 상태에서 재계산하지 않음 |
+| isNewCustomer | 선택 boolean 또는 null | 신규 true / 기존 false. AI 판정값 |
+| registeredParcelCount | 선택 0 이상 int32 또는 null | 접수 확정 배송 상세 수. 주문 헤더 수가 아니며 결제 대기 포함 |
+| faqAnswerCount | 선택 0 이상 int32 또는 null | FAQ를 사용해 답변한 건수 |
+| orderLookupCount | 선택 0 이상 int32 또는 null | 접수 내역을 조회해 안내한 건수 |
+| cancelledParcelCount | 선택 0 이상 int32 또는 null | 취소 완료 배송 상세 수 |
+| hasHandoffRequest | 선택 boolean 또는 null | 상담원 연결 요구 여부. 연결 성공과 별개 |
 | repeatQuestionCount | 0 이상 int32 또는 null | 되묻기 횟수. 미측정과 0을 구분 |
 | hasComplaint | boolean 또는 null | 미판정 null과 확인된 불만 없음 false를 구분 |
 | complaints | 배열, 최대 20개 | true이면 1개 이상. false/null이면 빈 배열 |
 
-통화 결과 코드는 REGISTERED(접수 성공), REGISTRATION_FAILED(접수 실패), HANDOFF(상담원 이관),
-CANCELLED(주문 취소), INQUIRY(문의)다. 현재 합의 초안의 REGISTERED는 접수에 필요한 정보를 모아
-기존 주문 API가 저장을 확인한 통화로, 결제 대기도 포함한다. 결제·디버 최종 접수 성공과는 별개다.
-생산자인 AI가 확정한 결과를 보내며 백엔드는 주문 상태나 문장으로 결과를 추정하지 않는다.
+한 통화의 접수·취소·FAQ·접수 조회·상담원 연결 요구는 각각의 요약 값으로 함께 기록한다. 대표 분류로 합치거나 현재 주문 상태에서 추정하지 않는다.
 
 Complaint 항목의 모든 필드도 필수다.
 
@@ -67,6 +74,15 @@ AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는
 아직 수집되지 않은 발화를 생성하거나 다른 통화와 연결하지 않는다. 관리자 통화 상세·목록의 analysis가 불만 근거와 발화 순번을 제공한다. 프론트는 같은 통화의 transcript에서 실제 수신된 발화만 강조한다. [조회 계약](calls.md)을 따른다.
 
 ## 저장·재전송
+
+- 새 앱 실행 전 041·042를 순서대로 적용한다. 041은 기존 `call_analyses`에 nullable 컬럼 6개를 추가하며 기본값·기존 행 보완은 없다. 042는 대표 분류 `result`와 해당 CHECK를 삭제하고, 기존 분석의 해시를 `result` 없는 계약으로 갱신한다. 다른 분석 값·저장 시각·성공 감사·FK는 보존한다. 실제 서버 적용은 별도다.
+- 7개 값은 AI가 확정해 보낸다. 백엔드는 고객 상태·주문 상태·이벤트·현재 ACTIVE로 판정하거나 집계하지 않는다. `isNewCustomer`의 판정 시점과 반복 조회·답변의 집계 규칙도 AI 생산자가 정한다.
+- `aiPersonaVersionSeq`는 백엔드 설정 API에서 받은 값 중 해당 통화가 실제 사용한 버전이다. AI가 통화 시작 때 고정해 종료 분석까지 유지하며, 백엔드는 존재 여부와 FK만 검증한다.
+- 접수·취소는 `order_parcels` 기준이다. 접수 정보가 확정된 결제 대기 상세도 접수 건수에 포함한다. 미완료 수집 상세를 접수 건수로 세지 않는다. 취소는 이전 통화의 접수 건도 포함할 수 있어 두 건수를 상쇄하거나 비교하지 않는다.
+- FAQ 답변·접수 조회는 AI의 집계값을 그대로 보존한다. 검색·조회 API 호출 횟수나 응답 배열 길이로 백엔드가 재계산하지 않는다. `shipmentLookupCount`와 `customerType`은 받지 않는다.
+- 새 요약의 생략·null은 미수집, 숫자 0·boolean false는 확인한 없음이다. 요약 값들은 함께 존재할 수 있으며 실제 `handoff_requests`와 강제로 일치시키지 않는다.
+- 새 요약의 생략·null은 정규화 해시에서 제외한다. 042 적용 후 기존 요청에서 `result`만 제거한 재전송과 요약의 명시적 null 재전송은 동일한 204다. 0·false 등 실제 값이 달라지면 409이고 누적 증가·덮어쓰기를 하지 않는다. 기존 분석에 나중에 요약을 추가하는 것도 다른 내용이므로 409다.
+- 관리자 `GET /api/calls`, `GET /api/calls/{id}`는 같은 `analysis`에 새 6개 값을 제공한다. 분석 미수신은 analysis=null, 과거 분석의 새 값은 각각 null이다. [프론트 조회 계약](calls.md)을 따른다.
 
 - `024-call-analyses.sql`로 기존 DB에 call_analyses 한 테이블만 추가한다. 기존 001~023은 변경하지 않는다.
 - 통화 PK가 곧 분석 PK다. 통화·실제 사용 버전 FK와 시각·횟수·불만 배열 제약을 둔다.
@@ -92,6 +108,6 @@ AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는
 | 422 | VALIDATION_FAILED | 종료가 시작보다 빠르거나 저장할 수 없는 시각 |
 | 503 | DEPENDENCY_UNAVAILABLE | AI 수집 토큰 미설정 |
 
-ANL-01 초 단위 계약은 새 앱 실행 전에 025까지 적용한다. 현재 앱은 FAQ 분류를 포함해 027까지 팀 migration runner로 적용한다. 이번 통화 조회 보완의 추가 migration은 없다. 운영 DB 적용·실제 AI 전송·프론트 화면 연결은 별도다.
+ANL-01 초 단위 계약은 025, 통화별 요약 확장은 041, 대표 분류 삭제는 042까지 팀 migration runner로 적용한다. 042는 분석 행 전체의 해시를 갱신하므로 기존 백엔드 중지·백업 후 적용하고 새 계약의 앱을 실행한다. 구버전 앱은 삭제된 컬럼을 요구하므로 함께 운영하거나 앱 이미지만 되돌리지 않는다. AI는 `result` 전송을, 프론트는 `analysis.result` 표시와 `?result=...` 필터를 제거해야 한다. 운영 DB 적용·실제 AI 전송·프론트 화면 연결은 별도다.
 
 025부터 불만 위치는 offsetSeconds(정수 초)다. offsetMs는 거절한다. AI에서 소수 초를 버린 뒤 전송한다. 기존 데이터는 025가 밀리초를 1000으로 나눠 버림하고 해시도 새 계약으로 갱신한다. 분석 저장 시각은 보존하며 기존 024 파일은 변경하지 않는다.

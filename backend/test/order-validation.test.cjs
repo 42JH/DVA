@@ -26,7 +26,7 @@ test('empty order detection ignores identity and zero quantities but preserves c
     { pickupRequestedAt: '2026-12-01T00:00:00Z' },
     { totalAmount: 3500 },
     { parcels: [{ origin: { name: '보내는 분' } }] },
-    { parcels: [{ destination: { latitude: 0 } }] },
+    { parcels: [{ destination: { roadAddress: '받는 곳' } }] },
     { parcels: [{ originPin: { scope: 'PERSONAL', pinSeq: 1 } }] },
     { parcels: [{ smallBoxCount: 1 }] },
     { parcels: [{ clientComment: '주의' }] },
@@ -43,8 +43,6 @@ const address = {
   jibunAddress: '검증동 1',
   dongName: '검증동',
   postalCode: '00001',
-  latitude: 0,
-  longitude: 0,
 };
 const complete = () =>
   orderDraft({
@@ -140,8 +138,6 @@ test('final validation rejects expired pickup, invalid address, quantities and p
   Object.assign(value.parcels[0].origin, {
     phoneNumber: '010-1234',
     postalCode: 'bad',
-    latitude: 91,
-    longitude: 181,
   });
   Object.assign(value.parcels[0], {
     smallBoxCount: -1,
@@ -158,8 +154,6 @@ test('final validation rejects expired pickup, invalid address, quantities and p
         'mustBeFuture',
         'digitsOnly',
         'postalCode',
-        'latitudeRange',
-        'longitudeRange',
         'quantityRange',
         'priceRange',
         'deliveryFeeRange',
