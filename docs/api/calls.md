@@ -68,7 +68,7 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 `aiActionCount`는 현재 수집된 AI 동작 전체 건수이며 `/actions`의 페이지 크기와 별개다. 수집 기록이 없으면 0이다.
 
 통화 목록·AI 분석·발화·처리 기록 조회는 S3 업로드를 기다리지 않는다. 아직 녹취가 없으면 `recordings: []`로 먼저 응답한다. AI 데이터와 PBX 시각·녹취는 기존 통화 번호에 나중에 연결되며 다음 조회에 반영된다. 파일 업로드 실패·지연을 이유로 이미 수집한 통화·분석을 목록에서 숨기지 않는다.
-열려 있는 화면의 자동 갱신과 재생 URL 보존은 [프론트 인계 사항](../../backend/docs/recording-independent-calls.md)을 따른다.
+열려 있는 화면의 자동 갱신과 재생 URL 보존은 [프론트 연동 명세](call-history-refresh-frontend.md)를 따른다. 백엔드 변경·검증 기록은 [작업 인계](../../backend/docs/recording-independent-calls.md)에 정리했다.
 
 `call`은 목록의 기본 정보·고객 필드이며 analysis는 data.analysis로 분리한다. 목록에서는 각 항목의 analysis에 같은 분석 객체를 제공한다.
 `recordings`는 아래 필드를 가진 배열이며 `recordingSeq` 오름차순이다.
