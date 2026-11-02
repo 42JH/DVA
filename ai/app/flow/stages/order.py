@@ -218,6 +218,7 @@ STAGES = [
         choices=lambda ctx: YES_NO,
         on_answer=event_answer,
         confirm=True,
+        consent=("yes",),  # 택배 담기로 이어진다(두 열쇠)
         transitions=(
             Transition("order.updated", "ORDER", lambda ctx: not order_complete(ctx)),  # 고치다 값이 비면 다시 받기
             # 결제 방식을 물어야 하면(후불 자격 둘) 운임만 말하고 결제 단계에서 묻는다. 고른 답이 확정이다
@@ -237,6 +238,7 @@ STAGES = [
         choices=lambda ctx: PAY_CHOICES if payment_asked(ctx) else {},
         on_answer=payment_answer,
         confirm=True,
+        consent=tuple(PAY_CHOICES),  # 고른 결제 방식이 곧 접수 확정
         on_enter=set_payment,
         transitions=(
             Transition(ENTERED, "A_DONE", lambda ctx: ctx.payment_method is not None),

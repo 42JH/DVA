@@ -293,6 +293,9 @@ async def watch_flow(call: Call, conn, client) -> None:
         p = call.flow.pending
         if p and not p["suspended"] and now - p["at"] >= cfg.flow.commit_delay_ms / 1000:
             await _fire(call, conn, engine.COMMIT, "commit")
+        held = call.consent
+        if held and (held["stage"] != call.flow.stage or now - held["at"] > cfg.listener.consent_wait_sec):
+            await listener.consent_expired(call, conn, held)
         if call.progress_due and not speaking(call):
             async with call.lock:
                 if call.progress_due:

@@ -73,6 +73,7 @@ class ListenerConfig(_Strict):
     joined_sec: float = Field(ge=0)
     delegate_wait_sec: float = Field(gt=0)
     cut_wait_ms: int = Field(ge=0, le=5000)
+    consent_wait_sec: float = Field(gt=0)
 
 
 class AddressConfig(_Strict):
@@ -219,6 +220,7 @@ class Texts(_Strict):
     answer_error: str
     record_heard: str
     reask: str
+    consent_retry: str
     speak: str
     drift_fix: str
     drift_markers: list[str]

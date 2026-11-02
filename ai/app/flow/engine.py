@@ -34,6 +34,7 @@ STAY = "@stay"  # 단계를 옮기지 않고 같은 단계를 예외 문구로 �
 ENTERED = "stage.entered"  # 단계에 들어온 직후 한 번 내는 사건(머무르지 않는 단계·건너뛰기 조건용)
 COMMIT = "commit.due"  # 확정 지연이 끝남(§2.5(3)). 미뤄 둔 전이를 실행한다
 COMMIT_WAIT = "COMMIT_WAIT"  # 확정을 기다리는 동안의 할 일(새 질문 없이 기다림)
+CONSENT_WAIT = "CONSENT_WAIT"  # Live-1이 동의를 보고하고 서버 판별을 기다리는 동안의 할 일(두 열쇠)
 MAX_HOPS = 10  # 사건 하나로 이만큼 옮겨 가면 정의 오류(전이가 끝나지 않음)
 
 Key = str | Callable[[Any], "str | tuple[str, ...] | None"] | None  # 문구 키, 또는 ctx → 문구 키(들)
@@ -72,6 +73,9 @@ class Stage:
     # 확인 단계: 서버가 고객 답을 직접 듣고 판별한다(담기·결제·취소·상담원 연결 앞, AGENTS.md 안전장치). 아니면 답은
     # 음성 모델이 알아듣고 백엔드가 answer 도구로 보고한다
     confirm: bool = False
+    # 확인 단계에서 되돌릴 수 없는 일로 이어지는 답(예: 담기·취소·상담원 연결의 "예"). 두 열쇠: Live-1의 answer 보고와
+    # 서버 판별이 둘 다 이 답일 때만 처리한다(listener.consent). 그 밖의 답(거절 등)은 서버 판별로 바로 처리한다
+    consent: tuple[str, ...] = ()
     subflow: bool = False  # QnA·상담원 Hub: 들어오기 전 업무 단계를 기억했다가 RETURN으로 돌아간다
     final: bool = False  # 통화를 끝내는 단계. 끼어드는 용건(enter_on)으로 나가지 않는다
     enter_on: tuple[str, ...] = ()  # 이 사건이 나면 어느 단계에서나(final 제외) 이 단계로 들어온다
@@ -242,9 +246,10 @@ def listening(ctx: Any) -> bool:
 
 
 def answers_by_tool(ctx: Any) -> bool:
-    """지금 단계의 답(제안 확인·업무 고르기 등)을 백엔드가 answer 도구로 보고한다(확인 단계가 아니고 고를 답이 있음)."""
+    """지금 단계의 답(제안 확인·업무 고르기·확인 질문)을 백엔드가 answer 도구로 보고한다(고를 답이 있음).
+    확인 단계의 보고는 두 열쇠의 한쪽일 뿐 그것만으로 처리하지 않는다(tools/answer.py)."""
     stage = current(ctx)
-    return bool(stage.choices and stage.on_answer and not stage.confirm and listening(ctx) and stage.choices(ctx))
+    return bool(stage.choices and stage.on_answer and listening(ctx) and stage.choices(ctx))
 
 
 ANYWHERE = ("get_state", "search_manual", "switch_task")  # 끝내는 단계 밖 어디서나(질문·업무 바꾸기는 언제든)
@@ -301,6 +306,9 @@ def render(ctx: Any, key: str) -> str:
 def next_text(ctx: Any) -> str:
     """다음에 할 말: 한 번만 붙일 말 + 마지막 전이 경로의 말 + 머무는 단계의 질문."""
     flow = ctx.flow
+    held = getattr(ctx, "consent", None)
+    if held and held["source"] == "live" and held["stage"] == flow.stage:
+        return render(ctx, CONSENT_WAIT)  # 동의를 보고한 턴: 확인 질문을 되풀이하지 않고 서버 판별을 기다린다
     keys = [*flow.notice, *flow.say]
     if not flow.say_asks:
         keys += [k for k in question(ctx) if k not in keys]

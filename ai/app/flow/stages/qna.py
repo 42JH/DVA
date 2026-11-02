@@ -88,6 +88,7 @@ STAGES = [
         choices=lambda ctx: ({"yes": "상담원 연결을 원한다"} if ctx.agent_offered else {}) | OTHER_TASK,
         on_answer=other_task,
         confirm=True,  # 상담원 연결 "예"는 서버가 직접 듣는다(AGENTS.md 안전장치)
+        consent=("yes",),  # 상담원 연결로 이어진다(두 열쇠)
         subflow=True,
         transitions=(
             Transition("agent.yes", "D_AGENT_AVAILABLE", lambda ctx: ctx.agent_offered, say="D9"),
