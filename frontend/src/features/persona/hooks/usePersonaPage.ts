@@ -215,6 +215,14 @@ export function usePersonaPage() {
   const canEdit =
     canManage && !!viewing && (viewing === latest || viewing.version === persona?.appliedVersion)
 
+  // [수정] · [음성 세부 조절]: 패널이 버전 히스토리의 맨 위(초안이 있으면 초안 = 지금 고치는 것)를 가리키게 (11/02 사용자)
+  const beginEdit = (mode: 'prompt' | 'voice') => {
+    setComparing(false)
+    setVersion(null)
+    setTab('history')
+    setEditing(mode)
+  }
+
   return {
     tab,
     setTab,
@@ -329,15 +337,9 @@ export function usePersonaPage() {
       }
     },
     editTarget,
-    startEdit: () => {
-      setComparing(false)
-      setEditing('prompt')
-    },
+    startEdit: () => beginEdit('prompt'),
     // 보기 화면 [음성 세부 조절] = 음성만 바꿔도 새 버전이라 수정 화면으로 들어가며 음성 창을 엶
-    startVoice: () => {
-      setComparing(false)
-      setEditing('voice')
-    },
+    startVoice: () => beginEdit('voice'),
     // 저장하면 새로 생긴 버전을 보여 줌 (취소면 보던 버전 그대로)
     finishEdit: (savedVersion?: number) => {
       setEditing(false)
@@ -361,11 +363,13 @@ export function usePersonaPage() {
         p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''
       }`,
     })),
+    // 페르소나를 고르면 패널이 그 페르소나의 버전 히스토리로 넘어감 (11/02 사용자)
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
       setShowAll(false)
       setComparing(false) // 다른 페르소나 버전끼리는 비교하지 않음
+      setTab('history')
     },
 
     versions: (showAll ? all : all.slice(0, HISTORY_FIRST)).map((v): VersionItem => {
