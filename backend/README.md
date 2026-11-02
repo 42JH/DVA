@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+무의미 통화는 AI가 등록·업무 결과 전송을 생략한다. 최초 고객 확인은 phoneNumber만 보내 조회하고, 업무 의도를 확인한 뒤 같은 API에 최초 call(providerCallId·incomingAt)을 보내 통화를 등록한다. PBX 미연결 수신은 received_at부터 30분 경과 후 처리 주기에 삭제하며 S3 미설정이어도 정리는 실행한다. 연결된 유효 통화의 저장 실패와 NO_ORDER는 보존한다. [AI 전달 계약](docs/meaningful-call-registration-handoff.md)을 따르며 AI 코드·운영 배포는 별도다.
+
 주소 위도·경도는 모든 입력·출력·디버 전송에서 제거한다. 고객·사원·PIN의 JSON 주소와 주문 좌표 컬럼은 새 migration 043으로 정리하며 기존 주문·PIN 버전과 나머지 값은 보존한다. 기존 앱 중지·백업 후 전환하고 구버전 앱으로 이미지 단독 복귀하지 않는다. 사용자 지정 범위에 따라 `backend/` 밖 문서·배포 보호는 수정하지 않았으므로 [좌표 제거 계약과 전환 주의사항](docs/address-coordinates-removal.md)을 우선한다.
 
 통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
@@ -36,8 +38,8 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
 AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 개인 카드 결제 대기 또는 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE·CANCELLED는 일부라도 수집한 주문을 저장한다. 주문 데이터가 없는 통화는 [빈 통화 계약](docs/empty-ai-order-results.md)에 따라 주문을 생성하지 않는다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
-상담 시작에는 [고객 확인 API](../docs/api/caller-context.md)에 phoneNumber와 call(providerCallId·incomingAt)을 보내 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 전화번호만 보낸 기존 조회는 그대로 유지한다.
-PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
+상담 시작의 [고객 확인 API](../docs/api/caller-context.md)는 먼저 phoneNumber만 보내 조회한다. AI가 실제 업무 의도를 확인한 뒤 최초 call(providerCallId·incomingAt)을 추가해 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 무의미 통화는 등록·결과 전송을 생략한다. 새 두 단계 계약은 위 AI 전달 문서를 우선한다.
+PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. 미연결 수신은 30분 경과 후 정리하며 연결된 통화는 보존한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.
@@ -83,7 +85,7 @@ npm run start:dev
 | `DVER_API_URL` | 기본 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용 |
 | `DVER_API_KEY` | 서버 전용 디버 키. 빈 값이면 신규 최종 접수만 503. 공백·제어문자 금지. Compose가 backend에 전달 |
 | `AWS_REGION` | S3 대상 리전. 기본 ap-northeast-2 |
-| `S3_RECORDINGS_BUCKET` | 비공개 녹취 버킷명. 미설정이면 웹훅은 보존하고 업로드 워커만 비활성 |
+| `S3_RECORDINGS_BUCKET` | 비공개 녹취 버킷명. 미설정이면 업로드만 비활성. 미연결 PBX 수신의 30분 정리는 계속 실행 |
 | `RECORDING_ALLOWED_HOSTS` | 정확한 원본 다운로드 호스트 목록. 기본 디버 녹취 S3 호스트, 쉼표 구분 |
 | `RECORDING_MATCH_WINDOW_SECONDS` | 동일 발신번호의 OpenAI/PBX 시작 시각 허용 차이. 기본 ±30초, 1~300 |
 

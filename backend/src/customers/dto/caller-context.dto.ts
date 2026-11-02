@@ -21,7 +21,7 @@ export class CallerContextRequestDto {
   @ApiPropertyOptional({
     type: () => CallIdentityDto,
     description:
-      'AI 통화 시작 시 전달. 통화를 생성·재사용하고 callSessionSeq를 반환합니다. 생략하면 기존 고객 조회만 수행합니다.',
+      'AI가 실제 상담 업무 의도를 확인한 뒤 전달. 통화를 생성·재사용하고 callSessionSeq를 반환합니다. 최초 고객 확인은 call 없이 조회하며 통화를 저장하지 않습니다. providerCallId·incomingAt은 최초 수신 이벤트 값을 유지합니다.',
   })
   @ValidateIf((_object, value) => value !== undefined)
   @IsObject()

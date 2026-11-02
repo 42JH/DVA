@@ -2,6 +2,8 @@
 
 POST /api/orders의 AI 결과 수신에 적용한다. endpoint·요청 필드는 그대로다. frontend·AI 소스 변경은 이번 작업에 포함하지 않는다.
 
+NO_ORDER 동작은 유지한다. 무의미 통화는 AI가 [두 단계 통화 등록 계약](meaningful-call-registration-handoff.md)에 따라 통화 등록·주문 결과 전송을 생략하며, NO_ORDER를 제외 신호로 사용하지 않는다. 유효한 문의·FAQ·조회·상담원 연결 통화는 주문이 없어도 보존한다.
+
 ## 주문을 만들지 않는 조건
 
 본문 call이 있고 outcome이 INCOMPLETE 또는 CANCELLED이며 아래 주문 정보가 모두 비어 있을 때다.

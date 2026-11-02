@@ -11,7 +11,7 @@ export class PbxWebhookRepository {
     private readonly calls: ConsultationsService,
   ) {}
 
-  async next() {
+  async next(storageConfigured: boolean) {
     // 짧은 도착 순서 역전을 기다린다. 실패한 한 건이 뒤의 수신을 계속 막지 않게 순환한다.
     // 5분 lease는 저장소의 HEAD·다운로드·업로드 제한(최대 150초)보다 길게 둔다.
     return (
@@ -24,11 +24,14 @@ export class PbxWebhookRepository {
           claim_id=$1,claimed_until=clock_timestamp()+interval '5 minutes'
        WHERE recording_id=(SELECT recording_id FROM pbx_webhooks.call_ended_events
          WHERE processing_status<>'PROCESSED' AND received_at<clock_timestamp()-interval '1 minute'
-           AND (last_attempt_at IS NULL OR last_attempt_at<clock_timestamp()-interval '1 minute')
+           AND ($2::boolean OR call_session_seq IS NULL)
+           AND ((call_session_seq IS NULL AND received_at<=clock_timestamp()-interval '30 minutes')
+             OR last_attempt_at IS NULL OR last_attempt_at<clock_timestamp()-interval '1 minute')
            AND (claimed_until IS NULL OR claimed_until<=clock_timestamp())
-         ORDER BY last_attempt_at NULLS FIRST,received_at,recording_id LIMIT 1 FOR UPDATE SKIP LOCKED)
+         ORDER BY (call_session_seq IS NULL AND received_at<=clock_timestamp()-interval '30 minutes') DESC,
+           last_attempt_at NULLS FIRST,received_at,recording_id LIMIT 1 FOR UPDATE SKIP LOCKED)
        RETURNING recording_id AS "recordingId",payload,claim_id AS "claimId"`,
-        [randomUUID()],
+        [randomUUID(), storageConfigured],
       )
     ).rows[0];
   }
@@ -97,6 +100,16 @@ export class PbxWebhookRepository {
   async release(recordingId: string, claimId: string): Promise<void> {
     await this.database.pool.query(
       'UPDATE pbx_webhooks.call_ended_events SET claim_id=NULL,claimed_until=NULL WHERE recording_id=$1 AND claim_id=$2',
+      [recordingId, claimId],
+    );
+  }
+
+  async discardExpired(recordingId: string, claimId: string): Promise<void> {
+    await this.database.pool.query(
+      `DELETE FROM pbx_webhooks.call_ended_events
+       WHERE recording_id=$1 AND claim_id=$2 AND claimed_until>clock_timestamp()
+         AND call_session_seq IS NULL AND processing_status<>'PROCESSED'
+         AND received_at<=clock_timestamp()-interval '30 minutes'`,
       [recordingId, claimId],
     );
   }

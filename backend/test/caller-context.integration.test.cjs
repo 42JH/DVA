@@ -131,6 +131,59 @@ test('unknown caller is explicitly unregistered; reads do not create a customer 
   assert.deepEqual(await counts(), previous);
 });
 
+test('two-stage context reads without writes and registers one confirmed orderless call with original identity', async () => {
+  const c = await customer();
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM customers) AS customers,
+        (SELECT count(*) FROM call_sessions) AS calls, (SELECT count(*) FROM orders) AS orders,
+        (SELECT count(*) FROM audit_logs) AS audits,
+        (SELECT count(*) FROM empty_ai_order_results) AS empty_results`)
+    ).rows[0];
+  const before = await counts();
+  for (let index = 0; index < 2; index++) {
+    const initial = await context(c.phoneNumber);
+    assert.equal(initial.customer.customerSeq, c.customerSeq);
+    assert.equal(Object.hasOwn(initial, 'callSessionSeq'), false);
+  }
+  assert.deepEqual(await counts(), before);
+  const call = { providerCallId: 'confirmed-' + randomUUID(), incomingAt: '2026-10-27T01:00:02Z' };
+  const response = await request({ phoneNumber: c.phoneNumber, call });
+  assert.equal(response.status, 200);
+  const id = (await response.json()).data.callSessionSeq;
+  assert.ok(Number.isInteger(id));
+  const saved = (
+    await pool.query(
+      'SELECT provider_call_id,incoming_at,caller_phone_number,customer_seq,order_seq FROM call_sessions WHERE call_session_seq=$1',
+      [id],
+    )
+  ).rows[0];
+  assert.equal(saved.provider_call_id, call.providerCallId);
+  assert.equal(saved.incoming_at.toISOString(), '2026-10-27T01:00:02.000Z');
+  assert.equal(saved.caller_phone_number, c.phoneNumber);
+  assert.equal(saved.customer_seq, c.customerSeq);
+  assert.equal(saved.order_seq, null);
+  const expected = {
+    ...before,
+    calls: String(Number(before.calls) + 1),
+    audits: String(Number(before.audits) + 1),
+  };
+  assert.deepEqual(await counts(), expected);
+  const replay = await request({ phoneNumber: c.phoneNumber, call });
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).data.callSessionSeq, id);
+  assert.deepEqual(await counts(), expected);
+  assert.equal(
+    (
+      await pool.query(
+        "SELECT count(*)::int AS count FROM audit_logs WHERE action='CALL_STARTED' AND target_seq=$1",
+        [id],
+      )
+    ).rows[0].count,
+    1,
+  );
+});
+
 test('registered caller without orders, pins or membership remains registered', async () => {
   const c = await customer();
   assert.deepEqual(await context(c.phoneNumber), {

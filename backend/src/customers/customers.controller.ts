@@ -40,10 +40,10 @@ export class CustomersController {
   @HttpCode(200)
   @MvpAiCustomerAccess()
   @ApiOperation({
-    summary: '고객 확인·주소록 조회 및 통화 시작',
+    summary: '고객 확인·주소록 조회 및 유효 상담 통화 등록',
     security: [],
     description:
-      '고객 등록 상태·소속·주소록을 조회합니다. call을 함께 보내면 통화를 생성·재사용하고 callSessionSeq를 반환합니다. AI는 이 번호를 주문 조회·취소·주소록 API의 call_session_seq 헤더에 사용합니다. 같은 통화 ID의 발신번호·수신 시각이 다르면 409입니다. 고객·주문은 생성하지 않으며 MVP 서비스 인증은 아직 적용하지 않습니다.',
+      '첫 고객 확인은 phoneNumber만 보내며 통화·감사를 저장하지 않습니다. AI가 주문 접수·접수 조회·FAQ·상담원 연결 등 업무 의도를 확인한 뒤 같은 API에 call을 포함하면 통화를 생성·재사용하고 callSessionSeq를 반환합니다. 최초 providerCallId·incomingAt을 유지하고, 응답 번호를 주문 조회·취소·주소록 API의 call_session_seq 헤더에 사용합니다. 무의미 통화는 등록·업무 결과 전송을 생략합니다. 같은 통화 ID의 발신번호·수신 시각이 다르면 409입니다. 고객·주문은 생성하지 않으며 MVP 서비스 인증은 아직 적용하지 않습니다.',
   })
   @ApiOkResponse({ type: CallerContextEnvelopeDto })
   context(@Body() input: CallerContextRequestDto, @Req() request: AuthRequest) {
