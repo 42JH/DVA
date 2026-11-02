@@ -22,12 +22,18 @@ export function FaqPage() {
   const vm = useFaqList()
 
   const columns: Column<FaqRow>[] = [
-    { key: 'no', header: '번호', width: 80, cell: (r) => <span className="text-sub">{r.no}</span> },
+    {
+      key: 'no',
+      header: '번호',
+      width: 80,
+      align: 'center',
+      cell: (r) => <span className="text-sub">{r.no}</span>,
+    },
     {
       key: 'category',
       header: '분류',
       width: 160, // 가장 긴 '배송·운송장' 태그 + 여백
-      pill: true,
+      align: 'center',
       cell: (r) => <Tag kind="gray">{r.category}</Tag>,
     },
     {
@@ -107,7 +113,7 @@ export function FaqPage() {
               <div className="-mx-4 rounded-b-lg bg-bg px-4 pt-1 pb-[22px]">
                 <div className="grid items-baseline" style={{ gridTemplateColumns: gridCols }}>
                   <span />
-                  <span className="text-label font-semibold text-sub">답변</span>
+                  <span className="text-center text-label font-semibold text-sub">답변</span>
                   {/* 답변은 마크다운(표 · 목록 · 굵게)으로 그림 — 11/01 사용자: '| 표 |'가 글자 그대로 보임. 긴 URL도 안에서 줄바꿈 */}
                   <Markdown text={r.answer} className="col-span-2 pr-4 text-body" />
                 </div>

@@ -23,7 +23,8 @@ export interface VersionRowView {
   onSelect: () => void
 }
 
-const COLS = 'grid-cols-[1.6fr_1.3fr_0.9fr_1fr_1fr_1fr_1.1fr_0.9fr]'
+// 상태(적용 중 · 이전)는 이름 옆이 아니라 따로 한 열 — 이름 옆에 두면 긴 이름이 잘렸음 (11/02 사용자)
+const COLS = 'grid-cols-[2fr_1.1fr_0.6fr_0.7fr_0.9fr_0.9fr_0.9fr_1fr_0.8fr]'
 
 export function VersionTable({
   rows,
@@ -44,6 +45,7 @@ export function VersionTable({
       >
         <span>페르소나 · 버전</span>
         <span>운영 기간</span>
+        <span className="text-center">상태</span>
         <span className="text-right">통화</span>
         <span className="flex items-center justify-end gap-1.5">
           <i className="size-2.5 rounded-sm bg-brand" />
@@ -71,20 +73,18 @@ export function VersionTable({
                 r.selected ? 'bg-action-soft' : 'hover:bg-bg'
               }`}
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <span
-                  className={`min-w-0 truncate text-label ${r.selected ? 'font-bold text-action' : 'font-semibold'}`}
-                  title={r.name}
-                >
-                  {r.name}
-                </span>
-                {r.active && (
-                  <Tag kind="blue" onTinted={r.selected}>
-                    적용 중
-                  </Tag>
-                )}
+              <span
+                className={`min-w-0 truncate pr-4 text-label ${r.selected ? 'font-bold text-action' : 'font-semibold'}`}
+                title={r.name}
+              >
+                {r.name}
               </span>
-              <span className="text-label text-sub">{r.period}</span>
+              <span className="pr-4 text-label text-sub">{r.period}</span>
+              <span className="text-center">
+                <Tag kind={r.active ? 'blue' : 'outline'} onTinted={r.selected}>
+                  {r.active ? '적용 중' : '이전'}
+                </Tag>
+              </span>
               <span className="text-right text-label font-semibold">{r.calls}</span>
               {[r.success, r.failed, r.handoff].map((c, i) => (
                 <span key={i} className="text-right">

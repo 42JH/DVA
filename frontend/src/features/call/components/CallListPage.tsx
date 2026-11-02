@@ -41,21 +41,21 @@ export function CallListPage() {
       ),
     },
     {
-      key: 'customer',
-      header: '고객 · 발신번호',
-      width: 170,
-      cell: (r) => <TwoLines top={r.name} bottom={r.phone} />,
-    },
-    {
       key: 'outcome',
       header: '통화 결과',
       width: 146,
-      pill: true,
+      align: 'center',
       cell: (r, { tinted }) => (
         <Tag kind={r.outcomeTag} onTinted={tinted}>
           {r.outcomeLabel}
         </Tag>
       ),
+    },
+    {
+      key: 'customer',
+      header: '고객 · 발신번호',
+      width: 170,
+      cell: (r) => <TwoLines top={r.name} bottom={r.phone} />,
     },
     {
       key: 'complaint',

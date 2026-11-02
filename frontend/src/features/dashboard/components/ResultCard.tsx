@@ -66,7 +66,7 @@ export function ResultCard({
                 <button
                   type="button"
                   onClick={r.onClick}
-                  className="group flex h-9 w-full items-center text-left"
+                  className="group flex h-9 items-center text-left" // w-full 아님: 글자 · 건수까지만 눌림, 오른쪽 빈 여백은 아님 (11/02 사용자)
                 >
                   <span className={`mr-2 size-2.5 shrink-0 rounded-sm ${COLOR[r.key].mark}`} />
                   <span className="w-[120px] text-label font-semibold group-hover:text-action">
@@ -137,7 +137,7 @@ function Gauge({
             </>
           )}
         </svg>
-        <div className="absolute inset-x-0 bottom-0 flex flex-col items-center">
+        <div className="absolute inset-x-0 bottom-4 flex flex-col items-center">
           <span className="text-title font-bold">{rate}</span>
           <span className="text-label font-semibold text-sub">접수 성공률</span>
         </div>

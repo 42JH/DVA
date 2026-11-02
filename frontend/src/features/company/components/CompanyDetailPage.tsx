@@ -97,7 +97,7 @@ export function CompanyDetailPage() {
       </div>
 
       {(vm.deleteError ?? vm.loadError) && (
-        <p role="alert" className="text-label text-danger">
+        <p role="alert" className="px-4 text-label text-danger">
           {vm.deleteError ?? vm.loadError}
         </p>
       )}

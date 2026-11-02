@@ -8,12 +8,14 @@ import { Checkbox } from './Checkbox'
 // 줄 끝 › · ▾ 없음 (10/29 목록 줄 끝 꺽쇠 뺌 · 10/30 09 펼침 꺽쇠 뺌) — 누를 수 있는 줄은 호버 바탕과 손가락 커서로 보임
 // 선택 · 호버 줄 위의 태그는 Tag onTinted로 흰 바탕 (줄 바탕과 겹쳐 사라지지 않게)
 
+// 열 정렬 — 가운데 열은 pr-4를 빼야 머리글과 값의 중심이 같은 x (pr-4는 왼쪽 · 오른쪽 열의 이웃 열과 간격용)
+const ALIGN = { left: 'pr-4', center: 'text-center', right: 'pr-4 text-right' } as const
+
 export interface Column<Row> {
   key: string
   header: string
   width?: number | string // px 또는 '1fr'. 마지막 열은 보통 나머지
-  align?: 'left' | 'right'
-  pill?: boolean // 셀이 알약(Tag)인 열 — 머리글을 알약 테두리가 아니라 안쪽 글자에 맞춤 (11/02 사용자: 머리글과 상태값 정렬)
+  align?: 'left' | 'center' | 'right' // 알약(Tag) · 번호 열은 center — 머리글과 값이 같은 축 (11/02 사용자: 정렬 통일, 가운데 OK)
   cell: (row: Row, ctx: { tinted: boolean }) => ReactNode
 }
 
@@ -77,10 +79,7 @@ export function Table<Row>({
             <span />
           ))}
         {columns.map((c) => (
-          <span
-            key={c.key}
-            className={`pr-4 ${c.align === 'right' ? 'text-right' : ''} ${c.pill ? 'pl-2.5' : ''}`} // pl-2.5 = Tag px-2.5
-          >
+          <span key={c.key} className={ALIGN[c.align ?? 'left']}>
             {c.header}
           </span>
         ))}
@@ -137,10 +136,7 @@ export function Table<Row>({
                     />
                   )}
                   {columns.map((c) => (
-                    <div
-                      key={c.key}
-                      className={`min-w-0 pr-4 ${c.align === 'right' ? 'text-right' : ''}`}
-                    >
+                    <div key={c.key} className={`min-w-0 ${ALIGN[c.align ?? 'left']}`}>
                       {c.cell(row, { tinted })}
                     </div>
                   ))}
