@@ -42,7 +42,8 @@ def saved_db(pins=(DEST, DEST2, ORIGIN), recent=(ORIGIN, DEST), payment_methods=
              cls=FakeBackend):
     """주소록이 있는 등록 고객. 최근 접수 1건: 강남 테헤란로(출발지) → 부산 해운대 이영희(도착지). 월결제 자격 있음."""
     db = cls()
-    db.add_customer(CALLER, "김철수", list(pins), recent=recent, payment_methods=list(payment_methods))
+    db.add_customer(CALLER, "김철수", list(pins), recent=recent, payment_methods=list(payment_methods),
+                    default_origin=ORIGIN if ORIGIN in pins or recent else None)
     return db
 
 
@@ -626,9 +627,10 @@ def test_new_customer_is_registered_when_sender_info_is_given():
     body = db.results[0]["body"]
     assert body["customerSeq"] == call.customer_seq and "customer" not in body
     assert body["call"]["incomingAt"] == INCOMING_AT
-    # 다음 통화: 접수 완료(ACCEPTED) 주문이 없어도(개인 카드 결제 대기) 등록한 주소가 기존 출발지
+    # 개인 PIN 저장은 고객 기본주소 등록과 별개다. 기본주소가 없는 다음 통화는 출발지를 자동 제안하지 않는다.
     again = make_call(db, session_id="live_next")
-    assert again.flow.stage == "ORDER" and FULL_ORDER["sender_address"] in engine.next_text(again)
+    assert again.flow.stage == "HUB" and again.origin_offer is None
+    assert again.pins[0].address == FULL_ORDER["sender_address"]
 
 
 def test_registration_is_tried_once_and_failure_keeps_new_customer_flow():

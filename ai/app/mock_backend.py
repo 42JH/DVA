@@ -4,9 +4,10 @@
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
 import itertools
+import unicodedata
 
-from app.backend_api import BackendError, CallerContext
-from app.order import Place
+from app.backend_api import BackendError, CallerContext, CompanyDirectoryPage
+from app.order import CompanyPlace, Place
 
 ADDRESS_REQUIRED = ("name", "phoneNumber", "roadAddress", "jibunAddress", "dongName", "postalCode", "latitude",
                     "longitude")
@@ -17,6 +18,7 @@ class MockBackend:
     def __init__(self):
         self.customers: dict[str, dict] = {}  # 전화번호 → {seq, name, status}
         self.pins: dict[str, list[Place]] = {}  # 전화번호 → 주소록
+        self.company_places: list[CompanyPlace] = []  # 백엔드가 활성 조건을 적용한 기업 검색 후보
         self.usage_types: dict[str, list[str]] = {}
         self.payment_methods: dict[str, list[str]] = {}  # 전화번호 → availablePaymentMethods
         self.recent: dict[str, tuple[Place, Place]] = {}  # 전화번호 → 이전 접수(출발지, 도착지)
@@ -36,6 +38,18 @@ class MockBackend:
 
     async def close(self) -> None:
         pass
+
+    async def search_company_places(self, query, limit=20, offset=0):
+        if not query.strip() or not 1 <= limit <= 100 or offset < 0:
+            raise BackendError("기업 배송지 검색 인수 오류")
+        terms = unicodedata.normalize("NFC", query).casefold().split()
+        matches = []
+        for place in self.company_places:
+            text = " ".join((place.label(), place.phone, place.geo.jibun_address if place.geo else "",
+                             place.geo.dong_name if place.geo else "", place.geo.postal_code if place.geo else ""))
+            if all(term in unicodedata.normalize("NFC", text).casefold() for term in terms):
+                matches.append(place)
+        return CompanyDirectoryPage(matches[offset:offset + limit], offset + limit < len(matches), len(matches))
 
     async def faq_entries(self, ids):
         from app.rag.faq_source import parse_faq_lookup, validate_faq_ids
@@ -84,9 +98,9 @@ class MockBackend:
 
     def add_customer(self, phone: str, name: str, pins: list[Place] = (), status: str = "ACTIVE",
                      usage_types: list[str] = ("PERSONAL",), recent: tuple[Place, Place] | None = None,
-                     payment_methods: list[str] = ("billing",)) -> int:
+                     payment_methods: list[str] = ("billing",), default_origin: Place | None = None) -> int:
         seq = next(self._seq)
-        self.customers[phone] = {"seq": seq, "name": name, "status": status}
+        self.customers[phone] = {"seq": seq, "name": name, "status": status, "default_origin": default_origin}
         self.pins[phone] = list(pins)
         self.usage_types[phone] = list(usage_types)
         self.payment_methods[phone] = list(payment_methods)
@@ -116,6 +130,8 @@ class MockBackend:
             return CallerContext(status="WITHDRAWN", call_session_seq=session)
         origin, destination = self.recent.get(phone, (None, None))
         return CallerContext(status="REGISTERED", customer_seq=c["seq"], name=c["name"],
+                             default_origin=c.get("default_origin").model_copy(update={"name": c["name"], "phone": phone})
+                             if c.get("default_origin") else None,
                              places=list(self.pins.get(phone, [])), usage_types=self.usage_types.get(phone, []),
                              call_session_seq=session, payment_methods=self.payment_methods.get(phone, []),
                              recent_origin=origin if session else None,

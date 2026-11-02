@@ -90,6 +90,21 @@ class Place(BaseModel, frozen=True):
     geo: Geo | None = None
 
 
+class CompanyPlace(Place):
+    """기업 검색 후보. 소속 번호는 PIN 번호가 아니며 주문 주소에는 복사하지 않는다."""
+
+    organization_seq: int
+    organization_name: str
+    membership_seq: int
+    customer_seq: int
+    department_seq: int | None = None
+    department_name: str | None = None
+
+    def label(self) -> str:
+        return " ".join(v for v in (self.organization_name, self.department_name, self.name, self.address,
+                                    self.address_detail) if v)
+
+
 def words(text: str | None) -> list[str]:
     return re.findall(r"[0-9A-Za-z가-힣]+", text or "")
 
@@ -179,6 +194,9 @@ def match_places(places: list[Place], name: str | None, place: str | None, detai
 
 def pin_labels(pins: list[Place]) -> list[str]:
     """후보끼리 다른 값으로 부른다(상세주소 → 주소 → 이름 순). 다이어그램의 {층수}·{상세주소}."""
+    if any(isinstance(p, CompanyPlace) for p in pins):
+        return [p.label() if isinstance(p, CompanyPlace) else f"{p.name} {p.address} {p.address_detail}".strip()
+                for p in pins]
     for part in ("address_detail", "address", "name"):
         values = [getattr(p, part) for p in pins]
         if all(values) and len(set(values)) == len(values):
