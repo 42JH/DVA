@@ -1,0 +1,73 @@
+// 관리자 웹(frontend) CI/CD — develop-fe에 머지되면 검증 → 빌드 → Lightsail에 교체 배포
+// 백엔드 파이프라인(develop-backend 루트 Jenkinsfile)과 같은 에이전트(linux-docker-builder, Node 24)와 같은 배포 키(dva-lightsail-ssh)를 씀
+// 젠킨스 Job은 frontend/deploy/jenkins-fe-job.groovy로 만듦 (Job 이름 dva-fe, 브랜치 develop-fe, 이 파일 경로 frontend/Jenkinsfile)
+pipeline {
+    agent { label 'linux-docker-builder' }
+    options {
+        disableConcurrentBuilds()
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+    parameters {
+        booleanParam(name: 'DEPLOY_LIGHTSAIL', defaultValue: true,
+            description: '검증과 빌드가 통과하면 서버에 배포합니다. 끄면 검증 · 빌드만 합니다.')
+    }
+    // GitLab 웹훅 없이 2분마다 develop-fe를 확인해 새 커밋이 있으면 실행 (웹훅을 붙이면 이 줄을 지움)
+    triggers { pollSCM('H/2 * * * *') }
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
+                    env.RELEASE = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
+                    currentBuild.displayName = "#${env.BUILD_NUMBER} ${env.SOURCE_COMMIT.take(8)}"
+                }
+            }
+        }
+        stage('Install') {
+            steps {
+                dir('frontend') {
+                    sh 'node --version && npm --version'
+                    sh 'npm ci --no-audit --no-fund'
+                }
+            }
+        }
+        stage('Lint') {
+            steps { dir('frontend') { sh 'npm run lint' } }
+        }
+        stage('Build') {
+            // tsc -b(타입 검사) + vite build. 개발용 가짜 API 워커는 서버에 올리지 않음
+            steps {
+                dir('frontend') {
+                    sh 'npm run build'
+                    sh 'rm -f dist/mockServiceWorker.js'
+                    sh 'tar -czf "dva-fe-$RELEASE.tgz" -C dist .'
+                }
+            }
+        }
+        stage('Deploy') {
+            when { expression { params.DEPLOY_LIGHTSAIL } }
+            steps {
+                withCredentials([sshUserPrivateKey(credentialsId: 'dva-lightsail-ssh',
+                    keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+                    sh 'bash frontend/deploy/ci-deploy.sh "frontend/dva-fe-$RELEASE.tgz" "$RELEASE" "$SSH_KEY" "$SSH_USER"'
+                }
+            }
+        }
+        stage('Smoke') {
+            // 서버가 방금 만든 index.html(같은 번들 이름)을 내주는지
+            when { expression { params.DEPLOY_LIGHTSAIL } }
+            steps {
+                sh '''
+                    bundle=$(grep -o 'assets/index-[A-Za-z0-9_-]*\\.js' frontend/dist/index.html | head -1)
+                    curl -fsSk https://13.209.59.180/ | grep -q "$bundle"
+                    echo "서버 번들 확인: $bundle"
+                '''
+            }
+        }
+    }
+    post {
+        success { echo "관리자 웹 배포 성공: ${env.RELEASE}" }
+        failure { echo '관리자 웹 파이프라인 실패 — 서버는 이전 판 그대로입니다' }
+    }
+}
