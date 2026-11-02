@@ -42,7 +42,8 @@ def saved_db(pins=(DEST, DEST2, ORIGIN), recent=(ORIGIN, DEST), payment_methods=
              cls=FakeBackend):
     """주소록이 있는 등록 고객. 최근 접수 1건: 강남 테헤란로(출발지) → 부산 해운대 이영희(도착지). 월결제 자격 있음."""
     db = cls()
-    db.add_customer(CALLER, "김철수", list(pins), recent=recent, payment_methods=list(payment_methods))
+    db.add_customer(CALLER, "김철수", list(pins), recent=recent, payment_methods=list(payment_methods),
+                    default_origin=ORIGIN if ORIGIN in pins or recent else None)
     return db
 
 
@@ -495,10 +496,16 @@ def test_24_out_of_order_values_are_recorded_and_only_missing_asked():
     assert said(call, "A1_1") and "receiver_name" not in engine.missing(call)
 
 
-def test_progress_tells_the_question_after_next():
+def test_progress_gives_only_the_next_question_not_what_to_say_before_the_result():
+    """진행 상태는 지금 할 말만 준다. 결과가 오기 전에 미리 말할 것(그다음 항목·답마다 이어서 할 말)을 주면, 위임한 턴에
+    음성 모델이 그것을 먼저 말하고 결과도 말해 두 번 말했다(2026-11-02 00:07 통화: 번호 정정 중 "맞으신 거죠?" 뒤
+    "다시 불러 주시겠어요?")."""
     call = play(new_db(), [say("order", "ORDER")])
     text = engine.progress_text(call, CFG.progress.max_chars)
-    assert "먼저 성함을" in text and "그다음" in text and TEXTS.say["A1_2"] in text
+    assert "먼저 성함을" in text and TEXTS.say["A1_2"] not in text
+    call = make_call(saved_db())  # 제안 질문(기존 출발지)도 답마다 이어서 할 말을 미리 주지 않는다
+    text = engine.progress_text(call, CFG.progress.max_chars)
+    assert TEXTS.say["B4"].split("{")[0] not in text and TEXTS.say["A1_2"] not in text
 
 
 def test_sender_phone_is_caller_without_asking_and_asked_only_without_caller():
@@ -620,9 +627,10 @@ def test_new_customer_is_registered_when_sender_info_is_given():
     body = db.results[0]["body"]
     assert body["customerSeq"] == call.customer_seq and "customer" not in body
     assert body["call"]["incomingAt"] == INCOMING_AT
-    # 다음 통화: 접수 완료(ACCEPTED) 주문이 없어도(개인 카드 결제 대기) 등록한 주소가 기존 출발지
+    # 개인 PIN 저장은 고객 기본주소 등록과 별개다. 기본주소가 없는 다음 통화는 출발지를 자동 제안하지 않는다.
     again = make_call(db, session_id="live_next")
-    assert again.flow.stage == "ORDER" and FULL_ORDER["sender_address"] in engine.next_text(again)
+    assert again.flow.stage == "HUB" and again.origin_offer is None
+    assert again.pins[0].address == FULL_ORDER["sender_address"]
 
 
 def test_registration_is_tried_once_and_failure_keeps_new_customer_flow():
@@ -781,27 +789,56 @@ def test_recent_pins_first():
     assert call.pin_candidates == [DEST, DEST2]  # 최근 N개에 없으면 전체에서
 
 
+TO_DEST = [say("yes", "ORDER"), say("no", "ORDER")]  # 기존 출발지 예 → 최근 도착지 아니요(받는 곳을 묻는 중)
+
+
+def test_partial_address_by_record_offers_similar_pin_first():
+    """받는 분이 정해지기 전에 주소를 일부만 말해 값 기록(record_order)으로 들어와도 주소록에서 비슷한 곳을 찾아
+    확인한다(B9). 받아쓰기 철자("센툼")·일반 낱말("아파트")은 넘어간다. 확인 전에는 받는 곳을 기록하지 않는다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "해운대 센툼 아파트"}, "ORDER")])
+    assert call.pin_offer == DEST and call.order.receiver_address is None and said(call, "B9")
+    report(call, say("yes", "ORDER"))
+    assert call.order.place("receiver") == DEST and call.pin_offer is None
+
+
+def test_partial_address_with_spoken_number_matches_pin_number():
+    """한글로 말한 번지도 숫자로 비교한다. 말한 숫자가 핀과 다르면 다른 곳이라 권하지 않고 그대로 기록한다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "센텀로 십"}, "ORDER")])
+    assert call.pin_offer == DEST
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "부산 센텀로 20"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "부산 센텀로 20"
+
+
+def test_region_only_matches_but_new_road_in_same_region_does_not():
+    """시·구만 말하면 그 지역의 핀을 확인하고, 도로까지 말했는데 그 도로의 핀이 없으면 같은 구라도 권하지 않는다."""
+    call = play(saved_db(), TO_DEST + [tool("match_pins", {"place": "서울 마포구"}, "ORDER")])
+    assert call.pin_offer == DEST2
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_address": "서울 마포구 성미산로 3"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "서울 마포구 성미산로 3"
+
+
+def test_none_of_candidates_then_same_address_is_recorded_not_offered_again():
+    """여러 후보에 "이 중에 없다"고 하면 그 후보들은 버린다: 같은 주소를 다시 기록해도 또 묻지 않고 기록한다."""
+    call = play(floors_db(), TO_DEST + [tool("record_order", {"receiver_address": "센텀로 10"}, "ORDER")])
+    assert len(call.pin_candidates) == 3 and said(call, "B8", 후보="301호·502호·701호")
+    report(call, say("other", "ORDER"))
+    report(call, tool("record_order", {"receiver_address": "센텀로 10"}, "ORDER"))
+    assert call.pin_candidates == [] and call.order.receiver_address == "센텀로 10"
+
+
+def test_address_with_name_already_recorded_is_not_matched_to_pins():
+    """받는 분 성함을 이미 직접 기록했으면(주소록 확인 질문 자리가 지났음) 주소는 그대로 기록한다."""
+    call = play(saved_db(), TO_DEST + [tool("record_order", {"receiver_name": "한승준"}, "ORDER"),
+                                       tool("record_order", {"receiver_address": "해운대 센텀로"}, "ORDER")])
+    assert call.pin_offer is None and call.order.receiver_address == "해운대 센텀로"
+
+
 def test_match_pins_strips_particles_but_not_names():
     other = DEST.model_copy(update={"name": "이영수"})
     call = play(saved_db(pins=(ORIGIN, DEST, other)), [say("yes", "ORDER"), say("no", "ORDER")])
     out = report(call, tool("match_pins", {"name": "이영희님", "place": "해운대로"}, "ORDER"))
     assert out["ok"] and call.pin_offer == DEST  # "이영희님"은 "이영희"로 보되 "이영"까지 줄여 이영수를 찾지 않는다
     assert run(dispatch(call, "match_pins", "{}", "x"))["ok"] is False  # 찾을 말이 없으면 오류
-
-
-def test_offer_preview_tells_what_to_say_after_each_answer():
-    """제안 질문: 판별보다 먼저 말하는 음성 모델이 답에 맞는 다음 질문을 하게 답마다 미리 알려 준다."""
-    call = make_call(saved_db())
-    ahead = dict(engine.preview(call))
-    assert ahead["예·맞다(그 출발지에서 보낸다)"] == ["B4"] and ahead["아니다, 다른 곳에서 보낸다"] == ["A1_2"]
-    assert "그다음" not in engine.progress_text(call, CFG.progress.max_chars)  # 고르는 질문에는 "그다음" 대신 답마다
-    report(call, say("yes", "ORDER"))
-    ahead = dict(engine.preview(call))
-    assert ahead["예·맞다·그렇게 해 달라"] == ["A3"] and ahead["아니다·다른 것이다"] == ["B6"]
-    report(call, say("no", "ORDER"))  # 받는 곳을 열어 묻는 중(B6): 답에 따라 다음이 갈려 "그다음"을 알려 주지 않는다
-    assert said(call, "B6") and "그다음" not in engine.progress_text(call, CFG.progress.max_chars)
-    call = make_call(new_db())  # HUB: 전이로 갈 곳을 따라간다
-    assert dict(engine.preview(call))["택배를 보내겠다(접수)"] == ["A1_1"]
 
 
 def test_saved_values_are_hidden_until_customer_says_them():
