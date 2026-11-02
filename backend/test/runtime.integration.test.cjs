@@ -604,7 +604,7 @@ test('production login through Nginx authorizes company operations and logout re
   );
 });
 
-test('production pin APIs preserve admin-only company writes and accept stale versions through Nginx', async () => {
+test('production personal PIN APIs accept stale versions and company PIN routes are retired through Nginx', async () => {
   const root = 'http://proxy/api';
   const headers = { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' };
   const login = await fetch(root + '/auth/login', {
@@ -660,23 +660,20 @@ test('production pin APIs preserve admin-only company writes and accept stale ve
   });
   assert.equal(company.status, 201);
   const companyId = (await company.json()).data.organizationSeq;
-  const shared = await fetch(root + `/companies/${companyId}/pins`, {
-    method: 'POST',
-    headers: admin,
-    body: JSON.stringify({ addressData }),
-  });
-  assert.equal(shared.status, 201);
-  const sharedId = (await shared.json()).data.companyPinSeq;
   for (const [method, path, body] of [
-    ['POST', `/companies/${companyId}/pins`, { addressData }],
-    ['PATCH', `/company-pins/${sharedId}`, { label: '금지' }],
+    ['GET', '/companies/' + companyId + '/pins'],
+    ['POST', '/companies/' + companyId + '/pins', { addressData }],
+    ['PATCH', '/company-pins/1', { label: '금지' }],
   ]) {
-    const denied = await fetch(root + path, { method, headers, body: JSON.stringify(body) });
-    assert.equal(denied.status, 401);
+    const retired = await fetch(root + path, {
+      method,
+      headers: admin,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    assert.equal(retired.status, 404);
   }
   for (const [method, path, body] of [
     ['GET', `/customers/${customerId}/pins`, undefined],
-    ['GET', `/companies/${companyId}/pins`, undefined],
     ['POST', `/customers/${customerId}/pins`, { addressData }],
   ]) {
     const unknown = await fetch(root + path, {

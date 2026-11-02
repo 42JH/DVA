@@ -36,14 +36,6 @@ export class OrganizationDeletionRepository {
       )
     ).rows;
   }
-  async hasUnassignedPins(client: PoolClient, company: number) {
-    return !!(
-      await client.query(
-        "SELECT 1 FROM company_pins WHERE organization_seq=$1 AND department_seq IS NULL AND nullif(btrim(department_name),'') IS NOT NULL LIMIT 1",
-        [company],
-      )
-    ).rowCount;
-  }
   async removeMembers(client: PoolClient, company: number, department: number | null) {
     return (
       await client.query<{ id: number; customerSeq: number; departmentSeq: number | null }>(

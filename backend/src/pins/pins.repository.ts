@@ -1,34 +1,11 @@
 import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
-import {
-  CreateCompanyPinDto,
-  CreatePinDto,
-  ListPinsQueryDto,
-  UpdateCompanyPinDto,
-  UpdatePinDto,
-} from './dto/pin-request.dto';
-import {
-  CompanyPinDto,
-  CreatedCompanyPinDto,
-  CreatedPersonalPinDto,
-  PersonalPinDto,
-  PinVersionDto,
-} from './dto/pin-response.dto';
+import { CreatePinDto, ListPinsQueryDto, UpdatePinDto } from './dto/pin-request.dto';
+import { CreatedPersonalPinDto, PersonalPinDto, PinVersionDto } from './dto/pin-response.dto';
 
 @Injectable()
 export class PinsRepository {
-  async department(client: PoolClient, companyId: number, id: number | null, name: string | null) {
-    return (
-      await client.query<{ departmentSeq: number; name: string }>(
-        `SELECT department_seq AS "departmentSeq",name FROM departments WHERE organization_seq=$1
-       AND (($2::int IS NOT NULL AND department_seq=$2) OR ($2::int IS NULL AND
-        lower(btrim(regexp_replace(normalize(name,NFC),'[[:space:]]+',' ','g')))=
-        lower(btrim(regexp_replace(normalize($3::text,NFC),'[[:space:]]+',' ','g'))))) FOR SHARE`,
-        [companyId, id, name],
-      )
-    ).rows;
-  }
   async call(client: PoolClient, id: number, lock: boolean) {
     return (
       await client.query<{ phone: string | null; endedAt: Date | null }>(
@@ -46,33 +23,10 @@ export class PinsRepository {
       )
     ).rows[0];
   }
-  async company(client: PoolClient, id: number, lock: boolean) {
-    return (
-      await client.query<{ status: string }>(
-        `SELECT status FROM organizations WHERE organization_seq=$1${lock ? ' FOR SHARE' : ''}`,
-        [id],
-      )
-    ).rows[0];
-  }
-  async callerCompany(client: PoolClient, phone: string) {
-    return (
-      await client.query<{ organizationSeq: number }>(
-        `SELECT m.organization_seq AS "organizationSeq" FROM customers c
-       JOIN memberships m ON m.customer_seq=c.customer_seq
-       JOIN organizations o ON o.organization_seq=m.organization_seq
-       WHERE c.phone_number=$1 AND c.status='ACTIVE' AND m.status='ACTIVE' AND o.status='ACTIVE'`,
-        [phone],
-      )
-    ).rows[0];
-  }
-  async owner(client: PoolClient, id: number, company: boolean): Promise<number | undefined> {
-    // 식별자는 코드 상수로만 선택한다. 소유자는 DB 트리거로 변경이 금지되어 있다.
-    const table = company ? 'company_pins' : 'personal_pins';
-    const key = company ? 'company_pin_seq' : 'personal_pin_seq';
-    const owner = company ? 'organization_seq' : 'customer_seq';
+  async owner(client: PoolClient, id: number): Promise<number | undefined> {
     return (
       await client.query<{ owner: number }>(
-        `SELECT ${owner} AS owner FROM ${table} WHERE ${key}=$1`,
+        'SELECT customer_seq AS owner FROM personal_pins WHERE personal_pin_seq=$1',
         [id],
       )
     ).rows[0]?.owner;
@@ -88,38 +42,12 @@ export class PinsRepository {
       '"personalPinSeq"',
     );
   }
-  async shared(client: PoolClient, companyId: number, query: ListPinsQueryDto) {
-    return await readPage<CompanyPinDto>(
-      client,
-      `SELECT company_pin_seq AS "companyPinSeq",organization_seq AS "organizationSeq",label,
-        department_name AS "departmentName",department_seq AS "departmentSeq",address_data AS "addressData",version FROM company_pins
-       WHERE organization_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)`,
-      [companyId, query.q || null],
-      query,
-      '"companyPinSeq"',
-    );
-  }
   async createPersonal(client: PoolClient, customerId: number, input: CreatePinDto) {
     return (
       await client.query<CreatedPersonalPinDto>(
         `INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)
        RETURNING personal_pin_seq AS "personalPinSeq",version`,
         [customerId, input.label ?? null, input.addressData],
-      )
-    ).rows[0];
-  }
-  async createCompany(client: PoolClient, companyId: number, input: CreateCompanyPinDto) {
-    return (
-      await client.query<CreatedCompanyPinDto>(
-        `INSERT INTO company_pins(organization_seq,label,department_name,address_data,department_seq) VALUES($1,$2,$3,$4,$5)
-       RETURNING company_pin_seq AS "companyPinSeq",version`,
-        [
-          companyId,
-          input.label ?? null,
-          input.departmentName ?? null,
-          input.addressData,
-          input.departmentSeq ?? null,
-        ],
       )
     ).rows[0];
   }
@@ -136,27 +64,6 @@ export class PinsRepository {
           input.label ?? null,
           input.addressData !== undefined,
           input.addressData ?? null,
-        ],
-      )
-    ).rows[0];
-  }
-  async updateCompany(client: PoolClient, id: number, input: UpdateCompanyPinDto) {
-    return (
-      await client.query<PinVersionDto>(
-        `UPDATE company_pins SET label=CASE WHEN $2 THEN $3 ELSE label END,
-        address_data=CASE WHEN $4 THEN $5::jsonb ELSE address_data END,
-        department_name=CASE WHEN $6 THEN $7 ELSE department_name END,
-        department_seq=CASE WHEN $6 THEN $8 ELSE department_seq END
-       WHERE company_pin_seq=$1 RETURNING version`,
-        [
-          id,
-          input.label !== undefined,
-          input.label ?? null,
-          input.addressData !== undefined,
-          input.addressData ?? null,
-          input.departmentName !== undefined,
-          input.departmentName ?? null,
-          input.departmentSeq ?? null,
         ],
       )
     ).rows[0];

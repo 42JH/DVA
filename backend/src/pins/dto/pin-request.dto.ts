@@ -62,26 +62,6 @@ export class CreatePinDto {
   addressData!: PinAddressInputDto;
 }
 
-export class CreateCompanyPinDto extends CreatePinDto {
-  @ApiPropertyOptional({
-    type: Number,
-    nullable: true,
-    minimum: 1,
-    maximum: 2147483647,
-    description: '소속 부서 번호. null은 기업 공용 PIN.',
-  })
-  @ValidateIf(nonNull)
-  @IsInt()
-  @Min(1)
-  @Max(2147483647)
-  departmentSeq?: number | null;
-  @ApiPropertyOptional({ type: String, nullable: true, description: '부서명. 중복 구분에 포함.' })
-  @ValidateIf(nonNull)
-  @Transform(trim)
-  @IsString()
-  departmentName?: string | null;
-}
-
 export class UpdatePinDto {
   @ApiPropertyOptional({
     type: String,
@@ -114,30 +94,6 @@ export class UpdatePinDto {
   expectedVersion?: number;
 }
 
-export class UpdateCompanyPinDto extends UpdatePinDto {
-  @ApiPropertyOptional({
-    type: Number,
-    nullable: true,
-    minimum: 1,
-    maximum: 2147483647,
-    description: '생략하면 유지, null이면 기업 공용 PIN으로 변경.',
-  })
-  @ValidateIf(nonNull)
-  @IsInt()
-  @Min(1)
-  @Max(2147483647)
-  departmentSeq?: number | null;
-  @ApiPropertyOptional({
-    type: String,
-    nullable: true,
-    description: '생략하면 유지, null이면 제거.',
-  })
-  @ValidateIf(nonNull)
-  @Transform(trim)
-  @IsString()
-  departmentName?: string | null;
-}
-
 export class PinIdParamsDto {
   @ApiProperty({ type: Number, minimum: 1, maximum: 2147483647 })
   @Transform(({ value }: TransformFnParams) =>
@@ -151,7 +107,7 @@ export class PinIdParamsDto {
 
 export class ListPinsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
-    description: '별칭·수령인·전화번호·주소의 부분 검색. 기업은 부서명 포함.',
+    description: '개인 PIN의 별칭·수령인·전화번호·주소 부분 검색.',
   })
   @ValidateIf(present)
   @Transform(trim)

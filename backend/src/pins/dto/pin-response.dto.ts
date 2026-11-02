@@ -12,27 +12,13 @@ export class PinVersionDto {
 export class CreatedPersonalPinDto extends PinVersionDto {
   @ApiProperty({ minimum: 1 }) personalPinSeq!: number;
 }
-export class CreatedCompanyPinDto extends PinVersionDto {
-  @ApiProperty({ minimum: 1 }) companyPinSeq!: number;
-}
 export class PersonalPinDto extends CreatedPersonalPinDto {
   @ApiProperty({ minimum: 1 }) customerSeq!: number;
   @ApiProperty({ type: String, nullable: true }) label!: string | null;
   @ApiProperty({ type: PinAddressInputDto }) addressData!: PinAddressInputDto;
 }
-export class CompanyPinDto extends CreatedCompanyPinDto {
-  @ApiProperty({ type: Number, nullable: true }) departmentSeq!: number | null;
-  @ApiProperty({ minimum: 1 }) organizationSeq!: number;
-  @ApiProperty({ type: String, nullable: true }) label!: string | null;
-  @ApiProperty({ type: String, nullable: true }) departmentName!: string | null;
-  @ApiProperty({ type: PinAddressInputDto }) addressData!: PinAddressInputDto;
-}
 export class CreatedPersonalPinEnvelopeDto {
   @ApiProperty({ type: CreatedPersonalPinDto }) data!: CreatedPersonalPinDto;
-  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
-}
-export class CreatedCompanyPinEnvelopeDto {
-  @ApiProperty({ type: CreatedCompanyPinDto }) data!: CreatedCompanyPinDto;
   @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
 }
 export class PinVersionEnvelopeDto {
@@ -41,16 +27,6 @@ export class PinVersionEnvelopeDto {
 }
 export class PersonalPinsEnvelopeDto {
   @ApiProperty({ type: [PersonalPinDto] }) data!: PersonalPinDto[];
-  @ApiProperty() hasNext!: boolean;
-  @ApiProperty({
-    type: 'integer',
-    minimum: 0,
-    description: '검색·필터 후 limit·offset 적용 전 전체 건수.',
-  })
-  total_count!: number;
-}
-export class CompanyPinsEnvelopeDto {
-  @ApiProperty({ type: [CompanyPinDto] }) data!: CompanyPinDto[];
   @ApiProperty() hasNext!: boolean;
   @ApiProperty({
     type: 'integer',
