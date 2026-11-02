@@ -3,15 +3,20 @@
 from types import SimpleNamespace
 
 import langchain_openai
+import pytest
 import qdrant_client
 
 from app.config import load_server_config
 from app.rag import faq_runtime
-from test_faq_index import setup
+from test_faq_index import prepare, refresh, setup
 
 
-def test_runtime_starts_without_gpu_and_validates_on_registration(setup, monkeypatch):
+# 빈 색인(첫 기동)과 등록된 FAQ가 있는 재시작(2026-11-02 Jenkins #53: 기존 조각을 GPU로 다시 검증하다 기동 실패)
+@pytest.mark.parametrize('registered', [False, True])
+def test_runtime_starts_without_gpu_and_validates_on_registration(setup, monkeypatch, registered):
     env = setup
+    if registered:
+        env.index.apply(refresh(prepare()))
     checks = []
     class Reranker:
         def __init__(self, *args):
@@ -31,7 +36,7 @@ def test_runtime_starts_without_gpu_and_validates_on_registration(setup, monkeyp
     rag_cfg = SimpleNamespace(embedding_model=env.state.model, dimensions=env.state.dimensions,
                               http_timeout_sec=1., bm25_weight=.4, rrf_c=60)
     runtime = faq_runtime.create_faq_runtime(env.events, faq_cfg, rag_cfg)
-    assert runtime.index.current().generation == 0
+    assert runtime.index.current().generation == int(registered)
     assert checks == []  # 기동 때는 GPU를 부르지 않는다
     assert isinstance(runtime.index.validate_chunks.__self__, Reranker)  # 등록할 때는 GPU 검증을 쓴다
     runtime.close()
