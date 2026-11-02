@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { phoneDigits, suggest } from '@/shared/lib/search'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { fmtDateDay, fmtDurationParts } from '@/shared/lib/format'
@@ -38,6 +39,8 @@ export function useHome() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
   const today = useQuery(homeQueries.today())
+  // 추천 = 오늘 주문의 이름 (03 주문 내역과 같은 규칙: 초성 · 띄어쓰기 무시, 숫자만 치면 추천 없음). 칠 때만 받음
+  const names = useQuery({ ...homeQueries.searchNames(), enabled: q.trim() !== '' })
 
   const s = today.data
   const counts: Record<TodayCardKind, number | undefined> = {
@@ -61,6 +64,7 @@ export function useHome() {
   return {
     q,
     setQ,
+    suggestions: phoneDigits(q) ? [] : suggest(names.data ?? [], q),
     search: () => searchFor(q),
     searchFor, // 최근 검색어를 고르면 바로 03으로 (q 상태가 바뀌기 전이라 글을 직접 받음)
 
