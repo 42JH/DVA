@@ -3,7 +3,6 @@
 import os
 import json
 from dataclasses import dataclass
-from types import SimpleNamespace
 
 from app.rag.faq_index import FaqIndex
 from app.rag.faq_index_state import FaqIndexState
@@ -46,9 +45,9 @@ def create_faq_runtime(events, faq_cfg, rag_cfg):
     try:
         reranker = RemoteReranker(os.getenv('RAG_RERANKER_URL'), os.getenv('RAG_RERANKER_API_KEY'),
                                   rag_cfg.http_timeout_sec)
-        # 오래된 GPU 이미지에는 길이 검증 API가 없다. 빈 색인이라도 기동 때 계약을 확인한다.
-        probe = SimpleNamespace(point_id='startup-check', content='FAQ 등록 길이 확인')
-        reranker.validate_chunks((probe,))
+        # 기동 때 GPU(길이 검증 API)를 확인하지 않는다. GPU VM은 30분 뒤 자동 중지라, 확인하면 GPU가 꺼진 동안 전화 서버가
+        # 뜨지 못했다(2026-11-02 Jenkins #52 배포·복구 모두 실패). 등록할 때마다 FaqIndex가 같은 검증을 하고, 실패하면
+        # 처리기가 다시 시도한다(오래된 GPU 이미지도 그때 걸린다)
         client = QdrantClient(url=os.getenv('QDRANT_URL') or 'http://127.0.0.1:6333',
                               api_key=os.environ['QDRANT_API_KEY'], timeout=rag_cfg.http_timeout_sec)
         if not client.collection_exists(faq_cfg.collection):
