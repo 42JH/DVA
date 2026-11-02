@@ -62,7 +62,7 @@ sequenceDiagram
 }
 ```
 
-번호는 국내 숫자 문자열로 변환한다. `+8210...`는 `010...`이다. 응답은 `data.lookupStatus`, `data.customer`, `personalPins`, `companyPins`, `callSessionSeq`를 포함한다. 자세한 필드는 [고객 초기 조회 계약](caller-context.md)을 따른다. 통화를 생성·재사용하며 고객·주문은 생성하지 않는다.
+번호는 국내 숫자 문자열로 변환한다. `+8210...`는 `010...`이다. 응답은 `data.lookupStatus`, `data.customer`, `personalPins`, `companyPins`, `callSessionSeq`를 포함한다. companyPins는 폐기된 호환 필드로 항상 빈 배열이다. 기본 출발지는 customer의 현재 이름·전화번호·address, 기업 배송지는 GET /api/companies/search를 사용한다. 자세한 필드는 [고객 초기 조회 계약](caller-context.md)을 따른다. 통화를 생성·재사용하며 고객·주문은 생성하지 않는다.
 
 상담 중 주문 조회·취소·주소록 API는 응답의 callSessionSeq를 `call_session_seq` 헤더로 받는다. 같은 통화 ID·발신번호·수신 시각의 재요청은 같은 번호를 반환한다. 기존 phoneNumber만 보낸 요청은 조회만 수행하고 통화 번호를 반환하지 않는다.
 

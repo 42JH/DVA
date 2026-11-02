@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회한다. 기업 PIN 등록·수정·조회 API는 폐기하며 개인 PIN과 과거 주문 주소는 보존한다. companyPins는 기존 AI 응답 호환을 위해 빈 배열로 유지한다. company_pins 테이블은 과거 주문 참조·기업 삭제 이력 처리용으로 남기며 migration이나 데이터 삭제는 없다. [기업 검색 계약](../docs/api/company-directory.md)과 [AI 인계](docs/company-address-directory-handoff.md)를 따르며 AI 코드·운영 배포는 별도다.
+
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 
 페르소나 목록·상세·버전 이력은 모든 ACTIVE 관리자에게 조회를 허용한다. 생성·수정·publish와 AI 지원 옵션은 ACTIVE인 SUPERVISOR(개발자)·SYSTEM_ADMIN에게 허용한다. 주문 결제수단을 생략하면 미정(null)으로 저장·조회하며 최종 접수 전에는 선택해야 한다. 새 앱 전에 migration 039·040을 모두 적용한다. 주문 정보가 전혀 없는 AI 미완료·취소 결과는 통화와 재전송 식별자만 보존하고 NO_ORDER를 반환한다. 기존 결제수단과 주문은 유지하며 실제 서버 DB 적용은 별도다. 프론트의 권한·null 표시 연결은 [전달 사항](docs/persona-read-payment-null-handoff.md), AI의 주문 미생성 응답은 [빈 통화 계약](docs/empty-ai-order-results.md)을 따른다.

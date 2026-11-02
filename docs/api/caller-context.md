@@ -118,21 +118,15 @@ HTTP 200, `{ data: CustomerContext, meta: { requestId } }` 형식이다.
 | availablePaymentMethods | 현재 사용 가능한 billing·credit·groupBilling. 최종 확정 때 서버가 다시 자격 검사 |
 | availableUsageTypes | 현재 사용 가능한 PERSONAL·COMPANY 범위. 주소록 유무와 무관 |
 | personalPins | 본인의 개인 PIN 전체. 없거나 고객이 비활성이면 빈 배열 |
-| companyPins | 접근 가능한 소속 기업의 공유 PIN 전체. 없거나 접근 불가면 빈 배열 |
+| companyPins | 폐기된 기업 PIN의 호환 필드. 항상 빈 배열. 기업 배송지는 GET /api/companies/search로 조회 |
 
 고객은 주문 이력이나 PIN이 없어도 REGISTERED다. 미등록과 탈퇴는 모두 customer·membership·organization이
 null이고 department도 null이며 availablePaymentMethods·availableUsageTypes·personalPins·companyPins가 빈 배열이지만 lookupStatus로 구분한다.
 탈퇴 고객을 자동 등록하거나 복구하지 않는다.
 
-개인 PIN 항목은 `personalPinSeq`, `label`, `addressData`, `version`이다.
-기업 PIN 항목은 `companyPinSeq`, `label`, `departmentName`, `addressData`, `version`이다.
-label과 departmentName은 null일 수 있다. addressData는 저장된 검증 주소 원문이며
-detailAddress는 없거나 null·빈 문자열일 수 있다. 나머지 주소 필드는 예시의 타입을 따른다.
-검색용 생성 컬럼 search_text는 노출하지 않는다.
+기본 출발지는 customer.name·phoneNumber·address를 우선 사용한다. 개인 PIN 또는 이전 주문의 이름으로 현재 고객 정보를 덮어쓰지 않는다. customer.address가 null이면 주소를 물어보거나 고객이 선택한 개인 PIN·이전 주소를 확인한다. 개인 PIN 등록은 기본 주소 사용의 전제 조건이 아니다.
 
-각 PIN 목록은 해당 PIN 번호 오름차순이며 페이지 제한 없이 전체를 반환한다.
-개인/기업 구분은 두 배열로 표현하며 출발지/도착지 kind를 임의로 만들지 않는다.
-같은 PIN을 발송지나 도착지로 사용할지는 주문에서 선택한다.
+개인 PIN 항목은 personalPinSeq·label·addressData·version이다. label은 null일 수 있으며 주소는 저장된 값 그대로 반환한다. 목록은 PIN 번호 오름차순이며 페이지 제한 없이 본인 항목 전체를 제공한다. 기업 배송지는 별도 검색 API의 customerSeq·membershipSeq와 addressData를 사용하며 PIN 번호를 만들지 않는다.
 
 ## 접근 범위
 
@@ -142,15 +136,14 @@ detailAddress는 없거나 null·빈 문자열일 수 있다. 나머지 주소 �
 | ACTIVE | 없음 | 없음 | PERSONAL | 본인 개인 PIN |
 | ACTIVE | INACTIVE | 무관 | PERSONAL | 본인 개인 PIN |
 | ACTIVE | ACTIVE | INACTIVE | PERSONAL | 본인 개인 PIN |
-| ACTIVE | ACTIVE | ACTIVE | PERSONAL, COMPANY | 본인 개인 PIN + 소속 기업 공유 PIN |
+| ACTIVE | ACTIVE | ACTIVE | PERSONAL, COMPANY | 본인 개인 PIN |
 
 ORG_ADMIN은 대표자 표시이며 MEMBER와 같은 주소록 범위를 사용한다.
 같은 기업에 속한 다른 고객의 개인 PIN, 다른 기업의 PIN, 기업 디렉터리 전체는 반환하지 않는다.
 개인 PIN은 주소의 연락처가 아니라 PIN 소유 고객으로 제한한다.
-기업 PIN에는 별도 비공개 상태 컬럼이 없으며 소속 기업의 공유 PIN만 대상으로 한다.
-공식 공유 PIN의 타 기업 검색은 [40번 디렉터리 API](company-directory.md)로 제공하며 초기 응답의 소속 범위는 변경하지 않는다.
+기업 간 공유 배송지는 [40번 디렉터리 API](company-directory.md)로 현재 사원 주소를 검색한다. 개인 PIN·기업 디렉터리 전체를 통화 초기 응답에 추가하지 않는다.
 
-고객·소속·기업 상태와 두 주소록을 하나의 SQL 문장으로 읽어 같은 시점의 데이터로 응답한다.
+고객·소속·기업 상태와 개인 주소록을 하나의 SQL 문장으로 읽어 같은 시점의 데이터로 응답한다.
 통화 저장이 있으면 이 조회와 같은 트랜잭션으로 처리한다. 조회가 실패하면 새 통화도 롤백한다.
 새 통화를 생성한 경우에만 CALL_STARTED 감사를 같은 트랜잭션에 저장한다. AI는 AI로 기록하며 재요청·단순 조회에는 추가하지 않는다.
 다음 조회는 최신 커밋된 상태를 반영하며 서버에 고객별 응답 캐시를 두지 않는다.
@@ -166,13 +159,13 @@ ORG_ADMIN은 대표자 표시이며 MEMBER와 같은 주소록 범위를 사용�
 
 AI는 lookupStatus를 기준으로 등록 여부를 판단하고 조회 실패는 확인 불가로 처리한다.
 현재 develop-ai의 `POST /internal/ai/callers/context`, `{ phone }`, `recent_order/places` 제안과는 계약이 다르다.
-AI 담당자는 요청 경로·본문·data/meta 해석을 변경하고, callSessionSeq와 PIN 원본 ID·version·개인/기업 구분을 보관해야 한다.
+AI 담당자는 요청 경로·본문·data/meta 해석을 변경하고, callSessionSeq와 개인 PIN 원본 ID·version을 보관해야 한다. 기업 공유 배송지의 새 응답은 [AI 인계](../../backend/docs/company-address-directory-handoff.md)를 따른다.
 대화 중 주소록 검색·등록·수정은 [39번 PIN API](pins.md)를 사용한다. version은 현재 값이며 수정 충돌 검사에는 사용하지 않는다.
 최근 주문 조회는 별도 주문 조회 API로 처리한다. 실제 AI 코드 수정·통화 연동 검증은 이 작업에 포함하지 않는다.
 
 ## DB와 검증
 
-customers·memberships·organizations·personal_pins·company_pins·call_sessions 기존 테이블과 인덱스를 사용한다.
+customers·memberships·organizations·personal_pins·call_sessions 기존 테이블과 인덱스를 사용한다.
 새 컬럼·테이블·마이그레이션·중복 처리 방지 키를 추가하지 않는다. 통화 중복은 기존 provider_call_id UNIQUE 제약을 사용한다.
 주문 결과 전송도 동일한 통화 저장 코드를 사용한다. 먼저 만든 통화에 주문을 연결하며, 주문 없는 통화도 PBX 웹훅과 녹취를 연결할 수 있다.
 Swagger는 `/api/docs` 및 `/api/docs-json`에서 활성화 설정에 따라 제공한다.
