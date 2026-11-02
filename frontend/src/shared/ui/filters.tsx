@@ -358,7 +358,7 @@ export function AppliedFilters({
 }) {
   if (chips.length === 0) return null
   return (
-    <div className="flex h-8 items-center gap-2">
+    <div className="flex h-8 items-center gap-2 px-4">
       <span className="mr-2 text-label font-semibold text-sub">적용된 필터</span>
       {chips.map((c) => (
         <button

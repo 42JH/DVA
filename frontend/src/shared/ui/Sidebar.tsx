@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { MENU, type MenuIcon } from './menu'
 
@@ -93,6 +93,29 @@ export function Sidebar({
   // 1280 아래(반응형 규칙 10/23)에선 접힌 채로 시작. 그 뒤는 사용자가 버튼으로
   const [collapsed, setCollapsed] = useState(() => window.matchMedia('(max-width: 1279px)').matches)
   const [fly, setFly] = useState<string | null>(null) // 접힌 채 그룹을 누르면 옆에 뜨는 하위 메뉴 (사이드바는 그대로 접힌 채)
+  const [flyTop, setFlyTop] = useState(0) // 옆 메뉴의 화면 y — 누른 그룹 줄 위에 맞춤 (fixed라 직접 잡아 줌)
+  const navRef = useRef<HTMLElement>(null)
+  // 옆 메뉴가 떠 있을 때 다른 곳을 누르거나 Esc → 닫힘. 화면을 덮는 막을 쓰지 않음 — 막은 다음 클릭(펼치기 버튼 · 다른 메뉴)까지 먹어서
+  // "눌러도 안 열림"이 됐음 (11/02 사용자). 사이드바 안 클릭은 각 버튼이 알아서 처리(그룹 다시 누르면 닫힘, 펼치기는 setFly(null))
+  useEffect(() => {
+    if (!fly) return
+    // 옆 메뉴 자신과 그걸 연 그룹 버튼 말고는 어디를 눌러도 닫힘 — 다른 메뉴(홈 · 기업관리 …)를 눌러도 떠 있던 문제 (11/02 사용자)
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Element
+      if (t.closest('[role="menu"]')) return
+      if (t.closest<HTMLElement>('[data-fly-owner]')?.dataset.flyOwner === fly) return
+      setFly(null)
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFly(null)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [fly])
   // '/faqs'(FAQ 목록)는 '/faqs/unanswered'에서도 켜지면 안 됨 → 더 깊은 형제가 있는 하위만 경로가 딱 맞을 때 켬
   const isEnd = (s: Sub, subs: Sub[]) => subs.some((o) => o !== s && o.to.startsWith(s.to + '/'))
   const subLabel = (s: Sub) => (
@@ -122,7 +145,7 @@ export function Sidebar({
       type="button"
       onClick={onClick}
       aria-label={name === 'collapse' ? '메뉴 접기' : '메뉴 펼치기'}
-      className="grid size-7 shrink-0 place-items-center rounded-md text-sub ring-1 ring-line ring-inset hover:bg-bg"
+      className="relative grid size-7 shrink-0 place-items-center rounded-md text-sub ring-1 ring-line ring-inset after:absolute after:-inset-1 after:content-[''] hover:bg-bg" // after: 판정 36 (보이는 건 28)
     >
       <Icon name={name} />
     </button>
@@ -130,6 +153,7 @@ export function Sidebar({
 
   return (
     <nav
+      ref={navRef}
       // 접고 펼 때 폭이 미끄러짐 (Gmail식, 11/01). overflow-hidden: 줄어드는 동안 글자가 밖으로 안 삐져나옴
       className={`flex h-full shrink-0 flex-col overflow-hidden border-r border-line bg-surface transition-[width] duration-200 ease-out ${collapsed ? 'w-[72px]' : 'w-sidebar'}`}
     >
@@ -156,12 +180,14 @@ export function Sidebar({
               <button
                 type="button"
                 title={collapsed ? m.label : undefined}
+                data-fly-owner={m.label}
                 aria-expanded={collapsed ? fly === m.label : !!open[m.label]}
-                onClick={() =>
-                  collapsed
-                    ? setFly((f) => (f === m.label ? null : m.label))
-                    : setOpen((o) => ({ ...o, [m.label]: !o[m.label] }))
-                }
+                onClick={(e) => {
+                  if (collapsed) {
+                    setFlyTop(e.currentTarget.getBoundingClientRect().top)
+                    setFly((f) => (f === m.label ? null : m.label))
+                  } else setOpen((o) => ({ ...o, [m.label]: !o[m.label] }))
+                }}
                 className={`${row(collapsed && inGroup(m.subs), inGroup(m.subs))} ${collapsed ? '' : 'w-full'}`} // 접히면 w-12 동그라미 그대로 (w-full이면 오른쪽으로 밀림)
               >
                 <Icon name={m.icon} />
@@ -183,11 +209,11 @@ export function Sidebar({
               </button>
               {collapsed && fly === m.label && (
                 <>
-                  {/* 바깥을 누르면 닫힘 */}
-                  <div className="fixed inset-0 z-40" onClick={() => setFly(null)} />
                   <ul
                     role="menu"
-                    className="absolute top-0 left-full z-50 ml-2 w-48 rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset"
+                    // fixed: nav가 overflow-hidden(폭 슬라이드용)이라 absolute면 72px 밖이 잘려 안 보였음 (11/02 사용자 "접혔을 때 주문 내역 · 통화 내역이 안 열려"). 왼쪽 = 접힌 폭 72 + 8
+                    className="fixed z-50 w-48 rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset"
+                    style={{ left: 80, top: flyTop }}
                   >
                     {m.subs.map((s) => (
                       <li key={s.to}>

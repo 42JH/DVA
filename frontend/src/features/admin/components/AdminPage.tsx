@@ -122,7 +122,7 @@ export function AdminPage() {
       <Tabs items={vm.tabs} value={vm.tab} onChange={vm.setTab} />
 
       {(vm.jobError ?? vm.loadError) && (
-        <p role="alert" className="text-label text-danger">
+        <p role="alert" className="px-4 text-label text-danger">
           {vm.jobError ?? vm.loadError}
         </p>
       )}

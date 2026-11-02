@@ -75,7 +75,7 @@ export function FileDrop({
             type="button"
             onClick={onRemove}
             aria-label="파일 빼기"
-            className="grid size-7 shrink-0 place-items-center rounded text-sub hover:bg-bg"
+            className="relative grid size-7 shrink-0 place-items-center rounded text-sub after:absolute after:-inset-1 after:content-[''] hover:bg-bg"
           >
             <svg
               viewBox="0 0 16 16"

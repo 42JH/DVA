@@ -10,7 +10,8 @@ import type { ReactNode } from 'react'
  *    <Table … />
  *  </ListPage>
  *
- *  03 · 04 · 08 · 09 · 10이 쓰고, 02도 세로 간격만 같이 씀. 여백 값을 바꾸려면 여기 한 곳 */
+ *  03 · 04 · 08 · 09 · 10이 쓰고, 02도 세로 간격만 같이 씀. 여백 값을 바꾸려면 여기 한 곳
+ *  가로 규칙: 상자(카드 · 입력칸 · 표)는 본문 가장자리에 딱, 상자 밖 글(탭 · 칩 줄 · 안내 · 오류)은 px-4 = 입력칸 안 글자 시작선 */
 export function ListPage({
   children,
   className = '',

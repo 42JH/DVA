@@ -36,13 +36,6 @@ export function OrderListPage() {
 
   const columns: Column<OrderListRow>[] = [
     {
-      key: 'status',
-      header: '상태',
-      width: 112,
-      pill: true,
-      cell: (r) => <Tag kind={r.statusTag}>{r.statusLabel}</Tag>,
-    },
-    {
       key: 'receivedAt',
       header: '접수 시각',
       width: 120,
@@ -53,6 +46,13 @@ export function OrderListPage() {
           ))}
         </div>
       ),
+    },
+    {
+      key: 'status',
+      header: '상태',
+      width: 112,
+      align: 'center',
+      cell: (r) => <Tag kind={r.statusTag}>{r.statusLabel}</Tag>,
     },
     {
       key: 'sender',
@@ -106,7 +106,7 @@ export function OrderListPage() {
       </FilterBar>
 
       {vm.notice && (
-        <p role="status" className="text-label text-action">
+        <p role="status" className="px-4 text-label text-action">
           {vm.notice}
         </p>
       )}

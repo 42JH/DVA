@@ -1,5 +1,6 @@
 // 탭 두 가지 (와이어프레임 10/23)
-// Tabs: 밑줄 탭 — 03 · 04 고객 유형(전체 · 기업 · 개인), 05 보기(전체 · AI 미답변 n). 줄 높이 48, 아래 구분선, 오른쪽에 버튼 자리
+// Tabs: 밑줄 탭 — 03 · 04 고객 유형(전체 · 기업 · 개인), 05 보기(전체 · AI 미답변 n). 줄 높이 40, 아래 구분선, 오른쪽에 버튼 자리
+// 탭마다 px-4: 글자가 본문 가장자리에서 16px(입력칸 안 글자 시작선과 같은 x) — 상자 밖 글은 16 들여쓰는 규칙 (11/02 사용자: 왼쪽에 딱 붙어 보임)
 // CountTabs: 칸 탭 — 10 상태(전체 11 · 승인 대기 3 · 관리자 8). 기간 칸과 같은 모양(모서리 8, 고른 칸 옅은 남색 + 남색 선)
 
 export interface TabItem<K extends string = string> {
@@ -22,7 +23,7 @@ export function Tabs<K extends string>({
   right?: React.ReactNode // [CSV 내보내기] [삭제] 등
 }) {
   return (
-    <div role="tablist" className="flex h-10 items-center gap-10 border-b border-line">
+    <div role="tablist" className="flex h-10 items-center gap-2 border-b border-line">
       {items.map((t) => {
         const on = t.key === value
         return (
@@ -32,7 +33,7 @@ export function Tabs<K extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={`relative flex h-full items-center gap-2 text-body ${on ? 'font-bold text-action' : t.muted ? 'text-muted' : 'text-sub'}`}
+            className={`relative flex h-full items-center gap-2 px-4 text-body ${on ? 'font-bold text-action' : t.muted ? 'text-muted' : 'text-sub'}`}
           >
             {t.label}
             {t.count !== undefined &&
