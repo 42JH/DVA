@@ -5,7 +5,7 @@ import { PersonaList } from './PersonaList'
 import { VersionList } from './VersionList'
 
 // 오른쪽 346 카드 [페르소나 | 버전 히스토리] — 보기 화면 · 수정 화면 공용 (11/02)
-// 수정 화면: 버튼 없이(onUse · onAdd · onTestCall · onApply를 안 줌) + 접기 · 펼치기(onToggle)
+// 접기 · 펼치기(onToggle)는 두 화면 모두. 수정 화면은 버튼 없이(onUse · onAdd · onTestCall · onApply를 안 줌)
 const TABS: { key: PanelTab; label: string }[] = [
   { key: 'persona', label: '페르소나' },
   { key: 'history', label: '버전 히스토리' },
