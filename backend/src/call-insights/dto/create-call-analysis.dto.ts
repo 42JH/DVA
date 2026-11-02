@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
   ArrayUnique,
@@ -18,12 +18,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import {
-  CALL_ANALYSIS_RESULTS,
-  CALL_COMPLAINT_TYPES,
-  CallAnalysisResult,
-  CallComplaintType,
-} from '../call-insights.types';
+import { CALL_COMPLAINT_TYPES, CallComplaintType } from '../call-insights.types';
 
 export class CallComplaintDto {
   @ApiProperty({ enum: CALL_COMPLAINT_TYPES, example: 'REPEATED_QUESTION' })
@@ -94,12 +89,75 @@ export class CreateCallAnalysisDto {
   @Max(2147483647)
   aiPersonaVersionSeq!: number | null;
 
-  @ApiProperty({
-    enum: CALL_ANALYSIS_RESULTS,
-    description: '통화 종료 결과. 현재 주문 상태와 별개.',
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description: 'AI가 판정한 신규 고객 true / 기존 고객 false. 생략·null은 미수집.',
   })
-  @IsIn(CALL_ANALYSIS_RESULTS)
-  result!: CallAnalysisResult;
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsBoolean()
+  isNewCustomer?: boolean | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 2147483647,
+    description: 'AI가 집계한 접수 확정 배송 상세 수. 결제 대기 포함. 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  registeredParcelCount?: number | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 2147483647,
+    description: 'AI가 집계한 FAQ 답변 건수. 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  faqAnswerCount?: number | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 2147483647,
+    description: 'AI가 집계한 접수 내역 조회·안내 건수. 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  orderLookupCount?: number | null;
+
+  @ApiPropertyOptional({
+    type: Number,
+    nullable: true,
+    minimum: 0,
+    maximum: 2147483647,
+    description: 'AI가 집계한 취소 완료 배송 상세 수. 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(0)
+  @Max(2147483647)
+  cancelledParcelCount?: number | null;
+
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description: '상담원 연결을 요구했으면 true. 실제 연결 성공과 별개이며 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsBoolean()
+  hasHandoffRequest?: boolean | null;
 
   @ApiProperty({
     type: Number,

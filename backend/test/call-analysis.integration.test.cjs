@@ -28,7 +28,6 @@ const input = (providerCallId, changes = {}) => ({
   startedAt: '2026-10-30T10:00:00+09:00',
   endedAt: '2026-10-30T10:03:40+09:00',
   aiPersonaVersionSeq: null,
-  result: 'REGISTERED',
   repeatQuestionCount: 2,
   hasComplaint: true,
   complaints: [
@@ -173,6 +172,7 @@ test('HTTP validates call identity, version existence, nullable fields and compl
     { hasComplaint: false },
     { hasComplaint: null },
     { responseLatencyTotalMs: 8400 },
+    { result: 'REGISTERED' },
   ])
     await error(await post(c.id, input(c.providerCallId, change)), 400, 'INVALID_REQUEST');
   assert.equal(
@@ -191,6 +191,7 @@ test('final analysis stores actual version and normalized evidence, preserving P
   const stored = (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id]))
     .rows[0];
   assert.equal(stored.ai_persona_version_seq, versionSeq);
+  assert.equal(Object.hasOwn(stored, 'result'), false);
   assert.equal(stored.ai_started_at.toISOString(), '2026-10-30T01:00:00.000Z');
   assert.equal(stored.ai_ended_at.toISOString(), '2026-10-30T01:03:40.000Z');
   assert.equal(stored.repeat_question_count, 2);
@@ -309,14 +310,13 @@ test('analysis schema enforces call uniqueness, references and stored value cons
   const c = await createCall();
   const client = await pool.connect();
   const statement = `INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,
-    ai_started_at,ai_ended_at,result,repeat_question_count,has_complaint,complaints,payload_hash)
-    VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)`;
+    ai_started_at,ai_ended_at,repeat_question_count,has_complaint,complaints,payload_hash)
+    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`;
   const values = [
     c.id,
     null,
     '2026-10-30T01:00:00Z',
     '2026-10-30T01:03:40Z',
-    'REGISTERED',
     0,
     false,
     '[]',
@@ -328,12 +328,11 @@ test('analysis schema enforces call uniqueness, references and stored value cons
       [0, 2147483647, '23503'],
       [1, 2147483647, '23503'],
       [3, '2026-10-30T00:59:59Z', '23514'],
-      [4, 'OTHER', '23514'],
-      [5, -1, '23514'],
-      [6, true, '23514'],
-      [7, '{}', '23514'],
-      [7, '[{}]', '23514'],
-      [8, 'invalid-hash', '23514'],
+      [4, -1, '23514'],
+      [5, true, '23514'],
+      [6, '{}', '23514'],
+      [6, '[{}]', '23514'],
+      [7, 'invalid-hash', '23514'],
     ]) {
       const invalid = [...values];
       invalid[index] = value;
@@ -347,4 +346,160 @@ test('analysis schema enforces call uniqueness, references and stored value cons
     await client.query('ROLLBACK');
     client.release();
   }
+});
+
+test('AI summary is stored as reported with the actual persona and replays never increment counts', async () => {
+  const c = await createCall();
+  const body = input(c.providerCallId, {
+    aiPersonaVersionSeq: versionSeq,
+    isNewCustomer: false,
+    registeredParcelCount: 3,
+    faqAnswerCount: 2,
+    orderLookupCount: 1,
+    cancelledParcelCount: 1,
+    hasHandoffRequest: true,
+  });
+  await success(await post(c.id, body));
+  const stored = (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id]))
+    .rows[0];
+  assert.equal(stored.ai_persona_version_seq, versionSeq);
+  assert.equal(stored.is_new_customer, false);
+  assert.equal(stored.registered_parcel_count, 3);
+  assert.equal(stored.faq_answer_count, 2);
+  assert.equal(stored.order_lookup_count, 1);
+  assert.equal(stored.cancelled_parcel_count, 1);
+  assert.equal(stored.has_handoff_request, true);
+  await Promise.all(Array.from({ length: 6 }, async () => success(await post(c.id, body))));
+  for (const change of [
+    { isNewCustomer: true },
+    { registeredParcelCount: 4 },
+    { faqAnswerCount: 3 },
+    { orderLookupCount: 2 },
+    { cancelledParcelCount: 2 },
+    { hasHandoffRequest: false },
+  ])
+    await error(await post(c.id, { ...body, ...change }), 409, 'EVENT_PAYLOAD_CONFLICT');
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id])).rows,
+    [stored],
+  );
+});
+
+test('result-free hashes and timestamps survive omitted and explicit-null summary replays', async () => {
+  const c = await createCall();
+  const body = input(c.providerCallId, {
+    startedAt: '2026-10-30T01:00:00.000Z',
+    endedAt: '2026-10-30T01:03:40.000Z',
+    hasComplaint: false,
+    complaints: [],
+  });
+  const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  await pool.query(
+    `INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,
+      repeat_question_count,has_complaint,complaints,payload_hash)
+     VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`,
+    [
+      c.id,
+      body.startedAt,
+      body.endedAt,
+      body.repeatQuestionCount,
+      body.hasComplaint,
+      JSON.stringify(body.complaints),
+      hash,
+    ],
+  );
+  const stored = (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id]))
+    .rows[0];
+  await success(await post(c.id, body));
+  const unknown = {
+    isNewCustomer: null,
+    registeredParcelCount: null,
+    faqAnswerCount: null,
+    orderLookupCount: null,
+    cancelledParcelCount: null,
+    hasHandoffRequest: null,
+  };
+  await success(await post(c.id, { ...body, ...unknown }));
+  assert.deepEqual(
+    (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id])).rows,
+    [stored],
+  );
+  for (const column of [
+    'is_new_customer',
+    'registered_parcel_count',
+    'faq_answer_count',
+    'order_lookup_count',
+    'cancelled_parcel_count',
+    'has_handoff_request',
+  ])
+    assert.equal(stored[column], null);
+  await error(
+    await post(c.id, { ...body, registeredParcelCount: 0 }),
+    409,
+    'EVENT_PAYLOAD_CONFLICT',
+  );
+});
+
+test('summary schema rejects negative and overflowing counts without changing the stored report', async () => {
+  const c = await createCall();
+  await success(await post(c.id, input(c.providerCallId)));
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const column of [
+      'registered_parcel_count',
+      'faq_answer_count',
+      'order_lookup_count',
+      'cancelled_parcel_count',
+    ]) {
+      for (const [value, code] of [
+        [-1, '23514'],
+        [2147483648, '22003'],
+      ]) {
+        await client.query('SAVEPOINT invalid_summary');
+        await assert.rejects(
+          () =>
+            client.query(`UPDATE call_analyses SET ${column}=$2 WHERE call_session_seq=$1`, [
+              c.id,
+              value,
+            ]),
+          { code },
+        );
+        await client.query('ROLLBACK TO SAVEPOINT invalid_summary');
+      }
+    }
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});
+
+test('Swagger exposes optional nullable summary input and matching administrator read fields', async () => {
+  const response = await fetch(base + '/api/docs-json');
+  assert.equal(response.status, 200);
+  const document = await response.json();
+  const schemas = document.components.schemas;
+  const request = schemas.CreateCallAnalysisDto;
+  const output = schemas.CallAnalysisDto;
+  for (const name of [
+    'isNewCustomer',
+    'registeredParcelCount',
+    'faqAnswerCount',
+    'orderLookupCount',
+    'cancelledParcelCount',
+    'hasHandoffRequest',
+  ]) {
+    assert.ok(request.properties[name]);
+    assert.equal(request.required.includes(name), false);
+    assert.equal(request.properties[name].nullable, true);
+    assert.equal(output.properties[name].nullable, true);
+  }
+  assert.equal(Object.hasOwn(request.properties, 'customerType'), false);
+  assert.equal(Object.hasOwn(request.properties, 'shipmentLookupCount'), false);
+  assert.equal(Object.hasOwn(request.properties, 'result'), false);
+  assert.equal(Object.hasOwn(output.properties, 'result'), false);
+  assert.equal(
+    document.paths['/api/calls'].get.parameters.some((parameter) => parameter.name === 'result'),
+    false,
+  );
 });

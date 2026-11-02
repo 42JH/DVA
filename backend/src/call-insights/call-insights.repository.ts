@@ -28,19 +28,25 @@ export class CallInsightsRepository {
   ): Promise<boolean> {
     const result = await client.query(
       `INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,ai_started_at,ai_ended_at,
-       result,repeat_question_count,has_complaint,complaints,payload_hash)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+       repeat_question_count,has_complaint,complaints,payload_hash,is_new_customer,
+       registered_parcel_count,faq_answer_count,order_lookup_count,cancelled_parcel_count,has_handoff_request)
+       VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14)
        ON CONFLICT(call_session_seq) DO NOTHING RETURNING call_session_seq`,
       [
         id,
         input.aiPersonaVersionSeq,
         input.startedAt,
         input.endedAt,
-        input.result,
         input.repeatQuestionCount,
         input.hasComplaint,
         JSON.stringify(input.complaints),
         payloadHash,
+        input.isNewCustomer ?? null,
+        input.registeredParcelCount ?? null,
+        input.faqAnswerCount ?? null,
+        input.orderLookupCount ?? null,
+        input.cancelledParcelCount ?? null,
+        input.hasHandoffRequest ?? null,
       ],
     );
     return result.rowCount === 1;

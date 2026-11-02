@@ -11,7 +11,7 @@
 - 목록: `{ data: [], hasNext, total_count }`. 단건: `{ data, meta: { requestId } }`.
 - 모든 응답은 `Cache-Control: no-store`. 전화번호·대화 내용·녹취 URL을 요청 로그에 남기지 않는다.
 - 경로 번호는 양의 int32다. 통화 경로의 `{id}`는 `call_sessions.call_session_seq`다.
-- 기존 통화·발화·녹취·이벤트와 `call_analyses`, `ai_persona_versions`, 고객·주문을 읽는다. 현재 앱은 FAQ 분류를 포함해 027까지 적용하며 이 조회 보완 자체의 추가 마이그레이션은 없다.
+- 기존 통화·발화·녹취·이벤트와 `call_analyses`, `ai_persona_versions`, 고객·주문을 읽는다. 현재 앱은 통화 요약 041·대표 분류 삭제 042까지 적용해야 한다.
 
 ## GET /api/calls — 통화 목록 조회
 
@@ -24,7 +24,6 @@
 | `endReason` | 저장된 종료 사유 정확히 일치. 종료 사유 코드 목록은 미확정 |
 | `handoffStatus` | REQUESTED / CONNECTED / FAILED |
 | `q` | 현재 연결 고객 이름·발신번호 부분 검색. NFC 정규화·앞뒤 공백 제거, 최대 200자. `%`·`_`는 일반 문자 |
-| `result` | 저장된 분석의 REGISTERED / REGISTRATION_FAILED / HANDOFF / CANCELLED / INQUIRY |
 | `hasComplaint` | 문자열 `true` / `false`만 허용. false는 확인된 불만 없음이며 미판정·분석 미수신은 제외 |
 | `aiPersonaVersionSeq` | 실제 사용했다고 분석에 기록된 페르소나 버전 DB 번호. 화면의 v6 같은 버전 숫자와 다름 |
 | `limit`, `offset` | 기본 20·0, limit 1~100 |
@@ -36,6 +35,7 @@ PBX 시작 시각이 아직 없으면 AI 분석의 시작 시각, 그것도 없�
 AI 시각은 아래 analysis에도 원본 그대로 제공한다. 이 조회는 DB의 PBX 시작·종료 값을 AI 시각으로 덮어쓰지 않는다.
 q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 조건을 적용하지 않는다. NUL·반복 query는 400이다.
 분석 필터는 해당 분석이 있는 통화만 선택한다. 존재하지 않는 버전 번호 필터는 빈 목록이며 404가 아니다.
+042부터 대표 분류 `result` 필터를 제공하지 않는다. 기존 `?result=...` 요청은 지원하지 않는 필드이므로 `400 INVALID_REQUEST`다.
 
 응답 항목:
 
@@ -94,9 +94,14 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 
 | analysis 필드 | 의미 |
 | --- | --- |
-| `result` | 당시 AI가 확정한 통화 결과. 현재 주문 상태로 재계산하지 않음 |
 | `aiPersonaVersionSeq` | 실제 사용 버전 DB 번호 또는 null |
 | `personaName`, `personaVersion` | 실제 사용 버전의 이름·버전 숫자. 미확인은 각각 null이며 현재 ACTIVE나 최신 버전으로 대신하지 않음 |
+| `isNewCustomer` | AI가 보낸 신규 true / 기존 false. 미수집 null |
+| `registeredParcelCount` | AI가 보낸 접수 확정 배송 상세 수. 결제 대기 포함. 미수집 null |
+| `faqAnswerCount` | AI가 보낸 FAQ 답변 건수. 미수집 null |
+| `orderLookupCount` | AI가 보낸 접수 내역 조회·안내 건수. 미수집 null |
+| `cancelledParcelCount` | AI가 보낸 취소 완료 배송 상세 수. 미수집 null |
+| `hasHandoffRequest` | AI가 보낸 상담원 연결 요구 여부. 연결 성공과 별개. 미수집 null |
 | `aiStartedAt`, `aiEndedAt` | AI 측정 시작·종료 원본. PBX 시각과 별도로 저장·반환 |
 | `repeatQuestionCount` | 0 이상 횟수 또는 미측정 null |
 | `hasComplaint` | 불만 확인 true, 없음 확인 false, 미판정 null |
@@ -105,10 +110,15 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 
 ```json
 {
-  "result": "REGISTERED",
   "aiPersonaVersionSeq": 7,
   "personaName": "빠른 접수형",
   "personaVersion": 6,
+  "isNewCustomer": false,
+  "registeredParcelCount": 3,
+  "faqAnswerCount": 2,
+  "orderLookupCount": 1,
+  "cancelledParcelCount": 1,
+  "hasHandoffRequest": true,
   "aiStartedAt": "2026-10-31T01:00:00.000Z",
   "aiEndedAt": "2026-10-31T01:03:40.000Z",
   "repeatQuestionCount": 2,
@@ -125,12 +135,13 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 }
 ```
 
-REGISTERED는 기존 ANL-01의 주문 저장 확인 기준이며 결제 대기를 포함한다. [분석 수집 계약](call-analysis.md)을 따른다.
+041·042 적용 후 새 요약 6개는 목록 각 항목의 `analysis`, 상세 `data.analysis`에 동일하게 반환하며 `analysis.result`는 반환하지 않는다. 상세의 통화 기본 정보는 기존 `data.call`을 유지하며 새 필드를 그 안에 중복 추가하지 않는다. 분석이 없으면 analysis=null, 과거 분석에 새 값이 없으면 각 필드가 null이다. [분석 수집 계약](call-analysis.md)을 따른다.
+프론트는 true/false를 신규/기존 또는 요청 있음/없음으로 표시하고, 건수는 0을 포함해 `N건`으로 표시한다. null은 미확인으로 구분하며 0·false로 대체하지 않는다. 고객·주문 상태가 나중에 바뀌어도 저장된 통화 요약은 바뀌지 않는다. 페르소나 이름·버전은 기존 불변 버전을 JOIN해 제공한다.
 불만 유형·근거 원문·정수 초 위치·발화 순번은 저장값 그대로 제공한다. 아직 수집되지 않은 발화를 만들어 채우지 않는다.
 프론트는 같은 통화의 스크립트에서 실제 존재하는 utteranceOrder만 강조하고, 늦은 발화 수신 후 다시 조회하면 연결할 수 있다.
 hash·프롬프트·AI 서비스 토큰은 반환하지 않는다. 근거·고객 이름·검색어를 일반 HTTP 로그에 복사하지 않는다.
 
-이번 보완은 기존 두 GET 경로의 응답·필터 확장이다. 새 HTTP 경로·테이블·뷰·컬럼·환경변수는 추가하지 않는다.
+이번 변경은 기존 두 GET 경로의 분석 응답 확장과 대표 분류·필터 삭제다. DB는 041에서 요약 컬럼 6개를 추가하고 042에서 result를 삭제한다. 새 HTTP 경로·테이블·뷰·환경변수는 추가하지 않는다. 주문의 orderStatus, 실제 상담원 연결의 handoff.status, PBX 종료 사유 endReason은 기존 계약을 유지한다.
 목록의 total_count로 검색 총건수를 제공한다. 프론트는 ceil(total_count/limit)으로 숫자 페이지 수를 계산한다.
 담당 2용 통계 뷰 두 개도 별도 작업이며 이 API에서 평균·비율을 집계하지 않는다.
 

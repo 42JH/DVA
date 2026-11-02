@@ -588,7 +588,6 @@ test('order-free calls still accept AI events and analysis and remain visible to
       startedAt: input.call.incomingAt,
       endedAt: '2026-10-27T01:01:00Z',
       aiPersonaVersionSeq: null,
-      result: 'INQUIRY',
       repeatQuestionCount: 0,
       hasComplaint: false,
       complaints: [],
@@ -600,7 +599,8 @@ test('order-free calls still accept AI events and analysis and remain visible to
     assert.equal(response.status, 200);
     const detail = (await response.json()).data;
     assert.equal(detail.call.orderSeq, null);
-    assert.equal(detail.analysis.result, 'INQUIRY');
+    assert.equal(detail.analysis.repeatQuestionCount, 0);
+    assert.equal(Object.hasOwn(detail.analysis, 'result'), false);
     assert.equal(detail.aiActionCount, 1);
   } finally {
     config.set('AI_INSIGHTS_TOKEN', previous);

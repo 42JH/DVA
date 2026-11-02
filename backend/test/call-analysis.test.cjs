@@ -43,12 +43,48 @@ const input = () => ({
   startedAt: '2026-10-30T10:00:00+09:00',
   endedAt: '2026-10-30T10:03:40+09:00',
   aiPersonaVersionSeq: null,
-  result: 'REGISTERED',
   repeatQuestionCount: 2,
   hasComplaint: true,
   complaints: [complaint()],
 });
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateCallAnalysisDto });
+
+const summary = () => ({
+  isNewCustomer: true,
+  registeredParcelCount: 3,
+  faqAnswerCount: 2,
+  orderLookupCount: 1,
+  cancelledParcelCount: 1,
+  hasHandoffRequest: true,
+});
+
+test('call summary accepts mixed outcomes, measured zero, false and unknown without coercion', async () => {
+  for (const values of [
+    summary(),
+    { ...summary(), isNewCustomer: false, hasHandoffRequest: false, registeredParcelCount: 0 },
+    Object.fromEntries(Object.keys(summary()).map((key) => [key, null])),
+    { ...summary(), faqAnswerCount: 2147483647 },
+  ]) {
+    const body = { ...input(), ...values };
+    assert.deepEqual(JSON.parse(JSON.stringify(await validate(body))), body);
+  }
+});
+
+test('call summary rejects invalid counts, non-boolean flags and obsolete field names', async () => {
+  for (const key of [
+    'registeredParcelCount',
+    'faqAnswerCount',
+    'orderLookupCount',
+    'cancelledParcelCount',
+  ])
+    for (const value of [-1, 1.5, '1', true, 2147483648, {}, []])
+      await assert.rejects(() => validate({ ...input(), [key]: value }), { status: 400 });
+  for (const key of ['isNewCustomer', 'hasHandoffRequest'])
+    for (const value of ['true', 'false', 'T', 'F', 0, 1, {}, []])
+      await assert.rejects(() => validate({ ...input(), [key]: value }), { status: 400 });
+  for (const change of [{ customerType: 'NEW' }, { shipmentLookupCount: 1 }])
+    await assert.rejects(() => validate({ ...input(), ...change }), { status: 400 });
+});
 
 test('analysis accepts explicit unknown values and preserves complaint evidence without coercion', async () => {
   const body = input();
@@ -68,7 +104,7 @@ test('analysis accepts explicit unknown values and preserves complaint evidence 
   );
 });
 
-test('analysis requires every field and rejects string numbers, hidden latency fields and invalid enums', async () => {
+test('analysis requires core fields and rejects string numbers, removed result and hidden latency fields', async () => {
   for (const key of Object.keys(input())) {
     const body = input();
     delete body[key];
@@ -85,7 +121,8 @@ test('analysis requires every field and rejects string numbers, hidden latency f
     { aiPersonaVersionSeq: 0 },
     { aiPersonaVersionSeq: '7' },
     { aiPersonaVersionSeq: 2147483648 },
-    { result: 'INCOMPLETE' },
+    { result: 'REGISTERED' },
+    { result: null },
     { repeatQuestionCount: -1 },
     { repeatQuestionCount: '2' },
     { repeatQuestionCount: 1.5 },

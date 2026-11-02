@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
+
 기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회한다. 기업 PIN 등록·수정·조회 API는 폐기하며 개인 PIN과 과거 주문 주소는 보존한다. companyPins는 기존 AI 응답 호환을 위해 빈 배열로 유지한다. company_pins 테이블은 과거 주문 참조·기업 삭제 이력 처리용으로 남기며 migration이나 데이터 삭제는 없다. [기업 검색 계약](../docs/api/company-directory.md)과 [AI 인계](docs/company-address-directory-handoff.md)를 따르며 AI 코드·운영 배포는 별도다.
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
@@ -24,7 +26,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
 
-관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·result·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 새 API·migration 없이 기존 두 GET 조회를 보완한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
+관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 기존 두 GET 조회에 요약을 추가하고 대표 분류·필터 result를 삭제한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
 
 기업 구성원·대표자 표시·소속 해제·JSON 단건/복수 등록/갱신은 [구성원 API 계약](../docs/api/members.md)을 참고한다. 이름·전화번호 등록의 선택 role과 기업·선택 부서·사원 통합 등록의 최신 입력·트랜잭션 계약은 [기업·사원 등록 명세](docs/company-registration.md)를 우선한다.
 

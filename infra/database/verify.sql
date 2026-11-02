@@ -120,7 +120,22 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_analyses'::regclass AND contype='p'
     AND pg_get_constraintdef(oid)='PRIMARY KEY (call_session_seq)') THEN
   RAISE EXCEPTION 'Call analysis table, identity or foreign keys missing'; END IF;
- RAISE NOTICE 'PASS: 27 public tables, 25 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
+   AND table_name='call_analyses' AND is_nullable='YES' AND column_default IS NULL
+   AND ((column_name IN ('is_new_customer','has_handoff_request') AND udt_name='bool')
+     OR (column_name IN ('registered_parcel_count','faq_answer_count','order_lookup_count','cancelled_parcel_count') AND udt_name='int4')))<>6
+  OR (SELECT count(*) FROM pg_constraint WHERE conrelid='public.call_analyses'::regclass AND contype='c'
+    AND conname IN ('call_analyses_registered_parcel_count_check','call_analyses_faq_answer_count_check',
+      'call_analyses_order_lookup_count_check','call_analyses_cancelled_parcel_count_check'))<>4
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='041-call-summary-metrics.sql') THEN
+  RAISE EXCEPTION 'Call summary schema or migration missing'; END IF;
+ IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='call_analyses' AND column_name='result')
+  OR EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_analyses'::regclass
+    AND conname='call_analyses_result_check')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='042-remove-call-analysis-result.sql') THEN
+  RAISE EXCEPTION 'Call analysis result removal or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, employee identity, generated columns and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
