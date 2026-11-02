@@ -10,10 +10,10 @@ export const ROLE_LABEL: Record<AdminRole, string> = {
   SYSTEM_ADMIN: '최고 관리자',
 }
 
-/** 탭 순서 = 디자인 (승인 대기 · 관리자 · 비활성화) */
+/** 탭 순서 (11/02 사용자: 관리자 먼저 — 디자인은 승인 대기 · 관리자 · 비활성화) */
 export const ADMIN_TABS: { key: AdminStatus; label: string }[] = [
-  { key: 'PENDING', label: '승인 대기' },
   { key: 'ACTIVE', label: '관리자' },
+  { key: 'PENDING', label: '승인 대기' },
   { key: 'INACTIVE', label: '비활성화' },
 ]
 
