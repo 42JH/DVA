@@ -36,13 +36,14 @@ async function createCall(changes = {}) {
     order: null,
     startedAt: '2026-10-31T01:00:03Z',
     endedAt: '2026-10-31T01:03:43Z',
+    incomingAt: null,
     endReason: 'PBX_ENDED',
     ...changes,
   };
   const id = (
     await f.pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason,customer_seq)
-     VALUES($1,$2,$3,$4,$5,$6,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq`,
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason,incoming_at,customer_seq)
+     VALUES($1,$2,$3,$4,$5,$6,$7,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq`,
       [
         input.providerCallId,
         input.phone,
@@ -50,6 +51,7 @@ async function createCall(changes = {}) {
         input.startedAt,
         input.endedAt,
         input.endReason,
+        input.incomingAt,
       ],
     )
   ).rows[0].call_session_seq;
@@ -443,6 +445,143 @@ test('new query fields reject ambiguous booleans, malformed versions, duplicates
     await f.error(await list(query), 400, 'INVALID_REQUEST');
 });
 
+test('incoming calls are visible in date-filtered lists before analysis, PBX or storage arrives', async () => {
+  const call = await createCall({
+    startedAt: null,
+    endedAt: null,
+    endReason: null,
+    incomingAt: '2026-10-31T00:59:58Z',
+  });
+  const page = await ok(
+    await list({
+      callerPhoneNumber: call.phone,
+      from: call.incomingAt,
+      to: '2026-10-31T00:59:59Z',
+    }),
+  );
+  assert.deepEqual(ids(page), [call.id]);
+  assert.equal(page.total_count, 1);
+  assert.equal(page.data[0].startedAt, '2026-10-31T00:59:58.000Z');
+  assert.equal(page.data[0].endedAt, null);
+  assert.equal(page.data[0].analysis, null);
+  const single = (await ok(await detail(call), true)).data;
+  assert.equal(single.call.startedAt, page.data[0].startedAt);
+  assert.deepEqual(single.recordings, []);
+});
+
+test('AI times update the same call and date filter before PBX or a recording is available', async () => {
+  const call = await createCall({
+    startedAt: null,
+    endedAt: null,
+    endReason: null,
+    incomingAt: '2026-10-31T00:59:58Z',
+  });
+  const input = await analyse(call);
+  const query = {
+    callerPhoneNumber: call.phone,
+    from: input.startedAt,
+    to: '2026-10-31T01:00:01Z',
+  };
+  const page = await ok(await list(query));
+  assert.deepEqual(ids(page), [call.id]);
+  assert.equal(page.data[0].startedAt, '2026-10-31T01:00:00.000Z');
+  assert.equal(page.data[0].endedAt, '2026-10-31T01:03:40.000Z');
+  assert.deepEqual(
+    ids(await ok(await list({ ...query, from: call.incomingAt, to: input.startedAt }))),
+    [],
+  );
+  const single = (await ok(await detail(call), true)).data;
+  assert.equal(single.call.startedAt, page.data[0].startedAt);
+  assert.equal(single.call.endedAt, page.data[0].endedAt);
+  assert.equal(single.call.endReason, null);
+  assert.deepEqual(single.recordings, []);
+  const stored = (
+    await f.pool.query('SELECT started_at,ended_at FROM call_sessions WHERE call_session_seq=$1', [
+      call.id,
+    ])
+  ).rows[0];
+  assert.deepEqual(stored, { started_at: null, ended_at: null });
+});
+
+test('late PBX times take priority while the AI analysis and call identity are preserved', async () => {
+  const call = await createCall({
+    startedAt: null,
+    endedAt: null,
+    endReason: null,
+    incomingAt: '2026-10-31T00:59:58Z',
+  });
+  await analyse(call);
+  const before = (await ok(await detail(call), true)).data;
+  assert.equal(before.call.startedAt, before.analysis.aiStartedAt);
+  await f.pool.query(
+    'UPDATE call_sessions SET started_at=$2,ended_at=$3 WHERE call_session_seq=$1',
+    [call.id, '2026-10-31T01:00:03Z', '2026-10-31T01:03:43Z'],
+  );
+  const after = (await ok(await detail(call), true)).data;
+  assert.equal(after.call.callSessionSeq, before.call.callSessionSeq);
+  assert.equal(after.call.startedAt, '2026-10-31T01:00:03.000Z');
+  assert.equal(after.call.endedAt, '2026-10-31T01:03:43.000Z');
+  assert.deepEqual(after.analysis, before.analysis);
+  assert.deepEqual(after.recordings, []);
+  assert.deepEqual(
+    ids(
+      await ok(
+        await list({
+          callerPhoneNumber: call.phone,
+          from: before.call.startedAt,
+          to: after.call.startedAt,
+        }),
+      ),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    ids(
+      await ok(
+        await list({
+          callerPhoneNumber: call.phone,
+          from: after.call.startedAt,
+          to: '2026-10-31T01:00:04Z',
+        }),
+      ),
+    ),
+    [call.id],
+  );
+});
+
+test('fallback times share date boundaries, deterministic pagination and analysis filters', async () => {
+  const caller = phone();
+  const pbx = await createCall({
+    phone: caller,
+    startedAt: '2026-10-31T02:00:00Z',
+    endedAt: '2026-10-31T02:03:00Z',
+  });
+  const ai = await createCall({ phone: caller, startedAt: null, endedAt: null, endReason: null });
+  await analyse(ai, { startedAt: '2026-10-31T02:00:00Z', endedAt: '2026-10-31T02:03:00Z' });
+  const incoming = await createCall({
+    phone: caller,
+    startedAt: null,
+    endedAt: null,
+    endReason: null,
+    incomingAt: '2026-10-31T02:00:00Z',
+  });
+  await createCall({ phone: caller, startedAt: null, endedAt: null, endReason: null });
+  const query = {
+    callerPhoneNumber: caller,
+    from: '2026-10-31T02:00:00Z',
+    to: '2026-10-31T02:00:01Z',
+    limit: 1,
+  };
+  const expected = [incoming.id, ai.id, pbx.id];
+  for (const [offset, id] of expected.entries()) {
+    const page = await ok(await list({ ...query, offset }));
+    assert.deepEqual(ids(page), [id]);
+    assert.equal(page.total_count, 3);
+    assert.equal(page.hasNext, offset < 2);
+  }
+  assert.deepEqual(ids(await ok(await list({ ...query, result: 'INQUIRY' }))), [ai.id]);
+});
+
 test('late analysis and utterances become readable without inventing a default persona or altering complaint references', async () => {
   const call = await createCall({ startedAt: null, endedAt: null, endReason: null });
   assert.equal((await ok(await detail(call), true)).data.analysis, null);
@@ -454,8 +593,8 @@ test('late analysis and utterances become readable without inventing a default p
   };
   await analyse(call, { hasComplaint: true, complaints: [complaint] });
   const before = (await ok(await detail(call), true)).data;
-  assert.equal(before.call.startedAt, null);
-  assert.equal(before.call.endedAt, null);
+  assert.equal(before.call.startedAt, before.analysis.aiStartedAt);
+  assert.equal(before.call.endedAt, before.analysis.aiEndedAt);
   assert.equal(before.analysis.aiPersonaVersionSeq, null);
   assert.equal(before.analysis.personaName, null);
   assert.equal(before.analysis.personaVersion, null);

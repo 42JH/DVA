@@ -27,9 +27,11 @@ type CallRow = Omit<CallDto, 'handoff'> & {
   requestedAt: Date;
 };
 
+const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
+
 const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
- c.started_at AS "startedAt",c.ended_at AS "endedAt",c.end_reason AS "endReason",
+ ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",c.end_reason AS "endReason",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",
  a.result,a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
  a.ai_started_at AS "aiStartedAt",a.ai_ended_at AS "aiEndedAt",a.repeat_question_count AS "repeatQuestionCount",
@@ -104,8 +106,8 @@ export class ConsultationsRepository {
       [query.orderSeq, 'c.order_seq', '='],
       [query.orderStatus, 'o.status', '='],
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
-      [query.from, 'c.started_at', '>='],
-      [query.to, 'c.started_at', '<'],
+      [query.from, CALL_STARTED_AT, '>='],
+      [query.to, CALL_STARTED_AT, '<'],
       [query.endReason, 'c.end_reason', '='],
       [query.handoffStatus, 'h.status', '='],
       [query.result, 'a.result', '='],

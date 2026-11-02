@@ -20,7 +20,7 @@
 | `orderSeq` | 연결된 주문 번호 정확히 일치 |
 | `orderStatus` | 연결된 주문의 COLLECTING / notPaid / PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED / CANCELLED |
 | `callerPhoneNumber` | 저장된 발신번호 정확히 일치. 숫자와 맨 앞의 `+` 허용 |
-| `from`, `to` | 실제 `started_at` 기준. from 포함·to 미포함, 시간대 필수 |
+| `from`, `to` | 응답 `startedAt`과 같은 기준(PBX 시작 → AI 시작 → 수신 이벤트 시각). from 포함·to 미포함, 시간대 필수 |
 | `endReason` | 저장된 종료 사유 정확히 일치. 종료 사유 코드 목록은 미확정 |
 | `handoffStatus` | REQUESTED / CONNECTED / FAILED |
 | `q` | 현재 연결 고객 이름·발신번호 부분 검색. NFC 정규화·앞뒤 공백 제거, 최대 200자. `%`·`_`는 일반 문자 |
@@ -30,8 +30,10 @@
 | `limit`, `offset` | 기본 20·0, limit 1~100 |
 
 조건은 모두 AND로 결합한다. `startedAt DESC NULLS LAST, callSessionSeq DESC`로 정렬한다.
-시작 시각이 없는 통화는 기간 검색에서 제외되고, 기간 조건 없는 목록에서는 마지막에 표시한다.
-기존 기간·정렬과 `startedAt`·`endedAt`은 PBX 시각 기준을 유지한다. AI 시각은 아래 analysis에서 별도로 제공한다.
+PBX 시작 시각이 아직 없으면 AI 분석의 시작 시각, 그것도 없으면 통화 수신 이벤트 시각을 사용한다.
+기간 필터·정렬·응답 `startedAt`은 모두 이 우선순위를 사용한다. 세 시각이 모두 없는 과거 통화만 기간 검색에서 제외하고 기간 조건 없는 목록의 마지막에 표시한다.
+`endedAt`은 PBX 종료 우선, 없으면 AI 분석의 종료 시각이며 둘 다 없으면 null이다. PBX 시각이 나중에 도착하면 같은 통화 번호에서 우선 적용하므로 표시 시각·기간·순서가 보정될 수 있다.
+AI 시각은 아래 analysis에도 원본 그대로 제공한다. 이 조회는 DB의 PBX 시작·종료 값을 AI 시각으로 덮어쓰지 않는다.
 q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 조건을 적용하지 않는다. NUL·반복 query는 400이다.
 분석 필터는 해당 분석이 있는 통화만 선택한다. 존재하지 않는 버전 번호 필터는 빈 목록이며 404가 아니다.
 
@@ -43,7 +45,7 @@ q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 �
 | `callerPhoneNumber` | 발신번호, 미확인 시 null |
 | `orderSeq` | 연결 주문 번호, 없으면 null. 주문 내용은 기존 주문 상세 API에서 조회 |
 | `orderStatus`, `orderTotalAmount` | 연결 주문의 현재 결제·접수 상태와 미취소 상세 합계. 주문 없으면 null |
-| `startedAt`, `endedAt` | 실제 통화 시각. 미수집 시 null |
+| `startedAt`, `endedAt` | 위 우선순위의 표시 시각. 사용할 시각이 모두 없으면 null |
 | `endReason` | 저장된 종료 사유. 미확인 시 null |
 | `handoff` | 연결 기록이 없으면 null. 있으면 아래 연결 정보 |
 | `customerSeq`, `customerName` | 연결 고객 번호와 현재 이름. 미확인은 null |
@@ -64,6 +66,10 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 
 `id`는 `call_session_seq`다. 응답의 `data`는 `{ call, analysis, recordings, aiActionCount }`다.
 `aiActionCount`는 현재 수집된 AI 동작 전체 건수이며 `/actions`의 페이지 크기와 별개다. 수집 기록이 없으면 0이다.
+
+통화 목록·AI 분석·발화·처리 기록 조회는 S3 업로드를 기다리지 않는다. 아직 녹취가 없으면 `recordings: []`로 먼저 응답한다. AI 데이터와 PBX 시각·녹취는 기존 통화 번호에 나중에 연결되며 다음 조회에 반영된다. 파일 업로드 실패·지연을 이유로 이미 수집한 통화·분석을 목록에서 숨기지 않는다.
+열려 있는 화면의 자동 갱신과 재생 URL 보존은 [프론트 인계 사항](../../backend/docs/recording-independent-calls.md)을 따른다.
+
 `call`은 목록의 기본 정보·고객 필드이며 analysis는 data.analysis로 분리한다. 목록에서는 각 항목의 analysis에 같은 분석 객체를 제공한다.
 `recordings`는 아래 필드를 가진 배열이며 `recordingSeq` 오름차순이다.
 
@@ -91,7 +97,7 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 | `result` | 당시 AI가 확정한 통화 결과. 현재 주문 상태로 재계산하지 않음 |
 | `aiPersonaVersionSeq` | 실제 사용 버전 DB 번호 또는 null |
 | `personaName`, `personaVersion` | 실제 사용 버전의 이름·버전 숫자. 미확인은 각각 null이며 현재 ACTIVE나 최신 버전으로 대신하지 않음 |
-| `aiStartedAt`, `aiEndedAt` | AI 측정 시작·종료. 기존 PBX 시각은 유지 |
+| `aiStartedAt`, `aiEndedAt` | AI 측정 시작·종료 원본. PBX 시각과 별도로 저장·반환 |
 | `repeatQuestionCount` | 0 이상 횟수 또는 미측정 null |
 | `hasComplaint` | 불만 확인 true, 없음 확인 false, 미판정 null |
 | `complaints` | 저장 순서대로 불만 최대 20개. type·evidenceText·offsetSeconds·utteranceOrders |
@@ -196,7 +202,7 @@ S3의 403은 파일 미존재로 단정하지 않는다. 실패 항목은 `url`�
 
 ## 수집 상태와 범위
 
-- 현재 모놀리식은 AI 주문 결과로 통화 행을 만들고 PBX 웹훅 매칭 후 실제 시작·종료 시각을 저장한다.
+- 통화 식별자가 포함된 고객 컨텍스트나 AI 결과에서 통화 행을 만들고 수신 이벤트 시각으로 먼저 조회한다. AI 분석을 받으면 AI 시작·종료도 조회에 사용하며, PBX 웹훅 매칭 후에는 실제 PBX 시작·종료가 우선한다. S3 업로드 완료 여부로 통화 행의 노출을 제한하지 않는다.
   `endedAt: null`은 종료 정보가 아직 없다는 뜻이며 현재 통화 중이라고 단정할 수 없다.
 - 주문 상태를 통화 종료 사유로 바꾸어 반환하지 않는다.
 - 완결된 발화는 [EVT-01](call-events.md)로 수집해 기존 전사 조회에서 읽는다. 조회 API가 STT를 생성하거나 수집 완료를 보장하지 않는다. 실제 상담원 연결 결과 수집은 후속 범위다.

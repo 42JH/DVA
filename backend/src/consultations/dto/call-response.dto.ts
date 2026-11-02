@@ -86,7 +86,8 @@ export class CallDto {
   orderSeq!: number | null;
 
   @ApiProperty({
-    description: '실제 통화 시작 시각. 미수집 시 null.',
+    description:
+      '표시·기간 검색 기준 시작 시각. PBX 시작, AI 시작, 수신 이벤트 시각 순으로 사용하며 모두 없으면 null.',
     type: String,
     format: 'date-time',
     nullable: true,
@@ -95,7 +96,8 @@ export class CallDto {
   startedAt!: Date | null;
 
   @ApiProperty({
-    description: '실제 통화 종료 시각. null만으로 통화 진행 중이라고 판단할 수 없습니다.',
+    description:
+      'PBX 종료 시각 우선, 미수집이면 AI 종료 시각. 모두 없으면 null이며 null만으로 통화 진행 중이라고 판단하지 않습니다.',
     type: String,
     format: 'date-time',
     nullable: true,

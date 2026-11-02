@@ -9,6 +9,7 @@ const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worke
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 const { DatabaseService } = require('../dist/database/database.service');
 const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
+const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -393,6 +394,51 @@ test('expired claims recover and stale completion, failure and release cannot re
     ]),
     (error) => error.code === '23514',
   );
+});
+
+test('a date-filtered call is readable before upload and receives its recording on the same call after upload', async () => {
+  const id = await call('01098880001', 2);
+  const repository = apps[0].get(ConsultationsRepository);
+  const query = {
+    callerPhoneNumber: '01098880001',
+    from: '2026-10-27T01:00:00Z',
+    to: '2026-10-27T01:01:00Z',
+    limit: 100,
+    offset: 0,
+  };
+  const read = async () =>
+    (await repository.findMany(query)).rows.find((row) => row.callSessionSeq === id);
+  assert.equal((await read()).startedAt.toISOString(), '2026-10-27T01:00:02.000Z');
+  assert.deepEqual(await repository.findRecordings(id), []);
+  const data = payload();
+  await receipt(data);
+  const original = saving;
+  let entered, release;
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const wait = new Promise((resolve) => {
+    release = resolve;
+  });
+  saving = async (...args) => {
+    entered();
+    await wait;
+    return original(...args);
+  };
+  const pending = workers[0].processPending();
+  await started;
+  try {
+    const row = await read();
+    assert.equal(row.callSessionSeq, id);
+    assert.equal(row.startedAt.toISOString(), '2026-10-27T01:00:00.000Z');
+    assert.deepEqual(await repository.findRecordings(id), []);
+  } finally {
+    release();
+  }
+  await pending;
+  assert.equal((await read()).callSessionSeq, id);
+  assert.equal((await repository.findRecordings(id)).length, 1);
+  assert.equal(uploads, 1);
 });
 
 test('disabled S3 and recent receipts remain durable; retry cooldown does not starve later events', async () => {
