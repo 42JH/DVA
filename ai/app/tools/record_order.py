@@ -22,6 +22,10 @@ RETRY = {"pickup_at": "수거 희망 날짜와 시간을 다시 여쭤보기(지
 )
 async def record_order(ctx, args: OrderFields) -> Result:
     values, invalid = args.cleaned()
+    if any(k.startswith("receiver_") for k in values):
+        ctx.directory_revision += 1
+        ctx.directory_status = None
+        ctx.directory_terms = {}
     before = ctx.snapshot_slots()
     pin_events = ctx.pins_for_address(values)  # 주소록에 비슷한 받는 곳이 있으면 기록하지 않고 그 핀을 확인한다
     for name in CALL_FIELDS:

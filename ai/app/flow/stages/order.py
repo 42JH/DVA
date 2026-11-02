@@ -55,6 +55,8 @@ def receiver_name_text(ctx) -> str:
     """받는 분: 제안(최근 도착지·하나 남은 핀·후보들)이 있으면 그것, 주소록에서 찾다가 한쪽만 들었으면 빠진 쪽,
     주소록이 있는 고객이면 받는 분·장소를 열어 묻고(B6, 백엔드가 match_pins), 아니면 성함.
     받는 곳 주소를 이미 받았으면 성함만 묻는다(2026-11-01 21:47 통화: 주소를 말했는데 "어디로 보내실 건가요?"를 또 물음)."""
+    if ctx.directory_status:
+        return "COMPANY_NARROW" if ctx.directory_status == "more" else "COMPANY_FAILED"
     kind = receiver_offer(ctx)
     if kind:
         return {"recent": "B4", "pin": "B9", "pins": "B8"}[kind]
@@ -109,6 +111,7 @@ async def order_answer(ctx, answer: str) -> list[str]:
         if answer == "yes":
             ctx.use_place("receiver", ctx.pin_offer)
             ctx.pin_offer, ctx.pin_candidates = None, []
+            ctx.directory_terms, ctx.directory_status = {}, None
         else:
             await ctx.reject_pin()
     elif kind == "pins":
@@ -204,7 +207,7 @@ STAGES = [
             Transition("pickup.past", STAY, action=past_pickup),
             # 그 밖의 기록·제안 답·주소록 찾기 결과: 단계는 그대로, 할 말(빠진 항목·제안)을 새로 계산한다
             *(Transition(e, STAY) for e in ("order.updated", "pins.one", "pins.many", "pins.none",
-                                              "pins.ask_name", "pins.ask_place")),
+                                              "pins.ask_name", "pins.ask_place", "pins.more")),
         ),
     ),
     Stage(

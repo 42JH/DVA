@@ -4,9 +4,10 @@
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
 import itertools
+import unicodedata
 
-from app.backend_api import BackendError, CallerContext
-from app.order import Place
+from app.backend_api import BackendError, CallerContext, CompanyDirectoryPage
+from app.order import CompanyPlace, Place
 
 ADDRESS_REQUIRED = ("name", "phoneNumber", "roadAddress", "jibunAddress", "dongName", "postalCode", "latitude",
                     "longitude")
@@ -17,6 +18,7 @@ class MockBackend:
     def __init__(self):
         self.customers: dict[str, dict] = {}  # 전화번호 → {seq, name, status}
         self.pins: dict[str, list[Place]] = {}  # 전화번호 → 주소록
+        self.company_places: list[CompanyPlace] = []  # 백엔드가 활성 조건을 적용한 기업 검색 후보
         self.usage_types: dict[str, list[str]] = {}
         self.payment_methods: dict[str, list[str]] = {}  # 전화번호 → availablePaymentMethods
         self.recent: dict[str, tuple[Place, Place]] = {}  # 전화번호 → 이전 접수(출발지, 도착지)
@@ -36,6 +38,18 @@ class MockBackend:
 
     async def close(self) -> None:
         pass
+
+    async def search_company_places(self, query, limit=20, offset=0):
+        if not query.strip() or not 1 <= limit <= 100 or offset < 0:
+            raise BackendError("기업 배송지 검색 인수 오류")
+        terms = unicodedata.normalize("NFC", query).casefold().split()
+        matches = []
+        for place in self.company_places:
+            text = " ".join((place.label(), place.phone, place.geo.jibun_address if place.geo else "",
+                             place.geo.dong_name if place.geo else "", place.geo.postal_code if place.geo else ""))
+            if all(term in unicodedata.normalize("NFC", text).casefold() for term in terms):
+                matches.append(place)
+        return CompanyDirectoryPage(matches[offset:offset + limit], offset + limit < len(matches), len(matches))
 
     async def faq_entries(self, ids):
         from app.rag.faq_source import parse_faq_lookup, validate_faq_ids

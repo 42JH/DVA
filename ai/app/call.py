@@ -13,7 +13,7 @@ from app.backend_api import BackendError, result_body
 from app.config import ServerConfig, Texts
 from app.events import bus
 from app.flow import engine
-from app.order import COUNT_FIELDS, ORDER_FIELDS, PHONE_FIELDS, Order, Place, match_places, pin_labels, words
+from app.order import COUNT_FIELDS, ORDER_FIELDS, PHONE_FIELDS, CompanyPlace, Order, Place, match_places, pin_labels, words
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class Call:
         self.recent_pins: list[Place] = []  # 이전 접수의 도착지(최근 것부터). 도착지 핀 후보 맨 앞
         self.registered_name: str | None = None
         self.usage_types: list[str] = []
-        self.pins: list[Place] = []  # 발신번호 주인의 주소록(개인·기업 PIN). 출발지·도착지 구분이 없다
+        self.pins: list[Place] = []  # 발신번호 주인의 개인 주소록. 기업 배송지는 별도 API 검색
         # 백엔드가 준 가장 최근 접수 1건의 출발지·도착지({기존 출발지}, "이번에도 {도착지 주소}로")
         self.recent: dict[str, Place | None] = {"origin": None, "destination": None}
         self.places: dict[str, list[Place]] = {"destination": []}  # 이번 택배의 도착지 핀 후보(최근 것부터)
@@ -230,6 +230,9 @@ class Call:
     def reset_order_flags(self) -> None:
         """택배 하나를 받는 동안만 쓰는 상태. 새 택배를 시작할 때 비운다."""
         self.from_saved: set[str] = set()  # 주소록·앞 택배로 채운 항목(번호·상세주소는 읽지 않게 가린다)
+        self.directory_revision = getattr(self, "directory_revision", 0) + 1
+        self.directory_terms: dict[str, str] = {}
+        self.directory_status: str | None = None
         # 주소 확정: 새로 기록돼 아직 주소DB로 확정하지 않은 주소 항목, 못 찾아 한 번 다시 물은 주소 항목, 결과(관제용)
         self.address_pending: set[str] = set()
         self.address_retry: set[str] = set()
@@ -356,6 +359,66 @@ class Call:
             self.pin_ask = "place" if name else "name"
             return ["pins.ask_place" if name else "pins.ask_name"]
         return self.pins_found(found)
+
+    def clear_destination_search(self, clear_receiver: bool = False) -> None:
+        """새 수신인 검색에는 이전 조건이나 후보를 남기지 않는다."""
+        self.directory_revision += 1
+        self.directory_terms, self.dest_said = {}, {}
+        self.directory_status, self.pin_ask = None, None
+        self.pin_candidates, self.pin_offer, self.dest_offer = [], None, None
+        self.pin_rejected["destination"] = []
+        if clear_receiver:
+            for part in ("name", "phone", "address", "address_detail", "geo"):
+                setattr(self.order, f"receiver_{part}", None)
+            self.from_saved -= {"receiver_phone", "receiver_address_detail"}
+            self.address_pending.discard("receiver_address")
+            self.address_retry.discard("receiver_address")
+
+    async def find_places(self, name: str | None, place: str | None, detail: str | None,
+                          organization: str | None = None, department: str | None = None,
+                          restart: bool = False) -> list[str]:
+        """개인 주소록에 없거나 기업을 지정하면 현재 기업·사원 배송지를 검색한다."""
+        from app.tools._base import ToolError
+
+        self.directory_revision += 1  # 로컬 주소록에서 바로 찾은 경우에도 앞선 API 검색은 무효다
+        if restart or "receiver_phone" in self.from_saved or (organization and self.directory_terms.get("organization")
+                                                               not in (None, organization)):
+            self.clear_destination_search(clear_receiver=True)
+        terms = {**self.directory_terms, **self.dest_said}
+        terms.update({k: v for k, v in (("name", name), ("place", place), ("detail", detail),
+                                      ("organization", organization), ("department", department)) if v})
+        if not terms.get("organization") and not terms.get("department"):
+            events = self.match_pins(name, place, detail)
+            if self.pin_candidates:
+                self.directory_status = None
+                return events
+            terms = {**terms, **self.dest_said}
+        # API를 기다리기 전에 이전 후보를 지워 장애 시 옛 수신인을 확정하지 못하게 한다.
+        self.directory_revision += 1
+        revision, order = self.directory_revision, self.order
+        self.directory_terms = terms
+        self.dest_said = {k: terms[k] for k in ("name", "place", "detail") if k in terms}
+        self.pin_candidates, self.pin_offer, self.dest_offer, self.pin_ask = [], None, None, None
+        self.directory_status = "failed"  # 취소/시간 초과도 결과 없음으로 바꾸지 않는다
+        query = " ".join(terms[k] for k in ("organization", "department", "name", "place", "detail") if terms.get(k))
+        try:
+            page = await self.backend.search_company_places(query, limit=self.cfg.flow.max_pin_options + 1)
+        except Exception:
+            if revision != self.directory_revision or order is not self.order:
+                raise ToolError("이전 검색 결과 무시", "현재 수신인 조건으로 진행") from None
+            raise ToolError("기업 배송지 검색 장애", "기업 배송지를 확인하지 못했어요. 잠시 후 다시 검색하거나 주소를 직접 말씀해 주세요.") from None
+        if revision != self.directory_revision or order is not self.order or self.flow.stage != "ORDER":
+            raise ToolError("이전 검색 결과 무시", "현재 수신인 조건으로 진행")
+        if page.has_next or page.total_count > self.cfg.flow.max_pin_options:
+            self.directory_status = "more"
+            return ["pins.more"]
+        self.directory_status = None
+        if page.places:
+            return self.pins_found(page.places)
+        if not (terms.get("name") and terms.get("place")):
+            self.pin_ask = "place" if terms.get("name") else "name"
+            return ["pins.ask_place" if terms.get("name") else "pins.ask_name"]
+        return self.pins_found([])
 
     def pins_for_address(self, values: dict) -> list[str]:
         """받는 분이 정해지기 전에 받는 곳 주소가 값 기록(record_order)으로 들어오면, 기록하기 전에 주소록에서 비슷한 핀을
@@ -578,7 +641,7 @@ class Call:
             "성함": self.display_name() or "",
             "기존 출발지": origin.address if origin else "",
             "도착지 주소": destination.address if destination else "",
-            "수신인": verifying.name if verifying else "",  # 확인 중인 핀, 아니라고 한 뒤(B11)에는 그 핀의 받는 분
+            "수신인": verifying.label() if isinstance(verifying, CompanyPlace) else verifying.name if verifying else "",
             "후보": "·".join(self.pin_labels()),
             # 운임 안내는 접수 목록에 담은 뒤(확정 뒤)에 나가므로, 받는 중인 택배가 비었으면 방금 담은 택배의 운임
             "운임": f"{fare:,}" if (fare := self.parcel_fare(
