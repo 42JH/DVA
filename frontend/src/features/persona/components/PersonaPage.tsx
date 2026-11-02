@@ -9,7 +9,7 @@ import { VersionDiffCard } from './VersionDiffCard'
 
 // 07 페르소나 관리 (와이어프레임 07_페르소나관리 · _버전히스토리, 10/31)
 // 왼쪽 시스템 프롬프트 카드 | 오른쪽 346 카드 [페르소나 | 버전 히스토리] 탭(PersonaPanel). 두 카드 모두 화면 높이에 맞추고 안쪽만 스크롤
-// [수정] → 왼쪽이 수정 화면, 오른쪽 패널은 버튼 없이 · 접기 가능 (11/02). 패널에서 고르면 저장 안 한 내용 확인 후 그 보기로. [v4와 비교] → 왼쪽 카드가 버전 비교로
+// 오른쪽 패널은 보기 · 수정 화면 모두 접기 가능, 접힘 상태도 둘이 같이 씀 (11/02). [수정] → 왼쪽이 수정 화면, 패널은 버튼 없이. 패널에서 고르면 저장 안 한 내용 확인 후 그 보기로. [v4와 비교] → 왼쪽 카드가 버전 비교로
 export function PersonaPage() {
   const vm = usePersonaPage()
   const panel = {
@@ -69,6 +69,8 @@ export function PersonaPage() {
         onAdd={vm.canAdd ? vm.openAdd : undefined}
         onTestCall={vm.startTestCall}
         onApply={vm.askApply}
+        open={vm.panelOpen}
+        onToggle={vm.togglePanel}
       />
       {vm.applyConfirm && (
         <ConfirmDialog

@@ -86,7 +86,7 @@ const hasBatchim = (name: string) => {
 }
 const nameEul = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
 
-const PANEL_KEY = 'dva.persona.editPanel' // 수정 화면 오른쪽 패널을 접어 뒀는지 — 이 브라우저에만 ('closed' = 접힘)
+const PANEL_KEY = 'dva.persona.panel' // 오른쪽 패널을 접어 뒀는지 — 보기 · 수정 화면 공용, 이 브라우저에만 ('closed' = 접힘)
 const loadPanelOpen = () => {
   try {
     return localStorage.getItem(PANEL_KEY) !== 'closed'
@@ -131,7 +131,7 @@ export function usePersonaPage() {
   const [tested, setTested] = useState<Record<string, number>>({})
   const [confirming, setConfirming] = useState<Confirming>(null) // [적용] · [사용하기] 확인 창
   const [adding, setAdding] = useState(false) // 페르소나 추가 창
-  const [panelOpen, setPanelOpen] = useState(loadPanelOpen) // 수정 화면 오른쪽 패널 (처음엔 펼침, 접으면 기억)
+  const [panelOpen, setPanelOpen] = useState(loadPanelOpen) // 오른쪽 패널 — 보기 · 수정 화면이 같은 값 (처음엔 펼침, 접으면 기억)
   const qc = useQueryClient()
   // 추가 · 수정 · 적용 · 사용하기는 SUPERVISOR · SYSTEM_ADMIN만 (백엔드 persona-head-management.md) → OPERATOR는 버튼을 숨기고 보기 · 시험 통화만 (11/02 사용자)
   // 내 정보를 불러오기 전(role undefined)에도 숨김
@@ -214,6 +214,14 @@ export function usePersonaPage() {
       : null
   const canEdit =
     canManage && !!viewing && (viewing === latest || viewing.version === persona?.appliedVersion)
+
+  // [수정] · [음성 세부 조절]: 패널이 버전 히스토리의 맨 위(초안이 있으면 초안 = 지금 고치는 것)를 가리키게 (11/02 사용자)
+  const beginEdit = (mode: 'prompt' | 'voice') => {
+    setComparing(false)
+    setVersion(null)
+    setTab('history')
+    setEditing(mode)
+  }
 
   return {
     tab,
@@ -329,15 +337,9 @@ export function usePersonaPage() {
       }
     },
     editTarget,
-    startEdit: () => {
-      setComparing(false)
-      setEditing('prompt')
-    },
+    startEdit: () => beginEdit('prompt'),
     // 보기 화면 [음성 세부 조절] = 음성만 바꿔도 새 버전이라 수정 화면으로 들어가며 음성 창을 엶
-    startVoice: () => {
-      setComparing(false)
-      setEditing('voice')
-    },
+    startVoice: () => beginEdit('voice'),
     // 저장하면 새로 생긴 버전을 보여 줌 (취소면 보던 버전 그대로)
     finishEdit: (savedVersion?: number) => {
       setEditing(false)
@@ -361,11 +363,13 @@ export function usePersonaPage() {
         p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''
       }`,
     })),
+    // 페르소나를 고르면 패널이 그 페르소나의 버전 히스토리로 넘어감 (11/02 사용자)
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
       setShowAll(false)
       setComparing(false) // 다른 페르소나 버전끼리는 비교하지 않음
+      setTab('history')
     },
 
     versions: (showAll ? all : all.slice(0, HISTORY_FIRST)).map((v): VersionItem => {
