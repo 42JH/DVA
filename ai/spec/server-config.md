@@ -19,4 +19,11 @@ GPT-Live 세션 바깥의 서버 동작 변수는 전부 여기에 둔다. 코�
 
 실제 항목은 `config/server.toml`의 주석과 `app/config.py`(검증 모델)가 기준이다.
 
+운영 FAQ 초기 이전을 완료한 환경은 `/home/ubuntu/dva-ai/shared/faq-runtime.json`에
+`{"receive_enabled":true,"process_enabled":true}`를 보관할 수 있다. 비밀값이나 원문은 넣지 않는다.
+`deploy/apply-faq-runtime.py`가 새 배포와 복구 대상의 `[faq_sync]` 두 항목만 적용하며 다른 설정은 유지한다.
+파일이 없으면 저장소 기본값을 유지한다. 잘못된 선택이나 FAQ 미지원 릴리스는 배포를 중단한다.
+처리만 켜는 조합은 금지하며 호스트 Python 3.11 이상이 필요하다.
+이 배포 보완 코드를 반영하기 전에는 운영에서 직접 바꾼 값이 다음 배포에서 덮어써질 수 있다.
+
 모델·고객에게 나가는 진행 문구(단계별 할 일, 항목 묻는 말, 진행 상태 틀, 통화 정보, 판별 지시문)는 `prompts/flow.toml`에 둔다. 도구 설명·도구 오류 문장·판별 선택지 설명(모델용)은 코드(도구·단계 정의)에 둔다.

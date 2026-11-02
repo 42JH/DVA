@@ -38,6 +38,11 @@ compose() {
 
 apply_release() {
     local directory="$1"
+    # 초기 이전을 완료한 운영 환경의 선택은 새 릴리스에도 유지한다. 개발 기본값은 비활성.
+    if [[ -f "$deploy_root/shared/faq-runtime.json" ]]; then
+        python3 "$release_dir/apply-faq-runtime.py" "$deploy_root/shared/faq-runtime.json" \
+            "$directory/config/server.toml" || return 1
+    fi
     compose "$directory" config --quiet || return 1
     compose "$directory" up -d --no-build --pull missing --remove-orphans --wait --wait-timeout 120 || return 1
 }
