@@ -98,7 +98,8 @@ export class CallQueryDto extends PaginationQueryDto {
   callerPhoneNumber?: string;
 
   @ApiPropertyOptional({
-    description: '실제 통화 시작 시각의 시작 경계(포함). Z 또는 시간대 오프셋 필수.',
+    description:
+      '표시 시작 시각(PBX 시작 → AI 시작 → 수신)의 시작 경계(포함). Z 또는 시간대 오프셋 필수.',
     format: 'date-time',
     example: '2026-10-28T00:00:00+09:00',
   })
@@ -108,7 +109,8 @@ export class CallQueryDto extends PaginationQueryDto {
   from?: string;
 
   @ApiPropertyOptional({
-    description: '실제 통화 시작 시각의 종료 경계(미포함). from보다 늦어야 합니다.',
+    description:
+      '표시 시작 시각(PBX 시작 → AI 시작 → 수신)의 종료 경계(미포함). from보다 늦어야 합니다.',
     format: 'date-time',
     example: '2026-10-29T00:00:00+09:00',
   })
