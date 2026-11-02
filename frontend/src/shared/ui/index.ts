@@ -15,6 +15,7 @@ export {
 } from './filters'
 export { Pagination } from './Pagination'
 export { Table, TwoLines, type Column } from './Table'
+export { COL } from './tableCols'
 export { ListPage, FilterBar } from './ListPage'
 export { ConfirmDialog, FormModal } from './Modal'
 export { AddressSearchModal, AddressField, type SearchedAddress } from './AddressSearchModal'

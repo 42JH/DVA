@@ -1,4 +1,5 @@
 import {
+  COL,
   FilterBar,
   ListPage,
   Button,
@@ -31,7 +32,7 @@ export function CallListPage() {
     {
       key: 'time',
       header: '통화 시작 시각',
-      width: 154,
+      width: COL.time,
       cell: (r) => (
         <div className="text-body text-sub">
           {r.time.map((line) => (
@@ -43,10 +44,10 @@ export function CallListPage() {
     {
       key: 'outcome',
       header: '통화 결과',
-      width: 146,
-      align: 'center',
+      width: COL.status,
+      pill: true,
       cell: (r, { tinted }) => (
-        <Tag kind={r.outcomeTag} onTinted={tinted}>
+        <Tag kind={r.outcomeTag} onTinted={tinted} fixed>
           {r.outcomeLabel}
         </Tag>
       ),
@@ -54,7 +55,7 @@ export function CallListPage() {
     {
       key: 'customer',
       header: '고객 · 발신번호',
-      width: 170,
+      width: 160,
       cell: (r) => <TwoLines top={r.name} bottom={r.phone} />,
     },
     {
@@ -71,7 +72,7 @@ export function CallListPage() {
     {
       key: 'duration',
       header: '통화 시간',
-      width: 120,
+      width: COL.duration,
       align: 'right',
       cell: (r) => <span className="text-body">{r.duration}</span>,
     },
