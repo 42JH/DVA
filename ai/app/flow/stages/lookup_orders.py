@@ -153,6 +153,7 @@ STAGES = [
         choices=lambda ctx: YES_NO,
         on_answer=confirm_answer,
         confirm=True,
+        consent=("yes",),  # 취소로 이어진다(두 열쇠)
         unheard_ok=("no",),
         transitions=(
             # 되돌릴 수 없는 확정: commit_delay_ms 동안 새 입력이 없을 때만 취소를 시작한다(§2.5(3))
@@ -170,6 +171,7 @@ STAGES = [
         choices=lambda ctx: YES_NO,
         on_answer=cancel_answer,
         confirm=True,
+        consent=("yes",),  # 취소를 다시 시도한다(두 열쇠)
         transitions=(
             Transition("cancel.done", "HUB", say="C9", asks=True, action=reset_fail),
             Transition("cancel.failed", STAY, action=cancel_failed),

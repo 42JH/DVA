@@ -133,8 +133,10 @@ def report(call, step, i=0):
     elif kind == "commit":
         assert call.flow.pending, f"{call.flow.stage}에 미뤄 둔 확정이 없음"
         out = run(engine.apply(call, [engine.COMMIT], "commit"))
-    elif engine.current(call).confirm:  # 확인 단계: 서버가 고객 말을 직접 판별
+    elif engine.current(call).confirm:  # 확인 단계: 서버가 고객 말을 직접 판별(동의는 Live-1 보고와 두 열쇠)
         assert a in stage_choices(call), f"{call.flow.stage}에 없는 답 {a}"
+        if a in engine.current(call).consent and b == "none":
+            assert run(dispatch(call, "answer", json.dumps({"choice": a}), f"a{i}"))["ok"]
         out = run(apply_answer(call, a, b))
     else:  # 음성 모델이 알아들은 답을 백엔드가 보고
         out = None
@@ -165,13 +167,54 @@ def check_question(call):
         assert field is None or not call.field_done(field), f"이미 채운 {field}를 묻는 {key}"
 
 
+def cancelled(db):
+    return sum(p["status"] == "CANCELLED" for o in db.orders for p in o["parcels"])
+
+
+class Rules:
+    """AGENTS.md "안전장치"를 모든 시나리오의 보고마다 확인한다. 장치(판별·지연·문구)가 아니라 지켜야 할 결과를 본다.
+    고객 동의 = 그 확인 단계에서 다른 용건 없이 "예"를 보고한 것. 되돌릴 수 없는 일은 동의한 횟수를 넘지 않는다."""
+
+    CONSENT = ("A_CONFIRM", "C_CANCEL_CONFIRM", "D_AGENT_OFFER")  # 택배 담기·취소·상담원 연결의 확인 질문
+
+    def __init__(self, call, db):
+        self.call, self.db = call, db
+        self.yes = dict.fromkeys(self.CONSENT, 0)
+        self.cancelled = cancelled(db)
+
+    def before(self, step):
+        kind, answer, intent, _ = step
+        if kind == "say" and answer == "yes" and intent == "none" and self.call.flow.stage in self.yes:
+            self.yes[self.call.flow.stage] += 1
+        self.order, self.parcels = self.call.order.model_copy(deep=True), len(self.call.parcels)
+
+    def after(self, i):
+        call, db, yes = self.call, self.db, self.yes
+        where = f"{i}번째 보고 뒤 {call.flow.stage}"
+        # 빠진 항목이 있으면 되읽기 확인(A_CONFIRM)으로 가지 않는다
+        assert call.flow.stage != "A_CONFIRM" or (call.order.complete() and call.pickup_at), f"{where}: 빠진 항목"
+        # 택배는 접수 확인에 동의한 만큼만, 임시 주문 그대로 담는다
+        assert len(call.parcels) <= yes["A_CONFIRM"], f"{where}: 동의 없이 택배를 담음"
+        if len(call.parcels) > self.parcels:
+            assert call.parcels[-1] == self.order and self.order.complete(), f"{where}: 담은 택배가 임시 주문과 다름"
+        # 취소는 취소 확인에 동의한 만큼만
+        assert cancelled(db) - self.cancelled <= yes["C_CANCEL_CONFIRM"], f"{where}: 동의 없이 취소"
+        # 상담원 연결은 동의했을 때만(탈퇴 고객은 다이어그램 밖 바로 연결, entry.py)
+        assert not call.refer_requested.is_set() or yes["D_AGENT_OFFER"] or call.customer_type == "withdrawn", \
+            f"{where}: 동의 없이 상담원 연결"
+        assert len(db.results) <= 1, f"{where}: 접수를 두 번 보냄"  # 통화당 한 번
+
+
 def play(db, steps, cfg=None):
     call = make_call(db)
     call.rag, call.cfg = FakeRag(), cfg or call.cfg
+    rules = Rules(call, db)
     for i, step in enumerate(steps):
+        rules.before(step)
         report(call, step, i)
         assert call.flow.stage == step[3], f"{i}번째 {step}: {call.flow.stage}"
         check_question(call)
+        rules.after(i)
     return call
 
 
@@ -689,7 +732,7 @@ def test_wait_drops_pending_commit_and_only_yes_rearms():
     assert call.flow.pending is None
     run(apply_answer(call, "none", "none"))
     assert call.flow.pending is None  # 되읽기 확정은 고객의 "예"로만 다시 건다
-    run(apply_answer(call, "yes", "none"))
+    report(call, say("yes", "A_CONFIRM"))
     assert call.flow.pending and call.flow.stage == "A_CONFIRM"
 
 
@@ -1024,6 +1067,7 @@ def test_unheard_yes_is_reasked_once_per_question_but_no_is_taken():
     call.agent_deltas = [("이 택배 접수를 ", 1000, 1400), ("취소해 드릴까요?", 1400, 4000)]
     run(apply_answer(call, "yes", "none", start_ms=1500))
     assert call.flow.pending is None and call.reask and call.flow.reasked
+    run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "a1"))  # 두 열쇠의 Live-1 쪽
     run(apply_answer(call, "yes", "none", start_ms=1500))  # 한 번 다시 물은 뒤에는 받는다(되풀이 방지)
     assert call.flow.pending
     call = play(orders_db(), FIND + [say("cancel", "C_CANCEL_CONFIRM")])
@@ -1229,16 +1273,46 @@ def test_question_never_asks_a_filled_item_whatever_order_values_come_in(db, sen
 
 # --- 음성 모델이 알아들은 답·업무 바꾸기(answer·switch_task 도구) ---
 
-def test_answer_tool_only_takes_current_choices_and_not_confirm_answers():
+def test_answer_tool_only_takes_current_choices():
     call = play(saved_db(), [])
     state = engine.summary(call)
     assert state["choices"].keys() == {"yes", "no", "other"} and "answer" in state["tools"]
     out = run(dispatch(call, "answer", json.dumps({"choice": "pin_1"}), "x1"))  # 지금 질문의 선택지가 아님
     assert not out["ok"] and call.origin_offer
-    call = play(new_db(), NEW_TO_PICKUP + [tool("record_order", WHEN, "A_CONFIRM")])
-    assert "answer" not in engine.allowed_tools(call) and "choices" not in engine.summary(call)  # 확인 단계는 서버가 듣는다
-    out = run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "x2"))
-    assert not out["ok"] and call.flow.pending is None and call.flow.stage == "A_CONFIRM"
+
+
+AT_CONFIRM = NEW_TO_PICKUP + [tool("record_order", WHEN, "A_CONFIRM")]
+
+
+def test_confirm_takes_yes_only_when_live1_and_server_both_heard_it():
+    """두 열쇠(docs/flow-two-key-plan.md): 되돌릴 수 없는 확인은 Live-1 보고와 서버 판별이 둘 다 "예"일 때만."""
+    call = play(new_db(), AT_CONFIRM)
+    assert "answer" in engine.allowed_tools(call) and engine.summary(call)["choices"].keys() == {"yes", "no"}
+    out = run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "x1"))  # Live-1 보고만
+    assert out["ok"] and call.flow.pending is None and out["state"]["next"] == TEXTS.note["CONSENT_WAIT"]
+    run(apply_answer(call, "yes"))  # 같은 말의 서버 판별
+    assert call.flow.pending and call.consent is None
+    # 서버 판별만(Live-1이 다른 질문을 하고 고객이 그 질문에 "네"): 실행하지 않는다
+    call = play(new_db(), AT_CONFIRM)
+    run(apply_answer(call, "yes"))
+    assert call.flow.pending is None and call.consent["source"] == "server"
+    assert engine.next_text(call) != TEXTS.note["CONSENT_WAIT"]  # Live-1은 자기 대화를 이어 간다
+    # 실제 통화에서 흔한 순서: 서버 판별(말 멈춤 뒤 약 0.9초)이 먼저, Live-1 보고(위임 → 백엔드)가 나중
+    out = run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "x0"))
+    assert out["ok"] and call.flow.pending and TEXTS.note["COMMIT_WAIT"] in out["state"]["next"]
+    # 서버가 다른 용건이 섞인 말로 들음: 실행하지 않고 Live-1 보고도 버린다(정정은 Live-1이 응대, 확인은 다시 받는다)
+    call = play(new_db(), AT_CONFIRM)
+    run(dispatch(call, "answer", json.dumps({"choice": "yes"}), "x2"))
+    run(apply_answer(call, "none", "correction"))  # 서버는 "네, 근데 받는 분이…"로 들음
+    assert call.flow.pending is None and call.consent is None
+
+
+def test_confirm_refusal_is_taken_from_server_alone():
+    call = play(new_db(), AT_CONFIRM)
+    out = run(dispatch(call, "answer", json.dumps({"choice": "no"}), "x1"))  # 거절 보고는 서버 판별에 맡긴다
+    assert out["ok"] and not out.get("events") and said(call, "A_CONFIRM")
+    run(apply_answer(call, "no"))
+    assert said(call, "A_CONFIRM_FIX")
 
 
 def test_switch_task_from_middle_of_order_and_back():

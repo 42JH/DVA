@@ -131,7 +131,11 @@ async def report(state: StudioState, config: RunnableConfig) -> Command:
         if state.answer == NO_ANSWER or state.answer not in stage_choices(call):
             return await _next(call, [], {"result": {"error": f"{call.flow.stage} 단계의 답이 아님. choices 중 하나"}})
         if confirm:
-            out, events = await _collect(lambda: apply_answer(call, state.answer, state.intent or "none"))
+            async def heard():  # 동의는 두 열쇠: Live-1 보고(answer 도구)와 서버 판별이 둘 다(listener.consent)
+                if state.answer in engine.current(call).consent and not state.intent:
+                    await dispatch(call, "answer", json.dumps({"choice": state.answer}), call_id)
+                return await apply_answer(call, state.answer, state.intent or "none")
+            out, events = await _collect(heard)
         else:
             out, events = await _collect(lambda: dispatch(call, "answer", json.dumps({"choice": state.answer}), call_id))
     elif state.intent in TASKS:

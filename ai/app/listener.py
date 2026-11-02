@@ -387,12 +387,57 @@ async def apply_answer(call, answer: str, intent: str = "none", *, start_ms: int
     if answer != NO_ANSWER and stage.on_answer is not None and answer in stage_choices(call) and intent == "none":
         if answer not in stage.unheard_ok and not prompt_heard(call, start_ms) and not call.flow.reasked:
             call.flow.reasked = call.reask = True
+            call.consent = None  # 다시 묻는다: 이 말에 대한 Live-1 보고도 버린다
             log.info("질문을 다 듣기 전 답 %s 단계=%s answer=%s", call.session_id, stage.name, answer)
+        elif answer in stage.consent:
+            events = await consent(call, "server", answer)
         else:
+            call.consent = None  # 되돌릴 수 있는 답(거절 등)은 서버 판별로 바로
             events = await stage.on_answer(call, answer)
-            await engine.apply(call, events, "listener")
+        await engine.apply(call, events, "listener")
+    else:
+        call.consent = None  # 동의가 아니거나 다른 용건이 섞인 말: 먼저 온 Live-1 보고와 짝이 될 수 없다
     await settle(call, pending, intent in BLOCKING)
     return events
+
+
+async def consent(call, source: str, choice: str) -> list[str]:
+    """두 열쇠: 되돌릴 수 없는 일로 이어지는 확인 답(Stage.consent)은 Live-1의 보고(answer 도구, source="live")와 서버
+    판별(source="server")이 둘 다 같은 답일 때만 처리한다(docs/flow-two-key-plan.md). 고객 말의 맥락(Live-1이 직전에
+    무엇을 물었는지)은 Live-1만 알고, 서버 판별은 모델이 지어낸 보고를 막는다. 먼저 온 쪽은 consent_wait_sec 동안 남고,
+    짝이 오지 않거나 서로 다르면 watch_flow가 확인 질문을 다시 하게 한다(2026-11-02: Live-1이 확인 질문 뒤 한 다른 질문의
+    "네"로 취소·택배 담기가 됨)."""
+    stage, held, now = engine.current(call), call.consent, time.monotonic()
+    if held and held["stage"] == stage.name and held["source"] not in (None, source) \
+            and now - held["at"] <= call.cfg.listener.consent_wait_sec:
+        if held["choice"] == choice:
+            call.consent = None
+            log.info("두 열쇠 동의 %s 단계=%s 답=%s", call.session_id, stage.name, choice)
+            return await stage.on_answer(call, choice)
+        log.info("두 열쇠 불일치 %s 단계=%s %s=%s %s=%s", call.session_id, stage.name,
+                 held["source"], held["choice"], source, choice)
+        call.consent = {"stage": stage.name, "source": None, "choice": None, "at": 0.0}  # 바로 다시 묻게
+        return []
+    call.consent = {"stage": stage.name, "source": source, "choice": choice, "at": now}
+    return []
+
+
+async def consent_expired(call, conn, held: dict) -> None:
+    """두 열쇠의 짝이 오지 않았거나 서로 달랐다(watch_flow). 아무것도 실행하지 않고, 아직 그 확인 단계면 확인 질문을
+    다시 하게 한다. 예: Live-1이 자기 질문을 하고 고객이 그 질문에 "네"(서버 판별만 옴)."""
+    async with call.lock:
+        if call.consent is not held:
+            return
+        call.consent = None
+        if held["stage"] != call.flow.stage:
+            return
+        log.info("두 열쇠 짝 없음 %s 단계=%s 먼저 온 쪽=%s", call.session_id, held["stage"], held["source"])
+        try:
+            await conn.session.thinking.append(
+                content=call.texts.consent_retry.format(next=engine.next_text(call)), delegation_id=None)
+            call.last_progress = engine.progress_text(call, call.cfg.progress.max_chars)  # 같은 질문을 또 보내지 않게
+        except Exception:
+            log.exception("확인 질문 다시 묻기 전송 실패 %s", call.session_id)
 
 
 async def settle(call, pending: dict | None, blocking: bool) -> None:

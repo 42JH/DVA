@@ -10,7 +10,7 @@ GPT-Live 세션 바깥의 서버 동작 변수는 전부 여기에 둔다. 코�
 - 페르소나: 통화 진입 때 대기 설정을 맞추는 최대 시간, 백엔드 재시도 간격, 결과 회신 시도 횟수, 관리자 프롬프트 최대 글자 수(토큰은 환경변수 `AI_PERSONA_TOKEN`, `spec/persona.md`)
 - 백엔드 API: 고객 확인 시간 제한, 통화 결과 요청 시간 제한·다시 확인하는 총 시간·간격, 조회 개수(주소는 환경변수 `BACKEND_API_URL`, 가짜 백엔드 사용 여부는 `BACKEND_MOCK`, `spec/backend-api.md`)
 - 관제: SSE keepalive 간격, 끝난 통화를 화면에 남겨 두는 시간
-- 고객 답 판별: 판별 API(`engine`: decisions·responses), 모델·추론 강도(responses만), 말이 멈췄다고 볼 시간(ms), 시간 제한, 넘기는 글자 수, 선택지 최대 개수
+- 고객 답 판별: 판별 API(`engine`: decisions·responses), 모델·추론 강도(responses만), 말이 멈췄다고 볼 시간(ms), 시간 제한, 넘기는 글자 수, 선택지 최대 개수, 확인 단계 두 열쇠의 짝을 기다리는 시간(`consent_wait_sec`, 초)
 - 통화 흐름(`[flow]`, `spec/LANGGRAPH_REBUILD.md` §9): 도착지 핀 매칭에서 먼저 찾을 최근 핀 개수, 확정 지연(ms, 말 멈춤 대기보다 길게 — 기동 시 검사), 늘어놓을 핀 후보 수, 검색 결과 대기(초), 다시 조회·취소 상한, 상담원 연결 가능 시간, 질문을 들었는지 볼 때 겹침 허용(ms), 듣지 않던 단계의 말 판별 대기(초). RAG Yes 점수 임계값은 `[rag] min_score`(없으면 근거 유무만)
 - 로그 수준
 - RAG: 컬렉션/large 모델/3072차원, BM25 비중·RRF c, Top5/Top3, 외부 HTTP/전체 검색 timeout, 재연결 대기.

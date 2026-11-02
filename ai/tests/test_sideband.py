@@ -19,7 +19,8 @@ def quick_cfg(pause_ms=100, flow=None, **call):
     return CFG.model_copy(update={"call": CFG.call.model_copy(update=call),
                                   "listener": CFG.listener.model_copy(update={"pause_ms": pause_ms,
                                                                                "delegate_wait_sec": 0.2,
-                                                                               "cut_wait_ms": 300}),
+                                                                               "cut_wait_ms": 300,
+                                                                               "consent_wait_sec": 1.0}),
                                   "flow": CFG.flow.model_copy(update={"agent_open_hour": 0, "agent_close_hour": 24,
                                                                       **(flow or {})})})
 
@@ -30,6 +31,12 @@ def answers(client, answer, intent="none", slot="none", value=False):
         enum = kw["text"]["format"]["schema"]["properties"]["answer"]["enum"]
         return {"answer": answer if answer in enum else "none", "intent": intent, "slot": slot, "value": value}
     client.responses.decide = decide
+
+
+def consents(client, conn, choice="yes", call_id="consent"):
+    """확인 질문에 고객이 동의: 서버 판별도 그 답이고, Live-1도 같은 말을 맡겨 백엔드가 answer로 보고한다(두 열쇠)."""
+    answers(client, choice)
+    conn.function_call("answer", {"choice": choice}, call_id)
 
 
 async def start(call, client):
@@ -276,7 +283,7 @@ def test_refer_after_agent_offer_yes():
 
     async def scenario():
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 연결해 주세요")
         await until(lambda: client.live.sessions.of("refer"))
         assert client.live.sessions.of("refer")[0][2] == CFG.call.refer_target_uri
@@ -336,6 +343,7 @@ def test_concurrent_calls_do_not_mix_and_slow_backend_does_not_block_others():
         await until(lambda: all(c.flow.stage == "A_CONFIRM" for c in calls))
         answers(client, "yes")
         for _, conn in started:
+            conn.function_call("answer", {"choice": "yes"}, "consent")  # 두 열쇠의 Live-1 쪽
             conn.push("session.input_transcript.delta", delta="네 맞아요")
         # 결제 단계 진입은 확정 지연 뒤에(감시 작업이 COMMIT)
         await until(lambda: all(c.flow.stage == "A_CHOICE" for c in calls))
@@ -383,7 +391,7 @@ def test_answer_processing_failure_tells_voice_model_and_keeps_stage(monkeypatch
 
     async def scenario():
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 취소해 주세요")
         await until(lambda: call.texts.answer_error in thoughts(conn))
         assert call.flow.stage == "C_CANCEL_CONFIRM" and call.flow.pending is None
@@ -400,7 +408,7 @@ def test_refer_failure_apologizes_then_hangs_up():
 
     async def scenario():
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 연결해 주세요")
         await until(lambda: client.live.sessions.of("hangup"))
         assert call.refer_failed and any("연결이 어렵습니다" in t for t in thoughts(conn))
@@ -515,6 +523,7 @@ def test_15_yes_before_core_is_not_taken_and_question_is_asked_again():
         conn.push("session.input_transcript.delta", delta="네", start_ms=e + 700, end_ms=e + 900)
         await until(lambda: any("끝까지 듣기 전" in t for t in thoughts(conn)))
         assert call.flow.pending is None and "취소해 드릴까요" in thoughts(conn)[-1]
+        conn.function_call("answer", {"choice": "yes"}, "consent")  # 다시 물은 뒤의 동의는 Live-1도 보고
         conn.push("session.input_transcript.delta", delta="네 취소해 주세요", start_ms=e + 3500, end_ms=e + 4000)
         await until(lambda: call.flow.pending or call.flow.stage != "C_CANCEL_CONFIRM")
         await close(conn, task)
@@ -545,7 +554,7 @@ def test_17_cancel_yes_then_wait_within_commit_delay_does_not_cancel():
     async def scenario():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네")
         await until(lambda: call.flow.pending)
         answers(client, "none", "wait")
@@ -578,7 +587,7 @@ def test_words_heard_while_answer_is_applied_are_not_lost(monkeypatch):
                 await asyncio.sleep(0.05)
 
         monkeypatch.setattr(engine, "apply", apply_then_talk)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네")
         await until(lambda: len(client.responses.requests) == 2 and not call.listen_tasks)
         assert "아 잠깐만요" in client.responses.requests[1]["input"] and call.flow.pending is None
@@ -596,7 +605,7 @@ def test_18_customer_talk_during_cancel_does_not_stop_it_and_result_is_told():
     async def scenario():
         call.cfg = quick_cfg(flow={"flush_wait_sec": 0.3})
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 취소해 주세요")
         await until(lambda: call.flow.stage == "C_CANCEL")
         answers(client, "none", "wait")
@@ -633,7 +642,7 @@ def test_late_tail_does_not_cancel_classification_of_new_answer():
         call.cfg = quick_cfg()
         task, conn, e = await at_cancel_question(call, client)
         conn.push("session.output_transcript.delta", delta="이 택배 접수를 취소해 드릴까요?", start_ms=e + 100, end_ms=e + 2500)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 맞아요", start_ms=e + 3000, end_ms=e + 3400)
         conn.push("session.input_transcript.delta", delta=" 그리고", start_ms=750, end_ms=790)  # 앞 질문에 한 말의 늦은 조각
         await until(lambda: call.flow.pending or call.flow.stage != "C_CANCEL_CONFIRM")
@@ -678,7 +687,7 @@ def test_25_call_ending_during_write_waits_for_its_result():
         # 확정(말 끝 + 0.1 + 0.7초) 뒤, 취소가 끝나기(+1.0초) 전에 무응답 종료(1.4초)가 오게
         call.cfg = quick_cfg(idle_hangup_sec=1.4, hangup_silence_sec=0.05, hangup_max_wait_sec=0.2)
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네")
         await until(lambda: call.flow.stage == "C_CANCEL")
         await until(lambda: call.flow.stage == "END_CALL", timeout=3)
@@ -698,7 +707,7 @@ def test_write_in_progress_is_finished_when_session_closes():
     async def scenario():
         call.cfg = quick_cfg()
         task, conn = await start(call, client)
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네")
         await until(lambda: SlowCancel.cancels == 1)
         await close(conn, task)  # 고객이 끊어도 실행 중인 취소는 결과까지 기록
@@ -720,7 +729,7 @@ def test_commit_fires_after_delay_and_fare_notice_is_sent_first():
         await until(lambda: call.flow.stage == "A_CONFIRM" and conn.outputs())
         nxt = conn.outputs()[-1]["state"]["next"]  # 방금 받은 번호 확인 뒤 접수 내용 되읽기(임시 주문 그대로)
         assert "010-9876-5432" in nxt and "받는 분 이영희님" in nxt and "이대로 접수할까요?" in nxt
-        answers(client, "yes")
+        consents(client, conn)
         conn.push("session.input_transcript.delta", delta="네 맞아요")
         await until(lambda: call.flow.pending)
         assert engine.next_text(call) == call.texts.note["COMMIT_WAIT"]  # 기다리는 동안 새 질문 없음
@@ -1118,3 +1127,61 @@ def test_responses_engine_still_works():
     out = run(judge(call, client, "ORDER", {"yes": "예", "none": "답 없음"}, "네", "질문"))
     req = client.responses.requests[0]
     assert out[:3] == ("yes", "none", "none") and req["store"] is False and "answer 선택지" in req["input"]
+
+
+# --- 두 열쇠(docs/flow-two-key-plan.md): Live-1이 확인 질문 뒤 자기 질문을 하고 고객이 그 질문에 "네" ---
+# 서버 판별은 Live-1의 질문을 보지 못해 "예"로 고른다(아래 판별 결과 yes가 그 상황). Live-1은 자기 질문의 답인 줄 알아
+# 동의로 보고하지 않으므로 실행하지 않는다(2026-11-02 재현: 이전 구조에서는 취소·택배 담기가 됨).
+
+def test_yes_to_live1_own_question_does_not_cancel():
+    db = orders_db()
+    client, call = FakeClient(), to_cancel_confirm(db)
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        task, conn, e = await at_cancel_question(call, client)
+        conn.push("session.output_transcript.delta", delta="이 택배 접수를 취소해 드릴까요?", start_ms=e + 100, end_ms=e + 2000)
+        answers(client, "none", "question")
+        conn.push("session.input_transcript.delta", delta="취소하면 환불은 언제 돼요?", start_ms=e + 2500, end_ms=e + 3500)
+        await until(lambda: client.responses.requests and not call.listen_tasks)
+        conn.push("session.output_transcript.delta", delta="환불은 삼 일 안에 돼요. 더 궁금하신 점 있으세요?",
+                  start_ms=e + 4000, end_ms=e + 6000)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네", start_ms=e + 6500, end_ms=e + 6800)
+        await until(lambda: len(client.responses.requests) >= 2 and not call.listen_tasks)
+        await asyncio.sleep(call.cfg.flow.commit_delay_ms / 1000 + 0.3)
+        cancelled = db.orders[1]["parcels"][0]["status"] == "CANCELLED"
+        # 짝(Live-1 보고)이 오지 않았다: 확인 질문을 다시 하게 한다
+        await until(lambda: any("답을 확인하지 못했습니다" in t and "취소해 드릴까요" in t for t in thoughts(conn)))
+        await close(conn, task)
+        assert not cancelled and call.flow.stage == "C_CANCEL_CONFIRM" and call.consent is None
+
+    run(scenario())
+
+
+def test_yes_to_live1_own_question_does_not_add_parcel():
+    client, call = FakeClient(), make_call()
+
+    async def scenario():
+        call.cfg = quick_cfg()
+        task, conn = await start(call, client)
+        conn.function_call("answer", {"choice": "order"}, "o1")
+        await until(lambda: call.flow.stage == "ORDER")
+        conn.function_call("record_order", FULL_ORDER, "r1")
+        await until(lambda: call.flow.stage == "A_CONFIRM" and conn.outputs())
+        conn.push("session.input_transcript.delta", delta="잠깐만요", start_ms=0, end_ms=500)  # 세션 시계 맞춤
+        answers(client, "none", "wait")
+        await until(lambda: client.responses.requests and not call.listen_tasks)
+        # Live-1이 되읽기 대신 자기 질문을 함(대화를 이끔). 고객은 그 질문에 "네"
+        conn.push("session.output_transcript.delta", delta="네, 천천히 확인하세요. 다 보셨어요?",
+                  start_ms=call.now_ms(), end_ms=call.now_ms() + 300)
+        await asyncio.sleep(0.4)
+        answers(client, "yes")
+        conn.push("session.input_transcript.delta", delta="네", start_ms=call.now_ms(), end_ms=call.now_ms() + 200)
+        await until(lambda: len(client.responses.requests) >= 2 and not call.listen_tasks)
+        await asyncio.sleep(call.cfg.flow.commit_delay_ms / 1000 + 0.3)
+        added = len(call.parcels)
+        await close(conn, task)
+        assert added == 0
+
+    run(scenario())

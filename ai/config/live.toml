@@ -59,7 +59,8 @@ verbosity = "low"
 
 # 백엔드 도구: function(이 서버가 실행) · web_search. 함수는 이름만 적으면 코드에서 설명·스키마를 채운다.
 # 여기 없는 도구는 모델이 쓸 수 없다. 백엔드는 값 기록·주소록 찾기·택배 조회·FAQ 검색과, 음성 모델이 알아들은
-# 고객 답(answer)·업무 바꾸기(switch_task)를 보고한다. 확인 단계(담기·결제·취소·상담원 연결)의 답만 서버가 직접 판별한다.
+# 고객 답(answer)·업무 바꾸기(switch_task)를 보고한다. 확인 단계(담기·결제·취소·상담원 연결)의 동의는 이 보고와 서버 판별이
+# 둘 다 같을 때만 처리한다(두 열쇠, spec/flow.md).
 # cancel_order는 고객의 "예"를 확정 지연 뒤에 서버만 부른다. modify_order는 수정 보류(LANGGRAPH_REBUILD §5.4)로 쓰지 않는다.
 [[backend.tools]]
 type = "function"

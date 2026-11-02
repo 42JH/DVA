@@ -172,6 +172,8 @@ class Call:
         # 지난 단계의 말(전환 전에 한 말의 늦은 조각, 듣지 않는 단계에서 쌓인 말): 전역 의도로만 판별한다
         self.side: dict = {"stage": "", "text": "", "off": False, "since": 0.0, "flushing": False}
         self.reask = False  # 질문을 다 듣기 전 답이라 받지 않았음: 같은 질문을 다시 하게 한다
+        # 두 열쇠 중 먼저 온 쪽(listener.consent): {"stage", "source"(live·server, 불일치면 None), "choice", "at"}
+        self.consent: dict | None = None
         self.listen_timer: asyncio.Task | None = None
         self.side_timer: asyncio.Task | None = None
         self.listen_tasks: set[asyncio.Task] = set()
