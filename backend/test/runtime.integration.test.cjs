@@ -731,7 +731,7 @@ test('production order address history reads stored snapshots through Nginx and 
   assert.equal(invalid.status, 400);
 });
 
-test('production company directory searches official PINs through Nginx without opening management APIs', async () => {
+test('production company directory searches current member addresses through Nginx without opening management APIs', async () => {
   const root = 'http://proxy/api';
   const login = await fetch(root + '/auth/login', {
     method: 'POST',
@@ -754,7 +754,7 @@ test('production company directory searches official PINs through Nginx without 
   const id = (await registered.json()).data.organizationSeq;
   const addressData = {
     name: '공식 담당자',
-    phoneNumber: '07012345678',
+    phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
     roadAddress: '공식로 1',
     jibunAddress: '공식동 1',
     detailAddress: '',
@@ -763,21 +763,24 @@ test('production company directory searches official PINs through Nginx without 
     latitude: 37.5,
     longitude: 127,
   };
-  const created = await fetch(root + `/companies/${id}/pins`, {
+  const { name: recipientName, phoneNumber, ...address } = addressData;
+  const created = await fetch(root + '/companies/' + id + '/members', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ label: '물류센터', departmentName: '운영부', addressData }),
+    body: JSON.stringify({
+      items: [{ employeeNo: 'RUNTIME-DIR', name: recipientName, phoneNumber, address }],
+    }),
   });
-  assert.equal(created.status, 201);
-  const pinId = (await created.json()).data.companyPinSeq;
-  const url = root + '/companies/search?' + new URLSearchParams({ q: name + ' 운영부' });
+  assert.equal(created.status, 204, await created.text());
+  const url = root + '/companies/search?' + new URLSearchParams({ q: name + ' ' + recipientName });
   const searched = await fetch(url);
   assert.equal(searched.status, 200);
   assert.equal(searched.headers.get('cache-control'), 'no-store');
   const body = await searched.json();
   assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
   assert.equal(body.data[0].organizationSeq, id);
-  assert.equal(body.data[0].companyPinSeq, pinId);
+  assert.ok(body.data[0].customerSeq);
+  assert.equal(body.data[0].companyPinSeq, undefined);
   assert.equal(body.data[0].organizationName, name);
   assert.deepEqual(body.data[0].addressData, addressData);
   assert.equal((await fetch(root + '/companies')).status, 401);

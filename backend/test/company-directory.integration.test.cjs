@@ -102,219 +102,245 @@ async function company(name = marker(), status = 'ACTIVE') {
   ).rows[0].organization_seq;
   return { id, name };
 }
-async function pin(c, { label = null, departmentName = null, addressData = address() } = {}) {
-  const row = (
+async function recipient(
+  c,
+  {
+    name = '공식 배송 담당자',
+    status = 'ACTIVE',
+    membershipStatus = 'ACTIVE',
+    addressData = address(),
+  } = {},
+) {
+  const { name: ignoredName, phoneNumber: ignoredPhone, ...ownAddress } = addressData || {};
+  const phoneNumber = '010' + String(randomInt(10000000, 100000000));
+  const customerSeq = (
     await pool.query(
-      `INSERT INTO company_pins(organization_seq,label,department_name,address_data)
-    VALUES($1,$2,$3,$4) RETURNING company_pin_seq AS "companyPinSeq",version`,
-      [c.id, label, departmentName, addressData],
+      'INSERT INTO customers(name,phone_number,status,address_data) VALUES($1,$2,$3,$4) RETURNING customer_seq',
+      [name, phoneNumber, status, addressData ? ownAddress : null],
     )
-  ).rows[0];
+  ).rows[0].customer_seq;
+  const membershipSeq = (
+    await testMembership(pool, {
+      customerSeq,
+      organizationSeq: c.id,
+      employeeNo: marker(),
+      status: membershipStatus,
+    })
+  ).rows[0].membership_seq;
+  const departmentSeq = (
+    await pool.query('SELECT department_seq FROM memberships WHERE membership_seq=$1', [
+      membershipSeq,
+    ])
+  ).rows[0].department_seq;
   return {
-    ...row,
     organizationSeq: c.id,
     organizationName: c.name,
-    label,
-    departmentName,
-    departmentSeq: null,
-    addressData,
+    membershipSeq,
+    customerSeq,
+    departmentSeq,
+    departmentName: '검증 부서',
+    addressData: addressData ? { ...ownAddress, name, phoneNumber } : null,
   };
 }
 
-test('search returns active company official PINs without customer, membership or call prerequisites', async () => {
+test('active member addresses are shared across companies without any company PIN or caller prerequisite', async () => {
   const c = await company();
-  const p = await pin(c, { label: '물류센터', departmentName: '배송부' });
-  assert.deepEqual(await result(await search({ q: c.name })), {
-    data: [p],
-    hasNext: false,
-    total_count: 1,
-  });
-  // 공개 디렉터리는 특정 통화나 소속에 결속하지 않는다.
-  assert.deepEqual(await result(await search({ q: c.name }, { call_session_seq: '2147483647' })), {
-    data: [p],
-    hasNext: false,
-    total_count: 1,
-  });
+  const member = await recipient(c);
+  assert.equal(
+    (await pool.query('SELECT count(*) FROM company_pins WHERE organization_seq=$1', [c.id]))
+      .rows[0].count,
+    '0',
+  );
+  for (const headers of [{}, { call_session_seq: '2147483647' }])
+    assert.deepEqual(await result(await search({ q: c.name }, headers)), {
+      data: [member],
+      hasNext: false,
+      total_count: 1,
+    });
 });
 
-test('one company can expose several official destinations and PIN contact fields are retained', async () => {
-  const c = await company();
-  const first = await pin(c, { label: '본사', departmentName: '인사부' });
-  const second = await pin(c, {
-    label: '물류센터',
-    departmentName: '운영부',
-    addressData: address({ name: '물류 수령인', phoneNumber: '07012345678' }),
-  });
-  const body = await result(await search({ q: c.name }));
-  assert.deepEqual(body.data, [first, second]);
-  assert.equal(body.data[1].addressData.name, '물류 수령인');
-  assert.equal(body.data[1].addressData.phoneNumber, '07012345678');
-  assert.equal(body.data[0].addressData.postalCode, '01234');
-});
-
-test('inactive companies and companies without official PINs do not appear', async () => {
-  const token = marker();
-  const inactive = await company(token + ' 비활성', 'INACTIVE');
-  await pin(inactive);
-  await company(token + ' 빈기업');
-  assert.deepEqual(await result(await search({ q: token })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-});
-
-test('homonymous companies remain separate and pagination has deterministic company/PIN ordering', async () => {
+test('multiple recipients in homonymous companies have stable customer identities and pagination', async () => {
   const name = marker(),
     first = await company(name),
     second = await company(name);
-  const pins = [await pin(first), await pin(first), await pin(second)];
-  const pages = [];
+  const members = [await recipient(first), await recipient(first), await recipient(second)];
+  const collected = [];
   for (let offset = 0; offset < 3; offset++) {
     const body = await result(await search({ q: name, limit: '1', offset: String(offset) }));
     assert.equal(body.hasNext, offset < 2);
-    pages.push(...body.data);
+    assert.equal(body.total_count, 3);
+    collected.push(...body.data);
   }
-  assert.deepEqual(pages, pins);
-  assert.deepEqual(await result(await search({ q: name, offset: '3' })), {
+  assert.deepEqual(collected, members);
+  assert.deepEqual(await result(await search({ q: name, offset: '99' })), {
     data: [],
     hasNext: false,
     total_count: 3,
   });
 });
 
-test('query matches company, department, label, official recipient/contact and address fields', async () => {
-  const c = await company();
-  const p = await pin(c, {
-    label: '본사',
-    departmentName: '물류센터',
-    addressData: address({ name: 'Kim 가나', detailAddress: '100%_101호' }),
-  });
-  for (const q of [
-    `${c.name} 물류센터`,
-    `물류센터 ${c.name}`,
-    `${c.name} kim`,
-    '가나'.normalize('NFD'),
-    '01000001234',
-    '공식로',
-    '100%_',
-    '01234',
-  ]) {
-    const body = await result(await search({ q }));
-    assert.ok(
-      body.data.some((row) => row.companyPinSeq === p.companyPinSeq),
-      q,
-    );
-  }
-  assert.deepEqual(await result(await search({ q: `${c.name} 없는부서` })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-  assert.deepEqual(await result(await search({ q: "' OR TRUE --" })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-  assert.deepEqual(await result(await search({ q: `  ${c.name}\t\n 물류센터  ` })), {
-    data: [p],
+test('inactive companies, inactive memberships, withdrawn customers and missing addresses are excluded', async () => {
+  const token = marker(),
+    active = await company(token + ' 활성'),
+    inactive = await company(token + ' 비활성', 'INACTIVE');
+  await recipient(inactive);
+  await recipient(active, { membershipStatus: 'INACTIVE' });
+  await recipient(active, { status: 'WITHDRAWN' });
+  await recipient(active, { addressData: null });
+  const visible = await recipient(active);
+  assert.deepEqual(await result(await search({ q: token })), {
+    data: [visible],
     hasNext: false,
     total_count: 1,
   });
 });
 
-test('only explicit public PIN fields are projected; member and private PIN values cannot match queries', async () => {
+test('optional departments and detail addresses are retained without inventing PIN IDs', async () => {
   const c = await company(),
-    secret = marker();
-  const p = await pin(c);
-  const phone = '010' + String(randomInt(10000000, 100000000));
-  const customer = (
-    await pool.query(
-      `INSERT INTO customers(name,phone_number,status)
-    VALUES($1,$2,'ACTIVE') RETURNING customer_seq`,
-      [secret, phone],
-    )
-  ).rows[0].customer_seq;
-  await testMembership(pool, { customerSeq: customer, organizationSeq: c.id, employeeNo: secret });
-  await pool.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)', [
-    customer,
-    secret,
-    address({ name: secret, phoneNumber: phone }),
+    member = await recipient(c);
+  await pool.query('UPDATE memberships SET department_seq=NULL WHERE membership_seq=$1', [
+    member.membershipSeq,
   ]);
-  const body = await result(await search({ q: c.name }));
-  assert.deepEqual(body.data, [p]);
-  assert.deepEqual(Object.keys(body.data[0]).sort(), [
+  await pool.query(
+    "UPDATE customers SET address_data=address_data-'detailAddress' WHERE customer_seq=$1",
+    [member.customerSeq],
+  );
+  const expected = {
+    ...member,
+    departmentSeq: null,
+    departmentName: null,
+    addressData: { ...member.addressData },
+  };
+  delete expected.addressData.detailAddress;
+  const rows = (await result(await search({ q: c.name }))).data;
+  assert.deepEqual(rows, [expected]);
+  assert.deepEqual(Object.keys(rows[0]).sort(), [
     'addressData',
-    'companyPinSeq',
+    'customerSeq',
     'departmentName',
     'departmentSeq',
-    'label',
+    'membershipSeq',
     'organizationName',
     'organizationSeq',
-    'version',
   ]);
-  assert.ok(!JSON.stringify(body).includes(secret));
-  assert.ok(!JSON.stringify(body).includes(phone));
+});
+
+test('search combines company, department, current recipient and address terms with normalization', async () => {
+  const c = await company();
+  const member = await recipient(c, {
+    name: 'Kim 가나',
+    addressData: address({ detailAddress: '100%_101호' }),
+  });
+  for (const q of [
+    c.name + ' 검증 부서',
+    '검증 부서 ' + c.name,
+    c.name + ' kim',
+    '가나'.normalize('NFD'),
+    member.addressData.phoneNumber,
+    '공식로',
+    '100%_',
+    '01234',
+  ])
+    assert.ok(
+      (await result(await search({ q }))).data.some(
+        (row) => row.customerSeq === member.customerSeq,
+      ),
+      q,
+    );
+  for (const q of [c.name + ' 없는부서', "' OR TRUE --"])
+    assert.deepEqual(await result(await search({ q })), {
+      data: [],
+      hasNext: false,
+      total_count: 0,
+    });
+  assert.deepEqual((await result(await search({ q: '  ' + c.name + '\t\n 검증 부서  ' }))).data, [
+    member,
+  ]);
+});
+
+test('private PINs, legacy company PINs and employee numbers are not exposed or searched', async () => {
+  const c = await company(),
+    member = await recipient(c),
+    secret = marker();
+  await pool.query('UPDATE memberships SET employee_no=$1 WHERE membership_seq=$2', [
+    secret,
+    member.membershipSeq,
+  ]);
+  for (const [table, key, id] of [
+    ['personal_pins', 'customer_seq', member.customerSeq],
+    ['company_pins', 'organization_seq', c.id],
+  ])
+    await pool.query('INSERT INTO ' + table + '(' + key + ',label,address_data) VALUES($1,$2,$3)', [
+      id,
+      secret,
+      address({ name: secret }),
+    ]);
+  assert.deepEqual((await result(await search({ q: c.name }))).data, [member]);
   assert.deepEqual(await result(await search({ q: secret })), {
     data: [],
     hasNext: false,
     total_count: 0,
   });
-  assert.deepEqual(await result(await search({ q: phone })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
 });
 
-test('company and PIN edits and deactivation are reflected by the next query', async () => {
-  const c = await company();
-  const p = await pin(c, { label: '이전 별칭', departmentName: '이전 부서' });
-  const mutate = (path, body) =>
-    fetch(base + '/api' + path, {
-      method: 'PATCH',
-      headers: adminHeaders,
-      body: JSON.stringify(body),
-    });
-  const renamed = marker();
-  assert.equal((await mutate(`/companies/${c.id}`, { name: renamed })).status, 204);
-  assert.deepEqual(await result(await search({ q: c.name })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
+test('current profile updates are visible immediately without changing personal PINs', async () => {
+  const c = await company(),
+    member = await recipient(c);
+  const saved = address({ name: '이전 이름', phoneNumber: member.addressData.phoneNumber });
+  await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2)', [
+    member.customerSeq,
+    saved,
+  ]);
+  const changed = { ...member.addressData, roadAddress: '새공식로 99' };
+  const { name, phoneNumber, ...ownAddress } = changed;
+  const response = await fetch(base + '/api/customers/' + member.customerSeq, {
+    method: 'PATCH',
+    headers: adminHeaders,
+    body: JSON.stringify({ name: '새 담당자', address: ownAddress }),
   });
-  assert.equal((await result(await search({ q: renamed }))).data[0].organizationName, renamed);
-  assert.equal(
+  assert.equal(response.status, 204, await response.text());
+  const row = (await result(await search({ q: c.name + ' 새공식로' }))).data[0];
+  assert.equal(row.customerSeq, member.customerSeq);
+  assert.equal(row.addressData.name, '새 담당자');
+  assert.equal(row.addressData.phoneNumber, phoneNumber);
+  assert.equal(row.addressData.roadAddress, '새공식로 99');
+  assert.deepEqual(
     (
-      await mutate(`/company-pins/${p.companyPinSeq}`, {
-        label: '새 별칭',
-        departmentName: '새 부서',
-        addressData: address({ roadAddress: '새공식로 99' }),
-      })
-    ).status,
-    200,
+      await pool.query('SELECT address_data FROM personal_pins WHERE customer_seq=$1', [
+        member.customerSeq,
+      ])
+    ).rows[0].address_data,
+    saved,
   );
-  assert.deepEqual(await result(await search({ q: `${renamed} 이전` })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-  const updated = (await result(await search({ q: `${renamed} 새공식로` }))).data[0];
-  assert.equal(updated.departmentName, '새 부서');
-  assert.equal(updated.version, 2);
-  assert.equal((await mutate(`/companies/${c.id}`, { status: 'INACTIVE' })).status, 204);
-  assert.deepEqual(await result(await search({ q: renamed })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-  assert.equal((await mutate(`/companies/${c.id}`, { status: 'ACTIVE' })).status, 204);
-  assert.equal((await result(await search({ q: renamed }))).data[0].companyPinSeq, p.companyPinSeq);
+  assert.deepEqual((await result(await search({ q: c.name + ' 이전 이름' }))).data, []);
+});
+
+test('company rename, deactivation, address removal and membership unlinking affect the next read', async () => {
+  const c = await company(),
+    member = await recipient(c),
+    renamed = marker();
+  await pool.query('UPDATE organizations SET name=$1 WHERE organization_seq=$2', [renamed, c.id]);
+  assert.deepEqual((await result(await search({ q: c.name }))).data, []);
+  assert.equal((await result(await search({ q: renamed }))).data[0].organizationName, renamed);
+  await pool.query("UPDATE organizations SET status='INACTIVE' WHERE organization_seq=$1", [c.id]);
+  assert.deepEqual((await result(await search({ q: renamed }))).data, []);
+  await pool.query("UPDATE organizations SET status='ACTIVE' WHERE organization_seq=$1", [c.id]);
+  await pool.query('UPDATE customers SET address_data=NULL WHERE customer_seq=$1', [
+    member.customerSeq,
+  ]);
+  assert.deepEqual((await result(await search({ q: renamed }))).data, []);
+  const { name, phoneNumber, ...ownAddress } = member.addressData;
+  await pool.query('UPDATE customers SET address_data=$1 WHERE customer_seq=$2', [
+    ownAddress,
+    member.customerSeq,
+  ]);
+  await pool.query('DELETE FROM memberships WHERE membership_seq=$1', [member.membershipSeq]);
+  assert.deepEqual((await result(await search({ q: renamed }))).data, []);
 });
 
 test('every active admin role can search while the anonymous MVP read uses the same projection', async () => {
   const c = await company();
-  await pin(c);
+  await recipient(c);
   const anonymous = await result(await search({ q: c.name }));
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN'])
     assert.deepEqual(await result(await search({ q: c.name }, await account(role))), anonymous);
@@ -337,28 +363,12 @@ test('stale cookies never fall back to anonymous access and untrusted Origin is 
   );
 });
 
-test('the search exception does not open company management, member lists or scoped PIN APIs', async () => {
+test('shared delivery search keeps company management and complete member lists protected', async () => {
   const c = await company();
-  const p = await pin(c);
+  await recipient(c);
   assert.equal((await fetch(base + '/api/companies')).status, 401);
-  assert.equal((await fetch(base + `/api/companies/${c.id}`)).status, 401);
-  assert.equal((await fetch(base + `/api/companies/${c.id}/members`)).status, 401);
-  await error(await fetch(base + `/api/companies/${c.id}/pins`), 400, 'INVALID_REQUEST');
-  const create = await fetch(base + `/api/companies/${c.id}/pins`, {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ addressData: address() }),
-  });
-  await error(create, 401, 'UNAUTHORIZED');
-  await error(
-    await fetch(base + `/api/company-pins/${p.companyPinSeq}`, {
-      method: 'PATCH',
-      headers: { Origin: origin, 'Content-Type': 'application/json' },
-      body: '{"label":"금지"}',
-    }),
-    401,
-    'UNAUTHORIZED',
-  );
+  assert.equal((await fetch(base + '/api/companies/' + c.id)).status, 401);
+  assert.equal((await fetch(base + '/api/companies/' + c.id + '/members')).status, 401);
 });
 
 test('query and pagination validation reject missing, blank, repeated and unsupported filters', async () => {
@@ -385,7 +395,7 @@ test('query and pagination validation reject missing, blank, repeated and unsupp
 
 test('search is read-only and database failures are not transformed into empty successes', async () => {
   const c = await company();
-  await pin(c);
+  await recipient(c);
   const counts = async () =>
     (
       await pool.query(`SELECT (SELECT count(*) FROM organizations) AS companies,
@@ -408,7 +418,7 @@ test('search is read-only and database failures are not transformed into empty s
   assert.equal((await result(await search({ q: c.name }))).data.length, 1);
 });
 
-test('Swagger exposes public PIN projection and static search remains separate from company IDs', async () => {
+test('Swagger exposes member delivery projection and static search remains separate from company IDs', async () => {
   const doc = await (await fetch(base + '/api/docs-json')).json();
   const operation = doc.paths['/api/companies/search'].get;
   assert.deepEqual(operation.tags, ['Companies']);
@@ -421,6 +431,8 @@ test('Swagger exposes public PIN projection and static search remains separate f
   );
   assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.organizationName);
   assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.addressData);
+  assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.customerSeq);
+  assert.equal(doc.components.schemas.CompanyDirectoryEntryDto.properties.companyPinSeq, undefined);
   assert.equal(
     (await fetch(base + '/api/companies/2147483647', { headers: adminHeaders })).status,
     404,
