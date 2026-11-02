@@ -69,7 +69,7 @@ $taskIp = (Invoke-TaskGcloud -Arguments @('compute','addresses','describe','dvr-
 $taskZone = 'asia-northeast3-a'
 $taskVm = 'dvr-reranker-l4'
 $taskState = @{project=$Project; name=$taskVm; zone=$taskZone; ip=$taskIp; url="https://${taskIp}.sslip.io";
-    budgetUsd=250; budgetKrw=$taskKrw; currencyConversionRate=$taskFx; runtimeAfterSetupSeconds=900; state='creating'}
+    budgetUsd=250; budgetKrw=$taskKrw; currencyConversionRate=$taskFx; runtimeAfterSetupSeconds=1800; state='creating'}
 $taskState | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskStatePath 'state.json') -Encoding utf8
 Invoke-TaskGcloud -Arguments @('compute','instances','create',$taskVm,"--project=$Project","--zone=$taskZone",'--machine-type=g2-standard-4',
     '--image=ubuntu-2204-jammy-v20261021','--image-project=ubuntu-os-cloud','--boot-disk-size=60GB','--boot-disk-type=pd-balanced',

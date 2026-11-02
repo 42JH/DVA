@@ -41,6 +41,6 @@ tar -C "$ai_root" --exclude=.venv -cf - . \
 # 주소DB는 릴리스마다 보내지 않고 서버의 shared/data에 한 번 올려 둔다(spec/address.md)
 printf 'AI_IMAGE=%s\nADDRESS_DATA_DIR=%s\n' "$image" "$remote_root/shared/data" > "$key_dir/release.env"
 tar -C "$ai_root" -cf - compose.yaml config prompts \
- -C "$ai_root/deploy" deploy.sh compose.deploy.yaml -C "$key_dir" release.env \
+ -C "$ai_root/deploy" deploy.sh apply-faq-runtime.py compose.deploy.yaml -C "$key_dir" release.env \
  | ssh "${options[@]}" "$server" "tar -xf - -C $remote_root/releases/$version"
 ssh "${options[@]}" "$server" "bash $remote_root/releases/$version/deploy.sh" </dev/null

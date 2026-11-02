@@ -1,5 +1,8 @@
 # GCP 리랭커 운영
 
+2026-11-02 사용자 요청으로 구축 후 자동 중지 시간을 **30분(1800초)/STOP**으로 변경했다.
+이후 VM을 켤 때마다 적용되며 모델 준비 시간도 포함한다. 아래 최초 구축의 15분/900초 표기는 당시 이력이다.
+
 2026-10-27 사용자 승인: GCP L4, 총예산 $250, 최초 구축은 완료까지 허용, 이후 VM을 켤 때마다15분 자동 중지. 전화 한 통의15분 제한이 아니다.
 
 ## 배포 자원
@@ -36,7 +39,7 @@ gcloud.cmd compute instances start dvr-reranker-l4 --project=dvr-rerank --zone=a
 gcloud.cmd compute instances stop dvr-reranker-l4 --project=dvr-rerank --zone=asia-northeast3-a
 ```
 
-등록된15분 제한은 시작할 때마다 적용된다. 준비 시간도 포함하며 진행 중인 전화가 있어도 자동 중지는 기다려주지 않는다. 기존 전화 서버는 이때 검색 오류로 안내하고 접수 상태를 유지하도록 구현돼 있다. 자동으로 요청이 VM을 깨우는 구조는 아니다.
+등록된30분 제한은 시작할 때마다 적용된다. 준비 시간도 포함하며 진행 중인 전화가 있어도 자동 중지는 기다려주지 않는다. 기존 전화 서버는 이때 검색 오류로 안내하고 접수 상태를 유지하도록 구현돼 있다. 자동으로 요청이 VM을 깨우는 구조는 아니다.
 
 ## 이 PC에서 연결
 
@@ -75,7 +78,7 @@ Windows PowerShell5.1은 한국어 native stdout 인코딩이 다를 수 있어 
 - `install.sh`: 고정 Docker 이미지 빌드→고정 모델 다운로드→systemd서비스.
 - `proxy.sh`: Caddy의 공인 인증서/HTTPS. 인증서와 모델 캐시는 디스크에 보존한다.
 - `remote.ps1`: Windows gcloud.cmd 중첩 따옴표를 피하는 고정 스크립트 전송. base64는 비밀 암호화가 아니라 명령 전달 형식이다.
-- `control.ps1`: 시작할 때15분/STOP을 확인하고, 이미 실행 중이면 타이머를 연장하지 않는다.
+- `control.ps1`: 시작할 때30분/STOP을 확인하고, 이미 실행 중이면 타이머를 연장하지 않는다.
 
 전화용 Dockerfile은 GPU 파일을 제외한다. GPU 이미지는 `gpu/Dockerfile`로 별도 만들며 공식 베이스 이미지를 digest로 고정했다. 실제 VM에서는26KB 미만의 배포 소스만 사용했고 모델은 Hugging Face 공개 저장소에서 직접 받았다.
 
