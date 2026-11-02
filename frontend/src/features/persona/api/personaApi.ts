@@ -1,7 +1,7 @@
 // 07 페르소나 관리 Model — 페르소나(AI 상담사 말투 · 목소리 묶음)와 버전(프롬프트 + 음성 설정 기록). React를 모르는 데이터 층
 // 실서버 /api/personas (develop-backend 11/02 초안 계약): 저장(PATCH) = 페르소나마다 하나인 초안을 덮어씀(버전 안 늘어남)
 // [적용] = 초안 확정(POST versions → 새 HEAD) + 적용 요청(activate → PENDING → AI가 확인하면 ACTIVE, 서비스 전체에 하나)
-// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제 API는 없음 (backend-todo 07)
+// 서버 모양 → 화면 모양은 personaMap.ts(순수 함수, 테스트). 초안 삭제 · 지난 버전으로 되돌리기는 하지 않음 (11/02 사용자)
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'

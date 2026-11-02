@@ -12,8 +12,8 @@ export function PersonaList({
 }: {
   items: PersonaItem[]
   onSelect: (personaSeq: number) => void
-  onUse: (personaSeq: number) => void
-  onAdd: () => void
+  onUse?: (personaSeq: number) => void // 없으면 [사용하기]를 안 그림 (수정 화면 패널)
+  onAdd?: () => void // 없으면 [+ 페르소나 추가]를 그리지 않음 (OPERATOR)
 }) {
   return (
     <div className="flex flex-col">
@@ -35,7 +35,8 @@ export function PersonaList({
             ) : p.applying ? (
               <Tag kind="outline">{p.applying}</Tag>
             ) : (
-              p.canUse && (
+              p.canUse &&
+              onUse && (
                 <Button small onClick={() => onUse(p.personaSeq)}>
                   사용하기
                 </Button>
@@ -50,9 +51,11 @@ export function PersonaList({
           <p className="text-caption text-sub">{p.versionLine}</p>
         </div>
       ))}
-      <Button className="mt-4 self-start" onClick={onAdd}>
-        + 페르소나 추가
-      </Button>
+      {onAdd && (
+        <Button className="mt-4 self-start" onClick={onAdd}>
+          + 페르소나 추가
+        </Button>
+      )}
     </div>
   )
 }

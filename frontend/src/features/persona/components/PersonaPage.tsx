@@ -1,26 +1,25 @@
-import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
-import { ConfirmDialog, Tabs } from '@/shared/ui'
-import { usePersonaPage, type PanelTab } from '@/features/persona/hooks/usePersonaPage'
+import { ConfirmDialog } from '@/shared/ui'
+import { usePersonaPage } from '@/features/persona/hooks/usePersonaPage'
 import { AddPersonaModal } from './AddPersonaModal'
-import { PersonaList } from './PersonaList'
+import { PersonaPanel } from './PersonaPanel'
 import { PromptCard } from './PromptCard'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { VersionDiffCard } from './VersionDiffCard'
-import { VersionList } from './VersionList'
 
 // 07 페르소나 관리 (와이어프레임 07_페르소나관리 · _버전히스토리, 10/31)
-// 왼쪽 시스템 프롬프트 카드 | 오른쪽 346 카드 [페르소나 | 버전 히스토리] 탭. 두 카드 모두 화면 높이에 맞추고 안쪽만 스크롤
-// [수정] → 오른쪽 패널 없이 넓은 수정 화면 (저장 · 취소하면 돌아옴). [v6과 비교] → 왼쪽 카드가 버전 비교로
-const TABS: { key: PanelTab; label: string }[] = [
-  { key: 'persona', label: '페르소나' },
-  { key: 'history', label: '버전 히스토리' },
-]
-
+// 왼쪽 시스템 프롬프트 카드 | 오른쪽 346 카드 [페르소나 | 버전 히스토리] 탭(PersonaPanel). 두 카드 모두 화면 높이에 맞추고 안쪽만 스크롤
+// [수정] → 왼쪽이 수정 화면, 오른쪽 패널은 버튼 없이 · 접기 가능 (11/02). 패널에서 고르면 저장 안 한 내용 확인 후 그 보기로. [v4와 비교] → 왼쪽 카드가 버전 비교로
 export function PersonaPage() {
   const vm = usePersonaPage()
-  // 오른쪽 카드 탭을 바꾸면 내용이 그 방향에서 미끄러져 들어옴 (다른 화면 탭과 같은 전환, 11/01). 훅이라 이른 return 앞에
-  const slide = slideClass(useSlideDir(TABS.findIndex((t) => t.key === vm.tab)))
+  const panel = {
+    tab: vm.tab,
+    onTab: vm.setTab,
+    personas: vm.personas,
+    versions: vm.versions,
+    moreVersions: vm.moreVersions,
+    onShowMore: vm.showAllVersions,
+  }
 
   if (vm.error || vm.isLoading || !vm.prompt || !vm.editTarget)
     return (
@@ -32,7 +31,19 @@ export function PersonaPage() {
   if (vm.editing)
     return (
       <div className="min-h-[600px] flex-1">
-        <PromptEditor target={vm.editTarget} onDone={vm.finishEdit} />
+        <PromptEditor
+          target={vm.editTarget}
+          onDone={vm.finishEdit}
+          aside={(leave) => (
+            <PersonaPanel
+              {...panel}
+              onSelectPersona={(seq) => leave(() => vm.selectPersona(seq))}
+              onSelectVersion={(v) => leave(() => vm.selectVersion(v))}
+              open={vm.panelOpen}
+              onToggle={vm.togglePanel}
+            />
+          )}
+        />
       </div>
     )
 
@@ -50,28 +61,15 @@ export function PersonaPage() {
           />
         )}
       </div>
-      <aside className="flex w-[346px] shrink-0 flex-col rounded-xl bg-surface px-5 pt-3 pb-5 ring-1 ring-line ring-inset">
-        <Tabs items={TABS} value={vm.tab} onChange={vm.setTab} />
-        <div key={vm.tab} className={`min-h-0 flex-1 overflow-auto ${slide}`}>
-          {vm.tab === 'persona' ? (
-            <PersonaList
-              items={vm.personas}
-              onSelect={vm.selectPersona}
-              onUse={vm.askUse}
-              onAdd={vm.openAdd}
-            />
-          ) : (
-            <VersionList
-              items={vm.versions}
-              more={vm.moreVersions}
-              onSelect={vm.selectVersion}
-              onShowMore={vm.showAllVersions}
-              onTestCall={vm.startTestCall}
-              onApply={vm.askApply}
-            />
-          )}
-        </div>
-      </aside>
+      <PersonaPanel
+        {...panel}
+        onSelectPersona={vm.selectPersona}
+        onSelectVersion={vm.selectVersion}
+        onUse={vm.askUse}
+        onAdd={vm.canAdd ? vm.openAdd : undefined}
+        onTestCall={vm.startTestCall}
+        onApply={vm.askApply}
+      />
       {vm.applyConfirm && (
         <ConfirmDialog
           title={vm.applyConfirm.title}
