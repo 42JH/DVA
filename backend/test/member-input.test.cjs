@@ -84,8 +84,6 @@ test('inline employees accept the customer address object in single and batch re
     jibunAddress: '주소동 1',
     dongName: '주소동',
     postalCode: '01234',
-    latitude: 37.5,
-    longitude: 127,
   };
   for (const request of [{ ...input, address }, { items: [{ ...input, address }] }])
     assert.deepEqual(
@@ -94,20 +92,6 @@ test('inline employees accept the customer address object in single and batch re
     );
   assert.equal((await pipe.transform(input))[0].address, undefined);
   assert.equal((await pipe.transform({ ...input, address: null }))[0].address, null);
-  for (const coordinates of [
-    {},
-    { latitude: null, longitude: null },
-    { latitude: 0, longitude: 0 },
-    { latitude: 37.5 },
-    { longitude: -127 },
-  ]) {
-    const partial = { ...address, ...coordinates };
-    if (!('latitude' in coordinates)) delete partial.latitude;
-    if (!('longitude' in coordinates)) delete partial.longitude;
-    const actual = (await pipe.transform({ ...input, address: partial }))[0].address;
-    assert.equal(actual.latitude, coordinates.latitude ?? 1);
-    assert.equal(actual.longitude, coordinates.longitude ?? 1);
-  }
   for (const field of ['roadAddress', 'jibunAddress', 'dongName', 'postalCode']) {
     const partial = { ...address };
     delete partial[field];
@@ -121,8 +105,10 @@ test('inline employees accept the customer address object in single and batch re
   for (const invalid of [
     '주소로 1',
     [],
-    { ...address, latitude: '37.5' },
-    { ...address, longitude: 181 },
+    { ...address, latitude: 37.5 },
+    { ...address, longitude: 127 },
+    { ...address, latitude: null },
+    { ...address, longitude: null },
     { ...address, postalCode: '1234' },
     { ...address, detailAddress: null },
     { ...address, unknown: true },

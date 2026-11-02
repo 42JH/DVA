@@ -31,8 +31,6 @@ const addressFields = [
   'detailAddress',
   'dongName',
   'postalCode',
-  'latitude',
-  'longitude',
 ];
 const sqlFields = [
   'name',
@@ -42,8 +40,6 @@ const sqlFields = [
   'detail_address',
   'dong_name',
   'postal_code',
-  'latitude',
-  'longitude',
 ];
 const address = (prefix = '도착', extra = {}) => ({
   name: prefix + ' 수령인',
@@ -53,8 +49,6 @@ const address = (prefix = '도착', extra = {}) => ({
   detailAddress: '101호',
   dongName: prefix + '동',
   postalCode: '01234',
-  latitude: 37.5,
-  longitude: 127,
   ...extra,
 });
 let app, base, adminHeaders, passwordHash;

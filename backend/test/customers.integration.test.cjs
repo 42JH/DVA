@@ -363,8 +363,6 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
     detailAddress: '',
     dongName: '테스트동',
     postalCode: '12345',
-    latitude: 37.5,
-    longitude: 127.0,
   };
   await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2::jsonb)', [
     id,
@@ -486,8 +484,6 @@ test('own address is nullable, validated, available in reads and independent of 
     detailAddress: '101호',
     dongName: '내주소동',
     postalCode: '01234',
-    latitude: 37.5,
-    longitude: 127,
   };
   const number = phone();
   const id = await register({ name: '주소 고객', phoneNumber: number, address });
@@ -564,8 +560,6 @@ test('address-only updates roll back when success audit fails', async () => {
           jibunAddress: '원자성동 1',
           dongName: '원자성동',
           postalCode: '01234',
-          latitude: 37.5,
-          longitude: 127,
         },
       }),
       500,

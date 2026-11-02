@@ -42,8 +42,6 @@ const address = {
   detailAddress: '',
   dongName: '보존동',
   postalCode: '01030',
-  latitude: 37.5,
-  longitude: 127,
 };
 async function request(method, path, body, headers = {}) {
   const response = await fetch(base + path, {

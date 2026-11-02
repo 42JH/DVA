@@ -38,8 +38,6 @@ export class PinAddressDto {
   @ApiProperty({ type: String, nullable: true, required: false }) detailAddress?: string | null;
   @ApiProperty() dongName!: string;
   @ApiProperty() postalCode!: string;
-  @ApiProperty({ minimum: -90, maximum: 90 }) latitude!: number;
-  @ApiProperty({ minimum: -180, maximum: 180 }) longitude!: number;
 }
 
 export class PersonalContextPinDto {

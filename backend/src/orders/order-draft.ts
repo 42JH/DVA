@@ -18,8 +18,6 @@ export const ORDER_ADDRESS_FIELDS = [
   'detailAddress',
   'dongName',
   'postalCode',
-  'latitude',
-  'longitude',
 ] as const;
 
 function address(value: OrderAddressPatchDto = {}): Required<OrderAddressPatchDto> {

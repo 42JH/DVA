@@ -54,6 +54,70 @@ const validateUpdate = async (body) => {
   return input;
 };
 
+test('customer, PIN and order requests reject retired coordinates, including null and zero', async () => {
+  const {
+    CreateCustomerDto,
+    UpdateCustomerDto,
+  } = require('../dist/customers/dto/customer-request.dto');
+  const { CreatePinDto, UpdatePinDto } = require('../dist/pins/dto/pin-request.dto');
+  const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
+  const address = {
+    roadAddress: '검증로 1',
+    jibunAddress: '검증동 1',
+    dongName: '검증동',
+    postalCode: '00001',
+  };
+  const recipient = { ...address, name: '수령인', phoneNumber: '01012345678' };
+  for (const [metatype, body, getAddress] of [
+    [
+      CreateCustomerDto,
+      { name: '고객', phoneNumber: '01012345678', address },
+      (input) => input.address,
+    ],
+    [UpdateCustomerDto, { address }, (input) => input.address],
+    [CreatePinDto, { addressData: recipient }, (input) => input.addressData],
+    [UpdatePinDto, { addressData: recipient }, (input) => input.addressData],
+    [
+      CreateOrderDto,
+      { customerSeq: 1, parcels: [{ origin: recipient }] },
+      (input) => input.parcels[0].origin,
+    ],
+    [
+      UpdateOrderDto,
+      { expectedVersion: 1, parcels: [{ destination: recipient }] },
+      (input) => input.parcels[0].destination,
+    ],
+    [
+      CreateManualOrderDto,
+      { customerSeq: 1, parcels: [{ origin: recipient }] },
+      (input) => input.parcels[0].origin,
+    ],
+  ]) {
+    const transform = (input) => pipe.transform(input, { type: 'body', metatype });
+    const validated = await transform(structuredClone(body));
+    assert.deepEqual(JSON.parse(JSON.stringify(getAddress(validated))), getAddress(body));
+    assert.equal(Object.hasOwn(getAddress(validated), 'latitude'), false);
+    assert.equal(Object.hasOwn(getAddress(validated), 'longitude'), false);
+    for (const field of ['latitude', 'longitude'])
+      for (const value of [0, 37.5, null, '127']) {
+        const invalid = structuredClone(body);
+        getAddress(invalid)[field] = value;
+        await assert.rejects(
+          () => transform(invalid),
+          (error) =>
+            error.getStatus() === 400 &&
+            error
+              .getResponse()
+              .details.some(
+                (detail) =>
+                  detail.field.endsWith('.' + field) && detail.reason === 'whitelistValidation',
+              ),
+          metatype.name + '.' + field + '=' + value,
+        );
+      }
+  }
+});
+
 test('clients cannot inject parcel cancellation state through creation or editing', async () => {
   await assert.rejects(
     () => validate({ customerSeq: 1, parcels: [{ status: 'CANCELLED' }] }),
@@ -71,7 +135,7 @@ test('order updates preserve omitted fields, nullable clears, zero and empty tex
     expectedVersion: 4,
     pickupRequestedAt: null,
     parcels: [
-      { orderParcelSeq: 101, origin: { name: null, latitude: 0 }, clientComment: '' },
+      { orderParcelSeq: 101, origin: { name: null }, clientComment: '' },
       { originPin: null, documentCount: 0, itemPrice: null },
     ],
   });
@@ -80,7 +144,6 @@ test('order updates preserve omitted fields, nullable clears, zero and empty tex
   assert.equal(input.parcels[0].smallBoxCount, undefined);
   assert.equal(input.parcels[0].origin.name, null);
   assert.equal(input.parcels[0].origin.phoneNumber, undefined);
-  assert.equal(input.parcels[0].origin.latitude, 0);
   assert.equal(input.parcels[0].clientComment, '');
   assert.equal(input.parcels[1].orderParcelSeq, undefined);
   assert.equal(input.parcels[1].documentCount, 0);
@@ -236,14 +299,14 @@ test('order inputs preserve zero, explicit timezone and PostgreSQL numeric bound
     pickupRequestedAt: '2026-10-28T10:00:00+09:00',
     parcels: [
       {
-        origin: { latitude: 0, longitude: 180 },
+        origin: { postalCode: '00001' },
         documentCount: 0,
         smallBoxCount: 2147483647,
         itemPrice: Number.MAX_SAFE_INTEGER,
       },
     ],
   });
-  assert.equal(result.parcels[0].origin.latitude, 0);
+  assert.equal(result.parcels[0].origin.postalCode, '00001');
   assert.equal(result.parcels[0].documentCount, 0);
   assert.equal(result.parcels[0].itemPrice, Number.MAX_SAFE_INTEGER);
 });

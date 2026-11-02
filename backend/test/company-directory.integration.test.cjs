@@ -34,8 +34,6 @@ const address = (extra = {}) => ({
   detailAddress: randomUUID(),
   dongName: '공식동',
   postalCode: '01234',
-  latitude: 37.5,
-  longitude: 127,
   ...extra,
 });
 const search = (query, headers = {}) =>

@@ -3,7 +3,6 @@ import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsInt,
   IsNotEmpty,
-  IsNumber,
   IsObject,
   IsString,
   Matches,
@@ -37,16 +36,6 @@ export class PinAddressInputDto {
   @IsString()
   @Matches(/^[0-9]{5}(?![\s\S])/)
   postalCode!: string;
-  @ApiProperty({ minimum: -90, maximum: 90 })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-90)
-  @Max(90)
-  latitude!: number;
-  @ApiProperty({ minimum: -180, maximum: 180 })
-  @IsNumber({ allowNaN: false, allowInfinity: false })
-  @Min(-180)
-  @Max(180)
-  longitude!: number;
 }
 
 export class CreatePinDto {

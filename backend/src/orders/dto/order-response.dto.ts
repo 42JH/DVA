@@ -172,12 +172,6 @@ export class OrderAddressValueDto {
 
   @ApiProperty({ description: '우편번호. 선행 0 보존.', type: String, nullable: true })
   postalCode!: string | null;
-
-  @ApiProperty({ description: '위도.', type: Number, nullable: true, minimum: -90, maximum: 90 })
-  latitude!: number | null;
-
-  @ApiProperty({ description: '경도.', type: Number, nullable: true, minimum: -180, maximum: 180 })
-  longitude!: number | null;
 }
 
 export class OrderParcelDto {

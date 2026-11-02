@@ -35,7 +35,7 @@ DECLARE customer_id integer; other_customer integer; company_id integer; other_c
  pin_id integer; order_id integer; parcel_id integer; call_id integer; admin_id integer;
  shipment_id integer; persona_id integer; prompt_id integer; faq_id integer;
  current_version integer; before_time timestamptz;
- address jsonb := '{"name":"Recipient","phoneNumber":"01012345678","roadAddress":"Road 1","jibunAddress":"Lot 1","detailAddress":"101","dongName":"Dong","postalCode":"12345","latitude":37.5,"longitude":127.0}';
+ address jsonb := '{"name":"Recipient","phoneNumber":"01012345678","roadAddress":"Road 1","jibunAddress":"Lot 1","detailAddress":"101","dongName":"Dong","postalCode":"12345"}';
 BEGIN
  INSERT INTO customers(name,phone_number,status) VALUES('Test','01000000001','ACTIVE') RETURNING customer_seq INTO customer_id;
  INSERT INTO customers(name,phone_number,status) VALUES('Other','01000000002','ACTIVE') RETURNING customer_seq INTO other_customer;
@@ -54,7 +54,7 @@ BEGIN
  VALUES(other_customer,other_company,'001A','ORG_ADMIN','ACTIVE',other_department);
  PERFORM pg_temp.expect_error(format('UPDATE memberships SET department_seq=%s WHERE customer_seq=%s',other_department,customer_id),'23503');
 
- IF valid_parcel_address('{}'::jsonb) OR valid_parcel_address(jsonb_set(address,'{latitude}','91'))
+ IF valid_parcel_address('{}'::jsonb) OR valid_parcel_address(address || '{"latitude":0}'::jsonb)
   OR valid_parcel_address(jsonb_set(address,'{phoneNumber}','"bad"')) THEN
   RAISE EXCEPTION 'Address validation failed'; END IF;
  INSERT INTO personal_pins(customer_seq,label,address_data) VALUES(customer_id,'Home',address) RETURNING personal_pin_seq INTO pin_id;

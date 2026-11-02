@@ -175,8 +175,6 @@ export class OrdersController {
                 detailAddress: '101호',
                 dongName: '예시동',
                 postalCode: '01234',
-                latitude: 37.5,
-                longitude: 127,
               },
               destination: {
                 name: '수령인',
@@ -186,8 +184,6 @@ export class OrdersController {
                 detailAddress: '',
                 dongName: '배송동',
                 postalCode: '05678',
-                latitude: 37.6,
-                longitude: 127.1,
               },
               notifiedPrice: 3500,
               smallBoxCount: 1,

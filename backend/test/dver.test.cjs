@@ -15,8 +15,6 @@ const address = {
   jibunAddress: '검증동 1',
   dongName: '검증동',
   postalCode: '00001',
-  latitude: 0,
-  longitude: 0,
 };
 const complete = () =>
   orderDraft({
@@ -74,6 +72,17 @@ test('Dver excludes cancelled snapshots without changing the stored order', () =
   assert.deepEqual(input, before);
 });
 
+test('Dver omits retired coordinates even if a stale in-memory snapshot still contains them', () => {
+  const input = complete();
+  for (const parcel of input.parcels)
+    for (const side of ['origin', 'destination'])
+      Object.assign(parcel[side], { latitude: 37.5, longitude: 127 });
+  const before = structuredClone(input);
+  const payload = dverPayload(input);
+  assert.doesNotMatch(JSON.stringify(payload), /latitude|longitude/);
+  assert.deepEqual(input, before);
+});
+
 test('Dver v2 mapping sends each parcel and its own fee without internal identifiers', () => {
   const input = complete();
   const before = structuredClone(input);
@@ -98,7 +107,17 @@ test('Dver v2 mapping sends each parcel and its own fee without internal identif
   assert.deepEqual(parcel.item, { document: 0, smallBox: 1, mediumBox: 0, bigBox: 0, etc: '' });
   assert.equal(parcel.origin.detailAddress, '');
   assert.equal(parcel.origin.postalCode, '00001');
-  assert.equal(parcel.origin.latitude, 0);
+  for (const current of payload.outboundParcels)
+    for (const side of ['origin', 'destination'])
+      assert.deepEqual(Object.keys(current[side]).sort(), [
+        'detailAddress',
+        'dongName',
+        'jibunAddress',
+        'name',
+        'phoneNumber',
+        'postalCode',
+        'roadAddress',
+      ]);
   assert.equal(parcel.itemPrice, 0);
   assert.equal(parcel.notifiedPrice, 3500);
   assert.equal(payload.outboundParcels[1].notifiedPrice, 3500);

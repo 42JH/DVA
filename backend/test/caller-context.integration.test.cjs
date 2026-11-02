@@ -33,8 +33,6 @@ const address = {
   detailAddress: '101호',
   dongName: '예시동',
   postalCode: '01234',
-  latitude: 37.5,
-  longitude: 127,
 };
 before(async () => {
   await migrate(pool);
@@ -193,7 +191,8 @@ test('active company member receives personal pins while legacy company pins sta
   );
   assert.equal(result.personalPins[0].version, 3);
   assert.equal(result.personalPins[0].addressData.postalCode, '01234');
-  assert.equal(result.personalPins[0].addressData.latitude, 37.5);
+  assert.equal(Object.hasOwn(result.personalPins[0].addressData, 'latitude'), false);
+  assert.equal(Object.hasOwn(result.personalPins[0].addressData, 'longitude'), false);
   assert.deepEqual(Object.keys(result.personalPins[0]).sort(), [
     'addressData',
     'label',

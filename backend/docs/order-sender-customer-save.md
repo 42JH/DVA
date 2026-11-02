@@ -53,9 +53,7 @@ Content-Type: application/json
         "jibunAddress": "서울시 예시동 1",
         "detailAddress": "101호",
         "dongName": "예시동",
-        "postalCode": "01234",
-        "latitude": 37.5,
-        "longitude": 127
+        "postalCode": "01234"
       }
     }
   ]
@@ -97,9 +95,7 @@ Content-Type: application/json
     "jibunAddress": "서울시 예시동 1",
     "detailAddress": "101호",
     "dongName": "예시동",
-    "postalCode": "01234",
-    "latitude": 37.5,
-    "longitude": 127
+    "postalCode": "01234"
   }
 }
 ```
@@ -114,14 +110,12 @@ Content-Type: application/json
 | `origin.detailAddress` | `address.detailAddress` | 선택. 생략 또는 빈 문자열 허용, null 불가 |
 | `origin.dongName`      | `address.dongName`      | 주소 저장 시 필수                         |
 | `origin.postalCode`    | `address.postalCode`    | 숫자 5자리 문자열                         |
-| `origin.latitude`      | `address.latitude`      | 숫자 -90~90                               |
-| `origin.longitude`     | `address.longitude`     | 숫자 -180~180                             |
 | `origin.phoneNumber`   | 전달하지 않음           | 고객 원본 전화번호는 변경 불가            |
 
 - 고객에게 반영할 **변경 필드만** 보낸다. 이름만 바뀌었다면 `name`만 보내고, 주소만 바뀌었다면 `address`만 보낸다.
 - `address` 객체를 보낼 때는 위 필수 주소값을 모두 포함한 **전체 주소 객체로 교체**한다. 주문 PATCH의 주소 부분 수정과 다르다.
 - `origin` 객체를 그대로 `address`에 복사하면 이름·전화번호 등의 추가 필드 때문에 거절된다.
-- 불완전한 주문 주소는 고객 주소로 저장할 수 없다. 임의 좌표·주소를 채우지 말고 주소 완성 또는 이번 주문만 저장하도록 안내한다.
+- 불완전한 주문 주소는 고객 주소로 저장할 수 없다. 임의 주소를 채우지 말고 주소 완성 또는 이번 주문만 저장하도록 안내한다. 위도·경도는 보내지 않는다.
 - `address` 생략은 기존 주소 유지, `address: null`은 고객 주소 삭제다. 이 수정 플로우에서 불완전한 주소를 null로 바꿔 보내지 않는다.
 - `status`, `monthlyBillingEnabled`, 회원 소속 등은 이 화면의 저장 대상이 아니다.
 - 주문의 여러 상세에서 서로 다른 보내는 분을 수정했다면, 고객 원본에 반영할 상세를 사용자가 선택해야 한다. 첫 상세를 자동 선택하거나 모든 상세로 고객 PATCH를 반복하지 않는다.

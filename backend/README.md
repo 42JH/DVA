@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+주소 위도·경도는 모든 입력·출력·디버 전송에서 제거한다. 고객·사원·PIN의 JSON 주소와 주문 좌표 컬럼은 새 migration 043으로 정리하며 기존 주문·PIN 버전과 나머지 값은 보존한다. 기존 앱 중지·백업 후 전환하고 구버전 앱으로 이미지 단독 복귀하지 않는다. 사용자 지정 범위에 따라 `backend/` 밖 문서·배포 보호는 수정하지 않았으므로 [좌표 제거 계약과 전환 주의사항](docs/address-coordinates-removal.md)을 우선한다.
+
 통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
 
 기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회한다. 기업 PIN 등록·수정·조회 API는 폐기하며 개인 PIN과 과거 주문 주소는 보존한다. companyPins는 기존 AI 응답 호환을 위해 빈 배열로 유지한다. company_pins 테이블은 과거 주문 참조·기업 삭제 이력 처리용으로 남기며 migration이나 데이터 삭제는 없다. [기업 검색 계약](../docs/api/company-directory.md)과 [AI 인계](docs/company-address-directory-handoff.md)를 따르며 AI 코드·운영 배포는 별도다.
