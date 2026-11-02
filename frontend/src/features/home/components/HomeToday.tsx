@@ -1,4 +1,4 @@
-import { Button, SearchBox } from '@/shared/ui'
+import { FilterBar, SearchBox } from '@/shared/ui'
 import { useHome } from '@/features/home/hooks/useHome'
 import { TodayStatCard } from './TodayStatCard'
 
@@ -8,25 +8,19 @@ export function HomeToday() {
 
   return (
     <>
-      <form
-        className="flex gap-3"
-        onSubmit={(e) => {
-          e.preventDefault()
-          vm.search()
-        }}
-      >
+      {/* 다른 목록의 검색칸과 같은 모양 (11/02 사용자): FilterBar · 버튼 없이 Enter로 검색 · 최근 검색어 · 칠 때 추천. 검색은 03 주문 내역으로 */}
+      <FilterBar>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
-          recentKey="home" // 11/02 사용자: 홈만 따로 최근 검색어 (추천은 홈에 목록이 없어 안 띄움)
+          onSubmit={vm.search}
+          recentKey="home"
+          suggestions={vm.suggestions}
           onPick={vm.searchFor}
-          placeholder="디버 접수번호 · 주문 번호 · 이름 · 전화번호 · 주소"
-          className="flex-1"
+          placeholder="이름 · 전화번호 · 주소" // 가는 곳(03 주문 내역) 검색과 같은 범위 — 주문 번호 · 디버 접수번호는 03 검색이 못 찾음
+          className="min-w-0 flex-1"
         />
-        <Button kind="primary" type="submit" className="h-10!">
-          검색
-        </Button>
-      </form>
+      </FilterBar>
 
       <section className="flex flex-col gap-4">
         <h2 className="flex items-baseline gap-3.5 text-card font-bold">
