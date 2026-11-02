@@ -84,9 +84,9 @@ class MockBackend:
 
     def add_customer(self, phone: str, name: str, pins: list[Place] = (), status: str = "ACTIVE",
                      usage_types: list[str] = ("PERSONAL",), recent: tuple[Place, Place] | None = None,
-                     payment_methods: list[str] = ("billing",)) -> int:
+                     payment_methods: list[str] = ("billing",), default_origin: Place | None = None) -> int:
         seq = next(self._seq)
-        self.customers[phone] = {"seq": seq, "name": name, "status": status}
+        self.customers[phone] = {"seq": seq, "name": name, "status": status, "default_origin": default_origin}
         self.pins[phone] = list(pins)
         self.usage_types[phone] = list(usage_types)
         self.payment_methods[phone] = list(payment_methods)
@@ -116,6 +116,8 @@ class MockBackend:
             return CallerContext(status="WITHDRAWN", call_session_seq=session)
         origin, destination = self.recent.get(phone, (None, None))
         return CallerContext(status="REGISTERED", customer_seq=c["seq"], name=c["name"],
+                             default_origin=c.get("default_origin").model_copy(update={"name": c["name"], "phone": phone})
+                             if c.get("default_origin") else None,
                              places=list(self.pins.get(phone, [])), usage_types=self.usage_types.get(phone, []),
                              call_session_seq=session, payment_methods=self.payment_methods.get(phone, []),
                              recent_origin=origin if session else None,

@@ -93,6 +93,7 @@ def order_choices(ctx) -> dict[str, str]:
 
 async def order_answer(ctx, answer: str) -> list[str]:
     """제안에 대한 답. 예면 저장된 값을 임시 주문에 쓰고, 아니면 제안을 지워 그 항목을 그냥 묻는다."""
+    from app.tools.record_order import resolve
     kind = offer(ctx)
     if kind == "origin":
         place, ctx.origin_offer = ctx.origin_offer, None
@@ -117,6 +118,7 @@ async def order_answer(ctx, answer: str) -> list[str]:
             ctx.pin_rejected["destination"] += ctx.pin_candidates
             ctx.pin_candidates = []
             await ctx.carry_dest_said()
+    await resolve(ctx)
     await ctx.sync_asking()
     return ["order.updated"]
 

@@ -37,6 +37,7 @@ class CallerContext:
     status: str = "UNREGISTERED"  # REGISTERED · UNREGISTERED · WITHDRAWN
     customer_seq: int | None = None
     name: str | None = None
+    default_origin: Place | None = None  # 현재 고객 기본주소. 개인 PIN·주문 이력과 독립
     places: list[Place] = field(default_factory=list)  # 개인·기업 주소록(출발지·도착지 모두에 쓴다)
     usage_types: list[str] = field(default_factory=list)  # PERSONAL · COMPANY
     call_session_seq: int | None = None  # DB 통화 번호. 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더
@@ -52,8 +53,10 @@ def _pin_place(data: dict) -> Place | None:
         return None
     geo = None
     if all(data.get(k) not in (None, "") for k in ("jibunAddress", "dongName", "postalCode", "latitude", "longitude")):
-        geo = Geo(jibun_address=data["jibunAddress"], dong_name=data["dongName"], postal_code=data["postalCode"],
-                  latitude=data["latitude"], longitude=data["longitude"])
+        lat, lon = data["latitude"], data["longitude"]
+        if lat != 1 and lon != 1 and -90 <= lat <= 90 and -180 <= lon <= 180:
+            geo = Geo(jibun_address=data["jibunAddress"], dong_name=data["dongName"], postal_code=data["postalCode"],
+                      latitude=lat, longitude=lon)
     return Place(name=data["name"], phone=data["phoneNumber"], address=data["roadAddress"],
                  address_detail=data.get("detailAddress") or "", geo=geo)
 
@@ -161,6 +164,8 @@ class BackendAPI:
                 places.append(p)
         ctx = CallerContext(status=data["lookupStatus"], customer_seq=customer.get("customerSeq"),
                             name=customer.get("name"), places=places,
+                            default_origin=_pin_place({**(customer.get("address") or {}),
+                                                       "name": customer.get("name"), "phoneNumber": phone}),
                             usage_types=list(data.get("availableUsageTypes") or []),
                             call_session_seq=data.get("callSessionSeq"),
                             payment_methods=list(data.get("availablePaymentMethods") or []))

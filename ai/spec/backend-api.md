@@ -27,7 +27,7 @@
 | `WITHDRAWN` | 신규로 다루지 않는다. 바로 상담원 연결 |
 
 - 실패(시간 초과·5xx)면 신규 고객으로 진행한다. 통화 번호가 없으므로 조회·취소는 "조회가 어려워요"(C3_FAIL)가 된다.
-- **이전 접수 주소** `GET /api/customers/{customerSeq}/addresses?direction=ORIGIN|DESTINATION&limit=`: 등록 고객이고 통화 번호가 있으면 이어서 부른다. 최근 것부터 오는 접수 완료(ACCEPTED) 주문의 주소다. 출발지 1건은 기존 고객 인사의 `{기존 출발지}`, 도착지 `[flow] pin_recent_count`건은 "이번에도 {도착지 주소}로"와 도착지 핀 후보 맨 앞에 쓴다(`spec/scenario.md` B). 실패해도 고객 확인은 그대로 쓰고 출발지 없이 인사한다.
+- **이전 접수 주소** `GET /api/customers/{customerSeq}/addresses?direction=ORIGIN|DESTINATION&limit=`: 등록 고객이고 통화 번호가 있으면 이어서 부른다. 최근 것부터 오는 접수 완료(ACCEPTED) 주문의 주소다. 출발지 1건은 과거 이력으로만 보존하며 현재 기본 출발지를 대신하지 않는다. 도착지 `[flow] pin_recent_count`건은 "이번에도 {도착지 주소}로"와 도착지 핀 후보 맨 앞에 쓴다(`spec/scenario.md` B). 실패해도 고객 확인과 현재 기본 출발지는 그대로 쓴다.
   - ACCEPTED 주문만 오므로 개인 카드 결제 대기(notPaid) 중인 최근 주문은 빠진다.
 
 ## 1-1. 신규 고객 등록 — `POST /api/customers`, `POST /api/customers/{id}/pins`
@@ -38,7 +38,7 @@
 2. 고객 확인을 같은 통화로 다시 불러(이전 주소는 읽지 않음) 고객 번호·결제 자격을 받는다. 백엔드는 통화 고객을 발신번호로 찾으므로 등록 직후부터 통화 번호로 조회·주소록 API를 쓸 수 있다.
 3. 보내는 곳(주소 9개 항목이 다 있을 때)을 개인 주소록에 저장: `POST /api/customers/{customerSeq}/pins` `{label: "보내는 곳", addressData}`, `call_session_seq` 헤더. 같은 주소면 409(그대로).
 
-- 통화 결과는 `customerSeq`로 보낸다. 다음 통화에서는 등록 고객이고, 접수 완료(ACCEPTED) 주문이 없어도(개인 카드 결제 대기뿐) 본인 주소록의 주소(발신번호와 같은 번호의 핀)가 `{기존 출발지}`다.
+- 통화 결과는 `customerSeq`로 보낸다. 개인 PIN 저장은 고객 기본주소 갱신과 별개다. 다음 통화의 기본 출발지는 `customer.address`로만 제안하며, 없으면 주소를 묻는다.
 - 실패해도 통화는 신규 고객으로 이어 간다(결과는 `customer: {name, phoneNumber}`).
 
 ## 2. 통화 중 조회·취소(C 흐름)
@@ -105,3 +105,8 @@
 
 - 수거 시각 규칙을 백엔드 문서와 맞춘다(위 4번, AI는 연동 규격대로 고객이 말한 미래 시각을 보낸다).
 - `call_session_seq` 헤더 이름에 밑줄이 있다. 중간에 nginx 같은 프록시가 있으면 기본 설정(`underscores_in_headers off`)에서 헤더가 버려진다. AI → 백엔드가 Docker 내부망으로 직접 가면 문제없다.
+
+
+## 현재 고객 기본 출발지 (Jira 65)
+
+`CallerContext.default_origin`은 customer.address(객체 또는 null)에 현재 고객 이름과 서버가 확인한 발신번호를 결합한다. 개인 PIN과 이전 주문을 자동 기본주소로 사용하지 않는다. 통화에서 고친 이름/전화와 두 번째 택배의 직전 출발지를 보존한다. 기본좌표 1 또는 누락 좌표는 선택 후 기존 주소 보정 경로로 처리한다.

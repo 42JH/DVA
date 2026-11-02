@@ -216,9 +216,8 @@ class Call:
                     self.customer_type, self.customer_seq = "registered", context.customer_seq
                     self.registered_name, self.usage_types = context.name, context.usage_types
                     self.pins, self.recent_pins = list(context.places), list(context.recent_destinations)
-                    # 접수 완료된 주문이 없으면(개인 카드 결제 대기뿐·등록만 한 고객) 본인 주소록의 주소가 기존 출발지(§9)
-                    own = next((p for p in self.pins if p.phone == self.caller), None)
-                    self.recent = {"origin": context.recent_origin or own,
+                    # 현재 고객 기본주소는 개인 PIN·이전 주문과 분리한다.
+                    self.recent = {"origin": context.default_origin,
                                    "destination": context.recent_destinations[0] if context.recent_destinations else None}
                 elif context.status == "WITHDRAWN":
                     self.customer_type = "withdrawn"
@@ -288,7 +287,13 @@ class Call:
 
     def use_place(self, role: str, place: Place) -> None:
         """저장된 배송지(또는 앞 택배)를 이번 주문의 보내는 곳·받는 곳으로 쓴다."""
+        if role == "sender":
+            # 과거 주소록의 이름이 현재 고객 이름이나 이번 통화의 정정을 덮어쓰지 않게 한다.
+            place = place.model_copy(update={"name": self.order.sender_name or self.registered_name or place.name,
+                                             "phone": self.order.sender_phone or self.caller or place.phone})
         self.order.set_place(role, place)
+        if place.geo is None:
+            self.address_pending.add(f"{role}_address")
         self.from_saved |= {f"{role}_phone", f"{role}_address_detail"}
 
     # --- B: 최근 접수·핀 ---
@@ -397,13 +402,15 @@ class Call:
         """보내는 분 = 고객, 연락처 = 발신번호(묻지 않는다). MVP 전제(다이어그램 메모).
         TODO(flow): 보내는 분이 고객과 다를 수 있다. 발신번호가 없는 통화는 고려하지 않는다(연락처가 비어 미완료 접수)."""
         o = self.order
-        o.sender_name = o.sender_name or self.registered_name or self.customer_name
+        previous = self.parcels[-1] if self.parcels else None
+        o.sender_name = o.sender_name or (previous.sender_name if previous else None) \
+            or self.registered_name or self.customer_name
         if o.sender_phone is None and self.caller:
-            o.sender_phone = self.caller
+            o.sender_phone = (previous.sender_phone if previous else None) or self.caller
 
     async def register_customer(self) -> None:
         """신규 고객이 보내는 분 정보(성함·주소)를 다 말하면 백엔드에 고객으로 등록하고 보내는 곳을 개인 주소록에 저장한다.
-        이때부터 기존 고객으로 다룬다(통화 결과는 고객 번호로, 다음 통화는 이 주소가 기존 출발지, 2026-10-31 결정).
+        이때부터 기존 고객으로 다룬다(통화 결과는 고객 번호로). 개인 PIN 저장은 고객 기본주소 갱신과 별개다.
         실패해도 통화는 신규 고객으로 이어 간다(결과는 이름·발신번호로 보낸다).
         TODO(flow): 등록 뒤 보내는 곳을 고쳐도 주소록은 고치지 않는다."""
         o = self.order
