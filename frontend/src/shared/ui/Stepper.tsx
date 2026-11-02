@@ -14,7 +14,7 @@ export function Stepper({
   return (
     <span className="flex items-center gap-2">
       <span className="text-label text-sub">{label}</span>
-      <span className="flex h-8 items-center rounded-lg bg-surface ring-1 ring-line ring-inset">
+      <span className="flex h-7 items-center rounded-lg bg-surface ring-1 ring-line ring-inset">
         <button
           type="button"
           className={`${btn} text-sub`}

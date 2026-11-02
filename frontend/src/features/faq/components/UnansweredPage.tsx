@@ -1,4 +1,4 @@
-import { AppliedFilters, Pagination, SearchBox } from '@/shared/ui'
+import { FilterBar, ListPage, AppliedFilters, Pagination, SearchBox } from '@/shared/ui'
 import { useUnansweredList } from '@/features/faq/hooks/useUnansweredList'
 import { UnansweredTable } from './UnansweredTable'
 
@@ -9,14 +9,17 @@ export function UnansweredPage() {
   const vm = useUnansweredList()
 
   return (
-    <div className="flex flex-col gap-6">
-      <SearchBox
-        value={vm.q}
-        onChange={vm.setQ}
-        recentKey="unanswered"
-        suggestions={vm.suggestions}
-        placeholder="질문 · 이름 · 전화번호"
-      />
+    <ListPage>
+      <FilterBar>
+        <SearchBox
+          value={vm.q}
+          onChange={vm.setQ}
+          recentKey="unanswered"
+          suggestions={vm.suggestions}
+          placeholder="질문 · 이름 · 전화번호"
+          className="min-w-0 flex-1"
+        />
+      </FilterBar>
       <AppliedFilters chips={vm.callChips} onRemove={vm.clearCall} onClear={vm.clearCall} />
 
       <UnansweredTable
@@ -39,6 +42,6 @@ export function UnansweredPage() {
         }
         footer={<Pagination page={vm.page} pages={vm.pages} onChange={vm.goPage} />}
       />
-    </div>
+    </ListPage>
   )
 }

@@ -31,7 +31,7 @@ export function fmtDetailTime(
   const date =
     (year ?? d.getFullYear() !== now.getFullYear())
       ? fmtDate(iso)
-      : `${two(d.getMonth() + 1)}.${two(d.getDate())}`
+      : `${two(d.getMonth() + 1)}-${two(d.getDate())}`
   const time = `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? `:${two(d.getSeconds())}` : ''}`
   return `${date} (${DAY[d.getDay()]}) ${time}`
 }
@@ -41,23 +41,23 @@ export function fmtListTime(iso: string, now = new Date()): [string] | [string, 
   const d = new Date(iso)
   const hm = `${two(d.getHours())}:${two(d.getMinutes())}`
   return d.getFullYear() === now.getFullYear()
-    ? [`${two(d.getMonth() + 1)}.${two(d.getDate())} ${hm}`]
+    ? [`${two(d.getMonth() + 1)}-${two(d.getDate())} ${hm}`]
     : [fmtDate(iso), hm]
 }
 
 export function fmtDateTime(iso: string): string {
   const d = new Date(iso)
-  return `${two(d.getMonth() + 1)}.${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
+  return `${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
 export function fmtDate(iso: string): string {
   const d = new Date(iso)
-  return `${d.getFullYear()}.${two(d.getMonth() + 1)}.${two(d.getDate())}`
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`
 }
 
 export function fmtDateTimeDay(iso: string): string {
   const d = new Date(iso)
-  return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`
+  return `${two(d.getMonth() + 1)}-${two(d.getDate())} (${DAY[d.getDay()]}) ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
 /** 초 → '3분 40초', 한 시간부터 '1시간 5분 03초' (04 통화 시간 · 02 평균 · CSV) */
@@ -93,7 +93,7 @@ export function fmtPhone(digits: string): string {
 
 /** '10.20 (화)' (01 홈 '오늘' 기준일) */
 export function fmtDateDay(d: Date): string {
-  return `${two(d.getMonth() + 1)}.${two(d.getDate())} (${DAY[d.getDay()]})`
+  return `${two(d.getMonth() + 1)}-${two(d.getDate())} (${DAY[d.getDay()]})`
 }
 
 /** Date → datetime-local 칸 값 'YYYY-MM-DDTHH:mm' (브라우저 시간대 = 화면 시간대) */

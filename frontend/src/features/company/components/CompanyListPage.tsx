@@ -1,4 +1,14 @@
-import { Button, ConfirmDialog, Pagination, SearchBox, Table, Tag, type Column } from '@/shared/ui'
+import {
+  FilterBar,
+  ListPage,
+  Button,
+  ConfirmDialog,
+  Pagination,
+  SearchBox,
+  Table,
+  Tag,
+  type Column,
+} from '@/shared/ui'
 import { INACTIVE_TAG } from '@/features/company/labels'
 import { useCompanyList, type CompanyRow } from '@/features/company/hooks/useCompanyList'
 import { CompanyCsvModal } from './CompanyCsvModal'
@@ -40,8 +50,8 @@ export function CompanyListPage() {
   ]
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex gap-3">
+    <ListPage>
+      <FilterBar>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
@@ -56,7 +66,7 @@ export function CompanyListPage() {
         <Button kind="primary" tall onClick={vm.openCsv}>
           CSV로 기업 등록
         </Button>
-      </div>
+      </FilterBar>
 
       {(vm.deleteError ?? vm.loadError) && (
         <p role="alert" className="text-label text-danger">
@@ -100,6 +110,6 @@ export function CompanyListPage() {
         />
       )}
       {vm.csvOpen && <CompanyCsvModal onClose={vm.closeCsv} />}
-    </div>
+    </ListPage>
   )
 }

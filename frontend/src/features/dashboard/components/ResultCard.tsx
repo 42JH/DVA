@@ -66,7 +66,7 @@ export function ResultCard({
                 <button
                   type="button"
                   onClick={r.onClick}
-                  className="group flex h-[42px] w-full items-center text-left"
+                  className="group flex h-9 w-full items-center text-left"
                 >
                   <span className={`mr-2 size-2.5 shrink-0 rounded-sm ${COLOR[r.key].mark}`} />
                   <span className="w-[120px] text-label font-semibold group-hover:text-action">

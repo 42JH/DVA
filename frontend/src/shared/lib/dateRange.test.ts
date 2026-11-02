@@ -38,7 +38,7 @@ assert.deepEqual(periodToRange('today', undefined, '2026-10-20'), {
 assert.deepEqual(periodToRange('week', undefined, '2026-10-20'), {
   from: '2026-10-14',
   to: '2026-10-21',
-}) // 와이어프레임 10.14~10.20
+}) // 와이어프레임 10-14~10-20
 assert.deepEqual(periodToRange('custom', { from: '2026-10-01', to: '2026-10-15' }), {
   from: '2026-10-01',
   to: '2026-10-16',
@@ -46,8 +46,8 @@ assert.deepEqual(periodToRange('custom', { from: '2026-10-01', to: '2026-10-15' 
 assert.equal(periodToRange('custom'), null)
 
 const today = '2026-10-20'
-assert.equal(fmtRange('2026-10-01', '2026-10-15', today), '10.01 ~ 10.15')
-assert.equal(fmtRange('2025-12-29', '2026-01-04', today), '2025.12.29 ~ 2026.01.04') // 한쪽이 다른 해면 양쪽 다 연도
+assert.equal(fmtRange('2026-10-01', '2026-10-15', today), '10-01 ~ 10-15')
+assert.equal(fmtRange('2025-12-29', '2026-01-04', today), '2025-12-29 ~ 2026-01-04') // 한쪽이 다른 해면 양쪽 다 연도
 
 // 주소의 기간 검증
 assert.deepEqual(parseRange('2026-10-01', '2026-10-15', today), {

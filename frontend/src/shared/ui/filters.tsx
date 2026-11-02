@@ -91,7 +91,7 @@ export function SearchBox({
   return (
     <div className={`relative ${className}`}>
       <label
-        className={`flex h-12 items-center gap-3 rounded-lg bg-surface px-4 ${LINE} focus-within:ring-action`}
+        className={`flex h-10 items-center gap-3 rounded-lg bg-surface px-4 ${LINE} focus-within:ring-action`}
       >
         <svg
           viewBox="0 0 20 20"
@@ -163,7 +163,7 @@ export function SearchBox({
                 aria-selected={i === act}
                 onClick={() => pick(text)}
                 onMouseEnter={() => setActive(i)}
-                className={`flex h-10 cursor-pointer items-center gap-3 px-4 text-label ${
+                className={`flex h-9 cursor-pointer items-center gap-3 px-4 text-label ${
                   i === act ? 'bg-bg' : ''
                 }`}
               >
@@ -220,7 +220,7 @@ export function PeriodFilter({
             role="radio"
             aria-checked={on}
             onClick={() => onChange(k)}
-            className={`flex h-12 items-center gap-2 rounded-lg px-5 text-body ${
+            className={`flex h-10 items-center gap-2 rounded-lg px-5 text-body ${
               on
                 ? `${LINE_ON} bg-action-soft font-semibold text-action`
                 : `${LINE} bg-surface text-ink`
@@ -271,7 +271,7 @@ export function Select<V extends string>({
   const current = options.find((o) => o.value === value)?.label ?? ''
   return (
     <label
-      className={`relative flex h-12 items-center gap-2 rounded-lg px-4 text-body ${
+      className={`relative flex h-10 items-center gap-2 rounded-lg px-4 text-body ${
         applied ? `${LINE_ON} bg-action-soft` : `${LINE} bg-surface`
       } ${className}`}
     >
@@ -358,14 +358,14 @@ export function AppliedFilters({
 }) {
   if (chips.length === 0) return null
   return (
-    <div className="flex h-9 items-center gap-2">
+    <div className="flex h-8 items-center gap-2">
       <span className="mr-2 text-label font-semibold text-sub">적용된 필터</span>
       {chips.map((c) => (
         <button
           key={c.key}
           type="button"
           onClick={() => onRemove(c.key)}
-          className="flex h-9 items-center gap-2 rounded-full bg-action-soft pr-3 pl-4 text-label font-semibold text-action"
+          className="flex h-8 items-center gap-2 rounded-full bg-action-soft pr-3 pl-4 text-label font-semibold text-action"
         >
           {c.label}
           {/* ✕는 글자가 아니라 16 칸 아이콘 — 글꼴에 따라 자리가 흔들리지 않게 */}
@@ -433,7 +433,7 @@ export function ChipGroup<V extends string>({
             aria-checked={on}
             disabled={off}
             onClick={() => onChange(o.value)}
-            className={`${compact ? 'h-11 px-3.5' : 'h-12 px-5'} rounded-lg text-body ${
+            className={`${compact ? 'h-9 px-3.5' : 'h-10 px-5'} rounded-lg text-body ${
               on
                 ? `${LINE_ON} bg-action-soft font-semibold text-action`
                 : off

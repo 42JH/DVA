@@ -109,7 +109,7 @@ export function Sidebar({
 
   // 줄 (11/01 Gmail식 알약): 펼침 = 왼쪽 끝 0..210, 오른쪽만 둥글게 (pl 28 → 아이콘 28, 글자 58) · 접힘 = 12..60 동그라미 (아이콘 x 28로 같음 → 접힐 때 아이콘이 안 움직임)
   const row = (active: boolean, bold: boolean) =>
-    `flex h-11 items-center text-body ${collapsed ? 'ml-3 w-12 justify-center rounded-full' : 'gap-3.5 rounded-r-full pr-3 pl-7'} ${
+    `flex h-10 items-center text-body ${collapsed ? 'ml-3 w-12 justify-center rounded-full' : 'gap-3.5 rounded-r-full pr-3 pl-7'} ${
       active
         ? 'bg-action-soft font-bold text-action'
         : bold
@@ -196,7 +196,7 @@ export function Sidebar({
                           end={isEnd(s, m.subs!)}
                           onClick={() => setFly(null)}
                           className={({ isActive }) =>
-                            `flex h-10 items-center rounded-lg px-3 text-label whitespace-nowrap ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
+                            `flex h-9 items-center rounded-lg px-3 text-label whitespace-nowrap ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
                           }
                         >
                           {subLabel(s)}
@@ -215,7 +215,7 @@ export function Sidebar({
                         to={s.to}
                         end={isEnd(s, m.subs!)}
                         className={({ isActive }) =>
-                          `flex h-10 items-center rounded-r-full pr-3 pl-[58px] text-label ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
+                          `flex h-9 items-center rounded-r-full pr-3 pl-[58px] text-label ${isActive ? 'bg-action-soft font-bold text-action' : 'text-sub hover:bg-bg'}`
                         }
                       >
                         {subLabel(s)}

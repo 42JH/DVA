@@ -21,7 +21,7 @@ export function CallActions({
     <section
       className={`flex min-h-0 flex-col rounded-xl bg-surface p-8 ring-1 ring-line ring-inset ${className}`}
     >
-      <h2 className="flex h-10 items-center text-card font-bold">처리 내용</h2>
+      <h2 className="flex h-9 items-center text-card font-bold">처리 내용</h2>
 
       <ul className="shrink-0">
         {results.length === 0 && (
@@ -46,7 +46,7 @@ export function CallActions({
             </div>
             {r.question && (
               <p className="mt-3 flex gap-6 text-body">
-                <span className="shrink-0 text-label leading-7 text-sub">질문</span>
+                <span className="shrink-0 text-label leading-6 text-sub">질문</span>
                 <span className="min-w-0">{r.question}</span>
               </p>
             )}
@@ -62,13 +62,13 @@ export function CallActions({
         {actions.map((a) => {
           const row = (
             <>
-              <span className="w-16 shrink-0 text-label leading-7 text-sub tabular-nums">
+              <span className="w-16 shrink-0 text-label leading-6 text-sub tabular-nums">
                 {a.time}
               </span>
               <span className="w-14 shrink-0">
                 <Tag kind="gray">{a.tag}</Tag>
               </span>
-              <span className="min-w-0 text-label leading-7 break-words">{a.text}</span>
+              <span className="min-w-0 text-label leading-6 break-words">{a.text}</span>
             </>
           )
           return (
