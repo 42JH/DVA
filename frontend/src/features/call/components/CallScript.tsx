@@ -7,11 +7,6 @@ import type { PlayerState } from '@/features/call/hooks/useRecordingPlayer'
 // 불만 구간: 옅은 빨강 바탕 + 빨간 선으로 묶고 머리에 '불만 · 유형' (10/21). 카드 안에서만 스크롤
 // 녹취: 서명 URL을 <audio>로 (명세 §5.3). 없거나 발급 실패면 ▶를 끄고 한 줄로 알림
 // 짚는 줄(focusKey): 재생 중인 말 또는 오른쪽 AI 동작을 눌러 고른 말 = 옅은 남색. jump가 바뀌면 그 줄로 스크롤 (11/01)
-const STATE_TEXT: Record<PlayerState, string | null> = {
-  ok: null,
-  none: '녹취 없음',
-  failed: '녹취를 불러오지 못했습니다',
-}
 
 export function CallScript({
   className = '',
@@ -21,6 +16,7 @@ export function CallScript({
   segments,
   focusKey,
   jump,
+  emptyText,
 }: {
   className?: string
   persona: string // '' 이면 표시 안 함 (분석 전 · 페르소나 미기록)
@@ -34,11 +30,13 @@ export function CallScript({
     scrub: (ratio: number) => void // 진행 바를 끌어 위치 옮김
     src?: string
     handlers: AudioHTMLAttributes<HTMLAudioElement>
+    text: string | null // 녹취 상태 한 줄 (없으면 '지금 / 길이')
   }
   audioRef: RefObject<HTMLAudioElement | null>
   segments: ScriptSegment[]
   focusKey: number | null
   jump: { key: number; n: number } | null
+  emptyText: string // 줄이 없을 때 (받는 중 · 못 받음 · 없음)
 }) {
   const canPlay = player.state === 'ok'
   const list = useRef<HTMLUListElement>(null)
@@ -109,7 +107,7 @@ export function CallScript({
         </div>
         <div className="mt-2 flex h-7 items-center pl-13 text-label">
           <span className={canPlay ? 'text-sub' : 'text-muted'}>
-            {STATE_TEXT[player.state] ?? `${player.now} / ${player.length}`}
+            {player.text ?? `${player.now} / ${player.length}`}
           </span>
         </div>
       </div>
@@ -119,7 +117,7 @@ export function CallScript({
       {/* 줄: 화자 칸 64 · 글자 · 시각 오른쪽 끝. 카드 안에서만 스크롤 */}
       <ul ref={list} className="mt-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto">
         {segments.length === 0 && (
-          <li className="py-10 text-center text-body text-muted">발화가 없습니다.</li>
+          <li className="py-10 text-center text-body text-muted">{emptyText}</li>
         )}
         {segments.map((seg, si) =>
           seg.complaint ? (

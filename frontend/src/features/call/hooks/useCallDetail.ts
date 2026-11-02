@@ -16,6 +16,7 @@ import {
   callQueries,
   type Complaint,
   type ResultBlock,
+  toCallDetail,
   type Utterance,
 } from '@/features/call/api/callApi'
 import { utteranceAt, utteranceForAction } from '@/features/call/api/callDto'
@@ -95,7 +96,16 @@ function toSegments(utterances: Timed[], complaints: Complaint[]): ScriptSegment
 /** 블록 순서: 주문에 한 일(접수 · 주문 취소 · 이관)이 위, AI 미답변이 아래 — 같은 무리 안에선 통화 순번 (10/28: 미답변이 위면 문의 통화로 읽힘) */
 const rank = (r: ResultBlock) => (r.kind === 'QUESTION_UNANSWERED' ? 1 : 0)
 
-/** 06 통화 상세 훅 — 요약 · 스크립트(불만 묶음) · 녹취 재생 · 처리 내용 · AI 동작 · 주문 팝업 */
+/** 영역이 비었을 때 문구 — 받는 중 · 못 받음 · 받았는데 없음을 구분 (명세: 빈 성공 응답과 요청 실패를 구분) */
+const emptyText = (
+  q: { isPending: boolean; isError: boolean; data?: unknown },
+  loading: string,
+  failed: string,
+  none: string,
+) => (q.isPending ? loading : q.isError && !q.data ? failed : none)
+
+/** 06 통화 상세 훅 — 요약 · 스크립트(불만 묶음) · 녹취 재생 · 처리 내용 · AI 동작 · 주문 팝업
+ * 네 조회(기본 · 대화 · 처리 결과 · AI 동작)를 따로 받아 5초마다 다시 — 늦게 온 분석 · 발화 · 녹취가 같은 화면에 붙고, 한 영역이 늦거나 실패해도 나머지는 그대로 (11/02 연동 명세) */
 export function useCallDetail(callId: number) {
   const navigate = useNavigate()
   const [orderId, setOrderId] = useState<number | null>(null) // '주문 보기 ›'로 연 주문
@@ -104,7 +114,13 @@ export function useCallDetail(callId: number) {
   const [jump, setJump] = useState<{ key: number; n: number } | null>(null)
 
   const detail = useQuery(callQueries.detail(callId))
+  const transcript = useQuery(callQueries.transcript(callId))
+  const resultsQ = useQuery(callQueries.results(callId))
+  const actionsQ = useQuery(callQueries.actions(callId))
+  // 기본 정보가 오면 바로 그림. 나머지는 받은 만큼 (아직 못 받은 영역은 빈 칸 + 그 영역 문구)
   const call = detail.data
+    ? toCallDetail(detail.data, transcript.data ?? [], resultsQ.data ?? [], actionsQ.data ?? [])
+    : undefined
   const player = useRecordingPlayer(call?.recording ?? null, () => {
     void detail.refetch()
   })
@@ -126,11 +142,32 @@ export function useCallDetail(callId: number) {
     player.seek(sec)
   }
 
-  const error = !detail.error
-    ? null
-    : detail.error instanceof ApiError && detail.error.status === 404
+  // 404는 받은 게 있어도 '통화 없음'(삭제된 통화 — 반복 조회도 멈춤). 그 밖의 오류 화면은 아무것도 못 받았을 때만,
+  // 받은 게 있으면 그대로 두고(재조회 실패 · 일부만 수신) 안내 한 줄 (11/02 연동 명세)
+  const error =
+    detail.error instanceof ApiError && detail.error.status === 404
       ? '통화를 찾을 수 없습니다.'
-      : '불러오지 못했습니다. 다시 시도해 주세요.'
+      : call || !detail.error
+        ? null
+        : '불러오지 못했습니다. 다시 시도해 주세요.'
+  // 이미 받은 영역의 재조회가 실패하면 받은 내용은 그대로 두고 한 줄 알림 (다음 갱신에서 다시)
+  const notice =
+    call && [detail, transcript, resultsQ, actionsQ].some((q) => q.isError && q.data !== undefined)
+      ? '다시 받지 못한 부분이 있어요. 마지막으로 받은 내용을 보여 드려요.'
+      : null
+  // 녹취 한 줄 — 빈 배열은 '아직 연결 안 됨'(업로드 중 · 실패 · 무음으로 단정 안 함), NOT_FOUND와 DEPENDENCY_UNAVAILABLE은 따로 (명세)
+  const rec = call?.recording ?? null
+  const recordingText = !rec
+    ? '녹취가 아직 연결되지 않았어요'
+    : player.state !== 'failed'
+      ? null
+      : rec.error === 'NOT_FOUND'
+        ? '녹취 파일을 찾을 수 없어요'
+        : rec.error === 'DEPENDENCY_UNAVAILABLE'
+          ? '녹취 저장소에 연결하지 못했어요 · 다시 받는 중'
+          : !rec.url
+            ? '녹취 주소를 받지 못했어요 · 다시 받는 중'
+            : '녹취를 재생하지 못했어요 · 다시 받는 중'
 
   const results: ResultView[] = call
     ? [...call.results]
@@ -169,6 +206,7 @@ export function useCallDetail(callId: number) {
   return {
     isLoading: detail.isPending,
     error,
+    notice,
 
     // 요약 한 줄: 고객 + 통화 결과 · 통화 시작 시각 · 통화 시간 · 발신번호 / 아래 불만 줄 (모르는 값은 '—')
     summary: call
@@ -198,6 +236,7 @@ export function useCallDetail(callId: number) {
       scrub: player.scrub, // 진행 바 드래그 (11/01)
       src: player.src,
       handlers: player.handlers,
+      text: recordingText, // 재생 줄 아래 한 줄 (없으면 '지금 / 길이')
     },
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
     // 스크립트 줄을 누르면 그 말부터 듣기 (11/01) — 시각을 아는 줄만
@@ -210,6 +249,24 @@ export function useCallDetail(callId: number) {
           }),
         }))
       : [],
+    scriptEmpty: emptyText(
+      transcript,
+      '대화를 불러오는 중…',
+      '대화를 받지 못했어요. 잠시 뒤 다시 받아요.',
+      '발화가 없습니다.',
+    ),
+    resultsEmpty: emptyText(
+      resultsQ,
+      '처리 내역을 불러오는 중…',
+      '처리 내역을 받지 못했어요. 잠시 뒤 다시 받아요.',
+      '이 통화로 처리된 주문 · 미답변이 없습니다.',
+    ),
+    actionsEmpty: emptyText(
+      actionsQ,
+      'AI 동작을 불러오는 중…',
+      'AI 동작을 받지 못했어요. 잠시 뒤 다시 받아요.',
+      '기록이 없습니다.',
+    ),
     focusKey, // 옅은 남색으로 짚는 줄 (발화 순번)
     jump, // 그 줄로 스크롤 (AI 동작을 눌렀을 때만 — 재생 중엔 강조만 따라가고 스크롤은 안 함)
 

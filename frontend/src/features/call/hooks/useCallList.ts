@@ -13,6 +13,7 @@ import type { Outcome } from '@/features/call/api/callApi'
 import {
   callListQueries,
   fetchAllCalls,
+  LIST_REFRESH_MS,
   type CallListQuery,
   type CallRow,
 } from '@/features/call/api/callListApi'
@@ -83,6 +84,8 @@ export function useCallList() {
     queryFn: ({ signal }) => fetchAllCalls({ ...query, q: '' }, signal),
     enabled: searching,
     staleTime: 5 * 60_000,
+    refetchInterval: LIST_REFRESH_MS, // 검색 중에도 새 통화 · 늦은 분석 반영 (11/02 연동 명세)
+    refetchOnWindowFocus: 'always', // 5분 재사용이어도 탭에 돌아오면 바로 다시 받음 (명세: 복귀 시 다시 조회)
   })
   const poolRows = (pool.data ?? []).map(toView)
   const digits = phoneDigits(q) // 숫자만 쳤으면 번호로
@@ -161,9 +164,12 @@ export function useCallList() {
     count: total, // '통화 목록 131건'
     // 검색 밑천이 상한에 걸림 → 그 뒤 통화는 검색에 안 잡힘 (11/02)
     listNote:
-      searching && poolRows.length >= FETCH_ALL_MAX
-        ? `최근 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건 안에서만 검색됩니다. 기간을 줄여 주세요.`
-        : null,
+      // 다시 받다 실패해도 받아 둔 줄은 그대로 두고 알림 (11/02 연동 명세)
+      (searching ? pool.isError && !!pool.data : list.isError && !!list.data)
+        ? '다시 받지 못했어요. 마지막으로 받은 목록이에요.'
+        : searching && poolRows.length >= FETCH_ALL_MAX
+          ? `최근 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건 안에서만 검색됩니다. 기간을 줄여 주세요.`
+          : null,
     isLoading: searching ? pool.isPending : list.isPending,
     listError: (searching ? pool.error : list.error)
       ? '불러오지 못했습니다. 다시 시도해 주세요.'

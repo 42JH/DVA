@@ -17,6 +17,9 @@ export interface CallListQuery {
   complaintOnly: boolean // [불만 통화] 탭
 }
 
+/** 목록 · 검색 pool 갱신 주기 — 열어 둔 화면에 새 통화 · 늦은 분석이 다음 조회에 보이게 (11/02 연동 명세). 숨긴 탭에선 멈춤 */
+export const LIST_REFRESH_MS = 5_000
+
 export const callListQueries = {
   all: () => ['calls', 'list'] as const,
   list: (query: CallListQuery, page: number, size: number) =>
@@ -24,6 +27,7 @@ export const callListQueries = {
       queryKey: [...callListQueries.all(), query, page, size],
       queryFn: ({ signal }) => fetchCalls(query, page, size, signal),
       placeholderData: keepPreviousData, // 쪽 · 필터를 바꾸는 동안 이전 목록을 그대로 (표가 깜빡이지 않게)
+      refetchInterval: LIST_REFRESH_MS,
     }),
 }
 
