@@ -15,7 +15,7 @@ import {
 import { ADMIN_TABS, ROLE_LABEL } from '@/features/admin/labels'
 
 const PAGE_SIZE = 11 // 디자인: 한 쪽 11명
-const DEFAULTS: { tab: AdminStatus } = { tab: 'ACTIVE' } // 디자인 첫 화면 = '관리자' 탭
+const DEFAULTS: { tab: AdminStatus } = { tab: 'ACTIVE' } // 첫 화면 = '관리자' 탭 (맨 앞 탭)
 
 /** ⋮ 메뉴 항목 (비활성화 · 활성화는 11/01 백엔드 반영으로 연결) */
 export type AdminAction = 'reset' | 'deactivate' | 'activate' | 'delete'
@@ -33,17 +33,19 @@ export interface AdminRow {
   loginId: string
   role: string // '최고 관리자' · '일반 관리자'
   date: string // 가입 신청일 '2026.03.02'
-  isMe: boolean // '본인' 태그, 메뉴 없음
   pending: boolean // 승인 대기 탭 줄 → [승인] [거절]
   actions: AdminAction[] // ⋮ 메뉴 (빈 배열이면 ⋮ 없음)
 }
 
-// 서버가 막는 일은 처음부터 안 보임: 본인 = 없음, 다른 최고 관리자 = 초기화만 (권한 변경 · 삭제 불가)
-function actionsOf(a: Admin, isMe: boolean): AdminAction[] {
-  if (isMe || a.status === 'PENDING') return []
+// 서버가 막는 일은 처음부터 안 보임: 다른 최고 관리자 = 초기화만 (권한 변경 · 삭제 불가). 본인 줄은 목록에서 뺌
+function actionsOf(a: Admin): AdminAction[] {
+  if (a.status === 'PENDING') return []
   if (a.role === 'SYSTEM_ADMIN') return ['reset']
   return ['reset', a.status === 'INACTIVE' ? 'activate' : 'deactivate', 'delete']
 }
+
+const withoutMe = (tab: AdminStatus, n: number | undefined) =>
+  n === undefined ? undefined : tab === 'ACTIVE' ? Math.max(0, n - 1) : n
 
 /** 10 관리자 권한 관리 훅 — 탭 · 쪽(URL) · 목록 · 탭 건수 · 줄마다 할 수 있는 일 · 확인 창 · 요청 */
 export function useAdminList() {
@@ -62,6 +64,7 @@ export function useAdminList() {
     queries: ADMIN_TABS.map((t) => adminQueries.list({ status: t.key, limit: 1, offset: 0 })),
   })
 
+  // 쪽 수는 서버 건수(나 포함)로 — 나를 빼고 세면 마지막 쪽이 사라져 한 명이 안 보일 수 있음
   const total = list.data?.total_count ?? 0
   const pages = pageCount(total, PAGE_SIZE)
   // 지워서 마지막 쪽이 비면 앞쪽으로 (예: 2쪽의 1명을 삭제)
@@ -85,26 +88,27 @@ export function useAdminList() {
     onError: () => setConfirming(null), // 창을 닫고 표 위 한 줄로 오류
   })
 
-  const rows: AdminRow[] = (list.data?.data ?? []).map((a) => {
-    const isMe = a.adminUserSeq === me?.adminUserSeq
-    return {
+  // 본인 줄은 안 보임 (11/02 사용자 — 본인에게 할 수 있는 일이 없음, 내 정보는 11 화면)
+  // shortcut: 서버에 '나 빼고' 조건이 없어 받은 쪽에서 거름 → 내가 있는 쪽만 한 줄 적게 보임. 서버가 제외 조건을 주면 그걸로
+  const rows: AdminRow[] = (list.data?.data ?? [])
+    .filter((a) => a.adminUserSeq !== me?.adminUserSeq)
+    .map((a) => ({
       id: a.adminUserSeq,
       name: a.name,
       loginId: a.loginId,
       role: ROLE_LABEL[a.role],
       date: fmtDate(a.createdAt),
-      isMe,
       pending: a.status === 'PENDING',
-      actions: actionsOf(a, isMe),
-    }
-  })
+      actions: actionsOf(a),
+    }))
   const find = (id: number) => list.data?.data.find((a) => a.adminUserSeq === id)
 
   return {
     tabs: ADMIN_TABS.map((t, i) => ({
       key: t.key,
       label: t.label,
-      count: counts[i]?.data?.total_count,
+      // 관리자 탭 숫자는 나를 뺀 수 (로그인한 나는 늘 ACTIVE)
+      count: withoutMe(t.key, counts[i]?.data?.total_count),
       countKind: t.key === 'PENDING' ? ('red' as const) : undefined, // 승인 대기 = 빨간 숫자
     })),
     tab,

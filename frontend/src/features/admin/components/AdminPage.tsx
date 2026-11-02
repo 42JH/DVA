@@ -6,7 +6,6 @@ import {
   MoreMenu,
   Pagination,
   Table,
-  Tag,
   type Column,
   type MoreMenuItem,
 } from '@/shared/ui'
@@ -69,12 +68,7 @@ export function AdminPage() {
       key: 'name',
       header: '이름',
       width: 220,
-      cell: (r) => (
-        <span className="flex items-center gap-2 text-body font-semibold">
-          {r.name}
-          {r.isMe && <Tag>본인</Tag>}
-        </span>
-      ),
+      cell: (r) => <span className="text-body font-semibold">{r.name}</span>,
     },
     { key: 'loginId', header: '아이디', width: 240, cell: (r) => r.loginId },
     { key: 'role', header: '권한', width: 180, cell: (r) => r.role },
