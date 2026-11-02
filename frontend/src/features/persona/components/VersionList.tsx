@@ -17,8 +17,8 @@ export function VersionList({
   more: number
   onSelect: (version: number) => void
   onShowMore: () => void
-  onTestCall: (version: number) => void
-  onApply: (version: number) => void
+  onTestCall?: (version: number) => void // 없으면 고른 칸의 버튼 줄을 안 그림 (수정 화면 패널)
+  onApply?: (version: number) => void
 }) {
   return (
     <div className="flex flex-col">
@@ -50,7 +50,7 @@ export function VersionList({
               <span className="font-bold">{v.testResult}</span>
             </p>
           )}
-          {v.selected && (
+          {v.selected && onTestCall && (
             <div className="mt-2 flex justify-between" onClick={(e) => e.stopPropagation()}>
               <Button
                 small
@@ -71,7 +71,7 @@ export function VersionList({
                 </svg>
                 시험 통화
               </Button>
-              {v.canApply && (
+              {v.canApply && onApply && (
                 <Button
                   small
                   kind={v.canApplyNow ? 'primary' : 'normal'}

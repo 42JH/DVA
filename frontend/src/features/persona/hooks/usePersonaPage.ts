@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { fmtClock, fmtShortDate } from '@/shared/lib/format'
 import type { TagKind } from '@/shared/ui'
 import { ApiError } from '@/shared/api/client'
+import { useSession } from '@/shared/auth/useSession'
 import {
   DEFAULT_VOICE_LABEL,
   SPEED_CHOICE,
@@ -85,6 +86,15 @@ const hasBatchim = (name: string) => {
 }
 const nameEul = (name: string) => `${name}${hasBatchim(name) ? '을' : '를'}`
 
+const PANEL_KEY = 'dva.persona.editPanel' // 수정 화면 오른쪽 패널을 접어 뒀는지 — 이 브라우저에만 ('closed' = 접힘)
+const loadPanelOpen = () => {
+  try {
+    return localStorage.getItem(PANEL_KEY) !== 'closed'
+  } catch {
+    return true // 저장소가 막혀 있으면 펼친 채로
+  }
+}
+
 const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
 
 /** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v4 [적용 중] → v5 [저장됨]
@@ -121,7 +131,12 @@ export function usePersonaPage() {
   const [tested, setTested] = useState<Record<string, number>>({})
   const [confirming, setConfirming] = useState<Confirming>(null) // [적용] · [사용하기] 확인 창
   const [adding, setAdding] = useState(false) // 페르소나 추가 창
+  const [panelOpen, setPanelOpen] = useState(loadPanelOpen) // 수정 화면 오른쪽 패널 (처음엔 펼침, 접으면 기억)
   const qc = useQueryClient()
+  // 추가 · 수정 · 적용 · 사용하기는 SUPERVISOR · SYSTEM_ADMIN만 (백엔드 persona-head-management.md) → OPERATOR는 버튼을 숨기고 보기 · 시험 통화만 (11/02 사용자)
+  // 내 정보를 불러오기 전(role undefined)에도 숨김
+  const { role } = useSession()
+  const canManage = role === 'SUPERVISOR' || role === 'SYSTEM_ADMIN'
 
   const personas = useQuery({
     ...personaQueries.list(),
@@ -197,7 +212,8 @@ export function usePersonaPage() {
           voiceFirst: editing === 'voice',
         }
       : null
-  const canEdit = !!viewing && (viewing === latest || viewing.version === persona?.appliedVersion)
+  const canEdit =
+    canManage && !!viewing && (viewing === latest || viewing.version === persona?.appliedVersion)
 
   return {
     tab,
@@ -276,6 +292,7 @@ export function usePersonaPage() {
         : '적용 요청을 보내지 못했습니다. 잠시 뒤 다시 시도해 주세요.',
 
     adding,
+    canAdd: canManage,
     openAdd: () => setAdding(true),
     closeAdd: () => setAdding(false),
     // 추가하면 그 페르소나를 골라 보여 줌
@@ -301,6 +318,16 @@ export function usePersonaPage() {
     closeCompare: () => setComparing(false),
 
     editing: editing !== false,
+    panelOpen,
+    togglePanel: () => {
+      const next = !panelOpen
+      setPanelOpen(next)
+      try {
+        localStorage.setItem(PANEL_KEY, next ? 'open' : 'closed')
+      } catch {
+        // 못 저장해도 이번 화면에선 바뀜
+      }
+    },
     editTarget,
     startEdit: () => {
       setComparing(false)
@@ -325,7 +352,7 @@ export function usePersonaPage() {
       applying: p.applyingVersion
         ? `v${p.applyingVersion} 적용 대기${p.applyError ? ' · AI 반영 오류' : ''}`
         : null,
-      canUse: !p.inUse && !p.applyingVersion,
+      canUse: canManage && !p.inUse && !p.applyingVersion,
       lines: [
         `${voiceName(p.voice.voice)} · ${SPEED_LABEL[p.voice.speed]}`,
         WAIT_LABEL[p.voice.waitTime],
@@ -342,7 +369,7 @@ export function usePersonaPage() {
     },
 
     versions: (showAll ? all : all.slice(0, HISTORY_FIRST)).map((v): VersionItem => {
-      const canApply = v === latest && v.status === 'SAVED'
+      const canApply = canManage && v === latest && v.status === 'SAVED'
       return {
         version: v.version,
         tags: [
