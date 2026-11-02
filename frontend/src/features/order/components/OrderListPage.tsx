@@ -1,4 +1,5 @@
 import {
+  COL,
   FilterBar,
   ListPage,
   Button,
@@ -38,7 +39,7 @@ export function OrderListPage() {
     {
       key: 'receivedAt',
       header: '접수 시각',
-      width: 120,
+      width: COL.time,
       cell: (r) => (
         <div className="text-body text-sub">
           {r.receivedAt.map((line) => (
@@ -50,9 +51,13 @@ export function OrderListPage() {
     {
       key: 'status',
       header: '상태',
-      width: 112,
-      align: 'center',
-      cell: (r) => <Tag kind={r.statusTag}>{r.statusLabel}</Tag>,
+      width: COL.status,
+      pill: true,
+      cell: (r) => (
+        <Tag kind={r.statusTag} fixed>
+          {r.statusLabel}
+        </Tag>
+      ),
     },
     {
       key: 'sender',

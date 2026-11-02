@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation } from 'react-router'
+import { ExitGhost } from '@/shared/lib/useExitGhost'
 import { MENU, type MenuIcon } from './menu'
 
 // 사이드바 (와이어프레임 15 Sidebar · 10/20 확정 메뉴) — 폭 222 · 머리 64(로고 + '관리자' + 접기 28) · 줄 44(아이콘 16 + 14 + 글자) · 하위 줄 40
@@ -95,6 +96,7 @@ export function Sidebar({
   const [fly, setFly] = useState<string | null>(null) // 접힌 채 그룹을 누르면 옆에 뜨는 하위 메뉴 (사이드바는 그대로 접힌 채)
   const [flyTop, setFlyTop] = useState(0) // 옆 메뉴의 화면 y — 누른 그룹 줄 위에 맞춤 (fixed라 직접 잡아 줌)
   const navRef = useRef<HTMLElement>(null)
+  const flyRef = useRef<HTMLUListElement>(null) // 옆 메뉴 — 닫힐 때 사라지는 애니메이션은 안의 <ExitGhost> (11/02 사용자: 열리고 닫히는 전환)
   // 옆 메뉴가 떠 있을 때 다른 곳을 누르거나 Esc → 닫힘. 화면을 덮는 막을 쓰지 않음 — 막은 다음 클릭(펼치기 버튼 · 다른 메뉴)까지 먹어서
   // "눌러도 안 열림"이 됐음 (11/02 사용자). 사이드바 안 클릭은 각 버튼이 알아서 처리(그룹 다시 누르면 닫힘, 펼치기는 setFly(null))
   useEffect(() => {
@@ -167,7 +169,9 @@ export function Sidebar({
       ) : (
         // whitespace-nowrap: 폭이 미끄러지는 동안 '관리자'가 세로로 꺾이지 않게 (잘리기만 함)
         <div className="flex h-16 items-center gap-2.5 pr-6 pl-6 whitespace-nowrap">
-          <span className="text-strong font-bold text-brand">dver</span>
+          <NavLink to="/" className="text-strong font-bold text-brand" aria-label="홈으로">
+            dver
+          </NavLink>
           <span className="text-label font-semibold text-sub">관리자</span>
           <span className="ml-auto">{toggleBtn('collapse', () => setCollapsed(true))}</span>
         </div>
@@ -212,9 +216,11 @@ export function Sidebar({
                   <ul
                     role="menu"
                     // fixed: nav가 overflow-hidden(폭 슬라이드용)이라 absolute면 72px 밖이 잘려 안 보였음 (11/02 사용자 "접혔을 때 주문 내역 · 통화 내역이 안 열려"). 왼쪽 = 접힌 폭 72 + 8
-                    className="fixed z-50 w-48 rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset"
+                    ref={flyRef}
+                    className="fixed z-50 w-48 origin-top-left rounded-xl bg-surface p-2 shadow-[0_12px_40px_rgba(43,47,54,0.16)] ring-1 ring-line ring-inset motion-safe:animate-pop-in"
                     style={{ left: 80, top: flyTop }}
                   >
+                    <ExitGhost target={flyRef} />
                     {m.subs.map((s) => (
                       <li key={s.to}>
                         <NavLink

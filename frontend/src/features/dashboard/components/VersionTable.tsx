@@ -81,7 +81,7 @@ export function VersionTable({
               </span>
               <span className="pr-4 text-label text-sub">{r.period}</span>
               <span className="text-center">
-                <Tag kind={r.active ? 'blue' : 'outline'} onTinted={r.selected}>
+                <Tag kind={r.active ? 'blue' : 'outline'} onTinted={r.selected} fixed>
                   {r.active ? '적용 중' : '이전'}
                 </Tag>
               </span>

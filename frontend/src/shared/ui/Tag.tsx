@@ -14,16 +14,18 @@ export type TagKind = keyof typeof KIND
 export function Tag({
   kind = 'gray',
   onTinted,
+  fixed,
   children,
 }: {
   kind?: TagKind
   onTinted?: boolean
+  fixed?: boolean // 표 열의 알약: 폭 96 고정(가장 긴 '배송·운송장' 기준) + 글자 가운데 — 열 안 알약 크기가 제각각이지 않게 (11/02 사용자)
   children: string
 }) {
   const color = onTinted ? `bg-surface ${KIND[kind].split(' ')[1]}` : KIND[kind]
   return (
     <span
-      className={`inline-flex h-6 items-center rounded-full px-2.5 text-caption font-semibold whitespace-nowrap ${color}`}
+      className={`inline-flex h-6 items-center rounded-full px-2.5 text-caption font-semibold whitespace-nowrap ${fixed ? 'w-24 justify-center' : ''} ${color}`}
     >
       {children}
     </span>

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, ConfirmDialog, Table, TwoLines, type Column } from '@/shared/ui'
+import { COL, Button, ConfirmDialog, Table, TwoLines, type Column } from '@/shared/ui'
 import type { UnansweredRow, useUnansweredList } from '@/features/faq/hooks/useUnansweredList'
 import { FaqFormModal } from './FaqFormModal'
 
@@ -20,7 +20,7 @@ export function UnansweredTable({
     {
       key: 'time',
       header: '통화 시작 시각',
-      width: 168,
+      width: COL.time,
       // 올해면 한 줄, 다른 해면 날짜 위 · 시각 아래 (연도 규칙 10/30)
       cell: (r) => (
         <div className="text-body text-sub">
@@ -33,7 +33,7 @@ export function UnansweredTable({
     {
       key: 'customer',
       header: '고객 · 발신번호',
-      width: 200,
+      width: 160,
       cell: (r) => <TwoLines top={r.customerName} bottom={r.phone} />,
     },
     {

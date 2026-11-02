@@ -8,14 +8,15 @@ import { Checkbox } from './Checkbox'
 // 줄 끝 › · ▾ 없음 (10/29 목록 줄 끝 꺽쇠 뺌 · 10/30 09 펼침 꺽쇠 뺌) — 누를 수 있는 줄은 호버 바탕과 손가락 커서로 보임
 // 선택 · 호버 줄 위의 태그는 Tag onTinted로 흰 바탕 (줄 바탕과 겹쳐 사라지지 않게)
 
-// 열 정렬 — 가운데 열은 pr-4를 빼야 머리글과 값의 중심이 같은 x (pr-4는 왼쪽 · 오른쪽 열의 이웃 열과 간격용)
-const ALIGN = { left: 'pr-4', center: 'text-center', right: 'pr-4 text-right' } as const
+// 열 정렬 규칙 (11/02 사용자) — 글은 왼쪽, 숫자 · 시간은 오른쪽, 알약 열은 고정 폭 상자(96) 안에서 가운데(머리글도 그 상자 가운데). 열 사이 간격은 pr-4 하나
+const ALIGN = { left: 'pr-4', right: 'pr-4 text-right' } as const
 
 export interface Column<Row> {
   key: string
   header: string
   width?: number | string // px 또는 '1fr'. 마지막 열은 보통 나머지
-  align?: 'left' | 'center' | 'right' // 알약(Tag) · 번호 열은 center — 머리글과 값이 같은 축 (11/02 사용자: 정렬 통일, 가운데 OK)
+  align?: 'left' | 'right'
+  pill?: boolean // 셀이 고정 폭 알약(<Tag fixed>, 96)인 열 — 폭은 COL.status(112 = 96 + 16), 머리글은 알약 상자 가운데
   cell: (row: Row, ctx: { tinted: boolean }) => ReactNode
 }
 
@@ -79,7 +80,10 @@ export function Table<Row>({
             <span />
           ))}
         {columns.map((c) => (
-          <span key={c.key} className={ALIGN[c.align ?? 'left']}>
+          <span
+            key={c.key}
+            className={`${ALIGN[c.align ?? 'left']} ${c.pill ? 'text-center' : ''}`}
+          >
             {c.header}
           </span>
         ))}
