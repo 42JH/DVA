@@ -38,8 +38,7 @@ def context(data):
 
 
 REGISTERED = {
-    "lookupStatus": "REGISTERED", "customer": {"customerSeq": 12, "name": "김철수", "phoneNumber": CALLER,
-                                               "address": {**PIN, "name": "과거이름"}},
+    "lookupStatus": "REGISTERED", "customer": {"customerSeq": 12, "name": "김철수", "phoneNumber": CALLER},
     "availableUsageTypes": ["PERSONAL", "COMPANY"], "callSessionSeq": 20,
     "availablePaymentMethods": ["billing", "credit"],
     "personalPins": [{"personalPinSeq": 1, "label": "집", "addressData": PIN},
@@ -67,9 +66,9 @@ def test_caller_context_registered_with_pins_call_and_recent_addresses():
     ctx = run(client.caller_context(CALLER, CALL_ID, recent_limit=5))
     assert (ctx.status, ctx.customer_seq, ctx.name, ctx.usage_types) == ("REGISTERED", 12, "김철수", ["PERSONAL", "COMPANY"])
     assert ctx.call_session_seq == 20 and ctx.payment_methods == ["billing", "credit"]
-    assert [p.address for p in ctx.places] == ["서울 예시로 12"]  # 기업 PIN은 사용하지 않는다
+    assert [p.address for p in ctx.places] == ["서울 예시로 12", "회사로 1"]  # 같은 곳·불완전한 곳은 뺀다
     assert ctx.places[0].geo.postal_code == "01234" and ctx.places[0].address_detail == "101호"
-    assert ctx.default_origin.name == "김철수" and ctx.default_origin.phone == CALLER
+    assert ctx.places[1].geo is None  # 좌표가 없으면 다시 찾게 비워 둔다
     assert seen[0].method == "POST" and seen[0].url.path == "/api/customers/context"
     assert CALLER not in str(seen[0].url) and body(seen[0]) == {"phoneNumber": CALLER, "call": CALL_ID}
     # 이전 접수 주소: 통화 번호 헤더, 출발지 1건·도착지 최근 N건(같은 곳·불완전한 곳은 뺀다)

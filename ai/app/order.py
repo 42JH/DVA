@@ -90,21 +90,6 @@ class Place(BaseModel, frozen=True):
     geo: Geo | None = None
 
 
-class CompanyPlace(Place):
-    """기업 검색 후보. 소속 번호는 PIN 번호가 아니며 주문 주소에는 복사하지 않는다."""
-
-    organization_seq: int
-    organization_name: str
-    membership_seq: int
-    customer_seq: int
-    department_seq: int | None = None
-    department_name: str | None = None
-
-    def label(self) -> str:
-        return " ".join(v for v in (self.organization_name, self.department_name, self.name, self.address,
-                                    self.address_detail) if v)
-
-
 def words(text: str | None) -> list[str]:
     return re.findall(r"[0-9A-Za-z가-힣]+", text or "")
 
@@ -117,86 +102,18 @@ def _contains(text: str, said: str | None, keep: int = 2) -> bool:
                for w in words(said))
 
 
-# 장소를 가리지 않는 말: 맞지 않아도 핀을 빼지 않고 맞아도 점수로 치지 않는다
-GENERIC_WORDS = {"쪽", "근처", "집", "동네", "거기", "아파트", "빌라", "건물", "회사", "주소", "거", "곳", "데"}
-# 시·도 줄임말. 이것과 시·도·구·군으로 끝나는 말은 너무 넓어서 이것만 맞은 핀은 후보로 보지 않는다
-SIDO_WORDS = {"서울", "부산", "대구", "인천", "광주", "대전", "울산", "세종", "경기", "강원", "충북", "충남", "전북",
-              "전남", "경북", "경남", "제주"}
-
-
-def _is_region(word: str) -> bool:
-    return word in SIDO_WORDS or (len(word) >= 2 and word[-1] in "시도구군")
-
-
-def _word_in(squeezed: str, word: str, squeezed_jamo: str) -> bool:
-    """조사 한두 글자를 떼고도 보고("해운대로", "강남에서"), 세 글자 이상이면 받아쓰기 철자 차이 자모 하나까지 본다
-    ("마린씨티" ↔ "마린시티")."""
-    from app.address.corrector import jamo, lev
-
-    if any(w in squeezed for w in [word] + [word[:-k] for k in (1, 2) if len(word) - k >= 2]):
-        return True
-    if len(word) < 3:
-        return False
-    target = jamo(word, canon=True)
-    n = len(target)
-    return any(lev(target, squeezed_jamo[i:i + n + d]) <= 1
-               for d in (-1, 0, 1) for i in range(max(0, len(squeezed_jamo) - n - d + 1)))
-
-
-def place_score(where: str, said: str | None) -> int | None:
-    """고객이 말한 장소가 핀 주소와 얼마나 비슷한지(맞은 낱말 수). 주소를 다 말하지 않아도 찾는다(맞지 않는 낱말은
-    넘어간다). 비슷하지 않으면 None:
-    - 말한 숫자(번지·건물번호·호수, 한글 숫자 포함)가 핀에 없다: 숫자가 다르면 다른 곳이다.
-    - 시·도·구 밖의 낱말(도로·동·건물)을 말했는데 하나도 맞지 않았다: 시·구만 같은 다른 곳이다
-      ("서울 강남구 테헤란로"를 강남구의 다른 핀으로 권하지 않게). 시·구만 말했으면 그것만 맞아도 된다."""
-    from app.address.corrector import jamo, to_number
-
-    squeezed = "".join(words(where))
-    squeezed_jamo = jamo(squeezed, canon=True)
-    numbers = {n.lstrip("0") for n in re.findall(r"\d+", where)}
-    score, specific_said, specific_hit = 0, False, False
-    for w in words(said):
-        if w in GENERIC_WORDS or (len(w) == 1 and not w.isdigit()):
-            continue  # "이"·"오" 같은 한 글자는 숫자로도 낱말로도 보지 않는다
-        num = w if w.isdigit() else to_number(w)
-        if num:  # "이백십이", "1203호"
-            if num.lstrip("0") not in numbers:
-                return None
-            score += 1
-            continue
-        region = _is_region(w)
-        specific_said |= not region
-        if _word_in(squeezed, w, squeezed_jamo):
-            score += 1
-            specific_hit |= not region
-    if score == 0 or (specific_said and not specific_hit):
-        return None
-    return score
-
-
 def match_places(places: list[Place], name: str | None, place: str | None, detail: str | None) -> list[Place]:
-    """고객이 말한 이름·층/호수가 맞고, 장소(지역·도로·건물)가 가장 비슷한 핀들. 말하지 않은 것은 따지지 않는다.
-    장소는 일부만 말해도 된다(place_score): 비슷한 핀 중 가장 많이 맞은 것들."""
-    scored = []
+    """고객이 말한 이름·장소(지역·도로·건물)·층/호수가 모두 맞는 핀. 말하지 않은 것은 따지지 않는다."""
+    out = []
     for p in places:
-        if not (_contains(p.name, name, keep=3) and _contains(p.address_detail, detail)):
-            continue
-        if not any(w not in GENERIC_WORDS and (len(w) > 1 or w.isdigit()) for w in words(place)):
-            scored.append((0, p))
-            continue
         where = " ".join([p.address, p.geo.jibun_address, p.geo.dong_name] if p.geo else [p.address])
-        score = place_score(f"{where} {p.address_detail}", place)
-        if score is not None:
-            scored.append((score, p))
-    best = max((s for s, _ in scored), default=0)
-    return [p for s, p in scored if s == best]
+        if _contains(p.name, name, keep=3) and _contains(where, place) and _contains(p.address_detail, detail):
+            out.append(p)
+    return out
 
 
 def pin_labels(pins: list[Place]) -> list[str]:
     """후보끼리 다른 값으로 부른다(상세주소 → 주소 → 이름 순). 다이어그램의 {층수}·{상세주소}."""
-    if any(isinstance(p, CompanyPlace) for p in pins):
-        return [p.label() if isinstance(p, CompanyPlace) else f"{p.name} {p.address} {p.address_detail}".strip()
-                for p in pins]
     for part in ("address_detail", "address", "name"):
         values = [getattr(p, part) for p in pins]
         if all(values) and len(set(values)) == len(values):

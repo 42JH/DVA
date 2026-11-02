@@ -15,9 +15,8 @@ from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import httpx2
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.order import COUNT_FIELDS, ORDER_FIELDS, CompanyPlace, Geo, Order, Place
+from app.order import COUNT_FIELDS, ORDER_FIELDS, Geo, Order, Place
 from app.rag.faq_source import FaqLookup, parse_faq_lookup, parse_initial_faqs, validate_faq_ids
 
 log = logging.getLogger(__name__)
@@ -29,56 +28,8 @@ IN_PROGRESS = "REQUEST_IN_PROGRESS"
 INSIGHTS_ATTEMPTS = 3  # 통화 기록 전송 시도 횟수(연결 실패·5xx)
 
 
-class _DirectoryLogFilter(logging.Filter):
-    """httpx2의 INFO 요청 로그가 검색어를 일반 서버 로그에 남기지 않게 한다."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return "/api/companies/search" not in record.getMessage()
-
-
-_DIRECTORY_LOG_FILTER = _DirectoryLogFilter()
-
-
 class BackendError(Exception):
     """예상하지 못한 응답(5xx, 형식 오류 등). 도구·판별 쪽에서 오류 결과로 바꾼다."""
-
-
-class _DirectoryAddress(BaseModel):
-    model_config = ConfigDict(strict=True)
-    name: str = Field(min_length=1)
-    phoneNumber: str = Field(min_length=1)
-    roadAddress: str = Field(min_length=1)
-    detailAddress: str | None = None
-    jibunAddress: str | None = None
-    dongName: str | None = None
-    postalCode: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-
-
-class _DirectoryEntry(BaseModel):
-    model_config = ConfigDict(strict=True)
-    organizationSeq: int = Field(gt=0)
-    organizationName: str = Field(min_length=1)
-    membershipSeq: int = Field(gt=0)
-    customerSeq: int = Field(gt=0)
-    departmentSeq: int | None
-    departmentName: str | None
-    addressData: _DirectoryAddress
-
-
-class _DirectoryPage(BaseModel):
-    model_config = ConfigDict(strict=True)
-    data: list[_DirectoryEntry]
-    hasNext: bool
-    total_count: int = Field(ge=0)
-
-
-@dataclass
-class CompanyDirectoryPage:
-    places: list[CompanyPlace]
-    has_next: bool
-    total_count: int
 
 
 @dataclass
@@ -86,8 +37,7 @@ class CallerContext:
     status: str = "UNREGISTERED"  # REGISTERED · UNREGISTERED · WITHDRAWN
     customer_seq: int | None = None
     name: str | None = None
-    default_origin: Place | None = None  # 현재 고객 기본주소. 개인 PIN·주문 이력과 독립
-    places: list[Place] = field(default_factory=list)  # 발신번호 주인의 개인 주소록
+    places: list[Place] = field(default_factory=list)  # 개인·기업 주소록(출발지·도착지 모두에 쓴다)
     usage_types: list[str] = field(default_factory=list)  # PERSONAL · COMPANY
     call_session_seq: int | None = None  # DB 통화 번호. 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더
     payment_methods: list[str] = field(default_factory=list)  # 지금 쓸 수 있는 billing · credit · groupBilling
@@ -102,10 +52,8 @@ def _pin_place(data: dict) -> Place | None:
         return None
     geo = None
     if all(data.get(k) not in (None, "") for k in ("jibunAddress", "dongName", "postalCode", "latitude", "longitude")):
-        lat, lon = data["latitude"], data["longitude"]
-        if lat != 1 and lon != 1 and -90 <= lat <= 90 and -180 <= lon <= 180:
-            geo = Geo(jibun_address=data["jibunAddress"], dong_name=data["dongName"], postal_code=data["postalCode"],
-                      latitude=lat, longitude=lon)
+        geo = Geo(jibun_address=data["jibunAddress"], dong_name=data["dongName"], postal_code=data["postalCode"],
+                  latitude=data["latitude"], longitude=data["longitude"])
     return Place(name=data["name"], phone=data["phoneNumber"], address=data["roadAddress"],
                  address_detail=data.get("detailAddress") or "", geo=geo)
 
@@ -182,7 +130,6 @@ class BackendAPI:
                  submit_timeout_sec: float = 15.0, submit_retry_sec: float = 40.0, retry_interval_sec: float = 2.0,
                  persona_token: str | None = None, insights_token: str | None = None):
         self.http = httpx2.AsyncClient(base_url=base_url, timeout=timeout_sec, transport=transport)
-        logging.getLogger("httpx2").addFilter(_DIRECTORY_LOG_FILTER)
         self.persona_token = persona_token  # 페르소나 API 전용 서비스 토큰(주문·고객 API에는 보내지 않는다)
         self.insights_token = insights_token  # 통화 기록·분석 API 전용 서비스 토큰(spec/insights.md)
         self.submit_timeout_sec = submit_timeout_sec
@@ -191,35 +138,6 @@ class BackendAPI:
 
     async def close(self) -> None:
         await self.http.aclose()
-
-    async def search_company_places(self, query: str, limit: int = 20, offset: int = 0) -> CompanyDirectoryPage:
-        """기업·사원 배송지 검색. 쿼리와 주소를 오류/로그에 포함하지 않는다."""
-        if not query.strip() or not 1 <= limit <= 100 or offset < 0:
-            raise BackendError("기업 배송지 검색 인수 오류")
-        try:
-            resp = await self.http.get("/api/companies/search", params={"q": query, "limit": limit, "offset": offset})
-        except httpx2.TransportError:
-            raise BackendError("기업 배송지 검색 연결 실패") from None
-        if resp.status_code != 200:
-            raise BackendError(f"기업 배송지 검색 HTTP {resp.status_code}")
-        try:
-            page = _DirectoryPage.model_validate(resp.json())
-            if len(page.data) > limit or (page.data and page.total_count < offset + len(page.data)) \
-                    or page.hasNext != (offset + len(page.data) < page.total_count) \
-                    or (page.hasNext and not page.data):
-                raise ValueError("페이지 불일치")
-            places = []
-            for entry in page.data:
-                place = _pin_place(entry.addressData.model_dump())
-                places.append(CompanyPlace(**place.model_dump(), organization_seq=entry.organizationSeq,
-                                           organization_name=entry.organizationName, membership_seq=entry.membershipSeq,
-                                           customer_seq=entry.customerSeq, department_seq=entry.departmentSeq,
-                                           department_name=entry.departmentName))
-            if len({(p.organization_seq, p.membership_seq) for p in places}) != len(places):
-                raise ValueError("중복 후보")
-            return CompanyDirectoryPage(places, page.hasNext, page.total_count)
-        except (ValueError, TypeError, ValidationError):
-            raise BackendError("기업 배송지 검색 응답 형식 오류") from None
 
     async def _post(self, path: str, body: dict, ok=(200, 201), headers: dict | None = None) -> httpx2.Response:
         resp = await self.http.post(PREFIX + path, json=body, headers=headers)
@@ -238,13 +156,11 @@ class BackendAPI:
         data = resp.json()["data"]
         customer = data.get("customer") or {}
         places = []
-        for pin in data.get("personalPins") or []:
+        for pin in [*(data.get("personalPins") or []), *(data.get("companyPins") or [])]:
             if (p := _pin_place(pin.get("addressData") or {})) and p not in places:
                 places.append(p)
         ctx = CallerContext(status=data["lookupStatus"], customer_seq=customer.get("customerSeq"),
                             name=customer.get("name"), places=places,
-                            default_origin=_pin_place({**(customer.get("address") or {}),
-                                                       "name": customer.get("name"), "phoneNumber": phone}),
                             usage_types=list(data.get("availableUsageTypes") or []),
                             call_session_seq=data.get("callSessionSeq"),
                             payment_methods=list(data.get("availablePaymentMethods") or []))

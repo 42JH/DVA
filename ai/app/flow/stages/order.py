@@ -55,8 +55,6 @@ def receiver_name_text(ctx) -> str:
     """받는 분: 제안(최근 도착지·하나 남은 핀·후보들)이 있으면 그것, 주소록에서 찾다가 한쪽만 들었으면 빠진 쪽,
     주소록이 있는 고객이면 받는 분·장소를 열어 묻고(B6, 백엔드가 match_pins), 아니면 성함.
     받는 곳 주소를 이미 받았으면 성함만 묻는다(2026-11-01 21:47 통화: 주소를 말했는데 "어디로 보내실 건가요?"를 또 물음)."""
-    if ctx.directory_status:
-        return "COMPANY_NARROW" if ctx.directory_status == "more" else "COMPANY_FAILED"
     kind = receiver_offer(ctx)
     if kind:
         return {"recent": "B4", "pin": "B9", "pins": "B8"}[kind]
@@ -82,6 +80,38 @@ FIELD_TEXTS = {
 }
 
 
+def next_after(ctx, filled: tuple[str, ...]) -> list[str]:
+    """그 항목들이 채워졌다고 보고 다음에 물을 질문(문구 키). 다 차면 되읽기 확인."""
+    for f in missing(ctx):
+        if f not in filled:
+            text = FIELD_TEXTS[f]
+            return [text(ctx) if callable(text) else text]
+    return ["A_CONFIRM"]
+
+
+def order_preview(ctx) -> list[tuple[str, list[str]]]:
+    """제안 질문의 답마다 바로 이어서 할 말(engine.preview). 음성 모델은 판별보다 먼저 말을 시작해, 미리 알려 주지 않으면
+    다음 질문을 스스로 지었다(2026-10-31 통화). 받는 분 질문은 그때의 제안 상태로 계산한다."""
+    kind = offer(ctx)
+    if kind == "origin":
+        return [(ORIGIN_CHOICES["yes"], next_after(ctx, ("sender_phone", "sender_address", "sender_address_detail"))),
+                (ORIGIN_CHOICES["no"], ["A1_2"]), (ORIGIN_CHOICES["other"], ["HUB_ASK"])]
+    if kind in ("recent", "pin"):
+        receiver = ("receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail")
+        out = [(YES_NO["yes"], next_after(ctx, receiver))]
+        if kind == "recent":
+            out.append((YES_NO["no"], ["B6" if ctx.pin_scope("destination") else "A2_1"]))
+        return out
+    return []
+
+
+def then_hint(ctx) -> bool:
+    """"그다음" 항목 알림은 그냥 항목을 묻는 질문에만. 받는 곳을 열어 묻거나(B6) 제안·후보를 묻는 중이면 답에 따라 다음이
+    갈려(주소록 찾기·제안 답) 엉뚱한 항목을 미리 묻게 된다."""
+    m = missing(ctx)
+    return not m or m[0] != "receiver_name" or receiver_name_text(ctx) == "A2_1"
+
+
 def order_choices(ctx) -> dict[str, str]:
     kind = offer(ctx)
     if kind == "origin":
@@ -95,7 +125,6 @@ def order_choices(ctx) -> dict[str, str]:
 
 async def order_answer(ctx, answer: str) -> list[str]:
     """제안에 대한 답. 예면 저장된 값을 임시 주문에 쓰고, 아니면 제안을 지워 그 항목을 그냥 묻는다."""
-    from app.tools.record_order import resolve
     kind = offer(ctx)
     if kind == "origin":
         place, ctx.origin_offer = ctx.origin_offer, None
@@ -111,17 +140,14 @@ async def order_answer(ctx, answer: str) -> list[str]:
         if answer == "yes":
             ctx.use_place("receiver", ctx.pin_offer)
             ctx.pin_offer, ctx.pin_candidates = None, []
-            ctx.directory_terms, ctx.directory_status = {}, None
         else:
             await ctx.reject_pin()
     elif kind == "pins":
         if answer.startswith("pin_"):
             ctx.pins_found([ctx.pin_candidates[int(answer.removeprefix("pin_")) - 1]], narrowing=True)
-        else:  # 이 중에 없다: 후보들은 버린다(같은 주소를 다시 말해도 같은 후보를 또 묻지 않게)
-            ctx.pin_rejected["destination"] += ctx.pin_candidates
+        else:
             ctx.pin_candidates = []
             await ctx.carry_dest_said()
-    await resolve(ctx)
     await ctx.sync_asking()
     return ["order.updated"]
 
@@ -199,6 +225,8 @@ STAGES = [
         field_texts=FIELD_TEXTS,
         choices=order_choices,
         on_answer=order_answer,
+        preview=order_preview,
+        then=then_hint,
         on_enter=start_parcel,
         unheard_ok=("no", "other"),  # 제안을 듣기 전이어도 아니라는 답은 되돌릴 수 있다(§2.5(1))
         transitions=on_updated("A_CONFIRM", order_complete) + (
@@ -207,7 +235,7 @@ STAGES = [
             Transition("pickup.past", STAY, action=past_pickup),
             # 그 밖의 기록·제안 답·주소록 찾기 결과: 단계는 그대로, 할 말(빠진 항목·제안)을 새로 계산한다
             *(Transition(e, STAY) for e in ("order.updated", "pins.one", "pins.many", "pins.none",
-                                              "pins.ask_name", "pins.ask_place", "pins.more")),
+                                              "pins.ask_name", "pins.ask_place")),
         ),
     ),
     Stage(

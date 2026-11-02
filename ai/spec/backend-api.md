@@ -13,7 +13,7 @@
 ## 공통
 
 - JSON, UTF-8. 단건 `{data, meta: {requestId}}`, 목록 `{data, hasNext}`, 오류 `{error: {code, message, details}, meta}`, 204는 본문 없음.
-- **기업 배송지 검색의 `q`를 제외하고 개인정보를 URL에 넣지 않는다.** 전화번호는 본문으로, 받는 분 성함으로 거르는 것은 AI 서버가 한다(목록의 `recipientName` 쿼리를 쓰지 않음). 경로에는 백엔드가 준 정수 번호만 넣는다.
+- **개인정보를 URL에 넣지 않는다.** 전화번호는 본문으로, 받는 분 성함으로 거르는 것은 AI 서버가 한다(목록의 `recipientName` 쿼리를 쓰지 않음). 경로에는 백엔드가 준 정수 번호만 넣는다.
 - 통화 중 조회·취소·이전 주소 요청에는 고객 확인에서 받은 통화 번호를 `call_session_seq` 헤더로 보낸다(`Call.call_session_seq`). 백엔드는 그 통화 고객의 주문만 보여 주고 취소하게 한다.
 
 ## 1. 고객 확인 — `POST /api/customers/context`
@@ -22,26 +22,13 @@
 
 | `data.lookupStatus` | AI 처리 |
 |---|---|
-| `REGISTERED` | 등록 고객. `customer.customerSeq`·`name`·`phoneNumber`·`address`(현재 기본 출발지), 주소록 `personalPins`의 `addressData`(도착지 핀 후보, 9개 항목이 다 있으면 다시 찾지 않음), `availablePaymentMethods`(결제 방식, 아래 3번) |
+| `REGISTERED` | 등록 고객. `customer.customerSeq`·`name`, 주소록 `personalPins`·`companyPins`의 `addressData`(도착지 핀 후보, 9개 항목이 다 있으면 다시 찾지 않음), `availablePaymentMethods`(결제 방식, 아래 3번) |
 | `UNREGISTERED` | 신규 고객(`availablePaymentMethods`는 빈 배열) |
 | `WITHDRAWN` | 신규로 다루지 않는다. 바로 상담원 연결 |
 
 - 실패(시간 초과·5xx)면 신규 고객으로 진행한다. 통화 번호가 없으므로 조회·취소는 "조회가 어려워요"(C3_FAIL)가 된다.
-- **이전 접수 주소** `GET /api/customers/{customerSeq}/addresses?direction=ORIGIN|DESTINATION&limit=`: 등록 고객이고 통화 번호가 있으면 이어서 부른다. 최근 것부터 오는 접수 완료(ACCEPTED) 주문의 주소다. 출발지 1건은 과거 이력으로만 보존하며 현재 기본 출발지를 대신하지 않는다. 도착지 `[flow] pin_recent_count`건은 "이번에도 {도착지 주소}로"와 도착지 핀 후보 맨 앞에 쓴다(`spec/scenario.md` B). 실패해도 고객 확인과 현재 기본 출발지는 그대로 쓴다.
+- **이전 접수 주소** `GET /api/customers/{customerSeq}/addresses?direction=ORIGIN|DESTINATION&limit=`: 등록 고객이고 통화 번호가 있으면 이어서 부른다. 최근 것부터 오는 접수 완료(ACCEPTED) 주문의 주소다. 출발지 1건은 기존 고객 인사의 `{기존 출발지}`, 도착지 `[flow] pin_recent_count`건은 "이번에도 {도착지 주소}로"와 도착지 핀 후보 맨 앞에 쓴다(`spec/scenario.md` B). 실패해도 고객 확인은 그대로 쓰고 출발지 없이 인사한다.
   - ACCEPTED 주문만 오므로 개인 카드 결제 대기(notPaid) 중인 최근 주문은 빠진다.
-
-## 1-0. 현재 기본주소와 기업 배송지 검색 (2026-11-02 인계)
-
-- `customer.address`는 주소 객체 또는 null이며 이름·전화번호를 중복 저장하지 않는다. `CallerContext.default_origin`은 현재 고객 이름과 서버가 확인한 발신번호를 주소에 결합한다. 개인 PIN·과거 주문과 분리하며 고객 이름 변경을 PIN에 전파하지 않는다.
-- 기본주소가 있으면 첫 택배의 출발지로 제안한다. 없으면 과거 주문/발신번호가 같은 개인 PIN을 자동 채택하지 않고 주소를 묻는다. 저장된 출발지를 적용해도 현재 이름·연락처와 통화 중 명시적 정정을 보존한다. 두 번째 택배부터 직전 출발지를 재사용한다.
-- `companyPins`는 폐기 호환 필드이며 AI는 읽지 않는다. 전체 기업 사원을 통화 시작 때 가져오지 않는다.
-- 기업·사원 배송지는 `GET /api/companies/search?q=...&limit=...&offset=...`로 찾는다. HTTP 클라이언트의 params로 인코딩한다. 응답은 `{data, hasNext, total_count}`, 항목은 `organizationSeq/organizationName/membershipSeq/customerSeq/departmentSeq/departmentName/addressData`다. 부서는 null일 수 있다. `companyPinSeq/label/version`을 요구하지 않는다.
-- 검색어의 공백 구분 단어는 모두 일치해야 한다. 활성 기업·활성 소속·활성 고객·주소 보유 여부는 백엔드가 판정한다. 다른 기업의 사원도 검색할 수 있으며 AI는 사원 목록에 개인 PIN의 발신번호 범위를 적용하지 않는다.
-- `CompanyPlace`에 기업/부서와 소속 식별값을 보관한다. 후보 선택은 기존 확인 흐름을 거친다. 번호를 PIN 번호로 변환하지 않는다. 주문에는 선택한 주소의 이름·전화번호·주소값만 복사하며 `originPin`을 지정하지 않는다. 과거 주문 주소는 바꾸지 않는다.
-- 통화 검색은 `max_pin_options + 1`개를 요청한다. `hasNext=true` 또는 전체 개수가 표시 상한을 넘으면 일부를 유일 후보로 확정하지 않고 기업/부서/이름을 더 묻는다. 전체 사원 목록을 무제한 페이지 순회하지 않는다. 클라이언트 메서드는 별도 페이지 조회를 위해 offset도 지원한다.
-- 0건과 연결/시간 초과/HTTP 오류/형식 오류를 구분한다. 오류 본문·검색어를 예외에 넣지 않고 httpx2의 기업 검색 요청 INFO 로그를 제외한다. 도구 기록은 기존 인증된 관제 범위에서만 다룬다. 인프라 프록시 접근 로그에서도 q를 노출하지 않도록 백엔드와 확인해야 한다.
-- 고객 기본좌표 1 또는 범위를 벗어난 좌표는 확정 좌표로 쓰지 않는다. 저장된 주소에 좌표가 없으면 선택 후 기존 주소DB/카카오 보정 경로로 채운다. 못 찾으면 기존 미완료/재질문 규칙을 따른다.
-- 새 계약 출처는 사용자 제공 `company-address-directory-handoff.md`다. 원격에는 해당 백엔드 작업 브랜치가 아직 없어 실제 서버와의 통합 검증은 별도다.
 
 ## 1-1. 신규 고객 등록 — `POST /api/customers`, `POST /api/customers/{id}/pins`
 
@@ -51,7 +38,7 @@
 2. 고객 확인을 같은 통화로 다시 불러(이전 주소는 읽지 않음) 고객 번호·결제 자격을 받는다. 백엔드는 통화 고객을 발신번호로 찾으므로 등록 직후부터 통화 번호로 조회·주소록 API를 쓸 수 있다.
 3. 보내는 곳(주소 9개 항목이 다 있을 때)을 개인 주소록에 저장: `POST /api/customers/{customerSeq}/pins` `{label: "보내는 곳", addressData}`, `call_session_seq` 헤더. 같은 주소면 409(그대로).
 
-- 통화 결과는 `customerSeq`로 보낸다. 개인 PIN 저장은 고객 기본주소 갱신과 별개다. 다음 통화의 기본 출발지는 `customer.address`로만 제안하며, 없으면 주소를 묻는다.
+- 통화 결과는 `customerSeq`로 보낸다. 다음 통화에서는 등록 고객이고, 접수 완료(ACCEPTED) 주문이 없어도(개인 카드 결제 대기뿐) 본인 주소록의 주소(발신번호와 같은 번호의 핀)가 `{기존 출발지}`다.
 - 실패해도 통화는 신규 고객으로 이어 간다(결과는 `customer: {name, phoneNumber}`).
 
 ## 2. 통화 중 조회·취소(C 흐름)
