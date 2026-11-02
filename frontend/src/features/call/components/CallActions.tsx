@@ -11,11 +11,15 @@ export function CallActions({
   results,
   actions,
   count,
+  resultsEmpty,
+  actionsEmpty,
 }: {
   className?: string
   results: ResultView[]
   actions: ActionView[]
   count: number
+  resultsEmpty: string // 블록이 없을 때 (받는 중 · 못 받음 · 없음)
+  actionsEmpty: string
 }) {
   return (
     <section
@@ -25,9 +29,7 @@ export function CallActions({
 
       <ul className="shrink-0">
         {results.length === 0 && (
-          <li className="border-b border-line py-4 text-body text-muted">
-            이 통화로 처리된 주문 · 미답변이 없습니다.
-          </li>
+          <li className="border-b border-line py-4 text-body text-muted">{resultsEmpty}</li>
         )}
         {results.map((r) => (
           <li key={r.key} className="border-b border-line py-4">
@@ -58,7 +60,7 @@ export function CallActions({
         AI 동작 <span className="text-label font-normal text-sub">{count}</span>
       </h3>
       <ul className="mt-3 min-h-0 flex-1 overflow-y-auto">
-        {actions.length === 0 && <li className="py-6 text-body text-muted">기록이 없습니다.</li>}
+        {actions.length === 0 && <li className="py-6 text-body text-muted">{actionsEmpty}</li>}
         {actions.map((a) => {
           const row = (
             <>

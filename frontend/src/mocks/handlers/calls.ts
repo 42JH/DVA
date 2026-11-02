@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 import { addDays, todayYmd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtDetailTime, fmtPhone } from '@/shared/lib/format'
@@ -413,7 +413,93 @@ const UNANSWERED_SEQ: Record<number, number> = { 9101: 7019, 9104: 7008 } // 09 
 const iso = (s: string) => new Date(s).toISOString()
 const plus = (s: string, sec: number) => new Date(Date.parse(s) + sec * 1000).toISOString()
 const sceneOf = (id: number) => CALLS.find((c) => c.callSessionSeq === id)
-const rowOf = (id: number) => ROWS.find((r) => r.callSessionSeq === id)
+const rowOf = (id: number) => rowsNow().find((r) => r.callSessionSeq === id) // 20초 뒤 생기는 새 통화도
+
+// ---------- 늦게 도착하는 데이터 (11/02 '통화 내역 자동 갱신 프론트 연동 명세'의 완료 조건을 가짜 서버로 재현) ----------
+// 시계는 페이지를 새로 열 때(가짜 서버가 뜰 때) 0초. 화면은 5초마다 다시 받음. 줄 번호는 목록(최신순) 위에서부터
+//  1번 줄: 15초 분석 → 25초 녹취(서명 URL 20초 유효, 조회마다 새 URL). 50~60초엔 상세 기본 조회가 503
+//  2번 줄: 녹취 발급 실패(DEPENDENCY_UNAVAILABLE)
+//  3번 줄: 녹취가 먼저(처음부터) → 20초에 분석. 대화 조회는 4초 늦게 오고 AI 동작 조회는 늘 503 (한 영역의 지연 · 실패가 다른 영역을 막지 않는지)
+//  4번 줄: 녹취 파일 없음(NOT_FOUND). 0~10초 대화 · AI 동작 · 처리 내역 없음
+//  새 통화: 20초에 목록 맨 위에 생김(분석 · 녹취 없이) → 35초에 분석
+//  목록 조회는 75~90초에 503 (받아 둔 줄은 그대로여야 함)
+const T0 = Date.now()
+const elapsed = () => (Date.now() - T0) / 1000
+const seqAt = (i: number) => SORTED[i].callSessionSeq
+const NEW_ROW: CallRow = {
+  callSessionSeq: 9900,
+  startedAt: new Date(T0 + 15_000).toISOString(),
+  customerName: '정다은',
+  callerNumber: '01055501234',
+  outcome: 'SUCCESS',
+  complaint: null,
+  durationSec: 42,
+}
+const rowsNow = () => (elapsed() >= 20 ? [NEW_ROW, ...SORTED] : SORTED)
+/** 아직 분석이 안 온 통화 */
+const pending = (r: CallRow) =>
+  (r.callSessionSeq === seqAt(0) && elapsed() < 15) ||
+  (r.callSessionSeq === seqAt(2) && elapsed() < 20) ||
+  (r.callSessionSeq === NEW_ROW.callSessionSeq && elapsed() < 35)
+/** 대화 · AI 동작 · 처리 내역이 아직 안 온 통화 */
+const eventsLater = (id: number) => id === seqAt(3) && elapsed() < 10
+const unavailable = () =>
+  HttpResponse.json(
+    {
+      error: {
+        code: 'DEPENDENCY_UNAVAILABLE',
+        message: '잠시 뒤 다시 시도해 주세요.',
+        details: [],
+      },
+    },
+    { status: 503 },
+  )
+let silentWav: string | null = null
+/** 30초 무음 WAV(8kHz 8bit) — 가짜 서버엔 녹취 파일이 없어 재생 · 위치 복원을 이걸로 봄 */
+const silentWavUrl = () => {
+  if (silentWav || typeof URL === 'undefined' || !URL.createObjectURL) return silentWav
+  const n = 8000 * 30
+  const b = new Uint8Array(44 + n)
+  const w = (o: number, s: string) => [...s].forEach((c, i) => (b[o + i] = c.charCodeAt(0)))
+  const u32 = (o: number, v: number) => new DataView(b.buffer).setUint32(o, v, true)
+  const u16 = (o: number, v: number) => new DataView(b.buffer).setUint16(o, v, true)
+  w(0, 'RIFF')
+  u32(4, 36 + n)
+  w(8, 'WAVE')
+  w(12, 'fmt ')
+  u32(16, 16)
+  u16(20, 1)
+  u16(22, 1)
+  u32(24, 8000)
+  u32(28, 8000)
+  u16(32, 1)
+  u16(34, 8)
+  w(36, 'data')
+  u32(40, n)
+  b.fill(0x80, 44)
+  silentWav = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }))
+  return silentWav
+}
+const recording = (
+  seq: number,
+  url: string | null,
+  ttlSec: number,
+  error: 'NOT_FOUND' | 'DEPENDENCY_UNAVAILABLE' | null,
+) => ({
+  recordingSeq: seq,
+  createdAt: new Date().toISOString(),
+  url: url ? `${url}#${Date.now()}` : null, // 실서버처럼 조회마다 URL 글자가 바뀜 → 같은 녹취면 재생 중 소리가 안 끊겨야 함
+  expiresAt: url ? new Date(Date.now() + ttlSec * 1000).toISOString() : null,
+  playbackError: error,
+})
+const recordingsOf = (r: CallRow) => {
+  const id = r.callSessionSeq
+  if (id === seqAt(0)) return elapsed() >= 25 ? [recording(9001, silentWavUrl(), 20, null)] : []
+  if (id === seqAt(1)) return [recording(9002, null, 0, 'DEPENDENCY_UNAVAILABLE')]
+  if (id === seqAt(2)) return [recording(9003, silentWavUrl(), 300, null)]
+  if (id === seqAt(3)) return [recording(9004, null, 0, 'NOT_FOUND')]
+  return []
+}
 
 /** 통화 기본 (CallListItem · Call 공통 부분) */
 function callOf(r: CallRow) {
@@ -583,13 +669,14 @@ export const callHandlers = [
     const orderSeq = p('orderSeq')
     const from = p('from')
     const to = p('to')
-    const hit = SORTED.filter((r) => {
+    if (elapsed() >= 75 && elapsed() < 90) return unavailable()
+    const hit = rowsNow().filter((r) => {
       const t = Date.parse(r.startedAt)
-      const a = analysisOf(r)
+      const a = pending(r) ? null : analysisOf(r) // 분석 전 통화는 결과 · 불만 필터에서 빠짐 (명세: 정상 필터 동작)
       return (
         (!q || r.customerName.toLowerCase().includes(q) || r.callerNumber.includes(q)) &&
-        (!result || a.result === result) &&
-        (hasComplaint === null || String(a.hasComplaint) === hasComplaint) &&
+        (!result || a?.result === result) &&
+        (hasComplaint === null || (!!a && String(a.hasComplaint) === hasComplaint)) &&
         (!personaSeq || Number(personaSeq) === PERSONA_SEQ) &&
         (!orderSeq || callOf(r).orderSeq === Number(orderSeq)) &&
         (!from || t >= Date.parse(from)) &&
@@ -598,7 +685,7 @@ export const callHandlers = [
     })
     return HttpResponse.json(
       pageOf(
-        hit.map((r) => ({ ...callOf(r), analysis: analysisOf(r) })),
+        hit.map((r) => ({ ...callOf(r), analysis: pending(r) ? null : analysisOf(r) })),
         url,
       ),
     )
@@ -607,31 +694,43 @@ export const callHandlers = [
   http.get(`${API_BASE_URL}/calls/:id`, ({ params }) => {
     const r = rowOf(Number(params.id))
     if (!r) return notFound()
+    if (r.callSessionSeq === seqAt(0) && elapsed() >= 50 && elapsed() < 60) return unavailable() // 재조회 실패해도 화면 유지
     const scene = sceneOf(r.callSessionSeq)
     return HttpResponse.json({
       data: {
         call: callOf(r),
-        analysis: analysisOf(r),
+        analysis: pending(r) ? null : analysisOf(r),
         aiActionCount: scene ? scene.actions.length : 0,
-        recordings: [],
+        recordings: recordingsOf(r),
       },
       meta: meta(),
     })
   }),
   // API-23 · 24 · 25 — 장면이 없는 통화는 빈 목록 (무음이 아니라 미수집)
-  http.get(`${API_BASE_URL}/calls/:id/transcript`, ({ request, params }) => {
-    const scene = sceneOf(Number(params.id))
-    if (!rowOf(Number(params.id))) return notFound()
-    return HttpResponse.json(pageOf(scene ? eventsOf(scene).utterances : [], new URL(request.url)))
+  http.get(`${API_BASE_URL}/calls/:id/transcript`, async ({ request, params }) => {
+    const id = Number(params.id)
+    const scene = sceneOf(id)
+    if (!rowOf(id)) return notFound()
+    if (id === seqAt(2)) await delay(4000) // 대화만 늦게 — 나머지 영역은 먼저 그려져야 함
+    return HttpResponse.json(
+      pageOf(scene && !eventsLater(id) ? eventsOf(scene).utterances : [], new URL(request.url)),
+    )
   }),
   http.get(`${API_BASE_URL}/calls/:id/actions`, ({ request, params }) => {
-    const scene = sceneOf(Number(params.id))
-    if (!rowOf(Number(params.id))) return notFound()
-    return HttpResponse.json(pageOf(scene ? eventsOf(scene).actions : [], new URL(request.url)))
+    const id = Number(params.id)
+    const scene = sceneOf(id)
+    if (!rowOf(id)) return notFound()
+    if (id === seqAt(2)) return unavailable() // AI 동작만 늘 실패 — 다른 영역은 그대로여야 함
+    return HttpResponse.json(
+      pageOf(scene && !eventsLater(id) ? eventsOf(scene).actions : [], new URL(request.url)),
+    )
   }),
   http.get(`${API_BASE_URL}/calls/:id/processing-results`, ({ request, params }) => {
-    const scene = sceneOf(Number(params.id))
-    if (!rowOf(Number(params.id))) return notFound()
-    return HttpResponse.json(pageOf(scene ? eventsOf(scene).results : [], new URL(request.url)))
+    const id = Number(params.id)
+    const scene = sceneOf(id)
+    if (!rowOf(id)) return notFound()
+    return HttpResponse.json(
+      pageOf(scene && !eventsLater(id) ? eventsOf(scene).results : [], new URL(request.url)),
+    )
   }),
 ]

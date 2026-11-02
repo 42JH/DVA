@@ -182,6 +182,7 @@ export interface ResultBlock {
   unansweredQuestionSeq: number | null
 }
 export interface Recording {
+  recordingSeq: number // 재조회마다 서명 URL 글자가 바뀌어도 같은 녹취인지 보는 열쇠 (11/02 연동 명세)
   url: string | null
   expiresAt: string | null
   error: RecordingDto['playbackError']
@@ -200,7 +201,7 @@ export interface CallDetail {
   actions: AiAction[]
   results: ResultBlock[]
   aiActionCount: number
-  recording: Recording | null // 첫 녹취 (url 있는 것 우선). 녹취 없으면 null
+  recording: Recording | null // 첫 녹취 (url 있는 것 우선). 빈 배열(아직 연결 안 됨)이면 null
 }
 
 export const OUTCOME_OF: Record<ResultDto, Outcome> = {
@@ -288,6 +289,13 @@ export function toCallDetail(
       unansweredQuestionSeq: x.unansweredQuestionSeq,
     })),
     aiActionCount: d.aiActionCount,
-    recording: rec ? { url: rec.url, expiresAt: rec.expiresAt, error: rec.playbackError } : null,
+    recording: rec
+      ? {
+          recordingSeq: rec.recordingSeq,
+          url: rec.url,
+          expiresAt: rec.expiresAt,
+          error: rec.playbackError,
+        }
+      : null,
   }
 }

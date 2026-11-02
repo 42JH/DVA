@@ -25,6 +25,11 @@ function CallDetailBody({ callId }: { callId: number }) {
   return (
     // 두 카드가 화면 바닥까지 (카드 안에서만 스크롤). 창이 낮으면 최소 760 높이로 두고 페이지가 스크롤
     <div className="flex min-h-[760px] flex-1 flex-col gap-6">
+      {vm.notice && (
+        <p role="status" className="px-4 text-caption text-muted">
+          {vm.notice}
+        </p>
+      )}
       {/* 요약: 칸 폭은 내용대로, 사이 간격은 같게. 세로선으로 칸 구분 */}
       <section className="shrink-0 rounded-xl bg-surface px-8 ring-1 ring-line ring-inset">
         <div className="flex items-start justify-between gap-8 py-6 whitespace-nowrap">
@@ -79,12 +84,15 @@ function CallDetailBody({ callId }: { callId: number }) {
           segments={vm.segments}
           focusKey={vm.focusKey}
           jump={vm.jump}
+          emptyText={vm.scriptEmpty}
         />
         <CallActions
           className="min-w-0 flex-1"
           results={vm.results}
           actions={vm.actions}
           count={vm.actionCount}
+          resultsEmpty={vm.resultsEmpty}
+          actionsEmpty={vm.actionsEmpty}
         />
       </div>
 

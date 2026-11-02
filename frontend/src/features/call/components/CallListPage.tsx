@@ -110,11 +110,12 @@ export function CallListPage() {
           head={
             <h2 className="flex items-baseline gap-3.5 text-card font-bold">
               통화 목록
-              {!vm.isLoading && ( // 첫 로딩 중엔 '0건'을 보이지 않음
-                <span className="text-label font-normal text-sub">
-                  {vm.count.toLocaleString('ko-KR')}건
-                </span>
-              )}
+              {!vm.isLoading &&
+                !(vm.listError && vm.rows.length === 0) && ( // 첫 로딩 중 · 못 받았을 땐 '0건'을 보이지 않음
+                  <span className="text-label font-normal text-sub">
+                    {vm.count.toLocaleString('ko-KR')}건
+                  </span>
+                )}
               {vm.listNote && (
                 <span className="text-caption font-normal text-muted">{vm.listNote}</span>
               )}
