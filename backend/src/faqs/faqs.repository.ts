@@ -20,7 +20,7 @@ export class FaqsRepository {
     return await readPage<AgentFaqDto | FaqDto>(
       this.database.pool,
       `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries
-       WHERE ($1::text IS NULL OR strpos(lower(normalize(question,NFC)),lower(normalize($1,NFC)))>0
+       WHERE deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(normalize(question,NFC)),lower(normalize($1,NFC)))>0
          OR strpos(lower(normalize(answer,NFC)),lower(normalize($1,NFC)))>0)
          AND ($2::int[] IS NULL OR faq_entry_seq=ANY($2::int[]))
          AND ($3::text IS NULL OR category=$3)`,
@@ -37,7 +37,7 @@ export class FaqsRepository {
   async find(id: number, agent: boolean): Promise<AgentFaqDto | FaqDto | undefined> {
     return (
       await this.database.pool.query<AgentFaqDto | FaqDto>(
-        `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries WHERE faq_entry_seq=$1`,
+        `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
         [id],
       )
     ).rows[0];
@@ -62,7 +62,7 @@ export class FaqsRepository {
       (
         await client.query(
           `UPDATE faq_entries SET question=$2,answer=$3,category=$5,
-       updated_by_admin_user_seq=$4 WHERE faq_entry_seq=$1`,
+       updated_by_admin_user_seq=$4 WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
           [id, input.question, input.answer, adminId, input.category],
         )
       ).rowCount === 1
@@ -72,7 +72,7 @@ export class FaqsRepository {
   async delete(client: PoolClient, ids: number[]): Promise<number[]> {
     return (
       await client.query<{ id: number }>(
-        'DELETE FROM faq_entries WHERE faq_entry_seq=ANY($1::int[]) RETURNING faq_entry_seq AS id',
+        'UPDATE faq_entries SET deleted_at=clock_timestamp() WHERE faq_entry_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING faq_entry_seq AS id',
         [ids],
       )
     ).rows.map((row) => row.id);

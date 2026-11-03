@@ -36,7 +36,14 @@ export class CallEndRepository {
       )
     ).rows[0];
     if (!event) return null;
-    if (event.callId !== null) return event.callId;
+    if (event.callId !== null) {
+      const call = await client.query(
+        `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
+        AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+        [event.callId],
+      );
+      return call.rowCount ? event.callId : null;
+    }
     const callId = await this.sessions.matchRecording(client, {
       callerPhoneNumber: payload.callFrom,
       startedAt: payload.startedAt,

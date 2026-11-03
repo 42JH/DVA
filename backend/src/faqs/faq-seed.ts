@@ -49,7 +49,7 @@ export async function seedFaqs(
     await client.query('BEGIN');
     const admin = (
       await client.query<{ id: number }>(
-        "SELECT admin_user_seq AS id FROM admin_users WHERE login_id=$1 AND status='ACTIVE' AND role IN ('OPERATOR','SUPERVISOR','SYSTEM_ADMIN') FOR SHARE",
+        "SELECT admin_user_seq AS id FROM admin_users WHERE login_id=$1 AND deleted_at IS NULL AND status='ACTIVE' AND role IN ('OPERATOR','SUPERVISOR','SYSTEM_ADMIN') FOR SHARE",
         [loginId],
       )
     ).rows[0];

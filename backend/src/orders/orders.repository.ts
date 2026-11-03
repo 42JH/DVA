@@ -18,6 +18,31 @@ import {
 
 @Injectable()
 export class OrdersRepository {
+  async deletionBlocked(client: PoolClient, id: number): Promise<boolean> {
+    const requests = await client.query<{ blocked: boolean }>(
+      `SELECT ((approval_started_at IS NOT NULL AND completed_at IS NULL AND invalidated_at IS NULL)
+        OR notification_status='SENDING' OR completion_notification_status='SENDING') AS blocked
+       FROM order_payment_requests WHERE order_seq=$1 ORDER BY payment_request_id FOR UPDATE`,
+      [id],
+    );
+    const calls = await client.query(
+      `SELECT 1 FROM call_sessions WHERE order_seq=$1 AND deleted_at IS NULL AND ended_at IS NULL LIMIT 1`,
+      [id],
+    );
+    return requests.rows.some((row) => row.blocked) || !!calls.rowCount;
+  }
+
+  async softDelete(client: PoolClient, id: number): Promise<void> {
+    await client.query(
+      `UPDATE order_payment_requests SET
+      notification_status=CASE WHEN notification_status='PENDING' THEN 'FAILED' ELSE notification_status END,
+      completion_notification_status=CASE WHEN completion_notification_status IN ('WAITING','PENDING') THEN 'FAILED' ELSE completion_notification_status END
+      WHERE order_seq=$1`,
+      [id],
+    );
+    await client.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1', [id]);
+  }
+
   async emptyResult(client: PoolClient, key: string) {
     return (
       await client.query<{ callSessionSeq: number; actorAdminUserSeq: number | null }>(
@@ -49,7 +74,7 @@ export class OrdersRepository {
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
         `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
         payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
-       FROM orders o WHERE order_seq=$1`,
+       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL`,
         [id, callId],
       )
     ).rows[0];
@@ -85,7 +110,7 @@ export class OrdersRepository {
   async customerByPhone(client: PoolClient, phone: string) {
     return (
       await client.query<{ customerSeq: number }>(
-        `SELECT customer_seq AS "customerSeq" FROM customers WHERE phone_number=$1 AND status='ACTIVE' FOR SHARE`,
+        `SELECT customer_seq AS "customerSeq" FROM customers WHERE phone_number=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE`,
         [phone],
       )
     ).rows[0];
@@ -105,7 +130,11 @@ export class OrdersRepository {
 
   async customerExists(client: PoolClient, id: number): Promise<boolean> {
     return (
-      (await client.query('SELECT 1 FROM customers WHERE customer_seq=$1', [id])).rowCount === 1
+      (
+        await client.query('SELECT 1 FROM customers WHERE customer_seq=$1 AND deleted_at IS NULL', [
+          id,
+        ])
+      ).rowCount === 1
     );
   }
 
@@ -120,7 +149,8 @@ export class OrdersRepository {
           'detailAddress',p.${side}_detail_address,'dongName',p.${side}_dong_name,
           'postalCode',p.${side}_postal_code) AS address
        FROM orders o JOIN order_parcels p ON p.order_seq=o.order_seq
-       WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE'
+       WHERE o.customer_seq=$1 AND o.status='ACCEPTED' AND p.status='ACTIVE' AND o.deleted_at IS NULL
+         AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
          AND ($2::timestamptz IS NULL OR o.created_at >= $2)
          AND ($3::timestamptz IS NULL OR o.created_at < $3)
          AND (NULLIF(btrim(p.${side}_road_address),'') IS NOT NULL
@@ -151,8 +181,9 @@ export class OrdersRepository {
       }>(
         `SELECT u.customer_seq AS "customerSeq", c.ended_at AS "endedAt", c.order_seq AS "orderSeq"
          FROM call_sessions c LEFT JOIN customers u
-           ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE'
-         WHERE c.call_session_seq=$1`,
+           ON u.phone_number=c.caller_phone_number AND u.status='ACTIVE' AND u.deleted_at IS NULL
+         WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL
+           AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
         [callId],
       )
     ).rows[0];
@@ -171,7 +202,8 @@ export class OrdersRepository {
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
          ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=o.order_seq),'[]'::jsonb) AS parcels
        FROM orders o
-       WHERE ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
+       WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+        AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
            WHERE strpos(lower(normalize(v.value,NFC)),lower($1))>0)
@@ -200,7 +232,8 @@ export class OrdersRepository {
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
          FROM orders o
-         WHERE ($1::int IS NULL OR o.customer_seq=$1)
+         WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+           AND ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)
            AND ($4::text IS NULL OR o.status=$4)
@@ -264,7 +297,8 @@ export class OrdersRepository {
             WHERE p.order_seq=o.order_seq
           ),'[]'::jsonb)
         ) AS detail FROM orders o
-        WHERE o.order_seq=$1 AND ($2::int IS NULL OR o.customer_seq=$2)`,
+        WHERE o.order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+          AND ($2::int IS NULL OR o.customer_seq=$2)`,
         [id, customerId],
       )
     ).rows[0]?.detail;
@@ -278,16 +312,19 @@ export class OrdersRepository {
   ) {
     return (
       await client.query<
-        CreatedOrderDto & { allowed: boolean; creationSource: OrderCreationSource }
+        CreatedOrderDto & {
+          allowed: boolean;
+          deleted: boolean;
+          creationSource: OrderCreationSource;
+        }
       >(
         `SELECT o.order_seq AS "orderSeq", o.version,o.creation_source AS "creationSource",
+          (o.deleted_at IS NOT NULL OR COALESCE(o.closed_at,o.created_at)<=clock_timestamp()-interval '5 years') AS deleted,
           CASE WHEN $2::int IS NULL THEN EXISTS(
-            SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq)
-          ELSE EXISTS(
-            SELECT 1 FROM audit_logs a WHERE a.target_type='ORDER' AND a.target_seq=o.order_seq
-              AND a.action='ORDER_CREATED' AND a.result='SUCCESS' AND a.actor_type='ADMIN' AND a.actor_seq=$2)
+            SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq AND c.deleted_at IS NULL)
+          ELSE o.created_by_admin_user_seq=$2
             AND ($3::int IS NULL OR EXISTS(
-              SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq))
+              SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$3 AND c.order_seq=o.order_seq AND c.deleted_at IS NULL))
           END AS allowed
         FROM orders o WHERE o.creation_request_id=$1::uuid`,
         [key, adminId, callId],
@@ -298,7 +335,7 @@ export class OrdersRepository {
   async call(client: PoolClient, id: number) {
     return (
       await client.query<{ orderSeq: number | null; endedAt: Date | null; phone: string | null }>(
-        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone FROM call_sessions WHERE call_session_seq=$1 FOR UPDATE',
+        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
         [id],
       )
     ).rows[0];
@@ -309,16 +346,16 @@ export class OrdersRepository {
       pin.scope === 'PERSONAL'
         ? await client.query(
             `SELECT personal_pin_seq FROM personal_pins
-         WHERE personal_pin_seq=$1 AND customer_seq=$2 FOR SHARE`,
+         WHERE personal_pin_seq=$1 AND customer_seq=$2 AND deleted_at IS NULL FOR SHARE`,
             [pin.pinSeq, customerId],
           )
         : await client.query(
             // Lock company access before the PIN, matching department rename and deletion.
             `WITH allowed AS MATERIALIZED (
               SELECT o.organization_seq FROM memberships m JOIN organizations o USING(organization_seq)
-              WHERE m.customer_seq=$2 AND m.status='ACTIVE' AND o.status='ACTIVE' FOR SHARE OF m,o
+              WHERE m.customer_seq=$2 AND m.status='ACTIVE' AND o.status='ACTIVE' AND m.deleted_at IS NULL AND o.deleted_at IS NULL FOR SHARE OF m,o
             ) SELECT p.company_pin_seq FROM company_pins p JOIN allowed a USING(organization_seq)
-            WHERE p.company_pin_seq=$1 FOR SHARE OF p`,
+            WHERE p.company_pin_seq=$1 AND p.deleted_at IS NULL FOR SHARE OF p`,
             [pin.pinSeq, customerId],
           );
     return result.rowCount === 1;
@@ -333,7 +370,7 @@ export class OrdersRepository {
         totalAmount: number | null;
         paymentMethodType: string | null;
       }>(
-        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 FOR UPDATE',
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL AND COALESCE(closed_at,created_at)>clock_timestamp()-interval \'5 years\' FOR UPDATE',
         [id],
       )
     ).rows[0];
@@ -426,11 +463,12 @@ export class OrdersRepository {
     customerId: number | null,
     key: string,
     creationSource: OrderCreationSource,
+    adminId: number | null = null,
   ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount)
-       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6) RETURNING order_seq AS id`,
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount,created_by_admin_user_seq)
+       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6,$7) RETURNING order_seq AS id`,
         [
           customerId,
           draft.paymentMethodType,
@@ -438,6 +476,7 @@ export class OrdersRepository {
           key,
           creationSource,
           draft.totalAmount,
+          adminId,
         ],
       )
     ).rows[0].id;

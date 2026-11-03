@@ -110,12 +110,12 @@ before(async () => {
     DVER_API_KEY: 'dver-fixture',
   });
   await pool.query(
-    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) DO UPDATE SET password_hash=EXCLUDED.password_hash",
+    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash",
     [await hashPassword('payment-fixture-only')],
   );
   customerId = (
     await pool.query(
-      "INSERT INTO customers(name,phone_number,status) VALUES('실주문 검증','01000210001','ACTIVE') ON CONFLICT(phone_number) DO UPDATE SET status='ACTIVE' RETURNING customer_seq",
+      "INSERT INTO customers(name,phone_number,status) VALUES('실주문 검증','01000210001','ACTIVE') ON CONFLICT(phone_number) WHERE deleted_at IS NULL DO UPDATE SET status='ACTIVE' RETURNING customer_seq",
     )
   ).rows[0].customer_seq;
   const { AppModule } = require('../dist/app.module');

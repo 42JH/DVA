@@ -55,7 +55,7 @@ before(async () => {
   await migrate(pool);
   adminId = (
     await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('deletion1030','삭제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('deletion1030','삭제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
       [await hashPassword('deletion-test-only')],
     )
   ).rows[0].admin_user_seq;
@@ -207,7 +207,7 @@ async function history(f) {
   ).rows[0].snapshot;
 }
 
-test('company deletion physically clears company data while preserving personal, order, call and billing history', async () => {
+test('company soft deletion hides company data while preserving personal, order, call and billing history', async () => {
   const f = await fixture();
   const pin = await companyPin(f, { departmentSeq: f.department });
   const parcels = [
@@ -270,12 +270,21 @@ test('company deletion physically clears company data while preserving personal,
   );
   assert.equal((await request('GET', `/companies/${f.company}`)).status, 404);
   assert.equal(
-    (await pool.query('SELECT 1 FROM departments WHERE organization_seq=$1', [f.company])).rowCount,
+    (
+      await pool.query(
+        'SELECT 1 FROM departments WHERE organization_seq=$1 AND deleted_at IS NULL',
+        [f.company],
+      )
+    ).rowCount,
     0,
   );
   assert.equal(
-    (await pool.query('SELECT 1 FROM company_pins WHERE organization_seq=$1', [f.company]))
-      .rowCount,
+    (
+      await pool.query(
+        'SELECT 1 FROM company_pins WHERE organization_seq=$1 AND deleted_at IS NULL',
+        [f.company],
+      )
+    ).rowCount,
     0,
   );
   const context = (await request('POST', '/customers/context', { phoneNumber: f.phone })).body.data;
@@ -383,7 +392,11 @@ test('department deletion detaches its employees and deletes only its pins while
   assert.deepEqual(await detail(settled.orderSeq), before);
   assert.equal((await request('GET', `/companies/${f.company}`)).status, 200);
   assert.equal(
-    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    (
+      await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1 AND deleted_at IS NULL', [
+        f.member,
+      ])
+    ).rowCount,
     0,
   );
   assert.equal((await request('GET', `/customers/${f.customer}`)).status, 200);
@@ -394,16 +407,22 @@ test('department deletion detaches its employees and deletes only its pins while
   );
   assert.deepEqual(
     (
-      await pool.query('SELECT company_pin_seq FROM company_pins WHERE organization_seq=$1', [
-        f.company,
-      ])
+      await pool.query(
+        'SELECT company_pin_seq FROM company_pins WHERE organization_seq=$1 AND deleted_at IS NULL',
+        [f.company],
+      )
     ).rows
       .map((p) => p.company_pin_seq)
       .sort((a, b) => a - b),
     [common, retained].sort((a, b) => a - b),
   );
   assert.equal(
-    (await pool.query('SELECT 1 FROM company_pins WHERE company_pin_seq=$1', [target])).rowCount,
+    (
+      await pool.query(
+        'SELECT 1 FROM company_pins WHERE company_pin_seq=$1 AND deleted_at IS NULL',
+        [target],
+      )
+    ).rowCount,
     0,
   );
   assert.equal(
@@ -509,7 +528,11 @@ test('unassigned legacy PINs are preserved without blocking department deletion 
     before,
   );
   assert.equal(
-    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    (
+      await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1 AND deleted_at IS NULL', [
+        f.member,
+      ])
+    ).rowCount,
     0,
   );
 });
@@ -533,11 +556,20 @@ test('audit failure after all company deletes rolls back the complete operation'
   assert.deepEqual(await history(f), before);
   assert.equal((await request('GET', `/companies/${f.company}`)).status, 200);
   assert.equal(
-    (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+    (
+      await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1 AND deleted_at IS NULL', [
+        f.member,
+      ])
+    ).rowCount,
     1,
   );
   assert.equal(
-    (await pool.query('SELECT 1 FROM company_pins WHERE company_pin_seq=$1', [pin])).rowCount,
+    (
+      await pool.query(
+        'SELECT 1 FROM company_pins WHERE company_pin_seq=$1 AND deleted_at IS NULL',
+        [pin],
+      )
+    ).rowCount,
     1,
   );
   assert.equal(
@@ -576,7 +608,12 @@ test('busy customers prevent partial deletion and concurrent deletes produce one
     await blocker.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [f.customer]);
     assert.equal((await request('DELETE', `/companies/${f.company}`)).status, 409);
     assert.equal(
-      (await pool.query('SELECT 1 FROM memberships WHERE membership_seq=$1', [f.member])).rowCount,
+      (
+        await pool.query(
+          'SELECT 1 FROM memberships WHERE membership_seq=$1 AND deleted_at IS NULL',
+          [f.member],
+        )
+      ).rowCount,
       1,
     );
   } finally {
@@ -666,8 +703,12 @@ test('deleting a company without departments unlinks employees and preserves cus
   assert.equal((await request('DELETE', `/companies/${company}`)).status, 204);
   assert.equal((await request('GET', '/customers/' + customer)).status, 200);
   assert.equal(
-    (await pool.query('SELECT count(*) FROM memberships WHERE customer_seq=$1', [customer])).rows[0]
-      .count,
+    (
+      await pool.query(
+        'SELECT count(*) FROM memberships WHERE customer_seq=$1 AND deleted_at IS NULL',
+        [customer],
+      )
+    ).rows[0].count,
     '0',
   );
   assert.ok(await detail(saved.orderSeq));

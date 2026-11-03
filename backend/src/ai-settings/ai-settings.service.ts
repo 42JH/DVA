@@ -76,12 +76,8 @@ export class AiSettingsService {
     versions: PersonaVersion[],
     client?: PoolClient,
   ): Promise<PersonaVersion[]> {
-    const names = await this.audit.actorNames(
-      'AI_PERSONA_VERSION',
-      versions.map((version) => ({
-        actorId: version.createdByAdminUserSeq,
-        targetId: version.aiPersonaVersionSeq,
-      })),
+    const names = await this.repository.authorNames(
+      versions.map((version) => version.aiPersonaVersionSeq),
       client,
     );
     return versions.map((version) => ({

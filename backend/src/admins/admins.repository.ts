@@ -12,7 +12,7 @@ export class AdminsRepository {
   async byLogin(loginId: string, client: PoolClient) {
     return (
       await client.query<AdminAccount>(
-        `SELECT ${columns} FROM admin_users WHERE login_id=$1 FOR UPDATE`,
+        `SELECT ${columns} FROM admin_users WHERE login_id=$1 AND deleted_at IS NULL FOR UPDATE`,
         [loginId],
       )
     ).rows[0];
@@ -20,7 +20,7 @@ export class AdminsRepository {
   async lock(ids: number[], client: PoolClient) {
     return (
       await client.query<AdminAccount>(
-        `SELECT ${columns} FROM admin_users WHERE admin_user_seq=ANY($1::int[]) ORDER BY admin_user_seq FOR UPDATE`,
+        `SELECT ${columns} FROM admin_users WHERE admin_user_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY admin_user_seq FOR UPDATE`,
         [ids],
       )
     ).rows;
@@ -38,7 +38,7 @@ export class AdminsRepository {
     return await readPage<AdminAccount>(
       this.database.pool,
       `SELECT ${columns} FROM admin_users
-   WHERE ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)`,
+   WHERE deleted_at IS NULL AND ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)`,
       [query.role ?? null, query.status ?? null],
       query,
       '"adminUserSeq" DESC',
@@ -67,6 +67,10 @@ export class AdminsRepository {
     );
   }
   async remove(id: number, client: PoolClient) {
-    await client.query('DELETE FROM admin_users WHERE admin_user_seq=$1', [id]);
+    await client.query('DELETE FROM admin_sessions WHERE admin_user_seq=$1', [id]);
+    await client.query(
+      'UPDATE admin_users SET deleted_at=clock_timestamp() WHERE admin_user_seq=$1 AND deleted_at IS NULL',
+      [id],
+    );
   }
 }

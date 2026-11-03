@@ -24,7 +24,7 @@ export class MembersRepository {
       organizationSeq: number;
       status: string;
     }>(
-      `SELECT organization_seq AS "organizationSeq", status FROM organizations WHERE organization_seq=$1${client ? ' FOR UPDATE' : ''}`,
+      `SELECT organization_seq AS "organizationSeq", status FROM organizations WHERE organization_seq=$1 AND deleted_at IS NULL${client ? ' FOR UPDATE' : ''}`,
       [id],
     );
     return result.rows[0];
@@ -37,7 +37,7 @@ export class MembersRepository {
         'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
         jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) AS customer
        FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
-       WHERE m.organization_seq=$1 AND ($2::text IS NULL OR m.status=$2)`,
+       WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL AND ($2::text IS NULL OR m.status=$2)`,
       [companyId, query.status ?? null],
       query,
       "(membership->>'membershipSeq')::integer DESC",
@@ -47,7 +47,7 @@ export class MembersRepository {
 
   async member(id: number, client?: PoolClient): Promise<Membership | undefined> {
     const result = await (client ?? this.database.pool).query<Membership>(
-      `SELECT ${memberColumns} FROM memberships WHERE membership_seq=$1`,
+      `SELECT ${memberColumns} FROM memberships WHERE membership_seq=$1 AND deleted_at IS NULL`,
       [id],
     );
     return result.rows[0];
@@ -55,7 +55,7 @@ export class MembersRepository {
 
   async customer(id: number, client: PoolClient): Promise<Customer | undefined> {
     const result = await client.query<Customer>(
-      'SELECT customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status FROM customers WHERE customer_seq=$1 FOR UPDATE',
+      'SELECT customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status FROM customers WHERE customer_seq=$1 AND deleted_at IS NULL FOR UPDATE',
       [id],
     );
     return result.rows[0];
@@ -84,14 +84,17 @@ export class MembersRepository {
   }
 
   async remove(id: number, client: PoolClient): Promise<void> {
-    await client.query('DELETE FROM memberships WHERE membership_seq=$1', [id]);
+    await client.query(
+      'UPDATE memberships SET deleted_at=clock_timestamp() WHERE membership_seq=$1 AND deleted_at IS NULL',
+      [id],
+    );
   }
 
   async department(companyId: number, departmentId: number, client: PoolClient): Promise<boolean> {
     return (
       (
         await client.query(
-          'SELECT 1 FROM departments WHERE organization_seq=$1 AND department_seq=$2 FOR SHARE',
+          'SELECT 1 FROM departments WHERE organization_seq=$1 AND department_seq=$2 AND deleted_at IS NULL FOR SHARE',
           [companyId, departmentId],
         )
       ).rowCount === 1
@@ -101,7 +104,7 @@ export class MembersRepository {
   async lockDepartments(companyId: number, ids: number[], client: PoolClient): Promise<boolean> {
     if (!ids.length) return true;
     const result = await client.query(
-      'SELECT department_seq FROM departments WHERE organization_seq=$1 AND department_seq=ANY($2::int[]) ORDER BY department_seq FOR SHARE',
+      'SELECT department_seq FROM departments WHERE organization_seq=$1 AND department_seq=ANY($2::int[]) AND deleted_at IS NULL ORDER BY department_seq FOR SHARE',
       [companyId, ids],
     );
     return result.rowCount === ids.length;
@@ -120,8 +123,8 @@ export class MembersRepository {
     const result = await client.query<MemberCandidate>(
       `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status AS "customerStatus",
        m.membership_seq AS "membershipSeq",m.organization_seq AS "organizationSeq",m.employee_no AS "employeeNo"
-       FROM customers c LEFT JOIN memberships m ON m.customer_seq=c.customer_seq
-       WHERE c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[]))`,
+       FROM customers c LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+       WHERE c.deleted_at IS NULL AND (c.phone_number=ANY($1::text[]) OR (m.organization_seq=$2 AND m.employee_no=ANY($3::text[])))`,
       [rows.map((row) => row.phoneNumber), companyId, rows.map((row) => row.employeeNo)],
     );
     return result.rows;

@@ -326,7 +326,7 @@ test('system admin approves pending accounts, filters lists and rejects empty/nu
     list.body.total_count,
     (
       await db.pool.query(
-        "SELECT count(*)::int AS n FROM admin_users WHERE role='OPERATOR' AND status='ACTIVE'",
+        "SELECT count(*)::int AS n FROM admin_users WHERE role='OPERATOR' AND status='ACTIVE' AND deleted_at IS NULL",
       )
     ).rows[0].n,
   );
@@ -1262,7 +1262,7 @@ test('logout records one success with session deletion and failed audit storage 
   }
 });
 
-test('admin deletion physically removes every allowed role/status and sessions while preserving audit names', async () => {
+test('admin soft deletion retains accounts, hides every allowed role/status and revokes sessions', async () => {
   const system = await account('deleteSystem', 'SYSTEM_ADMIN');
   const cookie = (await login(system)).session;
   for (const role of ['OPERATOR', 'SUPERVISOR']) {
@@ -1276,9 +1276,22 @@ test('admin deletion physically removes every allowed role/status and sessions w
       const response = await call('DELETE', '/api/admins/' + target.id, undefined, cookie);
       assert.equal(response.status, 204, response.text);
       assert.equal(
-        (await db.pool.query('SELECT 1 FROM admin_users WHERE admin_user_seq=$1', [target.id]))
-          .rowCount,
+        (
+          await db.pool.query(
+            'SELECT 1 FROM admin_users WHERE admin_user_seq=$1 AND deleted_at IS NULL',
+            [target.id],
+          )
+        ).rowCount,
         0,
+      );
+      assert.equal(
+        (
+          await db.pool.query(
+            'SELECT 1 FROM admin_users WHERE admin_user_seq=$1 AND deleted_at IS NOT NULL',
+            [target.id],
+          )
+        ).rowCount,
+        1,
       );
       assert.equal(
         (await db.pool.query('SELECT 1 FROM admin_sessions WHERE admin_user_seq=$1', [target.id]))
@@ -1471,9 +1484,10 @@ test('audit snapshots survive later deletion and in-flight work can retain the d
   });
   assert.equal(signup.status, 204);
   const replacement = (
-    await db.pool.query('SELECT admin_user_seq FROM admin_users WHERE login_id=$1', [
-      target.loginId,
-    ])
+    await db.pool.query(
+      'SELECT admin_user_seq FROM admin_users WHERE login_id=$1 AND deleted_at IS NULL',
+      [target.loginId],
+    )
   ).rows[0];
   assert.notEqual(replacement.admin_user_seq, target.id);
 });

@@ -23,9 +23,10 @@ export class CallEventsRepository {
   async callExists(id: number): Promise<boolean> {
     return (
       (
-        await this.database.pool.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1', [
-          id,
-        ])
+        await this.database.pool.query(
+          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          [id],
+        )
       ).rowCount === 1
     );
   }
@@ -82,7 +83,8 @@ export class CallEventsRepository {
     return (
       await client.query<EventCall>(
         `SELECT provider_call_id AS "providerCallId",caller_phone_number AS phone,order_seq AS "orderSeq"
-       FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE`,
+       FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
+         AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
         [id],
       )
     ).rows[0];
@@ -105,9 +107,9 @@ export class CallEventsRepository {
   ): Promise<boolean | undefined> {
     const result = await client.query<{ allowed: boolean | null }>(
       `SELECT o.order_seq=$2 OR o.customer_seq=COALESCE(
-         (SELECT customer_seq FROM orders WHERE order_seq=$2),
-         (SELECT customer_seq FROM customers WHERE phone_number=$3)) AS allowed
-       FROM orders o WHERE o.order_seq=$1 FOR KEY SHARE OF o`,
+         (SELECT customer_seq FROM orders WHERE order_seq=$2 AND deleted_at IS NULL),
+         (SELECT customer_seq FROM customers WHERE phone_number=$3 AND deleted_at IS NULL)) AS allowed
+       FROM orders o WHERE o.order_seq=$1 AND o.deleted_at IS NULL FOR SHARE OF o`,
       [orderId, call.orderSeq, call.phone],
     );
     return result.rows[0] ? result.rows[0].allowed === true : undefined;

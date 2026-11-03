@@ -20,7 +20,7 @@ export class OrderSubmissionRepository {
   async isCompanyCustomer(client: PoolClient, customerId: number): Promise<boolean> {
     const result = await client.query(
       `SELECT m.membership_seq FROM memberships m JOIN organizations o USING(organization_seq)
-         WHERE m.customer_seq=$1 AND m.status='ACTIVE' AND o.status='ACTIVE'
+         WHERE m.customer_seq=$1 AND m.status='ACTIVE' AND o.status='ACTIVE' AND m.deleted_at IS NULL AND o.deleted_at IS NULL
          FOR SHARE OF m,o`,
       [customerId],
     );

@@ -6,7 +6,7 @@ import { CreateCallAnalysisDto } from './dto/create-call-analysis.dto';
 export class CallInsightsRepository {
   async findProviderCallId(client: PoolClient, id: number): Promise<string | undefined> {
     const result = await client.query<{ provider_call_id: string }>(
-      'SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',
+      "SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE",
       [id],
     );
     return result.rows[0]?.provider_call_id;

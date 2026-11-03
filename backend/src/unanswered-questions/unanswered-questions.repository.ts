@@ -18,7 +18,10 @@ export class UnansweredQuestionsRepository {
         conversionHash: string | null;
       }>(
         `SELECT status,faq_entry_seq AS "faqId",faq_conversion_hash AS "conversionHash"
-       FROM unanswered_questions WHERE unanswered_question_seq=$1 FOR UPDATE`,
+       FROM unanswered_questions WHERE unanswered_question_seq=$1
+       AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=unanswered_questions.call_session_seq
+        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years') FOR SHARE)
+       FOR UPDATE`,
         [id],
       )
     ).rows[0];
@@ -26,8 +29,12 @@ export class UnansweredQuestionsRepository {
 
   async faqExists(client: PoolClient, id: number): Promise<boolean> {
     return (
-      (await client.query('SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1 FOR KEY SHARE', [id]))
-        .rowCount === 1
+      (
+        await client.query(
+          'SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL FOR SHARE',
+          [id],
+        )
+      ).rowCount === 1
     );
   }
 
@@ -41,7 +48,7 @@ export class UnansweredQuestionsRepository {
 
   async delete(client: PoolClient, id: number): Promise<void> {
     await client.query(
-      `UPDATE unanswered_questions SET status='DELETED',question_text=NULL,deleted_at=clock_timestamp()
+      `UPDATE unanswered_questions SET status='DELETED',deleted_at=clock_timestamp()
        WHERE unanswered_question_seq=$1`,
       [id],
     );
@@ -57,10 +64,11 @@ export class UnansweredQuestionsRepository {
          u.status,a.ai_persona_version_seq AS "aiPersonaVersionSeq",f.faq_entry_seq AS "faqEntrySeq"
          FROM unanswered_questions u JOIN call_sessions c ON c.call_session_seq=u.call_session_seq
          LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
-         LEFT JOIN orders o ON o.order_seq=c.order_seq
-         LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq)
-         LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq
-         WHERE u.status=$1
+         LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
+         LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
+         LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq AND f.deleted_at IS NULL
+         WHERE u.status=$1 AND c.deleted_at IS NULL
+           AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
            AND ($3::integer IS NULL OR u.call_session_seq=$3)
            AND ($4::integer IS NULL OR a.ai_persona_version_seq=$4)
@@ -86,7 +94,7 @@ export class UnansweredQuestionsRepository {
   async findCall(client: PoolClient, id: number): Promise<string | undefined> {
     return (
       await client.query<{ providerCallId: string }>(
-        'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',
+        'SELECT provider_call_id AS "providerCallId" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR SHARE',
         [id],
       )
     ).rows[0]?.providerCallId;

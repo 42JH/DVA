@@ -66,7 +66,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
           return 0;
         const pending = await client.query<{ orderSeq: number; totalAmount: number }>(
           `SELECT o.order_seq AS "orderSeq",o.total_amount AS "totalAmount" FROM orders o
-       WHERE status='notPaid' AND payment_due_at<=$1 AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NOT NULL)
+       WHERE status='notPaid' AND o.deleted_at IS NULL AND payment_due_at<=$1 AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.approval_started_at IS NOT NULL)
        ORDER BY payment_due_at,order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`,
           [now],
         );
@@ -101,7 +101,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
       updatedAt: string;
     }>(
       `SELECT order_seq AS id,status,updated_at::text AS "updatedAt" FROM orders
-       WHERE status='PAID' OR (status='SUBMISSION_FAILED' AND updated_at<date_trunc('minute',CURRENT_TIMESTAMP))
+       WHERE deleted_at IS NULL AND (status='PAID' OR (status='SUBMISSION_FAILED' AND updated_at<date_trunc('minute',CURRENT_TIMESTAMP)))
        ORDER BY updated_at,order_seq LIMIT 20`,
     );
     for (const order of pending.rows) {

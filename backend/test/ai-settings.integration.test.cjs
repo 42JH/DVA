@@ -813,7 +813,7 @@ async function legacyVersion(actorId, recordAudit = true) {
   });
 }
 
-test('logical creator references and audit-backed names survive physical administrator deletion and login ID reuse', async () => {
+test('creator snapshots survive administrator soft deletion and login ID reuse', async () => {
   const loginId = 'legacy-' + randomUUID();
   const creator = (
     await pool.query(
@@ -830,8 +830,12 @@ test('logical creator references and audit-backed names survive physical adminis
   );
   assert.equal((await call('DELETE', `/api/admins/${creator}`)).status, 204);
   assert.equal(
-    (await pool.query('SELECT count(*) FROM admin_users WHERE admin_user_seq=$1', [creator]))
-      .rows[0].count,
+    (
+      await pool.query(
+        'SELECT count(*) FROM admin_users WHERE admin_user_seq=$1 AND deleted_at IS NULL',
+        [creator],
+      )
+    ).rows[0].count,
     '0',
   );
   const rows = await (await call('GET', `/api/personas/${version.aiPersonaSeq}/versions`)).json();
@@ -855,7 +859,7 @@ test('logical creator references and audit-backed names survive physical adminis
         "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions' AND column_name='created_by_admin_user_name'",
       )
     ).rows[0].count,
-    '0',
+    '1',
   );
 });
 

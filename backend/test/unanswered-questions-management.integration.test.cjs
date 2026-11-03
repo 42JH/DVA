@@ -358,7 +358,7 @@ test('registered questions reject deletion and deleted linked FAQs are never rec
   assert.equal(original.faq_entry_seq, faqId);
 });
 
-test('deletion clears only the work item text, hides linked result text and retains transcript and retry identity', async () => {
+test('deletion preserves question text, hides linked result text and retains transcript and retry identity', async () => {
   const q = await question(),
     original = await row(q.id);
   const callBefore = (
@@ -399,7 +399,7 @@ test('deletion clears only the work item text, hides linked result text and reta
   assert.equal(await noContent(await remove(q.id)), null);
   const deleted = await row(q.id);
   assert.equal(deleted.status, 'DELETED');
-  assert.equal(deleted.question_text, null);
+  assert.equal(deleted.question_text, original.question_text);
   assert.ok(deleted.deleted_at);
   for (const key of ['event_id', 'payload_hash', 'created_at', 'occurred_at', 'offset_seconds'])
     assert.deepEqual(deleted[key], original[key]);
@@ -429,7 +429,7 @@ test('deletion clears only the work item text, hides linked result text and reta
   await f.error(await convert(q.id, body()), 409, 'INVALID_STATE');
 });
 
-test('deletion rejects body fields and rolls back text removal when its audit cannot persist', async () => {
+test('deletion rejects body fields and rolls back soft deletion when its audit cannot persist', async () => {
   const q = await question(),
     original = await row(q.id);
   await f.error(
@@ -477,7 +477,7 @@ test('concurrent deletes are idempotent and conversion versus deletion commits e
     assert.equal(after.faqs, before.faqs + 1);
   } else {
     assert.equal(outcome.status, 'DELETED');
-    assert.equal(outcome.question_text, null);
+    assert.equal(outcome.question_text, another.input.questionText);
     assert.equal(deleted.status, 204);
     assert.equal(after.faqs, before.faqs);
   }

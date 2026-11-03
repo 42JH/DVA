@@ -32,6 +32,15 @@ const DRAFT_SELECT = `SELECT ai_persona_seq AS "aiPersonaSeq",draft_revision AS 
 export class AiSettingsRepository {
   constructor(private readonly database: DatabaseService) {}
 
+  async authorNames(ids: number[], client?: PoolClient): Promise<Map<number, string | null>> {
+    const result = await (client ?? this.database.pool).query<{ id: number; name: string | null }>(
+      `SELECT ai_persona_version_seq AS id,CASE WHEN created_at>clock_timestamp()-interval '5 years'
+       THEN created_by_admin_user_name END AS name FROM ai_persona_versions WHERE ai_persona_version_seq=ANY($1::int[])`,
+      [ids],
+    );
+    return new Map(result.rows.map((row) => [row.id, row.name]));
+  }
+
   async cancelPending(client: PoolClient): Promise<void> {
     await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='PENDING'");
   }
@@ -208,8 +217,8 @@ export class AiSettingsRepository {
   ): Promise<PersonaVersion> {
     const row = (
       await client.query<{ id: number }>(
-        `INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,voice_id,speaking_rate,turn_wait_level,created_by_admin_user_seq)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING ai_persona_version_seq AS id`,
+        `INSERT INTO ai_persona_versions(ai_persona_seq,version,name,prompt_text,voice_id,speaking_rate,turn_wait_level,created_by_admin_user_seq,created_by_admin_user_name)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,(SELECT name FROM admin_users WHERE admin_user_seq=$8)) RETURNING ai_persona_version_seq AS id`,
         [
           id,
           version,

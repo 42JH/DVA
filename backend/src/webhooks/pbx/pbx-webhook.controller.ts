@@ -26,7 +26,7 @@ export class PbxWebhookController {
   @ApiOperation({
     summary: '통화 종료·녹취 웹훅 수신',
     description:
-      'DB에 수신 내역을 저장하면 즉시 응답합니다. 녹취 다운로드·S3 저장은 비동기이며, received는 업로드 완료를 뜻하지 않습니다. 같은 recordingId·본문은 중복 수신으로 응답합니다.\n\n발신번호와 시작 시각으로 유일한 통화를 찾고 연결을 고정합니다. 매칭 보류·저장 실패는 수신함에 남겨 재처리합니다.',
+      'DB에 수신 내역을 저장하면 즉시 응답합니다. 녹취 다운로드·S3 저장은 비동기이며, received는 업로드 완료를 뜻하지 않습니다. 같은 recordingId·본문은 중복 수신으로 응답합니다.\n\n발신번호와 시작 시각으로 유일한 통화를 찾고 연결을 고정합니다. 매칭 보류·저장 실패는 수신함에 남겨 재처리합니다. 최초 시작 시각이 5년 지난 수신은 DB에 저장하지 않고 status=expired로 HTTP 200 응답합니다.',
     servers: [
       { url: '/api', description: 'Nginx 경유' },
       { url: '/', description: 'NestJS 직접 연결' },

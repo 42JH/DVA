@@ -13,7 +13,7 @@ async function testMembership(
   const department = (
     await pool.query(
       `INSERT INTO departments(organization_seq,name,group_billing_enabled) VALUES($1,'검증 부서',$2)
-    ON CONFLICT(organization_seq,name) DO UPDATE SET group_billing_enabled=departments.group_billing_enabled OR EXCLUDED.group_billing_enabled RETURNING department_seq`,
+    ON CONFLICT(organization_seq,name) WHERE deleted_at IS NULL DO UPDATE SET group_billing_enabled=departments.group_billing_enabled OR EXCLUDED.group_billing_enabled RETURNING department_seq`,
       [organizationSeq, groupBillingEnabled],
     )
   ).rows[0].department_seq;

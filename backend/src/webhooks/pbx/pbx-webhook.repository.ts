@@ -25,6 +25,9 @@ export class PbxWebhookRepository {
        WHERE recording_id=(SELECT recording_id FROM pbx_webhooks.call_ended_events
          WHERE processing_status<>'PROCESSED' AND received_at<clock_timestamp()-interval '1 minute'
            AND ($2::boolean OR call_session_seq IS NULL)
+           AND (call_session_seq IS NULL OR EXISTS(SELECT 1 FROM call_sessions c
+            WHERE c.call_session_seq=call_ended_events.call_session_seq AND c.deleted_at IS NULL
+             AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')))
            AND ((call_session_seq IS NULL AND received_at<=clock_timestamp()-interval '30 minutes')
              OR last_attempt_at IS NULL OR last_attempt_at<clock_timestamp()-interval '1 minute')
            AND (claimed_until IS NULL OR claimed_until<=clock_timestamp())
@@ -105,6 +108,15 @@ export class PbxWebhookRepository {
       [recordingId, payload],
     );
     return result.rowCount === 1;
+  }
+
+  async expired(startedAt: string): Promise<boolean> {
+    return (
+      await this.database.pool.query<{ expired: boolean }>(
+        "SELECT $1::timestamptz<=clock_timestamp()-interval '5 years' AS expired",
+        [startedAt],
+      )
+    ).rows[0].expired;
   }
 
   async hasSamePayload(recordingId: string, payload: string): Promise<boolean> {

@@ -1,5 +1,6 @@
 import {
   Body,
+  Delete,
   Headers,
   Controller,
   Post,
@@ -83,6 +84,21 @@ import { OrderRequestKey } from './order-request-key';
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
+
+  @Delete(':id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'ORDER_DELETED', targetType: 'ORDER', target: 'id' })
+  @ApiOperation({
+    summary: '주문 soft delete',
+    description:
+      '활성 관리자 세션·허용 Origin 필수. 주문 및 하위 이력을 일반 조회에서 숨깁니다. 통화·결제·접수 진행 중에는 409이며 결제 취소를 대신하지 않습니다. 실제 폐기는 최초 완료/취소(미완료는 생성) 시각부터 5년 후 수행합니다.',
+  })
+  @ApiNoContentResponse({ description: '삭제 처리 완료.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: '없거나 삭제·만료된 주문.' })
+  @ApiConflictResponse({ type: ErrorResponseDto, description: '진행 중인 통화·결제·접수.' })
+  delete(@Param() params: OrderIdParamsDto, @Req() request: AuthRequest) {
+    return this.orders.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  }
 
   @Get()
   @MvpAiOrderAccess()
