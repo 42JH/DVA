@@ -916,3 +916,108 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
   assert.equal(preflight.status, 204);
   assert.ok(preflight.headers.get('access-control-allow-headers').includes('call_session_seq'));
 });
+
+test('production active count SSE crosses HTTPS and both Nginx proxies, keeps heartbeats and closes after logout', async () => {
+  const root = process.env.TEST_HTTPS_API_ROOT;
+  assert.match(root, /^https:\/\//);
+  const origin = 'https://13.209.59.180';
+  const login = await fetch(root + '/auth/login', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = { Cookie: login.headers.get('set-cookie').split(';')[0], Origin: origin };
+  const controller = new AbortController();
+  const response = await fetch(root + '/calls/active-count/stream', {
+    headers,
+    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]),
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /^text\/event-stream/);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  async function next(type) {
+    for (;;) {
+      let boundary = buffer.indexOf('\n\n');
+      while (boundary >= 0) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        if (frame.split('\n').some((line) => line === 'event: ' + type))
+          return JSON.parse(
+            frame
+              .split('\n')
+              .find((line) => line.startsWith('data:'))
+              .slice(5),
+          );
+        boundary = buffer.indexOf('\n\n');
+      }
+      const chunk = await reader.read();
+      assert.equal(chunk.done, false, 'SSE closed before ' + type);
+      buffer += decoder.decode(chunk.value, { stream: true }).replaceAll('\r\n', '\n');
+    }
+  }
+  try {
+    const initial = await next('active-call-count');
+    assert.deepEqual(Object.keys(initial).sort(), ['activeCallCount', 'observedAt']);
+    const startedAt = new Date(Date.now() - 20000).toISOString();
+    const phone = '010' + require('node:crypto').randomInt(10000000, 100000000);
+    const registered = await fetch(root + '/customers/context', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        phoneNumber: phone,
+        call: { providerCallId: randomUUID(), incomingAt: startedAt },
+      }),
+    });
+    assert.equal(registered.status, 200);
+    assert.equal((await next('active-call-count')).activeCallCount, initial.activeCallCount + 1);
+    await next('heartbeat');
+    await next('heartbeat');
+    const ended = await fetch(root + '/webhooks/pbx/call-ended', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + process.env.TEST_WEBHOOK_TOKEN,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        recordingId: 'runtime-count-' + randomUUID(),
+        callFrom: phone,
+        callTo: '07012345678',
+        startedAt,
+        endedAt: new Date(Date.parse(startedAt) + 10000).toISOString(),
+        durationSeconds: 10,
+        recordingUrl: 'https://recordings.example.test/audio.mp3',
+      }),
+    });
+    assert.equal(ended.status, 200);
+    assert.equal((await next('active-call-count')).activeCallCount, initial.activeCallCount);
+    const snapshot = await fetch(root + '/calls/active-count', { headers });
+    assert.equal(snapshot.status, 200);
+    assert.equal((await snapshot.json()).data.activeCallCount, initial.activeCallCount);
+    const logout = await fetch(root + '/auth/logout', { method: 'POST', headers });
+    assert.equal(logout.status, 204);
+    assert.deepEqual(await next('session-expired'), { code: 'UNAUTHORIZED' });
+    assert.equal((await fetch(root + '/calls/active-count', { headers })).status, 401);
+  } finally {
+    controller.abort();
+    await reader.cancel().catch(() => {});
+  }
+});
+
+test('HTTPS proxy preserves administrator authentication, internal blocking and PBX POST-only routing', async () => {
+  const root = process.env.TEST_HTTPS_API_ROOT;
+  assert.match(root, /^https:\/\//);
+  for (const [path, status] of [
+    ['/calls/active-count', 401],
+    ['/calls/active-count/stream', 401],
+    ['/internal/metrics', 404],
+    ['/health/ready', 404],
+    ['/health/ready/', 404],
+    ['/webhooks/pbx/call-ended', 405],
+  ]) {
+    const response = await fetch(root + path, { signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, status, path);
+  }
+});

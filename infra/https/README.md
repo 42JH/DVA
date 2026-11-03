@@ -114,3 +114,11 @@ Nginx 설정 변경은 `/usr/sbin/nginx -t` 성공 후 reload한다. host 기본
 구매한 도메인을 같은 IP에 연결하고 도메인용 인증서·Nginx server_name을 추가한다.
 새 주소의 수신 테스트 후 디버 PBX에 웹훅 URL 변경을 요청한다. IP 주소를 병행 유지하면
 전환 중 누락을 줄일 수 있다. 기존 수신 API·DB는 재구현하지 않는다.
+
+## 실시간 진행 통화 수 SSE
+
+`/api/calls/active-count/stream`은 외부 HTTPS nginx와 `infra/nginx/default.prod.conf`의 컨테이너 nginx 양쪽에서 버퍼링·캐시를 해제하고 30초 수신 대기시간을 사용한다. 백엔드는 5초 heartbeat를 전송하며, 30초는 통화의 최대 지속 시간이 아니다. 관리자 인증은 백엔드의 기존 세션 쿠키로 수행한다.
+
+저장소 설정은 반영했지만 호스트 `/etc/nginx/sites-available/dva-ip`는 앱 배포가 자동 갱신하지 않는다. MR 병합·backend 배포 시 현재 호스트 설정과 비교해 SSE location을 추가하고, 서버의 기존 도메인·인증서·PBX 미러·관리 경로를 보존한다. `sudo nginx -t` 성공 후 `sudo systemctl reload nginx`를 실행하고 실제 도메인에서 스트림·heartbeat·로그아웃 종료를 확인한다.
+
+API 계약·프론트 호출 예시·044 migration·적용 순서는 [실시간 통화 수 연동](../../backend/docs/active-call-count.md)을 따른다. `node backend/scripts/check.cjs`는 임시 인증서와 일회용 DB로 실제 두 nginx 설정 및 backend를 검증한다. Linux의 OpenSSL 또는 Git for Windows에 포함된 OpenSSL을 사용하며, 테스트 인증서·키는 임시 폴더와 테스트 컨테이너에만 두고 검증 후 삭제한다. 운영 인증서·키나 nginx 서비스는 테스트에 사용하지 않는다.

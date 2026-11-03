@@ -442,9 +442,10 @@ test('a date-filtered call is readable before upload and receives its recording 
 });
 
 test('disabled S3 and recent receipts remain durable; retry cooldown does not starve later events', async () => {
-  await call();
   const first = payload();
   await receipt(first);
+  // A call appearing after receipt still exercises the worker's fallback matching and cooldown.
+  await call();
   apps[0].get(ConfigService).set('S3_RECORDINGS_BUCKET', '');
   try {
     await workers[0].processPending();
@@ -508,9 +509,9 @@ test('unregistered calls leave no call, audit or recording and unmatched PBX rec
 test('expired unmatched receipts are removed with S3 disabled while registered orderless calls are retained', async () => {
   const unmatched = { ...payload(), callFrom: '01098889998' };
   const matched = payload();
-  const callId = await call();
   await receipt(unmatched);
   await receipt(matched);
+  const callId = await call();
   await pool.query(
     "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes'",
   );

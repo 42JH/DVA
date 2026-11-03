@@ -1,6 +1,7 @@
 // Cross-platform Docker verification. Creates only disposable resources with a random name.
 const { spawnSync } = require('node:child_process');
-const { readFileSync } = require('node:fs');
+const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const run = 'dva-backend-check-' + randomBytes(6).toString('hex');
@@ -10,7 +11,9 @@ const image = run + ':test';
 const runtimeImage = run + ':runtime';
 const application = run + '-app';
 const proxy = run + '-proxy';
+const httpsProxy = run + '-https';
 const root = path.resolve(__dirname, '..');
+const temporary = mkdtempSync(path.join(tmpdir(), run + '-'));
 const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
 const personaToken = randomBytes(32).toString('hex');
@@ -19,7 +22,8 @@ let networkCreated = false,
   imageCreated = false;
 let runtimeCreated = false,
   applicationCreated = false,
-  proxyCreated = false;
+  proxyCreated = false,
+  httpsCreated = false;
 function docker(args, required = true) {
   const result = spawnSync('docker', args, { stdio: 'inherit' });
   if (required && (result.error || result.status !== 0))
@@ -161,6 +165,78 @@ try {
     `${proxy}:/etc/nginx/conf.d/default.conf`,
   ]);
   docker(['start', proxy]);
+  const certificateDirectory = path.join(temporary, 'letsencrypt', 'live', 'dva-ip');
+  const secondaryCertificateDirectory = path.join(temporary, 'letsencrypt', 'live', 'dva-sslip');
+  mkdirSync(certificateDirectory, { recursive: true });
+  mkdirSync(secondaryCertificateDirectory, { recursive: true });
+  const certificate = path.join(certificateDirectory, 'fullchain.pem');
+  const privateKey = path.join(certificateDirectory, 'privkey.pem');
+  let openssl = 'openssl';
+  if (process.platform === 'win32' && spawnSync(openssl, ['version']).error?.code === 'ENOENT') {
+    const git = spawnSync('git', ['--exec-path'], { encoding: 'utf8' });
+    if (git.status !== 0) throw new Error('Git for Windows OpenSSL is required for HTTPS checks');
+    openssl = path.resolve(git.stdout.trim(), '../../../usr/bin/openssl.exe');
+  }
+  const generated = spawnSync(openssl, [
+    'req',
+    '-x509',
+    '-newkey',
+    'rsa:2048',
+    '-sha256',
+    '-nodes',
+    '-days',
+    '1',
+    '-subj',
+    '/CN=backend',
+    '-addext',
+    'subjectAltName=DNS:backend',
+    '-keyout',
+    privateKey,
+    '-out',
+    certificate,
+  ]);
+  if (generated.error || generated.status !== 0)
+    throw new Error('OpenSSL could not generate the disposable HTTPS certificate');
+  copyFileSync(certificate, path.join(secondaryCertificateDirectory, 'fullchain.pem'));
+  copyFileSync(privateKey, path.join(secondaryCertificateDirectory, 'privkey.pem'));
+  // Emulate the host's published loopback port inside an isolated Docker network namespace.
+  docker([
+    'exec',
+    '-d',
+    application,
+    'node',
+    '-e',
+    `
+    const net = require('node:net');
+    net.createServer(socket => {
+      const upstream = net.connect(80, 'proxy');
+      socket.on('error', () => upstream.destroy());
+      upstream.on('error', () => socket.destroy());
+      socket.on('close', () => upstream.destroy());
+      upstream.on('close', () => socket.destroy());
+      socket.pipe(upstream).pipe(socket);
+    }).listen(8082, '127.0.0.1');
+  `,
+  ]);
+  docker([
+    'create',
+    '--name',
+    httpsProxy,
+    '--network',
+    `container:${application}`,
+    '--memory',
+    '64m',
+    'nginx:stable-alpine',
+  ]);
+  httpsCreated = true;
+  docker([
+    'cp',
+    path.join(root, '../infra/https/https.conf'),
+    `${httpsProxy}:/etc/nginx/conf.d/default.conf`,
+  ]);
+  docker(['cp', path.join(temporary, 'letsencrypt'), `${httpsProxy}:/etc/letsencrypt`]);
+  docker(['start', httpsProxy]);
+  docker(['exec', httpsProxy, 'nginx', '-t']);
   docker([
     'run',
     '--rm',
@@ -174,6 +250,12 @@ try {
     `TEST_WEBHOOK_TOKEN=${webhookToken}`,
     '-e',
     `TEST_PERSONA_TOKEN=${personaToken}`,
+    '-e',
+    'TEST_HTTPS_API_ROOT=https://backend/api',
+    '-e',
+    'NODE_EXTRA_CA_CERTS=/test-proxy-ca.pem',
+    '--mount',
+    `type=bind,source=${certificate},target=/test-proxy-ca.pem,readonly`,
     image,
     'node',
     '--test',
@@ -196,10 +278,17 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
+  if (httpsCreated) docker(['rm', '-f', httpsProxy], false);
   if (proxyCreated) docker(['rm', '-f', proxy], false);
   if (applicationCreated) docker(['rm', '-f', application], false);
   if (databaseCreated) docker(['rm', '-f', database], false);
   if (networkCreated) docker(['network', 'rm', network], false);
   if (imageCreated) docker(['image', 'rm', image], false);
   if (runtimeCreated) docker(['image', 'rm', runtimeImage], false);
+  if (
+    path.dirname(temporary) !== path.resolve(tmpdir()) ||
+    !path.basename(temporary).startsWith(run + '-')
+  )
+    throw new Error('Unexpected verification temporary directory');
+  rmSync(temporary, { recursive: true, force: true });
 }

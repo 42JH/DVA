@@ -115,6 +115,16 @@ function callResult(row: CallRow): CallListItemDto {
 
 @Injectable()
 export class ConsultationsRepository {
+  async activeCount() {
+    const row = (
+      await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
+        `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
+       FROM call_sessions WHERE registered_at IS NOT NULL AND ended_at IS NULL`,
+      )
+    ).rows[0];
+    return { activeCallCount: row.activeCallCount, observedAt: row.observedAt.toISOString() };
+  }
+
   constructor(private readonly database: DatabaseService) {}
 
   async findMany(query: CallQueryDto): Promise<PageRows<CallListItemDto>> {

@@ -1,9 +1,10 @@
-import { ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { PbxWebhookRepository } from './pbx-webhook.repository';
 import { CallEndedPayload } from './pbx-webhook.payload';
 
 @Injectable()
 export class PbxWebhookService {
+  private readonly logger = new Logger(PbxWebhookService.name);
   constructor(private readonly repository: PbxWebhookRepository) {}
 
   async receive(
@@ -14,6 +15,12 @@ export class PbxWebhookService {
       const duplicate = !(await this.repository.insert(payload.recordingId, serialized));
       if (duplicate && !(await this.repository.hasSamePayload(payload.recordingId, serialized))) {
         throw new ConflictException('recordingId already exists with different data');
+      }
+      try {
+        await this.repository.matchReceived(payload);
+      } catch {
+        // 수신은 이미 영속화했다. 종료 매칭 장애는 기존 워커가 수신 건으로 복구한다.
+        this.logger.warn({ event: 'call_end_matching_deferred' });
       }
       // INSERT autocommit completes before the acknowledgment. Never ACK a failed database write.
       return { status: 'received', recordingId: payload.recordingId, duplicate };

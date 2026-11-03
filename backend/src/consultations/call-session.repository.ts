@@ -56,6 +56,7 @@ export class CallSessionRepository {
       'UPDATE call_sessions SET started_at=$2,ended_at=$3 WHERE call_session_seq=$1',
       [call.id, input.startedAt, input.endedAt],
     );
+    await client.query("SELECT pg_notify('call_sessions_changed','')");
     return call.id;
   }
 
@@ -84,6 +85,7 @@ export class CallSessionRepository {
         'INVALID_STATE',
         '같은 세션의 발신번호·수신 이벤트 시각은 변경할 수 없습니다.',
       );
+    if (inserted.rowCount === 1) await client.query("SELECT pg_notify('call_sessions_changed','')");
     return { id: call.id, created: inserted.rowCount === 1 };
   }
 }
