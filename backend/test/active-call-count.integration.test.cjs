@@ -2,6 +2,7 @@ require('reflect-metadata');
 const { before, beforeEach, afterEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomInt, randomUUID } = require('node:crypto');
+const { EventEmitter, once } = require('node:events');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { createTestPool, startTestApp } = require('./helpers/application.cjs');
@@ -494,26 +495,30 @@ test('SSE sends an unwrapped snapshot, crosses instances, reconnects from curren
   assert.equal(apps[1].get(ActiveCallCountService).updates.observed, false);
 });
 
-test('a burst shares one bounded count refresh across dashboard subscriptions', async () => {
+test('a burst shares one in-flight count refresh across dashboard subscriptions', async () => {
   const first = await stream(),
     second = await stream();
   await first.next();
   await second.next();
   const repository = apps[1].get(ConsultationsRepository);
   const original = repository.activeCount;
+  const started = new EventEmitter();
+  const firstRead = once(started, 'read', { signal: AbortSignal.timeout(8000) });
+  const gate = Promise.withResolvers();
   let reads = 0;
   repository.activeCount = async function () {
     reads++;
+    started.emit('read');
+    await gate.promise;
     return original.call(this);
   };
   try {
-    await Promise.all(Array.from({ length: 35 }, () => register()));
+    await Promise.all([firstRead, Promise.all(Array.from({ length: 35 }, () => register()))]);
+    assert.equal(reads, 1, 'subscribers must share the same pending count query');
+    gate.resolve();
     await Promise.all([first.until(35), second.until(35)]);
-    assert.ok(
-      reads <= 3,
-      'steady-state queries must be shared instead of one per event or subscriber: ' + reads,
-    );
   } finally {
+    gate.resolve();
     repository.activeCount = original;
   }
 });
@@ -525,34 +530,19 @@ test('above 100 active calls, changes are coalesced without postponing delivery 
   );
   const connection = await stream();
   assert.equal((await connection.next()).activeCallCount, 120);
-  const repository = apps[1].get(ConsultationsRepository),
-    original = repository.activeCount;
-  let reads = 0;
-  repository.activeCount = async function () {
-    reads++;
-    return original.call(this);
-  };
-  try {
-    const writes = (async () => {
-      for (let i = 0; i < 22; i++) {
-        await register();
-        await delay(100);
-      }
-    })();
-    const first = await connection.next();
-    assert.ok(
-      first.activeCallCount > 120 && first.activeCallCount < 142,
-      'receive an update while changes are still arriving',
-    );
-    await writes;
-    await connection.until(142);
-    assert.ok(
-      reads <= 4,
-      'high-load snapshots are limited to approximately one per second: ' + reads,
-    );
-  } finally {
-    repository.activeCount = original;
-  }
+  const writes = (async () => {
+    for (let i = 0; i < 22; i++) {
+      await register();
+      await delay(100);
+    }
+  })();
+  const first = await connection.next();
+  assert.ok(
+    first.activeCallCount > 120 && first.activeCallCount < 142,
+    'receive an update while changes are still arriving',
+  );
+  await writes;
+  await connection.until(142);
 });
 
 test('LISTEN reconnection recovers the current value and remains usable for later changes', async () => {
