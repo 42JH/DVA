@@ -107,9 +107,11 @@ export class CallEventsRepository {
   ): Promise<boolean | undefined> {
     const result = await client.query<{ allowed: boolean | null }>(
       `SELECT o.order_seq=$2 OR o.customer_seq=COALESCE(
-         (SELECT customer_seq FROM orders WHERE order_seq=$2 AND deleted_at IS NULL),
+         (SELECT customer_seq FROM orders WHERE order_seq=$2 AND deleted_at IS NULL
+           AND COALESCE(closed_at,created_at)>clock_timestamp()-interval '5 years'),
          (SELECT customer_seq FROM customers WHERE phone_number=$3 AND deleted_at IS NULL)) AS allowed
-       FROM orders o WHERE o.order_seq=$1 AND o.deleted_at IS NULL FOR SHARE OF o`,
+       FROM orders o WHERE o.order_seq=$1 AND o.deleted_at IS NULL
+         AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years' FOR SHARE OF o`,
       [orderId, call.orderSeq, call.phone],
     );
     return result.rows[0] ? result.rows[0].allowed === true : undefined;

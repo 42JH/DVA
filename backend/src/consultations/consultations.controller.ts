@@ -38,7 +38,11 @@ export class ConsultationsController {
   })
   @ApiResponse({ status: 204, description: '삭제 처리 완료.' })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: '없거나 삭제·만료된 통화.' })
-  @ApiResponse({ status: 409, type: ErrorResponseDto, description: '통화 또는 녹취 처리 중.' })
+  @ApiResponse({
+    status: 409,
+    type: ErrorResponseDto,
+    description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
+  })
   delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
     return this.consultations.delete(params.id, request.admin.adminUserSeq, request.requestId);
   }

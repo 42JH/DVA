@@ -229,11 +229,107 @@ test('deleted calls reject AI registration, STT/events, analysis, questions and 
   );
 });
 
+test('pending recording receipts block call deletion until their upload is durably recorded', async () => {
+  const c = await call();
+  const recordingId = randomUUID(),
+    claimId = randomUUID(),
+    key = 'recordings/' + randomUUID();
+  await f.pool.query(
+    "INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq,received_at) VALUES($1,'{}',$2,clock_timestamp()-interval '2 minutes')",
+    [recordingId, c.id],
+  );
+  for (const status of ['RECEIVED', 'FAILED']) {
+    await f.pool.query(
+      'UPDATE pbx_webhooks.call_ended_events SET processing_status=$2 WHERE recording_id=$1',
+      [recordingId, status],
+    );
+    await f.error(await remove('calls', c.id), 409, 'INVALID_STATE');
+    assert.equal((await f.get('/api/calls/' + c.id)).status, 200);
+    assert.equal(
+      (await f.pool.query('SELECT deleted_at FROM call_sessions WHERE call_session_seq=$1', [c.id]))
+        .rows[0].deleted_at,
+      null,
+    );
+  }
+  await f.pool.query(
+    "UPDATE pbx_webhooks.call_ended_events SET claim_id=$2,claimed_until=clock_timestamp()+interval '5 minutes' WHERE recording_id=$1",
+    [recordingId, claimId],
+  );
+  const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
+  assert.equal(
+    await f.app.get(PbxWebhookRepository).processed(recordingId, c.id, key, claimId),
+    true,
+  );
+  assert.equal((await remove('calls', c.id)).status, 204);
+  assert.equal(
+    (await f.pool.query('SELECT object_key FROM recordings WHERE call_session_seq=$1', [c.id]))
+      .rows[0].object_key,
+    key,
+  );
+});
+
+test('expired order references reject AI events atomically while a current customer order still works', async () => {
+  const c = await call();
+  const customer = (
+    await f.pool.query(
+      "INSERT INTO customers(name,phone_number,status) VALUES('참조 검증',$1,'ACTIVE') RETURNING customer_seq",
+      [c.phone],
+    )
+  ).rows[0].customer_seq;
+  const expired = (
+    await f.pool.query(
+      "INSERT INTO orders(customer_seq,status,created_at,closed_at) VALUES($1,'CANCELLED',clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years') RETURNING order_seq",
+      [customer],
+    )
+  ).rows[0].order_seq;
+  const current = (
+    await f.pool.query(
+      "INSERT INTO orders(customer_seq,status) VALUES($1,'COLLECTING') RETURNING order_seq",
+      [customer],
+    )
+  ).rows[0].order_seq;
+  await f.error(await f.get('/api/orders/' + expired), 404, 'NOT_FOUND');
+  const event = (orderSeq, eventOrder = 1, eventId = randomUUID()) => ({
+    eventId,
+    eventOrder,
+    kind: 'AI_ACTION',
+    occurredAt: new Date().toISOString(),
+    offsetSeconds: 0,
+    payload: { action: 'PREVIOUS_ORDER_SEARCH', summaryText: '주문 참조 검사', orderSeq },
+  });
+  const send = (events) =>
+    ai(`/api/ai/calls/${c.id}/events`, { providerCallId: c.providerCallId, events });
+  await f.error(await send([event(expired)]), 404, 'NOT_FOUND');
+  const ids = [randomUUID(), randomUUID()].sort();
+  await f.error(
+    await send([event(current, 1, ids[0]), event(expired, 2, ids[1])]),
+    404,
+    'NOT_FOUND',
+  );
+  assert.equal(
+    (await f.pool.query('SELECT 1 FROM call_insight_events WHERE call_session_seq=$1', [c.id]))
+      .rowCount,
+    0,
+  );
+  assert.equal((await send([event(current)])).status, 204);
+  assert.equal(
+    (await f.pool.query('SELECT 1 FROM call_insight_events WHERE call_session_seq=$1', [c.id]))
+      .rowCount,
+    1,
+  );
+});
+
 test('live calls, recording leases, payment and submission states cannot be deleted', async () => {
   const c = await call(false),
     o = await order();
   await f.error(await remove('calls', c.id), 409, 'INVALID_STATE');
-  for (const status of ['notPaid', 'PAID', 'SUBMITTING', 'SUBMISSION_FAILED']) {
+  for (const status of [
+    'notPaid',
+    'PAID',
+    'SUBMITTING',
+    'SUBMITTING_FAILED',
+    'SUBMISSION_FAILED',
+  ]) {
     await f.pool.query(
       "UPDATE orders SET status=$2,payment_method_type='billing',pickup_requested_at=clock_timestamp() WHERE order_seq=$1",
       [o.orderSeq, status],
@@ -249,7 +345,7 @@ test('live calls, recording leases, payment and submission states cannot be dele
   );
   await f.error(await remove('calls', ended.id), 409, 'INVALID_STATE');
   await f.pool.query(
-    'UPDATE pbx_webhooks.call_ended_events SET claim_id=NULL,claimed_until=NULL WHERE recording_id=$1',
+    "UPDATE pbx_webhooks.call_ended_events SET claim_id=NULL,claimed_until=NULL,processing_status='PROCESSED' WHERE recording_id=$1",
     [id],
   );
   assert.equal((await remove('calls', ended.id)).status, 204);

@@ -33,7 +33,11 @@ export class ConsultationsService {
         const call = await this.repository.lockForDeletion(client, id);
         if (!call) throw new ApiException(404, 'NOT_FOUND', '통화 기록을 찾을 수 없습니다.');
         if (!call.endedAt || (await this.repository.recordingInProgress(client, id)))
-          throw new ApiException(409, 'INVALID_STATE', '통화 또는 녹취 처리가 진행 중입니다.');
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+          );
         await this.repository.softDelete(client, id);
         await this.audit.recordSuccess(
           {

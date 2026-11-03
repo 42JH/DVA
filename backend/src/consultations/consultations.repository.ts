@@ -130,7 +130,7 @@ export class ConsultationsRepository {
     return !!(
       await client.query(
         `SELECT 1 FROM pbx_webhooks.call_ended_events
-      WHERE call_session_seq=$1 AND claimed_until>clock_timestamp() LIMIT 1`,
+      WHERE call_session_seq=$1 AND (processing_status<>'PROCESSED' OR claimed_until>clock_timestamp()) LIMIT 1`,
         [id],
       )
     ).rowCount;
