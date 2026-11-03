@@ -5,6 +5,8 @@ ROOT=/tmp/dva129
 MIGRATIONS=$ROOT/backend/migrations
 RUNNER=$ROOT/infra/database/migrate.sh
 export PATH="$ROOT/testbin:$PATH"
+set -- "$MIGRATIONS"/[0-9][0-9][0-9]-*.sql
+expected_migrations=$#
 psql -X -v ON_ERROR_STOP=1 -U dva -d monolith_db -f "$MIGRATIONS/001-pbx-call-ended.sql"
 psql -X -v ON_ERROR_STOP=1 -U dva -d monolith_db <<'SQL'
 INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload)
@@ -27,7 +29,7 @@ backup_count=$(find "$ROOT/backups" -type f | wc -l)
 sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/no-backup"
 test ! -e "$ROOT/no-backup"
 test "$(find "$ROOT/backups" -type f | wc -l)" = "$backup_count"
-test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 22
+test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = "$expected_migrations"
 echo 'PASS: repeated execution skips already-applied migrations'
 
 # Tamper only with a copy inside this test container, never with repo files.
@@ -46,7 +48,7 @@ if sh "$RUNNER" --no-backup dva-db-129-check "$ROOT/backups" > "$ROOT/failure.lo
  echo 'FAIL: invalid migration was accepted' >&2; exit 1
 fi
 test "$(psql -X -U dva -d monolith_db -Atc "SELECT to_regclass('public.migration_rollback_probe') IS NULL")" = t
-test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = 22
+test "$(psql -X -U dva -d monolith_db -Atc 'SELECT count(*) FROM db_migrations.applied_versions')" = "$expected_migrations"
 echo 'PASS: failure rolls back all newly pending SQL and ledger records'
 
 # Also prove atomic rollback when no ledger or business schema exists yet.

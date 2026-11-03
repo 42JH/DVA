@@ -68,7 +68,7 @@ BEGIN
  PERFORM pg_temp.expect_error(format('INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(%s,%L,%L::jsonb)',company_id,'sales',address::text),'23505');
  INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,'Support',address);
 
- INSERT INTO orders(customer_seq) VALUES(customer_id) RETURNING order_seq INTO order_id;
+ INSERT INTO orders(customer_seq,payment_method_type) VALUES(customer_id,'billing') RETURNING order_seq INTO order_id;
  IF (SELECT creation_source FROM orders WHERE order_seq=order_id)<>'UNKNOWN' THEN
   RAISE EXCEPTION 'Unspecified source must remain UNKNOWN'; END IF;
  PERFORM pg_temp.expect_error(format('UPDATE orders SET creation_source=%L WHERE order_seq=%s','OTHER',order_id),'23514');
