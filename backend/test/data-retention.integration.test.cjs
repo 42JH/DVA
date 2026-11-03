@@ -380,3 +380,61 @@ test('late expired PBX and AI registration cannot repopulate erased data', async
   assert.equal((await response.json()).status, 'expired');
   assert.equal(await exists('pbx_webhooks.call_ended_events', 'recording_id', recordingId), false);
 });
+
+test('expiry queries use time index bounds instead of filtering growing unexpired history', async (t) => {
+  const statements = [];
+  const query = async (sql) => {
+    statements.push(sql);
+    return { rows: sql.includes(' AS locked') ? [{ locked: true }] : [] };
+  };
+  const captured = new RetentionRepository({
+    pool: { query },
+    transaction: (work) => work({ query }),
+  });
+  await captured.claimCall();
+  await captured.purgeDatabase();
+  const client = await f.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`INSERT INTO audit_logs(actor_type,action,target_type,request_id,result,metadata)
+      SELECT 'SYSTEM','RETENTION_PLAN','SYSTEM',gen_random_uuid(),'SUCCESS','{}' FROM generate_series(1,20000)`);
+    await client.query(`INSERT INTO faq_change_notifications(operation,faq_entry_seqs,request_id,sent_at)
+      SELECT 'DELETE',ARRAY[2147483647],gen_random_uuid(),clock_timestamp() FROM generate_series(1,2000)`);
+    await client.query(`INSERT INTO call_sessions(provider_call_id,incoming_at,started_at,ended_at)
+      SELECT gen_random_uuid()::text,clock_timestamp(),clock_timestamp(),clock_timestamp() FROM generate_series(1,2000)`);
+    await client.query(`INSERT INTO orders(status)
+      SELECT 'COLLECTING' FROM generate_series(1,2000)`);
+    await client.query('ANALYZE audit_logs,faq_change_notifications,call_sessions,orders');
+    for (const [prefix, index] of [
+      ['DELETE FROM audit_logs', 'audit_logs_retention_idx'],
+      ['DELETE FROM faq_change_notifications', 'faq_notifications_retention_idx'],
+      ['SELECT call_session_seq AS id', 'call_sessions_retention_idx'],
+      ['SELECT o.order_seq AS id', 'orders_retention_idx'],
+    ]) {
+      const sql = statements.find((sql) => sql.startsWith(prefix));
+      assert.ok(sql, prefix);
+      const plan = (await client.query('EXPLAIN (ANALYZE,FORMAT JSON) ' + sql)).rows[0][
+        'QUERY PLAN'
+      ][0];
+      const pending = [plan.Plan];
+      let scan;
+      while (pending.length) {
+        const node = pending.pop();
+        if (node['Index Name'] === index) scan = node;
+        pending.push(...(node.Plans ?? []));
+      }
+      assert.ok(scan, index + ': ' + JSON.stringify(plan.Plan));
+      assert.match(scan['Index Cond'] ?? '', /<=/, index + ' must bound the expiry range');
+      t.diagnostic(
+        `${index}: ${scan['Index Cond']}; ${scan['Rows Removed by Filter'] ?? 0} rows filtered; ${plan['Execution Time']} ms`,
+      );
+    }
+  } finally {
+    try {
+      await client.query('ROLLBACK');
+      await client.query('ANALYZE audit_logs,faq_change_notifications,call_sessions,orders');
+    } finally {
+      client.release();
+    }
+  }
+});

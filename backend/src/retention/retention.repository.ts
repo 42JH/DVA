@@ -14,9 +14,10 @@ export class RetentionRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async claimCall(): Promise<CallPurge | undefined> {
+    // A statement-stable expiry cutoff lets time indexes bound the scan.
     const candidates = await this.database.pool.query<{ id: number; phone: string | null }>(
       `SELECT call_session_seq AS id,caller_phone_number AS phone FROM call_sessions
-       WHERE incoming_at<=clock_timestamp()-interval '5 years'
+       WHERE incoming_at<=statement_timestamp()-interval '5 years'
         AND (purge_claimed_until IS NULL OR purge_claimed_until<=clock_timestamp())
        ORDER BY incoming_at,call_session_seq LIMIT 10`,
     );
@@ -46,7 +47,7 @@ export class RetentionRepository {
         if (receipts.rows.length !== count || receipts.rows.some((row) => row.busy)) return;
         const call = await client.query(
           `SELECT 1 FROM call_sessions WHERE call_session_seq=$1
-          AND incoming_at<=clock_timestamp()-interval '5 years'
+          AND incoming_at<=statement_timestamp()-interval '5 years'
           AND (purge_claimed_until IS NULL OR purge_claimed_until<=clock_timestamp()) FOR UPDATE SKIP LOCKED`,
           [candidate.id],
         );
@@ -107,7 +108,7 @@ export class RetentionRepository {
         return false;
       const call = await client.query(
         `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND purge_claim_id=$2
-        AND purge_claimed_until>clock_timestamp() AND incoming_at<=clock_timestamp()-interval '5 years' FOR UPDATE`,
+        AND purge_claimed_until>clock_timestamp() AND incoming_at<=statement_timestamp()-interval '5 years' FOR UPDATE`,
         [claim.id, claim.claimId],
       );
       if (!call.rowCount) return false;
@@ -149,15 +150,15 @@ export class RetentionRepository {
         return;
       await client.query("SET LOCAL lock_timeout='1s'");
       await client.query(`DELETE FROM audit_logs WHERE audit_log_seq IN (SELECT audit_log_seq FROM audit_logs
-        WHERE occurred_at<=clock_timestamp()-interval '7 days' ORDER BY occurred_at,audit_log_seq LIMIT 1000 FOR UPDATE SKIP LOCKED)`);
+        WHERE occurred_at<=statement_timestamp()-interval '7 days' ORDER BY occurred_at,audit_log_seq LIMIT 1000 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM faq_change_notifications WHERE faq_change_notification_seq IN (
-        SELECT faq_change_notification_seq FROM faq_change_notifications WHERE sent_at<=clock_timestamp()-interval '7 days'
+        SELECT faq_change_notification_seq FROM faq_change_notifications WHERE sent_at<=statement_timestamp()-interval '7 days'
         ORDER BY sent_at LIMIT 1000 FOR UPDATE SKIP LOCKED)`);
       await client.query(`UPDATE ai_persona_versions SET created_by_admin_user_name=NULL WHERE ai_persona_version_seq IN (
-        SELECT ai_persona_version_seq FROM ai_persona_versions WHERE created_at<=clock_timestamp()-interval '5 years'
+        SELECT ai_persona_version_seq FROM ai_persona_versions WHERE created_at<=statement_timestamp()-interval '5 years'
          AND created_by_admin_user_name IS NOT NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       const orders = await client.query<{ id: number }>(`SELECT o.order_seq AS id FROM orders o
-        WHERE COALESCE(o.closed_at,o.created_at)<=clock_timestamp()-interval '5 years'
+        WHERE COALESCE(o.closed_at,o.created_at)<=statement_timestamp()-interval '5 years'
          AND o.status IN ('COLLECTING','notPaid','CANCELLED','ACCEPTED')
          AND NOT EXISTS(SELECT 1 FROM call_sessions c WHERE c.order_seq=o.order_seq)
          AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq
@@ -190,35 +191,35 @@ export class RetentionRepository {
       }
       // Child references remain valid until their own roots are expired.
       await client.query(`DELETE FROM memberships WHERE membership_seq IN (SELECT membership_seq FROM memberships
-        WHERE deleted_at<=clock_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM personal_pins WHERE personal_pin_seq IN (SELECT personal_pin_seq FROM personal_pins
-        WHERE deleted_at<=clock_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM company_pins WHERE company_pin_seq IN (SELECT company_pin_seq FROM company_pins
-        WHERE deleted_at<=clock_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM departments WHERE department_seq IN (SELECT d.department_seq FROM departments d
-        WHERE d.deleted_at<=clock_timestamp()-interval '5 years'
+        WHERE d.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.department_seq=d.department_seq)
          AND NOT EXISTS(SELECT 1 FROM company_pins p WHERE p.department_seq=d.department_seq) LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM organizations WHERE organization_seq IN (SELECT o.organization_seq FROM organizations o
-        WHERE o.deleted_at<=clock_timestamp()-interval '5 years'
+        WHERE o.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.organization_seq=o.organization_seq)
          AND NOT EXISTS(SELECT 1 FROM company_pins p WHERE p.organization_seq=o.organization_seq)
          AND NOT EXISTS(SELECT 1 FROM departments d WHERE d.organization_seq=o.organization_seq) LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`UPDATE customers SET name='삭제된 고객',phone_number='000'||customer_seq::text,address_data=NULL,
         monthly_billing_enabled=false,anonymized_at=clock_timestamp() WHERE customer_seq IN (SELECT customer_seq FROM customers
-         WHERE deleted_at<=clock_timestamp()-interval '5 years' AND anonymized_at IS NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+         WHERE deleted_at<=statement_timestamp()-interval '5 years' AND anonymized_at IS NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM customers WHERE customer_seq IN (SELECT c.customer_seq FROM customers c
-        WHERE c.deleted_at<=clock_timestamp()-interval '5 years'
+        WHERE c.deleted_at<=statement_timestamp()-interval '5 years'
          AND NOT EXISTS(SELECT 1 FROM orders o WHERE o.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM personal_pins p WHERE p.customer_seq=c.customer_seq)
          AND NOT EXISTS(SELECT 1 FROM memberships m WHERE m.customer_seq=c.customer_seq) LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM admin_users WHERE admin_user_seq IN (SELECT admin_user_seq FROM admin_users
-        WHERE deleted_at<=clock_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM faq_entries WHERE faq_entry_seq IN (SELECT faq_entry_seq FROM faq_entries
-        WHERE deleted_at<=clock_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+        WHERE deleted_at<=statement_timestamp()-interval '5 years' LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM organization_billing_months b WHERE (b.organization_seq,b.billing_month) IN (
         SELECT organization_seq,billing_month FROM organization_billing_months m
-        WHERE m.billing_month+interval '5 years 1 month'<=clock_timestamp()
+        WHERE m.billing_month+interval '5 years 1 month'<=statement_timestamp()
          AND NOT EXISTS(SELECT 1 FROM order_billing_charges c WHERE c.organization_seq=m.organization_seq AND c.billing_month=m.billing_month)
         LIMIT 100 FOR UPDATE SKIP LOCKED)`);
     });
