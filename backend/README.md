@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 프록시 미적용 사항은 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. 운영 적용은 별도다.
+
 무의미 통화는 AI가 등록·업무 결과 전송을 생략한다. 최초 고객 확인은 phoneNumber만 보내 조회하고, 업무 의도를 확인한 뒤 같은 API에 최초 call(providerCallId·incomingAt)을 보내 통화를 등록한다. PBX 미연결 수신은 received_at부터 30분 경과 후 처리 주기에 삭제하며 S3 미설정이어도 정리는 실행한다. 연결된 유효 통화의 저장 실패와 NO_ORDER는 보존한다. [AI 전달 계약](docs/meaningful-call-registration-handoff.md)을 따르며 AI 코드·운영 배포는 별도다.
 
 주소 위도·경도는 모든 입력·출력·디버 전송에서 제거한다. 고객·사원·PIN의 JSON 주소와 주문 좌표 컬럼은 새 migration 043으로 정리하며 기존 주문·PIN 버전과 나머지 값은 보존한다. 기존 앱 중지·백업 후 전환하고 구버전 앱으로 이미지 단독 복귀하지 않는다. 사용자 지정 범위에 따라 `backend/` 밖 문서·배포 보호는 수정하지 않았으므로 [좌표 제거 계약과 전환 주의사항](docs/address-coordinates-removal.md)을 우선한다.
@@ -39,7 +41,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 기업명·상태 관리 기능의 세션 인증 계약과 Postman 확인 방법은 [기업 API 계약](../docs/api/companies.md)을 참고한다.
 AI는 [주문 API 계약](../docs/api/orders.md)에 따라 POST /api/orders에 상담 결과를 한 번 전달한다. COMPLETE는 개인 카드 결제 대기 또는 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE·CANCELLED는 일부라도 수집한 주문을 저장한다. 주문 데이터가 없는 통화는 [빈 통화 계약](docs/empty-ai-order-results.md)에 따라 주문을 생성하지 않는다. 기존 미완료 주문 보완 후 접수는 [ORD-06](../docs/api/order-submit.md)을 유지한다.
 상담 시작의 [고객 확인 API](../docs/api/caller-context.md)는 먼저 phoneNumber만 보내 조회한다. AI가 실제 업무 의도를 확인한 뒤 최초 call(providerCallId·incomingAt)을 추가해 통화를 생성·재사용한다. 응답의 callSessionSeq를 상담 중 주문 조회·취소·주소록 API의 call_session_seq 헤더로 보내고, 주문 결과는 같은 통화에 연결한다. 무의미 통화는 등록·결과 전송을 생략한다. 새 두 단계 계약은 위 AI 전달 문서를 우선한다.
-PBX 녹취는 수신함 저장 후 비동기로 통화를 매칭하고 S3·recordings에 연결한다. 미연결 수신은 30분 경과 후 정리하며 연결된 통화는 보존한다. [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)와 [S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
+PBX 수신함 저장 후 유일한 통화의 종료를 즉시 반영하고 S3·recordings 연결은 비동기로 처리한다. 즉시 매칭이 실패하면 기존 워커가 재시도한다. 미연결 수신은 30분 경과 후 정리하며 연결된 통화는 보존한다. 최신 [실시간 통화 수 계약](docs/active-call-count.md)과 기존 [AI·PBX 연동 명세](../docs/api/ai-pbx-recordings.md)·[S3 설정](../docs/api/recording-s3-setup.md)을 참고한다.
 
 Jira: [S15P31D109-134](https://ssafy.atlassian.net/browse/S15P31D109-134). Node.js 24, NestJS 11, PostgreSQL 17, `pg`를 사용한다.
 업무 API의 초기 계약은 팀이 제공한 API 명세 초안을 따른다. MSA 애플리케이션과 독립적으로 관리한다.

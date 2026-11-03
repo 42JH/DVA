@@ -67,6 +67,10 @@ async function migrate(pool) {
         'SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=\'public\' AND table_name=\'order_parcels\' AND column_name IN (\'origin_latitude\',\'origin_longitude\',\'destination_latitude\',\'destination_longitude\')) AND valid_customer_address(\'{"roadAddress":"Road","jibunAddress":"Lot","dongName":"Dong","postalCode":"01234"}\'::jsonb)',
       );
       assert.equal(noCoordinates.rowCount, 1, 'Apply migration 043 to the isolated DB first');
+      const activeCalls = await client.query(
+        "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='registered_at' AND is_nullable='YES' AND column_default IS NOT NULL) AND to_regclass('public.call_sessions_active_count_idx') IS NOT NULL AND to_regclass('pbx_webhooks.call_ended_unlinked_identity_idx') IS NOT NULL",
+      );
+      assert.equal(activeCalls.rowCount, 1, 'Apply migration 044 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

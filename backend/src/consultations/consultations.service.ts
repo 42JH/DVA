@@ -11,6 +11,8 @@ import { AuditService } from '../audit/audit.service';
 import { CallSessionRepository } from './call-session.repository';
 import { CallIdentityDto } from './dto/call-identity.dto';
 import { RecordingCallMatch } from './consultations.types';
+import { CallEndRepository } from './call-end.repository';
+import { CallEndedPayload } from '../webhooks/pbx/pbx-webhook.payload';
 
 @Injectable()
 export class ConsultationsService {
@@ -19,6 +21,7 @@ export class ConsultationsService {
     private readonly playback: RecordingPlaybackService,
     private readonly sessions: CallSessionRepository,
     private readonly audit: AuditService,
+    private readonly endings: CallEndRepository,
   ) {}
 
   async ensureCall(
@@ -27,7 +30,9 @@ export class ConsultationsService {
     actorId: number | null,
     requestId: string,
   ): Promise<number> {
+    await this.endings.lockCaller(client, input.callerPhoneNumber);
     const session = await this.sessions.ensureCall(client, input);
+    await this.endings.matchPending(client, input.callerPhoneNumber, input.incomingAt);
     if (session.created)
       await this.audit.recordSuccess(
         {
@@ -57,6 +62,15 @@ export class ConsultationsService {
 
   matchRecording(client: PoolClient, input: RecordingCallMatch) {
     return this.sessions.matchRecording(client, input);
+  }
+
+  matchCallEnd(
+    client: PoolClient,
+    input: CallEndedPayload,
+    windowSeconds?: number,
+    claimId?: string,
+  ) {
+    return this.endings.match(client, input, windowSeconds, claimId);
   }
 
   async findMany(query: CallQueryDto) {

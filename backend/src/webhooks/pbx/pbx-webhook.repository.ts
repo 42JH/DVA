@@ -41,29 +41,13 @@ export class PbxWebhookRepository {
     windowSeconds: number,
     claimId: string,
   ): Promise<number | null> {
-    return this.database.transaction(async (client) => {
-      const event = (
-        await client.query<{ callId: number | null }>(
-          `SELECT call_session_seq AS "callId" FROM pbx_webhooks.call_ended_events
-           WHERE recording_id=$1 AND claim_id=$2 AND claimed_until>clock_timestamp() FOR UPDATE`,
-          [payload.recordingId, claimId],
-        )
-      ).rows[0];
-      if (!event) return null;
-      if (event.callId !== null) return event.callId;
-      const callId = await this.calls.matchRecording(client, {
-        callerPhoneNumber: payload.callFrom,
-        startedAt: payload.startedAt,
-        endedAt: payload.endedAt,
-        windowSeconds,
-      });
-      if (callId === null) return null;
-      await client.query(
-        'UPDATE pbx_webhooks.call_ended_events SET call_session_seq=$2 WHERE recording_id=$1',
-        [payload.recordingId, callId],
-      );
-      return callId;
-    });
+    return this.database.transaction((client) =>
+      this.calls.matchCallEnd(client, payload, windowSeconds, claimId),
+    );
+  }
+
+  matchReceived(payload: CallEndedPayload): Promise<number | null> {
+    return this.database.transaction((client) => this.calls.matchCallEnd(client, payload));
   }
 
   async processed(
