@@ -17,9 +17,10 @@ END IF;
 ## 운영 설정
 
 - S3 backend 역할에는 기존 업로드·재생 권한 외에 대상 버킷의 `s3:ListBucketVersions`와 `recordings/` 객체의 `s3:DeleteObject`, `s3:DeleteObjectVersion`이 필요하다. 삭제 버전/marker를 나열하고 실제 제거한다. Object Lock·MFA Delete·복제 대상이 있으면 운영 담당자가 함께 확인한다. [AWS 버전 삭제 설명](https://docs.aws.amazon.com/AmazonS3/latest/userguide/DeletingObjectVersions.html).
-- stdout/요청·응답·nginx·Docker 로그의 파일 보관은 수집/호스트 설정에서 7일로 적용한다. backend의 DB 정리만으로 외부 로그 파일은 삭제되지 않는다.
+- 저장소의 Loki는 이미 retention_period=168h이며 Compactor 삭제 지연은 2시간이다. 실제 배포 설정은 별도 확인한다. stdout/요청·응답·nginx·Docker 로그의 원본 파일 보관은 수집/호스트 설정에서 확인한다. 크기 기반 회전만으로는 7일 TTL이 되지 않으며 backend의 DB 정리가 외부 로그 파일을 삭제하지 않는다.
 - 백업·복제본·S3 복제 대상 및 AI/PBX가 보유한 녹취·STT·이벤트 원본도 원 통화 수신 시각부터 최대 5년 정책을 적용한다. 복원 시에는 만료 정리를 먼저 실행하고 외부 서비스에 공개한다.
 - 배포 전 원본 수신 시각을 확인하지 못하는 과거 통화와 미확정 결제를 점검한다. 날짜를 임의로 현재 시각으로 바꾸지 않는다.
+- 현재 재생·업로드·폐기는 S3_RECORDINGS_BUCKET 한 버킷을 사용한다. 버킷을 변경/분리할 때는 기존 객체 이관과 키 추적을 먼저 준비한다. S3 접근 장애가 나면 DB 키를 남기고 재시도하므로 에러 알림을 운영에서 확인해야 한다.
 
 ```sql
 SELECT call_session_seq FROM call_sessions WHERE incoming_at IS NULL ORDER BY call_session_seq;

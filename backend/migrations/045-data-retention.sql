@@ -139,6 +139,18 @@ BEGIN
  RETURN NEW;
 END $$;
 
+CREATE OR REPLACE FUNCTION notify_faq_change() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE entry_id integer; operation text;
+BEGIN
+ IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN RETURN NULL; END IF;
+ IF TG_OP='DELETE' AND OLD.deleted_at IS NOT NULL THEN RETURN NULL; END IF;
+ entry_id=CASE WHEN TG_OP='DELETE' THEN OLD.faq_entry_seq ELSE NEW.faq_entry_seq END;
+ operation=TG_OP;
+ IF TG_OP='UPDATE' AND OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN operation='DELETE'; END IF;
+ PERFORM pg_notify('faq_changed',jsonb_build_object('faqEntrySeq',entry_id,'operation',operation)::text);
+ RETURN NULL;
+END $$;
+
 COMMENT ON COLUMN orders.closed_at IS '최초 접수 완료/취소 시각. 수정·soft delete·재전송으로 연장하지 않는 5년 보관 기준';
 COMMENT ON COLUMN orders.created_by_admin_user_seq IS '감사 로그 TTL과 독립적인 생성자 권한의 논리 참조. 근거 없는 과거 값은 NULL';
 COMMENT ON COLUMN call_sessions.incoming_at IS '최초 통화 수신 시각. 녹취·STT·분석·AI 이벤트 전체의 5년 보관 기준';

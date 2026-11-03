@@ -3968,7 +3968,7 @@ test('admins edit, append and remove details in all seven states and derive the 
       ],
     });
     await pool.query(
-      "UPDATE orders SET status=$2,parcel_no=$3,dver_received_at=$4,paid_at=$5,payment_due_at=CASE WHEN $2='notPaid' THEN clock_timestamp()+interval '1 day' ELSE NULL END,created_at='2001-01-01T00:00:00Z' WHERE order_seq=$1",
+      "UPDATE orders SET status=$2,parcel_no=$3,dver_received_at=$4,paid_at=$5,payment_due_at=CASE WHEN $2='notPaid' THEN clock_timestamp()+interval '1 day' ELSE NULL END,created_at=clock_timestamp()-interval '1 year' WHERE order_seq=$1",
       [
         order.orderSeq,
         status,

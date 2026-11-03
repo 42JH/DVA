@@ -27,6 +27,16 @@ Jira: [S15P31D109-157](https://ssafy.atlassian.net/browse/S15P31D109-157). 변�
 
 세션 로그아웃·만료 정리, 확정한 페르소나 임시 초안 소비, 30분 미연결 수신 정리, 보관 만료 후 실제 폐기는 물리 삭제를 유지한다. 삭제 복원 API/UI는 이번 범위에 포함하지 않는다.
 
+## ERD 변경과 정리 실행
+
+admin_users·customers·organizations·departments·memberships·personal_pins·company_pins·faq_entries·orders·call_sessions에 nullable timestamptz deleted_at을 추가한다. 고객의 anonymized_at은 식별자만 남긴 시점을 기록한다. orders의 closed_at은 최초 종료 시각, created_by_admin_user_seq는 감사 로그와 독립적인 생성자 논리 참조다. call_sessions의 purge_claim_id/purge_claimed_until은 외부 삭제 lease이며 반드시 함께 설정/해제한다. ai_persona_versions의 created_by_admin_user_name은 작성자 이름 스냅샷이다. 실제 DDL은 045 한 파일이다.
+
+FK는 25개, 업무 트리거는 10개를 유지한다. 자식 테이블마다 삭제 상태를 중복 저장하지 않고 주문/통화 루트의 상태를 상속한다. 로그인 ID·고객 전화번호·고객 소속·기업별 사원번호·부서명·PIN 식별자·정규화 FAQ 질문의 UNIQUE는 deleted_at IS NULL인 행에 적용한다. 기존 식별자를 다른 사람에게 넘기지 않고 새 행으로 재등록한다.
+
+워커는 기동 시와 10초 주기에 실행하며 한 인스턴스에서 겹치지 않는다. 주기당 최대 통화 5건·주문 10건·감사 로그 1,000건·전송 완료 알림 1,000건·각 기준 정보 100건을 처리한다. 여러 서버는 DB claim과 advisory lock으로 협력한다. 기업·소속 쓰기 잠금(20261027,37)을 먼저 확보하고 부모 주문부터 잠근다. 금융 승인과 발송 상태는 결제 요청 행을 잠근 뒤 다시 확인한다. 통화는 기존 발신번호 잠금 → PBX 수신 → 통화 순서를 사용한다.
+
+S3 통신 전에 claim 트랜잭션을 커밋한다. 객체별 삭제는 총 2분으로 제한하며 실패하면 키를 남기고 1분 뒤 재시도 대상으로 전환한다. 최종 DB 폐기는 현재 claim 소유자만 가능하다. 버전·delete marker까지 제거하고 FK 자식부터 지운다. FAQ의 soft delete는 기존 DB DELETE 알림 의미도 유지하고 최종 폐기 시 같은 알림을 중복 발행하지 않는다. 만료 주문이 아직 통화 FK에 연결되어 있으면 통화 폐기를 먼저 기다리며, 최초 수신 시각 누락/미확정 결제는 운영 점검이 필요하다.
+
 ## 영향 확인과 검증 계획
 
 - 새 DB 전체 migration과 044까지 데이터가 있는 DB의 045 적용·롤백 검증. 기존 값·버전·FK·결제 금액 보존 확인.
@@ -44,4 +54,7 @@ Jira: [S15P31D109-157](https://ssafy.atlassian.net/browse/S15P31D109-157). 변�
 
 - 1차 스키마 검증: 격리 PostgreSQL 17에서 기존 데이터가 있는 044 → 045 적용/전체 롤백, 원본 버전·시각·작성자 보완, 활성 UNIQUE 재등록, FK 25개·업무 트리거 10개 보존 및 실제 배포 검증문을 포함한 14개 테스트 통과.
 - 2차 업무/API 검증: Linux 컴파일·lint, 새 API/잠금/롤백/재전송/재등록 10개, 초기 관리자 CLI부터 시작한 인증 35개, 페르소나·기업 삭제·미답변 기존 회귀 74개(합계 119개) 통과. 테스트의 현재 행 조회와 보존 행 확인을 구분해 물리 삭제 기대값을 교체했다.
-- 워커·전체 회귀 결과는 해당 구현 검증 후 추가한다.
+- 3차 정리 검증: S3 삭제 실패·재시도, 중복 워커, 업로드 lease, 외부 요청 중 DB 잠금 해제, 5년 FK 폐기·개인정보 제거·작성자 만료와 AI 이벤트의 7일 정리 제외를 실제 PostgreSQL 및 모의 S3로 확인했다.
+- 최종 `node backend/scripts/check.cjs` 종료 코드 0. lint·format·Linux 컴파일, 단위 118개 + 결제 시뮬레이터 21개 + 실제 PostgreSQL 통합 631개 + 로컬 운영 이미지/nginx·두 프록시 HTTPS 20개, 합계 790개 통과. 실패·skip 0이다.
+- 기존 관리자 수정 회귀의 2001년 생성 fixture는 새 만료 정책에 맞게 1년 전으로 조정했다. 만료 통화·주문이 DB 폐기 전에도 404인 검증은 별도로 유지한다. 초기 전체 실행에서 이 fixture가 실패했고 수정 후 전체 실행을 다시 통과했다.
+- 운영 서버 DB migration·실제 S3 객체 삭제·Jenkins 실행·배포는 수행하지 않았다. S3 버전 삭제는 모의 SDK로 검증했으며 실제 IAM/백업/원본 시각 점검은 인프라 후속 문서를 따른다.

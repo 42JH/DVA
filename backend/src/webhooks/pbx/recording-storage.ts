@@ -1,6 +1,13 @@
 import { Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  HeadObjectCommand,
+  ListObjectVersionsCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns';
 import { get } from 'node:https';
@@ -66,6 +73,36 @@ export class RecordingStorage implements OnApplicationShutdown {
 
   get configured(): boolean {
     return !!this.config.get('S3_RECORDINGS_BUCKET', { infer: true });
+  }
+
+  async erase(key: string): Promise<void> {
+    // shortcut: 녹취는 한 버킷을 사용한다. 버킷 분리 전 객체별 버킷 참조를 저장한다.
+    const bucket = this.config.get('S3_RECORDINGS_BUCKET', { infer: true });
+    if (!bucket) throw new Error('recording_storage_not_configured');
+    const abortSignal = AbortSignal.timeout(120000);
+    // A plain DELETE only adds a marker in a versioned bucket.
+    await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }), {
+      abortSignal,
+    });
+    for (let page = 0; page < 100; page++) {
+      const listed = await this.s3.send(
+        new ListObjectVersionsCommand({ Bucket: bucket, Prefix: key, MaxKeys: 1000 }),
+        { abortSignal },
+      );
+      const objects = [...(listed.Versions ?? []), ...(listed.DeleteMarkers ?? [])]
+        .filter((object) => object.Key === key)
+        .map((object) => ({ Key: key, VersionId: object.VersionId }));
+      if (!objects.length) {
+        if (listed.IsTruncated) throw new Error('recording_version_listing_incomplete');
+        return;
+      }
+      const deleted = await this.s3.send(
+        new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects, Quiet: true } }),
+        { abortSignal },
+      );
+      if (deleted.Errors?.length) throw new Error('recording_version_delete_failed');
+    }
+    throw new Error('recording_version_delete_limit');
   }
 
   private async stored(bucket: string, key: string, callId: number): Promise<boolean> {

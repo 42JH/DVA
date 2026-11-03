@@ -4,6 +4,7 @@ const { readFileSync, readdirSync } = require('node:fs');
 const { join } = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { Pool } = require('pg');
+const { once } = require('node:events');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -155,6 +156,37 @@ test('045 rolls back atomically and upgrades populated 044 without losing timest
         ).rows[0].n,
         10,
       );
+      await client.query('LISTEN faq_changed');
+      let notice = once(client, 'notification', { signal: AbortSignal.timeout(2000) });
+      const faq = (
+        await client.query(
+          "INSERT INTO faq_entries(question,answer,category,updated_by_admin_user_seq) VALUES('보관 정책 알림','답변','기타',1) RETURNING faq_entry_seq",
+        )
+      ).rows[0].faq_entry_seq;
+      assert.equal(JSON.parse((await notice)[0].payload).operation, 'INSERT');
+      notice = once(client, 'notification', { signal: AbortSignal.timeout(2000) });
+      await client.query(
+        'UPDATE faq_entries SET deleted_at=clock_timestamp() WHERE faq_entry_seq=$1',
+        [faq],
+      );
+      assert.equal(JSON.parse((await notice)[0].payload).operation, 'DELETE');
+      const notifications = [];
+      const collect = (message) => notifications.push(JSON.parse(message.payload));
+      client.on('notification', collect);
+      await client.query('DELETE FROM faq_entries WHERE faq_entry_seq=$1', [faq]);
+      const sentinel = new Promise((resolve) => {
+        const listen = (message) => {
+          if (JSON.parse(message.payload).sentinel) {
+            client.off('notification', listen);
+            resolve();
+          }
+        };
+        client.on('notification', listen);
+      });
+      await client.query("SELECT pg_notify('faq_changed','{\"sentinel\":true}')");
+      await sentinel;
+      client.off('notification', collect);
+      assert.deepEqual(notifications, [{ sentinel: true }]);
     } finally {
       await client.query('ROLLBACK');
       client.release();

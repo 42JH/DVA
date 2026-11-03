@@ -219,3 +219,42 @@ test('a stalled download times out rather than holding the worker forever', asyn
   t.after(() => storage.onApplicationShutdown());
   await assert.rejects(() => storage.download(new URL(source)));
 });
+
+test('retention erases every exact object version and delete marker and propagates partial deletion failures', async (t) => {
+  const storage = new RecordingStorage(config());
+  t.after(() => storage.onApplicationShutdown());
+  const key = 'recordings/expired';
+  let remaining = true,
+    denied = false;
+  const deleted = [];
+  t.mock.method(storage.s3, 'send', async (command) => {
+    assert.equal(command.input.Bucket, 'test-recordings');
+    if (command.constructor.name === 'DeleteObjectCommand') {
+      assert.equal(command.input.Key, key);
+      return {};
+    }
+    if (command.constructor.name === 'ListObjectVersionsCommand')
+      return remaining
+        ? {
+            Versions: [
+              { Key: key, VersionId: 'v1' },
+              { Key: key + '-other', VersionId: 'other' },
+            ],
+            DeleteMarkers: [{ Key: key, VersionId: 'marker' }],
+          }
+        : {};
+    assert.equal(command.constructor.name, 'DeleteObjectsCommand');
+    deleted.push(...command.input.Delete.Objects);
+    if (denied) return { Errors: [{ Key: key, Code: 'AccessDenied' }] };
+    remaining = false;
+    return {};
+  });
+  await storage.erase(key);
+  assert.deepEqual(deleted, [
+    { Key: key, VersionId: 'v1' },
+    { Key: key, VersionId: 'marker' },
+  ]);
+  remaining = true;
+  denied = true;
+  await assert.rejects(storage.erase(key), /recording_version_delete_failed/);
+});
