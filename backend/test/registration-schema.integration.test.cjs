@@ -59,6 +59,22 @@ async function verify(changes = [], message = 'Registration dates schema or migr
 test('deployment verification accepts migration 033 with nullable registration dates and live defaults', () =>
   verify());
 
+test('deployment verification requires migration 045, soft deletion and the fenced retention guard', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='045-data-retention.sql'",
+    'ALTER TABLE orders DROP COLUMN closed_at',
+    'ALTER TABLE call_sessions DROP COLUMN deleted_at',
+    'ALTER TABLE call_sessions DROP CONSTRAINT call_purge_claim_pair',
+  ])
+    await verify([sql], 'Data retention schema or migration missing');
+});
+
+test('deployment verification requires active-row employee uniqueness', () =>
+  verify(
+    ['DROP INDEX memberships_organization_seq_employee_no_key'],
+    'Active organization/employee uniqueness missing',
+  ));
+
 test('deployment verification requires migration 037 and an undecided payment default', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='037-undecided-order-payment-method.sql'",

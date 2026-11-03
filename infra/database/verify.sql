@@ -16,9 +16,10 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
   AND table_name='memberships' AND column_name='employee_no' AND is_nullable='NO') THEN
   RAISE EXCEPTION 'Required employee number column missing'; END IF;
- IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.memberships'::regclass
-  AND contype='u' AND pg_get_constraintdef(oid)='UNIQUE (organization_seq, employee_no)') THEN
-  RAISE EXCEPTION 'Organization/employee uniqueness missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM pg_index i WHERE i.indexrelid=to_regclass('public.memberships_organization_seq_employee_no_key')
+  AND i.indisunique AND i.indisvalid
+  AND pg_get_indexdef(i.indexrelid) LIKE '%(organization_seq, employee_no) WHERE (deleted_at IS NULL)') THEN
+  RAISE EXCEPTION 'Active organization/employee uniqueness missing'; END IF;
  IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
   AND table_name IN ('personal_pins','company_pins') AND column_name='search_text' AND is_generated='ALWAYS')<>2 THEN
   RAISE EXCEPTION 'Generated PIN search columns missing'; END IF;
@@ -135,7 +136,19 @@ BEGIN
     AND conname='call_analyses_result_check')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='042-remove-call-analysis-result.sql') THEN
   RAISE EXCEPTION 'Call analysis result removal or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, employee identity, generated columns and migration ledger';
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
+   AND table_name IN ('admin_users','customers','organizations','departments','memberships','personal_pins','company_pins','faq_entries','orders','call_sessions')
+   AND column_name='deleted_at' AND udt_name='timestamptz' AND is_nullable='YES')<>10
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='orders'
+    AND column_name IN ('closed_at','created_by_admin_user_seq'))<>2
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions' AND column_name='created_by_admin_user_name')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='call_sessions'::regclass AND conname='call_purge_claim_pair')
+  OR to_regclass('public.orders_retention_idx') IS NULL OR to_regclass('public.call_sessions_retention_idx') IS NULL
+  OR to_regclass('public.audit_logs_retention_idx') IS NULL
+  OR pg_get_functiondef('guard_order_parcel_edit()'::regprocedure) NOT LIKE '%dva.retention_order%'
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='045-data-retention.sql') THEN
+  RAISE EXCEPTION 'Data retention schema or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, active employee identity, retention schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

@@ -71,6 +71,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='registered_at' AND is_nullable='YES' AND column_default IS NOT NULL) AND to_regclass('public.call_sessions_active_count_idx') IS NOT NULL AND to_regclass('pbx_webhooks.call_ended_unlinked_identity_idx') IS NOT NULL",
       );
       assert.equal(activeCalls.rowCount, 1, 'Apply migration 044 to the isolated DB first');
+      const retention = await client.query(
+        "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='deleted_at') AND to_regclass('public.orders_retention_idx') IS NOT NULL",
+      );
+      assert.equal(retention.rowCount, 1, 'Apply migration 045 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
