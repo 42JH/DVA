@@ -4,7 +4,7 @@ const { before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { createServer } = require('node:http');
-const { Pool } = require('pg');
+const { createTestPool } = require('./application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 
@@ -17,13 +17,7 @@ module.exports = function manualOrders() {
   const { AppModule } = require('../../dist/app.module');
   const { configureApplication } = require('../../dist/configure-application');
   const { hashPassword } = require('../../dist/auth/password');
-  const pool = new Pool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+  const pool = createTestPool();
   const origin = 'http://localhost:5173';
   const f = { pool, origin, apps: [], cookies: [], adminIds: [], requests: [] };
   f.address = {

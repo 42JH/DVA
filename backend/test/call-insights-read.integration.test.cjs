@@ -6,7 +6,8 @@ const { ConfigService } = require('@nestjs/config');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
-const f = require('./helpers/faqs.cjs')();
+const { applicationFixture } = require('./helpers/application.cjs');
+const f = applicationFixture();
 const marker = () => 'private-call-read-' + randomUUID();
 const phone = () => '010' + randomInt(10000000, 100000000);
 const list = (query = {}, actor = 0, headers = {}) =>
