@@ -236,10 +236,10 @@ test('69: external rejection, invalid response and timeout are recorded without 
         res.writeHead(403);
         res.end('{}');
       },
-      'SUBMISSION_FAILED',
+      'SUBMITTING_FAILED',
     ],
-    [(_req, res) => res.end('<html>failed</html>'), 'SUBMISSION_FAILED'],
-    [() => {}, 'SUBMISSION_FAILED'],
+    [(_req, res) => res.end('<html>failed</html>'), 'SUBMITTING_FAILED'],
+    [() => {}, 'SUBMITTING_FAILED'],
   ]) {
     f.respond = respond;
     const key = randomUUID(),
@@ -280,7 +280,7 @@ test('69: result persistence failure leaves SUBMITTING and stale recovery never 
     await client.query('BEGIN');
     await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
     await client.query(
-      "UPDATE orders SET updated_at=now()-interval '2 minutes' WHERE order_seq=$1",
+      "UPDATE orders SET updated_at=now()-interval '2 minutes',submission_last_attempt_at=now()-interval '20 seconds' WHERE order_seq=$1",
       [data.orderSeq],
     );
     await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
@@ -293,7 +293,7 @@ test('69: result persistence failure leaves SUBMITTING and stale recovery never 
   }
   const retry = await f.send(f.body(), key);
   assert.equal(retry.status, 201);
-  assert.equal((await retry.json()).data.status, 'SUBMISSION_FAILED');
+  assert.equal((await retry.json()).data.status, 'SUBMITTING_FAILED');
   assert.equal(f.requests.length, 1);
   assert.equal((await f.counts()).shipments, before.shipments);
 });

@@ -60,7 +60,7 @@ export class OrderResultDto extends CreatedOrderDto {
   @ApiProperty({
     enum: ORDER_STATUSES,
     description:
-      'notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 디버 접수 실패. 접수 성공은 ACCEPTED만 안내합니다.',
+      'notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, SUBMITTING_FAILED 자동 재시도 중 실패, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 자동 재시도가 끝난 최종 실패. 접수 성공은 ACCEPTED만 안내합니다.',
   })
   status!: OrderStatus;
 
@@ -118,7 +118,7 @@ export class OrderSummaryDto {
 
   @ApiProperty({
     description:
-      '주문 상태: COLLECTING 수집 중, notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 디버 접수 실패, CANCELLED 취소됨. 일부 상세만 취소하면 결제 대기 상태 유지.',
+      '주문 상태: COLLECTING 수집 중, notPaid 결제 대기, PAID 결제 완료, SUBMITTING 디버 접수 중, SUBMITTING_FAILED 자동 재시도 중 실패, ACCEPTED 디버 접수 완료, SUBMISSION_FAILED 자동 재시도가 끝난 최종 실패, CANCELLED 취소됨. 일부 상세만 취소하면 결제 대기 상태 유지.',
     enum: ORDER_STATUSES,
     example: 'COLLECTING',
   })

@@ -37,6 +37,27 @@ export class OrdersService {
     private readonly submission: OrderSubmissionService,
   ) {}
 
+  async delete(id: number, adminId: number, requestId: string): Promise<void> {
+    await writeOrder(this.database, async (client) => {
+      const order = await this.repository.lockOrder(client, id);
+      if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (
+        !['COLLECTING', 'CANCELLED', 'ACCEPTED'].includes(order.status) ||
+        (await this.repository.deletionBlocked(client, id))
+      )
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '진행 중인 통화·결제·접수 처리를 마친 뒤 삭제해 주세요.',
+        );
+      await this.repository.softDelete(client, id);
+      await this.audit.recordSuccess(
+        { actorId: adminId, action: 'ORDER_DELETED', targetType: 'ORDER', targetId: id, requestId },
+        client,
+      );
+    });
+  }
+
   private callId(adminId: number | null, header?: string): number | null {
     if (
       (adminId === null && header === undefined) ||
@@ -231,6 +252,12 @@ export class OrdersService {
       if (previous) {
         if (!previous.allowed)
           throw new ApiException(403, 'FORBIDDEN', '이 요청 키의 주문에 접근할 수 없습니다.');
+        if (previous.deleted)
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '삭제되었거나 보관 기간이 지난 주문의 요청 키입니다.',
+          );
         if (submitManual && previous.creationSource !== 'ADMIN')
           throw new ApiException(409, 'INVALID_STATE', '관리자 수기 주문의 요청 키가 아닙니다.');
         if (!input.call && !submitManual)
@@ -291,6 +318,7 @@ export class OrdersService {
         customerId,
         key,
         callId !== null ? 'AI' : 'ADMIN',
+        adminId,
       );
       if (callId !== null) await this.calls.attachOrder(client, callId, result.orderSeq);
       await this.audit.recordSuccess(
@@ -641,11 +669,9 @@ export class OrdersService {
       if (order.status !== 'COLLECTING') {
         if (order.status === 'CANCELLED')
           throw new ApiException(409, 'INVALID_STATE', '취소된 주문입니다.');
-        if (
-          order.status === 'SUBMITTING' &&
-          (await this.submission.recoverStale(client, id, requestId))
-        ) {
-          return { status: 'SUBMISSION_FAILED' as const };
+        if (order.status === 'SUBMITTING') {
+          const recovered = await this.submission.recoverStale(client, id, requestId);
+          if (recovered) return { status: recovered };
         }
         return { status: order.status };
       }

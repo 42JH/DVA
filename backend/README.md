@@ -1,5 +1,9 @@
 # 모놀리식 백엔드 공통 기반
 
+디버 접수는 [10초 응답 제한·10분 자동 재시도 계약](docs/order-submission-retry.md)을 따른다. 새 앱 전에 migration 046을 적용한다. SUBMITTING_FAILED는 최초 전송 후 10분 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패다. AI·프론트의 상태 분기와 실패 탭 표시는 이 계약을 따른다.
+
+업무 데이터 삭제·보관은 새 migration 045와 [작업 명세](docs/data-retention.md), [API·AI 전달 사항](docs/data-retention-handoff.md)을 따른다. 기존 업무 DELETE는 soft delete로 바꾸고 주문·통화 DELETE를 추가한다. 통화 전체(녹취·STT·AI 이벤트)는 최초 incoming_at부터 5년, 주문은 최초 완료/취소(미완료는 생성)부터 5년 후 실제 폐기한다. 감사 로그와 전송 완료 알림은 7일 정리한다. 045 한 번 적용 후 새 앱으로 전환하며 [인프라 후속 항목](docs/data-retention-infra-follow-up.md)의 S3 권한·외부 로그·백업 폐기를 함께 확인한다. 외부 문서의 과거 물리 삭제 설명보다 이 계약을 우선한다.
+
 진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 양쪽 nginx 설정·운영 적용 순서는 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. nginx 설정은 저장소에 반영했으며 실제 서버 적용은 별도다.
 
 무의미 통화는 AI가 등록·업무 결과 전송을 생략한다. 최초 고객 확인은 phoneNumber만 보내 조회하고, 업무 의도를 확인한 뒤 같은 API에 최초 call(providerCallId·incomingAt)을 보내 통화를 등록한다. PBX 미연결 수신은 received_at부터 30분 경과 후 처리 주기에 삭제하며 S3 미설정이어도 정리는 실행한다. 연결된 유효 통화의 저장 실패와 NO_ORDER는 보존한다. [AI 전달 계약](docs/meaningful-call-registration-handoff.md)을 따르며 AI 코드·운영 배포는 별도다.
@@ -20,7 +24,7 @@ AI 통화 분석 ANL-01은 [분석 계약](../docs/api/call-analysis.md), 이벤
 
 AI 미답변 질문은 [UNQ-01 계약](../docs/api/unanswered-questions.md)에 따라 POST /api/ai/unanswered-questions로 수집한다. 같은 AI_INSIGHTS_TOKEN을 사용하며 최초 201·동일 발생 재전송 200이다. 신규 상태는 OPEN, 위치는 정수 초 또는 null이다. 프론트의 목록·검색은 [UNQ-02](../docs/api/unanswered-questions-read-spec.md) GET /api/unanswered-questions를 사용한다. 관리자 세션 전용, 기본 OPEN, 오래된 통화부터 조회하며 기간은 PBX 우선·AI 분석 대체의 통화 시작 기준이다. 전환·삭제는 [UNQ-03·UNQ-04](../docs/api/unanswered-questions-management.md)를 따른다. 전환은 분류·질문·답변 모두 필수이며 원문과 재전송 이력은 보존한다. 새 앱 전에 028까지 적용한다. 목록의 total_count로 검색 총건수를 제공하며 통계 뷰는 후속 작업이다.
 
-기업·부서 실제 삭제, 소속 해제와 PIN 정리, 개인 회원·주문·통화·녹취·청구 이력 보존은 [삭제 API 계약](../docs/api/company-deletion.md)을 따른다. 새 앱 전에 021까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
+기업·부서 soft delete, 소속 해제와 PIN 숨김, 개인 회원·주문·통화·녹취·청구 이력 보존은 [최신 삭제 계약](docs/data-retention-handoff.md)을 따른다. 기존 URL·권한·트랜잭션 범위는 [기존 삭제 API 계약](../docs/api/company-deletion.md)을 유지한다. 새 앱 전에 045까지 적용한다. 운영 DB 적용·삭제는 별도이며 AI 폴더는 변경하지 않는다.
 
 FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.md), AI 수신 API 구현은 [별도 AI FAQ 연동 규격](../docs/api/ai-faq-integration.md)을 따른다. 027 migration 적용 후 새 앱을 실행한다. 추가·수정은 category·question·answer가 모두 필수다. 관리자 조회에만 분류를 제공하고 AI 원본 응답·알림 형식은 유지한다. 기존 32개 질문은 [분류표](../docs/database/faq-category-assignments.md)대로 보완하며 미등록 질문이 있으면 임의 분류 없이 migration을 중단한다. 실제 DB 적용은 이번 작업에서 제외한다. `AI_FAQ_TOKEN`을 설정하면 저장된 변경 알림을 AI에 전송하며, 비어 있으면 대기는 보존하고 전송만 비활성이다.
 
@@ -30,7 +34,7 @@ FAQ 단건·복수 추가/삭제와 단건 수정은 [FAQ API](../docs/api/faqs.
 
 페르소나 유형·초안·버전·적용은 [HEAD·publish 관리 계약](docs/persona-head-management.md)을 우선한다. 새 앱 전에 039 migration까지 적용한다. PATCH 수정 저장은 유형별 초안 한 개를 덮어쓰고 HEAD를 유지한다. POST versions가 초안을 정식 버전으로 확정하고 초안을 삭제하며, POST activate가 확인한 HEAD를 별도로 publish한다. 확정과 publish는 실제 상담·기존 대기를 구분한다. 프론트는 expectedDraftRevision과 초안 응답을 처리하고 HEAD 확정 호출을 추가해야 한다. 신·구 PATCH 계약의 앱을 동시에 운영하지 않는다. 수동 PUT head는 계속 제공하지 않는다. 통화 중 적용과 선택 호환값 activeCallCount는 [다음 통화 적용 AI 전달 명세](docs/ai-persona-next-call.md)를 따른다. 진행 중 통화의 버전 고정은 AI 팀 구현·검증이 필요하다. `AI_PERSONA_TOKEN` 미설정 또는 AI 옵션 API 미연결 시 저장·확정·publish 요청은 503이다.
 
-관리자 페르소나 응답의 `createdByAdminUserName`은 기존 논리 참조와 감사 기록으로 조회한다. 페르소나에 이름 컬럼을 추가하지 않고 관리자 물리 삭제 후에도 작성자 번호와 확인 가능한 이름을 유지한다. 이름을 확인할 수 없는 과거 데이터는 null이며 AI 설정 응답에는 이름을 추가하지 않는다. 추가 migration은 없다.
+관리자 페르소나 응답의 `createdByAdminUserName`은 045에서 추가한 스냅샷으로 조회한다. 기존 감사 기록·관리자 정보로 확인 가능한 이름만 보완하고 알 수 없으면 null이다. 관리자 삭제·로그 7일 정리 후에도 생성 후 5년까지 이름을 유지하며 AI 설정 응답에는 이름을 추가하지 않는다. 주문 생성자 권한도 별도 논리 참조로 보존해 로그 TTL에 의존하지 않는다.
 
 관리자 통화 목록·상세·발화 조회는 [통화·녹취 API 계약](../docs/api/calls.md)을 참고한다. 목록의 q·hasComplaint·aiPersonaVersionSeq와 고객 표시, 목록·상세의 저장된 analysis를 제공한다. 분석 미수신은 null이며 PBX 시각·기간·정렬과 녹취 재생 동작은 유지한다. 기존 두 GET 조회에 요약을 추가하고 대표 분류·필터 result를 삭제한다. 목록의 total_count가 검색 총건수를 제공한다. 담당 2용 통계 뷰는 남은 작업이다.
 
@@ -446,9 +450,9 @@ PENDING → ACTIVE 가입 승인은 유지하고 같은 상태 지정·PENDING �
 비활성화는 계정 상태 변경·대상의 모든 세션 삭제·성공 감사 기록을 동일 트랜잭션에서 처리한다.
 재활성화해도 이전 세션은 복구하지 않으므로 다시 로그인해야 한다. 이미 인증한 실행 중 요청은 소급 취소하지 않는다.
 
-DELETE /api/admins/:id는 SYSTEM_ADMIN만 사용하며 OPERATOR·SUPERVISOR를 상태와 관계없이 실제 삭제한다.
+DELETE /api/admins/:id는 SYSTEM_ADMIN만 사용하며 OPERATOR·SUPERVISOR를 상태와 관계없이 soft delete한다.
 SYSTEM_ADMIN은 본인·타인 모두 삭제할 수 없다. 성공 응답은 본문 없는 204이며 없는 계정은 404다.
-계정과 모든 세션을 삭제하고 목록·로그인에서 제외한다. 이미 인증한 요청은 소급 취소하지 않지만 후속 인증은 실패한다.
+계정에 deleted_at을 기록하고 모든 세션을 즉시 삭제해 목록·로그인에서 제외한다. 계정은 삭제 후 5년 보관하고 폐기한다. 이미 인증한 요청은 소급 취소하지 않지만 후속 인증은 실패한다.
 업무 기록의 관리자 번호는 논리 참조로 보존하며 감사 로그의 actorName·targetAdminName으로 당시 이름을 확인한다.
 삭제 성공 감사와 계정 삭제는 같은 트랜잭션이다. 로그인·권한 변경과 겹쳐도 계정 잠금 뒤 재검증한다.
 INACTIVE는 로그인할 수 없으며 목록 필터·권한 변경·재활성화·삭제 대상으로 지원한다. 별도 상태 전환 API는 추가하지 않는다.
@@ -511,10 +515,10 @@ FAQ 등록은 단건·복수 모두 items 배열을 사용한다. 새 앱 전 02
 
 배포 전에 033-organization-created-at.sql을 적용해야 합니다. 실제 서버 DB 적용과 배포는 이 코드 변경의 로컬 검증에 포함하지 않습니다.
 
-관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않습니다. SUBMISSION_FAILED는 다음 분의 자동 워커 또는 관리자 POST /api/admin/orders/{id}/retry로 재전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+디버 요청의 응답 제한은 10초입니다. 실패·시간 초과는 SUBMITTING_FAILED로 저장하고 최초 전송부터 10분 동안 마지막 시도에서 최소 1분 간격으로 자동 재전송합니다. 10분이 끝나면 SUBMISSION_FAILED로 전환하고 자동 재시도를 종료합니다. 첫/마지막 전송 시각은 046에서 추가한 별도 컬럼으로 유지하며 서버 재시작·주문 수정·재호출로 첫 기한을 연장하지 않습니다.
 
-GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 실패 주문만 조회합니다. PAID 그룹은 PAID·SUBMITTING·ACCEPTED만 포함하며 실패를 제외합니다. 검색·기간·페이지 조건과 응답 형식은 유지하고 total_count도 같은 필터의 총 주문 수입니다. 기존 docs/api/admin-order-list.md의 PAID 그룹 설명보다 이 계약과 Swagger를 우선합니다.
+GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 SUBMITTING_FAILED와 SUBMISSION_FAILED를 함께 조회하고 실제 status로 재시도 중/최종 실패를 구분합니다. PAID 그룹은 PAID·SUBMITTING·ACCEPTED만 포함합니다. 검색·기간·페이지 조건과 응답 형식은 유지하고 total_count도 같은 필터의 총 주문 수입니다. 기존 docs/api/admin-order-list.md의 PAID 그룹 설명보다 이 계약과 Swagger를 우선합니다.
 
-자동 워커는 기동 시와 매분 PAID 및 이전 분까지의 SUBMISSION_FAILED를 오래된 갱신 시각 순으로 최대 20건 처리합니다. 실패 재시도 횟수 제한은 없고 ACCEPTED·SUBMITTING·notPaid·COLLECTING·CANCELLED는 자동 재전송하지 않습니다. 조회 시각 비교와 주문 잠금으로 다른 워커·관리자가 이미 처리한 스냅샷의 전송을 건너뛰며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 결제·청구·수거 시각은 재처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다. 스키마 변경이나 신규 migration은 없습니다.
+자동 워커는 기동 시와 10초 주기로 미확정 전송·10분 기한을 확인합니다. 실제 재전송은 PAID와 기한 안의 SUBMITTING_FAILED 중 마지막 시도 후 1분이 지난 주문만 최대 20건 병렬 처리합니다. 최신 시도 시각으로 이전 응답을 차단하며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 5년 보관 기한이 지난 주문은 이 배치에서 제외합니다. 기존 관리자 POST /api/admin/orders/{id}/retry는 최종 실패 후에도 수동 1회 요청으로 사용할 수 있으며 자동 기한을 새로 열지 않습니다. 결제·청구·수거 시각은 반복 처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다.
 
 배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.

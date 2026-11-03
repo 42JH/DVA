@@ -10,7 +10,7 @@ export class PinsRepository {
     return (
       await client.query<{ phone: string | null; endedAt: Date | null }>(
         `SELECT caller_phone_number AS phone,ended_at AS "endedAt" FROM call_sessions
-       WHERE call_session_seq=$1${lock ? ' FOR SHARE' : ''}`,
+       WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')${lock ? ' FOR SHARE' : ''}`,
         [id],
       )
     ).rows[0];
@@ -18,7 +18,7 @@ export class PinsRepository {
   async customer(client: PoolClient, id: number, lock: boolean) {
     return (
       await client.query<{ phone: string; status: string }>(
-        `SELECT phone_number AS phone,status FROM customers WHERE customer_seq=$1${lock ? ' FOR SHARE' : ''}`,
+        `SELECT phone_number AS phone,status FROM customers WHERE customer_seq=$1 AND deleted_at IS NULL${lock ? ' FOR SHARE' : ''}`,
         [id],
       )
     ).rows[0];
@@ -26,7 +26,7 @@ export class PinsRepository {
   async owner(client: PoolClient, id: number): Promise<number | undefined> {
     return (
       await client.query<{ owner: number }>(
-        'SELECT customer_seq AS owner FROM personal_pins WHERE personal_pin_seq=$1',
+        'SELECT customer_seq AS owner FROM personal_pins WHERE personal_pin_seq=$1 AND deleted_at IS NULL',
         [id],
       )
     ).rows[0]?.owner;
@@ -36,7 +36,7 @@ export class PinsRepository {
       client,
       `SELECT personal_pin_seq AS "personalPinSeq",customer_seq AS "customerSeq",label,
         address_data AS "addressData",version FROM personal_pins
-       WHERE customer_seq=$1 AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)`,
+       WHERE customer_seq=$1 AND deleted_at IS NULL AND ($2::text IS NULL OR strpos(search_text,lower(normalize($2,NFC)))>0)`,
       [customerId, query.q || null],
       query,
       '"personalPinSeq"',
@@ -57,7 +57,7 @@ export class PinsRepository {
       await client.query<PinVersionDto>(
         `UPDATE personal_pins SET label=CASE WHEN $2 THEN $3 ELSE label END,
         address_data=CASE WHEN $4 THEN $5::jsonb ELSE address_data END
-       WHERE personal_pin_seq=$1 RETURNING version`,
+       WHERE personal_pin_seq=$1 AND deleted_at IS NULL RETURNING version`,
         [
           id,
           input.label !== undefined,

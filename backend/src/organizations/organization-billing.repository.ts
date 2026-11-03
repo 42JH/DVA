@@ -13,7 +13,7 @@ export class OrganizationBillingRepository {
        coalesce(b.organization_name,o.name) AS "organizationName",to_char(m.month,'YYYY-MM') AS month,
        coalesce(b.monthly_amount,0)::float8 AS "monthlyAmount",coalesce(b.group_billing_amount,0)::float8 AS "groupBillingAmount"
        FROM (SELECT coalesce(to_date($2,'YYYY-MM'),date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date) AS month) m
-       LEFT JOIN organizations o ON o.organization_seq=$1
+       LEFT JOIN organizations o ON o.organization_seq=$1 AND o.deleted_at IS NULL
        LEFT JOIN organization_billing_months b ON b.organization_seq=$1 AND b.billing_month=m.month
        WHERE o.organization_seq IS NOT NULL OR b.organization_seq IS NOT NULL`,
         [id, month ?? null],
@@ -23,7 +23,7 @@ export class OrganizationBillingRepository {
   async ensureMonth(client: PoolClient, id: number, month: string) {
     const created = await client.query(
       `INSERT INTO organization_billing_months(organization_seq,billing_month,organization_name)
-       SELECT organization_seq,$2::date,name FROM organizations WHERE organization_seq=$1
+       SELECT organization_seq,$2::date,name FROM organizations WHERE organization_seq=$1 AND deleted_at IS NULL
        ON CONFLICT DO NOTHING RETURNING organization_seq`,
       [id, month],
     );
@@ -77,7 +77,7 @@ export class OrganizationBillingRepository {
       FROM organizations o LEFT JOIN (SELECT organization_seq,max(billing_month) AS last_month FROM organization_billing_months GROUP BY organization_seq) b USING(organization_seq)
       CROSS JOIN LATERAL generate_series(coalesce(b.last_month+interval '1 month',date_trunc('month',$1::timestamptz AT TIME ZONE 'Asia/Seoul')),
         date_trunc('month',$1::timestamptz AT TIME ZONE 'Asia/Seoul'),interval '1 month') m(month)
-      ORDER BY o.organization_seq,m.month`,
+      WHERE o.deleted_at IS NULL ORDER BY o.organization_seq,m.month`,
         [now],
       )
     ).rows;

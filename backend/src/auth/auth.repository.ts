@@ -11,7 +11,7 @@ export class AuthRepository {
         `SELECT a.admin_user_seq AS "adminUserSeq",
    a.login_id AS "loginId",a.name,a.role,a.status,a.created_at AS "createdAt",a.last_login_at AS "lastLoginAt"
    FROM admin_sessions s JOIN admin_users a USING(admin_user_seq)
-   WHERE s.session_token_hash=$1 AND s.expires_at>clock_timestamp() AND a.status='ACTIVE'`,
+   WHERE s.session_token_hash=$1 AND s.expires_at>clock_timestamp() AND a.status='ACTIVE' AND a.deleted_at IS NULL`,
         [hash],
       )
     ).rows[0];

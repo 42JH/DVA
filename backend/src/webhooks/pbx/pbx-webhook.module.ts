@@ -18,5 +18,6 @@ import { ConsultationsModule } from '../../consultations/consultations.module';
     PbxRecordingWorker,
     RecordingStorage,
   ],
+  exports: [RecordingStorage],
 })
 export class PbxWebhookModule {}

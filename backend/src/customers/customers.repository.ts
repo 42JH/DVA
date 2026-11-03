@@ -70,14 +70,14 @@ export class CustomersRepository {
         'personalPins', COALESCE((SELECT jsonb_agg(jsonb_build_object(
           'personalPinSeq',p.personal_pin_seq,'label',p.label,'addressData',p.address_data,'version',p.version)
           ORDER BY p.personal_pin_seq)
-          FROM personal_pins p WHERE p.customer_seq=c.customer_seq AND c.status='ACTIVE'), '[]'::jsonb),
+          FROM personal_pins p WHERE p.customer_seq=c.customer_seq AND p.deleted_at IS NULL AND c.status='ACTIVE'), '[]'::jsonb),
         'companyPins', '[]'::jsonb
       ) AS context
       FROM customers c
-      LEFT JOIN memberships m ON m.customer_seq=c.customer_seq
-      LEFT JOIN organizations o ON o.organization_seq=m.organization_seq
-      LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq
-      WHERE c.phone_number=$1`,
+      LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+      LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+      LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
+      WHERE c.phone_number=$1 AND c.deleted_at IS NULL`,
       [phoneNumber],
     );
     return (
@@ -102,7 +102,7 @@ export class CustomersRepository {
     return (
       await client.query<Customer>(
         `INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE')
-       ON CONFLICT(phone_number) DO NOTHING RETURNING ${columns}`,
+       ON CONFLICT(phone_number) WHERE deleted_at IS NULL DO NOTHING RETURNING ${columns}`,
         [input.name, input.phoneNumber],
       )
     ).rows[0];
@@ -111,7 +111,7 @@ export class CustomersRepository {
   async findByPhoneForOrder(client: PoolClient, phone: string): Promise<Customer | undefined> {
     return (
       await client.query<Customer>(
-        `SELECT ${columns} FROM customers WHERE phone_number=$1 FOR SHARE`,
+        `SELECT ${columns} FROM customers WHERE phone_number=$1 AND deleted_at IS NULL FOR SHARE`,
         [phone],
       )
     ).rows[0];
@@ -121,7 +121,7 @@ export class CustomersRepository {
     const result = await readPage<Customer>(
       this.database.pool,
       `SELECT ${columns} FROM customers
-       WHERE ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
+       WHERE deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
          AND ($2::text IS NULL OR phone_number = $2)
          AND ($3::text IS NULL OR status = $3)`,
       [query.q || null, query.phoneNumber ?? null, query.status ?? null],
@@ -133,7 +133,7 @@ export class CustomersRepository {
 
   async find(id: number, client?: PoolClient): Promise<Customer | undefined> {
     const result = await (client ?? this.database.pool).query<Customer>(
-      `SELECT ${columns} FROM customers WHERE customer_seq = $1${client ? ' FOR UPDATE' : ''}`,
+      `SELECT ${columns} FROM customers WHERE customer_seq = $1 AND deleted_at IS NULL${client ? ' FOR UPDATE' : ''}`,
       [id],
     );
     return result.rows[0];

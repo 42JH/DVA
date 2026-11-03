@@ -26,13 +26,13 @@ export class ObservabilityService {
         await client.query("SET LOCAL statement_timeout = '2s'");
         orders = (
           await client.query<{ status: string; count: string }>(
-            "SELECT status,count(*)::text AS count FROM orders WHERE status IN ('notPaid','PAID','SUBMISSION_FAILED','SUBMITTING') GROUP BY status",
+            "SELECT status,count(*)::text AS count FROM orders WHERE status IN ('notPaid','PAID','SUBMISSION_FAILED','SUBMITTING_FAILED','SUBMITTING') AND deleted_at IS NULL GROUP BY status",
           )
         ).rows;
         stale = Number(
           (
             await client.query<{ count: string }>(
-              "SELECT count(*)::text AS count FROM orders WHERE status='SUBMITTING' AND updated_at < clock_timestamp()-interval '1 minute'",
+              "SELECT count(*)::text AS count FROM orders WHERE status='SUBMITTING' AND deleted_at IS NULL AND COALESCE(submission_last_attempt_at,updated_at)<=statement_timestamp()-interval '10 seconds'",
             )
           ).rows[0].count,
         );
@@ -66,7 +66,13 @@ export class ObservabilityService {
     // 수집 실패를 주문 수 0으로 표시하지 않는다.
     if (ordersOk) {
       lines.push('# TYPE dva_orders_attention gauge');
-      for (const status of ['notPaid', 'PAID', 'SUBMISSION_FAILED', 'SUBMITTING'])
+      for (const status of [
+        'notPaid',
+        'PAID',
+        'SUBMISSION_FAILED',
+        'SUBMITTING_FAILED',
+        'SUBMITTING',
+      ])
         lines.push(
           `dva_orders_attention{status="${status}"} ${Number(orders.find((row) => row.status === status)?.count ?? 0)}`,
         );

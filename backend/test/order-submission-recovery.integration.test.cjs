@@ -33,7 +33,7 @@ async function interruptedOrder(stale = false) {
       await client.query('BEGIN');
       await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
       await client.query(
-        "UPDATE orders SET updated_at=clock_timestamp()-interval '2 minutes' WHERE order_seq=$1",
+        "UPDATE orders SET updated_at=clock_timestamp()-interval '2 minutes',submission_last_attempt_at=clock_timestamp()-interval '20 seconds' WHERE order_seq=$1",
         [id],
       );
       await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
@@ -51,6 +51,25 @@ async function interruptedOrder(stale = false) {
 const retry = (id, headers) =>
   f.post(`/api/admin/orders/${id}/retry`, {}, randomUUID(), 0, headers);
 
+test('10-minute retry policy stores a timed-out attempt as SUBMITTING_FAILED without repeating payment', async () => {
+  f.respond = () => {};
+  const response = await f.send();
+  const data = (await response.json()).data;
+  assert.equal(data.status, 'SUBMITTING_FAILED');
+  const row = (
+    await f.pool.query(
+      `SELECT submission_first_attempt_at,submission_last_attempt_at,
+       (SELECT count(*)::int FROM order_billing_charges b WHERE b.order_seq=o.order_seq) AS charges
+       FROM orders o WHERE order_seq=$1`,
+      [data.orderSeq],
+    )
+  ).rows[0];
+  assert.ok(row.submission_first_attempt_at);
+  assert.ok(row.submission_last_attempt_at);
+  assert.equal(row.charges, 1);
+  assert.equal(f.requests.length, 1);
+});
+
 test('admin retry preserves a fresh SUBMITTING order without another external submission', async () => {
   const id = await interruptedOrder();
   const response = await retry(id);
@@ -63,10 +82,10 @@ test('admin retry recovers a stale submission once, audits it and waits for a su
   const id = await interruptedOrder(true);
   const response = await retry(id);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).data.status, 'SUBMISSION_FAILED');
+  assert.equal((await response.json()).data.status, 'SUBMITTING_FAILED');
   assert.equal(f.requests.length, 1);
   const detail = (await (await f.get(`/api/orders/${id}`)).json()).data;
-  assert.equal(detail.status, 'SUBMISSION_FAILED');
+  assert.equal(detail.status, 'SUBMITTING_FAILED');
   assert.equal(detail.parcels.length, 1);
   assert.equal(detail.totalAmount, 3500);
   assert.equal(
@@ -123,7 +142,7 @@ async function failedOrder(name = '재접수 검증 ' + randomUUID()) {
   const response = await f.send(input);
   assert.equal(response.status, 201);
   const data = (await response.json()).data;
-  assert.equal(data.status, 'SUBMISSION_FAILED');
+  assert.equal(data.status, 'SUBMITTING_FAILED');
   return data.orderSeq;
 }
 
@@ -133,7 +152,7 @@ async function previousMinute(ids) {
     await client.query('BEGIN');
     await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
     await client.query(
-      "UPDATE orders SET updated_at=date_trunc('minute',clock_timestamp())-interval '1 second' WHERE order_seq=ANY($1::int[])",
+      "UPDATE orders SET updated_at=clock_timestamp()-interval '61 seconds',submission_first_attempt_at=LEAST(submission_first_attempt_at,clock_timestamp()-interval '61 seconds'),submission_last_attempt_at=clock_timestamp()-interval '61 seconds' WHERE order_seq=ANY($1::int[])",
       [ids],
     );
     await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
@@ -156,6 +175,150 @@ function gate() {
   return { promise, release };
 }
 
+async function submissionAge(id, first, last) {
+  return (
+    await f.pool.query(
+      `UPDATE orders SET submission_first_attempt_at=statement_timestamp()-$2::interval,
+       submission_last_attempt_at=statement_timestamp()-$3::interval WHERE order_seq=$1
+       RETURNING submission_first_attempt_at`,
+      [id, first, last],
+    )
+  ).rows[0].submission_first_attempt_at;
+}
+
+test('worker recovers an unanswered SUBMITTING attempt after ten seconds without an API replay', async () => {
+  const id = await interruptedOrder();
+  const first = await submissionAge(id, '20 seconds', '11 seconds');
+  await f.app.get(OrderMaintenanceWorker).run();
+  assert.equal((await stored(id)).status, 'SUBMITTING_FAILED');
+  assert.equal(f.requests.length, 1, 'recovery does not bypass the one-minute retry interval');
+  assert.deepEqual(
+    (await f.pool.query('SELECT submission_first_attempt_at FROM orders WHERE order_seq=$1', [id]))
+      .rows[0].submission_first_attempt_at,
+    first,
+  );
+});
+
+test('the ten-minute boundary ends automatic retries and explicit admin retry never reopens the window', async () => {
+  const id = await failedOrder();
+  const first = await submissionAge(id, '10 minutes', '61 seconds');
+  const worker = f.app.get(OrderMaintenanceWorker);
+  await worker.run();
+  assert.equal((await stored(id)).status, 'SUBMISSION_FAILED');
+  assert.equal(f.requests.length, 1);
+  await worker.run();
+  assert.equal(f.requests.length, 1);
+  assert.equal((await (await retry(id)).json()).data.status, 'SUBMISSION_FAILED');
+  assert.equal(f.requests.length, 2, 'an explicit manual request remains available');
+  await worker.run();
+  assert.equal(f.requests.length, 2, 'a manual failure never opens another automatic window');
+  assert.deepEqual(
+    (await f.pool.query('SELECT submission_first_attempt_at FROM orders WHERE order_seq=$1', [id]))
+      .rows[0].submission_first_attempt_at,
+    first,
+  );
+  succeed();
+  assert.equal((await (await retry(id)).json()).data.status, 'ACCEPTED');
+});
+
+test('a restarted worker keeps the original retry clock and stops an expired interrupted attempt', async () => {
+  const id = await interruptedOrder();
+  const first = await submissionAge(id, '11 minutes', '11 seconds');
+  const second = await f.start();
+  await second.get(OrderMaintenanceWorker).run();
+  assert.equal((await stored(id)).status, 'SUBMISSION_FAILED');
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(
+    (await f.pool.query('SELECT submission_first_attempt_at FROM orders WHERE order_seq=$1', [id]))
+      .rows[0].submission_first_attempt_at,
+    first,
+  );
+});
+
+test('a restarted worker retries within the original window without moving its first attempt', async () => {
+  const id = await failedOrder();
+  const first = await submissionAge(id, '2 minutes', '61 seconds');
+  const second = await f.start();
+  succeed();
+  await second.get(OrderMaintenanceWorker).run();
+  assert.equal((await stored(id)).status, 'ACCEPTED');
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(
+    (await f.pool.query('SELECT submission_first_attempt_at FROM orders WHERE order_seq=$1', [id]))
+      .rows[0].submission_first_attempt_at,
+    first,
+  );
+});
+
+test('an attempt near the automatic deadline cannot wait another full ten seconds', async () => {
+  const id = await failedOrder();
+  await submissionAge(id, '9 minutes 58 seconds', '61 seconds');
+  f.respond = () => {};
+  const started = Date.now();
+  const response = await retry(id);
+  assert.equal((await response.json()).data.status, 'SUBMISSION_FAILED');
+  assert.ok(Date.now() - started < 5000, 'the remaining retry window caps the HTTP timeout');
+  assert.equal(f.requests.length, 2);
+  await f.app.get(OrderMaintenanceWorker).run();
+  assert.equal(f.requests.length, 2);
+});
+
+test('a previous attempt cannot accept or overwrite a newer submission or duplicate its shipments', async () => {
+  const id = await failedOrder();
+  const previous = (
+    await f.pool.query(
+      'SELECT submission_last_attempt_at::text AS attempt FROM orders WHERE order_seq=$1',
+      [id],
+    )
+  ).rows[0].attempt;
+  const repository = f.app.get(OrderSubmissionRepository);
+  const client = await f.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const current = await repository.start(client, id);
+    const result = {
+      status: 'ACCEPTED',
+      parcelNo: 'TEST0069',
+      receivedAt: new Date().toISOString(),
+    };
+    assert.equal(await repository.finish(client, id, result, previous), undefined);
+    assert.equal(
+      (await client.query('SELECT status FROM orders WHERE order_seq=$1', [id])).rows[0].status,
+      'SUBMITTING',
+    );
+    assert.equal(await repository.finish(client, id, result, current.attempt), 'ACCEPTED');
+    assert.equal(await repository.finish(client, id, result, current.attempt), undefined);
+    await client.query('COMMIT');
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  assert.equal(
+    (
+      await f.pool.query(
+        'SELECT 1 FROM shipments s JOIN order_parcels p USING(order_parcel_seq) WHERE p.order_seq=$1',
+        [id],
+      )
+    ).rowCount,
+    1,
+  );
+});
+
+test('twenty expired paid orders cannot occupy the retry batch ahead of a current order', async () => {
+  await f.pool
+    .query(`INSERT INTO orders(status,payment_method_type,total_amount,created_at,updated_at,paid_at,pickup_requested_at)
+    SELECT 'PAID','billing',3500,statement_timestamp()-interval '6 years',statement_timestamp()-interval '6 years',
+      statement_timestamp()-interval '6 years',statement_timestamp()-interval '6 years'+interval '1 hour'
+    FROM generate_series(1,20)`);
+  const id = await failedOrder();
+  await previousMinute([id]);
+  succeed();
+  await f.app.get(OrderMaintenanceWorker).run();
+  assert.equal((await stored(id)).status, 'ACCEPTED');
+  assert.equal(f.requests.length, 2);
+  assert.equal((await f.pool.query("SELECT 1 FROM orders WHERE status='PAID'")).rowCount, 20);
+});
+
 test('failure tab is separate from PAID with filtered totals, pagination, all admin roles and Swagger', async () => {
   const marker = '실패탭-' + randomUUID();
   const ids = [await failedOrder(marker), await failedOrder(marker)];
@@ -167,7 +330,7 @@ test('failure tab is separate from PAID with filtered totals, pagination, all ad
     assert.equal(body.total_count, 2);
     assert.equal(body.hasNext, true);
     assert.equal(body.data.length, 1);
-    assert.equal(body.data[0].status, 'SUBMISSION_FAILED');
+    assert.equal(body.data[0].status, 'SUBMITTING_FAILED');
   }
   const emptyPage = await (await f.get(url + '&offset=100')).json();
   assert.equal(emptyPage.total_count, 2);
@@ -196,7 +359,7 @@ test('worker retries a failed order once per minute, preserves payment and picku
   const worker = f.app.get(OrderMaintenanceWorker);
   await worker.run();
   assert.equal(f.requests.length, 2);
-  assert.equal((await stored(id)).status, 'SUBMISSION_FAILED');
+  assert.equal((await stored(id)).status, 'SUBMITTING_FAILED');
   assert.deepEqual(f.requests[1].body, f.requests[0].body);
   await worker.run();
   assert.equal(f.requests.length, 2, 'a fresh failure waits for the next minute');
@@ -253,13 +416,13 @@ for (const rival of ['admin', 'worker']) {
       } else {
         service.submitPaidOrder = original;
         const response = await retry(id);
-        assert.equal((await response.json()).data.status, 'SUBMISSION_FAILED');
+        assert.equal((await response.json()).data.status, 'SUBMITTING_FAILED');
       }
       assert.equal(f.requests.length, 2);
       resume.release();
       await waiting;
       assert.equal(f.requests.length, 2, 'the selected snapshot was consumed by the other attempt');
-      assert.equal((await stored(id)).status, 'SUBMISSION_FAILED');
+      assert.equal((await stored(id)).status, 'SUBMITTING_FAILED');
     } finally {
       service.submitPaidOrder = original;
       resume.release();

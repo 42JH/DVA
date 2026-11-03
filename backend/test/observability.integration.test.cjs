@@ -49,12 +49,13 @@ test('internal metrics are text, independent of AI and absent from public Swagge
 test('stale detection reads committed order state without changing status, version or audit records', async () => {
   const initial = (
     await database.pool.query(
-      "SELECT count(*)::int AS n FROM orders WHERE status='SUBMITTING' AND updated_at < clock_timestamp()-interval '1 minute'",
+      "SELECT count(*)::int AS n FROM orders WHERE status='SUBMITTING' AND deleted_at IS NULL AND COALESCE(submission_last_attempt_at,updated_at)<=statement_timestamp()-interval '10 seconds'",
     )
   ).rows[0].n;
   for (const [status, old] of [
     ['PAID', false],
     ['SUBMISSION_FAILED', false],
+    ['SUBMITTING_FAILED', false],
     ['SUBMITTING', true],
     ['SUBMITTING', false],
   ]) {

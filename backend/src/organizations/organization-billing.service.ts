@@ -86,7 +86,7 @@ export class OrganizationBillingService {
         for (const month of months.slice(offset, offset + 10)) {
           // Serialize month creation with company deletion, including after its billing FKs are removed.
           const company = await client.query(
-            'SELECT 1 FROM organizations WHERE organization_seq=$1 FOR SHARE',
+            'SELECT 1 FROM organizations WHERE organization_seq=$1 AND deleted_at IS NULL FOR SHARE',
             [month.organizationSeq],
           );
           if (company.rowCount)

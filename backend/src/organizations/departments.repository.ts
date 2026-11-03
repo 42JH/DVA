@@ -18,7 +18,7 @@ export class DepartmentsRepository {
   async company(client: PoolClient, id: number) {
     return (
       await client.query<{ status: string }>(
-        'SELECT status FROM organizations WHERE organization_seq=$1 FOR UPDATE',
+        'SELECT status FROM organizations WHERE organization_seq=$1 AND deleted_at IS NULL FOR UPDATE',
         [id],
       )
     ).rows[0];
@@ -28,8 +28,8 @@ export class DepartmentsRepository {
       this.database.pool,
       `SELECT ${columns},d.created_at AS "createdAt",
         (SELECT count(*)::integer FROM memberships m WHERE m.department_seq=d.department_seq
-         AND m.organization_seq=d.organization_seq AND m.status='ACTIVE') AS "memberCount"
-       FROM departments d WHERE d.organization_seq=$1`,
+         AND m.organization_seq=d.organization_seq AND m.status='ACTIVE' AND m.deleted_at IS NULL) AS "memberCount"
+       FROM departments d WHERE d.organization_seq=$1 AND d.deleted_at IS NULL`,
       [id],
       query,
       '"departmentSeq"',
@@ -38,7 +38,7 @@ export class DepartmentsRepository {
   async find(client: PoolClient, id: number) {
     return (
       await client.query<DepartmentDto>(
-        `SELECT ${columns} FROM departments WHERE department_seq=$1`,
+        `SELECT ${columns} FROM departments WHERE department_seq=$1 AND deleted_at IS NULL`,
         [id],
       )
     ).rows[0];
@@ -60,7 +60,7 @@ export class DepartmentsRepository {
   async renamePins(client: PoolClient, id: number, name: string) {
     return (
       await client.query<{ id: number }>(
-        'UPDATE company_pins SET department_name=$2 WHERE department_seq=$1 AND department_name IS DISTINCT FROM $2 RETURNING company_pin_seq AS id',
+        'UPDATE company_pins SET department_name=$2 WHERE department_seq=$1 AND deleted_at IS NULL AND department_name IS DISTINCT FROM $2 RETURNING company_pin_seq AS id',
         [id, name],
       )
     ).rows;

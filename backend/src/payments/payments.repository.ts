@@ -45,7 +45,8 @@ export class PaymentsRepository {
        (SELECT p.origin_name FROM order_parcels p WHERE p.order_seq=o.order_seq AND p.status='ACTIVE' ORDER BY p.order_parcel_seq LIMIT 1) AS "senderName",
        (SELECT p.destination_name FROM order_parcels p WHERE p.order_seq=o.order_seq AND p.status='ACTIVE' ORDER BY p.order_parcel_seq LIMIT 1) AS "recipientSummary",
        (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq AND p.status='ACTIVE') AS "parcelCount"
-       FROM order_payment_requests r JOIN orders o USING(order_seq) WHERE r.payment_request_id=$1`,
+       FROM order_payment_requests r JOIN orders o USING(order_seq) WHERE r.payment_request_id=$1 AND o.deleted_at IS NULL
+         AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'`,
         [id],
       )
     ).rows[0];

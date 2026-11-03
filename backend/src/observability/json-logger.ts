@@ -23,8 +23,10 @@ const events = new Set([
   'paid_order_submission_deferred',
   'payment_worker_failed',
   'payment_reconcile_deferred',
+  'retention_cleanup_failed',
+  'retention_recording_deferred',
 ]);
-const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING']);
+const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING_FAILED', 'SUBMITTING']);
 const reasons = new Set([
   'authentication_rejected',
   'http_error',

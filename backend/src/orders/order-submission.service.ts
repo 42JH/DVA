@@ -11,6 +11,8 @@ import { SubmittedOrderDto } from './dto/submit-order.dto';
 import { assertOrderAmount } from './order-pricing';
 import { assertOrderSubmissionReady } from './order-submission.validation';
 import { writeOrder } from './order-write';
+import { randomUUID } from 'node:crypto';
+import { OrderStatus } from './orders.types';
 
 @Injectable()
 export class OrderSubmissionService {
@@ -24,8 +26,13 @@ export class OrderSubmissionService {
     private readonly payments: OrderPaymentsRepository,
   ) {}
 
-  async recoverStale(client: PoolClient, id: number, requestId: string): Promise<boolean> {
-    if (!(await this.submissions.markStale(client, id))) return false;
+  async recoverStale(
+    client: PoolClient,
+    id: number,
+    requestId: string,
+  ): Promise<OrderStatus | undefined> {
+    const status = await this.submissions.markStale(client, id);
+    if (!status) return;
     await this.audit.recordSuccess(
       {
         actorId: null,
@@ -37,7 +44,14 @@ export class OrderSubmissionService {
       },
       client,
     );
-    return true;
+    return status;
+  }
+
+  async recoverPending(): Promise<void> {
+    await this.database.transaction(async (client) => {
+      for (const id of await this.submissions.recoveryCandidates(client))
+        await this.recoverStale(client, id, randomUUID());
+    });
   }
 
   async submitPaidOrder(
@@ -50,14 +64,18 @@ export class OrderSubmissionService {
     const prepared = await writeOrder(this.database, async (client) => {
       const order = await this.repository.lockOrder(client, id);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (order.status === 'SUBMITTING') {
+        const recovered = await this.recoverStale(client, id, requestId);
+        return { status: recovered ?? order.status };
+      }
+      if (expectedUpdatedAt !== undefined) {
+        const recovered = await this.recoverStale(client, id, requestId);
+        if (recovered) return { status: recovered };
+      }
       if (
-        retry &&
-        expectedUpdatedAt === undefined &&
-        order.status === 'SUBMITTING' &&
-        (await this.recoverStale(client, id, requestId))
+        order.status !== 'PAID' &&
+        !(retry && ['SUBMITTING_FAILED', 'SUBMISSION_FAILED'].includes(order.status))
       )
-        return { status: 'SUBMISSION_FAILED' as const };
-      if (order.status !== 'PAID' && !(retry && order.status === 'SUBMISSION_FAILED'))
         return { status: order.status };
       const snapshot = (await this.repository.detail(client, id, null))!;
       // Payment fixes pickup at paid_at + 1 hour. Retries preserve that snapshot.
@@ -65,8 +83,8 @@ export class OrderSubmissionService {
       assertOrderAmount(snapshot);
       this.dver.ensureConfigured();
       // A worker snapshot is consumed once even if another attempt has already failed again.
-      if (!(await this.submissions.start(client, id, expectedUpdatedAt)))
-        return { status: order.status };
+      const attempt = await this.submissions.start(client, id, expectedUpdatedAt);
+      if (!attempt) return { status: order.status };
       await this.audit.recordSuccess(
         {
           actorId: adminId,
@@ -78,10 +96,16 @@ export class OrderSubmissionService {
         },
         client,
       );
-      return { payload };
+      return { payload, ...attempt };
     });
     if ('status' in prepared) return { status: prepared.status! };
-    return this.finishSubmission(id, requestId, prepared.payload);
+    return this.finishSubmission(
+      id,
+      requestId,
+      prepared.payload,
+      prepared.attempt,
+      prepared.timeoutMs,
+    );
   }
 
   async retry(id: number, adminId: number, requestId: string) {
@@ -89,7 +113,9 @@ export class OrderSubmissionService {
       this.repository.lockOrder(client, id),
     );
     if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
-    if (!['SUBMISSION_FAILED', 'SUBMITTING', 'ACCEPTED'].includes(order.status))
+    if (
+      !['SUBMISSION_FAILED', 'SUBMITTING_FAILED', 'SUBMITTING', 'ACCEPTED'].includes(order.status)
+    )
       throw new ApiException(409, 'INVALID_STATE', '디버 접수 실패 주문만 재접수할 수 있습니다.');
     return this.submitPaidOrder(id, requestId, adminId, true);
   }
@@ -157,6 +183,8 @@ export class OrderSubmissionService {
     id: number,
     requestId: string,
     payload: ReturnType<typeof dverPayload>,
+    attempt: string,
+    timeoutMs: number,
   ): Promise<SubmittedOrderDto> {
     const event = {
       actorId: null,
@@ -168,13 +196,15 @@ export class OrderSubmissionService {
     // SUBMITTING을 COMMIT한 요청만 전송하며 이 구간에는 DB 트랜잭션이 없다.
     let result: DverResult;
     try {
-      result = await this.dver.submit(payload);
+      result = await this.dver.submit(payload, timeoutMs);
     } catch {
       result = { status: 'SUBMISSION_FAILED' };
     }
     try {
-      await this.database.transaction(async (client) => {
-        await this.submissions.finish(client, id, result);
+      const status = await this.database.transaction(async (client) => {
+        const saved = await this.submissions.finish(client, id, result, attempt);
+        if (!saved)
+          return (await this.repository.lockOrder(client, id))?.status ?? 'SUBMISSION_FAILED';
         await this.audit.recordSuccess(
           {
             ...event,
@@ -185,14 +215,15 @@ export class OrderSubmissionService {
           },
           client,
         );
+        return saved;
       });
       this.logger.log({
         event: 'order_submission_result',
         orderSeq: id,
         requestId,
-        outcome: result.status,
+        outcome: status,
       });
-      return { status: result.status };
+      return { status };
     } catch {
       this.logger.error({ event: 'order_submission_result_save_failed', orderSeq: id, requestId });
       // 외부 접수가 성공했을 수 있다. 저장 실패 후에도 같은 주문을 다시 전송하지 않는다.

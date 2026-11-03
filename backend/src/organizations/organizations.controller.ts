@@ -164,7 +164,7 @@ export class OrganizationsController {
   @ApiOperation({
     summary: '기업 삭제',
     description:
-      '모든 활성 관리자. 소속·부서·기업 PIN을 삭제하고 개인 회원·개인 PIN·주문·통화·녹취·감사·청구 이력을 보존합니다.',
+      '모든 활성 관리자. 기업·소속·부서·기업 PIN을 하나의 트랜잭션에서 soft delete합니다. 개인 회원·개인 PIN·주문·통화·녹취·과거 청구 총액은 각각의 보관 기준을 유지합니다. 삭제한 기준 정보는 5년 후 실제 폐기합니다.',
   })
   @ApiNoContentResponse({ description: '삭제 완료. 응답 본문 없음.' })
   @ApiNotFoundResponse({ type: ErrorResponseDto })

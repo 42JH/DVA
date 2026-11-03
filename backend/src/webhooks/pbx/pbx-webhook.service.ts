@@ -11,6 +11,8 @@ export class PbxWebhookService {
     payload: CallEndedPayload,
   ): Promise<{ status: string; recordingId: string; duplicate: boolean }> {
     try {
+      if (await this.repository.expired(payload.startedAt))
+        return { status: 'expired', recordingId: payload.recordingId, duplicate: false };
       const serialized = JSON.stringify(payload);
       const duplicate = !(await this.repository.insert(payload.recordingId, serialized));
       if (duplicate && !(await this.repository.hasSamePayload(payload.recordingId, serialized))) {

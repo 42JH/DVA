@@ -1,4 +1,4 @@
-import { Controller, Get, Header, Param, Query, Req, Sse } from '@nestjs/common';
+import { Controller, Delete, Get, Header, HttpCode, Param, Query, Req, Sse } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthRequest, Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
@@ -9,6 +9,7 @@ import { CallIdParamsDto } from './dto/call-id-params.dto';
 import { TranscriptQueryDto, TranscriptResponseDto } from './dto/transcript.dto';
 import { ActiveCallCountService } from './active-call-count.service';
 import { ActiveCallCountResponseDto } from './dto/active-call-count.dto';
+import { AuditOperation } from '../audit/audit-operation';
 
 @ApiTags('Calls')
 @ApiCookieAuth('adminSession')
@@ -26,6 +27,25 @@ export class ConsultationsController {
     private readonly consultations: ConsultationsService,
     private readonly activeCalls: ActiveCallCountService,
   ) {}
+
+  @Delete(':id')
+  @HttpCode(204)
+  @AuditOperation({ action: 'CALL_DELETED', targetType: 'CALL_SESSION', target: 'id' })
+  @ApiOperation({
+    summary: '통화 soft delete',
+    description:
+      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 최초 incomingAt부터 5년 후 수행하며 주문은 별도로 유지합니다.',
+  })
+  @ApiResponse({ status: 204, description: '삭제 처리 완료.' })
+  @ApiResponse({ status: 404, type: ErrorResponseDto, description: '없거나 삭제·만료된 통화.' })
+  @ApiResponse({
+    status: 409,
+    type: ErrorResponseDto,
+    description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
+  })
+  delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
+    return this.consultations.delete(params.id, request.admin.adminUserSeq, request.requestId);
+  }
 
   @Get('active-count')
   @ApiOperation({

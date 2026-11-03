@@ -60,7 +60,7 @@ export class OrderPaymentsRepository {
   async eligibility(client: PoolClient, customerId: number) {
     const customer = (
       await client.query<{ monthlyBillingEnabled: boolean }>(
-        `SELECT monthly_billing_enabled AS "monthlyBillingEnabled" FROM customers WHERE customer_seq=$1 AND status='ACTIVE' FOR SHARE`,
+        `SELECT monthly_billing_enabled AS "monthlyBillingEnabled" FROM customers WHERE customer_seq=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE`,
         [customerId],
       )
     ).rows[0];
@@ -75,7 +75,7 @@ export class OrderPaymentsRepository {
         `SELECT m.organization_seq AS "organizationSeq",m.department_seq AS "departmentSeq",m.status AS "membershipStatus",o.status AS "organizationStatus",
        o.monthly_billing_enabled AS "monthlyBillingEnabled"
        FROM memberships m JOIN organizations o USING(organization_seq)
-       WHERE m.customer_seq=$1 FOR SHARE OF m,o`,
+       WHERE m.customer_seq=$1 AND m.deleted_at IS NULL AND o.deleted_at IS NULL FOR SHARE OF m,o`,
         [customerId],
       )
     ).rows[0];
@@ -83,7 +83,7 @@ export class OrderPaymentsRepository {
       member?.departmentSeq != null
         ? (
             await client.query<{ groupBillingEnabled: boolean }>(
-              'SELECT group_billing_enabled AS "groupBillingEnabled" FROM departments WHERE department_seq=$1 FOR SHARE',
+              'SELECT group_billing_enabled AS "groupBillingEnabled" FROM departments WHERE department_seq=$1 AND deleted_at IS NULL FOR SHARE',
               [member.departmentSeq],
             )
           ).rows[0]
@@ -156,10 +156,11 @@ export class OrderPaymentsRepository {
     if (!parent) return undefined;
     const order = (
       await client.query<{ status: string; totalAmount: number; paidAt: Date | null }>(
-        'SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt" FROM orders WHERE order_seq=$1 FOR UPDATE',
+        'SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE',
         [parent.orderSeq],
       )
     ).rows[0];
+    if (!order) return undefined;
     const request = (
       await client.query<PaymentRequest>(
         `SELECT payment_request_id AS "paymentRequestId",order_seq AS "orderSeq",amount,expires_at AS "expiresAt",approval_started_at AS "approvalStartedAt",invalidated_at AS "invalidatedAt",completed_at AS "completedAt",provider_reference AS "providerReference",provider_payment_key AS "providerPaymentKey",provider_approved_at AS "providerApprovedAt",approval_claim_id AS "approvalClaimId",approval_claimed_until AS "approvalClaimedUntil",notification_status AS "notificationStatus" FROM order_payment_requests WHERE payment_request_id=$1 FOR UPDATE`,
@@ -213,7 +214,7 @@ export class OrderPaymentsRepository {
           id: string;
         }>(`SELECT r.payment_request_id AS id FROM order_payment_requests r
         JOIN orders o USING(order_seq) WHERE r.notification_status='PENDING' AND r.invalidated_at IS NULL
-        AND r.completed_at IS NULL AND r.approval_started_at IS NULL AND r.expires_at>clock_timestamp() AND o.status='notPaid'
+        AND r.completed_at IS NULL AND r.approval_started_at IS NULL AND r.expires_at>clock_timestamp() AND o.status='notPaid' AND o.deleted_at IS NULL
         ORDER BY r.created_at LIMIT 1 FOR UPDATE OF r SKIP LOCKED`)
       ).rows[0];
       if (!row) return;

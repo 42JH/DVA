@@ -51,10 +51,10 @@ export class DverClient {
       throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '디버 접수 설정이 필요합니다.');
   }
 
-  async submit(payload: ReturnType<typeof dverPayload>): Promise<DverResult> {
+  async submit(payload: ReturnType<typeof dverPayload>, timeoutMs = 10_000): Promise<DverResult> {
     this.ensureConfigured();
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const started = performance.now();
     const finish = (result: DverResult, reason?: string): DverResult => {
       this.logger.log({

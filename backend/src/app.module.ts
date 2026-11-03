@@ -16,6 +16,7 @@ import { ObservabilityModule } from './observability/observability.module';
 import { PaymentsModule } from './payments/payments.module';
 import { CallInsightsModule } from './call-insights/call-insights.module';
 import { UnansweredQuestionsModule } from './unanswered-questions/unanswered-questions.module';
+import { RetentionModule } from './retention/retention.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { UnansweredQuestionsModule } from './unanswered-questions/unanswered-que
     UnansweredQuestionsModule,
     AiSettingsModule,
     FaqsModule,
+    RetentionModule,
   ],
 })
 export class AppModule {}

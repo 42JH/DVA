@@ -10,7 +10,7 @@ import { CompanyDirectoryEntryDto, CompanyDirectoryQueryDto } from './dto/compan
 const summaryColumns = `o.organization_seq AS "organizationSeq",o.name,o.status,
   o.monthly_billing_enabled AS "monthlyBillingEnabled",o.created_at AS "createdAt",
   (SELECT count(*)::integer FROM memberships m
-   WHERE m.organization_seq=o.organization_seq AND m.status='ACTIVE') AS "memberCount"`;
+   WHERE m.organization_seq=o.organization_seq AND m.status='ACTIVE' AND m.deleted_at IS NULL) AS "memberCount"`;
 
 @Injectable()
 export class OrganizationsRepository {
@@ -28,8 +28,9 @@ export class OrganizationsRepository {
         c.address_data || jsonb_build_object('name',c.name,'phoneNumber',c.phone_number) AS "addressData"
        FROM organizations o JOIN memberships m ON m.organization_seq=o.organization_seq
        JOIN customers c ON c.customer_seq=m.customer_seq
-       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=o.organization_seq
+       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=o.organization_seq AND d.deleted_at IS NULL
        WHERE o.status='ACTIVE' AND m.status='ACTIVE' AND c.status='ACTIVE'
+         AND o.deleted_at IS NULL AND m.deleted_at IS NULL AND c.deleted_at IS NULL
          AND c.address_data IS NOT NULL AND NOT EXISTS(
          SELECT 1 FROM unnest($1::text[]) AS terms(term)
          WHERE strpos(lower(normalize(concat_ws(' ',o.name,d.name,c.name,c.phone_number,
@@ -45,7 +46,7 @@ export class OrganizationsRepository {
     const result = await readPage<OrganizationSummaryDto>(
       this.database.pool,
       `SELECT ${summaryColumns} FROM organizations o
-       WHERE ($1::text IS NULL OR strpos(lower(o.name), lower($1)) > 0)
+       WHERE o.deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(o.name), lower($1)) > 0)
          AND ($2::text IS NULL OR o.status = $2)`,
       [query.q || null, query.status ?? null],
       query,
@@ -56,7 +57,7 @@ export class OrganizationsRepository {
 
   async find(id: number): Promise<OrganizationSummaryDto | undefined> {
     const result = await this.database.pool.query<OrganizationSummaryDto>(
-      `SELECT ${summaryColumns} FROM organizations o WHERE o.organization_seq = $1`,
+      `SELECT ${summaryColumns} FROM organizations o WHERE o.organization_seq = $1 AND o.deleted_at IS NULL`,
       [id],
     );
     return result.rows[0];
@@ -65,7 +66,7 @@ export class OrganizationsRepository {
   async update(id: number, changes: UpdateOrganizationDto, client: PoolClient): Promise<boolean> {
     const result = await client.query(
       `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled)
-       WHERE organization_seq = $1 RETURNING organization_seq`,
+       WHERE organization_seq = $1 AND deleted_at IS NULL RETURNING organization_seq`,
       [id, changes.name ?? null, changes.status ?? null, changes.monthlyBillingEnabled ?? null],
     );
     return result.rowCount === 1;

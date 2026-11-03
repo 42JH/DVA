@@ -84,7 +84,7 @@ export class AdminAccessController {
   @ApiOperation({
     summary: '관리자 삭제',
     description:
-      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR를 상태와 관계없이 실제 삭제하고 모든 세션을 종료합니다. SYSTEM_ADMIN은 삭제할 수 없으며 업무 기록과 감사 로그의 이름은 유지됩니다.',
+      'SYSTEM_ADMIN 전용. OPERATOR·SUPERVISOR를 상태와 관계없이 soft delete하고 모든 세션을 즉시 종료합니다. SYSTEM_ADMIN은 삭제할 수 없습니다. 계정은 삭제 후 5년 보관하며 감사 로그는 7일, 페르소나 작성자 이름은 별도 스냅샷으로 보관합니다.',
   })
   @ApiParam({
     name: 'id',

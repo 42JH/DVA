@@ -5,6 +5,7 @@ import { CallQueryDto } from './dto/call-query.dto';
 import { CallDto, CallListItemDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
 import { CallAnalysisDto } from './dto/call-analysis-response.dto';
 import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
+import { PoolClient } from 'pg';
 
 type RecordingRow = Pick<RecordingDto, 'recordingSeq' | 'createdAt'> & { objectKey: string };
 
@@ -46,9 +47,9 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
  a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
  h.handoff_request_seq AS "handoffRequestSeq",h.reason AS "handoffReason",h.status AS "handoffStatus",
  h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
- FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq
+ FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
  LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq
- LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq)
+ LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
  LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
  LEFT JOIN ai_persona_versions v ON v.ai_persona_version_seq=a.ai_persona_version_seq`;
 
@@ -115,11 +116,40 @@ function callResult(row: CallRow): CallListItemDto {
 
 @Injectable()
 export class ConsultationsRepository {
+  async lockForDeletion(client: PoolClient, id: number) {
+    return (
+      await client.query<{ endedAt: Date | null }>(
+        `SELECT ended_at AS "endedAt" FROM call_sessions
+      WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async recordingInProgress(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query(
+        `SELECT 1 FROM pbx_webhooks.call_ended_events
+      WHERE call_session_seq=$1 AND (processing_status<>'PROCESSED' OR claimed_until>clock_timestamp()) LIMIT 1`,
+        [id],
+      )
+    ).rowCount;
+  }
+
+  async softDelete(client: PoolClient, id: number): Promise<void> {
+    await client.query(
+      'UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=$1',
+      [id],
+    );
+    await client.query("SELECT pg_notify('call_sessions_changed','')");
+  }
+
   async activeCount() {
     const row = (
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
         `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
-       FROM call_sessions WHERE registered_at IS NOT NULL AND ended_at IS NULL`,
+       FROM call_sessions WHERE registered_at IS NOT NULL AND ended_at IS NULL AND deleted_at IS NULL
+        AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')`,
       )
     ).rows[0];
     return { activeCallCount: row.activeCallCount, observedAt: row.observedAt.toISOString() };
@@ -128,7 +158,9 @@ export class ConsultationsRepository {
   constructor(private readonly database: DatabaseService) {}
 
   async findMany(query: CallQueryDto): Promise<PageRows<CallListItemDto>> {
-    const conditions: string[] = [];
+    const conditions: string[] = [
+      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')",
+    ];
     const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
       [query.orderSeq, 'c.order_seq', '='],
@@ -165,7 +197,7 @@ export class ConsultationsRepository {
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
-      `${CALL_SELECT} WHERE c.call_session_seq=$1`,
+      `${CALL_SELECT} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
       [id],
     );
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
@@ -175,7 +207,8 @@ export class ConsultationsRepository {
     return (
       await this.database.pool.query<RecordingRow>(
         `SELECT recording_seq AS "recordingSeq",created_at AS "createdAt",object_key AS "objectKey"
-       FROM recordings WHERE call_session_seq=$1 ORDER BY recording_seq`,
+       FROM recordings WHERE call_session_seq=$1 AND EXISTS(SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$1
+        AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')) ORDER BY recording_seq`,
         [id],
       )
     ).rows;
