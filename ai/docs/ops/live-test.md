@@ -10,8 +10,8 @@ docker compose -f compose.yaml -f compose.qdrant-dashboard.yaml up -d --build
 uv run --env-file .env python -m uvicorn app.main:app --port 8000 --workers 1
 ```
 - 컨테이너 통화 로그는 호스트 `logs/calls/`, 아웃박스는 볼륨 `ai_state`(/app/state).
-- 필요한 값(`.env`): `OPENAI_API_KEY`, `OPENAI_WEBHOOK_SECRET`, `SPIKE_BACKEND_MODEL`(또는 `BACKEND_MODEL`), `BACKEND_MOCK=true`, 관제용 `MONITOR_USER`·`MONITOR_PASSWORD`. 선택: `KAKAO_REST_API_KEY`(지번·우편번호), `data/address.db`(없으면 주소 보정 없이 들은 그대로).
-- 웹훅 경로는 스파이크와 같다: `https://<host>/api/webhooks/openai/call-incoming`. 터널·OpenAI 웹훅 등록은 그대로 둔다.
+- 필요한 값(`.env`): `OPENAI_API_KEY`, `OPENAI_WEBHOOK_SECRET`, `BACKEND_MODEL`, `BACKEND_MOCK=true`, 관제용 `MONITOR_USER`·`MONITOR_PASSWORD`. 선택: `KAKAO_REST_API_KEY`(지번·우편번호), `data/address.db`(없으면 주소 보정 없이 들은 그대로).
+- 웹훅 경로(원본 서버와 같음): `https://<host>/api/webhooks/openai/call-incoming`. 터널·OpenAI 웹훅 등록은 그대로 둔다.
 - 관제: `http://127.0.0.1:8000/monitor`(단계·전사·Decision·도구 사건).
 - 통화가 끝나면 `logs/calls/<trace_id>.json`(단계·Decision 판정·도구 결과 코드·전사 — 개인정보, 커밋 안 함).
 

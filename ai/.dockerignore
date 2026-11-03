@@ -13,7 +13,6 @@ spec
 data
 rag_state
 logs
-spikes/*/logs
 evaluation
 gpu
 scripts/*

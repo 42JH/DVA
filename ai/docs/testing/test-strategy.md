@@ -14,7 +14,7 @@
 
 | 계층 | 대상 | 도구 | 위치 |
 |---|---|---|---|
-| L0 스파이크 | 실 Live 세션·로그 재생: 위임 지연·tier, append 동작, 발화 끝 간격, 독립 Decision 정확도(`delegation.md` §9, `spikes/s0*/RESULTS.md`) | 수동 + 기록 | `spikes/` (CI 제외) |
+| L0 스파이크 | 실 Live 세션·로그 재생: 위임 지연·tier, append 동작, 발화 끝 간격, 독립 Decision 정확도(`delegation.md` §9, `docs/spikes/*-RESULTS.md`) | 수동 + 기록 | 측정 기록만 남김(스파이크 코드는 2026-11-03 정리) |
 | L1 단위 | `ConversationState`, `FieldState` 전이·필드 버전, `assess`, 확정 관문 G1~G5, 정책 파일 → Live 지시문·서버 판정 일관성, 결과 outcome 결정, 정규화, Decision 질문 세트 생성 | pytest | `tests/domain/` |
 | L2 도구 | 각 핸들러: 입력 검증·상태 변경·`ToolOutcome` | 가짜 `BackendGateway`/`AddressService`/`KnowledgeBase` | `tests/tools/` |
 | L3 계약(BE) | 요청 본문·헤더가 `docs/be-contract/backend/` 규칙 충족, 응답 분류 | httpx2 `MockTransport` + 계약 검사기 | `tests/contracts/` |
@@ -136,7 +136,7 @@
 | 전달 최소화 | 정상 접수 1건 통화에서 N2·N3 송신 수 상한 이내, 일반 대화 턴 서버 송신 0 | `delegation.md` §6.3 |
 
 **오프라인 모델 평가**(네트워크 사용, CI 제외):
-- Decision: 대본의 (직전 AI 발화, 고객 발화) 쌍을 운영과 같은 입력 형식으로 독립 `POST /v1/decisions`에 넣어 `task`·`switch`·`confirm`·`pick` 정확도와 임계값(θ) 결정(`spikes/s0c/replay.py` 방식).
+- Decision: 대본의 (직전 AI 발화, 고객 발화) 쌍을 운영과 같은 입력 형식으로 독립 `POST /v1/decisions`에 넣어 `task`·`switch`·`confirm`·`pick` 정확도와 임계값(θ) 결정(스파이크 S0c 재생 방식, 기록 `docs/spikes/s0c-RESULTS.md`).
 - Backend: 값 발화를 Responses 모델에 넣어 도구 선택·인자 정확도.
 - 불필요 위임률: Decision이 ②로 분류한 발화 중 Live가 위임한 비율(스테이징).
 

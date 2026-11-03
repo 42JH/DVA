@@ -26,9 +26,9 @@ services:
       PBX_WEBHOOK_SECRET: ${PBX_WEBHOOK_SECRET:?Set PBX_WEBHOOK_SECRET in .env}
       MONITOR_USER: ${MONITOR_USER:?Set MONITOR_USER in .env}
       MONITOR_PASSWORD: ${MONITOR_PASSWORD:?Set MONITOR_PASSWORD in .env}
-      # Responses 위임 Backend 모델(없으면 예전 이름 SPIKE_BACKEND_MODEL)
-      BACKEND_MODEL: ${BACKEND_MODEL:-${SPIKE_BACKEND_MODEL:-gpt-6-luna}}
-      BACKEND_EFFORT: ${BACKEND_EFFORT:-${SPIKE_BACKEND_EFFORT:-low}}
+      # Responses 위임 Backend 모델
+      BACKEND_MODEL: ${BACKEND_MODEL:-gpt-6-luna}
+      BACKEND_EFFORT: ${BACKEND_EFFORT:-low}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       # BE. 운영 배포 기본은 실제 BE(원본과 같음). 로컬 시험은 .env에 BACKEND_MOCK=true를 명시한다
       BACKEND_MOCK: ${BACKEND_MOCK:-false}

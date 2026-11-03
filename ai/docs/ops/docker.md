@@ -6,7 +6,7 @@
 ## 구성
 | 파일 | 내용 |
 |---|---|
-| `Dockerfile` | python:3.14-slim + uv, `uv sync --frozen --no-dev`, 비루트 사용자(uid 10001), tiktoken 캐시 사전 준비(원본과 같음), 워커 1개. **기본 CMD는 S0 스파이크 서버**(관제 포함) — 새 서버(`app/main.py`)가 생기면 CMD만 바꾼다 |
+| `Dockerfile` | python:3.14-slim + uv, `uv sync --frozen --no-dev`, 비루트 사용자(uid 10001), tiktoken 캐시 사전 준비(원본과 같음), 워커 1개. CMD는 새 서버 `app.main:app`(관제 포함) |
 | `.dockerignore` | 원본 규칙 기준: `.env`, 테스트, 문서, `evaluation/`, `gpu/`, `scripts/*`(bootstrap_faq만 포함), `app/rag/gpu.py`·`text_agent.py` 제외 |
 | `compose.yaml` | `qdrant`(v1.13.4, API 키 필수, 내부망 `rag_net`만 — 원본 서비스 정의 그대로) + `ai`(127.0.0.1:`AI_PORT`, `/healthz` 헬스체크) |
 | `compose.qdrant-dashboard.yaml` | 원본 그대로의 개발 PC 전용 오버레이: Qdrant를 127.0.0.1:6333으로 연다 |
@@ -14,7 +14,7 @@
 
 ## 실행
 ```bash
-# .env에 최소: OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET, SPIKE_BACKEND_MODEL, MONITOR_USER, MONITOR_PASSWORD, QDRANT_API_KEY
+# .env에 최소: OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET, BACKEND_API_URL, PBX_WEBHOOK_SECRET, MONITOR_USER, MONITOR_PASSWORD, QDRANT_API_KEY
 docker compose up -d --build
 curl http://127.0.0.1:8000/healthz
 # 관제: http://127.0.0.1:8000/monitor (MONITOR_USER/MONITOR_PASSWORD)

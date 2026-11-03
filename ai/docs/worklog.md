@@ -315,3 +315,12 @@
 - docs/ops/deploy.md
 - 테스트 482 passed
 - 반영 브랜치: 원본 저장소 worktree S15P31D109-rebuild, feature/ai-rebuild(origin/develop-ai df93338 기준). 기존 ai/ 파일은 git mv로 ai/old/, Jenkinsfile·deploy/는 제자리. push·MR 안 함
+
+## 2026-11-03 — 스파이크 정리, 운영 .env(Jenkins credential) 준비
+
+- spikes/ 코드 삭제(server·analyze·replay·테스트·README). 측정 기록은 docs/spikes/s0-RESULTS.md·s0c-RESULTS.md로 이동, decisions.md·test-strategy.md·monitor.md·docker.md·live-test.md 참조 갱신
+- SPIKE_* 제거: .env·.env.example, app/main.py·compose의 SPIKE_BACKEND_MODEL/EFFORT 대체, .dockerignore spikes 줄. 로컬에 남은 spikes/*/logs(통화 기록, 미추적)는 지우지 않음
+- 운영용 .env.deploy(커밋 안 함, .gitignore .env.*): 리빌드 .env 비밀값 그대로 + BACKEND_MOCK=false, BACKEND_MODEL/EFFORT·LOG_LEVEL·MONITOR_RETAIN_ENDED_SEC, AI_PORT 비움, AI_IMAGE·ADDRESS_DATA_DIR·QDRANT_URL·로컬 경로 키 제외. 배포 compose(--project-name dva-ai + compose.deploy.yaml) config 통과
+- 리빌드 .env 비밀값은 원본 로컬 ai/.env와 키별로 모두 같음(값 비교만, 출력 안 함). Jenkins dva-ai credential 현재값과의 대조는 못 함
+- 반영 브랜치 이름 refactor/ai-rebuild로 변경
+- 테스트 482 passed

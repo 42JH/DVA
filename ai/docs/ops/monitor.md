@@ -45,4 +45,4 @@ bus = Bus()
 app.include_router(create_monitor_router(list_calls, bus))   # list_calls: () -> list[스냅샷]
 bus.publish({"type": "call", "call": snapshot})             # 상태가 바뀔 때마다
 ```
-현재 연결된 곳: S0 스파이크 서버(`spikes/s0/server.py`) — 받아쓰기, 도구 호출, 위임·Decision·실험(append) 사건, 오류. 끝난 통화는 `MONITOR_RETAIN_ENDED_SEC`(기본 1800초) 동안 남긴다.
+현재 연결된 곳: 새 서버(`app/main.py`) — 받아쓰기, 도구 호출, 위임·Decision·전달(N1'·N2·N3) 사건, 단계·통계, 오류. 끝난 통화는 `MONITOR_RETAIN_ENDED_SEC`(기본 1800초) 동안 남긴다.

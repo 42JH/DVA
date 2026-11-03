@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
     if os.environ.get("OPENAI_API_KEY"):
         from openai import AsyncOpenAI
         client = AsyncOpenAI()  # OPENAI_API_KEY·OPENAI_WEBHOOK_SECRET
-        model = os.environ.get("BACKEND_MODEL") or os.environ.get("SPIKE_BACKEND_MODEL", "")
+        model = os.environ.get("BACKEND_MODEL", "")
         if not model:
             raise RuntimeError("BACKEND_MODEL이 비어 있습니다(Responses 위임 Backend 모델)")
         svc.calls = CallService(CallDeps(client, svc.backend, load_policy(), cfg.call, model,
