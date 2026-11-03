@@ -21,8 +21,6 @@
 | `orderStatus` | 연결된 주문의 COLLECTING / notPaid / PAID / SUBMITTING / ACCEPTED / SUBMISSION_FAILED / CANCELLED |
 | `callerPhoneNumber` | 저장된 발신번호 정확히 일치. 숫자와 맨 앞의 `+` 허용 |
 | `from`, `to` | 응답 `startedAt`과 같은 기준(PBX 시작 → AI 시작 → 수신 이벤트 시각). from 포함·to 미포함, 시간대 필수 |
-| `endReason` | 저장된 종료 사유 정확히 일치. 종료 사유 코드 목록은 미확정 |
-| `handoffStatus` | REQUESTED / CONNECTED / FAILED |
 | `q` | 현재 연결 고객 이름·발신번호 부분 검색. NFC 정규화·앞뒤 공백 제거, 최대 200자. `%`·`_`는 일반 문자 |
 | `hasComplaint` | 문자열 `true` / `false`만 허용. false는 확인된 불만 없음이며 미판정·분석 미수신은 제외 |
 | `aiPersonaVersionSeq` | 실제 사용했다고 분석에 기록된 페르소나 버전 DB 번호. 화면의 v6 같은 버전 숫자와 다름 |
@@ -46,18 +44,13 @@ q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 �
 | `orderSeq` | 연결 주문 번호, 없으면 null. 주문 내용은 기존 주문 상세 API에서 조회 |
 | `orderStatus`, `orderTotalAmount` | 연결 주문의 현재 결제·접수 상태와 미취소 상세 합계. 주문 없으면 null |
 | `startedAt`, `endedAt` | 위 우선순위의 표시 시각. 사용할 시각이 모두 없으면 null |
-| `endReason` | 저장된 종료 사유. 미확인 시 null |
-| `handoff` | 연결 기록이 없으면 null. 있으면 아래 연결 정보 |
 | `customerSeq`, `customerName` | 연결 고객 번호와 현재 이름. 미확인은 null |
 | `analysis` | 아래 분석 객체. 분석을 수신하지 않았으면 null |
 
-`handoff`는 `handoffRequestSeq`, `reason`, `status`, `assignedAdminUserSeq`, `summaryText`,
-`requestedAt`을 반환한다. REQUESTED는 요청 기록이며 연결 성공이 아니다.
-CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연결 완료 시각으로 대신하지 않는다.
 고객은 연결 주문의 customer_seq를 우선하고 없으면 통화 발신번호와 고객 전화번호의 정확한 일치로 연결한다.
 탈퇴 고객의 과거 통화를 숨기지 않으며 고객 이름 변경은 다음 조회·검색에 반영된다. 고객의 다른 전화번호로 통화 발신번호를 바꾸지 않는다.
 
-통화·상담 상태에 연결된 주문의 결제 대기·디버 접수·취소 상태를 함께 제공한다. 저장된 endReason은 바꾸지 않는다. 결제 상태는 [주문 결제 계약](order-billing.md)을 따른다.
+통화·상담 상태에 연결된 주문의 결제 대기·디버 접수·취소 상태를 함께 제공한다. 결제 상태는 [주문 결제 계약](order-billing.md)을 따른다.
 
 조건에 맞는 결과가 없으면 `200 { "data": [], "hasNext": false, "total_count": 0 }`다.
 잘못된 날짜·역전된 기간·중복 query·지원하지 않는 필드는 `400 INVALID_REQUEST`다.
@@ -84,7 +77,6 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 녹취 하나의 발급이 실패해도 통화 정보와 다른 녹취를 반환한다. 이 경우 HTTP 200이며 해당 항목에 오류를 표시한다.
 
 통화 자체가 없으면 `404 NOT_FOUND`다. 통화는 있지만 녹취가 아직 없으면 `200`과 빈 배열을 반환한다.
-상담원 기록이 없으면 `call.handoff`는 null이다. 배정 관리자·요약이 없는 연결 기록도 그대로 null을 유지한다.
 연결 주문의 내용은 `GET /api/orders/{orderSeq}`로 조회한다.
 
 ### 저장된 통화 분석
@@ -141,7 +133,7 @@ CONNECTED·FAILED도 실제 저장된 값을 조회한다. 요청 시각을 연�
 프론트는 같은 통화의 스크립트에서 실제 존재하는 utteranceOrder만 강조하고, 늦은 발화 수신 후 다시 조회하면 연결할 수 있다.
 hash·프롬프트·AI 서비스 토큰은 반환하지 않는다. 근거·고객 이름·검색어를 일반 HTTP 로그에 복사하지 않는다.
 
-이번 변경은 기존 두 GET 경로의 분석 응답 확장과 대표 분류·필터 삭제다. DB는 041에서 요약 컬럼 6개를 추가하고 042에서 result를 삭제한다. 새 HTTP 경로·테이블·뷰·환경변수는 추가하지 않는다. 주문의 orderStatus, 실제 상담원 연결의 handoff.status, PBX 종료 사유 endReason은 기존 계약을 유지한다.
+041은 요약 컬럼 6개를 추가하고 042는 result를 삭제한다. 047은 저장 경로가 없는 end_reason과 handoff_requests를 제거한다. 목록·상세에서 endReason·handoff를 반환하지 않으며 endReason·handoffStatus 필터는 400이다. 상담원 연결 요구 여부는 analysis.hasHandoffRequest로 조회한다. 주문의 orderStatus와 통화·분석·녹취 경로는 유지한다.
 목록의 total_count로 검색 총건수를 제공한다. 프론트는 ceil(total_count/limit)으로 숫자 페이지 수를 계산한다.
 담당 2용 통계 뷰 두 개도 별도 작업이며 이 API에서 평균·비율을 집계하지 않는다.
 

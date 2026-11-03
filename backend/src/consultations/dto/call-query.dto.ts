@@ -13,7 +13,6 @@ import {
   Min,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
 
 export class CallQueryDto extends PaginationQueryDto {
@@ -109,23 +108,6 @@ export class CallQueryDto extends PaginationQueryDto {
   @IsISO8601({ strict: true, strictSeparator: true })
   @Matches(/T.*(?:Z|[+-]\d{2}:\d{2})$/)
   to?: string;
-
-  @ApiPropertyOptional({
-    description: '저장된 종료 사유와 정확히 일치하는 통화. 종료 사유 코드는 미확정입니다.',
-  })
-  @IsOptional()
-  @IsString()
-  @Matches(/\S/u)
-  endReason?: string;
-
-  @ApiPropertyOptional({
-    description: '상담원 연결 상태. REQUESTED 요청, CONNECTED 연결 확인, FAILED 실패 확인.',
-    enum: HANDOFF_STATUSES,
-    example: 'CONNECTED',
-  })
-  @IsOptional()
-  @IsIn(HANDOFF_STATUSES)
-  handoffStatus?: HandoffStatus;
 
   @ApiPropertyOptional({ description: '조회 개수.', default: 20, minimum: 1, maximum: 100 })
   declare limit: number;

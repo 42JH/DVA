@@ -93,7 +93,7 @@ export class ConsultationsController {
       '고객 이름·발신번호 검색과 통화 분석 결과·불만 여부·실제 페르소나 버전 필터를 제공합니다. 기간·정렬·표시 시작 시각은 PBX 시작, AI 시작, 수신 이벤트 시각 순으로 사용합니다. 분석 미수신은 analysis=null이며 녹취 업로드 전에도 조회합니다.',
   })
   @ApiOkResponse({
-    description: '통화 목록과 다음 페이지 여부. 연결 기록이 없으면 handoff는 null.',
+    description: '통화 목록과 다음 페이지 여부, 같은 조회 조건의 전체 건수.',
     type: CallListResponseDto,
   })
   findMany(@Query() query: CallQueryDto) {

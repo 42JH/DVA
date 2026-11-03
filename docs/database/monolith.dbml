@@ -97,7 +97,6 @@ Table company_pins {
   department_seq integer [note: '같은 기업의 부서 번호. NULL과 빈 부서명은 기업 공용, 비어 있지 않은 미연결 부서명은 배정 확인 필요']
   department_name text [note: '해당 기업 공유 핀의 부서명. 선택값']
   address_data jsonb [not null, note: '수령인 이름·전화번호·도로명·지번·상세주소·동명·우편번호·위경도를 담은 검증된 주소']
-  search_text text [note: '별칭·수령인·전화번호·주소 등을 결합한 검색용 자동 생성 문자열 / DB 생성 컬럼, 앱에서 직접 저장하지 않음']
   version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
   checks {
     `valid_parcel_address(address_data)`
@@ -282,10 +281,9 @@ Table call_sessions {
   incoming_at timestamptz [note: 'OpenAI 수신 이벤트 created_at. PBX 매칭용 기준 시각이며 실제 통화 시작 시각과 별도']
   started_at timestamptz [note: '종료 결과로 전달받는 실제 통화 시작 시각']
   ended_at timestamptz [note: '종료 결과로 전달받는 실제 통화 종료 시각']
-  end_reason text [note: '통화 종료 사유']
   checks {
     `btrim(provider_call_id)<>''`
-    `(started_at IS NULL AND ended_at IS NULL AND end_reason IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`
+    `(started_at IS NULL AND ended_at IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`
   }
   Note: 'consultation / 고객 확인 시 provider_call_id로 통화를 생성·재사용하고 call_session_seq를 AI에 반환한다. AI 결과는 같은 통화에 주문을 연결한다. PBX는 발신번호와 incoming_at 허용 구간 내 유일 후보에만 연결한다. 상담 조회는 연결 주문의 상태·총액을 함께 반환하며 별도 결제 상태 컬럼은 만들지 않는다. / SQL 인덱스: calls_order_idx, calls_retention_idx, call_sessions_caller_incoming_idx.'
 }
@@ -407,20 +405,6 @@ Table recordings {
     `object_key !~ '(^/|\.\.|://)'`
   }
   Note: 'consultation / S3 저장에 성공한 원본 녹취 참조. 삭제 예정은 created_at + 설정된 보관 개월로 계산한다. / SQL 인덱스: CREATE INDEX recordings_call_idx ON recordings(call_session_seq,recording_seq); CREATE INDEX recordings_retention_idx ON recordings(created_at,recording_seq);'
-}
-
-Table handoff_requests {
-  handoff_request_seq integer [pk, increment, not null, note: '행의 고유 기본키']
-  call_session_seq integer [not null, unique, note: '연결 대상 ID']
-  reason text [not null, note: '상담원 연결 요청 사유']
-  status text [not null, note: '업무 상태']
-  assigned_admin_user_seq integer [note: '관리자 논리 참조. 계정 삭제 후에도 번호 보존']
-  summary_text text [note: '상담원에게 전달할 AI 상담 요약']
-  requested_at timestamptz [not null, note: '상담원 연결 요청 시각']
-  checks {
-    `status IN ('REQUESTED','CONNECTED','FAILED')`
-  }
-  Note: 'consultation / AI/PBX에서 보고한 상담원 연결 결과. 백엔드가 PBX 연결 큐를 직접 제어하지 않는다. / SQL 인덱스: CREATE INDEX handoff_queue_idx ON handoff_requests(status,requested_at);'
 }
 
 Table empty_ai_order_results {
@@ -644,7 +628,6 @@ Ref: orders.order_seq < order_parcels.order_seq
 Ref: orders.order_seq ?< call_sessions.order_seq
 Ref: call_sessions.call_session_seq < call_utterances.call_session_seq
 Ref: call_sessions.call_session_seq < recordings.call_session_seq
-Ref: call_sessions.call_session_seq - handoff_requests.call_session_seq
 Ref: order_parcels.order_parcel_seq - shipments.order_parcel_seq
 Ref: shipments.shipment_seq < shipment_status_history.shipment_seq
 Ref: ai_personas.ai_persona_seq < ai_persona_versions.ai_persona_seq

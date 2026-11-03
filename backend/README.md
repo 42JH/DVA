@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+미사용 계약 제거는 [AI·프론트 전달 및 DB 전환 안내](docs/unused-contract-cleanup.md)를 따른다. 새 앱 전에 migration 047을 백업 후 적용한다. 중복 관리자 권한·AI FAQ 상세 API와 레거시 통화 종료 사유·연결 기록을 제거하며 실제 상담원 연결 요구 요약은 유지한다.
+
 디버 접수는 [10초 응답 제한·10분 자동 재시도 계약](docs/order-submission-retry.md)을 따른다. 새 앱 전에 migration 046을 적용한다. SUBMITTING_FAILED는 최초 전송 후 10분 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패다. AI·프론트의 상태 분기와 실패 탭 표시는 이 계약을 따른다.
 
 업무 데이터 삭제·보관은 새 migration 045와 [작업 명세](docs/data-retention.md), [API·AI 전달 사항](docs/data-retention-handoff.md)을 따른다. 기존 업무 DELETE는 soft delete로 바꾸고 주문·통화 DELETE를 추가한다. 통화 전체(녹취·STT·AI 이벤트)는 최초 incoming_at부터 5년, 주문은 최초 완료/취소(미완료는 생성)부터 5년 후 실제 폐기한다. 감사 로그와 전송 완료 알림은 7일 정리한다. 045 한 번 적용 후 새 앱으로 전환하며 [인프라 후속 항목](docs/data-retention-infra-follow-up.md)의 S3 권한·외부 로그·백업 폐기를 함께 확인한다. 외부 문서의 과거 물리 삭제 설명보다 이 계약을 우선한다.
@@ -187,7 +189,7 @@ backend/
 | `customers` | `customers`, `personal_pins` |
 | `organizations` | `organizations`, `departments`, `memberships`, `company_pins`, `organization_billing_months`, `order_billing_charges` |
 | `orders` | `orders`, `order_parcels` |
-| `consultations` | `call_sessions`, `call_utterances`, `recordings`, `handoff_requests` |
+| `consultations` | `call_sessions`, `call_utterances`, `recordings` |
 | `deliveries` | `shipments`, `shipment_status_history` |
 | `admins` | `admin_users` 계정 관리 |
 | `auth` | 로그인·인증·권한 검사. 계정 접근은 `admins`가 공개한 기능 사용 |
@@ -392,7 +394,6 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
 | GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext, total_count }` |
 | PATCH /api/admins/:id | SYSTEM_ADMIN, role 변경·PENDING → ACTIVE 승인·ACTIVE ↔ INACTIVE 전환, 204 |
-| PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
 | PATCH /api/admins/:id/password | SYSTEM_ADMIN, 본문 없이 dva1234로 초기화·대상 전체 세션 종료, 204 |
@@ -442,7 +443,7 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
 이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 두 권한 변경 경로 모두 OPERATOR ↔ SUPERVISOR만 허용한다.
 SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
-전용 `/admins/:id/role`은 `role`만 필수로 받으며 계정 상태를 변경하지 않는다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
+`PATCH /admins/:id`에 `role`만 전달하면 계정 상태를 유지한다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
 기존 PATCH /api/admins/:id의 status로 OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE를 전환한다.
 SYSTEM_ADMIN 본인·타인의 ACTIVE ↔ INACTIVE 전환은 403이며 기존 권한 변경·삭제 보호도 유지한다.

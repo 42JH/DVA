@@ -169,18 +169,6 @@ export class OrderPaymentsRepository {
     ).rows[0];
     return { ...request, order };
   }
-  async begin(client: PoolClient, id: string) {
-    await client.query(
-      'UPDATE order_payment_requests SET approval_started_at=clock_timestamp() WHERE payment_request_id=$1',
-      [id],
-    );
-  }
-  async release(client: PoolClient, id: string) {
-    await client.query(
-      'UPDATE order_payment_requests SET approval_started_at=NULL WHERE payment_request_id=$1 AND completed_at IS NULL AND invalidated_at IS NULL',
-      [id],
-    );
-  }
   async complete(client: PoolClient, id: string, reference: string) {
     await client.query(
       "UPDATE order_payment_requests SET completed_at=clock_timestamp(),provider_reference=$2,approval_claim_id=NULL,approval_claimed_until=NULL,completion_notification_status='PENDING' WHERE payment_request_id=$1",

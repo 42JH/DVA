@@ -62,10 +62,6 @@ test('5-year call expiry erases every child in FK order and also removes pre-INS
     [c.id],
   );
   await f.pool.query(
-    "INSERT INTO handoff_requests(call_session_seq,reason,status,requested_at) VALUES($1,'요청','REQUESTED',clock_timestamp())",
-    [c.id],
-  );
-  await f.pool.query(
     'INSERT INTO empty_ai_order_results(request_id,call_session_seq) VALUES(gen_random_uuid(),$1)',
     [c.id],
   );
@@ -88,7 +84,6 @@ test('5-year call expiry erases every child in FK order and also removes pre-INS
     'unanswered_questions',
     'call_utterances',
     'call_analyses',
-    'handoff_requests',
     'recordings',
     'empty_ai_order_results',
   ])

@@ -432,7 +432,7 @@ test('FAQ deletion retains content, hides AI results, sends DELETE and allows a 
   assert.equal(row.question, input.question);
   assert.equal(row.answer, input.answer);
   assert.ok(row.deleted_at);
-  await f.error(await f.ai('/' + id), 404, 'NOT_FOUND');
+  assert.deepEqual((await (await f.ai('?faqEntrySeqs=' + id)).json()).data, []);
   const next = await f.createdId({
     ...input,
     question: '  ' + input.question.toUpperCase() + '  ',

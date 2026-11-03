@@ -4,6 +4,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 
 ## 적용 기준
 
+`047-remove-unused-schema.sql`은 기업 PIN의 미사용 생성 컬럼 `search_text`, `call_sessions.end_reason`, `handoff_requests`를 한 트랜잭션에서 제거한다. 삭제 대상의 기존 값은 소실되므로 기존 앱 중지 → DB 백업 → migration·verify → 새 앱 실행 순서로 전환한다. 구버전 앱과 동시 운영하거나 스키마만 역으로 되돌리지 않는다. 통화 시각 CHECK, 개인 PIN 검색·주소, AI 상담원 연결 요구 요약은 보존한다. 최종 public 테이블 28개·FK 24개·업무 트리거 10개이며 운영 적용은 별도다. [연동·검증 안내](../../backend/docs/unused-contract-cleanup.md)를 따른다.
+
 `041-call-summary-metrics.sql`은 `call_analyses`에 신규 고객 여부, 접수 확정 배송 상세 수, FAQ 답변 건수, 접수 조회 건수, 취소 배송 상세 수, 상담원 연결 요구 여부의 nullable 컬럼 6개를 추가한다. 기본값·기존 행 보완은 없으며 기존 해시·시각·페르소나 참조를 보존한다. 네 건수는 0 이상 int32다. AI가 실제 사용 버전과 요약 값을 전송하고 백엔드는 집계하지 않는다. 생략·null은 미수집, 0·false는 확인한 없음이다. [수신·재전송·프론트 조회 계약](../api/call-analysis.md)을 따른다.
 
 `042-remove-call-analysis-result.sql`은 같은 테이블의 대표 분류 `result`와 해당 CHECK를 삭제하고, 기존 분석 전체의 `payload_hash`를 result 없는 정규화 본문으로 갱신한다. 요약·불만·시각·실제 페르소나·PK/FK와 다른 테이블의 데이터는 보존한다. 041·042를 순서대로 적용하며 실제 운영 적용은 별도다. 컬럼 값은 삭제되므로 기존 백엔드 중지 → 백업 → runner·verify → 새 계약의 앱 실행 순서로 진행한다. AI 요청·프론트 표시·목록 필터도 함께 전환하고 구버전 앱으로의 이미지 단독 복귀를 금지한다. 042는 분석 행 전체 갱신·배타 잠금이 필요하므로 데이터가 많은 환경의 적용 시간은 별도로 측정한다. 실패 시 SQL·이력은 트랜잭션으로 롤백된다.
@@ -186,7 +188,7 @@ audit_logs.actor_name은 작업 당시 관리자 이름 또는 AI, target_admin_
 기존 로그는 전환 시점의 admin_users.name으로만 보완하며 이미 알 수 없는 이름은 NULL로 남긴다.
 다른 업무 테이블에 관리자 이름 컬럼을 중복 추가하지 않는다.
 
-handoff_requests.assigned_admin_user_seq, shipment_status_history.actor_admin_user_seq,
+shipment_status_history.actor_admin_user_seq,
 ai_persona_versions.created_by_admin_user_seq·requested_by_admin_user_seq, faq_entries.updated_by_admin_user_seq는
 FK를 제거하고 번호를 보존한다. 계정 삭제로 해당 이력·업무 행을 지우지 않는다.
 admin_sessions의 ON DELETE CASCADE는 유지한다.

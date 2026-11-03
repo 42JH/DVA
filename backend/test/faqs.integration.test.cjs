@@ -25,20 +25,17 @@ test('21: all active roles create, view and edit FAQs while AI immediately reads
     );
     assert.equal(response.status, 204);
     assert.equal(await response.text(), '');
-    const ai = await f.ai('/' + id);
+    const ai = await f.ai('?faqEntrySeqs=' + id);
     assert.equal(ai.status, 200);
     assert.equal(ai.headers.get('cache-control'), 'no-store');
     const body = await ai.json();
-    assert.ok(body.meta.requestId);
-    assert.deepEqual(Object.keys(body.data).sort(), [
-      'answer',
-      'faqEntrySeq',
-      'question',
-      'updatedAt',
-    ]);
-    assert.equal(body.data.question, question);
-    assert.equal(body.data.answer, changed);
-    assert.ok(Date.parse(body.data.updatedAt) >= Date.parse(original.updatedAt));
+    assert.ok(ai.headers.get('x-request-id'));
+    assert.equal(body.data.length, 1);
+    const entry = body.data[0];
+    assert.deepEqual(Object.keys(entry).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
+    assert.equal(entry.question, question);
+    assert.equal(entry.answer, changed);
+    assert.ok(Date.parse(entry.updatedAt) >= Date.parse(original.updatedAt));
     const detail = (await (await f.get(`/api/faqs/${id}`)).json()).data;
     assert.equal(detail.createdAt, original.createdAt);
     assert.equal(detail.updatedByAdminUserSeq, f.ids[(actor + 1) % 3]);
@@ -225,7 +222,8 @@ test('one create and delete API supports single and multiple FAQs for every acti
       total_count: 0,
     });
     for (const id of ids) {
-      await f.error(await f.ai('/' + id), 404, 'NOT_FOUND');
+      assert.deepEqual((await (await f.ai('?faqEntrySeqs=' + id)).json()).data, []);
+      await f.error(await f.get('/api/faqs/' + id), 404, 'NOT_FOUND');
       const history = (
         await f.pool.query(
           "SELECT action,actor_type,actor_seq,actor_name FROM audit_logs WHERE target_type='FAQ_ENTRY' AND target_seq=$1 AND result='SUCCESS' ORDER BY audit_log_seq",
@@ -291,7 +289,8 @@ test('bulk writes reject invalid or missing entries and audit failure rolls back
     }
   }
   assert.deepEqual(await f.counts(), before);
-  for (const id of ids) assert.equal((await f.ai('/' + id)).status, 200);
+  for (const id of ids)
+    assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].faqEntrySeq, id);
   await f.error(await f.patch(ids[0], [{ answer: '복수 수정 금지' }]), 400, 'INVALID_REQUEST');
 });
 
@@ -376,11 +375,9 @@ test('21: invalid bodies, IDs and search parameters fail without changing FAQs',
       400,
       'INVALID_REQUEST',
     );
+  for (const id of ['0', '-1', '1.5', '2147483648'])
+    await f.error(await f.get('/api/faqs/' + id), 400, 'INVALID_REQUEST');
   for (const suffix of [
-    '/0',
-    '/-1',
-    '/1.5',
-    '/2147483648',
     '?limit=0',
     '?limit=101',
     '?offset=-1',
@@ -389,7 +386,7 @@ test('21: invalid bodies, IDs and search parameters fail without changing FAQs',
     '?isEnabled=true',
   ])
     await f.error(await f.ai(suffix), 400, 'INVALID_REQUEST');
-  await f.error(await f.ai('/2147483647'), 404, 'NOT_FOUND');
+  assert.deepEqual((await (await f.ai('?faqEntrySeqs=2147483647')).json()).data, []);
   await f.error(
     await f.patch(2147483647, { category: '기타', question: '질문', answer: '없음' }),
     404,
@@ -421,7 +418,7 @@ test('21: audit persistence failure rolls back content and reads never disguise 
     audit.recordSuccess = record;
   }
   assert.deepEqual(await f.counts(), before);
-  assert.equal((await (await f.ai('/' + id)).json()).data.answer, '유지');
+  assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].answer, '유지');
   const repo = f.app.get(FaqsRepository),
     list = repo.list;
   repo.list = async () => {
@@ -444,9 +441,21 @@ test('21: FAQ contents persist across application restarts and HTTP logs omit qu
   });
   await f.ai('?' + new URLSearchParams({ q: secret }));
   const app = await f.start();
-  const response = await fetch((await app.getUrl()) + '/api/ai/faqs/' + id);
-  assert.equal((await response.json()).data.question, secret);
+  const response = await fetch((await app.getUrl()) + '/api/ai/faqs?faqEntrySeqs=' + id);
+  assert.equal((await response.json()).data[0].question, secret);
   assert.doesNotMatch(JSON.stringify(f.logs), new RegExp(secret));
+});
+
+test('retired AI FAQ detail route and response schema are absent while admin detail remains', async () => {
+  const id = await f.createdId({ category: '기타', question: f.marker(), answer: '유지' });
+  await f.error(await f.ai('/' + id), 404, 'NOT_FOUND');
+  assert.equal((await f.get('/api/faqs/' + id)).status, 200);
+  assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].answer, '유지');
+  const spec = await (await f.get('/api/docs-json')).json();
+  assert.ok(spec.paths['/api/ai/faqs'].get);
+  assert.ok(spec.paths['/api/faqs/{id}'].get);
+  assert.equal(spec.paths['/api/ai/faqs/{id}'], undefined);
+  assert.equal(spec.components.schemas.AgentFaqResponseDto, undefined);
 });
 
 test('one canonical FAQ create envelope is required for single and multiple entries', async () => {
@@ -487,13 +496,13 @@ test('FAQ question uniqueness covers normalization, batches, updates and concurr
   );
   assert.deepEqual(await f.counts(), before);
   const otherId = await f.createdId({ ...original, question: f.marker() });
-  const other = (await (await f.ai('/' + otherId)).json()).data;
+  const other = (await (await f.ai('?faqEntrySeqs=' + otherId)).json()).data;
   const beforeUpdate = await f.counts();
   await f.error(await f.patch(otherId, duplicate), 409, 'DUPLICATE_RESOURCE');
-  assert.deepEqual((await (await f.ai('/' + otherId)).json()).data, other);
+  assert.deepEqual((await (await f.ai('?faqEntrySeqs=' + otherId)).json()).data, other);
   assert.deepEqual(await f.counts(), beforeUpdate);
   assert.equal((await f.patch(id, { ...original, answer: '자기 질문 수정 가능' })).status, 204);
-  assert.equal((await (await f.ai('/' + id)).json()).data.question, question);
+  assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].question, question);
   const racing = { ...original, question: f.marker() };
   const raceBefore = await f.counts();
   const results = await Promise.all([
@@ -595,7 +604,7 @@ test('FAQ uniqueness preserves literal backslashes instead of interpreting byte 
   const question = String.raw`C:\temp\x61\001 질문 ` + f.marker();
   const item = { category: '접수', question, answer: '역슬래시 원문' };
   const id = await f.createdId(item);
-  assert.equal((await (await f.ai('/' + id)).json()).data.question, question);
+  assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].question, question);
   await f.error(
     await f.create({ items: [{ ...item, question: question.toUpperCase() }] }),
     409,

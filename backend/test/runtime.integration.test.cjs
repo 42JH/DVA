@@ -74,10 +74,12 @@ test('production FAQ management through Nginx updates the AI read API without ex
     body: JSON.stringify({ category: '접수', question, answer: '수정 답변\n- 상세' }),
   });
   assert.equal(changed.status, 204);
-  const latest = await fetch(root + '/ai/faqs/' + id);
+  const latest = await fetch(root + '/ai/faqs?faqEntrySeqs=' + id);
   assert.equal(latest.status, 200);
   assert.equal(latest.headers.get('cache-control'), 'no-store');
-  const { data } = await latest.json();
+  const {
+    data: [data],
+  } = await latest.json();
   assert.equal(data.question, question);
   assert.equal(data.answer, '수정 답변\n- 상세');
   assert.deepEqual(Object.keys(data).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);

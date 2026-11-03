@@ -1,10 +1,10 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { MvpAiFaqAccess } from '../auth/mvp-ai-access';
 import { Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
-import { AiFaqQueryDto, FaqIdParamsDto } from './dto/faq-request.dto';
-import { AgentFaqListResponseDto, AgentFaqResponseDto } from './dto/faq-response.dto';
+import { AiFaqQueryDto } from './dto/faq-request.dto';
+import { AgentFaqListResponseDto } from './dto/faq-response.dto';
 import { FaqsService } from './faqs.service';
 
 @ApiTags('AI FAQs')
@@ -31,19 +31,5 @@ export class AiFaqsController {
   @ApiOkResponse({ type: AgentFaqListResponseDto })
   list(@Query() query: AiFaqQueryDto) {
     return this.faqs.list(query, true);
-  }
-
-  @Get(':id')
-  @MvpAiFaqAccess()
-  @ApiOperation({
-    summary: 'AI FAQ 상세 조회',
-    security: [{ adminSession: [] }, {}],
-    description:
-      '해당 FAQ의 최신 원본 조회. 관리자 식별자는 제외하며 MVP 서비스 인증·통화 헤더 불필요.',
-  })
-  @ApiOkResponse({ type: AgentFaqResponseDto })
-  @ApiResponse({ status: 404, type: ErrorResponseDto, description: 'FAQ 없음.' })
-  find(@Param() params: FaqIdParamsDto) {
-    return this.faqs.find(params.id, true);
   }
 }

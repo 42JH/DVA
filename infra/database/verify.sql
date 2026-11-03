@@ -4,10 +4,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
+ IF n<>28 THEN RAISE EXCEPTION 'Expected 28 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
+ IF n<>24 THEN RAISE EXCEPTION 'Expected 24 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -21,7 +21,7 @@ BEGIN
   AND pg_get_indexdef(i.indexrelid) LIKE '%(organization_seq, employee_no) WHERE (deleted_at IS NULL)') THEN
   RAISE EXCEPTION 'Active organization/employee uniqueness missing'; END IF;
  IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
-  AND table_name IN ('personal_pins','company_pins') AND column_name='search_text' AND is_generated='ALWAYS')<>2 THEN
+  AND table_name='personal_pins' AND column_name='search_text' AND is_generated='ALWAYS')<>1 THEN
   RAISE EXCEPTION 'Generated PIN search columns missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_users' AND column_name='name' AND is_nullable='NO') THEN RAISE EXCEPTION 'Admin name missing'; END IF;
  IF to_regclass('public.admin_sessions') IS NULL THEN RAISE EXCEPTION 'Admin sessions missing'; END IF;
@@ -155,7 +155,16 @@ BEGIN
     AND pg_get_constraintdef(oid) LIKE '%SUBMITTING_FAILED%')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql') THEN
   RAISE EXCEPTION 'Order submission retry schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
+ IF EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND ((table_name='company_pins' AND column_name='search_text')
+      OR (table_name='call_sessions' AND column_name='end_reason')))
+  OR to_regclass('public.handoff_requests') IS NOT NULL
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='call_sessions'::regclass
+    AND conname='call_sessions_check' AND contype='c' AND convalidated
+    AND pg_get_constraintdef(oid) LIKE '%ended_at >= started_at%')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='047-remove-unused-schema.sql') THEN
+  RAISE EXCEPTION 'Unused schema removal or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 28 public tables, 24 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

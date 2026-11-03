@@ -1,41 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
-import { HANDOFF_STATUSES, HandoffStatus } from '../consultations.types';
 import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
 import { CallAnalysisDto } from './call-analysis-response.dto';
-
-export class HandoffDto {
-  @ApiProperty({ description: '상담원 연결 요청 번호.', example: 5 })
-  handoffRequestSeq!: number;
-
-  @ApiProperty({ description: '저장된 연결 요청 사유.', example: '고객이 상담원 연결 요청' })
-  reason!: string;
-
-  @ApiProperty({
-    description: 'REQUESTED 요청, CONNECTED 연결 확인, FAILED 실패 확인.',
-    enum: HANDOFF_STATUSES,
-    example: 'REQUESTED',
-  })
-  status!: HandoffStatus;
-
-  @ApiProperty({ description: '배정 관리자 번호. 미확인 시 null.', type: Number, nullable: true })
-  assignedAdminUserSeq!: number | null;
-
-  @ApiProperty({
-    description: '상담원에게 전달할 요약. 없으면 null.',
-    type: String,
-    nullable: true,
-  })
-  summaryText!: string | null;
-
-  @ApiProperty({
-    description: '연결 요청 시각. 실제 연결 완료 시각과 다릅니다.',
-    type: String,
-    format: 'date-time',
-    example: '2026-10-28T01:02:00.000Z',
-  })
-  requestedAt!: Date;
-}
 
 export class CallDto {
   @ApiProperty({
@@ -104,20 +70,6 @@ export class CallDto {
     example: '2026-10-28T01:03:00.000Z',
   })
   endedAt!: Date | null;
-
-  @ApiProperty({
-    description: '저장된 통화 종료 사유. 미확인 시 null이며 주문 상태로 추정하지 않습니다.',
-    type: String,
-    nullable: true,
-  })
-  endReason!: string | null;
-
-  @ApiProperty({
-    description: '저장된 상담원 연결 요청·결과. 기록이 없으면 null.',
-    type: HandoffDto,
-    nullable: true,
-  })
-  handoff!: HandoffDto | null;
 }
 
 export class CallListItemDto extends CallDto {

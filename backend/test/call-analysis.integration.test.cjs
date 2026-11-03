@@ -43,9 +43,9 @@ const input = (providerCallId, changes = {}) => ({
 async function createCall() {
   const providerCallId = 'rtc_analysis_' + randomUUID();
   const result = await pool.query(
-    `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,end_reason)
+    `INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at)
      VALUES($1,'01012345678','2026-10-30T01:00:00Z','2026-10-30T01:00:03Z',
-      '2026-10-30T01:03:43Z','PBX_ENDED') RETURNING call_session_seq`,
+      '2026-10-30T01:03:43Z') RETURNING call_session_seq`,
     [providerCallId],
   );
   return { id: result.rows[0].call_session_seq, providerCallId };

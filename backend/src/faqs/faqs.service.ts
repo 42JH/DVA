@@ -20,8 +20,8 @@ export class FaqsService {
     return new ListResponse(await this.repository.list(query, agent), query.limit);
   }
 
-  async find(id: number, agent = false) {
-    const row = await this.repository.find(id, agent);
+  async find(id: number) {
+    const row = await this.repository.find(id);
     if (!row) throw new ApiException(404, 'NOT_FOUND', 'FAQ를 찾을 수 없습니다.');
     return row;
   }

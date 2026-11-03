@@ -25,7 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { Response } from 'express';
 import { AdminsService } from '../admins/admins.service';
-import { AdminQueryDto, UpdateAdminDto, UpdateAdminRoleDto } from '../admins/dto/admin-query.dto';
+import { AdminQueryDto, UpdateAdminDto } from '../admins/dto/admin-query.dto';
 import { ListResponse } from '../common/pagination';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { ApiException } from '../common/errors/api.exception';
@@ -110,23 +110,6 @@ export class AdminAccessController {
   })
   @ApiNoContentResponse({ description: '권한·활성 상태 변경 또는 가입 승인 완료.' })
   update(@Param('id') id: string, @Body() input: UpdateAdminDto, @Req() request: AuthRequest) {
-    return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
-  }
-  @AuditOperation({ action: 'ADMIN_ACCESS_CHANGED', targetType: 'ADMIN_USER', target: 'id' })
-  @Patch(':id/role')
-  @HttpCode(204)
-  @ApiOperation({
-    summary: '관리자 권한 변경',
-    description:
-      'SYSTEM_ADMIN 전용. OPERATOR ↔ SUPERVISOR만 변경하며 계정 상태는 유지합니다. 변경된 권한은 기존 세션의 다음 요청부터 적용됩니다.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: '대상 관리자 번호(adminUserSeq). SYSTEM_ADMIN은 변경 불가.',
-    schema: { type: 'integer', minimum: 1 },
-  })
-  @ApiNoContentResponse({ description: '권한 변경 완료. 응답 본문 없음.' })
-  role(@Param('id') id: string, @Body() input: UpdateAdminRoleDto, @Req() request: AuthRequest) {
     return this.auth.updateAdmin(request.sessionToken, adminId(id), input, request.requestId);
   }
   @AuditOperation({ action: 'ADMIN_PASSWORD_CHANGED', targetType: 'ADMIN_USER', target: 'id' })

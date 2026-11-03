@@ -37,20 +37,18 @@ async function createCall(changes = {}) {
     startedAt: '2026-10-31T01:00:03Z',
     endedAt: '2026-10-31T01:03:43Z',
     incomingAt: null,
-    endReason: 'PBX_ENDED',
     ...changes,
   };
   const id = (
     await f.pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason,incoming_at,customer_seq)
-     VALUES($1,$2,$3,$4,$5,$6,$7,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq`,
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,incoming_at,customer_seq)
+     VALUES($1,$2,$3,$4,$5,$6,(SELECT customer_seq FROM customers WHERE phone_number=$2)) RETURNING call_session_seq`,
       [
         input.providerCallId,
         input.phone,
         input.order,
         input.startedAt,
         input.endedAt,
-        input.endReason,
         input.incomingAt,
       ],
     )
@@ -175,7 +173,7 @@ test('detail and list expose the stored analysis and actual older persona withou
   });
   assert.equal(data.call.startedAt, new Date(call.startedAt).toISOString());
   assert.equal(data.call.endedAt, new Date(call.endedAt).toISOString());
-  assert.equal(data.call.endReason, 'PBX_ENDED');
+  assert.equal(Object.hasOwn(data.call, 'endReason'), false);
   assert.equal(data.call.orderStatus, 'CANCELLED');
   const page = await ok(await list({ callerPhoneNumber: call.phone }));
   assert.deepEqual(page.data[0].analysis, data.analysis);
@@ -232,7 +230,7 @@ test('list and detail preserve AI summary values including zero, false and unkno
       assert.equal(Object.hasOwn(data.call, key), false);
       assert.equal(Object.hasOwn(page.data[0], key), false);
     }
-    assert.equal(data.call.handoff, null);
+    assert.equal(Object.hasOwn(data.call, 'handoff'), false);
     assert.equal(data.call.orderSeq, null);
   }
 });
@@ -432,7 +430,6 @@ test('q normalizes Korean and case while treating wildcards and SQL text literal
     orderSeq: order,
     orderStatus: 'COLLECTING',
     callerPhoneNumber: owner.phone,
-    endReason: 'PBX_ENDED',
     hasComplaint: 'false',
     from: '2026-10-31T01:00:03Z',
     to: '2026-10-31T01:00:04Z',
@@ -483,7 +480,6 @@ test('incoming calls are visible in date-filtered lists before analysis, PBX or 
   const call = await createCall({
     startedAt: null,
     endedAt: null,
-    endReason: null,
     incomingAt: '2026-10-31T00:59:58Z',
   });
   const page = await ok(
@@ -507,7 +503,6 @@ test('AI times update the same call and date filter before PBX or a recording is
   const call = await createCall({
     startedAt: null,
     endedAt: null,
-    endReason: null,
     incomingAt: '2026-10-31T00:59:58Z',
   });
   const input = await analyse(call);
@@ -527,7 +522,7 @@ test('AI times update the same call and date filter before PBX or a recording is
   const single = (await ok(await detail(call), true)).data;
   assert.equal(single.call.startedAt, page.data[0].startedAt);
   assert.equal(single.call.endedAt, page.data[0].endedAt);
-  assert.equal(single.call.endReason, null);
+  assert.equal(Object.hasOwn(single.call, 'endReason'), false);
   assert.deepEqual(single.recordings, []);
   const stored = (
     await f.pool.query('SELECT started_at,ended_at FROM call_sessions WHERE call_session_seq=$1', [
@@ -541,7 +536,6 @@ test('late PBX times take priority while the AI analysis and call identity are p
   const call = await createCall({
     startedAt: null,
     endedAt: null,
-    endReason: null,
     incomingAt: '2026-10-31T00:59:58Z',
   });
   await analyse(call);
@@ -590,7 +584,7 @@ test('fallback times share date boundaries, deterministic pagination and analysi
     startedAt: '2026-10-31T02:00:00Z',
     endedAt: '2026-10-31T02:03:00Z',
   });
-  const ai = await createCall({ phone: caller, startedAt: null, endedAt: null, endReason: null });
+  const ai = await createCall({ phone: caller, startedAt: null, endedAt: null });
   await analyse(ai, {
     startedAt: '2026-10-31T02:00:00Z',
     endedAt: '2026-10-31T02:03:00Z',
@@ -600,10 +594,9 @@ test('fallback times share date boundaries, deterministic pagination and analysi
     phone: caller,
     startedAt: null,
     endedAt: null,
-    endReason: null,
     incomingAt: '2026-10-31T02:00:00Z',
   });
-  await createCall({ phone: caller, startedAt: null, endedAt: null, endReason: null });
+  await createCall({ phone: caller, startedAt: null, endedAt: null });
   const query = {
     callerPhoneNumber: caller,
     from: '2026-10-31T02:00:00Z',
@@ -621,7 +614,7 @@ test('fallback times share date boundaries, deterministic pagination and analysi
 });
 
 test('late analysis and utterances become readable without inventing a default persona or altering complaint references', async () => {
-  const call = await createCall({ startedAt: null, endedAt: null, endReason: null });
+  const call = await createCall({ startedAt: null, endedAt: null });
   assert.equal((await ok(await detail(call), true)).data.analysis, null);
   const complaint = {
     type: 'AI_REFUSAL',

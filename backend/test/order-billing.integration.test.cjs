@@ -170,15 +170,17 @@ test('personal card waits, partial cancellation replaces the request, and only t
   assert.notEqual(detail.paymentRequest.paymentRequestId, original.paymentRequestId);
   assert.equal(detail.paymentRequest.expiresAt, original.expiresAt);
   await assert.rejects(
-    () => payments.beginPayment(original.paymentRequestId, 12000),
+    () =>
+      payments.claimApproval(original.paymentRequestId, 12000, 'test-' + original.paymentRequestId),
     (e) => e.getStatus() === 409,
   );
   await assert.rejects(
-    () => payments.beginPayment(detail.paymentRequest.paymentRequestId, 12000),
+    () =>
+      payments.claimApproval(detail.paymentRequest.paymentRequestId, 12000, 'test-invalid-amount'),
     (e) => e.getStatus() === 409,
   );
   const current = detail.paymentRequest.paymentRequestId;
-  await payments.beginPayment(current, 7000);
+  await payments.claimApproval(current, 7000, 'test-' + current);
   assert.equal((await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status, 409);
   await assert.rejects(
     () => payments.confirmPayment(current, 12000, 'test-' + current, randomUUID()),
@@ -288,12 +290,16 @@ test('cancellation and payment approval serialize and invalid sums never create 
   assert.equal((await createFinal(missing)).status, 422);
   const order = (await createFinal()).body.data;
   const [approval, cancel] = await Promise.allSettled([
-    payments.beginPayment(order.paymentRequest.paymentRequestId, 12000),
+    payments.claimApproval(order.paymentRequest.paymentRequestId, 12000, 'test-racing-approval'),
     request(`/orders/${order.orderSeq}/cancel`, undefined, true),
   ]);
   if (approval.status === 'fulfilled') {
     assert.equal(cancel.value.status, 409);
-    await payments.releaseDeclinedPayment(order.paymentRequest.paymentRequestId);
+    await payments.releaseClaim(
+      order.paymentRequest.paymentRequestId,
+      approval.value.claimId,
+      true,
+    );
     assert.equal((await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status, 204);
   } else {
     assert.equal(approval.reason.getStatus(), 409);
@@ -586,17 +592,21 @@ test('expiry preserves consultation and recordings, closes the payment request, 
   assert.equal(logs[0].actorLabel, 'SYSTEM');
   assert.equal(logs[0].metadata.reason, 'PAYMENT_EXPIRED');
   await assert.rejects(
-    () => payments.beginPayment(order.paymentRequest.paymentRequestId, 12000),
+    () => payments.claimApproval(order.paymentRequest.paymentRequestId, 12000, 'test-expired'),
     (e) => e.getStatus() === 409,
   );
   const inFlight = (await createFinal()).body.data;
-  await payments.beginPayment(inFlight.paymentRequest.paymentRequestId, 12000);
+  const approval = await payments.claimApproval(
+    inFlight.paymentRequest.paymentRequestId,
+    12000,
+    'test-in-flight',
+  );
   await maintenance.run(future);
   assert.equal(
     (await request(`/orders/${inFlight.orderSeq}`, undefined, true, 'GET')).body.data.status,
     'notPaid',
   );
-  await payments.releaseDeclinedPayment(inFlight.paymentRequest.paymentRequestId);
+  await payments.releaseClaim(inFlight.paymentRequest.paymentRequestId, approval.claimId, true);
   await maintenance.run(future);
   assert.equal(
     (await request(`/orders/${inFlight.orderSeq}`, undefined, true, 'GET')).body.data.status,

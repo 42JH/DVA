@@ -2,14 +2,14 @@ import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { CallQueryDto } from './dto/call-query.dto';
-import { CallDto, CallListItemDto, HandoffDto, RecordingDto } from './dto/call-response.dto';
+import { CallDto, CallListItemDto, RecordingDto } from './dto/call-response.dto';
 import { CallAnalysisDto } from './dto/call-analysis-response.dto';
 import { TranscriptQueryDto, UtteranceDto } from './dto/transcript.dto';
 import { PoolClient } from 'pg';
 
 type RecordingRow = Pick<RecordingDto, 'recordingSeq' | 'createdAt'> & { objectKey: string };
 
-type CallRow = Omit<CallDto, 'handoff'> & {
+type CallRow = CallDto & {
   aiPersonaVersionSeq: number | null;
   personaName: string | null;
   personaVersion: number | null;
@@ -25,30 +25,21 @@ type CallRow = Omit<CallDto, 'handoff'> & {
   hasComplaint: boolean | null;
   complaints: CallAnalysisDto['complaints'] | null;
   analysedAt: Date | null;
-  handoffRequestSeq: number | null;
-  handoffReason: string;
-  handoffStatus: HandoffDto['status'];
-  assignedAdminUserSeq: number | null;
-  summaryText: string | null;
-  requestedAt: Date;
 };
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
 
 const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
- ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",c.end_reason AS "endReason",
+ ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",
  a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
  a.ai_started_at AS "aiStartedAt",a.ai_ended_at AS "aiEndedAt",a.repeat_question_count AS "repeatQuestionCount",
  a.has_complaint AS "hasComplaint",a.complaints,a.analysed_at AS "analysedAt",
  a.is_new_customer AS "isNewCustomer",a.registered_parcel_count AS "registeredParcelCount",
  a.faq_answer_count AS "faqAnswerCount",a.order_lookup_count AS "orderLookupCount",
- a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
- h.handoff_request_seq AS "handoffRequestSeq",h.reason AS "handoffReason",h.status AS "handoffStatus",
- h.assigned_admin_user_seq AS "assignedAdminUserSeq",h.summary_text AS "summaryText",h.requested_at AS "requestedAt"
+ a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest"
  FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
- LEFT JOIN handoff_requests h ON h.call_session_seq=c.call_session_seq
  LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
  LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
  LEFT JOIN ai_persona_versions v ON v.ai_persona_version_seq=a.ai_persona_version_seq`;
@@ -70,12 +61,6 @@ function callResult(row: CallRow): CallListItemDto {
     hasComplaint,
     complaints,
     analysedAt,
-    handoffRequestSeq,
-    handoffReason,
-    handoffStatus,
-    assignedAdminUserSeq,
-    summaryText,
-    requestedAt,
     ...call
   } = row;
   return {
@@ -99,17 +84,6 @@ function callResult(row: CallRow): CallListItemDto {
             hasComplaint,
             complaints: complaints!,
             analysedAt,
-          },
-    handoff:
-      handoffRequestSeq === null
-        ? null
-        : {
-            handoffRequestSeq,
-            reason: handoffReason,
-            status: handoffStatus,
-            assignedAdminUserSeq,
-            summaryText,
-            requestedAt,
           },
   };
 }
@@ -168,8 +142,6 @@ export class ConsultationsRepository {
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
       [query.from, CALL_STARTED_AT, '>='],
       [query.to, CALL_STARTED_AT, '<'],
-      [query.endReason, 'c.end_reason', '='],
-      [query.handoffStatus, 'h.status', '='],
       [query.hasComplaint, 'a.has_complaint', '='],
       [query.aiPersonaVersionSeq, 'a.ai_persona_version_seq', '='],
     ] as const) {

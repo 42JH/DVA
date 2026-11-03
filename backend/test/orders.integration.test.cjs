@@ -2642,11 +2642,16 @@ test('cancelled accepted snapshots stay out of previous address suggestions whil
   assert.equal((await cancelOrder(order.orderSeq, [detail.parcels[0].orderParcelSeq])).status, 204);
   const remaining = (await (await readDetail(order.orderSeq)).json()).data;
   const payments = apps[0].get(OrderPaymentsService);
-  await payments.beginPayment(remaining.paymentRequest.paymentRequestId, remaining.totalAmount);
+  const paymentKey = 'verified-' + randomUUID();
+  await payments.claimApproval(
+    remaining.paymentRequest.paymentRequestId,
+    remaining.totalAmount,
+    paymentKey,
+  );
   await payments.confirmPayment(
     remaining.paymentRequest.paymentRequestId,
     remaining.totalAmount,
-    'verified-' + randomUUID(),
+    paymentKey,
     randomUUID(),
   );
   assert.equal((await submissionRows(order.orderSeq)).status, 'ACCEPTED');
