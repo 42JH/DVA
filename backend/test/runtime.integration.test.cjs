@@ -917,8 +917,9 @@ test('Nginx forwards the call_session_seq header without losing its underscores'
   assert.ok(preflight.headers.get('access-control-allow-headers').includes('call_session_seq'));
 });
 
-test('production active count SSE crosses Nginx, keeps heartbeats and closes after logout', async () => {
-  const root = 'http://proxy/api';
+test('production active count SSE crosses HTTPS and both Nginx proxies, keeps heartbeats and closes after logout', async () => {
+  const root = process.env.TEST_HTTPS_API_ROOT;
+  assert.match(root, /^https:\/\//);
   const origin = 'https://13.209.59.180';
   const login = await fetch(root + '/auth/login', {
     method: 'POST',
@@ -1002,5 +1003,21 @@ test('production active count SSE crosses Nginx, keeps heartbeats and closes aft
   } finally {
     controller.abort();
     await reader.cancel().catch(() => {});
+  }
+});
+
+test('HTTPS proxy preserves administrator authentication, internal blocking and PBX POST-only routing', async () => {
+  const root = process.env.TEST_HTTPS_API_ROOT;
+  assert.match(root, /^https:\/\//);
+  for (const [path, status] of [
+    ['/calls/active-count', 401],
+    ['/calls/active-count/stream', 401],
+    ['/internal/metrics', 404],
+    ['/health/ready', 404],
+    ['/health/ready/', 404],
+    ['/webhooks/pbx/call-ended', 405],
+  ]) {
+    const response = await fetch(root + path, { signal: AbortSignal.timeout(5000) });
+    assert.equal(response.status, status, path);
   }
 });

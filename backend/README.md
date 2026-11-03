@@ -1,6 +1,6 @@
 # 모놀리식 백엔드 공통 기반
 
-진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 프록시 미적용 사항은 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. 운영 적용은 별도다.
+진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 양쪽 nginx 설정·운영 적용 순서는 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. nginx 설정은 저장소에 반영했으며 실제 서버 적용은 별도다.
 
 무의미 통화는 AI가 등록·업무 결과 전송을 생략한다. 최초 고객 확인은 phoneNumber만 보내 조회하고, 업무 의도를 확인한 뒤 같은 API에 최초 call(providerCallId·incomingAt)을 보내 통화를 등록한다. PBX 미연결 수신은 received_at부터 30분 경과 후 처리 주기에 삭제하며 S3 미설정이어도 정리는 실행한다. 연결된 유효 통화의 저장 실패와 NO_ORDER는 보존한다. [AI 전달 계약](docs/meaningful-call-registration-handoff.md)을 따르며 AI 코드·운영 배포는 별도다.
 

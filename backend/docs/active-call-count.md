@@ -1,6 +1,6 @@
 # 진행 통화 수 조회와 SSE 연동
 
-Jira: [S15P31D109-155](https://ssafy.atlassian.net/browse/S15P31D109-155). backend 범위의 구현이며 AI·프론트 코드와 운영 프록시 설정·배포는 별도다.
+Jira: [S15P31D109-155](https://ssafy.atlassian.net/browse/S15P31D109-155). 백엔드 API와 양쪽 nginx 설정을 포함한다. AI·프론트 코드 수정과 실제 서버 배포·nginx reload는 별도다.
 
 ## 집계 기준과 DB 전환
 
@@ -15,6 +15,40 @@ PBX 수신 시 등록된 유일한 통화를 매칭해 종료를 즉시 저장�
 수신함 저장 실패는 기존 503, 같은 recordingId의 다른 본문은 409다. 수신함을 영속화한 뒤 즉시 매칭만 실패하면 200 ACK 후 기존 녹취 워커가 복구한다. S3 업로드 성공 여부는 종료 저장 조건이 아니다. 연결된 유효 수신·S3 재시도·처리권과 NO_ORDER를 보존한다. 최종 AI 주문 결과는 PBX 종료 뒤에도 기존 계약으로 저장한다.
 
 종료 웹훅 자체가 누락되거나 후보가 모호하면 실제 통화가 끝났어도 집계에 남을 수 있다. 현재는 PBX가 알려준 종료만 확정한다. 미연결 PBX 수신 30분 보관을 통화 자동 종료 시간으로 사용하지 않는다. AI는 [유효 통화 등록 계약](meaningful-call-registration-handoff.md)대로 업무 의도 확인 후 최초 providerCallId·incomingAt으로 등록한다.
+
+## 호출자별 역할과 데이터 이동
+
+| 호출자 | API | 역할과 건수 영향 |
+| --- | --- | --- |
+| AI, 최초 고객 확인 | `POST /api/customers/context` | phoneNumber만 전송해 고객·주소 정보를 조회한다. 통화를 생성하지 않아 건수가 늘지 않는다. |
+| AI, 업무 의도 확인 후 | `POST /api/customers/context` | 최초 call 정보를 추가한다. 통화를 생성·재사용하고 callSessionSeq를 받는다. 신규 진행 통화가 집계에 들어간다. |
+| PBX | `POST /api/webhooks/pbx/call-ended` | 종료 시각을 저장해 집계에서 제외한다. 동일 웹훅 재전송은 중복 차감하지 않는다. |
+| 프론트 | `GET /api/calls/active-count` | 현재 건수를 JSON으로 한 번 조회한다. 통화 상태를 변경하지 않는다. |
+| 프론트 | `GET /api/calls/active-count/stream` | 최초 현재값과 이후 변경값을 하나의 연결에서 계속 받는다. 통화 상태를 변경하지 않는다. |
+
+PBX 공개 URL은 기존 nginx가 백엔드의 `/webhooks/pbx/call-ended`로 전달한다. PBX Bearer 토큰과 관리자 세션 쿠키는 각각 기존 인증을 사용하며 서로 대체하지 않는다.
+
+AI 최초 조회 예시:
+
+```json
+{ "phoneNumber": "01012345678" }
+```
+
+AI 업무 의도 확인 후 등록 예시. providerCallId와 incomingAt은 새로 만들지 않고 최초 전화 수신 이벤트 값을 사용한다.
+
+```json
+{
+  "phoneNumber": "01012345678",
+  "call": {
+    "providerCallId": "original-provider-call-id",
+    "incomingAt": "2026-11-03T00:00:00.000Z"
+  }
+}
+```
+
+저장 흐름은 AI 등록 → call_sessions 저장 → DB 트랜잭션 커밋 → PostgreSQL NOTIFY → 각 백엔드의 LISTEN → 진행 통화 COUNT → SSE → 프론트 숫자 갱신이다. 종료 시에는 PBX 수신 → ended_at 저장 이후 같은 알림 흐름을 사용한다. NOTIFY는 외부 API가 아니며 AI·프론트가 따로 호출하지 않는다.
+
+별도 숫자 컬럼에 +1/-1을 누적 저장하지 않는다. 통화별 registered_at과 ended_at을 저장하고 조건에 맞는 행을 부분 인덱스로 센다. 예를 들어 DB에 7건이 남으면 프론트에 7을 전송한다. 화면마다 1을 더하는 방식이 아니므로 여러 관리자가 동시에 구독해도 건수가 증가하지 않는다. 롤백된 등록은 알림도 취소된다. 등록 전에 종료 웹훅이 도착한 경우에는 같은 등록 트랜잭션에서 종료까지 반영해 진행 건수가 잠시 늘어나는 것을 방지한다.
 
 ## 현재 건수 API
 
@@ -55,6 +89,8 @@ data: {"activeCallCount":37,"observedAt":"2026-11-03T00:00:00.000Z"}
 
 프론트 연결 예시:
 
+SSE는 최초 현재값도 보내므로 화면 진입 시 stream 하나만 연결해도 된다. 현재값 GET은 단발 조회나 연결 상태 확인용으로 사용할 수 있다. EventSource는 GET 연결을 유지하며 브라우저가 재연결을 처리한다. 이벤트가 올 때마다 API를 다시 호출하거나 페이지를 새로고침할 필요는 없다.
+
 ```javascript
 const source = new EventSource('/api/calls/active-count/stream', { withCredentials: true });
 source.addEventListener('active-call-count', (event) => {
@@ -71,53 +107,26 @@ source.onerror = () => setConnectionStatus('reconnecting');
 // 화면을 떠날 때 source.close(). 다른 Origin이면 허용된 API URL을 사용한다.
 ```
 
-## 운영 nginx 적용안 — 미적용
+## nginx 설정 — 저장소 반영, 실제 서버 미반영
 
-현재 외부 HTTPS nginx → 컨테이너 nginx → backend 두 단계다. backend의 X-Accel-Buffering: no가 첫 프록시에서 소비될 수 있으므로 양쪽의 스트림 경로에서 버퍼링을 해제해야 한다. backend 밖 파일은 이번 수정 범위에 포함하지 않는다. 운영 반영 담당자가 기존 접근 제어·헤더를 유지하며 다음과 같은 전용 location을 적용하고 nginx 설정 검사 후 반영한다.
+프론트 → 외부 HTTPS nginx → 컨테이너 nginx → backend 순서로 연결된다. 백엔드의 X-Accel-Buffering: no가 첫 프록시에서 소비될 수 있어 두 설정 모두 `/api/calls/active-count/stream` 전용 location에 버퍼링·캐시 해제를 명시한다.
 
-컨테이너 `infra/nginx/default.prod.conf`의 server 내부:
+- [컨테이너 nginx 설정](../../infra/nginx/default.prod.conf): backend:3000으로 전달한다.
+- [외부 HTTPS nginx 설정](../../infra/https/https.conf): 기존 127.0.0.1:8082로 전달한다.
+- 양쪽 모두 `proxy_buffering off`, `proxy_cache off`, `Connection ''`, `proxy_read_timeout 30s`를 사용한다. 30초는 수신 데이터 사이의 대기시간이며 통화나 SSE의 총 유지시간 제한이 아니다. 5초 heartbeat로 연결을 유지한다.
+- 변경은 해당 스트림 경로에 한정한다. 기존 PBX 웹훅·AI 미러·인증·CORS·나머지 API 경로는 유지한다.
 
-```nginx
-location = /api/calls/active-count/stream {
-    proxy_pass http://backend:3000;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_set_header Connection '';
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_read_timeout 30s;
-}
-```
+사용자가 요청한 순서에 따라 백엔드 기능을 먼저 커밋하고 nginx 설정·검증을 후속 커밋으로 분리한다. 두 커밋을 같은 Jira 155의 MR로 올릴 수 있다. 실제 서버 적용 순서는 다음과 같다.
 
-호스트 `infra/https/https.conf`의 해당 HTTPS server 내부:
+1. develop-backend 대상 MR의 리뷰·병합 후 기존 배포 파이프라인을 사용한다. 새 backend 시작 전에 migration runner가 044를 적용하는지 확인한다. 컨테이너 nginx 설정은 기존 배포 패키지·Compose에 포함된다.
+2. 호스트 HTTPS nginx 설정은 앱 배포로 자동 교체되지 않는다. 현재 서버 설정과 저장소 설정을 비교해 기존 도메인·인증서·추가 경로를 보존하면서 SSE location을 반영한다. `nginx -t` 성공 후 `systemctl reload nginx`로 반영한다. 호스트 반영은 [HTTPS 운영 절차](../../infra/https/README.md)를 따른다.
+3. 실제 도메인에서 로그인 후 첫 SSE 이벤트, heartbeat와 10초 이상 연결 유지, 통화 등록·종료, 로그아웃 종료·재연결을 확인한다. AI의 기존 두 단계 등록이 실제 호출되는지도 확인한다.
 
-```nginx
-location = /api/calls/active-count/stream {
-    access_log off;
-    proxy_pass http://127.0.0.1:8082;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $remote_addr;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header Connection '';
-    proxy_buffering off;
-    proxy_cache off;
-    proxy_connect_timeout 3s;
-    proxy_read_timeout 30s;
-    proxy_send_timeout 10s;
-    proxy_next_upstream off;
-}
-```
-
-인증은 backend에서 유지한다. 쿠키·CORS·기존 PBX 미러·나머지 API 경로를 변경하지 않는다. 실제 도메인에서 첫 이벤트 지연, 10초 이상 연결 유지, 로그아웃 종료와 재연결을 별도 확인해야 한다. 로컬 통합 검증 결과를 운영 배포 성공으로 확대하지 않는다.
+이번 변경에서 실제 서버 접속·DB migration·배포·nginx reload·프론트/AI 코드 수정은 실행하지 않는다. 저장소 설정 반영과 실제 운영 반영을 구분한다.
 
 ## 검증 결과 — 2026-11-03
 
-저장소 루트에서 `node backend/scripts/check.cjs`를 실행해 일회용 PostgreSQL 17·운영용 backend 이미지·기존 컨테이너 nginx 설정으로 확인했다.
+저장소 루트에서 `node backend/scripts/check.cjs`와 `node --test infra/jenkins/test-monolith-ci.cjs`를 실행했다. 일회용 PostgreSQL 17·운영용 backend 이미지·두 nginx의 실제 저장소 설정·임시 HTTPS 인증서로 확인했다.
 
 | 검증 | 결과 |
 | --- | --- |
@@ -125,9 +134,10 @@ location = /api/calls/active-count/stream {
 | 단위 테스트 | 117개 통과 |
 | 결제 테스트 | 21개 통과 |
 | 실제 DB 통합 테스트 | 611개 통과, 새 기능 22개 포함 |
-| 운영 이미지·nginx 통합 테스트 | 19개 통과 |
-| 합계 | 768개 통과, 실패·취소·건너뜀 0개 |
+| 운영 이미지·두 nginx·HTTPS 통합 테스트 | 20개 통과 |
+| 인프라 CI 변경 감지·검증 선택 테스트 | 5개 통과 |
+| 합계 | 774개 통과, 실패·취소·건너뜀 0개 |
 
 새 기능 검증은 과거 데이터 제외, 동일 등록·웹훅 재전송, 두 서버의 동시 처리, 웹훅 선도착, S3 미설정, PBX 종료 후 NO_ORDER, 역할·세션 검증, SSE 최초값·재연결·공유 조회·묶음 전송·알림 누락 복구·장애·서버 종료를 포함한다. 과거 3만 건과 진행 125건의 테스트 데이터에서 집계가 부분 인덱스를 사용하는 실행 계획도 확인했다. 운영 부하의 처리량·지연을 보장하는 벤치마크는 아니다.
 
-실제 컨테이너 nginx를 거쳐 heartbeat 두 번과 등록·종료 알림, 로그아웃 종료를 확인했다. 외부 HTTPS nginx·실제 도메인·운영 DB migration·프론트와 AI 서버 연동은 실행하지 않았다. 운영 프록시 적용안은 위 절을 따른다.
+실제 두 nginx 설정을 일회용 컨테이너에서 연결해 HTTPS 인증서 신뢰 검증, heartbeat 두 번과 등록·종료 알림, 로그아웃 종료를 확인했다. 외부 프록시를 통한 미인증 차단·내부 경로 차단·PBX POST 제한도 확인했다. 실제 서버·운영 도메인·운영 DB migration·프론트와 AI 서버 연동은 실행하지 않았다. 운영 반영은 위 절을 따른다.
