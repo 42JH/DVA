@@ -1,14 +1,12 @@
 [project]
-name = "dpostcall-ai"
+name = "dpostcall-rebuild-modules"
 version = "0.1.0"
-description = "디바콜 전화 접수 서버"
+description = "디바콜 전화 접수 서버 재구성용 모듈(PBX 웹훅·백엔드 통신·도구와 RAG·주소 보정)"
 requires-python = ">=3.14"
 dependencies = [
     "fastapi",
-    "uvicorn",
     "pydantic",
     "openai[realtime]==3.35.1",
-    "langgraph>=1.2.16",
     "langchain-core>=1.6.13",
     "langchain-openai>=1.7.2",
     "langchain-qdrant>=1.1.0",
@@ -19,18 +17,15 @@ dependencies = [
     "kiwipiepy>=0.24.1",
     "tiktoken>=0.14.0",
     "qdrant-client==1.19.1",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
-dev = [
-    "langgraph-cli[inmem]>=0.4.37",
-    "pytest",
-    "python-dotenv>=1.2.4",
-]
+dev = ["pytest", "httpx"]
 
 [tool.uv]
 package = false
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["pbx_webhook/tests", "backend_client/tests", "address_resolver/tests", "monitor/tests", "app/tests", "tests"]
 pythonpath = ["."]

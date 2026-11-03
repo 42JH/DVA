@@ -1,0 +1,317 @@
+# Worklog
+
+## 2026-11-03 — 현행 분석·문서화 (코드 변경 없음)
+
+- 작성: `docs/contracts/be-api.md`, `pbx-webhooks.md`, `tool-contracts.md`, `docs/architecture/current-state.md`, `rebuild-assessment.md`
+- 소스코드 수정 없음. 외부 계약 변경 없음.
+- 테스트: `uv run pytest -q` → 364 passed.
+- 주요 발견: GPT-Live-1 세션·Responses Delegation·sideband·통화 생명주기 코드 부재 / `submit_result` 503 처리 BE 권고와 불일치 / ambiguous 주소 확정 기록 / 주소 보정 전역 락 / 수거 시각 BE 충돌 미결.
+- 남은 일: `rebuild-assessment.md` §6 질문 확인 후 설계.
+
+## 2026-11-03 — 새 아키텍처 설계 문서 (코드 변경 없음)
+
+- 작성: `docs/architecture/overview.md`, `call-lifecycle.md`, `delegation.md`, `conversation-state.md`, `error-recovery.md`, `latency-strategy.md`, `docs/testing/test-strategy.md`
+- OpenAI 동작 근거: 설치 SDK `openai==3.35.1` 타입 + 공식 가이드(live-delegation, live-prompting, voice-server-controls). 미확인 항목은 문서에 표시.
+- 추천안: A안(Responses 위임 + 서버 결정 도구, 통화당 액터). 구현은 사용자 승인 전 보류.
+- 사용자 지시로 송장번호 조회·분실·대리점 미입고 시나리오 제거.
+
+## 2026-11-03 — 아키텍처 v2: 경량 비동기 멀티콜 + Decision 우선 경로 (코드 변경 없음)
+
+- 개정: `overview.md`(v2, 5개 질문 답변·A안 대비 변경·위험·구현 순서), `delegation.md`(Decision·Live·위임 경로), `conversation-state.md`(필드 버전, 토큰 없는 확인), `call-lifecycle.md`(Actor/Queue 제거), `error-recovery.md`, `latency-strategy.md`(구간 5종·부하 테스트), `testing/test-strategy.md`
+- 신규: `concurrency.md`(CallSession·Lock·필드 버전·자원 제한·다중 인스턴스)
+- 근거: SDK `types/decision.py`·`decision_trigger_param.py`·`connect_server_event.py`, 가이드 `decisions-voice`·`decisions`. Decision은 열거형 답만 반환(자유 텍스트 추출 불가) → 값 입력은 Backend 위임 유지.
+- 핵심 미확인: Responses 위임 세션에서 트리거 동시 동작, 트리거 발동 시점 → S0 스파이크.
+
+## 2026-11-03 — 아키텍처 v3: Live-1 자율 진행 + 서버 선택 개입 (코드 변경 없음, 기획 변경 반영)
+
+- 신규: `docs/architecture/workflow-policy.md`(정책 파일 구조, Business State 분리, 자율 경계, 누락 방지 6층)
+- 개정: `overview.md`(v3, 6개 질문 답변), `delegation.md`(트리거 입력+출력 2개, 선택적 Tool 경로 A/B/C1~C3, Responses vs Client 비교, 전달 등급 N0~N3, 충돌 6상황), `conversation-state.md`(`next_step` → `assess`), `error-recovery.md`, `latency-strategy.md`(요구 4구간), `test-strategy.md`
+- 재확인: Decision은 자유 텍스트 인자 추출 불가(D1) → 값 입력은 Responses 위임 유지. 추천: Responses Delegation + Decision 트리거.
+
+## 2026-11-03 — v3 보완: Decision·Backend 역할 분리 (코드 변경 없음)
+
+- `delegation.md`: 판단 유형별 단일 소유자 표, 위임 경로 Structured Outputs = strict 함수 도구(SDK: 위임 `text`에 `format` 없음), 단계별 Decision 질문 세트(선택형 단계에서만, 선행 단계 아님), 실행 경로 5종, 복합 발화 통합 규칙 R1~R6
+- Decision의 값 발화·정정 감지 질문 제거(위임 누락 감시 제거 → 필드 EMPTY 유지 + gate로 보장)
+- 반영: `overview.md`(F15, Q4), `workflow-policy.md`(단계별 decision 세트, 필드 kind), `conversation-state.md`(G6), `error-recovery.md`, `call-lifecycle.md`, `test-strategy.md`
+
+## 2026-11-03 — 사용자 결정 P1~P11·BE 변동성 반영 (코드 변경 없음)
+
+- 신규: `docs/architecture/decisions.md`(결정 기록, 다른 문서보다 우선)
+- 반영: 수거 시각 now+1h(P1), 페르소나 promptText 우선(P2), 단일 워커(P3), N3 3회 후 상담원 제안(P4), `ParcelStore`로 접수 전 택배 수정(P5), ambiguous 1순위 자동 확정(P6), 등록 조건 성함·전화번호·주소(P7), 스크립트 영역 예약(P8), 상담원 설정값화(P11), BE 계약 변동 대응 구조(`overview.md` §7)
+- 남은 결정: P5 후속(수정 후 미확인 택배가 있는 채 종료 시 결과, 기본안 INCOMPLETE)
+
+## 2026-11-03 — 결정 보완 (코드 변경 없음)
+
+- P1: 저장소 BE 원문(결제 +1시간)은 구식, 사용자 결정이 기준
+- P2: `promptText` 확보 실패 시 서버 기본 프롬프트 사용
+- P6: 자동 확정에 대한 추가 보완 장치 제거(되읽기 필수 포함 규칙 삭제)
+- P5 후속: B안 — 재확인 전 종료 시 마지막 확인 스냅샷 전송(`StoredParcel.confirmed_snapshot`)
+
+## 2026-11-03 — S0 스파이크 도구 작성 (기존 소스 변경 없음)
+
+- 신규: `.env.example`, `.env`(빈 값, gitignore 대상), `spikes/s0/server.py`(수신→accept[Responses 위임+트리거 2개]→sideband 기록, 도구 1개, append 실험 3종, 트리거 교체), `spikes/s0/analyze.py`(U1~U7 보고서), `spikes/s0/test_analyze.py`, `spikes/s0/README.md`(준비·대본·판단 기준)
+- 검증: `uv run pytest spikes/s0 -q` 1 passed, 세션 설정·session.update·append 3종 페이로드를 SDK TypedDict로 검증 통과. 실통화는 미실행(사용자 환경 필요)
+- 발견: sideband 재연결은 `on_reconnecting` 콜백을 넘길 때만 켜짐(SDK `sideband.py`)
+
+## 2026-11-03 — S0 실행 오류 수정
+
+- 증상: `uvicorn` 실행 시 "Unable to create process using C:\Python314\python.exe". 원인: uvicorn이 프로젝트 의존성에 없어 PATH의 전역 uvicorn.exe(삭제된 Python 경로)가 잡힘
+- 조치: 실행 명령을 `uv run --env-file .env --with uvicorn python -m uvicorn ...`로 변경(README, server.py docstring). 의존성 추가 없음. 기동·`/healthz` 확인
+
+## 2026-11-03 — 관제·Docker·Qdrant 이관 (원본 S15P31D109/ai에서)
+
+- 신규 `monitor/`(Bus, 인증 라우터, 정적 화면, 테스트 5개): 원본 `app/monitor`·`app/events.py`에서 흐름 엔진·통화 레지스트리 의존 제거. `/api/graph`(옛 흐름 엔진)·`/api/orders`(옛 BE 계약) 제외. S0 스파이크 서버에 연결(받아쓰기·도구·위임·Decision·실험 사건, 끝난 통화 30분 유지)
+- 신규 `Dockerfile`·`.dockerignore`·`compose.yaml`(qdrant v1.13.4 + ai)·`compose.qdrant-dashboard.yaml`·`scripts/index_manual.py`(원본 index_markdown을 tools.rag 경로로)
+- 의존성: `uvicorn` 추가(원본에도 있던 것, 컨테이너 실행에 필요) → uv.lock 갱신. 이전 `--with uvicorn` 우회는 그대로 동작
+- `.env.example`/`.env`에 MONITOR_*, AI_PORT, ADDRESS_DATA_DIR, AI_IMAGE 추가(기존 값 보존)
+- 검증: pytest 369 passed, spike 1 passed, index dry-run OK, docker build OK, compose 스모크(healthy, /healthz 200, /monitor 401/200, ai→qdrant 인증 OK, 호스트 6333 미노출)
+- 위험: qdrant-client 1.19.1 ↔ 서버 1.13.4 버전 불일치 경고(원본도 동일)
+
+## 2026-11-03 — S0 결과 정리 (실통화 2건)
+
+- `spikes/s0/RESULTS.md`: 위임+트리거 공존 OK, Decision p50 ~140ms·p95 ~400ms(delta마다 발동, 순서 역전 있음), commentary 즉시 발화·thinking 무음, instructions.append는 발화를 끊지 못하고 다음 턴에 반영, 오디오 반사 입·출력 ~120KB/s, 출력 감시 predicate 실패, **위임 1회 7~16초**(Backend gpt-6-luna 생성 2번)
+- 수정: 출력 오디오 타입 `session.output_audio.delta`(server·analyze), N3 표식 지연 계산(발화 묶음 시작 → 표식 delta 수신 시각)
+- 다음: S0b(위임 지연 단축·대기 멘트·발화 중 N3·출력 감시 문구) — RAG 원본 이관 확인 후 진행
+
+## 2026-11-03 — RAG를 원본 그대로로 교체 (사용자 지시: RAG는 다른 담당자 구현, 수정 금지)
+
+- 삭제: `tools/rag/`(이전 이관 때 경로·설정·FAQ 출처를 바꾼 사본), `tools/tests`의 RAG 테스트 14개, 내가 만든 `scripts/index_manual.py`
+- 원본 그대로 복사(바이트 동일 확인): `app/rag/`, `app/webhooks/faqs.py`, `manuals/`, `config/rag-*.json`, `prompts/rag_context.md`, `gpu/`, RAG `scripts/`(라이브 랩 3개 제외), `evaluation/`, `spec/rag.md`·`faq-sync.md`, `docs/rag-handoff.md`, 원본 RAG 테스트 13개(`tests/`, 원본 서버 앱 의존 4개 제외)
+- 우리 쪽 호환판: `app/config.py`(ROOT·config_dir·prompts_dir·RagConfig·FaqSyncConfig·load_server_config의 rag/faq_sync/backend.timeout_sec), `app/backend_api.py`(→ backend_client), `app/webhooks/pbx.py`(→ pbx_webhook.sip.token_ok), `config/server.toml`([rag]·[faq_sync] 원본 섹션 + [backend].timeout_sec)
+- `backend_client`: `faq_page` → 원본 인터페이스 `faq_entries`·`initial_faq_entries`(BE·가짜 BE 모두 원본 메서드 그대로)
+- `tools/search_manual.py`가 `app.rag.schemas` 사용, Dockerfile·.dockerignore를 원본 규칙 기준으로 갱신(tiktoken 캐시 포함)
+- 검증: pytest 329 passed(원본 RAG 테스트 포함, 호환 테스트 4개 신규), docker build·compose 스모크(컨테이너에서 원본 RAG 로드·Qdrant 인증 OK), `scripts.index_markdown --dry-run` OK
+- 보완: 원본 `.gitattributes` 복사(RAG 원문·검색 설명·평가 데이터를 줄바꿈 변환 없이 저장 — 바이트 해시 보존). 앞 커밋에서 CRLF→LF로 정규화돼 저장됐던 `config/rag-search-descriptions.json`·`evaluation/datasets/*`를 원본 바이트로 다시 저장(blob == 원본 확인)
+- 사고: 검증 중 불필요한 `git stash`/`reset --soft HEAD~1`로 HEAD가 한 커밋 뒤로 갔다가 reflog로 즉시 복구(유실 없음)
+
+## 2026-11-03 — S0 결과 정정 (사용자 질문: 체감 대기가 길지 않았다)
+
+- 로그 타임라인 재확인: Live는 위임 시작과 동시에 대기 멘트를 스스로 말한다(고객 발화 끝 → 0.1~0.9초, 4회 모두). 실제 공백은 대기 멘트 끝 → 결과 발화 6.8~11.3초. "그동안 침묵" 서술을 정정
+- 정정: "312동 403호"는 고객이 실제로 말한 값 — "세부를 지어냈다"는 서술 철회. 남는 문제는 서버 기록 없이 "주소도 받아뒀어요"라고 말한 것
+- `spikes/s0/RESULTS.md` 지연·출력 감시·S0b 질문 2·4 갱신
+
+## 2026-11-03 — S0b 스파이크 준비 (사용자 승인: 대기 멘트 실험 제외 구성)
+
+- `spikes/s0/server.py`: `SPIKE_BACKEND_SERVICE_TIER`(위임 `service_tier`, 비우면 생략), `SPIKE_FINAL_MODE=commentary`(도구 결과 뒤 `response.create` 대신 서버가 도구 결과만 근거로 사실을 `session.commentary.append` — SDK상 Responses 위임에는 `delegation_id` null만 허용), `SPIKE_PROBES`를 실험 이름 목록으로(기본 instructions), instructions 실험은 AI 발화의 3번째 전사 delta에서 송신(발화 도중), 출력 감시 문구를 "가장 최근 AI 문장" 기준(`asks_confirmation@o2`, `claims_done@o2`)으로, 통화 로그 `incoming`에 실험 설정 기록
+- `spikes/s0/analyze.py`: 위임 경로 표(고객 끝→대기 멘트, 위임→함수 호출, 도구 결과→결과 발화, 공백), 실험 송신 시 발화 도중 여부·이후 계속된 글자/시간, AI 발화별 출력 predicate 최댓값, 실험 설정 표시. S0 로그 재분석 값이 수작업 타임라인과 일치(공백 11.2·8.1·6.8·9.6초). S0 instructions 실험은 발화 끝 0.35초 전(남은 1~5글자)에 보내졌음을 확인
+- `test_analyze.py` 2개 추가(위임 경로·발화 도중 판정, `facts_text`), `.env.example`·README 3b절(회차 b1~b3)
+- 검증: `pytest spikes/s0` 3 passed, 전체 329 passed, service_tier 설정 반영 확인. 실통화는 사용자 몫
+
+## 2026-11-03 — S0b 결과 분석 (실통화 3건: b1 기본, b2 priority, b3 priority+commentary)
+
+- priority tier: Backend 생성 1회 ~9초 → 0.5~0.9초(위임→함수 호출 0.65초, 고객 끝→결과 발화 3.1초). 기본 tier는 S0보다도 느렸다(9초)
+- commentary로 최종 문장 생략: 도구 결과 뒤 response.create를 안 보내자 Live가 27초간 무발화·무위임(세션 정지) → 폐기, F6 유지
+- 발화 도중 instructions.append: 4번 중 2번 발화가 끊겼지만 정정 문장은 다음 턴 — 미확정, N3은 다음 턴 반영 + 하드 gate로
+- 출력 감시 `claims_done@o2`: 평범한 질문에도 0.54~0.85 → 안전장치로 못 씀(설계 그대로)
+- Live가 도구 결과 전에 "성함 확인했습니다", 연락처 전 되읽기 → 하드 gate 필요 근거
+- `analyze.py` 수정: 결과 발화를 다음 위임 전까지로 한정, 발화 도중 판정을 "보낸 시각에 발화가 끝나지 않음"으로(이전엔 끝난 직후 0.7초도 포함). `spikes/s0/RESULTS.md` S0b 절
+
+## 2026-11-03 — 결정 기록: 위임 Backend priority
+
+- `decisions.md` S0b 행: `service_tier="priority"`(Fast mode) 고정, 도구 결과 뒤 항상 `response.create`. 근거·가격(gpt-6-luna Fast = Standard 2배)·강등 감시 지표. `overview.md` §6 갱신
+
+## 2026-11-03 — S1 기반·계약 (사용자 승인: "S1 진행해")
+
+- `backend_client/api.py`: `BackendError(message, status, code)` + `_fail()`로 모든 HTTP 실패에 상태·error.code를 담음. 계약 불일치 수정(`be-api.md` §B): 503을 같은 키 재확인에 포함, PIN 409는 `DUPLICATE_RESOURCE`만 성공, 페르소나 토큰 없으면 "Bearer None" 대신 실패, insights 재시도 오류 처리 정리, 연결 풀 `limits` 인자. 기업 검색의 클라이언트 오류에 code(`ARGUMENT_INVALID`·`TRANSPORT`·`RESPONSE_INVALID`)
+- `backend_client/mock.py`: 가짜 BE 오류에도 상태·코드
+- 신규 `app/integrations/backend/gateway.py`: `BackendFailure(kind, code, http_status, error_code, retryable)`, `classify()`(error-recovery.md §2.1 표), `BackendGateway.read/write`(전역 세마포어, 세마포어 대기 포함 예산, 읽기만 1회 재시도, 계약 위반 ERROR 로그)
+- 신규 `app/observability/trace.py`: `trace_id` contextvar, 로그 필터, `span()` + 훅(지표는 S7)
+- 신규 `app/main.py`: lifespan에서 BE(실제/`BACKEND_MOCK`) + 게이트웨이 1개, `app.state.svc`는 원본 FAQ 웹훅이 읽는 모양(cfg·faq_events·faq_processor), `/healthz`. 통화 수신은 S4
+- `app/config.py`·`config/server.toml` `[backend]`: max_concurrency·read/write 예산·submit 시간(원본 RAG가 읽는 timeout_sec 유지)
+- 계약 테스트 `app/tests/test_be_contract.py` + 픽스처 `app/tests/fixtures/be_contract/a629c60/`(BE 원문 예시 그대로 5개): 원문 응답 해석, 모르는 필드 무시, 사용 필드 누락 → `BE_CONTRACT_VIOLATION`, 요청은 원문 필드만·좌표 없음, 가짜 BE 오류 분류 일치
+- 테스트: 329 → 369 passed(게이트웨이 18, 계약 12, 클라이언트 동작 6, 조립 2 등). 실제 BE 연결은 미확인
+- 남음: 카카오 공유 클라이언트·세마포어(S3 주소 실행기와 함께), Idempotency-Key UUID 검사, `be-api.md` §B 3·4·8·9·10
+
+## 2026-11-03 — S0c: 트리거 대신 독립 Decision API (로그 재생, 사용자 승인)
+
+- `spikes/s0c/replay.py`: S0·S0b 로그 6건의 고객 발화 57개마다 `POST /v1/decisions` 1회(직전 AI 발화 + 고객 발화만), 트리거 마지막 결과와 비교, delta 간격 분석
+- 결과(`spikes/s0c/RESULTS.md`): 토큰 564k(트리거 2개) → 21k(1/27), 지연 웜 p50 251·p95 284ms(첫 4건 콜드 1.7~2.3초), 확인 질문이 아닐 때의 confirm=yes 오판정 4건이 not_answer로. delta 간격은 0.7초 이하/0.8초 초과로 갈림 → 발화 끝 = 0.8초 무 delta
+- 다음: 설계 수정(트리거 제거 → 서버가 발화 끝에 독립 판정) — 사용자 확인 후
+
+## 2026-11-03 — 설계 v3.1: Decision 트리거 제거, 서버 호출 독립 Decision (사용자 승인)
+
+- `decisions.md` S0c 행 추가(결정·근거·남은 위험)
+- `delegation.md` v3.1 재작성: §3 트리거 구성 → 서버 Decision 호출(발화 끝 800ms, 입력 = 직전 AI 발화 + 고객 발화, 단계별 질문 세트, confirm은 pending 있을 때만, 예산 1.0초, 웜업, `DECISION_STALE`), 출력 감시 제거(§3.4), R1 발화 연결을 `utterance_id`·`offset_ms`로, N3 = 서버 결정적 결과 문구 검사 → 다음 턴 정정, §6.2-2·5·§7.3·7.4 갱신, §8 세션 설정(triggers 없음, service_tier priority), §9 S0~S0c 결과표
+- `conversation-state.md`: `readback_end_ms` → `issued_t`, G1·G3 재정의(직전 AI 발화가 pending 발급 뒤 시작 + 고객 답이 그 뒤), 조기 되읽기는 감지 대신 gate로
+- `workflow-policy.md`: `[forbid].claims`(고위험 결과 문구), 층 5 출력 감시 → 결과 문구 검사
+- `overview.md`(D3·D9·F1·Q2·Q3·Q4·Q5·다이어그램·§3·X1·X2·X5·S0·S5·§6), `error-recovery.md`(Decision 코드·시나리오), `latency-strategy.md`(경로 D·지표·L1·L13), `concurrency.md` §3.3, `call-lifecycle.md` §4, `test-strategy.md`(L0·이벤트 표·Decision 평가) 정합
+- 코드 변경 없음
+
+## 2026-11-03 — S2 정책·도메인 (사용자 승인: "S2 진행해")
+
+- 정책: `policy/workflow.toml`(필드 목록·받는 순서 고정 단계·P1 수거 1시간·재질문 3회·확인 임계값·금지·결과 문구·읽기 규칙·Decision 질문 세트), `policy/default_prompt.md`(P2 대체 프롬프트, voice.md 기반)
+- `app/policy/model.py`: 엄격 로더 + 정합성 검사(모르는 필드, 한 필드 두 단계, gate 단계 수집 항목, 질문 세트 누락, choice 2~255, 자유형 질문 타입 금지). `render.py`: `render_live`(promptText 우선·빈 값이면 기본 프롬프트 + 절차·위임 규칙·금지·읽기 규칙), `render_backend`, `decision_questions`(단계별, confirm은 pending 때만, pick은 후보 이름표로)
+- `app/domain/`: `state.py`(FieldState·ParcelDraft·ConversationState·PendingConfirmation, 버전 규칙, 정정 실패 시 기존 값 유지), `assess.py`(단계·누락·blocked·readback_ready·결제 자동·재질문 초과·재확인 대기, `readback_facts`), `confirm.py`(G1~G5 관문, 확정 지연 뒤 G1·G2 재검사, release), `store.py`(P5 수정·B안 전송 스냅샷), `outcome.py`(COMPLETE/INCOMPLETE/CANCELLED/미전송 + 사유), `claims.py`(결과 문구 검사)
+- `app/integrations/backend/mapping.py`: 도메인 스냅샷 → `Order` → `result_body`(BE 필드 이름은 기존 한 곳)
+- 수정: S1 계약 테스트의 수량 필드 집합이 틀렸음(largeBoxCount 등 → BE 원문 documentCount·smallBoxCount·mediumBoxCount·bigBoxCount). 수량 4종을 다 쓰는 본문으로 다시 검사
+- 테스트: 369 → 413 passed(정책 일관성 16, 도메인 28 등)
+- 남음: 요금표(fare) 없음 → 실제로는 COMPLETE가 나오지 않음(be-api.md §8), 값 검증(전화번호·주소·수거 시각)은 S3 도구, G6·발화 묶기는 S5, 기본 프롬프트·정책 렌더링 문구는 실통화 조정 필요
+
+## 2026-11-03 — 배송비 요금표 연결 (사용자 지시: 원본 그대로)
+
+- `config/server.toml` `[fare]`: 원본 값·주석 그대로(서류 3850·소형 4950·중형 6050·대형 7150). `app/config.py` `FareConfig`(원본 정의 그대로), `load_server_config`가 `[fare]`도 읽음
+- `app/domain/fare.py` `parcel_fare`: 원본 `Call.parcel_fare` 규칙 그대로(요금 없는 규격·기타 물품·물품 없음 → None)
+- `app/main.py` `Services.fare_of` 연결. `decisions.md` FARE 행, `be-api.md` §8 갱신
+- 테스트 423 passed(요금 규칙 7, 두 택배 COMPLETE 금액·합계, 기타 물품 INCOMPLETE, 조립 연결)
+
+## 2026-11-03 — S0d: 스파이크 서버에 서버 호출 Decision 모드 (사용자 승인)
+
+- 사용자 지적: Decision이 여전히 많이 호출됨 → 확인 결과 통화를 받은 것은 S0 스파이크 서버(트리거 2개 그대로)였다. v3.1은 문서·도메인·로그 재생에만 있고 실통화 미검증이었음(S2 보고에서 명시하지 않은 것은 누락)
+- `spikes/s0/server.py`: `SPIKE_DECISION_MODE=server`면 트리거 미등록, 입력 delta마다 발화 끝 타이머(`SPIKE_UTTERANCE_GAP_MS`) 재시작 → 만료 시 직전 AI 발화 + 고객 발화로 `POST /v1/decisions` 1회(예산 1.0초, 오류·초과는 기록만), `decision_call` 로그, 관제 사건, 시작 시 웜업. 트리거 교체 실험은 server 모드에서 끔
+- `spikes/s0/analyze.py`: "Decision 호출 수·토큰" 절(트리거 건수·토큰 / 서버 호출 수·토큰·발화 끝 감지·API 지연·마지막 delta → 결과)
+- 발견·수정: `compose.yaml`이 `SPIKE_BACKEND_SERVICE_TIER`·`SPIKE_FINAL_MODE`를 컨테이너에 넘기지 않았다(Docker로 띄운 17:51 통화가 tier 없이 돎). 새 변수 포함 전달, `SPIKE_PROBES` 기본 0. `.dockerignore`에 `spikes/*/logs`(s0c 보고서 전사가 이미지에 들어가지 않게)
+- `.env`(커밋 안 함): server 모드·priority·probes 0. `.env.example`·README 3c절
+- 테스트: 발화 끝 묶기·직전 AI 발화·호출 1회(가짜 클라이언트), 분석 절. 컨테이너 안에서 server 모드 설정 확인
+
+## 2026-11-03 — S0d 실통화 결과 기록
+
+- 2건: Decision 429건/40만 토큰(트리거) → 9~10건/3.4~3.7천 토큰(서버 호출), 발화 끝 감지 ~0.8초, API p50 278~351·p95 441~943ms, 확인 답 판정 정확(yes·change·not_answer). 위험: API p95가 예산 1.0초 근접, Live가 결과 전 되읽기·틀린 번호 되읽기 → S3 검증·하드 gate. `spikes/s0/RESULTS.md` S0d 절
+
+## 2026-11-03 — S3 도구·연동 (사용자 승인)
+
+- 신규 `app/tools/`: `executor.py`(ModelTool 등록·strict spec, run_tool: call_id 결과 캐시 → 허용 확인 → 인수 검증 → 예산 실행 → ToolOutcome), `outcome.py`(status·code·facts·needs + 상태 요약), `context.py`(state·lock·policy·게이트웨이·주소·RAG·시계), `record.py`(record_fields: ① 버전 읽기 ② 잠금 밖 주소 보정 병렬 ③ 버전 검사 반영, 전화번호·P1 수거·not_found·ambiguous 1순위+후보 보관(P6)·장애 시 들은 값+geo 없음·상세주소 비우기·정정 실패 시 기존 값 유지·되읽기 gate 개방 시 확인 내용), `lookup.py`(find_destination·lookup_orders·search_manual·get_state, 후보는 state.candidates), `cancel.py`(서버 전용 취소: ops 키, 불확실 후 재조회)
+- 도메인: `rules.py`(원본 normalize_phone 그대로 + parse_pickup P1), `candidates.py`(offer·apply_pick·reject), state에 Place·CandidateSet·call_session_seq·places·selected_order, 새 택배에 발신번호 자동(CALLER_ID)
+- 연동: `app/integrations/address.py` AddressService(전용 스레드풀, 카카오 공유 클라이언트·세마포어, 예산 2.5초). `address_resolver`: `kakao.geocode(http=)` 공유 클라이언트 인자, `correct_blocking`. `app/main.py`에 주소DB 로드·AddressService 연결
+- 삭제: 옛 `tools/` 패키지와 테스트(사례는 `app/tests/test_tools.py`로 옮김). `pyproject` testpaths, Dockerfile(`tools` 대신 S2에서 빠져 있던 `policy/` 복사 — 이미지에 정책 파일이 없던 버그 수정)
+- 정정: S0d 결과에 "틀린 번호 010-283-54286은 S3 자릿수 검증으로 막는다"고 썼으나 11자리라 통과한다(테스트로 확인). 되읽기 확인으로만 잡힌다 — RESULTS.md 정정
+- 문서: `tool-contracts.md` §0 현행 계약, `error-recovery.md` 내부 코드(TOOL_TIMEOUT·NOTHING_CHANGED)
+- 테스트: 429 passed(도구 36: 규칙·실행기·기록·주소 확정/못 찾음/애매/장애/늦은 결과·되읽기 개방·받는 곳·조회·취소 중복/잠김/불확실·검색·상태), 이미지 빌드·정책·도구 로드 확인
+- 남음: 결제·상담원 확인, 통화 결과 전송(아웃박스)·refer는 S5·S6, 주소 실행기 thread vs process는 S7 측정, 카카오 호출 한도 [미확인]
+
+## 2026-11-03 — S4 세션·생명주기 (사용자 승인)
+
+- 신규 `app/calls/`: `session.py`(CallSession: phase·closed·hangup_after_accept·tasks·timers·events, spawn/set_timer, event_id = trace_id:seq, 관제 스냅샷 — 값 없음), `registry.py`(session_id 중복 거부·동시 통화 상한·발신번호 색인), `service.py`(CallService: 수신 → 1단계 고객 확인 ∥ 페르소나(캐시, 실패 시 서버 기본 프롬프트 P2) → accept(정책 렌더링·Responses 위임 priority·트리거 없음) → sideband 수신 루프(오디오 반사 미파싱, 동기 핸들러 표) → session.started 만료·무발화 타이머 → 마무리(출력 정지 후 hangup) → 정리(closed → 타이머·작업 취소 → 진행 부작용 unknown → on_finalize 훅 → registry 제거). 2단계 통화 등록 1회(ops["stage2"])·call_session_seq 대기, PBX 종료 매칭(ended_at 전 시작한 통화만, ACCEPTING이면 accept 뒤 끊기), shutdown
+- `app/config.py` CallConfig + `[call]` 설정, `app/main.py`에 통화 수신·PBX·관제 라우터(키 있을 때만)
+- 테스트 13개(가짜 OpenAI·가짜 BE): 정상 경로·자원 0, 페르소나·1단계, 1단계 장애, 상한·중복, accept 실패, accept 중 PBX 종료, ACTIVE PBX 종료·재통화 보호, 2단계 1회, 무발화 마무리, 수신 루프 예외, 진행 부작용 unknown, 이미 끝나는 통화. 전체 통과
+- 남음: 함수 호출 라우터·발화 끝 Decision·notifier(S5), 결과 아웃박스(S6), 페르소나 음성·회신, RAG 연결, 실통화 미검증
+
+## 2026-11-03 — S5 Decision·위임·전달 (사용자 지시: 실통화는 가짜 BE)
+
+- 신규 `app/calls/live.py` LiveFlow(CallService 핸들러 확장): 입력·출력 전사를 발화로 묶기(0.8초), 고객 발화 끝 Decision(단계별 질문, confirm은 확인 대기 때만, pick은 후보 이름표), 결과 적용(최신 발화만, 임계값), confirm yes → 관문 G1~G5 → G6 보류 → 확정 지연(새 입력 시 취소) → 담기/취소 실행 → N2, no·change 즉시 해제, task·switch(업무 시작·전환·담은 택배 수정·더 없음·마무리·상담원 미설정), pay 기록. 함수 호출 라우터(첫 업무 도구에 2단계 시작, 조회는 통화 번호 대기, 결과 → response.create). 전달 N1' thinking / N2 commentary(발화 정지·위임 완료 뒤) / N3 instructions(결과 문구 검사, 3회 후 이관 제안 사실), 같은 내용 1회
+- 도메인: 취소 확인(`issue_cancel_confirmation`·`take_cancel`), 후보 kind=parcel(P5 고칠 택배 선택), 되읽기 facts의 물품을 읽을 수 있는 형태로(JSON 직렬화 버그 — 대본 테스트로 발견)
+- 서비스: `begin_closing(after_speech)` — 마무리 인사가 나온 뒤 조용해지면 끊기, 정리 때 S5 타이머 취소. 관제 스냅샷에 전사, 통화 끝 `logs/calls/<trace_id>.json`
+- 안전: `.env`에 `BACKEND_MOCK=true`(기존 `.env`에 실제 BE 주소가 있었음), compose 기본 `BACKEND_MOCK=true`, 시작 로그에 BE 종류. 메모리 `live-test-mock-backend`. 실행 안내 `docs/ops/live-test.md`
+- 테스트: 대본 재생 3개(접수 끝까지·확인 내용 전 "네"는 확정 안 함·모델의 서버 전용 도구 호출 거부 + 결과 문구 N3). 전체 445 passed. 실통화 미검증
+
+## 2026-11-03 — S5 실통화 2건(가짜 BE) 분석과 수정
+
+- 결과: 두 통화 모두 수신 → 접수 의도 → 값 기록(위임 9~13회) → 되읽기 → 확인 → 담기(p1) → 마무리까지 진행. Decision 통화당 22~34회(고객 발화 수만큼)
+- 문제·수정:
+  1. 관제: 단계가 바뀔 때만 알림 → 전사·사건·도구마다(0.15초 묶음). 상세에 단계·빠진 항목·받는 중인 택배 값·담은 택배·수거·결제·확인 대기·후보·통계, 도구 호출 목록. 통화 기록에 최종 상태·도구 호출
+  2. 결과 문구 오탐(2번 통화): "접수 완료 결과는 확인되지 않았습니다"를 N3로 잡아 Live가 100초간 "확인 중" 반복 → 문장 단위 + 정책 `claim_skip`(부정·미래·물음 표지)로 제외, N3에 사실(`truth`) 첨부
+  3. 되읽기 도중 "네, 됐습니다"로 담김(2번 통화, 원본 11-02 사고 유형) → G3에 "직전 AI 발화가 확인 질문으로 끝났는가" 추가
+  4. "더 보낼 택배?" → "아뇨"가 switch=none(1번 통화) → more_parcels 단계에 `more` 질문(more/no_more), no_more는 끊지 않고 N1'. closing·payment 단계에도 switch(끝내기·문의 감지 — 대본 테스트로 발견)
+  5. 서버 결과(JSON) 뜻을 Live가 오해("담기"를 "접수 대기"로) → 정책 `[results]` "서버 결과 읽는 법"을 Live 지시문에 렌더링
+  6. 물품 정정("중형 두 개" → "소형") 병합 시 중형이 남을 위험 → 물품은 매번 전체 구성으로 교체(Backend 지시문·인수 설명)
+  7. Live가 고객이 말한 주소 다시 읽기를 거부 → 금지 항목을 "주소록 저장 값을 먼저 읽어 주기"로 좁힘
+  8. 첫 판정 DECISION_TIMEOUT(1번 통화) → 서버 시작 시 Decision 웜업
+  9. 마무리 인사 요청 후 Live가 말하지 않으면 15초 대기 → 4초 안에 말하지 않으면 끊기
+- 테스트 447 passed(회귀: 오탐 문장, 되읽기 도중 답, 더 없음 → 끝내기 순서, 물품 교체, 관제 직렬화)
+- 남음: 매뉴얼 검색 미연결(두 통화 모두 제주 운임 질문에 KB_UNAVAILABLE), 결과 전송(S6), 실통화 재확인
+
+## 2026-11-03 — S5 실통화 3차: 관제 스냅샷 버그 수정, 지연 분석 준비
+
+- 사용자 보고: 주문 접수 단계 지연 폭증, 관제 화면 비정상. 통화 기록 파일이 생기지 않아 서버 측 근거 없음
+- 원인(재현 확인): 관제 스냅샷이 필드 값 + 문자열을 더해 숫자(물품 가액)·물품 객체가 기록되는 순간 TypeError → 관제 중단, 통화 끝 기록 실패, 단계 전이 알림에서 예외가 나 정리가 중간에 멈출 수 있었음. 기존 대본 테스트는 통화 끝(택배가 보관소로 옮겨진 뒤)에만 스냅샷을 봐서 놓침
+- 수정: 값 문자열화, 관제 알림 예외를 통화 처리에서 격리(`CallSession.publish`, 통화당 로그 1번 + 통계 "관제 오류"), 통화 기록은 스냅샷이 실패해도 사건·전사·도구 기록을 남김. 회귀: 대본 테스트의 관제 알림마다 스냅샷 JSON 직렬화
+- 지연 분석 준비: 사건에 위임 시작·함수 호출 도착·Backend 응답 끝·재개·N2 대기(1초 초과) 시각 기록. 완료 이벤트를 못 받은 위임이 N2(최대 8초)·G6 보류(최대 6초)를 붙잡지 않게 15초 넘은 위임은 진행 중으로 보지 않음
+- 지연 원인은 미확인(이번 통화 기록이 없음) — 다음 통화 기록으로 구간별 확인
+- 실수: 검증 중 불필요한 `git stash`를 다시 실행(변경 없음, 유실 없음, HEAD 그대로)
+
+## 2026-11-03 — S5 실통화 4차(가짜 BE, 204초) 분석
+
+- 흐름 정상: 접수 의도 → 값 기록 → 되읽기 → "네" → 담기(p1: 서류 2, 가액 5000, 수거 내일 14:00) → "없습니다"(more=no_more 1.00, 끊지 않고 문의 받음) → 제주 운임 문의(search_manual KB_UNAVAILABLE) → "끊어주세요"(end 0.99) → 마무리 인사 → 서버가 끊음. 관제·통화 기록 정상
+- 지연: 서버 쪽 없음. 위임 → 함수 호출 0.7~1.0초, 도구 실행 1~189ms, Backend 최종 응답 1.0~1.9초. Decision 20회(고객 발화 ~19개)
+- 관찰:
+  - Live가 값마다 위임하지 않고 모아서 위임(첫 위임 70초, 보내는 분·주소·상세·받는 분·연락처를 한 번에). 지연은 줄지만 지시문("모았다가 한꺼번에 맡기지 않는다")과 다르고, 그사이 서버 상태가 비어 있다
+  - "네"·"아니요 없습니다"에도 위임(도구 없이 끝남, 각 ~1.5초) → 확인 "네"는 G6 보류 1.5초 후 담기, N2 2.8초 대기
+  - 되읽기에서 받는 분 연락처를 빠뜨림(확인 내용에는 있었음)
+  - "하나당 오천원"(서류 2개)을 가액 5000으로 기록 — 물품 가액이 개당인지 합계인지 정책에 없음 [확인 필요]
+  - 정정 2건(성함 한→현, 연락처 끝자리) 정상 반영
+- 수정: 담은 뒤 마무리 단계에서 관제 "빠진 항목"이 전부로 보이던 표시(assess.missing)
+
+## 2026-11-03 — S6 통화 결과·고객 등록·분석·이벤트 (BE 최신 규약 spec/ai-integration-current.md, 사용자 결정 1-b·2-b·3·주소 포함)
+
+- 규약 대조: 원본 서버(S15P31D109/ai)의 신규 고객 등록(register_customer: 고객 등록 → 고객 확인 재호출 → 보내는 곳 PIN, 결과는 customerSeq) 확인. 리빌드 버그 A(미등록 고객 결과 이름 없음 → 신규 고객 통화가 늘 INCOMPLETE)·B(결제 질문 선택지에 billing 없음) 발견·수정
+- 정책: 수거 일시 단계·필드 제거("결제 후 1시간 안에 방문" 안내), 결제 질문 선택지를 고객의 실제 가능 방식으로, `[results].order`(결과 상태 읽는 법)
+- 도메인: payment_auto = 가능 방식이 하나일 때만(기본 billing 제거), Outcome.customer_name(보내는 분 성함), COMPLETE 조건에서 수거 시각 제외, Customer.status·initial_status
+- 신규 `app/persistence/outbox.py`(SQLite, 결과·인사이트, 전송 전 영속·재시작 복구), `app/calls/results.py`(register·start/submit·_send·recover·finish·build_insights·_send_insight: 분석 7개 값 + 필수 필드, 이벤트 UTTERANCE·AI_ACTION·BUSINESS_RESULT(uuid5 eventId, 50개·90KiB 분할), 미답변 → QUESTION_UNANSWERED)
+- 흐름: 보내는 분 정보가 차면 백그라운드 등록, "더 없음" + 결제 확정(또는 끝내기)이면 백그라운드 전송 — 대화는 기다리지 않음. 통화 중 결과가 오면 N1'(order 상태), 마무리 N2에 order 상태. 정리 훅에서 결과 대기 → 인사이트
+- BE 클라이언트: create_customer(address), send_unanswered. 가짜 BE: 내 주소 검증, COMPLETE 수거 시각 불요, 분석 제거 필드 거절, 미답변. Docker: /app/state·/app/logs, compose 볼륨 ai_state, .gitignore state/
+- 계약 테스트 픽스처 7da8876(주문·분석·이벤트 예시). 테스트 459 passed(아웃박스·전송 1회·무의미 미전송·불확실 후 같은 키 재확인·등록과 내 주소·등록 실패 시 customer·분석/이벤트/미답변·50개 분할·대본 끝까지)
+- 남음: 하위 규약 최신본 확인, 페르소나 다음 통화 동기화, RAG 연결, 실통화 확인(가짜 BE)
+
+## 2026-11-03 — BE 하위 규약 최신본 대조, 접수 후 수정·추가 잠금
+
+- 최신화: 원본 저장소 fetch, origin/develop-backend `17d86ce`, 로컬 develop-ai를 `df93338`까지 빨리감기(guardrail 작업 폴더, 메인 작업 폴더는 미커밋 변경이 있어 건드리지 않음)
+- 대조(a629c60 → 17d86ce): ai-integration-current.md는 spec 사본과 같음. call-events·unanswered-questions·order-submit·caller-context·customers·pins·persona 변경 없음
+  - call-analysis.md: hasHandoffRequest = 고객의 상담원 연결 요구 여부(성공·실패 아님) — 우리 값(상담원 의도 시 켜짐)과 일치
+  - order-submission-retry.md(신규): BE가 디버 10초 대기·10분 동안 1분 간격 재신청 후 SUBMISSION_FAILED. ACCEPTED만 성공 — S6 처리와 일치
+  - ai-faq-integration.md: 단건 GET /api/ai/faqs/{id} 제거 — 리빌드·원본 모두 목록 API만 사용
+  - develop-ai: backend_api.py 변경 없음. RAG(faq_index·faq_runtime 기동 시 GPU 검증 제거) 변경 — app/rag 사본은 옛판·최신판 모두와 다름(RAG 연결 때 기준판 결정 필요)
+- 사용자 결정: 접수(결과 전송) 이후에는 수정하지 않는다
+- 수정: ConversationState.order_submitted(결과 전송 시작 때 켬). 이후 record_fields는 rejected ORDER_SUBMITTED, 택배 수정 의도는 다시 열지 않고 {"order": "submitted"}. 정책 `[results].submitted`(바꿨다·담았다고 말하지 않고 담당자 확인 후 연락 안내)
+- 테스트 461 passed(+2: 전송 후 값 기록 거절, 전송 시 잠금·수정 의도 미개방)
+
+## 2026-11-03 — 붙여 쓴 한글 길 번호 재조회("인동구길")
+
+- 원인: 통화 93f3d9에서 Live가 "인동구길 7-3"(9를 한글로 붙여 씀)을 넘김. 보정기는 한글 숫자를 "로" 뒤에서만 떼어 "인동구"를 찾다 not_found. 주소DB는 정상(띄운 "인동 구길"은 확정)
+- develop-ai 확인(미적용): ai/app/address/corrector.py는 address_resolver와 동일. 유사 표기 재시도 unlink_gil("인동 국일"→"인동 구길")은 이미 있음 — 붙여 쓴 경우는 처리 안 함. place_score(PIN 유사 주소)도 이미 backend_client에 있음
+- 수정: app/integrations/address.py split_gil — not_found일 때만 "한글숫자+(번)길"을 띄워 한 번 더 보정(보정기 원본 무수정). 실제 DB: "경북 구미 인동구길 7-3" → 경상북도 구미시 인동9길 7-3 확정, 없는 길은 not_found 유지
+- 사용자 결정: 기동 시 RAG·리랭커 확인 안 함(현재 사본 이미 그러함), develop-ai 두 판정 방식 미적용
+- 테스트 462 passed(+1)
+
+## 2026-11-03 — RAG 연결(원본 RagService, 기동 확인 없음)
+
+- app/main.py build_rag: 원본 develop-ai main.py lifespan 조립 순서 그대로(FAQ 알림 저장소[receive_enabled] → 관리 색인·처리기[process_enabled] → RagService). 원본 RAG 코드 무수정
+  - 원본과 다른 점: 관리 색인 준비 실패(Qdrant 장애 등)로 서버가 못 뜨지 않게 그 기능만 끈다. 기동 때 리랭커 확인 없음(사용자 지시). RagService.warmup(Qdrant 문서 적재·BM25 준비)은 원본처럼 백그라운드 — 리랭커는 부르지 않고 실패해도 기동 무관
+  - FAQ 웹훅 라우터(/internal/faqs/refresh) 포함, 종료 시 RagService·관리 색인 닫기
+- CallDeps.rag·rag_min_score·rag_budget_sec([rag] 설정) → ToolContext → search_manual
+- 검증: rebuild Qdrant가 비어 있어 원본 scripts/index_markdown.py로 manuals_dev_openai_large 색인(FAQ 32개). 실제 warmup 2.84s ready. 로컬 서버 기동 OK(healthz 200, FAQ 웹훅 401). 검색은 리랭커(GCP GPU VM) ConnectTimeout — VM 자동 중지 상태로 추정, 끝까지 검증 못 함
+- docs/ops/live-test.md: Qdrant·색인·리랭커 VM 켜기 절차
+- 테스트 463 passed(+1: Qdrant 키 없이도 기동, RagService·FAQ 라우트 연결)
+
+## 2026-11-03 — 페르소나 다음 통화 적용, 컨테이너 이미지를 새 서버로
+
+- 계약: spec/ai-integration-current.md §7, origin/develop-backend backend/docs/ai-persona-next-call.md(17d86ce). 원본 develop-ai ai/app/persona.py·webhooks/persona.py 동작을 옮김
+- 신규 app/calls/persona.py(PersonaManager): 알림·새 통화 진입이 같은 잠금 → PENDING 조회·검증 → APPLIED/FAILED(errorCode) 회신 → 응답 ACTIVE·버전·applicationId 확인 → 새 통화 기본값 교체. activeCallCount 대기 없음, 409는 재조회, 회신 유실은 unresolved(새 통화 503 거절)
+  - 원본과 다른 점(P2): ACTIVE 없음·쓸 수 없음은 거절하지 않고 서버 기본 프롬프트(버전 null). turnWaitLevel null은 AI 기본(NORMAL)으로 허용
+  - 진입 확인 예산 persona_budget_sec(1.0s) — 고객 확인(stage1)과 병렬, 넘으면 마지막 ACTIVE
+- 신규 app/webhooks/persona.py: GET /internal/persona/options(직접 JSON), POST /internal/persona/refresh(202, 힌트 검증만). Bearer AI_PERSONA_TOKEN
+- service: PersonaCache 제거, 통화마다 버전 고정(분석 aiPersonaVersionSeq), voiceId → session audio.output.voice. main: 기동 때 persona.run()(재시작 복구)
+- config [call]: persona_cache_sec 제거, persona_retry_sec·persona_report_attempts·persona_max_prompt_chars
+- Dockerfile CMD → app.main:app(스파이크 제외), /app/logs/calls. compose: BACKEND_MODEL(없으면 SPIKE_BACKEND_MODEL)·BACKEND_EFFORT·LOG_LEVEL, 스파이크 변수 제거, ./logs:/app/logs. .env.example 갱신
+- 검증: 컨테이너 재빌드·기동 healthy(주소DB·가짜 BE·Qdrant 준비·Decision 웜업), /internal/persona/options 401/200, refresh 202, /monitor 401(인증)
+- 테스트 470 passed(+7 test_persona: PENDING 즉시 적용, 잘못된 설정 FAILED·ACTIVE 유지, 회신 유실 시 거절 후 재확인, ACTIVE 없음 → 기본, 검증, 통화 버전·음성 고정, 웹훅 인증)
+
+## 2026-11-03 — 확인 대기 중 "접수해 주세요"(proceed), 진행 안내 검사, Decision 응답 시간, 이름 말끝 정리
+
+- 원인(통화 512a1b): 되읽기 → 문의(RAG 3번) 뒤 고객 "그럼 접수해 주세요"가 확인 질문의 답이 아니어서(G3) not_answer·한 번은 DECISION_TIMEOUT. 서버가 다시 묻게 하지 않았고 Live는 "접수 진행하겠습니다"만 반복 → 확정 없이 종료(INCOMPLETE NO_CONFIRMED_PARCEL). 단계(readback)는 정상
+- (a) Decision confirm 선택지 proceed(질문 없이 진행 요청). 확정하지 않고 N2 {"confirmation":"ask_again","readback":…} → Live가 되읽고 "이대로 접수할까요?" → 그 답(yes)만 기존 관문으로 확정. G3 유지
+- (b) 정책: [results].confirmation, [forbid] 확인 없이 진행 안내 금지. [[forbid.claims]] "진행하겠·진행할게·진행 요청 확인…"(unless=no_pending, use_skip=false — 미래형이라 claim_skip 미적용). truth에 awaiting_confirmation
+- (c) Decision: 응답 시간 ms를 사건에 기록, 통계에 P50·P95. 시간 초과는 늦은 답을 쓰지 않고 실제 도착 시간만 "Decision 늦은 응답"으로(추가 호출 없음), 입력 글자 수 기록
+- 이름: record_fields가 *_name 말끝(입니다·이니다·이에요·이요·예요·요·라고 합니다) 제거. "이…" 말끝은 앞 글자 받침이 있을 때만(박소이요 → 박소이), 남는 이름 2글자 이상일 때만
+- 테스트 473 passed(+3: proceed → 다시 묻기 → yes 확정, 진행 안내 검사, 이름 정리)
+
+## 2026-11-03 — 통화 중 끊김(무발화 타이머) 수정, 지연 로그 분석
+
+- 원인(통화 363d19): 무발화 타이머(silence_sec 30)가 고객 입력 delta에만 다시 걸려, 고객 마지막 말(144.3s) 뒤 AI가 긴 되읽기를 하는 동안 174.9s에 마무리 → 끊김(close_requested). 스파이크의 통화 길이 제한(SPIKE_MAX_CALL_SEC)은 새 서버에 없음. 세션 만료 타이머는 GPT-Live expires_at 기준(이번 원인 아님)
+- 수정: AI 출력 delta에도 무발화 타이머를 다시 건다(고객·AI 모두 조용할 때만 30초)
+- 지연 분석(최근 5통화): 위임→함수 P50 ~1.0–1.1s, 도구 P50 0.15–0.4s, 재개→AI 발화 P50 1.5–2.4s — 이전과 같은 수준. P95 증가 원인: search_manual 5.8s(리랭커 VM 꺼짐 → 연결 시간 초과 5s 후 KB_UNAVAILABLE), 한 위임에 도구 2개 연속(record_fields → search_manual). Decision P50 333ms·P95 831ms(16건, 시간 초과 2)
+- 별건(통화 98b348): Live가 "도림로143길 27, 리버뷰 신안 인스빌"(건물명 포함)을 넘겨 ADDRESS_NOT_FOUND. 도로명만이면 확정 — 미수정(보고)
+- 테스트 474 passed(+1: AI가 말하는 동안 무발화로 끊지 않음)
+
+## 2026-11-03 — 주소 재조회: 쉼표 뒤 건물 이름 떼기
+
+- 통화 98b348: "도림로143길 27, 리버뷰 신안 인스빌" ADDRESS_NOT_FOUND. app/integrations/address.py retries(): 못 찾았을 때만 ① 붙인 한글 길 번호 띄우기 ② 쉼표 앞(도로명·건물번호)만 ③ ②에 ① — 찾으면 멈춤. 보정기 원본 무수정
+- 실제 DB: 위 주소 → 서울특별시 영등포구 도림로143길 27 확정, 없는 길은 not_found 유지. 떼어 낸 건물 이름은 기록하지 않는다(상세주소는 따로 받음)
+- 리랭커 장애 시 빠른 실패(제안 1)는 사용자 결정으로 하지 않음
+- 테스트 475 passed(+1)
+
+## 2026-11-03 — develop-ai 반영 준비(원본 Jenkinsfile 기준, 이전 서버는 ai/old)
+
+- 원본 ai/Jenkinsfile·ai/deploy/(upload.sh·deploy.sh·compose.deploy.yaml·apply-faq-runtime.py·gcp/·known_hosts)를 그대로 가져옴(수정은 compose.deploy.yaml 로그 볼륨만)
+- 배포 호환: compose BACKEND_MOCK 기본 false·BACKEND_API_URL/PBX_WEBHOOK_SECRET 필수·BACKEND_MODEL 기본 gpt-6-luna·config/prompts 마운트, /health 추가, .dockerignore에 old·deploy·Jenkinsfile, compose.deploy.yaml에 ai_logs 볼륨, tests/test_faq_deploy_runtime.py(원본) 추가
+- docs/ops/deploy.md
+- 테스트 482 passed
+- 반영 브랜치: 원본 저장소 worktree S15P31D109-rebuild, feature/ai-rebuild(origin/develop-ai df93338 기준). 기존 ai/ 파일은 git mv로 ai/old/, Jenkinsfile·deploy/는 제자리. push·MR 안 함
