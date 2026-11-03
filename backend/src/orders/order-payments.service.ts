@@ -119,32 +119,6 @@ export class OrderPaymentsService {
       );
     });
   }
-  async beginPayment(id: string, amount: number) {
-    return this.database.transaction(async (client) => {
-      const request = await this.repository.request(client, id);
-      if (!request) throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
-      if (
-        request.order.status !== 'notPaid' ||
-        request.invalidatedAt ||
-        request.completedAt ||
-        request.expiresAt.getTime() <= Date.now() ||
-        request.order.totalAmount !== amount ||
-        request.amount !== amount
-      )
-        throw new ApiException(409, 'INVALID_STATE', '현재 유효한 금액의 미결제 요청이 아닙니다.');
-      if (request.approvalStartedAt)
-        throw new ApiException(409, 'REQUEST_IN_PROGRESS', '결제 승인 처리 중입니다.');
-      await this.repository.begin(client, id);
-      return { orderSeq: request.orderSeq, amount: request.amount };
-    });
-  }
-  async releaseDeclinedPayment(id: string) {
-    await this.database.transaction(async (client) => {
-      const request = await this.repository.request(client, id);
-      if (!request) throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
-      await this.repository.release(client, id);
-    });
-  }
   async confirmPayment(
     id: string,
     amount: number,

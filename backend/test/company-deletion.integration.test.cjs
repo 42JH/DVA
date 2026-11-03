@@ -332,13 +332,14 @@ test('company soft deletion hides company data while preserving personal, order,
     'ACCEPTED',
   );
   const payments = app.get(OrderPaymentsService);
-  await payments.beginPayment(pending.paymentRequest.paymentRequestId, 5000);
+  const paymentKey = 'delete-test-' + randomUUID();
+  await payments.claimApproval(pending.paymentRequest.paymentRequestId, 5000, paymentKey);
   assert.equal(
     (
       await payments.confirmPayment(
         pending.paymentRequest.paymentRequestId,
         5000,
-        'delete-test-' + randomUUID(),
+        paymentKey,
         randomUUID(),
       )
     ).status,

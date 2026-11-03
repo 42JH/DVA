@@ -47,10 +47,10 @@ COLLECTING 또는 notPaid에서만 취소한다. 일부 취소하면 상세 가�
 
 결제 연동은 DB 처리권과 승인 전에 저장된 결제 키를 사용한다. 아래 내부 함수는 기존 도메인 경계를 설명하며 실제 호출 순서와 복구 계약은 140번 문서를 따른다.
 
-1. beginPayment(paymentRequestId, amount)로 유효한 최신 요청·금액·기한을 확인하고 승인 작업을 선점한다.
+1. claimApproval(paymentRequestId, amount, paymentKey)로 유효한 최신 요청·금액·기한을 확인하고 결제 키와 처리권을 저장한다.
 2. 서버에서 결제사 승인을 호출하고 신뢰 가능한 결제 결과를 검증한다. 클라이언트 성공 화면만으로 확정하지 않는다.
 3. 승인 성공이면 confirmPayment에 같은 요청·금액·검증된 거래 식별자와 requestId를 전달한다. 같은 거래의 재확인은 추가 결제·감사·디버 재접수를 만들지 않는다.
-4. 결제사에서 명확히 승인 거절된 경우만 releaseDeclinedPayment로 선점을 해제한다. 응답을 잃은 경우 임의 해제하지 말고 결제사 조회로 먼저 확인해야 한다.
+4. 결제사에서 명확히 승인 거절된 경우만 releaseClaim(paymentRequestId, claimId, true)로 결제 키·승인 시작을 초기화한다. 응답을 잃으면 releaseClaim의 기본값으로 처리권만 해제하고 결제 키를 보존하여 결제사 조회로 먼저 확인한다.
 
 ## 재접수와 감사
 

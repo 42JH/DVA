@@ -444,12 +444,13 @@ test('worker still sends a PAID order immediately without repeating completed ca
   };
   const payments = f.app.get(OrderPaymentsService);
   try {
-    await payments.beginPayment(order.paymentRequest.paymentRequestId, 3500);
+    const paymentKey = 'test-' + randomUUID();
+    await payments.claimApproval(order.paymentRequest.paymentRequestId, 3500, paymentKey);
     await assert.rejects(
       payments.confirmPayment(
         order.paymentRequest.paymentRequestId,
         3500,
-        'test-' + randomUUID(),
+        paymentKey,
         randomUUID(),
       ),
       /test-only-interrupted-before-submission/,
