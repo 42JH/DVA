@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomInt, randomUUID } = require('node:crypto');
-const { Pool } = require('pg');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { S3Client, HeadObjectCommand } = require('@aws-sdk/client-s3');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -12,19 +11,12 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.S3_RECORDINGS_BUCKET = '';
-const { AppModule } = require('../dist/app.module');
-const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 const { callerPhone } = require('../dist/common/caller-phone');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const { RecordingPlaybackService } = require('../dist/consultations/recording-playback.service');
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
+const apps = [];
 const password = 'calls-test-only-password';
 const origin = 'http://localhost:5173';
 const logs = [];
@@ -103,15 +95,13 @@ async function error(response, status, code) {
 before(async () => {
   // 기존 통합 검증이 적용한 격리 DB만 사용한다.
   assert.ok((await pool.query("SELECT to_regclass('public.call_sessions') AS name")).rows[0].name);
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (entry) => logs.push(entry) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
   passwordHash = await hashPassword(password);
   operator = await account();
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 

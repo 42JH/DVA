@@ -3,8 +3,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { request: httpRequest } = require('node:http');
-const { Pool } = require('pg');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -14,13 +13,8 @@ const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.SWAGGER_ENABLED = 'true';
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
+const apps = [];
 const logs = [];
 let app, base, config, audit, cookie, versionSeq;
 const input = (providerCallId, changes = {}) => ({
@@ -78,12 +72,8 @@ async function error(response, status, code) {
 before(async () => {
   await migrate(pool);
   assert.ok((await pool.query("SELECT to_regclass('public.call_analyses') AS name")).rows[0].name);
-  const { AppModule } = require('../dist/app.module');
-  const { configureApplication } = require('../dist/configure-application');
   const { AuditService } = require('../dist/audit/audit.service');
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (entry) => logs.push(entry) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
   config = app.get(ConfigService);
   audit = app.get(AuditService);
@@ -114,7 +104,7 @@ before(async () => {
   ).rows[0].ai_persona_version_seq;
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 

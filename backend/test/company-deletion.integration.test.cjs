@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 const { configureApplication } = require('../dist/configure-application');
@@ -19,13 +19,7 @@ assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['127.0.0.1', 'db'].includes(process.env.DB_HOST));
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AppModule } = require('../dist/app.module');
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 const origin = 'http://localhost:5173';
 let app,
   base,

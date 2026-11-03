@@ -1,8 +1,7 @@
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
-const { NestFactory } = require('@nestjs/core');
-const { Pool } = require('pg');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 // The runner creates a disposable PostgreSQL container. Never run this against production.
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -10,9 +9,8 @@ assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 const token = randomBytes(32).toString('hex');
 process.env.PBX_WEBHOOK_TOKEN = token;
-const { AppModule } = require('../dist/app.module');
-const { configureApplication } = require('../dist/configure-application');
 let app, base, pool;
+const apps = [];
 const payload = {
   recordingId: 'test-call-1',
   callFrom: '01000000000',
@@ -24,13 +22,7 @@ const payload = {
 };
 
 before(async () => {
-  pool = new Pool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+  pool = createTestPool();
   for (let attempt = 0; ; attempt++) {
     try {
       await pool.query('SELECT 1');
@@ -40,13 +32,11 @@ before(async () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
   }
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: () => {} });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps);
   base = await app.getUrl();
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   if (pool) await pool.end();
 });
 
@@ -167,9 +157,8 @@ test('storage failure returns retryable 503 without exposing phone or signed URL
 
 test('receipt survives backend restart and startup migration can run twice', async () => {
   await app.close();
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: () => {} });
-  await app.listen(0, '127.0.0.1');
+  apps.splice(apps.indexOf(app), 1);
+  app = await startTestApp(apps);
   base = await app.getUrl();
   const response = await post(payload);
   assert.equal(response.status, 200);

@@ -2,8 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
-const { Pool } = require('pg');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -12,13 +11,8 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
 process.env.SWAGGER_ENABLED = 'true';
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
+const apps = [];
 const logs = [];
 let app, base, cookie, adminId, config, repository;
 const rowKeys = [
@@ -154,21 +148,17 @@ const ids = (body) => body.data.map((row) => row.unansweredQuestionSeq);
 
 before(async () => {
   await migrate(pool);
-  const { AppModule } = require('../dist/app.module');
-  const { configureApplication } = require('../dist/configure-application');
   const {
     UnansweredQuestionsRepository,
   } = require('../dist/unanswered-questions/unanswered-questions.repository');
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (value) => logs.push(value) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (value) => logs.push(value) });
   base = await app.getUrl();
   config = app.get(ConfigService);
   repository = app.get(UnansweredQuestionsRepository);
   ({ id: adminId, cookie } = await administrator());
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 

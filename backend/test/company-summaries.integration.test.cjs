@@ -4,23 +4,18 @@ const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { Pool } = require('pg');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { migrate } = require('./helpers/migrations.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
+const apps = [];
 let app, base, cookie;
 before(async () => migrate(pool));
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 
@@ -94,9 +89,6 @@ describe('administrator company and department summaries', () => {
   before(async () => {
     process.env.SWAGGER_ENABLED = 'true';
     process.env.CORS_ORIGINS = 'http://localhost:5173';
-    const { NestFactory } = require('@nestjs/core');
-    const { AppModule } = require('../dist/app.module');
-    const { configureApplication } = require('../dist/configure-application');
     const { hashPassword } = require('../dist/auth/password');
     const loginId = 'summary' + randomUUID().replaceAll('-', '').slice(0, 10);
     const password = 'summary-test-only-password';
@@ -104,9 +96,7 @@ describe('administrator company and department summaries', () => {
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'요약 검증',$2,'SYSTEM_ADMIN','ACTIVE')",
       [loginId, await hashPassword(password)],
     );
-    app = await NestFactory.create(AppModule, { logger: false });
-    configureApplication(app, { log: () => {} });
-    await app.listen(0, '127.0.0.1');
+    app = await startTestApp(apps);
     base = await app.getUrl();
     const login = await fetch(base + '/api/auth/login', {
       method: 'POST',

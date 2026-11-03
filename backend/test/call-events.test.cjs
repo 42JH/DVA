@@ -1,7 +1,8 @@
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const { normalizeCallEvents } = require('../dist/call-insights/call-event-input');
 const { CreateCallEventsDto } = require('../dist/call-insights/dto/create-call-events.dto');
 const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 const pipe = createValidationPipe();
@@ -198,4 +199,158 @@ test('utterance and business schemas reject wrong-kind fields, missing fields an
         { status: 400 },
       );
   }
+});
+
+// Captured from CallEventsService before extracting normalization.
+const legacyNormalizationInput = {
+  providerCallId: 'rtc_normalization_legacy',
+  events: [
+    {
+      eventId: 'CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC',
+      eventOrder: 3,
+      kind: 'BUSINESS_RESULT',
+      occurredAt: '2026-10-31T10:00:31+09:00',
+      offsetSeconds: 31,
+      payload: {
+        summaryText: 'FAQ 안내\n',
+        answerUtteranceOrder: 2,
+        questionUtteranceOrder: 1,
+        faqEntrySeq: 12,
+        unansweredQuestionSeq: null,
+        orderSeq: null,
+        action: 'FAQ_ANSWERED',
+      },
+    },
+    {
+      eventId: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',
+      eventOrder: 1,
+      kind: 'UTTERANCE',
+      occurredAt: '2026-10-31T10:00:00+09:00',
+      offsetSeconds: 0,
+      payload: {
+        lastSentenceSeq: 7,
+        utteranceText: ' 원문\n보존 ',
+        speaker: 'CUSTOMER',
+        utteranceOrder: 1,
+      },
+    },
+    {
+      eventId: 'BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB',
+      eventOrder: 2,
+      kind: 'AI_ACTION',
+      occurredAt: '2026-10-31T01:00:20.000Z',
+      offsetSeconds: 20,
+      payload: {
+        orderSeq: null,
+        summaryText: '이름 검색 1건',
+        action: 'PIN_SEARCH',
+      },
+    },
+    {
+      eventId: 'DDDDDDDD-DDDD-4DDD-8DDD-DDDDDDDDDDDD',
+      eventOrder: 4,
+      kind: 'BUSINESS_RESULT',
+      occurredAt: '2026-10-31T10:00:40+09:00',
+      offsetSeconds: null,
+      payload: {
+        unansweredQuestionSeq: null,
+        summaryText: '문의 안내 완료',
+        orderSeq: null,
+        action: 'INQUIRY',
+      },
+    },
+  ],
+};
+const legacyEventHashes = {
+  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa':
+    '498884a62530f4a92dc88909d9e168dde787e15b477dd832f24a869484f38dca',
+  'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb':
+    '1cbe61c9020ae05210540a4f35924af5ab1c350a5617c430cc348c572151e4aa',
+  'cccccccc-cccc-4ccc-8ccc-cccccccccccc':
+    'bdc6d1521c20ee8e2b35a7ce2749e87d226f828a6a8d6df2d0f5184e6a94119d',
+  'dddddddd-dddd-4ddd-8ddd-dddddddddddd':
+    'd3e232b1af94b6dd252ecca9cc3cd3441db6e907f5eeacdf7b3f0102238e269c',
+};
+
+test('event normalization preserves legacy hashes, received order, original text and unknown or zero offsets', () => {
+  const original = structuredClone(legacyNormalizationInput);
+  const normalized = normalizeCallEvents(legacyNormalizationInput.events);
+  assert.deepEqual(legacyNormalizationInput, original);
+  assert.deepEqual(
+    normalized.map((value) => value.eventId),
+    original.events.map((value) => value.eventId.toLowerCase()),
+  );
+  assert.equal(normalized[1].occurredAt, '2026-10-31T01:00:00.000Z');
+  assert.equal(normalized[1].payload.utteranceText, ' 원문\n보존 ');
+  assert.equal(normalized[1].offsetSeconds, 0);
+  assert.equal(normalized[3].offsetSeconds, null);
+  for (const value of normalized) {
+    const hash = createHash('sha256')
+      .update(
+        JSON.stringify({
+          callSessionSeq: 42,
+          providerCallId: legacyNormalizationInput.providerCallId,
+          ...value,
+        }),
+      )
+      .digest('hex');
+    assert.equal(hash, legacyEventHashes[value.eventId]);
+  }
+});
+
+test('event normalization rejects invalid or year-zero timestamps with the existing error', () => {
+  for (const occurredAt of ['invalid', '0000-01-01T00:00:00Z'])
+    assert.throws(() => normalizeCallEvents([event({ occurredAt })]), {
+      status: 422,
+      message: '이벤트 발생 시각을 확인해 주세요.',
+    });
+});
+
+test('event normalization detects duplicate IDs after case folding and duplicate event orders', () => {
+  const first = event({ eventId: randomUUID().toUpperCase() });
+  for (const second of [
+    { ...first, eventId: first.eventId.toLowerCase(), eventOrder: 2 },
+    { ...first, eventId: randomUUID() },
+  ])
+    assert.throws(() => normalizeCallEvents([first, second]), {
+      status: 400,
+      message: '요청 묶음 안의 이벤트 ID·순번은 중복될 수 없습니다.',
+    });
+});
+
+test('event normalization preserves FAQ-only reference rules and validation error statuses', () => {
+  const payload = {
+    action: 'FAQ_ANSWERED',
+    orderSeq: null,
+    unansweredQuestionSeq: null,
+    summaryText: '안내',
+    faqEntrySeq: 12,
+    questionUtteranceOrder: 1,
+    answerUtteranceOrder: 2,
+  };
+  for (const field of ['orderSeq', 'unansweredQuestionSeq'])
+    assert.throws(
+      () =>
+        normalizeCallEvents([
+          event({ kind: 'BUSINESS_RESULT', payload: { ...payload, [field]: 7 } }),
+        ]),
+      { status: 422 },
+    );
+  for (const field of ['faqEntrySeq', 'questionUtteranceOrder', 'answerUtteranceOrder'])
+    assert.throws(
+      () =>
+        normalizeCallEvents([
+          event({
+            kind: 'BUSINESS_RESULT',
+            payload: {
+              action: 'INQUIRY',
+              orderSeq: null,
+              unansweredQuestionSeq: null,
+              summaryText: '안내',
+              [field]: payload[field],
+            },
+          }),
+        ]),
+      { status: 400 },
+    );
 });

@@ -92,7 +92,7 @@ export class OrdersService {
     return call.customerSeq;
   }
 
-  async adminList(query: AdminOrderListQueryDto) {
+  private assertDateRange(query: { from?: string; to?: string }): void {
     if (
       (query.from !== undefined && !isZonedDate(query.from)) ||
       (query.to !== undefined && !isZonedDate(query.to)) ||
@@ -103,6 +103,10 @@ export class OrdersService {
         'INVALID_REQUEST',
         '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
       );
+  }
+
+  async adminList(query: AdminOrderListQueryDto) {
+    this.assertDateRange(query);
     return new ListResponse(
       await this.repository.adminList(this.database.pool, query),
       query.limit,
@@ -111,16 +115,7 @@ export class OrdersService {
 
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {
     const callId = this.callId(adminId, callSessionHeader);
-    if (
-      (query.from !== undefined && !isZonedDate(query.from)) ||
-      (query.to !== undefined && !isZonedDate(query.to)) ||
-      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
-      );
+    this.assertDateRange(query);
     return this.database.transaction(async (client) => {
       // 통화의 고객 범위와 주문 목록을 같은 시점의 데이터로 읽는다.
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
@@ -145,16 +140,7 @@ export class OrdersService {
     header?: string,
   ) {
     const callId = this.callId(adminId, header);
-    if (
-      (query.from !== undefined && !isZonedDate(query.from)) ||
-      (query.to !== undefined && !isZonedDate(query.to)) ||
-      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
-    )
-      throw new ApiException(
-        400,
-        'INVALID_REQUEST',
-        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
-      );
+    this.assertDateRange(query);
     return this.database.transaction(async (client) => {
       await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const callerCustomer = await this.readCustomer(client, adminId, callId);

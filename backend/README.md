@@ -286,6 +286,12 @@ customers/
 
 현재 테스트는 Jest가 아닌 `node:test`와 `test/*.cjs`를 사용한다. 같은 방식을 유지한다.
 
+주문·AI 설정 통합 테스트는 기존 `*.integration.test.cjs`가 공유 fixture를 한 번 만들고
+`orders-*.cjs`, `ai-settings-*.cjs`의 시나리오 등록 함수를 원래 순서대로 호출한다.
+이 등록 파일은 단독 실행 진입점이 아니다. 새 등록 파일은 기존 진입점에 require로 연결하고,
+새 테스트 진입점을 추가할 때는 package.json의 실행 목록에도 연결한다.
+반복문으로 등록하는 동시성 테스트도 같은 실행 순서를 유지한다.
+
 ```text
 test/
 ├── config.test.cjs

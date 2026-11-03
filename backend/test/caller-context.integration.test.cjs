@@ -4,24 +4,16 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { Pool } = require('pg');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { AppModule } = require('../dist/app.module');
 const { DatabaseService } = require('../dist/database/database.service');
-const { configureApplication } = require('../dist/configure-application');
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
+const apps = [];
 let app, base;
 const logs = [];
 const phone = () => '010' + String(randomInt(10000000, 100000000));
@@ -36,13 +28,11 @@ const address = {
 };
 before(async () => {
   await migrate(pool);
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (entry) => logs.push(entry) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 async function customer(status = 'ACTIVE') {
@@ -271,7 +261,7 @@ test('all membership/company status combinations enforce company access; represe
         const org = await organization(companyStatus);
         await member(c.customerSeq, org, membershipStatus, role);
         const personal = await pin('PERSONAL', c.customerSeq);
-        const company = await pin('COMPANY', org);
+        await pin('COMPANY', org);
         const result = await context(c.phoneNumber);
         const canUseCompany = membershipStatus === 'ACTIVE' && companyStatus === 'ACTIVE';
         assert.equal(result.membership.status, membershipStatus);

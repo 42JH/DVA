@@ -1,17 +1,11 @@
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 const { readPage } = require('../dist/common/pagination-query');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 let client;
 before(async () => {
   client = await pool.connect();

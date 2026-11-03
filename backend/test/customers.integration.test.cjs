@@ -4,38 +4,23 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { Pool } = require('pg');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { AppModule } = require('../dist/app.module');
 const { CustomersRepository } = require('../dist/customers/customers.repository');
-const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 const apps = [];
 const password = 'customer-test-only-password';
 const origin = 'http://localhost:5173';
 let app, base, baseB, repository, adminCookie, adminId, passwordHash;
 const phone = () => '010' + String(randomInt(10000000, 100000000));
-async function start() {
-  const application = await NestFactory.create(AppModule, { logger: false });
-  apps.push(application);
-  configureApplication(application, { log: () => {} });
-  await application.listen(0, '127.0.0.1');
-  return application;
-}
+const start = () => startTestApp(apps);
 async function account(role = 'OPERATOR') {
   const loginId = 'cus' + randomUUID().replaceAll('-', '').slice(0, 16);
   const { rows } = await pool.query(
