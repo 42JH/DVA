@@ -3,8 +3,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { request: httpRequest } = require('node:http');
-const { createTestPool } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -91,14 +90,9 @@ async function audits(id) {
 }
 before(async () => {
   await migrate(pool);
-  const { AppModule } = require('../dist/app.module');
-  const { configureApplication } = require('../dist/configure-application');
   const { AuditService } = require('../dist/audit/audit.service');
   for (let i = 0; i < 2; i++) {
-    const app = await NestFactory.create(AppModule, { logger: false });
-    apps.push(app);
-    configureApplication(app, { log: (value) => logs.push(value) });
-    await app.listen(0, '127.0.0.1');
+    await startTestApp(apps, { log: (value) => logs.push(value) });
   }
   base = await apps[0].getUrl();
   secondBase = await apps[1].getUrl();

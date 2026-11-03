@@ -2,9 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
-const { configureApplication } = require('../dist/configure-application');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { hashPassword } = require('../dist/auth/password');
 const { AuditService } = require('../dist/audit/audit.service');
 
@@ -14,17 +12,15 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 const origin = 'http://localhost:5173';
 process.env.CORS_ORIGINS = origin;
-const { AppModule } = require('../dist/app.module');
 const pool = createTestPool();
+const apps = [];
 let app, base, customerId, otherId, callId;
 const cookies = [],
   adminIds = [];
 const phone = '01064000001';
 
 before(async () => {
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: () => {} });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps);
   base = (await app.getUrl()) + '/api';
   const password = 'cancel-test-password';
   const hash = await hashPassword(password);
@@ -63,7 +59,7 @@ before(async () => {
 });
 
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 

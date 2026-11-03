@@ -1,4 +1,4 @@
-const { createTestPool } = require('./application.cjs');
+const { createTestPool, startTestApp } = require('./application.cjs');
 
 module.exports = function aiSettingsFixture() {
   require('reflect-metadata');
@@ -7,7 +7,6 @@ module.exports = function aiSettingsFixture() {
   const { randomUUID, randomBytes, createHash } = require('node:crypto');
   const { migrate } = require('./migrations.cjs');
   const { createServer } = require('node:http');
-  const { NestFactory } = require('@nestjs/core');
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.DB_NAME, 'dva_webhook_test');
   assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -113,12 +112,7 @@ module.exports = function aiSettingsFixture() {
     });
     await new Promise((resolve) => ai.listen(0, '127.0.0.1', resolve));
     process.env.AI_AGENT_URL = `http://127.0.0.1:${ai.address().port}`;
-    const { AppModule } = require('../../dist/app.module');
-    const { configureApplication } = require('../../dist/configure-application');
-    app = await NestFactory.create(AppModule, { logger: false });
-    apps.push(app);
-    configureApplication(app, { log: (entry) => logs.push(entry) });
-    await app.listen(0, '127.0.0.1');
+    app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
     base = await app.getUrl();
     for (const role of ['SYSTEM_ADMIN', 'OPERATOR', 'SUPERVISOR']) {
       const id = (
@@ -261,7 +255,6 @@ module.exports = function aiSettingsFixture() {
       refreshStatus = value;
     },
     apps,
-    NestFactory,
     logs,
     get base() {
       return base;

@@ -3,15 +3,12 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { AppModule } = require('../dist/app.module');
-const { configureApplication } = require('../dist/configure-application');
 const { MembersRepository } = require('../dist/members/members.repository');
 const { DatabaseService } = require('../dist/database/database.service');
 const { hashPassword } = require('../dist/auth/password');
@@ -27,13 +24,7 @@ const employees = (companyId, fixture) =>
   });
 const phone = () => '010' + String(randomInt(10000000, 100000000));
 let app, base, baseB, cookie, adminId, repository, passwordHash;
-async function start() {
-  const instance = await NestFactory.create(AppModule, { logger: false });
-  apps.push(instance);
-  configureApplication(instance, { log: () => {} });
-  await instance.listen(0, '127.0.0.1');
-  return instance;
-}
+const start = () => startTestApp(apps);
 async function account(role = 'OPERATOR') {
   const loginId = 'mem' + randomUUID().replaceAll('-', '').slice(0, 16);
   const { rows } = await pool.query(

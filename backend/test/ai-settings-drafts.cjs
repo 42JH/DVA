@@ -1,3 +1,4 @@
+const { startTestApp } = require('./helpers/application.cjs');
 module.exports = function registerAiSettingsDrafts(suite) {
   const {
     test,
@@ -20,7 +21,6 @@ module.exports = function registerAiSettingsDrafts(suite) {
     randomUUID,
     options,
     token,
-    NestFactory,
     apps,
     logs,
     cookies,
@@ -416,13 +416,8 @@ module.exports = function registerAiSettingsDrafts(suite) {
     'another backend resumes the draft and rechecks both identities after external validation without holding a DB lock',
     { timeout: 15000 },
     async () => {
-      const { AppModule } = require('../dist/app.module');
-      const { configureApplication } = require('../dist/configure-application');
       const { AiPersonaClient } = require('../dist/ai-settings/ai-persona.client');
-      const second = await NestFactory.create(AppModule, { logger: false });
-      apps.push(second);
-      configureApplication(second, { log: (entry) => logs.push(entry) });
-      await second.listen(0, '127.0.0.1');
+      const second = await startTestApp(apps, { log: (entry) => logs.push(entry) });
       const secondBase = await second.getUrl();
       const send = (method, path, body) =>
         fetch(secondBase + path, {

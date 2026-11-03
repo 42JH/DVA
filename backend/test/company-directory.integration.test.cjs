@@ -3,18 +3,16 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { AppModule } = require('../dist/app.module');
 const { OrganizationsRepository } = require('../dist/organizations/organizations.repository');
-const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 const pool = createTestPool();
+const apps = [];
 const origin = 'http://localhost:5173',
   password = 'directory-test-only-password';
 let app, base, adminHeaders, passwordHash;
@@ -74,15 +72,13 @@ async function account(role = 'OPERATOR') {
 before(async () => {
   // check:docker의 선행 검증이 기존 업무 스키마를 적용한다.
   assert.ok((await pool.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name);
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (entry) => logs.push(entry) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
   passwordHash = await hashPassword(password);
   adminHeaders = await account();
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 async function company(name = marker(), status = 'ACTIVE') {

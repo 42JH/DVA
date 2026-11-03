@@ -1,3 +1,4 @@
+const { startTestApp } = require('./helpers/application.cjs');
 module.exports = function registerAiSettingsApplication(suite) {
   const {
     test,
@@ -17,7 +18,6 @@ module.exports = function registerAiSettingsApplication(suite) {
     saveVersion,
     randomUUID,
     apps,
-    NestFactory,
     logs,
     actorIds,
     legacyVersion,
@@ -324,12 +324,7 @@ module.exports = function registerAiSettingsApplication(suite) {
       "UPDATE ai_persona_versions SET last_notified_at=clock_timestamp()-interval '31 seconds' WHERE ai_persona_version_seq=$1",
       [pending.aiPersonaVersionSeq],
     );
-    const { AppModule } = require('../dist/app.module');
-    const { configureApplication } = require('../dist/configure-application');
-    suite.app = await NestFactory.create(AppModule, { logger: false });
-    apps.push(suite.app);
-    configureApplication(suite.app, { log: (entry) => logs.push(entry) });
-    await suite.app.listen(0, '127.0.0.1');
+    suite.app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
     suite.base = await suite.app.getUrl();
     await applicationService().tick();
     assert.equal(notifications.filter((n) => n.applicationId === pending.applicationId).length, 3);

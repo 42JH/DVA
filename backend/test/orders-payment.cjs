@@ -1,3 +1,4 @@
+const { startTestApp } = require('./helpers/application.cjs');
 module.exports = function registerOrdersPayment(suite) {
   const {
     test,
@@ -20,9 +21,6 @@ module.exports = function registerOrdersPayment(suite) {
     OrdersRepository,
     ConfigService,
     AuditService,
-    NestFactory,
-    AppModule,
-    configureApplication,
     origin,
     cookies,
     waitForBlockedBy,
@@ -474,10 +472,7 @@ module.exports = function registerOrdersPayment(suite) {
     resetDver();
     const order = await readyOrder();
     assert.equal((await submitOrder(order)).status, 200);
-    const app = await NestFactory.create(AppModule, { logger: false });
-    apps.push(app);
-    configureApplication(app, { log: () => {} });
-    await app.listen(0, '127.0.0.1');
+    const app = await startTestApp(apps);
     const response = await fetch((await app.getUrl()) + `/api/orders/${order.orderSeq}/submit`, {
       method: 'POST',
       headers: {

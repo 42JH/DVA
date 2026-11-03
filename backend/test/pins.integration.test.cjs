@@ -3,19 +3,17 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'true';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { AppModule } = require('../dist/app.module');
 const { AuditService } = require('../dist/audit/audit.service');
-const { configureApplication } = require('../dist/configure-application');
 const { hashPassword } = require('../dist/auth/password');
 const pool = createTestPool();
+const apps = [];
 const origin = 'http://localhost:5173';
 const password = 'pin-test-only-password';
 let app, base, adminHeaders, passwordHash;
@@ -71,15 +69,13 @@ before(async () => {
     ).rows[0].ready,
     true,
   );
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: (entry) => logs.push(entry) });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
   passwordHash = await hashPassword(password);
   adminHeaders = await admin();
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   await pool.end();
 });
 async function fixture({

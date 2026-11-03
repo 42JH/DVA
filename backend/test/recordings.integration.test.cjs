@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worker');
@@ -17,7 +17,6 @@ process.env.SWAGGER_ENABLED = 'true';
 process.env.S3_RECORDINGS_BUCKET = '';
 process.env.PBX_WEBHOOK_TOKEN = randomUUID();
 const { AppModule } = require('../dist/app.module');
-const { configureApplication } = require('../dist/configure-application');
 const pool = createTestPool();
 const apps = [],
   urls = [],
@@ -82,10 +81,7 @@ before(async () => {
     'run the integration suite with its schema setup',
   );
   for (let index = 0; index < 2; index++) {
-    const app = await NestFactory.create(AppModule, { logger: false });
-    configureApplication(app, { log: () => {} });
-    await app.listen(0, '127.0.0.1');
-    apps.push(app);
+    const app = await startTestApp(apps);
     urls.push(await app.getUrl());
     app.get(ConfigService).set('S3_RECORDINGS_BUCKET', 'test-recordings');
     const store = app.get(RecordingStorage);

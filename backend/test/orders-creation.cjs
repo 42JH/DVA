@@ -1,3 +1,4 @@
+const { startTestApp } = require('./helpers/application.cjs');
 module.exports = function registerOrdersCreation(suite) {
   const {
     test,
@@ -20,9 +21,6 @@ module.exports = function registerOrdersCreation(suite) {
     cookies,
     aiResult,
     DatabaseService,
-    NestFactory,
-    AppModule,
-    configureApplication,
   } = suite;
   test('AI uses the same ORD-01 for partial and complete data, with one linked order and no shipment', async () => {
     for (const parcels of [
@@ -707,10 +705,7 @@ module.exports = function registerOrdersCreation(suite) {
     await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [orderSeq]);
     await errorCode(await aiCreate(await call(), body, key), 403, 'FORBIDDEN');
     await errorCode(await create(body, key), 403, 'FORBIDDEN');
-    const restarted = await NestFactory.create(AppModule, { logger: false });
-    apps.push(restarted);
-    configureApplication(restarted, { log: () => {} });
-    await restarted.listen(0, '127.0.0.1');
+    const restarted = await startTestApp(apps);
     const retry = await fetch((await restarted.getUrl()) + '/api/orders', {
       method: 'POST',
       headers: {

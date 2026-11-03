@@ -4,12 +4,11 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { createTestPool } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
 const { hashPassword } = require('../dist/auth/password');
-const { configureApplication } = require('../dist/configure-application');
 const { PaymentsService } = require('../dist/payments/payments.service');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
@@ -21,6 +20,7 @@ assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['127.0.0.1', 'db'].includes(process.env.DB_HOST));
 const pool = createTestPool();
+const apps = [];
 let app, upstream, base, origin, cookie, customerId, worker, payments, client;
 const calls = [],
   messages = [],
@@ -111,10 +111,7 @@ before(async () => {
       "INSERT INTO customers(name,phone_number,status) VALUES('실주문 검증','01000210001','ACTIVE') ON CONFLICT(phone_number) WHERE deleted_at IS NULL DO UPDATE SET status='ACTIVE' RETURNING customer_seq",
     )
   ).rows[0].customer_seq;
-  const { AppModule } = require('../dist/app.module');
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: () => {} });
-  await app.listen(0, '127.0.0.1');
+  app = await startTestApp(apps);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');
@@ -131,7 +128,7 @@ before(async () => {
   cookie = login.headers.get('set-cookie').split(';')[0];
 });
 after(async () => {
-  if (app) await app.close();
+  for (const application of apps) await application.close();
   if (upstream) {
     upstream.closeAllConnections();
     await new Promise((r) => upstream.close(r));
@@ -343,10 +340,8 @@ test('timeout after Toss success recovers after application restart using GET on
   assert.equal((await lookup(id)).body.data.status, 'REVIEW_REQUIRED');
   assert.equal((await request(`/orders/${r.orderSeq}/cancel`, undefined, true)).status, 409);
   await app.close();
-  const { AppModule } = require('../dist/app.module');
-  app = await NestFactory.create(AppModule, { logger: false });
-  configureApplication(app, { log: () => {} });
-  await app.listen(0, '127.0.0.1');
+  apps.splice(apps.indexOf(app), 1);
+  app = await startTestApp(apps);
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');

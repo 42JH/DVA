@@ -1,4 +1,4 @@
-const { createTestPool } = require('./application.cjs');
+const { createTestPool, startTestApp } = require('./application.cjs');
 
 module.exports = function ordersFixture() {
   const { testMembership } = require('./membership.cjs');
@@ -7,7 +7,6 @@ module.exports = function ordersFixture() {
   const assert = require('node:assert/strict');
   const { randomUUID } = require('node:crypto');
   const { migrate } = require('./migrations.cjs');
-  const { NestFactory } = require('@nestjs/core');
   const { ConfigService } = require('@nestjs/config');
   const { createServer } = require('node:http');
   const { OrderSubmissionRepository } = require('../../dist/orders/order-submission.repository');
@@ -18,11 +17,9 @@ module.exports = function ordersFixture() {
   assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
   process.env.SWAGGER_ENABLED = 'true';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
-  const { AppModule } = require('../../dist/app.module');
   const { OrdersRepository } = require('../../dist/orders/orders.repository');
   const { AuditService } = require('../../dist/audit/audit.service');
   const { DatabaseService } = require('../../dist/database/database.service');
-  const { configureApplication } = require('../../dist/configure-application');
   const { hashPassword } = require('../../dist/auth/password');
   const pool = createTestPool();
   const apps = [],
@@ -62,12 +59,7 @@ module.exports = function ordersFixture() {
       );
       if (index === 0) adminId = result.rows[0].admin_user_seq;
       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
-      const app = index < 2 ? await NestFactory.create(AppModule, { logger: false }) : apps[0];
-      if (index < 2) {
-        apps.push(app);
-        configureApplication(app, { log: () => {} });
-        await app.listen(0, '127.0.0.1');
-      }
+      const app = index < 2 ? await startTestApp(apps) : apps[0];
       hosts.push(await app.getUrl());
       const response = await fetch(hosts[index] + '/api/auth/login', {
         method: 'POST',
@@ -425,9 +417,6 @@ module.exports = function ordersFixture() {
     set organizationId(value) {
       organizationId = value;
     },
-    NestFactory,
-    AppModule,
-    configureApplication,
     readCustomer,
     readOrder,
     readOrders,

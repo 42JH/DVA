@@ -123,6 +123,12 @@ API 계약 비교와 Git 변경 범위 검사를 수행한다. PR 생성·운영
 
 운영 코드 변경은 OrdersService, CallEventsService 및 새 입력 정규화 함수뿐이다.
 새 API·DTO·DB 컬럼·테이블·마이그레이션·설정·의존성은 추가하지 않았다.
+임시 검증 DB·컨테이너·네트워크·이미지는 실행기가 만든 자원만 정리했다.
+
+전체 실행 근거는 로컬 임시 로그 `dva-internals-final-check.log`,
+`dva-internals-final-database.log`이며 단계별 로그와 Swagger 비교 결과도 별도로 보관했다.
+검증은 격리된 로컬 Linux Docker 기준이다. 운영 DB/S3·배포·Jenkins 및 실제 AI/프론트 환경의
+수동 연동 실행은 하지 않았다. Jira는 진행 중으로 유지하며 PR 생성/병합은 수행하지 않는다.
 
 ## 추가 작업: 남은 테스트 준비 코드 중복 정리
 
@@ -144,9 +150,28 @@ API 계약 비교와 Git 변경 범위 검사를 수행한다. PR 생성·운영
   테스트 코드·기대값을 변경하지 않고 기존 정규 실행 순서로 재검증했다.
 - `node backend/scripts/check.cjs` 통과: PostgreSQL 648개와 nginx/HTTPS 런타임 20개, 실패·skip 0.
   빌드 검사는 직전 동일 소스의 단위 122개·결제 시뮬레이터 21개 통과 결과를 Docker 캐시로 재사용했다.
-  임시 검증 DB·컨테이너·네트워크·이미지는 실행기가 만든 자원만 정리했다.
 
-전체 실행 근거는 로컬 임시 로그 `dva-internals-final-check.log`,
-`dva-internals-final-database.log`이며 단계별 로그와 Swagger 비교 결과도 별도로 보관했다.
-검증은 격리된 로컬 Linux Docker 기준이다. 운영 DB/S3·배포·Jenkins 및 실제 AI/프론트 환경의
-수동 연동 실행은 하지 않았다. Jira는 진행 중으로 유지하며 PR 생성/병합은 수행하지 않는다.
+### 추가 2단계: 앱 시작 준비 재사용
+
+- 23개 파일의 동일한 앱 시작 코드 25곳을 기존 `startTestApp` 호출로 바꿨다.
+  단일 앱 테스트도 종료 목록을 사용하고, PBX·결제 재시작은 종료한 앱을 목록에서 제거한다.
+- 주문·페르소나 fixture와 시나리오 등록 파일은 같은 helper를 직접 재사용한다.
+  더 이상 쓰지 않는 NestFactory·AppModule·configureApplication import 및 fixture 전달 항목을 정리했다.
+- logger, 인스턴스 수, 기존 인증 데이터, 외부 요청 설정과 테스트 순서를 유지했다.
+  앱 종료 시점을 직접 검사하는 SSE 테스트, listen 전 mock/설정 주입, 서비스만 사용하는 앱과
+  별도 DB 생성·삭제 테스트는 기존 초기화를 유지한다.
+- 변경 전후 테스트 27개 파일의 검증문 2,073개와 테스트·그룹 등록 표현식 387개의 내용·순서를
+  AST로 비교해 보존됨을 확인했다. Node 구문 검사와 테스트 파일 Prettier 검사도 통과했다.
+- 변경 범위는 테스트와 이 문서뿐이다. 운영 소스·API·DB·의존성·환경 설정·테스트 실행 목록은 동일하다.
+
+### 추가 작업 최종 검증
+
+- `node backend/scripts/check.cjs` 재실행 통과: 단위 122 + 결제 시뮬레이터 21 + PostgreSQL 통합 648 +
+  실제 nginx/HTTPS 런타임 20 = 811개. 실패·skip·cancelled·todo 모두 0이다.
+- lint·Prettier·TypeScript 컴파일과 양쪽 nginx 설정 검사도 통과했다.
+  이번 실행에서 생성한 임시 컨테이너와 네트워크가 남지 않았음을 확인했다.
+- 기존 테스트 진입점 61개와 실행 순서를 유지했고, 준비 코드만 총 242줄 줄였다.
+  새 helper·의존성·테스트 프레임워크·환경변수·설정 옵션은 추가하지 않았다.
+- 실행 근거는 로컬 임시 로그 `dva-test-fixture-pools-full.log`, `dva-test-fixture-apps-full.log`다.
+  검증은 격리된 로컬 Linux Docker 기준이며 원격 Jenkins 결과·운영 배포·실제 AI/프론트 수동 연동은 확인하지 않았다.
+- 별도 DB 검증의 CI 연결과 테스트 실행 목록 누락 방지는 적용하지 않았다. PR 생성·병합도 수행하지 않는다.
