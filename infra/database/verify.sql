@@ -148,7 +148,14 @@ BEGIN
   OR pg_get_functiondef('guard_order_parcel_edit()'::regprocedure) NOT LIKE '%dva.retention_order%'
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='045-data-retention.sql') THEN
   RAISE EXCEPTION 'Data retention schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, active employee identity, retention schema and migration ledger';
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='orders'
+    AND column_name IN ('submission_first_attempt_at','submission_last_attempt_at') AND udt_name='timestamptz' AND is_nullable='YES')<>2
+  OR to_regclass('public.orders_submission_retry_idx') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='orders'::regclass AND conname='orders_status_check'
+    AND pg_get_constraintdef(oid) LIKE '%SUBMITTING_FAILED%')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql') THEN
+  RAISE EXCEPTION 'Order submission retry schema or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

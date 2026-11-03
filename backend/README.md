@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+디버 접수는 [10초 응답 제한·10분 자동 재시도 계약](docs/order-submission-retry.md)을 따른다. 새 앱 전에 migration 046을 적용한다. SUBMITTING_FAILED는 최초 전송 후 10분 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패다. AI·프론트의 상태 분기와 실패 탭 표시는 이 계약을 따른다.
+
 업무 데이터 삭제·보관은 새 migration 045와 [작업 명세](docs/data-retention.md), [API·AI 전달 사항](docs/data-retention-handoff.md)을 따른다. 기존 업무 DELETE는 soft delete로 바꾸고 주문·통화 DELETE를 추가한다. 통화 전체(녹취·STT·AI 이벤트)는 최초 incoming_at부터 5년, 주문은 최초 완료/취소(미완료는 생성)부터 5년 후 실제 폐기한다. 감사 로그와 전송 완료 알림은 7일 정리한다. 045 한 번 적용 후 새 앱으로 전환하며 [인프라 후속 항목](docs/data-retention-infra-follow-up.md)의 S3 권한·외부 로그·백업 폐기를 함께 확인한다. 외부 문서의 과거 물리 삭제 설명보다 이 계약을 우선한다.
 
 진행 통화 수는 `GET /api/calls/active-count`, 변경 구독은 `GET /api/calls/active-count/stream`으로 제공한다. 새 앱 전에 044 migration을 적용한다. 과거 종료 미확인 통화는 제외하고 새 등록부터 집계하며 PBX 종료를 녹취 업로드 전에 반영한다. 관리자 쿠키·부하별 전송 묶기·세션 재검증과 양쪽 nginx 설정·운영 적용 순서는 [실시간 통화 수 계약](docs/active-call-count.md)을 따른다. nginx 설정은 저장소에 반영했으며 실제 서버 적용은 별도다.
@@ -513,10 +515,10 @@ FAQ 등록은 단건·복수 모두 items 배열을 사용한다. 새 앱 전 02
 
 배포 전에 033-organization-created-at.sql을 적용해야 합니다. 실제 서버 DB 적용과 배포는 이 코드 변경의 로컬 검증에 포함하지 않습니다.
 
-관리자 재접수는 1분 이상 지난 SUBMITTING 주문을 먼저 SUBMISSION_FAILED로 복구하고 반환합니다. 이 호출에서는 디버로 재전송하지 않습니다. SUBMISSION_FAILED는 다음 분의 자동 워커 또는 관리자 POST /api/admin/orders/{id}/retry로 재전송합니다. 최근 SUBMITTING과 이미 ACCEPTED인 주문은 현재 상태를 반환하며 기존 결제·청구는 반복하지 않습니다.
+디버 요청의 응답 제한은 10초입니다. 실패·시간 초과는 SUBMITTING_FAILED로 저장하고 최초 전송부터 10분 동안 마지막 시도에서 최소 1분 간격으로 자동 재전송합니다. 10분이 끝나면 SUBMISSION_FAILED로 전환하고 자동 재시도를 종료합니다. 첫/마지막 전송 시각은 046에서 추가한 별도 컬럼으로 유지하며 서버 재시작·주문 수정·재호출로 첫 기한을 연장하지 않습니다.
 
-GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 실패 주문만 조회합니다. PAID 그룹은 PAID·SUBMITTING·ACCEPTED만 포함하며 실패를 제외합니다. 검색·기간·페이지 조건과 응답 형식은 유지하고 total_count도 같은 필터의 총 주문 수입니다. 기존 docs/api/admin-order-list.md의 PAID 그룹 설명보다 이 계약과 Swagger를 우선합니다.
+GET /api/admin/orders의 statusGroup=SUBMISSION_FAILED는 SUBMITTING_FAILED와 SUBMISSION_FAILED를 함께 조회하고 실제 status로 재시도 중/최종 실패를 구분합니다. PAID 그룹은 PAID·SUBMITTING·ACCEPTED만 포함합니다. 검색·기간·페이지 조건과 응답 형식은 유지하고 total_count도 같은 필터의 총 주문 수입니다. 기존 docs/api/admin-order-list.md의 PAID 그룹 설명보다 이 계약과 Swagger를 우선합니다.
 
-자동 워커는 기동 시와 매분 PAID 및 이전 분까지의 SUBMISSION_FAILED를 오래된 갱신 시각 순으로 최대 20건 처리합니다. 실패 재시도 횟수 제한은 없고 ACCEPTED·SUBMITTING·notPaid·COLLECTING·CANCELLED는 자동 재전송하지 않습니다. 조회 시각 비교와 주문 잠금으로 다른 워커·관리자가 이미 처리한 스냅샷의 전송을 건너뛰며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 결제·청구·수거 시각은 재처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다. 스키마 변경이나 신규 migration은 없습니다.
+자동 워커는 기동 시와 10초 주기로 미확정 전송·10분 기한을 확인합니다. 실제 재전송은 PAID와 기한 안의 SUBMITTING_FAILED 중 마지막 시도 후 1분이 지난 주문만 최대 20건 병렬 처리합니다. 최신 시도 시각으로 이전 응답을 차단하며 HTTP 대기 중 DB 트랜잭션을 유지하지 않습니다. 5년 보관 기한이 지난 주문은 이 배치에서 제외합니다. 기존 관리자 POST /api/admin/orders/{id}/retry는 최종 실패 후에도 수동 1회 요청으로 사용할 수 있으며 자동 기한을 새로 열지 않습니다. 결제·청구·수거 시각은 반복 처리하지 않습니다. 외부 디버의 멱등키·접수 조회 계약이 없어 응답 유실 후 재전송으로 생기는 외부 중복 접수는 보장하지 못합니다.
 
 배포 DB 검증은 migration 033 적용 기록과 기업·부서의 `created_at` 타입·NULL 허용·현재 시각 기본값을 함께 확인합니다. Docker DB 회귀 테스트도 체크아웃한 `infra/database/verify.sql` 원문을 사용해 누락된 스키마를 거절하는지 검사하며, 이 SQL은 테스트 컨테이너에만 전달합니다.

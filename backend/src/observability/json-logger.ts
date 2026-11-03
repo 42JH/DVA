@@ -26,7 +26,7 @@ const events = new Set([
   'retention_cleanup_failed',
   'retention_recording_deferred',
 ]);
-const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING']);
+const outcomes = new Set(['ACCEPTED', 'SUBMISSION_FAILED', 'SUBMITTING_FAILED', 'SUBMITTING']);
 const reasons = new Set([
   'authentication_rejected',
   'http_error',

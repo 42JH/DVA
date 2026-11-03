@@ -75,7 +75,7 @@ export class AdminOrdersController {
   @ApiOperation({
     summary: '디버 접수 실패 주문 재접수',
     description:
-      '결제된 같은 주문의 미취소 상세를 재전송합니다. 결제·월별 사용액을 다시 처리하지 않습니다. 처리 중·완료 주문은 현재 상태만 반환합니다.',
+      '결제된 같은 주문의 미취소 상세를 수동 재전송합니다. 결제·월별 사용액을 다시 처리하지 않으며 자동 재시도 10분 기한을 연장하지 않습니다. 10초가 지난 미확정 SUBMITTING은 실패 상태로 복구하고 반환하며, 처리 중·완료 주문은 현재 상태만 반환합니다.',
   })
   @ApiExtraModels(SubmittedOrderDto)
   @ApiOkResponse({

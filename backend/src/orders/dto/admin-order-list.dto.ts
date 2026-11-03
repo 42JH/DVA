@@ -27,7 +27,7 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   @ApiPropertyOptional({
     enum: ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'],
     description:
-      '목록 탭. PAID는 PAID·SUBMITTING·ACCEPTED를 함께 조회하고 SUBMISSION_FAILED는 접수 실패만 조회합니다. 전체는 생략합니다.',
+      '목록 탭. PAID는 PAID·SUBMITTING·ACCEPTED, SUBMISSION_FAILED는 재시도 중 실패(SUBMITTING_FAILED)와 최종 실패(SUBMISSION_FAILED)를 조회합니다. 전체는 생략합니다.',
   })
   @IsOptional()
   @IsIn(['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'])

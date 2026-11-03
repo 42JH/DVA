@@ -1,6 +1,6 @@
 # Soft delete API·AI 전달 사항
 
-045와 새 백엔드를 함께 배포한다. 기존 삭제 API의 URL·본문·204 응답·역할은 유지한다. 이 문서는 기존 외부 API 문서의 ‘실제 삭제’ 설명보다 우선한다.
+045·046과 새 백엔드를 함께 배포한다. 기존 삭제 API의 URL·본문·204 응답·역할은 유지한다. 이 문서는 기존 외부 API 문서의 ‘실제 삭제’ 설명보다 우선한다. 접수 중간 실패·최종 실패는 [10초·10분 재시도 계약](order-submission-retry.md)을 따른다.
 
 | 호출 | 동작 |
 |---|---|
@@ -15,7 +15,7 @@
 
 신규 DELETE는 관리자 쿠키와 CORS_ORIGINS의 Origin이 필요하다. 본문은 없다. 정상 204, 대상 없음/삭제/만료 404, 진행 중 409 INVALID_STATE, 잠금 대기 초과 409 REQUEST_IN_PROGRESS다. OPERATOR·SUPERVISOR·SYSTEM_ADMIN 모두 사용할 수 있다.
 
-주문은 COLLECTING/CANCELLED/ACCEPTED이고 진행 중인 연결 통화·승인·안내 발송이 없을 때 삭제한다. notPaid는 기존 취소 API로 먼저 정리하고, PAID/SUBMITTING/SUBMISSION_FAILED는 접수 결과부터 확정한다. 통화는 PBX 종료가 확인되고 녹취 업로드 lease가 없어야 삭제한다. 종료 누락을 임의 시간 초과로 판단하지 않는다.
+주문은 COLLECTING/CANCELLED/ACCEPTED이고 진행 중인 연결 통화·승인·안내 발송이 없을 때 삭제한다. notPaid는 기존 취소 API로 먼저 정리하고, PAID/SUBMITTING/SUBMITTING_FAILED/SUBMISSION_FAILED는 결제·접수 결과부터 확인한다. 최종 접수 실패도 결제 취소를 뜻하지 않는다. 통화는 PBX 종료가 확인되고 녹취 업로드 lease가 없어야 삭제한다. 종료 누락을 임의 시간 초과로 판단하지 않는다.
 
 프론트는 기존 목록/total_count/상세를 다시 조회하면 된다. deletedAt을 새로 받아 필터링할 필요가 없다. 삭제/만료 데이터는 서버가 제외하며 이미 삭제한 주문·통화의 DELETE 재호출은 404다. 발급해 둔 녹취 URL은 기존 유효기간(최대 5분) 동안 동작할 수 있으며 이미 실행 중인 요청은 소급 취소하지 않는다.
 

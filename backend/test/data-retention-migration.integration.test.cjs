@@ -16,6 +16,110 @@ const connection = {
   password: process.env.DB_PASSWORD,
 };
 
+test('046 upgrades populated 045 atomically without extending old retries or changing order timestamps', async () => {
+  const name = 'dva_retry_' + randomUUID().replaceAll('-', '');
+  const owner = new Pool({ ...connection, database: process.env.DB_NAME });
+  let probe;
+  try {
+    await owner.query(`CREATE DATABASE ${name}`);
+    probe = new Pool({ ...connection, database: name });
+    const directory = join(__dirname, '../migrations');
+    const setup = await probe.connect();
+    try {
+      await setup.query('BEGIN');
+      for (const file of readdirSync(directory)
+        .filter((file) => /^\d{3}-.+\.sql$/.test(file) && file < '046-')
+        .sort())
+        await setup.query(readFileSync(join(directory, file), 'utf8'));
+      await setup.query('COMMIT');
+    } finally {
+      await setup.query('ROLLBACK');
+      setup.release();
+    }
+    const ids = (
+      await probe.query(`INSERT INTO orders(status,payment_method_type,pickup_requested_at,created_at,updated_at,paid_at,version)
+       VALUES('SUBMISSION_FAILED','credit',statement_timestamp(),statement_timestamp()-interval '2 hours',statement_timestamp()-interval '1 second',statement_timestamp()-interval '2 minutes',7),
+        ('SUBMISSION_FAILED','credit',statement_timestamp(),statement_timestamp()-interval '2 hours',statement_timestamp()-interval '1 minute',statement_timestamp()-interval '1 hour',8),
+        ('SUBMITTING','credit',statement_timestamp(),statement_timestamp()-interval '2 hours',statement_timestamp()-interval '2 seconds',statement_timestamp()-interval '2 minutes',9),
+        ('PAID','credit',statement_timestamp(),statement_timestamp(),statement_timestamp(),statement_timestamp(),10)
+       RETURNING order_seq`)
+    ).rows.map((row) => row.order_seq);
+    const before = (
+      await probe.query(
+        'SELECT order_seq,version,created_at,updated_at,paid_at FROM orders ORDER BY order_seq',
+      )
+    ).rows;
+    const client = await probe.connect();
+    try {
+      const sql = readFileSync(join(directory, '046-order-submission-retry-window.sql'), 'utf8');
+      await client.query('BEGIN');
+      await client.query(sql);
+      await assert.rejects(client.query('SELECT 1/0'), { code: '22012' });
+      await client.query('ROLLBACK');
+      assert.equal(
+        (
+          await client.query(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='submission_first_attempt_at'",
+          )
+        ).rowCount,
+        0,
+      );
+      await client.query('BEGIN');
+      await client.query(sql);
+      await client.query('COMMIT');
+      assert.deepEqual(
+        (
+          await client.query(
+            'SELECT order_seq,version,created_at,updated_at,paid_at FROM orders ORDER BY order_seq',
+          )
+        ).rows,
+        before,
+      );
+      const rows = (
+        await client.query(
+          'SELECT status,submission_first_attempt_at,submission_last_attempt_at FROM orders ORDER BY order_seq',
+        )
+      ).rows;
+      assert.deepEqual(
+        rows.map((row) => row.status),
+        ['SUBMITTING_FAILED', 'SUBMISSION_FAILED', 'SUBMITTING', 'PAID'],
+      );
+      assert.equal(rows[3].submission_first_attempt_at, null);
+      assert.equal(rows[3].submission_last_attempt_at, null);
+      assert.ok(rows[1].submission_first_attempt_at < new Date(Date.now() - 10 * 60 * 1000));
+      for (let index = 0; index < 3; index++)
+        assert.deepEqual(rows[index].submission_last_attempt_at, before[index].updated_at);
+      await assert.rejects(
+        client.query("UPDATE orders SET status='UNKNOWN' WHERE order_seq=$1", [ids[0]]),
+        { code: '23514' },
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::int AS n FROM pg_constraint WHERE connamespace='public'::regnamespace AND contype='f'",
+          )
+        ).rows[0].n,
+        25,
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::int AS n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE c.relnamespace='public'::regnamespace AND NOT t.tgisinternal",
+          )
+        ).rows[0].n,
+        10,
+      );
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  } finally {
+    await probe?.end();
+    await owner.query(`DROP DATABASE IF EXISTS ${name}`);
+    await owner.end();
+  }
+});
+
 test('045 rolls back atomically and upgrades populated 044 without losing timestamps, versions, FKs or snapshots', async () => {
   const name = 'dva_retention_' + randomUUID().replaceAll('-', '');
   assert.match(name, /^dva_retention_[a-f0-9]{32}$/);

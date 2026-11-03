@@ -6,6 +6,7 @@ export const ORDER_STATUSES = [
   'notPaid',
   'PAID',
   'SUBMITTING',
+  'SUBMITTING_FAILED',
   'ACCEPTED',
   'SUBMISSION_FAILED',
   'CANCELLED',

@@ -2542,7 +2542,7 @@ test('AI COMPLETE reports upstream rejection or uncertainty and never resends on
       key = randomUUID();
     const response = await aiCreate(undefined, input, key);
     const { data } = await response.json();
-    assert.equal(data.status, status === 403 ? 'SUBMISSION_FAILED' : 'SUBMISSION_FAILED');
+    assert.equal(data.status, 'SUBMITTING_FAILED');
     assert.equal((await submissionRows(data.orderSeq)).shipments, 0);
     assert.deepEqual((await (await aiCreate(undefined, input, key)).json()).data, data);
     assert.equal(dverRequests.length, 1);
@@ -2709,10 +2709,10 @@ test('ORD-06 submits the existing order and atomically creates each shipment and
   assert.equal(
     (
       await pool.query(
-        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name LIKE 'submission_%'",
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name IN ('submission_first_attempt_at','submission_last_attempt_at') AND udt_name='timestamptz' AND is_nullable='YES'",
       )
     ).rowCount,
-    0,
+    2,
   );
   const order = await readyOrder({
     parcels: [
@@ -3099,7 +3099,7 @@ test('ORD-06 records auth failures and unknown outcomes without shipments or a s
     };
     const response = await submitOrder(order);
     assert.equal(response.status, 200);
-    const status = 'SUBMISSION_FAILED';
+    const status = 'SUBMITTING_FAILED';
     assert.equal((await response.json()).data.status, status);
     assert.deepEqual(await submissionRows(order.orderSeq), {
       status,
@@ -3194,7 +3194,7 @@ test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITT
       // Set an old timestamp only in the disposable fixture; restore the trigger before commit.
       await client.query('ALTER TABLE orders DISABLE TRIGGER order_header_timestamp');
       await client.query(
-        "UPDATE orders SET updated_at=now()-interval '2 minutes' WHERE order_seq=$1",
+        "UPDATE orders SET updated_at=now()-interval '2 minutes',submission_last_attempt_at=now()-interval '20 seconds' WHERE order_seq=$1",
         [order.orderSeq],
       );
       await client.query('ALTER TABLE orders ENABLE TRIGGER order_header_timestamp');
@@ -3207,7 +3207,7 @@ test('ORD-06 result storage failure rolls back shipments/audit and stale SUBMITT
     }
     const recovery = await submitOrder(order, {}, 1);
     assert.equal(recovery.status, 200);
-    assert.equal((await recovery.json()).data.status, 'SUBMISSION_FAILED');
+    assert.equal((await recovery.json()).data.status, 'SUBMITTING_FAILED');
     assert.equal((await submitOrder(order)).status, 200);
     assert.equal(dverRequests.length, 1);
   }
@@ -3892,6 +3892,7 @@ test('admin screen tabs group payment-complete states and retain actual receipt 
     'PAID',
     'SUBMITTING',
     'ACCEPTED',
+    'SUBMITTING_FAILED',
     'SUBMISSION_FAILED',
     'CANCELLED',
   ];
@@ -3910,7 +3911,12 @@ test('admin screen tabs group payment-complete states and retain actual receipt 
     const body = await (
       await screenOrders({ from: '2092-01-01T00:00:00Z', to: '2092-01-02T00:00:00Z', statusGroup })
     ).json();
-    const expected = statusGroup === 'PAID' ? ['PAID', 'SUBMITTING', 'ACCEPTED'] : [statusGroup];
+    const expected =
+      statusGroup === 'PAID'
+        ? ['PAID', 'SUBMITTING', 'ACCEPTED']
+        : statusGroup === 'SUBMISSION_FAILED'
+          ? ['SUBMITTING_FAILED', 'SUBMISSION_FAILED']
+          : [statusGroup];
     assert.equal(body.total_count, expected.length);
     assert.ok(body.data.every((order) => order.parcels.length === 1));
     assert.deepEqual(body.data.map((o) => o.status).sort(), expected.sort());

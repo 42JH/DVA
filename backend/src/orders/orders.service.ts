@@ -669,11 +669,9 @@ export class OrdersService {
       if (order.status !== 'COLLECTING') {
         if (order.status === 'CANCELLED')
           throw new ApiException(409, 'INVALID_STATE', '취소된 주문입니다.');
-        if (
-          order.status === 'SUBMITTING' &&
-          (await this.submission.recoverStale(client, id, requestId))
-        ) {
-          return { status: 'SUBMISSION_FAILED' as const };
+        if (order.status === 'SUBMITTING') {
+          const recovered = await this.submission.recoverStale(client, id, requestId);
+          if (recovered) return { status: recovered };
         }
         return { status: order.status };
       }

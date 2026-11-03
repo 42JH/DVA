@@ -260,7 +260,7 @@ test('submission failure is retried on the same paid order without repeating pay
   await request(`/customers/${customerId}`, { monthlyBillingEnabled: true }, false, 'PATCH');
   dverReply = 'SUBMISSION_FAILED';
   const failed = await createFinal(finalBody({ paymentMethodType: 'credit' }));
-  assert.equal(failed.body.data.status, 'SUBMISSION_FAILED');
+  assert.equal(failed.body.data.status, 'SUBMITTING_FAILED');
   const id = failed.body.data.orderSeq;
   const count = dverRequests.length;
   dverReply = 'ACCEPTED';

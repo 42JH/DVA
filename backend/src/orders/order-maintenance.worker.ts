@@ -25,18 +25,11 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
   ) {}
   onApplicationBootstrap() {
     if (this.config.get('NODE_ENV') === 'test') return;
-    void this.run().catch(() => {});
     const tick = () => {
-      if (this.stopped) return;
-      this.timer = setTimeout(
-        () => {
-          void this.run().catch(() => {});
-          tick();
-        },
-        60_000 - (Date.now() % 60_000),
-      );
-      this.timer.unref();
+      if (!this.stopped) void this.run().catch(() => {});
     };
+    this.timer = setInterval(tick, 10_000);
+    this.timer.unref();
     tick();
   }
   run(now = new Date()): Promise<void> {
@@ -52,6 +45,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     return this.running;
   }
   private async work(now: Date) {
+    await this.submissions.recoverPending();
     // Rollover commits before locking orders, preserving the payment lock order.
     await this.billing.rollover(now);
     for (let batch = 0; batch < 10 && !this.stopped; batch++) {
@@ -97,26 +91,31 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     }
     const pending = await this.database.pool.query<{
       id: number;
-      status: 'PAID' | 'SUBMISSION_FAILED';
+      status: 'PAID' | 'SUBMITTING_FAILED';
       updatedAt: string;
     }>(
       `SELECT order_seq AS id,status,updated_at::text AS "updatedAt" FROM orders
-       WHERE deleted_at IS NULL AND (status='PAID' OR (status='SUBMISSION_FAILED' AND updated_at<date_trunc('minute',CURRENT_TIMESTAMP)))
-       ORDER BY updated_at,order_seq LIMIT 20`,
+       WHERE deleted_at IS NULL AND COALESCE(closed_at,created_at)>statement_timestamp()-interval '5 years'
+        AND (submission_first_attempt_at IS NULL OR submission_first_attempt_at>statement_timestamp()-interval '10 minutes')
+        AND (submission_last_attempt_at IS NULL OR submission_last_attempt_at<=statement_timestamp()-interval '1 minute')
+        AND status IN ('PAID','SUBMITTING_FAILED')
+       ORDER BY submission_last_attempt_at NULLS FIRST,order_seq LIMIT 20`,
     );
-    for (const order of pending.rows) {
-      try {
-        await this.submissions.submitPaidOrder(
-          order.id,
-          randomUUID(),
-          null,
-          order.status === 'SUBMISSION_FAILED',
-          order.updatedAt,
-        );
-      } catch {
-        this.logger.error({ event: 'paid_order_submission_deferred', orderSeq: order.id });
-      }
-    }
+    await Promise.all(
+      pending.rows.map(async (order) => {
+        try {
+          await this.submissions.submitPaidOrder(
+            order.id,
+            randomUUID(),
+            null,
+            order.status === 'SUBMITTING_FAILED',
+            order.updatedAt,
+          );
+        } catch {
+          this.logger.error({ event: 'paid_order_submission_deferred', orderSeq: order.id });
+        }
+      }),
+    );
   }
   async onModuleDestroy() {
     this.stopped = true;

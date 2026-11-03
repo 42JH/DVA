@@ -210,7 +210,8 @@ export class OrdersRepository {
          OR ($5::text IS NOT NULL AND (strpos(p.origin_phone_number,$5)>0 OR strpos(p.destination_phone_number,$5)>0)))))
         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
         AND ($3::timestamptz IS NULL OR o.created_at < $3)
-        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','ACCEPTED')))`,
+        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','ACCEPTED'))
+         OR ($4='SUBMISSION_FAILED' AND o.status='SUBMITTING_FAILED'))`,
       [
         query.q || null,
         query.from ?? null,

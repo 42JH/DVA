@@ -1,8 +1,8 @@
 # 045 적용과 인프라 후속 항목
 
-## DB 검증문 수정 제안
+## DB 검증문 반영
 
-현재 `infra/database/verify.sql`은 memberships의 `(organization_seq,employee_no)`가 UNIQUE **constraint**인지 확인한다. 045는 같은 열의 **활성 행 UNIQUE index**로 바꾸므로 기존 검증문은 정상 스키마를 거절한다. 검사를 제거하지 않고 아래 검사로 교체해야 한다.
+`infra/database/verify.sql`의 memberships `(organization_seq,employee_no)` 검사는 045의 **활성 행 UNIQUE index**를 검증하도록 반영했다. 기존 제약 검사를 제거해 우회하지 않고 아래 조건으로 교체했다.
 
 ```sql
 IF NOT EXISTS(SELECT 1 FROM pg_index i WHERE i.indexrelid=to_regclass('public.memberships_organization_seq_employee_no_key')
@@ -13,6 +13,8 @@ END IF;
 ```
 
 이와 함께 045 적용 기록, deleted_at 컬럼, 주문 생성자/완료 시각·페르소나 작성자 스냅샷, 통화 정리 lease, 보관 기간 인덱스를 검사한다. 기존 테이블 29개·FK 25개·업무 트리거 10개 검사는 그대로 유지한다. 사용자가 이 파일 하나의 수정 범위를 별도로 승인했다.
+
+후속 046의 최초/마지막 전송 시각, SUBMITTING_FAILED 상태 제약, 재시도 인덱스와 적용 기록도 같은 검증문에서 확인한다. 045·046을 적용한 뒤 새 앱을 실행하며 구버전 앱과 혼용하지 않는다.
 
 ## 운영 설정
 

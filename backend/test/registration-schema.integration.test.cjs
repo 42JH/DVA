@@ -75,6 +75,17 @@ test('deployment verification requires active-row employee uniqueness', () =>
     'Active organization/employee uniqueness missing',
   ));
 
+test('deployment verification requires migration 046 and the persistent retry window', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",
+    'DROP INDEX orders_submission_retry_idx',
+    'ALTER TABLE orders DROP COLUMN submission_first_attempt_at',
+    'ALTER TABLE orders DROP COLUMN submission_last_attempt_at',
+    'ALTER TABLE orders DROP CONSTRAINT orders_status_check',
+  ])
+    await verify([sql], 'Order submission retry schema or migration missing');
+});
+
 test('deployment verification requires migration 037 and an undecided payment default', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='037-undecided-order-payment-method.sql'",

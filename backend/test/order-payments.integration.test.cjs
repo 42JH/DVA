@@ -398,7 +398,7 @@ test('Dver rejection preserves payment; admin retries only Dver and keeps the pi
     rejectDver = false;
   }
   const before = await stored(r.orderSeq);
-  assert.equal(before.status, 'SUBMISSION_FAILED');
+  assert.equal(before.status, 'SUBMITTING_FAILED');
   assert.ok(before.paid_at);
   assert.equal((await request(`/admin/orders/${r.orderSeq}/retry`, {}, true)).status, 200);
   const after = await stored(r.orderSeq);
@@ -620,7 +620,7 @@ test('payment completion notice is independent of missing Dver configuration and
     rejectDver = false;
   }
   await worker.run();
-  assert.equal((await stored(failed.orderSeq)).status, 'SUBMISSION_FAILED');
+  assert.equal((await stored(failed.orderSeq)).status, 'SUBMITTING_FAILED');
   assert.equal(completionMessages(fid).length, 1);
   assert.ok(!completionMessages(fid)[0].includes('접수가 완료'));
 });

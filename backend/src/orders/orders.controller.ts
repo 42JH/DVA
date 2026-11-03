@@ -548,7 +548,7 @@ export class OrdersController {
   })
   @ApiOkResponse({
     description:
-      '결과 저장 완료. ACCEPTED만 접수 성공이며 notPaid는 결제 대기, SUBMISSION_FAILED는 관리자 재접수 대상입니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
+      '결과 저장 완료. ACCEPTED만 접수 성공이며 notPaid는 결제 대기, SUBMITTING_FAILED는 10분 기한 안의 자동 재시도 중 실패, SUBMISSION_FAILED는 자동 재시도가 끝난 최종 실패입니다. 접수 참고번호·확인 시각은 주문 상세에서 조회합니다.',
     schema: {
       type: 'object',
       required: ['data', 'meta'],
@@ -560,7 +560,7 @@ export class OrdersController {
   })
   @ApiAcceptedResponse({
     description:
-      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 1분 넘게 갱신되지 않은 SUBMITTING은 이 API 재호출 시 SUBMISSION_FAILED로 전환합니다.',
+      'SUBMITTING: 처리 중 또는 결과 저장 미확정. Location의 상세를 조회합니다. 전송 시작 후 10초가 지난 미확정 시도는 SUBMITTING_FAILED로 복구하며 최초 전송 후 10분이 끝나면 SUBMISSION_FAILED로 자동 재시도를 종료합니다.',
     headers: {
       Location: {
         description: '현재 주문 상세 URL.',
