@@ -392,7 +392,6 @@ Jenkins의 Backend checks 단계가 성공한 뒤에만 이미지 패키징과 �
 | GET /api/auth/me | 200 `{ data: { adminUserSeq, loginId, name, role, status }, meta }` |
 | GET /api/admins | SYSTEM_ADMIN, limit/offset/role/status 필터. `{ data, hasNext, total_count }` |
 | PATCH /api/admins/:id | SYSTEM_ADMIN, role 변경·PENDING → ACTIVE 승인·ACTIVE ↔ INACTIVE 전환, 204 |
-| PATCH /api/admins/:id/role | SYSTEM_ADMIN, `{ role: "OPERATOR" \| "SUPERVISOR" }`, 상태 유지, 204 |
 | POST /api/auth/signup | loginId/password/name으로 OPERATOR/PENDING 신청, 204 |
 | PATCH /api/auth/password | currentPassword/newPassword/newPasswordConfirm, 204 |
 | PATCH /api/admins/:id/password | SYSTEM_ADMIN, 본문 없이 dva1234로 초기화·대상 전체 세션 종료, 204 |
@@ -442,7 +441,7 @@ AuthModule은 인증과 권한 변경의 HTTP 흐름을 소유한다. AdminAcces
 동시 변경은 잠금 순서에 따라 처리하며 오래된 세션의 후속 변경은 401이 될 수 있다.
 이미 인증을 마친 실행 중 요청은 소급 취소하지 않는다. 두 권한 변경 경로 모두 OPERATOR ↔ SUPERVISOR만 허용한다.
 SYSTEM_ADMIN을 대상으로 권한을 변경하면 403이고 SYSTEM_ADMIN으로 승격하는 입력은 400이다.
-전용 `/admins/:id/role`은 `role`만 필수로 받으며 계정 상태를 변경하지 않는다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
+`PATCH /admins/:id`에 `role`만 전달하면 계정 상태를 유지한다. 변경된 권한은 기존 세션의 다음 요청부터 반영한다.
 PENDING은 가입 대기 전용이고 ACTIVE→PENDING 변경은 허용하지 않는다.
 기존 PATCH /api/admins/:id의 status로 OPERATOR·SUPERVISOR의 ACTIVE ↔ INACTIVE를 전환한다.
 SYSTEM_ADMIN 본인·타인의 ACTIVE ↔ INACTIVE 전환은 403이며 기존 권한 변경·삭제 보호도 유지한다.

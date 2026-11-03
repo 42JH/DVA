@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, ValidateIf } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
@@ -36,13 +36,4 @@ export class UpdateAdminDto {
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(ADMIN_STATUSES)
   status?: AdminStatus;
-}
-export class UpdateAdminRoleDto {
-  @ApiProperty({
-    description: '변경할 권한. SYSTEM_ADMIN의 권한은 변경할 수 없습니다.',
-    enum: ASSIGNABLE_ADMIN_ROLES,
-    example: 'SUPERVISOR',
-  })
-  @IsIn(ASSIGNABLE_ADMIN_ROLES)
-  role!: AssignableAdminRole;
 }

@@ -68,7 +68,7 @@ AI 생성·취소는 AI, 관리자 페이지 변경·재접수 시작은 ADMIN(�
 | --- | --- | --- |
 | 최초 관리자 CLI, POST /auth/signup | ADMIN_BOOTSTRAP, ADMIN_SIGNUP | ADMIN_USER |
 | POST /auth/login, /auth/logout | ADMIN_LOGIN, ADMIN_LOGOUT | ADMIN_USER |
-| PATCH /admins/{id}, /admins/{id}/role | ADMIN_ACCESS_CHANGED | ADMIN_USER |
+| PATCH /admins/{id} | ADMIN_ACCESS_CHANGED | ADMIN_USER |
 | PATCH /auth/password, /admins/{id}/password | ADMIN_PASSWORD_CHANGED | ADMIN_USER |
 | DELETE /admins/{id} | ADMIN_DELETED | ADMIN_USER |
 | 기업 등록·수정 | ORGANIZATION_CREATED, ORGANIZATION_UPDATED | ORGANIZATION |

@@ -711,10 +711,10 @@ test('concurrent self-demotions cannot change either system administrator', asyn
     '2',
   );
 });
-test('dedicated role change requires an active system administrator', async () => {
+test('role change through admin update requires an active system administrator', async () => {
   const target = await account('accessTarget');
   for (const [method, path, body] of [
-    ['PATCH', `/api/admins/${target.id}/role`, { role: 'SUPERVISOR' }],
+    ['PATCH', `/api/admins/${target.id}`, { role: 'SUPERVISOR' }],
   ]) {
     assert.equal((await call(method, path, body)).status, 401);
     assert.equal((await call(method, path, body, 'dva_session=invalid')).status, 401);
@@ -732,12 +732,12 @@ test('dedicated role change requires an active system administrator', async () =
   );
 });
 
-test('dedicated role changes take effect on existing sessions without changing account status', async () => {
+test('role-only admin updates take effect on existing sessions without changing account status', async () => {
   const system = await account('roleManager', 'SYSTEM_ADMIN');
   const session = (await login(system)).session;
   const target = await account('roleTarget');
   const targetSession = (await login(target)).session;
-  const path = `/api/admins/${target.id}/role`;
+  const path = `/api/admins/${target.id}`;
   assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
   const promoted = await call('PATCH', path, { role: 'SUPERVISOR' }, session);
   assert.equal(promoted.status, 204);
@@ -751,7 +751,7 @@ test('dedicated role changes take effect on existing sessions without changing a
   assert.equal((await call('GET', '/api/role-check/edit', undefined, targetSession)).status, 403);
   const pending = await account('pendingRole', 'OPERATOR', 'PENDING');
   assert.equal(
-    (await call('PATCH', `/api/admins/${pending.id}/role`, { role: 'SUPERVISOR' }, session)).status,
+    (await call('PATCH', `/api/admins/${pending.id}`, { role: 'SUPERVISOR' }, session)).status,
     204,
   );
   assert.equal((await login(pending)).status, 403);
@@ -765,30 +765,20 @@ test('dedicated role changes take effect on existing sessions without changing a
   );
 });
 
-test('both role routes protect system administrators and forbid promotion to system administrator', async () => {
+test('admin updates protect system administrators and forbid promotion to system administrator', async () => {
   const system = await account('roleProtection', 'SYSTEM_ADMIN');
   const session = (await login(system)).session;
   const operator = await account('noSystem');
   for (const status of ['ACTIVE', 'PENDING']) {
     const target = await account(`system${status}`, 'SYSTEM_ADMIN', status);
-    for (const suffix of ['', '/role']) {
-      assert.equal(
-        (await call('PATCH', `/api/admins/${target.id}${suffix}`, { role: 'OPERATOR' }, session))
-          .status,
-        403,
-      );
-      assert.equal(
-        (
-          await call(
-            'PATCH',
-            `/api/admins/${operator.id}${suffix}`,
-            { role: 'SYSTEM_ADMIN' },
-            session,
-          )
-        ).status,
-        400,
-      );
-    }
+    assert.equal(
+      (await call('PATCH', `/api/admins/${target.id}`, { role: 'OPERATOR' }, session)).status,
+      403,
+    );
+    assert.equal(
+      (await call('PATCH', `/api/admins/${operator.id}`, { role: 'SYSTEM_ADMIN' }, session)).status,
+      400,
+    );
     assert.deepEqual(
       (
         await db.pool.query('SELECT role,status FROM admin_users WHERE admin_user_seq=$1', [
@@ -800,28 +790,28 @@ test('both role routes protect system administrators and forbid promotion to sys
   }
 });
 
-test('dedicated role change validates its body, target and Origin', async () => {
+test('role changes through admin update validate the body, target and Origin', async () => {
   const system = await account('roleValidation', 'SYSTEM_ADMIN');
   const session = (await login(system)).session;
   const target = await account('roleInput');
-  const path = `/api/admins/${target.id}/role`;
+  const path = `/api/admins/${target.id}`;
   for (const body of [
     {},
     { role: null },
     { role: '' },
     { role: 'operator' },
     { role: 1 },
-    { role: 'SUPERVISOR', status: 'ACTIVE' },
+    { role: 'SUPERVISOR', status: 'INVALID' },
     { role: 'OPERATOR', name: 'changed' },
   ])
     assert.equal((await call('PATCH', path, body, session)).status, 400);
   for (const id of ['0', '-1', '1e2', '2147483648'])
     assert.equal(
-      (await call('PATCH', `/api/admins/${id}/role`, { role: 'SUPERVISOR' }, session)).status,
+      (await call('PATCH', `/api/admins/${id}`, { role: 'SUPERVISOR' }, session)).status,
       400,
     );
   assert.equal(
-    (await call('PATCH', '/api/admins/2147483647/role', { role: 'SUPERVISOR' }, session)).status,
+    (await call('PATCH', '/api/admins/2147483647', { role: 'SUPERVISOR' }, session)).status,
     404,
   );
   for (const Origin of ['', 'https://untrusted.invalid'])
@@ -831,11 +821,11 @@ test('dedicated role change validates its body, target and Origin', async () => 
     );
 });
 
-test('dedicated role change and its success audit commit or roll back together', async () => {
+test('role changes through admin update and their success audit commit or roll back together', async () => {
   const system = await account('roleAtomicAdmin', 'SYSTEM_ADMIN');
   const session = (await login(system)).session;
   const target = await account('roleAtomicUser');
-  const path = `/api/admins/${target.id}/role`;
+  const path = `/api/admins/${target.id}`;
   const audit = app.get(AuditService);
   const original = audit.record;
   audit.record = async () => {
@@ -859,6 +849,24 @@ test('dedicated role change and its success audit commit or roll back together',
     )
   ).rows;
   assert.deepEqual(records, [{ actor_seq: system.id, target_seq: target.id }]);
+});
+
+test('retired role-only route is absent from routing and Swagger', async () => {
+  const system = await account('retiredRoleMgr', 'SYSTEM_ADMIN');
+  const session = (await login(system)).session;
+  const target = await account('retiredRoleUser');
+  assert.equal(
+    (await call('PATCH', `/api/admins/${target.id}/role`, { role: 'SUPERVISOR' }, session)).status,
+    404,
+  );
+  assert.equal(
+    (await call('GET', '/api/auth/me', undefined, (await login(target)).session)).body.data.role,
+    'OPERATOR',
+  );
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  assert.ok(document.paths['/api/admins/{id}'].patch);
+  assert.equal(document.paths['/api/admins/{id}/role'], undefined);
+  assert.equal(document.components.schemas.UpdateAdminRoleDto, undefined);
 });
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
