@@ -1,6 +1,14 @@
 # 실시간 진행 통화 수 작업 재개 메모
 
-## 2026-11-03 인프라 설정까지 반영 — 최신 상태
+## 2026-11-03 Jenkins 인증서 전달 오류 수정
+
+- MR !205는 `c1811a8`로 develop-backend에 병합됐다. 이후 [Jenkins #90](https://13.209.59.180/jenkins/job/dva-ci-linux-validation/90/console)은 컴파일·단위·결제·DB 통합 검증 후 HTTPS 테스트 실행 준비에서 실패했고, 배포 단계는 실행되지 않았다.
+- 원인은 Jenkins agent의 임시 인증서를 별도 Docker daemon에 bind mount한 것이다. `/tmp/dva-backend-check-…/letsencrypt/live/dva-ip/fullchain.pem`은 agent에만 존재해 daemon에서 `bind source path does not exist`가 발생했다. 이전 Windows 로컬 검증은 이 파일시스템 분리 조건을 확인하지 못했다.
+- 최신 `origin/develop-backend`를 기준으로 `fix/backend-ci-certificate`에서 수정한다. `backend/scripts/check.cjs`의 운영 이미지 테스트 컨테이너를 create → 인증서 docker cp → start --attach 순서로 실행하고, 성공·실패 후 finally에서 제거한다. `NODE_EXTRA_CA_CERTS`를 통한 TLS 검증과 기존 HTTPS/SSE 테스트를 유지한다.
+- 일회용 Linux 클라이언트와 별도 Docker daemon의 파일시스템으로 같은 mount 오류를 재현했다. 인증서 파일 복사 후 내용 일치와 정상 종료, 실패 프로세스의 종료 코드 23 전달을 확인했다.
+- 수정 후 같은 분리 환경에서 `node backend/scripts/check.cjs`가 종료 코드 0으로 완료됐다. 컴파일·ESLint·Prettier, 단위 117개·결제 21개·DB 통합 611개·두 nginx/HTTPS 20개, 총 **769개 통과**다. CI 선택 테스트 **5개 통과**로 합계 **774개**, 실패·취소·건너뜀 0개다. `infra/observability/test.mjs`와 `infra/payment-test/check.mjs`도 통과했다. 이는 로컬 Linux 재현 환경의 결과이며 원격 Jenkins 재실행·운영 배포 결과와 구분한다.
+
+## 2026-11-03 인프라 설정까지 반영 — 당시 상태
 
 - 사용자의 요청으로 백엔드 구현을 `2a5322b` (`feat: 실시간 진행 통화 수 조회 및 변경 알림 추가`)에 먼저 커밋했다.
 - 이어서 사용자가 허용한 인프라 범위에서 `infra/nginx/default.prod.conf`와 `infra/https/https.conf`에 SSE 전용 location을 추가했다. 스트림 경로의 버퍼링·캐시 해제, 연결 헤더, 30초 수신 대기시간을 적용한다. 이 변경과 관련 문서·검증 도구를 후속 커밋으로 분리한다.
