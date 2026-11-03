@@ -12,6 +12,7 @@ const runtimeImage = run + ':runtime';
 const application = run + '-app';
 const proxy = run + '-proxy';
 const httpsProxy = run + '-https';
+const runtimeTests = run + '-runtime-tests';
 const root = path.resolve(__dirname, '..');
 const temporary = mkdtempSync(path.join(tmpdir(), run + '-'));
 const password = randomBytes(32).toString('hex');
@@ -23,7 +24,8 @@ let networkCreated = false,
 let runtimeCreated = false,
   applicationCreated = false,
   proxyCreated = false,
-  httpsCreated = false;
+  httpsCreated = false,
+  runtimeTestsCreated = false;
 function docker(args, required = true) {
   const result = spawnSync('docker', args, { stdio: 'inherit' });
   if (required && (result.error || result.status !== 0))
@@ -238,8 +240,9 @@ try {
   docker(['start', httpsProxy]);
   docker(['exec', httpsProxy, 'nginx', '-t']);
   docker([
-    'run',
-    '--rm',
+    'create',
+    '--name',
+    runtimeTests,
     '--network',
     network,
     '--memory',
@@ -254,13 +257,15 @@ try {
     'TEST_HTTPS_API_ROOT=https://backend/api',
     '-e',
     'NODE_EXTRA_CA_CERTS=/test-proxy-ca.pem',
-    '--mount',
-    `type=bind,source=${certificate},target=/test-proxy-ca.pem,readonly`,
     image,
     'node',
     '--test',
     'test/runtime.integration.test.cjs',
   ]);
+  runtimeTestsCreated = true;
+  // Jenkins and its Docker daemon have separate filesystems; stream the client-local certificate.
+  docker(['cp', certificate, `${runtimeTests}:/test-proxy-ca.pem`]);
+  docker(['start', '--attach', runtimeTests]);
   docker(['exec', proxy, 'nginx', '-t']);
   docker([
     'exec',
@@ -278,6 +283,7 @@ try {
   console.error(error.message);
   process.exitCode = 1;
 } finally {
+  if (runtimeTestsCreated) docker(['rm', '-f', runtimeTests], false);
   if (httpsCreated) docker(['rm', '-f', httpsProxy], false);
   if (proxyCreated) docker(['rm', '-f', proxy], false);
   if (applicationCreated) docker(['rm', '-f', application], false);
