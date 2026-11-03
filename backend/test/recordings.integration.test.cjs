@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worker');
@@ -18,13 +18,7 @@ process.env.S3_RECORDINGS_BUCKET = '';
 process.env.PBX_WEBHOOK_TOKEN = randomUUID();
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 const apps = [],
   urls = [],
   workers = [],

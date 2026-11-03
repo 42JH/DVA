@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -20,13 +20,7 @@ const { testMembership } = require('./helpers/membership.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['127.0.0.1', 'db'].includes(process.env.DB_HOST));
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 let app, upstream, base, origin, cookie, customerId, worker, payments, client;
 const calls = [],
   messages = [],

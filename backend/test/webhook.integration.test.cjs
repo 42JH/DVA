@@ -2,7 +2,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const { NestFactory } = require('@nestjs/core');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 
 // The runner creates a disposable PostgreSQL container. Never run this against production.
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -24,13 +24,7 @@ const payload = {
 };
 
 before(async () => {
-  pool = new Pool({
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+  pool = createTestPool();
   for (let attempt = 0; ; attempt++) {
     try {
       await pool.query('SELECT 1');

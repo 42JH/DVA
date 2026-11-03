@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomInt, randomUUID } = require('node:crypto');
-const { Pool } = require('pg');
+const { createTestPool } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { S3Client, HeadObjectCommand } = require('@aws-sdk/client-s3');
@@ -18,13 +18,7 @@ const { hashPassword } = require('../dist/auth/password');
 const { callerPhone } = require('../dist/common/caller-phone');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const { RecordingPlaybackService } = require('../dist/consultations/recording-playback.service');
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
+const pool = createTestPool();
 const password = 'calls-test-only-password';
 const origin = 'http://localhost:5173';
 const logs = [];
