@@ -1,5 +1,7 @@
 # 미사용 계약 제거 연동 안내
 
+파트별 전달본: [AI 현재 연동 명세](ai-integration-current.md), [프론트 현재 연동 명세](frontend-integration-current.md). 최신 호출 흐름·요청·응답·표시·오류 처리와 기존 변경을 함께 정리했다.
+
 ## AI
 
 - `GET /api/ai/faqs/{id}`를 제거한다. 단건도 `GET /api/ai/faqs?faqEntrySeqs={id}`로 요청한다.
