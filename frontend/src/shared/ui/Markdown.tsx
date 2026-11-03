@@ -5,11 +5,12 @@ import remarkGfm from 'remark-gfm'
 // 마크다운 글 (11/01 사용자: FAQ 답변의 | 표 |가 글자 그대로 보임) — 표 · 목록 · 굵게 · 링크만 쓰는 정도
 // HTML 태그는 해석하지 않음(react-markdown 기본). 줄바꿈 한 번 = 줄바꿈(remark-breaks) — 답변을 textarea 에 쓰던 그대로 보이게
 // 09 FAQ 답변 띠에서 씀. 글꼴 · 색은 바깥 className 으로
+// ~ 하나는 취소선 아님(singleTilde: false) — '09:00~18:00 … 2~3일'처럼 범위가 두 번 나오면 그 사이가 취소선이 됨 (11/03). ~~ 두 개는 그대로 취소선
 export function Markdown({ text, className = '' }: { text: string; className?: string }) {
   return (
     <div className={`min-w-0 break-words [&>*+*]:mt-2 ${className}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
+        remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkBreaks]}
         components={{
           table: ({ children }) => (
             <div className="overflow-x-auto">
