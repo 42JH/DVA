@@ -49,7 +49,3 @@ export class FaqResponseDto {
   @ApiProperty({ type: FaqDto }) data!: FaqDto;
   @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
 }
-export class AgentFaqResponseDto {
-  @ApiProperty({ type: AgentFaqDto }) data!: AgentFaqDto;
-  @ApiProperty({ type: RequestMetaDto }) meta!: RequestMetaDto;
-}

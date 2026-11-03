@@ -109,7 +109,7 @@ test('21 seed: CLI inserts 32 pairs in source order, records the chosen admin an
   );
   assert.deepEqual(await f.counts(), count);
   assert.equal(
-    (await (await f.ai('/' + rows[0].faq_entry_seq)).json()).data.answer,
+    (await (await f.ai('?faqEntrySeqs=' + rows[0].faq_entry_seq)).json()).data[0].answer,
     '관리자가 수정한 답변',
   );
 });
@@ -129,7 +129,7 @@ test('21 seed: concurrent initializers create one batch and any existing FAQ pre
   const id = await f.createdId({ category: '기타', question: '운영 FAQ', answer: '보존' });
   assert.deepEqual(await seedFaqs(f.pool, f.loginIds[0], entries), { inserted: 0, skipped: true });
   assert.equal((await f.counts()).faqs, 1);
-  assert.equal((await (await f.ai('/' + id)).json()).data.answer, '보존');
+  assert.equal((await (await f.ai('?faqEntrySeqs=' + id)).json()).data[0].answer, '보존');
 });
 
 test('21 seed: an in-flight administrator insert wins without being overwritten by first-time loading', async () => {

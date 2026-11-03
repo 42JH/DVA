@@ -145,7 +145,7 @@ test('027 also supports an empty installation and enforces required category wit
   });
 });
 
-test('administrator category storage and filtering leave AI list/detail schemas and query fields unchanged', async () => {
+test('administrator category storage and filtering leave AI list fields unchanged', async () => {
   const marker = f.marker();
   const ids = [];
   for (const category of ['접수', '주소', '접수'])
@@ -178,7 +178,7 @@ test('administrator category storage and filtering leave AI list/detail schemas 
     await f.error(await f.get('/api/faqs' + suffix), 400, 'INVALID_REQUEST');
   await f.error(await f.ai('?category=접수'), 400, 'INVALID_REQUEST');
   for (const data of [
-    (await (await f.ai('/' + ids[0])).json()).data,
+    ...(await (await f.ai('?faqEntrySeqs=' + ids[0])).json()).data,
     ...(await (await f.ai('?q=' + marker)).json()).data,
   ])
     assert.deepEqual(Object.keys(data).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);

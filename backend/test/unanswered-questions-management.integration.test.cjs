@@ -181,7 +181,7 @@ test('conversion atomically stores the required FAQ category, original question 
   assert.equal(audits[0].actor_seq, f.ids[0]);
   assert.deepEqual(audits[0].metadata, {});
   assert.equal(notes[0].request_id, audits[0].request_id);
-  const ai = (await (await f.ai('/' + faqId)).json()).data;
+  const ai = (await (await f.ai('?faqEntrySeqs=' + faqId)).json()).data[0];
   assert.deepEqual(Object.keys(ai).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
   assert.equal(ai.question, input.question);
   assert.equal(
