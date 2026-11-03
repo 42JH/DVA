@@ -17,16 +17,6 @@ export class OrderSubmissionRepository {
     ).rows[0].exists;
   }
 
-  async isCompanyCustomer(client: PoolClient, customerId: number): Promise<boolean> {
-    const result = await client.query(
-      `SELECT m.membership_seq FROM memberships m JOIN organizations o USING(organization_seq)
-         WHERE m.customer_seq=$1 AND m.status='ACTIVE' AND o.status='ACTIVE' AND m.deleted_at IS NULL AND o.deleted_at IS NULL
-         FOR SHARE OF m,o`,
-      [customerId],
-    );
-    return result.rowCount === 1;
-  }
-
   async start(client: PoolClient, id: number, expectedUpdatedAt?: string) {
     const result = await client.query<{ attempt: string; timeoutMs: number }>(
       `UPDATE orders SET status='SUBMITTING',
