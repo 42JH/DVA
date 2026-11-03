@@ -79,6 +79,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name IN ('submission_first_attempt_at','submission_last_attempt_at') AND udt_name='timestamptz' AND is_nullable='YES')=2 AND to_regclass('public.orders_submission_retry_idx') IS NOT NULL",
       );
       assert.equal(submissionRetry.rowCount, 1, 'Apply migration 046 to the isolated DB first');
+      const unusedSchema = await client.query(
+        "SELECT 1 WHERE to_regclass('public.handoff_requests') IS NULL AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND ((table_name='company_pins' AND column_name='search_text') OR (table_name='call_sessions' AND column_name='end_reason')))",
+      );
+      assert.equal(unusedSchema.rowCount, 1, 'Apply migration 047 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

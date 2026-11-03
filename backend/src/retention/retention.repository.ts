@@ -116,7 +116,6 @@ export class RetentionRepository {
       await client.query('DELETE FROM unanswered_questions WHERE call_session_seq=$1', [claim.id]);
       await client.query('DELETE FROM call_utterances WHERE call_session_seq=$1', [claim.id]);
       await client.query('DELETE FROM call_analyses WHERE call_session_seq=$1', [claim.id]);
-      await client.query('DELETE FROM handoff_requests WHERE call_session_seq=$1', [claim.id]);
       await client.query('DELETE FROM recordings WHERE call_session_seq=$1', [claim.id]);
       await client.query('DELETE FROM empty_ai_order_results WHERE call_session_seq=$1', [
         claim.id,

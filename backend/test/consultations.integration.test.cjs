@@ -55,21 +55,13 @@ async function call(input = {}) {
     orderSeq: null,
     startedAt: '2026-10-28T01:00:00.000Z',
     endedAt: '2026-10-28T01:03:00.000Z',
-    endReason: null,
     ...input,
   };
   const id = (
     await pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at,end_reason)
-     VALUES($1,$2,$3,$4,$5,$6) RETURNING call_session_seq`,
-      [
-        row.providerCallId,
-        row.callerPhoneNumber,
-        row.orderSeq,
-        row.startedAt,
-        row.endedAt,
-        row.endReason,
-      ],
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_seq,started_at,ended_at)
+     VALUES($1,$2,$3,$4,$5) RETURNING call_session_seq`,
+      [row.providerCallId, row.callerPhoneNumber, row.orderSeq, row.startedAt, row.endedAt],
     )
   ).rows[0].call_session_seq;
   return {
@@ -80,25 +72,7 @@ async function call(input = {}) {
     customerSeq: null,
     customerName: null,
     analysis: null,
-    handoff: null,
   };
-}
-async function handoff(row, status = 'REQUESTED') {
-  const value = {
-    reason: '고객 요청',
-    status,
-    assignedAdminUserSeq: null,
-    summaryText: null,
-    requestedAt: '2026-10-28T01:02:00.000Z',
-  };
-  const id = (
-    await pool.query(
-      `INSERT INTO handoff_requests(call_session_seq,reason,status,requested_at)
-     VALUES($1,$2,$3,$4) RETURNING handoff_request_seq`,
-      [row.callSessionSeq, value.reason, status, value.requestedAt],
-    )
-  ).rows[0].handoff_request_seq;
-  row.handoff = { handoffRequestSeq: id, ...value };
 }
 const list = (query = {}, headers = operator.headers) =>
   fetch(
@@ -128,9 +102,7 @@ async function error(response, status, code) {
 }
 before(async () => {
   // 기존 통합 검증이 적용한 격리 DB만 사용한다.
-  assert.ok(
-    (await pool.query("SELECT to_regclass('public.handoff_requests') AS name")).rows[0].name,
-  );
+  assert.ok((await pool.query("SELECT to_regclass('public.call_sessions') AS name")).rows[0].name);
   app = await NestFactory.create(AppModule, { logger: false });
   configureApplication(app, { log: (entry) => logs.push(entry) });
   await app.listen(0, '127.0.0.1');
@@ -172,12 +144,11 @@ test('pending administrators and expired sessions cannot read call records', asy
   await error(await list({}, expired.headers), 401, 'UNAUTHORIZED');
 });
 
-test('list preserves nullable call fields and distinguishes absent/requested/connected/failed handoffs', async () => {
+test('list preserves nullable call fields and excludes retired response fields', async () => {
   const phone = phoneNumber();
   const rows = [];
-  for (const status of [null, 'REQUESTED', 'CONNECTED', 'FAILED']) {
+  for (let index = 0; index < 4; index++) {
     const row = await call({ callerPhoneNumber: phone });
-    if (status) await handoff(row, status);
     rows.unshift(row);
   }
   assert.deepEqual(await result(await list({ callerPhoneNumber: phone })), {
@@ -185,29 +156,23 @@ test('list preserves nullable call fields and distinguishes absent/requested/con
     hasNext: false,
     total_count: rows.length,
   });
-  for (const status of ['REQUESTED', 'CONNECTED', 'FAILED'])
-    assert.deepEqual(
-      (await result(await list({ callerPhoneNumber: phone, handoffStatus: status }))).data,
-      rows.filter((row) => row.handoff?.status === status),
-    );
   const unknown = await call({ callerPhoneNumber: phone, startedAt: null, endedAt: null });
   const data = (await result(await list({ callerPhoneNumber: phone }))).data;
   assert.deepEqual(data.at(-1), unknown);
-  assert.equal(data.at(-1).endReason, null);
+  assert.equal(Object.hasOwn(data.at(-1), 'endReason'), false);
+  assert.equal(Object.hasOwn(data.at(-1), 'handoff'), false);
   assert.equal(Object.hasOwn(data.at(-1), 'status'), false);
 });
 
-test('list combines order, exact phone, end reason and handoff filters without changing stored data', async () => {
+test('list combines order, exact phone and order status filters and treats SQL search text literally', async () => {
   const orderSeq = (await pool.query('INSERT INTO orders DEFAULT VALUES RETURNING order_seq'))
     .rows[0].order_seq;
-  const row = await call({ orderSeq, endReason: 'customer_ended' });
-  await handoff(row, 'CONNECTED');
-  await call({ callerPhoneNumber: row.callerPhoneNumber, endReason: 'customer_ended' });
+  const row = await call({ orderSeq });
+  await call({ callerPhoneNumber: row.callerPhoneNumber });
   const query = {
     orderSeq,
     callerPhoneNumber: row.callerPhoneNumber,
-    endReason: row.endReason,
-    handoffStatus: 'CONNECTED',
+    orderStatus: 'COLLECTING',
   };
   assert.deepEqual(await result(await list(query)), {
     data: [row],
@@ -215,8 +180,7 @@ test('list combines order, exact phone, end reason and handoff filters without c
     total_count: 1,
   });
   for (const changed of [
-    { endReason: 'CUSTOMER_ENDED' },
-    { handoffStatus: 'FAILED' },
+    { orderStatus: 'CANCELLED' },
     { callerPhoneNumber: row.callerPhoneNumber.slice(0, -1) },
   ])
     assert.deepEqual(await result(await list({ ...query, ...changed })), {
@@ -225,8 +189,19 @@ test('list combines order, exact phone, end reason and handoff filters without c
       total_count: 0,
     });
   const literal = "test' OR true --";
-  const quoted = await call({ endReason: literal });
-  assert.deepEqual((await result(await list({ endReason: literal }))).data, [quoted]);
+  const quoted = await call();
+  const customer = (
+    await pool.query(
+      "INSERT INTO customers(name,phone_number,status) VALUES($1,$2,'ACTIVE') RETURNING customer_seq",
+      [literal, quoted.callerPhoneNumber],
+    )
+  ).rows[0].customer_seq;
+  await pool.query('UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1', [
+    quoted.callSessionSeq,
+    customer,
+  ]);
+  Object.assign(quoted, { customerSeq: customer, customerName: literal });
+  assert.deepEqual((await result(await list({ q: literal }))).data, [quoted]);
   assert.equal(
     (await pool.query('SELECT status FROM orders WHERE order_seq=$1', [orderSeq])).rows[0].status,
     'COLLECTING',
@@ -263,11 +238,10 @@ test('date filters use actual started_at with inclusive from and exclusive to, w
   assert.deepEqual(rows, { data: [first], hasNext: false, total_count: 1 });
 });
 
-test('pagination is deterministic for equal timestamps and null times, with no duplicate handoff rows', async () => {
+test('pagination is deterministic for equal timestamps and null times', async () => {
   const phone = phoneNumber();
   const first = await call({ callerPhoneNumber: phone });
   const second = await call({ callerPhoneNumber: phone });
-  await handoff(second);
   const unknown = await call({ callerPhoneNumber: phone, startedAt: null, endedAt: null });
   const expected = [second, first, unknown];
   for (let offset = 0; offset < 3; offset++) {
@@ -295,8 +269,10 @@ test('list rejects invalid, repeated and unsupported query fields', async () => 
     'callerPhoneNumber=1212%2B5551234',
     'callerPhoneNumber=',
     'endReason=',
+    'endReason=NORMAL',
     'endReason=%20',
     'handoffStatus=DONE',
+    'handoffStatus=CONNECTED',
     'handoffStatus=REQUESTED&handoffStatus=FAILED',
     'from=2026-02-30T00:00:00Z',
     'from=2026-10-28',
@@ -317,10 +293,11 @@ test('list rejects invalid, repeated and unsupported query fields', async () => 
 });
 
 test('request logs do not contain phone numbers, provider IDs or search text', async () => {
-  const row = await call({ endReason: randomUUID() });
-  await result(await list({ callerPhoneNumber: row.callerPhoneNumber, endReason: row.endReason }));
+  const row = await call();
+  const search = randomUUID();
+  await result(await list({ callerPhoneNumber: row.callerPhoneNumber, q: search }));
   const text = JSON.stringify(logs);
-  for (const value of [row.callerPhoneNumber, row.providerCallId, row.endReason])
+  for (const value of [row.callerPhoneNumber, row.providerCallId, search])
     assert.equal(text.includes(value), false);
 });
 
@@ -337,18 +314,11 @@ async function recording(callId) {
   return { ...row, createdAt: row.createdAt.toISOString() };
 }
 
-test('detail returns only the selected call, saved handoff data and recordings with signed URLs', async (t) => {
+test('detail returns only the selected call and recordings with signed URLs', async (t) => {
   const { commands } = playbackStorage(t);
   const orderSeq = (await pool.query('INSERT INTO orders DEFAULT VALUES RETURNING order_seq'))
     .rows[0].order_seq;
   const row = await call({ orderSeq });
-  await handoff(row, 'CONNECTED');
-  const summaryText = '고객 배송지 문의';
-  await pool.query(
-    'UPDATE handoff_requests SET assigned_admin_user_seq=$2,summary_text=$3 WHERE call_session_seq=$1',
-    [row.callSessionSeq, operator.id, summaryText],
-  );
-  Object.assign(row.handoff, { assignedAdminUserSeq: operator.id, summaryText });
   const first = await recording(row.callSessionSeq);
   const second = await recording(row.callSessionSeq);
   await recording((await call()).callSessionSeq);
@@ -367,10 +337,9 @@ test('detail returns only the selected call, saved handoff data and recordings w
     assert.equal(JSON.stringify(logs).includes(saved.url), false);
   }
   assert.equal(JSON.stringify(body).includes('objectKey'), false);
-  assert.equal(JSON.stringify(logs).includes(summaryText), false);
 });
 
-test('detail preserves missing times, phone, order and handoff while returning an empty recording list', async () => {
+test('detail preserves missing times, phone and order while returning an empty recording list', async () => {
   const row = await call({ callerPhoneNumber: null, startedAt: null, endedAt: null });
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
     call: callInfo(row),
@@ -669,11 +638,20 @@ test('one missing recording does not hide the call or another playable recording
   assert.ok(Date.parse(body.data.recordings[1].expiresAt) > Date.now());
 });
 
-test('standalone playback endpoint and its Swagger schemas are removed', async () => {
+test('legacy call fields, filters and standalone playback are absent from Swagger', async () => {
   const spec = await (await fetch(base + '/api/docs-json')).json();
   assert.equal(spec.paths['/api/recordings/{id}/url'], undefined);
   assert.equal(spec.components.schemas.PlaybackDto, undefined);
   assert.equal(spec.components.schemas.PlaybackResponseDto, undefined);
+  assert.equal(spec.components.schemas.HandoffDto, undefined);
+  for (const field of ['endReason', 'handoff'])
+    assert.equal(spec.components.schemas.CallDto.properties[field], undefined);
+  for (const field of ['endReason', 'handoffStatus'])
+    assert.equal(
+      spec.paths['/api/calls'].get.parameters.some((p) => p.name === field),
+      false,
+    );
+  assert.ok(spec.components.schemas.CallAnalysisDto.properties.hasHandoffRequest);
   for (const headers of [{}, operator.headers])
     await error(await fetch(base + '/api/recordings/1/url', { headers }), 404, 'NOT_FOUND');
 });

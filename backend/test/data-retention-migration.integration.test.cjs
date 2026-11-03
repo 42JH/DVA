@@ -16,6 +16,152 @@ const connection = {
   password: process.env.DB_PASSWORD,
 };
 
+test('047 removes legacy schema atomically and preserves addresses, call times, AI handoff flags, FKs and triggers', async () => {
+  const name = 'dva_unused_' + randomUUID().replaceAll('-', '');
+  assert.match(name, /^dva_unused_[a-f0-9]{32}$/);
+  const owner = new Pool({ ...connection, database: process.env.DB_NAME });
+  let probe;
+  try {
+    await owner.query(`CREATE DATABASE ${name}`);
+    probe = new Pool({ ...connection, database: name });
+    const directory = join(__dirname, '../migrations');
+    const client = await probe.connect();
+    try {
+      await client.query('BEGIN');
+      for (const file of readdirSync(directory)
+        .filter((file) => /^\d{3}-.+\.sql$/.test(file) && file < '047-')
+        .sort())
+        await client.query(readFileSync(join(directory, file), 'utf8'));
+      const address = {
+        name: '보존 수령인',
+        phoneNumber: '01012345678',
+        roadAddress: '보존 도로',
+        jibunAddress: '보존 지번',
+        detailAddress: '101호',
+        dongName: '보존동',
+        postalCode: '01234',
+      };
+      const customer = (
+        await client.query(
+          "INSERT INTO customers(name,phone_number,status) VALUES('보존 고객','01012345678','ACTIVE') RETURNING customer_seq",
+        )
+      ).rows[0].customer_seq;
+      const company = (
+        await client.query(
+          "INSERT INTO organizations(name,status) VALUES('보존 기업','ACTIVE') RETURNING organization_seq",
+        )
+      ).rows[0].organization_seq;
+      await client.query(
+        'INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)',
+        [customer, '개인 검색 보존', address],
+      );
+      await client.query(
+        'INSERT INTO company_pins(organization_seq,label,address_data) VALUES($1,$2,$3)',
+        [company, '기업 주소 보존', address],
+      );
+      const call = (
+        await client.query(
+          "INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,end_reason) VALUES('legacy-call','01012345678',statement_timestamp(),statement_timestamp(),statement_timestamp()+interval '1 minute','PBX_ENDED') RETURNING call_session_seq",
+        )
+      ).rows[0].call_session_seq;
+      await client.query(
+        "INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,has_handoff_request,payload_hash) VALUES($1,statement_timestamp(),statement_timestamp()+interval '1 minute','[]',true,repeat('a',64))",
+        [call],
+      );
+      await client.query(
+        "INSERT INTO handoff_requests(call_session_seq,reason,status,requested_at) VALUES($1,'기존 요청','REQUESTED',statement_timestamp())",
+        [call],
+      );
+      await client.query('COMMIT');
+      const snapshot = async () => ({
+        company: (await client.query("SELECT to_jsonb(p)-'search_text' AS row FROM company_pins p"))
+          .rows,
+        personal: (await client.query('SELECT * FROM personal_pins')).rows,
+        calls: (await client.query("SELECT to_jsonb(c)-'end_reason' AS row FROM call_sessions c"))
+          .rows,
+        analyses: (await client.query('SELECT * FROM call_analyses')).rows,
+        foreignKeys: (
+          await client.query(
+            "SELECT conrelid::regclass::text,conname,pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace='public'::regnamespace AND contype='f' AND conrelid::regclass::text<>'handoff_requests' ORDER BY conname",
+          )
+        ).rows,
+        triggers: (
+          await client.query(
+            "SELECT tgname,pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace) ORDER BY tgname",
+          )
+        ).rows,
+      });
+      const before = await snapshot();
+      const sql = readFileSync(join(directory, '047-remove-unused-schema.sql'), 'utf8');
+      await client.query('BEGIN');
+      await client.query(sql);
+      await assert.rejects(client.query('SELECT 1/0'), { code: '22012' });
+      await client.query('ROLLBACK');
+      assert.ok((await client.query('SELECT search_text FROM company_pins')).rows[0].search_text);
+      assert.equal(
+        (await client.query('SELECT end_reason FROM call_sessions')).rows[0].end_reason,
+        'PBX_ENDED',
+      );
+      assert.equal(
+        (await client.query('SELECT reason FROM handoff_requests')).rows[0].reason,
+        '기존 요청',
+      );
+      assert.deepEqual(await snapshot(), before);
+      await client.query('BEGIN');
+      await client.query(sql);
+      await client.query('COMMIT');
+      assert.equal(
+        (await client.query("SELECT to_regclass('public.handoff_requests') AS name")).rows[0].name,
+        null,
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='end_reason'",
+          )
+        ).rowCount,
+        0,
+      );
+      assert.equal(before.foreignKeys.length, 24);
+      assert.equal(before.triggers.length, 10);
+      for (const change of [
+        "ended_at=started_at-interval '1 second'",
+        'started_at=NULL',
+        'ended_at=NULL',
+      ])
+        await assert.rejects(
+          client.query(`UPDATE call_sessions SET ${change} WHERE call_session_seq=$1`, [call]),
+          { code: '23514' },
+        );
+      assert.deepEqual(await snapshot(), before);
+      assert.equal(
+        (
+          await client.query(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='company_pins' AND column_name='search_text'",
+          )
+        ).rowCount,
+        0,
+      );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT 1 FROM personal_pins WHERE strpos(search_text,'개인 검색 보존')>0 AND address_data=$1::jsonb",
+            [address],
+          )
+        ).rowCount,
+        1,
+      );
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+    }
+  } finally {
+    await probe?.end();
+    await owner.query(`DROP DATABASE IF EXISTS ${name}`);
+    await owner.end();
+  }
+});
+
 test('046 upgrades populated 045 atomically without extending old retries or changing order timestamps', async () => {
   const name = 'dva_retry_' + randomUUID().replaceAll('-', '');
   const owner = new Pool({ ...connection, database: process.env.DB_NAME });

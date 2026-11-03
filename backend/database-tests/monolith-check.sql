@@ -15,10 +15,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>27 THEN RAISE EXCEPTION 'Expected 27 public tables, got %',n; END IF;
+ IF n<>28 THEN RAISE EXCEPTION 'Expected 28 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, got %',n; END IF;
+ IF n<>24 THEN RAISE EXCEPTION 'Expected 24 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
@@ -99,10 +99,9 @@ BEGIN
  PERFORM pg_temp.expect_error($q$INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,call_session_seq) VALUES('missing-call-check','{}',2147483647)$q$,'23503');
  INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(call_id,1,'CUSTOMER','Hello',1);
  PERFORM pg_temp.expect_error(format('UPDATE call_sessions SET ended_at=CURRENT_TIMESTAMP WHERE call_session_seq=%s',call_id),'23514');
- UPDATE call_sessions SET started_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP,end_reason='NORMAL' WHERE call_session_seq=call_id;
+ UPDATE call_sessions SET started_at=CURRENT_TIMESTAMP,ended_at=CURRENT_TIMESTAMP WHERE call_session_seq=call_id;
  INSERT INTO recordings(call_session_seq,object_key) VALUES(call_id,'recordings/test.mp3');
  PERFORM pg_temp.expect_error(format('INSERT INTO recordings(call_session_seq,object_key) VALUES(%s,%L)',call_id,'https://example.invalid/test.mp3'),'23514');
- INSERT INTO handoff_requests(call_session_seq,reason,status,assigned_admin_user_seq,requested_at) VALUES(call_id,'Help','CONNECTED',admin_id,CURRENT_TIMESTAMP);
  INSERT INTO shipments(order_parcel_seq,tracking_number) VALUES(parcel_id,'DVA-TEST') RETURNING shipment_seq INTO shipment_id;
  PERFORM pg_temp.expect_error(format('INSERT INTO shipments(order_parcel_seq,tracking_number) VALUES(%s,%L)',parcel_id,'DVA-OTHER'),'23505');
  PERFORM pg_temp.expect_error($q$INSERT INTO shipments(order_parcel_seq,tracking_number) VALUES(2147483647,'DVA-ORPHAN')$q$,'23503');

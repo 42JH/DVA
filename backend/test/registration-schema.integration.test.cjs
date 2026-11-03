@@ -75,6 +75,20 @@ test('deployment verification requires active-row employee uniqueness', () =>
     'Active organization/employee uniqueness missing',
   ));
 
+test('deployment verification requires migration 047, legacy column removal and the call time guard', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='047-remove-unused-schema.sql'",
+    'ALTER TABLE company_pins ADD COLUMN search_text text',
+    'ALTER TABLE call_sessions ADD COLUMN end_reason text',
+    'ALTER TABLE call_sessions DROP CONSTRAINT call_sessions_check',
+  ])
+    await verify([sql], 'Unused schema removal or migration missing');
+  await verify(
+    ['ALTER TABLE personal_pins DROP COLUMN search_text'],
+    'Generated PIN search columns missing',
+  );
+});
+
 test('deployment verification requires migration 046 and the persistent retry window', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",
