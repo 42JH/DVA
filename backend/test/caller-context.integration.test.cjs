@@ -271,7 +271,7 @@ test('all membership/company status combinations enforce company access; represe
         const org = await organization(companyStatus);
         await member(c.customerSeq, org, membershipStatus, role);
         const personal = await pin('PERSONAL', c.customerSeq);
-        const company = await pin('COMPANY', org);
+        await pin('COMPANY', org);
         const result = await context(c.phoneNumber);
         const canUseCompany = membershipStatus === 'ACTIVE' && companyStatus === 'ACTIVE';
         assert.equal(result.membership.status, membershipStatus);

@@ -16,7 +16,6 @@ const { PaymentClient } = require('../dist/payments/payment.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const { AuditService } = require('../dist/audit/audit.service');
 const { testMembership } = require('./helpers/membership.cjs');
-const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');

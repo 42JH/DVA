@@ -314,7 +314,6 @@ test('production customer MVP flow through Nginx needs no service token while ad
     name: 'runtime-customer-' + randomUUID(),
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
   };
-  const key = randomUUID();
   const headers = { 'Content-Type': 'application/json' };
   const register = () =>
     fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
@@ -545,7 +544,6 @@ test('production login through Nginx authorizes company operations and logout re
   assert.equal(me.status, 200);
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
   const name = 'runtime-company-' + randomUUID();
-  const key = randomUUID();
   const companyHeaders = { ...headers, Cookie: session };
   const register = () =>
     fetch('http://proxy/api/companies', {
