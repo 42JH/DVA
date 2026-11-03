@@ -34,10 +34,10 @@ export class FaqsRepository {
     );
   }
 
-  async find(id: number, agent: boolean): Promise<AgentFaqDto | FaqDto | undefined> {
+  async find(id: number): Promise<FaqDto | undefined> {
     return (
-      await this.database.pool.query<AgentFaqDto | FaqDto>(
-        `SELECT ${agent ? AGENT_FIELDS : ADMIN_FIELDS} FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
+      await this.database.pool.query<FaqDto>(
+        `SELECT ${ADMIN_FIELDS} FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
         [id],
       )
     ).rows[0];
