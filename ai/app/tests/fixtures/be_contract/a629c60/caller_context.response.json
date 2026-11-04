@@ -1,0 +1,63 @@
+{
+  "data": {
+    "callSessionSeq": 7,
+    "lookupStatus": "REGISTERED",
+    "customer": {
+      "customerSeq": 12,
+      "name": "김철수",
+      "phoneNumber": "01012345678",
+      "status": "ACTIVE",
+      "monthlyBillingEnabled": false
+    },
+    "membership": {
+      "membershipSeq": 7,
+      "customerSeq": 12,
+      "organizationSeq": 3,
+      "departmentSeq": 5,
+      "employeeNo": "0012",
+      "role": "MEMBER",
+      "status": "ACTIVE"
+    },
+    "organization": {
+      "organizationSeq": 3,
+      "name": "예시 기업",
+      "status": "ACTIVE",
+      "monthlyBillingEnabled": false
+    },
+    "department": {
+      "departmentSeq": 5,
+      "organizationSeq": 3,
+      "name": "개발팀",
+      "groupBillingEnabled": false
+    },
+    "availableUsageTypes": [
+      "PERSONAL",
+      "COMPANY"
+    ],
+    "availablePaymentMethods": [
+      "billing"
+    ],
+    "personalPins": [
+      {
+        "personalPinSeq": 21,
+        "label": "집",
+        "addressData": {
+          "name": "김철수",
+          "phoneNumber": "01012345678",
+          "roadAddress": "서울 예시로 12",
+          "jibunAddress": "서울 예시동 12",
+          "detailAddress": "101호",
+          "dongName": "예시동",
+          "postalCode": "01234",
+          "latitude": 37.5,
+          "longitude": 127
+        },
+        "version": 1
+      }
+    ],
+    "companyPins": []
+  },
+  "meta": {
+    "requestId": "a73c0008-775a-42ca-8903-1a240654fcfa"
+  }
+}

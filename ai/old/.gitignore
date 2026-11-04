@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Test / Lint
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# LangGraph Studio 개발 서버(langgraph dev) 상태
+.langgraph_api/
+
+# Environment
+.env
+.env.*
+
+# AI artifacts
+models/
+/data/
+/rag_state/
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+
+.env.example

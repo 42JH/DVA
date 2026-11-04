@@ -1,4 +1,8 @@
-"""서버 설정(config/server.toml)과 진행 문구(prompts/flow.toml) 읽기."""
+"""원본 RAG(app/rag/, app/webhooks/faqs.py, scripts/, tests/)가 import하는 원본 서버 설정 모듈의 **호환판**.
+
+RAG는 다른 담당자의 구현이라 수정하지 않는다(docs/architecture/decisions.md RAG). 그래서 원본 app/config.py에서 RAG가 쓰는
+이름만 같은 동작으로 둔다: ROOT, config_dir(), prompts_dir(), RagConfig, FaqSyncConfig, load_server_config().rag/.faq_sync.
+RagConfig·FaqSyncConfig와 두 설정의 검증은 원본 정의를 그대로 옮겼다. 통화 흐름·BE·관제 등 원본의 나머지 설정은 두지 않는다."""
 
 import os
 import tomllib
@@ -19,123 +23,10 @@ def prompts_dir() -> Path:
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid")
 
 
-class CallConfig(_Strict):
-    max_concurrent: int = Field(ge=1, le=500)
-    reject_status_code: int = Field(ge=300, le=699)
-    hangup_silence_sec: float = Field(gt=0)
-    hangup_max_wait_sec: float = Field(gt=0)
-    idle_hangup_sec: float = Field(gt=0)
-    max_call_sec: float = Field(gt=0)
-    refer_target_uri: str = Field(pattern=r"^sips?:")
-    webhook_dedupe_sec: int = Field(ge=60)
-    tool_timeout_sec: float = Field(gt=0)
-
-
-class BusinessConfig(_Strict):
-    company_name: str = Field(min_length=1)
-    submitted_message: str
-    goodbye_message: str
-
-
-class ProgressConfig(_Strict):
-    max_chars: int = Field(ge=100, le=1000)
-
-
-class BackendConfig(_Strict):
-    timeout_sec: float = Field(gt=0)
-    submit_timeout_sec: float = Field(gt=0)
-    submit_retry_sec: float = Field(ge=0)
-    retry_interval_sec: float = Field(gt=0)
-    lookup_limit: int = Field(ge=1, le=20)
-    monitor_orders_limit: int = Field(ge=1, le=1000)
-
-
-class MonitorConfig(_Strict):
-    sse_keepalive_sec: float = Field(gt=0)
-    retain_ended_sec: int = Field(ge=0)
-    call_history_keep: int = Field(ge=0)
-    bubble_gap_ms: int = Field(ge=0)
-
-
-class ListenerConfig(_Strict):
-    engine: Literal["decisions", "responses"]
-    model: str = Field(min_length=1)
-    reasoning_effort: Literal["none", "minimal", "low", "medium", "high"]
-    pause_ms: int = Field(ge=100, le=5000)
-    timeout_sec: float = Field(gt=0)
-    max_heard_chars: int = Field(ge=50, le=2000)
-    max_agent_chars: int = Field(ge=0, le=2000)
-    max_choices: int = Field(ge=2, le=100)
-    record_heard: bool = False
-    joined_sec: float = Field(ge=0)
-    delegate_wait_sec: float = Field(gt=0)
-    cut_wait_ms: int = Field(ge=0, le=5000)
-    consent_wait_sec: float = Field(gt=0)
-
-
-class AddressConfig(_Strict):
-    db_path: str = Field(min_length=1)
-    kakao_timeout_sec: float = Field(gt=0)
-
-
-class PersonaConfig(_Strict):
-    entry_wait_sec: float = Field(gt=0)
-    retry_sec: float = Field(gt=0)
-    report_attempts: int = Field(ge=1, le=10)
-    max_prompt_chars: int = Field(ge=100, le=50000)
-
-
-class FlowConfig(_Strict):
-    pin_recent_count: int = Field(ge=1, le=50)
-    commit_delay_ms: int = Field(ge=100, le=5000)
-    max_pin_options: int = Field(ge=2, le=10)
-    retry_limit: int = Field(ge=0, le=5)
-    agent_open_hour: int = Field(ge=0, le=24)
-    agent_close_hour: int = Field(ge=0, le=24)
-    heard_grace_ms: int = Field(ge=0, le=2000)
-    flush_wait_sec: float = Field(gt=0)
-
-
-class FareConfig(_Strict):
-    """규격 하나당 배송비(원). 없으면 그 규격의 배송비를 모른다(미완료로 넘김)."""
-    document: int | None = Field(None, gt=0, le=2_147_483_647)
-    small_box: int | None = Field(None, gt=0, le=2_147_483_647)
-    medium_box: int | None = Field(None, gt=0, le=2_147_483_647)
-    big_box: int | None = Field(None, gt=0, le=2_147_483_647)
-
-
-class ServerConfig(_Strict):
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"]
-    call: CallConfig
-    business: BusinessConfig
-    progress: ProgressConfig
-    backend: BackendConfig
-    monitor: MonitorConfig
-    listener: ListenerConfig
-    address: AddressConfig
-    persona: PersonaConfig
-    flow: FlowConfig
-    fare: FareConfig = FareConfig()
-    rag: 'RagConfig'
-    client_backend: 'ClientBackendConfig'
-    faq_sync: 'FaqSyncConfig'
-
-    @model_validator(mode='after')
-    def separate_faq_collection(self):
-        if self.faq_sync.collection == self.rag.collection:
-            raise ValueError('FAQ 관리 컬렉션은 기존 MD 검색 컬렉션과 분리해야 합니다.')
-        return self
-
-    @model_validator(mode="after")
-    def _commit_after_pause(self):
-        # 확정 지연 중 들어온 말을 판별하려면 말 멈춤 대기보다 길어야 한다(LANGGRAPH_REBUILD §9)
-        if self.flow.commit_delay_ms <= self.listener.pause_ms:
-            raise ValueError("flow.commit_delay_ms는 listener.pause_ms보다 길어야 한다")
-        return self
-
+# --- 원본 app/config.py 정의 그대로(RAG 담당) ---
 
 class FaqSyncConfig(_Strict):
     receive_enabled: bool
@@ -179,54 +70,72 @@ class RagConfig(_Strict):
     min_score: float | None = None  # 1등 근거의 리랭커 점수가 이보다 낮으면 답할 자료 없음(RAG No). 없으면 근거 유무만 본다
 
 
-class ClientBackendConfig(_Strict):
+# --- 호환판: 원본 ServerConfig 중 RAG가 읽는 것만 ---
+
+class BackendConfig(_Strict):
+    """[backend]. timeout_sec는 원본 RAG 스크립트(scripts/bootstrap_faq.py, validate_faq_crud.py)도 읽는다.
+    나머지는 새 서버 전용(concurrency.md §6, error-recovery.md §3)."""
     timeout_sec: float = Field(gt=0)
-    transcript_wait_sec: float = Field(gt=0)
-    history_chars: int = Field(ge=200, le=16000)
-    max_delegations: int = Field(ge=1, le=1000)
-    context_chunk_tokens: int = Field(ge=50, le=350)
-    append_timeout_sec: float = Field(gt=0)
+    max_concurrency: int = Field(16, gt=0)       # BE 동시 요청 세마포어 = 연결 풀 상한
+    read_budget_sec: float = Field(3.0, gt=0)    # 읽기 도구 예산(세마포어 대기 포함)
+    write_budget_sec: float = Field(5.0, gt=0)   # 취소 등 쓰기 예산
+    submit_timeout_sec: float = Field(15.0, gt=0)  # 통화 결과 요청 1회
+    submit_retry_sec: float = Field(40.0, gt=0)    # 통화 결과 같은 키 재확인 총 시간
+
+
+class FareConfig(_Strict):
+    """규격 하나당 배송비(원). 없으면 그 규격의 배송비를 모른다(미완료로 넘김). 원본 app/config.py FareConfig 그대로."""
+    document: int | None = Field(None, gt=0, le=2_147_483_647)
+    small_box: int | None = Field(None, gt=0, le=2_147_483_647)
+    medium_box: int | None = Field(None, gt=0, le=2_147_483_647)
+    big_box: int | None = Field(None, gt=0, le=2_147_483_647)
+
+
+class CallConfig(_Strict):
+    """[call] 통화 생명주기(call-lifecycle.md §2). 수치는 실측 후 조정."""
+    max_active_calls: int = Field(20, gt=0)          # 넘으면 reject(486)
+    stage1_budget_sec: float = Field(1.5, gt=0)      # accept 전 고객 확인(실패 시 UNREGISTERED)
+    stage2_budget_sec: float = Field(3.0, gt=0)      # 업무 의도 확정 후 통화 등록
+    persona_budget_sec: float = Field(1.0, gt=0)     # 통화 진입 때 페르소나 동기화(넘으면 마지막 ACTIVE, 없으면 서버 기본 P2)
+    persona_retry_sec: float = Field(5.0, gt=0)      # 동기화·적용 회신 실패 후 재시도 간격(원본 [persona] retry_sec)
+    persona_report_attempts: int = Field(3, gt=0)    # 적용 회신 시도 횟수(원본 report_attempts)
+    persona_max_prompt_chars: int = Field(20000, gt=0)  # 넘으면 INVALID_CONFIG 회신(원본 max_prompt_chars)
+    recent_destinations: int = Field(5, ge=0)
+    closing_quiet_ms: int = Field(1200, gt=0)        # 마무리: 출력 전사가 이만큼 멈추면 끊는다
+    closing_max_sec: float = Field(15.0, gt=0)       # 마무리 최대 대기
+    silence_sec: float = Field(30.0, gt=0)           # 고객 무발화
+    expire_margin_sec: float = Field(60.0, ge=0)     # 세션 만료 전 마무리
+    finalize_wait_sec: float = Field(5.0, gt=0)      # 정리 때 진행 작업 대기 상한
+    # S5: 발화 끝 Decision·확정·전달(delegation.md §3·§6)
+    utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
+    decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
+    decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
+    commit_delay_ms: int = Field(700, ge=0)          # 확인 "예" 뒤 확정 지연(새 입력이 오면 취소)
+    notify_quiet_ms: int = Field(600, gt=0)          # N2는 AI 발화가 이만큼 멈춘 뒤 보낸다
+    n3_max: int = Field(3, ge=0)                     # P4: 정정 3회
+    response_fallback_sec: float = Field(3.0, gt=0)  # response.completed가 안 와도 결과 뒤 response.create
+
+
+class ServerConfig(_Strict):
+    rag: RagConfig
+    faq_sync: FaqSyncConfig
+    backend: BackendConfig
+    fare: FareConfig = FareConfig()
+    call: CallConfig = CallConfig()
+
+    @model_validator(mode='after')
+    def separate_faq_collection(self):  # 원본 ServerConfig의 같은 검증
+        if self.faq_sync.collection == self.rag.collection:
+            raise ValueError('FAQ 관리 컬렉션은 기존 MD 검색 컬렉션과 분리해야 합니다.')
+        return self
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:
+    """config/server.toml의 [rag]·[faq_sync]·[backend]·[fare]·[call]만 읽는다(파일의 다른 섹션은 무시)."""
     path = path or config_dir() / "server.toml"
     with path.open("rb") as f:
-        return ServerConfig.model_validate(tomllib.load(f))
-
-
-class Texts(_Strict):
-    """모델에게 줄 진행 문구. 단계 정의에 문구를 박지 않고 여기서 가져온다.
-    say: 고객에게 할 말(키 = LANGGRAPH_REBUILD 표의 ID), note: 따옴표 없이 주는 할 일, core: 질문의 핵심 구간."""
-
-    labels: dict[str, str]
-    say: dict[str, str]
-    note: dict[str, str]
-    core: dict[str, str]
-    correction_labels: dict[str, str]
-    task_names: dict[str, str]
-    status_names: dict[str, str]
-    customer_types: dict[str, str]
-    call_info: str
-    backend_info: str
-    backend_state: str
-    progress: str
-    progress_item: str
-    progress_sep: str
-    saved_value: str
-    caller_value: str
-    empty_value: str
-    classifier: str
-    classifier_questions: dict[str, str]
-    answer_error: str
-    record_heard: str
-    reask: str
-    consent_retry: str
-    speak: str
-    drift_fix: str
-    drift_markers: list[str]
-
-
-def load_texts(path: Path | None = None) -> Texts:
-    path = path or prompts_dir() / "flow.toml"
-    with path.open("rb") as f:
-        return Texts.model_validate(tomllib.load(f))
+        data = tomllib.load(f)
+    backend = data.get("backend") or {}
+    return ServerConfig.model_validate({"rag": data.get("rag"), "faq_sync": data.get("faq_sync"), "backend": backend,
+                                        "fare": data.get("fare") or {},
+                                        "call": data.get("call") or {}})
