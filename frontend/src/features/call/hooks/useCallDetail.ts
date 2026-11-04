@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock, fmtDetailTime, fmtDuration, fmtPhone } from '@/shared/lib/format'
-import { reasonTag } from '@/shared/lib/unansweredReason'
+import { reasonTag, unansweredTo } from '@/shared/lib/unansweredReason'
 import { ACTION_LABEL, COMPLAINT_LABEL, RESULT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
@@ -193,7 +193,7 @@ export function useCallDetail(callId: number) {
                   // 그 통화의 질문만 (10/30 사용자: 미답변 보기를 누르면 해당 통화 것만)
                   link: {
                     label: 'AI 미답변 보기',
-                    onClick: () => navigate(`/faqs/unanswered?call=${callId}`),
+                    onClick: () => navigate(unansweredTo(`/calls/${callId}`, callId)), // 경로 '통화 상세 > AI 미답변 > 강도윤 통화'
                   },
                 }
           if (r.orderSeq !== null) {

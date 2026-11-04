@@ -1,5 +1,6 @@
 import { Fragment, useContext, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
+import { unansweredTo } from '@/shared/lib/unansweredReason'
 import { TopBarInfo } from './topBarInfo'
 
 // 상단바 (와이어프레임 16 Page header) — 높이 64 · 제목 28/700 · 아래 구분선 · 왼쪽 여백 32(본문과 같은 선)
@@ -17,10 +18,12 @@ export function PageHeader({ title, unanswered }: { title: string; unanswered: n
 // AI 미답변 알림 (Figma '프레임' 11/04 — 사이드바 'AI 미답변' 옆 빨간 숫자가 여기로). 0건이면 안 보임
 // 종 20 + 8 + 글자 16/600. 색은 디자인(#e77f83)이 흰 바탕에서 대비 2.7:1이라 danger(빨강)로
 function UnansweredAlert({ count, className = '' }: { count: number; className?: string }) {
+  const { pathname, search } = useLocation()
   if (!count) return null
   return (
     <Link
-      to="/faqs/unanswered"
+      // 미답변 화면 경로 첫 칸 = 이 화면 (11/05 사용자: 이동 전 위치). 미답변 화면 안에선 그대로
+      to={pathname === '/faqs/unanswered' ? pathname + search : unansweredTo(pathname + search)}
       className={`flex items-center gap-2 text-body font-semibold text-danger hover:underline ${className}`}
     >
       <svg

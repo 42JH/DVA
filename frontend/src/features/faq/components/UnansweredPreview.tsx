@@ -1,4 +1,5 @@
 import { Link } from 'react-router'
+import { unansweredTo } from '@/shared/lib/unansweredReason'
 import { useUnansweredList } from '@/features/faq/hooks/useUnansweredList'
 import { UnansweredTable } from './UnansweredTable'
 
@@ -17,7 +18,7 @@ export function UnansweredPreview() {
             처리할 AI 미답변
             <span className="text-label font-normal text-sub">{vm.count}개</span>
           </h2>
-          <Link to="/faqs/unanswered" className="text-label font-bold text-action">
+          <Link to={unansweredTo('/')} className="text-label font-bold text-action">
             자세히 보기 ›
           </Link>
         </>

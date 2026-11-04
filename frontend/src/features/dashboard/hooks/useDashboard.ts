@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
 import {
   fmtRange,
@@ -17,6 +17,7 @@ import {
   fmtPctSplit,
   fmtShortDate,
 } from '@/shared/lib/format'
+import { unansweredTo } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
 import { COMPLAINT_LABEL, COMPLAINT_ORDER, OUTCOME_LABEL } from '@/features/dashboard/labels'
 import {
@@ -55,6 +56,7 @@ const durationText = (sec: number | null) => (sec === null ? '—' : fmtDuration
  * 숫자는 전부 목록 total_count (명세 §10: 통계 API 없음) */
 export function useDashboard() {
   const navigate = useNavigate()
+  const { pathname, search } = useLocation()
   const { isSystemAdmin } = useSession()
   const { params, set } = useListParams(DEFAULTS)
   const tabs = isSystemAdmin ? TABS : TABS.filter((t) => t.key === 'date')
@@ -97,7 +99,7 @@ export function useDashboard() {
         question: u.question,
         time: multiDay ? dayOnly(u.at) : hm(u.at),
       })),
-      onMore: more ? () => navigate('/faqs/unanswered') : undefined,
+      onMore: more ? () => navigate(unansweredTo(pathname + search)) : undefined, // 경로 '대시보드 > AI 미답변'
     },
     complaints: {
       sub:

@@ -8,7 +8,8 @@ import {
 import { FAQ_GRID } from './FaqCategories'
 
 // 09 AI 미답변 — Figma에 없어 FAQ 목록(Figma 'FAQ' 11/04)과 같은 틀로 만든 모양 (11/05 사용자)
-// 상단바: 경로 'FAQ > AI 미답변'(06에서 왔으면 '> 강도윤 · 11-05 13:13 통화') · 가운데 검색칸(질문 · 이름 · 전화번호, 치는 대로) · 알림
+// 상단바: 경로 '[이동 전 화면] > AI 미답변'(11/05 사용자 — 예: '통화 > AI 미답변', 06에서 왔으면 '통화 상세 > AI 미답변 > 강도윤 통화', 모르면 'FAQ')
+//   · 가운데 검색칸(질문 · 이름 · 전화번호, 치는 대로) · 알림
 // 왼쪽: 분류 자리에 사유 — 전체 · 답변 근거 부족 · 지식 검색 장애 · 미분류 (고른 것 파랑, 옆에 개수)
 // 오른쪽: 'Q “고객이 한 말”'(FAQ 줄과 같은 글자) / 아래 사유 칩 · 고객 · 번호 · '통화 시각 ›'(06) | [FAQ 추가](파랑 선 → FAQ 작성 화면) · 🗑(삭제 확인)
 // 맨 아래 가운데 쪽 번호 (FAQ와 같음) · 오래된 질문부터 (먼저 쌓인 것부터 처리)
@@ -29,8 +30,8 @@ export function UnansweredPage() {
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar
         crumbs={[
-          { label: 'FAQ', to: '/faqs' },
-          vm.callLabel ? { label: 'AI 미답변', to: '/faqs/unanswered' } : { label: 'AI 미답변' },
+          vm.origin,
+          vm.callLabel ? { label: 'AI 미답변', to: vm.allTo } : { label: 'AI 미답변' },
           ...(vm.callLabel ? [{ label: vm.callLabel }] : []),
         ]}
         search={<UnansweredSearch q={vm.q} onSearch={vm.setQ} />}
