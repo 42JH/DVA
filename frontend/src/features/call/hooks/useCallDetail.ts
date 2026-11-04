@@ -45,7 +45,7 @@ export interface ResultView {
   time: string
   link?: { label: string; onClick: () => void }
   question?: string // AI 미답변: 고객 질문
-  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (근거 부족 · 검색 장애 · 미분류)
+  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (답변 근거 부족 · 지식 검색 장애 · 미분류)
 }
 
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
@@ -171,6 +171,15 @@ export function useCallDetail(callId: number) {
             ? '녹취 주소를 받지 못했어요 · 다시 받는 중'
             : '녹취를 재생하지 못했어요 · 다시 받는 중'
 
+  // 미답변 기록 → 통화 안 시각(초)별 사유 문구. AI는 미답변을 그 질문을 찾은 FAQ 검색과 같은 시각으로 보냄
+  // 지운 미답변(질문 · 사유 null)은 사유를 몰라 빼서 검색 요약을 그대로 둠
+  const unansweredAt = new Map(
+    (call?.results ?? []).flatMap((r) =>
+      r.kind === 'QUESTION_UNANSWERED' && r.question !== null && r.atSec !== null
+        ? [[r.atSec, reasonTag(r.reason).label] as const]
+        : [],
+    ),
+  )
   const results: ResultView[] = call
     ? [...call.results]
         .filter((r) => RESULT_LABEL[r.kind]) // 문의 · 답한 FAQ 블록은 안 그림
@@ -281,7 +290,8 @@ export function useCallDetail(callId: number) {
         key: a.order,
         time: sec === null ? '' : fmtClock(sec),
         tag: ACTION_LABEL[a.kind],
-        text: a.text, // 서버 summaryText 그대로 (AI팀에 읽기 쉬운 문장으로 요청)
+        // 서버 summaryText 그대로. 단 미답변으로 기록된 FAQ 검색은 'FAQ 근거 있음' 같은 검색 요약 대신 미답변 사유 (11/04 AI팀)
+        text: (a.kind === 'FAQ_SEARCH' && sec !== null && unansweredAt.get(sec)) || a.text,
         onClick: sec === null ? undefined : () => jumpTo(sec, a.text),
       }
     }),

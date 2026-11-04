@@ -4,10 +4,10 @@ import type { TagKind } from '@/shared/ui'
 /** 서버 코드 그대로. null = 사유 없이 들어온 질문 · 연동 전에 쌓인 질문 (백엔드는 원인을 추정하지 않음) */
 export type UnansweredReason = 'KB_NO_ANSWER' | 'KB_UNAVAILABLE'
 
-/** 근거 부족 = 검색은 됐는데 답할 근거가 없음(FAQ 추가 대상) · 검색 장애 = 검색이 안 됨(FAQ에 답이 있었을 수도) · 미분류 = null */
+/** 문구는 AI팀 요청(11/04): 답변 근거 부족 = 검색은 됐는데 답할 근거가 없음(FAQ 추가 대상) · 지식 검색 장애 = 검색이 안 됨(FAQ에 답이 있었을 수도) · 미분류 = null */
 export const reasonTag = (r: UnansweredReason | null): { label: string; kind: TagKind } =>
   r === 'KB_NO_ANSWER'
-    ? { label: '근거 부족', kind: 'gray' }
+    ? { label: '답변 근거 부족', kind: 'gray' }
     : r === 'KB_UNAVAILABLE'
-      ? { label: '검색 장애', kind: 'red' }
+      ? { label: '지식 검색 장애', kind: 'red' }
       : { label: '미분류', kind: 'outline' }
