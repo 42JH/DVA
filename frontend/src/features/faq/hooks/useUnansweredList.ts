@@ -5,12 +5,7 @@ import { FETCH_ALL_MAX, pageSlice } from '@/shared/api/paging'
 import { todayYmd, ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
-import {
-  originOf,
-  reasonTag,
-  unansweredTo,
-  type UnansweredReason,
-} from '@/shared/lib/unansweredReason'
+import { originOf, reasonTag } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
   deleteUnanswered,
@@ -27,15 +22,10 @@ export type UnansweredRow = UnansweredQuestion & {
   reasonTag: ReturnType<typeof reasonTag>
 }
 
-/** 사유 거르기 (11/05 새 디자인 — FAQ 분류 자리) — '' = 전체, none = 미분류(사유 null) */
-export type ReasonKey = '' | UnansweredReason | 'none'
-const REASON_KEYS: ReasonKey[] = ['', 'KB_NO_ANSWER', 'KB_UNAVAILABLE', 'none']
-const reasonOf = (u: UnansweredQuestion): ReasonKey => u.reason ?? 'none'
-
 const PAGE_SIZE = 20
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
-// reason = 사유 거르기 (빈 값 = 전체) · from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 거르기 · 쪽을 바꿔도 남음)
-const DEFAULTS = { q: '', call: '', reason: '', from: '' }
+// from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 검색 · 쪽을 바꿔도 남음)
+const DEFAULTS = { q: '', call: '', from: '' }
 
 type Modal = { kind: 'delete'; item: UnansweredQuestion } | null
 
@@ -65,18 +55,20 @@ export function useUnansweredList({
       (call === null || u.callSessionSeq === call) &&
       (!todayOnly || (u.startedAt !== null && ymd(new Date(u.startedAt)) === today)),
   )
-  const searched = ofCall.filter(
+  const hit = ofCall.filter(
     (u) =>
       matchKo(u.question, q) ||
       matchKo(u.customerName, q) ||
       (digits !== '' && u.callerNumber.includes(digits)),
   ) // 순서 = 서버가 준 오래된 통화부터 (시각 모르는 질문은 뒤)
-  // URL은 누구나 고칠 수 있으니 모르는 사유 값은 전체로 (컨벤션 4.7)
-  const reason = REASON_KEYS.find((k) => k === params.reason) ?? ''
-  const hit = reason ? searched.filter((u) => reasonOf(u) === reason) : searched
-  // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 경로 끝: '강도윤 통화' (시각은 줄에 있어 뺌 — 길면 경로가 잘림). 질문이 다 처리돼 없으면 '이 통화'
+  // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 적용된 필터 칩: '강도윤 · 11-05 13:13 통화의 질문만' (질문이 다 처리돼 없으면 '이 통화의 질문만')
   const first = ofCall[0]
-  const callLabel = call === null ? null : first ? `${first.customerName} 통화` : '이 통화'
+  const callChip =
+    call === null
+      ? null
+      : first
+        ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
+        : '이 통화의 질문만'
   const sliced = pageSlice(hit, page, pageSize)
   const rows: UnansweredRow[] = sliced.rows.map((u) => ({
     ...u,
@@ -96,17 +88,9 @@ export function useUnansweredList({
     setQ: (v: string) => {
       if (v !== q) set({ q: v })
     },
-    // 왼쪽 사유 목록 — 검색 · 통화 조건 안에서 사유마다 몇 개 (11/05 새 디자인)
-    reason,
-    reasons: REASON_KEYS.map((key) => ({
-      key,
-      label: key === '' ? '전체' : reasonTag(key === 'none' ? null : key).label,
-      count: key === '' ? searched.length : searched.filter((u) => reasonOf(u) === key).length,
-    })),
-    setReason: (r: ReasonKey) => set({ reason: r }),
     origin: originOf(params.from), // 경로 첫 칸 = 이동 전 화면 (모르면 FAQ)
-    callLabel, // 06에서 왔을 때만 — 경로 '통화 상세 > AI 미답변 > 강도윤 통화'
-    allTo: params.from ? unansweredTo(params.from) : '/faqs/unanswered', // 'AI 미답변'을 누르면 그 통화 거르기만 풂
+    callChip, // 적용된 필터 칩 (06에서 왔을 때만)
+    clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로 (이동 전 화면은 그대로)
     rows,
     count: hit.length, // 'AI 미답변 질문 22개' (검색 중엔 결과 수)
     // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
