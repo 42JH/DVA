@@ -1,6 +1,8 @@
 # AI 파트 연동 명세 — 2026-11-04
 
-코드 기준: `feature/ai-call-updates`, DB migration `048`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 수거 시각·콜백·주소 권한·좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
+코드 기준: `feature/ai-dashboard`, DB migration `050`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 수거 시각·콜백·주소 권한·좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
+
+대시보드 확장은 [AI 전용 연동 명세](ai-dashboard-ai-integration.md)를 따른다. 기존 analysis 저장 후 `stage-metrics`·`response-wait-metrics`를 각각 전송한다. 기존 불편 유형을 유지하면서 화면용 5개 코드를 추가한다. 미답변 사유의 선택 reason·조회 필터는 [049 계약](unanswered-question-reasons.md)을 따른다.
 
 이 문서는 AI가 호출하거나 제공해야 하는 현재 계약을 모은다. 프론트 전달 사항은 [프론트 명세](frontend-integration-current.md), 이번 제거 내역과 DB 전환은 [작업 기록](unused-contract-cleanup.md)을 따른다.
 
@@ -19,7 +21,7 @@
 | 기존 주문 조회·취소, 개인 PIN, 과거 주문 주소 조회                    | `call_session_seq: <통화 번호>`로 발신 고객 범위 검증. 경로별 상세 계약 준수 |
 | `GET /api/companies/search`                                           | 기업 공유 배송지 조회. 현재 MVP 계약 사용                                    |
 | `GET /api/ai/faqs`                                                    | 현재 MVP 무토큰·통화 헤더 불필요                                             |
-| 분석·이벤트·미답변 수집                                               | `Authorization: Bearer <AI_INSIGHTS_TOKEN>`                                  |
+| 분석·이탈/대기 지표·이벤트·미답변 수집                                 | `Authorization: Bearer <AI_INSIGHTS_TOKEN>`                                  |
 | 페르소나 설정 조회·적용 결과                                          | `Authorization: Bearer <AI_PERSONA_TOKEN>`                                   |
 | BE → AI FAQ 변경 알림                                                 | `Authorization: Bearer <AI_FAQ_TOKEN>`                                       |
 | BE → AI 페르소나 옵션·갱신 알림                                       | `Authorization: Bearer <AI_PERSONA_TOKEN>`                                   |

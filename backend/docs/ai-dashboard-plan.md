@@ -12,6 +12,22 @@
 - 신규 고객 여부·페르소나는 기존 분석값을 사용한다. ALL에는 고객 미분류도 포함하고 NEW/EXISTING에서 제외한다. 지표 미수신을 0으로 만들지 않으며 분모 0은 비율·평균 NULL이다.
 - 신규 call_dashboard_metrics 한 테이블, 8개 컬럼, 분석과 1:1 CASCADE FK. 부모 call_sessions.deleted_at으로 조회를 숨기고 최초 incoming_at부터 5년 폐기 시 분석과 함께 제거한다. 별도 deleted_at·접수 시간 컬럼 없음.
 
+### DB 변경 목록
+
+| 대상 | 컬럼 | 타입·용도 |
+| --- | --- | --- |
+| 신규 call_dashboard_metrics | call_session_seq | integer PK, call_analyses에 CASCADE FK |
+| 위 신규 테이블 | dropoff_stage | nullable text, 최종 이탈 단계·NONE |
+| 위 신규 테이블 | dropoff_payload_hash | nullable text, 항목별 동일 재전송 판별 |
+| 위 신규 테이블 | dropoff_received_at | nullable timestamptz, 이탈 최초 수신 시각 |
+| 위 신규 테이블 | total_wait_ms | nullable bigint, 전체 대기 밀리초 |
+| 위 신규 테이블 | latency_stats | nullable jsonb, 고유 처리 유형 최대 7개 합계·횟수 |
+| 위 신규 테이블 | response_wait_payload_hash | nullable text, 대기 항목 동일 재전송 판별 |
+| 위 신규 테이블 | response_wait_received_at | nullable timestamptz, 대기 최초 수신 시각 |
+| 기존 ai_persona_versions | previous_active_version_seq | 신규 nullable integer, 직전 활성 버전 self FK |
+
+신규 지표는 항목 미수신이면 해당 값·해시·시각 전체가 NULL이며 기본값을 채우지 않는다. ai_persona_versions의 기존 상태·설정·시각은 유지하고 확인 가능한 직전 활성 관계만 보완한다.
+
 ## 순차 작업 및 커밋
 
 1. 계획·영향 확인 → migration 050·DB 제약·배포 verify·ERD·DB 검증 추가. 격리 DB runner와 업그레이드·원본 보존·실패 롤백·CASCADE를 검증한 뒤 커밋한다.
@@ -34,6 +50,14 @@
 - 1단계: 격리 DB runner exit 0, ALL MONOLITH DATABASE CHECKS PASSED. 049 상태의 기존 통화/분석 전체 행·해시·시각 보존, 050 직접 SQL 제약/JSON/PK/FK, 항목 독립 저장, soft delete 보존·분석 폐기 CASCADE를 검증했다. 신규/이전 업그레이드·반복 적용·체크섬 거절·최초/후속 실패 롤백·백업 복원도 통과했다. 운영 DB는 변경하지 않았다.
 - 2단계: 컴파일·lint·포맷, 단위 137개·결제 시뮬레이터 21개와 PostgreSQL/HTTP 집중 회귀 57개가 통과했다. 인증·분석 선행·잘못된 입력·독립 항목 동시 저장·재전송/충돌·감사 롤백·삭제/만료 거절·기존 분석/조회·배포 verify를 포함한다. PBX 시각 보정 후 동일 최종값이 422가 되던 순서 문제를 실패 테스트로 재현한 뒤 해시 우선 판별로 수정·단위/HTTP 재검증했다.
 - 3단계: GET 4개와 Swagger 응답을 추가했다. 컴파일·lint·포맷·단위 139개·결제 21개와 조회/AI 수신/기존 soft delete·폐기 집중 회귀 42개가 통과했다. 현재·직전 정확한 버전, 180초/2건=90초, 고객 미분류·NULL/0·통화 내 유형 중복·가중 평균·PBX 사후 보정·실제 보관 폐기 경로를 포함한다. 별도 66개 페르소나/조회 검증 후 ACTIVE가 0개로 남는 테스트 격리 문제를 재현하고 원래 상태 복원으로 수정했다. 같은 검증 66개 및 ACTIVE 1개 보존 확인이 통과했으며 후속 운영 이미지 검증에 사용할 상태를 보존한다.
+- 4단계: AI·프론트 별도 MD, 현재 연동 문서·README·기존 분석/조회 API·ERD 안내를 연결했다. 문서 9개에서 JSON 예시 17개 파싱·로컬 링크 125개 존재·단계/처리 코드 전체 매핑을 확인했다. 최종 문서 점검에서 Swagger의 '미측정'과 '측정 결과 대기 없음' 설명도 구분했다.
+
+## 전체 회귀 검증
+
+- `node backend/scripts/check.cjs`: exit 0, 총 884개 통과(단위 139·결제 시뮬레이터 21·격리 PostgreSQL/HTTP 704·운영 이미지/nginx/HTTPS 20), 실패·스킵 0. 컴파일·lint·포맷, 운영 이미지의 테스트/개발 도구/환경파일 제외, nginx 설정 검사도 통과했다.
+- `pwsh -NoProfile -File infra/database/test-monolith.ps1`: 최종 050 스키마로 exit 0, ALL MONOLITH DATABASE CHECKS PASSED. 업그레이드·반복 적용·변조 거절·실패 롤백·백업 복원·원본 보존·신규 제약·CASCADE를 포함한다.
+- API 로직·최종 스키마 전체 검증 이후 변경은 연동 문서와 Swagger 설명뿐이다. 이 설명 변경 뒤 Docker checks의 컴파일·lint·포맷·단위 139개·결제 21개가 다시 통과했고, 컴파일된 Swagger 메타데이터에서 미측정과 측정된 0의 설명을 확인했다.
+- 실제 운영 DB migration·배포·실제 AI 전송·프론트 화면 연결·운영 규모 성능 측정은 수행하지 않았다. 과거 성공 이력을 확인할 수 없으면 비교 previous는 NULL이다.
 
 ## 추가 확정: 접수 시간 막대그래프
 

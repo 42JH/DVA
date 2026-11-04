@@ -130,6 +130,7 @@ q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 �
 041·042 적용 후 새 요약 6개는 목록 각 항목의 `analysis`, 상세 `data.analysis`에 동일하게 반환하며 `analysis.result`는 반환하지 않는다. 상세의 통화 기본 정보는 기존 `data.call`을 유지하며 새 필드를 그 안에 중복 추가하지 않는다. 분석이 없으면 analysis=null, 과거 분석에 새 값이 없으면 각 필드가 null이다. [분석 수집 계약](call-analysis.md)을 따른다.
 프론트는 true/false를 신규/기존 또는 요청 있음/없음으로 표시하고, 건수는 0을 포함해 `N건`으로 표시한다. null은 미확인으로 구분하며 0·false로 대체하지 않는다. 고객·주문 상태가 나중에 바뀌어도 저장된 통화 요약은 바뀌지 않는다. 페르소나 이름·버전은 기존 불변 버전을 JOIN해 제공한다.
 불만 유형·근거 원문·정수 초 위치·발화 순번은 저장값 그대로 제공한다. 아직 수집되지 않은 발화를 만들어 채우지 않는다.
+050부터 기존 불만 유형을 유지하면서 INFORMATION_RECOGNITION_ERROR·INTENT_RECOGNITION_ERROR·UNSUPPORTED_ANSWER·INTERRUPTION·DISSATISFACTION_EXPRESSION을 추가한다. 전체 10개 코드는 [AI 대시보드 명세](../../backend/docs/ai-dashboard-ai-integration.md#불편-표현-유형), 별도 집계 GET 4개와 현재/직전 활성 버전 비교는 [프론트 대시보드 명세](../../backend/docs/ai-dashboard-frontend-integration.md)를 따른다. 목록·상세 응답 구조는 동일하며 대시보드 필드를 analysis 안에 추가하지 않는다.
 프론트는 같은 통화의 스크립트에서 실제 존재하는 utteranceOrder만 강조하고, 늦은 발화 수신 후 다시 조회하면 연결할 수 있다.
 hash·프롬프트·AI 서비스 토큰은 반환하지 않는다. 근거·고객 이름·검색어를 일반 HTTP 로그에 복사하지 않는다.
 

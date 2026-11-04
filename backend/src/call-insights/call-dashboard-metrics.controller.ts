@@ -71,7 +71,7 @@ export class CallDashboardMetricsController {
   @ApiOperation({
     summary: '통화 최종 대기시간·유형별 레이턴시 요약 저장',
     description:
-      'analysis 저장 후 전송. AI가 겹침을 제외한 총 대기시간을 보냅니다. 측정 없음은 0/[]. 배열 순서 차이는 동일 재전송. P95·원본 표본은 받지 않습니다.',
+      'analysis 저장 후 전송. AI가 겹침을 제외한 총 대기시간을 보냅니다. 측정 결과 대기가 없으면 0/[]. 미측정은 전송하지 않습니다. 배열 순서 차이는 동일 재전송. P95·원본 표본은 받지 않습니다.',
   })
   @ApiNoContentResponse({ description: '최초 저장 또는 동일 내용 재전송. 본문 없음.' })
   saveResponseWait(
