@@ -300,3 +300,24 @@ def test_clean_name_strips_spoken_endings():
     cases = {"현승준이니다": "현승준", "현승준입니다": "현승준", "현승준이요": "현승준", "김하늘이에요": "김하늘",
              "박소이요": "박소이", "박소이예요": "박소이", "신지환이라고 합니다": "신지환", "심지환": "심지환", "최요": "최요"}
     assert {k: clean_name(k) for k in cases} == cases
+
+
+def test_registered_customer_name_prefilled_regardless_of_origin_answer():
+    """운영 통화 d62b7162: 출발지 답이 기준 미달로 버려져도 등록 고객 성함은 채워져 있어 다시 묻지 않는다."""
+    s = ConversationState(customer=Customer(customer_seq=29, name="현승준", caller_phone="01012345678"), intent="order")
+    assert s.origin_answer is None
+    f = s.field_of("sender_name")
+    assert f.valid and f.value == "현승준" and f.source == Source.CALLER_ID
+    assert assess(s, P).missing[0] == "sender_address"
+    assert s.current.empty()  # 서버가 채운 값뿐이면 빈 택배(빈 주문을 만들지 않음)
+    assert readback_facts({"sender_name": "현승준"}, {"sender_name": Source.CALLER_ID}, P) == {"sender_name": "현승준"}
+    s.record("sender_name", "김영희")  # 고객이 다른 이름을 말하면 덮는다
+    assert s.field_of("sender_name").value == "김영희" and s.field_of("sender_name").source == Source.CUSTOMER
+    s.current = None  # 다음 택배도 같은 성함으로 시작
+    assert s.field_of("sender_name").value == "현승준"
+
+
+def test_unregistered_customer_name_not_prefilled():
+    s = ConversationState(customer=Customer(customer_seq=None, name=None, caller_phone="01012345678"), intent="order")
+    assert not s.field_of("sender_name").valid
+
