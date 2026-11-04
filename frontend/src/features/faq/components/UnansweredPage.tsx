@@ -17,7 +17,12 @@ import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useU
 const COLS = 'grid grid-cols-[170px_200px_170px_minmax(0,1fr)_196px]'
 const PAD = 'px-[54px]' // 03 주문 목록과 같은 좌우 자리
 // 사유 칩 바탕 — 04 상담 유형 칩 색 집합에서: 근거 부족(FAQ로 채울 것) = FAQ 남보라 · 검색 장애 = 분홍 · 미분류 = 회색
-const REASON_BG = { KB_NO_ANSWER: 'bg-kind-faq', KB_UNAVAILABLE: 'bg-kind-cancel', none: 'bg-bg' }
+// 11/05 사용자: 04 상담 유형 칩과 같은 모양(둥근 알약 · 높이 28 · 폭 76 이상). 미분류는 04 '분석 전'처럼 회색 글자 + 테두리(줄에 올려도 보이게)
+const REASON_BG = {
+  KB_NO_ANSWER: 'bg-kind-faq',
+  KB_UNAVAILABLE: 'bg-kind-cancel',
+  none: 'bg-bg text-sub ring-1 ring-line ring-inset',
+}
 
 export function UnansweredPage() {
   const vm = useUnansweredList()
@@ -160,7 +165,7 @@ function Row({ r, vm }: { r: UnansweredRow; vm: ReturnType<typeof useUnansweredL
       </span>
       <span>
         <span
-          className={`inline-grid h-7 place-items-center px-3 text-body ${REASON_BG[r.reason ?? 'none']}`}
+          className={`inline-grid h-7 min-w-19 place-items-center rounded-full px-3 text-body ${REASON_BG[r.reason ?? 'none']}`}
         >
           {r.reasonTag.label}
         </span>
