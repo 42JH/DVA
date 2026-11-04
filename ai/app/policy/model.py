@@ -73,7 +73,12 @@ class Forbid(_Strict):
 
 
 class Pickup(_Strict):
+    """수거 요청 시각 업무 규칙(app/domain/pickup.py). 시각은 "HH:MM"(한국 시간)."""
     min_lead_minutes: int = Field(ge=0)
+    open: str = "09:00"
+    close: str = "17:00"
+    max_days_ahead: int = Field(3, ge=0)
+    next_day_default: str = "09:00"
 
 
 class Reask(_Strict):

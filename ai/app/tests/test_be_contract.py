@@ -173,7 +173,7 @@ def test_latest_spec_7da8876_submit_analysis_and_events_shapes(tmp_path):
     rs = ResultService(BackendGateway(db), Outbox(tmp_path / "o.sqlite3"), POLICY, fare)
     run(rs.finish(s))
     body = db.results[-1]["body"]
-    assert set(body) <= SUBMIT_FIELDS and "pickupRequestedAt" not in body
+    assert set(body) <= SUBMIT_FIELDS and body["pickupRequestedAt"].endswith("+09:00")  # 시간대 포함(ai-call-follow-up.md)
     assert set(body["parcels"][0]) <= PARCEL_FIELDS
     assert set(db.analyses[st.customer.call_session_seq]) == set(analysis_example)  # 7개 값 + 필수 필드, result 없음
     event_example = fixture("7da8876", "events.request.json")["events"][0]

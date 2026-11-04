@@ -14,7 +14,8 @@ from pydantic import Field
 
 from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
-from app.domain.rules import normalize_phone
+from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
+from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import Items, Source
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
@@ -40,6 +41,8 @@ class RecordArgs(Args):
     other_item: str | None = Field(None, max_length=40, description="서류·박스가 아닌 물품일 때만 그 설명")
     item_price: int | None = Field(None, ge=0, le=100_000_000, description="물품 가액(원). 예: 만 원 → 10000")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
+    pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
+                                  "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
 
 
 # 이름 끝에 붙어 받아써진 말끝(2026-11-03 통화 512a1b: "현승준이니다"). "이"로 시작하는 말끝은 앞 글자에 받침이
@@ -85,6 +88,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             needs.append({"field": "receiver_phone", "reason": "PHONE_INVALID_DIGITS"})
     if "item_price" in given:
         values["item_price"] = given["item_price"]
+    rule = rule_of(policy.pickup)
+    if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
+        iso, code = parse_pickup(given["pickup_at"], ctx.now(), rule.min_lead_minutes)
+        code = code or check_pickup(iso, ctx.now(), rule)
+        if code:
+            needs.append({"field": "pickup_at", "reason": code})
+        else:
+            values["pickup_at"] = iso
     item_parts = {k: given[k] for k in (*COUNTS, "other_item") if k in given}
 
     async with ctx.lock:  # ① 주소 필드 버전과 지금 값
@@ -123,9 +134,15 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if not facts["recorded"] and not needs:
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
         pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs else None
+        moved = False
+        if pending and not s.pickup_at.valid:  # 되읽기 때 기본 수거 시각을 정해 함께 안내
+            iso, moved = default_pickup(ctx.now(), rule)
+            s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
+        if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
+            facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]
         if phones:
             facts["phones_to_read"] = phones  # 고객이 새로 불러 준 번호: 한 번 끊어 읽어 확인(README §5)

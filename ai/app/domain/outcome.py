@@ -26,7 +26,7 @@ class Outcome:
     parcels: tuple[dict, ...] = ()
     fares: tuple[int | None, ...] = ()
     payment: str | None = None
-    pickup_at: str | None = None        # 보내지 않는다(호환 선택값) — 항상 None
+    pickup_at: str | None = None        # 수거 요청 시각(되읽기 때 기본값·고객 조정, BE가 보존 — ai-call-follow-up.md)
     reasons: tuple[str, ...] = ()       # COMPLETE가 아닌 이유(관측·운영자 보완용)
     customer_name: str | None = None    # 미등록 고객 이름 = 보내는 분 성함(MVP: 고객 = 보내는 분, 원본 규칙)
 
@@ -51,7 +51,7 @@ def decide_outcome(state: ConversationState, policy: Policy, now: datetime,
         return Outcome(None)  # 무의미 통화: 등록·전송하지 않는다(empty-ai-order-results.md)
     a = assess(state, policy)
     payment = state.payment.value if state.payment.valid else a.payment_auto
-    pickup = None
+    pickup = state.pickup_at.value if state.pickup_at.valid else None
     submit = snapshot_for_submit(state)
     current = (draft_snapshot(state.current),) if has_current else ()
     name = state.customer.name or next((p.get("sender_name") for p in (*submit, *current) if p.get("sender_name")), None)

@@ -26,6 +26,7 @@ class FieldStatus(StrEnum):
 class Source(StrEnum):
     CUSTOMER = "customer"; CALLER_ID = "caller_id"; PROFILE = "profile"
     HISTORY = "history"; PIN = "pin"; COMPANY = "company"; RESOLVER = "resolver"
+    SERVER = "server"  # 서버가 정한 값(기본 수거 시각)
 
 
 @dataclass(frozen=True)

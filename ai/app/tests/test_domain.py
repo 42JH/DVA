@@ -200,7 +200,7 @@ def test_outcome_complete_and_body():
     assert pending_reconfirm(s) == [] and "pickup_at" not in o.parcels[0]
     call = {"providerCallId": "live_1", "callerPhoneNumber": "01012345678", "incomingAt": "2026-11-03T01:00:00Z"}
     body = submit_body(o, call, 12, None, "01012345678")
-    assert body["outcome"] == "COMPLETE" and body["totalAmount"] == 4000 and "pickupRequestedAt" not in body
+    assert body["outcome"] == "COMPLETE" and body["totalAmount"] == 4000 and body["pickupRequestedAt"].endswith("+09:00")
     assert body["parcels"][0]["smallBoxCount"] == 1 and body["parcels"][0]["destination"]["postalCode"] == "06236"
 
 

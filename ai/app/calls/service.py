@@ -133,7 +133,8 @@ class CallService:
         config = {"type": "live", "model": "gpt-live-1",
                 "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
-                    "model": self.d.backend_model, "instructions": render_backend(self.d.policy),
+                    "model": self.d.backend_model,
+                    "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
                     "tools": function_specs(), "tool_choice": "auto", "parallel_tool_calls": False,
                     "reasoning": {"effort": self.d.backend_effort}, "text": {"verbosity": "low"},
                     "service_tier": "priority"}}}

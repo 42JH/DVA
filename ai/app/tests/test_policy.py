@@ -37,7 +37,7 @@ def test_live_instructions_carry_policy_order_forbid_and_delegation():
     delegate = text.split("Generate <|SpawnThinking|> when:")[1].split("Do not generate")[0]
     assert all(POLICY.fields[n].label in delegate for n in POLICY.free_fields())  # 자유형은 전부 위임 규칙에(S0 U7)
     assert POLICY.fields["payment"].label not in delegate  # 선택형은 위임하지 않는다
-    assert "1시간 안에 방문" in text and text.startswith(default_persona()[:20])
+    assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
 
 
 def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():

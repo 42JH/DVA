@@ -360,3 +360,12 @@
 - 스냅샷 latency(구간·횟수·최근·P50·P95·최대)·backend_calls(최근 100), monitor/static/index.html "지연(ms)"·"백엔드 통신" 칸
 - 계획: docs/architecture/confirm-path-plan.md(실측 8.1s 분해, P1~P6, 목표 P50 ≤ 3s, 기준 측정 먼저)
 - 테스트 487 passed(+1 게이트웨이 기록, 끝-끝 테스트에 지연 표·BE 통신 확인)
+
+## 2026-11-04 — 수거 요청 시각(업무 규칙 a, BE 계약 feature/ai-call-updates)
+
+- app/domain/pickup.py: 기본 = 지금 + 60분(10분 올림), 09시 전 → 당일 09:00, 17시 초과 → 익일 09:00(today_unavailable). 조정 검증 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS(17:00 정각 허용)·PICKUP_TOO_FAR(3일, 임시). 주말·공휴일 구분 없음
+- workflow.toml [pickup] open·close·max_days_ahead·next_day_default, [speech].pickup·[results].pickup 문장, Policy.Pickup 필드
+- record_fields.pickup_at(ISO 8601 + 시간대): parse_pickup → check_pickup, 거절이면 needs + facts.pickup.allowed. 되읽기 개방 때 수거 시각이 없으면 기본값을 Source.SERVER로 기록하고 facts.pickup{at,today_unavailable,allowed}
+- Outcome.pickup_at = 기록된 수거 시각 → 결과 본문 pickupRequestedAt(BE가 보존, 늦은 결제는 BE가 결제+1시간을 09~17시로 맞춤)
+- Backend 지시문 끝에 현재 시각(한국) — "내일 10시"를 날짜로 바꾸기 위해. business_rules.md 수거 절, backend_rules.md pickup_at 규칙
+- 테스트 489 passed(+2, 본문 pickupRequestedAt 단정 갱신)

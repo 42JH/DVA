@@ -48,7 +48,7 @@ def test_submit_complete_once_and_status_facts(tmp_path):
     data = run(rs.submit(s))
     assert data["status"] == "notPaid" and not st.result_accepted  # 카드 결제 대기 ≠ 접수 성공
     body = db.results[-1]["body"]
-    assert body["outcome"] == "COMPLETE" and body["paymentMethodType"] == "billing" and "pickupRequestedAt" not in body
+    assert body["outcome"] == "COMPLETE" and body["paymentMethodType"] == "billing" and body["pickupRequestedAt"].endswith("+09:00")
     assert body["customerSeq"] == st.customer.customer_seq and "customer" not in body
     again = run(rs.submit(s))
     assert again == data and len(db.results) == 1  # 같은 통화: 아웃박스의 같은 키·본문(새 주문 없음)
