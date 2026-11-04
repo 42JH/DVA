@@ -161,8 +161,9 @@ class LiveFlow:
             pending_id = pending.id if pending else None
             methods = s.state.customer.payment_methods
             callback = s.state.callback_offered and not s.state.callback_requested
+            save = bool(s.state.address_offer) and s.state.address_consent is None
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       pay_methods=methods, callback=callback)
+                                       pay_methods=methods, callback=callback, save=save)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -212,6 +213,11 @@ class LiveFlow:
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
+            if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and st.address_offer \
+                    and st.address_consent is None:
+                st.address_consent = sv[0] == "yes"
+                s.note("주소 저장 동의", sv[0])
+                followups.append(("save", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
@@ -267,12 +273,15 @@ class LiveFlow:
                 if pid and rt.confirm_t:
                     s.timing("확인 '네'→담기", (time.time() - rt.confirm_t) * 1000)
                     rt.confirm_t = 0.0
+                if pid and s.state.address_offer:
+                    s.state.address_offer = s.state.address_offer | {"parcel": pid}
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
                 target = None
             else:
                 target = take_cancel(s.state, self.policy, pending_id)
                 facts = None
         if kind == "parcel":
+            self._maybe_save_addresses(s)
             if facts:
                 s.note("담기", facts["parcel_added"])
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
@@ -310,6 +319,8 @@ class LiveFlow:
                 summary = state_summary(st, self.policy)
             await self.notify(s, "N1'", {"picked": value, "summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
+        elif what == "save":
+            self._maybe_save_addresses(s)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -368,6 +379,19 @@ class LiveFlow:
         labels = tuple(f"{i}번 {p.draft['receiver_name'].value or '받는 분'}님 택배" for i, p in enumerate(st.parcels, 1))
         offer(st, "parcel", labels, tuple(p.parcel_id for p in st.parcels))
         return {"edit_parcel": "choose", "labels": list(labels)}
+
+    def _maybe_save_addresses(self, s: CallSession) -> None:
+        """택배를 담았고 고객이 저장에 동의했으면 고객 기본 주소·주소록 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409)."""
+        st, results = s.state, getattr(self.svc, "results", None)
+        offer = st.address_offer
+        if results is None or not offer or not offer.get("parcel") or not st.address_consent:
+            if offer and offer.get("parcel") and st.address_consent is False:
+                st.address_offer = None
+            return
+        snap = next((p.confirmed_snapshot for p in st.parcels if p.parcel_id == offer["parcel"]), None)
+        st.address_offer = None
+        if snap:
+            s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "address_save")
 
     def _agent_route(self, s: CallSession) -> dict:
         """잠금 안. 상담원 연결 요구(업무 규칙 e): 근무 시간 밖 → 콜백 제안, 안 + 전환 대상 있음 → 전환, 없음 → 담당자 연락."""

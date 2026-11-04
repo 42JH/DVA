@@ -179,3 +179,36 @@ def test_callback_field_sent_only_when_enabled(tmp_path):
     assert "hasCallbackRequest" not in rs.build_insights(s)["analysis"]
     rs.callback_field = True
     assert rs.build_insights(s)["analysis"]["hasCallbackRequest"] is True
+
+
+def test_address_save_offer_and_save_after_consent(tmp_path):
+    """업무 규칙 g: 되읽기 때 저장 제안 → 동의 후에만 기본 주소(PATCH, 통화 헤더)·받는 곳 PIN 저장."""
+    from app.domain.address_book import save_offer
+    from app.domain.state import Source
+    rs, db = service(tmp_path)
+    st = filled()
+    st.customer.customer_seq = db.add_customer(CALLER, "김철수")
+    st.customer.default_address = "서울 강남구 테헤란로 1"  # 기본 주소와 다른 출발지
+    assert save_offer(st) == {"sender": True, "receiver": True}
+    st.record("receiver_address", "부산 해운대구 센텀로 10", Source.PIN)  # 주소록에서 고른 받는 곳 → 추가 제안 없음
+    assert save_offer(st) == {"sender": True}
+    ctx = run(db.caller_context(CALLER, {"providerCallId": "live_1", "incomingAt": INCOMING_AT}))
+    pid = confirm_once(st)
+    snap = next(p.confirmed_snapshot for p in st.parcels if p.parcel_id == pid)
+    s = session(st)
+
+    async def seq(_s):
+        return ctx.call_session_seq
+
+    run(rs.save_addresses(s, seq, snap, {"sender": True, "receiver": True, "parcel": pid}))
+    assert db.customers[CALLER]["address"]["roadAddress"] == "서울 강남구 테헤란로 212"
+    assert db.customers[CALLER]["address"]["postalCode"] == GEO.postal_code and "name" not in db.customers[CALLER]["address"]
+    assert [p.address for p in db.pins[CALLER]] == ["부산 해운대구 센텀로 10"]
+    assert st.customer.default_address == "서울 강남구 테헤란로 212"
+
+
+def test_unregistered_customer_gets_no_address_offer():
+    from app.domain.address_book import save_offer
+    st = filled()
+    st.customer.customer_seq = None
+    assert save_offer(st) == {}

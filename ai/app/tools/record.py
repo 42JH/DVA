@@ -12,6 +12,7 @@ import asyncio
 import re
 from pydantic import Field
 
+from app.domain.address_book import save_offer
 from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
@@ -141,6 +142,10 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
+            offer = save_offer(s)  # 주소 저장 동의는 되읽기 확인 때 함께(사용자 결정 2026-11-04)
+            s.address_offer, s.address_consent = (offer or None), None
+            if offer:
+                facts["address_save"] = offer
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]

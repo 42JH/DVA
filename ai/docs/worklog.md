@@ -377,3 +377,13 @@
 - 분석 hasCallbackRequest: BE 계약(feature/ai-call-updates)은 별도 API 없이 최종 분석 필드. 048 + 새 BE 전에는 구버전이 400 → config [backend].analysis_callback_field=false(배포 후 true)
 - workflow.toml [[decision.callback.questions]]·[results].agent 상태별 문구, business_rules.md 상담원 절
 - 테스트 492 passed(+3)
+
+## 2026-11-04 — 되읽기 때 주소 저장 동의 → 고객 기본 주소·주소록 저장(업무 규칙 g)
+
+- 사용자 결정: 주소 저장 동의는 되읽기 확인 때 함께. BE 계약(feature/ai-call-updates): 고객 동의 후에만, 기본 주소 PATCH는 진행 중 통화 + call_session_seq 헤더, PIN 추가는 종료 후도 가능, 주문 저장은 자동 갱신 안 함
+- app/domain/address_book.save_offer: 등록 고객 + 확정 주소(geo) 기준 — 보내는 곳이 기본 주소와 다르면 sender, 받는 곳이 주소록·이력·기업에서 고른 곳이 아니면 receiver. shortcut: 고른 PIN을 고친 경우는 새 PIN 추가(PIN 번호 미보유)
+- record_fields 되읽기 개방 때 facts.address_save + state.address_offer. Decision 질문 save(제안 중·답 전만). 동의 yes + 택배 담김(commit) → ResultService.save_addresses(백그라운드): update_customer_address(PATCH /api/customers/{id}, call_session_seq 헤더) · create_pin(receiver). 거절이면 제안 버림. 실패는 관측만
+- BackendAPI.update_customer_address, MockBackend 흉내. Customer.default_address(고객 확인 default_origin)
+- workflow.toml [[decision.save.questions]]·[results].address_save, business_rules.md 문장
+- 미등록 고객은 기존 등록 절차(고객 등록 + 보내는 곳 PIN)를 그대로 둠
+- 테스트 495 passed(+3)

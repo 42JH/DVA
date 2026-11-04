@@ -133,6 +133,7 @@ class Customer:
     call_session_seq: int | None = None    # 2단계 고객 확인으로 받은 통화 번호(조회·취소·주소 이력의 고객 범위)
     places: tuple[Place, ...] = ()         # 받는 곳 후보 원천(최근 도착지 → 주소록 순)
     origin_address: str | None = None      # 등록된 출발지 도로명(고객 기본 주소, 없으면 최근 출발지) — 인사용, 상세주소 제외
+    default_address: str | None = None     # 고객 기본 주소 도로명(주소 저장 제안 비교용)
 
 
 @dataclass
@@ -154,6 +155,8 @@ class ConversationState:
     agent_transferred: bool = False       # 상담원 연결 요구(분석 hasHandoffRequest — 연결 성공 여부 아님)
     callback_offered: bool = False        # 상담원 근무 시간 밖이라 콜백을 제안함(답을 기다림)
     callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
+    address_offer: dict | None = None     # 되읽기 때 제안한 주소 저장 {sender, receiver, parcel(담은 뒤 택배 id)}
+    address_consent: bool | None = None   # 주소 저장 동의(None = 아직 답 없음)
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
     _next_parcel: int = 1

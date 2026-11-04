@@ -187,6 +187,14 @@ class MockBackend:
         self.customers[phone]["address"] = address
         return seq
 
+    async def update_customer_address(self, customer_seq, call_session_seq, address):
+        phone = self._phone(call_session_seq)
+        if self.customers.get(phone, {}).get("seq") != customer_seq:
+            raise BackendError("/api/customers 403 FORBIDDEN", 403, "FORBIDDEN")  # 진행 중 본인 통화만
+        if "name" in address or "phoneNumber" in address or "latitude" in address:
+            raise BackendError("/api/customers 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
+        self.customers[phone]["address"] = dict(address)
+
     async def create_pin(self, call_session_seq, customer_seq, order, role, label):
         phone = self._phone(call_session_seq)
         if self.customers.get(phone, {}).get("seq") != customer_seq:

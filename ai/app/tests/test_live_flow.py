@@ -322,3 +322,31 @@ def test_callback_question_only_while_offered():
     from app.tests.test_domain import P
     names = lambda **kw: [q["name"] for q in decision_questions(P, "intent", **kw)]  # noqa: E731
     assert "callback" in names(callback=True) and "callback" not in names()
+
+
+def test_address_save_waits_for_both_commit_and_consent():
+    lf = LiveFlow.__new__(LiveFlow)
+    saved = []
+
+    async def save_addresses(s, seq, snap, offer):
+        saved.append(offer)
+
+    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
+    from app.tests.test_domain import confirm_once, filled
+    st = filled()
+    pid = confirm_once(st)
+    spawned = []
+    s = SimpleNamespace(state=st, spawn=lambda coro, name: spawned.append(coro))
+    st.address_offer, st.address_consent = {"receiver": True}, None
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 아직 담기 전
+    st.address_offer = st.address_offer | {"parcel": pid}
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 동의 전
+    st.address_consent = False
+    lf._maybe_save_addresses(s)
+    assert not spawned and st.address_offer is None  # 거절 → 제안 버림
+    st.address_offer, st.address_consent = {"receiver": True, "parcel": pid}, True
+    lf._maybe_save_addresses(s)
+    run(spawned[0])
+    assert saved == [{"receiver": True, "parcel": pid}] and st.address_offer is None

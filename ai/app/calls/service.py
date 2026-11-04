@@ -367,6 +367,8 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     c.customer_seq, c.name = ctx.customer_seq, ctx.name
     c.payment_methods = tuple(ctx.payment_methods)
     c.call_session_seq = ctx.call_session_seq or c.call_session_seq
+    if getattr(ctx, "default_origin", None) and ctx.default_origin.address:
+        c.default_address = ctx.default_origin.address
     origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
     if origin and origin.address:
         c.origin_address = origin.address
