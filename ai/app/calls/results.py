@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from app.calls.session import CallSession
 from app.calls.unanswered import ReviewError, apply_review, evidence_from_session
+from app.domain.assess import assess
 from app.domain.outcome import decide_outcome
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
@@ -28,6 +29,52 @@ MAX_EVENTS, MAX_BYTES, MAX_TEXT = 50, 90 * 1024, 1000
 SAVED = ("ACCEPTED", "notPaid", "PAID", "SUBMITTING", "SUBMITTING_FAILED", "SUBMISSION_FAILED")
 ACTIONS = {"find_destination": "PIN_SEARCH", "lookup_orders": "PREVIOUS_ORDER_SEARCH", "search_manual": "FAQ_SEARCH",
            "record_fields": "FIELD_SAVED"}
+
+
+# 대시보드(ai-dashboard-ai-integration.md §3): 시스템 사유로 끝난 통화는 이탈 판정 대상이 아니다(미전송 = 미판정)
+SYSTEM_END = ("persona_unresolved", "accept_failed", "pbx_ended_during_accept", "expiring", "shutdown")
+ORDER_STAGE = {"sender": "SENDER_INFO", "receiver": "RECIPIENT_INFO", "item": "ITEM_INFO",
+               "readback": "CONFIRMATION", "payment": "PAYMENT_GUIDANCE"}
+# 분석 다음에 보내는 대시보드 항목(payload 키, 진행 키) — 서로 독립: 한쪽 실패·재전송이 다른 쪽을 막지 않는다(§1)
+DASHBOARD = (("stage_metrics", "send_stage_metrics"), ("wait_metrics", "send_wait_metrics"))
+
+
+def dropoff_stage(s: CallSession, policy) -> str | None:
+    """끊긴 순간 진행 중이던 단계. 판정하지 못하면 None — 모른다는 뜻으로 NONE을 보내지 않는다(§3)."""
+    st, reason = s.state, s.close_reason or ""
+    if reason in SYSTEM_END or reason.startswith("connection_") or st.agent_transferred or st.intent in (None, "agent"):
+        return None
+
+    def answered(tool: str) -> bool:  # 그 도구 결과가 나온 뒤 AI가 말했다
+        done = [t for t in s.tool_calls if t["name"] == tool and t.get("output")]
+        return bool(done) and s.last_output_t > done[-1]["at"] + (done[-1].get("elapsed_ms") or 0) / 1000
+
+    if st.intent == "order":
+        a = assess(st, policy)
+        if a.stage == "closing" or (a.stage == "more_parcels" and not a.payment_choice_needed):
+            return "NONE"  # 접수 정보 확정 뒤(남은 결정 없음)
+        stage = "PAYMENT_GUIDANCE" if a.stage == "more_parcels" else ORDER_STAGE.get(a.stage)
+        if stage and s.tool_calls and s.tool_calls[-1]["name"] == "search_manual":
+            return "FAQ_ANSWER"  # 접수 중 질문하다 끊김(문의는 진행 중 업무를 바꾸지 않는다)
+        return stage
+    if st.intent == "inquiry":
+        return "NONE" if answered("search_manual") else "FAQ_ANSWER"
+    if st.intent == "lookup":
+        return "NONE" if answered("lookup_orders") else "ORDER_LOOKUP"
+    if st.intent == "cancel":
+        return "NONE" if st.cancel_done else "ORDER_CANCEL"
+    return None
+
+
+def wait_metrics(s: CallSession) -> dict:
+    """§4 본문. 대기 = 고객 말 끝 → AI 말 시작 구간 합계(순서대로라 겹치지 않음). 고객 말 뒤 AI 말 없이 끝났으면
+    끝나기 시작한 시각까지. 측정하지 않은 유형은 뺀다(횟수 0 금지)."""
+    total, rt = s.wait_ms, s.rt
+    if rt is not None and rt.cust_end_t and rt.cust is None and s.ended_t > rt.cust_end_t:
+        total += (s.ended_t - rt.cust_end_t) * 1000
+    return {"providerCallId": s.call_id, "totalWaitMs": round(total),
+            "latencyStats": [{"processType": k, "totalLatencyMs": int(ms), "measurementCount": int(n)}
+                             for k, (ms, n) in s.latency.items() if n > 0]}
 
 
 def _iso(ts: float) -> str:
@@ -326,7 +373,10 @@ class ResultService:
             "repeatQuestionCount": _repeats(st),                    # 서버가 다시 받게 한 횟수(검증 실패 기준)
             "hasComplaint": None, "complaints": [],                 # 불만 판정 장치 없음 → 미수집(null)
         }
-        return {"provider_call_id": s.call_id, "events": events, "analysis": analysis, "unanswered": unanswered}
+        stage = dropoff_stage(s, self.policy)
+        return {"provider_call_id": s.call_id, "events": events, "analysis": analysis, "unanswered": unanswered,
+                "stage_metrics": {"providerCallId": s.call_id, "dropoffStage": stage} if stage else None,
+                "wait_metrics": wait_metrics(s)}
 
     async def _send_insight(self, row: dict) -> None:
         sid, seq, p = row["session_id"], row["call_session_seq"], row["payload"]
@@ -356,12 +406,25 @@ class ResultService:
             if not progress.get("analysis"):
                 await self.backend.write("analysis", api.send_call_analysis, seq, p["analysis"])
                 progress["analysis"] = True
-            await asyncio.to_thread(self.outbox.update_insight, sid, "DONE", progress)
-            log.info("통화 기록 전송 %s", sid)
         except BackendFailure as e:
             status = "PENDING" if e.kind in ("unavailable", "in_progress") else "FAILED"
             await asyncio.to_thread(self.outbox.update_insight, sid, status, progress | {"error": e.code})
             log.error("통화 기록 전송 %s %s", sid, e)
+            return
+        retry = False
+        for key, method in DASHBOARD:  # analysis 204 뒤에만. 배포 전에 저장된 본문(키 없음)은 보내지 않는다
+            if p.get(key) is None or progress.get(key) in ("done", "failed"):
+                continue
+            try:
+                await self.backend.write(key, getattr(api, method), seq, p[key])
+                progress[key] = "done"
+            except BackendFailure as e:  # 5xx·연결은 같은 본문으로 다시, 409 충돌·422·400 등은 멈춘다(§5)
+                again = e.kind in ("unavailable", "in_progress")
+                retry |= again
+                progress |= {key: None if again else "failed", f"{key}_error": e.code}
+                log.error("대시보드 전송 %s %s %s", sid, key, e)
+        await asyncio.to_thread(self.outbox.update_insight, sid, "PENDING" if retry else "DONE", progress)
+        log.info("통화 기록 전송 %s", sid)
 
 
 def _summary(name: str, out: dict) -> str:

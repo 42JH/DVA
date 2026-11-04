@@ -348,6 +348,8 @@ class CallService:
     # --- 공용 ---
     def _phase(self, s: CallSession, phase: Phase) -> None:
         if s.phase != phase:
+            if phase in ENDED and not s.ended_t:
+                s.ended_t = time.time()  # 통화가 끝나기 시작한 시각(대시보드 열린 대기 구간의 끝)
             s.phase = phase
             s.note("단계", phase.value)
             s.publish()  # 관제 오류가 전이·정리를 멈추지 않게

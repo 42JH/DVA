@@ -30,6 +30,9 @@ log = logging.getLogger(__name__)
 BUSINESS = ("order", "lookup", "cancel", "inquiry", "agent")
 TOOL_INTENT = {"record_fields": "order", "find_destination": "order", "lookup_orders": "lookup",
                "search_manual": "inquiry"}
+# 도구 → 대시보드 processType(ai-dashboard-ai-integration.md §4). 받는 곳 후보 찾기는 주소 조회로 센다
+TOOL_LATENCY = {"record_fields": "INFORMATION_INPUT", "find_destination": "ADDRESS_LOOKUP",
+                "search_manual": "FAQ_LOOKUP", "lookup_orders": "ORDER_LOOKUP"}
 
 
 @dataclass
@@ -127,6 +130,7 @@ class LiveFlow:
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
                 s.timing("고객 말 끝→AI 말 시작", (now - rt.cust_end_t) * 1000)
+                s.wait_ms += max(0.0, now - rt.cust_end_t) * 1000  # 대시보드 대기 합계(구간이 순서대로라 겹치지 않음)
                 rt.cust_end_t = 0.0
             if rt.await_speech:
                 s.timing(rt.await_speech[0], (now - rt.await_speech[1]) * 1000)
@@ -295,7 +299,9 @@ class LiveFlow:
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
         if target:  # 취소: 서버 전용 실행, 결과는 N2
+            t0 = time.monotonic()
             out = await cancel_parcel(s.tools, target["order_seq"], target["order_parcel_seq"])
+            s.measure("ORDER_CANCEL", (time.monotonic() - t0) * 1000)
             s.note("취소", out.code or out.facts.get("outcome", out.status))
             await self.notify(s, "N2", {"cancel": out.to_output()})
 
@@ -564,6 +570,8 @@ class LiveFlow:
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
         s.timing(f"도구 {name}", view["elapsed_ms"])
+        if name in TOOL_LATENCY:
+            s.measure(TOOL_LATENCY[name], view["elapsed_ms"])
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
