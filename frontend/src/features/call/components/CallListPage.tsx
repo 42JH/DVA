@@ -5,7 +5,7 @@ import { useDismiss } from '@/shared/lib/useDismiss'
 import { DayPick, DayScroll, Highlight, PreviewList, TopBar, TopSearch } from '@/shared/ui'
 import { useCallList, useCallPreview, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
-import { KindChips, PendingChip } from './KindChips'
+import { KindChips, PendingChip } from '@/shared/ui/KindChips'
 
 // 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터) · 줄 목록
 // 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동

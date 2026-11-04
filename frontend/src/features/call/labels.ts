@@ -1,5 +1,5 @@
 // 04 · 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 서버 코드는 callDto.ts의 것 그대로
-import type { CallActionKind, CallKind, ComplaintType, ProcessingKind } from './api/callDto'
+import type { CallActionKind, ComplaintType, ProcessingKind } from './api/callDto'
 
 /** 불만 유형 (04 불만 열 · 06 불만 줄 같은 말). 아래 다섯은 대시보드 연동 명세 §4의 새 유형 — 이름은 02 대시보드와 같음 */
 export const COMPLAINT_LABEL: Record<ComplaintType, string> = {
@@ -15,13 +15,7 @@ export const COMPLAINT_LABEL: Record<ComplaintType, string> = {
   DISSATISFACTION_EXPRESSION: '불만 표현',
 }
 
-/** 04 통화 목록 상담 유형 칩 (11/04 디자인) — 서버 요약 registeredParcelCount · orderLookupCount · cancelledParcelCount · faqAnswerCount */
-export const KIND_LABEL: Record<CallKind, string> = {
-  accept: '접수',
-  lookup: '조회',
-  cancel: '취소',
-  faq: 'FAQ',
-}
+export { KIND_LABEL } from '@/shared/lib/callKind' // 04 상담 유형 칩 (주문 상세도 써서 shared)
 
 /** 처리 내용 블록 머리 — 없는 종류(문의 · 답한 FAQ)는 블록으로 안 그림 (10/29 '미답변만 남기기') */
 export const RESULT_LABEL: Partial<Record<ProcessingKind, string>> = {

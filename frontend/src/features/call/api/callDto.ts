@@ -1,6 +1,7 @@
 // 04 · 06 서버 DTO (연동 상세명세 10/31 §13: CallListItem · CallDetail · CallAnalysis · CallComplaint · Recording · Utterance · CallAction · CallProcessingResult)
 // + 화면 모양으로 바꾸는 순수 변환. '@/'는 타입만 import — `npx tsx src/features/call/api/callDto.test.ts` 로 바로 돌리려고
 import type { UnansweredReason } from '@/shared/lib/unansweredReason'
+import { countsOf, type CallKind } from '../../../shared/lib/callKind' // 값 import라 상대 경로 (위 주석: tsx로 바로 돌림)
 
 // ---------- 서버 DTO ----------
 export type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
@@ -124,8 +125,7 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 }
 
 // ---------- 화면 모양 ----------
-/** 04 통화 목록 줄의 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) */
-export type CallKind = 'accept' | 'lookup' | 'cancel' | 'faq'
+export type { CallKind } // 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) — 주문 상세도 써서 shared/lib/callKind
 export interface CallRow {
   callSessionSeq: number
   startedAt: string | null
@@ -233,15 +233,6 @@ export function durationSec(startedAt: string | null, endedAt: string | null): n
   if (!startedAt || !endedAt) return null
   return Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000))
 }
-
-/** 통화 요약 → 상담 유형 횟수 (04 줄 · 06 머리). 분석 전이면 null, 못 모은 칸은 null(0으로 보지 않음) */
-const countsOf = (a: CallAnalysisDto | null): CallRow['counts'] =>
-  a && {
-    accept: a.registeredParcelCount ?? null,
-    lookup: a.orderLookupCount ?? null,
-    cancel: a.cancelledParcelCount ?? null,
-    faq: a.faqAnswerCount ?? null,
-  }
 
 export function toCallRow(d: CallListItemDto): CallRow {
   const a = d.analysis

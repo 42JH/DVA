@@ -3,6 +3,7 @@ import { Button, Dialog } from '@/shared/ui'
 import { OrderChip } from './OrderChip'
 import { PartyCard, PartyPair } from './PartyCards'
 import { useOrderDetail, type PartyView } from './useOrderDetail'
+import { KindChips, PendingChip } from '@/shared/ui/KindChips'
 
 // 주문 상세 창 (03 주문 내역 · 06 '주문 보기' 같은 창) — Figma에 없어 새 디자인(11/04 '주문' · '통화')의 말투로 만든 모양 (11/04 사용자)
 // 머리: '주문번호' + DV-00001 + 상태 칩(03 목록 줄과 같은 칩) · 접수 시각 · 경로 · 배송 n/m | ✕
@@ -112,10 +113,8 @@ export function OrderDetailModal({
                     className="flex h-12 items-center gap-5 border-b border-bg last:border-b-0"
                   >
                     <span className="w-[136px] shrink-0 text-body text-sub">{c.time}</span>
-                    <span
-                      className={`grid h-7 min-w-15 shrink-0 place-items-center px-3 text-body ${c.cancel ? 'bg-kind-cancel' : 'bg-kind-accept'}`}
-                    >
-                      {c.tag}
+                    <span className="flex shrink-0 gap-2">
+                      {c.analyzed ? <KindChips kinds={c.kinds} /> : <PendingChip />}
                     </span>
                     <span className="min-w-0 truncate text-strong">{c.text}</span>
                     {pathname === `/calls/${c.callSessionSeq}` ? (

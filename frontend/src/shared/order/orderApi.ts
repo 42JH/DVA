@@ -7,6 +7,7 @@ import { api, NotFoundError, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
 import { toOrderDetail, type OrderDetailDto, type OrderStatusDto } from './orderDto'
+import { countsOf, type KindCounts, type KindCountsDto } from '@/shared/lib/callKind'
 
 export interface Party {
   name: string
@@ -39,7 +40,12 @@ export interface OrderDetail {
   clientComment: string | null
   paymentMethod: PaymentMethod
   paymentState: PaymentState
-  relatedCalls: { callSessionSeq: number; startedAt: string; kind: 'ACCEPT' | 'CANCEL' }[]
+  relatedCalls: {
+    callSessionSeq: number
+    startedAt: string
+    kind: 'ACCEPT' | 'CANCEL'
+    counts?: KindCounts // 그 통화의 상담 유형 횟수 — 04 줄과 같은 칩 (null = 분석 전, 없으면 kind로 한 칩)
+  }[]
   /** 배송 상세마다 (03 목록 줄 = 상세 하나, 11/01). 위 sender · receiver · items는 첫 상세 · 합계(06 팝업 기본값)
    * 메모리 가짜 주문엔 없음 → 없으면 위 값 그대로 */
   parcels?: ParcelDetail[]
@@ -75,7 +81,7 @@ export const orderQueries = {
 interface RelatedCallDto {
   callSessionSeq: number
   startedAt: string | null
-  analysis: { result: string } | null
+  analysis: ({ result: string } & KindCountsDto) | null
 }
 
 export async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail> {
@@ -91,6 +97,7 @@ export async function fetchOrder(id: number, signal?: AbortSignal): Promise<Orde
         callSessionSeq: c.callSessionSeq,
         startedAt: c.startedAt,
         kind: c.analysis?.result === 'CANCELLED' ? ('CANCEL' as const) : ('ACCEPT' as const),
+        counts: countsOf(c.analysis),
       }))
       .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)),
   }
