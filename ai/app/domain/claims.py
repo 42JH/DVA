@@ -35,5 +35,5 @@ def unverified_claims(text: str, state: ConversationState, policy: Policy) -> li
 def truth(state: ConversationState) -> dict:
     """N3에 붙이는 사실(무엇이 맞는지). 서버 상태에서만."""
     return {"parcels_added": len(state.parcels), "order_submitted": state.result_accepted,
-            "cancel_done": state.cancel_done, "submit_when": "통화를 마칠 때 서버가 접수한다",
+            "cancel_done": state.cancel_done, "submit_when": "더 보낼 택배가 없다고 확인되면 서버가 접수한다(그 전까지 담은 택배는 고칠 수 있다)",
             "awaiting_confirmation": state.pending is not None}
