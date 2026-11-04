@@ -35,6 +35,26 @@ export async function prevCallDay(day: Ymd, q: string, signal?: AbortSignal): Pr
   return at ? ymd(new Date(at)) : null
 }
 
+/** day 다음에 통화가 있는 가장 가까운 날 (그 뒤 가장 오래된 1건의 날짜 — 통화 없는 날은 건너뜀). 없으면 null
+ *  서버는 최신순이라 건수를 먼저 받고, 2건 이상이면 맨 끝(offset = 건수 − 1) 1건을 다시 받음 */
+export async function nextCallDay(day: Ymd, q: string, signal?: AbortSignal): Promise<Ymd | null> {
+  const query = { q: toQ(q), from: kstDayStart(addDays(day, 1)), limit: 1 }
+  const head = await api.get<ApiList<CallListItemDto>>('/calls', {
+    query: { ...query, offset: 0 },
+    signal,
+  })
+  const last =
+    head.total_count > 1
+      ? (
+          await api.get<ApiList<CallListItemDto>>('/calls', {
+            query: { ...query, offset: head.total_count - 1 },
+            signal,
+          })
+        ).data[0]
+      : head.data[0]
+  return last?.startedAt ? ymd(new Date(last.startedAt)) : null
+}
+
 // ---------- 상담가 (날짜 옆) — 07 페르소나 기능을 import하지 못해(기능끼리 import 금지) 필요한 만큼만 ----------
 // 이름은 스크롤 따라 맨 위 통화의 상담가로 바뀜(통화 분석의 personaName). 고르면 그 상담가가 받은 가장 최근 통화로 이동 (11/04 사용자)
 interface PersonaListDto {

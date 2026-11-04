@@ -10,6 +10,7 @@ import {
   fetchCallDay,
   latestCallOf,
   prevCallDay,
+  nextCallDay,
   type CallRow,
 } from '@/features/call/api/callListApi'
 
@@ -101,6 +102,7 @@ export function useCallList() {
     anchor,
     fetchDay: (day, signal) => fetchCallDay(day, q, signal),
     prevDay: (day, signal) => prevCallDay(day, q, signal),
+    nextDay: (day, signal) => nextCallDay(day, q, signal),
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,

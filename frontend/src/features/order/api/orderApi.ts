@@ -107,6 +107,30 @@ export async function prevOrderDay(
   return at ? ymd(new Date(at)) : null
 }
 
+/** day 다음에 주문이 있는 가장 가까운 날 (그 뒤 가장 오래된 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null
+ *  서버는 최신순이라 건수를 먼저 받고, 2건 이상이면 맨 끝(offset = 건수 − 1) 1건을 다시 받음 */
+export async function nextOrderDay(
+  day: Ymd,
+  f: OrderFilter,
+  signal?: AbortSignal,
+): Promise<Ymd | null> {
+  const query = { ...toQuery(f), from: kstDayStart(addDays(day, 1)), limit: 1 }
+  const head = await api.get<ApiList<OrderListItem>>('/admin/orders', {
+    query: { ...query, offset: 0 },
+    signal,
+  })
+  const last =
+    head.total_count > 1
+      ? (
+          await api.get<ApiList<OrderListItem>>('/admin/orders', {
+            query: { ...query, offset: head.total_count - 1 },
+            signal,
+          })
+        ).data[0]
+      : head.data[0]
+  return last?.createdAt ? ymd(new Date(last.createdAt)) : null
+}
+
 // ---------- 주문 추가 · 수정 ----------
 /** 주문 추가(수기 접수) 본문 */
 /** 주소 검색으로 고른 주소의 나머지 칸 — 서버 주소는 지번 · 동 이름 · 우편번호 · 좌표가 필수 (명세 4.4) */
