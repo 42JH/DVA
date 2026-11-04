@@ -21,6 +21,7 @@
   --color-line: #dde3ea; /* 구분선 · 테두리 */
   --color-bg: #f2f6fa; /* 호버 · 옅은 바탕 */
   --color-surface: #ffffff;
+  --color-frame: #f0f9ff; /* 틀 바탕 — 사이드바 · 본문 카드 바깥 (디자인 '프레임' 11/04) */
 
   /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
   --font-sans:
@@ -40,7 +41,7 @@
 
   --tracking-tight: -0.025em;
 
-  --spacing-sidebar: 222px; /* w-sidebar */
+  --spacing-sidebar: 64px; /* w-sidebar — 아이콘 줄 (디자인 '프레임' 11/04) */
   --spacing-content: 32px; /* p-content */
 
   /* 움직임 (11/01 영상 예시): 페이지가 바뀌면 본문이 떠오르고, 모달은 배경이 어두워지며 창이 살짝 커지면서 뜸
