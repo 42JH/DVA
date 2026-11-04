@@ -3,6 +3,8 @@
 `POST /api/ai/calls/{id}/analysis`는 AI 서버가 기존 통화의 최종 분석을 저장하는 API다.
 이 문서는 ANL-01 계약이다. 이벤트 수집은 [EVT-01](call-events.md), 후속 이벤트 조회는 [EVT-02 상세 초안](call-events-read-spec.md)을 따른다.
 
+050 대시보드 확장에서는 불편 유형 5개를 추가한다. 기존 분석 형식·재전송 해시는 유지하며 이탈 단계와 대기/레이턴시는 분석 성공 후 별도 POST 2개로 보낸다. [AI 대시보드 연동 명세](../../backend/docs/ai-dashboard-ai-integration.md)를 따른다.
+
 ## 인증과 통화 연결
 
 - `Authorization: Bearer <AI_INSIGHTS_TOKEN>`, `Content-Type: application/json`.
@@ -62,13 +64,13 @@ Complaint 항목의 모든 필드도 필수다.
 
 | 필드 | 검증 |
 | --- | --- |
-| type | REPEATED_QUESTION, SPEAKING_TOO_FAST, RECOGNITION_FAILURE, SLOW_RESPONSE, AI_REFUSAL |
+| type | INFORMATION_RECOGNITION_ERROR, INTENT_RECOGNITION_ERROR, UNSUPPORTED_ANSWER, SLOW_RESPONSE, INTERRUPTION, DISSATISFACTION_EXPRESSION. 기존 REPEATED_QUESTION, SPEAKING_TOO_FAST, RECOGNITION_FAILURE, AI_REFUSAL도 유지 |
 | evidenceText | 공백 아닌 문자열, 최대 1,000자, NUL 금지. 공백·줄바꿈 등 원문 보존 |
 | offsetSeconds | 0 이상 안전한 정수 또는 null. 통화 시작부터 불만 구간까지의 정수 초 위치이며 레이턴시가 아님 |
 | utteranceOrders | 중복 없는 양의 int32 배열. 발화 연결 미확인은 빈 배열 |
 
 AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는 고객이 느리다고 표현한 불만이며
-시간 임계값으로 자동 판정하지 않는다. 응답 지연 합계·측정 횟수는 받거나 저장하지 않는다.
+시간 임계값으로 자동 판정하지 않는다. 이 analysis API에서는 응답 지연 합계·측정 횟수를 받지 않는다. 해당 값은 050의 별도 response-wait-metrics API로 저장한다. 화면 불편 6개 유형은 RAG 검색 결과·미답변 reason과 독립이며 기존 유형을 강제로 변환하지 않는다.
 
 발화 수집이 먼저 끝났다고 가정하지 않는다. 발화 순번은 해당 통화 안의 연결 정보로 저장하며
 아직 수집되지 않은 발화를 생성하거나 다른 통화와 연결하지 않는다. 관리자 통화 상세·목록의 analysis가 불만 근거와 발화 순번을 제공한다. 프론트는 같은 통화의 transcript에서 실제 수신된 발화만 강조한다. [조회 계약](calls.md)을 따른다.
@@ -76,7 +78,7 @@ AI_REFUSAL은 고객이 AI 상담을 거부했다는 뜻이다. SLOW_RESPONSE는
 ## 저장·재전송
 
 - 새 앱 실행 전 041·042를 순서대로 적용한다. 041은 기존 `call_analyses`에 nullable 컬럼 6개를 추가하며 기본값·기존 행 보완은 없다. 042는 대표 분류 `result`와 해당 CHECK를 삭제하고, 기존 분석의 해시를 `result` 없는 계약으로 갱신한다. 다른 분석 값·저장 시각·성공 감사·FK는 보존한다. 실제 서버 적용은 별도다.
-- 7개 값은 AI가 확정해 보낸다. 백엔드는 고객 상태·주문 상태·이벤트·현재 ACTIVE로 판정하거나 집계하지 않는다. `isNewCustomer`의 판정 시점과 반복 조회·답변의 집계 규칙도 AI 생산자가 정한다.
+- 7개 값은 AI가 확정해 보낸다. 백엔드는 고객 상태·주문 상태·이벤트·현재 ACTIVE로 판정하거나 집계하지 않는다. `isNewCustomer`는 통화 시작 시 판정값으로 고정하고 반복 조회·답변의 집계 규칙은 AI 생산자가 정한다.
 - `aiPersonaVersionSeq`는 백엔드 설정 API에서 받은 값 중 해당 통화가 실제 사용한 버전이다. AI가 통화 시작 때 고정해 종료 분석까지 유지하며, 백엔드는 존재 여부와 FK만 검증한다.
 - 접수·취소는 `order_parcels` 기준이다. 접수 정보가 확정된 결제 대기 상세도 접수 건수에 포함한다. 미완료 수집 상세를 접수 건수로 세지 않는다. 취소는 이전 통화의 접수 건도 포함할 수 있어 두 건수를 상쇄하거나 비교하지 않는다.
 - FAQ 답변·접수 조회는 AI의 집계값을 그대로 보존한다. 검색·조회 API 호출 횟수나 응답 배열 길이로 백엔드가 재계산하지 않는다. `shipmentLookupCount`와 `customerType`은 받지 않는다.

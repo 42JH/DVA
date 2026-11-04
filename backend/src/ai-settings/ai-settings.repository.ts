@@ -46,10 +46,12 @@ export class AiSettingsRepository {
   }
 
   async apply(versionId: number, client: PoolClient): Promise<void> {
-    await client.query("UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='ACTIVE'");
+    const previous = await client.query<{ id: number }>(
+      "UPDATE ai_persona_versions SET status='INACTIVE' WHERE status='ACTIVE' RETURNING ai_persona_version_seq AS id",
+    );
     await client.query(
-      "UPDATE ai_persona_versions SET status='ACTIVE',applied_at=clock_timestamp(),apply_error_code=NULL WHERE ai_persona_version_seq=$1",
-      [versionId],
+      "UPDATE ai_persona_versions SET status='ACTIVE',applied_at=clock_timestamp(),apply_error_code=NULL,previous_active_version_seq=$2 WHERE ai_persona_version_seq=$1",
+      [versionId, previous.rows[0]?.id ?? null],
     );
   }
 

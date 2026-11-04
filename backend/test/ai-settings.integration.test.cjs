@@ -4,3 +4,4 @@ require('./ai-settings-management.cjs')(suite);
 require('./ai-settings-application.cjs')(suite);
 require('./ai-settings-publishing.cjs')(suite);
 require('./ai-settings-drafts.cjs')(suite);
+require('./ai-settings-predecessor.cjs')(suite);

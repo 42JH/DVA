@@ -4,10 +4,10 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>28 THEN RAISE EXCEPTION 'Expected 28 public tables, found %',n; END IF;
+ IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>24 THEN RAISE EXCEPTION 'Expected 24 foreign keys, found %',n; END IF;
+ IF n<>26 THEN RAISE EXCEPTION 'Expected 26 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -175,7 +175,29 @@ BEGIN
     AND pg_get_constraintdef(oid) LIKE '%KB_NO_ANSWER%' AND pg_get_constraintdef(oid) LIKE '%KB_UNAVAILABLE%')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='049-unanswered-question-reason.sql') THEN
   RAISE EXCEPTION 'Unanswered question reason schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 28 public tables, 24 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='call_dashboard_metrics')<>8
+  OR (SELECT count(*) FROM information_schema.columns c JOIN (VALUES
+    ('call_session_seq','int4','NO'),('dropoff_stage','text','YES'),('dropoff_payload_hash','text','YES'),
+    ('dropoff_received_at','timestamptz','YES'),('total_wait_ms','int8','YES'),('latency_stats','jsonb','YES'),
+    ('response_wait_payload_hash','text','YES'),('response_wait_received_at','timestamptz','YES')
+   ) expected(name,kind,nullable) ON c.column_name=expected.name AND c.udt_name=expected.kind AND c.is_nullable=expected.nullable
+   WHERE c.table_schema='public' AND c.table_name='call_dashboard_metrics' AND c.column_default IS NULL)<>8
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.call_dashboard_metrics') AND contype='p'
+    AND pg_get_constraintdef(oid)='PRIMARY KEY (call_session_seq)')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.call_dashboard_metrics') AND contype='f'
+    AND confrelid='public.call_analyses'::regclass AND confdeltype='c')
+  OR (SELECT count(*) FROM pg_constraint WHERE conrelid=to_regclass('public.call_dashboard_metrics') AND contype='c' AND convalidated)<>8
+  OR NOT EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.valid_call_latency_stats(jsonb)') AND provolatile='i' AND proisstrict)
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='050-call-dashboard-metrics.sql') THEN
+  RAISE EXCEPTION 'Call dashboard metrics schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions'
+    AND column_name='previous_active_version_seq' AND udt_name='int4' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+    AND conname='ai_persona_previous_active_fk' AND contype='f' AND confrelid='public.ai_persona_versions'::regclass)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+    AND conname='ai_persona_previous_active_not_self' AND contype='c' AND convalidated) THEN
+  RAISE EXCEPTION 'Previous active persona schema missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 26 FKs, 10 triggers, dashboard/retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

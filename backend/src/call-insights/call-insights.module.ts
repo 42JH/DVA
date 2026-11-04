@@ -9,16 +9,26 @@ import { CallEventsController } from './call-events.controller';
 import { CallEventsReadController } from './call-events-read.controller';
 import { CallEventsRepository } from './call-events.repository';
 import { CallEventsService } from './call-events.service';
+import { CallDashboardMetricsController } from './call-dashboard-metrics.controller';
+import { CallDashboardMetricsRepository } from './call-dashboard-metrics.repository';
+import { CallDashboardMetricsService } from './call-dashboard-metrics.service';
 
 @Module({
   imports: [DatabaseModule, AuditModule],
-  controllers: [CallInsightsController, CallEventsController, CallEventsReadController],
+  controllers: [
+    CallInsightsController,
+    CallEventsController,
+    CallEventsReadController,
+    CallDashboardMetricsController,
+  ],
   providers: [
     CallInsightsGuard,
     CallInsightsRepository,
     CallInsightsService,
     CallEventsRepository,
     CallEventsService,
+    CallDashboardMetricsRepository,
+    CallDashboardMetricsService,
   ],
   exports: [CallInsightsGuard],
 })

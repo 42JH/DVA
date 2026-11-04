@@ -358,6 +358,19 @@ Table call_analyses {
 Ref: call_sessions.call_session_seq - call_analyses.call_session_seq
 Ref: ai_persona_versions.ai_persona_version_seq ?< call_analyses.ai_persona_version_seq
 
+Table call_dashboard_metrics {
+  call_session_seq integer [pk, not null, note: '050: 분석과 1:1. 분석 실제 폐기 시 CASCADE']
+  dropoff_stage text [note: 'AI 확정 이탈 단계. NONE 이탈 없음, NULL 미수신. 단계 진입은 저장하지 않음']
+  dropoff_payload_hash text [note: '이탈 항목의 정규화 SHA-256']
+  dropoff_received_at timestamptz [note: '이탈 항목 최초 수신 시각']
+  total_wait_ms bigint [note: 'AI가 겹침을 제외한 총 대기 밀리초. NULL 미수신, 0 측정 후 없음']
+  latency_stats jsonb [note: '최대 7개 고유 처리 유형의 totalLatencyMs/measurementCount. [] 측정 후 없음']
+  response_wait_payload_hash text [note: '대기 항목의 정규화 SHA-256']
+  response_wait_received_at timestamptz [note: '대기 항목 최초 수신 시각']
+  Note: '통화별 이탈·레이턴시 요약. 항목별 독립 원자 저장·동일 재전송 204/변경 409. 부모 통화 soft delete·incoming_at 기준 5년 보관을 따른다. 세부 CHECK와 JSON 검증 함수는 050 SQL 기준.'
+}
+Ref: call_analyses.call_session_seq - call_dashboard_metrics.call_session_seq [delete: cascade]
+
 Table pbx_webhooks.call_ended_events {
   recording_id varchar(200) [pk, not null, note: 'PBX 녹취 고유 ID. 같은 ID와 같은 본문의 재전송은 한 번만 수신']
   payload jsonb [not null, note: '정규화한 웹훅 원문. 발신·수신번호, 실제 시각, 재생 시간, 다운로드 URL 포함']
@@ -534,6 +547,7 @@ Table ai_persona_versions {
   requested_by_admin_user_seq integer [note: '적용 요청 관리자 논리 참조. 이름은 감사 로그에 보존']
   requested_at timestamptz [note: '최신 적용 요청 시각']
   applied_at timestamptz [note: 'AI 적용 확인 시각']
+  previous_active_version_seq integer [note: '050: 마지막 활성화 성공 직전 ACTIVE 버전. 미확인 NULL. 성공 트랜잭션에서 기록']
   last_notified_at timestamptz [note: 'AI 알림 재시도 시각']
   apply_error_code text [note: 'AI_UNAVAILABLE / INVALID_CONFIG / UNSUPPORTED_OPTIONS / APPLY_FAILED']
   indexes {
@@ -553,6 +567,8 @@ Table ai_persona_versions {
   }
   Note: 'operations / 이름·프롬프트·음성·속도·대기 설정은 변경 불가. 수정은 새 버전을 추가한다. AI가 통화 0건에서 적용을 확인한 뒤 ACTIVE 전환. SQL의 부분 UNIQUE 인덱스로 ACTIVE·PENDING 각각 1개와 application_id 고유성을 보장한다. 적용 제약·트리거의 배포 원본은 013 migration이다.'
 }
+
+Ref: ai_persona_versions.ai_persona_version_seq < ai_persona_versions.previous_active_version_seq
 
 Table ai_persona_drafts {
   ai_persona_seq integer [pk, not null, note: '039: 유형당 초안 한 개. 논리 참조']

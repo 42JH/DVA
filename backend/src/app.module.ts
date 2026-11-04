@@ -17,6 +17,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { CallInsightsModule } from './call-insights/call-insights.module';
 import { UnansweredQuestionsModule } from './unanswered-questions/unanswered-questions.module';
 import { RetentionModule } from './retention/retention.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { RetentionModule } from './retention/retention.module';
     AiSettingsModule,
     FaqsModule,
     RetentionModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

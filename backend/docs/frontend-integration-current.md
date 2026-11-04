@@ -1,6 +1,8 @@
 # 프론트 파트 연동 명세 — 2026-11-04
 
-코드 기준: `feature/ai-call-updates`, DB migration `048`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 수거 시각·콜백·좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
+코드 기준: `feature/ai-dashboard`, DB migration `050`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 수거 시각·콜백·좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
+
+AI 상담 성능 대시보드 GET 4개·고객 탭·현재/직전 활성 버전 비교·NULL/0 표시 규칙은 [프론트 전용 대시보드 명세](ai-dashboard-frontend-integration.md)를 따른다. 기존 통화 불편 유형에도 신규 5개 코드를 지원한다. 미답변 reason 표시/필터는 [049 계약](unanswered-question-reasons.md)을 따른다.
 
 [AI 명세](ai-integration-current.md) · [이번 제거와 검증·DB 전환](unused-contract-cleanup.md)
 
