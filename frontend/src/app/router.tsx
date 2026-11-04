@@ -88,11 +88,8 @@ export const router = createBrowserRouter([
               </RequireRole>
             ),
           },
-          {
-            path: 'me',
-            element: <MyInfoPage />,
-            handle: { title: '내 정보' } satisfies RouteHandle,
-          },
+          // 11 내 정보 (11/05 새 디자인 — 구성 그대로 모양만) — handle 없음(화면이 상단바 · 경로를 그림)
+          { path: 'me', element: <MyInfoPage /> },
           ...(import.meta.env.DEV
             ? [
                 {
