@@ -1,11 +1,14 @@
 import { useLocation, useNavigate } from 'react-router'
-import { Button, FormModal, Tag } from '@/shared/ui'
-import { useOrderDetail } from './useOrderDetail'
+import { Button, Overlay } from '@/shared/ui'
+import { OrderChip } from './OrderChip'
+import { useOrderDetail, type PartyView } from './useOrderDetail'
 
-// 주문 상세 팝업 (디자인 03_주문내역_주문상세 · _전화 = 06 '주문 보기'와 같은 창, 10/30 공통으로 올림)
-// 보내는 분 | 받는 분 → 접수 정보 → 관련 통화(누르면 창을 닫고 그 통화의 06) · [닫기] [수정]. 읽기 전용
+// 주문 상세 창 (03 주문 내역 · 06 '주문 보기' 같은 창) — Figma에 없어 새 디자인(11/04 '주문' · '통화')의 말투로 만든 모양 (11/04 사용자)
+// 머리: '주문번호' + DV-00001 + 상태 칩(03 목록 줄과 같은 칩) · 접수 시각 · 경로 · 배송 n/m | ✕
+// 몸: 보내는 분 ≫ 받는 분(하늘색 카드, 03 검색칸 사이 ≫와 같은 표시) · 접수 정보(두 칸) · 관련 통화(칩 = 04 통화 목록 색, 누르면 창을 닫고 06)
+// 아래: [주문 취소](결제 전) … [닫기] [다시 접수](접수 실패) [수정] — 넘긴 곳에서만 보임 (06은 [닫기]만). 파랑 채움은 한 번에 하나
+// 머리 · 버튼 줄은 고정, 몸만 스크롤 (창 높이 = 화면 - 64까지)
 // 쓰는 법: {orderId && <OrderDetailModal orderId={orderId} onClose={() => setOrderId(null)} onEdit={...} />}
-//   onEdit · onCancel · onRetry를 넘긴 곳에서만 그 버튼이 보임 (06 통화 상세는 [수정]만). 상태에 따라 취소(결제 전) · 다시 접수(접수 실패)
 export function OrderDetailModal({
   orderId,
   parcelSeq,
@@ -24,6 +27,7 @@ export function OrderDetailModal({
   const navigate = useNavigate()
   const { pathname } = useLocation() // 06에서 열렸으면 지금 보는 통화는 링크 대신 글자 (같은 화면이 기록에 또 쌓이지 않게)
   const { order, isLoading, error } = useOrderDetail(orderId, parcelSeq)
+  const retry = !!order?.canRetry && !!onRetry
 
   const openCall = (callSessionSeq: number) => {
     onClose()
@@ -31,127 +35,154 @@ export function OrderDetailModal({
   }
 
   return (
-    <FormModal
-      title="주문 상세"
-      titleExtra={order?.tags.map((t) => (
-        <Tag key={t.label} kind={t.kind}>
-          {t.label}
-        </Tag>
-      ))}
-      description={order?.subtitle}
-      width={960}
-      onClose={onClose}
-      footer={
-        <>
-          {order?.canCancel && onCancel && (
-            <Button
-              kind="dangerLine"
-              className="mr-auto"
-              onClick={() => onCancel(order.orderSeq, order.parcelCount)}
-            >
-              주문 취소
-            </Button>
-          )}
-          <Button onClick={onClose}>닫기</Button>
-          {order?.canRetry && onRetry && (
-            <Button kind="primary" onClick={() => onRetry(order.orderSeq)}>
-              다시 접수
-            </Button>
-          )}
-          {order?.canEdit && onEdit && (
-            <Button kind="primary" onClick={() => onEdit(order.orderSeq)}>
-              수정
-            </Button>
-          )}
-        </>
-      }
-    >
-      {!order ? (
-        <p className="py-16 text-center text-body text-muted">
-          {isLoading ? '불러오는 중…' : (error ?? '주문을 찾을 수 없습니다.')}
-        </p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2">
-            <Section title="보내는 분" rows={order.sender} />
-            <Section title="받는 분" rows={order.receiver} className="border-l border-line pl-7" />
+    <Overlay onClose={onClose} label="주문 상세" boxClass="w-[920px] py-7">
+      <header className="flex shrink-0 items-start gap-4 px-9">
+        {order ? (
+          <div className="min-w-0">
+            <p className="text-label font-medium text-sub">주문번호</p>
+            <h2 className="mt-0.5 flex items-center gap-4 text-title font-bold">
+              {order.orderNo}
+              {order.group && <OrderChip group={order.group} />}
+            </h2>
+            <p className="mt-1 text-body text-sub">{order.meta}</p>
           </div>
+        ) : (
+          <h2 className="text-title font-bold">주문 상세</h2>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className="-mr-1.5 ml-auto grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink"
+        >
+          <svg
+            viewBox="0 0 20 20"
+            className="size-5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            aria-hidden
+          >
+            <path d="M5 5l10 10M15 5L5 15" />
+          </svg>
+        </button>
+      </header>
 
-          <div className="border-t border-line" />
-          <div>
-            <h3 className="mb-3 text-body font-bold">접수 정보</h3>
-            <Row label="품목" value={order.items} />
-            <div className="grid grid-cols-2">
-              {order.info.map(([label, value]) => (
-                <Row key={label} label={label} value={value} />
-              ))}
+      <div className="mt-5 min-h-0 [scrollbar-width:thin] overflow-y-auto border-t border-line px-9 pt-5">
+        {!order ? (
+          <p className="py-16 text-center text-body text-muted">
+            {isLoading ? '불러오는 중…' : (error ?? '주문을 찾을 수 없습니다.')}
+          </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2">
+              <Party title="보내는 분" p={order.sender} />
+              <svg
+                viewBox="0 0 40 40"
+                className="size-8 self-center text-brand"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden
+              >
+                <path d="M10 28.33 18.33 20 10 11.67M21.67 28.33 30 20l-8.33-8.33" />
+              </svg>
+              <Party title="받는 분" p={order.receiver} />
             </div>
-            <Row label="고객 요청 사항" value={order.clientComment} />
-          </div>
 
-          <div className="border-t border-line" />
-          <div>
-            <h3 className="mb-3 text-body font-bold">관련 통화</h3>
-            {order.relatedCalls.length === 0 ? (
-              <p className="text-body text-muted">없음</p>
-            ) : (
-              <ul>
-                {order.relatedCalls.map((c) => (
-                  <li key={c.key} className="flex h-10 items-center gap-6 text-body">
-                    <span>{c.time}</span>
-                    <Tag kind="gray">{c.tag}</Tag>
-                    <span>{c.text}</span>
-                    {pathname === `/calls/${c.callSessionSeq}` ? (
-                      <span className="ml-auto text-label text-sub">보고 있는 통화</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => openCall(c.callSessionSeq)}
-                        className="ml-auto text-label font-semibold text-action hover:underline"
-                      >
-                        통화 상세 ›
-                      </button>
-                    )}
-                  </li>
+            <section className="mt-5">
+              <h3 className="text-strong font-bold">접수 정보</h3>
+              <dl className="mt-3 grid grid-cols-2 gap-x-10 gap-y-3">
+                {order.info.map(({ label, value, wide }) => (
+                  <div
+                    key={label}
+                    className={`flex items-baseline gap-4 ${wide ? 'col-span-2' : ''}`}
+                  >
+                    <dt className="w-[116px] shrink-0 text-body text-sub">{label}</dt>
+                    <dd
+                      className={`min-w-0 text-strong break-words ${value === '없음' ? 'text-muted' : ''}`}
+                    >
+                      {value}
+                    </dd>
+                  </div>
                 ))}
-              </ul>
-            )}
-          </div>
-        </>
-      )}
-    </FormModal>
+              </dl>
+            </section>
+
+            <section className="mt-5 border-t border-line pt-4">
+              <h3 className="text-strong font-bold">관련 통화</h3>
+              {order.relatedCalls.length === 0 ? (
+                <p className="mt-3 text-body text-muted">없음</p>
+              ) : (
+                <ul className="mt-1">
+                  {order.relatedCalls.map((c) => (
+                    <li
+                      key={c.key}
+                      className="flex h-12 items-center gap-5 border-b border-bg last:border-b-0"
+                    >
+                      <span className="w-[136px] shrink-0 text-body text-sub">{c.time}</span>
+                      <span
+                        className={`grid h-7 min-w-15 shrink-0 place-items-center px-3 text-body ${c.cancel ? 'bg-kind-cancel' : 'bg-kind-accept'}`}
+                      >
+                        {c.tag}
+                      </span>
+                      <span className="min-w-0 truncate text-strong">{c.text}</span>
+                      {pathname === `/calls/${c.callSessionSeq}` ? (
+                        <span className="ml-auto shrink-0 text-body text-sub">보고 있는 통화</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openCall(c.callSessionSeq)}
+                          className="ml-auto shrink-0 text-body font-semibold text-brand hover:underline"
+                        >
+                          통화 상세 ›
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        )}
+      </div>
+
+      <footer className="mt-4 flex shrink-0 items-center gap-3 border-t border-line px-9 pt-5">
+        {order?.canCancel && onCancel && (
+          <Button big kind="dangerLine" onClick={() => onCancel(order.orderSeq, order.parcelCount)}>
+            주문 취소
+          </Button>
+        )}
+        <Button big className="ml-auto" onClick={onClose}>
+          닫기
+        </Button>
+        {retry && (
+          <Button big kind="brand" onClick={() => onRetry(order.orderSeq)}>
+            다시 접수
+          </Button>
+        )}
+        {order?.canEdit && onEdit && (
+          <Button big kind={retry ? 'brandLine' : 'brand'} onClick={() => onEdit(order.orderSeq)}>
+            수정
+          </Button>
+        )}
+      </footer>
+    </Overlay>
   )
 }
 
-function Section({
-  title,
-  rows,
-  className = '',
-}: {
-  title: string
-  rows: [string, string][]
-  className?: string
-}) {
+/** 보내는 분 · 받는 분 카드 — 하늘색 바탕(틀 색) · 이름 20/600 · 전화번호 · 주소(도로명 + 상세) */
+function Party({ title, p }: { title: string; p: PartyView }) {
+  const dash = (t: string) => t || <span className="text-muted">—</span>
   return (
-    <div className={className}>
-      <h3 className="mb-3 text-body font-bold">{title}</h3>
-      {rows.map(([label, value]) => (
-        <Row key={label} label={label} value={value} />
-      ))}
-    </div>
-  )
-}
-
-/** 항목 136 · 값 (없음 · — 은 회색). 긴 주소 · 요청 사항은 줄바꿈 — 48px 고정이면 세 줄부터 옆 줄과 겹침 (11/02) */
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <p className="flex min-h-10 items-start py-2">
-      <span className="w-[136px] shrink-0 text-label text-sub">{label}</span>
-      <span
-        className={`min-w-0 text-body break-words ${value === '없음' || value === '—' ? 'text-sub' : ''}`}
-      >
-        {value}
-      </span>
-    </p>
+    <section className="min-w-0 rounded-xl bg-frame px-6 py-5">
+      <h3 className="text-label font-semibold text-brand">{title}</h3>
+      <p className="mt-1.5 text-card font-semibold break-words">{dash(p.name)}</p>
+      <p className="mt-1 text-body">{dash(p.phone)}</p>
+      <p className="mt-0.5 text-body break-words text-sub">{dash(p.address)}</p>
+    </section>
   )
 }

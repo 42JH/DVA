@@ -7,6 +7,7 @@ import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
 import { buildCreateOrder } from './orderCreate'
 import type { CustomerPatch, OrderPatch } from './orderPatch'
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
+import type { OrderGroup } from '@/shared/order/labels'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
@@ -22,8 +23,7 @@ export type OrderStatus =
   | 'CANCELLED' // 주문 취소
 
 /** '주문 상태' 고르기 = 서버 statusGroup (11/01): 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = SUBMITTING_FAILED · SUBMISSION_FAILED */
-export type StatusGroup =
-  'ALL' | 'COLLECTING' | 'notPaid' | 'PAID' | 'SUBMISSION_FAILED' | 'CANCELLED'
+export type StatusGroup = 'ALL' | OrderGroup
 
 /** 품목 4종 (와이어프레임 03 · 디버 FAQ '박스 크기') — 주문 상세의 items 키와 같은 순서. 그 밖은 '기타 품목' 글로 */
 export const BOX_TYPES = [

@@ -1,24 +1,43 @@
 import { useQuery } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { fmtDetailTime, fmtPhone } from '@/shared/lib/format'
-import type { TagKind } from '@/shared/ui'
-import { PAYMENT_METHOD_LABEL, PAYMENT_STATE_LABEL, RELATED_CALL_LABEL } from './labels'
+import {
+  ORDER_GROUP,
+  PAYMENT_METHOD_LABEL,
+  PAYMENT_STATE_LABEL,
+  RELATED_CALL_LABEL,
+  orderNo,
+  type OrderGroup,
+} from './labels'
 import { orderQueries, type OrderDetail, type Party } from './orderApi'
 
-/** 주문 상세 화면용 값 (읽기 전용) — OrderDetail(본문) · OrderDetailModal(창)이 그림 */
+/** 보내는 분 · 받는 분 카드 — 빈 칸은 '' (미완료 주문) */
+export interface PartyView {
+  name: string
+  phone: string // '010-1234-5678'
+  address: string // 도로명 + 상세주소 (03 목록과 같은 한 줄)
+}
+
+/** 주문 상세 화면용 값 (읽기 전용) — OrderDetailModal이 그림 */
 export interface OrderView {
   orderSeq: number
-  tags: { label: string; kind: TagKind }[] // [전화] · [수기] (+ [주문 취소])
-  subtitle: string // '접수 10.20 (화) 13:12 · AI 전화 접수' · '… · 수기 접수 이재훈'
-  sender: [string, string][] // [항목, 값]
-  receiver: [string, string][]
-  items: string
-  info: [string, string][] // 수거 희망 일시 · 결제 방식 · 물품 가액 · 결제 (두 칸씩)
-  clientComment: string
-  relatedCalls: { key: string; callSessionSeq: number; time: string; tag: string; text: string }[]
+  orderNo: string // 'DV-10519'
+  group: OrderGroup | null // 머리 칩 — 03 목록 줄과 같은 칩. 이 상세만 취소됐어도 '주문 취소'
+  meta: string // '접수 11-04 (수) 13:12 · AI 전화 접수 · 배송 1/2'
+  sender: PartyView
+  receiver: PartyView
+  info: { label: string; value: string; wide?: boolean }[] // 품목 · 수거 희망 일시 · 결제 방식 · 물품 가액 · 결제 · 고객 요청 사항 (wide = 두 칸 차지)
+  relatedCalls: {
+    key: string
+    callSessionSeq: number
+    time: string
+    cancel: boolean // 칩 색 (04 통화 목록 칩과 같은 색: 접수 · 취소)
+    tag: string
+    text: string
+  }[]
   canEdit: boolean // 취소된 주문은 [수정] 없음
-  canCancel: boolean // 결제 전(접수 중단 · 결제 대기)만 취소 가능 (명세 4.5, 11/01 결정)
-  canRetry: boolean // 디버 접수 실패만 [다시 접수] (11/01 결정)
+  canCancel: boolean // 결제 전(미완료 · 결제 대기)만 취소 가능 (명세 4.5, 11/01 결정)
+  canRetry: boolean // 디버 접수 최종 실패만 [다시 접수] (11/01 결정)
   parcelCount: number // 취소 확인 창 '배송 n건이 모두 취소' — 취소 안 된 상세 수
 }
 
@@ -63,31 +82,36 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
   const phone = o.route === 'PHONE'
   return {
     orderSeq: o.orderSeq,
-    tags: [
-      { label: phone ? '전화' : '수기', kind: 'blue' },
-      ...(o.cancelled ? [{ label: '주문 취소', kind: 'gray' as TagKind }] : []),
-    ],
-    subtitle: [
+    orderNo: orderNo(o.orderSeq),
+    group: o.cancelled ? 'CANCELLED' : o.status ? ORDER_GROUP[o.status] : null,
+    meta: [
       `접수 ${fmtDetailTime(o.acceptedAt)}`,
       phone ? 'AI 전화 접수' : `수기 접수 ${o.manualBy ?? ''}`.trim(),
       o.position,
     ]
       .filter(Boolean)
       .join(' · '),
-    sender: partyRows(o.sender),
-    receiver: partyRows(o.receiver),
-    items: itemsText(o),
+    sender: party(o.sender),
+    receiver: party(o.receiver),
     info: [
-      ['수거 희망 일시', o.pickupRequestedAt ? fmtDetailTime(o.pickupRequestedAt) : '없음'],
-      ['결제 방식', PAYMENT_METHOD_LABEL[o.paymentMethod]],
-      ['물품 가액', o.itemPrice === null ? '없음' : `${o.itemPrice.toLocaleString('ko-KR')}원`],
-      ['결제', PAYMENT_STATE_LABEL[o.paymentState]],
+      { label: '품목', value: itemsText(o), wide: true },
+      {
+        label: '수거 희망 일시',
+        value: o.pickupRequestedAt ? fmtDetailTime(o.pickupRequestedAt) : '없음',
+      },
+      { label: '결제 방식', value: PAYMENT_METHOD_LABEL[o.paymentMethod] },
+      {
+        label: '물품 가액',
+        value: o.itemPrice === null ? '없음' : `${o.itemPrice.toLocaleString('ko-KR')}원`,
+      },
+      { label: '결제', value: PAYMENT_STATE_LABEL[o.paymentState] },
+      { label: '고객 요청 사항', value: o.clientComment || '없음', wide: true },
     ],
-    clientComment: o.clientComment ?? '없음',
     relatedCalls: o.relatedCalls.map((c) => ({
       key: `${c.callSessionSeq}-${c.kind}`,
       callSessionSeq: c.callSessionSeq,
       time: fmtDetailTime(c.startedAt),
+      cancel: c.kind === 'CANCEL',
       tag: RELATED_CALL_LABEL[c.kind].tag,
       text: RELATED_CALL_LABEL[c.kind].text,
     })),
@@ -98,14 +122,24 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
   }
 }
 
-const partyRows = (p: Party): [string, string][] => [
-  ['이름', p.name],
-  ['전화번호', fmtPhone(p.phoneNumber)],
-  ['주소', p.roadAddress],
-  ['상세주소', p.detailAddress ?? '없음'],
-]
+const party = (p: Party): PartyView => ({
+  name: p.name,
+  phone: p.phoneNumber ? fmtPhone(p.phoneNumber) : '',
+  address: [p.roadAddress, p.detailAddress].filter(Boolean).join(' '),
+})
 
-function itemsText(o: OrderDetail) {
-  const i = o.items
-  return `서류 ${i.document} · 소박스 ${i.small} · 중박스 ${i.medium} · 대박스 ${i.big} · 기타 ${i.other ?? '—'}`
+/** '소박스 1 · 중박스 1 · 기타 화분' — 0개는 뺌 (03 목록에 있던 품목 칸과 같은 모양) */
+function itemsText({ items: i }: OrderDetail) {
+  const parts = (
+    [
+      ['서류', i.document],
+      ['소박스', i.small],
+      ['중박스', i.medium],
+      ['대박스', i.big],
+    ] as const
+  )
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${k} ${n}`)
+  if (i.other) parts.push(`기타 ${i.other}`)
+  return parts.join(' · ') || '없음'
 }
