@@ -1,4 +1,4 @@
-import { Button, FileDrop, FormModal, TextField } from '@/shared/ui'
+import { Button, FileDrop, Dialog, TextField } from '@/shared/ui'
 import { CSV_HEADER } from '@/features/company/csvMembers'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 
@@ -8,18 +8,22 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
   const vm = useCompanyCsv(onClose)
 
   return (
-    <FormModal
+    <Dialog
+      label="CSV로 기업 등록"
+      width={600}
       title="CSV로 기업 등록"
       onClose={onClose}
       footer={
         <>
           {vm.errorMessage && (
-            <p role="alert" className="mr-auto text-label text-danger">
+            <p role="alert" className="min-w-0 text-body text-danger">
               {vm.errorMessage}
             </p>
           )}
-          <Button onClick={onClose}>취소</Button>
-          <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
+          <Button big className="ml-auto" onClick={onClose}>
+            취소
+          </Button>
+          <Button big kind="brand" disabled={!vm.canSubmit} onClick={vm.submit}>
             {vm.isSubmitting ? '등록 중…' : '등록'}
           </Button>
         </>
@@ -50,6 +54,6 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           </p>
         </div>
       </div>
-    </FormModal>
+    </Dialog>
   )
 }

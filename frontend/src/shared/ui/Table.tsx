@@ -36,6 +36,7 @@ export function Table<Row>({
   empty = '내역이 없습니다.',
   loading,
   footer,
+  big,
 }: {
   columns: Column<Row>[]
   rows: Row[]
@@ -52,6 +53,9 @@ export function Table<Row>({
   empty?: string
   loading?: boolean
   footer?: ReactNode // 페이지 번호
+  // 새 디자인(11/05~ 08 · 10, 03 주문 · 04 통화 목록 말투): 카드 없이 · 열 머리 20/600 · 구분선 · 줄 글자 20 · 파랑 선택
+  // 남는 높이를 채우고 줄만 스크롤(열 머리는 위에 붙음, 쪽 번호는 아래 고정) — 부모가 flex 세로로 높이를 줘야 함
+  big?: boolean
 }) {
   // 열 폭은 와이어프레임 값 그대로 = 다음 열까지의 거리(사이 여백 포함) → grid gap 없이 깐다.
   // 폭 없는 열(나머지)은 minmax로 바닥을 둬서 글자가 눌려 잘리지 않게
@@ -66,96 +70,125 @@ export function Table<Row>({
   const allState = !selected?.size ? 'off' : selected.size === rows.length ? 'on' : 'some'
 
   return (
-    <section className="rounded-xl bg-surface px-8 pt-8 pb-7 ring-1 ring-line ring-inset">
-      {head && <div className="mb-4 flex h-9 items-center justify-between">{head}</div>}
-      {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
-      <div
-        className="mb-4 grid h-6 items-center text-label font-semibold text-sub"
-        style={{ gridTemplateColumns: gridCols }}
-      >
-        {selectable &&
-          (onSelectAll ? (
-            <Checkbox state={allState} onChange={onSelectAll} label="전체 선택" />
-          ) : (
-            <span />
-          ))}
-        {columns.map((c) => (
-          <span
-            key={c.key}
-            className={`${ALIGN[c.align ?? 'left']} ${c.pill ? 'text-center' : ''}`}
-          >
-            {c.header}
-          </span>
-        ))}
-      </div>
-      <div className="border-t border-line" />
-
-      {loading ? (
-        <p className="py-16 text-center text-body text-muted">불러오는 중…</p>
-      ) : rows.length === 0 ? (
-        <p className="py-16 text-center text-body text-muted">{empty}</p>
-      ) : (
-        <ul>
-          {rows.map((row, i) => {
-            const key = rowKey(row)
-            const isSelected = selected?.has(key) ?? false
-            const tinted = isSelected // 호버는 CSS(group-hover)라 태그는 선택만 흰 바탕으로
-            const isOpen = expanded?.(row) ?? false // 펼친 줄: 옅은 바탕, 아래 모서리는 각지게 → 아래 subRows 띠와 한 덩어리
-            const click = canClick?.(row) === false ? undefined : onRowClick
-            return (
-              <li key={key} className={i < rows.length - 1 ? 'border-b border-line' : ''}>
-                <div
-                  onClick={click ? () => click(row) : undefined}
-                  // 키보드: Tab으로 줄에 가서 Enter · Space로 열기 (안쪽 체크박스 · [수정]의 키는 줄로 안 번짐)
-                  role={click ? 'button' : undefined}
-                  tabIndex={click ? 0 : undefined}
-                  aria-expanded={click && expanded ? isOpen : undefined}
-                  onKeyDown={
-                    click
-                      ? (e) => {
-                          if (e.target !== e.currentTarget) return
-                          if (e.key !== 'Enter' && e.key !== ' ') return
-                          e.preventDefault() // Space가 화면을 내리지 않게
-                          click(row)
-                        }
-                      : undefined
-                  }
-                  // 포커스 표시는 바탕색이 아니라 안쪽 선 (선택 · 펼친 줄의 바탕색을 덮지 않게)
-                  className={`group -mx-4 grid min-h-[56px] items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-action focus-visible:ring-inset ${
-                    isSelected
-                      ? 'bg-action-soft'
-                      : isOpen
-                        ? 'cursor-pointer rounded-b-none bg-bg'
-                        : click
-                          ? 'cursor-pointer hover:bg-bg'
-                          : ''
-                  }`}
-                  style={{ gridTemplateColumns: gridCols }}
-                >
-                  {selectable && (
-                    <Checkbox
-                      state={isSelected ? 'on' : 'off'}
-                      onChange={() => onSelect?.(key)}
-                      label="줄 선택"
-                    />
-                  )}
-                  {columns.map((c) => (
-                    <div key={c.key} className={`min-w-0 ${ALIGN[c.align ?? 'left']}`}>
-                      {c.cell(row, { tinted })}
-                    </div>
-                  ))}
-                </div>
-                {/* 펼침 띠는 내용이 있을 때만 SubRow를 붙이고, 닫히면 떼어 냄 → 퇴장 애니메이션이 돎 */}
-                {(() => {
-                  const sub = subRows?.(row, { tinted, gridCols })
-                  return sub ? <SubRow>{sub}</SubRow> : null
-                })()}
-              </li>
-            )
-          })}
-        </ul>
+    <section
+      className={
+        big
+          ? 'flex min-h-0 flex-1 flex-col'
+          : 'rounded-xl bg-surface px-8 pt-8 pb-7 ring-1 ring-line ring-inset'
+      }
+    >
+      {head && (
+        <div className={`flex items-center justify-between ${big ? 'mb-5 shrink-0' : 'mb-4 h-9'}`}>
+          {head}
+        </div>
       )}
-      {footer && <div className="pt-4">{footer}</div>}
+      {/* big: 머리 + 줄을 한 스크롤 상자에 — 머리는 위에 붙고(sticky), 스크롤 막대가 생겨도 열 자리가 같음 */}
+      <div
+        className={
+          big
+            ? '-mx-4 min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto px-4'
+            : ''
+        }
+      >
+        <div className={big ? 'sticky top-0 z-10 bg-surface' : ''}>
+          {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
+          <div
+            className={`mb-4 grid items-center font-semibold ${big ? 'h-7 text-card text-ink' : 'h-6 text-label text-sub'}`}
+            style={{ gridTemplateColumns: gridCols }}
+          >
+            {selectable &&
+              (onSelectAll ? (
+                <Checkbox state={allState} onChange={onSelectAll} label="전체 선택" brand={big} />
+              ) : (
+                <span />
+              ))}
+            {columns.map((c) => (
+              <span
+                key={c.key}
+                className={`${ALIGN[c.align ?? 'left']} ${c.pill ? 'text-center' : ''}`}
+              >
+                {c.header}
+              </span>
+            ))}
+          </div>
+          <div className="border-t border-line" />
+        </div>
+
+        {loading ? (
+          <p className="py-16 text-center text-body text-muted">불러오는 중…</p>
+        ) : rows.length === 0 ? (
+          <p className="py-16 text-center text-body text-muted">{empty}</p>
+        ) : (
+          <ul>
+            {rows.map((row, i) => {
+              const key = rowKey(row)
+              const isSelected = selected?.has(key) ?? false
+              const tinted = isSelected // 호버는 CSS(group-hover)라 태그는 선택만 흰 바탕으로
+              const isOpen = expanded?.(row) ?? false // 펼친 줄: 옅은 바탕, 아래 모서리는 각지게 → 아래 subRows 띠와 한 덩어리
+              const click = canClick?.(row) === false ? undefined : onRowClick
+              return (
+                <li
+                  key={key}
+                  className={
+                    i < rows.length - 1 ? `border-b ${big ? 'border-bg' : 'border-line'}` : ''
+                  }
+                >
+                  <div
+                    onClick={click ? () => click(row) : undefined}
+                    // 키보드: Tab으로 줄에 가서 Enter · Space로 열기 (안쪽 체크박스 · [수정]의 키는 줄로 안 번짐)
+                    role={click ? 'button' : undefined}
+                    tabIndex={click ? 0 : undefined}
+                    aria-expanded={click && expanded ? isOpen : undefined}
+                    onKeyDown={
+                      click
+                        ? (e) => {
+                            if (e.target !== e.currentTarget) return
+                            if (e.key !== 'Enter' && e.key !== ' ') return
+                            e.preventDefault() // Space가 화면을 내리지 않게
+                            click(row)
+                          }
+                        : undefined
+                    }
+                    // 포커스 표시는 바탕색이 아니라 안쪽 선 (선택 · 펼친 줄의 바탕색을 덮지 않게)
+                    className={`group -mx-4 grid items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-inset ${big ? 'min-h-[72px] text-card focus-visible:ring-brand' : 'min-h-[56px] focus-visible:ring-action'} ${
+                      isSelected
+                        ? big
+                          ? 'bg-brand/10'
+                          : 'bg-action-soft'
+                        : isOpen
+                          ? 'cursor-pointer rounded-b-none bg-bg'
+                          : click
+                            ? 'cursor-pointer hover:bg-bg'
+                            : ''
+                    }`}
+                    style={{ gridTemplateColumns: gridCols }}
+                  >
+                    {selectable && (
+                      <Checkbox
+                        state={isSelected ? 'on' : 'off'}
+                        onChange={() => onSelect?.(key)}
+                        label="줄 선택"
+                        brand={big}
+                      />
+                    )}
+                    {columns.map((c) => (
+                      <div key={c.key} className={`min-w-0 ${ALIGN[c.align ?? 'left']}`}>
+                        {c.cell(row, { tinted })}
+                      </div>
+                    ))}
+                  </div>
+                  {/* 펼침 띠는 내용이 있을 때만 SubRow를 붙이고, 닫히면 떼어 냄 → 퇴장 애니메이션이 돎 */}
+                  {(() => {
+                    const sub = subRows?.(row, { tinted, gridCols })
+                    return sub ? <SubRow>{sub}</SubRow> : null
+                  })()}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
+      {footer && <div className={big ? 'shrink-0 pt-4' : 'pt-4'}>{footer}</div>}
     </section>
   )
 }

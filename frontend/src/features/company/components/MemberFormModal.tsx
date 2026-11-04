@@ -1,11 +1,4 @@
-import {
-  AddressField,
-  AddressSearchModal,
-  Button,
-  ChipGroup,
-  FormModal,
-  TextField,
-} from '@/shared/ui'
+import { AddressField, AddressSearchModal, Button, ChipGroup, Dialog, TextField } from '@/shared/ui'
 import type { Member } from '@/features/company/api/companyApi'
 import { MEMBER_ROLE } from '@/features/company/labels'
 import { useMemberForm } from '@/features/company/hooks/useMemberForm'
@@ -30,35 +23,46 @@ export function MemberFormModal({
   // 주소 검색은 폼 대신 띄움 (두 창이 겹치면 Esc가 둘 다 닫아서) — 고르면 돌아오고 적던 내용은 그대로
   if (vm.searching)
     return (
-      <AddressSearchModal title="사원 주소 검색" onPick={vm.pickAddress} onClose={vm.closeSearch} />
+      <AddressSearchModal
+        big
+        title="사원 주소 검색"
+        onPick={vm.pickAddress}
+        onClose={vm.closeSearch}
+      />
     )
 
   return (
-    <FormModal
+    <Dialog
+      label={vm.editing ? '사원 수정' : '사원 추가'}
+      width={600}
       title={vm.editing ? '사원 수정' : '사원 추가'}
-      description={companyName}
+      sub={companyName}
       onClose={onClose}
       footer={
         vm.addressFailMessage ? (
           // 사원은 저장됨 — 주소만 다시 보내거나 닫기
           <>
-            <p role="alert" className="mr-auto text-label text-danger">
+            <p role="alert" className="min-w-0 text-body text-danger">
               {vm.addressFailMessage}
             </p>
-            <Button onClick={onClose}>닫기</Button>
-            <Button kind="primary" disabled={vm.retrying} onClick={vm.retryAddress}>
+            <Button big className="ml-auto" onClick={onClose}>
+              닫기
+            </Button>
+            <Button big kind="brand" disabled={vm.retrying} onClick={vm.retryAddress}>
               {vm.retrying ? '저장 중…' : '주소 다시 저장'}
             </Button>
           </>
         ) : (
           <>
             {vm.errorMessage && (
-              <p role="alert" className="mr-auto text-label text-danger">
+              <p role="alert" className="min-w-0 text-body text-danger">
                 {vm.errorMessage}
               </p>
             )}
-            <Button onClick={onClose}>취소</Button>
-            <Button kind="primary" disabled={!vm.canSubmit} onClick={vm.submit}>
+            <Button big className="ml-auto" onClick={onClose}>
+              취소
+            </Button>
+            <Button big kind="brand" disabled={!vm.canSubmit} onClick={vm.submit}>
               {vm.editing ? '저장' : '추가'}
             </Button>
           </>
@@ -98,16 +102,9 @@ export function MemberFormModal({
           onChange={(e) => vm.setPhone(e.target.value)}
           error={vm.errors.phone}
         />
-        <div className="flex items-center gap-4">
-          <span className="w-[120px] shrink-0 text-label text-sub">역할</span>
-          <ChipGroup
-            name="역할"
-            compact
-            options={ROLES}
-            value={vm.form.role}
-            onChange={vm.setRole}
-          />
-        </div>
+        {/* 칩 묶음이 '역할' 라벨을 그림 (예전엔 바깥에도 한 번 더 있어 두 번 보였음) */}
+        <ChipGroup name="역할" compact options={ROLES} value={vm.form.role} onChange={vm.setRole} />
+
         <AddressField
           label="발송/수신 주소"
           value={vm.road}
@@ -125,6 +122,6 @@ export function MemberFormModal({
         {/* 칸이 여럿인 form은 제출 버튼이 있어야 Enter로 제출됨 — [추가/저장]은 창 아래(form 밖)라 숨은 버튼 */}
         <button type="submit" hidden />
       </form>
-    </FormModal>
+    </Dialog>
   )
 }
