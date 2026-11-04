@@ -4,10 +4,12 @@ export function Checkbox({
   state,
   onChange,
   label,
+  brand,
 }: {
   state: 'off' | 'on' | 'some'
   onChange: () => void
   label: string // 스크린리더용
+  brand?: boolean // 새 디자인(11/05~): 고르면 파랑
 }) {
   const on = state !== 'off'
   return (
@@ -23,7 +25,7 @@ export function Checkbox({
       className="-m-2 grid size-9 shrink-0 place-items-center"
     >
       <span
-        className={`grid size-5 place-items-center rounded ${on ? 'bg-action' : 'border-[1.5px] border-muted bg-surface'}`}
+        className={`grid size-5 place-items-center rounded ${on ? (brand ? 'bg-brand' : 'bg-action') : 'border-[1.5px] border-muted bg-surface'}`}
       >
         {on && (
           <svg
