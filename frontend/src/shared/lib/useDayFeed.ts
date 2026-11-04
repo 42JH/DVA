@@ -1,8 +1,9 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { addDays, todayYmd, type Ymd } from './dateRange'
+import { todayYmd, type Ymd } from './dateRange'
 
 // 날짜별 무한 목록 (04 통화 · 03 주문, Figma 11/04) — 고른 날(anchor, 기본 오늘)부터 하루씩 받음
-// 아래로 = 더 지난 날(건이 있는 날로 건너뜀), 위로 = 다음 날(오늘까지, 빈 날도 한 쪽). 오늘은 5초마다 새로
+// 아래로 = 더 지난 날, 위로 = 다음 날 — 둘 다 건이 있는 날로 건너뜀(위로는 오늘까지). 오늘은 5초마다 새로
+// 고른 날에 건이 없어도 그 날이 첫 쪽(빈 쪽) — 화면은 그 자리를 남겨 머리 날짜가 고른 날로 보이게 함 (11/04 사용자: 빈 날을 골라도 이동)
 // 화면은 shared/ui/DayScroll이 그림 (끝에 닿으면 loadOlder · loadNewer)
 
 /** 오늘 목록 갱신 주기 — 새 건 · 늦은 분석이 보이게 (11/02 연동 명세). 숨긴 탭에선 멈춤 */
@@ -21,10 +22,12 @@ export interface DaySource<T> {
   anchor: Ymd
   fetchDay: (day: Ymd, signal: AbortSignal) => Promise<T[]> // 그날 전부 (최신순)
   prevDay: (before: Ymd, signal: AbortSignal) => Promise<Ymd | null> // before 전에 건이 있는 가장 가까운 날
+  nextDay: (after: Ymd, signal: AbortSignal) => Promise<Ymd | null> // after 다음에 건이 있는 가장 가까운 날 (없으면 null)
 }
 
 /** DayScroll이 그리는 모양 — 화면은 rows만 화면용으로 바꿔 넘김 */
 export interface DayFeed<R> {
+  anchor: Ymd // 고른 날 — 건이 없어도 화면이 그 자리를 남김
   days: { day: Ymd; rows: R[] }[]
   isLoading: boolean
   stale: boolean // 조건을 바꿔 새 결과를 받는 중 (이전 목록을 흐리게)
@@ -47,6 +50,7 @@ export function useDayFeed<T>({
   anchor,
   fetchDay,
   prevDay,
+  nextDay,
 }: DaySource<T>): DayFeed<T> {
   const today = todayYmd()
   const list = useInfiniteQuery({
@@ -57,7 +61,8 @@ export function useDayFeed<T>({
         'day' in pageParam
           ? pageParam.day
           : 'after' in pageParam
-            ? addDays(pageParam.after, 1)
+            ? // 다음 날도 빈 날은 건너뜀(하루씩 묻지 않게). 오늘까지 없으면 오늘(빈 쪽) — 새 건이 오면 보이게
+              ((await nextDay(pageParam.after, signal)) ?? today)
             : await prevDay(pageParam.before, signal)
       return { day, rows: day ? await fetchDay(day, signal) : [] }
     },
@@ -80,6 +85,7 @@ export function useDayFeed<T>({
   })
 
   return {
+    anchor,
     days: pages.flatMap((p) =>
       p.day ? [{ day: p.day, rows: p.day === today && live.data ? live.data : p.rows }] : [],
     ),

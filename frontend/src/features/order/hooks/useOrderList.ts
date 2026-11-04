@@ -11,6 +11,7 @@ import {
   fetchOrderDay,
   orderQueries,
   prevOrderDay,
+  nextOrderDay,
   retryOrder,
   type ListParty,
   type StatusGroup,
@@ -82,6 +83,7 @@ export function useOrderList() {
     anchor,
     fetchDay: (day, signal) => fetchOrderDay(day, filter, signal),
     prevDay: (day, signal) => prevOrderDay(day, filter, signal),
+    nextDay: (day, signal) => nextOrderDay(day, filter, signal),
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,

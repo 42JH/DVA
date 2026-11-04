@@ -41,6 +41,9 @@ function Rows<R>({
   const [edge, setEdge] = useState({ top: false, bottom: false })
   const loaded = feed.days.length > 0 // 첫 쪽(고른 날)을 받음 — 비어 있어도
   const hasRows = feed.days.some((d) => d.rows.length > 0)
+  // 고른 날 자리가 있음(건이 있거나, 비었으면 남겨 둔 칸) — 이게 생기면 그 자리를 맨 위로 잡고 위아래로 받기 시작
+  const placed = hasRows || feed.days.some((d) => d.day === feed.anchor)
+  const spacer = useRef<HTMLDivElement>(null)
 
   // 맨 위에 보이는 줄 → 머리(onTop) · 보정 기준 · 돌아올 자리
   const measure = useCallback(() => {
@@ -59,17 +62,35 @@ function Rows<R>({
     scrollMemo.set(memoKey, el.scrollTop)
   }, [memoKey, onTop])
 
+  // 바닥 여유: 끝이면 160(마지막 줄이 바닥에 붙지 않게, 11/04 사용자). 그리고 고른 날(옮겨 왔으면 그 줄) 위에 다음 날이 붙을 수 있으면
+  // 그 자리가 맨 위까지 올라갈 만큼 — 아래 내용이 화면보다 짧으면 브라우저가 스크롤을 막아 고른 날 대신 다음 날이 맨 위가 됨
+  useLayoutEffect(() => {
+    const el = box.current
+    const sp = spacer.current
+    if (!el || !sp) return
+    const base = loaded && !feed.hasOlder ? 160 : 0
+    const picked = el.querySelector<HTMLElement>(
+      at ? `[data-row="${at}"]` : `[data-day="${feed.anchor}"]`,
+    )
+    const above = feed.days[0]?.day !== feed.anchor || feed.hasNewer // 위에 다음 날이 있거나 붙을 수 있음
+    // 고른 자리부터 바닥 여유 전까지의 높이 — scrollHeight는 내용이 화면보다 짧으면 화면 높이로 나와서 못 씀
+    const below = picked ? sp.getBoundingClientRect().top - picked.getBoundingClientRect().top : 0
+    const pad = parseFloat(getComputedStyle(el).paddingBottom) || 0
+    const fill = picked && above ? Math.ceil(el.clientHeight - below - pad) : 0
+    sp.style.height = `${Math.max(base, fill)}px`
+  })
+
   // 처음 그릴 때: 상세에서 돌아왔으면 보던 자리로, 옮겨 왔으면(at) 그 줄이 맨 위로
   useLayoutEffect(() => {
     const el = box.current
-    if (!hasRows || anchor.current || !el) return
+    if (!placed || anchor.current || !el) return
     const saved = scrollMemo.get(memoKey)
     const target = at ? el.querySelector<HTMLElement>(`[data-row="${at}"]`) : null
     if (saved !== undefined) el.scrollTop = saved
     else if (target)
       el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top
     measure()
-  }, [hasRows, memoKey, measure, at])
+  }, [placed, memoKey, measure, at])
 
   // 위에 줄이 붙으면(다음 날 · 새 건) 보던 줄이 제자리에 있게. 단 맨 위에서 가장 최신을 보는 중이면 새 건이 위에 보이게 둠
   useLayoutEffect(() => {
@@ -141,25 +162,22 @@ function Rows<R>({
       {feed.isLoading && <p className={note}>불러오는 중…</p>}
       {feed.error && <p className={note}>{feed.error}</p>}
       {feed.notice && <p className="py-2 text-center text-label text-muted">{feed.notice}</p>}
-      {/* 건이 없는 날(조건에 안 맞는 날 포함)은 문구 없이 건너뜀 (11/04 사용자) */}
-      {feed.days.map(
-        ({ day, rows }) =>
-          rows.length > 0 && (
-            <section key={day} aria-label={fmtLongDay(day)}>
-              {rows.map(row)}
-            </section>
-          ),
+      {/* 건이 없는 날(조건에 안 맞는 날 포함)은 문구 없이 건너뜀 (11/04 사용자)
+          단 고른 날은 비어도 보이지 않는 칸으로 자리를 남김 — 머리 날짜가 고른 날로 보이고, 아래는 이전 · 위로 올리면 이후 */}
+      {feed.days.map(({ day, rows }) =>
+        rows.length > 0 ? (
+          <section key={day} aria-label={fmtLongDay(day)}>
+            {rows.map(row)}
+          </section>
+        ) : day === feed.anchor ? (
+          <div key={day} aria-hidden data-row={`day-${day}`} data-day={day} className="h-6" />
+        ) : null,
       )}
       <div ref={bottom} aria-hidden className="h-px" />
       {loadingOlder && <p className={note}>불러오는 중…</p>}
       {olderError && retry(feed.loadOlder)}
-      {loaded && !hasOlder && (
-        <>
-          <p className={note}>{end(hasRows)}</p>
-          {/* 끝까지 내렸을 때 마지막 줄이 바닥에 붙지 않게 여유 (11/04 사용자) */}
-          <div aria-hidden className="h-40" />
-        </>
-      )}
+      {loaded && !hasOlder && <p className={note}>{end(hasRows)}</p>}
+      <div ref={spacer} aria-hidden />
     </div>
   )
 }
