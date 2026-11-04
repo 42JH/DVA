@@ -370,6 +370,12 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     if getattr(ctx, "default_origin", None) and ctx.default_origin.address:
         c.default_address = ctx.default_origin.address
     origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
+    if origin and origin.address and c.origin_place is None:
+        src = Source.PROFILE if getattr(ctx, "default_origin", None) else Source.HISTORY
+        g = origin.geo
+        c.origin_place = Place(c.name or origin.name, origin.phone, origin.address, origin.address_detail or "",
+                               Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None, src)
+        state.origin_offered = state.origin_offered or src == Source.PROFILE  # 기본 주소는 인사에서 묻는다
     if origin and origin.address:
         c.origin_address = origin.address
     places, seen = [], set()

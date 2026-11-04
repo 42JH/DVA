@@ -362,7 +362,7 @@ def test_registered_customer_origin_goes_to_call_info_without_detail():
     from app.calls.service import _apply_context
     from app.domain.state import ConversationState, Customer
     st = ConversationState(customer=Customer(caller_phone=CALLER))
-    origin = SimpleNamespace(address="서울 강남구 테헤란로 212", address_detail="1201호")
+    origin = SimpleNamespace(name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212", address_detail="1201호", geo=None)
     ctx = SimpleNamespace(status="REGISTERED", customer_seq=12, name="김철수", payment_methods=["billing"],
                           call_session_seq=None, recent_destinations=[], places=[], default_origin=origin, recent_origin=None)
     _apply_context(st, ctx, CALLER)

@@ -134,6 +134,7 @@ class Customer:
     places: tuple[Place, ...] = ()         # 받는 곳 후보 원천(최근 도착지 → 주소록 순)
     origin_address: str | None = None      # 등록된 출발지 도로명(고객 기본 주소, 없으면 최근 출발지) — 인사용, 상세주소 제외
     default_address: str | None = None     # 고객 기본 주소 도로명(주소 저장 제안 비교용)
+    origin_place: "Place | None" = None    # 출발지 후보: 고객 기본 주소(PROFILE), 없으면 이전 접수 출발지(HISTORY)
 
 
 @dataclass
@@ -157,6 +158,9 @@ class ConversationState:
     callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
     address_offer: dict | None = None     # 되읽기 때 제안한 주소 저장 {sender, receiver, parcel(담은 뒤 택배 id)}
     address_consent: bool | None = None   # 주소 저장 동의(None = 아직 답 없음)
+    origin_offered: bool = False          # 출발지 후보에서 보내는지 물음(인사 또는 접수 시작 때)
+    origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False
+    origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
     _next_parcel: int = 1

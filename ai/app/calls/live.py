@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
+from app.domain.address_book import prefill_sender
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
@@ -162,8 +163,9 @@ class LiveFlow:
             methods = s.state.customer.payment_methods
             callback = s.state.callback_offered and not s.state.callback_requested
             save = bool(s.state.address_offer) and s.state.address_consent is None
+            origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       pay_methods=methods, callback=callback, save=save)
+                                       pay_methods=methods, callback=callback, save=save, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -200,6 +202,12 @@ class LiveFlow:
                 s.note("Decision", "DECISION_STALE")
                 return
             rt.latest_applied = utt.utterance_id
+            if (og := answers.get("origin")) and og[1] >= th and og[0] in ("yes", "no") and st.origin_offered \
+                    and st.origin_answer is None:
+                st.origin_answer = og[0] == "yes"
+                s.note("출발지", og[0])
+                if st.intent == "order":
+                    followups.append(("origin", None))
             if "confirm" in answers and pending_id:
                 followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
             if (p := answers.get("pick")) and p[1] >= th:
@@ -321,6 +329,12 @@ class LiveFlow:
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
         elif what == "save":
             self._maybe_save_addresses(s)
+        elif what == "origin":  # 접수 중에 출발지 답이 옴 → 채우고 다음 질문 기준을 다시 준다
+            async with s.lock:
+                facts = self._origin_step(st)
+                facts["summary"] = state_summary(st, self.policy)
+            if facts.get("origin"):
+                await self.notify(s, "N1'", facts)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -360,7 +374,8 @@ class LiveFlow:
                 if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
-                if st.intent == "order":  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
+                if st.intent == "order":
+                    facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
                     facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
             self._maybe_submit(s, force=True)
@@ -381,6 +396,22 @@ class LiveFlow:
         labels = tuple(f"{i}번 {p.draft['receiver_name'].value or '받는 분'}님 택배" for i, p in enumerate(st.parcels, 1))
         offer(st, "parcel", labels, tuple(p.parcel_id for p in st.parcels))
         return {"edit_parcel": "choose", "labels": list(labels)}
+
+    def _origin_step(self, st) -> dict:
+        """잠금 안. 기존 고객의 보내는 분 채우기: 출발지 답이 있으면 채우고(prefilled·name_only), 아직 안 물었으면 묻게 한다."""
+        c = st.customer
+        if st.origin_applied or not c.customer_seq:
+            return {}
+        if st.origin_answer is not None:
+            done = prefill_sender(st, full=st.origin_answer)
+            st.origin_applied = True
+            return {"origin": "prefilled" if st.origin_answer and "sender_address" in done else "name_only"}
+        if c.origin_place and not st.field_of("sender_address").valid:
+            st.origin_offered = True
+            return {"origin_confirm": c.origin_place.address}
+        done = prefill_sender(st, full=False)  # 출발지 후보 없음: 성함만
+        st.origin_applied = True
+        return {"origin": "name_only"} if done else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
         """택배를 담았고 고객이 저장에 동의했으면 고객 기본 주소·주소록 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409)."""
