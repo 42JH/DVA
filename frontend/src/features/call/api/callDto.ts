@@ -1,5 +1,6 @@
 // 04 · 06 서버 DTO (연동 상세명세 10/31 §13: CallListItem · CallDetail · CallAnalysis · CallComplaint · Recording · Utterance · CallAction · CallProcessingResult)
-// + 화면 모양으로 바꾸는 순수 변환. '@/' import 없음 — `npx tsx src/features/call/api/callDto.test.ts` 로 바로 돌리려고
+// + 화면 모양으로 바꾸는 순수 변환. '@/'는 타입만 import — `npx tsx src/features/call/api/callDto.test.ts` 로 바로 돌리려고
+import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 
 // ---------- 서버 DTO ----------
 export type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
@@ -97,6 +98,7 @@ export interface CallActionDto {
 export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
   action: ProcessingKind
   unansweredQuestionSeq: number | null
+  unansweredReason?: UnansweredReason | null // 연결된 미답변의 사유 (11/04). 다른 결과 · 미분류 · 삭제한 미답변은 null, 연동 전 서버는 칸 없음
   questionText: string | null // 미답변 삭제 뒤 null
   answerText: string | null
   faqEntrySeq: number | null
@@ -180,6 +182,7 @@ export interface ResultBlock {
   orderSeq: number | null
   question: string | null
   unansweredQuestionSeq: number | null
+  reason: UnansweredReason | null // AI 미답변 사유 (null = 미분류 · 다른 결과)
 }
 export interface Recording {
   recordingSeq: number // 재조회마다 서명 URL 글자가 바뀌어도 같은 녹취인지 보는 열쇠 (11/02 연동 명세)
@@ -287,6 +290,7 @@ export function toCallDetail(
       orderSeq: x.orderSeq,
       question: x.questionText,
       unansweredQuestionSeq: x.unansweredQuestionSeq,
+      reason: x.unansweredReason ?? null,
     })),
     aiActionCount: d.aiActionCount,
     recording: rec

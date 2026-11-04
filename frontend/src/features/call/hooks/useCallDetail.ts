@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock, fmtDetailTime, fmtDuration, fmtPhone } from '@/shared/lib/format'
+import { reasonTag } from '@/shared/lib/unansweredReason'
 import type { TagKind } from '@/shared/ui'
 import {
   ACTION_LABEL,
@@ -44,6 +45,7 @@ export interface ResultView {
   time: string
   link?: { label: string; onClick: () => void }
   question?: string // AI 미답변: 고객 질문
+  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (근거 부족 · 검색 장애 · 미분류)
 }
 
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
@@ -185,6 +187,7 @@ export function useCallDetail(callId: number) {
               : {
                   ...base,
                   question: r.question,
+                  reason: reasonTag(r.reason),
                   // 그 통화의 질문만 (10/30 사용자: 미답변 보기를 누르면 해당 통화 것만)
                   link: {
                     label: 'AI 미답변 보기',
