@@ -142,7 +142,7 @@ async def lifespan(app: FastAPI):
     app.state.svc = Services(cfg=cfg, backend=build_backend(cfg.backend),
                              fare_of=partial(parcel_fare, table=cfg.fare.model_dump()), address=AddressService())
     svc = app.state.svc
-    warm = recovery = persona = None
+    warm = recovery = persona = review_worker = None
     rag_tasks = await build_rag(svc)
     app.include_router(faq_router)
     app.include_router(persona_router)
@@ -163,9 +163,26 @@ async def lifespan(app: FastAPI):
         persona = asyncio.create_task(svc.calls.persona.run())
         # S6: 결과 아웃박스(재시작 복구) — 실통화 시험은 가짜 BE(BACKEND_MOCK=true)
         outbox = Outbox(Path(os.environ.get("OUTBOX_PATH", ROOT / "state" / "outbox.sqlite3")))
+        reviewer = None
+        if cfg.unanswered_review.enabled:
+            from app.calls.unanswered import UnansweredReviewer
+            from app.config import prompts_dir
+            review_cfg = cfg.unanswered_review
+            reviewer = UnansweredReviewer(client, model,
+                                           (prompts_dir() / "unanswered_review.md").read_text(encoding="utf-8"),
+                                           timeout_sec=review_cfg.timeout_sec,
+                                           max_input_chars=review_cfg.max_input_chars,
+                                           max_output_tokens=review_cfg.max_output_tokens)
+            if not review_cfg.reason_contract_enabled:
+                log.warning("통화 종료 미답변 검토 활성: reason 계약 대기로 인사이트 전송 보류")
         svc.calls.results = ResultService(svc.backend, outbox, svc.calls.d.policy, svc.fare_of,
                                           cfg.backend.submit_timeout_sec + cfg.backend.submit_retry_sec + 5,
-                                          callback_field=cfg.backend.analysis_callback_field)
+                                          callback_field=cfg.backend.analysis_callback_field,
+                                          reviewer=reviewer,
+                                          reason_contract_enabled=cfg.unanswered_review.reason_contract_enabled,
+                                          review_max_attempts=cfg.unanswered_review.max_attempts)
+        if reviewer is not None:
+            review_worker = asyncio.create_task(svc.calls.results.review_loop(cfg.unanswered_review.poll_sec))
         svc.calls.on_finalize.insert(0, svc.calls.results.finish)
         recovery = asyncio.create_task(svc.calls.results.recover())
         bus = Bus()
@@ -179,11 +196,12 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for t in (warm, recovery, persona, *rag_tasks):
+        for t in (warm, recovery, persona, review_worker, *rag_tasks):
             if t and not t.done():
                 t.cancel()
         if svc.calls:
             await svc.calls.shutdown()
+            await svc.calls.results.drain()
         await svc.address.close()
         if svc.rag is not None:
             await svc.rag.close()

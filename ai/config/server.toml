@@ -83,3 +83,15 @@ agent_transfer_uri = ""
 agent_open = "09:00"
 agent_close = "18:00"
 agent_days = [0, 1, 2, 3, 4]   # 월~금
+
+[unanswered_review]
+# S15P31D109-159. 모델은 기존 BACKEND_MODEL 사용. 통화 중 추가 호출 없음.
+# 2026-11-04 백엔드 배포 완료 사용자 확인 + 가상 통화 실모델 8건 통과.
+# 이 설정은 AI 코드가 배포된 후 적용된다. false면 기존 종료 기록 경로로 돌아간다.
+enabled = true
+reason_contract_enabled = true
+timeout_sec = 30.0
+max_input_chars = 100000
+max_output_tokens = 6000
+max_attempts = 3
+poll_sec = 30.0

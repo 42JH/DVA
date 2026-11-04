@@ -3,6 +3,7 @@
 재구성할 AI 서버는 백엔드(BE)의 현재 구조를 그대로 쓴다. **BE에 변경을 요구하지 않는다.** 계약이 어긋나면 AI 쪽이 맞춘다.
 
 - `backend/`: BE 원문이다. `origin/develop-backend` a629c60(2026-11-03 10:28)의 `docs/api/`와 `backend/docs/`에서 AI가 쓰는 것만 복사했다.
+  - 2026-11-04 미답변 계약 2개(`unanswered-questions.md`, `unanswered-question-reasons.md`)는 `origin/develop-backend` **fbbaca1**로 갱신했다. reason은 선택이며 두 코드/생략/null을 허용한다. 명시한 reason은 재전송 본문 비교에 포함된다. 운영 049 적용·배포는 별도 확인 대상이다.
   - 문서끼리의 링크는 같은 폴더를 가리키게 고쳤다.
   - 관리자·프론트 전용 문서(calls, manual-orders, unanswered-questions 관리·조회 등)는 복사하지 않아서, 그 문서를 가리키는 링크는 열리지 않는다.
 - `ai/`: AI 쪽에서 위 계약을 어떻게 쓰는지 적은 문서다. `S15P31D109/ai`의 `spec/`·`docs/`에서 복사했다. 구현 경로는 원래 저장소 기준(`app/...`)이다.
@@ -31,7 +32,7 @@
 | `POST /api/ai/calls/{id}/events`, `/analysis` | call-events, call-analysis, `ai/insights.md` | `send_call_events`, `send_call_analysis` |
 | `GET /api/ai/config`, `POST /api/ai/config/apply-result` | ai-persona-next-call, persona-head-management | `persona_config`, `persona_result` |
 | `GET /api/ai/faqs` + BE→AI `POST /internal/faqs/refresh` | ai-faq-integration, faqs, `ai/faq-sync.md` | `faq_entries`·`initial_faq_entries`, `app/webhooks/faqs.py`(원본 RAG) |
-| `POST /api/ai/unanswered-questions` | unanswered-questions | **없음.** 원래 AI 코드에도 없다. 쓰려면 클라이언트에 추가한다 |
+| `POST /api/ai/unanswered-questions` | unanswered-questions, unanswered-question-reasons | `BackendAPI.send_unanswered`, `ResultService`. 종료 후 실제 발화 검토 경로는 S15P31D109-159에서 준비하며 운영 활성화는 별도 |
 | `PATCH` 주문 수정(COLLECTING만) | order-update | 없음(원래 AI에서도 수정 보류) |
 | PBX 종료 웹훅(BE와 같은 본문을 AI도 받음) | ai-pbx-recordings, active-call-count, `ai/pbx-sip.md` | `pbx_webhook.create_call_ended_router` |
 
