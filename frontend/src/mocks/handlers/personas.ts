@@ -42,12 +42,14 @@ export const personaHandlers = [
   http.get(`${API_BASE_URL}/personas`, () =>
     HttpResponse.json(
       page([
+        // 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
         {
           aiPersonaSeq: PERSONA_SEQ,
           code: 'parcel',
-          latestVersion: VERSIONS[0],
-          activeVersionSeq: 6,
-          pendingVersionSeq: null,
+          headVersion: VERSIONS[0], // v7 확정만(미적용)
+          activeVersion: VERSIONS[1], // v6 적용 중 → 상단바 '빠른 접수형 AI 상담가'
+          pendingVersion: null,
+          draft: null,
         },
       ]),
     ),

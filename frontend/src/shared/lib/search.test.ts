@@ -1,6 +1,6 @@
 // 실행: npx tsx src/shared/lib/search.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { matchKo, phoneDigits, suggest } from './search'
+import { findKo, matchKo, phoneDigits, suggest } from './search'
 
 // 띄어쓰기 · 대소문자 무시
 assert.ok(matchKo('수거 시간이 언제예요?', '수거시간'))
@@ -43,3 +43,13 @@ assert.deepEqual(suggest(['a1', 'a2', 'a3'], 'a', 2), ['a1', 'a2'])
 assert.deepEqual(suggest(['강도윤'], '  '), [])
 
 console.log('search.test.ts OK')
+
+// 하이라이트 자리 — 원래 글(띄어쓰기 포함) 기준 [시작, 끝), 띄어쓰기 · 초성 규칙은 matchKo와 같음 (09 FAQ 검색, 11/04)
+assert.deepEqual(findKo('박스 크기는 어떻게', '박스크기'), [[0, 5]])
+assert.deepEqual(findKo('수거 박스, 박스', '박스'), [
+  [3, 5],
+  [7, 9],
+])
+assert.deepEqual(findKo('방문 수거', 'ㅂㅁ'), [[0, 2]])
+assert.deepEqual(findKo('FAQ 목록', 'faq'), [[0, 3]])
+assert.deepEqual(findKo('아무거나', ''), [])

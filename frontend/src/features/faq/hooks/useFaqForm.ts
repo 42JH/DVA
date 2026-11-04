@@ -17,17 +17,24 @@ import {
   type UnansweredQuestion,
 } from '@/features/faq/api/unansweredApi'
 
-/** 09 FAQ 추가 · 수정 창 훅 — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
- * 10/30: 수정 창 안 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
+/** 09 FAQ 작성 · 수정 (11/04 화면 · AI 미답변의 FAQ 추가 창 공용) — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
+ * 수정엔 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
  * 추가는 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
-export function useFaqForm(
-  faq: Faq | null,
-  onDone: () => void,
-  from?: UnansweredQuestion,
-  onAdded?: (category: FaqCategory) => void, // 추가에 성공하면 (09 목록이 새 FAQ가 보이는 탭 · 쪽으로)
-) {
+export function useFaqForm({
+  faq = null,
+  from,
+  category: initial,
+  onSaved,
+  onDeleted,
+}: {
+  faq?: Faq | null
+  from?: UnansweredQuestion
+  category?: FaqCategory // 작성 화면: 목록에서 보던 분류를 골라 둔 채로 (11/04 — 왼쪽 분류 하나가 늘 파랑). 없으면 비워 두고 고르게
+  onSaved: (category: FaqCategory) => void // 저장(추가 · 수정)에 성공하면 그 분류
+  onDeleted: (category: FaqCategory) => void
+}) {
   const qc = useQueryClient()
-  const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? '') // 추가는 비워 두고 고르게 (기본값이 쓰레기통이 되지 않게)
+  const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? initial ?? '')
   const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
   const [answer, setAnswer] = useState(faq?.answer ?? '')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -42,7 +49,7 @@ export function useFaqForm(
       if (!faq) {
         if (from) await convertToFaq(from.unansweredQuestionSeq, input)
         else await createFaq(input)
-        return input
+        return
       }
       const changed =
         input.category !== faq.category ||
@@ -50,13 +57,12 @@ export function useFaqForm(
         input.answer !== faq.answer
       if (changed) await updateFaq(faq.faqEntrySeq, input) // 세 칸 다 보냄 (부분 수정 없음). 안 바뀌었으면 요청 없이 닫음
     },
-    onSuccess: async (added) => {
+    onSuccess: async () => {
       await Promise.all([
         qc.invalidateQueries({ queryKey: faqQueries.all() }),
         from && qc.invalidateQueries({ queryKey: unansweredQueries.all() }),
       ])
-      if (added) onAdded?.(added.category)
-      onDone()
+      onSaved(category as FaqCategory)
     },
     // 없어졌거나(404) 다른 관리자가 먼저 처리한(409 INVALID_STATE) 질문 · FAQ → 목록을 다시 받아 지금 상태로
     onError: (e) => {
@@ -69,7 +75,7 @@ export function useFaqForm(
 
   const remove = useMutation({
     mutationFn: () => deleteFaq(faq!.faqEntrySeq),
-    onSuccess: onDone,
+    onSuccess: () => onDeleted(faq!.category),
     onSettled: () => qc.invalidateQueries({ queryKey: faqQueries.all() }), // 404(이미 지워짐)여도 목록은 다시 받음
   })
 
