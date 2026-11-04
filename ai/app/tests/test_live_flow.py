@@ -408,7 +408,8 @@ def test_registered_greeting_yes_prefills_sender_and_asks_receiver_first():
     facts = json.loads(next(e for e in conn.sent if '"intent"' in e.get("content", ""))["content"].split("[서버 결과] ", 1)[1])
     assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
     cur = s.state.parcels[0].draft if s.state.parcels else s.state.current
-    assert all(cur[n].source == Source.PROFILE for n in ("sender_name", "sender_address", "sender_address_detail"))
+    assert cur["sender_name"].source == Source.CALLER_ID  # 등록 고객 성함은 처음부터 채워져 있다
+    assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
     assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
 
 
@@ -423,7 +424,7 @@ def test_origin_paths_other_place_and_recent_only():
                            intent="order")
     st.origin_offered, st.origin_answer = True, False
     assert lf._origin_step(st) == {"origin": "name_only"}
-    assert st.current["sender_name"].source == Source.PROFILE and not st.current["sender_address"].valid
+    assert st.current["sender_name"].source == Source.CALLER_ID and not st.current["sender_address"].valid
     # 기본 주소 없이 최근 출발지만 → 접수 시작 때 "그곳에서 보내시나요?"를 묻게 하고, 답이 오면 채운다
     st = ConversationState(customer=Customer(customer_seq=12, name="김철수", caller_phone=CALLER, origin_place=recent),
                            intent="order")

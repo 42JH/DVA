@@ -181,6 +181,11 @@ class ConversationState:
                 f = self.current["sender_phone"]
                 f.value, f.status, f.source, f.version = (self.customer.caller_phone, FieldStatus.VALID,
                                                           Source.CALLER_ID, self.bump())
+            # 등록 고객 성함 = 발신번호로 확인한 고객 이름(연락처처럼 서버가 채움, 빈 택배 판정에서 빠짐). 고객이 다른 이름을 말하면 덮인다
+            if self.customer.customer_seq and self.customer.name:
+                f = self.current["sender_name"]
+                f.value, f.status, f.source, f.version = (self.customer.name, FieldStatus.VALID,
+                                                          Source.CALLER_ID, self.bump())
         return self.current[name]
 
     def record(self, name: str, value: Any, source: Source = Source.CUSTOMER) -> bool:

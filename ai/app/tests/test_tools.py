@@ -122,7 +122,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["facts"]["phones_to_read"] == ["receiver_phone"]
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
-    assert out["missing"][0] == "sender_name" and out["stage"] == "sender"
+    assert out["missing"][0] == "sender_address" and out["stage"] == "sender"  # 등록 고객 성함은 이미 채워짐
 
 
 def test_bad_phone_and_pickup_not_saved_other_values_are():
