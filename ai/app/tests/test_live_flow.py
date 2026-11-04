@@ -245,3 +245,23 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
     ask = next(e for e in client.conns[0].sent if "ask_again" in e.get("content", ""))
     assert "이영희" in ask["content"]  # 되읽을 값을 같이 준다
     assert s.decision_ms and "Decision ms P50" in s.snapshot()["detail"]["통계"]
+
+
+def test_agent_greets_first_on_session_start():
+    """고객이 먼저 말하기 전에 서버가 N2로 첫 인사를 시킨다(한 번)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: any("call_started" in e.get("content", "") for e in conn.sent))
+        await ai(conn, "안녕하세요, 디바콜입니다.", 0)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return conn
+
+    conn = run(scenario())
+    greets = [e for e in conn.sent if "call_started" in e.get("content", "")]
+    assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"

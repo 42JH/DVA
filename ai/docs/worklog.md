@@ -324,3 +324,14 @@
 - 리빌드 .env 비밀값은 원본 로컬 ai/.env와 키별로 모두 같음(값 비교만, 출력 안 함). Jenkins dva-ai credential 현재값과의 대조는 못 함
 - 반영 브랜치 이름 refactor/ai-rebuild로 변경
 - 테스트 482 passed
+
+## 2026-11-04 — develop-ai 잘못 반영 되돌림, refactor/ai-rebuild 재구성·push
+
+- 사고: 반영 브랜치를 `worktree add -b … origin/develop-ai`로 만들어 upstream이 develop-ai로 잡힘 → 2026-11-03 22:23:18 push로 develop-ai가 e76fbe1(리빌드)로 갱신. 원인은 추적 브랜치를 끊지 않은 것(--no-track 미사용)
+- 조치: revert 커밋 ae2745d(트리 = df93338) → develop-ai push. refactor/ai-rebuild는 ae2745d 위에 revert의 revert 72a32ef(트리 = e76fbe1)로 재구성 → push, MR !210 → 65756aa로 머지
+
+## 2026-11-04 — 상담원이 먼저 인사
+
+- 원인: 첫 인사를 지시문(default_prompt "고객이 말하기 전에 먼저 인사")에만 맡김 → 최근 6통화 중 4건은 고객 "여보세요" 뒤에 인사. 원본 서버도 서버 신호 없음
+- 수정: LiveFlow.on_started — session.started 때 AI가 아직 말하지 않았고 고객도 말하지 않았으면 N2(commentary) {"call_started": true}. 정책 [results].call_started("바로 첫 인사, 한 번만")
+- 테스트 483 passed(+1). 실통화 미확인(이중 인사 여부)

@@ -74,6 +74,8 @@ class LiveFlow:
         base_in, base_out = h["session.input_transcript.delta"], h["session.output_transcript.delta"]
         h["session.input_transcript.delta"] = lambda s, ev: (base_in(s, ev), self.on_input(s, ev))
         h["session.output_transcript.delta"] = lambda s, ev: (base_out(s, ev), self.on_output(s, ev))
+        base_started = h["session.started"]
+        h["session.started"] = lambda s, ev: (base_started(s, ev), self.on_started(s))
         h["session.delegation.created"] = self.on_delegation
         h["response.event"] = self.on_response
 
@@ -82,6 +84,12 @@ class LiveFlow:
         if s.rt is None:
             s.rt = Runtime()
         return s.rt
+
+    def on_started(self, s: CallSession) -> None:
+        """상담원이 먼저 인사한다: 지시문만으로는 고객이 "여보세요"를 할 때까지 기다리는 일이 많았다(2026-11-03 통화 6건 중 4건).
+        세션이 열리면 N2(말할 거리)로 첫 인사를 시킨다. AI가 이미 말하기 시작했거나 고객이 먼저 말했으면 보내지 않는다."""
+        if s.last_output_t == 0 and self.rt(s).cust is None:
+            s.spawn(self.notify(s, "N2", {"call_started": True}), "greet")
 
     # ------------------------------------------------------------------ 전사 → 발화 끝
     def on_input(self, s: CallSession, ev: dict) -> None:
