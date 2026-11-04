@@ -117,7 +117,7 @@ const TOP: Item[] = [
   { to: '/dashboard', label: '통계', icon: 'chart' },
   { to: '/calls', label: '통화', icon: 'call' },
   { to: '/orders', label: '주문', icon: 'box' },
-  { to: '/faqs', label: 'FAQ', icon: 'faq' }, // FAQ 목록 · AI 미답변 둘 다 이 줄
+  { to: '/faqs', label: 'FAQ', icon: 'faq' }, // FAQ 목록 · 상세 · 작성 (AI 미답변은 아님 — 아래 NO_ROW)
 ]
 const BOTTOM: Item[] = [
   { to: '/logistics', label: '물류', icon: 'truck', soon: true },
@@ -125,6 +125,7 @@ const BOTTOM: Item[] = [
   { to: '/companies', label: '기업', icon: 'building' },
 ]
 const SETTINGS = ['/admins', '/me'] // 설정 메뉴 안 화면 — 여기 있으면 설정 줄이 선택됨
+const NO_ROW = '/faqs/unanswered' // 사이드바에 줄이 없는 화면 — 아무 줄도 선택 안 함 (11/05 사용자: FAQ가 선택돼 보일 필요 없음)
 
 // isolate: 흰 네모(-z-10)를 줄 안에서만 글자 · 아이콘 뒤로 깖. nowrap: 'AI 상담가'(45)가 줄 폭 46에 빠듯해 두 줄로 안 꺾이게
 const ROW =
@@ -137,8 +138,9 @@ export function Sidebar({ onLogout, showAdmins }: { onLogout: () => void; showAd
   const { pathname } = useLocation()
   const on = (to: string) => pathname === to || pathname.startsWith(to + '/')
   // 선택된 줄 (홈 '/'이면 없음)
-  const active =
-    [...TOP, ...BOTTOM].find((m) => on(m.to))?.to ?? (SETTINGS.some(on) ? 'settings' : null)
+  const active = on(NO_ROW)
+    ? null
+    : ([...TOP, ...BOTTOM].find((m) => on(m.to))?.to ?? (SETTINGS.some(on) ? 'settings' : null))
 
   // 흰 네모는 선택된 줄 안에 그림 → 줄이 바뀌면 옛 줄 자리에서 출발해 미끄러져 오는 애니메이션만 붙임 (FLIP)
   // 줄 안에 있으니 창 높이가 바뀌어 아래 무리가 움직여도 따라감. 옛 줄 자리는 지금 다시 재서 씀
