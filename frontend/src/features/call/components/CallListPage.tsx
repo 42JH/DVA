@@ -164,7 +164,8 @@ function PersonaToggle({
   const close = useCallback(() => setOpen(false), [])
   useDismiss(open, root, close)
   return (
-    <div ref={root} className="relative mt-[10px] ml-6 flex items-baseline gap-3">
+    // 날짜 글자와 같은 가운데 줄 (11/05 사용자 — 예전엔 위 10 띄워 날짜보다 아래에 있었음)
+    <div ref={root} className="relative ml-6 flex items-baseline gap-3">
       <button
         type="button"
         aria-haspopup="menu"
