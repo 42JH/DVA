@@ -10,6 +10,7 @@ ambiguous는 1순위 자동 확정 + 나머지 후보 보관(P6, ADDRESS_AUTO_SE
 
 import asyncio
 import re
+import time
 from pydantic import Field
 
 from app.domain.address_book import save_offer
@@ -18,6 +19,7 @@ from app.domain.confirm import issue_parcel_confirmation
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import Items, Source
+from app.observability.trace import observe_latency
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
 from app.tools.outcome import ToolOutcome, state_summary
@@ -165,7 +167,11 @@ def invalid_fields(needs: list[dict]) -> list[str]:
 async def _resolve(ctx: ToolContext, heard: str):
     if ctx.address is None:
         return None
-    return await ctx.address.resolve(heard)
+    t0 = time.monotonic()
+    try:
+        return await ctx.address.resolve(heard)
+    finally:
+        observe_latency("ADDRESS_LOOKUP", (time.monotonic() - t0) * 1000)
 
 
 def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, needs: list) -> None:

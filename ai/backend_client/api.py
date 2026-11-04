@@ -469,6 +469,14 @@ class BackendAPI:
     async def send_call_analysis(self, call_session_seq: int, body: dict) -> None:
         await self._insights(f"/api/ai/calls/{int(call_session_seq)}/analysis", body)
 
+    async def send_stage_metrics(self, call_session_seq: int, body: dict) -> None:
+        """대시보드 이탈 단계(ai-dashboard-ai-integration.md §3). analysis 저장 뒤에만. 같은 값 204, 다른 값 409."""
+        await self._insights(f"/api/ai/calls/{int(call_session_seq)}/stage-metrics", body)
+
+    async def send_wait_metrics(self, call_session_seq: int, body: dict) -> None:
+        """대시보드 대기시간·레이턴시(같은 문서 §4). 대기 > 통화 시간이면 422."""
+        await self._insights(f"/api/ai/calls/{int(call_session_seq)}/response-wait-metrics", body)
+
     async def send_unanswered(self, body: dict) -> int:
         """미답변 질문(POST /api/ai/unanswered-questions, B/unanswered-questions.md). 새 발생 201·같은 eventId 재전송 200,
         둘 다 data.unansweredQuestionSeq(같은 통화의 BUSINESS_RESULT QUESTION_UNANSWERED가 참조)."""

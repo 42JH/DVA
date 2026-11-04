@@ -42,6 +42,7 @@ class MockBackend:
         self.insights_enabled = True
         self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
         self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
+        self.dashboard: dict[tuple[int, str], dict] = {}  # (callSessionSeq, 항목) → 대시보드 최종값
 
     async def close(self) -> None:
         pass
@@ -119,6 +120,21 @@ class MockBackend:
                 raise BackendError(f"/analysis 400 INVALID_REQUEST {k}", 400, "INVALID_REQUEST")
         if self.analyses.setdefault(call_session_seq, body) != body:
             raise BackendError("/analysis 409 EVENT_PAYLOAD_CONFLICT", 409, "EVENT_PAYLOAD_CONFLICT")
+
+    def _dashboard(self, call_session_seq, item: str, body: dict, keys: set[str]) -> None:
+        if call_session_seq not in self.analyses:
+            raise BackendError(f"/{item} 409 INVALID_STATE", 409, "INVALID_STATE")
+        if set(body) != keys:
+            raise BackendError(f"/{item} 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
+        if self.dashboard.setdefault((call_session_seq, item), body) != body:
+            raise BackendError(f"/{item} 409 EVENT_PAYLOAD_CONFLICT", 409, "EVENT_PAYLOAD_CONFLICT")
+
+    async def send_stage_metrics(self, call_session_seq, body):
+        self._dashboard(call_session_seq, "stage-metrics", body, {"providerCallId", "dropoffStage"})
+
+    async def send_wait_metrics(self, call_session_seq, body):
+        self._dashboard(call_session_seq, "response-wait-metrics", body,
+                        {"providerCallId", "totalWaitMs", "latencyStats"})
 
     async def send_unanswered(self, body):
         found = self.unanswered.setdefault(body["eventId"], {"seq": next(self._seq), "body": body})

@@ -31,6 +31,9 @@ class Phase(StrEnum):
 
 
 ENDED = (Phase.CLOSING, Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE)
+# BE 호출 op → 대시보드 processType(고객 조회 1·2단계·등록 후 재확인, 통화 종료 뒤 결과 전송)
+BACKEND_LATENCY = {"caller_context": "CUSTOMER_LOOKUP", "caller_context2": "CUSTOMER_LOOKUP",
+                   "caller_context3": "CUSTOMER_LOOKUP", "submit": "ORDER_SAVE"}
 
 
 @dataclass
@@ -64,6 +67,10 @@ class CallSession:
     active_t: float = 0.0                                  # 세션 활성(session.started) 시각 — 첫 AI 발화까지 재기용
     backend_calls: list[dict] = field(default_factory=list)      # 관제 BE 통신: op·결과·HTTP·오류·ms·시각
     stats: Counter = field(default_factory=Counter)       # 관제: Decision·위임·도구·전달 횟수
+    # 대시보드 대기시간 계약(ai-dashboard-ai-integration.md §4): 통화 전체를 누적(관제 timings는 최근 200개만)
+    ended_t: float = 0.0                                   # 처음 끝나는 단계로 들어간 시각(열린 대기 구간의 끝)
+    wait_ms: float = 0.0                                   # 고객 말 끝 → AI 말 시작 구간 합계
+    latency: dict[str, list[int]] = field(default_factory=dict)  # processType → [합계 ms, 횟수]
     on_change: "Callable[[CallSession], None] | None" = None
     _dirty: bool = False
 
@@ -139,10 +146,18 @@ class CallSession:
         xs.append(round(ms))
         del xs[:-200]
 
+    def measure(self, process_type: str, ms: float) -> None:
+        """대시보드 처리 유형별 레이턴시 1회(실패·시간 초과도 걸린 시간으로 센다)."""
+        x = self.latency.setdefault(process_type, [0, 0])
+        x[0] += max(0, round(ms))
+        x[1] += 1
+
     def record_backend(self, op: str, ms: int, outcome: str, http: int | None, error: str | None) -> None:
         self.backend_calls.append({"at": time.time(), "op": op, "outcome": outcome, "http": http, "error": error, "ms": ms})
         del self.backend_calls[:-200]
         self.timing(f"BE {op}", ms)
+        if op in BACKEND_LATENCY:
+            self.measure(BACKEND_LATENCY[op], ms)
         self.changed()
 
     def snapshot(self) -> dict:

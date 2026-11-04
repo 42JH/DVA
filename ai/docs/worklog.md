@@ -511,3 +511,13 @@
 - 시험지 121문항: 틀린 기록 2 → 0(k05·n05 not_found), 정답 기록 106 그대로. 남은 ambiguous 2건(b02 "대핸란로 212", f03 "신정 2-1로 50")은 후보 1개(도로명을 많이 고침)라 1순위 자동 확정 시 정답
 - 영향: 고객이 부번을 빼고 말했거나("7-3"→"7") STT가 번호를 틀리게 받아써 없는 번호가 되면 이전처럼 비슷한 번호로 맞추지 않고 다시 묻는다(재질문 증가 가능, 실통화 확인 필요)
 - 테스트 528 passed(기대값 2곳: "테헤란로 112"는 not_found, 도구 ambiguous 경로는 "대해남노 211"로)
+
+## 2026-11-05 대시보드 이탈 단계·대기시간 전송(BE 계약 ai-dashboard-ai-integration.md)
+- 계약: POST /api/ai/calls/{id}/stage-metrics·response-wait-metrics(신규, BE 배포 완료 — 설정 토글 없음). analysis 204 뒤에만, 두 항목은 서로 독립. 기존 analysis 본문은 그대로(새 값을 넣으면 400)
+- 전송(app/calls/results.py): 통화 종료 때 두 본문을 analysis와 함께 한 번 계산해 insights 아웃박스에 저장(재전송은 같은 본문). 항목별 진행(done/failed) — 5xx·연결은 그 항목만 다시(행 PENDING), 409 충돌·422·400 등은 그 항목만 멈춤. 배포 전에 저장된 본문(키 없음)은 보내지 않음
+- 이탈 단계(dropoff_stage): 끊긴 순간 진행 중이던 단계. 접수 sender/receiver/item/readback/payment → SENDER_INFO/RECIPIENT_INFO/ITEM_INFO/CONFIRMATION/PAYMENT_GUIDANCE, "더 보낼 것" 단계는 결제 선택이 남았으면 PAYMENT_GUIDANCE 아니면 NONE, closing → NONE. 접수 중 마지막 도구가 FAQ 검색이면 FAQ_ANSWER. 문의·조회는 결과가 나온 뒤 AI가 말했으면 NONE 아니면 FAQ_ANSWER/ORDER_LOOKUP, 취소는 완료면 NONE 아니면 ORDER_CANCEL. 시스템 종료(shutdown·expiring·연결 오류·accept 실패 등)·상담원 연결·업무 미정은 미판정(보내지 않음)
+- 대기(totalWaitMs): 고객 말 끝 → AI 말 시작 구간 합계(CallSession.wait_ms, 구간이 순서대로라 겹침 없음). 고객 말 뒤 AI 말 없이 끝나면 끝나는 단계로 들어간 시각(ended_t)까지. 통화 시간으로 자르지 않음(422면 멈춤)
+- 레이턴시(latencyStats): CallSession.measure로 통화 단위 합계·횟수. 고객 조회=caller_context 1·2·3, 정보 입력=record_fields, 주소 조회=주소 보정 1회(record._resolve)+find_destination, FAQ=search_manual, 접수 내역=lookup_orders, 취소=cancel_parcel, 접수 저장=결과 전송(submit). 실패·시간 초과도 셈. 측정 없는 유형은 뺌
+- 한계: 대기는 서버가 전사 글자를 받은 시각 기준(실제 음성 재생 시각과 차이). 불편 판정(complaints)은 여전히 미판정(null)
+- 테스트 550 passed(+22: 단계표·미판정·대기 합계·열린 구간·측정 없는 유형·analysis 뒤 전송·항목 독립·실패 항목만 재전송·배포 전 본문·API 경로·인증)
+- 제외: policy/business_rules.md의 커밋 안 된 수정(다른 작업)은 건드리지 않음

@@ -22,6 +22,13 @@ def observe_backend(op: str, ms: int, outcome: str, http: int | None = None, err
         call.record_backend(op, ms, outcome, http, error)
 
 
+def observe_latency(process_type: str, ms: float) -> None:
+    """대시보드 처리 유형별 레이턴시 1회. 통화 안이면 그 통화에 쌓는다(observe_backend와 같은 방식)."""
+    call = current_call.get()
+    if call is not None and hasattr(call, "measure"):
+        call.measure(process_type, ms)
+
+
 def new_trace() -> str:
     """통화 수신 시 1회. 이 태스크와 자식 태스크의 로그·구간에 붙는다."""
     trace_id = uuid.uuid4().hex
