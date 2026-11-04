@@ -547,6 +547,7 @@ Table ai_persona_versions {
   requested_by_admin_user_seq integer [note: '적용 요청 관리자 논리 참조. 이름은 감사 로그에 보존']
   requested_at timestamptz [note: '최신 적용 요청 시각']
   applied_at timestamptz [note: 'AI 적용 확인 시각']
+  previous_active_version_seq integer [note: '050: 마지막 활성화 성공 직전 ACTIVE 버전. 미확인 NULL. 성공 트랜잭션에서 기록']
   last_notified_at timestamptz [note: 'AI 알림 재시도 시각']
   apply_error_code text [note: 'AI_UNAVAILABLE / INVALID_CONFIG / UNSUPPORTED_OPTIONS / APPLY_FAILED']
   indexes {
@@ -566,6 +567,8 @@ Table ai_persona_versions {
   }
   Note: 'operations / 이름·프롬프트·음성·속도·대기 설정은 변경 불가. 수정은 새 버전을 추가한다. AI가 통화 0건에서 적용을 확인한 뒤 ACTIVE 전환. SQL의 부분 UNIQUE 인덱스로 ACTIVE·PENDING 각각 1개와 application_id 고유성을 보장한다. 적용 제약·트리거의 배포 원본은 013 migration이다.'
 }
+
+Ref: ai_persona_versions.ai_persona_version_seq < ai_persona_versions.previous_active_version_seq
 
 Table ai_persona_drafts {
   ai_persona_seq integer [pk, not null, note: '039: 유형당 초안 한 개. 논리 참조']

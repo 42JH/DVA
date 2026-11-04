@@ -7,7 +7,7 @@ BEGIN
  IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
+ IF n<>26 THEN RAISE EXCEPTION 'Expected 26 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
@@ -190,7 +190,14 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM pg_proc WHERE oid=to_regprocedure('public.valid_call_latency_stats(jsonb)') AND provolatile='i' AND proisstrict)
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='050-call-dashboard-metrics.sql') THEN
   RAISE EXCEPTION 'Call dashboard metrics schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, dashboard/retention/retry schema and migration ledger';
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions'
+    AND column_name='previous_active_version_seq' AND udt_name='int4' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+    AND conname='ai_persona_previous_active_fk' AND contype='f' AND confrelid='public.ai_persona_versions'::regclass)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
+    AND conname='ai_persona_previous_active_not_self' AND contype='c' AND convalidated) THEN
+  RAISE EXCEPTION 'Previous active persona schema missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 26 FKs, 10 triggers, dashboard/retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

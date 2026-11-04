@@ -18,7 +18,7 @@ BEGIN
  IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, got %',n; END IF;
+ IF n<>26 THEN RAISE EXCEPTION 'Expected 26 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
  IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;

@@ -1,6 +1,25 @@
 SET LOCAL lock_timeout='5s';
 SET LOCAL statement_timeout='60s';
 
+ALTER TABLE public.ai_persona_versions
+ ADD COLUMN previous_active_version_seq integer
+  CONSTRAINT ai_persona_previous_active_fk REFERENCES public.ai_persona_versions(ai_persona_version_seq),
+ ADD CONSTRAINT ai_persona_previous_active_not_self CHECK (previous_active_version_seq<>ai_persona_version_seq);
+
+-- 과거는 현재/직전 적용 성공이 모두 확인되는 경우만 복원한다. 감사 정리 후의 이력은 추정하지 않는다.
+WITH applied AS (
+ SELECT target_seq,row_number() OVER(ORDER BY audit_log_seq DESC) AS position
+ FROM public.audit_logs WHERE action='PERSONA_APPLIED' AND result='SUCCESS' AND target_type='AI_PERSONA_VERSION'
+ ORDER BY audit_log_seq DESC LIMIT 2
+)
+UPDATE public.ai_persona_versions current SET previous_active_version_seq=previous.target_seq
+FROM applied latest,applied previous
+WHERE latest.position=1 AND previous.position=2 AND current.status='ACTIVE'
+ AND current.ai_persona_version_seq=latest.target_seq AND previous.target_seq<>latest.target_seq
+ AND EXISTS(SELECT 1 FROM public.ai_persona_versions v WHERE v.ai_persona_version_seq=previous.target_seq);
+
+COMMENT ON COLUMN public.ai_persona_versions.previous_active_version_seq IS '050: 이 버전의 마지막 활성화 성공 직전 ACTIVE 버전. 활성화 트랜잭션에서 고정. 과거 미확인은 NULL';
+
 CREATE FUNCTION public.valid_call_latency_stats(value jsonb) RETURNS boolean
 LANGUAGE plpgsql IMMUTABLE STRICT AS $$
 DECLARE item jsonb; seen text[] := '{}'; code text; duration numeric; samples numeric;

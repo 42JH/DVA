@@ -121,6 +121,15 @@ test('deployment verification requires 050, metric field types, receipt checks a
     await verify([sql], 'Call dashboard metrics schema or migration missing');
 });
 
+test('deployment verification requires nullable previous active identity and its self-reference guard', async () => {
+  for (const sql of [
+    'ALTER TABLE ai_persona_versions ALTER COLUMN previous_active_version_seq SET DEFAULT 1',
+    'ALTER TABLE ai_persona_versions ALTER COLUMN previous_active_version_seq TYPE bigint',
+    'ALTER TABLE ai_persona_versions DROP CONSTRAINT ai_persona_previous_active_not_self',
+  ])
+    await verify([sql], 'Previous active persona schema missing');
+});
+
 test('deployment verification requires migration 046 and the persistent retry window', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",
