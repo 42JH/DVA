@@ -1,6 +1,6 @@
-# AI 파트 연동 명세 — 2026-11-03
+# AI 파트 연동 명세 — 2026-11-04
 
-코드 기준: `refactor/unused-backend`, 기능 코드 `7da8876`, DB migration `047`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
+코드 기준: `feature/ai-call-updates`, DB migration `048`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 수거 시각·콜백·주소 권한·좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
 
 이 문서는 AI가 호출하거나 제공해야 하는 현재 계약을 모은다. 프론트 전달 사항은 [프론트 명세](frontend-integration-current.md), 이번 제거 내역과 DB 전환은 [작업 기록](unused-contract-cleanup.md)을 따른다.
 
@@ -13,7 +13,8 @@
 
 | 호출                                                                  | 인증·추가 헤더                                                               |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름/주소 수정 | 현재 MVP AI 접근. 고객 상태 변경 등 관리자 전용 작업 제외                    |
+| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름 단독 수정 | 현재 MVP AI 접근. 고객 상태 변경 등 관리자 전용 작업 제외                    |
+| `PATCH /api/customers/{id}`의 `address` 수정·삭제                     | `call_session_seq` 필수. 진행 중인 본인 통화만 허용                          |
 | `POST /api/orders`의 AI 최종 결과                                     | `Idempotency-Key: <주문 결과별 UUID>` + 본문 `call`                          |
 | 기존 주문 조회·취소, 개인 PIN, 과거 주문 주소 조회                    | `call_session_seq: <통화 번호>`로 발신 고객 범위 검증. 경로별 상세 계약 준수 |
 | `GET /api/companies/search`                                           | 기업 공유 배송지 조회. 현재 MVP 계약 사용                                    |
@@ -85,6 +86,16 @@ Content-Type: application/json
 
 `latitude`, `longitude`는 선택 필드가 아니다. 숫자·문자열·null 모두 보내지 않는다. 보내면 400이며 BE도 디버 요청에 전송하지 않는다. 우편번호는 선행 0을 보존하는 문자열이다. [좌표 제거 상세](address-coordinates-removal.md)
 
+### 고객 기본 주소와 개인 PIN 저장
+
+고객 동의를 받은 경우에만 저장한다. 주문 생성·수정은 고객 기본 주소나 PIN을 자동 갱신하지 않는다.
+
+- 기본 주소: `PATCH /api/customers/{customerSeq}`에 `address`와 `call_session_seq` 헤더를 보낸다. 통화 종료 웹훅이 `call_sessions.ended_at`에 반영되기 전에 호출해야 한다. 객체는 완성 주소 전체 교체, null은 삭제, 생략은 유지다. 성공 204에는 본문이 없다. 이름 단독 수정과 고객 등록·상세는 기존 MVP 계약을 유지한다.
+- 개인 PIN: `POST /api/customers/{customerSeq}/pins`, `PATCH /api/pins/{pinSeq}`는 같은 통화 번호로 종료 후에도 호출할 수 있다. 기존 완성 `addressData`·소유권·중복·버전 계약을 유지한다. 주소 중복 409 `DUPLICATE_RESOURCE`는 기존 PIN을 덮어쓰지 않는다.
+- PIN 목록 `GET /api/customers/{customerSeq}/pins`는 진행 중 통화만 허용하며 종료 후에는 409 `INVALID_STATE`다. 종료 전 확보한 PIN 번호와 주소를 후처리에 사용한다.
+- 기본 주소의 누락/잘못된 통화 헤더는 400, 다른 고객은 403, 없는/삭제/보관 만료 통화는 404, 종료된 통화는 409다. 주소 변경과 성공 감사는 같은 트랜잭션이며 통화 종료와 경합하면 잠금 뒤 종료 여부를 다시 확인한다.
+- 주소/PIN 호출 실패는 주문 저장 성공을 취소하지 않는다. 새 연락처를 임의로 만들거나 주문 전체를 재접수하지 말고 해당 주소 호출의 결과를 확인한다.
+
 ### AI 결과 전송
 
 `POST /api/orders`에 주문 결과별 UUID를 `Idempotency-Key`로 보낸다. 최초 시도 전에 만들고 재전송에도 같은 키·같은 본문을 유지한다. 이 방식은 본문 `call`로 통화를 연결하므로 별도 `call_session_seq` 헤더나 `/submit` 호출이 필요 없다.
@@ -131,7 +142,7 @@ Content-Type: application/json
 - 기존 고객은 `customerSeq`, 신규 고객은 `customer: { name, phoneNumber }`를 사용하며 둘을 함께 보내지 않는다. 최종 결과에는 먼저 등록한 동일 `call`을 사용한다.
 - `COMPLETE`는 주문 정보 확정이다. 카드 승인·디버 접수 성공을 뜻하지 않는다. 배송 상세별 `notifiedPrice`와 미취소 상세 합계 `totalAmount`가 필요하다.
 - `paymentMethodType`은 `billing` 카드, `credit` 월결제, `groupBilling` 부서 그룹결제다. 자격은 BE가 검증한다. 미완료에서 생략하면 null이며 기본값으로 billing을 선택하지 않는다. 필드 자체에 null을 보내면 400이다. COMPLETE에는 선택이 필요하다.
-- `pickupRequestedAt`은 호환 선택값이다. 실제 수거 시각은 BE가 결제 완료 시각 + 1시간으로 확정하므로 AI가 필수로 수집하지 않는다.
+- `pickupRequestedAt`은 선택값이며 결제 대기 중에도 보존한다. 결제가 요청 시각 이전 또는 같으면 유지하고, 이후 결제 또는 미전송이면 결제 완료 + 1시간을 한국시간 09:00~17:00에 맞춘다(09시 이전은 당일 09시, 17시 초과는 다음날 09시). AI가 보낸 시각에는 별도 영업시간·예약 일수 제한을 두지 않는다. 개인 카드·월·그룹결제 모두 같으며 재접수 시 다시 계산하지 않는다. [변경 계약](ai-call-follow-up.md)을 따른다.
 - `INCOMPLETE`, `CANCELLED`는 확인한 정보만 보낸다. 주문 정보가 전혀 없는 유효 통화는 `status=NO_ORDER`, `orderSeq/version/paymentRequest=null`로 수신 완료된다. 질문·조회·연결 요구 이력은 같은 통화에 보존한다. NO_ORDER를 장난전화 제외 신호로 사용하지 않는다.
 
 | 반환 `data.status`  | AI 처리                                                    |
@@ -152,7 +163,7 @@ Content-Type: application/json
 
 [주문 결제 상세](../../docs/api/ai-order-billing-integration.md) · [빈 주문 방지](empty-ai-order-results.md) · [10초·10분 재시도](order-submission-retry.md) · [취소](../../docs/api/order-cancel.md)
 
-## 4. 최종 통화 분석 — AI가 7개 값을 확정
+## 4. 최종 통화 분석 — AI가 요약값을 확정
 
 `POST /api/ai/calls/{callSessionSeq}/analysis`, `Authorization: Bearer <AI_INSIGHTS_TOKEN>`. HTTP 204이며 응답 JSON을 읽지 않는다. 분석 API는 통화를 생성하지 않는다.
 
@@ -168,6 +179,7 @@ Content-Type: application/json
   "orderLookupCount": 1,
   "cancelledParcelCount": 1,
   "hasHandoffRequest": true,
+  "hasCallbackRequest": false,
   "repeatQuestionCount": 0,
   "hasComplaint": false,
   "complaints": []
@@ -183,8 +195,9 @@ Content-Type: application/json
 | `orderLookupCount`      | 접수 내역을 조회해 안내한 건수. shipment 필드명을 쓰지 않음                    |
 | `cancelledParcelCount`  | 취소 완료 배송 상세 수. 이전 통화의 접수 건 취소도 가능                        |
 | `hasHandoffRequest`     | 상담원 연결 요구 여부. 연결 성공·실패 상태가 아님                              |
+| `hasCallbackRequest`    | 콜백 요청 여부. 기존 발신번호로 연락하며 별도 콜백 처리 완료 상태는 없음      |
 
-네 건수는 0 이상 int32, 두 boolean은 true/false다. 새 요약 6개는 생략·null을 허용하지만 미수집을 뜻한다. 새 AI는 측정한 최종값을 모두 명시한다. `0`, `false`, `null`을 구분하며 BE는 주문·이벤트를 다시 세어 덮어쓰지 않는다.
+네 건수는 0 이상 int32, 세 boolean은 true/false다. 요약 7개는 생략·null을 허용하지만 미수집을 뜻한다. 새 AI는 측정한 최종값을 모두 명시한다. `0`, `false`, `null`을 구분하며 BE는 주문·이벤트를 다시 세어 덮어쓰지 않는다. 콜백은 별도 접수 API 없이 최초 최종 분석에 `hasCallbackRequest`로 포함한다. 생략/null은 기존 해시를 유지하며 확정 후 true/false 변경은 다른 분석과 동일하게 409다.
 
 기존 핵심 필드 `aiPersonaVersionSeq`, `repeatQuestionCount`, `hasComplaint`, `complaints`, 시작·종료 시각은 필수다. nullable 허용과 생략 허용은 다르다. `hasComplaint=true`이면 근거 1개 이상, false/null이면 `complaints=[]`. 근거는 `type`, `evidenceText`, 정수 초 `offsetSeconds` 또는 null, 같은 통화의 `utteranceOrders`를 사용한다.
 

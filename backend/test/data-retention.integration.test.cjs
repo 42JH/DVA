@@ -59,7 +59,7 @@ test('5-year call expiry erases every child in FK order and also removes pre-INS
     [c.id, question],
   );
   await f.pool.query(
-    "INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,payload_hash) VALUES($1,clock_timestamp(),clock_timestamp(),'[]',repeat('d',64))",
+    "INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,payload_hash,has_callback_request) VALUES($1,clock_timestamp(),clock_timestamp(),'[]',repeat('d',64),true)",
     [c.id],
   );
   await f.pool.query(

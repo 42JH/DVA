@@ -68,7 +68,7 @@ export class PinsController {
     summary: '개인 주소록 등록',
     security: aiSecurity,
     description:
-      '현재 통화 고객 또는 관리자. 완성 주소 필수. 요청 키 없이 DB 주소 중복 제약을 적용합니다.',
+      '해당 통화 고객 또는 관리자. AI는 통화 종료 후에도 추가할 수 있으며 삭제·보관 만료 통화는 거절합니다. 완성 주소 필수. 요청 키 없이 DB 주소 중복 제약을 적용합니다.',
   })
   @ApiHeader(callHeader)
   @ApiCreatedResponse({ type: CreatedPersonalPinEnvelopeDto })
@@ -94,7 +94,7 @@ export class PinsController {
     summary: '개인 주소록 수정',
     security: aiSecurity,
     description:
-      '버전 비교 없이 지정한 필드만 수정합니다. addressData는 완성 주소 전체 교체. 소유 고객 변경 불가.',
+      '해당 통화 고객은 통화 종료 후에도 수정할 수 있습니다. 삭제·보관 만료 통화는 거절합니다. 버전 비교 없이 지정한 필드만 수정하며 addressData는 완성 주소 전체 교체. 소유 고객 변경 불가.',
   })
   @ApiHeader(callHeader)
   @ApiOkResponse({ type: PinVersionEnvelopeDto })

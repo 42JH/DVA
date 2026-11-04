@@ -65,6 +65,13 @@ export class CallAnalysisDto {
   })
   hasHandoffRequest!: boolean | null;
 
+  @ApiProperty({
+    type: Boolean,
+    nullable: true,
+    description: 'AI 판정 콜백 요청 여부. 상담원 연결 요구·처리 완료와 별개. 미수집은 null.',
+  })
+  hasCallbackRequest!: boolean | null;
+
   @ApiProperty({ format: 'date-time', description: 'AI가 측정한 통화 시작. PBX 시각과 별개.' })
   aiStartedAt!: Date;
 

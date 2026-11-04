@@ -110,7 +110,7 @@ test('call soft deletion hides transcript, analysis, actions, questions and reco
     'recordings/' + randomUUID(),
   ]);
   await f.pool.query(
-    "INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,payload_hash) VALUES($1,clock_timestamp(),clock_timestamp(),'[]',repeat('a',64))",
+    "INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,complaints,payload_hash,has_callback_request) VALUES($1,clock_timestamp(),clock_timestamp(),'[]',repeat('a',64),true)",
     [c.id],
   );
   const question = await data(
@@ -145,6 +145,15 @@ test('call soft deletion hides transcript, analysis, actions, questions and reco
       (await f.pool.query(`SELECT 1 FROM ${table} WHERE call_session_seq=$1`, [c.id])).rowCount,
       1,
     );
+  assert.equal(
+    (
+      await f.pool.query(
+        'SELECT has_callback_request FROM call_analyses WHERE call_session_seq=$1',
+        [c.id],
+      )
+    ).rows[0].has_callback_request,
+    true,
+  );
   assert.equal(
     (
       await f.pool.query(

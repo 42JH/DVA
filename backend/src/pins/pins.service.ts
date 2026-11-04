@@ -29,14 +29,14 @@ export class PinsService {
       );
     const call = await this.repository.call(client, Number(header), lock);
     if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
-    if (call.endedAt !== null)
+    if (call.endedAt !== null && !lock)
       throw new ApiException(
         409,
         'INVALID_STATE',
-        '종료된 통화에서는 주소록을 사용할 수 없습니다.',
+        '종료된 통화에서는 주소록을 조회할 수 없습니다.',
       );
     if (!call.phone) throw new ApiException(403, 'FORBIDDEN', '통화 발신번호가 필요합니다.');
-    return call.phone;
+    return call;
   }
 
   private async personalAccess(
@@ -46,14 +46,19 @@ export class PinsService {
     header: string | undefined,
     write: boolean,
   ) {
-    const phone = adminId === null ? await this.caller(client, header, write) : null;
+    const call = adminId === null ? await this.caller(client, header, write) : null;
     const customer = await this.repository.customer(client, customerId, write);
     if (!customer) throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
-    if (phone !== null && (phone !== customer.phone || customer.status !== 'ACTIVE'))
+    if (
+      call !== null &&
+      (call.phone !== customer.phone ||
+        (call.customerSeq !== null && call.customerSeq !== customerId) ||
+        customer.status !== 'ACTIVE')
+    )
       throw new ApiException(
         403,
         'FORBIDDEN',
-        '현재 통화의 활성 고객 주소록만 사용할 수 있습니다.',
+        '해당 통화의 활성 고객 주소록만 사용할 수 있습니다.',
       );
     if (customer.status !== 'ACTIVE')
       throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 주소록은 사용할 수 없습니다.');

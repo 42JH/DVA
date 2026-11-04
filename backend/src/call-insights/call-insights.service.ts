@@ -48,6 +48,7 @@ export class CallInsightsService {
       orderLookupCount: input.orderLookupCount ?? undefined,
       cancelledParcelCount: input.cancelledParcelCount ?? undefined,
       hasHandoffRequest: input.hasHandoffRequest ?? undefined,
+      hasCallbackRequest: input.hasCallbackRequest ?? undefined,
     };
     const payloadHash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 

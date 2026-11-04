@@ -109,13 +109,14 @@ async function fixture({
   });
   const call = (
     await pool.query(
-      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at)
-    VALUES($1,$2,$3,$4) RETURNING call_session_seq`,
+      `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at,customer_seq)
+    VALUES($1,$2,$3,$4,$5) RETURNING call_session_seq`,
       [
         randomUUID(),
         phone,
         ended ? '2026-10-27T00:00:00Z' : null,
         ended ? '2026-10-27T00:01:00Z' : null,
+        customer,
       ],
     )
   ).rows[0].call_session_seq;
@@ -237,7 +238,7 @@ test('another caller cannot list, create or edit private pins', async () => {
   );
 });
 
-test('missing, invalid, unknown and ended call IDs are not accepted for AI operations', async () => {
+test('invalid call IDs are rejected and ended calls permit personal PIN writes while reads remain blocked', async () => {
   const f = await fixture();
   const p = await personal(f);
   for (const header of [undefined, '0', '-1', '1.5', 'abc', '2147483648']) {
@@ -259,12 +260,89 @@ test('missing, invalid, unknown and ended call IDs are not accepted for AI opera
     "UPDATE call_sessions SET started_at='2026-10-27T00:00:00Z',ended_at='2026-10-27T00:01:00Z' WHERE call_session_seq=$1",
     [f.call],
   );
-  for (const [method, path, body] of [
-    ['GET', `/customers/${f.customer}/pins`],
-    ['POST', `/customers/${f.customer}/pins`, { addressData: address() }],
-    ['PATCH', `/pins/${p.personalPinSeq}`, { label: '끝난 통화' }],
-  ])
-    await error(await request(method, path, body, f.ai), 409, 'INVALID_STATE');
+  await error(
+    await request('GET', `/customers/${f.customer}/pins`, undefined, f.ai),
+    409,
+    'INVALID_STATE',
+  );
+  const data = address();
+  const added = await personal(f, data, {}, f.ai);
+  assert.deepEqual((await stored(added.personalPinSeq)).address_data, data);
+  const replacement = address();
+  await success(
+    await request(
+      'PATCH',
+      `/pins/${p.personalPinSeq}`,
+      { label: '끝난 통화', addressData: replacement },
+      f.ai,
+    ),
+  );
+  assert.deepEqual((await stored(p.personalPinSeq)).address_data, replacement);
+  await error(
+    await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
+    409,
+    'DUPLICATE_RESOURCE',
+  );
+});
+
+test('post-call PIN writes retain customer identity, deletion and retention checks', async () => {
+  const other = await fixture();
+  for (const change of [
+    'customer_seq=$2',
+    'deleted_at=clock_timestamp()',
+    "incoming_at=clock_timestamp()-interval '6 years'",
+  ]) {
+    const f = await fixture({ ended: true });
+    const pin = await personal(f);
+    const before = await stored(pin.personalPinSeq);
+    await pool.query(
+      `UPDATE call_sessions SET ${change} WHERE call_session_seq=$1`,
+      change.includes('$2') ? [f.call, other.customer] : [f.call],
+    );
+    const status = change.includes('$2') ? 403 : 404;
+    const code = status === 403 ? 'FORBIDDEN' : 'NOT_FOUND';
+    await error(
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: address() }, f.ai),
+      status,
+      code,
+    );
+    await error(
+      await request('PATCH', `/pins/${pin.personalPinSeq}`, { label: '거절' }, f.ai),
+      status,
+      code,
+    );
+    assert.deepEqual(await stored(pin.personalPinSeq), before);
+  }
+});
+
+test('an ended call cannot modify a new customer who reuses the deleted original customer phone', async () => {
+  const f = await fixture({ ended: true });
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    f.customer,
+  ]);
+  const response = await request(
+    'POST',
+    '/customers',
+    { name: '새 고객', phoneNumber: f.phone },
+    {},
+  );
+  const customer = await success(response, 201);
+  assert.notEqual(customer.customerSeq, f.customer);
+  await error(
+    await request(
+      'POST',
+      `/customers/${customer.customerSeq}/pins`,
+      { addressData: address() },
+      f.ai,
+    ),
+    403,
+    'FORBIDDEN',
+  );
+  assert.equal(
+    (await pool.query('SELECT 1 FROM personal_pins WHERE customer_seq=$1', [customer.customerSeq]))
+      .rowCount,
+    0,
+  );
 });
 
 test('stale administrator cookies cannot fall back to AI access; administrator writes retain Origin checks', async () => {
@@ -576,7 +654,7 @@ test('editing a referenced pin leaves existing order address snapshots and order
 });
 
 test('audit success is atomic with writes and contains no address or phone; failure rolls back changes', async () => {
-  const f = await fixture();
+  const f = await fixture({ ended: true });
   const p = await personal(f);
   const requestId = randomUUID();
   await success(
@@ -605,14 +683,14 @@ test('audit success is atomic with writes and contains no address or phone; fail
   };
   try {
     await error(
-      await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '롤백 대상' }),
+      await request('PATCH', `/pins/${p.personalPinSeq}`, { label: '롤백 대상' }, f.ai),
       500,
       'INTERNAL_ERROR',
     );
     assert.deepEqual(await stored(p.personalPinSeq), before);
     const data = address();
     await error(
-      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }),
+      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
       500,
       'INTERNAL_ERROR',
     );

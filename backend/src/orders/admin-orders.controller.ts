@@ -111,7 +111,7 @@ export class AdminOrdersController {
       oneOf: [{ required: ['customerSeq'] }, { required: ['customer'] }],
     },
     description:
-      'customerSeq 또는 customer 중 하나와 완성된 택배 상세 (수거 시각은 결제 완료 후 1시간으로 서버가 결정). totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
+      'customerSeq 또는 customer 중 하나와 완성된 택배 상세. 요청 수거 시각은 그 시각까지 결제하면 유지하며, 이후 결제 또는 생략 시 결제 완료 + 1시간을 한국시간 09:00~17:00으로 조정합니다. totalAmount와 각 parcels[].notifiedPrice를 전달하며 미취소 상세 합계를 검증합니다.',
   })
   @ApiCreatedResponse({
     description: '현재 접수 결과. HTTP 201만으로 성공을 판단하지 않습니다.',

@@ -13,6 +13,7 @@ const { PaymentsService } = require('../dist/payments/payments.service');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
+const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
 const { AuditService } = require('../dist/audit/audit.service');
 const { testMembership } = require('./helpers/membership.cjs');
 
@@ -208,6 +209,108 @@ const confirm = (r, key = 'ok_' + r.paymentRequest.paymentRequestId, patch = {})
 const lookup = (id) => request(`/payments/requests/${id}`, undefined, false, 'GET');
 const stored = (id) =>
   pool.query('SELECT * FROM orders WHERE order_seq=$1', [id]).then((r) => r.rows[0]);
+function assertCalculatedPickup(order) {
+  const time = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(order.pickup_requested_at);
+  assert.ok(time >= '09:00:00' && time <= '17:00:00', time);
+  assert.ok(order.pickup_requested_at.getTime() >= order.paid_at.getTime() + 3600000);
+}
+
+test('pickup preserves requested times and calculates Korean 09:00-17:00 boundaries at payment', async (t) => {
+  const cases = [
+    [
+      'before request',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T14:50:00+09:00',
+      '2026-11-04T15:00:00+09:00',
+    ],
+    [
+      'less than one hour before request',
+      '2026-11-04T16:50:00+09:00',
+      '2026-11-04T16:30:00+09:00',
+      '2026-11-04T16:50:00+09:00',
+    ],
+    [
+      'equal to request',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T15:00:00+09:00',
+    ],
+    [
+      'AI time outside business hours',
+      '2026-11-04T23:00:00+09:00',
+      '2026-11-04T16:30:00+09:00',
+      '2026-11-04T23:00:00+09:00',
+    ],
+    [
+      'after request',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T15:01:00+09:00',
+      '2026-11-04T16:01:00+09:00',
+    ],
+    [
+      'exact closing time',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T16:00:00+09:00',
+      '2026-11-04T17:00:00+09:00',
+    ],
+    [
+      'one millisecond past closing',
+      '2026-11-04T15:00:00+09:00',
+      '2026-11-04T16:00:00.001+09:00',
+      '2026-11-05T09:00:00+09:00',
+    ],
+    ['missing early request', null, '2026-11-04T07:15:00+09:00', '2026-11-04T09:00:00+09:00'],
+    ['exact opening time', null, '2026-11-04T08:00:00+09:00', '2026-11-04T09:00:00+09:00'],
+    ['missing daytime request', null, '2026-11-04T09:00:00+09:00', '2026-11-04T10:00:00+09:00'],
+    [
+      'year rollover after late payment',
+      null,
+      '2026-12-31T23:30:00+09:00',
+      '2027-01-01T09:00:00+09:00',
+    ],
+    ['UTC input at Korean closing time', null, '2026-11-04T07:00:00Z', '2026-11-04T08:00:00Z'],
+  ];
+  const repository = app.get(OrderPaymentsRepository);
+  for (const [name, requested, paid, expected] of cases)
+    await t.test(name, async () => {
+      const transaction = await pool.connect();
+      try {
+        await transaction.query('BEGIN');
+        const id = (
+          await transaction.query(
+            "INSERT INTO orders(customer_seq,payment_method_type,total_amount,pickup_requested_at) VALUES($1,'billing',3500,$2) RETURNING order_seq",
+            [customerId, requested],
+          )
+        ).rows[0].order_seq;
+        await repository.waitForPayment(transaction, id);
+        const waiting = (
+          await transaction.query('SELECT pickup_requested_at FROM orders WHERE order_seq=$1', [id])
+        ).rows[0];
+        assert.equal(
+          waiting.pickup_requested_at?.toISOString() ?? null,
+          requested ? new Date(requested).toISOString() : null,
+        );
+        await repository.billed(transaction, id, null, null, randomUUID(), paid);
+        const order = (
+          await transaction.query(
+            'SELECT paid_at,pickup_requested_at FROM orders WHERE order_seq=$1',
+            [id],
+          )
+        ).rows[0];
+        assert.equal(order.paid_at.toISOString(), new Date(paid).toISOString());
+        assert.equal(order.pickup_requested_at.toISOString(), new Date(expected).toISOString());
+      } finally {
+        await transaction.query('ROLLBACK');
+        transaction.release();
+      }
+    });
+});
 
 test('real AI/admin orders queue one message after commit; no upfront pickup or Dver call', async () => {
   const before = parcels.length,
@@ -235,7 +338,40 @@ test('real AI/admin orders queue one message after commit; no upfront pickup or 
   await worker.run();
   assert.ok(messages.some((s) => s.includes(`/p/${ai.paymentRequest.paymentRequestId}`)));
 });
-test('verified Toss approval updates the real order and posts Dver once with approved time + 1 hour', async () => {
+test('AI pickup survives payment waiting, notices, approval and repeated requests without an hours restriction', async () => {
+  const requested = new Date(Date.now() + 2 * 86400000);
+  requested.setUTCHours(14, 30, 0, 0);
+  const body = { ...orderBody(), pickupRequestedAt: requested.toISOString() };
+  const result = await create(body, randomUUID(), true);
+  const id = result.paymentRequest.paymentRequestId;
+  assert.equal(
+    (await stored(result.orderSeq)).pickup_requested_at.toISOString(),
+    body.pickupRequestedAt,
+  );
+  assert.equal((await lookup(id)).body.data.pickupRequestedAt, body.pickupRequestedAt);
+  await worker.run();
+  const notice = messages.find((message) => message.includes(`/p/${id}`));
+  assert.ok(notice.includes('23:30'));
+  assert.ok(notice.includes('해당 시각 이후 결제 시'));
+  const html = await (await fetch(`${base}/payments/p/${id}`)).text();
+  assert.ok(html.includes('id="pickup-time"'));
+  assert.ok(html.includes('23:30'));
+  assert.ok(html.includes('다음날 09:00'));
+  assert.equal((await confirm(result)).status, 200);
+  assert.equal(
+    (await stored(result.orderSeq)).pickup_requested_at.toISOString(),
+    body.pickupRequestedAt,
+  );
+  assert.equal(Date.parse(parcels.at(-1).pickupRequestedAt), requested.getTime());
+  assert.equal((await confirm(result)).status, 200);
+  await payments.reconcile(id, randomUUID());
+  assert.equal(
+    (await stored(result.orderSeq)).pickup_requested_at.toISOString(),
+    body.pickupRequestedAt,
+  );
+});
+
+test('verified Toss approval updates the real order and posts Dver once with pickup inside Korean working hours', async () => {
   const r = await create(),
     id = r.paymentRequest.paymentRequestId,
     key = 'ok_' + id,
@@ -249,7 +385,7 @@ test('verified Toss approval updates the real order and posts Dver once with app
     p = providerPayments.get(key);
   assert.equal(o.status, 'ACCEPTED');
   assert.equal(o.paid_at.toISOString(), p.approvedAt);
-  assert.equal(o.pickup_requested_at.getTime() - o.paid_at.getTime(), 3600000);
+  assertCalculatedPickup(o);
   assert.equal(parcels.length - start, 1);
   assert.equal(Date.parse(parcels.at(-1).pickupRequestedAt), o.pickup_requested_at.getTime());
   assert.equal(calls.filter((c) => c.method === 'POST' && c.body.orderId === id).length, 1);
@@ -441,17 +577,18 @@ test('public page/status expose no provider key or secrets and cannot accept sel
   assert.equal((await request(`/payments/requests/${id}/reconcile`, { paid: true })).status, 400);
 });
 
-test('monthly and group billing bypass Toss and notifications and fix pickup at paid time + 1 hour', async () => {
+test('monthly and group billing bypass Toss and notifications and preserve a future requested pickup', async () => {
   await worker.run();
   const count = messages.length,
     postCount = calls.filter((c) => c.method === 'POST').length;
   await pool.query('UPDATE customers SET monthly_billing_enabled=true WHERE customer_seq=$1', [
     customerId,
   ]);
+  const requested = new Date(Date.now() + 86400000).toISOString();
   const monthly = await create({
     ...orderBody(),
     paymentMethodType: 'credit',
-    pickupRequestedAt: '2020-01-01T00:00:00Z',
+    pickupRequestedAt: requested,
   });
   assert.equal(monthly.status, 'ACCEPTED');
   assert.equal(monthly.paymentRequest, null);
@@ -466,12 +603,16 @@ test('monthly and group billing bypass Toss and notifications and fix pickup at 
     employeeNo: randomUUID(),
     groupBillingEnabled: true,
   });
-  const group = await create({ ...orderBody(), paymentMethodType: 'groupBilling' });
+  const group = await create({
+    ...orderBody(),
+    paymentMethodType: 'groupBilling',
+    pickupRequestedAt: requested,
+  });
   assert.equal(group.status, 'ACCEPTED');
   assert.equal(group.paymentRequest, null);
   for (const r of [monthly, group]) {
     const o = await stored(r.orderSeq);
-    assert.equal(o.pickup_requested_at.getTime() - o.paid_at.getTime(), 3600000);
+    assert.equal(o.pickup_requested_at.toISOString(), requested);
   }
   await worker.run();
   assert.equal(messages.length, count);

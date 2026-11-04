@@ -2,7 +2,11 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { paymentEnvironment } = require('../dist/payments/payment-config');
-const { paymentMessage, paymentCompletionMessage } = require('../dist/payments/payment-message');
+const {
+  paymentMessage,
+  paymentCompletionMessage,
+  pickupNotice,
+} = require('../dist/payments/payment-message');
 test('order payments are opt-in and reject live/mismatched key types and untrusted upstream overrides', () => {
   const errors = [];
   assert.equal(paymentEnvironment({}, errors).ORDER_PAYMENTS_ENABLED, false);
@@ -100,6 +104,21 @@ test('completion notices use verified amounts and Korean times without claiming 
   ])
     assert.ok(!message.includes(unwanted));
   assert.ok(message.includes('[주문 확인](https://example.com/api/payments/p/fixture)'));
+});
+
+test('pickup notices show requested Korean time and explain late-payment adjustment only before payment', () => {
+  const requested = { pickupRequestedAt: '2026-11-04T23:30:00+09:00', approvedAt: null };
+  const pending = pickupNotice(requested);
+  assert.ok(pending.includes('23:30'));
+  assert.ok(pending.includes('해당 시각 이후 결제 시'));
+  assert.ok(pending.includes('다음날 09:00'));
+  assert.ok(pending.includes('09:00 이전은 당일 09:00'));
+  const paid = pickupNotice({ ...requested, approvedAt: '2026-11-04T16:30:00+09:00' });
+  assert.ok(paid.includes('23:30'));
+  assert.ok(!paid.includes('결제 시'));
+  const missing = pickupNotice({ pickupRequestedAt: null, approvedAt: null });
+  assert.ok(missing.includes('결제 완료 후 1시간 뒤'));
+  assert.ok(missing.includes('17:00 초과는 다음날 09:00'));
 });
 
 test('both notices list every parcel and escape injected address content', () => {

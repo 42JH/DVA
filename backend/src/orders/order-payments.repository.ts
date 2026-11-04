@@ -100,7 +100,7 @@ export class OrderPaymentsRepository {
   }
   async waitForPayment(client: PoolClient, id: number) {
     await client.query(
-      "UPDATE orders SET status='notPaid',pickup_requested_at=NULL,payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
+      "UPDATE orders SET status='notPaid',payment_due_at=clock_timestamp()+interval '24 hours' WHERE order_seq=$1",
       [id],
     );
     await this.replaceRequest(client, id);
@@ -135,12 +135,17 @@ export class OrderPaymentsRepository {
     approvedAt?: string,
   ) {
     await client.query(
-      `WITH paid AS (SELECT COALESCE($4::timestamptz,clock_timestamp()) AS at)
-       UPDATE orders SET status='PAID',paid_at=paid.at,pickup_requested_at=paid.at+interval '1 hour',
+      `WITH paid AS (SELECT COALESCE($4::timestamptz,clock_timestamp()) AS at),
+       pickup AS (SELECT at,date_trunc('day',at AT TIME ZONE 'Asia/Seoul') AS local_day FROM paid)
+       UPDATE orders SET status='PAID',paid_at=pickup.at,pickup_requested_at=CASE
+         WHEN pickup_requested_at>=pickup.at THEN pickup_requested_at
+         WHEN pickup.at+interval '1 hour'>(pickup.local_day+interval '17 hours') AT TIME ZONE 'Asia/Seoul'
+           THEN (pickup.local_day+interval '1 day 9 hours') AT TIME ZONE 'Asia/Seoul'
+         ELSE GREATEST(pickup.at+interval '1 hour',(pickup.local_day+interval '9 hours') AT TIME ZONE 'Asia/Seoul') END,
        billing_organization_seq=$2,billing_department_seq=$3,
        billing_organization_name=(SELECT name FROM organizations WHERE organization_seq=$2),
        billing_department_name=(SELECT name FROM departments WHERE department_seq=$3)
-       FROM paid WHERE order_seq=$1`,
+       FROM pickup WHERE order_seq=$1`,
       [id, organizationId, departmentId, approvedAt ?? null],
     );
     await this.billing.recordCharge(client, id, requestId);

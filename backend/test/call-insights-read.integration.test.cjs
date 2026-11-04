@@ -165,6 +165,7 @@ test('detail and list expose the stored analysis and actual older persona withou
     orderLookupCount: null,
     cancelledParcelCount: null,
     hasHandoffRequest: null,
+    hasCallbackRequest: null,
     aiStartedAt: new Date(input.startedAt).toISOString(),
     aiEndedAt: new Date(input.endedAt).toISOString(),
     repeatQuestionCount: 2,
@@ -203,6 +204,7 @@ test('list and detail preserve AI summary values including zero, false and unkno
       orderLookupCount: 1,
       cancelledParcelCount: 1,
       hasHandoffRequest: true,
+      hasCallbackRequest: true,
     },
     {
       isNewCustomer: false,
@@ -211,6 +213,7 @@ test('list and detail preserve AI summary values including zero, false and unkno
       orderLookupCount: 0,
       cancelledParcelCount: 0,
       hasHandoffRequest: false,
+      hasCallbackRequest: false,
     },
     {
       isNewCustomer: null,
@@ -219,6 +222,7 @@ test('list and detail preserve AI summary values including zero, false and unkno
       orderLookupCount: null,
       cancelledParcelCount: null,
       hasHandoffRequest: null,
+      hasCallbackRequest: null,
     },
   ]) {
     const call = await createCall();

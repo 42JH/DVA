@@ -83,6 +83,16 @@ test('deployment verification requires migration 047, legacy column removal and 
   );
 });
 
+test('deployment verification requires migration 048 and nullable boolean callback status without a default', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='048-call-callback-request.sql'",
+    'ALTER TABLE call_analyses DROP COLUMN has_callback_request',
+    'ALTER TABLE call_analyses ALTER COLUMN has_callback_request SET DEFAULT false',
+    'ALTER TABLE call_analyses ALTER COLUMN has_callback_request TYPE text USING has_callback_request::text',
+  ])
+    await verify([sql], 'Call callback request schema or migration missing');
+});
+
 test('deployment verification requires migration 046 and the persistent retry window', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",

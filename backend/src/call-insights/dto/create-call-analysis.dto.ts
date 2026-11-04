@@ -159,6 +159,16 @@ export class CreateCallAnalysisDto {
   @IsBoolean()
   hasHandoffRequest?: boolean | null;
 
+  @ApiPropertyOptional({
+    type: Boolean,
+    nullable: true,
+    description:
+      '콜백을 요청했으면 true. 상담원 연결 요구·처리 완료와 별개이며 생략·null은 미수집.',
+  })
+  @ValidateIf((_object: unknown, value: unknown) => value !== undefined && value !== null)
+  @IsBoolean()
+  hasCallbackRequest?: boolean | null;
+
   @ApiProperty({
     type: Number,
     nullable: true,

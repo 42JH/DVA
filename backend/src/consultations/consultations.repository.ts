@@ -19,6 +19,7 @@ type CallRow = CallDto & {
   orderLookupCount: number | null;
   cancelledParcelCount: number | null;
   hasHandoffRequest: boolean | null;
+  hasCallbackRequest: boolean | null;
   aiStartedAt: Date | null;
   aiEndedAt: Date | null;
   repeatQuestionCount: number | null;
@@ -38,7 +39,8 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
  a.has_complaint AS "hasComplaint",a.complaints,a.analysed_at AS "analysedAt",
  a.is_new_customer AS "isNewCustomer",a.registered_parcel_count AS "registeredParcelCount",
  a.faq_answer_count AS "faqAnswerCount",a.order_lookup_count AS "orderLookupCount",
- a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest"
+ a.cancelled_parcel_count AS "cancelledParcelCount",a.has_handoff_request AS "hasHandoffRequest",
+ a.has_callback_request AS "hasCallbackRequest"
  FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
  LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
  LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
@@ -55,6 +57,7 @@ function callResult(row: CallRow): CallListItemDto {
     orderLookupCount,
     cancelledParcelCount,
     hasHandoffRequest,
+    hasCallbackRequest,
     aiStartedAt,
     aiEndedAt,
     repeatQuestionCount,
@@ -78,6 +81,7 @@ function callResult(row: CallRow): CallListItemDto {
             orderLookupCount,
             cancelledParcelCount,
             hasHandoffRequest,
+            hasCallbackRequest,
             aiStartedAt: aiStartedAt!,
             aiEndedAt: aiEndedAt!,
             repeatQuestionCount,

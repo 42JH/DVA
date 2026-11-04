@@ -1,7 +1,19 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiCreatedResponse,
+  ApiHeader,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -96,19 +108,28 @@ export class CustomersController {
     summary: '고객 이름·상태 변경',
     security: [{ adminSession: [] }, {}],
     description:
-      '이름·내 주소 수정은 MVP 서비스 인증 없음. status는 ACTIVE 관리자 세션과 허용 Origin 필수. 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
+      '이름 수정은 기존 MVP 서비스 인증 없음. AI의 내 주소 수정·삭제는 call_session_seq로 진행 중인 본인 통화를 확인합니다. 관리자는 통화 헤더 없이 기존 세션과 허용 Origin으로 수정합니다. status·월결제 자격은 관리자 전용이며 전화번호 변경·탈퇴 복구는 지원하지 않습니다.',
+  })
+  @ApiHeader({
+    name: 'call_session_seq',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
+    description:
+      'AI가 address를 수정·삭제할 때 필수. 진행 중 본인 통화 번호. 관리자와 AI 이름 단독 수정에는 불필요.',
   })
   @ApiNoContentResponse()
   update(
     @Param() params: CustomerIdParamsDto,
     @Body() input: UpdateCustomerDto,
     @Req() request: AuthRequest,
+    @Headers('call_session_seq') header?: string,
   ) {
     return this.customers.update(
       params.id,
       input,
       request.admin?.adminUserSeq ?? null,
       request.requestId,
+      header,
     );
   }
 }

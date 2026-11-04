@@ -1,4 +1,5 @@
 import { PaymentView } from './payments.repository';
+import { pickupNotice } from './payment-message';
 const escape = (value: unknown) =>
   String(value).replace(
     /[&<>"']/g,
@@ -12,13 +13,7 @@ export function paymentPage(record: PaymentView, base: string, clientKey: string
     clientKey,
     apiUrl: `${base}/requests/${record.token}`,
   }).replace(/</g, '\\u003c');
-  const pickup = record.pickupRequestedAt
-    ? new Intl.DateTimeFormat('ko-KR', {
-        timeZone: 'Asia/Seoul',
-        dateStyle: 'short',
-        timeStyle: 'short',
-      }).format(new Date(record.pickupRequestedAt)) + ' KST'
-    : '결제 완료 후 1시간 뒤';
+  const pickup = pickupNotice(record);
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><title>DVA 택배 결제</title>
 <link rel="stylesheet" href="${base}/assets/style.css"><script src="https://js.tosspayments.com/v2/standard" defer></script>
@@ -30,7 +25,7 @@ export function paymentPage(record: PaymentView, base: string, clientKey: string
 <div><dt>보내는 분</dt><dd>${escape(record.senderName || '발송인')}</dd></div>
 <div><dt>받는 분</dt><dd>${escape(record.recipientSummary || '수령인')}${record.parcelCount > 1 ? ` 외 ${record.parcelCount - 1}건` : ''}</dd></div>
 <div><dt>배송 건수</dt><dd>${record.parcelCount}건</dd></div>
-<div><dt>수거 요청일시</dt><dd>${escape(pickup)}</dd></div></dl>
+<div><dt>수거 요청일시</dt><dd id="pickup-time">${escape(pickup)}</dd></div></dl>
 <div class="total"><span>결제금액</span><strong>${record.amount.toLocaleString('ko-KR')}<small>원</small></strong></div></section>
 <p class="test-note">토스페이먼츠 테스트 환경입니다. 실제 금액은 청구되지 않습니다.</p>
 <section id="payment-method" aria-label="결제수단"></section><section id="agreement" aria-label="이용약관"></section>

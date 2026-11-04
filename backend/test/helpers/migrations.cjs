@@ -83,6 +83,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE to_regclass('public.handoff_requests') IS NULL AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND ((table_name='company_pins' AND column_name='search_text') OR (table_name='call_sessions' AND column_name='end_reason')))",
       );
       assert.equal(unusedSchema.rowCount, 1, 'Apply migration 047 to the isolated DB first');
+      const callback = await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL",
+      );
+      assert.equal(callback.rowCount, 1, 'Apply migration 048 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
