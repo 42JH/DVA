@@ -3,6 +3,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
+import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 import type { FaqInput } from './faqApi'
 
 /** 화면에서 쓰는 모양 (서버 UnansweredQuestion에서 바꿈 — 화면 이름은 그대로 두려고) */
@@ -13,6 +14,7 @@ export interface UnansweredQuestion {
   customerName: string // 연결 고객의 지금 이름. 모르면 '—'
   callerNumber: string // 발신번호, 숫자만. 모르면 ''
   question: string // 고객이 한 말 그대로 (어… 음… 포함) — 다듬는 건 관리자가 [FAQ 추가] 창 질문 칸에서
+  reason: UnansweredReason | null // 미답변 사유 (11/04). null = 미분류
 }
 
 /** 서버 UnansweredQuestion (§13) — 화면에서 안 쓰는 칸(occurredAt · offsetSeconds · status 등)은 뺌 */
@@ -23,6 +25,7 @@ interface UnansweredDto {
   customerName: string | null
   callerPhoneNumber: string | null
   questionText: string
+  reason?: UnansweredReason | null // 사유 연동(DB 049) 전 서버는 칸이 없음 → 미분류
 }
 
 const toScreen = (d: UnansweredDto): UnansweredQuestion => ({
@@ -32,6 +35,7 @@ const toScreen = (d: UnansweredDto): UnansweredQuestion => ({
   customerName: d.customerName ?? '—',
   callerNumber: (d.callerPhoneNumber ?? '').replace(/\D/g, ''),
   question: d.questionText,
+  reason: d.reason ?? null,
 })
 
 export const unansweredQueries = {

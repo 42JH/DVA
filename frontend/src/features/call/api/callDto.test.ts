@@ -107,6 +107,7 @@ const d = toCallDetail(
       orderSeq: null,
       action: 'QUESTION_UNANSWERED',
       unansweredQuestionSeq: 7019,
+      unansweredReason: 'KB_NO_ANSWER',
       questionText: '착불?',
       answerText: null,
       faqEntrySeq: null,
@@ -137,6 +138,7 @@ assert.deepEqual(d.results[0], {
   orderSeq: null,
   question: '착불?',
   unansweredQuestionSeq: 7019,
+  reason: 'KB_NO_ANSWER',
 })
 assert.deepEqual(d.actions[0], {
   order: 1,

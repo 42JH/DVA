@@ -227,6 +227,7 @@ type Unanswered = {
   customerName: string | null
   callerPhoneNumber: string | null
   questionText: string
+  reason: 'KB_NO_ANSWER' | 'KB_UNAVAILABLE' | null
   status: 'OPEN' | 'REGISTERED'
   aiPersonaVersionSeq: number | null
   faqEntrySeq: number | null
@@ -271,6 +272,13 @@ const UA_SEED: [string, string, string, string, number?, number?][] = [
   [`${today}T10:47:00`, '(주)새봄식품', '01031167745', '아이스박스는 몇 개까지 한 번에 돼요?'],
   [`${today}T11:30:00`, '진우석', '01067702218', '받는 분이 집에 없으면 어떻게 돼요?'],
 ]
+// 사유(11/04 미답변 사유 연동): 10/19까지 = 사유 연동 전에 쌓인 질문(미분류 null) · 10/20 15시대와 9104 통화 = 검색 서버가 멈춘 때(검색 장애) · 나머지 = 근거 부족
+const reasonOf = (at: string, call?: number): Unanswered['reason'] =>
+  at < '2026-10-20'
+    ? null
+    : at.startsWith('2026-10-20T15') || call === 9104
+      ? 'KB_UNAVAILABLE'
+      : 'KB_NO_ANSWER'
 const unanswered: Unanswered[] = UA_SEED.map(([at, name, phone, question, call, offset], i) => {
   const startedAt = new Date(`${at}+09:00`).toISOString()
   return {
@@ -283,6 +291,7 @@ const unanswered: Unanswered[] = UA_SEED.map(([at, name, phone, question, call, 
     customerName: name,
     callerPhoneNumber: phone,
     questionText: question,
+    reason: reasonOf(at, call),
     status: 'OPEN',
     aiPersonaVersionSeq: null,
     faqEntrySeq: null,

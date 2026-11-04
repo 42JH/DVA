@@ -409,7 +409,11 @@ const COMPLAINT_TYPE: Record<string, string> = {
   'AI라서 거부': 'AI_REFUSAL',
 }
 const PERSONA_SEQ = 6 // 빠른 접수형 v6의 DB 번호 (07 가짜와 맞춤)
-const UNANSWERED_SEQ: Record<number, number> = { 9101: 7019, 9104: 7008 } // 09 가짜 미답변 번호 (faq.ts UA_SEED 순서)
+// 09 가짜 미답변 번호 · 사유 (faq.ts UA_SEED 순서 · reasonOf와 맞춤)
+const UNANSWERED_OF: Record<number, [number, 'KB_NO_ANSWER' | 'KB_UNAVAILABLE']> = {
+  9101: [7019, 'KB_NO_ANSWER'],
+  9104: [7008, 'KB_UNAVAILABLE'],
+}
 const iso = (s: string) => new Date(s).toISOString()
 const plus = (s: string, sec: number) => new Date(Date.parse(s) + sec * 1000).toISOString()
 const sceneOf = (id: number) => CALLS.find((c) => c.callSessionSeq === id)
@@ -619,7 +623,10 @@ function eventsOf(scene: CallDetail) {
           : x.kind === 'ACCEPTED'
             ? 'ORDER_CREATED'
             : 'ORDER_CANCELLED',
-        unansweredQuestionSeq: unanswered ? (UNANSWERED_SEQ[scene.callSessionSeq] ?? null) : null,
+        unansweredQuestionSeq: unanswered
+          ? (UNANSWERED_OF[scene.callSessionSeq]?.[0] ?? null)
+          : null,
+        unansweredReason: unanswered ? (UNANSWERED_OF[scene.callSessionSeq]?.[1] ?? null) : null,
         questionText: unanswered ? x.question : null,
         answerText: null,
         faqEntrySeq: null,

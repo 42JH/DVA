@@ -5,6 +5,7 @@ import { FETCH_ALL_MAX, pageSlice } from '@/shared/api/paging'
 import { todayYmd, ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
+import { reasonTag } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
   deleteUnanswered,
@@ -14,8 +15,12 @@ import {
 
 export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
 
-/** 목록 한 줄 = 질문 + 화면용 글 (시각 칸 한 줄 또는 두 줄 · 하이픈 전화번호) */
-export type UnansweredRow = UnansweredQuestion & { time: string[]; phone: string }
+/** 목록 한 줄 = 질문 + 화면용 글 (시각 칸 한 줄 또는 두 줄 · 하이픈 전화번호 · 사유 태그) */
+export type UnansweredRow = UnansweredQuestion & {
+  time: string[]
+  phone: string
+  reasonTag: ReturnType<typeof reasonTag>
+}
 
 const PAGE_SIZE = 20
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
@@ -72,6 +77,7 @@ export function useUnansweredList({
     ...u,
     time: u.startedAt ? fmtListTime(u.startedAt) : ['—'], // 시각을 못 받은 통화
     phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
+    reasonTag: reasonTag(u.reason),
   }))
 
   const remove = useMutation({

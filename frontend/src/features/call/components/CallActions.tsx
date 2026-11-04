@@ -2,7 +2,7 @@ import { Tag } from '@/shared/ui'
 import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail'
 
 // 처리 내용 카드 (06 오른쪽, 와이어프레임 06_통화상세 10/30) — 이 통화가 한 일
-// 위: 결과 블록 (굵은 종류 · 회색 통화 안 시각 · 오른쪽 링크). 접수 · 주문 취소 → '주문 보기 ›'(팝업), AI 미답변 → 질문 + 'AI 미답변 보기 ›'(09)
+// 위: 결과 블록 (굵은 종류 · 회색 통화 안 시각 · 오른쪽 링크). 접수 · 주문 취소 → '주문 보기 ›'(팝업), AI 미답변 → 사유 태그 + 질문 + 'AI 미답변 보기 ›'(09)
 //     상담원 이관 요청은 링크 없음 (연결 성공이 아니라 요청 기록). 블록이 없으면 안내 한 줄
 // 아래: 'AI 동작 n'(서버 전체 건수) 기록 (시각 · 회색 태그 · 내용). 길면 이 목록만 스크롤 — 결과 블록은 그대로
 //     줄을 누르면 왼쪽 스크립트가 그 동작을 부른 고객 말로 넘어가고 녹취가 그 말부터 (11/01). 시각을 모르는 줄은 누를 수 없음
@@ -35,6 +35,7 @@ export function CallActions({
           <li key={r.key} className="border-b border-line py-4">
             <div className="flex items-baseline gap-3">
               <span className="text-body font-bold">{r.label}</span>
+              {r.reason && <Tag kind={r.reason.kind}>{r.reason.label}</Tag>}
               <span className="text-label text-sub">{r.time}</span>
               {r.link && (
                 <button

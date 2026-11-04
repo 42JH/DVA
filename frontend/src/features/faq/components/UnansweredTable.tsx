@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react'
-import { COL, Button, ConfirmDialog, Table, TwoLines, type Column } from '@/shared/ui'
+import { COL, Button, ConfirmDialog, Table, Tag, TwoLines, type Column } from '@/shared/ui'
 import type { UnansweredRow, useUnansweredList } from '@/features/faq/hooks/useUnansweredList'
 import { FaqFormModal } from './FaqFormModal'
 
 // AI 미답변 질문 표 + [FAQ 추가] · [삭제] 창 — 09 AI 미답변 화면과 01 홈 미리보기가 같이 씀
-// 줄 = 통화 시작 시각 | 고객 · 발신번호 | “질문”(고객 말 그대로) | [FAQ 추가] [삭제]. 줄을 누르면 그 통화의 06 통화 상세
+// 줄 = 통화 시작 시각 | 고객 · 발신번호 | 사유 | “질문”(고객 말 그대로) | [FAQ 추가] [삭제]. 줄을 누르면 그 통화의 06 통화 상세
 export function UnansweredTable({
   vm,
   head,
@@ -35,6 +35,17 @@ export function UnansweredTable({
       header: '고객 · 발신번호',
       width: 160,
       cell: (r) => <TwoLines top={r.customerName} bottom={r.phone} />,
+    },
+    {
+      key: 'reason',
+      header: '사유', // 근거 부족 · 검색 장애 · 미분류 (11/04 미답변 사유 연동)
+      width: COL.status,
+      pill: true,
+      cell: (r, { tinted }) => (
+        <Tag kind={r.reasonTag.kind} onTinted={tinted} fixed>
+          {r.reasonTag.label}
+        </Tag>
+      ),
     },
     {
       key: 'question',
