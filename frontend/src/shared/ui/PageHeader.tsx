@@ -40,52 +40,33 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
   )
 }
 
-// 새 상단바 (Figma '프레임' · 'FAQ' 11/04) — 날짜 · 상태 | 화면 검색칸(폭 317, 가운데) | AI 미답변 알림. 목록 화면이 본문 맨 위에 그림
-// (본문 위 여백 24를 끌어올려 카드 위에서 36 높이에 가운데가 오게). 날짜 외 정보는 AppLayout이 TopBarInfo로 채워 줌
+// 새 상단바 (Figma '프레임' · 'FAQ' · '통화' 11/04) — 상태 | 화면 검색칸(폭 317, 가운데 — 있을 때) | AI 미답변 알림. 화면이 본문 맨 위에 그림
+// (본문 위 여백 24를 끌어올려 카드 위에서 36 높이에 가운데가 오게). 정보는 AppLayout이 TopBarInfo로 채워 줌
 // 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 점은 라이브처럼 깜빡임, 0건이면 '접수 중'만(11/04 사용자). 실시간 연결이 끊기면 점이 회색으로 멈춤
-// 좁은 화면(1280)에선 상태 글자가 말줄임 — 검색칸은 늘 가운데
-// crumbs = 검색 중이면 날짜 · 상태 자리에 경로('“박스” 검색', 11/04 사용자 — 상세로 가면 '“박스” 검색 > “박스” 검색 상세')
-// 04 통화(Figma '통화' 11/04)는 날짜 · 검색이 아래 머리 줄에 있어 상태 · 알림만 (date={false}, search 없음)
-export function TopBar({
-  search,
-  crumbs,
-  date = true,
-  className = '',
-}: {
-  search?: ReactNode
-  crumbs?: Crumb[]
-  date?: boolean
-  className?: string // 화면마다 왼쪽 자리 맞춤 (04는 카드 왼쪽 24부터)
-}) {
+// 날짜는 뺌 (11/04 사용자 — 04 통화처럼 FAQ도). 상태는 카드 왼쪽 24부터(Figma '통화'), 좁은 화면(1280)에선 말줄임 — 검색칸은 늘 가운데
+// crumbs = 검색 중이면 상태 자리에 경로('“박스” 검색', 11/04 사용자 — 상세로 가면 '“박스” 검색 > “박스” 검색 상세')
+export function TopBar({ search, crumbs }: { search?: ReactNode; crumbs?: Crumb[] }) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
-  const today = new Date().toLocaleDateString('ko-KR', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  })
   return (
-    <header
-      className={`-mt-6 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2 ${className}`}
-    >
-      <div className="flex min-w-0 items-center gap-[clamp(16px,3.3vw,48px)]">
+    <header className="-mt-6 -ml-4 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2">
+      <div className="flex min-w-0 items-center">
         {crumbs ? (
           <Crumbs items={crumbs} className="min-w-0 truncate" />
         ) : (
-          date && <span className="shrink-0 text-body text-ink">{today}</span>
-        )}
-        {!crumbs && persona && (
-          <span
-            title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
-            className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
-          >
+          persona && (
             <span
-              aria-hidden
-              className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
-            />
-            <span className="truncate">
-              {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+              title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
+              className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
+            >
+              <span
+                aria-hidden
+                className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
+              />
+              <span className="truncate">
+                {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+              </span>
             </span>
-          </span>
+          )
         )}
       </div>
       {search ?? <span />}
