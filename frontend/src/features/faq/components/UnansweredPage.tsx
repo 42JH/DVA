@@ -15,7 +15,9 @@ import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useU
 // 상단바: 경로 '[이동 전 화면] > AI 미답변' · 검색(11/05 — 예전 검색칸이 상단바 → 창으로) · 알림. 표는 03 주문 · 04 통화 목록 말투 — 열 머리 20/600 · 아래 구분선 · 줄 글자 20 · 칩 · 새 버튼
 // 줄 = 통화 시작 시각 | 고객 · 발신번호 | 사유 칩 | “질문” | [FAQ 추가](파랑 선 → FAQ 작성 화면) [삭제](빨강 선 → 확인 창). 줄을 누르면 그 통화의 06
 // 한 화면에: 표 줄만 스크롤 (머리 · 쪽 번호는 고정). 오래된 질문부터 (먼저 쌓인 것부터 처리)
-const COLS = 'grid grid-cols-[170px_200px_170px_minmax(0,1fr)_196px]'
+// 좁은 창(1280 미만)에선 앞 세 열이 3/4로 (global.css --col-scale) — 질문 열이 '“…'로 눌리지 않게. 버튼 열은 그대로
+const COLS =
+  'grid grid-cols-[calc(170px*var(--col-scale))_calc(200px*var(--col-scale))_calc(170px*var(--col-scale))_minmax(0,1fr)_196px]'
 const PAD = 'px-[54px]' // 03 주문 목록과 같은 좌우 자리
 // 사유 칩 — 04 상담 유형 칩 색 집합에서: 근거 부족(FAQ로 채울 것) = FAQ 남보라 · 검색 장애 = 분홍 · 미분류 = 회색. 모양 · 색은 06 처리 내용과 같이 shared/lib/unansweredReason
 export function UnansweredPage() {

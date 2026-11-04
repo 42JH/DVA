@@ -21,7 +21,8 @@ export function AuthLayout({
   children: ReactNode
 }) {
   return (
-    <div className="grid h-full grid-cols-[576px_1fr]">
+    // 좁은 창(1280 미만)에선 그림 판이 줄고(오른쪽이 잘림) 오른쪽 칸은 최소 520 — 440 칸 양옆 여백 (11/05 반응형)
+    <div className="grid h-full grid-cols-[minmax(0,1fr)_minmax(520px,1fr)] xl:grid-cols-[576px_1fr]">
       <aside className="relative overflow-hidden bg-action-soft">
         <div className="absolute top-1/2 left-0 h-[1024px] w-[576px] -translate-y-1/2">
           <i className={`${BLOB} top-[163px] left-[194px] size-[120px]`} />

@@ -15,8 +15,8 @@ export function MyInfoPage() {
     <div className="flex flex-col">
       <TopBar />
       <NewLook.Provider value>
-        <div className="mt-v32 flex justify-center">
-          <section className="flex w-[640px] flex-col gap-v28 rounded-xl bg-surface px-8 py-v32 ring-1 ring-line [--field-label:150px] ring-inset">
+        <div className="mt-v24 flex justify-center">
+          <section className="flex w-[640px] flex-col gap-v24 rounded-xl bg-surface px-8 py-v32 ring-1 ring-line [--field-label:150px] ring-inset">
             <div className="flex flex-col gap-6">
               <h2 className="text-card font-semibold">계정 정보</h2>
               <TextField label="아이디" inline locked value={me?.loginId ?? ''} />

@@ -67,7 +67,7 @@ export function CompanyDetailPage() {
     {
       key: 'actions',
       header: '',
-      width: 170,
+      width: '170px', // 버튼 두 개 — 좁은 창에서도 안 줄임
       align: 'right',
       cell: (r) => (
         <span className="flex justify-end gap-2">

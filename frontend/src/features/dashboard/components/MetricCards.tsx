@@ -214,8 +214,11 @@ export function RegistrationCard({ c }: { c: CardState<RegistrationView> }) {
   )
 }
 
-/** 불편 유형 범례 줄 칸: 이름 | 통화 수 58 | 구성비 65 */
-const LEGEND = 'grid grid-cols-[minmax(0,1fr)_58px_65px] items-center gap-2 px-[9px]'
+/** 불편 유형 범례 줄 칸: 이름 | 통화 수 58 | 구성비 65
+ *  좁은 창(1280 미만)에선 통화 수 칸을 빼고 이름을 넓힘 — 이름이 '정보 …'로 잘려 무슨 유형인지 몰라서 (11/05 반응형. 수는 표 위 '불편 139'와 구성비로) */
+const LEGEND =
+  'grid grid-cols-[minmax(0,1fr)_65px] xl:grid-cols-[minmax(0,1fr)_58px_65px] items-center gap-2 px-[9px]'
+const COUNT = 'hidden text-right xl:block'
 
 /** §4 고객 불편 표현 통화율 — 메인은 늘 전체 고객 */
 export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
@@ -227,14 +230,14 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
             <p className="font-medium text-ink">{v.ratio}</p>
             <p>{v.excluded}</p>
           </Headline>
-          <div className="grid min-h-0 flex-1 grid-cols-[244px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
+          <div className="grid min-h-0 flex-1 grid-cols-[clamp(140px,36%,244px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
             <div className="grid min-h-0 place-items-center">
               <Donut slices={v.slices} total={v.total} />
             </div>
             <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
               <div className={`${LEGEND} shrink-0 pb-1.5 text-[10px] text-muted`}>
                 <span>불편 유형</span>
-                <span className="text-right">통화 수</span>
+                <span className={COUNT}>통화 수</span>
                 <span className="text-right">구성비</span>
               </div>
               {v.slices.map((s) => (
@@ -246,7 +249,7 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
                     <i className={`size-2 shrink-0 rounded-[3px] ${s.bg}`} />
                     <span className="truncate">{s.label}</span>
                   </span>
-                  <span className="text-right">{s.count}</span>
+                  <span className={COUNT}>{s.count}</span>
                   <span className="text-right text-sub">{s.share}</span>
                 </div>
               ))}

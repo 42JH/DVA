@@ -14,7 +14,7 @@ const ALIGN = { left: 'pr-4', right: 'pr-4 text-right' } as const
 export interface Column<Row> {
   key: string
   header: string
-  width?: number | string // px 또는 '1fr'. 마지막 열은 보통 나머지
+  width?: number | string // px(좁은 창에선 3/4로 줄어듦 — global.css --col-scale) 또는 글자('170px' 안 줄임 · '1fr'). 마지막 열은 보통 나머지
   align?: 'left' | 'right'
   pill?: boolean // 셀이 고정 폭 알약(<Tag fixed>, 96)인 열 — 폭은 COL.status(112 = 96 + 16), 머리글은 알약 상자 가운데
   cell: (row: Row, ctx: { tinted: boolean }) => ReactNode
@@ -55,6 +55,7 @@ export function Table<Row>({
   footer?: ReactNode // 페이지 번호
   // 새 디자인(11/05~ 08 · 10, 03 주문 · 04 통화 목록 말투): 카드 없이 · 열 머리 20/600 · 구분선 · 줄 글자 20 · 파랑 선택
   // 남는 높이를 채우고 줄만 스크롤(열 머리는 위에 붙음, 쪽 번호는 아래 고정) — 부모가 flex 세로로 높이를 줘야 함
+  // 좁은 창(1280 미만)에선 글자 16 — 20이면 전화번호 · 날짜가 두 줄로 꺾임 (11/05 반응형)
   big?: boolean
 }) {
   // 열 폭은 와이어프레임 값 그대로 = 다음 열까지의 거리(사이 여백 포함) → grid gap 없이 깐다.
@@ -62,7 +63,9 @@ export function Table<Row>({
   const gridCols = [
     selectable ? '44px' : null,
     ...columns.map((c) =>
-      typeof c.width === 'number' ? `${c.width}px` : (c.width ?? 'minmax(120px, 1fr)'),
+      typeof c.width === 'number'
+        ? `calc(${c.width}px * var(--col-scale))`
+        : (c.width ?? 'minmax(120px, 1fr)'),
     ),
   ]
     .filter(Boolean)
@@ -93,7 +96,7 @@ export function Table<Row>({
         <div className={big ? 'sticky top-0 z-10 bg-surface' : ''}>
           {/* 머리줄은 높이 24 고정(가운데 = 카드 위 44) + 아래 16 → 구분선이 카드 위 72. 글꼴에 안 흔들리게 */}
           <div
-            className={`mb-4 grid items-center font-semibold ${big ? 'h-7 text-card text-ink' : 'h-6 text-label text-sub'}`}
+            className={`mb-4 grid items-center font-semibold ${big ? 'h-7 text-body text-ink xl:text-card' : 'h-6 text-label text-sub'}`}
             style={{ gridTemplateColumns: gridCols }}
           >
             {selectable &&
@@ -150,7 +153,7 @@ export function Table<Row>({
                         : undefined
                     }
                     // 포커스 표시는 바탕색이 아니라 안쪽 선 (선택 · 펼친 줄의 바탕색을 덮지 않게)
-                    className={`group -mx-4 grid items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-inset ${big ? 'min-h-[72px] text-card focus-visible:ring-brand' : 'min-h-[56px] focus-visible:ring-action'} ${
+                    className={`group -mx-4 grid items-center rounded-lg px-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-inset ${big ? 'min-h-[72px] text-body focus-visible:ring-brand xl:text-card' : 'min-h-[56px] focus-visible:ring-action'} ${
                       isSelected
                         ? big
                           ? 'bg-brand/10'
