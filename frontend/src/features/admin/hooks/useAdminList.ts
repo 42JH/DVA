@@ -1,7 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { fmtDate } from '@/shared/lib/format'
-import { pageCount } from '@/shared/api/paging'
+import { pageCount, pageSlice } from '@/shared/api/paging'
+import { matchKo } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { useSession } from '@/shared/auth/useSession'
 import {
@@ -15,7 +16,7 @@ import {
 import { ADMIN_TABS, ROLE_LABEL } from '@/features/admin/labels'
 
 const PAGE_SIZE = 11 // 디자인: 한 쪽 11명
-const DEFAULTS: { tab: AdminStatus } = { tab: 'ACTIVE' } // 첫 화면 = '관리자' 탭 (맨 앞 탭)
+const DEFAULTS: { tab: AdminStatus; q: string } = { tab: 'ACTIVE', q: '' } // 첫 화면 = '관리자' 탭 (맨 앞 탭)
 
 /** ⋮ 메뉴 항목 (비활성화 · 활성화는 11/01 백엔드 반영으로 연결) */
 export type AdminAction = 'reset' | 'deactivate' | 'activate' | 'delete'
@@ -56,16 +57,24 @@ export function useAdminList() {
   const qc = useQueryClient()
   const [confirming, setConfirming] = useState<Confirming>(null)
 
+  // 검색 (11/05 — 이름 · 아이디, 지금 탭 안에서): 서버에 검색 조건이 없어 탭 전체(최대 100명)를 받아 앞에서 거름
+  // ponytail: 한 탭 100명까지만 찾음 — 넘으면 서버 검색 조건(q)을 요청
+  const q = params.q.trim()
   const list = useQuery(
-    adminQueries.list({ status: tab, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    q
+      ? adminQueries.list({ status: tab, limit: 100, offset: 0 })
+      : adminQueries.list({ status: tab, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
   )
+  const hit = q
+    ? (list.data?.data ?? []).filter((a) => matchKo(a.name, q) || matchKo(a.loginId, q))
+    : null
   // 탭 건수: 상태마다 1건만 받아 total_count만 씀
   const counts = useQueries({
     queries: ADMIN_TABS.map((t) => adminQueries.list({ status: t.key, limit: 1, offset: 0 })),
   })
 
   // 쪽 수는 서버 건수(나 포함)로 — 나를 빼고 세면 마지막 쪽이 사라져 한 명이 안 보일 수 있음
-  const total = list.data?.total_count ?? 0
+  const total = hit ? hit.length : (list.data?.total_count ?? 0)
   const pages = pageCount(total, PAGE_SIZE)
   // 지워서 마지막 쪽이 비면 앞쪽으로 (예: 2쪽의 1명을 삭제)
   useEffect(() => {
@@ -90,7 +99,7 @@ export function useAdminList() {
 
   // 본인 줄은 안 보임 (11/02 사용자 — 본인에게 할 수 있는 일이 없음, 내 정보는 11 화면)
   // shortcut: 서버에 '나 빼고' 조건이 없어 받은 쪽에서 거름 → 내가 있는 쪽만 한 줄 적게 보임. 서버가 제외 조건을 주면 그걸로
-  const rows: AdminRow[] = (list.data?.data ?? [])
+  const rows: AdminRow[] = (hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? []))
     .filter((a) => a.adminUserSeq !== me?.adminUserSeq)
     .map((a) => ({
       id: a.adminUserSeq,
@@ -113,6 +122,8 @@ export function useAdminList() {
     })),
     tab,
     setTab: (key: AdminStatus) => set({ tab: key }),
+    q: params.q,
+    setQ: (v: string) => set({ q: v }), // 쪽은 1로
 
     rows,
     isLoading: list.isPending,

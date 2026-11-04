@@ -26,7 +26,6 @@ export function SearchBox({
   recentKey,
   suggestions,
   onPick,
-  big,
 }: {
   value: string
   placeholder: string
@@ -36,7 +35,6 @@ export function SearchBox({
   recentKey?: string
   suggestions?: string[]
   onPick?: (v: string) => void
-  big?: boolean // 새 디자인(11/05~ 08): 03 주문 검색칸 모양 — 높이 36 · 선 1(검색칸 색) · 입력 중 파랑. 최근 검색어 · 추천은 그대로
 }) {
   const recent = useRecentSearches(recentKey)
   const [open, setOpen] = useState(false)
@@ -94,15 +92,11 @@ export function SearchBox({
   return (
     <div className={`relative ${className}`}>
       <label
-        className={
-          big
-            ? 'flex h-9 items-center gap-4 rounded-lg border border-field bg-surface pr-3 pl-5 focus-within:border-brand'
-            : `flex h-10 items-center gap-3 rounded-lg bg-surface px-4 ${LINE} focus-within:ring-action`
-        }
+        className={`flex h-10 items-center gap-3 rounded-lg bg-surface px-4 ${LINE} focus-within:ring-action`}
       >
         <svg
           viewBox="0 0 20 20"
-          className={`shrink-0 ${big ? 'size-4 stroke-field' : 'size-5 stroke-sub'}`}
+          className="size-5 shrink-0 stroke-sub"
           fill="none"
           strokeWidth={1.6}
           strokeLinecap="round"

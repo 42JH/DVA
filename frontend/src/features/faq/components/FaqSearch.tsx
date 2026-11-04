@@ -2,62 +2,24 @@ import { useId, useState, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { useRecentSearches } from '@/shared/lib/recentSearches'
 import { Highlight, Overlay } from '@/shared/ui'
+import { SEARCH_PLACEHOLDER, SearchIcon, TopSearchButton, XIcon } from '@/shared/ui/TopSearch'
 import { faqTo, useFaqSearch } from '@/features/faq/hooks/useFaqList'
 
 // 09 FAQ 검색 (11/04 의견: 검색칸을 누르면 모달로) — 상단바엔 검색칸 모양 버튼(폭 317 · 높이 32), 누르면 위쪽에 검색 창
 // 창: 검색칸(지금 검색어로 시작) · 맞는 FAQ(모든 분류 · 최근 순 · 8개, 분류 + 질문, 맞은 자리 하이라이트) · 칸이 비면 최근 검색어(하나씩 ✕ · 전체 삭제)
 // ↑↓ 줄 고르기 · Enter = 고른 FAQ 상세('“박스” 검색 상세'), 안 골랐으면 목록에 검색 적용('“박스” 검색') · ✕ · Esc · 바깥 클릭 = 닫기
 // 폭 560 · 뒤 화면은 안 어둡게 · 윗줄(입력칸 · ✕ 말고)을 잡고 끌어 옮김 (11/04 사용자)
+// 11/05: 버튼 · 아이콘은 다른 화면 상단바 검색(shared/ui/TopSearch)과 같은 것 — 안내 글 '어떤 정보를 찾고 계신가요?' · 검색칸 색
 const SHOW = 8
-
-const SearchIcon = ({ className }: { className: string }) => (
-  <svg
-    viewBox="0 0 20 20"
-    className={`shrink-0 stroke-sub ${className}`}
-    fill="none"
-    strokeWidth={1.6}
-    strokeLinecap="round"
-    aria-hidden
-  >
-    <circle cx="8.5" cy="8.5" r="6" />
-    <path d="M13 13l4.5 4.5" />
-  </svg>
-)
-
-const XIcon = ({ className }: { className: string }) => (
-  <svg viewBox="0 0 20 20" className={`stroke-current ${className}`} strokeWidth={1.8} aria-hidden>
-    <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
-  </svg>
-)
 
 /** 상단바 검색칸 자리 — 검색 중이면 검색어와 ✕(검색 지우기) */
 export function FaqSearch({ q, onApply }: { q: string; onApply: (q: string) => void }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="relative">
-      <button
-        type="button"
-        aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
-        className="flex h-8 w-full items-center gap-6 rounded-lg bg-surface pr-9 pl-5 text-left text-body ring-1 ring-sub ring-inset hover:bg-bg"
-      >
-        <SearchIcon className="size-4" />
-        <span className={`truncate ${q ? 'text-ink' : 'text-sub'}`}>
-          {q || '어떤 질문을 찾고 계신가요?'}
-        </span>
-      </button>
-      {q && (
-        <button
-          type="button"
-          aria-label="검색 지우기"
-          onClick={() => onApply('')}
-          className="absolute top-1/2 right-2 grid size-6 -translate-y-1/2 place-items-center rounded text-sub hover:bg-bg hover:text-ink"
-        >
-          <XIcon className="size-4" />
-        </button>
-      )}
+    <>
+      <TopSearchButton text={q} onOpen={() => setOpen(true)} onClear={() => onApply('')} />
       {open && <SearchModal initial={q} onApply={onApply} onClose={() => setOpen(false)} />}
-    </div>
+    </>
   )
 }
 
@@ -125,13 +87,13 @@ function SearchModal({
           value={q}
           onChange={(e) => type(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="어떤 질문을 찾고 계신가요?"
+          placeholder={SEARCH_PLACEHOLDER}
           role="combobox"
           aria-label="FAQ 검색"
           aria-expanded={shown.length > 0}
           aria-controls={listId}
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
-          className="min-w-0 flex-1 bg-transparent text-strong outline-none placeholder:text-muted"
+          className="min-w-0 flex-1 bg-transparent text-strong outline-none placeholder:text-field"
         />
         <button
           type="button"

@@ -7,6 +7,7 @@ import {
   Pagination,
   Table,
   TopBar,
+  TopSearch,
   type Column,
   type MoreMenuItem,
 } from '@/shared/ui'
@@ -17,7 +18,7 @@ import { useAdminList, type AdminAction, type AdminRow } from '@/features/admin/
 // 10 관리자 권한 관리 (Figma 10, 11/01) — 건수 탭 → 표(이름 · 아이디 · 권한 · 가입 신청일 · 줄 끝) → 쪽 번호
 // 디자인과 다른 점 (11/01 결정): 전화 · 이메일 → 아이디 · 권한(서버에 없음) · '슈퍼바이저만' 안내 뺌(화면 자체가 최고 관리자 전용)
 // 비활성화(확인 창) · 활성화(바로)는 11/01 백엔드 반영으로 연결 — 처음엔 API가 없어 '준비 중'으로 꺼 뒀었음
-// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 새 상단바(04 · 03처럼 상태 · 알림) · 파랑 탭 · 표 big · 새 버튼 · 파랑 쪽 번호 · 새 확인 창
+// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 새 상단바(04 · 03처럼 상태 · 검색(이름 · 아이디, 11/05) · 알림) · 파랑 탭 · 표 big · 새 버튼 · 파랑 쪽 번호 · 새 확인 창
 
 // ⋮ 메뉴 항목 모양 — 무엇을 할 수 있는지는 훅(actions), 모양 · 순서만 여기
 const MENU: Record<AdminAction, Omit<MoreMenuItem, 'key' | 'onSelect'>> = {
@@ -115,7 +116,16 @@ export function AdminPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar />
+      <TopBar
+        search={
+          <TopSearch
+            name="관리자 검색"
+            fields={[{ value: vm.q }]}
+            hint="이름이나 아이디로 찾아요. 지금 보고 있는 탭 안에서 찾아요."
+            onApply={([q]) => vm.setQ(q)}
+          />
+        }
+      />
       <ListPage className="mt-2 min-h-0 flex-1 px-[54px]">
         {/* 04 통화 내역 · 09 FAQ처럼 밑줄 탭 (11/01, 칸 버튼 CountTabs에서 바꿈). 승인 대기 건수는 빨강 그대로 */}
         <Tabs big items={vm.tabs} value={vm.tab} onChange={vm.setTab} />

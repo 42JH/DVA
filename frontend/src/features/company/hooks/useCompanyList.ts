@@ -5,7 +5,7 @@ import { pageCount, pageSlice } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
 import { fmtShortDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
-import { matchKo, suggest } from '@/shared/lib/search'
+import { matchKo } from '@/shared/lib/search'
 import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
 import { BILLING_LABEL, errorText } from '@/features/company/labels'
 
@@ -89,7 +89,6 @@ export function useCompanyList() {
   return {
     q: params.q,
     setQ: (v: string) => set({ q: v }), // 쪽은 1로
-    suggestions: suggest([...new Set((pool.data ?? []).map((c) => c.name))], q), // 추천 = 기업 이름
     rows,
     total,
     isLoading: searching ? pool.isPending : list.isPending,

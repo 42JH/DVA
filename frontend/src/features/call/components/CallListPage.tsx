@@ -2,15 +2,14 @@ import { useCallback, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
-import { DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { DayPick, DayScroll, Highlight, TopBar, TopSearch } from '@/shared/ui'
 import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
-import { CallSearch } from './CallSearch'
 import { KindChips } from './KindChips'
 
-// 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터 · 검색칸) · 줄 목록
+// 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터) · 줄 목록
 // 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동
-// 검색칸은 창 없이 치는 대로 목록이 바뀜 (11/04 사용자)
+// 검색은 상단바 → 창 (11/05 사용자: 모든 화면 상단바 검색. 예전엔 머리 오른쪽 칸에 치는 대로)
 // 줄 = 시각 | 상담 유형 칩(접수 · 조회 · 취소 · FAQ, 두 번 이상이면 숫자) · 불만(빨간 알약, 올리면 근거) | 이름(신규면 new) | 전화번호 | 통화 시간
 // 무한 스크롤 (11/04 사용자 · shared/ui/DayScroll): 고른 날짜(기본 오늘)부터 — 아래로 내리면 지난 날, 위로 올리면 다음 날을 이어 받고, 머리 날짜는 맨 위 줄의 날짜를 따라감
 // 목록만 스크롤(머리는 고정) · 줄을 누르면 06. 06에서 돌아오면 보던 자리 그대로 (받아 둔 목록 + 스크롤 위치)
@@ -39,7 +38,16 @@ export function CallListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar />
+      <TopBar
+        search={
+          <TopSearch
+            name="통화 검색"
+            fields={[{ value: vm.q }]}
+            hint="고객 이름이나 전화번호로 찾아요."
+            onApply={([q]) => vm.setQ(q)}
+          />
+        }
+      />
       <div className="mt-2 flex h-[37px] shrink-0 items-center pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         <PersonaToggle
@@ -52,7 +60,6 @@ export function CallListPage() {
         />
         <div className="ml-auto flex items-center gap-6">
           <CallFilter value={vm.form} active={vm.isFiltered} onApply={vm.applyForm} />
-          <CallSearch q={vm.q} onSearch={vm.setQ} />
         </div>
       </div>
       <div className="mt-5 mr-[50px] ml-[58px] shrink-0 border-t border-line" />

@@ -137,11 +137,8 @@ export function useOrderList() {
     sender: params.sender,
     receiver: params.receiver,
     // 검색하면 오늘부터 (최근 주문이 위) — 지난 날짜에 머물러 있으면 새 결과가 안 보임. 같은 값이면 그대로
-    setSender: (v: string) => {
-      if (v.trim() !== sender) set({ sender: v.trim(), date: '' })
-    },
-    setReceiver: (v: string) => {
-      if (v.trim() !== receiver) set({ receiver: v.trim(), date: '' })
+    search: (s: string, r: string) => {
+      if (s !== sender || r !== receiver) set({ sender: s, receiver: r, date: '' })
     },
     isFiltered: group !== 'ALL' || !!sender || !!receiver,
 
