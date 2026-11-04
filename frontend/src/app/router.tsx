@@ -63,11 +63,8 @@ export const router = createBrowserRouter([
           { path: 'orders', element: <OrderListPage /> },
           // 04 통화 내역 (Figma 11/04) — handle 없음(화면이 상단바 · 머리를 그림)
           { path: 'calls', element: <CallListPage /> },
-          {
-            path: 'calls/:callId',
-            element: <CallDetailPage />,
-            handle: { title: '통화 상세' } satisfies RouteHandle,
-          },
+          // 06 통화 상세 (11/05 새 디자인) — handle 없음(화면이 경로 '통화 > 통화 상세'를 그림)
+          { path: 'calls/:callId', element: <CallDetailPage /> },
           {
             path: 'companies',
             element: <CompanyListPage />,

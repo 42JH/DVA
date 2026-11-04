@@ -8,15 +8,7 @@ import { fetchAll } from '@/shared/api/paging'
 import type { CallActionDto, CallDetailDto, CallProcessingResultDto, UtteranceDto } from './callDto'
 
 export { toCallDetail } from './callDto'
-export type {
-  AiAction,
-  CallDetail,
-  Complaint,
-  Outcome,
-  Recording,
-  ResultBlock,
-  Utterance,
-} from './callDto'
+export type { AiAction, CallDetail, Complaint, Recording, ResultBlock, Utterance } from './callDto'
 
 /** 열어 둔 통화 상세를 다시 받는 주기 (명세 권장 5초) */
 export const CALL_REFRESH_MS = 5_000

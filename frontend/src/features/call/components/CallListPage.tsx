@@ -6,6 +6,7 @@ import { DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
 import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
 import { CallSearch } from './CallSearch'
+import { KindChips } from './KindChips'
 
 // 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터 · 검색칸) · 줄 목록
 // 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동
@@ -13,12 +14,6 @@ import { CallSearch } from './CallSearch'
 // 줄 = 시각 | 상담 유형 칩(접수 · 조회 · 취소 · FAQ, 두 번 이상이면 숫자) · 불만(빨간 알약, 올리면 근거) | 이름(신규면 new) | 전화번호 | 통화 시간
 // 무한 스크롤 (11/04 사용자 · shared/ui/DayScroll): 고른 날짜(기본 오늘)부터 — 아래로 내리면 지난 날, 위로 올리면 다음 날을 이어 받고, 머리 날짜는 맨 위 줄의 날짜를 따라감
 // 목록만 스크롤(머리는 고정) · 줄을 누르면 06. 06에서 돌아오면 보던 자리 그대로 (받아 둔 목록 + 스크롤 위치)
-const KIND_BG = {
-  accept: 'bg-kind-accept',
-  lookup: 'bg-kind-lookup',
-  cancel: 'bg-kind-cancel',
-  faq: 'bg-kind-faq',
-} as const
 
 export function CallListPage() {
   const vm = useCallList()
@@ -66,7 +61,7 @@ export function CallListPage() {
         feed={vm.feed}
         at={vm.at}
         onTop={onTop}
-        row={(r) => <CallLine key={r.callSessionSeq} r={r} q={vm.q} />}
+        row={(r) => <CallLine key={r.callSessionSeq} r={r} q={vm.q} from={`/calls${key}`} />}
         end={(hasRows) =>
           hasRows
             ? '이전 통화가 없습니다.'
@@ -81,10 +76,11 @@ export function CallListPage() {
 }
 
 /** 한 줄 (Figma 행 높이 70 · 글자 20) — 줄 전체가 06 링크 */
-function CallLine({ r, q }: { r: CallListRow; q: string }) {
+function CallLine({ r, q, from }: { r: CallListRow; q: string; from: string }) {
   return (
     <Link
       to={`/calls/${r.callSessionSeq}`}
+      state={{ from }} // 06 경로 '통화'가 이 목록(날짜 · 검색 · 필터)으로 돌아오게
       data-row={r.callSessionSeq}
       data-day={r.day}
       data-persona={r.persona ?? undefined}
@@ -94,14 +90,7 @@ function CallLine({ r, q }: { r: CallListRow; q: string }) {
       <span className="text-sub">{r.time}</span>
       <span className="flex min-w-0 items-center gap-2 pr-4">
         {r.counts ? (
-          r.kinds.map((k) => (
-            <span
-              key={k.kind}
-              className={`grid h-7 min-w-19 shrink-0 place-items-center px-3 ${KIND_BG[k.kind]}`}
-            >
-              {k.label}
-            </span>
-          ))
+          <KindChips kinds={r.kinds} />
         ) : (
           <span className="text-body text-muted">분석 전</span>
         )}

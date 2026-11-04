@@ -4,15 +4,7 @@ import { useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock, fmtDetailTime, fmtDuration, fmtPhone } from '@/shared/lib/format'
 import { reasonTag } from '@/shared/lib/unansweredReason'
-import type { TagKind } from '@/shared/ui'
-import {
-  ACTION_LABEL,
-  COMPLAINT_LABEL,
-  NO_ANALYSIS,
-  OUTCOME_LABEL,
-  OUTCOME_TAG,
-  RESULT_LABEL,
-} from '@/features/call/labels'
+import { ACTION_LABEL, COMPLAINT_LABEL, RESULT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
   type Complaint,
@@ -21,6 +13,7 @@ import {
   type Utterance,
 } from '@/features/call/api/callApi'
 import { utteranceAt, utteranceForAction } from '@/features/call/api/callDto'
+import { kindChips } from './useCallList'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -211,21 +204,19 @@ export function useCallDetail(callId: number) {
         })
     : []
 
-  const outcomeView = (
-    o: typeof call extends infer T ? (T extends { outcome: infer O } ? O : never) : never,
-  ) => (o ? { label: OUTCOME_LABEL[o], tag: OUTCOME_TAG[o] as TagKind } : NO_ANALYSIS)
-
   return {
     isLoading: detail.isPending,
     error,
     notice,
 
-    // 요약 한 줄: 고객 + 통화 결과 · 통화 시작 시각 · 통화 시간 · 발신번호 / 아래 불만 줄 (모르는 값은 '—')
+    // 머리 (11/04 새 디자인 — 04 줄과 같은 말): 고객 이름(신규면 new) + 상담 유형 칩 / 발신번호 · 시작 시각 · 통화 시간 · 상담가 / 불만 줄
+    // 옛 '통화 결과' 태그는 뺌 — 서버가 11/04 result를 빼서 실서버에선 늘 '분석 전'으로 보였음
     summary: call
       ? {
           customer: call.customerName ?? '—',
-          outcome: outcomeView(call.outcome).label,
-          outcomeTag: outcomeView(call.outcome).tag,
+          isNew: call.isNew === true,
+          kinds: kindChips(call.counts),
+          analyzed: call.counts !== null, // 분석 전이면 칩 대신 '분석 전'
           startedAt: call.startedAt ? fmtDetailTime(call.startedAt, { seconds: true }) : '—',
           duration: call.durationSec === null ? '—' : fmtDuration(call.durationSec),
           caller: call.callerNumber ? fmtPhone(call.callerNumber) : '—',

@@ -1,30 +1,5 @@
 // 04 · 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 서버 코드는 callDto.ts의 것 그대로
-import type { TagKind } from '@/shared/ui'
-import type {
-  CallActionKind,
-  CallKind,
-  ComplaintType,
-  Outcome,
-  ProcessingKind,
-} from './api/callDto'
-
-/** 통화 결과 (04 · 02와 같은 5개) + 태그 색 (문의 = 흰 바탕 회색 선) */
-export const OUTCOME_LABEL: Record<Outcome, string> = {
-  HANDOFF: '상담원 이관',
-  SUCCESS: '접수 성공',
-  FAILED: '접수 실패',
-  CANCELLED: '주문 취소',
-  INQUIRY: '문의',
-}
-export const OUTCOME_TAG: Record<Outcome, TagKind> = {
-  HANDOFF: 'gray',
-  SUCCESS: 'blue',
-  FAILED: 'red',
-  CANCELLED: 'gray',
-  INQUIRY: 'outline',
-}
-/** 분석이 아직 안 온 통화(analysis = null) — 성공 · 불만 없음으로 보지 않음 (명세 §5.1) */
-export const NO_ANALYSIS = { label: '분석 전', tag: 'outline' as TagKind }
+import type { CallActionKind, CallKind, ComplaintType, ProcessingKind } from './api/callDto'
 
 /** 불만 유형 (02 대시보드 · 04 불만 열 · 06 불만 줄 같은 말) */
 export const COMPLAINT_LABEL: Record<ComplaintType, string> = {

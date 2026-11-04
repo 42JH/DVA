@@ -31,7 +31,7 @@ export interface CallComplaintDto {
   utteranceOrders: number[]
 }
 export interface CallAnalysisDto {
-  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(02 대시보드 · 06 요약)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
+  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(02 대시보드 · 주문 상세 관련 통화)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
   aiPersonaVersionSeq: number | null
   personaName: string | null
   personaVersion: number | null
@@ -114,9 +114,6 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 }
 
 // ---------- 화면 모양 ----------
-/** 통화 결과 = 04와 같은 5개 (화면 코드는 그대로 두고 서버 값은 아래 OUTCOME_OF로) */
-export type Outcome = 'HANDOFF' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'INQUIRY'
-
 /** 04 통화 목록 줄의 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) */
 export type CallKind = 'accept' | 'lookup' | 'cancel' | 'faq'
 export interface CallRow {
@@ -204,10 +201,11 @@ export interface Recording {
 export interface CallDetail {
   callSessionSeq: number
   customerName: string | null
-  outcome: Outcome | null
   startedAt: string | null
   durationSec: number | null
   callerNumber: string
+  isNew: boolean | null // 신규 고객 (null = 모름) — 04 줄과 같은 값
+  counts: CallRow['counts'] // 상담 유형 횟수 (null = 분석 전) — 04 줄과 같은 값
   persona: { name: string; version: number } | null
   handoff: { status: HandoffDto['status']; reason: string } | null
   complaints: Complaint[]
@@ -218,13 +216,6 @@ export interface CallDetail {
   recording: Recording | null // 첫 녹취 (url 있는 것 우선). 빈 배열(아직 연결 안 됨)이면 null
 }
 
-export const OUTCOME_OF: Record<ResultDto, Outcome> = {
-  REGISTERED: 'SUCCESS',
-  REGISTRATION_FAILED: 'FAILED',
-  HANDOFF: 'HANDOFF',
-  CANCELLED: 'CANCELLED',
-  INQUIRY: 'INQUIRY',
-}
 export const digits = (phone: string | null) => (phone ?? '').replace(/\D/g, '')
 
 /** 통화 시간 = PBX 종료 − 시작 (초). 한쪽이라도 없으면 null */
@@ -232,6 +223,15 @@ export function durationSec(startedAt: string | null, endedAt: string | null): n
   if (!startedAt || !endedAt) return null
   return Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000))
 }
+
+/** 통화 요약 → 상담 유형 횟수 (04 줄 · 06 머리). 분석 전이면 null, 못 모은 칸은 null(0으로 보지 않음) */
+const countsOf = (a: CallAnalysisDto | null): CallRow['counts'] =>
+  a && {
+    accept: a.registeredParcelCount ?? null,
+    lookup: a.orderLookupCount ?? null,
+    cancel: a.cancelledParcelCount ?? null,
+    faq: a.faqAnswerCount ?? null,
+  }
 
 export function toCallRow(d: CallListItemDto): CallRow {
   const a = d.analysis
@@ -241,12 +241,7 @@ export function toCallRow(d: CallListItemDto): CallRow {
     customerName: d.customerName,
     callerNumber: digits(d.callerPhoneNumber),
     isNew: a?.isNewCustomer ?? null,
-    counts: a && {
-      accept: a.registeredParcelCount ?? null,
-      lookup: a.orderLookupCount ?? null,
-      cancel: a.cancelledParcelCount ?? null,
-      faq: a.faqAnswerCount ?? null,
-    },
+    counts: countsOf(a),
     complaints: (a?.complaints ?? []).map((c) => ({ type: c.type, reason: c.evidenceText })),
     persona: a?.personaName ?? null,
     durationSec: durationSec(d.startedAt, d.endedAt),
@@ -284,10 +279,11 @@ export function toCallDetail(
   return {
     callSessionSeq: d.call.callSessionSeq,
     customerName: d.call.customerName,
-    outcome: a ? OUTCOME_OF[a.result] : null,
     startedAt: d.call.startedAt,
     durationSec: durationSec(d.call.startedAt, d.call.endedAt),
     callerNumber: digits(d.call.callerPhoneNumber),
+    isNew: a?.isNewCustomer ?? null,
+    counts: countsOf(a),
     persona:
       a?.personaName && a.personaVersion !== null
         ? { name: a.personaName, version: a.personaVersion }
