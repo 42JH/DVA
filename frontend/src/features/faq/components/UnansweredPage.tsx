@@ -1,5 +1,13 @@
 import type { KeyboardEvent } from 'react'
-import { Button, ConfirmDialog, Highlight, Pagination, TopBar, TopSearch } from '@/shared/ui'
+import {
+  Button,
+  ConfirmDialog,
+  Highlight,
+  Pagination,
+  PreviewList,
+  TopBar,
+  TopSearch,
+} from '@/shared/ui'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 
 // 09 AI 미답변 — 옛 구성 그대로(적용된 필터 · 'AI 미답변 질문 n개' · 표 · 쪽 번호)에 새 디자인만 입힘 (11/05 사용자: 구성은 두고 디자인만)
@@ -25,6 +33,20 @@ export function UnansweredPage() {
             hint="질문 · 고객 이름 · 전화번호로 찾아요."
             recentKey="unanswered"
             onApply={([q]) => vm.setQ(q)}
+            preview={([q], close) => (
+              <PreviewList
+                title="맞는 질문 (오래된 순)"
+                loading={vm.isLoading}
+                empty="해당하는 질문이 없습니다."
+                close={close}
+                items={vm.preview(q).map((u) => ({
+                  key: u.unansweredQuestionSeq,
+                  main: <Highlight text={`“${u.question}”`} q={q} />,
+                  sub: `${u.customerName} · ${u.time}`,
+                  onPick: () => vm.openCall(u),
+                }))}
+              />
+            )}
           />
         }
       />

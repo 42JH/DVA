@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
-import { DayPick, DayScroll, Highlight, TopBar, TopSearch } from '@/shared/ui'
-import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
+import { DayPick, DayScroll, Highlight, PreviewList, TopBar, TopSearch } from '@/shared/ui'
+import { useCallList, useCallPreview, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
 import { KindChips } from './KindChips'
 
@@ -45,6 +45,7 @@ export function CallListPage() {
             fields={[{ value: vm.q }]}
             hint="고객 이름이나 전화번호로 찾아요."
             onApply={([q]) => vm.setQ(q)}
+            preview={([q], close) => <CallPreview q={q} from={`/calls${key}`} close={close} />}
           />
         }
       />
@@ -79,6 +80,31 @@ export function CallListPage() {
         className="pt-1.5 pr-[72px] pl-[58px]"
       />
     </div>
+  )
+}
+
+/** 검색 창 미리 보기 — 이름 · 번호 · 시각. 누르면 그 통화의 06 (돌아오면 이 목록) */
+function CallPreview({ q, from, close }: { q: string; from: string; close: () => void }) {
+  const { rows, loading } = useCallPreview(q)
+  const navigate = useNavigate()
+  return (
+    <PreviewList
+      title="최근 통화"
+      loading={loading}
+      empty="맞는 통화가 없습니다."
+      close={close}
+      items={rows.map((r) => ({
+        key: r.callSessionSeq,
+        main: (
+          <>
+            <Highlight text={r.name} q={q} />
+            <span className="ml-3 text-sub">{r.phone}</span>
+          </>
+        ),
+        sub: r.time,
+        onPick: () => navigate(`/calls/${r.callSessionSeq}`, { state: { from } }),
+      }))}
+    />
   )
 }
 

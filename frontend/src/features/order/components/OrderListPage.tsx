@@ -8,6 +8,7 @@ import {
   DayPick,
   DayScroll,
   Highlight,
+  PreviewList,
   TopBar,
   TopSearch,
 } from '@/shared/ui'
@@ -15,7 +16,11 @@ import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
 import type { StatusGroup } from '@/features/order/api/orderApi'
-import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
+import {
+  useOrderList,
+  useOrderPreview,
+  type OrderListRow,
+} from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 
@@ -46,6 +51,9 @@ export function OrderListPage() {
             ]}
             hint="보내는 분 · 받는 분의 이름이나 주소로 찾아요. 한 칸만 써도 돼요."
             onApply={([s, r]) => vm.search(s, r)}
+            preview={([s, r], close) => (
+              <OrderPreview sender={s} receiver={r} onPick={vm.openOrder} close={close} />
+            )}
           />
         }
       />
@@ -175,6 +183,41 @@ function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
         </span>
       ))}
     </span>
+  )
+}
+
+/** 검색 창 미리 보기 — '보내는 분 → 받는 분' · 시각 · 주문번호. 누르면 그 주문 상세 창 */
+function OrderPreview({
+  sender,
+  receiver,
+  onPick,
+  close,
+}: {
+  sender: string
+  receiver: string
+  onPick: (r: OrderListRow) => void
+  close: () => void
+}) {
+  const { rows, loading } = useOrderPreview(sender, receiver)
+  return (
+    <PreviewList
+      title="최근 주문"
+      loading={loading}
+      empty="맞는 주문이 없습니다."
+      close={close}
+      items={rows.map((r) => ({
+        key: r.key,
+        main: (
+          <>
+            <Highlight text={r.sender.name || '—'} q={sender} />
+            <span className="mx-2 text-muted">→</span>
+            <Highlight text={r.receiver.name || '—'} q={receiver} />
+          </>
+        ),
+        sub: `${r.time} · ${r.orderNo}`,
+        onPick: () => onPick(r),
+      }))}
+    />
   )
 }
 

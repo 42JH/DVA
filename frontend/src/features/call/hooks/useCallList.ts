@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtDuration, fmtPhone, fmtRowTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -8,6 +8,7 @@ import { matchCall, type CallFilter, type CallKind } from '@/features/call/api/c
 import {
   callPersonaQueries,
   fetchCallDay,
+  fetchRecentCalls,
   latestCallOf,
   prevCallDay,
   nextCallDay,
@@ -80,6 +81,21 @@ const toFilter = (f: CallFilterForm): CallFilter => ({
   minSec: f.min * 60,
   maxSec: f.max >= DUR_MAX ? null : f.max * 60,
 })
+
+/** 상단바 검색 창 미리 보기 (11/05) — 기간 없이 맞는 최근 통화 6건. 누르면 그 통화의 06 */
+export function useCallPreview(q: string) {
+  const today = todayYmd()
+  const res = useQuery({
+    queryKey: ['calls', 'preview', q],
+    queryFn: ({ signal }) => fetchRecentCalls(q, 6, signal),
+    enabled: q !== '',
+    placeholderData: keepPreviousData,
+  })
+  const rows = (res.data ?? []).map((r) =>
+    toView(r, r.startedAt ? ymd(new Date(r.startedAt)) : today, today),
+  )
+  return { rows, loading: res.isFetching }
+}
 
 /** 04 통화 내역 훅 (Figma '통화' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로
  *  거르기: 검색(이름 · 전화번호, 서버) · 상담가 토글 · 필터 창(신규 · 상담 유형 · 통화 시간, 화면). 줄을 누르면 그 통화의 06 */

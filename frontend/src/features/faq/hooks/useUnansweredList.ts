@@ -43,15 +43,18 @@ export function useUnansweredList() {
     (list.data?.length ?? 0) >= FETCH_ALL_MAX && (total.data ?? 0) > (list.data?.length ?? 0)
 
   const q = params.q
-  const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
   const call = /^\d+$/.test(params.call) ? Number(params.call) : null // 숫자가 아니면(?call=abc) 통화 필터 없음
   const ofCall = (list.data ?? []).filter((u) => call === null || u.callSessionSeq === call)
-  const hit = ofCall.filter(
-    (u) =>
-      matchKo(u.question, q) ||
-      matchKo(u.customerName, q) ||
-      (digits !== '' && u.callerNumber.includes(digits)),
-  ) // 순서 = 서버가 준 오래된 통화부터 (시각 모르는 질문은 뒤)
+  const find = (q: string) => {
+    const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
+    return ofCall.filter(
+      (u) =>
+        matchKo(u.question, q) ||
+        matchKo(u.customerName, q) ||
+        (digits !== '' && u.callerNumber.includes(digits)),
+    )
+  }
+  const hit = find(q) // 순서 = 서버가 준 오래된 통화부터 (시각 모르는 질문은 뒤)
   // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 적용된 필터 칩: '강도윤 · 11-05 13:13 통화의 질문만' (질문이 다 처리돼 없으면 '이 통화의 질문만')
   const first = ofCall[0]
   const callChip =
@@ -95,6 +98,11 @@ export function useUnansweredList() {
     goPage: (p: number) => set({ page: p }),
 
     openCall: (u: UnansweredQuestion) => navigate(`/calls/${u.callSessionSeq}`),
+    // 상단바 검색 창 미리 보기 (11/05) — 목록과 같은 규칙, 앞 6개 (오래된 것부터)
+    preview: (q: string) =>
+      find(q)
+        .slice(0, 6)
+        .map((u) => ({ ...u, time: u.startedAt ? fmtListTime(u.startedAt).join(' ') : '—' })),
 
     modal,
     // FAQ 추가 = FAQ 작성 화면(11/04 새 디자인)으로 — 질문 칸에 고객이 한 말을 채우고, 저장하면 이 질문이 처리됨(API-27) · 여기로 돌아옴
