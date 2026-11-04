@@ -209,6 +209,8 @@ BE가 삭제·만료 조건을 적용하므로 프론트는 DB에 직접 쿼리�
 
 미답변 목록은 `GET /api/unanswered-questions`, FAQ 전환은 `POST /api/unanswered-questions/{id}/faqs`에 category·question·answer. 성공 204 후 Location의 FAQ와 미답변 목록을 재조회한다. 변경은 FAQ·감사·AI 알림과 같은 트랜잭션이다. [관리 상세](../../docs/api/unanswered-questions-management.md)
 
+각 미답변의 `reason`은 `KB_NO_ANSWER`(근거 부족), `KB_UNAVAILABLE`(검색 장애), null(미분류)다. reason 생략은 전체 사유, 두 코드로 필터, `reason=UNCLASSIFIED`는 null만 조회한다. 기본 `status=OPEN`은 유지하고 전체 발생 집계는 `status=ALL&reason=...`의 `total_count`를 사용한다. ALL은 OPEN·REGISTERED만 포함하며 DELETED·삭제/보관 만료 통화는 제외한다. 기간은 기존 통화 시작 기준이고 같은 질문도 다른 eventId면 별도 건수다. 통화 처리 결과의 `unansweredReason`도 표시할 수 있으며 삭제한 미답변은 null이다. 기존 앱의 사유 없는 데이터도 정상으로 표시한다. [사유 계약](unanswered-question-reasons.md)
+
 ### 페르소나
 
 | 동작           | API·화면 처리                                                                                                                                     |

@@ -42,7 +42,7 @@ async function noContent(response) {
   assert.ok(response.headers.get('x-request-id'));
   return response.headers.get('location');
 }
-async function question() {
+async function question(reason = undefined) {
   const providerCallId = 'rtc_manage_' + randomUUID();
   const callId = (
     await f.pool.query(
@@ -57,6 +57,7 @@ async function question() {
     questionText: 'private-unanswered-original ' + f.marker(),
     occurredAt: '2026-10-31T10:00:20+09:00',
     offsetSeconds: 20,
+    reason,
   };
   const response = await collect(input);
   assert.equal(response.status, 201, await response.clone().text());
@@ -497,4 +498,21 @@ test('converting an unanswered question to an existing FAQ question is rejected 
   assert.deepEqual(await row(q.id), original);
   assert.deepEqual(await f.counts(), before);
   assert.equal((await successes(q.id, 'UNANSWERED_QUESTION_REGISTERED')).length, 0);
+});
+
+test('both reasons remain independent of FAQ conversion, deletion and original collection replay', async () => {
+  for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE']) {
+    const converted = await question(reason);
+    await noContent(await convert(converted.id, body()));
+    assert.equal((await row(converted.id)).status, 'REGISTERED');
+    assert.equal((await row(converted.id)).reason, reason);
+    assert.equal((await collect(converted.input)).status, 200);
+    const deleted = await question(reason);
+    await noContent(await remove(deleted.id));
+    assert.equal((await row(deleted.id)).status, 'DELETED');
+    assert.equal((await row(deleted.id)).reason, reason);
+    assert.equal((await collect(deleted.input)).status, 200);
+    assert.equal((await row(deleted.id)).status, 'DELETED');
+    assert.equal((await row(deleted.id)).reason, reason);
+  }
 });

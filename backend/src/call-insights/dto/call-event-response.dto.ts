@@ -1,4 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  UNANSWERED_QUESTION_REASONS,
+  UnansweredQuestionReason,
+} from '../../unanswered-questions/unanswered-question.types';
 import { AI_ACTIONS, BUSINESS_ACTIONS } from '../call-events.types';
 
 class CallEventRecordDto {
@@ -48,6 +52,13 @@ export class CallProcessingResultDto extends CallEventRecordDto {
 
   @ApiProperty({ type: Number, nullable: true, description: '연결 미답변 질문 번호. 없으면 null.' })
   unansweredQuestionSeq!: number | null;
+
+  @ApiProperty({
+    enum: UNANSWERED_QUESTION_REASONS,
+    nullable: true,
+    description: '연결된 미답변의 발생 사유. 미분류·삭제한 질문·다른 처리 결과는 null입니다.',
+  })
+  unansweredReason!: UnansweredQuestionReason | null;
 
   @ApiProperty({
     type: String,

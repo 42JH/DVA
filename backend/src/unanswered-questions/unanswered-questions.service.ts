@@ -115,6 +115,8 @@ export class UnansweredQuestionsService {
       questionText: input.questionText,
       occurredAt: occurredAt.toISOString(),
       offsetSeconds: input.offsetSeconds,
+      // 미분류는 JSON 해시에서 제외해 기존 여섯 필드의 재전송을 유지한다.
+      reason: input.reason ?? undefined,
     };
     const hash = createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
     return this.database.transaction(async (client) => {

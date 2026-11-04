@@ -12,6 +12,12 @@ import {
   Min,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import {
+  UNANSWERED_QUESTION_REASONS,
+  UnansweredQuestionReason,
+} from '../unanswered-question.types';
+
+const reasonFilters = [...UNANSWERED_QUESTION_REASONS, 'UNCLASSIFIED'] as const;
 
 const integer = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value;
@@ -57,12 +63,20 @@ export class UnansweredQuestionQueryDto extends PaginationQueryDto {
   aiPersonaVersionSeq?: number;
 
   @ApiPropertyOptional({
-    enum: ['OPEN', 'REGISTERED'],
+    enum: ['OPEN', 'REGISTERED', 'ALL'],
     default: 'OPEN',
-    description: '미처리 또는 FAQ 전환 상태. 삭제한 질문은 조회하지 않습니다.',
+    description: '기본 미처리. ALL은 OPEN·REGISTERED를 함께 조회하며 삭제한 질문은 제외합니다.',
   })
-  @IsIn(['OPEN', 'REGISTERED'])
-  status: 'OPEN' | 'REGISTERED' = 'OPEN';
+  @IsIn(['OPEN', 'REGISTERED', 'ALL'])
+  status: 'OPEN' | 'REGISTERED' | 'ALL' = 'OPEN';
+
+  @ApiPropertyOptional({
+    enum: reasonFilters,
+    description: '생략은 전체 사유. UNCLASSIFIED는 사유가 null인 과거·미분류 질문만 조회합니다.',
+  })
+  @IsOptional()
+  @IsIn(reasonFilters)
+  reason?: UnansweredQuestionReason | 'UNCLASSIFIED';
 
   @ApiPropertyOptional({
     maxLength: 200,

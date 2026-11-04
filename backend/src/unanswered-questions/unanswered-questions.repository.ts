@@ -61,13 +61,13 @@ export class UnansweredQuestionsRepository {
          COALESCE(c.started_at,a.ai_started_at) AS "callStartedAt",u.occurred_at AS "occurredAt",
          u.offset_seconds::double precision AS "offsetSeconds",customer.customer_seq AS "customerSeq",
          customer.name AS "customerName",c.caller_phone_number AS "callerPhoneNumber",u.question_text AS "questionText",
-         u.status,a.ai_persona_version_seq AS "aiPersonaVersionSeq",f.faq_entry_seq AS "faqEntrySeq"
+         u.status,u.reason,a.ai_persona_version_seq AS "aiPersonaVersionSeq",f.faq_entry_seq AS "faqEntrySeq"
          FROM unanswered_questions u JOIN call_sessions c ON c.call_session_seq=u.call_session_seq
          LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
          LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
          LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
          LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq AND f.deleted_at IS NULL
-         WHERE u.status=$1 AND c.deleted_at IS NULL
+         WHERE u.status IN ('OPEN','REGISTERED') AND ($1::text='ALL' OR u.status=$1) AND c.deleted_at IS NULL
            AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
            AND ($3::integer IS NULL OR u.call_session_seq=$3)
@@ -76,7 +76,8 @@ export class UnansweredQuestionsRepository {
              OR strpos(lower(normalize(customer.name,NFC)),lower(normalize($5,NFC)))>0
              OR strpos(c.caller_phone_number,$5)>0)
            AND ($6::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)>=$6)
-           AND ($7::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)<$7)`,
+           AND ($7::timestamptz IS NULL OR COALESCE(c.started_at,a.ai_started_at)<$7)
+           AND ($8::text IS NULL OR u.reason=$8 OR ($8='UNCLASSIFIED' AND u.reason IS NULL))`,
       [
         query.status,
         query.unansweredQuestionSeq ?? null,
@@ -85,6 +86,7 @@ export class UnansweredQuestionsRepository {
         query.q || null,
         query.from ?? null,
         query.to ?? null,
+        query.reason ?? null,
       ],
       query,
       '"callStartedAt" ASC NULLS LAST,"unansweredQuestionSeq" ASC',
@@ -107,14 +109,15 @@ export class UnansweredQuestionsRepository {
   ): Promise<number | undefined> {
     return (
       await client.query<{ id: number }>(
-        `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,payload_hash)
-         VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(event_id) DO NOTHING RETURNING unanswered_question_seq AS id`,
+        `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,offset_seconds,reason,payload_hash)
+         VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(event_id) DO NOTHING RETURNING unanswered_question_seq AS id`,
         [
           input.eventId,
           input.callSessionSeq,
           input.questionText,
           input.occurredAt,
           input.offsetSeconds,
+          input.reason ?? null,
           hash,
         ],
       )

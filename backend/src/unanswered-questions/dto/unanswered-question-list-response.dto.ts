@@ -1,4 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  UNANSWERED_QUESTION_REASONS,
+  UnansweredQuestionReason,
+} from '../unanswered-question.types';
 
 export class UnansweredQuestionDto {
   @ApiProperty({ description: '질문 한 번 발생의 번호. FAQ 전환·삭제에 사용합니다.' })
@@ -46,6 +50,13 @@ export class UnansweredQuestionDto {
 
   @ApiProperty({ maxLength: 1000, description: '수집한 질문 원문. HTML로 해석하지 않는 평문.' })
   questionText!: string;
+
+  @ApiProperty({
+    enum: UNANSWERED_QUESTION_REASONS,
+    nullable: true,
+    description: 'AI가 보고한 미답변 발생 사유. 과거·미분류는 null이며 업무 상태와 별개입니다.',
+  })
+  reason!: UnansweredQuestionReason | null;
 
   @ApiProperty({
     enum: ['OPEN', 'REGISTERED'],

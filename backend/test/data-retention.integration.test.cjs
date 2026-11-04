@@ -44,7 +44,7 @@ test('5-year call expiry erases every child in FK order and also removes pre-INS
   ).rows[0].id;
   const question = (
     await f.pool.query(
-      "INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,payload_hash) VALUES(gen_random_uuid(),$1,'만료 질문',clock_timestamp(),repeat('a',64)) RETURNING unanswered_question_seq AS id",
+      "INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,reason,payload_hash) VALUES(gen_random_uuid(),$1,'만료 질문',clock_timestamp(),'KB_UNAVAILABLE',repeat('a',64)) RETURNING unanswered_question_seq AS id",
       [c.id],
     )
   ).rows[0].id;

@@ -232,6 +232,8 @@ Content-Type: application/json
 
 미답변은 `POST /api/ai/unanswered-questions`에 `eventId`, `callSessionSeq`, `providerCallId`, `questionText`, `occurredAt`, `offsetSeconds`를 보낸다. 같은 이벤트 UUID로 재전송한다. 생성 응답의 번호를 관련 업무 결과 이벤트에서 참조하는 계약은 [미답변 수집](../../docs/api/unanswered-questions.md)을 따른다.
 
+통화 종료 후 RAG 검색 결과와 Live의 실제 답변을 대조해 미답변 사유를 확정하고 선택 `reason`을 추가한다. `KB_NO_ANSWER`는 검색 성공 후 근거 부족, `KB_UNAVAILABLE`은 검색 미연결·장애다. 생략/null과 과거 행은 미분류다. 기존 질문별 호출·201/200 응답·QUESTION_UNANSWERED의 질문 번호 참조는 유지하며 통합 전송 API는 추가하지 않는다. 같은 eventId의 사유·본문은 재전송에도 고정한다. DB 049 적용 → 새 BE 배포 후 전송을 시작하며 구버전 BE에 먼저 보내면 400이다. [사유·호환·전환 상세](unanswered-question-reasons.md)
+
 삭제·만료된 주문을 참조하는 새 이벤트는 404다. 유효·만료 참조가 한 요청에 섞여도 전체가 롤백되므로 204가 아니면 일부 저장됐다고 가정하지 않는다. AI 이벤트·STT는 7일 로그 정리 대상이 아니다.
 
 ## 6. FAQ 원본 조회·변경 알림

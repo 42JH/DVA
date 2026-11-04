@@ -7,7 +7,7 @@
 | 인증 | 기존 dva_session 관리자 쿠키. 프론트는 credentials: include |
 | 권한 | ACTIVE OPERATOR / SUPERVISOR / SYSTEM_ADMIN |
 | 사용처 | 홈 미리보기, AI 미답변 관리 목록, 통화 상세에서 선택한 질문 조회 |
-| 선행 | migration 026까지 적용, [UNQ-01](unanswered-questions.md) 질문 수집 |
+| 선행 | migration 049까지 적용, [UNQ-01](unanswered-questions.md) 질문 수집 |
 | 응답 | HTTP 200, 기존 목록 형식 { data, hasNext, total_count } |
 
 DB에 수집된 질문을 조회한다. AI 호출·추가 토큰 설정은 없으며 AI_INSIGHTS_TOKEN 미설정도 관리자 조회를 막지 않는다.
@@ -22,7 +22,8 @@ AI 토큰만으로 조회할 수 없다. 조회는 질문·통화·분석·고�
 | unansweredQuestionSeq | 양의 int32 / 생략 | 통화 상세에서 선택한 질문 한 건으로 좁힘 |
 | callSessionSeq | 양의 int32 / 생략 | 한 통화에서 발생한 질문만 조회 |
 | aiPersonaVersionSeq | 양의 int32 / 생략 | 통화 분석에 기록된 실제 사용 버전. 분석 미수신은 제외 |
-| status | OPEN / REGISTERED, 기본 OPEN | 현재 업무 처리 상태. DELETED·ALL은 허용하지 않음 |
+| status | OPEN / REGISTERED / ALL, 기본 OPEN | ALL은 삭제되지 않은 OPEN·REGISTERED 발생을 함께 조회. 응답 status에 ALL을 저장하지 않음 |
+| reason | KB_NO_ANSWER / KB_UNAVAILABLE / UNCLASSIFIED, 생략은 전체 | 미답변 발생 사유. UNCLASSIFIED는 사유가 null인 과거·미분류만 조회 |
 | q | 최대 200자 / 생략 | 질문 원문·현재 연결 고객 이름·통화 발신번호 중 하나의 부분 일치 |
 | from / to | 시간대 포함 ISO 8601 / 생략 | 둘 다 지정하거나 둘 다 생략. 통화 시작 시각 from 포함·to 미포함 |
 | limit | 정수 1~100 / 20 | 반환할 최대 질문 개수 |
@@ -40,10 +41,13 @@ GET /api/unanswered-questions?limit=6&offset=0
 GET /api/unanswered-questions?callSessionSeq=120
 GET /api/unanswered-questions?unansweredQuestionSeq=51
 GET /api/unanswered-questions?q=주말&status=OPEN&limit=20&offset=0
+GET /api/unanswered-questions?status=ALL&reason=KB_NO_ANSWER&limit=1
+GET /api/unanswered-questions?status=ALL&reason=KB_UNAVAILABLE&limit=1
+GET /api/unanswered-questions?status=ALL&reason=UNCLASSIFIED&limit=1
 GET /api/unanswered-questions?from=2026-10-30T15:00:00Z&to=2026-10-31T15:00:00Z
 ```
 
-마지막 예시는 한국 시간 2026-10-31 하루다. from < to이며 실제 변환 가능한 서기 1년 이후 시각이어야 한다.
+from/to 예시는 한국 시간 2026-10-31 하루다. from < to이며 실제 변환 가능한 서기 1년 이후 시각이어야 한다.
 시각 형식·기간 한쪽 누락·역전·같은 경계·변환 불가능한 시각은 모두 400이다.
 
 ## Response
@@ -61,6 +65,7 @@ GET /api/unanswered-questions?from=2026-10-30T15:00:00Z&to=2026-10-31T15:00:00Z
       "customerName": "김철수",
       "callerPhoneNumber": "01012345678",
       "questionText": "주말에도 수거하나요?",
+      "reason": "KB_NO_ANSWER",
       "status": "OPEN",
       "aiPersonaVersionSeq": 7,
       "faqEntrySeq": null
@@ -81,6 +86,7 @@ GET /api/unanswered-questions?from=2026-10-30T15:00:00Z&to=2026-10-31T15:00:00Z
 | customerSeq / customerName | integer / string / null | 연결 고객 번호·현재 이름. 과거 이름 스냅샷이 아님 |
 | callerPhoneNumber | string / null | 통화에 저장된 발신번호. 선행 0 보존 |
 | questionText | string | 수집한 원문. 공백·줄바꿈 보존. HTML로 해석하지 않는 평문 |
+| reason | KB_NO_ANSWER / KB_UNAVAILABLE / null | 근거 부족 / 검색 미연결·장애 / 과거·미분류. 업무 status와 독립적 |
 | status | OPEN / REGISTERED | 미처리 / FAQ 전환 상태. AI 동작 status와 별개 |
 | aiPersonaVersionSeq | integer / null | 실제 사용했다고 ANL-01에 보고한 버전 |
 | faqEntrySeq | integer / null | 전환한 FAQ가 현재 존재하면 번호, 미전환·FAQ 삭제 후 null |
@@ -117,12 +123,14 @@ eventId·providerCallId·본문 해시·전환 해시·관리자 내부 정보�
 8. limit보다 한 건 더 읽어 hasNext를 계산한다. limit는 페이지 크기이며 저장 누적 제한이 아니다.
    offset 페이지는 조회 시점 기준이며 여러 페이지가 하나의 고정 스냅샷인 것은 아니다.
 
-total_count는 같은 검색·상태·통화·페르소나·기간 조건의 전체 질문 수다. limit·offset을 제외하며 마지막 페이지를 넘겨도 전체 건수는 유지한다. 숫자 페이지는 ceil(total_count/limit)으로 계산한다.
+total_count는 같은 검색·상태·사유·통화·페르소나·기간 조건의 전체 질문 수다. limit·offset을 제외하며 마지막 페이지를 넘겨도 전체 건수는 유지한다. 숫자 페이지는 ceil(total_count/limit)으로 계산한다.
+
+기본 OPEN은 미처리 건수다. status=ALL&reason=...의 total_count로 FAQ 전환 건을 포함한 사유별 발생 건수를 조회한다. 같은 통화·문장이라도 다른 eventId면 별도 발생이며 DELETED와 삭제/보관 만료 통화는 제외한다. 기간은 기존 통화 시작 시각 기준이다. 별도 통합 전송·통계 API는 추가하지 않는다.
 
 ## DB·오류·검증
 
 기존 unanswered_questions·call_sessions·call_analyses·orders·customers·faq_entries를 조회한다.
-새 테이블·컬럼·뷰·migration·환경변수·의존성은 없다. 기존 migration은 변경하지 않는다.
+새 migration 049의 nullable reason을 함께 조회한다. 새 테이블·뷰·환경변수·의존성은 없고 기존 migration은 변경하지 않는다.
 담당 2의 통계용 뷰는 이 목록 API와 별도의 남은 작업이다.
 FAQ 전환·질문 삭제는 [UNQ-03·UNQ-04](unanswered-questions-management.md)를 따른다. 조회 fixture 외에 실제 관리 API와 연결한 전환·삭제·재전송도 검증한다.
 

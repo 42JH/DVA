@@ -54,6 +54,7 @@ export class CallEventsRepository {
          e.offset_seconds::double precision AS "offsetSeconds",e.payload->>'action' AS action,
          e.payload->>'summaryText' AS "summaryText",(e.payload->>'orderSeq')::integer AS "orderSeq",
          e.unanswered_question_seq AS "unansweredQuestionSeq",
+         CASE WHEN u.status IN ('OPEN','REGISTERED') THEN u.reason ELSE NULL END AS "unansweredReason",
          CASE WHEN e.payload->>'action'='FAQ_ANSWERED' THEN question.utterance_text
           WHEN u.status IN ('OPEN','REGISTERED') THEN u.question_text ELSE NULL END AS "questionText",
          answer.utterance_text AS "answerText",(e.payload->>'faqEntrySeq')::integer AS "faqEntrySeq",

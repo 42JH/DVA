@@ -93,6 +93,22 @@ test('deployment verification requires migration 048 and nullable boolean callba
     await verify([sql], 'Call callback request schema or migration missing');
 });
 
+test('deployment verification requires 049, a nullable reason without a default and its validated code constraint', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='049-unanswered-question-reason.sql'",
+    'ALTER TABLE unanswered_questions DROP COLUMN reason',
+    "ALTER TABLE unanswered_questions ALTER COLUMN reason SET DEFAULT 'KB_NO_ANSWER'",
+    'ALTER TABLE unanswered_questions DROP CONSTRAINT unanswered_questions_reason_check',
+  ])
+    await verify([sql], 'Unanswered question reason schema or migration missing');
+  await verify(
+    [
+      "ALTER TABLE unanswered_questions DROP CONSTRAINT unanswered_questions_reason_check; ALTER TABLE unanswered_questions ADD CONSTRAINT unanswered_questions_reason_check CHECK (reason IN ('KB_NO_ANSWER','KB_UNAVAILABLE')) NOT VALID",
+    ],
+    'Unvalidated constraints found',
+  );
+});
+
 test('deployment verification requires migration 046 and the persistent retry window', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",

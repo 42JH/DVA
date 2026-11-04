@@ -2,6 +2,8 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 const { request: httpRequest } = require('node:http');
 const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
@@ -160,6 +162,7 @@ test('new questions return 201 with OPEN defaults, original text and one atomic 
   assert.equal(row.occurred_at.toISOString(), '2026-10-31T01:01:20.000Z');
   assert.equal(row.offset_seconds, '80');
   assert.equal(row.status, 'OPEN');
+  assert.equal(row.reason, null);
   assert.ok(row.created_at instanceof Date);
   assert.match(row.payload_hash, /^[a-f0-9]{64}$/);
   for (const name of ['faq_entry_seq', 'faq_conversion_hash', 'registered_at', 'deleted_at'])
@@ -200,7 +203,7 @@ test('equivalent replay returns 200 and preserves creation time, hash, original 
 
 test('concurrent replay across two instances creates one question and one success audit', async () => {
   const c = await createCall();
-  const body = input(c);
+  const body = input(c, { reason: 'KB_NO_ANSWER' });
   const responses = await Promise.all(
     Array.from({ length: 12 }, async (_, index) => {
       const response = await post(body, { base: index % 2 ? secondBase : base });
@@ -211,6 +214,7 @@ test('concurrent replay across two instances creates one question and one succes
   assert.equal(responses.filter((value) => value.status === 201).length, 1);
   assert.equal(new Set(responses.map((value) => value.id)).size, 1);
   assert.equal((await questions(c.id)).length, 1);
+  assert.equal((await questions(c.id))[0].reason, 'KB_NO_ANSWER');
   assert.equal((await audits(responses[0].id)).length, 1);
 });
 
@@ -345,7 +349,7 @@ test('collection has no 50-question cumulative limit and does not merge repeated
 
 test('a collected question connects to processing results; event failure retries without losing the question', async (t) => {
   const c = await createCall();
-  const body = input(c);
+  const body = input(c, { reason: 'KB_UNAVAILABLE' });
   const id = await success(await post(body), 201);
   const events = {
     providerCallId: c.providerCallId,
@@ -398,11 +402,143 @@ test('a collected question connects to processing results; event failure retries
   assert.equal(results.data.length, 1);
   assert.equal(results.data[0].unansweredQuestionSeq, id);
   assert.equal(results.data[0].questionText, body.questionText);
+  assert.equal(results.data[0].unansweredReason, body.reason);
   await pool.query(
     "UPDATE unanswered_questions SET status='DELETED',question_text=NULL,deleted_at=clock_timestamp() WHERE unanswered_question_seq=$1",
     [id],
   );
   assert.equal((await read()).data[0].questionText, null);
+  assert.equal((await read()).data[0].unansweredReason, null);
   assert.equal(await success(await post(body), 200), id);
   assert.equal((await read()).data[0].questionText, null);
+  assert.equal((await questions(c.id))[0].reason, body.reason);
+});
+
+test('classified questions keep their reason on replay and reject a changed or omitted reason', async () => {
+  const c = await createCall(true);
+  for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE']) {
+    const body = input(c, { reason });
+    const id = await success(await post(body), 201);
+    const beforeRows = await questions(c.id);
+    assert.equal(beforeRows.find((row) => row.unanswered_question_seq === id).reason, reason);
+    const beforeAudits = await audits(id);
+    assert.equal(await success(await post(body), 200), id);
+    const { reason: _reason, ...legacy } = body;
+    for (const changed of [
+      legacy,
+      { ...body, reason: null },
+      { ...body, reason: reason === 'KB_NO_ANSWER' ? 'KB_UNAVAILABLE' : 'KB_NO_ANSWER' },
+    ])
+      await error(await post(changed), 409, 'EVENT_PAYLOAD_CONFLICT');
+    assert.deepEqual(await questions(c.id), beforeRows);
+    assert.deepEqual(await audits(id), beforeAudits);
+  }
+  for (const reason of ['UNCLASSIFIED', 'OPEN', 'kb_no_answer', true, ['KB_NO_ANSWER']])
+    await error(await post(input(c, { reason })), 400, 'INVALID_REQUEST');
+  assert.equal((await questions(c.id)).length, 2);
+});
+
+test('omitted and null reasons preserve the original six-field hash and cannot reclassify an occurrence', async () => {
+  const c = await createCall();
+  for (const reason of [undefined, null]) {
+    const body = input(c);
+    const id = await success(await post({ ...body, reason }), 201);
+    const expectedHash = createHash('sha256')
+      .update(JSON.stringify({ ...body, occurredAt: '2026-10-31T01:01:20.000Z' }))
+      .digest('hex');
+    const beforeRows = await questions(c.id);
+    const row = beforeRows.find((value) => value.unanswered_question_seq === id);
+    assert.equal(row.reason, null);
+    assert.equal(row.payload_hash, expectedHash);
+    assert.equal(await success(await post(body), 200), id);
+    assert.equal(await success(await post({ ...body, reason: null }), 200), id);
+    await error(await post({ ...body, reason: 'KB_NO_ANSWER' }), 409, 'EVENT_PAYLOAD_CONFLICT');
+    assert.deepEqual(await questions(c.id), beforeRows);
+    assert.equal((await audits(id)).length, 1);
+  }
+});
+
+test('049 upgrades legacy question rows without changing their hash, state, time or foreign keys', async () => {
+  const c = await createCall();
+  const body = input(c);
+  const id = await success(await post(body), 201);
+  const beforeRows = await questions(c.id);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('ALTER TABLE public.unanswered_questions DROP COLUMN reason');
+    const foreignKeys = await client.query(
+      "SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE contype='f' ORDER BY conname,definition",
+    );
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/049-unanswered-question-reason.sql'), 'utf8'),
+    );
+    assert.deepEqual(
+      (
+        await client.query(
+          'SELECT * FROM unanswered_questions WHERE call_session_seq=$1 ORDER BY unanswered_question_seq',
+          [c.id],
+        )
+      ).rows,
+      beforeRows,
+    );
+    assert.deepEqual(
+      (
+        await client.query(
+          "SELECT conname,pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE contype='f' ORDER BY conname,definition",
+        )
+      ).rows,
+      foreignKeys.rows,
+    );
+    for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE', null])
+      await client.query(
+        'UPDATE unanswered_questions SET reason=$2 WHERE unanswered_question_seq=$1',
+        [id, reason],
+      );
+    for (const reason of ['UNCLASSIFIED', 'OPEN', '']) {
+      await client.query('SAVEPOINT invalid_reason');
+      await assert.rejects(
+        client.query('UPDATE unanswered_questions SET reason=$2 WHERE unanswered_question_seq=$1', [
+          id,
+          reason,
+        ]),
+        { code: '23514' },
+      );
+      await client.query('ROLLBACK TO SAVEPOINT invalid_reason');
+    }
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  assert.equal(await success(await post({ ...body, reason: null }), 200), id);
+  assert.deepEqual(await questions(c.id), beforeRows);
+});
+
+test('OpenAPI documents optional reason input, nullable read values and independent reason/status filters', async () => {
+  const response = await fetch(base + '/api/docs-json');
+  assert.equal(response.status, 200);
+  const document = await response.json();
+  const schemas = document.components.schemas;
+  const reasons = ['KB_NO_ANSWER', 'KB_UNAVAILABLE'];
+  const create = schemas.CreateUnansweredQuestionDto;
+  assert.deepEqual(create.properties.reason.enum, reasons);
+  assert.equal(create.properties.reason.nullable, true);
+  assert.equal(create.required.includes('reason'), false);
+  assert.deepEqual(schemas.UnansweredQuestionDto.properties.reason.enum, reasons);
+  assert.equal(schemas.UnansweredQuestionDto.properties.reason.nullable, true);
+  assert.deepEqual(schemas.CallProcessingResultDto.properties.unansweredReason.enum, reasons);
+  assert.equal(schemas.CallProcessingResultDto.properties.unansweredReason.nullable, true);
+  const parameters = document.paths['/api/unanswered-questions'].get.parameters;
+  assert.deepEqual(parameters.find((item) => item.name === 'reason').schema.enum, [
+    ...reasons,
+    'UNCLASSIFIED',
+  ]);
+  assert.deepEqual(parameters.find((item) => item.name === 'status').schema.enum, [
+    'OPEN',
+    'REGISTERED',
+    'ALL',
+  ]);
+  assert.deepEqual(Object.keys(schemas.CollectedUnansweredQuestionDto.properties), [
+    'unansweredQuestionSeq',
+  ]);
 });

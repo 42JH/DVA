@@ -36,6 +36,25 @@ test('question input preserves original text and accepts explicit unknown, zero 
   }
 });
 
+test('question reasons accept the two codes or unclassified input without accepting workflow or query-only values', async () => {
+  for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE', null]) {
+    const value = input({ reason });
+    assert.deepEqual(JSON.parse(JSON.stringify(await validate(value))), value);
+  }
+  for (const reason of [
+    'UNCLASSIFIED',
+    'OPEN',
+    'kb_no_answer',
+    '',
+    1,
+    true,
+    {},
+    [],
+    ['KB_NO_ANSWER'],
+  ])
+    await assert.rejects(() => validate(input({ reason })), { status: 400 });
+});
+
 test('questions require all six fields and reject invalid identifiers, text, time and numeric coercion', async () => {
   for (const key of Object.keys(input())) {
     const value = input();
@@ -121,10 +140,28 @@ test('question search normalizes Korean and trims input while preserving literal
     await assert.rejects(() => validateQuery({ q }), { status: 400 });
 });
 
+test('question filters distinguish reason, unclassified and all non-deleted workflow states', async () => {
+  for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE', 'UNCLASSIFIED']) {
+    const value = await validateQuery({ reason, status: 'ALL' });
+    assert.equal(value.reason, reason);
+    assert.equal(value.status, 'ALL');
+  }
+  for (const reason of [
+    'null',
+    'ALL',
+    'OPEN',
+    'kb_no_answer',
+    '',
+    1,
+    ['KB_NO_ANSWER', 'KB_UNAVAILABLE'],
+  ])
+    await assert.rejects(() => validateQuery({ reason }), { status: 400 });
+});
+
 test('question queries reject deleted state, unknown fields, malformed dates and pagination', async () => {
   for (const value of [
     { status: 'DELETED' },
-    { status: 'ALL' },
+    { status: 'UNKNOWN' },
     { status: ['OPEN', 'REGISTERED'] },
     { customerSeq: '1' },
     { offsetMs: '1' },

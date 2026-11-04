@@ -1,7 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsInt,
+  IsIn,
   IsISO8601,
+  IsOptional,
   IsString,
   IsUUID,
   Matches,
@@ -11,6 +13,10 @@ import {
   NotContains,
   ValidateIf,
 } from 'class-validator';
+import {
+  UNANSWERED_QUESTION_REASONS,
+  UnansweredQuestionReason,
+} from '../unanswered-question.types';
 
 export class CreateUnansweredQuestionDto {
   @ApiProperty({ format: 'uuid', description: '질문 발생 시 생성하고 재전송에도 유지하는 식별자.' })
@@ -38,6 +44,16 @@ export class CreateUnansweredQuestionDto {
   @Matches(/\S/u)
   @NotContains('\u0000')
   questionText!: string;
+
+  @ApiPropertyOptional({
+    enum: UNANSWERED_QUESTION_REASONS,
+    nullable: true,
+    description:
+      'AI가 실제 답변과 검색 결과를 대조한 사유. 근거 부족/검색 장애. 생략·null은 미분류.',
+  })
+  @IsOptional()
+  @IsIn(UNANSWERED_QUESTION_REASONS)
+  reason?: UnansweredQuestionReason | null;
 
   @ApiProperty({
     format: 'date-time',
