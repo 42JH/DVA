@@ -2,31 +2,44 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
+
+# 가상환경
 .venv/
 venv/
 
-# Test / Lint
+# 테스트/도구 캐시
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
 
-# LangGraph Studio 개발 서버(langgraph dev) 상태
-.langgraph_api/
-
-# Environment
+# 환경변수/비밀 (PBX_WEBHOOK_SECRET, KAKAO_REST_API_KEY, QDRANT_API_KEY 등)
 .env
 .env.*
+!.env.example
 
-# AI artifacts
-models/
+# 로컬 DB/런타임 상태
 /data/
-/rag_state/
-*.pt
-*.pth
-*.onnx
-*.safetensors
-*.ckpt
+rag_state/
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sqlite3-wal
+*.sqlite3-shm
 
-.env.example
+# 로그
+*.log
+logs/
+
+# IDE/OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+# 결과·인사이트 아웃박스(SQLite, 개인정보)
+state/

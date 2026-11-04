@@ -1,0 +1,147 @@
+"""FastAPI 하나: PBX(OpenAI) 웹훅, 관제 API·SSE, 관제 화면. 워커 1개로 띄운다."""
+
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI
+
+from app import address
+from app.call import Call, Registry
+from app.config import ROOT, load_server_config, load_texts
+from app.flow import engine
+from app.live_session import LiveConfigError, function_tool_names, load_live_toml
+from app.monitor.router import router as monitor_router
+from app.persona import PersonaManager
+from app.services import Services
+from app.tools._base import TOOLS, load_tools
+from app.webhooks.openai import router as webhook_router
+from app.webhooks.pbx import router as pbx_router
+from app.webhooks.persona import router as persona_router
+from app.webhooks.faqs import router as faq_router, valid_token as valid_faq_token
+
+log = logging.getLogger(__name__)
+
+
+def check_definitions(cfg, texts) -> None:
+    """기동 시 검증: 단계·도구·문구가 서로 맞는지, live.toml의 함수 도구가 모두 있는지. 실패하면 기동을 멈춘다.
+    단계 정의가 검증을 통과하면 상태 그래프(LangGraph)를 만든다."""
+    load_tools()
+    engine.load_stages()
+    sample = Call("startup-check", None, cfg, texts, None).text_vars()
+    engine.validate(set(TOOLS), texts, sample)
+    engine.build()
+    texts.call_info.format(**sample, first="")
+    texts.backend_info.format(**sample)
+    texts.backend_state.format(state="")
+    unknown = [n for n in function_tool_names(load_live_toml()) if n not in TOOLS]
+    if unknown:
+        raise LiveConfigError(f"live.toml에 없는 함수 도구: {unknown}")
+
+
+def create_app(client: Any = None, backend: Any = None, rag: Any = None, faq_events: Any = None,
+               faq_index: Any = None) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        cfg = load_server_config()
+        logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+        texts = load_texts()
+        check_definitions(cfg, texts)
+        address.load(ROOT / cfg.address.db_path)
+        event_store = faq_events
+        if event_store is None and cfg.faq_sync.receive_enabled:
+            if not valid_faq_token(os.environ.get('AI_FAQ_TOKEN')):
+                raise RuntimeError('FAQ 알림 활성화에는 올바른 AI_FAQ_TOKEN이 필요합니다.')
+            from app.rag.faq_events import FaqEventStore
+
+            f = cfg.faq_sync
+            event_store = await asyncio.to_thread(
+                FaqEventStore, ROOT / f.db_path, max_pending=f.max_pending, busy_timeout_sec=f.busy_timeout_sec)
+            await asyncio.to_thread(event_store.recover_interrupted)
+        faq_runtime = None
+        if cfg.faq_sync.process_enabled and faq_index is None:
+            from app.rag.faq_runtime import create_faq_runtime
+
+            faq_runtime = await asyncio.to_thread(create_faq_runtime, event_store, cfg.faq_sync, cfg.rag)
+            managed_index = faq_runtime.index
+        else:
+            managed_index = faq_index
+        if cfg.faq_sync.process_enabled:
+            from app.rag.faq_processor import FaqProcessor
+
+            FaqProcessor.check_bindings(event_store, managed_index, cfg.faq_sync, cfg.rag)
+        openai_client, backend_api = client, backend
+        if openai_client is None:
+            from openai import AsyncOpenAI
+
+            openai_client = AsyncOpenAI()  # OPENAI_API_KEY, OPENAI_WEBHOOK_SECRET
+        if backend_api is None and os.environ.get("BACKEND_MOCK", "").lower() in ("1", "true"):
+            from app.mock_backend import MockBackend
+
+            logging.getLogger(__name__).warning("가짜 백엔드(메모리) 사용 중: 재시작하면 주문·배송지가 사라진다")
+            backend_api = MockBackend()
+        elif backend_api is None:
+            from app.backend_api import BackendAPI
+
+            b = cfg.backend
+            backend_api = BackendAPI(os.environ["BACKEND_API_URL"], b.timeout_sec, submit_timeout_sec=b.submit_timeout_sec,
+                                     submit_retry_sec=b.submit_retry_sec, retry_interval_sec=b.retry_interval_sec,
+                                     persona_token=os.environ.get("AI_PERSONA_TOKEN"),
+                                     insights_token=os.environ.get("AI_INSIGHTS_TOKEN"))
+        app.state.svc = Services(cfg, texts, openai_client, backend_api, Registry(cfg))
+        svc = app.state.svc
+        svc.faq_events = event_store
+        if cfg.faq_sync.process_enabled:
+            svc.faq_processor = FaqProcessor(event_store, backend_api, managed_index, cfg.faq_sync, cfg.rag)
+        svc.persona = PersonaManager(backend_api, cfg.persona, enabled=bool(os.environ.get("AI_PERSONA_TOKEN")))
+        if not svc.persona.enabled:
+            log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: prompts/voice.md 사용")
+        svc.spawn(svc.persona.run())
+        if rag is not None:
+            app.state.svc.rag = rag
+        elif faq_runtime is not None:
+            from app.rag.service import RagService
+
+            app.state.svc.rag = RagService(cfg.rag, faq_index=managed_index, reranker=faq_runtime.reranker)
+        elif client is None:
+            from app.rag.service import RagService
+            app.state.svc.rag = RagService(cfg.rag)  # 첫 검색 전까지 외부 연결 없음
+            app.state.svc.spawn(app.state.svc.rag.warmup())
+        try:
+            if svc.faq_processor is not None:
+                svc.spawn(svc.faq_processor.run())
+            yield
+        finally:
+            calls = list(app.state.svc.registry.calls.values())
+            jobs = [c.task for c in calls if c.task is not None and not c.task.done()]
+            jobs += [t for t in app.state.svc.tasks if not t.done()]
+            for task in jobs:
+                task.cancel()
+            if jobs:
+                await asyncio.gather(*jobs, return_exceptions=True)
+            if rag is None and app.state.svc.rag is not None:
+                await app.state.svc.rag.close()
+            if faq_runtime is not None:
+                await asyncio.to_thread(faq_runtime.close)
+            if backend is None:
+                await backend_api.close()
+            if client is None:
+                await openai_client.close()
+
+    app = FastAPI(title="디바콜 전화 접수", lifespan=lifespan)
+    app.include_router(webhook_router)
+    app.include_router(pbx_router)
+    app.include_router(persona_router)
+    app.include_router(faq_router)
+    app.include_router(monitor_router)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok", "service": "ai-agent"}
+
+    return app
+
+
+app = create_app()
