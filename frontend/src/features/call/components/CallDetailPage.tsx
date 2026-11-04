@@ -4,7 +4,7 @@ import { Crumbs } from '@/shared/ui'
 import { useCallDetail } from '@/features/call/hooks/useCallDetail'
 import { CallActions } from './CallActions'
 import { CallScript } from './CallScript'
-import { KindChips } from './KindChips'
+import { KindChips, PendingChip } from './KindChips'
 
 // 06 통화 상세 — Figma에 새 디자인이 없어 새 화면(11/04 'FAQ 상세' · '통화')의 말투로 만든 모양 (11/05 사용자)
 // 경로 '통화 > 통화 상세'(04 목록에서 왔으면 그 목록으로) · 머리: 고객 이름(신규면 new) + 상담 유형 칩(04 줄과 같은 칩)
@@ -46,11 +46,7 @@ function CallDetailBody({ callId }: { callId: number }) {
                 )}
               </h1>
               <span className="flex flex-wrap items-center gap-2 text-card">
-                {s.analyzed ? (
-                  <KindChips kinds={s.kinds} />
-                ) : (
-                  <span className="text-body text-muted">분석 전</span>
-                )}
+                {s.analyzed ? <KindChips kinds={s.kinds} /> : <PendingChip />}
               </span>
             </div>
             <p className="mt-1.5 text-body text-sub">
