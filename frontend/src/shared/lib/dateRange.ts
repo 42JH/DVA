@@ -51,17 +51,6 @@ export function periodToRange(
   return { from: custom.from, to: addDays(custom.to, 1) }
 }
 
-/** 주소의 from · to('YYYY-MM-DD') 검증 (02 · 04): 모양이 틀리거나 없는 날짜 · 뒤집힌 기간 · 미래면 null(= 오늘). to가 비면 하루 */
-export function parseRange(
-  from: string,
-  to: string,
-  today = todayYmd(),
-): { from: Ymd; to: Ymd } | null {
-  const ok = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && ymd(new Date(`${s}T00:00`)) === s
-  const end = to || from
-  return from && ok(from) && ok(end) && from <= end && end <= today ? { from, to: end } : null
-}
-
 /** 표시용 (10/30 연도 규칙): 올해면 'MM.DD', 하나라도 다른 해면 전부 'YYYY.MM.DD' — 같이 보이는 날짜는 같이 넘겨 연도 여부를 맞춤 */
 export function fmtYmds(days: Ymd[], today = todayYmd()): string[] {
   const withYear = days.some((s) => s.slice(0, 4) !== today.slice(0, 4))

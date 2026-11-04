@@ -19,23 +19,18 @@ assert.equal(originOf('/orders').label, '주문')
 assert.equal(originOf('/faqs?category=접수').label, 'FAQ')
 assert.equal(originOf('/faqs/12').label, 'FAQ 상세')
 assert.equal(originOf('/faqs/12/edit').label, 'FAQ 수정')
-assert.equal(originOf('/').label, '홈')
-assert.equal(originOf('/dashboard?period=week').label, '대시보드')
+assert.equal(originOf('/dashboard/response-wait').label, '통계')
 // 없거나 모르는 화면 · 바깥 주소는 FAQ
 assert.deepEqual(originOf(''), { label: 'FAQ', to: '/faqs' })
 assert.deepEqual(originOf('//evil.example/x'), { label: 'FAQ', to: '/faqs' })
 assert.deepEqual(originOf('https://evil.example'), { label: 'FAQ', to: '/faqs' })
 assert.deepEqual(originOf('/ui-kit'), { label: 'FAQ', to: '/faqs' })
 
-// FAQ 작성 경로: 미답변 목록에서 왔으면 그 목록의 from이 첫 칸, 홈 미리보기에서 왔으면 홈
+// FAQ 작성 경로: 미답변 목록에서 왔으면 그 목록의 from이 첫 칸
 const back = unansweredTo('/orders') + '&reason=KB_NO_ANSWER'
 assert.deepEqual(unansweredCrumbs(back), [
   { label: '주문', to: '/orders' },
   { label: 'AI 미답변', to: back },
-])
-assert.deepEqual(unansweredCrumbs('/'), [
-  { label: '홈', to: '/' },
-  { label: 'AI 미답변', to: '/faqs/unanswered?from=%2F' },
 ])
 assert.equal(unansweredCrumbs('/faqs/unanswered')[0].label, 'FAQ') // from 없는 목록
 

@@ -5,11 +5,11 @@ import { SignupPage } from '@/features/auth/components/SignupPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { CallListPage } from '@/features/call/components/CallListPage'
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
+import { GraphPage } from '@/features/dashboard/components/GraphPage'
 import { FaqListPage } from '@/features/faq/components/FaqListPage'
 import { FaqDetailPage } from '@/features/faq/components/FaqDetailPage'
 import { FaqEditPage } from '@/features/faq/components/FaqEditPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
-import { HomePage } from './routes/HomePage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { PersonaPage } from '@/features/persona/components/PersonaPage'
 import { MyInfoPage } from '@/features/me/components/MyInfoPage'
@@ -53,12 +53,12 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-          { index: true, element: <HomePage />, handle: { title: '홈' } satisfies RouteHandle },
-          {
-            path: 'dashboard',
-            element: <DashboardPage />,
-            handle: { title: '대시보드' } satisfies RouteHandle,
-          },
+          // 홈 화면은 없앰 (11/05 사용자) — 로그인하면 02 통계로
+          { index: true, element: <Navigate to="/dashboard" replace /> },
+          // 02 통계 'AI 상담 성능' (Figma 11/05) · 그래프 보기 두 화면 — handle 없음(화면이 상단바 · 경로를 그림)
+          { path: 'dashboard', element: <DashboardPage /> },
+          { path: 'dashboard/response-wait', element: <GraphPage kind="response-wait" /> },
+          { path: 'dashboard/stage-dropoffs', element: <GraphPage kind="stage-dropoffs" /> },
           // 03 주문 내역 (Figma 11/04) — handle 없음(화면이 상단바 · 머리를 그림)
           { path: 'orders', element: <OrderListPage /> },
           // 04 통화 내역 (Figma 11/04) — handle 없음(화면이 상단바 · 머리를 그림)

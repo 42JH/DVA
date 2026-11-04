@@ -565,7 +565,7 @@ function analysisOf(r: CallRow) {
       : []
   const n = r.callSessionSeq // 통화 번호로 정해지는 가짜 요약 (새로고침해도 같음)
   return {
-    result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(02 · 06 요약)이 아직 읽어서 남김
+    result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)이 아직 읽어서 남김
     // 통화 요약 (연동 명세 11/04 §3) — 04 줄의 접수 · 조회 · 취소 · FAQ 칩, new
     isNewCustomer: n % 7 === 0,
     registeredParcelCount: r.outcome === 'SUCCESS' ? 1 + (n % 4) : 0,
@@ -710,13 +710,11 @@ export const callHandlers = [
       meta: { requestId: crypto.randomUUID() },
     }),
   ),
-  // API-21 — q(이름 · 번호 부분 일치) · result · hasComplaint · aiPersonaVersionSeq · orderSeq · from(포함)/to(미포함)
+  // API-21 — q(이름 · 번호 부분 일치) · aiPersonaVersionSeq · orderSeq · from(포함)/to(미포함). 화면이 쓰는 필터만
   http.get(`${API_BASE_URL}/calls`, ({ request }) => {
     const url = new URL(request.url)
     const p = (k: string) => url.searchParams.get(k)
     const q = (p('q') ?? '').trim().toLowerCase()
-    const result = p('result')
-    const hasComplaint = p('hasComplaint')
     const personaSeq = p('aiPersonaVersionSeq')
     const orderSeq = p('orderSeq')
     const from = p('from')
@@ -724,11 +722,8 @@ export const callHandlers = [
     if (elapsed() >= 75 && elapsed() < 90) return unavailable()
     const hit = rowsNow().filter((r) => {
       const t = Date.parse(r.startedAt)
-      const a = pending(r) ? null : analysisOf(r) // 분석 전 통화는 결과 · 불만 필터에서 빠짐 (명세: 정상 필터 동작)
       return (
         (!q || r.customerName.toLowerCase().includes(q) || r.callerNumber.includes(q)) &&
-        (!result || a?.result === result) &&
-        (hasComplaint === null || (!!a && String(a.hasComplaint) === hasComplaint)) &&
         (!personaSeq || personaOf(r).seq === Number(personaSeq)) &&
         (!orderSeq || callOf(r).orderSeq === Number(orderSeq)) &&
         (!from || t >= Date.parse(from)) &&

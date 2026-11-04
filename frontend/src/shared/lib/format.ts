@@ -24,17 +24,6 @@ export function fmtRowTime(iso: string, today: Ymd): string {
   return `${date.replaceAll('-', '.')} ${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
-/** 날짜 + 요일 (10/30 연도 규칙): 올해 '10.02 (금)', 다른 해 '2025.12.29 (월)' — 02 버전 운영 기간. year = 연도 강제 */
-export function fmtDay(iso: string, now = new Date(), year?: boolean): string {
-  return fmtDetailTime(iso, { now, year }).slice(0, -6) // 'HH:MM' 앞 공백까지 뗌
-}
-
-/** 기간 양 끝 날짜 + 요일: 한쪽이라도 다른 해면 양쪽 다 연도 (02 페르소나별 오른쪽 위) */
-export function fmtDayRange(from: string, to: string, now = new Date()): string {
-  const year = [from, to].some((s) => new Date(s).getFullYear() !== now.getFullYear())
-  return `${fmtDay(from, now, year)} ~ ${fmtDay(to, now, year)}`
-}
-
 /** 상세 화면 시각 (10/30 연도 규칙): 올해 '10.20 (화) 13:12', 다른 해 '2025.12.29 (월) 13:12'. seconds면 '13:12:08' (06 통화 시작 시각)
  * year를 주면 그대로 (기간처럼 여러 날짜의 연도 표시를 맞출 때) */
 export function fmtDetailTime(
@@ -84,17 +73,6 @@ export function fmtDuration(seconds: number): string {
   return `${h ? `${h}시간 ` : ''}${Math.floor(seconds / 60) % 60}분 ${two(seconds % 60)}초`
 }
 
-/** 초 → 큰 숫자 · 작은 단위로 나눈 조각 [['3', '분'], ['40', '초']] (02 평균 카드 · 01 홈 평균) */
-export function fmtDurationParts(seconds: number): [string, string][] {
-  const s = Math.round(seconds)
-  const h = Math.floor(s / 3600) // 한 시간 넘으면 '1시간 5분 03초' (11/02)
-  return [
-    ...(h ? ([[String(h), '시간']] as [string, string][]) : []),
-    [String(Math.floor(s / 60) % 60), '분'],
-    [two(s % 60), '초'],
-  ]
-}
-
 /** 초 → '03:40', 한 시간부터 '1:05:03' (06 통화 안 시각 · 재생 바) */
 export function fmtClock(seconds: number): string {
   const h = Math.floor(seconds / 3600)
@@ -122,19 +100,6 @@ export function toDateTimeLocal(d: Date): string {
 /** datetime-local 칸 값 → 서버로 보낼 ISO 8601 (UTC) */
 export function fromDateTimeLocal(value: string): string {
   return new Date(value).toISOString()
-}
-
-/** 비율 묶음 ['85%', '10%', '5%'] — 따로 반올림하면 합이 99 · 101이 되므로 최대 나머지법으로 합을 100에 맞춤 (02 게이지 줄 · 버전별 기록). 합이 0이면 전부 '—' */
-export function fmtPctSplit(values: number[], digits = 0): string[] {
-  const of = values.reduce((a, b) => a + b, 0)
-  if (!of) return values.map(() => '—')
-  const unit = 10 ** digits
-  const raw = values.map((v) => (v / of) * 100 * unit)
-  const out = raw.map(Math.floor)
-  const byRemainder = raw.map((_, i) => i).sort((a, b) => raw[b] - out[b] - (raw[a] - out[a]))
-  let left = 100 * unit - out.reduce((a, b) => a + b, 0)
-  for (const i of byRemainder) if (left-- > 0) out[i]++
-  return out.map((n) => `${(n / unit).toFixed(digits)}%`)
 }
 
 /** 날짜만 (10/30 연도 규칙): 올해 '10.02', 다른 해 '2025.12.29' — 07 버전 저장일 · 02 하루 범위. 'YYYY-MM-DD'를 받음 (Date 파싱 없음 → 시간대 무관) */
