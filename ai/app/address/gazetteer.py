@@ -1,7 +1,7 @@
 """행안부 주소DB(텍스트) -> SQLite 변환 + 보정기용 사전/건물번호 조회.
 
-빌드: uv run python -X utf8 -m address_resolver.db <주소DB 텍스트 폴더> data/address.db   (한 번만, 1~2분 걸림)
-사용: AddressDB("data/address.db") 를 RoadDict 대신 candidates()/correct() 에 넘긴다. correct()는 지번도 찾는다.
+빌드: uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db   (한 번만, 1~2분 걸림)
+사용: open_db(path)로 열어 matcher.resolve()/correct()에 넘긴다. correct()는 지번도 찾는다.
 DB 스키마가 바뀌면(지번 테이블 추가 등) address.db 를 지우고 다시 빌드한다.
 
 레이아웃은 address_db/[가이드]주소DB 활용방법.pdf 붙임1 기준.
@@ -10,14 +10,19 @@ DB 스키마가 바뀌면(지번 테이블 추가 등) address.db 를 지우고 
   지번_<시도>.txt            : 관리번호|일련번호|법정동코드|시도명|시군구명|법정읍면동명|법정리명|산여부|번지|호|대표여부
 """
 import glob
+import logging
 import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
-from address_resolver.corrector import Name, RoadDict
+from app.address.matcher import RoadDict
+from app.address.phonetic import Name
+
+log = logging.getLogger(__name__)
 
 ENC = "cp949"
 # 테스트도 같은 스키마로 작은 DB를 만든다
@@ -96,14 +101,33 @@ class _LazyRoads(dict):
         return roads
 
 
+def open_db(path: Path) -> "AddressDB | None":
+    """주소DB를 연다. 파일이 없으면 None(보정 없이 들은 그대로 — AddressService가 status="off")."""
+    if not path.is_file():
+        log.warning("주소DB가 없어 주소 보정을 끕니다: %s", path)
+        return None
+    log.info("주소 보정 켜짐: %s", path)
+    return AddressDB(path)
+
+
 class AddressDB(RoadDict):
+    """여러 스레드(AddressService 실행기)가 잠금 없이 같이 쓴다: SQLite 연결은 스레드마다 하나씩, 캐시(지역별 도로·법정동)는
+    같은 값을 다시 채워 넣을 뿐이라 동시에 채워도 결과가 같다."""
+
     def __init__(self, path):
-        # 읽기 전용(배포에서는 :ro 볼륨). 조회는 스레드에서 오므로 같은 스레드 검사는 끈다(address_resolver/__init__.py가 잠금)
-        self.conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True, check_same_thread=False)
+        self._uri = f"{Path(path).resolve().as_uri()}?mode=ro"  # 읽기 전용(배포에서는 :ro 볼륨)
+        self._local = threading.local()
         self.parts = {}
         self.roads = _LazyRoads(self)
         self._areas = {}
         self.set_regions(self.conn.execute("SELECT DISTINCT sido, sigungu FROM roads"))
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._local.conn = sqlite3.connect(self._uri, uri=True)
+        return conn
 
     def lookup(self, sido, sigungu, road, number):
         """그 도로에 그 건물번호가 실제로 있으면 표준 도로명주소 문자열, 없으면 None."""

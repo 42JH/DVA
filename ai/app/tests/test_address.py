@@ -1,4 +1,4 @@
-"""주소 보정(address_resolver): 보정기 자체(도로 사전·작은 주소DB)와 카카오 지번·우편번호. record_order에 붙은 동작은 tools/tests.
+"""주소 보정(app/address): 보정기 자체(도로 사전·작은 주소DB)와 카카오 지번·우편번호. record_fields에 붙은 동작은 test_tools.
 보정기 사례는 kakao_map_test의 자체 테스트를 옮긴 것이다. 실제 주소DB(data/address.db) 없이 돈다."""
 
 import csv
@@ -8,16 +8,17 @@ import httpx2
 import pytest
 from conftest import run
 
-import address_resolver as address
-from address_resolver import kakao
-from address_resolver.corrector import RoadDict, candidates, correct, jamo
-from address_resolver.db import AddressDB
-from address_resolver.kakao import Geo
-from address_resolver.tests.sample_db import build_sample_db
+from app.address.gazetteer import AddressDB, open_db
+from app.address.matcher import NOT_FOUND, RoadDict, candidates, correct
+from app.address.phonetic import jamo
+from app.domain.state import Geo
+from app.integrations import kakao
+from app.integrations.address import AddressService
+from app.tests.address_sample_db import build_sample_db
 
 REAL_GEOCODE = kakao.geocode  # fake_kakao 픽스처가 바꾸기 전 진짜 함수
 
-DATA = Path(__file__).parent / "data"
+DATA = Path(__file__).parent / "fixtures"
 
 
 # --- 보정기: 지역 트리·도로명 퍼지 매칭 ---
@@ -87,7 +88,7 @@ def test_candidates_correct_misheard_road(rd, heard, want):
 
 def test_linking_sound_is_compared_as_pronounced():
     """연음·ㅢ 발음: "인의동"을 "이니동"으로 받아써도 같은 소리로 본다(다른 동보다 훨씬 가깝게)."""
-    from address_resolver.corrector import Name, distance
+    from app.address.phonetic import Name, distance
     assert jamo("인의동", canon=True) == jamo("이니동", canon=True)
     assert distance(Name("이니동"), Name("인의동")) < 1 < distance(Name("이니동"), Name("인동"))
 
@@ -148,42 +149,42 @@ def db(db_path):
 
 
 def test_correct_statuses(db):
-    assert correct(db, "서울 강남구 태헤란노 211")["address"] == "서울특별시 강남구 테헤란로 211"
+    assert correct(db, "서울 강남구 태헤란노 211").address == "서울특별시 강남구 테헤란로 211"
     # 테헤란로2길에는 10번이 없고 1길에만 있음 -> 일/이 혼동으로 보고 1길 10으로 확정
-    assert correct(db, "서울 강남구 테헤란로2길 10")["address"] == "서울특별시 강남구 테헤란로1길 10"
+    assert correct(db, "서울 강남구 테헤란로2길 10").address == "서울특별시 강남구 테헤란로1길 10"
     # 1길 32, 2길 32 둘 다 있음 -> 들은 그대로 있는 쪽
-    assert correct(db, "서울 강남구 테헤란로2길 32")["address"] == "서울특별시 강남구 테헤란로2길 32"
+    assert correct(db, "서울 강남구 테헤란로2길 32").address == "서울특별시 강남구 테헤란로2길 32"
     # 건물번호를 고쳐야 맞는 주소는 확정하지 않고 후보로만
     r = correct(db, "서울 강남구 테헤란로 112")
-    assert r["status"] == "ambiguous" and "서울특별시 강남구 테헤란로 111" in r["candidates"], r
-    assert correct(db, "서울 강남구 테헤란로 99999") == {"status": "not_found", "address": None, "candidates": []}
-    assert correct(db, "서울 강남구 없는로 12")["status"] == "not_found"
-    assert correct(db, "전북 익산시 왕궁로 100")["address"] == "전북특별자치도 익산시 왕궁면 왕궁로 100"  # 읍면은 주소에 들어감
+    assert r.status == "ambiguous" and "서울특별시 강남구 테헤란로 111" in r.candidates, r
+    assert correct(db, "서울 강남구 테헤란로 99999") == NOT_FOUND
+    assert correct(db, "서울 강남구 없는로 12").status == "not_found"
+    assert correct(db, "전북 익산시 왕궁로 100").address == "전북특별자치도 익산시 왕궁면 왕궁로 100"  # 읍면은 주소에 들어감
     # 도로명을 많이 고치고 건물번호까지 바꿔야 맞는 주소는 억지로 맞추지 않는다(없는 주소). 번호가 맞으면 후보로 둔다
     weak = correct(db, "서울 강남구 대해남노 112")
-    assert weak["status"] == "not_found" and weak["weak"] == "서울특별시 강남구 테헤란로 111"
-    assert correct(db, "서울 강남구 대해남노 211")["candidates"] == ["서울특별시 강남구 테헤란로 211"]
+    assert weak == NOT_FOUND
+    assert correct(db, "서울 강남구 대해남노 211").candidates == ("서울특별시 강남구 테헤란로 211",)
     # 연음으로 받아쓴 길 번호("구길" -> "국일")
-    assert correct(db, "경북 구미시 인동 국일 7-3")["address"] == "경상북도 구미시 인동9길 7-3"
+    assert correct(db, "경북 구미시 인동 국일 7-3").address == "경상북도 구미시 인동9길 7-3"
 
 
 def test_jibun_address_resolves_to_road_address(db):
     """지번은 시군구 안의 법정동·리 이름으로 찾고, 그 지번 건물의 도로명주소로 돌려준다."""
-    assert correct(db, "경북 구미시 인의동 844-5")["address"] == "경상북도 구미시 인동9길 7-3"
-    assert correct(db, "경북 구미시 인의동 844번지 5호")["address"] == "경상북도 구미시 인동9길 7-3"
-    assert correct(db, "경북 구미시 이니동 845")["address"] == "경상북도 구미시 인동9길 8"  # 연음으로 받아씀(인의동)
-    assert correct(db, "구미시 이니동 844-5")["address"] == "경상북도 구미시 인동9길 7-3"  # 시도 생략 + 연음
-    assert correct(db, "경북 구미시 선산읍 완전리 산 12")["address"] == "전북특별자치도 익산시 왕궁면 왕궁로 100"
-    assert correct(db, "경북 구미시 인의동 9999")["status"] == "not_found"
+    assert correct(db, "경북 구미시 인의동 844-5").address == "경상북도 구미시 인동9길 7-3"
+    assert correct(db, "경북 구미시 인의동 844번지 5호").address == "경상북도 구미시 인동9길 7-3"
+    assert correct(db, "경북 구미시 이니동 845").address == "경상북도 구미시 인동9길 8"  # 연음으로 받아씀(인의동)
+    assert correct(db, "구미시 이니동 844-5").address == "경상북도 구미시 인동9길 7-3"  # 시도 생략 + 연음
+    assert correct(db, "경북 구미시 선산읍 완전리 산 12").address == "전북특별자치도 익산시 왕궁면 왕궁로 100"
+    assert correct(db, "경북 구미시 인의동 9999").status == "not_found"
 
 
-def test_load_turns_off_without_db_file(tmp_path, db_path, monkeypatch):
-    try:
-        assert address.load(tmp_path / "none.db") is False and run(address.correct("서울 강남구 테헤란로 212")) is None
-        assert address.load(db_path) is True
-        assert run(address.correct("서울 강남구 테헤란로 212"))["status"] == "confirmed"
-    finally:
-        address._db = None
+def test_service_is_off_without_db_file(tmp_path, db_path, fake_kakao):
+    """주소DB 파일이 없으면 보정을 끄고 들은 그대로(status off) — 주소DB가 있으면 보정한다."""
+    assert open_db(tmp_path / "none.db") is None
+    off = run(AddressService(None).resolve("서울 강남구 테헤란로 212"))
+    assert (off.status, off.address) == ("off", "서울 강남구 테헤란로 212")
+    on = run(AddressService(open_db(db_path)).resolve("서울 강남구 태헤란노 212"))
+    assert (on.status, on.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
 
 
 # --- 카카오 주소 검색(지번·동명·우편번호) ---
@@ -230,7 +231,7 @@ def test_kakao_geocode_off_without_key(monkeypatch):
 
 
 def test_linked_gil_number_is_unlinked_only_when_not_found():
-    from address_resolver.corrector import unlink_gil
+    from app.address.parse import unlink_gil
     assert unlink_gil("경북 구미시 인동 국일 7-3") == "경북 구미시 인동  구길 7-3"
     assert unlink_gil("경북 구미시 인동국일 7-3") == "경북 구미시 인동 구길 7-3"
     assert unlink_gil("서울 강남구 테헤란로 212") is None

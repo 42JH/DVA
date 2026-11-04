@@ -30,7 +30,7 @@ class DestinationArgs(Args):
 
 
 def _to_be(p: Place) -> BEPlace:
-    from address_resolver.kakao import Geo
+    from backend_client.order import Geo
     geo = Geo(jibun_address=p.geo.jibun_address, dong_name=p.geo.dong_name, postal_code=p.geo.postal_code) if p.geo else None
     return BEPlace(name=p.name, phone=p.phone, address=p.address, address_detail=p.address_detail, geo=geo)
 

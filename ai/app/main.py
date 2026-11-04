@@ -17,9 +17,9 @@ from pathlib import Path
 import httpx2
 from fastapi import FastAPI
 
-import address_resolver
 from app.config import ROOT, BackendConfig, ServerConfig, load_server_config
 from app.domain.fare import parcel_fare
+from app.address.gazetteer import open_db
 from app.integrations.address import AddressService
 from app.integrations.backend.gateway import BackendGateway
 from app.calls.live import LiveFlow
@@ -137,10 +137,10 @@ def setup_logging() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     cfg = load_server_config()
-    # 행안부 주소DB(compose: ./data → /app/data). 없으면 보정 없이 들은 그대로(address_resolver.load가 경고)
-    address_resolver.load(Path(os.environ.get("ADDRESS_DB", ROOT / "data" / "address.db")))
+    # 행안부 주소DB(compose: ./data → /app/data). 없으면 보정 없이 들은 그대로(open_db가 경고)
+    address_db = open_db(Path(os.environ.get("ADDRESS_DB", ROOT / "data" / "address.db")))
     app.state.svc = Services(cfg=cfg, backend=build_backend(cfg.backend),
-                             fare_of=partial(parcel_fare, table=cfg.fare.model_dump()), address=AddressService())
+                             fare_of=partial(parcel_fare, table=cfg.fare.model_dump()), address=AddressService(address_db))
     svc = app.state.svc
     warm = recovery = persona = review_worker = None
     rag_tasks = await build_rag(svc)

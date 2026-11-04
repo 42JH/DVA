@@ -147,7 +147,7 @@ async def read_loop(s: CallSession):
 
 | 작업 | 성격 | 현재 | 방안 |
 |---|---|---|---|
-| 주소 보정(`corrector.py`) | 순수 Python CPU(자모·편집거리, 후보 최대 30개 × 건물번호) + SQLite | `to_thread` + 전역 락(직렬) | ① 전역 락 제거(스레드별 읽기 전용 연결) ② GIL로 병렬화가 안 되면 `ProcessPoolExecutor`(작은 풀, 프로세스별 DB 연결). `AddressService` 인터페이스는 같게 두고 실행기만 교체. **측정 후 선택** |
+| 주소 보정(`app/address/matcher.py`) | 순수 Python CPU(자모·편집거리, 후보 최대 30개 × 건물번호) + SQLite | 전용 스레드풀 2개, 전역 락 제거·스레드별 읽기 전용 연결(2026-11-05). GIL로 실제 병렬화는 안 됨(측정: 105건 동시 2.13s ≈ 순차 2.12s) | ① 전역 락 제거(스레드별 읽기 전용 연결) ② GIL로 병렬화가 안 되면 `ProcessPoolExecutor`(작은 풀, 프로세스별 DB 연결). `AddressService` 인터페이스는 같게 두고 실행기만 교체. **측정 후 선택** |
 | Kiwi 토큰화·BM25 | C++ 확장 + Python | `RagService` 스레드 | GIL 해제 여부 [미확인] → 측정. 삭제 차단 시 질의마다 BM25 재생성(`faq_search.py:54`) 비용 측정 |
 | sideband JSON 파싱 | 루프 CPU | — | §4 경량 분기 |
 | pydantic 검증 | 작음 | — | 없음 |

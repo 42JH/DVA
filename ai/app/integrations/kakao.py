@@ -7,18 +7,10 @@ import os
 import re
 
 import httpx2
-from pydantic import BaseModel
+
+from app.domain.state import Geo
 
 log = logging.getLogger(__name__)
-
-
-class Geo(BaseModel, frozen=True):
-    """주소에 딸린 값(고객에게 묻지 않는다). 확정한 도로명주소를 카카오 주소 검색으로 찾아 채운다(spec/address.md)."""
-
-    jibun_address: str
-    dong_name: str
-    postal_code: str
-
 
 URL = "https://dapi.kakao.com/v2/local/search/address.json"
 

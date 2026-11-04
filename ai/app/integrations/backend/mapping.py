@@ -3,10 +3,10 @@
 도메인 스냅샷(app/domain/state.py draft_snapshot 모양) → backend_client.order.Order → result_body.
 """
 
-from address_resolver.kakao import Geo as BackendGeo
 from app.domain.outcome import Outcome
 from app.domain.state import Geo, Items
 from backend_client.api import result_body
+from backend_client.order import Geo as BackendGeo
 from backend_client.order import Order
 
 _TEXT = ("sender_name", "sender_phone", "sender_address", "sender_address_detail",

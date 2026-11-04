@@ -21,7 +21,6 @@ COPY --chown=appuser:appuser prompts ./prompts
 COPY --chown=appuser:appuser manuals ./manuals
 COPY --chown=appuser:appuser scripts/bootstrap_faq.py ./scripts/bootstrap_faq.py
 COPY --chown=appuser:appuser pbx_webhook ./pbx_webhook
-COPY --chown=appuser:appuser address_resolver ./address_resolver
 COPY --chown=appuser:appuser backend_client ./backend_client
 COPY --chown=appuser:appuser policy ./policy
 COPY --chown=appuser:appuser monitor ./monitor

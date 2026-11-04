@@ -24,7 +24,7 @@
 | L7 지연·부하 | 구간 P50/P95, 동시 통화 1→100 단계 부하, 이벤트 루프 지연 | 가짜 sideband WS 서버 + 하네스(`latency-strategy.md` §6) | `bench/` |
 | L8 스테이징 | 실 SIP 통화 | 수동 + 기록 | 체크리스트 |
 
-기존 테스트(`pbx_webhook/tests`, `backend_client/tests`, `address_resolver/tests`, `tools/tests`)는 유지하며 리팩터 시 같은 동작을 보장하는 회귀망으로 쓴다.
+기존 테스트(`pbx_webhook/tests`, `backend_client/tests`, `app/tests/test_address.py`, `app/tests/test_tools.py`)는 유지하며 리팩터 시 같은 동작을 보장하는 회귀망으로 쓴다.
 
 ## 3. L3 BE 계약 테스트 (필수 항목)
 

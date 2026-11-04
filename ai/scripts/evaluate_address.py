@@ -20,9 +20,8 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-import address_resolver
-from address_resolver import kakao
-from address_resolver.db import AddressDB
+from app.address.gazetteer import AddressDB, open_db
+from app.integrations import kakao
 from app.integrations.address import AddressService
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,14 +67,15 @@ async def main(repeat: int, out: Path | None) -> None:
     data = json.loads(DATASET.read_text(encoding="utf-8"))
     cases = data["cases"]
     db_path = Path(os.environ.get("ADDRESS_DB", ROOT / "data" / "address.db"))
-    assert address_resolver.load(db_path), f"주소DB 없음: {db_path}"
-    check_labels(address_resolver._db, cases)
+    db = open_db(db_path)
+    assert db is not None, f"주소DB 없음: {db_path}"
+    check_labels(db, cases)
 
     async def no_geo(*_a, **_k):
         return None
     kakao.geocode = no_geo  # 네트워크 없이 보정만
 
-    svc = AddressService()
+    svc = AddressService(db)
     rows, cold, warm = [], {}, defaultdict(list)
     try:
         for c in cases:  # 첫 호출(지역 도로 캐시 없음)
@@ -131,7 +131,7 @@ async def main(repeat: int, out: Path | None) -> None:
         "by_tag": {k: dict(v) for k, v in sorted(by_tag.items())},
     }
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
-    report = {"dataset": data["version"], "commit": commit, "resolver": "address_resolver (구 서버 보정기)",
+    report = {"dataset": data["version"], "commit": commit, "resolver": "app.address",
               "db_bytes": db_path.stat().st_size, "repeat": repeat, "geocode": "off",
               "summary": summary, "results": results}
 

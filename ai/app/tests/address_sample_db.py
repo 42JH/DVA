@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from address_resolver.db import INDEXES, SCHEMA
+from app.address.gazetteer import INDEXES, SCHEMA
 
 ROADS = [  # (도로명코드, 읍면동일련번호, 도로명, 시도, 시군구, 읍면동, 읍면동구분 0:읍면 1:동)
     (1, 0, "테헤란로", "서울특별시", "강남구", "역삼동", "1"),

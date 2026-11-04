@@ -486,3 +486,12 @@
 - 틀린 기록 1: "테헤란로 210"(없는 번호) → ambiguous 1순위 "테헤란로 510"이 P6로 기록됨
 - 지연(보정만, 로컬): 첫 호출 P50 10ms·P95 115ms·최대 337ms, 반복 P50 9ms·P95 111ms·최대 432ms(역삼동 지번 3건이 300ms대). 105건 동시 2.31s ≈ 순차 합 2.40s → 전역 락으로 병렬 처리 안 됨 확인
 - 한계: 시험지를 보정기의 알려진 약점을 보고 만들었으므로 독립 정확도가 아니라 회귀 기준이다. 말끝 사례가 실제로 얼마나 들어오는지는 현재 backend_rules.md 기준으로 미확인
+
+## 2026-11-05 주소 보정 교체 1단계 — address_resolver를 app/address로(동작 동일)
+- 목적: 구 서버 보정기를 현 서버 구조로 옮기고 구조 문제(전역 상태·전역 락·dict 결과·Geo 두 벌·의존 방향)만 정리. 점수·기준값·말 다듬기 로직은 그대로
+- 이동(git mv): corrector.py → app/address/matcher.py(찾기·판정) + phonetic.py(소리 비교) + parse.py(말 다듬기·재시도 표기 — integrations의 split_gil·retries 포함), stt_preprocess.py → numbers.py, db.py → gazetteer.py, kakao.py → app/integrations/kakao.py, 테스트 → app/tests/test_address.py·address_sample_db.py·fixtures/roads_sample.csv. address_resolver/ 삭제
+- 바뀐 구조: 결과는 Resolution(status, address, candidates) dataclass(쓰지 않던 "weak" 키 삭제). 전역 _db·load() → gazetteer.open_db()로 열어 AddressService(db)에 주입(main.py). 전역 threading.Lock 제거, SQLite 연결은 스레드마다. 재시도 루프는 matcher.resolve()로(순서 동일). kakao.geocode는 도메인 Geo를 돌려주고, BE 모양 Geo(pydantic)는 backend_client/order.py로. backend_client는 app.address.phonetic·parse를 씀
+- 유지한 계약: AddressService.resolve() → AddressResult(status·address·alternatives·geo), 도구 결과 코드, P6, ADDRESS_DB·KAKAO_REST_API_KEY, data/address.db 스키마(재빌드 불필요)
+- 검증: 전체 525 passed(이전과 같음). 시험지 address_v1 105문항 기준선과 사례별 상태·기록 주소·후보 차이 0(evaluation/results/address_v1_stage1.json). 빈 캐시 주소DB를 스레드 8개로 동시에 3회×210건 — 기준선과 차이 0
+- 지연: 반복 P50 7.5ms·P95 103ms(기준선 8.8·111). 105건 동시 2.13s ≈ 순차 2.12s — 락을 없애도 GIL(순수 Python 편집거리) 때문에 병렬 이득 없음. 3단계에서 프로세스 풀 등 측정 후 결정
+- 기타: Dockerfile COPY address_resolver, pyproject testpaths, README·concurrency.md·test-strategy.md·tool-contracts.md 갱신. Docker 이미지 빌드는 이번에 확인 안 함
