@@ -40,30 +40,6 @@ def retries(heard: str) -> list[str]:
     return list(dict.fromkeys(x for x in out if x))
 
 
-# 받아쓴 그대로 넘긴 기본주소의 말끝(backend_rules.md). "이요"·"이에요"는 앞 글자에 받침이 있으면 두 가지로 읽힌다
-# ("테헤란로 이일이요" = "이일이"+"요" / "이일"+"이요"). 이름은 문법만으로 정하지만(record.clean_name) 번호는 글자만으로
-# 못 정해서, 두 해석을 다 찾아 보고 주소DB에 있는 쪽을 쓴다(둘 다 있으면 후보 둘 — 확정하지 않음)
-_ENDING = re.compile(r"\s*(입니다|이에요|예요|에요|이요|요)[.!?\s]*$")
-
-
-def _has_final(ch: str) -> bool:
-    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
-
-
-def endings(heard: str) -> list[str]:
-    """말끝을 뗀 해석(1~2개). 말끝이 없으면 빈 목록."""
-    m = _ENDING.search(heard)
-    if not m:
-        return []
-    base = heard[:m.start()].rstrip()
-    if m[1] in ("이요", "이에요"):
-        with_i = base + "이"
-        out = [base, with_i] if _has_final(base[-1:]) else [with_i]
-    else:
-        out = [base]
-    return [x for x in out if x]
-
-
 @dataclass(frozen=True)
 class AddressResult:
     status: Literal["confirmed", "ambiguous", "not_found", "off", "error"]
@@ -97,9 +73,11 @@ class AddressService:
 
     async def _resolve(self, heard: str) -> AddressResult:
         with span("address", step="correct"):
-            r = await self._correct(heard)
-            if r is not None and r["status"] == "not_found":
-                r = await self._retry(heard) or r
+            r = await asyncio.get_running_loop().run_in_executor(self.pool, address_resolver.correct_blocking, heard)
+            for retry in retries(heard) if r is not None and r["status"] == "not_found" else ():
+                r = await asyncio.get_running_loop().run_in_executor(self.pool, address_resolver.correct_blocking, retry)
+                if r["status"] != "not_found":
+                    break
         if r is None:
             status, address, alternatives = "off", heard, ()
         elif r["status"] == "not_found":
@@ -112,21 +90,3 @@ class AddressService:
                 g = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
         geo = Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None
         return AddressResult(status, address, alternatives, geo)
-
-    async def _correct(self, text: str) -> dict | None:
-        return await asyncio.get_running_loop().run_in_executor(self.pool, address_resolver.correct_blocking, text)
-
-    async def _retry(self, heard: str) -> dict | None:
-        """못 찾았을 때: 말끝 해석마다 다시 보는 표기(retries)를 차례로 보고 처음 찾은 것. 해석이 둘이고 둘 다 찾으면 후보 둘."""
-        found = []
-        for base in endings(heard) or [heard]:
-            for text in ([base] if base != heard else []) + retries(base):
-                r = await self._correct(text)
-                if r["status"] != "not_found":
-                    found.append(r)
-                    break
-        found = [r for r in found if r["status"] == "confirmed"] or found  # 그대로 있는 해석이 고쳐야 맞는 해석보다 먼저
-        if len(found) < 2:
-            return found[0] if found else None
-        cands = list(dict.fromkeys(c for r in found for c in (r["candidates"] or [r["address"]])))
-        return found[0] if len(cands) == 1 else {"status": "ambiguous", "address": cands[0], "candidates": cands}

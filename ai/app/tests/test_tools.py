@@ -364,27 +364,6 @@ def test_attached_korean_gil_number_retried_only_when_not_found(corrector, addre
     assert run(address.resolve("구미시 없는구길 99")).status == "not_found"
 
 
-def test_spoken_ending_read_both_ways_and_db_decides(corrector, address, monkeypatch):
-    """기본주소를 받아쓴 그대로 넘김(backend_rules.md) → 말끝 "이요"는 두 해석을 다 찾아 실제 주소인 쪽."""
-    from app.integrations.address import endings
-    assert endings("테헤란로 이일이요") == ["테헤란로 이일", "테헤란로 이일이"]  # 일(받침) + 이요 / 이일이 + 요
-    assert endings("테헤란로 이백십이요") == ["테헤란로 이백십", "테헤란로 이백십이"]
-    assert endings("인동 구길 사이요") == ["인동 구길 사이"]  # 받침 없는 글자 뒤 "이요"는 "요"만
-    assert endings("테헤란로 이백십일입니다") == ["테헤란로 이백십일"] and endings("테헤란로 212") == []
-    r = run(address.resolve("서울 강남구 테헤란로 이백십이요"))  # 210은 없고 212는 있음
-    assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
-    r = run(address.resolve("서울 강남구 테헤란로 이백십일이요"))  # 이백십일(211)·이백십일이(보정기도 212로 읽음) 둘 다 있음
-    assert (r.status, r.address, r.alternatives) == ("ambiguous", "서울특별시 강남구 테헤란로 211", ("서울특별시 강남구 테헤란로 212",))
-    assert run(address.resolve("경북 구미 인동구길 칠 다시 삼이요")).address == "경상북도 구미시 인동9길 7-3"  # 말끝 + 붙인 길
-    # 두 해석이 다 실제 주소면 확정하지 않고 후보 둘
-    real = {"서울 강남구 테헤란로 이일": "서울특별시 강남구 테헤란로 21", "서울 강남구 테헤란로 이일이": "서울특별시 강남구 테헤란로 212"}
-    monkeypatch.setattr(address_resolver, "correct_blocking", lambda t: {"status": "confirmed", "address": real[t],
-                        "candidates": [real[t]]} if t in real else {"status": "not_found", "address": None, "candidates": []})
-    r = run(address.resolve("서울 강남구 테헤란로 이일이요"))
-    assert r.status == "ambiguous" and (r.address, r.alternatives) == (real["서울 강남구 테헤란로 이일"],
-                                                                       (real["서울 강남구 테헤란로 이일이"],))
-
-
 def test_building_name_after_comma_retried_only_when_not_found(corrector, address):
     from app.integrations.address import retries
     assert retries("구미시 인동9길 7-3, 무슨빌라") == ["구미시 인동9길 7-3"] and retries("서울 강남구 테헤란로 212") == []

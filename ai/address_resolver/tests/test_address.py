@@ -177,16 +177,6 @@ def test_jibun_address_resolves_to_road_address(db):
     assert correct(db, "경북 구미시 인의동 9999")["status"] == "not_found"
 
 
-def test_glued_dasi_between_numbers_is_branch_separator(db):
-    """운영 통화 8ffabaca: Backend가 "인동구길 이십이다시일"을 붙여 넘겨 못 찾음. 숫자 사이 "다시"는 부번 표시."""
-    from address_resolver.corrector import normalize_text
-    assert correct(db, "경북 구미시 인동 구길 칠다시삼")["address"] == "경상북도 구미시 인동9길 7-3"
-    assert correct(db, "경북 구미시 인동 구길 칠대시삼")["address"] == "경상북도 구미시 인동9길 7-3"
-    assert correct(db, "경북 구미시 인의동 팔백사십사다시오")["address"] == "경상북도 구미시 인동9길 7-3"  # 지번
-    assert normalize_text("나주시 다시면 다시로 12") == "나주시 다시면 다시로 12"  # 도로명·면 이름은 그대로
-    assert normalize_text("고다시길 3") == "고다시길 3"
-
-
 def test_load_turns_off_without_db_file(tmp_path, db_path, monkeypatch):
     try:
         assert address.load(tmp_path / "none.db") is False and run(address.correct("서울 강남구 테헤란로 212")) is None

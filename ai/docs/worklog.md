@@ -476,19 +476,3 @@
 - 테스트 test_policy 1줄. 501 passed. 실통화 확인 필요
 
 - Jira159 MR 추가 충돌 처리: 이전 해결 후 develop-ai가 6fa05a0 → 5c2bbec로 갱신되며 위 기록 5줄이 추가됐다. 이번 변경은 worklog.md만이므로 양쪽 기록을 모두 보존하고 충돌 표식·git diff --check를 확인했다. 동작 코드·테스트 파일 변화가 없어 이전 525개 테스트 결과를 유지하며 반복 실행하지 않았다. 기능 브랜치만 갱신하고 MR 최종 병합은 사용자에게 남긴다.
-## 2026-11-04 AGENTS.md: 땜질 패치 금지
-- §9 금지 사항에 "특정 통화·문장·조건에만 맞춘 예외 처리용 땜질 패치 금지, 근본 원인을 공통 경로에서 수정" 추가(사용자 지시)
-- 확인: 결과 본문 customerSeq = BE 고객 번호(customers.customer_seq, 등록 고객), customer{name, phoneNumber} = 미등록 고객 이름·발신번호(주문과 함께 고객 생성). 둘 중 하나만. 택배 보내는 분 성함은 parcels[].origin.name(parcel.origin_name)으로 별도 저장(develop-backend 277cf1c create-order.dto.ts·orders.service.ts·orders.repository.ts)
-## 2026-11-04 주소 보정기: 숫자 사이에 붙은 "다시"
-- 원인(운영 통화 8ffabaca): Backend가 "인동구길 이십이다시일"로 넘김 → corrector.parse의 TAIL_TOKEN이 "다시"를 떨어진 토큰일 때만 숫자로 봐서 "이십이다시일"을 도로명 일부로 읽음 → not_found
-- 수정: address_resolver/corrector.normalize_text에 앞뒤가 숫자 글자인 "다시|대시"를 띄우는 한 줄(사용자 승인: 보정기 수정). 주소DB의 "다시로"·"고다시길"·"다시면"은 앞뒤가 숫자 글자가 아니라 그대로
-- 실제 주소DB: 인동 구길 이십이다시일·인동구길 이십이다시일(붙인 길 번호는 기존 재시도) → 인동9길 22-1, 칠다시삼 → 7-3. 띄어 쓴 표기·신정이펜일로 오십 결과 같음
-- 테스트 address_resolver test_glued_dasi_between_numbers_is_branch_separator(도로명·지번·대시·다시로/고다시길 유지). 502 passed
-
-## 2026-11-04 기본주소는 받아쓴 그대로(규칙 4번 C) + 말끝 두 해석
-- 비교(받는 곳 발화 14개 × 3회, gpt-6-luna → 보정기·서버 재시도 → 정답 대조): A 현재(숫자로 바꿈) 33/42(틀린 확정 3: "이십이다시일"→20-1 등), B 한글 띄어 씀 34/42, C 받아쓴 그대로 39/42(틀린 확정 0). 최종 문장(말끝도 그대로, 서버가 뗌)은 fix/address-glued-dasi 보정기와 함께 39/42(실패 3 = "사백 일층이요"를 상세로 안 나눔 → 못 찾음·다시 물음)
-- policy/backend_rules.md: 규칙 4번을 "기본주소는 받아쓴 그대로(띄어쓰기·숫자·말끝 그대로), 층·동·호수는 기본주소에 넣지 않음, 상세주소 동·호수·층은 숫자"로, 규칙 2번 예시 "… 신정이펜일로 오십"
-- app/integrations/address.py: 못 찾았을 때 말끝을 뗀 해석(endings)마다 기존 재시도(retries)를 차례로. "이요·이에요"는 앞 글자에 받침이 있으면 두 해석("이일이요" = 이일 / 이일이) — 확정이 있으면 확정 우선, 둘 다 실제 주소면 후보 둘(ambiguous, 첫째 자동 선택·후보 보관). 이름 말끝(record.clean_name)은 문법만으로 정하지만 번호는 주소DB로 가린다
-- 지연: 못 찾았을 때만 보정 1회 3~11ms(로컬) × 최대 몇 회
-- 테스트 test_spoken_ending_read_both_ways_and_db_decides. 526 passed
-- 남은 것: 상세주소 ""(말하지 않음) 규칙과 못 찾은 주소의 상세주소 보존(계획 E)은 미적용. 보정기가 "사백 일"(401 없음)을 402로 확정한 사례 1건(퍼지 확정, 원인 미확인)
