@@ -38,11 +38,11 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   CANCELLED_BEFORE_PAYMENT: '결제 전 취소',
 }
 
-/** 주문 상세 '관련 통화' 줄: 구분 태그 · 내용 */
+/** 주문 상세 '관련 통화' 줄: 이 주문에 한 일 (칩은 04 통화 목록과 같은 상담 유형 칩) */
 export const RELATED_CALL_LABEL: Record<
   OrderDetail['relatedCalls'][number]['kind'],
-  { tag: string; text: string }
+  { text: string }
 > = {
-  ACCEPT: { tag: '접수', text: '새 주문 접수' },
-  CANCEL: { tag: '취소', text: '주문 취소' },
+  ACCEPT: { text: '새 주문 접수' },
+  CANCEL: { text: '주문 취소' },
 }

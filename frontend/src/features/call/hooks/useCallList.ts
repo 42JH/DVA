@@ -3,7 +3,8 @@ import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtDuration, fmtPhone, fmtRowTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
-import { COMPLAINT_LABEL, KIND_LABEL } from '@/features/call/labels'
+import { KINDS, kindChips } from '@/shared/lib/callKind'
+import { COMPLAINT_LABEL } from '@/features/call/labels'
 import { matchCall, type CallFilter, type CallKind } from '@/features/call/api/callDto'
 import {
   callPersonaQueries,
@@ -17,7 +18,7 @@ import {
 
 export type { CallKind } from '@/features/call/api/callDto'
 
-export const KINDS: CallKind[] = ['accept', 'lookup', 'cancel', 'faq']
+export { KINDS, kindChips } from '@/shared/lib/callKind'
 export const DUR_MAX = 20 // 통화 시간 슬라이더 끝(분) — 끝까지 두면 위 제한 없음
 
 /** 필터 창 값 (분 단위). max === DUR_MAX = 위 제한 없음 */
@@ -43,13 +44,6 @@ export type CallListRow = CallRow & {
 // URL 쿼리 기본값 (useListParams 규칙: 모듈 상수) — 06 갔다가 뒤로가기 하면 날짜 · 조건 그대로
 // date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
 const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
-
-/** 상담 유형 칩 — 한 것만, 두 번 이상이면 '접수 3' (04 줄 · 06 머리) */
-export const kindChips = (counts: CallRow['counts']) =>
-  KINDS.flatMap((kind) => {
-    const n = counts?.[kind] ?? 0
-    return n > 0 ? [{ kind, label: n > 1 ? `${KIND_LABEL[kind]} ${n}` : KIND_LABEL[kind] }] : []
-  })
 
 const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
   ...r,

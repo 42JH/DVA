@@ -1,3 +1,4 @@
+import { CHIP_CLASS } from '@/shared/lib/callKind'
 import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
 import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail'
 
@@ -77,11 +78,7 @@ export function CallActions({
               <span className="w-12 shrink-0 text-label leading-7 text-sub tabular-nums">
                 {a.time}
               </span>
-              <span
-                className={`grid h-7 min-w-12 shrink-0 place-items-center px-2 text-label ${ACTION_BG[a.tag] ?? 'bg-bg'}`}
-              >
-                {a.tag}
-              </span>
+              <span className={`${CHIP_CLASS} ${ACTION_BG[a.tag] ?? 'bg-bg'}`}>{a.tag}</span>
               <span className="min-w-0 text-body leading-7 break-words">{a.text}</span>
             </>
           )

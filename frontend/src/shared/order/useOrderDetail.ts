@@ -10,6 +10,7 @@ import {
   type OrderGroup,
 } from './labels'
 import { orderQueries, type OrderDetail, type Party } from './orderApi'
+import { kindChips, type CallKind } from '@/shared/lib/callKind'
 
 /** 보내는 분 · 받는 분 카드 — 빈 칸은 '' (미완료 주문) */
 export interface PartyView {
@@ -31,8 +32,8 @@ export interface OrderView {
     key: string
     callSessionSeq: number
     time: string
-    cancel: boolean // 칩 색 (04 통화 목록 칩과 같은 색: 접수 · 취소)
-    tag: string
+    kinds: { kind: CallKind; label: string }[] // 04 통화 목록 줄과 같은 칩 (11/05 사용자: 모양 · 내용 통일)
+    analyzed: boolean // false = 분석 전 칩
     text: string
   }[]
   canEdit: boolean // 취소 · 결제 완료(디버 접수 중 · 접수 완료 포함)는 [수정] 없음 (11/05 사용자). 접수 실패는 고쳐서 다시 접수하게 둠
@@ -112,8 +113,17 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
       key: `${c.callSessionSeq}-${c.kind}`,
       callSessionSeq: c.callSessionSeq,
       time: fmtDetailTime(c.startedAt),
-      cancel: c.kind === 'CANCEL',
-      tag: RELATED_CALL_LABEL[c.kind].tag,
+      // 통화 요약이 있으면 04와 같은 칩, 없는 가짜 주문은 kind로 한 칩
+      kinds:
+        c.counts === undefined
+          ? [
+              {
+                kind: c.kind === 'CANCEL' ? 'cancel' : 'accept',
+                label: c.kind === 'CANCEL' ? '취소' : '접수',
+              },
+            ]
+          : kindChips(c.counts),
+      analyzed: c.counts !== null,
       text: RELATED_CALL_LABEL[c.kind].text,
     })),
     canEdit: group !== 'CANCELLED' && group !== 'PAID',
