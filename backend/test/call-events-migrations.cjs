@@ -66,7 +66,11 @@ function registerCallEventsMigrations(suite) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      // 격리 테스트 트랜잭션 안에서만 과거 스키마를 복원하고 025 → 042 전환을 재현한다.
+      // 과거 migration이 이후 계약의 해시까지 재작성하지 않도록 기존 행을 격리한다.
+      await client.query(
+        'CREATE TEMP TABLE analysis_before_legacy_upgrade ON COMMIT DROP AS SELECT * FROM public.call_analyses',
+      );
+      await client.query('DELETE FROM public.call_analyses');
       await client.query(
         "ALTER TABLE call_analyses ADD COLUMN result text NOT NULL DEFAULT 'INQUIRY'",
       );
@@ -133,6 +137,9 @@ function registerCallEventsMigrations(suite) {
       );
       await client.query(
         readFileSync(join(__dirname, '../migrations/042-remove-call-analysis-result.sql'), 'utf8'),
+      );
+      await client.query(
+        'INSERT INTO public.call_analyses SELECT * FROM analysis_before_legacy_upgrade',
       );
       await client.query('COMMIT');
     } catch (failure) {
