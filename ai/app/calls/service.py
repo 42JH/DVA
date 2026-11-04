@@ -122,6 +122,8 @@ class CallService:
         info = {"전화 받은 시각": _kst(s.incoming_at), "고객": "등록 고객" if c.customer_seq else "처음 이용하는 고객"}
         if c.name:
             info["고객 성함"] = c.name
+        if c.customer_seq and c.origin_address:
+            info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
         tools = tuple((t["name"], t["description"]) for t in function_specs())
         config = {"type": "live", "model": "gpt-live-1",
                 "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
@@ -356,6 +358,9 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     c.customer_seq, c.name = ctx.customer_seq, ctx.name
     c.payment_methods = tuple(ctx.payment_methods)
     c.call_session_seq = ctx.call_session_seq or c.call_session_seq
+    origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
+    if origin and origin.address:
+        c.origin_address = origin.address
     places, seen = [], set()
     for src, items in ((Source.HISTORY, ctx.recent_destinations), (Source.PIN, ctx.places)):
         for p in items:

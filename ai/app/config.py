@@ -110,6 +110,7 @@ class CallConfig(_Strict):
     utterance_gap_ms: int = Field(800, gt=0)         # 마지막 입력 delta 뒤 무 delta → 발화 끝(S0c·S0d)
     decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
+    unanswered_agent_after: int = Field(3, gt=0)     # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙 h)
     commit_delay_ms: int = Field(700, ge=0)          # 확인 "예" 뒤 확정 지연(새 입력이 오면 취소)
     notify_quiet_ms: int = Field(600, gt=0)          # N2는 AI 발화가 이만큼 멈춘 뒤 보낸다
     n3_max: int = Field(3, ge=0)                     # P4: 정정 3회

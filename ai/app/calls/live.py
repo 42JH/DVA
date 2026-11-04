@@ -57,6 +57,7 @@ class Runtime:
     n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
+    unanswered: int = 0                               # 매뉴얼 검색이 연속으로 답을 못 한 횟수(3회 → 상담원 권유, 답하면 0)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -341,6 +342,20 @@ class LiveFlow:
         offer(st, "parcel", labels, tuple(p.parcel_id for p in st.parcels))
         return {"edit_parcel": "choose", "labels": list(labels)}
 
+    def _count_unanswered(self, s: CallSession, out: dict) -> dict:
+        """같은 질문에 3번 연속 답을 못 드리면 상담원 연결 권유(업무 규칙). 답이 나오면 0으로.
+        shortcut: 질문이 같은지 보지 않고 연속 실패만 센다 — 다른 질문으로 바뀌어도 이어 센다."""
+        rt = self.rt(s)
+        if out.get("status") == "ok" and (out.get("facts") or {}).get("answerable"):
+            rt.unanswered = 0
+            return out
+        rt.unanswered += 1
+        if rt.unanswered < self.cfg.unanswered_agent_after:
+            return out
+        rt.unanswered = 0
+        s.note("상담원 권유", "매뉴얼 연속 미답변")
+        return out | {"facts": (out.get("facts") or {}) | {"agent": "suggest"}}
+
     # ------------------------------------------------------------------ S6: 등록·결과 전송(대화는 기다리지 않음)
     def _maybe_register(self, s: CallSession) -> None:
         """미등록 고객이 보내는 분 성함·주소·상세를 다 말하면 1번(원본 register_customer)."""
@@ -431,6 +446,8 @@ class LiveFlow:
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
+        if name == "search_manual":
+            out = self._count_unanswered(s, out)
         if name == "lookup_orders" and s.state.selected_order:  # 1건이면 바로 취소 확인 대기(의도가 취소일 때)
             async with s.lock:
                 if s.state.intent == "cancel":

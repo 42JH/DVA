@@ -131,6 +131,7 @@ class Customer:
     payment_methods: tuple[str, ...] = ()  # BE availablePaymentMethods
     call_session_seq: int | None = None    # 2단계 고객 확인으로 받은 통화 번호(조회·취소·주소 이력의 고객 범위)
     places: tuple[Place, ...] = ()         # 받는 곳 후보 원천(최근 도착지 → 주소록 순)
+    origin_address: str | None = None      # 등록된 출발지 도로명(고객 기본 주소, 없으면 최근 출발지) — 인사용, 상세주소 제외
 
 
 @dataclass

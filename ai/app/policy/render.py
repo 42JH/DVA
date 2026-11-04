@@ -1,16 +1,27 @@
 """정책 → Live 지시문·Backend 지시문·Decision 질문. 같은 Policy 객체에서 서버 판정(app/domain/assess.py)도 나온다.
 
-Live 지시문 = 페르소나 promptText(우선, P2) 또는 서버 기본 프롬프트 + 아래 정책 렌더링(절차·위임·금지).
+Live 지시문 = [페르소나: BE promptText, 없으면 policy/persona_default.md] + [업무 규칙: policy/business_rules.md
++ 정책 렌더링(절차·위임·금지·서버 결과 읽는 법)] + [통화 정보]. 업무 규칙이 페르소나보다 우선(business_rules.md 첫머리).
+Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드는 이어 붙이기만 한다(docs/architecture/prompt-layout-plan.md).
 """
 
 from app.config import ROOT
 from app.policy.model import Policy
 
-DEFAULT_PROMPT_PATH = ROOT / "policy" / "default_prompt.md"
+POLICY_DIR = ROOT / "policy"
 
 
-def default_prompt() -> str:
-    return DEFAULT_PROMPT_PATH.read_text(encoding="utf-8")
+def _read(name: str) -> str:
+    return (POLICY_DIR / name).read_text(encoding="utf-8").strip()
+
+
+def default_persona() -> str:
+    """BE 페르소나가 없을 때(연동 꺼짐·ACTIVE 없음, P2)."""
+    return _read("persona_default.md")
+
+
+def business_rules() -> str:
+    return _read("business_rules.md")
 
 
 def _labels(policy: Policy, names) -> list[str]:
@@ -54,10 +65,9 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
 
 def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, str] | None = None,
                 tools: tuple[tuple[str, str], ...] = ()) -> str:
-    """P2: 페르소나 promptText 우선, 없으면(조회 실패·빈 값) 서버 기본 프롬프트. 정책 절차는 뒤에 붙는다."""
-    base = prompt_text.strip() if prompt_text and prompt_text.strip() else default_prompt()
-    parts = [base, "", "페르소나 지시와 아래 절차가 충돌하면 페르소나 지시를 따르되, '하지 않는 것'은 항상 지킵니다.", "",
-             render_policy(policy, tools)]
+    """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
+    persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
+    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)
@@ -65,11 +75,7 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
 
 def render_backend(policy: Policy) -> str:
     free = ", ".join(f"{policy.fields[n].label}({n})" for n in policy.free_fields())
-    return ("음성 상담의 백엔드입니다. 고객 발화(음성 전사)에서 값을 뽑아 알맞은 도구를 호출합니다.\n"
-            f"뽑는 값: {free}. 말하지 않은 항목은 null입니다. 들은 숫자는 한 자리씩 빠짐없이 그대로 넣습니다.\n"
-            "예/아니요·후보 선택·용건 분류·결제 방식 판단은 하지 않습니다(서버가 합니다). 다음 절차도 정하지 않습니다.\n"
-            "물품을 기록할 때는 바뀐 규격만이 아니라 지금 보낼 물품 전체(규격별 개수)를 넣습니다(정정 포함).\n"
-            "도구 결과의 facts·fields·missing만 근거로 Live가 말할 내용을 한두 문장으로 돌려줍니다. 결과를 지어내지 않습니다.")
+    return _read("backend_rules.md").replace("{fields}", free)
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,

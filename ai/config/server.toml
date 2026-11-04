@@ -75,3 +75,4 @@ closing_max_sec = 15.0
 silence_sec = 30.0
 expire_margin_sec = 60.0
 finalize_wait_sec = 5.0
+unanswered_agent_after = 3   # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙)

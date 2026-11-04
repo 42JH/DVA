@@ -151,7 +151,7 @@ call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리�
 closing = "true면 마무리 인사를 한 번 하고 기다린다. 전화는 서버가 끊는다"
 unverified = "방금 말한 것 중 사실이 아닌 표현. truth의 값이 사실이다. 바로잡아 안내한다"
 cancel = "취소 결과: done=취소됨, already=이미 취소된 접수, locked=결제가 끝나 전화로 취소 불가, unknown=확인 중(완료라고 말하지 않는다)"
-agent = "not_configured면 지금은 상담원 연결이 안 된다. 담당자가 확인 후 연락드린다고 안내한다"
+agent = "not_configured면 지금은 상담원 연결이 안 된다. 담당자가 확인 후 연락드린다고 안내한다. suggest면 같은 질문에 답을 드리지 못했으니 상담원 연결을 권한다(권유 멘트)"
 unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로 말하지 않고 지금 확인이 어렵다고 안내한다"
 confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되읽고 '이대로 접수할까요?'로 묻는다(고객이 그 질문에 답해야 확정된다). cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
 order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), notPaid는 카드 결제 대기(결제 안내는 따로 간다고만), pending이나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"

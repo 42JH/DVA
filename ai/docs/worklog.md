@@ -335,3 +335,14 @@
 - 원인: 첫 인사를 지시문(default_prompt "고객이 말하기 전에 먼저 인사")에만 맡김 → 최근 6통화 중 4건은 고객 "여보세요" 뒤에 인사. 원본 서버도 서버 신호 없음
 - 수정: LiveFlow.on_started — session.started 때 AI가 아직 말하지 않았고 고객도 말하지 않았으면 N2(commentary) {"call_started": true}. 정책 [results].call_started("바로 첫 인사, 한 번만")
 - 테스트 483 passed(+1). 실통화 미확인(이중 인사 여부)
+
+## 2026-11-04 — 지시문 파일 분리(페르소나만 BE), 등록 출발지 인사, 매뉴얼 연속 미답변 → 상담원 권유
+
+계획: docs/architecture/prompt-layout-plan.md v5 단계 2·3(계약과 무관한 부분). 합의 계약: docs/be-requests/2026-11-04-pickup-callback-handoff-pins.md
+- 프롬프트 분리: policy/persona_default.md(페르소나, BE promptText 없을 때) · policy/business_rules.md(업무 규칙, "페르소나보다 우선") · policy/backend_rules.md(Backend 지시문 + 번호 부분 정정 d). policy/default_prompt.md 삭제
+- render_live: 페르소나 → 업무 규칙 → 정책 절차(workflow.toml 렌더) → 통화 정보. "충돌 시 페르소나 우선" 문장 삭제. render_backend는 파일 읽기
+- 제시 프롬프트 반영 시 고친 문장: 진행 상태 → 서버 결과, 확인 답 위임 삭제(b), 번호 확인은 phones_to_read(c), 부분 정정(d), 상담원은 "담당자가 확인 후 연락"(전환 없음), 검색 결과는 한 번에 근거 최대 3개, 마무리 멘트 고정. 주소 맞장구(i)는 페르소나, "주소를 다시 말하지 않음" 삭제
+- f: Customer.origin_address(고객 기본 주소, 없으면 최근 출발지 도로명) → 등록 고객 통화 정보 "등록된 출발지"(상세주소 제외)
+- h: search_manual 연속 미답변 3회(config [call].unanswered_agent_after) → 도구 결과 facts.agent="suggest", 답이 나오면 0. shortcut: 질문 동일성은 보지 않음. [results].agent에 suggest 뜻 추가
+- 보류(계약 대조 후): a 수거 일시(규칙 파일은 현재 서버 동작 유지), e 이관 요청 전송, g 주소록 갱신
+- 테스트 486 passed(+3: 지시문 순서·우선순위·기본 페르소나, 규칙 파일의 결과 키, 등록 출발지, 연속 미답변)

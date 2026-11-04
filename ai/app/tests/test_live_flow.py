@@ -265,3 +265,18 @@ def test_agent_greets_first_on_session_start():
     conn = run(scenario())
     greets = [e for e in conn.sent if "call_started" in e.get("content", "")]
     assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"
+
+
+def test_three_unanswered_manual_searches_suggest_agent_then_reset():
+    """같은 질문에 3번 연속 답을 못 드리면 상담원 권유(업무 규칙 h), 답이 나오면 0으로."""
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.cfg = SimpleNamespace(unanswered_agent_after=3)
+    s = SimpleNamespace(rt=None, note=lambda *a: None)
+    miss = {"status": "ok", "code": "KB_NO_EVIDENCE", "facts": {"answerable": False}}
+    hit = {"status": "ok", "facts": {"answerable": True}}
+    down = {"status": "unavailable", "code": "KB_UNAVAILABLE"}
+    assert "agent" not in lf._count_unanswered(s, miss)["facts"]
+    lf._count_unanswered(s, hit)  # 답이 나오면 0
+    assert "agent" not in lf._count_unanswered(s, miss)["facts"] and "facts" not in lf._count_unanswered(s, down)
+    out = lf._count_unanswered(s, miss)
+    assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
