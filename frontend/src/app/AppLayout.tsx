@@ -25,13 +25,13 @@ export function AppLayout() {
   }, [pathname, search])
 
   return (
-    // 틀 (디자인 '프레임' 11/04): 옅은 하늘색 바탕 위에 왼쪽 아이콘 줄 + 오른쪽 흰 카드(위 · 오른쪽 · 아래 4 띄움, 모서리 16)
+    // 틀 (디자인 '프레임' 11/04): 옅은 하늘색 바탕 위에 왼쪽 아이콘 줄 + 오른쪽 흰 카드(위 · 오른쪽 · 아래 4 띄움, 모서리 20)
     <div className="flex h-full bg-frame">
       <Sidebar
         onLogout={logout}
         showAdmins={isSystemAdmin} // 설정 ▸ 관리자(10 관리자 권한 관리)는 최고 관리자만 (RequireRole과 짝)
       />
-      <div className="my-1 mr-1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-2xl bg-surface">
+      <div className="my-1 mr-1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-surface">
         <PageHeader title={title} unanswered={unanswered} />
         <main
           ref={main}
