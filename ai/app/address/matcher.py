@@ -225,14 +225,12 @@ def jibun_candidates(db, text):
 
 
 # --- 판정 ------------------------------------------------------------------------
-NUM_MAX = 2.7      # 건물번호 소리 거리 상한 (본번 숫자 한 글자 넣고 빼기 정도)
 CONFIRM_MAX = 3.0  # 이보다 많이 고쳐야 맞는 주소는 확정하지 않고 고객에게 확인
 MARGIN = 1.0       # 1등과 이만큼 이상 차이 나야 확정. 안 나면 애매함
-NUM_CONFIRM_MAX = 0  # 건물번호를 고쳐서 맞춘 주소는 확정하지 않음 (다른 도로를 잘못 들은 경우와 구별이 안 됨)
 
 
 def number_distance(heard, real):
-    """건물번호 "본번-부번" 둘의 소리 거리. 부번을 안 말한 것도 거리로 친다."""
+    """건물번호 "본번-부번" 둘의 거리(읽는 소리 기준이라 "07"과 "7"은 0). 부번을 안 말한 것도 거리로 친다."""
     hm, _, hs = heard.partition("-")
     rm, _, rs = real.partition("-")
     return num_distance(hm, rm) + num_distance(hs, rs)
@@ -276,8 +274,9 @@ def correct(db, text) -> Resolution:
 
 
 def _correct(db, text) -> Resolution:
-    """도로 후보마다 실제 건물번호 전부와 소리 거리를 재서 (도로명 거리 + 길 번호 거리 + 건물번호 거리)가
-    가장 작은 실제 주소를 고른다. 1등이 뚜렷하지 않으면(일/이처럼 소리로는 못 가리는 경우) 확정하지 않는다.
+    """도로 후보마다 들은 건물번호(지번)가 실제로 있는 주소만 남겨 (도로명 거리 + 길 번호 거리)가 가장 작은 주소를 고른다.
+    건물번호를 고쳐야만 맞는 주소는 후보가 아니다(사용자 결정 2026-11-05: 없는 "테헤란로 210"을 510으로 기록하던 문제 —
+    번호를 잘못 들었는지 없는 번호인지 구별할 수 없으니 다시 묻는다). 1등이 뚜렷하지 않으면 확정하지 않는다.
     지번 후보도 같은 점수로 같이 비교한다. db 는 numbers()/areas()/jibun_numbers() 가 있는 gazetteer.AddressDB.
     """
     # (이름 거리, 들은 번호, 실제 (번호, 주소) 목록 읽기)
@@ -291,18 +290,13 @@ def _correct(db, text) -> Resolution:
         if d > sources[0][0] + CONFIRM_MAX:  # 이름부터 1등보다 훨씬 먼 후보는 볼 필요 없음
             break
         for real, address in numbers():
-            n = number_distance(number, real)
-            if n <= NUM_MAX and d + n < scored.get(address, (99,))[0]:
-                scored[address] = (d + n, n)
+            if number_distance(number, real) == 0 and d < scored.get(address, 99):
+                scored[address] = d
     ranked = sorted(scored.items(), key=lambda x: x[1])
     if not ranked:
         return NOT_FOUND
-    best, best_n = ranked[0][1]
-    if best > CONFIRM_MAX and best_n > 0:
-        # 도로명을 많이 고치고 건물번호까지 바꿔야 맞는 주소는 실제로 없는 주소를 비슷한 곳에 억지로 맞춘 것이다
-        # ("구미시 없는길 99" -> 임은길 19). 엉뚱한 실제 주소로 바꾸지 않고 못 찾음으로(2026-10-28)
-        return NOT_FOUND
-    close = tuple(a for a, (c, _) in ranked if c - best < MARGIN)[:3]
-    if len(close) == 1 and best <= CONFIRM_MAX and best_n <= NUM_CONFIRM_MAX:
+    best = ranked[0][1]
+    close = tuple(a for a, c in ranked if c - best < MARGIN)[:3]
+    if len(close) == 1 and best <= CONFIRM_MAX:
         return Resolution("confirmed", close[0], close)
     return Resolution("ambiguous", None, close)

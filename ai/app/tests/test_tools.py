@@ -155,8 +155,8 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     out = call(c, "record_fields", {"receiver_address": "테헤란로 212", "receiver_address_detail": "403호"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").status == FieldStatus.INVALID
     assert s.field_of("receiver_address_detail").status == FieldStatus.EMPTY  # 못 찾은 주소의 상세주소도 믿지 않는다
-    best, *rest = correct(corrector, "서울 강남구 테헤란로 112").candidates
-    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 112", "receiver_address_detail": "101호"})
+    best, *rest = correct(corrector, "서울 강남구 대해남노 211").candidates  # 도로명을 많이 고쳐 확정하지 않는 주소
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 대해남노 211", "receiver_address_detail": "101호"})
     f = s.field_of("receiver_address")
     assert f.value == best and f.candidates == tuple(rest) and out["facts"]["auto_selected"] == ["receiver_address"]
 

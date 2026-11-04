@@ -154,9 +154,9 @@ def test_correct_statuses(db):
     assert correct(db, "서울 강남구 테헤란로2길 10").address == "서울특별시 강남구 테헤란로1길 10"
     # 1길 32, 2길 32 둘 다 있음 -> 들은 그대로 있는 쪽
     assert correct(db, "서울 강남구 테헤란로2길 32").address == "서울특별시 강남구 테헤란로2길 32"
-    # 건물번호를 고쳐야 맞는 주소는 확정하지 않고 후보로만
-    r = correct(db, "서울 강남구 테헤란로 112")
-    assert r.status == "ambiguous" and "서울특별시 강남구 테헤란로 111" in r.candidates, r
+    # 건물번호를 고쳐야만 맞는 주소는 후보로도 두지 않는다(없는 번호를 비슷한 번호로 기록하지 않게, 사용자 결정 2026-11-05)
+    assert correct(db, "서울 강남구 테헤란로 112") == NOT_FOUND
+    assert correct(db, "경북 구미시 인동9길 7") == NOT_FOUND  # 부번을 빼면 다른 번호(7-3을 7로 들음 ≠ 7-3)
     assert correct(db, "서울 강남구 테헤란로 99999") == NOT_FOUND
     assert correct(db, "서울 강남구 없는로 12").status == "not_found"
     assert correct(db, "전북 익산시 왕궁로 100").address == "전북특별자치도 익산시 왕궁면 왕궁로 100"  # 읍면은 주소에 들어감
