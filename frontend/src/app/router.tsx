@@ -80,16 +80,13 @@ export const router = createBrowserRouter([
             element: <PersonaPage />,
             handle: { title: '페르소나 관리' } satisfies RouteHandle,
           },
-          // 09 FAQ (Figma 11/04) — 목록 · 상세 · 작성 · 수정은 handle 없음(화면이 상단바 · 경로를 그림). AI 미답변은 예전 상단바
+          // 09 FAQ (Figma 11/04) — 목록 · 상세 · 작성 · 수정은 handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'faqs', element: <FaqListPage /> },
           { path: 'faqs/new', element: <FaqEditPage /> },
           { path: 'faqs/:faqId', element: <FaqDetailPage /> },
           { path: 'faqs/:faqId/edit', element: <FaqEditPage /> },
-          {
-            path: 'faqs/unanswered',
-            element: <UnansweredPage />,
-            handle: { title: 'AI 미답변' } satisfies RouteHandle,
-          },
+          // AI 미답변 (11/05 새 디자인 — FAQ 목록과 같은 틀) — handle 없음(화면이 상단바 · 경로를 그림)
+          { path: 'faqs/unanswered', element: <UnansweredPage /> },
           {
             path: 'admins',
             handle: { title: '관리자 권한 관리' } satisfies RouteHandle,

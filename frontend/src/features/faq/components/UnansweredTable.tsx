@@ -1,9 +1,8 @@
 import type { ReactNode } from 'react'
 import { COL, Button, ConfirmDialog, Table, Tag, TwoLines, type Column } from '@/shared/ui'
 import type { UnansweredRow, useUnansweredList } from '@/features/faq/hooks/useUnansweredList'
-import { FaqFormModal } from './FaqFormModal'
 
-// AI 미답변 질문 표 + [FAQ 추가] · [삭제] 창 — 09 AI 미답변 화면과 01 홈 미리보기가 같이 씀
+// AI 미답변 질문 표 + [삭제] 확인 창 — 01 홈 미리보기 (09 AI 미답변 화면은 11/05 새 디자인 UnansweredPage). [FAQ 추가]는 FAQ 작성 화면으로
 // 줄 = 통화 시작 시각 | 고객 · 발신번호 | 사유 | “질문”(고객 말 그대로) | [FAQ 추가] [삭제]. 줄을 누르면 그 통화의 06 통화 상세
 export function UnansweredTable({
   vm,
@@ -84,15 +83,7 @@ export function UnansweredTable({
         footer={footer}
       />
 
-      {vm.modal?.kind === 'add' && (
-        <FaqFormModal
-          key={vm.modal.item.unansweredQuestionSeq}
-          faq={null}
-          from={vm.modal.item}
-          onClose={vm.closeModal}
-        />
-      )}
-      {vm.modal?.kind === 'delete' && (
+      {vm.modal && (
         <ConfirmDialog
           title="정말로 삭제하시겠습니까?"
           target={`“${vm.modal.item.question}”`}

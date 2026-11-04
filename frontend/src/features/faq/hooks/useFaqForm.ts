@@ -17,7 +17,7 @@ import {
   type UnansweredQuestion,
 } from '@/features/faq/api/unansweredApi'
 
-/** 09 FAQ 작성 · 수정 (11/04 화면 · AI 미답변의 FAQ 추가 창 공용) — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
+/** 09 FAQ 작성 · 수정 (11/04 화면 — AI 미답변 [FAQ 추가]로 온 작성 포함, 11/05) — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
  * 수정엔 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
  * 추가는 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
 export function useFaqForm({
