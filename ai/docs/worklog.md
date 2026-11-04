@@ -476,3 +476,38 @@
 - 테스트 test_policy 1줄. 501 passed. 실통화 확인 필요
 
 - Jira159 MR 추가 충돌 처리: 이전 해결 후 develop-ai가 6fa05a0 → 5c2bbec로 갱신되며 위 기록 5줄이 추가됐다. 이번 변경은 worklog.md만이므로 양쪽 기록을 모두 보존하고 충돌 표식·git diff --check를 확인했다. 동작 코드·테스트 파일 변화가 없어 이전 525개 테스트 결과를 유지하며 반복 실행하지 않았다. 기능 브랜치만 갱신하고 MR 최종 병합은 사용자에게 남긴다.
+
+## 2026-11-05 주소 보정 교체 0단계 — 회귀 시험지·기준선
+- 목적: address_resolver(구 서버 보정기) 교체 전 기준점. 코드 변경 없음
+- 추가: evaluation/datasets/address_v1.json(105문항: 표준 20·도로명 오인식 12·지역 변형 11·한글 숫자 10·길 번호 12·도로명 안 숫자 5·다시 6·말끝 6·덧붙인 건물명 4·지번 11·없는 주소 8). 정답은 고객이 뜻한 주소(보정기 출력 아님), 실제 주소DB에 있는지 스크립트가 먼저 확인. 출처: 기존 테스트, worklog 운영 통화(93f3d9·98b348·8ffabaca·d62b7162), 신규
+- 추가: scripts/evaluate_address.py — 서버 경로 그대로 AddressService.resolve(보정+재시도), 카카오는 끔. 결과 evaluation/results/address_v1_baseline.json
+- 기준선(실제 data/address.db): 정답 있는 97문항 중 정답 기록 85(확정 83·애매→1순위 정답 2), 틀린 기록 0, 못 찾음 12. 없는 주소 8문항 중 못 찾음 7, 틀린 기록 1
+- 못 찾음 12: 숫자 사이 붙은 '다시' 3, 말끝(요·이요·입니다) 6, 쉼표 없는 건물명 2, 지번 "태평로 일가" 1
+- 틀린 기록 1: "테헤란로 210"(없는 번호) → ambiguous 1순위 "테헤란로 510"이 P6로 기록됨
+- 지연(보정만, 로컬): 첫 호출 P50 10ms·P95 115ms·최대 337ms, 반복 P50 9ms·P95 111ms·최대 432ms(역삼동 지번 3건이 300ms대). 105건 동시 2.31s ≈ 순차 합 2.40s → 전역 락으로 병렬 처리 안 됨 확인
+- 한계: 시험지를 보정기의 알려진 약점을 보고 만들었으므로 독립 정확도가 아니라 회귀 기준이다. 말끝 사례가 실제로 얼마나 들어오는지는 현재 backend_rules.md 기준으로 미확인
+
+## 2026-11-05 주소 보정 교체 1단계 — address_resolver를 app/address로(동작 동일)
+- 목적: 구 서버 보정기를 현 서버 구조로 옮기고 구조 문제(전역 상태·전역 락·dict 결과·Geo 두 벌·의존 방향)만 정리. 점수·기준값·말 다듬기 로직은 그대로
+- 이동(git mv): corrector.py → app/address/matcher.py(찾기·판정) + phonetic.py(소리 비교) + parse.py(말 다듬기·재시도 표기 — integrations의 split_gil·retries 포함), stt_preprocess.py → numbers.py, db.py → gazetteer.py, kakao.py → app/integrations/kakao.py, 테스트 → app/tests/test_address.py·address_sample_db.py·fixtures/roads_sample.csv. address_resolver/ 삭제
+- 바뀐 구조: 결과는 Resolution(status, address, candidates) dataclass(쓰지 않던 "weak" 키 삭제). 전역 _db·load() → gazetteer.open_db()로 열어 AddressService(db)에 주입(main.py). 전역 threading.Lock 제거, SQLite 연결은 스레드마다. 재시도 루프는 matcher.resolve()로(순서 동일). kakao.geocode는 도메인 Geo를 돌려주고, BE 모양 Geo(pydantic)는 backend_client/order.py로. backend_client는 app.address.phonetic·parse를 씀
+- 유지한 계약: AddressService.resolve() → AddressResult(status·address·alternatives·geo), 도구 결과 코드, P6, ADDRESS_DB·KAKAO_REST_API_KEY, data/address.db 스키마(재빌드 불필요)
+- 검증: 전체 525 passed(이전과 같음). 시험지 address_v1 105문항 기준선과 사례별 상태·기록 주소·후보 차이 0(evaluation/results/address_v1_stage1.json). 빈 캐시 주소DB를 스레드 8개로 동시에 3회×210건 — 기준선과 차이 0
+- 지연: 반복 P50 7.5ms·P95 103ms(기준선 8.8·111). 105건 동시 2.13s ≈ 순차 2.12s — 락을 없애도 GIL(순수 Python 편집거리) 때문에 병렬 이득 없음. 3단계에서 프로세스 풀 등 측정 후 결정
+- 기타: Dockerfile COPY address_resolver, pyproject testpaths, README·concurrency.md·test-strategy.md·tool-contracts.md 갱신. Docker 이미지 빌드는 이번에 확인 안 함
+
+## 2026-11-05 주소 보정 교체 2단계 — 못 찾았을 때 다시 볼 표기를 한곳에서
+- 원칙: 들은 그대로 먼저 보고 찾으면 그대로 돌려준다(기존에 찾던 주소는 바뀌지 않는다). 못 찾았을 때만 다시 본다
+- app/address/parse.readings(): 고침 5개(말끝 떼기·붙인 한글 길 번호 띄우기·쉼표/번호 뒤 건물명 떼기·숫자 사이 붙은 '다시' 띄우기·"일가"→"1가")의 조합을 적게 고친 것부터. 말끝 "이요"는 앞 글자 받침이 있으면 두 해석을 한 묶음으로 — 둘 다 실제 주소면 ambiguous(확정이 있으면 확정만 봄). 건물명 떼기는 번호 뒤가 '다시'면 자르지 않음(본번만 남아 다른 건물이 되는 것 방지 — 구현 중 발견)
+- matcher.resolve(): 묶음 8개·1초 상한(넘으면 not_found — 예산 2.5초를 넘기면 "장애"로 들은 값이 기록되므로). integrations의 split_gil·retries 순차 재시도를 대체. 되돌려졌던 '다시'·'이요' 수정(5769438·7213a84)은 기본 해석을 바꾸지 않는 방식으로 다시 넣음
+- 시험지 address_v1: 기준선에서 못 찾던 12건 모두 정답 확정, 나머지 93건 결과 동일. 고친 뒤 새로 쓴 holdout 16문항(정답 먼저 정함): 실제 주소 9/9 정답, 없는 주소 6/7 거부
+- 남은 틀린 기록 2건(k05 "테헤란로 210", n05 "테헤란로 이백십요"): 없는 번호 → 번호를 고쳐 ambiguous → P6 1순위(510) 기록. 2단계 고침과 무관한 판정·P6 문제 — 사용자 결정 필요
+- 지연(보정만): 반복 P50 9.7ms·P95 110ms·최대 561ms(없는 지번 "역삼동 99999" — 기본 경로)
+- 테스트 528 passed(+3: 고침별 단위, 두 해석·붙인 '다시'·건물명·없는 주소, 시간 상한)
+
+## 2026-11-05 주소: 건물번호를 고쳐야만 맞는 주소는 못 찾음(사용자 결정 B)
+- 원인: 없는 번호("테헤란로 210")를 소리 거리로 510·203에 맞춰 ambiguous → P6 1순위(510) 기록. 사용자 결정: 번호를 고쳐야만 맞는 주소는 not_found(다시 물음). P6보다 정확도 우선
+- 수정: app/address/matcher._correct — 실제 건물번호(지번)가 들은 번호와 같은(읽는 소리 기준, "07"=7) 주소만 후보. NUM_MAX·NUM_CONFIRM_MAX와 "많이 고친 뒤 번호까지 바꾼" 예외 분기 삭제(이 규칙이 포함). 길 번호·도로명 소리 보정은 그대로
+- 시험지 121문항: 틀린 기록 2 → 0(k05·n05 not_found), 정답 기록 106 그대로. 남은 ambiguous 2건(b02 "대핸란로 212", f03 "신정 2-1로 50")은 후보 1개(도로명을 많이 고침)라 1순위 자동 확정 시 정답
+- 영향: 고객이 부번을 빼고 말했거나("7-3"→"7") STT가 번호를 틀리게 받아써 없는 번호가 되면 이전처럼 비슷한 번호로 맞추지 않고 다시 묻는다(재질문 증가 가능, 실통화 확인 필요)
+- 테스트 528 passed(기대값 2곳: "테헤란로 112"는 not_found, 도구 ambiguous 경로는 "대해남노 211"로)

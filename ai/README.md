@@ -8,9 +8,9 @@ BE 통신 규약은 `docs/be-contract/`에 있다(BE 원문 + AI 쪽 사용 문�
 ```
 monitor/           관제 화면(/monitor, SSE)    (의존: 없음, docs/ops/monitor.md)
 pbx_webhook/       PBX·OpenAI 웹훅 수신        (의존: 없음)
-address_resolver/  주소 보정·좌표              (의존: 없음)
-backend_client/    BE 서버 API 클라이언트·가짜  (의존: address_resolver의 Geo·자모 비교)
-tools/             도구 5개·실행기            (의존: backend_client, address_resolver, app.rag.schemas)
+app/address/       주소 보정(주소DB)            (의존: 없음)
+backend_client/    BE 서버 API 클라이언트·가짜  (의존: app.address의 자모 비교)
+tools/             도구 5개·실행기            (의존: backend_client, app.integrations.address, app.rag.schemas)
 app/rag/ 등        RAG — 원본 그대로, 수정 금지 (아래 'RAG' 절)
 ```
 
@@ -47,14 +47,16 @@ docker compose up -d --build   # Qdrant + AI 서버(현재 S0 스파이크 + 관
   - **위도·경도 제거**: BE 최신 계약(develop-backend a629c60, `address-coordinates-removal.md`)에 맞춰 주소 요청·응답에서 뺐다. 보내면 400이다. 가짜 백엔드도 좌표가 오면 400으로 거절한다.
   - **고객 확인 2단계**: 전화 수신 직후에는 `caller_context(phone)`로 조회만 하고, 업무 의도를 확인한 뒤 `caller_context(phone, call)`로 통화를 등록한다(`meaningful-call-registration-handoff.md`). 이 순서는 새 서버가 지킨다. `call`의 `providerCallId`·`incomingAt`은 최초 수신 이벤트 값으로 고정한다.
 
-## address_resolver: 주소 보정
+## app/address: 주소 보정
 
-- `load(path)`로 행안부 주소DB(SQLite)를 연다. 파일이 없으면 보정을 끈다.
-- `await correct(text)`: 결과는 `confirmed`(확정), `ambiguous`(애매함), `not_found`(없음) 중 하나와 후보다.
-- `kakao.geocode(address, timeout)`: 지번, 동명, 우편번호를 돌려준다(좌표는 BE 계약에서 빠짐). `KAKAO_REST_API_KEY`가 없거나 못 찾으면 None이다.
-- 주소DB 만들기: `uv run python -X utf8 -m address_resolver.db <주소DB 텍스트 폴더> data/address.db`
-- 원본과 다른 점: `Geo`가 `app/order.py`에서 `address_resolver/kakao.py`로 옮겨졌다(`backend_client.order`가 다시 내보낸다).
-- 테스트용 작은 주소DB는 `address_resolver/tests/sample_db.py`의 `build_sample_db`로 만든다.
+- `gazetteer.open_db(path)`로 행안부 주소DB(SQLite, 읽기 전용)를 연다. 파일이 없으면 None → `AddressService(None)`은 보정 없이 들은 그대로(`off`).
+- `matcher.resolve(db, text)` → `Resolution(status, address, candidates)`: `confirmed`(확정)·`ambiguous`(애매함)·`not_found`(없음). 들은 그대로 못 찾았을 때만 `parse.readings`(말끝·붙인 길 번호·건물명·붙인 '다시'·"N가")의 표기로 적게 고친 것부터 다시 본다(묶음 8개·1초 상한).
+- 나눔: `numbers`(한글 숫자) · `phonetic`(소리 비교, `backend_client.place_score`도 씀) · `parse`(말 다듬기) · `matcher`(찾기·판정) · `gazetteer`(조회·빌드). 스레드마다 SQLite 연결 — 전역 락 없음.
+- `app/integrations/address.py` `AddressService`: 전용 스레드풀·예산 2.5초·카카오. `app/integrations/kakao.py` `geocode()`는 지번·동명·우편번호(`app.domain.state.Geo`), 키가 없거나 못 찾으면 None.
+- BE 모양 `Geo`(pydantic)는 `backend_client/order.py`에 있다.
+- 주소DB 만들기: `uv run python -X utf8 -m app.address.gazetteer <주소DB 텍스트 폴더> data/address.db`
+- 회귀 시험지: `uv run python -X utf8 -m scripts.evaluate_address` (`evaluation/datasets/address_v1.json`, 실제 주소DB 필요)
+- 테스트용 작은 주소DB는 `app/tests/address_sample_db.py`의 `build_sample_db`로 만든다.
 
 ## tools: 도구와 RAG
 

@@ -1,4 +1,4 @@
-"""테스트 공용: 실제 OpenAI·PBX·백엔드·카카오·주소DB를 부르지 않는다."""
+"""테스트 공용: 실제 OpenAI·PBX·백엔드·카카오·주소DB를 부르지 않는다(AddressService는 주소DB를 넘길 때만 보정)."""
 
 import asyncio
 import base64
@@ -10,9 +10,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import address_resolver
-from address_resolver import kakao
-from address_resolver.kakao import Geo
+from app.domain.state import Geo as DomainGeo
+from app.integrations import kakao
+from backend_client.order import Geo
 
 WEBHOOK_SECRET = "whsec_" + base64.b64encode(b"test-secret").decode()
 CALLER = "01012345678"
@@ -29,17 +29,11 @@ FULL_ORDER = {
 GEO = Geo(jibun_address="서울 강남구 역삼동 737", dong_name="역삼동", postal_code="06236")
 
 
-@pytest.fixture(autouse=True)
-def no_address_db(monkeypatch):
-    """개발 PC에 주소DB가 있어도 테스트는 주소 보정 없이 돈다(보정 테스트는 작은 DB로)."""
-    monkeypatch.setattr(address_resolver, "_db", None)
-
-
 @pytest.fixture
 def fake_kakao(monkeypatch):
     """카카오 주소 검색을 부르지 않는다. 확정한 주소마다 같은 지번·우편번호를 돌려준다."""
     async def geocode(address_, timeout_sec, transport=None, http=None):
-        return GEO if address_ else None
+        return DomainGeo(GEO.jibun_address, GEO.dong_name, GEO.postal_code) if address_ else None
 
     monkeypatch.setattr(kakao, "geocode", geocode)
 

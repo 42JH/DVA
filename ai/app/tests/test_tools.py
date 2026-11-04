@@ -8,16 +8,15 @@ import httpx2
 import pytest
 from conftest import CALLER, GEO, INCOMING_AT, run
 
-import address_resolver
-from address_resolver.corrector import correct
-from address_resolver.db import AddressDB
-from address_resolver.tests.sample_db import build_sample_db
+from app.address.gazetteer import AddressDB
+from app.address.matcher import correct
 from app.domain.candidates import apply_pick
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Place, Source
 from app.integrations.address import AddressService
 from app.integrations.backend.gateway import BackendGateway
 from app.policy.model import load_policy
+from app.tests.address_sample_db import build_sample_db
 from app.tools import MODEL_TOOLS, function_specs, run_tool
 from app.tools.cancel import cancel_parcel
 from app.tools.context import ToolContext
@@ -41,15 +40,13 @@ def call(c, name, args, call_id=None, **kw):
 
 
 @pytest.fixture
-def corrector(tmp_path, monkeypatch):
-    db = AddressDB(build_sample_db(tmp_path / "address.db"))
-    monkeypatch.setattr(address_resolver, "_db", db)
-    return db
+def corrector(tmp_path):
+    return AddressDB(build_sample_db(tmp_path / "address.db"))
 
 
 @pytest.fixture
-def address(fake_kakao):
-    return AddressService()
+def address(corrector, fake_kakao):
+    return AddressService(corrector)
 
 
 # --- 규칙 ---
@@ -158,8 +155,8 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     out = call(c, "record_fields", {"receiver_address": "테헤란로 212", "receiver_address_detail": "403호"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").status == FieldStatus.INVALID
     assert s.field_of("receiver_address_detail").status == FieldStatus.EMPTY  # 못 찾은 주소의 상세주소도 믿지 않는다
-    best, *rest = correct(corrector, "서울 강남구 테헤란로 112")["candidates"]
-    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 112", "receiver_address_detail": "101호"})
+    best, *rest = correct(corrector, "서울 강남구 대해남노 211").candidates  # 도로명을 많이 고쳐 확정하지 않는 주소
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 대해남노 211", "receiver_address_detail": "101호"})
     f = s.field_of("receiver_address")
     assert f.value == best and f.candidates == tuple(rest) and out["facts"]["auto_selected"] == ["receiver_address"]
 
@@ -172,11 +169,11 @@ def test_changed_address_without_detail_clears_detail(corrector, address):
     assert c.state.field_of("sender_address_detail").status == FieldStatus.EMPTY
 
 
-def test_address_service_down_keeps_heard_value_without_geo(monkeypatch):
-    def broken(text):
+def test_address_service_down_keeps_heard_value_without_geo(corrector, monkeypatch):
+    def broken(db, text):
         raise RuntimeError("db")
-    monkeypatch.setattr(address_resolver, "correct_blocking", broken)
-    c = ctx(address=AddressService())
+    monkeypatch.setattr("app.address.matcher.resolve", broken)
+    c = ctx(address=AddressService(corrector))
     out = call(c, "record_fields", {"receiver_address": "부산 해운대구 센텀로 10"})
     assert c.state.field_of("receiver_address").value == "부산 해운대구 센텀로 10"
     assert out["facts"]["geo_missing"] == ["receiver_address"] and c.state.current.receiver_geo is None
@@ -188,7 +185,7 @@ def test_late_address_result_does_not_overwrite_newer_value(corrector, fake_kaka
             await asyncio.sleep(0.05)
             return await super().resolve(heard)
 
-    c = ctx(address=Slow())
+    c = ctx(address=Slow(corrector))
 
     async def race():
         first = asyncio.create_task(run_tool(c, "record_fields", json.dumps({"sender_address": "서울 강남구 테헤란로 211"}), "a"))
@@ -357,7 +354,7 @@ def test_record_rejected_after_order_submitted():
 
 
 def test_attached_korean_gil_number_retried_only_when_not_found(corrector, address):
-    from app.integrations.address import split_gil
+    from app.address.parse import split_gil
     assert split_gil("구미시 인동구길 7-3") == "구미시 인동 구길 7-3" and split_gil("서울 강남구 테헤란로 212") is None
     r = run(address.resolve("경북 구미 인동구길 7-3"))  # Live가 9를 "구"로 붙여 씀(2026-11-03 통화)
     assert (r.status, r.address) == ("confirmed", "경상북도 구미시 인동9길 7-3")
@@ -365,8 +362,8 @@ def test_attached_korean_gil_number_retried_only_when_not_found(corrector, addre
 
 
 def test_building_name_after_comma_retried_only_when_not_found(corrector, address):
-    from app.integrations.address import retries
-    assert retries("구미시 인동9길 7-3, 무슨빌라") == ["구미시 인동9길 7-3"] and retries("서울 강남구 테헤란로 212") == []
+    from app.address.parse import cut_trailing
+    assert cut_trailing("구미시 인동9길 7-3, 무슨빌라") == ["구미시 인동9길 7-3"] and cut_trailing("서울 강남구 테헤란로 212") is None
     r = run(address.resolve("경북 구미시 인동9길 7-3, 리버뷰 신안 인스빌"))  # Live가 건물 이름을 붙여 넘김(2026-11-03 통화)
     assert (r.status, r.address) == ("confirmed", "경상북도 구미시 인동9길 7-3")
     assert run(address.resolve("구미시 없는구길 99, 어딘가")).status == "not_found"

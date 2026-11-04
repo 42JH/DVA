@@ -1,43 +1,26 @@
-"""주소 서비스(Address Resolver 어댑터). 주소DB 보정(CPU·SQLite) + 카카오 지번·동명·우편번호.
+"""주소 서비스: 주소DB 보정(app/address, CPU·SQLite) + 카카오 지번·동명·우편번호.
 
 - 보정은 전용 스레드풀에서 돈다(concurrency.md §6.2 "주소 보정 실행기", 이벤트 루프를 막지 않음).
 - 카카오는 공유 클라이언트 1개 + 세마포어(호출 한도 [미확인]).
 - 예산 2.5초(error-recovery.md §3). 장애·초과는 status="error" — 호출자는 들은 값으로 진행하고 geo 없음으로 둔다.
+- 주소DB가 없으면(db=None) status="off": 들은 그대로 기록하고 geo만 찾는다.
 """
 
 import asyncio
 import logging
-import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Literal
 
 import httpx2
 
-import address_resolver
-from address_resolver import kakao
+from app.address import matcher
+from app.address.gazetteer import AddressDB
 from app.domain.state import Geo
+from app.integrations import kakao
 from app.observability.trace import span
 
 log = logging.getLogger(__name__)
-
-
-_GIL = re.compile(r"(?<=[가-힣])([영공일이삼사오육칠팔구십백]+번?길)(?=\s|$)")
-
-
-def split_gil(heard: str) -> str | None:
-    """"인동구길" → "인동 구길": 붙여 쓴 한글 길 번호를 띄운다(보정기는 띄운 "구길"만 9길로 읽는다). 바뀐 게 없으면 None.
-    못 찾았을 때만 쓴다 — 아무 데서나 떼면 "구미"처럼 숫자 글자로 시작하는 이름을 자를 수 있어서."""
-    spaced = _GIL.sub(r" \1", heard)
-    return spaced if spaced != heard else None
-
-
-def retries(heard: str) -> list[str]:
-    """못 찾았을 때 차례로 다시 볼 표기: 붙인 길 번호 띄우기, 쉼표 뒤(건물 이름) 떼기
-    (2026-11-03 통화 98b348: "도림로143길 27, 리버뷰 신안 인스빌")."""
-    road = heard.split(",")[0].strip() if "," in heard else ""
-    out = [split_gil(heard), road if road and road != heard else None, split_gil(road) if road else None]
-    return list(dict.fromkeys(x for x in out if x))
 
 
 @dataclass(frozen=True)
@@ -49,8 +32,9 @@ class AddressResult:
 
 
 class AddressService:
-    def __init__(self, workers: int = 2, kakao_concurrency: int = 8, kakao_timeout_sec: float = 3.0,
-                 budget_sec: float = 2.5, http: httpx2.AsyncClient | None = None):
+    def __init__(self, db: AddressDB | None = None, workers: int = 2, kakao_concurrency: int = 8,
+                 kakao_timeout_sec: float = 3.0, budget_sec: float = 2.5, http: httpx2.AsyncClient | None = None):
+        self.db = db
         self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="address")
         self.kakao_sem = asyncio.Semaphore(kakao_concurrency)
         self.kakao_timeout_sec = kakao_timeout_sec
@@ -72,21 +56,16 @@ class AddressService:
             return AddressResult("error", heard, (), None)
 
     async def _resolve(self, heard: str) -> AddressResult:
-        with span("address", step="correct"):
-            r = await asyncio.get_running_loop().run_in_executor(self.pool, address_resolver.correct_blocking, heard)
-            for retry in retries(heard) if r is not None and r["status"] == "not_found" else ():
-                r = await asyncio.get_running_loop().run_in_executor(self.pool, address_resolver.correct_blocking, retry)
-                if r["status"] != "not_found":
-                    break
-        if r is None:
+        if self.db is None:
             status, address, alternatives = "off", heard, ()
-        elif r["status"] == "not_found":
-            return AddressResult("not_found", None, (), None)
         else:
-            cands = list(r["candidates"]) or [r["address"]]
-            status, address, alternatives = r["status"], cands[0], tuple(cands[1:])
+            with span("address", step="correct"):
+                r = await asyncio.get_running_loop().run_in_executor(self.pool, matcher.resolve, self.db, heard)
+            if r.status == "not_found":
+                return AddressResult("not_found", None, (), None)
+            cands = list(r.candidates) or [r.address]
+            status, address, alternatives = r.status, cands[0], tuple(cands[1:])
         with span("address", step="geocode"):
             async with self.kakao_sem:
-                g = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
-        geo = Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None
+                geo = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
         return AddressResult(status, address, alternatives, geo)

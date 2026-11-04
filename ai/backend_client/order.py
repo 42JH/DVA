@@ -4,7 +4,14 @@ import re
 
 from pydantic import BaseModel
 
-from address_resolver.kakao import Geo  # 지번·동명·우편번호는 주소 모듈이 만든다
+
+class Geo(BaseModel, frozen=True):
+    """주소에 딸린 값(BE jibunAddress·dongName·postalCode). 확정한 도로명주소로 카카오에서 찾는다(app/integrations/kakao.py)."""
+
+    jibun_address: str
+    dong_name: str
+    postal_code: str
+
 
 # 받는 순서의 기준이 되는 택배 항목. item은 물품(규격별 수량 또는 기타 물품 설명)을 묶어 부르는 이름이다
 ORDER_FIELDS = (
@@ -125,7 +132,7 @@ def _is_region(word: str) -> bool:
 def _word_in(squeezed: str, word: str, squeezed_jamo: str) -> bool:
     """조사 한두 글자를 떼고도 보고("해운대로", "강남에서"), 세 글자 이상이면 받아쓰기 철자 차이 자모 하나까지 본다
     ("마린씨티" ↔ "마린시티")."""
-    from address_resolver.corrector import jamo, lev
+    from app.address.phonetic import jamo, lev
 
     if any(w in squeezed for w in [word] + [word[:-k] for k in (1, 2) if len(word) - k >= 2]):
         return True
@@ -143,7 +150,8 @@ def place_score(where: str, said: str | None) -> int | None:
     - 말한 숫자(번지·건물번호·호수, 한글 숫자 포함)가 핀에 없다: 숫자가 다르면 다른 곳이다.
     - 시·도·구 밖의 낱말(도로·동·건물)을 말했는데 하나도 맞지 않았다: 시·구만 같은 다른 곳이다
       ("서울 강남구 테헤란로"를 강남구의 다른 핀으로 권하지 않게). 시·구만 말했으면 그것만 맞아도 된다."""
-    from address_resolver.corrector import jamo, to_number
+    from app.address.parse import to_number
+    from app.address.phonetic import jamo
 
     squeezed = "".join(words(where))
     squeezed_jamo = jamo(squeezed, canon=True)
