@@ -8,6 +8,7 @@ import {
   type Faq,
   type FaqCategory,
 } from '@/features/faq/hooks/useFaqList'
+import { unansweredCrumbs } from '@/shared/lib/unansweredReason'
 import type { UnansweredQuestion } from '@/features/faq/hooks/useUnansweredList'
 import { FAQ_GRID, FaqCategoryPicker } from './FaqCategories'
 
@@ -15,7 +16,7 @@ import { FAQ_GRID, FaqCategoryPicker } from './FaqCategories'
 // 왼쪽 상자 = 분류 고르기, 오른쪽 상자 = 질문(28/500) | 선 | 답변(24). 아래 [삭제](수정만, 왼쪽) · [취소](회색) [저장](파랑)
 // 작성은 목록에서 보던 분류를 골라 둔 채로(?category=). 저장하면 작성 → 그 분류 목록(새 FAQ가 맨 위), 수정 → 상세
 // 검색해서 온 수정(?q=)은 경로 'FAQ > “박스” 검색 > “박스” 검색 상세 > FAQ 수정', 저장 · 취소 → 그 상세, 삭제 → 그 검색 결과
-// AI 미답변 [FAQ 추가]로 온 작성(state.from, 11/05): 질문 칸 = 고객이 한 말, 경로 'FAQ > AI 미답변 > FAQ 작성'
+// AI 미답변 [FAQ 추가]로 온 작성(state.from, 11/05): 질문 칸 = 고객이 한 말, 경로 '[이동 전 화면] > AI 미답변 > FAQ 작성'
 //   저장하면 FAQ가 생기고 그 질문은 처리됨(API-27) → 저장 · 취소 모두 보던 미답변 목록(state.back)으로
 export function FaqEditPage() {
   const { faqId } = useParams()
@@ -86,14 +87,7 @@ function FaqForm({
       <Crumbs
         items={
           from
-            ? [
-                { label: 'FAQ', to: '/faqs' },
-                {
-                  label: 'AI 미답변', // 홈 미리보기에서 왔어도 경로는 미답변 화면으로 (저장 · 취소만 온 곳으로)
-                  to: fromBack.startsWith('/faqs/unanswered') ? fromBack : '/faqs/unanswered',
-                },
-                { label: 'FAQ 작성' },
-              ]
+            ? [...unansweredCrumbs(fromBack), { label: 'FAQ 작성' }] // '[이동 전 화면] > AI 미답변 > FAQ 작성'
             : !faq
               ? [{ label: 'FAQ', to: back }, { label: 'FAQ 작성' }]
               : q
