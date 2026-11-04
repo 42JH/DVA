@@ -131,7 +131,7 @@ Content-Type: application/json
 - 기존 고객은 `customerSeq`, 신규 고객은 `customer: { name, phoneNumber }`를 사용하며 둘을 함께 보내지 않는다. 최종 결과에는 먼저 등록한 동일 `call`을 사용한다.
 - `COMPLETE`는 주문 정보 확정이다. 카드 승인·디버 접수 성공을 뜻하지 않는다. 배송 상세별 `notifiedPrice`와 미취소 상세 합계 `totalAmount`가 필요하다.
 - `paymentMethodType`은 `billing` 카드, `credit` 월결제, `groupBilling` 부서 그룹결제다. 자격은 BE가 검증한다. 미완료에서 생략하면 null이며 기본값으로 billing을 선택하지 않는다. 필드 자체에 null을 보내면 400이다. COMPLETE에는 선택이 필요하다.
-- `pickupRequestedAt`은 호환 선택값이다. 실제 수거 시각은 BE가 결제 완료 시각 + 1시간으로 확정하므로 AI가 필수로 수집하지 않는다.
+- `pickupRequestedAt`은 선택값이며 결제 대기 중에도 보존한다. 결제가 요청 시각 이전 또는 같으면 유지하고, 이후 결제 또는 미전송이면 결제 완료 + 1시간을 한국시간 09:00~17:00에 맞춘다(09시 이전은 당일 09시, 17시 초과는 다음날 09시). AI가 보낸 시각에는 별도 영업시간·예약 일수 제한을 두지 않는다. 개인 카드·월·그룹결제 모두 같으며 재접수 시 다시 계산하지 않는다. [변경 계약](ai-call-follow-up.md)을 따른다.
 - `INCOMPLETE`, `CANCELLED`는 확인한 정보만 보낸다. 주문 정보가 전혀 없는 유효 통화는 `status=NO_ORDER`, `orderSeq/version/paymentRequest=null`로 수신 완료된다. 질문·조회·연결 요구 이력은 같은 통화에 보존한다. NO_ORDER를 장난전화 제외 신호로 사용하지 않는다.
 
 | 반환 `data.status`  | AI 처리                                                    |

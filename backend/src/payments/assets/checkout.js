@@ -21,6 +21,13 @@ const descriptions = {
 };
 function show(record) {
   status.textContent = descriptions[record.status] || '결제 상태를 확인할 수 없어요.';
+  if (record.status === 'PAID' && record.pickupRequestedAt)
+    document.getElementById('pickup-time').textContent = new Intl.DateTimeFormat('ko-KR', {
+      timeZone: 'Asia/Seoul',
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hour12: false,
+    }).format(new Date(record.pickupRequestedAt));
   if (record.status === 'PAID')
     status.textContent =
       record.orderStatus === 'ACCEPTED'

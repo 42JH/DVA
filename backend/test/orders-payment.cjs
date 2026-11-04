@@ -232,7 +232,8 @@ module.exports = function registerOrdersPayment(suite) {
 
   test('ORD-06 commits SUBMITTING and releases locks before HTTP; concurrent retries only return status', async () => {
     resetDver();
-    const order = await readyOrder();
+    const requested = new Date(Date.now() + 86400000).toISOString();
+    const order = await readyOrder({ pickupRequestedAt: requested });
     let release, received;
     const arrived = new Promise((resolve) => {
       received = resolve;
@@ -254,12 +255,13 @@ module.exports = function registerOrdersPayment(suite) {
         await locked.query('BEGIN');
         const row = (
           await locked.query(
-            'SELECT status,version FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',
+            'SELECT status,version,pickup_requested_at FROM orders WHERE order_seq=$1 FOR UPDATE NOWAIT',
             [order.orderSeq],
           )
         ).rows[0];
         assert.equal(row.status, 'SUBMITTING');
-        assert.equal(row.version, order.version + 1); // Payment fixes the pickup time.
+        assert.equal(row.version, order.version); // Payment preserves the future pickup time.
+        assert.equal(row.pickup_requested_at.toISOString(), requested);
       } finally {
         await locked.query('ROLLBACK');
         locked.release();

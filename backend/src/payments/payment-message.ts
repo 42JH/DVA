@@ -17,6 +17,25 @@ const deliveryDetails = (view: PaymentNoticeView) =>
 • 도착지 주소: ${plain(parcel.destinationAddress || '주문 내역에서 확인')}`,
     )
     .join('\n\n');
+const time = (value: string | null) =>
+  value
+    ? new Intl.DateTimeFormat('ko-KR', {
+        timeZone: 'Asia/Seoul',
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        hour12: false,
+      }).format(new Date(value))
+    : '주문 내역에서 확인';
+export function pickupNotice(view: Pick<PaymentNoticeView, 'pickupRequestedAt' | 'approvedAt'>) {
+  if (!view.pickupRequestedAt)
+    return '결제 완료 후 1시간 뒤 (09:00 이전은 당일 09:00, 17:00 초과는 다음날 09:00)';
+  return (
+    time(view.pickupRequestedAt) +
+    (view.approvedAt
+      ? ''
+      : ' (해당 시각 이후 결제 시 결제 완료 1시간 후로 변경, 09:00 이전은 당일 09:00, 17:00 초과는 다음날 09:00)')
+  );
+}
 export function paymentMessage(view: PaymentNoticeView, base: string) {
   return `[DVA] 택배 결제 안내
 
@@ -28,7 +47,7 @@ export function paymentMessage(view: PaymentNoticeView, base: string) {
 
 • 주문번호: ${view.orderSeq}
 ${deliveryDetails(view)}
-• 수거 요청일시: 결제 완료 후 1시간 뒤
+• 수거 요청일시: ${pickupNotice(view)}
 • 결제금액: ${view.amount.toLocaleString('ko-KR')}원
 
 [결제하기](${base}/p/${view.token})
@@ -37,15 +56,6 @@ ${deliveryDetails(view)}
 }
 
 export function paymentCompletionMessage(view: PaymentNoticeView, base: string) {
-  const time = (value: string | null) =>
-    value
-      ? new Intl.DateTimeFormat('ko-KR', {
-          timeZone: 'Asia/Seoul',
-          dateStyle: 'medium',
-          timeStyle: 'short',
-          hour12: false,
-        }).format(new Date(value))
-      : '주문 내역에서 확인';
   return `[DVA] 택배 결제 완료 안내
 
 안녕하세요! DVA입니다.
