@@ -479,3 +479,8 @@
 ## 2026-11-04 AGENTS.md: 땜질 패치 금지
 - §9 금지 사항에 "특정 통화·문장·조건에만 맞춘 예외 처리용 땜질 패치 금지, 근본 원인을 공통 경로에서 수정" 추가(사용자 지시)
 - 확인: 결과 본문 customerSeq = BE 고객 번호(customers.customer_seq, 등록 고객), customer{name, phoneNumber} = 미등록 고객 이름·발신번호(주문과 함께 고객 생성). 둘 중 하나만. 택배 보내는 분 성함은 parcels[].origin.name(parcel.origin_name)으로 별도 저장(develop-backend 277cf1c create-order.dto.ts·orders.service.ts·orders.repository.ts)
+## 2026-11-04 주소 보정기: 숫자 사이에 붙은 "다시"
+- 원인(운영 통화 8ffabaca): Backend가 "인동구길 이십이다시일"로 넘김 → corrector.parse의 TAIL_TOKEN이 "다시"를 떨어진 토큰일 때만 숫자로 봐서 "이십이다시일"을 도로명 일부로 읽음 → not_found
+- 수정: address_resolver/corrector.normalize_text에 앞뒤가 숫자 글자인 "다시|대시"를 띄우는 한 줄(사용자 승인: 보정기 수정). 주소DB의 "다시로"·"고다시길"·"다시면"은 앞뒤가 숫자 글자가 아니라 그대로
+- 실제 주소DB: 인동 구길 이십이다시일·인동구길 이십이다시일(붙인 길 번호는 기존 재시도) → 인동9길 22-1, 칠다시삼 → 7-3. 띄어 쓴 표기·신정이펜일로 오십 결과 같음
+- 테스트 address_resolver test_glued_dasi_between_numbers_is_branch_separator(도로명·지번·대시·다시로/고다시길 유지). 502 passed
