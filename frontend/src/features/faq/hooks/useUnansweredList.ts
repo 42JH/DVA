@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { FETCH_ALL_MAX, pageSlice } from '@/shared/api/paging'
-import { todayYmd, ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { originOf, reasonTag } from '@/shared/lib/unansweredReason'
@@ -32,10 +31,7 @@ type Modal = { kind: 'delete'; item: UnansweredQuestion } | null
 /** 09 AI 미답변 목록 훅 (와이어프레임 09_AI미답변, 10/30) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리)
  * 검색 = 질문 · 이름 · 전화번호. 줄마다 [FAQ 추가](창 → 추가하면 처리됨) · [삭제](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
-export function useUnansweredList({
-  pageSize = PAGE_SIZE,
-  todayOnly = false, // 01 홈: 오늘 통화에서 나온 질문만
-}: { pageSize?: number; todayOnly?: boolean } = {}) {
+export function useUnansweredList() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
@@ -49,12 +45,7 @@ export function useUnansweredList({
   const q = params.q
   const digits = phoneDigits(q) // 숫자만 쳤을 때만 번호로 ('010-1458' · '01014582209' 둘 다). '3시'의 3으로 번호를 찾지 않게
   const call = /^\d+$/.test(params.call) ? Number(params.call) : null // 숫자가 아니면(?call=abc) 통화 필터 없음
-  const today = todayYmd()
-  const ofCall = (list.data ?? []).filter(
-    (u) =>
-      (call === null || u.callSessionSeq === call) &&
-      (!todayOnly || (u.startedAt !== null && ymd(new Date(u.startedAt)) === today)),
-  )
+  const ofCall = (list.data ?? []).filter((u) => call === null || u.callSessionSeq === call)
   const hit = ofCall.filter(
     (u) =>
       matchKo(u.question, q) ||
@@ -69,7 +60,7 @@ export function useUnansweredList({
       : first
         ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
         : '이 통화의 질문만'
-  const sliced = pageSlice(hit, page, pageSize)
+  const sliced = pageSlice(hit, page, PAGE_SIZE)
   const rows: UnansweredRow[] = sliced.rows.map((u) => ({
     ...u,
     time: u.startedAt ? fmtListTime(u.startedAt) : ['—'], // 시각을 못 받은 통화

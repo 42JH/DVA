@@ -5,7 +5,17 @@ import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 // ---------- 서버 DTO ----------
 export type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
 export type ComplaintType =
-  'REPEATED_QUESTION' | 'SPEAKING_TOO_FAST' | 'RECOGNITION_FAILURE' | 'SLOW_RESPONSE' | 'AI_REFUSAL'
+  | 'REPEATED_QUESTION'
+  | 'SPEAKING_TOO_FAST'
+  | 'RECOGNITION_FAILURE'
+  | 'SLOW_RESPONSE'
+  | 'AI_REFUSAL'
+  // 11/04 대시보드 연동 명세 §4로 더해진 다섯 (AI 새 불편 유형 — 위 넷은 과거 유형, SLOW_RESPONSE는 둘 다)
+  | 'INFORMATION_RECOGNITION_ERROR'
+  | 'INTENT_RECOGNITION_ERROR'
+  | 'UNSUPPORTED_ANSWER'
+  | 'INTERRUPTION'
+  | 'DISSATISFACTION_EXPRESSION'
 export type CallActionKind =
   | 'PIN_SEARCH'
   | 'PREVIOUS_ORDER_SEARCH'
@@ -31,7 +41,7 @@ export interface CallComplaintDto {
   utteranceOrders: number[]
 }
 export interface CallAnalysisDto {
-  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(02 대시보드 · 주문 상세 관련 통화)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
+  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
   aiPersonaVersionSeq: number | null
   personaName: string | null
   personaVersion: number | null

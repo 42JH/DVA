@@ -34,6 +34,16 @@
   --color-order-fail: #e77f83; /* 접수 실패 — 디자인에 없는 상태라 상단바 알림 빨강 */
   --color-order-cancel: #6698ff; /* 주문 취소 */
   --color-field: #b1bece; /* 검색칸 테두리 · 돋보기 (Figma '검색 필드' 11/04) */
+  /* 02 대시보드 'AI 상담 성능' (Figma 11/04) — 도넛 불편 유형 2~6번 색(1번은 brand) · chart-prev = 직전 버전 막대(연보라)
+     attention = 눈에 띄는 줄(이탈이 가장 많은 단계 · 가장 느린 처리) 글자 · 바탕. 숫자 강조 · 신규 고객은 brand, 기존 고객은 sub */
+  --color-chart-2: #00ccff;
+  --color-chart-3: #c8daff;
+  --color-chart-4: #56afbf;
+  --color-chart-5: #88baac;
+  --color-chart-6: #b4c3cf;
+  --color-chart-prev: #9ba1d5;
+  --color-attention: #bb6b40;
+  --color-attention-soft: #fff6ef;
 
   /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
   --font-sans:
@@ -74,12 +84,31 @@
   --spacing-v76: clamp(24px, 8.444dvh, 91px);
   --spacing-v84: clamp(28px, 9.333dvh, 101px);
   --spacing-v104: clamp(32px, 11.556dvh, 125px);
+  /* 02 대시보드 (카드 네 장이 780 높이 노트북에도 들어가게 — 큰 숫자 · 카드 안팎 간격) */
+  --text-v30: clamp(24px, 3.333dvh, 30px);
+  --text-v30--line-height: 1.2;
+  --spacing-v8: clamp(4px, calc(1.333dvh - 4px), 10px);
+  --spacing-v16: clamp(8px, calc(2.667dvh - 8px), 19px);
 
   /* 움직임 (11/01 영상 예시): 페이지가 바뀌면 본문이 떠오르고, 모달은 배경이 어두워지며 창이 살짝 커지면서 뜸
      등장은 전부 backwards(끝나면 애니메이션이 빠짐) — transform 애니메이션이 both/forwards 로 남아 있으면 그 요소가 fixed 자손의 기준이 되어 모달 배경이 스크롤과 함께 밀림(11/01 버그)
      쓰는 곳: app/AppLayout(animate-page-in) · shared/ui/Modal(animate-dim-in · animate-pop-in). 늘 motion-safe: 와 같이 (움직임 줄이기 설정이면 안 움직임) */
   --animate-page-in: page-in 0.25s ease-out backwards;
   --animate-dim-in: dim-in 0.2s ease-out backwards;
+  /* 02 통계 그래프가 뜰 때 (11/05 사용자): 막대는 바닥에서 자라고, 도넛은 조각마다 시계 방향으로 채워지고, 값 글자는 그 뒤에 나타남 */
+  --animate-bar-grow: bar-grow 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+  --animate-donut-in: donut-in 0.7s ease-out backwards;
+  --animate-label-in: dim-in 0.3s ease-out 0.45s backwards;
+  @keyframes bar-grow {
+    from {
+      transform: scaleY(0);
+    }
+  }
+  @keyframes donut-in {
+    from {
+      stroke-dasharray: 0 999;
+    }
+  }
   --animate-pop-in: pop-in 0.2s ease-out backwards;
   /* 탭을 바꾸면 아래 내용이 그 방향에서 미끄러져 들어옴 (shared/lib/useSlideDir — 02 · 04 · 09) */
   /* 라이브 점 (상단바 'AI 상담가 · 접수 중', 11/04 사용자: 깜빡깜빡). motion-safe: 와 같이 — 움직임 줄이기 설정이면 안 깜빡임 */

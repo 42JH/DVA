@@ -1,4 +1,4 @@
-// AI 미답변 공용 — 사유 문구 (미답변 사유 연동 11/04) · 화면 주소 · 경로 첫 칸 (11/05). 09 AI 미답변 · 06 처리 내용 · 상단바 알림 · 홈 · 통계가 같이 써서 shared (기능 폴더끼리 import 금지)
+// AI 미답변 공용 — 사유 문구 (미답변 사유 연동 11/04) · 화면 주소 · 경로 첫 칸 (11/05). 09 AI 미답변 · 06 처리 내용 · 상단바 알림 · 통계가 같이 써서 shared (기능 폴더끼리 import 금지)
 import type { TagKind } from '@/shared/ui'
 
 /** 서버 코드 그대로. null = 사유 없이 들어온 질문 · 연동 전에 쌓인 질문 (백엔드는 원인을 추정하지 않음) */
@@ -25,12 +25,11 @@ const PAGE_NAMES: [RegExp, string][] = [
   [/^\/faqs\/\d+\/edit/, 'FAQ 수정'],
   [/^\/faqs\/\d+(?:[?#]|$)/, 'FAQ 상세'],
   [/^\/faqs(?:[?#]|$)/, 'FAQ'],
-  [/^\/dashboard/, '대시보드'],
+  [/^\/dashboard/, '통계'],
   [/^\/companies/, '기업관리'],
   [/^\/personas/, '페르소나 관리'],
   [/^\/admins/, '관리자 권한 관리'],
   [/^\/me(?:[?#]|$)/, '내 정보'],
-  [/^\/(?:[?#]|$)/, '홈'],
 ]
 
 /** 경로 첫 칸 = 미답변으로 오기 직전 화면 (주소의 from). 없거나 모르는 화면 · 바깥 주소('//…' — 주소는 누구나 고칠 수 있음)면 FAQ */
@@ -40,7 +39,7 @@ export function originOf(from: string | null | undefined): { label: string; to: 
   return name && from ? { label: name, to: from } : { label: 'FAQ', to: '/faqs' }
 }
 
-/** FAQ 작성(미답변에서 옴)의 경로 앞 두 칸 '[이동 전 위치] > AI 미답변'. back = 돌아갈 곳 — 미답변 목록 주소, 또는 홈 미리보기에서 왔으면 '/' */
+/** FAQ 작성(미답변에서 옴)의 경로 앞 두 칸 '[이동 전 위치] > AI 미답변'. back = 돌아갈 곳 — 미답변 목록 주소 */
 export function unansweredCrumbs(back: string): { label: string; to: string }[] {
   const list = back.startsWith('/faqs/unanswered')
   const from = list ? new URL(back, 'http://x').searchParams.get('from') : back

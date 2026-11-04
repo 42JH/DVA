@@ -4,13 +4,10 @@ import {
   fmtDate,
   fmtDateTime,
   fmtDateTimeDay,
-  fmtDay,
-  fmtDayRange,
   fmtDetailTime,
   fmtClock,
   fmtDuration,
   fmtListTime,
-  fmtPctSplit,
   fmtPhone,
 } from './format'
 
@@ -34,19 +31,4 @@ assert.deepEqual(fmtListTime(t, now), ['10-20 14:33'])
 assert.deepEqual(fmtListTime('2025-12-29T13:40:00+09:00', now), ['2025-12-29', '13:40'])
 assert.equal(fmtDetailTime(t, { seconds: true, now }), '10-20 (화) 14:33:05')
 assert.equal(fmtDetailTime('2025-12-29T13:40:00+09:00', { now }), '2025-12-29 (월) 13:40')
-assert.equal(fmtDay('2026-10-02T00:00:00+09:00', now), '10-02 (금)')
-assert.equal(fmtDay('2025-12-29T00:00:00+09:00', now), '2025-12-29 (월)')
-assert.equal(fmtDayRange('2026-10-02T00:00', '2026-10-20T00:00', now), '10-02 (금) ~ 10-20 (화)')
-assert.equal(
-  fmtDayRange('2025-12-29T00:00', '2026-10-31T00:00', now),
-  '2025-12-29 (월) ~ 2026-10-31 (토)',
-) // 한쪽이 다른 해면 양쪽 다
-
-// 비율 합 100 맞춤 (따로 반올림하면 85 · 10 · 4 = 99)
-assert.deepEqual(fmtPctSplit([854, 96, 44]), ['86%', '10%', '4%'])
-assert.deepEqual(fmtPctSplit([1, 1, 1]), ['34%', '33%', '33%'])
-assert.deepEqual(fmtPctSplit([1, 1, 1], 1), ['33.4%', '33.3%', '33.3%'])
-assert.deepEqual(fmtPctSplit([0, 0, 0]), ['—', '—', '—'])
-assert.deepEqual(fmtPctSplit([0, 5, 0]), ['0%', '100%', '0%'])
-
 console.log('format.test ok')
