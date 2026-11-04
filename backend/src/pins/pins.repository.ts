@@ -8,8 +8,12 @@ import { CreatedPersonalPinDto, PersonalPinDto, PinVersionDto } from './dto/pin-
 export class PinsRepository {
   async call(client: PoolClient, id: number, lock: boolean) {
     return (
-      await client.query<{ phone: string | null; endedAt: Date | null }>(
-        `SELECT caller_phone_number AS phone,ended_at AS "endedAt" FROM call_sessions
+      await client.query<{
+        phone: string | null;
+        customerSeq: number | null;
+        endedAt: Date | null;
+      }>(
+        `SELECT caller_phone_number AS phone,customer_seq AS "customerSeq",ended_at AS "endedAt" FROM call_sessions
        WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')${lock ? ' FOR SHARE' : ''}`,
         [id],
       )

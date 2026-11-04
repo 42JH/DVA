@@ -7,6 +7,21 @@ import { RecordingCallMatch } from './consultations.types';
 
 @Injectable()
 export class CallSessionRepository {
+  async caller(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        phone: string | null;
+        customerSeq: number | null;
+        endedAt: Date | null;
+      }>(
+        `SELECT caller_phone_number AS phone,customer_seq AS "customerSeq",ended_at AS "endedAt"
+         FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
+         AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE`,
+        [id],
+      )
+    ).rows[0];
+  }
+
   async attachRecording(client: PoolClient, callId: number, objectKey: string): Promise<void> {
     const call = await client.query(
       `SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL

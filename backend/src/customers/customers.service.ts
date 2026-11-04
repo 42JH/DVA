@@ -136,8 +136,10 @@ export class CustomersService {
     changes: UpdateCustomerDto,
     actorId: number | null,
     requestId: string,
+    callSessionHeader?: string,
   ): Promise<void> {
     const administrator = actorId !== null;
+    const aiAddress = !administrator && changes.address !== undefined;
     if (
       changes.name === undefined &&
       changes.status === undefined &&
@@ -154,10 +156,35 @@ export class CustomersService {
       !administrator
     )
       throw new ApiException(403, 'FORBIDDEN', '고객 상태 변경은 관리자만 가능합니다.');
+    if (
+      aiAddress &&
+      (callSessionHeader === undefined ||
+        !/^[0-9]+(?![\s\S])/.test(callSessionHeader) ||
+        Number(callSessionHeader) < 1 ||
+        Number(callSessionHeader) > 2147483647)
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        'AI 고객 기본 주소 수정에는 유효한 call_session_seq가 필요합니다.',
+      );
     await this.database.transaction(async (client) => {
+      const caller = aiAddress
+        ? await this.calls.ongoingCaller(client, Number(callSessionHeader))
+        : undefined;
       const customer = await this.repository.find(id, client);
       if (!customer || (!administrator && customer.status === 'WITHDRAWN'))
         throw new ApiException(404, 'NOT_FOUND', '고객을 찾을 수 없습니다.');
+      if (
+        caller &&
+        (caller.phone !== customer.phoneNumber ||
+          (caller.customerSeq !== null && caller.customerSeq !== id))
+      )
+        throw new ApiException(
+          403,
+          'FORBIDDEN',
+          '해당 통화 고객의 기본 주소만 수정할 수 있습니다.',
+        );
       if (customer.status === 'WITHDRAWN' && changes.status === 'ACTIVE')
         throw new ApiException(409, 'INVALID_STATE', '탈퇴 고객의 복구는 지원하지 않습니다.');
       await this.repository.update(id, changes, client);

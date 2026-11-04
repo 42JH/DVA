@@ -13,7 +13,8 @@
 
 | 호출                                                                  | 인증·추가 헤더                                                               |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름/주소 수정 | 현재 MVP AI 접근. 고객 상태 변경 등 관리자 전용 작업 제외                    |
+| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름 단독 수정 | 현재 MVP AI 접근. 고객 상태 변경 등 관리자 전용 작업 제외                    |
+| `PATCH /api/customers/{id}`의 `address` 수정·삭제                     | `call_session_seq` 필수. 진행 중인 본인 통화만 허용                          |
 | `POST /api/orders`의 AI 최종 결과                                     | `Idempotency-Key: <주문 결과별 UUID>` + 본문 `call`                          |
 | 기존 주문 조회·취소, 개인 PIN, 과거 주문 주소 조회                    | `call_session_seq: <통화 번호>`로 발신 고객 범위 검증. 경로별 상세 계약 준수 |
 | `GET /api/companies/search`                                           | 기업 공유 배송지 조회. 현재 MVP 계약 사용                                    |
@@ -85,6 +86,16 @@ Content-Type: application/json
 
 `latitude`, `longitude`는 선택 필드가 아니다. 숫자·문자열·null 모두 보내지 않는다. 보내면 400이며 BE도 디버 요청에 전송하지 않는다. 우편번호는 선행 0을 보존하는 문자열이다. [좌표 제거 상세](address-coordinates-removal.md)
 
+### 고객 기본 주소와 개인 PIN 저장
+
+고객 동의를 받은 경우에만 저장한다. 주문 생성·수정은 고객 기본 주소나 PIN을 자동 갱신하지 않는다.
+
+- 기본 주소: `PATCH /api/customers/{customerSeq}`에 `address`와 `call_session_seq` 헤더를 보낸다. 통화 종료 웹훅이 `call_sessions.ended_at`에 반영되기 전에 호출해야 한다. 객체는 완성 주소 전체 교체, null은 삭제, 생략은 유지다. 성공 204에는 본문이 없다. 이름 단독 수정과 고객 등록·상세는 기존 MVP 계약을 유지한다.
+- 개인 PIN: `POST /api/customers/{customerSeq}/pins`, `PATCH /api/pins/{pinSeq}`는 같은 통화 번호로 종료 후에도 호출할 수 있다. 기존 완성 `addressData`·소유권·중복·버전 계약을 유지한다. 주소 중복 409 `DUPLICATE_RESOURCE`는 기존 PIN을 덮어쓰지 않는다.
+- PIN 목록 `GET /api/customers/{customerSeq}/pins`는 진행 중 통화만 허용하며 종료 후에는 409 `INVALID_STATE`다. 종료 전 확보한 PIN 번호와 주소를 후처리에 사용한다.
+- 기본 주소의 누락/잘못된 통화 헤더는 400, 다른 고객은 403, 없는/삭제/보관 만료 통화는 404, 종료된 통화는 409다. 주소 변경과 성공 감사는 같은 트랜잭션이며 통화 종료와 경합하면 잠금 뒤 종료 여부를 다시 확인한다.
+- 주소/PIN 호출 실패는 주문 저장 성공을 취소하지 않는다. 새 연락처를 임의로 만들거나 주문 전체를 재접수하지 말고 해당 주소 호출의 결과를 확인한다.
+
 ### AI 결과 전송
 
 `POST /api/orders`에 주문 결과별 UUID를 `Idempotency-Key`로 보낸다. 최초 시도 전에 만들고 재전송에도 같은 키·같은 본문을 유지한다. 이 방식은 본문 `call`로 통화를 연결하므로 별도 `call_session_seq` 헤더나 `/submit` 호출이 필요 없다.
@@ -152,7 +163,7 @@ Content-Type: application/json
 
 [주문 결제 상세](../../docs/api/ai-order-billing-integration.md) · [빈 주문 방지](empty-ai-order-results.md) · [10초·10분 재시도](order-submission-retry.md) · [취소](../../docs/api/order-cancel.md)
 
-## 4. 최종 통화 분석 — AI가 7개 값을 확정
+## 4. 최종 통화 분석 — AI가 요약값을 확정
 
 `POST /api/ai/calls/{callSessionSeq}/analysis`, `Authorization: Bearer <AI_INSIGHTS_TOKEN>`. HTTP 204이며 응답 JSON을 읽지 않는다. 분석 API는 통화를 생성하지 않는다.
 

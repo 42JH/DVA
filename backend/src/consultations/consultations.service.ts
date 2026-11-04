@@ -89,6 +89,19 @@ export class ConsultationsService {
     return this.sessions.attachCustomer(client, callId, customerId);
   }
 
+  async ongoingCaller(client: PoolClient, id: number) {
+    const call = await this.sessions.caller(client, id);
+    if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+    if (call.endedAt !== null)
+      throw new ApiException(
+        409,
+        'INVALID_STATE',
+        '종료된 통화에서는 고객 기본 주소를 수정할 수 없습니다.',
+      );
+    if (!call.phone) throw new ApiException(403, 'FORBIDDEN', '통화 발신번호가 필요합니다.');
+    return call;
+  }
+
   attachOrder(client: PoolClient, callId: number, orderId: number) {
     return this.sessions.attachOrder(client, callId, orderId);
   }

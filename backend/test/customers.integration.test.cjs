@@ -88,6 +88,21 @@ async function register(input = { name: '고객', phoneNumber: phone() }) {
   return (await response.json()).data.customerSeq;
 }
 const adminHeaders = () => ({ Cookie: adminCookie, Origin: origin });
+async function callFor(id) {
+  const number = (
+    await pool.query('SELECT phone_number FROM customers WHERE customer_seq=$1', [id])
+  ).rows[0].phone_number;
+  const response = await request('/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phoneNumber: number,
+      call: { providerCallId: randomUUID(), incomingAt: new Date().toISOString() },
+    }),
+  });
+  assert.equal(response.status, 200);
+  return { call_session_seq: String((await response.json()).data.callSessionSeq) };
+}
 async function error(response, status, code) {
   assert.equal(response.status, status);
   const body = await response.json();
@@ -491,7 +506,8 @@ test('own address is nullable, validated, available in reads and independent of 
   assert.equal((await patch(id, { name: '이름만 변경' })).status, 204);
   assert.deepEqual((await detail()).address, address);
   const replacement = { ...address, roadAddress: '새내주소로 3' };
-  assert.equal((await patch(id, { address: replacement })).status, 204);
+  const ai = await callFor(id);
+  assert.equal((await patch(id, { address: replacement }, ai)).status, 204);
   assert.deepEqual((await detail()).address, replacement);
   assert.deepEqual(
     (await pool.query('SELECT address_data FROM personal_pins WHERE customer_seq=$1', [id])).rows[0]
@@ -509,7 +525,7 @@ test('own address is nullable, validated, available in reads and independent of 
     { ...address, name: '중복 이름' },
     { ...address, longitude: '127' },
   ]) {
-    await error(await patch(id, { address: invalid }), 400, 'INVALID_REQUEST');
+    await error(await patch(id, { address: invalid }, ai), 400, 'INVALID_REQUEST');
     assert.deepEqual((await detail()).address, replacement);
     await assert.rejects(
       () =>
@@ -520,7 +536,7 @@ test('own address is nullable, validated, available in reads and independent of 
       (e) => e.code === '23514',
     );
   }
-  assert.equal((await patch(id, { address: null })).status, 204);
+  assert.equal((await patch(id, { address: null }, ai)).status, 204);
   assert.equal((await detail()).address, null);
   assert.equal(
     (await pool.query('SELECT count(*) FROM personal_pins WHERE customer_seq=$1', [id])).rows[0]
@@ -531,6 +547,7 @@ test('own address is nullable, validated, available in reads and independent of 
 
 test('address-only updates roll back when success audit fails', async () => {
   const id = await register();
+  const ai = await callFor(id);
   const { AuditService } = require('../dist/audit/audit.service');
   const audit = app.get(AuditService),
     original = audit.recordSuccess;
@@ -539,14 +556,18 @@ test('address-only updates roll back when success audit fails', async () => {
   };
   try {
     await error(
-      await patch(id, {
-        address: {
-          roadAddress: '원자성로 1',
-          jibunAddress: '원자성동 1',
-          dongName: '원자성동',
-          postalCode: '01234',
+      await patch(
+        id,
+        {
+          address: {
+            roadAddress: '원자성로 1',
+            jibunAddress: '원자성동 1',
+            dongName: '원자성동',
+            postalCode: '01234',
+          },
         },
-      }),
+        ai,
+      ),
       500,
       'INTERNAL_ERROR',
     );
@@ -554,4 +575,113 @@ test('address-only updates roll back when success audit fails', async () => {
     audit.recordSuccess = original;
   }
   assert.equal((await (await request('/' + id)).json()).data.address, null);
+});
+
+test('AI basic address changes require a matching ongoing call while administrator and name-only updates keep their contracts', async () => {
+  const id = await register({ name: '주소 권한 고객', phoneNumber: phone() });
+  const replacement = {
+    roadAddress: '통화로 1',
+    jibunAddress: '통화동 1',
+    dongName: '통화동',
+    postalCode: '01234',
+  };
+  for (const header of [undefined, '0', '-1', '1.5', 'abc', '2147483648', '1,2'])
+    await error(
+      await patch(
+        id,
+        { name: '저장되면 안 됨', address: replacement },
+        header === undefined ? {} : { call_session_seq: header },
+      ),
+      400,
+      'INVALID_REQUEST',
+    );
+  await error(
+    await patch(id, { address: replacement }, { call_session_seq: '2147483647' }),
+    404,
+    'NOT_FOUND',
+  );
+  const other = await register();
+  await error(await patch(id, { address: replacement }, await callFor(other)), 403, 'FORBIDDEN');
+  const ai = await callFor(id);
+  assert.equal((await patch(id, { address: replacement }, ai)).status, 204);
+  await pool.query(
+    "UPDATE call_sessions SET started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE call_session_seq=$1",
+    [ai.call_session_seq],
+  );
+  await error(await patch(id, { name: '종료 후 변경', address: null }, ai), 409, 'INVALID_STATE');
+  const customer = (await (await request('/' + id)).json()).data;
+  assert.equal(customer.name, '주소 권한 고객');
+  assert.deepEqual(customer.address, replacement);
+  assert.equal((await patch(id, { name: '기존 이름 수정' })).status, 204);
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const actor = await account(role);
+    assert.equal(
+      (await patch(id, { address: null }, { Cookie: actor.cookie, Origin: origin })).status,
+      204,
+    );
+  }
+});
+
+test('AI basic address writes reject deleted and expired calls and cannot cross a stored customer identity', async () => {
+  const id = await register();
+  const other = await register();
+  for (const change of [
+    'customer_seq=$2',
+    'deleted_at=clock_timestamp()',
+    "incoming_at=clock_timestamp()-interval '6 years'",
+  ]) {
+    const ai = await callFor(id);
+    await pool.query(
+      `UPDATE call_sessions SET ${change} WHERE call_session_seq=$1`,
+      change.includes('$2') ? [ai.call_session_seq, other] : [ai.call_session_seq],
+    );
+    await error(
+      await patch(id, { address: null }, ai),
+      change.includes('$2') ? 403 : 404,
+      change.includes('$2') ? 'FORBIDDEN' : 'NOT_FOUND',
+    );
+  }
+});
+
+test('a customer address write waiting behind call termination rechecks the end time before saving', async () => {
+  const id = await register({ name: '종료 경합 고객', phoneNumber: phone() });
+  const ai = await callFor(id);
+  const transaction = await pool.connect();
+  let pending;
+  try {
+    await transaction.query('BEGIN');
+    const pid = (await transaction.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    await transaction.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR UPDATE', [
+      ai.call_session_seq,
+    ]);
+    pending = request('/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...ai },
+      body: JSON.stringify({ name: '저장되면 안 됨', address: null }),
+      signal: AbortSignal.timeout(8000),
+    });
+    let waiting = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      waiting = (
+        await pool.query(
+          'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS waiting',
+          [pid],
+        )
+      ).rows[0].waiting;
+      if (waiting) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(waiting, true, 'the address write must lock its call before the customer');
+    await transaction.query(
+      "UPDATE call_sessions SET started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE call_session_seq=$1",
+      [ai.call_session_seq],
+    );
+    await transaction.query('COMMIT');
+    await error(await pending, 409, 'INVALID_STATE');
+    assert.equal((await (await request('/' + id)).json()).data.name, '종료 경합 고객');
+  } finally {
+    await transaction.query('ROLLBACK');
+    transaction.release();
+    await pending?.catch(() => {});
+  }
 });

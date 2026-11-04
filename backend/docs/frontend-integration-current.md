@@ -155,6 +155,8 @@ source.onerror = () => {
 
 ## 5. 주문 목록·결제·접수 실패
 
+`pickupRequestedAt`은 AI/관리자가 정한 요청 시각을 결제 대기 중에도 반환한다. 요청 시각까지 결제하면 유지하고, 이후 결제 또는 미전송이면 결제 완료 + 1시간을 한국시간 09:00~17:00으로 조정한다(09시 이전은 당일 09시, 17시 초과는 다음날 09시). 프론트는 저장된 응답을 표시하며 별도로 시각을 재계산하지 않는다. 관리자 고객 기본 주소/PIN 수정은 기존 세션·Origin을 사용하고 통화 헤더가 필요 없다.
+
 화면용 목록은 `GET /api/admin/orders`, 일반 상세는 `GET /api/orders/{id}`다. 관리자 수기는 `POST /api/admin/orders`, 수정은 `PATCH /api/orders/{id}`이며 경로별 DTO·expectedVersion을 따른다. 결제 알림 재발송·결제 진행은 [결제 API](../../docs/api/order-payment-integration.md)를 사용한다. 클라이언트의 결제 성공 화면만으로 주문을 완료 처리하지 않는다.
 
 | 실제 status       | 표시                          |
