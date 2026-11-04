@@ -1,15 +1,16 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtRowTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ORDER_GROUP, orderNo, type OrderGroup } from '@/shared/order/labels'
 import { STATUS_GROUP_LABEL, orderErrorText } from '@/features/order/labels'
-import { parcelRows, partyHas } from '@/features/order/api/parcelRows'
+import { parcelRows, partyHas, type ParcelRow } from '@/features/order/api/parcelRows'
 import {
   cancelOrder,
   fetchOrderDay,
+  fetchRecentOrders,
   orderQueries,
   prevOrderDay,
   nextOrderDay,
@@ -58,6 +59,42 @@ const party = (p: ListParty | undefined) => ({
   address: [p?.roadAddress, p?.detailAddress].filter(Boolean).join(' '),
 })
 
+const toRow = (r: ParcelRow, day: Ymd, today: Ymd): OrderListRow => ({
+  key: r.key,
+  day,
+  orderSeq: r.orderSeq,
+  parcelSeq: r.parcel?.orderParcelSeq ?? null,
+  time: fmtRowTime(r.createdAt, today),
+  group: ORDER_GROUP[r.status],
+  sender: party(r.parcel?.origin),
+  receiver: party(r.parcel?.destination),
+  orderNo: orderNo(r.orderSeq),
+})
+
+/** 그 사람이 맞는 줄만 — 서버 검색어는 하나라 칸마다 그 사람에서 다시 거름 */
+const fits = (sender: string, receiver: string) => (r: ParcelRow) =>
+  partyHas(r.parcel?.origin, sender) && partyHas(r.parcel?.destination, receiver)
+
+const PREVIEW = 6
+/** 상단바 검색 창 미리 보기 (11/05) — 기간 없이 최근 주문에서 맞는 줄 6개. 누르면 그 주문 상세 창
+ *  ponytail: 서버 최근 100건(한 번에 받을 수 있는 최대) 안에서만 거름 — 두 칸을 다 쓰면 더 오래된 맞는 주문은 미리 보기에 안 나올 수 있음(Enter로 목록은 다 나옴) */
+export function useOrderPreview(sender: string, receiver: string) {
+  const today = todayYmd()
+  const q = sender || receiver
+  const res = useQuery({
+    queryKey: [...orderQueries.all(), 'preview', q],
+    queryFn: ({ signal }) => fetchRecentOrders(q, 100, signal),
+    enabled: q !== '',
+    placeholderData: keepPreviousData,
+  })
+  const rows = (res.data ?? [])
+    .flatMap(parcelRows)
+    .filter(fits(sender, receiver))
+    .slice(0, PREVIEW)
+    .map((r) => toRow(r, ymd(new Date(r.createdAt)), today))
+  return { rows, loading: res.isFetching }
+}
+
 /** 03 주문 내역 훅 (Figma '주문' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로 (04 통화와 같은 틀)
  *  거르기: 주문 상태(서버 statusGroup) · 보내는 분 · 받는 분 검색칸. 줄을 누르면 주문 상세 창 → 수정 · 취소 · 다시 접수 */
 export function useOrderList() {
@@ -89,20 +126,8 @@ export function useOrderList() {
     day,
     rows: rows
       .flatMap(parcelRows)
-      .filter(
-        (r) => partyHas(r.parcel?.origin, sender) && partyHas(r.parcel?.destination, receiver),
-      )
-      .map((r): OrderListRow => ({
-        key: r.key,
-        day,
-        orderSeq: r.orderSeq,
-        parcelSeq: r.parcel?.orderParcelSeq ?? null,
-        time: fmtRowTime(r.createdAt, today),
-        group: ORDER_GROUP[r.status],
-        sender: party(r.parcel?.origin),
-        receiver: party(r.parcel?.destination),
-        orderNo: orderNo(r.orderSeq),
-      })),
+      .filter(fits(sender, receiver))
+      .map((r) => toRow(r, day, today)),
   }))
 
   // 취소 · 다시 접수 — 확인 창 [확인] → 요청 → 목록 · 상세 다시 받기 → 그 줄의 상세로 돌아감

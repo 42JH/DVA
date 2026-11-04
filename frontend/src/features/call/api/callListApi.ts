@@ -25,6 +25,15 @@ export async function fetchCallDay(day: Ymd, q: string, signal?: AbortSignal): P
     .map(toCallRow)
 }
 
+/** 상단바 검색 창 미리 보기 — 기간 없이 최근 n건 (최신순) */
+export async function fetchRecentCalls(q: string, n: number, signal?: AbortSignal) {
+  const res = await api.get<ApiList<CallListItemDto>>('/calls', {
+    query: { q: toQ(q), limit: n, offset: 0 },
+    signal,
+  })
+  return res.data.map(toCallRow)
+}
+
 /** day 전에 통화가 있는 가장 가까운 날 (최신 1건의 날짜 — 통화 없는 날은 건너뜀). 없으면 null */
 export async function prevCallDay(day: Ymd, q: string, signal?: AbortSignal): Promise<Ymd | null> {
   const res = await api.get<ApiList<CallListItemDto>>('/calls', {
