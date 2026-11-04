@@ -88,6 +88,11 @@ Backend instructions = policy/backend_rules.md (render_backend 문장 이동 + d
 | e 상담원 연결 | BE: 연결·콜백 API 없음, `handoff_requests` 삭제(047), "상담원 연결 제어·콜백은 범위 밖"(`calls.md:211-214`). 기록은 분석 `hasHandoffRequest`·이벤트 `HANDOFF_REQUESTED`만. 통화 전환: OpenAI `live.sessions.refer(session_id, target_uri="sip:…")`(SDK 확인), PBX 계약 "고객 동의 후에만"(`pbx-sip.md:14`) | 전환은 **상담원 SIP 주소**만 있으면 구현 가능. 콜백(`create_callback_request`)은 **BE API 없음** → BE 신설 또는 미답변·이벤트 기록으로 대체. 상담원 근무 시간 출처 없음 → 설정값 |
 | g 주소록 수정 | 출발지(고객 기본 주소): `PATCH /api/customers/{id}` name·address, AI 허용(`customers.md:8-10`). 도착지: `POST /api/customers/{id}/pins`(같은 주소 409 DUPLICATE_RESOURCE), `PATCH /api/pins/{id}`(addressData 전체 교체), "관리자 또는 현재 통화 고객". PIN과 고객 기본 주소는 자동 동기화 안 함 | **구현 가능** |
 
+### 3.2 BE 회신(2026-11-04, 사용자 전달)
+- **BE 구현 완료(사용자 전달)**: 수거 요청 시각 보존, 콜백 요청 API, 주소록 관련. 원격 `develop-backend`는 아직 `e5dc008`(2026-11-03 22:28)로 **계약 문서·코드 미반영** — BE 브랜치·문서가 올라오면 경로·필드·오류 코드를 확인한 뒤 구현한다(추측 구현 금지).
+- **g 주소록 갱신 시점 변경**: 접수 후가 아니라 **해당 주소를 인식했을 때**(주소 보정이 확정된 시점) 갱신한다.
+- **e 상담원 이관(임시)**: 우리 쪽은 **이관 요청을 BE로 보내기만** 한다. 실제 통화 전환(`refer`)은 상담원 SIP URI가 준비되지 않아 하지 않는다.
+
 ## 4. 세부 결정(2026-11-04)
 1. a 기본값이 17시를 넘으면: "금일 수거는 어렵고 익일 수거 가능" 안내, 기본 익일 09:00. 주말·공휴일 구분 없음.
 2. a 조정 범위: 3일 이내(임시 — 정책 미정, 설정값).
