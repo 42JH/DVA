@@ -8,6 +8,7 @@ import {
   TopBar,
   TopSearch,
 } from '@/shared/ui'
+import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 
 // 09 AI 미답변 — 옛 구성 그대로(적용된 필터 · 'AI 미답변 질문 n개' · 표 · 쪽 번호)에 새 디자인만 입힘 (11/05 사용자: 구성은 두고 디자인만)
@@ -16,14 +17,7 @@ import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useU
 // 한 화면에: 표 줄만 스크롤 (머리 · 쪽 번호는 고정). 오래된 질문부터 (먼저 쌓인 것부터 처리)
 const COLS = 'grid grid-cols-[170px_200px_170px_minmax(0,1fr)_196px]'
 const PAD = 'px-[54px]' // 03 주문 목록과 같은 좌우 자리
-// 사유 칩 바탕 — 04 상담 유형 칩 색 집합에서: 근거 부족(FAQ로 채울 것) = FAQ 남보라 · 검색 장애 = 분홍 · 미분류 = 회색
-// 11/05 사용자: 04 상담 유형 칩과 같은 모양(둥근 알약 · 높이 28 · 폭 76 이상). 미분류는 04 '분석 전'처럼 회색 글자 + 테두리(줄에 올려도 보이게)
-const REASON_BG = {
-  KB_NO_ANSWER: 'bg-kind-faq',
-  KB_UNAVAILABLE: 'bg-kind-cancel',
-  none: 'bg-bg text-sub ring-1 ring-line ring-inset',
-}
-
+// 사유 칩 — 04 상담 유형 칩 색 집합에서: 근거 부족(FAQ로 채울 것) = FAQ 남보라 · 검색 장애 = 분홍 · 미분류 = 회색. 모양 · 색은 06 처리 내용과 같이 shared/lib/unansweredReason
 export function UnansweredPage() {
   const vm = useUnansweredList()
 
@@ -164,11 +158,7 @@ function Row({ r, vm }: { r: UnansweredRow; vm: ReturnType<typeof useUnansweredL
         </span>
       </span>
       <span>
-        <span
-          className={`inline-grid h-7 min-w-19 place-items-center rounded-full px-3 text-body ${REASON_BG[r.reason ?? 'none']}`}
-        >
-          {r.reasonTag.label}
-        </span>
+        <span className={`${REASON_TAG_CLASS} ${r.reasonTag.bg}`}>{r.reasonTag.label}</span>
       </span>
       <span className="truncate pr-4" title={r.question}>
         “<Highlight text={r.question} q={vm.q} />”

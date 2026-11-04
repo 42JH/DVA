@@ -1,4 +1,4 @@
-import { Tag } from '@/shared/ui'
+import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
 import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail'
 
 // 처리 내용 (06 오른쪽, 11/05 새 디자인) — 이 통화가 한 일
@@ -32,7 +32,7 @@ export function CallActions({
 }) {
   return (
     <section className={`flex min-h-0 flex-col ${className}`}>
-      <h2 className="shrink-0 text-strong font-bold">처리 내용</h2>
+      <h2 className="shrink-0 text-card font-semibold">처리 내용</h2>
 
       <ul className="mt-3 flex shrink-0 flex-col gap-2">
         {results.length === 0 && (
@@ -41,8 +41,10 @@ export function CallActions({
         {results.map((r) => (
           <li key={r.key} className="rounded-xl bg-frame px-5 py-4">
             <div className="flex items-center gap-3">
-              <span className="text-strong font-bold">{r.label}</span>
-              {r.reason && <Tag kind={r.reason.kind}>{r.reason.label}</Tag>}
+              <span className="text-strong font-semibold">{r.label}</span>
+              {r.reason && (
+                <span className={`${REASON_TAG_CLASS} ${r.reason.bg}`}>{r.reason.label}</span>
+              )}
               <span className="text-label text-sub tabular-nums">{r.time}</span>
               {r.link && (
                 <button
@@ -64,7 +66,7 @@ export function CallActions({
         ))}
       </ul>
 
-      <h3 className="mt-6 flex shrink-0 items-baseline gap-2 text-strong font-bold">
+      <h3 className="mt-6 flex shrink-0 items-baseline gap-2 text-card font-semibold">
         AI 동작 <span className="text-body font-normal text-sub">{count}</span>
       </h3>
       <ul className="mt-2 min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto pr-2">
