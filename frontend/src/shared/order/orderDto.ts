@@ -4,9 +4,16 @@
 import type { OrderDetail, Party, PaymentMethod, PaymentState } from './orderApi'
 
 /** 주문 상태 (서버). COLLECTING 수집 중 · notPaid 결제 대기 · PAID 결제 완료 · SUBMITTING 디버 접수 중
- * · ACCEPTED 디버 접수 완료 · SUBMISSION_FAILED 디버 접수 실패 · CANCELLED 취소 */
+ * · SUBMITTING_FAILED 디버 접수 실패(자동 재시도 중, 11/03) · ACCEPTED 디버 접수 완료 · SUBMISSION_FAILED 디버 접수 최종 실패 · CANCELLED 취소 */
 export type OrderStatusDto =
-  'COLLECTING' | 'notPaid' | 'PAID' | 'SUBMITTING' | 'ACCEPTED' | 'SUBMISSION_FAILED' | 'CANCELLED'
+  | 'COLLECTING'
+  | 'notPaid'
+  | 'PAID'
+  | 'SUBMITTING'
+  | 'SUBMITTING_FAILED'
+  | 'ACCEPTED'
+  | 'SUBMISSION_FAILED'
+  | 'CANCELLED'
 
 /** 결제 방식 (서버). cat = 예전 지점 방문 결제(조회만) */
 export type PaymentMethodDto = 'cat' | 'billing' | 'credit' | 'groupBilling'
@@ -82,6 +89,7 @@ const PAYMENT_STATE: Record<OrderStatusDto, PaymentState> = {
   notPaid: 'UNPAID',
   PAID: 'PAID',
   SUBMITTING: 'PAID',
+  SUBMITTING_FAILED: 'PAID',
   ACCEPTED: 'PAID',
   SUBMISSION_FAILED: 'PAID',
   CANCELLED: 'CANCELLED_BEFORE_PAYMENT',

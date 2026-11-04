@@ -1,37 +1,30 @@
-// 주문 상태 코드 → 화면 문구 · 태그 색 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
-import type { TagKind } from '@/shared/ui'
+// 주문 상태 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
 import type { OrderStatus, StatusGroup } from './api/orderApi'
 
-// 실제 상태 7개 (11/01): '결제 완료' 탭 안에서도 접수 실패가 바로 보이게 줄 태그는 실제 상태로
-export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
-  COLLECTING: '접수 중단',
+/** 상태 묶음 = 서버 statusGroup = 목록 '주문 상태' 고르기 · 줄 칩 (Figma '주문' 11/04 문구). 접수 실패는 서버 묶음(11/01)이라 더함 */
+export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
+  ALL: '전체',
+  COLLECTING: '미완료 주문',
   notPaid: '결제 대기',
   PAID: '결제 완료',
-  SUBMITTING: '디버 접수 중',
-  ACCEPTED: '접수 완료',
   SUBMISSION_FAILED: '접수 실패',
   CANCELLED: '주문 취소',
 }
 
-// 진행 중 = 남색 선 + 점, 조치 필요(결제 대기 · 접수 실패) = 빨강, 완료 = 파랑, 취소 = 회색
-export const ORDER_STATUS_TAG: Record<OrderStatus, TagKind> = {
-  COLLECTING: 'live',
-  notPaid: 'red',
-  PAID: 'blue',
-  SUBMITTING: 'live',
-  ACCEPTED: 'blue',
-  SUBMISSION_FAILED: 'red',
-  CANCELLED: 'gray',
+/** 실제 상태 8개 → 묶음 (서버 statusGroup 규칙: 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = 재시도 중 실패 · 최종 실패) */
+export const STATUS_GROUP: Record<OrderStatus, Exclude<StatusGroup, 'ALL'>> = {
+  COLLECTING: 'COLLECTING',
+  notPaid: 'notPaid',
+  PAID: 'PAID',
+  SUBMITTING: 'PAID',
+  ACCEPTED: 'PAID',
+  SUBMITTING_FAILED: 'SUBMISSION_FAILED',
+  SUBMISSION_FAILED: 'SUBMISSION_FAILED',
+  CANCELLED: 'CANCELLED',
 }
 
-/** 상태 탭 5개 = 서버 statusGroup (와이어프레임 03 순서) */
-export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
-  ALL: '전체',
-  COLLECTING: '접수 중단',
-  notPaid: '결제 대기',
-  PAID: '결제 완료',
-  CANCELLED: '주문 취소',
-}
+/** 주문번호 'DV-00001' (Figma '주문' 11/04) — 서버 주문 번호(orderSeq)를 5자리로 */
+export const orderNo = (orderSeq: number) => `DV-${String(orderSeq).padStart(5, '0')}`
 
 /** 주문 추가 · 수정 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구 · 코드를 그대로 보이지 않음, 11/01 기업관리와 같은 기준) */
 export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소'): string {

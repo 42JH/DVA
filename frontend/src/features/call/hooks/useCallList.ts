@@ -1,13 +1,15 @@
-import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
-import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtDuration, fmtPhone } from '@/shared/lib/format'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { fmtDuration, fmtPhone, fmtRowTime } from '@/shared/lib/format'
+import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
 import { COMPLAINT_LABEL, KIND_LABEL } from '@/features/call/labels'
 import { matchCall, type CallFilter, type CallKind } from '@/features/call/api/callDto'
 import {
-  callListQueries,
   callPersonaQueries,
+  fetchCallDay,
   latestCallOf,
+  prevCallDay,
   type CallRow,
 } from '@/features/call/api/callListApi'
 
@@ -40,19 +42,10 @@ export type CallListRow = CallRow & {
 // date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
 const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 
-const pad = (n: number) => String(n).padStart(2, '0')
-function timeLabel(iso: string, today: Ymd) {
-  const d = new Date(iso)
-  const day = ymd(d)
-  if (day === today) return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
-  const date = day.slice(0, 4) === today.slice(0, 4) ? day.slice(5) : day
-  return `${date.replaceAll('-', '.')} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
 const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
   ...r,
   day,
-  time: r.startedAt ? timeLabel(r.startedAt, today) : '—',
+  time: r.startedAt ? fmtRowTime(r.startedAt, today) : '—',
   name: r.customerName ?? '—',
   phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
   kinds: KINDS.flatMap((kind) => {
@@ -102,49 +95,23 @@ export function useCallList() {
       hit && set({ date: hit.day >= today ? '' : hit.day, at: String(hit.callSessionSeq) }),
   })
 
-  const list = useInfiniteQuery(callListQueries.days(anchor, q))
-  const pages = list.data?.pages ?? []
-  const live = useQuery({ ...callListQueries.today(q), enabled: pages[0]?.day === today })
-  const days = pages.flatMap((p) => {
-    if (!p.day) return []
-    const day = p.day
-    const rows = day === today && live.data ? live.data : p.rows
-    return [
-      {
-        day,
-        rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day, today)),
-      },
-    ]
+  const feed = useDayFeed({
+    key: ['calls', 'list'],
+    filter: q,
+    anchor,
+    fetchDay: (day, signal) => fetchCallDay(day, q, signal),
+    prevDay: (day, signal) => prevCallDay(day, q, signal),
   })
+  const days = feed.days.map(({ day, rows }) => ({
+    day,
+    rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day, today)),
+  }))
   const isFiltered = form.newOnly || form.kinds.length > 0 || form.min > 0 || form.max < DUR_MAX
 
   return {
     anchor,
-    today,
-    days,
+    feed: { ...feed, days },
     at: Number(params.at) || null, // 처음 그릴 때 이 통화를 맨 위로
-    isLoading: list.isPending,
-    stale: list.isPlaceholderData, // 검색어를 바꿔 새 결과를 받는 중 (이전 목록을 흐리게)
-    error: list.isError && !pages.length ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
-    // 받아 둔 줄은 그대로 두고 알림 (11/02 연동 명세)
-    notice:
-      live.isError && !!live.data
-        ? '오늘 통화를 다시 받지 못했어요. 마지막으로 받은 목록이에요.'
-        : null,
-    hasNewer: list.hasPreviousPage,
-    hasOlder: list.hasNextPage,
-    loadingNewer: list.isFetchingPreviousPage,
-    loadingOlder: list.isFetchingNextPage,
-    newerError: list.isFetchPreviousPageError,
-    olderError: list.isFetchNextPageError,
-    busy: list.isFetching, // 받는 중(어느 쪽이든) — 끝나면 화면이 끝에 닿아 있는지 다시 봄
-    // 한 번에 한 방향만 (서로 끊지 않게) — 스크롤 끝에 닿을 때 화면이 부름
-    loadNewer: () => {
-      if (!list.isFetching) void list.fetchPreviousPage({ cancelRefetch: false })
-    },
-    loadOlder: () => {
-      if (!list.isFetching) void list.fetchNextPage({ cancelRefetch: false })
-    },
 
     setDate: (d: Ymd) => set({ date: d >= today ? '' : d, at: '' }),
 

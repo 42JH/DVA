@@ -2,11 +2,10 @@ import { api, type ApiList } from './client'
 
 /**
  * 쪽 나누기 — 두 가지 목록을 한 모양으로
- *  1) 서버가 쪽을 나누는 목록(04): offsetOf(page, size)로 요청하고, 쪽 번호는 total_count로 pageCount
+ *  1) 서버가 쪽을 나누는 목록: offset = (page - 1) * size로 요청하고, 쪽 번호는 total_count로 pageCount
  *  2) 전부 받아 앞에서 나누는 목록(09처럼 수십 건): fetchAll로 다 받고 pageSlice(items, page, size)
  * 쪽 번호는 1부터. 지워서 쪽이 줄면 마지막 쪽으로 붙임(clamp)
  */
-export const offsetOf = (page: number, size: number) => Math.max(0, page - 1) * size
 
 export const pageCount = (total: number, size: number) => Math.max(1, Math.ceil(total / size))
 
