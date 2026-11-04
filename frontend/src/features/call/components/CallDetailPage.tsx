@@ -42,7 +42,7 @@ function CallDetailBody({ callId }: { callId: number }) {
                   {s.customer}
                 </span>
                 {s.isNew && (
-                  <sup className="mt-1.5 ml-1 text-label font-normal text-brand">new</sup>
+                  <sup className="mt-1.5 ml-1 text-[12px] font-normal text-brand">new</sup>
                 )}
               </h1>
               <span className="flex flex-wrap items-center gap-2 text-card">

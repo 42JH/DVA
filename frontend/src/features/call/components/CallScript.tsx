@@ -46,7 +46,7 @@ export function CallScript({
   }, [jump])
   return (
     <section className={`flex min-h-0 flex-col ${className}`}>
-      <h2 className="shrink-0 text-strong font-bold">통화 스크립트</h2>
+      <h2 className="shrink-0 text-card font-semibold">통화 스크립트</h2>
 
       {/* 재생: ▶ + 진행 바(파랑) + 지금 / 길이. 녹취가 없거나 못 받으면 그 한 줄 */}
       <audio ref={audioRef} src={player.src} preload="metadata" {...player.handlers} />

@@ -1,16 +1,20 @@
 // AI 미답변 공용 — 사유 문구 (미답변 사유 연동 11/04) · 화면 주소 · 경로 첫 칸 (11/05). 09 AI 미답변 · 06 처리 내용 · 상단바 알림 · 통계가 같이 써서 shared (기능 폴더끼리 import 금지)
-import type { TagKind } from '@/shared/ui'
-
 /** 서버 코드 그대로. null = 사유 없이 들어온 질문 · 연동 전에 쌓인 질문 (백엔드는 원인을 추정하지 않음) */
 export type UnansweredReason = 'KB_NO_ANSWER' | 'KB_UNAVAILABLE'
 
-/** 문구는 AI팀 요청(11/04): 답변 근거 부족 = 검색은 됐는데 답할 근거가 없음(FAQ 추가 대상) · 지식 검색 장애 = 검색이 안 됨(FAQ에 답이 있었을 수도) · 미분류 = null */
-export const reasonTag = (r: UnansweredReason | null): { label: string; kind: TagKind } =>
+/** 문구는 AI팀 요청(11/04): 답변 근거 부족 = 검색은 됐는데 답할 근거가 없음(FAQ 추가 대상) · 지식 검색 장애 = 검색이 안 됨(FAQ에 답이 있었을 수도) · 미분류 = null
+ * bg = 칩 바탕 — 09 미답변 목록 · 06 처리 내용이 같은 칩 (11/05 사용자: 04 상담 유형 칩과 같은 둥근 알약 · 높이 28 · 폭 76 이상 · 글자 16)
+ * 미분류는 04 '분석 전'처럼 회색 글자 + 테두리 (줄에 마우스를 올려 바탕이 회색이 돼도 · 06 회색 카드 위에서도 보이게) */
+export const reasonTag = (r: UnansweredReason | null): { label: string; bg: string } =>
   r === 'KB_NO_ANSWER'
-    ? { label: '답변 근거 부족', kind: 'gray' }
+    ? { label: '답변 근거 부족', bg: 'bg-kind-faq' }
     : r === 'KB_UNAVAILABLE'
-      ? { label: '지식 검색 장애', kind: 'red' }
-      : { label: '미분류', kind: 'outline' }
+      ? { label: '지식 검색 장애', bg: 'bg-kind-cancel' }
+      : { label: '미분류', bg: 'bg-bg text-sub ring-1 ring-line ring-inset' }
+
+/** 사유 칩 모양 — bg와 같이 씀 */
+export const REASON_TAG_CLASS =
+  'inline-grid h-7 min-w-19 shrink-0 place-items-center rounded-full px-3 text-body'
 
 /** AI 미답변 화면 주소 — from = 지금 화면 주소(경로 첫 칸 '이동 전 위치', 11/05 사용자) · call = 그 통화의 질문만 (06에서) */
 export const unansweredTo = (from: string, call?: number) =>
