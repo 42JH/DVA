@@ -168,3 +168,14 @@ def test_batches_split_at_50_events():
     assert [len(b["events"]) for b in _batches("live_1", events)] == [50, 50, 20]
 
 
+
+
+def test_callback_field_sent_only_when_enabled(tmp_path):
+    """hasCallbackRequest는 048 + 새 BE 배포 뒤에만(구버전 BE는 400) — 설정으로 켠다."""
+    rs, db = service(tmp_path)
+    st = filled()
+    st.callback_requested = True
+    s = session(st)
+    assert "hasCallbackRequest" not in rs.build_insights(s)["analysis"]
+    rs.callback_field = True
+    assert rs.build_insights(s)["analysis"]["hasCallbackRequest"] is True

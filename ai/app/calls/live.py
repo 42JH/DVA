@@ -5,6 +5,7 @@ CallService.handlers에 붙는 동기 핸들러(상태 갱신 + 작업 생성만
 """
 
 import asyncio
+from datetime import time as dtime
 import hashlib
 import json
 import logging
@@ -12,6 +13,7 @@ import time
 from dataclasses import dataclass, field
 
 from app.calls.session import CallSession, Phase
+from app.domain.rules import KST
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
@@ -158,8 +160,9 @@ class LiveFlow:
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
             methods = s.state.customer.payment_methods
+            callback = s.state.callback_offered and not s.state.callback_requested
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       pay_methods=methods)
+                                       pay_methods=methods, callback=callback)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -209,6 +212,10 @@ class LiveFlow:
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
+            if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
+                st.callback_offered = False
+                st.callback_requested = cb[0] == "yes"
+                followups.append(("callback", cb[0]))
             if (pay := answers.get("pay")) and pay[1] >= th and pay[0] in st.customer.payment_methods:
                 st.record("payment", pay[0])
                 followups.append(("payment", pay[0]))
@@ -303,6 +310,9 @@ class LiveFlow:
                 summary = state_summary(st, self.policy)
             await self.notify(s, "N1'", {"picked": value, "summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
+        elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
+            s.note("콜백", value)
+            await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
         elif what == "payment":
             await self.notify(s, "N1'", {"payment": value})
             self._maybe_submit(s)
@@ -334,8 +344,7 @@ class LiveFlow:
             elif intent == "edit_parcel":
                 facts = self._edit(st)
             elif intent == "agent":
-                facts = {"agent": "not_configured"}   # P11: 상담원 대상 미설정 → "담당자가 확인 후 연락"
-                st.agent_transferred = True
+                facts = self._agent_route(s)
             else:  # 조회·취소로 전환(받던 택배는 state.current에 그대로), 문의는 하던 업무를 바꾸지 않는다
                 if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
@@ -359,6 +368,38 @@ class LiveFlow:
         labels = tuple(f"{i}번 {p.draft['receiver_name'].value or '받는 분'}님 택배" for i, p in enumerate(st.parcels, 1))
         offer(st, "parcel", labels, tuple(p.parcel_id for p in st.parcels))
         return {"edit_parcel": "choose", "labels": list(labels)}
+
+    def _agent_route(self, s: CallSession) -> dict:
+        """잠금 안. 상담원 연결 요구(업무 규칙 e): 근무 시간 밖 → 콜백 제안, 안 + 전환 대상 있음 → 전환, 없음 → 담당자 연락."""
+        st = s.state
+        st.agent_transferred = True  # 연결 요구 여부(성공 아님)
+        if not self._agent_hours(s.tools.now()):
+            st.callback_offered = not st.callback_requested
+            return {"agent": "callback_registered" if st.callback_requested else "callback_offer"}
+        if self.cfg.agent_transfer_uri:
+            s.spawn(self._transfer(s), "transfer")
+            return {"agent": "transferring"}
+        return {"agent": "not_configured"}
+
+    def _agent_hours(self, now) -> bool:
+        k = now.astimezone(KST)
+        return k.weekday() in self.cfg.agent_days and \
+            dtime.fromisoformat(self.cfg.agent_open) <= k.time() < dtime.fromisoformat(self.cfg.agent_close)
+
+    async def _transfer(self, s: CallSession) -> None:
+        """안내("바로 연결해 드리겠습니다")가 끝나면 통화 전환(SIP REFER, PBX 계약: 고객 동의 후에만). 실패 → 콜백 제안."""
+        deadline = time.monotonic() + 10.0
+        rt = self.rt(s)
+        while time.monotonic() < deadline and (rt.await_speech or time.time() - s.last_output_t < 1.2):
+            await asyncio.sleep(0.1)
+        try:
+            await self.svc.d.client.live.sessions.refer(s.call_id, target_uri=self.cfg.agent_transfer_uri)
+            s.note("상담원 전환", "refer")
+        except Exception as e:  # 전환 실패: 고객 탓 아님 — 콜백으로 안내
+            s.note("상담원 전환 실패", type(e).__name__)
+            async with s.lock:
+                s.state.callback_offered = True
+            await self.notify(s, "N2", {"agent": "transfer_failed"})
 
     def _count_unanswered(self, s: CallSession, out: dict) -> dict:
         """같은 질문에 3번 연속 답을 못 드리면 상담원 연결 권유(업무 규칙). 답이 나오면 0으로.

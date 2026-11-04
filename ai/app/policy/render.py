@@ -79,7 +79,8 @@ def render_backend(policy: Policy) -> str:
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
-                       pick_labels: tuple[str, ...] = (), pay_methods: tuple[str, ...] = ()) -> list[dict]:
+                       pick_labels: tuple[str, ...] = (), pay_methods: tuple[str, ...] = (),
+                       callback: bool = False) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
@@ -87,6 +88,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets = ["intent"]
     if pending:
         sets.insert(0, "confirm")  # confirm은 확인 대기가 있을 때만(delegation.md §3.2)
+    if callback:
+        sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
     out = []
     for name in dict.fromkeys(sets):
         for q in policy.decision[name].questions:

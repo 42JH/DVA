@@ -81,6 +81,8 @@ class BackendConfig(_Strict):
     write_budget_sec: float = Field(5.0, gt=0)   # 취소 등 쓰기 예산
     submit_timeout_sec: float = Field(15.0, gt=0)  # 통화 결과 요청 1회
     submit_retry_sec: float = Field(40.0, gt=0)    # 통화 결과 같은 키 재확인 총 시간
+    # 분석에 hasCallbackRequest를 넣는다. 048 + 새 BE(feature/ai-call-updates) 배포 전에는 false(구버전 BE가 400으로 거절)
+    analysis_callback_field: bool = False
 
 
 class FareConfig(_Strict):
@@ -111,6 +113,11 @@ class CallConfig(_Strict):
     decision_budget_sec: float = Field(1.0, gt=0)    # S0d API p95 943ms — 넘으면 판단 없음
     decision_min_confidence: float = Field(0.6, gt=0, le=1)  # task·switch·pick·pay 적용 하한
     unanswered_agent_after: int = Field(3, gt=0)     # 매뉴얼 검색 연속 미답변 → 상담원 권유(업무 규칙 h)
+    # 상담원 연결(업무 규칙 e). 전환 대상 SIP URI가 비면 전환하지 않는다(미준비). 근무 시간 밖이면 콜백 제안
+    agent_transfer_uri: str = ""
+    agent_open: str = "09:00"
+    agent_close: str = "18:00"
+    agent_days: tuple[int, ...] = (0, 1, 2, 3, 4)    # 월=0 … 일=6
     commit_delay_ms: int = Field(700, ge=0)          # 확인 "예" 뒤 확정 지연(새 입력이 오면 취소)
     notify_quiet_ms: int = Field(600, gt=0)          # N2는 AI 발화가 이만큼 멈춘 뒤 보낸다
     n3_max: int = Field(3, ge=0)                     # P4: 정정 3회

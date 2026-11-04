@@ -151,7 +151,9 @@ class ConversationState:
     no_more_parcels: bool = False          # 고객이 더 보낼 택배가 없다고 함(more_parcels 단계 완료)
     order_submitted: bool = False          # 결과 전송 시작 — 이후 택배 수정·추가 없음(접수 후 수정 불가)
     order_cancelled: bool = False          # 고객이 이번 접수 자체를 취소(CANCELLED)
-    agent_transferred: bool = False
+    agent_transferred: bool = False       # 상담원 연결 요구(분석 hasHandoffRequest — 연결 성공 여부 아님)
+    callback_offered: bool = False        # 상담원 근무 시간 밖이라 콜백을 제안함(답을 기다림)
+    callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
     _next_parcel: int = 1

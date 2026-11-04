@@ -369,3 +369,11 @@
 - Outcome.pickup_at = 기록된 수거 시각 → 결과 본문 pickupRequestedAt(BE가 보존, 늦은 결제는 BE가 결제+1시간을 09~17시로 맞춤)
 - Backend 지시문 끝에 현재 시각(한국) — "내일 10시"를 날짜로 바꾸기 위해. business_rules.md 수거 절, backend_rules.md pickup_at 규칙
 - 테스트 489 passed(+2, 본문 pickupRequestedAt 단정 갱신)
+
+## 2026-11-04 — 상담원 연결: 근무 시간 밖 콜백(hasCallbackRequest)·통화 전환 열어 둠(업무 규칙 e)
+
+- 사용자 결정: 통화 전환 기능은 열어 두고, 근무 시간 밖이라 이관 불가 + 고객 동의 시 hasCallbackRequest=true
+- LiveFlow._agent_route(용건 agent): hasHandoffRequest(agent_transferred) 기록 → 근무 시간 밖(config [call] agent_open·agent_close·agent_days, 임시 평일 09~18시) → N2 callback_offer + Decision 질문 callback(제안 중에만) → yes면 callback_requested(N2 callback_registered), no면 callback_declined. 근무 시간 안 + agent_transfer_uri → N2 transferring → 안내가 끝나면 live.sessions.refer(실패 → transfer_failed + 콜백 제안). URI 비어 있음(지금) → not_configured
+- 분석 hasCallbackRequest: BE 계약(feature/ai-call-updates)은 별도 API 없이 최종 분석 필드. 048 + 새 BE 전에는 구버전이 400 → config [backend].analysis_callback_field=false(배포 후 true)
+- workflow.toml [[decision.callback.questions]]·[results].agent 상태별 문구, business_rules.md 상담원 절
+- 테스트 492 passed(+3)

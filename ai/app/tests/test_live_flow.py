@@ -283,3 +283,42 @@ def test_three_unanswered_manual_searches_suggest_agent_then_reset():
     assert "agent" not in lf._count_unanswered(s, miss)["facts"] and "facts" not in lf._count_unanswered(s, down)
     out = lf._count_unanswered(s, miss)
     assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
+
+
+def _agent_flow(uri="", now=None):
+    from datetime import datetime, timedelta, timezone
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.cfg = SimpleNamespace(agent_days=(0, 1, 2, 3, 4), agent_open="09:00", agent_close="18:00", agent_transfer_uri=uri)
+    spawned, refers = [], []
+
+    async def refer(sid, target_uri):
+        refers.append((sid, target_uri))
+
+    lf.svc = SimpleNamespace(d=SimpleNamespace(client=SimpleNamespace(live=SimpleNamespace(
+        sessions=SimpleNamespace(refer=refer)))))
+    from app.domain.state import ConversationState
+    at = now or datetime(2026, 11, 4, 10, 0, tzinfo=timezone(timedelta(hours=9)))  # 수요일 10시
+    s = SimpleNamespace(state=ConversationState(), tools=SimpleNamespace(now=lambda: at), call_id="live_1", rt=None,
+                        last_output_t=0.0, note=lambda *a: None, spawn=lambda coro, name: spawned.append(coro))
+    return lf, s, spawned, refers
+
+
+def test_agent_out_of_hours_offers_callback_in_hours_transfers_or_not_configured():
+    """업무 규칙 e: 근무 시간 밖 → 콜백 제안, 안 + 전환 대상 있음 → 전환(refer), 없음 → 담당자 연락."""
+    from datetime import datetime, timedelta, timezone
+    night = datetime(2026, 11, 4, 20, 0, tzinfo=timezone(timedelta(hours=9)))
+    lf, s, _, _ = _agent_flow(now=night)
+    assert lf._agent_route(s) == {"agent": "callback_offer"} and s.state.callback_offered and s.state.agent_transferred
+    lf, s, _, _ = _agent_flow()
+    assert lf._agent_route(s) == {"agent": "not_configured"} and not s.state.callback_offered  # SIP URI 미준비
+    lf, s, spawned, refers = _agent_flow(uri="sip:agent@pbx")
+    assert lf._agent_route(s) == {"agent": "transferring"}
+    run(spawned[0])  # 안내가 끝나면(여기서는 바로) 전환
+    assert refers == [("live_1", "sip:agent@pbx")]
+
+
+def test_callback_question_only_while_offered():
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P
+    names = lambda **kw: [q["name"] for q in decision_questions(P, "intent", **kw)]  # noqa: E731
+    assert "callback" in names(callback=True) and "callback" not in names()
