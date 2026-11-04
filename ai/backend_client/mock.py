@@ -249,6 +249,13 @@ class MockBackend:
         call = body["call"]
         if call["providerCallId"] in self.calls:
             raise BackendError("/api/orders 409 INVALID_STATE", 409, "INVALID_STATE")  # 통화 한 건에 주문 한 건
+        if body["outcome"] != "COMPLETE" and _no_order_info(body):  # BE NO_ORDER(empty-ai-order-results.md)
+            data = {"orderSeq": None, "version": None, "status": "NO_ORDER", "totalAmount": None,
+                    "callSessionSeq": next(self._seq), "parcelNo": None, "paymentRequest": None}
+            self.calls.add(call["providerCallId"])
+            self.keys[idempotency_key] = data
+            self.results.append({"body": body, "key": idempotency_key, **data})
+            return data
         if body["outcome"] == "COMPLETE":
             _check_complete(body)
             if body["paymentMethodType"] not in self._allowed(call["callerPhoneNumber"], body):
@@ -304,3 +311,15 @@ def _check_complete(body: dict) -> None:
         missing.append("totalAmount")  # 미취소 상세 배송비의 합계와 같아야 한다
     if missing:
         raise BackendError(f"/api/orders 422 VALIDATION_FAILED {missing}", 422, "VALIDATION_FAILED")
+
+
+def _no_order_info(body: dict) -> bool:
+    """BE NO_ORDER 조건: 결제 방식·수거 시각·합계가 없고, 택배가 없거나 모두 빈 주소·수량 0·빈 설명·가격 없음."""
+    if any(body.get(k) is not None for k in ("paymentMethodType", "pickupRequestedAt", "totalAmount")):
+        return False
+    for p in body.get("parcels") or []:
+        addresses = [v for side in ("origin", "destination") for v in (p.get(side) or {}).values() if v not in (None, "")]
+        counts = [p.get(k) for k in ("documentCount", "smallBoxCount", "mediumBoxCount", "bigBoxCount") if p.get(k)]
+        if addresses or counts or p.get("otherItemDescription") or p.get("itemPrice") is not None:
+            return False
+    return True

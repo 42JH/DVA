@@ -387,3 +387,11 @@
 - workflow.toml [[decision.save.questions]]·[results].address_save, business_rules.md 문장
 - 미등록 고객은 기존 등록 절차(고객 등록 + 보내는 곳 PIN)를 그대로 둠
 - 테스트 495 passed(+3)
+
+## 2026-11-04 — 택배 정보 없는 통화의 빈 주문 방지(계획 customer-scenario-plan.md §3)
+
+- 원인(운영 통화 3a0b9c7f): 담은 택배·받던 값이 없는데 결제 가능 방식이 하나라 paymentMethodType=billing이 자동으로 들어감 → BE가 주문 정보로 보고 COLLECTING orderSeq 59 생성(BE 규칙: parcels 없고 paymentMethodType·pickupRequestedAt·totalAmount 미수집이어야 NO_ORDER)
+- decide_outcome: 담은 택배도 받던 값도 없으면 결제 방식을 넣지 않음(수거 시각은 원래 이 경로에 없음) → BE NO_ORDER
+- 가짜 BE: 같은 조건이면 NO_ORDER(orderSeq null)로 흉내
+- 운영 orderSeq 59는 AI가 지우지 않음(BE 확인 필요)
+- 테스트 496 passed(+1 운영 통화 재현)
