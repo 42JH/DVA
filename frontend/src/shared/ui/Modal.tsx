@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Button } from './Button'
+import { NewLook } from './newLook'
 
-// 오버레이 두 가지 (와이어프레임 13 · 14)
-// ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]
+// 오버레이 (와이어프레임 13 · 14 + 새 디자인 11/04~)
+// ConfirmDialog: 560 폭 · 제목(24/700) · 대상 한 줄(20 회색) · 안내 또는 빨간 경고 · [취소] [삭제/거절]. big = 새 디자인 버튼 · 글자
 // FormModal:     600(08 사원 수정) / 680(09 질의) / 960(03 송장표 · 주문 추가) 폭 · 제목 + ✕ · 내용 · 아래 버튼 — 안쪽 여백 32
+// Dialog:        새 디자인 창 (03 주문 상세 · 추가 · 수정, Figma에 없어 '주문' · '통화' 화면 말투로) — 작은 글 + 제목 + 옆 | ✕ · 몸 · 버튼 줄
 // 둘 다 뒤 화면을 #2B2F36 40%로 가리고, Esc로 닫힘. 창 자체는 DOM 흐름 밖(fixed)
 // 키보드: 열면 창 안 첫 칸으로 포커스, Tab은 창 안에서만 돎, 닫으면 연 버튼으로 돌아감. 창이 겹치면 맨 위 창만 키를 받음
 
@@ -135,6 +137,7 @@ export function ConfirmDialog({
   onOk,
   onClose,
   pending,
+  big,
 }: {
   title: string // '정말로 삭제하시겠습니까?'
   target?: string // '선택한 통화 3건' · '김지훈 · jihoon.kim@dver.co.kr'
@@ -145,19 +148,25 @@ export function ConfirmDialog({
   onOk: () => void
   onClose: () => void
   pending?: boolean
+  big?: boolean // 새 디자인 (11/04~ 03 주문): 제목 24 · 글자 한 단계 크게 · 버튼 높이 32 / 글자 20 · 확인 남색 대신 파랑
 }) {
   return (
     <Overlay onClose={onClose} label={title}>
       <div className="flex w-[496px] flex-col gap-2">
-        <h2 className="text-card font-bold">{title}</h2>
+        <h2 className={`font-bold ${big ? 'text-title' : 'text-card'}`}>{title}</h2>
         {target && (
           // 질문 전문이 올 수 있음(최대 1,000자) — 세 줄까지만, 나머지는 title (11/02)
-          <p className="line-clamp-3 text-body break-words text-sub" title={target}>
+          <p
+            className={`line-clamp-3 break-words text-sub ${big ? 'text-strong' : 'text-body'}`}
+            title={target}
+          >
             {target}
           </p>
         )}
         {warn && (
-          <p className="mt-3 flex items-start gap-2 text-label font-semibold text-danger">
+          <p
+            className={`mt-3 flex items-start gap-2 font-semibold text-danger ${big ? 'text-body' : 'text-label'}`}
+          >
             {/* 아이콘은 첫 줄 높이(1.4em) 칸 가운데 — 글꼴이 바뀌어도 첫 줄과 나란히 */}
             <span className="flex h-[1.4em] shrink-0 items-center">
               <svg
@@ -176,10 +185,19 @@ export function ConfirmDialog({
             {warn}
           </p>
         )}
-        {note && !warn && <p className="mt-3 text-label text-sub">{note}</p>}
+        {note && !warn && (
+          <p className={`mt-3 text-sub ${big ? 'text-body' : 'text-label'}`}>{note}</p>
+        )}
         <div className="mt-8 flex justify-end gap-3">
-          <Button onClick={onClose}>취소</Button>
-          <Button kind={okKind} onClick={onOk} disabled={pending}>
+          <Button big={big} onClick={onClose}>
+            취소
+          </Button>
+          <Button
+            big={big}
+            kind={big && okKind === 'primary' ? 'brand' : okKind}
+            onClick={onOk}
+            disabled={pending}
+          >
             {okLabel}
           </Button>
         </div>
@@ -216,29 +234,90 @@ export function FormModal({
             </h2>
             {description && <p className="mt-1 text-label text-sub">{description}</p>}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="닫기"
-            className="-mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg" // 32 칸 안 20 아이콘 → 아이콘 오른쪽이 안쪽 여백 선(32)에 딱
-          >
-            <svg
-              viewBox="0 0 20 20"
-              className="size-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-            >
-              <path d="M5 5l10 10M15 5L5 15" />
-            </svg>
-          </button>
+          <CloseX onClose={onClose} />
         </div>
         <div className="border-t border-line" />
         {/* 제목줄 · 버튼줄은 고정, 내용만 스크롤. -mx-8 px-8: 스크롤 막대를 창 오른쪽 끝에 붙이고 글자 자리는 그대로 */}
         <div className="-mx-8 flex min-h-0 flex-col gap-6 overflow-y-auto px-8">{children}</div>
         <div className="flex justify-end gap-3">{footer}</div>
       </div>
+    </Overlay>
+  )
+}
+
+/** ✕ — 32 칸 안 20 아이콘 → 아이콘 오른쪽이 안쪽 여백 선에 딱 */
+function CloseX({ onClose, className = '' }: { onClose: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label="닫기"
+      className={`-mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink ${className}`}
+    >
+      <svg
+        viewBox="0 0 20 20"
+        className="size-5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        aria-hidden
+      >
+        <path d="M5 5l10 10M15 5L5 15" />
+      </svg>
+    </button>
+  )
+}
+
+/** 새 디자인 창 (11/04~ — 03 주문 상세 · 추가 · 수정 · 주소 검색). Figma에 없어 '주문' · '통화' 화면 말투로 만든 틀 (11/04 사용자)
+ *  머리: 작은 회색 글(eyebrow) · 제목 24/700 + 옆(extra — 상태 칩) · 아래 회색 한 줄(sub) | ✕
+ *  몸은 위 선 아래에서만 스크롤, 버튼 줄은 위 선 + 고정 (창 높이 = 화면 - 64까지). 안의 입력칸은 새 모양(newLook.ts) */
+export function Dialog({
+  label,
+  eyebrow,
+  title,
+  extra,
+  sub,
+  width = 920,
+  onClose,
+  children,
+  footer,
+}: {
+  label: string // 화면 읽기 이름 ('주문 상세')
+  eyebrow?: string // 제목 위 작은 글 ('주문번호')
+  title: ReactNode
+  extra?: ReactNode
+  sub?: string
+  width?: number // 920(주문) · 600(주소 검색 · 묻는 창)
+  onClose: () => void
+  children: ReactNode
+  footer: ReactNode // 왼쪽부터 — 오른쪽으로 보낼 첫 버튼에 ml-auto
+}) {
+  return (
+    <Overlay onClose={onClose} label={label} boxClass="py-7">
+      <NewLook.Provider value>
+        <div className="flex min-h-0 flex-col" style={{ width }}>
+          <header className="flex shrink-0 items-start gap-4 px-9">
+            <div className="min-w-0">
+              {eyebrow && <p className="text-label font-medium text-sub">{eyebrow}</p>}
+              <h2
+                className={`flex items-center gap-4 text-title font-bold break-words ${eyebrow ? 'mt-0.5' : ''}`}
+              >
+                {title}
+                {extra}
+              </h2>
+              {sub && <p className="mt-1 text-body text-sub">{sub}</p>}
+            </div>
+            <CloseX onClose={onClose} className="ml-auto" />
+          </header>
+          <div className="mt-5 min-h-0 [scrollbar-width:thin] overflow-y-auto border-t border-line px-9 pt-5">
+            {children}
+          </div>
+          <footer className="mt-4 flex shrink-0 items-center gap-3 border-t border-line px-9 pt-5">
+            {footer}
+          </footer>
+        </div>
+      </NewLook.Provider>
     </Overlay>
   )
 }

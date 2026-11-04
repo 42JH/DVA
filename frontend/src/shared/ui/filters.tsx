@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useContext, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { useRecentSearches } from '@/shared/lib/recentSearches'
 import { ExitGhost } from '@/shared/lib/useExitGhost'
+import { NewLook } from './newLook'
 
 // 필터 줄 부품 — 높이 48 · 모서리 8. 적용된(applied) 상태 = 옅은 남색 바탕 + 남색 1.5 선 (와이어프레임 04 '불만 있음')
 // 상태는 훅(hooks/)이 들고, 여기는 그리기만
@@ -409,15 +410,21 @@ export function ChipGroup<V extends string>({
   onChange: (v: V) => void
   compact?: boolean // 폼 창 안 (03 주문 추가 결제 방식): 칸 44 · 라벨 왼쪽 120 — TextField inline과 줄이 맞게
 }) {
+  // 새 디자인 창(Dialog) 안이면 04 통화 필터 칩처럼: 둥근 알약 · 고르면 파랑 채움 · 라벨 16 · 라벨 칸 폭 = --field-label (newLook.ts)
+  const fresh = useContext(NewLook)
   return (
     <div
-      className={`flex items-center ${compact ? 'gap-1.5' : 'gap-2'}`}
+      className={`flex items-center ${compact ? (fresh ? 'gap-2' : 'gap-1.5') : 'gap-2'}`}
       role="radiogroup"
       aria-label={name}
     >
       <span
         className={
-          compact ? 'mr-4 w-[120px] shrink-0 text-label text-sub' : 'mr-2 text-body text-sub'
+          compact
+            ? fresh
+              ? 'mr-2 w-[var(--field-label,120px)] shrink-0 text-body text-sub'
+              : 'mr-4 w-[120px] shrink-0 text-label text-sub'
+            : 'mr-2 text-body text-sub'
         }
       >
         {name}
@@ -433,13 +440,23 @@ export function ChipGroup<V extends string>({
             aria-checked={on}
             disabled={off}
             onClick={() => onChange(o.value)}
-            className={`${compact ? 'h-9 px-3.5' : 'h-10 px-5'} rounded-lg text-body ${
-              on
-                ? `${LINE_ON} bg-action-soft font-semibold text-action`
-                : off
-                  ? `${LINE} cursor-not-allowed bg-bg text-muted`
-                  : `${LINE} bg-surface text-ink`
-            }`}
+            className={
+              fresh
+                ? `h-9 rounded-full px-4 text-body font-semibold ${
+                    on
+                      ? 'bg-brand text-white'
+                      : off
+                        ? 'cursor-not-allowed bg-bg text-muted'
+                        : 'bg-surface text-sub ring-1 ring-field ring-inset hover:bg-bg'
+                  }`
+                : `${compact ? 'h-9 px-3.5' : 'h-10 px-5'} rounded-lg text-body ${
+                    on
+                      ? `${LINE_ON} bg-action-soft font-semibold text-action`
+                      : off
+                        ? `${LINE} cursor-not-allowed bg-bg text-muted`
+                        : `${LINE} bg-surface text-ink`
+                  }`
+            }
           >
             {o.label}
             {off && <span className="ml-1.5 text-caption">{o.disabledHint}</span>}

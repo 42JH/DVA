@@ -1,4 +1,4 @@
-import { Button, FormModal } from '@/shared/ui'
+import { Button, Dialog } from '@/shared/ui'
 import { useOrderToEdit } from '@/features/order/hooks/useOrderToEdit'
 import { OrderFormModal } from './OrderFormModal'
 
@@ -20,14 +20,18 @@ export function OrderEditModal({
 
   if (!order)
     return (
-      <FormModal
+      <Dialog
+        label="주문 수정"
         title="주문 수정"
-        width={960}
         onClose={onClose}
-        footer={<Button onClick={onClose}>닫기</Button>}
+        footer={
+          <Button big className="ml-auto" onClick={onClose}>
+            닫기
+          </Button>
+        }
       >
         <p className="py-16 text-center text-body text-muted">{notice}</p>
-      </FormModal>
+      </Dialog>
     )
   return (
     <OrderFormModal

@@ -88,6 +88,7 @@ export function OrderListPage() {
 
       {vm.modal?.kind === 'cancel' && (
         <ConfirmDialog
+          big
           title="주문을 취소하시겠습니까?"
           target={`${orderNo(vm.modal.id)} 주문`}
           warn={
@@ -104,6 +105,7 @@ export function OrderListPage() {
       )}
       {vm.modal?.kind === 'retry' && (
         <ConfirmDialog
+          big
           title="디버에 다시 접수할까요?"
           target={`${orderNo(vm.modal.id)} 주문`}
           note={
@@ -136,7 +138,8 @@ export function OrderListPage() {
           orderId={vm.modal.id}
           parcelSeq={vm.modal.parcelSeq}
           onDone={vm.backToDetail}
-          onClose={vm.backToDetail}
+          // 인자 없이 — ✕ · [취소]가 넘기는 클릭 이벤트가 안내 문구(notice)로 들어가 화면이 깨졌음 (11/04)
+          onClose={() => vm.backToDetail()}
         />
       )}
     </div>

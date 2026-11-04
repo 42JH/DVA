@@ -1,13 +1,14 @@
 import { useLocation, useNavigate } from 'react-router'
-import { Button, Overlay } from '@/shared/ui'
+import { Button, Dialog } from '@/shared/ui'
 import { OrderChip } from './OrderChip'
+import { PartyCard, PartyPair } from './PartyCards'
 import { useOrderDetail, type PartyView } from './useOrderDetail'
 
 // 주문 상세 창 (03 주문 내역 · 06 '주문 보기' 같은 창) — Figma에 없어 새 디자인(11/04 '주문' · '통화')의 말투로 만든 모양 (11/04 사용자)
 // 머리: '주문번호' + DV-00001 + 상태 칩(03 목록 줄과 같은 칩) · 접수 시각 · 경로 · 배송 n/m | ✕
 // 몸: 보내는 분 ≫ 받는 분(하늘색 카드, 03 검색칸 사이 ≫와 같은 표시) · 접수 정보(두 칸) · 관련 통화(칩 = 04 통화 목록 색, 누르면 창을 닫고 06)
 // 아래: [주문 취소](결제 전) … [닫기] [다시 접수](접수 실패) [수정] — 넘긴 곳에서만 보임 (06은 [닫기]만). 파랑 채움은 한 번에 하나
-// 머리 · 버튼 줄은 고정, 몸만 스크롤 (창 높이 = 화면 - 64까지)
+// 틀은 공용 새 디자인 창(shared/ui Dialog) — 머리 · 버튼 줄은 고정, 몸만 스크롤 (창 높이 = 화면 - 64까지)
 // 쓰는 법: {orderId && <OrderDetailModal orderId={orderId} onClose={() => setOrderId(null)} onEdit={...} />}
 export function OrderDetailModal({
   orderId,
@@ -35,142 +36,107 @@ export function OrderDetailModal({
   }
 
   return (
-    <Overlay onClose={onClose} label="주문 상세" boxClass="w-[920px] py-7">
-      <header className="flex shrink-0 items-start gap-4 px-9">
-        {order ? (
-          <div className="min-w-0">
-            <p className="text-label font-medium text-sub">주문번호</p>
-            <h2 className="mt-0.5 flex items-center gap-4 text-title font-bold">
-              {order.orderNo}
-              {order.group && <OrderChip group={order.group} />}
-            </h2>
-            <p className="mt-1 text-body text-sub">{order.meta}</p>
-          </div>
-        ) : (
-          <h2 className="text-title font-bold">주문 상세</h2>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          className="-mr-1.5 ml-auto grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink"
-        >
-          <svg
-            viewBox="0 0 20 20"
-            className="size-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={1.8}
-            strokeLinecap="round"
-            aria-hidden
-          >
-            <path d="M5 5l10 10M15 5L5 15" />
-          </svg>
-        </button>
-      </header>
+    <Dialog
+      label="주문 상세"
+      eyebrow={order ? '주문번호' : undefined}
+      title={order?.orderNo ?? '주문 상세'}
+      extra={order?.group && <OrderChip group={order.group} />}
+      sub={order?.meta}
+      onClose={onClose}
+      footer={
+        <>
+          {order?.canCancel && onCancel && (
+            <Button
+              big
+              kind="dangerLine"
+              onClick={() => onCancel(order.orderSeq, order.parcelCount)}
+            >
+              주문 취소
+            </Button>
+          )}
+          <Button big className="ml-auto" onClick={onClose}>
+            닫기
+          </Button>
+          {retry && (
+            <Button big kind="brand" onClick={() => onRetry(order.orderSeq)}>
+              다시 접수
+            </Button>
+          )}
+          {order?.canEdit && onEdit && (
+            <Button big kind={retry ? 'brandLine' : 'brand'} onClick={() => onEdit(order.orderSeq)}>
+              수정
+            </Button>
+          )}
+        </>
+      }
+    >
+      {!order ? (
+        <p className="py-16 text-center text-body text-muted">
+          {isLoading ? '불러오는 중…' : (error ?? '주문을 찾을 수 없습니다.')}
+        </p>
+      ) : (
+        <>
+          <PartyPair
+            sender={<Party title="보내는 분" p={order.sender} />}
+            receiver={<Party title="받는 분" p={order.receiver} />}
+          />
 
-      <div className="mt-5 min-h-0 [scrollbar-width:thin] overflow-y-auto border-t border-line px-9 pt-5">
-        {!order ? (
-          <p className="py-16 text-center text-body text-muted">
-            {isLoading ? '불러오는 중…' : (error ?? '주문을 찾을 수 없습니다.')}
-          </p>
-        ) : (
-          <>
-            <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] gap-2">
-              <Party title="보내는 분" p={order.sender} />
-              <svg
-                viewBox="0 0 40 40"
-                className="size-8 self-center text-brand"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden
-              >
-                <path d="M10 28.33 18.33 20 10 11.67M21.67 28.33 30 20l-8.33-8.33" />
-              </svg>
-              <Party title="받는 분" p={order.receiver} />
-            </div>
-
-            <section className="mt-5">
-              <h3 className="text-strong font-bold">접수 정보</h3>
-              <dl className="mt-3 grid grid-cols-2 gap-x-10 gap-y-3">
-                {order.info.map(({ label, value, wide }) => (
-                  <div
-                    key={label}
-                    className={`flex items-baseline gap-4 ${wide ? 'col-span-2' : ''}`}
+          <section className="mt-5">
+            <h3 className="text-strong font-bold">접수 정보</h3>
+            <dl className="mt-3 grid grid-cols-2 gap-x-10 gap-y-3">
+              {order.info.map(({ label, value, wide }) => (
+                <div
+                  key={label}
+                  className={`flex items-baseline gap-4 ${wide ? 'col-span-2' : ''}`}
+                >
+                  <dt className="w-[116px] shrink-0 text-body text-sub">{label}</dt>
+                  <dd
+                    className={`min-w-0 text-strong break-words ${value === '없음' ? 'text-muted' : ''}`}
                   >
-                    <dt className="w-[116px] shrink-0 text-body text-sub">{label}</dt>
-                    <dd
-                      className={`min-w-0 text-strong break-words ${value === '없음' ? 'text-muted' : ''}`}
-                    >
-                      {value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-            </section>
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </section>
 
-            <section className="mt-5 border-t border-line pt-4">
-              <h3 className="text-strong font-bold">관련 통화</h3>
-              {order.relatedCalls.length === 0 ? (
-                <p className="mt-3 text-body text-muted">없음</p>
-              ) : (
-                <ul className="mt-1">
-                  {order.relatedCalls.map((c) => (
-                    <li
-                      key={c.key}
-                      className="flex h-12 items-center gap-5 border-b border-bg last:border-b-0"
+          <section className="mt-5 border-t border-line pt-4">
+            <h3 className="text-strong font-bold">관련 통화</h3>
+            {order.relatedCalls.length === 0 ? (
+              <p className="mt-3 text-body text-muted">없음</p>
+            ) : (
+              <ul className="mt-1">
+                {order.relatedCalls.map((c) => (
+                  <li
+                    key={c.key}
+                    className="flex h-12 items-center gap-5 border-b border-bg last:border-b-0"
+                  >
+                    <span className="w-[136px] shrink-0 text-body text-sub">{c.time}</span>
+                    <span
+                      className={`grid h-7 min-w-15 shrink-0 place-items-center px-3 text-body ${c.cancel ? 'bg-kind-cancel' : 'bg-kind-accept'}`}
                     >
-                      <span className="w-[136px] shrink-0 text-body text-sub">{c.time}</span>
-                      <span
-                        className={`grid h-7 min-w-15 shrink-0 place-items-center px-3 text-body ${c.cancel ? 'bg-kind-cancel' : 'bg-kind-accept'}`}
+                      {c.tag}
+                    </span>
+                    <span className="min-w-0 truncate text-strong">{c.text}</span>
+                    {pathname === `/calls/${c.callSessionSeq}` ? (
+                      <span className="ml-auto shrink-0 text-body text-sub">보고 있는 통화</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => openCall(c.callSessionSeq)}
+                        className="ml-auto shrink-0 text-body font-semibold text-brand hover:underline"
                       >
-                        {c.tag}
-                      </span>
-                      <span className="min-w-0 truncate text-strong">{c.text}</span>
-                      {pathname === `/calls/${c.callSessionSeq}` ? (
-                        <span className="ml-auto shrink-0 text-body text-sub">보고 있는 통화</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => openCall(c.callSessionSeq)}
-                          className="ml-auto shrink-0 text-body font-semibold text-brand hover:underline"
-                        >
-                          통화 상세 ›
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
-        )}
-      </div>
-
-      <footer className="mt-4 flex shrink-0 items-center gap-3 border-t border-line px-9 pt-5">
-        {order?.canCancel && onCancel && (
-          <Button big kind="dangerLine" onClick={() => onCancel(order.orderSeq, order.parcelCount)}>
-            주문 취소
-          </Button>
-        )}
-        <Button big className="ml-auto" onClick={onClose}>
-          닫기
-        </Button>
-        {retry && (
-          <Button big kind="brand" onClick={() => onRetry(order.orderSeq)}>
-            다시 접수
-          </Button>
-        )}
-        {order?.canEdit && onEdit && (
-          <Button big kind={retry ? 'brandLine' : 'brand'} onClick={() => onEdit(order.orderSeq)}>
-            수정
-          </Button>
-        )}
-      </footer>
-    </Overlay>
+                        통화 상세 ›
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
+    </Dialog>
   )
 }
 
@@ -178,11 +144,10 @@ export function OrderDetailModal({
 function Party({ title, p }: { title: string; p: PartyView }) {
   const dash = (t: string) => t || <span className="text-muted">—</span>
   return (
-    <section className="min-w-0 rounded-xl bg-frame px-6 py-5">
-      <h3 className="text-label font-semibold text-brand">{title}</h3>
+    <PartyCard title={title}>
       <p className="mt-1.5 text-card font-semibold break-words">{dash(p.name)}</p>
       <p className="mt-1 text-body">{dash(p.phone)}</p>
       <p className="mt-0.5 text-body break-words text-sub">{dash(p.address)}</p>
-    </section>
+    </PartyCard>
   )
 }
