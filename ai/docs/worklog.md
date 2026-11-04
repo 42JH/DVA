@@ -476,3 +476,6 @@
 - 테스트 test_policy 1줄. 501 passed. 실통화 확인 필요
 
 - Jira159 MR 추가 충돌 처리: 이전 해결 후 develop-ai가 6fa05a0 → 5c2bbec로 갱신되며 위 기록 5줄이 추가됐다. 이번 변경은 worklog.md만이므로 양쪽 기록을 모두 보존하고 충돌 표식·git diff --check를 확인했다. 동작 코드·테스트 파일 변화가 없어 이전 525개 테스트 결과를 유지하며 반복 실행하지 않았다. 기능 브랜치만 갱신하고 MR 최종 병합은 사용자에게 남긴다.
+## 2026-11-04 AGENTS.md: 땜질 패치 금지
+- §9 금지 사항에 "특정 통화·문장·조건에만 맞춘 예외 처리용 땜질 패치 금지, 근본 원인을 공통 경로에서 수정" 추가(사용자 지시)
+- 확인: 결과 본문 customerSeq = BE 고객 번호(customers.customer_seq, 등록 고객), customer{name, phoneNumber} = 미등록 고객 이름·발신번호(주문과 함께 고객 생성). 둘 중 하나만. 택배 보내는 분 성함은 parcels[].origin.name(parcel.origin_name)으로 별도 저장(develop-backend 277cf1c create-order.dto.ts·orders.service.ts·orders.repository.ts)
