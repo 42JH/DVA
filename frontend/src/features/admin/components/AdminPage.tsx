@@ -83,7 +83,7 @@ export function AdminPage() {
     {
       key: 'actions',
       header: '',
-      width: 200,
+      width: '200px', // 버튼 두 개 — 좁은 창에서도 안 줄임
       align: 'right',
       cell: (r) =>
         r.pending ? (

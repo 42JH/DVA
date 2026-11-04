@@ -188,6 +188,17 @@
 }
 
 @layer base {
+  /* 좁은 창(1280 미만 ~ 최소 1024): 표의 고정 열 폭을 3/4로 — 글 열(나머지)이 눌려 줄바꿈 · 잘림이 나지 않게 (11/05 반응형)
+     버튼 열처럼 줄면 안 되는 열은 폭을 글자('170px')로 줘서 안 줄임 (shared/ui/Table) */
+  :root {
+    --col-scale: 1;
+  }
+  @media (width < 1280px) {
+    :root {
+      --col-scale: 0.75;
+    }
+  }
+
   html,
   body,
   #root {
@@ -195,7 +206,9 @@
   }
 
   body {
-    min-width: 1280px; /* 1280 미만은 가로 스크롤 (반응형 규칙) */
+    /* 최소 지원 1024 × 600 (11/05 사용자: 웹 평균 최소 — PC 창을 줄인 정도까지). 그보다 작으면 배치는 그대로, 창이 스크롤 */
+    min-width: 1024px;
+    min-height: 600px;
     font-size: var(--text-body);
     line-height: 1.4;
     letter-spacing: var(--tracking-tight);
