@@ -164,7 +164,8 @@ async def lifespan(app: FastAPI):
         # S6: 결과 아웃박스(재시작 복구) — 실통화 시험은 가짜 BE(BACKEND_MOCK=true)
         outbox = Outbox(Path(os.environ.get("OUTBOX_PATH", ROOT / "state" / "outbox.sqlite3")))
         svc.calls.results = ResultService(svc.backend, outbox, svc.calls.d.policy, svc.fare_of,
-                                          cfg.backend.submit_timeout_sec + cfg.backend.submit_retry_sec + 5)
+                                          cfg.backend.submit_timeout_sec + cfg.backend.submit_retry_sec + 5,
+                                          callback_field=cfg.backend.analysis_callback_field)
         svc.calls.on_finalize.insert(0, svc.calls.results.finish)
         recovery = asyncio.create_task(svc.calls.results.recover())
         bus = Bus()

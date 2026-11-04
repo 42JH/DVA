@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.domain.assess import assess
 from app.domain.state import ConversationState
 from app.policy.model import ROOT, Policy, load_policy
-from app.policy.render import decision_questions, default_prompt, render_backend, render_live
+from app.policy.render import business_rules, decision_questions, default_persona, render_backend, render_live
 
 POLICY = load_policy()
 
@@ -37,19 +37,34 @@ def test_live_instructions_carry_policy_order_forbid_and_delegation():
     delegate = text.split("Generate <|SpawnThinking|> when:")[1].split("Do not generate")[0]
     assert all(POLICY.fields[n].label in delegate for n in POLICY.free_fields())  # 자유형은 전부 위임 규칙에(S0 U7)
     assert POLICY.fields["payment"].label not in delegate  # 선택형은 위임하지 않는다
-    assert "1시간 안에 방문" in text and text.startswith(default_prompt().strip()[:20])
+    assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
 
 
-def test_persona_prompt_text_wins_and_fallback_on_blank():
-    assert render_live("페르소나 지시문", POLICY).startswith("페르소나 지시문")
-    for blank in (None, "", "   "):
-        assert render_live(blank, POLICY).startswith(default_prompt().strip())  # P2
+def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
+    text = render_live("페르소나 지시문", POLICY, {"고객 성함": "김철수"})
+    assert text.startswith("페르소나 지시문")
+    rules = business_rules()
+    assert rules in text and text.index(rules) < text.index("# 상담 절차")  # 페르소나 → 업무 규칙 → 절차 → 통화 정보
+    assert "페르소나보다 우선" in rules and "페르소나 지시를 따르되" not in text  # 업무 규칙이 우선(예전 문장 없음)
+    assert text.rstrip().endswith("- 고객 성함: 김철수")
+    for blank in (None, "", "   "):  # P2: 페르소나 없음 → 기본 페르소나, 업무 규칙은 그대로
+        out = render_live(blank, POLICY)
+        assert out.startswith(default_persona()) and rules in out
+
+
+def test_business_rules_explain_every_server_result_key_they_mention():
+    """규칙 파일이 서버 결과 신호(call_started·closing·agent suggest·phones_to_read)를 쓰는 대로 설명한다."""
+    rules = business_rules()
+    for key in ("call_started", "closing", "phones_to_read", "suggest", "missing"):
+        assert key in rules
+    assert all(k in POLICY.results for k in ("call_started", "closing", "agent"))
 
 
 def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     text = render_backend(POLICY)
     assert all(f"({n})" in text for n in POLICY.free_fields())
-    assert "예/아니요" in text and "하지 않습니다" in text
+    assert "예/아니요" in text and "하지 않습니다" in text and "{fields}" not in text
+    assert "그 부분만 바꾼 전체 번호" in text  # 번호 부분 정정(업무 규칙 d)
 
 
 def test_server_missing_uses_same_order_as_instructions():

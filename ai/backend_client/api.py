@@ -277,6 +277,14 @@ class BackendAPI:
             raise _fail("/api/customers", resp)
         return _data(resp)["customerSeq"]
 
+    async def update_customer_address(self, customer_seq: int, call_session_seq: int, address: dict) -> None:
+        """고객 기본 주소 교체(PATCH /api/customers/{id} address). 진행 중 본인 통화의 call_session_seq 헤더 필수
+        (ai-call-follow-up.md: 누락 400·다른 고객 403·없는 통화 404·종료된 통화 409). 성공 204. 고객 동의 후에만 부른다."""
+        resp = await self.http.patch(f"/api/customers/{int(customer_seq)}", json={"address": address},
+                                     headers=_call(call_session_seq))
+        if resp.status_code not in (200, 204):
+            raise _fail("/api/customers", resp)
+
     async def create_pin(self, call_session_seq: int, customer_seq: int, order: Order, role: str, label: str) -> None:
         """주문의 보내는 곳(role=sender)·받는 곳을 그 고객의 개인 주소록에 저장한다. 같은 주소가 이미 있으면(409
         DUPLICATE_RESOURCE) 그대로. 409라도 사용 불가 상태 등 다른 코드는 실패(B/pins.md "중복 주소·사용 불가 상태 409")."""

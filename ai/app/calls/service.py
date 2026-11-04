@@ -19,7 +19,7 @@ from app.calls.session import ENDED, CallSession, Phase
 from app.config import CallConfig
 from app.domain.state import ConversationState, Customer, Geo, Place, Source
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
-from app.observability.trace import new_trace, span, trace_id_var
+from app.observability.trace import current_call, new_trace, span, trace_id_var
 from app.policy.model import Policy
 from app.policy.render import render_backend, render_live
 from app.tools import function_specs
@@ -72,6 +72,7 @@ class CallService:
                             rag_min_score=self.d.rag_min_score, rag_budget_sec=self.d.rag_budget_sec)
         s = CallSession(inc.session_id, trace, inc.caller, inc.incoming_at or _utc_now(), tools)
         s.on_change = self.on_change
+        current_call.set(s)  # 이 통화 태스크·자식 태스크의 BE 호출을 관제에 남긴다
         verdict = self.registry.admit(s) if self.accepting_new else "full"
         if verdict == "duplicate":
             log.info("같은 session_id 재수신 무시 %s", inc.session_id)
@@ -88,7 +89,10 @@ class CallService:
 
     async def _run(self, s: CallSession) -> None:
         self._phase(s, Phase.ACCEPTING)
-        persona, stage1 = await asyncio.gather(self.persona.entry(), self._stage1(s), return_exceptions=True)
+        t0 = time.monotonic()
+        persona, stage1 = await asyncio.gather(_timed(s, "페르소나 확인", self.persona.entry()),
+                                               _timed(s, "고객 확인(1단계)", self._stage1(s)), return_exceptions=True)
+        s.timing("통화 준비(accept 전)", (time.monotonic() - t0) * 1000)
         if isinstance(stage1, BaseException):
             raise stage1
         if isinstance(persona, PersonaUnavailable):  # 적용 결과 불명확: 확인될 때까지 새 통화를 열지 않는다(계약)
@@ -102,7 +106,8 @@ class CallService:
         s.persona_version_seq = persona.version_seq if persona else None  # 이 통화가 끝까지 쓰는 버전(분석에 그대로)
         try:
             with span("accept"):
-                await self.d.client.live.sessions.accept(s.call_id, session=self.session_config(s, persona))
+                await _timed(s, "accept", self.d.client.live.sessions.accept(s.call_id,
+                                                                              session=self.session_config(s, persona)))
         except Exception as e:  # decision_already_made(재시작 후 재전송) 등: 업무 정보 없음 → 결과 미전송
             log.warning("accept 실패 %s %s", s.call_id, type(e).__name__)
             s.close_reason = "accept_failed"
@@ -122,11 +127,14 @@ class CallService:
         info = {"전화 받은 시각": _kst(s.incoming_at), "고객": "등록 고객" if c.customer_seq else "처음 이용하는 고객"}
         if c.name:
             info["고객 성함"] = c.name
+        if c.customer_seq and c.origin_address:
+            info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
         tools = tuple((t["name"], t["description"]) for t in function_specs())
         config = {"type": "live", "model": "gpt-live-1",
                 "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
-                    "model": self.d.backend_model, "instructions": render_backend(self.d.policy),
+                    "model": self.d.backend_model,
+                    "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
                     "tools": function_specs(), "tool_choice": "auto", "parallel_tool_calls": False,
                     "reasoning": {"effort": self.d.backend_effort}, "text": {"verbosity": "low"},
                     "service_tier": "priority"}}}
@@ -216,6 +224,7 @@ class CallService:
                 self._phase(s, Phase.CLOSED)
 
     def _on_started(self, s: CallSession, ev: dict) -> None:
+        s.active_t = time.time()
         s.expires_at = (ev.get("session") or {}).get("expires_at")
         self._phase(s, Phase.ACTIVE)
         if s.expires_at:
@@ -242,6 +251,8 @@ class CallService:
         self._arm_silence(s)
 
     def _on_output(self, s: CallSession, ev: dict) -> None:
+        if s.active_t and not s.last_output_t:
+            s.timing("연결→첫 AI 발화", (time.time() - s.active_t) * 1000)
         s.last_output_t = time.time()
         self._arm_silence(s)  # 무발화 = 고객·AI 모두 조용(2026-11-03 통화 363d19: 긴 되읽기 도중 고객 무입력 30초로 끊음)
 
@@ -356,6 +367,11 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     c.customer_seq, c.name = ctx.customer_seq, ctx.name
     c.payment_methods = tuple(ctx.payment_methods)
     c.call_session_seq = ctx.call_session_seq or c.call_session_seq
+    if getattr(ctx, "default_origin", None) and ctx.default_origin.address:
+        c.default_address = ctx.default_origin.address
+    origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
+    if origin and origin.address:
+        c.origin_address = origin.address
     places, seen = [], set()
     for src, items in ((Source.HISTORY, ctx.recent_destinations), (Source.PIN, ctx.places)):
         for p in items:
@@ -368,6 +384,15 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     if places:
         c.places = tuple(places)
     state.bump()
+
+
+async def _timed(s: CallSession, name: str, aw):
+    """관제 지연 기록(실패해도 걸린 시간은 남긴다)."""
+    t0 = time.monotonic()
+    try:
+        return await aw
+    finally:
+        s.timing(name, (time.monotonic() - t0) * 1000)
 
 
 def _utc_now() -> str:

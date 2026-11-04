@@ -13,7 +13,7 @@ from app.config import ROOT
 
 DecisionSet = Literal["intent", "collect", "confirm", "pick", "pay", "more", "off"]
 # pick은 후보 이름표가 통화마다 달라 정책에 질문을 두지 않고 서버가 만든다(delegation.md §3.2)
-STATIC_DECISION_SETS = ("intent", "collect", "confirm", "pay", "more")
+STATIC_DECISION_SETS = ("intent", "collect", "confirm", "pay", "more", "callback", "save")  # callback: 콜백(e), save: 주소 저장 동의(g)
 CLAIM_CONDITIONS = ("result_accepted", "cancel_done", "never")
 
 
@@ -73,7 +73,12 @@ class Forbid(_Strict):
 
 
 class Pickup(_Strict):
+    """수거 요청 시각 업무 규칙(app/domain/pickup.py). 시각은 "HH:MM"(한국 시간)."""
     min_lead_minutes: int = Field(ge=0)
+    open: str = "09:00"
+    close: str = "17:00"
+    max_days_ahead: int = Field(3, ge=0)
+    next_day_default: str = "09:00"
 
 
 class Reask(_Strict):

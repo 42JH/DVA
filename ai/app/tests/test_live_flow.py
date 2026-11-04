@@ -126,7 +126,7 @@ def test_order_flow_end_to_end(tmp_path):
     # S6: 미등록 고객 → 보내는 분 정보가 차면 등록(주소 geo가 없어 내 주소는 생략) → 결과는 고객 번호로 1번
     assert db.customers[CALLER]["name"] == "김철수" and db.customers[CALLER]["address"] is None
     [result] = db.results
-    assert result["body"]["customerSeq"] == s.state.customer.customer_seq and "pickupRequestedAt" not in result["body"]
+    assert result["body"]["customerSeq"] == s.state.customer.customer_seq and result["body"]["pickupRequestedAt"].endswith("+09:00")
     assert result["body"]["outcome"] == "INCOMPLETE"  # 주소 보정 없이(geo 없음) — 사유 ADDRESS_GEO_MISSING
     assert s.state.customer.call_session_seq in db.analyses and db.events[s.state.customer.call_session_seq]
     closing = next(e for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"])
@@ -139,6 +139,9 @@ def test_order_flow_end_to_end(tmp_path):
     names = [n for _, n in client.decisions.calls]
     assert len(names) == 4 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
     assert names[2] == ["more", "switch"]
+    lat = {r["구간"] for r in snap["latency"]}  # 관제 지연 표
+    assert {"Decision", "위임→도구 호출", "도구 record_fields", "확인 '네'→담기", "통화 준비(accept 전)", "accept"} <= lat
+    assert any(b["op"].startswith("caller_context") and b["outcome"] == "ok" for b in snap["backend_calls"])  # BE 통신
 
 
 def test_yes_before_readback_does_not_commit():
@@ -245,3 +248,105 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
     ask = next(e for e in client.conns[0].sent if "ask_again" in e.get("content", ""))
     assert "이영희" in ask["content"]  # 되읽을 값을 같이 준다
     assert s.decision_ms and "Decision ms P50" in s.snapshot()["detail"]["통계"]
+
+
+def test_agent_greets_first_on_session_start():
+    """고객이 먼저 말하기 전에 서버가 N2로 첫 인사를 시킨다(한 번)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: any("call_started" in e.get("content", "") for e in conn.sent))
+        await ai(conn, "안녕하세요, 디바콜입니다.", 0)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return conn
+
+    conn = run(scenario())
+    greets = [e for e in conn.sent if "call_started" in e.get("content", "")]
+    assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"
+
+
+def test_three_unanswered_manual_searches_suggest_agent_then_reset():
+    """같은 질문에 3번 연속 답을 못 드리면 상담원 권유(업무 규칙 h), 답이 나오면 0으로."""
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.cfg = SimpleNamespace(unanswered_agent_after=3)
+    s = SimpleNamespace(rt=None, note=lambda *a: None)
+    miss = {"status": "ok", "code": "KB_NO_EVIDENCE", "facts": {"answerable": False}}
+    hit = {"status": "ok", "facts": {"answerable": True}}
+    down = {"status": "unavailable", "code": "KB_UNAVAILABLE"}
+    assert "agent" not in lf._count_unanswered(s, miss)["facts"]
+    lf._count_unanswered(s, hit)  # 답이 나오면 0
+    assert "agent" not in lf._count_unanswered(s, miss)["facts"] and "facts" not in lf._count_unanswered(s, down)
+    out = lf._count_unanswered(s, miss)
+    assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
+
+
+def _agent_flow(uri="", now=None):
+    from datetime import datetime, timedelta, timezone
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.cfg = SimpleNamespace(agent_days=(0, 1, 2, 3, 4), agent_open="09:00", agent_close="18:00", agent_transfer_uri=uri)
+    spawned, refers = [], []
+
+    async def refer(sid, target_uri):
+        refers.append((sid, target_uri))
+
+    lf.svc = SimpleNamespace(d=SimpleNamespace(client=SimpleNamespace(live=SimpleNamespace(
+        sessions=SimpleNamespace(refer=refer)))))
+    from app.domain.state import ConversationState
+    at = now or datetime(2026, 11, 4, 10, 0, tzinfo=timezone(timedelta(hours=9)))  # 수요일 10시
+    s = SimpleNamespace(state=ConversationState(), tools=SimpleNamespace(now=lambda: at), call_id="live_1", rt=None,
+                        last_output_t=0.0, note=lambda *a: None, spawn=lambda coro, name: spawned.append(coro))
+    return lf, s, spawned, refers
+
+
+def test_agent_out_of_hours_offers_callback_in_hours_transfers_or_not_configured():
+    """업무 규칙 e: 근무 시간 밖 → 콜백 제안, 안 + 전환 대상 있음 → 전환(refer), 없음 → 담당자 연락."""
+    from datetime import datetime, timedelta, timezone
+    night = datetime(2026, 11, 4, 20, 0, tzinfo=timezone(timedelta(hours=9)))
+    lf, s, _, _ = _agent_flow(now=night)
+    assert lf._agent_route(s) == {"agent": "callback_offer"} and s.state.callback_offered and s.state.agent_transferred
+    lf, s, _, _ = _agent_flow()
+    assert lf._agent_route(s) == {"agent": "not_configured"} and not s.state.callback_offered  # SIP URI 미준비
+    lf, s, spawned, refers = _agent_flow(uri="sip:agent@pbx")
+    assert lf._agent_route(s) == {"agent": "transferring"}
+    run(spawned[0])  # 안내가 끝나면(여기서는 바로) 전환
+    assert refers == [("live_1", "sip:agent@pbx")]
+
+
+def test_callback_question_only_while_offered():
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P
+    names = lambda **kw: [q["name"] for q in decision_questions(P, "intent", **kw)]  # noqa: E731
+    assert "callback" in names(callback=True) and "callback" not in names()
+
+
+def test_address_save_waits_for_both_commit_and_consent():
+    lf = LiveFlow.__new__(LiveFlow)
+    saved = []
+
+    async def save_addresses(s, seq, snap, offer):
+        saved.append(offer)
+
+    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
+    from app.tests.test_domain import confirm_once, filled
+    st = filled()
+    pid = confirm_once(st)
+    spawned = []
+    s = SimpleNamespace(state=st, spawn=lambda coro, name: spawned.append(coro))
+    st.address_offer, st.address_consent = {"receiver": True}, None
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 아직 담기 전
+    st.address_offer = st.address_offer | {"parcel": pid}
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 동의 전
+    st.address_consent = False
+    lf._maybe_save_addresses(s)
+    assert not spawned and st.address_offer is None  # 거절 → 제안 버림
+    st.address_offer, st.address_consent = {"receiver": True, "parcel": pid}, True
+    lf._maybe_save_addresses(s)
+    run(spawned[0])
+    assert saved == [{"receiver": True, "parcel": pid}] and st.address_offer is None

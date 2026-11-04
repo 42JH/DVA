@@ -324,3 +324,66 @@
 - 리빌드 .env 비밀값은 원본 로컬 ai/.env와 키별로 모두 같음(값 비교만, 출력 안 함). Jenkins dva-ai credential 현재값과의 대조는 못 함
 - 반영 브랜치 이름 refactor/ai-rebuild로 변경
 - 테스트 482 passed
+
+## 2026-11-04 — develop-ai 잘못 반영 되돌림, refactor/ai-rebuild 재구성·push
+
+- 사고: 반영 브랜치를 `worktree add -b … origin/develop-ai`로 만들어 upstream이 develop-ai로 잡힘 → 2026-11-03 22:23:18 push로 develop-ai가 e76fbe1(리빌드)로 갱신. 원인은 추적 브랜치를 끊지 않은 것(--no-track 미사용)
+- 조치: revert 커밋 ae2745d(트리 = df93338) → develop-ai push. refactor/ai-rebuild는 ae2745d 위에 revert의 revert 72a32ef(트리 = e76fbe1)로 재구성 → push, MR !210 → 65756aa로 머지
+
+## 2026-11-04 — 상담원이 먼저 인사
+
+- 원인: 첫 인사를 지시문(default_prompt "고객이 말하기 전에 먼저 인사")에만 맡김 → 최근 6통화 중 4건은 고객 "여보세요" 뒤에 인사. 원본 서버도 서버 신호 없음
+- 수정: LiveFlow.on_started — session.started 때 AI가 아직 말하지 않았고 고객도 말하지 않았으면 N2(commentary) {"call_started": true}. 정책 [results].call_started("바로 첫 인사, 한 번만")
+- 테스트 483 passed(+1). 실통화 미확인(이중 인사 여부)
+
+## 2026-11-04 — 지시문 파일 분리(페르소나만 BE), 등록 출발지 인사, 매뉴얼 연속 미답변 → 상담원 권유
+
+계획: docs/architecture/prompt-layout-plan.md v5 단계 2·3(계약과 무관한 부분). 합의 계약: docs/be-requests/2026-11-04-pickup-callback-handoff-pins.md
+- 프롬프트 분리: policy/persona_default.md(페르소나, BE promptText 없을 때) · policy/business_rules.md(업무 규칙, "페르소나보다 우선") · policy/backend_rules.md(Backend 지시문 + 번호 부분 정정 d). policy/default_prompt.md 삭제
+- render_live: 페르소나 → 업무 규칙 → 정책 절차(workflow.toml 렌더) → 통화 정보. "충돌 시 페르소나 우선" 문장 삭제. render_backend는 파일 읽기
+- 제시 프롬프트 반영 시 고친 문장: 진행 상태 → 서버 결과, 확인 답 위임 삭제(b), 번호 확인은 phones_to_read(c), 부분 정정(d), 상담원은 "담당자가 확인 후 연락"(전환 없음), 검색 결과는 한 번에 근거 최대 3개, 마무리 멘트 고정. 주소 맞장구(i)는 페르소나, "주소를 다시 말하지 않음" 삭제
+- f: Customer.origin_address(고객 기본 주소, 없으면 최근 출발지 도로명) → 등록 고객 통화 정보 "등록된 출발지"(상세주소 제외)
+- h: search_manual 연속 미답변 3회(config [call].unanswered_agent_after) → 도구 결과 facts.agent="suggest", 답이 나오면 0. shortcut: 질문 동일성은 보지 않음. [results].agent에 suggest 뜻 추가
+- 보류(계약 대조 후): a 수거 일시(규칙 파일은 현재 서버 동작 유지), e 이관 요청 전송, g 주소록 갱신
+- 테스트 486 passed(+3: 지시문 순서·우선순위·기본 페르소나, 규칙 파일의 결과 키, 등록 출발지, 연속 미답변)
+
+## 2026-11-04 — 접수 시점 문구 정정
+
+- 업무 규칙(사용자): 접수(결과 전송)는 더 보낼 택배가 없다고 확인되면 한다. 그 전까지 담은 택배는 세션에 보관하고 고칠 수 있다
+- 어긋난 문구 수정: workflow.toml [results].parcel_added, claims.py truth.submit_when("통화를 마칠 때" → "더 보낼 택배가 없다고 확인되면"). 코드 동작(_maybe_submit)은 그대로
+- 테스트 486 passed
+
+## 2026-11-04 — 관제: 지연 시간 표·백엔드 통신 내역, 확정 경로 계획
+
+- 관제 기록: app/observability/trace.py current_call(통화 태스크 ContextVar)·observe_backend → BackendGateway._once가 BE 호출마다 op·결과·HTTP·오류·ms를 지금 통화에 기록(세마포어 대기 포함, 통화 밖 호출은 버림). 페르소나 동기화는 게이트웨이를 거치지 않아 "페르소나 확인" 지연으로만 보임
+- 지연 구간(CallSession.timings, 구간별 최근 200개): 통화 준비(accept 전)·페르소나 확인·고객 확인(1단계)·accept·연결→첫 AI 발화·고객 말 끝→AI 말 시작·Decision(시간 초과분)·위임→도구 호출·도구 <이름>·재개→AI 발화·N2 대기(AI 발화 끝)·N2→AI 발화·확인 '네'→담기·BE <op>
+- 스냅샷 latency(구간·횟수·최근·P50·P95·최대)·backend_calls(최근 100), monitor/static/index.html "지연(ms)"·"백엔드 통신" 칸
+- 계획: docs/architecture/confirm-path-plan.md(실측 8.1s 분해, P1~P6, 목표 P50 ≤ 3s, 기준 측정 먼저)
+- 테스트 487 passed(+1 게이트웨이 기록, 끝-끝 테스트에 지연 표·BE 통신 확인)
+
+## 2026-11-04 — 수거 요청 시각(업무 규칙 a, BE 계약 feature/ai-call-updates)
+
+- app/domain/pickup.py: 기본 = 지금 + 60분(10분 올림), 09시 전 → 당일 09:00, 17시 초과 → 익일 09:00(today_unavailable). 조정 검증 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS(17:00 정각 허용)·PICKUP_TOO_FAR(3일, 임시). 주말·공휴일 구분 없음
+- workflow.toml [pickup] open·close·max_days_ahead·next_day_default, [speech].pickup·[results].pickup 문장, Policy.Pickup 필드
+- record_fields.pickup_at(ISO 8601 + 시간대): parse_pickup → check_pickup, 거절이면 needs + facts.pickup.allowed. 되읽기 개방 때 수거 시각이 없으면 기본값을 Source.SERVER로 기록하고 facts.pickup{at,today_unavailable,allowed}
+- Outcome.pickup_at = 기록된 수거 시각 → 결과 본문 pickupRequestedAt(BE가 보존, 늦은 결제는 BE가 결제+1시간을 09~17시로 맞춤)
+- Backend 지시문 끝에 현재 시각(한국) — "내일 10시"를 날짜로 바꾸기 위해. business_rules.md 수거 절, backend_rules.md pickup_at 규칙
+- 테스트 489 passed(+2, 본문 pickupRequestedAt 단정 갱신)
+
+## 2026-11-04 — 상담원 연결: 근무 시간 밖 콜백(hasCallbackRequest)·통화 전환 열어 둠(업무 규칙 e)
+
+- 사용자 결정: 통화 전환 기능은 열어 두고, 근무 시간 밖이라 이관 불가 + 고객 동의 시 hasCallbackRequest=true
+- LiveFlow._agent_route(용건 agent): hasHandoffRequest(agent_transferred) 기록 → 근무 시간 밖(config [call] agent_open·agent_close·agent_days, 임시 평일 09~18시) → N2 callback_offer + Decision 질문 callback(제안 중에만) → yes면 callback_requested(N2 callback_registered), no면 callback_declined. 근무 시간 안 + agent_transfer_uri → N2 transferring → 안내가 끝나면 live.sessions.refer(실패 → transfer_failed + 콜백 제안). URI 비어 있음(지금) → not_configured
+- 분석 hasCallbackRequest: BE 계약(feature/ai-call-updates)은 별도 API 없이 최종 분석 필드. 048 + 새 BE 전에는 구버전이 400 → config [backend].analysis_callback_field=false(배포 후 true)
+- workflow.toml [[decision.callback.questions]]·[results].agent 상태별 문구, business_rules.md 상담원 절
+- 테스트 492 passed(+3)
+
+## 2026-11-04 — 되읽기 때 주소 저장 동의 → 고객 기본 주소·주소록 저장(업무 규칙 g)
+
+- 사용자 결정: 주소 저장 동의는 되읽기 확인 때 함께. BE 계약(feature/ai-call-updates): 고객 동의 후에만, 기본 주소 PATCH는 진행 중 통화 + call_session_seq 헤더, PIN 추가는 종료 후도 가능, 주문 저장은 자동 갱신 안 함
+- app/domain/address_book.save_offer: 등록 고객 + 확정 주소(geo) 기준 — 보내는 곳이 기본 주소와 다르면 sender, 받는 곳이 주소록·이력·기업에서 고른 곳이 아니면 receiver. shortcut: 고른 PIN을 고친 경우는 새 PIN 추가(PIN 번호 미보유)
+- record_fields 되읽기 개방 때 facts.address_save + state.address_offer. Decision 질문 save(제안 중·답 전만). 동의 yes + 택배 담김(commit) → ResultService.save_addresses(백그라운드): update_customer_address(PATCH /api/customers/{id}, call_session_seq 헤더) · create_pin(receiver). 거절이면 제안 버림. 실패는 관측만
+- BackendAPI.update_customer_address, MockBackend 흉내. Customer.default_address(고객 확인 default_origin)
+- workflow.toml [[decision.save.questions]]·[results].address_save, business_rules.md 문장
+- 미등록 고객은 기존 등록 절차(고객 등록 + 보내는 곳 PIN)를 그대로 둠
+- 테스트 495 passed(+3)

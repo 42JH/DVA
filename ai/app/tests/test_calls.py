@@ -14,7 +14,7 @@ from app.calls.session import Phase
 from app.config import CallConfig
 from app.integrations.backend.gateway import BackendGateway
 from app.policy.model import load_policy
-from app.policy.render import default_prompt
+from app.policy.render import default_persona
 from backend_client.mock import MockBackend
 from backend_client.order import Place as BEPlace
 from pbx_webhook import IncomingCall
@@ -139,7 +139,7 @@ def test_happy_path_accept_config_and_full_cleanup():
     r = cfg["delegation"]["responses"]
     assert r["service_tier"] == "priority" and {t["name"] for t in r["tools"]} == {
         "record_fields", "find_destination", "lookup_orders", "search_manual", "get_state"}
-    assert cfg["instructions"].startswith(default_prompt().strip()[:30])  # 페르소나 없음 → 서버 기본(P2)
+    assert cfg["instructions"].startswith(default_persona()[:30])  # 페르소나 없음 → 기본 페르소나(P2)
     s = svc.done[0]
     assert s.phase == Phase.DONE and s.close_reason == "remote_hangup" and s.closed
     assert not s.tasks and not s.timers and conn.closed and not svc.registry.calls  # 종료 시 자원 0
@@ -355,3 +355,20 @@ def test_ai_speech_keeps_silence_timer_from_firing():
 
     run(scenario())
     assert svc.done[0].close_reason in ("silence", "close_requested")
+
+
+def test_registered_customer_origin_goes_to_call_info_without_detail():
+    from types import SimpleNamespace
+    from app.calls.service import _apply_context
+    from app.domain.state import ConversationState, Customer
+    st = ConversationState(customer=Customer(caller_phone=CALLER))
+    origin = SimpleNamespace(address="서울 강남구 테헤란로 212", address_detail="1201호")
+    ctx = SimpleNamespace(status="REGISTERED", customer_seq=12, name="김철수", payment_methods=["billing"],
+                          call_session_seq=None, recent_destinations=[], places=[], default_origin=origin, recent_origin=None)
+    _apply_context(st, ctx, CALLER)
+    svc = service()
+    from app.calls.session import CallSession
+    from app.tools.context import ToolContext
+    s = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", st, svc.d.policy, None))
+    text = svc.session_config(s, None)["instructions"]
+    assert "- 등록된 출발지: 서울 강남구 테헤란로 212" in text and "1201호" not in text.split("# 통화 정보")[1]

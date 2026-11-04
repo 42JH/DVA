@@ -90,9 +90,13 @@ gate = "server"
 decision = "collect"          # 문의·끝내기(end)를 계속 듣는다(S5: closing에서 질문이 없어 "끊어주세요"를 못 들음)
 
 [pickup]
-# 수거 일시는 묻지 않는다(사용자 결정 2026-11-03, BE 최신 규약 spec/ai-integration-current.md §3: 실제 수거는 BE가
-# 결제 완료 + 1시간으로 정함, pickupRequestedAt은 호환 선택값). 고객이 시각을 말하면 아래 안내로 답한다
-min_lead_minutes = 60         # parse_pickup 규칙(지금은 기록에 쓰지 않음)
+# 수거 요청 시각(사용자 결정 2026-11-04 a, BE 계약 backend/docs/ai-call-follow-up.md). 서버가 기본값을 정하고 되읽기 때 안내,
+# 고객이 원하면 아래 범위에서 바꾼다. BE는 pickupRequestedAt을 보존(결제가 늦으면 BE가 결제+1시간을 09~17시로 맞춤)
+min_lead_minutes = 60         # 지금부터 최소 1시간 뒤
+open = "09:00"
+close = "17:00"               # 정각 허용
+max_days_ahead = 3            # 임시(정책 미정)
+next_day_default = "09:00"    # 오늘 영업 시간을 넘기면 다음 날 이 시각
 
 [reask]
 max_attempts = 3              # 같은 항목 3회 실패 → 다른 방법 제안 → 상담원 제안
@@ -138,21 +142,24 @@ use_skip = false
 phone = "고객이 직접 불러 준 번호만 숫자를 끊어 읽는다"
 address = "주소는 시·구와 도로명·건물번호로 읽고 상세주소는 읽지 않는다"
 amount = "접수번호와 요금은 서버가 준 값만 말한다"
-pickup = "수거 일시는 묻지 않는다. 기사님이 결제 완료 후 1시간 안에 방문한다고만 안내하고 시각을 약속하지 않는다"
+pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시각을 되읽기 때 안내하고, 고객이 바꾸고 싶어 하면 그 시각을 맡긴다"
 
 # --- 서버 결과 읽는 법(Live 지시문에 렌더링). 서버는 사실(JSON)만 보낸다 — 키의 뜻을 여기서 정한다 ---
 [results]
-parcel_added = "이 택배를 담았다. 접수(주문 전송)는 통화를 마칠 때 서버가 한다. '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. 접수 완료라고 말하지 않는다"
+parcel_added = "이 택배를 담았다. 접수(주문 전송)는 더 보낼 택배가 없다고 확인되면 서버가 한다(그 전까지는 담아 두고 고칠 수 있다). '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. 접수 완료라고 말하지 않는다"
 readback = "이 값 그대로 되읽고 맞는지 묻는다(고객이 확인 질문을 끝까지 듣고 답해야 확정된다)"
 missing = "아직 받지 못한 항목. 받는 순서에서 빠진 첫 항목을 묻는다"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"
 more_parcels = "false면 더 보낼 택배가 없다. 궁금한 점이 더 있는지 묻고, 없으면 마무리 인사를 한다"
+call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리지 않고 바로 첫 인사를 한다(인사 규칙대로, 한 번만)"
 closing = "true면 마무리 인사를 한 번 하고 기다린다. 전화는 서버가 끊는다"
 unverified = "방금 말한 것 중 사실이 아닌 표현. truth의 값이 사실이다. 바로잡아 안내한다"
 cancel = "취소 결과: done=취소됨, already=이미 취소된 접수, locked=결제가 끝나 전화로 취소 불가, unknown=확인 중(완료라고 말하지 않는다)"
-agent = "not_configured면 지금은 상담원 연결이 안 된다. 담당자가 확인 후 연락드린다고 안내한다"
+agent = "상담원 연결 상태. suggest = 같은 질문에 답을 못 드려 상담원 연결을 권한다. transferring = '담당 상담원에게 바로 연결해 드리겠습니다. 잠시만 기다려 주세요'라고 한 번 말한다(말이 끝나면 서버가 전화를 넘긴다). callback_offer = 지금은 상담원 연결 가능 시간이 아니다 — '죄송하지만 지금은 상담원 연결 가능 시간이 아니라 연결이 어렵습니다. 지금 거신 번호로 담당자가 다음 영업일 오전에 먼저 연락드려도 될까요?'라고 묻는다. callback_registered = 연락드리겠다고 안내한다. callback_declined = 알겠다고 하고 하던 일로 돌아간다. transfer_failed = 연결이 되지 않았다고 사과하고 callback_offer처럼 묻는다. not_configured = 지금은 바로 연결이 안 된다, 담당자가 확인 후 연락드린다고 안내한다"
 unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로 말하지 않고 지금 확인이 어렵다고 안내한다"
 confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되읽고 '이대로 접수할까요?'로 묻는다(고객이 그 질문에 답해야 확정된다). cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
+pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
+address_save = "되읽기 때 함께 물을 주소 저장. sender = 보내는 곳을 고객 기본 주소로, receiver = 받는 곳을 주소록에. 확인 질문과 한 번에 묻는다(예: '이대로 접수할까요? 받는 곳 주소도 주소록에 저장해 드릴까요?'). 고객이 동의할 때만 서버가 저장한다"
 order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), notPaid는 카드 결제 대기(결제 안내는 따로 간다고만), pending이나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"
 submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서는 택배를 고치거나 더 담을 수 없다. 바꿨다·담았다고 말하지 않고, 변경은 담당자가 확인 후 연락드린다고 안내한다"
 
@@ -180,6 +187,18 @@ name = "more"
 type = "choice"
 choices = ["more", "no_more", "not_answer"]
 instructions = "직전 AI 발화가 더 보낼 택배가 있는지 물었고 고객이 답했으면 고른다: 더 있다=more, 없다(아니요·없어요·그게 다예요)=no_more. 그 질문의 답이 아니면 not_answer."
+
+[[decision.callback.questions]]
+name = "callback"
+type = "choice"
+choices = ["yes", "no", "not_answer"]
+instructions = "직전 AI 발화가 상담원 대신 담당자가 나중에 연락드려도 되는지 물었고 고객이 답했으면 고른다: 좋다=yes, 싫다=no. 답이 아니면 not_answer."
+
+[[decision.save.questions]]
+name = "save"
+type = "choice"
+choices = ["yes", "no", "not_answer"]
+instructions = "직전 AI 발화가 주소를 주소록(기본 주소)에 저장할지 물었고 고객이 그에 답했으면 고른다: 저장해 달라·네=yes, 저장하지 말라=no. 접수 확인에만 답하고 저장 여부를 말하지 않았으면 not_answer."
 
 [[decision.pay.questions]]
 name = "pay"

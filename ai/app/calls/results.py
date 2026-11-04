@@ -31,8 +31,10 @@ def _iso(ts: float) -> str:
 
 
 class ResultService:
-    def __init__(self, backend: BackendGateway, outbox: Outbox, policy, fare_of, submit_budget_sec: float = 60.0):
+    def __init__(self, backend: BackendGateway, outbox: Outbox, policy, fare_of, submit_budget_sec: float = 60.0,
+                 callback_field: bool = False):
         self.backend, self.outbox, self.policy, self.fare_of = backend, outbox, policy, fare_of
+        self.callback_field = callback_field  # 분석 hasCallbackRequest(새 BE 배포 후에만 켠다)
         self.submit_budget_sec = submit_budget_sec
         self.tasks: dict[str, asyncio.Task] = {}   # session_id → 결과 전송(통화 정리와 무관하게 끝까지)
         self.background: set[asyncio.Task] = set()
@@ -68,6 +70,30 @@ class ResultService:
         except BackendFailure as e:
             op["status"] = "failed"
             s.note("고객 등록 실패", e.code)
+
+    async def save_addresses(self, s: CallSession, call_session_seq, snap: dict, offer: dict) -> None:
+        """고객 동의 후 저장(BE 계약 ai-call-follow-up.md): 기본 주소 PATCH(통화 중, call_session_seq 헤더),
+        받는 곳 PIN 추가(같은 주소 409 DUPLICATE_RESOURCE는 이미 있음). 실패는 주문에 영향 없음(관측만)."""
+        try:
+            seq = await call_session_seq(s)
+            c = s.state.customer
+            if not seq or not c.customer_seq:
+                s.note("주소 저장 생략", "통화 번호·고객 번호 없음")
+                return
+            if offer.get("sender") and (geo := snap.get("sender_geo")):
+                address = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,
+                           "detailAddress": snap.get("sender_address_detail") or "", "dongName": geo.dong_name,
+                           "postalCode": geo.postal_code}
+                await self.backend.write("update_customer_address", self.backend.api.update_customer_address,
+                                         c.customer_seq, seq, address)
+                c.default_address = snap["sender_address"]
+                s.note("기본 주소 저장", "ok")
+            if offer.get("receiver") and snap.get("receiver_geo"):
+                await self.backend.write("create_pin", self.backend.api.create_pin, seq, c.customer_seq,
+                                         to_order(snap), "receiver", snap.get("receiver_name") or "받는 곳")
+                s.note("주소록 저장", "ok")
+        except BackendFailure as e:
+            s.note("주소 저장 실패", e.code)
 
     # ------------------------------------------------------------------ 통화 결과
     def start(self, s: CallSession, on_result=None) -> asyncio.Task:
@@ -219,6 +245,7 @@ class ResultService:
                                     and ((t.get("output") or {}).get("facts") or {}).get("found")),
             "cancelledParcelCount": len(cancels),
             "hasHandoffRequest": bool(st.agent_transferred),
+            **({"hasCallbackRequest": bool(st.callback_requested)} if self.callback_field else {}),
             "repeatQuestionCount": _repeats(st),                    # 서버가 다시 받게 한 횟수(검증 실패 기준)
             "hasComplaint": None, "complaints": [],                 # 불만 판정 장치 없음 → 미수집(null)
         }

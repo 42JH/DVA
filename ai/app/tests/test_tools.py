@@ -134,7 +134,7 @@ def test_bad_phone_and_pickup_not_saved_other_values_are():
     assert out["facts"]["recorded"] == ["receiver_name"]  # 부분 반영을 명시(위험 3)
     f = c.state.field_of("receiver_phone")
     assert (f.value, f.status, f.attempts) == ("01098765432", FieldStatus.VALID, 1)  # 정정 실패: 기존 값 유지
-    assert call(c, "record_fields", {"pickup_at": TOMORROW})["code"] == "TOOL_ARGS_INVALID"  # 수거 일시는 받지 않는다
+    assert call(c, "record_fields", {"pickup_at": TOMORROW})["facts"]["pickup"]["at"] == TOMORROW  # 수거 일시는 받지 않는다
 
 
 def test_items_replaced_as_whole_and_unspecified():
@@ -370,3 +370,27 @@ def test_building_name_after_comma_retried_only_when_not_found(corrector, addres
     r = run(address.resolve("경북 구미시 인동9길 7-3, 리버뷰 신안 인스빌"))  # Live가 건물 이름을 붙여 넘김(2026-11-03 통화)
     assert (r.status, r.address) == ("confirmed", "경상북도 구미시 인동9길 7-3")
     assert run(address.resolve("구미시 없는구길 99, 어딘가")).status == "not_found"
+
+
+
+def test_pickup_default_moves_to_next_morning_and_customer_range_is_checked():
+    """업무 규칙 a: 기본 = 지금 + 1시간(10분 올림), 09시 전 → 당일 09시, 17시 넘음 → 익일 09시. 조정은 09~17시·1시간 이후·3일 이내."""
+    from app.domain.pickup import check_pickup, default_pickup, rule_of
+    r = rule_of(P.pickup)
+    at = lambda h, m=0, d=3: datetime(2026, 11, d, h, m, tzinfo=KST)  # noqa: E731
+    assert default_pickup(at(10, 3), r) == ("2026-11-03T11:10:00+09:00", False)
+    assert default_pickup(at(6), r) == ("2026-11-03T09:00:00+09:00", False)
+    assert default_pickup(at(16), r) == ("2026-11-03T17:00:00+09:00", False)  # 17시 정각 허용
+    assert default_pickup(at(16, 30), r) == ("2026-11-04T09:00:00+09:00", True)  # 금일 불가 → 익일 09시
+    now = at(10)
+    assert check_pickup(at(10, 30).isoformat(), now, r) == "PICKUP_TOO_SOON"
+    assert check_pickup(at(18, 0, 4).isoformat(), now, r) == "PICKUP_OUT_OF_HOURS"
+    assert check_pickup(at(10, 0, 7).isoformat(), now, r) == "PICKUP_TOO_FAR"
+    assert check_pickup(at(10, 0, 6).isoformat(), now, r) is None
+
+
+def test_record_rejects_pickup_out_of_hours_with_allowed_range():
+    c = ctx()
+    out = call(c, "record_fields", {"pickup_at": (NOW + timedelta(days=1)).replace(hour=20).isoformat()})
+    assert out["code"] == "PICKUP_OUT_OF_HOURS" and "09:00~17:00" in out["facts"]["pickup"]["allowed"]
+    assert not c.state.pickup_at.valid
