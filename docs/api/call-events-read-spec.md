@@ -111,6 +111,7 @@ status·offsetMs·레이턴시는 반환하지 않는다. 프론트는 summaryTe
       "summaryText": "FAQ로 요금 문의 안내 완료",
       "orderSeq": null,
       "unansweredQuestionSeq": null,
+      "unansweredReason": null,
       "faqEntrySeq": 12,
       "questionUtteranceOrder": 5,
       "answerUtteranceOrder": 6,
@@ -129,6 +130,7 @@ action은 ORDER_CREATED / ORDER_CANCELLED / QUESTION_UNANSWERED / HANDOFF_REQUES
 | 추가 응답 필드 | 규칙 |
 | --- | --- |
 | unansweredQuestionSeq | 연결 미답변 번호 또는 null. 삭제 후에도 역사적 번호 보존 |
+| unansweredReason | 연결 미답변의 KB_NO_ANSWER / KB_UNAVAILABLE. 과거·미분류·삭제한 질문·다른 처리 결과는 null. 업무 status와 독립적 |
 | faqEntrySeq | FAQ_ANSWERED에 사용한 FAQ 번호. 나머지는 null |
 | questionUtteranceOrder | FAQ_ANSWERED의 같은 통화 고객 질문 순번. 나머지는 null |
 | answerUtteranceOrder | FAQ_ANSWERED의 같은 통화 AI 답변 순번. 나머지는 null |
@@ -139,6 +141,7 @@ FAQ_SEARCH는 검색 동작이고 FAQ_ANSWERED는 답변 처리 결과다. 검�
 질문·답변은 같은 통화의 발화에서 읽으며 FAQ의 현재 질문·답변으로 대신하지 않는다. FAQ 수정·삭제 후에도 상담 원문은 유지된다.
 FAQ를 삭제했으면 FAQ 번호의 연결 화면은 404일 수 있다. 통화 당시 원문과 역사적 번호는 보존한다.
 미답변 원문을 이벤트 JSON에 복사하거나 삭제 후 복원하지 않는다. 미답변의 FAQ 전환은 기존 상담의 미답변 사실을 바꾸지 않는다.
+사유도 이벤트 입력에 중복 저장하지 않고 기존 unansweredQuestionSeq로 연결한 질문에서 조회한다. 새 앱 전에 migration 049를 적용하며 [사유·필터 계약](../../backend/docs/unanswered-question-reasons.md)을 따른다.
 HANDOFF_REQUESTED는 연결 완료가 아니며 ORDER_CREATED는 결제·디버 접수 성공을 뜻하지 않는다.
 
 ## 조회·화면 규칙
@@ -158,7 +161,7 @@ HANDOFF_REQUESTED는 연결 완료가 아니며 ORDER_CREATED는 결제·디버 
 400 INVALID_REQUEST 입력 오류, 401 UNAUTHORIZED 세션 없음·만료·비활성, 403 FORBIDDEN 권한 오류,
 404 NOT_FOUND 통화 없음, 500 INTERNAL_ERROR 분류되지 않은 조회 오류다. 연결 장애 분류는 공통 예외 정책을 따른다.
 
-026까지 적용한 기존 call_insight_events·call_utterances·unanswered_questions를 사용한다. 추가 테이블·뷰·migration은 없다.
+049까지 적용한 기존 call_insight_events·call_utterances·unanswered_questions를 사용한다. 새 사유 컬럼만 JOIN하며 추가 테이블·뷰·이벤트 입력 변경은 없다.
 신규 FAQ 답변 참조 세 개는 기존 이벤트 JSONB에 저장한다. [EVT-01의 참조·재전송 규칙](call-events.md)을 따른다.
 
 검증 대상은 실제 관리자 인증, 두 검색 코드, 종류별 조회 분리·페이지 경계, 정수 초·null·과거 발화 보존,

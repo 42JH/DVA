@@ -119,6 +119,7 @@ test('call soft deletion hides transcript, analysis, actions, questions and reco
       callSessionSeq: c.id,
       providerCallId: c.providerCallId,
       questionText: '보관할 질문',
+      reason: 'KB_UNAVAILABLE',
       occurredAt: new Date().toISOString(),
       offsetSeconds: 0,
     }),
@@ -154,14 +155,14 @@ test('call soft deletion hides transcript, analysis, actions, questions and reco
     ).rows[0].has_callback_request,
     true,
   );
-  assert.equal(
+  assert.deepEqual(
     (
       await f.pool.query(
-        'SELECT question_text FROM unanswered_questions WHERE unanswered_question_seq=$1',
+        'SELECT question_text,reason FROM unanswered_questions WHERE unanswered_question_seq=$1',
         [question.unansweredQuestionSeq],
       )
-    ).rows[0].question_text,
-    '보관할 질문',
+    ).rows[0],
+    { question_text: '보관할 질문', reason: 'KB_UNAVAILABLE' },
   );
   assert.deepEqual(
     (await f.pool.query('SELECT incoming_at FROM call_sessions WHERE call_session_seq=$1', [c.id]))

@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+미답변 사유는 [사유 연동 계약](docs/unanswered-question-reasons.md)을 따른다. 새 앱 전에 migration 049를 적용한다. 기존 질문별 수집 POST의 선택 `reason`에 `KB_NO_ANSWER`·`KB_UNAVAILABLE`을 받고 생략/null·과거 행은 미분류로 보존한다. 목록의 reason 필터와 조회 전용 `status=ALL`로 삭제되지 않은 OPEN·REGISTERED 발생을 집계하며 기본 OPEN은 유지한다. 통화 처리 결과는 `unansweredReason`으로 제공한다. AI의 실제 답변 대조와 운영 적용은 별도다.
+
 수거 요청 시각은 결제 대기 중에도 보존하고, 요청 시각까지 결제하면 유지한다. 이후 결제 또는 미전송 시 결제 완료 + 1시간을 한국시간 09:00~17:00으로 조정한다(17시 초과는 다음날 09시). AI 입력 시각에는 별도 영업시간 제한을 두지 않는다. [AI 통화 후속 연동 변경](docs/ai-call-follow-up.md)의 최신 계약을 따른다.
 
 콜백 요청 여부는 기존 최종 분석 POST의 선택 필드 `hasCallbackRequest`로 받고, 통화 목록·상세의 `analysis`에 반환한다. 새 앱 전에 `048-call-callback-request.sql`을 적용한다. 기존 데이터는 null이며 별도 콜백 접수·처리 완료 API는 추가하지 않는다.

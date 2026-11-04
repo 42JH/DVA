@@ -87,6 +87,10 @@ async function migrate(pool) {
         "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL",
       );
       assert.equal(callback.rowCount, 1, 'Apply migration 048 to the isolated DB first');
+      const reason = await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='unanswered_questions' AND column_name='reason' AND udt_name='text' AND is_nullable='YES' AND column_default IS NULL",
+      );
+      assert.equal(reason.rowCount, 1, 'Apply migration 049 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

@@ -25,6 +25,7 @@ const rowKeys = [
   'customerName',
   'callerPhoneNumber',
   'questionText',
+  'reason',
   'status',
   'aiPersonaVersionSeq',
   'faqEntrySeq',
@@ -83,7 +84,7 @@ async function createCall({
   ).rows[0].call_session_seq;
   return { id, providerCallId };
 }
-async function question(call, questionText, offsetSeconds = 80) {
+async function question(call, questionText, offsetSeconds = 80, reason = undefined) {
   const response = await fetch(base + '/api/ai/unanswered-questions', {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -94,6 +95,7 @@ async function question(call, questionText, offsetSeconds = 80) {
       questionText,
       occurredAt: '2026-10-31T10:01:20+09:00',
       offsetSeconds,
+      reason,
     }),
   });
   assert.equal(response.status, 201, await response.clone().text());
@@ -195,7 +197,10 @@ test('list requires an active administrator session, accepts all three roles and
 test('HTTP rejects unknown, repeated, out-of-range and malformed query values without echoing search text', async () => {
   for (const query of [
     'status=DELETED',
-    'status=ALL',
+    'status=UNKNOWN',
+    'reason=UNKNOWN',
+    'reason=null',
+    'reason=KB_NO_ANSWER&reason=KB_UNAVAILABLE',
     'status=OPEN&status=REGISTERED',
     'callSessionSeq=1&callSessionSeq=2',
     'unansweredQuestionSeq=0',
@@ -251,6 +256,7 @@ test('collected questions return their exact plain text, UTC time and numeric ze
         customerName: null,
         callerPhoneNumber: null,
         questionText: raw,
+        reason: null,
         status: 'OPEN',
         aiPersonaVersionSeq: null,
         faqEntrySeq: null,
@@ -473,6 +479,97 @@ test('pagination applies after filters, supports a six-item preview and does not
     hasNext: false,
     total_count: 7,
   });
+});
+
+test('reason counts combine status, time, call and search filters while excluding deleted or expired history', async () => {
+  const q = scope();
+  const call = await createCall({ startedAt: '2026-10-31T01:00:00Z' });
+  const faq = (
+    await pool.query(
+      "INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,category) VALUES($1,'답변',$2,'기타') RETURNING faq_entry_seq",
+      [q, adminId],
+    )
+  ).rows[0].faq_entry_seq;
+  const groups = [];
+  for (const reason of ['KB_NO_ANSWER', 'KB_UNAVAILABLE', null]) {
+    const open = await question(call, q, 0, reason);
+    const registered = await question(call, q, null, reason);
+    await pool.query(
+      "UPDATE unanswered_questions SET status='REGISTERED',faq_entry_seq=$2,faq_conversion_hash=repeat('a',64),registered_at=now() WHERE unanswered_question_seq=$1",
+      [registered, faq],
+    );
+    groups.push({ reason: reason ?? 'UNCLASSIFIED', open, registered });
+  }
+  const deleted = await question(call, q, 0, 'KB_NO_ANSWER');
+  await pool.query(
+    "UPDATE unanswered_questions SET status='DELETED',deleted_at=now() WHERE unanswered_question_seq=$1",
+    [deleted],
+  );
+  const hidden = await createCall({ startedAt: '2026-10-31T01:00:00Z' });
+  await question(hidden, q, 0, 'KB_NO_ANSWER');
+  await pool.query('UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=$1', [
+    hidden.id,
+  ]);
+  const expired = await createCall({
+    startedAt: '2020-01-01T00:00:00Z',
+    incomingAt: '2020-01-01T00:00:00Z',
+  });
+  await pool.query(
+    "INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,reason,payload_hash) VALUES($1,$2,$3,'2020-01-01T00:00:01Z','KB_NO_ANSWER',repeat('a',64))",
+    [randomUUID(), expired.id, q],
+  );
+  assert.deepEqual(
+    ids(await list({ q })),
+    groups.map((group) => group.open),
+  );
+  assert.deepEqual(
+    ids(await list({ q, status: 'REGISTERED' })),
+    groups.map((group) => group.registered),
+  );
+  const all = await list({ q, status: 'ALL' });
+  assert.equal(all.total_count, 6);
+  assert.equal(all.hasNext, false);
+  for (const group of groups) {
+    const selected = await list({ q, reason: group.reason, status: 'ALL', limit: 1 });
+    assert.deepEqual(ids(selected), [group.open]);
+    assert.equal(selected.data[0].reason, group.reason === 'UNCLASSIFIED' ? null : group.reason);
+    assert.equal(selected.total_count, 2);
+    assert.equal(selected.hasNext, true);
+    const next = await list({ q, reason: group.reason, status: 'ALL', limit: 1, offset: 1 });
+    assert.deepEqual(ids(next), [group.registered]);
+    assert.equal(next.total_count, 2);
+    assert.equal(next.hasNext, false);
+    assert.deepEqual(await list({ q, reason: group.reason, status: 'ALL', offset: 2 }), {
+      data: [],
+      hasNext: false,
+      total_count: 2,
+    });
+    assert.equal((await list({ q, reason: group.reason })).total_count, 1);
+  }
+  assert.equal(
+    (
+      await list({
+        q,
+        reason: 'KB_NO_ANSWER',
+        status: 'ALL',
+        callSessionSeq: call.id,
+        from: '2026-10-31T01:00:00Z',
+        to: '2026-10-31T01:01:00Z',
+      })
+    ).total_count,
+    2,
+  );
+  for (const filter of [
+    { callSessionSeq: hidden.id },
+    { callSessionSeq: expired.id },
+    { unansweredQuestionSeq: groups[1].open },
+    { from: '2026-10-31T01:01:00Z', to: '2026-11-01T00:00:00Z' },
+    { aiPersonaVersionSeq: 2147483647 },
+  ])
+    assert.equal(
+      (await list({ q, reason: 'KB_NO_ANSWER', status: 'ALL', ...filter })).total_count,
+      0,
+    );
 });
 
 test('reads leave question history and audits unchanged; query failures return a redacted 500 and never an empty success', async () => {

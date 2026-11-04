@@ -296,6 +296,7 @@ Table unanswered_questions {
   occurred_at timestamptz [not null]
   offset_seconds bigint [note: '0 이상 안전한 정수 초. 미확인은 NULL']
   status text [not null, default: 'OPEN', note: 'OPEN / REGISTERED / DELETED']
+  reason text [note: 'KB_NO_ANSWER 근거 부족 / KB_UNAVAILABLE 검색 미연결·장애. 과거·미분류는 NULL. status와 독립적']
   faq_entry_seq integer [note: 'FAQ 삭제 뒤에도 보존하는 논리 참조']
   payload_hash text [not null]
   faq_conversion_hash text
@@ -303,7 +304,7 @@ Table unanswered_questions {
   registered_at timestamptz
   deleted_at timestamptz
   indexes { (unanswered_question_seq, call_session_seq) [unique] }
-  Note: 'EVT-01 참조 기반만 준비. UNQ API는 후속 구현. 상태 조합·원문 삭제 제약은 026 SQL을 따른다.'
+  Note: 'UNQ 수집·조회·FAQ 전환. reason 제약은 049, soft delete 상태 조합은 045 SQL을 따른다.'
 }
 Ref: call_sessions.call_session_seq < unanswered_questions.call_session_seq
 

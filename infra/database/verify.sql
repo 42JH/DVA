@@ -168,6 +168,13 @@ BEGIN
     AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL)
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='048-call-callback-request.sql') THEN
   RAISE EXCEPTION 'Call callback request schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='unanswered_questions'
+    AND column_name='reason' AND udt_name='text' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.unanswered_questions'::regclass
+    AND conname='unanswered_questions_reason_check' AND contype='c' AND convalidated
+    AND pg_get_constraintdef(oid) LIKE '%KB_NO_ANSWER%' AND pg_get_constraintdef(oid) LIKE '%KB_UNAVAILABLE%')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='049-unanswered-question-reason.sql') THEN
+  RAISE EXCEPTION 'Unanswered question reason schema or migration missing'; END IF;
  RAISE NOTICE 'PASS: 28 public tables, 24 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
