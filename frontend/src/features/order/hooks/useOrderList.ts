@@ -1,51 +1,33 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useDeferredValue, useState } from 'react'
-import { pageCount, pageSlice } from '@/shared/api/paging'
-import { downloadCsv, toCsv } from '@/shared/lib/csv'
-import { todayYmd } from '@/shared/lib/dateRange'
-import { fmtListTime, fmtPhone } from '@/shared/lib/format'
-import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
+import { fmtRowTime } from '@/shared/lib/format'
+import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
-import type { Option, TagKind } from '@/shared/ui'
+import { STATUS_GROUP, STATUS_GROUP_LABEL, orderErrorText, orderNo } from '@/features/order/labels'
+import { parcelRows, partyHas } from '@/features/order/api/parcelRows'
 import {
-  ORDER_STATUS_LABEL,
-  ORDER_STATUS_TAG,
-  STATUS_GROUP_LABEL,
-  orderErrorText,
-} from '@/features/order/labels'
-import { ORDER_CSV_HEADER, toOrderCsvRow } from '@/features/order/api/orderCsv'
-import { parcelRows, type ParcelRow } from '@/features/order/api/parcelRows'
-import {
-  BOX_TYPES,
-  fetchAllOrders,
-  orderQueries,
-  type ListParcel,
-  type ListParty,
-  type OrderListItem,
-  type OrderListQuery,
-  type StatusGroup,
   cancelOrder,
+  fetchOrderDay,
+  orderQueries,
+  prevOrderDay,
   retryOrder,
+  type ListParty,
+  type StatusGroup,
 } from '@/features/order/api/orderApi'
 
-export interface PartyCell {
-  name: string
-  phone: string // 010-1234-5678
-  address: string
-}
-
-/** 목록 한 줄 = 배송 상세 하나(보내는 분 1 + 받는 분 1, 11/01 결정) · 화면용 글만 (그리기만 하도록) */
+/** 목록 한 줄 = 배송 상세 하나(보내는 분 1 + 받는 분 1, 11/01 결정) · 화면용 글만 (Figma '주문' 11/04) */
 export interface OrderListRow {
   key: string
-  orderSeq: number // 줄을 누르면 이 주문 상세 (접수 중단 · 취소도 열림, 11/01 결정)
+  day: Ymd // 접수한 날 (머리 날짜 · 스크롤 위치)
+  orderSeq: number // 줄을 누르면 이 주문 상세 (미완료 · 취소도 열림, 11/01 결정)
   parcelSeq: number | null // 그 줄의 배송 상세 → 상세 창이 이 상세를 보여 줌 (상세 없는 주문은 null)
-  statusLabel: string
-  statusTag: TagKind
-  receivedAt: string[] // 올해면 한 줄, 다른 해면 날짜 · 시각 두 줄
-  sender: PartyCell
-  receiver: PartyCell
-  pickupAt: string | null // null = 접수 중이거나 비워 둔 수기 접수 → '—'
-  items: string | null // '소박스 1 · 중박스 1'
+  time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24'
+  group: Exclude<StatusGroup, 'ALL'> // 칩 색
+  status: string // 칩 글 '결제 완료'
+  sender: { name: string; address: string }
+  receiver: { name: string; address: string }
+  orderNo: string // 'DV-10519'
 }
 
 type Modal =
@@ -60,84 +42,74 @@ type Modal =
 const RETRY_RESULT: Partial<Record<string, string>> = {
   ACCEPTED: '디버에 다시 접수했습니다.',
   SUBMITTING: '디버 접수를 처리하는 중이에요. 잠시 뒤 목록에서 확인해 주세요.',
+  SUBMITTING_FAILED: '다시 접수했지만 실패해서 서버가 자동으로 다시 시도하는 중이에요.',
   SUBMISSION_FAILED: '다시 접수했지만 또 실패했습니다. 백엔드 담당자에게 알려 주세요.',
 }
 
-const PAGE_SIZE = 20 // 주문 20개 — 상세가 여러 개면 줄은 더 많아짐
-// URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). from · to가 비면 오늘
-const DEFAULTS = { q: '', from: '', to: '', status: 'ALL' }
-// 상태 탭 5개 = 서버 statusGroup
-const STATUS_OPTIONS: Option<StatusGroup>[] = (
-  Object.keys(STATUS_GROUP_LABEL) as StatusGroup[]
-).map((g) => ({ value: g, label: STATUS_GROUP_LABEL[g] }))
+// URL 쿼리 기본값 (useListParams 규칙: 모듈 상수) — 상세 창을 닫아도 · 새로고침해도 날짜 · 조건 그대로
+// date '' = 오늘 · status = 상태 묶음 · sender · receiver = 검색칸 글
+const DEFAULTS = { date: '', status: 'ALL', sender: '', receiver: '' }
+const GROUPS = Object.keys(STATUS_GROUP_LABEL) as StatusGroup[]
 
-// 접수 중은 이름 · 전화 · 주소가 아직 비어 있을 수 있음 → 빈 글자 (칸에서 '—')
-const party = (p: ListParty | undefined): PartyCell => ({
+// 미완료 주문은 이름 · 주소가 아직 비어 있을 수 있음 → 빈 글자 (칸에서 '—')
+const party = (p: ListParty | undefined) => ({
   name: p?.name ?? '',
-  phone: p?.phoneNumber ? fmtPhone(p.phoneNumber) : '',
   address: [p?.roadAddress, p?.detailAddress].filter(Boolean).join(' '),
 })
-/** '소박스 1 · 중박스 1 · 기타 화분' — 0개는 뺌. 상세가 없으면 null */
-function itemsText(p: ListParcel | null) {
-  if (!p) return null
-  const count = {
-    document: p.documentCount,
-    small: p.smallBoxCount,
-    medium: p.mediumBoxCount,
-    big: p.bigBoxCount,
-  }
-  const parts = BOX_TYPES.filter((b) => count[b.key] > 0).map((b) => `${b.label} ${count[b.key]}`)
-  if (p.otherItemDescription) parts.push(`기타 ${p.otherItemDescription}`)
-  return parts.join(' · ') || null
-}
 
-/** 03 주문 내역 훅 (와이어프레임 03_주문내역, 10/31 · 실서버 11/01)
- * 검색(이름 · 전화번호 · 주소, 서버) · 날짜 칸(기본 오늘) · 상태 탭 5개 · 쪽은 URL에. 줄 = 배송 상세. CSV = 지금 조건의 전체(목록 칸만) */
+/** 03 주문 내역 훅 (Figma '주문' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로 (04 통화와 같은 틀)
+ *  거르기: 주문 상태(서버 statusGroup) · 보내는 분 · 받는 분 검색칸. 줄을 누르면 주문 상세 창 → 수정 · 취소 · 다시 접수 */
 export function useOrderList() {
-  const { params, page, set } = useListParams(DEFAULTS)
-  const [exporting, setExporting] = useState(false)
+  const { params, set } = useListParams(DEFAULTS)
   const [modal, setModal] = useState<Modal>(null)
+  const [notice, setNotice] = useState<string | null>(null) // 취소 · 다시 접수 결과 한 줄
+  const qc = useQueryClient()
 
   const today = todayYmd()
-  const range = params.from ? { from: params.from, to: params.to || params.from } : null
+  const anchor =
+    /^\d{4}-\d{2}-\d{2}$/.test(params.date) && params.date < today ? params.date : today
   // URL은 누구나 고칠 수 있으니 모르는 상태 값은 '전체'로 (컨벤션 4.7)
-  const status = STATUS_OPTIONS.some((o) => o.value === params.status)
+  const group = GROUPS.includes(params.status as StatusGroup)
     ? (params.status as StatusGroup)
     : 'ALL'
-  // 검색어가 없으면 서버가 쪽을 나눔. 있으면 같은 조건의 주문 전체를 받아 04 · 09와 같은 규칙(초성 · 띄어쓰기 무시)으로 앞에서 거름 (11/02)
-  const q = useDeferredValue(params.q.trim()) // 칠 때마다 거르니 입력이 먼저, 목록은 한 박자 늦게
-  const searching = q !== ''
-  const query: OrderListQuery = {
-    q: '',
-    from: range?.from ?? today,
-    to: range?.to ?? today,
-    group: status,
-  }
-  const list = useQuery({ ...orderQueries.list(query, page, PAGE_SIZE), enabled: !searching })
-  const pool = useQuery({ ...orderQueries.pool(query), enabled: searching })
-  const parties = (o: OrderListItem) => o.parcels.flatMap((p) => [p.origin, p.destination])
-  const digits = phoneDigits(q) // 숫자만 쳤으면 전화번호로
-  const hit = searching
-    ? (pool.data ?? []).filter((o) =>
-        parties(o).some((p) =>
-          digits
-            ? (p.phoneNumber ?? '').includes(digits)
-            : [p.name, p.roadAddress, p.jibunAddress, p.detailAddress].some((t) =>
-                matchKo(t ?? '', q),
-              ),
-        ),
+  const sender = params.sender.trim()
+  const receiver = params.receiver.trim()
+  // 서버 검색어는 하나(보내는 분 · 받는 분 둘 다에서 찾음) → 한 칸 글로 좁혀 받고, 칸마다 그 사람에서 맞았는지 다시 거름
+  const filter = { q: sender || receiver, group }
+  const feed = useDayFeed({
+    key: [...orderQueries.all(), 'list'],
+    filter,
+    anchor,
+    fetchDay: (day, signal) => fetchOrderDay(day, filter, signal),
+    prevDay: (day, signal) => prevOrderDay(day, filter, signal),
+  })
+  const days = feed.days.map(({ day, rows }) => ({
+    day,
+    rows: rows
+      .flatMap(parcelRows)
+      .filter(
+        (r) => partyHas(r.parcel?.origin, sender) && partyHas(r.parcel?.destination, receiver),
       )
-    : null
-  const orders = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? [])
-  const qc = useQueryClient()
-  const [notice, setNotice] = useState<string | null>(null) // 취소 · 다시 접수 결과 한 줄
+      .map((r): OrderListRow => ({
+        key: r.key,
+        day,
+        orderSeq: r.orderSeq,
+        parcelSeq: r.parcel?.orderParcelSeq ?? null,
+        time: fmtRowTime(r.createdAt, today),
+        group: STATUS_GROUP[r.status],
+        status: STATUS_GROUP_LABEL[STATUS_GROUP[r.status]],
+        sender: party(r.parcel?.origin),
+        receiver: party(r.parcel?.destination),
+        orderNo: orderNo(r.orderSeq),
+      })),
+  }))
 
   // 취소 · 다시 접수 — 확인 창 [확인] → 요청 → 목록 · 상세 다시 받기 → 그 줄의 상세로 돌아감
   const action = useMutation({
     mutationFn: async (m: Extract<Modal, { kind: 'cancel' | 'retry' }>) => {
       if (m.kind === 'cancel') {
         await cancelOrder(m.id)
-        return `주문 ${m.id}번을 취소했습니다.`
+        return `${orderNo(m.id)} 주문을 취소했습니다.`
       }
       const res = await retryOrder(m.id)
       return (
@@ -151,71 +123,26 @@ export function useOrderList() {
       setModal({ kind: 'detail', id: m.id, parcelSeq: m.parcelSeq })
     },
   })
-  const total = hit ? hit.length : (list.data?.total_count ?? 0) // 주문 수 (줄 수 아님)
-
-  const rows: OrderListRow[] = orders.flatMap(parcelRows).map((r) => ({
-    key: r.key,
-    orderSeq: r.orderSeq,
-    parcelSeq: r.parcel?.orderParcelSeq ?? null,
-    statusLabel: ORDER_STATUS_LABEL[r.status],
-    statusTag: ORDER_STATUS_TAG[r.status],
-    receivedAt: fmtListTime(r.createdAt),
-    sender: party(r.parcel?.origin),
-    receiver: party(r.parcel?.destination),
-    pickupAt: r.pickupRequestedAt && fmtListTime(r.pickupRequestedAt).join(' '),
-    items: itemsText(r.parcel),
-  }))
-
-  const exportCsv = async () => {
-    setExporting(true)
-    try {
-      const all: ParcelRow[] = (hit ?? (await fetchAllOrders(query))).flatMap(parcelRows) // 검색 중이면 걸러진 그대로
-      const csv = toCsv(
-        [...ORDER_CSV_HEADER],
-        all.map((r) => toOrderCsvRow(r, ORDER_STATUS_LABEL[r.status])),
-      )
-      const span = query.from === query.to ? query.from : `${query.from}_${query.to}`
-      downloadCsv(`주문내역_${span}.csv`, csv)
-    } finally {
-      setExporting(false)
-    }
-  }
 
   return {
-    q: params.q,
-    setQ: (v: string) => set({ q: v }),
-    // 추천 = 같은 조건 주문의 이름 (주소는 길어서 뺌, 숫자만 치면 추천 없음)
-    suggestions: digits
-      ? []
-      : suggest(
-          [
-            ...new Set(
-              (pool.data ?? []).flatMap((o) => parties(o).flatMap((p) => (p.name ? [p.name] : []))),
-            ),
-          ],
-          q,
-        ),
-    range, // 날짜 칸 (null = 오늘)
-    setRange: (r: { from: string; to: string }) =>
-      // 오늘 하루를 고르면 기본값(빈 값)으로 → 주소가 깨끗하고 내일 열어도 '오늘'
-      set(r.from === today && r.to === today ? { from: '', to: '' } : { from: r.from, to: r.to }),
-    status,
-    statusOptions: STATUS_OPTIONS,
-    setStatus: (s: StatusGroup) => set({ status: s }),
+    anchor,
+    feed: { ...feed, days },
+    setDate: (d: Ymd) => set({ date: d >= today ? '' : d }),
 
-    rows,
-    count: total, // '주문 목록 104건' — 주문 수
-    isLoading: searching ? pool.isPending : list.isPending,
-    listError: (searching ? pool.error : list.error)
-      ? '주문 목록을 불러오지 못했습니다. 새로고침해 주세요.'
-      : null,
-    page,
-    pages: pageCount(total, PAGE_SIZE),
-    goPage: (p: number) => set({ page: p }),
+    group,
+    groups: GROUPS.map((g) => ({ value: g, label: STATUS_GROUP_LABEL[g] })),
+    setGroup: (g: StatusGroup) => set({ status: g }),
 
-    exportCsv,
-    exporting,
-    canExport: total > 0,
+    sender: params.sender,
+    receiver: params.receiver,
+    // 검색하면 오늘부터 (최근 주문이 위) — 지난 날짜에 머물러 있으면 새 결과가 안 보임. 같은 값이면 그대로
+    setSender: (v: string) => {
+      if (v.trim() !== sender) set({ sender: v.trim(), date: '' })
+    },
+    setReceiver: (v: string) => {
+      if (v.trim() !== receiver) set({ receiver: v.trim(), date: '' })
+    },
+    isFiltered: group !== 'ALL' || !!sender || !!receiver,
 
     modal,
     openAdd: () => setModal({ kind: 'add' }),
@@ -223,9 +150,9 @@ export function useOrderList() {
       setModal({ kind: 'detail', id: r.orderSeq, parcelSeq: r.parcelSeq }),
     editOrder: (id: number) =>
       setModal((m) => ({ kind: 'edit', id, parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null })), // 상세 창 [수정]
-    // 수정 저장 · 취소 → 수정하던 그 주문 상세로. notice = 접수 중단 주문 접수 결과 (목록 위 한 줄)
-    backToDetail: (notice?: string) => {
-      if (notice) setNotice(notice)
+    // 수정 저장 · 취소 → 수정하던 그 주문 상세로. notice = 미완료 주문 접수 결과 (머리 한 줄)
+    backToDetail: (message?: string) => {
+      if (message) setNotice(message)
       setModal((m) =>
         m?.kind === 'edit' ? { kind: 'detail', id: m.id, parcelSeq: m.parcelSeq } : null,
       )

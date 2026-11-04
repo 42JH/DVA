@@ -27,6 +27,13 @@
   --color-kind-lookup: #ffefc7; /* 조회 */
   --color-kind-cancel: #fff0f1; /* 취소 */
   --color-kind-faq: #cbdcff; /* FAQ */
+  /* 03 주문 목록 상태 칩 테두리 (Figma '주문' 11/04) — 글자는 sub */
+  --color-order-open: #febdc2; /* 미완료 주문 */
+  --color-order-wait: #ffd361; /* 결제 대기 */
+  --color-order-paid: #83c8ff; /* 결제 완료 */
+  --color-order-fail: #e77f83; /* 접수 실패 — 디자인에 없는 상태라 상단바 알림 빨강 */
+  --color-order-cancel: #6698ff; /* 주문 취소 */
+  --color-field: #b1bece; /* 검색칸 테두리 · 돋보기 (Figma '검색 필드' 11/04) */
 
   /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
   --font-sans:

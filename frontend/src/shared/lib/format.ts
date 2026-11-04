@@ -2,9 +2,27 @@
 // 목록의 활동 시각 = 'MM.DD HH:MM' · 오래 남는 날짜(등록일 · 가입 신청일 · 버전 생성일) = 'YYYY.MM.DD'
 // 상세 화면의 시각 = 'MM.DD (요일) HH:MM' (06 · 05 상세) — 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
 // 10/30 연도 규칙 (모든 페이지): 올해면 연도 생략, 다른 해(작년 포함)면 'YYYY.MM.DD' → 새 목록은 fmtListTime
+import { ymd, type Ymd } from './dateRange'
 
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = ['일', '월', '화', '수', '목', '금', '토']
+
+/** 날짜별 목록 머리 '11월 4일 수요일' (Figma '통화' · '주문' 11/04) */
+export const fmtLongDay = (day: Ymd) =>
+  new Date(`${day}T00:00:00+09:00`).toLocaleDateString('ko-KR', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long',
+  })
+
+/** 날짜별 목록 줄 시각: 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40' (04 통화 · 03 주문) */
+export function fmtRowTime(iso: string, today: Ymd): string {
+  const d = new Date(iso)
+  const day = ymd(d)
+  if (day === today) return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+  const date = day.slice(0, 4) === today.slice(0, 4) ? day.slice(5) : day
+  return `${date.replaceAll('-', '.')} ${two(d.getHours())}:${two(d.getMinutes())}`
+}
 
 /** 날짜 + 요일 (10/30 연도 규칙): 올해 '10.02 (금)', 다른 해 '2025.12.29 (월)' — 02 버전 운영 기간. year = 연도 강제 */
 export function fmtDay(iso: string, now = new Date(), year?: boolean): string {

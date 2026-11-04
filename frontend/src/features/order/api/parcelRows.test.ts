@@ -1,8 +1,7 @@
-// 실행: TZ=Asia/Seoul npx tsx --tsconfig tsconfig.app.json src/features/order/api/orderCsv.test.ts  (프레임워크 없이 assert만)
+// 실행: npx tsx --tsconfig tsconfig.app.json src/features/order/api/parcelRows.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { ORDER_CSV_HEADER, toOrderCsvRow } from './orderCsv'
 import type { ListParcel, OrderListItem } from './orderApi'
-import { parcelRows } from './parcelRows'
+import { parcelRows, partyHas } from './parcelRows'
 
 const parcel = (seq: number, to: string, status: ListParcel['status'] = 'ACTIVE'): ListParcel => ({
   orderParcelSeq: seq,
@@ -53,19 +52,16 @@ assert.deepEqual(
   [['10519', 'COLLECTING', null]],
 )
 
-// CSV 칸
-const cells = toOrderCsvRow(rows[0]!, '접수 완료')
-assert.equal(cells.length, ORDER_CSV_HEADER.length) // 머리줄과 칸 수가 같아야 엑셀에서 안 밀림
-const at = (h: (typeof ORDER_CSV_HEADER)[number]) => cells[ORDER_CSV_HEADER.indexOf(h)]
-assert.equal(at('접수 시각'), '2026-10-31 13:12')
-assert.equal(at('받는 분 상세주소'), '') // 없으면 빈칸
-assert.equal(at('중박스'), '2')
-assert.equal(at('기타 품목'), '화분')
-assert.equal(at('수거 희망 일시'), '2026-11-02 09:00')
+// 검색칸: 그 사람의 이름 · 전화번호 · 주소만 봄 (대소문자 무시, 숫자만 치면 전화번호)
+const sender = parcel(1, '이영희').origin
+assert.equal(partyHas(sender, ''), true) // 빈 칸은 다 맞음
+assert.equal(partyHas(sender, '강도'), true)
+assert.equal(partyHas(sender, '역삼로 150'), true)
+assert.equal(partyHas(sender, '5층'), true)
+assert.equal(partyHas(sender, '010-6638'), true) // 숫자만 → 전화번호 숫자
+assert.equal(partyHas(sender, '이영희'), false) // 받는 분 이름은 보내는 분 칸에서 안 맞음
+assert.equal(partyHas(sender, '마포구'), false)
+assert.equal(partyHas(undefined, '강도'), false) // 상세 없는 미완료 주문
+assert.equal(partyHas({ ...sender, roadAddress: 'Seoul Gangnam-gu' }, 'gangnam'), true)
 
-// 접수 중(상세 없음)은 사람 · 품목 칸이 빈칸
-const live = toOrderCsvRow(empty[0]!, '접수 중')
-assert.equal(live.length, ORDER_CSV_HEADER.length)
-assert.deepEqual(live.slice(3, 16), Array(13).fill(''))
-
-console.log('orderCsv.test ok')
+console.log('parcelRows.test ok')
