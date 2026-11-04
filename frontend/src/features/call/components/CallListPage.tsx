@@ -45,7 +45,7 @@ export function CallListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar date={false} className="-ml-4" />
+      <TopBar />
       <div className="mt-2 flex h-[37px] shrink-0 items-center pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         <PersonaToggle
