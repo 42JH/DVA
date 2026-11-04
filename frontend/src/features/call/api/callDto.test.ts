@@ -1,7 +1,6 @@
 // 실행: npx tsx src/features/call/api/callDto.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import {
-  OUTCOME_OF,
   durationSec,
   toCallDetail,
   utteranceAt,
@@ -48,9 +47,6 @@ const analysis: CallListItemDto['analysis'] = {
   cancelledParcelCount: null,
   faqAnswerCount: 2,
 }
-
-// 결과 코드 → 화면 코드 (옛 06 요약 — 서버에서 result가 빠지면 같이 지움)
-assert.equal(OUTCOME_OF.REGISTERED, 'SUCCESS')
 
 // 목록 줄: 분석 있음
 const row = toCallRow({ ...call, analysis })
@@ -154,6 +150,9 @@ const d = toCallDetail(
   ],
 )
 assert.equal(d.persona, null)
+assert.equal(d.isNew, true) // 06 머리: 04 줄과 같은 신규 · 상담 유형 횟수
+assert.deepEqual(d.counts, { accept: 3, lookup: 0, cancel: null, faq: 2 })
+assert.equal(toCallDetail({ ...detail, analysis: null }, [], [], []).counts, null) // 분석 전
 assert.equal(d.recording?.url, 'https://x/y')
 assert.equal(d.aiActionCount, 7)
 assert.deepEqual(d.utterances[0], { order: 1, atSec: null, speaker: 'AI', text: '안녕\n하세요' })

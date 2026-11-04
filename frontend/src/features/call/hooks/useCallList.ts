@@ -43,16 +43,20 @@ export type CallListRow = CallRow & {
 // date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
 const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 
+/** 상담 유형 칩 — 한 것만, 두 번 이상이면 '접수 3' (04 줄 · 06 머리) */
+export const kindChips = (counts: CallRow['counts']) =>
+  KINDS.flatMap((kind) => {
+    const n = counts?.[kind] ?? 0
+    return n > 0 ? [{ kind, label: n > 1 ? `${KIND_LABEL[kind]} ${n}` : KIND_LABEL[kind] }] : []
+  })
+
 const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
   ...r,
   day,
   time: r.startedAt ? fmtRowTime(r.startedAt, today) : '—',
   name: r.customerName ?? '—',
   phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
-  kinds: KINDS.flatMap((kind) => {
-    const n = r.counts?.[kind] ?? 0
-    return n > 0 ? [{ kind, label: n > 1 ? `${KIND_LABEL[kind]} ${n}` : KIND_LABEL[kind] }] : []
-  }),
+  kinds: kindChips(r.counts),
   complaint: r.complaints.length
     ? { label: COMPLAINT_LABEL[r.complaints[0].type], reasons: r.complaints.map((c) => c.reason) }
     : null,
