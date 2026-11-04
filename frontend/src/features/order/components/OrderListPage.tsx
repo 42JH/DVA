@@ -36,7 +36,7 @@ export function OrderListPage() {
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar />
-      <div className="mt-2 flex h-8 shrink-0 items-center gap-6 px-[54px]">
+      <div className="mt-2 flex h-[37px] shrink-0 items-center gap-6 pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         {vm.notice && (
           <p role="status" className="ml-auto truncate text-label text-sub">
@@ -48,7 +48,7 @@ export function OrderListPage() {
         </Button>
       </div>
       {/* 검색칸은 그 칸의 사람 열에 맞춤 (테두리가 글자보다 4 왼쪽). ≫는 두 칸 사이 가운데 */}
-      <div className={`${COLS} mt-[34px] h-9 shrink-0 px-[54px]`}>
+      <div className={`${COLS} mt-[29px] h-9 shrink-0 pr-[50px] pl-[58px]`}>
         <div className="col-start-3 -ml-1 flex min-w-0 items-center">
           <PartySearch who="보내는 분" q={vm.sender} onSearch={vm.setSender} />
           <svg
@@ -68,14 +68,16 @@ export function OrderListPage() {
           <PartySearch who="받는 분" q={vm.receiver} onSearch={vm.setReceiver} />
         </div>
       </div>
-      <div className={`${COLS} mt-5 h-7 shrink-0 items-center px-[54px] text-card font-semibold`}>
+      <div
+        className={`${COLS} mt-5 h-7 shrink-0 items-center pr-[50px] pl-[58px] text-card font-semibold`}
+      >
         <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
         <span>보내는 분</span>
         <span>받는 분</span>
         <span className="text-center">주문번호</span>
       </div>
-      <div className="mx-[54px] mt-5 shrink-0 border-t border-line" />
-      {/* 오른쪽 76 = 줄 끝이 디자인 1350(크롬 얇은 막대 10 포함) · 위 3 = 첫 줄 글자 자리(디자인 283) */}
+      <div className="mt-5 mr-[50px] ml-[58px] shrink-0 border-t border-line" />
+      {/* 왼쪽 58 · 오른쪽 72 = 04 통화와 같은 자리(줄 1200, 끝 1354 — 크롬 얇은 막대 10 포함, 11/04 사용자: 두 화면 날짜 · 목록 위치 맞춤) · 위 3 = 첫 줄 글자 자리 */}
       <DayScroll
         feed={vm.feed}
         onTop={onTop}
@@ -87,7 +89,7 @@ export function OrderListPage() {
               ? '맞는 주문이 없습니다.'
               : '주문이 없습니다.'
         }
-        className="pt-[3px] pr-[76px] pl-[54px]"
+        className="pt-[3px] pr-[72px] pl-[58px]"
       />
 
       {vm.modal?.kind === 'cancel' && (
