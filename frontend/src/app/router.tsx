@@ -81,8 +81,7 @@ export const router = createBrowserRouter([
           // AI 미답변 (11/05 새 디자인 — FAQ 목록과 같은 틀) — handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'faqs/unanswered', element: <UnansweredPage /> },
           {
-            path: 'admins',
-            handle: { title: '관리자 권한 관리' } satisfies RouteHandle,
+            path: 'admins', // 10 (11/05 새 디자인) — handle 없음(화면이 상단바 · 경로를 그림)
             element: (
               <RequireRole roles={['SYSTEM_ADMIN']}>
                 <AdminPage />

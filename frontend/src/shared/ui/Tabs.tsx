@@ -16,14 +16,19 @@ export function Tabs<K extends string>({
   value,
   onChange,
   right,
+  big,
 }: {
   items: TabItem<K>[]
   value: K
   onChange: (key: K) => void
   right?: React.ReactNode // [CSV 내보내기] [삭제] 등
+  big?: boolean // 새 디자인(11/05~ 10): 글자 20 · 고른 탭 파랑
 }) {
   return (
-    <div role="tablist" className="flex h-10 items-center gap-2 border-b border-line">
+    <div
+      role="tablist"
+      className={`flex items-center gap-2 border-b border-line ${big ? 'h-12' : 'h-10'}`}
+    >
       {items.map((t) => {
         const on = t.key === value
         return (
@@ -33,7 +38,7 @@ export function Tabs<K extends string>({
             role="tab"
             aria-selected={on}
             onClick={() => onChange(t.key)}
-            className={`relative flex h-full items-center gap-2 px-4 text-body ${on ? 'font-bold text-action' : t.muted ? 'text-muted' : 'text-sub'}`}
+            className={`relative flex h-full items-center gap-2 px-4 ${big ? 'text-card' : 'text-body'} ${on ? (big ? 'font-semibold text-brand' : 'font-bold text-action') : t.muted ? 'text-muted' : 'text-sub'}`}
           >
             {t.label}
             {t.count !== undefined &&
@@ -46,7 +51,11 @@ export function Tabs<K extends string>({
                   {t.count}
                 </span>
               ))}
-            {on && <span className="absolute inset-x-0 bottom-0 h-[3px] rounded-full bg-action" />}
+            {on && (
+              <span
+                className={`absolute inset-x-0 bottom-0 h-[3px] rounded-full ${big ? 'bg-brand' : 'bg-action'}`}
+              />
+            )}
           </button>
         )
       })}
