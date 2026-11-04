@@ -362,8 +362,8 @@ def test_attached_korean_gil_number_retried_only_when_not_found(corrector, addre
 
 
 def test_building_name_after_comma_retried_only_when_not_found(corrector, address):
-    from app.address.parse import retries
-    assert retries("구미시 인동9길 7-3, 무슨빌라") == ["구미시 인동9길 7-3"] and retries("서울 강남구 테헤란로 212") == []
+    from app.address.parse import cut_trailing
+    assert cut_trailing("구미시 인동9길 7-3, 무슨빌라") == ["구미시 인동9길 7-3"] and cut_trailing("서울 강남구 테헤란로 212") is None
     r = run(address.resolve("경북 구미시 인동9길 7-3, 리버뷰 신안 인스빌"))  # Live가 건물 이름을 붙여 넘김(2026-11-03 통화)
     assert (r.status, r.address) == ("confirmed", "경상북도 구미시 인동9길 7-3")
     assert run(address.resolve("구미시 없는구길 99, 어딘가")).status == "not_found"

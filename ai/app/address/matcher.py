@@ -9,11 +9,12 @@
 """
 import functools
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from app.address.parse import LETTER, branch_key, parse, retries, unlink_gil
+from app.address.parse import LETTER, branch_key, parse, readings, unlink_gil
 from app.address.phonetic import Name, distance, num_distance, read_digits, road_readings
 
 
@@ -237,14 +238,33 @@ def number_distance(heard, real):
     return num_distance(hm, rm) + num_distance(hs, rs)
 
 
-def resolve(db, heard: str) -> Resolution:
-    """서버가 쓰는 입구: 들은 그대로 보고, 못 찾았을 때만 다시 볼 표기(retries)를 차례로 — 찾으면 멈춤."""
+RETRY_GROUPS = 8     # 다시 볼 표기 묶음 상한(묶음당 표기 1~2개)
+RETRY_SEC = 1.0      # 다시 보기 시간 상한. 넘으면 못 찾음 — AddressService 예산(2.5초) 초과는 "장애"로 들은 값을 기록하게 되므로
+
+
+def resolve(db, heard: str, clock=time.monotonic) -> Resolution:
+    """서버가 쓰는 입구: 들은 그대로 먼저 본다(찾으면 그대로 — 고침이 기존 결과를 바꾸지 않게). 못 찾았을 때만
+    parse.readings()의 표기 묶음을 적게 고친 것부터 보고, 처음 찾은 묶음에서 멈춘다."""
     r = correct(db, heard)
-    for retry in retries(heard) if r.status == "not_found" else ():
-        r = correct(db, retry)
-        if r.status != "not_found":
+    if r.status != "not_found":
+        return r
+    deadline = clock() + RETRY_SEC
+    for group in readings(heard)[:RETRY_GROUPS]:
+        if clock() > deadline:
             break
-    return r
+        found = [x for x in (correct(db, t) for t in group) if x.status != "not_found"]
+        if found:
+            return _merge(found)
+    return NOT_FOUND
+
+
+def _merge(found: list[Resolution]) -> Resolution:
+    """같은 묶음(똑같이 그럴듯한 해석)에서 찾은 결과 합치기: 확정이 있으면 확정만 보고, 서로 다른 주소면 확정하지 않는다."""
+    picked = [x for x in found if x.status == "confirmed"] or found
+    addresses = tuple(dict.fromkeys(a for x in picked for a in x.candidates))
+    if len(picked) == 1 or len(addresses) == 1:
+        return picked[0]
+    return Resolution("ambiguous", None, addresses[:3])
 
 
 def correct(db, text) -> Resolution:

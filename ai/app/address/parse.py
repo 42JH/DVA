@@ -3,6 +3,7 @@
 숫자는 위치로 해석한다: 뒤에서부터 숫자 토큰을 떼어내고, '길' 앞은 길 번호, 뒤는 건물번호.
 """
 
+import itertools
 import re
 
 from app.address.numbers import korean_to_int
@@ -99,9 +100,81 @@ def split_gil(heard: str) -> str | None:
     return spaced if spaced != heard else None
 
 
-def retries(heard: str) -> list[str]:
-    """못 찾았을 때 차례로 다시 볼 표기: 붙인 길 번호 띄우기, 쉼표 뒤(건물 이름) 떼기
-    (2026-11-03 통화 98b348: "도림로143길 27, 리버뷰 신안 인스빌")."""
-    road = heard.split(",")[0].strip() if "," in heard else ""
-    out = [split_gil(heard), road if road and road != heard else None, split_gil(road) if road else None]
-    return list(dict.fromkeys(x for x in out if x))
+# 받아쓴 그대로 넘긴 기본주소의 말끝. "이요"·"이에요"는 앞 글자에 받침이 있으면 두 가지로 읽힌다
+# ("테헤란로 이일이요" = "이일이"+"요" / "이일"+"이요") — 글자만으로 못 정해서 두 해석을 다 보고 주소DB가 가린다
+_ENDING = re.compile(r"\s*(입니다|이에요|예요|에요|이요|요)[.!?\s]*$")
+
+
+def _has_final(ch: str) -> bool:
+    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+
+
+def strip_ending(text: str) -> list[str] | None:
+    """말끝을 뗀 해석 1~2개. 말끝이 없으면 None."""
+    m = _ENDING.search(text)
+    if not m:
+        return None
+    base = text[:m.start()].rstrip()
+    if m[1] in ("이요", "이에요") and not base[-1:].isdigit():
+        out = [base, base + "이"] if _has_final(base[-1:]) else [base + "이"]
+    else:
+        out = [base]
+    return [x for x in out if x] or None
+
+
+def _is_number(token: str) -> bool:
+    return bool(re.search(r"\d", token) or to_number(token))
+
+
+def cut_trailing(text: str) -> list[str] | None:
+    """번호 뒤에 붙은 건물 이름 떼기: "올림픽로 300 롯데월드타워" → "올림픽로 300". 쉼표가 있으면 쉼표 앞만
+    (2026-11-03 통화 98b348: "도림로143길 27, 리버뷰 신안 인스빌"). 바뀐 게 없으면 None.
+    shortcut: 마지막 숫자 토큰 뒤를 모두 뗀다 — 기본주소에 "101동" 같은 상세주소가 섞이면 그대로 둔다(상세는 따로 받는다)."""
+    head = text.split(",")[0].strip()
+    tokens = head.split()
+    last = max((i for i, t in enumerate(tokens) if i > 0 and _is_number(t)), default=None)
+    if last is not None:
+        if tokens[last + 1:last + 2] in (["다시"], ["대시"], ["-"]):
+            return None  # 부번이 이어진다("칠 다시 삼이요") — 자르면 본번만 남아 다른 건물이 된다
+        head = " ".join(tokens[:last + 1])
+    return [head] if head and head != text.strip() else None
+
+
+def split_dasi(text: str) -> list[str] | None:
+    """숫자 사이에 붙은 부번 표시 띄우기: "칠다시삼" → "칠 다시 삼"(운영 통화 8ffabaca). 바뀐 게 없으면 None."""
+    spaced = re.sub(rf"(?<=[{NUM_CHARS}])(다시|대시)(?=[{NUM_CHARS}])", r" \1 ", text)
+    return [spaced] if spaced != text else None
+
+
+def ga_digits(text: str) -> list[str] | None:
+    """한글 숫자로 말한 "N가" 동 이름을 사전 표기로: "태평로 일가" → "태평로1가". 바뀐 게 없으면 None."""
+    fixed = re.sub(r"(?<=[가-힣])\s*([영공일이삼사오육칠팔구십]+)가(?=\s|$)",
+                   lambda m: f"{korean_to_int(m[1])}가", text)
+    return [fixed] if fixed != text else None
+
+
+def _gil(text: str) -> list[str] | None:
+    spaced = split_gil(text)
+    return [spaced] if spaced else None
+
+
+# 못 찾았을 때 다시 볼 고침들(앞에 있을수록 먼저). 말끝은 다른 고침보다 먼저 떼야 뒤 고침이 끝 토큰을 제대로 본다
+REWRITES = (strip_ending, _gil, cut_trailing, split_dasi, ga_digits)
+
+
+def readings(heard: str) -> list[tuple[str, ...]]:
+    """못 찾았을 때 다시 볼 표기 묶음들, 적게 고친 것부터(고침 1개 → 2개 → …). 한 묶음 안의 표기들은 똑같이 그럴듯한
+    해석이다(말끝 "이요"의 두 해석) — 둘 다 실제 주소면 확정하지 않는다(matcher.resolve)."""
+    out, seen = [], {heard}
+    for size in range(1, len(REWRITES) + 1):
+        for combo in itertools.combinations(REWRITES, size):
+            texts = [heard]
+            for fix in combo:  # 고침마다 실제로 바뀌어야 한다(안 바뀌는 고침이 낀 조합은 앞 조합과 같다)
+                texts = [y for t in texts for y in (fix(t) or [])]
+                if not texts:
+                    break
+            group = tuple(dict.fromkeys(t for t in texts if t not in seen))
+            if group:
+                seen.update(group)
+                out.append(group)
+    return out

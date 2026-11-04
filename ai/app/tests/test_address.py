@@ -236,3 +236,37 @@ def test_linked_gil_number_is_unlinked_only_when_not_found():
     assert unlink_gil("경북 구미시 인동국일 7-3") == "경북 구미시 인동 구길 7-3"
     assert unlink_gil("서울 강남구 테헤란로 212") is None
     assert unlink_gil("인천 남동구 만수일로 3") is None  # 받침 ㄱ이 아니면 그대로
+
+
+# --- 못 찾았을 때 다시 볼 표기(parse.readings) ---
+
+def test_rewrites_each_fix_only_what_it_targets():
+    from app.address.parse import cut_trailing, ga_digits, split_dasi, strip_ending
+    assert strip_ending("테헤란로 이일이요") == ["테헤란로 이일", "테헤란로 이일이"]  # 일(받침) + 이요 / 이일이 + 요
+    assert strip_ending("인동 구길 사이요") == ["인동 구길 사이"]  # 받침 없는 글자 뒤 "이요"는 "요"만
+    assert strip_ending("세종대로 110입니다") == ["세종대로 110"] and strip_ending("테헤란로 212") is None
+    assert split_dasi("인동 구길 칠다시삼") == ["인동 구길 칠 다시 삼"]
+    assert split_dasi("나주시 다시면 다시로 12") is None and split_dasi("고다시길 3") is None  # 도로명·면 이름은 그대로
+    assert cut_trailing("올림픽로 300 롯데월드타워") == ["올림픽로 300"]
+    assert cut_trailing("인동구길 칠 다시 삼이요") is None  # 부번이 이어지면 자르지 않는다(본번만 남으면 다른 건물)
+    assert ga_digits("서울 중구 태평로 일가 삼십일") == ["서울 중구 태평로1가 삼십일"]
+
+
+def test_resolve_retries_only_when_not_found_and_readings_decide(db):
+    from app.address.matcher import resolve
+    r = resolve(db, "서울 강남구 테헤란로 이백십이요")  # "이백십"(210 없음)·"이백십이"(212) 중 확정된 쪽
+    assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
+    r = resolve(db, "서울 강남구 테헤란로 이백십일이요")  # 211·212 둘 다 실제 주소 → 확정하지 않는다
+    assert r.status == "ambiguous" and r.candidates == ("서울특별시 강남구 테헤란로 211", "서울특별시 강남구 테헤란로 212")
+    assert resolve(db, "경북 구미시 인동 구길 칠다시삼").address == "경상북도 구미시 인동9길 7-3"
+    assert resolve(db, "경북 구미 인동구길 칠 다시 삼이요").address == "경상북도 구미시 인동9길 7-3"  # 말끝 + 붙인 길
+    assert resolve(db, "서울 강남구 테헤란로 212 무슨타워").address == "서울특별시 강남구 테헤란로 212"
+    assert resolve(db, "서울 강남구 없는로 칠다시삼") == NOT_FOUND
+
+
+def test_resolve_stops_retrying_after_time_limit(db):
+    """다시 보기가 시간 상한을 넘으면 못 찾음 — 예산 초과로 "장애"가 되어 들은 값을 기록하지 않게."""
+    from app.address.matcher import RETRY_SEC, resolve
+    ticks = iter([0, RETRY_SEC + 1])
+    assert resolve(db, "서울 강남구 테헤란로 212요", clock=lambda: next(ticks)) == NOT_FOUND
+    assert resolve(db, "서울 강남구 테헤란로 212요").status == "confirmed"
