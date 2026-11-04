@@ -1,6 +1,6 @@
-# AI 파트 연동 명세 — 2026-11-03
+# AI 파트 연동 명세 — 2026-11-04
 
-코드 기준: `refactor/unused-backend`, 기능 코드 `7da8876`, DB migration `047`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
+코드 기준: `feature/ai-call-updates`, DB migration `048`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 수거 시각·콜백·주소 권한·좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
 
 이 문서는 AI가 호출하거나 제공해야 하는 현재 계약을 모은다. 프론트 전달 사항은 [프론트 명세](frontend-integration-current.md), 이번 제거 내역과 DB 전환은 [작업 기록](unused-contract-cleanup.md)을 따른다.
 
@@ -168,6 +168,7 @@ Content-Type: application/json
   "orderLookupCount": 1,
   "cancelledParcelCount": 1,
   "hasHandoffRequest": true,
+  "hasCallbackRequest": false,
   "repeatQuestionCount": 0,
   "hasComplaint": false,
   "complaints": []
@@ -183,8 +184,9 @@ Content-Type: application/json
 | `orderLookupCount`      | 접수 내역을 조회해 안내한 건수. shipment 필드명을 쓰지 않음                    |
 | `cancelledParcelCount`  | 취소 완료 배송 상세 수. 이전 통화의 접수 건 취소도 가능                        |
 | `hasHandoffRequest`     | 상담원 연결 요구 여부. 연결 성공·실패 상태가 아님                              |
+| `hasCallbackRequest`    | 콜백 요청 여부. 기존 발신번호로 연락하며 별도 콜백 처리 완료 상태는 없음      |
 
-네 건수는 0 이상 int32, 두 boolean은 true/false다. 새 요약 6개는 생략·null을 허용하지만 미수집을 뜻한다. 새 AI는 측정한 최종값을 모두 명시한다. `0`, `false`, `null`을 구분하며 BE는 주문·이벤트를 다시 세어 덮어쓰지 않는다.
+네 건수는 0 이상 int32, 세 boolean은 true/false다. 요약 7개는 생략·null을 허용하지만 미수집을 뜻한다. 새 AI는 측정한 최종값을 모두 명시한다. `0`, `false`, `null`을 구분하며 BE는 주문·이벤트를 다시 세어 덮어쓰지 않는다. 콜백은 별도 접수 API 없이 최초 최종 분석에 `hasCallbackRequest`로 포함한다. 생략/null은 기존 해시를 유지하며 확정 후 true/false 변경은 다른 분석과 동일하게 409다.
 
 기존 핵심 필드 `aiPersonaVersionSeq`, `repeatQuestionCount`, `hasComplaint`, `complaints`, 시작·종료 시각은 필수다. nullable 허용과 생략 허용은 다르다. `hasComplaint=true`이면 근거 1개 이상, false/null이면 `complaints=[]`. 근거는 `type`, `evidenceText`, 정수 초 `offsetSeconds` 또는 null, 같은 통화의 `utteranceOrders`를 사용한다.
 

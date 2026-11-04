@@ -56,12 +56,19 @@ const summary = () => ({
   orderLookupCount: 1,
   cancelledParcelCount: 1,
   hasHandoffRequest: true,
+  hasCallbackRequest: true,
 });
 
 test('call summary accepts mixed outcomes, measured zero, false and unknown without coercion', async () => {
   for (const values of [
     summary(),
-    { ...summary(), isNewCustomer: false, hasHandoffRequest: false, registeredParcelCount: 0 },
+    {
+      ...summary(),
+      isNewCustomer: false,
+      hasHandoffRequest: false,
+      hasCallbackRequest: false,
+      registeredParcelCount: 0,
+    },
     Object.fromEntries(Object.keys(summary()).map((key) => [key, null])),
     { ...summary(), faqAnswerCount: 2147483647 },
   ]) {
@@ -79,7 +86,7 @@ test('call summary rejects invalid counts, non-boolean flags and obsolete field 
   ])
     for (const value of [-1, 1.5, '1', true, 2147483648, {}, []])
       await assert.rejects(() => validate({ ...input(), [key]: value }), { status: 400 });
-  for (const key of ['isNewCustomer', 'hasHandoffRequest'])
+  for (const key of ['isNewCustomer', 'hasHandoffRequest', 'hasCallbackRequest'])
     for (const value of ['true', 'false', 'T', 'F', 0, 1, {}, []])
       await assert.rejects(() => validate({ ...input(), [key]: value }), { status: 400 });
   for (const change of [{ customerType: 'NEW' }, { shipmentLookupCount: 1 }])

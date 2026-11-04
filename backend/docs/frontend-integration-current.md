@@ -1,6 +1,6 @@
-# 프론트 파트 연동 명세 — 2026-11-03
+# 프론트 파트 연동 명세 — 2026-11-04
 
-코드 기준: `refactor/unused-backend`, 기능 코드 `7da8876`, DB migration `047`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
+코드 기준: `feature/ai-call-updates`, DB migration `048`까지. 운영 API에 적용된 상태는 별도 확인한다. 이번 문서는 실제 요청·표시·갱신에 필요한 현재 계약을 모으며, 구버전 문서의 수거 시각·콜백·좌표·통화 분류·기본 결제수단·물리 삭제 설명보다 우선한다.
 
 [AI 명세](ai-integration-current.md) · [이번 제거와 검증·DB 전환](unused-contract-cleanup.md)
 
@@ -78,6 +78,7 @@ const { data, hasNext, total_count } = await response.json();
   "orderLookupCount": 1,
   "cancelledParcelCount": 1,
   "hasHandoffRequest": true,
+  "hasCallbackRequest": true,
   "aiStartedAt": "2026-11-03T01:00:00.000Z",
   "aiEndedAt": "2026-11-03T01:03:40.000Z",
   "repeatQuestionCount": 0,
@@ -96,8 +97,11 @@ const { data, hasNext, total_count } = await response.json();
 | orderLookupCount           | **접수 조회** 안내 건수                                                         |
 | cancelledParcelCount       | 취소 완료 배송 상세 수                                                          |
 | hasHandoffRequest          | true 요청 있음 / false 요청 없음 / null 미확인. 실제 연결 성공·실패 상태가 아님 |
+| hasCallbackRequest         | true 콜백 요청 / false 요청 없음 / null 미수집. 처리 완료 상태는 제공하지 않음 |
 
 분석 미수신은 `analysis=null`, 과거 분석의 새 요약 미수집은 개별 필드 null이다. 건수 0·false를 빈 값으로 숨기거나 null을 0·false로 바꾸지 않는다. 한 통화가 접수·FAQ·조회·취소·연결 요구를 동시에 가질 수 있어 한 개 result 뱃지로 합치지 않는다. BE가 저장된 최종 AI 값을 보내므로 프론트에서 DB 쿼리·주문 상태로 다시 계산하지 않는다.
+
+콜백은 기존 `GET /api/calls`의 `data[].analysis.hasCallbackRequest`, `GET /api/calls/{id}`의 `data.analysis.hasCallbackRequest`로 표시한다. 이름·번호는 기존 `customerName`·`callerPhoneNumber`를 사용하며 이름은 미등록/삭제 고객이면 null일 수 있다. 새 목록 필터나 콜백 완료 처리 API는 추가하지 않는다.
 
 표시 시작 시각은 PBX 시작 → AI 시작 → 최초 수신 시각 순, 종료는 PBX 종료 → AI 종료 순이다. 모든 시각이 없으면 null이며 null만으로 진행 중이라고 판단하지 않는다. 불만 offsetSeconds는 정수 초 위치이며 지연 시간 값이 아니다. utteranceOrders에 해당하는 **실제 수신된 같은 통화 발화**만 강조한다.
 

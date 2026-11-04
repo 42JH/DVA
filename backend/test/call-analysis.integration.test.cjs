@@ -3,6 +3,8 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { request: httpRequest } = require('node:http');
+const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -348,6 +350,7 @@ test('AI summary is stored as reported with the actual persona and replays never
     orderLookupCount: 1,
     cancelledParcelCount: 1,
     hasHandoffRequest: true,
+    hasCallbackRequest: true,
   });
   await success(await post(c.id, body));
   const stored = (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id]))
@@ -359,6 +362,7 @@ test('AI summary is stored as reported with the actual persona and replays never
   assert.equal(stored.order_lookup_count, 1);
   assert.equal(stored.cancelled_parcel_count, 1);
   assert.equal(stored.has_handoff_request, true);
+  assert.equal(stored.has_callback_request, true);
   await Promise.all(Array.from({ length: 6 }, async () => success(await post(c.id, body))));
   for (const change of [
     { isNewCustomer: true },
@@ -367,6 +371,7 @@ test('AI summary is stored as reported with the actual persona and replays never
     { orderLookupCount: 2 },
     { cancelledParcelCount: 2 },
     { hasHandoffRequest: false },
+    { hasCallbackRequest: false },
   ])
     await error(await post(c.id, { ...body, ...change }), 409, 'EVENT_PAYLOAD_CONFLICT');
   assert.deepEqual(
@@ -408,6 +413,7 @@ test('result-free hashes and timestamps survive omitted and explicit-null summar
     orderLookupCount: null,
     cancelledParcelCount: null,
     hasHandoffRequest: null,
+    hasCallbackRequest: null,
   };
   await success(await post(c.id, { ...body, ...unknown }));
   assert.deepEqual(
@@ -421,6 +427,7 @@ test('result-free hashes and timestamps survive omitted and explicit-null summar
     'order_lookup_count',
     'cancelled_parcel_count',
     'has_handoff_request',
+    'has_callback_request',
   ])
     assert.equal(stored[column], null);
   await error(
@@ -478,6 +485,7 @@ test('Swagger exposes optional nullable summary input and matching administrator
     'orderLookupCount',
     'cancelledParcelCount',
     'hasHandoffRequest',
+    'hasCallbackRequest',
   ]) {
     assert.ok(request.properties[name]);
     assert.equal(request.required.includes(name), false);
@@ -492,4 +500,63 @@ test('Swagger exposes optional nullable summary input and matching administrator
     document.paths['/api/calls'].get.parameters.some((parameter) => parameter.name === 'result'),
     false,
   );
+});
+
+test('callback is independent of handoff, survives ended calls and rejects invalid flags and deleted calls', async () => {
+  const call = await createCall();
+  const body = input(call.providerCallId, { hasHandoffRequest: false, hasCallbackRequest: true });
+  for (const value of ['true', 1, {}, []])
+    await error(
+      await post(call.id, { ...body, hasCallbackRequest: value }),
+      400,
+      'INVALID_REQUEST',
+    );
+  await success(await post(call.id, body));
+  await success(await post(call.id, body));
+  const row = (
+    await pool.query(
+      'SELECT has_handoff_request,has_callback_request FROM call_analyses WHERE call_session_seq=$1',
+      [call.id],
+    )
+  ).rows[0];
+  assert.deepEqual(row, { has_handoff_request: false, has_callback_request: true });
+  await pool.query(
+    'UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=$1',
+    [call.id],
+  );
+  await error(await post(call.id, body), 404, 'NOT_FOUND');
+});
+
+test('migration 048 preserves existing analysis data, hashes and timestamps with unknown callback status', async () => {
+  const call = await createCall();
+  const body = input(call.providerCallId);
+  await success(await post(call.id, body));
+  const before = (
+    await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [call.id])
+  ).rows;
+  const transaction = await pool.connect();
+  try {
+    await transaction.query('BEGIN');
+    await transaction.query('ALTER TABLE public.call_analyses DROP COLUMN has_callback_request');
+    await transaction.query(
+      readFileSync(join(__dirname, '../migrations/048-call-callback-request.sql'), 'utf8'),
+    );
+    assert.deepEqual(
+      (await transaction.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [call.id]))
+        .rows,
+      before,
+    );
+    assert.equal(
+      (
+        await transaction.query(
+          "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL",
+        )
+      ).rowCount,
+      1,
+    );
+  } finally {
+    await transaction.query('ROLLBACK');
+    transaction.release();
+  }
+  await success(await post(call.id, { ...body, hasCallbackRequest: null }));
 });

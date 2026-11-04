@@ -164,6 +164,10 @@ BEGIN
     AND pg_get_constraintdef(oid) LIKE '%ended_at >= started_at%')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='047-remove-unused-schema.sql') THEN
   RAISE EXCEPTION 'Unused schema removal or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses'
+    AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='048-call-callback-request.sql') THEN
+  RAISE EXCEPTION 'Call callback request schema or migration missing'; END IF;
  RAISE NOTICE 'PASS: 28 public tables, 24 FKs, 10 triggers, active employee identity, retention/retry schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
