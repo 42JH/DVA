@@ -5,7 +5,7 @@ import { useDismiss } from '@/shared/lib/useDismiss'
 import { DayPick, DayScroll, Highlight, TopBar, TopSearch } from '@/shared/ui'
 import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
-import { KindChips } from './KindChips'
+import { KindChips, PendingChip } from './KindChips'
 
 // 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터) · 줄 목록
 // 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동
@@ -96,11 +96,7 @@ function CallLine({ r, q, from }: { r: CallListRow; q: string; from: string }) {
     >
       <span className="text-sub">{r.time}</span>
       <span className="flex min-w-0 items-center gap-2 pr-4">
-        {r.counts ? (
-          <KindChips kinds={r.kinds} />
-        ) : (
-          <span className="text-body text-muted">분석 전</span>
-        )}
+        {r.counts ? <KindChips kinds={r.kinds} /> : <PendingChip />}
         {r.complaint && <Complaint c={r.complaint} />}
       </span>
       <span className="flex min-w-0 items-start font-medium" title={r.name}>
