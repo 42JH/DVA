@@ -4,6 +4,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 
 ## 적용 기준
 
+050-call-dashboard-metrics.sql은 통화별 이탈 단계·총 대기시간·유형별 레이턴시 요약을 저장하는 call_dashboard_metrics 한 테이블과 JSON 검증 함수를 추가한다. 기존 테이블 컬럼·행·해시·시각·FK·트리거는 변경하지 않는다. 분석과 1:1 CASCADE FK로 연결하며 부모 통화 soft delete와 최초 incoming_at 기준 5년 폐기를 따른다. 최종 public 테이블 29개·FK 25개·업무 트리거 10개다. 새 대시보드 앱 전에 기존 runner로 050을 적용하고 verify.sql로 검사한다. 접수 시간은 기존 통화시간·접수 건수로 계산하므로 별도 시간 컬럼을 만들지 않는다.
+
 `047-remove-unused-schema.sql`은 기업 PIN의 미사용 생성 컬럼 `search_text`, `call_sessions.end_reason`, `handoff_requests`를 한 트랜잭션에서 제거한다. 삭제 대상의 기존 값은 소실되므로 기존 앱 중지 → DB 백업 → migration·verify → 새 앱 실행 순서로 전환한다. 구버전 앱과 동시 운영하거나 스키마만 역으로 되돌리지 않는다. 통화 시각 CHECK, 개인 PIN 검색·주소, AI 상담원 연결 요구 요약은 보존한다. 최종 public 테이블 28개·FK 24개·업무 트리거 10개이며 운영 적용은 별도다. [연동·검증 안내](../../backend/docs/unused-contract-cleanup.md)를 따른다.
 
 `041-call-summary-metrics.sql`은 `call_analyses`에 신규 고객 여부, 접수 확정 배송 상세 수, FAQ 답변 건수, 접수 조회 건수, 취소 배송 상세 수, 상담원 연결 요구 여부의 nullable 컬럼 6개를 추가한다. 기본값·기존 행 보완은 없으며 기존 해시·시각·페르소나 참조를 보존한다. 네 건수는 0 이상 int32다. AI가 실제 사용 버전과 요약 값을 전송하고 백엔드는 집계하지 않는다. 생략·null은 미수집, 0·false는 확인한 없음이다. [수신·재전송·프론트 조회 계약](../api/call-analysis.md)을 따른다.

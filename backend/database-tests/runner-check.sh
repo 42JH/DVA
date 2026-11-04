@@ -15,6 +15,7 @@ SQL
 sh "$RUNNER" dva-db-129-check "$ROOT/backups"
 psql -X -v ON_ERROR_STOP=1 -U dva -d monolith_db -f "$ROOT/infra/database/verify.sql"
 psql -X -v ON_ERROR_STOP=1 -U dva -d monolith_db -f "$ROOT/check.sql"
+psql -X -v ON_ERROR_STOP=1 -U dva -d monolith_db -f "$ROOT/dashboard-check.sql"
 
 # Restore the pre-migration dump into a different disposable database.
 BACKUP=$(find "$ROOT/backups" -type f ! -name '*.sha256' | sort | head -n 1)

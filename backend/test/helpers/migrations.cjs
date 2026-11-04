@@ -91,6 +91,10 @@ async function migrate(pool) {
         "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='unanswered_questions' AND column_name='reason' AND udt_name='text' AND is_nullable='YES' AND column_default IS NULL",
       );
       assert.equal(reason.rowCount, 1, 'Apply migration 049 to the isolated DB first');
+      const dashboard = await client.query(
+        "SELECT 1 WHERE to_regclass('public.call_dashboard_metrics') IS NOT NULL AND to_regprocedure('public.valid_call_latency_stats(jsonb)') IS NOT NULL",
+      );
+      assert.equal(dashboard.rowCount, 1, 'Apply migration 050 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
