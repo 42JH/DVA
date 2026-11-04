@@ -2,12 +2,13 @@
 import assert from 'node:assert/strict'
 import {
   OUTCOME_OF,
-  RESULT_OF,
   durationSec,
   toCallDetail,
   utteranceAt,
   utteranceForAction,
   toCallRow,
+  matchCall,
+  type CallFilter,
   type CallDetailDto,
   type CallListItemDto,
 } from './callDto'
@@ -41,26 +42,51 @@ const analysis: CallListItemDto['analysis'] = {
     },
   ],
   analysedAt: call.endedAt,
+  isNewCustomer: true,
+  registeredParcelCount: 3,
+  orderLookupCount: 0,
+  cancelledParcelCount: null,
+  faqAnswerCount: 2,
 }
 
-// 결과 코드 ↔ 화면 코드가 서로 되돌아감
-for (const k of Object.keys(RESULT_OF) as (keyof typeof RESULT_OF)[])
-  assert.equal(OUTCOME_OF[RESULT_OF[k]], k)
+// 결과 코드 → 화면 코드 (옛 06 요약 — 서버에서 result가 빠지면 같이 지움)
+assert.equal(OUTCOME_OF.REGISTERED, 'SUCCESS')
 
 // 목록 줄: 분석 있음
 const row = toCallRow({ ...call, analysis })
-assert.equal(row.outcome, 'SUCCESS')
 assert.equal(row.callerNumber, '01066382047') // 하이픈 제거
 assert.equal(row.durationSec, 220)
-assert.deepEqual(row.complaint, { type: 'REPEATED_QUESTION', reason: '세 번 물음' })
+assert.equal(row.isNew, true)
+assert.deepEqual(row.counts, { accept: 3, lookup: 0, cancel: null, faq: 2 }) // null(못 모음)을 0으로 바꾸지 않음
+assert.deepEqual(row.complaints, [{ type: 'REPEATED_QUESTION', reason: '세 번 물음' }])
+assert.equal(row.persona, '빠른 접수형')
+// 연동 전 서버(요약 칸 없음) → 모름
+const old = toCallRow({
+  ...call,
+  analysis: { ...analysis, isNewCustomer: undefined, faqAnswerCount: undefined },
+})
+assert.equal(old.isNew, null)
+assert.equal(old.counts?.faq, null)
 
 // 분석 전 · 시각 없음 — 성공 · 불만 없음으로 보지 않음
 const bare = toCallRow({ ...call, callerPhoneNumber: null, endedAt: null, analysis: null })
-assert.equal(bare.outcome, null)
-assert.equal(bare.complaint, null)
+assert.equal(bare.counts, null)
+assert.deepEqual(bare.complaints, [])
 assert.equal(bare.durationSec, null)
 assert.equal(bare.callerNumber, '')
 assert.equal(durationSec(null, call.endedAt), null)
+
+// 04 화면 거르기 — 신규 · 상담 유형(하나라도) · 통화 시간
+const none: CallFilter = { newOnly: false, kinds: [], minSec: 0, maxSec: null }
+assert.equal(matchCall(row, none), true)
+assert.equal(matchCall(row, { ...none, newOnly: true }), true)
+assert.equal(matchCall(old, { ...none, newOnly: true }), false) // 신규인지 모름
+assert.equal(matchCall(row, { ...none, kinds: ['lookup', 'faq'] }), true) // FAQ 2
+assert.equal(matchCall(row, { ...none, kinds: ['lookup', 'cancel'] }), false) // 조회 0 · 취소 모름
+assert.equal(matchCall(row, { ...none, minSec: 180, maxSec: 600 }), true) // 220초
+assert.equal(matchCall(row, { ...none, minSec: 240 }), false)
+assert.equal(matchCall(row, { ...none, maxSec: 200 }), false)
+assert.equal(matchCall(bare, { ...none, minSec: 60 }), false) // 통화 시간 모름
 
 // 상세: 녹취는 url 있는 것 우선, 페르소나 null 처리, 세 목록 변환
 const detail: CallDetailDto = {
