@@ -36,6 +36,18 @@ const VERSIONS = [
   ver(5, 'INACTIVE', '2026-09-17T09:00:00+09:00', '2026-09-16T18:00:00+09:00'),
   ver(4, 'INACTIVE', '2026-09-01T09:00:00+09:00', '2026-08-31T18:00:00+09:00'),
 ]
+// 친절형: 9월까지 쓰던 상담가 (지금 안 씀) — 04 상담가 토글에서 고르면 가짜 통화(전부 빠른 접수형 v6)가 다 빠짐
+const KIND_SEQ = 2
+const KIND_VERSIONS = [
+  {
+    ...ver(2, 'INACTIVE', '2026-08-20T09:00:00+09:00', '2026-08-19T18:00:00+09:00'),
+    aiPersonaVersionSeq: 22,
+  },
+  {
+    ...ver(1, 'INACTIVE', '2026-08-01T09:00:00+09:00', '2026-07-31T18:00:00+09:00'),
+    aiPersonaVersionSeq: 21,
+  },
+].map((v) => ({ ...v, aiPersonaSeq: KIND_SEQ, code: 'kind', name: '친절형' }))
 const page = <T>(items: T[]) => ({ data: items, hasNext: false, total_count: items.length })
 
 export const personaHandlers = [
@@ -51,15 +63,25 @@ export const personaHandlers = [
           pendingVersion: null,
           draft: null,
         },
+        {
+          aiPersonaSeq: KIND_SEQ,
+          code: 'kind',
+          headVersion: KIND_VERSIONS[0],
+          activeVersion: null,
+          pendingVersion: null,
+          draft: null,
+        },
       ]),
     ),
   ),
   http.get(`${API_BASE_URL}/personas/:id/versions`, ({ params }) =>
     Number(params.id) === PERSONA_SEQ
       ? HttpResponse.json(page(VERSIONS))
-      : HttpResponse.json(
-          { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
-          { status: 404 },
-        ),
+      : Number(params.id) === KIND_SEQ
+        ? HttpResponse.json(page(KIND_VERSIONS))
+        : HttpResponse.json(
+            { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
+            { status: 404 },
+          ),
   ),
 ]

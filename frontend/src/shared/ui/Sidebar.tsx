@@ -6,7 +6,7 @@ import { ExitGhost } from '@/shared/lib/useExitGhost'
 // 사이드바 (Figma 디자인/목업 '프레임' 11/04) — 폭 64 아이콘 줄: 로고(홈) · 위 무리 · 아래 무리(바닥에 붙음)
 // 줄 46×59 = 아이콘 24 + 글자 12. 선택된 줄 = 흰 네모(모서리 8), 다른 줄을 고르면 네모가 그리로 미끄러짐 (디자인 '선택시 슬라이드 애니메이션')
 // 설정 = 옆에 뜨는 메뉴(관리자 · 내 정보 · 로그아웃, 11/04 사용자). 관리자는 최고 관리자만
-// 디자인의 '물류'는 [추가] 표시(간단하게 된다면)라 아직 없음 — 화면이 생기면 BOTTOM에 한 줄
+// '물류'는 디자인 자리에 두되 누를 수 없음(화면 없음, 11/04 사용자) — 화면이 생기면 soon을 빼고 링크로. 디자인의 '접수'는 '주문'으로 통일(11/04 사용자)
 // AI 미답변 숫자는 상단바로 옮김 (PageHeader)
 
 // 아이콘 = Figma 아이콘의 선을 그대로 옮김 (조각마다 translate = 24 칸 안 자리). 색은 currentColor
@@ -50,6 +50,14 @@ const ICON = {
         <path d="M0.750067 2.75004C0.811818 2.19763 1.07587 1.68762 1.49132 1.31833C1.90677 0.949038 2.44422 0.746602 3.00007 0.750043C4.35007 0.750043 5.25007 1.60004 5.25007 2.75004C5.25007 4.60004 3.00007 4.60004 3.00007 6.25004" />
         <path d="M3.00007 9.00004V9.05004" />
       </g>
+    </>
+  ),
+  truck: (
+    <>
+      <rect x="2" y="5" width="12" height="10" rx="1" />
+      <path d="M14 9h4l4 4v2h-8z" />
+      <circle cx="6" cy="17" r="2" />
+      <circle cx="18" cy="17" r="2" />
     </>
   ),
   headset: (
@@ -104,7 +112,7 @@ function Icon({ name, on }: { name: keyof typeof ICON; on: boolean }) {
   )
 }
 
-type Item = { to: string; label: string; icon: keyof typeof ICON }
+type Item = { to: string; label: string; icon: keyof typeof ICON; soon?: boolean }
 const TOP: Item[] = [
   { to: '/dashboard', label: '통계', icon: 'chart' },
   { to: '/calls', label: '통화', icon: 'call' },
@@ -112,6 +120,7 @@ const TOP: Item[] = [
   { to: '/faqs', label: 'FAQ', icon: 'faq' }, // FAQ 목록 · AI 미답변 둘 다 이 줄
 ]
 const BOTTOM: Item[] = [
+  { to: '/logistics', label: '물류', icon: 'truck', soon: true },
   { to: '/personas', label: 'AI 상담가', icon: 'headset' },
   { to: '/companies', label: '기업', icon: 'building' },
 ]
@@ -176,11 +185,18 @@ export function Sidebar({ onLogout, showAdmins }: { onLogout: () => void; showAd
 
   const row = (m: Item) => (
     <li key={m.to}>
-      <NavLink to={m.to} className={`${ROW} ${tone(active === m.to)}`}>
-        {active === m.to && markEl}
-        <Icon name={m.icon} on={active === m.to} />
-        {m.label}
-      </NavLink>
+      {m.soon ? (
+        <span aria-disabled="true" title="준비 중" className={`${ROW} text-ink`}>
+          <Icon name={m.icon} on={false} />
+          {m.label}
+        </span>
+      ) : (
+        <NavLink to={m.to} className={`${ROW} ${tone(active === m.to)}`}>
+          {active === m.to && markEl}
+          <Icon name={m.icon} on={active === m.to} />
+          {m.label}
+        </NavLink>
+      )}
     </li>
   )
 

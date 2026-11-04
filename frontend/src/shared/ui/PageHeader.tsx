@@ -45,7 +45,18 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
 // 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 점은 라이브처럼 깜빡임, 0건이면 '접수 중'만(11/04 사용자). 실시간 연결이 끊기면 점이 회색으로 멈춤
 // 좁은 화면(1280)에선 상태 글자가 말줄임 — 검색칸은 늘 가운데
 // crumbs = 검색 중이면 날짜 · 상태 자리에 경로('“박스” 검색', 11/04 사용자 — 상세로 가면 '“박스” 검색 > “박스” 검색 상세')
-export function TopBar({ search, crumbs }: { search: ReactNode; crumbs?: Crumb[] }) {
+// 04 통화(Figma '통화' 11/04)는 날짜 · 검색이 아래 머리 줄에 있어 상태 · 알림만 (date={false}, search 없음)
+export function TopBar({
+  search,
+  crumbs,
+  date = true,
+  className = '',
+}: {
+  search?: ReactNode
+  crumbs?: Crumb[]
+  date?: boolean
+  className?: string // 화면마다 왼쪽 자리 맞춤 (04는 카드 왼쪽 24부터)
+}) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
   const today = new Date().toLocaleDateString('ko-KR', {
     month: 'long',
@@ -53,12 +64,14 @@ export function TopBar({ search, crumbs }: { search: ReactNode; crumbs?: Crumb[]
     weekday: 'long',
   })
   return (
-    <header className="-mt-6 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2">
+    <header
+      className={`-mt-6 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2 ${className}`}
+    >
       <div className="flex min-w-0 items-center gap-[clamp(16px,3.3vw,48px)]">
         {crumbs ? (
           <Crumbs items={crumbs} className="min-w-0 truncate" />
         ) : (
-          <span className="shrink-0 text-body text-ink">{today}</span>
+          date && <span className="shrink-0 text-body text-ink">{today}</span>
         )}
         {!crumbs && persona && (
           <span
@@ -75,7 +88,7 @@ export function TopBar({ search, crumbs }: { search: ReactNode; crumbs?: Crumb[]
           </span>
         )}
       </div>
-      {search}
+      {search ?? <span />}
       <UnansweredAlert count={unanswered} className="justify-self-end" />
     </header>
   )

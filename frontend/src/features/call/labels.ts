@@ -1,6 +1,12 @@
 // 04 · 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 서버 코드는 callDto.ts의 것 그대로
 import type { TagKind } from '@/shared/ui'
-import type { CallActionKind, ComplaintType, Outcome, ProcessingKind } from './api/callDto'
+import type {
+  CallActionKind,
+  CallKind,
+  ComplaintType,
+  Outcome,
+  ProcessingKind,
+} from './api/callDto'
 
 /** 통화 결과 (04 · 02와 같은 5개) + 태그 색 (문의 = 흰 바탕 회색 선) */
 export const OUTCOME_LABEL: Record<Outcome, string> = {
@@ -27,6 +33,14 @@ export const COMPLAINT_LABEL: Record<ComplaintType, string> = {
   RECOGNITION_FAILURE: '못 알아들음',
   SLOW_RESPONSE: '답답함 · 느림',
   AI_REFUSAL: 'AI라서 거부',
+}
+
+/** 04 통화 목록 상담 유형 칩 (11/04 디자인) — 서버 요약 registeredParcelCount · orderLookupCount · cancelledParcelCount · faqAnswerCount */
+export const KIND_LABEL: Record<CallKind, string> = {
+  accept: '접수',
+  lookup: '조회',
+  cancel: '취소',
+  faq: 'FAQ',
 }
 
 /** 처리 내용 블록 머리 — 없는 종류(문의 · 답한 FAQ)는 블록으로 안 그림 (10/29 '미답변만 남기기') */

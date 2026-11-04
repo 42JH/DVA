@@ -1,187 +1,178 @@
-import { useQuery } from '@tanstack/react-query'
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { FETCH_ALL_MAX, pageCount, pageSlice } from '@/shared/api/paging'
-import { downloadCsv, toCsv } from '@/shared/lib/csv'
-import { parseRange, todayYmd } from '@/shared/lib/dateRange'
-import { fmtDuration, fmtListTime, fmtPhone, toDateTimeLocal } from '@/shared/lib/format'
-import { matchKo, phoneDigits, suggest } from '@/shared/lib/search'
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query'
+import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
+import { fmtDuration, fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
-import type { Option, TagKind } from '@/shared/ui'
-import { COMPLAINT_LABEL, NO_ANALYSIS, OUTCOME_LABEL, OUTCOME_TAG } from '@/features/call/labels'
-import type { Outcome } from '@/features/call/api/callApi'
+import { COMPLAINT_LABEL, KIND_LABEL } from '@/features/call/labels'
+import { matchCall, type CallFilter, type CallKind } from '@/features/call/api/callDto'
 import {
   callListQueries,
-  fetchAllCalls,
-  LIST_REFRESH_MS,
-  type CallListQuery,
+  callPersonaQueries,
+  latestCallOf,
   type CallRow,
 } from '@/features/call/api/callListApi'
 
-/** 목록 한 줄 = 통화 + 화면용 글 (모르는 값은 '—', 분석 전은 '분석 전' 태그) */
+export type { CallKind } from '@/features/call/api/callDto'
+
+export const KINDS: CallKind[] = ['accept', 'lookup', 'cancel', 'faq']
+export const DUR_MAX = 20 // 통화 시간 슬라이더 끝(분) — 끝까지 두면 위 제한 없음
+
+/** 필터 창 값 (분 단위). max === DUR_MAX = 위 제한 없음 */
+export interface CallFilterForm {
+  newOnly: boolean
+  kinds: CallKind[]
+  min: number
+  max: number
+}
+export const NO_FILTER: CallFilterForm = { newOnly: false, kinds: [], min: 0, max: DUR_MAX }
+
+/** 목록 한 줄 = 통화 + 화면용 글 (Figma '통화' 11/04) */
 export type CallListRow = CallRow & {
-  time: string[] // 올해면 한 줄, 다른 해면 날짜 위 · 시각 아래
+  day: Ymd // 받은 날 (머리 날짜 · 스크롤 위치)
+  time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40'
   name: string
-  phone: string
-  outcomeLabel: string
-  outcomeTag: TagKind
-  complaintView: { label: string; reason: string } | null
+  phone: string // 마스킹 안 함 (11/04 사용자)
+  kinds: { kind: CallKind; label: string }[] // 한 것만 — 두 번 이상이면 '접수 3'
+  complaint: { label: string; reasons: string[] } | null // 첫 불만 유형 + 근거(말풍선)
   duration: string
 }
-export type CallTab = 'all' | 'complaint'
-type OutcomeFilter = Outcome | 'ALL'
 
-const PAGE_SIZE = 20
-const DEFAULTS = { tab: 'all', q: '', from: '', to: '', outcome: 'ALL' } // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙)
-const OUTCOME_ORDER: Outcome[] = ['SUCCESS', 'FAILED', 'HANDOFF', 'CANCELLED', 'INQUIRY']
+// URL 쿼리 기본값 (useListParams 규칙: 모듈 상수) — 06 갔다가 뒤로가기 하면 날짜 · 조건 그대로
+// date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
+const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 
-/** 숫자만 쳤으면 그 숫자가 든 번호 추천 (새 결과가 오기 전 이전 줄이 남아 있어도 맞는 것만, 다 친 번호는 빼고). 숫자가 아니면 null */
-function phoneSuggestions(rows: CallListRow[], digits: string): string[] | null {
-  if (!digits) return null
-  const hit = rows.filter((r) => r.callerNumber.includes(digits) && r.callerNumber !== digits)
-  return [...new Set(hit.map((r) => r.phone))].slice(0, 5)
+const pad = (n: number) => String(n).padStart(2, '0')
+function timeLabel(iso: string, today: Ymd) {
+  const d = new Date(iso)
+  const day = ymd(d)
+  if (day === today) return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+  const date = day.slice(0, 4) === today.slice(0, 4) ? day.slice(5) : day
+  return `${date.replaceAll('-', '.')} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-const toView = (c: CallRow): CallListRow => ({
-  ...c,
-  time: c.startedAt ? fmtListTime(c.startedAt) : ['—'],
-  name: c.customerName ?? '—',
-  phone: c.callerNumber ? fmtPhone(c.callerNumber) : '—',
-  outcomeLabel: c.outcome ? OUTCOME_LABEL[c.outcome] : NO_ANALYSIS.label,
-  outcomeTag: c.outcome ? OUTCOME_TAG[c.outcome] : NO_ANALYSIS.tag,
-  complaintView: c.complaint
-    ? { label: COMPLAINT_LABEL[c.complaint.type], reason: c.complaint.reason }
+const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
+  ...r,
+  day,
+  time: r.startedAt ? timeLabel(r.startedAt, today) : '—',
+  name: r.customerName ?? '—',
+  phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
+  kinds: KINDS.flatMap((kind) => {
+    const n = r.counts?.[kind] ?? 0
+    return n > 0 ? [{ kind, label: n > 1 ? `${KIND_LABEL[kind]} ${n}` : KIND_LABEL[kind] }] : []
+  }),
+  complaint: r.complaints.length
+    ? { label: COMPLAINT_LABEL[r.complaints[0].type], reasons: r.complaints.map((c) => c.reason) }
     : null,
-  duration: c.durationSec === null ? '—' : fmtDuration(c.durationSec),
+  duration: r.durationSec === null ? '' : fmtDuration(r.durationSec),
 })
 
-/** 04 통화 내역 훅 (와이어프레임 04_통화내역 · _불만 · _기간선택, 10/30)
- * 탭 [전체 | 불만 통화] · 검색(이름 · 전화번호) · 날짜 칸(기본 오늘) · 통화 결과 · 쪽은 URL에 (06 갔다가 뒤로가기 하면 그대로)
- * 줄을 누르면 그 통화의 06. CSV 내보내기 = 지금 조건의 전체 쪽 */
+function parseForm(p: typeof DEFAULTS): CallFilterForm {
+  const [lo, hi] = p.dur.split('-')
+  const min = Math.min(DUR_MAX, Math.max(0, Math.floor(Number(lo)) || 0))
+  const max = hi ? Math.min(DUR_MAX, Math.max(min, Math.floor(Number(hi)) || DUR_MAX)) : DUR_MAX
+  return {
+    newOnly: p.new === '1',
+    kinds: KINDS.filter((k) => p.kinds.split(',').includes(k)),
+    min,
+    max,
+  }
+}
+const toFilter = (f: CallFilterForm): CallFilter => ({
+  newOnly: f.newOnly,
+  kinds: f.kinds,
+  minSec: f.min * 60,
+  maxSec: f.max >= DUR_MAX ? null : f.max * 60,
+})
+
+/** 04 통화 내역 훅 (Figma '통화' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로
+ *  거르기: 검색(이름 · 전화번호, 서버) · 상담가 토글 · 필터 창(신규 · 상담 유형 · 통화 시간, 화면). 줄을 누르면 그 통화의 06 */
 export function useCallList() {
-  const navigate = useNavigate()
-  const { params, page, set } = useListParams(DEFAULTS)
-  const [exporting, setExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
-
+  const { params, set } = useListParams(DEFAULTS)
   const today = todayYmd()
-  const range = parseRange(params.from, params.to, today) // 주소의 이상한 날짜(뒤집힘 · 미래 · 글자)는 오늘로
-  const query: CallListQuery = {
-    q: params.q,
-    from: range?.from ?? today,
-    to: range?.to ?? today,
-    outcome: params.outcome as OutcomeFilter,
-    complaintOnly: params.tab === 'complaint',
-  }
-  // 검색어가 없을 땐 서버가 쪽을 나눔. 검색어가 있으면 같은 조건(기간 · 탭 · 결과)의 통화 전체를 받아 09와 같은 규칙(초성 · 띄어쓰기 무시)으로
-  // 앞에서 거르고 쪽을 나눔 — 서버 검색은 글자 그대로라 'ㅊㅇㅇ'이 안 됨 (11/02 사용자: 04도 09처럼). 전체는 5분 재사용
-  // ponytail: fetchAll 2,000건 상한 — 긴 기간의 검색은 앞 2,000건 안에서만. 넘으면 서버 검색으로 돌릴 것
+  const anchor =
+    /^\d{4}-\d{2}-\d{2}$/.test(params.date) && params.date < today ? params.date : today
   const q = params.q.trim()
-  const searching = q !== ''
-  const list = useQuery({ ...callListQueries.list(query, page, PAGE_SIZE), enabled: !searching })
-  const pool = useQuery({
-    queryKey: [...callListQueries.all(), 'pool', { ...query, q: '' }],
-    queryFn: ({ signal }) => fetchAllCalls({ ...query, q: '' }, signal),
-    enabled: searching,
-    staleTime: 5 * 60_000,
-    refetchInterval: LIST_REFRESH_MS, // 검색 중에도 새 통화 · 늦은 분석 반영 (11/02 연동 명세)
-    refetchOnWindowFocus: 'always', // 5분 재사용이어도 탭에 돌아오면 바로 다시 받음 (명세: 복귀 시 다시 조회)
+  const form = parseForm(params)
+  const filter = toFilter(form)
+
+  // 상담가: 이름은 화면이 스크롤 따라 맨 위 통화의 상담가로 바꿔 보여 줌. 고르면 그 상담가가 받은 가장 최근 통화로 이동 (거르지 않음)
+  const personas = useQuery(callPersonaQueries.list())
+  const jump = useMutation({
+    mutationFn: latestCallOf,
+    onSuccess: (hit) =>
+      hit && set({ date: hit.day >= today ? '' : hit.day, at: String(hit.callSessionSeq) }),
   })
-  const poolRows = (pool.data ?? []).map(toView)
-  const digits = phoneDigits(q) // 숫자만 쳤으면 번호로
-  const hit = searching
-    ? poolRows.filter((r) =>
-        digits ? r.callerNumber.includes(digits) : matchKo(r.customerName ?? '', q),
-      )
-    : null
-  const total = hit ? hit.length : (list.data?.totalCount ?? 0)
-  const pages = pageCount(total, PAGE_SIZE)
-  useEffect(() => {
-    if ((hit ?? list.data) && page > pages) set({ page: pages }) // 주소의 쪽이 범위 밖이면 마지막 쪽으로
-  }, [hit, list.data, page, pages, set])
-  const rows = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.items ?? []).map(toView)
 
-  const outcomeOptions: Option<OutcomeFilter>[] = [
-    { value: 'ALL', label: '전체' },
-    ...OUTCOME_ORDER.map((o) => ({ value: o, label: OUTCOME_LABEL[o] })),
-  ]
-
-  const exportCsv = async () => {
-    if (total > FETCH_ALL_MAX) {
-      // 목록은 100건씩 2,000건까지만 받을 수 있음 (CSV 엔드포인트 없음) — 조용히 잘린 파일을 주지 않게 막음 (11/02)
-      setExportError(
-        `통화가 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건을 넘어 내보낼 수 없습니다. 기간을 나눠 주세요.`,
-      )
-      return
-    }
-    setExporting(true)
-    setExportError(null)
-    try {
-      const all = hit ?? (await fetchAllCalls(query)).map(toView) // 검색 중이면 화면과 같은 목록
-      const csv = toCsv(
-        ['통화 시작 시각', '고객', '발신번호', '통화 결과', '불만 유형', '불만 사유', '통화 시간'],
-        all.map((c) => [
-          // CSV는 늘 연도까지 ('2026-10-20 14:33') — 화면의 올해 연도 생략 규칙은 목록에만
-          c.startedAt ? toDateTimeLocal(new Date(c.startedAt)).replace('T', ' ') : '—',
-          c.name,
-          c.phone,
-          c.outcomeLabel,
-          c.complaintView?.label ?? '',
-          c.complaintView?.reason ?? '',
-          c.duration,
-        ]),
-      )
-      const span = query.from === query.to ? query.from : `${query.from}_${query.to}`
-      downloadCsv(`통화내역_${span}${query.complaintOnly ? '_불만' : ''}.csv`, csv)
-    } catch {
-      setExportError('내보내지 못했습니다. 다시 시도해 주세요.')
-    } finally {
-      setExporting(false)
-    }
-  }
+  const list = useInfiniteQuery(callListQueries.days(anchor, q))
+  const pages = list.data?.pages ?? []
+  const live = useQuery({ ...callListQueries.today(q), enabled: pages[0]?.day === today })
+  const days = pages.flatMap((p) => {
+    if (!p.day) return []
+    const day = p.day
+    const rows = day === today && live.data ? live.data : p.rows
+    return [
+      {
+        day,
+        rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day, today)),
+      },
+    ]
+  })
+  const isFiltered = form.newOnly || form.kinds.length > 0 || form.min > 0 || form.max < DUR_MAX
 
   return {
-    tab: params.tab as CallTab,
-    setTab: (t: CallTab) => set({ tab: t }),
+    anchor,
+    today,
+    days,
+    at: Number(params.at) || null, // 처음 그릴 때 이 통화를 맨 위로
+    isLoading: list.isPending,
+    stale: list.isPlaceholderData, // 검색어를 바꿔 새 결과를 받는 중 (이전 목록을 흐리게)
+    error: list.isError && !pages.length ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
+    // 받아 둔 줄은 그대로 두고 알림 (11/02 연동 명세)
+    notice:
+      live.isError && !!live.data
+        ? '오늘 통화를 다시 받지 못했어요. 마지막으로 받은 목록이에요.'
+        : null,
+    hasNewer: list.hasPreviousPage,
+    hasOlder: list.hasNextPage,
+    loadingNewer: list.isFetchingPreviousPage,
+    loadingOlder: list.isFetchingNextPage,
+    newerError: list.isFetchPreviousPageError,
+    olderError: list.isFetchNextPageError,
+    busy: list.isFetching, // 받는 중(어느 쪽이든) — 끝나면 화면이 끝에 닿아 있는지 다시 봄
+    // 한 번에 한 방향만 (서로 끊지 않게) — 스크롤 끝에 닿을 때 화면이 부름
+    loadNewer: () => {
+      if (!list.isFetching) void list.fetchPreviousPage({ cancelRefetch: false })
+    },
+    loadOlder: () => {
+      if (!list.isFetching) void list.fetchNextPage({ cancelRefetch: false })
+    },
+
+    setDate: (d: Ymd) => set({ date: d >= today ? '' : d, at: '' }),
+
+    personas: personas.data ?? [],
+    activePersona: personas.data?.find((p) => p.inUse)?.name ?? null, // 맨 위 통화의 상담가를 모를 때(분석 전)
+    pickPersona: (personaSeq: number) => jump.mutate(personaSeq),
+    jumping: jump.isPending,
+    jumpNote: jump.isError
+      ? '찾지 못했습니다. 다시 시도해 주세요.'
+      : jump.isSuccess && !jump.data
+        ? '이 상담가가 받은 통화가 없습니다.'
+        : null,
+    resetJump: jump.reset,
+
     q: params.q,
-    setQ: (v: string) => set({ q: v }),
-    // 추천 = 같은 조건의 통화 전체에서 이름, 숫자만 쳤으면 번호
-    suggestions:
-      phoneSuggestions(poolRows, phoneDigits(params.q)) ??
-      suggest(
-        [...new Set(poolRows.flatMap((r) => (r.customerName ? [r.customerName] : [])))],
-        params.q,
-      ),
-    range, // 날짜 칸 (null = 오늘)
-    setRange: (r: { from: string; to: string }) =>
-      // 오늘 하루를 고르면 기본값(빈 값)으로 → 주소가 깨끗하고 내일 열어도 '오늘'
-      set(r.from === today && r.to === today ? { from: '', to: '' } : { from: r.from, to: r.to }),
-    outcome: params.outcome as OutcomeFilter,
-    outcomeOptions,
-    setOutcome: (o: OutcomeFilter) => set({ outcome: o }),
+    // 검색하면 오늘부터 (최근 통화가 위) — 지난 날짜에 머물러 있으면 새 결과가 안 보임. 같은 값이면 그대로
+    setQ: (v: string) => {
+      if (v.trim() !== params.q.trim()) set({ q: v.trim(), date: '', at: '' })
+    },
 
-    rows,
-    count: total, // '통화 목록 131건'
-    // 검색 밑천이 상한에 걸림 → 그 뒤 통화는 검색에 안 잡힘 (11/02)
-    listNote:
-      // 다시 받다 실패해도 받아 둔 줄은 그대로 두고 알림 (11/02 연동 명세)
-      (searching ? pool.isError && !!pool.data : list.isError && !!list.data)
-        ? '다시 받지 못했어요. 마지막으로 받은 목록이에요.'
-        : searching && poolRows.length >= FETCH_ALL_MAX
-          ? `최근 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}건 안에서만 검색됩니다. 기간을 줄여 주세요.`
-          : null,
-    isLoading: searching ? pool.isPending : list.isPending,
-    listError: (searching ? pool.error : list.error)
-      ? '불러오지 못했습니다. 다시 시도해 주세요.'
-      : null,
-    page: Math.min(page, pages),
-    pages,
-    goPage: (p: number) => set({ page: p }),
-
-    openCall: (c: CallRow) => navigate(`/calls/${c.callSessionSeq}`),
-    exportCsv,
-    exporting,
-    exportError,
-    canExport: total > 0,
+    form,
+    isFiltered,
+    applyForm: (f: CallFilterForm) =>
+      set({
+        at: '',
+        new: f.newOnly ? '1' : '',
+        kinds: f.kinds.join(','),
+        dur: f.min === 0 && f.max === DUR_MAX ? '' : `${f.min}-${f.max === DUR_MAX ? '' : f.max}`,
+      }),
   }
 }

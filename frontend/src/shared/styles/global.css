@@ -22,6 +22,11 @@
   --color-bg: #f2f6fa; /* 호버 · 옅은 바탕 */
   --color-surface: #ffffff;
   --color-frame: #f0f9ff; /* 틀 바탕 — 사이드바 · 본문 카드 바깥 (디자인 '프레임' 11/04) */
+  /* 04 통화 목록 상담 유형 칩 바탕 (Figma '통화' 11/04) — 글자는 ink */
+  --color-kind-accept: #d5edfe; /* 접수 */
+  --color-kind-lookup: #ffefc7; /* 조회 */
+  --color-kind-cancel: #fff0f1; /* 취소 */
+  --color-kind-faq: #cbdcff; /* FAQ */
 
   /* 글자 — 줄 간격 140% · 자간 -2.5% (text-* 유틸리티마다 line-height 포함) */
   --font-sans:

@@ -31,7 +31,7 @@ export interface CallComplaintDto {
   utteranceOrders: number[]
 }
 export interface CallAnalysisDto {
-  result: ResultDto
+  result: ResultDto // 11/04 서버에서 빠짐 — 옛 화면(02 대시보드 · 06 요약)만 아직 읽음. 그 화면을 새 디자인으로 바꿀 때 지울 것
   aiPersonaVersionSeq: number | null
   personaName: string | null
   personaVersion: number | null
@@ -41,6 +41,13 @@ export interface CallAnalysisDto {
   hasComplaint: boolean | null
   complaints: CallComplaintDto[]
   analysedAt: string
+  // 통화 요약 (연동 명세 11/04 §3) — 한 통화가 접수 · 조회 · 취소 · FAQ를 같이 가질 수 있음. null = 이 분석에선 못 모음(0으로 보지 않음)
+  // 연동 전 서버엔 칸이 없음(undefined) → null로 봄
+  isNewCustomer?: boolean | null
+  registeredParcelCount?: number | null // 접수 확정 배송 상세 수
+  orderLookupCount?: number | null // 접수 조회 안내 수
+  cancelledParcelCount?: number | null // 취소 완료 배송 상세 수
+  faqAnswerCount?: number | null // FAQ 답변 수
 }
 export interface HandoffDto {
   handoffRequestSeq: number
@@ -110,13 +117,17 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 /** 통화 결과 = 04와 같은 5개 (화면 코드는 그대로 두고 서버 값은 아래 OUTCOME_OF로) */
 export type Outcome = 'HANDOFF' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'INQUIRY'
 
+/** 04 통화 목록 줄의 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) */
+export type CallKind = 'accept' | 'lookup' | 'cancel' | 'faq'
 export interface CallRow {
   callSessionSeq: number
   startedAt: string | null
   customerName: string | null
   callerNumber: string // 숫자만. 모르면 ''
-  outcome: Outcome | null // null = 분석 전
-  complaint: { type: ComplaintType; reason: string } | null // 첫 불만 (04 열 하나)
+  isNew: boolean | null // 신규 고객 (null = 모름)
+  counts: Record<CallKind, number | null> | null // null = 분석 전
+  complaints: { type: ComplaintType; reason: string }[]
+  persona: string | null // 실제로 받은 상담가 이름 (그 버전의 이름 — 분석 전이면 null)
   durationSec: number | null
 }
 export interface Complaint {
@@ -214,14 +225,6 @@ export const OUTCOME_OF: Record<ResultDto, Outcome> = {
   CANCELLED: 'CANCELLED',
   INQUIRY: 'INQUIRY',
 }
-export const RESULT_OF: Record<Outcome, ResultDto> = {
-  SUCCESS: 'REGISTERED',
-  FAILED: 'REGISTRATION_FAILED',
-  HANDOFF: 'HANDOFF',
-  CANCELLED: 'CANCELLED',
-  INQUIRY: 'INQUIRY',
-}
-
 export const digits = (phone: string | null) => (phone ?? '').replace(/\D/g, '')
 
 /** 통화 시간 = PBX 종료 − 시작 (초). 한쪽이라도 없으면 null */
@@ -231,16 +234,43 @@ export function durationSec(startedAt: string | null, endedAt: string | null): n
 }
 
 export function toCallRow(d: CallListItemDto): CallRow {
-  const c = d.analysis?.complaints[0]
+  const a = d.analysis
   return {
     callSessionSeq: d.callSessionSeq,
     startedAt: d.startedAt,
     customerName: d.customerName,
     callerNumber: digits(d.callerPhoneNumber),
-    outcome: d.analysis ? OUTCOME_OF[d.analysis.result] : null,
-    complaint: c ? { type: c.type, reason: c.evidenceText } : null,
+    isNew: a?.isNewCustomer ?? null,
+    counts: a && {
+      accept: a.registeredParcelCount ?? null,
+      lookup: a.orderLookupCount ?? null,
+      cancel: a.cancelledParcelCount ?? null,
+      faq: a.faqAnswerCount ?? null,
+    },
+    complaints: (a?.complaints ?? []).map((c) => ({ type: c.type, reason: c.evidenceText })),
+    persona: a?.personaName ?? null,
     durationSec: durationSec(d.startedAt, d.endedAt),
   }
+}
+
+/** 04 화면 거르기 — 서버에 없는 조건이라 고른 날의 통화를 다 받은 뒤 화면에서 (필터 창) */
+export interface CallFilter {
+  newOnly: boolean // 신규 고객만
+  kinds: CallKind[] // 이 중 하나라도 한 통화 (빈 배열 = 전체)
+  minSec: number // 통화 시간 아래 끝 (0 = 제한 없음)
+  maxSec: number | null // 위 끝 (null = 제한 없음)
+}
+/** 신규 · 유형 · 시간은 모르면(null) 그 조건이 있을 때 뺌 — 모르는 값을 '아님'이나 0으로 보지 않음 */
+export function matchCall(r: CallRow, f: CallFilter): boolean {
+  if (f.newOnly && r.isNew !== true) return false
+  if (f.kinds.length && !f.kinds.some((k) => (r.counts?.[k] ?? 0) > 0)) return false
+  if (f.minSec > 0 || f.maxSec !== null)
+    return (
+      r.durationSec !== null &&
+      r.durationSec >= f.minSec &&
+      (f.maxSec === null || r.durationSec <= f.maxSec)
+    )
+  return true
 }
 
 export function toCallDetail(

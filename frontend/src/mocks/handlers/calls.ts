@@ -266,6 +266,12 @@ const act = (atSec: number, kind: 'SEARCH' | 'CANCEL' | 'SEND', text: string): A
   text,
 })
 const persona = { name: '빠른 접수형', version: 6 }
+// 4일 전까지는 친절형 v2(personas.ts 버전 번호 22)가 받음 — 04 머리의 상담가가 스크롤 따라 바뀌는지 · 상담가를 골라 옮기는지 보려고
+const KIND_FROM = Date.parse(`${addDays(todayYmd(), -3)}T00:00:00+09:00`)
+const personaOf = (r: CallRow) =>
+  Date.parse(r.startedAt) < KIND_FROM
+    ? { seq: 22, name: '친절형', version: 2 }
+    : { seq: PERSONA_SEQ, ...persona }
 
 const CALLS: CallDetail[] = [
   // 9101 강도윤 10.20 13:12 — 접수 + 접수 중 문의를 AI가 답하지 못함 (한 통화 = 결과 둘). 불만 = 되묻기 반복
@@ -557,11 +563,20 @@ function analysisOf(r: CallRow) {
           },
         ]
       : []
+  const n = r.callSessionSeq // 통화 번호로 정해지는 가짜 요약 (새로고침해도 같음)
   return {
-    result: RESULT[r.outcome],
-    aiPersonaVersionSeq: PERSONA_SEQ,
-    personaName: persona.name,
-    personaVersion: persona.version,
+    result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(02 · 06 요약)이 아직 읽어서 남김
+    // 통화 요약 (연동 명세 11/04 §3) — 04 줄의 접수 · 조회 · 취소 · FAQ 칩, new
+    isNewCustomer: n % 7 === 0,
+    registeredParcelCount: r.outcome === 'SUCCESS' ? 1 + (n % 4) : 0,
+    orderLookupCount: n % 3,
+    cancelledParcelCount: r.outcome === 'CANCELLED' ? 1 : n % 9 === 0 ? 2 : 0,
+    faqAnswerCount: r.outcome === 'INQUIRY' ? 1 + (n % 2) : n % 5 === 0 ? 1 : 0,
+    hasHandoffRequest: r.outcome === 'HANDOFF',
+    hasCallbackRequest: false,
+    aiPersonaVersionSeq: personaOf(r).seq,
+    personaName: personaOf(r).name,
+    personaVersion: personaOf(r).version,
     aiStartedAt: iso(r.startedAt),
     aiEndedAt: plus(r.startedAt, r.durationSec),
     repeatQuestionCount: complaints.some((c) => c.type === 'REPEATED_QUESTION') ? 3 : 0,
@@ -714,7 +729,7 @@ export const callHandlers = [
         (!q || r.customerName.toLowerCase().includes(q) || r.callerNumber.includes(q)) &&
         (!result || a?.result === result) &&
         (hasComplaint === null || (!!a && String(a.hasComplaint) === hasComplaint)) &&
-        (!personaSeq || Number(personaSeq) === PERSONA_SEQ) &&
+        (!personaSeq || personaOf(r).seq === Number(personaSeq)) &&
         (!orderSeq || callOf(r).orderSeq === Number(orderSeq)) &&
         (!from || t >= Date.parse(from)) &&
         (!to || t < Date.parse(to))
