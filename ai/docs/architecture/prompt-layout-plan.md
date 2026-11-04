@@ -85,6 +85,19 @@ BE 구현 코드·문서가 원격(`develop-backend`)에 올라오면 합의 문
 
 이전 확인 기록(2026-11-04, `e5dc008`): a는 당시 BE가 결제 시 덮어써 충돌(→ 합의 1로 해소), e는 BE API 없음(→ 합의 2), g는 기존 API로 가능.
 
+### 3.1 BE 구현 대조(2026-11-04, `origin/feature/ai-call-updates` 9a5d032 — develop-backend 미머지)
+BE 문서 `backend/docs/ai-call-follow-up.md`, `backend/docs/ai-integration-current.md`(2026-11-04판)가 **실제 계약**이다(합의 문서와 다르면 BE를 따른다).
+
+| 항목 | BE 구현 | 합의 문서와 차이 → AI 반영 |
+|---|---|---|
+| a 수거 | `pickupRequestedAt`(시간대 포함 ISO)을 결제 대기 중에도 보존. 결제가 요청 시각 이전·같으면 유지, 이후면 결제+1시간을 09~17시로 맞춤(17시 초과 → 다음날 09시). AI 값에 영업시간·일수 제한 없음. 카드·월·그룹 동일, 재접수 재계산 없음 | 같음. AI 쪽 09~17시·3일·+1시간 검증은 AI 업무 규칙으로 유지 |
+| e 콜백 | **별도 API 없음.** 최종 분석 `POST /api/ai/calls/{seq}/analysis`에 `hasCallbackRequest: true/false/null` 추가(이름·연락처·사유·멱등키 없음 — 연락처는 통화 발신번호, 이름은 고객 이름). `hasHandoffRequest`와 독립, 연결 요구로 콜백을 추정하지 않음. 주문 없는 콜백 통화도 `call` 등록 필요 | §2 e의 "콜백 요청 API" 대신 **분석 필드 1개**. 아웃박스 불필요(분석 전송에 포함). **배포 순서**: 048 + 새 BE 전에는 구버전 BE가 새 필드를 400으로 거절 → AI는 설정 플래그로 켠다 |
+| g 기본 주소 | `PATCH /api/customers/{id}` `address` + **`call_session_seq` 헤더 필수**, **진행 중 본인 통화만**(종료 후 409, 헤더 없음 400, 다른 고객 403). **고객 동의 후에만** | 통화 중에 끝내야 함. 헤더는 새 BE 전에 먼저 넣어도 됨(구버전은 무시) |
+| g PIN | `POST /api/customers/{id}/pins`·`PATCH /api/pins/{id}`는 종료 후에도 같은 통화 고객이면 허용. 목록 `GET`은 진행 중만(종료 후 409) — 종료 전에 PIN 번호·주소 확보. 주소 중복 409 `DUPLICATE_RESOURCE`. **고객 동의 후에만** | "주소 인식 시 자동 갱신"이 아니라 **동의 질문 필요** |
+| 공통 | 주문 저장은 기본 주소·PIN을 자동 갱신하지 않음. 주소/PIN 실패는 주문 성공을 되돌리지 않음 | 같음 |
+
+남은 결정: ① 주소 저장 동의를 언제·어떻게 묻는지 ② 이관(전환 없음)을 `hasCallbackRequest=true`로 볼지 ③ 새 BE 배포 전 플래그 기본값.
+
 ## 4. 단계
 1. BE 구현 확인(§3) — 원격 반영되면.
 2. 프롬프트 분리(§1): `persona_default.md`·`business_rules.md`·`backend_rules.md`, `render_live`·`render_backend` 정리.
