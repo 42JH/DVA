@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useRef, useState, type UIEvent } from 'react'
 import { useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
@@ -38,9 +38,10 @@ export function OrderListPage() {
   const [seen, setSeen] = useState<{ key: string; day: Ymd } | null>(null) // 맨 위에 보이는 줄의 날
   const day = (seen?.key === key && seen.day) || vm.anchor
   const onTop = useCallback((row: HTMLElement) => setSeen({ key, day: row.dataset.day! }), [key])
+  const fold = useFoldOnScroll()
 
   return (
-    <div className="flex min-h-0 flex-[1_1_0px] flex-col">
+    <div className="flex min-h-0 flex-[1_1_0px] flex-col" onScrollCapture={fold.onScroll}>
       <TopBar
         search={
           <TopSearch
@@ -68,13 +69,20 @@ export function OrderListPage() {
           추가
         </Button>
       </div>
+      {/* 열 머리: 목록을 내리면 위로 접히고 올리면 다시 나옴 (11/05 사용자). 접힌 동안만 잘라 냄 — 펼쳐 있을 땐 '주문 상태 ⌄' 메뉴가 아래로 나와야 해서 */}
       <div
-        className={`${COLS} mt-v32 h-7 shrink-0 items-center pr-[50px] pl-[58px] text-card font-semibold`}
+        className={`grid shrink-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${fold.folded ? 'grid-rows-[0fr] overflow-hidden' : 'grid-rows-[1fr]'}`}
       >
-        <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
-        <span>보내는 분</span>
-        <span>받는 분</span>
-        <span className="text-center">주문번호</span>
+        <div className="min-h-0" inert={fold.folded}>
+          <div
+            className={`${COLS} mt-v32 h-7 items-center pr-[50px] pl-[58px] text-card font-semibold`}
+          >
+            <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
+            <span>보내는 분</span>
+            <span>받는 분</span>
+            <span className="text-center">주문번호</span>
+          </div>
+        </div>
       </div>
       <div className="mt-5 mr-[50px] ml-[58px] shrink-0 border-t border-line" />
       {/* 왼쪽 58 · 오른쪽 72 = 04 통화와 같은 자리(줄 1200, 끝 1354 — 크롬 얇은 막대 10 포함, 11/04 사용자: 두 화면 날짜 · 목록 위치 맞춤) · 위 3 = 첫 줄 글자 자리 */}
@@ -184,6 +192,21 @@ function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
       ))}
     </span>
   )
+}
+
+/** 목록을 내리면 접힘 · 올리면(또는 맨 위면) 펼침 — 줄 상자(DayScroll)의 스크롤을 바깥에서 잡음(capture, 스크롤은 위로 안 번져서)
+ *  한 번에 크게 뛴 건 무시: 위에 날이 붙을 때 DayScroll이 보던 줄을 제자리에 두려고 scrollTop을 크게 옮김(사람 스크롤 아님) */
+function useFoldOnScroll() {
+  const [folded, setFolded] = useState(false)
+  const last = useRef(0)
+  const onScroll = (e: UIEvent) => {
+    const y = (e.target as HTMLElement).scrollTop
+    const d = y - last.current
+    last.current = y
+    if (y < 40) setFolded(false)
+    else if (Math.abs(d) > 4 && Math.abs(d) < 250) setFolded(d > 0)
+  }
+  return { folded, onScroll }
 }
 
 /** 검색 창 미리 보기 — '보내는 분 → 받는 분' · 시각 · 주문번호. 누르면 그 주문 상세 창 */
