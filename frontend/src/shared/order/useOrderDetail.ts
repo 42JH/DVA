@@ -35,7 +35,7 @@ export interface OrderView {
     tag: string
     text: string
   }[]
-  canEdit: boolean // 취소된 주문은 [수정] 없음
+  canEdit: boolean // 취소 · 결제 완료(디버 접수 중 · 접수 완료 포함)는 [수정] 없음 (11/05 사용자). 접수 실패는 고쳐서 다시 접수하게 둠
   canCancel: boolean // 결제 전(미완료 · 결제 대기)만 취소 가능 (명세 4.5, 11/01 결정)
   canRetry: boolean // 디버 접수 최종 실패만 [다시 접수] (11/01 결정)
   parcelCount: number // 취소 확인 창 '배송 n건이 모두 취소' — 취소 안 된 상세 수
@@ -80,10 +80,11 @@ export function pickParcel(
 
 function toView(o: OrderDetail & { position?: string }): OrderView {
   const phone = o.route === 'PHONE'
+  const group = o.cancelled ? 'CANCELLED' : o.status ? ORDER_GROUP[o.status] : null
   return {
     orderSeq: o.orderSeq,
     orderNo: orderNo(o.orderSeq),
-    group: o.cancelled ? 'CANCELLED' : o.status ? ORDER_GROUP[o.status] : null,
+    group,
     meta: [
       `접수 ${fmtDetailTime(o.acceptedAt)}`,
       phone ? 'AI 전화 접수' : `수기 접수 ${o.manualBy ?? ''}`.trim(),
@@ -115,7 +116,7 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
       tag: RELATED_CALL_LABEL[c.kind].tag,
       text: RELATED_CALL_LABEL[c.kind].text,
     })),
-    canEdit: !o.cancelled,
+    canEdit: group !== 'CANCELLED' && group !== 'PAID',
     canCancel: o.status === 'COLLECTING' || o.status === 'notPaid',
     canRetry: o.status === 'SUBMISSION_FAILED',
     parcelCount: o.parcels?.filter((p) => !p.cancelled).length || 1,
