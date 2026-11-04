@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS call_results(
 CREATE TABLE IF NOT EXISTS insights(
   session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, payload_json TEXT NOT NULL,
   status TEXT NOT NULL, progress_json TEXT NOT NULL DEFAULT '{}', updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS review_jobs(
+  session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, input_json TEXT NOT NULL,
+  status TEXT NOT NULL, result_json TEXT, prepared_json TEXT, error TEXT,
+  attempts INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
 """
 
 
@@ -90,3 +94,45 @@ class Outbox:
         with self.lock:
             ids = [r[0] for r in self.db.execute("SELECT session_id FROM insights WHERE status='PENDING'")]
         return [self.insight(i) for i in ids]
+
+    # --- 통화 종료 후 미답변 검토: 원본 입력·확정 판정은 재시작에도 유지 ---
+    def review(self, session_id: str) -> dict | None:
+        with self.lock:
+            row = self.db.execute(
+                "SELECT call_session_seq,input_json,status,result_json,prepared_json,error,attempts "
+                "FROM review_jobs WHERE session_id=?", (session_id,)).fetchone()
+        if not row:
+            return None
+        return {"session_id": session_id, "call_session_seq": row[0], "input": json.loads(row[1]),
+                "status": row[2], "result": json.loads(row[3]) if row[3] else None,
+                "prepared": json.loads(row[4]) if row[4] else None, "error": row[5], "attempts": row[6]}
+
+    def create_review(self, session_id: str, seq: int, data: dict) -> dict:
+        with self.lock:
+            self.db.execute("INSERT OR IGNORE INTO review_jobs "
+                            "(session_id,call_session_seq,input_json,status,updated_at) VALUES(?,?,?,?,?)",
+                            (session_id, seq, json.dumps(data, ensure_ascii=False), "PENDING", time.time()))
+        return self.review(session_id)
+
+    def begin_review(self, session_id: str) -> None:
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET attempts=attempts+1,updated_at=? "
+                            "WHERE session_id=? AND status='PENDING'", (time.time(), session_id))
+
+    def complete_review(self, session_id: str, result: dict, prepared: dict) -> None:
+        """판정과 전송 예정 본문을 원자적으로 고정한다. READY 이후 재판정 금지."""
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET result_json=?,prepared_json=?,status='READY',error=NULL,updated_at=? "
+                            "WHERE session_id=? AND status='PENDING'",
+                            (json.dumps(result, ensure_ascii=False), json.dumps(prepared, ensure_ascii=False),
+                             time.time(), session_id))
+
+    def update_review(self, session_id: str, status: str, error: str | None = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET status=?,error=?,updated_at=? WHERE session_id=?",
+                            (status, error, time.time(), session_id))
+
+    def unfinished_reviews(self) -> list[dict]:
+        with self.lock:
+            ids = [r[0] for r in self.db.execute("SELECT session_id FROM review_jobs WHERE status IN ('PENDING','READY')")]
+        return [self.review(i) for i in ids]

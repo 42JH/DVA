@@ -124,12 +124,24 @@ class CallConfig(_Strict):
     response_fallback_sec: float = Field(3.0, gt=0)  # response.completed가 안 와도 결과 뒤 response.create
 
 
+class UnansweredReviewConfig(_Strict):
+    enabled: bool = False
+    # 백엔드 reason 허용값·필수 여부·배포 확인 전에는 전송 보류
+    reason_contract_enabled: bool = False
+    timeout_sec: float = Field(30.0, gt=0, le=120)
+    max_input_chars: int = Field(100000, ge=1000, le=1000000)
+    max_output_tokens: int = Field(6000, ge=100, le=30000)
+    max_attempts: int = Field(3, ge=1, le=10)
+    poll_sec: float = Field(30.0, ge=1, le=300)
+
+
 class ServerConfig(_Strict):
     rag: RagConfig
     faq_sync: FaqSyncConfig
     backend: BackendConfig
     fare: FareConfig = FareConfig()
     call: CallConfig = CallConfig()
+    unanswered_review: UnansweredReviewConfig = UnansweredReviewConfig()
 
     @model_validator(mode='after')
     def separate_faq_collection(self):  # 원본 ServerConfig의 같은 검증
@@ -139,11 +151,12 @@ class ServerConfig(_Strict):
 
 
 def load_server_config(path: Path | None = None) -> ServerConfig:
-    """config/server.toml의 [rag]·[faq_sync]·[backend]·[fare]·[call]만 읽는다(파일의 다른 섹션은 무시)."""
+    """서버·RAG·통화·종료 검토 섹션을 읽는다(호환 대상이 아닌 다른 섹션은 무시)."""
     path = path or config_dir() / "server.toml"
     with path.open("rb") as f:
         data = tomllib.load(f)
     backend = data.get("backend") or {}
     return ServerConfig.model_validate({"rag": data.get("rag"), "faq_sync": data.get("faq_sync"), "backend": backend,
                                         "fare": data.get("fare") or {},
-                                        "call": data.get("call") or {}})
+                                        "call": data.get("call") or {},
+                                        "unanswered_review": data.get("unanswered_review") or {}})

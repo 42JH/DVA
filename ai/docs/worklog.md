@@ -420,13 +420,59 @@
 - 출발지 질문 축소(계획 2번)는 적용하지 않음(사용자 결정: 1·3·4만). prefill_sender의 성함 처리는 이미 VALID라 건너뛴다
 - 테스트: 기대값 3곳(성함 출처 CALLER_ID, missing 첫 항목 sender_address) 수정 + 새 테스트 2개(출발지 답 없이도 채움·빈 택배·되읽기·정정·다음 택배 / 미등록은 비움). 501 passed
 
+## 2026-11-04 — S15P31D109-159 통화 종료 후 실제 미답변 검토 초안
+
+- 브랜치: feature/S15P31D109-159-unanswered-reporting, 기준 develop-ai f34343f. 기존 RAG 검색·임베딩·BM25·RRF·리랭커·Live 도구는 변경하지 않음.
+- 기존 ResultService는 search_manual.facts.answerable만으로 미답변과 faqAnswerCount를 계산했음. 검색 성공 후 Live가 안내하지 못한 경우·실패 후 재검색으로 해결한 경우를 구분하기 위해 종료 후 전사 전체를 검토하는 선택적 경로 추가.
+- app/calls/unanswered.py + prompts/unanswered_review.md: Responses 구조화 출력으로 문의별 ANSWERED/UNANSWERED/CLARIFICATION/UNKNOWN 판정. 고객 원문·AI 직접 인용·검색 참조·시각·전체 검색 포함 여부 검증. 같은 문의 반복 검색은 한 항목에 묶음. 사유는 모델이 쓰지 않고 마지막 연결 검색 상태로 KB_NO_ANSWER/KB_UNAVAILABLE 결정. 모델 장애를 KB_UNAVAILABLE로 오인하지 않음.
+- Outbox review_jobs: 원본 입력을 먼저 저장하고 판정·전송 예정 본문을 원자적으로 확정. 확정 후 재판정하지 않음. 발생 ID는 고객 발화 위치+질문 원문 해시로 고정하며 고객 질문 시각을 사용.
+- 종료 훅은 저장 후 서비스 소유 작업을 시작하고 반환. Live 보고 도구나 통화 중 추가 추론 없음. 재시작·전송 응답 유실 시 동일 본문 재전송. 실행 중 주기적 복구와 판정 재시도 상한 추가.
+- 사용자 확인: 백엔드 reason 필드 추가 예정. 현 계약은 여전히 추가 필드 거절. docs/contracts/unanswered-reason-proposal.md에 전달안·확인 항목 분리. 운영 전송은 reason_contract_enabled 게이트로 보호하고 [unanswered_review].enabled도 기본 false. .env·운영 서버·배포 설정은 수정하지 않음.
+- 한계: 실제 모델 의미 판정은 아직 미평가. 검토 FAILED 시 그 통화 이벤트·분석은 보류(주문/통화 결과 전송 유지). 전사 300행 도달·입력 한도 초과는 판정 오류로 보존. 단일 프로세스 소비자 전제. 운영 활성화 전 계약·실모델 검증·보류 건 처리 절차 필요.
+- 테스트: 신규 20개 포함 전체 **521 passed, 1 warning / 19.63초**. 가짜 모델·백엔드만 사용. 기존 langchain-community deprecation 경고 1건. git diff --check 통과.
+- 테스트 환경 문제: 제한 환경의 Windows asyncio socketpair 생성에서 정지. faulthandler로 socket.accept 위치 확인 후 멈춘 테스트를 종료하고 같은 테스트를 제한 밖에서 실행하여 통과. 구현 오류로 단정해 asyncio 코드를 바꾸지 않음.
+- 커밋·푸시·병합·실제 API/전화 호출은 아직 수행하지 않음. 구현 계획·인계·한계는 docs/architecture/unanswered-reporting.md 참고.
+
+## 2026-11-04 — S15P31D109-159 백엔드 reason 병합 계약 확인
+
+- 사용자 안내에 따라 origin/develop-backend만 fetch하여 277cf1c → fbbaca1 갱신. feature/unanswered-reasons(e0a0658) 병합 확인. 현재 AI 작업 브랜치·미커밋 구현·output/tmp는 유지하고 백엔드 브랜치 자체를 병합하지 않음.
+- docs/api/unanswered-questions.md·backend/docs/unanswered-question-reasons.md와 실제 DTO·저장·해시 코드를 대조함. 기존 6필드는 필수, reason은 선택이며 KB_NO_ANSWER/KB_UNAVAILABLE/null 허용. 생략/null은 미분류. 명시한 사유 변경·삭제는 동일 eventId 재전송에서 409, 과거 미분류 사후 분류 불가. 기존 AI 본문과 일치하여 전송 코드 변경 불필요.
+- 관리자 목록 reason 및 통화 처리 결과 unansweredReason 제공. QUESTION_UNANSWERED 이벤트 입력에 사유를 복사하지 않고 기존 질문 번호 연결 유지. UNCLASSIFIED는 조회 전용.
+- AI 계약 스냅샷 2개와 출처 README, 설계·인계 문서 갱신. 가짜 HTTP 계약 테스트 4개(두 코드/null/생략, 201→200, 인증·경로·동일 바이트 재전송) 추가. 관련 테스트 **60 passed / 1.32초**, git diff --check 통과. 실제 백엔드/모델/DB 호출은 하지 않음.
+- 코드 병합과 운영 적용은 구분: 백엔드 자체 작업 기록에도 실제 운영 DB·배포는 미실행으로 명시됨. DB 백업 → migration 049 적용 → 새 BE 배포 → 실제 모델 검증·AI 활성화 순서를 유지. 두 활성화 플래그는 false 그대로이며 커밋·푸시·배포는 하지 않음.
+
+## 2026-11-04 — S15P31D109-159 백엔드 배포 확인 및 실모델 사전 검증
+
+- 사용자가 백엔드 배포 완료를 확인함. 운영 DB·수집 API를 AI가 직접 검사한 것은 아님. 현재 AI 브랜치는 그대로 유지.
+- scripts/check_unanswered_review.py 추가: 개인정보 없는 가상 전사·검색 상태로 실제 종료 판정 모델만 호출한다. 백엔드·전화·RAG 요청은 하지 않으며 각 판정·기대값·시간을 JSON에 남김. 오류도 실패로 명시하며 인증 정보가 포함될 수 있는 예외 본문은 기록하지 않음.
+- 최초 uv run은 기존 lock에 따라 환경 패키지를 동기화한 뒤 BACKEND_MODEL 미설정으로 API 호출 전에 종료. 의존성 명세·lock은 변경 없음. 이후 --no-sync와 현재 compose 기본 모델 --model gpt-6-luna를 명시함.
+- 실제 OpenAI 가상 통화 **8/8 통과**: 검색 성공 후 미답변, 검색 장애, 부정형 정상 답변, 장애 후 해결, 확인 중 이후 해결, 명확화, 확인 중만 남은 경우, 두 문의 혼재. 인용·분류 결과도 확인함. 작은 사전 검증이며 전체 실통화 정확도의 증명은 아님.
+- 판정 시간 2.181~4.468초, 평균 3.026초. 통화 종료 후 처리이며 통화 중 응답 지연과 구분. 결과 output/unanswered-review/backend-deployed-20261104.json에 저장(개인정보 없는 가상 데이터).
+- config/server.toml의 enabled·reason_contract_enabled를 true로 준비. 클래스 기본 false는 유지하며 구버전 환경은 꺼야 함. AI 코드·설정을 실제 배포해야 운영에 반영됨. 운영 AI는 아직 배포하지 않았고 실제 관리자 미답변 수집 검증도 남아 있음.
+- 전체 로컬 테스트 **525 passed, 14 warnings / 23.00초**. langsmith의 Python 3.14 asyncio deprecation 13건과 기존 langchain-community 1건. .env 원문 조회·수정 없음. 커밋·푸시·병합·운영 배포 없음.
+
+## 2026-11-04 — S15P31D109-159 커밋·원격 브랜치 공유 준비
+
+- 사용자 요청에 따라 종료 후 미답변 구현·프롬프트·설정·검증 스크립트·테스트·계약/설계/작업 기록을 Jira 159 기능 커밋으로 정리한다.
+- 검증 근거는 전체 525개 테스트 통과와 실제 모델 가상 통화 8/8 통과. 이후 동작 코드 변경 없이 커밋 범위와 git diff --check를 확인했다.
+- 기존 output/·tmp/ 및 개인 개발로그·인증 파일은 커밋 대상에서 제외한다. feature/S15P31D109-159-unanswered-reporting에 커밋 후 같은 원격 브랜치에 푸시한다. develop-ai 병합은 사용자가 직접 진행하며 이 작업에서는 병합·운영 배포를 하지 않는다.
+
 ## 2026-11-04 Backend 주소 기록 규칙 복원
 - 원인(운영 통화 d62b7162): 리빌드 backend_rules.md에 주소 받아쓰기 규칙이 없었다. "신정이펜일로 오십삼백십이동 사백삼호" → "…53" / "12동 403호"로 잘못 나눠 ADDRESS_NOT_FOUND 3회 후 51로 오확정. 보정기(address_resolver)는 기존 서버와 같음
 - 수정: 기존 서버 old/prompts/backend.md "값 기록 규칙"의 주소 항목 1~7을 policy/backend_rules.md로 옮김(들은 그대로 기록, 기본/상세 같은 호출에 분리·상세 없으면 "", 쉼 사이 숫자 합치지 않기·동/호는 상세, 길·건물번호·번지·호수만 숫자로·도로 이름 소리는 한글 그대로, 시·도/시·군·구 유지, 지역만이면 기록 안 함, 서버가 바로잡은 주소 다시 고치지 않기). 못 찾음 고정 문장(8)은 적용 안 함(사용자 결정)
 - 실호출(gpt-6-luna, 대화 2줄만): 신정이펜일로 50/312동 403호, 인의동 565-3/아슬란 305호, 인동 9길 7-3/"", 영천구 목동로 212/3층, "서울로 보내요" 기록 안 함. 단 상태 없는 2줄 대화라 보내는 곳 질문에도 receiver_*로 넣음(실통화는 N1' 상태 요약이 단계를 줌 — 운영 통화로 확인 필요)
 - 테스트 test_policy에 규칙 포함 확인 1줄. 501 passed
 
+## 2026-11-04 — S15P31D109-159 MR 로그 충돌 해결
+
+- develop-ai 최신 6fa05a0의 주소 기록 규칙 복원 및 관련 테스트를 기능 브랜치에 반영한다. develop-ai 자체의 병합은 사용자가 진행한다.
+- 충돌은 docs/worklog.md의 파일 끝 기록 추가 1곳뿐. Jira159 개발·검증 기록과 팀원의 주소 규칙 복원 기록을 모두 보존했다. 코드 충돌은 없었으며 팀원 주소 지시문·테스트 변경도 그대로 유지한다.
+- 기존 output/·tmp/와 개인 파일은 포함하지 않는다. 충돌 해소 후 전체 테스트와 충돌 표식·git diff --check를 검증하고 기능 브랜치에만 커밋·푸시한다.
+- 검증 결과: 전체 **525 passed, 14 warnings / 19.55초**. 충돌 표식 없음, git diff --check 통과. 실제 모델·전화·백엔드 API는 호출하지 않았으며 운영 배포도 하지 않았다.
+
 ## 2026-11-04 주소는 들으면 바로 맡기기(C')
 - 원인(운영 통화 8ffabaca): Live가 받는 곳 주소(46.7s)를 듣고 맡기지 않은 채 "주소는 이렇게 적었습니다"라고 말하고, 47초 뒤 물건 가격과 함께 맡김 → 주소 확인(ADDRESS_NOT_FOUND)이 늦게 드러남
 - 수정: business_rules.md 주소 듣기에 "주소를 말하면 다른 정보를 더 모으지 말고 바로 맡긴다(확인하는 동안 대화 계속)", "서버 결과 전에는 따라 말하기만, 적었다·기록했다·저장했다고 말하지 않는다" 추가. 문구 검사(forbid.claims)는 정상 안내("총 천 원으로 기록했습니다")까지 걸려 넣지 않음
 - 테스트 test_policy 1줄. 501 passed. 실통화 확인 필요
+
+- Jira159 MR 추가 충돌 처리: 이전 해결 후 develop-ai가 6fa05a0 → 5c2bbec로 갱신되며 위 기록 5줄이 추가됐다. 이번 변경은 worklog.md만이므로 양쪽 기록을 모두 보존하고 충돌 표식·git diff --check를 확인했다. 동작 코드·테스트 파일 변화가 없어 이전 525개 테스트 결과를 유지하며 반복 실행하지 않았다. 기능 브랜치만 갱신하고 MR 최종 병합은 사용자에게 남긴다.

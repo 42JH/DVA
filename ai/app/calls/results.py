@@ -10,7 +10,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from openai import APIError
+from pydantic import ValidationError
+
 from app.calls.session import CallSession
+from app.calls.unanswered import ReviewError, apply_review, evidence_from_session
 from app.domain.outcome import decide_outcome
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
@@ -32,12 +36,17 @@ def _iso(ts: float) -> str:
 
 class ResultService:
     def __init__(self, backend: BackendGateway, outbox: Outbox, policy, fare_of, submit_budget_sec: float = 60.0,
-                 callback_field: bool = False):
+                 callback_field: bool = False, reviewer=None, reason_contract_enabled: bool = False,
+                 review_max_attempts: int = 3):
         self.backend, self.outbox, self.policy, self.fare_of = backend, outbox, policy, fare_of
         self.callback_field = callback_field  # 분석 hasCallbackRequest(새 BE 배포 후에만 켠다)
         self.submit_budget_sec = submit_budget_sec
         self.tasks: dict[str, asyncio.Task] = {}   # session_id → 결과 전송(통화 정리와 무관하게 끝까지)
         self.background: set[asyncio.Task] = set()
+        self.reviewer = reviewer
+        self.reason_contract_enabled = reason_contract_enabled
+        self.review_max_attempts = review_max_attempts
+        self.review_lock = asyncio.Lock()  # 한 프로세스 안에서 종료·복구 작업의 중복 판정/전송 방지
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
     async def register(self, s: CallSession, call_session_seq) -> None:
@@ -157,6 +166,62 @@ class ResultService:
             await self._send(row)
         for row in await asyncio.to_thread(self.outbox.unfinished_insights):
             await self._send_insight(row)
+        await self.recover_reviews()
+
+    async def review_loop(self, poll_sec: float) -> None:
+        while True:
+            await asyncio.sleep(poll_sec)
+            await self.recover_reviews()
+
+    async def recover_reviews(self) -> None:
+        if self.reviewer is None:
+            return
+        for row in await asyncio.to_thread(self.outbox.unfinished_reviews):
+            await self._process_review(row["session_id"])
+        # 검토가 끝난 뒤 전송만 실패한 건도 실행 중 재시도한다(재판정하지 않는다).
+        async with self.review_lock:
+            for row in await asyncio.to_thread(self.outbox.unfinished_insights):
+                review = await asyncio.to_thread(self.outbox.review, row["session_id"])
+                if review is not None and review["status"] == "DONE":
+                    await self._send_insight(row)
+
+    async def _process_review(self, sid: str) -> None:
+        async with self.review_lock:
+            row = await asyncio.to_thread(self.outbox.review, sid)
+            if row is None or row["status"] not in ("PENDING", "READY"):
+                return
+            if row["status"] == "PENDING":
+                if row["attempts"] >= self.review_max_attempts:
+                    await asyncio.to_thread(self.outbox.update_review, sid, "FAILED", "REVIEW_ATTEMPTS_EXHAUSTED")
+                    return
+                await asyncio.to_thread(self.outbox.begin_review, sid)
+                try:
+                    source = row["input"]
+                    verdict = await self.reviewer.review(source["evidence"])
+                    prepared = apply_review(sid, source["started_t"], source["evidence"], source["payload"], verdict)
+                    await asyncio.to_thread(self.outbox.complete_review, sid, verdict, prepared)
+                except (APIError, TimeoutError, ReviewError, ValidationError) as e:
+                    # 모델/판정 장애는 지식 검색 장애가 아니다. 고객 미답변을 만들어 보내지 않는다.
+                    code = str(e) if isinstance(e, ReviewError) else type(e).__name__
+                    status = "FAILED" if row["attempts"] + 1 >= self.review_max_attempts else "PENDING"
+                    await asyncio.to_thread(self.outbox.update_review, sid, status, code)
+                    log.warning("통화 종료 검토 보류 %s %s", sid, code)
+                    return
+                row = await asyncio.to_thread(self.outbox.review, sid)
+            if not self.reason_contract_enabled:
+                return  # 계약이 확정되기 전에는 reason을 구버전 BE에 보내지 않는다.
+            insight = await asyncio.to_thread(self.outbox.create_insight, sid, row["call_session_seq"], row["prepared"])
+            await self._send_insight(insight)
+            # 전송 실패면 기존 insights 아웃박스가 복구한다. 확정 판정은 다시 호출하지 않는다.
+            await asyncio.to_thread(self.outbox.update_review, sid, "DONE")
+
+    async def drain(self) -> None:
+        """종료 시 작업을 취소해도 저장된 PENDING/READY/insights에서 재개한다."""
+        tasks = list(self.background)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     # ------------------------------------------------------------------ 분석·이벤트·미답변(통화 끝)
     async def finish(self, s: CallSession) -> None:
@@ -172,8 +237,20 @@ class ResultService:
         if not seq or not s.state.intent or not getattr(self.backend.api, "insights_enabled", False):
             return  # 무의미 통화·통화 미등록·수집 토큰 없음: 보내지 않는다
         payload = self.build_insights(s)
+        if self.reviewer is not None:
+            await asyncio.to_thread(self.outbox.create_review, s.call_id, seq,
+                                    {"started_t": s.started_t, "evidence": evidence_from_session(s), "payload": payload})
+            task = asyncio.create_task(self._process_review(s.call_id), name=f"review:{s.call_id[-8:]}")
+            self.background.add(task)
+            task.add_done_callback(self._review_done)
+            return  # 통화 소유 작업으로 생성하지 않는다. Live는 판정을 기다리지 않는다.
         row = await asyncio.to_thread(self.outbox.create_insight, s.call_id, seq, payload)
         await self._send_insight(row)
+
+    def _review_done(self, task: asyncio.Task) -> None:
+        self.background.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            log.error("통화 종료 검토 작업 오류: %s", type(task.exception()).__name__)
 
     def build_insights(self, s: CallSession) -> dict:
         st, now = s.state, time.time()
@@ -253,6 +330,8 @@ class ResultService:
 
     async def _send_insight(self, row: dict) -> None:
         sid, seq, p = row["session_id"], row["call_session_seq"], row["payload"]
+        if not self.reason_contract_enabled and any("reason" in u for u in p["unanswered"]):
+            return  # 재시작으로 복구한 새 본문에도 같은 계약 게이트를 적용한다.
         progress = dict(row["progress"])
         api = self.backend.api
         try:

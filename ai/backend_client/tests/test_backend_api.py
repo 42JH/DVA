@@ -37,6 +37,36 @@ def context(data):
     return lambda req: httpx2.Response(200, json={"data": data, "meta": {"requestId": "r"}})
 
 
+@pytest.mark.parametrize("reason", ["KB_NO_ANSWER", "KB_UNAVAILABLE", None, "OMITTED"])
+def test_unanswered_reason_contract_fbbaca1_preserves_body_on_retry(reason):
+    """develop-backend fbbaca1: 선택 reason을 그대로 보내며 재전송도 같은 본문·인증을 사용한다."""
+    payload = {"eventId": "8d4e5cb5-d474-4e8a-904a-868304187e03", "callSessionSeq": 120,
+               "providerCallId": "rtc_example_120", "questionText": "주말에도 수거하나요?",
+               "occurredAt": "2026-11-04T10:01:20+09:00", "offsetSeconds": 80}
+    if reason != "OMITTED":
+        payload["reason"] = reason
+    requests = []
+
+    def handler(req):
+        assert req.method == "POST" and req.url.path == "/api/ai/unanswered-questions"
+        assert req.headers["Authorization"] == "Bearer test-insights"
+        assert body(req) == payload
+        requests.append(req.content)
+        return httpx2.Response(201 if len(requests) == 1 else 200, json={"data": {"unansweredQuestionSeq": 51}})
+
+    client, _ = api(handler, insights_token="test-insights")
+
+    async def scenario():
+        try:
+            assert await client.send_unanswered(payload) == 51
+            assert await client.send_unanswered(payload) == 51
+        finally:
+            await client.close()
+
+    run(scenario())
+    assert requests[0] == requests[1]
+
+
 REGISTERED = {
     "lookupStatus": "REGISTERED", "customer": {"customerSeq": 12, "name": "김철수", "phoneNumber": CALLER,
                                                "address": {**PIN, "name": "과거이름"}},
