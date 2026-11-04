@@ -30,18 +30,34 @@ function same(t: string, q: string, last: boolean, next: string | undefined): bo
   return tn === qn - jong && nn >= 0 && JONG_AS_CHO[jong] === choOf(nn) // 받침이 다음 글자 첫소리
 }
 
-/** text 안에 query가 들어 있나 (빈 검색어는 다 맞음) */
-export function matchKo(text: string, query: string): boolean {
+/** text 안에서 query에 맞는 자리들 [시작, 끝) — 원래 글(띄어쓰기 포함) 기준이라 하이라이트에 그대로 씀 (09 FAQ, 11/04) */
+export function findKo(text: string, query: string): [number, number][] {
   const q = norm(query)
-  if (!q) return true
-  const t = norm(text)
+  if (!q) return []
+  let t = '' // 띄어쓰기 뺀 소문자 글
+  const at: number[] = [] // t의 글자 → text 자리
+  for (let i = 0; i < text.length; i++) {
+    if (/\s/.test(text[i])) continue
+    const c = text[i].toLowerCase()
+    t += c.length === 1 ? c : text[i] // 소문자가 두 글자로 바뀌는 문자는 그대로 (자리가 어긋나지 않게)
+    at.push(i)
+  }
+  const hits: [number, number][] = []
   for (let i = 0; i + q.length <= t.length; i++) {
     let ok = true
     for (let j = 0; ok && j < q.length; j++)
       ok = same(t[i + j], q[j], j === q.length - 1, t[i + j + 1])
-    if (ok) return true
+    if (ok) {
+      hits.push([at[i], at[i + q.length - 1] + 1])
+      i += q.length - 1 // 겹치지 않게 다음 자리부터
+    }
   }
-  return false
+  return hits
+}
+
+/** text 안에 query가 들어 있나 (빈 검색어는 다 맞음) */
+export function matchKo(text: string, query: string): boolean {
+  return !norm(query) || findKo(text, query).length > 0
 }
 
 /** 전화번호로 찾을 숫자 — 검색어가 숫자 · 하이픈 · 띄어쓰기로만 돼 있을 때만 ('3시'처럼 글자에 섞인 숫자로 번호를 찾지 않게) */

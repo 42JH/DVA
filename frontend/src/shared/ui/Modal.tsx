@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useExitGhost } from '@/shared/lib/useExitGhost'
 import { Button } from './Button'
 
@@ -18,18 +18,32 @@ const EXIT_SWAP = [
   ['motion-safe:animate-pop-in', 'animate-pop-out'],
 ] as const
 
-function Overlay({
+// top = 화면 위쪽에 붙어 뜸(검색 창), boxClass = 창 모양 덧붙임 (기본은 가운데 · 안쪽 여백 32)
+// dim = 뒤 화면을 어둡게(기본). 끄면 투명 — 바깥을 누르면 닫히는 건 같음 (09 FAQ 검색 창, 11/04 사용자)
+// movable = 창 안의 data-drag 칸(예: 검색 창 윗줄)을 잡고 끌어 옮김. 그 안의 입력칸 · 버튼 · 링크 · 고를 줄은 원래대로
+//   화면 밖으로 다 나가지 않게: 위는 화면 안, 옆 · 아래는 80px 남김
+export function Overlay({
   onClose,
   children,
   label,
+  top,
+  boxClass = 'p-8',
+  dim = true,
+  movable,
 }: {
   onClose: () => void
   children: ReactNode
   label: string
+  top?: boolean
+  boxClass?: string
+  dim?: boolean
+  movable?: boolean
 }) {
   const root = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
   const downOnDim = useRef(false) // 누르기 시작한 곳이 어두운 배경일 때만 닫음 (창 안에서 끌다가 밖에서 놓으면 안 닫힘)
+  const [at, setAt] = useState({ x: 0, y: 0 }) // 끌어서 옮긴 만큼 (movable)
+  const drag = useRef<{ dx: number; dy: number; left: number; top: number; w: number } | null>(null)
   useExitGhost(root, EXIT_SWAP, 200)
 
   // 열 때 한 번 (onClose가 렌더마다 새 함수여도 다시 안 돎)
@@ -63,7 +77,7 @@ function Overlay({
   return (
     <div
       ref={root}
-      className="fixed inset-0 z-50 grid place-items-center bg-ink/40 motion-safe:animate-dim-in"
+      className={`fixed inset-0 z-50 grid ${dim ? 'bg-ink/40 motion-safe:animate-dim-in' : ''} ${top ? 'place-items-start justify-items-center pt-[12dvh]' : 'place-items-center'}`}
       onMouseDown={(e) => (downOnDim.current = e.target === e.currentTarget)}
       onClick={(e) => downOnDim.current && e.target === e.currentTarget && onClose()}
     >
@@ -74,8 +88,36 @@ function Overlay({
         aria-modal="true"
         aria-label={label}
         onClick={(e) => e.stopPropagation()} // 창이 클릭되는 줄 안에 그려져도 그 줄의 클릭으로 안 번지게
+        // translate 속성(transform 아님) — 열고 닫히는 pop 애니메이션(transform)과 겹치지 않음
+        style={movable ? { translate: `${at.x}px ${at.y}px` } : undefined}
+        onPointerDown={(e) => {
+          const t = e.target as Element
+          if (!movable || !t.closest('[data-drag]')) return
+          if (t.closest('input,textarea,select,button,a,[role="option"]')) return
+          e.preventDefault() // 글자 선택 · 검색칸 포커스가 빠지지 않게
+          e.currentTarget.setPointerCapture(e.pointerId)
+          const r = e.currentTarget.getBoundingClientRect()
+          drag.current = {
+            dx: e.clientX - at.x,
+            dy: e.clientY - at.y,
+            left: r.left - at.x,
+            top: r.top - at.y,
+            w: r.width,
+          }
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current
+          if (!d) return
+          const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+          setAt({
+            x: clamp(e.clientX - d.dx, 80 - d.left - d.w, window.innerWidth - d.left - 80),
+            y: clamp(e.clientY - d.dy, -d.top, window.innerHeight - d.top - 80),
+          })
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onPointerCancel={() => (drag.current = null)}
         // 창 높이 = 브라우저 높이 - 위아래 32씩까지. 넘치면 FormModal의 내용 칸만 스크롤 (주문 상세처럼 긴 창)
-        className="flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface p-8 shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none motion-safe:animate-pop-in"
+        className={`flex max-h-[calc(100dvh-64px)] flex-col rounded-xl bg-surface shadow-[0_12px_40px_rgba(43,47,54,0.16)] outline-none motion-safe:animate-pop-in ${boxClass}`}
       >
         {children}
       </div>

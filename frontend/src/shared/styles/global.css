@@ -44,6 +44,25 @@
   --spacing-sidebar: 64px; /* w-sidebar — 아이콘 줄 (디자인 '프레임' 11/04) */
   --spacing-content: 32px; /* p-content */
 
+  /* 새 디자인 화면(11/04~, FAQ부터)은 스크롤 없이 한 화면에 (사용자: 1440 노트북 · 1920 PC 모두). 이름의 숫자 = 디자인 px
+     900 높이 화면에서 디자인 값(1dvh = 9px) → 낮은 화면에선 줄고(clamp 아래 값까지), 높은 화면에선 글자는 디자인 값에서 멈추고 간격만 1.2배까지
+     예: text-v24 · gap-v28 · pt-v76 · h-v76 */
+  --text-v28: clamp(21px, 3.111dvh, 28px);
+  --text-v28--line-height: 1.2;
+  --text-v24: clamp(18px, 2.667dvh, 24px);
+  --text-v24--line-height: 1.4;
+  --spacing-v24: clamp(
+    8px,
+    calc(4.667dvh - 18px),
+    29px
+  ); /* 줄 사이는 더 빨리 줄어듦 — 1366×768 노트북(화면 ~650)에서도 분류 10줄이 들어가게 */
+  --spacing-v28: clamp(10px, calc(5.333dvh - 20px), 34px);
+  --spacing-v32: clamp(14px, 3.556dvh, 38px);
+  --spacing-v44: clamp(16px, 4.889dvh, 53px);
+  --spacing-v76: clamp(24px, 8.444dvh, 91px);
+  --spacing-v84: clamp(28px, 9.333dvh, 101px);
+  --spacing-v104: clamp(32px, 11.556dvh, 125px);
+
   /* 움직임 (11/01 영상 예시): 페이지가 바뀌면 본문이 떠오르고, 모달은 배경이 어두워지며 창이 살짝 커지면서 뜸
      등장은 전부 backwards(끝나면 애니메이션이 빠짐) — transform 애니메이션이 both/forwards 로 남아 있으면 그 요소가 fixed 자손의 기준이 되어 모달 배경이 스크롤과 함께 밀림(11/01 버그)
      쓰는 곳: app/AppLayout(animate-page-in) · shared/ui/Modal(animate-dim-in · animate-pop-in). 늘 motion-safe: 와 같이 (움직임 줄이기 설정이면 안 움직임) */
@@ -51,8 +70,23 @@
   --animate-dim-in: dim-in 0.2s ease-out backwards;
   --animate-pop-in: pop-in 0.2s ease-out backwards;
   /* 탭을 바꾸면 아래 내용이 그 방향에서 미끄러져 들어옴 (shared/lib/useSlideDir — 02 · 04 · 09) */
+  /* 라이브 점 (상단바 'AI 상담가 · 접수 중', 11/04 사용자: 깜빡깜빡). motion-safe: 와 같이 — 움직임 줄이기 설정이면 안 깜빡임 */
+  --animate-blink: blink 1.4s ease-in-out infinite;
+  @keyframes blink {
+    50% {
+      opacity: 0.25;
+    }
+  }
   --animate-slide-in-r: slide-in-r 0.2s ease-out backwards;
   --animate-slide-in-l: slide-in-l 0.2s ease-out backwards;
+  /* 09 FAQ 분류를 바꾸면 질문 목록이 늘 아래에서 위로 올라옴 (11/04 사용자) */
+  --animate-slide-in-u: slide-in-u 0.2s ease-out backwards;
+  @keyframes slide-in-u {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+  }
   @keyframes slide-in-r {
     from {
       opacity: 0;

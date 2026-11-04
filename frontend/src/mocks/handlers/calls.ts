@@ -1,4 +1,4 @@
-import { delay, http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse, sse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 import { addDays, todayYmd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtDetailTime, fmtPhone } from '@/shared/lib/format'
@@ -658,6 +658,36 @@ const meta = () => ({ requestId: crypto.randomUUID() })
 const SORTED = [...ROWS].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)) // PBX 시작 최신순
 
 export const callHandlers = [
+  // 진행 통화 수 (연동 명세 11/04 §4) — SSE: 연결하면 현재값 · 5초마다 heartbeat(실서버와 같음) · 8초마다 0 → 1 → 2 → 3 → 0
+  // (상단바 '접수 중' · 'N건 접수 중' 확인용). GET은 스트림을 다시 붙이기 전에 한 번 부름
+  sse<{
+    'active-call-count': { activeCallCount: number; observedAt: string }
+    heartbeat: { observedAt: string }
+  }>(`${API_BASE_URL}/calls/active-count/stream`, ({ client, request }) => {
+    let n = 2
+    const now = () => new Date().toISOString()
+    const push = () =>
+      client.send({ event: 'active-call-count', data: { activeCallCount: n, observedAt: now() } })
+    push()
+    const change = setInterval(() => {
+      n = (n + 1) % 4
+      push()
+    }, 8000)
+    const beat = setInterval(
+      () => client.send({ event: 'heartbeat', data: { observedAt: now() } }),
+      5000,
+    )
+    request.signal.addEventListener('abort', () => {
+      clearInterval(change)
+      clearInterval(beat)
+    })
+  }),
+  http.get(`${API_BASE_URL}/calls/active-count`, () =>
+    HttpResponse.json({
+      data: { activeCallCount: 2, observedAt: new Date().toISOString() },
+      meta: { requestId: crypto.randomUUID() },
+    }),
+  ),
   // API-21 — q(이름 · 번호 부분 일치) · result · hasComplaint · aiPersonaVersionSeq · orderSeq · from(포함)/to(미포함)
   http.get(`${API_BASE_URL}/calls`, ({ request }) => {
     const url = new URL(request.url)

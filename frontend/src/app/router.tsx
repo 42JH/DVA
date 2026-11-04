@@ -5,7 +5,9 @@ import { SignupPage } from '@/features/auth/components/SignupPage'
 import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { CallListPage } from '@/features/call/components/CallListPage'
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
-import { FaqPage } from '@/features/faq/components/FaqPage'
+import { FaqListPage } from '@/features/faq/components/FaqListPage'
+import { FaqDetailPage } from '@/features/faq/components/FaqDetailPage'
+import { FaqEditPage } from '@/features/faq/components/FaqEditPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { HomePage } from './routes/HomePage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
@@ -87,12 +89,11 @@ export const router = createBrowserRouter([
             element: <PersonaPage />,
             handle: { title: '페르소나 관리' } satisfies RouteHandle,
           },
-          // 09 FAQ 관리 ▸ FAQ 목록 · AI 미답변 (10/28 A안) — 상단바 제목 = 하위 메뉴 이름
-          {
-            path: 'faqs',
-            element: <FaqPage />,
-            handle: { title: 'FAQ 목록' } satisfies RouteHandle,
-          },
+          // 09 FAQ (Figma 11/04) — 목록 · 상세 · 작성 · 수정은 handle 없음(화면이 상단바 · 경로를 그림). AI 미답변은 예전 상단바
+          { path: 'faqs', element: <FaqListPage /> },
+          { path: 'faqs/new', element: <FaqEditPage /> },
+          { path: 'faqs/:faqId', element: <FaqDetailPage /> },
+          { path: 'faqs/:faqId/edit', element: <FaqEditPage /> },
           {
             path: 'faqs/unanswered',
             element: <UnansweredPage />,

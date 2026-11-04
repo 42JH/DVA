@@ -1,23 +1,22 @@
 import { Button, ConfirmDialog, FormModal, SelectField, TextArea, TextField } from '@/shared/ui'
 import { useFaqForm } from '@/features/faq/hooks/useFaqForm'
-import type { Faq, FaqCategory } from '@/features/faq/hooks/useFaqList'
+import type { Faq } from '@/features/faq/hooks/useFaqList'
 import type { UnansweredQuestion } from '@/features/faq/hooks/useUnansweredList'
 
 // 09 FAQ 추가 · FAQ 수정 창 (와이어프레임 09_FAQ관리_FAQ추가 · _FAQ수정 · _삭제확인, 10/30) — 폭 680 · 분류 셀렉트 · 질문 · 답변 · [취소] [추가/저장]
+// 11/04부터 FAQ 화면의 작성 · 수정은 화면(FaqEditPage)으로 바뀌고, 이 창은 AI 미답변 → FAQ 추가에만 씀
 // 수정 창은 왼쪽 아래 [삭제](빨간 테두리, 모든 관리자) → 확인 창 '정말로 삭제하시겠습니까?' “질문”
 // AI 미답변에서 열면(from) 질문 칸 = 고객이 한 말 그대로 → 관리자가 다듬음. 분류 · 답변은 비어 있음
 export function FaqFormModal({
   faq,
   from,
   onClose,
-  onAdded,
 }: {
   faq: Faq | null
   from?: UnansweredQuestion
   onClose: () => void
-  onAdded?: (category: FaqCategory) => void // 추가에 성공하면 그 분류
 }) {
-  const vm = useFaqForm(faq, onClose, from, onAdded)
+  const vm = useFaqForm({ faq, from, onSaved: onClose, onDeleted: onClose })
 
   if (vm.confirmingDelete)
     return (
