@@ -168,13 +168,13 @@ submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서�
 name = "task"
 type = "choice"
 choices = ["order", "lookup", "cancel", "inquiry", "agent", "end", "chit_chat", "unclear"]
-instructions = "고객 발화의 용건을 고른다. 택배 접수 정보 제공은 order, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화 종료는 end, 인사·맞장구·대기 요청은 chit_chat."
+instructions = "고객 발화의 용건을 고른다. 택배 접수 정보 제공은 order, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화 종료는 end, 인사·맞장구·대기 요청은 chit_chat. 직전 AI 발화가 택배 접수를 도와드릴지 물었고 고객이 동의하거나 진행을 바라면(예·네·해 주세요·아뇨 그냥 해 주세요) order. 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent."
 
 [[decision.collect.questions]]
 name = "switch"
 type = "choice"
 choices = ["none", "edit_parcel", "lookup", "cancel", "inquiry", "agent", "end"]
-instructions = "고객이 하던 접수와 다른 일을 하려는지 고른다. 접수 정보를 말하거나 질문에 답하면 none, 이미 담은 택배를 고치려 하면 edit_parcel, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화를 끝내려 하면 end."
+instructions = "고객이 하던 접수와 다른 일을 하려는지 고른다. 접수 정보를 말하거나 질문에 답하면 none, 이미 담은 택배를 고치려 하면 edit_parcel, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화를 끝내려 하면 end. 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent."
 
 [[decision.confirm.questions]]
 name = "confirm"

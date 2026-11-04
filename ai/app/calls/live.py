@@ -360,6 +360,8 @@ class LiveFlow:
                 if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
+                if st.intent == "order":  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
+                    facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
             self._maybe_submit(s, force=True)
             facts["order"] = _order_status(s)

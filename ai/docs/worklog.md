@@ -395,3 +395,11 @@
 - 가짜 BE: 같은 조건이면 NO_ORDER(orderSeq null)로 흉내
 - 운영 orderSeq 59는 AI가 지우지 않음(BE 확인 필요)
 - 테스트 496 passed(+1 운영 통화 재현)
+
+## 2026-11-04 — 인사 질문에 동의 → 접수 시작, 접수 시작 알림에 빠진 항목(계획 §2)
+
+- 원인(운영 통화 3a0b9c7f): 인사 "택배 접수 도와드릴까요?"에 "예" → task=chit_chat, "아뇨 아뇨 해주세요" → order 0.28(기준 미달). 접수가 정해질 때 알림이 {"intent":"order"}뿐 → Live가 "어떤 택배 보내실 건가요?"(순서 밖)
+- workflow.toml task: "직전 AI 발화가 접수를 도와드릴지 물었고 동의·진행을 바라면 order", "상담원 연결을 권했고 동의하면 agent". switch에도 agent 동의
+- _on_intent: order면 알림에 summary(state_summary: stage·missing·fields) — missing 첫 항목이 다음 질문
+- 실제 Decision API 확인(gpt-6-luna): "예" → order 0.93, "아뇨 아뇨 해주세요" → order 1.00, "아니요 그냥 물어볼 게" → inquiry 0.78, 상담원 권유 뒤 "네" → agent 1.00
+- 테스트 497 passed(+1 알림에 missing 첫 항목 sender_name)

@@ -350,3 +350,26 @@ def test_address_save_waits_for_both_commit_and_consent():
     lf._maybe_save_addresses(s)
     run(spawned[0])
     assert saved == [{"receiver": True, "parcel": pid}] and st.address_offer is None
+
+
+def test_order_intent_notice_carries_missing_so_first_question_follows_order():
+    """운영 통화 3a0b9c7f: 접수 시작 알림이 {"intent":"order"}뿐이라 Live가 "어떤 택배" 같은 순서 밖 질문을 함."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        await ai(conn, "안녕하세요, 디바콜입니다.", 0)
+        await say(conn, "택배 보내려고요", 1000)
+        await until(lambda: any('"intent"' in e.get("content", "") for e in conn.sent))
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return conn
+
+    conn = run(scenario())
+    notice = next(e for e in conn.sent if '"intent"' in e.get("content", ""))
+    facts = json.loads(notice["content"].split("[서버 결과] ", 1)[1])
+    assert facts["intent"] == "order" and facts["summary"]["missing"][0] == "sender_name"
