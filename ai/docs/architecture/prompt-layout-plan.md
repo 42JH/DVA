@@ -9,11 +9,11 @@
 
 | # | 결정 | 서버가 강제하는 것 |
 |---|---|---|
-| a | 수거 일시: 기본 = 통화 현재 시각 + 1시간부터, 09~17시 안. 고객 요청 시 영업시간 안에서 조정 | 기본값 계산, 허용 범위 검증(거절 코드), 되읽기·전송 |
+| a | 수거 일시: 기본 = 통화 현재 시각 + 1시간부터, 09~17시 안. 그 시각이 17시를 넘으면 "금일 수거는 어렵고 익일 수거 가능" 안내, 기본 익일 09:00. 고객 요청 시 영업시간 안·3일 이내(임시)에서 조정 | 기본값 계산, 허용 범위 검증(거절 코드), 되읽기·전송 |
 | b | 확인 답은 서버 Decision(위임 안 함) | 지금과 같음 |
 | c | 새 번호는 받은 직후 끊어 읽어 확인(`phones_to_read`) | 지금과 같음 |
 | d | 번호 정정은 틀린 부분만 고침 | Backend 규칙으로 합친 전체 번호 기록 + 서버 자릿수 검증 + 되읽기 재확인 |
-| e | 상담원 이관 권유·연결(`transferCall`), 근무 시간 외 콜백(`create_callback_request`) | 이관 조건 판정·도구 실행(**계약 확인 후**) |
+| e | 상담원 이관 권유·연결(`transferCall`), 근무 시간 외 콜백(`create_callback_request`). 불만·격앙은 **Live가 판단**해 이관을 권유(지연 추가 없음) | 고객의 연결 요청은 기존 Decision 용건 `agent`로 판정, 도구 실행(**계약 확인 후**) |
 | f | 등록 고객 인사에 성함·등록 출발지 | 통화 정보에 기본 출발지 |
 | g | 출발지·최근 도착지가 바뀌면 접수 후 주소록 수정 | 접수 결과 뒤 서버가 BE 주소록 갱신(**계약 확인 후**) |
 | h | 같은 질문에 3번 연속 답 못 하면 이관 권유, 해결되면 횟수 0 | 서버가 답 못 한 횟수를 세고 3회면 이관 사실 전달 |
@@ -48,9 +48,9 @@ Backend instructions = policy/backend_rules.md (render_backend 문장 이동 + d
 
 ### a. 수거 일시(결정 1-b 철회)
 - 필드 `pickup_at` 재도입(`workflow.toml` 필드·단계, `record_fields` 인자, 되읽기·확인 스냅샷 포함).
-- **기본값**: 통화 시작 시각(`incomingAt`, KST) + 1시간. 결과가 09:00~17:00 밖이면 다음 허용 시각(§4 결정 필요: 다음 영업일 09:00 등). 고객에게는 기본값을 안내하고 묻지 않는다.
-- **조정**: 고객이 시각을 말하면 `parse_pickup`(기존 `app/domain/rules.py`)으로 해석 → `현재 + 1시간 ≤ 시각`, `09:00 ≤ 시각 ≤ 17:00` 아니면 `rejected`(`PICKUP_TOO_SOON`·`PICKUP_OUT_OF_HOURS`) + 허용 범위 사실.
-- 설정: `config/server.toml [pickup]` `lead_hours=1`, `open="09:00"`, `close="17:00"`(규약 바뀌면 설정만).
+- **기본값**: 통화 시작 시각(`incomingAt`, KST) + 1시간. 09:00 전이면 당일 09:00, 17:00을 넘으면 **익일 09:00**(사실 `pickup_today_unavailable`로 "금일 수거는 어렵고 익일 수거 가능" 안내). 고객에게는 기본값을 안내하고 묻지 않는다. 주말·공휴일은 구분하지 않는다(정책 없음).
+- **조정**: 고객이 시각을 말하면 `parse_pickup`(기존 `app/domain/rules.py`)으로 해석 → `현재 + 1시간 ≤ 시각`, `09:00 ≤ 시각 ≤ 17:00`, `시각 ≤ 오늘 + 3일`이 아니면 `rejected`(`PICKUP_TOO_SOON`·`PICKUP_OUT_OF_HOURS`·`PICKUP_TOO_FAR`) + 허용 범위 사실.
+- 설정: `config/server.toml [pickup]` `lead_hours=1`, `open="09:00"`, `close="17:00"`, `max_days_ahead=3`(임시 — 정책 미정), 기본 익일 시각 `next_day_default="09:00"`(규약 바뀌면 설정만).
 - 전송: 결과 본문 `pickupRequestedAt`(ISO 8601) — **BE가 이 값을 수거 시각으로 쓰는지 계약 확인 후**. BE가 "결제 완료 + 1시간"으로 덮어쓰면 고객 안내와 실제가 달라진다(§3).
 
 ### d. 번호 부분 정정
@@ -58,7 +58,7 @@ Backend instructions = policy/backend_rules.md (render_backend 문장 이동 + d
 - 서버: 지금처럼 자릿수·정규화 검증, 바뀐 번호는 `phones_to_read`로 다시 끊어 읽어 확인(c와 함께 오기록 방지).
 
 ### e·h. 상담원 이관
-- **이관 조건 판정(서버)**: ① Decision 용건 `agent`(즉시) ② 불만·격앙: Decision 질문 추가(`complaint` 선택형) ③ 같은 질문 3회 연속 답 못 함(h): `search_manual`의 `KB_NO_EVIDENCE`·`KB_LOW_SCORE`·`unavailable`를 질문별로 세고, 답이 나오면 0으로. 3회면 N2 `{"agent":"suggest"}`.
+- **이관 조건**: ① 고객의 연결 요청 → Decision 용건 `agent`(서버, 기존 질문) ② 불만·격앙 → **Live가 판단해 이관을 권유**(프롬프트, Decision 질문 추가 없음 — 지연 방지). 고객이 동의하면 ①로 판정 ③ 같은 질문 3회 연속 답 못 함(h, 서버): `search_manual`의 `KB_NO_EVIDENCE`·`KB_LOW_SCORE`·`unavailable`를 질문별로 세고, 답이 나오면 0으로. 3회면 N2 `{"agent":"suggest"}`.
 - **연결**: 고객이 동의(Decision confirm)하면 `transfer_call`(통화 전환), 상담원 근무 시간 밖이면 콜백 안내 → `create_callback_request`(성함·연락처).
 - 설정: 상담원 근무 시간(`config [agent]`).
 - **전제: BE·PBX 계약**(통화 전환 방식, 콜백 요청 API, 근무 시간 출처). 없으면 지금처럼 "담당자가 확인 후 연락" + 분석 `hasHandoffRequest`·미답변 등록.
@@ -81,10 +81,10 @@ Backend instructions = policy/backend_rules.md (render_backend 문장 이동 + d
 | e 통화 전환·콜백·근무 시간 | `docs/api/calls.md`, `ai-pbx-recordings.md`, PBX 계약 | 이관 판정까지만 구현, 연결은 "담당자가 확인 후 연락" |
 | g PIN 갱신 | `docs/api/pins.md`, `backend/docs/order-sender-customer-save.md` | 제외 |
 
-## 4. 결정 필요(세부)
-1. a 기본값이 영업시간 밖일 때: 다음 영업일 09:00? 주말·공휴일 처리? 분 단위 반올림(예: 10분 단위)?
-2. a 조정 요청이 다른 날짜(모레 등)일 때 허용 범위(며칠까지)?
-3. e 불만 판정을 Decision 질문으로 추가할지(호출 질문 1개 증가, 비용·지연 소폭).
+## 4. 세부 결정(2026-11-04)
+1. a 기본값이 17시를 넘으면: "금일 수거는 어렵고 익일 수거 가능" 안내, 기본 익일 09:00. 주말·공휴일 구분 없음.
+2. a 조정 범위: 3일 이내(임시 — 정책 미정, 설정값).
+3. e 불만·격앙 판단: Live 모델(프롬프트). Decision 질문을 늘리지 않는다.
 
 ## 5. 단계
 1. 계약 확인(§3) → 보고·범위 확정.
@@ -99,4 +99,5 @@ Backend instructions = policy/backend_rules.md (render_backend 문장 이동 + d
 - a: BE가 `pickupRequestedAt`을 쓰지 않으면 고객 안내 시각과 실제 수거가 다르다(§3에서 확정).
 - d: 부분 정정은 Backend가 잘못 합칠 수 있다 → 되읽기 재확인으로만 막는다.
 - e: 계약이 없으면 프롬프트의 연결 멘트("바로 연결해 드리겠습니다")가 실제와 달라진다 → 계약 전에는 해당 문장을 "담당자가 확인 후 연락"으로 둔다.
-- 지연: 규약 파일 길이, (선택) 불만 Decision 질문 추가 → 실통화 P50·P95.
+- 지연: 규약 파일 길이 → 실통화 P50·P95. 불만 판단은 Live가 하므로 Decision 호출은 늘지 않는다.
+- e(불만): Live 판단이라 서버가 검증하지 않는다. 이관 실행은 고객 동의(Decision `agent`)가 있어야만 한다.
