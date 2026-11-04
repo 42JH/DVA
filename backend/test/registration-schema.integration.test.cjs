@@ -109,6 +109,18 @@ test('deployment verification requires 049, a nullable reason without a default 
   );
 });
 
+test('deployment verification requires 050, metric field types, receipt checks and the cascading analysis FK', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='050-call-dashboard-metrics.sql'",
+    'ALTER TABLE call_dashboard_metrics ALTER COLUMN total_wait_ms SET DEFAULT 0',
+    'ALTER TABLE call_dashboard_metrics ALTER COLUMN total_wait_ms TYPE numeric',
+    'ALTER TABLE call_dashboard_metrics DROP CONSTRAINT call_dashboard_wait_receipt_check',
+    'ALTER TABLE call_dashboard_metrics DROP CONSTRAINT call_dashboard_metrics_call_session_seq_fkey; ALTER TABLE call_dashboard_metrics ADD FOREIGN KEY(call_session_seq) REFERENCES call_analyses(call_session_seq)',
+    'ALTER TABLE call_dashboard_metrics ADD COLUMN deleted_at timestamptz',
+  ])
+    await verify([sql], 'Call dashboard metrics schema or migration missing');
+});
+
 test('deployment verification requires migration 046 and the persistent retry window', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='046-order-submission-retry-window.sql'",
