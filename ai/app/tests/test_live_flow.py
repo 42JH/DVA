@@ -139,6 +139,9 @@ def test_order_flow_end_to_end(tmp_path):
     names = [n for _, n in client.decisions.calls]
     assert len(names) == 4 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
     assert names[2] == ["more", "switch"]
+    lat = {r["구간"] for r in snap["latency"]}  # 관제 지연 표
+    assert {"Decision", "위임→도구 호출", "도구 record_fields", "확인 '네'→담기", "통화 준비(accept 전)", "accept"} <= lat
+    assert any(b["op"].startswith("caller_context") and b["outcome"] == "ok" for b in snap["backend_calls"])  # BE 통신
 
 
 def test_yes_before_readback_does_not_commit():

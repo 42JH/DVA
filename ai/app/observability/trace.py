@@ -11,6 +11,15 @@ log = logging.getLogger("trace")
 trace_id_var: ContextVar[str] = ContextVar("trace_id", default="-")
 # 구간이 끝날 때마다 (이름, ms, 속성)으로 불린다. 테스트·지표 수집기가 바꿔 끼운다.
 span_hooks: list[Callable[[str, float, dict], None]] = []
+# 지금 태스크가 처리하는 통화(CallSession). 통화 수신 때 설정, 자식 태스크가 물려받는다. 관제 기록(BE 통신·지연)용
+current_call: ContextVar[object | None] = ContextVar("current_call", default=None)
+
+
+def observe_backend(op: str, ms: int, outcome: str, http: int | None = None, error: str | None = None) -> None:
+    """BE 호출 한 번(게이트웨이). 통화 안이면 그 통화의 관제 기록에 남긴다. 통화 밖(재시작 복구 등)이면 버린다."""
+    call = current_call.get()
+    if call is not None and hasattr(call, "record_backend"):
+        call.record_backend(op, ms, outcome, http, error)
 
 
 def new_trace() -> str:

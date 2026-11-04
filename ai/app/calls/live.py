@@ -58,6 +58,9 @@ class Runtime:
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
     unanswered: int = 0                               # 매뉴얼 검색이 연속으로 답을 못 한 횟수(3회 → 상담원 권유, 답하면 0)
+    cust_end_t: float = 0.0                           # 관제: 마지막 고객 발화 끝(→ AI 말 시작)
+    await_speech: tuple[str, float] | None = None     # 관제: (구간 이름, 시작) — 다음 AI 발화 시작까지
+    confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -119,6 +122,12 @@ class LiveFlow:
             rt.seq += 1
             rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now))
             del rt.ai[:-20]
+            if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
+                s.timing("고객 말 끝→AI 말 시작", (now - rt.cust_end_t) * 1000)
+                rt.cust_end_t = 0.0
+            if rt.await_speech:
+                s.timing(rt.await_speech[0], (now - rt.await_speech[1]) * 1000)
+                rt.await_speech = None
         _transcript(s, "agent", rt.ai[-1])
         if rt.ai_end:
             rt.ai_end.cancel()
@@ -127,6 +136,8 @@ class LiveFlow:
     def _customer_done(self, s: CallSession) -> None:
         rt = self.rt(s)
         utt, rt.cust, rt.endpoint = rt.cust, None, None
+        if utt:
+            rt.cust_end_t = utt.t_last
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
             s.spawn(self.judge(s, utt, prev), "decision")
@@ -164,13 +175,15 @@ class LiveFlow:
             s.note("Decision", f"DECISION_TIMEOUT >{self.cfg.decision_budget_sec * 1000:.0f}ms 입력 {len(text)}자")
             # 늦은 답은 쓰지 않고 실제 응답 시간만 남긴다(예산 조정 근거). 추가 호출 없음
             call.add_done_callback(lambda f: f.cancelled() or f.exception() or s.note(
-                "Decision 늦은 응답", f"{(time.monotonic() - started) * 1000:.0f}ms"))
+                "Decision 늦은 응답", f"{(time.monotonic() - started) * 1000:.0f}ms") or s.timing(
+                "Decision(시간 초과분)", (time.monotonic() - started) * 1000))
             return
         except Exception as e:
             s.note("Decision", f"DECISION_UNAVAILABLE {type(e).__name__}")
             return
         ms = round((time.monotonic() - started) * 1000)
         s.decision_ms.append(ms)
+        s.timing("Decision", ms)
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms")
         await self.apply(s, utt, prev, answers, pending_id)
@@ -221,7 +234,9 @@ class LiveFlow:
             return None
         if self._delegation_in(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
+            rt.confirm_t = utt.t_last
             return ("hold", pending_id)
+        rt.confirm_t = utt.t_last
         self._arm_commit(s, pending_id)
         return None
 
@@ -242,6 +257,9 @@ class LiveFlow:
             kind = s.state.pending.kind
             if kind == "parcel":
                 pid = commit_parcel(s.state, self.policy, pending_id)
+                if pid and rt.confirm_t:
+                    s.timing("확인 '네'→담기", (time.time() - rt.confirm_t) * 1000)
+                    rt.confirm_t = 0.0
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
                 target = None
             else:
@@ -430,6 +448,10 @@ class LiveFlow:
 
     async def call_tool(self, s: CallSession, did, item: dict) -> None:
         name, call_id = item.get("name"), item.get("call_id")
+        d0 = self._dl(s, did)
+        if not d0.get("tool_t"):  # 위임 시작 → 첫 함수 호출 도착(Backend 판단 시간)
+            d0["tool_t"] = time.time()
+            s.timing("위임→도구 호출", (d0["tool_t"] - d0["t"]) * 1000)
         if name in TOOL_INTENT:
             self._business(s, TOOL_INTENT[name])
         if name == "lookup_orders":
@@ -443,6 +465,7 @@ class LiveFlow:
             out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
+        s.timing(f"도구 {name}", view["elapsed_ms"])
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
@@ -471,6 +494,7 @@ class LiveFlow:
         if d["inflight"] == 0 and d["outputs"]:
             d["outputs"] = 0
             s.note("재개", str(did)[-6:])
+            self.rt(s).await_speech = ("재개→AI 발화", time.time())
             await self.send(s, {"type": "response.create"})
 
     def _delegation_in(self, s: CallSession, utt: Spoken) -> bool:
@@ -500,13 +524,17 @@ class LiveFlow:
         if level == "N2":
             t0 = time.monotonic()
             await self._wait_quiet(s)
-            if (waited := time.monotonic() - t0) > 1.0:
+            waited = time.monotonic() - t0
+            s.timing("N2 대기(AI 발화 끝)", waited * 1000)
+            if waited > 1.0:
                 s.note("N2 대기", f"{waited:.1f}s")
         etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append",
                  "N3": "session.instructions.append"}[level]
         s.stats[f"전달 {level}"] += 1
         s.note(f"전달 {level}", content[:200])
         await self.send(s, {"type": etype, "delegation_id": None, "content": f"[서버 결과] {content}"[:1800]})
+        if level == "N2":
+            rt.await_speech = ("N2→AI 발화", time.time())
 
     async def _wait_quiet(self, s: CallSession, timeout: float = 8.0) -> None:
         deadline = time.monotonic() + timeout

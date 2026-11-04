@@ -352,3 +352,11 @@
 - 업무 규칙(사용자): 접수(결과 전송)는 더 보낼 택배가 없다고 확인되면 한다. 그 전까지 담은 택배는 세션에 보관하고 고칠 수 있다
 - 어긋난 문구 수정: workflow.toml [results].parcel_added, claims.py truth.submit_when("통화를 마칠 때" → "더 보낼 택배가 없다고 확인되면"). 코드 동작(_maybe_submit)은 그대로
 - 테스트 486 passed
+
+## 2026-11-04 — 관제: 지연 시간 표·백엔드 통신 내역, 확정 경로 계획
+
+- 관제 기록: app/observability/trace.py current_call(통화 태스크 ContextVar)·observe_backend → BackendGateway._once가 BE 호출마다 op·결과·HTTP·오류·ms를 지금 통화에 기록(세마포어 대기 포함, 통화 밖 호출은 버림). 페르소나 동기화는 게이트웨이를 거치지 않아 "페르소나 확인" 지연으로만 보임
+- 지연 구간(CallSession.timings, 구간별 최근 200개): 통화 준비(accept 전)·페르소나 확인·고객 확인(1단계)·accept·연결→첫 AI 발화·고객 말 끝→AI 말 시작·Decision(시간 초과분)·위임→도구 호출·도구 <이름>·재개→AI 발화·N2 대기(AI 발화 끝)·N2→AI 발화·확인 '네'→담기·BE <op>
+- 스냅샷 latency(구간·횟수·최근·P50·P95·최대)·backend_calls(최근 100), monitor/static/index.html "지연(ms)"·"백엔드 통신" 칸
+- 계획: docs/architecture/confirm-path-plan.md(실측 8.1s 분해, P1~P6, 목표 P50 ≤ 3s, 기준 측정 먼저)
+- 테스트 487 passed(+1 게이트웨이 기록, 끝-끝 테스트에 지연 표·BE 통신 확인)

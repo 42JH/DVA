@@ -60,6 +60,9 @@ class CallSession:
     tool_calls: list[dict] = field(default_factory=list)   # 관제: 도구 이름·인수·결과·시간
     result: dict | None = None                             # 통화 결과 응답 data(S6)
     decision_ms: list[int] = field(default_factory=list)   # 발화 끝 Decision 응답 시간(예산 안에 온 것, P50·P95용)
+    timings: dict[str, list[int]] = field(default_factory=dict)  # 관제 지연(ms): 구간 이름 → 측정값
+    active_t: float = 0.0                                  # 세션 활성(session.started) 시각 — 첫 AI 발화까지 재기용
+    backend_calls: list[dict] = field(default_factory=list)      # 관제 BE 통신: op·결과·HTTP·오류·ms·시각
     stats: Counter = field(default_factory=Counter)       # 관제: Decision·위임·도구·전달 횟수
     on_change: "Callable[[CallSession], None] | None" = None
     _dirty: bool = False
@@ -131,6 +134,17 @@ class CallSession:
         self.send_seq += 1
         return f"{self.trace_id}:{self.send_seq}"   # error.client_event_id 상관(call-lifecycle.md §3)
 
+    def timing(self, name: str, ms: float) -> None:
+        xs = self.timings.setdefault(name, [])
+        xs.append(round(ms))
+        del xs[:-200]
+
+    def record_backend(self, op: str, ms: int, outcome: str, http: int | None, error: str | None) -> None:
+        self.backend_calls.append({"at": time.time(), "op": op, "outcome": outcome, "http": http, "error": error, "ms": ms})
+        del self.backend_calls[:-200]
+        self.timing(f"BE {op}", ms)
+        self.changed()
+
     def snapshot(self) -> dict:
         """관제 화면(monitor) 모양. 관제는 인증 뒤에서만 보이므로(docs/ops/monitor.md) 업무 값·전사를 그대로 보여 준다."""
         s, policy = self.state, self.tools.policy
@@ -158,6 +172,7 @@ class CallSession:
                 "status": self.phase.value, "stage": a.stage, "end_reason": self.close_reason,
                 "transcript": [{"speaker": r["speaker"], "text": r["text"]} for r in self.transcript],
                 "tool_calls": self.tool_calls[-50:], "events": self.events[-200:],
+                "backend_calls": self.backend_calls[-100:], "latency": _latency_table(self.timings),
                 "errors": [{"at": e["at"], "message": e["text"]} for e in self.events if e["kind"] == "오류"],
                 "detail": detail}
 
@@ -178,3 +193,15 @@ def _latency(name: str, ms: list[int]) -> dict:
     xs = sorted(ms)
     pick = lambda q: xs[min(len(xs) - 1, max(0, -(-len(xs) * q // 100) - 1))]
     return {f"{name} ms P50": pick(50), f"{name} ms P95": pick(95)}
+
+
+def _latency_table(timings: dict[str, list[int]]) -> list[dict]:
+    """관제 지연 표: 구간별 횟수·최근·P50·P95·최대(ms)."""
+    rows = []
+    for name, xs in timings.items():
+        if not xs:
+            continue
+        p = _latency(name, xs)
+        rows.append({"구간": name, "횟수": len(xs), "최근": xs[-1], "P50": p[f"{name} ms P50"],
+                     "P95": p[f"{name} ms P95"], "최대": max(xs)})
+    return rows

@@ -16,7 +16,7 @@ from typing import Literal, TypeVar
 
 import httpx2
 
-from app.observability.trace import span
+from app.observability.trace import observe_backend, span
 from backend_client.api import IN_PROGRESS, BackendError
 
 log = logging.getLogger(__name__)
@@ -93,6 +93,16 @@ class BackendGateway:
         return await self._once(op, fn, args, kw, time.monotonic() + (budget_sec or self.write_budget_sec))
 
     async def _once(self, op, fn, args, kw, deadline: float):
+        t0, outcome, http, error = time.monotonic(), "ok", None, None
+        try:
+            return await self._call(op, fn, args, kw, deadline)
+        except BackendFailure as e:
+            outcome, http, error = e.code, e.http_status, e.error_code
+            raise
+        finally:  # 관제: 대기(세마포어) 포함 걸린 시간과 결과
+            observe_backend(op, round((time.monotonic() - t0) * 1000), outcome, http, error)
+
+    async def _call(self, op, fn, args, kw, deadline: float):
         with span("semaphore_wait", resource="backend", op=op):
             try:
                 await asyncio.wait_for(self.sem.acquire(), max(0.0, deadline - time.monotonic()))

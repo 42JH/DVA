@@ -102,3 +102,39 @@ def test_spans_record_outcome():
     http = [a for n, a in seen if n == "backend_http"]
     assert [a["outcome"] for a in http] == ["ok", "BE_CONTRACT_VIOLATION"]
     assert {n for n, _ in seen} == {"semaphore_wait", "backend_http"}
+
+
+def test_gateway_records_backend_calls_for_current_call():
+    """관제: 지금 통화(current_call)에 BE 호출의 op·결과·HTTP·오류·ms를 남긴다. 통화 밖이면 남기지 않는다."""
+    import asyncio
+    from app.integrations.backend.gateway import BackendFailure, BackendGateway
+    from app.observability.trace import current_call
+
+    class Call:
+        def __init__(self):
+            self.rows = []
+
+        def record_backend(self, *row):
+            self.rows.append(row)
+
+    async def ok():
+        return 1
+
+    async def boom():
+        raise BackendFailure("not_found", "BE_NOT_FOUND", "x", http_status=404, error_code="NOT_FOUND")
+
+    async def scenario():
+        gw = BackendGateway(object())
+        await gw.read("outside", ok)  # 통화 밖: 기록 없음
+        call = Call()
+        current_call.set(call)
+        await gw.read("caller_context", ok)
+        try:
+            await gw.write("cancel", boom)
+        except BackendFailure:
+            pass
+        return call.rows
+
+    rows = asyncio.run(scenario())
+    assert [r[0] for r in rows] == ["caller_context", "cancel"]
+    assert rows[0][2] == "ok" and rows[1][2:] == ("BE_NOT_FOUND", 404, "NOT_FOUND") and all(r[1] >= 0 for r in rows)

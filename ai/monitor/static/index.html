@@ -33,7 +33,7 @@
 <main>
   <section><h2>통화</h2><div id="calls"></div></section>
   <section><h2>받아쓰기</h2><div id="transcript"></div></section>
-  <section><h2>상세</h2><div id="detail"></div><h2>도구 호출</h2><div id="tools"></div><h2>사건</h2><div id="events"></div></section>
+  <section><h2>상세</h2><div id="detail"></div><h2>지연(ms)</h2><div id="latency"></div><h2>백엔드 통신</h2><div id="backend"></div><h2>도구 호출</h2><div id="tools"></div><h2>사건</h2><div id="events"></div></section>
 </main>
 <script>
 const calls = new Map();
@@ -54,6 +54,11 @@ function render() {
   $("transcript").innerHTML = (c.transcript || []).map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
   $("detail").innerHTML = `<table>${Object.entries(c.detail || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${show(v)}</td></tr>`).join("")}</table>
     ${(c.errors || []).map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
+  const lat = c.latency || [];
+  $("latency").innerHTML = lat.length ? `<table><tr><th>구간</th><th>횟수</th><th>최근</th><th>P50</th><th>P95</th><th>최대</th></tr>${lat.map((r) =>
+    `<tr><th>${esc(r["구간"])}</th><td>${r["횟수"]}</td><td>${r["최근"]}</td><td>${r["P50"]}</td><td>${r["P95"]}</td><td>${r["최대"]}</td></tr>`).join("")}</table>` : "<span class=muted>-</span>";
+  $("backend").innerHTML = [...(c.backend_calls || [])].reverse().map((b) => `<div class="event ${b.outcome === "ok" ? "" : "error"}"><span class="muted">${time(b.at)}</span>
+    <b>${esc(b.op)}</b> · ${esc(b.outcome)}${b.http ? ` · HTTP ${esc(b.http)}` : ""}${b.error ? ` · ${esc(b.error)}` : ""} · ${b.ms}ms</div>`).join("") || "<span class=muted>-</span>";
   $("tools").innerHTML = [...(c.tool_calls || [])].reverse().map((t) => `<div class="tool"><b>${esc(t.name)}</b> · ${esc(t.status)}
     ${t.elapsed_ms != null ? `· ${t.elapsed_ms}ms` : ""}<pre>${esc(t.arguments)}</pre>${t.output ? `<pre>${esc(JSON.stringify(t.output, null, 1))}</pre>` : ""}</div>`).join("");
   $("events").innerHTML = [...(c.events || [])].reverse().map((e) => `<div class="event"><span class="muted">${time(e.at)} ${esc(e.kind)}</span> ${esc(e.text)}</div>`).join("");
