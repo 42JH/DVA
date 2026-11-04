@@ -36,6 +36,8 @@ class FakeDecisions:
                                   "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
             answers.append(choice("task", "order"))
+        if "origin" in names:
+            answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
         if "more" in names:
             answers.append(choice("more", "no_more" if "없어요" in said else "not_answer"))
         if "switch" in names:
@@ -350,3 +352,85 @@ def test_address_save_waits_for_both_commit_and_consent():
     lf._maybe_save_addresses(s)
     run(spawned[0])
     assert saved == [{"receiver": True, "parcel": pid}] and st.address_offer is None
+
+
+def test_order_intent_notice_carries_missing_so_first_question_follows_order():
+    """운영 통화 3a0b9c7f: 접수 시작 알림이 {"intent":"order"}뿐이라 Live가 "어떤 택배" 같은 순서 밖 질문을 함."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        await ai(conn, "안녕하세요, 디바콜입니다.", 0)
+        await say(conn, "택배 보내려고요", 1000)
+        await until(lambda: any('"intent"' in e.get("content", "") for e in conn.sent))
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return conn
+
+    conn = run(scenario())
+    notice = next(e for e in conn.sent if '"intent"' in e.get("content", ""))
+    facts = json.loads(notice["content"].split("[서버 결과] ", 1)[1])
+    assert facts["intent"] == "order" and facts["summary"]["missing"][0] == "sender_name"
+
+
+
+def test_registered_greeting_yes_prefills_sender_and_asks_receiver_first():
+    """기존 고객: 인사 "○○님, {기본 주소}에서 보내시는 택배 접수 도와드릴까요?"에 "예" → 접수 + 그 출발지 →
+    보내는 분 성함·주소·상세를 등록 정보(PROFILE)로 채우고 다음 질문은 받는 분 성함."""
+    from app.domain.state import Source
+    from backend_client.order import Geo as BGeo, Place as BPlace
+    svc, client = flow()
+    db = svc.d.backend.api
+    db.add_customer(CALLER, "김철수", default_origin=BPlace(name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212",
+                                                        address_detail="1201호", geo=BGeo(jibun_address="서울 강남구 역삼동 737",
+                                                                                         dong_name="역삼동", postal_code="06236")))
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 테헤란로 212에서 보내시는 택배 접수 도와드릴까요?", 0)
+        await say(conn, "예", 1500)
+        await until(lambda: any('"intent"' in e.get("content", "") for e in conn.sent))
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s, conn
+
+    s, conn = run(scenario())
+    assert "등록된 출발지: 서울 강남구 테헤란로 212" in client.accepted[0][1]["instructions"]
+    facts = json.loads(next(e for e in conn.sent if '"intent"' in e.get("content", ""))["content"].split("[서버 결과] ", 1)[1])
+    assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
+    cur = s.state.parcels[0].draft if s.state.parcels else s.state.current
+    assert all(cur[n].source == Source.PROFILE for n in ("sender_name", "sender_address", "sender_address_detail"))
+    assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
+
+
+def test_origin_paths_other_place_and_recent_only():
+    from app.domain.assess import readback_facts
+    from app.domain.state import ConversationState, Customer, Place, Source
+    from app.tests.test_domain import GEO, P
+    lf = LiveFlow.__new__(LiveFlow)
+    recent = Place("김철수", CALLER, "부산 해운대구 센텀로 10", "3층", GEO, Source.HISTORY)
+    # 다른 곳에서 보냄 → 성함만, 다음은 보내는 곳 주소
+    st = ConversationState(customer=Customer(customer_seq=12, name="김철수", caller_phone=CALLER, origin_place=recent),
+                           intent="order")
+    st.origin_offered, st.origin_answer = True, False
+    assert lf._origin_step(st) == {"origin": "name_only"}
+    assert st.current["sender_name"].source == Source.PROFILE and not st.current["sender_address"].valid
+    # 기본 주소 없이 최근 출발지만 → 접수 시작 때 "그곳에서 보내시나요?"를 묻게 하고, 답이 오면 채운다
+    st = ConversationState(customer=Customer(customer_seq=12, name="김철수", caller_phone=CALLER, origin_place=recent),
+                           intent="order")
+    assert lf._origin_step(st) == {"origin_confirm": "부산 해운대구 센텀로 10"} and st.origin_offered
+    st.origin_answer = True
+    assert lf._origin_step(st) == {"origin": "prefilled"}
+    # 되읽기에는 저장된 상세주소를 넣지 않는다
+    snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
+    out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
+    assert "sender_address" in out and "sender_address_detail" not in out

@@ -212,3 +212,20 @@ def test_unregistered_customer_gets_no_address_offer():
     st = filled()
     st.customer.customer_seq = None
     assert save_offer(st) == {}
+
+
+def test_order_intent_without_parcel_info_is_no_order_not_empty_collecting(tmp_path):
+    """운영 통화 3a0b9c7f: 결제 방식 하나뿐인 등록 고객이 접수 의도만 말하고 끊음 → 결제 방식을 보내지 않아 NO_ORDER.
+    (이전: paymentMethodType=billing이 들어가 BE가 빈 COLLECTING 주문 orderSeq 59를 만듦)"""
+    from app.domain.state import Source
+    rs, db = service(tmp_path)
+    st = ConversationState(customer=Customer(customer_seq=db.add_customer(CALLER, "현승준"), name="현승준",
+                                             caller_phone=CALLER, payment_methods=("billing",)), intent="order")
+    st.record("sender_phone", CALLER, Source.CALLER_ID)  # 발신번호만 자동으로 채워진 받던 택배
+    before = len(db.orders) if hasattr(db, "orders") else None
+    data = run(rs.submit(session(st)))
+    body = db.results[-1]["body"]
+    assert body["outcome"] == "INCOMPLETE" and "paymentMethodType" not in body and "pickupRequestedAt" not in body
+    assert not body.get("parcels") and data["status"] == "NO_ORDER" and data["orderSeq"] is None
+    if before is not None:
+        assert len(db.orders) == before  # 주문을 만들지 않는다

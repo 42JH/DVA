@@ -387,3 +387,29 @@
 - workflow.toml [[decision.save.questions]]·[results].address_save, business_rules.md 문장
 - 미등록 고객은 기존 등록 절차(고객 등록 + 보내는 곳 PIN)를 그대로 둠
 - 테스트 495 passed(+3)
+
+## 2026-11-04 — 택배 정보 없는 통화의 빈 주문 방지(계획 customer-scenario-plan.md §3)
+
+- 원인(운영 통화 3a0b9c7f): 담은 택배·받던 값이 없는데 결제 가능 방식이 하나라 paymentMethodType=billing이 자동으로 들어감 → BE가 주문 정보로 보고 COLLECTING orderSeq 59 생성(BE 규칙: parcels 없고 paymentMethodType·pickupRequestedAt·totalAmount 미수집이어야 NO_ORDER)
+- decide_outcome: 담은 택배도 받던 값도 없으면 결제 방식을 넣지 않음(수거 시각은 원래 이 경로에 없음) → BE NO_ORDER
+- 가짜 BE: 같은 조건이면 NO_ORDER(orderSeq null)로 흉내
+- 운영 orderSeq 59는 AI가 지우지 않음(BE 확인 필요)
+- 테스트 496 passed(+1 운영 통화 재현)
+
+## 2026-11-04 — 인사 질문에 동의 → 접수 시작, 접수 시작 알림에 빠진 항목(계획 §2)
+
+- 원인(운영 통화 3a0b9c7f): 인사 "택배 접수 도와드릴까요?"에 "예" → task=chit_chat, "아뇨 아뇨 해주세요" → order 0.28(기준 미달). 접수가 정해질 때 알림이 {"intent":"order"}뿐 → Live가 "어떤 택배 보내실 건가요?"(순서 밖)
+- workflow.toml task: "직전 AI 발화가 접수를 도와드릴지 물었고 동의·진행을 바라면 order", "상담원 연결을 권했고 동의하면 agent". switch에도 agent 동의
+- _on_intent: order면 알림에 summary(state_summary: stage·missing·fields) — missing 첫 항목이 다음 질문
+- 실제 Decision API 확인(gpt-6-luna): "예" → order 0.93, "아뇨 아뇨 해주세요" → order 1.00, "아니요 그냥 물어볼 게" → inquiry 0.78, 상담원 권유 뒤 "네" → agent 1.00
+- 테스트 497 passed(+1 알림에 missing 첫 항목 sender_name)
+
+## 2026-11-04 — 기존 고객 보내는 분 미리 채우기(계획 §1)
+
+- 출발지 후보 Customer.origin_place: 1단계 default_origin(고객 기본 주소, PROFILE) — 인사 "○○님, {출발지}에서 보내시는 택배 접수 도와드릴까요?"로 묻는 것으로 봄(origin_offered). 없으면 2단계 recent_origin(이전 접수 출발지, HISTORY) — 접수 시작 알림에 origin_confirm("{주소}에서 보내시나요?")
+- Decision 질문 origin(제안 뒤 답 전만). 같은 발화의 용건보다 먼저 처리("예" = 접수 + 그 출발지)
+- prefill_sender(app/domain/address_book.py): yes → 보내는 분 성함·주소(+geo)·상세를 Source.PROFILE로(고객이 말한 값은 덮지 않음), no → 성함만. 후보 없는 등록 고객은 성함만. 접수 알림 origin=prefilled|name_only + summary(missing 첫 항목 = 받는 분 성함/보내는 곳 주소)
+- 되읽기: 저장된 상세주소(PROFILE)는 기존 읽기 규칙대로 넣지 않음. 기본 주소와 같은 출발지는 저장 제안 없음
+- task 기준에 "출발지가 달라도 보내려는 것이면 order" 추가
+- 실제 Decision API(gpt-6-luna): 인사 뒤 "예" → order 0.99·origin yes 1.00, "네 거기서요" → order·yes, "아니요 오늘은 회사에서 보내요" → order 0.98·origin no 0.72, "아니요 조회하려고요" → lookup·not_answer, 최근 출발지 질문 뒤 "네" → yes, "아뇨 다른 데요" → no 1.00. 부작용: "아니요 그냥 물어볼 게 있어서요" → inquiry 0.46(기준 미달, 접수로 오판하지는 않음)
+- 테스트 499 passed(+2)

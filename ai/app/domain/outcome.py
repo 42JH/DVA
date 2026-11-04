@@ -59,7 +59,10 @@ def decide_outcome(state: ConversationState, policy: Policy, now: datetime,
     if state.order_cancelled:
         return Outcome("CANCELLED", tuple(submit) + current, payment=payment, customer_name=name)
     if not submit:  # 담은 택배 없음: 받던 값만(없으면 빈 결과 → BE NO_ORDER)
-        return Outcome("INCOMPLETE", current, payment=payment, reasons=("NO_CONFIRMED_PARCEL",), customer_name=name)
+        # 받던 값도 없으면 결제 방식·수거 시각도 넣지 않는다 — BE는 paymentMethodType 하나만 있어도 주문 정보로 보고
+        # COLLECTING 주문을 만든다(empty-ai-order-results.md, 운영 통화 3a0b9c7f orderSeq 59)
+        return Outcome("INCOMPLETE", current, payment=payment if current else None, reasons=("NO_CONFIRMED_PARCEL",),
+                       customer_name=name)
 
     fares = tuple(fare_of(p) for p in submit)
     reasons = [g for p in submit for g in _parcel_gaps(p)]
