@@ -1,5 +1,7 @@
-"""BE → AI 페르소나 API(원본 develop-ai ai/app/webhooks/persona.py 그대로, 계약 backend/docs/ai-persona-next-call.md).
-Authorization: Bearer <AI_PERSONA_TOKEN>이 맞는 것만 처리한다. 토큰·프롬프트는 로그에 남기지 않는다."""
+"""백엔드 → AI 페르소나 API(spec/persona.md). 내부 네트워크(http://ai:8000)로만 부른다.
+
+Authorization: Bearer <AI_PERSONA_TOKEN>이 맞는 것만 처리한다. 토큰·프롬프트는 로그에 남기지 않는다.
+"""
 
 import logging
 import os
@@ -8,8 +10,8 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ValidationError
 
-from app.calls.persona import OPTIONS
-from pbx_webhook.sip import token_ok
+from app.persona import OPTIONS
+from app.webhooks.pbx import token_ok
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/internal/persona")
@@ -44,8 +46,5 @@ async def refresh(request: Request) -> Response:
         Refresh.model_validate_json(await request.body())
     except ValidationError:
         return Response(status_code=400)
-    calls = request.app.state.svc.calls
-    if calls is None:  # 통화 수신이 꺼져 있으면(OPENAI_API_KEY 없음) 적용할 곳이 없다
-        return Response(status_code=503)
-    calls.persona.refresh()
+    request.app.state.svc.persona.refresh()
     return Response(status_code=202)
