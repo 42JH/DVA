@@ -2,8 +2,15 @@ import { useCallback, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
-import { useLiveSearch } from '@/shared/lib/useLiveSearch'
-import { Button, ConfirmDialog, DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import {
+  Button,
+  ConfirmDialog,
+  DayPick,
+  DayScroll,
+  Highlight,
+  TopBar,
+  TopSearch,
+} from '@/shared/ui'
 import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
@@ -12,9 +19,9 @@ import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrder
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 
-// 03 주문 내역 (Figma 디자인/목업 '주문' 11/04) — 04 통화와 같은 틀: 상단바 · 머리(📅 날짜 | [추가]) · 검색칸(보내는 분 ≫ 받는 분) · 열 머리 · 줄 목록
+// 03 주문 내역 (Figma 디자인/목업 '주문' 11/04) — 04 통화와 같은 틀: 상단바 · 머리(📅 날짜 | [추가]) · 열 머리 · 줄 목록
 // 줄 = 시각 | 상태 칩(shared/order/OrderChip — 상세 창 머리와 같은 칩) | 보내는 분(이름 · 주소) | 받는 분 | 주문번호
-// 열 머리 '주문 상태 ⌄'를 누르면 상태 고르기(서버 statusGroup). 검색칸은 치는 대로 — 보내는 분 칸은 보내는 분에서만, 받는 분 칸은 받는 분에서만 찾음
+// 열 머리 '주문 상태 ⌄'를 누르면 상태 고르기(서버 statusGroup). 검색은 상단바 → 창(보내는 분 · 받는 분 두 칸, 11/05 사용자) — 보내는 분 칸은 보내는 분에서만, 받는 분 칸은 받는 분에서만 찾음
 // 무한 스크롤 · 머리 날짜 = 맨 위 줄의 날 (shared/ui/DayScroll, 04와 같음). 줄을 누르면 주문 상세 창 (shared/order — 06 '주문 보기'와 같은 창)
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
 // 칸 = Figma 자리(줄 1200 기준): 시각 126 · 상태 186 · 보내는 분 436 · 받는 분 342 · 주문번호 110(가운데). 넓은 화면에선 두 사람 칸이 같은 비율로 늘어남
@@ -29,7 +36,19 @@ export function OrderListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar />
+      <TopBar
+        search={
+          <TopSearch
+            name="주문 검색"
+            fields={[
+              { label: '보내는 분', value: vm.sender, placeholder: '이름 · 주소' },
+              { label: '받는 분', value: vm.receiver, placeholder: '이름 · 주소' },
+            ]}
+            hint="보내는 분 · 받는 분의 이름이나 주소로 찾아요. 한 칸만 써도 돼요."
+            onApply={([s, r]) => vm.search(s, r)}
+          />
+        }
+      />
       <div className="mt-2 flex h-[37px] shrink-0 items-center gap-6 pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         {vm.notice && (
@@ -41,29 +60,8 @@ export function OrderListPage() {
           추가
         </Button>
       </div>
-      {/* 검색칸은 그 칸의 사람 열에 맞춤 (테두리가 글자보다 4 왼쪽). ≫는 두 칸 사이 가운데 */}
-      <div className={`${COLS} mt-[29px] h-9 shrink-0 pr-[50px] pl-[58px]`}>
-        <div className="col-start-3 -ml-1 flex min-w-0 items-center">
-          <PartySearch who="보내는 분" q={vm.sender} onSearch={vm.setSender} />
-          <svg
-            viewBox="0 0 40 40"
-            className="mx-auto -my-0.5 size-10 shrink-0 text-brand"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M10 28.33 18.33 20 10 11.67M21.67 28.33 30 20l-8.33-8.33" />
-          </svg>
-        </div>
-        <div className="-ml-1 flex min-w-0">
-          <PartySearch who="받는 분" q={vm.receiver} onSearch={vm.setReceiver} />
-        </div>
-      </div>
       <div
-        className={`${COLS} mt-5 h-7 shrink-0 items-center pr-[50px] pl-[58px] text-card font-semibold`}
+        className={`${COLS} mt-v32 h-7 shrink-0 items-center pr-[50px] pl-[58px] text-card font-semibold`}
       >
         <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
         <span>보내는 분</span>
@@ -177,56 +175,6 @@ function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
         </span>
       ))}
     </span>
-  )
-}
-
-/** 보내는 분 · 받는 분 검색칸 (Figma '검색 필드' 11/04 — 320 × 36, 선 1 · 모서리 8). 치는 대로 목록이 바뀜 */
-function PartySearch({
-  who,
-  q,
-  onSearch,
-}: {
-  who: string
-  q: string
-  onSearch: (q: string) => void
-}) {
-  const { text, setText, clear, onKeyDown } = useLiveSearch(q, onSearch)
-  return (
-    <label className="flex h-9 w-[320px] min-w-0 shrink items-center gap-4 rounded-lg border border-field bg-surface pr-2 pl-5 focus-within:border-brand">
-      <svg
-        viewBox="-0.58 -0.58 16 16"
-        className="size-4 shrink-0 text-field"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.5}
-        strokeLinecap="round"
-        aria-hidden
-      >
-        <circle cx="6.08" cy="6.08" r="5.33" />
-        <path d="M10.08 10.08l4 4" />
-      </svg>
-      <input
-        type="search"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder="이름 · 주소"
-        aria-label={`${who} 검색 (이름 · 주소)`}
-        className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
-      />
-      {text && (
-        <button
-          type="button"
-          aria-label={`${who} 검색 지우기`}
-          onClick={clear}
-          className="grid size-6 shrink-0 place-items-center rounded text-sub hover:bg-bg hover:text-ink"
-        >
-          <svg viewBox="0 0 20 20" className="size-4 stroke-current" strokeWidth={1.8} aria-hidden>
-            <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
-          </svg>
-        </button>
-      )}
-    </label>
   )
 }
 

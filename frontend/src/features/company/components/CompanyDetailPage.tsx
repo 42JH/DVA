@@ -1,5 +1,14 @@
 import { Link, useParams } from 'react-router'
-import { Button, ConfirmDialog, Crumbs, Pagination, Table, Tag, type Column } from '@/shared/ui'
+import {
+  Button,
+  ConfirmDialog,
+  Pagination,
+  Table,
+  Tag,
+  TopBar,
+  TopSearch,
+  type Column,
+} from '@/shared/ui'
 import { INACTIVE_TAG, MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyDetail, type MemberRow } from '@/features/company/hooks/useCompanyDetail'
 import { MemberCsvModal } from './MemberCsvModal'
@@ -8,7 +17,7 @@ import { MemberFormModal } from './MemberFormModal'
 // 08 기업 상세 (Figma 08_기업관리_기업상세, 11/01) — ‹ 기업 목록 | 기업명 · '사원 12명 · 대표자 이서미 외 1명' + [CSV로 사원 추가] [사원 추가]
 // → 표 '사원 목록 12명'(사번 · 사원명+태그 · 전화번호 · 발송/수신 주소 · 상세주소 · [수정][삭제]) → 쪽 번호
 // 디자인과 다른 점 (11/01 결정): 등록일 뺌 · 대표자 이름 · 비활성 태그 · '기업 관리자' → '대표자' · 주소는 보기만
-// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 경로 '기업관리 > 기업 상세'(06 통화 상세처럼) · 새 버튼 · 표 big · 파랑 쪽 번호 · 새 창
+// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 상단바: 경로 '기업관리 > 기업 상세' · 사원 검색(11/05) · 알림 · 새 버튼 · 표 big · 파랑 쪽 번호 · 새 창
 export function CompanyDetailPage() {
   const id = Number(useParams().companyId)
   const vm = useCompanyDetail(id)
@@ -77,11 +86,18 @@ export function CompanyDetailPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <Crumbs
-        items={[{ label: '기업관리', to: '/companies' }, { label: '기업 상세' }]}
-        className="shrink-0 pl-[54px]"
+      <TopBar
+        crumbs={[{ label: '기업관리', to: '/companies' }, { label: '기업 상세' }]}
+        search={
+          <TopSearch
+            name="사원 검색"
+            fields={[{ value: vm.q }]}
+            hint="사원명 · 사번 · 전화번호로 찾아요."
+            onApply={([q]) => vm.setQ(q)}
+          />
+        }
       />
-      <div className="mt-v32 flex min-h-0 flex-1 flex-col gap-6 px-[54px]">
+      <div className="mt-2 flex min-h-0 flex-1 flex-col gap-6 px-[54px]">
         <div className="flex shrink-0 items-center gap-4">
           <Link to="/companies" className="text-body font-semibold text-brand hover:underline">
             ‹ 기업 목록

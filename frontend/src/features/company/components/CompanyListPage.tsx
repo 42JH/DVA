@@ -4,10 +4,10 @@ import {
   Button,
   ConfirmDialog,
   Pagination,
-  SearchBox,
   Table,
   Tag,
   TopBar,
+  TopSearch,
   type Column,
 } from '@/shared/ui'
 import { INACTIVE_TAG } from '@/features/company/labels'
@@ -16,7 +16,7 @@ import { CompanyCsvModal } from './CompanyCsvModal'
 
 // 08 기업관리 목록 (Figma 08_기업관리, 11/01) — 검색 + [삭제] [CSV로 기업 등록] → 표 '기업 목록 24곳'(체크 · 기업명 · 사원 수 · 월결제) → 쪽 번호
 // 디자인과 다른 점 (11/01 결정): 월결제 열 · 비활성 태그 추가 (등록일 · 사원 수는 11/01 백엔드 반영으로 서버 값)
-// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 새 상단바(04 · 03처럼 상태 · 알림) · 검색칸 · 새 버튼 · 표 big(줄만 스크롤) · 파랑 쪽 번호 · 새 창
+// 11/05 새 디자인: 구성은 그대로 두고 모양만 (사용자) — 새 상단바(04 · 03처럼 상태 · 검색 · 알림 — 검색칸은 상단바 → 창으로) · 새 버튼 · 표 big(줄만 스크롤) · 파랑 쪽 번호 · 새 창
 export function CompanyListPage() {
   const vm = useCompanyList()
 
@@ -53,19 +53,26 @@ export function CompanyListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar />
+      <TopBar
+        search={
+          <TopSearch
+            name="기업 검색"
+            fields={[{ value: vm.q }]}
+            hint="기업명으로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요."
+            recentKey="companies"
+            onApply={([q]) => vm.setQ(q)}
+          />
+        }
+      />
       <ListPage className="mt-2 min-h-0 flex-1 px-[54px]">
         <FilterBar>
-          <SearchBox
+          <Button
             big
-            value={vm.q}
-            onChange={vm.setQ}
-            recentKey="companies" // 11/02 사용자: 04 · 09와 같은 모양 (최근 검색어 · 추천 · 초성)
-            suggestions={vm.suggestions}
-            placeholder="기업명 검색"
-            className="min-w-0 flex-1"
-          />
-          <Button big kind="dangerLine" disabled={vm.selected.size === 0} onClick={vm.askDelete}>
+            kind="dangerLine"
+            className="ml-auto"
+            disabled={vm.selected.size === 0}
+            onClick={vm.askDelete}
+          >
             삭제
           </Button>
           <Button big kind="brand" onClick={vm.openCsv}>

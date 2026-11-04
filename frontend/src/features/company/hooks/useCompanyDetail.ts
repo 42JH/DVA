@@ -2,14 +2,15 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect, useState } from 'react'
 import { fmtPhone, fmtShortDate } from '@/shared/lib/format'
 import { ymd } from '@/shared/lib/dateRange'
-import { pageCount } from '@/shared/api/paging'
+import { pageCount, pageSlice } from '@/shared/api/paging'
+import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ApiError } from '@/shared/api/client'
 import { companyQueries, removeMember, type Member } from '@/features/company/api/companyApi'
 import { errorText } from '@/features/company/labels'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10명
-const DEFAULTS = {}
+const DEFAULTS = { q: '' }
 
 export interface MemberRow {
   id: number // membershipSeq
@@ -33,7 +34,7 @@ export type MemberModal =
 
 /** 08 기업 상세 훅 — 기업 · 제목 줄(사원 수 · 대표자) · 사원 표(쪽은 URL) · 창 상태 · 사원 삭제 */
 export function useCompanyDetail(id: number) {
-  const { page, set } = useListParams(DEFAULTS)
+  const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
   const [modal, setModal] = useState<MemberModal>(null)
 
@@ -48,11 +49,24 @@ export function useCompanyDetail(id: number) {
     .filter((m) => m.membership.role === 'ORG_ADMIN' && m.membership.status === 'ACTIVE')
     .map((m) => m.customer.name)
 
-  const total = members.data?.total_count ?? 0
+  // 사원 검색 (11/05): 서버에 검색 조건이 없어 대표자용으로 받아 둔 전체에서 거름 (사원명 초성 · 사번 · 전화번호 숫자)
+  const q = params.q.trim()
+  const digits = phoneDigits(q)
+  const hit = q
+    ? (all.data ?? []).filter(
+        (m) =>
+          matchKo(m.customer.name, q) ||
+          m.membership.employeeNo.includes(q) ||
+          (!!digits && m.customer.phoneNumber.includes(digits)),
+      )
+    : null
+  const shown = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (members.data?.data ?? [])
+
+  const total = hit ? hit.length : (members.data?.total_count ?? 0)
   const pages = pageCount(total, PAGE_SIZE)
   useEffect(() => {
-    if (members.data && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
-  }, [members.data, page, pages, set])
+    if ((hit ? all.data : members.data) && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
+  }, [hit, all.data, members.data, page, pages, set])
 
   const remove = useMutation({
     mutationFn: (m: Member) => removeMember(m.membership.membershipSeq),
@@ -64,7 +78,7 @@ export function useCompanyDetail(id: number) {
     onError: () => setModal(null),
   })
 
-  const rows: MemberRow[] = (members.data?.data ?? []).map((m) => ({
+  const rows: MemberRow[] = shown.map((m) => ({
     id: m.membership.membershipSeq,
     employeeNo: m.membership.employeeNo,
     name: m.customer.name,
@@ -98,8 +112,10 @@ export function useCompanyDetail(id: number) {
       .join(' · '),
     total,
 
+    q: params.q,
+    setQ: (v: string) => set({ q: v }), // 쪽은 1로
     rows,
-    isLoading: members.isPending,
+    isLoading: hit ? all.isPending : members.isPending,
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),
