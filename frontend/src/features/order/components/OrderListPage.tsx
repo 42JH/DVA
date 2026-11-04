@@ -4,27 +4,21 @@ import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
 import { useLiveSearch } from '@/shared/lib/useLiveSearch'
 import { Button, ConfirmDialog, DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
+import { orderNo } from '@/shared/order/labels'
 import type { StatusGroup } from '@/features/order/api/orderApi'
-import { orderNo } from '@/features/order/labels'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 
 // 03 주문 내역 (Figma 디자인/목업 '주문' 11/04) — 04 통화와 같은 틀: 상단바 · 머리(📅 날짜 | [추가]) · 검색칸(보내는 분 ≫ 받는 분) · 열 머리 · 줄 목록
-// 줄 = 시각 | 상태 칩 | 보내는 분(이름 · 주소) | 받는 분 | 주문번호. 칩은 모두 같은 폭 — 가장 긴 '미완료 주문' 기준 (11/04 사용자)
+// 줄 = 시각 | 상태 칩(shared/order/OrderChip — 상세 창 머리와 같은 칩) | 보내는 분(이름 · 주소) | 받는 분 | 주문번호
 // 열 머리 '주문 상태 ⌄'를 누르면 상태 고르기(서버 statusGroup). 검색칸은 치는 대로 — 보내는 분 칸은 보내는 분에서만, 받는 분 칸은 받는 분에서만 찾음
 // 무한 스크롤 · 머리 날짜 = 맨 위 줄의 날 (shared/ui/DayScroll, 04와 같음). 줄을 누르면 주문 상세 창 (shared/order — 06 '주문 보기'와 같은 창)
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
 // 칸 = Figma 자리(줄 1200 기준): 시각 126 · 상태 186 · 보내는 분 436 · 받는 분 342 · 주문번호 110(가운데). 넓은 화면에선 두 사람 칸이 같은 비율로 늘어남
 const COLS = 'grid grid-cols-[126px_186px_minmax(0,436fr)_minmax(0,342fr)_110px]'
-const CHIP: Record<OrderListRow['group'], string> = {
-  COLLECTING: 'border-order-open',
-  notPaid: 'border-order-wait',
-  PAID: 'border-order-paid',
-  SUBMISSION_FAILED: 'border-order-fail',
-  CANCELLED: 'border-order-cancel',
-}
 
 export function OrderListPage() {
   const vm = useOrderList()
@@ -161,11 +155,7 @@ function OrderLine({ r, vm }: { r: OrderListRow; vm: ReturnType<typeof useOrderL
     >
       <span className="pl-0.5 text-sub">{r.time}</span>
       <span>
-        <span
-          className={`grid h-8 w-[105px] place-items-center rounded-2xl border-2 text-body font-semibold whitespace-nowrap text-sub ${CHIP[r.group]}`}
-        >
-          {r.status}
-        </span>
+        <OrderChip group={r.group} />
       </span>
       <Party p={r.sender} q={vm.sender.trim()} />
       <Party p={r.receiver} q={vm.receiver.trim()} />

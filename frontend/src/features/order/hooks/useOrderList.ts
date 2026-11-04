@@ -4,7 +4,8 @@ import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtRowTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
-import { STATUS_GROUP, STATUS_GROUP_LABEL, orderErrorText, orderNo } from '@/features/order/labels'
+import { ORDER_GROUP, orderNo, type OrderGroup } from '@/shared/order/labels'
+import { STATUS_GROUP_LABEL, orderErrorText } from '@/features/order/labels'
 import { parcelRows, partyHas } from '@/features/order/api/parcelRows'
 import {
   cancelOrder,
@@ -24,8 +25,7 @@ export interface OrderListRow {
   orderSeq: number // 줄을 누르면 이 주문 상세 (미완료 · 취소도 열림, 11/01 결정)
   parcelSeq: number | null // 그 줄의 배송 상세 → 상세 창이 이 상세를 보여 줌 (상세 없는 주문은 null)
   time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24'
-  group: Exclude<StatusGroup, 'ALL'> // 칩 색
-  status: string // 칩 글 '결제 완료'
+  group: OrderGroup // 상태 칩
   sender: { name: string; address: string }
   receiver: { name: string; address: string }
   orderNo: string // 'DV-10519'
@@ -98,8 +98,7 @@ export function useOrderList() {
         orderSeq: r.orderSeq,
         parcelSeq: r.parcel?.orderParcelSeq ?? null,
         time: fmtRowTime(r.createdAt, today),
-        group: STATUS_GROUP[r.status],
-        status: STATUS_GROUP_LABEL[STATUS_GROUP[r.status]],
+        group: ORDER_GROUP[r.status],
         sender: party(r.parcel?.origin),
         receiver: party(r.parcel?.destination),
         orderNo: orderNo(r.orderSeq),

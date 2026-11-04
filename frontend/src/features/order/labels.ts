@@ -1,30 +1,9 @@
-// 주문 상태 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts)
-import type { OrderStatus, StatusGroup } from './api/orderApi'
+// 주문 상태 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 칩 · 주문번호는 상세 창과 같이 써서 shared/order/labels
+import { ORDER_GROUP_LABEL } from '@/shared/order/labels'
+import type { StatusGroup } from './api/orderApi'
 
-/** 상태 묶음 = 서버 statusGroup = 목록 '주문 상태' 고르기 · 줄 칩 (Figma '주문' 11/04 문구). 접수 실패는 서버 묶음(11/01)이라 더함 */
-export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
-  ALL: '전체',
-  COLLECTING: '미완료 주문',
-  notPaid: '결제 대기',
-  PAID: '결제 완료',
-  SUBMISSION_FAILED: '접수 실패',
-  CANCELLED: '주문 취소',
-}
-
-/** 실제 상태 8개 → 묶음 (서버 statusGroup 규칙: 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = 재시도 중 실패 · 최종 실패) */
-export const STATUS_GROUP: Record<OrderStatus, Exclude<StatusGroup, 'ALL'>> = {
-  COLLECTING: 'COLLECTING',
-  notPaid: 'notPaid',
-  PAID: 'PAID',
-  SUBMITTING: 'PAID',
-  ACCEPTED: 'PAID',
-  SUBMITTING_FAILED: 'SUBMISSION_FAILED',
-  SUBMISSION_FAILED: 'SUBMISSION_FAILED',
-  CANCELLED: 'CANCELLED',
-}
-
-/** 주문번호 'DV-00001' (Figma '주문' 11/04) — 서버 주문 번호(orderSeq)를 5자리로 */
-export const orderNo = (orderSeq: number) => `DV-${String(orderSeq).padStart(5, '0')}`
+/** '주문 상태' 고르기 = 전체 + 상태 묶음 (서버 statusGroup) */
+export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = { ALL: '전체', ...ORDER_GROUP_LABEL }
 
 /** 주문 추가 · 수정 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구 · 코드를 그대로 보이지 않음, 11/01 기업관리와 같은 기준) */
 export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소'): string {
