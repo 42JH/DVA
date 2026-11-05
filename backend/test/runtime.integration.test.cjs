@@ -781,7 +781,9 @@ test('production company directory searches current member addresses through Ngi
   });
   assert.equal(created.status, 204, await created.text());
   const url = root + '/companies/search?' + new URLSearchParams({ q: name + ' ' + recipientName });
-  const searched = await fetch(url);
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal((await fetch(url, { headers })).status, 401);
+  const searched = await fetch(url, { headers: businessHeaders() });
   assert.equal(searched.status, 200);
   assert.equal(searched.headers.get('cache-control'), 'no-store');
   const body = await searched.json();
@@ -791,6 +793,16 @@ test('production company directory searches current member addresses through Ngi
   assert.equal(body.data[0].companyPinSeq, undefined);
   assert.equal(body.data[0].organizationName, name);
   assert.deepEqual(body.data[0].addressData, addressData);
+  const adminSearchUrl = root + '/companies/members/search?q=RUNTIME-DIR';
+  assert.equal((await fetch(adminSearchUrl, { headers: businessHeaders() })).status, 401);
+  const memberSearch = await fetch(adminSearchUrl, { headers });
+  assert.equal(memberSearch.status, 200);
+  const members = await memberSearch.json();
+  assert.equal(members.data[0].organizationSeq, id);
+  assert.equal(members.data[0].name, recipientName);
+  assert.equal(members.data[0].phoneNumber, phoneNumber);
+  assert.equal(members.data[0].employeeNo, 'RUNTIME-DIR');
+  assert.equal(members.data[0].organizationStatus, 'ACTIVE');
   assert.equal((await fetch(root + '/companies')).status, 401);
   assert.equal((await fetch(root + `/companies/${id}/members`)).status, 401);
   const deactivated = await fetch(root + `/companies/${id}`, {
@@ -799,8 +811,24 @@ test('production company directory searches current member addresses through Ngi
     body: '{"status":"INACTIVE"}',
   });
   assert.equal(deactivated.status, 204);
-  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false, total_count: 0 });
-  assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
+  assert.deepEqual(await (await fetch(url, { headers: businessHeaders() })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  assert.deepEqual(await (await fetch(adminSearchUrl, { headers })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  const inactiveMembers = await (
+    await fetch(adminSearchUrl + '&includeInactive=true', { headers })
+  ).json();
+  assert.equal(inactiveMembers.data[0].organizationStatus, 'INACTIVE');
+  assert.equal(
+    (await fetch(root + '/companies/search?q=', { headers: businessHeaders() })).status,
+    400,
+  );
 });
 
 test('production cancellation preserves AI phone scope and admin sessions through Nginx', async () => {

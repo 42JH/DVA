@@ -1,6 +1,6 @@
 # 기업·부서 삭제와 기록 보존
 
-Backend 전용 기능. 새 앱 실행 전 `021-company-deletion-history.sql`까지 적용한다.
+Backend 전용 기능. 현재 앱은 `053-drop-company-pins.sql`까지 적용한다. 기업 PIN 테이블 제거·과거 참조 호환은 [053 전환 안내](../../backend/docs/company-pin-retirement.md)를 우선한다.
 
 | API | 권한·입력 | 응답 |
 | --- | --- | --- |
@@ -13,11 +13,11 @@ Backend 전용 기능. 새 앱 실행 전 `021-company-deletion-history.sql`까�
 
 | 대상 | 기업 삭제 | 부서 삭제 |
 | --- | --- | --- |
-| 기업·부서 | 기업과 소속 부서 전체 실제 삭제 | 해당 부서만 실제 삭제 |
-| 소속 | 기업 구성원 전체의 소속 행 삭제 | 해당 부서 구성원의 기업·부서 소속 행 삭제 |
+| 기업·부서 | 기업과 소속 부서 전체 soft delete | 해당 부서만 soft delete |
+| 소속 | 기업 구성원 전체 소속 soft delete | 해당 부서 구성원 소속 soft delete |
 | 개인 고객·개인 월결제 설정·개인 PIN | 보존 | 보존 |
-| 기업 PIN | 해당 기업 전체 삭제 | 해당 부서 번호의 PIN만 삭제 |
-| 다른 부서·사원·기업 공용 PIN | 다른 기업 데이터 보존 | 같은 기업의 다른 부서·사원·기업 공용 PIN 보존 |
+| 기업 PIN | 053에서 테이블 제거, 삭제 API는 접근하지 않음 | 동일 |
+| 다른 부서·사원 | 다른 기업 데이터 보존 | 같은 기업의 다른 부서·사원 보존 |
 | 주문·상세·배송·결제 요청·청구 원장·월별 금액 | 보존 | 보존 |
 | 통화·발화·녹취 객체와 DB 연결·기존 감사 로그 | 보존 | 보존 |
 
@@ -25,7 +25,7 @@ Backend 전용 기능. 새 앱 실행 전 `021-company-deletion-history.sql`까�
 
 ## 기존 기업 PIN 이력
 
-기업 PIN 등록·수정·조회 API는 폐기되었다. 기업 공유 배송지는 활성 기업 사원의 현재 고객 주소에서 조회한다. 기존 company_pins 테이블은 과거 주문 참조를 보존하는 용도로 유지한다. 기업 삭제는 기존 PIN을 정리하고, 부서 삭제는 department_seq가 해당 부서인 PIN만 정리한다. 부서가 정해지지 않은 과거 PIN은 임의로 배정·삭제하지 않고 그대로 보존하며 부서 삭제를 막지 않는다. 부서 개명 시 명시적으로 연결된 과거 PIN의 표시명·버전 갱신은 유지한다.
+기업 PIN 등록·수정·조회 API는 폐기되었다. 기업 공유 배송지는 활성 기업 사원의 현재 고객 주소에서 조회한다. 053은 company_pins만 제거하고 과거 주문의 COMPANY 논리 참조·주소 사본·기존 감사를 유지한다. 기업·부서 삭제나 개명에서 PIN 동기화·새 PIN 감사는 수행하지 않는다.
 
 ## 과거 주문과 청구 조회
 
@@ -37,15 +37,15 @@ Backend 전용 기능. 새 앱 실행 전 `021-company-deletion-history.sql`까�
 
 ## 진행 중인 주문
 
-- `COLLECTING`: 삭제 전 내용을 그대로 보존한다. 접수 시 결제 자격·PIN을 다시 검사한다. 권한이 사라졌으면 403이며 자동 결제 전환·주소 변경은 하지 않는다. 필요한 경우 관리자가 결제 방식을 변경하고 삭제된 PIN 출처를 `originPin:null`로 해제한 뒤 고객에게 주소를 확인하고 다시 접수한다.
+- `COLLECTING`: 삭제 전 내용을 그대로 보존한다. 접수 시 현재 결제 자격과 PERSONAL PIN 권한을 다시 검사한다. 결제 자격이 사라졌으면 403이며 자동 전환하지 않는다. 과거 COMPANY는 저장된 주소 사본으로 진행한다. 주소 변경 시에만 originPin을 null 또는 유효한 PERSONAL로 전환한다.
 - `notPaid`: 기존 금액·주소·만료 시각·결제 요청을 유지한다. 회사·PIN 삭제 후에도 개인 결제를 완료할 수 있다.
 - `PAID`·`SUBMITTING`·`SUBMISSION_FAILED`·`ACCEPTED`: 결제 당시 사본으로 진행하며 회사 삭제가 취소·재청구를 유발하지 않는다. 실패 주문은 기존 관리자 재접수 API를 사용한다.
 
 ## 트랜잭션과 감사
 
-소속/CSV 공통 잠금 → 대상 고객 번호순 잠금 → 기업·부서 잠금 → 미배정 PIN 확인 → 소속·기업 PIN 삭제 → 부서·기업 삭제 순서다. 삭제와 성공 감사는 같은 트랜잭션이며 감사 저장 실패도 전체 롤백한다. 디버·S3·AI에 삭제 요청을 보내지 않는다.
+소속/CSV 공통 잠금 → 대상 고객 번호순 잠금 → 기업·부서 잠금 → 소속 soft delete → 부서·기업 soft delete 순서다. 삭제와 성공 감사는 같은 트랜잭션이며 감사 저장 실패도 전체 롤백한다. 디버·S3·AI에 삭제 요청을 보내지 않는다.
 
-작업 주체는 요청 관리자 `ADMIN`, 표시명 `운영자`다. 소속별 `MEMBERSHIP_REMOVED`, PIN별 `COMPANY_PIN_DELETED`, 부서별 `DEPARTMENT_DELETED`, 기업 `ORGANIZATION_DELETED`를 같은 `requestId`로 연결한다. 작업자 번호·이름과 `organizationSeq/organizationName`, 해당 시 `departmentSeq/departmentName/customerSeq`를 보존한다. 개인 주소·전화번호·사번을 삭제 로그에 복사하지 않는다. 기존 AI·SYSTEM 로그의 주체와 내용은 바꾸지 않는다.
+작업 주체는 요청 관리자 `ADMIN`, 표시명 `운영자`다. 소속별 `MEMBERSHIP_REMOVED`, 부서별 `DEPARTMENT_DELETED`, 기업 `ORGANIZATION_DELETED`를 같은 `requestId`로 연결한다. 작업자 번호·이름과 `organizationSeq/organizationName`, 해당 시 `departmentSeq/departmentName/customerSeq`를 보존한다. 개인 주소·전화번호·사번을 삭제 로그에 복사하지 않는다. 기존 COMPANY_PIN·AI·SYSTEM 로그의 주체와 내용은 바꾸지 않는다.
 
 ## 배포와 검증
 

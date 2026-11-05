@@ -357,26 +357,32 @@ module.exports = function registerOrdersUpdates(suite) {
     }
   });
 
-  test('ORD-04 checks personal and company PIN access and permits clearing a revoked reference', async () => {
+  test('ORD-04 checks personal PIN ownership and permits clearing a revoked reference', async () => {
     const id = await readOrder(suite.customerId, [{ smallBoxCount: 1 }]);
     let before = await storedOrder(id);
     const change = (pin) => ({
       expectedVersion: before.version,
       parcels: [{ orderParcelSeq: before.parcels[0].orderParcelSeq, originPin: pin }],
     });
-    for (const pin of [
-      { scope: 'PERSONAL', pinSeq: suite.otherPin },
-      { scope: 'COMPANY', pinSeq: 2147483647 },
-    ])
-      await errorCode(await patchOrder(id, change(pin)), 403, 'FORBIDDEN');
+    await errorCode(
+      await patchOrder(id, change({ scope: 'PERSONAL', pinSeq: suite.otherPin })),
+      403,
+      'FORBIDDEN',
+    );
+    await errorCode(
+      await patchOrder(id, change({ scope: 'COMPANY', pinSeq: 2147483647 })),
+      400,
+      'INVALID_REQUEST',
+    );
     assert.equal(
-      (await patchOrder(id, change({ scope: 'COMPANY', pinSeq: suite.companyPin }))).status,
+      (await patchOrder(id, change({ scope: 'PERSONAL', pinSeq: suite.personalPin }))).status,
       200,
     );
     before = await storedOrder(id);
-    await pool.query("UPDATE memberships SET status='INACTIVE' WHERE customer_seq=$1", [
-      suite.customerId,
-    ]);
+    await pool.query(
+      'UPDATE personal_pins SET deleted_at=clock_timestamp() WHERE personal_pin_seq=$1',
+      [suite.personalPin],
+    );
     try {
       await errorCode(
         await patchOrder(id, {
@@ -390,10 +396,56 @@ module.exports = function registerOrdersUpdates(suite) {
       assert.equal((await patchOrder(id, change(null))).status, 200);
       assert.equal((await storedOrder(id)).parcels[0].originPin, null);
     } finally {
-      await pool.query("UPDATE memberships SET status='ACTIVE' WHERE customer_seq=$1", [
-        suite.customerId,
+      await pool.query('UPDATE personal_pins SET deleted_at=NULL WHERE personal_pin_seq=$1', [
+        suite.personalPin,
       ]);
     }
+  });
+
+  test('legacy COMPANY references preserve only the same parcel and address snapshot, and never authorize a new selection', async () => {
+    const id = await readOrder(suite.customerId, [
+      { origin: address, smallBoxCount: 1 },
+      { origin: address, smallBoxCount: 1 },
+    ]);
+    let before = await storedOrder(id);
+    const parcelId = before.parcels[0].orderParcelSeq;
+    const legacy = { scope: 'COMPANY', pinSeq: suite.companyPin };
+    await pool.query(
+      "UPDATE order_parcels SET origin_pin_scope='COMPANY',origin_pin_seq=$2 WHERE order_parcel_seq=$1",
+      [parcelId, legacy.pinSeq],
+    );
+    before = await storedOrder(id);
+    const patch = (change) =>
+      patchOrder(id, {
+        expectedVersion: before.version,
+        parcels: [{ orderParcelSeq: parcelId, ...change }],
+      });
+    for (const change of [
+      { originPin: { ...legacy, pinSeq: legacy.pinSeq + 1 } },
+      { origin: { name: '다른 출발지' } },
+      { originPin: legacy, origin: { name: '다른 출발지' } },
+      { orderParcelSeq: before.parcels[1].orderParcelSeq, originPin: legacy },
+      { orderParcelSeq: undefined, originPin: legacy, origin: address },
+    ]) {
+      await errorCode(await patch(change), 400, 'INVALID_REQUEST');
+      assert.deepEqual(await storedOrder(id), before);
+    }
+    assert.equal(
+      (await patch({ originPin: legacy, origin: address, smallBoxCount: 2 })).status,
+      200,
+    );
+    let current = await storedOrder(id);
+    assert.deepEqual(current.parcels[0].origin, before.parcels[0].origin);
+    assert.deepEqual(current.parcels[0].originPin, legacy);
+    before = current;
+    assert.equal((await patch({ clientComment: '과거 주소 유지' })).status, 200);
+    current = await storedOrder(id);
+    assert.deepEqual(current.parcels[0].originPin, legacy);
+    before = current;
+    assert.equal((await patch({ origin: { name: '새 출발지' }, originPin: null })).status, 200);
+    current = await storedOrder(id);
+    assert.equal(current.parcels[0].originPin, null);
+    assert.equal(current.parcels[0].origin.name, '새 출발지');
   });
 
   test('ORD-04 AI continues an explicitly selected customer order and cannot replace a call binding', async () => {

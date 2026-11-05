@@ -611,19 +611,19 @@ module.exports = function registerOrdersCreation(suite) {
     assert.deepEqual(await counts(), before);
   });
 
-  test('PIN access is checked for the order customer and active company membership', async () => {
+  test('personal PIN ownership is checked and new company PIN selections are retired', async () => {
     const body = (scope, pinSeq) => ({
       customerSeq: suite.customerId,
       parcels: [{ originPin: { scope, pinSeq } }],
     });
     for (const pin of [suite.otherPin, 2147483647])
       await errorCode(await create(body('PERSONAL', pin)), 403, 'FORBIDDEN');
-    assert.equal((await create(body('COMPANY', suite.companyPin))).status, 201);
+    await errorCode(await create(body('COMPANY', suite.companyPin)), 400, 'INVALID_REQUEST');
     await pool.query("UPDATE memberships SET status='INACTIVE' WHERE customer_seq=$1", [
       suite.customerId,
     ]);
     try {
-      await errorCode(await create(body('COMPANY', suite.companyPin)), 403, 'FORBIDDEN');
+      await errorCode(await create(body('COMPANY', suite.companyPin)), 400, 'INVALID_REQUEST');
     } finally {
       await pool.query("UPDATE memberships SET status='ACTIVE' WHERE customer_seq=$1", [
         suite.customerId,
@@ -633,7 +633,7 @@ module.exports = function registerOrdersCreation(suite) {
       suite.organizationId,
     ]);
     try {
-      await errorCode(await create(body('COMPANY', suite.companyPin)), 403, 'FORBIDDEN');
+      await errorCode(await create(body('COMPANY', suite.companyPin)), 400, 'INVALID_REQUEST');
     } finally {
       await pool.query("UPDATE organizations SET status='ACTIVE' WHERE organization_seq=$1", [
         suite.organizationId,

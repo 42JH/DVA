@@ -103,6 +103,11 @@ async function migrate(pool) {
         "SELECT 1 WHERE to_regclass('public.faq_question_examples') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.faq_entries'::regclass AND tgname='faq_question_examples_reset' AND tgenabled='O')",
       );
       assert.equal(faqExamples.rowCount, 1, 'Apply migration 052 to the isolated DB first');
+      assert.equal(
+        (await client.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name,
+        null,
+        'Apply migration 053 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)

@@ -57,12 +57,4 @@ export class DepartmentsRepository {
       [id, input.name ?? null, input.groupBillingEnabled ?? null],
     );
   }
-  async renamePins(client: PoolClient, id: number, name: string) {
-    return (
-      await client.query<{ id: number }>(
-        'UPDATE company_pins SET department_name=$2 WHERE department_seq=$1 AND deleted_at IS NULL AND department_name IS DISTINCT FROM $2 RETURNING company_pin_seq AS id',
-        [id, name],
-      )
-    ).rows;
-  }
 }

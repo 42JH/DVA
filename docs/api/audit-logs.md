@@ -1,6 +1,6 @@
 # 감사 로그
 
-기업·부서 삭제는 `ORGANIZATION_DELETED`, `DEPARTMENT_DELETED`, 연결 정리는 `MEMBERSHIP_REMOVED`, `COMPANY_PIN_DELETED`로 기록한다. 같은 requestId와 당시 기업/부서 번호·이름으로 삭제 후에도 추적한다. 요청 관리자는 ADMIN·표시명 운영자이며 작업자 번호·이름을 보존한다. [삭제 감사와 트랜잭션 계약](company-deletion.md)을 따른다.
+기업·부서 삭제는 `ORGANIZATION_DELETED`, `DEPARTMENT_DELETED`, 연결 정리는 `MEMBERSHIP_REMOVED`로 기록한다. 053 이후 새 기업 PIN 감사는 생성하지 않으며 과거 `COMPANY_PIN_CREATED/UPDATED/DELETED` 이력은 보존한다. 같은 requestId와 당시 기업/부서 번호·이름으로 삭제 후에도 추적한다. 요청 관리자는 ADMIN·표시명 운영자이며 작업자 번호·이름을 보존한다. [삭제 감사와 트랜잭션 계약](company-deletion.md)을 따른다.
 
 관련 Jira: [S15P31D109-101](https://ssafy.atlassian.net/browse/S15P31D109-101).
 조회는 `dva_session`으로 인증한 ACTIVE 상태의 SUPERVISOR·SYSTEM_ADMIN만 가능하다.

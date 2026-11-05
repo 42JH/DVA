@@ -298,14 +298,18 @@ const businessToken = 'business-test-only-token-at-least-32-characters';
 const adminToken = 'a'.repeat(64);
 const origin = 'http://localhost:5173';
 
-function customerAccess(handler, headers = {}, settings = {}) {
+function customerAccess(handler, headers = {}, settings = {}, Controller = CustomersController) {
   const failures = [];
   const request = {
     headers,
     rawHeaders: Object.entries(headers).flat(),
     get: (name) => headers[name.toLowerCase()],
     path: '/api/customers/1',
-    method: ['find', 'list'].includes(handler) ? 'GET' : handler === 'update' ? 'PATCH' : 'POST',
+    method: ['find', 'list', 'search'].includes(handler)
+      ? 'GET'
+      : handler === 'update'
+        ? 'PATCH'
+        : 'POST',
     body: {},
     params: { id: '1' },
     requestId: 'business-auth-test',
@@ -325,8 +329,8 @@ function customerAccess(handler, headers = {}, settings = {}) {
     },
   );
   const context = {
-    getHandler: () => CustomersController.prototype[handler],
-    getClass: () => CustomersController,
+    getHandler: () => Controller.prototype[handler],
+    getClass: () => Controller,
     switchToHttp: () => ({ getRequest: () => request }),
   };
   return { request, failures, run: () => guard.canActivate(context) };
@@ -379,4 +383,50 @@ test('AI business authentication preserves administrator sessions, Origin and li
   }
   const list = customerAccess('list', { authorization: 'Bearer ' + businessToken });
   await assert.rejects(list.run(), (error) => error.getStatus() === 401);
+});
+
+test('directory service authentication requires one valid Bearer independently of administrator cookies', async () => {
+  const { OrganizationsController } = require('../dist/organizations/organizations.controller');
+  const access = (headers, settings) =>
+    customerAccess('search', headers, settings, OrganizationsController);
+  for (const headers of [
+    {},
+    { cookie: 'dva_session=' + adminToken },
+    { authorization: 'Bearer wrong' },
+  ])
+    await assert.rejects(access(headers).run(), (error) => error.getStatus() === 401);
+  for (const cookie of [undefined, 'dva_session=' + adminToken, 'dva_session=stale']) {
+    const authenticated = access({ authorization: 'Bearer ' + businessToken, cookie });
+    assert.equal(await authenticated.run(), true);
+    assert.equal(authenticated.request.auditActorType, 'AI');
+    assert.equal(authenticated.request.admin, undefined);
+  }
+  const duplicate = access({ authorization: 'Bearer ' + businessToken });
+  duplicate.request.rawHeaders.push('Authorization', 'Bearer ' + businessToken);
+  await assert.rejects(duplicate.run(), (error) => error.getStatus() === 401);
+  await assert.rejects(
+    access({ cookie: 'dva_session=' + adminToken }, { AI_BUSINESS_TOKEN: undefined }).run(),
+    (error) => error.getStatus() === 503,
+  );
+});
+
+test('administrator member search never accepts a service token as a session', async () => {
+  const { MembersController } = require('../dist/members/members.controller');
+  for (const headers of [
+    {},
+    { authorization: 'Bearer ' + businessToken },
+    { cookie: 'dva_session=bad', authorization: 'Bearer ' + businessToken },
+  ])
+    await assert.rejects(
+      customerAccess('search', headers, {}, MembersController).run(),
+      (error) => error.getStatus() === 401,
+    );
+  const access = customerAccess(
+    'search',
+    { cookie: 'dva_session=' + adminToken },
+    { AI_BUSINESS_TOKEN: undefined },
+    MembersController,
+  );
+  assert.equal(await access.run(), true);
+  assert.equal(access.request.admin.adminUserSeq, 7);
 });

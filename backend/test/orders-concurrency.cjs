@@ -42,7 +42,6 @@ module.exports = function registerOrdersConcurrency(suite) {
           ])
         ).rows[0].department_seq;
         const parcel = {
-          originPin: { scope: 'COMPANY', pinSeq: suite.companyPin },
           origin: address,
           destination: address,
           smallBoxCount: 1,
@@ -173,7 +172,6 @@ module.exports = function registerOrdersConcurrency(suite) {
           paymentMethodType: 'groupBilling',
           parcels: [
             {
-              originPin: { scope: 'COMPANY', pinSeq: suite.companyPin },
               origin: address,
               destination: address,
               smallBoxCount: 1,

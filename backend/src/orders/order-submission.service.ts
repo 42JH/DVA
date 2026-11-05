@@ -142,6 +142,7 @@ export class OrderSubmissionService {
       if (parcel.status === 'CANCELLED') continue;
       if (
         parcel.originPin &&
+        parcel.originPin.scope === 'PERSONAL' &&
         !(await this.repository.canUsePin(client, customerId, parcel.originPin))
       )
         throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');

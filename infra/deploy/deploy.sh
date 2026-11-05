@@ -227,6 +227,26 @@ check_unused_compatibility() {
     }
 }
 
+read_company_pin_schema() {
+    local db_container state
+    db_container="$(database_container)" || return 1
+    state="$("${docker_cmd[@]}" exec "$db_container" sh -c \
+        'exec psql -X -At -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "$1"' sh \
+        "SELECT to_regclass('public.organizations') IS NOT NULL AND to_regclass('public.company_pins') IS NULL" </dev/null)" || return 1
+    [[ "$state" == t || "$state" == f ]] || return 1
+    printf '%s' "$state"
+}
+
+check_company_pin_compatibility() {
+    local directory="$1" state
+    [[ -f "$directory/backend/migrations/$company_pin_migration" ]] && return 0
+    state="$(read_company_pin_schema)" || return 1
+    [[ "$state" == f ]] || {
+        echo 'Deployment/restore blocked: the target app requires removed company PIN table. Repair forward or restore the backup during maintenance.' >&2
+        return 1
+    }
+}
+
 restore_previous() {
     local state
     if [[ -z "$old_version" || "$old_version" == "$version" ]]; then
@@ -246,6 +266,7 @@ restore_previous() {
     check_address_compatibility "$releases_dir/$old_version" || return 1
     check_retention_compatibility "$releases_dir/$old_version" || return 1
     check_unused_compatibility "$releases_dir/$old_version" || return 1
+    check_company_pin_compatibility "$releases_dir/$old_version" || return 1
     echo "Restoring previous running release: $old_version" >&2
     if apply_release "$releases_dir/$old_version"; then
         echo 'Previous release restored. Deployment still reports failure.' >&2
@@ -273,6 +294,7 @@ call_analysis_migration=042-remove-call-analysis-result.sql
 address_migration=043-remove-address-coordinates.sql
 retention_migration=045-data-retention.sql
 unused_migration=047-remove-unused-schema.sql
+company_pin_migration=053-drop-company-pins.sql
 backup_required=false
 case "${1:-}" in
     '') ;;
@@ -303,9 +325,11 @@ check_call_analysis_compatibility "$release_dir" || exit 1
 check_address_compatibility "$release_dir" || exit 1
 check_retention_compatibility "$release_dir" || exit 1
 check_unused_compatibility "$release_dir" || exit 1
+check_company_pin_compatibility "$release_dir" || exit 1
 address_state="$(read_address_schema)" || { echo 'Cannot verify address schema. Deployment stopped.' >&2; exit 1; }
 retention_state="$(read_retention_schema)" || { echo 'Cannot verify retention schema. Deployment stopped.' >&2; exit 1; }
 unused_state="$(read_unused_schema)" || { echo 'Cannot verify removed schema fields. Deployment stopped.' >&2; exit 1; }
+company_pin_state="$(read_company_pin_schema)" || { echo 'Cannot verify company PIN schema. Deployment stopped.' >&2; exit 1; }
 call_analysis_state=f
 if [[ -f "$release_dir/backend/migrations/$call_analysis_migration" ]]; then
     call_analysis_state="$(read_call_analysis_schema)" || { echo 'Cannot verify call analysis schema. Deployment stopped.' >&2; exit 1; }
@@ -325,7 +349,8 @@ if [[ "${1:-}" != --rollback ]]; then
        [[ "$call_analysis_state" == f && -f "$release_dir/backend/migrations/$call_analysis_migration" ]] ||
        [[ "$address_state" == f && -f "$release_dir/backend/migrations/$address_migration" ]] ||
        [[ "$retention_state" == f && -f "$release_dir/backend/migrations/$retention_migration" ]] ||
-       [[ "$unused_state" == f && -f "$release_dir/backend/migrations/$unused_migration" ]]; then
+       [[ "$unused_state" == f && -f "$release_dir/backend/migrations/$unused_migration" ]] ||
+       [[ "$company_pin_state" == f && -f "$release_dir/backend/migrations/$company_pin_migration" ]]; then
         # Quiesce old writers before the backup and breaking schema conversion.
         compose "$release_dir" stop backend
         backup_required=true

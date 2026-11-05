@@ -63,22 +63,14 @@ async function member(customerSeq, organizationSeq, status = 'ACTIVE', role = 'M
     })
   ).rows[0].membership_seq;
 }
-async function pin(scope, owner, label = null, version = 1) {
-  if (scope === 'PERSONAL')
-    return (
-      await pool.query(
-        `INSERT INTO personal_pins(customer_seq,label,address_data,version) VALUES($1,$2,$3,$4)
-         RETURNING personal_pin_seq`,
-        [owner, label, { ...address, detailAddress: randomUUID() }, version],
-      )
-    ).rows[0].personal_pin_seq;
+async function pin(owner, label = null, version = 1) {
   return (
     await pool.query(
-      `INSERT INTO company_pins(organization_seq,label,department_name,address_data,version)
-       VALUES($1,$2,'개발부',$3,$4) RETURNING company_pin_seq`,
+      `INSERT INTO personal_pins(customer_seq,label,address_data,version) VALUES($1,$2,$3,$4)
+       RETURNING personal_pin_seq`,
       [owner, label, { ...address, detailAddress: randomUUID() }, version],
     )
-  ).rows[0].company_pin_seq;
+  ).rows[0].personal_pin_seq;
 }
 function request(input, headers = {}) {
   return fetch(base + '/api/customers/context', {
@@ -186,7 +178,7 @@ test('registered caller without orders, pins or membership remains registered', 
 
 test('current customer identity and default address remain independent of an older personal PIN', async () => {
   const c = await customer();
-  const personal = await pin('PERSONAL', c.customerSeq, '이전 보내는 곳');
+  const personal = await pin(c.customerSeq, '이전 보내는 곳');
   const { name, phoneNumber, ...ownAddress } = address;
   await pool.query('UPDATE customers SET name=$1,address_data=$2 WHERE customer_seq=$3', [
     '현재 고객명',
@@ -212,11 +204,9 @@ test('active company member receives personal pins while legacy company pins sta
   const membershipSeq = await member(c.customerSeq, org);
   await member(colleague.customerSeq, org);
   await member(outsider.customerSeq, otherOrg);
-  const personal = await pin('PERSONAL', c.customerSeq, '내 주소', 3);
-  await pin('COMPANY', org, '기업 공용', 2);
-  await pin('PERSONAL', colleague.customerSeq, '동료 비공개');
-  await pin('PERSONAL', outsider.customerSeq, '타인 비공개');
-  await pin('COMPANY', otherOrg, '다른 기업 공용');
+  const personal = await pin(c.customerSeq, '내 주소', 3);
+  await pin(colleague.customerSeq, '동료 비공개');
+  await pin(outsider.customerSeq, '타인 비공개');
   const result = await context(c.phoneNumber);
   assert.equal(result.lookupStatus, 'REGISTERED');
   assert.deepEqual(result.customer, c);
@@ -260,8 +250,7 @@ test('all membership/company status combinations enforce company access; represe
         const c = await customer();
         const org = await organization(companyStatus);
         await member(c.customerSeq, org, membershipStatus, role);
-        const personal = await pin('PERSONAL', c.customerSeq);
-        await pin('COMPANY', org);
+        const personal = await pin(c.customerSeq);
         const result = await context(c.phoneNumber);
         const canUseCompany = membershipStatus === 'ACTIVE' && companyStatus === 'ACTIVE';
         assert.equal(result.membership.status, membershipStatus);
@@ -288,8 +277,7 @@ test('withdrawn callers remain distinct but expose no profile, membership or pin
   const c = await customer('WITHDRAWN');
   const org = await organization();
   await member(c.customerSeq, org, 'ACTIVE', 'ORG_ADMIN');
-  await pin('PERSONAL', c.customerSeq);
-  await pin('COMPANY', org);
+  await pin(c.customerSeq);
   assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
   assert.equal(
     (await pool.query('SELECT status FROM customers WHERE customer_seq=$1', [c.customerSeq]))
@@ -302,11 +290,9 @@ test('whole address book is returned beyond page size, with stable IDs, nullable
   const c = await customer();
   const org = await organization();
   await member(c.customerSeq, org);
-  const personalIds = [],
-    companyIds = [];
+  const personalIds = [];
   for (let i = 0; i < 105; i++) {
-    personalIds.push(await pin('PERSONAL', c.customerSeq));
-    companyIds.push(await pin('COMPANY', org));
+    personalIds.push(await pin(c.customerSeq));
   }
   const first = await context(c.phoneNumber);
   assert.deepEqual(
@@ -331,7 +317,6 @@ test('next lookup reflects withdrawal, membership deactivation, unlinking and or
   const c = await customer();
   const org = await organization();
   const id = await member(c.customerSeq, org);
-  await pin('COMPANY', org);
   assert.equal((await context(c.phoneNumber)).companyPins.length, 0);
   await pool.query("UPDATE memberships SET status='INACTIVE' WHERE membership_seq=$1", [id]);
   assert.deepEqual((await context(c.phoneNumber)).companyPins, []);

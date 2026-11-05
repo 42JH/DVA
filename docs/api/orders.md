@@ -95,7 +95,7 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000055
 | `pickupRequestedAt` | 시간대 포함 ISO 8601. 생략·null 가능. 최종 수거 시각은 결제 완료 시각 + 1시간으로 서버가 결정 |
 | `parcels` | 상세 목록. 미완료는 생략·빈 배열 가능, 완료는 한 건 이상 |
 | `origin`, `destination` | 이름·숫자 전화번호·도로명·지번 주소·동명·5자리 우편번호·위경도. 완료 시 모두 필요하며 상세 주소는 선택 |
-| `originPin` | 선택. `scope`(PERSONAL/COMPANY), `pinSeq`. 해당 고객의 사용 권한 검사 |
+| `originPin` | 선택. 새 선택은 `scope: PERSONAL`과 `pinSeq`, 해당 고객의 사용 권한 검사. 신규 COMPANY는 400이며 기업 배송지는 주소 사본으로 전달 |
 | 수량 | `documentCount`, `smallBoxCount`, `mediumBoxCount`, `bigBoxCount`: 정수 0~2147483647, 기본 0 |
 | 물품·요청 사항 | `otherItemDescription`, `clientComment`: 기본 빈 문자열. 완료는 양의 수량 또는 기타 물품 설명 필요 |
 | `itemPrice` | 물품 가액, 0~Number.MAX_SAFE_INTEGER 정수. 완료 시 필수 |

@@ -51,7 +51,7 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000069
 - ACTIVE `OPERATOR`·`SUPERVISOR`·`SYSTEM_ADMIN` 모두 허용한다. 브라우저는 로그인 쿠키를 포함한다. 잘못된 쿠키를 익명 AI 요청으로 전환하지 않는다.
 - `customerSeq` 또는 `customer: {name, phoneNumber}` 중 하나만 전달한다. 미등록 번호는 주문과 같은 트랜잭션에서 고객을 생성하고, 기존 활성 번호이면 연결한다. 기존 이름·상태를 덮어쓰지 않는다. 탈퇴 고객은 접수할 수 없다.
 - 완성된 `parcels` 한 건 이상이 필수다. `pickupRequestedAt`은 생략 가능하며 서버가 결제 완료 시각 + 1시간으로 결정한다. 출발·도착 이름/숫자 연락처/도로명·지번 주소/동명/5자리 우편번호/위경도, 물품 수량 또는 기타 물품 설명, 물품 가액이 필요하다. 상세 주소는 선택이다.
-- `originPin: {scope, pinSeq}`는 선택이다. 관리자라도 주문 고객이 사용할 수 있는 PIN인지 검사한다. 주소 내용은 `origin`에 별도 전달한다.
+- `originPin: {scope: "PERSONAL", pinSeq}`는 선택이다. 관리자라도 주문 고객이 사용할 수 있는 개인 PIN인지 검사한다. 신규 COMPANY는 400이며 기업 배송지는 PIN 참조 없이 `origin` 주소로 전달한다.
 - `billing`은 개인·기업의 개인 카드이며 기본값이다. `credit`은 활성 월결제 자격, `groupBilling`은 활성 기업·소속 부서의 그룹결제 자격이 필요하다. 예시의 credit 고객은 월결제가 활성화되어 있어야 한다. 실제 카드 승인·청구·환불 기능은 포함하지 않는다.
 - totalAmount와 각 상세 notifiedPrice는 호출자가 전달하며 미취소 상세 합계를 검증한다. 요금은 고정값이 아니다. 한 요청은 주문 한 건, 상세 수만큼 `order_parcels`, 접수 성공 후 상세별 `shipments` 한 건이다. 박스 수량마다 배송을 생성하지 않는다.
 - `call`·`outcome`·`call_session_seq` 헤더·`status`·`version`·`creationSource`는 받지 않는다. 서버가 `creationSource=ADMIN`을 결정한다.

@@ -14,6 +14,7 @@ export TEST_CALL_ANALYSIS_SCHEMA="$test_root/call-analysis-schema"
 export TEST_ADDRESS_SCHEMA="$test_root/address-schema"
 export TEST_RETENTION_SCHEMA="$test_root/retention-schema"
 export TEST_UNUSED_SCHEMA="$test_root/unused-schema"
+export TEST_COMPANY_PIN_SCHEMA="$test_root/company-pin-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -61,6 +62,11 @@ fi
 if [[ "$1" == exec && "$*" == *public.handoff_requests* ]]; then
     [[ "${TEST_UNUSED_QUERY_FAIL:-}" != 1 ]] || exit 1
     if [[ -f "$TEST_UNUSED_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *"to_regclass('public.company_pins') IS NULL"* ]]; then
+    [[ "${TEST_COMPANY_PIN_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_COMPANY_PIN_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -114,6 +120,7 @@ if [ -f "$root/backend/migrations/042-remove-call-analysis-result.sql" ]; then t
 if [ -f "$root/backend/migrations/043-remove-address-coordinates.sql" ]; then touch "$TEST_ADDRESS_SCHEMA"; fi
 if [ -f "$root/backend/migrations/045-data-retention.sql" ]; then touch "$TEST_RETENTION_SCHEMA"; fi
 if [ -f "$root/backend/migrations/047-remove-unused-schema.sql" ]; then touch "$TEST_UNUSED_SCHEMA"; fi
+if [ -f "$root/backend/migrations/053-drop-company-pins.sql" ]; then touch "$TEST_COMPANY_PIN_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
     if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
@@ -138,14 +145,17 @@ MOCK
     if [[ "${3:-}" == summary ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/042-remove-call-analysis-result.sql"
     fi
-    if [[ "${4:-}" == address || "${4:-}" == retention || "${4:-}" == unused ]]; then
+    if [[ "${4:-}" == address || "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/043-remove-address-coordinates.sql"
     fi
-    if [[ "${4:-}" == retention || "${4:-}" == unused ]]; then
+    if [[ "${4:-}" == retention || "${4:-}" == unused || "${4:-}" == pins ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/045-data-retention.sql"
     fi
-    if [[ "${4:-}" == unused ]]; then
+    if [[ "${4:-}" == unused || "${4:-}" == pins ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/047-remove-unused-schema.sql"
+    fi
+    if [[ "${4:-}" == pins ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/053-drop-company-pins.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -459,11 +469,12 @@ for failure in verification app; do
 done
 # Each later conversion must protect automatic deployment and recovery independently.
 old_version=call-summary
-for cutover in address retention unused; do
+for cutover in address retention unused pins; do
     case "$cutover" in
         address) schema_marker="$TEST_ADDRESS_SCHEMA"; query_failure=TEST_ADDRESS_QUERY_FAIL ;;
         retention) schema_marker="$TEST_RETENTION_SCHEMA"; query_failure=TEST_RETENTION_QUERY_FAIL ;;
         unused) schema_marker="$TEST_UNUSED_SCHEMA"; query_failure=TEST_UNUSED_QUERY_FAIL ;;
+        pins) schema_marker="$TEST_COMPANY_PIN_SCHEMA"; query_failure=TEST_COMPANY_PIN_QUERY_FAIL ;;
     esac
     printf '%s\n' "$old_version" > "$test_root/site/current-release"
     make_release "$cutover" history summary "$cutover"
@@ -506,6 +517,13 @@ for cutover in address retention unused; do
     assert_current "$cutover"
     if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
 
+    if [[ "$cutover" == pins ]]; then
+        : > "$TEST_DOCKER_LOG"
+        if bash "$test_root/site/releases/$cutover/deploy.sh" --rollback; then exit 1; fi
+        assert_current "$cutover"
+        if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+    fi
+
     make_release "$cutover-compatible-broken" history summary "$cutover"
     : > "$TEST_DOCKER_LOG"
     if TEST_FAIL_VERSION="$cutover-compatible-broken" bash "$test_root/site/releases/$cutover-compatible-broken/deploy.sh"; then exit 1; fi
@@ -538,14 +556,14 @@ for cutover in address retention unused; do
     old_version="$cutover"
 done
 
-# A release spanning all three conversions needs just one stop and one backup.
-rm -f -- "$TEST_ADDRESS_SCHEMA" "$TEST_RETENTION_SCHEMA" "$TEST_UNUSED_SCHEMA"
+# A release spanning all four conversions needs just one stop and one backup.
+rm -f -- "$TEST_ADDRESS_SCHEMA" "$TEST_RETENTION_SCHEMA" "$TEST_UNUSED_SCHEMA" "$TEST_COMPANY_PIN_SCHEMA"
 printf 'call-summary\n' > "$test_root/site/current-release"
-make_release combined history summary unused
+make_release combined history summary pins
 : > "$TEST_DOCKER_LOG"
 bash "$test_root/site/releases/combined/deploy.sh"
 assert_current combined
-[[ -f "$TEST_ADDRESS_SCHEMA" && -f "$TEST_RETENTION_SCHEMA" && -f "$TEST_UNUSED_SCHEMA" ]]
+[[ -f "$TEST_ADDRESS_SCHEMA" && -f "$TEST_RETENTION_SCHEMA" && -f "$TEST_UNUSED_SCHEMA" && -f "$TEST_COMPANY_PIN_SCHEMA" ]]
 [[ "$(grep -c ' stop backend$' "$TEST_DOCKER_LOG")" -eq 1 ]]
 [[ "$(grep -c '^BACKUP ' "$TEST_DOCKER_LOG")" -eq 1 ]]
-echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042/043/045/047 stop-backup order and incompatible restore protection.'
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042/043/045/047/053 stop-backup order and incompatible restore protection.'

@@ -247,7 +247,7 @@ test('lists use stable pagination, status and literal name searches without expo
     ]);
 });
 
-test('patch updates name/status with no response body and preserves memberships/pins', async () => {
+test('patch updates name/status with no response body and preserves memberships/personal pins', async () => {
   const id = (await (await create('상태 변경 기업')).json()).data.organizationSeq;
   const customer = await pool.query(
     `INSERT INTO customers(name,phone_number,status) VALUES ('fixture','01000000000','ACTIVE') RETURNING customer_seq`,
@@ -266,10 +266,10 @@ test('patch updates name/status with no response body and preserves memberships/
     dongName: '테스트동',
     postalCode: '00000',
   };
-  await pool.query(
-    `INSERT INTO company_pins(organization_seq,address_data) VALUES ($1,$2::jsonb)`,
-    [id, JSON.stringify(address)],
-  );
+  await pool.query(`INSERT INTO personal_pins(customer_seq,address_data) VALUES ($1,$2::jsonb)`, [
+    customer.rows[0].customer_seq,
+    JSON.stringify(address),
+  ]);
   const response = await patch(id, { name: ' 수정된 기업 ', status: 'INACTIVE' });
   assert.equal(response.status, 204);
   assert.equal(await response.text(), '');
@@ -289,8 +289,11 @@ test('patch updates name/status with no response body and preserves memberships/
     '1',
   );
   assert.equal(
-    (await pool.query('SELECT count(*) FROM company_pins WHERE organization_seq=$1', [id])).rows[0]
-      .count,
+    (
+      await pool.query('SELECT count(*) FROM personal_pins WHERE customer_seq=$1', [
+        customer.rows[0].customer_seq,
+      ])
+    ).rows[0].count,
     '1',
   );
   const filtered = await (await request('?status=INACTIVE')).json();

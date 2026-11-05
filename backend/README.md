@@ -38,7 +38,7 @@ AI 고객 기본 주소 PATCH는 `call_session_seq`로 진행 중 본인 통화�
 
 통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
 
-기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회한다. 기업 PIN 등록·수정·조회 API는 폐기하며 개인 PIN과 과거 주문 주소는 보존한다. companyPins는 기존 AI 응답 호환을 위해 빈 배열로 유지한다. company_pins 테이블은 과거 주문 참조·기업 삭제 이력 처리용으로 남기며 migration이나 데이터 삭제는 없다. [기업 검색 계약](../docs/api/company-directory.md)과 [AI 인계](docs/company-address-directory-handoff.md)를 따르며 AI 코드·운영 배포는 별도다.
+기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회하며 DIR-01은 AI_BUSINESS_TOKEN Bearer 전용이다. 관리자 상단바는 세션 전용 [사원 검색](../docs/api/company-members-search.md)을 사용하며 주소 없는 사원과 선택적 비활성 검색을 지원한다. 두 검색 q는 정규화 후 1~100자다. 기업 PIN API는 폐기하며 053 migration으로 company_pins를 제거한다. 개인 PIN·과거 주문 주소/COMPANY 논리 참조·감사는 보존하고 companyPins는 빈 배열로 유지한다. [기업 검색 계약](../docs/api/company-directory.md), [제거·배포·복구 안내](docs/company-pin-retirement.md), [AI 인계](docs/company-address-directory-handoff.md)를 따른다. AI/FE 코드·운영 배포는 별도이며 053 없는 구버전 이미지로 단독 복귀하지 않는다.
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 
@@ -212,7 +212,7 @@ backend/
 | 모듈 | 담당 데이터·책임 |
 |---|---|
 | `customers` | `customers`, `personal_pins` |
-| `organizations` | `organizations`, `departments`, `memberships`, `company_pins`, `organization_billing_months`, `order_billing_charges` |
+| `organizations` | `organizations`, `departments`, `memberships`, `organization_billing_months`, `order_billing_charges` |
 | `orders` | `orders`, `order_parcels` |
 | `consultations` | `call_sessions`, `call_utterances`, `recordings` |
 | `deliveries` | `shipments`, `shipment_status_history` |

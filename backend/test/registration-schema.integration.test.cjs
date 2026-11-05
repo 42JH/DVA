@@ -72,7 +72,6 @@ test('deployment verification requires active-row employee uniqueness', () =>
 test('deployment verification requires migration 047, legacy column removal and the call time guard', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='047-remove-unused-schema.sql'",
-    'ALTER TABLE company_pins ADD COLUMN search_text text',
     'ALTER TABLE call_sessions ADD COLUMN end_reason text',
     'ALTER TABLE call_sessions DROP CONSTRAINT call_sessions_check',
   ])
@@ -80,6 +79,17 @@ test('deployment verification requires migration 047, legacy column removal and 
   await verify(
     ['ALTER TABLE personal_pins DROP COLUMN search_text'],
     'Generated PIN search columns missing',
+  );
+});
+
+test('deployment verification requires migration 053 and the company PIN table to be absent', async () => {
+  await verify(
+    ["DELETE FROM db_migrations.applied_versions WHERE version='053-drop-company-pins.sql'"],
+    'Company PIN retirement or migration missing',
+  );
+  await verify(
+    ['CREATE TABLE company_pins(company_pin_seq integer)'],
+    'Expected 29 public tables, found 30',
   );
 });
 

@@ -3,7 +3,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -28,7 +28,7 @@ const address = (extra = {}) => ({
   postalCode: '01234',
   ...extra,
 });
-const search = (query, headers = {}) =>
+const search = (query, headers = businessHeaders()) =>
   fetch(
     base +
       '/api/companies/search?' +
@@ -71,7 +71,10 @@ async function account(role = 'OPERATOR') {
 }
 before(async () => {
   // check:docker의 선행 검증이 기존 업무 스키마를 적용한다.
-  assert.ok((await pool.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name);
+  assert.equal(
+    (await pool.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name,
+    null,
+  );
   app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
   passwordHash = await hashPassword(password);
@@ -96,6 +99,7 @@ async function recipient(
     name = '공식 배송 담당자',
     status = 'ACTIVE',
     membershipStatus = 'ACTIVE',
+    employeeNo = marker(),
     addressData = address(),
   } = {},
 ) {
@@ -111,7 +115,7 @@ async function recipient(
     await testMembership(pool, {
       customerSeq,
       organizationSeq: c.id,
-      employeeNo: marker(),
+      employeeNo,
       status: membershipStatus,
     })
   ).rows[0].membership_seq;
@@ -134,12 +138,10 @@ async function recipient(
 test('active member addresses are shared across companies without any company PIN or caller prerequisite', async () => {
   const c = await company();
   const member = await recipient(c);
-  assert.equal(
-    (await pool.query('SELECT count(*) FROM company_pins WHERE organization_seq=$1', [c.id]))
-      .rows[0].count,
-    '0',
-  );
-  for (const headers of [{}, { call_session_seq: '2147483647' }])
+  for (const headers of [
+    businessHeaders(),
+    { ...businessHeaders(), call_session_seq: '2147483647' },
+  ])
     assert.deepEqual(await result(await search({ q: c.name }, headers)), {
       data: [member],
       hasNext: false,
@@ -246,7 +248,7 @@ test('search combines company, department, current recipient and address terms w
   ]);
 });
 
-test('private PINs, legacy company PINs and employee numbers are not exposed or searched', async () => {
+test('private PINs and employee numbers are not exposed or searched', async () => {
   const c = await company(),
     member = await recipient(c),
     secret = marker();
@@ -254,10 +256,7 @@ test('private PINs, legacy company PINs and employee numbers are not exposed or 
     secret,
     member.membershipSeq,
   ]);
-  for (const [table, key, id] of [
-    ['personal_pins', 'customer_seq', member.customerSeq],
-    ['company_pins', 'organization_seq', c.id],
-  ])
+  for (const [table, key, id] of [['personal_pins', 'customer_seq', member.customerSeq]])
     await pool.query('INSERT INTO ' + table + '(' + key + ',label,address_data) VALUES($1,$2,$3)', [
       id,
       secret,
@@ -326,12 +325,20 @@ test('company rename, deactivation, address removal and membership unlinking aff
   assert.deepEqual((await result(await search({ q: renamed }))).data, []);
 });
 
-test('every active admin role can search while the anonymous MVP read uses the same projection', async () => {
+test('administrator cookies cannot replace the directory service credential', async () => {
   const c = await company();
   await recipient(c);
-  const anonymous = await result(await search({ q: c.name }));
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN'])
-    assert.deepEqual(await result(await search({ q: c.name }, await account(role))), anonymous);
+  const authenticated = await result(await search({ q: c.name }));
+  await error(await search({ q: c.name }, {}), 401, 'UNAUTHORIZED');
+  await error(await search({ q: c.name }, { Authorization: 'Bearer wrong' }), 401, 'UNAUTHORIZED');
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const headers = await account(role);
+    await error(await search({ q: c.name }, headers), 401, 'UNAUTHORIZED');
+    assert.deepEqual(
+      await result(await search({ q: c.name }, { ...headers, ...businessHeaders() })),
+      authenticated,
+    );
+  }
 });
 
 test('stale cookies never fall back to anonymous access and untrusted Origin is rejected', async () => {
@@ -345,7 +352,7 @@ test('stale cookies never fall back to anonymous access and untrusted Origin is 
   );
   await error(await search({ q: c.name }, loggedOut), 401, 'UNAUTHORIZED');
   await error(
-    await search({ q: c.name }, { Origin: 'https://untrusted.invalid' }),
+    await search({ q: c.name }, { ...businessHeaders(), Origin: 'https://untrusted.invalid' }),
     403,
     'FORBIDDEN',
   );
@@ -387,7 +394,7 @@ test('search is read-only and database failures are not transformed into empty s
   const counts = async () =>
     (
       await pool.query(`SELECT (SELECT count(*) FROM organizations) AS companies,
-    (SELECT count(*) FROM company_pins) AS pins,(SELECT count(*) FROM audit_logs) AS audits`)
+    (SELECT count(*) FROM personal_pins) AS pins,(SELECT count(*) FROM audit_logs) AS audits`)
     ).rows[0];
   const before = await counts();
   await result(await search({ q: c.name }));
@@ -410,7 +417,8 @@ test('Swagger exposes member delivery projection and static search remains separ
   const doc = await (await fetch(base + '/api/docs-json')).json();
   const operation = doc.paths['/api/companies/search'].get;
   assert.deepEqual(operation.tags, ['Companies']);
-  assert.ok(operation.security.some((entry) => Object.keys(entry).length === 0));
+  assert.deepEqual(operation.security, [{ bearer: [] }]);
+  assert.equal(operation.parameters.find((p) => p.name === 'q').schema.maxLength, 100);
   assert.ok(operation.parameters.some((p) => p.name === 'q' && p.required));
   assert.ok(!operation.parameters.some((p) => p.name === 'call_session_seq'));
   assert.deepEqual(
@@ -430,10 +438,178 @@ test('Swagger exposes member delivery projection and static search remains separ
 test('request logs contain route templates without query, recipient or phone values', async () => {
   const requestId = randomUUID(),
     term = marker();
-  await result(await search({ q: term }, { 'X-Request-Id': requestId }));
+  await result(await search({ q: term }, { ...businessHeaders(), 'X-Request-Id': requestId }));
   await new Promise((resolve) => setImmediate(resolve));
   const entries = logs.filter((entry) => entry.requestId === requestId);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].route, '/api/companies/search');
   assert.ok(!JSON.stringify(entries).includes(term));
+});
+
+const memberSearch = (query, headers = adminHeaders) =>
+  fetch(
+    base +
+      '/api/companies/members/search?' +
+      (typeof query === 'string' ? query : new URLSearchParams(query)),
+    { headers },
+  );
+
+test('administrator member search includes addressless members and searches only member fields', async () => {
+  const term = marker(),
+    c = await company(marker()),
+    employeeNo = '0007-' + term;
+  const member = await recipient(c, { name: term + ' 가나', employeeNo, addressData: null });
+  const phone = (
+    await pool.query('SELECT phone_number FROM customers WHERE customer_seq=$1', [
+      member.customerSeq,
+    ])
+  ).rows[0].phone_number;
+  const expected = {
+    organizationSeq: c.id,
+    organizationName: c.name,
+    organizationStatus: 'ACTIVE',
+    membershipSeq: member.membershipSeq,
+    membershipStatus: 'ACTIVE',
+    employeeNo,
+    departmentName: '검증 부서',
+    name: term + ' 가나',
+    phoneNumber: phone,
+  };
+  for (const q of [
+    term,
+    employeeNo,
+    phone,
+    phone.slice(0, 3) + '-' + phone.slice(3, 7) + '-' + phone.slice(7),
+    term + ' 부서',
+    term + ' ' + '가나'.normalize('NFD'),
+  ])
+    assert.deepEqual((await result(await memberSearch({ q }))).data, [expected]);
+  for (const q of [c.name, term + ' 없는이름', "' OR TRUE --", '---'])
+    assert.deepEqual((await result(await memberSearch({ q }))).data, []);
+  const addressOnly = marker();
+  await pool.query('UPDATE customers SET address_data=$1 WHERE customer_seq=$2', [
+    { roadAddress: addressOnly, jibunAddress: '지번', dongName: '동', postalCode: '12345' },
+    member.customerSeq,
+  ]);
+  assert.deepEqual((await result(await memberSearch({ q: addressOnly }))).data, []);
+  await pool.query('UPDATE memberships SET department_seq=NULL WHERE membership_seq=$1', [
+    member.membershipSeq,
+  ]);
+  assert.deepEqual((await result(await memberSearch({ q: employeeNo }))).data, [
+    { ...expected, departmentName: null },
+  ]);
+});
+
+test('administrator member search defaults to active and includes inactive only on explicit true', async () => {
+  const term = marker(),
+    active = await company(),
+    inactive = await company(marker(), 'INACTIVE');
+  const visible = await recipient(active, { name: term });
+  const inactiveMember = await recipient(active, { name: term, membershipStatus: 'INACTIVE' });
+  const inactiveCompany = await recipient(inactive, { name: term });
+  await recipient(active, { name: term, status: 'WITHDRAWN' });
+  const removed = await recipient(active, { name: term });
+  await pool.query('UPDATE memberships SET deleted_at=clock_timestamp() WHERE membership_seq=$1', [
+    removed.membershipSeq,
+  ]);
+  const deletedCustomer = await recipient(active, { name: term });
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    deletedCustomer.customerSeq,
+  ]);
+  const deletedCompany = await company();
+  await recipient(deletedCompany, { name: term });
+  await pool.query(
+    'UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=$1',
+    [deletedCompany.id],
+  );
+  for (const includeInactive of [undefined, 'false']) {
+    const query = { q: term, ...(includeInactive === undefined ? {} : { includeInactive }) };
+    const body = await result(await memberSearch(query));
+    assert.deepEqual(
+      body.data.map((row) => row.membershipSeq),
+      [visible.membershipSeq],
+    );
+    assert.equal(body.total_count, 1);
+  }
+  const body = await result(await memberSearch({ q: term, includeInactive: 'true' }));
+  assert.equal(body.total_count, 3);
+  assert.deepEqual(
+    new Set(body.data.map((row) => row.membershipSeq)),
+    new Set([visible.membershipSeq, inactiveMember.membershipSeq, inactiveCompany.membershipSeq]),
+  );
+  assert.equal(
+    body.data.find((row) => row.membershipSeq === inactiveMember.membershipSeq).membershipStatus,
+    'INACTIVE',
+  );
+  assert.equal(
+    body.data.find((row) => row.membershipSeq === inactiveCompany.membershipSeq).organizationStatus,
+    'INACTIVE',
+  );
+});
+
+test('administrator search keeps session roles, stable pagination, literal matching and exact counts', async () => {
+  const term = marker() + '100%_',
+    c = await company();
+  const first = await recipient(c, { name: term }),
+    second = await recipient(c, { name: term });
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const body = await result(await memberSearch({ q: term }, await account(role)));
+    assert.deepEqual(
+      body.data.map((row) => row.membershipSeq),
+      [first.membershipSeq, second.membershipSeq],
+    );
+  }
+  for (const headers of [
+    {},
+    businessHeaders(),
+    { Cookie: 'dva_session=bad', ...businessHeaders() },
+  ])
+    await error(await memberSearch({ q: term }, headers), 401, 'UNAUTHORIZED');
+  for (const offset of [0, 1, 99]) {
+    const body = await result(await memberSearch({ q: term, limit: '1', offset: String(offset) }));
+    assert.equal(body.total_count, 2);
+    assert.equal(body.hasNext, offset === 0);
+    assert.deepEqual(
+      body.data.map((row) => row.membershipSeq),
+      offset === 0 ? [first.membershipSeq] : offset === 1 ? [second.membershipSeq] : [],
+    );
+  }
+  const doc = await (await fetch(base + '/api/docs-json')).json();
+  assert.deepEqual(doc.paths['/api/companies/members/search'].get.security, [{ adminSession: [] }]);
+  assert.equal(
+    doc.paths['/api/companies/members/search'].get.parameters.find((p) => p.name === 'q').schema
+      .maxLength,
+    100,
+  );
+});
+
+test('both searches enforce normalized 100-code-point bounds and reject invalid or repeated parameters', async () => {
+  for (const read of [search, memberSearch]) {
+    for (const q of [
+      '가'.repeat(100),
+      '😀'.repeat(100),
+      '  ' + '가'.repeat(100).normalize('NFD') + '  ',
+    ])
+      await result(await read({ q }));
+    for (const q of ['가'.repeat(101), '😀'.repeat(101), '\u0000']) {
+      const response = await read({ q });
+      await error(response.clone(), 400, 'INVALID_REQUEST');
+      assert.ok((await response.json()).error.details.some((detail) => detail.field === 'q'));
+    }
+  }
+  for (const query of [
+    '',
+    'q=',
+    'q=%20',
+    'q=a&q=b',
+    'q[x]=a',
+    'q=a&limit=0',
+    'q=a&limit=101',
+    'q=a&offset=-1',
+    'q=a&includeInactive=1',
+    'q=a&includeInactive=',
+    'q=a&includeInactive=true&includeInactive=false',
+    'q=a&organizationSeq=1',
+  ])
+    await error(await memberSearch(query), 400, 'INVALID_REQUEST');
 });

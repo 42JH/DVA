@@ -2,7 +2,7 @@
 
 개인 PIN은 자주 보내는 상대나 추가 배송지를 저장하는 주소록이다. 고객 기본 이름·전화번호·주소는 고객 정보에서 읽으며 개인 PIN과 자동 동기화하지 않는다.
 
-기업 공유 배송지는 [활성 기업 사원의 현재 고객 주소 검색](company-directory.md)으로 제공한다. 기업 PIN의 GET/POST `/api/companies/{id}/pins`, PATCH `/api/company-pins/{id}`는 폐기되어 404를 반환한다. 기존 company_pins 테이블과 과거 주문의 COMPANY 논리 참조는 보존한다.
+기업 공유 배송지는 [활성 기업 사원의 현재 고객 주소 검색](company-directory.md)으로 제공한다. 기업 PIN의 GET/POST `/api/companies/{id}/pins`, PATCH `/api/company-pins/{id}`는 폐기되어 404를 반환한다. 053 migration은 company_pins 테이블을 제거하며 과거 주문의 COMPANY 논리 참조·주소 사본은 보존한다. 신규 COMPANY 선택은 400이고 PERSONAL 계약은 유지한다. [제거·호환·전환 절차](../../backend/docs/company-pin-retirement.md)를 따른다.
 
 ## HTTP 계약
 
@@ -59,4 +59,4 @@ PIN 변경은 기존 주문에 복사된 주소나 주문 버전을 변경하지
 
 입력 오류 400, 잘못된 관리자 인증 401, 다른 고객 접근 403, 없는 고객·통화·PIN 404, 중복 주소·사용 불가 상태 409를 기존 error/meta 형식으로 반환한다. DB 장애를 빈 성공으로 바꾸지 않는다.
 
-개인 PIN 회귀 테스트는 기존 등록·검색·수정·권한·중복·동시 수정·감사 롤백·과거 주문 주소 보존을 검사한다. 폐기된 기업 PIN API의 404와 기존 DB 행 보존도 확인한다. 배포 환경·실제 통화는 [AI 인계](../../backend/docs/company-address-directory-handoff.md)의 별도 확인 대상이다.
+개인 PIN 회귀 테스트는 기존 등록·검색·수정·권한·중복·동시 수정·감사 롤백·과거 주문 주소 보존을 검사한다. 폐기된 기업 PIN API의 404, 테이블 부재와 과거 주문 호환도 확인한다. 배포 환경·실제 통화는 [AI 인계](../../backend/docs/company-address-directory-handoff.md)의 별도 확인 대상이다.

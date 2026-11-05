@@ -106,18 +106,19 @@ module.exports = function registerOrdersPayment(suite) {
           destination: address,
           smallBoxCount: 1,
           itemPrice: 0,
-          originPin: { scope: 'COMPANY', pinSeq: suite.companyPin },
+          originPin: { scope: 'PERSONAL', pinSeq: suite.personalPin },
         },
       ],
     });
-    await pool.query("UPDATE memberships SET status='INACTIVE' WHERE customer_seq=$1", [
-      suite.customerId,
-    ]);
+    await pool.query(
+      'UPDATE personal_pins SET deleted_at=clock_timestamp() WHERE personal_pin_seq=$1',
+      [suite.personalPin],
+    );
     try {
       await errorCode(await submitOrder(pin), 403, 'FORBIDDEN');
     } finally {
-      await pool.query("UPDATE memberships SET status='ACTIVE' WHERE customer_seq=$1", [
-        suite.customerId,
+      await pool.query('UPDATE personal_pins SET deleted_at=NULL WHERE personal_pin_seq=$1', [
+        suite.personalPin,
       ]);
     }
     assert.equal(suite.dverRequests.length, 0);
@@ -137,6 +138,24 @@ module.exports = function registerOrdersPayment(suite) {
     assert.equal(patched.status, 200);
     partial.version = (await patched.json()).data.version;
     assert.equal((await submitOrder(partial)).status, 200);
+  });
+
+  test('legacy COMPANY address snapshots submit without a retired PIN lookup or membership grant', async () => {
+    resetDver();
+    const order = await readyOrder();
+    const before = await storedOrder(order.orderSeq);
+    await pool.query(
+      "UPDATE order_parcels SET origin_pin_scope='COMPANY',origin_pin_seq=$2 WHERE order_parcel_seq=$1",
+      [before.parcels[0].orderParcelSeq, suite.companyPin],
+    );
+    const legacy = await storedOrder(order.orderSeq);
+    order.version = legacy.version;
+    assert.equal((await submitOrder(order)).status, 200);
+    const saved = await storedOrder(order.orderSeq);
+    assert.deepEqual(saved.parcels[0].origin, legacy.parcels[0].origin);
+    assert.deepEqual(saved.parcels[0].originPin, legacy.parcels[0].originPin);
+    assert.equal(saved.status, 'ACCEPTED');
+    assert.equal(suite.dverRequests.length, 1);
   });
 
   test('ORD-06 rejects invalid path/body and keeps session and Origin checks', async () => {
