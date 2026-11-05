@@ -1,10 +1,11 @@
-import type { AudioHTMLAttributes, RefObject } from 'react'
+import { useEffect, type AudioHTMLAttributes, type RefObject } from 'react'
 import type { PlayerState } from '@/features/call/hooks/useRecordingPlayer'
 
 // 06 녹취 재생 줄 (11/05 새 디자인 맨 아래, 카드 폭 전체 · 위 구분선)
 // 왼쪽 '[ 빠른 접수형 ]'(받은 상담가) | 가운데 ⏮ 이전 발화 · ▶ 재생 · ⏭ 다음 발화 + 아래 지금 · 진행 막대 · 길이 | 오른쪽 🔈 음량
 // 막대 두 개(진행 · 음량) 같은 모양 (11/05 사용자): 평소 채운 부분 검정 · 손잡이 없음 → 올리면(·키보드 초점) 파랑 + 파랑 동그라미 손잡이
 // 스피커를 누르면 음소거(✕ 스피커) · 다시 누르면 소리. 녹취가 없거나 못 들으면 버튼 · 막대를 끄고 그 사정 한 줄
+// 방향키 (11/05 사용자): ← 이전 발화 · → 다음 발화 · ↑ 음량 +10% · ↓ 음량 -10% — 글 칸 · 막대(range)에 초점이 있으면 그쪽 동작 그대로
 export interface PlayerView {
   state: PlayerState
   playing: boolean
@@ -36,6 +37,24 @@ export function CallPlayer({
   className?: string
 }) {
   const canPlay = player.state === 'ok'
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return
+      const t = e.target as HTMLElement | null
+      if (t?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return
+      const act = {
+        ArrowLeft: player.prev,
+        ArrowRight: player.next,
+        ArrowUp: () => canPlay && player.setVolume(Math.min(1, player.volume + 0.1)),
+        ArrowDown: () => canPlay && player.setVolume(Math.max(0, player.volume - 0.1)),
+      }[e.key]
+      if (!act) return
+      e.preventDefault() // 목록 · 화면이 같이 스크롤되지 않게
+      act()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [player, canPlay])
   const step =
     'grid size-8 place-items-center rounded-full text-sub hover:bg-bg hover:text-ink disabled:text-line disabled:hover:bg-transparent'
   return (

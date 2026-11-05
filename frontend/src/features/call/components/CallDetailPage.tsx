@@ -44,12 +44,14 @@ function CallDetailBody({ callId }: { callId: number }) {
               className="min-w-0 flex-1"
               segments={vm.segments}
               focusKey={vm.focusKey}
+              follow={vm.player.playing}
               jump={vm.jump}
               emptyText={vm.isLoading ? '불러오는 중…' : vm.scriptEmpty}
             />
             <CallActions
               className="w-[min(420px,32%)] shrink-0"
               actions={vm.actions}
+              follow={vm.player.playing}
               emptyText={vm.actionsEmpty}
             />
           </div>
