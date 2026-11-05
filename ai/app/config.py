@@ -95,6 +95,8 @@ class FareConfig(_Strict):
 
 
 class CallConfig(_Strict):
+    live_led: bool = False  # 새 통화에서만 선택. 기존 Decision 경로와 동시에 실행하지 않는다.
+    live_led_persona_version: int | None = None  # 검토한 새 운영 프롬프트 버전. 미지정이면 서버 기본 말투 사용
     """[call] 통화 생명주기(call-lifecycle.md §2). 수치는 실측 후 조정."""
     max_active_calls: int = Field(20, gt=0)          # 넘으면 reject(486)
     stage1_budget_sec: float = Field(1.5, gt=0)      # accept 전 고객 확인(실패 시 UNREGISTERED)

@@ -56,7 +56,8 @@ def model_tool(name: str, description: str, args: type[Args], budget: str = "too
 
 
 def function_specs(names: Iterable[str] | None = None) -> list[dict]:
-    return [t.spec() for n, t in MODEL_TOOLS.items() if names is None or n in names]
+    return [t.spec() for n, t in MODEL_TOOLS.items()
+            if (n != "manage_conversation" if names is None else n in names)]
 
 
 def _hint(e: ValidationError) -> list[dict]:

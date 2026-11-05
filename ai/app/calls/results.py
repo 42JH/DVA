@@ -104,12 +104,15 @@ class ResultService:
         실패해도 통화는 신규 고객으로 이어 가고 결과는 customer{name, phoneNumber}로 보낸다."""
         op = s.tools.ops["register"]
         try:
-            seq = await call_session_seq(s)
             async with s.lock:
                 cur = s.state.current
+                if cur is None:
+                    op["status"] = "failed"
+                    return
                 name = cur["sender_name"].value
                 snap = draft_snapshot(cur)
                 geo = cur.sender_geo
+            seq = await call_session_seq(s)
             address = None
             if geo:  # 주소 7항목 중 이름·번호를 뺀 완성 주소만(부분 주소로 기본 출발지를 만들지 않는다)
                 address = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,

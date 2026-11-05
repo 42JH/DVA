@@ -7,8 +7,7 @@ ROLE_FIELDS = ("name", "phone", "address", "address_detail")
 
 
 def offer(state: ConversationState, kind: str, labels: tuple[str, ...], items: tuple) -> None:
-    state.candidates = CandidateSet(kind, labels, items)
-    state.bump()
+    state.candidates = CandidateSet(kind, labels, items, state.bump())
 
 
 def apply_pick(state: ConversationState, label: str) -> bool:
