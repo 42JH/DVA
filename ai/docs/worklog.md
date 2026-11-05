@@ -534,3 +534,10 @@
 - README 및 architecture/current-state.md의 부품 모음·서버 부재 설명은 현재 구현과 차이 있음. Dockerfile은 현재 app.main:app을 실행하며 단일 워커 사용.
 - 검증: 기존 가상환경(Python 3.14.7)에서 플러그인 자동 로딩·pytest 캐시를 끄고 test_dashboard_metrics.py의 이탈 단계·대기시간·측정 범위 테스트 18 passed, 4 deselected. 전체 테스트와 확대 실행은 완료되지 않아 중단(일부 오류 표시 포함, 원인 미확정). 전체 통과로 판단하지 않음.
 - 실제 OpenAI·PBX·백엔드·카카오·Qdrant 통합 검증 및 배포는 수행하지 않음.
+
+## 2026-11-05 — LIVE-1 위임 대기 발화 원인 조사
+- docs/architecture/live-waiting-speech-investigation.md에 코드·기존 실험·공식 문서 근거와 다음 검증 계획 기록. 구현·외부 계약 변경 없음.
+- 공통 정책은 결과 전 짧은 대기 안내를 요구하고, 기본 페르소나는 안내 문구 혼합을 요구함. 운영 BE ACTIVE 페르소나 적용 여부는 미확인.
+- Responses 위임 중 LIVE 자율 발화와 이후 결과 안내가 이어지는 현상을 유력 원인으로 분류. 문장 중단·무관한 발화의 정확한 원인은 최신 녹음·이벤트 부재로 미확정.
+- 공식 문서의 자동 acknowledgment 억제는 client 위임용이며 현재 Responses에 직접 적용 불가. 설치 SDK에도 해당 delay 필드는 없음.
+- 검증은 코드·설치 SDK·공식 문서·기존 실험 보고서 읽기만 수행. 테스트·실통화·유료 API 호출 없음.
