@@ -51,9 +51,12 @@ export class PaymentsService {
     const claim = await this.orders.claimApproval(id, amount, key);
     if (claim.done) return this.repository.read(id);
     try {
-      let result = await this.client.toss(id, amount, claim.key, claim.lookupOnly);
-      if (!claim.lookupOnly && result.data.code === 'ALREADY_PROCESSED_PAYMENT')
+      let lookupOnly = claim.lookupOnly;
+      let result = await this.client.toss(id, amount, claim.key, lookupOnly);
+      if (!lookupOnly && result.data.code === 'ALREADY_PROCESSED_PAYMENT') {
+        lookupOnly = true;
         result = await this.client.toss(id, amount, claim.key, true);
+      }
       const p = result.data;
       if (
         result.status === 200 &&
@@ -70,14 +73,15 @@ export class PaymentsService {
         await this.orders.confirmPayment(id, amount, claim.key, requestId, p.approvedAt);
         return this.repository.read(id);
       }
+      // An absent lookup cannot prove that an earlier approval failed.
       const declined =
-        (!claim.lookupOnly &&
-          result.status >= 400 &&
-          result.status < 500 &&
-          p.code === 'REJECT_CARD_PAYMENT') ||
-        (claim.lookupOnly &&
+        (!lookupOnly &&
+          ((result.status >= 400 && result.status < 500 && p.code === 'REJECT_CARD_PAYMENT') ||
+            (result.status === 404 &&
+              (p.code === 'NOT_FOUND_PAYMENT' || p.code === 'NOT_FOUND_PAYMENT_SESSION')))) ||
+        (lookupOnly &&
           result.status === 200 &&
-          ['ABORTED', 'EXPIRED'].includes(String(p.status)) &&
+          (p.status === 'ABORTED' || p.status === 'EXPIRED') &&
           p.orderId === id &&
           p.paymentKey === claim.key &&
           p.totalAmount === amount &&

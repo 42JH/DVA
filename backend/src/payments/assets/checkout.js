@@ -57,7 +57,19 @@ async function state() {
 check.addEventListener('click', async () => {
   check.disabled = true;
   try {
-    show(await request('/reconcile', {}));
+    let current;
+    try {
+      current = await request('/reconcile', {});
+    } catch {
+      current = await state();
+    }
+    show(current);
+    if (current.status === 'PENDING') {
+      // This page may have opened before the payment widgets could initialize.
+      pay.hidden = true;
+      back.hidden = false;
+      status.textContent = '결제가 승인되지 않았어요. 택배 정보로 돌아가 다시 진행해 주세요.';
+    }
   } catch {
     check.disabled = false;
     status.textContent = '아직 결과를 확인하지 못했어요. 잠시 후 결과 확인을 다시 눌러 주세요.';

@@ -17,7 +17,7 @@
     "check:docker": "node scripts/check.cjs",
     "bootstrap:admin": "npm run build && node scripts/bootstrap-admin.cjs",
     "bootstrap:faq": "npm run build && node dist/faqs/bootstrap-faq.js",
-    "test:compiled": "node --test test/config.test.cjs test/http-foundation.test.cjs test/pagination.test.cjs test/auth.test.cjs test/member-input.test.cjs test/order-input.test.cjs test/order-validation.test.cjs test/dver.test.cjs test/recording-storage.test.cjs test/recording-playback.test.cjs test/faq-input.test.cjs test/ai-settings.test.cjs test/observability.test.cjs test/order-pricing.test.cjs test/payment-input.test.cjs test/call-analysis.test.cjs test/active-call-count.test.cjs test/call-events.test.cjs test/unanswered-questions.test.cjs test/company-registration-input.test.cjs test/call-dashboard-metrics.test.cjs test/dashboard.test.cjs && npm run test:payment"
+    "test:compiled": "node --test test/config.test.cjs test/http-foundation.test.cjs test/pagination.test.cjs test/auth.test.cjs test/member-input.test.cjs test/order-input.test.cjs test/order-validation.test.cjs test/dver.test.cjs test/recording-storage.test.cjs test/recording-playback.test.cjs test/faq-input.test.cjs test/ai-settings.test.cjs test/observability.test.cjs test/order-pricing.test.cjs test/payment-input.test.cjs test/payment-recovery.test.cjs test/call-analysis.test.cjs test/active-call-count.test.cjs test/call-events.test.cjs test/unanswered-questions.test.cjs test/company-registration-input.test.cjs test/call-dashboard-metrics.test.cjs test/dashboard.test.cjs && npm run test:payment"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1157.0",
