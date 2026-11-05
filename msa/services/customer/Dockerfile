@@ -14,7 +14,7 @@ RUN npm run lint \
  && npm run build
 
 FROM builder AS checks
-RUN node --test test/auth-bridge.test.cjs test/database-audit.test.cjs
+RUN node --test test/auth-bridge.test.cjs test/database-audit.test.cjs test/call-context.test.cjs
 
 FROM node:24-bookworm-slim
 WORKDIR /app/service

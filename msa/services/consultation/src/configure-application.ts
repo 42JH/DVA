@@ -55,6 +55,8 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/caller-context', method: RequestMethod.ALL },
+      { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'consultation/health', method: RequestMethod.ALL },
       { path: 'consultation/health/ready', method: RequestMethod.ALL },
       { path: 'webhooks/pbx/call-ended', method: RequestMethod.ALL },

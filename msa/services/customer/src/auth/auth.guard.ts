@@ -71,6 +71,19 @@ export class AuthGuard implements CanActivate {
         throw new ApiException(403, 'FORBIDDEN', '서비스 인증이 필요합니다.');
       return true;
     }
+    if (
+      this.reflector.getAllAndOverride<boolean>('auth:internal-consultation', [
+        context.getHandler(),
+        context.getClass(),
+      ])
+    ) {
+      const token = this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true });
+      const actual = Buffer.from(request.get('Authorization') ?? '');
+      const expected = Buffer.from(`Bearer ${token ?? ''}`);
+      if (!token || actual.length !== expected.length || !timingSafeEqual(actual, expected))
+        throw new ApiException(403, 'FORBIDDEN', '서비스 인증이 필요합니다.');
+      return true;
+    }
     // Existing health and PBX retain their dedicated authentication contracts.
     if (
       ['/health', '/health/ready', '/webhooks/pbx/call-ended'].includes(

@@ -88,7 +88,7 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/operations/health').expect(200);
   });
 
-  it('lets consultation verify sessions without granting customer audit or public admin access', async () => {
+  it('lets consultation verify sessions while rejecting forged customer events and public admin access', async () => {
     const token = 'local-test-consultation-token-'.padEnd(48, 'c');
     app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);
     const authorization = 'Bearer ' + token;
@@ -100,8 +100,14 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer())
       .post('/internal/events')
       .set('Authorization', authorization)
-      .send({})
-      .expect(403);
+      .send({
+        eventId: '00000000-0000-4000-8000-000000000001',
+        source: 'customer',
+        eventType: 'AuditAborted',
+        payload: { transactionId: '00000000-0000-4000-8000-000000000002' },
+      })
+      .expect(401)
+      .expect({ error: 'EVENT_UNAUTHORIZED' });
     await request(app.getHttpServer())
       .get('/api/admins')
       .set('Authorization', authorization)

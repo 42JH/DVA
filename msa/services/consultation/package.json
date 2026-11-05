@@ -30,7 +30,8 @@
     "pg": "8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "@aws-sdk/client-s3": "3.1157.0"
+    "@aws-sdk/client-s3": "3.1157.0",
+    "@dva/events": "file:../../shared/events"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

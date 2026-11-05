@@ -8,6 +8,7 @@ import { DatabaseService } from '../src/database/database.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ApiException } from '../src/common/errors/api.exception';
 import { AuditService } from '../src/audit/audit.service';
+import { ConfigService } from '@nestjs/config';
 
 describe('Customer read API (e2e)', () => {
   let app: INestApplication<App>;
@@ -36,8 +37,81 @@ describe('Customer read API (e2e)', () => {
     configureApplication(app);
     await app.init();
   });
+  it('preserves anonymous context, cookie authentication and input validation without registering a call', async () => {
+    await request(app.getHttpServer())
+      .post('/api/customers/context')
+      .send({ phoneNumber: '01000000001' })
+      .expect(({ status, body }: { status: number; body: unknown }) => {
+        if (status !== 200) throw new Error(JSON.stringify(body));
+      })
+      .expect(200)
+      .expect('Cache-Control', 'no-store')
+      .expect(({ body }: { body: { data: { lookupStatus: string } } }) =>
+        expect(body.data.lookupStatus).toBe('UNREGISTERED'),
+      );
+    for (const body of [
+      { phoneNumber: 12 },
+      { phoneNumber: '010 1234' },
+      { phoneNumber: '01012345678', call: null },
+      {
+        phoneNumber: '01012345678',
+        call: { providerCallId: 'x', incomingAt: 'invalid' },
+      },
+    ])
+      await request(app.getHttpServer()).post('/api/customers/context').send(body).expect(400);
+    await request(app.getHttpServer())
+      .post('/api/customers/context')
+      .set('Cookie', 'dva_session=bad')
+      .send({ phoneNumber: '01012345678' })
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/api/customers/context')
+      .set('Origin', 'http://localhost:5173')
+      .set('Cookie', 'dva_session=bad')
+      .send({ phoneNumber: '01012345678' })
+      .expect(401);
+  });
+
   afterAll(async () => {
     await app.close();
+  });
+
+  it('permits only consultation read events and excludes private queries from Swagger', async () => {
+    const token = 'context-query-test-token-'.padEnd(48, 'c');
+    app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);
+    const event = {
+      eventId: '00000000-0000-4000-8000-000000000021',
+      source: 'consultation',
+      eventType: 'CallCustomerRequested',
+      payload: { phoneNumber: '0' },
+    };
+    for (const authorization of ['', 'Bearer wrong', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN])
+      await request(app.getHttpServer())
+        .post('/internal/caller-context')
+        .set('Authorization', authorization)
+        .send(event)
+        .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/caller-context')
+      .set('Authorization', 'Bearer ' + token)
+      .send(event)
+      .expect(200)
+      .expect({ eventId: event.eventId, status: 'processed', payload: { customerSeq: null } });
+    await request(app.getHttpServer())
+      .post('/internal/caller-context')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...event, source: 'operations' })
+      .expect(422);
+    await request(app.getHttpServer())
+      .post('/internal/caller-context')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...event, payload: { phoneNumber: '0', sql: 'SELECT secret' } })
+      .expect(422);
+    await request(app.getHttpServer())
+      .get('/customer/docs-json')
+      .expect(({ body }: { body: { paths: Record<string, unknown> } }) =>
+        expect(body.paths['/internal/caller-context']).toBeUndefined(),
+      );
   });
 
   it('preserves health and Swagger under the original service prefix', async () => {
@@ -60,6 +134,7 @@ describe('Customer read API (e2e)', () => {
         const paths = body.paths;
         for (const [path, methods] of Object.entries({
           '/api/customers': ['get', 'post'],
+          '/api/customers/context': ['post'],
           '/api/customers/{id}': ['get'],
           '/api/companies': ['get', 'post'],
           '/api/companies/search': ['get'],
@@ -71,7 +146,6 @@ describe('Customer read API (e2e)', () => {
         })) {
           expect(Object.keys(paths[path]).sort()).toEqual(methods.sort());
         }
-        expect(paths['/api/customers/context']).toBeUndefined();
         expect(paths['/api/companies/{id}/billing']).toBeUndefined();
         expect(paths['/internal/audit/flush']).toBeUndefined();
       });

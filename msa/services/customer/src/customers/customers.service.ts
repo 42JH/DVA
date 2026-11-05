@@ -1,3 +1,5 @@
+import { CallContextClient } from './call-context.client';
+import { CallerContextRequestDto } from './dto/caller-context.dto';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { AuditService } from '../audit/audit.service';
@@ -14,6 +16,7 @@ export class CustomersService {
     private readonly repository: CustomersRepository,
     private readonly database: DatabaseService,
     private readonly audit: AuditService,
+    private readonly calls: CallContextClient,
   ) {}
 
   // 소속 충돌 검증과 고객 잠금을 마친 호출자의 같은 트랜잭션에 참여한다.
@@ -28,6 +31,17 @@ export class CustomersService {
     );
     const byPhone = new Map(inserted.map((row) => [row.phoneNumber, row.customerSeq]));
     return rows.map((row) => row.customerSeq ?? byPhone.get(row.phoneNumber)!);
+  }
+
+  async context(input: CallerContextRequestDto, actorId: number | null, requestId: string) {
+    try {
+      return input.call
+        ? await this.calls.context(input, actorId, requestId)
+        : await this.repository.context(input.phoneNumber);
+    } catch (error) {
+      if (error instanceof ApiException) throw error;
+      throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', '고객 초기 정보를 조회할 수 없습니다.');
+    }
   }
 
   list(query: ListCustomersQueryDto) {

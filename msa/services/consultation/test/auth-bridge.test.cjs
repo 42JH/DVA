@@ -38,7 +38,7 @@ after(async () => { server.closeAllConnections(); await new Promise(resolve => s
 const rejects = status => error => error instanceof ApiException && error.getStatus() === status;
 test('validates service authentication and PBX/S3 settings without exposing credentials', () => {
   const valid = { DB_HOST: 'db', DB_USER: 'consultation_app', DB_PASSWORD: 'private-password', DB_NAME: 'consultation_db',
-    OPERATIONS_URL: 'http://operations:3005', CONSULTATION_AUTH_TOKEN: serviceToken };
+    CUSTOMER_AUTH_TOKEN: 'customer-test-service-token-'.padEnd(48,'c'), CUSTOMER_URL: 'http://customer:3001', OPERATIONS_URL: 'http://operations:3005', CONSULTATION_AUTH_TOKEN: serviceToken };
   assert.equal(validateEnvironment(valid).PORT, 3004);
   for (const extra of [{ OPERATIONS_URL: '' }, { OPERATIONS_URL: 'http://user:password@operations:3005' },
     { OPERATIONS_URL: 'http://operations:3005/path' }, { OPERATIONS_URL: 'file:///tmp/auth' },
