@@ -1,4 +1,4 @@
--- Run against an isolated DB after the monolith or MSA operations schema. Rolled back.
+-- Existing MSA settings remain usable in the preserved legacy store. Rolled back.
 BEGIN;
 DO $$
 DECLARE admin_id integer; faq_id integer; persona_id integer;
@@ -21,12 +21,12 @@ BEGIN
   RAISE EXCEPTION 'Invalid admin status accepted';
  EXCEPTION WHEN check_violation THEN NULL;
  END;
- INSERT INTO ai_personas(code,name) VALUES('faq-check-'||txid_current(),'test')
+ INSERT INTO legacy_ai_personas(code,name) VALUES('faq-check-'||txid_current(),'test')
  RETURNING ai_persona_seq INTO persona_id;
- IF (SELECT turn_wait_level FROM ai_personas WHERE ai_persona_seq=persona_id)<>'NORMAL' THEN
+ IF (SELECT turn_wait_level FROM legacy_ai_personas WHERE ai_persona_seq=persona_id)<>'NORMAL' THEN
   RAISE EXCEPTION 'Wrong wait default'; END IF;
  BEGIN
-  UPDATE ai_personas SET turn_wait_level='INVALID' WHERE ai_persona_seq=persona_id;
+  UPDATE legacy_ai_personas SET turn_wait_level='INVALID' WHERE ai_persona_seq=persona_id;
   RAISE EXCEPTION 'Invalid wait level accepted';
  EXCEPTION WHEN check_violation THEN NULL; END;
  INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,updated_at)
