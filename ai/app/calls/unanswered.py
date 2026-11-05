@@ -270,10 +270,11 @@ def apply_review(session_id: str, started_t: float, evidence: dict, payload: dic
     events = list(payload.get("events", []))
     if faq_answered_enabled:
         events = _answered_events(session_id, started_t, evidence, events, review)
+    # 부분 검토에서도 이미 검증한 응대 수는 보존한다. 미확정만 있는 경우 0으로 단정하지 않는다.
+    answered = sum(i["outcome"] == "ANSWERED" for i in review["inquiries"])
     return payload | {"unanswered": unanswered, **({"events": events} if "events" in payload else {}),
                       "analysis": payload["analysis"] | {
-                          "faqAnswerCount": (sum(i["outcome"] == "ANSWERED" for i in review["inquiries"])
-                                             if review.get("complete", True) else None)}}
+                          "faqAnswerCount": answered if answered or review.get("complete", True) else None}}
 
 
 def _answered_events(session_id: str, started_t: float, evidence: dict, events: list[dict], review: dict) -> list[dict]:
