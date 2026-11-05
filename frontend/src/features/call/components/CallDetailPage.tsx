@@ -1,4 +1,5 @@
 import { useLocation, useParams } from 'react-router'
+import { useRememberView } from '@/shared/lib/recentViews'
 import { TopBar } from '@/shared/ui'
 import { useCallDetail } from '@/features/call/hooks/useCallDetail'
 import { CallActions } from './CallActions'
@@ -18,6 +19,7 @@ export function CallDetailPage() {
 
 function CallDetailBody({ callId }: { callId: number }) {
   const vm = useCallDetail(callId)
+  useRememberView('call', callId, vm.recent, vm.notFound)
   // 04 목록에서 왔으면 그 주소(날짜 · 검색 · 필터 그대로)로, 다른 곳(주문 상세 · AI 미답변)에서 왔으면 오늘 목록으로
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/calls'
 

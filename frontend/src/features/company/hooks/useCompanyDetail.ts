@@ -45,9 +45,10 @@ export function useCompanyDetail(id: number) {
   })
   // 대표자는 쪽과 상관없이 전체에서 — 제목 줄 '대표자 이서미 외 1명' (11/01 디자인 추가 c)
   const all = useQuery(companyQueries.allMembers(id))
-  const leaders = (all.data ?? [])
-    .filter((m) => m.membership.role === 'ORG_ADMIN' && m.membership.status === 'ACTIVE')
-    .map((m) => m.customer.name)
+  const leaderMembers = (all.data ?? []).filter(
+    (m) => m.membership.role === 'ORG_ADMIN' && m.membership.status === 'ACTIVE',
+  )
+  const leaders = leaderMembers.map((m) => m.customer.name)
 
   // 사원 검색 (11/05): 서버에 검색 조건이 없어 대표자용으로 받아 둔 전체에서 거름 (사원명 초성 · 사번 · 전화번호 숫자)
   const q = params.q.trim()
@@ -97,6 +98,10 @@ export function useCompanyDetail(id: number) {
         ? '기업 정보를 불러오지 못했습니다. 새로고침해 주세요.'
         : null,
     name: company.data?.name ?? '',
+    // 검색 창 '최근 조회' 줄 — 기업명 뒤 대표자 이름 · 전화번호 (11/05 시안). 대표자가 없으면 기업명만
+    leader: leaderMembers[0]
+      ? [leaderMembers[0].customer.name, fmtPhone(leaderMembers[0].customer.phoneNumber)]
+      : undefined,
     inactive: company.data?.status === 'INACTIVE',
     // 제목 줄 '사원 12명 · 등록 05.22 · 대표자 이서미 외 1명' (디자인 + 대표자, 11/01)
     summary: [

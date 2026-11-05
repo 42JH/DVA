@@ -54,6 +54,7 @@ export function useOrderDetail(orderId: number | null, parcelSeq?: number | null
       : q.error instanceof ApiError && q.error.status === 404
         ? '주문을 찾을 수 없습니다.'
         : '불러오지 못했습니다. 다시 시도해 주세요.',
+    notFound: q.error instanceof ApiError && q.error.status === 404,
   }
 }
 

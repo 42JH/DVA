@@ -3,25 +3,32 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { todayYmd } from '@/shared/lib/dateRange'
 import { fmtPhone, fmtRowTime } from '@/shared/lib/format'
-import { useRecentSearches } from '@/shared/lib/recentSearches'
+import {
+  clearRecentViews,
+  forgetView,
+  useRecentViews,
+  type RecentView,
+} from '@/shared/lib/recentViews'
 import { matchKo, parseOrderNo } from '@/shared/lib/search'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
 import { useOrderDetail } from '@/shared/order/useOrderDetail'
 import { Highlight } from '@/shared/ui/Highlight'
 import { Overlay } from '@/shared/ui/Modal'
+import { MenuIcon } from '@/shared/ui/Sidebar'
 import { searchQueries, type FaqHit } from './searchApi'
 
 // 상단바 공용 검색 (11/05 사용자: 모든 화면 상단바 공통 = 상태 · 검색 · 알림. 설정 화면만 검색 없음)
 // 상단바엔 검색칸 모양 버튼(폭 317 · 높이 32 · 선 field · 안내 '어떤 정보를 찾고 계신가요?'), 누르면 위쪽에 검색 창
-// 창 맨 위 탭 [통화 | 주문 | FAQ | 기업] — 처음 열면 그 화면의 탭(통계 · 그 밖 화면은 주문). 탭을 바꿔도 검색어는 그대로
+// 창: 맨 위 검색칸 · 가운데 결과(칸이 비면 '최근 조회') · 맨 아래 탭 [통화 | 주문 | FAQ | 기업] 알약 (11/05 사용자 시안)
+//   처음 열면 그 화면의 탭(통계 · 그 밖 화면은 주문). 탭을 바꿔도 검색어는 그대로
 //   통화 = 이름 · 전화번호 → 최근 8건, 누르면 06 통화 상세
 //   주문 = 주문번호 'DV-10519'(숫자만 쳐도, 0으로 시작하지 않으면)면 그 주문, 아니면 이름 · 전화번호 · 주소 → 최근 8건. 누르면 주문 상세 창
 //   FAQ = 질문 · 답변 낱말(띄어쓰기 무시 · 초성) → 최근 만든 것부터 8건, 누르면 FAQ 상세
 //   기업 = 기업명(띄어쓰기 무시 · 초성) → 8곳, 누르면 기업 상세
 // Enter · '모두 보기' = 그 탭 목록에 검색 — 지금 화면의 탭이면 이 화면 목록에(onApply), 아니면 그 목록 화면으로 이동(?q=)
-// ↑↓ 줄 고르기 · Enter = 고른 줄 · ✕ · Esc · 바깥 클릭 = 닫기 · 윗줄(탭 줄 빈 곳)을 잡고 끌어 옮김
-// 최근 검색어는 FAQ · 기업 탭만 — 통화 · 주문 검색어는 이름 · 전화번호(개인정보, shared/lib/recentSearches)
+// ↑↓ 줄 고르기 · Enter = 고른 줄 · ✕ · Esc · 바깥 클릭 = 닫기 · 검색칸 줄 · 탭 줄의 빈 곳을 잡고 끌어 옮김
+// 최근 검색어는 없앰(11/05) → '최근 조회': 그 탭에서 최근 연 상세 7개(아이콘 · 이름), 누르면 바로 그 상세 (shared/lib/recentViews)
 
 export type SearchTab = 'call' | 'order' | 'faq' | 'company'
 
@@ -39,28 +46,28 @@ const TABS: { key: SearchTab; label: string; list: string; placeholder: string; 
     key: 'call',
     label: '통화',
     list: '/calls',
-    placeholder: '이름 · 전화번호',
+    placeholder: '고객 이름이나 전화번호를 입력해 주세요',
     hint: '고객 이름이나 전화번호로 통화를 찾아요.',
   },
   {
     key: 'order',
     label: '주문',
     list: '/orders',
-    placeholder: '주문 번호 · 이름 · 전화번호 · 주소',
+    placeholder: '주문번호나 고객 정보를 입력해 주세요',
     hint: '주문번호(예: DV-10519)나 보내는 분 · 받는 분의 이름 · 전화번호 · 주소로 주문을 찾아요.',
   },
   {
     key: 'faq',
     label: 'FAQ',
     list: '/faqs',
-    placeholder: '질문 · 답변 낱말',
+    placeholder: '찾으시는 FAQ를 검색해 주세요',
     hint: '질문 · 답변의 낱말로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요. (예: ㅅㄱ → 수거)',
   },
   {
     key: 'company',
     label: '기업',
     list: '/companies',
-    placeholder: '기업명',
+    placeholder: '회사명이나 사원 정보를 입력해 주세요',
     hint: '기업명으로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요.',
   },
 ]
@@ -87,6 +94,26 @@ const XIcon = ({ className }: { className: string }) => (
     <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
   </svg>
 )
+
+/** 최근 조회 줄 앞 아이콘 (11/05 시안) — 통화 = 전화기 · 주문 = 상자 · FAQ = Q · 기업 = 건물 */
+function KindIcon({ kind }: { kind: RecentView['kind'] }) {
+  if (kind === 'faq') return <span className="w-4 shrink-0 text-center text-body text-sub">Q</span>
+  if (kind === 'call')
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="size-4 shrink-0 text-sub"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M6.84 3H4.2C3.48 3 3 3.6 3 4.32C3.24 12.84 9.96 19.56 18.48 19.8C19.2 19.8 19.8 19.32 19.8 18.6V15.96L15.48 14.04L13.56 16.08C11.19 14.77 9.23 12.81 7.92 10.44L9.96 8.52L6.84 3Z" />
+      </svg>
+    )
+  return <MenuIcon name={kind === 'order' ? 'box' : 'building'} className="size-4 text-sub" />
+}
 
 /** 상단바 검색칸 자리 — 누르면 검색 창. 이 화면 목록에 검색 중이면 검색어와 ✕(검색 지우기) */
 export function GlobalSearch(props: SearchProps) {
@@ -204,19 +231,15 @@ function SearchModal({
   const s = useSearchData(typed, tab)
   const today = todayYmd()
   const meta = TABS.find((t) => t.key === tab)!
-  const recentFaq = useRecentSearches('faq')
-  const recentCompany = useRecentSearches('companies')
-  const recent = tab === 'faq' ? recentFaq : tab === 'company' ? recentCompany : null
+  const recent = useRecentViews(tab)
 
   const go = (to: string) => {
-    recent?.add(typed)
     onClose()
     navigate(to)
   }
   // 그 탭 목록에 검색 — 이 화면의 탭이면 이 화면 목록에, 아니면 그 목록 화면으로
   const apply = () => {
     if (tab === firstTab && onApply) {
-      recent?.add(typed)
       onApply(typed)
       onClose()
     } else go(typed ? `${meta.list}?${new URLSearchParams({ q: typed })}` : meta.list)
@@ -236,8 +259,57 @@ function SearchModal({
       </>
     ),
   })
-  const rows: Row[] =
-    tab === 'call'
+  // 최근 조회 한 줄 — 누르면 그 상세 (주문은 상세 창). 오른쪽 ✕ = 이 기록만 지움
+  const recentRow = (v: RecentView): Row => ({
+    key: `r${v.kind}${v.id}`,
+    open: () =>
+      v.kind === 'order'
+        ? openOrder(v.id)
+        : go(
+            v.kind === 'call'
+              ? `/calls/${v.id}`
+              : v.kind === 'faq'
+                ? `/faqs/${v.id}`
+                : `/companies/${v.id}`,
+          ),
+    cells: (
+      <>
+        <KindIcon kind={v.kind} />
+        <span className="flex min-w-0 items-center gap-2.5 text-body">
+          {v.kind === 'order' && <span className="shrink-0">{orderNo(v.id)}</span>}
+          <span className="truncate">{v.label}</span>
+          {v.to !== undefined && (
+            <>
+              <span aria-label="에서" className="shrink-0 font-semibold">
+                ≫
+              </span>
+              <span className="truncate">{v.to}</span>
+            </>
+          )}
+          {v.sub?.map((t) => (
+            <span key={t} className="shrink-0 tabular-nums">
+              {t}
+            </span>
+          ))}
+        </span>
+        <button
+          type="button"
+          aria-label={`최근 조회 ${v.label} 지우기`}
+          onClick={(e) => {
+            e.stopPropagation() // 줄(상세로 이동)까지 번지지 않게
+            forgetView(v.kind, v.id)
+            setActive(-1)
+          }}
+          className="ml-auto grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-surface hover:text-ink"
+        >
+          <XIcon className="size-4" />
+        </button>
+      </>
+    ),
+  })
+  const rows: Row[] = !typed
+    ? recent.map(recentRow)
+    : tab === 'call'
       ? s.calls.map((h) => ({
           key: `c${h.callSessionSeq}`,
           open: () => go(`/calls/${h.callSessionSeq}`),
@@ -346,34 +418,13 @@ function SearchModal({
       top
       dim={false}
       movable
-      boxClass="w-[min(560px,calc(100vw-160px))] overflow-hidden ring-1 ring-line"
+      boxClass="h-[min(440px,calc(100dvh-120px))] w-[min(560px,calc(100vw-160px))] overflow-hidden ring-1 ring-line"
     >
-      {/* 탭 줄 = 잡고 끄는 곳 (탭 글자 말고 빈 곳) */}
-      <div
+      {/* 검색칸 줄 = 잡고 끄는 곳 (입력칸 · ✕ 말고) */}
+      <label
         data-drag
-        role="tablist"
-        aria-label="검색 대상"
-        className="flex h-12 shrink-0 cursor-move items-end gap-6 border-b border-line px-6"
+        className="flex h-14 shrink-0 cursor-move items-center border-b border-line px-6"
       >
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={t.key === tab}
-            onClick={() => pick(t.key)}
-            className={`-mb-px h-10 cursor-pointer border-b-2 px-1 text-body ${
-              t.key === tab
-                ? 'border-brand font-semibold text-brand'
-                : 'border-transparent text-sub hover:text-ink'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-      <label className="flex h-14 shrink-0 items-center gap-4 border-b border-line pr-4 pl-6">
-        <SearchIcon className="size-5" />
         <input
           ref={input}
           autoFocus
@@ -388,70 +439,43 @@ function SearchModal({
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
           className="min-w-0 flex-1 bg-transparent text-strong outline-none placeholder:text-field"
         />
-        <button
-          type="button"
-          aria-label="닫기"
-          onClick={onClose}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink"
-        >
-          <XIcon className="size-5" />
-        </button>
       </label>
 
-      <div className="min-h-0 [scrollbar-width:thin] overflow-y-auto py-2">
-        {typed ? (
-          rows.length ? (
-            <ul id={listId} role="listbox" aria-label="검색 결과">
-              {rows.map((r, i) => (
-                <li
-                  key={r.key}
-                  id={`${listId}-${i}`}
-                  role="option"
-                  aria-selected={i === active}
-                  onMouseEnter={() => setActive(i)}
-                  onClick={r.open}
-                  className={`flex cursor-pointer items-baseline gap-4 px-6 py-3 ${i === active ? 'bg-bg' : ''}`}
-                >
-                  {r.cells}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-6 py-6 text-body text-sub">{empty}</p>
-          )
-        ) : recent?.items.length ? (
-          <>
-            <p className="flex items-center justify-between px-6 pt-2 pb-1 text-caption text-muted">
-              최근 검색어
-              <button type="button" onClick={recent.clear} className="hover:text-ink">
-                전체 삭제
-              </button>
-            </p>
-            {/* 누르는 곳은 검색어 글자와 ✕만 (줄 전체가 아님 — 11/04 사용자: 클릭 범위) */}
-            <ul>
-              {recent.items.map((t) => (
-                <li key={t} className="flex items-center justify-between gap-2 px-6 py-0.5">
-                  <button
-                    type="button"
-                    onClick={() => type(t)}
-                    className="min-w-0 truncate py-1.5 text-left text-body hover:text-brand"
-                  >
-                    {t}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`최근 검색어 ${t} 지우기`}
-                    onClick={() => recent.remove(t)}
-                    className="grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-bg hover:text-ink"
-                  >
-                    <XIcon className="size-4" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
+      {/* 남는 높이를 채우고 안에서 스크롤 — 막대는 숨김(11/05 시안) */}
+      <div className="min-h-0 flex-1 [scrollbar-width:none] overflow-y-auto py-2 [&::-webkit-scrollbar]:hidden">
+        {!typed && rows.length > 0 && (
+          <p className="flex items-center justify-between px-6 pt-2 pb-1 text-label font-medium text-ink">
+            최근 조회
+            <button
+              type="button"
+              onClick={() => {
+                clearRecentViews(tab) // 이 탭만
+                setActive(-1)
+              }}
+              className="text-caption font-normal text-sub hover:text-ink"
+            >
+              전체 삭제
+            </button>
+          </p>
+        )}
+        {rows.length ? (
+          <ul id={listId} role="listbox" aria-label={typed ? '검색 결과' : '최근 조회'}>
+            {rows.map((r, i) => (
+              <li
+                key={r.key}
+                id={`${listId}-${i}`}
+                role="option"
+                aria-selected={i === active}
+                onMouseEnter={() => setActive(i)}
+                onClick={r.open}
+                className={`flex cursor-pointer gap-4 px-6 ${typed ? 'items-baseline py-3' : 'items-center py-1.5'} ${i === active ? 'bg-bg' : ''}`}
+              >
+                {r.cells}
+              </li>
+            ))}
+          </ul>
         ) : (
-          <p className="px-6 py-6 text-body break-keep text-sub">{meta.hint}</p>
+          <p className="px-6 py-6 text-body break-keep text-sub">{typed ? empty : meta.hint}</p>
         )}
       </div>
 
@@ -467,6 +491,28 @@ function SearchModal({
           <kbd className="font-sans text-caption text-muted">Enter</kbd>
         </button>
       )}
+      {/* 탭 = 맨 아래 알약 (11/05 사용자 시안). 줄의 빈 곳도 잡고 끄는 곳 */}
+      <div
+        data-drag
+        role="tablist"
+        aria-label="검색 대상"
+        className="flex h-11 shrink-0 cursor-move items-center gap-1 border-t border-line px-4"
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={t.key === tab}
+            onClick={() => pick(t.key)}
+            className={`h-7 cursor-pointer rounded-full px-3 text-label ${
+              t.key === tab ? 'bg-brand/10 font-semibold text-brand' : 'text-sub hover:text-ink'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
     </Overlay>
   )
 }

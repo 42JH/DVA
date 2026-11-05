@@ -1,4 +1,5 @@
 import { Link, useParams } from 'react-router'
+import { useRememberView } from '@/shared/lib/recentViews'
 import { Button, ConfirmDialog, Pagination, Table, Tag, TopBar, type Column } from '@/shared/ui'
 import { INACTIVE_TAG, MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyDetail, type MemberRow } from '@/features/company/hooks/useCompanyDetail'
@@ -12,6 +13,7 @@ import { MemberFormModal } from './MemberFormModal'
 export function CompanyDetailPage() {
   const id = Number(useParams().companyId)
   const vm = useCompanyDetail(id)
+  useRememberView('company', id, vm.name ? { label: vm.name, sub: vm.leader } : null, vm.notFound) // 검색 창 '최근 조회'
 
   if (vm.notFound)
     return (

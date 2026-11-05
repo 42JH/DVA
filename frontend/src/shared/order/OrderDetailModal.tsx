@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router'
+import { useRememberView } from '@/shared/lib/recentViews'
 import { Button, Dialog } from '@/shared/ui'
 import { OrderChip } from './OrderChip'
 import { PartyCard, PartyPair } from './PartyCards'
@@ -28,7 +29,14 @@ export function OrderDetailModal({
 }) {
   const navigate = useNavigate()
   const { pathname } = useLocation() // 06에서 열렸으면 지금 보는 통화는 링크 대신 글자 (같은 화면이 기록에 또 쌓이지 않게)
-  const { order, isLoading, error } = useOrderDetail(orderId, parcelSeq)
+  const { order, isLoading, error, notFound } = useOrderDetail(orderId, parcelSeq)
+  // 검색 창 '최근 조회' — '보내는 분 ≫ 받는 분' (shared/lib/recentViews). 없는 주문이면 기록에서 뺌
+  useRememberView(
+    'order',
+    orderId,
+    order ? { label: order.sender.name || '—', to: order.receiver.name || '—' } : null,
+    notFound,
+  )
   const retry = !!order?.canRetry && !!onRetry
 
   const openCall = (callSessionSeq: number) => {

@@ -94,6 +94,24 @@ const ICON = {
   ),
 }
 
+/** 메뉴 아이콘을 다른 곳에서 (검색 창 '최근 조회' 줄 앞 — 통화 · 주문 · FAQ · 기업). 크기 · 색은 className */
+export function MenuIcon({ name, className }: { name: keyof typeof ICON; className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`shrink-0 ${className}`}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      {ICON[name]}
+    </svg>
+  )
+}
+
 // 아이콘 회색 · 글자 진한 회색 (디자인 neutral-600 · 800). 선택되면 둘 다 파랑 (디자인 선택 상태 11/04)
 function Icon({ name, on }: { name: keyof typeof ICON; on: boolean }) {
   return (
