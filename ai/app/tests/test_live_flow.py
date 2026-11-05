@@ -367,66 +367,38 @@ def test_callback_question_only_while_offered():
     assert "callback" in names(callback=True) and "callback" not in names()
 
 
-def test_address_save_after_commit_one_answer_for_both():
-    """담기 전에는 묻지 않고, 담은 뒤 한 번의 답으로 제안한 주소(보내는 곳·받는 곳)를 함께 정한다."""
-    from app.calls.live import _save_pending
-    lf = LiveFlow.__new__(LiveFlow)
-    saved = []
-
-    async def save_addresses(s, seq, snap, offer):
-        saved.append(offer)
-
-    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
-    from app.tests.test_domain import confirm_once, filled
-    st = filled()
-    pid = confirm_once(st)
-    spawned = []
-    s = SimpleNamespace(state=st, spawn=lambda coro, name: spawned.append(coro))
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
-    assert _save_pending(st) == ()  # 되읽기 중(담기 전)에는 저장을 묻지 않는다
-    lf._maybe_save_addresses(s)
-    assert not spawned
-    st.address_offer = st.address_offer | {"parcel": pid}
-    assert _save_pending(st) == ("sender", "receiver")
-    lf._maybe_save_addresses(s)
-    assert not spawned  # 답 전
-    st.address_consent = False
-    lf._maybe_save_addresses(s)
-    assert not spawned and st.address_offer is None and _save_pending(st) == ()  # 거절 → 둘 다 버림
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True, "parcel": pid}, True
-    lf._maybe_save_addresses(s)
-    run(spawned[0])
-    assert saved == [{"sender": True, "receiver": True, "parcel": pid}] and st.address_offer is None  # 둘 다 저장
-
-
-def test_save_question_only_after_commit_and_blocks_more():
-    """담은 뒤 N2에 저장 제안이 실리고, 저장 답을 기다리는 동안은 '더 없음'을 판정하지 않는다."""
-    from app.calls.live import Spoken
+def test_customer_info_saved_on_commit_without_asking():
+    """택배를 담으면 묻지 않고 저장 대상(성함·보내는 곳·받는 곳)을 저장한다(2026-11-06). 담기 전에는 저장하지 않는다."""
     from app.domain.confirm import issue_parcel_confirmation
     from app.policy.render import decision_questions
     from app.tests.test_domain import P, filled
     from app.tests.test_results import session
-    lf = LiveFlow.__new__(LiveFlow)
-    lf.policy, lf.svc = P, SimpleNamespace(results=None)
-    lf.cfg = SimpleNamespace(decision_min_confidence=0.6)
-    sent = []
+    saved, sent = [], []
+
+    async def save_addresses(s, seq, snap, offer):
+        saved.append(offer)
 
     async def notify(s, level, facts):
         sent.append((level, facts))
 
-    lf.notify = notify
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.policy, lf.notify = P, notify
+    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
     st = filled()
+    s = session(st)
+    spawned = []
+    s.spawn = lambda coro, name: spawned.append(coro)
     p = issue_parcel_confirmation(st, P, 100.0)
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
-    run(lf.commit(session(st), p.id))
+    st.address_offer = {"name": True, "sender": True, "receiver": True}
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 되읽기 중(담기 전)에는 저장하지 않는다
+    run(lf.commit(s, p.id))
     [(level, facts)] = sent
-    assert level == "N2" and facts["parcel_added"] and facts["address_save"] == {"sender": True, "receiver": True}
-    names = lambda **kw: [q["name"] for q in decision_questions(P, "more_parcels", **kw)]  # noqa: E731
-    assert names(save=True) == ["save", "switch"]  # 저장 답 대기: more 없음
-    assert names() == ["more", "switch"]  # 답을 들은 뒤에는 다시 더 보낼 택배를 듣는다
-    utt = Spoken(9, "네 해 주세요", 0, 500, 200.0, 200.5)
-    run(lf.apply(session(st), utt, None, {"save": ("yes", 0.95, {})}, None))
-    assert st.address_consent is True and st.address_offer is None  # 한 번의 답으로 둘 다
+    assert level == "N2" and facts["parcel_added"] and "address_save" not in facts  # 저장 여부를 묻지 않는다
+    run(spawned[0])
+    assert saved == [{"name": True, "sender": True, "receiver": True, "parcel": facts["parcel_added"]}]
+    assert st.address_offer is None
+    assert [q["name"] for q in decision_questions(P, "more_parcels")] == ["more", "switch"]  # 저장 질문 없음
 
 
 def test_order_intent_notice_carries_missing_so_first_question_follows_order():

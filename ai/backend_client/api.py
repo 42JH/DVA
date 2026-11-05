@@ -293,10 +293,10 @@ class BackendAPI:
             raise _fail("/api/customers/{id}", resp)
         return _data(resp)
 
-    async def update_customer_address(self, customer_seq: int, call_session_seq: int, address: dict) -> None:
-        """고객 기본 주소 교체(PATCH /api/customers/{id} address). 진행 중 본인 통화의 call_session_seq 헤더 필수
-        (ai-call-follow-up.md: 누락 400·다른 고객 403·없는 통화 404·종료된 통화 409). 성공 204. 고객 동의 후에만 부른다."""
-        resp = await self.http.patch(f"/api/customers/{int(customer_seq)}", json={"address": address},
+    async def update_customer(self, customer_seq: int, call_session_seq: int, fields: dict) -> None:
+        """고객 이름·기본 주소 교체(PATCH /api/customers/{id}, fields = name·address 중 한 개 이상, customers.md:30).
+        진행 중 본인 통화의 call_session_seq 헤더 필수(누락 400·다른 고객 403·없는 통화 404·종료된 통화 409). 성공 204."""
+        resp = await self.http.patch(f"/api/customers/{int(customer_seq)}", json=fields,
                                      headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code not in (200, 204):
             raise _fail("/api/customers", resp)

@@ -755,3 +755,13 @@
 - `app/tools/lookup.py`에 `ORDER_STATUS_TEXT`·`status_text` 추가, 조회 결과 orders와 취소 확인 cancel_target에 `status_text`를 붙임(`status` 원문은 유지). 문구는 BE 계약 기준, 사용자 결정: ACCEPTED = "접수 완료"만, 수거·배송 언급 없음, COLLECTING에 "결제 전" 언급 없음, 결제 완료도 말하지 않음(PAID = "접수 대기 중"), 모르는 상태 = "확인 필요".
 - 표는 지시문이 아니라 서버 코드에 둔다: 다른 개발자가 수정 중인 지시문과 간섭하지 않게(사용자 결정, 코드 주석에 명시). 정책 단일 출처 원칙과는 어긋나므로 지시문 정리 후 옮길지 별도 결정.
 - 테스트: COLLECTING 조회에 "접수 미완료", 7개 상태 전부 문구 있음, 수거·배송·결제 단어 없음, 모르는 상태, 취소 확인 결과. 전체 **649 passed**. BE API·응답 형식·취소 가능 상태 판정 변경 없음. 실제 모델이 status_text대로 말하는지는 실통화 미확인.
+
+## 2026-11-06 — 고객 정보(성함·기본 주소) 자동 갱신, 주소 저장 동의 절차 제거
+
+- 브랜치 `feat/auto-save-customer-info`(develop-ai c2a9661 기반). 사용자 결정: 기존 고객이 접수 중 보내는 분 성함·보내는 곳을 바꾸면 고객 정보도 PATCH로 갱신하고, 동의는 묻지 않는다. 기존 주소 저장 제안(보내는 곳 기본 주소·받는 곳 PIN)도 묻지 않고 자동 저장.
+- `save_offer`(address_book.py): 보내는 분 성함(앞뒤 공백 제거)이 등록 이름과 다르면 `name` 추가. 저장 시점은 그대로 택배를 담을 때(되읽기 중에는 저장하지 않음).
+- `BackendAPI.update_customer_address` → `update_customer(customer_seq, call_session_seq, fields)`: name·address를 PATCH /api/customers/{id} 한 번에(customers.md:30 "name·address 중 한 개 이상"). 헤더(call_session_seq·AI_BUSINESS_TOKEN)는 그대로. MockBackend도 같은 이름·검증(빈 이름·지원 외 필드 400).
+- `ResultService.save_addresses`: PATCH 성공 뒤 통화 중 고객 정보(`customer.name`·`default_address`·`default_address_detail`) 갱신. 실패는 기존처럼 관측만.
+- 동의 절차 제거: `address_consent`·`_save_pending`·Decision `save` 질문 세트·`[results].address_save`·parcel_added의 저장 질문 문장. business_rules.md는 "저장 여부를 묻지 않는다" 한 줄로 교체.
+- 계약 차이: BE 문서(ai-call-follow-up.md)는 "AI가 고객 동의를 받은 경우에만 저장"이라 되어 있다. 사용자 결정으로 동의 없이 저장하며, BE와 공유 필요.
+- 테스트: 성함 다를 때 name 대상, 이름+주소 한 번의 PATCH 본문, 담을 때 묻지 않고 저장·N2에 address_save 없음·more_parcels에 save 질문 없음. 전체 **648 passed**(교체 테스트 2→1). 실통화·실 BE 미확인.
