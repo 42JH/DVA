@@ -18,15 +18,26 @@ from app.address.parse import LETTER, branch_key, parse, readings, unlink_gil
 from app.address.phonetic import Name, distance, num_distance, read_digits, road_readings
 
 
+# 못 찾은 이유(needs.detail): 고객에게 어느 부분을 또렷하게 다시 말해 달라고 할지. 뒤로 갈수록 더 많이 알아들은 것
+#   region   시·도나 시·군·구를 못 찾음      name    지역 안에 맞는 도로·동·리 이름이 없음
+#   needs_ri 리가 있는 읍·면까지만 말함        number  이름은 맞는데 그 건물번호(번지)가 없음
+#   multiple 해당하는 곳이 여러 곳(순서 밖)
+Reason = Literal["region", "name", "needs_ri", "number", "multiple"]
+REASON_RANK = ("region", "name", "needs_ri", "number")
+
+
 @dataclass(frozen=True)
 class Resolution:
-    """보정 결과. address는 confirmed일 때만, candidates는 confirmed면 [확정 주소], ambiguous면 가까운 순 최대 3개."""
+    """보정 결과. address는 confirmed일 때만, candidates는 confirmed면 [확정 주소], ambiguous면 가까운 순 최대 3개.
+    reason은 not_found일 때만(못 찾은 이유)."""
     status: Literal["confirmed", "ambiguous", "not_found"]
     address: str | None
     candidates: tuple[str, ...]
+    reason: Reason | None = None
 
 
-NOT_FOUND = Resolution("not_found", None, ())
+def not_found(reason: Reason) -> Resolution:
+    return Resolution("not_found", None, (), reason)
 
 
 # --- 도로명 사전 ---------------------------------------------------------------
@@ -259,7 +270,7 @@ def resolve(db, heard: str, clock=time.monotonic) -> Resolution:
     (사용자 결정 2026-11-05: P6보다 정확도 우선. 고객에게 후보를 고르게 하는 방식은 측정 후 검토). 후보가 하나인
     ambiguous(도로명을 많이 고쳐 맞춘 주소)는 그대로 돌려준다."""
     r = _resolve(db, heard, clock)
-    return NOT_FOUND if r.status == "ambiguous" and len(r.candidates) > 1 else r
+    return not_found("multiple") if r.status == "ambiguous" and len(r.candidates) > 1 else r
 
 
 def _resolve(db, heard: str, clock) -> Resolution:
@@ -268,14 +279,18 @@ def _resolve(db, heard: str, clock) -> Resolution:
     r = correct(db, heard)
     if r.status != "not_found":
         return r
+    reasons = [r.reason]
     deadline = clock() + RETRY_SEC
     for group in readings(heard)[:RETRY_GROUPS]:
         if clock() > deadline:
             break
-        found = [x for x in (correct(db, t) for t in group) if x.status != "not_found"]
+        tried = [correct(db, t) for t in group]
+        found = [x for x in tried if x.status != "not_found"]
         if found:
             return _merge(found)
-    return NOT_FOUND
+        reasons += [x.reason for x in tried]
+    # 이유는 가장 많이 알아들은 해석 기준("테헤란로 99999 무슨빌딩"은 건물명을 떼면 이름은 맞고 번호가 없다)
+    return not_found(max(reasons, key=REASON_RANK.index))
 
 
 def _merge(found: list[Resolution]) -> Resolution:
@@ -291,7 +306,8 @@ def correct(db, text) -> Resolution:
     """못 찾으면 연음으로 바뀐 길 번호를 되돌려 한 번 더(기존 결과는 그대로 두고 못 찾을 때만)."""
     result = _correct(db, text)
     if result.status == "not_found" and (fixed := unlink_gil(text)):
-        return _correct(db, fixed)
+        again = _correct(db, fixed)
+        return again if again.status != "not_found" else result  # 못 찾았으면 이유는 들은 그대로 기준
     return result
 
 
@@ -320,9 +336,28 @@ def _correct(db, text) -> Resolution:
                 scored[address] = d
     ranked = sorted(scored.items(), key=lambda x: x[1])
     if not ranked:
-        return NOT_FOUND
+        return not_found(_why(db, text, sources))
     best = ranked[0][1]
     close = tuple(a for a, c in ranked if c - best < MARGIN)[:3]
     if len(close) == 1 and best <= CONFIRM_MAX:
         return Resolution("confirmed", close[0], close)
     return Resolution("ambiguous", None, close)
+
+
+def _why(db, text, sources) -> Reason:
+    """못 찾은 이유. 들은 이름과 소리가 같은 실제 이름이 있었으면 번호 문제, 아니면 지역 → 읍·면만 → 이름 순으로 본다."""
+    if sources and sources[0][0] < 1:
+        return "number"
+    scopes, rest = db.match_region(parse(text)[0][0])
+    if not scopes:
+        return "region"
+    rest = rest[:-1] if rest[-1:] == ["산"] else rest  # 지번 "산 12"의 "산"은 이름이 아니다
+    if rest and any(_said_emd(rest[-1], db.emds(key)) for key in scopes):
+        return "needs_ri"
+    return "name"
+
+
+def _said_emd(said: str, emds) -> bool:
+    """들은 이름이 리가 있는 읍·면 이름(접미사 "읍"·"면"을 빼고 말한 것 포함)과 소리가 같은가."""
+    q = Name(said).canon
+    return any(q in (Name(e).canon, Name(e[:-1]).canon) for e in emds)

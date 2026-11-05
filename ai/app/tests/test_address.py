@@ -9,7 +9,7 @@ import pytest
 from conftest import run
 
 from app.address.gazetteer import AddressDB, open_db
-from app.address.matcher import NOT_FOUND, RoadDict, candidates, correct
+from app.address.matcher import RoadDict, candidates, correct, not_found
 from app.address.phonetic import jamo
 from app.domain.state import Geo
 from app.integrations import kakao
@@ -151,18 +151,18 @@ def db(db_path):
 def test_correct_statuses(db):
     assert correct(db, "서울 강남구 태헤란노 211").address == "서울특별시 강남구 테헤란로 211"
     # 테헤란로2길에는 10번이 없고 1길에만 있음 -> 정확히 들은 2길을 버리고 1길로 고치지 않는다(다시 물음, 2026-11-05)
-    assert correct(db, "서울 강남구 테헤란로2길 10") == NOT_FOUND
+    assert correct(db, "서울 강남구 테헤란로2길 10") == not_found("number")
     # 1길 32, 2길 32 둘 다 있음 -> 들은 그대로 있는 쪽
     assert correct(db, "서울 강남구 테헤란로2길 32").address == "서울특별시 강남구 테헤란로2길 32"
     # 건물번호를 고쳐야만 맞는 주소는 후보로도 두지 않는다(없는 번호를 비슷한 번호로 기록하지 않게, 사용자 결정 2026-11-05)
-    assert correct(db, "서울 강남구 테헤란로 112") == NOT_FOUND
-    assert correct(db, "경북 구미시 인동9길 7") == NOT_FOUND  # 부번을 빼면 다른 번호(7-3을 7로 들음 ≠ 7-3)
-    assert correct(db, "서울 강남구 테헤란로 99999") == NOT_FOUND
+    assert correct(db, "서울 강남구 테헤란로 112") == not_found("number")
+    assert correct(db, "경북 구미시 인동9길 7") == not_found("number")  # 부번을 빼면 다른 번호(7-3을 7로 들음 ≠ 7-3)
+    assert correct(db, "서울 강남구 테헤란로 99999") == not_found("number")
     assert correct(db, "서울 강남구 없는로 12").status == "not_found"
     assert correct(db, "전북 익산시 왕궁로 100").address == "전북특별자치도 익산시 왕궁면 왕궁로 100"  # 읍면은 주소에 들어감
     # 도로명을 많이 고치고 건물번호까지 바꿔야 맞는 주소는 억지로 맞추지 않는다(없는 주소). 번호가 맞으면 후보로 둔다
     weak = correct(db, "서울 강남구 대해남노 112")
-    assert weak == NOT_FOUND
+    assert weak == not_found("name")  # 도로명을 많이 고친 이름이라 번호 문제가 아니다
     assert correct(db, "서울 강남구 대해남노 211").candidates == ("서울특별시 강남구 테헤란로 211",)
     # 연음으로 받아쓴 길 번호("구길" -> "국일")
     assert correct(db, "경북 구미시 인동 국일 7-3").address == "경상북도 구미시 인동9길 7-3"
@@ -257,28 +257,39 @@ def test_resolve_retries_only_when_not_found_and_readings_decide(db):
     r = resolve(db, "서울 강남구 테헤란로 이백십이요")  # "이백십"(210 없음)·"이백십이"(212) 중 확정된 쪽
     assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
     # 211·212 둘 다 실제 주소 → 후보가 둘 이상이면 1순위를 기록하지 않고 다시 묻는다(사용자 결정 2026-11-05)
-    assert resolve(db, "서울 강남구 테헤란로 이백십일이요") == NOT_FOUND
+    assert resolve(db, "서울 강남구 테헤란로 이백십일이요") == not_found("multiple")
     assert resolve(db, "경북 구미시 인동 구길 칠다시삼").address == "경상북도 구미시 인동9길 7-3"
     assert resolve(db, "경북 구미 인동구길 칠 다시 삼이요").address == "경상북도 구미시 인동9길 7-3"  # 말끝 + 붙인 길
     assert resolve(db, "서울 강남구 테헤란로 212 무슨타워").address == "서울특별시 강남구 테헤란로 212"
-    assert resolve(db, "서울 강남구 없는로 칠다시삼") == NOT_FOUND
+    assert resolve(db, "서울 강남구 없는로 칠다시삼") == not_found("name")
 
 
 def test_resolve_stops_retrying_after_time_limit(db):
     """다시 보기가 시간 상한을 넘으면 못 찾음 — 예산 초과로 "장애"가 되어 들은 값을 기록하지 않게."""
     from app.address.matcher import RETRY_SEC, resolve
     ticks = iter([0, RETRY_SEC + 1])
-    assert resolve(db, "서울 강남구 테헤란로 212요", clock=lambda: next(ticks)) == NOT_FOUND
+    assert resolve(db, "서울 강남구 테헤란로 212요", clock=lambda: next(ticks)).status == "not_found"
     assert resolve(db, "서울 강남구 테헤란로 212요").status == "confirmed"
 
 
 def test_heard_name_is_not_replaced_by_a_similar_real_place(db):
     """맞게 들은 이름은 고치지 않고, 짧은 이름은 소리가 같을 때만 맞다고 본다(2026-11-05 "산동 580" → 신동 580)."""
     # 리 없이 읍·면만 말하면 번지가 하나로 정해지지 않는다 → 비슷한 다른 동·리로 고치지 않는다(못 찾음)
-    assert correct(db, "경북 구미시 선산읍 산 12") == NOT_FOUND
+    assert correct(db, "경북 구미시 선산읍 산 12") == not_found("needs_ri")
     assert correct(db, "경북 구미시 선산읍 완전리 산 12").status == "confirmed"
     # 짧은 동 이름("인의")에서 글자가 바뀌면 다른 장소 → 후보가 아니다. 연음처럼 소리가 같으면 그대로 찾는다
-    assert correct(db, "경북 구미시 안의동 844-5") == NOT_FOUND
+    assert correct(db, "경북 구미시 안의동 844-5") == not_found("name")
     assert correct(db, "경북 구미시 이니동 844-5").status == "confirmed"
     # 긴 도로명은 받아쓰기 오류를 지금처럼 고친다
     assert correct(db, "서울 강남구 태헤란노 211").address == "서울특별시 강남구 테헤란로 211"
+
+
+def test_not_found_says_which_part_to_say_again(db):
+    """못 찾은 이유(needs.detail): 고객에게 어느 부분을 또렷하게 다시 말해 달라고 할지."""
+    from app.address.matcher import resolve
+    assert resolve(db, "테헤란로 212") == not_found("region")  # 시·군·구 없음
+    assert resolve(db, "서울 강남구 없는로 12") == not_found("name")
+    assert resolve(db, "경북 구미시 선산 12") == not_found("needs_ri")  # 리 없이 읍·면만(접미사 없이)
+    assert resolve(db, "서울 강남구 테헤란로 99999") == not_found("number")
+    # 이유는 가장 많이 알아들은 해석 기준: 건물명을 떼면 이름은 맞고 번호가 없다
+    assert resolve(db, "서울 강남구 테헤란로 99999 무슨빌딩") == not_found("number")

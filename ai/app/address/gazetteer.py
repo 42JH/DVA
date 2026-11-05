@@ -120,6 +120,7 @@ class AddressDB(RoadDict):
         self.parts = {}
         self.roads = _LazyRoads(self)
         self._areas = {}
+        self._emds = {}
         self.set_regions(self.conn.execute("SELECT DISTINCT sido, sigungu FROM roads"))
 
     @property
@@ -160,6 +161,13 @@ class AddressDB(RoadDict):
                                 for i, dong, ri in ((i, d, re.sub(r"\(.*?\)", "", r)) for i, d, r in self.conn.execute(
                                     "SELECT id, dong, ri FROM areas WHERE sido = ? AND sigungu = ?", key))]
         return self._areas[key]
+
+    def emds(self, key):
+        """(시도, 시군구) 안의 리가 있는 읍·면 이름들. 못 찾은 이유(needs_ri: 리 없이 읍·면만 말함) 판단에만 쓴다."""
+        if key not in self._emds:
+            self._emds[key] = [d for (d,) in self.conn.execute(
+                "SELECT DISTINCT dong FROM areas WHERE sido = ? AND sigungu = ? AND ri != ''", key)]
+        return self._emds[key]
 
     def jibun_numbers(self, area, san):
         """그 법정동·리의 지번 전부 -> [("123-4", 그 지번 지상 건물의 도로명주소), ...]. 한 지번에 건물이 여럿이면 여러 줄."""

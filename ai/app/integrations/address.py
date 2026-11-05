@@ -29,6 +29,7 @@ class AddressResult:
     address: str | None           # 기록할 주소(confirmed·ambiguous=보정 주소 1순위, off·error=들은 그대로)
     alternatives: tuple[str, ...]  # ambiguous일 때 나머지 후보(P6: 보관)
     geo: Geo | None
+    reason: str | None = None     # not_found일 때 못 찾은 이유(app.address.matcher.Reason)
 
 
 class AddressService:
@@ -62,7 +63,7 @@ class AddressService:
             with span("address", step="correct"):
                 r = await asyncio.get_running_loop().run_in_executor(self.pool, matcher.resolve, self.db, heard)
             if r.status == "not_found":
-                return AddressResult("not_found", None, (), None)
+                return AddressResult("not_found", None, (), None, r.reason)
             cands = list(r.candidates) or [r.address]
             status, address, alternatives = r.status, cands[0], tuple(cands[1:])
         with span("address", step="geocode"):
