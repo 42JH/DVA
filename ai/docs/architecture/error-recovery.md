@@ -27,7 +27,7 @@
 | 입력 | `PHONE_INVALID_DIGITS`, `PICKUP_IN_PAST`, `PICKUP_TOO_SOON`(현재 + 1시간 미만, P1), `PICKUP_INVALID_FORMAT`, `NOTHING_TO_RECORD`, `ITEM_UNSPECIFIED` | needs_input |
 | 주소(자동) | `ADDRESS_AUTO_SELECTED`(ambiguous 1순위 자동 확정, P6) | ok(+경고) |
 | 상담원 | `AGENT_NOT_CONFIGURED`(P11 설정 없음), `AGENT_CLOSED`(운영 시간 외) | rejected |
-| 주소 | `ADDRESS_NOT_FOUND`, `ADDRESS_AMBIGUOUS`, `ADDRESS_GEO_MISSING`(접수 필수값 부족, 대화는 계속) | needs_input / needs_choice / ok(+경고) |
+| 주소 | `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 도로명·동·건물명이 여러 시군구에 있거나 지역 없이 소리를 고쳐야 맞음 → `regions`·`heard`와 함께 지역 되묻기, 2026-11-05), `ADDRESS_AMBIGUOUS`, `ADDRESS_GEO_MISSING`(접수 필수값 부족, 대화는 계속) | needs_input / needs_choice / ok(+경고) |
 | 받는 곳 | `DEST_NONE`, `DEST_MANY`, `DEST_TOO_MANY`(기업 검색 과다) | needs_input / needs_choice |
 | 확인 | `CONFIRM_SNAPSHOT_CHANGED`, `CONFIRM_BEFORE_READBACK_END`, `COMMIT_ABORTED_BY_SPEECH`, `CONFIRM_UNCLEAR`(임계 미만·not_answer) | needs_confirmation |
 | Decision | `DECISION_STALE`(더 최신 발화 결과 적용됨·pending 바뀜), `DECISION_TIMEOUT`(예산 1.0초 초과), `DECISION_UNAVAILABLE`(API 오류), `DECISION_REFUSAL` (모두 "판단 없음"·기록만, 고객 대응 없음) | — |
@@ -74,7 +74,8 @@
 | 예외 | 감지 | 1차 대응 | 반복 시 | 근거·제약 |
 |---|---|---|---|---|
 | **주소 검색 실패**(not_found) | AddressService `not_found` | 값 저장 안 함, `needs_input` `ADDRESS_NOT_FOUND`: "도로명과 건물번호를 다시" | 2회: "동 이름과 번지로"(지번 경로) → 3회: 상담원 제안 | `call-flow/README.md` §4 |
-| 주소 애매(ambiguous) | 후보 ≥2 또는 도로명을 많이 고침(건물번호는 정확히 일치할 때만 — 번호를 고쳐야 맞으면 not_found, 2026-11-05) | **1순위 자동 확정**(`auto_selected=true`), 나머지 후보 보관 | 고객이 정정하면 일반 정정 경로 | 사용자 결정 P6(`decisions.md`) |
+| 주소 애매(ambiguous) | **같은 시군구 안의** 후보 ≥2 또는 도로명을 많이 고침(건물번호는 정확히 일치할 때만 — 번호를 고쳐야 맞으면 not_found, 2026-11-05) | **1순위 자동 확정**(`auto_selected=true`), 나머지 후보 보관 | 고객이 정정하면 일반 정정 경로 | 사용자 결정 P6(`decisions.md`) |
+| 주소 지역 필요(region_needed) | 후보가 서로 다른 시군구에 걸침, 또는 지역을 전혀 안 말했고 이름을 소리로 고쳐야 맞음 | 값 저장 안 함, `needs_input` `ADDRESS_REGION_NEEDED` + `regions`(최대 3)·`heard` | Live가 지역을 묻고 모델이 `heard`와 합쳐 재전달 | 사용자 결정 2026-11-05(다른 시군구 자동 선택 금지) |
 | 주소 보정 장애(DB 없음·예외) | 서비스 오류 | 들은 값 VALID(source=CUSTOMER) + `ADDRESS_GEO_MISSING` 기록, 대화 계속 | 결과는 INCOMPLETE(운영자 보완) | 대화를 막지 않음 |
 | 카카오 지오코딩 실패 | `geo=None` | 대화 계속, 결과 INCOMPLETE 사유 기록 | — | 장애와 결과 없음 구분해 지표 |
 | **전화번호 오류** | `normalize_phone` None | 기존 값 유지, `PHONE_INVALID_DIGITS`: "또박또박 한 번 더" | 2회: 끊어서 불러 달라 → 3회: 상담원 제안 | 자릿수 규칙 기존 유지 |

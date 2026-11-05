@@ -152,7 +152,7 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     assert s.field_of("sender_address").source == Source.RESOLVER and s.current.sender_geo == Geo(
         GEO.jibun_address, GEO.dong_name, GEO.postal_code)
     assert out["status"] == "ok" and s.field_of("sender_address_detail").value == "3층"
-    out = call(c, "record_fields", {"receiver_address": "테헤란로 212", "receiver_address_detail": "403호"})
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12", "receiver_address_detail": "403호"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").status == FieldStatus.INVALID
     assert s.field_of("receiver_address_detail").status == FieldStatus.EMPTY  # 못 찾은 주소의 상세주소도 믿지 않는다
     best, *rest = correct(corrector, "서울 강남구 대해남노 211").candidates  # 도로명을 많이 고쳐 확정하지 않는 주소
@@ -394,3 +394,14 @@ def test_record_rejects_pickup_out_of_hours_with_allowed_range():
     out = call(c, "record_fields", {"pickup_at": (NOW + timedelta(days=1)).replace(hour=20).isoformat()})
     assert out["code"] == "PICKUP_OUT_OF_HOURS" and "09:00~17:00" in out["facts"]["pickup"]["allowed"]
     assert not c.state.pickup_at.valid
+
+
+def test_address_in_several_regions_asks_region(corrector, address):
+    """같은 주소가 여러 시군구에 있으면 기록하지 않고 지역을 되묻는다(ADDRESS_REGION_NEEDED). 모델은 heard와 지역을 합쳐 다시 넘긴다."""
+    c = ctx(address=address)
+    out = call(c, "record_fields", {"receiver_address": "중앙로 232"})
+    assert out["code"] == "ADDRESS_REGION_NEEDED" and out["needs"][0]["heard"] == "중앙로 232"
+    assert set(out["needs"][0]["regions"]) == {"서울특별시 양천구", "경기도 고양시 덕양구"}
+    assert c.state.field_of("receiver_address").status == FieldStatus.INVALID
+    out = call(c, "record_fields", {"receiver_address": "양천구 중앙로 232"})
+    assert out["status"] == "ok" and c.state.field_of("receiver_address").value == "서울특별시 양천구 중앙로 232"

@@ -97,7 +97,7 @@ def test_region_is_searched_top_down(rd):
     assert candidates(rd, "서울 중구 세종대로 110")[0][0] == "서울특별시"  # 부산 중구가 아니라
     assert candidates(rd, "부산 중구 중앙대로 100")[0][:3] == ("부산광역시", "중구", "중앙대로")
     assert candidates(rd, "서울 중구 중앙대로 100") == []  # 서울 안에서만 찾는다
-    # 지역을 전혀 말하지 않거나 시·군·구를 빼면 찾지 않는다
+    # 이름 색인이 없는 사전(RoadDict)은 시·군·구 없이 찾지 않는다(주소DB는 전국 색인으로 찾는다 — test_resolve_without_region)
     assert candidates(rd, "테헤란로 212") == []
     assert candidates(rd, "서울 테헤란로 212") == []
 
@@ -270,3 +270,93 @@ def test_resolve_stops_retrying_after_time_limit(db):
     ticks = iter([0, RETRY_SEC + 1])
     assert resolve(db, "서울 강남구 테헤란로 212요", clock=lambda: next(ticks)) == NOT_FOUND
     assert resolve(db, "서울 강남구 테헤란로 212요").status == "confirmed"
+
+
+# --- 전국 이름 색인(names + FTS5 trigram)과 건물명 ---
+
+def test_name_key_ignores_spacing_and_reads_digits():
+    from app.address.gazetteer import name_key
+    assert name_key("강남 파이낸스 센터") == name_key("강남파이낸스센터")
+    assert name_key("63빌딩") == name_key("육십삼빌딩")
+    assert name_key("태헤란노") == name_key("테헤란로")  # 발음 정규화(ㅐ/ㅔ, ㄴ/ㄹ)
+
+
+def test_names_index_finds_similar_names_nationwide(db):
+    from app.address.gazetteer import name_key
+    assert db.search_names(0, name_key("태헤란노"))[0] == ("테헤란로", "서울특별시", "강남구")  # 지역 없이 찾는다
+    assert db.search_names(0, name_key("테헤란로"), scope=[("경기도", "성남시 분당구")]) == []  # 지역 제한
+    assert db.search_names(1, name_key("신천동"))[0] == ("신천동", "서울특별시", "송파구")
+    assert db.search_names(2, name_key("롯데월드타워"))[0][0] == "롯데월드타워"  # 복합 표기 "…앤드롯데월드몰"을 풀어 둔 이름
+    assert db.search_names(2, name_key("롯데월드"))[0][0] == "롯데월드"  # 정확히 같은 이름이 먼저
+    assert db.search_names(2, name_key("카카오 판교아지트"))[0] == ("카카오 판교 아지트", "경기도", "성남시 분당구")
+
+
+def test_named_addresses_resolve_building_to_road_address(db):
+    assert db.named_addresses("롯데월드타워앤드롯데월드몰") == ["서울특별시 송파구 올림픽로 300"]
+    assert db.named_addresses("포스코센터", scope=[("서울특별시", "강남구")]) == ["서울특별시 강남구 테헤란로 212"]
+    assert db.named_addresses("포스코센터", scope=[("경기도", "성남시 분당구")]) == []
+
+
+def test_open_db_rejects_old_schema(tmp_path):
+    """옛 스키마(이름 색인 없음)는 조용히 축소하지 않고 기동을 막아 재빌드를 알린다(사용자 결정 2026-11-05)."""
+    import sqlite3
+    old = tmp_path / "old.db"
+    conn = sqlite3.connect(old)
+    conn.executescript("CREATE TABLE roads (road_code INTEGER, emd_seq INTEGER, road TEXT, sido TEXT, sigungu TEXT,"
+                       " emd TEXT, emd_type TEXT);")
+    conn.commit()
+    conn.close()
+    with pytest.raises(RuntimeError, match="다시 빌드"):
+        open_db(old)
+
+
+# --- 지역 없이·시도만·동부터·건물명(전국 이름 색인, 2026-11-05 재설계) ---
+
+def test_composite_building_names_are_split_at_build():
+    from app.address.gazetteer import name_variants
+    assert name_variants("롯데월드타워앤드롯데월드몰") == ["롯데월드타워앤드롯데월드몰", "롯데월드타워", "롯데월드몰"]
+    assert name_variants("부산광역시청, 부산광역시의회") == ["부산광역시청, 부산광역시의회", "부산광역시청", "부산광역시의회"]
+    assert name_variants("서울역(본옥)") == ["서울역(본옥)", "서울역"]
+    assert name_variants("삼성전자(주) 평택캠퍼스") == ["삼성전자(주) 평택캠퍼스", "삼성전자 평택캠퍼스"]
+    assert name_variants("앤드류빌딩") == ["앤드류빌딩"]  # 이름 안의 글자는 구분자가 아니다
+
+
+def test_resolve_without_region(db):
+    from app.address.matcher import resolve
+    ok = lambda heard: (resolve(db, heard).status, resolve(db, heard).address)
+    assert ok("테헤란로 212") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 도로부터
+    assert ok("태헤란노 212") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 소리로 같은 이름은 지역 없이도 확정
+    assert ok("서울 테헤란로 212") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 시도만
+    assert ok("역삼동 테헤란로 212") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 동부터
+    assert ok("서울 역삼동 테헤란로 212") == ("confirmed", "서울특별시 강남구 테헤란로 212")
+    assert ok("역삼동 737") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 동 + 지번
+    assert ok("서울 신천동 29") == ("confirmed", "서울특별시 송파구 올림픽로 300")
+    assert ok("중앙로 1") == ("confirmed", "경기도 고양시 덕양구 중앙로 1")  # 흔한 도로명이라도 번호가 한 곳에만 있으면 확정
+    assert ok("경기 중앙로 232") == ("confirmed", "경기도 고양시 덕양구 중앙로 232")
+    assert ok("없는로 12") == ("not_found", None) and ok("테헤란로 99999") == ("not_found", None)
+
+
+def test_same_road_in_several_regions_asks_region(db):
+    """같은 도로명·번호가 서로 다른 시군구에 있으면 자동으로 고르지 않고 지역을 되묻는다(사용자 결정 2026-11-05)."""
+    from app.address.matcher import resolve
+    r = resolve(db, "중앙로 232")
+    assert r.status == "region_needed" and set(r.candidates) == {"서울특별시 양천구", "경기도 고양시 덕양구"} and r.address is None
+    # 지역을 전혀 안 말했고 이름을 고쳐야 맞으면(소리 거리 ≥ 1) 확정하지 않고 그 후보 지역을 묻는다
+    r = resolve(db, "대핸란로 212")
+    assert r.status == "region_needed" and r.candidates == ("서울특별시 강남구",)
+    assert resolve(db, "서울 테헤람로 212").address == "서울특별시 강남구 테헤란로 212"  # 시도를 말했으면 고쳐서 확정
+    assert resolve(db, "테헤람로 212").status == "region_needed"
+
+
+def test_building_name_resolves_to_its_road_address(db):
+    from app.address.matcher import resolve
+    ok = lambda heard: (resolve(db, heard).status, resolve(db, heard).address)
+    assert ok("롯데월드타워") == ("confirmed", "서울특별시 송파구 올림픽로 300")  # 실제 표기 "롯데월드타워앤드롯데월드몰"을 풀어 둠
+    assert ok("롯데월드") == ("confirmed", "서울특별시 송파구 올림픽로 240")
+    assert ok("송파구 롯데월드타워") == ok("서울 롯데월드타워") == ("confirmed", "서울특별시 송파구 올림픽로 300")
+    assert ok("카카오 판교아지트") == ("confirmed", "경기도 성남시 분당구 판교역로 166")  # 띄어쓰기 무시
+    assert ok("포스코센터") == ("confirmed", "서울특별시 강남구 테헤란로 212")
+    assert ok("서울 포스코 센타") == ("confirmed", "서울특별시 강남구 테헤란로 212")  # 시도 안에서는 소리 오류를 고친다
+    assert resolve(db, "포스코 센타").status == "region_needed"  # 지역 없이 고친 이름은 되묻는다
+    assert ok("없는빌딩타워") == ("not_found", None)
+    assert ok("롯데월드타워 300") == ("not_found", None)  # 번호가 붙으면 건물명 경로가 아니다

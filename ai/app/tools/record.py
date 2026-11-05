@@ -207,8 +207,12 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
     s = ctx.state
     role = addr.removesuffix("_address")
     detail = f"{role}_address_detail"
-    if r is not None and r.status == "not_found":
-        needs.append({"field": addr, "reason": "ADDRESS_NOT_FOUND"})
+    if r is not None and r.status in ("not_found", "region_needed"):
+        need = {"field": addr, "reason": "ADDRESS_NOT_FOUND"}
+        if r.status == "region_needed":  # 같은 주소가 여러 지역에 있음: Live가 지역을 묻고, 모델이 heard와 합쳐 다시 넘긴다
+            need = {"field": addr, "reason": "ADDRESS_REGION_NEEDED", "regions": list(r.alternatives),
+                    "heard": given[addr].strip()}
+        needs.append(need)
         if detail in facts["recorded"] and not s.field_of(addr).valid:
             s.clear(detail)  # 못 찾은 주소에 붙은 상세주소도 믿을 수 없다
             facts["recorded"].remove(detail)

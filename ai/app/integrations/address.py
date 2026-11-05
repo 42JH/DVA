@@ -25,9 +25,9 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AddressResult:
-    status: Literal["confirmed", "ambiguous", "not_found", "off", "error"]
+    status: Literal["confirmed", "ambiguous", "region_needed", "not_found", "off", "error"]
     address: str | None           # 기록할 주소(confirmed·ambiguous=보정 주소 1순위, off·error=들은 그대로)
-    alternatives: tuple[str, ...]  # ambiguous일 때 나머지 후보(P6: 보관)
+    alternatives: tuple[str, ...]  # ambiguous일 때 나머지 후보(P6: 보관), region_needed일 때 되물을 지역 이름(최대 3)
     geo: Geo | None
 
 
@@ -61,8 +61,8 @@ class AddressService:
         else:
             with span("address", step="correct"):
                 r = await asyncio.get_running_loop().run_in_executor(self.pool, matcher.resolve, self.db, heard)
-            if r.status == "not_found":
-                return AddressResult("not_found", None, (), None)
+            if r.status in ("not_found", "region_needed"):
+                return AddressResult(r.status, None, r.candidates, None)
             cands = list(r.candidates) or [r.address]
             status, address, alternatives = r.status, cands[0], tuple(cands[1:])
         with span("address", step="geocode"):
