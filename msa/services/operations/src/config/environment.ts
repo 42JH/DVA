@@ -8,6 +8,7 @@ export interface Environment {
   DB_NAME: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
+  CUSTOMER_AUTH_TOKEN?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -69,7 +70,15 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_NAME: required('DB_NAME'),
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
+    CUSTOMER_AUTH_TOKEN:
+      typeof raw.CUSTOMER_AUTH_TOKEN === 'string' ? raw.CUSTOMER_AUTH_TOKEN : undefined,
   };
+  if (
+    raw.CUSTOMER_AUTH_TOKEN !== undefined &&
+    (typeof raw.CUSTOMER_AUTH_TOKEN !== 'string' ||
+      !/^[\x21-\x7e]{32,256}$/.test(raw.CUSTOMER_AUTH_TOKEN))
+  )
+    errors.push('CUSTOMER_AUTH_TOKEN');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

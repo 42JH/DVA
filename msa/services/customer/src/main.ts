@@ -1,27 +1,27 @@
+import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { ConfigService } from '@nestjs/config';
+import { configureApplication } from './configure-application';
+import { type Environment, EnvironmentValidationError } from './config/environment';
+import { JsonLogger } from './observability/json-logger';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  app.setGlobalPrefix('customer');
+const logger = new JsonLogger();
 
-  const config = new DocumentBuilder()
-    .setTitle('DVA Customer API')
-    .setDescription('고객·기업 관리 서비스')
-    .setVersion('0.1.0')
-    .build();
-
-  const documentFactory = () =>
-    SwaggerModule.createDocument(app, config);
-
-  SwaggerModule.setup('docs', app, documentFactory, {
-  useGlobalPrefix: true,
-  jsonDocumentUrl: 'docs-json',
-  });
-
-  app.enableShutdownHooks();
-  await app.listen(process.env.PORT ?? 3001, '0.0.0.0');
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.create(AppModule, { abortOnError: false, logger });
+  configureApplication(app);
+  const port = app
+    .get<ConfigService<Environment, true>>(ConfigService)
+    .get('PORT', { infer: true });
+  await app.listen(port, '0.0.0.0');
+  logger.log({ event: 'backend_started' });
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  logger.error({
+    event: 'backend_startup_failed',
+    invalidFields: error instanceof EnvironmentValidationError ? error.fields : undefined,
+  });
+  process.exit(1);
+});

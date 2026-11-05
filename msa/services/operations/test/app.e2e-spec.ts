@@ -86,4 +86,46 @@ describe('Operations infrastructure (e2e)', () => {
     await request(app.getHttpServer()).get('/operations/health/ready').expect(503);
     await request(app.getHttpServer()).get('/operations/health').expect(200);
   });
+
+  it('requires service credentials for internal sessions and keeps them out of public Swagger', async () => {
+    const body = { sessionToken: 'a'.repeat(64) };
+    await request(app.getHttpServer()).post('/internal/auth/session').send(body).expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Cookie', 'dva_session=' + 'a'.repeat(64))
+      .send(body)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Authorization', 'Bearer wrong')
+      .send(body)
+      .expect(403);
+    const authorization = 'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a');
+    await request(app.getHttpServer())
+      .get('/api/admins')
+      .set('Authorization', authorization)
+      .expect(401);
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Authorization', authorization)
+      .send({ sessionToken: '' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Authorization', authorization)
+      .send({ ...body, role: 'SYSTEM_ADMIN' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Authorization', authorization)
+      .send(body)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get('/operations/docs-json')
+      .expect(200)
+      .expect(({ body }: { body: { paths: Record<string, unknown> } }) => {
+        expect(body.paths['/internal/auth/session']).toBeUndefined();
+        expect(body.paths['/api/internal/auth/session']).toBeUndefined();
+      });
+  });
 });
