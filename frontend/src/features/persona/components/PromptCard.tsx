@@ -32,8 +32,7 @@ export function PromptCard({
             </Button>
           )}
           {prompt.canEdit && (
-            // shortcut: 수정 화면 글 칸이 flex에 눌려 아래가 잘림(jiw/log/2026-11-05-persona-editor-clip.md) — 고치면 disabled · title 삭제
-            <Button big kind="brand" disabled title="수정 화면 점검 중입니다" onClick={onEdit}>
+            <Button big kind="brand" onClick={onEdit}>
               수정
             </Button>
           )}
