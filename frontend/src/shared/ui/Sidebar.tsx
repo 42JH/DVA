@@ -121,7 +121,8 @@ const TOP: Item[] = [
 ]
 const BOTTOM: Item[] = [
   { to: '/logistics', label: '물류', icon: 'truck', soon: true },
-  { to: '/personas', label: 'AI 상담가', icon: 'headset' },
+  // shortcut: 수정 화면 글 칸 잘림(jiw/log/2026-11-05-persona-editor-clip.md)으로 잠시 막음 — 고치면 soon 삭제
+  { to: '/personas', label: 'AI 상담가', icon: 'headset', soon: true },
   { to: '/companies', label: '기업', icon: 'building' },
 ]
 const SETTINGS = ['/admins', '/me'] // 설정 메뉴 안 화면 — 여기 있으면 설정 줄이 선택됨
