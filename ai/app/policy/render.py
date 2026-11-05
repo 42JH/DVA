@@ -6,7 +6,8 @@ Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드�
 """
 
 from app.config import ROOT
-from app.policy.model import Policy
+from app.domain.pickup import describe, rule_of
+from app.policy.model import Policy, load_policy
 
 POLICY_DIR = ROOT / "policy"
 
@@ -20,8 +21,25 @@ def default_persona() -> str:
     return _read("persona_default.md")
 
 
-def business_rules() -> str:
-    return _read("business_rules.md")
+def business_rules(policy: Policy | None = None) -> str:
+    policy = policy if policy is not None else load_policy()
+    return _read("business_rules.md").replace("{pickup_allowed}", describe(rule_of(policy.pickup)))
+
+
+def render_input_rules(policy: Policy) -> str:
+    """Live·Responses 양쪽에 같은 입력 제한을 제공한다."""
+    limits, phone = policy.input_limits, policy.phone
+    return "\n".join([
+        "## 공통 입력 제한(페르소나·검색 자료의 다른 제한보다 우선)",
+        f"- 물품 가액: {limits.item_price_min:,}원~{limits.item_price_max:,}원(양 끝 포함).",
+        f"- 현재 받는 곳별 접수 묶음(parcel)마다 소형·중형·대형 박스 합계 최대 {limits.box_total_max}개.",
+        f"- 서류는 같은 묶음에서 박스와 별도로 최대 {limits.document_max}개. 서류를 박스 합계에 더하지 않습니다.",
+        "- 수거 가능 범위: " + describe(rule_of(policy.pickup)) + ". 시간대는 한국 시간입니다.",
+        f"- 전화번호: 한글 숫자·국가번호 +82·구분 기호를 정리한 뒤 {phone.mobile_prefix} 시작은 "
+        f"정확히 {phone.mobile_digits}자리, 그 외 0 시작은 {phone.domestic_min_digits}~{phone.domestic_max_digits}자리. "
+        f"{'·'.join(phone.service_prefixes)} 시작 대표번호는 {phone.service_digits}자리입니다. 번호를 추측해 채우지 않습니다.",
+        "- 허용 범위 밖 값은 임의로 줄이거나 상한으로 바꾸지 않고 허용 범위를 설명한 뒤 다시 받습니다.",
+    ])
 
 
 def _labels(policy: Policy, names) -> list[str]:
@@ -40,19 +58,25 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
              "- 이미 기록된 항목은 다시 묻지 않습니다. 서버 결과의 missing이 아직 받지 못한 항목입니다.",
              "- 순서 밖에서 말한 값과 정정도 버리지 않고 맡깁니다. 그다음 질문은 여전히 이 순서에서 빠진 첫 항목입니다."]
     lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
-    lines += ["", "## 단계"]
+    lines += ["", render_input_rules(policy), "", "## 단계"]
     lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
     lines += ["", "## 백엔드에 맡기기", "Generate <|SpawnThinking|> when:",
-              f"- 고객이 다음 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}"]
+              f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}",
+              "- 수거 시각 변경은 서버의 현재 시각 기준 최종 검사를 거치도록 맡깁니다. 통화 시작 시각만으로 허용 여부를 확정하지 않습니다.",
+              "- 정상 정보와 잘못된 값이 섞이면 정상 정보는 버리지 않고 맡기고, 잘못된 항목은 다시 묻습니다. "
+              "기록 성공은 서버 결과로만 안내합니다."]
     if tools:
         lines += ["", "Backend tools:"] + [f"- {name}: {desc}" for name, desc in tools]
     lines += ["", "Do not generate <|SpawnThinking|> when:",
+              "- 고객이 말한 가액·수량·전화번호가 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
+              "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
               "Do not guess the result while waiting.",
               "- 결과를 기다리는 동안 채우는 말은 정해진 문장 없이, 고객이 방금 한 말에 이어지는 자연스러운 한마디로 그때그때 짓습니다. "
               "짧게 하고, 앞에서 한 말을 되풀이하지 않습니다. 바로 답할 수 있으면 채우는 말 없이 답합니다.",
-              "- 채우는 말에는 결과·판단·되읽기·다음 질문을 넣지 않습니다. 결과는 서버 결과가 온 뒤에 말합니다.",
+              "- 채우는 말에는 저장 결과·되읽기·다음 접수 질문을 넣지 않습니다. "
+              "명백한 입력 제한 위반의 설명과 재질문은 바로 할 수 있습니다. 저장 결과는 서버 결과가 온 뒤에 말합니다.",
               "- 고객이 말을 시작하면 하던 말을 바로 멈추고 고객 말을 먼저 받습니다. 기다리던 결과가 뒤늦게 오면 "
               "고객이 방금 한 말에 맞춰 필요한 것만 이어서 안내합니다(이미 지나간 이야기를 다시 꺼내지 않습니다).", "",
               "## 하지 않는 것"]
@@ -72,7 +96,7 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
                 tools: tuple[tuple[str, str], ...] = ()) -> str:
     """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
     persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
-    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
+    parts = [persona, "", business_rules(policy), "", render_policy(policy, tools)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)
@@ -80,7 +104,7 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
 
 def render_backend(policy: Policy) -> str:
     free = ", ".join(f"{policy.fields[n].label}({n})" for n in policy.free_fields())
-    return _read("backend_rules.md").replace("{fields}", free)
+    return _read("backend_rules.md").replace("{fields}", free) + "\n\n" + render_input_rules(policy)
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,

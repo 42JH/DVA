@@ -129,13 +129,14 @@ class CallService:
             info["고객 성함"] = c.name
         if c.customer_seq and c.origin_address:
             info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
-        tools = tuple((t["name"], t["description"]) for t in function_specs())
+        specs = function_specs(policy=self.d.policy)
+        tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",
                 "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
                     "model": self.d.backend_model,
                     "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
-                    "tools": function_specs(), "tool_choice": "auto", "parallel_tool_calls": False,
+                    "tools": specs, "tool_choice": "auto", "parallel_tool_calls": False,
                     "reasoning": {"effort": self.d.backend_effort}, "text": {"verbosity": "low"},
                     "service_tier": "priority"}}}
         if persona and persona.voice:  # 원본 live_session.build_session과 같은 자리
