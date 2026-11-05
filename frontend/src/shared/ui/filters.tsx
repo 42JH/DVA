@@ -1,5 +1,4 @@
 import { useContext, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { useRecentSearches } from '@/shared/lib/recentSearches'
 import { ExitGhost } from '@/shared/lib/useExitGhost'
 import { NewLook } from './newLook'
 
@@ -12,10 +11,10 @@ const LINE_ON = 'ring-[1.5px] ring-action ring-inset'
 /**
  * 검색칸 — 입력 중엔 Enter로 검색. 자리글 예: '주문 · 디버 접수번호 · 고객 · 발신번호'
  * 켜는 옵션 (10/30, 안 주면 예전 그대로):
- *  - recentKey: 최근 검색어 — 이 이름으로 브라우저에 저장, 칸이 비어 있을 때 아래에 뜸 (09만. 고객 이름 · 번호 검색칸엔 쓰지 않기)
  *  - suggestions: 추천 목록 — 칠 때 아래에 뜸. 화면 훅이 shared/lib/search의 suggest()로 만들어 넘김
- *  - onPick: 최근 검색어 · 추천을 골랐을 때 할 일 (검색칸 글자는 늘 그 글로 바뀜. 예: 01 홈은 바로 검색 이동)
- * 키보드: ↑↓ 고르기 · Enter 고른 것 적용 · Esc 닫기 · Delete 최근 검색어 지우기 (한글 조합 중 Enter는 무시)
+ *  - onPick: 추천을 골랐을 때 할 일 (검색칸 글자는 늘 그 글로 바뀜. 예: 01 홈은 바로 검색 이동)
+ * 키보드: ↑↓ 고르기 · Enter 고른 것 적용 · Esc 닫기 (한글 조합 중 Enter는 무시)
+ * 최근 검색어는 11/05에 없앰 — 대신 상단바 검색 창의 '최근 조회'(shared/lib/recentViews)
  */
 export function SearchBox({
   value,
@@ -23,7 +22,6 @@ export function SearchBox({
   onChange,
   onSubmit,
   className = '',
-  recentKey,
   suggestions,
   onPick,
 }: {
@@ -32,19 +30,16 @@ export function SearchBox({
   onChange: (v: string) => void
   onSubmit?: () => void
   className?: string
-  recentKey?: string
   suggestions?: string[]
   onPick?: (v: string) => void
 }) {
-  const recent = useRecentSearches(recentKey)
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(-1)
   const listId = useId()
   const pop = useRef<HTMLDivElement>(null) // 목록이 닫힐 때 사라지는 애니메이션은 안의 <ExitGhost> (11/01)
 
-  const hasPopup = !!recentKey || suggestions !== undefined // 옵션을 안 켠 검색칸은 예전처럼 그냥 입력칸
-  const isRecent = value.trim() === ''
-  const items = isRecent ? recent.items : (suggestions ?? [])
+  const hasPopup = suggestions !== undefined // 옵션을 안 켠 검색칸은 예전처럼 그냥 입력칸
+  const items = suggestions ?? []
   const expanded = open && items.length > 0
   const act = active < items.length ? active : -1 // 목록이 줄어도(✕) 없는 줄을 가리키지 않게
 
@@ -55,12 +50,7 @@ export function SearchBox({
   const pick = (text: string) => {
     onChange(text)
     onPick?.(text)
-    recent.add(text)
     close()
-  }
-  const removeRecent = (text: string) => {
-    recent.remove(text)
-    setActive(-1)
   }
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return // 한글 조합을 끝내는 Enter · 방향키
@@ -75,7 +65,6 @@ export function SearchBox({
         e.preventDefault() // 감싼 form이 있어도 제출하지 않고 고른 것만 적용
         pick(items[act])
       } else {
-        recent.add(value)
         onSubmit?.()
         close()
       }
@@ -83,9 +72,6 @@ export function SearchBox({
       e.preventDefault()
       e.stopPropagation() // 뒤에 열린 창(Modal)의 Esc까지 닫히지 않게 — 목록만 닫음
       close()
-    } else if (e.key === 'Delete' && expanded && isRecent && act >= 0) {
-      e.preventDefault() // 키보드로 최근 검색어 지우기 (✕는 마우스용)
-      removeRecent(items[act])
     }
   }
 
@@ -114,10 +100,7 @@ export function SearchBox({
           }}
           onFocus={() => setOpen(true)}
           onMouseDown={() => setOpen(true)} // 이미 포커스가 있으면 focus가 안 와서, 닫은 뒤 다시 누를 때 열리게
-          onBlur={() => {
-            recent.add(value) // 바로 걸러지는 검색이라 칸을 떠날 때 남김
-            close()
-          }}
+          onBlur={close}
           onKeyDown={onKeyDown}
           {...(hasPopup && {
             role: 'combobox',
@@ -139,23 +122,7 @@ export function SearchBox({
           className="absolute inset-x-0 top-full z-20 mt-1 origin-top rounded-lg bg-surface py-2 shadow-[0_8px_24px_rgba(43,47,54,0.12)] ring-1 ring-line ring-inset motion-safe:animate-pop-in"
         >
           <ExitGhost target={pop} />
-          {isRecent && (
-            <div className="flex items-center justify-between px-4 pb-1 text-caption text-muted">
-              <span>최근 검색어</span>
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={() => {
-                  recent.clear()
-                  setActive(-1)
-                }}
-                className="hover:text-ink"
-              >
-                전체 삭제
-              </button>
-            </div>
-          )}
-          <ul id={listId} role="listbox" aria-label={isRecent ? '최근 검색어' : '추천 검색어'}>
+          <ul id={listId} role="listbox" aria-label="추천 검색어">
             {items.map((text, i) => (
               <li
                 key={text}
@@ -169,21 +136,6 @@ export function SearchBox({
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{text}</span>
-                {isRecent && (
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    aria-hidden // 줄(option) 이름에 섞이지 않게 — 키보드는 Delete
-                    title="삭제"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      removeRecent(text)
-                    }}
-                    className="text-muted hover:text-ink"
-                  >
-                    ✕
-                  </button>
-                )}
               </li>
             ))}
           </ul>

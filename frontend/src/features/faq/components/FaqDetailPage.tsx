@@ -1,4 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { useRememberView } from '@/shared/lib/recentViews'
 import { Button, Highlight, Markdown, TopBar } from '@/shared/ui'
 import { faqTo, useFaqDetail, useRecentQuestions } from '@/features/faq/hooks/useFaqList'
 import { FAQ_GRID, FaqCategoryNav } from './FaqCategories'
@@ -14,6 +15,8 @@ export function FaqDetailPage() {
   const id = Number(useParams().faqId)
   const q = useSearchParams()[0].get('q') ?? ''
   const { faq, isLoading, error } = useFaqDetail(id)
+  // 검색 창 '최근 조회' — 목록을 받았는데 없으면(지워짐) 기록에서 뺌
+  useRememberView('faq', id, faq ? { label: faq.question } : null, !isLoading && !error && !faq)
   const questions = useRecentQuestions(id)
   const navigate = useNavigate()
 
