@@ -4,7 +4,11 @@ import { PageRows, readPage } from '../common/pagination-query';
 import { DatabaseService } from '../database/database.service';
 import { CallerContextDto } from './dto/caller-context.dto';
 import { Customer, EmployeeCustomerIdentity } from './customers.types';
-import { CreateCustomerDto, ListCustomersQueryDto } from './dto/customer-request.dto';
+import {
+  CreateCustomerDto,
+  ListCustomersQueryDto,
+  UpdateCustomerDto,
+} from './dto/customer-request.dto';
 
 const columns =
   'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled",address_data AS address';
@@ -119,6 +123,20 @@ export class CustomersRepository {
       [id],
     );
     return result.rows[0];
+  }
+
+  async update(id: number, changes: UpdateCustomerDto, client: PoolClient): Promise<void> {
+    await client.query(
+      'UPDATE customers SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled),address_data=CASE WHEN $5::boolean THEN $6::jsonb ELSE address_data END WHERE customer_seq = $1',
+      [
+        id,
+        changes.name ?? null,
+        changes.status ?? null,
+        changes.monthlyBillingEnabled ?? null,
+        changes.address !== undefined,
+        changes.address ?? null,
+      ],
+    );
   }
 
   async insert(client: PoolClient, input: CreateCustomerDto): Promise<number> {

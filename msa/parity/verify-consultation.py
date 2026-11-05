@@ -85,8 +85,8 @@ def main():
                    '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                    '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
-                   command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs', *(['test/caller-context.integration.test.cjs'] if side == 'monolith' else [])))
-            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs', *([ROOT/'backend/test/caller-context.integration.test.cjs'] if side == 'monolith' else [])):
+                   command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs', *(['test/caller-context.integration.test.cjs', 'test/customers.integration.test.cjs', 'test/pins.integration.test.cjs'] if side == 'monolith' else [])))
+            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs', *([ROOT/'backend/test/caller-context.integration.test.cjs', ROOT/'backend/test/customers.integration.test.cjs', ROOT/'backend/test/pins.integration.test.cjs'] if side == 'monolith' else [])):
                 target = '/app/test/' if side == 'monolith' else '/app/service/test/'
                 run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
             complete(name)
@@ -130,6 +130,15 @@ def main():
         run('docker', 'cp', str(runtime), name+':/app/service/test/customer-runtime', label='context-consumer-copy')
         for source in (ROOT/'msa/parity/caller-context.test.cjs', ROOT/'msa/parity/context-claimant.cjs', LOGS/'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='context-copy-'+source.name)
+        complete(name)
+        name = RUN+'-customer-pins'
+        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CUSTOMER_AUTH_TOKEN='+password,
+               '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+               command=('node', '--test', 'test/customer-pins.test.cjs'))
+        run('docker', 'cp', str(runtime), name+':/app/service/test/customer-runtime', label='pins-consumer-copy')
+        for source in (ROOT/'msa/parity/customer-pins.test.cjs', ROOT/'msa/parity/pin-scope-claimant.cjs', LOGS/'seed-password.cjs'):
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='pins-copy-'+source.name)
         complete(name)
         report['passed'] = True
     finally:

@@ -16,6 +16,8 @@ Node.js 24에서 `npm ci` 후 DB_HOST·DB_PORT·DB_USER·DB_PASSWORD·DB_NAME과
 
 Health는 HTTP 프로세스 상태이며 readiness는 DB 접속 상태를 확인한다. 시작 시 인증·감사 준비 스키마가 없으면 기동에 실패한다. DDL은 앱에서 실행하지 않으며 Liquibase operations `005`까지 먼저 적용한다. 이름 없는 구버전 관리자 데이터가 있으면 임의의 이름을 채우지 않고 마이그레이션을 중단한다.
 
+customer의 CUSTOMER_UPDATED·PERSONAL_PIN_CREATED/UPDATED 감사도 같은 준비/확정/중단 경로로 받는다. 고객과 PIN에 대한 감사 권한은 customer 토큰에만 추가하며 consultation은 기존 CALL_STARTED/AI·ADMIN/SUCCESS 범위를 유지한다. PIN 주소나 전화번호는 감사 metadata에 저장하지 않는다.
+
 ## 동일한 외부 API
 
 - `POST /api/auth/login`, `POST /api/auth/signup`, `POST /api/auth/logout`

@@ -1,6 +1,6 @@
 # Customer 서비스
 
-모놀리식의 고객·기업·부서·구성원 조회 7개·쓰기 10개와 고객 확인/통화 등록 1개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
+모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN 22개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 공개 API
 
@@ -8,7 +8,8 @@
 - `GET /api/companies`, `GET /api/companies/search`, `GET /api/companies/:id`
 - `GET /api/companies/:id/departments`, `GET /api/companies/:id/members`
 - `POST /api/customers`
-- `POST /api/customers/context`
+- `POST /api/customers/context`, `PATCH /api/customers/:id`
+- `GET /api/customers/:id/pins`, `POST /api/customers/:id/pins`, `PATCH /api/pins/:id`
 - `POST /api/companies`, `PATCH /api/companies/:id`, `DELETE /api/companies/:id`
 - `POST /api/companies/:id/departments`, `PATCH /api/departments/:id`, `DELETE /api/departments/:id`
 - `POST /api/companies/:id/members`, `PATCH /api/members/:id`, `DELETE /api/members/:id`
@@ -17,7 +18,13 @@
 
 고객 확인은 call 없이 현재 고객·소속·결제 자격·개인 PIN 전체를 조회하며 통화·감사를 저장하지 않는다. call이 있으면 consultation에 등록 이벤트를 보내 같은 통화를 생성·재사용하고 CALL_STARTED 감사 확정까지 기다린다. 공개 경로·Origin/쿠키·오류·메타·후행 슬래시는 기존 customer가 처리한다. 최신 `04b7346`처럼 고객 생성·전화번호 검색·구성원 등록·고객 확인의 전화번호는 숫자 문자열 11자리다.
 
-현재 공개 선언은 18/23개다. 고객 PATCH·기업 월 청구 GET·고객 PIN GET/POST·PIN PATCH, 5개와 월별 청구 초기화 등 자동 업무 워커는 후속이다.
+현재 공개 선언은 22/23개다. 기업 월 청구 GET 1개와 월별 청구 초기화 등 자동 업무 워커는 주문·청구 단계에서 연결한다. [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)을 따른다.
+
+## 고객 수정·개인 PIN
+
+고객 이름 단독 AI 수정은 통화 헤더가 불필요하며, 내 주소 수정/삭제는 진행 중인 본인 통화를 확인한다. 상태·월결제 자격은 현재 관리자 세션과 허용 Origin이 필요하고 탈퇴 복구는 거절한다. PIN 조회는 진행 중 통화만 허용하지만 쓰기는 종료 후에도 가능하다. 삭제·보관 만료·다른 고객/재사용 번호의 통화는 거절한다. PIN은 삭제 데이터 숨김·리터럴 검색/페이지/total_count·DB 주소 중복·부분 수정·오래된 expectedVersion 허용·실제 변경 시 버전 증가를 원본처럼 처리한다.
+
+AI 요청은 consultation에 인증한 통화 범위 이벤트를 보내고, consultation은 쓰기 통화의 FOR SHARE 잠금을 유지한 채 고정된 customer 내부 경로에서 원본 업무를 실행한다. customer의 업무·수신 기록·감사 결정 커밋과 감사 ACK까지 완료한 뒤 응답한다. 같은 내부 쓰기 이벤트는 다시 반영하지 않으며 주소/전화번호 대신 입력 해시와 결과 식별자/버전만 inbox에 보관한다. 조회 이벤트는 현재 페이지를 다시 읽고 응답을 저장하지 않는다. 교차 DB 직접 조회나 새 외부 API는 없다.
 
 ## 실행과 DB
 
@@ -25,9 +32,9 @@ Node.js 24에서 `npm ci` 후 아래 환경을 설정하고 `npm run start:dev`�
 
 - customer 전용 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
 - `OPERATIONS_URL`: 예시 `http://operations:3005`, 경로·자격증명 없는 정확한 origin
-- `CUSTOMER_AUTH_TOKEN`: operations와 공유하는 32~256자 ASCII 서비스 비밀 값
-- `CONSULTATION_URL`: 통화 등록용 정확한 HTTP(S) origin. k8s는 `http://consultation:3004`; 미설정 시 call이 있는 요청만 503이다.
-- `CONSULTATION_AUTH_TOKEN`: consultation에서 오는 내부 고객 조회의 서비스 비밀 값. 공개 API 인증을 대신하지 않는다.
+- `CUSTOMER_AUTH_TOKEN`: operations·consultation과 공유하는 32~256자 ASCII 서비스 비밀 값
+- `CONSULTATION_URL`: 통화 등록·AI 고객 주소/PIN 통화 범위용 정확한 HTTP(S) origin. k8s는 `http://consultation:3004`; 미설정 시 해당 의존 요청은 503이다.
+- `CONSULTATION_AUTH_TOKEN`: consultation에서 오는 내부 고객 조회·통화 범위 실행의 서비스 비밀 값. 공개 API 인증을 대신하지 않는다.
 - `CORS_ORIGINS`: 정확한 origin 목록, `PORT` 기본 3001, `SWAGGER_ENABLED` 기본 true
 
 customer·operations `006`과 consultation `004`까지 먼저 적용한다. 구버전 고객·기업·구성원·대기 이벤트를 보존하고, 원본이 없는 과거 기업 등록 시각·부서 배정·기본 주소는 NULL로 남긴다. customer `005`의 좌표 제거는 운영 백업을 먼저 준비해야 한다. `006`은 개인 PIN의 soft delete·활성 주소 유일성을 추가하고 기존 소유권·주소·버전을 보존한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다.
@@ -53,7 +60,7 @@ Docker 빌드는 ESLint·단위·E2E·TypeScript 검사를 실행한다. `checks
 
 Jenkins는 customer 선택 시 `Verify Customer Parity`를 실행한다. DB 적용 뒤 operations를 먼저 배포하고 customer를 배포한다. 공통 배포 스크립트가 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성한다. 기존 값은 보존하며 잘못된 값이나 접근 실패가 있으면 교체하지 않고 배포를 중단한다. 실제 비밀 값은 Git·명령 인자·오류 메시지에 넣지 않는다. 두 앱은 각 `<service>-db` Secret의 PG* 필드를 사용한다.
 
-Ingress는 기존 `/customer`와 `/api/customers`, `/api/companies`, `/api/members`, `/api/departments`를 customer로 라우팅한다. 내부 경로는 Ingress로 공개하지 않는다. 공개 HTTPS·운영 Jenkins 결과와 전체 MSA 동등성은 별도 검증 대상이다.
+Ingress는 기존 `/customer`와 `/api/customers`, `/api/companies`, `/api/members`, `/api/departments`, `/api/pins`를 customer로 라우팅한다. 내부 경로는 Ingress로 공개하지 않는다. 공개 HTTPS·운영 Jenkins 결과와 전체 MSA 동등성은 별도 검증 대상이다.
 
 ## 감사 완료와 복구
 

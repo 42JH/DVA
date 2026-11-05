@@ -1,3 +1,4 @@
+import { json, type Request, type Response, type NextFunction } from 'express';
 import { ForbiddenException, INestApplication, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -11,6 +12,11 @@ import { type Environment } from './config/environment';
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
   app.use(requestContext(logger));
+  const scopeParser = json({ limit: '256kb' });
+  // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
+  app.use('/internal/call-scope', (request: Request, response: Response, next: NextFunction) => {
+    scopeParser(request, response, next);
+  });
   app.enableCors({
     origin: (
       origin: string | undefined,
@@ -37,6 +43,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       { path: 'customer/health', method: RequestMethod.ALL },
       { path: 'customer/health/ready', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
+      { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
     ],
   });
