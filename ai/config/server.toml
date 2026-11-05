@@ -90,6 +90,8 @@ agent_days = [0, 1, 2, 3, 4]   # 월~금
 # 이 설정은 AI 코드가 배포된 후 적용된다. false면 기존 종료 기록 경로로 돌아간다.
 enabled = true
 reason_contract_enabled = true
+# 2026-11-05 운영 DB의 052 테이블·실행 중 백엔드의 배열 DTO 확인 완료.
+faq_answered_enabled = true
 timeout_sec = 30.0
 max_input_chars = 100000
 max_output_tokens = 6000

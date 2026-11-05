@@ -180,7 +180,8 @@ async def lifespan(app: FastAPI):
                                           callback_field=cfg.backend.analysis_callback_field,
                                           reviewer=reviewer,
                                           reason_contract_enabled=cfg.unanswered_review.reason_contract_enabled,
-                                          review_max_attempts=cfg.unanswered_review.max_attempts)
+                                          review_max_attempts=cfg.unanswered_review.max_attempts,
+                                          faq_answered_enabled=cfg.unanswered_review.faq_answered_enabled)
         if reviewer is not None:
             review_worker = asyncio.create_task(svc.calls.results.review_loop(cfg.unanswered_review.poll_sec))
         svc.calls.on_finalize.insert(0, svc.calls.results.finish)
