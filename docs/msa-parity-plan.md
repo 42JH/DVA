@@ -44,6 +44,16 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - 실제 기능·서비스 DB 연결·전체 동등성 비교·운영 배포는 후속 MR에서 진행하며 현재 미검증이다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
 
+## 두 번째 MR 계획 — operations 인증·감사
+
+첫 MR !271은 `3f3894f`로 병합됐다. 이번 작업은 그 커밋에서 분리한 `feature/msa-operations-auth`이며 동일한 Jira Task 160에 연결한다.
+
+- 이식 범위는 `/api/auth` 5개, `/api/admins` 4개, `/api/audit-logs` 2개이다. Controller·DTO·Service·Repository와 공통 입력 검증·오류·응답·페이지네이션·요청 ID·로그 보호는 최신 backend의 기존 구현을 사용한다.
+- operations 전용 DB 연결·설정, 첫 관리자 CLI, 기존 `/operations/health`·Swagger 보존 및 DB readiness, 기존 공개 API URL의 Ingress 라우팅을 함께 연결한다. 프론트·AI·backend는 수정하지 않는다.
+- 후속 changeset 004에서 관리자 이름·세션·soft delete·로그인 ID 재사용·감사 이름 스냅샷·AI 주체·INACTIVE 상태를 모놀리식에 맞춘다. 기존 MSA 계정에는 이름 원본이 없어 임의로 채우지 않는다. 구버전 계정이 존재하면 변경 전체를 차단하고 데이터를 보존하며 검증된 이름 이관을 별도 준비해야 한다.
+- backend의 인증 단위·실제 PostgreSQL HTTP 테스트를 복사본 변형 없이 양쪽 앱에 실행한다. 동일 초기 데이터·요청을 양쪽 운영 이미지에 보내 응답·쿠키·헤더와 관리자·세션·감사 DB 상태도 직접 비교한다. 새 MSA 연결 설정·마이그레이션 실패·기존 배포 회귀를 따로 검사한다.
+- 이번 MR은 operations 내부 감사의 원자성을 구현한다. 다른 서비스의 인증 위임·감사 이벤트 수신과 서비스 전체 보관 워커는 해당 서비스 이식 및 전체 정합성 단계에서 연결한다.
+
 ## 첫 MR 검증 기록 (2026-11-05)
 
 - Node.js 24 이벤트 단위 3개, 실제 PostgreSQL 17.11·HTTP 통합 14개, 기준 목록 1개 통과. 수신 COMMIT 후 실제 SIGKILL·새 프로세스 재시작 시 업무 중복 없음, 10개 동시 재수신·source/type/payload 충돌·인증·과대 입력·재시도·잘못된 ACK·리다이렉트·타임아웃·동일 업무 순서 보호 포함.

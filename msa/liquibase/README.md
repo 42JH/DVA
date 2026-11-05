@@ -11,7 +11,7 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 6 | 8 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
-| operations | operations_db | operations-db | 7 | 9 |
+| operations | operations_db | operations-db | 8 | 9 |
 
 업무 테이블 18개 + outbox/inbox 10개 = 28개. Liquibase의 DATABASECHANGELOG와
 DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 38개가 된다.
