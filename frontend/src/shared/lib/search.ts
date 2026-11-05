@@ -75,3 +75,10 @@ export function suggest(texts: string[], query: string, n = 5): string[] {
   }
   return out
 }
+
+/** 'DV-10519' · 'dv10519' · '10519' → 10519. 0으로 시작하는 숫자는 전화번호로 봄 (상단바 검색) */
+export function parseOrderNo(text: string): number | null {
+  const m = /^\s*(dv)?\s*-?\s*(\d{1,9})\s*$/i.exec(text)
+  if (!m || (!m[1] && m[2].startsWith('0'))) return null
+  return Number(m[2]) || null
+}

@@ -1,6 +1,6 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { todayYmd, ymd, type Ymd } from '@/shared/lib/dateRange'
+import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
 import { fmtRowTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -10,7 +10,6 @@ import { parcelRows, partyHas, type ParcelRow } from '@/features/order/api/parce
 import {
   cancelOrder,
   fetchOrderDay,
-  fetchRecentOrders,
   orderQueries,
   prevOrderDay,
   nextOrderDay,
@@ -49,8 +48,8 @@ const RETRY_RESULT: Partial<Record<string, string>> = {
 }
 
 // URL 쿼리 기본값 (useListParams 규칙: 모듈 상수) — 상세 창을 닫아도 · 새로고침해도 날짜 · 조건 그대로
-// date '' = 오늘 · status = 상태 묶음 · sender · receiver = 검색칸 글
-const DEFAULTS = { date: '', status: 'ALL', sender: '', receiver: '' }
+// date '' = 오늘 · status = 상태 묶음 · q = 검색어 (11/05 사용자: 공용 상단바 검색 한 칸 — 보내는 분 · 받는 분 둘 다에서 찾음)
+const DEFAULTS = { date: '', status: 'ALL', q: '' }
 const GROUPS = Object.keys(STATUS_GROUP_LABEL) as StatusGroup[]
 
 // 미완료 주문은 이름 · 주소가 아직 비어 있을 수 있음 → 빈 글자 (칸에서 '—')
@@ -72,28 +71,9 @@ const toRow = (r: ParcelRow, day: Ymd, today: Ymd): OrderListRow => ({
 })
 
 /** 그 사람이 맞는 줄만 — 서버 검색어는 하나라 칸마다 그 사람에서 다시 거름 */
-const fits = (sender: string, receiver: string) => (r: ParcelRow) =>
-  partyHas(r.parcel?.origin, sender) && partyHas(r.parcel?.destination, receiver)
-
-const PREVIEW = 6
-/** 상단바 검색 창 미리 보기 (11/05) — 기간 없이 최근 주문에서 맞는 줄 6개. 누르면 그 주문 상세 창
- *  ponytail: 서버 최근 100건(한 번에 받을 수 있는 최대) 안에서만 거름 — 두 칸을 다 쓰면 더 오래된 맞는 주문은 미리 보기에 안 나올 수 있음(Enter로 목록은 다 나옴) */
-export function useOrderPreview(sender: string, receiver: string) {
-  const today = todayYmd()
-  const q = sender || receiver
-  const res = useQuery({
-    queryKey: [...orderQueries.all(), 'preview', q],
-    queryFn: ({ signal }) => fetchRecentOrders(q, 100, signal),
-    enabled: q !== '',
-    placeholderData: keepPreviousData,
-  })
-  const rows = (res.data ?? [])
-    .flatMap(parcelRows)
-    .filter(fits(sender, receiver))
-    .slice(0, PREVIEW)
-    .map((r) => toRow(r, ymd(new Date(r.createdAt)), today))
-  return { rows, loading: res.isFetching }
-}
+// 서버는 주문 단위로 찾음 → 배송 상세 줄마다 보내는 분 · 받는 분 중 한쪽이라도 맞는지 다시 거름
+const fits = (q: string) => (r: ParcelRow) =>
+  partyHas(r.parcel?.origin, q) || partyHas(r.parcel?.destination, q)
 
 /** 03 주문 내역 훅 (Figma '주문' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로 (04 통화와 같은 틀)
  *  거르기: 주문 상태(서버 statusGroup) · 보내는 분 · 받는 분 검색칸. 줄을 누르면 주문 상세 창 → 수정 · 취소 · 다시 접수 */
@@ -110,10 +90,8 @@ export function useOrderList() {
   const group = GROUPS.includes(params.status as StatusGroup)
     ? (params.status as StatusGroup)
     : 'ALL'
-  const sender = params.sender.trim()
-  const receiver = params.receiver.trim()
-  // 서버 검색어는 하나(보내는 분 · 받는 분 둘 다에서 찾음) → 한 칸 글로 좁혀 받고, 칸마다 그 사람에서 맞았는지 다시 거름
-  const filter = { q: sender || receiver, group }
+  const q = params.q.trim()
+  const filter = { q, group }
   const feed = useDayFeed({
     key: [...orderQueries.all(), 'list'],
     filter,
@@ -126,7 +104,7 @@ export function useOrderList() {
     day,
     rows: rows
       .flatMap(parcelRows)
-      .filter(fits(sender, receiver))
+      .filter(fits(q))
       .map((r) => toRow(r, day, today)),
   }))
 
@@ -159,18 +137,19 @@ export function useOrderList() {
     groups: GROUPS.map((g) => ({ value: g, label: STATUS_GROUP_LABEL[g] })),
     setGroup: (g: StatusGroup) => set({ status: g }),
 
-    sender: params.sender,
-    receiver: params.receiver,
+    q: params.q,
     // 검색하면 오늘부터 (최근 주문이 위) — 지난 날짜에 머물러 있으면 새 결과가 안 보임. 같은 값이면 그대로
-    search: (s: string, r: string) => {
-      if (s !== sender || r !== receiver) set({ sender: s, receiver: r, date: '' })
+    setQ: (v: string) => {
+      if (v.trim() !== q) set({ q: v.trim(), date: '' })
     },
-    isFiltered: group !== 'ALL' || !!sender || !!receiver,
+    isFiltered: group !== 'ALL' || !!q,
 
     modal,
     openAdd: () => setModal({ kind: 'add' }),
     openOrder: (r: OrderListRow) =>
       setModal({ kind: 'detail', id: r.orderSeq, parcelSeq: r.parcelSeq }),
+    // 상단바 검색에서 고른 주문 — 이 화면의 상세 창(수정 · 취소 가능)으로, 첫 배송 상세
+    openOrderSeq: (id: number) => setModal({ kind: 'detail', id, parcelSeq: null }),
     editOrder: (id: number) =>
       setModal((m) => ({ kind: 'edit', id, parcelSeq: m?.kind === 'detail' ? m.parcelSeq : null })), // 상세 창 [수정]
     // 수정 저장 · 취소 → 수정하던 그 주문 상세로. notice = 미완료 주문 접수 결과 (머리 한 줄)

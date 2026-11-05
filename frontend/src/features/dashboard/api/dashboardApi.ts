@@ -4,9 +4,7 @@
 //   null = 미측정 · 계산 불가(분모 0) → 화면에 '—' (0과 다름). 비율은 이미 0~100이고 반올림 안 됨 → 표시 자릿수만 화면에서
 // 개발 중엔 MSW 가짜(mocks/handlers/dashboard.ts)가 같은 모양으로 응답
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
-import { api, type ApiItem, type ApiList } from '@/shared/api/client'
-import { fetchAll } from '@/shared/api/paging'
-import { phoneDigits } from '@/shared/lib/search'
+import { api, type ApiItem } from '@/shared/api/client'
 
 export type CustomerType = 'ALL' | 'NEW' | 'EXISTING'
 export type Stage =
@@ -125,64 +123,4 @@ export const dashboardQueries = {
         ).data,
       placeholderData: keepPreviousData, // 탭을 바꾸는 동안 이전 탭 카드가 흐리게 남음 (깜빡임 없게)
     }),
-}
-
-/** 상단바 검색 창의 통화 줄 (API-21 통화 목록에서 쓰는 것만 — 04 통화 기능은 import 못 함) */
-export interface CallHit {
-  callSessionSeq: number
-  customerName: string | null
-  callerPhoneNumber: string | null
-  startedAt: string | null
-}
-
-/** 이름 · 전화번호로 찾은 최근 통화 8건 (서버가 최신순). 숫자만 쳤으면 번호로('010-1458' → '0101458' — 서버는 숫자만 저장) */
-export const searchQueries = {
-  calls: (q: string) =>
-    queryOptions({
-      queryKey: ['dashboard', 'call-search', q],
-      queryFn: async ({ signal }) =>
-        api.get<ApiList<CallHit>>('/calls', {
-          query: { q: (phoneDigits(q) || q).slice(0, 200), limit: 8, offset: 0 },
-          signal,
-        }),
-      enabled: q !== '',
-      placeholderData: keepPreviousData, // 치는 동안 이전 결과가 남아 깜빡이지 않음
-    }),
-  /** 이름 · 전화번호로 찾은 최근 주문 8건 — 서버가 보내는 분 · 받는 분 둘 다에서 찾음 (03 주문 목록과 같은 검색) */
-  orders: (q: string) =>
-    queryOptions({
-      queryKey: ['dashboard', 'order-search', q],
-      queryFn: async ({ signal }) =>
-        (
-          await api.get<ApiList<OrderHit>>('/admin/orders', {
-            query: { q: (phoneDigits(q) || q).slice(0, 200), limit: 8, offset: 0 },
-            signal,
-          })
-        ).data,
-      enabled: q !== '',
-      placeholderData: keepPreviousData,
-    }),
-  /** FAQ 전부 — 09 FAQ 목록과 같은 요청 · 같은 캐시 키(['faqs', 'list']). 수십 개라 다 받고 화면에서 찾음 */
-  faqs: (enabled: boolean) =>
-    queryOptions({
-      queryKey: ['faqs', 'list'],
-      queryFn: ({ signal }) => fetchAll<FaqHit>('/faqs', {}, signal),
-      enabled,
-    }),
-}
-
-/** 상단바 검색 창의 주문 줄 (03 주문 목록 응답에서 쓰는 것만 — 03 주문 기능은 import 못 함) */
-export interface OrderHit {
-  orderSeq: number
-  createdAt: string
-  parcels: { origin: { name: string | null }; destination: { name: string | null } }[]
-}
-
-/** 상단바 검색 창의 FAQ 줄 (API-29 FAQ에서 쓰는 것만 — 09 FAQ 기능은 import 못 함) */
-export interface FaqHit {
-  faqEntrySeq: number
-  category: string
-  question: string
-  answer: string
-  createdAt: string
 }

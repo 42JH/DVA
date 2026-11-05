@@ -5,7 +5,6 @@ import { pageSlice } from '@/shared/api/paging'
 import { matchKo } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { FAQ_CATEGORIES, faqQueries, type Faq, type FaqCategory } from '@/features/faq/api/faqApi'
-import { heardQuestions } from '@/features/faq/api/faqHeard'
 
 export type { Faq, FaqCategory } from '@/features/faq/api/faqApi'
 export { FAQ_CATEGORIES } from '@/features/faq/api/faqApi'
@@ -72,14 +71,7 @@ export function useFaqDetail(id: number) {
   }
 }
 
-/** 검색 창(FaqSearchModal) — 치는 동안 맞는 FAQ (한 박자 늦게, 목록과 같은 규칙) */
-export function useFaqSearch(q: string) {
-  const dq = useDeferredValue(q)
-  const list = useQuery(faqQueries.list())
-  return dq.trim() ? searchFaqs(list.data ?? [], dq) : []
-}
-
-/** 이 FAQ로 AI가 답한 최근 고객 질문 (상세 아래) — 지금은 목데이터(faqHeard.ts). API가 생기면 여기서 useQuery로 */
-export function useHeardQuestions(faq: Faq | null) {
-  return faq ? heardQuestions(faq) : []
+/** 이 FAQ로 AI가 답한 최근 고객 질문 사례 (상세 아래) — GET /faqs/{id}의 recentQuestions. 못 받으면 칸째 안 보임 */
+export function useRecentQuestions(id: number) {
+  return useQuery(faqQueries.detail(id)).data?.recentQuestions ?? []
 }

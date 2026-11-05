@@ -119,7 +119,8 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
   unansweredReason?: UnansweredReason | null // 연결된 미답변의 사유 (11/04). 다른 결과 · 미분류 · 삭제한 미답변은 null, 연동 전 서버는 칸 없음
   questionText: string | null // 미답변 삭제 뒤 null
   answerText: string | null
-  faqEntrySeq: number | null
+  faqEntrySeq: number | null // 사용 FAQ가 하나면 그 번호, 여럿이면 null
+  faqEntrySeqs?: number[] | null // 사용 FAQ 번호들 (11/05 — FAQ 응대 한 건에 여럿). FAQ 응대가 아니면 null, 구버전 서버는 칸 없음
   questionUtteranceOrder: number | null
   answerUtteranceOrder: number | null
 }

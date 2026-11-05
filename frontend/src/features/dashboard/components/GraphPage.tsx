@@ -1,4 +1,4 @@
-import { Crumbs } from '@/shared/ui'
+import { Crumbs, TopBar } from '@/shared/ui'
 import type { CustomerType } from '@/features/dashboard/api/dashboardApi'
 import { useDashboardGraph, type GraphKind } from '@/features/dashboard/hooks/useDashboardGraph'
 import { CUSTOMER_LABEL } from '@/features/dashboard/labels'
@@ -21,6 +21,7 @@ export function GraphPage({ kind }: { kind: GraphKind }) {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
+      <TopBar />
       <Crumbs items={[{ label: '통계', to: '/dashboard' }, { label: '그래프 보기' }]} />
       <div className="shrink-0 pt-v44">
         <h1 className="text-v24 font-bold">{vm.title}</h1>
