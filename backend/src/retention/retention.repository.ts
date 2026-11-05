@@ -2,6 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 
+// Expired records wait only for live I/O; an unresolved outcome is not an active claim.
+const ACTIVE_PAYMENT_WORK = `COALESCE((r.approval_claimed_until>clock_timestamp()
+ OR (r.notification_status='SENDING' AND r.notification_attempted_at>clock_timestamp()-interval '45 seconds')
+ OR (r.completion_notification_status='SENDING' AND r.completion_notification_attempted_at>clock_timestamp()-interval '45 seconds')),false)`;
+
 export interface CallPurge {
   id: number;
   phone: string | null;
@@ -158,18 +163,16 @@ export class RetentionRepository {
          AND created_by_admin_user_name IS NOT NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       const orders = await client.query<{ id: number }>(`SELECT o.order_seq AS id FROM orders o
         WHERE COALESCE(o.closed_at,o.created_at)<=statement_timestamp()-interval '5 years'
-         AND o.status IN ('COLLECTING','notPaid','CANCELLED','ACCEPTED','SUBMISSION_FAILED')
+         AND NOT(o.status='SUBMITTING' AND COALESCE(o.submission_last_attempt_at,o.updated_at)>clock_timestamp()-interval '10 seconds')
          AND NOT EXISTS(SELECT 1 FROM call_sessions c WHERE c.order_seq=o.order_seq)
          AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq
-          AND ((r.approval_started_at IS NOT NULL AND r.completed_at IS NULL AND r.invalidated_at IS NULL)
-           OR r.notification_status='SENDING' OR r.completion_notification_status='SENDING'))
+          AND ${ACTIVE_PAYMENT_WORK})
         ORDER BY COALESCE(o.closed_at,o.created_at),o.order_seq LIMIT 10 FOR UPDATE OF o SKIP LOCKED`);
       for (const order of orders.rows) {
         const requests = await client.query<{ busy: boolean }>(
           `SELECT
-          ((approval_started_at IS NOT NULL AND completed_at IS NULL AND invalidated_at IS NULL)
-           OR notification_status='SENDING' OR completion_notification_status='SENDING') AS busy
-          FROM order_payment_requests WHERE order_seq=$1 ORDER BY payment_request_id FOR UPDATE`,
+          ${ACTIVE_PAYMENT_WORK} AS busy
+          FROM order_payment_requests r WHERE r.order_seq=$1 ORDER BY r.payment_request_id FOR UPDATE`,
           [order.id],
         );
         if (requests.rows.some((row) => row.busy)) continue;

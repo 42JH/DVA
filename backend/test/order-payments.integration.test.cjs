@@ -1237,12 +1237,18 @@ test('a due retry gets its turn ahead of newer unchecked approvals', async () =>
   try {
     await client.query('BEGIN');
     await client.query(
+      'CREATE TEMP TABLE orders (LIKE public.orders INCLUDING ALL) ON COMMIT DROP',
+    );
+    await client.query(
+      'INSERT INTO orders(order_seq) OVERRIDING SYSTEM VALUE SELECT generate_series(1,21)',
+    );
+    await client.query(
       'CREATE TEMP TABLE order_payment_requests (LIKE public.order_payment_requests INCLUDING ALL) ON COMMIT DROP',
     );
     const due = (
       await client.query(`INSERT INTO order_payment_requests
       (order_seq,amount,expires_at,approval_started_at,provider_payment_key,approval_next_check_at)
-      VALUES(-1,1,clock_timestamp()+interval '1 hour',clock_timestamp()-interval '2 minutes',
+      VALUES(21,1,clock_timestamp()+interval '1 hour',clock_timestamp()-interval '2 minutes',
         'due-retry',clock_timestamp()-interval '1 second') RETURNING payment_request_id`)
     ).rows[0].payment_request_id;
     await client.query(`INSERT INTO order_payment_requests
