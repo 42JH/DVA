@@ -3,11 +3,12 @@
 서버가 쓰는 경로 그대로 AddressService.resolve()를 부른다(보정 + 못 찾았을 때 재시도). 카카오 지번 조회는
 네트워크라 끄고(geo 없음) 보정 시간만 잰다.
 
-    uv run python -X utf8 -m scripts.evaluate_address [--repeat 5] [--out evaluation/results/address_v1_baseline.json]
+    uv run python -X utf8 -m scripts.evaluate_address [--dataset address_v2] [--repeat 5] [--out evaluation/results/address_v1_baseline.json]
 
 판정(서버가 실제로 기록하는 값 기준, P6: ambiguous는 1순위를 기록):
 - 정답 주소가 있는 사례: confirmed(확정·정답) / auto(애매→1순위가 정답) / wrong(다른 주소 기록) / missed(못 찾음 → 다시 물음)
 - 정답 null(없는 주소): rejected(못 찾음, 정답) / wrong(무언가 기록)
+- expect_status가 있는 사례(지역 되묻기가 정답, v2): asked(그 상태) / wrong(무언가 기록) / missed(못 찾음)
 """
 
 import argparse
@@ -25,7 +26,7 @@ from app.integrations import kakao
 from app.integrations.address import AddressService
 
 ROOT = Path(__file__).resolve().parents[1]
-DATASET = ROOT / "evaluation" / "datasets" / "address_v1.json"
+DATASETS = ROOT / "evaluation" / "datasets"
 
 
 def check_labels(db: AddressDB, cases: list[dict]) -> None:
@@ -46,9 +47,11 @@ def check_labels(db: AddressDB, cases: list[dict]) -> None:
     assert len(ids) == len(set(ids)), "사례 id 중복"
 
 
-def classify(expect: str | None, status: str, recorded: str | None) -> str:
+def classify(expect: str | None, status: str, recorded: str | None, expect_status: str | None = None) -> str:
     if status in ("off", "error"):
         return "error"
+    if expect_status:
+        return "asked" if status == expect_status else ("wrong" if recorded else "missed")
     if expect is None:
         return "rejected" if recorded is None else "wrong"
     if recorded is None:
@@ -63,8 +66,8 @@ def pct(xs: list[float], p: float) -> float:
     return round(xs[min(len(xs) - 1, int(round(p / 100 * (len(xs) - 1))))], 1)
 
 
-async def main(repeat: int, out: Path | None) -> None:
-    data = json.loads(DATASET.read_text(encoding="utf-8"))
+async def main(dataset: str, repeat: int, out: Path | None) -> None:
+    data = json.loads((DATASETS / f"{dataset}.json").read_text(encoding="utf-8"))
     cases = data["cases"]
     db_path = Path(os.environ.get("ADDRESS_DB", ROOT / "data" / "address.db"))
     db = open_db(db_path)
@@ -97,15 +100,17 @@ async def main(repeat: int, out: Path | None) -> None:
 
     results = []
     for c, r in rows:
-        outcome = classify(c["expect"], r.status, r.address)
-        results.append({"id": c["id"], "heard": c["heard"], "expect": c["expect"], "tags": c["tags"],
+        outcome = classify(c["expect"], r.status, r.address, c.get("expect_status"))
+        results.append({"id": c["id"], "heard": c["heard"], "expect": c["expect"], "expect_status": c.get("expect_status"),
+                        "tags": c["tags"],
                         "status": r.status, "recorded": r.address, "alternatives": list(r.alternatives),
                         "outcome": outcome, "cold_ms": round(cold[c["id"]], 1),
                         "warm_p50_ms": round(statistics.median(warm[c["id"]]), 1) if warm[c["id"]] else None})
 
     counts = Counter(x["outcome"] for x in results)
     positive = [x for x in results if x["expect"] is not None]
-    negative = [x for x in results if x["expect"] is None]
+    ask = [x for x in results if x["expect_status"]]
+    negative = [x for x in results if x["expect"] is None and not x["expect_status"]]
     by_tag = defaultdict(Counter)
     for x in results:
         for tag in x["tags"]:
@@ -118,9 +123,12 @@ async def main(repeat: int, out: Path | None) -> None:
         "positive": {"total": len(positive),
                      "correct_recorded": sum(x["outcome"] in ("confirmed", "auto") for x in positive),
                      "confirmed": counts["confirmed"], "auto": counts["auto"],
-                     "wrong": sum(x["outcome"] == "wrong" for x in positive), "missed": counts["missed"]},
+                     "wrong": sum(x["outcome"] == "wrong" for x in positive),
+                     "missed": sum(x["outcome"] == "missed" for x in positive)},
         "negative": {"total": len(negative), "rejected": counts["rejected"],
                      "wrong": sum(x["outcome"] == "wrong" for x in negative)},
+        "ask": {"total": len(ask), "asked": counts["asked"], "wrong": sum(x["outcome"] == "wrong" for x in ask),
+                "missed": sum(x["outcome"] == "missed" for x in ask)},
         "latency_ms": {"cold_p50": pct(list(cold.values()), 50), "cold_p95": pct(list(cold.values()), 95),
                        "cold_max": round(max(cold.values()), 1),
                        "warm_p50": pct(all_warm, 50) if all_warm else None,
@@ -148,7 +156,8 @@ async def main(repeat: int, out: Path | None) -> None:
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
+    ap.add_argument("--dataset", default="address_v1", help="evaluation/datasets/<이름>.json")
     ap.add_argument("--repeat", type=int, default=5, help="따뜻한 상태 반복 횟수")
     ap.add_argument("--out", type=Path, default=None, help="결과 JSON 경로")
     args = ap.parse_args()
-    asyncio.run(main(args.repeat, args.out))
+    asyncio.run(main(args.dataset, args.repeat, args.out))
