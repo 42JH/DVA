@@ -1,6 +1,6 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsInt, Max, Min } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
 
 function integer({ value }: { value: unknown }): unknown {
   return typeof value === 'string' && /^-?\d+$/.test(value) ? Number(value) : value;

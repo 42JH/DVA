@@ -44,11 +44,16 @@ export class AuditRepository {
     );
   }
 
-  async insert(event: AuditEvent, result: AuditResult, client?: PoolClient): Promise<void> {
+  async insert(
+    event: AuditEvent,
+    result: AuditResult,
+    client?: PoolClient,
+    occurredAt?: string,
+  ): Promise<void> {
     const actorType = event.actorType ?? (event.actorId === null ? 'SYSTEM' : 'ADMIN');
     await (client ?? this.database.pool).query(
       `INSERT INTO audit_logs(actor_type,actor_seq,action,target_type,target_seq,request_id,result,metadata,
-         actor_name,target_admin_name)
+         actor_name,target_admin_name,occurred_at)
        VALUES($1,$2,$3,$4,$5,$6,$7,$9::jsonb,
          CASE WHEN $1='AI' THEN 'AI' WHEN $1='ADMIN' THEN COALESCE($8::text,
            (SELECT name FROM admin_users WHERE admin_user_seq=$2),
@@ -61,7 +66,7 @@ export class AuditRepository {
            (SELECT target_admin_name FROM audit_logs
             WHERE target_type='ADMIN_USER' AND target_seq=$5
               AND action='ADMIN_DELETED' AND result='SUCCESS'
-            ORDER BY occurred_at DESC,audit_log_seq DESC LIMIT 1)) END)`,
+            ORDER BY occurred_at DESC,audit_log_seq DESC LIMIT 1)) END,COALESCE($10::timestamptz,CURRENT_TIMESTAMP))`,
       [
         actorType,
         event.actorId,
@@ -72,6 +77,7 @@ export class AuditRepository {
         result,
         event.actorName ?? null,
         JSON.stringify(event.metadata ?? {}),
+        occurredAt ?? null,
       ],
     );
   }

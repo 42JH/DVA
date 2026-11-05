@@ -165,4 +165,12 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   });
 }
 
-module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent };
+async function sendEvent(url, token, event) {
+  validateEvent(event);
+  checkToken(token);
+  const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
+  if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
+}
+
+module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent, sendEvent };

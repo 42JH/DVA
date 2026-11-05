@@ -1,9 +1,9 @@
-import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
-import { configureApplication } from './configure-application';
+import { NestFactory } from '@nestjs/core';
+import 'reflect-metadata';
+import { AppModule } from './app.module';
 import { type Environment, EnvironmentValidationError } from './config/environment';
+import { configureApplication } from './configure-application';
 import { JsonLogger } from './observability/json-logger';
 
 const logger = new JsonLogger();

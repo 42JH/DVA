@@ -1,29 +1,31 @@
 FROM node:24-bookworm-slim AS builder
-WORKDIR /app
+WORKDIR /app/service
 
-COPY package*.json ./
+COPY services/customer/package*.json ./
+COPY shared/events /shared/events
 RUN npm ci
 
-COPY nest-cli.json tsconfig*.json .prettierrc eslint.config.mjs ./
-COPY src ./src
-COPY test ./test
+COPY services/customer/nest-cli.json services/customer/tsconfig*.json services/customer/.prettierrc services/customer/eslint.config.mjs ./
+COPY services/customer/src ./src
+COPY services/customer/test ./test
 RUN npm run lint \
  && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
  && npm run build
 
 FROM builder AS checks
-RUN node --test test/auth-bridge.test.cjs
+RUN node --test test/auth-bridge.test.cjs test/database-audit.test.cjs
 
 FROM node:24-bookworm-slim
-WORKDIR /app
+WORKDIR /app/service
 ENV NODE_ENV=production
 ENV PORT=3001
 
-COPY package*.json ./
+COPY services/customer/package*.json ./
+COPY shared/events /shared/events
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/service/dist ./dist
 
 USER node
 EXPOSE 3001

@@ -1,13 +1,14 @@
 FROM node:24-bookworm-slim AS builder
-WORKDIR /app
+WORKDIR /app/service
 
-COPY package*.json ./
+COPY services/operations/package*.json ./
+COPY shared/events /shared/events
 RUN npm ci
 
-COPY nest-cli.json tsconfig*.json .prettierrc eslint.config.mjs ./
-COPY src ./src
-COPY test ./test
-COPY scripts ./scripts
+COPY services/operations/nest-cli.json services/operations/tsconfig*.json services/operations/.prettierrc services/operations/eslint.config.mjs ./
+COPY services/operations/src ./src
+COPY services/operations/test ./test
+COPY services/operations/scripts ./scripts
 RUN npm run lint \
  && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
@@ -17,15 +18,16 @@ FROM builder AS checks
 CMD ["node", "--test", "test/auth.test.cjs", "test/auth.integration.test.cjs"]
 
 FROM node:24-bookworm-slim
-WORKDIR /app
+WORKDIR /app/service
 ENV NODE_ENV=production
 ENV PORT=3005
 
-COPY package*.json ./
+COPY services/operations/package*.json ./
+COPY shared/events /shared/events
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY --from=builder /app/dist ./dist
-COPY scripts ./scripts
+COPY --from=builder /app/service/dist ./dist
+COPY services/operations/scripts ./scripts
 
 USER node
 EXPOSE 3005

@@ -1,7 +1,9 @@
-import { readPage, type PageRows } from '../common/pagination-query';
+import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { ListOrganizationsQueryDto } from './dto/list-organizations-query.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationSummaryDto } from './dto/organization-response.dto';
 import { CompanyDirectoryEntryDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 
@@ -13,6 +15,7 @@ const summaryColumns = `o.organization_seq AS "organizationSeq",o.name,o.status,
 @Injectable()
 export class OrganizationsRepository {
   constructor(private readonly database: DatabaseService) {}
+
   async searchDirectory(
     query: CompanyDirectoryQueryDto,
   ): Promise<PageRows<CompanyDirectoryEntryDto>> {
@@ -38,6 +41,7 @@ export class OrganizationsRepository {
       'lower(normalize("organizationName",NFC)),"organizationSeq","customerSeq"',
     );
   }
+
   async list(query: ListOrganizationsQueryDto): Promise<PageRows<OrganizationSummaryDto>> {
     const result = await readPage<OrganizationSummaryDto>(
       this.database.pool,
@@ -50,11 +54,30 @@ export class OrganizationsRepository {
     );
     return result;
   }
+
   async find(id: number): Promise<OrganizationSummaryDto | undefined> {
     const result = await this.database.pool.query<OrganizationSummaryDto>(
       `SELECT ${summaryColumns} FROM organizations o WHERE o.organization_seq = $1 AND o.deleted_at IS NULL`,
       [id],
     );
     return result.rows[0];
+  }
+
+  async update(id: number, changes: UpdateOrganizationDto, client: PoolClient): Promise<boolean> {
+    const result = await client.query(
+      `UPDATE organizations SET name = COALESCE($2, name), status = COALESCE($3, status),monthly_billing_enabled=COALESCE($4,monthly_billing_enabled)
+       WHERE organization_seq = $1 AND deleted_at IS NULL RETURNING organization_seq`,
+      [id, changes.name ?? null, changes.status ?? null, changes.monthlyBillingEnabled ?? null],
+    );
+    return result.rowCount === 1;
+  }
+
+  async insert(client: PoolClient, name: string, monthlyBillingEnabled = false): Promise<number> {
+    const result = await client.query<{ organizationSeq: number }>(
+      `INSERT INTO organizations (name, status,monthly_billing_enabled) VALUES ($1, 'ACTIVE',$2)
+       RETURNING organization_seq AS "organizationSeq"`,
+      [name, monthlyBillingEnabled],
+    );
+    return result.rows[0].organizationSeq;
   }
 }

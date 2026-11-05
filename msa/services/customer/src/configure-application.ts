@@ -1,12 +1,12 @@
 import { ForbiddenException, INestApplication, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { type Environment } from './config/environment';
-import { ApiExceptionFilter } from './common/http/api-exception.filter';
-import { ResponseEnvelopeInterceptor } from './common/http/response-envelope.interceptor';
-import { API_PREFIX, requestContext } from './common/http/request-context';
-import { createValidationPipe } from './common/http/validation.pipe';
 import { ErrorResponseDto, RequestMetaDto } from './common/dto/api-response.dto';
+import { ApiExceptionFilter } from './common/http/api-exception.filter';
+import { API_PREFIX, requestContext } from './common/http/request-context';
+import { ResponseEnvelopeInterceptor } from './common/http/response-envelope.interceptor';
+import { createValidationPipe } from './common/http/validation.pipe';
+import { type Environment } from './config/environment';
 
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
@@ -36,6 +36,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
     exclude: [
       { path: 'customer/health', method: RequestMethod.ALL },
       { path: 'customer/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/audit/flush', method: RequestMethod.ALL },
     ],
   });
   app.useGlobalPipes(createValidationPipe());

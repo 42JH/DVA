@@ -5,12 +5,15 @@ import { DatabaseModule } from '../database/database.module';
 import { AuditController } from './audit.controller';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
+import { AuditEventsController } from './audit-events.controller';
+import { CustomerAuditReceiver } from './customer-audit.receiver';
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [AuditController],
+  controllers: [AuditController, AuditEventsController],
   providers: [
     AuditRepository,
+    CustomerAuditReceiver,
     AuditService,
     { provide: APP_INTERCEPTOR, useClass: AuditFailureInterceptor },
   ],

@@ -1,9 +1,9 @@
 import { Logger } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { isUUID } from 'class-validator';
 import { NextFunction, Request, Response } from 'express';
-import { logContext } from '../../observability/json-logger';
+import { randomUUID } from 'node:crypto';
 import { recordHttp } from '../../observability/http-metrics';
+import { logContext } from '../../observability/json-logger';
 
 export const API_PREFIX = 'api';
 export type ContextRequest = Request & { requestId?: string };

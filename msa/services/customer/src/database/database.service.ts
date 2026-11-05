@@ -5,6 +5,11 @@ import { type Environment } from '../config/environment';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
+  audit?: {
+    beforeCommit(client: PoolClient): Promise<(() => Promise<void>) | undefined>;
+    rollback(client: PoolClient): Promise<void>;
+    clear(client: PoolClient): void;
+  };
   readonly pool: Pool;
   readonly transactionStatistics = {
     count: 0,
@@ -38,6 +43,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.pool.query('SELECT created_at, monthly_billing_enabled FROM organizations LIMIT 0');
     await this.pool.query('SELECT department_seq, deleted_at FROM memberships LIMIT 0');
     await this.pool.query('SELECT created_at, deleted_at FROM departments LIMIT 0');
+    await this.pool.query('SELECT department_seq, deleted_at FROM company_pins LIMIT 0');
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -46,15 +52,21 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     const started = performance.now();
     this.transactionStatistics.connectionWaitSeconds += (started - queued) / 1000;
     let releaseError: Error | undefined;
+    let commitAttempted = false;
+    let completed!: T;
+    let confirmed: (() => Promise<void>) | undefined;
     try {
       await client.query('BEGIN');
-      const result = await work(client);
+      completed = await work(client);
+      confirmed = await this.audit?.beforeCommit(client);
+      commitAttempted = true;
       await client.query('COMMIT');
-      return result;
     } catch (error) {
       this.transactionStatistics.failures++;
       try {
         await client.query('ROLLBACK');
+        // A lost COMMIT response may already be committed; never publish an abort for it.
+        if (!commitAttempted) await this.audit?.rollback(client);
       } catch {
         // Evict a broken connection while preserving the original business/SQL failure.
         releaseError = new Error('Transaction rollback failed');
@@ -69,7 +81,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         seconds,
       );
       client.release(releaseError);
+      this.audit?.clear(client);
     }
+    // Release the business connection before the relay needs another pool connection.
+    await confirmed?.();
+    return completed;
   }
 
   async onModuleDestroy(): Promise<void> {

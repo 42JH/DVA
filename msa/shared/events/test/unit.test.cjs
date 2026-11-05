@@ -1,10 +1,30 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { validateEvent, createReceiver, createRelay } = require('../index.cjs');
+const { validateEvent, createReceiver, createRelay, sendEvent } = require('../index.cjs');
 
 const token = 'test-only-event-key-'.padEnd(40, 'a');
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderAccepted', payload: { orderSeq: 1 } });
+
+test('direct event requests require the exact bounded JSON ACK and reject redirects', async t => {
+  const {createServer}=require('node:http');
+  let mode='ok';
+  const input=event();
+  const server=createServer(async(request,response)=>{
+    assert.equal(request.headers.authorization,'Bearer '+token);
+    const chunks=[];for await(const chunk of request)chunks.push(chunk);
+    assert.deepEqual(JSON.parse(Buffer.concat(chunks)),input);
+    if(mode==='redirect'){response.writeHead(307,{Location:'/other'}).end();return;}
+    response.setHeader('Content-Type',mode==='html'?'text/html':'application/json');
+    response.statusCode=mode==='error'?500:200;
+    response.end(mode==='oversized'?'x'.repeat(5000):JSON.stringify({eventId:mode==='wrong'?randomUUID():input.eventId,status:mode==='duplicate'?'duplicate':'processed'}));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));});
+  const url=`http://127.0.0.1:${server.address().port}/internal/events`;
+  await sendEvent(url,token,input);mode='duplicate';await sendEvent(url,token,input);
+  for(mode of ['wrong','html','oversized','error','redirect'])await assert.rejects(sendEvent(url,token,input));
+});
 
 test('event envelopes accept only bounded identifiers and a JSON object payload', () => {
   assert.doesNotThrow(() => validateEvent(event()));

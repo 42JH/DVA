@@ -7,6 +7,7 @@ import { configureApplication } from '../src/configure-application';
 import { DatabaseService } from '../src/database/database.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ApiException } from '../src/common/errors/api.exception';
+import { AuditService } from '../src/audit/audit.service';
 
 describe('Customer read API (e2e)', () => {
   let app: INestApplication<App>;
@@ -25,6 +26,11 @@ describe('Customer read API (e2e)', () => {
       .useValue({ pool })
       .overrideProvider(AuthService)
       .useValue(auth)
+      .overrideProvider(AuditService)
+      .useValue({
+        recordFailure: jest.fn().mockResolvedValue(undefined),
+        flush: jest.fn().mockResolvedValue(undefined),
+      })
       .compile();
     app = module.createNestApplication();
     configureApplication(app);
@@ -46,26 +52,42 @@ describe('Customer read API (e2e)', () => {
       .expect(200)
       .expect(/DVA Customer API/);
   });
-  it('documents only implemented reads and keeps the public API prefix', async () => {
+  it('documents exactly the implemented methods and keeps internal paths private', async () => {
     await request(app.getHttpServer())
       .get('/customer/docs-json')
       .expect(200)
       .expect(({ body }: { body: { paths: Record<string, Record<string, unknown>> } }) => {
         const paths = body.paths;
-        for (const path of [
-          '/api/customers',
-          '/api/customers/{id}',
-          '/api/companies',
-          '/api/companies/search',
-          '/api/companies/{id}',
-          '/api/companies/{id}/members',
-          '/api/companies/{id}/departments',
-        ]) {
-          expect(Object.keys(paths[path])).toEqual(['get']);
+        for (const [path, methods] of Object.entries({
+          '/api/customers': ['get', 'post'],
+          '/api/customers/{id}': ['get'],
+          '/api/companies': ['get', 'post'],
+          '/api/companies/search': ['get'],
+          '/api/companies/{id}': ['get', 'patch', 'delete'],
+          '/api/companies/{id}/members': ['get', 'post'],
+          '/api/companies/{id}/departments': ['get', 'post'],
+          '/api/members/{id}': ['patch', 'delete'],
+          '/api/departments/{id}': ['patch', 'delete'],
+        })) {
+          expect(Object.keys(paths[path]).sort()).toEqual(methods.sort());
         }
         expect(paths['/api/customers/context']).toBeUndefined();
         expect(paths['/api/companies/{id}/billing']).toBeUndefined();
+        expect(paths['/internal/audit/flush']).toBeUndefined();
       });
+  });
+  it('authenticates internal audit barriers independently of administrator cookies', async () => {
+    await request(app.getHttpServer()).post('/internal/audit/flush').send({}).expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/audit/flush')
+      .set('Cookie', 'dva_session=' + 'a'.repeat(64))
+      .send({})
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/audit/flush')
+      .set('Authorization', 'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a'))
+      .send({})
+      .expect(400);
   });
   it('requires current sessions for administrator reads and preserves error envelopes', async () => {
     await request(app.getHttpServer())
@@ -75,7 +97,7 @@ describe('Customer read API (e2e)', () => {
         expect(body.error.code).toBe('UNAUTHORIZED');
         expect(body.meta.requestId).toEqual(expect.any(String));
       });
-    await request(app.getHttpServer()).post('/api/customers').send({}).expect(404);
+    await request(app.getHttpServer()).post('/api/customers').send({}).expect(400);
   });
   it('fails readiness on DB or authentication dependency failure while keeping liveness', async () => {
     pool.query.mockRejectedValueOnce(new Error('unavailable'));

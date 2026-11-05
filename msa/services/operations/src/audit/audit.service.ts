@@ -5,11 +5,15 @@ import { ListResponse } from '../common/pagination';
 import { AuditRepository } from './audit.repository';
 import { AuditEvent, AuditLog, AuditResult } from './audit.types';
 import { AuditQueryDto } from './dto/audit-query.dto';
+import { CustomerAuditReceiver } from './customer-audit.receiver';
 
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
-  constructor(private readonly repository: AuditRepository) {}
+  constructor(
+    private readonly repository: AuditRepository,
+    private readonly customer: CustomerAuditReceiver,
+  ) {}
 
   record(
     actorId: number | null,
@@ -55,11 +59,13 @@ export class AuditService {
       );
     }
 
+    await this.customer.flushPending();
     const rows = await this.repository.findMany(query);
     return new ListResponse(rows, query.limit);
   }
 
   async findOne(id: number): Promise<AuditLog> {
+    await this.customer.flushPending();
     const row = await this.repository.findOne(id);
     if (!row) throw new ApiException(404, 'NOT_FOUND', '감사 로그를 찾을 수 없습니다.');
     return row;
