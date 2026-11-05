@@ -2,15 +2,13 @@
 /** 서버 코드 그대로. null = 사유 없이 들어온 질문 · 연동 전에 쌓인 질문 (백엔드는 원인을 추정하지 않음) */
 export type UnansweredReason = 'KB_NO_ANSWER' | 'KB_UNAVAILABLE'
 
-/** 문구는 AI팀 요청(11/04): 답변 근거 부족 = 검색은 됐는데 답할 근거가 없음(FAQ 추가 대상) · 지식 검색 장애 = 검색이 안 됨(FAQ에 답이 있었을 수도) · 미분류 = null
- * bg = 칩 바탕 — 09 미답변 목록 · 06 처리 내용이 같은 칩 (11/05 사용자: 04 상담 유형 칩과 같은 둥근 알약 · 높이 28 · 폭 76 이상 · 글자 16)
- * 미분류는 04 '분석 전'처럼 회색 글자 + 테두리 (줄에 마우스를 올려 바탕이 회색이 돼도 · 06 회색 카드 위에서도 보이게) */
+/** 문구 (11/05 사용자): KB_NO_ANSWER = '유사한 질문 없음'(검색은 됐는데 맞는 FAQ가 없음 — FAQ 추가 대상)
+ *  KB_UNAVAILABLE · null = '서버 에러'(검색이 안 됨 · 사유 없이 들어옴 — 둘 다 같은 칩. 예전 '지식 검색 장애' · '미분류')
+ * bg = 칩 바탕 — 09 미답변 목록 · 06 처리 내용이 같은 칩 (04 상담 유형 칩과 같은 둥근 알약 · 높이 28 · 폭 76 이상 · 글자 16) */
 export const reasonTag = (r: UnansweredReason | null): { label: string; bg: string } =>
   r === 'KB_NO_ANSWER'
-    ? { label: '답변 근거 부족', bg: 'bg-kind-faq' }
-    : r === 'KB_UNAVAILABLE'
-      ? { label: '지식 검색 장애', bg: 'bg-kind-cancel' }
-      : { label: '미분류', bg: 'bg-bg text-sub ring-1 ring-line ring-inset' }
+    ? { label: '유사한 질문 없음', bg: 'bg-kind-faq' }
+    : { label: '서버 에러', bg: 'bg-kind-cancel' }
 
 /** 사유 칩 모양 — bg와 같이 씀 */
 export const REASON_TAG_CLASS =
