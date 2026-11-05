@@ -4,7 +4,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -83,7 +83,7 @@ async function pin(scope, owner, label = null, version = 1) {
 function request(input, headers = {}) {
   return fetch(base + '/api/customers/context', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json', ...businessHeaders(), ...headers },
     body: JSON.stringify(input),
   });
 }
@@ -390,7 +390,7 @@ test('query failure is 503 rather than a new customer or a partial success', asy
   }
 });
 
-test('MVP needs no service token or Origin; stale administrator cookies never bypass session checks', async () => {
+test('authenticated AI needs no Origin; stale administrator cookies never bypass session checks', async () => {
   const c = await customer();
   assert.equal((await context(c.phoneNumber)).customer.customerSeq, c.customerSeq);
   const badCookie = await request(

@@ -1,4 +1,5 @@
 module.exports = function registerOrdersCallContext(suite) {
+  const { businessHeaders } = require('./helpers/application.cjs');
   const {
     test,
     readCustomer,
@@ -165,7 +166,7 @@ module.exports = function registerOrdersCallContext(suite) {
     await errorCode(await readOrders('', aiReadHeaders(data.callSessionSeq)), 403, 'FORBIDDEN');
     const registered = await fetch(hosts[0] + '/api/customers', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
       body: JSON.stringify({ name: '통화 중 등록', phoneNumber: phone }),
     });
     assert.equal(registered.status, 201);

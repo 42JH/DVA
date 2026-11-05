@@ -18,6 +18,7 @@ const temporary = mkdtempSync(path.join(tmpdir(), run + '-'));
 const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
 const personaToken = randomBytes(32).toString('hex');
+const businessToken = randomBytes(32).toString('hex');
 let networkCreated = false,
   databaseCreated = false,
   imageCreated = false;
@@ -106,6 +107,8 @@ try {
     '-e',
     'AI_AGENT_URL=http://ai.invalid:8000',
     '-e',
+    `AI_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
     'SWAGGER_ENABLED=false',
     '-e',
     `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
@@ -145,6 +148,8 @@ try {
     `PBX_WEBHOOK_TOKEN=${webhookToken}`,
     '-e',
     `AI_PERSONA_TOKEN=${personaToken}`,
+    '-e',
+    `AI_BUSINESS_TOKEN=${businessToken}`,
     runtimeImage,
   ]);
   applicationCreated = true;
@@ -253,6 +258,8 @@ try {
     `TEST_WEBHOOK_TOKEN=${webhookToken}`,
     '-e',
     `TEST_PERSONA_TOKEN=${personaToken}`,
+    '-e',
+    `TEST_BUSINESS_TOKEN=${businessToken}`,
     '-e',
     'TEST_HTTPS_API_ROOT=https://backend/api',
     '-e',

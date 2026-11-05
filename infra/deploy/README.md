@@ -43,6 +43,7 @@ Lightsail → 체크섬 확인 → docker load → 미적용 DB migration → �
   PBX 웹훅과 Swagger 문서 경로를 전달한다. [HTTPS 운영](../https/README.md), [웹훅 규격](../webhooks/PBX-CALL-ENDED.md)을 참고한다.
 - 운영 `shared/.env`에는 DB 설정 외에 32바이트 이상의 `PBX_WEBHOOK_TOKEN`이 필요하다.
   기존 서버에는 무작위 토큰을 생성했으며 Git·산출물에 포함하지 않았다.
+- 고객 업무 API의 AI 인증에는 `shared/.env`의 `AI_BUSINESS_TOKEN`을 AI와 맞춘다. Compose가 backend에 주입하며 설정·가드 구현을 포함한 새 이미지로 배포해야 한다. env 파일 저장 또는 기존 컨테이너의 단순 restart만으로 새 환경이 반영되지는 않는다. AI 컨테이너 환경 반영은 AI 팀이 별도로 수행한다. [S01 전환·검증](../../backend/docs/ai-business-auth.md)
 
 ## 1. Windows에서 배포 폴더 생성
 

@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/
 import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Environment } from '../config/environment';
 import { AdminPublic, AdminRole } from '../admins/admins.types';
 import { ApiException } from '../common/errors/api.exception';
@@ -12,8 +13,7 @@ import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
-// Temporary, explicit opt-in for customer context/registration/detail/name updates (Jira 135).
-// Do not apply this to administrator-only operations or to an entire controller.
+// Customer service token or administrator session; keep this permission method-scoped.
 export const MvpAiCustomerAccess = () => SetMetadata('auth:mvp-ai-customer', true);
 export const Roles = (...roles: AdminRole[]) => SetMetadata('auth:roles', roles);
 export type AuthRequest = Request & {
@@ -79,13 +79,27 @@ export class AuthGuard implements CanActivate {
       const hasSessionCookie = (request.headers.cookie ?? '')
         .split(';')
         .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`));
-      const changesStatus =
-        request.method === 'PATCH' &&
-        request.body !== null &&
-        typeof request.body === 'object' &&
-        Object.hasOwn(request.body, 'status');
-      // A missing/stale administrator session must never turn a status change into an AI write.
-      if (!hasSessionCookie && !changesStatus) {
+      if (!hasSessionCookie) {
+        const expected = this.config.get('AI_BUSINESS_TOKEN', { infer: true });
+        if (!expected)
+          throw new ApiException(
+            503,
+            'DEPENDENCY_UNAVAILABLE',
+            'AI 고객 인증이 설정되지 않았습니다.',
+          );
+        const authorization = request.get('Authorization') ?? '';
+        const count = request.rawHeaders.filter(
+          (value, index) => index % 2 === 0 && value.toLowerCase() === 'authorization',
+        ).length;
+        if (
+          count !== 1 ||
+          !authorization.startsWith('Bearer ') ||
+          !timingSafeEqual(
+            createHash('sha256').update(authorization.slice(7)).digest(),
+            createHash('sha256').update(expected).digest(),
+          )
+        )
+          throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 업무 인증이 필요합니다.');
         request.auditActorType = 'AI';
         return true;
       }

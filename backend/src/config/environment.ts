@@ -8,6 +8,7 @@ export interface Environment extends PaymentEnvironment {
   DB_PASSWORD: string;
   DB_NAME: string;
   AI_AGENT_URL: string;
+  AI_BUSINESS_TOKEN?: string;
   AI_PERSONA_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
@@ -86,9 +87,18 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   const swagger = raw.SWAGGER_ENABLED ?? (nodeEnv === 'development' ? 'true' : 'false');
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const token = raw.PBX_WEBHOOK_TOKEN;
+  const businessToken = raw.AI_BUSINESS_TOKEN;
   const personaToken = raw.AI_PERSONA_TOKEN;
   const faqToken = raw.AI_FAQ_TOKEN;
   const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      businessToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   if (
     insightsToken !== undefined &&
     insightsToken !== '' &&
@@ -155,6 +165,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
     AI_AGENT_URL: aiUrl.replace(/\/$/, ''),
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     AI_INSIGHTS_TOKEN:

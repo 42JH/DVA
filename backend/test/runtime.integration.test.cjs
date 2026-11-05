@@ -1,6 +1,7 @@
 const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const businessHeaders = () => ({ Authorization: 'Bearer ' + process.env.TEST_BUSINESS_TOKEN });
 
 test('persona runtime reads and acknowledgment authentication survive real Nginx forwarding', async () => {
   const headers = { Authorization: `Bearer ${process.env.TEST_PERSONA_TOKEN}` };
@@ -309,12 +310,24 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
-test('production customer MVP flow through Nginx needs no service token while admin operations remain protected', async () => {
+test('production customer service authentication through Nginx preserves AI and administrator boundaries', async () => {
   const input = {
     name: 'runtime-customer-' + randomUUID(),
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
   };
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', ...businessHeaders() };
+  for (const authorization of [undefined, 'Bearer wrong-business-token']) {
+    const denied = await fetch('http://proxy/api/customers/context', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authorization === undefined ? {} : { Authorization: authorization }),
+      },
+      body: JSON.stringify({ phoneNumber: input.phoneNumber }),
+    });
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).error.code, 'UNAUTHORIZED');
+  }
   const register = () =>
     fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
   const first = await register();
@@ -337,7 +350,7 @@ test('production customer MVP flow through Nginx needs no service token while ad
   const replay = await register();
   assert.equal(replay.status, 409);
   assert.equal((await replay.json()).error.code, 'DUPLICATE_RESOURCE');
-  const detail = await fetch('http://proxy/api/customers/' + id);
+  const detail = await fetch('http://proxy/api/customers/' + id, { headers });
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.phoneNumber, input.phoneNumber);
   const rename = await fetch('http://proxy/api/customers/' + id, {
@@ -348,12 +361,12 @@ test('production customer MVP flow through Nginx needs no service token while ad
   assert.equal(rename.status, 204);
   assert.equal(await rename.text(), '');
   assert.equal((await fetch('http://proxy/api/customers')).status, 401);
-  const anonymousStatus = await fetch('http://proxy/api/customers/' + id, {
+  const aiStatus = await fetch('http://proxy/api/customers/' + id, {
     method: 'PATCH',
     headers: { ...headers, Origin: 'https://13.209.59.180' },
     body: '{"status":"WITHDRAWN"}',
   });
-  assert.equal(anonymousStatus.status, 401);
+  assert.equal(aiStatus.status, 403);
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
     headers: { ...headers, Origin: 'https://13.209.59.180' },
@@ -371,7 +384,7 @@ test('production customer MVP flow through Nginx needs no service token while ad
     body: '{"status":"WITHDRAWN"}',
   });
   assert.equal(withdrawn.status, 204);
-  assert.equal((await fetch('http://proxy/api/customers/' + id)).status, 404);
+  assert.equal((await fetch('http://proxy/api/customers/' + id, { headers })).status, 404);
   const adminDetail = await fetch('http://proxy/api/customers/' + id, { headers: adminHeaders });
   assert.equal(adminDetail.status, 200);
   assert.equal((await adminDetail.json()).data.status, 'WITHDRAWN');
@@ -466,7 +479,7 @@ test('production member JSON supports single and bulk registration through Nginx
     ).status,
     204,
   );
-  const customer = await fetch(root + '/customers/' + customerId);
+  const customer = await fetch(root + '/customers/' + customerId, { headers });
   assert.equal(customer.status, 200);
   assert.equal((await customer.json()).data.phoneNumber, nextPhone);
   const patch = await fetch(root + '/members/' + membershipId, {
@@ -477,7 +490,7 @@ test('production member JSON supports single and bulk registration through Nginx
   assert.equal(patch.status, 204);
   const removed = await fetch(root + '/members/' + membershipId, { method: 'DELETE', headers });
   assert.equal(removed.status, 204);
-  assert.equal((await fetch(root + '/customers/' + customerId)).status, 200);
+  assert.equal((await fetch(root + '/customers/' + customerId, { headers })).status, 200);
   const empty = await fetch(root + `/companies/${companyId}/members`, {
     headers: { Cookie: session },
   });
@@ -965,7 +978,7 @@ test('production active count SSE crosses HTTPS and both Nginx proxies, keeps he
     const phone = '010' + require('node:crypto').randomInt(10000000, 100000000);
     const registered = await fetch(root + '/customers/context', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
       body: JSON.stringify({
         phoneNumber: phone,
         call: { providerCallId: randomUUID(), incomingAt: startedAt },

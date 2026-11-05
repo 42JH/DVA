@@ -7,7 +7,7 @@ const { RetentionWorker } = require('../dist/retention/retention.worker');
 const { RetentionRepository } = require('../dist/retention/retention.repository');
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
-const { applicationFixture } = require('./helpers/application.cjs');
+const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
 const f = applicationFixture();
 async function oldCall(age = '6 years') {
   const providerCallId = randomUUID(),
@@ -463,7 +463,7 @@ test('late expired PBX and AI registration cannot repopulate erased data', async
       call: { providerCallId: c.providerCallId, incomingAt: c.incoming_at.toISOString() },
     },
     0,
-    { Cookie: undefined, Origin: undefined },
+    { Cookie: undefined, Origin: undefined, ...businessHeaders() },
   );
   await f.error(replay, 409, 'INVALID_STATE');
   const recordingId = randomUUID();

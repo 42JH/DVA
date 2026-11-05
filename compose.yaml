@@ -49,6 +49,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       DB_NAME: ${DB_NAME:?Set DB_NAME in .env}
       AI_AGENT_URL: http://ai:8000
+      AI_BUSINESS_TOKEN: ${AI_BUSINESS_TOKEN:-}
       AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
       AI_FAQ_TOKEN: ${AI_FAQ_TOKEN:-}
       AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}

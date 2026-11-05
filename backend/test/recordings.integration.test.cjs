@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worker');
@@ -176,7 +176,7 @@ test('call context without an order is matched to its recording and retries neve
   const start = () =>
     fetch(urls[0] + '/api/customers/context', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
       body: JSON.stringify(input),
     });
   const response = await start();
@@ -472,7 +472,7 @@ test('unregistered calls leave no call, audit or recording and unmatched PBX rec
   const before = await counts();
   const initial = await fetch(urls[0] + '/api/customers/context', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...businessHeaders() },
     body: JSON.stringify({ phoneNumber: data.callFrom }),
   });
   assert.equal(initial.status, 200);

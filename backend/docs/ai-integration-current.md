@@ -12,11 +12,12 @@
 - JSON 요청은 `Content-Type: application/json`. 날짜는 시간대가 있는 ISO 8601, ID는 별도 설명이 없으면 양의 int32다.
 - AI 요청에는 관리자 쿠키·브라우저 Origin을 넣지 않는다. 잘못된 관리자 쿠키를 보내도 AI로 우회하지 않는다.
 - 현재 MVP의 무토큰 경로를 모든 관리자 API에 일반화하지 않는다. 토큰은 환경변수로 공유하며 프론트·로그에 노출하지 않는다.
+- 고객 API의 서비스 인증은 [S01 연동 안내](ai-business-auth.md)를 우선한다. 정상 요청 본문·응답은 유지하고 고객 호출에만 업무 Bearer를 추가한다.
 
 | 호출                                                                  | 인증·추가 헤더                                                               |
 | --------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름 단독 수정 | 현재 MVP AI 접근. 고객 상태 변경 등 관리자 전용 작업 제외                    |
-| `PATCH /api/customers/{id}`의 `address` 수정·삭제                     | `call_session_seq` 필수. 진행 중인 본인 통화만 허용                          |
+| `POST /api/customers/context` 및 허용된 고객 등록·상세·이름 단독 수정 | `Authorization: Bearer <AI_BUSINESS_TOKEN>`. 고객 상태 변경 등 관리자 전용 작업 제외 |
+| `PATCH /api/customers/{id}`의 `address` 수정·삭제                     | 업무 Bearer + `call_session_seq` 필수. 진행 중인 본인 통화만 허용             |
 | `POST /api/orders`의 AI 최종 결과                                     | `Idempotency-Key: <주문 결과별 UUID>` + 본문 `call`                          |
 | 기존 주문 조회·취소, 개인 PIN, 과거 주문 주소 조회                    | `call_session_seq: <통화 번호>`로 발신 고객 범위 검증. 경로별 상세 계약 준수 |
 | `GET /api/companies/search`                                           | 기업 공유 배송지 조회. 현재 MVP 계약 사용                                    |
@@ -36,6 +37,7 @@
 ```http
 POST /api/customers/context
 Content-Type: application/json
+Authorization: Bearer <AI_BUSINESS_TOKEN>
 ```
 
 ```json
@@ -92,7 +94,7 @@ Content-Type: application/json
 
 고객 동의를 받은 경우에만 저장한다. 주문 생성·수정은 고객 기본 주소나 PIN을 자동 갱신하지 않는다.
 
-- 기본 주소: `PATCH /api/customers/{customerSeq}`에 `address`와 `call_session_seq` 헤더를 보낸다. 통화 종료 웹훅이 `call_sessions.ended_at`에 반영되기 전에 호출해야 한다. 객체는 완성 주소 전체 교체, null은 삭제, 생략은 유지다. 성공 204에는 본문이 없다. 이름 단독 수정과 고객 등록·상세는 기존 MVP 계약을 유지한다.
+- 기본 주소: `PATCH /api/customers/{customerSeq}`에 업무 Bearer, `address`와 `call_session_seq` 헤더를 보낸다. 통화 종료 웹훅이 `call_sessions.ended_at`에 반영되기 전에 호출해야 한다. 객체는 완성 주소 전체 교체, null은 삭제, 생략은 유지다. 성공 204에는 본문이 없다. 이름 단독 수정과 고객 등록·상세에도 업무 Bearer가 필요하다.
 - 개인 PIN: `POST /api/customers/{customerSeq}/pins`, `PATCH /api/pins/{pinSeq}`는 같은 통화 번호로 종료 후에도 호출할 수 있다. 기존 완성 `addressData`·소유권·중복·버전 계약을 유지한다. 주소 중복 409 `DUPLICATE_RESOURCE`는 기존 PIN을 덮어쓰지 않는다.
 - PIN 목록 `GET /api/customers/{customerSeq}/pins`는 진행 중 통화만 허용하며 종료 후에는 409 `INVALID_STATE`다. 종료 전 확보한 PIN 번호와 주소를 후처리에 사용한다.
 - 기본 주소의 누락/잘못된 통화 헤더는 400, 다른 고객은 403, 없는/삭제/보관 만료 통화는 404, 종료된 통화는 409다. 주소 변경과 성공 감사는 같은 트랜잭션이며 통화 종료와 경합하면 잠금 뒤 종료 여부를 다시 확인한다.

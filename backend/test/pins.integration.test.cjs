@@ -3,7 +3,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -324,7 +324,7 @@ test('an ended call cannot modify a new customer who reuses the deleted original
     'POST',
     '/customers',
     { name: '새 고객', phoneNumber: f.phone },
-    {},
+    businessHeaders(),
   );
   const customer = await success(response, 201);
   assert.notEqual(customer.customerSeq, f.customer);

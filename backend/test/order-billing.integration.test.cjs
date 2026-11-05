@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
+const { createTestPool, businessHeaders } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 const { configureApplication } = require('../dist/configure-application');
@@ -31,7 +31,9 @@ async function request(path, body, ai = false, method = 'POST') {
     method,
     headers: {
       'Content-Type': 'application/json',
-      ...(ai ? { call_session_seq: String(callId) } : { Cookie: cookie, Origin: origin }),
+      ...(ai
+        ? { ...businessHeaders(), call_session_seq: String(callId) }
+        : { Cookie: cookie, Origin: origin }),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

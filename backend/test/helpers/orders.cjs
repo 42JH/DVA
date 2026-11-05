@@ -1,4 +1,4 @@
-const { createTestPool, startTestApp } = require('./application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./application.cjs');
 
 module.exports = function ordersFixture() {
   const { testMembership } = require('./membership.cjs');
@@ -334,7 +334,7 @@ module.exports = function ordersFixture() {
   const startCallContext = (phoneNumber, call, index = 0, extra = {}) =>
     fetch(hosts[index] + '/api/customers/context', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...extra },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders(), ...extra },
       body: JSON.stringify({ phoneNumber, call }),
     });
 

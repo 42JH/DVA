@@ -3,20 +3,22 @@
 Jira: [S15P31D109-34](https://ssafy.atlassian.net/browse/S15P31D109-34).
 구현은 모놀리식 `backend/src/customers/`에 두며 MSA는 변경하지 않는다.
 
-## MVP 인증과 범위
+## 인증과 범위
 
-2026-10-27 합의에 따라 고객 등록·상세·이름·내 주소 수정에 AI 서비스 인증을 요구하지 않는다.
-서버 간 호출에는 관리자 쿠키, Bearer 토큰, Origin, call_session_seq가 필요하지 않다.
-이 세 작업과 [발신번호 초기 조회](caller-context.md)만 명시적으로 `MvpAiCustomerAccess`를 사용한다. 기존 관리자·기업·PBX 인증은 유지한다.
-서비스 인증 도입은 [S15P31D109-135](https://ssafy.atlassian.net/browse/S15P31D109-135)의 후속 작업이다.
+고객 등록·상세·수정과 [고객 확인](caller-context.md)의 AI 요청은
+`Authorization: Bearer <AI_BUSINESS_TOKEN>`을 요구한다. 관리자 쿠키·Origin은 보내지 않는다.
+토큰은 32자 이상 공백 없는 ASCII이며 환경변수에는 Bearer 접두사 없이 값만 저장한다.
+서버 미설정은 503, 요청 토큰 누락·오류·중복 Authorization은 401이다.
+AI의 address 수정·삭제에는 기존처럼 진행 중 본인 통화의 call_session_seq도 필요하다.
+설정·배포·토큰별 사용 범위는 [S01 연동 안내](../../backend/docs/ai-business-auth.md)를 따른다.
 
 고객 목록과 status 변경은 모든 ACTIVE 관리자 역할에 허용한다.
 관리자 `dva_session` 쿠키를 보내면 실제 세션을 검증하며 잘못되거나 만료된 쿠키는
-인증 없는 요청으로 전환하지 않고 401로 거절한다. 관리자 변경 요청에는 허용 Origin이 필요하다.
-Origin이 없는 익명 status 변경 요청은 기존 Origin 검사에서 403, 허용 Origin만 있고
-유효한 세션이 없는 요청은 401이다. 임의의 관리자 ID·AI 식별 헤더로 권한을 부여하지 않는다.
+AI 요청으로 전환하지 않고 401로 거절한다. 관리자 변경 요청에는 허용 Origin이 필요하다.
+유효한 AI 토큰으로도 status·월결제 자격을 변경하면 403이다.
+임의의 관리자 ID·AI 식별 헤더로 권한을 부여하지 않는다.
 
-이 MVP는 익명 고객 ID 접근의 통화별 소유권을 검증하지 않는다. 발신번호 식별과 고객·기업·PIN
+이번 서비스 인증은 상세 조회·이름 수정의 통화별 소유권을 검증하지 않는다. 발신번호 식별과 고객·기업·PIN
 초기 데이터 제공은 [33번 API](caller-context.md)를 사용한다. 통화 시작·고객 연결, 실제 고객 본인인증은 별도 범위다.
 고객 목록의 phoneNumber 검색은 관리자용이며 AI 발신번호 식별 API를 대체하지 않는다.
 
@@ -49,7 +51,7 @@ phoneNumber는 정확히 일치 검색하고 status는 ACTIVE/WITHDRAWN이다. �
 
 관리자는 ACTIVE → WITHDRAWN으로 변경할 수 있다. WITHDRAWN → ACTIVE 복구는 409 INVALID_STATE다.
 탈퇴 고객의 이름과 이력은 보존하며 관리자에게 목록·상세를 제공한다.
-인증 없는 상세·이름 수정은 WITHDRAWN 고객을 404로 처리한다.
+인증된 AI의 상세·이름 수정은 WITHDRAWN 고객을 404로 처리한다.
 상태 변경으로 기존 주문·개인 PIN·기업 소속을 삭제하거나 상태를 일괄 변경하지 않는다.
 탈퇴한 고객도 전화번호 고유성을 유지하므로 같은 번호를 다시 등록하면 409 DUPLICATE_RESOURCE다.
 
@@ -73,17 +75,18 @@ cd ..
 ```
 
 기존 Docker 검증에 고객 HTTP/DB 테스트를 연결한다. 입력·검색·권한·상태 전이,
-동시 전화번호 충돌·재시작·실패 롤백, 실제 운영 이미지와 Nginx의 무인증 AI 호출 및
+동시 전화번호 충돌·재시작·실패 롤백, 실제 운영 이미지와 Nginx의 AI 토큰 인증 및
 관리자 경계를 검사한다. DB runner는 신규 migration·제약·반복 적용·기존 데이터 보존·
 백업 복원·체크섬 변경 거부·최초 및 후속 실패 롤백을 검사한다.
 테스트는 임시 PostgreSQL만 사용한다. 이 문서는 실제 서버 적용이나 AI 팀 연동 완료를 뜻하지 않는다.
 
 ## AI 호출 예시
 
-서버 호출은 Content-Type을 보내면 된다.
+서버 호출은 Content-Type과 업무 인증을 보낸다.
 
 ```http
 POST /api/customers
+Authorization: Bearer <AI_BUSINESS_TOKEN>
 Content-Type: application/json
 
 {"name":"예시 고객","phoneNumber":"01012345678"}
