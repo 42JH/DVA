@@ -165,7 +165,7 @@ class LiveFlow:
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
-            save = _save_pending(s.state)
+            save = bool(s.state.address_offer) and s.state.address_consent is None
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
                                        callback=callback, save=save, origin=origin)
@@ -224,13 +224,10 @@ class LiveFlow:
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
-            saved_now = False
-            for key in _save_pending(st):  # 항목별로 듣는다: "받는 곳만 저장해 주세요"
-                if (sv := answers.get(f"save_{key}")) and sv[1] >= th and sv[0] in ("yes", "no"):
-                    st.address_consent[key] = sv[0] == "yes"
-                    s.note("주소 저장 동의", f"{key}={sv[0]}")
-                    saved_now = True
-            if saved_now:
+            if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and st.address_offer \
+                    and st.address_consent is None:
+                st.address_consent = sv[0] == "yes"
+                s.note("주소 저장 동의", sv[0])
                 followups.append(("save", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
@@ -287,8 +284,6 @@ class LiveFlow:
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
-                if facts and (keys := _save_pending(s.state)):  # 담은 뒤 저장 여부를 따로 묻게 한다
-                    facts["address_save"] = {k: True for k in keys}
                 target = None
             else:
                 target = take_cancel(s.state, self.policy, pending_id)
@@ -410,22 +405,17 @@ class LiveFlow:
         return {"origin": "name_only"} if done else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
-        """택배를 담은 뒤 고객이 답한 항목만 처리한다: 동의한 항목은 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409),
-        거절한 항목은 버린다. 답하지 않은 항목은 남아 있다가 통화가 끝나면 저장하지 않는다(다시 묻지 않음)."""
+        """택배를 담았고 고객이 저장에 동의했으면 고객 기본 주소·주소록 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409)."""
         st, results = s.state, getattr(self.svc, "results", None)
         offer = st.address_offer
-        if not offer or not offer.get("parcel"):
+        if results is None or not offer or not offer.get("parcel") or not st.address_consent:
+            if offer and offer.get("parcel") and st.address_consent is False:
+                st.address_offer = None
             return
-        answered = [k for k in SAVE_KEYS if offer.get(k) and k in st.address_consent]
-        if not answered:
-            return
-        rest = {k: True for k in SAVE_KEYS if offer.get(k) and k not in answered}
-        st.address_offer = rest | {"parcel": offer["parcel"]} if rest else None
-        approved = {k: True for k in answered if st.address_consent[k]}
         snap = next((p.confirmed_snapshot for p in st.parcels if p.parcel_id == offer["parcel"]), None)
-        if results is not None and approved and snap:
-            s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, approved | {"parcel": offer["parcel"]}),
-                    "address_save")
+        st.address_offer = None
+        if snap:
+            s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "address_save")
 
     def _agent_route(self, s: CallSession) -> dict:
         """잠금 안. 상담원 연결 요구(업무 규칙 e): 근무 시간 밖 → 콜백 제안, 안 + 전환 대상 있음 → 전환, 없음 → 담당자 연락."""
@@ -678,17 +668,6 @@ def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:
 def _answer(a) -> tuple[str, float, dict]:
     probs = {str(p.value): p.probability for p in (a.probabilities or [])}
     return str(a.choice), float(a.confidence or 0), probs
-
-
-SAVE_KEYS = ("sender", "receiver")
-
-
-def _save_pending(st) -> tuple[str, ...]:
-    """담은 택배의 저장 제안 중 아직 답을 듣지 못한 항목. 담기 전(되읽기 중)에는 묻지 않으므로 없다."""
-    offer = st.address_offer
-    if not offer or not offer.get("parcel"):
-        return ()
-    return tuple(k for k in SAVE_KEYS if offer.get(k) and k not in st.address_consent)
 
 
 def _order_status(s: CallSession) -> dict:

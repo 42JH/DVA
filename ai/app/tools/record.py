@@ -144,8 +144,10 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
-            # 주소 저장은 되읽기 확인과 섞지 않고, 택배를 담은 뒤 따로 묻는다(사용자 결정 2026-11-05). 여기서는 제안만 정해 둔다
-            s.address_offer, s.address_consent = (save_offer(s) or None), {}
+            offer = save_offer(s)  # 주소 저장 동의는 되읽기 확인 때 함께(사용자 결정 2026-11-04)
+            s.address_offer, s.address_consent = (offer or None), None
+            if offer:
+                facts["address_save"] = offer
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]

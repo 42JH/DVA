@@ -157,8 +157,8 @@ class ConversationState:
     agent_transferred: bool = False       # 상담원 연결 요구(분석 hasHandoffRequest — 연결 성공 여부 아님)
     callback_offered: bool = False        # 상담원 근무 시간 밖이라 콜백을 제안함(답을 기다림)
     callback_requested: bool = False      # 고객이 콜백에 동의(분석 hasCallbackRequest)
-    address_offer: dict | None = None     # 주소 저장 제안 {sender, receiver, parcel(담은 뒤 택배 id)}. 담은 뒤 따로 묻는다
-    address_consent: dict[str, bool] = field(default_factory=dict)  # 항목별 동의(sender·receiver). 없는 키 = 아직 답 없음
+    address_offer: dict | None = None     # 되읽기 때 제안한 주소 저장 {sender, receiver, parcel(담은 뒤 택배 id)}
+    address_consent: bool | None = None   # 주소 저장 동의(None = 아직 답 없음)
     origin_offered: bool = False          # 출발지 후보에서 보내는지 물음(인사 또는 접수 시작 때)
     origin_answer: bool | None = None     # 그 출발지에서 보냄 = True, 다른 곳 = False
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
