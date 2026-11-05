@@ -17,6 +17,6 @@ import { ActiveCallCountService } from './active-call-count.service';
     CallEndRepository,
     ActiveCallCountService,
   ],
-  exports: [ConsultationsService],
+  exports: [ConsultationsService, CallEndRepository],
 })
 export class ConsultationsModule {}

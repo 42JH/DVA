@@ -1,6 +1,6 @@
 # Customer 서비스
 
-모놀리식의 고객·기업·부서·구성원 조회 7개와 쓰기 10개 API를 동일한 DTO·권한·SQL·응답 형식으로 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), 이번 쓰기의 완료 경계와 제한은 [쓰기 계획](../../../docs/msa-customer-writes-plan.md), 전체 범위는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
+모놀리식의 고객·기업·부서·구성원 조회 7개·쓰기 10개와 고객 확인/통화 등록 1개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 공개 API
 
@@ -8,13 +8,16 @@
 - `GET /api/companies`, `GET /api/companies/search`, `GET /api/companies/:id`
 - `GET /api/companies/:id/departments`, `GET /api/companies/:id/members`
 - `POST /api/customers`
+- `POST /api/customers/context`
 - `POST /api/companies`, `PATCH /api/companies/:id`, `DELETE /api/companies/:id`
 - `POST /api/companies/:id/departments`, `PATCH /api/departments/:id`, `DELETE /api/departments/:id`
 - `POST /api/companies/:id/members`, `PATCH /api/members/:id`, `DELETE /api/members/:id`
 
 필터·페이지네이션·검증 오류·soft delete·탈퇴 고객 처리·기본 주소·집계와 기존 MVP AI 접근 범위를 유지한다. 쿠키가 없을 때 원본이 허용한 요청만 AI로 처리하며, 잘못되거나 회수된 쿠키를 AI 요청으로 전환하지 않는다. 단건/일괄 직원 등록과 기존 고객 식별·중복·부서 변경·탈퇴·기업 삭제 시 연결 데이터의 처리 및 감사도 이식했다. 조회에는 원본과 동일하게 감사 쓰기가 없다.
 
-고객 컨텍스트 POST·고객 PATCH·기업 월 청구 GET·고객 PIN GET/POST·PIN PATCH, 6개 선언은 통화/주문 의존성과 함께 후속 MR 대상이며 성공 응답을 제공하지 않는다. 월별 청구 초기화 등 원본의 자동 업무 워커도 아직 이식 전이다.
+고객 확인은 call 없이 현재 고객·소속·결제 자격·개인 PIN 전체를 조회하며 통화·감사를 저장하지 않는다. call이 있으면 consultation에 등록 이벤트를 보내 같은 통화를 생성·재사용하고 CALL_STARTED 감사 확정까지 기다린다. 공개 경로·Origin/쿠키·오류·메타·후행 슬래시는 기존 customer가 처리한다. 최신 `04b7346`처럼 고객 생성·전화번호 검색·구성원 등록·고객 확인의 전화번호는 숫자 문자열 11자리다.
+
+현재 공개 선언은 18/23개다. 고객 PATCH·기업 월 청구 GET·고객 PIN GET/POST·PIN PATCH, 5개와 월별 청구 초기화 등 자동 업무 워커는 후속이다.
 
 ## 실행과 DB
 
@@ -23,9 +26,11 @@ Node.js 24에서 `npm ci` 후 아래 환경을 설정하고 `npm run start:dev`�
 - customer 전용 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
 - `OPERATIONS_URL`: 예시 `http://operations:3005`, 경로·자격증명 없는 정확한 origin
 - `CUSTOMER_AUTH_TOKEN`: operations와 공유하는 32~256자 ASCII 서비스 비밀 값
+- `CONSULTATION_URL`: 통화 등록용 정확한 HTTP(S) origin. k8s는 `http://consultation:3004`; 미설정 시 call이 있는 요청만 503이다.
+- `CONSULTATION_AUTH_TOKEN`: consultation에서 오는 내부 고객 조회의 서비스 비밀 값. 공개 API 인증을 대신하지 않는다.
 - `CORS_ORIGINS`: 정확한 origin 목록, `PORT` 기본 3001, `SWAGGER_ENABLED` 기본 true
 
-customer와 operations Liquibase `005`를 먼저 적용한다. 구버전 고객·기업·구성원·대기 이벤트를 보존하고, 원본이 없는 과거 기업 등록 시각·부서 배정·기본 주소는 NULL로 남긴다. customer `005`는 기업 PIN의 부서·soft delete를 추가하고 원본 043처럼 양쪽 PIN 주소의 latitude/longitude를 제거한다. PIN 버전·소유권은 보존하며 유일하게 일치하는 기존 부서만 연결한다. 좌표 제거 전 운영 백업을 별도로 준비해야 한다. 앱은 시작할 때 스키마를 확인하며 DDL을 실행하지 않는다.
+customer·operations `006`과 consultation `004`까지 먼저 적용한다. 구버전 고객·기업·구성원·대기 이벤트를 보존하고, 원본이 없는 과거 기업 등록 시각·부서 배정·기본 주소는 NULL로 남긴다. customer `005`의 좌표 제거는 운영 백업을 먼저 준비해야 한다. `006`은 개인 PIN의 soft delete·활성 주소 유일성을 추가하고 기존 소유권·주소·버전을 보존한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다.
 
 세션은 operations DB에만 저장한다. customer는 매 요청 `POST /internal/auth/session`에 서비스 Bearer와 기존 세션 토큰을 전달해 현재 권한을 확인한다. 관리자·세션을 복제하거나 operations DB를 직접 조회하지 않는다. 응답 크기 8KiB·요청 2초 제한과 리다이렉트 거절을 적용하며 인증 서비스 장애는 서버 오류로 처리한다.
 

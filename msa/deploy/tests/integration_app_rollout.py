@@ -47,7 +47,7 @@ def main():
     cluster_created = False
     database_resources = []
     try:
-        db_services = ('operations', service) if service in ('customer', 'consultation') else ('operations',) if service == 'operations' else ()
+        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations',) if service == 'operations' else ()
         addresses = {}
         if db_services:
             if not created:
@@ -119,8 +119,8 @@ def main():
         if db_services:
             app.ensure_service_auth_secret('customer')
             app.ensure_service_auth_secret('consultation')
+            tokens = {peer: base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-' + peer + '-auth', '-o', 'json'))['data'][peer + '-token']).decode('ascii') for peer in ('customer', 'consultation')}
         if service in ('customer', 'consultation'):
-            token = base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-' + service + '-auth', '-o', 'json'))['data'][service + '-token']).decode('ascii')
             operations = network + '-operations-app'
             command(['docker', 'build', '--label', label, '-t', operations, '-f', str(ROOT / 'msa/services/operations/Dockerfile'), str(ROOT / 'msa')])
             database_resources.append(('image', operations))
@@ -128,10 +128,23 @@ def main():
                      '-e', 'NODE_ENV=production', '-e', 'PORT=3005', '-e', 'SWAGGER_ENABLED=true',
                      '-e', f'DB_HOST={addresses["operations"]}', '-e', 'DB_PORT=5432',
                      '-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=disposable-test-only',
-                     '-e', 'DB_NAME=dva_webhook_test', '-e', service.upper() + '_AUTH_TOKEN=' + token, operations])
+                     '-e', 'DB_NAME=dva_webhook_test', '-e', 'CUSTOMER_AUTH_TOKEN=' + tokens['customer'],
+                     '-e', 'CONSULTATION_AUTH_TOKEN=' + tokens['consultation'], operations])
             database_resources.append(('container', operations))
             operations_address = command(['docker', 'inspect', operations, '--format',
                                           '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}']).strip()
+        if service == 'consultation':
+            customer = network + '-customer-app'
+            command(['docker', 'build', '--label', label, '-t', customer, '-f', str(ROOT / 'msa/services/customer/Dockerfile'), str(ROOT / 'msa')])
+            database_resources.append(('image', customer))
+            command(['docker', 'run', '-d', '--name', customer, '--label', label, '--network', network,
+                     '-e', 'NODE_ENV=production', '-e', 'PORT=3001', '-e', 'SWAGGER_ENABLED=true',
+                     '-e', 'DB_HOST=' + addresses['customer'], '-e', 'DB_USER=customer_app', '-e', 'DB_PORT=5432',
+                     '-e', 'DB_PASSWORD=disposable-test-only', '-e', 'DB_NAME=dva_webhook_test',
+                     '-e', 'OPERATIONS_URL=http://' + operations_address + ':3005',
+                     '-e', 'CUSTOMER_AUTH_TOKEN=' + tokens['customer'], '-e', 'CONSULTATION_AUTH_TOKEN=' + tokens['consultation'], customer])
+            database_resources.append(('container', customer))
+            customer_address = command(['docker', 'inspect', customer, '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}']).strip()
         port = command(['docker', 'port', cluster, '30081/tcp']).strip()
         url = f'http://{port}/{service}/health'
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
@@ -148,6 +161,8 @@ def main():
             if service in ('customer', 'consultation'):
                 env = dep['spec']['template']['spec']['containers'][0]['env']
                 next(item for item in env if item['name'] == 'OPERATIONS_URL')['value'] = f'http://{operations_address}:3005'
+                if service == 'consultation':
+                    next(item for item in env if item['name'] == 'CUSTOMER_URL')['value'] = f'http://{customer_address}:3001'
             svc = next(r for r in resources if r['kind'] == 'Service')
             svc['spec']['type'] = 'NodePort'
             svc['spec']['ports'][0]['nodePort'] = 30081

@@ -1,6 +1,6 @@
 import { HttpException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createReceiver, sendEvent } from '@dva/events';
+import { createReceiver, sendEvent, type Event } from '@dva/events';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -30,7 +30,7 @@ const actions = new Set([
   'COMPANY_PIN_DELETED',
 ]);
 const targets = new Set(['CUSTOMER', 'ORGANIZATION', 'DEPARTMENT', 'MEMBERSHIP', 'COMPANY_PIN']);
-function auditInput(payload: Record<string, unknown>) {
+function auditInput(payload: Record<string, unknown>, service: 'customer' | 'consultation') {
   const audit = payload.audit;
   if (
     Object.keys(payload).sort().join(',') !== 'audit,occurredAt,result,transactionId' ||
@@ -56,13 +56,21 @@ function auditInput(payload: Record<string, unknown>) {
     !(audit.targetId === null || integer(audit.targetId)) ||
     !AUDIT_ACTOR_TYPES.includes(audit.actorType as never) ||
     (audit.actorType === 'ADMIN') !== (audit.actorId !== null) ||
-    !actions.has(audit.action as string) ||
-    !targets.has(audit.targetType as string) ||
+    !(service === 'customer'
+      ? actions.has(audit.action as string)
+      : audit.action === 'CALL_STARTED') ||
+    !(service === 'customer'
+      ? targets.has(audit.targetType as string)
+      : audit.targetType === 'CALL_SESSION') ||
     typeof audit.requestId !== 'string' ||
     audit.requestId.length < 1 ||
     audit.requestId.length > 128 ||
     !(audit.metadata === undefined || object(audit.metadata)) ||
     !AUDIT_RESULTS.includes(payload.result as never) ||
+    (service === 'consultation' &&
+      (payload.result !== 'SUCCESS' ||
+        audit.targetId === null ||
+        !['AI', 'ADMIN'].includes(audit.actorType as string))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))
   )
@@ -93,25 +101,31 @@ function transaction(payload: Record<string, unknown>): string {
 }
 
 @Injectable()
-export class CustomerAuditReceiver {
+export class ServiceAuditReceiver {
   readonly receive: ReturnType<typeof createReceiver>;
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
     repository: AuditRepository,
   ) {
-    const token = config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
-    this.receive = createReceiver<PoolClient>({
-      pool: database.pool,
-      sources: token ? { customer: token } : {},
-      handlers: {
-        'customer:AuditPrepared': async (client, event) => {
-          const input = auditInput(event.payload);
+    const sources: Record<string, string> = {};
+    const handlers: Record<string, (client: PoolClient, event: Event) => Promise<void>> = {};
+    for (const service of ['customer', 'consultation'] as const) {
+      const table =
+        service === 'customer' ? 'customer_audit_preparations' : 'consultation_audit_preparations';
+      const token = config.get(
+        service === 'customer' ? 'CUSTOMER_AUTH_TOKEN' : 'CONSULTATION_AUTH_TOKEN',
+        { infer: true },
+      );
+      if (token) sources[service] = token;
+      Object.assign(handlers, {
+        [service + ':AuditPrepared']: async (client: PoolClient, event: Event) => {
+          const input = auditInput(event.payload, service);
           await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [
             input.transactionId,
           ]);
           const existing = await client.query<{ aborted: boolean }>(
-            'SELECT aborted FROM customer_audit_preparations WHERE event_id=$1',
+            `SELECT aborted FROM ${table} WHERE event_id=$1`,
             [input.transactionId],
           );
           if (existing.rows[0]?.aborted) return;
@@ -119,65 +133,72 @@ export class CustomerAuditReceiver {
           await client.query(
             `WITH prepared AS (
           DELETE FROM audit_logs WHERE audit_log_seq=currval(pg_get_serial_sequence('audit_logs','audit_log_seq')) RETURNING *
-        ) INSERT INTO customer_audit_preparations(event_id,transaction_id,audit) SELECT $1,$2,to_jsonb(prepared) FROM prepared`,
+        ) INSERT INTO ${table}(event_id,transaction_id,audit) SELECT $1,$2,to_jsonb(prepared) FROM prepared`,
             [event.eventId, input.transactionId],
           );
         },
-        'customer:AuditCommitted': async (client, event) => {
+        [service + ':AuditCommitted']: async (client: PoolClient, event: Event) => {
           const ids = references(event.payload);
           const transactionId = transaction(event.payload);
           await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [
             transactionId,
           ]);
           const prepared = await client.query(
-            'SELECT event_id FROM customer_audit_preparations WHERE event_id=ANY($1::uuid[]) AND transaction_id=$2 AND NOT aborted FOR UPDATE',
+            `SELECT event_id FROM ${table} WHERE event_id=ANY($1::uuid[]) AND transaction_id=$2 AND NOT aborted FOR UPDATE`,
             [ids, transactionId],
           );
           if (prepared.rowCount !== ids.length) throw invalid();
           await client.query(
             `INSERT INTO audit_logs OVERRIDING SYSTEM VALUE
           SELECT (jsonb_populate_record(NULL::audit_logs,p.audit)).* FROM unnest($1::uuid[]) WITH ORDINALITY i(id,n)
-          JOIN customer_audit_preparations p ON p.event_id=i.id ORDER BY i.n`,
+          JOIN ${table} p ON p.event_id=i.id ORDER BY i.n`,
             [ids],
           );
-          await client.query(
-            'DELETE FROM customer_audit_preparations WHERE event_id=ANY($1::uuid[])',
-            [ids],
-          );
+          await client.query(`DELETE FROM ${table} WHERE event_id=ANY($1::uuid[])`, [ids]);
         },
-        'customer:AuditAborted': async (client, event) => {
+        [service + ':AuditAborted']: async (client: PoolClient, event: Event) => {
           if (Object.keys(event.payload).join(',') !== 'transactionId') throw invalid();
           const transactionId = transaction(event.payload);
           await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [
             transactionId,
           ]);
           await client.query(
-            'UPDATE customer_audit_preparations SET audit=NULL,aborted=true WHERE transaction_id=$1',
+            `UPDATE ${table} SET audit=NULL,aborted=true WHERE transaction_id=$1`,
             [transactionId],
           );
           await client.query(
-            `INSERT INTO customer_audit_preparations(event_id,transaction_id,aborted) VALUES($1,$1,true)
-            ON CONFLICT(event_id) DO UPDATE SET audit=NULL,aborted=true WHERE customer_audit_preparations.transaction_id=EXCLUDED.transaction_id`,
+            `INSERT INTO ${table}(event_id,transaction_id,aborted) VALUES($1,$1,true)
+            ON CONFLICT(event_id) DO UPDATE SET audit=NULL,aborted=true WHERE ${table}.transaction_id=EXCLUDED.transaction_id`,
             [transactionId],
           );
         },
-      },
-    });
+      });
+    }
+    this.receive = createReceiver<PoolClient>({ pool: database.pool, sources, handlers });
   }
 
   async flushPending(): Promise<void> {
-    const { rows } = await this.database.pool.query<{ transaction_id: string }>(
-      'SELECT DISTINCT transaction_id FROM customer_audit_preparations WHERE NOT aborted ORDER BY transaction_id LIMIT 128',
-    );
-    if (!rows.length) return;
-    const url = this.config.get('CUSTOMER_URL', { infer: true });
-    const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
-    if (!url || !token) throw new Error('Customer audit confirmation unavailable');
-    await sendEvent(url + '/internal/audit/flush', token, {
-      eventId: randomUUID(),
-      source: 'operations',
-      eventType: 'AuditFlushRequested',
-      payload: { transactionIds: rows.map((row) => row.transaction_id) },
-    });
+    for (const service of ['customer', 'consultation'] as const) {
+      const table =
+        service === 'customer' ? 'customer_audit_preparations' : 'consultation_audit_preparations';
+      const { rows } = await this.database.pool.query<{ transaction_id: string }>(
+        `SELECT DISTINCT transaction_id FROM ${table} WHERE NOT aborted ORDER BY transaction_id LIMIT 128`,
+      );
+      if (!rows.length) continue;
+      const url = this.config.get(service === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL', {
+        infer: true,
+      });
+      const token = this.config.get(
+        service === 'customer' ? 'CUSTOMER_AUTH_TOKEN' : 'CONSULTATION_AUTH_TOKEN',
+        { infer: true },
+      );
+      if (!url || !token) throw new Error('Customer audit confirmation unavailable');
+      await sendEvent(url + '/internal/audit/flush', token, {
+        eventId: randomUUID(),
+        source: 'operations',
+        eventType: 'AuditFlushRequested',
+        payload: { transactionIds: rows.map((row) => row.transaction_id) },
+      });
+    }
   }
 }

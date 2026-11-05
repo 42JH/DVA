@@ -42,19 +42,19 @@ def main():
         for side, path, target in (
             ('consultation-checks', 'msa/services/consultation', 'checks'),
             ('consultation', 'msa/services/consultation', None),
-            ('operations', 'msa/services/operations', None),
+            ('operations', 'msa/services/operations', None), ('customer', 'msa/services/customer', None),
             ('monolith-checks', 'backend', 'checks'), ('monolith', 'backend', None),
             ('liquibase', 'msa/liquibase', None),
         ):
             image = RUN+'-'+side
             resources.append(('image', image))
-            context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if side == 'operations' else [str(ROOT/path)]
+            context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if side in ('operations', 'customer', 'consultation', 'consultation-checks') else [str(ROOT/path)]
             run('docker', 'build', '--label', LABEL, '-t', image,
                 *(['--target', target] if target else []), *context, label=side+'-build')
             images[side] = image
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
-        for side in ('monolith', 'operations', 'consultation'):
+        for side in ('monolith', 'operations', 'customer', 'consultation'):
             name = RUN+'-'+side+'-db'
             create(name, 'postgres:17.11-bookworm', '--network-alias', side+'-db',
                    '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER='+side+'_app',
@@ -83,22 +83,26 @@ def main():
             create(name, images[side+'-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1',
                    '-e', 'DB_PORT=5432', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
                    '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
-                   '-e', 'OPERATIONS_URL=http://operations-app:3005',
-                   '-e', 'CONSULTATION_AUTH_TOKEN='+token, network='container:'+RUN+'-'+side+'-db',
-                   command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs'))
-            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs'):
-                run('docker', 'cp', str(source), name+':/app/test/'+source.name, label=side+'-copy-'+source.name)
+                   '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+                   '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
+                   command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs', *(['test/caller-context.integration.test.cjs'] if side == 'monolith' else [])))
+            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs', *([ROOT/'backend/test/caller-context.integration.test.cjs'] if side == 'monolith' else [])):
+                target = '/app/test/' if side == 'monolith' else '/app/service/test/'
+                run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
             complete(name)
-        for side, port in (('monolith', '3000'), ('operations', '3005'), ('consultation', '3004')):
-            name = RUN+'-'+side+'-app'
-            create(name, images[side], '--network-alias', side+'-app',
-                   '-e', 'NODE_ENV=production', '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
-                   '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
-                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
-                   '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
-                   '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
-                   '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
-            run('docker', 'start', name, label=side+'-app-start')
+        def start_apps(environment):
+            for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001'), ('consultation', '3004')):
+                name = RUN+'-'+side+'-app'
+                create(name, images[side], '--network-alias', side+'-app',
+                       '-e', 'NODE_ENV='+environment, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
+                       '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
+                       '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
+                       '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
+                       '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+                       '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_URL=http://consultation-app:3004',
+                       '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
+                run('docker', 'start', name, label=side+'-app-start')
+        start_apps('production')
         run('docker', 'cp', RUN+'-operations-app:/app/service/dist/auth/password.js',
             str(LOGS/'seed-password.cjs'), label='password-fixture-copy')
         name = RUN+'-differential'
@@ -106,7 +110,26 @@ def main():
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
                command=('node', '--test', 'test/consultation-pbx.test.cjs'))
         for source in (ROOT/'msa/parity/consultation-pbx.test.cjs', LOGS/'seed-password.cjs'):
-            run('docker', 'cp', str(source), name+':/app/test/'+source.name, label='copy-'+source.name)
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
+        complete(name)
+        # Keep production PBX/SSE distinct from foreground context checks without the
+        # monolith's still-unported monthly order/billing maintenance worker.
+        for side in ('monolith', 'operations', 'customer', 'consultation'):
+            name = RUN+'-'+side+'-app'
+            run('docker', 'stop', '--time=5', name, label=side+'-production-stop')
+            run('docker', 'rm', name, label=side+'-production-remove')
+        start_apps('test')
+        name = RUN+'-caller-context'
+        runtime = LOGS/'customer-runtime'
+        runtime.mkdir(exist_ok=True)
+        run('docker', 'cp', RUN+'-customer-app:/app/service/dist/.', str(runtime), label='context-consumer-runtime')
+        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
+               '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+               command=('node', '--test', 'test/caller-context.test.cjs'))
+        run('docker', 'cp', str(runtime), name+':/app/service/test/customer-runtime', label='context-consumer-copy')
+        for source in (ROOT/'msa/parity/caller-context.test.cjs', ROOT/'msa/parity/context-claimant.cjs', LOGS/'seed-password.cjs'):
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='context-copy-'+source.name)
         complete(name)
         report['passed'] = True
     finally:

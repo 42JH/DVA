@@ -44,6 +44,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.pool.query('SELECT department_seq, deleted_at FROM memberships LIMIT 0');
     await this.pool.query('SELECT created_at, deleted_at FROM departments LIMIT 0');
     await this.pool.query('SELECT department_seq, deleted_at FROM company_pins LIMIT 0');
+    await this.pool.query('SELECT deleted_at FROM personal_pins LIMIT 0');
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

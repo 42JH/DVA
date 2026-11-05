@@ -9,6 +9,8 @@ export interface Environment {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   OPERATIONS_URL: string;
+  CUSTOMER_URL: string;
+  CUSTOMER_AUTH_TOKEN: string;
   CONSULTATION_AUTH_TOKEN: string;
   PBX_WEBHOOK_TOKEN?: string;
   AWS_REGION: string;
@@ -91,6 +93,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
     OPERATIONS_URL: required('OPERATIONS_URL'),
+    CUSTOMER_URL: required('CUSTOMER_URL'),
+    CUSTOMER_AUTH_TOKEN: required('CUSTOMER_AUTH_TOKEN'),
     CONSULTATION_AUTH_TOKEN: required('CONSULTATION_AUTH_TOKEN'),
     AWS_REGION:
       typeof raw.AWS_REGION === 'string' && raw.AWS_REGION
@@ -150,6 +154,18 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     config.RECORDING_MATCH_WINDOW_SECONDS > 300
   )
     errors.push('RECORDING_MATCH_WINDOW_SECONDS');
+  try {
+    const url = new URL(config.CUSTOMER_URL);
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.origin !== config.CUSTOMER_URL
+    )
+      errors.push('CUSTOMER_URL');
+  } catch {
+    errors.push('CUSTOMER_URL');
+  }
+  if (!/^[\x21-\x7e]{32,256}$/.test(config.CUSTOMER_AUTH_TOKEN))
+    errors.push('CUSTOMER_AUTH_TOKEN');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

@@ -15,4 +15,7 @@
   <changeSet id="003-pbx-active-calls" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="003-pbx-active-calls.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="004-call-customer" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="004-call-customer.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

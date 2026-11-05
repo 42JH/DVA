@@ -10,6 +10,8 @@ export interface Environment {
   SWAGGER_ENABLED: boolean;
   OPERATIONS_URL: string;
   CUSTOMER_AUTH_TOKEN: string;
+  CONSULTATION_AUTH_TOKEN?: string;
+  CONSULTATION_URL?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -73,6 +75,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     SWAGGER_ENABLED: swagger === 'true',
     OPERATIONS_URL: required('OPERATIONS_URL'),
     CUSTOMER_AUTH_TOKEN: required('CUSTOMER_AUTH_TOKEN'),
+    CONSULTATION_URL: typeof raw.CONSULTATION_URL === 'string' ? raw.CONSULTATION_URL : undefined,
+    CONSULTATION_AUTH_TOKEN:
+      typeof raw.CONSULTATION_AUTH_TOKEN === 'string' ? raw.CONSULTATION_AUTH_TOKEN : undefined,
   };
   try {
     const url = new URL(config.OPERATIONS_URL);
@@ -87,6 +92,22 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     errors.push('OPERATIONS_URL');
   }
   if (!/^[\x21-\x7e]{32,256}$/.test(config.CUSTOMER_AUTH_TOKEN)) errors.push('CUSTOMER_AUTH_TOKEN');
+  if (
+    raw.CONSULTATION_AUTH_TOKEN !== undefined &&
+    (typeof raw.CONSULTATION_AUTH_TOKEN !== 'string' ||
+      !/^[\x21-\x7e]{32,256}$/.test(raw.CONSULTATION_AUTH_TOKEN))
+  )
+    errors.push('CONSULTATION_AUTH_TOKEN');
+  if (raw.CONSULTATION_URL !== undefined) {
+    try {
+      if (typeof raw.CONSULTATION_URL !== 'string') throw new Error();
+      const url = new URL(raw.CONSULTATION_URL);
+      if (!['http:', 'https:'].includes(url.protocol) || url.origin !== raw.CONSULTATION_URL)
+        errors.push('CONSULTATION_URL');
+    } catch {
+      errors.push('CONSULTATION_URL');
+    }
+  }
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }
