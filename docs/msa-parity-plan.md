@@ -70,3 +70,20 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - Linux Python 배포·변경 선택·실패 복구 회귀 50개와 95개 라우트 기준 목록 1개 통과. operations 운영 의존성 audit은 0건이다. 개발 도구 의존성의 low 5/moderate 23은 기준 브랜치 잠금 파일과 동일하며 이번 MR에서 major 교체하지 않았다.
 - 임시 k3s v1.35.5+k3s1에 실제 operations 이미지와 별도 PostgreSQL/Secret/Liquibase를 연결해 최초 배포·정상 교체·의도적 readiness 실패 후 이전 이미지/배포 이력 복구를 확인했다. 교체/복구 중 HTTP 442건, 실패 0건이다. 기존 운영 kubeconfig는 사용하지 않았다.
 - 운영 Jenkins 실행·공개 Ingress/HTTPS·다른 서비스와의 인증/감사 연동·전체 95개 API 동등성은 미검증이다. 이 MR이 전체 MSA 이식 완료를 의미하지 않는다. 이름 없는 기존 MSA 관리자 행이 있으면 실제 이름 이관을 준비하기 전 004와 후속 앱 배포를 중단한다.
+
+## 다음 MR 계획 — customer 조회·인증 연결과 CI 실패 수정
+
+!276 병합 커밋 `1ec031e`에서 `feature/msa-customer`를 분리했다. 같은 Task 160을 유지한다. customer의 23개 선언 중 조회 7개부터 제공하고, 쓰기·컨텍스트·PIN·청구 16개는 원자적 감사/통화/주문 의존성과 함께 후속 MR에 남긴다. 미구현 요청을 임시 성공으로 반환하지 않는다.
+
+- 이번 공개 경로는 GET `/api/customers`, `/api/customers/:id`, `/api/companies`, `/api/companies/search`, `/api/companies/:id`, `/api/companies/:id/departments`, `/api/companies/:id/members`다. 원본 필터·페이지네이션·권한/MVP AI 범위·상태/soft delete·현재 주소 및 집계 규칙을 유지한다.
+- customer 독립 스키마에 부서·선택 소속·월결제 자격·기본 주소·soft delete와 필요한 제약을 후속 changeset으로 추가한다. 기존 부서 배정·기본 주소·등록 시각은 근거 없이 만들지 않는다. 원본 없는 과거 등록 시각은 NULL, 기존 구성원 부서는 NULL로 보존한다.
+- 세션은 operations에 보관한다. 서비스 인증을 사용하는 내부 조회로 매 요청 현재 세션/권한을 확인하며 customer DB에 관리자·세션을 복제하거나 operations DB를 직접 조회하지 않는다. 프론트/AI 요청은 변경하지 않는다.
+- 동일 데이터와 요청으로 모놀리식/독립 customer+operations의 조회·오류·권한 갱신/세션 회수·HTTP/DB 결과를 대조한다. 기존 operations 인증·전체 DB·배포 회귀도 수행한다.
+
+### Jenkins #23 실패 원인과 재현
+
+[dva-msa #23](https://13.209.59.180/jenkins/job/dva-msa/23/console)은 `1ec031e`를 검사하며 스크립트 회귀 50개를 통과한 뒤 `Verify Event Transport`에서 실패했다. 앱 빌드·DB 적용·배포는 도달하지 않았다. 수신 업무는 커밋됐지만 `delivered_at`은 NULL이었다.
+
+정상 전송 fixture도 timeout 검사용 100ms를 공유했다. 실제 정상 전송 테스트가 약 150ms 걸리면서 ACK를 받기 전에 중단됐고, 릴레이는 설계대로 미확정 메시지를 재시도 대상으로 보존했다. 운영 기본값은 5초다.
+
+ACK를 수신 COMMIT 후 250ms 지연시키는 회귀를 추가해 수정 전 동일한 `delivered_at=NULL` 실패를 재현했다. 정상 fixture는 운영 기본값을 쓰고 의도적인 오류/timeout 검사만 100ms로 분리했다. 기존 완료/중복/실패/재시도 assertion은 유지한다. 수정 후 Node 단위 3개·실제 PostgreSQL/HTTP 통합 15개·기준 목록 1개가 통과했다. 실제 Jenkins 재실행 결과는 별도 확인 대상이다.
