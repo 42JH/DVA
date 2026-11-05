@@ -247,6 +247,10 @@ class LiveFlow:
                           prev.utterance() if prev else None, latest_applied_utterance=None, closed=s.closed)
         if not gate.ok:
             s.note("확인 관문", gate.code)
+            if gate.code == "CONFIRM_UNCLEAR" and not self._delegation_in(s, utt):
+                # 애매한 '네'는 확정하지 않되 다시 묻게 한다(알리지 않으면 Live가 기다리다 무음 종료, 운영 통화 b8f3795c).
+                # 같은 발화로 위임이 돌면 고친 값의 되읽기가 따라오므로 묻지 않는다
+                return ("ask_confirm", pending_id)
             return None
         if self._delegation_in(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
@@ -307,12 +311,14 @@ class LiveFlow:
             async with s.lock:
                 pending = st.pending if st.pending and st.pending.id == value else None
                 facts = None
-                if pending and st.current is not None:
+                if pending and pending.kind == "cancel":
+                    facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
+                elif pending and st.current is not None:
                     sources = {n: f.source for n, f in st.current.fields.items()}
                     facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
             if facts:
                 s.note("확인 다시 묻기", value)
-                await self.notify(s, "N2", facts)
+                await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
         elif what == "released":
             await self.notify(s, "N1'", {"confirmation": "cancelled_by_customer", "answer": value,
                                          "summary": state_summary(st, self.policy)})

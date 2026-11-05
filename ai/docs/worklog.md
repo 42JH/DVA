@@ -781,3 +781,10 @@
 - 고객이 ‘발송 주소’, ‘보내는 주소’, ‘보내는 곳’, ‘출발지’라고 말하면 발송 주소로 이해한다. `sender_address`·`sender_address_detail`, BE 주문의 `origin` 및 주소록 저장 데이터는 유지했다.
 - 초안은 전체 테스트 648개, 문구 정리 후 상담 정책·도구·통화 흐름·BE 계약 테스트 93개 통과. 실제 통화 음성은 미확인.
 
+## 2026-11-06 — 애매한 확인 답('네' 신뢰도 미달)에 다시 묻기
+
+- 브랜치 `fix/confirm-unclear-reask`(develop-ai 1e1b8dd 기반, MR 318과 독립). 운영 통화 b8f3795c: 되읽기 뒤 "아 그렇게 접수해줘"가 confirm=yes 0.56(yes_min 0.7 미만) → 관문 CONFIRM_UNCLEAR로 확정하지 않으면서 Live에 아무것도 보내지 않음. AI는 "접수 진행 여부를 확인하겠습니다" 뒤 32초 멈췄고 무음 종료, 결과 INCOMPLETE NO_CONFIRMED_PARCEL.
+- 수정(live.py `_on_confirm`): CONFIRM_UNCLEAR이면 확정하지 않고 기존 '다시 묻기'(N2 confirmation=ask_again + 되읽기 값)를 보낸다. 같은 발화로 위임이 돌고 있으면(고친 값의 되읽기가 따라옴) 묻지 않는다. 다른 관문 실패(되읽기 도중 '네'·내용 바뀜·통화 끝)는 그대로.
+- `ask_confirm` 후속: 같은 내용이어도 다시 보낸다(again — 두 번째 애매한 답에도 멈추지 않게). 취소 확인 대기면 택배 되읽기 대신 cancel_target(받는 분·상태)을 준다(이전에는 받던 택배가 있으면 택배 되읽기를 줄 수 있었음). workflow.toml [results].confirmation에 cancel_target 함께 오면 취소 여부를 다시 묻고, 처리했다고 말하지 않는다는 문장 추가.
+- 확인 기준(yes_min 0.7)은 바꾸지 않았다(정확도 우선).
+- 테스트: 애매한 '네' 두 번 → ask_again 두 번·확정 없음 → 분명한 '네'로 확정, 취소 다시 묻기는 cancel_target. 수정 전 코드에서 두 테스트 실패 확인. 전체 **650 passed**. 실통화 미확인.
