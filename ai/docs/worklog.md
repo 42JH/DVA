@@ -718,3 +718,10 @@
 
 - origin/develop-ai 70c839c의 접수 완료 후 자동 종료 변경을 작업 브랜치에 병합했다. 충돌은 worklog.md 끝의 기록 추가 부분 1곳이며, 양쪽 기록을 모두 보존했다. 팀원 코드와 사용자 프롬프트는 수정하지 않았다.
 - 정책·페르소나·입력 제한·RAG 프롬프트·통화 서비스·통화 흐름 회귀 테스트 98 passed, 13 warnings / 16.01초. git diff --check 통과. 실제 모델·실통화 검증 및 develop-ai 병합은 수행하지 않는다.
+
+## 2026-11-05 — 고객·기업 검색 API 서비스 토큰(AI_BUSINESS_TOKEN)
+
+- BE 요청: POST /api/customers/context, POST /api/customers, PATCH /api/customers/{id}, GET /api/companies/search에 `Authorization: Bearer <AI_BUSINESS_TOKEN>`. 요청 본문·응답 해석·call_session_seq 헤더는 그대로. 페르소나·분석 API는 기존 토큰 유지, 쿠키는 보내지 않는다.
+- GET /api/customers/{id}는 AI가 호출하지 않아 추가할 호출이 없다(요청 목록에는 있음). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
+- 토큰 미설정이면 헤더 없이 호출하고 시작 시 경고(BE 인증 적용 전 배포 호환). 401은 gateway에서 `BE_AUTH_FAILED`(kind contract, 재시도 없음, 경보 로그)로 분류.
+- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 4개 호출 헤더·미설정·기존 토큰 분리·401 1회. 전체 **646 passed**.

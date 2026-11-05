@@ -185,13 +185,14 @@ class BackendAPI:
     def __init__(self, base_url: str, timeout_sec: float, transport: httpx2.AsyncBaseTransport | None = None,
                  submit_timeout_sec: float = 15.0, submit_retry_sec: float = 40.0, retry_interval_sec: float = 2.0,
                  persona_token: str | None = None, insights_token: str | None = None,
-                 limits: httpx2.Limits | None = None):
+                 business_token: str | None = None, limits: httpx2.Limits | None = None):
         # 프로세스에 하나(concurrency.md §6.1). limits = 연결 풀 상한(게이트웨이 세마포어와 맞춘다)
         self.http = httpx2.AsyncClient(base_url=base_url, timeout=timeout_sec, transport=transport,
                                        **({"limits": limits} if limits else {}))
         logging.getLogger("httpx2").addFilter(_DIRECTORY_LOG_FILTER)
         self.persona_token = persona_token  # 페르소나 API 전용 서비스 토큰(주문·고객 API에는 보내지 않는다)
         self.insights_token = insights_token  # 통화 기록·분석 API 전용 서비스 토큰(spec/insights.md)
+        self.business_token = business_token  # 고객·기업 검색 API 서비스 토큰(AI_BUSINESS_TOKEN)
         self.submit_timeout_sec = submit_timeout_sec
         self.submit_retry_sec = submit_retry_sec
         self.retry_interval_sec = retry_interval_sec
@@ -204,7 +205,8 @@ class BackendAPI:
         if not query.strip() or not 1 <= limit <= 100 or offset < 0:
             raise BackendError("기업 배송지 검색 인수 오류", code="ARGUMENT_INVALID")
         try:
-            resp = await self.http.get("/api/companies/search", params={"q": query, "limit": limit, "offset": offset})
+            resp = await self.http.get("/api/companies/search", params={"q": query, "limit": limit, "offset": offset},
+                                       headers=self._business_headers())
         except httpx2.TransportError:
             raise BackendError("기업 배송지 검색 연결 실패", code="TRANSPORT") from None
         if resp.status_code != 200:
@@ -228,6 +230,10 @@ class BackendAPI:
         except (ValueError, TypeError, ValidationError):
             raise BackendError("기업 배송지 검색 응답 형식 오류", code="RESPONSE_INVALID") from None
 
+    def _business_headers(self) -> dict:
+        # shortcut: 미설정이면 헤더 없이 보낸다(BE 인증 적용 전 배포 호환). BE가 401을 주면 인증 설정 오류로 끝난다
+        return {"Authorization": f"Bearer {self.business_token}"} if self.business_token else {}
+
     async def _post(self, path: str, body: dict, ok=(200, 201), headers: dict | None = None) -> httpx2.Response:
         resp = await self.http.post(PREFIX + path, json=body, headers=headers)
         if resp.status_code not in ok:
@@ -239,7 +245,7 @@ class BackendAPI:
         보내면 백엔드가 통화를 만들거나 다시 쓰고 통화 번호(callSessionSeq)를 준다. 고객·주문은 만들지 않는다.
         등록 고객이면 이전 접수의 출발지 1건·도착지 recent_limit건도 읽는다(실패해도 고객 확인은 그대로)."""
         body = {"phoneNumber": phone} | ({"call": call} if call else {})
-        resp = await self.http.post("/api/customers/context", json=body)
+        resp = await self.http.post("/api/customers/context", json=body, headers=self._business_headers())
         if resp.status_code != 200:
             raise _fail("/api/customers/context", resp)
         data = resp.json()["data"]
@@ -270,7 +276,7 @@ class BackendAPI:
         address = 내 주소 객체(이름·전화번호 없이 roadAddress·jibunAddress·detailAddress·dongName·postalCode, B/customers.md).
         다음 통화의 기본 출발지(customer.address)가 된다(사용자 결정 2026-11-03)."""
         body = {"name": name, "phoneNumber": phone} | ({"address": address} if address else {})
-        resp = await self.http.post("/api/customers", json=body)
+        resp = await self.http.post("/api/customers", json=body, headers=self._business_headers())
         if resp.status_code == 409:
             return None
         if resp.status_code != 201:
@@ -281,7 +287,7 @@ class BackendAPI:
         """고객 기본 주소 교체(PATCH /api/customers/{id} address). 진행 중 본인 통화의 call_session_seq 헤더 필수
         (ai-call-follow-up.md: 누락 400·다른 고객 403·없는 통화 404·종료된 통화 409). 성공 204. 고객 동의 후에만 부른다."""
         resp = await self.http.patch(f"/api/customers/{int(customer_seq)}", json={"address": address},
-                                     headers=_call(call_session_seq))
+                                     headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code not in (200, 204):
             raise _fail("/api/customers", resp)
 

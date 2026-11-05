@@ -27,7 +27,7 @@ Kind = Literal["unavailable", "in_progress", "state", "forbidden", "not_found", 
 @dataclass
 class BackendFailure(Exception):
     kind: Kind
-    code: str                      # BE_UNAVAILABLE · BE_TIMEOUT · BE_INVALID_STATE · BE_FORBIDDEN · BE_NOT_FOUND · BE_CONTRACT_VIOLATION
+    code: str                      # BE_UNAVAILABLE · BE_TIMEOUT · BE_INVALID_STATE · BE_FORBIDDEN · BE_NOT_FOUND · BE_CONTRACT_VIOLATION · BE_AUTH_FAILED
     op: str = ""
     http_status: int | None = None
     error_code: str | None = None  # BE 응답 error.code
@@ -61,13 +61,15 @@ def classify(exc: BaseException, op: str = "") -> BackendFailure:
         return f("in_progress", "BE_UNAVAILABLE", status, error)
     if status >= 500:
         return f("unavailable", "BE_UNAVAILABLE", status, error, retryable=True)
+    if status == 401:  # 서비스 토큰 누락·불일치 = 인증 설정 오류. 같은 요청을 다시 보내지 않는다(retryable=False)
+        return f("contract", "BE_AUTH_FAILED", status, error)
     if status == 409:
         return f("state", "BE_INVALID_STATE", status, error)
     if status == 403:
         return f("forbidden", "BE_FORBIDDEN", status, error)
     if status == 404:
         return f("not_found", "BE_NOT_FOUND", status, error)
-    return f("contract", "BE_CONTRACT_VIOLATION", status, error)  # 400·422·401 등: AI 본문·설정 오류
+    return f("contract", "BE_CONTRACT_VIOLATION", status, error)  # 400·422 등: AI 본문 오류
 
 
 class BackendGateway:
