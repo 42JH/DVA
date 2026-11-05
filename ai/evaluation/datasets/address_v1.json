@@ -1,7 +1,7 @@
 {
  "version": "address_v1",
  "created": "2026-11-05",
- "description": "주소 보정 회귀 시험지. heard = Backend LLM이 record_fields에 넘기는 기본주소 문자열, expect = 고객이 뜻한 실제 도로명주소(행안부 주소DB 표기) 또는 null(실제로 없는 주소 → 다시 물어야 함). 정답은 보정기 출력이 아니라 뜻한 주소로 정했고, 실제 주소DB에 있는지(null이면 없는지) scripts/evaluate_address.py가 먼저 확인한다. 주소는 공공기관·랜드마크와 이미 저장소 worklog·테스트에 있는 사례만 쓴다.",
+ "description": "주소 보정 회귀 시험지. heard = Backend LLM이 record_fields에 넘기는 기본주소 문자열, expect = 고객이 뜻한 실제 도로명주소(행안부 주소DB 표기) 또는 null(실제로 없는 주소 → 다시 물어야 함). 정답은 보정기 출력이 아니라 뜻한 주소로 정했고, 실제 주소DB에 있는지(null이면 없는지) scripts/evaluate_address.py가 먼저 확인한다. 주소는 공공기관·랜드마크와 이미 저장소 worklog·테스트에 있는 사례만 쓴다. expect_reason = 정답 null 문항의 못 찾은 이유(region·name·needs_ri·number·multiple, DB 사실로 정함).",
  "cases": [
   {
    "id": "a01",
@@ -920,7 +920,8 @@
    "tags": [
     "nonexistent"
    ],
-   "source": "test"
+   "source": "test",
+   "expect_reason": "number"
   },
   {
    "id": "k02",
@@ -929,7 +930,8 @@
    "tags": [
     "nonexistent"
    ],
-   "source": "test"
+   "source": "test",
+   "expect_reason": "name"
   },
   {
    "id": "k03",
@@ -938,7 +940,8 @@
    "tags": [
     "nonexistent"
    ],
-   "source": "worklog:2026-10-28"
+   "source": "worklog:2026-10-28",
+   "expect_reason": "name"
   },
   {
    "id": "k04",
@@ -948,7 +951,8 @@
     "nonexistent",
     "region_only"
    ],
-   "source": "new"
+   "source": "new",
+   "expect_reason": "region"
   },
   {
    "id": "k05",
@@ -958,7 +962,8 @@
     "nonexistent",
     "nonexistent_number"
    ],
-   "source": "new"
+   "source": "new",
+   "expect_reason": "number"
   },
   {
    "id": "k06",
@@ -968,7 +973,8 @@
     "nonexistent",
     "nonexistent_number"
    ],
-   "source": "call:d62b7162"
+   "source": "call:d62b7162",
+   "expect_reason": "number"
   },
   {
    "id": "k07",
@@ -978,7 +984,8 @@
     "nonexistent",
     "nonexistent_number"
    ],
-   "source": "test"
+   "source": "test",
+   "expect_reason": "name"
   },
   {
    "id": "k08",
@@ -988,7 +995,8 @@
     "nonexistent",
     "nonexistent_number"
    ],
-   "source": "new"
+   "source": "new",
+   "expect_reason": "number"
   },
   {
    "id": "p01",
@@ -1096,7 +1104,8 @@
     "ending",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "name"
   },
   {
    "id": "n02",
@@ -1107,7 +1116,8 @@
     "extra_words",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "number"
   },
   {
    "id": "n03",
@@ -1118,7 +1128,8 @@
     "ending",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "name"
   },
   {
    "id": "n04",
@@ -1129,7 +1140,8 @@
     "ending",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "number"
   },
   {
    "id": "n05",
@@ -1141,7 +1153,8 @@
     "ending",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "number"
   },
   {
    "id": "n06",
@@ -1152,7 +1165,8 @@
     "jibun",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "number"
   },
   {
    "id": "n07",
@@ -1163,7 +1177,333 @@
     "glued_dasi",
     "holdout"
    ],
-   "source": "holdout:2026-11-05"
+   "source": "holdout:2026-11-05",
+   "expect_reason": "name"
+  },
+  {
+   "id": "q01",
+   "heard": "경북 구미시 산동 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "사용자 보고: 신동 580으로 오확정. 리 없이 읍·면만 → 리를 다시 물음",
+   "expect_reason": "needs_ri"
+  },
+  {
+   "id": "q02",
+   "heard": "경북 구미시 산동읍 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "리 없음 → 다시 물음(건물 기준 봉산리 하나뿐이어도 건물 없는 필지가 있을 수 있음)",
+   "expect_reason": "needs_ri"
+  },
+  {
+   "id": "q03",
+   "heard": "경북 구미시 산동읍 백현리 580",
+   "expect": null,
+   "tags": [
+    "exact_name_no_number",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "건물 없는 필지. 이름은 정확 → 다른 리(고아읍 봉한리)로 넘어가지 않음",
+   "expect_reason": "number"
+  },
+  {
+   "id": "q04",
+   "heard": "경북 구미시 산동읍 봉산리 580",
+   "expect": "경상북도 구미시 산동읍 산호대로41길 13",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q05",
+   "heard": "경북 구미시 신동 580",
+   "expect": "경상북도 구미시 인동63길 63-1",
+   "tags": [
+    "jibun",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "짧은 동 이름을 정확히 말하면 그대로"
+  },
+  {
+   "id": "q06",
+   "heard": "경북 구미시 선동 580",
+   "expect": null,
+   "tags": [
+    "short_name",
+    "nonexistent",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "없는 동 이름, 신동과 모음 하나 차이 → 고쳐서 확정하지 않음",
+   "expect_reason": "name"
+  },
+  {
+   "id": "q07",
+   "heard": "경남 김해시 상동 294",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "리 없음(묵방리 294만 건물) → 다시 물음",
+   "expect_reason": "needs_ri"
+  },
+  {
+   "id": "q08",
+   "heard": "경남 김해시 상동면 묵방리 294",
+   "expect": "경상남도 김해시 상동면 장척로 429",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q09",
+   "heard": "경남 김해시 대동면 주중리 302",
+   "expect": "경상남도 김해시 대동면 주중길 98-6",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q10",
+   "heard": "서울 강남구 테헤란로1길 8",
+   "expect": null,
+   "tags": [
+    "exact_name_no_number",
+    "branch",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "설계 선택: 정확히 말한 1길에 8이 없음 → 2길 8로 고치지 않고 다시 물음",
+   "expect_reason": "number"
+  },
+  {
+   "id": "q11",
+   "heard": "서울 강남구 테헤란로2길 8",
+   "expect": "서울특별시 강남구 테헤란로2길 8",
+   "tags": [
+    "gil",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "r01",
+   "heard": "서울시 양천구 신정이패닐로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:20462e22"
+  },
+  {
+   "id": "r02",
+   "heard": "서울시 양천구 신정이펜율로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:3103c5be"
+  },
+  {
+   "id": "r03",
+   "heard": "서울시 양천구 신정이패밀로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:abd1549c"
+  },
+  {
+   "id": "r04",
+   "heard": "서울북구민시 인동 9길 7-3",
+   "expect": null,
+   "tags": [
+    "region_misheard",
+    "from_call"
+   ],
+   "source": "call:bfde1109",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r05",
+   "heard": "경북 구미시 인동구길 이십이다시일",
+   "expect": "경상북도 구미시 인동9길 22-1",
+   "tags": [
+    "glued_dasi",
+    "glued_gil",
+    "from_call"
+   ],
+   "source": "call:8ffabaca"
+  },
+  {
+   "id": "r06",
+   "heard": "전주시 금암이동백사십구 다시 십일 번지요",
+   "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+   "tags": [
+    "jibun",
+    "admin_dong",
+    "glued_number",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:3851b79d"
+  },
+  {
+   "id": "r07",
+   "heard": "주시 금암동 백사십구 다시 십일 번지요",
+   "expect": null,
+   "tags": [
+    "jibun",
+    "region_misheard",
+    "from_call"
+   ],
+   "source": "call:3851b79d",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r08",
+   "heard": "전주시 금암이동 백사십구 다시 십일 번지요",
+   "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+   "tags": [
+    "jibun",
+    "admin_dong",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:3851b79d"
+  },
+  {
+   "id": "r09",
+   "heard": "구미시 인의동 오륙오 다시 삼이요",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "jibun",
+    "korean_number",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:07f92ee3"
+  },
+  {
+   "id": "r10",
+   "heard": "구미시 인의동 오육오 다시 삼",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "jibun",
+    "korean_number",
+    "from_call"
+   ],
+   "source": "call:653aaa96"
+  },
+  {
+   "id": "r11",
+   "heard": "경상북도 구미시 인동구길 25-3",
+   "expect": null,
+   "tags": [
+    "glued_gil",
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:6c5e294b",
+   "expect_reason": "number"
+  },
+  {
+   "id": "r12",
+   "heard": "부산광역시 서구 보덕로 321번길 24",
+   "expect": "부산광역시 서구 구덕로321번길 24",
+   "tags": [
+    "road_misheard",
+    "short_name",
+    "from_call"
+   ],
+   "source": "call:cb73ea8a"
+  },
+  {
+   "id": "r13",
+   "heard": "부산광역시 서구 구덕로 삼백이십일 번길 이십사",
+   "expect": "부산광역시 서구 구덕로321번길 24",
+   "tags": [
+    "gil",
+    "korean_number",
+    "from_call"
+   ],
+   "source": "call:6ddd0958"
+  },
+  {
+   "id": "r14",
+   "heard": "경상북도 구미시 산동 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "from_call"
+   ],
+   "source": "call:5f9a9e44",
+   "expect_reason": "needs_ri"
+  },
+  {
+   "id": "r15",
+   "heard": "서울시 양천구 신정이펜일로 52",
+   "expect": null,
+   "tags": [
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:d62b7162",
+   "expect_reason": "number"
+  },
+  {
+   "id": "r16",
+   "heard": "인동 이십오길 다시 오",
+   "expect": null,
+   "tags": [
+    "no_region",
+    "from_call"
+   ],
+   "source": "call:07f92ee3",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r17",
+   "heard": "서울시 양천구 신정이패닐로 5",
+   "expect": null,
+   "tags": [
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:20462e22",
+   "expect_reason": "number"
   }
  ]
 }

@@ -179,7 +179,7 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
     role = addr.removesuffix("_address")
     detail = f"{role}_address_detail"
     if r is not None and r.status == "not_found":
-        needs.append({"field": addr, "reason": "ADDRESS_NOT_FOUND"})
+        needs.append({"field": addr, "reason": "ADDRESS_NOT_FOUND"} | ({"detail": r.reason} if r.reason else {}))
         if detail in facts["recorded"] and not s.field_of(addr).valid:
             s.clear(detail)  # 못 찾은 주소에 붙은 상세주소도 믿을 수 없다
             facts["recorded"].remove(detail)
