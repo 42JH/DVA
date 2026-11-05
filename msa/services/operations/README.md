@@ -48,8 +48,12 @@ k8s.yaml은 dva 네임스페이스의 기존 `operations-db` Secret(PGHOST/PGPOR
 ```bash
 # 저장소 루트, 호스트 DB 포트를 열지 않는 임시 Docker DB
 python msa/parity/verify-operations.py
+# 선택 실행: 운영 kubeconfig 없이 임시 k3s + PostgreSQL로 배포/복구 검사
+python msa/deploy/tests/integration_app_rollout.py --service operations --image dva-operations:local
 ```
 
 검증기는 변경하지 않은 `backend/test/auth*.cjs`를 양쪽 checks 이미지에서 실행한다. operations만 실제 Liquibase 스키마를 사용한다. 이후 양쪽 production 이미지에 같은 요청을 보내 응답·쿠키 속성·관리자·세션·감사 데이터를 비교한다. 무작위 토큰·생성 시각은 형식/9시간 TTL/해시 저장을 먼저 검증하고 비교에서 정규화한다. 다른 서비스의 테이블이나 전체 업무 동등성을 검증한 결과로 확대하지 않는다.
 
 로그/보고서는 `msa/liquibase/verification-logs/operations/`에 남는다. Jenkins는 operations가 빌드 대상으로 선택되면 이 검증을 통과한 뒤에만 앱 배포를 진행한다. 운영 Webhook 배포·외부 HTTPS·다른 서비스 연동은 별도 확인한다.
+
+2026-11-05 검증: 원본 인증 40개를 양쪽에 실행해 통과했고 operations 설정 2개, 단위 1개, E2E 5개, production HTTP·DB 비교와 실제 배포 probe도 통과했다. 임시 k3s의 최초 배포·교체·실패 복구 중 HTTP 442건의 실패는 0건이었다. DB 전체 201단계와 배포 회귀 50개도 통과했다. 상세 제한은 전체 계획의 두 번째 MR 검증 기록에 남겼다.

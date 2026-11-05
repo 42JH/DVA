@@ -41,7 +41,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 ## 진행 상태
 
 - 첫 MR은 공통 기반이다. 기존 5개 업무 앱에 이벤트 핸들러를 등록하거나 외부 업무 API를 제공하는 단계가 아니다.
-- 실제 기능·서비스 DB 연결·전체 동등성 비교·운영 배포는 후속 MR에서 진행하며 현재 미검증이다.
+- 두 번째 MR에서 operations 인증·관리자·감사 11개 API와 전용 DB 연결을 구현하고 아래 범위로 비교 검증했다. 나머지 서비스·교차 서비스 연동·전체 동등성·운영 배포는 후속 단계다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
 
 ## 두 번째 MR 계획 — operations 인증·감사
@@ -60,3 +60,13 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - Liquibase 5.0.4 + PostgreSQL 17.11 검증 보고서 `passed=true`, 185단계 완료. 5개 신규 설치·재적용·기존 업무 함수·기존 DB 업그레이드·기존 changeset 이력과 대기 메시지 보존, customer/order 신규 changeset 실패 롤백 포함.
 - Linux Python 기존 배포·선택·복구 회귀 49개 통과. npm의 잠금 파일 기반 설치와 audit에서 취약점 0건.
 - 추적 변경은 msa/docs 안에만 있으며 backend/frontend/ai 변경 없음. 업무 앱 전체 빌드·전체 API 동등성·운영 Jenkins/k3s 실행은 이번 단계에서 검증하지 않았다.
+
+## 두 번째 MR 검증 기록 (2026-11-05)
+
+- `python msa/parity/verify-operations.py`: unchanged backend 인증 테스트 40개가 모놀리식과 operations에서 각각 통과했다. operations 설정 경계 테스트 2개도 통과했다. 새 DB용 migrate helper만 실제 operations Liquibase 이력을 확인하며 원본 인증 테스트의 검증 조건은 변경하지 않는다.
+- 양쪽 production 이미지에서 동일 요청의 HTTP 상태·본문·요청 ID·CORS·쿠키 속성과 매 요청 후 관리자·세션·감사 DB 업무 값을 비교한 시나리오가 통과했다. 11개 API, 승인·권한 즉시 반영·비활성화·재활성화·비밀번호 초기화/변경·세션 회수·로그아웃·soft delete·ID 재사용·감사 스냅샷/권한/필터/검증 실패를 포함한다. 토큰은 형식·SHA-256 저장, 시각은 유효 범위·세션 9시간 TTL을 확인한 후 정규화한다.
+- Linux Node.js 24 operations 이미지의 ESLint·TypeScript 빌드·단위 1개·E2E 5개 통과. 실제 배포용 공통 probe도 production 이미지의 `/operations/health/ready`와 OpenAPI를 통과했다.
+- PostgreSQL 17.11 + Liquibase 5.0.4 전체 검증 `passed=true`, 201단계 통과. 새 004의 기존 이름 없는 계정 거절/데이터 보존과 중간 SQL 실패 시 컬럼·세션 테이블·이력 롤백을 확인했다.
+- Linux Python 배포·변경 선택·실패 복구 회귀 50개와 95개 라우트 기준 목록 1개 통과. operations 운영 의존성 audit은 0건이다. 개발 도구 의존성의 low 5/moderate 23은 기준 브랜치 잠금 파일과 동일하며 이번 MR에서 major 교체하지 않았다.
+- 임시 k3s v1.35.5+k3s1에 실제 operations 이미지와 별도 PostgreSQL/Secret/Liquibase를 연결해 최초 배포·정상 교체·의도적 readiness 실패 후 이전 이미지/배포 이력 복구를 확인했다. 교체/복구 중 HTTP 442건, 실패 0건이다. 기존 운영 kubeconfig는 사용하지 않았다.
+- 운영 Jenkins 실행·공개 Ingress/HTTPS·다른 서비스와의 인증/감사 연동·전체 95개 API 동등성은 미검증이다. 이 MR이 전체 MSA 이식 완료를 의미하지 않는다. 이름 없는 기존 MSA 관리자 행이 있으면 실제 이름 이관을 준비하기 전 004와 후속 앱 배포를 중단한다.

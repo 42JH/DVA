@@ -94,7 +94,7 @@ def probe(service, resources):
 const r=await fetch(url,{signal:AbortSignal.timeout(5000)});
 if(!r.ok)throw Error(url+' HTTP '+r.status);
 const body=await r.json();
-if(url.endsWith('/health')?body.status!=='ok':!body.openapi)throw Error('Invalid response '+url);
+if(url===process.argv[1]?body.status!=='ok':!body.openapi)throw Error('Invalid response '+url);
 console.log('OK '+url)}})().catch(e=>{console.error(e);process.exit(1)})"""
     kube("-n", "dva", "exec", f"deployment/{service}", "--", "node", "-e", js, health, docs)
     for resource in resources:

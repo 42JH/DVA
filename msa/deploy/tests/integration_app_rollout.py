@@ -43,12 +43,47 @@ def main():
     samples = []
     stop = threading.Event()
     monitor = None
+    cluster_created = False
+    database_resources = []
     try:
+        if service == 'operations':
+            if not created:
+                raise ValueError('Operations DB fixtures require a newly created disposable cluster')
+            network = cluster + '-operations'
+            database = network + '-db'
+            image = network + '-liquibase'
+            label = 'dva.test-run=' + cluster
+            command(['docker', 'network', 'create', '--internal', '--label', label, network])
+            database_resources.append(('network', network))
+            command(['docker', 'run', '-d', '--name', database, '--label', label, '--network', network,
+                     '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER=operations_app',
+                     '-e', 'POSTGRES_DB=dva_webhook_test', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust',
+                     'postgres:17.11-bookworm'])
+            database_resources.append(('container', database))
+            for _ in range(60):
+                ready = subprocess.run(['docker', 'exec', database, 'pg_isready', '-h', '127.0.0.1',
+                                        '-U', 'operations_app'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if ready.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError('Operations rollout test DB not ready')
+            command(['docker', 'build', '--label', label, '-t', image, str(ROOT / 'msa/liquibase')])
+            database_resources.append(('image', image))
+            command(['docker', 'run', '--rm', '--network', network,
+                     '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{database}:5432/dva_webhook_test',
+                     '-e', 'LIQUIBASE_COMMAND_USERNAME=operations_app', image,
+                     '--changelog-file=operations/db.changelog.xml', 'update'])
+            address = command(['docker', 'inspect', database, '--format',
+                               '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}']).strip()
         if created:
-            command(['docker', 'run', '-d', '--privileged', '--name', cluster, '-p', '127.0.0.1::30081',
+            command(['docker', 'run', '-d', '--privileged', '--name', cluster, '--label', 'dva.test-run=' + cluster, '-p', '127.0.0.1::30081',
                      '-e', 'K3S_TOKEN=local-delivery-check-only', 'rancher/k3s:v1.35.5-k3s1',
                      'server', '--disable', 'traefik', '--disable', 'metrics-server', '--disable', 'servicelb',
                      '--node-name', 'delivery-check'])
+            cluster_created = True
+        if service == 'operations':
+            command(['docker', 'network', 'connect', network, cluster])
         def kube(*options, data=None):
             options = list(options)
             if '-f' in options:
@@ -71,6 +106,12 @@ def main():
             raise RuntimeError('Local k3s did not become Ready')
         kube('-n', 'kube-system', 'rollout', 'status', 'deployment/coredns', '--timeout=120s')
         kube('apply', '-f', '-', data=json.dumps({'apiVersion': 'v1', 'kind': 'Namespace', 'metadata': {'name': 'dva'}}))
+        if service == 'operations':
+            kube('apply', '-f', '-', data=json.dumps({
+                'apiVersion': 'v1', 'kind': 'Secret', 'metadata': {'name': 'operations-db', 'namespace': 'dva'},
+                'stringData': {'PGHOST': address, 'PGPORT': '5432', 'PGUSER': 'operations_app',
+                               'PGPASSWORD': 'disposable-test-only', 'PGDATABASE': 'dva_webhook_test'},
+            }))
         port = command(['docker', 'port', cluster, '30081/tcp']).strip()
         url = f'http://{port}/{service}/health'
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
@@ -144,8 +185,17 @@ def main():
         if monitor:
             monitor.join(timeout=5)
         os.chdir(original)
-        if created:
+        if cluster_created:
+            item = json.loads(command(['docker', 'inspect', cluster]))[0]
+            if item.get('Config', {}).get('Labels', {}).get('dva.test-run') != cluster:
+                raise RuntimeError('Refusing cleanup of unowned rollout cluster')
             subprocess.run(['docker', 'rm', '-fv', cluster], check=False)
+        for kind, name in reversed(database_resources):
+            item = json.loads(command(['docker', kind, 'inspect', name]))[0]
+            labels = item.get('Labels') if kind == 'network' else item.get('Config', {}).get('Labels')
+            if not labels or labels.get('dva.test-run') != cluster:
+                raise RuntimeError('Refusing cleanup of unowned operations fixture: ' + name)
+            command(['docker', kind, 'rm', *(['-f'] if kind == 'container' else []), name])
 
 
 if __name__ == '__main__':

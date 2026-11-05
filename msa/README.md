@@ -1,6 +1,6 @@
 # MSA CI/CD
 
-모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. 첫 기반 MR은 전체 API·migration·워커 기준 목록과 이벤트 공통 런타임/검증을 추가한다. 아직 업무 앱에 이벤트 핸들러와 기존 외부 API를 연결하지 않았으며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`에서 임시 PostgreSQL·HTTP 검증과 기준 목록 검사를 실행하고 실패 시 이후 배포를 중단한다.
+모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. 전체 API·migration·워커 기준 목록과 이벤트 공통 런타임/검증 위에 [operations의 인증·관리자·감사 API](services/operations/README.md)를 연결했다. 다른 서비스의 업무 API·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`에서 임시 PostgreSQL·HTTP 검증과 기준 목록 검사를 실행하고 실패 시 이후 배포를 중단한다. operations 빌드 시 `Verify Operations Parity`에서 변경하지 않은 모놀리식 인증 테스트와 양쪽 production 이미지의 HTTP·DB 비교도 실행한다.
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 

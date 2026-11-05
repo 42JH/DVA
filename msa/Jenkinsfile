@@ -85,6 +85,20 @@ pipeline {
             }
         }
 
+        stage('Verify Operations Parity') {
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().contains('operations')
+                }
+            }
+            steps { sh 'python3 msa/parity/verify-operations.py' }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'msa/liquibase/verification-logs/operations/**', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Verify and Build Services') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
