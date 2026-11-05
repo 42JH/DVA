@@ -277,8 +277,10 @@ def test_heard_name_is_not_replaced_by_a_similar_real_place(db):
     # 리 없이 읍·면만 말하면 번지가 하나로 정해지지 않는다 → 비슷한 다른 동·리로 고치지 않는다(못 찾음)
     assert correct(db, "경북 구미시 선산읍 산 12") == not_found("needs_ri")
     assert correct(db, "경북 구미시 선산읍 완전리 산 12").status == "confirmed"
-    # 짧은 동 이름("인의")에서 글자가 바뀌면 다른 장소 → 후보가 아니다. 연음처럼 소리가 같으면 그대로 찾는다
-    assert correct(db, "경북 구미시 안의동 844-5") == not_found("name")
+    # 짧은 동 이름("인의")을 소리가 다르게 고쳤으면 번호 하나(845)만으로는 인정하지 않는다(우연일 수 있음).
+    # 본번·부번(844-5)이 다 맞으면 증거가 둘이라 인정한다(사용자 결정 ②). 연음처럼 소리가 같으면 그대로 찾는다
+    assert correct(db, "경북 구미시 안의동 845") == not_found("name")
+    assert correct(db, "경북 구미시 안의동 844-5").address == "경상북도 구미시 인동9길 7-3"
     assert correct(db, "경북 구미시 이니동 844-5").status == "confirmed"
     # 긴 도로명은 받아쓰기 오류를 지금처럼 고친다
     assert correct(db, "서울 강남구 태헤란노 211").address == "서울특별시 강남구 테헤란로 211"

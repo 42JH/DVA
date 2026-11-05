@@ -1,0 +1,2682 @@
+{
+  "dataset": "address_v1",
+  "commit": "b96a365",
+  "resolver": "app.address",
+  "db_bytes": 612503552,
+  "repeat": 5,
+  "geocode": "off",
+  "summary": {
+    "cases": 149,
+    "outcomes": {
+      "confirmed": 117,
+      "auto": 2,
+      "rejected": 28,
+      "missed": 2
+    },
+    "positive": {
+      "total": 121,
+      "correct_recorded": 119,
+      "confirmed": 117,
+      "auto": 2,
+      "wrong": 0,
+      "missed": 2
+    },
+    "negative": {
+      "total": 28,
+      "rejected": 28,
+      "wrong": 0,
+      "reason_match": 28
+    },
+    "latency_ms": {
+      "cold_p50": 11.8,
+      "cold_p95": 91.0,
+      "cold_max": 396.4,
+      "warm_p50": 9.3,
+      "warm_p95": 99.5,
+      "warm_max": 472.6,
+      "concurrent_all_wall": 2530.1,
+      "sequential_sum_warm_p50": 4004.0
+    },
+    "by_tag": {
+      "admin_dong": {
+        "confirmed": 2,
+        "missed": 1
+      },
+      "branch": {
+        "rejected": 1
+      },
+      "clean": {
+        "confirmed": 20
+      },
+      "comma": {
+        "confirmed": 3
+      },
+      "dasi": {
+        "confirmed": 7
+      },
+      "emd_only": {
+        "rejected": 4
+      },
+      "emd_ri": {
+        "confirmed": 3
+      },
+      "ending": {
+        "confirmed": 12,
+        "rejected": 4,
+        "missed": 2
+      },
+      "ending_two_readings": {
+        "confirmed": 1
+      },
+      "eup_myeon": {
+        "confirmed": 2
+      },
+      "exact_name_no_number": {
+        "rejected": 2
+      },
+      "extra_words": {
+        "confirmed": 8,
+        "rejected": 1
+      },
+      "from_call": {
+        "confirmed": 8,
+        "rejected": 7,
+        "missed": 2
+      },
+      "gil": {
+        "confirmed": 14
+      },
+      "glued_dasi": {
+        "confirmed": 5,
+        "rejected": 1
+      },
+      "glued_gil": {
+        "confirmed": 5,
+        "rejected": 1
+      },
+      "glued_number": {
+        "missed": 1
+      },
+      "holdout": {
+        "confirmed": 14,
+        "rejected": 13
+      },
+      "jibun": {
+        "confirmed": 18,
+        "rejected": 2,
+        "missed": 2
+      },
+      "korean_number": {
+        "confirmed": 21,
+        "missed": 1
+      },
+      "linked_sound": {
+        "confirmed": 2
+      },
+      "no_region": {
+        "rejected": 1
+      },
+      "no_sido": {
+        "confirmed": 5
+      },
+      "nonexistent": {
+        "rejected": 16
+      },
+      "nonexistent_number": {
+        "rejected": 8
+      },
+      "number_in_road": {
+        "confirmed": 7,
+        "auto": 1
+      },
+      "region_misheard": {
+        "confirmed": 1,
+        "rejected": 2
+      },
+      "region_only": {
+        "rejected": 1
+      },
+      "region_renamed": {
+        "confirmed": 3
+      },
+      "region_variant": {
+        "confirmed": 11
+      },
+      "road_misheard": {
+        "confirmed": 13,
+        "auto": 1
+      },
+      "sejong": {
+        "confirmed": 1
+      },
+      "short_name": {
+        "rejected": 4,
+        "confirmed": 2
+      },
+      "sound_neighbor": {
+        "confirmed": 2
+      },
+      "split_road": {
+        "confirmed": 2
+      },
+      "stt_spelling": {
+        "confirmed": 3
+      },
+      "sub_number": {
+        "confirmed": 1
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "a01",
+      "heard": "서울특별시 강남구 테헤란로 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 20.2,
+      "warm_p50_ms": 8.3
+    },
+    {
+      "id": "a02",
+      "heard": "서울 중구 세종대로 110",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.9,
+      "warm_p50_ms": 4.3
+    },
+    {
+      "id": "a03",
+      "heard": "대전 유성구 대학로 291",
+      "expect": "대전광역시 유성구 대학로 291",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "대전광역시 유성구 대학로 291",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 13.4,
+      "warm_p50_ms": 6.4
+    },
+    {
+      "id": "a04",
+      "heard": "세종시 한누리대로 2130",
+      "expect": "세종특별자치시 한누리대로 2130",
+      "tags": [
+        "clean",
+        "sejong"
+      ],
+      "status": "confirmed",
+      "recorded": "세종특별자치시 한누리대로 2130",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 29.5,
+      "warm_p50_ms": 16.3
+    },
+    {
+      "id": "a05",
+      "heard": "제주 제주시 문연로 6",
+      "expect": "제주특별자치도 제주시 문연로 6",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "제주특별자치도 제주시 문연로 6",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 21.9,
+      "warm_p50_ms": 5.7
+    },
+    {
+      "id": "a06",
+      "heard": "부산 해운대구 해운대해변로 264",
+      "expect": "부산광역시 해운대구 해운대해변로 264",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 해운대구 해운대해변로 264",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.7,
+      "warm_p50_ms": 6.5
+    },
+    {
+      "id": "a07",
+      "heard": "충남 홍성군 홍북읍 충남대로 21",
+      "expect": "충청남도 홍성군 홍북읍 충남대로 21",
+      "tags": [
+        "clean",
+        "eup_myeon"
+      ],
+      "status": "confirmed",
+      "recorded": "충청남도 홍성군 홍북읍 충남대로 21",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.8,
+      "warm_p50_ms": 4.9
+    },
+    {
+      "id": "a08",
+      "heard": "경북 안동시 도청대로 455",
+      "expect": "경상북도 안동시 풍천면 도청대로 455",
+      "tags": [
+        "clean",
+        "eup_myeon"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 안동시 풍천면 도청대로 455",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 21.8,
+      "warm_p50_ms": 13.2
+    },
+    {
+      "id": "a09",
+      "heard": "경기 고양시 일산서구 킨텍스로 217-60",
+      "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "tags": [
+        "clean",
+        "sub_number"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.4,
+      "warm_p50_ms": 6.7
+    },
+    {
+      "id": "a10",
+      "heard": "광주 북구 용봉로 77",
+      "expect": "전남광주통합특별시 북구 용봉로 77",
+      "tags": [
+        "clean",
+        "region_renamed"
+      ],
+      "status": "confirmed",
+      "recorded": "전남광주통합특별시 북구 용봉로 77",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.9,
+      "warm_p50_ms": 5.9
+    },
+    {
+      "id": "a11",
+      "heard": "광주광역시 북구 용봉로 77",
+      "expect": "전남광주통합특별시 북구 용봉로 77",
+      "tags": [
+        "clean",
+        "region_renamed"
+      ],
+      "status": "confirmed",
+      "recorded": "전남광주통합특별시 북구 용봉로 77",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.5,
+      "warm_p50_ms": 5.8
+    },
+    {
+      "id": "a12",
+      "heard": "강원도 춘천시 중앙로 1",
+      "expect": "강원특별자치도 춘천시 중앙로 1",
+      "tags": [
+        "clean",
+        "region_renamed"
+      ],
+      "status": "confirmed",
+      "recorded": "강원특별자치도 춘천시 중앙로 1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 13.7,
+      "warm_p50_ms": 7.3
+    },
+    {
+      "id": "a13",
+      "heard": "전북 전주시 완산구 효자로 225",
+      "expect": "전북특별자치도 전주시 완산구 효자로 225",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "전북특별자치도 전주시 완산구 효자로 225",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.9,
+      "warm_p50_ms": 7.5
+    },
+    {
+      "id": "a14",
+      "heard": "울산 남구 중앙로 201",
+      "expect": "울산광역시 남구 중앙로 201",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "울산광역시 남구 중앙로 201",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.6,
+      "warm_p50_ms": 8.7
+    },
+    {
+      "id": "a15",
+      "heard": "인천 남동구 정각로 29",
+      "expect": "인천광역시 남동구 정각로 29",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "인천광역시 남동구 정각로 29",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.1,
+      "warm_p50_ms": 3.9
+    },
+    {
+      "id": "a16",
+      "heard": "대구 중구 공평로 88",
+      "expect": "대구광역시 중구 공평로 88",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "대구광역시 중구 공평로 88",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.9,
+      "warm_p50_ms": 4.1
+    },
+    {
+      "id": "a17",
+      "heard": "경기도 수원시 영통구 도청로 30",
+      "expect": "경기도 수원시 영통구 도청로 30",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 수원시 영통구 도청로 30",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.9,
+      "warm_p50_ms": 7.4
+    },
+    {
+      "id": "a18",
+      "heard": "충북 청주시 상당구 상당로 155",
+      "expect": "충청북도 청주시 상당구 상당로 155",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "충청북도 청주시 상당구 상당로 155",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.6,
+      "warm_p50_ms": 9.3
+    },
+    {
+      "id": "a19",
+      "heard": "서울 강서구 하늘길 112",
+      "expect": "서울특별시 강서구 하늘길 112",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강서구 하늘길 112",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.1,
+      "warm_p50_ms": 3.2
+    },
+    {
+      "id": "a20",
+      "heard": "경북 포항시 남구 시청로 1",
+      "expect": "경상북도 포항시 남구 시청로 1",
+      "tags": [
+        "clean"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 포항시 남구 시청로 1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.9,
+      "warm_p50_ms": 4.0
+    },
+    {
+      "id": "b01",
+      "heard": "서울 강남구 태헤란노 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.2,
+      "warm_p50_ms": 8.4
+    },
+    {
+      "id": "b02",
+      "heard": "서울 강남구 대핸란로 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "ambiguous",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "auto",
+      "cold_ms": 8.5,
+      "warm_p50_ms": 8.2
+    },
+    {
+      "id": "b03",
+      "heard": "서울 송파구 올림핑노 300",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.7,
+      "warm_p50_ms": 5.6
+    },
+    {
+      "id": "b04",
+      "heard": "서울 종로구 사징노 161",
+      "expect": "서울특별시 종로구 사직로 161",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 종로구 사직로 161",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.3,
+      "warm_p50_ms": 5.8
+    },
+    {
+      "id": "b05",
+      "heard": "경기 성남시 분당구 판교영노 166",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 12.6,
+      "warm_p50_ms": 8.4
+    },
+    {
+      "id": "b06",
+      "heard": "서울 중구 세정대로 110",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 4.0,
+      "warm_p50_ms": 4.1
+    },
+    {
+      "id": "b07",
+      "heard": "경기 성남 분당구 불쩡노 6",
+      "expect": "경기도 성남시 분당구 불정로 6",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 불정로 6",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.6,
+      "warm_p50_ms": 6.5
+    },
+    {
+      "id": "b08",
+      "heard": "서울 마포구 월드껍로 240",
+      "expect": "서울특별시 마포구 월드컵로 240",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 마포구 월드컵로 240",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 13.6,
+      "warm_p50_ms": 7.6
+    },
+    {
+      "id": "b09",
+      "heard": "서울 용산구 이태원노 29",
+      "expect": "서울특별시 용산구 이태원로 29",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 용산구 이태원로 29",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 12.4,
+      "warm_p50_ms": 7.8
+    },
+    {
+      "id": "b10",
+      "heard": "대전 유성구 대항노 291",
+      "expect": "대전광역시 유성구 대학로 291",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "대전광역시 유성구 대학로 291",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.5,
+      "warm_p50_ms": 6.7
+    },
+    {
+      "id": "b11",
+      "heard": "서울 관악구 과낭노 1",
+      "expect": "서울특별시 관악구 관악로 1",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 관악구 관악로 1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.8,
+      "warm_p50_ms": 5.4
+    },
+    {
+      "id": "b12",
+      "heard": "부산 연제구 중앙때로 1001",
+      "expect": "부산광역시 연제구 중앙대로 1001",
+      "tags": [
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 연제구 중앙대로 1001",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.9,
+      "warm_p50_ms": 5.8
+    },
+    {
+      "id": "c01",
+      "heard": "강남구 테헤란로 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "region_variant",
+        "no_sido"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.2,
+      "warm_p50_ms": 14.3
+    },
+    {
+      "id": "c02",
+      "heard": "분당구 판교역로 166",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "region_variant",
+        "no_sido"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.1,
+      "warm_p50_ms": 10.5
+    },
+    {
+      "id": "c03",
+      "heard": "경기 분당구 판교역로 166",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.0,
+      "warm_p50_ms": 5.6
+    },
+    {
+      "id": "c04",
+      "heard": "경기 성남시분당구 판교역로 166",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.2,
+      "warm_p50_ms": 6.6
+    },
+    {
+      "id": "c05",
+      "heard": "서울 강남 테헤란로 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.6,
+      "warm_p50_ms": 7.8
+    },
+    {
+      "id": "c06",
+      "heard": "서울 중9 세종대로 110",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 4.1,
+      "warm_p50_ms": 4.2
+    },
+    {
+      "id": "c07",
+      "heard": "서울 종로9 사직로 161",
+      "expect": "서울특별시 종로구 사직로 161",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 종로구 사직로 161",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.7,
+      "warm_p50_ms": 5.5
+    },
+    {
+      "id": "c08",
+      "heard": "서울 특별시 강남구 테헤란로 212",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "region_variant"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.7,
+      "warm_p50_ms": 9.2
+    },
+    {
+      "id": "c09",
+      "heard": "성남시 분당구 판교역로 166",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "region_variant",
+        "no_sido"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 18.7,
+      "warm_p50_ms": 18.5
+    },
+    {
+      "id": "c10",
+      "heard": "서울 영천구 목동로 212",
+      "expect": "서울특별시 양천구 목동로 212",
+      "tags": [
+        "region_variant",
+        "region_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 목동로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.5,
+      "warm_p50_ms": 3.7
+    },
+    {
+      "id": "c11",
+      "heard": "중구 세종대로 110",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "region_variant",
+        "no_sido"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 21.3,
+      "warm_p50_ms": 10.6
+    },
+    {
+      "id": "d01",
+      "heard": "서울 강남구 테헤란로 이백십이",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.9,
+      "warm_p50_ms": 8.0
+    },
+    {
+      "id": "d02",
+      "heard": "서울 강남구 테헤란로 이 일 이",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.4,
+      "warm_p50_ms": 8.2
+    },
+    {
+      "id": "d03",
+      "heard": "서울 강남구 테헤란로 이백 십이",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.6,
+      "warm_p50_ms": 8.1
+    },
+    {
+      "id": "d04",
+      "heard": "경기도 성남시 분당구 판교 역로 백육십육",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "korean_number",
+        "split_road"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.2,
+      "warm_p50_ms": 9.4
+    },
+    {
+      "id": "d05",
+      "heard": "서울 중구 세종 대로 백십",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "korean_number",
+        "split_road"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.4,
+      "warm_p50_ms": 5.0
+    },
+    {
+      "id": "d06",
+      "heard": "서울 영등포구 의사당대로 일",
+      "expect": "서울특별시 영등포구 의사당대로 1",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 의사당대로 1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.4,
+      "warm_p50_ms": 2.7
+    },
+    {
+      "id": "d07",
+      "heard": "서울 강남구 테헤란로 이백십일",
+      "expect": "서울특별시 강남구 테헤란로 211",
+      "tags": [
+        "korean_number",
+        "sound_neighbor"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 211",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.7,
+      "warm_p50_ms": 9.3
+    },
+    {
+      "id": "d08",
+      "heard": "세종시 한누리대로 이천백삼십",
+      "expect": "세종특별자치시 한누리대로 2130",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "세종특별자치시 한누리대로 2130",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 17.0,
+      "warm_p50_ms": 16.5
+    },
+    {
+      "id": "d09",
+      "heard": "부산 연제구 중앙대로 천일",
+      "expect": "부산광역시 연제구 중앙대로 1001",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 연제구 중앙대로 1001",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.3,
+      "warm_p50_ms": 5.7
+    },
+    {
+      "id": "d10",
+      "heard": "서울 송파구 올림픽로 삼백",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.6,
+      "warm_p50_ms": 5.3
+    },
+    {
+      "id": "e01",
+      "heard": "서울 강남구 테헤란로 팔길 이십",
+      "expect": "서울특별시 강남구 테헤란로8길 20",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로8길 20",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.0,
+      "warm_p50_ms": 8.5
+    },
+    {
+      "id": "e02",
+      "heard": "서울 강남구 테헤란로8길 20",
+      "expect": "서울특별시 강남구 테헤란로8길 20",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로8길 20",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.4,
+      "warm_p50_ms": 9.3
+    },
+    {
+      "id": "e03",
+      "heard": "서울 강남구 테헤란로 8길 20",
+      "expect": "서울특별시 강남구 테헤란로8길 20",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로8길 20",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.8,
+      "warm_p50_ms": 8.9
+    },
+    {
+      "id": "e04",
+      "heard": "서울 강남구 태헤란노 이십육길 십",
+      "expect": "서울특별시 강남구 테헤란로26길 10",
+      "tags": [
+        "gil",
+        "road_misheard"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로26길 10",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.5,
+      "warm_p50_ms": 16.7
+    },
+    {
+      "id": "e05",
+      "heard": "서울 강남구 테헤란로 이십육펀킬 십",
+      "expect": "서울특별시 강남구 테헤란로26길 10",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로26길 10",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.6,
+      "warm_p50_ms": 15.9
+    },
+    {
+      "id": "e06",
+      "heard": "서울 강남구 테헤란로26뻔 길 10",
+      "expect": "서울특별시 강남구 테헤란로26길 10",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로26길 10",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 20.8,
+      "warm_p50_ms": 16.4
+    },
+    {
+      "id": "e07",
+      "heard": "경북 구미시 인동 9길 7-3",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 19.5,
+      "warm_p50_ms": 5.6
+    },
+    {
+      "id": "e08",
+      "heard": "경북 구미 인동구길 7-3",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "gil",
+        "glued_gil"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 16.4,
+      "warm_p50_ms": 14.3
+    },
+    {
+      "id": "e09",
+      "heard": "경북 구미시 인동 국일 7-3",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "gil",
+        "linked_sound"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.4,
+      "warm_p50_ms": 15.4
+    },
+    {
+      "id": "e10",
+      "heard": "경북 구미시 인동구길 칠 다시 삼",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "gil",
+        "glued_gil",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.4,
+      "warm_p50_ms": 14.2
+    },
+    {
+      "id": "e11",
+      "heard": "서울 영등포구 도림로 백사십삼길 이십칠",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "tags": [
+        "gil",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 16.6,
+      "warm_p50_ms": 14.9
+    },
+    {
+      "id": "e12",
+      "heard": "서울 영등포구 도림로143길 27",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "tags": [
+        "gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.3,
+      "warm_p50_ms": 14.7
+    },
+    {
+      "id": "f01",
+      "heard": "서울 양천구 신정이펜일로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 2.6,
+      "warm_p50_ms": 3.1
+    },
+    {
+      "id": "f02",
+      "heard": "서울시 양천구 신정 201로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 4.6,
+      "warm_p50_ms": 4.8
+    },
+    {
+      "id": "f03",
+      "heard": "서울시 양천구 신정 2-1로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road"
+      ],
+      "status": "ambiguous",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "auto",
+      "cold_ms": 4.3,
+      "warm_p50_ms": 4.3
+    },
+    {
+      "id": "f04",
+      "heard": "서울 양천구 신정이팬일로 오십",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 3.1,
+      "warm_p50_ms": 2.8
+    },
+    {
+      "id": "f05",
+      "heard": "서울 양천구 신정이펜일로 오십일",
+      "expect": "서울특별시 양천구 신정이펜1로 51",
+      "tags": [
+        "number_in_road",
+        "korean_number",
+        "sound_neighbor"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 51",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 3.0,
+      "warm_p50_ms": 2.9
+    },
+    {
+      "id": "g01",
+      "heard": "경북 구미시 인동 구길 칠다시삼",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "dasi",
+        "glued_dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 17.1,
+      "warm_p50_ms": 16.4
+    },
+    {
+      "id": "g02",
+      "heard": "경북 구미시 인동구길 이십이다시일",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "tags": [
+        "dasi",
+        "glued_dasi",
+        "glued_gil"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 32.5,
+      "warm_p50_ms": 34.1
+    },
+    {
+      "id": "g03",
+      "heard": "경북 구미시 인동 구길 이십이 다시 일",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "tags": [
+        "dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.6,
+      "warm_p50_ms": 6.7
+    },
+    {
+      "id": "g04",
+      "heard": "경북 구미시 인동 구길 칠 대시 삼",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.4,
+      "warm_p50_ms": 5.8
+    },
+    {
+      "id": "g05",
+      "heard": "경기 고양시 일산서구 킨텍스로 이백십칠 다시 육십",
+      "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "tags": [
+        "dasi",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.2,
+      "warm_p50_ms": 7.2
+    },
+    {
+      "id": "g06",
+      "heard": "경기 고양시 일산서구 킨텍스로 이백십칠다시육십",
+      "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "tags": [
+        "dasi",
+        "glued_dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 14.1,
+      "warm_p50_ms": 15.0
+    },
+    {
+      "id": "h01",
+      "heard": "서울 송파구 올림픽로 삼백이요",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 16.3,
+      "warm_p50_ms": 16.7
+    },
+    {
+      "id": "h02",
+      "heard": "서울 강남구 테헤란로 이백십이요",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 20.2,
+      "warm_p50_ms": 19.9
+    },
+    {
+      "id": "h03",
+      "heard": "서울 강남구 테헤란로 212요",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 12.6,
+      "warm_p50_ms": 12.9
+    },
+    {
+      "id": "h04",
+      "heard": "서울 중구 세종대로 110입니다",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.4,
+      "warm_p50_ms": 8.4
+    },
+    {
+      "id": "h05",
+      "heard": "경북 구미 인동구길 칠 다시 삼이요",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "tags": [
+        "ending",
+        "glued_gil"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 53.3,
+      "warm_p50_ms": 52.0
+    },
+    {
+      "id": "h06",
+      "heard": "서울 강남구 테헤란로 이백십이입니다",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 12.4,
+      "warm_p50_ms": 13.5
+    },
+    {
+      "id": "i01",
+      "heard": "서울 영등포구 도림로143길 27, 리버뷰 신안 인스빌",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "tags": [
+        "extra_words",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 18.2,
+      "warm_p50_ms": 19.9
+    },
+    {
+      "id": "i02",
+      "heard": "서울 송파구 올림픽로 300 롯데월드타워",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "extra_words"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 12.3,
+      "warm_p50_ms": 12.9
+    },
+    {
+      "id": "i03",
+      "heard": "서울 중구 세종대로 110 서울시청",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "extra_words"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 9.2,
+      "warm_p50_ms": 9.8
+    },
+    {
+      "id": "i04",
+      "heard": "경기 성남시 분당구 판교역로 166, 카카오 판교아지트",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "extra_words",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 19.6,
+      "warm_p50_ms": 19.2
+    },
+    {
+      "id": "j01",
+      "heard": "경북 구미시 인의동 565-3",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 89.6,
+      "warm_p50_ms": 90.9
+    },
+    {
+      "id": "j02",
+      "heard": "구미시 인의동 565-3",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "tags": [
+        "jibun",
+        "no_sido"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 89.8,
+      "warm_p50_ms": 96.6
+    },
+    {
+      "id": "j03",
+      "heard": "경북 구미시 이니동 565-3",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "tags": [
+        "jibun",
+        "linked_sound"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 90.0,
+      "warm_p50_ms": 92.0
+    },
+    {
+      "id": "j04",
+      "heard": "서울 강남구 역삼동 737",
+      "expect": "서울특별시 강남구 테헤란로 152",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 152",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 294.4,
+      "warm_p50_ms": 297.2
+    },
+    {
+      "id": "j05",
+      "heard": "서울 강남구 역삼동 칠백삼십칠",
+      "expect": "서울특별시 강남구 테헤란로 152",
+      "tags": [
+        "jibun",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 152",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 282.8,
+      "warm_p50_ms": 294.8
+    },
+    {
+      "id": "j06",
+      "heard": "서울 중구 태평로1가 31",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.9,
+      "warm_p50_ms": 4.5
+    },
+    {
+      "id": "j07",
+      "heard": "서울 중구 태평로 일가 삼십일",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "jibun",
+        "korean_number"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 7.2,
+      "warm_p50_ms": 8.5
+    },
+    {
+      "id": "j08",
+      "heard": "경기 성남시 분당구 백현동 532",
+      "expect": "경기도 성남시 분당구 판교역로 166",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 성남시 분당구 판교역로 166",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 32.0,
+      "warm_p50_ms": 29.8
+    },
+    {
+      "id": "j09",
+      "heard": "서울 송파구 신천동 29",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.3,
+      "warm_p50_ms": 5.9
+    },
+    {
+      "id": "j10",
+      "heard": "서울 송파구 신천동 29번지",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 5.6,
+      "warm_p50_ms": 5.8
+    },
+    {
+      "id": "j11",
+      "heard": "서울 강남구 역삼1동 737",
+      "expect": "서울특별시 강남구 테헤란로 152",
+      "tags": [
+        "jibun",
+        "admin_dong"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 152",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 282.9,
+      "warm_p50_ms": 297.4
+    },
+    {
+      "id": "k01",
+      "heard": "서울 강남구 테헤란로 99999",
+      "expect": null,
+      "tags": [
+        "nonexistent"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 14.6,
+      "warm_p50_ms": 15.5
+    },
+    {
+      "id": "k02",
+      "heard": "서울 강남구 없는로 12",
+      "expect": null,
+      "tags": [
+        "nonexistent"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 3.1,
+      "warm_p50_ms": 3.6
+    },
+    {
+      "id": "k03",
+      "heard": "구미시 없는길 99",
+      "expect": null,
+      "tags": [
+        "nonexistent"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 14.1,
+      "warm_p50_ms": 14.5
+    },
+    {
+      "id": "k04",
+      "heard": "서울",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "region_only"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "region",
+      "expect_reason": "region",
+      "outcome": "rejected",
+      "cold_ms": 0.2,
+      "warm_p50_ms": 0.3
+    },
+    {
+      "id": "k05",
+      "heard": "서울 강남구 테헤란로 210",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "nonexistent_number"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 7.3,
+      "warm_p50_ms": 7.5
+    },
+    {
+      "id": "k06",
+      "heard": "서울 양천구 신정이펜일로 53",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "nonexistent_number"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 3.1,
+      "warm_p50_ms": 3.1
+    },
+    {
+      "id": "k07",
+      "heard": "서울 강남구 테헤란로31길 5-2",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "nonexistent_number"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 18.8,
+      "warm_p50_ms": 20.2
+    },
+    {
+      "id": "k08",
+      "heard": "서울 강남구 테헤란로 21",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "nonexistent_number"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 6.6,
+      "warm_p50_ms": 7.2
+    },
+    {
+      "id": "p01",
+      "heard": "대전 유성구 대학로 291이에요",
+      "expect": "대전광역시 유성구 대학로 291",
+      "tags": [
+        "ending",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "대전광역시 유성구 대학로 291",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.5,
+      "warm_p50_ms": 15.6
+    },
+    {
+      "id": "p02",
+      "heard": "제주 제주시 문연로 육이에요",
+      "expect": "제주특별자치도 제주시 문연로 6",
+      "tags": [
+        "ending",
+        "ending_two_readings",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "제주특별자치도 제주시 문연로 6",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 24.7,
+      "warm_p50_ms": 24.7
+    },
+    {
+      "id": "p03",
+      "heard": "인천 남동구 정각로 29 인천시청",
+      "expect": "인천광역시 남동구 정각로 29",
+      "tags": [
+        "extra_words",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "인천광역시 남동구 정각로 29",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.3,
+      "warm_p50_ms": 11.2
+    },
+    {
+      "id": "p04",
+      "heard": "부산 해운대구 해운대해변로 264, 더베이101",
+      "expect": "부산광역시 해운대구 해운대해변로 264",
+      "tags": [
+        "extra_words",
+        "comma",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 해운대구 해운대해변로 264",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 18.8,
+      "warm_p50_ms": 19.4
+    },
+    {
+      "id": "p05",
+      "heard": "세종시 한누리대로 2130 세종시청이요",
+      "expect": "세종특별자치시 한누리대로 2130",
+      "tags": [
+        "extra_words",
+        "ending",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "세종특별자치시 한누리대로 2130",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 56.2,
+      "warm_p50_ms": 59.8
+    },
+    {
+      "id": "p06",
+      "heard": "경기 고양시 일산서구 킨텍스로 이백십칠대시육십",
+      "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "tags": [
+        "dasi",
+        "glued_dasi",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.6,
+      "warm_p50_ms": 14.7
+    },
+    {
+      "id": "p07",
+      "heard": "서울 송파구 신천동 이십구번지요",
+      "expect": "서울특별시 송파구 올림픽로 300",
+      "tags": [
+        "jibun",
+        "ending",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 300",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 10.3,
+      "warm_p50_ms": 10.9
+    },
+    {
+      "id": "p08",
+      "heard": "서울 중구 세종대로 백십 서울특별시청",
+      "expect": "서울특별시 중구 세종대로 110",
+      "tags": [
+        "extra_words",
+        "korean_number",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 중구 세종대로 110",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 8.7,
+      "warm_p50_ms": 8.6
+    },
+    {
+      "id": "p09",
+      "heard": "울산 남구 중앙로 이백일입니다",
+      "expect": "울산광역시 남구 중앙로 201",
+      "tags": [
+        "ending",
+        "korean_number",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "울산광역시 남구 중앙로 201",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.9,
+      "warm_p50_ms": 11.9
+    },
+    {
+      "id": "n01",
+      "heard": "서울 강남구 없는로 12요",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "ending",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 8.1,
+      "warm_p50_ms": 7.3
+    },
+    {
+      "id": "n02",
+      "heard": "서울 강남구 테헤란로 99999 무슨빌딩",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "extra_words",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 19.9,
+      "warm_p50_ms": 20.0
+    },
+    {
+      "id": "n03",
+      "heard": "구미시 없는길 99이요",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "ending",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 41.3,
+      "warm_p50_ms": 44.0
+    },
+    {
+      "id": "n04",
+      "heard": "서울 중구 세종대로 99999입니다",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "ending",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 13.1,
+      "warm_p50_ms": 12.9
+    },
+    {
+      "id": "n05",
+      "heard": "서울 강남구 테헤란로 이백십요",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "nonexistent_number",
+        "ending",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 11.5,
+      "warm_p50_ms": 11.8
+    },
+    {
+      "id": "n06",
+      "heard": "서울 강남구 역삼동 99999",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "jibun",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 396.4,
+      "warm_p50_ms": 428.3
+    },
+    {
+      "id": "n07",
+      "heard": "서울 강남구 없는로 칠다시삼",
+      "expect": null,
+      "tags": [
+        "nonexistent",
+        "glued_dasi",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 10.8,
+      "warm_p50_ms": 11.0
+    },
+    {
+      "id": "q01",
+      "heard": "경북 구미시 산동 580",
+      "expect": null,
+      "tags": [
+        "emd_only",
+        "short_name",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "needs_ri",
+      "expect_reason": "needs_ri",
+      "outcome": "rejected",
+      "cold_ms": 54.5,
+      "warm_p50_ms": 56.7
+    },
+    {
+      "id": "q02",
+      "heard": "경북 구미시 산동읍 580",
+      "expect": null,
+      "tags": [
+        "emd_only",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "needs_ri",
+      "expect_reason": "needs_ri",
+      "outcome": "rejected",
+      "cold_ms": 5.6,
+      "warm_p50_ms": 6.8
+    },
+    {
+      "id": "q03",
+      "heard": "경북 구미시 산동읍 백현리 580",
+      "expect": null,
+      "tags": [
+        "exact_name_no_number",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 24.0,
+      "warm_p50_ms": 26.0
+    },
+    {
+      "id": "q04",
+      "heard": "경북 구미시 산동읍 봉산리 580",
+      "expect": "경상북도 구미시 산동읍 산호대로41길 13",
+      "tags": [
+        "jibun",
+        "emd_ri",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 산동읍 산호대로41길 13",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 27.8,
+      "warm_p50_ms": 29.6
+    },
+    {
+      "id": "q05",
+      "heard": "경북 구미시 신동 580",
+      "expect": "경상북도 구미시 인동63길 63-1",
+      "tags": [
+        "jibun",
+        "short_name",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동63길 63-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 11.6,
+      "warm_p50_ms": 12.4
+    },
+    {
+      "id": "q06",
+      "heard": "경북 구미시 선동 580",
+      "expect": null,
+      "tags": [
+        "short_name",
+        "nonexistent",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": "name",
+      "outcome": "rejected",
+      "cold_ms": 23.2,
+      "warm_p50_ms": 24.2
+    },
+    {
+      "id": "q07",
+      "heard": "경남 김해시 상동 294",
+      "expect": null,
+      "tags": [
+        "emd_only",
+        "short_name",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "needs_ri",
+      "expect_reason": "needs_ri",
+      "outcome": "rejected",
+      "cold_ms": 108.5,
+      "warm_p50_ms": 104.8
+    },
+    {
+      "id": "q08",
+      "heard": "경남 김해시 상동면 묵방리 294",
+      "expect": "경상남도 김해시 상동면 장척로 429",
+      "tags": [
+        "jibun",
+        "emd_ri",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "경상남도 김해시 상동면 장척로 429",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 42.1,
+      "warm_p50_ms": 44.1
+    },
+    {
+      "id": "q09",
+      "heard": "경남 김해시 대동면 주중리 302",
+      "expect": "경상남도 김해시 대동면 주중길 98-6",
+      "tags": [
+        "jibun",
+        "emd_ri",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "경상남도 김해시 대동면 주중길 98-6",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 16.3,
+      "warm_p50_ms": 18.7
+    },
+    {
+      "id": "q10",
+      "heard": "서울 강남구 테헤란로1길 8",
+      "expect": null,
+      "tags": [
+        "exact_name_no_number",
+        "branch",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 8.6,
+      "warm_p50_ms": 9.0
+    },
+    {
+      "id": "q11",
+      "heard": "서울 강남구 테헤란로2길 8",
+      "expect": "서울특별시 강남구 테헤란로2길 8",
+      "tags": [
+        "gil",
+        "holdout"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로2길 8",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 6.6,
+      "warm_p50_ms": 7.1
+    },
+    {
+      "id": "r01",
+      "heard": "서울시 양천구 신정이패닐로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road",
+        "stt_spelling",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 3.4,
+      "warm_p50_ms": 3.7
+    },
+    {
+      "id": "r02",
+      "heard": "서울시 양천구 신정이펜율로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road",
+        "stt_spelling",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 3.3,
+      "warm_p50_ms": 3.7
+    },
+    {
+      "id": "r03",
+      "heard": "서울시 양천구 신정이패밀로 50",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "tags": [
+        "number_in_road",
+        "stt_spelling",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 3.3,
+      "warm_p50_ms": 3.6
+    },
+    {
+      "id": "r04",
+      "heard": "서울북구민시 인동 9길 7-3",
+      "expect": null,
+      "tags": [
+        "region_misheard",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "region",
+      "expect_reason": "region",
+      "outcome": "rejected",
+      "cold_ms": 10.0,
+      "warm_p50_ms": 10.2
+    },
+    {
+      "id": "r05",
+      "heard": "경북 구미시 인동구길 이십이다시일",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "tags": [
+        "glued_dasi",
+        "glued_gil",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 31.7,
+      "warm_p50_ms": 34.7
+    },
+    {
+      "id": "r06",
+      "heard": "전주시 금암이동백사십구 다시 십일 번지요",
+      "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "tags": [
+        "jibun",
+        "admin_dong",
+        "glued_number",
+        "ending",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": null,
+      "outcome": "missed",
+      "cold_ms": 85.4,
+      "warm_p50_ms": 82.1
+    },
+    {
+      "id": "r07",
+      "heard": "주시 금암동 백사십구 다시 십일 번지요",
+      "expect": null,
+      "tags": [
+        "jibun",
+        "region_misheard",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "region",
+      "expect_reason": "region",
+      "outcome": "rejected",
+      "cold_ms": 41.0,
+      "warm_p50_ms": 44.6
+    },
+    {
+      "id": "r08",
+      "heard": "전주시 금암이동 백사십구 다시 십일 번지요",
+      "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "tags": [
+        "jibun",
+        "admin_dong",
+        "ending",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 266.2,
+      "warm_p50_ms": 271.1
+    },
+    {
+      "id": "r09",
+      "heard": "구미시 인의동 오륙오 다시 삼이요",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "tags": [
+        "jibun",
+        "korean_number",
+        "ending",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "name",
+      "expect_reason": null,
+      "outcome": "missed",
+      "cold_ms": 91.0,
+      "warm_p50_ms": 99.5
+    },
+    {
+      "id": "r10",
+      "heard": "구미시 인의동 오육오 다시 삼",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "tags": [
+        "jibun",
+        "korean_number",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 115.7,
+      "warm_p50_ms": 121.4
+    },
+    {
+      "id": "r11",
+      "heard": "경상북도 구미시 인동구길 25-3",
+      "expect": null,
+      "tags": [
+        "glued_gil",
+        "nonexistent_number",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 15.7,
+      "warm_p50_ms": 17.1
+    },
+    {
+      "id": "r12",
+      "heard": "부산광역시 서구 보덕로 321번길 24",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "tags": [
+        "road_misheard",
+        "short_name",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 21.0,
+      "warm_p50_ms": 16.6
+    },
+    {
+      "id": "r13",
+      "heard": "부산광역시 서구 구덕로 삼백이십일 번길 이십사",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "tags": [
+        "gil",
+        "korean_number",
+        "from_call"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "reason": null,
+      "expect_reason": null,
+      "outcome": "confirmed",
+      "cold_ms": 15.3,
+      "warm_p50_ms": 15.8
+    },
+    {
+      "id": "r14",
+      "heard": "경상북도 구미시 산동 580",
+      "expect": null,
+      "tags": [
+        "emd_only",
+        "short_name",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "needs_ri",
+      "expect_reason": "needs_ri",
+      "outcome": "rejected",
+      "cold_ms": 54.5,
+      "warm_p50_ms": 58.1
+    },
+    {
+      "id": "r15",
+      "heard": "서울시 양천구 신정이펜일로 52",
+      "expect": null,
+      "tags": [
+        "nonexistent_number",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 3.7,
+      "warm_p50_ms": 4.0
+    },
+    {
+      "id": "r16",
+      "heard": "인동 이십오길 다시 오",
+      "expect": null,
+      "tags": [
+        "no_region",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "region",
+      "expect_reason": "region",
+      "outcome": "rejected",
+      "cold_ms": 28.9,
+      "warm_p50_ms": 29.6
+    },
+    {
+      "id": "r17",
+      "heard": "서울시 양천구 신정이패닐로 5",
+      "expect": null,
+      "tags": [
+        "nonexistent_number",
+        "from_call"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "reason": "number",
+      "expect_reason": "number",
+      "outcome": "rejected",
+      "cold_ms": 3.6,
+      "warm_p50_ms": 4.4
+    }
+  ]
+}
