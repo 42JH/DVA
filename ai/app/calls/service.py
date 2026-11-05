@@ -167,13 +167,15 @@ class CallService:
         return task
 
     async def _stage2(self, s: CallSession) -> int | None:
+        """통화 등록(번호 확보)만 이 예산 안에서. 이전 접수 주소는 번호를 보관한 뒤 별도 작업으로 읽는다 —
+        등록은 됐는데 이력 조회가 늦어 번호까지 잃는 일이 없게(BE 확인 2026-11-05 1번)."""
         if not s.caller:  # 발신번호 없으면 고객 범위를 만들 수 없다
             s.tools.ops["stage2"]["status"] = "failed"
             return None
         call = {"providerCallId": s.call_id, "incomingAt": s.incoming_at}
         try:
             ctx = await self.d.backend.read("caller_context2", self.d.backend.api.caller_context, s.caller, call,
-                                            self.d.cfg.recent_destinations, budget_sec=self.d.cfg.stage2_budget_sec)
+                                            0, budget_sec=self.d.cfg.stage2_budget_sec)
         except BackendFailure as e:
             s.tools.ops["stage2"]["status"] = "failed"
             s.note("통화 등록 실패", e.code)
@@ -182,7 +184,28 @@ class CallService:
             _apply_context(s.state, ctx, s.caller)
         s.tools.ops["stage2"]["status"] = "done"
         s.note("통화 등록", "ok" if ctx.call_session_seq else "번호 없음")
+        if ctx.status == "REGISTERED" and ctx.customer_seq and ctx.call_session_seq and self.d.cfg.recent_destinations:
+            s.spawn(self._stage2_history(s, ctx), "stage2_history")
         return ctx.call_session_seq
+
+    async def _stage2_history(self, s: CallSession, ctx) -> None:
+        """이전 접수의 출발지 1건·도착지 N건을 병렬로(각각 기본 읽기 예산). 실패해도 통화 등록은 그대로."""
+        api, seq, cust = self.d.backend.api, ctx.call_session_seq, ctx.customer_seq
+        origins, dests = await asyncio.gather(
+            self.d.backend.read("address_history", api.address_history, seq, cust, "ORIGIN", 1),
+            self.d.backend.read("address_history", api.address_history, seq, cust, "DESTINATION",
+                                self.d.cfg.recent_destinations),
+            return_exceptions=True)
+        for r in (origins, dests):
+            if isinstance(r, BackendFailure):
+                s.note("이전 접수 주소 조회 실패", r.code)
+            elif isinstance(r, BaseException):
+                raise r
+        ctx.recent_origin = origins[0] if isinstance(origins, list) and origins else None
+        ctx.recent_destinations = dests if isinstance(dests, list) else []
+        if ctx.recent_origin or ctx.recent_destinations:
+            async with s.lock:
+                _apply_context(s.state, ctx, s.caller)
 
     async def call_session_seq(self, s: CallSession) -> int | None:
         """조회·취소가 쓰는 통화 번호. 2단계를 시작하고(이미 했으면 그대로) 잠금 밖에서 기다린다."""

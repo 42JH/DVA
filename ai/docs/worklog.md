@@ -599,3 +599,11 @@
 - 수정: `Customer.default_address_detail` 추가(state.py), `_apply_context`에서 `default_origin.address_detail or ""`로 채움(service.py), `save_offer`가 (도로명, 상세) 쌍을 비교(address_book.py), PATCH 성공 뒤 상세도 갱신(results.py). 되읽기 전에는 상세가 반드시 채워지고(없다고 하면 "") BE도 생략을 ""로 정규화하므로 None은 비교에 오지 않는다.
 - BE API·계약 변경 없음. 테스트 595 passed(+1: 상세만 다름→sender 제안, 같음→없음, 양쪽 ""→없음).
 - 남은 일(미구현): 1번 통화 등록 번호는 context 응답 즉시 보관하고 이력 조회를 분리, 2번 SENT_UNCERTAIN 주문 결과를 실행 중에도 같은 키·본문으로 재전송.
+
+## 2026-11-05 — 2단계 통화 등록: 번호를 먼저 보관하고 이전 접수 주소는 별도 조회(BE 확인 1번)
+- 원인: `_stage2`가 `caller_context(recent_limit=5)` 한 호출(예산 3초)로 통화 등록 POST → 출발지 이력 → 도착지 이력을 순서대로 했고, 게이트웨이 `wait_for`가 코루틴 전체를 취소해 등록이 끝났어도 이력이 늦으면 `callSessionSeq`를 잃었다(요청 1건 timeout 3초 × 3건 vs 예산 3초). 실패한 stage2는 그 통화에서 재시도하지 않아 조회·취소 `CALL_NOT_REGISTERED`, 종료 후 이벤트·분석·주소 저장 생략으로 이어졌다.
+- 수정(app/calls/service.py): `_stage2`는 `recent_limit=0`으로 등록만 하고 즉시 `_apply_context`로 번호를 보관·`done`. 등록 고객이면 `_stage2_history`를 별도 작업으로 띄워 ORIGIN 1건·DESTINATION N건을 `gather`로 병렬 조회(각각 게이트웨이 기본 읽기 예산 3초). `BackendFailure`는 note("이전 접수 주소 조회 실패")만 남기고 번호에 영향 없음. 받은 이력은 `_apply_context`를 한 번 더 불러 반영.
+- `call_session_seq()`를 기다리는 조회·취소 도구는 이제 등록만 기다린다. 최근 도착지 후보는 수십~수백 ms 뒤 들어온다(record 도구는 원래 stage2를 기다리지 않아 같은 창이 있었음).
+- `api.caller_context`의 내부 이력 조회 블록과 시그니처는 유지(backend_client 테스트·mock 의존). 새 설정값 없음. BE 계약 변경 없음. 문서 call-lifecycle.md §2.2 2단계 행 갱신(이미 "병렬"로 적혀 있었고 코드가 순차였음).
+- 테스트 596 passed(+1 `test_stage2_keeps_call_seq_when_history_lookup_fails`: 이력 503이어도 번호 보관·stage2 done·PIN만·기본 주소는 context에서). 수정 전 코드에서는 번호 없음으로 실패 확인.
+- 하지 않음: 등록 POST 자체 실패 시 재시도(BE context는 같은 providerCallId면 멱등이라 추후 가능).
