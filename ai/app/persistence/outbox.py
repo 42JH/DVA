@@ -43,12 +43,12 @@ class Outbox:
     # --- 통화 결과 ---
     def result(self, session_id: str) -> dict | None:
         with self.lock:
-            row = self.db.execute("SELECT idempotency_key, body_json, status, last_data_json, attempts FROM call_results "
-                                  "WHERE session_id=?", (session_id,)).fetchone()
+            row = self.db.execute("SELECT idempotency_key, body_json, status, last_data_json, attempts, updated_at "
+                                  "FROM call_results WHERE session_id=?", (session_id,)).fetchone()
         if not row:
             return None
         return {"session_id": session_id, "key": row[0], "body": json.loads(row[1]), "status": row[2],
-                "data": json.loads(row[3]) if row[3] else None, "attempts": row[4]}
+                "data": json.loads(row[3]) if row[3] else None, "attempts": row[4], "updated_at": row[5]}
 
     def create_result(self, session_id: str, key: str, body: dict) -> dict:
         """처음이면 저장(전송 전에 커밋), 이미 있으면 기존 행(키·본문 불변)."""

@@ -607,3 +607,11 @@
 - `api.caller_context`의 내부 이력 조회 블록과 시그니처는 유지(backend_client 테스트·mock 의존). 새 설정값 없음. BE 계약 변경 없음. 문서 call-lifecycle.md §2.2 2단계 행 갱신(이미 "병렬"로 적혀 있었고 코드가 순차였음).
 - 테스트 596 passed(+1 `test_stage2_keeps_call_seq_when_history_lookup_fails`: 이력 503이어도 번호 보관·stage2 done·PIN만·기본 주소는 context에서). 수정 전 코드에서는 번호 없음으로 실패 확인.
 - 하지 않음: 등록 POST 자체 실패 시 재시도(BE context는 같은 providerCallId면 멱등이라 추후 가능).
+
+## 2026-11-05 — SENT_UNCERTAIN 주문 결과를 실행 중에도 같은 키로 재확인(BE 확인 2번)
+- 원인: `POST /api/orders`가 503·연결 끊김·시간 초과로 불확실해지면 아웃박스에 `SENT_UNCERTAIN`으로 남는데, 재전송 함수 `_send(row)`는 기동 시 `recover()`에서만 불렸다. 주기 작업 `review_loop`는 검토·인사이트만 다뤄 프로세스가 계속 떠 있으면 장애가 풀려도 그대로였다.
+- 수정: `ResultService.resend_loop/resend_unfinished`(app/calls/results.py) — `unfinished_results`를 돌며 같은 키·같은 본문으로 `_send`. 이 프로세스가 전송 중인 행(`tasks`에 미완료)과 `updated_at`이 전송 예산(`submit_budget_sec`) 안인 행은 건너뛴다. 기동 `recover()`와 같은 `result_lock`을 써 동시 전송을 막는다. 아웃박스 `result()`가 `updated_at`을 돌려주게 함(outbox.py). 설정 `[backend] result_resend_sec`(기본 60초, 0이면 재시작 때만) 추가(config.py·server.toml), main.py에서 작업 시작·종료 시 취소.
+- 멱등: 키·본문은 아웃박스에 고정돼 있고 BE는 같은 `Idempotency-Key`면 기존 결과를 200으로 돌려준다(backend_client/api.py submit_result). 새 키를 만들지 않으므로 중복 주문 없음. BE API·계약 변경 없음.
+- 테스트 597 passed(+1 `test_uncertain_submit_is_rechecked_while_running`: 예산 안 행 건너뜀 → 전송 중 행 건너뜀 → 재확인 후 DONE·같은 키로 주문 1건). 편집 중 `recover()` 끝의 `recover_reviews()` 호출이 밀려 `test_v1_confirmed_review_is_not_backfilled`가 깨진 것을 잡아 되돌렸다.
+- 범위 밖: 재전송이 나중에 성공해도 그 통화의 분석(registeredParcelCount 등)은 고치지 않는다(기동 복구도 동일). `FAILED`(400·404·422)는 재시도하지 않는다. 포기 조건 없음(`attempts` 누적).
+- 문서: error-recovery.md 통화 결과 행 갱신.

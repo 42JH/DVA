@@ -62,7 +62,7 @@
 | 취소(서버 전용) | 5s | 재시도 전 상세 재조회로 이미 취소 여부 확인(기존 `cancel_order` 규칙) | `op_id`, 상태 `running/done/unknown/refused`, 같은 대상 동시 실행 금지(`ops` 키, `concurrency.md` §5) |
 | 2단계 고객 확인 | 3s | 연결 실패 1회 | BE가 같은 ID·번호·시각에 같은 번호 반환 |
 | PIN 저장·고객 등록 | 백그라운드 | 1회 | BE 409 DUPLICATE_RESOURCE를 성공으로, **409 상태 오류는 실패로 구분** |
-| 통화 결과 | 요청 15s, 총 40s(기존) + 재시작 복구 | 같은 키·같은 본문 | 아웃박스(`call-lifecycle.md` §7) |
+| 통화 결과 | 요청 15s, 총 40s(기존) + 실행 중 주기 재확인(`backend.result_resend_sec`, 기본 60s, SENT_UNCERTAIN만) + 재시작 복구 | 같은 키·같은 본문 | 아웃박스(`call-lifecycle.md` §7). 전송 중인 행·방금 바뀐 행(전송 예산 안)은 건너뜀 |
 | 인사이트 | 백그라운드 | 5xx·연결 실패 3회, 같은 eventId | eventId·eventOrder 영속 |
 | 함수 호출 결과 반환 | — | 재연결 후 재전송 | `call_id` 결과 캐시, 1회 전송 |
 

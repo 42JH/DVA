@@ -1,5 +1,6 @@
 """S6: 아웃박스·통화 결과 전송·신규 고객 등록·최종 분석·이벤트·미답변(spec/ai-integration-current.md). 가짜 BE."""
 
+import asyncio
 import json
 
 import httpx2
@@ -79,6 +80,44 @@ def test_uncertain_submit_is_rechecked_with_same_key_after_restart(tmp_path):
     rs2 = ResultService(BackendGateway(healthy), Outbox(tmp_path / "outbox.sqlite3"), P, fare)
     run(rs2.recover())
     assert healthy.results[-1]["key"] == row["key"] and rs2.outbox.result("live_1")["status"] == "DONE"
+
+
+def test_uncertain_submit_is_rechecked_while_running(tmp_path):
+    """BE 확인 2번: 재시작 없이도 SENT_UNCERTAIN 결과를 같은 키·본문으로 재확인한다. 전송 중·방금 바뀐 행은 건너뛴다."""
+    class Flaky(MockBackend):
+        down = True
+
+        async def submit_result(self, body, key):
+            if self.down:
+                raise httpx2.ConnectError("down")
+            return await super().submit_result(body, key)
+
+    db = Flaky()
+    db.add_customer(CALLER, "김철수")
+    db.customers[CALLER]["seq"] = 12
+    db.payment_methods[CALLER] = ["billing"]
+    rs, _ = service(tmp_path, db)
+    rs.submit_budget_sec = 0.5
+    st = filled()
+    confirm_once(st)
+    assert run(rs.submit(session(st))) is None
+    row = rs.outbox.result("live_1")
+    assert row["status"] == "SENT_UNCERTAIN"
+    db.down = False
+
+    async def scenario():
+        await rs.resend_unfinished()  # 방금 바뀐 행(전송 예산 안): 다음 주기로
+        assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN" and db.results == []
+        rs.outbox.db.execute("UPDATE call_results SET updated_at = updated_at - 100")  # 예산이 지난 행
+        rs.tasks["live_1"] = asyncio.create_task(asyncio.sleep(10))  # 이 프로세스가 전송 중
+        await rs.resend_unfinished()
+        assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN" and db.results == []
+        rs.tasks.pop("live_1").cancel()
+        await rs.resend_unfinished()
+
+    run(scenario())
+    assert rs.outbox.result("live_1")["status"] == "DONE"
+    assert len(db.results) == 1 and db.results[0]["key"] == row["key"]  # 같은 키로 주문 1건, 새 키 없음
 
 
 def test_new_customer_registration_with_address_then_payment_auto(tmp_path):

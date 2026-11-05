@@ -96,6 +96,7 @@ class ResultService:
         self.faq_answered_enabled = faq_answered_enabled
         self.review_lock = asyncio.Lock()  # 한 프로세스 안에서 종료·복구 작업의 중복 판정/전송 방지
         self.insight_lock = asyncio.Lock()  # 전사 작업과 검토 작업이 같은 진행 상태를 덮지 않게 한다.
+        self.result_lock = asyncio.Lock()   # 기동 복구와 주기 재확인이 같은 결과 행을 동시에 보내지 않게
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
     async def register(self, s: CallSession, call_session_seq) -> None:
@@ -199,7 +200,7 @@ class ResultService:
             data = await self.backend.write("submit", self.backend.api.submit_result, row["body"], row["key"],
                                             budget_sec=self.submit_budget_sec)
         except BackendFailure as e:
-            # 503·네트워크·시간 초과는 같은 키로 다시(재시작 때), 404(삭제·만료 통화)·400·422·그 밖 409는 멈춘다(§8)
+            # 503·네트워크·시간 초과는 같은 키로 다시(주기 재확인·재시작 때), 404(삭제·만료 통화)·400·422·그 밖 409는 멈춘다(§8)
             status = "SENT_UNCERTAIN" if e.kind in ("unavailable", "in_progress") else "FAILED"
             await asyncio.to_thread(self.outbox.update_result, sid, status, {"error": e.code, "http": e.http_status,
                                                                             "errorCode": e.error_code})
@@ -212,11 +213,29 @@ class ResultService:
 
     async def recover(self) -> None:
         """재시작 후: 끝나지 않은 결과·인사이트를 같은 키·본문·eventId로 다시 보낸다."""
-        for row in await asyncio.to_thread(self.outbox.unfinished_results):
-            await self._send(row)
+        async with self.result_lock:
+            for row in await asyncio.to_thread(self.outbox.unfinished_results):
+                await self._send(row)
         for row in await asyncio.to_thread(self.outbox.unfinished_insights):
             await self._send_insight(row)
         await self.recover_reviews()
+
+    async def resend_loop(self, interval_sec: float) -> None:
+        while True:
+            await asyncio.sleep(interval_sec)
+            await self.resend_unfinished()
+
+    async def resend_unfinished(self) -> None:
+        """실행 중에도 SENT_UNCERTAIN(503·연결 끊김·시간 초과) 주문 결과를 같은 키·본문으로 다시 확인한다(BE 확인 2026-11-05 2번).
+        새 키를 만들지 않으므로 BE가 이미 저장했으면 기존 결과를 돌려주고, 못 받았으면 그때 저장한다."""
+        async with self.result_lock:
+            for row in await asyncio.to_thread(self.outbox.unfinished_results):
+                task = self.tasks.get(row["session_id"])
+                if task is not None and not task.done():
+                    continue  # 이 프로세스가 지금 보내는 중
+                if time.time() - (row.get("updated_at") or 0) < self.submit_budget_sec:
+                    continue  # 방금 바뀐 행(전송 직후·다른 작업과 경쟁)은 다음 주기에
+                await self._send(row)
 
     async def review_loop(self, poll_sec: float) -> None:
         while True:

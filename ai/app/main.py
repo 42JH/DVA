@@ -142,7 +142,7 @@ async def lifespan(app: FastAPI):
     app.state.svc = Services(cfg=cfg, backend=build_backend(cfg.backend),
                              fare_of=partial(parcel_fare, table=cfg.fare.model_dump()), address=AddressService(address_db))
     svc = app.state.svc
-    warm = recovery = persona = review_worker = None
+    warm = recovery = persona = review_worker = resend_worker = None
     rag_tasks = await build_rag(svc)
     app.include_router(faq_router)
     app.include_router(persona_router)
@@ -186,6 +186,8 @@ async def lifespan(app: FastAPI):
             review_worker = asyncio.create_task(svc.calls.results.review_loop(cfg.unanswered_review.poll_sec))
         svc.calls.on_finalize.insert(0, svc.calls.results.finish)
         recovery = asyncio.create_task(svc.calls.results.recover())
+        if cfg.backend.result_resend_sec:  # SENT_UNCERTAIN 결과를 실행 중에도 같은 키로 재확인(0이면 재시작 때만)
+            resend_worker = asyncio.create_task(svc.calls.results.resend_loop(cfg.backend.result_resend_sec))
         bus = Bus()
         svc.calls.on_change = lambda s: bus.publish({"type": "call", "call": s.snapshot()})  # 전사·사건·단계마다
         svc.calls.on_finalize.append(write_call_log)
@@ -197,7 +199,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        for t in (warm, recovery, persona, review_worker, *rag_tasks):
+        for t in (warm, recovery, persona, review_worker, resend_worker, *rag_tasks):
             if t and not t.done():
                 t.cancel()
         if svc.calls:
