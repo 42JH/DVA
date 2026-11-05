@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Button, ConfirmDialog, Tag } from '@/shared/ui'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { VoiceModal } from './VoiceModal'
@@ -10,6 +10,7 @@ const LINE = 27 // 줄 높이 px — 줄 번호 칸과 글 칸이 같은 높이�
 // 11/05 새 디자인 (구성 그대로 모양만): 버튼 big · 저장 파랑 · 글 칸 테두리 파랑 · 새 확인 창
 // 와이어프레임의 [v6과 비교]는 뺌 (10/31 결정): 비교는 저장 후 보기 화면에서
 // 줄은 접지 않음(wrap off): 접으면 한 줄이 여러 줄로 보여 줄 번호가 어긋남
+// 스크롤은 글 칸(textarea)이 직접, 줄 번호는 그만큼 따라 올라감 (11/05 — 칸 높이를 rows로 맞추던 방식은 flex stretch · 가로 막대에 잘림, jiw/log/2026-11-05-persona-editor-clip.md)
 export function PromptEditor({
   target,
   onDone,
@@ -20,6 +21,7 @@ export function PromptEditor({
   aside?: (leave: (then: () => void) => void) => ReactNode // 오른쪽 패널 — 고르면 leave(보기로 갈 일): 저장 안 한 내용이 있으면 확인 창부터
 }) {
   const vm = usePromptEditor(target, onDone)
+  const nums = useRef<HTMLOListElement>(null)
 
   return (
     <div className="flex h-full gap-6">
@@ -35,36 +37,39 @@ export function PromptEditor({
           <span className="text-label text-sub">{vm.subtitle}</span>
         </p>
 
-        {/* 줄 번호 칸 + 글 칸을 한 스크롤 안에 → 위아래로 같이 움직임 */}
-        <div className="flex min-h-0 flex-1 overflow-auto rounded-lg ring-[1.5px] ring-brand ring-inset">
-          <ol
-            aria-hidden
-            className="w-12 shrink-0 border-r border-line py-3 text-right select-none"
-          >
-            {Array.from({ length: vm.lineCount }, (_, i) => (
-              <li
-                key={i}
-                style={{ height: LINE }}
-                className={`pr-3 text-caption leading-[27px] ${vm.caretLine === i + 1 ? 'font-bold text-brand' : 'text-sub'}`}
-              >
-                {i + 1}
-              </li>
-            ))}
-          </ol>
+        {/* 글 칸만 스크롤하고 줄 번호는 따라 움직임 — 번호 칸은 가로 막대가 없어 scrollTop으론 맨 아래에서 막대 두께만큼 어긋남 → transform */}
+        <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg ring-[1.5px] ring-brand ring-inset">
+          <div className="w-12 shrink-0 overflow-hidden border-r border-line">
+            <ol ref={nums} aria-hidden className="py-3 text-right select-none">
+              {Array.from({ length: vm.lineCount }, (_, i) => (
+                <li
+                  key={i}
+                  style={{ height: LINE }}
+                  className={`pr-3 text-caption leading-[27px] ${vm.caretLine === i + 1 ? 'font-bold text-brand' : 'text-sub'}`}
+                >
+                  {i + 1}
+                </li>
+              ))}
+            </ol>
+          </div>
           <textarea
             aria-label="시스템 프롬프트"
             value={vm.text}
             wrap="off"
             spellCheck={false}
-            rows={vm.lineCount}
             onChange={(e) => {
               vm.setText(e.target.value)
               vm.onCaret(e.target.value, e.target.selectionStart)
             }}
             onSelect={(e) => vm.onCaret(e.currentTarget.value, e.currentTarget.selectionStart)}
             onBlur={vm.clearCaret}
+            onScroll={(e) => {
+              // 리렌더 없이 DOM만 옮김 — 스크롤마다 state를 바꾸면 줄 수만큼 다시 그림
+              if (nums.current)
+                nums.current.style.transform = `translateY(${-e.currentTarget.scrollTop}px)`
+            }}
             style={{ lineHeight: `${LINE}px` }}
-            className="min-w-0 flex-1 resize-none overflow-x-auto overflow-y-hidden bg-transparent px-3 py-3 text-label outline-none"
+            className="min-w-0 flex-1 resize-none overflow-auto bg-transparent px-3 py-3 text-label outline-none"
           />
         </div>
 
