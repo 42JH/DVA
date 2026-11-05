@@ -2,6 +2,7 @@ import { PaymentEnvironment, paymentEnvironment } from '../payments/payment-conf
 export interface Environment extends PaymentEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
+  AUTH_PROXY_HOPS: number;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
@@ -51,6 +52,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     return parsed;
   };
   const nodeEnv = raw.NODE_ENV ?? 'development';
+  const authProxyHops = raw.AUTH_PROXY_HOPS ?? '0';
+  if (typeof authProxyHops !== 'string' || !/^[012]$/.test(authProxyHops))
+    errors.push('AUTH_PROXY_HOPS');
   if (!['development', 'test', 'production'].includes(String(nodeEnv))) errors.push('NODE_ENV');
   const aiUrl = required('AI_AGENT_URL');
   try {
@@ -159,6 +163,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     ...paymentEnvironment(raw, errors),
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3000),
+    AUTH_PROXY_HOPS: Number(authProxyHops),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
     DB_USER: required('DB_USER'),

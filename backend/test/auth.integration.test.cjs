@@ -12,6 +12,7 @@ const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { DatabaseService } = require('../dist/database/database.service');
 const { AuthService, tokenHash } = require('../dist/auth/auth.service');
+const { AuthLimitsService } = require('../dist/auth/auth-limits.service');
 const { AuthRepository } = require('../dist/auth/auth.repository');
 const { AdminsService } = require('../dist/admins/admins.service');
 const { AuditService } = require('../dist/audit/audit.service');
@@ -45,8 +46,11 @@ Module({ imports: [AppModule], controllers: [RoleFixture] })(TestModule);
 const prefix = 't' + randomBytes(2).toString('hex');
 const password = 'valid pass123';
 let app, db, base, hash;
+let signupClock = Date.now();
 const logs = [];
 async function call(method, path, body, cookie, headers = {}) {
+  // Existing signup validation cases each get a fresh window; S04 tests exercise shared windows.
+  if (path === '/api/auth/signup') signupClock += 24 * 60 * 60 * 1000;
   const res = await fetch(base + path, {
     method,
     headers: {
@@ -90,6 +94,7 @@ async function login(user, pass = password, cookie) {
 before(async () => {
   app = await NestFactory.create(TestModule, { logger: false });
   configureApplication(app, { log: (row) => logs.push(row) });
+  app.get(AuthLimitsService).now = () => signupClock;
   await app.init();
   db = app.get(DatabaseService);
   // The Docker runner supplies an isolated empty database, never a production connection.

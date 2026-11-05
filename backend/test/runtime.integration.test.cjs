@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const businessHeaders = () => ({ Authorization: 'Bearer ' + process.env.TEST_BUSINESS_TOKEN });
 
+const { setTimeout: delay } = require('node:timers/promises');
+
 test('persona runtime reads and acknowledgment authentication survive real Nginx forwarding', async () => {
   const headers = { Authorization: `Bearer ${process.env.TEST_PERSONA_TOKEN}` };
   const active = await fetch('http://proxy/api/ai/config', { headers });
@@ -1032,5 +1034,74 @@ test('HTTPS proxy preserves administrator authentication, internal blocking and 
   ]) {
     const response = await fetch(root + path, { signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, status, path);
+  }
+});
+
+test('HTTPS and development login IP buckets reject bursts with the established JSON/CORS contract', async () => {
+  // Let any earlier HTTPS login leave the six-request burst allowance fully available.
+  await delay(12_000);
+  for (const root of [process.env.TEST_HTTPS_API_ROOT, 'http://development-proxy/api']) {
+    const send = (index) =>
+      fetch(root + (index % 2 ? '/AUTH/LOGIN/' : '/auth/login'), {
+        method: 'POST',
+        headers: {
+          Origin: 'https://13.209.59.180',
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '192.0.2.' + index,
+          'X-Real-IP': '198.51.100.' + index,
+        },
+        body: JSON.stringify({ loginId: 'invalid-login-id', password: 'x' }),
+      });
+    for (let index = 0; index < 6; index++) {
+      const accepted = await send(index);
+      assert.equal(accepted.status, 400, await accepted.text());
+    }
+    const rejected = await send(7);
+    assert.equal(rejected.status, 429, await rejected.clone().text());
+    assert.equal(rejected.headers.get('retry-after'), '2');
+    assert.equal(rejected.headers.get('cache-control'), 'no-store');
+    assert.equal(rejected.headers.get('access-control-allow-origin'), 'https://13.209.59.180');
+    assert.ok(
+      rejected.headers.get('access-control-expose-headers').toLowerCase().includes('retry-after'),
+    );
+    const body = await rejected.json();
+    assert.equal(body.error.code, 'RATE_LIMITED');
+    assert.deepEqual(body.error.details, []);
+    assert.equal(rejected.headers.get('x-request-id'), body.meta.requestId);
+    const preflight = await fetch(root + '/auth/login', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://13.209.59.180', 'Access-Control-Request-Method': 'POST' },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal((await fetch(root + '/ai/faqs')).status, 200);
+  }
+});
+
+test('signup limits survive HTTPS proxy forwarding and development proxy header sanitization', async () => {
+  for (const root of [process.env.TEST_HTTPS_API_ROOT, 'http://development-proxy/api']) {
+    const send = (index) =>
+      fetch(root + '/auth/signup', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://13.209.59.180',
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': `192.0.2.${index}, 198.51.100.${index}`,
+          'X-Real-IP': '203.0.113.' + index,
+        },
+        body: JSON.stringify({
+          loginId: 'runtimeLimit01',
+          password: 'test-only-password',
+          name: '',
+        }),
+      });
+    for (let index = 0; index < 5; index++) {
+      const accepted = await send(index);
+      assert.equal(accepted.status, 400, await accepted.text());
+    }
+    const rejected = await send(9);
+    assert.equal(rejected.status, 429);
+    assert.ok(Number(rejected.headers.get('retry-after')) > 0);
+    assert.ok(Number(rejected.headers.get('retry-after')) <= 600);
+    assert.equal((await rejected.json()).error.code, 'RATE_LIMITED');
   }
 });

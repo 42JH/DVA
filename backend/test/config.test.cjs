@@ -12,6 +12,20 @@ const valid = {
   AI_AGENT_URL: 'http://ai:8000',
 };
 
+test('auth proxy hops default to direct peers and accept only the supported private proxy topology', () => {
+  assert.equal(validateEnvironment(valid).AUTH_PROXY_HOPS, 0);
+  for (const hops of ['0', '1', '2'])
+    assert.equal(
+      validateEnvironment({ ...valid, AUTH_PROXY_HOPS: hops }).AUTH_PROXY_HOPS,
+      Number(hops),
+    );
+  for (const hops of ['', 'true', '3', '-1', '1.5', 2])
+    assert.throws(
+      () => validateEnvironment({ ...valid, AUTH_PROXY_HOPS: hops }),
+      /AUTH_PROXY_HOPS/,
+    );
+});
+
 test('customer business token is optional, validated and never echoed in configuration errors', () => {
   assert.equal(validateEnvironment(valid).AI_BUSINESS_TOKEN, undefined);
   assert.equal(

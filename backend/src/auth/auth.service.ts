@@ -10,6 +10,7 @@ import { ApiException } from '../common/errors/api.exception';
 import { AuthRepository } from './auth.repository';
 import { ChangePasswordDto, LoginDto, SignupDto } from './dto/auth-request.dto';
 import { hashPassword, verifyPassword } from './password';
+import { AuthLimitsService } from './auth-limits.service';
 export function tokenHash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -22,6 +23,7 @@ export class AuthService {
     private readonly repository: AuthRepository,
     private readonly admins: AdminsService,
     private readonly audit: AuditService,
+    private readonly limits: AuthLimitsService,
   ) {}
   async authenticate(token?: string, client?: PoolClient): Promise<AdminPublic> {
     if (!token || !/^[0-9a-f]{64}$/.test(token)) throw unauthorized();
@@ -30,41 +32,51 @@ export class AuthService {
     return account;
   }
   async login(input: LoginDto, requestId: string, previousToken?: string) {
-    return this.database.transaction(async (client) => {
-      // Hold the account lock through password verification and session creation.
-      // Password changes use the same lock, so old-password logins cannot survive a reset.
-      const account = await this.admins.findForLogin(input.loginId, client);
-      const valid = await verifyPassword(input.password, account?.passwordHash);
-      if (!account || !valid) throw unauthorized();
-      if (account.status === 'INACTIVE')
-        throw new ApiException(403, 'ACCOUNT_INACTIVE', '비활성화된 계정입니다.');
-      if (account.status === 'PENDING')
-        throw new ApiException(403, 'ACCOUNT_PENDING', '승인 대기중입니다.');
-      if (account.status !== 'ACTIVE') throw unauthorized();
-      const token = randomBytes(32).toString('hex');
-      if (previousToken) await this.repository.remove(tokenHash(previousToken), client);
-      await this.repository.removeExpired(account.adminUserSeq, client);
-      const expiresAt = await this.repository.create(
-        tokenHash(token),
-        account.adminUserSeq,
-        client,
-      );
-      await this.admins.recordLogin(account.adminUserSeq, client);
-      await this.audit.record(
-        account.adminUserSeq,
-        account.adminUserSeq,
-        'ADMIN_LOGIN',
-        requestId,
-        client,
-      );
-      return { token, expiresAt };
+    return this.limits.withPasswordWork(async () => {
+      this.limits.checkLogin(input.loginId);
+      const result = await this.database.transaction(async (client) => {
+        // Hold the account lock through password verification and session creation.
+        // Password changes use the same lock, so old-password logins cannot survive a reset.
+        const account = await this.admins.findForLogin(input.loginId, client);
+        const valid = await verifyPassword(input.password, account?.passwordHash);
+        if (!account || !valid) {
+          this.limits.recordLoginFailure(input.loginId);
+          throw unauthorized();
+        }
+        if (account.status === 'INACTIVE')
+          throw new ApiException(403, 'ACCOUNT_INACTIVE', '비활성화된 계정입니다.');
+        if (account.status === 'PENDING')
+          throw new ApiException(403, 'ACCOUNT_PENDING', '승인 대기중입니다.');
+        if (account.status !== 'ACTIVE') throw unauthorized();
+        const token = randomBytes(32).toString('hex');
+        if (previousToken) await this.repository.remove(tokenHash(previousToken), client);
+        await this.repository.removeExpired(account.adminUserSeq, client);
+        const expiresAt = await this.repository.create(
+          tokenHash(token),
+          account.adminUserSeq,
+          client,
+        );
+        await this.admins.recordLogin(account.adminUserSeq, client);
+        await this.audit.record(
+          account.adminUserSeq,
+          account.adminUserSeq,
+          'ADMIN_LOGIN',
+          requestId,
+          client,
+        );
+        return { token, expiresAt };
+      });
+      this.limits.clearLogin(input.loginId);
+      return result;
     });
   }
   async signup(input: SignupDto, requestId: string) {
-    const hash = await hashPassword(input.password);
-    await this.database.transaction(async (client) => {
-      const account = await this.admins.signup(input.loginId, input.name, hash, client);
-      await this.audit.record(null, account.adminUserSeq, 'ADMIN_SIGNUP', requestId, client);
+    return this.limits.withPasswordWork(async () => {
+      const hash = await hashPassword(input.password);
+      await this.database.transaction(async (client) => {
+        const account = await this.admins.signup(input.loginId, input.name, hash, client);
+        await this.audit.record(null, account.adminUserSeq, 'ADMIN_SIGNUP', requestId, client);
+      });
     });
   }
   async logout(token: string | undefined, requestId: string) {
@@ -146,28 +158,32 @@ export class AuthService {
       details.push({ field: 'newPasswordConfirm', reason: 'PASSWORD_MISMATCH' });
     if (details.length)
       throw new ApiException(422, 'VALIDATION_FAILED', '입력값을 확인해 주세요.', details);
-    const hash = await hashPassword(input.newPassword);
-    await this.database.transaction(async (client) => {
-      const identity = await this.authenticate(token, client);
-      const { actor, target } = await this.lockAuthorized(
-        token,
-        identity.adminUserSeq,
-        false,
-        client,
-      );
-      if (!(await verifyPassword(input.currentPassword, target.passwordHash)))
-        throw new ApiException(422, 'VALIDATION_FAILED', '입력값을 확인해 주세요.', [
-          { field: 'currentPassword', reason: 'INCORRECT_PASSWORD' },
-        ]);
-      await this.savePassword(actor, target, hash, requestId, client);
+    return this.limits.withPasswordWork(async () => {
+      const hash = await hashPassword(input.newPassword);
+      await this.database.transaction(async (client) => {
+        const identity = await this.authenticate(token, client);
+        const { actor, target } = await this.lockAuthorized(
+          token,
+          identity.adminUserSeq,
+          false,
+          client,
+        );
+        if (!(await verifyPassword(input.currentPassword, target.passwordHash)))
+          throw new ApiException(422, 'VALIDATION_FAILED', '입력값을 확인해 주세요.', [
+            { field: 'currentPassword', reason: 'INCORRECT_PASSWORD' },
+          ]);
+        await this.savePassword(actor, target, hash, requestId, client);
+      });
     });
   }
   async resetPassword(token: string, id: number, requestId: string) {
-    const hash = await hashPassword('dva1234');
-    return this.database.transaction(async (client) => {
-      const { actor, target } = await this.lockAuthorized(token, id, true, client);
-      await this.savePassword(actor, target, hash, requestId, client);
-      return actor.adminUserSeq === id;
+    return this.limits.withPasswordWork(async () => {
+      const hash = await hashPassword('dva1234');
+      return this.database.transaction(async (client) => {
+        const { actor, target } = await this.lockAuthorized(token, id, true, client);
+        await this.savePassword(actor, target, hash, requestId, client);
+        return actor.adminUserSeq === id;
+      });
     });
   }
 }

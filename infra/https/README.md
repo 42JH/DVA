@@ -1,5 +1,7 @@
 # 고정 IP HTTPS 운영
 
+관리자 로그인 IP 제한은 [S04 적용 순서](../../backend/docs/auth-request-limits.md)에 따라 새 backend 적용 후 이 폴더의 `https.conf`를 호스트 Nginx에 별도 반영한다. 평균 30회/분·burst 5이며 초과 요청의 JSON·CORS·Retry-After는 backend guard가 처리한다. backend/내부 Nginx의 기존 비공개 바인딩을 유지한다.
+
 대상: Lightsail `13.209.59.180`. 도메인 구매·Route 53·별도 로드밸런서 없이 기존 서버를 사용한다.
 Let’s Encrypt IP 인증서는 무료이며 유효기간은 약 160시간이다.
 발급 사양: https://letsencrypt.org/2026/03/11/shorter-certs-certbot.html

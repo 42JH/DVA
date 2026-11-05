@@ -5,6 +5,235 @@ const { hashPassword, verifyPassword } = require('../dist/auth/password');
 const { readSessionToken } = require('../dist/auth/auth.guard');
 const { cookieOptions } = require('../dist/auth/auth.controller');
 const { tokenHash } = require('../dist/auth/auth.service');
+const { AuthService } = require('../dist/auth/auth.service');
+const { AuthLimitsService } = require('../dist/auth/auth-limits.service');
+const { authClientIp, AuthLimitsGuard } = require('../dist/auth/auth-limits.guard');
+const { RateLimitException } = require('../dist/common/errors/api.exception');
+const { validateSync } = require('class-validator');
+const { plainToInstance } = require('class-transformer');
+const { LoginDto, SignupDto, ChangePasswordDto } = require('../dist/auth/dto/auth-request.dto');
+
+function limitsFixture() {
+  const limits = new AuthLimitsService();
+  let now = 1_000_000;
+  limits.now = () => now;
+  return {
+    limits,
+    advance: (milliseconds) => {
+      now += milliseconds;
+    },
+  };
+}
+const isLimited = (seconds) => (error) => {
+  assert.ok(error instanceof RateLimitException);
+  assert.equal(error.getStatus(), 429);
+  if (seconds !== undefined) assert.equal(error.retryAfterSeconds, seconds);
+  return true;
+};
+
+test('signup counts attempts in both rolling windows without extending a blocked window', () => {
+  const { limits, advance } = limitsFixture();
+  for (let batch = 0; batch < 4; batch++) {
+    for (let attempt = 0; attempt < 5; attempt++) limits.checkSignup('192.0.2.1');
+    assert.throws(() => limits.checkSignup('192.0.2.1'), isLimited(batch === 3 ? 84_600 : 600));
+    if (batch === 0) {
+      advance(100_000);
+      assert.throws(() => limits.checkSignup('192.0.2.1'), isLimited(500));
+      limits.checkSignup('192.0.2.2');
+      advance(500_000);
+    } else advance(600_000);
+  }
+  assert.throws(() => limits.checkSignup('192.0.2.1'), isLimited(84_000));
+  advance(84_000_000);
+  limits.checkSignup('192.0.2.1');
+});
+
+test('five failures block an ID for five minutes; blocked and in-flight failures cannot extend it', () => {
+  const { limits, advance } = limitsFixture();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    limits.checkLogin('operator');
+    limits.recordLoginFailure('operator');
+  }
+  assert.throws(() => limits.checkLogin('operator'), isLimited(300));
+  advance(60_000);
+  limits.recordLoginFailure('operator');
+  assert.throws(() => limits.checkLogin('operator'), isLimited(240));
+  limits.checkLogin('Operator');
+  advance(240_000);
+  limits.checkLogin('operator');
+  for (let attempt = 0; attempt < 4; attempt++) limits.recordLoginFailure('operator');
+  limits.checkLogin('operator');
+  limits.clearLogin('operator');
+  limits.recordLoginFailure('operator');
+  limits.checkLogin('operator');
+});
+
+test('account failures outside fifteen minutes expire and live counter storage is bounded', () => {
+  const { limits, advance } = limitsFixture();
+  for (let attempt = 0; attempt < 4; attempt++) limits.recordLoginFailure('operator');
+  advance(900_000);
+  limits.recordLoginFailure('operator');
+  limits.checkLogin('operator');
+  for (let index = 0; index < 9999; index++) limits.checkLogin('id' + index);
+  assert.equal(limits.counters.size, 10_000);
+  assert.throws(() => limits.checkLogin('overflow'), isLimited(60));
+  for (let attempt = 0; attempt < 4; attempt++) limits.recordLoginFailure('operator');
+  assert.throws(() => limits.checkLogin('operator'), isLimited(300));
+  advance(900_000);
+  limits.checkLogin('overflow');
+  assert.equal(limits.counters.size, 1);
+});
+
+test('all HTTP password operations share two slots before obtaining a DB connection, and release on failure', async () => {
+  const { limits } = limitsFixture();
+  let calls = 0,
+    release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const database = {
+    transaction: async () => {
+      calls++;
+      await held;
+      throw new Error('transaction failed');
+    },
+  };
+  const auth = new AuthService(database, {}, {}, {}, limits);
+  const first = auth.login({ loginId: 'first', password: 'password' }, 'request');
+  const second = auth.login({ loginId: 'second', password: 'password' }, 'request');
+  for (const work of [
+    () => auth.login({ loginId: 'third', password: 'password' }, 'request'),
+    () => auth.signup({ loginId: 'new', password: 'password', name: 'Name' }, 'request'),
+    () =>
+      auth.changePassword(
+        'token',
+        { currentPassword: 'password', newPassword: 'newpass', newPasswordConfirm: 'newpass' },
+        'request',
+      ),
+    () => auth.resetPassword('token', 1, 'request'),
+  ])
+    await assert.rejects(work, isLimited(1));
+  assert.equal(calls, 2);
+  release();
+  await Promise.all([
+    assert.rejects(first, /transaction failed/),
+    assert.rejects(second, /transaction failed/),
+  ]);
+  await assert.rejects(
+    auth.login({ loginId: 'third', password: 'password' }, 'request'),
+    /transaction failed/,
+  );
+  assert.equal(calls, 3);
+});
+
+test('authentication IP selection ignores untrusted headers and uses only the configured proxy tail', () => {
+  const request = (forwarded) => ({
+    socket: { remoteAddress: '::ffff:127.0.0.1' },
+    get: () => forwarded,
+  });
+  assert.equal(authClientIp(request('192.0.2.99'), 0), '127.0.0.1');
+  assert.equal(authClientIp(request('192.0.2.99, 198.51.100.7, 172.18.0.1'), 2), '198.51.100.7');
+  assert.equal(authClientIp(request('198.51.100.7'), 1), '198.51.100.7');
+  for (const value of [undefined, '198.51.100.7', 'invalid, 172.18.0.1', '198.51.100.7,'])
+    assert.equal(authClientIp(request(value), 2), '127.0.0.1');
+});
+
+test('the signup guard separates authoritative client IPs, ignores forged prefixes and scopes the proxy marker', () => {
+  const { AuthController } = require('../dist/auth/auth.controller');
+  const { limits } = limitsFixture();
+  const guard = new AuthLimitsGuard(limits, { get: () => 2 }, new Reflector());
+  const context = (handler, forwarded, limited) => ({
+    getHandler: () => handler,
+    switchToHttp: () => ({
+      getRequest: () => ({
+        socket: { remoteAddress: '172.18.0.3' },
+        get: (name) => (name === 'X-Forwarded-For' ? forwarded : limited),
+      }),
+    }),
+  });
+  for (let index = 0; index < 5; index++)
+    assert.equal(
+      guard.canActivate(
+        context(AuthController.prototype.signup, `192.0.2.${index}, 198.51.100.1, 172.18.0.1`),
+      ),
+      true,
+    );
+  assert.throws(
+    () =>
+      guard.canActivate(
+        context(AuthController.prototype.signup, '203.0.113.1, 198.51.100.1, 172.18.0.1'),
+      ),
+    isLimited(600),
+  );
+  assert.equal(
+    guard.canActivate(context(AuthController.prototype.signup, '198.51.100.2, 172.18.0.1')),
+    true,
+  );
+  assert.throws(
+    () => guard.canActivate(context(AuthController.prototype.login, undefined, '1')),
+    isLimited(2),
+  );
+  assert.equal(guard.canActivate(context(AuthController.prototype.me, undefined, '1')), true);
+});
+
+test('rate-limit drops avoid DB failure audit while authentication denials still use it', async () => {
+  const { AuditFailureInterceptor } = require('../dist/audit/audit-failure.interceptor');
+  const { throwError, lastValueFrom } = require('rxjs');
+  let writes = 0;
+  const interceptor = new AuditFailureInterceptor(
+    { get: () => ({ action: 'ADMIN_LOGIN', targetType: 'ADMIN_USER', target: 'none' }) },
+    {
+      recordFailure: async () => {
+        writes++;
+      },
+    },
+  );
+  const context = {
+    getHandler: () => () => {},
+    switchToHttp: () => ({ getRequest: () => ({ headers: {}, params: {}, requestId: 'test' }) }),
+  };
+  const run = (error) =>
+    lastValueFrom(interceptor.intercept(context, { handle: () => throwError(() => error) }));
+  await assert.rejects(run(new RateLimitException(1)), isLimited(1));
+  assert.equal(writes, 0);
+  await assert.rejects(
+    run(new ApiException(401, 'UNAUTHORIZED', '인증 실패')),
+    (error) => error.getStatus() === 401,
+  );
+  assert.equal(writes, 1);
+});
+
+test('signup/new password length bounds preserve legacy login, whitespace and Unicode', () => {
+  const validate = (type, input) => validateSync(plainToInstance(type, input));
+  const signup = { loginId: 'operator', password: 'password', name: '이'.repeat(50) };
+  assert.deepEqual(validate(SignupDto, signup), []);
+  assert.equal(validate(SignupDto, { ...signup, name: '이'.repeat(51) })[0].property, 'name');
+  for (const password of ['x'.repeat(257), '12345', 123456, null])
+    assert.ok(
+      validate(SignupDto, { ...signup, password }).some((error) => error.property === 'password'),
+    );
+  assert.deepEqual(validate(SignupDto, { ...signup, password: '🙂'.repeat(256) }), []);
+  assert.deepEqual(
+    validate(LoginDto, { loginId: 'operator', password: ' 비밀 ' + 'x'.repeat(300) }),
+    [],
+  );
+  const change = {
+    currentPassword: 'x'.repeat(300),
+    newPassword: ' 새 비밀 ' + 'x'.repeat(249),
+    newPasswordConfirm: ' 새 비밀 ' + 'x'.repeat(249),
+  };
+  assert.deepEqual(validate(ChangePasswordDto, change), []);
+  assert.ok(
+    validate(ChangePasswordDto, { ...change, newPassword: 'x'.repeat(257) }).some(
+      (error) => error.property === 'newPassword',
+    ),
+  );
+  assert.ok(
+    validate(ChangePasswordDto, { ...change, newPasswordConfirm: 'x'.repeat(257) }).some(
+      (error) => error.property === 'newPasswordConfirm',
+    ),
+  );
+});
 test('password hashing is salted, preserves spaces and long Unicode input, and fails closed', async () => {
   const password = ' 비밀번호 ' + 'x'.repeat(140);
   const first = await hashPassword(password);

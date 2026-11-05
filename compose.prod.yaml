@@ -39,6 +39,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      AUTH_PROXY_HOPS: "2"
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: ${DB_USER:?Set DB_USER in the environment file}
