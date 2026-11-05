@@ -68,11 +68,8 @@ export const router = createBrowserRouter([
           // 08 기업관리 (11/05 새 디자인 — 구성 그대로 모양만) — handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'companies', element: <CompanyListPage /> },
           { path: 'companies/:companyId', element: <CompanyDetailPage /> },
-          {
-            path: 'personas',
-            element: <PersonaPage />,
-            handle: { title: '페르소나 관리' } satisfies RouteHandle,
-          },
+          // 07 페르소나 관리 (11/05 새 디자인 — 구성 그대로 모양만) — handle 없음(화면이 상단바를 그림)
+          { path: 'personas', element: <PersonaPage /> },
           // 09 FAQ (Figma 11/04) — 목록 · 상세 · 작성 · 수정은 handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'faqs', element: <FaqListPage /> },
           { path: 'faqs/new', element: <FaqEditPage /> },

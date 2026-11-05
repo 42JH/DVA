@@ -5,7 +5,7 @@ import { PersonaList } from './PersonaList'
 import { VersionList } from './VersionList'
 
 // 오른쪽 346 카드 [페르소나 | 버전 히스토리] — 보기 화면 · 수정 화면 공용 (11/02)
-// 접기 · 펼치기(onToggle)는 두 화면 모두. 수정 화면은 버튼 없이(onUse · onAdd · onTestCall · onApply를 안 줌)
+// 11/05 새 디자인: 탭 big(글자 20 · 파랑 밑줄). 접기 · 펼치기(onToggle)는 두 화면 모두. 수정 화면은 버튼 없이(onUse · onAdd · onTestCall · onApply를 안 줌)
 const TABS: { key: PanelTab; label: string }[] = [
   { key: 'persona', label: '페르소나' },
   { key: 'history', label: '버전 히스토리' },
@@ -79,7 +79,7 @@ export function PersonaPanel({
   return (
     <aside className="flex w-[346px] shrink-0 flex-col rounded-xl bg-surface px-5 pt-3 pb-5 ring-1 ring-line ring-inset">
       <div className="flex items-start gap-2">
-        <Tabs items={TABS} value={tab} onChange={onTab} />
+        <Tabs big items={TABS} value={tab} onChange={onTab} />
         {onToggle && (
           <button
             type="button"
