@@ -7,7 +7,6 @@ import {
   Pagination,
   Table,
   TopBar,
-  TopSearch,
   type Column,
   type MoreMenuItem,
 } from '@/shared/ui'
@@ -116,16 +115,8 @@ export function AdminPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar
-        search={
-          <TopSearch
-            name="관리자 검색"
-            fields={[{ value: vm.q }]}
-            hint="이름이나 아이디로 찾아요. 지금 보고 있는 탭 안에서 찾아요."
-            onApply={([q]) => vm.setQ(q)}
-          />
-        }
-      />
+      {/* 설정 화면은 검색칸 없음 (11/05 사용자) */}
+      <TopBar search={false} />
       <ListPage className="mt-2 min-h-0 flex-1 px-[54px]">
         {/* 04 통화 내역 · 09 FAQ처럼 밑줄 탭 (11/01, 칸 버튼 CountTabs에서 바꿈). 승인 대기 건수는 빨강 그대로 */}
         <Tabs big items={vm.tabs} value={vm.tab} onChange={vm.setTab} />

@@ -1,20 +1,10 @@
-import { Fragment, useContext, type ReactNode } from 'react'
+import { Fragment, useContext } from 'react'
 import { Link, useLocation } from 'react-router'
 import { unansweredTo } from '@/shared/lib/unansweredReason'
+import { GlobalSearch, type SearchProps } from '@/shared/search/GlobalSearch'
 import { TopBarInfo } from './topBarInfo'
 
-// 상단바 (와이어프레임 16 Page header) — 높이 64 · 제목 28/700 · 아래 구분선 · 왼쪽 여백 32(본문과 같은 선)
-// 사이드바처럼 모든 화면에 고정된 틀이라 각 화면이 그리지 않는다. AppLayout이 라우트의 handle.title로 그린다
-// 새 디자인 화면(11/04 FAQ부터)은 handle.title 없이 화면이 TopBar · Crumbs를 본문 맨 위에 직접 그린다
-export function PageHeader({ title, unanswered }: { title: string; unanswered: number }) {
-  return (
-    <header className="flex h-16 shrink-0 items-center border-b border-line px-content">
-      <h1 className="text-title font-bold">{title}</h1>
-      <UnansweredAlert count={unanswered} className="ml-auto" />
-    </header>
-  )
-}
-
+// 상단바(TopBar) · 경로(Crumbs) — 화면이 본문 맨 위에 직접 그림. handle.title이 있는 화면(새 디자인 전)은 AppLayout이 대신 그림
 // AI 미답변 알림 (Figma '프레임' 11/04 — 사이드바 'AI 미답변' 옆 빨간 숫자가 여기로). 0건이면 안 보임
 // 종 20 + 8 + 글자 16/600. 색은 디자인(#e77f83)이 흰 바탕에서 대비 2.7:1이라 danger(빨강)로
 function UnansweredAlert({ count, className = '' }: { count: number; className?: string }) {
@@ -45,36 +35,33 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
   )
 }
 
-// 새 상단바 (Figma '프레임' · 'FAQ' · '통화' 11/04) — 상태 | 화면 검색칸(폭 317, 가운데 — 있을 때) | AI 미답변 알림. 화면이 본문 맨 위에 그림
+// 새 상단바 (Figma '프레임' · 'FAQ' · '통화' 11/04) — 상태 | 검색칸(폭 317, 가운데) | AI 미답변 알림. 화면이 본문 맨 위에 그림
 // (본문 위 여백 24를 끌어올려 카드 위에서 36 높이에 가운데가 오게). 정보는 AppLayout이 TopBarInfo로 채워 줌
 // 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 점은 라이브처럼 깜빡임, 0건이면 '접수 중'만(11/04 사용자). 실시간 연결이 끊기면 점이 회색으로 멈춤
 // 날짜는 뺌 (11/04 사용자 — 04 통화처럼 FAQ도). 상태는 카드 왼쪽 24부터(Figma '통화'), 좁은 화면(1280)에선 말줄임 — 검색칸은 늘 가운데
-// crumbs = 검색 중이면 상태 자리에 경로('“박스” 검색', 11/04 사용자 — 상세로 가면 '“박스” 검색 > “박스” 검색 상세')
-export function TopBar({ search, crumbs }: { search?: ReactNode; crumbs?: Crumb[] }) {
+// 11/05 사용자: 모든 화면 같은 모양 — 검색은 공용 탭 검색(shared/search/GlobalSearch), 처음 탭 = 그 화면(기본 주문). 설정 화면은 search={false}
+// 경로('통화 > 통화 상세')는 상단바가 아니라 그 아래 줄에 화면이 그림
+export function TopBar({ search = { tab: 'order' } }: { search?: SearchProps | false }) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
   return (
     <header className="-mt-6 -ml-4 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2">
       <div className="flex min-w-0 items-center">
-        {crumbs ? (
-          <Crumbs items={crumbs} className="min-w-0 truncate" />
-        ) : (
-          persona && (
+        {persona && (
+          <span
+            title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
+            className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
+          >
             <span
-              title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
-              className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
-            >
-              <span
-                aria-hidden
-                className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
-              />
-              <span className="truncate">
-                {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
-              </span>
+              aria-hidden
+              className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
+            />
+            <span className="truncate">
+              {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
             </span>
-          )
+          </span>
         )}
       </div>
-      {search ?? <span />}
+      {search ? <GlobalSearch {...search} /> : <span />}
       <UnansweredAlert count={unanswered} className="justify-self-end" />
     </header>
   )

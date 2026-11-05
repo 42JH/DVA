@@ -98,11 +98,6 @@ export function useUnansweredList() {
     goPage: (p: number) => set({ page: p }),
 
     openCall: (u: UnansweredQuestion) => navigate(`/calls/${u.callSessionSeq}`),
-    // 상단바 검색 창 미리 보기 (11/05) — 목록과 같은 규칙, 앞 6개 (오래된 것부터)
-    preview: (q: string) =>
-      find(q)
-        .slice(0, 6)
-        .map((u) => ({ ...u, time: u.startedAt ? fmtListTime(u.startedAt).join(' ') : '—' })),
 
     modal,
     // FAQ 추가 = FAQ 작성 화면(11/04 새 디자인)으로 — 질문 칸에 고객이 한 말을 채우고, 저장하면 이 질문이 처리됨(API-27) · 여기로 돌아옴

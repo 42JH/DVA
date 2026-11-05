@@ -7,7 +7,6 @@ import {
   Table,
   Tag,
   TopBar,
-  TopSearch,
   type Column,
 } from '@/shared/ui'
 import { INACTIVE_TAG } from '@/features/company/labels'
@@ -53,17 +52,7 @@ export function CompanyListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar
-        search={
-          <TopSearch
-            name="기업 검색"
-            fields={[{ value: vm.q }]}
-            hint="기업명으로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요."
-            recentKey="companies"
-            onApply={([q]) => vm.setQ(q)}
-          />
-        }
-      />
+      <TopBar search={{ tab: 'company', q: vm.q, onApply: vm.setQ }} />
       <ListPage className="mt-2 min-h-0 flex-1 px-[54px]">
         <FilterBar>
           <Button

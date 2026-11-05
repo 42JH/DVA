@@ -1,6 +1,5 @@
 import { TopBar } from '@/shared/ui'
 import { useDashboard } from '@/features/dashboard/hooks/useDashboard'
-import { DashboardSearch } from './DashboardSearch'
 import { ComplaintCard, DropOffCard, RegistrationCard, WaitCard } from './MetricCards'
 
 // 02 통계 'AI 상담 성능' (Figma 디자인/목업 '통계' 11/05 · 숫자는 대시보드 연동 명세) — 로그인하면 처음 보는 화면 (홈 화면은 없앰, 11/05 사용자)
@@ -11,7 +10,8 @@ export function DashboardPage() {
   const vm = useDashboard()
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar search={<DashboardSearch />} />
+      {/* 상단바 검색 탭은 주문이 먼저 (11/05 사용자) */}
+      <TopBar />
       <div className="shrink-0 pt-v24">
         <h1 className="text-v24 font-bold">AI 상담 성능</h1>
         <p className="mt-[3px] text-[12px] text-muted">

@@ -5,8 +5,8 @@ import {
   Pagination,
   Table,
   Tag,
+  Crumbs,
   TopBar,
-  TopSearch,
   type Column,
 } from '@/shared/ui'
 import { INACTIVE_TAG, MEMBER_ROLE } from '@/features/company/labels'
@@ -86,16 +86,11 @@ export function CompanyDetailPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar
-        crumbs={[{ label: '기업관리', to: '/companies' }, { label: '기업 상세' }]}
-        search={
-          <TopSearch
-            name="사원 검색"
-            fields={[{ value: vm.q }]}
-            hint="사원명 · 사번 · 전화번호로 찾아요."
-            onApply={([q]) => vm.setQ(q)}
-          />
-        }
+      {/* 11/05 사용자: 모든 화면 같은 상단바(기업 탭이 먼저) — 경로는 아래 줄. 예전 '사원 검색'은 공용 탭 검색으로 바뀌어 없어짐 */}
+      <TopBar search={{ tab: 'company' }} />
+      <Crumbs
+        items={[{ label: '기업관리', to: '/companies' }, { label: '기업 상세' }]}
+        className="shrink-0 px-[54px]"
       />
       <div className="mt-2 flex min-h-0 flex-1 flex-col gap-6 px-[54px]">
         <div className="flex shrink-0 items-center gap-4">

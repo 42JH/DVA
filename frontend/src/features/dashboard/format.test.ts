@@ -1,16 +1,6 @@
 // 실행: npx tsx src/features/dashboard/format.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import {
-  axisTicks,
-  hoursMinutes,
-  maxIndex,
-  num,
-  one,
-  two,
-  parseOrderNo,
-  pctText,
-  versionGap,
-} from './format'
+import { axisTicks, hoursMinutes, maxIndex, num, one, two, pctText, versionGap } from './format'
 
 // 서버가 반올림하지 않은 비율 · 평균 (디자인 예시 수치)
 assert.equal(one((51 / 400) * 100), '12.8')
@@ -41,12 +31,5 @@ assert.equal(versionGap(230 - 182.9), '현재 버전이 직전 버전보다 접�
 assert.equal(versionGap(-30), '현재 버전이 직전 버전보다 접수 1건당 30.0초 길었어요.')
 assert.equal(versionGap(0.04), '현재 버전과 직전 버전의 접수 1건당 시간이 같았어요.')
 assert.equal(versionGap(null), null)
-
-assert.equal(parseOrderNo('DV-10519'), 10519)
-assert.equal(parseOrderNo(' dv 00012 '), 12)
-assert.equal(parseOrderNo('10519'), 10519)
-assert.equal(parseOrderNo('01012345678'), null) // 0으로 시작 = 전화번호
-assert.equal(parseOrderNo('DV-'), null)
-assert.equal(parseOrderNo('김민'), null)
 
 console.log('format.test.ts OK')

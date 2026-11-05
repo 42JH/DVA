@@ -13,7 +13,8 @@ export function MyInfoPage() {
 
   return (
     <div className="flex flex-col">
-      <TopBar />
+      {/* 설정 화면은 검색칸 없음 (11/05 사용자) */}
+      <TopBar search={false} />
       <NewLook.Provider value>
         <div className="mt-v24 flex justify-center">
           <section className="flex w-[640px] flex-col gap-v24 rounded-xl bg-surface px-8 py-v32 ring-1 ring-line [--field-label:150px] ring-inset">
