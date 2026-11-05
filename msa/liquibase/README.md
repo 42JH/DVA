@@ -7,14 +7,14 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 
 | 서비스 | DB | Secret | 업무·이벤트 테이블 | Liquibase 포함 |
 |---|---|---|---:|---:|
-| customer | customer_db | customer-db | 7 | 9 |
+| customer | customer_db | customer-db | 8 | 10 |
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 6 | 8 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
 | operations | operations_db | operations-db | 8 | 10 |
 
-현재 업무 테이블 19개 + outbox/inbox 10개 = 29개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 39개가 된다.
+현재 업무 테이블 20개 + outbox/inbox 10개 = 30개. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 40개가 된다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
 
@@ -23,6 +23,7 @@ DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 39개�
 - 서비스별 초기 changeset 1개. 각 서비스 DB 안에서 원자적으로 실행한다.
 - customer와 operations는 기존 `002`와 이벤트 전달용 `003`, 나머지는 이벤트 전달용 `002`도 포함한다. 각 changeset은 별도 트랜잭션이다.
 - operations `004`는 관리자 이름·soft delete·9시간 세션·감사 이름 스냅샷과 INACTIVE 상태를 모놀리식 계약에 맞춘다. 이름 없는 기존 관리자 행이 있으면 데이터를 보존하고 적용을 중단한다. 실제 이름을 확인한 별도 마이그레이션 전에는 인증 앱을 배포하지 않는다.
+- customer `004`는 기본 주소·월결제 자격·soft delete·부서·선택 부서 소속과 제약을 추가한다. 기존 고객/기업/소속/PIN/이벤트는 보존하며 근거 없는 과거 기업 생성 시각·기본 주소·부서 배정은 NULL로 남긴다. PIN 주소 규칙·버전은 변경하지 않는다. 003의 기존 데이터 업그레이드와 후속 SQL 실패 롤백도 검증한다.
 - SQL의 바깥 BEGIN/COMMIT만 제거하고 runInTransaction=true로 Liquibase가 트랜잭션을 관리한다.
 - splitStatements=false로 PostgreSQL 함수 본문의 세미콜론을 보존한다.
 - 기존 업무 테이블이 있으면 초기 changeset을 HALT한다. 자동 삭제/덮어쓰기하지 않는다.

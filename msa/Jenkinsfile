@@ -99,6 +99,20 @@ pipeline {
             }
         }
 
+        stage('Verify Customer Parity') {
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().contains('customer')
+                }
+            }
+            steps { sh 'python3 msa/parity/verify-customer.py' }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'msa/liquibase/verification-logs/customer/**', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Verify and Build Services') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
@@ -183,9 +197,9 @@ pipeline {
                                 mkdir -p msa-release/app-logs
                                 count=0
 
-                                for package in msa-release/apps/"$RELEASE_NAME"/*; do
-                                    [ -d "$package" ] || continue
-                                    service=$(basename "$package")
+                                while IFS= read -r service; do
+                                    package="msa-release/apps/$RELEASE_NAME/$service"
+                                    test -d "$package"
 
                                     bash msa/deploy/upload-app.sh \
                                         "$package" "$MSA_SSH_KEY" \
@@ -195,7 +209,7 @@ pipeline {
                                         "msa-release/app-logs/$service.log"
 
                                     count=$((count + 1))
-                                done
+                                done < msa-release/services.txt
 
                                 if [ "$count" -eq 0 ]; then
                                     echo 'No application packages to deploy.' >&2

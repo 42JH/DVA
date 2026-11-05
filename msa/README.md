@@ -1,6 +1,6 @@
 # MSA CI/CD
 
-모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. 전체 API·migration·워커 기준 목록과 이벤트 공통 런타임/검증 위에 [operations의 인증·관리자·감사 API](services/operations/README.md)를 연결했다. 다른 서비스의 업무 API·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`에서 임시 PostgreSQL·HTTP 검증과 기준 목록 검사를 실행하고 실패 시 이후 배포를 중단한다. operations 빌드 시 `Verify Operations Parity`에서 변경하지 않은 모놀리식 인증 테스트와 양쪽 production 이미지의 HTTP·DB 비교도 실행한다.
+모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. [operations의 인증·관리자·감사 11개 API](services/operations/README.md)와 [customer 조회 7개 API·세션 인증 위임](services/customer/README.md)을 연결했다. 남은 업무 API·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`의 임시 PostgreSQL·HTTP 검증과 기준 목록 검사, 선택한 서비스의 `Verify Operations Parity`/`Verify Customer Parity`에서 원본 모놀리식과 HTTP·DB 비교를 실행하고 실패 시 이후 배포를 중단한다.
 
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
@@ -21,6 +21,7 @@ Webhook → develop-backend checkout → 스크립트 검사 → 실제 배포 �
 앱은 서비스별 **실제 배포 성공 커밋**과 비교한다. CI만 성공했거나 배포가 실패한 변경을 누락하지 않는다. 기존 정상 customer는 이미지 태그의 커밋으로 최초 이력을 이어받는다. 클러스터 이력 조회 실패는 배포를 중단한다.
 
 - 서비스 폴더 변경: 해당 서비스만 빌드한다. 앱 공통 배포 코드 변경: 모든 서비스를 빌드한다.
+- customer는 operations에 현재 세션을 조회하므로 두 서비스가 선택되면 operations부터 배포한다. 배포 스크립트는 최초 `msa-customer-auth` Secret을 만들고 기존 서비스 비밀 값은 교체하지 않는다. customer의 DB·인증 readiness가 실패하면 새 Pod를 트래픽에 넣지 않는다.
 - DB CI는 마지막 성공 CI 커밋 기준으로 DB 관련 경로를 비교한다. 앱 전용 코드·문서 변경만으로 DB 검사를 실행하지 않는다. Jenkinsfile, DB 배포 코드, 공통 SSH 설정 변경이나 비교 이력 누락은 DB CI를 실행한다.
 - Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
 - `develop-backend` 실행은 CI와 CD를 함께 수행한다. 수동 재실행도 동일한 흐름이다. 작업 브랜치는 CI만 수행한다.

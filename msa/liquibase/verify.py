@@ -83,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',7,4),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',8,4)]:
+    for service, tables, fks in [('customer',8,6),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',8,4)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 3, 'operations': 4}.get(service, 2)
+        changesets = {'customer': 4, 'operations': 4}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -102,6 +102,8 @@ try:
         assert history == after, service
         if service in checks:
             sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-workflow', service+'_app')
+        if service == 'customer':
+            sql(db, (SOURCE / 'customer-reads-check.sql').read_text(encoding='utf-8'), 'customer-reads-workflow', 'customer_app')
         fingerprint = preview_fingerprint(service, db, service+'-ci-preview-current')
         output = ci_command(service, db, 'apply', service+'-ci-apply-current', fingerprint)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
@@ -182,7 +184,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('4' if service == 'operations' else '3')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '4'
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -235,6 +237,35 @@ try:
     assert sql('operations_auth_upgrade_db', "SELECT to_regclass('admin_sessions') IS NULL;", 'operations-auth-atomic-sessions') == 't'
     assert sql('operations_auth_upgrade_db', 'SELECT count(*) FROM databasechangelog;', 'operations-auth-atomic-history') == '3'
     lb('operations', 'operations_auth_upgrade_db', 'update', 'operations-auth-upgrade')
+    # Upgrade a populated 003 DB without inventing legacy dates, addresses or departments.
+    sql('postgres', 'CREATE DATABASE customer_reads_upgrade_db OWNER customer_app;', 'customer-reads-setup')
+    db = 'customer_reads_upgrade_db'
+    lb('customer', db, 'update-count', 'customer-reads-baseline', extra=('--count=3',))
+    sql(db, """INSERT INTO customers(name,phone_number,status) VALUES('legacy customer','01080000001','ACTIVE');
+        INSERT INTO organizations(name,status) VALUES('legacy company','ACTIVE');
+        INSERT INTO memberships(customer_seq,organization_seq,employee_no,role,status) VALUES(1,1,'0001','ORG_ADMIN','ACTIVE');
+        INSERT INTO personal_pins(customer_seq,label,address_data,version) VALUES(1,'legacy PIN',
+          '{"name":"Receiver","phoneNumber":"01080000001","roadAddress":"Road","jibunAddress":"Lot","dongName":"Dong","postalCode":"01234","latitude":37,"longitude":127}',7);
+        INSERT INTO outbox_events(destination,event_type,aggregate_seq,payload) VALUES('operations','CustomerCreated',1,'{"legacy":true}');""", 'customer-reads-legacy-seed', 'customer_app')
+    preserved = """SELECT jsonb_build_object(
+        'customers',(SELECT jsonb_agg(jsonb_build_array(customer_seq,name,phone_number,status)) FROM customers),
+        'organizations',(SELECT jsonb_agg(jsonb_build_array(organization_seq,name,status)) FROM organizations),
+        'memberships',(SELECT jsonb_agg(jsonb_build_array(membership_seq,customer_seq,organization_seq,employee_no,role,status)) FROM memberships),
+        'pins',(SELECT jsonb_agg(jsonb_build_array(personal_pin_seq,customer_seq,label,address_data,version)) FROM personal_pins),
+        'outbox',(SELECT jsonb_agg(to_jsonb(e)) FROM outbox_events e));"""
+    legacy = sql(db, preserved, 'customer-reads-legacy-before')
+    failing = logs / 'atomicity-customer-reads'
+    shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+    read_sql = failing / 'customer/004-customer-reads.sql'
+    read_sql.write_text(read_sql.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n', encoding='utf-8')
+    output = lb('customer', db, 'update', 'customer-reads-atomic-failure', failure=True, changelog_root=failing)
+    assert 'division by zero' in output.lower(), output
+    assert sql(db, preserved, 'customer-reads-atomic-data') == legacy
+    assert sql(db, "SELECT to_regclass('departments') IS NULL AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data');", 'customer-reads-atomic-schema') == 't'
+    assert sql(db, 'SELECT count(*) FROM databasechangelog;', 'customer-reads-atomic-history') == '3'
+    lb('customer', db, 'update', 'customer-reads-upgrade')
+    assert sql(db, preserved, 'customer-reads-legacy-after') == legacy
+    assert sql(db, "SELECT (SELECT created_at IS NULL AND monthly_billing_enabled=false FROM organizations WHERE organization_seq=1),(SELECT address_data IS NULL AND monthly_billing_enabled=false FROM customers WHERE customer_seq=1),(SELECT department_seq IS NULL FROM memberships WHERE membership_seq=1);", 'customer-reads-unknown-not-fabricated') == 't|t|t'
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

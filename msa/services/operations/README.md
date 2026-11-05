@@ -2,7 +2,7 @@
 
 관리자 인증·계정 관리·감사 조회를 담당한다. `backend/`의 동일 API·DTO·권한·SQL·트랜잭션 흐름을 이식했다. 프론트·AI의 요청 형식은 변경하지 않는다. Redis나 추가 브로커는 사용하지 않는다.
 
-관련 작업: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160). 전체 순서는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다. 다른 서비스 인증·감사 이벤트 연동과 5년 보존 워커는 해당 서비스 이식 이후 연결한다.
+관련 작업: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160). 전체 순서는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다. customer 조회의 세션 인증을 연결했으며, 다른 서비스와 감사 이벤트 연동·5년 보존 워커는 후속 작업이다.
 
 ## 실행
 
@@ -28,6 +28,12 @@ Health는 HTTP 프로세스 상태이며 readiness는 DB 접속 상태를 확인
 API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Origin 검사·no-store를 유지한다. OpenAPI는 `/api/docs-json`과 기존 `/operations/docs-json` 모두 제공한다. 허용 Origin은 정확한 origin 목록으로 설정하며 와일드카드를 받지 않는다. SWAGGER_ENABLED 기본값은 기존 operations와 동일하게 true이다.
 
 최초 SYSTEM_ADMIN 생성은 Liquibase 적용 후 `node scripts/bootstrap-admin.cjs <loginId> <name>`에 비밀번호를 stdin으로 전달한다. 원본처럼 기존 SYSTEM_ADMIN이 있으면 거절하며 비밀번호를 인자/로그에 넣지 않는다.
+
+## Customer 내부 인증
+
+`POST /internal/auth/session`은 서비스 Bearer `CUSTOMER_AUTH_TOKEN`과 본문 `{ "sessionToken": "기존 64자 세션 토큰" }`을 받아 기존 AuthService로 현재 세션·권한을 확인한다. 비밀번호·세션 해시를 반환하지 않으며 공개 Swagger·Ingress에서 제외한다. 서비스 토큰만으로 기존 관리자 API에 접근할 수 없다. 환경 값을 생략하면 이 내부 경로는 거절하고 기존 공개 인증은 유지한다.
+
+배포 스크립트는 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성하고 기존 값은 바꾸지 않는다. customer와 operations가 이 Secret을 공유한다. customer readiness가 새 내부 경로를 요구하므로 두 서비스가 선택되면 operations를 먼저 배포한다.
 
 ## 빌드와 자동 배포
 

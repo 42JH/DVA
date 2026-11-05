@@ -1,5 +1,6 @@
 """Regression checks for deployment history and resource recovery."""
 import copy
+import base64
 import importlib.util
 import json
 import os
@@ -96,10 +97,10 @@ class DeliveryPlanTests(unittest.TestCase):
             self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
             self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
         self.assertEqual(planner.plan(baseline, True, self.state, annotations),
-                         ['consultation', 'operations'])
+                         ['operations', 'consultation'])
         self.assertEqual(planner.databases(baseline, True, annotations), [])
         self.assertFalse(planner.changed(baseline, planner.DB_PATHS))
-        for service, remaining in [('consultation', ['operations']), ('operations', [])]:
+        for service, remaining in [('operations', ['consultation']), ('consultation', [])]:
             self.state[service] = deployment(self.git('rev-parse', 'HEAD'))
             self.state[service]['metadata']['name'] = service
             self.assertEqual(planner.plan(baseline, True, self.state, annotations), remaining)
@@ -155,6 +156,34 @@ class DeliveryPlanTests(unittest.TestCase):
 
 
 class ReleaseRecoveryTests(unittest.TestCase):
+    def test_customer_auth_secret_created_once_without_exposing_token_in_args(self):
+        with patch.object(release, 'kube', side_effect=['', 'created']) as kube:
+            release.ensure_customer_auth_secret()
+            self.assertEqual(kube.call_count, 2)
+            call = kube.call_args_list[1]
+            self.assertEqual(call.args, ('create', '-f', '-'))
+            value = json.loads(call.kwargs['data'])
+            token = value['stringData']['customer-token']
+            self.assertGreaterEqual(len(token), 32)
+            self.assertNotIn(token, ' '.join(call.args))
+            self.assertEqual(value['metadata'], {'name': 'msa-customer-auth', 'namespace': 'dva'})
+
+    def test_existing_customer_auth_secret_is_preserved(self):
+        value = {'metadata': {'name': 'msa-customer-auth', 'namespace': 'dva'},
+                 'data': {'customer-token': base64.b64encode(b'c' * 48).decode()}}
+        with patch.object(release, 'kube', return_value=json.dumps(value)) as kube:
+            release.ensure_customer_auth_secret()
+            self.assertEqual(kube.call_count, 1)
+
+    def test_invalid_customer_auth_secret_is_not_replaced_or_printed(self):
+        value = {'metadata': {'name': 'msa-customer-auth', 'namespace': 'dva'},
+                 'data': {'customer-token': base64.b64encode(b'private-invalid-value').decode()}}
+        with patch.object(release, 'kube', return_value=json.dumps(value)) as kube:
+            with self.assertRaisesRegex(RuntimeError, 'not replaced') as raised:
+                release.ensure_customer_auth_secret()
+            self.assertNotIn('private-invalid-value', str(raised.exception))
+            self.assertEqual(kube.call_count, 1)
+
     def test_kubectl_multiple_json_documents(self):
         first, second = {'kind': 'Deployment'}, {'kind': 'Service'}
         self.assertEqual(release.parse_resources(json.dumps(first) + '\n' + json.dumps(second)), [first, second])

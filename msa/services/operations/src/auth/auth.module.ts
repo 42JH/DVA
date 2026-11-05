@@ -9,9 +9,10 @@ import { AuthService } from './auth.service';
 import { AuthGuard } from './auth.guard';
 import { AuthController } from './auth.controller';
 import { AdminAccessController } from './admin-access.controller';
+import { InternalAuthController } from './internal-auth.controller';
 @Module({
   imports: [ApplicationConfigModule, DatabaseModule, AdminsModule, AuditModule],
-  controllers: [AuthController, AdminAccessController],
+  controllers: [AuthController, AdminAccessController, InternalAuthController],
   providers: [AuthRepository, AuthService, { provide: APP_GUARD, useClass: AuthGuard }],
   exports: [AuthService],
 })

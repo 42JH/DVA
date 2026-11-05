@@ -42,7 +42,11 @@ before(async () => {
       await client.query('INSERT INTO effects(id,value) VALUES($1,$2)', [event.payload.orderSeq, event.payload]);
       if (mode === 'handler-failure') throw new Error('injected business failure');
     } } });
-  const http = eventHttpHandler(handle);
+  const http = eventHttpHandler(async (...args) => {
+    const ack = await handle(...args);
+    if (mode === 'delayed-ack') await new Promise(resolve => setTimeout(resolve, 250));
+    return ack;
+  });
   server = createServer(async (request, response) => {
     if (mode === 'http-failure') { response.writeHead(503).end(); return; }
     if (mode === 'bad-ack') { response.writeHead(200, { 'Content-Type': 'application/json' }).end('{}'); return; }
@@ -57,7 +61,7 @@ before(async () => {
   });
   await new Promise(resolve => server.listen(0, '0.0.0.0', resolve));
   url = `http://127.0.0.1:${server.address().port}/internal/events`;
-  relay = createRelay({ pool: sender, source: 'order', destinations: { delivery: { url, token } }, timeoutMs: 100 });
+  relay = createRelay({ pool: sender, source: 'order', destinations: { delivery: { url, token } } });
 });
 beforeEach(async () => {
   mode = 'success';
@@ -147,10 +151,25 @@ test('lost ACK replays the same event after a new relay instance starts', async 
   assert.ok((await rows(sender, 'outbox_events'))[0].delivered_at);
 });
 
+test('normal relay accepts a committed ACK delayed beyond 100 ms without duplicate application', async () => {
+  mode = 'delayed-ack';
+  const id = await add();
+  await relay();
+  assert.deepEqual(await counts(), [1, 1]);
+  const [event] = await rows(sender, 'outbox_events');
+  assert.equal(event.event_id, id);
+  assert.ok(event.delivered_at);
+  assert.equal(event.attempt_count, 0);
+  assert.equal(event.last_http_status, 200);
+  assert.equal(await relay(), false);
+  assert.deepEqual(await counts(), [1, 1]);
+});
+
 test('invalid ACK, redirects and timeout never acknowledge an event', async () => {
+  const faultRelay = createRelay({ pool: sender, source: 'order', destinations: { delivery: { url, token } }, timeoutMs: 100 });
   for (const failure of ['bad-ack', 'redirect', 'timeout']) {
     await sender.query('TRUNCATE outbox_events'); await add(); mode = failure;
-    await relay(); assert.equal((await rows(sender, 'outbox_events'))[0].delivered_at, null);
+    await faultRelay(); assert.equal((await rows(sender, 'outbox_events'))[0].delivered_at, null);
     assert.equal((await rows(sender, 'outbox_events'))[0].attempt_count, 1);
   }
   assert.deepEqual(await counts(), [0, 0]);

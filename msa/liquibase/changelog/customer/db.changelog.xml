@@ -21,4 +21,7 @@
   <changeSet id="003-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="004-customer-reads" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="004-customer-reads.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>
