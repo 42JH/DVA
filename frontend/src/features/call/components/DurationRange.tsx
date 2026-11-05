@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type PointerEvent } from 'react'
 import { DUR_MAX } from '@/features/call/hooks/useCallList'
 
 // 04 통화 필터 '통화 시간' (11/05) — 창 너비 막대(얇은 선 + 흰 손잡이) 아래에 [ 3  분 ] ~ [ 10  분 ] 입력칸
@@ -61,10 +61,19 @@ export function DurationRange({
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
   const setMin = (v: number) => onChange(clamp(v, 0, max), max)
   const setMax = (v: number) => onChange(min, clamp(v, min, DUR_MAX))
+  // 막대 빈 곳을 누르면 더 가까운 손잡이가 그 분으로. 범위 밖 값은 setMin/setMax가 보정
+  const jump = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.target instanceof HTMLInputElement) return // 손잡이는 range가 직접 처리
+    const r = e.currentTarget.getBoundingClientRect()
+    const v = Math.round(((e.clientX - r.left - THUMB / 2) / (r.width - THUMB)) * DUR_MAX)
+    const toMin = min === max ? v < min : Math.abs(v - min) <= Math.abs(v - max) // 겹쳐 있으면 누른 쪽 방향으로
+    if (toMin) setMin(v)
+    else setMax(v)
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="relative h-6">
+      <div onPointerDown={jump} className="relative h-6 cursor-pointer">
         <div
           aria-hidden
           className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-line"
