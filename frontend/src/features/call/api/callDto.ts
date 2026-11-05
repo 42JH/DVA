@@ -59,6 +59,9 @@ export interface CallAnalysisDto {
   orderLookupCount?: number | null // 접수 조회 안내 수
   cancelledParcelCount?: number | null // 취소 완료 배송 상세 수
   faqAnswerCount?: number | null // FAQ 답변 수
+  // AI 판정 요구 여부 (null = 미수집). 서로 별개, 상담원 연결 요구 ≠ 실제 연결(call.handoff)
+  hasCallbackRequest?: boolean | null
+  hasHandoffRequest?: boolean | null
 }
 export interface HandoffDto {
   handoffRequestSeq: number
@@ -137,6 +140,8 @@ export interface CallRow {
   complaints: { type: ComplaintType; reason: string }[]
   persona: string | null // 실제로 받은 상담가 이름 (그 버전의 이름 — 분석 전이면 null)
   durationSec: number | null
+  callbackAsked: boolean | null // 콜백 요청 (null = 모름 — 아님으로 보지 않기)
+  handoffAsked: boolean | null // 상담원 연결 요구 (AI 판정, 연결 성공 아님)
 }
 export interface Complaint {
   type: ComplaintType
@@ -218,7 +223,9 @@ export interface CallDetail {
   isNew: boolean | null // 신규 고객 (null = 모름) — 04 줄과 같은 값
   counts: CallRow['counts'] // 상담 유형 횟수 (null = 분석 전) — 04 줄과 같은 값
   persona: { name: string; version: number } | null
-  handoff: { status: HandoffDto['status']; reason: string } | null
+  handoff: { status: HandoffDto['status']; reason: string } | null // 실제 이관 요청 기록
+  callbackAsked: boolean | null // 04 줄과 같은 값
+  handoffAsked: boolean | null // AI 판정 요구 — handoff(기록)와 다를 수 있음
   complaints: Complaint[]
   utterances: Utterance[]
   actions: AiAction[]
@@ -247,6 +254,8 @@ export function toCallRow(d: CallListItemDto): CallRow {
     complaints: (a?.complaints ?? []).map((c) => ({ type: c.type, reason: c.evidenceText })),
     persona: a?.personaName ?? null,
     durationSec: durationSec(d.startedAt, d.endedAt),
+    callbackAsked: a?.hasCallbackRequest ?? null,
+    handoffAsked: a?.hasHandoffRequest ?? null,
   }
 }
 
@@ -293,6 +302,8 @@ export function toCallDetail(
     handoff: d.call.handoff
       ? { status: d.call.handoff.status, reason: d.call.handoff.reason }
       : null,
+    callbackAsked: a?.hasCallbackRequest ?? null,
+    handoffAsked: a?.hasHandoffRequest ?? null,
     complaints: (a?.complaints ?? []).map((c) => ({
       type: c.type,
       reason: c.evidenceText,
