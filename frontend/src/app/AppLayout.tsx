@@ -45,7 +45,7 @@ export function AppLayout() {
           >
             {/* 경로(쿼리 제외)가 바뀌면 본문이 떠오름 (11/01). key로 새로 그려서 애니메이션이 다시 돎 — 쪽 · 필터 변경은 같은 경로라 안 돎 */}
             <div key={pathname} className="flex min-h-full flex-col motion-safe:animate-page-in">
-              {/* 아직 새 디자인 전 화면(handle.title — AI 상담가)도 같은 상단바 + 아래 줄에 제목 (11/05 사용자: 모든 화면 같은 상단바) */}
+              {/* handle.title 화면(지금은 개발용 공통 부품뿐)도 같은 상단바 + 아래 줄에 제목 */}
               {title && (
                 <>
                   <TopBar />

@@ -1,6 +1,6 @@
 import { useLocation, useParams } from 'react-router'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
-import { Crumbs, TopBar } from '@/shared/ui'
+import { TopBar } from '@/shared/ui'
 import { useCallDetail } from '@/features/call/hooks/useCallDetail'
 import { CallActions } from './CallActions'
 import { CallScript } from './CallScript'
@@ -27,11 +27,7 @@ function CallDetailBody({ callId }: { callId: number }) {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar search={{ tab: 'call' }} />
-      <Crumbs
-        items={[{ label: '통화', to: from }, { label: '통화 상세' }]}
-        className="shrink-0 pl-[58px]"
-      />
+      <TopBar crumbs={[{ label: '통화', to: from }, { label: '통화 상세' }]} />
       {vm.error || !s ? (
         <p className="py-16 text-center text-body text-muted">{vm.error ?? '불러오는 중…'}</p>
       ) : (
