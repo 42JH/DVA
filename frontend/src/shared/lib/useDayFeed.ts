@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueries, useQuery, type Query } from '@tanstack/react-query'
 import { todayYmd, type Ymd } from './dateRange'
 
 // 날짜별 무한 목록 (04 통화 · 03 주문, Figma 11/04) — 고른 날(anchor, 기본 오늘)부터 하루씩 받음
@@ -8,6 +8,8 @@ import { todayYmd, type Ymd } from './dateRange'
 
 /** 오늘 목록 갱신 주기 — 새 건 · 늦은 분석이 보이게 (11/02 연동 명세). 숨긴 탭에선 멈춤 */
 const LIVE_MS = 5_000
+/** 지난 날 중 아직 바뀔 줄(pending)이 있는 날의 갱신 주기 — 다음 날 결제 · 늦은 분석 (11/05 사용자: 오늘보다 느슨하게) */
+const PAST_MS = 15_000
 
 type DayParam = { day: Ymd } | { before: Ymd } | { after: Ymd }
 /** 한 쪽 = 하루. day null = 더 지난 건 없음 */
@@ -23,6 +25,7 @@ export interface DaySource<T> {
   fetchDay: (day: Ymd, signal: AbortSignal) => Promise<T[]> // 그날 전부 (최신순)
   prevDay: (before: Ymd, signal: AbortSignal) => Promise<Ymd | null> // before 전에 건이 있는 가장 가까운 날
   nextDay: (after: Ymd, signal: AbortSignal) => Promise<Ymd | null> // after 다음에 건이 있는 가장 가까운 날 (없으면 null)
+  pending?: (row: T) => boolean // 서버가 나중에 바꿀 수 있는 줄 (미완료 주문 · 분석 전 통화). 없으면 지난 날은 갱신 안 함
 }
 
 /** DayScroll이 그리는 모양 — 화면은 rows만 화면용으로 바꿔 넘김 */
@@ -51,6 +54,7 @@ export function useDayFeed<T>({
   fetchDay,
   prevDay,
   nextDay,
+  pending,
 }: DaySource<T>): DayFeed<T> {
   const today = todayYmd()
   const list = useInfiniteQuery({
@@ -69,7 +73,7 @@ export function useDayFeed<T>({
     getNextPageParam: (last): DayParam | undefined => (last.day ? { before: last.day } : undefined),
     getPreviousPageParam: (first): DayParam | undefined =>
       first.day && first.day < todayYmd() ? { after: first.day } : undefined,
-    staleTime: 5 * 60_000, // 지난 날은 안 바뀜. 오늘은 아래 live가 따로 갱신
+    staleTime: 5 * 60_000, // 오늘은 아래 live, 지난 날의 바뀔 줄은 아래 past가 따로 갱신
     // 조건만 바뀌면(같은 날) 새 결과가 올 때까지 이전 목록을 그대로 — 칠 때마다 목록이 비었다 차지 않게
     placeholderData: (prev, prevQuery) =>
       prevQuery?.queryKey[key.length + 1] === anchor ? prev : undefined,
@@ -83,11 +87,30 @@ export function useDayFeed<T>({
     refetchOnWindowFocus: 'always', // 탭에 돌아오면 바로 (명세: 복귀 시 다시 조회)
     enabled: pages[0]?.day === today,
   })
+  // 지난 날 — 바뀔 줄이 있는 날만 15초마다. 받으면 그 날 쪽을 이걸로 바꿔 그림 (live와 같은 방식)
+  const changing = pending ?? (() => false)
+  const pastDays = pages.flatMap((p) =>
+    p.day && p.day !== today && p.rows.some(changing) ? [{ day: p.day, rows: p.rows }] : [],
+  )
+  const past = useQueries({
+    queries: pastDays.map((p) => ({
+      queryKey: [...key, 'past', p.day, filter],
+      queryFn: ({ signal }) => fetchDay(p.day, signal),
+      initialData: p.rows, // 방금 받은 목록으로 시작 — 열자마자 같은 날을 또 받지 않게
+      initialDataUpdatedAt: list.dataUpdatedAt,
+      staleTime: PAST_MS,
+      // 다시 받아 보니 바뀔 줄이 없으면 그 날은 멈춤
+      refetchInterval: (q: Query<T[]>) => (q.state.data?.some(changing) ? PAST_MS : false),
+    })),
+  })
+  const pastRows = new Map(pastDays.map((p, i) => [p.day, past[i]?.data]))
 
   return {
     anchor,
     days: pages.flatMap((p) =>
-      p.day ? [{ day: p.day, rows: p.day === today && live.data ? live.data : p.rows }] : [],
+      p.day
+        ? [{ day: p.day, rows: (p.day === today ? live.data : pastRows.get(p.day)) ?? p.rows }]
+        : [],
     ),
     isLoading: list.isPending,
     stale: list.isPlaceholderData,

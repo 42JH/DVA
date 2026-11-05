@@ -101,6 +101,7 @@ export function useCallList() {
     fetchDay: (day, signal) => fetchCallDay(day, q, signal),
     prevDay: (day, signal) => prevCallDay(day, q, signal),
     nextDay: (day, signal) => nextCallDay(day, q, signal),
+    pending: (r) => r.counts === null, // 분석 전 — 늦게 오는 분석이 보이게
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,
