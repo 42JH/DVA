@@ -513,6 +513,10 @@ class LiveFlow:
         rt = self.rt(s)
         if s.state.intent is None:
             s.state.intent = intent
+        elif intent == "order" and s.state.intent != "order":
+            # 문의·조회 뒤 접수 도구를 부르면 접수로 바꾼다(그대로 두면 '더 없음'·마무리를 못 들음, 운영 통화 8df5dd7f)
+            s.note("업무 전환", f"{s.state.intent}→order")
+            s.state.intent = "order"
         if not rt.intent_started:
             rt.intent_started = True
             self.svc.stage2(s)
