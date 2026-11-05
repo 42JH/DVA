@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+업무 전화번호는 [휴대전화 번호 입력 계약](docs/mobile-phone-integration.md)에 따라 정확히 11자리 숫자 문자열로 받는다. 고객·고객 확인·직원·PIN·주문 입력 및 저장 주문의 최종 접수 검증에 적용한다. 수집 중 생략·null, 기존 저장 데이터 조회, PBX 원문 국제 표기 수신은 유지한다. 프론트·AI 전달 범위도 해당 문서에 정리했다.
+
 미확정 결제의 5년 보관 만료는 [결제 보관·입력 검증 작업 계획](docs/payment-retention-and-mobile-plan.md)과 [보관 계약](docs/data-retention.md)을 따른다. 만료 건은 승인·복구 큐에서 제외하고 실제 승인·안내·디버 요청의 기존 점유 시간만 보호한 뒤 FK 순서대로 폐기한다. 오래된 결제 상태만으로 무기한 보존하지 않으며 기한 안의 미확정 결제 보호와 기존 결제·취소 API 계약은 유지한다. 이 변경의 추가 migration은 없다.
 
 FAQ 상세 고객 질문 사례는 [AI 전송 명세](docs/faq-question-examples-ai-integration.md)와 [프론트 조회 명세](docs/faq-question-examples-frontend-integration.md)를 따른다. 앱 교체 전에 migration 052를 적용한다. FAQ_ANSWERED의 faqEntrySeqs 배열(기존 단건 호환)과 고객 발화를 받아 독립 텍스트로 복사해 관리자 상세 recentQuestions에 최신 10개만 제공한다. 같은 문장은 별도 사례로 유지하고 동일 이벤트 재전송은 추가하지 않는다. 통화 삭제와 독립적으로 응대 발생부터 5년까지 보관하며 FAQ 수정·삭제 시 사례를 비운다. 수정 전 발생한 지연 이벤트는 사례에 추가하지 않고 원본 이벤트는 보존한다. [계획·검증 기록](docs/faq-question-examples-plan.md)을 참고한다.

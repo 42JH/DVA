@@ -16,6 +16,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { MEMBER_ROLES, MEMBER_STATUSES, MemberRole, MemberStatus } from '../members.types';
 import { CustomerAddressDto } from '../../customers/dto/customer-address.dto';
 
@@ -97,9 +98,12 @@ export class InlineMemberDto extends OmitType(CreateMemberDto, ['customerSeq', '
   @IsNotEmpty()
   @Matches(/^[^\u0000]+$/)
   name!: string;
-  @ApiProperty({ description: '숫자 문자열. 선행 0 유지.', pattern: '^[0-9]+(?![\\s\\S])' })
+  @ApiProperty({
+    description: '휴대전화 번호 11자리 문자열. 선행 0 유지.',
+    pattern: MOBILE_PHONE_PATTERN.source,
+  })
   @IsString()
-  @Matches(/^[0-9]+(?![\s\S])/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber!: string;
 }
 

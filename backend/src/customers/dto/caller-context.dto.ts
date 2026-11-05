@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsObject, IsString, Matches, ValidateIf, ValidateNested } from 'class-validator';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { MembershipResponseDto } from '../../members/dto/member-response.dto';
 import { OrganizationResponseDto } from '../../organizations/dto/organization-response.dto';
 import { CustomerResponseDto } from './customer-response.dto';
@@ -10,12 +11,12 @@ import { DepartmentDto } from '../../organizations/dto/department.dto';
 
 export class CallerContextRequestDto {
   @ApiProperty({
-    description: 'PBX에서 전달된 발신번호. 선행 0을 보존한 숫자 문자열.',
-    pattern: '^[0-9]+(?![\\s\\S])',
+    description: '국내 표기로 정규화한 발신 휴대전화 번호. 선행 0을 보존한 숫자 문자열 11자리.',
+    pattern: MOBILE_PHONE_PATTERN.source,
     example: '01012345678',
   })
   @IsString()
-  @Matches(/^[0-9]+(?![\s\S])/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber!: string;
 
   @ApiPropertyOptional({

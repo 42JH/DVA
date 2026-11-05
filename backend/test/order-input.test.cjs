@@ -11,6 +11,85 @@ const { assertOrderUpdate } = require('../dist/orders/order-update.validation');
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
 
+test('business phone inputs require exactly eleven ASCII digits without normalization', async () => {
+  const {
+    CreateCustomerDto,
+    ListCustomersQueryDto,
+  } = require('../dist/customers/dto/customer-request.dto');
+  const { CallerContextRequestDto } = require('../dist/customers/dto/caller-context.dto');
+  const { InlineMemberDto } = require('../dist/members/dto/member-request.dto');
+  const { CreatePinDto, UpdatePinDto } = require('../dist/pins/dto/pin-request.dto');
+  const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
+  const address = (phoneNumber) => ({
+    name: '수령인',
+    phoneNumber,
+    roadAddress: '검증로 1',
+    jibunAddress: '검증동 1',
+    dongName: '검증동',
+    postalCode: '00001',
+  });
+  for (const [metatype, body] of [
+    [CreateCustomerDto, (phoneNumber) => ({ name: '고객', phoneNumber })],
+    [ListCustomersQueryDto, (phoneNumber) => ({ phoneNumber })],
+    [CallerContextRequestDto, (phoneNumber) => ({ phoneNumber })],
+    [InlineMemberDto, (phoneNumber) => ({ employeeNo: '001', name: '직원', phoneNumber })],
+    [CreatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
+    [UpdatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
+    [CreateOrderDto, (phoneNumber) => ({ customer: { name: '고객', phoneNumber } })],
+    [CreateOrderDto, (phoneNumber) => ({ customerSeq: 1, parcels: [{ origin: { phoneNumber } }] })],
+    [
+      UpdateOrderDto,
+      (phoneNumber) => ({ expectedVersion: 1, parcels: [{ destination: { phoneNumber } }] }),
+    ],
+    [
+      CreateManualOrderDto,
+      (phoneNumber) => ({ customerSeq: 1, parcels: [{ destination: address(phoneNumber) }] }),
+    ],
+  ]) {
+    const transform = (phoneNumber) =>
+      pipe.transform(body(phoneNumber), { type: 'body', metatype });
+    for (const phoneNumber of ['01012345678', '01000000000']) await transform(phoneNumber);
+    for (const phoneNumber of [
+      '021234567',
+      '0101234567',
+      '010123456789',
+      '010-1234-5678',
+      '+821012345678',
+      ' 01012345678',
+      '01012345678 ',
+      '01012345678\n',
+      '０１０１２３４５６７８',
+      '',
+      1012345678,
+      false,
+    ])
+      await assert.rejects(
+        () => transform(phoneNumber),
+        (error) =>
+          error.getStatus() === 400 &&
+          error.getResponse().details.some((detail) => detail.field.endsWith('phoneNumber')),
+        metatype.name + ': ' + JSON.stringify(phoneNumber),
+      );
+  }
+});
+
+test('collecting an order still permits omitted or cleared phones and partial searches', async () => {
+  for (const phoneNumber of [undefined, null]) {
+    const created = await validate({ customerSeq: 1, parcels: [{ origin: { phoneNumber } }] });
+    assert.equal(created.parcels[0].origin.phoneNumber, phoneNumber);
+    const updated = await pipe.transform(
+      { expectedVersion: 1, parcels: [{ destination: { phoneNumber } }] },
+      { type: 'body', metatype: UpdateOrderDto },
+    );
+    assert.equal(updated.parcels[0].destination.phoneNumber, phoneNumber);
+  }
+  const { ListCustomersQueryDto } = require('../dist/customers/dto/customer-request.dto');
+  assert.equal(
+    (await pipe.transform({ q: '010' }, { type: 'query', metatype: ListCustomersQueryDto })).q,
+    '010',
+  );
+});
+
 test('parcel cancellation requires a nonempty unique array of database integers', async () => {
   const validateCancellation = (body) =>
     pipe.transform(body, { type: 'body', metatype: CancelOrderParcelsDto });
