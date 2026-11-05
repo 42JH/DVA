@@ -49,7 +49,12 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     lines += ["", "Do not generate <|SpawnThinking|> when:",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
-              "Do not guess the result while waiting. 결과가 오기 전에는 짧은 대기 안내만 합니다.", "",
+              "Do not guess the result while waiting.",
+              "- 결과를 기다리는 동안 채우는 말은 정해진 문장 없이, 고객이 방금 한 말에 이어지는 자연스러운 한마디로 그때그때 짓습니다. "
+              "짧게 하고, 앞에서 한 말을 되풀이하지 않습니다. 바로 답할 수 있으면 채우는 말 없이 답합니다.",
+              "- 채우는 말에는 결과·판단·되읽기·다음 질문을 넣지 않습니다. 결과는 서버 결과가 온 뒤에 말합니다.",
+              "- 고객이 말을 시작하면 하던 말을 바로 멈추고 고객 말을 먼저 받습니다. 기다리던 결과가 뒤늦게 오면 "
+              "고객이 방금 한 말에 맞춰 필요한 것만 이어서 안내합니다(이미 지나간 이야기를 다시 꺼내지 않습니다).", "",
               "## 하지 않는 것"]
     lines += [f"- {item}" for item in policy.forbid.items]
     lines += ["", "## 읽기 규칙"] + [f"- {v}" for v in policy.speech.values()]
