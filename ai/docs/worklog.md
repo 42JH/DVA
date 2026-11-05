@@ -526,3 +526,37 @@
 - 접수 확인: "접수 내용 확인 부탁드릴게요." 뒤 기록된 주문 내용을 말해 확인받음. 접수 완료는 서버 전송 성공 뒤에만 말함
 - 무관한 요청: 1억 이상 같은 터무니없는 가격·택배와 무관한 요청은 처리하기 어렵다고 응대, 계속되면 안내 후 상담 종료
 - 사용자가 작성한 수정을 요청에 따라 커밋(코드 변경 없음)
+
+## 2026-11-05 — FAQ 응대 근거 배열 연동 구현
+
+- 사용자 요청으로 구현 재개. Jira 번호 없이 진행하라는 지시에 따라 origin/develop-ai e5a9dee에서 feature/faq-answer-evidence 생성. 기존 로컬 develop-ai c296bfa·output/tmp 보존.
+- 첨부 faq-question-examples-ai-integration.md를 계약으로 사용: 기존 events API, FAQ_ANSWERED 한 건에 faqEntrySeqs 배열, 질문/답변 UTTERANCE 참조. 추가 questionText·단건 필드·FAQ별 분리 이벤트를 보내지 않음. 원문 스냅샷은 docs/be-contract/backend에 보관(로컬 상대 링크만 수정).
+- 현재 원격 develop-backend 0848174와 원격 FAQ 관련 브랜치들을 조회했지만 새 배열 DTO는 확인되지 않음. 첨부 계약대로 구현하되 [unanswered_review].faq_answered_enabled=false 기본/파일 설정을 유지. migration 052와 배열 지원 BE 배포 확인 후 true로 전환. 기존 미답변/사유 기능은 유지.
+- Inquiry.used_evidence: 검색 번호·청크 ID·근거 직접 인용·답변 직접 인용 추가. 실제 전달 Top3, 관련 검색, 원문 인용, 답변 인용, backend-faq:N 양의 int32를 검증해 서버에서 FAQ 번호를 계산함. 모델이 번호만 만들어 내는 방식을 사용하지 않음. 근거 특정 불가이면 빈 배열 허용.
+- 다중 질문이 같은 검색을 공유하도록 이전 전역 중복 금지를 조정하되 범위·개별 목록 중복·전체 검색 포함·발화 순서 검증은 유지. 한 질문/답변 발화 쌍은 FAQ 번호를 합쳐 이벤트 한 건, 별도 응대이면 같은 문장도 별도 이벤트. FAQ 청크가 여러 개여도 번호는 한 번만 전송. faqAnswerCount는 기존 문의 수이며 FAQ 수로 늘리지 않음.
+- 빈 전사 행을 건너뛴 실제 UTTERANCE 순번으로 변환. 발화 화자·원문·20,000자 절단 범위를 확인. 실제 답변 기록 시각을 사용하고 검토/전송 시각으로 바꾸지 않음. 기존 발화 뒤에 이벤트를 배치해 발화 저장 선행 조건을 충족.
+- v2 판정·배열 이벤트는 기존 Outbox에 확정/저장. 구버전 READY·전송 완료 데이터는 다시 판정/소급 보강하지 않음. 응답 유실·재시작 때 동일 ID/순번/본문으로 재전송하고, 배열 전송을 꺼도 확정 본문을 변조하지 않고 보류.
+- 새 테스트 24개 포함 **593 passed, 14 warnings / 21.71초**. 가짜 모델·백엔드로 복수 근거·검색 공유·부분 미답변·조작 인용/ID·발화 순번·절단·배치·구버전 복구·응답 유실·HTTP 배열 계약 검증. 기존 주소·대시보드 테스트 포함 전체 통과.
+- 실제 gpt-6-luna 가상 통화 8건 **8/8 통과**. 단일/복수 FAQ, 근거와 모순된 답변 제외, 미답변/검색 장애/명확화, 같은 FAQ 두 청크, 동일 문장 별도 응대 포함. 결과 output/faq-evidence/faq-evidence-v1-20261105.json. 최신 경계 검증으로 저장 판정 오프라인 재검증도 8/8. 운영 backend·전화에는 쓰지 않음.
+- 종료 후 판정 2.110~6.033초, 평균 3.644초. 기존 미답변 검토와 같은 모델 호출이며 통화 중 추가 호출 없음. 표본이 달라 이전 평균과 차이를 기능의 순수 지연으로 단정하지 않음. 모델의 사후 근거 판정이며 Live 내부 선택의 직접 관찰은 아님.
+- 실행 스크립트 scripts/check_faq_answer_evidence.py와 가상 데이터 evaluation/datasets/faq_evidence_v1.json, 설계/실행 안내 docs/architecture/faq-answer-evidence.md 추가. git diff --check 통과. .env 내용 조회·수정, 커밋·푸시·병합·운영 배포 없음.
+
+## 2026-11-05 — FAQ 배열 지원 백엔드 최신 병합 확인
+
+- 사용자 요청으로 origin/develop-backend를 다시 fetch해 0848174 → **6a141a0** 갱신. feature/faq-question-examples의 1313f27 구현·c08c530 문서 병합 확인.
+- 실제 DTO는 faqEntrySeq 단건과 faqEntrySeqs 배열(1~100, 양의 int32, 중복 없음)을 지원한다. 입력 정규화 코드에서 두 필드 동시 전송을 400으로 거절하고 배열은 정렬한다. FAQ_ANSWERED 외 action에 참조를 보내도 400이다.
+- migration 052-faq-question-examples.sql과 고객 질문 사례 수집/검증 코드 존재 확인. 첨부 연동 문서와 원격 문서가 일치함(보관 사본의 로컬 상대 링크 조정만 제외). 현재 AI 배열 구현과 호환돼 동작 코드 수정은 불필요.
+- 계약 출처·설계 문서의 초기 미병합 안내를 갱신. 원격 코드 확인이며 운영 DB migration 적용·배포까지 확인한 것은 아님. 배열 전송 스위치는 false 유지. 문서만 갱신했으므로 통과한 593개 테스트/실모델 8건을 반복 실행하지 않음. 커밋·푸시·운영 쓰기 없음.
+
+## 2026-11-05 — FAQ 배열 전송 활성화 전 운영 배포 점검
+
+- 사용자 푸시/병합 준비 문의에 따라 운영 서버를 읽기 전용 점검. DB는 READ ONLY 트랜잭션으로 faq_question_examples 테이블 존재 여부만 확인(false), 실행 중 백엔드의 컴파일된 create-call-events DTO에서 faqEntrySeqs 지원 여부 확인(false).
+- 원격 코드 병합과 달리 운영은 아직 배열 기능 미적용이다. faq_answered_enabled=false를 유지하고 백엔드 migration 052 적용·새 BE 배포 후 활성화하도록 안내했다. 임의로 운영 DB를 변경하거나 백엔드를 배포하지 않았다. 이 확인 단계에서는 커밋·푸시·병합도 하지 않음.
+
+## 2026-11-05 — FAQ 배열 운영 배포 재확인·develop-ai 최신 반영 및 병합 준비
+
+- 사용자 요청으로 운영 재점검. PostgreSQL READ ONLY 조회에서 faq_question_examples 테이블 존재=true, 실행 중 백엔드의 컴파일된 DTO에 faqEntrySeqs 존재=true 확인. 이전 보류 이후 배포가 반영됐으며 작업 브랜치 server.toml의 faq_answered_enabled=true로 준비했다. 실제 운영 DB/설정에 쓰거나 AI를 배포하지 않음.
+- origin/develop-ai e5a9dee → 5330e0d로 갱신. 주소 개선 머지 되돌림이므로 해당 최신 트리를 그대로 반영하고 우리 작업으로 주소 변경을 재도입하지 않음. 기존 로컬 develop-ai 브랜치·개인 output/tmp 보존.
+- 최신화 전에 충돌 가능한 worklog.md만 stash 1893e74로 보존하고 기능 브랜치를 fast-forward했다. 새 develop-ai 로그 위에 우리 기능 기록만 복원해 되돌린 주소 로그를 다시 넣지 않았다. 원본 stash는 백업으로 유지하며 기존 다른 stash는 건드리지 않음.
+- 새 기준 전체 **574 passed, 14 warnings / 20.36초**. 이전 593개와의 차이는 develop-ai 되돌림으로 바뀐 테스트 구성이며 실패 없음. FAQ 배열 테스트와 기존 통화/미답변/대시보드 회귀 포함. 이번 재확인에서는 실제 모델 API를 다시 호출하지 않았고 기존 가상 검증 8/8 결과를 유지한다.
+- 사용자 병합 준비 요청에 따라 기능 코드·프롬프트·설정·테스트·가상 데이터/검증 스크립트·계약·문서만 커밋하여 feature/faq-answer-evidence로 공유한다. Jira 번호 없이 진행하라는 사용자 지시를 따른다. output/tmp·인증 파일·개인 개발로그는 제외. 최종 develop-ai 병합은 사용자가 직접 진행한다.

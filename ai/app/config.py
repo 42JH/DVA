@@ -128,6 +128,8 @@ class UnansweredReviewConfig(_Strict):
     enabled: bool = False
     # 백엔드 reason 허용값·필수 여부·배포 확인 전에는 전송 보류
     reason_contract_enabled: bool = False
+    # 첨부 배열 계약 + migration 052·배열 지원 백엔드 배포 후 활성화
+    faq_answered_enabled: bool = False
     timeout_sec: float = Field(30.0, gt=0, le=120)
     max_input_chars: int = Field(100000, ge=1000, le=1000000)
     max_output_tokens: int = Field(6000, ge=100, le=30000)

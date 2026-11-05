@@ -84,7 +84,7 @@ def _iso(ts: float) -> str:
 class ResultService:
     def __init__(self, backend: BackendGateway, outbox: Outbox, policy, fare_of, submit_budget_sec: float = 60.0,
                  callback_field: bool = False, reviewer=None, reason_contract_enabled: bool = False,
-                 review_max_attempts: int = 3):
+                 review_max_attempts: int = 3, faq_answered_enabled: bool = False):
         self.backend, self.outbox, self.policy, self.fare_of = backend, outbox, policy, fare_of
         self.callback_field = callback_field  # 분석 hasCallbackRequest(새 BE 배포 후에만 켠다)
         self.submit_budget_sec = submit_budget_sec
@@ -93,6 +93,7 @@ class ResultService:
         self.reviewer = reviewer
         self.reason_contract_enabled = reason_contract_enabled
         self.review_max_attempts = review_max_attempts
+        self.faq_answered_enabled = faq_answered_enabled
         self.review_lock = asyncio.Lock()  # 한 프로세스 안에서 종료·복구 작업의 중복 판정/전송 방지
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
@@ -245,7 +246,8 @@ class ResultService:
                 try:
                     source = row["input"]
                     verdict = await self.reviewer.review(source["evidence"])
-                    prepared = apply_review(sid, source["started_t"], source["evidence"], source["payload"], verdict)
+                    prepared = apply_review(sid, source["started_t"], source["evidence"], source["payload"], verdict,
+                                            faq_answered_enabled=self.faq_answered_enabled)
                     await asyncio.to_thread(self.outbox.complete_review, sid, verdict, prepared)
                 except (APIError, TimeoutError, ReviewError, ValidationError) as e:
                     # 모델/판정 장애는 지식 검색 장애가 아니다. 고객 미답변을 만들어 보내지 않는다.
@@ -257,6 +259,8 @@ class ResultService:
                 row = await asyncio.to_thread(self.outbox.review, sid)
             if not self.reason_contract_enabled:
                 return  # 계약이 확정되기 전에는 reason을 구버전 BE에 보내지 않는다.
+            if not self.faq_answered_enabled and _has_faq_answers(row["prepared"]):
+                return  # 이미 고정된 배열 이벤트는 임의 제거하지 않고 지원 환경까지 보류한다.
             insight = await asyncio.to_thread(self.outbox.create_insight, sid, row["call_session_seq"], row["prepared"])
             await self._send_insight(insight)
             # 전송 실패면 기존 insights 아웃박스가 복구한다. 확정 판정은 다시 호출하지 않는다.
@@ -382,6 +386,8 @@ class ResultService:
         sid, seq, p = row["session_id"], row["call_session_seq"], row["payload"]
         if not self.reason_contract_enabled and any("reason" in u for u in p["unanswered"]):
             return  # 재시작으로 복구한 새 본문에도 같은 계약 게이트를 적용한다.
+        if not self.faq_answered_enabled and _has_faq_answers(p):
+            return
         progress = dict(row["progress"])
         api = self.backend.api
         try:
@@ -425,6 +431,10 @@ class ResultService:
                 log.error("대시보드 전송 %s %s %s", sid, key, e)
         await asyncio.to_thread(self.outbox.update_insight, sid, "PENDING" if retry else "DONE", progress)
         log.info("통화 기록 전송 %s", sid)
+
+
+def _has_faq_answers(payload: dict) -> bool:
+    return any(e.get("payload", {}).get("action") == "FAQ_ANSWERED" for e in payload.get("events", []))
 
 
 def _summary(name: str, out: dict) -> str:
