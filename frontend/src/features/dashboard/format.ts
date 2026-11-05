@@ -39,10 +39,3 @@ export function versionGap(diff: number | null): string | null {
   if (s === '0.0') return '현재 버전과 직전 버전의 접수 1건당 시간이 같았어요.'
   return `현재 버전이 직전 버전보다 접수 1건당 ${s}초 ${diff > 0 ? '짧았어요' : '길었어요'}.`
 }
-
-/** 'DV-10519' · 'dv10519' · '10519' → 10519. 0으로 시작하는 숫자는 전화번호로 봄 (상단바 검색) */
-export function parseOrderNo(text: string): number | null {
-  const m = /^\s*(dv)?\s*-?\s*(\d{1,9})\s*$/i.exec(text)
-  if (!m || (!m[1] && m[2].startsWith('0'))) return null
-  return Number(m[2]) || null
-}

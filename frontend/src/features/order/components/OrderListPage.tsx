@@ -2,31 +2,18 @@ import { useCallback, useRef, useState, type UIEvent } from 'react'
 import { useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
-import {
-  Button,
-  ConfirmDialog,
-  DayPick,
-  DayScroll,
-  Highlight,
-  PreviewList,
-  TopBar,
-  TopSearch,
-} from '@/shared/ui'
+import { Button, ConfirmDialog, DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
 import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
 import type { StatusGroup } from '@/features/order/api/orderApi'
-import {
-  useOrderList,
-  useOrderPreview,
-  type OrderListRow,
-} from '@/features/order/hooks/useOrderList'
+import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
 
 // 03 주문 내역 (Figma 디자인/목업 '주문' 11/04) — 04 통화와 같은 틀: 상단바 · 머리(📅 날짜 | [추가]) · 열 머리 · 줄 목록
 // 줄 = 시각 | 상태 칩(shared/order/OrderChip — 상세 창 머리와 같은 칩) | 보내는 분(이름 · 주소) | 받는 분 | 주문번호
-// 열 머리 '주문 상태 ⌄'를 누르면 상태 고르기(서버 statusGroup). 검색은 상단바 → 창(보내는 분 · 받는 분 두 칸, 11/05 사용자) — 보내는 분 칸은 보내는 분에서만, 받는 분 칸은 받는 분에서만 찾음
+// 열 머리 '주문 상태 ⌄'를 누르면 상태 고르기(서버 statusGroup). 검색은 상단바 공용 탭 검색(주문 탭이 먼저) 한 칸 — 보내는 분 · 받는 분 둘 다에서 찾고 Enter는 이 목록에 (11/05 사용자)
 // 무한 스크롤 · 머리 날짜 = 맨 위 줄의 날 (shared/ui/DayScroll, 04와 같음). 줄을 누르면 주문 상세 창 (shared/order — 06 '주문 보기'와 같은 창)
 // 상세 [수정] → 주문 수정 창(주문 추가와 같은 창, 값 채움) → 저장 · 취소하면 그 주문 상세로
 // 칸 = Figma 자리(줄 1200 기준): 시각 126 · 상태 186 · 보내는 분 436 · 받는 분 342 · 주문번호 110(가운데). 넓은 화면에선 두 사람 칸이 같은 비율로 늘어남
@@ -42,22 +29,7 @@ export function OrderListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col" onScrollCapture={fold.onScroll}>
-      <TopBar
-        search={
-          <TopSearch
-            name="주문 검색"
-            fields={[
-              { label: '보내는 분', value: vm.sender, placeholder: '이름 · 주소' },
-              { label: '받는 분', value: vm.receiver, placeholder: '이름 · 주소' },
-            ]}
-            hint="보내는 분 · 받는 분의 이름이나 주소로 찾아요. 한 칸만 써도 돼요."
-            onApply={([s, r]) => vm.search(s, r)}
-            preview={([s, r], close) => (
-              <OrderPreview sender={s} receiver={r} onPick={vm.openOrder} close={close} />
-            )}
-          />
-        }
-      />
+      <TopBar search={{ tab: 'order', q: vm.q, onApply: vm.setQ, onOrder: vm.openOrderSeq }} />
       <div className="mt-2 flex h-[37px] shrink-0 items-center gap-6 pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         {vm.notice && (
@@ -174,14 +146,14 @@ function OrderLine({ r, vm }: { r: OrderListRow; vm: ReturnType<typeof useOrderL
       <span>
         <OrderChip group={r.group} />
       </span>
-      <Party p={r.sender} q={vm.sender.trim()} />
-      <Party p={r.receiver} q={vm.receiver.trim()} />
+      <Party p={r.sender} q={vm.q.trim()} />
+      <Party p={r.receiver} q={vm.q.trim()} />
       <span className="text-center">{r.orderNo}</span>
     </button>
   )
 }
 
-/** 이름 위 · 주소 아래 (줄 간격 32). 길면 말줄임, 올리면 전체. 검색칸 글과 맞은 자리는 하이라이트 */
+/** 이름 위 · 주소 아래 (줄 간격 32). 길면 말줄임, 올리면 전체. 검색어와 맞은 자리는 하이라이트 */
 function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
   return (
     <span className="flex min-w-0 flex-col gap-1 pr-6 font-medium">
@@ -207,41 +179,6 @@ function useFoldOnScroll() {
     else if (Math.abs(d) > 4 && Math.abs(d) < 250) setFolded(d > 0)
   }
   return { folded, onScroll }
-}
-
-/** 검색 창 미리 보기 — '보내는 분 → 받는 분' · 시각 · 주문번호. 누르면 그 주문 상세 창 */
-function OrderPreview({
-  sender,
-  receiver,
-  onPick,
-  close,
-}: {
-  sender: string
-  receiver: string
-  onPick: (r: OrderListRow) => void
-  close: () => void
-}) {
-  const { rows, loading } = useOrderPreview(sender, receiver)
-  return (
-    <PreviewList
-      title="최근 주문"
-      loading={loading}
-      empty="맞는 주문이 없습니다."
-      close={close}
-      items={rows.map((r) => ({
-        key: r.key,
-        main: (
-          <>
-            <Highlight text={r.sender.name || '—'} q={sender} />
-            <span className="mx-2 text-muted">→</span>
-            <Highlight text={r.receiver.name || '—'} q={receiver} />
-          </>
-        ),
-        sub: `${r.time} · ${r.orderNo}`,
-        onPick: () => onPick(r),
-      }))}
-    />
-  )
 }
 
 /** 열 머리 '주문 상태 ⌄' — 누르면 상태 고르기. 고르면 머리가 그 상태 이름(파랑)으로 */

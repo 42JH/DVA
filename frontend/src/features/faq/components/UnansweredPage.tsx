@@ -1,13 +1,5 @@
 import type { KeyboardEvent } from 'react'
-import {
-  Button,
-  ConfirmDialog,
-  Highlight,
-  Pagination,
-  PreviewList,
-  TopBar,
-  TopSearch,
-} from '@/shared/ui'
+import { Button, ConfirmDialog, Crumbs, Highlight, Pagination, TopBar } from '@/shared/ui'
 import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 
@@ -25,32 +17,8 @@ export function UnansweredPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar
-        crumbs={[vm.origin, { label: 'AI 미답변' }]}
-        search={
-          <TopSearch
-            name="AI 미답변 검색"
-            fields={[{ value: vm.q }]}
-            hint="질문 · 고객 이름 · 전화번호로 찾아요."
-            recentKey="unanswered"
-            onApply={([q]) => vm.setQ(q)}
-            preview={([q], close) => (
-              <PreviewList
-                title="맞는 질문 (오래된 순)"
-                loading={vm.isLoading}
-                empty="해당하는 질문이 없습니다."
-                close={close}
-                items={vm.preview(q).map((u) => ({
-                  key: u.unansweredQuestionSeq,
-                  main: <Highlight text={`“${u.question}”`} q={q} />,
-                  sub: `${u.customerName} · ${u.time}`,
-                  onPick: () => vm.openCall(u),
-                }))}
-              />
-            )}
-          />
-        }
-      />
+      <TopBar search={{ tab: 'faq' }} />
+      <Crumbs items={[vm.origin, { label: 'AI 미답변' }]} className={`shrink-0 ${PAD}`} />
       {vm.callChip && (
         // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 — ✕ = 전체 미답변으로
         <div className={`mt-2 shrink-0 ${PAD}`}>

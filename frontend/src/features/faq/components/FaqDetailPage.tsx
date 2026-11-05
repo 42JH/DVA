@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Button, Crumbs, Highlight, Markdown } from '@/shared/ui'
+import { Button, Crumbs, Highlight, Markdown, TopBar } from '@/shared/ui'
 import { faqTo, useFaqDetail, useRecentQuestions } from '@/features/faq/hooks/useFaqList'
 import { FAQ_GRID, FaqCategoryNav } from './FaqCategories'
 
@@ -19,6 +19,7 @@ export function FaqDetailPage() {
 
   return (
     <>
+      <TopBar search={{ tab: 'faq' }} />
       <Crumbs
         items={
           q

@@ -93,19 +93,6 @@ export async function fetchOrderDay(
   )
 }
 
-/** 상단바 검색 창 미리 보기 — 기간 없이 최근 n건 (최신순) */
-export async function fetchRecentOrders(
-  q: string,
-  n: number,
-  signal?: AbortSignal,
-): Promise<OrderListItem[]> {
-  const res = await api.get<ApiList<OrderListItem>>('/admin/orders', {
-    query: { ...toQuery({ q, group: 'ALL' }), limit: n, offset: 0 },
-    signal,
-  })
-  return res.data
-}
-
 /** day 전에 주문이 있는 가장 가까운 날 (최신 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null */
 export async function prevOrderDay(
   day: Ymd,

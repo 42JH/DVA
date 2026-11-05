@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { Button, ConfirmDialog, Crumbs } from '@/shared/ui'
+import { Button, ConfirmDialog, Crumbs, TopBar } from '@/shared/ui'
 import { useFaqForm } from '@/features/faq/hooks/useFaqForm'
 import {
   faqTo,
@@ -39,6 +39,7 @@ export function FaqEditPage() {
   if (!detail.faq)
     return (
       <>
+        <TopBar search={{ tab: 'faq' }} />
         <Crumbs
           items={[
             { label: 'FAQ', to: '/faqs' },
@@ -84,6 +85,7 @@ function FaqForm({
 
   return (
     <>
+      <TopBar search={{ tab: 'faq' }} />
       <Crumbs
         items={
           from

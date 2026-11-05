@@ -1,15 +1,15 @@
 import { useCallback, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
 import { useDismiss } from '@/shared/lib/useDismiss'
-import { DayPick, DayScroll, Highlight, PreviewList, TopBar, TopSearch } from '@/shared/ui'
-import { useCallList, useCallPreview, type CallListRow } from '@/features/call/hooks/useCallList'
+import { DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
 import { KindChips, PendingChip } from '@/shared/ui/KindChips'
 
 // 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터) · 줄 목록
 // 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동
-// 검색은 상단바 → 창 (11/05 사용자: 모든 화면 상단바 검색. 예전엔 머리 오른쪽 칸에 치는 대로)
+// 검색은 상단바 공용 탭 검색(통화 탭이 먼저) — Enter는 이 목록에 (11/05 사용자: 모든 화면 같은 상단바)
 // 줄 = 시각 | 상담 유형 칩(접수 · 조회 · 취소 · FAQ, 두 번 이상이면 숫자) · 불만(빨간 알약, 올리면 근거) | 이름(신규면 new) | 전화번호 | 통화 시간
 // 무한 스크롤 (11/04 사용자 · shared/ui/DayScroll): 고른 날짜(기본 오늘)부터 — 아래로 내리면 지난 날, 위로 올리면 다음 날을 이어 받고, 머리 날짜는 맨 위 줄의 날짜를 따라감
 // 목록만 스크롤(머리는 고정) · 줄을 누르면 06. 06에서 돌아오면 보던 자리 그대로 (받아 둔 목록 + 스크롤 위치)
@@ -38,17 +38,7 @@ export function CallListPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar
-        search={
-          <TopSearch
-            name="통화 검색"
-            fields={[{ value: vm.q }]}
-            hint="고객 이름이나 전화번호로 찾아요."
-            onApply={([q]) => vm.setQ(q)}
-            preview={([q], close) => <CallPreview q={q} from={`/calls${key}`} close={close} />}
-          />
-        }
-      />
+      <TopBar search={{ tab: 'call', q: vm.q, onApply: vm.setQ }} />
       <div className="mt-2 flex h-[37px] shrink-0 items-center pr-[50px] pl-[58px]">
         <DayPick day={day} onPick={vm.setDate} />
         <PersonaToggle
@@ -80,31 +70,6 @@ export function CallListPage() {
         className="pt-1.5 pr-[72px] pl-[58px]"
       />
     </div>
-  )
-}
-
-/** 검색 창 미리 보기 — 이름 · 번호 · 시각. 누르면 그 통화의 06 (돌아오면 이 목록) */
-function CallPreview({ q, from, close }: { q: string; from: string; close: () => void }) {
-  const { rows, loading } = useCallPreview(q)
-  const navigate = useNavigate()
-  return (
-    <PreviewList
-      title="최근 통화"
-      loading={loading}
-      empty="맞는 통화가 없습니다."
-      close={close}
-      items={rows.map((r) => ({
-        key: r.callSessionSeq,
-        main: (
-          <>
-            <Highlight text={r.name} q={q} />
-            <span className="ml-3 text-sub">{r.phone}</span>
-          </>
-        ),
-        sub: r.time,
-        onPick: () => navigate(`/calls/${r.callSessionSeq}`, { state: { from } }),
-      }))}
-    />
   )
 }
 

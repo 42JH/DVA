@@ -1,13 +1,13 @@
 import { useLayoutEffect, useRef } from 'react'
 import { Outlet, useLocation, useMatches } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
-import { PageHeader, Sidebar, TopBarInfo } from '@/shared/ui'
+import { Crumbs, Sidebar, TopBar, TopBarInfo } from '@/shared/ui'
 import { useActiveCallCount } from '@/features/call/hooks/useActiveCallCount'
 import { useUnansweredCount } from '@/features/faq/hooks/useUnansweredList'
 import { useActivePersonaName } from '@/features/persona/hooks/useActivePersonaName'
 
 /** 라우트마다 붙이는 정보 (router.tsx의 handle). 상단바 제목은 여기서만 정한다.
- *  handle이 없는 화면(11/04 새 디자인 — FAQ부터)은 상단(TopBar · Crumbs)을 화면이 직접 그림 */
+ *  handle이 있으면 여기서 상단바 + 제목 줄을 그리고, 없는 화면(11/04 새 디자인 — FAQ부터)은 상단(TopBar · Crumbs)을 화면이 직접 그림 */
 export type RouteHandle = { title: string }
 
 // 로그인 뒤 틀: 왼쪽 사이드바 + 오른쪽(상단바 64 고정 + 본문 스크롤). 상단바 · 사이드바는 화면이 그리지 않는다
@@ -38,7 +38,6 @@ export function AppLayout() {
           showAdmins={isSystemAdmin} // 설정 ▸ 관리자(10 관리자 권한 관리)는 최고 관리자만 (RequireRole과 짝)
         />
         <div className="my-1 mr-1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-surface">
-          {title && <PageHeader title={title} unanswered={unanswered} />}
           <main
             ref={main}
             // 스크롤 막대는 디자인처럼 바탕 없이 얇은 회색 손잡이만
@@ -46,6 +45,13 @@ export function AppLayout() {
           >
             {/* 경로(쿼리 제외)가 바뀌면 본문이 떠오름 (11/01). key로 새로 그려서 애니메이션이 다시 돎 — 쪽 · 필터 변경은 같은 경로라 안 돎 */}
             <div key={pathname} className="flex min-h-full flex-col motion-safe:animate-page-in">
+              {/* 아직 새 디자인 전 화면(handle.title — AI 상담가)도 같은 상단바 + 아래 줄에 제목 (11/05 사용자: 모든 화면 같은 상단바) */}
+              {title && (
+                <>
+                  <TopBar />
+                  <Crumbs items={[{ label: title }]} className="shrink-0" />
+                </>
+              )}
               <Outlet />
             </div>
           </main>
