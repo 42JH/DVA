@@ -275,6 +275,21 @@ def test_lookup_orders_scope_name_and_selection():
     assert call(ctx(db), "lookup_orders", {})["code"] == "CALL_NOT_REGISTERED"  # 고객 범위 없으면 조회 안 함
 
 
+def test_lookup_orders_gives_status_meaning_not_pickup():
+    """통화 293: COLLECTING을 '수거 진행 중'으로 안내함 → 서버가 상태의 뜻을 같이 준다(수거·배송·결제 언급 없음)."""
+    from app.tools.lookup import ORDER_STATUS_TEXT, status_text
+    db = MockBackend()
+    cust = registered(db)
+    db.add_order(CALLER, "COLLECTING", [("홍길동", "부산 해운대구 센텀로 10")])
+    [order] = call(ctx(db, customer=cust), "lookup_orders", {"receiver_name": "홍길동"})["facts"]["orders"]
+    assert order["status"] == "COLLECTING" and order["status_text"].startswith("접수 미완료")
+    statuses = ("COLLECTING", "notPaid", "PAID", "SUBMITTING", "ACCEPTED", "SUBMISSION_FAILED", "CANCELLED")
+    assert set(ORDER_STATUS_TEXT) == set(statuses)  # BE 계약의 주문 상태 전부
+    assert not any(w in text for text in ORDER_STATUS_TEXT.values() for w in ("수거", "배송", "결제 완료", "결제 전"))
+    assert ORDER_STATUS_TEXT["ACCEPTED"] == "접수 완료"
+    assert status_text("SOMETHING_NEW") == status_text(None) == "확인 필요"  # 모르는 상태는 추측하지 않는다
+
+
 def _order(db, status="COLLECTING"):
     cust = registered(db)
     order_seq = db.add_order(CALLER, status, [("이영희", "부산 해운대구 센텀로 10")])

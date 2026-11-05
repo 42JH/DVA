@@ -748,3 +748,10 @@
 - GET /api/customers/{id}는 통화 흐름이 쓰지 않지만 요청 목록에 있어 `customer_detail`(200 data·404 None)을 토큰과 함께 추가(MockBackend도 같은 메서드). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
 - 토큰 미설정이면 헤더 없이 호출하고 시작 시 경고(BE 인증 적용 전 배포 호환). 401은 gateway에서 `BE_AUTH_FAILED`(kind contract, 재시도 없음, 경보 로그)로 분류.
 - .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 5개 호출 헤더·상세 404·미설정·기존 토큰 분리·401 1회. develop-ai 병합 후 전체 **647 passed**.
+
+## 2026-11-06 — 조회·취소 확인 결과에 주문 상태의 뜻을 서버가 함께 전달
+
+- 브랜치 `fix/lookup-order-status-text`(develop-ai 20e7e12 기반). 통화 293에서 통화 267의 주문(orderSeq 97, COLLECTING)을 "현재 수거 진행 중"으로 잘못 안내. 원인: `_parcels`가 주문 상태 원문을 넘기고 `lookup_orders`·취소 확인(`_order_facts`)이 뜻 없이 모델에 전달, 지시문에도 조회 상태의 뜻이 없음(옛 `[status_names]`는 새 구조에서 빠짐).
+- `app/tools/lookup.py`에 `ORDER_STATUS_TEXT`·`status_text` 추가, 조회 결과 orders와 취소 확인 cancel_target에 `status_text`를 붙임(`status` 원문은 유지). 문구는 BE 계약 기준, 사용자 결정: ACCEPTED = "접수 완료"만, 수거·배송 언급 없음, COLLECTING에 "결제 전" 언급 없음, 결제 완료도 말하지 않음(PAID = "접수 대기 중"), 모르는 상태 = "확인 필요".
+- 표는 지시문이 아니라 서버 코드에 둔다: 다른 개발자가 수정 중인 지시문과 간섭하지 않게(사용자 결정, 코드 주석에 명시). 정책 단일 출처 원칙과는 어긋나므로 지시문 정리 후 옮길지 별도 결정.
+- 테스트: COLLECTING 조회에 "접수 미완료", 7개 상태 전부 문구 있음, 수거·배송·결제 단어 없음, 모르는 상태, 취소 확인 결과. 전체 **649 passed**. BE API·응답 형식·취소 가능 상태 판정 변경 없음. 실제 모델이 status_text대로 말하는지는 실통화 미확인.

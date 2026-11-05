@@ -24,6 +24,7 @@ from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
+from app.tools.lookup import status_text
 from app.tools.outcome import state_summary
 
 log = logging.getLogger(__name__)
@@ -720,5 +721,6 @@ def _order_status(s: CallSession) -> dict:
 
 def _order_facts(order: dict) -> dict:
     """취소 확인 때 읽을 것: 받는 분·상태만(주소는 시·구 수준으로 Live가 읽는다)."""
-    return {"receiver_name": order.get("receiver_name"), "status": order.get("status")}
+    return {"receiver_name": order.get("receiver_name"), "status": order.get("status"),
+            "status_text": status_text(order.get("status"))}
 
