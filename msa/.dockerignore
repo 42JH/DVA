@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/coverage
+**/.env*
+**/*.log
+liquibase/verification-logs
+liquibase/verification.json
+**/__pycache__

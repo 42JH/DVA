@@ -57,7 +57,7 @@ def main():
             image = RUN + '-' + name
             resources.append(('image', image))
             run('docker', 'build', '--label', LABEL, '-t', image,
-                *(['--target', target] if target else []), str(ROOT / path), label=name + '-build')
+                *(['--target', target] if target else []), *(['-f', str(ROOT / path / 'Dockerfile'), str(ROOT / 'msa')] if path.startswith('msa/services/') else [str(ROOT / path)]), label=name + '-build')
             images[name] = image
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
@@ -97,7 +97,7 @@ def main():
                    *(['test/environment.test.cjs'] if side == 'operations' else [])))
             if side == 'operations':
                 for file in ('auth.test.cjs', 'auth.integration.test.cjs'):
-                    copy('backend/test/' + file, name, '/app/test/' + file)
+                    copy('backend/test/' + file, name, '/app/service/test/' + file)
             complete(name)
             name = RUN + '-' + side + '-app'
             create(name, images[side], *common, '--network-alias', side + '-app',
@@ -108,7 +108,7 @@ def main():
         create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
                '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
                '-e', 'PGDATABASE=dva_webhook_test', command=('node', '--test', 'test/operations-auth.test.cjs'))
-        copy('msa/parity/operations-auth.test.cjs', name, '/app/test/operations-auth.test.cjs')
+        copy('msa/parity/operations-auth.test.cjs', name, '/app/service/test/operations-auth.test.cjs')
         complete(name)
         spec = importlib.util.spec_from_file_location('app_release', ROOT / 'msa/deploy/app-release.py')
         release = importlib.util.module_from_spec(spec)

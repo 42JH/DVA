@@ -2,7 +2,7 @@
 
 관리자 인증·계정 관리·감사 조회를 담당한다. `backend/`의 동일 API·DTO·권한·SQL·트랜잭션 흐름을 이식했다. 프론트·AI의 요청 형식은 변경하지 않는다. Redis나 추가 브로커는 사용하지 않는다.
 
-관련 작업: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160). 전체 순서는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다. customer 조회의 세션 인증을 연결했으며, 다른 서비스와 감사 이벤트 연동·5년 보존 워커는 후속 작업이다.
+관련 작업: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160). 전체 순서는 [동등성 계획](../../../docs/msa-parity-plan.md)을 따른다. customer의 세션 인증과 쓰기 감사 이벤트를 연결했으며, 나머지 서비스의 감사·5년 보존 워커는 후속 작업이다.
 
 ## 실행
 
@@ -14,7 +14,7 @@ Node.js 24에서 `npm ci` 후 DB_HOST·DB_PORT·DB_USER·DB_PASSWORD·DB_NAME과
 - Swagger: http://localhost:3005/operations/docs
 - OpenAPI: http://localhost:3005/operations/docs-json
 
-Health는 HTTP 프로세스 상태이며 readiness는 DB 접속 상태를 확인한다. 시작 시 인증 스키마가 없으면 기동에 실패한다. DDL은 앱에서 실행하지 않으며 Liquibase operations `004`까지 먼저 적용한다. 이름 없는 구버전 관리자 데이터가 있으면 임의의 이름을 채우지 않고 마이그레이션을 중단한다.
+Health는 HTTP 프로세스 상태이며 readiness는 DB 접속 상태를 확인한다. 시작 시 인증·감사 준비 스키마가 없으면 기동에 실패한다. DDL은 앱에서 실행하지 않으며 Liquibase operations `005`까지 먼저 적용한다. 이름 없는 구버전 관리자 데이터가 있으면 임의의 이름을 채우지 않고 마이그레이션을 중단한다.
 
 ## 동일한 외부 API
 
@@ -35,9 +35,11 @@ API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Orig
 
 배포 스크립트는 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성하고 기존 값은 바꾸지 않는다. customer와 operations가 이 Secret을 공유한다. customer readiness가 새 내부 경로를 요구하므로 두 서비스가 선택되면 operations를 먼저 배포한다.
 
+`POST /internal/events`도 같은 서비스 Bearer를 요구하며 공개 Swagger/Ingress에서 제외한다. customer의 AuditPrepared는 원본 감사 제약을 적용한 뒤 005의 비공개 준비 테이블에 보관한다. AuditCommitted는 inbox와 감사 행을 함께 커밋하며 중복 재반영을 막고, AuditAborted는 늦은 준비를 차단한다. 감사 조회 직전에 준비 상태가 있으면 `CUSTOMER_URL`의 `/internal/audit/flush`로 결정 확인 이벤트를 보낸다. `CUSTOMER_URL`은 자격정보·경로·query 없는 HTTP(S) origin이며 k8s에서는 `http://customer:3001`이다. 진행 중 업무의 잠금을 강제로 해제하거나 다른 DB를 직접 읽지 않는다. 상세 경계와 강제 종료 복구 검증은 [customer 쓰기 계획](../../../docs/msa-customer-writes-plan.md)을 따른다.
+
 ## 빌드와 자동 배포
 
-저장소 루트에서 `docker build -t dva-operations:local msa/services/operations`를 실행한다. Docker 빌드에서 ESLint·단위·E2E·TypeScript 검사를 실행하고, 운영 이미지는 개발 의존성 없이 node 사용자로 구동한다.
+저장소 루트에서 `docker build -t dva-operations:local -f msa/services/operations/Dockerfile msa`를 실행한다. Docker 빌드에서 ESLint·단위·E2E·TypeScript 검사를 실행하고, 운영 이미지는 개발 의존성 없이 node 사용자로 구동한다.
 
 공통 Jenkins 파이프라인이 서비스 폴더를 자동 선택한다. develop-backend 병합 후 테스트·이미지 빌드·패키징·k3s 배포를 수행한다. 정상 배포된 다른 서비스와 변경 없는 DB는 생략한다. 배포 이력이 없거나 실패한 서비스는 재선택될 수 있다.
 
@@ -62,4 +64,4 @@ python msa/deploy/tests/integration_app_rollout.py --service operations --image 
 
 로그/보고서는 `msa/liquibase/verification-logs/operations/`에 남는다. Jenkins는 operations가 빌드 대상으로 선택되면 이 검증을 통과한 뒤에만 앱 배포를 진행한다. 운영 Webhook 배포·외부 HTTPS·다른 서비스 연동은 별도 확인한다.
 
-2026-11-05 검증: 원본 인증 40개를 양쪽에 실행해 통과했고 operations 설정 2개, 단위 1개, E2E 5개, production HTTP·DB 비교와 실제 배포 probe도 통과했다. 임시 k3s의 최초 배포·교체·실패 복구 중 HTTP 442건의 실패는 0건이었다. DB 전체 201단계와 배포 회귀 50개도 통과했다. 상세 제한은 전체 계획의 두 번째 MR 검증 기록에 남겼다.
+2026-11-05 customer 쓰기 연결 후 재검증: 원본 인증 40개를 양쪽에 실행해 통과했고 operations 설정 2개, 단위 1개, E2E 6개, production HTTP·DB 비교와 실제 배포 probe도 통과했다. 별도 customer 비교에서 준비·확정·중단·중복·변조·지연·SIGKILL 복구를 확인했다. 임시 k3s 최초 배포·교체·실패 복구 중 operations HTTP 450건의 실패는 0건이었다. DB 전체 228단계와 Linux 배포 회귀 54개도 통과했다. 운영 Jenkins·공개 HTTPS·자동 업무/보관 워커·전체 95개 API는 미검증이다.

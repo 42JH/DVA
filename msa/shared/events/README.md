@@ -2,7 +2,7 @@
 
 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)의 첫 MR이다. Node.js 24의 HTTP·crypto·fetch와 기존 서비스의 `pg` Pool을 사용하며 런타임 외부 의존성은 없다. 테스트에서만 저장소와 같은 pg 8.23.1을 사용한다.
 
-이 패키지는 아직 5개 NestJS 업무 앱에 등록하지 않았다. 이번 변경만 배포해도 업무 API나 이벤트가 자동으로 실행되지는 않는다. 서비스별 이식 MR에서 기존 API·인증·업무 SQL·워커와 연결한다.
+customer와 operations의 감사 이벤트에 연결했다. 나머지 서비스는 해당 이식 MR에서 기존 API·인증·업무 SQL·워커와 연결한다. 패키지만 배포해 업무 API나 이벤트가 자동으로 실행되지는 않는다.
 
 ## 트랜잭션과 사용 계약
 
@@ -15,6 +15,8 @@
 `eventHttpHandler(receive)`는 기존 앱에 장착할 수 있는 Node HTTP 핸들러다. 경로는 외부 업무 API와 구분되는 내부 전용 `POST /internal/events`이며 1MiB JSON 한도를 적용한다. 프론트·AI가 이 엔드포인트를 호출하지 않는다. 내부 라우트는 공개 Ingress에 추가하지 않으며 토큰은 환경/Secret으로 주입한다.
 
 `createRelay({ pool, source, destinations, timeoutMs })`는 이벤트 한 건을 처리하는 비동기 함수를 반환한다. destinations는 고정 서비스별 `{ url, token }`이다. URL의 자격정보·query·fragment·HTTP(S) 외 스킴과 리다이렉트를 거절한다. 내부 HTTP 또는 외부 HTTPS를 사용할 수 있으며 토큰은 로그에 기록하지 않는다.
+
+`sendEvent(url, token, event)`는 같은 입력·URL·5초 제한·4KiB 정확 ACK 검증으로 제어 이벤트 한 건을 직접 전송한다. 영속 저장이나 재시도는 하지 않는다. customer 감사 준비/결정 조회처럼 호출자가 별도 트랜잭션·outbox·복구 규칙을 가진 경우에만 사용한다. 업무 확정 이벤트는 기존 enqueue/relay를 사용한다. TypeScript 선언도 패키지에 포함한다.
 
 릴레이는 같은 수신처·업무 식별자의 앞선 미전달 이벤트를 추월하지 않는다. 다른 업무의 이벤트는 SKIP LOCKED로 병렬 처리한다. HTTP 응답 본문을 읽는 동안에도 기본 5초(최대 30초) 제한을 적용하며 응답은 4KiB 이내의 정확한 이벤트 ACK여야 한다. 성공 ACK 후에만 delivered_at을 기록한다. 타임아웃·잘못된 ACK·인증/업무 오류·미등록 수신처는 DB 대기를 남기고 250ms부터 최대 60초 간격으로 재시도한다. 영구 오류도 자동 삭제하거나 성공 처리하지 않으며 attempt_count·next_attempt_at·last_http_status로 진단한다.
 

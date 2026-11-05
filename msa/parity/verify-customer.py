@@ -1,4 +1,4 @@
-"""Compare customer reads with unchanged monolith on three isolated Docker DBs."""
+"""Compare production reads and worker-isolated writes on three isolated Docker DBs."""
 import json
 from pathlib import Path
 import subprocess
@@ -14,7 +14,10 @@ LOGS = ROOT / 'msa/liquibase/verification-logs/customer'
 def main():
     LOGS.mkdir(parents=True, exist_ok=True)
     resources = []
-    report = {'passed': False, 'checks': [], 'reference': subprocess.check_output(
+    report = {'passed': False, 'checks': [], 'phases': {
+        'reads': {'nodeEnv': 'production', 'automaticBusinessWorkers': True},
+        'writes': {'nodeEnv': 'test', 'automaticBusinessWorkers': False},
+    }, 'reference': subprocess.check_output(
         ['git', 'rev-parse', 'HEAD:backend'], cwd=ROOT, text=True).strip()}
 
     def run(*args, label):
@@ -52,7 +55,7 @@ def main():
             image = RUN + '-' + name
             resources.append(('image', image))
             run('docker', 'build', '--label', LABEL, '-t', image,
-                *(['--target', target] if target else []), str(ROOT / path), label=name+'-build')
+                *(['--target', target] if target else []), *(['-f', str(ROOT / path / 'Dockerfile'), str(ROOT / 'msa')] if path.startswith('msa/services/') else [str(ROOT / path)]), label=name+'-build')
             images[name] = image
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
@@ -83,23 +86,45 @@ def main():
                        '-e', 'LIQUIBASE_COMMAND_USERNAME='+side+'_app', '-e', 'LIQUIBASE_COMMAND_PASSWORD='+password,
                        command=('--changelog-file='+side+'/db.changelog.xml', 'update'))
             complete(name)
-        for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001')):
+        def applications(mode):
+          for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001')):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app',
-                   '-e', 'NODE_ENV=production', '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
+                   '-e', 'NODE_ENV='+mode, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
                    '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
                    '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
                    '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+                   '-e', 'CUSTOMER_URL=http://customer-app:3001',
                    '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token)
             run('docker', 'start', name, label=side+'-app-start')
-        run('docker', 'cp', RUN+'-operations-app:/app/dist/auth/password.js',
+        applications('production')
+        run('docker', 'cp', RUN+'-operations-app:/app/service/dist/auth/password.js',
             str(LOGS / 'seed-password.cjs'), label='password-fixture-copy')
         name = RUN+'-differential'
         create(name, images['customer-checks'], '-e', 'NODE_ENV=test',
                '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
-               '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token, command=('node', '--test', 'test/customer-reads.test.cjs'))
-        for source in (ROOT / 'msa/parity/customer-reads.test.cjs', LOGS / 'seed-password.cjs'):
-            run('docker', 'cp', str(source), name+':/app/test/'+source.name, label='copy-'+source.name)
+               '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token, command=('node', '--test', '--test-concurrency=1', 'test/member-input.test.cjs', 'test/customer-reads.test.cjs'))
+        for source in (ROOT / 'backend/test/member-input.test.cjs', ROOT / 'msa/parity/customer-reads.test.cjs', ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
+        complete(name)
+        # The unchanged monolith's test mode isolates foreground writes from future order workers.
+        for side in ('monolith','operations','customer'):
+            name = RUN+'-'+side+'-app'
+            item = json.loads(run('docker', 'inspect', name, label=side+'-production-owner'))[0]
+            if item.get('Config', {}).get('Labels', {}).get('dva.test-run') != RUN:
+                raise RuntimeError('Refusing cleanup of unowned production fixture: '+name)
+            result = subprocess.run(['docker', 'logs', name], capture_output=True, text=True,
+                                    encoding='utf-8', errors='replace', check=True)
+            (LOGS / (name+'-production.log')).write_text(result.stdout+result.stderr, encoding='utf-8')
+            run('docker','rm','-f',name,label=side+'-production-stop')
+            resources.remove(('container',name))
+        applications('test')
+        name = RUN+'-writes'
+        create(name, images['customer-checks'], '-e','NODE_ENV=test','-e','PGPASSWORD='+password,
+               '-e','PGDATABASE=dva_webhook_test','-e','CUSTOMER_AUTH_TOKEN='+auth_token,
+               command=('node','--test','test/customer-writes.test.cjs'))
+        for source in (ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):
+            run('docker','cp',str(source),name+':/app/service/test/'+source.name,label='writes-copy-'+source.name)
         complete(name)
         report['passed'] = True
     finally:

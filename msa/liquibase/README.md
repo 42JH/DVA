@@ -5,16 +5,16 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 2026-10-22 확정 MSA SQL을 기준으로 한 서비스별 초기 마이그레이션이다. 원본 경로와 체크섬은 source-manifest.json에 출처 기록으로 보존한다.
 기존 backend/ 모놀리식과 독립적으로 관리한다. 관련 이슈: [S15P31D109-125](https://ssafy.atlassian.net/browse/S15P31D109-125).
 
-| 서비스 | DB | Secret | 업무·이벤트 테이블 | Liquibase 포함 |
+| 서비스 | DB | Secret | 업무·이벤트·준비 테이블 | Liquibase 포함 |
 |---|---|---|---:|---:|
 | customer | customer_db | customer-db | 8 | 10 |
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 6 | 8 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
-| operations | operations_db | operations-db | 8 | 10 |
+| operations | operations_db | operations-db | 9 | 11 |
 
-현재 업무 테이블 20개 + outbox/inbox 10개 = 30개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 40개가 된다.
+현재 업무 테이블 20개 + outbox/inbox 10개 + customer 감사 준비 1개 = 31개. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 41개가 된다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
 
@@ -24,6 +24,8 @@ DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 40개�
 - customer와 operations는 기존 `002`와 이벤트 전달용 `003`, 나머지는 이벤트 전달용 `002`도 포함한다. 각 changeset은 별도 트랜잭션이다.
 - operations `004`는 관리자 이름·soft delete·9시간 세션·감사 이름 스냅샷과 INACTIVE 상태를 모놀리식 계약에 맞춘다. 이름 없는 기존 관리자 행이 있으면 데이터를 보존하고 적용을 중단한다. 실제 이름을 확인한 별도 마이그레이션 전에는 인증 앱을 배포하지 않는다.
 - customer `004`는 기본 주소·월결제 자격·soft delete·부서·선택 부서 소속과 제약을 추가한다. 기존 고객/기업/소속/PIN/이벤트는 보존하며 근거 없는 과거 기업 생성 시각·기본 주소·부서 배정은 NULL로 남긴다. PIN 주소 규칙·버전은 변경하지 않는다. 003의 기존 데이터 업그레이드와 후속 SQL 실패 롤백도 검증한다.
+- customer `005`는 기업 PIN의 부서·soft delete와 변경 시 버전 규칙을 추가한다. 원본 043처럼 양쪽 PIN 주소에서 latitude/longitude를 제거하므로 운영 적용 전 별도 백업이 필요하다. 변환 시 PIN 버전·소유권을 보존하고 유일하게 일치하는 부서명만 연결한다. SQL 후반 실패 시 주소·스키마·이력 전체 rollback도 검사한다.
+- operations `005`는 customer 업무와 감사 확정을 연결하는 비공개 `customer_audit_preparations`를 추가한다. customer와 operations는 각각 changeset 5개이며 이전 changeset은 수정하지 않는다.
 - SQL의 바깥 BEGIN/COMMIT만 제거하고 runInTransaction=true로 Liquibase가 트랜잭션을 관리한다.
 - splitStatements=false로 PostgreSQL 함수 본문의 세미콜론을 보존한다.
 - 기존 업무 테이블이 있으면 초기 changeset을 HALT한다. 자동 삭제/덮어쓰기하지 않는다.
