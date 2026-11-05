@@ -717,3 +717,8 @@
 - app/integrations/address.py: 로컬이 not_found이거나 weak이고 키가 있을 때만 카카오 둘을 병렬 호출(세마포어·공유 클라이언트·타임아웃 유지) → with_witness. 여러 지역에 실제로 있어 되묻는 경우(강한 근거)는 카카오가 덮지 못함
 - scripts/evaluate_address.py --kakao(키 필요). 측정(_same_road 수정 전, 재측정 필요): v2 카카오 켬 54/55·틀림 0·되묻기 10/10·없는 주소 6/6, p01 "63빌딩"은 인천·영등포 두 지역 되묻기로 안전하게 전환(address_v2_redesign_s3.json). v1 카카오 켬 106/106, 없는 주소 14/15 — k08이 번호만 같은 다른 길로 확정(address_v1_redesign_s3.json) → _same_road로 고치고 단위 시험 추가, 전체 650 passed
 - 남은 것: _same_road 반영 후 v1·v2 --kakao 재측정, 지연(p95) 재확인, 4단계(Geo 로컬화) 미착수, push 미실행
+
+## 2026-11-06 3단계 재측정(_same_road 반영, 카카오 켬)
+- v1 106/106·없는 주소 15/15(k08 해결), warm p50 8.6·p95 223·max 300ms (address_v1_redesign_s3.json)
+- v2 정답 55 중 54 기록·틀림 0·되묻기 10/10·없는 주소 6/6, warm p50 115·p95 260·max 527ms (address_v2_redesign_s3.json). 남은 1건 p01 "63빌딩"은 부가정보(인천)와 카카오(영등포)가 엇갈려 두 지역 되묻기 — 틀린 기록이 아니라 안전한 되묻기
+- 남은 것: 4단계 Geo 로컬화(사용자 결정 대기), push(지시 대기), 운영 서버 address.db 재업로드
