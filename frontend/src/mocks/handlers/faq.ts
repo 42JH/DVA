@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 import { todayYmd } from '@/shared/lib/dateRange'
+import { recentQuestionsOf } from './faqHeard'
 
 // 가짜 FAQ · AI 미답변 — 연동 상세명세 10/31 API-26~33 모양 그대로. 메모리에만 있어서 새로고침하면 처음으로
 // 예시 질문은 와이어프레임 09 + 디버 FAQ 참고자료([프로젝트] 고정값) 기준. 분류는 10개(10/28 '기타' 추가). 전부 예시
@@ -298,6 +299,7 @@ const unanswered: Unanswered[] = UA_SEED.map(([at, name, phone, question, call, 
   }
 })
 const deleted = new Set<number>() // 지운 질문 번호 (서버는 DELETED 상태로 남기고 목록에서 뺌)
+const edited = new Set<number>() // 내용이 바뀐 FAQ — 서버는 고객 질문 사례를 비움
 const sameContent = (f: Faq, b: Record<string, unknown>) =>
   f.category === b.category && f.question === b.question && f.answer === b.answer
 
@@ -315,6 +317,13 @@ export const faqHandlers = [
       )
       .sort((a, b) => a.faqEntrySeq - b.faqEntrySeq)
     return HttpResponse.json(pageOf(hit, url))
+  }),
+  // FAQ 상세 + 고객 질문 사례 (11/05 연동) — recentQuestions 최대 10 · 최신순, 없으면 [] (null 아님)
+  http.get(`${API_BASE_URL}/faqs/:id`, ({ params }) => {
+    const faq = faqs.find((f) => f.faqEntrySeq === Number(params.id))
+    if (!faq) return error(404, 'NOT_FOUND', 'FAQ가 없습니다.')
+    const recentQuestions = edited.has(faq.faqEntrySeq) ? [] : recentQuestionsOf(faq)
+    return HttpResponse.json({ data: { ...faq, recentQuestions }, meta: { requestId: 'mock' } })
   }),
   // API-30 — 한 건도 items 배열. 전부 저장하거나 전부 거절
   http.post(`${API_BASE_URL}/faqs`, async ({ request }) => {
@@ -340,6 +349,7 @@ export const faqHandlers = [
     const details = invalidFields(body)
     if (details.length) return error(400, 'INVALID_REQUEST', '입력값을 확인해 주세요.', details)
     if (takenBy(String(body.question), faq.faqEntrySeq)) return duplicateError()
+    if (!sameContent(faq, body)) edited.add(faq.faqEntrySeq) // 저장값이 바뀌면 사례를 비움 (같으면 그대로)
     faq.category = String(body.category)
     faq.question = String(body.question)
     faq.answer = String(body.answer)
