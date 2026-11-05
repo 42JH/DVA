@@ -9,4 +9,7 @@
     </preConditions>
     <sqlFile path="001-initial.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="002-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

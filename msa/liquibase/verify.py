@@ -6,6 +6,7 @@ import time
 import uuid
 import os
 import re
+import shutil
 
 BASE = Path(__file__).resolve().parent
 SOURCE = BASE / 'tests'
@@ -82,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',5,4),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',7,3)]:
+    for service, tables, fks in [('customer',7,4),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',7,3)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -91,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = 2 if service in ('customer', 'operations') else 1
+        changesets = 3 if service in ('customer', 'operations') else 2
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -112,6 +113,7 @@ try:
     # An error late in the initial SQL must roll back tables and Liquibase history.
     broken = logs / 'atomicity' / 'customer'
     broken.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(BASE / 'changelog', broken.parent, dirs_exist_ok=True)
     for filename in ('db.changelog.xml', '001-initial.sql', '002-employee-no-and-status.sql'):
         content = (BASE / 'changelog' / 'customer' / filename).read_text(encoding='utf-8')
         if filename == '001-initial.sql':
@@ -160,6 +162,7 @@ try:
         upgrade_root = logs / ('atomicity-002-'+service)
         target = upgrade_root / service
         target.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(BASE / 'changelog', upgrade_root, dirs_exist_ok=True)
         second = '002-employee-no-and-status.sql' if service == 'customer' else '002-admin-status.sql'
         for filename in ('db.changelog.xml', '001-initial.sql', second):
             content = (BASE / 'changelog' / service / filename).read_text(encoding='utf-8')
@@ -179,11 +182,39 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '2'
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '3'
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
         assert 'Pending changes changed after preview' in output, output
+    # Upgrade every previously supported schema without losing pending message IDs/payloads.
+    for service in ('customer', 'operations', 'order', 'consultation', 'delivery'):
+        db = service + '_events_upgrade_db'
+        sql('postgres', f'CREATE DATABASE {db} OWNER {service}_app;', service+'-events-setup')
+        previous_count = 2 if service in ('customer', 'operations') else 1
+        lb(service, db, 'update-count', service+'-events-baseline', extra=(f'--count={previous_count}',))
+        baseline = sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', service+'-events-history-before')
+        if service == 'customer':
+            sql(db, "INSERT INTO customers(name,phone_number,status) VALUES('upgrade','01099999991','ACTIVE');", service+'-events-seed', service+'_app')
+        else:
+            sql(db, "INSERT INTO outbox_events(event_id,destination,event_type,aggregate_seq,payload) VALUES('00000000-0000-4000-8000-000000000001','delivery','OrderAccepted',1,'{\"legacy\":true}');", service+'-events-seed', service+'_app')
+        if service in ('customer', 'order'):
+            failing = logs / ('atomicity-events-' + service)
+            shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+            shared_sql = failing / 'shared/001-event-transport.sql'
+            shared_sql.write_text(shared_sql.read_text(encoding='utf-8') + '\nSELECT 1 / 0;\n', encoding='utf-8')
+            output = lb(service, db, 'update', service+'-events-atomic-failure', failure=True, changelog_root=failing)
+            assert 'division by zero' in output.lower(), output
+            assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', service+'-events-history-rolled-back') == baseline
+            assert sql(db, "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='outbox_events' AND column_name='outbox_seq';", service+'-events-columns-rolled-back') == '0'
+            if service == 'customer':
+                assert sql(db, "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename IN ('outbox_events','inbox_events');", service+'-events-tables-rolled-back') == '0'
+        lb(service, db, 'update', service+'-events-upgrade')
+        assert sql(db, f'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<={previous_count} ORDER BY orderexecuted;', service+'-events-old-history-preserved') == baseline
+        if service == 'customer':
+            assert sql(db, "SELECT count(*) FROM customers WHERE phone_number='01099999991';", service+'-events-business-preserved') == '1'
+        else:
+            assert sql(db, "SELECT count(*) FROM outbox_events WHERE event_id='00000000-0000-4000-8000-000000000001' AND payload='{\"legacy\":true}'::jsonb AND delivered_at IS NULL AND attempt_count=0 AND outbox_seq IS NOT NULL AND next_attempt_at IS NOT NULL;", service+'-events-pending-preserved') == '1'
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

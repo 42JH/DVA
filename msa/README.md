@@ -1,5 +1,7 @@
 # MSA CI/CD
 
+모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. 첫 기반 MR은 전체 API·migration·워커 기준 목록과 이벤트 공통 런타임/검증을 추가한다. 아직 업무 앱에 이벤트 핸들러와 기존 외부 API를 연결하지 않았으며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`에서 임시 PostgreSQL·HTTP 검증과 기준 목록 검사를 실행하고 실패 시 이후 배포를 중단한다.
+
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
 현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery·consultation·operations NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.

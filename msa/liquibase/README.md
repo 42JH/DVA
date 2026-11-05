@@ -7,21 +7,21 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 
 | 서비스 | DB | Secret | 기존 설계 테이블 | Liquibase 포함 |
 |---|---|---|---:|---:|
-| customer | customer_db | customer-db | 5 | 7 |
+| customer | customer_db | customer-db | 5 | 9 |
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 6 | 8 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
 | operations | operations_db | operations-db | 7 | 9 |
 
-업무 테이블 18개 + outbox/inbox 8개 = 26개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 36개가 된다.
+업무 테이블 18개 + outbox/inbox 10개 = 28개. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 38개가 된다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
 
 ## 변경 관리
 
 - 서비스별 초기 changeset 1개. 각 서비스 DB 안에서 원자적으로 실행한다.
-- customer와 operations는 후속 `002` changeset도 포함한다. 각 changeset은 별도 트랜잭션이다.
+- customer와 operations는 기존 `002`와 이벤트 전달용 `003`, 나머지는 이벤트 전달용 `002`도 포함한다. 각 changeset은 별도 트랜잭션이다.
 - SQL의 바깥 BEGIN/COMMIT만 제거하고 runInTransaction=true로 Liquibase가 트랜잭션을 관리한다.
 - splitStatements=false로 PostgreSQL 함수 본문의 세미콜론을 보존한다.
 - 기존 업무 테이블이 있으면 초기 changeset을 HALT한다. 자동 삭제/덮어쓰기하지 않는다.
@@ -39,6 +39,12 @@ Docker와 Python 3가 있는 PC에서 `msa/liquibase`로 이동한 뒤 `python v
 검증 결과는 verification.json 및 verification-logs/에 저장된다.
 SQL 원본 체크섬은 source-manifest.json에 기록했다.
 운영 적용 이후 기존 SQL을 재생성하거나 수정하지 않는다.
+
+## 이벤트 전달 후속 changeset
+
+[S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)에서 기존 changeset을 보존하고 `shared/001-event-transport.sql`을 서비스별 새 changeset으로 참조한다. customer 메시지 테이블 2개와 전체 서비스의 outbox 순번·재시도 시각·시도 횟수·HTTP 상태·인덱스를 추가한다. 기존 대기 이벤트의 ID·본문·전달 상태와 적용 이력은 보존한다.
+
+앱의 새 이벤트 런타임을 연결하기 전에 적용한다. 기존 앱은 추가 컬럼을 무시하며 이번 기반 MR은 업무 앱에 publisher/consumer를 등록하지 않는다. [런타임과 검증](../shared/events/README.md)을 참고한다. 새 설치뿐 아니라 5개 기존 서비스 DB의 업그레이드, customer/order의 신규 변경 실패 시 전체 changeset 롤백을 `verify.py`가 검사한다.
 
 ## 서버 준비 (운영 적용 전에 먼저 수행)
 
