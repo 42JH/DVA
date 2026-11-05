@@ -15,6 +15,7 @@ import {
   nextOrderDay,
   retryOrder,
   type ListParty,
+  type OrderStatus,
   type StatusGroup,
 } from '@/features/order/api/orderApi'
 
@@ -46,6 +47,10 @@ const RETRY_RESULT: Partial<Record<string, string>> = {
   SUBMITTING_FAILED: '다시 접수했지만 실패해서 서버가 자동으로 다시 시도하는 중이에요.',
   SUBMISSION_FAILED: '다시 접수했지만 또 실패했습니다. 백엔드 담당자에게 알려 주세요.',
 }
+
+// 더 바뀌지 않는 상태 — 지난 날 목록은 이 밖의 주문이 있을 때만 15초마다 다시 받음 (11/05 사용자)
+// 최종 실패는 관리자가 [다시 접수]할 때만 바뀌고, 그땐 무효화로 바로 새로 받음
+const DONE: ReadonlySet<OrderStatus> = new Set(['ACCEPTED', 'CANCELLED', 'SUBMISSION_FAILED'])
 
 // URL 쿼리 기본값 (useListParams 규칙: 모듈 상수) — 상세 창을 닫아도 · 새로고침해도 날짜 · 조건 그대로
 // date '' = 오늘 · status = 상태 묶음 · q = 검색어 (11/05 사용자: 공용 상단바 검색 한 칸 — 보내는 분 · 받는 분 둘 다에서 찾음)
@@ -99,6 +104,7 @@ export function useOrderList() {
     fetchDay: (day, signal) => fetchOrderDay(day, filter, signal),
     prevDay: (day, signal) => prevOrderDay(day, filter, signal),
     nextDay: (day, signal) => nextOrderDay(day, filter, signal),
+    pending: (r) => !DONE.has(r.status),
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,
