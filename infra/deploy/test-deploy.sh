@@ -11,6 +11,9 @@ export TEST_MEMBERSHIP_TABLE="$test_root/membership-table"
 export TEST_BILLING_SCHEMA="$test_root/billing-schema"
 export TEST_COMPANY_HISTORY_SCHEMA="$test_root/company-history-schema"
 export TEST_CALL_ANALYSIS_SCHEMA="$test_root/call-analysis-schema"
+export TEST_ADDRESS_SCHEMA="$test_root/address-schema"
+export TEST_RETENTION_SCHEMA="$test_root/retention-schema"
+export TEST_UNUSED_SCHEMA="$test_root/unused-schema"
 export PATH="$test_root/bin:$PATH"
 cat > "$test_root/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
@@ -43,6 +46,21 @@ fi
 if [[ "$1" == exec && "$*" == *public.call_analyses* ]]; then
     [[ "${TEST_CALL_ANALYSIS_QUERY_FAIL:-}" != 1 ]] || exit 1
     if [[ -f "$TEST_CALL_ANALYSIS_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *origin_latitude* ]]; then
+    [[ "${TEST_ADDRESS_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_ADDRESS_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *"table_name='customers' AND column_name='deleted_at'"* ]]; then
+    [[ "${TEST_RETENTION_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_RETENTION_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
+    exit 0
+fi
+if [[ "$1" == exec && "$*" == *public.handoff_requests* ]]; then
+    [[ "${TEST_UNUSED_QUERY_FAIL:-}" != 1 ]] || exit 1
+    if [[ -f "$TEST_UNUSED_SCHEMA" ]]; then printf 't\n'; else printf 'f\n'; fi
     exit 0
 fi
 if [[ "$1" == exec && "$*" == *psql* && "${TEST_VERIFY_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -93,6 +111,9 @@ if [ -f "$root/backend/migrations/010-remove-membership-write-requests.sql" ]; t
 if [ -f "$root/backend/migrations/019-organization-monthly-billing.sql" ]; then touch "$TEST_BILLING_SCHEMA"; fi
 if [ -f "$root/backend/migrations/021-company-deletion-history.sql" ]; then touch "$TEST_COMPANY_HISTORY_SCHEMA"; fi
 if [ -f "$root/backend/migrations/042-remove-call-analysis-result.sql" ]; then touch "$TEST_CALL_ANALYSIS_SCHEMA"; fi
+if [ -f "$root/backend/migrations/043-remove-address-coordinates.sql" ]; then touch "$TEST_ADDRESS_SCHEMA"; fi
+if [ -f "$root/backend/migrations/045-data-retention.sql" ]; then touch "$TEST_RETENTION_SCHEMA"; fi
+if [ -f "$root/backend/migrations/047-remove-unused-schema.sql" ]; then touch "$TEST_UNUSED_SCHEMA"; fi
 MOCK
     printf 'SELECT 1;\n' > "$directory/infra/database/verify.sql"
     if [[ "${2:-}" == cutover || "${2:-}" == membership || "${2:-}" == cleanup || "${2:-}" == billing || "${2:-}" == history ]]; then
@@ -116,6 +137,15 @@ MOCK
     fi
     if [[ "${3:-}" == summary ]]; then
         printf 'SELECT 1;\n' > "$directory/backend/migrations/042-remove-call-analysis-result.sql"
+    fi
+    if [[ "${4:-}" == address || "${4:-}" == retention || "${4:-}" == unused ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/043-remove-address-coordinates.sql"
+    fi
+    if [[ "${4:-}" == retention || "${4:-}" == unused ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/045-data-retention.sql"
+    fi
+    if [[ "${4:-}" == unused ]]; then
+        printf 'SELECT 1;\n' > "$directory/backend/migrations/047-remove-unused-schema.sql"
     fi
     (cd "$directory" && find . -type f ! -name 'images.tar*' ! -name release-files.sha256 -print0 | sort -z | xargs -0 sha256sum > release-files.sha256)
 }
@@ -427,4 +457,95 @@ for failure in verification app; do
     [[ -f "$TEST_CALL_ANALYSIS_SCHEMA" ]]
     if grep -F '/releases/analysis-old/compose.prod.yaml up ' "$TEST_DOCKER_LOG"; then exit 1; fi
 done
-echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042 stop-backup order and incompatible restore protection.'
+# Each later conversion must protect automatic deployment and recovery independently.
+old_version=call-summary
+for cutover in address retention unused; do
+    case "$cutover" in
+        address) schema_marker="$TEST_ADDRESS_SCHEMA"; query_failure=TEST_ADDRESS_QUERY_FAIL ;;
+        retention) schema_marker="$TEST_RETENTION_SCHEMA"; query_failure=TEST_RETENTION_QUERY_FAIL ;;
+        unused) schema_marker="$TEST_UNUSED_SCHEMA"; query_failure=TEST_UNUSED_QUERY_FAIL ;;
+    esac
+    printf '%s\n' "$old_version" > "$test_root/site/current-release"
+    make_release "$cutover" history summary "$cutover"
+    : > "$TEST_DOCKER_LOG"
+    if env "$query_failure=1" bash "$test_root/site/releases/$cutover/deploy.sh"; then
+        echo "Unknown $cutover schema was accepted." >&2; exit 1
+    fi
+    assert_current "$old_version"
+    if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+    for failure in backup sql; do
+        : > "$TEST_DOCKER_LOG"
+        if [[ "$failure" == backup ]]; then
+            if TEST_BACKUP_FAIL=1 bash "$test_root/site/releases/$cutover/deploy.sh"; then exit 1; fi
+            if grep '^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+        else
+            if TEST_MIGRATION_FAIL_VERSION="$cutover" bash "$test_root/site/releases/$cutover/deploy.sh"; then exit 1; fi
+        fi
+        assert_current "$old_version"
+        [[ ! -f "$schema_marker" ]]
+        grep '^BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+        grep -F "/releases/$old_version/compose.prod.yaml up " "$TEST_DOCKER_LOG" >/dev/null
+        if grep -F "/releases/$cutover/compose.prod.yaml up " "$TEST_DOCKER_LOG"; then exit 1; fi
+    done
+
+    : > "$TEST_DOCKER_LOG"
+    bash "$test_root/site/releases/$cutover/deploy.sh"
+    assert_current "$cutover"
+    [[ -f "$schema_marker" ]]
+    stop_line="$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+    backup_line="$(grep -n '^BACKUP ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+    migration_line="$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+    app_line="$(grep -n ' up ' "$TEST_DOCKER_LOG" | cut -d: -f1)"
+    [[ "$stop_line" -lt "$backup_line" && "$backup_line" -lt "$migration_line" && "$migration_line" -lt "$app_line" ]]
+
+    : > "$TEST_DOCKER_LOG"
+    if bash "$test_root/site/releases/$old_version/deploy.sh"; then
+        echo "Old app deployed after $cutover conversion." >&2; exit 1
+    fi
+    assert_current "$cutover"
+    if grep -E ' stop backend| up |^MIGRATE ' "$TEST_DOCKER_LOG"; then exit 1; fi
+
+    make_release "$cutover-compatible-broken" history summary "$cutover"
+    : > "$TEST_DOCKER_LOG"
+    if TEST_FAIL_VERSION="$cutover-compatible-broken" bash "$test_root/site/releases/$cutover-compatible-broken/deploy.sh"; then exit 1; fi
+    assert_current "$cutover"
+    grep '^NO_BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+    grep -F "/releases/$cutover/compose.prod.yaml up " "$TEST_DOCKER_LOG" >/dev/null
+    if grep '^BACKUP ' "$TEST_DOCKER_LOG"; then exit 1; fi
+    # The only stop is cleanup of the failed app, after SQL; no repeated cutover outage.
+    [[ "$(grep -c ' stop backend$' "$TEST_DOCKER_LOG")" -eq 1 ]]
+    [[ "$(grep -n '^MIGRATE ' "$TEST_DOCKER_LOG" | cut -d: -f1)" -lt "$(grep -n ' stop backend$' "$TEST_DOCKER_LOG" | cut -d: -f1)" ]]
+
+    for failure in verification app; do
+        # Reset only the disposable fixture to simulate a first committed conversion.
+        rm -f -- "$schema_marker"
+        printf '%s\n' "$old_version" > "$test_root/site/current-release"
+        : > "$TEST_DOCKER_LOG"
+        if [[ "$failure" == verification ]]; then
+            if TEST_VERIFY_FAIL=1 bash "$test_root/site/releases/$cutover/deploy.sh"; then exit 1; fi
+        else
+            if TEST_FAIL_VERSION="$cutover" bash "$test_root/site/releases/$cutover/deploy.sh"; then exit 1; fi
+        fi
+        assert_current "$old_version"
+        [[ -f "$schema_marker" ]]
+        grep '^BACKUP ' "$TEST_DOCKER_LOG" >/dev/null
+        if grep -F "/releases/$old_version/compose.prod.yaml up " "$TEST_DOCKER_LOG"; then
+            echo "Incompatible app restored after $cutover conversion." >&2; exit 1
+        fi
+        if [[ "$failure" == verification ]] && grep ' up ' "$TEST_DOCKER_LOG"; then exit 1; fi
+    done
+    old_version="$cutover"
+done
+
+# A release spanning all three conversions needs just one stop and one backup.
+rm -f -- "$TEST_ADDRESS_SCHEMA" "$TEST_RETENTION_SCHEMA" "$TEST_UNUSED_SCHEMA"
+printf 'call-summary\n' > "$test_root/site/current-release"
+make_release combined history summary unused
+: > "$TEST_DOCKER_LOG"
+bash "$test_root/site/releases/combined/deploy.sh"
+assert_current combined
+[[ -f "$TEST_ADDRESS_SCHEMA" && -f "$TEST_RETENTION_SCHEMA" && -f "$TEST_UNUSED_SCHEMA" ]]
+[[ "$(grep -c ' stop backend$' "$TEST_DOCKER_LOG")" -eq 1 ]]
+[[ "$(grep -c '^BACKUP ' "$TEST_DOCKER_LOG")" -eq 1 ]]
+echo 'PASS: migration gating, fresh DB startup, compatible rollback, 008/010/019/021/042/043/045/047 stop-backup order and incompatible restore protection.'
