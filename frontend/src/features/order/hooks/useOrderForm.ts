@@ -102,7 +102,10 @@ export function useOrderForm(
     ? toDateTimeLocal(new Date(order.pickupRequestedAt))
     : ''
   const [pickupAt, setPickupAt] = useState(initialPickup) // datetime-local 값
-  const [payment, setPayment] = useState<PaymentMethod>(order?.paymentMethod ?? 'MONTHLY') // 와이어프레임 기본 = 월정산
+  // 새 주문만 월정산 기본(와이어프레임). 수정은 서버 값 그대로 — 미정(null)을 월정산으로 채우면 안 바꿔도 credit이 나감
+  const [payment, setPayment] = useState<PaymentMethod | null>(
+    order ? order.paymentMethod : 'MONTHLY',
+  )
   const [request, setRequest] = useState(order?.clientComment ?? '')
   const [searching, setSearching] = useState<Side | null>(null) // 주소 검색 창이 열린 쪽
   // 보내는 분 이름 · 주소를 고쳤을 때 '고객정보에도 저장할까요?' 창 (jiw/order-sender-customer-save.md)
@@ -269,6 +272,7 @@ export function useOrderForm(
     requestError: fieldError('clientComment'),
     payment,
     paymentOptions: PAYMENT_OPTIONS,
+    paymentText: payment ? PAYMENT_METHOD_LABEL[payment] : '미정', // 잠긴 칸 글자 (지점 방문 포함)
     setPayment,
     paymentLocked, // 잠겼으면 칩 대신 글자로
 

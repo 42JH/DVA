@@ -3,7 +3,7 @@
 import type { PaymentMethodDto } from '@/shared/order/orderDto'
 import type { OrderInput, PartyInput } from './orderApi'
 
-const METHOD: Record<OrderInput['paymentMethod'], PaymentMethodDto> = {
+const METHOD: Record<NonNullable<OrderInput['paymentMethod']>, PaymentMethodDto> = {
   PERSONAL_CARD: 'billing',
   MONTHLY: 'credit',
   GROUP_CARD: 'groupBilling',
@@ -24,7 +24,7 @@ const address = (p: PartyInput) => ({
 export function buildCreateOrder(input: OrderInput, shippingFee: number) {
   return {
     customer: { name: input.sender.name, phoneNumber: input.sender.phoneNumber }, // 수기 = 주문자가 보내는 분
-    paymentMethodType: METHOD[input.paymentMethod],
+    ...(input.paymentMethod ? { paymentMethodType: METHOD[input.paymentMethod] } : {}), // 생략 = 미정(서버)
     totalAmount: shippingFee, // 상세 배송비 합계와 같아야 함 (상세 하나)
     ...(input.pickupAt ? { pickupRequestedAt: input.pickupAt } : {}), // 기존 호환용, 서버가 최종 결정
     parcels: [
