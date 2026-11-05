@@ -35,6 +35,25 @@ spec:
               value: production
             - name: PORT
               value: "3005"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGDATABASE}
+            - name: CORS_ORIGINS
+              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+            - name: SWAGGER_ENABLED
+              value: "true"
           resources:
             requests:
               cpu: 100m
@@ -50,7 +69,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /operations/health
+              path: /operations/health/ready
               port: http
             periodSeconds: 3
             timeoutSeconds: 2
@@ -97,6 +116,27 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/admins
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/audit-logs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
           - path: /operations
             pathType: Prefix
             backend:
