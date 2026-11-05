@@ -560,3 +560,11 @@
 - 최신화 전에 충돌 가능한 worklog.md만 stash 1893e74로 보존하고 기능 브랜치를 fast-forward했다. 새 develop-ai 로그 위에 우리 기능 기록만 복원해 되돌린 주소 로그를 다시 넣지 않았다. 원본 stash는 백업으로 유지하며 기존 다른 stash는 건드리지 않음.
 - 새 기준 전체 **574 passed, 14 warnings / 20.36초**. 이전 593개와의 차이는 develop-ai 되돌림으로 바뀐 테스트 구성이며 실패 없음. FAQ 배열 테스트와 기존 통화/미답변/대시보드 회귀 포함. 이번 재확인에서는 실제 모델 API를 다시 호출하지 않았고 기존 가상 검증 8/8 결과를 유지한다.
 - 사용자 병합 준비 요청에 따라 기능 코드·프롬프트·설정·테스트·가상 데이터/검증 스크립트·계약·문서만 커밋하여 feature/faq-answer-evidence로 공유한다. Jira 번호 없이 진행하라는 사용자 지시를 따른다. output/tmp·인증 파일·개인 개발로그는 제외. 최종 develop-ai 병합은 사용자가 직접 진행한다.
+
+## 2026-11-05 결제 방식 질문·안내 제거(사용자 결정)
+- 결제 단계 삭제: 택배를 다 받고 "더 없음"이면 바로 결과 전송·마무리로(more_parcels → closing). 결제 방식 Decision 질문(pay)·N1' payment_choice/payment 알림·[fields.payment]·[[stage]] payment 제거
+- 결제 방식은 서버가 고객 자격(availablePaymentMethods)으로 정함 — app/domain/assess.auto_payment: groupBilling > credit > 하나뿐인 방식, 빈 배열이면 미정(paymentMethodType 생략 → INCOMPLETE PAYMENT_UNKNOWN, 기본 billing 금지 유지). 결과 본문의 paymentMethodType 데이터는 그대로
+- Live 지시문: business_rules.md "결제 안내" → "요금"(결제 방식은 묻거나 안내하지 않음, 결제 완료·카드번호 금지 문장과 요금 문장 유지), [results].order의 notPaid 결제 대기 안내 삭제(그 밖과 같이 "담당자가 확인 후 안내"). 금지 항목·"결제 완료" 문구 검사는 유지(오안내 방지)
+- 대시보드 이탈 단계: PAYMENT_GUIDANCE를 더 만들지 않음(more_parcels·closing → NONE). BE 코드 값 자체는 계약에 남음
+- 미변경: policy/backend_rules.md(결제 판단 금지 문장 — 여전히 맞음, 커밋 안 된 다른 수정 있음), docs/call-flow/flow.toml(옛 설계, 실행에 안 쓰임)
+- 테스트 553 passed(결제 자동 선택 6가지, 결제 단계 없음, Decision 질문 세트, 지시문에 결제 방식 없음)

@@ -47,7 +47,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     if tools:
         lines += ["", "Backend tools:"] + [f"- {name}: {desc}" for name, desc in tools]
     lines += ["", "Do not generate <|SpawnThinking|> when:",
-              f"- 고객이 예/아니요, 후보 고르기, {', '.join(_labels(policy, choice))}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
+              f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
               "Do not guess the result while waiting. 결과가 오기 전에는 짧은 대기 안내만 합니다.", "",
               "## 하지 않는 것"]
@@ -79,7 +79,7 @@ def render_backend(policy: Policy) -> str:
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
-                       pick_labels: tuple[str, ...] = (), pay_methods: tuple[str, ...] = (),
+                       pick_labels: tuple[str, ...] = (),
                        callback: bool = False, save: bool = False, origin: bool = False) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
@@ -99,10 +99,7 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         for q in policy.decision[name].questions:
             item = {"type": q.type, "name": q.name, "instructions": q.instructions}
             if q.type == "choice":
-                choices = q.choices
-                if q.name == "pay" and pay_methods:  # 고객의 실제 가능 방식만(S6: 카드를 고를 수 없던 버그 B)
-                    choices = tuple(c for c in q.choices if c in pay_methods) + ("not_answer",)
-                item["choices"] = [{"value": c} for c in choices]
+                item["choices"] = [{"value": c} for c in q.choices]
             out.append(item)
     if pick_labels:
         out.append({"type": "choice", "name": "pick", "instructions":

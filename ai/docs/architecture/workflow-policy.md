@@ -61,10 +61,7 @@ id = "edit_parcel"                  # P5: 담은 택배 수정
 enter_when = "customer_requests_edit"
 goal = "어느 택배를 고칠지 확인하고, 고친 뒤 다시 되읽어 확인받는다"
 gate = "server"
-[[stage]]
-id = "payment"
-enter_when = "server.payment_choice_needed"
-gate = "server"
+# payment 단계 삭제(2026-11-05): 결제 방식은 묻지 않고 서버가 정한다(app/domain/assess.auto_payment)
 [[stage]]
 id = "closing"
 gate = "server"                     # 마무리 문구는 서버가 준 접수 결과로만

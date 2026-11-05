@@ -36,7 +36,7 @@ def test_live_instructions_carry_policy_order_forbid_and_delegation():
     assert all(item in text for item in POLICY.forbid.items)
     delegate = text.split("Generate <|SpawnThinking|> when:")[1].split("Do not generate")[0]
     assert all(POLICY.fields[n].label in delegate for n in POLICY.free_fields())  # 자유형은 전부 위임 규칙에(S0 U7)
-    assert POLICY.fields["payment"].label not in delegate  # 선택형은 위임하지 않는다
+    assert "payment" not in POLICY.fields and "결제 방식" not in procedure.split("## 하지 않는 것")[0]  # 결제는 묻지 않는다
     assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
 
 
@@ -76,7 +76,7 @@ def test_server_missing_uses_same_order_as_instructions():
 
 @pytest.mark.parametrize("stage, pending, expected", [
     ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm"]),
-    ("readback", False, []), ("more_parcels", True, ["confirm", "more", "switch"]), ("payment", False, ["pay", "switch"]),
+    ("readback", False, []), ("more_parcels", True, ["confirm", "more", "switch"]),
     ("closing", False, ["switch"]),
 ])
 def test_decision_questions_per_stage(stage, pending, expected):
@@ -105,7 +105,3 @@ def test_invalid_policy_is_rejected(breakage, message):
     with pytest.raises(ValidationError, match=message):
         Policy.model_validate(d)
 
-
-def test_pay_question_uses_customer_methods():
-    qs = decision_questions(POLICY, "payment", pay_methods=("billing", "credit"))
-    assert [c["value"] for c in qs[0]["choices"]] == ["billing", "credit", "not_answer"]
