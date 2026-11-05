@@ -160,9 +160,38 @@ class DeliveryPlanTests(unittest.TestCase):
 
 
 class ReleaseRecoveryTests(unittest.TestCase):
+    def test_consultation_auth_secret_created_and_preserved(self):
+        with patch.object(release, 'kube', side_effect=['', 'created']) as kube:
+            release.ensure_service_auth_secret('consultation')
+            call = kube.call_args_list[1]
+            value = json.loads(call.kwargs['data'])
+            token = value['stringData']['consultation-token']
+            self.assertGreaterEqual(len(token), 32)
+            self.assertNotIn(token, ' '.join(call.args))
+            self.assertEqual(value['metadata'], {'name': 'msa-consultation-auth', 'namespace': 'dva'})
+        existing = {'metadata': value['metadata'], 'data': {'consultation-token': base64.b64encode(token.encode()).decode()}}
+        with patch.object(release, 'kube', return_value=json.dumps(existing)) as kube:
+            release.ensure_service_auth_secret('consultation')
+            self.assertEqual(kube.call_count, 1)
+
+    def test_invalid_consultation_secret_is_never_replaced(self):
+        existing = {'metadata': {'name': 'msa-consultation-auth', 'namespace': 'dva'},
+                    'data': {'consultation-token': base64.b64encode(b'private-invalid-value').decode()}}
+        with patch.object(release, 'kube', return_value=json.dumps(existing)) as kube:
+            with self.assertRaisesRegex(RuntimeError, 'not replaced') as raised:
+                release.ensure_service_auth_secret('consultation')
+            self.assertNotIn('private-invalid-value', str(raised.exception))
+            self.assertEqual(kube.call_count, 1)
+
+    def test_service_secret_rejects_unknown_owners_before_access(self):
+        with patch.object(release, 'kube') as kube:
+            with self.assertRaises(ValueError):
+                release.ensure_service_auth_secret('unknown')
+            kube.assert_not_called()
+
     def test_customer_auth_secret_created_once_without_exposing_token_in_args(self):
         with patch.object(release, 'kube', side_effect=['', 'created']) as kube:
-            release.ensure_customer_auth_secret()
+            release.ensure_service_auth_secret('customer')
             self.assertEqual(kube.call_count, 2)
             call = kube.call_args_list[1]
             self.assertEqual(call.args, ('create', '-f', '-'))
@@ -176,7 +205,7 @@ class ReleaseRecoveryTests(unittest.TestCase):
         value = {'metadata': {'name': 'msa-customer-auth', 'namespace': 'dva'},
                  'data': {'customer-token': base64.b64encode(b'c' * 48).decode()}}
         with patch.object(release, 'kube', return_value=json.dumps(value)) as kube:
-            release.ensure_customer_auth_secret()
+            release.ensure_service_auth_secret('customer')
             self.assertEqual(kube.call_count, 1)
 
     def test_invalid_customer_auth_secret_is_not_replaced_or_printed(self):
@@ -184,7 +213,7 @@ class ReleaseRecoveryTests(unittest.TestCase):
                  'data': {'customer-token': base64.b64encode(b'private-invalid-value').decode()}}
         with patch.object(release, 'kube', return_value=json.dumps(value)) as kube:
             with self.assertRaisesRegex(RuntimeError, 'not replaced') as raised:
-                release.ensure_customer_auth_secret()
+                release.ensure_service_auth_secret('customer')
             self.assertNotIn('private-invalid-value', str(raised.exception))
             self.assertEqual(kube.call_count, 1)
 

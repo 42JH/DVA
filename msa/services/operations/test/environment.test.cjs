@@ -12,7 +12,8 @@ test('operations requires its DB, preserves exact origins and validates ports', 
     { CUSTOMER_AUTH_TOKEN: 'too-short' }, { CUSTOMER_AUTH_TOKEN: 'x'.repeat(257) },
     { CUSTOMER_AUTH_TOKEN: 'x'.repeat(32) + '\n' }, { CUSTOMER_URL: {} },
     { CUSTOMER_URL: 'http://user:password@customer:3001' }, { CUSTOMER_URL: 'file:///tmp/audit' },
-    { CUSTOMER_URL: 'http://customer:3001/path' }]) {
+    { CUSTOMER_URL: 'http://customer:3001/path' },{CONSULTATION_AUTH_TOKEN:'short'},
+    {CONSULTATION_AUTH_TOKEN:{}},{CONSULTATION_AUTH_TOKEN:'x'.repeat(257)},{CONSULTATION_AUTH_TOKEN:'x'.repeat(32)+'\n'}]) {
     assert.throws(() => validateEnvironment({ ...valid, ...extra }), /Invalid environment variables/);
   }
 });

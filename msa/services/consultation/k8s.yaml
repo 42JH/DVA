@@ -35,6 +35,32 @@ spec:
               value: production
             - name: PORT
               value: "3004"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGHOST }
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGPORT }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGUSER }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGPASSWORD }
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: { name: consultation-db, key: PGDATABASE }
+            - name: OPERATIONS_URL
+              value: http://operations:3005
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: { name: msa-consultation-auth, key: consultation-token }
+            - name: CORS_ORIGINS
+              value: https://13.209.59.180,https://k15d109.p.ssafy.io,http://localhost:5173
+          envFrom:
+            - secretRef:
+                name: consultation-runtime
+                optional: true
           resources:
             requests:
               cpu: 100m
@@ -50,7 +76,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /consultation/health
+              path: /consultation/health/ready
               port: http
             periodSeconds: 3
             timeoutSeconds: 2
@@ -97,6 +123,24 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/calls
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/webhooks/pbx/call-ended
+            pathType: Exact
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /webhooks/pbx/call-ended
+            pathType: Exact
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
           - path: /consultation
             pathType: Prefix
             backend:

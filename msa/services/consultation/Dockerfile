@@ -12,6 +12,9 @@ RUN npm run lint \
  && npm run test:e2e -- --runInBand \
  && npm run build
 
+FROM builder AS checks
+RUN node --test test/auth-bridge.test.cjs test/active-call-count.test.cjs test/recording-storage.test.cjs
+
 FROM node:24-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production

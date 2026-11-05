@@ -12,4 +12,7 @@
   <changeSet id="002-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="003-pbx-active-calls" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="003-pbx-active-calls.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

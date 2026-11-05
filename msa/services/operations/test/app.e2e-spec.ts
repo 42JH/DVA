@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -85,6 +86,26 @@ describe('Operations infrastructure (e2e)', () => {
     jest.spyOn(database.pool, 'query').mockRejectedValueOnce(new Error('unavailable') as never);
     await request(app.getHttpServer()).get('/operations/health/ready').expect(503);
     await request(app.getHttpServer()).get('/operations/health').expect(200);
+  });
+
+  it('lets consultation verify sessions without granting customer audit or public admin access', async () => {
+    const token = 'local-test-consultation-token-'.padEnd(48, 'c');
+    app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);
+    const authorization = 'Bearer ' + token;
+    await request(app.getHttpServer())
+      .post('/internal/auth/session')
+      .set('Authorization', authorization)
+      .send({ sessionToken: '' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/internal/events')
+      .set('Authorization', authorization)
+      .send({})
+      .expect(403);
+    await request(app.getHttpServer())
+      .get('/api/admins')
+      .set('Authorization', authorization)
+      .expect(401);
   });
 
   it('requires service credentials for internal sessions and keeps them out of public Swagger', async () => {
