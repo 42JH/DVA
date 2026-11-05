@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 NAMESPACE = uuid.UUID("cbbbd75b-af26-46c3-a362-f1b253223dce")
-REVIEW_VERSION = "unanswered-v3-explicit-refs"
+REVIEW_VERSION = "unanswered-v4-search-outcome"
 
 
 class UsedEvidence(BaseModel):
@@ -203,9 +203,12 @@ def validate_decision(evidence: dict, decision: ReviewDecision, *, require_cover
         if inquiry.outcome in ("ANSWERED", "UNANSWERED"):
             a = inquiry.agent_index
             quote = inquiry.agent_quote
+            # 미답변은 앞선 검색 이후 안내한 거절이 최종 재검색 뒤에도 해소되지 않은 경우가 있다.
+            # 답변 완료는 기존처럼 마지막 관련 검색 뒤의 발화여야 한다.
+            required_search = ordered[0] if inquiry.outcome == "UNANSWERED" else ordered[-1]
             if (a is None or a <= i or a >= len(transcript) or transcript[a]["speaker"] != "agent"
                     or not quote or not quote.strip() or quote not in transcript[a]["text"]
-                    or transcript[a]["t"] < searches[ordered[-1]]["at"]):
+                    or transcript[a]["t"] < searches[required_search]["at"]):
                 raise ReviewError("INVALID_AGENT_QUOTE")
         else:
             a, quote = inquiry.agent_index, inquiry.agent_quote
@@ -313,6 +316,6 @@ def _answered_events(session_id: str, started_t: float, evidence: dict, events: 
                        "occurredAt": datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="milliseconds"),
                        "offsetSeconds": max(0, int(ts - started_t)),
                        "payload": {"action": "FAQ_ANSWERED", "orderSeq": None, "unansweredQuestionSeq": None,
-                                   "summaryText": "FAQ 근거로 문의 안내 완료", "faqEntrySeqs": sorted(ids),
+                                   "summaryText": "FAQ 답변 근거 있음", "faqEntrySeqs": sorted(ids),
                                    "questionUtteranceOrder": orders[q], "answerUtteranceOrder": orders[a]}})
     return events

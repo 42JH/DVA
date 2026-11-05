@@ -263,3 +263,28 @@ def test_last_related_search_controls_reason_after_retry():
     e["searches"].append({"at": 1002.5, "output": {"status": "ok", "facts": {"answerable": True}}})
     result = validate_decision(e, decision(tool_indices=[0, 1]))
     assert result["inquiries"][0]["reason"] == "KB_NO_ANSWER"
+
+
+def test_unanswered_quote_before_final_retry_is_still_valid():
+    e = evidence()
+    e["searches"].append({"at": 1003.55, "output": {"status": "ok"}})
+    result = validate_decision(e, decision(tool_indices=[0, 1]))
+    assert result["inquiries"][0]["outcome"] == "UNANSWERED"
+    assert result["inquiries"][0]["reason"] == "KB_NO_ANSWER"
+
+
+@pytest.mark.parametrize("outcome,at", [("ANSWERED", 1003.55), ("UNANSWERED", 1000)])
+def test_timing_guard_still_rejects_premature_answers(outcome, at):
+    e = evidence()
+    e["transcript"][1]["t"] = at
+    if outcome == "ANSWERED":
+        e["searches"].append({"at": 1004, "output": {"status": "ok"}})
+    with pytest.raises(ReviewError, match="INVALID_AGENT_QUOTE"):
+        validate_decision(e, decision(outcome, tool_indices=list(range(len(e["searches"])))))
+
+
+def test_unanswered_retry_does_not_accept_invented_quote():
+    e = evidence()
+    e["searches"].append({"at": 1003.55, "output": {"status": "ok"}})
+    with pytest.raises(ReviewError, match="INVALID_AGENT_QUOTE"):
+        validate_decision(e, decision(tool_indices=[0, 1], agent_quote="확인되지 않은 새 문장"))
