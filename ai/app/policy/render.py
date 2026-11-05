@@ -95,8 +95,10 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "confirm")  # confirm은 확인 대기가 있을 때만(delegation.md §3.2)
     if callback:
         sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
-    if save:
-        sets.insert(0, "save")  # 되읽기 때 주소 저장을 물었을 때만(업무 규칙 g)
+    if save:  # 담은 뒤 주소 저장을 물었고 답을 기다릴 때만(업무 규칙 g)
+        sets.insert(0, "save")
+        # 저장 질문에 답하는 동안 "더 없음"은 듣지 않는다: 저장에 대한 "아니요"가 더 없음으로 읽히면 결과가 바로 전송된다
+        sets = [d for d in sets if d != "more"]
     if origin:
         sets.insert(0, "origin")  # 기존 고객에게 출발지를 물었고 답을 기다릴 때만
     out = []

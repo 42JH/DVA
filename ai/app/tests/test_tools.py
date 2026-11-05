@@ -208,6 +208,9 @@ def test_full_parcel_opens_readback_with_facts(corrector, address):
     assert out["can_proceed"] is True and c.state.pending is not None and c.state.pending.issued_t == 100.0
     facts = out["facts"]["readback"]
     assert "sender_phone" not in facts and facts["receiver_phone"] == "01098765432"  # 발신번호는 읽지 않는다
+    # 주소 저장은 되읽기 확인과 섞지 않는다: 제안은 상태에만 두고 담은 뒤 따로 묻는다(2026-11-05)
+    assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
+    assert c.state.address_consent is None
 
 
 # --- find_destination ---

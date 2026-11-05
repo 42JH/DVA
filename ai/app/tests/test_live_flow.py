@@ -292,10 +292,12 @@ def test_late_result_and_n2_wait_while_customer_is_speaking():
                                                          "name": "record_fields",
                                                          "arguments": json.dumps({"sender_name": "김철수"})}}})
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
-        for i in range(12):  # 결과가 오는 동안 고객이 끼어들어 계속 말한다(약 0.36초, gap 40ms보다 촘촘히)
-            conn.push({"type": "session.input_transcript.delta", "delta": "저기요 ", "start_ms": 3000 + i * 30,
-                       "end_ms": 3000 + i * 30 + 25})
-            await asyncio.sleep(0.03)
+        # 결과가 오는 동안 고객이 끼어들어 계속 말한다(약 0.36초). 간격은 gap 40ms보다 넉넉히 촘촘하게 —
+        # Windows sleep 오차(~15ms)로 30ms 간격이 40ms를 넘어 발화가 끊긴 것으로 보이던 불안정(1/6 실패)을 막는다
+        for i in range(36):
+            conn.push({"type": "session.input_transcript.delta", "delta": "저기요 ", "start_ms": 3000 + i * 10,
+                       "end_ms": 3000 + i * 10 + 8})
+            await asyncio.sleep(0.01)
         types = sent_types(conn)
         assert "response.item.create" in types and "response.create" not in types
         notes_while_speaking = len([e for e in conn.sent if e["type"] == "session.commentary.append"])
@@ -361,7 +363,9 @@ def test_callback_question_only_while_offered():
     assert "callback" in names(callback=True) and "callback" not in names()
 
 
-def test_address_save_waits_for_both_commit_and_consent():
+def test_address_save_after_commit_one_answer_for_both():
+    """담기 전에는 묻지 않고, 담은 뒤 한 번의 답으로 제안한 주소(보내는 곳·받는 곳)를 함께 정한다."""
+    from app.calls.live import _save_pending
     lf = LiveFlow.__new__(LiveFlow)
     saved = []
 
@@ -374,19 +378,51 @@ def test_address_save_waits_for_both_commit_and_consent():
     pid = confirm_once(st)
     spawned = []
     s = SimpleNamespace(state=st, spawn=lambda coro, name: spawned.append(coro))
-    st.address_offer, st.address_consent = {"receiver": True}, None
+    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
+    assert _save_pending(st) == ()  # 되읽기 중(담기 전)에는 저장을 묻지 않는다
     lf._maybe_save_addresses(s)
-    assert not spawned  # 아직 담기 전
+    assert not spawned
     st.address_offer = st.address_offer | {"parcel": pid}
+    assert _save_pending(st) == ("sender", "receiver")
     lf._maybe_save_addresses(s)
-    assert not spawned  # 동의 전
+    assert not spawned  # 답 전
     st.address_consent = False
     lf._maybe_save_addresses(s)
-    assert not spawned and st.address_offer is None  # 거절 → 제안 버림
-    st.address_offer, st.address_consent = {"receiver": True, "parcel": pid}, True
+    assert not spawned and st.address_offer is None and _save_pending(st) == ()  # 거절 → 둘 다 버림
+    st.address_offer, st.address_consent = {"sender": True, "receiver": True, "parcel": pid}, True
     lf._maybe_save_addresses(s)
     run(spawned[0])
-    assert saved == [{"receiver": True, "parcel": pid}] and st.address_offer is None
+    assert saved == [{"sender": True, "receiver": True, "parcel": pid}] and st.address_offer is None  # 둘 다 저장
+
+
+def test_save_question_only_after_commit_and_blocks_more():
+    """담은 뒤 N2에 저장 제안이 실리고, 저장 답을 기다리는 동안은 '더 없음'을 판정하지 않는다."""
+    from app.calls.live import Spoken
+    from app.domain.confirm import issue_parcel_confirmation
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.policy, lf.svc = P, SimpleNamespace(results=None)
+    lf.cfg = SimpleNamespace(decision_min_confidence=0.6)
+    sent = []
+
+    async def notify(s, level, facts):
+        sent.append((level, facts))
+
+    lf.notify = notify
+    st = filled()
+    p = issue_parcel_confirmation(st, P, 100.0)
+    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
+    run(lf.commit(session(st), p.id))
+    [(level, facts)] = sent
+    assert level == "N2" and facts["parcel_added"] and facts["address_save"] == {"sender": True, "receiver": True}
+    names = lambda **kw: [q["name"] for q in decision_questions(P, "more_parcels", **kw)]  # noqa: E731
+    assert names(save=True) == ["save", "switch"]  # 저장 답 대기: more 없음
+    assert names() == ["more", "switch"]  # 답을 들은 뒤에는 다시 더 보낼 택배를 듣는다
+    utt = Spoken(9, "네 해 주세요", 0, 500, 200.0, 200.5)
+    run(lf.apply(session(st), utt, None, {"save": ("yes", 0.95, {})}, None))
+    assert st.address_consent is True and st.address_offer is None  # 한 번의 답으로 둘 다
 
 
 def test_order_intent_notice_carries_missing_so_first_question_follows_order():
