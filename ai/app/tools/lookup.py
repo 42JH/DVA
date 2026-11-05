@@ -81,6 +81,25 @@ async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = 
 
 # --- lookup_orders ---
 
+# 주문 상태 → 모델에 넘길 뜻(BE 계약 docs/be-contract/ai/backend-api.md §2·§4). 원문 상태만 주면 모델이 COLLECTING을
+# '수거 중'으로 추측했다(통화 293). 지시문(workflow.toml·business_rules.md)이 아니라 서버 코드에 둔다 — 다른 개발자가
+# 수정 중인 지시문과 간섭하지 않게(2026-11-06 사용자 결정). 수거·배송·결제 완료는 말하지 않는다(백엔드에 수거·배송 상태 없음).
+ORDER_STATUS_TEXT = {
+    "COLLECTING": "접수 미완료(정보 수집 중), 최종 접수 전",
+    "notPaid": "접수 대기 중, 결제가 확인되면 접수 진행",
+    "PAID": "접수 대기 중",
+    "SUBMITTING": "접수 처리 중",
+    "ACCEPTED": "접수 완료",
+    "SUBMISSION_FAILED": "접수 처리 문제, 담당자 확인 중",
+    "CANCELLED": "취소됨",
+}
+
+
+def status_text(status: str | None) -> str:
+    """모르는 상태는 추측하지 않는다."""
+    return ORDER_STATUS_TEXT.get(status or "", "확인 필요")
+
+
 class LookupArgs(Args):
     receiver_name: str | None = Field(None, max_length=30, description="받는 분 성함(조사·호칭 빼고). 기억하지 못하면 null")
 
@@ -104,7 +123,8 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         else:
             offer(ctx.state, "order", tuple(labels), tuple(orders))
     return ToolOutcome("needs_choice" if len(orders) > 1 else "ok", None,
-                       {"found": len(orders), "orders": [{"label": lb, "status": o.get("status")}
+                       {"found": len(orders), "orders": [{"label": lb, "status": o.get("status"),
+                                                         "status_text": status_text(o.get("status"))}
                                                         for lb, o in zip(labels, orders)]})
 
 

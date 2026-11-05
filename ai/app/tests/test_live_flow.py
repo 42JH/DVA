@@ -582,3 +582,9 @@ def test_flow_complete_without_result_closes_with_pending_and_reminds_silent_gre
     closings = [e["content"] for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"]]
     assert len(closings) == 2 and all('"pending"' in c for c in closings)
     assert client.hangups == ["live_1"] and hung[0] - said_t >= 1.0
+
+
+def test_cancel_target_carries_status_meaning():
+    from app.calls.live import _order_facts
+    facts = _order_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})
+    assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전"}
