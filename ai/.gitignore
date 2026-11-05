@@ -43,3 +43,6 @@ logs/
 Thumbs.db
 # 결과·인사이트 아웃박스(SQLite, 개인정보)
 state/
+
+
+.langgraph_api/
