@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 from conftest import CALLER, run
@@ -49,7 +50,7 @@ def flow(tmp_path=None):
     client = FakeClient()
     client.decisions = FakeDecisions()
     svc = service(client, utterance_gap_ms=40, commit_delay_ms=30, notify_quiet_ms=30, response_fallback_sec=0.2,
-                  closing_quiet_ms=60, closing_max_sec=2.0)
+                  closing_quiet_ms=1000, closing_max_sec=3.0)
     LiveFlow(svc)
     if tmp_path is not None:  # S6: 결과·인사이트까지
         from app.calls.results import ResultService
@@ -107,20 +108,22 @@ def test_order_flow_end_to_end(tmp_path):
         await until(lambda: s.state.parcels)
         await until(lambda: "session.commentary.append" in sent_types(conn))   # N2: 담기 완료
         await ai(conn, "담아 두었어요. 더 보내실 택배 있으세요?", 9000)
-        await say(conn, "아니요 없어요", 11000)                       # more=no_more → 더 없음(아직 끊지 않음)
-        await until(lambda: s.state.no_more_parcels)
-        assert s.phase == Phase.ACTIVE
-        await ai(conn, "더 궁금하신 점 있으세요?", 12000)
-        await say(conn, "아니요 끊어주세요", 12500)                   # switch=end → 마무리
+        await say(conn, "아니요 없어요", 11000)                       # more=no_more → 접수 완료 단계 → 결과 뒤 마무리
         await until(lambda: s.phase == Phase.CLOSING)
+        assert s.result and s.close_reason == "flow_complete"         # 결과를 받은 뒤 마무리 안내
         await ai(conn, "감사합니다. 좋은 하루 보내세요.", 13000)       # 마무리 인사 뒤 끊는다
+        said_t = s.last_output_t
         await task
-        return s, conn
+        return s, conn, said_t
 
-    s, conn = run(scenario())
+    hung = []
+    hangup = client.live.sessions.hangup
+    client.live.sessions.hangup = lambda sid: (hung.append(time.time()), hangup(sid))[1]
+    s, conn, said_t = run(scenario())
+    assert hung[0] - said_t >= 1.0  # 마무리 인사(마지막 출력) 뒤 최소 1초 기다려 끊는다
     assert svc.snapshot_errors == [] and not s.stats.get("관제 오류")  # 값이 든 중간 상태에서도 관제 스냅샷이 된다
     snap = json.loads(json.dumps(s.snapshot(), ensure_ascii=False))  # 관제 SSE·통화 기록이 직렬화할 수 있어야
-    assert snap["detail"]["담은 택배"][0]["받는 분"] == "이영희" and snap["detail"]["통계"]["Decision 호출"] == 4
+    assert snap["detail"]["담은 택배"][0]["받는 분"] == "이영희" and snap["detail"]["통계"]["Decision 호출"] == 3
     assert snap["tool_calls"][0]["name"] == "record_fields" and snap["transcript"]
     assert s.state.intent == "order" and len(s.state.parcels) == 1 and s.state.no_more_parcels
     assert s.state.parcels[0].confirmed_snapshot["receiver_phone"] == "01098765432"
@@ -132,14 +135,15 @@ def test_order_flow_end_to_end(tmp_path):
     assert result["body"]["outcome"] == "INCOMPLETE"  # 주소 보정 없이(geo 없음) — 사유 ADDRESS_GEO_MISSING
     assert s.state.customer.call_session_seq in db.analyses and db.events[s.state.customer.call_session_seq]
     closing = next(e for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"])
-    assert '"order"' in closing["content"]  # 마무리 안내에 결과 상태(사실)
-    assert client.hangups == ["live_1"] and s.close_reason in ("customer_end", "close_requested")
+    assert '"order"' in closing["content"] and '"pending"' not in closing["content"]  # 받은 결과 상태로 마무리
+    assert "more_parcels" not in "".join(e["content"] for e in conn.sent if e["type"] == "session.thinking.append")
+    assert client.hangups == ["live_1"]
     types = sent_types(conn)
     assert types.index("response.item.create") < types.index("response.create")  # 결과 뒤 재개(S0b)
     assert all(e["event_id"].startswith(s.trace_id) for e in conn.sent)
     # Decision은 고객 발화 끝마다 1번(트리거 아님), 확인 질문은 확인 대기 중에만
     names = [n for _, n in client.decisions.calls]
-    assert len(names) == 4 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
+    assert len(names) == 3 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
     assert names[2] == ["more", "switch"]
     lat = {r["구간"] for r in snap["latency"]}  # 관제 지연 표
     assert {"Decision", "위임→도구 호출", "도구 record_fields", "확인 '네'→담기", "통화 준비(accept 전)", "accept"} <= lat
@@ -506,3 +510,75 @@ def test_origin_paths_other_place_and_recent_only():
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
     out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
     assert "sender_address" in out and "sender_address_detail" not in out
+
+
+def test_customer_end_mid_collection_greets_then_hangs_up():
+    """접수 도중 고객이 끝내면(switch=end) 기존대로 마무리 인사 뒤 끊는다(완료 단계가 아니어도)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "택배 보내려고요", 1000)
+        await say(conn, "그냥 끊어주세요", 2000)
+        await until(lambda: s.phase == Phase.CLOSING)
+        reason = s.close_reason
+        await ai(conn, "감사합니다. 좋은 하루 보내세요.", 3000)
+        await task
+        return reason, conn
+
+    reason, conn = run(scenario())
+    assert reason == "customer_end" and client.hangups == ["live_1"]
+    assert any(e["type"] == "session.commentary.append" and "closing" in e["content"] for e in conn.sent)
+
+
+class SlowResults:
+    """결과 전송이 끝나지 않는 가짜(마무리 결과 대기 상한 확인)."""
+    def __init__(self):
+        self.tasks = {}
+
+    def start(self, s, on_result):
+        self.tasks[s.call_id] = asyncio.ensure_future(asyncio.sleep(30))
+
+
+def test_flow_complete_without_result_closes_with_pending_and_reminds_silent_greeting():
+    """완료 단계: 결과가 상한 안에 안 오면 pending으로 마무리 인사를 시키고, AI가 말하지 않으면 1번 다시 요청한 뒤
+    인사가 끝나고 최소 1초 뒤에 끊는다."""
+    from app.tests.test_domain import confirm_once, filled
+    client = FakeClient()
+    client.decisions = FakeDecisions()
+    svc = service(client, utterance_gap_ms=40, notify_quiet_ms=30, closing_quiet_ms=1000, closing_max_sec=12.0,
+                  closing_result_wait_sec=0.2)
+    lf = LiveFlow(svc)
+    svc.results = SlowResults()
+    hung = []
+    hangup = client.live.sessions.hangup
+    client.live.sessions.hangup = lambda sid: (hung.append(time.time()), hangup(sid))[1]
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        st = filled()
+        confirm_once(st)
+        s.tools.state = st
+        await lf._follow(s, "no_more", None)                       # 완료 단계 → 결과 0.2초 대기 → pending 마무리
+        assert s.phase == Phase.CLOSING and s.close_reason == "flow_complete"
+        await until(lambda: sum("closing" in e.get("content", "") for e in conn.sent) == 2, timeout=6.0)  # 4초 무발화 → 재요청
+        await ai(conn, "이용해 주셔서 감사합니다. 좋은 하루 보내세요.", 9000)
+        said_t = s.last_output_t
+        await task
+        svc.results.tasks["live_1"].cancel()
+        return conn, said_t
+
+    conn, said_t = run(scenario())
+    closings = [e["content"] for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"]]
+    assert len(closings) == 2 and all('"pending"' in c for c in closings)
+    assert client.hangups == ["live_1"] and hung[0] - said_t >= 1.0

@@ -278,6 +278,7 @@ class CallService:
         if s.active_t and not s.last_output_t:
             s.timing("연결→첫 AI 발화", (time.time() - s.active_t) * 1000)
         s.last_output_t = time.time()
+        s.last_output_end_ms = max(s.last_output_end_ms, ev.get("end_ms") or 0)
         self._arm_silence(s)  # 무발화 = 고객·AI 모두 조용(2026-11-03 통화 363d19: 긴 되읽기 도중 고객 무입력 30초로 끊음)
 
     def _arm_silence(self, s: CallSession) -> None:
@@ -285,9 +286,11 @@ class CallService:
             s.set_timer("silence", self.d.cfg.silence_sec, lambda: self.begin_closing(s, "silence"))
 
     # --- 마무리·PBX ---
-    def begin_closing(self, s: CallSession, reason: str, after_speech: bool = False) -> None:
-        """CLOSING: 출력 전사가 closing_quiet_ms 멈추면(또는 closing_max_sec) 끊는다. 이미 끝나는 중이면 무시.
-        after_speech: 마무리 인사를 요청한 경우 — 요청 뒤 AI가 한 번 말하기 시작한 다음부터 조용함을 센다."""
+    def begin_closing(self, s: CallSession, reason: str, after_speech: bool = False,
+                      remind: Callable[[], Awaitable[None]] | None = None) -> None:
+        """CLOSING: AI 발화 끝 뒤 closing_quiet_ms(최소 1초) 조용하면 끊는다. 이미 끝나는 중이면 무시.
+        after_speech: 마무리 인사를 요청한 경우 — 요청 뒤 AI가 한 번 말하기 시작한 다음부터 조용함을 센다.
+        remind: 인사를 요청했는데 말하지 않으면 1번 다시 요청한다."""
         if s.phase in ENDED or s.phase not in (Phase.ACTIVE, Phase.ATTACHING):
             return
         s.close_reason = reason
@@ -295,18 +298,34 @@ class CallService:
         self._phase(s, Phase.CLOSING)
         s.cancel_timer("silence")
         s.cancel_timer("expire")
-        s.spawn(self._close_when_quiet(s), "closing")
+        s.spawn(self._close_when_quiet(s, remind), "closing")
 
-    async def _close_when_quiet(self, s: CallSession) -> None:
+    async def _close_when_quiet(self, s: CallSession, remind=None) -> None:
         deadline = time.monotonic() + self.d.cfg.closing_max_sec
         quiet = self.d.cfg.closing_quiet_ms / 1000
-        speak_by = time.monotonic() + 4.0  # 마무리 인사를 요청했는데 4초 안에 말하지 않으면 그냥 끊는다
-        while time.monotonic() < min(deadline, speak_by) and s.closing_requested_t \
-                and s.last_output_t <= s.closing_requested_t:
+        if s.closing_requested_t and not await self._spoke_after_request(s, deadline):
+            if remind is not None:
+                s.note("마무리", "인사 없음 → 다시 요청")
+                s.closing_requested_t = time.time()
+                await remind()
+            if remind is None or not await self._spoke_after_request(s, deadline):
+                s.note("마무리", "인사 없이 끊음")
+        # 상한에 걸려도 마지막 발화 뒤 quiet(최소 1초)는 지킨다(말이 계속 이어지면 5초 더까지만)
+        while time.monotonic() < deadline + 5.0 and time.time() - s.last_output_t < quiet:
             await asyncio.sleep(0.1)
-        while time.monotonic() < deadline and time.time() - s.last_output_t < quiet:
-            await asyncio.sleep(0.1)
+        if s.last_output_t:
+            s.timing("마무리 마지막 발화→끊기", (time.time() - s.last_output_t) * 1000)
+            if est := _audio_end_estimate(s):
+                s.timing("마무리 오디오 끝 추정−전사 수신", (est - s.last_output_t) * 1000)
         await self._quiet(hangup_quietly(self.d.client, s.call_id), "hangup")
+
+    @staticmethod
+    async def _spoke_after_request(s: CallSession, deadline: float) -> bool:
+        """마무리 인사 요청 뒤 4초 안에(상한 안에서) AI가 말하기 시작했는지."""
+        speak_by = min(deadline, time.monotonic() + 4.0)
+        while time.monotonic() < speak_by and s.last_output_t <= s.closing_requested_t:
+            await asyncio.sleep(0.1)
+        return s.last_output_t > s.closing_requested_t
 
     async def on_call_ended(self, ev) -> None:
         """PBX 종료 웹훅(call-lifecycle.md §5). 같은 번호로 다시 건 통화는 끊지 않게 ended_at 전에 시작한 통화만."""
@@ -417,6 +436,12 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     if places:
         c.places = tuple(places)
     state.bump()
+
+
+def _audio_end_estimate(s: CallSession) -> float:
+    """오디오 재생 끝 추정(세션 시작 + 출력 전사 end_ms). 관제 기록만 한다.
+    shortcut: 타임라인 0 = session.started 수신 시각이라는 가정이 미실측이라 끊는 시점에 쓰지 않는다 — 실통화로 차이를 확인한 뒤 반영."""
+    return s.active_t + s.last_output_end_ms / 1000 if s.active_t and s.last_output_end_ms else 0.0
 
 
 async def _timed(s: CallSession, name: str, aw):
