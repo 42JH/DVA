@@ -81,7 +81,7 @@ try:
     else:
         raise RuntimeError('PostgreSQL not ready')
 
-    checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql',
+    checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
     for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',9,4)]:
         db = service + '_db'
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 5, 'operations': 5}.get(service, 2)
+        changesets = {'customer': 5, 'operations': 5, 'consultation': 3}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -283,6 +283,31 @@ try:
     lb('customer', db, 'update', 'customer-writes-upgrade')
     assert sql(db, "SELECT version=7 AND NOT address_data ?| ARRAY['latitude','longitude'] AND address_data->>'roadAddress'='Road' FROM personal_pins WHERE personal_pin_seq=1;", 'customer-writes-pin-conversion') == 't'
     assert sql(db, "SELECT version=11 AND department_seq=1 AND NOT address_data ?| ARRAY['latitude','longitude'] FROM company_pins WHERE company_pin_seq=1;", 'customer-writes-company-pin-conversion') == 't'
+    # Preserve unknown legacy registration times and roll back all late 003 failures.
+    db = 'consultation_pbx_upgrade_db'
+    sql('postgres', f'CREATE DATABASE {db} OWNER consultation_app;', 'consultation-pbx-upgrade-setup')
+    lb('consultation', db, 'update-count', 'consultation-pbx-baseline', extra=('--count=2',))
+    sql(db, """INSERT INTO call_sessions(provider_call_id,caller_phone_number) VALUES('legacy-open','01012345678');
+      INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at) VALUES('legacy-ended','01012345679','2026-10-01T00:00:00Z','2026-10-01T00:01:00Z');
+      INSERT INTO recordings(call_session_seq,object_key) VALUES(2,'legacy/audio.mp3');
+      INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(2,1,'AI','legacy text',1);
+      INSERT INTO outbox_events(destination,event_type,aggregate_seq,payload) VALUES('order','LegacyPending',2,'{}');""", 'consultation-pbx-legacy-data', 'consultation_app')
+    legacy = "SELECT jsonb_agg(to_jsonb(c)) FROM call_sessions c;"
+    original_calls = sql(db, legacy, 'consultation-pbx-before')
+    history = sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'consultation-pbx-history-before')
+    failing = logs / 'atomicity-consultation-pbx'
+    shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+    migration = failing / 'consultation/003-pbx-active-calls.sql'
+    migration.write_text(migration.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n', encoding='utf-8')
+    output = lb('consultation', db, 'update', 'consultation-pbx-atomic-failure', failure=True, changelog_root=failing)
+    assert 'division by zero' in output.lower(), output
+    assert sql(db, legacy, 'consultation-pbx-atomic-data') == original_calls
+    assert sql(db, "SELECT count(*) FROM pg_namespace WHERE nspname='pbx_webhooks';", 'consultation-pbx-atomic-schema') == '0'
+    assert sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'consultation-pbx-atomic-history') == history
+    lb('consultation', db, 'update', 'consultation-pbx-upgrade')
+    assert sql(db, "SELECT count(*) FILTER(WHERE registered_at IS NULL),count(*) FILTER(WHERE incoming_at=started_at AND provider_call_id='legacy-ended'),count(*) FILTER(WHERE incoming_at IS NULL AND provider_call_id='legacy-open') FROM call_sessions;", 'consultation-pbx-no-fabricated-time') == '2|1|1'
+    assert sql(db, "SELECT (SELECT object_key FROM recordings),(SELECT utterance_text FROM call_utterances),(SELECT payload::text FROM outbox_events WHERE event_type='LegacyPending');", 'consultation-pbx-related-preserved') == 'legacy/audio.mp3|legacy text|{}'
+    assert sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='pbx_webhooks'),(SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='pbx_webhooks'::regnamespace),(SELECT count(*) FROM databasechangelog);", 'consultation-pbx-catalog') == '1|1|3'
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)
