@@ -20,7 +20,7 @@ BEGIN
 END $$;
 \i /tmp/dva129/backend/migrations/052-faq-question-examples.sql
 DO $$
-DECLARE faq_id integer; call_id integer; snapshot jsonb; example_id integer;
+DECLARE faq_id integer; other_faq integer; call_id integer; snapshot jsonb; example_id integer;
 BEGIN
  SELECT u.faq_id,u.call_id,u.faq_before INTO faq_id,call_id,snapshot FROM faq_example_upgrade u;
  IF (SELECT to_jsonb(f) FROM public.faq_entries f WHERE faq_entry_seq=faq_id) IS DISTINCT FROM snapshot
@@ -33,6 +33,10 @@ BEGIN
  -- Same text, different occurrence remains a separate example.
  INSERT INTO public.faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
   SELECT faq_id,'00000000-0000-4000-8000-000000000053',question_text,occurred_at FROM public.faq_question_examples WHERE faq_question_example_seq=example_id;
+ INSERT INTO public.faq_entries(question,answer,category,updated_by_admin_user_seq)
+  VALUES('같은 응대의 다른 FAQ','다른 FAQ 답변','기타',1) RETURNING faq_entry_seq INTO other_faq;
+ INSERT INTO public.faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
+  SELECT other_faq,event_id,question_text,occurred_at FROM public.faq_question_examples WHERE faq_question_example_seq=example_id;
  BEGIN
   INSERT INTO public.faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
    VALUES(faq_id,'00000000-0000-4000-8000-000000000052','중복 이벤트',statement_timestamp());
@@ -86,6 +90,8 @@ BEGIN
  DELETE FROM public.faq_entries WHERE faq_entry_seq=faq_id;
  IF EXISTS(SELECT 1 FROM public.faq_question_examples WHERE faq_entry_seq=faq_id) THEN
   RAISE EXCEPTION 'FAQ physical delete must cascade examples'; END IF;
+ IF (SELECT count(*) FROM public.faq_question_examples WHERE faq_entry_seq=other_faq)<>1 THEN
+  RAISE EXCEPTION 'Deleting one FAQ must preserve the other FAQ example for the same event'; END IF;
 END $$;
 ROLLBACK;
 \echo 'PASS: FAQ snapshot upgrade, constraints, call independence and transactional FAQ cleanup'

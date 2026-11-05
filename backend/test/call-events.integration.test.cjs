@@ -781,6 +781,7 @@ test('FAQ results reference same-batch customer/AI speech and retain actual answ
         summaryText: 'FAQ 안내 완료',
         unansweredReason: null,
         faqEntrySeq: faqId,
+        faqEntrySeqs: [faqId],
         questionUtteranceOrder: 1,
         answerUtteranceOrder: 2,
         questionText: question.payload.utteranceText,

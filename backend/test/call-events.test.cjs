@@ -56,6 +56,78 @@ test('FAQ answers require FAQ and question/answer utterance references without a
   );
 });
 
+test('FAQ arrays validate unique positive IDs and normalize order while preserving the legacy single-ID shape', async () => {
+  const payload = {
+    action: 'FAQ_ANSWERED',
+    orderSeq: null,
+    unansweredQuestionSeq: null,
+    summaryText: '여러 FAQ로 안내',
+    faqEntrySeqs: [12, 2],
+    questionUtteranceOrder: 1,
+    answerUtteranceOrder: 2,
+  };
+  const input = body(event({ kind: 'BUSINESS_RESULT', payload }));
+  const validated = await validate(input);
+  assert.deepEqual(normalizeCallEvents(validated.events)[0].payload.faqEntrySeqs, [2, 12]);
+  assert.deepEqual(payload.faqEntrySeqs, [12, 2]);
+  const reordered = structuredClone(input);
+  reordered.events[0].payload.faqEntrySeqs.reverse();
+  assert.deepEqual(
+    normalizeCallEvents(validated.events),
+    normalizeCallEvents((await validate(reordered)).events),
+  );
+  const max = { ...payload, faqEntrySeqs: Array.from({ length: 100 }, (_, i) => i + 1) };
+  await validate(body(event({ kind: 'BUSINESS_RESULT', payload: max })));
+  for (const faqEntrySeqs of [
+    undefined,
+    null,
+    [],
+    [1, 1],
+    [0],
+    [-1],
+    [1.5],
+    ['1'],
+    [null],
+    [2147483648],
+    Array.from({ length: 101 }, (_, i) => i + 1),
+  ])
+    await assert.rejects(
+      () =>
+        validate(body(event({ kind: 'BUSINESS_RESULT', payload: { ...payload, faqEntrySeqs } }))),
+      { status: 400 },
+    );
+  assert.throws(
+    () =>
+      normalizeCallEvents([
+        event({ kind: 'BUSINESS_RESULT', payload: { ...payload, faqEntrySeq: 12 } }),
+      ]),
+    { status: 400 },
+  );
+  assert.throws(
+    () =>
+      normalizeCallEvents([
+        event({
+          kind: 'BUSINESS_RESULT',
+          payload: {
+            action: 'INQUIRY',
+            orderSeq: null,
+            unansweredQuestionSeq: null,
+            summaryText: '문의',
+            faqEntrySeqs: [12],
+          },
+        }),
+      ]),
+    { status: 400 },
+  );
+  const legacy = { ...payload, faqEntrySeq: 12 };
+  delete legacy.faqEntrySeqs;
+  const normalized = normalizeCallEvents(
+    (await validate(body(event({ kind: 'BUSINESS_RESULT', payload: legacy })))).events,
+  )[0].payload;
+  assert.deepEqual(normalized, legacy);
+  assert.equal(Object.hasOwn(normalized, 'faqEntrySeqs'), false);
+});
+
 test('events accept each discriminated payload, integer seconds, explicit nulls and 50 items', async () => {
   for (const value of [
     event(),

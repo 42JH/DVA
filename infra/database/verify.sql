@@ -210,6 +210,8 @@ BEGIN
   OR (SELECT count(*) FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='f')<>1
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='f'
     AND confrelid='public.faq_entries'::regclass AND confdeltype='c')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='u'
+    AND pg_get_constraintdef(oid)='UNIQUE (faq_entry_seq, event_id)')
   OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.faq_question_examples_recent_idx') AND indisvalid)
   OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.faq_question_examples_retention_idx') AND indisvalid)
   OR NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.faq_entries'::regclass

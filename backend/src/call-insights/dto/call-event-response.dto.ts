@@ -77,9 +77,20 @@ export class CallProcessingResultDto extends CallEventRecordDto {
   @ApiProperty({
     type: Number,
     nullable: true,
-    description: '답변에 사용한 FAQ 번호. FAQ 삭제 후에도 역사적 번호를 보존합니다.',
+    description:
+      '단일 FAQ 응대의 호환 번호. 여러 FAQ를 사용했거나 FAQ 답변이 아니면 null. 전체 번호는 faqEntrySeqs로 제공합니다.',
   })
   faqEntrySeq!: number | null;
+
+  @ApiProperty({
+    type: [Number],
+    nullable: true,
+    minItems: 1,
+    maxItems: 100,
+    description:
+      '사용한 FAQ 번호 배열. 기존 단건 이벤트도 배열로 제공합니다. FAQ 답변 외에는 null.',
+  })
+  faqEntrySeqs!: number[] | null;
 
   @ApiProperty({
     type: Number,

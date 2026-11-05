@@ -4,9 +4,10 @@ SET LOCAL statement_timeout='60s';
 CREATE TABLE public.faq_question_examples (
  faq_question_example_seq integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  faq_entry_seq integer NOT NULL REFERENCES public.faq_entries(faq_entry_seq) ON DELETE CASCADE,
- event_id uuid NOT NULL UNIQUE,
+ event_id uuid NOT NULL,
  question_text text NOT NULL CHECK (length(btrim(question_text))>0 AND length(question_text)<=20000),
- occurred_at timestamptz NOT NULL CHECK (isfinite(occurred_at))
+ occurred_at timestamptz NOT NULL CHECK (isfinite(occurred_at)),
+ UNIQUE (faq_entry_seq,event_id)
 );
 CREATE INDEX faq_question_examples_recent_idx ON public.faq_question_examples
  (faq_entry_seq,occurred_at DESC,faq_question_example_seq DESC);
@@ -19,7 +20,7 @@ BEGIN
  RETURN NULL;
 END $$;
 CREATE TRIGGER faq_question_examples_reset AFTER UPDATE ON public.faq_entries
- FOR EACH ROW EXECUTE FUNCTION public.reset_faq_question_examples();
+ FOR EACH ROW WHEN (OLD IS DISTINCT FROM NEW) EXECUTE FUNCTION public.reset_faq_question_examples();
 
 COMMENT ON TABLE public.faq_question_examples IS 'FAQ별 최신 10개 고객 질문 스냅샷. 응대 발생 후 5년 폐기. FAQ 수정·삭제 시 정리하며 통화 삭제와 독립';
 COMMENT ON COLUMN public.faq_question_examples.event_id IS '원본 FAQ_ANSWERED UUID의 논리 참조. 원본 통화·이벤트 물리 삭제 뒤에도 스냅샷을 유지하므로 FK 없음';
