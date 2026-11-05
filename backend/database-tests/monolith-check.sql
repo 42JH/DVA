@@ -15,13 +15,13 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, got %',n; END IF;
+ IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>26 THEN RAISE EXCEPTION 'Expected 26 foreign keys, got %',n; END IF;
+ IF n<>27 THEN RAISE EXCEPTION 'Expected 27 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
- IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
+ IF n<>11 THEN RAISE EXCEPTION 'Expected 11 business triggers, got %',n; END IF;
  IF to_regclass('public.call_insight_events') IS NULL OR to_regclass('public.unanswered_questions') IS NULL THEN
   RAISE EXCEPTION 'Call events or unanswered reference schema missing'; END IF;
  IF to_regclass('public.call_analyses') IS NULL THEN RAISE EXCEPTION 'Call analyses missing'; END IF;

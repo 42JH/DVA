@@ -99,6 +99,10 @@ async function migrate(pool) {
         "SELECT 1 WHERE EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_payment_requests' AND column_name='approval_next_check_at' AND udt_name='timestamptz' AND is_nullable='YES') AND pg_get_indexdef(to_regclass('public.order_payment_reconcile_idx')) LIKE '%COALESCE(approval_next_check_at, approval_started_at)%'",
       );
       assert.equal(paymentRecovery.rowCount, 1, 'Apply migration 051 to the isolated DB first');
+      const faqExamples = await client.query(
+        "SELECT 1 WHERE to_regclass('public.faq_question_examples') IS NOT NULL AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.faq_entries'::regclass AND tgname='faq_question_examples_reset' AND tgenabled='O')",
+      );
+      assert.equal(faqExamples.rowCount, 1, 'Apply migration 052 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
