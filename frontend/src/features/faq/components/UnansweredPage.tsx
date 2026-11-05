@@ -19,7 +19,7 @@ import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useU
 const COLS =
   'grid grid-cols-[calc(170px*var(--col-scale))_calc(200px*var(--col-scale))_calc(170px*var(--col-scale))_minmax(0,1fr)_196px]'
 const PAD = 'px-[54px]' // 03 주문 목록과 같은 좌우 자리
-// 사유 칩 — 04 상담 유형 칩 색 집합에서: 근거 부족(FAQ로 채울 것) = FAQ 남보라 · 검색 장애 = 분홍 · 미분류 = 회색. 모양 · 색은 06 처리 내용과 같이 shared/lib/unansweredReason
+// 사유 칩 — 04 상담 유형 칩 색 집합에서: 유사한 질문 없음(FAQ로 채울 것) = FAQ 남보라 · 서버 에러(검색 장애 · 사유 없음) = 분홍. 모양 · 색은 06 처리 내용과 같이 shared/lib/unansweredReason
 export function UnansweredPage() {
   const vm = useUnansweredList()
 

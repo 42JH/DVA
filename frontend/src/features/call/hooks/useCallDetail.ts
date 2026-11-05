@@ -38,7 +38,7 @@ export interface ResultView {
   time: string
   link?: { label: string; onClick: () => void }
   question?: string // AI 미답변: 고객 질문
-  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (답변 근거 부족 · 지식 검색 장애 · 미분류)
+  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (유사한 질문 없음 · 서버 에러)
 }
 
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
