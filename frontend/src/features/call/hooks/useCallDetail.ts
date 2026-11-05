@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock, fmtPhone } from '@/shared/lib/format'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
@@ -87,7 +87,7 @@ const emptyText = (
 
 /** 06 통화 상세 훅 (11/05 새 디자인) — 대본(불만 묶음) · 녹취 재생(이전 · 다음 발화 · 음량) · AI 동작(짚은 말과 같이 하이라이트)
  * 네 조회(기본 · 대화 · 처리 결과 · AI 동작)를 따로 받아 5초마다 다시 — 늦게 온 분석 · 발화 · 녹취가 같은 화면에 붙고, 한 영역이 늦거나 실패해도 나머지는 그대로 (11/02 연동 명세) */
-export function useCallDetail(callId: number) {
+export function useCallDetail(callId: number, fromFaq?: number) {
   // AI 동작을 눌러 짚은 통화 안 시각(초)과, 스크립트가 그 줄로 스크롤할 신호 (누를 때마다 n이 늘어 같은 줄도 다시 스크롤)
   const [cursor, setCursor] = useState<number | null>(null)
   const [jump, setJump] = useState<{ key: number; n: number } | null>(null)
@@ -129,9 +129,16 @@ export function useCallDetail(callId: number) {
 
   // 404는 받은 게 있어도 '통화 없음'(삭제된 통화 — 반복 조회도 멈춤). 그 밖의 오류 화면은 아무것도 못 받았을 때만,
   // 받은 게 있으면 그대로 두고(재조회 실패 · 일부만 수신) 안내 한 줄 (11/02 연동 명세)
+  // FAQ 상세 고객 질문 사례에서 왔는데 통화가 지워졌으면(404) 그 FAQ 상세를 다시 받아 링크를 갱신 (11/05 명세)
+  const qc = useQueryClient()
+  const gone = detail.error instanceof ApiError && detail.error.status === 404
+  useEffect(() => {
+    if (gone && fromFaq) void qc.invalidateQueries({ queryKey: ['faqs', 'detail', fromFaq] })
+  }, [gone, fromFaq, qc])
+
   const error =
     detail.error instanceof ApiError && detail.error.status === 404
-      ? '통화를 찾을 수 없습니다.'
+      ? '통화 원본이 삭제되어 조회할 수 없습니다.' // FAQ 상세 사례 · 다른 화면에서 온 지워진 통화 (11/05 FAQ 사례 연동 문구)
       : call || !detail.error
         ? null
         : '불러오지 못했습니다. 다시 시도해 주세요.'
