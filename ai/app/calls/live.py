@@ -580,7 +580,9 @@ class LiveFlow:
             await self.resume(s, did)
 
     async def resume(self, s: CallSession, did) -> None:
-        """미결 호출이 없고 보낸 결과가 있으면 response.create 1회. 생략하면 Live가 멈춘다(S0b b3)."""
+        """미결 호출이 없고 보낸 결과가 있으면 response.create 1회. 생략하면 Live가 멈춘다(S0b b3).
+        고객이 끼어들어 말하는 중이면 말이 끝난 뒤 재개한다(앞선 결과를 고객 말 위에 얹지 않게)."""
+        await self._customer_quiet(s)
         d = self._dl(s, did)
         if d["inflight"] == 0 and d["outputs"]:
             d["outputs"] = 0
@@ -631,10 +633,16 @@ class LiveFlow:
         deadline = time.monotonic() + timeout
         quiet = self.cfg.notify_quiet_ms / 1000
         while time.monotonic() < deadline:
-            busy = any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
+            busy = self.rt(s).cust is not None or any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
             if not busy and time.time() - s.last_output_t >= quiet:
                 return
             await asyncio.sleep(0.1)
+
+    async def _customer_quiet(self, s: CallSession, timeout: float = 8.0) -> None:
+        """고객 발화가 끝날 때까지(발화 끝 = 마지막 전사 뒤 utterance_gap_ms). 상한을 넘기면 그대로 진행한다."""
+        deadline = time.monotonic() + timeout
+        while self.rt(s).cust is not None and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
 
     async def send(self, s: CallSession, event: dict) -> None:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
