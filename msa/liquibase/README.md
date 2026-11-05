@@ -11,15 +11,17 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 7 | 9 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
-| operations | operations_db | operations-db | 10 | 12 |
+| operations | operations_db | operations-db | 13 | 15 |
 
-현재 public 업무 테이블 20개 + outbox/inbox 10개 + customer/consultation 감사 준비 2개 = 32개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 42개가 된다.
-consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 43개다. 위 consultation 수는 이 수신함도 포함한다.
+현재 public 업무·보관 테이블 23개 + outbox/inbox 10개 + customer/consultation 감사 준비 2개 = 35개. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 45개가 된다.
+consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 46개다. 위 consultation 수는 이 수신함도 포함한다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
-운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
+초기 페르소나 2개와 편집용 프롬프트는 operations 007에서 legacy 테이블에 그대로 보존한다. 새 API의 설정 이력·초안과 ACTIVE/PENDING은 비어 있으며 구 프롬프트를 실제 상담 설정으로 자동 선택하지 않는다.
 
 ## 변경 관리
+
+- operations `007`은 기존 identity/prompt·시퀀스·설정·불변 이력과 기존 SQL 활성화 함수를 legacy 이름으로 보존하고 새 페르소나 identity/불변 버전/초안 3개 테이블을 추가한다. 이전 001~006 이력·대기 이벤트와 행 값을 보존한다. 초기·업그레이드 제약 및 후반 SQL 실패 시 rename/함수/DDL/데이터/이력 전체 롤백을 검사한다. 과거의 전체 설정을 추정하거나 구 프롬프트를 자동 publish하지 않는다.
 
 - consultation `003`은 PBX 수신함/claim과 통화 도착·등록·삭제 필드 및 활성 집계 인덱스를 추가한다. 기존 데이터/이력/대기 이벤트를 보존하고 실제 PBX 시작 시각만 누락된 도착 시각으로 사용한다. 근거 없는 과거 등록 시각은 NULL로 남긴다. 원본 047에서 폐기된 종료 사유는 새 API에서 사용하지 않지만 MSA의 과거 값은 보존하며 이관/실패 rollback을 검사한다.
 - consultation `004`는 customer 소유 고객의 양수 논리 참조와 인덱스를 추가한다. 기존 통화의 고객은 추정하지 않고 NULL로 보존한다. 기존 통화·수신함·이벤트·이력과 후반 SQL 실패 시 롤백을 확인한다.

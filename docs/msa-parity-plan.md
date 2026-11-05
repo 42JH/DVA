@@ -47,6 +47,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
 - 다섯 번째 MR은 consultation PBX 수신·녹취 워커와 진행 통화 수 조회/SSE 3개를 연결한다. 범위와 복구/검증은 [consultation PBX 계획](msa-consultation-pbx-plan.md)을 따른다. 고객 컨텍스트/PIN·통화 생성과 나머지 상담/주문/운영 기능 및 전체 보관 워커는 후속 단계다.
 - 여섯 번째 MR은 customer 고객 확인/통화 등록과 consultation의 통화·PBX·감사 확정을 연결한다. 최신 `04b7346`의 11자리 휴대전화 입력을 반영하며 customer는 18/23개다. [고객 확인·통화 등록 계획](msa-caller-context-plan.md)에 원본 비교·장애 복구와 후속 범위를 기록한다.
+- 여덟 번째 MR은 상담 분석의 실제 페르소나 버전 의존성을 위해 operations 설정/초안/버전/AI 적용 10개 선언과 알림 워커를 먼저 연결해 operations 21개를 제공한다. 구 MSA 프롬프트는 이력을 꾸미지 않고 legacy 테이블에 보존한다. [페르소나 계획](msa-personas-plan.md)에 비교·복구·후속 범위를 기록한다. FAQ와 나머지 상담/주문/보관 기능은 계속 남아 있다.
 - 일곱 번째 MR은 기존 고객 PATCH와 개인 PIN 조회/등록/수정 4개를 연결해 customer 22/23개를 제공한다. [고객 수정·개인 PIN 계획](msa-customer-pins-plan.md)에 통화 잠금·원본 입력/중복/부분 수정·감사와 복구 검증을 기록한다. 기업 청구 GET·주문/상담/운영 나머지와 전체 자동/보관 워커는 후속이다.
 
 ## 두 번째 MR 계획 — operations 인증·감사
