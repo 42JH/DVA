@@ -1,4 +1,4 @@
-import { Fragment, useContext } from 'react'
+import { Fragment, useContext, type ReactNode } from 'react'
 import { Link, useLocation } from 'react-router'
 import { unansweredTo } from '@/shared/lib/unansweredReason'
 import { GlobalSearch, type SearchProps } from '@/shared/search/GlobalSearch'
@@ -42,7 +42,16 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
 // 11/05 사용자: 모든 화면 같은 모양 — 검색은 공용 탭 검색(shared/search/GlobalSearch), 처음 탭 = 그 화면(기본 주문). 설정 화면은 search={false}
 // 뎁스가 있는 화면(통화 상세 · FAQ 상세 · 작성 · 수정 · AI 미답변 · 기업 상세 · 그래프 보기)은 crumbs — 상태 자리에 경로, 검색칸 없음 (11/05 사용자 이미지)
 // FAQ 목록은 검색 중일 때만 crumbs('FAQ > “박스” 검색') + 검색칸 그대로
-export function TopBar({ search, crumbs }: { search?: SearchProps | false; crumbs?: Crumb[] }) {
+// extra = 검색칸 자리(가운데 칸) 오른쪽에 붙는 화면 정보 — 검색칸이 없을 때만 (06 통화 상세의 발신번호, 11/05 사용자 이미지)
+export function TopBar({
+  search,
+  crumbs,
+  extra,
+}: {
+  search?: SearchProps | false
+  crumbs?: Crumb[]
+  extra?: ReactNode
+}) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
   // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
   const box = search ?? (crumbs ? false : ({ tab: 'order' } as const))
@@ -68,7 +77,12 @@ export function TopBar({ search, crumbs }: { search?: SearchProps | false; crumb
           )
         )}
       </div>
-      {box ? <GlobalSearch {...box} /> : <span />}
+      {box ? (
+        <GlobalSearch {...box} />
+      ) : (
+        // 검색칸이 없는 화면은 가운데 칸 오른쪽에 화면 정보 (06 발신번호)
+        <div className="flex min-w-0 justify-end">{extra}</div>
+      )}
       <UnansweredAlert count={unanswered} className="justify-self-end" />
     </header>
   )
