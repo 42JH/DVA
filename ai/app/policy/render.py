@@ -115,6 +115,9 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
     if stage is None and stage_id == "intent":
         sets = ["intent"]
+    elif stage is None and stage_id in ("inquiry", "lookup", "cancel", "agent"):
+        # 접수 밖 업무에도 끝내기·업무 전환을 듣는다(없으면 문의·조회 뒤 '끊을게요'를 못 들어 무음 종료만 남음, 운영 통화 8df5dd7f)
+        sets = ["collect"]
     if pending:
         sets.insert(0, "confirm")  # confirm은 확인 대기가 있을 때만(delegation.md §3.2)
     if callback:

@@ -36,7 +36,7 @@ class FakeDecisions:
             answers.append(choice("confirm", "yes" if said.startswith("네") else
                                   "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
-            answers.append(choice("task", "order"))
+            answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
         if "origin" in names:
             answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
         if "more" in names:
@@ -506,6 +506,50 @@ def test_customer_end_mid_collection_greets_then_hangs_up():
     reason, conn = run(scenario())
     assert reason == "customer_end" and client.hangups == ["live_1"]
     assert any(e["type"] == "session.commentary.append" and "closing" in e["content"] for e in conn.sent)
+
+
+def test_inquiry_intent_still_hears_end_and_hangs_up():
+    """문의로 시작한 통화도 '끊어 주세요'를 듣고 마무리 인사 뒤 끊는다(운영 통화 8df5dd7f·6cb7ff73: 판단이 없어 무음 종료)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "궁금한 게 있어요", 1000)
+        intent = s.state.intent
+        await say(conn, "네 끊어주세요", 2000)
+        await until(lambda: s.phase == Phase.CLOSING)
+        reason = s.close_reason
+        await ai(conn, "감사합니다. 좋은 하루 보내세요.", 3000)
+        await task
+        return intent, reason
+
+    intent, reason = run(scenario())
+    assert intent == "inquiry" and reason == "customer_end" and client.hangups == ["live_1"]
+
+
+def test_order_tool_after_inquiry_or_lookup_switches_intent_to_order():
+    """문의·조회 뒤 접수 도구를 부르면 접수로 바뀌어 더 보낼 택배·마무리 판단을 받는다. 접수 중 조회 도구는 접수를 유지."""
+    from app.domain.assess import assess
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.svc = SimpleNamespace(stage2=lambda s: None)
+    lf.rt = lambda s: SimpleNamespace(intent_started=True)
+    for before in ("inquiry", "lookup", "cancel", "agent"):
+        assert [q["name"] for q in decision_questions(P, before)] == ["switch"]  # 끝내기·전환을 듣는다
+        st = filled()
+        st.intent = before
+        lf._business(session(st), "order")
+        assert st.intent == "order" and assess(st, P).stage == "readback"
+    lf._business(session(st), "lookup")
+    lf._business(session(st), "inquiry")
+    assert st.intent == "order"
 
 
 class SlowResults:
