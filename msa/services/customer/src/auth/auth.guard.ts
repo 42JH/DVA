@@ -1,10 +1,14 @@
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
+import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
-import { type Environment } from '../config/environment';
-import { type AdminPublic, type AdminRole } from '../admins/admins.types';
+import { timingSafeEqual } from 'node:crypto';
+import { AdminPublic, AdminRole } from '../admins/admins.types';
+import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/audit-operation';
+import { AuditService } from '../audit/audit.service';
+import { AuditActorType } from '../audit/audit.types';
 import { ApiException } from '../common/errors/api.exception';
+import { type Environment } from '../config/environment';
 import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 export const SESSION_COOKIE = 'dva_session';
@@ -17,7 +21,7 @@ export type AuthRequest = Request & {
   requestId: string;
   admin: AdminPublic;
   sessionToken: string;
-  auditActorType?: 'AI';
+  auditActorType?: AuditActorType;
 };
 export function readSessionToken(request: Request): string | undefined {
   const values = (request.headers.cookie ?? '')
@@ -32,14 +36,41 @@ export function readSessionToken(request: Request): string | undefined {
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly auth: AuthService,
+    private readonly audit: AuditService,
     private readonly reflector: Reflector,
     private readonly config: ConfigService<Environment, true>,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    return this.checkAccess(context);
+    try {
+      return await this.checkAccess(context);
+    } catch (error) {
+      const operation = this.reflector.get<AuditOperationOptions>(
+        AUDIT_OPERATION,
+        context.getHandler(),
+      );
+      if (operation)
+        await this.audit.recordFailure(
+          auditEvent(operation, context.switchToHttp().getRequest<AuthRequest>()),
+          error,
+        );
+      throw error;
+    }
   }
   private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
+    if (
+      this.reflector.getAllAndOverride<boolean>('auth:internal-operations', [
+        context.getHandler(),
+        context.getClass(),
+      ])
+    ) {
+      const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+      const actual = Buffer.from(request.get('Authorization') ?? '');
+      const expected = Buffer.from('Bearer ' + token);
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
+        throw new ApiException(403, 'FORBIDDEN', '서비스 인증이 필요합니다.');
+      return true;
+    }
     // Existing health and PBX retain their dedicated authentication contracts.
     if (
       ['/health', '/health/ready', '/webhooks/pbx/call-ended'].includes(

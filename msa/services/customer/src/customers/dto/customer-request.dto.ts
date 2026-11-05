@@ -1,11 +1,59 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsIn, IsInt, IsString, Matches, Max, Min, ValidateIf } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsNotEmpty,
+  IsObject,
+  ValidateNested,
+  IsString,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { CUSTOMER_STATUSES, type CustomerStatus } from '../customers.types';
 
+import { CustomerAddressDto } from './customer-address.dto';
+
 const trim = ({ value }: { value: unknown }): unknown =>
   typeof value === 'string' ? value.trim() : value;
+
+export class CreateCustomerDto {
+  @ApiPropertyOptional({
+    type: CustomerAddressDto,
+    nullable: true,
+    description:
+      '고객의 내 주소. PIN과 독립. 생략 시 유지(생성 시 null), null로 삭제, 객체는 전체 교체.',
+  })
+  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CustomerAddressDto)
+  address?: CustomerAddressDto | null;
+  @ApiPropertyOptional({
+    description: '개인 월결제 자격. 관리자만 true로 설정 가능. 미입력 시 false.',
+    default: false,
+  })
+  @ValidateIf((_o, value) => value !== undefined)
+  @IsBoolean()
+  monthlyBillingEnabled?: boolean;
+  @ApiProperty({ description: '이름. 앞뒤 공백 제거, 빈 이름 불가.' })
+  @Transform(trim)
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @ApiProperty({
+    description: '선행 0을 보존한 숫자 문자열. 하이픈·공백·국가번호 + 불가.',
+    pattern: '^[0-9]+$',
+  })
+  @IsString()
+  @Matches(/^[0-9]+$/)
+  phoneNumber!: string;
+}
 
 export class ListCustomersQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({ description: '이름 부분 검색. 앞뒤 공백 제거.' })

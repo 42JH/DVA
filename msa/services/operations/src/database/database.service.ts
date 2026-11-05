@@ -37,6 +37,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.pool.query('SELECT name, deleted_at FROM admin_users LIMIT 0');
     await this.pool.query('SELECT session_token_hash FROM admin_sessions LIMIT 0');
     await this.pool.query('SELECT actor_name, target_admin_name FROM audit_logs LIMIT 0');
+    await this.pool.query('SELECT event_id FROM customer_audit_preparations LIMIT 0');
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

@@ -10,7 +10,9 @@ test('operations requires its DB, preserves exact origins and validates ports', 
   for (const extra of [{ DB_PORT: '0' }, { PORT: '65536' }, { DB_PORT: '5432x' },
     { CORS_ORIGINS: 'https://example.com/path' }, { SWAGGER_ENABLED: 'yes' }, { NODE_ENV: {} },
     { CUSTOMER_AUTH_TOKEN: 'too-short' }, { CUSTOMER_AUTH_TOKEN: 'x'.repeat(257) },
-    { CUSTOMER_AUTH_TOKEN: 'x'.repeat(32) + '\n' }]) {
+    { CUSTOMER_AUTH_TOKEN: 'x'.repeat(32) + '\n' }, { CUSTOMER_URL: {} },
+    { CUSTOMER_URL: 'http://user:password@customer:3001' }, { CUSTOMER_URL: 'file:///tmp/audit' },
+    { CUSTOMER_URL: 'http://customer:3001/path' }]) {
     assert.throws(() => validateEnvironment({ ...valid, ...extra }), /Invalid environment variables/);
   }
 });

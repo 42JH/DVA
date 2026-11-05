@@ -1,8 +1,8 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PublicAuth } from './auth/auth.guard';
-import { DatabaseService } from './database/database.service';
 import { AuthService } from './auth/auth.service';
+import { DatabaseService } from './database/database.service';
 
 @ApiTags('Health')
 @PublicAuth()

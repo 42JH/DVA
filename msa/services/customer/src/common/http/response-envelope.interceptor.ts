@@ -1,10 +1,10 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
-import { Response } from 'express';
 import { SSE_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
+import { Response } from 'express';
 import { map } from 'rxjs';
-import { type ContextRequest, isApiRequest } from './request-context';
 import { ListResponse } from '../pagination';
+import { type ContextRequest, isApiRequest } from './request-context';
 
 @Injectable()
 export class ResponseEnvelopeInterceptor implements NestInterceptor {

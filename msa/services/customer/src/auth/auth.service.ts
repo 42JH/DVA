@@ -89,5 +89,8 @@ export class AuthService {
     const auth = await this.request('/internal/auth/session', { sessionToken: '' });
     await auth.body?.cancel();
     if (auth.status !== 400) throw unavailable();
+    const events = await this.request('/internal/events', {});
+    await events.body?.cancel();
+    if (events.status !== 400) throw unavailable();
   }
 }

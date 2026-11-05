@@ -10,7 +10,7 @@ NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 APP_COMMON = ["msa/Jenkinsfile", "msa/deploy/package-app.sh", "msa/deploy/upload-app.sh",
               "msa/deploy/remote-app.sh", "msa/deploy/app-release.py", "msa/deploy/read-app-state.sh",
               "msa/deploy/plan-apps.py", "msa/deploy/ssh-common.sh", "msa/deploy/known_hosts",
-              "msa/shared/", "msa/parity/", "msa/services/package.json", "msa/services/package-lock.json"]
+              "msa/shared/", "msa/parity/", "msa/.dockerignore", "msa/services/package.json", "msa/services/package-lock.json"]
 DB_PATHS = ["msa/liquibase/", "msa/Jenkinsfile", "msa/deploy/package.sh", "msa/deploy/upload.sh",
             "msa/deploy/remote.sh", "msa/deploy/run-remote.sh", "msa/deploy/ssh-common.sh",
             "msa/deploy/known_hosts", "msa/deploy/has-msa-changes.sh", "msa/deploy/deliver-databases.sh", "msa/deploy/plan-apps.py",

@@ -1,6 +1,6 @@
 import { AppController } from './app.controller';
-import { DatabaseService } from './database/database.service';
 import { AuthService } from './auth/auth.service';
+import { DatabaseService } from './database/database.service';
 
 describe('AppController', () => {
   it('서버 상태를 반환한다', () => {

@@ -25,4 +25,7 @@
     </preConditions>
     <sqlFile path="004-admin-auth-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="005-customer-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="005-customer-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

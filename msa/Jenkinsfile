@@ -122,9 +122,14 @@ pipeline {
                     while IFS= read -r service; do
                         directory="msa/services/$service"
                         echo "BUILD: $service"
+                        if [ "$service" = customer ] || [ "$service" = operations ]; then
+                            set -- -f "$directory/Dockerfile" msa
+                        else
+                            set -- "$directory"
+                        fi
                         docker build \
                             --tag "docker.io/library/dva-$service:$RELEASE_NAME" \
-                            "$directory"
+                            "$@"
 
                         bash msa/deploy/package-app.sh "$service"
                     done < msa-release/services.txt

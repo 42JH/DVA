@@ -19,6 +19,7 @@ before(async () => {
     const body = chunks.length ? JSON.parse(Buffer.concat(chunks)) : undefined;
     if (mode === 'timeout') return;
     if (request.url === '/operations/health/ready') { response.writeHead(mode === 'unready' ? 503 : 200).end('{}'); return; }
+    if (request.url === '/internal/events') { assert.deepEqual(body,{}); response.writeHead(400).end('{}'); return; }
     assert.equal(request.url, '/internal/auth/session');
     assert.equal(request.method, 'POST');
     assert.ok(body.sessionToken === token || body.sessionToken === '');

@@ -9,6 +9,7 @@ export interface Environment {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   CUSTOMER_AUTH_TOKEN?: string;
+  CUSTOMER_URL?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -72,6 +73,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     SWAGGER_ENABLED: swagger === 'true',
     CUSTOMER_AUTH_TOKEN:
       typeof raw.CUSTOMER_AUTH_TOKEN === 'string' ? raw.CUSTOMER_AUTH_TOKEN : undefined,
+    CUSTOMER_URL: typeof raw.CUSTOMER_URL === 'string' ? raw.CUSTOMER_URL : undefined,
   };
   if (
     raw.CUSTOMER_AUTH_TOKEN !== undefined &&
@@ -79,6 +81,16 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       !/^[\x21-\x7e]{32,256}$/.test(raw.CUSTOMER_AUTH_TOKEN))
   )
     errors.push('CUSTOMER_AUTH_TOKEN');
+  if (raw.CUSTOMER_URL !== undefined) {
+    try {
+      if (typeof raw.CUSTOMER_URL !== 'string') throw new Error('Invalid customer origin');
+      const url = new URL(raw.CUSTOMER_URL);
+      if (!['http:', 'https:'].includes(url.protocol) || url.origin !== raw.CUSTOMER_URL)
+        errors.push('CUSTOMER_URL');
+    } catch {
+      errors.push('CUSTOMER_URL');
+    }
+  }
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

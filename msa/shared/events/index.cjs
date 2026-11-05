@@ -16,6 +16,12 @@ function validateEvent(event) {
 function checkToken(token) {
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid event authentication configuration');
 }
+function endpoint(value) {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+    throw new Error('Invalid event endpoint');
+  return url.href;
+}
 async function transaction(pool, action) {
   const client = await pool.connect();
   let broken;
@@ -128,11 +134,9 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
     throw new Error('Invalid event relay configuration');
   const endpoints = new Map(Object.entries(destinations).map(([destination, config]) => {
     if (!services.has(destination)) throw new Error('Invalid event destination');
-    const url = new URL(config.url);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
-      throw new Error('Invalid event endpoint');
+    const url = endpoint(config.url);
     checkToken(config.token);
-    return [destination, { url: url.href, token: config.token }];
+    return [destination, { url, token: config.token }];
   }));
   return () => transaction(pool, async client => {
     const { rows } = await client.query(
@@ -165,4 +169,13 @@ function createRelay({ pool, source, destinations, timeoutMs = 5000 }) {
   });
 }
 
-module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent };
+async function sendEvent(url, token, event) {
+  validateEvent(event);
+  checkToken(token);
+  url = endpoint(url);
+  const response = await fetch(url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(event) });
+  if (!await acknowledged(response, event.eventId)) throw new Error('Event acknowledgement unavailable');
+}
+
+module.exports = { enqueue, createReceiver, createRelay, eventHttpHandler, validateEvent, sendEvent };

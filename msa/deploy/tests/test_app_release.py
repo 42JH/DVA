@@ -110,6 +110,10 @@ class DeliveryPlanTests(unittest.TestCase):
         ci_success = self.git('rev-parse', 'HEAD')
         self.assertEqual(planner.plan(ci_success, True, self.state, {}), ['customer'])
 
+    def test_shared_docker_context_change_rebuilds_service(self):
+        self.commit('msa/.dockerignore', '**/node_modules')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['customer'])
+
     def test_unchanged_deployed_service_skips(self):
         self.commit('backend/other.ts', 'unrelated')
         self.assertEqual(planner.plan('', True, self.state, {}), [])

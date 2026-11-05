@@ -121,7 +121,7 @@ def main():
         if service == 'customer':
             token = base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-customer-auth', '-o', 'json'))['data']['customer-token']).decode('ascii')
             operations = network + '-operations-app'
-            command(['docker', 'build', '--label', label, '-t', operations, str(ROOT / 'msa/services/operations')])
+            command(['docker', 'build', '--label', label, '-t', operations, '-f', str(ROOT / 'msa/services/operations/Dockerfile'), str(ROOT / 'msa')])
             database_resources.append(('image', operations))
             command(['docker', 'run', '-d', '--name', operations, '--label', label, '--network', network,
                      '-e', 'NODE_ENV=production', '-e', 'PORT=3005', '-e', 'SWAGGER_ENABLED=true',
