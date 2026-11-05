@@ -39,11 +39,14 @@ export class FaqsRepository {
       await this.database.pool.query<FaqDetailDto>(
         `SELECT ${ADMIN_FIELDS},COALESCE((
            SELECT jsonb_agg(jsonb_build_object('faqQuestionExampleSeq',e.faq_question_example_seq,
-             'questionText',e.question_text,'occurredAt',e.occurred_at)
+             'questionText',e.question_text,'occurredAt',e.occurred_at,'callSessionSeq',c.call_session_seq)
              ORDER BY e.occurred_at DESC,e.faq_question_example_seq DESC)
-           FROM (SELECT faq_question_example_seq,question_text,occurred_at FROM faq_question_examples
+           FROM (SELECT faq_question_example_seq,event_id,question_text,occurred_at FROM faq_question_examples
              WHERE faq_entry_seq=f.faq_entry_seq AND occurred_at>statement_timestamp()-interval '5 years'
              ORDER BY occurred_at DESC,faq_question_example_seq DESC LIMIT 10) e
+           LEFT JOIN call_insight_events source_event ON source_event.event_id=e.event_id
+           LEFT JOIN call_sessions c ON c.call_session_seq=source_event.call_session_seq
+             AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
          ),'[]'::jsonb) AS "recentQuestions"
          FROM faq_entries f WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
         [id],

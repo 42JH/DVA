@@ -124,10 +124,12 @@ test('only administrator FAQ detail exposes raw customer examples; lists, source
     assert.equal(data.updatedByAdminUserSeq, before.updatedByAdminUserSeq);
     assert.equal(data.recentQuestions.length, 1);
     assert.deepEqual(Object.keys(data.recentQuestions[0]).sort(), [
+      'callSessionSeq',
       'faqQuestionExampleSeq',
       'occurredAt',
       'questionText',
     ]);
+    assert.equal(data.recentQuestions[0].callSessionSeq, c.id);
     assert.equal(data.recentQuestions[0].questionText, text);
     assert.equal(new Date(data.recentQuestions[0].occurredAt).toISOString(), values[2].occurredAt);
   }
@@ -163,6 +165,11 @@ test('only administrator FAQ detail exposes raw customer examples; lists, source
     '#/components/schemas/FaqDetailDto',
   );
   assert.equal(spec.components.schemas.FaqDetailDto.properties.recentQuestions.maxItems, 10);
+  const exampleSchema = spec.components.schemas.FaqQuestionExampleDto;
+  assert.equal(exampleSchema.properties.callSessionSeq.type, 'number');
+  assert.equal(exampleSchema.properties.callSessionSeq.nullable, true);
+  assert.equal(exampleSchema.properties.callSessionSeq.minimum, 1);
+  assert.ok(exampleSchema.required.includes('callSessionSeq'));
   assert.equal(spec.components.schemas.FaqDto.properties.recentQuestions, undefined);
   assert.equal(spec.components.schemas.AgentFaqDto.properties.recentQuestions, undefined);
 });
@@ -195,6 +202,8 @@ test('multiple FAQs can reference the same question/answer pair and repeated tex
   assert.equal(saved.length, 3);
   assert.equal(new Set(saved.map((row) => row.faqQuestionExampleSeq)).size, 3);
   assert.equal(new Set(saved.map((row) => row.questionText)).size, 1);
+  assert.equal(saved.filter((row) => row.callSessionSeq === c.id).length, 2);
+  assert.equal(saved.filter((row) => row.callSessionSeq === other.id).length, 1);
   assert.equal(await sourceCount(c.id), 4);
 });
 
@@ -328,14 +337,21 @@ test('FAQ soft/physical deletion clears snapshots and still accepts delayed hist
   }
 });
 
-test('call soft deletion and the real call purge preserve independently stored question text', async () => {
+test('call soft deletion and the real call purge null the call link while preserving question text', async () => {
   const id = await faq(),
     c = await call(),
     values = batch([id]);
   await success(await post(c, values));
   const saved = (await detail(id)).recentQuestions;
+  assert.equal(saved[0].callSessionSeq, c.id);
+  const withoutCall = saved.map((row) => ({ ...row, callSessionSeq: null }));
+  const snapshots = await examples(id);
+  assert.equal((await f.get(`/api/calls/${c.id}`)).status, 200);
+  await f.error(await f.get(`/api/calls/${c.id}`, 0, { Cookie: undefined }), 401, 'UNAUTHORIZED');
   await success(await f.write('DELETE', `/api/calls/${c.id}`, undefined, 2));
-  assert.deepEqual((await detail(id)).recentQuestions, saved);
+  await f.error(await f.get(`/api/calls/${c.id}`), 404, 'NOT_FOUND');
+  assert.deepEqual((await detail(id)).recentQuestions, withoutCall);
+  assert.deepEqual(await examples(id), snapshots);
   const claimId = randomUUID();
   await f.pool.query(
     "UPDATE call_sessions SET incoming_at=clock_timestamp()-interval '6 years',purge_claim_id=$2,purge_claimed_until=clock_timestamp()+interval '5 minutes' WHERE call_session_seq=$1",
@@ -351,7 +367,28 @@ test('call soft deletion and the real call purge preserve independently stored q
       .rowCount,
     0,
   );
+  assert.deepEqual((await detail(id)).recentQuestions, withoutCall);
+  assert.deepEqual(await examples(id), snapshots);
+});
+
+test('call links follow detail visibility for legacy and expired calls without hiding recent examples', async () => {
+  const id = await faq(),
+    c = await call();
+  await success(await post(c, batch([id])));
+  const saved = (await detail(id)).recentQuestions;
+  await f.pool.query('UPDATE call_sessions SET incoming_at=NULL WHERE call_session_seq=$1', [c.id]);
+  assert.equal((await f.get(`/api/calls/${c.id}`)).status, 200);
   assert.deepEqual((await detail(id)).recentQuestions, saved);
+  await f.pool.query(
+    "UPDATE call_sessions SET incoming_at=clock_timestamp()-interval '6 years' WHERE call_session_seq=$1",
+    [c.id],
+  );
+  await f.error(await f.get(`/api/calls/${c.id}`), 404, 'NOT_FOUND');
+  assert.equal(await sourceCount(c.id), 3);
+  assert.deepEqual(
+    (await detail(id)).recentQuestions,
+    saved.map((row) => ({ ...row, callSessionSeq: null })),
+  );
 });
 
 test('five-year expiry is hidden immediately and physically removed by the existing retention worker without extending recent cases', async () => {
@@ -372,6 +409,7 @@ test('five-year expiry is hidden immediately and physically removed by the exist
   const displayed = (await detail(id)).recentQuestions;
   assert.equal(displayed.length, 1);
   assert.equal(displayed[0].questionText, '아직 유효한 질문');
+  assert.equal(displayed[0].callSessionSeq, null);
   assert.equal((await examples(id)).length, 2);
   await f.app.get(RetentionWorker).run();
   assert.equal((await examples(id)).length, 1);
