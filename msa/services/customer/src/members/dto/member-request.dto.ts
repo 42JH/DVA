@@ -1,3 +1,4 @@
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { ApiProperty, ApiPropertyOptional, OmitType, getSchemaPath } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -102,9 +103,12 @@ export class InlineMemberDto extends OmitType(CreateMemberDto, ['customerSeq', '
   @IsNotEmpty()
   @Matches(new RegExp(`^[^${String.fromCharCode(0)}]+$`))
   name!: string;
-  @ApiProperty({ description: '숫자 문자열. 선행 0 유지.', pattern: '^[0-9]+(?![\\s\\S])' })
+  @ApiProperty({
+    description: '휴대전화 번호 11자리 문자열. 선행 0 유지.',
+    pattern: MOBILE_PHONE_PATTERN.source,
+  })
   @IsString()
-  @Matches(/^[0-9]+(?![\s\S])/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber!: string;
 }
 

@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 5, 'operations': 6, 'consultation': 4}.get(service, 2)
+        changesets = {'customer': 6, 'operations': 6, 'consultation': 4}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -184,7 +184,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('6' if service == 'operations' else '5')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '6'
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -344,6 +344,29 @@ try:
     lb('operations', db, 'update', 'consultation-audit-upgrade')
     assert sql(db, 'SELECT row_to_json(p)::text FROM customer_audit_preparations p;', 'consultation-audit-preserved') == prepared
     assert sql(db, 'SELECT count(*) FROM consultation_audit_preparations;', 'consultation-audit-empty') == '0'
+    db = 'context_pin_upgrade_db'
+    sql('postgres', f'CREATE DATABASE {db} OWNER customer_app;', 'context-pin-setup')
+    lb('customer', db, 'update-count', 'context-pin-baseline', extra=('--count=5',))
+    sql(db, """INSERT INTO customers(name,phone_number,status) VALUES('legacy owner','01080000002','ACTIVE');
+      INSERT INTO personal_pins(customer_seq,label,address_data,version) VALUES(1,'legacy pin',
+      '{"name":"Receiver","phoneNumber":"01080000002","roadAddress":"Road","jibunAddress":"Lot","dongName":"Dong","postalCode":"01234"}',17);""", 'context-pin-seed', 'customer_app')
+    pin_before = sql(db, 'SELECT to_jsonb(p)::text FROM personal_pins p;', 'context-pin-before')
+    history = sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'context-pin-history-before')
+    failing = logs / 'atomicity-context-pin'
+    shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+    migration = failing / 'customer/006-context-pins.sql'
+    migration.write_text(migration.read_text(encoding='utf-8') + '\nSELECT 1 / 0;\n', encoding='utf-8')
+    output = lb('customer', db, 'update', 'context-pin-atomic-failure', failure=True, changelog_root=failing)
+    assert 'division by zero' in output.lower(), output
+    assert sql(db, 'SELECT to_jsonb(p)::text FROM personal_pins p;', 'context-pin-atomic-data') == pin_before
+    assert sql(db, "SELECT count(*) FROM information_schema.columns WHERE table_name='personal_pins' AND column_name='deleted_at';", 'context-pin-atomic-column') == '0'
+    assert sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'context-pin-atomic-history') == history
+    lb('customer', db, 'update', 'context-pin-upgrade')
+    assert sql(db, "SELECT (to_jsonb(p)-'deleted_at')::text FROM personal_pins p;", 'context-pin-preserved') == pin_before
+    assert sql(db, 'SELECT deleted_at IS NULL AND version=17 AND customer_seq=1 FROM personal_pins;', 'context-pin-no-fabrication') == 't'
+    sql(db, """UPDATE personal_pins SET deleted_at='2026-01-01Z' WHERE personal_pin_seq=1;
+      INSERT INTO personal_pins(customer_seq,label,address_data) SELECT customer_seq,label,address_data FROM personal_pins WHERE personal_pin_seq=1;""", 'context-pin-active-reuse', 'customer_app')
+    assert sql(db, 'SELECT count(*),min(version) FILTER(WHERE personal_pin_seq=1),count(*) FILTER(WHERE deleted_at IS NULL) FROM personal_pins;', 'context-pin-history-and-version') == '2|17|1'
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

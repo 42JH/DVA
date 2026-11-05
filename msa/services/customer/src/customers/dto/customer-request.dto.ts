@@ -1,3 +1,4 @@
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
@@ -47,11 +48,11 @@ export class CreateCustomerDto {
   name!: string;
 
   @ApiProperty({
-    description: '선행 0을 보존한 숫자 문자열. 하이픈·공백·국가번호 + 불가.',
-    pattern: '^[0-9]+$',
+    description: '선행 0을 보존한 휴대전화 번호 11자리 문자열. 하이픈·공백·국가번호 + 불가.',
+    pattern: MOBILE_PHONE_PATTERN.source,
   })
   @IsString()
-  @Matches(/^[0-9]+$/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber!: string;
 }
 
@@ -62,10 +63,13 @@ export class ListCustomersQueryDto extends PaginationQueryDto {
   @IsString()
   q?: string;
 
-  @ApiPropertyOptional({ description: '전화번호 정확히 일치 검색.', pattern: '^[0-9]+$' })
+  @ApiPropertyOptional({
+    description: '휴대전화 번호 11자리 정확히 일치 검색.',
+    pattern: MOBILE_PHONE_PATTERN.source,
+  })
   @ValidateIf((_object, value) => value !== undefined)
   @IsString()
-  @Matches(/^[0-9]+$/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber?: string;
 
   @ApiPropertyOptional({ enum: CUSTOMER_STATUSES })
