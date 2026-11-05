@@ -164,12 +164,11 @@ class LiveFlow:
             pending = s.state.pending
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
-            methods = s.state.customer.payment_methods
             callback = s.state.callback_offered and not s.state.callback_requested
             save = bool(s.state.address_offer) and s.state.address_consent is None
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       pay_methods=methods, callback=callback, save=save, origin=origin)
+                                       callback=callback, save=save, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -234,9 +233,6 @@ class LiveFlow:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
                 followups.append(("callback", cb[0]))
-            if (pay := answers.get("pay")) and pay[1] >= th and pay[0] in st.customer.payment_methods:
-                st.record("payment", pay[0])
-                followups.append(("payment", pay[0]))
         for f in followups:
             if f:
                 await self._follow(s, *f)
@@ -344,17 +340,10 @@ class LiveFlow:
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
-        elif what == "payment":
-            await self.notify(s, "N1'", {"payment": value})
-            self._maybe_submit(s)
         elif what == "no_more":  # 더 없음: 마무리는 고객이 끝낼 때(문의가 남았을 수 있다)
             async with s.lock:
                 st.no_more_parcels = True
-                a = assess(st, self.policy)
-            facts = {"more_parcels": False}
-            if a.stage == "payment":
-                facts["payment_choice"] = list(st.customer.payment_methods)
-            await self.notify(s, "N1'", facts)
+            await self.notify(s, "N1'", {"more_parcels": False})
             self._maybe_submit(s)
 
     async def _on_intent(self, s: CallSession, intent: str) -> None:
@@ -365,11 +354,7 @@ class LiveFlow:
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
                     st.no_more_parcels = True
-                    a = assess(st, self.policy)
-                    if a.stage == "payment":
-                        facts = {"more_parcels": False, "payment_choice": list(st.customer.payment_methods)}
-                    else:
-                        facts = {"more_parcels": False, "closing": True}
+                    facts = {"more_parcels": False, "closing": True}
                 else:
                     facts = {"closing": True}
             elif intent == "edit_parcel":
@@ -490,7 +475,7 @@ class LiveFlow:
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
 
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
-        """더 없음 + 결제 방식이 정해졌으면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다."""
+        """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
         results = getattr(self.svc, "results", None)
         if results is None or s.call_id in results.tasks:
             return

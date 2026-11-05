@@ -2,7 +2,7 @@
 #   ① Live 지시문(app/policy/render.py render_live) ② Backend 지시문(render_backend)
 #   ③ 서버 판정(app/domain/assess.py) ④ Decision 질문(decision_questions) ⑤ 결과 문구 검사(app/domain/claims.py)
 # 를 만든다. 업무 규칙 출처: docs/call-flow/README.md "반드시 지킬 것", decisions.md P1·P5·P6·P8·P11.
-version = "2026-11-03.1"
+version = "2026-11-05.1"
 
 # --- 필드 목록. 이름은 Business State·BE 매핑과 같다(backend_client/order.py) ---
 # kind: free = Backend가 strict 도구 인자로 추출(Live가 위임) · choice = Decision 질문 · auto = 서버가 채움(묻지 않음)
@@ -37,10 +37,7 @@ kind = "free"
 [fields.item_price]
 label = "물건 가격"
 kind = "free"
-[fields.payment]
-label = "결제 방식"
-kind = "choice"
-scope = "call"
+# 결제 방식은 필드가 아니다: 묻지도 안내하지도 않고 서버가 고객 자격으로 정한다(app/domain/assess.auto_payment, 2026-11-05)
 
 # --- 단계(받는 순서 고정: README "반드시 지킬 것" 1). required 순서가 곧 묻는 순서 ---
 [[stage]]
@@ -76,12 +73,6 @@ decision = "confirm"
 id = "more_parcels"
 goal = "더 보낼 택배가 있는지 묻는다. 담은 택배는 접수 전까지 고객 요청 시 수정할 수 있다"   # P5
 decision = ["more", "collect"]
-
-[[stage]]
-id = "payment"
-goal = "서버가 결제 방식 선택을 요청할 때만, 서버가 준 결제 방식 중에서 묻는다"
-gate = "server"
-decision = ["pay", "collect"]
 
 [[stage]]
 id = "closing"
@@ -161,7 +152,7 @@ confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
 origin = "보내는 곳. prefilled = 등록된 출발지로 보내는 분 성함·주소·상세를 채웠다(묻지 않는다, 상세주소는 읽지 않는다). name_only = 다른 곳에서 보낸다 — 성함만 채웠고 보내는 곳 주소를 묻는다. origin_confirm이 있으면 '{그 주소}에서 보내시나요?'라고 한 번 묻는다"
 address_save = "되읽기 때 함께 물을 주소 저장. sender = 보내는 곳을 고객 기본 주소로, receiver = 받는 곳을 주소록에. 확인 질문과 한 번에 묻는다(예: '이대로 접수할까요? 받는 곳 주소도 주소록에 저장해 드릴까요?'). 고객이 동의할 때만 서버가 저장한다"
-order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), notPaid는 카드 결제 대기(결제 안내는 따로 간다고만), pending이나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"
+order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), pending·notPaid나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"
 submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서는 택배를 고치거나 더 담을 수 없다. 바꿨다·담았다고 말하지 않고, 변경은 담당자가 확인 후 연락드린다고 안내한다"
 
 # --- Decision 질문(서버가 고객 발화 끝에 POST /v1/decisions로, delegation.md §3.2). 선택형만 ---
@@ -206,10 +197,3 @@ name = "origin"
 type = "choice"
 choices = ["yes", "no", "not_answer"]
 instructions = "직전 AI 발화가 고객의 등록된 출발지나 이전에 보낸 곳에서 보내는지 물었고(예: '…에서 보내시는 택배 접수 도와드릴까요?', '…에서 보내시나요?') 고객이 답했으면 고른다: 그곳에서 보냄·네·접수해 달라=yes, 다른 곳에서 보냄=no. 답이 아니면 not_answer."
-
-[[decision.pay.questions]]
-name = "pay"
-type = "choice"
-# 선택지는 통화마다 고객의 실제 가능 결제 방식(availablePaymentMethods) + not_answer로 바뀐다(render.decision_questions)
-choices = ["billing", "credit", "groupBilling", "not_answer"]
-instructions = "직전 AI 발화가 결제 방식을 물었고 고객이 답했으면 고른다: 카드=billing, 월결제(후불)=credit, 부서 그룹결제=groupBilling. 답이 아니면 not_answer."

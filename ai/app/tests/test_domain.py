@@ -83,9 +83,16 @@ def test_assess_blocked_attempts_and_payment():
         s.record_invalid("sender_address", "ADDRESS_NOT_FOUND")
     a = assess(s, P)
     assert a.stages["sender"].blocked == ("sender_address",) and a.attempts_exceeded == ("sender_address",)
-    assert a.payment_choice_needed and a.payment_auto is None
-    assert assess(ConversationState(customer=Customer(payment_methods=("credit",))), P).payment_auto == "credit"
-    assert assess(ConversationState(), P).payment_auto is None  # 기본 billing 없음(BE 최신 규약)
+    assert a.payment_auto == "groupBilling"
+
+
+@pytest.mark.parametrize("methods, want", [
+    (("billing",), "billing"), (("billing", "credit"), "credit"), (("billing", "groupBilling"), "groupBilling"),
+    (("billing", "credit", "groupBilling"), "groupBilling"), (("credit", "groupBilling"), "groupBilling"),
+    ((), None),  # 기본 billing 없음(BE 최신 규약)
+])
+def test_payment_is_never_asked_and_picked_from_methods(methods, want):
+    assert assess(ConversationState(customer=Customer(payment_methods=methods)), P).payment_auto == want
 
 
 def test_assess_after_parcels():
@@ -96,7 +103,7 @@ def test_assess_after_parcels():
     s.no_more_parcels = True
     assert assess(s, P).stage == "closing"
     s.customer.payment_methods = ("credit", "groupBilling")
-    assert assess(s, P).stage == "payment"
+    assert assess(s, P).stage == "closing"  # 결제 단계 없음: 더 없음 → 바로 마무리
 
 
 def test_readback_facts_hide_caller_and_saved_values():

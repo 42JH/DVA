@@ -34,7 +34,7 @@ ACTIONS = {"find_destination": "PIN_SEARCH", "lookup_orders": "PREVIOUS_ORDER_SE
 # 대시보드(ai-dashboard-ai-integration.md §3): 시스템 사유로 끝난 통화는 이탈 판정 대상이 아니다(미전송 = 미판정)
 SYSTEM_END = ("persona_unresolved", "accept_failed", "pbx_ended_during_accept", "expiring", "shutdown")
 ORDER_STAGE = {"sender": "SENDER_INFO", "receiver": "RECIPIENT_INFO", "item": "ITEM_INFO",
-               "readback": "CONFIRMATION", "payment": "PAYMENT_GUIDANCE"}
+               "readback": "CONFIRMATION"}  # PAYMENT_GUIDANCE: 결제 단계 없음(2026-11-05)
 # 분석 다음에 보내는 대시보드 항목(payload 키, 진행 키) — 서로 독립: 한쪽 실패·재전송이 다른 쪽을 막지 않는다(§1)
 DASHBOARD = (("stage_metrics", "send_stage_metrics"), ("wait_metrics", "send_wait_metrics"))
 
@@ -51,9 +51,9 @@ def dropoff_stage(s: CallSession, policy) -> str | None:
 
     if st.intent == "order":
         a = assess(st, policy)
-        if a.stage == "closing" or (a.stage == "more_parcels" and not a.payment_choice_needed):
+        if a.stage in ("closing", "more_parcels"):
             return "NONE"  # 접수 정보 확정 뒤(남은 결정 없음)
-        stage = "PAYMENT_GUIDANCE" if a.stage == "more_parcels" else ORDER_STAGE.get(a.stage)
+        stage = ORDER_STAGE.get(a.stage)
         if stage and s.tool_calls and s.tool_calls[-1]["name"] == "search_manual":
             return "FAQ_ANSWER"  # 접수 중 질문하다 끊김(문의는 진행 중 업무를 바꾸지 않는다)
         return stage
