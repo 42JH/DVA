@@ -158,7 +158,7 @@ export class RetentionRepository {
          AND created_by_admin_user_name IS NOT NULL LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       const orders = await client.query<{ id: number }>(`SELECT o.order_seq AS id FROM orders o
         WHERE COALESCE(o.closed_at,o.created_at)<=statement_timestamp()-interval '5 years'
-         AND o.status IN ('COLLECTING','notPaid','CANCELLED','ACCEPTED')
+         AND o.status IN ('COLLECTING','notPaid','CANCELLED','ACCEPTED','SUBMISSION_FAILED')
          AND NOT EXISTS(SELECT 1 FROM call_sessions c WHERE c.order_seq=o.order_seq)
          AND NOT EXISTS(SELECT 1 FROM order_payment_requests r WHERE r.order_seq=o.order_seq
           AND ((r.approval_started_at IS NOT NULL AND r.completed_at IS NULL AND r.invalidated_at IS NULL)

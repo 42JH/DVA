@@ -28,6 +28,31 @@ const storage = () => f.app.get(RecordingStorage);
 const worker = () => f.app.get(RetentionWorker);
 const repository = () => f.app.get(RetentionRepository);
 
+async function failedOrder(age = '6 years') {
+  const client = await f.pool.connect();
+  try {
+    await client.query('BEGIN');
+    const id = (
+      await client.query(
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at)
+      VALUES('SUBMISSION_FAILED','credit',3500,clock_timestamp()-$1::interval,
+        clock_timestamp()-$1::interval,clock_timestamp()-$1::interval) RETURNING order_seq`,
+        [age],
+      )
+    ).rows[0].order_seq;
+    await client.query("SELECT set_config('dva.admin_order_edit',$1,true)", [String(id)]);
+    await client.query(
+      "INSERT INTO order_parcels(order_seq,parcel_position,origin_name,origin_road_address) VALUES($1,1,'실패 주문 발송인','실패 주문 주소')",
+      [id],
+    );
+    await client.query('COMMIT');
+    return id;
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+}
+
 test('5-year call expiry erases every child in FK order and also removes pre-INSERT upload keys', async (t) => {
   const c = await oldCall(),
     recordingId = randomUUID(),
@@ -289,6 +314,92 @@ test('expired accepted orders purge finalized parcels, shipments, payments and c
     ),
     7777,
   );
+});
+
+test('expired final submission failures purge their snapshots and completed payment while newer failures remain', async () => {
+  const expired = await failedOrder(),
+    boundary = await failedOrder('5 years'),
+    newer = await failedOrder('5 years -1 hour');
+  await f.pool.query(
+    `INSERT INTO order_payment_requests(order_seq,amount,expires_at,completed_at,provider_reference,
+      provider_payment_key,provider_approved_at,completion_notification_status)
+    VALUES($1,3500,clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years',
+      $2,$2,clock_timestamp()-interval '6 years','SENT')`,
+    [expired, randomUUID()],
+  );
+  await f.error(await f.get('/api/orders/' + expired), 404, 'NOT_FOUND');
+  await worker().run();
+  for (const id of [expired, boundary]) {
+    for (const table of ['orders', 'order_parcels', 'order_payment_requests'])
+      assert.equal(await exists(table, 'order_seq', id), false, table + ':' + id);
+  }
+  assert.equal(await exists('orders', 'order_seq', newer), true);
+  assert.equal(await exists('order_parcels', 'order_seq', newer), true);
+});
+
+test('expired final submission failures retain payment, notification and linked-call protections', async (t) => {
+  for (const reason of ['approval', 'notification', 'completion', 'call']) {
+    await t.test(reason, async () => {
+      const id = await failedOrder();
+      if (reason === 'call') {
+        await f.pool.query(
+          'INSERT INTO call_sessions(provider_call_id,order_seq,incoming_at) VALUES($1,$2,clock_timestamp())',
+          [randomUUID(), id],
+        );
+      } else {
+        await f.pool.query(
+          `INSERT INTO order_payment_requests(order_seq,amount,expires_at,
+            approval_started_at,provider_payment_key,completed_at,provider_reference,
+            notification_status,completion_notification_status)
+          VALUES($1,3500,clock_timestamp()-interval '6 years',
+            CASE WHEN $2='approval' THEN clock_timestamp() END,
+            CASE WHEN $2='approval' THEN $3 END,
+            CASE WHEN $2='completion' THEN clock_timestamp()-interval '6 years' END,
+            CASE WHEN $2='completion' THEN $3 END,
+            CASE WHEN $2='notification' THEN 'SENDING' ELSE 'SENT' END,
+            CASE WHEN $2='completion' THEN 'SENDING' ELSE 'WAITING' END)`,
+          [id, reason, randomUUID()],
+        );
+      }
+      await repository().purgeDatabase();
+      assert.equal(await exists('orders', 'order_seq', id), true);
+      assert.equal(await exists('order_parcels', 'order_seq', id), true);
+      // Release only this fixture's blocker and verify that expiry then removes it.
+      if (reason === 'call') {
+        await f.pool.query('UPDATE call_sessions SET order_seq=NULL WHERE order_seq=$1', [id]);
+      } else if (reason === 'approval') {
+        await f.pool.query(
+          'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE order_seq=$1',
+          [id],
+        );
+      } else {
+        await f.pool.query(
+          "UPDATE order_payment_requests SET notification_status='SENT',completion_notification_status=CASE WHEN completed_at IS NULL THEN 'WAITING' ELSE 'SENT' END WHERE order_seq=$1",
+          [id],
+        );
+      }
+      await repository().purgeDatabase();
+      assert.equal(await exists('orders', 'order_seq', id), false);
+      assert.equal(await exists('order_parcels', 'order_seq', id), false);
+    });
+  }
+});
+
+test('expiry still preserves paid, submitting and retryable submission work', async () => {
+  const ids = [];
+  for (const status of ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED']) {
+    const row = (
+      await f.pool.query(
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at)
+      VALUES($1,'credit',3500,clock_timestamp()-interval '6 years',
+        clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years') RETURNING order_seq`,
+        [status],
+      )
+    ).rows[0];
+    ids.push(row.order_seq);
+  }
+  await repository().purgeDatabase();
+  for (const id of ids) assert.equal(await exists('orders', 'order_seq', id), true);
 });
 
 test('master data expiry erases personal details while preserving newer order FKs and clears old persona author names', async () => {
