@@ -7,7 +7,7 @@ import json
 from conftest import run
 
 from app.calls.unanswered import (ReferencedDecision, evidence_from_session, model_evidence,
-                                  UnansweredReviewer, validate_referenced_decision)
+                                  UnansweredReviewer, apply_review, validate_referenced_decision)
 from app.tests.test_faq_answer_evidence import ANSWER, QUESTION, decision, evidence, payload
 from app.tests.test_results import service
 from app.tests.test_unanswered import FakeClient, reviewer
@@ -65,7 +65,7 @@ def test_one_bad_citation_does_not_drop_valid_answer_or_other_faq():
     assert result["issues"][0]["code"] == "INVALID_EVIDENCE_QUOTE"
 
 
-def test_one_bad_inquiry_keeps_valid_inquiry_but_count_is_unknown():
+def test_one_bad_inquiry_keeps_valid_inquiry_and_confirmed_count():
     e = evidence()
     d = wire(e)
     bad = d.inquiries[0].model_copy(deep=True)
@@ -74,6 +74,49 @@ def test_one_bad_inquiry_keeps_valid_inquiry_but_count_is_unknown():
     result = validate_referenced_decision(e, model_evidence(e), d)
     assert result["complete"] is False and len(result["inquiries"]) == 1
     assert result["inquiries"][0]["faq_entry_seqs"] == [12, 18]
+    assert apply_review("partial", 1000, e, {"analysis": {}}, result)["analysis"]["faqAnswerCount"] == 1
+
+
+def test_three_confirmed_answers_survive_one_question_spacing_error(tmp_path):
+    e = evidence()
+    original_transcript, original_search = copy.deepcopy(e["transcript"]), copy.deepcopy(e["searches"][0])
+    e["transcript"], e["searches"] = [], []
+    for i in range(3):
+        e["transcript"].extend(r | {"t": r["t"] + i * 10} for r in original_transcript)
+        e["searches"].append(copy.deepcopy(original_search) | {"at": 1002 + i * 10})
+    e["transcript"].append({"speaker": "customer", "text": "무인지점에서 보내도?", "t": 1030})
+    rs, db = service(tmp_path)
+    s, _ = payload(e, rs, db)
+    numbered = model_evidence(evidence_from_session(s))
+    first = wire(evidence_from_session(s)).inquiries[0]
+    inquiries = []
+    for i in range(3):
+        item = first.model_copy(deep=True)
+        item.customer_ref = numbered["transcript"][i * 2]["ref"]
+        item.agent_ref = numbered["transcript"][i * 2 + 1]["ref"]
+        item.search_refs = [numbered["searches"][i]["ref"]]
+        for citation in item.used_evidence:
+            citation.search_ref = item.search_refs[0]
+        inquiries.append(item)
+    bad = first.model_copy(deep=True)
+    bad.customer_ref = numbered["transcript"][6]["ref"]
+    bad.question_text = "무인 지점에서 보내도?"
+    inquiries.append(bad)
+    rs.reviewer = reviewer(FakeClient(ReferencedDecision(inquiries=inquiries)))
+    rs.reason_contract_enabled = rs.faq_answered_enabled = True
+
+    async def scenario():
+        await rs.finish(s)
+        await asyncio.gather(*rs.background)
+
+    run(scenario())
+    review = rs.outbox.review(s.call_id)["result"]
+    assert review["complete"] is False
+    assert any(issue["code"] == "INVALID_QUESTION_QUOTE" for issue in review["issues"])
+    seq = s.state.customer.call_session_seq
+    assert db.analyses[seq]["faqAnswerCount"] == 3
+    assert sum(event["payload"].get("action") == "FAQ_ANSWERED" for event in db.events[seq].values()) == 3
+    assert db.unanswered == {}
 
 
 def test_bad_quote_is_audited_privately_and_valid_faq_is_delivered(tmp_path, caplog):
@@ -305,3 +348,4 @@ def test_unknown_outcome_is_not_reported_as_confirmed_zero():
     d.inquiries[0].used_evidence = []
     result = validate_referenced_decision(e, model_evidence(e), d)
     assert result["complete"] is False and result["inquiries"][0]["outcome"] == "UNKNOWN"
+    assert apply_review("unknown", 1000, e, {"analysis": {}}, result)["analysis"]["faqAnswerCount"] is None
