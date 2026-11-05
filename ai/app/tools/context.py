@@ -32,16 +32,3 @@ class ToolContext:
     lookup_limit: int = 5                         # P10
     ops: dict[str, dict] = field(default_factory=dict)       # 쓰기 작업(취소) 상태: 중복 실행 방지
     outputs: dict[str, dict] = field(default_factory=dict)   # call_id → 결과(같은 함수 호출 재수신, F15)
-    live_led: bool = False
-    control: Callable[[dict], Awaitable[dict]] | None = None
-    recording: int = 0
-    address_pending: int = 0
-    last_utterance_id: int = 0
-    last_utterance_at: datetime | None = None
-    record_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    ending: bool = False
-    closed: bool = False
-
-    def __post_init__(self):
-        if self.live_led:
-            self.state.require_resolved_addresses = True

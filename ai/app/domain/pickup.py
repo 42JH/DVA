@@ -30,10 +30,7 @@ def rule_of(p) -> PickupRule:
 def default_pickup(now: datetime, r: PickupRule) -> tuple[str, bool]:
     """(한국 시간 ISO 8601, 오늘 수거 불가로 다음 날로 넘겼는지)."""
     at = now.astimezone(KST) + timedelta(minutes=r.min_lead_minutes)
-    has_seconds = bool(at.second or at.microsecond)
     at = at.replace(second=0, microsecond=0)
-    if has_seconds:
-        at += timedelta(minutes=1)
     if at.minute % 10:
         at += timedelta(minutes=10 - at.minute % 10)
     moved = False

@@ -66,8 +66,6 @@ def decide_outcome(state: ConversationState, policy: Policy, now: datetime,
 
     fares = tuple(fare_of(p) for p in submit)
     reasons = [g for p in submit for g in _parcel_gaps(p)]
-    if state.unresolved_fields:
-        reasons.append("UNRESOLVED_INPUT")
     if any(f is None or f <= 0 for f in fares):
         reasons.append("FARE_UNKNOWN")
     if not payment:
