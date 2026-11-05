@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router'
-import { Button, Crumbs, Highlight, Markdown, TopBar } from '@/shared/ui'
+import { Button, Highlight, Markdown, TopBar } from '@/shared/ui'
 import { faqTo, useFaqDetail, useRecentQuestions } from '@/features/faq/hooks/useFaqList'
 import { FAQ_GRID, FaqCategoryNav } from './FaqCategories'
 
@@ -19,9 +19,8 @@ export function FaqDetailPage() {
 
   return (
     <>
-      <TopBar search={{ tab: 'faq' }} />
-      <Crumbs
-        items={
+      <TopBar
+        crumbs={
           q
             ? [
                 { label: 'FAQ', to: faqTo.list(faq?.category) },
@@ -30,7 +29,6 @@ export function FaqDetailPage() {
               ]
             : [{ label: 'FAQ', to: faqTo.list(faq?.category) }, { label: 'FAQ 상세' }]
         }
-        className="pl-17"
       />
 
       {/* 수정 화면(FaqEditPage)과 같은 틀 — 분류 상자 안 여백 20 · 질문 줄 높이 76 · 답변 위아래 24 */}

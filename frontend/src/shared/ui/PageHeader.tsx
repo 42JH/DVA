@@ -40,28 +40,35 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
 // 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 점은 라이브처럼 깜빡임, 0건이면 '접수 중'만(11/04 사용자). 실시간 연결이 끊기면 점이 회색으로 멈춤
 // 날짜는 뺌 (11/04 사용자 — 04 통화처럼 FAQ도). 상태는 카드 왼쪽 24부터(Figma '통화'), 좁은 화면(1280)에선 말줄임 — 검색칸은 늘 가운데
 // 11/05 사용자: 모든 화면 같은 모양 — 검색은 공용 탭 검색(shared/search/GlobalSearch), 처음 탭 = 그 화면(기본 주문). 설정 화면은 search={false}
-// 경로('통화 > 통화 상세')는 상단바가 아니라 그 아래 줄에 화면이 그림
-export function TopBar({ search = { tab: 'order' } }: { search?: SearchProps | false }) {
+// 뎁스가 있는 화면(통화 상세 · FAQ 상세 · 작성 · 수정 · AI 미답변 · 기업 상세 · 그래프 보기)은 crumbs — 상태 자리에 경로, 검색칸 없음 (11/05 사용자 이미지)
+// FAQ 목록은 검색 중일 때만 crumbs('FAQ > “박스” 검색') + 검색칸 그대로
+export function TopBar({ search, crumbs }: { search?: SearchProps | false; crumbs?: Crumb[] }) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
+  // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
+  const box = search ?? (crumbs ? false : ({ tab: 'order' } as const))
   return (
     <header className="-mt-6 -ml-4 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2">
       <div className="flex min-w-0 items-center">
-        {persona && (
-          <span
-            title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
-            className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
-          >
+        {crumbs ? (
+          <Crumbs items={crumbs} className="min-w-0 truncate" />
+        ) : (
+          persona && (
             <span
-              aria-hidden
-              className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
-            />
-            <span className="truncate">
-              {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+              title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
+              className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
+            >
+              <span
+                aria-hidden
+                className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
+              />
+              <span className="truncate">
+                {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+              </span>
             </span>
-          </span>
+          )
         )}
       </div>
-      {search ? <GlobalSearch {...search} /> : <span />}
+      {box ? <GlobalSearch {...box} /> : <span />}
       <UnansweredAlert count={unanswered} className="justify-self-end" />
     </header>
   )
