@@ -334,7 +334,7 @@ const CALLS: CallDetail[] = [
       save(77, 'pickupRequestedAt', fmtDetailTime(tomorrow('09:00'))),
       save(85, 'parcels', '서류 1'),
       save(91, 'clientComment', '경비실에 맡겨 주세요'),
-      act(94, 'SEARCH', 'FAQ 근거 없음'), // AI가 보내는 검색 요약 그대로 — 미답변(94초)과 같은 시각 → 06 AI 동작엔 미답변 사유
+      act(94, 'SEARCH', 'FAQ 근거 없음'), // AI가 보내는 검색 요약 그대로 — 미답변(94초)과 같은 시각 → 06 AI 동작 '… · 근거 부족'
       save(109, 'itemPrice', '30,000원'),
       save(215, 'paymentMethodType', '월정산'),
       act(217, 'SEND', '디버 접수 완료'),
@@ -366,7 +366,7 @@ const CALLS: CallDetail[] = [
     ],
     actions: [
       act(9, 'SEARCH', '발신번호로 주문 검색 → 오늘 1건'),
-      act(4, 'SEARCH', 'FAQ 근거 있음'), // 검색은 근거가 있다고 했지만 미답변(4초) — 06 AI 동작엔 미답변 사유
+      act(4, 'SEARCH', 'FAQ 근거 있음'), // 지난 기록 문구 — 06에선 'FAQ 검색 후보 있음 · 서버 에러'(검색 후보는 있었지만 미답변 4초, 사유 없음)
     ],
     results: [{ atSec: 4, kind: 'UNANSWERED', question: '기사님 오늘 몇 시쯤 도착하세요?' }],
   },

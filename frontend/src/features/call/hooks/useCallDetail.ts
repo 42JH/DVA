@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { fmtClock, fmtPhone } from '@/shared/lib/format'
-import { reasonTag } from '@/shared/lib/unansweredReason'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
@@ -11,7 +10,7 @@ import {
   type Utterance,
 } from '@/features/call/api/callApi'
 import { utteranceAt, utteranceForAction, type CallActionKind } from '@/features/call/api/callDto'
-import { groupActions } from '@/features/call/actionText'
+import { faqResultText, groupActions } from '@/features/call/actionText'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -155,12 +154,13 @@ export function useCallDetail(callId: number) {
             ? '녹취 주소를 받지 못했어요 · 다시 받는 중'
             : '녹취를 재생하지 못했어요 · 다시 받는 중'
 
-  // 미답변 기록 → 통화 안 시각(초)별 사유 문구. AI는 미답변을 그 질문을 찾은 FAQ 검색과 같은 시각으로 보냄
-  // 지운 미답변(질문 · 사유 null)은 사유를 몰라 빼서 검색 요약을 그대로 둠
-  const unansweredAt = new Map(
+  // FAQ 최종 응대 결과 → 통화 안 시각(초)별 문구 (FAQ_ANSWERED = 근거 있음 · 미답변 = 근거 부족 / 서버 에러, 11/05 AI팀)
+  // AI는 결과를 그 질문을 찾은 FAQ 검색과 같은 시각으로 보냄. 지운 미답변(질문 · 사유 null)은 사유를 몰라 뺌
+  const faqResultAt = new Map(
     (call?.results ?? []).flatMap((r) =>
-      r.kind === 'QUESTION_UNANSWERED' && r.question !== null && r.atSec !== null
-        ? [[r.atSec, reasonTag(r.reason).label] as const]
+      r.atSec !== null &&
+      (r.kind === 'FAQ_ANSWERED' || (r.kind === 'QUESTION_UNANSWERED' && r.question !== null))
+        ? [[r.atSec, faqResultText(r.kind, r.reason)] as const]
         : [],
     ),
   )
@@ -237,8 +237,11 @@ export function useCallDetail(callId: number) {
       return {
         key: head.order,
         kind: head.kind,
-        // 미답변으로 기록된 FAQ 검색은 검색 요약 대신 미답변 사유 (11/04 AI팀)
-        text: (head.kind === 'FAQ_SEARCH' && sec !== null && unansweredAt.get(sec)) || text,
+        // FAQ 검색 = AI 요약 그대로(검색 후보를 찾았다는 뜻 — '답을 찾음' 아님) + 최종 결과 '· 근거 있음 / 근거 부족 / 서버 에러' (11/05 AI팀)
+        text:
+          head.kind === 'FAQ_SEARCH' && sec !== null && faqResultAt.has(sec)
+            ? `${text} · ${faqResultAt.get(sec)}`
+            : text,
         active: focusKey !== null && all.some((a) => by(a) === focusKey),
         onClick: sec === null ? undefined : () => jumpTo(sec, head.text),
       }
