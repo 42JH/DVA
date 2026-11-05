@@ -1310,6 +1310,200 @@
     "holdout"
    ],
    "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "r01",
+   "heard": "서울시 양천구 신정이패닐로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:20462e22"
+  },
+  {
+   "id": "r02",
+   "heard": "서울시 양천구 신정이펜율로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:3103c5be"
+  },
+  {
+   "id": "r03",
+   "heard": "서울시 양천구 신정이패밀로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "number_in_road",
+    "stt_spelling",
+    "from_call"
+   ],
+   "source": "call:abd1549c"
+  },
+  {
+   "id": "r04",
+   "heard": "서울북구민시 인동 9길 7-3",
+   "expect": null,
+   "tags": [
+    "region_misheard",
+    "from_call"
+   ],
+   "source": "call:bfde1109",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r05",
+   "heard": "경북 구미시 인동구길 이십이다시일",
+   "expect": "경상북도 구미시 인동9길 22-1",
+   "tags": [
+    "glued_dasi",
+    "glued_gil",
+    "from_call"
+   ],
+   "source": "call:8ffabaca"
+  },
+  {
+   "id": "r06",
+   "heard": "전주시 금암이동백사십구 다시 십일 번지요",
+   "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+   "tags": [
+    "jibun",
+    "admin_dong",
+    "glued_number",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:3851b79d"
+  },
+  {
+   "id": "r07",
+   "heard": "주시 금암동 백사십구 다시 십일 번지요",
+   "expect": null,
+   "tags": [
+    "jibun",
+    "region_misheard",
+    "from_call"
+   ],
+   "source": "call:3851b79d",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r08",
+   "heard": "전주시 금암이동 백사십구 다시 십일 번지요",
+   "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+   "tags": [
+    "jibun",
+    "admin_dong",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:3851b79d"
+  },
+  {
+   "id": "r09",
+   "heard": "구미시 인의동 오륙오 다시 삼이요",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "jibun",
+    "korean_number",
+    "ending",
+    "from_call"
+   ],
+   "source": "call:07f92ee3"
+  },
+  {
+   "id": "r10",
+   "heard": "구미시 인의동 오육오 다시 삼",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "jibun",
+    "korean_number",
+    "from_call"
+   ],
+   "source": "call:653aaa96"
+  },
+  {
+   "id": "r11",
+   "heard": "경상북도 구미시 인동구길 25-3",
+   "expect": null,
+   "tags": [
+    "glued_gil",
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:6c5e294b",
+   "expect_reason": "number"
+  },
+  {
+   "id": "r12",
+   "heard": "부산광역시 서구 보덕로 321번길 24",
+   "expect": "부산광역시 서구 구덕로321번길 24",
+   "tags": [
+    "road_misheard",
+    "short_name",
+    "from_call"
+   ],
+   "source": "call:cb73ea8a"
+  },
+  {
+   "id": "r13",
+   "heard": "부산광역시 서구 구덕로 삼백이십일 번길 이십사",
+   "expect": "부산광역시 서구 구덕로321번길 24",
+   "tags": [
+    "gil",
+    "korean_number",
+    "from_call"
+   ],
+   "source": "call:6ddd0958"
+  },
+  {
+   "id": "r14",
+   "heard": "경상북도 구미시 산동 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "from_call"
+   ],
+   "source": "call:5f9a9e44",
+   "expect_reason": "needs_ri"
+  },
+  {
+   "id": "r15",
+   "heard": "서울시 양천구 신정이펜일로 52",
+   "expect": null,
+   "tags": [
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:d62b7162",
+   "expect_reason": "number"
+  },
+  {
+   "id": "r16",
+   "heard": "인동 이십오길 다시 오",
+   "expect": null,
+   "tags": [
+    "no_region",
+    "from_call"
+   ],
+   "source": "call:07f92ee3",
+   "expect_reason": "region"
+  },
+  {
+   "id": "r17",
+   "heard": "서울시 양천구 신정이패닐로 5",
+   "expect": null,
+   "tags": [
+    "nonexistent_number",
+    "from_call"
+   ],
+   "source": "call:20462e22",
+   "expect_reason": "number"
   }
  ]
 }
