@@ -46,34 +46,33 @@ const TABS: { key: SearchTab; label: string; list: string; placeholder: string; 
     key: 'call',
     label: '통화',
     list: '/calls',
-    placeholder: '이름 · 전화번호',
+    placeholder: '고객 이름이나 전화번호를 입력해 주세요',
     hint: '고객 이름이나 전화번호로 통화를 찾아요.',
   },
   {
     key: 'order',
     label: '주문',
     list: '/orders',
-    placeholder: '주문 번호 · 이름 · 전화번호 · 주소',
+    placeholder: '주문번호나 고객 정보를 입력해 주세요',
     hint: '주문번호(예: DV-10519)나 보내는 분 · 받는 분의 이름 · 전화번호 · 주소로 주문을 찾아요.',
   },
   {
     key: 'faq',
     label: 'FAQ',
     list: '/faqs',
-    placeholder: '질문 · 답변 낱말',
+    placeholder: '찾으시는 FAQ를 검색해 주세요',
     hint: '질문 · 답변의 낱말로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요. (예: ㅅㄱ → 수거)',
   },
   {
     key: 'company',
     label: '기업',
     list: '/companies',
-    placeholder: '기업명',
+    placeholder: '회사명이나 사원 정보를 입력해 주세요',
     hint: '기업명으로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요.',
   },
 ]
 
 const SHOW = 8
-const KIND_ICON = { call: 'call', order: 'box', faq: 'faq', company: 'building' } as const
 const newest = (a: FaqHit, b: FaqHit) => Date.parse(b.createdAt) - Date.parse(a.createdAt)
 
 const SearchIcon = ({ className }: { className: string }) => (
@@ -95,6 +94,26 @@ const XIcon = ({ className }: { className: string }) => (
     <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
   </svg>
 )
+
+/** 최근 조회 줄 앞 아이콘 (11/05 시안) — 통화 = 전화기 · 주문 = 상자 · FAQ = Q · 기업 = 건물 */
+function KindIcon({ kind }: { kind: RecentView['kind'] }) {
+  if (kind === 'faq') return <span className="w-4 shrink-0 text-center text-body text-sub">Q</span>
+  if (kind === 'call')
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        className="size-4 shrink-0 text-sub"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        <path d="M6.84 3H4.2C3.48 3 3 3.6 3 4.32C3.24 12.84 9.96 19.56 18.48 19.8C19.2 19.8 19.8 19.32 19.8 18.6V15.96L15.48 14.04L13.56 16.08C11.19 14.77 9.23 12.81 7.92 10.44L9.96 8.52L6.84 3Z" />
+      </svg>
+    )
+  return <MenuIcon name={kind === 'order' ? 'box' : 'building'} className="size-4 text-sub" />
+}
 
 /** 상단바 검색칸 자리 — 누르면 검색 창. 이 화면 목록에 검색 중이면 검색어와 ✕(검색 지우기) */
 export function GlobalSearch(props: SearchProps) {
@@ -255,21 +274,24 @@ function SearchModal({
           ),
     cells: (
       <>
-        <MenuIcon name={KIND_ICON[v.kind]} className="size-4 text-muted" />
-        <span className="flex min-w-0 items-center gap-2 text-body">
+        <KindIcon kind={v.kind} />
+        <span className="flex min-w-0 items-center gap-2.5 text-body">
+          {v.kind === 'order' && <span className="shrink-0">{orderNo(v.id)}</span>}
           <span className="truncate">{v.label}</span>
           {v.to !== undefined && (
             <>
-              <span aria-label="에서" className="shrink-0 font-semibold text-brand">
+              <span aria-label="에서" className="shrink-0 font-semibold">
                 ≫
               </span>
               <span className="truncate">{v.to}</span>
             </>
           )}
+          {v.sub?.map((t) => (
+            <span key={t} className="shrink-0 tabular-nums">
+              {t}
+            </span>
+          ))}
         </span>
-        {v.at && (
-          <span className="ml-auto shrink-0 text-label text-sub">{fmtRowTime(v.at, today)}</span>
-        )}
         <button
           type="button"
           aria-label={`최근 조회 ${v.label} 지우기`}
@@ -278,7 +300,7 @@ function SearchModal({
             forgetView(v.kind, v.id)
             setActive(-1)
           }}
-          className={`grid size-7 shrink-0 place-items-center self-center rounded text-muted hover:bg-surface hover:text-ink ${v.at ? '' : 'ml-auto'}`}
+          className="ml-auto grid size-7 shrink-0 place-items-center rounded text-muted hover:bg-surface hover:text-ink"
         >
           <XIcon className="size-4" />
         </button>
@@ -396,14 +418,13 @@ function SearchModal({
       top
       dim={false}
       movable
-      boxClass="w-[min(560px,calc(100vw-160px))] overflow-hidden ring-1 ring-line"
+      boxClass="h-[min(440px,calc(100dvh-120px))] w-[min(560px,calc(100vw-160px))] overflow-hidden ring-1 ring-line"
     >
       {/* 검색칸 줄 = 잡고 끄는 곳 (입력칸 · ✕ 말고) */}
       <label
         data-drag
-        className="flex h-14 shrink-0 cursor-move items-center gap-4 border-b border-line pr-4 pl-6"
+        className="flex h-14 shrink-0 cursor-move items-center border-b border-line px-6"
       >
-        <SearchIcon className="size-5" />
         <input
           ref={input}
           autoFocus
@@ -418,19 +439,12 @@ function SearchModal({
           aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
           className="min-w-0 flex-1 bg-transparent text-strong outline-none placeholder:text-field"
         />
-        <button
-          type="button"
-          aria-label="닫기"
-          onClick={onClose}
-          className="grid size-8 shrink-0 place-items-center rounded-lg text-sub hover:bg-bg hover:text-ink"
-        >
-          <XIcon className="size-5" />
-        </button>
       </label>
 
-      <div className="min-h-0 [scrollbar-width:thin] overflow-y-auto py-2">
+      {/* 남는 높이를 채우고 안에서 스크롤 — 막대는 숨김(11/05 시안) */}
+      <div className="min-h-0 flex-1 [scrollbar-width:none] overflow-y-auto py-2 [&::-webkit-scrollbar]:hidden">
         {!typed && rows.length > 0 && (
-          <p className="flex items-center justify-between px-6 pt-2 pb-1 text-caption text-muted">
+          <p className="flex items-center justify-between px-6 pt-2 pb-1 text-label font-medium text-ink">
             최근 조회
             <button
               type="button"
@@ -438,7 +452,7 @@ function SearchModal({
                 clearRecentViews(tab) // 이 탭만
                 setActive(-1)
               }}
-              className="hover:text-ink"
+              className="text-caption font-normal text-sub hover:text-ink"
             >
               전체 삭제
             </button>

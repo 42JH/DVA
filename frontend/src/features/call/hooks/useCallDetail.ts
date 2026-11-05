@@ -182,7 +182,10 @@ export function useCallDetail(callId: number) {
     customer: call?.customerName ?? null,
     // 검색 창 '최근 조회' (shared/lib/recentViews) — 받으면 기록, 404면 기록에서 뺌
     recent: call
-      ? { label: call.customerName ?? '이름 없음', at: call.startedAt ?? undefined }
+      ? {
+          label: call.customerName ?? '이름 없음',
+          sub: call.callerNumber ? [fmtPhone(call.callerNumber)] : undefined,
+        }
       : null,
     notFound: detail.error instanceof ApiError && detail.error.status === 404,
     caller: call?.callerNumber ? fmtPhone(call.callerNumber) : '',

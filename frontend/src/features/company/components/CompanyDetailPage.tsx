@@ -13,7 +13,7 @@ import { MemberFormModal } from './MemberFormModal'
 export function CompanyDetailPage() {
   const id = Number(useParams().companyId)
   const vm = useCompanyDetail(id)
-  useRememberView('company', id, vm.name ? { label: vm.name } : null, vm.notFound) // 검색 창 '최근 조회'
+  useRememberView('company', id, vm.name ? { label: vm.name, sub: vm.leader } : null, vm.notFound) // 검색 창 '최근 조회'
 
   if (vm.notFound)
     return (

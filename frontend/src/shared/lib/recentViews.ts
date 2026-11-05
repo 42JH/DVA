@@ -2,7 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 
 // 최근 조회 (11/05 사용자: 최근 검색어 대신) — 상단바 검색 창이 비었을 때 탭별로 보여 주고, 누르면 바로 그 상세로
 // 상세를 열 때마다 남김 (검색 창에서 열든 목록에서 열든): 통화 상세 · 주문 상세 창 · FAQ 상세 · 기업 상세
-// 탭(종류)마다 최대 7개 · 최근이 위 · 이 브라우저에만. 고객 이름이 들어가서 로그아웃하면 전부 지움 (shared/auth/session)
+// 탭(종류)마다 최대 20개(11/05 시안) · 최근이 위 · 이 브라우저에만. 고객 이름이 들어가서 로그아웃하면 전부 지움 (shared/auth/session)
 // 상세가 '없음'(지워짐 · 404)이면 그 기록을 뺌
 export type RecentKind = 'call' | 'order' | 'faq' | 'company'
 
@@ -10,12 +10,12 @@ export interface RecentView {
   kind: RecentKind
   id: number
   label: string // 통화 = 고객 이름 · 주문 = 보내는 분 · FAQ = 질문 · 기업 = 기업명
-  to?: string // 주문 = 받는 분 ('보내는 분 ≫ 받는 분')
-  at?: string // 통화 = 시작 시각 ISO
+  to?: string // 주문 = 받는 분 ('DV-00001 보내는 분 ≫ 받는 분')
+  sub?: string[] // 이름 뒤 흐린 글 — 통화 = [전화번호] · 기업 = [대표자 이름, 대표자 전화번호]
 }
 
 const KEY = 'dva.recentViews'
-const MAX = 7
+const MAX = 20
 const KINDS: RecentKind[] = ['call', 'order', 'faq', 'company']
 
 const valid = (v: unknown): v is RecentView => {
@@ -59,7 +59,7 @@ export function rememberView(v: RecentView) {
     same(first, v.kind, v.id) &&
     first.label === v.label &&
     first.to === v.to &&
-    first.at === v.at
+    String(first.sub) === String(v.sub)
   )
     return
   const rest = all.filter((x) => !same(x, v.kind, v.id))
@@ -93,14 +93,15 @@ export function useRecentViews(kind: RecentKind): RecentView[] {
 export function useRememberView(
   kind: RecentKind,
   id: number,
-  view: { label: string; to?: string; at?: string } | null,
+  view: { label: string; to?: string; sub?: string[] } | null,
   gone = false,
 ) {
   const label = view?.label
   const to = view?.to
-  const at = view?.at
+  const sub = view?.sub?.length ? JSON.stringify(view.sub) : undefined // 배열은 렌더마다 새 것이라 글로 바꿔 비교
   useEffect(() => {
     if (gone) forgetView(kind, id)
-    else if (label !== undefined) rememberView({ kind, id, label, to, at })
-  }, [kind, id, label, to, at, gone])
+    else if (label !== undefined)
+      rememberView({ kind, id, label, to, sub: sub ? (JSON.parse(sub) as string[]) : undefined })
+  }, [kind, id, label, to, sub, gone])
 }
