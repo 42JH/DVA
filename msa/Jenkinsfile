@@ -116,7 +116,7 @@ pipeline {
         stage('Verify Consultation Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().contains('consultation')
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation'] }
                 }
             }
             steps { sh 'python3 msa/parity/verify-consultation.py' }
@@ -136,7 +136,7 @@ pipeline {
                     while IFS= read -r service; do
                         directory="msa/services/$service"
                         echo "BUILD: $service"
-                        if [ "$service" = customer ] || [ "$service" = operations ]; then
+                        if [ "$service" = customer ] || [ "$service" = operations ] || [ "$service" = consultation ]; then
                             set -- -f "$directory/Dockerfile" msa
                         else
                             set -- "$directory"

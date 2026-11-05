@@ -46,6 +46,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - 네 번째 MR은 customer 쓰기 10개와 operations 감사 준비·확정·중단 및 생산자 강제 종료 복구를 연결한다. customer 공개 선언은 17/23개이며 나머지 6개·자동 업무 워커·전체 MSA 동등성은 남아 있다. 범위와 검증 환경은 [customer 쓰기 계획](msa-customer-writes-plan.md)에 명시한다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
 - 다섯 번째 MR은 consultation PBX 수신·녹취 워커와 진행 통화 수 조회/SSE 3개를 연결한다. 범위와 복구/검증은 [consultation PBX 계획](msa-consultation-pbx-plan.md)을 따른다. 고객 컨텍스트/PIN·통화 생성과 나머지 상담/주문/운영 기능 및 전체 보관 워커는 후속 단계다.
+- 여섯 번째 MR은 customer 고객 확인/통화 등록과 consultation의 통화·PBX·감사 확정을 연결한다. 최신 `04b7346`의 11자리 휴대전화 입력을 반영하며 customer는 18/23개다. [고객 확인·통화 등록 계획](msa-caller-context-plan.md)에 원본 비교·장애 복구와 후속 범위를 기록한다.
 
 ## 두 번째 MR 계획 — operations 인증·감사
 

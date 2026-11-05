@@ -86,8 +86,9 @@ def plan(base, delivery, deployments, annotations):
             raise ValueError(f"Missing Dockerfile/k8s.yaml: {service}")
         selected.append(service)
         print(f"BUILD: {service} (baseline={app_base or 'unknown'})")
-    # Customer readiness requires the operations private session endpoint.
-    return (['operations'] if 'operations' in selected else []) + [s for s in selected if s != 'operations']
+    # Consultation depends on customer reads; both depend on operations authentication.
+    first = ('operations', 'customer', 'consultation')
+    return [s for s in first if s in selected] + [s for s in selected if s not in first]
 
 
 def databases(base, delivery, annotations):

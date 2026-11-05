@@ -105,6 +105,19 @@ class DeliveryPlanTests(unittest.TestCase):
             self.state[service]['metadata']['name'] = service
             self.assertEqual(planner.plan(baseline, True, self.state, annotations), remaining)
 
+    def test_call_context_rolls_out_operations_then_customer_then_consultation(self):
+        for service in ('operations', 'consultation'):
+            self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
+            self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
+        self.commit('msa/services/customer/src/main.ts', 'context bridge')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}),
+                         ['operations', 'customer', 'consultation'])
+
+    def test_dependency_order_keeps_other_services_selected(self):
+        self.commit('msa/services/analytics/Dockerfile', 'FROM node')
+        self.commit('msa/services/analytics/k8s.yaml', 'manifest')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['analytics'])
+
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')
