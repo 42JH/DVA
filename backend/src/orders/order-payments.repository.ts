@@ -22,12 +22,15 @@ export interface PaymentRequest {
 @Injectable()
 export class OrderPaymentsRepository {
   async reserveApproval(client: PoolClient, id: string, key: string, claimId: string) {
-    await client.query(
+    const result = await client.query(
       `UPDATE order_payment_requests SET provider_payment_key=$2,
         approval_started_at=COALESCE(approval_started_at,clock_timestamp()),approval_claim_id=$3,
-        approval_claimed_until=clock_timestamp()+interval '45 seconds' WHERE payment_request_id=$1`,
+        approval_claimed_until=clock_timestamp()+interval '45 seconds' WHERE payment_request_id=$1
+        AND EXISTS(SELECT 1 FROM orders o WHERE o.order_seq=order_payment_requests.order_seq
+          AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years')`,
       [id, key, claimId],
     );
+    return result.rowCount === 1;
   }
 
   async queueNotification(client: PoolClient, id: string) {
@@ -160,8 +163,15 @@ export class OrderPaymentsRepository {
     ).rows[0];
     if (!parent) return undefined;
     const order = (
-      await client.query<{ status: string; totalAmount: number; paidAt: Date | null }>(
-        'SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE',
+      await client.query<{
+        status: string;
+        totalAmount: number;
+        paidAt: Date | null;
+        retentionExpired: boolean;
+      }>(
+        `SELECT status,total_amount AS "totalAmount",paid_at AS "paidAt",
+         COALESCE(closed_at,created_at)<=clock_timestamp()-interval '5 years' AS "retentionExpired"
+         FROM orders WHERE order_seq=$1 AND deleted_at IS NULL FOR UPDATE`,
         [parent.orderSeq],
       )
     ).rows[0];

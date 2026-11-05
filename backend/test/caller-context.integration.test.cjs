@@ -349,13 +349,16 @@ test('next lookup reflects withdrawal, membership deactivation, unlinking and or
   assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
 });
 
-test('only a digits-only string phoneNumber is accepted, without legacy or ownership override fields', async () => {
+test('only an eleven-digit string phoneNumber is accepted, without legacy or ownership override fields', async () => {
   for (const input of [
     {},
     { phone: phone() },
     { phoneNumber: null },
     { phoneNumber: 1012345678 },
     { phoneNumber: '' },
+    { phoneNumber: '021234567' },
+    { phoneNumber: '0101234567' },
+    { phoneNumber: '010123456789' },
     { phoneNumber: '010-1234-5678' },
     { phoneNumber: '+821012345678' },
     { phoneNumber: ' 01012345678' },

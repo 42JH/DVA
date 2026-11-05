@@ -74,12 +74,13 @@ export class PaymentsRepository {
       await this.database.pool.query<{
         id: string;
       }>(`WITH candidates AS (
-      SELECT payment_request_id FROM order_payment_requests
-      WHERE provider_payment_key IS NOT NULL AND approval_started_at IS NOT NULL AND invalidated_at IS NULL
-      AND completed_at IS NULL AND (approval_claimed_until IS NULL OR approval_claimed_until<=clock_timestamp())
-      AND (approval_next_check_at IS NULL OR approval_next_check_at<=clock_timestamp())
-      ORDER BY COALESCE(approval_next_check_at,approval_started_at),payment_request_id
-      LIMIT 20 FOR UPDATE SKIP LOCKED)
+      SELECT r.payment_request_id FROM order_payment_requests r JOIN orders o USING(order_seq)
+      WHERE r.provider_payment_key IS NOT NULL AND r.approval_started_at IS NOT NULL AND r.invalidated_at IS NULL
+      AND r.completed_at IS NULL AND (r.approval_claimed_until IS NULL OR r.approval_claimed_until<=clock_timestamp())
+      AND (r.approval_next_check_at IS NULL OR r.approval_next_check_at<=clock_timestamp())
+      AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'
+      ORDER BY COALESCE(r.approval_next_check_at,r.approval_started_at),r.payment_request_id
+      LIMIT 20 FOR UPDATE OF r SKIP LOCKED)
       UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
       FROM candidates c WHERE r.payment_request_id=c.payment_request_id
       RETURNING r.payment_request_id AS id`)
