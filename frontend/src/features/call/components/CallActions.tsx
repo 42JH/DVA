@@ -1,105 +1,98 @@
-import { CHIP_CLASS } from '@/shared/lib/callKind'
-import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
-import type { ActionView, ResultView } from '@/features/call/hooks/useCallDetail'
+import type { ReactNode } from 'react'
+import type { CallActionKind } from '@/features/call/api/callDto'
+import type { ActionView } from '@/features/call/hooks/useCallDetail'
 
-// 처리 내용 (06 오른쪽, 11/05 새 디자인) — 이 통화가 한 일
-// 위: 결과 카드(하늘색 — 주문 상세 창 카드와 같은 색) — 굵은 종류 · 회색 통화 안 시각 · 오른쪽 파랑 링크
-//     접수 · 주문 취소 → '주문 보기 ›'(팝업), AI 미답변 → 사유 태그 + 질문 + 'AI 미답변 보기 ›'(09). 상담원 이관 요청은 링크 없음 (연결 성공이 아니라 요청 기록)
-// 아래: 'AI 동작 n'(서버 전체 건수) — 시각 · 칩 · 내용. 길면 이 목록만 스크롤
-//     칩 색 = 04 상담 유형 칩 색: 전송 = 접수 파랑 · 조회 = 노랑 · 취소 = 분홍 · 검색 = FAQ 남보라, 저장(칸 채우기)은 회색
-//     줄을 누르면 왼쪽 스크립트가 그 동작을 부른 고객 말로 넘어가고 녹취가 그 말부터 (11/01). 시각을 모르는 줄은 누를 수 없음
-const ACTION_BG: Record<string, string> = {
-  전송: 'bg-kind-accept',
-  조회: 'bg-kind-lookup',
-  취소: 'bg-kind-cancel',
-  검색: 'bg-kind-faq',
-  저장: 'bg-bg',
+// 06 AI 동작 기록 (11/05 새 디자인 오른쪽) — 아이콘 + 서버 요약 한 줄 ('보내는 분 이름 = 강도윤' · '주소 검색 ... → 1건' · '전송 완료')
+// 아이콘: 조회 = 명부 · 저장 = 디스켓 · 검색 = 돋보기 · 전송 = 보내기 화살표 · 취소 = ✕. 이 목록만 스크롤
+// 하이라이트: 지금 짚은 말(재생 중 · 고른 말)이 부른 동작 = 옅은 하늘색 (11/05 사용자: 대본처럼 AI 동작도)
+// 줄을 누르면 대본이 그 동작을 부른 고객 말로 넘어가고 녹취가 그 말부터 (11/01). 시각을 모르는 줄은 누를 수 없음
+const svg = (d: ReactNode) => (
+  <svg
+    viewBox="0 0 24 24"
+    className="size-6 shrink-0"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.7}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden
+  >
+    {d}
+  </svg>
+)
+const LOOKUP = svg(
+  <>
+    <rect x="5" y="3" width="15" height="18" rx="2" />
+    <path d="M3 7h4M3 12h4M3 17h4M10 8h6M10 12h6M10 16h4" />
+  </>,
+)
+const SAVE = svg(
+  <>
+    <path d="M5 3h11l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 1-2z" />
+    <path d="M8 3v5h7V3M8 21v-6h8v6" />
+  </>,
+)
+const SEARCH = svg(
+  <>
+    <circle cx="11" cy="11" r="7" />
+    <path d="M20 20l-4-4" />
+  </>,
+)
+const SEND = svg(<path d="M14 5l7 7-7 7M21 12H11a7 7 0 0 0-7 7" />)
+const CANCEL = svg(<path d="M6 6l12 12M18 6L6 18" />)
+const ICON: Record<CallActionKind, ReactNode> = {
+  CUSTOMER_LOOKUP: LOOKUP,
+  ORDER_LOOKUP: LOOKUP,
+  FIELD_SAVED: SAVE,
+  PIN_SEARCH: SEARCH,
+  PREVIOUS_ORDER_SEARCH: SEARCH,
+  FAQ_SEARCH: SEARCH,
+  ADDRESS_SEARCH: SEARCH,
+  ORDER_SUBMITTED: SEND,
+  ORDER_CANCELLED: CANCEL,
 }
 
 export function CallActions({
   className = '',
-  results,
   actions,
-  count,
-  resultsEmpty,
-  actionsEmpty,
+  emptyText,
 }: {
   className?: string
-  results: ResultView[]
   actions: ActionView[]
-  count: number
-  resultsEmpty: string // 카드가 없을 때 (받는 중 · 못 받음 · 없음)
-  actionsEmpty: string
+  emptyText: string // 받는 중 · 못 받음 · 없음
 }) {
   return (
-    <section className={`flex min-h-0 flex-col ${className}`}>
-      <h2 className="shrink-0 text-card font-semibold">처리 내용</h2>
-
-      <ul className="mt-3 flex shrink-0 flex-col gap-2">
-        {results.length === 0 && (
-          <li className="rounded-xl bg-frame px-5 py-4 text-body text-muted">{resultsEmpty}</li>
-        )}
-        {results.map((r) => (
-          <li key={r.key} className="rounded-xl bg-frame px-5 py-4">
-            <div className="flex items-center gap-3">
-              <span className="text-strong font-semibold">{r.label}</span>
-              {r.reason && (
-                <span className={`${REASON_TAG_CLASS} ${r.reason.bg}`}>{r.reason.label}</span>
-              )}
-              <span className="text-label text-sub tabular-nums">{r.time}</span>
-              {r.link && (
-                <button
-                  type="button"
-                  onClick={r.link.onClick}
-                  className="ml-auto shrink-0 text-body font-semibold text-brand hover:underline"
-                >
-                  {r.link.label} ›
-                </button>
-              )}
-            </div>
-            {r.question && (
-              <p className="mt-2 flex gap-3 text-body">
-                <span className="shrink-0 text-sub">질문</span>
-                <span className="min-w-0 break-words">{r.question}</span>
-              </p>
+    <ul
+      aria-label="AI 동작"
+      className={`flex min-h-0 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] flex-col overflow-y-auto pr-2 ${className}`}
+    >
+      {actions.length === 0 && <li className="py-6 text-body text-muted">{emptyText}</li>}
+      {actions.map((a) => {
+        const row = `flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left text-strong ${a.active ? 'bg-frame' : ''}`
+        const cells = (
+          <>
+            {ICON[a.kind]}
+            <span className="min-w-0 break-words">{a.text}</span>
+          </>
+        )
+        return (
+          <li key={a.key}>
+            {a.onClick ? (
+              <button
+                type="button"
+                onClick={a.onClick}
+                title="이 동작을 부른 고객 말로 가기 · 거기부터 듣기"
+                aria-current={a.active || undefined}
+                className={`${row} ${a.active ? '' : 'hover:bg-bg'}`}
+              >
+                {cells}
+              </button>
+            ) : (
+              <div className={row}>{cells}</div>
             )}
           </li>
-        ))}
-      </ul>
-
-      <h3 className="mt-6 flex shrink-0 items-baseline gap-2 text-card font-semibold">
-        AI 동작 <span className="text-body font-normal text-sub">{count}</span>
-      </h3>
-      <ul className="mt-2 min-h-0 flex-1 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto pr-2">
-        {actions.length === 0 && <li className="py-6 text-body text-muted">{actionsEmpty}</li>}
-        {actions.map((a) => {
-          const row = (
-            <>
-              <span className="w-12 shrink-0 text-label leading-7 text-sub tabular-nums">
-                {a.time}
-              </span>
-              <span className={`${CHIP_CLASS} ${ACTION_BG[a.tag] ?? 'bg-bg'}`}>{a.tag}</span>
-              <span className="min-w-0 text-body leading-7 break-words">{a.text}</span>
-            </>
-          )
-          return (
-            <li key={a.key}>
-              {a.onClick ? (
-                <button
-                  type="button"
-                  onClick={a.onClick}
-                  title="이 동작을 부른 고객 말로 가기 · 거기부터 듣기"
-                  className="flex w-full items-start gap-3 rounded-lg px-2 py-1 text-left hover:bg-bg"
-                >
-                  {row}
-                </button>
-              ) : (
-                <div className="flex items-start gap-3 px-2 py-1">{row}</div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </section>
+        )
+      })}
+    </ul>
   )
 }

@@ -39,6 +39,8 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
   const [now, setNow] = useState(0)
   const [length, setLength] = useState(0)
   const [failed, setFailed] = useState(false)
+  const [volume, setVolumeState] = useState(1) // 0 ~ 1 (<audio> 기본 1)
+  const [muted, setMuted] = useState(false)
   const errorFetchAt = useRef(0) // 재생 오류로 다시 받은 때 — 파일이 정말 없으면 오류 → 재조회가 끝없이 돌지 않게 10초에 한 번까지
 
   // 최신 Recording(재조회마다 옴)을 <audio> 소리로 — 렌더 중에 바꿈(React 문서 '이전 렌더 정보 저장' 방식, effect로 하면 한 박자 늦고 린트가 막음)
@@ -100,7 +102,26 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
     void a.play().catch(() => setFailed(true))
   }
 
+  /** 음량 막대 (11/05 새 디자인) — 0으로 끌면 음소거 아이콘, 다시 올리면 소리 */
+  const setVolume = (v: number) => {
+    const a = ref.current
+    if (!a) return
+    a.volume = Math.max(0, Math.min(1, v))
+    a.muted = v === 0
+  }
+  /** 스피커 아이콘 — 음소거 켜고 끄기 (끌 때 음량이 0이었으면 반쯤으로) */
+  const toggleMute = () => {
+    const a = ref.current
+    if (!a) return
+    if (a.muted && a.volume === 0) a.volume = 0.5
+    a.muted = !a.muted
+  }
+
   const handlers: AudioHTMLAttributes<HTMLAudioElement> = {
+    onVolumeChange: (e: SyntheticEvent<HTMLAudioElement>) => {
+      setVolumeState(e.currentTarget.volume)
+      setMuted(e.currentTarget.muted)
+    },
     onPlay: () => setPlaying(true),
     onPause: () => setPlaying(false),
     onEnded: () => setPlaying(false),
@@ -137,6 +158,10 @@ export function useRecordingPlayer(recording: Recording | null, onExpired: () =>
     toggle,
     seek,
     scrub,
+    volume: muted ? 0 : volume, // 막대에 보이는 음량 (음소거면 0)
+    muted: muted || volume === 0,
+    setVolume,
+    toggleMute,
     audioRef: ref,
     src: url ?? undefined,
     handlers,

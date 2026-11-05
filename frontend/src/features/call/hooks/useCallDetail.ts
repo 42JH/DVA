@@ -1,19 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
-import { fmtClock, fmtDetailTime, fmtDuration, fmtPhone } from '@/shared/lib/format'
-import { reasonTag, unansweredTo } from '@/shared/lib/unansweredReason'
-import { ACTION_LABEL, COMPLAINT_LABEL, RESULT_LABEL } from '@/features/call/labels'
+import { fmtClock, fmtPhone } from '@/shared/lib/format'
+import { reasonTag } from '@/shared/lib/unansweredReason'
+import { COMPLAINT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
   type Complaint,
-  type ResultBlock,
   toCallDetail,
   type Utterance,
 } from '@/features/call/api/callApi'
-import { utteranceAt, utteranceForAction } from '@/features/call/api/callDto'
-import { kindChips } from './useCallList'
+import { utteranceAt, utteranceForAction, type CallActionKind } from '@/features/call/api/callDto'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -31,22 +28,12 @@ export interface ScriptSegment {
   lines: ScriptLine[]
 }
 
-/** 처리 내용 블록 한 개 */
-export interface ResultView {
-  key: string
-  label: string // '접수' · '주문 취소' · 'AI 미답변' · '상담원 이관 요청'
-  time: string
-  link?: { label: string; onClick: () => void }
-  question?: string // AI 미답변: 고객 질문
-  reason?: ReturnType<typeof reasonTag> // AI 미답변: 사유 태그 (유사한 질문 없음 · 서버 에러)
-}
-
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
 export interface ActionView {
   key: number
-  time: string
-  tag: string // 저장 · 검색 · 조회 · 취소 · 전송
+  kind: CallActionKind // 아이콘 (조회 · 저장 · 검색 · 전송 · 취소)
   text: string
+  active: boolean // 지금 짚은 말이 부른 동작 — 하이라이트
   onClick?: () => void
 }
 
@@ -88,9 +75,6 @@ function toSegments(utterances: Timed[], complaints: Complaint[]): ScriptSegment
   return segments
 }
 
-/** 블록 순서: 주문에 한 일(접수 · 주문 취소 · 이관)이 위, AI 미답변이 아래 — 같은 무리 안에선 통화 순번 (10/28: 미답변이 위면 문의 통화로 읽힘) */
-const rank = (r: ResultBlock) => (r.kind === 'QUESTION_UNANSWERED' ? 1 : 0)
-
 /** 영역이 비었을 때 문구 — 받는 중 · 못 받음 · 받았는데 없음을 구분 (명세: 빈 성공 응답과 요청 실패를 구분) */
 const emptyText = (
   q: { isPending: boolean; isError: boolean; data?: unknown },
@@ -99,11 +83,9 @@ const emptyText = (
   none: string,
 ) => (q.isPending ? loading : q.isError && !q.data ? failed : none)
 
-/** 06 통화 상세 훅 — 요약 · 스크립트(불만 묶음) · 녹취 재생 · 처리 내용 · AI 동작 · 주문 팝업
+/** 06 통화 상세 훅 (11/05 새 디자인) — 대본(불만 묶음) · 녹취 재생(이전 · 다음 발화 · 음량) · AI 동작(짚은 말과 같이 하이라이트)
  * 네 조회(기본 · 대화 · 처리 결과 · AI 동작)를 따로 받아 5초마다 다시 — 늦게 온 분석 · 발화 · 녹취가 같은 화면에 붙고, 한 영역이 늦거나 실패해도 나머지는 그대로 (11/02 연동 명세) */
 export function useCallDetail(callId: number) {
-  const navigate = useNavigate()
-  const [orderId, setOrderId] = useState<number | null>(null) // '주문 보기 ›'로 연 주문
   // AI 동작을 눌러 짚은 통화 안 시각(초)과, 스크립트가 그 줄로 스크롤할 신호 (누를 때마다 n이 늘어 같은 줄도 다시 스크롤)
   const [cursor, setCursor] = useState<number | null>(null)
   const [jump, setJump] = useState<{ key: number; n: number } | null>(null)
@@ -173,62 +155,26 @@ export function useCallDetail(callId: number) {
         : [],
     ),
   )
-  const results: ResultView[] = call
-    ? [...call.results]
-        .filter((r) => RESULT_LABEL[r.kind]) // 문의 · 답한 FAQ 블록은 안 그림
-        .sort((a, b) => rank(a) - rank(b) || a.order - b.order)
-        .map((r) => {
-          const base = {
-            key: `${r.kind}-${r.order}`,
-            label: RESULT_LABEL[r.kind]!,
-            time: r.atSec === null ? '' : fmtClock(r.atSec),
-          }
-          if (r.kind === 'QUESTION_UNANSWERED')
-            return r.question === null
-              ? base // 삭제된 질문: 원문도 링크도 없음
-              : {
-                  ...base,
-                  question: r.question,
-                  reason: reasonTag(r.reason),
-                  // 그 통화의 질문만 (10/30 사용자: 미답변 보기를 누르면 해당 통화 것만)
-                  link: {
-                    label: 'AI 미답변 보기',
-                    onClick: () => navigate(unansweredTo(`/calls/${callId}`, callId)), // 경로 '통화 상세 > AI 미답변 > 강도윤 통화'
-                  },
-                }
-          if (r.orderSeq !== null) {
-            const orderSeq = r.orderSeq
-            return { ...base, link: { label: '주문 보기', onClick: () => setOrderId(orderSeq) } }
-          }
-          return base
-        })
-    : []
+  // 이전 · 다음 발화 (11/05 새 디자인 재생 줄 ⏮ ⏭) — 지금 짚은 말 기준. 짚은 말이 없으면 다음 = 첫 말
+  const timed = says.filter((u): u is Timed & { atSec: number } => u.atSec !== null)
+  const here = focusKey === null ? -1 : timed.findIndex((u) => u.order === focusKey)
+  const goLine = (u: (typeof timed)[number] | undefined) => {
+    if (!u) return
+    setJump((j) => ({ key: u.order, n: (j?.n ?? 0) + 1 }))
+    listenFrom(u.atSec)
+  }
 
   return {
     isLoading: detail.isPending,
     error,
     notice,
 
-    // 머리 (11/04 새 디자인 — 04 줄과 같은 말): 고객 이름(신규면 new) + 상담 유형 칩 / 발신번호 · 시작 시각 · 통화 시간 · 상담가 / 불만 줄
-    // 옛 '통화 결과' 태그는 뺌 — 서버가 11/04 result를 빼서 실서버에선 늘 '분석 전'으로 보였음
-    summary: call
-      ? {
-          customer: call.customerName ?? '—',
-          isNew: call.isNew === true,
-          kinds: kindChips(call.counts),
-          analyzed: call.counts !== null, // 분석 전이면 칩 대신 '분석 전'
-          startedAt: call.startedAt ? fmtDetailTime(call.startedAt, { seconds: true }) : '—',
-          duration: call.durationSec === null ? '—' : fmtDuration(call.durationSec),
-          caller: call.callerNumber ? fmtPhone(call.callerNumber) : '—',
-          complaints: call.complaints.map((c) => ({
-            label: COMPLAINT_LABEL[c.type],
-            reason: c.reason,
-          })),
-        }
-      : null,
+    // 상단바 (11/05 새 디자인): 경로 '통화 > “김민수”님 통화' · 발신번호
+    customer: call?.customerName ?? null,
+    caller: call?.callerNumber ? fmtPhone(call.callerNumber) : '',
 
-    // 스크립트 (말만) + 녹취 재생
-    persona: call?.persona ? `${call.persona.name} v${call.persona.version}` : '',
+    // 대본 + 녹취 재생 (아래 재생 줄)
+    persona: call?.persona?.name ?? '', // 재생 줄 왼쪽 '[ 빠른 접수형 ]'
     player: {
       state: player.state,
       playing: player.playing,
@@ -237,12 +183,18 @@ export function useCallDetail(callId: number) {
       progress: player.progress,
       toggle: player.toggle,
       scrub: player.scrub, // 진행 바 드래그 (11/01)
+      prev: () => goLine(here > 0 ? timed[here - 1] : timed[0]),
+      next: () => goLine(timed[here + 1]),
+      volume: player.volume,
+      muted: player.muted,
+      setVolume: player.setVolume,
+      toggleMute: player.toggleMute,
       src: player.src,
       handlers: player.handlers,
-      text: recordingText, // 재생 줄 아래 한 줄 (없으면 '지금 / 길이')
+      text: recordingText, // 녹취가 없거나 못 들을 때 한 줄
     },
     audioRef: player.audioRef, // <audio>에 꽂을 ref — player와 따로 넘김 (렌더 중 ref 접근 규칙)
-    // 스크립트 줄을 누르면 그 말부터 듣기 (11/01) — 시각을 아는 줄만
+    // 대본 줄을 누르면 그 말부터 듣기 (11/01) — 시각을 아는 줄만
     segments: call
       ? toSegments(says, call.complaints).map((seg) => ({
           ...seg,
@@ -258,38 +210,27 @@ export function useCallDetail(callId: number) {
       '대화를 받지 못했어요. 잠시 뒤 다시 받아요.',
       '발화가 없습니다.',
     ),
-    resultsEmpty: emptyText(
-      resultsQ,
-      '처리 내역을 불러오는 중…',
-      '처리 내역을 받지 못했어요. 잠시 뒤 다시 받아요.',
-      '이 통화로 처리된 주문 · 미답변이 없습니다.',
-    ),
     actionsEmpty: emptyText(
       actionsQ,
       'AI 동작을 불러오는 중…',
       'AI 동작을 받지 못했어요. 잠시 뒤 다시 받아요.',
       '기록이 없습니다.',
     ),
-    focusKey, // 옅은 남색으로 짚는 줄 (발화 순번)
-    jump, // 그 줄로 스크롤 (AI 동작을 눌렀을 때만 — 재생 중엔 강조만 따라가고 스크롤은 안 함)
+    focusKey, // 하이라이트하는 줄 (발화 순번)
+    jump, // 그 줄로 스크롤 (AI 동작 · 이전 · 다음을 눌렀을 때만 — 재생 중엔 하이라이트만 따라가고 스크롤은 안 함)
 
-    // 처리 내용
-    results,
+    // AI 동작 기록 — 짚은 말이 부른 동작은 같이 하이라이트 (11/05 사용자: AI 동작 로그에도 그 부분 하이라이트)
     actions: (call?.actions ?? []).map((a): ActionView => {
       const sec = a.atSec
+      const from = sec === null ? null : utteranceForAction(says, sec, a.text)
       return {
         key: a.order,
-        time: sec === null ? '' : fmtClock(sec),
-        tag: ACTION_LABEL[a.kind],
+        kind: a.kind,
         // 서버 summaryText 그대로. 단 미답변으로 기록된 FAQ 검색은 'FAQ 근거 있음' 같은 검색 요약 대신 미답변 사유 (11/04 AI팀)
         text: (a.kind === 'FAQ_SEARCH' && sec !== null && unansweredAt.get(sec)) || a.text,
+        active: from !== null && from.order === focusKey,
         onClick: sec === null ? undefined : () => jumpTo(sec, a.text),
       }
     }),
-    actionCount: call?.aiActionCount ?? 0,
-
-    // 주문 팝업 (shared/order/OrderDetailModal — 03 주문 내역과 같은 창). 06은 읽기만: [수정]은 03에서 (통화 ≠ 주문, 10/28)
-    orderId, // null이 아니면 팝업
-    closeOrder: () => setOrderId(null),
   }
 }
