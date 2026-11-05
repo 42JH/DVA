@@ -211,13 +211,18 @@ class MockBackend:
                         "monthlyBillingEnabled": False, "address": c.get("address")}
         return None
 
-    async def update_customer_address(self, customer_seq, call_session_seq, address):
+    async def update_customer(self, customer_seq, call_session_seq, fields):
         phone = self._phone(call_session_seq)
         if self.customers.get(phone, {}).get("seq") != customer_seq:
             raise BackendError("/api/customers 403 FORBIDDEN", 403, "FORBIDDEN")  # 진행 중 본인 통화만
-        if "name" in address or "phoneNumber" in address or "latitude" in address:
+        address = fields.get("address") or {}
+        if not fields or set(fields) - {"name", "address"} or "name" in address or "phoneNumber" in address \
+                or "latitude" in address or ("name" in fields and not str(fields["name"] or "").strip()):
             raise BackendError("/api/customers 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
-        self.customers[phone]["address"] = dict(address)
+        if "name" in fields:
+            self.customers[phone]["name"] = fields["name"].strip()
+        if "address" in fields:
+            self.customers[phone]["address"] = dict(address)
 
     async def create_pin(self, call_session_seq, customer_seq, order, role, label):
         phone = self._phone(call_session_seq)

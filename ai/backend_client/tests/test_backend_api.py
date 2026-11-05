@@ -372,7 +372,7 @@ def business_calls(client):
     run(client.caller_context(CALLER))
     run(client.create_customer("김철수", CALLER))
     assert run(client.customer_detail(12))["customerSeq"] == 12
-    run(client.update_customer_address(12, 20, {"roadAddress": "서울 예시로 12"}))
+    run(client.update_customer(12, 20, {"name": "김철수", "address": {"roadAddress": "서울 예시로 12"}}))
     run(client.search_company_places("예시"))
 
 
@@ -397,6 +397,7 @@ def test_customer_and_company_calls_send_business_token_only():
         ("GET", "/api/companies/search")]
     assert all(r.headers["authorization"] == "Bearer biz-token" and "cookie" not in r.headers for r in seen)
     assert seen[3].headers["call_session_seq"] == "20"  # 기존 통화 헤더 유지
+    assert json.loads(seen[3].content) == {"name": "김철수", "address": {"roadAddress": "서울 예시로 12"}}  # 한 번의 PATCH
 
 
 def test_business_token_unset_sends_no_authorization():
