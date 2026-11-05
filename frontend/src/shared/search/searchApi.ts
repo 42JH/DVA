@@ -3,7 +3,7 @@
 import { keepPreviousData, queryOptions } from '@tanstack/react-query'
 import { api, type ApiList } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
-import { directoryQuery, phoneDigits } from '@/shared/lib/search'
+import { phoneDigits } from '@/shared/lib/search'
 
 /** 통화 줄 (API-21 통화 목록에서 쓰는 것만) */
 export interface CallHit {
@@ -36,16 +36,25 @@ export interface CompanyHit {
   memberCount: number
 }
 
-/** 사원 줄 — GET /companies/search (DIR-01 기업 공식 배송지 검색) 응답에서 쓰는 것만
- *  서버 조건: 활성 기업 · 활성 소속 · 활성 고객 · **기본 주소가 있는 사원만**. 기업명 · 부서명 · 이름 · 전화번호 · 주소에서
- *  띄어쓰기로 나눈 낱말이 모두 들어 있으면 맞음(대소문자 무시). 정렬 = 기업명 · 기업 번호 · 고객 번호 */
+/** 사원 줄 — GET /companies/members/search (관리자 사원 검색, 11/05 백엔드 명세). 한 줄 = 소속 하나
+ *  서버: 이름 · 전화번호 · 사번 · 부서명 부분 일치, 띄어쓰기로 나눈 낱말이 모두 맞아야(낱말마다 다른 칸이어도 됨) · 기업명 · 주소는 안 찾음
+ *  숫자 · 하이픈 낱말은 서버가 전화번호와 숫자로 비교(사번은 글자 그대로) → 프론트는 원문을 보냄. 주소 · 부서 없는 사원도 나옴
+ *  정렬 = 기업명 · 기업 번호 · 소속 번호. 관리자 세션 필수 (AI용 DIR-01 /companies/search와 다름) */
 export interface MemberHit {
   organizationSeq: number
   organizationName: string
+  organizationStatus: 'ACTIVE' | 'INACTIVE'
   membershipSeq: number
+  membershipStatus: 'ACTIVE' | 'INACTIVE'
+  employeeNo: string
   departmentName: string | null
-  addressData: { name: string; phoneNumber: string } // 전화번호는 숫자만
+  name: string
+  phoneNumber: string // 숫자만
 }
+
+// 서버 q 규칙: NFC · 앞뒤 · 연속 공백 정리 뒤 1~100자(코드 포인트), 넘으면 400 → 같은 정리 후 100자까지만 보냄
+const memberQ = (q: string) =>
+  [...q.normalize('NFC').trim().replace(/\s+/gu, ' ')].slice(0, 100).join('')
 
 const SHOW = 8
 // 숫자만 쳤으면 번호로 ('010-1458' → '0101458' — 서버는 숫자만 저장)
@@ -83,16 +92,16 @@ export const searchQueries = {
       queryFn: ({ signal }) => fetchAll<FaqHit>('/faqs', {}, signal),
       enabled,
     }),
-  /** 사원 이름 · 전화번호 · 부서 → 그 사원이 속한 기업 (기업 탭, 11/05). 기업명 줄과 따로 최대 50명 받아 사원 정보로 맞은 줄만 */
-  directory: (q: string) =>
+  /** 사원 이름 · 전화번호 · 사번 · 부서 → 그 사원이 속한 기업 (기업 탭). 비활성 기업 · 소속도 포함(줄에 '비활성' 표시), 최대 50명 */
+  members: (q: string) =>
     queryOptions({
-      queryKey: ['search', 'directory', q],
+      queryKey: ['search', 'members', q],
       queryFn: ({ signal }) =>
-        api.get<ApiList<MemberHit>>('/companies/search', {
-          query: { q: directoryQuery(q), limit: 50, offset: 0 },
+        api.get<ApiList<MemberHit>>('/companies/members/search', {
+          query: { q: memberQ(q), includeInactive: true, limit: 50, offset: 0 },
           signal,
         }),
-      enabled: directoryQuery(q) !== '',
+      enabled: memberQ(q) !== '',
       placeholderData: keepPreviousData,
     }),
   /** 기업 전부 — 08 기업 목록 검색용과 같은 요청 · 같은 캐시 키 (5분 재사용) */

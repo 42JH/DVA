@@ -82,27 +82,3 @@ export function parseOrderNo(text: string): number | null {
   if (!m || (!m[1] && m[2].startsWith('0'))) return null
   return Number(m[2]) || null
 }
-
-// 낱말마다: 숫자 · 하이픈만이면 숫자로 ('010-1234' → '0101234' — 서버는 숫자만 저장, 낱말 단위로 맞춤)
-export const directoryQuery = (q: string) =>
-  q
-    .trim()
-    .split(/\s+/)
-    .map((w) => (/^[\d-]+$/.test(w) ? w.replace(/-/g, '') : w))
-    .filter(Boolean)
-    .join(' ')
-    .slice(0, 200)
-
-/** 상단바 검색 기업 탭(GET /companies/search 결과) — 사원 정보(이름 · 전화번호 · 부서)로 맞은 줄만 — 서버는 기업명 · 주소로도 맞추는데, 그건 기업명 줄 · 주소라 사원 줄로는 안 보임 */
-export function memberMatches(
-  m: { departmentName: string | null; addressData: { name: string; phoneNumber: string } },
-  q: string,
-): boolean {
-  const own = [m.addressData.name, m.addressData.phoneNumber, m.departmentName ?? '']
-    .join(' ')
-    .normalize('NFC')
-    .toLowerCase()
-  return directoryQuery(q)
-    .split(' ')
-    .every((w) => own.includes(w.normalize('NFC').toLowerCase()))
-}

@@ -9,12 +9,13 @@ import {
   useRecentViews,
   type RecentView,
 } from '@/shared/lib/recentViews'
-import { matchKo, memberMatches, parseOrderNo } from '@/shared/lib/search'
+import { matchKo, parseOrderNo } from '@/shared/lib/search'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
 import { useOrderDetail } from '@/shared/order/useOrderDetail'
 import { Highlight } from '@/shared/ui/Highlight'
 import { Overlay } from '@/shared/ui/Modal'
+import { Tag } from '@/shared/ui/Tag'
 import { MenuIcon } from '@/shared/ui/Sidebar'
 import { searchQueries, type FaqHit } from './searchApi'
 
@@ -172,18 +173,16 @@ function useSearchData(typed: string, tab: SearchTab) {
   const orders = useQuery(searchQueries.orders(tab === 'order' && orderSeq === null ? term : ''))
   const faqs = useQuery(searchQueries.faqs(tab === 'faq'))
   const companies = useQuery(searchQueries.companies(tab === 'company'))
-  const members = useQuery(searchQueries.directory(tab === 'company' ? term : ''))
+  const members = useQuery(searchQueries.members(tab === 'company' ? term : ''))
   const faqHits = typed
     ? (faqs.data ?? [])
         .filter((f) => matchKo(f.question, typed) || matchKo(f.answer, typed))
         .sort(newest)
     : []
   const companyHits = typed ? (companies.data ?? []).filter((c) => matchKo(c.name, typed)) : []
-  // 사원으로 찾은 기업 — 서버 검색 결과에서 이름 · 전화번호 · 부서가 맞은 사원만 (기업명 · 주소로만 맞은 건 뺌). 실패해도 기업명 줄은 그대로
+  // 사원으로 찾은 기업 (관리자 사원 검색 — 서버가 이름 · 전화번호 · 사번 · 부서로만 찾음). 실패해도 기업명 줄은 그대로
   const memberHits =
-    tab === 'company' && typed !== '' && term !== ''
-      ? (members.data?.data ?? []).filter((m) => memberMatches(m, term))
-      : []
+    tab === 'company' && typed !== '' && term !== '' ? (members.data?.data ?? []) : []
   const server = tab === 'call' ? calls : orders
   const ready = typed !== '' && term !== ''
 
@@ -373,7 +372,7 @@ function SearchModal({
                   </>
                 ),
               })),
-              // 사원으로 찾은 기업: 기업명 · 사원 이름 · 전화번호 (최근 조회 기업 줄과 같은 차림)
+              // 사원으로 찾은 기업: 기업명 · 사원 이름 · (부서) · 사번 · 전화번호, 비활성 기업 · 소속이면 '비활성'
               ...s.members.map((m): Row => ({
                 key: `m${m.membershipSeq}`,
                 open: () => go(`/companies/${m.organizationSeq}`),
@@ -381,15 +380,23 @@ function SearchModal({
                   <>
                     <span className="min-w-0 truncate text-body">{m.organizationName}</span>
                     <span className="shrink-0 text-body">
-                      <Highlight text={m.addressData.name} q={typed} />
+                      <Highlight text={m.name} q={typed} />
                     </span>
                     {m.departmentName && (
                       <span className="min-w-0 truncate text-label text-sub">
                         <Highlight text={m.departmentName} q={typed} />
                       </span>
                     )}
+                    {(m.organizationStatus === 'INACTIVE' || m.membershipStatus === 'INACTIVE') && (
+                      <span className="shrink-0 self-center">
+                        <Tag>비활성</Tag>
+                      </span>
+                    )}
                     <span className="ml-auto shrink-0 text-label text-sub tabular-nums">
-                      {fmtPhone(m.addressData.phoneNumber)}
+                      <Highlight text={m.employeeNo} q={typed} />
+                    </span>
+                    <span className="shrink-0 text-label text-sub tabular-nums">
+                      {fmtPhone(m.phoneNumber)}
                     </span>
                   </>
                 ),
