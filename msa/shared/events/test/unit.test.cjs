@@ -6,6 +6,15 @@ const { validateEvent, createReceiver, createRelay, sendEvent } = require('../in
 const token = 'test-only-event-key-'.padEnd(40, 'a');
 const event = () => ({ eventId: randomUUID(), source: 'order', eventType: 'OrderAccepted', payload: { orderSeq: 1 } });
 
+test('direct requests validate destinations before sending service credentials', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => { calls++; return new Response('{}'); });
+  for (const url of ['file:///tmp/events', 'http://user:pass@delivery/events',
+    'http://delivery/events?token=secret', 'http://delivery/events#x'])
+    await assert.rejects(sendEvent(url, token, event()), /Invalid event endpoint/);
+  assert.equal(calls, 0);
+});
+
 test('direct event requests require the exact bounded JSON ACK and reject redirects', async t => {
   const {createServer}=require('node:http');
   let mode='ok';

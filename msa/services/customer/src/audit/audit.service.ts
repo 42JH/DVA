@@ -99,12 +99,18 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   async beforeCommit(client: PoolClient): Promise<(() => Promise<void>) | undefined> {
     const pending = this.pending.get(client);
     if (!pending?.eventIds.length) return;
-    const eventId = await enqueue(client, {
-      destination: 'operations',
-      eventType: 'AuditCommitted',
-      aggregateSeq: 1,
-      payload: { transactionId: pending.transactionId, preparedEventIds: pending.eventIds },
-    });
+    let eventId: string | undefined;
+    // Bound confirmation bodies when a company deletion produces thousands of audit rows.
+    for (let offset = 0; offset < pending.eventIds.length; offset += 1000)
+      eventId = await enqueue(client, {
+        destination: 'operations',
+        eventType: 'AuditCommitted',
+        aggregateSeq: 1,
+        payload: {
+          transactionId: pending.transactionId,
+          preparedEventIds: pending.eventIds.slice(offset, offset + 1000),
+        },
+      });
     return () => this.flush(eventId);
   }
   async rollback(client: PoolClient): Promise<void> {

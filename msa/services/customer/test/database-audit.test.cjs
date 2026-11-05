@@ -24,3 +24,26 @@ test('an unknown COMMIT outcome never sends an abort that could erase committed 
   const {db,events}=await fixture('lost-commit');await assert.rejects(db.transaction(async()=>42));
   assert.ok(events.includes('COMMIT'));assert.ok(events.includes('release'));assert.ok(!events.includes('abort'));assert.ok(!events.includes('confirmed'));
 });
+
+test('large corporate audit confirmations fit the HTTP body limit and wait for the final batch',async t=>{
+  const {AuditService}=require('../dist/audit/audit.service');
+  const {randomUUID}=require('node:crypto');
+  const prepared=[],decisions=[];
+  t.mock.method(globalThis,'fetch',async(url,options)=>{
+    const event=JSON.parse(options.body);prepared.push(event.eventId);
+    return new Response(JSON.stringify({eventId:event.eventId,status:'processed'}),{headers:{'Content-Type':'application/json'}});
+  });
+  const client={query:async(sql,values)=>{
+    if(sql.includes('transaction_timestamp()'))return{rows:[{at:new Date()}]};
+    if(sql.startsWith('INSERT INTO outbox_events')){const id=randomUUID();decisions.push({id,payload:values[3]});return{rows:[{event_id:id}]};}
+    return{rows:[]};
+  }};
+  const config={OPERATIONS_URL:'http://operations:3005',CUSTOMER_AUTH_TOKEN:'test-only-audit-token-'.padEnd(40,'a')};
+  const audit=new AuditService({pool:{}},{get:key=>config[key]});
+  for(let i=0;i<3001;i++)await audit.recordSuccess({actorId:1,action:'MEMBERSHIP_REMOVED',targetType:'MEMBERSHIP',targetId:i+1,requestId:randomUUID()},client);
+  const confirm=await audit.beforeCommit(client);
+  for(const decision of decisions)assert.ok(Buffer.byteLength(JSON.stringify({eventId:decision.id,source:'customer',eventType:'AuditCommitted',payload:decision.payload}))<100*1024,'confirmation exceeds Nest HTTP limit');
+  assert.deepEqual(decisions.flatMap(item=>item.payload.preparedEventIds),prepared);
+  let confirmed;audit.flush=async id=>{confirmed=id;};await confirm();
+  assert.equal(confirmed,decisions.at(-1).id);
+});
