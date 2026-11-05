@@ -31,7 +31,7 @@ kind = "free"
 label = "보내는 분 연락처"
 kind = "auto"                 # 발신번호. 묻지도 읽지도 않는다
 [fields.sender_address]
-label = "보내는 곳 주소"
+label = "발송 주소"
 kind = "free"
 [fields.sender_address_detail]
 label = "보내는 곳 상세주소(동·호수)"
@@ -167,7 +167,7 @@ agent = "상담원 연결 상태. suggest = 같은 질문에 답을 못 드려 �
 unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로 말하지 않고 지금 확인이 어렵다고 안내한다"
 confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되읽고 '이대로 접수할까요?'로 묻는다(고객이 그 질문에 답해야 확정된다). cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
-origin = "보내는 곳. prefilled = 등록된 출발지로 보내는 분 성함·주소·상세를 채웠다(묻지 않는다, 상세주소는 읽지 않는다). name_only = 다른 곳에서 보낸다 — 성함만 채웠고 보내는 곳 주소를 묻는다. origin_confirm이 있으면 '{그 주소}에서 보내시나요?'라고 한 번 묻는다"
+origin = "발송 주소. prefilled = 등록된 출발지로 보내는 분 성함·주소·상세를 채웠다(묻지 않는다, 상세주소는 읽지 않는다). name_only = 다른 곳에서 보낸다 — 성함만 채웠고 발송 주소를 묻는다. origin_confirm이 있으면 '{그 주소}에서 보내시나요?'라고 한 번 묻는다"
 order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), pending·notPaid나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"
 submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서는 택배를 고치거나 더 담을 수 없다. 바꿨다·담았다고 말하지 않고, 변경은 담당자가 확인 후 연락드린다고 안내한다"
 

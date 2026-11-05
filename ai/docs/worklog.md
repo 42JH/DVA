@@ -765,3 +765,9 @@
 - 동의 절차 제거: `address_consent`·`_save_pending`·Decision `save` 질문 세트·`[results].address_save`·parcel_added의 저장 질문 문장. business_rules.md는 "저장 여부를 묻지 않는다" 한 줄로 교체.
 - 계약 차이: BE 문서(ai-call-follow-up.md)는 "AI가 고객 동의를 받은 경우에만 저장"이라 되어 있다. 사용자 결정으로 동의 없이 저장하며, BE와 공유 필요.
 - 테스트: 성함 다를 때 name 대상, 이름+주소 한 번의 PATCH 본문, 담을 때 묻지 않고 저장·N2에 address_save 없음·more_parcels에 save 질문 없음. 전체 **648 passed**(교체 테스트 2→1). 실통화·실 BE 미확인.
+
+## 2026-11-06 — 상담 용어를 ‘발송 주소’로 통일
+
+- `fix/dispatch-address-wording`(`develop-ai` 9765f25 기준, Jira 이슈 없음). 택배를 보내는 곳의 주소는 요청·재질문·되읽기에 ‘발송 주소’를 쓴다. 동·호수는 기존 문구로 묻는다.
+- 고객이 ‘발송 주소’, ‘보내는 주소’, ‘보내는 곳’, ‘출발지’라고 말하면 발송 주소로 이해한다. `sender_address`·`sender_address_detail`, BE 주문의 `origin` 및 주소록 저장 데이터는 유지했다.
+- 초안은 전체 테스트 648개, 문구 정리 후 상담 정책·도구·통화 흐름·BE 계약 테스트 93개 통과. 실제 통화 음성은 미확인.
