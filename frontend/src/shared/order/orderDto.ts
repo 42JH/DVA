@@ -26,8 +26,6 @@ export interface OrderAddressDto {
   detailAddress: string | null
   dongName: string | null
   postalCode: string | null
-  latitude: number | null
-  longitude: number | null
 }
 
 export interface OrderParcelDto {
@@ -103,7 +101,6 @@ const party = (a: OrderAddressDto | undefined): Party => ({
   jibunAddress: a?.jibunAddress ?? undefined,
   dongName: a?.dongName ?? undefined,
   postalCode: a?.postalCode ?? undefined,
-  hasCoords: a?.latitude != null && a?.longitude != null,
 })
 
 const sum = (xs: (number | null)[]) =>

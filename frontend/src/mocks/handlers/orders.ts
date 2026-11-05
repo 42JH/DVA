@@ -41,8 +41,6 @@ const address = (p: OrderDetail['sender']) => ({
   detailAddress: p.detailAddress,
   dongName: null,
   postalCode: null,
-  latitude: null,
-  longitude: null,
 })
 
 /** 화면 주문 → 서버 DTO (상세 parcel 하나짜리) */

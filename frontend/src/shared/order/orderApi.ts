@@ -18,7 +18,6 @@ export interface Party {
   jibunAddress?: string
   dongName?: string
   postalCode?: string
-  hasCoords?: boolean // 위도 · 경도가 있는지 — 접수 중단 주문을 접수할 때 주소가 완성됐는지 보려고
 }
 
 // 월정산 · 그룹카드 · 개인카드 (디버 10/27) + 지점 방문(예전 주문 조회만 — 서버 cat, 새로 고를 수 없음)

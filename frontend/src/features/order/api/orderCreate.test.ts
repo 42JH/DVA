@@ -35,10 +35,8 @@ const p = body.parcels[0]!
 assert.equal(p.notifiedPrice, 3500)
 assert.equal(p.itemPrice, 30000)
 assert.equal(p.destination.detailAddress, '') // 없으면 빈 문자열(null 불가)
-assert.deepEqual(
-  [p.origin.postalCode, p.origin.dongName, p.origin.latitude, p.origin.longitude],
-  ['06236', '역삼동', 1, 1],
-)
+assert.deepEqual([p.origin.postalCode, p.origin.dongName], ['06236', '역삼동'])
+assert.equal('latitude' in p.origin, false) // 좌표 칸은 서버에서 빠짐(043) — 보내면 400
 assert.equal(p.otherItemDescription, '')
 assert.equal(p.clientComment, '')
 

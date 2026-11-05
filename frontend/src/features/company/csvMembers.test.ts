@@ -151,7 +151,7 @@ const existing = (
     customerSeq: i + 1,
     name,
     phoneNumber,
-    address: { ...address, latitude: 1, longitude: 1 },
+    address,
     status: 'ACTIVE',
   },
 }))

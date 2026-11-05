@@ -35,6 +35,11 @@ pipeline {
         stage('Lint') {
             steps { dir('frontend') { sh 'npm run lint' } }
         }
+        stage('Test') {
+            // src 아래 *.test.ts 전부 (assert 스크립트를 node --test로 — 하나라도 실패하면 배포 안 함)
+            // backendContract.test.ts = 화면이 보내는 대표 요청을 백엔드 DTO 스냅샷(npm run sync:dto)으로 검사
+            steps { dir('frontend') { sh 'npm test' } }
+        }
         stage('Build') {
             // tsc -b(타입 검사) + vite build. 개발용 가짜 API 워커는 서버에 올리지 않음
             steps {

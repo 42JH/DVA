@@ -16,8 +16,6 @@ import { isPhone, phoneDigits } from '@/features/company/csvMembers'
 import { errorText } from '@/features/company/labels'
 
 type Role = Member['membership']['role']
-// shortcut: 위도 · 경도 1 고정 (11/01 사용자 결정, 03 주문과 같음) — 카카오 JS 키가 오면 주소 → 좌표 변환으로 바꿀 것
-const FIXED_COORD = 1
 
 /** 08 사원 추가 · 수정 창 훅 — 사번 · 사원명 · 전화번호 · 역할 · 주소(검색) · 상세주소 (주소는 11/01 추가)
  * 추가 = 등록(+대표자면 PATCH) · 수정 = 같은 사번으로 재등록(이름 · 전화 갱신) + 역할이 바뀌면 PATCH. 사번은 수정 불가
@@ -47,14 +45,9 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
   const no = form.employeeNo.trim()
   const digits = phoneDigits(form.phone)
   const road = picked?.roadAddress ?? before?.roadAddress ?? ''
-  // 보낼 주소(전체 교체 객체): 새로 골랐으면 검색 결과 + 좌표 1, 상세주소만 바꿨으면 원래 주소(실제 좌표 유지)
+  // 보낼 주소(전체 교체 객체): 새로 골랐으면 검색 결과, 상세주소만 바꿨으면 원래 주소
   const address: CustomerAddress | null = picked
-    ? {
-        ...picked,
-        detailAddress: form.detail.trim(),
-        latitude: FIXED_COORD,
-        longitude: FIXED_COORD,
-      }
+    ? { ...picked, detailAddress: form.detail.trim() }
     : before && form.detail.trim() !== (before.detailAddress ?? '')
       ? { ...before, detailAddress: form.detail.trim() }
       : null
