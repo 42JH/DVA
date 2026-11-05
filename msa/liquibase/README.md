@@ -11,24 +11,25 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 | order | order_db | order-db | 4 | 6 |
 | consultation | consultation_db | consultation-db | 7 | 9 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
-| operations | operations_db | operations-db | 9 | 11 |
+| operations | operations_db | operations-db | 10 | 12 |
 
-현재 public 업무 테이블 20개 + outbox/inbox 10개 + customer 감사 준비 1개 = 31개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 41개가 된다.
-consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 42개다. 위 consultation 수는 이 수신함도 포함한다.
+현재 public 업무 테이블 20개 + outbox/inbox 10개 + customer/consultation 감사 준비 2개 = 32개. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 42개가 된다.
+consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 43개다. 위 consultation 수는 이 수신함도 포함한다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
 
 ## 변경 관리
 
 - consultation `003`은 PBX 수신함/claim과 통화 도착·등록·삭제 필드 및 활성 집계 인덱스를 추가한다. 기존 데이터/이력/대기 이벤트를 보존하고 실제 PBX 시작 시각만 누락된 도착 시각으로 사용한다. 근거 없는 과거 등록 시각은 NULL로 남긴다. 원본 047에서 폐기된 종료 사유는 새 API에서 사용하지 않지만 MSA의 과거 값은 보존하며 이관/실패 rollback을 검사한다.
+- consultation `004`는 customer 소유 고객의 양수 논리 참조와 인덱스를 추가한다. 기존 통화의 고객은 추정하지 않고 NULL로 보존한다. 기존 통화·수신함·이벤트·이력과 후반 SQL 실패 시 롤백을 확인한다.
 
 - 서비스별 초기 changeset 1개. 각 서비스 DB 안에서 원자적으로 실행한다.
 - customer와 operations는 기존 `002`와 이벤트 전달용 `003`, 나머지는 이벤트 전달용 `002`도 포함한다. 각 changeset은 별도 트랜잭션이다.
 - operations `004`는 관리자 이름·soft delete·9시간 세션·감사 이름 스냅샷과 INACTIVE 상태를 모놀리식 계약에 맞춘다. 이름 없는 기존 관리자 행이 있으면 데이터를 보존하고 적용을 중단한다. 실제 이름을 확인한 별도 마이그레이션 전에는 인증 앱을 배포하지 않는다.
 - customer `004`는 기본 주소·월결제 자격·soft delete·부서·선택 부서 소속과 제약을 추가한다. 기존 고객/기업/소속/PIN/이벤트는 보존하며 근거 없는 과거 기업 생성 시각·기본 주소·부서 배정은 NULL로 남긴다. PIN 주소 규칙·버전은 변경하지 않는다. 003의 기존 데이터 업그레이드와 후속 SQL 실패 롤백도 검증한다.
 - customer `005`는 기업 PIN의 부서·soft delete와 변경 시 버전 규칙을 추가한다. 원본 043처럼 양쪽 PIN 주소에서 latitude/longitude를 제거하므로 운영 적용 전 별도 백업이 필요하다. 변환 시 PIN 버전·소유권을 보존하고 유일하게 일치하는 부서명만 연결한다. SQL 후반 실패 시 주소·스키마·이력 전체 rollback도 검사한다.
-- operations `005`는 customer 업무와 감사 확정을 연결하는 비공개 `customer_audit_preparations`를 추가한다. customer와 operations는 각각 changeset 5개이며 이전 changeset은 수정하지 않는다.
+- operations `005`는 customer 업무와 감사 확정을 연결하는 비공개 `customer_audit_preparations`를 추가한다. `006`은 consultation만 사용하는 별도 `consultation_audit_preparations`를 추가한다. customer 5개·operations 6개·consultation 4개 changeset이며 기존 적용 이력은 수정하지 않는다. customer의 기존 미확정 감사와 이력을 보존하고 006 후반 실패 시 전체 롤백을 검사한다.
 - SQL의 바깥 BEGIN/COMMIT만 제거하고 runInTransaction=true로 Liquibase가 트랜잭션을 관리한다.
 - splitStatements=false로 PostgreSQL 함수 본문의 세미콜론을 보존한다.
 - 기존 업무 테이블이 있으면 초기 changeset을 HALT한다. 자동 삭제/덮어쓰기하지 않는다.
