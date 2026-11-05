@@ -5,14 +5,14 @@ import { ListResponse } from '../common/pagination';
 import { AuditRepository } from './audit.repository';
 import { AuditEvent, AuditLog, AuditResult } from './audit.types';
 import { AuditQueryDto } from './dto/audit-query.dto';
-import { CustomerAuditReceiver } from './customer-audit.receiver';
+import { ServiceAuditReceiver } from './service-audit.receiver';
 
 @Injectable()
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
   constructor(
     private readonly repository: AuditRepository,
-    private readonly customer: CustomerAuditReceiver,
+    private readonly customer: ServiceAuditReceiver,
   ) {}
 
   record(

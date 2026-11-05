@@ -6,10 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient } from 'pg';
-import { Environment } from '../config/environment';
+import { type Environment } from '../config/environment';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
+  audit?: {
+    beforeCommit(
+      client: PoolClient,
+    ): Promise<(() => Promise<void>) | undefined>;
+    rollback(client: PoolClient): Promise<void>;
+    clear(client: PoolClient): void;
+  };
   readonly pool: Pool;
   readonly transactionStatistics = {
     count: 0,
@@ -42,7 +49,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     // Liquibase owns DDL; fail startup before accepting traffic on an incomplete schema.
     await this.pool.query(
-      'SELECT incoming_at,registered_at,deleted_at FROM call_sessions LIMIT 0',
+      'SELECT incoming_at,registered_at,deleted_at,customer_seq FROM call_sessions LIMIT 0',
     );
     await this.pool.query(
       'SELECT claim_id,claimed_until,call_session_seq FROM pbx_webhooks.call_ended_events LIMIT 0',
@@ -57,15 +64,21 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.transactionStatistics.connectionWaitSeconds +=
       (started - queued) / 1000;
     let releaseError: Error | undefined;
+    let commitAttempted = false;
+    let completed!: T;
+    let confirmed: (() => Promise<void>) | undefined;
     try {
       await client.query('BEGIN');
-      const result = await work(client);
+      completed = await work(client);
+      confirmed = await this.audit?.beforeCommit(client);
+      commitAttempted = true;
       await client.query('COMMIT');
-      return result;
     } catch (error) {
       this.transactionStatistics.failures++;
       try {
         await client.query('ROLLBACK');
+        // A lost COMMIT response may already be committed; never publish an abort for it.
+        if (!commitAttempted) await this.audit?.rollback(client);
       } catch {
         // Evict a broken connection while preserving the original business/SQL failure.
         releaseError = new Error('Transaction rollback failed');
@@ -80,7 +93,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         seconds,
       );
       client.release(releaseError);
+      this.audit?.clear(client);
     }
+    // Release the business connection before the relay needs another pool connection.
+    await confirmed?.();
+    return completed;
   }
 
   async onModuleDestroy(): Promise<void> {

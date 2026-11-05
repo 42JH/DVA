@@ -6,6 +6,8 @@ import { AppModule } from '../src/app.module';
 import { configureApplication } from '../src/configure-application';
 import { DatabaseService } from '../src/database/database.service';
 import { AuthService } from '../src/auth/auth.service';
+import { AuditService } from '../src/audit/audit.service';
+import { CustomerContextClient } from '../src/customers/customer-context.client';
 import { ApiException } from '../src/common/errors/api.exception';
 
 describe('Consultation PBX and active calls (e2e)', () => {
@@ -29,6 +31,12 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .useValue({ pool })
       .overrideProvider(AuthService)
       .useValue(auth)
+      .overrideProvider(AuditService)
+      .useValue({ flush: jest.fn().mockResolvedValue(undefined) })
+      .overrideProvider(CustomerContextClient)
+      .useValue({
+        callCustomer: jest.fn().mockResolvedValue(null),
+      })
       .compile();
     app = module.createNestApplication();
     configureApplication(app);

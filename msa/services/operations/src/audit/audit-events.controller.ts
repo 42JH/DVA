@@ -1,14 +1,14 @@
 import { Body, Controller, HttpException, Post, Headers, HttpCode } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Event } from '@dva/events';
-import { InternalCustomerAuth } from '../auth/auth.guard';
-import { CustomerAuditReceiver } from './customer-audit.receiver';
+import { InternalServiceAuth } from '../auth/auth.guard';
+import { ServiceAuditReceiver } from './service-audit.receiver';
 
 @ApiExcludeController()
-@InternalCustomerAuth()
+@InternalServiceAuth()
 @Controller('internal')
 export class AuditEventsController {
-  constructor(private readonly events: CustomerAuditReceiver) {}
+  constructor(private readonly events: ServiceAuditReceiver) {}
   @Post('events')
   @HttpCode(200)
   async receive(@Body() event: Event, @Headers('authorization') authorization: string) {

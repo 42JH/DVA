@@ -11,8 +11,7 @@ import { AuditActorType } from '../audit/audit.types';
 import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 import { timingSafeEqual } from 'node:crypto';
-export const InternalCustomerAuth = () => SetMetadata('auth:internal-customer', true);
-export const InternalSessionAuth = () => SetMetadata('auth:internal-session', true);
+export const InternalServiceAuth = () => SetMetadata('auth:internal-session', true);
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 // Temporary, explicit opt-in for customer context/registration/detail/name updates (Jira 135).
@@ -62,9 +61,9 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
     const session = this.reflector.getAllAndOverride<boolean>('auth:internal-session', targets);
-    if (session || this.reflector.getAllAndOverride<boolean>('auth:internal-customer', targets)) {
+    if (session) {
       const tokens = [this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true })];
-      if (session) tokens.push(this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }));
+      tokens.push(this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }));
       const actual = Buffer.from(request.get('Authorization') ?? '');
       const accepted = tokens.some((token) => {
         const expected = Buffer.from(`Bearer ${token ?? ''}`);

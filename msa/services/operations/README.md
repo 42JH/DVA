@@ -35,9 +35,9 @@ API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Orig
 
 배포 스크립트는 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성하고 기존 값은 바꾸지 않는다. customer와 operations가 이 Secret을 공유한다. customer readiness가 새 내부 경로를 요구하므로 두 서비스가 선택되면 operations를 먼저 배포한다.
 
-consultation은 별도 `dva/msa-consultation-auth` Secret의 `consultation-token`을 공유한다. 같은 최초 생성/기존 값 보존 정책이며 consultation도 operations 이후 배포한다. consultation 토큰은 세션 확인에만 허용하고 customer 감사 수신에는 허용하지 않는다. 세션/관리자를 다른 DB에 복제하지 않는다.
+consultation은 별도 `dva/msa-consultation-auth` Secret의 `consultation-token`을 공유한다. 두 토큰은 세션 확인과 각 소유 서비스의 이벤트/역방향 조회 인증에 사용하며 customer·consultation은 operations 이후 배포한다. 세션/관리자를 다른 DB에 복제하지 않는다. 서비스 토큰으로 공개 관리자 API에 접근할 수 없다.
 
-`POST /internal/events`는 `CUSTOMER_AUTH_TOKEN`만 허용하며 공개 Swagger/Ingress에서 제외한다. customer의 AuditPrepared는 원본 감사 제약을 적용한 뒤 005의 비공개 준비 테이블에 보관한다. AuditCommitted는 inbox와 감사 행을 함께 커밋하며 중복 재반영을 막고, AuditAborted는 늦은 준비를 차단한다. 감사 조회 직전에 준비 상태가 있으면 `CUSTOMER_URL`의 `/internal/audit/flush`로 결정 확인 이벤트를 보낸다. `CUSTOMER_URL`은 자격정보·경로·query 없는 HTTP(S) origin이며 k8s에서는 `http://customer:3001`이다. 진행 중 업무의 잠금을 강제로 해제하거나 다른 DB를 직접 읽지 않는다. 상세 경계와 강제 종료 복구 검증은 [customer 쓰기 계획](../../../docs/msa-customer-writes-plan.md)을 따른다.
+`POST /internal/events`는 source별 CUSTOMER_AUTH_TOKEN/CONSULTATION_AUTH_TOKEN을 검증하고 허용 action·target을 분리한다. customer는 기존 감사 범위를, consultation은 CALL_STARTED·CALL_SESSION·SUCCESS·AI/ADMIN만 사용한다. 준비 테이블도 customer/consultation별로 분리해 한 서비스의 확정/중단으로 다른 서비스 감사를 조작할 수 없다. inbox·감사 확정은 함께 COMMIT하며 공개 Swagger/Ingress에서는 제외한다. 감사 조회는 각 소유 서비스의 `/internal/audit/flush`에 결정을 확인하며 진행 중 업무 잠금을 강제로 해제하지 않는다. CUSTOMER_URL=`http://customer:3001`, CONSULTATION_URL=`http://consultation:3004`이며 자격정보·경로·query 없는 정확한 HTTP(S) origin만 허용한다. [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md)에 장애 검증을 기록한다.
 
 ## 빌드와 자동 배포
 

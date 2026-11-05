@@ -55,6 +55,11 @@ spec:
             - name: CUSTOMER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: CONSULTATION_URL
+              value: http://consultation:3004
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
             - name: CORS_ORIGINS
               value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
             - name: SWAGGER_ENABLED

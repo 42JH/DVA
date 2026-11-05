@@ -3,7 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { PoolClient } from 'pg';
 import { callerPhone } from '../common/caller-phone';
 import { Environment } from '../config/environment';
-import { CallEndedPayload } from '../webhooks/pbx/pbx-webhook.payload';
+import {
+  CallEndedPayload,
+  parseCallEndedPayload,
+} from '../webhooks/pbx/pbx-webhook.payload';
 import { CallSessionRepository } from './call-session.repository';
 
 @Injectable()
@@ -59,5 +62,47 @@ export class CallEndRepository {
         [payload.recordingId, callId],
       );
     return callId;
+  }
+
+  async matchPending(
+    client: PoolClient,
+    phone: string,
+    incomingAt: string,
+  ): Promise<void> {
+    const normalized = callerPhone(phone);
+    const phones = normalized.startsWith('0')
+      ? [normalized, '+82' + normalized.slice(1), '0082' + normalized.slice(1)]
+      : [normalized];
+    const window =
+      this.config.get('RECORDING_MATCH_WINDOW_SECONDS', { infer: true }) * 1000;
+    const incoming = Date.parse(incomingAt);
+    const pending = await client.query<{ payload: unknown }>(
+      `SELECT payload FROM pbx_webhooks.call_ended_events
+       WHERE call_session_seq IS NULL AND processing_status<>'PROCESSED'
+         AND payload->>'callFrom'=ANY($1::text[]) AND payload->>'startedAt' BETWEEN $2 AND $3
+       ORDER BY received_at,recording_id`,
+      [
+        phones,
+        new Date(incoming - window).toISOString(),
+        new Date(incoming + window).toISOString(),
+      ],
+    );
+    for (const event of pending.rows) {
+      let payload: CallEndedPayload;
+      try {
+        payload = parseCallEndedPayload(event.payload);
+      } catch {
+        continue;
+      }
+      try {
+        await this.match(client, payload);
+      } catch (error) {
+        if (
+          !(error instanceof Error) ||
+          error.message !== 'recording_call_time_conflict'
+        )
+          throw error;
+      }
+    }
   }
 }

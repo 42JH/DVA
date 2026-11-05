@@ -36,6 +36,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
     exclude: [
       { path: 'customer/health', method: RequestMethod.ALL },
       { path: 'customer/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
     ],
   });

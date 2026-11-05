@@ -103,5 +103,8 @@ export class AuthService {
     });
     await auth.body?.cancel();
     if (auth.status !== 400) throw unavailable();
+    const events = await this.request('/internal/events', {});
+    await events.body?.cancel();
+    if (events.status !== 400) throw unavailable();
   }
 }

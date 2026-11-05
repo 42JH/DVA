@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { PageRows, readPage } from '../common/pagination-query';
 import { DatabaseService } from '../database/database.service';
+import { CallerContextDto } from './dto/caller-context.dto';
 import { Customer, EmployeeCustomerIdentity } from './customers.types';
 import { CreateCustomerDto, ListCustomersQueryDto } from './dto/customer-request.dto';
 
@@ -35,6 +36,67 @@ export class CustomersRepository {
         [JSON.stringify(rows)],
       )
     ).rows;
+  }
+
+  async context(phoneNumber: string, client?: PoolClient): Promise<CallerContextDto> {
+    // 한 SQL 문장의 스냅샷으로 고객·소속 상태와 허용 주소록을 함께 읽는다.
+    const result = await (client ?? this.database.pool).query<{ context: CallerContextDto }>(
+      `SELECT jsonb_build_object(
+        'lookupStatus', CASE WHEN c.status='ACTIVE' THEN 'REGISTERED' ELSE 'WITHDRAWN' END,
+        'customer', CASE WHEN c.status='ACTIVE' THEN jsonb_build_object(
+          'customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) END,
+        'membership', CASE WHEN c.status='ACTIVE' AND m.membership_seq IS NOT NULL THEN jsonb_build_object(
+          'membershipSeq',m.membership_seq,'customerSeq',m.customer_seq,'organizationSeq',m.organization_seq,
+          'employeeNo',m.employee_no,'role',m.role,'status',m.status,'departmentSeq',m.department_seq) END,
+        'organization', CASE WHEN c.status='ACTIVE' AND o.organization_seq IS NOT NULL THEN jsonb_build_object(
+          'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled) END,
+        'department',CASE WHEN c.status='ACTIVE' AND d.department_seq IS NOT NULL THEN jsonb_build_object(
+          'departmentSeq',d.department_seq,'organizationSeq',d.organization_seq,'name',d.name,'groupBillingEnabled',d.group_billing_enabled) END,
+        'availablePaymentMethods',CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
+          '["billing"]'::jsonb || CASE WHEN
+            (m.membership_seq IS NULL AND c.monthly_billing_enabled)
+            OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
+            THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
+          || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
+            THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END,
+        'availableUsageTypes', CASE
+          WHEN c.status<>'ACTIVE' THEN '[]'::jsonb
+          WHEN m.status='ACTIVE' AND o.status='ACTIVE' THEN '["PERSONAL","COMPANY"]'::jsonb
+          ELSE '["PERSONAL"]'::jsonb END,
+        'personalPins', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+          'personalPinSeq',p.personal_pin_seq,'label',p.label,'addressData',p.address_data,'version',p.version)
+          ORDER BY p.personal_pin_seq)
+          FROM personal_pins p WHERE p.customer_seq=c.customer_seq AND p.deleted_at IS NULL AND c.status='ACTIVE'), '[]'::jsonb),
+        'companyPins', '[]'::jsonb
+      ) AS context
+      FROM customers c
+      LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+      LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+      LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
+      WHERE c.phone_number=$1 AND c.deleted_at IS NULL`,
+      [phoneNumber],
+    );
+    return (
+      result.rows[0]?.context ?? {
+        lookupStatus: 'UNREGISTERED',
+        customer: null,
+        membership: null,
+        organization: null,
+        department: null,
+        availablePaymentMethods: [],
+        availableUsageTypes: [],
+        personalPins: [],
+        companyPins: [],
+      }
+    );
+  }
+
+  async callCustomer(phoneNumber: string): Promise<number | null> {
+    const result = await this.database.pool.query<{ id: number }>(
+      'SELECT customer_seq AS id FROM customers WHERE phone_number=$1 AND deleted_at IS NULL',
+      [phoneNumber],
+    );
+    return result.rows[0]?.id ?? null;
   }
 
   async list(query: ListCustomersQueryDto): Promise<PageRows<Customer>> {
