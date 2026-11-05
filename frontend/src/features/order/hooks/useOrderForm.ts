@@ -136,7 +136,13 @@ export function useOrderForm(
       receiver: party(parties.receiver),
       items: { ...counts, other: orNull(etcItem) },
       declaredValue: declaredValue ? Number(declaredValue) : null,
-      pickupAt: pickupAt ? fromDateTimeLocal(pickupAt) : null,
+      // 안 건드렸으면 서버 원래 값 — 칸은 분까지라 다시 바꾸면 초가 0이 되어 '바뀜'으로 잡힘
+      pickupAt:
+        pickupAt === initialPickup
+          ? (order?.pickupRequestedAt ?? null)
+          : pickupAt
+            ? fromDateTimeLocal(pickupAt)
+            : null,
       paymentMethod: payment,
       request: orNull(request),
       shippingFee: collecting ? (shippingFee ? Number(shippingFee) : null) : undefined,
