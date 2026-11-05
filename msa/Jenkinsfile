@@ -48,6 +48,11 @@ pipeline {
             }
         }
 
+        stage('Verify Event Transport') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
+            steps { sh 'python3 msa/shared/events/verify.py' }
+        }
+
         stage('Select Build Scope') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {

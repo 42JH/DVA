@@ -43,3 +43,10 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - 첫 MR은 공통 기반이다. 기존 5개 업무 앱에 이벤트 핸들러를 등록하거나 외부 업무 API를 제공하는 단계가 아니다.
 - 실제 기능·서비스 DB 연결·전체 동등성 비교·운영 배포는 후속 MR에서 진행하며 현재 미검증이다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
+
+## 첫 MR 검증 기록 (2026-11-05)
+
+- Node.js 24 이벤트 단위 3개, 실제 PostgreSQL 17.11·HTTP 통합 14개, 기준 목록 1개 통과. 수신 COMMIT 후 실제 SIGKILL·새 프로세스 재시작 시 업무 중복 없음, 10개 동시 재수신·source/type/payload 충돌·인증·과대 입력·재시도·잘못된 ACK·리다이렉트·타임아웃·동일 업무 순서 보호 포함.
+- Liquibase 5.0.4 + PostgreSQL 17.11 검증 보고서 `passed=true`, 185단계 완료. 5개 신규 설치·재적용·기존 업무 함수·기존 DB 업그레이드·기존 changeset 이력과 대기 메시지 보존, customer/order 신규 changeset 실패 롤백 포함.
+- Linux Python 기존 배포·선택·복구 회귀 49개 통과. npm의 잠금 파일 기반 설치와 audit에서 취약점 0건.
+- 추적 변경은 msa/docs 안에만 있으며 backend/frontend/ai 변경 없음. 업무 앱 전체 빌드·전체 API 동등성·운영 Jenkins/k3s 실행은 이번 단계에서 검증하지 않았다.
