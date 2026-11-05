@@ -12,6 +12,7 @@ import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 import { timingSafeEqual } from 'node:crypto';
 export const InternalCustomerAuth = () => SetMetadata('auth:internal-customer', true);
+export const InternalSessionAuth = () => SetMetadata('auth:internal-session', true);
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 // Temporary, explicit opt-in for customer context/registration/detail/name updates (Jira 135).
@@ -60,12 +61,16 @@ export class AuthGuard implements CanActivate {
   private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
-    if (this.reflector.getAllAndOverride<boolean>('auth:internal-customer', targets)) {
-      const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+    const session = this.reflector.getAllAndOverride<boolean>('auth:internal-session', targets);
+    if (session || this.reflector.getAllAndOverride<boolean>('auth:internal-customer', targets)) {
+      const tokens = [this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true })];
+      if (session) tokens.push(this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }));
       const actual = Buffer.from(request.get('Authorization') ?? '');
-      const expected = Buffer.from(`Bearer ${token ?? ''}`);
-      if (!token || actual.length !== expected.length || !timingSafeEqual(actual, expected))
-        throw new ApiException(403, 'FORBIDDEN', '서비스 인증이 필요합니다.');
+      const accepted = tokens.some((token) => {
+        const expected = Buffer.from(`Bearer ${token ?? ''}`);
+        return !!token && actual.length === expected.length && timingSafeEqual(actual, expected);
+      });
+      if (!accepted) throw new ApiException(403, 'FORBIDDEN', '서비스 인증이 필요합니다.');
       return true;
     }
     // Existing health and PBX retain their dedicated authentication contracts.

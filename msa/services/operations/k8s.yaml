@@ -59,6 +59,9 @@ spec:
             - name: CUSTOMER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
           resources:
             requests:
               cpu: 100m

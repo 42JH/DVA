@@ -29,13 +29,15 @@ API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Orig
 
 최초 SYSTEM_ADMIN 생성은 Liquibase 적용 후 `node scripts/bootstrap-admin.cjs <loginId> <name>`에 비밀번호를 stdin으로 전달한다. 원본처럼 기존 SYSTEM_ADMIN이 있으면 거절하며 비밀번호를 인자/로그에 넣지 않는다.
 
-## Customer 내부 인증
+## 서비스 내부 인증
 
-`POST /internal/auth/session`은 서비스 Bearer `CUSTOMER_AUTH_TOKEN`과 본문 `{ "sessionToken": "기존 64자 세션 토큰" }`을 받아 기존 AuthService로 현재 세션·권한을 확인한다. 비밀번호·세션 해시를 반환하지 않으며 공개 Swagger·Ingress에서 제외한다. 서비스 토큰만으로 기존 관리자 API에 접근할 수 없다. 환경 값을 생략하면 이 내부 경로는 거절하고 기존 공개 인증은 유지한다.
+`POST /internal/auth/session`은 서비스 Bearer `CUSTOMER_AUTH_TOKEN` 또는 `CONSULTATION_AUTH_TOKEN`과 본문 `{ "sessionToken": "기존 64자 세션 토큰" }`을 받아 기존 AuthService로 현재 세션·권한을 확인한다. 비밀번호·세션 해시를 반환하지 않으며 공개 Swagger·Ingress에서 제외한다. 서비스 토큰만으로 기존 관리자 API에 접근할 수 없다. 두 서비스 토큰을 모두 생략하면 이 내부 경로는 거절하고 기존 공개 인증은 유지한다.
 
 배포 스크립트는 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성하고 기존 값은 바꾸지 않는다. customer와 operations가 이 Secret을 공유한다. customer readiness가 새 내부 경로를 요구하므로 두 서비스가 선택되면 operations를 먼저 배포한다.
 
-`POST /internal/events`도 같은 서비스 Bearer를 요구하며 공개 Swagger/Ingress에서 제외한다. customer의 AuditPrepared는 원본 감사 제약을 적용한 뒤 005의 비공개 준비 테이블에 보관한다. AuditCommitted는 inbox와 감사 행을 함께 커밋하며 중복 재반영을 막고, AuditAborted는 늦은 준비를 차단한다. 감사 조회 직전에 준비 상태가 있으면 `CUSTOMER_URL`의 `/internal/audit/flush`로 결정 확인 이벤트를 보낸다. `CUSTOMER_URL`은 자격정보·경로·query 없는 HTTP(S) origin이며 k8s에서는 `http://customer:3001`이다. 진행 중 업무의 잠금을 강제로 해제하거나 다른 DB를 직접 읽지 않는다. 상세 경계와 강제 종료 복구 검증은 [customer 쓰기 계획](../../../docs/msa-customer-writes-plan.md)을 따른다.
+consultation은 별도 `dva/msa-consultation-auth` Secret의 `consultation-token`을 공유한다. 같은 최초 생성/기존 값 보존 정책이며 consultation도 operations 이후 배포한다. consultation 토큰은 세션 확인에만 허용하고 customer 감사 수신에는 허용하지 않는다. 세션/관리자를 다른 DB에 복제하지 않는다.
+
+`POST /internal/events`는 `CUSTOMER_AUTH_TOKEN`만 허용하며 공개 Swagger/Ingress에서 제외한다. customer의 AuditPrepared는 원본 감사 제약을 적용한 뒤 005의 비공개 준비 테이블에 보관한다. AuditCommitted는 inbox와 감사 행을 함께 커밋하며 중복 재반영을 막고, AuditAborted는 늦은 준비를 차단한다. 감사 조회 직전에 준비 상태가 있으면 `CUSTOMER_URL`의 `/internal/audit/flush`로 결정 확인 이벤트를 보낸다. `CUSTOMER_URL`은 자격정보·경로·query 없는 HTTP(S) origin이며 k8s에서는 `http://customer:3001`이다. 진행 중 업무의 잠금을 강제로 해제하거나 다른 DB를 직접 읽지 않는다. 상세 경계와 강제 종료 복구 검증은 [customer 쓰기 계획](../../../docs/msa-customer-writes-plan.md)을 따른다.
 
 ## 빌드와 자동 배포
 

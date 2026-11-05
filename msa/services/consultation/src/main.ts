@@ -1,11 +1,34 @@
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import 'reflect-metadata';
 import { AppModule } from './app.module';
-import { configureApp } from './configure-app';
+import {
+  type Environment,
+  EnvironmentValidationError,
+} from './config/environment';
+import { configureApplication } from './configure-application';
+import { JsonLogger } from './observability/json-logger';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
-  configureApp(app);
-  await app.listen(process.env.PORT ?? 3004, '0.0.0.0');
+const logger = new JsonLogger();
+
+async function bootstrap(): Promise<void> {
+  const app = await NestFactory.create(AppModule, {
+    abortOnError: false,
+    logger,
+  });
+  configureApplication(app);
+  const port = app
+    .get<ConfigService<Environment, true>>(ConfigService)
+    .get('PORT', { infer: true });
+  await app.listen(port, '0.0.0.0');
+  logger.log({ event: 'backend_started' });
 }
 
-void bootstrap();
+void bootstrap().catch((error: unknown) => {
+  logger.error({
+    event: 'backend_startup_failed',
+    invalidFields:
+      error instanceof EnvironmentValidationError ? error.fields : undefined,
+  });
+  process.exit(1);
+});
