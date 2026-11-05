@@ -135,7 +135,9 @@ describe('Customer read API (e2e)', () => {
         for (const [path, methods] of Object.entries({
           '/api/customers': ['get', 'post'],
           '/api/customers/context': ['post'],
-          '/api/customers/{id}': ['get'],
+          '/api/customers/{id}': ['get', 'patch'],
+          '/api/customers/{id}/pins': ['get', 'post'],
+          '/api/pins/{id}': ['patch'],
           '/api/companies': ['get', 'post'],
           '/api/companies/search': ['get'],
           '/api/companies/{id}': ['get', 'patch', 'delete'],
@@ -148,6 +150,7 @@ describe('Customer read API (e2e)', () => {
         }
         expect(paths['/api/companies/{id}/billing']).toBeUndefined();
         expect(paths['/internal/audit/flush']).toBeUndefined();
+        expect(paths['/internal/call-scope']).toBeUndefined();
       });
   });
   it('authenticates internal audit barriers independently of administrator cookies', async () => {
@@ -162,6 +165,41 @@ describe('Customer read API (e2e)', () => {
       .set('Authorization', 'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a'))
       .send({})
       .expect(400);
+  });
+  it('authenticates scoped execution separately and rejects forged command or caller fields', async () => {
+    const token = 'pin-scope-test-token-'.padEnd(48, 'c');
+    app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);
+    for (const authorization of ['', 'Bearer wrong', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN])
+      await request(app.getHttpServer())
+        .post('/internal/call-scope')
+        .set('Authorization', authorization)
+        .send({})
+        .expect(403);
+    const event = {
+      eventId: '00000000-0000-4000-8000-000000000022',
+      source: 'consultation',
+      eventType: 'CallScopedCustomerRequested',
+      payload: {
+        command: {
+          operation: 'CustomerUpdated',
+          id: 1,
+          callSessionSeq: 1,
+          input: { address: null },
+          requestId: '00000000-0000-4000-8000-000000000023',
+        },
+        caller: { phone: null, customerSeq: null, endedAt: 'invalid' },
+      },
+    };
+    for (const invalid of [
+      event,
+      { ...event, source: 'customer' },
+      { ...event, payload: { ...event.payload, actorId: 1 } },
+    ])
+      await request(app.getHttpServer())
+        .post('/internal/call-scope')
+        .set('Authorization', 'Bearer ' + token)
+        .send(invalid)
+        .expect(422);
   });
   it('requires current sessions for administrator reads and preserves error envelopes', async () => {
     await request(app.getHttpServer())

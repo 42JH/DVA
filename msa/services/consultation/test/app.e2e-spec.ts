@@ -88,6 +88,25 @@ describe('Consultation PBX and active calls (e2e)', () => {
         .expect(401)
         .expect('Cache-Control', 'no-store');
   });
+  it('rejects unauthenticated or forged scoped commands before using a call connection', async () => {
+    const previous = pool.query.mock.calls.length;
+    for (const authorization of [
+      '',
+      'Bearer wrong',
+      'Bearer ' + process.env.CONSULTATION_AUTH_TOKEN,
+    ])
+      await request(app.getHttpServer())
+        .post('/internal/call-scope')
+        .set('Authorization', authorization)
+        .send({})
+        .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/call-scope')
+      .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+      .send({})
+      .expect(422);
+    expect(pool.query.mock.calls.length).toBe(previous);
+  });
   it('preserves dedicated PBX authentication on direct and public proxy paths', async () => {
     const previous = pool.query.mock.calls.length;
     for (const path of [

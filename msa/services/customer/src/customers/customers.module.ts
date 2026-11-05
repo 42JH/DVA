@@ -1,3 +1,4 @@
+import { CallScopeModule } from '../call-scope/call-scope.module';
 import { CallContextClient } from './call-context.client';
 import { CallerContextQueryController } from './caller-context.controller';
 import { Module } from '@nestjs/common';
@@ -7,7 +8,7 @@ import { CustomersRepository } from './customers.repository';
 import { CustomersService } from './customers.service';
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, CallScopeModule],
   controllers: [CustomersController, CallerContextQueryController],
   providers: [CustomersService, CustomersRepository, CallContextClient],
   exports: [CustomersService],

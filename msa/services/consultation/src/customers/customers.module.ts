@@ -1,3 +1,4 @@
+import { CallScopeController } from './call-scope.controller';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { ConsultationsModule } from '../consultations/consultations.module';
@@ -7,7 +8,7 @@ import { CustomerContextClient } from './customer-context.client';
 
 @Module({
   imports: [DatabaseModule, ConsultationsModule],
-  controllers: [CallerContextCommandController],
+  controllers: [CallerContextCommandController, CallScopeController],
   providers: [CustomersService, CustomerContextClient],
   exports: [CustomerContextClient],
 })

@@ -1,3 +1,4 @@
+import { json } from 'express';
 import {
   ForbiddenException,
   INestApplication,
@@ -29,6 +30,14 @@ export function configureApplication(
     next();
   });
   app.use(requestContext(logger));
+  const scopeParser = json({ limit: '256kb' });
+  // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
+  app.use(
+    '/internal/call-scope',
+    (request: Request, response: Response, next: NextFunction) => {
+      scopeParser(request, response, next);
+    },
+  );
   app.enableCors({
     origin: (
       origin: string | undefined,
@@ -56,6 +65,7 @@ export function configureApplication(
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
       { path: 'internal/caller-context', method: RequestMethod.ALL },
+      { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'consultation/health', method: RequestMethod.ALL },
       { path: 'consultation/health/ready', method: RequestMethod.ALL },

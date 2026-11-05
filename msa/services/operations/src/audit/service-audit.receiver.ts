@@ -16,6 +16,9 @@ const integer = (value: unknown) =>
 const invalid = () => new HttpException({ error: 'INVALID_AUDIT_EVENT' }, 422);
 const actions = new Set([
   'CUSTOMER_CREATED',
+  'CUSTOMER_UPDATED',
+  'PERSONAL_PIN_CREATED',
+  'PERSONAL_PIN_UPDATED',
   'ORGANIZATION_CREATED',
   'ORGANIZATION_UPDATED',
   'ORGANIZATION_DELETED',
@@ -29,7 +32,14 @@ const actions = new Set([
   'COMPANY_PIN_UPDATED',
   'COMPANY_PIN_DELETED',
 ]);
-const targets = new Set(['CUSTOMER', 'ORGANIZATION', 'DEPARTMENT', 'MEMBERSHIP', 'COMPANY_PIN']);
+const targets = new Set([
+  'CUSTOMER',
+  'PERSONAL_PIN',
+  'ORGANIZATION',
+  'DEPARTMENT',
+  'MEMBERSHIP',
+  'COMPANY_PIN',
+]);
 function auditInput(payload: Record<string, unknown>, service: 'customer' | 'consultation') {
   const audit = payload.audit;
   if (

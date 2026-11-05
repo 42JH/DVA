@@ -10,6 +10,8 @@
 
 customer의 기존 `POST /api/customers/context`에 call이 들어오면 내부 등록 이벤트로 통화를 생성·재사용한다. [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md)을 따른다. 고객·주문을 생성하지 않으며 동일 통화 ID·발신번호·수신 시각·고객 논리 참조와 PBX 선도착 매칭을 유지한다. CALL_STARTED 감사 확정 후 응답하고 고객 조회/감사 준비 실패는 통화·PBX 연결·명령 수신 기록을 롤백한다. 명령 응답 유실·중복·실제 생산자 종료 복구도 검증한다.
 
+customer의 고객 주소/PIN 요청은 `POST /internal/call-scope`에서 기존 CUSTOMER_AUTH_TOKEN으로 받는다. 원본 통화 조건으로 현재 발신번호·고객 참조·종료 상태를 읽고, 쓰기에는 FOR SHARE를 유지하면서 기존 CONSULTATION_AUTH_TOKEN으로 customer의 고정 내부 실행 경로에 위임한다. customer의 업무/수신 기록/감사 확정 후 반환하며 관리자나 주소록을 consultation DB에 복제하지 않는다. 공개 API/Swagger/Ingress에 이 경로를 추가하지 않는다. 상세 범위와 검증 한계는 [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)에 기록한다.
+
 기존 PBX·녹취의 고정 연결·유일 후보·claim/재시도·S3 조건부 저장과 미연결 수신 30분 정리를 유지한다. 주문 결과·다른 상담/AI API·전체 보관 워커는 후속이다. 명령 수신 기록의 입력은 전체 보관 워커 이식 전까지 유지한다.
 
 ## 환경과 DB
