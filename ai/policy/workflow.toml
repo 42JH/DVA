@@ -137,7 +137,7 @@ pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시�
 
 # --- 서버 결과 읽는 법(Live 지시문에 렌더링). 서버는 사실(JSON)만 보낸다 — 키의 뜻을 여기서 정한다 ---
 [results]
-parcel_added = "이 택배를 같은 주문 안에 담았다. 주문 전송은 통화 종료 과정에서 전체를 한 번에 한다(그 전까지 고칠 수 있다). '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. address_save가 함께 오면 담았다고 안내한 뒤 그 저장 여부만 묻고, 고객이 답하면 더 보낼 택배가 있는지 묻는다. 접수 완료라고 말하지 않는다"
+parcel_added = "이 택배를 담았다. 접수(주문 전송)는 더 보낼 택배가 없다고 확인되면 서버가 한다(그 전까지는 담아 두고 고칠 수 있다). '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. address_save가 함께 오면 담았다고 안내한 뒤 그 저장 여부만 묻고, 고객이 답하면 더 보낼 택배가 있는지 묻는다. 접수 완료라고 말하지 않는다"
 readback = "이 값 그대로 되읽고 맞는지 묻는다(고객이 확인 질문을 끝까지 듣고 답해야 확정된다)"
 missing = "아직 받지 못한 항목. 받는 순서에서 빠진 첫 항목을 묻는다"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"
@@ -148,7 +148,7 @@ unverified = "방금 말한 것 중 사실이 아닌 표현. truth의 값이 사
 cancel = "취소 결과: done=취소됨, already=이미 취소된 접수, locked=결제가 끝나 전화로 취소 불가, unknown=확인 중(완료라고 말하지 않는다)"
 agent = "상담원 연결 상태. suggest = 같은 질문에 답을 못 드려 상담원 연결을 권한다. transferring = '담당 상담원에게 바로 연결해 드리겠습니다. 잠시만 기다려 주세요'라고 한 번 말한다(말이 끝나면 서버가 전화를 넘긴다). callback_offer = 지금은 상담원 연결 가능 시간이 아니다 — '죄송하지만 지금은 상담원 연결 가능 시간이 아니라 연결이 어렵습니다. 지금 거신 번호로 담당자가 다음 영업일 오전에 먼저 연락드려도 될까요?'라고 묻는다. callback_registered = 연락드리겠다고 안내한다. callback_declined = 알겠다고 하고 하던 일로 돌아간다. transfer_failed = 연결이 되지 않았다고 사과하고 callback_offer처럼 묻는다. not_configured = 지금은 바로 연결이 안 된다, 담당자가 확인 후 연락드린다고 안내한다"
 unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로 말하지 않고 지금 확인이 어렵다고 안내한다"
-confirmation = "확인 대기 상태. ask_again은 접수 내용 readback을 확인한다. cancel_ask_again은 cancel_target으로 취소 대상을 다시 확인하고 취소할지 묻는다(접수 문구 금지). cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
+confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되읽고 '이대로 접수할까요?'로 묻는다(고객이 그 질문에 답해야 확정된다). cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
 origin = "보내는 곳. prefilled = 등록된 출발지로 보내는 분 성함·주소·상세를 채웠다(묻지 않는다, 상세주소는 읽지 않는다). name_only = 다른 곳에서 보낸다 — 성함만 채웠고 보내는 곳 주소를 묻는다. origin_confirm이 있으면 '{그 주소}에서 보내시나요?'라고 한 번 묻는다"
 address_save = "택배를 담은 뒤 따로 묻는 주소 저장. sender = 이번 보내는 곳을 다음부터 기본 출발지로 쓸지(지금 기본 출발지를 바꾼다), receiver = 받는 곳을 주소록에 추가할지. 되읽기 확인 질문과 섞지 않는다. 둘 다 오면 한 질문으로 묻고 한 번의 답으로 둘 다 정한다. 고객이 동의할 때만 서버가 저장하며, 저장했다고 먼저 말하지 않는다"
@@ -165,8 +165,8 @@ instructions = "고객 발화의 용건을 고른다. 택배 접수 정보 제�
 [[decision.collect.questions]]
 name = "switch"
 type = "choice"
-choices = ["none", "order", "edit_parcel", "lookup", "cancel", "inquiry", "agent", "end"]
-instructions = "고객의 업무 전환을 고른다. 접수를 새로 시작하거나 조회·취소·문의 후 접수로 돌아오려 하면 order. 진행 중인 접수 정보를 말하거나 질문에 답하면 none, 이미 담은 택배를 고치려 하면 edit_parcel, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화를 끝내려 하면 end. 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent."
+choices = ["none", "edit_parcel", "lookup", "cancel", "inquiry", "agent", "end"]
+instructions = "고객이 하던 접수와 다른 일을 하려는지 고른다. 접수 정보를 말하거나 질문에 답하면 none, 이미 담은 택배를 고치려 하면 edit_parcel, 보낸 택배 조회는 lookup, 취소는 cancel, 서비스 질문은 inquiry, 상담원 요청은 agent, 통화를 끝내려 하면 end. 직전 AI 발화가 상담원 연결을 권했고 고객이 동의하면 agent."
 
 [[decision.confirm.questions]]
 name = "confirm"

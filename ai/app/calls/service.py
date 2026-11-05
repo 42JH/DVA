@@ -54,9 +54,7 @@ class CallService:
         c = deps.cfg
         self.persona = PersonaManager(deps.backend.api, entry_wait_sec=c.persona_budget_sec, retry_sec=c.persona_retry_sec,
                                       report_attempts=c.persona_report_attempts,
-                                      max_prompt_chars=c.persona_max_prompt_chars,
-                                      enabled=False if c.live_led and c.live_led_persona_version is None else None,
-                                      allowed_version=c.live_led_persona_version if c.live_led else None)
+                                      max_prompt_chars=c.persona_max_prompt_chars)
         self.handlers: dict[str, Handler] = {"session.started": self._on_started, "session.closed": self._on_closed,
                                              "error": self._on_error, "session.usage.updated": self._on_usage,
                                              "session.input_transcript.delta": self._on_input,
@@ -105,10 +103,7 @@ class CallService:
             return
         if isinstance(persona, BaseException):
             raise persona
-        approved = not self.d.cfg.live_led or (persona and persona.version_seq == self.d.cfg.live_led_persona_version)
-        s.persona_version_seq = persona.version_seq if persona and approved else None
-        if persona and not approved:
-            log.warning("Live 주도 모드: 검토 버전이 아닌 운영 지시문 대신 서버 기본 말투 사용")
+        s.persona_version_seq = persona.version_seq if persona else None  # 이 통화가 끝까지 쓰는 버전(분석에 그대로)
         try:
             with span("accept"):
                 await _timed(s, "accept", self.d.client.live.sessions.accept(s.call_id,
@@ -134,19 +129,13 @@ class CallService:
             info["고객 성함"] = c.name
         if c.customer_seq and c.origin_address:
             info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
-        from app.tools import MODEL_TOOLS
-        live_led = self.d.cfg.live_led
-        s.tools.live_led = live_led
-        s.state.require_resolved_addresses = live_led
-        specs = function_specs(tuple(MODEL_TOOLS)) if live_led else function_specs()
-        tools = tuple((t["name"], t["description"]) for t in specs)
-        prompt = persona.prompt if persona and (not live_led or persona.version_seq == self.d.cfg.live_led_persona_version) else None
+        tools = tuple((t["name"], t["description"]) for t in function_specs())
         config = {"type": "live", "model": "gpt-live-1",
-                "instructions": render_live(prompt, self.d.policy, info, tools, live_led=live_led),
+                "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
                     "model": self.d.backend_model,
-                    "instructions": render_backend(self.d.policy, live_led=live_led) + f"\n세션 시작 시각(한국): {_kst(_utc_now())}",
-                    "tools": specs, "tool_choice": "auto", "parallel_tool_calls": False,
+                    "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
+                    "tools": function_specs(), "tool_choice": "auto", "parallel_tool_calls": False,
                     "reasoning": {"effort": self.d.backend_effort}, "text": {"verbosity": "low"},
                     "service_tier": "priority"}}}
         if persona and persona.voice:  # 원본 live_session.build_session과 같은 자리
@@ -216,7 +205,7 @@ class CallService:
         ctx.recent_destinations = dests if isinstance(dests, list) else []
         if ctx.recent_origin or ctx.recent_destinations:
             async with s.lock:
-                _apply_history(s.state, ctx)
+                _apply_context(s.state, ctx, s.caller)
 
     async def call_session_seq(self, s: CallSession) -> int | None:
         """조회·취소가 쓰는 통화 번호. 2단계를 시작하고(이미 했으면 그대로) 잠금 밖에서 기다린다."""
@@ -335,15 +324,8 @@ class CallService:
     async def finalize(self, s: CallSession) -> None:
         if s.phase in (Phase.FINALIZING, Phase.DONE):
             return
-        s.tools.ending = True
-        deadline = time.monotonic() + self.d.cfg.finalize_wait_sec
-        while s.tools.recording and time.monotonic() < deadline:
-            await asyncio.sleep(0.02)
-        if s.tools.recording:
-            s.state.unresolved_fields.add("pending_recordings")
         async with s.lock:
             s.closed = True                                         # 1 이후 반영·부작용 거부
-            s.tools.closed = True
         self._phase(s, Phase.FINALIZING)
         for name in list(s.timers):                                 # 2 타이머·확정 대기 취소
             s.cancel_timer(name)
@@ -368,8 +350,6 @@ class CallService:
         trace_id_var.set("-")
 
     async def warmup(self) -> None:
-        if self.d.cfg.live_led:
-            return  # 이 통화 경로는 별도 Decision을 쓰지 않는다
         """Decision API 콜드 첫 호출이 1.7~2.3초(S0c) — 서버 시작 시 1번(S5 실통화 첫 판정이 DECISION_TIMEOUT)."""
         from app.policy.render import decision_questions
         try:
@@ -435,33 +415,6 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
             places.append(Place(p.name, p.phone, p.address, p.address_detail, geo, src))
     if places:
         c.places = tuple(places)
-    state.bump()
-
-
-def _apply_history(state: ConversationState, ctx) -> None:
-    """늦게 도착한 이력은 후보만 보충한다. 고객의 새 값·기본 주소·선택 결과를 되돌리지 않는다."""
-    c = state.customer
-    if c.customer_seq != ctx.customer_seq:
-        return
-    recent = []
-    for p in ctx.recent_destinations:
-        g = p.geo
-        recent.append(Place(p.name, p.phone, p.address, p.address_detail,
-                            Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None, Source.HISTORY))
-    places, seen = [], set()
-    for p in (*recent, *c.places):
-        key = (p.name, p.address, p.address_detail)
-        if key not in seen:
-            places.append(p)
-            seen.add(key)
-    c.places = tuple(places)
-    has_sender = state.current is not None and state.current["sender_address"].valid
-    p = ctx.recent_origin
-    if p and p.address and c.origin_place is None and not state.origin_applied and not has_sender:
-        g = p.geo
-        c.origin_place = Place(c.name or p.name, p.phone, p.address, p.address_detail,
-                               Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None, Source.HISTORY)
-        c.origin_address = p.address
     state.bump()
 
 

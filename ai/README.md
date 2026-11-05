@@ -1,18 +1,4 @@
-# 디바콜 AI 전화 상담 서버
-
-현재 서버 진입점은 `app/main.py`다. 이 브랜치의 `config/server.toml`은 `[call].live_led=true`로 준비돼 있다. Live가 입력 제약·질문·수락을 판단하고 Responses 모델은 기록/실행 어댑터로 사용한다. 실제 조회·주소 확정·접수·취소 결과는 서버가 관리한다. 운영 배포는 별도다.
-
-- 규칙 원문: `policy/business_rules.md`, 수치 원본: `policy/input_rules.toml`, 수거/절차 설정: `policy/workflow.toml`.
-- `app/policy/render.py`가 위 규칙과 말투를 Live instructions로 조립한다. `backend_rules_live.md`는 별도 Responses 어댑터 지시문이다.
-- 새 모드는 검토한 `live_led_persona_version`을 지정하기 전 서버 기본 말투를 사용한다. 과거 운영 페르소나를 섞거나 적용 완료로 회신하지 않는다.
-- 기존 경로로 돌아가려면 `[call].live_led=false`로 새 통화를 시작한다. 진행 중 통화의 모드는 바뀌지 않는다.
-- 외부 API 없는 전체 검사: `uv run pytest -q`. Windows의 제한된 실행 환경에서 비동기 루프가 멈추면 일반 실행 환경에서 검사한다.
-- 실제 합성 음성 검사: `uv run --env-file .env python -m scripts.check_live_led --run` 및 `--acceptance-only`. OpenAI 사용료가 발생하며 실제 PBX/BE 주문에는 연결하지 않는다.
-- 설계·검증 범위·미검증 사항: [Live 주도 개편](docs/architecture/live-led-workflow-redesign.md#14-구현-결과와-검증).
-
-## 이전 모듈 분리 당시 기록
-
-아래는 2026-11-03 재구성 시작 당시 자료다. 현재 서버 기능/테스트 수/프롬프트는 위 설명과 구현 결과를 우선한다.
+# 재구성용 모듈
 
 디바콜 전화 접수 서버(`S15P31D109/ai`, 2026-11-03 `exp/no-speech-injection` 기준)에서 통화 흐름과 상관없는 기능만 떼어 낸 모듈 네 개다. 통화 흐름(단계, 진행 상태, 판별기, sideband, Live 세션 설정, 관제, 페르소나 관리)은 가져오지 않았다. 그 부분은 새로 만들 서버가 이 모듈들을 조합해 구현한다.
 

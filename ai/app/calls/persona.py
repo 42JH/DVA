@@ -61,13 +61,12 @@ def check(data: dict, max_chars: int) -> Persona:
 
 class PersonaManager:
     def __init__(self, api, *, entry_wait_sec: float = 1.0, retry_sec: float = 5.0, report_attempts: int = 3,
-                 max_prompt_chars: int = 20000, enabled: bool | None = None, allowed_version: int | None = None):
+                 max_prompt_chars: int = 20000, enabled: bool | None = None):
         self.api = api  # backend_client(BackendAPI·MockBackend): persona_config·persona_result
         self.entry_wait_sec, self.retry_sec = entry_wait_sec, retry_sec
         self.report_attempts, self.max_prompt_chars = report_attempts, max_prompt_chars
         # 실제 BE는 AI_PERSONA_TOKEN이 있을 때만(없으면 서버 기본 프롬프트). 가짜 BE는 토큰 없이 켠다
         self.enabled = bool(getattr(api, "persona_token", True)) if enabled is None else enabled
-        self.allowed_version = allowed_version
         self.active: Persona | None = None  # 새 통화의 기본 설정(BE ACTIVE)
         self.loaded = False                 # ACTIVE를 한 번이라도 확인했는지
         self.unresolved = False             # APPLIED 회신 결과 불명확(확인될 때까지 새 통화 거절)
@@ -128,10 +127,6 @@ class PersonaManager:
                 # 대기 없음, 또는 이미 실패를 회신한 요청. 앞선 회신이 불명확했어도 방금 조회한 ACTIVE가 결과다
                 self.unresolved = False
                 return
-            if self.allowed_version is not None and pending.get("aiPersonaVersionSeq") != self.allowed_version:
-                log.warning("검토하지 않은 Live 주도 페르소나 대기는 적용하지 않음")
-                self.unresolved = False
-                return  # APPLIED/FAILED를 허위 회신하지 않고 BE의 PENDING을 유지
             if await self._apply(pending):
                 return
             # 409: 그사이 대기가 교체됐다. ACTIVE·PENDING을 다시 맞춘다
@@ -145,8 +140,6 @@ class PersonaManager:
             return
         try:
             self.active = check(data, self.max_prompt_chars)
-            if self.allowed_version is not None and self.active.version_seq != self.allowed_version:
-                self.active = None
         except PersonaError as e:
             log.error("BE ACTIVE 페르소나를 쓸 수 없음 → 서버 기본 프롬프트: %s", e.code)
             self.active = None

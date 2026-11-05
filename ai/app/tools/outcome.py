@@ -38,10 +38,5 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     fields = {}
     if state.current is not None:
         fields = {n: f.status.value for n, f in state.current.fields.items() if policy.fields[n].kind != "auto"}
-    result = {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
-              "parcels": len(state.parcels)}
-    if state.pending:
-        result["confirmation"] = {"id": state.pending.id, "kind": state.pending.kind}
-    if state.candidates:
-        result["candidates"] = {"version": state.candidates.version, "labels": list(state.candidates.labels)}
-    return result
+    return {"stage": a.stage, "fields": fields, "missing": list(a.missing), "can_proceed": a.readback_ready,
+            "parcels": len(state.parcels)}

@@ -5,7 +5,6 @@ CallService.handlers에 붙는 동기 핸들러(상태 갱신 + 작업 생성만
 """
 
 import asyncio
-from datetime import datetime, timezone
 from datetime import time as dtime
 import hashlib
 import json
@@ -17,11 +16,10 @@ from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
 from app.domain.address_book import prefill_sender
 from app.domain.assess import assess, readback_facts
-from app.domain.preparation import prepare_confirmation
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
-                                release, take_cancel, asks)
+                                release, take_cancel)
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
@@ -69,8 +67,6 @@ class Runtime:
     cust_end_t: float = 0.0                           # 관제: 마지막 고객 발화 끝(→ AI 말 시작)
     await_speech: tuple[str, float] | None = None     # 관제: (구간 이름, 시작) — 다음 AI 발화 시작까지
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
-    last_customer: Spoken | None = None
-    actions: set[tuple] = field(default_factory=set)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -102,9 +98,6 @@ class LiveFlow:
     def on_started(self, s: CallSession) -> None:
         """상담원이 먼저 인사한다: 지시문만으로는 고객이 "여보세요"를 할 때까지 기다리는 일이 많았다(2026-11-03 통화 6건 중 4건).
         세션이 열리면 N2(말할 거리)로 첫 인사를 시킨다. AI가 이미 말하기 시작했거나 고객이 먼저 말했으면 보내지 않는다."""
-        s.tools.live_led = self.cfg.live_led
-        if self.cfg.live_led:
-            s.tools.control = lambda args: self.control(s, args)
         if s.last_output_t == 0 and self.rt(s).cust is None:
             s.spawn(self.notify(s, "N2", {"call_started": True}), "greet")
 
@@ -114,12 +107,8 @@ class LiveFlow:
         if rt.cust is None:
             rt.seq += 1
             rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
-            if self.cfg.live_led:
-                s.tools.last_utterance_id = rt.cust.utterance_id
-                s.spawn(self.publish_context(s), "input-reference")
         rt.cust.text += ev.get("delta", "")
         rt.cust.end_ms, rt.cust.t_last = ev.get("end_ms") or rt.cust.end_ms, now
-        s.tools.last_utterance_at = datetime.fromtimestamp(now, timezone.utc)
         _transcript(s, "customer", rt.cust)
         if rt.commit is not None:  # 확정 지연 중 새 발화 → 확정 취소, 새 Decision을 기다린다(§5.2)
             rt.commit.cancel()
@@ -156,99 +145,9 @@ class LiveFlow:
         utt, rt.cust, rt.endpoint = rt.cust, None, None
         if utt:
             rt.cust_end_t = utt.t_last
-            rt.last_customer = utt
-            s.tools.last_utterance_id = utt.utterance_id
-            s.tools.last_utterance_at = datetime.fromtimestamp(utt.t_last, timezone.utc)
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
-            if self.cfg.live_led:
-                s.spawn(self.publish_context(s), "live-context")
-            else:
-                s.spawn(self.judge(s, utt, prev), "decision")
-
-    async def publish_context(self, s: CallSession) -> None:
-        """현재 시각·실행 참조만 제공한다. 고객의 뜻을 별도 모델로 재판정하지 않는다."""
-        async with s.lock:
-            data = state_summary(s.state, self.policy) | {
-                "utterance_id": s.tools.last_utterance_id, "now": s.tools.now().isoformat(),
-                "utterance_at": s.tools.last_utterance_at.isoformat() if s.tools.last_utterance_at else None,
-                "recording": s.tools.recording, "address_pending": s.tools.address_pending}
-        await self.send(s, {"type": "session.thinking.append", "delegation_id": None,
-                            "content": "[통화 상태] " + json.dumps(data, ensure_ascii=False)})
-
-    async def control(self, s: CallSession, args: dict) -> dict:
-        """Responses 어댑터의 행동 요청. 의미 분류를 다시 호출하지 않고 참조와 실행 상태를 검사한다."""
-        rt, st = self.rt(s), s.state
-        action, uid = args["action"], args["utterance_id"]
-        token = (uid, action, args.get("pending_id"), args.get("candidate_version"), args.get("candidate_label"), args.get("field"))
-        async with s.lock:
-            if s.closed or s.phase != Phase.ACTIVE:
-                return {"status": "rejected", "code": "CALL_ENDING"}
-            if rt.cust is not None or uid != s.tools.last_utterance_id:
-                return {"status": "rejected", "code": "ACTION_STALE", "utterance_id": s.tools.last_utterance_id}
-            if token in rt.actions:
-                return {"duplicate": True}
-            if st.order_submitted and action in ("order", "more", "confirm", "change"):
-                return {"status": "rejected", "code": "ORDER_SUBMITTED"}
-            if s.tools.address_pending and action not in ("end", "agent", "change", "reject"):
-                return {"status": "rejected", "code": "ADDRESS_PENDING"}
-            if action in ("more", "no_more") and st.current is not None and not st.current.empty():
-                return {"status": "needs_confirmation", "code": "CURRENT_PARCEL_UNCONFIRMED",
-                        "summary": state_summary(st, self.policy), **prepare_confirmation(s.tools)}
-            if action in ("confirm", "change", "reject"):
-                p = st.pending
-                if p is None or p.id != args.get("pending_id"):
-                    return {"status": "rejected", "code": "CONFIRM_STALE"}
-                if action == "confirm":
-                    from app.domain.confirm import confirmation_matches
-                    if s.tools.recording or st.unresolved_fields or not confirmation_matches(st, self.policy, p):
-                        return {"status": "rejected", "code": "CONFIRM_SNAPSHOT_CHANGED"}
-                    utterance = rt.last_customer
-                    prev = next((a for a in reversed(rt.ai) if utterance and a.t_start < utterance.t_start), None)
-                    if utterance is None or prev is None or prev.t_start < p.issued_t:
-                        return {"status": "rejected", "code": "CONFIRM_NOT_PRESENTED"}
-                    if p.kind == "cancel" and (utterance.start_ms < prev.end_ms or not asks(prev.text)):
-                        return {"status": "rejected", "code": "CANCEL_CONFIRM_NOT_FINISHED"}
-                    rt.confirm_t = utterance.t_last
-                    self._arm_commit(s, p.id)
-                else:
-                    release(st, p.id)
-            elif action == "select":
-                c = st.candidates
-                if not c or c.version != args.get("candidate_version") or not apply_pick(st, args.get("candidate_label")):
-                    return {"status": "rejected", "code": "CANDIDATE_STALE"}
-            elif action.startswith("origin_"):
-                if not st.origin_offered or st.origin_applied:
-                    return {"status": "rejected", "code": "ORIGIN_NOT_PENDING"}
-                st.origin_answer = action == "origin_yes"
-            elif action.startswith("save_"):
-                if not _save_pending(st):
-                    return {"status": "rejected", "code": "SAVE_NOT_PENDING"}
-                st.address_consent = action == "save_yes"
-            elif action.startswith("callback_"):
-                if not st.callback_offered:
-                    return {"status": "rejected", "code": "CALLBACK_NOT_PENDING"}
-                st.callback_offered = False
-                st.callback_requested = action == "callback_yes"
-            elif action == "input_rejected":
-                name = args.get("field")
-                if name not in self.policy.fields and name != "pickup_at":
-                    return {"status": "rejected", "code": "UNKNOWN_FIELD"}
-                st.input_rejections[name] = st.input_rejections.get(name, 0) + 1
-            rt.actions.add(token)
-        if action in BUSINESS + ("end",):
-            await self._on_intent(s, action)
-        elif action in ("more", "no_more"):
-            await self._follow(s, action, None)
-        elif action == "select":
-            await self._follow(s, "picked", args.get("candidate_label"))
-        elif action.startswith("origin_"):
-            await self._follow(s, "origin", None)
-        elif action.startswith("save_"):
-            await self._follow(s, "save", None)
-        elif action.startswith("callback_"):
-            await self._follow(s, "callback", "yes" if st.callback_requested else "no")
-        return {"action": action, "summary": state_summary(st, self.policy)}
+            s.spawn(self.judge(s, utt, prev), "decision")
 
     def _ai_done(self, s: CallSession) -> None:
         """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)."""
@@ -323,8 +222,8 @@ class LiveFlow:
                 followups.append(("intent", t[0]))
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none":
                 followups.append(("intent", w[0]))
-            if (m := answers.get("more")) and m[1] >= th and m[0] in ("more", "no_more") and st.parcels:
-                followups.append((m[0], None))
+            if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
+                followups.append(("no_more", None))
             if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and _save_pending(st):
                 st.address_consent = sv[0] == "yes"  # 제안한 주소(보내는 곳·받는 곳) 전체에 한 번의 답
                 s.note("주소 저장 동의", sv[0])
@@ -414,10 +313,7 @@ class LiveFlow:
             async with s.lock:
                 pending = st.pending if st.pending and st.pending.id == value else None
                 facts = None
-                if pending and pending.kind == "cancel":
-                    facts = {"confirmation": "cancel_ask_again", "cancel_target": _order_facts(pending.snapshot),
-                             "confirmation_id": pending.id, "confirmation_kind": "cancel"}
-                elif pending and st.current is not None:
+                if pending and st.current is not None:
                     sources = {n: f.source for n, f in st.current.fields.items()}
                     facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
             if facts:
@@ -430,17 +326,15 @@ class LiveFlow:
             await self._on_intent(s, value)
         elif what == "picked":
             async with s.lock:
-                issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" and st.selected_order else None
-                prepared = prepare_confirmation(s.tools) if st.intent == "order" else {}
+                issued = issue_cancel_confirmation(st, s.tools.clock()) if st.selected_order else None
                 summary = state_summary(st, self.policy)
-            await self.notify(s, "N1'", {"picked": value, "summary": summary} | prepared
+            await self.notify(s, "N1'", {"picked": value, "summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
         elif what == "save":
             self._maybe_save_addresses(s)
         elif what == "origin":  # 접수 중에 출발지 답이 옴 → 채우고 다음 질문 기준을 다시 준다
             async with s.lock:
                 facts = self._origin_step(st)
-                facts.update(prepare_confirmation(s.tools))
                 facts["summary"] = state_summary(st, self.policy)
             if facts.get("origin"):
                 await self.notify(s, "N1'", facts)
@@ -451,30 +345,10 @@ class LiveFlow:
             async with s.lock:
                 st.no_more_parcels = True
             await self.notify(s, "N1'", {"more_parcels": False})
-        elif what == "more":
-            async with s.lock:
-                if st.order_submitted:
-                    return
-                st.no_more_parcels = False
-                st.intent = "order"
-                st.candidates, st.selected_order, st.pending = None, None, None
-                st.field_of("sender_phone")  # 같은 주문 안에서 다음 받는 곳의 정보를 받는다
-                if st.parcels:
-                    sender = st.parcels[-1].draft
-                    for name, field in sender.fields.items():
-                        if name.startswith("sender_") and field.valid:
-                            st.record(name, field.value, field.source)
-                    st.current.sender_geo = sender.sender_geo
-                else:
-                    prefill_sender(st, full=st.origin_answer is True)
-                facts = {"more_parcels": True, "summary": state_summary(st, self.policy)}
-            await self.notify(s, "N1'", facts)
+            self._maybe_submit(s)
 
     async def _on_intent(self, s: CallSession, intent: str) -> None:
         st = s.state
-        if intent == "end":
-            s.tools.ending = True
-            await self.drain_recordings(s)
         if intent in BUSINESS:
             self._business(s, intent)
         async with s.lock:
@@ -489,9 +363,7 @@ class LiveFlow:
             elif intent == "agent":
                 facts = self._agent_route(s)
             else:  # 조회·취소로 전환(받던 택배는 state.current에 그대로), 문의는 하던 업무를 바꾸지 않는다
-                if intent in ("order", "lookup", "cancel") or st.intent is None:
-                    if st.intent != intent:
-                        st.candidates, st.selected_order, st.pending = None, None, None
+                if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
                 if st.intent == "order":
@@ -592,14 +464,6 @@ class LiveFlow:
         return out | {"facts": (out.get("facts") or {}) | {"agent": "suggest"}}
 
     # ------------------------------------------------------------------ S6: 등록·결과 전송(대화는 기다리지 않음)
-    async def drain_recordings(self, s: CallSession) -> None:
-        deadline = time.monotonic() + self.cfg.finalize_wait_sec
-        while s.tools.recording and time.monotonic() < deadline:
-            await asyncio.sleep(0.02)
-        if s.tools.recording:
-            s.state.unresolved_fields.add("pending_recordings")
-            s.note("기록 대기 초과", "남은 기록을 성공으로 처리하지 않음")
-
     def _maybe_register(self, s: CallSession) -> None:
         """미등록 고객이 보내는 분 성함·주소·상세를 다 말하면 1번(원본 register_customer)."""
         results = getattr(self.svc, "results", None)
@@ -611,12 +475,14 @@ class LiveFlow:
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
 
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
-        """종료 과정에서 한 주문을 전송한다. '더 없음'만으로는 접수를 시작하지 않는다."""
+        """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
         results = getattr(self.svc, "results", None)
         if results is None or s.call_id in results.tasks:
             return
         st = s.state
-        if force and (st.parcels or st.intent):
+        a = assess(st, self.policy)
+        ready = st.parcels and st.no_more_parcels and (st.payment.valid or a.payment_auto) and not st.candidates
+        if force and (st.parcels or st.intent) or ready:
             st.order_submitted = bool(st.parcels)
             results.start(s, self._on_result)
 
@@ -628,10 +494,7 @@ class LiveFlow:
     def _business(self, s: CallSession, intent: str) -> None:
         """첫 업무 의도 → 2단계 고객 확인 1회(call-lifecycle.md §2.2)."""
         rt = self.rt(s)
-        if intent == "order" and s.state.intent != "order":
-            s.state.intent = "order"
-            s.state.candidates, s.state.selected_order, s.state.pending = None, None, None
-        elif s.state.intent is None:
+        if s.state.intent is None:
             s.state.intent = intent
         if not rt.intent_started:
             rt.intent_started = True
@@ -674,13 +537,11 @@ class LiveFlow:
 
     async def call_tool(self, s: CallSession, did, item: dict) -> None:
         name, call_id = item.get("name"), item.get("call_id")
-        if self.cfg.live_led:
-            await self._customer_quiet(s)  # 복합 발화의 정정까지 받은 뒤 인자를 반영한다
         d0 = self._dl(s, did)
         if not d0.get("tool_t"):  # 위임 시작 → 첫 함수 호출 도착(Backend 판단 시간)
             d0["tool_t"] = time.time()
             s.timing("위임→도구 호출", (d0["tool_t"] - d0["t"]) * 1000)
-        if name in TOOL_INTENT and name != "record_fields":
+        if name in TOOL_INTENT:
             self._business(s, TOOL_INTENT[name])
         if name == "lookup_orders":
             await self.svc.call_session_seq(s)  # 2단계 통화 등록을 기다린다(실패면 도구가 CALL_NOT_REGISTERED)
@@ -689,20 +550,8 @@ class LiveFlow:
                 "at": time.time()}
         s.tool_calls.append(view)
         s.stats["도구"] += 1
-        allowed = tuple(n for n in MODEL_TOOLS if self.cfg.live_led or n != "manage_conversation")
         with span("tool", tool=name):
-            if name == "record_fields":
-                if s.tools.ending or s.closed:
-                    out = {"status": "rejected", "code": "CALL_ENDING"}
-                else:
-                    s.tools.recording += 1
-                    try:
-                        async with s.tools.record_lock:
-                            out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=allowed)
-                    finally:
-                        s.tools.recording -= 1
-            else:
-                out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=allowed)
+            out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
         s.timing(f"도구 {name}", view["elapsed_ms"])
@@ -710,16 +559,7 @@ class LiveFlow:
             s.measure(TOOL_LATENCY[name], view["elapsed_ms"])
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
-            if out.get("status") == "ok" or out.get("facts", {}).get("recorded"):
-                self._business(s, "order")
-                async with s.lock:
-                    if not out.get("needs"):
-                        out.setdefault("facts", {}).update(prepare_confirmation(s.tools))
-                    out.update(state_summary(s.state, self.policy))
-                self._maybe_register(s)
-        if self.cfg.live_led:
-            out["utterance_id"] = s.tools.last_utterance_id
-            out["now"] = s.tools.now().isoformat()
+            self._maybe_register(s)
         if name == "search_manual":
             out = self._count_unanswered(s, out)
         if name == "lookup_orders" and s.state.selected_order:  # 1건이면 바로 취소 확인 대기(의도가 취소일 때)

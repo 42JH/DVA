@@ -146,10 +146,5 @@ class NoArgs(Args):
 @model_tool("get_state", "지금까지 기록된 항목의 상태와 빠진 항목을 본다(맥락 복구용, 아무것도 바꾸지 않음).", NoArgs)
 async def get_state(ctx: ToolContext, args: NoArgs) -> ToolOutcome:
     async with ctx.lock:
-        facts = {}
-        if ctx.live_led:
-            facts = {"utterance_id": ctx.last_utterance_id, "now": ctx.now().isoformat(),
-                     "utterance_at": ctx.last_utterance_at.isoformat() if ctx.last_utterance_at else None,
-                     "recording": ctx.recording, "address_pending": ctx.address_pending}
-        return ToolOutcome("ok", facts=facts, summary=state_summary(ctx.state, ctx.policy))
+        return ToolOutcome("ok", summary=state_summary(ctx.state, ctx.policy))
 

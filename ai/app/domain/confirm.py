@@ -49,8 +49,7 @@ def _parcel_snapshot(state: ConversationState) -> dict:
 
 
 def _versions(state: ConversationState, policy: Policy) -> dict[str, int]:
-    return {n: state.field_of(n).version for s in policy.collect_stages() for n in s.required} | {
-        "pickup_at": state.pickup_at.version}
+    return {n: state.field_of(n).version for s in policy.collect_stages() for n in s.required}
 
 
 def issue_parcel_confirmation(state: ConversationState, policy: Policy, now_t: float) -> PendingConfirmation | None:
@@ -87,10 +86,6 @@ def _same_snapshot(state: ConversationState, policy: Policy, p: PendingConfirmat
         return state.selected_order is not None and snapshot_hash(state.selected_order) == p.snapshot_hash
     return (state.current is not None and _versions(state, policy) == p.field_versions
             and snapshot_hash(_parcel_snapshot(state)) == p.snapshot_hash)
-
-
-def confirmation_matches(state: ConversationState, policy: Policy, p: PendingConfirmation) -> bool:
-    return not p.done and _same_snapshot(state, policy, p)
 
 
 def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer: ConfirmAnswer,
