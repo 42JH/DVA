@@ -102,7 +102,10 @@ function toView(o: OrderDetail & { position?: string }): OrderView {
         label: '수거 희망 일시',
         value: o.pickupRequestedAt ? fmtDetailTime(o.pickupRequestedAt) : '없음',
       },
-      { label: '결제 방식', value: PAYMENT_METHOD_LABEL[o.paymentMethod] },
+      {
+        label: '결제 방식',
+        value: o.paymentMethod ? PAYMENT_METHOD_LABEL[o.paymentMethod] : '미정',
+      },
       {
         label: '물품 가액',
         value: o.itemPrice === null ? '없음' : `${o.itemPrice.toLocaleString('ko-KR')}원`,
