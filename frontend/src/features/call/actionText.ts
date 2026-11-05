@@ -2,6 +2,7 @@
 // AI 서버가 보내는 summaryText(ai/app/calls/results.py _summary · 통화 결과 전송)를 화면 말로 — 서버는 고치지 않음, 지난 통화에도 그대로 적용
 // 순수 함수 · '@/' import 없음 — `npx tsx src/features/call/actionText.test.ts` 로 바로 확인
 import type { AiAction } from './api/callDto'
+import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 
 /** 도구 실패 코드 → 화면 말 (develop-ai ToolOutcome · 확인 게이트 · 수거 일시 규칙에서 모음, 11/05) */
 const FAIL_TEXT: Record<string, string> = {
@@ -80,10 +81,20 @@ export function refineAction(text: string): string {
   if (m) return `항목 ${m[1]}개 기록`
   m = /^통화 결과 전송:\s*(.+)$/.exec(t)
   if (m) return `주문 전송 · ${STATUS_TEXT[m[1]] ?? m[1]}`
-  if (t === 'FAQ 근거 있음') return 'FAQ에서 답을 찾음'
+  if (t === 'FAQ 근거 있음') return 'FAQ 검색 후보 있음' // 지난 기록 — 검색은 후보를 찾았다는 뜻일 뿐, 답했다는 뜻이 아님 (11/05 AI팀)
   if (t === 'FAQ 근거 없음') return 'FAQ에 답이 없음'
   if (t === '등록 고객' || t === '미등록 고객' || t === '탈퇴 고객') return `고객 조회 · ${t}`
   return t
+}
+
+/** FAQ 검색 뒤 최종 응대 결과 (11/05 AI팀 — 검색 기록과 최종 결과를 따로 보냄)
+ *  FAQ_ANSWERED = 근거 있음 · 미답변 KB_NO_ANSWER = 근거 부족 · 미답변 KB_UNAVAILABLE · 사유 없음 = 서버 에러 */
+export function faqResultText(
+  kind: 'FAQ_ANSWERED' | 'QUESTION_UNANSWERED',
+  reason: UnansweredReason | null,
+) {
+  if (kind === 'FAQ_ANSWERED') return '근거 있음'
+  return reason === 'KB_NO_ANSWER' ? '근거 부족' : '서버 에러'
 }
 
 /** 화면 한 줄 = 동작 한 개 또는 연달아 나온 '기록'(칸 채우기) 여러 개를 합친 것 — 'n개 항목' 합계 */
