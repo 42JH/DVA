@@ -6,9 +6,9 @@
 import itertools
 import re
 
-from app.address.numbers import HANGUL_DIGITS, HANGUL_NUMERALS, korean_to_int
+from app.address.numbers import korean_to_int
 
-NUM_CHARS = HANGUL_NUMERALS + "0-9"
+NUM_CHARS = "영공일이삼사오육칠팔구십백천만0-9"
 # 도로명 뒤에 오는 숫자 토큰: "십", "이백", "10길", "십길", "길", "212번지", "212-1", "다시"
 # STT가 "번길"을 "펀킬", "번낄"처럼 쓰는 경우까지
 GIL = "(?:[번펀뻔]?[길낄킬])"
@@ -21,14 +21,11 @@ def branch_key(num, letter=""):
 
 
 def to_number(s):
-    """'이백 십이' / '이 일 이' / '20' / '이백12' -> '212' 같은 숫자 문자열. 숫자가 없거나 숫자로 읽을 수 없는 배열이면 ''."""
+    """'이백 십이' / '이 일 이' / '20' / '이백12' -> '212' 같은 숫자 문자열. 숫자가 없으면 ''."""
     s = re.sub(r"\s|번지|번|호", "", s)
     if not s or not re.fullmatch(rf"[{NUM_CHARS}]+", s):
         return ""
-    if s.isdigit():
-        return s
-    n = korean_to_int(s)
-    return "" if n is None else str(n)
+    return s if s.isdigit() else str(korean_to_int(s))
 
 
 def normalize_text(text):
@@ -76,7 +73,7 @@ def split_tail(head, tail):
 
 
 # --- 못 찾았을 때 다시 볼 표기 ----------------------------------------------------
-NUMBER_SYLLABLES = set(HANGUL_DIGITS + "십백")
+NUMBER_SYLLABLES = set("영공일이삼사오육칠팔구십백")
 
 
 def unlink_gil(text):
@@ -93,7 +90,7 @@ def unlink_gil(text):
     return fixed if fixed != text else None
 
 
-_GIL = re.compile(rf"(?<=[가-힣])([{HANGUL_DIGITS}십백]+번?길)(?=\s|$)")
+_GIL = re.compile(r"(?<=[가-힣])([영공일이삼사오육칠팔구십백]+번?길)(?=\s|$)")
 
 
 def split_gil(heard: str) -> str | None:
@@ -151,34 +148,9 @@ def split_dasi(text: str) -> list[str] | None:
 
 def ga_digits(text: str) -> list[str] | None:
     """한글 숫자로 말한 "N가" 동 이름을 사전 표기로: "태평로 일가" → "태평로1가". 바뀐 게 없으면 None."""
-    def digits(m):
-        n = korean_to_int(m[1])
-        return m[0] if n is None else f"{n}가"
-
-    fixed = re.sub(rf"(?<=[가-힣])\s*([{HANGUL_DIGITS}십]+)가(?=\s|$)", digits, text)
+    fixed = re.sub(r"(?<=[가-힣])\s*([영공일이삼사오육칠팔구십]+)가(?=\s|$)",
+                   lambda m: f"{korean_to_int(m[1])}가", text)
     return [fixed] if fixed != text else None
-
-
-_GLUED = re.compile(rf"(.*[가-힣\d][로길동리가])((?:\d[\d-]*|[{HANGUL_NUMERALS}]+(?:(?:다시|대시)[{HANGUL_NUMERALS}]+)?)"
-                    rf"(?:번지|번)?)")
-
-
-def split_number(text: str) -> list[str] | None:
-    """이름에 붙어 받아써진 건물번호·번지 띄우기: "테헤란로212" → "테헤란로 212", "금암이동백사십구 다시 십일" →
-    "금암이동 백사십구 다시 십일"(통화 3851b79d), "태평로1가31" → "태평로1가 31". 번호 바로 앞의 이름 토큰에서만,
-    떼는 부분이 아라비아 숫자이거나 두 글자 이상의 한글 숫자일 때만 뗀다("강동구"의 "구" 같은 지역 이름을 자르지 않게).
-    바뀐 게 없으면 None."""
-    tokens = text.split()
-    i = len(tokens) - 1
-    while i > 0 and TAIL_TOKEN.fullmatch(tokens[i]):
-        i -= 1
-    m = _GLUED.fullmatch(tokens[i]) if tokens else None
-    if not m:
-        return None
-    num = re.sub(r"번지|번", "", m[2])
-    if not re.search(r"\d", num) and (len(num) < 2 or not to_number(re.split(r"다시|대시", num)[0])):
-        return None
-    return [" ".join(tokens[:i] + [m[1], m[2]] + tokens[i + 1:])]
 
 
 def _gil(text: str) -> list[str] | None:
@@ -187,7 +159,7 @@ def _gil(text: str) -> list[str] | None:
 
 
 # 못 찾았을 때 다시 볼 고침들(앞에 있을수록 먼저). 말끝은 다른 고침보다 먼저 떼야 뒤 고침이 끝 토큰을 제대로 본다
-REWRITES = (strip_ending, split_number, _gil, cut_trailing, split_dasi, ga_digits)
+REWRITES = (strip_ending, _gil, cut_trailing, split_dasi, ga_digits)
 
 
 def readings(heard: str) -> list[tuple[str, ...]]:

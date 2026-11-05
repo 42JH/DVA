@@ -18,26 +18,15 @@ from app.address.parse import LETTER, branch_key, parse, readings, unlink_gil
 from app.address.phonetic import Name, distance, num_distance, read_digits, road_readings
 
 
-# 못 찾은 이유(needs.detail): 고객에게 어느 부분을 또렷하게 다시 말해 달라고 할지. 뒤로 갈수록 더 많이 알아들은 것
-#   region   시·도나 시·군·구를 못 찾음      name    지역 안에 맞는 도로·동·리 이름이 없음
-#   needs_ri 리가 있는 읍·면까지만 말함        number  이름은 맞는데 그 건물번호(번지)가 없음
-#   multiple 해당하는 곳이 여러 곳(순서 밖)
-Reason = Literal["region", "name", "needs_ri", "number", "multiple"]
-REASON_RANK = ("region", "name", "needs_ri", "number")
-
-
 @dataclass(frozen=True)
 class Resolution:
-    """보정 결과. address는 confirmed일 때만, candidates는 confirmed면 [확정 주소], ambiguous면 가까운 순 최대 3개.
-    reason은 not_found일 때만(못 찾은 이유)."""
+    """보정 결과. address는 confirmed일 때만, candidates는 confirmed면 [확정 주소], ambiguous면 가까운 순 최대 3개."""
     status: Literal["confirmed", "ambiguous", "not_found"]
     address: str | None
     candidates: tuple[str, ...]
-    reason: Reason | None = None
 
 
-def not_found(reason: Reason) -> Resolution:
-    return Resolution("not_found", None, (), reason)
+NOT_FOUND = Resolution("not_found", None, ())
 
 
 # --- 도로명 사전 ---------------------------------------------------------------
@@ -162,20 +151,6 @@ def closest(q, options):
 
 
 # --- 후보 찾기 -------------------------------------------------------------------
-NAME_SUFFIX = "동리가로길읍면"
-SHORT_NAME = 2  # 접미사를 뺀 글자 수가 이 이하인 도로·동·리 이름은 "짧은 이름"
-
-
-def name_distance(q, cand):
-    """도로·동·리 이름 거리와, 짧은 이름을 소리가 다르게 고쳤는지. 짧은 이름은 글자 하나만 바뀌어도 다른 실제 장소라
-    (산동/신동/인동) 고쳐서 맞췄으면 이름 말고 정확한 증거가 둘 이상 맞아야 인정한다(_correct, 사용자 결정 2026-11-05 ②:
-    번지 하나는 비슷한 이름의 다른 동에도 흔하지만 "321번길 24"처럼 둘이 함께 맞기는 드물다).
-    시도·시군구는 그 아래 도로·번호가 실제로 있어야 맞으므로 따지지 않는다."""
-    meaningful = len(cand.text) - (cand.text[-1:] in NAME_SUFFIX)
-    return distance(q, cand), meaningful <= SHORT_NAME and q.canon != cand.canon
-
-
-
 BRANCH = re.compile(rf"(.+?)(\d+)({LETTER}?)(?:번길|길)")  # 사전 도로명 "테헤란로10길" -> ("테헤란로", "10")
 BRANCH_KEY = re.compile(r"(\d+)(\D?)")  # branch_key() 결과 "1다" -> ("1", "다")
 BRANCH_MAX = 1.5  # 길 번호는 자모 한 개 차이까지 (1길/2길 = 일/이)
@@ -197,8 +172,7 @@ def branch_penalty(query, road):
 
 
 def candidates(rd, text, top=5):
-    """보정된 (시도, 시군구, 도로명, 건물번호, 점수, 부번까지 맞아야 함) 후보 목록, 점수 낮을수록 좋음.
-    마지막 값: 짧은 도로명을 고쳤고 길 번호로 확인되지 않았으면 True — 건물번호가 본번·부번 모두 맞아야 증거 둘."""
+    """보정된 (시도, 시군구, 도로명, 건물번호, 점수) 후보 목록, 점수 낮을수록 좋음."""
     for tokens, branch, number in parse(text):
         found = {}
         scopes, rest = rd.match_region(tokens)
@@ -212,26 +186,23 @@ def candidates(rd, text, top=5):
                     penalty = branch_penalty(branch, road_branch)
                     if penalty is None:
                         continue
-                    d, fixed = min(name_distance(q, base) for q in qs)
-                    d += penalty
-                    branch_proved = branch is not None and penalty == 0  # 길 번호가 정확히 맞음 = 이름 밖의 증거 하나
-                    if d < found.get((key, road), (99,))[0]:
-                        found[(key, road)] = (d, fixed and not branch_proved)
+                    d = min(distance(q, base) for q in qs) + penalty
+                    if d < found.get((key, road), 99):
+                        found[(key, road)] = d
             # 발음 정규화 거리 0인 후보(점수 < 1)를 찾았으면 더 긴 분할은 안 봄
-            if found and min(v[0] for v in found.values()) < 1:
+            if found and min(found.values()) < 1:
                 break
         if found:  # 이 숫자 해석으로 도로를 찾았으면 다음 해석은 안 봄
             break
-    ranked = sorted(found.items(), key=lambda x: x[1][0])[:top]
-    return [(sido, sg, road, number, round(d, 2), weak) for ((sido, sg), road), (d, weak) in ranked]
+    ranked = sorted(found.items(), key=lambda x: x[1])[:top]
+    return [(sido, sg, road, number, round(d, 2)) for ((sido, sg), road), d in ranked]
 
 
 AREA_END = re.compile(r"[동리가]$")  # 지번 주소로 볼 이름 끝 (법정동·리, 종로1가 같은 "가")
 
 
 def jibun_candidates(db, text):
-    """지번 주소 -> [(areas.id, 산여부, 번지-호, 거리, 부번까지 맞아야 함)]. 끝 1~2토큰("인의동", "선산읍 완전리")을
-    법정동·리와 비교. 짧은 동·리 이름을 소리가 다르게 고쳤으면 번지 본번·부번이 모두 맞아야 증거 둘."""
+    """지번 주소 -> [(areas.id, 산여부, 번지-호, 거리)]. 끝 1~2토큰("인의동", "선산읍 완전리")을 법정동·리와 비교."""
     tokens, branch, number = parse(text)[0]
     if branch is not None:  # "~길 N"은 도로명주소
         return []
@@ -247,10 +218,10 @@ def jibun_candidates(db, text):
         qs = [(Name(said), 0)] + [(Name(re.sub(r"\d+(?=동$)", "", said)), 0.5)] * bool(re.search(r"\d동$", said))
         for key in scopes:
             for area, names in db.areas(key):
-                d, fixed = min((dist + p, fixed) for q, p in qs for n in names for dist, fixed in [name_distance(q, n)])
-                if d < found.get(area, (99,))[0]:
-                    found[area] = (d, fixed)
-    return [(area, san, number, d, weak) for area, (d, weak) in found.items()]
+                d = min(distance(q, n) + p for q, p in qs for n in names)
+                if d < found.get(area, 99):
+                    found[area] = d
+    return [(area, san, number, d) for area, d in found.items()]
 
 
 # --- 판정 ------------------------------------------------------------------------
@@ -270,31 +241,19 @@ RETRY_SEC = 1.0      # 다시 보기 시간 상한. 넘으면 못 찾음 — Add
 
 
 def resolve(db, heard: str, clock=time.monotonic) -> Resolution:
-    """서버가 쓰는 입구. 후보가 둘 이상인 ambiguous는 못 찾음(다시 물음) — 1순위를 기록하면 근거 없는 선택이다
-    (사용자 결정 2026-11-05: P6보다 정확도 우선. 고객에게 후보를 고르게 하는 방식은 측정 후 검토). 후보가 하나인
-    ambiguous(도로명을 많이 고쳐 맞춘 주소)는 그대로 돌려준다."""
-    r = _resolve(db, heard, clock)
-    return not_found("multiple") if r.status == "ambiguous" and len(r.candidates) > 1 else r
-
-
-def _resolve(db, heard: str, clock) -> Resolution:
-    """들은 그대로 먼저 본다(찾으면 그대로 — 고침이 기존 결과를 바꾸지 않게). 못 찾았을 때만
+    """서버가 쓰는 입구: 들은 그대로 먼저 본다(찾으면 그대로 — 고침이 기존 결과를 바꾸지 않게). 못 찾았을 때만
     parse.readings()의 표기 묶음을 적게 고친 것부터 보고, 처음 찾은 묶음에서 멈춘다."""
     r = correct(db, heard)
     if r.status != "not_found":
         return r
-    reasons = [r.reason]
     deadline = clock() + RETRY_SEC
     for group in readings(heard)[:RETRY_GROUPS]:
         if clock() > deadline:
             break
-        tried = [correct(db, t) for t in group]
-        found = [x for x in tried if x.status != "not_found"]
+        found = [x for x in (correct(db, t) for t in group) if x.status != "not_found"]
         if found:
             return _merge(found)
-        reasons += [x.reason for x in tried]
-    # 이유는 가장 많이 알아들은 해석 기준("테헤란로 99999 무슨빌딩"은 건물명을 떼면 이름은 맞고 번호가 없다)
-    return not_found(max(reasons, key=REASON_RANK.index))
+    return NOT_FOUND
 
 
 def _merge(found: list[Resolution]) -> Resolution:
@@ -310,8 +269,7 @@ def correct(db, text) -> Resolution:
     """못 찾으면 연음으로 바뀐 길 번호를 되돌려 한 번 더(기존 결과는 그대로 두고 못 찾을 때만)."""
     result = _correct(db, text)
     if result.status == "not_found" and (fixed := unlink_gil(text)):
-        again = _correct(db, fixed)
-        return again if again.status != "not_found" else result  # 못 찾았으면 이유는 들은 그대로 기준
+        return _correct(db, fixed)
     return result
 
 
@@ -321,49 +279,24 @@ def _correct(db, text) -> Resolution:
     번호를 잘못 들었는지 없는 번호인지 구별할 수 없으니 다시 묻는다). 1등이 뚜렷하지 않으면 확정하지 않는다.
     지번 후보도 같은 점수로 같이 비교한다. db 는 numbers()/areas()/jibun_numbers() 가 있는 gazetteer.AddressDB.
     """
-    # (이름 거리, 들은 번호, 실제 (번호, 주소) 목록 읽기, 부번까지 맞아야 함)
-    sources = [(d, number, functools.partial(db.numbers, sido, sigungu, road), weak)
-               for sido, sigungu, road, number, d, weak in candidates(db, text, top=30)]
-    sources += [(d, number, functools.partial(db.jibun_numbers, area, san), weak)
-                for area, san, number, d, weak in jibun_candidates(db, text)]
+    # (이름 거리, 들은 번호, 실제 (번호, 주소) 목록 읽기)
+    sources = [(d, number, functools.partial(db.numbers, sido, sigungu, road))
+               for sido, sigungu, road, number, d in candidates(db, text, top=30)]
+    sources += [(d, number, functools.partial(db.jibun_numbers, area, san))
+                for area, san, number, d in jibun_candidates(db, text)]
     sources.sort(key=lambda x: x[0])
-    # 들은 이름과 소리가 같은 실제 이름(점수 < 1)이 있으면 그 안에서만 번호를 찾는다. 그 이름에 번호가 없다고 비슷한 다른
-    # 이름으로 넘어가지 않는다(정확히 들은 "산동읍 백현리 580" → 고아읍 봉한리 580, "테헤란로1길 8" → 7길 8 방지)
-    if sources and sources[0][0] < 1:
-        sources = [s for s in sources if s[0] < 1]
     scored = {}
-    for d, number, numbers, weak in sources:
+    for d, number, numbers in sources:
         if d > sources[0][0] + CONFIRM_MAX:  # 이름부터 1등보다 훨씬 먼 후보는 볼 필요 없음
             break
         for real, address in numbers():
-            if weak and "-" not in real:
-                continue  # 짧은 이름을 고쳐 맞춘 곳은 번호 하나(본번)만으로는 우연일 수 있다(산동 580 → 신동 580)
             if number_distance(number, real) == 0 and d < scored.get(address, 99):
                 scored[address] = d
     ranked = sorted(scored.items(), key=lambda x: x[1])
     if not ranked:
-        return not_found(_why(db, text, sources))
+        return NOT_FOUND
     best = ranked[0][1]
     close = tuple(a for a, c in ranked if c - best < MARGIN)[:3]
     if len(close) == 1 and best <= CONFIRM_MAX:
         return Resolution("confirmed", close[0], close)
     return Resolution("ambiguous", None, close)
-
-
-def _why(db, text, sources) -> Reason:
-    """못 찾은 이유. 들은 이름과 소리가 같은 실제 이름이 있었으면 번호 문제, 아니면 지역 → 읍·면만 → 이름 순으로 본다."""
-    if sources and sources[0][0] < 1:
-        return "number"
-    scopes, rest = db.match_region(parse(text)[0][0])
-    if not scopes:
-        return "region"
-    rest = rest[:-1] if rest[-1:] == ["산"] else rest  # 지번 "산 12"의 "산"은 이름이 아니다
-    if rest and any(_said_emd(rest[-1], db.emds(key)) for key in scopes):
-        return "needs_ri"
-    return "name"
-
-
-def _said_emd(said: str, emds) -> bool:
-    """들은 이름이 리가 있는 읍·면 이름(접미사 "읍"·"면"을 빼고 말한 것 포함)과 소리가 같은가."""
-    q = Name(said).canon
-    return any(q in (Name(e).canon, Name(e[:-1]).canon) for e in emds)

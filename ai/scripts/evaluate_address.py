@@ -7,7 +7,7 @@
 
 판정(서버가 실제로 기록하는 값 기준, P6: ambiguous는 1순위를 기록):
 - 정답 주소가 있는 사례: confirmed(확정·정답) / auto(애매→1순위가 정답) / wrong(다른 주소 기록) / missed(못 찾음 → 다시 물음)
-- 정답 null(없는 주소): rejected(못 찾음, 정답) / wrong(무언가 기록). 못 찾았으면 이유(needs.detail)가 expect_reason과 맞는지도 센다
+- 정답 null(없는 주소): rejected(못 찾음, 정답) / wrong(무언가 기록)
 """
 
 import argparse
@@ -100,7 +100,6 @@ async def main(repeat: int, out: Path | None) -> None:
         outcome = classify(c["expect"], r.status, r.address)
         results.append({"id": c["id"], "heard": c["heard"], "expect": c["expect"], "tags": c["tags"],
                         "status": r.status, "recorded": r.address, "alternatives": list(r.alternatives),
-                        "reason": r.reason, "expect_reason": c.get("expect_reason"),
                         "outcome": outcome, "cold_ms": round(cold[c["id"]], 1),
                         "warm_p50_ms": round(statistics.median(warm[c["id"]]), 1) if warm[c["id"]] else None})
 
@@ -121,8 +120,7 @@ async def main(repeat: int, out: Path | None) -> None:
                      "confirmed": counts["confirmed"], "auto": counts["auto"],
                      "wrong": sum(x["outcome"] == "wrong" for x in positive), "missed": counts["missed"]},
         "negative": {"total": len(negative), "rejected": counts["rejected"],
-                     "wrong": sum(x["outcome"] == "wrong" for x in negative),
-                     "reason_match": sum(x["outcome"] == "rejected" and x["reason"] == x["expect_reason"] for x in negative)},
+                     "wrong": sum(x["outcome"] == "wrong" for x in negative)},
         "latency_ms": {"cold_p50": pct(list(cold.values()), 50), "cold_p95": pct(list(cold.values()), 95),
                        "cold_max": round(max(cold.values()), 1),
                        "warm_p50": pct(all_warm, 50) if all_warm else None,
@@ -143,9 +141,6 @@ async def main(repeat: int, out: Path | None) -> None:
         if x["outcome"] in ("wrong", "missed", "error"):
             print(f"  {x['id']} [{x['outcome']}] {x['heard']!r} → {x['status']} {x['recorded']!r}"
                   f" (정답 {x['expect']!r}, 후보 {x['alternatives']})")
-    for x in negative:
-        if x["outcome"] == "rejected" and x["reason"] != x["expect_reason"]:
-            print(f"  {x['id']} [이유 다름] {x['heard']!r} → {x['reason']} (기대 {x['expect_reason']})")
     if out:
         out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"\n저장: {out}")

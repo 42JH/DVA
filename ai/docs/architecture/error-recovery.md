@@ -74,7 +74,7 @@
 | 예외 | 감지 | 1차 대응 | 반복 시 | 근거·제약 |
 |---|---|---|---|---|
 | **주소 검색 실패**(not_found) | AddressService `not_found` | 값 저장 안 함, `needs_input` `ADDRESS_NOT_FOUND`: "도로명과 건물번호를 다시" | 2회: "동 이름과 번지로"(지번 경로) → 3회: 상담원 제안 | `call-flow/README.md` §4 |
-| 주소 애매(ambiguous) | 도로명을 많이 고친 후보 1개(건물번호는 정확히 일치할 때만 — 번호를 고쳐야 맞으면 not_found, 후보 ≥2도 not_found, 2026-11-05) | **1순위 자동 확정**(`auto_selected=true`), 나머지 후보 보관 | 고객이 정정하면 일반 정정 경로 | 사용자 결정 P6(`decisions.md`) |
+| 주소 애매(ambiguous) | 후보 ≥2 또는 도로명을 많이 고침(건물번호는 정확히 일치할 때만 — 번호를 고쳐야 맞으면 not_found, 2026-11-05) | **1순위 자동 확정**(`auto_selected=true`), 나머지 후보 보관 | 고객이 정정하면 일반 정정 경로 | 사용자 결정 P6(`decisions.md`) |
 | 주소 보정 장애(DB 없음·예외) | 서비스 오류 | 들은 값 VALID(source=CUSTOMER) + `ADDRESS_GEO_MISSING` 기록, 대화 계속 | 결과는 INCOMPLETE(운영자 보완) | 대화를 막지 않음 |
 | 카카오 지오코딩 실패 | `geo=None` | 대화 계속, 결과 INCOMPLETE 사유 기록 | — | 장애와 결과 없음 구분해 지표 |
 | **전화번호 오류** | `normalize_phone` None | 기존 값 유지, `PHONE_INVALID_DIGITS`: "또박또박 한 번 더" | 2회: 끊어서 불러 달라 → 3회: 상담원 제안 | 자릿수 규칙 기존 유지 |

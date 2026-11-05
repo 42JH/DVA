@@ -10,7 +10,7 @@
 
 | 모델 도구(strict) | 인수 | 결과 |
 |---|---|---|
-| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외). `ADDRESS_NOT_FOUND`의 needs 항목에는 `detail`(못 찾은 이유: `region`·`name`·`needs_ri`·`number`·`multiple`, 2026-11-05) |
+| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
 | `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
 | `lookup_orders` | receiver_name | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / unavailable(`CALL_NOT_REGISTERED`) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
