@@ -4,7 +4,7 @@ import type { VersionItem } from '@/features/persona/hooks/usePersonaPage'
 // 오른쪽 '버전 히스토리' 탭 — 최신부터. 칸을 누르면 그 버전의 프롬프트 + 그 칸에만 [시험 통화] [적용] (10/31)
 // [적용]은 적용 안 한 최신 저장본에만. 지난 버전은 [시험 통화]만 (11/02 결정 — 옛 버전으로 되돌리기 없음)
 // 6개 넘으면 '이전 버전 n개 더 보기 ›'
-// [시험 통화] → 시험 통화 창, 끝나면 '시험 통화 완료 · 01:12' + [적용] 남색 (07_적용가능). [적용]은 시험 통화를 끝낸 버전만 → 확인 창 (10/31)
+// [시험 통화] → 시험 통화 창, 끝나면 '시험 통화 완료 · 01:12' + [적용] 파랑 (07_적용가능, 11/05 새 디자인 — 고른 칸 옅은 파랑 · 버튼 big). [적용]은 시험 통화를 끝낸 버전만 → 확인 창 (10/31)
 export function VersionList({
   items,
   more,
@@ -29,8 +29,8 @@ export function VersionList({
           tabIndex={0}
           onClick={() => onSelect(v.version)}
           onKeyDown={(e) => e.key === 'Enter' && onSelect(v.version)}
-          className={`-mx-5 flex cursor-pointer flex-col gap-1 border-b border-line px-5 py-4 ${
-            v.selected ? 'bg-action-soft' : 'hover:bg-bg'
+          className={`-mx-5 flex cursor-pointer flex-col gap-1 border-b border-line px-5 py-4 outline-none focus-visible:ring-[1.5px] focus-visible:ring-brand focus-visible:ring-inset ${
+            v.selected ? 'bg-brand/10' : 'hover:bg-bg'
           }`}
         >
           <p className="flex items-center gap-2">
@@ -53,13 +53,14 @@ export function VersionList({
           {v.selected && onTestCall && (
             <div className="mt-2 flex justify-between" onClick={(e) => e.stopPropagation()}>
               <Button
-                small
+                big
+                kind="brandLine"
                 className="flex items-center gap-1.5"
                 onClick={() => onTestCall(v.version)}
               >
                 <svg
                   viewBox="0 0 20 20"
-                  className="size-4"
+                  className="size-5"
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={1.6}
@@ -73,8 +74,8 @@ export function VersionList({
               </Button>
               {v.canApply && onApply && (
                 <Button
-                  small
-                  kind={v.canApplyNow ? 'primary' : 'normal'}
+                  big
+                  kind="brand"
                   disabled={!v.canApplyNow}
                   title={v.canApplyNow ? undefined : '시험 통화를 끝내면 적용할 수 있습니다'}
                   onClick={() => onApply(v.version)}
@@ -90,7 +91,7 @@ export function VersionList({
         <button
           type="button"
           onClick={onShowMore}
-          className="mt-4 self-start text-label font-bold text-action hover:underline"
+          className="mt-4 self-start text-body font-semibold text-brand hover:underline"
         >
           이전 버전 {more}개 더 보기 ›
         </button>

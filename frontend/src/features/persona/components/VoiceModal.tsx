@@ -1,9 +1,10 @@
-import { Button, ChipGroup, FormModal, SelectField, Tag } from '@/shared/ui'
+import { Button, ChipGroup, Dialog, SelectField, Tag } from '@/shared/ui'
 import type { usePromptEditor } from '@/features/persona/hooks/usePromptEditor'
 
 // 07 음성 세부 조절 창 (와이어프레임 07_페르소나관리_음성세부조절, 10/31) — 수정 화면 위에
 // 'v8 작성 중' (+ 바꾸면 '음성 설정 바뀜') → 음성: 목소리 ▾ · 발화 속도 · 말 끝 기다리기 · 미리 듣기 ▶
 // 저장 버튼 없음: 고르는 즉시 작성 중 버전에 반영, 수정 화면 [저장]으로 프롬프트와 같이 저장
+// 11/05 새 디자인: 새 창(Dialog). 새 창은 버튼 줄이 늘 있어 빈 줄 대신 [닫기](✕ · Esc와 같음) · 미리 듣기 파랑
 export function VoiceModal({
   vm,
   subtitle,
@@ -12,13 +13,18 @@ export function VoiceModal({
   subtitle: string
 }) {
   return (
-    <FormModal
+    <Dialog
+      label="음성 세부 조절"
       title={vm.voiceTitle}
-      titleExtra={vm.voiceChanged ? <Tag kind="blue">음성 설정 바뀜</Tag> : undefined}
-      description={subtitle}
+      extra={vm.voiceChanged ? <Tag kind="blue">음성 설정 바뀜</Tag> : undefined}
+      sub={subtitle}
       width={720}
       onClose={vm.closeVoice}
-      footer={null}
+      footer={
+        <Button big className="ml-auto" onClick={vm.closeVoice}>
+          닫기
+        </Button>
+      }
     >
       <section className="flex flex-col gap-3">
         <h3 className="mb-1 text-body font-bold">음성</h3>
@@ -45,11 +51,11 @@ export function VoiceModal({
           value={vm.voice.waitTime}
           onChange={vm.setWaitTime}
         />
-        <div className="grid grid-cols-[120px_1fr] items-center gap-x-4">
-          <span className="text-label text-sub">미리 듣기</span>
+        <div className="grid grid-cols-[var(--field-label,120px)_1fr] items-center gap-x-4">
+          <span className="text-body text-sub">미리 듣기</span>
           <span className="flex items-center gap-3">
             <Button
-              kind="primary"
+              kind="brand"
               aria-label="미리 듣기"
               disabled={!vm.canPreview}
               onClick={vm.preview}
@@ -63,6 +69,6 @@ export function VoiceModal({
           </span>
         </div>
       </section>
-    </FormModal>
+    </Dialog>
   )
 }
