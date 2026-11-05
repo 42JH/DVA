@@ -55,6 +55,7 @@ class CallSession:
     started_t: float = field(default_factory=time.time)
     last_input_t: float = 0.0
     last_output_t: float = 0.0
+    last_output_end_ms: int = 0       # 출력 전사의 세션 타임라인 끝(오디오 재생 끝 추정용)
     events: list[dict] = field(default_factory=list)   # 관제용 사건(개인정보 값 없음)
     send_seq: int = 0
     rt: Any = None                    # S5 통화 중 흐름 상태(app/calls/live.py Runtime)
