@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from 'react'
-import { Button, ConfirmDialog, Crumbs, Highlight, Pagination, TopBar } from '@/shared/ui'
+import { Button, ConfirmDialog, Highlight, Pagination, TopBar } from '@/shared/ui'
 import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 
@@ -17,8 +17,7 @@ export function UnansweredPage() {
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar search={{ tab: 'faq' }} />
-      <Crumbs items={[vm.origin, { label: 'AI 미답변' }]} className={`shrink-0 ${PAD}`} />
+      <TopBar crumbs={[vm.origin, { label: 'AI 미답변' }]} />
       {vm.callChip && (
         // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 — ✕ = 전체 미답변으로
         <div className={`mt-2 shrink-0 ${PAD}`}>

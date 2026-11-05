@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
-import { Button, ConfirmDialog, Crumbs, TopBar } from '@/shared/ui'
+import { Button, ConfirmDialog, TopBar } from '@/shared/ui'
 import { useFaqForm } from '@/features/faq/hooks/useFaqForm'
 import {
   faqTo,
@@ -39,14 +39,12 @@ export function FaqEditPage() {
   if (!detail.faq)
     return (
       <>
-        <TopBar search={{ tab: 'faq' }} />
-        <Crumbs
-          items={[
+        <TopBar
+          crumbs={[
             { label: 'FAQ', to: '/faqs' },
             { label: 'FAQ 상세', to: `/faqs/${faqId}` },
             { label: 'FAQ 수정' },
           ]}
-          className="pl-17"
         />
         <p className="pt-v84 pl-17 text-body text-sub">
           {detail.isLoading
@@ -85,9 +83,8 @@ function FaqForm({
 
   return (
     <>
-      <TopBar search={{ tab: 'faq' }} />
-      <Crumbs
-        items={
+      <TopBar
+        crumbs={
           from
             ? [...unansweredCrumbs(fromBack), { label: 'FAQ 작성' }] // '[이동 전 화면] > AI 미답변 > FAQ 작성'
             : !faq
@@ -105,7 +102,6 @@ function FaqForm({
                     { label: 'FAQ 수정' },
                   ]
         }
-        className="pl-17"
       />
 
       <div
