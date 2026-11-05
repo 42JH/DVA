@@ -132,6 +132,12 @@ spec:
               service:
                 name: customer
                 port: {number: 3001}
+          - path: /api/pins
+            pathType: Prefix
+            backend:
+              service:
+                name: customer
+                port: {number: 3001}
           - path: /api/companies
             pathType: Prefix
             backend:

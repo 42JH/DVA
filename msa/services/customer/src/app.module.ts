@@ -1,3 +1,5 @@
+import { PinsModule } from './pins/pins.module';
+import { CallScopeExecutionModule } from './call-scope/call-scope-execution.module';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AuditModule } from './audit/audit.module';
@@ -15,6 +17,8 @@ import { OrganizationsModule } from './organizations/organizations.module';
     AuditModule,
     AuthModule,
     CustomersModule,
+    PinsModule,
+    CallScopeExecutionModule,
     OrganizationsModule,
     MembersModule,
   ],
