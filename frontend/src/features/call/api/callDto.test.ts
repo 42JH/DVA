@@ -46,6 +46,8 @@ const analysis: CallListItemDto['analysis'] = {
   orderLookupCount: 0,
   cancelledParcelCount: null,
   faqAnswerCount: 2,
+  hasCallbackRequest: true,
+  hasHandoffRequest: false,
 }
 
 // 목록 줄: 분석 있음
@@ -56,6 +58,8 @@ assert.equal(row.isNew, true)
 assert.deepEqual(row.counts, { accept: 3, lookup: 0, cancel: null, faq: 2 }) // null(못 모음)을 0으로 바꾸지 않음
 assert.deepEqual(row.complaints, [{ type: 'REPEATED_QUESTION', reason: '세 번 물음' }])
 assert.equal(row.persona, '빠른 접수형')
+assert.equal(row.callbackAsked, true) // 서버 값을 그대로 (11/05 리뷰: 전엔 버려짐)
+assert.equal(row.handoffAsked, false)
 // 연동 전 서버(요약 칸 없음) → 모름
 const old = toCallRow({
   ...call,
@@ -63,10 +67,16 @@ const old = toCallRow({
 })
 assert.equal(old.isNew, null)
 assert.equal(old.counts?.faq, null)
+assert.equal(
+  toCallRow({ ...call, analysis: { ...analysis, hasCallbackRequest: null } }).callbackAsked,
+  null,
+) // 미수집 = 모름
 
 // 분석 전 · 시각 없음 — 성공 · 불만 없음으로 보지 않음
 const bare = toCallRow({ ...call, callerPhoneNumber: null, endedAt: null, analysis: null })
 assert.equal(bare.counts, null)
+assert.equal(bare.callbackAsked, null) // 분석 전 = 모름
+assert.equal(bare.handoffAsked, null)
 assert.deepEqual(bare.complaints, [])
 assert.equal(bare.durationSec, null)
 assert.equal(bare.callerNumber, '')
@@ -153,6 +163,11 @@ assert.equal(d.persona, null)
 assert.equal(d.isNew, true) // 06 머리: 04 줄과 같은 신규 · 상담 유형 횟수
 assert.deepEqual(d.counts, { accept: 3, lookup: 0, cancel: null, faq: 2 })
 assert.equal(toCallDetail({ ...detail, analysis: null }, [], [], []).counts, null) // 분석 전
+assert.deepEqual(
+  [toCallDetail(detail, [], [], []).callbackAsked, toCallDetail(detail, [], [], []).handoffAsked],
+  [true, false],
+)
+assert.equal(toCallDetail({ ...detail, analysis: null }, [], [], []).callbackAsked, null)
 assert.equal(d.recording?.url, 'https://x/y')
 assert.equal(d.aiActionCount, 7)
 assert.deepEqual(d.utterances[0], { order: 1, atSec: null, speaker: 'AI', text: '안녕\n하세요' })
