@@ -256,8 +256,8 @@ def test_resolve_retries_only_when_not_found_and_readings_decide(db):
     from app.address.matcher import resolve
     r = resolve(db, "서울 강남구 테헤란로 이백십이요")  # "이백십"(210 없음)·"이백십이"(212) 중 확정된 쪽
     assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
-    # 211·212 둘 다 실제 주소 → 후보가 둘 이상이면 1순위를 기록하지 않고 다시 묻는다(사용자 결정 2026-11-05)
-    assert resolve(db, "서울 강남구 테헤란로 이백십일이요") == not_found("multiple")
+    # "이백십일이요" = 이백십일 + 이요. "이백십일이"는 숫자로 읽을 수 없는 배열이라 212로 추측하지 않는다(예전엔 212로 읽어 후보 둘)
+    assert resolve(db, "서울 강남구 테헤란로 이백십일이요").address == "서울특별시 강남구 테헤란로 211"
     assert resolve(db, "경북 구미시 인동 구길 칠다시삼").address == "경상북도 구미시 인동9길 7-3"
     assert resolve(db, "경북 구미 인동구길 칠 다시 삼이요").address == "경상북도 구미시 인동9길 7-3"  # 말끝 + 붙인 길
     assert resolve(db, "서울 강남구 테헤란로 212 무슨타워").address == "서울특별시 강남구 테헤란로 212"
@@ -295,3 +295,27 @@ def test_not_found_says_which_part_to_say_again(db):
     assert resolve(db, "서울 강남구 테헤란로 99999") == not_found("number")
     # 이유는 가장 많이 알아들은 해석 기준: 건물명을 떼면 이름은 맞고 번호가 없다
     assert resolve(db, "서울 강남구 테헤란로 99999 무슨빌딩") == not_found("number")
+
+
+@pytest.mark.parametrize("said, want", [
+    ("이백십이", "212"), ("이일이", "212"), ("오륙오", "565"), ("십륙", "16"), ("천일", "1001"), ("이천백삼십", "2130"),
+    ("공일", "1"), ("이백12", "212"), ("일만이천", "12000"), ("영", "0"),
+    # 숫자로 읽을 수 없는 배열은 추측하지 않는다(엉뚱한 값이 실제 번지와 맞아 다른 주소가 기록되지 않게)
+    ("이백십일이", ""), ("이백일이", ""), ("백이삼", ""), ("십백", ""), ("이백123", ""), ("만만", ""),
+])
+def test_korean_numbers_are_read_or_rejected(said, want):
+    from app.address.parse import to_number
+    assert to_number(said) == want
+
+
+def test_number_glued_to_name_is_split_only_when_not_found(db):
+    """이름에 붙은 건물번호·번지("인의동844-5", "테헤란로이백십일")는 못 찾았을 때 띄워 다시 본다."""
+    from app.address.matcher import resolve
+    from app.address.parse import split_number
+    assert resolve(db, "경북 구미시 인의동844-5").address == "경상북도 구미시 인동9길 7-3"
+    assert resolve(db, "서울 강남구 테헤란로이백십일").address == "서울특별시 강남구 테헤란로 211"
+    assert split_number("경북 구미시 인의동팔백사십사 다시 오") == ["경북 구미시 인의동 팔백사십사 다시 오"]
+    assert split_number("서울 중구 태평로1가31") == ["서울 중구 태평로1가 31"]
+    # 지역 이름의 숫자 글자("강동구"의 구)나 한 글자 한글 숫자는 떼지 않는다
+    assert split_number("서울 강동구") is None and split_number("서울 중앙로이") is None
+    assert split_number("서울 강남구 테헤란로 212") is None
