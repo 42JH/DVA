@@ -45,6 +45,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 - 세 번째 MR은 customer 조회 7개와 operations 세션 인증 위임, Jenkins #23 이벤트 테스트 실패 수정을 포함한다. customer 쓰기·통화 컨텍스트·PIN·청구 16개와 다른 업무 API는 아래 후속 범위로 남는다.
 - 네 번째 MR은 customer 쓰기 10개와 operations 감사 준비·확정·중단 및 생산자 강제 종료 복구를 연결한다. customer 공개 선언은 17/23개이며 나머지 6개·자동 업무 워커·전체 MSA 동등성은 남아 있다. 범위와 검증 환경은 [customer 쓰기 계획](msa-customer-writes-plan.md)에 명시한다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
+- 다섯 번째 MR은 consultation PBX 수신·녹취 워커와 진행 통화 수 조회/SSE 3개를 연결한다. 범위와 복구/검증은 [consultation PBX 계획](msa-consultation-pbx-plan.md)을 따른다. 고객 컨텍스트/PIN·통화 생성과 나머지 상담/주문/운영 기능 및 전체 보관 워커는 후속 단계다.
 
 ## 두 번째 MR 계획 — operations 인증·감사
 

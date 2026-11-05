@@ -288,7 +288,7 @@ try:
     sql('postgres', f'CREATE DATABASE {db} OWNER consultation_app;', 'consultation-pbx-upgrade-setup')
     lb('consultation', db, 'update-count', 'consultation-pbx-baseline', extra=('--count=2',))
     sql(db, """INSERT INTO call_sessions(provider_call_id,caller_phone_number) VALUES('legacy-open','01012345678');
-      INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at) VALUES('legacy-ended','01012345679','2026-10-01T00:00:00Z','2026-10-01T00:01:00Z');
+      INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at,end_reason) VALUES('legacy-ended','01012345679','2026-10-01T00:00:00Z','2026-10-01T00:01:00Z','legacy-pbx-end');
       INSERT INTO recordings(call_session_seq,object_key) VALUES(2,'legacy/audio.mp3');
       INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(2,1,'AI','legacy text',1);
       INSERT INTO outbox_events(destination,event_type,aggregate_seq,payload) VALUES('order','LegacyPending',2,'{}');""", 'consultation-pbx-legacy-data', 'consultation_app')
@@ -306,7 +306,7 @@ try:
     assert sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'consultation-pbx-atomic-history') == history
     lb('consultation', db, 'update', 'consultation-pbx-upgrade')
     assert sql(db, "SELECT count(*) FILTER(WHERE registered_at IS NULL),count(*) FILTER(WHERE incoming_at=started_at AND provider_call_id='legacy-ended'),count(*) FILTER(WHERE incoming_at IS NULL AND provider_call_id='legacy-open') FROM call_sessions;", 'consultation-pbx-no-fabricated-time') == '2|1|1'
-    assert sql(db, "SELECT (SELECT object_key FROM recordings),(SELECT utterance_text FROM call_utterances),(SELECT payload::text FROM outbox_events WHERE event_type='LegacyPending');", 'consultation-pbx-related-preserved') == 'legacy/audio.mp3|legacy text|{}'
+    assert sql(db, "SELECT (SELECT object_key FROM recordings),(SELECT utterance_text FROM call_utterances),(SELECT payload::text FROM outbox_events WHERE event_type='LegacyPending'),(SELECT end_reason FROM call_sessions WHERE provider_call_id='legacy-ended');", 'consultation-pbx-related-preserved') == 'legacy/audio.mp3|legacy text|{}|legacy-pbx-end'
     assert sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='pbx_webhooks'),(SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='pbx_webhooks'::regnamespace),(SELECT count(*) FROM databasechangelog);", 'consultation-pbx-catalog') == '1|1|3'
     report['passed'] = True
 except Exception as error:

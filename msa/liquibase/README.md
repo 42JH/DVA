@@ -9,16 +9,19 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 |---|---|---|---:|---:|
 | customer | customer_db | customer-db | 8 | 10 |
 | order | order_db | order-db | 4 | 6 |
-| consultation | consultation_db | consultation-db | 6 | 8 |
+| consultation | consultation_db | consultation-db | 7 | 9 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
 | operations | operations_db | operations-db | 9 | 11 |
 
-현재 업무 테이블 20개 + outbox/inbox 10개 + customer 감사 준비 1개 = 31개. Liquibase의 DATABASECHANGELOG와
+현재 public 업무 테이블 20개 + outbox/inbox 10개 + customer 감사 준비 1개 = 31개. Liquibase의 DATABASECHANGELOG와
 DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 41개가 된다.
+consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 42개다. 위 consultation 수는 이 수신함도 포함한다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 운영 초기 데이터는 페르소나 2개와 편집용 프롬프트이며, 실제 운영 프롬프트 검증은 별도다.
 
 ## 변경 관리
+
+- consultation `003`은 PBX 수신함/claim과 통화 도착·등록·삭제 필드 및 활성 집계 인덱스를 추가한다. 기존 데이터/이력/대기 이벤트를 보존하고 실제 PBX 시작 시각만 누락된 도착 시각으로 사용한다. 근거 없는 과거 등록 시각은 NULL로 남긴다. 원본 047에서 폐기된 종료 사유는 새 API에서 사용하지 않지만 MSA의 과거 값은 보존하며 이관/실패 rollback을 검사한다.
 
 - 서비스별 초기 changeset 1개. 각 서비스 DB 안에서 원자적으로 실행한다.
 - customer와 operations는 기존 `002`와 이벤트 전달용 `003`, 나머지는 이벤트 전달용 `002`도 포함한다. 각 changeset은 별도 트랜잭션이다.

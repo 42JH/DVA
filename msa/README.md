@@ -2,6 +2,8 @@
 
 모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. [operations의 인증·관리자·감사 11개 API](services/operations/README.md)와 [customer 조회 7개·쓰기 10개 API 및 세션/감사 연결](services/customer/README.md)을 구현했다. 남은 업무 API·자동 워커·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`의 임시 PostgreSQL·HTTP 검증과 기준 목록 검사, 선택한 서비스의 `Verify Operations Parity`/`Verify Customer Parity`에서 원본 모놀리식과 HTTP·DB 비교를 실행하고 실패 시 이후 배포를 중단한다. customer 쓰기 비교는 자동 업무 워커를 제외한 기본 test 환경이며 production 조회 검증과 구분한다.
 
+[consultation의 PBX 수신·녹취·진행 통화 수/SSE](services/consultation/README.md) 3개 API도 연결했다. `Verify Consultation Parity`는 원본 PBX/워커 시나리오를 양쪽 앱에서 실행하고 production HTTP·DB·SSE를 비교한다. consultation은 별도 서비스 토큰으로 operations에 세션을 확인하며 PBX/S3 설정은 기존 환경/Secret에서 주입한다. 통화 생성·다른 상담 기능과 전체 워커/95개 API 동등성은 후속 범위다.
+
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
 현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery·consultation·operations NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.
