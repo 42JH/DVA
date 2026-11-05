@@ -153,16 +153,27 @@ class AddressDB(RoadDict):
                 for main, sub, emd, emd_type in rows]
 
     def areas(self, key):
-        """(시도, 시군구) 안의 법정동·리 -> [(areas.id, 비교 이름들)]. "선산읍 완전리"는 "완전리"로도 말함."""
+        """(시도, 시군구) 안의 법정동·리 -> [(areas.id, 비교 이름들)]. "선산읍 완전리"는 "완전리"로도 말함.
+
+        리가 있는 읍·면은 읍·면 이름만 말한 경우("산동읍", 접미사 없이 "산동")도 (None, 이름들)로 둔다. 리 없이는 지번이
+        하나로 정해지지 않아서(같은 번지가 여러 리에 있고, 건물 없는 필지는 주소DB에 없다) 번호를 찾지 않는다 — 이 이름이
+        들은 이름과 같으면 다른 동·리로 고치지 않고 다시 묻게 된다(matcher._correct, 2026-11-05 "산동 580" → 신동 580).
+        """
         if key not in self._areas:
             # "기암리(基岩)"/"기암리(岐岩)"처럼 한자로만 구분된 리가 있음 -> 말로는 같으니 괄호를 떼고 비교
-            self._areas[key] = [(i, [Name(ri), Name(dong + ri)] if ri else [Name(dong)])
-                                for i, dong, ri in ((i, d, re.sub(r"\(.*?\)", "", r)) for i, d, r in self.conn.execute(
-                                    "SELECT id, dong, ri FROM areas WHERE sido = ? AND sigungu = ?", key))]
+            rows = [(i, d, re.sub(r"\(.*?\)", "", r)) for i, d, r in self.conn.execute(
+                "SELECT id, dong, ri FROM areas WHERE sido = ? AND sigungu = ?", key)]
+            out = [(i, [Name(ri), Name(dong + ri)] if ri else [Name(dong)]) for i, dong, ri in rows]
+            for emd in sorted({dong for _, dong, ri in rows if ri}):
+                out.append((None, [Name(emd)] + ([Name(emd[:-1])] if len(emd) >= 3 and emd[-1] in "읍면" else [])))
+            self._areas[key] = out
         return self._areas[key]
 
     def jibun_numbers(self, area, san):
-        """그 법정동·리의 지번 전부 -> [("123-4", 그 지번 지상 건물의 도로명주소), ...]. 한 지번에 건물이 여럿이면 여러 줄."""
+        """그 법정동·리의 지번 전부 -> [("123-4", 그 지번 지상 건물의 도로명주소), ...]. 한 지번에 건물이 여럿이면 여러 줄.
+        area가 None(읍·면만 말함)이면 없음."""
+        if area is None:
+            return []
         rows = self.conn.execute("""
             SELECT j.main, j.sub, r.sido, r.sigungu, r.road, b.main, b.sub, r.emd, r.emd_type FROM jibun j
             JOIN buildings b ON b.id = j.building

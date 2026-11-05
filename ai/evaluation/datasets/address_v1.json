@@ -1164,6 +1164,131 @@
     "holdout"
    ],
    "source": "holdout:2026-11-05"
+  },
+  {
+   "id": "q01",
+   "heard": "경북 구미시 산동 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "사용자 보고: 신동 580으로 오확정. 리 없이 읍·면만 → 리를 다시 물음"
+  },
+  {
+   "id": "q02",
+   "heard": "경북 구미시 산동읍 580",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "리 없음 → 다시 물음(건물 기준 봉산리 하나뿐이어도 건물 없는 필지가 있을 수 있음)"
+  },
+  {
+   "id": "q03",
+   "heard": "경북 구미시 산동읍 백현리 580",
+   "expect": null,
+   "tags": [
+    "exact_name_no_number",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "건물 없는 필지. 이름은 정확 → 다른 리(고아읍 봉한리)로 넘어가지 않음"
+  },
+  {
+   "id": "q04",
+   "heard": "경북 구미시 산동읍 봉산리 580",
+   "expect": "경상북도 구미시 산동읍 산호대로41길 13",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q05",
+   "heard": "경북 구미시 신동 580",
+   "expect": "경상북도 구미시 인동63길 63-1",
+   "tags": [
+    "jibun",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "짧은 동 이름을 정확히 말하면 그대로"
+  },
+  {
+   "id": "q06",
+   "heard": "경북 구미시 선동 580",
+   "expect": null,
+   "tags": [
+    "short_name",
+    "nonexistent",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "없는 동 이름, 신동과 모음 하나 차이 → 고쳐서 확정하지 않음"
+  },
+  {
+   "id": "q07",
+   "heard": "경남 김해시 상동 294",
+   "expect": null,
+   "tags": [
+    "emd_only",
+    "short_name",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "리 없음(묵방리 294만 건물) → 다시 물음"
+  },
+  {
+   "id": "q08",
+   "heard": "경남 김해시 상동면 묵방리 294",
+   "expect": "경상남도 김해시 상동면 장척로 429",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q09",
+   "heard": "경남 김해시 대동면 주중리 302",
+   "expect": "경상남도 김해시 대동면 주중길 98-6",
+   "tags": [
+    "jibun",
+    "emd_ri",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
+  },
+  {
+   "id": "q10",
+   "heard": "서울 강남구 테헤란로1길 8",
+   "expect": null,
+   "tags": [
+    "exact_name_no_number",
+    "branch",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name",
+   "note": "설계 선택: 정확히 말한 1길에 8이 없음 → 2길 8로 고치지 않고 다시 물음"
+  },
+  {
+   "id": "q11",
+   "heard": "서울 강남구 테헤란로2길 8",
+   "expect": "서울특별시 강남구 테헤란로2길 8",
+   "tags": [
+    "gil",
+    "holdout"
+   ],
+   "source": "holdout:2026-11-05-name"
   }
  ]
 }
