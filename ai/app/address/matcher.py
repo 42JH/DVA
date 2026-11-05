@@ -212,7 +212,7 @@ def candidates(rd, text, top=5):
     return [(sido, sg, road, number, round(d, 2)) for ((sido, sg), road), d in ranked]
 
 
-AREA_END = re.compile(r"[동리가읍면]$")  # 지번 주소로 볼 이름 끝 (법정동·리, 종로1가 같은 "가", 리를 뺀 읍·면)
+AREA_END = re.compile(r"[동리가]$")  # 지번 주소로 볼 이름 끝 (법정동·리, 종로1가 같은 "가")
 
 
 def jibun_candidates(db, text):

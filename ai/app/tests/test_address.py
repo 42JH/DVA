@@ -274,7 +274,7 @@ def test_resolve_stops_retrying_after_time_limit(db):
 
 def test_heard_name_is_not_replaced_by_a_similar_real_place(db):
     """맞게 들은 이름은 고치지 않고, 짧은 이름은 소리가 같을 때만 맞다고 본다(2026-11-05 "산동 580" → 신동 580)."""
-    # 리 없이 읍·면만 말하면 번지가 하나로 정해지지 않는다 → 다른 동·리로 고치지 않고 다시 묻는다
+    # 리 없이 읍·면만 말하면 번지가 하나로 정해지지 않는다 → 비슷한 다른 동·리로 고치지 않는다(못 찾음)
     assert correct(db, "경북 구미시 선산읍 산 12") == NOT_FOUND
     assert correct(db, "경북 구미시 선산읍 완전리 산 12").status == "confirmed"
     # 짧은 동 이름("인의")에서 글자가 바뀌면 다른 장소 → 후보가 아니다. 연음처럼 소리가 같으면 그대로 찾는다

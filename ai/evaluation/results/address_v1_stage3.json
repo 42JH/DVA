@@ -1,6 +1,6 @@
 {
   "dataset": "address_v1",
-  "commit": "2ac6717",
+  "commit": "f14c974",
   "resolver": "app.address",
   "db_bytes": 612503552,
   "repeat": 3,
@@ -26,14 +26,14 @@
       "wrong": 0
     },
     "latency_ms": {
-      "cold_p50": 11.5,
-      "cold_p95": 55.8,
-      "cold_max": 450.3,
-      "warm_p50": 9.4,
-      "warm_p95": 90.9,
-      "warm_max": 476.9,
-      "concurrent_all_wall": 2515.6,
-      "sequential_sum_warm_p50": 3175.0
+      "cold_p50": 10.9,
+      "cold_p95": 49.9,
+      "cold_max": 423.7,
+      "warm_p50": 8.1,
+      "warm_p95": 88.2,
+      "warm_max": 482.2,
+      "concurrent_all_wall": 2511.3,
+      "sequential_sum_warm_p50": 2833.3
     },
     "by_tag": {
       "admin_dong": {
@@ -157,8 +157,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 20.7,
-      "warm_p50_ms": 9.5
+      "cold_ms": 23.7,
+      "warm_p50_ms": 8.3
     },
     {
       "id": "a02",
@@ -171,8 +171,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.7,
-      "warm_p50_ms": 6.0
+      "cold_ms": 9.1,
+      "warm_p50_ms": 3.9
     },
     {
       "id": "a03",
@@ -185,8 +185,8 @@
       "recorded": "대전광역시 유성구 대학로 291",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.8,
-      "warm_p50_ms": 8.8
+      "cold_ms": 16.5,
+      "warm_p50_ms": 6.2
     },
     {
       "id": "a04",
@@ -200,8 +200,8 @@
       "recorded": "세종특별자치시 한누리대로 2130",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 37.0,
-      "warm_p50_ms": 19.1
+      "cold_ms": 31.6,
+      "warm_p50_ms": 16.1
     },
     {
       "id": "a05",
@@ -214,8 +214,8 @@
       "recorded": "제주특별자치도 제주시 문연로 6",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 27.7,
-      "warm_p50_ms": 5.1
+      "cold_ms": 24.5,
+      "warm_p50_ms": 2.8
     },
     {
       "id": "a06",
@@ -228,8 +228,8 @@
       "recorded": "부산광역시 해운대구 해운대해변로 264",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.1,
-      "warm_p50_ms": 11.3
+      "cold_ms": 13.4,
+      "warm_p50_ms": 6.9
     },
     {
       "id": "a07",
@@ -243,8 +243,8 @@
       "recorded": "충청남도 홍성군 홍북읍 충남대로 21",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 13.2,
-      "warm_p50_ms": 4.3
+      "cold_ms": 10.5,
+      "warm_p50_ms": 4.7
     },
     {
       "id": "a08",
@@ -258,8 +258,8 @@
       "recorded": "경상북도 안동시 풍천면 도청대로 455",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 20.7,
-      "warm_p50_ms": 9.6
+      "cold_ms": 26.0,
+      "warm_p50_ms": 9.2
     },
     {
       "id": "a09",
@@ -273,8 +273,8 @@
       "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.9,
-      "warm_p50_ms": 7.8
+      "cold_ms": 10.1,
+      "warm_p50_ms": 7.2
     },
     {
       "id": "a10",
@@ -288,8 +288,8 @@
       "recorded": "전남광주통합특별시 북구 용봉로 77",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.1,
-      "warm_p50_ms": 4.6
+      "cold_ms": 12.7,
+      "warm_p50_ms": 5.2
     },
     {
       "id": "a11",
@@ -303,8 +303,8 @@
       "recorded": "전남광주통합특별시 북구 용봉로 77",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.3,
-      "warm_p50_ms": 6.2
+      "cold_ms": 5.4,
+      "warm_p50_ms": 4.9
     },
     {
       "id": "a12",
@@ -318,8 +318,8 @@
       "recorded": "강원특별자치도 춘천시 중앙로 1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.5,
-      "warm_p50_ms": 6.0
+      "cold_ms": 13.1,
+      "warm_p50_ms": 6.6
     },
     {
       "id": "a13",
@@ -332,8 +332,8 @@
       "recorded": "전북특별자치도 전주시 완산구 효자로 225",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.7,
-      "warm_p50_ms": 6.6
+      "cold_ms": 11.0,
+      "warm_p50_ms": 7.1
     },
     {
       "id": "a14",
@@ -346,8 +346,8 @@
       "recorded": "울산광역시 남구 중앙로 201",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.6,
-      "warm_p50_ms": 11.2
+      "cold_ms": 15.0,
+      "warm_p50_ms": 8.8
     },
     {
       "id": "a15",
@@ -360,7 +360,7 @@
       "recorded": "인천광역시 남동구 정각로 29",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.4,
+      "cold_ms": 12.1,
       "warm_p50_ms": 3.3
     },
     {
@@ -374,8 +374,8 @@
       "recorded": "대구광역시 중구 공평로 88",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.5,
-      "warm_p50_ms": 3.7
+      "cold_ms": 5.1,
+      "warm_p50_ms": 3.8
     },
     {
       "id": "a17",
@@ -388,8 +388,8 @@
       "recorded": "경기도 수원시 영통구 도청로 30",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 9.8,
-      "warm_p50_ms": 7.4
+      "cold_ms": 9.7,
+      "warm_p50_ms": 7.3
     },
     {
       "id": "a18",
@@ -402,8 +402,8 @@
       "recorded": "충청북도 청주시 상당구 상당로 155",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.1,
-      "warm_p50_ms": 7.8
+      "cold_ms": 13.6,
+      "warm_p50_ms": 8.2
     },
     {
       "id": "a19",
@@ -417,7 +417,7 @@
       "alternatives": [],
       "outcome": "confirmed",
       "cold_ms": 8.4,
-      "warm_p50_ms": 3.8
+      "warm_p50_ms": 3.2
     },
     {
       "id": "a20",
@@ -430,8 +430,8 @@
       "recorded": "경상북도 포항시 남구 시청로 1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 11.3,
-      "warm_p50_ms": 3.2
+      "cold_ms": 10.8,
+      "warm_p50_ms": 3.5
     },
     {
       "id": "b01",
@@ -444,8 +444,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.1,
-      "warm_p50_ms": 9.1
+      "cold_ms": 9.6,
+      "warm_p50_ms": 8.0
     },
     {
       "id": "b02",
@@ -458,8 +458,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "auto",
-      "cold_ms": 9.7,
-      "warm_p50_ms": 8.6
+      "cold_ms": 8.5,
+      "warm_p50_ms": 8.2
     },
     {
       "id": "b03",
@@ -472,8 +472,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 11.2,
-      "warm_p50_ms": 5.0
+      "cold_ms": 10.6,
+      "warm_p50_ms": 5.1
     },
     {
       "id": "b04",
@@ -486,8 +486,8 @@
       "recorded": "서울특별시 종로구 사직로 161",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.5,
-      "warm_p50_ms": 5.7
+      "cold_ms": 10.0,
+      "warm_p50_ms": 5.4
     },
     {
       "id": "b05",
@@ -500,8 +500,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.9,
-      "warm_p50_ms": 9.3
+      "cold_ms": 12.1,
+      "warm_p50_ms": 8.1
     },
     {
       "id": "b06",
@@ -514,8 +514,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 4.2,
-      "warm_p50_ms": 5.1
+      "cold_ms": 5.2,
+      "warm_p50_ms": 4.0
     },
     {
       "id": "b07",
@@ -528,8 +528,8 @@
       "recorded": "경기도 성남시 분당구 불정로 6",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.5,
-      "warm_p50_ms": 6.4
+      "cold_ms": 7.3,
+      "warm_p50_ms": 6.0
     },
     {
       "id": "b08",
@@ -542,8 +542,8 @@
       "recorded": "서울특별시 마포구 월드컵로 240",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.7,
-      "warm_p50_ms": 8.1
+      "cold_ms": 13.8,
+      "warm_p50_ms": 8.0
     },
     {
       "id": "b09",
@@ -556,8 +556,8 @@
       "recorded": "서울특별시 용산구 이태원로 29",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.6,
-      "warm_p50_ms": 6.6
+      "cold_ms": 11.9,
+      "warm_p50_ms": 7.3
     },
     {
       "id": "b10",
@@ -584,8 +584,8 @@
       "recorded": "서울특별시 관악구 관악로 1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 11.5,
-      "warm_p50_ms": 5.0
+      "cold_ms": 11.0,
+      "warm_p50_ms": 5.1
     },
     {
       "id": "b12",
@@ -598,8 +598,8 @@
       "recorded": "부산광역시 연제구 중앙대로 1001",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.6,
-      "warm_p50_ms": 5.9
+      "cold_ms": 9.5,
+      "warm_p50_ms": 5.5
     },
     {
       "id": "c01",
@@ -613,8 +613,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 13.5,
-      "warm_p50_ms": 13.3
+      "cold_ms": 14.1,
+      "warm_p50_ms": 14.0
     },
     {
       "id": "c02",
@@ -628,8 +628,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.5,
-      "warm_p50_ms": 13.3
+      "cold_ms": 11.8,
+      "warm_p50_ms": 9.9
     },
     {
       "id": "c03",
@@ -642,8 +642,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.3,
-      "warm_p50_ms": 5.8
+      "cold_ms": 5.7,
+      "warm_p50_ms": 5.1
     },
     {
       "id": "c04",
@@ -656,8 +656,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.8,
-      "warm_p50_ms": 8.9
+      "cold_ms": 6.3,
+      "warm_p50_ms": 6.0
     },
     {
       "id": "c05",
@@ -670,8 +670,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.5,
-      "warm_p50_ms": 7.8
+      "cold_ms": 7.8,
+      "warm_p50_ms": 7.4
     },
     {
       "id": "c06",
@@ -684,8 +684,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 4.3,
-      "warm_p50_ms": 3.9
+      "cold_ms": 5.0,
+      "warm_p50_ms": 3.8
     },
     {
       "id": "c07",
@@ -698,8 +698,8 @@
       "recorded": "서울특별시 종로구 사직로 161",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 4.9,
-      "warm_p50_ms": 7.0
+      "cold_ms": 7.9,
+      "warm_p50_ms": 5.2
     },
     {
       "id": "c08",
@@ -712,8 +712,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.5,
-      "warm_p50_ms": 10.6
+      "cold_ms": 10.9,
+      "warm_p50_ms": 8.8
     },
     {
       "id": "c09",
@@ -727,8 +727,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.7,
-      "warm_p50_ms": 19.5
+      "cold_ms": 19.1,
+      "warm_p50_ms": 18.5
     },
     {
       "id": "c10",
@@ -742,8 +742,8 @@
       "recorded": "서울특별시 양천구 목동로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.6,
-      "warm_p50_ms": 4.5
+      "cold_ms": 8.6,
+      "warm_p50_ms": 3.9
     },
     {
       "id": "c11",
@@ -757,8 +757,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 20.9,
-      "warm_p50_ms": 10.9
+      "cold_ms": 22.4,
+      "warm_p50_ms": 8.6
     },
     {
       "id": "d01",
@@ -771,8 +771,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.3,
-      "warm_p50_ms": 8.6
+      "cold_ms": 7.0,
+      "warm_p50_ms": 8.0
     },
     {
       "id": "d02",
@@ -785,8 +785,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.6,
-      "warm_p50_ms": 7.5
+      "cold_ms": 8.1,
+      "warm_p50_ms": 8.4
     },
     {
       "id": "d03",
@@ -800,7 +800,7 @@
       "alternatives": [],
       "outcome": "confirmed",
       "cold_ms": 8.1,
-      "warm_p50_ms": 8.1
+      "warm_p50_ms": 7.8
     },
     {
       "id": "d04",
@@ -814,8 +814,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.8,
-      "warm_p50_ms": 8.2
+      "cold_ms": 9.2,
+      "warm_p50_ms": 9.4
     },
     {
       "id": "d05",
@@ -829,8 +829,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 4.2,
-      "warm_p50_ms": 4.6
+      "cold_ms": 4.8,
+      "warm_p50_ms": 4.3
     },
     {
       "id": "d06",
@@ -843,8 +843,8 @@
       "recorded": "서울특별시 영등포구 의사당대로 1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 9.7,
-      "warm_p50_ms": 4.2
+      "cold_ms": 8.5,
+      "warm_p50_ms": 2.7
     },
     {
       "id": "d07",
@@ -858,8 +858,8 @@
       "recorded": "서울특별시 강남구 테헤란로 211",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.9,
-      "warm_p50_ms": 8.9
+      "cold_ms": 8.0,
+      "warm_p50_ms": 8.3
     },
     {
       "id": "d08",
@@ -872,8 +872,8 @@
       "recorded": "세종특별자치시 한누리대로 2130",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.3,
-      "warm_p50_ms": 15.2
+      "cold_ms": 14.8,
+      "warm_p50_ms": 15.6
     },
     {
       "id": "d09",
@@ -886,8 +886,8 @@
       "recorded": "부산광역시 연제구 중앙대로 1001",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.8,
-      "warm_p50_ms": 5.4
+      "cold_ms": 5.6,
+      "warm_p50_ms": 5.5
     },
     {
       "id": "d10",
@@ -900,8 +900,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.6,
-      "warm_p50_ms": 6.2
+      "cold_ms": 5.4,
+      "warm_p50_ms": 5.4
     },
     {
       "id": "e01",
@@ -914,8 +914,8 @@
       "recorded": "서울특별시 강남구 테헤란로8길 20",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 9.8,
-      "warm_p50_ms": 9.4
+      "cold_ms": 8.5,
+      "warm_p50_ms": 8.4
     },
     {
       "id": "e02",
@@ -928,8 +928,8 @@
       "recorded": "서울특별시 강남구 테헤란로8길 20",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.6,
-      "warm_p50_ms": 8.9
+      "cold_ms": 8.2,
+      "warm_p50_ms": 9.0
     },
     {
       "id": "e03",
@@ -942,8 +942,8 @@
       "recorded": "서울특별시 강남구 테헤란로8길 20",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 9.1,
-      "warm_p50_ms": 10.7
+      "cold_ms": 8.5,
+      "warm_p50_ms": 8.6
     },
     {
       "id": "e04",
@@ -957,8 +957,8 @@
       "recorded": "서울특별시 강남구 테헤란로26길 10",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.9,
-      "warm_p50_ms": 20.8
+      "cold_ms": 16.0,
+      "warm_p50_ms": 16.4
     },
     {
       "id": "e05",
@@ -971,8 +971,8 @@
       "recorded": "서울특별시 강남구 테헤란로26길 10",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 18.4,
-      "warm_p50_ms": 17.1
+      "cold_ms": 17.1,
+      "warm_p50_ms": 16.1
     },
     {
       "id": "e06",
@@ -985,8 +985,8 @@
       "recorded": "서울특별시 강남구 테헤란로26길 10",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 18.4,
-      "warm_p50_ms": 17.8
+      "cold_ms": 15.6,
+      "warm_p50_ms": 16.5
     },
     {
       "id": "e07",
@@ -999,8 +999,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 15.8,
-      "warm_p50_ms": 5.4
+      "cold_ms": 15.0,
+      "warm_p50_ms": 5.7
     },
     {
       "id": "e08",
@@ -1014,8 +1014,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 16.4,
-      "warm_p50_ms": 18.0
+      "cold_ms": 13.9,
+      "warm_p50_ms": 13.1
     },
     {
       "id": "e09",
@@ -1029,8 +1029,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.5,
-      "warm_p50_ms": 17.5
+      "cold_ms": 15.2,
+      "warm_p50_ms": 13.5
     },
     {
       "id": "e10",
@@ -1045,8 +1045,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 13.0,
-      "warm_p50_ms": 16.7
+      "cold_ms": 14.9,
+      "warm_p50_ms": 12.3
     },
     {
       "id": "e11",
@@ -1060,8 +1060,8 @@
       "recorded": "서울특별시 영등포구 도림로143길 27",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.0,
-      "warm_p50_ms": 16.5
+      "cold_ms": 13.9,
+      "warm_p50_ms": 14.2
     },
     {
       "id": "e12",
@@ -1074,8 +1074,8 @@
       "recorded": "서울특별시 영등포구 도림로143길 27",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.2,
-      "warm_p50_ms": 14.6
+      "cold_ms": 17.5,
+      "warm_p50_ms": 16.1
     },
     {
       "id": "f01",
@@ -1088,8 +1088,8 @@
       "recorded": "서울특별시 양천구 신정이펜1로 50",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 3.1,
-      "warm_p50_ms": 3.5
+      "cold_ms": 3.2,
+      "warm_p50_ms": 3.7
     },
     {
       "id": "f02",
@@ -1102,8 +1102,8 @@
       "recorded": "서울특별시 양천구 신정이펜1로 50",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.1,
-      "warm_p50_ms": 8.0
+      "cold_ms": 5.2,
+      "warm_p50_ms": 4.9
     },
     {
       "id": "f03",
@@ -1116,8 +1116,8 @@
       "recorded": "서울특별시 양천구 신정이펜1로 50",
       "alternatives": [],
       "outcome": "auto",
-      "cold_ms": 4.3,
-      "warm_p50_ms": 5.4
+      "cold_ms": 4.9,
+      "warm_p50_ms": 4.3
     },
     {
       "id": "f04",
@@ -1131,8 +1131,8 @@
       "recorded": "서울특별시 양천구 신정이펜1로 50",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 3.0,
-      "warm_p50_ms": 3.7
+      "cold_ms": 3.7,
+      "warm_p50_ms": 2.6
     },
     {
       "id": "f05",
@@ -1147,8 +1147,8 @@
       "recorded": "서울특별시 양천구 신정이펜1로 51",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 3.1,
-      "warm_p50_ms": 4.6
+      "cold_ms": 2.7,
+      "warm_p50_ms": 2.8
     },
     {
       "id": "g01",
@@ -1162,8 +1162,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.7,
-      "warm_p50_ms": 16.4
+      "cold_ms": 16.3,
+      "warm_p50_ms": 13.9
     },
     {
       "id": "g02",
@@ -1178,8 +1178,8 @@
       "recorded": "경상북도 구미시 인동9길 22-1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 30.3,
-      "warm_p50_ms": 30.2
+      "cold_ms": 32.6,
+      "warm_p50_ms": 30.4
     },
     {
       "id": "g03",
@@ -1193,7 +1193,7 @@
       "alternatives": [],
       "outcome": "confirmed",
       "cold_ms": 6.1,
-      "warm_p50_ms": 6.1
+      "warm_p50_ms": 5.8
     },
     {
       "id": "g04",
@@ -1206,8 +1206,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.2,
-      "warm_p50_ms": 6.2
+      "cold_ms": 5.5,
+      "warm_p50_ms": 5.6
     },
     {
       "id": "g05",
@@ -1221,8 +1221,8 @@
       "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.6,
-      "warm_p50_ms": 6.5
+      "cold_ms": 7.8,
+      "warm_p50_ms": 6.6
     },
     {
       "id": "g06",
@@ -1236,8 +1236,8 @@
       "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.3,
-      "warm_p50_ms": 18.8
+      "cold_ms": 15.1,
+      "warm_p50_ms": 11.7
     },
     {
       "id": "h01",
@@ -1250,8 +1250,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 15.4,
-      "warm_p50_ms": 16.0
+      "cold_ms": 15.9,
+      "warm_p50_ms": 15.0
     },
     {
       "id": "h02",
@@ -1264,8 +1264,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 19.7,
-      "warm_p50_ms": 18.8
+      "cold_ms": 21.3,
+      "warm_p50_ms": 18.3
     },
     {
       "id": "h03",
@@ -1278,8 +1278,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.7,
-      "warm_p50_ms": 16.0
+      "cold_ms": 13.6,
+      "warm_p50_ms": 10.7
     },
     {
       "id": "h04",
@@ -1292,8 +1292,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 6.3,
-      "warm_p50_ms": 7.1
+      "cold_ms": 6.8,
+      "warm_p50_ms": 6.8
     },
     {
       "id": "h05",
@@ -1307,8 +1307,8 @@
       "recorded": "경상북도 구미시 인동9길 7-3",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 43.5,
-      "warm_p50_ms": 54.7
+      "cold_ms": 44.5,
+      "warm_p50_ms": 46.4
     },
     {
       "id": "h06",
@@ -1321,8 +1321,8 @@
       "recorded": "서울특별시 강남구 테헤란로 212",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.1,
-      "warm_p50_ms": 12.6
+      "cold_ms": 10.8,
+      "warm_p50_ms": 13.1
     },
     {
       "id": "i01",
@@ -1336,8 +1336,8 @@
       "recorded": "서울특별시 영등포구 도림로143길 27",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 18.6,
-      "warm_p50_ms": 20.0
+      "cold_ms": 17.4,
+      "warm_p50_ms": 18.9
     },
     {
       "id": "i02",
@@ -1350,8 +1350,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 11.1,
-      "warm_p50_ms": 11.8
+      "cold_ms": 11.2,
+      "warm_p50_ms": 12.2
     },
     {
       "id": "i03",
@@ -1364,8 +1364,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 9.7,
-      "warm_p50_ms": 14.3
+      "cold_ms": 8.0,
+      "warm_p50_ms": 8.1
     },
     {
       "id": "i04",
@@ -1379,8 +1379,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 16.4,
-      "warm_p50_ms": 17.7
+      "cold_ms": 15.6,
+      "warm_p50_ms": 16.9
     },
     {
       "id": "j01",
@@ -1393,8 +1393,8 @@
       "recorded": "경상북도 구미시 인동5길 25-1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 92.5,
-      "warm_p50_ms": 95.2
+      "cold_ms": 107.5,
+      "warm_p50_ms": 90.9
     },
     {
       "id": "j02",
@@ -1408,8 +1408,8 @@
       "recorded": "경상북도 구미시 인동5길 25-1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 92.5,
-      "warm_p50_ms": 114.2
+      "cold_ms": 94.5,
+      "warm_p50_ms": 93.0
     },
     {
       "id": "j03",
@@ -1423,8 +1423,8 @@
       "recorded": "경상북도 구미시 인동5길 25-1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 87.4,
-      "warm_p50_ms": 97.2
+      "cold_ms": 86.6,
+      "warm_p50_ms": 88.7
     },
     {
       "id": "j04",
@@ -1437,8 +1437,8 @@
       "recorded": "서울특별시 강남구 테헤란로 152",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 297.8,
-      "warm_p50_ms": 318.9
+      "cold_ms": 291.3,
+      "warm_p50_ms": 288.9
     },
     {
       "id": "j05",
@@ -1452,8 +1452,8 @@
       "recorded": "서울특별시 강남구 테헤란로 152",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 290.9,
-      "warm_p50_ms": 322.2
+      "cold_ms": 313.0,
+      "warm_p50_ms": 296.7
     },
     {
       "id": "j06",
@@ -1466,8 +1466,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 4.8,
-      "warm_p50_ms": 5.2
+      "cold_ms": 5.2,
+      "warm_p50_ms": 4.3
     },
     {
       "id": "j07",
@@ -1481,8 +1481,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.5,
-      "warm_p50_ms": 8.8
+      "cold_ms": 6.6,
+      "warm_p50_ms": 7.1
     },
     {
       "id": "j08",
@@ -1495,8 +1495,8 @@
       "recorded": "경기도 성남시 분당구 판교역로 166",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 30.9,
-      "warm_p50_ms": 32.1
+      "cold_ms": 28.5,
+      "warm_p50_ms": 28.1
     },
     {
       "id": "j09",
@@ -1509,8 +1509,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 7.9,
-      "warm_p50_ms": 9.1
+      "cold_ms": 5.0,
+      "warm_p50_ms": 5.5
     },
     {
       "id": "j10",
@@ -1523,8 +1523,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 5.0,
-      "warm_p50_ms": 5.2
+      "cold_ms": 5.2,
+      "warm_p50_ms": 6.0
     },
     {
       "id": "j11",
@@ -1538,8 +1538,8 @@
       "recorded": "서울특별시 강남구 테헤란로 152",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 285.7,
-      "warm_p50_ms": 334.9
+      "cold_ms": 299.1,
+      "warm_p50_ms": 291.8
     },
     {
       "id": "k01",
@@ -1552,8 +1552,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 14.8,
-      "warm_p50_ms": 17.4
+      "cold_ms": 14.5,
+      "warm_p50_ms": 14.8
     },
     {
       "id": "k02",
@@ -1566,8 +1566,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 2.3,
-      "warm_p50_ms": 2.3
+      "cold_ms": 2.4,
+      "warm_p50_ms": 2.6
     },
     {
       "id": "k03",
@@ -1580,8 +1580,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 9.4,
-      "warm_p50_ms": 8.2
+      "cold_ms": 9.0,
+      "warm_p50_ms": 8.8
     },
     {
       "id": "k04",
@@ -1595,8 +1595,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 0.2,
-      "warm_p50_ms": 0.4
+      "cold_ms": 0.3,
+      "warm_p50_ms": 0.2
     },
     {
       "id": "k05",
@@ -1610,8 +1610,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 7.6,
-      "warm_p50_ms": 10.4
+      "cold_ms": 7.0,
+      "warm_p50_ms": 7.0
     },
     {
       "id": "k06",
@@ -1625,8 +1625,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 3.3,
-      "warm_p50_ms": 3.6
+      "cold_ms": 3.0,
+      "warm_p50_ms": 3.0
     },
     {
       "id": "k07",
@@ -1640,8 +1640,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 17.8,
-      "warm_p50_ms": 21.2
+      "cold_ms": 17.7,
+      "warm_p50_ms": 18.9
     },
     {
       "id": "k08",
@@ -1655,8 +1655,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 7.2,
-      "warm_p50_ms": 8.2
+      "cold_ms": 6.8,
+      "warm_p50_ms": 6.7
     },
     {
       "id": "p01",
@@ -1670,8 +1670,8 @@
       "recorded": "대전광역시 유성구 대학로 291",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 18.3,
-      "warm_p50_ms": 17.6
+      "cold_ms": 13.2,
+      "warm_p50_ms": 14.2
     },
     {
       "id": "p02",
@@ -1686,8 +1686,8 @@
       "recorded": "제주특별자치도 제주시 문연로 6",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 17.4,
-      "warm_p50_ms": 14.8
+      "cold_ms": 14.3,
+      "warm_p50_ms": 14.9
     },
     {
       "id": "p03",
@@ -1701,8 +1701,8 @@
       "recorded": "인천광역시 남동구 정각로 29",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.6,
-      "warm_p50_ms": 9.6
+      "cold_ms": 9.8,
+      "warm_p50_ms": 8.9
     },
     {
       "id": "p04",
@@ -1717,8 +1717,8 @@
       "recorded": "부산광역시 해운대구 해운대해변로 264",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 18.1,
-      "warm_p50_ms": 22.7
+      "cold_ms": 17.5,
+      "warm_p50_ms": 18.1
     },
     {
       "id": "p05",
@@ -1733,8 +1733,8 @@
       "recorded": "세종특별자치시 한누리대로 2130",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 55.8,
-      "warm_p50_ms": 58.0
+      "cold_ms": 49.9,
+      "warm_p50_ms": 52.0
     },
     {
       "id": "p06",
@@ -1749,7 +1749,7 @@
       "recorded": "경기도 고양시 일산서구 킨텍스로 217-60",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.3,
+      "cold_ms": 12.5,
       "warm_p50_ms": 11.7
     },
     {
@@ -1765,8 +1765,8 @@
       "recorded": "서울특별시 송파구 올림픽로 300",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 14.3,
-      "warm_p50_ms": 9.8
+      "cold_ms": 9.0,
+      "warm_p50_ms": 9.5
     },
     {
       "id": "p08",
@@ -1781,8 +1781,8 @@
       "recorded": "서울특별시 중구 세종대로 110",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 11.6,
-      "warm_p50_ms": 8.2
+      "cold_ms": 7.4,
+      "warm_p50_ms": 7.8
     },
     {
       "id": "p09",
@@ -1797,8 +1797,8 @@
       "recorded": "울산광역시 남구 중앙로 201",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 10.5,
-      "warm_p50_ms": 10.5
+      "cold_ms": 9.9,
+      "warm_p50_ms": 11.0
     },
     {
       "id": "n01",
@@ -1813,8 +1813,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 4.7,
-      "warm_p50_ms": 6.4
+      "cold_ms": 4.8,
+      "warm_p50_ms": 5.3
     },
     {
       "id": "n02",
@@ -1829,8 +1829,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 23.6,
-      "warm_p50_ms": 19.7
+      "cold_ms": 19.4,
+      "warm_p50_ms": 20.0
     },
     {
       "id": "n03",
@@ -1845,8 +1845,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 39.6,
-      "warm_p50_ms": 35.8
+      "cold_ms": 31.7,
+      "warm_p50_ms": 30.4
     },
     {
       "id": "n04",
@@ -1861,8 +1861,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 13.1,
-      "warm_p50_ms": 11.3
+      "cold_ms": 12.0,
+      "warm_p50_ms": 11.9
     },
     {
       "id": "n05",
@@ -1878,8 +1878,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 11.1,
-      "warm_p50_ms": 14.3
+      "cold_ms": 10.3,
+      "warm_p50_ms": 10.3
     },
     {
       "id": "n06",
@@ -1894,8 +1894,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 450.3,
-      "warm_p50_ms": 459.1
+      "cold_ms": 423.7,
+      "warm_p50_ms": 409.5
     },
     {
       "id": "n07",
@@ -1910,8 +1910,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 13.7,
-      "warm_p50_ms": 9.5
+      "cold_ms": 8.8,
+      "warm_p50_ms": 8.0
     },
     {
       "id": "q01",
@@ -1926,8 +1926,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 5.2,
-      "warm_p50_ms": 2.9
+      "cold_ms": 3.9,
+      "warm_p50_ms": 3.0
     },
     {
       "id": "q02",
@@ -1941,8 +1941,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 4.0,
-      "warm_p50_ms": 4.5
+      "cold_ms": 3.3,
+      "warm_p50_ms": 3.7
     },
     {
       "id": "q03",
@@ -1956,8 +1956,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 21.0,
-      "warm_p50_ms": 27.8
+      "cold_ms": 21.4,
+      "warm_p50_ms": 25.1
     },
     {
       "id": "q04",
@@ -1972,8 +1972,8 @@
       "recorded": "경상북도 구미시 산동읍 산호대로41길 13",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 29.7,
-      "warm_p50_ms": 27.7
+      "cold_ms": 29.1,
+      "warm_p50_ms": 29.1
     },
     {
       "id": "q05",
@@ -1988,8 +1988,8 @@
       "recorded": "경상북도 구미시 인동63길 63-1",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 12.0,
-      "warm_p50_ms": 12.4
+      "cold_ms": 11.1,
+      "warm_p50_ms": 10.5
     },
     {
       "id": "q06",
@@ -2004,8 +2004,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 5.8,
-      "warm_p50_ms": 2.5
+      "cold_ms": 3.3,
+      "warm_p50_ms": 2.8
     },
     {
       "id": "q07",
@@ -2020,8 +2020,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 16.3,
-      "warm_p50_ms": 3.7
+      "cold_ms": 12.0,
+      "warm_p50_ms": 2.9
     },
     {
       "id": "q08",
@@ -2036,8 +2036,8 @@
       "recorded": "경상남도 김해시 상동면 장척로 429",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 44.5,
-      "warm_p50_ms": 41.9
+      "cold_ms": 47.4,
+      "warm_p50_ms": 39.8
     },
     {
       "id": "q09",
@@ -2052,8 +2052,8 @@
       "recorded": "경상남도 김해시 대동면 주중길 98-6",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 16.6,
-      "warm_p50_ms": 15.5
+      "cold_ms": 17.3,
+      "warm_p50_ms": 16.1
     },
     {
       "id": "q10",
@@ -2068,8 +2068,8 @@
       "recorded": null,
       "alternatives": [],
       "outcome": "rejected",
-      "cold_ms": 8.5,
-      "warm_p50_ms": 14.9
+      "cold_ms": 11.2,
+      "warm_p50_ms": 7.9
     },
     {
       "id": "q11",
@@ -2083,8 +2083,8 @@
       "recorded": "서울특별시 강남구 테헤란로2길 8",
       "alternatives": [],
       "outcome": "confirmed",
-      "cold_ms": 8.0,
-      "warm_p50_ms": 7.1
+      "cold_ms": 6.8,
+      "warm_p50_ms": 6.7
     }
   ]
 }
