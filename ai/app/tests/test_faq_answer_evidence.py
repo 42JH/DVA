@@ -219,12 +219,14 @@ def test_v1_confirmed_review_is_not_backfilled(tmp_path):
 def test_lost_event_ack_retries_frozen_array_without_new_model_call(tmp_path):
     class LostAck(MockBackend):
         attempts = 0
+        drop_ack = True
 
         async def send_call_events(self, seq, body):
             await super().send_call_events(seq, body)
-            self.attempts += 1
-            if self.attempts == 1:
-                raise BackendFailure("unavailable", "BE_TIMEOUT", "events")
+            if any(e["payload"].get("action") == "FAQ_ANSWERED" for e in body["events"]):
+                self.attempts += 1
+                if self.drop_ack:
+                    raise BackendFailure("unavailable", "BE_TIMEOUT", "events")
 
     rs, db = service(tmp_path, LostAck())
     s, _ = payload(evidence(), rs, db)
@@ -237,7 +239,10 @@ def test_lost_event_ack_retries_frozen_array_without_new_model_call(tmp_path):
 
     run(initial())
     stored = rs.outbox.insight(s.call_id)
-    assert stored["status"] == "PENDING" and len(faq_events(stored["payload"])) == 1
+    prepared = rs.outbox.review(s.call_id)["prepared"]
+    assert stored["status"] == "PENDING" and len(faq_events(prepared)) == 1
+    assert db.analyses[s.state.customer.call_session_seq]["faqAnswerCount"] == 1
+    db.drop_ack = False
     rs.outbox.close()
     restored = ResultService(BackendGateway(db), Outbox(tmp_path / "outbox.sqlite3"), P, fare,
         reviewer=reviewer(client), reason_contract_enabled=True, faq_answered_enabled=True)

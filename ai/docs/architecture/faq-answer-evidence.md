@@ -51,3 +51,5 @@ API 키 원문을 출력하지 않는다. 운영 BACKEND_MODEL이 다르면 실�
 첫 점검에서는 PostgreSQL to_regclass('public.faq_question_examples')가 NULL이고 실행 중 DTO에도 faqEntrySeqs가 없어 false로 보류했다. 이후 사용자의 재확인 요청 때 같은 읽기 전용 점검을 수행해 **테이블 존재=true, 실행 중 배열 DTO=true**를 확인했다. 이에 작업 브랜치의 스위치를 true로 전환했다. 운영 DB/설정은 수정하지 않았다. 최신 develop-ai 5330e0d의 주소 변경 되돌림을 기능 브랜치에 반영하며 팀원 결정을 재적용으로 덮지 않는다. 첨부 계약과 달라진 동작 코드는 없다.
 
 최신 기준 회귀 검증은 **574 passed, 14 warnings / 20.36초**다. 앞선 593개와의 개수 차이는 주소 변경 되돌림으로 바뀐 테스트 구성이다. 추가 모델 호출은 하지 않았다. 기능 브랜치에서 병합을 준비하며 최종 develop-ai 병합·운영 AI 배포 이후 새 통화로 실제 FAQ 사례 수집을 확인한다.
+
+종료 검토 실패와 기본 기록 전송 분리, 명시적 ref 및 부분 근거 검증은 [후속 설계](postcall-review-delivery.md)를 따른다. 위 검증 수치와 배포 기록은 각 작성 당시의 이력이다.

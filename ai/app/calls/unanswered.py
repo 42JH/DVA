@@ -11,7 +11,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 NAMESPACE = uuid.UUID("cbbbd75b-af26-46c3-a362-f1b253223dce")
-REVIEW_VERSION = "unanswered-v2-faq-evidence"
+REVIEW_VERSION = "unanswered-v3-explicit-refs"
 
 
 class UsedEvidence(BaseModel):
@@ -38,8 +38,36 @@ class ReviewDecision(BaseModel):
     inquiries: list[Inquiry]
 
 
+class ReferencedEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    search_ref: str
+    chunk_id: str
+    evidence_quote: str
+    answer_quote: str
+
+
+class ReferencedInquiry(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    customer_ref: str
+    question_text: str
+    search_refs: list[str]
+    outcome: Literal["ANSWERED", "UNANSWERED", "CLARIFICATION", "UNKNOWN"]
+    agent_ref: str | None
+    agent_quote: str | None
+    used_evidence: list[ReferencedEvidence] = Field(max_length=100)
+
+
+class ReferencedDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    inquiries: list[ReferencedInquiry]
+
+
 class ReviewError(Exception):
     """본문을 예외 메시지에 포함하지 않는 검토 오류."""
+
+    def __init__(self, code: str, diagnostic: dict | None = None):
+        super().__init__(code)
+        self.diagnostic = diagnostic
 
 
 class UnansweredReviewer:
@@ -51,35 +79,105 @@ class UnansweredReviewer:
 
     async def review(self, evidence: dict) -> dict:
         if not evidence["searches"]:
-            return {"version": REVIEW_VERSION, "model": self.model, "inquiries": []}
+            return {"version": REVIEW_VERSION, "model": self.model, "inquiries": [], "complete": True, "issues": []}
         # Live의 현재 전사 보존 상한에 도달하면 앞부분 유실 가능성이 있다.
         if len(evidence["transcript"]) >= 300:
             raise ReviewError("TRANSCRIPT_POSSIBLY_TRUNCATED")
-        content = json.dumps(evidence, ensure_ascii=False)
+        numbered = model_evidence(evidence)
+        content = json.dumps(numbered, ensure_ascii=False)
         if len(content) > self.max_input_chars:
             raise ReviewError("REVIEW_INPUT_TOO_LARGE")
         async with asyncio.timeout(self.timeout_sec):
             response = await self.client.with_options(max_retries=0, timeout=self.timeout_sec).responses.parse(
                 model=self.model, store=False,
                 input=[{"role": "system", "content": self.prompt}, {"role": "user", "content": content}],
-                text_format=ReviewDecision, max_output_tokens=self.max_output_tokens,
+                text_format=ReferencedDecision, max_output_tokens=self.max_output_tokens,
             )
         if response.status != "completed" or response.output_parsed is None:
-            raise ReviewError("REVIEW_NOT_COMPLETED")
-        decision = ReviewDecision.model_validate(response.output_parsed)
-        return validate_decision(evidence, decision) | {"version": REVIEW_VERSION, "model": self.model}
+            raise ReviewError("REVIEW_NOT_COMPLETED", {"status": response.status,
+                                                       "output_text": getattr(response, "output_text", None)})
+        decision = ReferencedDecision.model_validate(response.output_parsed)
+        return validate_referenced_decision(evidence, numbered, decision) | {
+            "version": REVIEW_VERSION, "model": self.model, "raw_decision": decision.model_dump()}
 
 
 def evidence_from_session(s) -> dict:
     """인덱스는 저장된 스냅샷 안에서 고정된다. 검색 도구만 포함한다."""
-    return {"transcript": [{"speaker": r["speaker"], "text": r["text"], "t": r["t"]}
+    return {"transcript": [{"utterance_id": r.get("id"), "speaker": r["speaker"], "text": r["text"], "t": r["t"]}
                            for r in s.transcript],
             "searches": [{"arguments": t.get("arguments", "{}"), "at": t.get("at", s.started_t),
                           "output": t.get("output") or {}}
                          for t in s.tool_calls if t["name"] == "search_manual"]}
 
 
-def validate_decision(evidence: dict, decision: ReviewDecision) -> dict:
+def model_evidence(evidence: dict) -> dict:
+    """모델이 번호를 세지 않고 저장된 스냅샷의 명시적 참조를 선택하게 한다."""
+    return {"transcript": [r | {"ref": f"u:{r.get('utterance_id', 'legacy')}:{i}"}
+                           for i, r in enumerate(evidence["transcript"])],
+            "searches": [r | {"ref": f"s:{i}"} for i, r in enumerate(evidence["searches"])]}
+
+
+def validate_referenced_decision(evidence: dict, numbered: dict, decision: ReferencedDecision) -> dict:
+    """불량 항목/근거를 격리한다. 실패를 미답변이나 0건으로 변환하지 않는다."""
+    utter = {r["ref"]: i for i, r in enumerate(numbered["transcript"])}
+    searches = {r["ref"]: i for i, r in enumerate(numbered["searches"])}
+    items, issues, seen, covered = [], [], set(), set()
+    complete = True
+    for index, raw in enumerate(decision.inquiries):
+        try:
+            if raw.customer_ref not in utter or (raw.agent_ref is not None and raw.agent_ref not in utter):
+                raise ReviewError("UNKNOWN_UTTERANCE_REF")
+            if any(ref not in searches for ref in raw.search_refs):
+                raise ReviewError("UNKNOWN_SEARCH_REF")
+            inquiry = Inquiry(customer_index=utter[raw.customer_ref], question_text=raw.question_text,
+                              tool_indices=[searches[ref] for ref in raw.search_refs], outcome=raw.outcome,
+                              agent_index=utter[raw.agent_ref] if raw.agent_ref is not None else None,
+                              agent_quote=raw.agent_quote)
+            key = (inquiry.customer_index, inquiry.question_text)
+            if key in seen:
+                raise ReviewError("DUPLICATE_OR_MISSING_INQUIRY")
+            validated = validate_decision(evidence, ReviewDecision(inquiries=[inquiry]), require_coverage=False)["inquiries"][0]
+            if inquiry.question_text not in evidence["transcript"][inquiry.customer_index]["text"][:20000]:
+                raise ReviewError("FAQ_QUOTE_NOT_TRANSMITTED")
+            seen.add(key)
+            covered.update(inquiry.tool_indices)
+        except (ReviewError, ValueError) as e:
+            complete = False
+            issues.append({"inquiry": index, "code": str(e) if isinstance(e, ReviewError) else "INVALID_INQUIRY_SCHEMA"})
+            continue
+        selected, used = [], set()
+        if inquiry.outcome == "UNKNOWN":
+            complete = False
+            issues.append({"inquiry": index, "code": "UNDETERMINED_INQUIRY"})
+        for citation, ref in enumerate(raw.used_evidence):
+            try:
+                if ref.search_ref not in searches:
+                    raise ReviewError("UNKNOWN_SEARCH_REF")
+                item = UsedEvidence(search_index=searches[ref.search_ref], chunk_id=ref.chunk_id,
+                                    evidence_quote=ref.evidence_quote, answer_quote=ref.answer_quote)
+                key = (item.search_index, item.chunk_id)
+                if key in used:
+                    raise ReviewError("DUPLICATE_EVIDENCE_REFERENCE")
+                _validate_evidence(inquiry.model_copy(update={"used_evidence": [item]}), evidence["searches"])
+                if item.answer_quote not in evidence["transcript"][inquiry.agent_index]["text"][:20000]:
+                    raise ReviewError("FAQ_QUOTE_NOT_TRANSMITTED")
+                selected.append(item)
+                used.add(key)
+            except (ReviewError, ValueError) as e:
+                issues.append({"inquiry": index, "citation": citation,
+                               "code": str(e) if isinstance(e, ReviewError) else "INVALID_EVIDENCE_SCHEMA"})
+        inquiry.used_evidence = selected
+        validated.update(used_evidence=[r.model_dump() for r in selected],
+                         faq_entry_seqs=_validate_evidence(inquiry, evidence["searches"]))
+        items.append(validated)
+    if covered != set(range(len(evidence["searches"]))):
+        complete = False
+        issues.append({"code": "INCOMPLETE_SEARCH_COVERAGE"})
+    return {"inquiries": sorted(items, key=lambda r: (r["customer_index"], r["question_text"])),
+            "complete": complete, "issues": issues}
+
+
+def validate_decision(evidence: dict, decision: ReviewDecision, *, require_coverage: bool = True) -> dict:
     """모델이 만든 원문·사유를 신뢰하지 않고 참조·인용·순서를 검사한다."""
     transcript, searches = evidence["transcript"], evidence["searches"]
     seen, used_tools, items = set(), set(), []
@@ -123,7 +221,7 @@ def validate_decision(evidence: dict, decision: ReviewDecision) -> dict:
         faq_ids = _validate_evidence(inquiry, searches)
         items.append(inquiry.model_dump() | {"reason": reason, "faq_entry_seqs": faq_ids})
     # 모델이 일부 검색을 빠뜨린 결과를 '검토 완료'로 저장하지 않는다.
-    if used_tools != set(range(len(searches))):
+    if require_coverage and used_tools != set(range(len(searches))):
         raise ReviewError("INCOMPLETE_SEARCH_COVERAGE")
     return {"inquiries": sorted(items, key=lambda item: (item["customer_index"], item["question_text"]))}
 
@@ -174,7 +272,8 @@ def apply_review(session_id: str, started_t: float, evidence: dict, payload: dic
         events = _answered_events(session_id, started_t, evidence, events, review)
     return payload | {"unanswered": unanswered, **({"events": events} if "events" in payload else {}),
                       "analysis": payload["analysis"] | {
-                          "faqAnswerCount": sum(i["outcome"] == "ANSWERED" for i in review["inquiries"])}}
+                          "faqAnswerCount": (sum(i["outcome"] == "ANSWERED" for i in review["inquiries"])
+                                             if review.get("complete", True) else None)}}
 
 
 def _answered_events(session_id: str, started_t: float, evidence: dict, events: list[dict], review: dict) -> list[dict]:
