@@ -1,7 +1,7 @@
 // 08 사원 CSV → 등록 항목 (CSV로 기업 등록 · CSV로 사원 추가 공용). React를 모르는 순수 함수 — csvMembers.test.ts
 // 모양 (11/01 결정): 사번,사원명,전화번호,대표자,부서,도로명 주소,지번 주소,동,우편번호,상세주소
 //   우편번호까지 9열 필수(상세주소 열만 생략 가능) · 값은 사번 · 사원명 · 전화 · 주소 4칸 필수, 대표자 · 부서 · 상세주소는 빈칸 가능 (11/01 결정)
-//   대표자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로 (좌표는 1 고정)
+//   대표자 'Y'(여러 명) · 주소는 카카오 검색 결과의 칸을 그대로
 // 서버에 파일을 보내지 않고 JSON으로 바꿔 보냄 (명세 7장: CSV API 없음). 행 번호는 머리줄 = 1행
 import { parseCsv } from '@/shared/lib/csv'
 import type { Member, MemberInput } from '@/features/company/api/companyApi'

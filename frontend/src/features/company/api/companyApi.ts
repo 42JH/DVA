@@ -16,15 +16,13 @@ export interface Company {
   createdAt: string | null // 등록 시각 — 예전 기업은 이력이 없어 null
 }
 
-/** CustomerAddress — 사원 주소는 고객 정보에 있음. 보기만 (11/01 결정 A: 좌표가 필수라 화면에서 못 넣음) */
+/** CustomerAddress — 사원 주소는 고객 정보에 있음 (서버 CustomerAddressDto — 좌표 칸은 043에서 빠짐) */
 export interface CustomerAddress {
   roadAddress: string
   jibunAddress: string
   detailAddress?: string
   dongName: string
   postalCode: string
-  latitude: number
-  longitude: number
 }
 
 /** MemberView = 소속(membership) + 고객(customer) */
@@ -190,16 +188,16 @@ export async function assignLeaders(id: number, employeeNos: string[]): Promise<
 }
 
 /** 사원 주소 저장 — 주소는 사원 소속이 아니라 고객 정보에 있음: PATCH /customers/{customerSeq} { address } (204)
- * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호 · 위도 · 경도). 03 주문 '고객정보에도 저장'과 같은 API (11/01) */
+ * address는 전체 교체 객체(필수: 도로명 · 지번 · 동 · 우편번호). 03 주문 '고객정보에도 저장'과 같은 API (11/01) */
 export const saveCustomerAddress = (customerSeq: number, address: CustomerAddress): Promise<void> =>
   api.patch(`/customers/${customerSeq}`, { body: { address } })
 
 /** CSV 주소를 사원마다 고객 주소로 저장 — 등록 API에 주소 칸이 아직 없어서(백엔드 추가 예정) 등록 뒤 따로
- * shortcut: 사원마다 PATCH 1번 · 등록과 묶이지 않음 · 좌표 1 고정 — 등록 API가 주소를 받으면 그 본문으로 옮기고 이 함수는 지울 것
+ * shortcut: 사원마다 PATCH 1번 · 등록과 묶이지 않음 — 등록 API가 주소를 받으면 그 본문으로 옮기고 이 함수는 지울 것
  * 사번 → 고객 번호는 전체 사원을 다시 받아 찾음. 저장하지 못한 사번 목록을 돌려줌 */
 export async function saveMemberAddresses(
   id: number,
-  rows: { employeeNo: string; address: Omit<CustomerAddress, 'latitude' | 'longitude'> }[],
+  rows: { employeeNo: string; address: CustomerAddress }[],
 ): Promise<string[]> {
   if (rows.length === 0) return []
   const byNo = new Map((await fetchAllMembers(id)).map((m) => [m.membership.employeeNo, m]))
@@ -207,10 +205,7 @@ export async function saveMemberAddresses(
   for (const r of rows) {
     const seq = byNo.get(r.employeeNo)?.customer.customerSeq
     if (seq === undefined) failed.push(r.employeeNo)
-    else
-      await saveCustomerAddress(seq, { ...r.address, latitude: 1, longitude: 1 }).catch(() =>
-        failed.push(r.employeeNo),
-      )
+    else await saveCustomerAddress(seq, r.address).catch(() => failed.push(r.employeeNo))
   }
   return failed
 }

@@ -104,8 +104,6 @@ assert.deepEqual(
         jibunAddress: '서울 중구 태평로1가 31',
         dongName: '태평로1가',
         postalCode: '04524',
-        latitude: 1,
-        longitude: 1,
       },
     },
   ],
@@ -168,8 +166,6 @@ assert.deepEqual(
       detailAddress: '7층',
       dongName: '역삼동',
       postalCode: '06236',
-      latitude: 1,
-      longitude: 1,
     },
   },
 )
@@ -210,7 +206,7 @@ assert.equal(
 )
 
 // 접수 중단 주문 접수 조건
-const full = { jibunAddress: '지번', dongName: '동', postalCode: '01234', hasCoords: true }
+const full = { jibunAddress: '지번', dongName: '동', postalCode: '01234' }
 const ready: OrderDetail = {
   ...order,
   sender: { ...order.sender, ...full },
@@ -225,14 +221,14 @@ assert.deepEqual(
   }),
   [],
 )
-// AI가 모으다 끊긴 주소(좌표 없음) + 배송비 없음 + 가액 없음
+// AI가 모으다 끊긴 주소(우편번호 없음) + 배송비 없음 + 가액 없음
 assert.deepEqual(
   submitMissing(
-    { ...ready, receiver: { ...ready.receiver, hasCoords: false } },
+    { ...ready, receiver: { ...ready.receiver, postalCode: undefined } },
     {
       ...same,
       sender: ready.sender,
-      receiver: { ...ready.receiver, hasCoords: false },
+      receiver: { ...ready.receiver, postalCode: undefined },
       declaredValue: null,
       shippingFee: null,
     },
@@ -242,7 +238,7 @@ assert.deepEqual(
 // 다시 검색해 고르면 주소는 통과
 assert.deepEqual(
   submitMissing(
-    { ...ready, receiver: { ...ready.receiver, hasCoords: false } },
+    { ...ready, receiver: { ...ready.receiver, postalCode: undefined } },
     {
       ...same,
       sender: ready.sender,

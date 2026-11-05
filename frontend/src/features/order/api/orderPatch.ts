@@ -17,10 +17,8 @@ export interface OrderPatch {
   parcels?: Record<string, unknown>[] // ParcelChange 하나 (수기 = 받는 분 1명, 11/01)
 }
 
-// shortcut: 위도 · 경도는 1로 고정 (11/01 사용자 결정), 카카오 JS 키가 오면 주소 → 좌표 변환으로 바꿀 것
-export const FIXED_COORD = 1
-
-/** 바뀐 사람 칸만 (이름 · 전화 · 상세주소). 도로명이 바뀌면 주소 전체(지번 · 동 · 우편번호 · 좌표)를 함께 */
+/** 바뀐 사람 칸만 (이름 · 전화 · 상세주소). 도로명이 바뀌면 주소 전체(지번 · 동 · 우편번호)를 함께
+ *  좌표 칸은 서버 주소에서 빠짐(migration 043) — 보내면 400(모르는 칸 거절) */
 function partyPatch(before: Party, after: PartyInput) {
   const out: Record<string, string | number> = {}
   if (after.name !== before.name) out.name = after.name
@@ -28,12 +26,7 @@ function partyPatch(before: Party, after: PartyInput) {
   if ((after.detailAddress ?? '') !== (before.detailAddress ?? ''))
     out.detailAddress = after.detailAddress ?? '' // 빈 문자열 = 비우기 (null 불가, 명세)
   if (after.roadAddress !== before.roadAddress && after.picked)
-    Object.assign(out, {
-      roadAddress: after.roadAddress,
-      ...after.picked,
-      latitude: FIXED_COORD,
-      longitude: FIXED_COORD,
-    })
+    Object.assign(out, { roadAddress: after.roadAddress, ...after.picked })
   return out
 }
 
@@ -92,8 +85,6 @@ export interface CustomerPatch {
     detailAddress: string
     dongName: string
     postalCode: string
-    latitude: number
-    longitude: number
   }
 }
 
@@ -112,22 +103,19 @@ export function buildCustomerPatch(order: OrderDetail, input: OrderInput): Custo
         detailAddress: after.detailAddress ?? '',
         dongName: rest.dongName,
         postalCode: rest.postalCode,
-        // shortcut: 1 고정 (사용자 결정 11/01) — 문서는 임의 좌표 저장을 막으라고 함, 카카오 키 오면 실제 좌표로 꼭 바꿀 것
-        latitude: FIXED_COORD,
-        longitude: FIXED_COORD,
       }
   }
   return out.name !== undefined || out.address ? out : null
 }
 
 /** 접수 중단 주문을 접수하려면 모자란 것 (명세 API-16: 양쪽 완성 주소 · 물품 · 물품 가액 · 상세별 배송비)
- * 빈 배열이면 [접수] 가능. 주소는 다시 검색해 골랐거나(picked) 원래 주소가 완성(지번 · 동 · 우편번호 · 좌표)이어야 함 */
+ * 빈 배열이면 [접수] 가능. 주소는 다시 검색해 골랐거나(picked) 원래 주소가 완성(지번 · 동 · 우편번호)이어야 함 — 좌표는 서버에서 빠짐 */
 export function submitMissing(order: OrderDetail, input: OrderInput): string[] {
   const addressOk = (before: Party, after: PartyInput) =>
     after.picked
       ? after.roadAddress !== ''
       : after.roadAddress === before.roadAddress &&
-        !!(before.jibunAddress && before.dongName && before.postalCode && before.hasCoords)
+        !!(before.jibunAddress && before.dongName && before.postalCode)
   const out: string[] = []
   for (const [label, before, after] of [
     ['보내는 분', order.sender, input.sender],
