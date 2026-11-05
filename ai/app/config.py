@@ -81,6 +81,7 @@ class BackendConfig(_Strict):
     write_budget_sec: float = Field(5.0, gt=0)   # 취소 등 쓰기 예산
     submit_timeout_sec: float = Field(15.0, gt=0)  # 통화 결과 요청 1회
     submit_retry_sec: float = Field(40.0, gt=0)    # 통화 결과 같은 키 재확인 총 시간
+    result_resend_sec: float = Field(60.0, ge=0)   # SENT_UNCERTAIN 결과를 실행 중 같은 키로 재확인하는 주기(0이면 끔)
     # 분석에 hasCallbackRequest를 넣는다. 048 + 새 BE(feature/ai-call-updates) 배포 전에는 false(구버전 BE가 400으로 거절)
     analysis_callback_field: bool = False
 

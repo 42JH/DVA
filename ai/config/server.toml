@@ -48,6 +48,8 @@ read_budget_sec = 3.0
 write_budget_sec = 5.0
 submit_timeout_sec = 15.0
 submit_retry_sec = 40.0
+# SENT_UNCERTAIN(503·연결 끊김·시간 초과) 주문 결과를 실행 중에도 같은 키·본문으로 재확인하는 주기. 0이면 재시작 때만
+result_resend_sec = 60.0
 # 분석 hasCallbackRequest: 048 + 새 BE(feature/ai-call-updates) 배포 후 true로(구버전 BE는 400)
 analysis_callback_field = false
 

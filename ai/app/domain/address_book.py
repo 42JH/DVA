@@ -15,7 +15,9 @@ def save_offer(state: ConversationState) -> dict:
         return {}
     out = {}
     sa = cur["sender_address"]
-    if sa.valid and cur.sender_geo and sa.value != c.default_address:
+    # 상세주소는 되읽기 전에 반드시 채워진다(없다고 하면 ""). 상세만 바뀐 경우(101호→102호)도 저장 제안
+    if sa.valid and cur.sender_geo and \
+            (sa.value, cur["sender_address_detail"].value or "") != (c.default_address, c.default_address_detail or ""):
         out["sender"] = True
     ra = cur["receiver_address"]
     if ra.valid and cur.receiver_geo and ra.source not in (Source.PIN, Source.HISTORY, Source.COMPANY):
