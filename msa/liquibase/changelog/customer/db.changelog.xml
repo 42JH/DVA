@@ -24,4 +24,7 @@
   <changeSet id="004-customer-reads" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="004-customer-reads.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="005-corporate-writes" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="005-corporate-writes.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

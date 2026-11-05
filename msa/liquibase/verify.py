@@ -83,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,6),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',8,4)]:
+    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',9,4)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 4, 'operations': 4}.get(service, 2)
+        changesets = {'customer': 5, 'operations': 5}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -184,7 +184,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '4'
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '5'
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -263,9 +263,26 @@ try:
     assert sql(db, preserved, 'customer-reads-atomic-data') == legacy
     assert sql(db, "SELECT to_regclass('departments') IS NULL AND NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='customers' AND column_name='address_data');", 'customer-reads-atomic-schema') == 't'
     assert sql(db, 'SELECT count(*) FROM databasechangelog;', 'customer-reads-atomic-history') == '3'
-    lb('customer', db, 'update', 'customer-reads-upgrade')
+    lb('customer', db, 'update-count', 'customer-reads-upgrade', extra=('--count=1',))
     assert sql(db, preserved, 'customer-reads-legacy-after') == legacy
     assert sql(db, "SELECT (SELECT created_at IS NULL AND monthly_billing_enabled=false FROM organizations WHERE organization_seq=1),(SELECT address_data IS NULL AND monthly_billing_enabled=false FROM customers WHERE customer_seq=1),(SELECT department_seq IS NULL FROM memberships WHERE membership_seq=1);", 'customer-reads-unknown-not-fabricated') == 't|t|t'
+    sql(db, """INSERT INTO departments(organization_seq,name) VALUES(1,'Legacy department');
+        INSERT INTO company_pins(organization_seq,department_name,address_data,version) VALUES(1,' legacy department ',
+          '{"name":"Receiver","phoneNumber":"01080000001","roadAddress":"Road","jibunAddress":"Lot","dongName":"Dong","postalCode":"01234","latitude":37,"longitude":127}',11);""", 'customer-writes-legacy-company-pin', 'customer_app')
+    original_pins = "SELECT jsonb_agg(to_jsonb(p)) FROM company_pins p;"
+    original_pin_data = sql(db, original_pins, 'customer-writes-pin-before')
+    failing = logs / 'atomicity-customer-writes'
+    shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+    write_sql = failing / 'customer/005-corporate-writes.sql'
+    write_sql.write_text(write_sql.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n', encoding='utf-8')
+    output = lb('customer', db, 'update', 'customer-writes-atomic-failure', failure=True, changelog_root=failing)
+    assert 'division by zero' in output.lower(), output
+    assert sql(db, original_pins, 'customer-writes-atomic-pin-data') == original_pin_data
+    assert sql(db, "SELECT count(*) FROM information_schema.columns WHERE table_name='company_pins' AND column_name IN ('department_seq','deleted_at');", 'customer-writes-atomic-schema') == '0'
+    assert sql(db, 'SELECT count(*) FROM databasechangelog;', 'customer-writes-atomic-history') == '4'
+    lb('customer', db, 'update', 'customer-writes-upgrade')
+    assert sql(db, "SELECT version=7 AND NOT address_data ?| ARRAY['latitude','longitude'] AND address_data->>'roadAddress'='Road' FROM personal_pins WHERE personal_pin_seq=1;", 'customer-writes-pin-conversion') == 't'
+    assert sql(db, "SELECT version=11 AND department_seq=1 AND NOT address_data ?| ARRAY['latitude','longitude'] FROM company_pins WHERE company_pin_seq=1;", 'customer-writes-company-pin-conversion') == 't'
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)
