@@ -46,7 +46,9 @@ function withLead(utterances: Utterance[]): Timed[] {
   return utterances.map((u, i) => {
     if (u.atSec === null || u.speaker !== 'CUSTOMER') return { ...u, labelSec: u.atSec }
     const prev = utterances.slice(0, i).findLast((p) => p.atSec !== null)?.atSec ?? 0
-    return { ...u, atSec: Math.max(prev, u.atSec - CUSTOMER_LEAD_SEC), labelSec: u.atSec }
+    // 앞 말 시작까지 당기면 두 줄 시각이 같아져 앞 줄이 하이라이트 · ⏮로 못 감(11/05 실서버 'AI 00:51' · '고객 네 00:52') → 앞 말과의 중간까지만
+    const lead = Math.max(u.atSec - CUSTOMER_LEAD_SEC, (prev + u.atSec) / 2)
+    return { ...u, atSec: Math.max(prev, lead), labelSec: u.atSec }
   })
 }
 
@@ -89,6 +91,8 @@ export function useCallDetail(callId: number) {
   // AI 동작을 눌러 짚은 통화 안 시각(초)과, 스크립트가 그 줄로 스크롤할 신호 (누를 때마다 n이 늘어 같은 줄도 다시 스크롤)
   const [cursor, setCursor] = useState<number | null>(null)
   const [jump, setJump] = useState<{ key: number; n: number } | null>(null)
+  // 고른 줄 (누름 · ⏮ ⏭ · AI 동작) — 시각이 같은 줄이 여럿이면 시각만으로는 앞 줄을 못 고름(뒤 줄이 이김) → 고른 줄을 다음 줄 시작 전까지 붙잡음
+  const [pin, setPin] = useState<{ key: number; sec: number } | null>(null)
 
   const detail = useQuery(callQueries.detail(callId))
   const transcript = useQuery(callQueries.transcript(callId))
@@ -104,18 +108,22 @@ export function useCallDetail(callId: number) {
   const says = withLead(call?.utterances ?? []) // 듣기 시각이 보정된 말들 (아래 전부 이걸 씀)
   // 지금 짚은 줄: 녹취가 돌면 재생 위치, 아니면 누른 시각 (11/01 사용자: AI 동작을 누르면 왼쪽 그 부분 + 그 부분 음성)
   const at = player.now > 0 ? player.now : cursor
-  const focusKey = at === null ? null : (utteranceAt(says, at)?.order ?? null)
+  const pinEnd = pin && says.find((u) => u.atSec !== null && u.atSec > pin.sec)?.atSec
+  const pinned = pin && at !== null && at >= pin.sec && (pinEnd == null || at < pinEnd)
+  const focusKey = pinned ? pin.key : at === null ? null : (utteranceAt(says, at)?.order ?? null)
   // AI 동작을 누르면 그 동작을 부른 '고객의 말'로 — AI 말이 아니라 (11/01 사용자). 고객 말 처음부터 듣게 그 말의 시각으로 감
   const jumpTo = (sec: number, text: string) => {
     const line = utteranceForAction(says, sec, text)
     const at = line?.atSec ?? sec
     setCursor(at)
+    setPin(line ? { key: line.order, sec: at } : null)
     if (line) setJump((j) => ({ key: line.order, n: (j?.n ?? 0) + 1 }))
     player.seek(at)
   }
-  /** 스크립트 줄을 눌렀을 때 — 그 말부터 (스크롤은 안 함, 이미 보고 있는 줄) */
-  const listenFrom = (sec: number) => {
+  /** 그 줄부터 듣기 (스크립트 줄을 누름 · ⏮ ⏭) — 스크롤은 부른 쪽이 */
+  const listenFrom = (key: number, sec: number) => {
     setCursor(sec)
+    setPin({ key, sec })
     player.seek(sec)
   }
 
@@ -161,7 +169,7 @@ export function useCallDetail(callId: number) {
   const goLine = (u: (typeof timed)[number] | undefined) => {
     if (!u) return
     setJump((j) => ({ key: u.order, n: (j?.n ?? 0) + 1 }))
-    listenFrom(u.atSec)
+    listenFrom(u.order, u.atSec)
   }
 
   return {
@@ -200,7 +208,7 @@ export function useCallDetail(callId: number) {
           ...seg,
           lines: seg.lines.map((l) => {
             const sec = l.atSec
-            return sec === null ? l : { ...l, onClick: () => listenFrom(sec) }
+            return sec === null ? l : { ...l, onClick: () => listenFrom(l.key, sec) }
           }),
         }))
       : [],
