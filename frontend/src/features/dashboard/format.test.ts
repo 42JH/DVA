@@ -6,7 +6,6 @@ import {
   maxIndex,
   num,
   one,
-  pct2,
   two,
   parseOrderNo,
   pctText,
@@ -19,8 +18,7 @@ assert.equal(one(214), '214.0')
 assert.equal(one(0), '0.0') // 측정된 0은 그대로
 assert.equal(one(null), '—') // 미측정 · 분모 0
 assert.equal(pctText(21.428), '21.4%')
-assert.equal(two(21.428), '21.43') // 응답 대기 · 단계별 이탈률만
-assert.equal(pct2(0.7777), '0.78%')
+assert.equal(two(21.428), '21.43') // 응답 대기 카드 표의 평균 대기만
 assert.equal(two(null), '—')
 assert.equal(pctText(null), '—')
 assert.equal(num(1800), '1,800')
