@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+결제 승인 복구는 새 앱 전에 migration 051을 적용한다. 미확정 요청을 선택할 때 다음 자동 조회를 1분 뒤로 예약해 다른 요청의 확인 기회를 보장한다. 확정 실패만 해제하고 새 결제 시도별 멱등키를 사용하며, 타임아웃·404·인증 오류는 결제키를 보존한다. [결제 연동 계약](../docs/api/order-payment-integration.md)의 실패·복구 기준을 따른다.
+
 AI 상담 성능 대시보드는 [프론트 조회 명세](docs/ai-dashboard-frontend-integration.md)와 [AI 전송 명세](docs/ai-dashboard-ai-integration.md)를 따른다. 새 앱 전에 migration 050을 적용한다. 고객 전체·신규·기존 공통 필터로 GET 4개를 제공하고, AI가 기존 analysis 저장 후 이탈·응답 대기 지표를 각각 전송한다. 페르소나 막대는 현재 운영 버전과 직전 활성 버전만 비교하며 활성화 성공 시 직전 번호를 보존한다. 신규 지표는 통화 soft delete·최초 수신부터 5년 폐기를 따른다. 기존 분석 요청 형식은 유지하고 불편 유형 5개를 추가한다. [계획·검증 기록](docs/ai-dashboard-plan.md)의 운영 배포·과거 이력 제한도 확인한다.
 
 미답변 사유는 [사유 연동 계약](docs/unanswered-question-reasons.md)을 따른다. 새 앱 전에 migration 049를 적용한다. 기존 질문별 수집 POST의 선택 `reason`에 `KB_NO_ANSWER`·`KB_UNAVAILABLE`을 받고 생략/null·과거 행은 미분류로 보존한다. 목록의 reason 필터와 조회 전용 `status=ALL`로 삭제되지 않은 OPEN·REGISTERED 발생을 집계하며 기본 OPEN은 유지한다. 통화 처리 결과는 `unansweredReason`으로 제공한다. AI의 실제 답변 대조와 운영 적용은 별도다.

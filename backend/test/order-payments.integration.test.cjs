@@ -10,6 +10,7 @@ const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
 const { hashPassword } = require('../dist/auth/password');
 const { PaymentsService } = require('../dist/payments/payments.service');
+const { PaymentsRepository } = require('../dist/payments/payments.repository');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
@@ -26,7 +27,8 @@ let app, upstream, base, origin, cookie, customerId, worker, payments, client;
 const calls = [],
   messages = [],
   parcels = [],
-  providerPayments = new Map();
+  providerPayments = new Map(),
+  approvalResponses = new Map();
 let rejectDver = false,
   messageMode = 'ok';
 const adminOrigin = 'http://127.0.0.1:5173';
@@ -67,24 +69,43 @@ before(async () => {
       receipt: req.headers['idempotency-key'],
     });
     if (req.method === 'POST' && req.url === '/v1/payments/confirm') {
-      assert.equal(req.headers['idempotency-key'], body.orderId);
+      const receipt = req.headers['idempotency-key'];
+      assert.ok(typeof receipt === 'string' && receipt.length > 0 && receipt.length <= 300);
+      if (approvalResponses.has(receipt)) {
+        const cached = approvalResponses.get(receipt);
+        return json(cached.status, cached.data);
+      }
+      const respond = (status, data) => {
+        approvalResponses.set(receipt, { status, data });
+        return json(status, data);
+      };
+      if (body.paymentKey.startsWith('reject_'))
+        return respond(403, { code: 'REJECT_CARD_PAYMENT' });
+      if (body.paymentKey.startsWith('missing_'))
+        return respond(404, { code: 'NOT_FOUND_PAYMENT' });
+      if (body.paymentKey.startsWith('unauthorized_'))
+        return respond(401, { code: 'UNAUTHORIZED_KEY' });
       const p = {
         orderId: body.orderId,
         paymentKey: body.paymentKey,
         totalAmount: body.amount,
         currency: 'KRW',
-        status: 'DONE',
-        approvedAt: new Date(Date.now() - 5000).toISOString(),
+        status: body.paymentKey.startsWith('pending_') ? 'IN_PROGRESS' : 'DONE',
+        approvedAt: body.paymentKey.startsWith('pending_')
+          ? null
+          : new Date(Date.now() - 5000).toISOString(),
       };
       providerPayments.set(body.paymentKey, p);
       if (body.paymentKey.startsWith('timeout_')) return;
-      if (body.paymentKey.startsWith('uncertain_')) return json(500, { code: 'PROVIDER_ERROR' });
-      if (body.paymentKey.startsWith('reject_')) return json(403, { code: 'REJECT_CARD_PAYMENT' });
+      if (body.paymentKey.startsWith('uncertain_') || body.paymentKey.startsWith('pending_'))
+        return respond(500, { code: 'PROVIDER_ERROR' });
       if (body.paymentKey.startsWith('wrong_')) p.totalAmount++;
-      return json(200, p);
+      return respond(200, p);
     }
     if (req.method === 'GET' && req.url.startsWith('/v1/payments/')) {
-      const p = providerPayments.get(decodeURIComponent(req.url.slice('/v1/payments/'.length)));
+      const key = decodeURIComponent(req.url.slice('/v1/payments/'.length));
+      if (key.startsWith('unauthorized_')) return json(401, { code: 'UNAUTHORIZED_KEY' });
+      const p = providerPayments.get(key);
       return json(p ? 200 : 404, p || { code: 'NOT_FOUND_PAYMENT' });
     }
     return json(501, { code: 'UNMODELED_ENDPOINT' });
@@ -209,6 +230,10 @@ const confirm = (r, key = 'ok_' + r.paymentRequest.paymentRequestId, patch = {})
 const lookup = (id) => request(`/payments/requests/${id}`, undefined, false, 'GET');
 const stored = (id) =>
   pool.query('SELECT * FROM orders WHERE order_seq=$1', [id]).then((r) => r.rows[0]);
+const storedPayment = (id) =>
+  pool
+    .query('SELECT * FROM order_payment_requests WHERE payment_request_id=$1', [id])
+    .then((r) => r.rows[0]);
 function assertCalculatedPickup(order) {
   const time = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Seoul',
@@ -944,4 +969,290 @@ test('notices include all active parcel addresses and remove cancelled addresses
   assert.ok(completion.includes('도착검증로 201 도착 201호'));
   for (const unwanted of ['도착검증로 202', '배송 건수', '(한국 시간)'])
     assert.ok(!completion.includes(unwanted));
+});
+
+test('confirmed rejection permits a new payment attempt without reusing the failed receipt', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId,
+    key = 'reject_' + id;
+  assert.equal((await confirm(order, key)).status, 422);
+  assert.equal((await confirm(order, key)).status, 422);
+  assert.equal((await lookup(id)).body.data.status, 'PENDING');
+  assert.equal((await confirm(order)).status, 200);
+  const attempts = calls.filter((c) => c.method === 'POST' && c.body.orderId === id);
+  assert.equal(attempts.length, 3);
+  assert.equal(attempts[0].receipt, attempts[1].receipt);
+  assert.notEqual(attempts[1].receipt, attempts[2].receipt);
+  assert.equal((await stored(order.orderSeq)).status, 'ACCEPTED');
+});
+
+test('missing, unauthorized and still-processing payments retain their keys and block a new charge', async () => {
+  for (const prefix of ['missing_', 'unauthorized_', 'pending_']) {
+    const order = await create(),
+      id = order.paymentRequest.paymentRequestId,
+      key = prefix + id;
+    try {
+      assert.equal((await confirm(order, key)).status, 502);
+      assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 502);
+      const row = await storedPayment(id);
+      assert.equal(row.provider_payment_key, key);
+      assert.ok(row.approval_started_at);
+      assert.equal((await lookup(id)).body.data.status, 'REVIEW_REQUIRED');
+      assert.equal((await confirm(order, 'different_' + id)).status, 409);
+      assert.equal(
+        (await request(`/orders/${order.orderSeq}/cancel`, undefined, true)).status,
+        409,
+      );
+    } finally {
+      await pool.query(
+        'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=$1',
+        [id],
+      );
+    }
+  }
+});
+
+test('verified terminal failures permit a fresh payment while preserving the original deadline', async () => {
+  for (const status of ['ABORTED', 'EXPIRED']) {
+    const order = await create(),
+      id = order.paymentRequest.paymentRequestId,
+      key = 'pending_' + id;
+    assert.equal((await confirm(order, key)).status, 502);
+    const before = await storedPayment(id);
+    providerPayments.get(key).status = status;
+    assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 422);
+    const after = await storedPayment(id);
+    assert.equal(after.provider_payment_key, null);
+    assert.equal(after.approval_started_at, null);
+    assert.equal(after.expires_at.getTime(), before.expires_at.getTime());
+    assert.equal((await confirm(order)).status, 200);
+  }
+});
+
+test('a mismatched failure or recorded approval cannot be cleared by a terminal provider reply', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId,
+    key = 'pending_' + id;
+  assert.equal((await confirm(order, key)).status, 502);
+  const payment = providerPayments.get(key);
+  payment.status = 'ABORTED';
+  payment.currency = 'USD';
+  assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 502);
+  assert.equal((await storedPayment(id)).provider_payment_key, key);
+  payment.currency = 'KRW';
+  const approvedAt = new Date(Date.now() - 5000).toISOString();
+  await app.get(OrderPaymentsService).recordApproval(id, key, approvedAt);
+  assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 502);
+  const retained = await storedPayment(id);
+  assert.equal(retained.provider_payment_key, key);
+  assert.equal(retained.provider_approved_at.toISOString(), approvedAt);
+  payment.status = 'DONE';
+  payment.approvedAt = approvedAt;
+  assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 200);
+});
+
+test('a stale or expired approval claim cannot clear the current payment attempt', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId,
+    key = 'lease_' + id,
+    orders = app.get(OrderPaymentsService);
+  const first = await orders.claimApproval(id, order.totalAmount, key);
+  const replacement = randomUUID();
+  await pool.query(
+    'UPDATE order_payment_requests SET approval_claim_id=$2 WHERE payment_request_id=$1',
+    [id, replacement],
+  );
+  await orders.releaseClaim(id, first.claimId, true);
+  assert.equal((await storedPayment(id)).approval_claim_id, replacement);
+  await pool.query(
+    "UPDATE order_payment_requests SET approval_claimed_until=clock_timestamp()-interval '1 second' WHERE payment_request_id=$1",
+    [id],
+  );
+  await orders.releaseClaim(id, replacement, true);
+  assert.equal((await storedPayment(id)).provider_payment_key, key);
+  const current = await orders.claimApproval(id, order.totalAmount, key);
+  assert.equal(await orders.releaseClaim(id, current.claimId, true), true);
+  assert.equal((await storedPayment(id)).provider_payment_key, null);
+  assert.equal((await confirm(order)).status, 200);
+  assert.equal(await orders.releaseClaim(id, current.claimId, true), false);
+  assert.ok((await storedPayment(id)).completed_at);
+});
+
+test('a confirmed failure does not reopen an expired merchant payment deadline', async () => {
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId,
+    key = 'pending_' + id;
+  assert.equal((await confirm(order, key)).status, 502);
+  await pool.query(
+    "UPDATE order_payment_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE payment_request_id=$1",
+    [id],
+  );
+  const before = await storedPayment(id);
+  providerPayments.get(key).status = 'EXPIRED';
+  assert.equal((await request(`/payments/requests/${id}/reconcile`, {})).status, 422);
+  assert.equal((await lookup(id)).body.data.status, 'EXPIRED');
+  assert.equal((await confirm(order)).status, 409);
+  assert.equal((await storedPayment(id)).expires_at.getTime(), before.expires_at.getTime());
+});
+
+test('twenty unresolved approvals cannot starve a later success across worker restart', async () => {
+  const staged = [];
+  try {
+    for (let i = 0; i < 21; i++) {
+      const order = await create(),
+        id = order.paymentRequest.paymentRequestId,
+        key = 'missing_' + id;
+      staged.push({ order, id, key });
+      const claim = await app.get(OrderPaymentsService).claimApproval(id, order.totalAmount, key);
+      await app.get(OrderPaymentsService).releaseClaim(id, claim.claimId);
+      await pool.query(
+        "UPDATE order_payment_requests SET approval_started_at='2000-01-01'::timestamptz+$2::integer*interval '1 second',notification_status='SENT' WHERE payment_request_id=$1",
+        [id, i],
+      );
+    }
+    const last = staged[20];
+    providerPayments.set(last.key, {
+      orderId: last.id,
+      paymentKey: last.key,
+      totalAmount: last.order.totalAmount,
+      currency: 'KRW',
+      status: 'DONE',
+      approvedAt: new Date(Date.now() - 5000).toISOString(),
+    });
+    await worker.run();
+    assert.equal((await stored(last.order.orderSeq)).status, 'notPaid');
+    const firstKeys = new Set(staged.slice(0, 20).map((entry) => '/v1/payments/' + entry.key));
+    assert.equal(calls.filter((c) => c.method === 'GET' && firstKeys.has(c.path)).length, 20);
+    const restarted = await startTestApp(apps);
+    await restarted.get(PaymentsWorker).run();
+    assert.equal((await stored(last.order.orderSeq)).status, 'ACCEPTED');
+    assert.equal(calls.filter((c) => c.method === 'GET' && firstKeys.has(c.path)).length, 20);
+    assert.equal(calls.filter((c) => c.method === 'POST' && c.body.orderId === last.id).length, 0);
+  } finally {
+    await pool.query(
+      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=ANY($1::uuid[]) AND completed_at IS NULL',
+      [staged.map((entry) => entry.id)],
+    );
+  }
+});
+
+test('automatic approval batches are disjoint and honor the persisted next lookup time', async () => {
+  const ids = [];
+  try {
+    for (let i = 0; i < 21; i++) {
+      const order = await create(),
+        id = order.paymentRequest.paymentRequestId;
+      ids.push(id);
+      const claim = await app
+        .get(OrderPaymentsService)
+        .claimApproval(id, order.totalAmount, 'batch_' + id);
+      await app.get(OrderPaymentsService).releaseClaim(id, claim.claimId);
+      await pool.query(
+        "UPDATE order_payment_requests SET approval_started_at='1900-01-01'::timestamptz+$2::integer*interval '1 second' WHERE payment_request_id=$1",
+        [id, i],
+      );
+    }
+    const repository = app.get(PaymentsRepository);
+    const [first, second] = await Promise.all([
+      repository.pendingApprovals(),
+      repository.pendingApprovals(),
+    ]);
+    const firstIds = new Set(first.map((row) => row.id));
+    assert.ok(second.every((row) => !firstIds.has(row.id)));
+    assert.equal(
+      new Set([...first, ...second].filter((row) => ids.includes(row.id)).map((row) => row.id))
+        .size,
+      21,
+    );
+    assert.ok((await repository.pendingApprovals()).every((row) => !ids.includes(row.id)));
+    await pool.query(
+      "UPDATE order_payment_requests SET approval_next_check_at=clock_timestamp()-interval '1 second' WHERE payment_request_id=$1",
+      [ids[0]],
+    );
+    assert.ok((await repository.pendingApprovals()).some((row) => row.id === ids[0]));
+  } finally {
+    await pool.query(
+      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=ANY($1::uuid[])',
+      [ids],
+    );
+  }
+});
+
+test('migration 051 preserves an existing key, approval evidence and lease during upgrade', async () => {
+  const { readFileSync } = require('node:fs');
+  const { join } = require('node:path');
+  const order = await create(),
+    id = order.paymentRequest.paymentRequestId;
+  await app.get(OrderPaymentsService).claimApproval(id, order.totalAmount, 'upgrade_' + id);
+  await app.get(OrderPaymentsService).recordApproval(id, 'upgrade_' + id, new Date().toISOString());
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const snapshot = async () =>
+      (
+        await client.query(
+          "SELECT to_jsonb(r)-'approval_next_check_at' AS value FROM order_payment_requests r WHERE payment_request_id=$1",
+          [id],
+        )
+      ).rows[0].value;
+    const before = await snapshot();
+    // Recreate only the pre-051 column/index shape inside this disposable transaction.
+    await client.query('ALTER TABLE order_payment_requests DROP COLUMN approval_next_check_at');
+    const original = readFileSync(
+      join(__dirname, '../migrations/022-order-toss-payments.sql'),
+      'utf8',
+    );
+    await client.query(original.match(/CREATE INDEX order_payment_reconcile_idx[\s\S]+?;/)[0]);
+    await client.query(
+      readFileSync(join(__dirname, '../migrations/051-payment-approval-recovery.sql'), 'utf8'),
+    );
+    assert.deepEqual(await snapshot(), before);
+    const row = (
+      await client.query(
+        'SELECT approval_next_check_at FROM order_payment_requests WHERE payment_request_id=$1',
+        [id],
+      )
+    ).rows[0];
+    assert.equal(row.approval_next_check_at, null);
+    assert.match(
+      (
+        await client.query(
+          "SELECT pg_get_indexdef('order_payment_reconcile_idx'::regclass) AS definition",
+        )
+      ).rows[0].definition,
+      /COALESCE\(approval_next_check_at, approval_started_at\).*payment_request_id/,
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+    await pool.query(
+      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=$1',
+      [id],
+    );
+  }
+});
+
+test('a due retry gets its turn ahead of newer unchecked approvals', async () => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      'CREATE TEMP TABLE order_payment_requests (LIKE public.order_payment_requests INCLUDING ALL) ON COMMIT DROP',
+    );
+    const due = (
+      await client.query(`INSERT INTO order_payment_requests
+      (order_seq,amount,expires_at,approval_started_at,provider_payment_key,approval_next_check_at)
+      VALUES(-1,1,clock_timestamp()+interval '1 hour',clock_timestamp()-interval '2 minutes',
+        'due-retry',clock_timestamp()-interval '1 second') RETURNING payment_request_id`)
+    ).rows[0].payment_request_id;
+    await client.query(`INSERT INTO order_payment_requests
+      (order_seq,amount,expires_at,approval_started_at,provider_payment_key)
+      SELECT n,1,clock_timestamp()+interval '1 hour',clock_timestamp(),'new-'||n
+      FROM generate_series(1,20) n`);
+    const repository = new PaymentsRepository({ pool: client });
+    assert.ok((await repository.pendingApprovals()).some((row) => row.id === due));
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
 });

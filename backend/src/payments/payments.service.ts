@@ -80,9 +80,9 @@ export class PaymentsService {
           ['ABORTED', 'EXPIRED'].includes(String(p.status)) &&
           p.orderId === id &&
           p.paymentKey === claim.key &&
-          p.totalAmount === amount);
-      if (declined) {
-        await this.orders.releaseClaim(id, claim.claimId!, true);
+          p.totalAmount === amount &&
+          p.currency === 'KRW');
+      if (declined && (await this.orders.releaseClaim(id, claim.claimId!, true))) {
         throw new ApiException(422, 'PAYMENT_FAILED', '결제가 승인되지 않았습니다.');
       }
       throw new ApiException(502, 'PAYMENT_RESULT_UNKNOWN', '결제 결과를 조회로 확인해 주세요.');
