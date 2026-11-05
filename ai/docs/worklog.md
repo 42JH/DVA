@@ -733,3 +733,12 @@
 
 - origin/develop-ai 70c839c의 접수 완료 후 자동 종료 변경을 작업 브랜치에 병합했다. 충돌은 worklog.md 끝의 기록 추가 부분 1곳이며, 양쪽 기록을 모두 보존했다. 팀원 코드와 사용자 프롬프트는 수정하지 않았다.
 - 정책·페르소나·입력 제한·RAG 프롬프트·통화 서비스·통화 흐름 회귀 테스트 98 passed, 13 warnings / 16.01초. git diff --check 통과. 실제 모델·실통화 검증 및 develop-ai 병합은 수행하지 않는다.
+
+
+## 2026-11-05 — 관제페이지 글씨 크기·통화 상태 표시 개선
+- 사용자 요청으로 develop-ai에 origin/develop-ai af62245 병합. 로컬 문서 커밋 2개를 보존했고, worklog 끝의 추가 기록 충돌은 양쪽 내용을 모두 유지해 해결했다.
+- monitor/static/index.html: 가운데 받아쓰기 말풍선 글씨를 18px에서 16px로 축소. 왼쪽 통화 목록에 active는 파란색 ‘통화중’, ended는 빨간색 ‘통화 종료’ 배지로 표시. accepting은 중립색 ‘연결 중’, 알 수 없는 상태는 기존 값 표시.
+- 기존 SSE 갱신 흐름으로 종료 시 배지도 즉시 갱신. 외부 API·인증·통화 처리 로직 변경 없음.
+- 검증: 기존 관제 테스트 5 passed. Node 실행으로 SSE active→ended 갱신, accepting·미지 상태 표시와 HTML 이스케이프 확인. git diff --check 통과. 제한 환경 pytest는 출력 없이 대기해 권한 확장 실행으로 검증 완료.
+- 운영 URL은 웹 도구로 접근하지 못해 운영 화면의 시각 검증은 미수행. 서버 배포·원격 push는 수행하지 않음.
+- 사용자 지시에 따라 Jira 이슈 번호 없이 design/monitor-readability 브랜치로 작업을 분리했다. develop-ai는 수정 전 최신화 병합 상태(5bb221d)로 복원하고, 수정 커밋 제목을 팀 규칙의 한국어 형식으로 정리했다.

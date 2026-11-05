@@ -16,8 +16,11 @@
   h2 { font-size: 18px; color: var(--blue); margin: 8px 0; }
   .call { padding: 8px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
   .call.sel { border-color: var(--blue); background: #f0f8ff; }
+  .call-status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 14px; font-weight: 700; color: #555; background: #f2f2f2; }
+  .call-status.active { color: #1565c0; background: #e3f2ff; }
+  .call-status.ended { color: #c62828; background: #ffebee; }
   .muted { color: #777; font-size: 15px; }
-  .bubble { margin: 6px 0; padding: 6px 10px; border-radius: 10px; max-width: 90%; }
+  .bubble { margin: 6px 0; padding: 6px 10px; border-radius: 10px; max-width: 90%; font-size: 16px; }
   .customer { background: #f2f2f2; }
   .agent { background: #e3f2ff; margin-left: auto; }
   table { border-collapse: collapse; width: 100%; font-size: 16px; }
@@ -42,12 +45,17 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const time = (t) => t ? new Date(t * 1000).toLocaleTimeString("ko-KR") : "";
 const show = (v) => v == null || v === "" ? "<span class=muted>-</span>" : typeof v === "object" ? `<pre>${esc(JSON.stringify(v, null, 1))}</pre>` : esc(v);
+const callStatus = (status) => {
+  const labels = { accepting: "연결 중", active: "통화중", ended: "통화 종료" };
+  const color = status === "active" ? "active" : status === "ended" ? "ended" : "";
+  return `<span class="call-status ${color}">${esc(Object.hasOwn(labels, status) ? labels[status] : status)}</span>`;
+};
 
 function render() {
   const list = [...calls.values()].sort((a, b) => b.started_at - a.started_at);
   if (!selected && list.length) selected = list[0].session_id;
   $("calls").innerHTML = list.map((c) => `<div class="call ${c.session_id === selected ? "sel" : ""}" data-id="${esc(c.session_id)}">
-    <b>${esc(c.caller)}</b> <span class="muted">${time(c.started_at)}</span><br>${esc(c.status)}${c.stage ? ` · ${esc(c.stage)}` : ""}
+    <b>${esc(c.caller)}</b> <span class="muted">${time(c.started_at)}</span><br>${callStatus(c.status)}${c.stage ? ` · ${esc(c.stage)}` : ""}
     ${c.end_reason ? `<br><span class="muted">종료: ${esc(c.end_reason)}</span>` : ""}</div>`).join("");
   const c = calls.get(selected);
   if (!c) return;
