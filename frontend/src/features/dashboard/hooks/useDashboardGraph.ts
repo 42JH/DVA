@@ -7,7 +7,7 @@ import {
   type Stage,
   type StageDropoffs,
 } from '@/features/dashboard/api/dashboardApi'
-import { num, one, pctText } from '@/features/dashboard/format'
+import { num, one, pctText, two } from '@/features/dashboard/format'
 import { PROCESS_LABEL, STAGE_LABEL } from '@/features/dashboard/labels'
 
 // 02 대시보드 '그래프 보기' (Figma '통계 · 응답 대기에 쓰인 통화시간' · '통계 · 단계별 이탈률' 11/05)
@@ -33,7 +33,7 @@ function waitSeries(d: ResponseWait): Series {
     headline: one(perCall(d.totalWaitMs)),
     sub: `전체 통화시간의 ${pctText(d.waitRatePercent)} · ${num(d.measuredCallCount)}통화`,
     values,
-    labels: values.map(one),
+    labels: values.map(two), // 막대 위 초는 두 자리 — 0.04초가 '0.0'으로 보이지 않게 (11/05 사용자)
   }
 }
 

@@ -4,6 +4,7 @@ import { axisTicks } from '@/features/dashboard/format'
 // 02 대시보드 그래프 — 라이브러리 없이 (Figma 'AI 상담 성능' · '통계 · 그래프 보기' 11/04)
 // 크기는 남는 높이를 따라감 (780 높이 노트북 ~ 1920 PC 한 화면)
 // 뜰 때 움직임: 막대 자람 · 도넛 채워짐 · 값 글자 뒤따라 나타남 (global.css animate-*, 움직임 줄이기 설정이면 안 움직임)
+// 막대 모양: 위 두 모서리만 둥글게(6px) · 아래(0 선에 닿는 쪽)는 각지게 (11/05 사용자 이미지)
 
 const at = (v: number, top: number) => `${(v / top) * 100}%`
 
@@ -66,7 +67,7 @@ export function BarChart({
             <div key={b.key} className="relative flex items-end justify-center">
               {b.value !== null && (
                 <div
-                  className={`w-[min(112px,80%)] origin-bottom rounded motion-safe:animate-bar-grow ${BAR[i % 2].bar}`}
+                  className={`w-[min(112px,80%)] origin-bottom rounded-t-md motion-safe:animate-bar-grow ${BAR[i % 2].bar}`}
                   style={{ height: at(b.value, top) }}
                 />
               )}
@@ -123,7 +124,7 @@ export function GroupedBars({
                   >
                     {v !== null && (
                       <div
-                        className={`w-full origin-bottom rounded motion-safe:animate-bar-grow ${s.bar}`}
+                        className={`w-full origin-bottom rounded-t-md motion-safe:animate-bar-grow ${s.bar}`}
                         style={{ height: at(v, top) }}
                       />
                     )}
