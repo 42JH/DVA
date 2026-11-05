@@ -203,6 +203,14 @@ class MockBackend:
         self.customers[phone]["address"] = address
         return seq
 
+    async def customer_detail(self, customer_seq):
+        """B/customers.md Customer. 없거나 탈퇴면 404 → None."""
+        for phone, c in self.customers.items():
+            if c["seq"] == customer_seq and c["status"] == "ACTIVE":
+                return {"customerSeq": c["seq"], "name": c["name"], "phoneNumber": phone, "status": c["status"],
+                        "monthlyBillingEnabled": False, "address": c.get("address")}
+        return None
+
     async def update_customer_address(self, customer_seq, call_session_seq, address):
         phone = self._phone(call_session_seq)
         if self.customers.get(phone, {}).get("seq") != customer_seq:

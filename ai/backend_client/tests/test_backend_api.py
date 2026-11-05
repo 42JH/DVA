@@ -365,6 +365,70 @@ def test_order_calls_do_not_send_persona_token():
     assert "authorization" not in seen[0].headers
 
 
+DIRECTORY = {"data": [], "hasNext": False, "total_count": 0}
+
+
+def business_calls(client):
+    run(client.caller_context(CALLER))
+    run(client.create_customer("김철수", CALLER))
+    assert run(client.customer_detail(12))["customerSeq"] == 12
+    run(client.update_customer_address(12, 20, {"roadAddress": "서울 예시로 12"}))
+    run(client.search_company_places("예시"))
+
+
+def business_handler(req):
+    if req.url.path == "/api/companies/search":
+        return httpx2.Response(200, json=DIRECTORY)
+    if req.url.path == "/api/customers":
+        return httpx2.Response(201, json={"data": {"customerSeq": 12}})
+    if req.method == "PATCH":
+        return httpx2.Response(204)
+    if req.method == "GET":
+        return httpx2.Response(200, json={"data": {"customerSeq": 12}, "meta": {"requestId": "r"}})
+    return context({"lookupStatus": "UNREGISTERED"})(req)
+
+
+def test_customer_and_company_calls_send_business_token_only():
+    client, seen = api(business_handler, business_token="biz-token", persona_token="persona", insights_token="ins")
+    business_calls(client)
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("POST", "/api/customers/context"), ("POST", "/api/customers"), ("GET", "/api/customers/12"),
+        ("PATCH", "/api/customers/12"),
+        ("GET", "/api/companies/search")]
+    assert all(r.headers["authorization"] == "Bearer biz-token" and "cookie" not in r.headers for r in seen)
+    assert seen[3].headers["call_session_seq"] == "20"  # 기존 통화 헤더 유지
+
+
+def test_business_token_unset_sends_no_authorization():
+    client, seen = api(business_handler)
+    business_calls(client)
+    assert all("authorization" not in r.headers for r in seen)
+
+
+def test_persona_and_insights_keep_their_tokens_with_business_token():
+    def handler(req):
+        if req.url.path == "/api/ai/config":
+            return httpx2.Response(200, json={"data": {}})
+        return httpx2.Response(204)
+    client, seen = api(handler, business_token="biz-token", persona_token="persona", insights_token="ins")
+    run(client.persona_config("ACTIVE"))
+    run(client.send_call_events(1, {}))
+    assert [r.headers["authorization"] for r in seen] == ["Bearer persona", "Bearer ins"]
+
+
+def test_customer_detail_404_is_none():
+    client, _ = api(lambda req: httpx2.Response(404, json={"error": {"code": "NOT_FOUND"}}))
+    assert run(client.customer_detail(12)) is None
+
+
+def test_401_raises_once_without_retry():
+    client, seen = api(lambda req: httpx2.Response(401, json={"error": {"code": "UNAUTHORIZED"}}),
+                       business_token="wrong")
+    with pytest.raises(BackendError) as e:
+        run(client.caller_context(CALLER))
+    assert e.value.status == 401 and len(seen) == 1
+
+
 @pytest.mark.parametrize("status, code, ok", [(201, None, True), (409, "DUPLICATE_RESOURCE", True),
                                               (409, "INVALID_STATE", False), (403, "FORBIDDEN", False)])
 def test_create_pin_only_duplicate_409_is_success(status, code, ok):
