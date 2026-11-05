@@ -9,7 +9,7 @@ import {
   useRecentViews,
   type RecentView,
 } from '@/shared/lib/recentViews'
-import { matchKo, parseOrderNo } from '@/shared/lib/search'
+import { matchKo, memberMatches, parseOrderNo } from '@/shared/lib/search'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
 import { useOrderDetail } from '@/shared/order/useOrderDetail'
@@ -68,7 +68,7 @@ const TABS: { key: SearchTab; label: string; list: string; placeholder: string; 
     label: '기업',
     list: '/companies',
     placeholder: '회사명이나 사원 정보를 입력해 주세요',
-    hint: '기업명으로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요.',
+    hint: '기업명(띄어쓰기 무시 · 초성)이나 사원 이름 · 전화번호로 찾아요. 사원은 주소가 등록된 활성 사원만 나와요.',
   },
 ]
 
@@ -176,12 +176,18 @@ function useSearchData(typed: string, tab: SearchTab) {
   const orders = useQuery(searchQueries.orders(tab === 'order' && orderSeq === null ? term : ''))
   const faqs = useQuery(searchQueries.faqs(tab === 'faq'))
   const companies = useQuery(searchQueries.companies(tab === 'company'))
+  const members = useQuery(searchQueries.directory(tab === 'company' ? term : ''))
   const faqHits = typed
     ? (faqs.data ?? [])
         .filter((f) => matchKo(f.question, typed) || matchKo(f.answer, typed))
         .sort(newest)
     : []
   const companyHits = typed ? (companies.data ?? []).filter((c) => matchKo(c.name, typed)) : []
+  // 사원으로 찾은 기업 — 서버 검색 결과에서 이름 · 전화번호 · 부서가 맞은 사원만 (기업명 · 주소로만 맞은 건 뺌). 실패해도 기업명 줄은 그대로
+  const memberHits =
+    tab === 'company' && typed !== '' && term !== ''
+      ? (members.data?.data ?? []).filter((m) => memberMatches(m, term))
+      : []
   const server = tab === 'call' ? calls : orders
   const ready = typed !== '' && term !== ''
 
@@ -197,11 +203,12 @@ function useSearchData(typed: string, tab: SearchTab) {
     faqTotal: faqHits.length,
     companies: companyHits.slice(0, SHOW),
     companyTotal: companyHits.length,
+    members: memberHits.slice(0, SHOW),
     searching:
       tab === 'faq'
         ? faqs.isPending
         : tab === 'company'
-          ? companies.isPending
+          ? companies.isPending || term !== typed || members.isFetching
           : term !== typed || server.isFetching,
     error: (tab === 'faq' ? faqs : tab === 'company' ? companies : server).error?.message ?? null,
   }
@@ -355,20 +362,43 @@ function SearchModal({
                 </>
               ),
             }))
-          : s.companies.map((c) => ({
-              key: `g${c.organizationSeq}`,
-              open: () => go(`/companies/${c.organizationSeq}`),
-              cells: (
-                <>
-                  <span className="min-w-0 truncate text-body">
-                    <Highlight text={c.name} q={typed} />
-                  </span>
-                  <span className="ml-auto shrink-0 text-label text-sub">
-                    사원 {c.memberCount}명
-                  </span>
-                </>
-              ),
-            }))
+          : [
+              ...s.companies.map((c) => ({
+                key: `g${c.organizationSeq}`,
+                open: () => go(`/companies/${c.organizationSeq}`),
+                cells: (
+                  <>
+                    <span className="min-w-0 truncate text-body">
+                      <Highlight text={c.name} q={typed} />
+                    </span>
+                    <span className="ml-auto shrink-0 text-label text-sub">
+                      사원 {c.memberCount}명
+                    </span>
+                  </>
+                ),
+              })),
+              // 사원으로 찾은 기업: 기업명 · 사원 이름 · 전화번호 (최근 조회 기업 줄과 같은 차림)
+              ...s.members.map((m): Row => ({
+                key: `m${m.membershipSeq}`,
+                open: () => go(`/companies/${m.organizationSeq}`),
+                cells: (
+                  <>
+                    <span className="min-w-0 truncate text-body">{m.organizationName}</span>
+                    <span className="shrink-0 text-body">
+                      <Highlight text={m.addressData.name} q={typed} />
+                    </span>
+                    {m.departmentName && (
+                      <span className="min-w-0 truncate text-label text-sub">
+                        <Highlight text={m.departmentName} q={typed} />
+                      </span>
+                    )}
+                    <span className="ml-auto shrink-0 text-label text-sub tabular-nums">
+                      {fmtPhone(m.addressData.phoneNumber)}
+                    </span>
+                  </>
+                ),
+              })),
+            ]
   const total = {
     call: s.callTotal,
     order: s.orderTotal,
@@ -376,7 +406,11 @@ function SearchModal({
     company: s.companyTotal,
   }[tab]
   // '모두 보기' — 주문번호로 찾은 주문 하나는 목록 검색이 아니라 그 주문
-  const all = rows.length && s.orderSeq === null ? `${meta.label} ${total}건` : null
+  // 기업 탭은 기업명으로 맞은 게 있을 때만 (08 목록 검색은 기업명만 — 사원으로만 찾았으면 목록엔 안 나옴)
+  const all =
+    rows.length && s.orderSeq === null && (tab !== 'company' || total > 0)
+      ? `${meta.label} ${total}건`
+      : null
   const empty = s.error
     ? s.error
     : s.orderSeq !== null
