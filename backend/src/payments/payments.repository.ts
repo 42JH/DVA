@@ -69,13 +69,20 @@ export class PaymentsRepository {
     return { ...view, parcels };
   }
   async pendingApprovals() {
+    // Schedule before I/O so even unreadable requests yield their place after a failed lookup.
     return (
       await this.database.pool.query<{
         id: string;
-      }>(`SELECT payment_request_id AS id FROM order_payment_requests
+      }>(`WITH candidates AS (
+      SELECT payment_request_id FROM order_payment_requests
       WHERE provider_payment_key IS NOT NULL AND approval_started_at IS NOT NULL AND invalidated_at IS NULL
       AND completed_at IS NULL AND (approval_claimed_until IS NULL OR approval_claimed_until<=clock_timestamp())
-      ORDER BY approval_started_at LIMIT 20`)
+      AND (approval_next_check_at IS NULL OR approval_next_check_at<=clock_timestamp())
+      ORDER BY COALESCE(approval_next_check_at,approval_started_at),payment_request_id
+      LIMIT 20 FOR UPDATE SKIP LOCKED)
+      UPDATE order_payment_requests r SET approval_next_check_at=clock_timestamp()+interval '1 minute'
+      FROM candidates c WHERE r.payment_request_id=c.payment_request_id
+      RETURNING r.payment_request_id AS id`)
     ).rows;
   }
 }

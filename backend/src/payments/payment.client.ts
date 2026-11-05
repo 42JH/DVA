@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Environment } from '../config/environment';
 import { ApiException } from '../common/errors/api.exception';
+import { createHash } from 'node:crypto';
 
 async function responseText(response: Response) {
   const chunks: Uint8Array[] = [];
@@ -38,7 +39,14 @@ export class PaymentClient {
               Buffer.from(this.config.get('TOSS_TEST_SECRET_KEY', { infer: true }) + ':').toString(
                 'base64',
               ),
-            ...(!lookupOnly ? { 'Content-Type': 'application/json', 'Idempotency-Key': id } : {}),
+            ...(!lookupOnly
+              ? {
+                  'Content-Type': 'application/json',
+                  'Idempotency-Key': createHash('sha256')
+                    .update(JSON.stringify([id, amount, key]))
+                    .digest('hex'),
+                }
+              : {}),
           },
           ...(!lookupOnly
             ? { body: JSON.stringify({ orderId: id, amount, paymentKey: key }) }

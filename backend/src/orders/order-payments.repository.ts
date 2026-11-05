@@ -182,13 +182,17 @@ export class OrderPaymentsRepository {
   }
 
   async releaseClaim(id: string, claimId: string, declined = false) {
-    await this.database.pool.query(
+    const result = await this.database.pool.query(
       `UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL,
       approval_started_at=CASE WHEN $3 THEN NULL ELSE approval_started_at END,
-      provider_payment_key=CASE WHEN $3 THEN NULL ELSE provider_payment_key END
-      WHERE payment_request_id=$1 AND approval_claim_id=$2 AND completed_at IS NULL`,
+      provider_payment_key=CASE WHEN $3 THEN NULL ELSE provider_payment_key END,
+      approval_next_check_at=CASE WHEN $3 THEN NULL ELSE approval_next_check_at END
+      WHERE payment_request_id=$1 AND approval_claim_id=$2 AND completed_at IS NULL
+      AND (NOT $3 OR (provider_approved_at IS NULL AND invalidated_at IS NULL
+        AND approval_claimed_until>clock_timestamp()))`,
       [id, claimId, declined],
     );
+    return result.rowCount === 1;
   }
 
   async recordApproval(id: string, key: string, approvedAt: string) {

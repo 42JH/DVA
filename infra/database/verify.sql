@@ -197,7 +197,15 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.ai_persona_versions'::regclass
     AND conname='ai_persona_previous_active_not_self' AND contype='c' AND convalidated) THEN
   RAISE EXCEPTION 'Previous active persona schema missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 26 FKs, 10 triggers, dashboard/retention/retry schema and migration ledger';
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
+    AND table_name='order_payment_requests' AND column_name='approval_next_check_at'
+    AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.order_payment_reconcile_idx')
+    AND indisvalid AND pg_get_indexdef(indexrelid) LIKE '%COALESCE(approval_next_check_at, approval_started_at)%'
+    AND pg_get_indexdef(indexrelid) LIKE '%payment_request_id%')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='051-payment-approval-recovery.sql') THEN
+  RAISE EXCEPTION 'Payment approval recovery schema or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 29 public tables, 26 FKs, 10 triggers, dashboard/retention/retry/payment recovery schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
