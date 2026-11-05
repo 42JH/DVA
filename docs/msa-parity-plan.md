@@ -42,6 +42,7 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 
 - 첫 MR은 공통 기반이다. 기존 5개 업무 앱에 이벤트 핸들러를 등록하거나 외부 업무 API를 제공하는 단계가 아니다.
 - 두 번째 MR에서 operations 인증·관리자·감사 11개 API와 전용 DB 연결을 구현하고 아래 범위로 비교 검증했다. 나머지 서비스·교차 서비스 연동·전체 동등성·운영 배포는 후속 단계다.
+- 세 번째 MR은 customer 조회 7개와 operations 세션 인증 위임, Jenkins #23 이벤트 테스트 실패 수정을 포함한다. customer 쓰기·통화 컨텍스트·PIN·청구 16개와 다른 업무 API는 아래 후속 범위로 남는다.
 - 기존 적용된 Liquibase changeset은 수정하지 않고 후속 changeset을 사용한다.
 
 ## 두 번째 MR 계획 — operations 인증·감사
@@ -87,3 +88,13 @@ DB는 테이블의 물리 배치보다 업무 필드·연결·스냅샷·상태�
 정상 전송 fixture도 timeout 검사용 100ms를 공유했다. 실제 정상 전송 테스트가 약 150ms 걸리면서 ACK를 받기 전에 중단됐고, 릴레이는 설계대로 미확정 메시지를 재시도 대상으로 보존했다. 운영 기본값은 5초다.
 
 ACK를 수신 COMMIT 후 250ms 지연시키는 회귀를 추가해 수정 전 동일한 `delivered_at=NULL` 실패를 재현했다. 정상 fixture는 운영 기본값을 쓰고 의도적인 오류/timeout 검사만 100ms로 분리했다. 기존 완료/중복/실패/재시도 assertion은 유지한다. 수정 후 Node 단위 3개·실제 PostgreSQL/HTTP 통합 15개·기준 목록 1개가 통과했다. 실제 Jenkins 재실행 결과는 별도 확인 대상이다.
+
+### 세 번째 MR 검증 기록 (2026-11-05)
+
+- `python msa/parity/verify-customer.py`: 변경하지 않은 모놀리식 production 이미지와 독립 customer/operations production 이미지에 동일 요청 77건을 보내 HTTP 상태·본문·요청 ID·CORS·쿠키 속성·7개 GET OpenAPI 및 참조 DTO 스키마가 일치했다. 매 요청 후 고객·기업·부서·구성원 DB 업무 값이 같고 조회로 변경되지 않음을 확인했다. 권한별 조회·MVP AI·세션 회수/재로그인·삭제·잘못된 쿠키·숨겨진 데이터·입력 오류·리터럴 검색·빈 페이지도 포함한다.
+- customer Linux Node.js 24 이미지에서 ESLint·TypeScript·단위 1개·E2E 4개·실제 HTTP 인증 연결/환경 경계 6개가 통과했다. 잘못된 서비스 응답·리다이렉트·과대 응답·2초 timeout·현재 권한 갱신·민감 필드 제외와 인증 장애 시 readiness 실패/독립 liveness를 확인했다.
+- operations의 기존 원본 인증 테스트 40개가 양쪽에서 각각 통과했고 production HTTP·DB 비교와 배포 probe도 통과했다. 새 이미지의 ESLint·TypeScript·단위 1개·E2E 6개와 설정 경계 2개가 통과했다. 내부 경로는 서비스 인증을 요구하고 공개 Swagger에 노출되지 않으며 서비스 토큰만으로 공개 관리자 API에 접근하지 못한다.
+- PostgreSQL 17.11 + Liquibase 5.0.4 전체 검증 `passed=true`, 216단계 통과. 기존 customer 003의 고객·소속·PIN 본문/버전·대기 이벤트·이력을 보존했으며, 004 중간 실패 시 DDL/데이터/이력 전체 롤백을 확인했다. 전체 테이블은 업무 20개+이벤트 10개+Liquibase 관리 10개다.
+- Linux Python 배포·선택·복구 회귀 53개와 변경 Bash/Python 구문 검사가 통과했다. 서비스 비밀 값의 최초 생성·기존 값 보존·잘못된 값 거절/로그 보호를 검사했다. customer 운영 의존성 audit은 0건이며 개발 도구에는 low 5/moderate 23이 남아 있다.
+- 임시 k3s v1.35.5+k3s1에서 실제 스키마·서비스 토큰·DB Secret·operations 내부 인증을 사용했다. 두 서비스 manifest 전체의 서버 dry-run, 최초 배포·정상 교체·의도적 readiness 실패 후 이미지/배포 이력 복구를 확인했다. customer HTTP 429건, operations 432건의 실패는 0건이다. 운영 kubeconfig는 사용하지 않았다.
+- 최신 원격 기준은 `1ec031e`이며 backend/frontend/AI 추적 파일은 변경하지 않았다. 실제 Jenkins 재실행·운영 배포·공개 Ingress/HTTPS·남은 16개 customer 선언·다른 서비스·전체 API/이벤트 동등성은 미검증이다. customer 인증은 operations 가용성에 의존하며 두 서비스 선택 시 operations부터 배포한다. 기존 이름 없는 MSA 관리자 데이터가 있으면 operations 004의 기존 차단 정책이 유지된다.
