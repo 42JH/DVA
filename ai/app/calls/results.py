@@ -145,6 +145,7 @@ class ResultService:
                 await self.backend.write("update_customer_address", self.backend.api.update_customer_address,
                                          c.customer_seq, seq, address)
                 c.default_address = snap["sender_address"]
+                c.default_address_detail = snap.get("sender_address_detail") or ""
                 s.note("기본 주소 저장", "ok")
             if offer.get("receiver") and snap.get("receiver_geo"):
                 await self.backend.write("create_pin", self.backend.api.create_pin, seq, c.customer_seq,

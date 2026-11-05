@@ -592,3 +592,10 @@
 - 사용자 승인으로 fix/postcall-review-delivery에 origin/develop-ai d0e7d1b를 병합했다. 팀원의 채우는 말/끼어들기 처리 변경을 그대로 유지했다. worklog 동시 추가 충돌은 양쪽 기록을 모두 보존해 해결했다.
 - 통합 전체 테스트 **594 passed, 14 warnings / 21.12초**. 실제 모델 공개 가상 평가 9/9 결과는 이전 프롬프트 검증이며 이번 최신 병합 후에는 추가 모델 호출 없이 전체 회귀 테스트를 실행했다.
 - 수정 커밋 9de6327 및 최신 통합 이력을 작업 브랜치에 푸시하고 develop-ai 대상 MR을 준비한다. 사용자 개인 output/tmp와 비밀 설정은 커밋하지 않는다. 운영 배포·통화 228 재전송 없음.
+
+## 2026-11-05 — 기본 주소 저장 제안: 상세주소만 바뀌어도 제안(BE 확인 4번)
+- BE 담당자 확인사항 3건(통화 등록 번호 유실·SENT_UNCERTAIN 주기 재확인 없음·상세주소 비교 누락)을 코드로 대조해 모두 사실로 확인했다. 이번에는 4번만 고쳤다.
+- 원인: `save_offer`(app/domain/address_book.py)가 도로명 문자열만 비교해, 101호→102호처럼 상세만 바뀌면 저장 제안이 나가지 않아 `PATCH /api/customers/{id}`를 부르지 못했다. 상세주소는 BE 응답→`_pin_place`→`origin_place`까지 이미 들어오고 있었고, 비교용 `default_address`만 도로명으로 잘라 두고 있었다.
+- 수정: `Customer.default_address_detail` 추가(state.py), `_apply_context`에서 `default_origin.address_detail or ""`로 채움(service.py), `save_offer`가 (도로명, 상세) 쌍을 비교(address_book.py), PATCH 성공 뒤 상세도 갱신(results.py). 되읽기 전에는 상세가 반드시 채워지고(없다고 하면 "") BE도 생략을 ""로 정규화하므로 None은 비교에 오지 않는다.
+- BE API·계약 변경 없음. 테스트 595 passed(+1: 상세만 다름→sender 제안, 같음→없음, 양쪽 ""→없음).
+- 남은 일(미구현): 1번 통화 등록 번호는 context 응답 즉시 보관하고 이력 조회를 분리, 2번 SENT_UNCERTAIN 주문 결과를 실행 중에도 같은 키·본문으로 재전송.

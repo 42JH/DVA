@@ -371,6 +371,7 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     c.call_session_seq = ctx.call_session_seq or c.call_session_seq
     if getattr(ctx, "default_origin", None) and ctx.default_origin.address:
         c.default_address = ctx.default_origin.address
+        c.default_address_detail = ctx.default_origin.address_detail or ""
     origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
     if origin and origin.address and c.origin_place is None:
         src = Source.PROFILE if getattr(ctx, "default_origin", None) else Source.HISTORY

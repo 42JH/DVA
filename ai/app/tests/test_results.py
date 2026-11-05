@@ -214,6 +214,21 @@ def test_unregistered_customer_gets_no_address_offer():
     assert save_offer(st) == {}
 
 
+def test_sender_offer_when_only_detail_differs():
+    """BE 확인 4번: 도로명이 같아도 상세(101호→102호)가 바뀌면 기본 주소 저장을 제안한다. 둘 다 같으면 제안 없음."""
+    from app.domain.address_book import save_offer
+    from app.domain.state import Source
+    st = filled(sender_address_detail="102호")
+    st.record("receiver_address", "부산 해운대구 센텀로 10", Source.PIN)  # 받는 곳 제안은 끈다
+    st.customer.default_address, st.customer.default_address_detail = "서울 강남구 테헤란로 212", "101호"
+    assert save_offer(st) == {"sender": True}
+    st.customer.default_address_detail = "102호"
+    assert save_offer(st) == {}
+    st.record("sender_address_detail", "")  # 고객이 상세 없다고 함 ↔ BE 상세 ""(생략)도 같은 것으로
+    st.customer.default_address_detail = ""
+    assert save_offer(st) == {}
+
+
 def test_order_intent_without_parcel_info_is_no_order_not_empty_collecting(tmp_path):
     """운영 통화 3a0b9c7f: 결제 방식 하나뿐인 등록 고객이 접수 의도만 말하고 끊음 → 결제 방식을 보내지 않아 NO_ORDER.
     (이전: paymentMethodType=billing이 들어가 BE가 빈 COLLECTING 주문 orderSeq 59를 만듦)"""
