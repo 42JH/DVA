@@ -37,7 +37,7 @@ export interface OrderDetail {
   pickupRequestedAt: string | null // 수기 접수에서 비워 둘 수 있음 (10/31)
   itemPrice: number | null // 수기 접수에서 비워 둘 수 있음
   clientComment: string | null
-  paymentMethod: PaymentMethod
+  paymentMethod: PaymentMethod | null // null = 미정 — 접수 전에 골라야 함
   paymentState: PaymentState
   relatedCalls: {
     callSessionSeq: number

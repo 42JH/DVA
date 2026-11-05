@@ -50,7 +50,7 @@ export interface OrderDetailDto {
   orderSeq: number
   customerSeq: number | null
   status: OrderStatusDto
-  paymentMethodType: PaymentMethodDto
+  paymentMethodType: PaymentMethodDto | null // null = 미정 (수집 중 주문, 서버 nullable)
   creationSource: 'AI' | 'ADMIN' | 'UNKNOWN'
   pickupRequestedAt: string | null
   createdAt: string
@@ -131,7 +131,7 @@ export function toOrderDetail(dto: OrderDetailDto): OrderDetail {
     pickupRequestedAt: dto.pickupRequestedAt,
     itemPrice: sum(counted.map((p) => p.itemPrice)),
     clientComment: comments.length ? comments.join(' / ') : null,
-    paymentMethod: PAYMENT_METHOD[dto.paymentMethodType],
+    paymentMethod: dto.paymentMethodType ? PAYMENT_METHOD[dto.paymentMethodType] : null,
     paymentState: PAYMENT_STATE[dto.status],
     relatedCalls: [], // shortcut: 응답에 관련 통화가 없음 — 통화 API(calls)에서 orderSeq로 찾거나 BE에 요청
     version: dto.version,

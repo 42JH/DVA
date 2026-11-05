@@ -183,7 +183,7 @@ export function OrderFormModal({
                   label="결제 방식"
                   inline
                   locked
-                  value={vm.paymentOptions.find((o) => o.value === vm.payment)?.label ?? vm.payment}
+                  value={vm.paymentText}
                   hint="결제 방식은 미완료 주문에서만 바꿀 수 있습니다."
                 />
               ) : (

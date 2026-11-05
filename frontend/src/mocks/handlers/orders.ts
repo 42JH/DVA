@@ -11,7 +11,7 @@ import type {
 // 가짜 주문 상세 GET /orders/{id} (연동 상세명세 10/31 §4.2) · 목록 GET /admin/orders (§4.1) — 모양 그대로
 // 데이터는 shared/order/orderApi.ts의 메모리 저장소(03 주문 내역 가짜 목록 · 추가 · 수정이 쓰는 것)를 그대로 읽어 DTO로 바꿈
 //   → 03에서 추가한 주문도 06 '주문 보기' 팝업에서 같은 내용으로 보임. 화면 → DTO 변환은 orderDto.toOrderDetail의 반대
-const METHOD: Record<OrderDetail['paymentMethod'], PaymentMethodDto> = {
+const METHOD: Record<NonNullable<OrderDetail['paymentMethod']>, PaymentMethodDto> = {
   MONTHLY: 'credit',
   GROUP_CARD: 'groupBilling',
   PERSONAL_CARD: 'billing',
@@ -49,7 +49,7 @@ function toDto(o: OrderDetail): OrderDetailDto {
     orderSeq: o.orderSeq,
     customerSeq: null,
     status: statusOf(o),
-    paymentMethodType: METHOD[o.paymentMethod],
+    paymentMethodType: o.paymentMethod ? METHOD[o.paymentMethod] : null,
     creationSource: o.route === 'MANUAL' ? 'ADMIN' : 'AI',
     pickupRequestedAt: o.pickupRequestedAt ? new Date(o.pickupRequestedAt).toISOString() : null,
     createdAt: new Date(o.acceptedAt).toISOString(),

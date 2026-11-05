@@ -358,7 +358,7 @@ export function ChipGroup<V extends string>({
 }: {
   name: string
   options: Option<V>[]
-  value: V
+  value: V | null // null = 아직 안 고름 → 켜진 칩 없음 (03 결제 방식 '미정')
   onChange: (v: V) => void
   compact?: boolean // 폼 창 안 (03 주문 추가 결제 방식): 칸 44 · 라벨 왼쪽 120 — TextField inline과 줄이 맞게
 }) {

@@ -64,7 +64,12 @@ export function buildOrderPatch(
   const before = order.pickupRequestedAt ? Date.parse(order.pickupRequestedAt) : null
   const after = input.pickupAt ? Date.parse(input.pickupAt) : null
   if (before !== after) patch.pickupRequestedAt = input.pickupAt
-  if (input.paymentMethod !== order.paymentMethod && input.paymentMethod !== 'BRANCH_VISIT')
+  // 미정(null)은 보내지 않음 — 서버는 null을 받지 않고, 생략 = 유지
+  if (
+    input.paymentMethod !== null &&
+    input.paymentMethod !== order.paymentMethod &&
+    input.paymentMethod !== 'BRANCH_VISIT'
+  )
     patch.paymentMethodType = METHOD[input.paymentMethod]
 
   // 도로명이 바뀌었는데 검색 결과(지번 · 동 · 우편번호)가 없으면 서버가 거절 → 보내지 않음 (검색으로만 고르므로 보통 없음)
@@ -126,6 +131,7 @@ export function submitMissing(order: OrderDetail, input: OrderInput): string[] {
   }
   const i = input.items
   if (!(i.document || i.small || i.medium || i.big || i.other)) out.push('품목')
+  if (input.paymentMethod === null) out.push('결제 방식') // 미정은 접수 전에 골라야 함 (서버)
   if (input.declaredValue === null) out.push('물품 가액')
   if (!input.shippingFee || input.shippingFee < 1) out.push('배송비')
   return out

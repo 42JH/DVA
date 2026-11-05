@@ -253,4 +253,25 @@ assert.deepEqual(
   [],
 )
 
+// 결제 방식 미정(서버 null): 안 고르면 안 보냄(전엔 월정산으로 채워져 credit이 나감) · 고르면 보냄 · 접수는 막힘
+const undecided: OrderDetail = { ...order, paymentMethod: null }
+assert.equal(buildOrderPatch(undecided, 101, { ...same, paymentMethod: null }).patch, null)
+assert.equal(
+  buildOrderPatch(undecided, 101, { ...same, paymentMethod: 'MONTHLY' }).patch?.paymentMethodType,
+  'credit',
+)
+assert.deepEqual(
+  submitMissing(
+    { ...ready, paymentMethod: null },
+    {
+      ...same,
+      sender: ready.sender,
+      receiver: ready.receiver,
+      paymentMethod: null,
+      shippingFee: 3500,
+    },
+  ),
+  ['결제 방식'],
+)
+
 console.log('orderPatch OK')

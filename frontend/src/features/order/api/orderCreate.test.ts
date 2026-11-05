@@ -48,4 +48,10 @@ const b2 = buildCreateOrder(
 assert.equal(b2.pickupRequestedAt, '2026-11-02T09:00:00+09:00')
 assert.equal(b2.paymentMethodType, 'credit')
 
+// 결제 방식 미정 → 칸을 빼고 보냄 (서버: 생략 = 미정)
+assert.equal(
+  'paymentMethodType' in buildCreateOrder({ ...input, paymentMethod: null }, 3500),
+  false,
+)
+
 console.log('orderCreate OK')
