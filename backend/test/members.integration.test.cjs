@@ -460,7 +460,7 @@ test('JSON batch creates new customers and links existing unaffiliated customers
 
 test('1000 inline employees use two data writes per import and keep every identity mapped correctly', async () => {
   const co = await company();
-  const prefix = '019' + randomInt(10000000, 100000000);
+  const prefix = '019' + randomInt(1000, 10000);
   const input = Array.from({ length: 1000 }, (_, index) => ({
     employeeNo: String(index).padStart(4, '0'),
     name: '일괄 직원 ' + index,

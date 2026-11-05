@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 import { OrderCallDto } from './order-call.dto';
 
 const present = (_object: unknown, value: unknown) => value !== undefined;
@@ -26,14 +27,15 @@ export class OrderAddressPatchDto {
   name?: string | null;
 
   @ApiPropertyOptional({
-    description: '연락처. 하이픈 없는 숫자 문자열.',
+    description: '연락처. 하이픈·공백 없는 휴대전화 번호 11자리 문자열.',
+    pattern: MOBILE_PHONE_PATTERN.source,
     example: '01012345678',
     type: String,
     nullable: true,
   })
   @IsOptional()
   @IsString()
-  @Matches(/^[0-9]+$/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber?: string | null;
 
   @ApiPropertyOptional({ description: '도로명 주소.', type: String, nullable: true })

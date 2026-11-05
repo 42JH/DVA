@@ -1,5 +1,7 @@
 # AI 파트 연동 명세 — 2026-11-04
 
+[휴대전화 번호 입력 계약](mobile-phone-integration.md): 업무 `phoneNumber`는 정확히 11자리 숫자 문자열이다. 고객 확인·고객 등록·주문 고객/연락처·PIN에 적용하며, PBX 원문 발신번호의 국제 표기 수신은 기존 계약을 유지한다.
+
 코드 기준: `feature/ai-dashboard`, DB migration `050`까지. 운영 서버에 이 코드·migration이 적용되었다는 뜻은 아니다. AI·프론트 소스와 실제 배포는 별도다. 과거 문서와 수거 시각·콜백·주소 권한·좌표·통화 등록·결제·접수 실패 상태·제거 필드 설명이 다르면 이 문서와 현재 DTO를 우선한다.
 
 대시보드 확장은 [AI 전용 연동 명세](ai-dashboard-ai-integration.md)를 따른다. 기존 analysis 저장 후 `stage-metrics`·`response-wait-metrics`를 각각 전송한다. 기존 불편 유형을 유지하면서 화면용 5개 코드를 추가한다. 미답변 사유의 선택 reason·조회 필터는 [049 계약](unanswered-question-reasons.md)을 따른다.

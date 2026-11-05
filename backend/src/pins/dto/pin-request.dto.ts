@@ -12,6 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
 
 const present = (_object: unknown, value: unknown) => value !== undefined;
 const nonNull = (_object: unknown, value: unknown) => value !== undefined && value !== null;
@@ -20,9 +21,13 @@ const trim = ({ value }: TransformFnParams): unknown =>
 
 export class PinAddressInputDto {
   @ApiProperty() @Transform(trim) @IsString() @IsNotEmpty() name!: string;
-  @ApiProperty({ pattern: '^[0-9]+(?![\\s\\S])', example: '01012345678' })
+  @ApiProperty({
+    description: '휴대전화 번호 11자리 문자열.',
+    pattern: MOBILE_PHONE_PATTERN.source,
+    example: '01012345678',
+  })
   @IsString()
-  @Matches(/^[0-9]+(?![\s\S])/)
+  @Matches(MOBILE_PHONE_PATTERN)
   phoneNumber!: string;
   @ApiProperty() @Transform(trim) @IsString() @IsNotEmpty() roadAddress!: string;
   @ApiProperty() @Transform(trim) @IsString() @IsNotEmpty() jibunAddress!: string;

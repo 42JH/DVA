@@ -5,6 +5,9 @@ const { randomUUID, randomInt, randomBytes, createHash } = require('node:crypto'
 const { ConfigService } = require('@nestjs/config');
 const { RetentionWorker } = require('../dist/retention/retention.worker');
 const { RetentionRepository } = require('../dist/retention/retention.repository');
+const { PaymentsRepository } = require('../dist/payments/payments.repository');
+const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
+const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
 const { applicationFixture } = require('./helpers/application.cjs');
@@ -337,7 +340,7 @@ test('expired final submission failures purge their snapshots and completed paym
   assert.equal(await exists('order_parcels', 'order_seq', newer), true);
 });
 
-test('expired final submission failures retain payment, notification and linked-call protections', async (t) => {
+test('expired final submission failures retain active payment, notification and linked-call protections', async (t) => {
   for (const reason of ['approval', 'notification', 'completion', 'call']) {
     await t.test(reason, async () => {
       const id = await failedOrder();
@@ -350,14 +353,19 @@ test('expired final submission failures retain payment, notification and linked-
         await f.pool.query(
           `INSERT INTO order_payment_requests(order_seq,amount,expires_at,
             approval_started_at,provider_payment_key,completed_at,provider_reference,
-            notification_status,completion_notification_status)
+            notification_status,completion_notification_status,approval_claim_id,approval_claimed_until,
+            notification_attempted_at,completion_notification_attempted_at)
           VALUES($1,3500,clock_timestamp()-interval '6 years',
             CASE WHEN $2='approval' THEN clock_timestamp() END,
             CASE WHEN $2='approval' THEN $3 END,
             CASE WHEN $2='completion' THEN clock_timestamp()-interval '6 years' END,
             CASE WHEN $2='completion' THEN $3 END,
             CASE WHEN $2='notification' THEN 'SENDING' ELSE 'SENT' END,
-            CASE WHEN $2='completion' THEN 'SENDING' ELSE 'WAITING' END)`,
+            CASE WHEN $2='completion' THEN 'SENDING' ELSE 'WAITING' END,
+            CASE WHEN $2='approval' THEN gen_random_uuid() END,
+            CASE WHEN $2='approval' THEN clock_timestamp()+interval '45 seconds' END,
+            CASE WHEN $2='notification' THEN clock_timestamp() END,
+            CASE WHEN $2='completion' THEN clock_timestamp() END)`,
           [id, reason, randomUUID()],
         );
       }
@@ -369,7 +377,7 @@ test('expired final submission failures retain payment, notification and linked-
         await f.pool.query('UPDATE call_sessions SET order_seq=NULL WHERE order_seq=$1', [id]);
       } else if (reason === 'approval') {
         await f.pool.query(
-          'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE order_seq=$1',
+          'UPDATE order_payment_requests SET approval_claim_id=NULL,approval_claimed_until=NULL WHERE order_seq=$1',
           [id],
         );
       } else {
@@ -385,21 +393,108 @@ test('expired final submission failures retain payment, notification and linked-
   }
 });
 
-test('expiry still preserves paid, submitting and retryable submission work', async () => {
-  const ids = [];
+test('expired abandoned payment and submission states purge while current work remains', async () => {
+  const expired = [],
+    retained = [];
   for (const status of ['PAID', 'SUBMITTING', 'SUBMITTING_FAILED']) {
-    const row = (
+    for (const age of ['6 years', '4 years']) {
+      const row = (
+        await f.pool.query(
+          `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at,updated_at)
+      VALUES($1,'credit',3500,clock_timestamp()-$2::interval,
+        clock_timestamp()-$2::interval,clock_timestamp()-$2::interval,clock_timestamp()-$2::interval) RETURNING order_seq`,
+          [status, age],
+        )
+      ).rows[0];
+      (age === '6 years' ? expired : retained).push(row.order_seq);
+    }
+  }
+  const active = await failedOrder();
+  await f.pool.query(
+    "UPDATE orders SET status='SUBMITTING',submission_last_attempt_at=clock_timestamp() WHERE order_seq=$1",
+    [active],
+  );
+  await repository().purgeDatabase();
+  for (const id of expired) assert.equal(await exists('orders', 'order_seq', id), false);
+  for (const id of [...retained, active])
+    assert.equal(await exists('orders', 'order_seq', id), true);
+  await f.pool.query(
+    "UPDATE orders SET submission_last_attempt_at=clock_timestamp()-interval '11 seconds' WHERE order_seq=$1",
+    [active],
+  );
+  await repository().purgeDatabase();
+  assert.equal(await exists('orders', 'order_seq', active), false);
+});
+
+test('expired unresolved payments leave recovery and purge without releasing retained payment keys', async () => {
+  const requests = [];
+  for (const age of ['6 years', '4 years']) {
+    const id = (
       await f.pool.query(
-        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,paid_at,pickup_requested_at)
-      VALUES($1,'credit',3500,clock_timestamp()-interval '6 years',
-        clock_timestamp()-interval '6 years',clock_timestamp()-interval '6 years') RETURNING order_seq`,
-        [status],
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,payment_due_at)
+      VALUES('notPaid','billing',3500,clock_timestamp()-$1::interval,clock_timestamp()-$1::interval+interval '1 day') RETURNING order_seq`,
+        [age],
+      )
+    ).rows[0].order_seq;
+    const request = (
+      await f.pool.query(
+        `INSERT INTO order_payment_requests(order_seq,amount,created_at,expires_at,provider_payment_key,approval_started_at)
+      VALUES($1,3500,clock_timestamp()-$2::interval,clock_timestamp()-$2::interval+interval '1 day',$3,clock_timestamp()-$2::interval)
+      RETURNING payment_request_id AS id,provider_payment_key AS key`,
+        [id, age, randomUUID()],
       )
     ).rows[0];
-    ids.push(row.order_seq);
+    requests.push({ ...request, orderId: id });
   }
+  const [expired, retained] = requests;
+  assert.equal(
+    await f.app
+      .get(OrderPaymentsRepository)
+      .reserveApproval(f.pool, expired.id, expired.key, randomUUID()),
+    false,
+  );
+  const candidates = await f.app.get(PaymentsRepository).pendingApprovals();
+  assert.equal(
+    candidates.some((row) => row.id === expired.id),
+    false,
+  );
+  assert.equal(
+    candidates.some((row) => row.id === retained.id),
+    true,
+  );
+  await assert.rejects(
+    f.app.get(OrderPaymentsService).claimApproval(expired.id, 3500, expired.key),
+    (error) => error.getStatus() === 404,
+  );
   await repository().purgeDatabase();
-  for (const id of ids) assert.equal(await exists('orders', 'order_seq', id), true);
+  assert.equal(await exists('orders', 'order_seq', expired.orderId), false);
+  assert.equal(await exists('order_payment_requests', 'payment_request_id', expired.id), false);
+  const kept = (
+    await f.pool.query(
+      'SELECT provider_payment_key,approval_started_at FROM order_payment_requests WHERE payment_request_id=$1',
+      [retained.id],
+    )
+  ).rows[0];
+  assert.equal(kept.provider_payment_key, retained.key);
+  assert.ok(kept.approval_started_at);
+});
+
+test('expired stale notification states do not hold payment data indefinitely', async (t) => {
+  for (const kind of ['notification', 'completion'])
+    await t.test(kind, async () => {
+      const id = await failedOrder();
+      await f.pool.query(
+        `INSERT INTO order_payment_requests(order_seq,amount,expires_at,completed_at,provider_reference,
+      notification_status,notification_attempted_at,completion_notification_status,completion_notification_attempted_at)
+      VALUES($1,3500,clock_timestamp()-interval '6 years',CASE WHEN $2='completion' THEN clock_timestamp()-interval '6 years' END,
+      CASE WHEN $2='completion' THEN $3 END,CASE WHEN $2='notification' THEN 'SENDING' ELSE 'SENT' END,
+      clock_timestamp()-interval '46 seconds',CASE WHEN $2='completion' THEN 'SENDING' ELSE 'WAITING' END,clock_timestamp()-interval '46 seconds')`,
+        [id, kind, randomUUID()],
+      );
+      await repository().purgeDatabase();
+      assert.equal(await exists('orders', 'order_seq', id), false);
+      assert.equal(await exists('order_payment_requests', 'order_seq', id), false);
+    });
 });
 
 test('master data expiry erases personal details while preserving newer order FKs and clears old persona author names', async () => {

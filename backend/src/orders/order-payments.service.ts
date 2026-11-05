@@ -21,7 +21,8 @@ export class OrderPaymentsService {
     return this.database.transaction(async (client) => {
       await client.query("SET LOCAL lock_timeout='2s'");
       const r = await this.repository.request(client, id);
-      if (!r) throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
+      if (!r || r.order.retentionExpired)
+        throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
       if (r.amount !== amount || (key && r.providerPaymentKey && r.providerPaymentKey !== key))
         throw new ApiException(409, 'INVALID_STATE', '결제 정보가 일치하지 않습니다.');
       if (r.completedAt)
@@ -38,7 +39,8 @@ export class OrderPaymentsService {
       const paymentKey = r.providerPaymentKey || key;
       if (!paymentKey) throw new ApiException(409, 'INVALID_STATE', '조회할 결제 정보가 없습니다.');
       const claimId = randomUUID();
-      await this.repository.reserveApproval(client, id, paymentKey, claimId);
+      if (!(await this.repository.reserveApproval(client, id, paymentKey, claimId)))
+        throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');
       return { done: false as const, key: paymentKey, claimId, lookupOnly: !!r.approvalStartedAt };
     });
   }

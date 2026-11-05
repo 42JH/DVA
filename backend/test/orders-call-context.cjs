@@ -83,10 +83,7 @@ module.exports = function registerOrdersCallContext(suite) {
     assert.equal(repeated.status, 200);
     assert.equal((await repeated.json()).data.callSessionSeq, ids[0]);
     const international = await startCallContext('0082' + phone.slice(1), identity);
-    assert.equal(international.status, 200);
-    const internationalData = (await international.json()).data;
-    assert.equal(internationalData.callSessionSeq, ids[0]);
-    assert.equal(internationalData.customer.phoneNumber, phone);
+    await errorCode(international, 400, 'INVALID_REQUEST');
     await errorCode(await startCallContext('01099990000', identity), 409, 'INVALID_STATE');
     await errorCode(
       await startCallContext(phone, {
