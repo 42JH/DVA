@@ -4,6 +4,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 
 ## 적용 기준
 
+054-recording-retry-policy.sql은 기존 PBX 수신함에 시도 횟수·다음 실행 시각·실패 코드·확인 플래그를 추가한다. 기존 FAILED만 LEGACY_FAILURE 확인 대기로 이행하고 원본·ID·통화 연결·lease·녹취는 보존한다. 기존 워커 중지·백업 후 적용하고 054 호환 앱을 실행한다. [S09 정책·수동 재개](../../backend/docs/recording-retry-policy.md)를 따르며 054 비호환 앱으로의 배포·복귀는 차단한다. public 테이블·FK·업무 트리거 개수는 053과 같다.
+
 053-drop-company-pins.sql은 기업 PIN 테이블과 전용 객체만 제거한다. 과거 주문의 COMPANY 논리 참조·주소 사본·감사와 개인 PIN·공유 검증 함수를 보존한다. 최종 public 스키마는 테이블 29개·FK 25개·업무 트리거 10개다. 기존 앱/워커 중지 → 원본 보관 범위 확인·백업 → 053·verify → 호환 앱 전환 순서이며 053 없는 앱으로의 배포·롤백·자동 복귀를 차단한다. [변경·데이터 확인·복구 안내](../../backend/docs/company-pin-retirement.md)를 따른다. 기존 migration은 수정하지 않으며 아래의 과거 migration별 개수는 각 시점의 기록이다.
 
 051-payment-approval-recovery.sql은 order_payment_requests.approval_next_check_at nullable 컬럼과 자동 조회 순서용 인덱스를 추가한다. 기존 결제 키·승인 시작·승인 증거·처리권·완료 기록은 바꾸지 않으며 기존 행은 NULL로 즉시 조회 가능하다. 새 앱 전에 기존 runner로 051을 적용하고 verify.sql로 검사한다. 컬럼 추가와 인덱스 교체이므로 이전 앱도 같은 DB를 사용할 수 있다. [결제 복구 계약](../api/order-payment-integration.md)을 따른다.

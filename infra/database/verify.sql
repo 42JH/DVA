@@ -53,6 +53,16 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND conname='call_ended_claim_pair_check')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='031-recording-worker-claims.sql') THEN
   RAISE EXCEPTION 'Recording worker claim schema or migration missing'; END IF;
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events'
+   AND ((column_name='attempt_count' AND udt_name='int2' AND is_nullable='NO')
+     OR (column_name='next_attempt_at' AND udt_name='timestamptz')
+     OR (column_name='last_error_code' AND udt_name='text')
+     OR (column_name='requires_review' AND udt_name='bool' AND is_nullable='NO')))<>4
+  OR to_regclass('pbx_webhooks.call_ended_unmatched_expiry_idx') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='pbx_webhooks.call_ended_events'::regclass AND conname='call_ended_review_check')
+  OR COALESCE(pg_get_indexdef(to_regclass('pbx_webhooks.call_ended_retry_idx')),'') NOT LIKE '%NOT requires_review%'
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='054-recording-retry-policy.sql') THEN
+  RAISE EXCEPTION 'Recording retry policy schema or migration missing'; END IF;
  IF to_regclass('public.call_sessions_started_list_idx') IS NULL
   OR to_regclass('public.orders_customer_created_list_idx') IS NULL
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='032-list-read-indexes.sql') THEN

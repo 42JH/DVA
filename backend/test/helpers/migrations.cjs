@@ -108,6 +108,15 @@ async function migrate(pool) {
         null,
         'Apply migration 053 to the isolated DB first',
       );
+      assert.equal(
+        (
+          await client.query(
+            "SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events' AND column_name IN ('attempt_count','next_attempt_at','last_error_code','requires_review')",
+          )
+        ).rows[0].n,
+        4,
+        'Apply migration 054 to the isolated DB first',
+      );
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
