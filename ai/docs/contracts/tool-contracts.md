@@ -18,7 +18,7 @@
 
 **서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
 
-**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 카카오는 공유 클라이언트 + 세마포어, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음.
+**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
 작성일: 2026-11-03 · 근거: `tools/*.py`, `backend_client/order.py`, `address_resolver/`, `app/rag/text_agent.py`(당시 `tools/rag/`, 지금은 원본 경로)
 표기: **[코드]** 구현 확인 · **[문서]** 문서만 · **확인 필요**
 

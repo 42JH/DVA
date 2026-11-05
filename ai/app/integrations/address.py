@@ -1,4 +1,4 @@
-"""주소 서비스: 주소DB 보정(app/address, CPU·SQLite) + 카카오 지번·동명·우편번호.
+"""주소 서비스: 주소DB 보정(app/address, CPU·SQLite) + 접수용 지번·동명·우편번호(주소DB, 비면 카카오).
 
 - 보정은 전용 스레드풀에서 돈다(concurrency.md §6.2 "주소 보정 실행기", 이벤트 루프를 막지 않음).
 - 카카오는 공유 클라이언트 1개 + 세마포어(호출 한도 [미확인]).
@@ -68,9 +68,14 @@ class AddressService:
                 return AddressResult(r.status, None, r.candidates, None)
             cands = list(r.candidates) or [r.address]
             status, address, alternatives = r.status, cands[0], tuple(cands[1:])
-        with span("address", step="geocode"):
-            async with self.kakao_sem:
-                geo = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
+        geo = None
+        if self.db is not None:  # 접수용 값은 주소DB에서(4단계 Geo 로컬화, 2026-11-06). 비어 있으면 카카오로 보완
+            with span("address", step="geo"):
+                geo = await asyncio.get_running_loop().run_in_executor(self.pool, self.db.geo, address)
+        if geo is None:
+            with span("address", step="geocode"):
+                async with self.kakao_sem:
+                    geo = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
         return AddressResult(status, address, alternatives, geo)
 
     async def _witness(self, heard: str, local: matcher.Resolution) -> matcher.Resolution:

@@ -433,3 +433,37 @@ def test_witness_is_not_asked_for_strong_results_or_without_key(db_path, fake_ka
     assert run(svc.resolve("서울 강남구 테헤란로 212")).status == "confirmed" and not seen
     monkeypatch.delenv("KAKAO_REST_API_KEY")
     assert run(svc.resolve("무슨빌딩")).status == "not_found" and not seen
+
+
+# --- 접수용 값(지번·법정동·우편번호)을 주소DB에서(4단계 Geo 로컬화, 2026-11-06) ---
+
+def test_local_geo_matches_kakao_format(db):
+    # 대표 지번(737, 비대표 738은 아님), 시도 두 글자, 우편번호 5자리
+    assert db.geo("서울특별시 강남구 테헤란로 212") == Geo("서울 강남구 역삼동 737", "역삼동", "06220")
+    assert db.geo("서울특별시 송파구 올림픽로 300") == Geo("서울 송파구 신천동 29", "신천동", "05551")
+    # 읍면·리·산, 특별자치도는 정식 명칭 그대로
+    assert db.geo("전북특별자치도 익산시 왕궁면 왕궁로 100") == Geo("전북특별자치도 익산시 선산읍 완전리 산 12", "선산읍 완전리", "54546")
+    assert db.geo("서울특별시 강남구 테헤란로 211") is None  # 지번·우편번호 없음 → 카카오로 보완
+    assert db.geo("서울특별시 강남구 테헤란로 99999") is None
+
+
+def test_kakao_sido_abbreviation():
+    from app.address.gazetteer import kakao_sido
+    assert [kakao_sido(s) for s in ("서울특별시", "부산광역시", "경기도", "경상북도", "충청남도")] == ["서울", "부산", "경기", "경북", "충남"]
+    assert [kakao_sido(s) for s in ("세종특별자치시", "제주특별자치도", "강원특별자치도", "전남광주통합특별시")] == \
+        ["세종특별자치시", "제주특별자치도", "강원특별자치도", "전남광주통합특별시"]
+
+
+def test_service_uses_local_geo_and_falls_back_to_kakao(db_path, monkeypatch):
+    calls = []
+
+    async def geocode(address_, timeout_sec, transport=None, http=None):
+        calls.append(address_)
+        return Geo("카카오", "카카오동", "00000")
+
+    monkeypatch.setattr(kakao, "geocode", geocode)
+    svc = AddressService(open_db(db_path))
+    r = run(svc.resolve("서울 강남구 테헤란로 212"))
+    assert r.geo == Geo("서울 강남구 역삼동 737", "역삼동", "06220") and not calls  # 로컬에서, 카카오 호출 없음
+    r = run(svc.resolve("서울 강남구 테헤란로 211"))
+    assert r.geo == Geo("카카오", "카카오동", "00000") and calls == ["서울특별시 강남구 테헤란로 211"]  # 로컬에 없으면 카카오

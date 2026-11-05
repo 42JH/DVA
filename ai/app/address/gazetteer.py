@@ -20,7 +20,8 @@ import threading
 import time
 from pathlib import Path
 
-from app.address.matcher import RoadDict
+from app.address.matcher import RoadDict, sido_aliases
+from app.domain.state import Geo
 from app.address.phonetic import Name, jamo, read_digits
 
 log = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ SCHEMA = """
                             main INTEGER, sub INTEGER, postal INTEGER, hdong INTEGER);  -- postal·hdong: 부가정보
     CREATE TABLE hdongs (id INTEGER PRIMARY KEY, code TEXT, name TEXT);  -- 행정동
     CREATE TABLE areas (id INTEGER PRIMARY KEY, sido TEXT, sigungu TEXT, dong TEXT, ri TEXT);  -- 법정동·리
-    CREATE TABLE jibun (area INTEGER, san INTEGER, main INTEGER, sub INTEGER, building INTEGER);
+    CREATE TABLE jibun (area INTEGER, san INTEGER, main INTEGER, sub INTEGER, building INTEGER, rep INTEGER);  -- rep: 대표 지번
     CREATE TABLE building_names (building INTEGER, name TEXT);  -- 시군구용건물명·건축물대장건물명, 건물당 0~2개
     -- 전국 이름 색인: kind 0 도로명(시군구별), 1 법정동·리, 2 건물명(시군구별). canon = name_key(). FTS는 names를 내용으로 씀
     CREATE TABLE names (id INTEGER PRIMARY KEY, kind INTEGER, text TEXT, canon TEXT, sido TEXT, sigungu TEXT);
@@ -49,6 +50,8 @@ INDEXES = """
     CREATE INDEX buildings_key ON buildings (road_code, main, sub);
     CREATE INDEX areas_region ON areas (sido, sigungu);
     CREATE INDEX jibun_key ON jibun (area, san, main, sub);
+    CREATE INDEX jibun_building ON jibun (building);  -- 건물 -> 대표 지번(geo)
+    CREATE INDEX roads_road ON roads (road, sido);     -- 도로명주소 문자열 -> 건물(geo: 시군구를 모를 때)
     CREATE INDEX building_names_name ON building_names (name);
     CREATE INDEX names_kind ON names (kind, sido, sigungu);
 """
@@ -137,8 +140,8 @@ def build(src, out):
             for c in (line.rstrip("\n").split("|") for line in f):
                 if c[0] in ids:
                     area = areas.setdefault((c[3], c[4], c[5], c[6]), len(areas) + 1)
-                    rows.append((area, int(c[7]), int(c[8]), int(c[9]), ids[c[0]]))
-        conn.executemany("INSERT INTO jibun VALUES (?,?,?,?,?)", rows)
+                    rows.append((area, int(c[7]), int(c[8]), int(c[9]), ids[c[0]], int(c[10] == "1")))
+        conn.executemany("INSERT INTO jibun VALUES (?,?,?,?,?,?)", rows)
         m += len(rows)
         print(f"  {sido_file} 건물 {len(ids):,}건, 건물명 {len(name_rows):,}건, 지번 {len(rows):,}건")
     conn.executemany("INSERT INTO areas VALUES (?,?,?,?,?)", [(i, *k) for k, i in areas.items()])
@@ -241,6 +244,32 @@ class AddressDB(RoadDict):
                                  (area, san, int(main), int(sub or 0)))
         return [address(sido, sg, road, number_of(bm, bs), emd, emd_type) for sido, sg, road, bm, bs, emd, emd_type in rows]
 
+    def geo(self, road_address):
+        """확정한 도로명주소의 접수용 값(지번주소·법정동명·우편번호) — 카카오 geocode와 같은 표기(2026-11-06 실측으로 정한 규칙):
+        지번은 대표 지번, 시도는 특별시·광역시·도만 두 글자로 줄임, 동명은 "동" 또는 "읍면 리", 산은 "산 45-1", 우편번호 5자리.
+        건물·대표 지번·우편번호 중 하나라도 없으면 None(호출자가 카카오로 보완)."""
+        parts = road_address.split()
+        sido, road, number = parts[0], parts[-2], parts[-1]
+        main, _, sub = number.partition("-")
+        if not main.isdigit() or (sub and not sub.isdigit()):
+            return None
+        for bid, sg, emd, t, postal in self.conn.execute("""
+                SELECT b.id, r.sigungu, r.emd, r.emd_type, b.postal FROM buildings b
+                JOIN roads r ON r.road_code = b.road_code AND r.emd_seq = b.emd_seq
+                WHERE r.sido = ? AND r.road = ? AND b.main = ? AND b.sub = ? AND b.underground = 0""",
+                (sido, road, int(main), int(sub or 0))):
+            if address(sido, sg, road, number, emd, t) != road_address or postal is None:
+                continue
+            j = self.conn.execute("""SELECT a.dong, a.ri, j.san, j.main, j.sub FROM jibun j JOIN areas a ON a.id = j.area
+                                     WHERE j.building = ? ORDER BY j.rep DESC, j.rowid LIMIT 1""", (bid,)).fetchone()
+            if j is None:
+                continue
+            dong, ri, san, jm, js = j
+            dong_name = f"{dong} {ri}".strip()
+            jibun = " ".join(x for x in (kakao_sido(sido), sg, dong_name, "산" if san else "", number_of(jm, js)) if x)
+            return Geo(jibun_address=jibun, dong_name=dong_name, postal_code=f"{postal:05d}")
+        return None
+
     def search_names(self, kind, key, scope=None, limit=200):
         """전국 이름 색인: name_key(들은 이름)와 trigram을 공유하는 이름을 bm25 순으로 -> [(text, 시도, 시군구)].
         scope=[(시도, 시군구)]면 그 지역만. 재순위(소리 거리)는 호출자가 한다.
@@ -273,6 +302,13 @@ class AddressDB(RoadDict):
             args += [x for k in scope for x in k]
         return [address(sido, sg, road, number_of(main, sub), emd, t)
                 for sido, sg, road, main, sub, emd, t in self.conn.execute(sql, args)]
+
+
+def kakao_sido(sido):
+    """카카오 지번주소의 시도 표기: 특별시·광역시·도는 두 글자(서울, 경북), 특별자치시·도와 통합특별시는 정식 명칭."""
+    if "특별자치" in sido or "통합" in sido:
+        return sido
+    return min(sido_aliases(sido), key=len)
 
 
 def number_of(main, sub):
