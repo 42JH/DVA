@@ -623,3 +623,13 @@
 - 테스트 597 passed(+1 `test_uncertain_submit_is_rechecked_while_running`: 예산 안 행 건너뜀 → 전송 중 행 건너뜀 → 재확인 후 DONE·같은 키로 주문 1건). 편집 중 `recover()` 끝의 `recover_reviews()` 호출이 밀려 `test_v1_confirmed_review_is_not_backfilled`가 깨진 것을 잡아 되돌렸다.
 - 범위 밖: 재전송이 나중에 성공해도 그 통화의 분석(registeredParcelCount 등)은 고치지 않는다(기동 복구도 동일). `FAILED`(400·404·422)는 재시도하지 않는다. 포기 조건 없음(`attempts` 누적).
 - 문서: error-recovery.md 통화 결과 행 갱신.
+
+## 2026-11-05 주소 저장 질문을 접수 확인과 나누고, 보내는 곳·받는 곳 동의를 따로(사용자 결정)
+- 문제: "이대로 접수할까요? 받는 곳 주소도 주소록에 저장해 드릴까요?"를 한 번에 물어, 저장에 대한 "아니요"가 접수 확인 no로 읽혀 확인 대기가 풀리거나, "네" 한마디면 저장 동의가 비어 저장되지 않음. sender·receiver를 yes/no 하나로 받아 "받는 곳만"도 기본 출발지까지 바뀜(BE는 PATCH 고객 주소·POST PIN으로 원래 따로)
+- 흐름: 되읽기 도구 결과에 address_save를 넣지 않고(record.py, 제안은 상태에만) → 택배를 담은 N2에 address_save(아직 답 없는 항목) → Live가 저장만 따로 묻고 → 답 뒤 더 보낼 택배
+- 상태: address_consent bool → 항목별 dict(state.py). _save_pending(live.py) = 담은 택배의 제안 중 답 없는 항목(담기 전에는 없음 → 되읽기 중 저장 판정 안 함)
+- Decision: save 질문을 save_sender·save_receiver로 나누고 제안한 항목만 보냄(render.decision_questions save=항목). 저장 답을 기다리는 동안 more(더 없음)를 빼 저장 "아니요"가 더 없음 → 즉시 결과 전송으로 이어지지 않게 함
+- 저장(_maybe_save_addresses): 답한 항목만 처리 — 동의한 항목만 save_addresses로(백그라운드), 거절 항목은 버림, 답 없는 항목은 남았다가 통화가 끝나면 저장하지 않음(다시 묻지 않음)
+- 지시문: business_rules.md·workflow.toml(parcel_added·address_save·save 질문 2개) — sender는 기본 출발지를 바꾼다는 뜻을 명시, 고정 문구 없음
+- 테스트 599 passed(기준 598, 새 테스트 2·기존 1 교체: 항목별 저장·거절·남김, 담기 N2에 제안·저장 대기 중 more 없음·apply 항목별 기록, 되읽기 결과에 제안 없음). 기존 끼어들기 테스트의 타이밍 불안정(Windows sleep 오차로 1/6 실패) — 전사 간격 30→10ms, 20회 0실패
+- 남은 한계: 한 발화에 저장 답과 "더 없어요"를 같이 하면 더 없음은 판정하지 않아 한 번 더 물음. 주소록에서 고른 받는 곳을 고친 경우 기존 PIN 수정 없음(shortcut 그대로). 실통화 미확인
