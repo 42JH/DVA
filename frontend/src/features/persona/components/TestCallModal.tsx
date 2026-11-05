@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { Button, FormModal, Tag } from '@/shared/ui'
+import { Button, Dialog, Tag } from '@/shared/ui'
 import { useTestCall, type TestCallTarget } from '@/features/persona/hooks/useTestCall'
 
 // 07 시험 통화 창 (와이어프레임 07_페르소나관리_시험통화, 10/31)
-// '시험 통화' + 빨간 '통화 중' · 통화 시간 → 설명 줄 → 대화 줄(AI 남색 / 나 회색 · 말 · 시각) → 🎙 듣는 중 → [통화 끝내기]
+// '시험 통화' + 빨간 '통화 중' · 통화 시간 → 설명 줄 → 대화 줄(AI 파랑 / 나 회색 · 말 · 시각) → 🎙 듣는 중 → [통화 끝내기]
+// 11/05 새 디자인: 새 창(Dialog) · 남색 → 파랑 · [통화 끝내기] big 빨강 오른쪽
 // 닫기(✕ · Esc)도 통화를 끝냄 — 몰래 계속되는 통화가 없게
 export function TestCallModal({
   target,
@@ -20,9 +21,10 @@ export function TestCallModal({
   }, [vm.lines.length])
 
   return (
-    <FormModal
+    <Dialog
+      label="시험 통화"
       title="시험 통화"
-      titleExtra={
+      extra={
         <>
           <Tag kind="red">통화 중</Tag>
           <span className="ml-4 text-strong font-bold tabular-nums" aria-label="통화 시간">
@@ -30,11 +32,11 @@ export function TestCallModal({
           </span>
         </>
       }
-      description={vm.subtitle}
+      sub={vm.subtitle}
       width={720}
       onClose={vm.end}
       footer={
-        <Button kind="danger" onClick={vm.end}>
+        <Button big kind="danger" className="ml-auto" onClick={vm.end}>
           통화 끝내기
         </Button>
       }
@@ -45,7 +47,7 @@ export function TestCallModal({
             key={l.key}
             className="grid min-h-[46px] grid-cols-[56px_1fr_auto] items-center gap-x-2"
           >
-            <span className={`text-caption font-bold ${l.isAi ? 'text-action' : 'text-sub'}`}>
+            <span className={`text-caption font-bold ${l.isAi ? 'text-brand' : 'text-sub'}`}>
               {l.who}
             </span>
             <span className="text-body">{l.text}</span>
@@ -53,10 +55,10 @@ export function TestCallModal({
           </li>
         ))}
         <li className="flex min-h-[46px] items-center gap-3">
-          <span className="grid size-8 place-items-center rounded-full bg-action-soft">
+          <span className="grid size-8 place-items-center rounded-full bg-brand/10">
             <svg
               viewBox="0 0 20 20"
-              className="size-4 stroke-action"
+              className="size-4 stroke-brand"
               fill="none"
               strokeWidth={1.6}
               strokeLinecap="round"
@@ -66,10 +68,10 @@ export function TestCallModal({
               <path d="M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5" />
             </svg>
           </span>
-          <span className="text-label font-bold text-action">듣는 중</span>
+          <span className="text-label font-bold text-brand">듣는 중</span>
         </li>
       </ol>
       <div ref={bottom} />
-    </FormModal>
+    </Dialog>
   )
 }

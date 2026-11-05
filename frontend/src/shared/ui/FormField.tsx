@@ -55,7 +55,10 @@ function Wrap({
     )
   return (
     <label className="flex flex-col gap-2">
-      <span className="text-label font-semibold text-sub">{label}</span>
+      {/* 새 디자인 창 안이면 왼쪽 라벨(inline)과 같은 글자 16 · 보통 굵기 (11/05 07 페르소나 추가) */}
+      <span className={fresh ? 'text-body text-sub' : 'text-label font-semibold text-sub'}>
+        {label}
+      </span>
       {children}
       {note}
     </label>
@@ -134,12 +137,13 @@ export function TextArea({
   className = '',
   ...rest
 }: TextareaHTMLAttributes<HTMLTextAreaElement> & { label: string; error?: string; hint?: string }) {
+  const fresh = useContext(NewLook) // 새 디자인 창 안이면 TextField와 같은 선 · 포커스 색 (11/05 07 페르소나 추가)
   return (
     <Wrap label={label} error={error} hint={hint}>
       <textarea
         {...rest}
         aria-invalid={!!error}
-        className={`${BOX} min-h-[180px] resize-y bg-surface py-2.5 ${STATE(error)} ${className}`}
+        className={`${BOX} min-h-[180px] resize-y bg-surface py-2.5 ${STATE(error, fresh)} ${className}`}
       />
     </Wrap>
   )
