@@ -17,7 +17,8 @@ from app.tools import function_specs
 
 @pytest.mark.parametrize("args, accepted", [
     ({"item_price": 0}, False), ({"item_price": 1}, True),
-    ({"item_price": 99_999_999}, True), ({"item_price": 100_000_000}, False),
+    ({"item_price": 99_999_999}, True), ({"item_price": 100_000_000}, True),
+    ({"item_price": 100_000_001}, False),
     ({"item_price": 200_000_000}, False),
     ({"document_count": 100}, True), ({"document_count": 101}, False),
     ({"small_box_count": 10}, True), ({"big_box_count": 11}, False),
@@ -47,7 +48,7 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
     # 기존 숫자를 다른 값으로 바꿔도 코드에 남은 예전 상한·캐시를 쓰지 않아야 한다.
     text = (ROOT / "policy/workflow.toml").read_text(encoding="utf-8")
     replacements = {"item_price_min = 1": "item_price_min = 2",
-                    "item_price_max = 99_999_999": "item_price_max = 123_456",
+                    "item_price_max = 100_000_000": "item_price_max = 123_456",
                     "box_total_max = 10": "box_total_max = 7", "document_max = 100": "document_max = 80",
                     "min_lead_minutes = 60": "min_lead_minutes = 90",
                     "max_days_ahead = 3": "max_days_ahead = 2",
@@ -63,7 +64,7 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
         assert "최대 7개" in rendered and "최대 80개" in rendered
         assert "90분 이후" in rendered and "2일(48시간)" in rendered
         assert "정확히 12자리" in rendered
-        assert "99,999,999" not in rendered and "{pickup_allowed}" not in rendered
+        assert "100,000,000" not in rendered and "{pickup_allowed}" not in rendered
 
     svc = service()
     svc.d.policy = p
@@ -94,7 +95,9 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
     # 다른 정책의 스키마가 기본 정책으로 새지 않아야 한다.
     default_spec = next(t for t in function_specs() if t["name"] == "record_fields")
     default_price = default_spec["parameters"]["properties"]["item_price"]["anyOf"][0]
-    assert default_price["maximum"] == 99_999_999
+    assert default_price["maximum"] == 100_000_000
+    for rendered in (render_live("test", load_policy()), render_backend(load_policy())):
+        assert "1원~100,000,000원(양 끝 포함)" in rendered
 
 
 @pytest.mark.parametrize("lead, code", [(timedelta(minutes=59, seconds=59), "PICKUP_TOO_SOON"),
@@ -115,7 +118,7 @@ def test_default_pickup_never_rounds_below_minimum(hour, second, microsecond):
 
 
 @pytest.mark.parametrize("section, change", [
-    ("input_limits", {"item_price_min": 100_000_000}),
+    ("input_limits", {"item_price_min": 100_000_001}),
     ("input_limits", {"box_total_max": 0}),
     ("pickup", {"open": "18:00"}), ("pickup", {"close": "25:00"}),
     ("pickup", {"min_lead_minutes": 5000}),
