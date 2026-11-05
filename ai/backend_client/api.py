@@ -283,6 +283,16 @@ class BackendAPI:
             raise _fail("/api/customers", resp)
         return _data(resp)["customerSeq"]
 
+    async def customer_detail(self, customer_seq: int) -> dict | None:
+        """고객 상세(GET /api/customers/{id}, B/customers.md). data = Customer. 없거나 탈퇴(404)면 None.
+        지금 통화 흐름은 부르지 않는다(서비스 인증 대상이라 계약만 맞춰 둠)."""
+        resp = await self.http.get(f"/api/customers/{int(customer_seq)}", headers=self._business_headers())
+        if resp.status_code == 404:
+            return None
+        if resp.status_code != 200:
+            raise _fail("/api/customers/{id}", resp)
+        return _data(resp)
+
     async def update_customer_address(self, customer_seq: int, call_session_seq: int, address: dict) -> None:
         """고객 기본 주소 교체(PATCH /api/customers/{id} address). 진행 중 본인 통화의 call_session_seq 헤더 필수
         (ai-call-follow-up.md: 누락 400·다른 고객 403·없는 통화 404·종료된 통화 409). 성공 204. 고객 동의 후에만 부른다."""

@@ -722,6 +722,6 @@
 ## 2026-11-05 — 고객·기업 검색 API 서비스 토큰(AI_BUSINESS_TOKEN)
 
 - BE 요청: POST /api/customers/context, POST /api/customers, PATCH /api/customers/{id}, GET /api/companies/search에 `Authorization: Bearer <AI_BUSINESS_TOKEN>`. 요청 본문·응답 해석·call_session_seq 헤더는 그대로. 페르소나·분석 API는 기존 토큰 유지, 쿠키는 보내지 않는다.
-- GET /api/customers/{id}는 AI가 호출하지 않아 추가할 호출이 없다(요청 목록에는 있음). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
+- GET /api/customers/{id}는 통화 흐름이 쓰지 않지만 요청 목록에 있어 `customer_detail`(200 data·404 None)을 토큰과 함께 추가(MockBackend도 같은 메서드). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
 - 토큰 미설정이면 헤더 없이 호출하고 시작 시 경고(BE 인증 적용 전 배포 호환). 401은 gateway에서 `BE_AUTH_FAILED`(kind contract, 재시도 없음, 경보 로그)로 분류.
-- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 4개 호출 헤더·미설정·기존 토큰 분리·401 1회. 전체 **646 passed**.
+- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 5개 호출 헤더·상세 404·미설정·기존 토큰 분리·401 1회. 전체 **646 passed**.
