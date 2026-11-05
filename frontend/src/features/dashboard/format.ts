@@ -4,6 +4,9 @@
 export const one = (n: number | null) => (n === null ? '—' : n.toFixed(1))
 /** 0~100 비율 → '12.8%' (null은 '—') */
 export const pctText = (p: number | null) => (p === null ? '—' : `${one(p)}%`)
+/** 소수 두 자리 — 응답 대기 · 단계별 이탈률(카드 · 그래프 보기)만 (11/05 사용자). 나머지 카드는 한 자리 */
+export const two = (n: number | null) => (n === null ? '—' : n.toFixed(2))
+export const pct2 = (p: number | null) => (p === null ? '—' : `${two(p)}%`)
 /** 건수 → '1,800' */
 export const num = (n: number) => n.toLocaleString('ko-KR')
 

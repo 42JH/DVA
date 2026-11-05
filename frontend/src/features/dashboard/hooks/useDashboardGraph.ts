@@ -7,7 +7,7 @@ import {
   type Stage,
   type StageDropoffs,
 } from '@/features/dashboard/api/dashboardApi'
-import { num, one, pctText } from '@/features/dashboard/format'
+import { num, pct2, two } from '@/features/dashboard/format'
 import { PROCESS_LABEL, STAGE_LABEL } from '@/features/dashboard/labels'
 
 // 02 대시보드 '그래프 보기' (Figma '통계 · 응답 대기에 쓰인 통화시간' · '통계 · 단계별 이탈률' 11/05)
@@ -30,10 +30,10 @@ function waitSeries(d: ResponseWait): Series {
     return p ? perCall(p.totalLatencyMs) : null
   })
   return {
-    headline: one(perCall(d.totalWaitMs)),
-    sub: `전체 통화시간의 ${pctText(d.waitRatePercent)} · ${num(d.measuredCallCount)}통화`,
+    headline: two(perCall(d.totalWaitMs)),
+    sub: `전체 통화시간의 ${pct2(d.waitRatePercent)} · ${num(d.measuredCallCount)}통화`,
     values,
-    labels: values.map(one),
+    labels: values.map(two),
   }
 }
 
@@ -43,10 +43,10 @@ function dropSeries(d: StageDropoffs): Series {
     (k) => d.stages.find((s) => s.stage === k)?.dropoffRatePercent ?? null,
   )
   return {
-    headline: one(d.dropoffRatePercent),
+    headline: two(d.dropoffRatePercent),
     sub: `판정 ${num(d.assessedCallCount)}통화 중 고객 이탈 ${num(d.dropoffCallCount)}통화`,
     values,
-    labels: values.map(pctText),
+    labels: values.map(pct2),
   }
 }
 

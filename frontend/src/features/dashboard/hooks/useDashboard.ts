@@ -8,10 +8,20 @@ import {
   type StageDropoffs,
   type VersionTime,
 } from '@/features/dashboard/api/dashboardApi'
-import { hoursMinutes, maxIndex, num, one, pctText, versionGap } from '@/features/dashboard/format'
+import {
+  hoursMinutes,
+  maxIndex,
+  num,
+  one,
+  pct2,
+  pctText,
+  two,
+  versionGap,
+} from '@/features/dashboard/format'
 import { COMPLAINT, PROCESS_LABEL, STAGE_LABEL } from '@/features/dashboard/labels'
 
 const sec = (s: number | null) => (s === null ? '—' : `${one(s)}초`)
+const sec2 = (s: number | null) => (s === null ? '—' : `${two(s)}초`) // 응답 대기 표
 
 /** 02 대시보드 'AI 상담 성능' 훅 — 카드 네 장 = 네 요청을 동시에. 고객 탭이 없어 늘 전체(customerType=ALL, 11/05 디자인)
  *  신규 · 기존 비교는 '그래프 보기' 화면(useDashboardGraph) */
@@ -47,13 +57,13 @@ export interface CardState<V> {
 function dropOffView(d: StageDropoffs) {
   const hot = maxIndex(d.stages.map((s) => s.callCount))
   return {
-    value: one(d.dropoffRatePercent),
+    value: two(d.dropoffRatePercent),
     note:
       `판정 ${num(d.assessedCallCount)}건 중 고객 이탈 ${num(d.dropoffCallCount)}건` +
       (d.unassessedCallCount ? ` · 미판정 ${num(d.unassessedCallCount)}건 제외` : ''),
     rows: d.stages.map((s, i) => ({
       key: s.stage,
-      cells: [STAGE_LABEL[s.stage], `${num(s.callCount)}건`, pctText(s.dropoffRatePercent)],
+      cells: [STAGE_LABEL[s.stage], `${num(s.callCount)}건`, pct2(s.dropoffRatePercent)],
       hot: i === hot,
     })),
   }
@@ -117,14 +127,14 @@ function complaintView(d: ComplaintCalls) {
 function waitView(d: ResponseWait) {
   const hot = maxIndex(d.processes.map((p) => p.averageLatencyMs ?? 0))
   return {
-    value: one(d.waitRatePercent),
+    value: two(d.waitRatePercent),
     note: `총 대기 ${hoursMinutes(d.totalWaitMs / 1000)} · 전체 통화 ${hoursMinutes(d.totalCallDurationMs / 1000)}`,
     rows: d.processes.map((p, i) => ({
       key: p.processType,
       cells: [
         PROCESS_LABEL[p.processType],
         `${num(p.measurementCount)}회`,
-        sec(p.averageLatencyMs === null ? null : p.averageLatencyMs / 1000),
+        sec2(p.averageLatencyMs === null ? null : p.averageLatencyMs / 1000),
       ],
       hot: i === hot,
     })),
