@@ -61,6 +61,9 @@ class AddressService:
         else:
             with span("address", step="correct"):
                 r = await asyncio.get_running_loop().run_in_executor(self.pool, matcher.resolve, self.db, heard)
+            if (r.status == "not_found" or r.weak) and kakao.has_key():
+                with span("address", step="witness"):
+                    r = await self._witness(heard, r)
             if r.status in ("not_found", "region_needed"):
                 return AddressResult(r.status, None, r.candidates, None)
             cands = list(r.candidates) or [r.address]
@@ -69,3 +72,15 @@ class AddressService:
             async with self.kakao_sem:
                 geo = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
         return AddressResult(status, address, alternatives, geo)
+
+    async def _witness(self, heard: str, local: matcher.Resolution) -> matcher.Resolution:
+        """두 번째 근거: 로컬이 못 찾았거나 약하면(지역 없는 건물명 확정·소리를 고친 되묻기) 카카오 키워드·주소(similar) 검색을
+        병렬로 부르고, 결과 주소를 주소DB로 검증해 다시 판정한다(matcher.with_witness). 실패·결과 없음이면 로컬 결과 그대로."""
+        async with self.kakao_sem:
+            places, addresses = await asyncio.gather(
+                kakao.search_places(heard, self.kakao_timeout_sec, http=self.http),
+                kakao.search_addresses(heard, self.kakao_timeout_sec, http=self.http))
+        texts = list(dict.fromkeys(places + addresses))
+        if not texts:
+            return local
+        return await asyncio.get_running_loop().run_in_executor(self.pool, matcher.with_witness, self.db, local, texts, heard)

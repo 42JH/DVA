@@ -710,3 +710,10 @@
 - 지연: 못 찾는 발화가 재시도마다 전국 FTS를 태워 v1 p95 100→525ms로 커짐 → 측정(전체 trigram 70~220ms, 드문 4~6개 12~50ms, 1위 동일) 후 trigram을 드문 것부터 posting 합 5만 이내(최소 4개)만 사용 → v1 warm p50 6.5·p95 181·max 237ms, v2 p50 93·p95 197·max 400ms
 - 결과: v1 106/106·15/15(회귀 0, evaluation/results/address_v1_redesign_s2.json). v2 정답 55 중 48 기록·틀림 1·못 찾음 6, 되묻기 10/10, 없는 주소 6/6(address_v2_redesign_s2.json). 남은 것 — 틀림 p01 "63빌딩"(부가정보에 인천의 동명 건물만 있음: 건물명 단독은 약한 근거라 3단계에서 카카오 키워드로 교차 확인), 못 찾음 p02~p06(상호·약칭, 카카오 몫), b10 "포스코 센타"(지역 없이 소리를 고친 이름은 되묻기 — 설계상)
 - 시험: 전체 통과(+8: 색인·건물명·복합 표기 풀기·옛 스키마 거부·지역 없이 찾기·되묻기·도구 ADDRESS_REGION_NEEDED). 샘플 DB에 올림픽로·두 지역 중앙로·건물명 추가
+
+## 2026-11-06 주소 보정 재설계 3단계 — 카카오를 두 번째 근거로(키워드·similar, 로컬 검증 뒤 채택)
+- app/integrations/kakao.py: 공통 요청(_documents)·has_key, search_places(키워드 장소 검색, 상호·약칭·POI), search_addresses(analyze_type=similar). 결과는 도로명주소 문자열, 상위 3개
+- app/address/matcher.py: Resolution.weak(지역 없이 건물명만으로 확정, 또는 지역 없이 소리를 고친 이름 하나뿐인 되묻기 — 부가정보 "63빌딩"이 인천의 다른 건물인 것처럼 건물명 단독은 약한 근거). verify(카카오 주소를 주소DB로 검증, 이름 소리까지 정확), with_witness(검증된 주소만, 들은 번호가 있으면 같은 번호 + 들은 도로명(길 번호 포함)이 소리로 같은 주소만 — v1 k08 "테헤란로 21"이 "테헤란로87길 21"로 확정되던 문제의 근본 원인 수정 _same_road. 로컬 확정이 1순위, 지역이 엇갈리면 되묻기, 한 지역이면 확정)
+- app/integrations/address.py: 로컬이 not_found이거나 weak이고 키가 있을 때만 카카오 둘을 병렬 호출(세마포어·공유 클라이언트·타임아웃 유지) → with_witness. 여러 지역에 실제로 있어 되묻는 경우(강한 근거)는 카카오가 덮지 못함
+- scripts/evaluate_address.py --kakao(키 필요). 측정(_same_road 수정 전, 재측정 필요): v2 카카오 켬 54/55·틀림 0·되묻기 10/10·없는 주소 6/6, p01 "63빌딩"은 인천·영등포 두 지역 되묻기로 안전하게 전환(address_v2_redesign_s3.json). v1 카카오 켬 106/106, 없는 주소 14/15 — k08이 번호만 같은 다른 길로 확정(address_v1_redesign_s3.json) → _same_road로 고치고 단위 시험 추가, 전체 650 passed
+- 남은 것: _same_road 반영 후 v1·v2 --kakao 재측정, 지연(p95) 재확인, 4단계(Geo 로컬화) 미착수, push 미실행

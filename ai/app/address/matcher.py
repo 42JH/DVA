@@ -21,10 +21,12 @@ from app.address.phonetic import Name, distance, num_distance, read_digits, road
 @dataclass(frozen=True)
 class Resolution:
     """보정 결과. address는 confirmed일 때만. candidates는 confirmed면 [확정 주소], ambiguous면 가까운 순 최대 3개,
-    region_needed면 그 주소가 있는 지역 이름("서울특별시 양천구") 최대 3개."""
+    region_needed면 그 주소가 있는 지역 이름("서울특별시 양천구") 최대 3개.
+    weak: 지역 없이 건물명만으로 확정했거나 지역 없이 소리를 고친 이름 하나뿐이라 되묻는 경우 — 두 번째 근거(카카오)로 가릴 수 있다."""
     status: Literal["confirmed", "ambiguous", "region_needed", "not_found"]
     address: str | None
     candidates: tuple[str, ...]
+    weak: bool = False
 
 
 NOT_FOUND = Resolution("not_found", None, ())
@@ -379,22 +381,70 @@ def _correct(db, text) -> Resolution:
             if d < scored.get(addr, (99,))[0]:
                 scored[addr] = (d, key)
     national = wide_scope(db, parse(text)[0][0])[0] is None  # 시도도 동도 말하지 않음
-    return judge(scored or building_candidates(db, text), exact_only=national)
+    if scored:
+        return judge(scored, exact_only=national)
+    # 건물명은 건축물대장 이름이라 사람들이 부르는 장소명과 다를 수 있다(부가정보의 "63빌딩"은 인천의 다른 건물) — 지역 없이 건물명만으로
+    # 확정한 결과는 weak: 두 번째 근거로 가린다
+    return judge(building_candidates(db, text), exact_only=national, weak_confirm=national)
 
 
-def judge(scored: dict, exact_only=False) -> Resolution:
+def judge(scored: dict, exact_only=False, weak_confirm=False) -> Resolution:
     """1등과 MARGIN 안의 후보들로 판정: 지역이 둘 이상이면 되묻기, 하나뿐이고 가까우면 확정, 아니면 애매함.
     exact_only(지역을 전혀 안 말함): 전국엔 비슷한 소리의 이름이 늘 있어서, 소리까지 정확히 맞는 이름(거리 < 1)만 확정하고
-    아니면 그 후보 지역을 되묻는다("없는로 12"가 멀리 있는 비슷한 도로로 확정되지 않게)."""
+    아니면 그 후보 지역을 되묻는다("없는로 12"가 멀리 있는 비슷한 도로로 확정되지 않게) — 이 되묻기는 weak."""
     ranked = sorted(scored.items(), key=lambda x: x[1][0])
     if not ranked:
         return NOT_FOUND
     best = ranked[0][1][0]
     close = [(addr, region) for addr, (d, region) in ranked if d - best < MARGIN]
     regions = tuple(dict.fromkeys(" ".join(r).strip() for _, r in close))
-    if len(regions) > 1 or (exact_only and best >= 1):  # 다른 시군구를 자동으로 고르면 오배송 — 지역을 묻는다(사용자 결정 2026-11-05)
+    if len(regions) > 1:  # 다른 시군구를 자동으로 고르면 오배송 — 지역을 묻는다(사용자 결정 2026-11-05)
         return Resolution("region_needed", None, regions[:3])
+    if exact_only and best >= 1:
+        return Resolution("region_needed", None, regions, weak=True)
     addresses = tuple(addr for addr, _ in close)[:3]
     if len(addresses) == 1 and best <= CONFIRM_MAX:
-        return Resolution("confirmed", addresses[0], addresses)
+        return Resolution("confirmed", addresses[0], addresses, weak=weak_confirm)
     return Resolution("ambiguous", None, addresses)
+
+
+# --- 두 번째 근거(카카오 검색 결과)로 가리기 ---------------------------------------------------------
+def verify(db, text):
+    """밖(카카오)에서 온 주소 문자열이 주소DB에 실제로 있는지 -> (표준 주소, (시도, 시군구)) 또는 None. 이름은 소리까지 정확히."""
+    for sido, sg, road, number, d in candidates(db, text, top=3):
+        if d < 1 and (addr := db.lookup(sido, sg, road, number)):
+            return addr, (sido, sg)
+    return None
+
+
+def _same_road(db, tokens, branch, address):
+    """번호를 말한 발화는 들은 도로명(길 번호 포함)과 카카오 주소의 도로명이 소리로 같아야 한다 — 번호만 같은 다른 길
+    ("테헤란로 21" ← "테헤란로87길 21")을 받지 않게."""
+    road = address.split()[-2]
+    db.add_parts({road})
+    base, road_branch = db.parts[road]
+    if branch_penalty(branch, road_branch) != 0:
+        return False
+    return any(min(distance(Name(t), base) for t in road_readings("".join(tokens[-k:]))) < 1
+               for k in (1, 2) if len(tokens) >= k)
+
+
+def with_witness(db, local: Resolution, texts: list[str], heard: str) -> Resolution:
+    """로컬이 못 찾았거나 약할 때(weak) 카카오가 돌려준 도로명주소들로 다시 판정. 주소DB로 검증한 것만 쓰고, 들은 건물번호가
+    있으면 같은 번호만 받는다(번호를 고쳐 맞추지 않는 규칙). 로컬 확정이 있으면 그것이 1순위이고 카카오가 다른 지역을 가리키면
+    되묻는다. 지역이 엇갈리면 되묻고, 한 지역이면 1순위로 확정. 검증된 게 없으면 로컬 결과 그대로."""
+    tokens, branch, number = parse(heard)[0]
+    found = {}
+    if local.status == "confirmed" and (v := verify(db, local.address)):
+        found[local.address] = v[1]
+    for text in texts:
+        v = verify(db, text)
+        if v and (not number or (v[0].endswith(" " + number) and _same_road(db, tokens, branch, v[0]))):
+            found.setdefault(v[0], v[1])
+    if not found:
+        return local
+    regions = tuple(dict.fromkeys(" ".join(r).strip() for r in found.values()))
+    if len(regions) > 1:
+        return Resolution("region_needed", None, regions[:3])
+    first = next(iter(found))
+    return Resolution("confirmed", first, (first,))

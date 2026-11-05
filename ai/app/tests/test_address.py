@@ -360,3 +360,75 @@ def test_building_name_resolves_to_its_road_address(db):
     assert resolve(db, "포스코 센타").status == "region_needed"  # 지역 없이 고친 이름은 되묻는다
     assert ok("없는빌딩타워") == ("not_found", None)
     assert ok("롯데월드타워 300") == ("not_found", None)  # 번호가 붙으면 건물명 경로가 아니다
+
+
+# --- 두 번째 근거: 카카오 키워드·similar 검색 결과를 주소DB로 검증해 채택(3단계, 2026-11-06) ---
+
+def test_kakao_search_returns_top_road_addresses(monkeypatch):
+    monkeypatch.setenv("KAKAO_REST_API_KEY", "k")
+    docs = [{"place_name": "국회의사당", "road_address_name": "서울 영등포구 의사당대로 1"}, {"place_name": "x", "road_address_name": ""}]
+    transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": docs}))
+    assert run(kakao.search_places("국회의사당", 3.0, transport)) == ["서울 영등포구 의사당대로 1"]
+    assert seen[0].url.path.endswith("keyword.json") and seen[0].url.params["query"] == "국회의사당"
+    docs = [{"road_address": {"address_name": "서울 강남구 테헤란로 212"}}, {"road_address": None}]
+    transport, seen = kakao_api(lambda req: httpx2.Response(200, json={"documents": docs}))
+    assert run(kakao.search_addresses("테헤란로 212 무슨빌딩", 3.0, transport)) == ["서울 강남구 테헤란로 212"]
+    assert seen[0].url.params["analyze_type"] == "similar"
+    transport, _ = kakao_api(lambda req: httpx2.Response(500, json={}))
+    assert run(kakao.search_places("x", 3.0, transport)) == [] and run(kakao.search_addresses("x", 3.0, transport)) == []
+
+
+def witness(monkeypatch, places=(), addresses=()):
+    """카카오 검색을 가짜로: 불렸는지(seen)와 결과를 정한다."""
+    seen = []
+
+    async def fake_places(q, *a, **k):
+        seen.append(("places", q))
+        return list(places)
+
+    async def fake_addresses(q, *a, **k):
+        seen.append(("addresses", q))
+        return list(addresses)
+
+    monkeypatch.setenv("KAKAO_REST_API_KEY", "k")
+    monkeypatch.setattr(kakao, "search_places", fake_places)
+    monkeypatch.setattr(kakao, "search_addresses", fake_addresses)
+    return seen
+
+
+def test_witness_fills_in_only_verified_addresses(db_path, fake_kakao, monkeypatch):
+    svc = AddressService(open_db(db_path))
+    seen = witness(monkeypatch, places=["서울 강남구 없는로 1", "서울 강남구 테헤란로 212", "서울 강남구 테헤란로 211"])
+    r = run(svc.resolve("무슨빌딩"))  # 로컬에 없는 상호 → 검증되는 카카오 1순위
+    assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212") and len(seen) == 2
+    witness(monkeypatch, addresses=["서울 강남구 테헤란로 212"])
+    assert run(svc.resolve("테헤란로 210")).status == "not_found"  # 들은 번호와 다른 주소는 받지 않는다
+    witness(monkeypatch, addresses=["서울 강남구 테헤란로1길 10"])
+    assert run(svc.resolve("테헤란로 10")).status == "not_found"  # 번호만 같고 길이 다른 주소도 받지 않는다(v1 k08)
+    witness(monkeypatch, addresses=["서울 강남구 테헤란로1길 10"])
+    assert run(svc.resolve("테헤란로 일길 10 무슨빌딩")).address == "서울특별시 강남구 테헤란로1길 10"
+    witness(monkeypatch, places=["경기 성남시 분당구 판교역로 166"], addresses=["서울 강남구 테헤란로 212"])
+    assert run(svc.resolve("어딘가")).status == "region_needed"  # 카카오 결과끼리 지역이 엇갈리면 되묻는다
+
+
+def test_witness_checks_weak_local_results(db_path, fake_kakao, monkeypatch):
+    """지역 없이 건물명만으로 확정한 결과는 카카오가 다른 지역을 가리키면 되묻고, 같은 지역이면 그대로. 소리를 고친 되묻기는 카카오가 확정할 수 있다."""
+    svc = AddressService(open_db(db_path))
+    witness(monkeypatch, places=["경기 성남시 분당구 판교역로 166"])
+    r = run(svc.resolve("포스코센터"))
+    assert r.status == "region_needed" and r.alternatives == ("서울특별시 강남구", "경기도 성남시 분당구")
+    witness(monkeypatch, places=["서울 강남구 테헤란로 212"])
+    assert run(svc.resolve("포스코센터")).address == "서울특별시 강남구 테헤란로 212"
+    witness(monkeypatch)  # 카카오가 모르는 이름이면 로컬 확정 유지
+    assert run(svc.resolve("포스코센터")).address == "서울특별시 강남구 테헤란로 212"
+    witness(monkeypatch, places=["서울 강남구 테헤란로 212"])
+    assert run(svc.resolve("포스코 센타")).address == "서울특별시 강남구 테헤란로 212"  # 되묻기(weak) → 카카오로 확정
+
+
+def test_witness_is_not_asked_for_strong_results_or_without_key(db_path, fake_kakao, monkeypatch):
+    svc = AddressService(open_db(db_path))
+    seen = witness(monkeypatch, places=["서울 양천구 중앙로 232"])
+    assert run(svc.resolve("중앙로 232")).status == "region_needed" and not seen  # 여러 지역에 실제로 있음: 카카오가 덮지 못한다
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).status == "confirmed" and not seen
+    monkeypatch.delenv("KAKAO_REST_API_KEY")
+    assert run(svc.resolve("무슨빌딩")).status == "not_found" and not seen
