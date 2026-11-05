@@ -6,6 +6,8 @@ export interface Environment {
   DB_USER: string;
   DB_PASSWORD: string;
   DB_NAME: string;
+  AI_AGENT_URL?: string;
+  AI_PERSONA_TOKEN?: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   CUSTOMER_AUTH_TOKEN?: string;
@@ -63,6 +65,32 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   }
   const swagger = raw.SWAGGER_ENABLED ?? 'true';
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
+  const aiUrl = raw.AI_AGENT_URL;
+  if (aiUrl !== undefined) {
+    try {
+      if (typeof aiUrl !== 'string') throw new Error();
+      const url = new URL(aiUrl);
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        errors.push('AI_AGENT_URL');
+    } catch {
+      errors.push('AI_AGENT_URL');
+    }
+  }
+  const personaToken = raw.AI_PERSONA_TOKEN;
+  if (
+    personaToken !== undefined &&
+    personaToken !== '' &&
+    (typeof personaToken !== 'string' ||
+      personaToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(personaToken))
+  )
+    errors.push('AI_PERSONA_TOKEN');
   const config: Environment = {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3005),
@@ -71,6 +99,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_USER: required('DB_USER'),
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
+    AI_AGENT_URL: typeof aiUrl === 'string' ? aiUrl.replace(/\/$/, '') : undefined,
+    AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
     CUSTOMER_AUTH_TOKEN:
