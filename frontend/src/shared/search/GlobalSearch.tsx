@@ -41,34 +41,30 @@ export interface SearchProps {
 
 const SEARCH_PLACEHOLDER = '어떤 정보를 찾고 계신가요?'
 
-const TABS: { key: SearchTab; label: string; list: string; placeholder: string; hint: string }[] = [
+const TABS: { key: SearchTab; label: string; list: string; placeholder: string }[] = [
   {
     key: 'call',
     label: '통화',
     list: '/calls',
     placeholder: '고객 이름이나 전화번호를 입력해 주세요',
-    hint: '고객 이름이나 전화번호로 통화를 찾아요.',
   },
   {
     key: 'order',
     label: '주문',
     list: '/orders',
     placeholder: '주문번호나 고객 정보를 입력해 주세요',
-    hint: '주문번호(예: DV-10519)나 보내는 분 · 받는 분의 이름 · 전화번호 · 주소로 주문을 찾아요.',
   },
   {
     key: 'faq',
     label: 'FAQ',
     list: '/faqs',
     placeholder: '찾으시는 FAQ를 검색해 주세요',
-    hint: '질문 · 답변의 낱말로 찾아요. 띄어쓰기는 무시하고, 초성으로도 찾을 수 있어요. (예: ㅅㄱ → 수거)',
   },
   {
     key: 'company',
     label: '기업',
     list: '/companies',
     placeholder: '회사명이나 사원 정보를 입력해 주세요',
-    hint: '기업명(띄어쓰기 무시 · 초성)이나 사원 이름 · 전화번호로 찾아요. 사원은 주소가 등록된 활성 사원만 나와요.',
   },
 ]
 
@@ -509,7 +505,8 @@ function SearchModal({
             ))}
           </ul>
         ) : (
-          <p className="px-6 py-6 text-body break-keep text-sub">{typed ? empty : meta.hint}</p>
+          // 칸이 비고 최근 조회도 없으면 빈 칸 (찾는 법 안내 글은 뺌 — 11/05 사용자)
+          typed && <p className="px-6 py-6 text-body break-keep text-sub">{empty}</p>
         )}
       </div>
 
