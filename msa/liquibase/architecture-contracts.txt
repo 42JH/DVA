@@ -1,5 +1,9 @@
 아키텍처 보완 계약 (2026-10-21)
 
+2026-11-05 주의: 아래는 초기 설계 기록이다. 최신 구현 기준은 docs/msa-parity-plan.md와
+develop-backend의 backend 코드다. 결제·재시도·삭제·보관 등 현재 모놀리식과 다른 정책은
+그대로 이식하지 않는다. 새 이벤트 공통 기반은 msa/shared/events/README.md를 따른다.
+
 1. 서비스 경계
 고객: customers, organizations, memberships, personal_pins, company_pins (5)
 주문: orders, order_parcels (2)
