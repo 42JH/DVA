@@ -429,7 +429,7 @@ test('department membership scopes monthly and group eligibility and only admins
     (
       await request(
         '/customers',
-        { name: '임의 자격 상승', phoneNumber: phone + '1', monthlyBillingEnabled: true },
+        { name: '임의 자격 상승', phoneNumber: '01000138003', monthlyBillingEnabled: true },
         true,
       )
     ).status,

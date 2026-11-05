@@ -314,7 +314,7 @@ test('list supports literal name search, exact phone, state and stable offset pa
   assert.equal(second.hasNext, false);
   assert.equal((await list({ q: prefix.toUpperCase() + 'ALPHA%_' })).data[0].customerSeq, ids[0]);
   assert.equal((await list({ phoneNumber: inputs[0].phoneNumber })).data[0].customerSeq, ids[0]);
-  assert.deepEqual((await list({ phoneNumber: inputs[0].phoneNumber.slice(1) })).data, []);
+  assert.deepEqual((await list({ phoneNumber: phone() })).data, []);
   assert.deepEqual(
     (await list({ q: prefix, status: 'WITHDRAWN' })).data.map((row) => row.customerSeq),
     [ids[1]],
@@ -331,6 +331,7 @@ test('list supports literal name search, exact phone, state and stable offset pa
     'offset=1.5',
     'q=a&q=b',
     'phoneNumber=010-1234',
+    'phoneNumber=' + inputs[0].phoneNumber.slice(1),
     'status=INACTIVE',
     'page=1',
   ])

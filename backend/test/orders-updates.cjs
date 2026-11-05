@@ -54,7 +54,7 @@ module.exports = function registerOrdersUpdates(suite) {
             documentCount: 0,
           },
           {
-            destination: { name: '새 상세', phoneNumber: '0012345' },
+            destination: { name: '새 상세', phoneNumber: '01000012345' },
             smallBoxCount: 1,
             itemPrice: Number.MAX_SAFE_INTEGER,
           },
@@ -82,7 +82,7 @@ module.exports = function registerOrdersUpdates(suite) {
     assert.deepEqual(after.parcels[1], before.parcels[1]);
     const added = after.parcels[2];
     assert.equal(added.parcelPosition, 6);
-    assert.equal(added.destination.phoneNumber, '0012345');
+    assert.equal(added.destination.phoneNumber, '01000012345');
     assert.equal(added.origin.name, null);
     assert.equal(added.originPin, null);
     assert.equal(added.documentCount, 0);

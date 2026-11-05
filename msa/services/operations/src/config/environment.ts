@@ -9,6 +9,7 @@ export interface Environment {
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   CUSTOMER_AUTH_TOKEN?: string;
+  CONSULTATION_AUTH_TOKEN?: string;
   CUSTOMER_URL?: string;
 }
 
@@ -74,6 +75,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CUSTOMER_AUTH_TOKEN:
       typeof raw.CUSTOMER_AUTH_TOKEN === 'string' ? raw.CUSTOMER_AUTH_TOKEN : undefined,
     CUSTOMER_URL: typeof raw.CUSTOMER_URL === 'string' ? raw.CUSTOMER_URL : undefined,
+    CONSULTATION_AUTH_TOKEN:
+      typeof raw.CONSULTATION_AUTH_TOKEN === 'string' ? raw.CONSULTATION_AUTH_TOKEN : undefined,
   };
   if (
     raw.CUSTOMER_AUTH_TOKEN !== undefined &&
@@ -91,6 +94,12 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       errors.push('CUSTOMER_URL');
     }
   }
+  if (
+    raw.CONSULTATION_AUTH_TOKEN !== undefined &&
+    (typeof raw.CONSULTATION_AUTH_TOKEN !== 'string' ||
+      !/^[\x21-\x7e]{32,256}$/.test(raw.CONSULTATION_AUTH_TOKEN))
+  )
+    errors.push('CONSULTATION_AUTH_TOKEN');
   if (errors.length) throw new EnvironmentValidationError(errors);
   return config;
 }

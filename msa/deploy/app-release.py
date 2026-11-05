@@ -129,31 +129,35 @@ def rollout(service):
     kube("-n", "dva", "rollout", "status", f"deployment/{service}", "--timeout=240s")
 
 
-def ensure_customer_auth_secret():
-    name = 'msa-customer-auth'
+def ensure_service_auth_secret(service):
+    if service not in ('customer', 'consultation'):
+        raise ValueError('Unsupported service authentication secret')
+    name = f'msa-{service}-auth'
+    key = f'{service}-token'
     try:
         existing = kube('-n', 'dva', 'get', 'secret', name, '--ignore-not-found', '-o', 'json')
         if existing.strip():
             value = json.loads(existing)
-            token = base64.b64decode(value['data']['customer-token'], validate=True).decode('ascii')
+            token = base64.b64decode(value['data'][key], validate=True).decode('ascii')
             if value['metadata']['name'] != name or value['metadata']['namespace'] != 'dva' or not re.fullmatch(r'[\x21-\x7e]{32,256}', token):
                 raise ValueError('Invalid existing service authentication secret')
             return
         kube('create', '-f', '-', data=json.dumps({
             'apiVersion': 'v1', 'kind': 'Secret', 'type': 'Opaque',
             'metadata': {'name': name, 'namespace': 'dva'},
-            'stringData': {'customer-token': secrets.token_urlsafe(48)},
+            'stringData': {key: secrets.token_urlsafe(48)},
         }))
     except Exception:
-        raise RuntimeError('Customer authentication secret is unavailable; existing values were not replaced') from None
+        raise RuntimeError(f'{service.capitalize()} authentication secret is unavailable; existing values were not replaced') from None
 
 
 def apply_release(service, release, image):
     desired = parse_resources(kube("apply", "--dry-run=server", "-f", "k8s.yaml", "-o", "json"))
     validate_resources(desired, service, image)
     container = next(r for r in desired if r['kind'] == 'Deployment')['spec']['template']['spec']['containers'][0]
-    if any(e.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == 'msa-customer-auth' for e in container.get('env', [])):
-        ensure_customer_auth_secret()
+    for peer in ('customer', 'consultation'):
+        if any(e.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == f'msa-{peer}-auth' for e in container.get('env', [])):
+            ensure_service_auth_secret(peer)
     previous = []
     for resource in desired:
         value = kube("-n", "dva", "get", KINDS[resource["kind"]], service, "--ignore-not-found", "-o", "json")

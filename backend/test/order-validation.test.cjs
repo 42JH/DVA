@@ -59,6 +59,24 @@ const complete = () =>
       },
     ],
   });
+test('final submission checks stored origin and destination phones for eleven digits', () => {
+  for (const side of ['origin', 'destination'])
+    for (const phoneNumber of ['021234567', '0101234567', '010123456789', '01012345678\n']) {
+      const draft = complete();
+      draft.parcels[0][side].phoneNumber = phoneNumber;
+      assert.throws(
+        () => assertOrderSubmissionReady(draft, now),
+        (error) =>
+          error.getStatus() === 422 &&
+          error
+            .getResponse()
+            .details.some((detail) => detail.field === `parcels.0.${side}.phoneNumber`),
+        side + ': ' + JSON.stringify(phoneNumber),
+      );
+    }
+  assert.doesNotThrow(() => assertOrderSubmissionReady(complete(), now));
+});
+
 test('an unspecified payment method stays undecided until final submission', () => {
   const draft = complete();
   const undecided = orderDraft({ customerSeq: 31, parcels: [] });
@@ -152,7 +170,7 @@ test('final validation rejects expired pickup, invalid address, quantities and p
       for (const reason of [
         'unsupported',
         'mustBeFuture',
-        'digitsOnly',
+        'mobilePhone',
         'postalCode',
         'quantityRange',
         'priceRange',

@@ -2,7 +2,7 @@ import { Body, Controller, Header, HttpCode, Post } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { IsString, Matches } from 'class-validator';
 import { AuthService } from './auth.service';
-import { InternalCustomerAuth } from './auth.guard';
+import { InternalSessionAuth } from './auth.guard';
 
 class CurrentSessionDto {
   @IsString()
@@ -11,7 +11,7 @@ class CurrentSessionDto {
 }
 
 @ApiExcludeController()
-@InternalCustomerAuth()
+@InternalSessionAuth()
 @Controller('internal/auth')
 export class InternalAuthController {
   constructor(private readonly auth: AuthService) {}
