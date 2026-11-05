@@ -4,6 +4,7 @@
 """
 
 import tomllib
+from datetime import time
 from pathlib import Path
 from typing import Literal
 
@@ -75,10 +76,51 @@ class Forbid(_Strict):
 class Pickup(_Strict):
     """수거 요청 시각 업무 규칙(app/domain/pickup.py). 시각은 "HH:MM"(한국 시간)."""
     min_lead_minutes: int = Field(ge=0)
-    open: str = "09:00"
-    close: str = "17:00"
-    max_days_ahead: int = Field(3, ge=0)
-    next_day_default: str = "09:00"
+    open: str
+    close: str
+    max_days_ahead: int = Field(gt=0)
+    next_day_default: str
+
+    @model_validator(mode="after")
+    def valid_window(self):
+        start, end, default = map(time.fromisoformat, (self.open, self.close, self.next_day_default))
+        if not start <= default <= end:
+            raise ValueError("수거 기본 시각은 영업시간 안이어야 합니다")
+        if self.min_lead_minutes > self.max_days_ahead * 24 * 60:
+            raise ValueError("수거 최소 준비 시간이 최대 범위를 넘습니다")
+        return self
+
+
+class InputLimits(_Strict):
+    item_price_min: int = Field(gt=0)
+    item_price_max: int = Field(gt=0)
+    box_total_max: int = Field(gt=0)
+    document_max: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def valid_price_range(self):
+        if self.item_price_min > self.item_price_max:
+            raise ValueError("물품 가액 최소값이 최대값을 넘습니다")
+        return self
+
+
+class Phone(_Strict):
+    mobile_prefix: str
+    mobile_digits: int = Field(gt=0)
+    domestic_min_digits: int = Field(gt=0)
+    domestic_max_digits: int = Field(gt=0)
+    service_prefixes: tuple[str, ...] = Field(min_length=1)
+    service_digits: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def valid_format(self):
+        if not self.mobile_prefix.startswith("0") or not self.mobile_prefix.isdigit():
+            raise ValueError("휴대전화 접두번호 오류")
+        if len(self.mobile_prefix) > self.mobile_digits or self.domestic_min_digits > self.domestic_max_digits:
+            raise ValueError("전화번호 자릿수 오류")
+        if any(not p.isdigit() or len(p) > self.service_digits for p in self.service_prefixes):
+            raise ValueError("대표번호 접두번호 오류")
+        return self
 
 
 class Reask(_Strict):
@@ -101,6 +143,8 @@ class Policy(_Strict):
     fields: dict[str, FieldSpec]
     stage: tuple[Stage, ...]
     pickup: Pickup
+    input_limits: InputLimits
+    phone: Phone
     reask: Reask
     confirm: Confirm
     address: Address

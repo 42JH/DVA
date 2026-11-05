@@ -2,7 +2,24 @@
 #   ① Live 지시문(app/policy/render.py render_live) ② Backend 지시문(render_backend)
 #   ③ 서버 판정(app/domain/assess.py) ④ Decision 질문(decision_questions) ⑤ 결과 문구 검사(app/domain/claims.py)
 # 를 만든다. 업무 규칙 출처: docs/call-flow/README.md "반드시 지킬 것", decisions.md P1·P5·P6·P8·P11.
-version = "2026-11-05.1"
+version = "2026-11-05.2"
+
+# 전화 접수 제한의 단일 출처. Live·Responses·도구 스키마·서버 검사가 함께 사용한다.
+# 수량 단위: 현재 받는 곳별 접수 묶음(parcel). 서로 다른 접수 묶음을 자동 병합하지 않는다.
+[input_limits]
+item_price_min = 1
+item_price_max = 99_999_999
+box_total_max = 10
+document_max = 100
+
+# 기존 전화번호 허용 범위를 유지한다. 한글 숫자/+82 정규화 뒤 적용한다.
+[phone]
+mobile_prefix = "010"
+mobile_digits = 11
+domestic_min_digits = 9
+domestic_max_digits = 11
+service_prefixes = ["15", "16", "18"]
+service_digits = 8
 
 # --- 필드 목록. 이름은 Business State·BE 매핑과 같다(backend_client/order.py) ---
 # kind: free = Backend가 strict 도구 인자로 추출(Live가 위임) · choice = Decision 질문 · auto = 서버가 채움(묻지 않음)
@@ -86,7 +103,7 @@ decision = "collect"          # 문의·끝내기(end)를 계속 듣는다(S5: c
 min_lead_minutes = 60         # 지금부터 최소 1시간 뒤
 open = "09:00"
 close = "17:00"               # 정각 허용
-max_days_ahead = 3            # 임시(정책 미정)
+max_days_ahead = 3            # 현재 시각부터 정확히 3일(72시간) 이내
 next_day_default = "09:00"    # 오늘 영업 시간을 넘기면 다음 날 이 시각
 
 [reask]

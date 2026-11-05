@@ -16,6 +16,7 @@ import openai
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.integrations.backend.gateway import BackendFailure
+from app.policy.model import Policy, load_policy
 from app.tools.context import ToolContext
 from app.tools.outcome import ToolOutcome
 
@@ -35,10 +36,14 @@ class ModelTool:
     run: Callable[[ToolContext, Args], Awaitable[ToolOutcome]]
     budget: str = "tool"           # tool · rag
     timeout_code: str = "TOOL_TIMEOUT"
+    args_factory: Callable[[Policy], type[Args]] | None = None
 
-    def spec(self) -> dict:
+    def args_for(self, policy: Policy) -> type[Args]:
+        return self.args_factory(policy) if self.args_factory else self.args
+
+    def spec(self, policy: Policy) -> dict:
         """Responses 위임 tools에 넣는 strict 함수 도구(delegation.md §2.1)."""
-        fn = openai.pydantic_function_tool(self.args, name=self.name, description=self.description)["function"]
+        fn = openai.pydantic_function_tool(self.args_for(policy), name=self.name, description=self.description)["function"]
         return {"type": "function", "name": fn["name"], "description": fn["description"],
                 "parameters": fn["parameters"], "strict": fn["strict"]}
 
@@ -46,17 +51,19 @@ class ModelTool:
 MODEL_TOOLS: dict[str, ModelTool] = {}
 
 
-def model_tool(name: str, description: str, args: type[Args], budget: str = "tool", timeout_code: str = "TOOL_TIMEOUT"):
+def model_tool(name: str, description: str, args: type[Args], budget: str = "tool", timeout_code: str = "TOOL_TIMEOUT",
+               args_factory: Callable[[Policy], type[Args]] | None = None):
     def register(fn):
         if name in MODEL_TOOLS:
             raise RuntimeError(f"도구 이름 중복: {name}")
-        MODEL_TOOLS[name] = ModelTool(name, description, args, fn, budget, timeout_code)
+        MODEL_TOOLS[name] = ModelTool(name, description, args, fn, budget, timeout_code, args_factory)
         return fn
     return register
 
 
-def function_specs(names: Iterable[str] | None = None) -> list[dict]:
-    return [t.spec() for n, t in MODEL_TOOLS.items() if names is None or n in names]
+def function_specs(names: Iterable[str] | None = None, *, policy: Policy | None = None) -> list[dict]:
+    policy = policy if policy is not None else load_policy()
+    return [t.spec(policy) for n, t in MODEL_TOOLS.items() if names is None or n in names]
 
 
 def _hint(e: ValidationError) -> list[dict]:
@@ -74,7 +81,7 @@ async def run_tool(ctx: ToolContext, name: str, arguments: str, call_id: str,
         outcome = ToolOutcome("rejected", "TOOL_NOT_ALLOWED")
     else:
         try:
-            args = tool.args.model_validate_json(arguments or "{}")
+            args = tool.args_for(ctx.policy).model_validate_json(arguments or "{}")
         except ValidationError as e:
             outcome = ToolOutcome("needs_input", "TOOL_ARGS_INVALID", needs=_hint(e))  # 모델에게 재호출
         else:
