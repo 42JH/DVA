@@ -11,6 +11,7 @@ const image = run + ':test';
 const runtimeImage = run + ':runtime';
 const application = run + '-app';
 const proxy = run + '-proxy';
+const developmentProxy = run + '-development-proxy';
 const httpsProxy = run + '-https';
 const runtimeTests = run + '-runtime-tests';
 const root = path.resolve(__dirname, '..');
@@ -18,12 +19,14 @@ const temporary = mkdtempSync(path.join(tmpdir(), run + '-'));
 const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
 const personaToken = randomBytes(32).toString('hex');
+const businessToken = randomBytes(32).toString('hex');
 let networkCreated = false,
   databaseCreated = false,
   imageCreated = false;
 let runtimeCreated = false,
   applicationCreated = false,
   proxyCreated = false,
+  developmentProxyCreated = false,
   httpsCreated = false,
   runtimeTestsCreated = false;
 function docker(args, required = true) {
@@ -106,6 +109,8 @@ try {
     '-e',
     'AI_AGENT_URL=http://ai.invalid:8000',
     '-e',
+    `AI_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
     'SWAGGER_ENABLED=false',
     '-e',
     `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
@@ -128,6 +133,8 @@ try {
     '-e',
     'NODE_ENV=production',
     '-e',
+    'AUTH_PROXY_HOPS=2',
+    '-e',
     'DB_HOST=db',
     '-e',
     'DB_PORT=5432',
@@ -145,6 +152,8 @@ try {
     `PBX_WEBHOOK_TOKEN=${webhookToken}`,
     '-e',
     `AI_PERSONA_TOKEN=${personaToken}`,
+    '-e',
+    `AI_BUSINESS_TOKEN=${businessToken}`,
     runtimeImage,
   ]);
   applicationCreated = true;
@@ -167,6 +176,26 @@ try {
     `${proxy}:/etc/nginx/conf.d/default.conf`,
   ]);
   docker(['start', proxy]);
+  docker([
+    'create',
+    '--name',
+    developmentProxy,
+    '--network',
+    network,
+    '--network-alias',
+    'development-proxy',
+    '--memory',
+    '64m',
+    'nginx:stable-alpine',
+  ]);
+  developmentProxyCreated = true;
+  docker([
+    'cp',
+    path.join(root, '../infra/nginx/default.conf'),
+    `${developmentProxy}:/etc/nginx/conf.d/default.conf`,
+  ]);
+  docker(['start', developmentProxy]);
+  docker(['exec', developmentProxy, 'nginx', '-t']);
   const certificateDirectory = path.join(temporary, 'letsencrypt', 'live', 'dva-ip');
   const secondaryCertificateDirectory = path.join(temporary, 'letsencrypt', 'live', 'dva-sslip');
   mkdirSync(certificateDirectory, { recursive: true });
@@ -254,6 +283,8 @@ try {
     '-e',
     `TEST_PERSONA_TOKEN=${personaToken}`,
     '-e',
+    `TEST_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
     'TEST_HTTPS_API_ROOT=https://backend/api',
     '-e',
     'NODE_EXTRA_CA_CERTS=/test-proxy-ca.pem',
@@ -286,6 +317,7 @@ try {
   if (runtimeTestsCreated) docker(['rm', '-f', runtimeTests], false);
   if (httpsCreated) docker(['rm', '-f', httpsProxy], false);
   if (proxyCreated) docker(['rm', '-f', proxy], false);
+  if (developmentProxyCreated) docker(['rm', '-f', developmentProxy], false);
   if (applicationCreated) docker(['rm', '-f', application], false);
   if (databaseCreated) docker(['rm', '-f', database], false);
   if (networkCreated) docker(['network', 'rm', network], false);

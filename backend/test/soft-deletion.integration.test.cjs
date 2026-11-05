@@ -172,6 +172,7 @@ test('call soft deletion hides transcript, analysis, actions, questions and reco
 });
 
 test('deleted calls reject AI registration, STT/events, analysis, questions and order scope access', async () => {
+  const { businessHeaders } = require('./helpers/application.cjs');
   const c = await call();
   assert.equal((await remove('calls', c.id)).status, 204);
   const context = await f.write(
@@ -182,7 +183,7 @@ test('deleted calls reject AI registration, STT/events, analysis, questions and 
       call: { providerCallId: c.providerCallId, incomingAt: c.incoming_at.toISOString() },
     },
     0,
-    { Cookie: undefined, Origin: undefined },
+    { Cookie: undefined, Origin: undefined, ...businessHeaders() },
   );
   await f.error(context, 409, 'INVALID_STATE');
   await f.error(

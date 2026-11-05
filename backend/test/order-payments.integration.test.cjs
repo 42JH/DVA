@@ -15,6 +15,7 @@ const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
+const { OrderMaintenanceWorker } = require('../dist/orders/order-maintenance.worker');
 const { AuditService } = require('../dist/audit/audit.service');
 const { testMembership } = require('./helpers/membership.cjs');
 
@@ -83,6 +84,10 @@ before(async () => {
         return respond(403, { code: 'REJECT_CARD_PAYMENT' });
       if (body.paymentKey.startsWith('missing_'))
         return respond(404, { code: 'NOT_FOUND_PAYMENT' });
+      if (body.paymentKey.startsWith('expired_session_'))
+        return respond(404, { code: 'NOT_FOUND_PAYMENT_SESSION' });
+      if (body.paymentKey.startsWith('unknown_missing_'))
+        return respond(500, { code: 'PROVIDER_ERROR' });
       if (body.paymentKey.startsWith('unauthorized_'))
         return respond(401, { code: 'UNAUTHORIZED_KEY' });
       const p = {
@@ -986,8 +991,32 @@ test('confirmed rejection permits a new payment attempt without reusing the fail
   assert.equal((await stored(order.orderSeq)).status, 'ACCEPTED');
 });
 
-test('missing, unauthorized and still-processing payments retain their keys and block a new charge', async () => {
-  for (const prefix of ['missing_', 'unauthorized_', 'pending_']) {
+test('a direct missing-payment or expired-session rejection permits a fresh payment on the same link', async () => {
+  for (const prefix of ['missing_', 'expired_session_']) {
+    const order = await create(),
+      id = order.paymentRequest.paymentRequestId,
+      key = prefix + id;
+    const before = await storedPayment(id);
+    const failed = await confirm(order, key);
+    assert.equal(failed.status, 422);
+    assert.equal(failed.body.error.code, 'PAYMENT_FAILED');
+    const after = await storedPayment(id);
+    assert.equal(after.provider_payment_key, null);
+    assert.equal(after.approval_started_at, null);
+    assert.equal(after.expires_at.getTime(), before.expires_at.getTime());
+    assert.equal((await lookup(id)).body.data.status, 'PENDING');
+    assert.equal((await confirm(order, key)).status, 422);
+    assert.equal((await confirm(order)).status, 200);
+    const attempts = calls.filter((c) => c.method === 'POST' && c.body.orderId === id);
+    assert.equal(attempts.length, 3);
+    assert.equal(attempts[0].receipt, attempts[1].receipt);
+    assert.notEqual(attempts[1].receipt, attempts[2].receipt);
+    assert.equal((await stored(order.orderSeq)).status, 'ACCEPTED');
+  }
+});
+
+test('an absent lookup, unauthorized and still-processing payments retain their keys and block a new charge', async () => {
+  for (const prefix of ['unknown_missing_', 'unauthorized_', 'pending_']) {
     const order = await create(),
       id = order.paymentRequest.paymentRequestId,
       key = prefix + id;
@@ -1010,6 +1039,31 @@ test('missing, unauthorized and still-processing payments retain their keys and 
       );
     }
   }
+});
+
+test('a rejected payment session no longer blocks order cancellation or deadline cleanup', async () => {
+  const cancelled = await create();
+  assert.equal((await confirm(cancelled, 'expired_session_' + cancelled.orderSeq)).status, 422);
+  assert.equal(
+    (await request(`/orders/${cancelled.orderSeq}/cancel`, undefined, true)).status,
+    204,
+  );
+  assert.equal((await stored(cancelled.orderSeq)).status, 'CANCELLED');
+  const expired = await create(),
+    id = expired.paymentRequest.paymentRequestId;
+  assert.equal((await confirm(expired, 'missing_' + id)).status, 422);
+  await pool.query(
+    "UPDATE orders SET payment_due_at=clock_timestamp()-interval '1 second' WHERE order_seq=$1",
+    [expired.orderSeq],
+  );
+  await pool.query(
+    "UPDATE order_payment_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE payment_request_id=$1",
+    [id],
+  );
+  assert.equal((await lookup(id)).body.data.status, 'EXPIRED');
+  assert.equal((await confirm(expired)).status, 409);
+  await app.get(OrderMaintenanceWorker).run();
+  assert.equal((await stored(expired.orderSeq)).status, 'CANCELLED');
 });
 
 test('verified terminal failures permit a fresh payment while preserving the original deadline', async () => {

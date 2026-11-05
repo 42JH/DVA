@@ -12,7 +12,7 @@ import { CreatedOrderDto, OrderResultDto } from './dto/order-response.dto';
 import { NoOrderResultDto } from './dto/no-order-result.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ListResponse } from '../common/pagination';
-import { hasOrderData, isZonedDate, orderDraft } from './order-draft';
+import { hasOrderData, isZonedDate, orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
 import { OrdersRepository } from './orders.repository';
 import { UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { assertOrderUpdate } from './order-update.validation';
@@ -287,6 +287,12 @@ export class OrdersService {
       if (callId !== null && customerId !== null)
         await this.calls.attachCustomer(client, callId, customerId);
       for (const parcel of draft.parcels) {
+        if (parcel.originPin?.scope === 'COMPANY')
+          throw new ApiException(
+            400,
+            'INVALID_REQUEST',
+            '기업 배송지는 PIN 대신 주소로 전달해 주세요.',
+          );
         if (
           parcel.originPin &&
           (customerId === null ||
@@ -443,7 +449,23 @@ export class OrdersService {
         if (adminId === null && previous?.status === 'CANCELLED')
           throw new ApiException(409, 'INVALID_STATE', '취소된 주문 상세는 수정할 수 없습니다.');
         const pin = change.originPin === undefined ? previous?.originPin : change.originPin;
-        if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
+        if (pin?.scope === 'COMPANY') {
+          // Retired references identify saved history, never a newly selectable address.
+          if (
+            previous?.originPin?.scope !== 'COMPANY' ||
+            previous.originPin.pinSeq !== pin.pinSeq ||
+            ORDER_ADDRESS_FIELDS.some(
+              (field) =>
+                change.origin?.[field] !== undefined &&
+                change.origin[field] !== previous.origin[field],
+            )
+          )
+            throw new ApiException(
+              400,
+              'INVALID_REQUEST',
+              '기존 기업 PIN 참조를 새로 지정하거나 주소 변경에 사용할 수 없습니다.',
+            );
+        } else if (pin && !(await this.repository.canUsePin(client, customer.customerSeq, pin)))
           throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
       }
       await this.repository.updateHeader(

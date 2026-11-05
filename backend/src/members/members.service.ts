@@ -13,6 +13,7 @@ import {
 } from './dto/member-request.dto';
 import { MemberCandidate } from './members.types';
 import { CustomersService } from '../customers/customers.service';
+import { SearchMembersQueryDto } from './dto/search-members.dto';
 
 @Injectable()
 export class MembersService {
@@ -34,6 +35,10 @@ export class MembersService {
   async list(companyId: number, query: ListMembersQueryDto) {
     await this.company(companyId);
     return new ListResponse(await this.repository.list(companyId, query), query.limit);
+  }
+
+  async search(query: SearchMembersQueryDto) {
+    return new ListResponse(await this.repository.search(query), query.limit);
   }
 
   private record(

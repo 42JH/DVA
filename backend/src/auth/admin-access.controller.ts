@@ -126,6 +126,12 @@ export class AdminAccessController {
     schema: { type: 'integer', minimum: 1 },
   })
   @ApiNoContentResponse({ description: '비밀번호 초기화 및 대상 관리자의 전체 세션 종료.' })
+  @ApiResponse({
+    status: 429,
+    description: '비밀번호 처리 여유가 없습니다. Retry-After 초 이후 재시도합니다.',
+    type: ErrorResponseDto,
+    headers: { 'Retry-After': { description: '재시도까지 남은 초', schema: { type: 'integer' } } },
+  })
   @ApiBody({ required: false, schema: { type: 'object', additionalProperties: false } })
   async password(
     @Param('id') id: string,

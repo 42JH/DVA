@@ -1,5 +1,11 @@
 # 모놀리식 백엔드 공통 기반
 
+S05 결제 복구는 [실패 판정·연동 영향·운영 절차](docs/payment-approval-recovery.md)를 따른다. 최초 승인에서 확인한 결제 정보 없음·세션 만료는 기존 422로 반환하고 같은 링크의 재결제를 허용한다. 미확정 건의 조회 404·인증 오류·타임아웃은 확인 대기를 유지한다. AI·관리자 프론트의 API·환경변수와 DB 스키마는 변경하지 않는다.
+
+관리자 로그인·가입과 비밀번호 처리는 [S04 인증 요청 제한](docs/auth-request-limits.md)을 따른다. 로그인 IP 평균 30회/분·burst 5, 가입 IP 10분 5회·24시간 20회, ID별 15분 5회 실패 시 5분 제한, 비밀번호 처리 전체 동시 2개를 적용한다. 가입 이름은 50자·새 비밀번호는 256자까지이며 기존 비밀번호 검증은 유지한다. 429·Retry-After 처리와 호스트 Nginx 별도 적용 순서를 확인한다. 승인 대기 30일은 수동 검토 기준이다.
+
+고객 확인·등록·상세·수정의 AI 호출은 `Authorization: Bearer <AI_BUSINESS_TOKEN>`을 요구한다. 미설정 시 해당 AI 호출은 503, 누락·오류 토큰은 401이다. 관리자 세션·Origin과 AI 주소 수정의 진행 중 본인 통화 검사는 유지한다. [S01 설정·전환·검증](docs/ai-business-auth.md)을 따른다. 주문·PIN 등 나머지 MVP 경로의 서비스 인증과 통화별 권한은 별도 범위다.
+
 업무 전화번호는 [휴대전화 번호 입력 계약](docs/mobile-phone-integration.md)에 따라 정확히 11자리 숫자 문자열로 받는다. 고객·고객 확인·직원·PIN·주문 입력 및 저장 주문의 최종 접수 검증에 적용한다. 수집 중 생략·null, 기존 저장 데이터 조회, PBX 원문 국제 표기 수신은 유지한다. 프론트·AI 전달 범위도 해당 문서에 정리했다.
 
 미확정 결제의 5년 보관 만료는 [결제 보관·입력 검증 작업 계획](docs/payment-retention-and-mobile-plan.md)과 [보관 계약](docs/data-retention.md)을 따른다. 만료 건은 승인·복구 큐에서 제외하고 실제 승인·안내·디버 요청의 기존 점유 시간만 보호한 뒤 FK 순서대로 폐기한다. 오래된 결제 상태만으로 무기한 보존하지 않으며 기한 안의 미확정 결제 보호와 기존 결제·취소 API 계약은 유지한다. 이 변경의 추가 migration은 없다.
@@ -32,7 +38,7 @@ AI 고객 기본 주소 PATCH는 `call_session_seq`로 진행 중 본인 통화�
 
 통화별 AI 요약은 [ANL-01](../docs/api/call-analysis.md)을 따른다. `isNewCustomer`, `registeredParcelCount`, `faqAnswerCount`, `orderLookupCount`, `cancelledParcelCount`, `hasHandoffRequest`를 추가하고 실제 사용 `aiPersonaVersionSeq`도 AI가 전달한다. 접수·취소는 배송 상세 기준이며 접수에 결제 대기를 포함한다. 백엔드는 검증·저장·조회만 담당한다. 새 앱 실행 전에 migration 041·042를 적용한다. 042는 대표 분류 result를 삭제하고 기존 재전송 해시를 갱신하므로 기존 백엔드 중지·백업 후 전환한다. AI의 result 전송·프론트의 analysis.result 표시와 result 목록 필터를 제거해야 한다. 과거 요약은 null, result를 제거한 동일 재전송은 204, 다른 최종값은 409이며 프론트는 기존 통화 목록·상세의 analysis에서 조회한다.
 
-기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회한다. 기업 PIN 등록·수정·조회 API는 폐기하며 개인 PIN과 과거 주문 주소는 보존한다. companyPins는 기존 AI 응답 호환을 위해 빈 배열로 유지한다. company_pins 테이블은 과거 주문 참조·기업 삭제 이력 처리용으로 남기며 migration이나 데이터 삭제는 없다. [기업 검색 계약](../docs/api/company-directory.md)과 [AI 인계](docs/company-address-directory-handoff.md)를 따르며 AI 코드·운영 배포는 별도다.
+기업 공유 배송지는 활성 기업 사원의 현재 고객 주소로 조회하며 DIR-01은 AI_BUSINESS_TOKEN Bearer 전용이다. 관리자 상단바는 세션 전용 [사원 검색](../docs/api/company-members-search.md)을 사용하며 주소 없는 사원과 선택적 비활성 검색을 지원한다. 두 검색 q는 정규화 후 1~100자다. 기업 PIN API는 폐기하며 053 migration으로 company_pins를 제거한다. 개인 PIN·과거 주문 주소/COMPANY 논리 참조·감사는 보존하고 companyPins는 빈 배열로 유지한다. [기업 검색 계약](../docs/api/company-directory.md), [제거·배포·복구 안내](docs/company-pin-retirement.md), [AI 인계](docs/company-address-directory-handoff.md)를 따른다. AI/FE 코드·운영 배포는 별도이며 053 없는 구버전 이미지로 단독 복귀하지 않는다.
 
 통화 고객 번호는 nullable 논리 참조로 저장한다. 고객이 없어도 통화를 보존하며 전화번호 변경 후에도 통화·미답변의 고객 연결을 유지한다. 새 앱 전에 migration 040이 필요하다. 기존 데이터 보완과 연동 범위는 [통화 고객 연결](docs/call-customer-reference.md)을 따른다.
 
@@ -102,6 +108,7 @@ npm run start:dev
 | `PORT`, `DB_PORT` | 정수 1~65535, 기본 3000 / 5432 |
 | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | 필수, 누락/빈 값이면 시작 중단 |
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
+| `AI_BUSINESS_TOKEN` | 선택, 고객 확인·등록·상세·수정 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 해당 AI 호출은 503. 관리자 세션은 유지 |
 | `AI_PERSONA_TOKEN` | 선택, AI 서버와 공유할 32자 이상 공백 없는 ASCII 토큰. 페르소나 옵션·알림·설정 조회·적용 회신 전용. 비어 있으면 해당 연동과 재시도 워커만 비활성 |
 | `AI_FAQ_TOKEN` | 선택, 32자 이상 공백 없는 ASCII 토큰. FAQ 변경 알림 전용. 비어 있으면 FAQ 쓰기·알림 대기는 보존하고 전송 워커만 비활성 |
 | `AI_INSIGHTS_TOKEN` | 선택, 통화 분석·이벤트·미답변 수집 전용 32자 이상 공백 없는 ASCII 토큰. 미설정 시 ANL-01·EVT-01·UNQ-01은 503 |
@@ -205,7 +212,7 @@ backend/
 | 모듈 | 담당 데이터·책임 |
 |---|---|
 | `customers` | `customers`, `personal_pins` |
-| `organizations` | `organizations`, `departments`, `memberships`, `company_pins`, `organization_billing_months`, `order_billing_charges` |
+| `organizations` | `organizations`, `departments`, `memberships`, `organization_billing_months`, `order_billing_charges` |
 | `orders` | `orders`, `order_parcels` |
 | `consultations` | `call_sessions`, `call_utterances`, `recordings` |
 | `deliveries` | `shipments`, `shipment_status_history` |

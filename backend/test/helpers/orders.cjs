@@ -1,4 +1,4 @@
-const { createTestPool, startTestApp } = require('./application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./application.cjs');
 
 module.exports = function ordersFixture() {
   const { testMembership } = require('./membership.cjs');
@@ -109,12 +109,8 @@ module.exports = function ordersFixture() {
       if (id === customerId) personalPin = pin;
       else otherPin = pin;
     }
-    companyPin = (
-      await pool.query(
-        'INSERT INTO company_pins(organization_seq,address_data) VALUES($1,$2) RETURNING company_pin_seq',
-        [organizationId, address],
-      )
-    ).rows[0].company_pin_seq;
+    // Historical order references have no FK and survive the retired table.
+    companyPin = 901;
     dverServer = createServer(async (req, res) => {
       let body = '';
       for await (const chunk of req) body += chunk;
@@ -334,7 +330,7 @@ module.exports = function ordersFixture() {
   const startCallContext = (phoneNumber, call, index = 0, extra = {}) =>
     fetch(hosts[index] + '/api/customers/context', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...extra },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders(), ...extra },
       body: JSON.stringify({ phoneNumber, call }),
     });
 

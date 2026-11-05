@@ -70,14 +70,15 @@ export class OrderAddressPatchDto {
 
 export class OriginPinDto {
   @ApiProperty({
-    description: '출발지 주소록 유형. PERSONAL: 개인, COMPANY: 기업.',
+    description:
+      '신규 선택은 PERSONAL만 허용. COMPANY는 과거 주문 조회 및 동일 참조·주소를 유지하는 PATCH 호환용.',
     enum: ['PERSONAL', 'COMPANY'],
   })
   @IsIn(['PERSONAL', 'COMPANY'])
   scope!: 'PERSONAL' | 'COMPANY';
 
   @ApiProperty({
-    description: '선택한 주소록 번호(personalPinSeq 또는 companyPinSeq).',
+    description: '개인 주소록 번호. 과거 COMPANY 번호는 기존 주문의 논리 참조로만 보존.',
     minimum: 1,
     maximum: 2147483647,
   })

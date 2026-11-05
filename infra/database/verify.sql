@@ -4,13 +4,16 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, found %',n; END IF;
+ IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>27 THEN RAISE EXCEPTION 'Expected 27 foreign keys, found %',n; END IF;
+ IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
- IF n<>11 THEN RAISE EXCEPTION 'Expected 11 business triggers, found %',n; END IF;
+ IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
+ IF to_regclass('public.company_pins') IS NOT NULL
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='053-drop-company-pins.sql') THEN
+  RAISE EXCEPTION 'Company PIN retirement or migration missing'; END IF;
  IF EXISTS(SELECT 1 FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
   WHERE s.nspname='public' AND NOT c.convalidated) THEN RAISE EXCEPTION 'Unvalidated constraints found'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
@@ -101,9 +104,8 @@ BEGIN
  IF NOT EXISTS(SELECT 1 FROM pg_index WHERE indrelid='public.faq_entries'::regclass AND indexrelid=to_regclass('public.faq_entries_question_identity_uq') AND indisunique AND indisvalid) THEN
   RAISE EXCEPTION 'FAQ question uniqueness index missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='billing_organization_name')
-  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='company_pins'::regclass AND conname='company_pins_department_company_fk')
   OR EXISTS(SELECT 1 FROM pg_constraint WHERE contype='f' AND conrelid IN ('orders'::regclass,'order_billing_charges'::regclass,'organization_billing_months'::regclass) AND confrelid IN ('organizations'::regclass,'departments'::regclass)) THEN
-  RAISE EXCEPTION 'Company deletion history/department PIN schema missing'; END IF;
+  RAISE EXCEPTION 'Company deletion history schema missing'; END IF;
  IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='021-company-deletion-history.sql') THEN
   RAISE EXCEPTION 'Company deletion migration missing'; END IF;
  IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='order_payment_requests'
@@ -137,8 +139,8 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='042-remove-call-analysis-result.sql') THEN
   RAISE EXCEPTION 'Call analysis result removal or migration missing'; END IF;
  IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public'
-   AND table_name IN ('admin_users','customers','organizations','departments','memberships','personal_pins','company_pins','faq_entries','orders','call_sessions')
-   AND column_name='deleted_at' AND udt_name='timestamptz' AND is_nullable='YES')<>10
+   AND table_name IN ('admin_users','customers','organizations','departments','memberships','personal_pins','faq_entries','orders','call_sessions')
+   AND column_name='deleted_at' AND udt_name='timestamptz' AND is_nullable='YES')<>9
   OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='orders'
     AND column_name IN ('closed_at','created_by_admin_user_seq'))<>2
   OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ai_persona_versions' AND column_name='created_by_admin_user_name')
@@ -218,7 +220,7 @@ BEGIN
     AND tgname='faq_question_examples_reset' AND tgenabled='O')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='052-faq-question-examples.sql') THEN
   RAISE EXCEPTION 'FAQ question snapshots, independent retention or migration missing'; END IF;
- RAISE NOTICE 'PASS: 30 public tables, 27 FKs, 11 triggers, FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
+ RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, company PIN retirement/FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

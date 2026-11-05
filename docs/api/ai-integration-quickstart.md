@@ -6,7 +6,7 @@
 
 - 내부 주소: 같은 Docker 네트워크에서 `http://backend:3000`
 - 외부 주소: `https://13.209.59.180`
-- 공통: `Content-Type: application/json`. 아래 두 AI 호출은 현재 MVP 기준 관리자 쿠키·Bearer 토큰이 필요 없다.
+- 공통: `Content-Type: application/json`. 고객 확인·등록·상세·수정은 `Authorization: Bearer <AI_BUSINESS_TOKEN>`이 필요하다. AI는 관리자 쿠키를 보내지 않는다. 주문 결과 전송은 기존 계약을 유지한다. [고객 인증 전환](../../backend/docs/ai-business-auth.md)
 
 ## 1. 통화 시작: 고객 확인
 

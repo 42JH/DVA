@@ -3,7 +3,7 @@ import { readPage } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Pool, PoolClient } from 'pg';
-import { OriginPinDto } from './dto/create-order.dto';
+import { OrderAddressPatchDto, OriginPinDto } from './dto/create-order.dto';
 import { CreatedOrderDto, OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
 import { OrderQueryDto } from './dto/order-query.dto';
 import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
@@ -343,22 +343,12 @@ export class OrdersRepository {
   }
 
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
-    const result =
-      pin.scope === 'PERSONAL'
-        ? await client.query(
-            `SELECT personal_pin_seq FROM personal_pins
+    if (pin.scope !== 'PERSONAL') return false;
+    const result = await client.query(
+      `SELECT personal_pin_seq FROM personal_pins
          WHERE personal_pin_seq=$1 AND customer_seq=$2 AND deleted_at IS NULL FOR SHARE`,
-            [pin.pinSeq, customerId],
-          )
-        : await client.query(
-            // Lock company access before the PIN, matching department rename and deletion.
-            `WITH allowed AS MATERIALIZED (
-              SELECT o.organization_seq FROM memberships m JOIN organizations o USING(organization_seq)
-              WHERE m.customer_seq=$2 AND m.status='ACTIVE' AND o.status='ACTIVE' AND m.deleted_at IS NULL AND o.deleted_at IS NULL FOR SHARE OF m,o
-            ) SELECT p.company_pin_seq FROM company_pins p JOIN allowed a USING(organization_seq)
-            WHERE p.company_pin_seq=$1 AND p.deleted_at IS NULL FOR SHARE OF p`,
-            [pin.pinSeq, customerId],
-          );
+      [pin.pinSeq, customerId],
+    );
     return result.rowCount === 1;
   }
 
@@ -384,10 +374,14 @@ export class OrdersRepository {
         parcelPosition: number;
         status: 'ACTIVE' | 'CANCELLED';
         originPin: OriginPinDto | null;
+        origin: Required<OrderAddressPatchDto>;
       }>(
         `SELECT order_parcel_seq AS "orderParcelSeq",parcel_position AS "parcelPosition",status,
           CASE WHEN origin_pin_seq IS NULL THEN NULL
-            ELSE jsonb_build_object('scope',origin_pin_scope,'pinSeq',origin_pin_seq) END AS "originPin"
+            ELSE jsonb_build_object('scope',origin_pin_scope,'pinSeq',origin_pin_seq) END AS "originPin",
+          jsonb_build_object('name',origin_name,'phoneNumber',origin_phone_number,
+            'roadAddress',origin_road_address,'jibunAddress',origin_jibun_address,
+            'detailAddress',origin_detail_address,'dongName',origin_dong_name,'postalCode',origin_postal_code) AS origin
          FROM order_parcels WHERE order_seq=$1 ORDER BY parcel_position`,
         [id],
       )

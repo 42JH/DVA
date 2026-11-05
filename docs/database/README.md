@@ -4,6 +4,8 @@ Jira: S15P31D109-129 · 브랜치: `feature/monolith-db` · MR 대상: `develop-
 
 ## 적용 기준
 
+053-drop-company-pins.sql은 기업 PIN 테이블과 전용 객체만 제거한다. 과거 주문의 COMPANY 논리 참조·주소 사본·감사와 개인 PIN·공유 검증 함수를 보존한다. 최종 public 스키마는 테이블 29개·FK 25개·업무 트리거 10개다. 기존 앱/워커 중지 → 원본 보관 범위 확인·백업 → 053·verify → 호환 앱 전환 순서이며 053 없는 앱으로의 배포·롤백·자동 복귀를 차단한다. [변경·데이터 확인·복구 안내](../../backend/docs/company-pin-retirement.md)를 따른다. 기존 migration은 수정하지 않으며 아래의 과거 migration별 개수는 각 시점의 기록이다.
+
 051-payment-approval-recovery.sql은 order_payment_requests.approval_next_check_at nullable 컬럼과 자동 조회 순서용 인덱스를 추가한다. 기존 결제 키·승인 시작·승인 증거·처리권·완료 기록은 바꾸지 않으며 기존 행은 NULL로 즉시 조회 가능하다. 새 앱 전에 기존 runner로 051을 적용하고 verify.sql로 검사한다. 컬럼 추가와 인덱스 교체이므로 이전 앱도 같은 DB를 사용할 수 있다. [결제 복구 계약](../api/order-payment-integration.md)을 따른다.
 
 050-call-dashboard-metrics.sql은 통화별 이탈 단계·총 대기시간·유형별 레이턴시 요약을 저장하는 call_dashboard_metrics 한 테이블과 JSON 검증 함수를 추가한다. 분석과 1:1 CASCADE FK로 연결하며 부모 통화 soft delete와 최초 incoming_at 기준 5년 폐기를 따른다. 현재 ACTIVE와 직전 활성 버전의 비교를 위해 ai_persona_versions.previous_active_version_seq nullable self FK도 추가한다. 과거는 현재/직전 성공 감사가 모두 확인될 때만 보완하고 미확인은 NULL로 유지한다. 기존 분석 행·해시·시각·기존 FK·트리거는 보존한다. 최종 public 테이블 29개·FK 26개·업무 트리거 10개다. 새 앱 전에 기존 runner로 050을 적용하고 verify.sql로 검사한다. 접수 시간은 기존 통화시간·접수 건수로 계산하므로 별도 시간 컬럼을 만들지 않는다.

@@ -36,6 +36,13 @@ export class FaqQuestionExampleDto {
     format: 'date-time',
   })
   occurredAt!: string;
+  @ApiProperty({
+    description: '통화 상세 조회용 번호. 통화 원본이 삭제·보관 만료 등으로 조회 불가하면 null.',
+    type: Number,
+    nullable: true,
+    minimum: 1,
+  })
+  callSessionSeq!: number | null;
 }
 
 export class FaqDetailDto extends FaqDto {

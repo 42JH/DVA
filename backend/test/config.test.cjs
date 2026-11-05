@@ -12,6 +12,42 @@ const valid = {
   AI_AGENT_URL: 'http://ai:8000',
 };
 
+test('auth proxy hops default to direct peers and accept only the supported private proxy topology', () => {
+  assert.equal(validateEnvironment(valid).AUTH_PROXY_HOPS, 0);
+  for (const hops of ['0', '1', '2'])
+    assert.equal(
+      validateEnvironment({ ...valid, AUTH_PROXY_HOPS: hops }).AUTH_PROXY_HOPS,
+      Number(hops),
+    );
+  for (const hops of ['', 'true', '3', '-1', '1.5', 2])
+    assert.throws(
+      () => validateEnvironment({ ...valid, AUTH_PROXY_HOPS: hops }),
+      /AUTH_PROXY_HOPS/,
+    );
+});
+
+test('customer business token is optional, validated and never echoed in configuration errors', () => {
+  assert.equal(validateEnvironment(valid).AI_BUSINESS_TOKEN, undefined);
+  assert.equal(
+    validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: '' }).AI_BUSINESS_TOKEN,
+    undefined,
+  );
+  const token = 'b'.repeat(32);
+  assert.equal(
+    validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: token }).AI_BUSINESS_TOKEN,
+    token,
+  );
+  for (const value of ['short', token + ' ', token + '\n', '한'.repeat(32), 123])
+    assert.throws(
+      () => validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }),
+      (error) => {
+        assert.equal(error.message, 'Invalid environment variables: AI_BUSINESS_TOKEN');
+        assert.ok(!error.message.includes(String(value)));
+        return true;
+      },
+    );
+});
+
 test('FAQ notification token is optional, validated and never echoed in configuration errors', () => {
   assert.equal(validateEnvironment(valid).AI_FAQ_TOKEN, undefined);
   assert.equal(validateEnvironment({ ...valid, AI_FAQ_TOKEN: '' }).AI_FAQ_TOKEN, undefined);

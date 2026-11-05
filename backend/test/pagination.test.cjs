@@ -49,6 +49,7 @@ test('every paginated API documents total_count as required, including both FAQ 
       '/customers',
       '/companies',
       '/companies/search',
+      '/companies/members/search',
       '/companies/{id}/departments',
       '/companies/{id}/members',
       '/personas',

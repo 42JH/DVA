@@ -69,5 +69,6 @@ sh "$ROOT/persona-upgrade-check.sh"
 sh "$ROOT/cancellation-upgrade-check.sh"
 sh "$ROOT/admin-audit-upgrade-check.sh"
 sh "$ROOT/company-history-upgrade-check.sh"
+sh "$ROOT/company-pin-retirement-check.sh"
 sh "$ROOT/payment-completion-upgrade-check.sh"
 echo 'ALL MONOLITH DATABASE CHECKS PASSED'

@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-11-02 / backend/migrations/001~042 기준. public 업무·관리자 29개 + PBX 수신 1개 = ERD 30개, 컬럼 284개, 물리 FK 26개. 같은 PostgreSQL을 사용하며 마이그레이션 이력은 생략.'
+  Note: '2026-11-05 / 053 기업 PIN 테이블 및 FK 2개 제거 반영. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
@@ -89,23 +89,6 @@ Table personal_pins {
   }
   Note: 'customer / 개인 주소록. 확인된 신규 주소를 고객별로 저장한다. / SQL 인덱스: CREATE INDEX personal_pins_scope_idx ON personal_pins(customer_seq,personal_pin_seq); CREATE UNIQUE INDEX personal_pins_identity_uk ON personal_pins(customer_seq,pin_identity(address_data));'
 }
-
-Table company_pins {
-  company_pin_seq integer [pk, increment, not null, note: '행의 고유 기본키']
-  organization_seq integer [not null, note: '연결 대상 ID']
-  label text [note: '주소록 별칭']
-  department_seq integer [note: '같은 기업의 부서 번호. NULL과 빈 부서명은 기업 공용, 비어 있지 않은 미연결 부서명은 배정 확인 필요']
-  department_name text [note: '해당 기업 공유 핀의 부서명. 선택값']
-  address_data jsonb [not null, note: '수령인 이름·전화번호·도로명·지번·상세주소·동명·우편번호·위경도를 담은 검증된 주소']
-  version integer [not null, default: 1, note: '변경 버전. 동시 수정 검증 또는 버전 관리에 사용']
-  checks {
-    `valid_parcel_address(address_data)`
-    `version > 0`
-  }
-  Note: 'customer / 기업이 제출한 공식 배송지 공유 핀. 부서명은 선택값. 40번 합의: 활성 기업의 모든 공유 핀을 타 기업에서도 검색 가능. 등록·수정은 관리자 전용. / SQL 인덱스: CREATE INDEX company_pins_scope_idx ON company_pins(organization_seq,company_pin_seq); CREATE UNIQUE INDEX company_pins_identity_uk ON company_pins(organization_seq,lower(btrim(regexp_replace(normalize(coalesce(department_name,\'\'),NFC),\'[[:space:]]+\',\' \',\'g\'))),pin_identity(address_data));'
-}
-
-Ref: company_pins.(department_seq,organization_seq) >? departments.(department_seq,organization_seq)
 
 // End of customer module
 
@@ -639,7 +622,6 @@ Table faq_change_notifications {
 Ref: customers.customer_seq - memberships.customer_seq
 Ref: organizations.organization_seq < memberships.organization_seq
 Ref: customers.customer_seq < personal_pins.customer_seq
-Ref: organizations.organization_seq < company_pins.organization_seq
 Ref: customers.customer_seq ?< orders.customer_seq
 Ref: orders.order_seq < order_parcels.order_seq
 Ref: orders.order_seq ?< call_sessions.order_seq

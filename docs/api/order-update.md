@@ -41,7 +41,7 @@ AI는 `parcels[].status=CANCELLED`인 상세를 수정할 수 없으며 전체 �
 | pickupRequestedAt | 시간대를 포함한 ISO 8601. 생략하면 유지, null이면 비우기 |
 | parcels[].orderParcelSeq | 있으면 해당 주문의 기존 상세 수정, 없으면 마지막 순번 뒤에 추가 |
 | parcels[].origin / destination | 제공한 주소 하위 필드만 변경. 생략 유지, nullable 하위 필드의 null은 비우기 |
-| parcels[].originPin | PERSONAL/COMPANY와 pinSeq. 생략 유지, null이면 참조 해제 |
+| parcels[].originPin | PERSONAL과 pinSeq. 생략 유지, null이면 해제. COMPANY는 기존 동일 상세의 동일 참조·출발지 주소 유지에만 허용 |
 | 수량 4종 | 0~2147483647 정수. 기존 상세는 생략 유지, 새 상세는 기본 0 |
 | otherItemDescription / clientComment | 문자열. 빈 문자열로 비우기. 새 상세는 기본 빈 문자열 |
 | itemPrice | 0~9007199254740991 정수 또는 null. 기존 상세는 생략 유지, 새 상세는 기본 null |
@@ -49,7 +49,7 @@ AI는 `parcels[].status=CANCELLED`인 상세를 수정할 수 없으며 전체 �
 - `expectedVersion` 외 변경 필드가 하나 이상 필요하다. 빈 배열만으로는 저장하지 않는다. 배열의 각 상세에도 변경값이 필요하며, 상세 번호·빈 주소 객체만 있는 항목은 400이다.
 - 주소 객체 자체의 null, 중복 상세 번호, 변경 불가 필드(customerSeq·status·parcelPosition 등)는 400이다. 타 주문의 상세와 없는 상세는 모두 404다.
 - 생략한 상세는 삭제하지 않는다. 새 상세의 순번은 현재 최대 순번+1이며 새 상세 배송비 기본값은 null이다.
-- 수정 대상 상세의 PIN 접근 권한을 다시 확인한다. 권한이 사라졌다면 `originPin: null`로 참조를 해제할 수 있다. 주문 주소 수정은 원본 PIN에 반영되지 않는다.
+- 수정 대상 상세의 PERSONAL PIN 접근 권한을 다시 확인한다. 권한이 사라졌다면 `originPin: null`로 참조를 해제할 수 있다. 과거 COMPANY는 새로 선택하거나 번호를 바꿀 수 없고 주소 변경 시 null 또는 유효한 PERSONAL로 전환한다. 동일 참조·주소를 유지하는 수정은 테이블 없이 처리한다. 주문 주소 수정은 원본 PIN에 반영되지 않는다. [053 호환 계약](../../backend/docs/company-pin-retirement.md)을 따른다.
 - 주문에 활성 고객이 연결되어 있어야 한다. 결제 자격·입력 완전성·최종 동의·디버 접수는 ORD-06에서 다룬다.
 
 ## 응답과 재시도

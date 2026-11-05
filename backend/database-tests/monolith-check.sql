@@ -15,13 +15,14 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, got %',n; END IF;
+ IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>27 THEN RAISE EXCEPTION 'Expected 27 foreign keys, got %',n; END IF;
+ IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
- IF n<>11 THEN RAISE EXCEPTION 'Expected 11 business triggers, got %',n; END IF;
+ IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, got %',n; END IF;
+ IF to_regclass('public.company_pins') IS NOT NULL THEN RAISE EXCEPTION 'Retired company PIN table remains'; END IF;
  IF to_regclass('public.call_insight_events') IS NULL OR to_regclass('public.unanswered_questions') IS NULL THEN
   RAISE EXCEPTION 'Call events or unanswered reference schema missing'; END IF;
  IF to_regclass('public.call_analyses') IS NULL THEN RAISE EXCEPTION 'Call analyses missing'; END IF;
@@ -64,9 +65,6 @@ BEGIN
  UPDATE personal_pins SET label='Office' WHERE personal_pin_seq=pin_id;
  IF (SELECT version FROM personal_pins WHERE personal_pin_seq=pin_id)<>2 THEN RAISE EXCEPTION 'Pin version failed'; END IF;
  PERFORM pg_temp.expect_error(format('UPDATE personal_pins SET customer_seq=%s WHERE personal_pin_seq=%s',other_customer,pin_id),'23514');
- INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,' Sales ',address);
- PERFORM pg_temp.expect_error(format('INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(%s,%L,%L::jsonb)',company_id,'sales',address::text),'23505');
- INSERT INTO company_pins(organization_seq,department_name,address_data) VALUES(company_id,'Support',address);
 
  INSERT INTO orders(customer_seq,payment_method_type) VALUES(customer_id,'billing') RETURNING order_seq INTO order_id;
  IF (SELECT creation_source FROM orders WHERE order_seq=order_id)<>'UNKNOWN' THEN

@@ -6,6 +6,11 @@ const { Pool } = require('pg');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./migrations.cjs');
 
+function businessHeaders() {
+  assert.match(process.env.AI_BUSINESS_TOKEN ?? '', /^[\x21-\x7e]{32,}$/);
+  return { Authorization: 'Bearer ' + process.env.AI_BUSINESS_TOKEN };
+}
+
 function createTestPool() {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -104,4 +109,4 @@ function applicationFixture(name = '통합 테스트 관리자') {
   return f;
 }
 
-module.exports = { applicationFixture, createTestPool, startTestApp };
+module.exports = { applicationFixture, createTestPool, startTestApp, businessHeaders };

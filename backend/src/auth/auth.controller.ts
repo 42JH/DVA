@@ -16,6 +16,7 @@ import { AuthService } from './auth.service';
 import { AuthRequest, PublicAuth, SESSION_COOKIE } from './auth.guard';
 import { ChangePasswordDto, LoginDto, SignupDto } from './dto/auth-request.dto';
 import { LoginEnvelopeDto, MeEnvelopeDto } from './dto/auth-response.dto';
+import { LimitAuthRequests } from './auth-limits.guard';
 export function cookieOptions(production: boolean): CookieOptions {
   return { httpOnly: true, secure: production, sameSite: 'lax', path: '/api' };
 }
@@ -28,6 +29,12 @@ export function cookieOptions(production: boolean): CookieOptions {
   type: ErrorResponseDto,
 })
 @ApiResponse({ status: 403, description: '허용되지 않은 Origin.', type: ErrorResponseDto })
+@ApiResponse({
+  status: 429,
+  description: '인증 요청 제한. Retry-After 초 이후 다시 시도합니다.',
+  type: ErrorResponseDto,
+  headers: { 'Retry-After': { description: '재시도까지 남은 초', schema: { type: 'integer' } } },
+})
 @Controller('auth')
 export class AuthController {
   constructor(
@@ -46,6 +53,7 @@ export class AuthController {
   })
   @AuditOperation({ action: 'ADMIN_LOGIN', targetType: 'ADMIN_USER', target: 'none' })
   @Post('login')
+  @LimitAuthRequests('login')
   @HttpCode(200)
   @ApiResponse({
     status: 403,
@@ -78,6 +86,7 @@ export class AuthController {
   })
   @AuditOperation({ action: 'ADMIN_SIGNUP', targetType: 'ADMIN_USER', target: 'none' })
   @Post('signup')
+  @LimitAuthRequests('signup')
   @HttpCode(204)
   @ApiNoContentResponse({ description: '가입 신청 완료.' })
   @ApiResponse({ status: 409, description: '이미 사용 중인 로그인 ID.', type: ErrorResponseDto })

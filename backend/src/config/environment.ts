@@ -2,12 +2,14 @@ import { PaymentEnvironment, paymentEnvironment } from '../payments/payment-conf
 export interface Environment extends PaymentEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
+  AUTH_PROXY_HOPS: number;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
   DB_PASSWORD: string;
   DB_NAME: string;
   AI_AGENT_URL: string;
+  AI_BUSINESS_TOKEN?: string;
   AI_PERSONA_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
@@ -50,6 +52,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     return parsed;
   };
   const nodeEnv = raw.NODE_ENV ?? 'development';
+  const authProxyHops = raw.AUTH_PROXY_HOPS ?? '0';
+  if (typeof authProxyHops !== 'string' || !/^[012]$/.test(authProxyHops))
+    errors.push('AUTH_PROXY_HOPS');
   if (!['development', 'test', 'production'].includes(String(nodeEnv))) errors.push('NODE_ENV');
   const aiUrl = required('AI_AGENT_URL');
   try {
@@ -86,9 +91,18 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   const swagger = raw.SWAGGER_ENABLED ?? (nodeEnv === 'development' ? 'true' : 'false');
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const token = raw.PBX_WEBHOOK_TOKEN;
+  const businessToken = raw.AI_BUSINESS_TOKEN;
   const personaToken = raw.AI_PERSONA_TOKEN;
   const faqToken = raw.AI_FAQ_TOKEN;
   const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      businessToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   if (
     insightsToken !== undefined &&
     insightsToken !== '' &&
@@ -149,12 +163,15 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     ...paymentEnvironment(raw, errors),
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3000),
+    AUTH_PROXY_HOPS: Number(authProxyHops),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
     DB_USER: required('DB_USER'),
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
     AI_AGENT_URL: aiUrl.replace(/\/$/, ''),
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     AI_INSIGHTS_TOKEN:

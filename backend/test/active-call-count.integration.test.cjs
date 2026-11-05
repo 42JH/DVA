@@ -5,7 +5,7 @@ const { randomBytes, randomInt, randomUUID } = require('node:crypto');
 const { EventEmitter, once } = require('node:events');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -40,6 +40,10 @@ async function json(path, options = {}, instance = 0) {
   const response = await fetch(urls[instance] + path, {
     signal: AbortSignal.timeout(15000),
     ...options,
+    headers: {
+      ...(path === '/api/customers/context' ? businessHeaders() : {}),
+      ...options.headers,
+    },
   });
   const text = await response.text();
   return {

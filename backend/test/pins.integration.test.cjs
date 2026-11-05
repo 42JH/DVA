@@ -3,7 +3,7 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -133,15 +133,8 @@ async function personal(f, data = address(), extra = {}, headers = adminHeaders)
     201,
   );
 }
-async function stored(id, shared = false) {
-  return (
-    await pool.query(
-      shared
-        ? 'SELECT * FROM company_pins WHERE company_pin_seq=$1'
-        : 'SELECT * FROM personal_pins WHERE personal_pin_seq=$1',
-      [id],
-    )
-  ).rows[0];
+async function stored(id) {
+  return (await pool.query('SELECT * FROM personal_pins WHERE personal_pin_seq=$1', [id])).rows[0];
 }
 
 test('AI registers, searches and edits its active customer personal pins without service authentication', async () => {
@@ -197,15 +190,10 @@ test('all active administrator roles can manage personal pins', async () => {
   }
 });
 
-test('retired company PIN routes return 404 and leave legacy data intact', async () => {
+test('retired company PIN routes return 404 without recreating the table or changing personal PINs', async () => {
   const f = await fixture({ role: 'ORG_ADMIN' });
-  const id = (
-    await pool.query(
-      'INSERT INTO company_pins(organization_seq,address_data) VALUES($1,$2) RETURNING company_pin_seq',
-      [f.company, address()],
-    )
-  ).rows[0].company_pin_seq;
-  const before = await stored(id, true);
+  const id = (await personal(f)).personalPinSeq;
+  const before = await stored(id);
   for (const headers of [f.ai, adminHeaders])
     for (const [method, path, body] of [
       ['GET', '/companies/' + f.company + '/pins'],
@@ -213,7 +201,11 @@ test('retired company PIN routes return 404 and leave legacy data intact', async
       ['PATCH', '/company-pins/' + id, { label: '금지' }],
     ])
       assert.equal((await request(method, path, body, headers)).status, 404);
-  assert.deepEqual(await stored(id, true), before);
+  assert.deepEqual(await stored(id), before);
+  assert.equal(
+    (await pool.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name,
+    null,
+  );
 });
 
 test('another caller cannot list, create or edit private pins', async () => {
@@ -324,7 +316,7 @@ test('an ended call cannot modify a new customer who reuses the deleted original
     'POST',
     '/customers',
     { name: '새 고객', phoneNumber: f.phone },
-    {},
+    businessHeaders(),
   );
   const customer = await success(response, 201);
   assert.notEqual(customer.customerSeq, f.customer);

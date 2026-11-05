@@ -1,6 +1,9 @@
 const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const businessHeaders = () => ({ Authorization: 'Bearer ' + process.env.TEST_BUSINESS_TOKEN });
+
+const { setTimeout: delay } = require('node:timers/promises');
 
 test('persona runtime reads and acknowledgment authentication survive real Nginx forwarding', async () => {
   const headers = { Authorization: `Bearer ${process.env.TEST_PERSONA_TOKEN}` };
@@ -309,12 +312,24 @@ test('production image keeps health and disables Swagger by default', async () =
   assert.equal((await docs.json()).error.code, 'NOT_FOUND');
 });
 
-test('production customer MVP flow through Nginx needs no service token while admin operations remain protected', async () => {
+test('production customer service authentication through Nginx preserves AI and administrator boundaries', async () => {
   const input = {
     name: 'runtime-customer-' + randomUUID(),
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
   };
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json', ...businessHeaders() };
+  for (const authorization of [undefined, 'Bearer wrong-business-token']) {
+    const denied = await fetch('http://proxy/api/customers/context', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authorization === undefined ? {} : { Authorization: authorization }),
+      },
+      body: JSON.stringify({ phoneNumber: input.phoneNumber }),
+    });
+    assert.equal(denied.status, 401);
+    assert.equal((await denied.json()).error.code, 'UNAUTHORIZED');
+  }
   const register = () =>
     fetch('http://proxy/api/customers', { method: 'POST', headers, body: JSON.stringify(input) });
   const first = await register();
@@ -337,7 +352,7 @@ test('production customer MVP flow through Nginx needs no service token while ad
   const replay = await register();
   assert.equal(replay.status, 409);
   assert.equal((await replay.json()).error.code, 'DUPLICATE_RESOURCE');
-  const detail = await fetch('http://proxy/api/customers/' + id);
+  const detail = await fetch('http://proxy/api/customers/' + id, { headers });
   assert.equal(detail.status, 200);
   assert.equal((await detail.json()).data.phoneNumber, input.phoneNumber);
   const rename = await fetch('http://proxy/api/customers/' + id, {
@@ -348,12 +363,12 @@ test('production customer MVP flow through Nginx needs no service token while ad
   assert.equal(rename.status, 204);
   assert.equal(await rename.text(), '');
   assert.equal((await fetch('http://proxy/api/customers')).status, 401);
-  const anonymousStatus = await fetch('http://proxy/api/customers/' + id, {
+  const aiStatus = await fetch('http://proxy/api/customers/' + id, {
     method: 'PATCH',
     headers: { ...headers, Origin: 'https://13.209.59.180' },
     body: '{"status":"WITHDRAWN"}',
   });
-  assert.equal(anonymousStatus.status, 401);
+  assert.equal(aiStatus.status, 403);
   const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
     headers: { ...headers, Origin: 'https://13.209.59.180' },
@@ -371,7 +386,7 @@ test('production customer MVP flow through Nginx needs no service token while ad
     body: '{"status":"WITHDRAWN"}',
   });
   assert.equal(withdrawn.status, 204);
-  assert.equal((await fetch('http://proxy/api/customers/' + id)).status, 404);
+  assert.equal((await fetch('http://proxy/api/customers/' + id, { headers })).status, 404);
   const adminDetail = await fetch('http://proxy/api/customers/' + id, { headers: adminHeaders });
   assert.equal(adminDetail.status, 200);
   assert.equal((await adminDetail.json()).data.status, 'WITHDRAWN');
@@ -466,7 +481,7 @@ test('production member JSON supports single and bulk registration through Nginx
     ).status,
     204,
   );
-  const customer = await fetch(root + '/customers/' + customerId);
+  const customer = await fetch(root + '/customers/' + customerId, { headers });
   assert.equal(customer.status, 200);
   assert.equal((await customer.json()).data.phoneNumber, nextPhone);
   const patch = await fetch(root + '/members/' + membershipId, {
@@ -477,7 +492,7 @@ test('production member JSON supports single and bulk registration through Nginx
   assert.equal(patch.status, 204);
   const removed = await fetch(root + '/members/' + membershipId, { method: 'DELETE', headers });
   assert.equal(removed.status, 204);
-  assert.equal((await fetch(root + '/customers/' + customerId)).status, 200);
+  assert.equal((await fetch(root + '/customers/' + customerId, { headers })).status, 200);
   const empty = await fetch(root + `/companies/${companyId}/members`, {
     headers: { Cookie: session },
   });
@@ -766,7 +781,9 @@ test('production company directory searches current member addresses through Ngi
   });
   assert.equal(created.status, 204, await created.text());
   const url = root + '/companies/search?' + new URLSearchParams({ q: name + ' ' + recipientName });
-  const searched = await fetch(url);
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal((await fetch(url, { headers })).status, 401);
+  const searched = await fetch(url, { headers: businessHeaders() });
   assert.equal(searched.status, 200);
   assert.equal(searched.headers.get('cache-control'), 'no-store');
   const body = await searched.json();
@@ -776,6 +793,16 @@ test('production company directory searches current member addresses through Ngi
   assert.equal(body.data[0].companyPinSeq, undefined);
   assert.equal(body.data[0].organizationName, name);
   assert.deepEqual(body.data[0].addressData, addressData);
+  const adminSearchUrl = root + '/companies/members/search?q=RUNTIME-DIR';
+  assert.equal((await fetch(adminSearchUrl, { headers: businessHeaders() })).status, 401);
+  const memberSearch = await fetch(adminSearchUrl, { headers });
+  assert.equal(memberSearch.status, 200);
+  const members = await memberSearch.json();
+  assert.equal(members.data[0].organizationSeq, id);
+  assert.equal(members.data[0].name, recipientName);
+  assert.equal(members.data[0].phoneNumber, phoneNumber);
+  assert.equal(members.data[0].employeeNo, 'RUNTIME-DIR');
+  assert.equal(members.data[0].organizationStatus, 'ACTIVE');
   assert.equal((await fetch(root + '/companies')).status, 401);
   assert.equal((await fetch(root + `/companies/${id}/members`)).status, 401);
   const deactivated = await fetch(root + `/companies/${id}`, {
@@ -784,8 +811,24 @@ test('production company directory searches current member addresses through Ngi
     body: '{"status":"INACTIVE"}',
   });
   assert.equal(deactivated.status, 204);
-  assert.deepEqual(await (await fetch(url)).json(), { data: [], hasNext: false, total_count: 0 });
-  assert.equal((await fetch(root + '/companies/search?q=')).status, 400);
+  assert.deepEqual(await (await fetch(url, { headers: businessHeaders() })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  assert.deepEqual(await (await fetch(adminSearchUrl, { headers })).json(), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  const inactiveMembers = await (
+    await fetch(adminSearchUrl + '&includeInactive=true', { headers })
+  ).json();
+  assert.equal(inactiveMembers.data[0].organizationStatus, 'INACTIVE');
+  assert.equal(
+    (await fetch(root + '/companies/search?q=', { headers: businessHeaders() })).status,
+    400,
+  );
 });
 
 test('production cancellation preserves AI phone scope and admin sessions through Nginx', async () => {
@@ -965,7 +1008,7 @@ test('production active count SSE crosses HTTPS and both Nginx proxies, keeps he
     const phone = '010' + require('node:crypto').randomInt(10000000, 100000000);
     const registered = await fetch(root + '/customers/context', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
       body: JSON.stringify({
         phoneNumber: phone,
         call: { providerCallId: randomUUID(), incomingAt: startedAt },
@@ -1019,5 +1062,74 @@ test('HTTPS proxy preserves administrator authentication, internal blocking and 
   ]) {
     const response = await fetch(root + path, { signal: AbortSignal.timeout(5000) });
     assert.equal(response.status, status, path);
+  }
+});
+
+test('HTTPS and development login IP buckets reject bursts with the established JSON/CORS contract', async () => {
+  // Let any earlier HTTPS login leave the six-request burst allowance fully available.
+  await delay(12_000);
+  for (const root of [process.env.TEST_HTTPS_API_ROOT, 'http://development-proxy/api']) {
+    const send = (index) =>
+      fetch(root + (index % 2 ? '/AUTH/LOGIN/' : '/auth/login'), {
+        method: 'POST',
+        headers: {
+          Origin: 'https://13.209.59.180',
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': '192.0.2.' + index,
+          'X-Real-IP': '198.51.100.' + index,
+        },
+        body: JSON.stringify({ loginId: 'invalid-login-id', password: 'x' }),
+      });
+    for (let index = 0; index < 6; index++) {
+      const accepted = await send(index);
+      assert.equal(accepted.status, 400, await accepted.text());
+    }
+    const rejected = await send(7);
+    assert.equal(rejected.status, 429, await rejected.clone().text());
+    assert.equal(rejected.headers.get('retry-after'), '2');
+    assert.equal(rejected.headers.get('cache-control'), 'no-store');
+    assert.equal(rejected.headers.get('access-control-allow-origin'), 'https://13.209.59.180');
+    assert.ok(
+      rejected.headers.get('access-control-expose-headers').toLowerCase().includes('retry-after'),
+    );
+    const body = await rejected.json();
+    assert.equal(body.error.code, 'RATE_LIMITED');
+    assert.deepEqual(body.error.details, []);
+    assert.equal(rejected.headers.get('x-request-id'), body.meta.requestId);
+    const preflight = await fetch(root + '/auth/login', {
+      method: 'OPTIONS',
+      headers: { Origin: 'https://13.209.59.180', 'Access-Control-Request-Method': 'POST' },
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal((await fetch(root + '/ai/faqs')).status, 200);
+  }
+});
+
+test('signup limits survive HTTPS proxy forwarding and development proxy header sanitization', async () => {
+  for (const root of [process.env.TEST_HTTPS_API_ROOT, 'http://development-proxy/api']) {
+    const send = (index) =>
+      fetch(root + '/auth/signup', {
+        method: 'POST',
+        headers: {
+          Origin: 'https://13.209.59.180',
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': `192.0.2.${index}, 198.51.100.${index}`,
+          'X-Real-IP': '203.0.113.' + index,
+        },
+        body: JSON.stringify({
+          loginId: 'runtimeLimit01',
+          password: 'test-only-password',
+          name: '',
+        }),
+      });
+    for (let index = 0; index < 5; index++) {
+      const accepted = await send(index);
+      assert.equal(accepted.status, 400, await accepted.text());
+    }
+    const rejected = await send(9);
+    assert.equal(rejected.status, 429);
+    assert.ok(Number(rejected.headers.get('retry-after')) > 0);
+    assert.ok(Number(rejected.headers.get('retry-after')) <= 600);
+    assert.equal((await rejected.json()).error.code, 'RATE_LIMITED');
   }
 });

@@ -39,12 +39,14 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
+      AUTH_PROXY_HOPS: "2"
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: ${DB_USER:?Set DB_USER in the environment file}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in the environment file}
       DB_NAME: ${DB_NAME:?Set DB_NAME in the environment file}
       AI_AGENT_URL: http://ai:8000
+      AI_BUSINESS_TOKEN: ${AI_BUSINESS_TOKEN:-}
       AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
       AI_FAQ_TOKEN: ${AI_FAQ_TOKEN:-}
       AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}

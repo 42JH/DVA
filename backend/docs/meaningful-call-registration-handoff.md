@@ -6,6 +6,8 @@ AI는 실제 상담 업무 의도를 확인한 뒤 통화를 등록한다. 장�
 
 첫 고객 확인과 유효 통화 등록은 기존 `POST /api/customers/context`를 두 번 사용하는 방식이다. endpoint·요청 필드를 추가하지 않는다. `call` 없이 조회하는 기존 동작을 사용하며, `call`이 있는 요청은 AI가 업무 의도를 확인했다는 계약으로 처리한다.
 
+두 요청 모두 `Authorization: Bearer <AI_BUSINESS_TOKEN>`을 요구한다. 토큰 누락·오류는 401, BE 미설정은 503이며 [S01 인증 안내](ai-business-auth.md)를 따른다. 통화별 권한 결속은 별도다.
+
 ## 1. 전화 수신 직후: 조회만
 
 최초 수신 이벤트의 `providerCallId`와 `incomingAt`은 AI가 보관한다. 이때 백엔드에는 전화번호만 보낸다.
@@ -13,6 +15,7 @@ AI는 실제 상담 업무 의도를 확인한 뒤 통화를 등록한다. 장�
 ```http
 POST /api/customers/context
 Content-Type: application/json
+Authorization: Bearer <AI_BUSINESS_TOKEN>
 ```
 
 ```json

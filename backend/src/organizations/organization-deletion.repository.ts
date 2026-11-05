@@ -45,19 +45,6 @@ export class OrganizationDeletionRepository {
       )
     ).rows;
   }
-  async removePins(client: PoolClient, company: number, department: number | null) {
-    return (
-      await client.query<{
-        id: number;
-        departmentSeq: number | null;
-        departmentName: string | null;
-      }>(
-        `UPDATE company_pins SET deleted_at=clock_timestamp() WHERE organization_seq=$1 AND deleted_at IS NULL AND ($2::int IS NULL OR department_seq=$2)
-       RETURNING company_pin_seq AS id,department_seq AS "departmentSeq",department_name AS "departmentName"`,
-        [company, department],
-      )
-    ).rows;
-  }
   async removeDepartments(client: PoolClient, company: number, department: number | null) {
     await client.query(
       'UPDATE departments SET deleted_at=clock_timestamp() WHERE organization_seq=$1 AND deleted_at IS NULL AND ($2::int IS NULL OR department_seq=$2)',

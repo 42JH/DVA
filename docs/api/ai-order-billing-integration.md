@@ -240,9 +240,9 @@ AI 취소에는 취소 항목과 금액 변경 전후를 함께 기록한다. AI
 기업·부서 삭제는 활성 관리자 전용이며 AI 서버에 삭제 API 호출 권한이나 새 삭제 이벤트는 추가하지 않는다. [기업·부서 삭제 규격](company-deletion.md)의 정리와 기록 보존을 적용한다.
 
 - 고객 확인에서 삭제 대상 사원의 membership·organization·department는 null, companyPins는 빈 배열이다. customer·personalPins는 유지하며 availablePaymentMethods를 다시 확인한다. 개인의 월결제 설정이 true이면 credit은 계속 가능하지만 기존 기업 청구가 아닌 개인 월결제로 처리한다.
-- 기업 PIN API는 폐기되며 companyPins는 항상 빈 배열이다. 기업 배송지는 GET /api/companies/search의 현재 사원 주소를 사용한다. 부서·기업 삭제 시 남아 있는 과거 기업 PIN 행 정리는 기존 동작을 유지한다.
+- 기업 PIN API는 폐기되며 companyPins는 항상 빈 배열이다. 기업 배송지는 업무 Bearer 전용 GET /api/companies/search의 현재 사원 주소를 사용한다(q 1~100자). 053은 기업 PIN 테이블만 제거하고 과거 주문의 COMPANY 참조·주소 사본을 보존한다.
 - 과거 주문의 주소·PIN 출처 번호·결제 상태·통화·녹취는 보존한다. 주문 상세는 결제 당시 `billingOrganizationSeq/billingOrganizationName/billingDepartmentSeq/billingDepartmentName`을 반환하며, 현재 소속으로 과거 기업을 추정하지 않는다.
-- COLLECTING의 최종 접수는 현재 자격·PIN을 검사하므로 삭제된 기업 자격/PIN은 403일 수 있다. 주문을 다시 생성하지 않고 기존 주문에서 허용 결제 방식과 주소 출처를 확인한다. 주소 사본은 유지할 수 있지만 삭제된 PIN은 `originPin:null`로 해제해야 한다.
+- COLLECTING의 최종 접수는 현재 결제 자격·PERSONAL PIN을 검사한다. 삭제된 기업의 결제 자격은 403일 수 있으므로 기존 주문에서 허용 결제 방식을 확인한다. 과거 COMPANY 참조·주소 사본은 그대로 진행할 수 있으며 주소 변경 시에만 `originPin:null` 또는 유효한 PERSONAL로 전환한다.
 - notPaid는 기존 요청·금액·만료 시각으로 개인 결제를 이어간다. 결제 완료 주문은 저장된 사본으로 디버 접수·운영자 재접수를 계속한다. 회사 삭제를 이유로 자동 취소하거나 재청구하지 않는다.
 
 이번 변경은 Backend와 문서만 포함하며 AI 팀은 고객 확인을 다시 호출하고 403 이후 자격/PIN 재확인 안내를 연결한다.

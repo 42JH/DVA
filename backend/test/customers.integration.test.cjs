@@ -4,7 +4,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -53,7 +53,14 @@ after(async () => {
 });
 
 function request(path = '', options = {}, host = base) {
-  return fetch(host + '/api/customers' + path, options);
+  return fetch(host + '/api/customers' + path, {
+    ...options,
+    headers: Object.fromEntries(
+      Object.entries({ ...businessHeaders(), ...options.headers }).filter(
+        ([, v]) => v !== undefined,
+      ),
+    ),
+  });
 }
 function create(
   input = { name: '고객', phoneNumber: phone() },
@@ -111,7 +118,81 @@ async function error(response, status, code) {
   assert.equal(response.headers.get('cache-control'), 'no-store');
 }
 
-test('MVP AI can register, read and rename without cookie, token, call header or Origin', async () => {
+test('customer service authentication rejects invalid callers before reading or changing business data', async () => {
+  const id = await register();
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM customers) AS customers,
+        (SELECT count(*) FROM call_sessions) AS calls`)
+    ).rows[0];
+  const previous = await counts();
+  const name = (await pool.query('SELECT name FROM customers WHERE customer_seq=$1', [id])).rows[0]
+    .name;
+  for (const [method, path, body] of [
+    ['GET', '/' + id, undefined],
+    ['POST', '', { name: '거절할 고객', phoneNumber: phone() }],
+    [
+      'POST',
+      '/context',
+      {
+        phoneNumber: phone(),
+        call: { providerCallId: randomUUID(), incomingAt: new Date().toISOString() },
+      },
+    ],
+    ['PATCH', '/' + id, { name: '거절할 이름' }],
+  ]) {
+    for (const authorization of [undefined, 'Bearer wrong-business-token']) {
+      const response = await fetch(base + '/api/customers' + path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authorization === undefined ? {} : { Authorization: authorization }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+      await error(response, 401, 'UNAUTHORIZED');
+      const events = (
+        await pool.query('SELECT actor_type,result FROM audit_logs WHERE request_id=$1', [
+          response.headers.get('x-request-id'),
+        ])
+      ).rows;
+      assert.ok(events.every((event) => event.actor_type !== 'AI' && event.result !== 'SUCCESS'));
+    }
+  }
+  assert.deepEqual(await counts(), previous);
+  assert.equal(
+    (await pool.query('SELECT name FROM customers WHERE customer_seq=$1', [id])).rows[0].name,
+    name,
+  );
+});
+
+test('unconfigured customer service auth fails closed while administrator access and Swagger remain valid', async () => {
+  const { ConfigService } = require('@nestjs/config');
+  const config = app.get(ConfigService);
+  const token = config.get('AI_BUSINESS_TOKEN');
+  try {
+    config.set('AI_BUSINESS_TOKEN', '');
+    await error(
+      await fetch(base + '/api/customers/1', { headers: { Authorization: 'Bearer ' + token } }),
+      503,
+      'DEPENDENCY_UNAVAILABLE',
+    );
+    assert.equal((await fetch(base + '/api/customers', { headers: adminHeaders() })).status, 200);
+  } finally {
+    config.set('AI_BUSINESS_TOKEN', token);
+  }
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  for (const [path, method] of [
+    ['/api/customers/context', 'post'],
+    ['/api/customers', 'post'],
+    ['/api/customers/{id}', 'get'],
+    ['/api/customers/{id}', 'patch'],
+  ])
+    assert.deepEqual(document.paths[path][method].security, [{ adminSession: [] }, { bearer: [] }]);
+  assert.deepEqual(document.paths['/api/customers'].get.security, [{ adminSession: [] }]);
+});
+
+test('authenticated AI can register, read and rename without a cookie, call header or Origin', async () => {
   const input = { name: '  새 고객  ', phoneNumber: phone() };
   const response = await create(input);
   assert.equal(response.status, 201);
@@ -138,7 +219,12 @@ test('MVP AI can register, read and rename without cookie, token, call header or
 test('customer list and status changes require a real active administrator; forged headers grant nothing', async () => {
   const id = await register();
   for (const cookie of [undefined, 'dva_session=bad', 'dva_session=' + 'f'.repeat(64)]) {
-    const headers = { Origin: origin, 'X-Admin-User-Seq': String(adminId), 'X-AI-Client': 'true' };
+    const headers = {
+      Origin: origin,
+      Authorization: undefined,
+      'X-Admin-User-Seq': String(adminId),
+      'X-AI-Client': 'true',
+    };
     if (cookie) headers.Cookie = cookie;
     await error(await request('', { headers }), 401, 'UNAUTHORIZED');
     await error(
@@ -494,7 +580,7 @@ test('own address is nullable, validated, available in reads and independent of 
   await pool.query('INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2)', [id, pin]);
   const contextResponse = await fetch(base + '/api/customers/context', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...businessHeaders() },
     body: JSON.stringify({ phoneNumber: number }),
   });
   const context = (await contextResponse.json()).data;
