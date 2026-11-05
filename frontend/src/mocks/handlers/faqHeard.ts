@@ -1,10 +1,7 @@
-// 이 FAQ로 AI가 답한 최근 고객 질문 (FAQ 상세 아래, Figma 'FAQ 상세' 11/04) — RAG가 이 FAQ를 고른 고객 발화 원문 그대로
-// ('어음... 저... 그...'까지, 다듬지 않음). 화면도 그대로 보여 줌
-// ponytail: 목데이터 — 백엔드 · AI에 아직 없음(11/04 사용자: 그동안 목데이터로 띄움, 실서버 · 배포 화면에서도).
-//   API가 생기면 이 함수만 GET /faqs/{id}/questions(가칭)로 바꿈 — 데이터 출처는 통화 처리 결과 FAQ_ANSWERED의 질문 원문 · faqEntrySeq
-import type { Faq, FaqCategory } from './faqApi'
+// 가짜 FAQ 고객 질문 사례 — GET /faqs/{id}의 recentQuestions (FAQ 상세 고객 질문 사례 연동 11/05)
+// RAG가 이 FAQ를 고른 고객 발화 원문 그대로('어음... 저... 그...'까지, 다듬지 않음). 분류별 예시를 FAQ마다 다른 순서로
 
-const HEARD: Record<FaqCategory, string[]> = {
+const HEARD: Record<string, string[]> = {
   접수: [
     '어음... 저 택배 접수하려고 전화드렸는데요',
     '아 네 그 택배 하나 보내려고 하는데 어떻게 하면 돼요?',
@@ -61,9 +58,14 @@ const HEARD: Record<FaqCategory, string[]> = {
   ],
 }
 
-/** 최근 5개 — 분류별 예시를 FAQ마다 다른 순서로 */
-export function heardQuestions(faq: Pick<Faq, 'faqEntrySeq' | 'category'>): string[] {
-  const pool = HEARD[faq.category]
-  const start = faq.faqEntrySeq % pool.length
-  return [...pool.slice(start), ...pool.slice(0, start)].slice(0, 5)
+/** 최신순 사례 (서버: 최대 10개 · 응대 시각 내림차순). FAQ마다 5개, 한 시간 간격 */
+export function recentQuestionsOf(faq: { faqEntrySeq: number; category: string }) {
+  const pool = HEARD[faq.category] ?? []
+  const start = faq.faqEntrySeq % Math.max(pool.length, 1)
+  const now = Date.now()
+  return [...pool.slice(start), ...pool.slice(0, start)].slice(0, 5).map((questionText, i) => ({
+    faqQuestionExampleSeq: faq.faqEntrySeq * 100 + (5 - i),
+    questionText,
+    occurredAt: new Date(now - (i + 1) * 3_600_000).toISOString(),
+  }))
 }

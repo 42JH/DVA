@@ -1,7 +1,7 @@
-// 09 FAQ 관리 Model — API-29 · 30 · 31 · 33 (연동 상세명세 10/31 §6.1~6.3). React를 모르는 데이터 · API 층
+// 09 FAQ 관리 Model — API-29 · 30 · 31 · 33 (연동 상세명세 10/31 §6.1~6.3) + 상세 GET /faqs/{id}(고객 질문 사례, 11/05). React를 모르는 데이터 · API 층
 // 개발 중엔 MSW 가짜(mocks/handlers/faq.ts)가 같은 모양으로 응답
 import { queryOptions } from '@tanstack/react-query'
-import { api } from '@/shared/api/client'
+import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 
 /**
@@ -32,6 +32,18 @@ export interface Faq {
   updatedAt: string
 }
 
+/** 고객 질문 사례 — 이 FAQ로 AI가 답한 실제 고객 발화 원문 (공백 · 줄바꿈 그대로, 일반 글로만 보여 줌) */
+export interface FaqQuestionExample {
+  faqQuestionExampleSeq: number // 렌더링 key (같은 문장도 다른 사례)
+  questionText: string
+  occurredAt: string // 응대 시각 ISO 8601
+}
+
+/** FAQ 상세 = FAQ + 최근 고객 질문 사례 (최대 10 · 최신순 · 서버 순서 그대로 · 없으면 []) */
+export interface FaqDetail extends Faq {
+  recentQuestions: FaqQuestionExample[]
+}
+
 export interface FaqInput {
   category: FaqCategory
   question: string
@@ -45,6 +57,18 @@ export const faqQueries = {
       queryKey: [...faqQueries.all(), 'list'],
       queryFn: ({ signal }) => fetchFaqs(signal),
     }),
+  // 상세는 고객 질문 사례 때문에 따로 받음 (FAQ 칸은 목록에도 있음). 키가 ['faqs', …] 아래라 수정 · 삭제 뒤 목록과 같이 새로 받음
+  detail: (id: number) =>
+    queryOptions({
+      queryKey: [...faqQueries.all(), 'detail', id],
+      queryFn: ({ signal }) => fetchFaqDetail(id, signal),
+    }),
+}
+
+/** FAQ 상세 — recentQuestions가 없는 구버전 서버(배포 과도기)면 [] */
+export async function fetchFaqDetail(id: number, signal?: AbortSignal): Promise<FaqDetail> {
+  const { data } = await api.get<ApiItem<FaqDetail>>(`/faqs/${id}`, { signal })
+  return { ...data, recentQuestions: data.recentQuestions ?? [] }
 }
 
 /** API-29 — FAQ는 수십 개라 다 받고, 검색(띄어쓰기 · 초성) · 분류 · 쪽 나누기 · 최신순은 화면에서 (서버 q는 단순 부분 일치 · 번호순뿐) */
