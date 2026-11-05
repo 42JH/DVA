@@ -341,9 +341,13 @@ class LiveFlow:
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
-        elif what == "no_more":  # 더 없음: 마무리는 고객이 끝낼 때(문의가 남았을 수 있다)
+        elif what == "no_more":
             async with s.lock:
                 st.no_more_parcels = True
+                done = assess(st, self.policy).stage == "closing"
+            if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
+                await self._finish(s)
+                return
             await self.notify(s, "N1'", {"more_parcels": False})
             self._maybe_submit(s)
 
@@ -374,7 +378,28 @@ class LiveFlow:
             facts["order"] = _order_status(s)
         await self.notify(s, "N2" if facts.get("closing") or "agent" in facts else "N1'", facts)
         if facts.get("closing"):
-            self.svc.begin_closing(s, "customer_end", after_speech=True)  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+            self.svc.begin_closing(s, "customer_end", after_speech=True,  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+                                   remind=lambda: self.notify(s, "N2", facts, again=True))
+
+    async def _finish(self, s: CallSession) -> None:
+        """접수 완료 단계(assess closing): 결과를 closing_result_wait_sec까지 기다려 그 상태로 마무리 인사(N2 closing)를
+        시키고 끊는다. 고객이 먼저 끝냈거나 이미 끝나는 중이면 하지 않는다."""
+        if s.phase != Phase.ACTIVE:
+            return
+        self._maybe_submit(s, force=True)
+        results = getattr(self.svc, "results", None)
+        task = results.tasks.get(s.call_id) if results is not None else None
+        if task is not None:
+            t0 = time.monotonic()
+            await asyncio.wait({task}, timeout=self.cfg.closing_result_wait_sec)  # 실패·초과여도 pending으로 마무리
+            s.timing("마무리 결과 대기", (time.monotonic() - t0) * 1000)
+        if s.phase != Phase.ACTIVE:
+            return
+        facts = {"more_parcels": False, "closing": True, "order": _order_status(s)}
+        s.note("마무리", "접수 완료 단계")
+        await self.notify(s, "N2", facts)
+        self.svc.begin_closing(s, "flow_complete", after_speech=True,
+                               remind=lambda: self.notify(s, "N2", facts, again=True))
 
     def _edit(self, st) -> dict:
         from app.domain.store import open_for_edit
@@ -600,12 +625,13 @@ class LiveFlow:
             await asyncio.wait([asyncio.create_task(e.wait()) for e in events], timeout=timeout)
 
     # ------------------------------------------------------------------ 전달(N1'/N2/N3)
-    async def notify(self, s: CallSession, level: str, facts: dict) -> None:
-        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한)."""
+    async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False) -> None:
+        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
+        again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
         content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         h = hashlib.sha256(f"{level}:{content}".encode()).hexdigest()
-        if h in rt.sent_hashes:
+        if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
         if level == "N3":
