@@ -1,20 +1,15 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { useDismiss } from '@/shared/lib/useDismiss'
 import { KIND_LABEL } from '@/features/call/labels'
-import { DUR_MAX, KINDS, NO_FILTER, type CallFilterForm } from '@/features/call/hooks/useCallList'
+import { DurationRange } from './DurationRange'
+import { KINDS, NO_FILTER, type CallFilterForm } from '@/features/call/hooks/useCallList'
 
 // 04 통화 필터 (Figma '필터 팝오버' 11/04) — 머리의 필터 아이콘을 누르면 아래에 360 창. 고친 값은 [적용]을 눌러야 목록에 반영
 // 고객 구분 [전체 | 신규] · 상담 유형 접수 · 조회 · 취소 · FAQ(하나라도 한 통화). 고객 유형(기업 · 개인)은 뺌 — 통화 목록 API에 값이 없음 (11/04 사용자)
-// 통화 시간 0~20분 두 손잡이(끝까지면 제한 없음, 양 끝 글 = 고른 값) · 초기화 = 창 안 값만 처음으로
+// 통화 시간 0~20분 = DurationRange (막대 + 아래 분 입력칸) · 초기화 = 창 안 값만 처음으로
 const CHIP = 'h-8 min-w-15 rounded-full px-4 text-body font-semibold'
 const chipTone = (on: boolean) =>
   on ? 'bg-brand text-white' : 'bg-surface text-sub ring-1 ring-line ring-inset hover:bg-bg'
-// 두 range 입력을 겹침: 막대는 안 눌리고 손잡이만 눌림 (손잡이 20 · 흰 바탕 · 파랑 테두리)
-const RANGE =
-  'pointer-events-none absolute inset-x-0.5 inset-y-0 appearance-none bg-transparent outline-none ' +
-  '[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:size-5 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-brand [&::-webkit-slider-thumb]:bg-white ' +
-  '[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-brand [&::-moz-range-thumb]:bg-white ' +
-  'focus-visible:[&::-webkit-slider-thumb]:ring-2 focus-visible:[&::-webkit-slider-thumb]:ring-brand/40'
 
 const FilterIcon = () => (
   <svg
@@ -96,7 +91,6 @@ function FilterPanel({
         ? x.kinds.filter((y) => y !== k)
         : KINDS.filter((y) => y === k || x.kinds.includes(y)),
     }))
-  const at = (v: number) => v / DUR_MAX // 손잡이 위치(0~1)
 
   return (
     <div
@@ -155,44 +149,11 @@ function FilterPanel({
       <hr className="border-line" />
 
       <Section title="통화 시간">
-        <div className="flex items-center gap-3">
-          <span className="w-9 shrink-0 text-label font-bold">{f.min}분</span>
-          <div className="relative h-6 flex-1 rounded-full bg-line">
-            <div
-              aria-hidden
-              className="absolute inset-y-0.5 rounded-full bg-brand"
-              style={{
-                left: `calc(2px + (100% - 24px) * ${at(f.min)})`,
-                width: `calc((100% - 24px) * ${at(f.max) - at(f.min)} + 20px)`,
-              }}
-            />
-            <input
-              type="range"
-              min={0}
-              max={DUR_MAX}
-              value={f.min}
-              aria-label="통화 시간 최소(분)"
-              onChange={(e) =>
-                setF((x) => ({ ...x, min: Math.min(Number(e.target.value), x.max) }))
-              }
-              className={`${RANGE} ${f.min >= DUR_MAX - 1 ? 'z-10' : ''}`} // 오른쪽 끝에 겹치면 최소 손잡이가 위로 (잡을 수 있게)
-            />
-            <input
-              type="range"
-              min={0}
-              max={DUR_MAX}
-              value={f.max}
-              aria-label="통화 시간 최대(분)"
-              onChange={(e) =>
-                setF((x) => ({ ...x, max: Math.max(Number(e.target.value), x.min) }))
-              }
-              className={RANGE}
-            />
-          </div>
-          <span className="w-12 shrink-0 text-right text-label font-bold">
-            {f.max >= DUR_MAX ? `${DUR_MAX}분+` : `${f.max}분`}
-          </span>
-        </div>
+        <DurationRange
+          min={f.min}
+          max={f.max}
+          onChange={(min, max) => setF((x) => ({ ...x, min, max }))}
+        />
       </Section>
       <hr className="border-line" />
 
