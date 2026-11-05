@@ -527,6 +527,21 @@
 - 무관한 요청: 1억 이상 같은 터무니없는 가격·택배와 무관한 요청은 처리하기 어렵다고 응대, 계속되면 안내 후 상담 종료
 - 사용자가 작성한 수정을 요청에 따라 커밋(코드 변경 없음)
 
+## 2026-11-05 — develop-ai 최신화 및 프로젝트 구조 점검
+- origin fetch 후 develop-ai를 f34343f에서 2ac6717로 fast-forward(27개 커밋). 기존 미추적 output/, tmp/ 보존.
+- 실제 진입점 app/main.py 기준으로 calls(통화·위임·결과), domain(업무 상태·확인), tools, address, rag, persistence(outbox), monitor, backend_client 구조 확인. 소스코드·외부 API 계약 변경 없음.
+- 이 브랜치의 frontend는 .gitkeep만 있고 backend는 NestJS 상태 확인용 기본 코드. 전체 서비스 구현 범위와 혼동하지 않도록 각 개발 브랜치 구분 필요.
+- README 및 architecture/current-state.md의 부품 모음·서버 부재 설명은 현재 구현과 차이 있음. Dockerfile은 현재 app.main:app을 실행하며 단일 워커 사용.
+- 검증: 기존 가상환경(Python 3.14.7)에서 플러그인 자동 로딩·pytest 캐시를 끄고 test_dashboard_metrics.py의 이탈 단계·대기시간·측정 범위 테스트 18 passed, 4 deselected. 전체 테스트와 확대 실행은 완료되지 않아 중단(일부 오류 표시 포함, 원인 미확정). 전체 통과로 판단하지 않음.
+- 실제 OpenAI·PBX·백엔드·카카오·Qdrant 통합 검증 및 배포는 수행하지 않음.
+
+## 2026-11-05 — LIVE-1 위임 대기 발화 원인 조사
+- docs/architecture/live-waiting-speech-investigation.md에 코드·기존 실험·공식 문서 근거와 다음 검증 계획 기록. 구현·외부 계약 변경 없음.
+- 공통 정책은 결과 전 짧은 대기 안내를 요구하고, 기본 페르소나는 안내 문구 혼합을 요구함. 운영 BE ACTIVE 페르소나 적용 여부는 미확인.
+- Responses 위임 중 LIVE 자율 발화와 이후 결과 안내가 이어지는 현상을 유력 원인으로 분류. 문장 중단·무관한 발화의 정확한 원인은 최신 녹음·이벤트 부재로 미확정.
+- 공식 문서의 자동 acknowledgment 억제는 client 위임용이며 현재 Responses에 직접 적용 불가. 설치 SDK에도 해당 delay 필드는 없음.
+- 검증은 코드·설치 SDK·공식 문서·기존 실험 보고서 읽기만 수행. 테스트·실통화·유료 API 호출 없음.
+
 ## 2026-11-05 — FAQ 응대 근거 배열 연동 구현
 
 - 사용자 요청으로 구현 재개. Jira 번호 없이 진행하라는 지시에 따라 origin/develop-ai e5a9dee에서 feature/faq-answer-evidence 생성. 기존 로컬 develop-ai c296bfa·output/tmp 보존.
@@ -719,9 +734,17 @@
 - origin/develop-ai 70c839c의 접수 완료 후 자동 종료 변경을 작업 브랜치에 병합했다. 충돌은 worklog.md 끝의 기록 추가 부분 1곳이며, 양쪽 기록을 모두 보존했다. 팀원 코드와 사용자 프롬프트는 수정하지 않았다.
 - 정책·페르소나·입력 제한·RAG 프롬프트·통화 서비스·통화 흐름 회귀 테스트 98 passed, 13 warnings / 16.01초. git diff --check 통과. 실제 모델·실통화 검증 및 develop-ai 병합은 수행하지 않는다.
 
+## 2026-11-05 — 관제페이지 글씨 크기·통화 상태 표시 개선
+- 사용자 요청으로 develop-ai에 origin/develop-ai af62245 병합. 로컬 문서 커밋 2개를 보존했고, worklog 끝의 추가 기록 충돌은 양쪽 내용을 모두 유지해 해결했다.
+- monitor/static/index.html: 가운데 받아쓰기 말풍선 글씨를 18px에서 16px로 축소. 왼쪽 통화 목록에 active는 파란색 ‘통화중’, ended는 빨간색 ‘통화 종료’ 배지로 표시. accepting은 중립색 ‘연결 중’, 알 수 없는 상태는 기존 값 표시.
+- 기존 SSE 갱신 흐름으로 종료 시 배지도 즉시 갱신. 외부 API·인증·통화 처리 로직 변경 없음.
+- 검증: 기존 관제 테스트 5 passed. Node 실행으로 SSE active→ended 갱신, accepting·미지 상태 표시와 HTML 이스케이프 확인. git diff --check 통과. 제한 환경 pytest는 출력 없이 대기해 권한 확장 실행으로 검증 완료.
+- 운영 URL은 웹 도구로 접근하지 못해 운영 화면의 시각 검증은 미수행. 서버 배포·원격 push는 수행하지 않음.
+- 사용자 지시에 따라 Jira 이슈 번호 없이 design/monitor-readability 브랜치로 작업을 분리했다. develop-ai는 수정 전 최신화 병합 상태(5bb221d)로 복원하고, 수정 커밋 제목을 팀 규칙의 한국어 형식으로 정리했다.
+
 ## 2026-11-05 — 고객·기업 검색 API 서비스 토큰(AI_BUSINESS_TOKEN)
 
 - BE 요청: POST /api/customers/context, POST /api/customers, PATCH /api/customers/{id}, GET /api/companies/search에 `Authorization: Bearer <AI_BUSINESS_TOKEN>`. 요청 본문·응답 해석·call_session_seq 헤더는 그대로. 페르소나·분석 API는 기존 토큰 유지, 쿠키는 보내지 않는다.
 - GET /api/customers/{id}는 통화 흐름이 쓰지 않지만 요청 목록에 있어 `customer_detail`(200 data·404 None)을 토큰과 함께 추가(MockBackend도 같은 메서드). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
 - 토큰 미설정이면 헤더 없이 호출하고 시작 시 경고(BE 인증 적용 전 배포 호환). 401은 gateway에서 `BE_AUTH_FAILED`(kind contract, 재시도 없음, 경보 로그)로 분류.
-- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 5개 호출 헤더·상세 404·미설정·기존 토큰 분리·401 1회. 전체 **646 passed**.
+- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 5개 호출 헤더·상세 404·미설정·기존 토큰 분리·401 1회. develop-ai 병합 후 전체 **647 passed**.
