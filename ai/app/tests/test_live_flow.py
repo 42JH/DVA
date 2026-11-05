@@ -33,8 +33,11 @@ class FakeDecisions:
         said = input.split("고객 발화: ")[1]
         answers = []
         if "confirm" in names:
-            answers.append(choice("confirm", "yes" if said.startswith("네") else
-                                  "proceed" if "접수해 주세요" in said else "not_answer"))
+            if said.startswith("음"):  # 애매한 '네'(운영 통화 b8f3795c "아 그렇게 접수해줘" yes 0.56)
+                answers.append(choice("confirm", "yes", 0.56))
+            else:
+                answers.append(choice("confirm", "yes" if said.startswith("네") else
+                                      "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
             answers.append(choice("task", "order"))
         if "origin" in names:
@@ -254,6 +257,65 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
     ask = next(e for e in client.conns[0].sent if "ask_again" in e.get("content", ""))
     assert "이영희" in ask["content"]  # 되읽을 값을 같이 준다
     assert s.decision_ms and "Decision ms P50" in s.snapshot()["detail"]["통계"]
+
+
+def test_unclear_yes_reasks_each_time_then_clear_yes_commits(tmp_path):
+    """운영 통화 b8f3795c: 애매한 '네'(yes 0.56)는 확정하지 않고 Live에 아무것도 안 보내 32초 멈춘 뒤 무음 종료.
+    이제 확정 없이 다시 묻게 하고(두 번째 애매한 답에도), 분명한 '네'에 확정한다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "택배 보내려고요", 1000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                         "name": "record_fields", "arguments": json.dumps(FULL)}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.pending)
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+        asks = lambda: [e for e in conn.sent if e["type"] == "session.commentary.append" and "ask_again" in e["content"]]  # noqa: E731
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "음 그렇게 해줘", 6500)
+        await until(lambda: len(asks()) == 1)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 7500)
+        await say(conn, "음 그렇게 해줘", 9000)
+        await until(lambda: len(asks()) == 2)  # 같은 내용이어도 다시 묻는다
+        assert s.state.parcels == [] and s.state.pending
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 10000)
+        await say(conn, "네 해주세요", 11500)
+        await until(lambda: s.state.parcels)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert len(s.state.parcels) == 1
+
+
+def test_cancel_reask_carries_cancel_target_not_parcel_readback():
+    from app.domain.confirm import issue_cancel_confirmation
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    sent = []
+
+    async def notify(s, level, facts, again=False):
+        sent.append((level, facts, again))
+
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.policy, lf.notify = P, notify
+    st = filled()  # 받던 택배가 있어도 취소 확인이면 택배 되읽기를 주지 않는다
+    st.selected_order = {"receiver_name": "홍길동", "status": "COLLECTING", "order_seq": 1, "order_parcel_seq": 2}
+    p = issue_cancel_confirmation(st, 100.0)
+    run(lf._follow(session(st), "ask_confirm", p.id))
+    [(level, facts, again)] = sent
+    assert level == "N2" and again and facts["confirmation"] == "ask_again" and "readback" not in facts
+    assert facts["cancel_target"]["receiver_name"] == "홍길동"
 
 
 def test_agent_greets_first_on_session_start():
