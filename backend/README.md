@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+FAQ 상세 고객 질문 사례는 [AI 전송 명세](docs/faq-question-examples-ai-integration.md)와 [프론트 조회 명세](docs/faq-question-examples-frontend-integration.md)를 따른다. 앱 교체 전에 migration 052를 적용한다. FAQ_ANSWERED의 faqEntrySeqs 배열(기존 단건 호환)과 고객 발화를 받아 독립 텍스트로 복사해 관리자 상세 recentQuestions에 최신 10개만 제공한다. 같은 문장은 별도 사례로 유지하고 동일 이벤트 재전송은 추가하지 않는다. 통화 삭제와 독립적으로 응대 발생부터 5년까지 보관하며 FAQ 수정·삭제 시 사례를 비운다. 수정 전 발생한 지연 이벤트는 사례에 추가하지 않고 원본 이벤트는 보존한다. [계획·검증 기록](docs/faq-question-examples-plan.md)을 참고한다.
+
 결제 승인 복구는 새 앱 전에 migration 051을 적용한다. 미확정 요청을 선택할 때 다음 자동 조회를 1분 뒤로 예약해 다른 요청의 확인 기회를 보장한다. 확정 실패만 해제하고 새 결제 시도별 멱등키를 사용하며, 타임아웃·404·인증 오류는 결제키를 보존한다. [결제 연동 계약](../docs/api/order-payment-integration.md)의 실패·복구 기준을 따른다.
 
 AI 상담 성능 대시보드는 [프론트 조회 명세](docs/ai-dashboard-frontend-integration.md)와 [AI 전송 명세](docs/ai-dashboard-ai-integration.md)를 따른다. 새 앱 전에 migration 050을 적용한다. 고객 전체·신규·기존 공통 필터로 GET 4개를 제공하고, AI가 기존 analysis 저장 후 이탈·응답 대기 지표를 각각 전송한다. 페르소나 막대는 현재 운영 버전과 직전 활성 버전만 비교하며 활성화 성공 시 직전 번호를 보존한다. 신규 지표는 통화 soft delete·최초 수신부터 5년 폐기를 따른다. 기존 분석 요청 형식은 유지하고 불편 유형 5개를 추가한다. [계획·검증 기록](docs/ai-dashboard-plan.md)의 운영 배포·과거 이력 제한도 확인한다.

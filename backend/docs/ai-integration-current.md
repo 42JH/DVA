@@ -232,6 +232,8 @@ Content-Type: application/json
 
 성공 204. `UTTERANCE`, `AI_ACTION`, `BUSINESS_RESULT`별 payload가 다르며 임의 tool 인자·추가 status를 보내지 않는다. `HANDOFF_REQUESTED` 업무 이벤트는 유지한다. 별도 `handoff_requests` 쓰기 API는 없다. FAQ 답변 결과의 `FAQ_ANSWERED` 참조 필드와 순서·재전송 규칙은 [이벤트 상세](../../docs/api/call-events.md)를 따른다.
 
+052 이후 FAQ 응대는 [고객 질문 사례 AI 명세](faq-question-examples-ai-integration.md)를 우선한다. 질문·답변 한 쌍에 이벤트 하나와 `faqEntrySeqs: [12,15]`를 보내고 기존 단건 `faqEntrySeq`는 호환한다. 서버는 FAQ별 최근 10개 고객 질문을 통화와 독립적인 텍스트로 보관한다. 같은 발생 재전송은 최초 UUID·단건/배열 형식을 유지하며 FAQ 수정 전 발생 사례는 상세 목록에 다시 추가하지 않는다.
+
 미답변은 `POST /api/ai/unanswered-questions`에 `eventId`, `callSessionSeq`, `providerCallId`, `questionText`, `occurredAt`, `offsetSeconds`를 보낸다. 같은 이벤트 UUID로 재전송한다. 생성 응답의 번호를 관련 업무 결과 이벤트에서 참조하는 계약은 [미답변 수집](../../docs/api/unanswered-questions.md)을 따른다.
 
 통화 종료 후 RAG 검색 결과와 Live의 실제 답변을 대조해 미답변 사유를 확정하고 선택 `reason`을 추가한다. `KB_NO_ANSWER`는 검색 성공 후 근거 부족, `KB_UNAVAILABLE`은 검색 미연결·장애다. 생략/null과 과거 행은 미분류다. 기존 질문별 호출·201/200 응답·QUESTION_UNANSWERED의 질문 번호 참조는 유지하며 통합 전송 API는 추가하지 않는다. 같은 eventId의 사유·본문은 재전송에도 고정한다. DB 049 적용 → 새 BE 배포 후 전송을 시작하며 구버전 BE에 먼저 보내면 400이다. [사유·호환·전환 상세](unanswered-question-reasons.md)
