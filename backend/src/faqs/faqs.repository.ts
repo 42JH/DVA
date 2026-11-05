@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import { AdminFaqQueryDto, AiFaqQueryDto, CreateFaqDto, UpdateFaqDto } from './dto/faq-request.dto';
-import { AgentFaqDto, FaqDto } from './dto/faq-response.dto';
+import { AgentFaqDto, FaqDetailDto, FaqDto } from './dto/faq-response.dto';
 
 const AGENT_FIELDS = 'faq_entry_seq AS "faqEntrySeq",question,answer,updated_at AS "updatedAt"';
 const ADMIN_FIELDS = `${AGENT_FIELDS},category,created_at AS "createdAt",updated_by_admin_user_seq AS "updatedByAdminUserSeq"`;
@@ -34,10 +34,18 @@ export class FaqsRepository {
     );
   }
 
-  async find(id: number): Promise<FaqDto | undefined> {
+  async find(id: number): Promise<FaqDetailDto | undefined> {
     return (
-      await this.database.pool.query<FaqDto>(
-        `SELECT ${ADMIN_FIELDS} FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
+      await this.database.pool.query<FaqDetailDto>(
+        `SELECT ${ADMIN_FIELDS},COALESCE((
+           SELECT jsonb_agg(jsonb_build_object('faqQuestionExampleSeq',e.faq_question_example_seq,
+             'questionText',e.question_text,'occurredAt',e.occurred_at)
+             ORDER BY e.occurred_at DESC,e.faq_question_example_seq DESC)
+           FROM (SELECT faq_question_example_seq,question_text,occurred_at FROM faq_question_examples
+             WHERE faq_entry_seq=f.faq_entry_seq AND occurred_at>statement_timestamp()-interval '5 years'
+             ORDER BY occurred_at DESC,faq_question_example_seq DESC LIMIT 10) e
+         ),'[]'::jsonb) AS "recentQuestions"
+         FROM faq_entries f WHERE faq_entry_seq=$1 AND deleted_at IS NULL`,
         [id],
       )
     ).rows[0];
@@ -72,7 +80,12 @@ export class FaqsRepository {
   async delete(client: PoolClient, ids: number[]): Promise<number[]> {
     return (
       await client.query<{ id: number }>(
-        'UPDATE faq_entries SET deleted_at=clock_timestamp() WHERE faq_entry_seq=ANY($1::int[]) AND deleted_at IS NULL RETURNING faq_entry_seq AS id',
+        `WITH targets AS (
+           SELECT faq_entry_seq FROM faq_entries WHERE faq_entry_seq=ANY($1::int[]) AND deleted_at IS NULL
+           ORDER BY faq_entry_seq FOR UPDATE
+         ) UPDATE faq_entries SET deleted_at=clock_timestamp()
+         WHERE faq_entry_seq IN (SELECT faq_entry_seq FROM targets) AND deleted_at IS NULL
+         RETURNING faq_entry_seq AS id`,
         [ids],
       )
     ).rows.map((row) => row.id);

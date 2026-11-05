@@ -8,7 +8,7 @@
 | DELETE /api/companies/{id} | 모든 활성 관리자. 기업·부서·소속·기업 PIN을 같은 트랜잭션에서 soft delete |
 | DELETE /api/departments/{id} | 해당 부서·소속·기업 PIN만 soft delete |
 | DELETE /api/members/{id} | 소속만 soft delete. 고객은 보존 |
-| DELETE /api/faqs | 기존 faqEntrySeqs 배열 유지. 원문 보관 + AI DELETE 알림 유지 |
+| DELETE /api/faqs | 기존 faqEntrySeqs 배열 유지. FAQ 본문 보관 + AI DELETE 알림 유지. 052 고객 질문 사례는 같은 트랜잭션에서 물리 삭제 |
 | DELETE /api/unanswered-questions/{id} | 기존 정책대로 OPEN만 삭제, DELETED 재호출 204, REGISTERED 409. 원문은 DB에 보관하고 조회·처리 결과에서는 숨김 |
 | **DELETE /api/orders/{id}** | 신규. 모든 활성 관리자. 주문과 자식 이력을 일반 조회에서 숨김. 결제 취소 API가 아니며 금액·청구 총액은 변경하지 않음 |
 | **DELETE /api/calls/{id}** | 신규. 모든 활성 관리자. 통화·분석·STT·AI 이벤트·미답변·녹취를 일반 조회에서 숨김. 연결된 주문은 보존 |
@@ -18,6 +18,8 @@
 주문은 COLLECTING/CANCELLED/ACCEPTED이고 진행 중인 연결 통화·승인·안내 발송이 없을 때 삭제한다. notPaid는 기존 취소 API로 먼저 정리하고, PAID/SUBMITTING/SUBMITTING_FAILED/SUBMISSION_FAILED는 결제·접수 결과부터 확인한다. 최종 접수 실패도 결제 취소를 뜻하지 않는다. 통화는 PBX 종료가 확인되고 연결된 모든 녹취 수신의 저장이 완료되어야 삭제한다. RECEIVED·FAILED 또는 활성 업로드 lease가 있으면 409이며 저장을 마친 뒤 재호출한다. 종료 누락을 임의 시간 초과로 판단하지 않는다.
 
 프론트는 기존 목록/total_count/상세를 다시 조회하면 된다. deletedAt을 새로 받아 필터링할 필요가 없다. 삭제/만료 데이터는 서버가 제외하며 이미 삭제한 주문·통화의 DELETE 재호출은 404다. 발급해 둔 녹취 URL은 기존 유효기간(최대 5분) 동안 동작할 수 있으며 이미 실행 중인 요청은 소급 취소하지 않는다.
+
+052 FAQ 고객 질문 사례는 [별도 조회 계약](faq-question-examples-frontend-integration.md)을 따른다. 통화 soft delete·물리 삭제 후에도 FAQ 상세의 질문 텍스트를 유지하며, 실제 FAQ 응대 발생부터 5년 또는 FAQ 실제 수정·삭제/최신 10개 초과 시 물리 삭제한다. 원본 통화 이벤트·발화의 기존 보관 정책은 그대로다.
 
 보관 만료 후 자동 폐기에서는 최종 접수 실패 `SUBMISSION_FAILED`도 생성 시각부터 5년이 지난 정리 대상이다. 미확정 결제 승인·발송 중인 안내·연결 통화가 있으면 유예하며, 기한 안의 일반 DELETE와 결제 취소·환불 기준은 그대로 유지한다.
 

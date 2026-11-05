@@ -42,15 +42,29 @@ export function normalizeCallEvents(input: CallEventInputDto[]): CallEventInputD
             'VALIDATION_FAILED',
             'FAQ 답변 결과의 주문·미답변 번호는 null이어야 합니다.',
           );
-        Object.assign(payload, {
-          faqEntrySeq: value.faqEntrySeq,
-          questionUtteranceOrder: value.questionUtteranceOrder,
-          answerUtteranceOrder: value.answerUtteranceOrder,
-        });
+        if (value.faqEntrySeq !== undefined && value.faqEntrySeqs !== undefined)
+          throw new ApiException(
+            400,
+            'INVALID_REQUEST',
+            'FAQ 단건 번호와 번호 배열은 함께 보낼 수 없습니다.',
+          );
+        Object.assign(
+          payload,
+          value.faqEntrySeqs !== undefined
+            ? { faqEntrySeqs: [...value.faqEntrySeqs].sort((a, b) => a - b) }
+            : { faqEntrySeq: value.faqEntrySeq },
+          {
+            questionUtteranceOrder: value.questionUtteranceOrder,
+            answerUtteranceOrder: value.answerUtteranceOrder,
+          },
+        );
       } else if (
-        [value.faqEntrySeq, value.questionUtteranceOrder, value.answerUtteranceOrder].some(
-          (field) => field !== undefined,
-        )
+        [
+          value.faqEntrySeq,
+          value.faqEntrySeqs,
+          value.questionUtteranceOrder,
+          value.answerUtteranceOrder,
+        ].some((field) => field !== undefined)
       )
         throw new ApiException(
           400,

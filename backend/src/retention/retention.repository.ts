@@ -221,6 +221,10 @@ export class RetentionRepository {
         WHERE m.billing_month+interval '5 years 1 month'<=statement_timestamp()
          AND NOT EXISTS(SELECT 1 FROM order_billing_charges c WHERE c.organization_seq=m.organization_seq AND c.billing_month=m.billing_month)
         LIMIT 100 FOR UPDATE SKIP LOCKED)`);
+      await client.query(`DELETE FROM faq_question_examples WHERE faq_question_example_seq IN (
+        SELECT faq_question_example_seq FROM faq_question_examples
+        WHERE occurred_at<=statement_timestamp()-interval '5 years'
+        ORDER BY occurred_at,faq_question_example_seq LIMIT 100 FOR UPDATE SKIP LOCKED)`);
     });
   }
 }

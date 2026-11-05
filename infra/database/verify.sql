@@ -4,13 +4,13 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
+ IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
- IF n<>26 THEN RAISE EXCEPTION 'Expected 26 foreign keys, found %',n; END IF;
+ IF n<>27 THEN RAISE EXCEPTION 'Expected 27 foreign keys, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
  JOIN pg_namespace s ON s.oid=c.relnamespace WHERE s.nspname='public' AND NOT t.tgisinternal;
- IF n<>10 THEN RAISE EXCEPTION 'Expected 10 business triggers, found %',n; END IF;
+ IF n<>11 THEN RAISE EXCEPTION 'Expected 11 business triggers, found %',n; END IF;
  IF EXISTS(SELECT 1 FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
   WHERE s.nspname='public' AND NOT c.convalidated) THEN RAISE EXCEPTION 'Unvalidated constraints found'; END IF;
  IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public'
@@ -205,7 +205,20 @@ BEGIN
     AND pg_get_indexdef(indexrelid) LIKE '%payment_request_id%')
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='051-payment-approval-recovery.sql') THEN
   RAISE EXCEPTION 'Payment approval recovery schema or migration missing'; END IF;
- RAISE NOTICE 'PASS: 29 public tables, 26 FKs, 10 triggers, dashboard/retention/retry/payment recovery schema and migration ledger';
+ IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='faq_question_examples'
+    AND column_name IN ('faq_question_example_seq','faq_entry_seq','event_id','question_text','occurred_at') AND is_nullable='NO')<>5
+  OR (SELECT count(*) FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='f')<>1
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='f'
+    AND confrelid='public.faq_entries'::regclass AND confdeltype='c')
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.faq_question_examples') AND contype='u'
+    AND pg_get_constraintdef(oid)='UNIQUE (faq_entry_seq, event_id)')
+  OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.faq_question_examples_recent_idx') AND indisvalid)
+  OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.faq_question_examples_retention_idx') AND indisvalid)
+  OR NOT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='public.faq_entries'::regclass
+    AND tgname='faq_question_examples_reset' AND tgenabled='O')
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='052-faq-question-examples.sql') THEN
+  RAISE EXCEPTION 'FAQ question snapshots, independent retention or migration missing'; END IF;
+ RAISE NOTICE 'PASS: 30 public tables, 27 FKs, 11 triggers, FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables

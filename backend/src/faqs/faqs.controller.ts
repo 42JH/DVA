@@ -62,7 +62,11 @@ export class FaqsController {
   }
 
   @Get(':id')
-  @ApiOperation({ summary: '관리자 FAQ 상세 조회' })
+  @ApiOperation({
+    summary: '관리자 FAQ 상세 조회',
+    description:
+      '최근 고객 질문 recentQuestions를 최대 10개 제공합니다. 통화 삭제와 독립적으로 발생 후 5년까지 보관하고 FAQ 수정·삭제 시 비웁니다.',
+  })
   @ApiOkResponse({ type: FaqResponseDto })
   @ApiResponse({ status: 404, type: ErrorResponseDto, description: 'FAQ 없음.' })
   find(@Param() params: FaqIdParamsDto) {

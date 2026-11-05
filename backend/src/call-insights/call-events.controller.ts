@@ -54,7 +54,7 @@ export class CallEventsController {
   @ApiOperation({
     summary: 'EVT-01 통화 이벤트 저장',
     description:
-      '요청당 1~50개·100KiB. 통화 누적 개수 제한이 아니다. 위치는 정수 초이며 AI 동작 status는 받지 않는다. 동일 재전송은 204, 충돌은 묶음 전체 롤백 후 409.',
+      '요청당 1~50개·100KiB. 통화 누적 개수 제한이 아니다. 위치는 정수 초이며 AI 동작 status는 받지 않는다. 동일 재전송은 204, 충돌은 묶음 전체 롤백 후 409. 신규 FAQ_ANSWERED는 유효한 현재 FAQ에 고객 질문 스냅샷을 추가한다. FAQ 수정 전 발생·삭제 FAQ·5년 만료 사례는 스냅샷에 추가하지 않고 원본 이벤트는 보존한다.',
   })
   @ApiNoContentResponse({ description: '전체 저장 또는 동일 이벤트 재전송 성공. 본문 없음.' })
   save(

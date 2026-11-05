@@ -3,6 +3,7 @@ import { ApiProperty, ApiPropertyOptional, getSchemaPath } from '@nestjs/swagger
 import {
   ArrayMaxSize,
   ArrayMinSize,
+  ArrayUnique,
   IsArray,
   IsIn,
   IsInt,
@@ -107,16 +108,39 @@ export class BusinessResultPayloadDto {
   @ApiPropertyOptional({
     minimum: 1,
     maximum: 2147483647,
-    description: 'FAQ_ANSWERED에서 필수인 사용 FAQ 번호. 다른 action에서는 생략한다.',
+    description:
+      '기존 단건 호환용 FAQ 번호. FAQ_ANSWERED는 faqEntrySeqs 또는 이 필드 중 하나만 보낸다.',
   })
   @ValidateIf(
     (payload: BusinessResultPayloadDto, value: unknown) =>
-      payload.action === 'FAQ_ANSWERED' || value !== undefined,
+      (payload.action === 'FAQ_ANSWERED' && payload.faqEntrySeqs === undefined) ||
+      value !== undefined,
   )
   @IsInt()
   @Min(1)
   @Max(2147483647)
   faqEntrySeq?: number;
+
+  @ApiPropertyOptional({
+    type: [Number],
+    minItems: 1,
+    maxItems: 100,
+    description:
+      '답변에 사용한 FAQ 번호 1~100개. 중복 불가. FAQ_ANSWERED 전용이며 faqEntrySeq와 함께 보내지 않는다.',
+  })
+  @ValidateIf(
+    (payload: BusinessResultPayloadDto, value: unknown) =>
+      (payload.action === 'FAQ_ANSWERED' && payload.faqEntrySeq === undefined) ||
+      value !== undefined,
+  )
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  @ArrayUnique()
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  @Max(2147483647, { each: true })
+  faqEntrySeqs?: number[];
 
   @ApiPropertyOptional({
     minimum: 1,

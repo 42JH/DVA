@@ -57,7 +57,12 @@ export class CallEventsRepository {
          CASE WHEN u.status IN ('OPEN','REGISTERED') THEN u.reason ELSE NULL END AS "unansweredReason",
          CASE WHEN e.payload->>'action'='FAQ_ANSWERED' THEN question.utterance_text
           WHEN u.status IN ('OPEN','REGISTERED') THEN u.question_text ELSE NULL END AS "questionText",
-         answer.utterance_text AS "answerText",(e.payload->>'faqEntrySeq')::integer AS "faqEntrySeq",
+         answer.utterance_text AS "answerText",
+         COALESCE((e.payload->>'faqEntrySeq')::integer,
+           CASE WHEN jsonb_array_length(e.payload->'faqEntrySeqs')=1
+             THEN (e.payload->'faqEntrySeqs'->>0)::integer END) AS "faqEntrySeq",
+         CASE WHEN e.payload->>'action'='FAQ_ANSWERED' THEN COALESCE(e.payload->'faqEntrySeqs',
+           jsonb_build_array((e.payload->>'faqEntrySeq')::integer)) END AS "faqEntrySeqs",
          (e.payload->>'questionUtteranceOrder')::integer AS "questionUtteranceOrder",
          (e.payload->>'answerUtteranceOrder')::integer AS "answerUtteranceOrder"
          FROM call_insight_events e
@@ -160,6 +165,51 @@ export class CallEventsRepository {
         [callId, payload.utteranceOrder],
       )
     ).rows[0];
+  }
+
+  async saveFaqQuestionExamples(
+    client: PoolClient,
+    callId: number,
+    events: CallEventInputDto[],
+  ): Promise<void> {
+    const results = events.flatMap((event) => {
+      const payload = event.payload as BusinessResultPayloadDto;
+      return (payload.faqEntrySeqs ?? [payload.faqEntrySeq!]).map((id) => ({
+        event_id: event.eventId,
+        faq_entry_seq: id,
+        question_utterance_order: payload.questionUtteranceOrder!,
+        occurred_at: event.occurredAt,
+      }));
+    });
+    const ids = [...new Set(results.map((result) => result.faq_entry_seq))];
+    // FAQ 수정/삭제와 같은 번호순 잠금을 사용해 여러 통화의 10개 제한을 직렬화한다.
+    await client.query(
+      `WITH current_faqs AS (
+         SELECT faq_entry_seq,updated_at FROM faq_entries
+         WHERE faq_entry_seq=ANY($3::int[]) AND deleted_at IS NULL
+         ORDER BY faq_entry_seq FOR UPDATE
+       ) INSERT INTO faq_question_examples(faq_entry_seq,event_id,question_text,occurred_at)
+       SELECT f.faq_entry_seq,r.event_id,u.utterance_text,r.occurred_at
+       FROM jsonb_to_recordset($2::jsonb) AS r(event_id uuid,faq_entry_seq integer,
+         question_utterance_order integer,occurred_at timestamptz)
+       JOIN current_faqs f ON f.faq_entry_seq=r.faq_entry_seq
+       JOIN call_utterances u ON u.call_session_seq=$1 AND u.utterance_order=r.question_utterance_order
+       WHERE r.occurred_at>=f.updated_at
+         AND r.occurred_at>statement_timestamp()-interval '5 years'
+       ORDER BY r.occurred_at,r.event_id
+       ON CONFLICT(faq_entry_seq,event_id) DO NOTHING`,
+      [callId, JSON.stringify(results), ids],
+    );
+    await client.query(
+      `DELETE FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[])
+       AND (occurred_at<=statement_timestamp()-interval '5 years' OR faq_question_example_seq IN (
+         SELECT faq_question_example_seq FROM (
+           SELECT faq_question_example_seq,row_number() OVER(PARTITION BY faq_entry_seq
+             ORDER BY occurred_at DESC,faq_question_example_seq DESC) AS position
+           FROM faq_question_examples WHERE faq_entry_seq=ANY($1::int[])
+         ) ranked WHERE position>10))`,
+      [ids],
+    );
   }
 
   async insert(

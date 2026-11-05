@@ -10,6 +10,7 @@ import { normalizeCallEvents } from './call-event-input';
 import {
   AiActionPayloadDto,
   BusinessResultPayloadDto,
+  CallEventInputDto,
   CreateCallEventsDto,
   UtterancePayloadDto,
 } from './dto/create-call-events.dto';
@@ -48,7 +49,7 @@ export class CallEventsService {
       if (call.providerCallId !== input.providerCallId)
         throw new ApiException(403, 'FORBIDDEN', '통화 번호와 AI 통화 ID가 일치하지 않습니다.');
       let inserted = false;
-      const faqResults: BusinessResultPayloadDto[] = [];
+      const faqResults: CallEventInputDto[] = [];
       // 서로 다른 통화에서 잘못 재사용한 UUID도 같은 잠금 순서로 처리한다.
       for (const event of events.sort((a, b) => a.eventId.localeCompare(b.eventId))) {
         const hash = createHash('sha256')
@@ -112,12 +113,16 @@ export class CallEventsService {
             event.kind === 'BUSINESS_RESULT' &&
             (event.payload as BusinessResultPayloadDto).action === 'FAQ_ANSWERED'
           )
-            faqResults.push(event.payload as BusinessResultPayloadDto);
+            faqResults.push(event);
         }
       }
       // 같은 묶음의 발화가 UUID 정렬 뒤에 있어도 참조할 수 있다.
       for (const result of faqResults) {
-        const references = await this.repository.faqReferences(client, id, result);
+        const references = await this.repository.faqReferences(
+          client,
+          id,
+          result.payload as BusinessResultPayloadDto,
+        );
         if (references.questionSpeaker === null || references.answerSpeaker === null)
           throw new ApiException(
             404,
@@ -131,6 +136,7 @@ export class CallEventsService {
             '질문은 고객 발화, 답변은 AI 발화여야 합니다.',
           );
       }
+      if (faqResults.length) await this.repository.saveFaqQuestionExamples(client, id, faqResults);
       if (inserted)
         await this.audit.recordSuccess(
           {
