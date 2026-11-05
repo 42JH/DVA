@@ -11,6 +11,7 @@ import {
   type Utterance,
 } from '@/features/call/api/callApi'
 import { utteranceAt, utteranceForAction, type CallActionKind } from '@/features/call/api/callDto'
+import { groupActions } from '@/features/call/actionText'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
@@ -228,16 +229,18 @@ export function useCallDetail(callId: number) {
     jump, // 그 줄로 스크롤 (AI 동작 · 이전 · 다음을 눌렀을 때만 — 재생 중엔 하이라이트만 따라가고 스크롤은 안 함)
 
     // AI 동작 기록 — 짚은 말이 부른 동작은 같이 하이라이트 (11/05 사용자: AI 동작 로그에도 그 부분 하이라이트)
-    actions: (call?.actions ?? []).map((a): ActionView => {
-      const sec = a.atSec
-      const from = sec === null ? null : utteranceForAction(says, sec, a.text)
+    // 글은 화면 말로 정제(actionText — 실패 코드 · 주문 상태 · '기록: n개 항목'), 연달아 나온 '기록'은 한 줄로 합침 (11/05 사용자)
+    actions: groupActions(call?.actions ?? []).map(({ head, all, text }): ActionView => {
+      const sec = head.atSec
+      const by = (a: (typeof all)[number]) =>
+        a.atSec === null ? null : (utteranceForAction(says, a.atSec, a.text)?.order ?? null)
       return {
-        key: a.order,
-        kind: a.kind,
-        // 서버 summaryText 그대로. 단 미답변으로 기록된 FAQ 검색은 'FAQ 근거 있음' 같은 검색 요약 대신 미답변 사유 (11/04 AI팀)
-        text: (a.kind === 'FAQ_SEARCH' && sec !== null && unansweredAt.get(sec)) || a.text,
-        active: from !== null && from.order === focusKey,
-        onClick: sec === null ? undefined : () => jumpTo(sec, a.text),
+        key: head.order,
+        kind: head.kind,
+        // 미답변으로 기록된 FAQ 검색은 검색 요약 대신 미답변 사유 (11/04 AI팀)
+        text: (head.kind === 'FAQ_SEARCH' && sec !== null && unansweredAt.get(sec)) || text,
+        active: focusKey !== null && all.some((a) => by(a) === focusKey),
+        onClick: sec === null ? undefined : () => jumpTo(sec, head.text),
       }
     }),
   }
