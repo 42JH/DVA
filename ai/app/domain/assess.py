@@ -55,7 +55,9 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
         m, b = [], []
         for name in s.required:
             f = _field(state, name)
-            if f is None or not f.valid:
+            needs_geo = state.require_resolved_addresses and name in ("sender_address", "receiver_address") and (
+                state.current is None or getattr(state.current, name.replace("address", "geo")) is None)
+            if f is None or not f.valid or name in state.unresolved_fields or needs_geo:
                 m.append(name)
             if f is not None and f.status in (FieldStatus.INVALID, FieldStatus.PENDING_CHOICE):
                 b.append(name)

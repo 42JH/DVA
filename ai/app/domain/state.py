@@ -68,6 +68,7 @@ class CandidateSet:
     kind: Literal["destination", "order", "parcel"]   # parcel: 고칠 담은 택배(P5)
     labels: tuple[str, ...]
     items: tuple[Any, ...]         # destination: Place, order: 조회 결과 dict
+    version: int = 0
 
 
 @dataclass
@@ -164,6 +165,9 @@ class ConversationState:
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
+    input_rejections: dict[str, int] = field(default_factory=dict)
+    unresolved_fields: set[str] = field(default_factory=set)
+    require_resolved_addresses: bool = False
     _next_parcel: int = 1
 
     # --- 변경(잠금 안에서만) ---

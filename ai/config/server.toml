@@ -65,6 +65,11 @@ medium_box = 6050
 big_box = 7150
 
 [call]
+# 새 통화에서 Live가 규칙·대화를 주도하고 Responses는 기록/실행 어댑터로 사용한다.
+# false면 기존 Decision 경로. 운영 배포는 별도이며 진행 중 통화의 모드는 바뀌지 않는다.
+live_led = true
+# 검토한 새 운영 페르소나 버전을 지정하기 전에는 서버 기본 말투를 사용하고 BE 페르소나 적용 회신은 하지 않는다.
+# live_led_persona_version = 10
 # 통화 생명주기(docs/architecture/call-lifecycle.md §2). 측정 후 조정
 max_active_calls = 20
 stage1_budget_sec = 1.5

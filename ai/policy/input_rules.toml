@@ -1,0 +1,5 @@
+# 원 단위 정수. 한 통화의 주문 안에 있는 받는 곳별 택배 내역마다 적용한다.
+item_price_min = 1
+item_price_max = 99999999
+box_total_max = 10
+document_max = 100

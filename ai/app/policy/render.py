@@ -7,6 +7,7 @@ Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드�
 
 from app.config import ROOT
 from app.policy.model import Policy
+from app.policy.inputs import render_input_rules
 
 POLICY_DIR = ROOT / "policy"
 
@@ -20,8 +21,8 @@ def default_persona() -> str:
     return _read("persona_default.md")
 
 
-def business_rules() -> str:
-    return _read("business_rules.md")
+def business_rules(*, live_led: bool = False) -> str:
+    return _read("business_rules.md" if live_led else "business_rules_legacy.md")
 
 
 def _labels(policy: Policy, names) -> list[str]:
@@ -69,18 +70,43 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
 
 
 def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, str] | None = None,
-                tools: tuple[tuple[str, str], ...] = ()) -> str:
+                tools: tuple[tuple[str, str], ...] = (), *, live_led: bool = False) -> str:
     """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
     persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
-    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
+    if live_led:
+        order = [policy.fields[n].label for stage in policy.collect_stages() for n in stage.required]
+        parts = [persona, "", business_rules(live_led=True), "", render_input_rules(policy), "",
+                 "## 기본 수집 순서\n" + " → ".join(order),
+                 "## Delegation policy\nBackend tools:"]
+        parts += [f"- {name}: {desc}" for name, desc in tools]
+        parts += ["Generate <|SpawnThinking|> when:\n"
+                  "- 규칙에 맞는 값을 기록하거나 정정할 때, 실제 조회·검색이 필요할 때.\n"
+                  "- 동의·후보·출발지·저장·콜백·업무 전환·추가 택배·종료 의사를 서버에 반영할 때. "
+                  "manage_conversation으로 요청한 행동을 전달합니다.\n"
+                  "Do not generate <|SpawnThinking|> when:\n"
+                  "- 범위 밖이거나 불명확해 고객에게 다시 물어야 할 때. 간단한 규칙 판단을 백엔드에 묻지 않습니다.\n"
+                  "- 인사·맞장구·이미 받은 사실의 반복.\n"
+                  "Do not guess the result while waiting.\n"
+                  "- 단순 기록 중에는 이미 들은 항목을 다시 묻지 않고 다음 독립 항목을 물을 수 있습니다. "
+                  "주소 조회 중에는 다음 작업으로 넘어가지 않습니다. 실제 결과·최종 확인은 필요한 처리가 끝난 뒤 안내합니다."]
+        meanings = dict(policy.results) | {
+            "readback": "서버가 기록한 확인 내용. 직접 말한 상세주소를 포함해 읽습니다. 고객이 의미상 수락하면 읽기를 끝내고 확인 ID로 전달합니다.",
+            "confirmation": "최신 확인 ID와 종류 또는 재확인 사유. 접수와 취소의 대상을 구분합니다. cancel_ask_again은 취소할지 묻습니다.",
+            "missing": "서버 기록 기준의 누락 항목. 이미 들었고 기록 중인 값은 다시 묻지 않습니다. 실제 실패한 항목은 복구합니다.",
+        }
+        parts += ["## 서버 결과 읽는 법"] + [f"- {key}: {value}" for key, value in meanings.items()]
+        parts += [f"같은 항목을 {policy.reask.max_attempts}회 받지 못하면 표현·방법을 바꾸고 상담원 연결을 권합니다."]
+    else:
+        parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)
 
 
-def render_backend(policy: Policy) -> str:
+def render_backend(policy: Policy, *, live_led: bool = False) -> str:
     free = ", ".join(f"{policy.fields[n].label}({n})" for n in policy.free_fields())
-    return _read("backend_rules.md").replace("{fields}", free)
+    name = "backend_rules_live.md" if live_led else "backend_rules.md"
+    return _read(name).replace("{fields}", free)
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
@@ -89,8 +115,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
-    if stage is None and stage_id == "intent":
-        sets = ["intent"]
+    if stage is None:
+        sets = ["intent"] if stage_id == "intent" else ["collect"]
     if pending:
         sets.insert(0, "confirm")  # confirm은 확인 대기가 있을 때만(delegation.md §3.2)
     if callback:

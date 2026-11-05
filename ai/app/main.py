@@ -159,7 +159,7 @@ async def lifespan(app: FastAPI):
         warm = asyncio.create_task(svc.calls.warmup())
         # 페르소나: 기동 때 ACTIVE·PENDING 복구, 이후 BE 알림마다 동기화(새 통화 진입도 같은 잠금으로 맞춘다)
         if not svc.calls.persona.enabled:
-            log.warning("AI_PERSONA_TOKEN이 없어 페르소나 연동 끔: 서버 기본 프롬프트(P2)")
+            log.warning("운영 페르소나 연동을 사용하지 않아 서버 기본 프롬프트(P2)")
         persona = asyncio.create_task(svc.calls.persona.run())
         # S6: 결과 아웃박스(재시작 복구) — 실통화 시험은 가짜 BE(BACKEND_MOCK=true)
         outbox = Outbox(Path(os.environ.get("OUTBOX_PATH", ROOT / "state" / "outbox.sqlite3")))
