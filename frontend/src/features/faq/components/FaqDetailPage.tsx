@@ -1,4 +1,5 @@
-import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { fmtDateTime } from '@/shared/lib/format'
 import { useRememberView } from '@/shared/lib/recentViews'
 import { Button, Highlight, Markdown, TopBar } from '@/shared/ui'
 import { faqTo, useFaqDetail, useRecentQuestions } from '@/features/faq/hooks/useFaqList'
@@ -9,6 +10,7 @@ import { FAQ_GRID, FaqCategoryNav } from './FaqCategories'
 // 질문 · 답변은 수정 화면의 질문칸 · 답변칸과 같은 글자 · 같은 자리 (11/04 사용자: 화면마다 폰트 맞춤)
 // 고객 질문 = GET /faqs/{id}의 recentQuestions (11/05 실서버 연동 — 최대 10 · 서버 순서(최신순) 그대로 · 같은 문장도 따로)
 //   RAG가 이 FAQ를 고른 발화 원문 그대로('어음... 저...'까지, 가공 · 말줄임 없음, 일반 글). 없으면 구분선째 안 보임
+//   줄 = 말풍선 · 질문 · 응대 시각. 원본 통화 번호가 있으면 질문을 누르면 통화 상세, 없으면(원본 삭제 · 만료) 글만 + 안내
 // 한 화면에 다 보이게: 답변 칸이 남는 높이를 채우고, 긴 답변은 그 칸 안에서 스크롤 (화면 전체는 안 밀림)
 // 검색해서 들어오면(?q=) 경로 'FAQ > “박스” 검색 > “박스” 검색 상세' · 질문 · 답변의 맞은 자리 하이라이트 (11/04 사용자)
 export function FaqDetailPage() {
@@ -77,8 +79,26 @@ export function FaqDetailPage() {
                     >
                       <path d="M8 14C11.3137 14 14 11.3137 14 8C14 4.68629 11.3137 2 8 2C4.68629 2 2 4.68629 2 8C2 8.7981 2.15582 9.5598 2.43871 10.2563C2.49285 10.3897 2.51992 10.4563 2.532 10.5102C2.54381 10.5629 2.54813 10.6019 2.54814 10.6559C2.54814 10.7111 2.53812 10.7713 2.51807 10.8916L2.12275 13.2635C2.08135 13.5119 2.06065 13.6361 2.09917 13.7259C2.13289 13.8045 2.19552 13.8671 2.27412 13.9008C2.36393 13.9393 2.48812 13.9186 2.73651 13.8772L5.10843 13.4819C5.22872 13.4619 5.28887 13.4519 5.34409 13.4519C5.3981 13.4519 5.43711 13.4562 5.48981 13.468C5.54369 13.4801 5.61035 13.5072 5.74366 13.5613C6.4402 13.8442 7.2019 14 8 14Z" />
                     </svg>
-                    <span className="min-w-0 break-words whitespace-pre-wrap">
-                      {qe.questionText}
+                    {qe.callSessionSeq !== null ? (
+                      // 원본 통화로 (통화 상세가 404면 그 화면이 이 FAQ 상세를 다시 받게 fromFaq를 넘김)
+                      <Link
+                        to={`/calls/${qe.callSessionSeq}`}
+                        state={{ fromFaq: id }}
+                        title="이 질문이 나온 통화 보기"
+                        className="min-w-0 break-words whitespace-pre-wrap hover:text-brand hover:underline"
+                      >
+                        {qe.questionText}
+                      </Link>
+                    ) : (
+                      <span
+                        title="통화 원본이 삭제되어 조회할 수 없습니다"
+                        className="min-w-0 break-words whitespace-pre-wrap"
+                      >
+                        {qe.questionText}
+                      </span>
+                    )}
+                    <span className="ml-auto shrink-0 pl-4 text-caption text-muted tabular-nums">
+                      {fmtDateTime(qe.occurredAt)}
                     </span>
                   </li>
                 ))}

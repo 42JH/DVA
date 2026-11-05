@@ -37,6 +37,7 @@ export interface FaqQuestionExample {
   faqQuestionExampleSeq: number // 렌더링 key (같은 문장도 다른 사례)
   questionText: string
   occurredAt: string // 응대 시각 ISO 8601
+  callSessionSeq: number | null // 그 사례의 원본 통화 → 통화 상세. null = 원본이 지워졌거나 보관 만료(링크 없음)
 }
 
 /** FAQ 상세 = FAQ + 최근 고객 질문 사례 (최대 10 · 최신순 · 서버 순서 그대로 · 없으면 []) */
@@ -65,10 +66,16 @@ export const faqQueries = {
     }),
 }
 
-/** FAQ 상세 — recentQuestions가 없는 구버전 서버(배포 과도기)면 [] */
+/** FAQ 상세 — 구버전 서버(배포 과도기)는 recentQuestions · callSessionSeq 칸이 없을 수 있음 → [] · null */
 export async function fetchFaqDetail(id: number, signal?: AbortSignal): Promise<FaqDetail> {
   const { data } = await api.get<ApiItem<FaqDetail>>(`/faqs/${id}`, { signal })
-  return { ...data, recentQuestions: data.recentQuestions ?? [] }
+  return {
+    ...data,
+    recentQuestions: (data.recentQuestions ?? []).map((e) => ({
+      ...e,
+      callSessionSeq: e.callSessionSeq ?? null,
+    })),
+  }
 }
 
 /** API-29 — FAQ는 수십 개라 다 받고, 검색(띄어쓰기 · 초성) · 분류 · 쪽 나누기 · 최신순은 화면에서 (서버 q는 단순 부분 일치 · 번호순뿐) */

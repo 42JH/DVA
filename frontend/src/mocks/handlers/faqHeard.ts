@@ -67,5 +67,7 @@ export function recentQuestionsOf(faq: { faqEntrySeq: number; category: string }
     faqQuestionExampleSeq: faq.faqEntrySeq * 100 + (5 - i),
     questionText,
     occurredAt: new Date(now - (i + 1) * 3_600_000).toISOString(),
+    // 원본 통화: 있는 통화 · 지워진 통화(404) · 원본 없음(null)을 섞음
+    callSessionSeq: [9101, 9105, null, 9104, 99999][i],
   }))
 }

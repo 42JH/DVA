@@ -18,10 +18,12 @@ export function CallDetailPage() {
 }
 
 function CallDetailBody({ callId }: { callId: number }) {
-  const vm = useCallDetail(callId)
-  useRememberView('call', callId, vm.recent, vm.notFound)
   // 04 목록에서 왔으면 그 주소(날짜 · 검색 · 필터 그대로)로, 다른 곳(주문 상세 · AI 미답변)에서 왔으면 오늘 목록으로
-  const from = (useLocation().state as { from?: string } | null)?.from ?? '/calls'
+  const state = useLocation().state as { from?: string; fromFaq?: number } | null
+  // fromFaq = FAQ 상세 고객 질문 사례에서 옴 → 통화가 없으면(404) 그 FAQ 상세를 다시 받음 (훅이 처리)
+  const vm = useCallDetail(callId, state?.fromFaq)
+  const from = state?.from ?? '/calls'
+  useRememberView('call', callId, vm.recent, vm.notFound)
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
