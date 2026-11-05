@@ -526,3 +526,11 @@
 - 접수 확인: "접수 내용 확인 부탁드릴게요." 뒤 기록된 주문 내용을 말해 확인받음. 접수 완료는 서버 전송 성공 뒤에만 말함
 - 무관한 요청: 1억 이상 같은 터무니없는 가격·택배와 무관한 요청은 처리하기 어렵다고 응대, 계속되면 안내 후 상담 종료
 - 사용자가 작성한 수정을 요청에 따라 커밋(코드 변경 없음)
+
+## 2026-11-05 — develop-ai 최신화 및 프로젝트 구조 점검
+- origin fetch 후 develop-ai를 f34343f에서 2ac6717로 fast-forward(27개 커밋). 기존 미추적 output/, tmp/ 보존.
+- 실제 진입점 app/main.py 기준으로 calls(통화·위임·결과), domain(업무 상태·확인), tools, address, rag, persistence(outbox), monitor, backend_client 구조 확인. 소스코드·외부 API 계약 변경 없음.
+- 이 브랜치의 frontend는 .gitkeep만 있고 backend는 NestJS 상태 확인용 기본 코드. 전체 서비스 구현 범위와 혼동하지 않도록 각 개발 브랜치 구분 필요.
+- README 및 architecture/current-state.md의 부품 모음·서버 부재 설명은 현재 구현과 차이 있음. Dockerfile은 현재 app.main:app을 실행하며 단일 워커 사용.
+- 검증: 기존 가상환경(Python 3.14.7)에서 플러그인 자동 로딩·pytest 캐시를 끄고 test_dashboard_metrics.py의 이탈 단계·대기시간·측정 범위 테스트 18 passed, 4 deselected. 전체 테스트와 확대 실행은 완료되지 않아 중단(일부 오류 표시 포함, 원인 미확정). 전체 통과로 판단하지 않음.
+- 실제 OpenAI·PBX·백엔드·카카오·Qdrant 통합 검증 및 배포는 수행하지 않음.
