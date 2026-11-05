@@ -1,13 +1,14 @@
 """S15P31D109-159. 실제 API 호출 없이 판정 검증·종료 경로·재시작을 검증한다."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
 from conftest import run
 
 from app.calls.results import ResultService
-from app.calls.unanswered import (Inquiry, ReviewDecision, ReviewError, UnansweredReviewer,
+from app.calls.unanswered import (Inquiry, ReviewDecision, ReferencedDecision, ReviewError, UnansweredReviewer,
                                   apply_review, evidence_from_session, validate_decision)
 from app.tests.test_domain import P, fare, filled
 from app.tests.test_results import service, session
@@ -95,7 +96,19 @@ class FakeClient:
 
     async def parse(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(output_parsed=self.result, status=self.status)
+        result = self.result
+        if isinstance(result, ReviewDecision):  # 기존 숫자 fixture를 명시적 ref를 선택하는 가짜 모델 출력으로 변환
+            data = json.loads(kwargs["input"][1]["content"])
+            def ref(rows, index):
+                return rows[index]["ref"] if 0 <= index < len(rows) else "unknown-ref"
+            result = ReferencedDecision.model_validate({"inquiries": [{
+                "customer_ref": ref(data["transcript"], r.customer_index), "question_text": r.question_text,
+                "search_refs": [ref(data["searches"], j) for j in r.tool_indices], "outcome": r.outcome,
+                "agent_ref": ref(data["transcript"], r.agent_index) if r.agent_index is not None else None,
+                "agent_quote": r.agent_quote, "used_evidence": [{"search_ref": ref(data["searches"], e.search_index),
+                    "chunk_id": e.chunk_id, "evidence_quote": e.evidence_quote, "answer_quote": e.answer_quote}
+                    for e in r.used_evidence]} for r in result.inquiries]})
+        return SimpleNamespace(output_parsed=result, status=self.status)
 
 
 def reviewer(client, **kw):
@@ -107,7 +120,7 @@ def test_structured_adapter_sends_only_evidence_and_rejects_refusal():
     client = FakeClient(decision())
     result = run(reviewer(client).review(evidence()))
     assert result["inquiries"][0]["reason"] == "KB_NO_ANSWER"
-    assert client.calls[0]["store"] is False and client.calls[0]["text_format"] is ReviewDecision
+    assert client.calls[0]["store"] is False and client.calls[0]["text_format"] is ReferencedDecision
     with pytest.raises(ReviewError, match="REVIEW_NOT_COMPLETED"):
         run(reviewer(FakeClient()).review(evidence()))
     with pytest.raises(ReviewError, match="REVIEW_INPUT_TOO_LARGE"):
@@ -159,8 +172,8 @@ def test_contract_gate_and_restart_reuse_fixed_verdict_and_body(tmp_path):
 
     run(prepare())
     saved = rs.outbox.review(s.call_id)
-    assert saved["status"] == "READY" and saved["result"]["model"] == "test-model"
-    assert db.unanswered == {} and db.events == {} and db.analyses == {}
+    assert saved["status"] == "DONE" and saved["result"]["model"] == "test-model"
+    assert db.unanswered == {} and db.events and db.analyses
     rs.outbox.close()
     rs2 = ResultService(BackendGateway(db), Outbox(tmp_path / "outbox.sqlite3"), P, fare,
                         reviewer=reviewer(client), reason_contract_enabled=True)
@@ -174,7 +187,7 @@ def test_contract_gate_and_restart_reuse_fixed_verdict_and_body(tmp_path):
     assert rs2.outbox.review(s.call_id)["status"] == "DONE"
 
 
-def test_failed_review_does_not_send_or_use_old_heuristic_and_stops_retrying(tmp_path):
+def test_failed_review_does_not_send_unverified_results_and_stops_retrying(tmp_path):
     rs, db = service(tmp_path)
     s = reviewed_session(db)
     client = FakeClient()  # 거절/결과 없음
@@ -189,7 +202,8 @@ def test_failed_review_does_not_send_or_use_old_heuristic_and_stops_retrying(tmp
     run(scenario())
     assert len(client.calls) == 2
     assert rs.outbox.review(s.call_id)["status"] == "FAILED"
-    assert db.unanswered == {} and db.analyses == {}
+    assert db.unanswered == {} and db.events
+    assert db.analyses[s.state.customer.call_session_seq]["faqAnswerCount"] is None
 
 
 def test_no_search_does_not_call_model_and_truncated_input_is_not_judged():
@@ -218,11 +232,12 @@ def test_lost_ack_retries_same_unanswered_without_rejudging(tmp_path):
 
     class LostAck(MockBackend):
         unanswered_attempts = 0
+        drop_ack = True
 
         async def send_unanswered(self, body):
             seq = await super().send_unanswered(body)
             self.unanswered_attempts += 1
-            if self.unanswered_attempts == 1:
+            if self.drop_ack:
                 raise BackendFailure("unavailable", "BE_TIMEOUT", "unanswered")
             return seq
 
@@ -235,11 +250,12 @@ def test_lost_ack_retries_same_unanswered_without_rejudging(tmp_path):
         await rs.finish(s)
         await asyncio.gather(*rs.background)
         assert rs.outbox.insight(s.call_id)["status"] == "PENDING"
+        db.drop_ack = False
         await rs.recover_reviews()
         assert rs.outbox.insight(s.call_id)["status"] == "DONE"
 
     run(scenario())
-    assert len(client.calls) == 1 and db.unanswered_attempts == 2 and len(db.unanswered) == 1
+    assert len(client.calls) == 1 and db.unanswered_attempts >= 2 and len(db.unanswered) == 1
 
 
 def test_last_related_search_controls_reason_after_retry():
