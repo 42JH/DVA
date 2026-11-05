@@ -19,4 +19,10 @@
   <changeSet id="003-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="004-admin-auth-audit" author="dva" dbms="postgresql" runInTransaction="true">
+    <preConditions onFail="HALT" onError="HALT" onFailMessage="Legacy administrator display names are unavailable. Preserve these accounts and prepare a verified name migration before enabling operations auth.">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM admin_users</sqlCheck>
+    </preConditions>
+    <sqlFile path="004-admin-auth-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

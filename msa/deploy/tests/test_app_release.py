@@ -113,6 +113,10 @@ class DeliveryPlanTests(unittest.TestCase):
         self.commit('backend/other.ts', 'unrelated')
         self.assertEqual(planner.plan('', True, self.state, {}), [])
 
+    def test_parity_change_verifies_deployed_services_again(self):
+        self.commit('msa/parity/operations-auth.test.cjs', 'updated contract check')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['customer'])
+
     def test_database_only_change_is_selected_without_app(self):
         annotations = {f'dva.ssafy.io/db-{name}-commit': self.deployed for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}
         self.commit('msa/liquibase/changelog/operations/002.sql', 'schema only')

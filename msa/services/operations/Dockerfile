@@ -7,10 +7,14 @@ RUN npm ci
 COPY nest-cli.json tsconfig*.json .prettierrc eslint.config.mjs ./
 COPY src ./src
 COPY test ./test
+COPY scripts ./scripts
 RUN npm run lint \
  && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
  && npm run build
+
+FROM builder AS checks
+CMD ["node", "--test", "test/auth.test.cjs", "test/auth.integration.test.cjs"]
 
 FROM node:24-bookworm-slim
 WORKDIR /app
@@ -21,6 +25,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=builder /app/dist ./dist
+COPY scripts ./scripts
 
 USER node
 EXPOSE 3005

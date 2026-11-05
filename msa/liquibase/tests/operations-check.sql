@@ -7,14 +7,18 @@ BEGIN
    AND table_name='faq_entries' AND column_name IN ('version','is_enabled')) THEN
   RAISE EXCEPTION 'Removed FAQ columns remain';
  END IF;
- INSERT INTO admin_users(login_id,password_hash,role,status)
- VALUES('faq-check-'||txid_current(),'test-only-not-a-login','SYSTEM_ADMIN','ACTIVE')
+ INSERT INTO admin_users(login_id,name,password_hash,role,status)
+ VALUES('faq-check-'||txid_current(),'Schema test','test-only-not-a-login','SYSTEM_ADMIN','ACTIVE')
  RETURNING admin_user_seq INTO admin_id;
  UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=admin_id;
  UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=admin_id;
+ UPDATE admin_users SET status='INACTIVE' WHERE admin_user_seq=admin_id;
+ IF (SELECT status FROM admin_users WHERE admin_user_seq=admin_id)<>'INACTIVE' THEN
+  RAISE EXCEPTION 'Latest monolith inactive state not preserved'; END IF;
+ UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=admin_id;
  BEGIN
-  UPDATE admin_users SET status='INACTIVE' WHERE admin_user_seq=admin_id;
-  RAISE EXCEPTION 'Inactive admin accepted';
+  UPDATE admin_users SET status='INVALID' WHERE admin_user_seq=admin_id;
+  RAISE EXCEPTION 'Invalid admin status accepted';
  EXCEPTION WHEN check_violation THEN NULL;
  END;
  INSERT INTO ai_personas(code,name) VALUES('faq-check-'||txid_current(),'test')

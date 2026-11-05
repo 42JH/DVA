@@ -83,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',7,4),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',7,3)]:
+    for service, tables, fks in [('customer',7,4),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',8,4)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = 3 if service in ('customer', 'operations') else 2
+        changesets = {'customer': 3, 'operations': 4}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -182,7 +182,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '3'
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('4' if service == 'operations' else '3')
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -215,6 +215,26 @@ try:
             assert sql(db, "SELECT count(*) FROM customers WHERE phone_number='01099999991';", service+'-events-business-preserved') == '1'
         else:
             assert sql(db, "SELECT count(*) FROM outbox_events WHERE event_id='00000000-0000-4000-8000-000000000001' AND payload='{\"legacy\":true}'::jsonb AND delivered_at IS NULL AND attempt_count=0 AND outbox_seq IS NOT NULL AND next_attempt_at IS NOT NULL;", service+'-events-pending-preserved') == '1'
+    # Nameless legacy accounts must halt the new auth schema without rewriting identity/data.
+    sql('postgres', 'CREATE DATABASE operations_auth_upgrade_db OWNER operations_app;', 'operations-auth-setup')
+    lb('operations', 'operations_auth_upgrade_db', 'update-count', 'operations-auth-baseline', extra=('--count=3',))
+    sql('operations_auth_upgrade_db', "INSERT INTO admin_users(login_id,password_hash,role,status) VALUES('legacy','preserved-hash','OPERATOR','ACTIVE');", 'operations-auth-legacy-seed', 'operations_app')
+    output = lb('operations', 'operations_auth_upgrade_db', 'update', 'operations-auth-nameless-rejected', failure=True)
+    assert 'Legacy administrator display names are unavailable' in output, output
+    assert sql('operations_auth_upgrade_db', "SELECT login_id,password_hash FROM admin_users;", 'operations-auth-legacy-preserved') == 'legacy|preserved-hash'
+    assert sql('operations_auth_upgrade_db', "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_users' AND column_name='name';", 'operations-auth-no-partial-column') == '0'
+    assert sql('operations_auth_upgrade_db', 'SELECT count(*) FROM databasechangelog;', 'operations-auth-no-partial-history') == '3'
+    sql('operations_auth_upgrade_db', "DELETE FROM admin_users WHERE login_id='legacy';", 'operations-auth-test-fixture-cleanup', 'operations_app')
+    failing = logs / 'atomicity-operations-auth'
+    shutil.copytree(BASE / 'changelog', failing, dirs_exist_ok=True)
+    auth_sql = failing / 'operations/004-admin-auth-audit.sql'
+    auth_sql.write_text(auth_sql.read_text(encoding='utf-8') + '\nSELECT 1 / 0;\n', encoding='utf-8')
+    output = lb('operations', 'operations_auth_upgrade_db', 'update', 'operations-auth-atomic-failure', failure=True, changelog_root=failing)
+    assert 'division by zero' in output.lower(), output
+    assert sql('operations_auth_upgrade_db', "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='admin_users' AND column_name IN ('name','deleted_at');", 'operations-auth-atomic-columns') == '0'
+    assert sql('operations_auth_upgrade_db', "SELECT to_regclass('admin_sessions') IS NULL;", 'operations-auth-atomic-sessions') == 't'
+    assert sql('operations_auth_upgrade_db', 'SELECT count(*) FROM databasechangelog;', 'operations-auth-atomic-history') == '3'
+    lb('operations', 'operations_auth_upgrade_db', 'update', 'operations-auth-upgrade')
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)
