@@ -62,7 +62,7 @@ def test_multi_faq_one_response_one_event_and_original_utterances(tmp_path):
     out = apply_review(s.call_id, 1000, e, p, result, faq_answered_enabled=True)
     [event] = faq_events(out)
     assert event["payload"] == {"action": "FAQ_ANSWERED", "orderSeq": None, "unansweredQuestionSeq": None,
-        "summaryText": "FAQ 근거로 문의 안내 완료", "faqEntrySeqs": [12, 18],
+        "summaryText": "FAQ 답변 근거 있음", "faqEntrySeqs": [12, 18],
         "questionUtteranceOrder": 1, "answerUtteranceOrder": 2}
     assert event["offsetSeconds"] == 5 and event["occurredAt"].endswith("16:45.000+00:00")
     assert out["analysis"]["faqAnswerCount"] == 1 and p == original

@@ -492,7 +492,7 @@ class ResultService:
                                    "occurredAt": item["occurredAt"], "offsetSeconds": item["offsetSeconds"],
                                    "payload": {"action": "QUESTION_UNANSWERED", "orderSeq": None,
                                                "unansweredQuestionSeq": progress[f"unanswered_{i}_result"],
-                                               "summaryText": "답하지 못한 질문 기록"}})
+                                               "summaryText": _unanswered_summary(item)}})
                 for i, batch in enumerate(_batches(base["provider_call_id"], events)):
                     key = f"review_batch_{i}"
                     if not await perform(key, "events", api.send_call_events, seq, batch):
@@ -590,8 +590,19 @@ def _summary(name: str, out: dict) -> str:
     if name == "lookup_orders":
         return f"택배 {facts.get('found', 0)}건 찾음"
     if name == "search_manual":
-        return "FAQ 근거 있음" if facts.get("answerable") else "FAQ 근거 없음"
+        context = facts.get("context") or {}
+        if "evidence" in context:
+            return f"FAQ 검색 후보 {len(context['evidence'])}건 반환"
+        return "FAQ 검색 완료·응대 검토 전"
     return "완료"
+
+
+def _unanswered_summary(item: dict) -> str:
+    if item.get("reason") == "KB_NO_ANSWER":
+        return "FAQ 답변 근거 없음"
+    if item.get("reason") == "KB_UNAVAILABLE":
+        return "지식 검색 장애로 답변하지 못함"
+    return "답하지 못한 질문 기록"
 
 
 def _question(tool_call: dict) -> str | None:

@@ -4,6 +4,8 @@ import asyncio
 import copy
 import json
 
+import pytest
+
 from conftest import run
 
 from app.calls.unanswered import (ReferencedDecision, evidence_from_session, model_evidence,
@@ -13,6 +15,49 @@ from app.tests.test_results import service
 from app.tests.test_unanswered import FakeClient, reviewer
 from backend_client.api import BackendError
 from backend_client.mock import MockBackend
+
+
+@pytest.mark.parametrize("status,reason,summary", [
+    ("ok", "KB_NO_ANSWER", "FAQ 답변 근거 없음"),
+    ("unavailable", "KB_UNAVAILABLE", "지식 검색 장애로 답변하지 못함"),
+])
+def test_irrelevant_weather_search_retry_delivers_final_unanswered(tmp_path, status, reason, summary):
+    e = evidence()
+    e["transcript"][0]["text"] = "오늘 날씨 어때요?"
+    e["transcript"][1]["text"] = "실시간 날씨는 확인해 드릴 수 없습니다."
+    e["searches"][0]["output"]["status"] = status
+    e["searches"].append(copy.deepcopy(e["searches"][0]) | {"at": 1005.55})
+    rs, db = service(tmp_path)
+    s, _ = payload(e, rs, db)
+    d = wire(evidence_from_session(s))
+    item = d.inquiries[0]
+    item.question_text = e["transcript"][0]["text"]
+    item.outcome = "UNANSWERED"
+    item.agent_quote = e["transcript"][1]["text"]
+    item.used_evidence = []
+    item.search_refs = [r["ref"] for r in model_evidence(e)["searches"]]
+    rs.reviewer = reviewer(FakeClient(d))
+    rs.reason_contract_enabled = rs.faq_answered_enabled = True
+
+    async def scenario():
+        await rs.finish(s)
+        await asyncio.gather(*rs.background)
+        await rs.recover_reviews()
+
+    run(scenario())
+    seq = s.state.customer.call_session_seq
+    events = list(db.events[seq].values())
+    assert rs.outbox.insight(s.call_id)["status"] == "DONE"
+    assert rs.outbox.review(s.call_id)["result"]["complete"] is True
+    assert len(db.unanswered) == 1
+    assert next(iter(db.unanswered.values()))["body"]["reason"] == reason
+    assert any(x["payload"].get("action") == "QUESTION_UNANSWERED" and
+               x["payload"]["summaryText"] == summary for x in events)
+    assert not any(x["payload"].get("action") == "FAQ_ANSWERED" for x in events)
+    assert db.analyses[seq]["faqAnswerCount"] == 0
+    if status == "ok":
+        assert [x["payload"]["summaryText"] for x in events if x["payload"].get("action") == "FAQ_SEARCH"] == [
+            "FAQ 검색 후보 3건 반환", "FAQ 검색 후보 3건 반환"]
 
 
 def wire(e):
