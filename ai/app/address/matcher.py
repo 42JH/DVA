@@ -380,7 +380,8 @@ def _correct(db, text) -> Resolution:
         for addr in db.jibun_lookup(area, san, number):
             if d < scored.get(addr, (99,))[0]:
                 scored[addr] = (d, key)
-    national = wide_scope(db, parse(text)[0][0])[0] is None  # 시도도 동도 말하지 않음
+    tokens = parse(text)[0][0]
+    national = not db.match_region(tokens)[0] and wide_scope(db, tokens)[0] is None  # 시군구도 시도도 동도 말하지 않음
     if scored:
         return judge(scored, exact_only=national)
     # 건물명은 건축물대장 이름이라 사람들이 부르는 장소명과 다를 수 있다(부가정보의 "63빌딩"은 인천의 다른 건물) — 지역 없이 건물명만으로

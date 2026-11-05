@@ -345,6 +345,7 @@ def test_same_road_in_several_regions_asks_region(db):
     r = resolve(db, "대핸란로 212")
     assert r.status == "region_needed" and r.candidates == ("서울특별시 강남구",)
     assert resolve(db, "서울 테헤람로 212").address == "서울특별시 강남구 테헤란로 212"  # 시도를 말했으면 고쳐서 확정
+    assert resolve(db, "강남구 테헤람로 212").address == "서울특별시 강남구 테헤란로 212"  # 시도 없이 시군구만 말해도 지역을 말한 것
     assert resolve(db, "테헤람로 212").status == "region_needed"
 
 
