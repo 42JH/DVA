@@ -272,6 +272,41 @@ def test_agent_greets_first_on_session_start():
     assert len(greets) == 1 and greets[0]["type"] == "session.commentary.append"
 
 
+def test_late_result_and_n2_wait_while_customer_is_speaking():
+    """끼어들기: 고객이 말하는 동안 앞선 위임 결과로 재개(response.create)하거나 N2를 보내지 않는다. 말이 끝나면 보낸다."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await until(lambda: "session.commentary.append" in sent_types(conn))  # 첫 인사 N2
+        await say(conn, "택배 보내려고요", 1000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.created"}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                         "name": "record_fields",
+                                                         "arguments": json.dumps({"sender_name": "김철수"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+        for i in range(12):  # 결과가 오는 동안 고객이 끼어들어 계속 말한다(약 0.36초, gap 40ms보다 촘촘히)
+            conn.push({"type": "session.input_transcript.delta", "delta": "저기요 ", "start_ms": 3000 + i * 30,
+                       "end_ms": 3000 + i * 30 + 25})
+            await asyncio.sleep(0.03)
+        types = sent_types(conn)
+        assert "response.item.create" in types and "response.create" not in types
+        notes_while_speaking = len([e for e in conn.sent if e["type"] == "session.commentary.append"])
+        await until(lambda: "response.create" in sent_types(conn))  # 고객 말이 끝나면 재개
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return notes_while_speaking
+
+    assert run(scenario()) == 1  # 고객이 말하는 동안 새 N2 없음(첫 인사만)
+
+
 def test_three_unanswered_manual_searches_suggest_agent_then_reset():
     """같은 질문에 3번 연속 답을 못 드리면 상담원 권유(업무 규칙 h), 답이 나오면 0으로."""
     lf = LiveFlow.__new__(LiveFlow)
