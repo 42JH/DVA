@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS review_jobs(
   session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, input_json TEXT NOT NULL,
   status TEXT NOT NULL, result_json TEXT, prepared_json TEXT, error TEXT,
   attempts INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS review_attempts(
+  attempt_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, attempt_number INTEGER NOT NULL,
+  result_json TEXT, error TEXT, created_at REAL NOT NULL);
 """
 
 
@@ -40,12 +43,12 @@ class Outbox:
     # --- 통화 결과 ---
     def result(self, session_id: str) -> dict | None:
         with self.lock:
-            row = self.db.execute("SELECT idempotency_key, body_json, status, last_data_json, attempts FROM call_results "
-                                  "WHERE session_id=?", (session_id,)).fetchone()
+            row = self.db.execute("SELECT idempotency_key, body_json, status, last_data_json, attempts, updated_at "
+                                  "FROM call_results WHERE session_id=?", (session_id,)).fetchone()
         if not row:
             return None
         return {"session_id": session_id, "key": row[0], "body": json.loads(row[1]), "status": row[2],
-                "data": json.loads(row[3]) if row[3] else None, "attempts": row[4]}
+                "data": json.loads(row[3]) if row[3] else None, "attempts": row[4], "updated_at": row[5]}
 
     def create_result(self, session_id: str, key: str, body: dict) -> dict:
         """처음이면 저장(전송 전에 커밋), 이미 있으면 기존 행(키·본문 불변)."""
@@ -136,3 +139,23 @@ class Outbox:
         with self.lock:
             ids = [r[0] for r in self.db.execute("SELECT session_id FROM review_jobs WHERE status IN ('PENDING','READY')")]
         return [self.review(i) for i in ids]
+
+    def fail_review(self, session_id: str, error: str, prepared: dict) -> None:
+        """판정 실패를 유지하며 검증되지 않은 값을 제외한 최종 전송 본문만 한 번 고정."""
+        with self.lock:
+            self.db.execute("UPDATE review_jobs SET status='FAILED',error=?,prepared_json=COALESCE(prepared_json,?), "
+                            "updated_at=? WHERE session_id=? AND status='PENDING'",
+                            (error, json.dumps(prepared, ensure_ascii=False), time.time(), session_id))
+
+    def record_review_attempt(self, session_id: str, number: int, result: dict | None, error: str | None) -> None:
+        """판정 원문·세부 오류는 일반 로그가 아니라 기존 보호된 Outbox 안에 보관한다."""
+        with self.lock:
+            self.db.execute("INSERT INTO review_attempts(session_id,attempt_number,result_json,error,created_at) "
+                            "VALUES(?,?,?,?,?)", (session_id, number,
+                             json.dumps(result, ensure_ascii=False) if result is not None else None, error, time.time()))
+
+    def review_attempts(self, session_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT attempt_number,result_json,error FROM review_attempts "
+                                   "WHERE session_id=? ORDER BY attempt_id", (session_id,)).fetchall()
+        return [{"attempt": r[0], "result": json.loads(r[1]) if r[1] else None, "error": r[2]} for r in rows]

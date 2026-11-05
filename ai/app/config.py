@@ -81,6 +81,7 @@ class BackendConfig(_Strict):
     write_budget_sec: float = Field(5.0, gt=0)   # 취소 등 쓰기 예산
     submit_timeout_sec: float = Field(15.0, gt=0)  # 통화 결과 요청 1회
     submit_retry_sec: float = Field(40.0, gt=0)    # 통화 결과 같은 키 재확인 총 시간
+    result_resend_sec: float = Field(60.0, ge=0)   # SENT_UNCERTAIN 결과를 실행 중 같은 키로 재확인하는 주기(0이면 끔)
     # 분석에 hasCallbackRequest를 넣는다. 048 + 새 BE(feature/ai-call-updates) 배포 전에는 false(구버전 BE가 400으로 거절)
     analysis_callback_field: bool = False
 
@@ -103,7 +104,8 @@ class CallConfig(_Strict):
     persona_report_attempts: int = Field(3, gt=0)    # 적용 회신 시도 횟수(원본 report_attempts)
     persona_max_prompt_chars: int = Field(20000, gt=0)  # 넘으면 INVALID_CONFIG 회신(원본 max_prompt_chars)
     recent_destinations: int = Field(5, ge=0)
-    closing_quiet_ms: int = Field(1200, gt=0)        # 마무리: 출력 전사가 이만큼 멈추면 끊는다
+    closing_quiet_ms: int = Field(1200, ge=1000)     # 마무리: AI 발화 끝 뒤 이만큼 조용하면 끊는다(전달 지연 — 최소 1초)
+    closing_result_wait_sec: float = Field(5.0, gt=0)  # 접수 완료 단계: 결과를 이만큼 기다려 마무리 안내에 쓴다(넘으면 pending)
     closing_max_sec: float = Field(15.0, gt=0)       # 마무리 최대 대기
     silence_sec: float = Field(30.0, gt=0)           # 고객 무발화
     expire_margin_sec: float = Field(60.0, ge=0)     # 세션 만료 전 마무리
@@ -128,6 +130,8 @@ class UnansweredReviewConfig(_Strict):
     enabled: bool = False
     # 백엔드 reason 허용값·필수 여부·배포 확인 전에는 전송 보류
     reason_contract_enabled: bool = False
+    # 첨부 배열 계약 + migration 052·배열 지원 백엔드 배포 후 활성화
+    faq_answered_enabled: bool = False
     timeout_sec: float = Field(30.0, gt=0, le=120)
     max_input_chars: int = Field(100000, ge=1000, le=1000000)
     max_output_tokens: int = Field(6000, ge=100, le=30000)

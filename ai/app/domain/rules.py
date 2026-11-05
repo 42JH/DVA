@@ -4,6 +4,8 @@
 import re
 from datetime import datetime, timedelta, timezone
 
+from app.policy.model import Phone, load_policy
+
 KST = timezone(timedelta(hours=9))
 
 _KOREAN_DIGITS = {"공": "0", "영": "0", "빵": "0", "일": "1", "이": "2", "삼": "3", "사": "4",
@@ -13,19 +15,20 @@ _NATIVE_DIGITS = {"하나": "1", "다섯": "5", "여섯": "6", "일곱": "7", "�
                   "둘": "2", "셋": "3", "넷": "4"}
 
 
-def normalize_phone(raw: str) -> str | None:
+def normalize_phone(raw: str, rule: Phone | None = None) -> str | None:
     """한글 숫자·기호를 숫자만으로 바꾸고 자릿수를 검사한다. 틀리면 None(저장하지 않는다)."""
+    rule = rule if rule is not None else load_policy().phone
     for word, digit in _NATIVE_DIGITS.items():
         raw = raw.replace(word, digit)
     s = "".join(_KOREAN_DIGITS.get(ch, ch) for ch in raw).strip()
     if s.startswith("+82"):
         s = "0" + s[3:].lstrip(" -")
     digits = re.sub(r"\D", "", s)
-    if re.fullmatch(r"1[568]\d{6}", digits):
+    if len(digits) == rule.service_digits and digits.startswith(rule.service_prefixes):
         return digits
-    if digits.startswith("010"):
-        return digits if len(digits) == 11 else None
-    if digits.startswith("0") and 9 <= len(digits) <= 11:
+    if digits.startswith(rule.mobile_prefix):
+        return digits if len(digits) == rule.mobile_digits else None
+    if digits.startswith("0") and rule.domestic_min_digits <= len(digits) <= rule.domestic_max_digits:
         return digits
     return None
 

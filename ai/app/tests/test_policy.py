@@ -27,6 +27,14 @@ def test_receive_order_matches_call_flow_rule():
     assert POLICY.fields["sender_phone"].kind == "auto" and "sender_phone" not in order  # 발신번호, 묻지 않음
 
 
+def test_waiting_words_are_generated_not_fixed():
+    """대기 중 채우는 말은 고정 문장 없이 Live가 짓는다(2026-11-05). 끼어들기 원칙은 페르소나와 무관하게 항상 들어간다."""
+    for text in (render_live(None, POLICY), render_live("운영 페르소나", POLICY)):
+        assert "정해진 문장 없이" in text and "고객이 말을 시작하면 하던 말을 바로 멈추고" in text
+        assert "대기 안내만" not in text
+    assert "## 대기 안내" not in default_persona() and "네 고객님" not in default_persona()
+
+
 def test_live_instructions_carry_policy_order_forbid_and_delegation():
     text = render_live(None, POLICY)
     labels = [POLICY.fields[n].label for s in POLICY.collect_stages() for n in s.required]
@@ -36,7 +44,7 @@ def test_live_instructions_carry_policy_order_forbid_and_delegation():
     assert all(item in text for item in POLICY.forbid.items)
     delegate = text.split("Generate <|SpawnThinking|> when:")[1].split("Do not generate")[0]
     assert all(POLICY.fields[n].label in delegate for n in POLICY.free_fields())  # 자유형은 전부 위임 규칙에(S0 U7)
-    assert POLICY.fields["payment"].label not in delegate  # 선택형은 위임하지 않는다
+    assert "payment" not in POLICY.fields and "결제 방식" not in procedure.split("## 하지 않는 것")[0]  # 결제는 묻지 않는다
     assert "수거 시각은 먼저 묻지 않는다" in text and text.startswith(default_persona()[:20])
 
 
@@ -76,7 +84,7 @@ def test_server_missing_uses_same_order_as_instructions():
 
 @pytest.mark.parametrize("stage, pending, expected", [
     ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm"]),
-    ("readback", False, []), ("more_parcels", True, ["confirm", "more", "switch"]), ("payment", False, ["pay", "switch"]),
+    ("readback", False, []), ("more_parcels", True, ["confirm", "more", "switch"]),
     ("closing", False, ["switch"]),
 ])
 def test_decision_questions_per_stage(stage, pending, expected):
@@ -105,7 +113,3 @@ def test_invalid_policy_is_rejected(breakage, message):
     with pytest.raises(ValidationError, match=message):
         Policy.model_validate(d)
 
-
-def test_pay_question_uses_customer_methods():
-    qs = decision_questions(POLICY, "payment", pay_methods=("billing", "credit"))
-    assert [c["value"] for c in qs[0]["choices"]] == ["billing", "credit", "not_answer"]

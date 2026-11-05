@@ -37,6 +37,43 @@ def context(data):
     return lambda req: httpx2.Response(200, json={"data": data, "meta": {"requestId": "r"}})
 
 
+@pytest.mark.parametrize("ids", [[12], [12, 15]])
+def test_faq_answered_array_contract_uses_existing_events_api(ids):
+    """사용자 제공 FAQ 사례 계약: 한 응대/이벤트, 배열만 사용, 발화 원문은 UTTERANCE 한 번씩."""
+    events = []
+    for i, (speaker, text) in enumerate((("CUSTOMER", "착불도 되나요?"), ("AI", "착불은 불가합니다.")), 1):
+        events.append({"eventId": f"00000000-0000-4000-8000-00000000000{i}", "eventOrder": i,
+                       "kind": "UTTERANCE", "occurredAt": f"2026-11-05T03:00:0{i}.000Z", "offsetSeconds": i,
+                       "payload": {"utteranceOrder": i, "speaker": speaker, "utteranceText": text, "lastSentenceSeq": 1}})
+    events.append({"eventId": "00000000-0000-4000-8000-000000000003", "eventOrder": 3,
+                   "kind": "BUSINESS_RESULT", "occurredAt": "2026-11-05T03:00:02.000Z", "offsetSeconds": 2,
+                   "payload": {"action": "FAQ_ANSWERED", "orderSeq": None, "unansweredQuestionSeq": None,
+                               "summaryText": "FAQ 근거로 문의 안내 완료", "faqEntrySeqs": ids,
+                               "questionUtteranceOrder": 1, "answerUtteranceOrder": 2}})
+    expected = {"providerCallId": "live_1", "events": events}
+
+    def handler(req):
+        assert req.method == "POST" and req.url.path == "/api/ai/calls/120/events"
+        assert req.headers["Authorization"] == "Bearer test-insights"
+        assert body(req) == expected
+        assert set(body(req)["events"][-1]["payload"]) == {
+            "action", "orderSeq", "unansweredQuestionSeq", "summaryText", "faqEntrySeqs",
+            "questionUtteranceOrder", "answerUtteranceOrder"}
+        return httpx2.Response(204)
+
+    client, seen = api(handler, insights_token="test-insights")
+
+    async def scenario():
+        try:
+            await client.send_call_events(120, expected)
+            await client.send_call_events(120, expected)
+        finally:
+            await client.close()
+
+    run(scenario())
+    assert len(seen) == 2 and seen[0].content == seen[1].content
+
+
 @pytest.mark.parametrize("reason", ["KB_NO_ANSWER", "KB_UNAVAILABLE", None, "OMITTED"])
 def test_unanswered_reason_contract_fbbaca1_preserves_body_on_retry(reason):
     """develop-backend fbbaca1: 선택 reason을 그대로 보내며 재전송도 같은 본문·인증을 사용한다."""

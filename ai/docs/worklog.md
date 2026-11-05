@@ -541,3 +541,195 @@
 - Responses 위임 중 LIVE 자율 발화와 이후 결과 안내가 이어지는 현상을 유력 원인으로 분류. 문장 중단·무관한 발화의 정확한 원인은 최신 녹음·이벤트 부재로 미확정.
 - 공식 문서의 자동 acknowledgment 억제는 client 위임용이며 현재 Responses에 직접 적용 불가. 설치 SDK에도 해당 delay 필드는 없음.
 - 검증은 코드·설치 SDK·공식 문서·기존 실험 보고서 읽기만 수행. 테스트·실통화·유료 API 호출 없음.
+
+## 2026-11-05 — FAQ 응대 근거 배열 연동 구현
+
+- 사용자 요청으로 구현 재개. Jira 번호 없이 진행하라는 지시에 따라 origin/develop-ai e5a9dee에서 feature/faq-answer-evidence 생성. 기존 로컬 develop-ai c296bfa·output/tmp 보존.
+- 첨부 faq-question-examples-ai-integration.md를 계약으로 사용: 기존 events API, FAQ_ANSWERED 한 건에 faqEntrySeqs 배열, 질문/답변 UTTERANCE 참조. 추가 questionText·단건 필드·FAQ별 분리 이벤트를 보내지 않음. 원문 스냅샷은 docs/be-contract/backend에 보관(로컬 상대 링크만 수정).
+- 현재 원격 develop-backend 0848174와 원격 FAQ 관련 브랜치들을 조회했지만 새 배열 DTO는 확인되지 않음. 첨부 계약대로 구현하되 [unanswered_review].faq_answered_enabled=false 기본/파일 설정을 유지. migration 052와 배열 지원 BE 배포 확인 후 true로 전환. 기존 미답변/사유 기능은 유지.
+- Inquiry.used_evidence: 검색 번호·청크 ID·근거 직접 인용·답변 직접 인용 추가. 실제 전달 Top3, 관련 검색, 원문 인용, 답변 인용, backend-faq:N 양의 int32를 검증해 서버에서 FAQ 번호를 계산함. 모델이 번호만 만들어 내는 방식을 사용하지 않음. 근거 특정 불가이면 빈 배열 허용.
+- 다중 질문이 같은 검색을 공유하도록 이전 전역 중복 금지를 조정하되 범위·개별 목록 중복·전체 검색 포함·발화 순서 검증은 유지. 한 질문/답변 발화 쌍은 FAQ 번호를 합쳐 이벤트 한 건, 별도 응대이면 같은 문장도 별도 이벤트. FAQ 청크가 여러 개여도 번호는 한 번만 전송. faqAnswerCount는 기존 문의 수이며 FAQ 수로 늘리지 않음.
+- 빈 전사 행을 건너뛴 실제 UTTERANCE 순번으로 변환. 발화 화자·원문·20,000자 절단 범위를 확인. 실제 답변 기록 시각을 사용하고 검토/전송 시각으로 바꾸지 않음. 기존 발화 뒤에 이벤트를 배치해 발화 저장 선행 조건을 충족.
+- v2 판정·배열 이벤트는 기존 Outbox에 확정/저장. 구버전 READY·전송 완료 데이터는 다시 판정/소급 보강하지 않음. 응답 유실·재시작 때 동일 ID/순번/본문으로 재전송하고, 배열 전송을 꺼도 확정 본문을 변조하지 않고 보류.
+- 새 테스트 24개 포함 **593 passed, 14 warnings / 21.71초**. 가짜 모델·백엔드로 복수 근거·검색 공유·부분 미답변·조작 인용/ID·발화 순번·절단·배치·구버전 복구·응답 유실·HTTP 배열 계약 검증. 기존 주소·대시보드 테스트 포함 전체 통과.
+- 실제 gpt-6-luna 가상 통화 8건 **8/8 통과**. 단일/복수 FAQ, 근거와 모순된 답변 제외, 미답변/검색 장애/명확화, 같은 FAQ 두 청크, 동일 문장 별도 응대 포함. 결과 output/faq-evidence/faq-evidence-v1-20261105.json. 최신 경계 검증으로 저장 판정 오프라인 재검증도 8/8. 운영 backend·전화에는 쓰지 않음.
+- 종료 후 판정 2.110~6.033초, 평균 3.644초. 기존 미답변 검토와 같은 모델 호출이며 통화 중 추가 호출 없음. 표본이 달라 이전 평균과 차이를 기능의 순수 지연으로 단정하지 않음. 모델의 사후 근거 판정이며 Live 내부 선택의 직접 관찰은 아님.
+- 실행 스크립트 scripts/check_faq_answer_evidence.py와 가상 데이터 evaluation/datasets/faq_evidence_v1.json, 설계/실행 안내 docs/architecture/faq-answer-evidence.md 추가. git diff --check 통과. .env 내용 조회·수정, 커밋·푸시·병합·운영 배포 없음.
+
+## 2026-11-05 — FAQ 배열 지원 백엔드 최신 병합 확인
+
+- 사용자 요청으로 origin/develop-backend를 다시 fetch해 0848174 → **6a141a0** 갱신. feature/faq-question-examples의 1313f27 구현·c08c530 문서 병합 확인.
+- 실제 DTO는 faqEntrySeq 단건과 faqEntrySeqs 배열(1~100, 양의 int32, 중복 없음)을 지원한다. 입력 정규화 코드에서 두 필드 동시 전송을 400으로 거절하고 배열은 정렬한다. FAQ_ANSWERED 외 action에 참조를 보내도 400이다.
+- migration 052-faq-question-examples.sql과 고객 질문 사례 수집/검증 코드 존재 확인. 첨부 연동 문서와 원격 문서가 일치함(보관 사본의 로컬 상대 링크 조정만 제외). 현재 AI 배열 구현과 호환돼 동작 코드 수정은 불필요.
+- 계약 출처·설계 문서의 초기 미병합 안내를 갱신. 원격 코드 확인이며 운영 DB migration 적용·배포까지 확인한 것은 아님. 배열 전송 스위치는 false 유지. 문서만 갱신했으므로 통과한 593개 테스트/실모델 8건을 반복 실행하지 않음. 커밋·푸시·운영 쓰기 없음.
+
+## 2026-11-05 — FAQ 배열 전송 활성화 전 운영 배포 점검
+
+- 사용자 푸시/병합 준비 문의에 따라 운영 서버를 읽기 전용 점검. DB는 READ ONLY 트랜잭션으로 faq_question_examples 테이블 존재 여부만 확인(false), 실행 중 백엔드의 컴파일된 create-call-events DTO에서 faqEntrySeqs 지원 여부 확인(false).
+- 원격 코드 병합과 달리 운영은 아직 배열 기능 미적용이다. faq_answered_enabled=false를 유지하고 백엔드 migration 052 적용·새 BE 배포 후 활성화하도록 안내했다. 임의로 운영 DB를 변경하거나 백엔드를 배포하지 않았다. 이 확인 단계에서는 커밋·푸시·병합도 하지 않음.
+
+## 2026-11-05 — FAQ 배열 운영 배포 재확인·develop-ai 최신 반영 및 병합 준비
+
+- 사용자 요청으로 운영 재점검. PostgreSQL READ ONLY 조회에서 faq_question_examples 테이블 존재=true, 실행 중 백엔드의 컴파일된 DTO에 faqEntrySeqs 존재=true 확인. 이전 보류 이후 배포가 반영됐으며 작업 브랜치 server.toml의 faq_answered_enabled=true로 준비했다. 실제 운영 DB/설정에 쓰거나 AI를 배포하지 않음.
+- origin/develop-ai e5a9dee → 5330e0d로 갱신. 주소 개선 머지 되돌림이므로 해당 최신 트리를 그대로 반영하고 우리 작업으로 주소 변경을 재도입하지 않음. 기존 로컬 develop-ai 브랜치·개인 output/tmp 보존.
+- 최신화 전에 충돌 가능한 worklog.md만 stash 1893e74로 보존하고 기능 브랜치를 fast-forward했다. 새 develop-ai 로그 위에 우리 기능 기록만 복원해 되돌린 주소 로그를 다시 넣지 않았다. 원본 stash는 백업으로 유지하며 기존 다른 stash는 건드리지 않음.
+- 새 기준 전체 **574 passed, 14 warnings / 20.36초**. 이전 593개와의 차이는 develop-ai 되돌림으로 바뀐 테스트 구성이며 실패 없음. FAQ 배열 테스트와 기존 통화/미답변/대시보드 회귀 포함. 이번 재확인에서는 실제 모델 API를 다시 호출하지 않았고 기존 가상 검증 8/8 결과를 유지한다.
+- 사용자 병합 준비 요청에 따라 기능 코드·프롬프트·설정·테스트·가상 데이터/검증 스크립트·계약·문서만 커밋하여 feature/faq-answer-evidence로 공유한다. Jira 번호 없이 진행하라는 사용자 지시를 따른다. output/tmp·인증 파일·개인 개발로그는 제외. 최종 develop-ai 병합은 사용자가 직접 진행한다.
+
+## 2026-11-05 결제 방식 질문·안내 제거(사용자 결정)
+- 결제 단계 삭제: 택배를 다 받고 "더 없음"이면 바로 결과 전송·마무리로(more_parcels → closing). 결제 방식 Decision 질문(pay)·N1' payment_choice/payment 알림·[fields.payment]·[[stage]] payment 제거
+- 결제 방식은 서버가 고객 자격(availablePaymentMethods)으로 정함 — app/domain/assess.auto_payment: groupBilling > credit > 하나뿐인 방식, 빈 배열이면 미정(paymentMethodType 생략 → INCOMPLETE PAYMENT_UNKNOWN, 기본 billing 금지 유지). 결과 본문의 paymentMethodType 데이터는 그대로
+- Live 지시문: business_rules.md "결제 안내" → "요금"(결제 방식은 묻거나 안내하지 않음, 결제 완료·카드번호 금지 문장과 요금 문장 유지), [results].order의 notPaid 결제 대기 안내 삭제(그 밖과 같이 "담당자가 확인 후 안내"). 금지 항목·"결제 완료" 문구 검사는 유지(오안내 방지)
+- 대시보드 이탈 단계: PAYMENT_GUIDANCE를 더 만들지 않음(more_parcels·closing → NONE). BE 코드 값 자체는 계약에 남음
+- 미변경: policy/backend_rules.md(결제 판단 금지 문장 — 여전히 맞음, 커밋 안 된 다른 수정 있음), docs/call-flow/flow.toml(옛 설계, 실행에 안 쓰임)
+- 테스트 553 passed(결제 자동 선택 6가지, 결제 단계 없음, Decision 질문 세트, 지시문에 결제 방식 없음)
+
+## 2026-11-05 — 종료 검토와 기본 기록 전송 분리
+
+- 통화 228은 종료 검토의 고객 참조/인용 검증 실패로 전사·분석까지 전송되지 않았다. 실패 원시 출력이 없어 정확한 오인용 문구는 확인 불가. 운영 데이터는 수정하지 않았다.
+- fix/postcall-review-delivery에서 기본 전사·업무 이벤트를 먼저 보내고, 검토 후 FAQ/미답변·분석을 별도 단계로 전송하도록 수정했다. 모델에는 명시적 발화/검색 ref를 제공한다. 잘못된 문의/인용은 해당 항목만 제외하고 보호된 Outbox에 원시 판정과 오류를 남긴다.
+- 검토 실패는 KB_UNAVAILABLE 또는 KB_NO_ANSWER로 바꾸지 않는다. 기존 두 사유의 의미와 백엔드 계약은 유지한다. 미확정 FAQ 답변 수는 null이며 0으로 단정하지 않는다.
+- 기존 확정 전송 본문/ID는 유지하고 과거 FAILED를 자동 재처리하지 않는다. FAQ 추가 이벤트 실패가 기본 분석 전송을 막지 않는다.
+- 전체 단위 테스트 592 passed, 14 warnings. 공개 가상 대화 실제 모델 1차 8/9: 동일 FAQ의 중복 청크를 모호한 서로 다른 FAQ로 취급해 근거를 누락했다. 같은 source_id의 중복과 서로 다른 FAQ의 모호함을 구분하도록 프롬프트를 보완했다. 상세 설계: docs/architecture/postcall-review-delivery.md.
+- 로컬 구현·검증이며 운영 배포/통화 228 재전송은 하지 않았다.
+
+- 프롬프트 보완 후 같은 공개 가상 9건 재검증: 9/9 통과. 반복 실행 한 번의 통과이며 모든 실통화의 정확성을 보장하지 않는다.
+
+## 2026-11-05 대기 중 채우는 말을 고정 문장 없이, 끼어들기 대응
+- 프롬프트: render.py "백엔드에 맡기기"의 "짧은 대기 안내만" → 원칙만(정해진 문장 없이 고객이 방금 한 말에 이어지는 한마디를 그때그때, 짧게·되풀이 없이, 바로 답할 수 있으면 생략 / 결과·판단·되읽기·다음 질문 금지 / 고객이 말하면 바로 멈추고 받기, 늦게 온 결과는 고객이 방금 한 말에 맞춰 필요한 것만). 페르소나와 무관하게 항상 들어감(운영 페르소나에도 적용)
+- persona_default.md: "## 대기 안내" 고정 3문장 삭제, 끼어들기의 고정 "네 고객님" → "짧게 받은 뒤 기다린다"
+- 코드(app/calls/live.py): 위임 결과 재개(resume → response.create)와 N2(_wait_quiet)가 고객이 말하는 중(rt.cust)이면 말이 끝날 때까지 기다림(_customer_quiet, 상한 8초). 이전에는 고객이 끼어들어 말하는 중에도 앞선 결과로 Live를 재개할 수 있었음
+- 영향: 고객이 결과 도착 중에 말하면 결과 안내가 그 발화 끝(+utterance_gap_ms)까지 늦어짐. 실통화로 겹침이 실제로 있었는지는 미측정(로그 없음)
+- 테스트 579 passed(+2: 고객 발화 중 재개·N2 보류 — 보강 전 코드에서 실패 확인, 지시문에 고정 대기 문장 없음·원칙 포함)
+
+## 2026-11-05 — 종료 검토 수정 최신 develop-ai 통합 검증
+
+- 사용자 승인으로 fix/postcall-review-delivery에 origin/develop-ai d0e7d1b를 병합했다. 팀원의 채우는 말/끼어들기 처리 변경을 그대로 유지했다. worklog 동시 추가 충돌은 양쪽 기록을 모두 보존해 해결했다.
+- 통합 전체 테스트 **594 passed, 14 warnings / 21.12초**. 실제 모델 공개 가상 평가 9/9 결과는 이전 프롬프트 검증이며 이번 최신 병합 후에는 추가 모델 호출 없이 전체 회귀 테스트를 실행했다.
+- 수정 커밋 9de6327 및 최신 통합 이력을 작업 브랜치에 푸시하고 develop-ai 대상 MR을 준비한다. 사용자 개인 output/tmp와 비밀 설정은 커밋하지 않는다. 운영 배포·통화 228 재전송 없음.
+
+## 2026-11-05 — 부분 검토에서 검증된 FAQ 응대 건수 보존
+
+- 백엔드 팀이 보고한 통화 232의 FAQ_ANSWERED 3건/faqAnswerCount null 불일치를 코드와 로컬 재현으로 확인했다. 원인은 검토 complete=false이면 검증된 ANSWERED 문의도 집계에서 null로 바꾸던 처리였다. 이번에는 운영 통화/DB를 직접 조회하거나 수정하지 않았다.
+- 사용자 승인으로 최신 origin/develop-ai f229c41에서 fix/faq-answer-count 별도 worktree(tmp/faq-count-fix)를 생성했다. 다른 문서 작업 브랜치의 수정/미추적 파일은 그대로 보존했다.
+- 정상 검증된 ANSWERED 문의가 있으면 부분 검토에서도 그 수를 전송한다. 완전 검토+답변 없음=0, 불완전 검토+확인된 답변 없음=null, 검토 전체 실패=null은 유지한다. 숫자는 확인된 문의 응대 수이며 FAQ 번호 배열 길이/검색 수/전체 응대 보장값이 아니다.
+- 질문/답변 원문·근거 검증과 KB_UNAVAILABLE/KB_NO_ANSWER, FAQ 이벤트, 모델 호출 횟수, API 계약은 변경하지 않았다. 정상 3개+질문 띄어쓰기 오류 1개의 가상 사례에서 이벤트 3건과 분석 3건을 함께 확인했다. 오류는 내부 검토 기록에 남는다.
+- 전체 **595 passed, 14 warnings / 23.96초**, git diff --check 통과. 모델 API 추가 호출 없음. 확정된 과거 Outbox/분석은 변조·자동 재전송하지 않으므로 통화 232의 기존 null 복구는 별도 처리다. 커밋/푸시 후 MR 준비하며 최종 병합·배포는 하지 않는다.
+
+## 2026-11-05 — 기본 주소 저장 제안: 상세주소만 바뀌어도 제안(BE 확인 4번)
+- BE 담당자 확인사항 3건(통화 등록 번호 유실·SENT_UNCERTAIN 주기 재확인 없음·상세주소 비교 누락)을 코드로 대조해 모두 사실로 확인했다. 이번에는 4번만 고쳤다.
+- 원인: `save_offer`(app/domain/address_book.py)가 도로명 문자열만 비교해, 101호→102호처럼 상세만 바뀌면 저장 제안이 나가지 않아 `PATCH /api/customers/{id}`를 부르지 못했다. 상세주소는 BE 응답→`_pin_place`→`origin_place`까지 이미 들어오고 있었고, 비교용 `default_address`만 도로명으로 잘라 두고 있었다.
+- 수정: `Customer.default_address_detail` 추가(state.py), `_apply_context`에서 `default_origin.address_detail or ""`로 채움(service.py), `save_offer`가 (도로명, 상세) 쌍을 비교(address_book.py), PATCH 성공 뒤 상세도 갱신(results.py). 되읽기 전에는 상세가 반드시 채워지고(없다고 하면 "") BE도 생략을 ""로 정규화하므로 None은 비교에 오지 않는다.
+- BE API·계약 변경 없음. 테스트 595 passed(+1: 상세만 다름→sender 제안, 같음→없음, 양쪽 ""→없음).
+- 남은 일(미구현): 1번 통화 등록 번호는 context 응답 즉시 보관하고 이력 조회를 분리, 2번 SENT_UNCERTAIN 주문 결과를 실행 중에도 같은 키·본문으로 재전송.
+
+## 2026-11-05 — 2단계 통화 등록: 번호를 먼저 보관하고 이전 접수 주소는 별도 조회(BE 확인 1번)
+- 원인: `_stage2`가 `caller_context(recent_limit=5)` 한 호출(예산 3초)로 통화 등록 POST → 출발지 이력 → 도착지 이력을 순서대로 했고, 게이트웨이 `wait_for`가 코루틴 전체를 취소해 등록이 끝났어도 이력이 늦으면 `callSessionSeq`를 잃었다(요청 1건 timeout 3초 × 3건 vs 예산 3초). 실패한 stage2는 그 통화에서 재시도하지 않아 조회·취소 `CALL_NOT_REGISTERED`, 종료 후 이벤트·분석·주소 저장 생략으로 이어졌다.
+- 수정(app/calls/service.py): `_stage2`는 `recent_limit=0`으로 등록만 하고 즉시 `_apply_context`로 번호를 보관·`done`. 등록 고객이면 `_stage2_history`를 별도 작업으로 띄워 ORIGIN 1건·DESTINATION N건을 `gather`로 병렬 조회(각각 게이트웨이 기본 읽기 예산 3초). `BackendFailure`는 note("이전 접수 주소 조회 실패")만 남기고 번호에 영향 없음. 받은 이력은 `_apply_context`를 한 번 더 불러 반영.
+- `call_session_seq()`를 기다리는 조회·취소 도구는 이제 등록만 기다린다. 최근 도착지 후보는 수십~수백 ms 뒤 들어온다(record 도구는 원래 stage2를 기다리지 않아 같은 창이 있었음).
+- `api.caller_context`의 내부 이력 조회 블록과 시그니처는 유지(backend_client 테스트·mock 의존). 새 설정값 없음. BE 계약 변경 없음. 문서 call-lifecycle.md §2.2 2단계 행 갱신(이미 "병렬"로 적혀 있었고 코드가 순차였음).
+- 테스트 596 passed(+1 `test_stage2_keeps_call_seq_when_history_lookup_fails`: 이력 503이어도 번호 보관·stage2 done·PIN만·기본 주소는 context에서). 수정 전 코드에서는 번호 없음으로 실패 확인.
+- 하지 않음: 등록 POST 자체 실패 시 재시도(BE context는 같은 providerCallId면 멱등이라 추후 가능).
+
+## 2026-11-05 — SENT_UNCERTAIN 주문 결과를 실행 중에도 같은 키로 재확인(BE 확인 2번)
+- 원인: `POST /api/orders`가 503·연결 끊김·시간 초과로 불확실해지면 아웃박스에 `SENT_UNCERTAIN`으로 남는데, 재전송 함수 `_send(row)`는 기동 시 `recover()`에서만 불렸다. 주기 작업 `review_loop`는 검토·인사이트만 다뤄 프로세스가 계속 떠 있으면 장애가 풀려도 그대로였다.
+- 수정: `ResultService.resend_loop/resend_unfinished`(app/calls/results.py) — `unfinished_results`를 돌며 같은 키·같은 본문으로 `_send`. 이 프로세스가 전송 중인 행(`tasks`에 미완료)과 `updated_at`이 전송 예산(`submit_budget_sec`) 안인 행은 건너뛴다. 기동 `recover()`와 같은 `result_lock`을 써 동시 전송을 막는다. 아웃박스 `result()`가 `updated_at`을 돌려주게 함(outbox.py). 설정 `[backend] result_resend_sec`(기본 60초, 0이면 재시작 때만) 추가(config.py·server.toml), main.py에서 작업 시작·종료 시 취소.
+- 멱등: 키·본문은 아웃박스에 고정돼 있고 BE는 같은 `Idempotency-Key`면 기존 결과를 200으로 돌려준다(backend_client/api.py submit_result). 새 키를 만들지 않으므로 중복 주문 없음. BE API·계약 변경 없음.
+- 테스트 597 passed(+1 `test_uncertain_submit_is_rechecked_while_running`: 예산 안 행 건너뜀 → 전송 중 행 건너뜀 → 재확인 후 DONE·같은 키로 주문 1건). 편집 중 `recover()` 끝의 `recover_reviews()` 호출이 밀려 `test_v1_confirmed_review_is_not_backfilled`가 깨진 것을 잡아 되돌렸다.
+- 범위 밖: 재전송이 나중에 성공해도 그 통화의 분석(registeredParcelCount 등)은 고치지 않는다(기동 복구도 동일). `FAILED`(400·404·422)는 재시도하지 않는다. 포기 조건 없음(`attempts` 누적).
+- 문서: error-recovery.md 통화 결과 행 갱신.
+
+## 2026-11-05 주소 저장 질문을 접수 확인과 나누고, 보내는 곳·받는 곳 동의를 따로(사용자 결정)
+- 문제: "이대로 접수할까요? 받는 곳 주소도 주소록에 저장해 드릴까요?"를 한 번에 물어, 저장에 대한 "아니요"가 접수 확인 no로 읽혀 확인 대기가 풀리거나, "네" 한마디면 저장 동의가 비어 저장되지 않음. sender·receiver를 yes/no 하나로 받아 "받는 곳만"도 기본 출발지까지 바뀜(BE는 PATCH 고객 주소·POST PIN으로 원래 따로)
+- 흐름: 되읽기 도구 결과에 address_save를 넣지 않고(record.py, 제안은 상태에만) → 택배를 담은 N2에 address_save(아직 답 없는 항목) → Live가 저장만 따로 묻고 → 답 뒤 더 보낼 택배
+- 상태: address_consent bool → 항목별 dict(state.py). _save_pending(live.py) = 담은 택배의 제안 중 답 없는 항목(담기 전에는 없음 → 되읽기 중 저장 판정 안 함)
+- Decision: save 질문을 save_sender·save_receiver로 나누고 제안한 항목만 보냄(render.decision_questions save=항목). 저장 답을 기다리는 동안 more(더 없음)를 빼 저장 "아니요"가 더 없음 → 즉시 결과 전송으로 이어지지 않게 함
+- 저장(_maybe_save_addresses): 답한 항목만 처리 — 동의한 항목만 save_addresses로(백그라운드), 거절 항목은 버림, 답 없는 항목은 남았다가 통화가 끝나면 저장하지 않음(다시 묻지 않음)
+- 지시문: business_rules.md·workflow.toml(parcel_added·address_save·save 질문 2개) — sender는 기본 출발지를 바꾼다는 뜻을 명시, 고정 문구 없음
+- 테스트 599 passed(기준 598, 새 테스트 2·기존 1 교체: 항목별 저장·거절·남김, 담기 N2에 제안·저장 대기 중 more 없음·apply 항목별 기록, 되읽기 결과에 제안 없음). 기존 끼어들기 테스트의 타이밍 불안정(Windows sleep 오차로 1/6 실패) — 전사 간격 30→10ms, 20회 0실패
+- 남은 한계: 한 발화에 저장 답과 "더 없어요"를 같이 하면 더 없음은 판정하지 않아 한 번 더 물음. 주소록에서 고른 받는 곳을 고친 경우 기존 PIN 수정 없음(shortcut 그대로). 실통화 미확인
+
+## 2026-11-05 주소 저장 동의를 다시 한 번의 답으로(사용자 결정, 접수와 저장 분리는 유지)
+- 되돌림: 항목별 동의(address_consent dict, Decision save_sender·save_receiver)를 bool 하나·save 질문 하나로. 제안한 주소(보내는 곳·받는 곳) 전체를 한 번의 답으로 정함 — 동의면 둘 다 저장, 거절이면 둘 다 버림
+- 유지: 되읽기 결과에 address_save 없음, 담은 뒤 N2로 저장만 따로 묻기, 저장 답 대기 중 more 판정 제외, 답 없으면 저장 안 함(다시 묻지 않음), sender가 기본 출발지를 바꾼다는 지시문
+- save 질문 지시문에서 "접수 확인에만 답하고…" 제거(담은 뒤에만 묻으므로 접수 확인과 섞이지 않음)
+- 테스트 599 passed(항목별 테스트 → 한 번의 답으로 둘 다 저장·거절, apply는 save 하나)
+- 다시 적용: !285(항목별 동의 버전)는 develop-ai에 병합됐다가 의도적으로 revert됨(665559a). revert는 유지하고 그 위(973b9d0)에 최종 버전(접수·저장 분리 + 보내는 곳·받는 곳 한 번의 동의)을 새 커밋 하나로 얹음(브랜치 fix/address-save-after-commit). 위 두 항목의 변경을 합친 결과와 같다
+
+## 2026-11-05 — FAQ 후보 표시와 최종 근거 판정 분리
+
+- 사용자 승인으로 최신 develop-ai 5a1f14c의 별도 worktree/브랜치 fix/faq-evidence-outcome에서 수정했다. 다른 문서 작업/개인 파일은 보존했다.
+- 통화 242를 읽기 전용 대조: FAQ_SEARCH 6건 모두 AI가 근거 있음으로 전송, 날씨 후보는 무관한 FAQ였다. 미답변 인용/발화 ref는 실제와 일치했으나 마지막 재검색이 발화 시작보다 0.55초 늦어 INVALID_AGENT_QUOTE가 났다. 초기 인용 오류 가설을 정정했다. 과거 데이터 변경/재전송 없음.
+- 검색 직후에는 후보 N건 반환만 표시한다. 검증된 FAQ_ANSWERED는 답변 근거 있음, 확정 QUESTION_UNANSWERED는 KB_NO_ANSWER의 답변 근거 없음/KB_UNAVAILABLE의 검색 장애로 구분한다. UNANSWERED는 앞선 관련 검색 뒤의 실제 거절 인용을 인정하되 ANSWERED의 마지막 검색 이후 조건과 원문/참조 검증은 유지한다.
+- 전체 **605 passed, 14 warnings / 25.41초**. 공개 가상 실제 모델 **10/10 통과**, 날씨+안내 도중 재검색 사례 포함. 초기 테스트 MockBackend 래퍼 접근 2건 오류는 body.reason을 검사하도록 바로잡았다. 모델 호출 단계/API 계약/RAG 임계값은 변경하지 않음.
+- 설계 및 프론트 전달 사항: docs/architecture/faq-search-outcomes.md. 과거 표시 매핑은 프론트 보완 필요, 검토 실패를 근거 없음으로 간주하지 않는다. 기존 확정 Outbox/분석/이벤트는 수정하지 않는다. 운영 배포와 과거 통화 재처리는 별도다.
+
+## 2026-11-05 — Live 입력 선검증·프롬프트·업무 흐름 분석(구현 없음)
+
+- 원격 develop-ai를 fetch하고 af9dd88에서 `codex/analyze-live-validation-conflicts` 브랜치를 생성했다. 기존 미추적 output/·tmp/는 보존했다.
+- 분석 문서: `docs/architecture/live-validation-audit-20261105.md`. 가액 0~1억 허용과 프롬프트의 1억 이상 거절, 박스 합계 검사 누락, 서류 99개 상한을 사용자 확정 규칙과 대조했다.
+- 제시된 9개 지적 중 2~9는 현행 코드에서 확인했다. 1번 운영 페르소나 원문은 제시된 로컬 경로에 없어 미확인으로 구분했다. 기본 페르소나와 운영 promptText 유입 경로는 확인했다.
+- 가짜 클라이언트 재현: 가액 0·1억 허용/2억 거절, 서류 100 거절, 박스 11 허용, 조회→접수 intent 유지, PIN 마지막 선택 뒤 pending 누락, 작성 건 없는 취소 재확인 무알림, more 후속 처리 없음, 잘못된 번호 정정의 오류 필드 제외, 상세주소 되읽기 포함. +72시간 30분 허용과 기본 수거 59분 30초 결함도 확인했다. 재현 스크립트·결과는 개인 output/live-validation-audit/에 보관했다.
+- 관련 기존 테스트 131 passed, 13 warnings / 7.60초. 초기 샌드박스 실행은 Windows asyncio 내부 socketpair 대기로 중단했고 최소 재현으로 환경 문제 확인 후 승인된 외부 실행으로 완료했다. 운영·모델 API 호출 없음.
+- 권고: 고정 제한을 Policy 한곳에서 Live 안내·도구 스키마·서버 검사로 공유하고 Live 즉시 재질문 허용. 저장·확정 검증은 유지한다. 종료/전환·PIN 확인·취소 재확인·more·수거 시간은 작은 흐름 수정으로 별도 해결한다.
+- 서비스 코드·외부 계약·운영 데이터 변경 없음. 실제 주문 BE 구현은 이 체크아웃에 없어 계약 문서와 구분했다. 실통화 지연 개선은 미측정이다.
+
+## 2026-11-05 — 개인정보 변경 문의의 검색 누락 후속 분석(구현 없음)
+
+- live-validation-audit-20261105.md §6에 규칙 단일 출처의 의미와 개인정보 변경 문의 경로 분석을 추가했다.
+- 로컬 웹 FAQ 원본에 ‘회원 정보 변경’과 마이페이지 안내가 있음을 확인했다. 운영 관리 FAQ 색인 포함 여부·해당 통화 로그는 미확인이다.
+- inquiry 분류만으로 검색은 실행되지 않으며 Live 위임→Responses 도구 선택이 별도로 필요하다. 이름 정정 즉시 재질문·등록 고객 접수 유도·missing 복귀 지시와 회원정보 안내 예시 누락이 검색 전 경로 이탈의 유력 원인이다. 실제 모델 오분류 여부는 단정하지 않았다.
+- 이번 택배 sender_name 기록과 고객 원장 이름 변경은 다르다. AI에는 독립 고객 이름 수정 도구가 없고 기본 주소 PATCH는 택배 담기 뒤 저장 동의 경로에 연결됨을 확인했다. 웹 FAQ 안내와 전화 수정 실행 가능 여부를 구분하도록 권고했다.
+- 코드·외부 계약 변경 없음. 정적 분석·로컬 FAQ 읽기만 수행했으며 모델·운영 API를 호출하지 않았다. 문서 변경이므로 테스트 재실행은 하지 않았다.
+
+## 2026-11-05 — 입력 규칙을 Policy 한곳에서 Live·Responses·서버에 적용
+
+- 사용자 구현 승인에 따라 기존 분석 브랜치에서 진행했다. `policy/workflow.toml` version 2026-11-05.2에 `[input_limits]`(가액 1~99,999,999원·박스 합계 10·서류 별도 100)와 기존 허용 형식을 유지하는 `[phone]`을 추가했다. 수거는 기존 `[pickup]`을 사용한다.
+- model.py에 정책 범위·시각·전화번호 정합성 검사를 추가했다. render.py는 같은 정책으로 Live·Responses 제한을 생성하고 business_rules의 수거 문구를 치환한다. 명백한 입력 오류의 즉시 재질문, 혼합 발화의 정상 정보 보존, 오류 status/code/needs 우선 해석을 명시했다. 기존 1억 이상 처리 불가 문구는 범위 설명·재질문으로 교체했다.
+- record_args가 정책별 인자 모델을 캐시 생성하고 executor·세션 구성에서 같은 정책으로 검증·도구 스키마를 만든다. 박스 합계는 서버 validator로 검사한다. 수량은 현재 parcel 단위이며 동일 수령지의 서로 다른 parcel을 자동 합산하지 않는다. 인자 오류는 기존 TOOL_ARGS_INVALID로 호출 전체를 거절하며 이전 정상값은 보존한다.
+- 수거는 최신 요청의 ‘현재부터 3일’을 정확한 72시간으로 적용했다. 09~17시 조건은 유지했다. 기본 시각의 초 단위 내림을 올림으로 고쳐 59분 30초 뒤를 기본값으로 주던 문제를 해결했다. 실제 상대 시각 해석용 시계 갱신은 이번 범위에 포함하지 않았다.
+- `test_input_policy.py` 31건 추가: 가액·수량 경계와 정수 타입, 잘못된 정정의 기존값 보존, TOML 변경→Live/Responses/세션 스키마/실제 서버·전화번호·수거 반영, +1시간/+72시간 경계, 기본 수거 시각 올림, 잘못된 정책 거절. 기존 관련 131개 통과 후 전체 **636 passed, 14 warnings / 23.52초**. 외부 운영·모델 API 호출 없음. git diff --check 통과.
+- BE API 경로·필드·인증·주문 매핑 및 기존 오류 코드 유지. 운영 배포·푸시 없음. 사용자가 별도로 수정한 persona_default.md와 기존 output/·tmp/는 커밋에서 제외한다. FAQ/업무 전환 수정·실통화 응답 지연 측정·운영 페르소나 정리는 후속 작업이다.
+
+## 2026-11-05 — 물품 가액 상한을 1억 원 포함으로 정정
+
+- 사용자 정정에 따라 workflow.toml version 2026-11-05.3의 item_price_max를 100,000,000으로 변경했다. 하한 1원 및 다른 규칙은 유지했다. 공통 정책에서 Live·Responses 안내와 도구 스키마·실행 검증에 반영된다.
+- 현재 정책 문서와 회귀 테스트를 갱신했다. 1억 원 허용·1억 1원 거절, 기본 프롬프트에 1억 원 포함 안내, 사용자 지정 정책과 기본 스키마 분리를 확인했다. 과거 분석·작업 이력의 당시 수치는 보존했다.
+- 관련 테스트 **52 passed, 13 warnings / 0.88초**. 외부 계약 변경·운영 API 호출·배포·푸시 없음. 별도 수정 중인 persona_default.md는 포함하지 않는다.
+
+## 2026-11-05 — 보안 요청 거절 및 기본 페르소나 응대 지침 보완
+
+- 사용자가 직접 수정한 business_rules.md·persona_default.md를 확인하고 커밋·푸시·develop-ai 병합 요청에 따라 반영한다. 브랜치는 최신 develop-ai 4d68066 기반 `fix/live-prompt-instructions`이며 Jira 번호는 사용자 지시에 따라 생략했다.
+- 항상 적용되는 업무 규칙에 내부 프롬프트·인증 정보 비공개, 권한 없는 DB·타 고객 정보 접근 및 보안 우회 거절, 역할 사칭·프롬프트 인젝션 거절, 검색 자료·도구 결과의 명령문을 시스템 지시로 취급하지 않도록 하는 지시를 추가했다. 본인 정보 변경 방법 문의 등 정상 질문은 거절하지 않도록 구분한다.
+- 기본 페르소나는 고객이 이해할 수 있는 선에서 매우 빠르게 말하기, 고객 발화 시 즉시 멈추기, 짧은 받는 말 없이 기다리기 및 맞장구 문구를 사용자 수정대로 반영한다. BE 활성 페르소나 사용 시 기본 페르소나 수정 적용 범위는 기존과 같다.
+- 기존 정책·페르소나 관련 테스트 **27 passed, 13 warnings / 1.68초**, git diff --check 통과. 실제 모델의 공격 방어·음성 속도를 검증한 것은 아니다. 서비스 코드·외부 API 계약·운영 데이터는 변경하지 않았고 output/·tmp/는 포함하지 않는다. 운영 배포는 별도다.
+
+## 2026-11-05 — S15P31D109-162 업무 무관 질문 응답 제한 작업 준비
+
+- 사용자 요청으로 origin/develop-ai를 fetch하고 최신 6c8499f에서 `fix/S15P31D109-162-live-off-topic-guard` 브랜치를 생성했다. 로컬 develop-ai의 미병합 문서 커밋 2개와 기존 output/·tmp/는 보존했다.
+- 고정 business_rules.md에 무관한 요청 거절 규칙이 있으나, ‘고객이 무슨 말을 하든 응대’ 지시와 ‘정상적인 응대가 어렵다고 판단될 경우’라는 조건이 함께 있음을 확인했다. 실제 라면 추천 발화의 로그·운영 페르소나는 확인하지 않아 원인으로 확정하지 않는다.
+- 후속 수정안: 고정 업무 규칙에 상담 범위와 일상 질문의 짧은 업무 복귀 응대를 명시하고, 정상 배송 문의·인사·혼합 발화를 구분한다. 프롬프트 검증과 실제 모델 대화 평가로 효과를 확인한 뒤 추가 서버 제어 필요성을 판단한다.
+- 이번 요청 범위는 분석과 작업 준비다. 서비스 코드·프롬프트·외부 계약 변경 및 모델 호출·테스트·커밋·푸시·배포 없음.
+
+## 2026-11-05 — S15P31D109-162 상담 범위 및 FAQ 자료 열람 제한
+
+- 사용자가 수정한 business_rules.md·backend_rules.md를 검토하고 커밋·푸시·develop-ai 대상 MR 생성 요청에 따라 반영한다. fetch로 origin/develop-ai 6c8499f와 작업 브랜치 기준이 같음을 확인했다.
+- Live 고정 업무 규칙에 택배 상담 범위와 정상 서비스 문의 구분, 업무 밖 답변·추천 제한, 확인·선택 단계 복귀를 명시했다. 무관한 요청 반복 시 종료 지시를 제거하고 범위 안내로 대체했다. 마무리의 일반 종료 금지 문장은 사용자 수정대로 삭제했으며 workflow.toml의 기존 금지 규칙과 서버 closing 절차는 유지한다.
+- Live·Backend 양쪽에 FAQ 번호·문서 ID로 자료 열람·목록·원문·요약을 요청하는 경우 검색·공개하지 않는 지시를 반영했다. Backend에는 순차 읽기·번역 및 이미 검색된 자료 반환 제한과 혼합 요청의 정상 서비스 질문만 검색하는 지시를 추가했다.
+- 기존 정책·페르소나·공통 입력 제한·RAG 프롬프트 테스트 64 passed, 13 warnings / 2.53초. 샌드박스 실행은 비동기 테스트 대기로 중단한 뒤 동일 테스트를 외부 실행으로 완료했다. git diff --check 통과. 사용자 QA 결과와 별개로 이번 작업에서 실제 모델 공격 방어·실통화·응답 지연은 검증하지 않았다.
+- 서비스 코드·외부 API 계약·검색 접근 권한 변경 없음. 프롬프트만으로 기밀 보호를 보장하지 않으며, 비공개 자료의 검색 권한 분리는 별도 작업이다. output/·tmp/는 커밋에서 제외하고 운영 배포·병합은 수행하지 않는다.
+
+## 2026-11-05 — 접수 완료 단계에서 마무리 인사 뒤 자동 종료
+
+- 브랜치 `fix/auto-close-after-flow`(develop-ai 6c8499f 기반). 지시문(workflow.toml·business_rules.md)은 다른 개발자가 수정 중이라 변경하지 않았다.
+- 문제: 종료는 고객이 끝내겠다고 말할 때(Decision end)뿐이었다. "더 없음"으로 assess 단계가 closing이 돼도 N1' more_parcels만 보내고 무발화 30초까지 통화가 유지됐다.
+- live.py: no_more 뒤 단계가 closing이면 `_finish` — 결과 전송 시작 → 결과를 `closing_result_wait_sec`(기본 5초)까지 기다림(실패·초과면 pending) → 기존 고객 종료와 같은 N2 `{more_parcels:false, closing:true, order}` → `begin_closing("flow_complete")`. 인사 문구는 기존 지시문의 closing 규칙을 따른다. 고객이 먼저 끝냈거나 마무리 중이면 실행하지 않는다.
+- service.py: 마무리 인사를 요청하고 4초 안에 말이 없으면 closing N2를 1번 다시 보낸다(고객 종료 경로도 같음). 상한 `closing_max_sec`에 걸려도 마지막 출력 전사 뒤 `closing_quiet_ms`는 지킨다(계속 말하면 +5초까지). `closing_quiet_ms`는 설정 검증 1000 이상(운영 1200 유지).
+- 관제: "마무리 결과 대기", "마무리 마지막 발화→끊기", "마무리 오디오 끝 추정−전사 수신"(session.started + 출력 전사 end_ms 기준 추정 — 미실측이라 끊는 시점에는 쓰지 않고 기록만).
+- 테스트: 접수 E2E를 "더 없음 → 결과 → 마무리 인사 → 1초 이상 뒤 끊김"으로 바꿈, 접수 도중 고객 종료, 결과 미수신 pending·무발화 재요청·1초 보장, closing_quiet_ms<1000 거부. 전체 **640 passed**.
+- 외부 계약(BE API·PBX hangup·Live 이벤트) 변경 없음. 미확인: 전사 수신과 실제 오디오 재생·PBX 전달 지연의 차이(실통화로 관제 값 확인 필요), 결과 대기 5초의 적정성. 남은 한계: 마무리 중 고객 발화는 듣지 않고 끊는다. 조회·취소·문의는 state에 완료 단계가 없어 범위 밖. 결과 대기 동안 "궁금한 점 있는지 묻는" 기존 지시문 문구(more_parcels)와는 N1' more_parcels를 보내지 않아 충돌하지 않지만, 지시문 수정 시 closing 규칙과 맞춰야 한다.
+
+## 2026-11-05 — S15P31D109-162 최신 develop-ai 병합 충돌 해결
+
+- origin/develop-ai 70c839c의 접수 완료 후 자동 종료 변경을 작업 브랜치에 병합했다. 충돌은 worklog.md 끝의 기록 추가 부분 1곳이며, 양쪽 기록을 모두 보존했다. 팀원 코드와 사용자 프롬프트는 수정하지 않았다.
+- 정책·페르소나·입력 제한·RAG 프롬프트·통화 서비스·통화 흐름 회귀 테스트 98 passed, 13 warnings / 16.01초. git diff --check 통과. 실제 모델·실통화 검증 및 develop-ai 병합은 수행하지 않는다.

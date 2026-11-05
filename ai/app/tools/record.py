@@ -11,7 +11,8 @@ ambiguous는 1순위 자동 확정 + 나머지 후보 보관(P6, ADDRESS_AUTO_SE
 import asyncio
 import re
 import time
-from pydantic import Field
+from functools import lru_cache
+from pydantic import Field, create_model, model_validator
 
 from app.domain.address_book import save_offer
 from app.domain.assess import readback_facts
@@ -20,6 +21,7 @@ from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import Items, Source
 from app.observability.trace import observe_latency
+from app.policy.model import InputLimits, Policy
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
 from app.tools.outcome import ToolOutcome, state_summary
@@ -37,15 +39,43 @@ class RecordArgs(Args):
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
     receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본 주소(도로명·지번)")
     receiver_address_detail: str | None = Field(None, max_length=60, description="동·호수 등. 없다고 하면 빈 문자열")
-    document_count: int | None = Field(None, ge=0, le=99, description="서류 봉투 수. 물품은 지금 보낼 전체 구성을 넣는다")
-    small_box_count: int | None = Field(None, ge=0, le=99, description="소형 박스 수")
-    medium_box_count: int | None = Field(None, ge=0, le=99, description="중형 박스 수")
-    big_box_count: int | None = Field(None, ge=0, le=99, description="대형 박스 수")
+    document_count: int | None = Field(None, ge=0, description="서류 봉투 수. 물품은 지금 보낼 전체 구성을 넣는다")
+    small_box_count: int | None = Field(None, ge=0, description="소형 박스 수")
+    medium_box_count: int | None = Field(None, ge=0, description="중형 박스 수")
+    big_box_count: int | None = Field(None, ge=0, description="대형 박스 수")
     other_item: str | None = Field(None, max_length=40, description="서류·박스가 아닌 물품일 때만 그 설명")
-    item_price: int | None = Field(None, ge=0, le=100_000_000, description="물품 가액(원). 예: 만 원 → 10000")
+    item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
     pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
                                   "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
+
+
+@lru_cache(maxsize=16)
+def _record_args(limits: InputLimits) -> type[RecordArgs]:
+    """같은 정책으로 모델 스키마와 실행기 검증 모델을 만든다. 합계는 서버에서 추가 검사한다."""
+    fields = {
+        name: (int | None, Field(None, ge=0, le=limits.document_max if name == "document_count"
+                                else limits.box_total_max,
+                                description=RecordArgs.model_fields[name].description +
+                                (f". 박스와 별도로 최대 {limits.document_max}개" if name == "document_count" else
+                                 f". 소형·중형·대형 합계는 접수 묶음마다 최대 {limits.box_total_max}개")))
+        for name in COUNTS
+    }
+    fields["item_price"] = (int | None, Field(None, ge=limits.item_price_min, le=limits.item_price_max,
+                                             description=RecordArgs.model_fields["item_price"].description))
+
+    @model_validator(mode="after")
+    def check_box_total(self):
+        if sum(getattr(self, name) or 0 for name in COUNTS[1:]) > limits.box_total_max:
+            raise ValueError(f"박스 합계는 접수 묶음마다 {limits.box_total_max}개 이하여야 합니다")
+        return self
+
+    return create_model("PolicyRecordArgs", __base__=RecordArgs,
+                        __validators__={"check_box_total": check_box_total}, **fields)
+
+
+def record_args(policy: Policy) -> type[RecordArgs]:
+    return _record_args(policy.input_limits)
 
 
 # 이름 끝에 붙어 받아써진 말끝(2026-11-03 통화 512a1b: "현승준이니다"). "이"로 시작하는 말끝은 앞 글자에 받침이
@@ -71,7 +101,7 @@ def clean_name(raw: str) -> str:
 @model_tool("record_fields",
             "고객이 말한 택배 값(보내는 분·받는 분·주소·물품·물품 가액·요청 사항)을 기록한다(정정도 같은 도구). "
             "이번에 들은 항목만 채우고 나머지는 null. 전화번호는 들은 그대로 넘기면 서버가 숫자로 바꾸고 자릿수를 검사한다.",
-            RecordArgs)
+            RecordArgs, args_factory=record_args)
 async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
     given = args.model_dump(exclude_none=True)
     if not given:
@@ -84,7 +114,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if name in given:
             values[name] = clean_name(given[name]) if name.endswith("_name") else given[name].strip()
     if "receiver_phone" in given:
-        phone = normalize_phone(given["receiver_phone"])
+        phone = normalize_phone(given["receiver_phone"], policy.phone)
         if phone:
             values["receiver_phone"] = phone
         else:
@@ -93,8 +123,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         values["item_price"] = given["item_price"]
     rule = rule_of(policy.pickup)
     if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
-        iso, code = parse_pickup(given["pickup_at"], ctx.now(), rule.min_lead_minutes)
-        code = code or check_pickup(iso, ctx.now(), rule)
+        now = ctx.now()
+        iso, code = parse_pickup(given["pickup_at"], now, rule.min_lead_minutes)
+        code = code or check_pickup(iso, now, rule)
         if code:
             needs.append({"field": "pickup_at", "reason": code})
         else:
@@ -144,10 +175,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
-            offer = save_offer(s)  # 주소 저장 동의는 되읽기 확인 때 함께(사용자 결정 2026-11-04)
-            s.address_offer, s.address_consent = (offer or None), None
-            if offer:
-                facts["address_save"] = offer
+            # 주소 저장은 되읽기 확인과 섞지 않고, 택배를 담은 뒤 따로 묻는다(사용자 결정 2026-11-05). 여기서는 제안만 정해 둔다
+            s.address_offer, s.address_consent = (save_offer(s) or None), None
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]

@@ -80,7 +80,7 @@ class FakeClient:
 
 
 def service(client=None, backend=None, **cfg) -> CallService:
-    base = {"closing_quiet_ms": 50, "closing_max_sec": 1.0, "silence_sec": 30.0, "finalize_wait_sec": 0.5} | cfg
+    base = {"closing_quiet_ms": 1000, "closing_max_sec": 1.0, "silence_sec": 30.0, "finalize_wait_sec": 0.5} | cfg
     svc = CallService(CallDeps(client or FakeClient(), BackendGateway(backend or MockBackend()), P,
                                CallConfig(**base), "gpt-6-luna"))
     svc.done = []
@@ -277,6 +277,39 @@ def test_stage2_runs_once_and_fills_call_seq_and_places():
     assert [p.name for p in s.state.customer.places] == ["박민수", "이영희"]  # 최근 도착지 → 주소록
 
 
+def test_stage2_keeps_call_seq_when_history_lookup_fails():
+    """BE 확인 1번: 통화 등록은 성공했는데 이전 접수 주소 조회가 실패·지연해도 통화 번호는 보관한다."""
+    from backend_client.api import BackendError
+    db = MockBackend()
+    pin = BEPlace(name="이영희", phone="01098765432", address="부산 해운대구 센텀로 10", address_detail="101호")
+    recent = BEPlace(name="박민수", phone="01011112222", address="서울 중구 세종대로 110", address_detail="")
+    home = BEPlace(name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212", address_detail="1201호")
+    db.add_customer(CALLER, "김철수", pins=[pin], recent=(pin, recent), default_origin=home)
+
+    async def broken(*a, **kw):
+        raise BackendError("history down", 503)
+
+    db.address_history = broken
+    svc = service(backend=db)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: svc.d.client.conns)
+        svc.d.client.conns[0].push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        seq = await svc.call_session_seq(s)
+        await until(lambda: any(e["kind"] == "이전 접수 주소 조회 실패" for e in s.events))
+        svc.d.client.conns[0].push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s, seq
+
+    s, seq = run(scenario())
+    assert seq and s.state.customer.call_session_seq == seq and s.tools.ops["stage2"]["status"] == "done"
+    assert [p.name for p in s.state.customer.places] == ["이영희"]  # 주소록(PIN)만, 이력 없음
+    assert s.state.customer.origin_place.address == home.address  # 기본 주소는 context 응답에 있어 이력 실패와 무관
+
+
 def test_closing_waits_for_quiet_then_hangs_up_and_silence_timer():
     svc = service(silence_sec=0.1)
 
@@ -372,3 +405,11 @@ def test_registered_customer_origin_goes_to_call_info_without_detail():
     s = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", st, svc.d.policy, None))
     text = svc.session_config(s, None)["instructions"]
     assert "- 등록된 출발지: 서울 강남구 테헤란로 212" in text and "1201호" not in text.split("# 통화 정보")[1]
+
+
+def test_closing_quiet_must_be_at_least_one_second():
+    """AI 발화가 고객에게 전달되는 지연 때문에 마무리 뒤 최소 1초는 기다린다(설정으로 줄일 수 없다)."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        CallConfig(closing_quiet_ms=999)
+    assert CallConfig(closing_quiet_ms=1000).closing_quiet_ms == 1000

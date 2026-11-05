@@ -129,13 +129,14 @@ class CallService:
             info["고객 성함"] = c.name
         if c.customer_seq and c.origin_address:
             info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
-        tools = tuple((t["name"], t["description"]) for t in function_specs())
+        specs = function_specs(policy=self.d.policy)
+        tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",
                 "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
                     "model": self.d.backend_model,
                     "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
-                    "tools": function_specs(), "tool_choice": "auto", "parallel_tool_calls": False,
+                    "tools": specs, "tool_choice": "auto", "parallel_tool_calls": False,
                     "reasoning": {"effort": self.d.backend_effort}, "text": {"verbosity": "low"},
                     "service_tier": "priority"}}}
         if persona and persona.voice:  # 원본 live_session.build_session과 같은 자리
@@ -167,13 +168,15 @@ class CallService:
         return task
 
     async def _stage2(self, s: CallSession) -> int | None:
+        """통화 등록(번호 확보)만 이 예산 안에서. 이전 접수 주소는 번호를 보관한 뒤 별도 작업으로 읽는다 —
+        등록은 됐는데 이력 조회가 늦어 번호까지 잃는 일이 없게(BE 확인 2026-11-05 1번)."""
         if not s.caller:  # 발신번호 없으면 고객 범위를 만들 수 없다
             s.tools.ops["stage2"]["status"] = "failed"
             return None
         call = {"providerCallId": s.call_id, "incomingAt": s.incoming_at}
         try:
             ctx = await self.d.backend.read("caller_context2", self.d.backend.api.caller_context, s.caller, call,
-                                            self.d.cfg.recent_destinations, budget_sec=self.d.cfg.stage2_budget_sec)
+                                            0, budget_sec=self.d.cfg.stage2_budget_sec)
         except BackendFailure as e:
             s.tools.ops["stage2"]["status"] = "failed"
             s.note("통화 등록 실패", e.code)
@@ -182,7 +185,28 @@ class CallService:
             _apply_context(s.state, ctx, s.caller)
         s.tools.ops["stage2"]["status"] = "done"
         s.note("통화 등록", "ok" if ctx.call_session_seq else "번호 없음")
+        if ctx.status == "REGISTERED" and ctx.customer_seq and ctx.call_session_seq and self.d.cfg.recent_destinations:
+            s.spawn(self._stage2_history(s, ctx), "stage2_history")
         return ctx.call_session_seq
+
+    async def _stage2_history(self, s: CallSession, ctx) -> None:
+        """이전 접수의 출발지 1건·도착지 N건을 병렬로(각각 기본 읽기 예산). 실패해도 통화 등록은 그대로."""
+        api, seq, cust = self.d.backend.api, ctx.call_session_seq, ctx.customer_seq
+        origins, dests = await asyncio.gather(
+            self.d.backend.read("address_history", api.address_history, seq, cust, "ORIGIN", 1),
+            self.d.backend.read("address_history", api.address_history, seq, cust, "DESTINATION",
+                                self.d.cfg.recent_destinations),
+            return_exceptions=True)
+        for r in (origins, dests):
+            if isinstance(r, BackendFailure):
+                s.note("이전 접수 주소 조회 실패", r.code)
+            elif isinstance(r, BaseException):
+                raise r
+        ctx.recent_origin = origins[0] if isinstance(origins, list) and origins else None
+        ctx.recent_destinations = dests if isinstance(dests, list) else []
+        if ctx.recent_origin or ctx.recent_destinations:
+            async with s.lock:
+                _apply_context(s.state, ctx, s.caller)
 
     async def call_session_seq(self, s: CallSession) -> int | None:
         """조회·취소가 쓰는 통화 번호. 2단계를 시작하고(이미 했으면 그대로) 잠금 밖에서 기다린다."""
@@ -254,6 +278,7 @@ class CallService:
         if s.active_t and not s.last_output_t:
             s.timing("연결→첫 AI 발화", (time.time() - s.active_t) * 1000)
         s.last_output_t = time.time()
+        s.last_output_end_ms = max(s.last_output_end_ms, ev.get("end_ms") or 0)
         self._arm_silence(s)  # 무발화 = 고객·AI 모두 조용(2026-11-03 통화 363d19: 긴 되읽기 도중 고객 무입력 30초로 끊음)
 
     def _arm_silence(self, s: CallSession) -> None:
@@ -261,9 +286,11 @@ class CallService:
             s.set_timer("silence", self.d.cfg.silence_sec, lambda: self.begin_closing(s, "silence"))
 
     # --- 마무리·PBX ---
-    def begin_closing(self, s: CallSession, reason: str, after_speech: bool = False) -> None:
-        """CLOSING: 출력 전사가 closing_quiet_ms 멈추면(또는 closing_max_sec) 끊는다. 이미 끝나는 중이면 무시.
-        after_speech: 마무리 인사를 요청한 경우 — 요청 뒤 AI가 한 번 말하기 시작한 다음부터 조용함을 센다."""
+    def begin_closing(self, s: CallSession, reason: str, after_speech: bool = False,
+                      remind: Callable[[], Awaitable[None]] | None = None) -> None:
+        """CLOSING: AI 발화 끝 뒤 closing_quiet_ms(최소 1초) 조용하면 끊는다. 이미 끝나는 중이면 무시.
+        after_speech: 마무리 인사를 요청한 경우 — 요청 뒤 AI가 한 번 말하기 시작한 다음부터 조용함을 센다.
+        remind: 인사를 요청했는데 말하지 않으면 1번 다시 요청한다."""
         if s.phase in ENDED or s.phase not in (Phase.ACTIVE, Phase.ATTACHING):
             return
         s.close_reason = reason
@@ -271,18 +298,34 @@ class CallService:
         self._phase(s, Phase.CLOSING)
         s.cancel_timer("silence")
         s.cancel_timer("expire")
-        s.spawn(self._close_when_quiet(s), "closing")
+        s.spawn(self._close_when_quiet(s, remind), "closing")
 
-    async def _close_when_quiet(self, s: CallSession) -> None:
+    async def _close_when_quiet(self, s: CallSession, remind=None) -> None:
         deadline = time.monotonic() + self.d.cfg.closing_max_sec
         quiet = self.d.cfg.closing_quiet_ms / 1000
-        speak_by = time.monotonic() + 4.0  # 마무리 인사를 요청했는데 4초 안에 말하지 않으면 그냥 끊는다
-        while time.monotonic() < min(deadline, speak_by) and s.closing_requested_t \
-                and s.last_output_t <= s.closing_requested_t:
+        if s.closing_requested_t and not await self._spoke_after_request(s, deadline):
+            if remind is not None:
+                s.note("마무리", "인사 없음 → 다시 요청")
+                s.closing_requested_t = time.time()
+                await remind()
+            if remind is None or not await self._spoke_after_request(s, deadline):
+                s.note("마무리", "인사 없이 끊음")
+        # 상한에 걸려도 마지막 발화 뒤 quiet(최소 1초)는 지킨다(말이 계속 이어지면 5초 더까지만)
+        while time.monotonic() < deadline + 5.0 and time.time() - s.last_output_t < quiet:
             await asyncio.sleep(0.1)
-        while time.monotonic() < deadline and time.time() - s.last_output_t < quiet:
-            await asyncio.sleep(0.1)
+        if s.last_output_t:
+            s.timing("마무리 마지막 발화→끊기", (time.time() - s.last_output_t) * 1000)
+            if est := _audio_end_estimate(s):
+                s.timing("마무리 오디오 끝 추정−전사 수신", (est - s.last_output_t) * 1000)
         await self._quiet(hangup_quietly(self.d.client, s.call_id), "hangup")
+
+    @staticmethod
+    async def _spoke_after_request(s: CallSession, deadline: float) -> bool:
+        """마무리 인사 요청 뒤 4초 안에(상한 안에서) AI가 말하기 시작했는지."""
+        speak_by = min(deadline, time.monotonic() + 4.0)
+        while time.monotonic() < speak_by and s.last_output_t <= s.closing_requested_t:
+            await asyncio.sleep(0.1)
+        return s.last_output_t > s.closing_requested_t
 
     async def on_call_ended(self, ev) -> None:
         """PBX 종료 웹훅(call-lifecycle.md §5). 같은 번호로 다시 건 통화는 끊지 않게 ended_at 전에 시작한 통화만."""
@@ -371,6 +414,7 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     c.call_session_seq = ctx.call_session_seq or c.call_session_seq
     if getattr(ctx, "default_origin", None) and ctx.default_origin.address:
         c.default_address = ctx.default_origin.address
+        c.default_address_detail = ctx.default_origin.address_detail or ""
     origin = getattr(ctx, "default_origin", None) or getattr(ctx, "recent_origin", None)
     if origin and origin.address and c.origin_place is None:
         src = Source.PROFILE if getattr(ctx, "default_origin", None) else Source.HISTORY
@@ -392,6 +436,12 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
     if places:
         c.places = tuple(places)
     state.bump()
+
+
+def _audio_end_estimate(s: CallSession) -> float:
+    """오디오 재생 끝 추정(세션 시작 + 출력 전사 end_ms). 관제 기록만 한다.
+    shortcut: 타임라인 0 = session.started 수신 시각이라는 가정이 미실측이라 끊는 시점에 쓰지 않는다 — 실통화로 차이를 확인한 뒤 반영."""
+    return s.active_t + s.last_output_end_ms / 1000 if s.active_t and s.last_output_end_ms else 0.0
 
 
 async def _timed(s: CallSession, name: str, aw):

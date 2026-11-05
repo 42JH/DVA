@@ -4,6 +4,7 @@
 
 - `backend/`: BE 원문이다. `origin/develop-backend` a629c60(2026-11-03 10:28)의 `docs/api/`와 `backend/docs/`에서 AI가 쓰는 것만 복사했다.
   - 2026-11-04 미답변 계약 2개(`unanswered-questions.md`, `unanswered-question-reasons.md`)는 `origin/develop-backend` **fbbaca1**로 갱신했다. reason은 선택이며 두 코드/생략/null을 허용한다. 명시한 reason은 재전송 본문 비교에 포함된다. 운영 049 적용·배포는 별도 확인 대상이다.
+  - 2026-11-05 사용자가 제공한 `faq-question-examples-ai-integration.md`를 보관했다. FAQ_ANSWERED 배열 전송은 이 문서가 단일 FAQ만 설명한 기존 call-events.md보다 우선한다. 이후 원격 develop-backend **6a141a0**에서 단건/배열 DTO·검증·migration 052·같은 연동 문서의 병합을 확인했다. 운영 재점검에서도 DB 사례 테이블과 실행 중 백엔드 배열 DTO 존재를 확인했다. AI 기능은 이 브랜치 배포 후 반영된다.
   - 문서끼리의 링크는 같은 폴더를 가리키게 고쳤다.
   - 관리자·프론트 전용 문서(calls, manual-orders, unanswered-questions 관리·조회 등)는 복사하지 않아서, 그 문서를 가리키는 링크는 열리지 않는다.
 - `ai/`: AI 쪽에서 위 계약을 어떻게 쓰는지 적은 문서다. `S15P31D109/ai`의 `spec/`·`docs/`에서 복사했다. 구현 경로는 원래 저장소 기준(`app/...`)이다.

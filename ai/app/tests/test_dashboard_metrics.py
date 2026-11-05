@@ -32,12 +32,9 @@ def order_at(stage: str) -> CallSession:
         st.clear("receiver_name")
     elif stage == "item":
         st.clear("items")
-    elif stage in ("more_parcels", "payment", "closing"):
+    elif stage in ("more_parcels", "closing"):
         confirm_once(st)
-        if stage == "payment":
-            st.customer.payment_methods = ("billing", "card")
-            st.no_more_parcels = True
-        elif stage == "closing":
+        if stage == "closing":
             st.no_more_parcels = True
     s = session(st)
     s.close_reason = "pbx_ended"
@@ -45,16 +42,16 @@ def order_at(stage: str) -> CallSession:
 
 
 @pytest.mark.parametrize("stage, want", [("sender", "SENDER_INFO"), ("receiver", "RECIPIENT_INFO"), ("item", "ITEM_INFO"),
-                                         ("readback", "CONFIRMATION"), ("payment", "PAYMENT_GUIDANCE"),
+                                         ("readback", "CONFIRMATION"),
                                          ("more_parcels", "NONE"), ("closing", "NONE")])
 def test_order_dropoff_is_stage_in_progress_when_call_ended(stage, want):
     assert dropoff_stage(order_at(stage), P) == want
 
 
-def test_more_parcels_with_payment_left_is_payment_guidance():
+def test_more_parcels_never_payment_guidance():  # 결제는 묻지 않는다(2026-11-05)
     s = order_at("more_parcels")
-    s.state.customer.payment_methods = ("billing", "card")
-    assert dropoff_stage(s, P) == "PAYMENT_GUIDANCE"
+    s.state.customer.payment_methods = ("billing", "credit", "groupBilling")
+    assert dropoff_stage(s, P) == "NONE"
 
 
 def test_customer_end_mid_collection_is_still_dropoff_and_faq_last_wins():

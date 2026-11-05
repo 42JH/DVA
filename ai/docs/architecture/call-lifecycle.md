@@ -87,7 +87,7 @@
 | 단계 | 시점 | 호출 | 결과 사용 |
 |---|---|---|---|
 | 1 | RECEIVED (accept 전) | `caller_context(phone)` | Live `instructions`/`input`의 고객 맥락(이름·기본 출발지 존재 여부), 탈퇴 고객 분기 |
-| 2 | ACTIVE, 첫 업무 의도(접수·조회·취소·문의·상담원) 확정 시 **1회** | `caller_context(phone, {providerCallId: session_id, incomingAt: 최초 created_at})` | `callSessionSeq` 확보 → 이전 접수 주소(ORIGIN 1, DESTINATION N) **병렬** 조회 |
+| 2 | ACTIVE, 첫 업무 의도(접수·조회·취소·문의·상담원) 확정 시 **1회** | `caller_context(phone, {providerCallId: session_id, incomingAt: 최초 created_at})` | `callSessionSeq` 확보·보관(`ops["stage2"]` 완료) → 이전 접수 주소(ORIGIN 1, DESTINATION N)는 **별도 작업**(`stage2_history`)으로 **병렬** 조회, 각각 기본 읽기 예산. 실패·지연해도 통화 번호는 유지 |
 
 - 2단계는 수신 후 30분 안이어야 녹취 연결(`B/meaningful-call-registration-handoff.md` §3) → 통화 시간 상한보다 짧으면 문제없음, 30분 초과 통화에서 미등록이면 경고 지표.
 - 2단계는 `ops["stage2"]`로 1회만 실행한다. 시작 시점은 첫 업무 의도가 확인된 때: Decision `task`가 업무 값(order·lookup·cancel·inquiry·agent)이거나, 그 전에 첫 Backend 위임(값 기록·조회·검색)이 도착한 때 중 먼저 오는 것(`delegation.md` §3.1).

@@ -47,7 +47,7 @@ def cases():
         "searches": [search(1002, "지점 이용 시간")], "expected": {"unanswered": [], "answered": 0}}
     yield {"id": "checking_only", "transcript": [
         utter("customer", q, 1001), utter("agent", "잠시 확인해 보겠습니다.", 1003)],
-        "searches": [search(1002, q)], "expected": {"unanswered": [], "answered": 0}}
+        "searches": [search(1002, q)], "expected": {"unanswered": [], "answered": None}}
     yield {"id": "two_inquiries", "transcript": [
         utter("customer", q, 1001), utter("agent", answer, 1003),
         utter("customer", "기사님 성별을 지정할 수 있나요?", 1004), utter("agent", refusal, 1006)],

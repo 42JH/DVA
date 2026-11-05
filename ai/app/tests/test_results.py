@@ -1,5 +1,6 @@
 """S6: 아웃박스·통화 결과 전송·신규 고객 등록·최종 분석·이벤트·미답변(spec/ai-integration-current.md). 가짜 BE."""
 
+import asyncio
 import json
 
 import httpx2
@@ -79,6 +80,44 @@ def test_uncertain_submit_is_rechecked_with_same_key_after_restart(tmp_path):
     rs2 = ResultService(BackendGateway(healthy), Outbox(tmp_path / "outbox.sqlite3"), P, fare)
     run(rs2.recover())
     assert healthy.results[-1]["key"] == row["key"] and rs2.outbox.result("live_1")["status"] == "DONE"
+
+
+def test_uncertain_submit_is_rechecked_while_running(tmp_path):
+    """BE 확인 2번: 재시작 없이도 SENT_UNCERTAIN 결과를 같은 키·본문으로 재확인한다. 전송 중·방금 바뀐 행은 건너뛴다."""
+    class Flaky(MockBackend):
+        down = True
+
+        async def submit_result(self, body, key):
+            if self.down:
+                raise httpx2.ConnectError("down")
+            return await super().submit_result(body, key)
+
+    db = Flaky()
+    db.add_customer(CALLER, "김철수")
+    db.customers[CALLER]["seq"] = 12
+    db.payment_methods[CALLER] = ["billing"]
+    rs, _ = service(tmp_path, db)
+    rs.submit_budget_sec = 0.5
+    st = filled()
+    confirm_once(st)
+    assert run(rs.submit(session(st))) is None
+    row = rs.outbox.result("live_1")
+    assert row["status"] == "SENT_UNCERTAIN"
+    db.down = False
+
+    async def scenario():
+        await rs.resend_unfinished()  # 방금 바뀐 행(전송 예산 안): 다음 주기로
+        assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN" and db.results == []
+        rs.outbox.db.execute("UPDATE call_results SET updated_at = updated_at - 100")  # 예산이 지난 행
+        rs.tasks["live_1"] = asyncio.create_task(asyncio.sleep(10))  # 이 프로세스가 전송 중
+        await rs.resend_unfinished()
+        assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN" and db.results == []
+        rs.tasks.pop("live_1").cancel()
+        await rs.resend_unfinished()
+
+    run(scenario())
+    assert rs.outbox.result("live_1")["status"] == "DONE"
+    assert len(db.results) == 1 and db.results[0]["key"] == row["key"]  # 같은 키로 주문 1건, 새 키 없음
 
 
 def test_new_customer_registration_with_address_then_payment_auto(tmp_path):
@@ -211,6 +250,21 @@ def test_unregistered_customer_gets_no_address_offer():
     from app.domain.address_book import save_offer
     st = filled()
     st.customer.customer_seq = None
+    assert save_offer(st) == {}
+
+
+def test_sender_offer_when_only_detail_differs():
+    """BE 확인 4번: 도로명이 같아도 상세(101호→102호)가 바뀌면 기본 주소 저장을 제안한다. 둘 다 같으면 제안 없음."""
+    from app.domain.address_book import save_offer
+    from app.domain.state import Source
+    st = filled(sender_address_detail="102호")
+    st.record("receiver_address", "부산 해운대구 센텀로 10", Source.PIN)  # 받는 곳 제안은 끈다
+    st.customer.default_address, st.customer.default_address_detail = "서울 강남구 테헤란로 212", "101호"
+    assert save_offer(st) == {"sender": True}
+    st.customer.default_address_detail = "102호"
+    assert save_offer(st) == {}
+    st.record("sender_address_detail", "")  # 고객이 상세 없다고 함 ↔ BE 상세 ""(생략)도 같은 것으로
+    st.customer.default_address_detail = ""
     assert save_offer(st) == {}
 
 

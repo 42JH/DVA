@@ -34,7 +34,7 @@ ACTIONS = {"find_destination": "PIN_SEARCH", "lookup_orders": "PREVIOUS_ORDER_SE
 # 대시보드(ai-dashboard-ai-integration.md §3): 시스템 사유로 끝난 통화는 이탈 판정 대상이 아니다(미전송 = 미판정)
 SYSTEM_END = ("persona_unresolved", "accept_failed", "pbx_ended_during_accept", "expiring", "shutdown")
 ORDER_STAGE = {"sender": "SENDER_INFO", "receiver": "RECIPIENT_INFO", "item": "ITEM_INFO",
-               "readback": "CONFIRMATION", "payment": "PAYMENT_GUIDANCE"}
+               "readback": "CONFIRMATION"}  # PAYMENT_GUIDANCE: 결제 단계 없음(2026-11-05)
 # 분석 다음에 보내는 대시보드 항목(payload 키, 진행 키) — 서로 독립: 한쪽 실패·재전송이 다른 쪽을 막지 않는다(§1)
 DASHBOARD = (("stage_metrics", "send_stage_metrics"), ("wait_metrics", "send_wait_metrics"))
 
@@ -51,9 +51,9 @@ def dropoff_stage(s: CallSession, policy) -> str | None:
 
     if st.intent == "order":
         a = assess(st, policy)
-        if a.stage == "closing" or (a.stage == "more_parcels" and not a.payment_choice_needed):
+        if a.stage in ("closing", "more_parcels"):
             return "NONE"  # 접수 정보 확정 뒤(남은 결정 없음)
-        stage = "PAYMENT_GUIDANCE" if a.stage == "more_parcels" else ORDER_STAGE.get(a.stage)
+        stage = ORDER_STAGE.get(a.stage)
         if stage and s.tool_calls and s.tool_calls[-1]["name"] == "search_manual":
             return "FAQ_ANSWER"  # 접수 중 질문하다 끊김(문의는 진행 중 업무를 바꾸지 않는다)
         return stage
@@ -84,7 +84,7 @@ def _iso(ts: float) -> str:
 class ResultService:
     def __init__(self, backend: BackendGateway, outbox: Outbox, policy, fare_of, submit_budget_sec: float = 60.0,
                  callback_field: bool = False, reviewer=None, reason_contract_enabled: bool = False,
-                 review_max_attempts: int = 3):
+                 review_max_attempts: int = 3, faq_answered_enabled: bool = False):
         self.backend, self.outbox, self.policy, self.fare_of = backend, outbox, policy, fare_of
         self.callback_field = callback_field  # 분석 hasCallbackRequest(새 BE 배포 후에만 켠다)
         self.submit_budget_sec = submit_budget_sec
@@ -93,7 +93,10 @@ class ResultService:
         self.reviewer = reviewer
         self.reason_contract_enabled = reason_contract_enabled
         self.review_max_attempts = review_max_attempts
+        self.faq_answered_enabled = faq_answered_enabled
         self.review_lock = asyncio.Lock()  # 한 프로세스 안에서 종료·복구 작업의 중복 판정/전송 방지
+        self.insight_lock = asyncio.Lock()  # 전사 작업과 검토 작업이 같은 진행 상태를 덮지 않게 한다.
+        self.result_lock = asyncio.Lock()   # 기동 복구와 주기 재확인이 같은 결과 행을 동시에 보내지 않게
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
     async def register(self, s: CallSession, call_session_seq) -> None:
@@ -143,6 +146,7 @@ class ResultService:
                 await self.backend.write("update_customer_address", self.backend.api.update_customer_address,
                                          c.customer_seq, seq, address)
                 c.default_address = snap["sender_address"]
+                c.default_address_detail = snap.get("sender_address_detail") or ""
                 s.note("기본 주소 저장", "ok")
             if offer.get("receiver") and snap.get("receiver_geo"):
                 await self.backend.write("create_pin", self.backend.api.create_pin, seq, c.customer_seq,
@@ -196,7 +200,7 @@ class ResultService:
             data = await self.backend.write("submit", self.backend.api.submit_result, row["body"], row["key"],
                                             budget_sec=self.submit_budget_sec)
         except BackendFailure as e:
-            # 503·네트워크·시간 초과는 같은 키로 다시(재시작 때), 404(삭제·만료 통화)·400·422·그 밖 409는 멈춘다(§8)
+            # 503·네트워크·시간 초과는 같은 키로 다시(주기 재확인·재시작 때), 404(삭제·만료 통화)·400·422·그 밖 409는 멈춘다(§8)
             status = "SENT_UNCERTAIN" if e.kind in ("unavailable", "in_progress") else "FAILED"
             await asyncio.to_thread(self.outbox.update_result, sid, status, {"error": e.code, "http": e.http_status,
                                                                             "errorCode": e.error_code})
@@ -209,11 +213,29 @@ class ResultService:
 
     async def recover(self) -> None:
         """재시작 후: 끝나지 않은 결과·인사이트를 같은 키·본문·eventId로 다시 보낸다."""
-        for row in await asyncio.to_thread(self.outbox.unfinished_results):
-            await self._send(row)
+        async with self.result_lock:
+            for row in await asyncio.to_thread(self.outbox.unfinished_results):
+                await self._send(row)
         for row in await asyncio.to_thread(self.outbox.unfinished_insights):
             await self._send_insight(row)
         await self.recover_reviews()
+
+    async def resend_loop(self, interval_sec: float) -> None:
+        while True:
+            await asyncio.sleep(interval_sec)
+            await self.resend_unfinished()
+
+    async def resend_unfinished(self) -> None:
+        """실행 중에도 SENT_UNCERTAIN(503·연결 끊김·시간 초과) 주문 결과를 같은 키·본문으로 다시 확인한다(BE 확인 2026-11-05 2번).
+        새 키를 만들지 않으므로 BE가 이미 저장했으면 기존 결과를 돌려주고, 못 받았으면 그때 저장한다."""
+        async with self.result_lock:
+            for row in await asyncio.to_thread(self.outbox.unfinished_results):
+                task = self.tasks.get(row["session_id"])
+                if task is not None and not task.done():
+                    continue  # 이 프로세스가 지금 보내는 중
+                if time.time() - (row.get("updated_at") or 0) < self.submit_budget_sec:
+                    continue  # 방금 바뀐 행(전송 직후·다른 작업과 경쟁)은 다음 주기에
+                await self._send(row)
 
     async def review_loop(self, poll_sec: float) -> None:
         while True:
@@ -229,7 +251,7 @@ class ResultService:
         async with self.review_lock:
             for row in await asyncio.to_thread(self.outbox.unfinished_insights):
                 review = await asyncio.to_thread(self.outbox.review, row["session_id"])
-                if review is not None and review["status"] == "DONE":
+                if row["payload"].get("deferred_review") or (review is not None and review["status"] == "DONE"):
                     await self._send_insight(row)
 
     async def _process_review(self, sid: str) -> None:
@@ -239,28 +261,46 @@ class ResultService:
                 return
             if row["status"] == "PENDING":
                 if row["attempts"] >= self.review_max_attempts:
-                    await asyncio.to_thread(self.outbox.update_review, sid, "FAILED", "REVIEW_ATTEMPTS_EXHAUSTED")
+                    await self._failed_review(row, "REVIEW_ATTEMPTS_EXHAUSTED")
                     return
                 await asyncio.to_thread(self.outbox.begin_review, sid)
+                verdict = None
                 try:
                     source = row["input"]
                     verdict = await self.reviewer.review(source["evidence"])
-                    prepared = apply_review(sid, source["started_t"], source["evidence"], source["payload"], verdict)
+                    prepared = apply_review(sid, source["started_t"], source["evidence"], source["payload"], verdict,
+                                            faq_answered_enabled=self.faq_answered_enabled)
+                    await asyncio.to_thread(self.outbox.record_review_attempt, sid, row["attempts"] + 1, verdict, None)
                     await asyncio.to_thread(self.outbox.complete_review, sid, verdict, prepared)
                 except (APIError, TimeoutError, ReviewError, ValidationError) as e:
                     # 모델/판정 장애는 지식 검색 장애가 아니다. 고객 미답변을 만들어 보내지 않는다.
                     code = str(e) if isinstance(e, ReviewError) else type(e).__name__
+                    await asyncio.to_thread(self.outbox.record_review_attempt, sid, row["attempts"] + 1,
+                                            (e.diagnostic or verdict) if isinstance(e, ReviewError) else verdict, code)
                     status = "FAILED" if row["attempts"] + 1 >= self.review_max_attempts else "PENDING"
-                    await asyncio.to_thread(self.outbox.update_review, sid, status, code)
+                    if status == "FAILED":
+                        await self._failed_review(row, code)
+                    else:
+                        await asyncio.to_thread(self.outbox.update_review, sid, status, code)
                     log.warning("통화 종료 검토 보류 %s %s", sid, code)
                     return
                 row = await asyncio.to_thread(self.outbox.review, sid)
-            if not self.reason_contract_enabled:
+            if not self.reason_contract_enabled and not row["prepared"].get("deferred_review"):
                 return  # 계약이 확정되기 전에는 reason을 구버전 BE에 보내지 않는다.
+            if not self.faq_answered_enabled and _has_faq_answers(row["prepared"]) and not row["prepared"].get("deferred_review"):
+                return  # 이미 고정된 배열 이벤트는 임의 제거하지 않고 지원 환경까지 보류한다.
             insight = await asyncio.to_thread(self.outbox.create_insight, sid, row["call_session_seq"], row["prepared"])
             await self._send_insight(insight)
             # 전송 실패면 기존 insights 아웃박스가 복구한다. 확정 판정은 다시 호출하지 않는다.
             await asyncio.to_thread(self.outbox.update_review, sid, "DONE")
+
+    async def _failed_review(self, row: dict, code: str) -> None:
+        sid, source = row["session_id"], row["input"]
+        prepared = source["payload"] | {"unanswered": [],
+            "analysis": source["payload"]["analysis"] | {"faqAnswerCount": None}}
+        await asyncio.to_thread(self.outbox.fail_review, sid, code, prepared)
+        insight = await asyncio.to_thread(self.outbox.create_insight, sid, row["call_session_seq"], prepared)
+        await self._send_insight(insight)
 
     async def drain(self) -> None:
         """종료 시 작업을 취소해도 저장된 PENDING/READY/insights에서 재개한다."""
@@ -285,8 +325,15 @@ class ResultService:
             return  # 무의미 통화·통화 미등록·수집 토큰 없음: 보내지 않는다
         payload = self.build_insights(s)
         if self.reviewer is not None:
+            payload = payload | {"deferred_review": True, "base_event_count": len(payload["events"])}
             await asyncio.to_thread(self.outbox.create_review, s.call_id, seq,
                                     {"started_t": s.started_t, "evidence": evidence_from_session(s), "payload": payload})
+            # 이 본문은 불변. 최종 분석/추가 결과는 review_jobs.prepared_json에 따로 고정한다.
+            base = payload | {"unanswered": [], "analysis": payload["analysis"] | {"faqAnswerCount": None}}
+            insight = await asyncio.to_thread(self.outbox.create_insight, s.call_id, seq, base)
+            delivery = asyncio.create_task(self._send_insight(insight), name=f"records:{s.call_id[-8:]}")
+            self.background.add(delivery)
+            delivery.add_done_callback(self._review_done)
             task = asyncio.create_task(self._process_review(s.call_id), name=f"review:{s.call_id[-8:]}")
             self.background.add(task)
             task.add_done_callback(self._review_done)
@@ -379,9 +426,109 @@ class ResultService:
                 "wait_metrics": wait_metrics(s)}
 
     async def _send_insight(self, row: dict) -> None:
+        async with self.insight_lock:
+            row = await asyncio.to_thread(self.outbox.insight, row["session_id"])
+            if row["status"] in ("DONE", "FAILED"):
+                return
+            if row["payload"].get("deferred_review"):
+                await self._send_deferred_insight(row)
+            else:
+                await self._send_legacy_insight(row)
+
+    async def _send_deferred_insight(self, row: dict) -> None:
+        """기본 기록·부가 결과·최종 분석을 독립 전송. 각 본문/진행 단계는 불변."""
+        sid, seq, base = row["session_id"], row["call_session_seq"], row["payload"]
+        progress, api = dict(row["progress"]), self.backend.api
+
+        async def perform(key, op, fn, *args):
+            if progress.get(key) in ("done", "failed"):
+                return progress[key] == "done"
+            try:
+                data = await self.backend.write(op, fn, *args)
+                progress[key] = "done"
+                if data is not None:
+                    progress[key + "_result"] = data
+            except BackendFailure as e:
+                progress[key] = None if e.kind in ("unavailable", "in_progress") else "failed"
+                progress[key + "_error"] = e.code
+                log.warning("통화 기록 단계 보류 %s %s %s", sid, key, e.code)
+            await asyncio.to_thread(self.outbox.update_insight, sid, "PENDING", progress)
+            return progress.get(key) == "done"
+
+        base_done = True
+        for i, batch in enumerate(_batches(base["provider_call_id"], base["events"])):
+            key = f"base_batch_{i}"
+            if not await perform(key, "events", api.send_call_events, seq, batch):
+                base_done = False
+                progress["base"] = "failed" if progress.get(key) == "failed" else None
+                break
+        if base_done:
+            progress["base"] = "done"
+        review = await asyncio.to_thread(self.outbox.review, sid)
+        prepared = review.get("prepared") if review else None
+        if prepared is None:
+            await asyncio.to_thread(self.outbox.update_insight, sid, "PENDING", progress)
+            return  # 전사는 이미 전송. 분석은 검토 최종값/미판정 값 확정까지 기다린다.
+
+        extras = prepared["events"][base["base_event_count"]:]
+        unanswered = prepared["unanswered"]
+        permitted = ((self.reason_contract_enabled or not unanswered)
+                     and (self.faq_answered_enabled or not _has_faq_answers(prepared)))
+        extra_done = permitted
+        if permitted and base_done:
+            for i, item in enumerate(unanswered):
+                if not await perform(f"unanswered_{i}", "unanswered", api.send_unanswered,
+                                     item | {"callSessionSeq": seq, "providerCallId": base["provider_call_id"]}):
+                    extra_done = False
+                    if progress.get(f"unanswered_{i}") == "failed":
+                        progress["review_events"] = "failed"
+                    break
+            if extra_done:
+                events = list(extras)
+                order = len(prepared["events"])
+                for i, item in enumerate(unanswered):
+                    events.append({"eventId": str(uuid.uuid5(NAMESPACE, f"{sid}:qu:{i}")),
+                                   "eventOrder": order + i + 1, "kind": "BUSINESS_RESULT",
+                                   "occurredAt": item["occurredAt"], "offsetSeconds": item["offsetSeconds"],
+                                   "payload": {"action": "QUESTION_UNANSWERED", "orderSeq": None,
+                                               "unansweredQuestionSeq": progress[f"unanswered_{i}_result"],
+                                               "summaryText": _unanswered_summary(item)}})
+                for i, batch in enumerate(_batches(base["provider_call_id"], events)):
+                    key = f"review_batch_{i}"
+                    if not await perform(key, "events", api.send_call_events, seq, batch):
+                        extra_done = False
+                        if progress.get(key) == "failed":
+                            progress["review_events"] = "failed"
+                        break
+        elif not base_done and (extras or unanswered):
+            extra_done = False
+            if progress.get("base") == "failed":
+                progress["review_events"] = "failed"
+        elif not extras and not unanswered:
+            extra_done = True
+        if extra_done:
+            progress["review_events"] = "done"
+
+        # FAQ·미답변 전송 오류와 무관하게 검토 후 확정한 분석은 전송한다.
+        await perform("analysis", "analysis", api.send_call_analysis, seq, prepared["analysis"])
+        for key, method in DASHBOARD:
+            if prepared.get(key) is None:
+                continue
+            if progress.get("analysis") == "done":
+                await perform(key, key, getattr(api, method), seq, prepared[key])
+            elif progress.get("analysis") == "failed":
+                progress[key] = "failed"
+        stages = ["base", "review_events", "analysis", *(k for k, _ in DASHBOARD if prepared.get(k) is not None)]
+        waiting = any(progress.get(k) not in ("done", "failed") for k in stages)
+        status = "PENDING" if waiting else ("FAILED" if any(progress.get(k) == "failed" for k in stages) else "DONE")
+        await asyncio.to_thread(self.outbox.update_insight, sid, status, progress)
+
+    async def _send_legacy_insight(self, row: dict) -> None:
         sid, seq, p = row["session_id"], row["call_session_seq"], row["payload"]
         if not self.reason_contract_enabled and any("reason" in u for u in p["unanswered"]):
             return  # 재시작으로 복구한 새 본문에도 같은 계약 게이트를 적용한다.
+        if not self.faq_answered_enabled and _has_faq_answers(p):
+            return
         progress = dict(row["progress"])
         api = self.backend.api
         try:
@@ -427,6 +574,10 @@ class ResultService:
         log.info("통화 기록 전송 %s", sid)
 
 
+def _has_faq_answers(payload: dict) -> bool:
+    return any(e.get("payload", {}).get("action") == "FAQ_ANSWERED" for e in payload.get("events", []))
+
+
 def _summary(name: str, out: dict) -> str:
     """도구 결과 한 줄. 인수 원문·개인정보(이름·번호·주소)는 넣지 않는다."""
     facts, code = out.get("facts") or {}, out.get("code")
@@ -439,8 +590,19 @@ def _summary(name: str, out: dict) -> str:
     if name == "lookup_orders":
         return f"택배 {facts.get('found', 0)}건 찾음"
     if name == "search_manual":
-        return "FAQ 근거 있음" if facts.get("answerable") else "FAQ 근거 없음"
+        context = facts.get("context") or {}
+        if "evidence" in context:
+            return f"FAQ 검색 후보 {len(context['evidence'])}건 반환"
+        return "FAQ 검색 완료·응대 검토 전"
     return "완료"
+
+
+def _unanswered_summary(item: dict) -> str:
+    if item.get("reason") == "KB_NO_ANSWER":
+        return "FAQ 답변 근거 없음"
+    if item.get("reason") == "KB_UNAVAILABLE":
+        return "지식 검색 장애로 답변하지 못함"
+    return "답하지 못한 질문 기록"
 
 
 def _question(tool_call: dict) -> str | None:

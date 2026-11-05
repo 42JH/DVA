@@ -164,12 +164,11 @@ class LiveFlow:
             pending = s.state.pending
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
-            methods = s.state.customer.payment_methods
             callback = s.state.callback_offered and not s.state.callback_requested
-            save = bool(s.state.address_offer) and s.state.address_consent is None
+            save = bool(_save_pending(s.state))
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
         questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       pay_methods=methods, callback=callback, save=save, origin=origin)
+                                       callback=callback, save=save, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -225,18 +224,14 @@ class LiveFlow:
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
-            if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and st.address_offer \
-                    and st.address_consent is None:
-                st.address_consent = sv[0] == "yes"
+            if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and _save_pending(st):
+                st.address_consent = sv[0] == "yes"  # 제안한 주소(보내는 곳·받는 곳) 전체에 한 번의 답
                 s.note("주소 저장 동의", sv[0])
                 followups.append(("save", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
                 followups.append(("callback", cb[0]))
-            if (pay := answers.get("pay")) and pay[1] >= th and pay[0] in st.customer.payment_methods:
-                st.record("payment", pay[0])
-                followups.append(("payment", pay[0]))
         for f in followups:
             if f:
                 await self._follow(s, *f)
@@ -288,6 +283,8 @@ class LiveFlow:
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
+                if facts and (keys := _save_pending(s.state)):  # 담은 뒤 저장 여부를 따로 묻게 한다
+                    facts["address_save"] = {k: True for k in keys}
                 target = None
             else:
                 target = take_cancel(s.state, self.policy, pending_id)
@@ -344,17 +341,14 @@ class LiveFlow:
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
-        elif what == "payment":
-            await self.notify(s, "N1'", {"payment": value})
-            self._maybe_submit(s)
-        elif what == "no_more":  # 더 없음: 마무리는 고객이 끝낼 때(문의가 남았을 수 있다)
+        elif what == "no_more":
             async with s.lock:
                 st.no_more_parcels = True
-                a = assess(st, self.policy)
-            facts = {"more_parcels": False}
-            if a.stage == "payment":
-                facts["payment_choice"] = list(st.customer.payment_methods)
-            await self.notify(s, "N1'", facts)
+                done = assess(st, self.policy).stage == "closing"
+            if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
+                await self._finish(s)
+                return
+            await self.notify(s, "N1'", {"more_parcels": False})
             self._maybe_submit(s)
 
     async def _on_intent(self, s: CallSession, intent: str) -> None:
@@ -365,11 +359,7 @@ class LiveFlow:
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
                     st.no_more_parcels = True
-                    a = assess(st, self.policy)
-                    if a.stage == "payment":
-                        facts = {"more_parcels": False, "payment_choice": list(st.customer.payment_methods)}
-                    else:
-                        facts = {"more_parcels": False, "closing": True}
+                    facts = {"more_parcels": False, "closing": True}
                 else:
                     facts = {"closing": True}
             elif intent == "edit_parcel":
@@ -388,7 +378,28 @@ class LiveFlow:
             facts["order"] = _order_status(s)
         await self.notify(s, "N2" if facts.get("closing") or "agent" in facts else "N1'", facts)
         if facts.get("closing"):
-            self.svc.begin_closing(s, "customer_end", after_speech=True)  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+            self.svc.begin_closing(s, "customer_end", after_speech=True,  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+                                   remind=lambda: self.notify(s, "N2", facts, again=True))
+
+    async def _finish(self, s: CallSession) -> None:
+        """접수 완료 단계(assess closing): 결과를 closing_result_wait_sec까지 기다려 그 상태로 마무리 인사(N2 closing)를
+        시키고 끊는다. 고객이 먼저 끝냈거나 이미 끝나는 중이면 하지 않는다."""
+        if s.phase != Phase.ACTIVE:
+            return
+        self._maybe_submit(s, force=True)
+        results = getattr(self.svc, "results", None)
+        task = results.tasks.get(s.call_id) if results is not None else None
+        if task is not None:
+            t0 = time.monotonic()
+            await asyncio.wait({task}, timeout=self.cfg.closing_result_wait_sec)  # 실패·초과여도 pending으로 마무리
+            s.timing("마무리 결과 대기", (time.monotonic() - t0) * 1000)
+        if s.phase != Phase.ACTIVE:
+            return
+        facts = {"more_parcels": False, "closing": True, "order": _order_status(s)}
+        s.note("마무리", "접수 완료 단계")
+        await self.notify(s, "N2", facts)
+        self.svc.begin_closing(s, "flow_complete", after_speech=True,
+                               remind=lambda: self.notify(s, "N2", facts, again=True))
 
     def _edit(self, st) -> dict:
         from app.domain.store import open_for_edit
@@ -420,16 +431,15 @@ class LiveFlow:
         return {"origin": "name_only"} if done else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
-        """택배를 담았고 고객이 저장에 동의했으면 고객 기본 주소·주소록 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409)."""
+        """택배를 담은 뒤 고객이 답했으면: 동의면 제안한 주소를 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409),
+        거절이면 제안을 버린다. 답이 없으면 남아 있다가 통화가 끝나면 저장하지 않는다(다시 묻지 않음)."""
         st, results = s.state, getattr(self.svc, "results", None)
         offer = st.address_offer
-        if results is None or not offer or not offer.get("parcel") or not st.address_consent:
-            if offer and offer.get("parcel") and st.address_consent is False:
-                st.address_offer = None
+        if not offer or not offer.get("parcel") or st.address_consent is None:
             return
-        snap = next((p.confirmed_snapshot for p in st.parcels if p.parcel_id == offer["parcel"]), None)
         st.address_offer = None
-        if snap:
+        snap = next((p.confirmed_snapshot for p in st.parcels if p.parcel_id == offer["parcel"]), None)
+        if results is not None and st.address_consent and snap:
             s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "address_save")
 
     def _agent_route(self, s: CallSession) -> dict:
@@ -490,7 +500,7 @@ class LiveFlow:
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
 
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
-        """더 없음 + 결제 방식이 정해졌으면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다."""
+        """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
         results = getattr(self.svc, "results", None)
         if results is None or s.call_id in results.tasks:
             return
@@ -595,7 +605,9 @@ class LiveFlow:
             await self.resume(s, did)
 
     async def resume(self, s: CallSession, did) -> None:
-        """미결 호출이 없고 보낸 결과가 있으면 response.create 1회. 생략하면 Live가 멈춘다(S0b b3)."""
+        """미결 호출이 없고 보낸 결과가 있으면 response.create 1회. 생략하면 Live가 멈춘다(S0b b3).
+        고객이 끼어들어 말하는 중이면 말이 끝난 뒤 재개한다(앞선 결과를 고객 말 위에 얹지 않게)."""
+        await self._customer_quiet(s)
         d = self._dl(s, did)
         if d["inflight"] == 0 and d["outputs"]:
             d["outputs"] = 0
@@ -613,12 +625,13 @@ class LiveFlow:
             await asyncio.wait([asyncio.create_task(e.wait()) for e in events], timeout=timeout)
 
     # ------------------------------------------------------------------ 전달(N1'/N2/N3)
-    async def notify(self, s: CallSession, level: str, facts: dict) -> None:
-        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한)."""
+    async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False) -> None:
+        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
+        again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
         content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         h = hashlib.sha256(f"{level}:{content}".encode()).hexdigest()
-        if h in rt.sent_hashes:
+        if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
         if level == "N3":
@@ -646,10 +659,16 @@ class LiveFlow:
         deadline = time.monotonic() + timeout
         quiet = self.cfg.notify_quiet_ms / 1000
         while time.monotonic() < deadline:
-            busy = any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
+            busy = self.rt(s).cust is not None or any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
             if not busy and time.time() - s.last_output_t >= quiet:
                 return
             await asyncio.sleep(0.1)
+
+    async def _customer_quiet(self, s: CallSession, timeout: float = 8.0) -> None:
+        """고객 발화가 끝날 때까지(발화 끝 = 마지막 전사 뒤 utterance_gap_ms). 상한을 넘기면 그대로 진행한다."""
+        deadline = time.monotonic() + timeout
+        while self.rt(s).cust is not None and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
 
     async def send(self, s: CallSession, event: dict) -> None:
         if s.sideband is None or s.phase in (Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE):
@@ -675,6 +694,17 @@ def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:
 def _answer(a) -> tuple[str, float, dict]:
     probs = {str(p.value): p.probability for p in (a.probabilities or [])}
     return str(a.choice), float(a.confidence or 0), probs
+
+
+SAVE_KEYS = ("sender", "receiver")
+
+
+def _save_pending(st) -> tuple[str, ...]:
+    """담은 택배의 저장 제안 항목(답을 기다리는 동안만). 담기 전(되읽기 중)에는 묻지 않으므로 없다."""
+    offer = st.address_offer
+    if not offer or not offer.get("parcel") or st.address_consent is not None:
+        return ()
+    return tuple(k for k in SAVE_KEYS if offer.get(k))
 
 
 def _order_status(s: CallSession) -> dict:
