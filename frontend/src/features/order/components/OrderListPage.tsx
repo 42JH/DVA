@@ -45,8 +45,8 @@ export function OrderListPage() {
           options={vm.groups}
           onPick={vm.setGroup}
         />
-        <span>보내는 분</span>
-        <span>받는 분</span>
+        <span className="w-[70px] text-center whitespace-nowrap">보내는 분</span>
+        <span className="w-[70px] text-center whitespace-nowrap">받는 분</span>
         <span className="text-right">주문번호</span>
       </div>
       <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
