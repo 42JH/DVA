@@ -51,13 +51,25 @@ export function FaqListPage() {
   const slide = changed || paged ? 'motion-safe:animate-slide-in-u' : ''
 
   const closeAdd = () => (adding?.back ? navigate(adding.back) : setAdding(null))
+  // 다른 질문을 누르거나 검색 · 쪽을 바꾸면 열려 있던 추가 · 수정 칸은 닫힘 (11/06 사용자). 분류 바꾸기는 추가할 분류를 고르는 것이라 그대로 둠
+  const closeForms = () => {
+    setAdding(null)
+    setEditing(null)
+  }
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar
         wide
         crumbs={vm.q ? [{ label: 'FAQ', to: vm.listTo }, { label: `“${vm.q}” 검색` }] : undefined}
-        search={{ tab: 'faq', q: vm.q, onApply: vm.setQ }}
+        search={{
+          tab: 'faq',
+          q: vm.q,
+          onApply: (v) => {
+            closeForms()
+            vm.setQ(v)
+          },
+        }}
       />
 
       <div className={`${BAR_COLS} min-h-0 flex-[1_1_0px] grid-rows-[minmax(0,1fr)_auto] pt-v28`}>
@@ -98,7 +110,10 @@ export function FaqListPage() {
                     faq={f}
                     q={vm.q}
                     open={vm.open === f.faqEntrySeq}
-                    onToggle={() => vm.toggle(f.faqEntrySeq)}
+                    onToggle={() => {
+                      closeForms()
+                      vm.toggle(f.faqEntrySeq)
+                    }}
                     onEdit={() => setEditing(f.faqEntrySeq)}
                   />
                 )}
@@ -122,7 +137,15 @@ export function FaqListPage() {
           <Icon name="arrow" className="size-5" />
         </Link>
         <div className="col-start-2 row-start-2 pt-4">
-          <Pagination big page={vm.page} pages={vm.pages} onChange={vm.goPage} />
+          <Pagination
+            big
+            page={vm.page}
+            pages={vm.pages}
+            onChange={(p) => {
+              closeForms()
+              vm.goPage(p)
+            }}
+          />
         </div>
         <Button
           kind="brand"
