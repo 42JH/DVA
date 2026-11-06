@@ -8,6 +8,7 @@ import {
   BAR_COLS,
   Button,
   ConfirmDialog,
+  Fold,
   Highlight,
   Markdown,
   Pagination,
@@ -45,7 +46,9 @@ export function FaqListPage() {
   const [editing, setEditing] = useState<number | null>(null)
   const waiting = useUnansweredCount()
   const changed = useSlideDir(FAQ_CATEGORIES.findIndex((c) => c.name === vm.category)) !== 0
-  const slide = changed ? 'motion-safe:animate-slide-in-u' : ''
+  const paged = useSlideDir(vm.page) !== 0
+  // 분류 · 쪽을 바꾸면 질문 목록이 아래에서 올라옴 (11/04 · 11/06 사용자: 효과 통일)
+  const slide = changed || paged ? 'motion-safe:animate-slide-in-u' : ''
 
   const closeAdd = () => (adding?.back ? navigate(adding.back) : setAdding(null))
 
@@ -61,19 +64,29 @@ export function FaqListPage() {
         <CategoryNav value={vm.category} />
         <div className="min-h-0 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto pb-2">
           {/* 추가 칸은 분류를 바꿔도 남음 (쓰던 글 그대로, 분류만 따라감) — 그래서 다시 그려지는 질문 목록 밖에 */}
+          {/* 펼침 · 추가 · 수정은 모두 Fold(표 펼침 띠와 같은 효과) — 열 땐 높이가 자라며 나타나고, 닫을 땐 접히며 사라짐 */}
           {adding && (
-            <div className="mb-v32">
-              <FaqEditor
-                from={adding.from}
-                category={vm.addCategory}
-                onCancel={closeAdd}
-                onSaved={closeAdd}
-              />
-            </div>
+            <Fold>
+              <div className="pb-v32">
+                <FaqEditor
+                  from={adding.from}
+                  category={vm.addCategory}
+                  onCancel={closeAdd}
+                  onSaved={closeAdd}
+                />
+              </div>
+            </Fold>
           )}
-          <ul key={vm.category ?? 'search'} className={`flex flex-col gap-v32 ${slide}`}>
+          <ul
+            key={`${vm.category ?? 'search'}-${vm.page}`}
+            className={`flex flex-col gap-v32 ${slide}`}
+          >
             {vm.rows.map((f) => (
-              <li key={f.faqEntrySeq}>
+              <li
+                key={f.faqEntrySeq}
+                // 수정으로 바뀔 땐 접히는 옛 답변(복제본, inert)을 숨김 — 수정 칸이 자라 나오는 것만 보이게
+                className={editing === f.faqEntrySeq ? '[&>[inert]]:hidden' : undefined}
+              >
                 {editing === f.faqEntrySeq ? (
                   <FaqEditor
                     faq={f}
@@ -190,7 +203,7 @@ function FaqRow({
           </span>
         </button>
         {open && (
-          <span className="flex shrink-0 gap-1">
+          <span className="flex shrink-0 gap-1 motion-safe:animate-dim-in">
             <button
               type="button"
               aria-label="수정"
@@ -212,7 +225,11 @@ function FaqRow({
           </span>
         )}
       </div>
-      {open && <FaqAnswer faq={faq} q={q} />}
+      {open && (
+        <Fold>
+          <FaqAnswer faq={faq} q={q} />
+        </Fold>
+      )}
       {del.confirming && (
         <ConfirmDialog
           big
@@ -236,7 +253,7 @@ function FaqAnswer({ faq, q }: { faq: Faq; q: string }) {
   useRememberView('faq', id, { label: faq.question }) // 검색 창 '최근 조회'
   const questions = useRecentQuestions(id)
   return (
-    <div className="mt-4 ml-7.5 flex flex-col gap-4">
+    <div className="ml-7.5 flex flex-col gap-4 pt-4">
       <Markdown text={faq.answer} highlight={q} className="rounded bg-bg p-4 text-body" />
       {questions.length > 0 && (
         <ul aria-label="이 FAQ로 답한 최근 고객 질문" className="flex flex-col gap-2 px-1">
@@ -314,30 +331,35 @@ function FaqEditor({
           className="min-w-0 flex-1 border-b border-line bg-transparent pb-2 outline-none placeholder:text-field focus:border-brand"
         />
       </div>
-      <textarea
-        aria-label="답변"
-        maxLength={20000}
-        value={vm.answer}
-        onChange={(e) => vm.setAnswer(e.target.value)}
-        placeholder="답변을 입력해주세요"
-        className="mt-3 ml-7.5 block [field-sizing:content] max-h-[40dvh] min-h-14 w-[calc(100%-30px)] resize-none rounded border border-field bg-transparent p-4 text-body outline-none placeholder:text-field focus:border-brand"
-      />
-      <div className="mt-3 flex items-center gap-4 pl-7.5 text-body font-medium">
-        <p role="alert" className="min-w-0 flex-1 text-label text-danger">
-          {vm.error}
-        </p>
-        <button type="button" onClick={onCancel} className="text-muted hover:text-ink">
-          취소
-        </button>
-        <button
-          type="button"
-          disabled={!vm.canSubmit}
-          onClick={vm.submit}
-          className="text-brand hover:underline disabled:text-muted disabled:no-underline"
-        >
-          저장
-        </button>
-      </div>
+      {/* 답변칸 · 버튼은 펼침 효과로 — 수정은 같은 줄의 답변이 접히며 이 칸이 자라 나옴 */}
+      <Fold>
+        <div className="pt-3">
+          <textarea
+            aria-label="답변"
+            maxLength={20000}
+            value={vm.answer}
+            onChange={(e) => vm.setAnswer(e.target.value)}
+            placeholder="답변을 입력해주세요"
+            className="ml-7.5 block [field-sizing:content] max-h-[40dvh] min-h-14 w-[calc(100%-30px)] resize-none rounded border border-field bg-transparent p-4 text-body outline-none placeholder:text-field focus:border-brand"
+          />
+          <div className="mt-3 flex items-center gap-4 pl-7.5 text-body font-medium">
+            <p role="alert" className="min-w-0 flex-1 text-label text-danger">
+              {vm.error}
+            </p>
+            <button type="button" onClick={onCancel} className="text-muted hover:text-ink">
+              취소
+            </button>
+            <button
+              type="button"
+              disabled={!vm.canSubmit}
+              onClick={vm.submit}
+              className="text-brand hover:underline disabled:text-muted disabled:no-underline"
+            >
+              저장
+            </button>
+          </div>
+        </div>
+      </Fold>
     </div>
   )
 }
