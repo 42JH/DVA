@@ -1,26 +1,46 @@
 import type { KeyboardEvent } from 'react'
-import { Button, ConfirmDialog, Highlight, Pagination, TopBar } from '@/shared/ui'
-import { REASON_TAG_CLASS } from '@/shared/lib/unansweredReason'
+import { ConfirmDialog, Highlight, TopBar } from '@/shared/ui'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
+import { Icon } from './icons'
 
-// 09 AI 미답변 — 옛 구성 그대로(적용된 필터 · 'AI 미답변 질문 n개' · 표 · 쪽 번호)에 새 디자인만 입힘 (11/05 사용자: 구성은 두고 디자인만)
-// 상단바: 경로 '[이동 전 화면] > AI 미답변' · 검색(11/05 — 예전 검색칸이 상단바 → 창으로) · 알림. 표는 03 주문 · 04 통화 목록 말투 — 열 머리 20/600 · 아래 구분선 · 줄 글자 20 · 칩 · 새 버튼
-// 줄 = 통화 시작 시각 | 고객 · 발신번호 | 사유 칩 | “질문” | [FAQ 추가](파랑 선 → FAQ 작성 화면) [삭제](빨강 선 → 확인 창). 줄을 누르면 그 통화의 06
-// 한 화면에: 표 줄만 스크롤 (머리 · 쪽 번호는 고정). 오래된 질문부터 (먼저 쌓인 것부터 처리)
-// 좁은 창(1280 미만)에선 앞 세 열이 3/4로 (global.css --col-scale) — 질문 열이 '“…'로 눌리지 않게. 버튼 열은 그대로
-const COLS =
-  'grid grid-cols-[calc(170px*var(--col-scale))_calc(200px*var(--col-scale))_calc(170px*var(--col-scale))_minmax(0,1fr)_196px]'
-const PAD = 'px-[54px]' // 03 주문 목록과 같은 좌우 자리
-// 사유 칩 — 04 상담 유형 칩 색 집합에서: 유사한 질문 없음(FAQ로 채울 것) = FAQ 남보라 · 서버 에러(검색 장애 · 사유 없음) = 분홍. 모양 · 색은 06 처리 내용과 같이 shared/lib/unansweredReason
+// 09 AI 미답변 문의 (Figma 'FAQ 미답변' 11/06) — 상단바: 왼쪽 경로 '[이동 전 화면] > AI 미답변 문의' · 가운데 이 목록 검색칸 · 오른쪽 상태
+// 본문(카드 양끝 100 안쪽): 통화 날짜별 묶음 — 머리 '📅 11월 4일'(16/600) + 진한 선, 줄 72 = 시각(오후 3:02) | “질문”(20/500) | 이름 | 전화번호 | [+] [휴지통]
+// [+] = FAQ 화면 맨 위 추가 칸에 이 질문을 채워 감 (저장하면 처리됨) · [휴지통] = 확인 창. 줄을 누르면 그 통화의 06
+// 쪽 번호 없이 본문만 스크롤 (스크롤 막대는 카드 오른쪽 끝). 오래된 질문부터 (먼저 쌓인 것부터 처리)
+// 사유 칩 · 'AI 미답변 질문 n개' 줄은 새 디자인에 없어 뺌 (사유는 06 처리 내용에 그대로)
 export function UnansweredPage() {
   const vm = useUnansweredList()
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar crumbs={[vm.origin, { label: 'AI 미답변' }]} />
+      <TopBar
+        crumbs={[vm.origin, { label: 'AI 미답변 문의' }]}
+        center={
+          <label className="flex h-9 min-w-0 items-center gap-2 rounded-lg pr-2 pl-4 ring-1 ring-field ring-inset focus-within:ring-brand">
+            <Icon name="search" className="size-4 text-field" />
+            <input
+              value={vm.q}
+              onChange={(e) => vm.setQ(e.target.value)}
+              placeholder="AI가 답하지 못한 질문을 찾아보세요"
+              aria-label="질문 · 이름 · 전화번호 검색"
+              className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-field"
+            />
+            {vm.q && (
+              <button
+                type="button"
+                aria-label="검색 지우기"
+                onClick={() => vm.setQ('')}
+                className="grid size-6 place-items-center rounded text-sub hover:bg-bg hover:text-ink"
+              >
+                <Icon name="x" className="size-4" />
+              </button>
+            )}
+          </label>
+        }
+      />
       {vm.callChip && (
         // 06 '처리 내용 › AI 미답변 보기'로 왔을 때 — ✕ = 전체 미답변으로
-        <div className={`mt-2 shrink-0 ${PAD}`}>
+        <div className="mt-2 shrink-0 px-[68px]">
           <span className="inline-flex h-8 items-center gap-1 rounded-full bg-brand/10 pr-1.5 pl-4 text-body font-medium text-brand">
             {vm.callChip}
             <button
@@ -29,36 +49,15 @@ export function UnansweredPage() {
               onClick={vm.clearCall}
               className="grid size-6 place-items-center rounded-full hover:bg-brand/15"
             >
-              <svg
-                viewBox="0 0 20 20"
-                className="size-3.5 stroke-current"
-                strokeWidth={2}
-                aria-hidden
-              >
-                <path d="M5 5l10 10M15 5L5 15" strokeLinecap="round" />
-              </svg>
+              <Icon name="x" className="size-3.5" />
             </button>
           </span>
         </div>
       )}
 
-      <h2 className={`mt-v32 flex shrink-0 items-baseline gap-3 text-title font-semibold ${PAD}`}>
-        AI 미답변 질문
-        <span className="text-body font-normal text-sub">{vm.count}개</span>
-        {vm.listNote && <span className="text-caption font-normal text-muted">{vm.listNote}</span>}
-      </h2>
-      <div className={`${COLS} mt-5 shrink-0 items-center text-card font-semibold ${PAD}`}>
-        <span>통화 시작 시각</span>
-        <span>고객 · 발신번호</span>
-        <span>사유</span>
-        <span>질문</span>
-        <span />
-      </div>
-      <div className="mx-[54px] mt-4 shrink-0 border-t border-line" />
-      {/* 줄 상자: 스크롤 막대는 카드 오른쪽 끝 — 03 주문 목록과 같은 자리 (오른쪽 76 = 막대 10 포함) */}
-      <ul className="-mr-8 min-h-0 flex-[1_1_0px] [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] [scrollbar-gutter:stable] overflow-y-auto pr-[76px] pl-[54px]">
-        {vm.rows.length === 0 && (
-          <li className="py-10 text-center text-body text-muted">
+      <div className="-mx-content min-h-0 flex-[1_1_0px] [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto px-[100px] pt-v44 pb-4">
+        {vm.groups.length === 0 && (
+          <p className="py-10 text-center text-body text-muted">
             {vm.isLoading
               ? '불러오는 중…'
               : (vm.listError ??
@@ -67,15 +66,22 @@ export function UnansweredPage() {
                   : vm.callChip
                     ? '이 통화의 질문은 모두 처리됐습니다.'
                     : 'AI가 답하지 못한 질문이 없습니다.'))}
-          </li>
+          </p>
         )}
-        {vm.rows.map((r) => (
-          <Row key={r.unansweredQuestionSeq} r={r} vm={vm} />
+        {vm.groups.map((g) => (
+          <section key={g.day} className="mb-v32">
+            <h2 className="flex items-center gap-2 border-b border-sub pb-3 text-body font-semibold">
+              <Icon name="calendar" className="size-4" />
+              {g.label}
+            </h2>
+            <ul>
+              {g.rows.map((r) => (
+                <Row key={r.unansweredQuestionSeq} r={r} vm={vm} />
+              ))}
+            </ul>
+          </section>
         ))}
-      </ul>
-
-      <div className="shrink-0 pt-4">
-        <Pagination big page={vm.page} pages={vm.pages} onChange={vm.goPage} />
+        {vm.listNote && <p className="text-caption text-muted">{vm.listNote}</p>}
       </div>
 
       {vm.modal && (
@@ -94,7 +100,9 @@ export function UnansweredPage() {
   )
 }
 
-/** 표 한 줄 — 누르면(Enter · Space도) 그 통화의 06. 버튼 누름은 줄로 안 번짐 */
+const ICON_BTN = 'grid size-8 place-items-center rounded text-ink hover:bg-surface hover:text-brand'
+
+/** 한 줄 — 누르면(Enter · Space도) 그 통화의 06. 버튼 누름은 줄로 안 번짐 */
 function Row({ r, vm }: { r: UnansweredRow; vm: ReturnType<typeof useUnansweredList> }) {
   const open = () => vm.openCall(r)
   const onKey = (e: KeyboardEvent<HTMLLIElement>) => {
@@ -109,40 +117,41 @@ function Row({ r, vm }: { r: UnansweredRow; vm: ReturnType<typeof useUnansweredL
       onClick={open}
       onKeyDown={onKey}
       title="이 질문이 나온 통화 상세"
-      className={`${COLS} min-h-[84px] items-center border-b border-bg py-3 text-card outline-none hover:bg-bg focus-visible:ring-[1.5px] focus-visible:ring-brand focus-visible:ring-inset`}
+      className="flex h-[clamp(56px,8dvh,72px)] items-center border-b border-line pl-3 outline-none hover:bg-bg focus-visible:ring-[1.5px] focus-visible:ring-brand focus-visible:ring-inset"
     >
-      <span className="text-sub">
-        {r.time.map((line) => (
-          <span key={line} className="block">
-            {line}
-          </span>
-        ))}
-      </span>
-      <span className="flex min-w-0 flex-col pr-4">
-        <span className="truncate font-medium">
-          <Highlight text={r.customerName} q={vm.q} />
-        </span>
-        <span className="text-body text-sub tabular-nums">
-          <Highlight text={r.phone} q={vm.q} />
-        </span>
-      </span>
-      <span>
-        <span className={`${REASON_TAG_CLASS} ${r.reasonTag.bg}`}>{r.reasonTag.label}</span>
-      </span>
-      <span className="truncate pr-4" title={r.question}>
+      <span className="w-[109px] shrink-0 text-caption text-sub">{r.time}</span>
+      <span className="min-w-0 flex-1 truncate pr-6 text-card font-medium" title={r.question}>
         “<Highlight text={r.question} q={vm.q} />”
       </span>
+      <span className="w-[70px] shrink-0 truncate pr-2 text-body font-medium">
+        <Highlight text={r.customerName} q={vm.q} />
+      </span>
+      <span className="w-[195px] shrink-0 text-body font-medium tabular-nums">
+        <Highlight text={r.phone} q={vm.q} />
+      </span>
       <span
-        className="flex justify-end gap-2"
+        className="flex shrink-0 gap-3"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <Button big kind="brandLine" onClick={() => vm.openAdd(r)}>
-          FAQ 추가
-        </Button>
-        <Button big kind="dangerLine" onClick={() => vm.openDelete(r)}>
-          삭제
-        </Button>
+        <button
+          type="button"
+          aria-label="FAQ로 추가"
+          title="FAQ로 추가"
+          onClick={() => vm.openAdd(r)}
+          className={ICON_BTN}
+        >
+          <Icon name="plus" className="size-6" />
+        </button>
+        <button
+          type="button"
+          aria-label="삭제"
+          title="삭제"
+          onClick={() => vm.openDelete(r)}
+          className={ICON_BTN}
+        >
+          <Icon name="trash" className="size-6" />
+        </button>
       </span>
     </li>
   )

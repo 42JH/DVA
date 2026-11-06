@@ -117,6 +117,10 @@ export function GlobalSearch(props: SearchProps) {
   const [open, setOpen] = useState(false)
   const [orderId, setOrderId] = useState<number | null>(null)
   const text = props.onApply ? (props.q ?? '') : ''
+  // 안내 문구: 목록 화면(자기 탭에 검색)은 그 탭 안내 — FAQ '찾으시는 FAQ를 검색해 주세요' (Figma 'FAQ' 11/06), 나머지는 공통
+  const hint = props.onApply
+    ? TABS.find((t) => t.key === props.tab)!.placeholder
+    : SEARCH_PLACEHOLDER
   return (
     <>
       <div className="relative">
@@ -124,12 +128,10 @@ export function GlobalSearch(props: SearchProps) {
           type="button"
           aria-haspopup="dialog"
           onClick={() => setOpen(true)}
-          className="flex h-8 w-full items-center gap-6 rounded-lg bg-surface pr-9 pl-5 text-left text-body ring-1 ring-field ring-inset hover:bg-bg"
+          className="flex h-9 w-full items-center gap-2 rounded-lg bg-surface pr-9 pl-4 text-left text-body ring-1 ring-field ring-inset hover:bg-bg"
         >
           <SearchIcon className="size-4" />
-          <span className={`truncate ${text ? 'text-ink' : 'text-field'}`}>
-            {text || SEARCH_PLACEHOLDER}
-          </span>
+          <span className={`truncate ${text ? 'text-ink' : 'text-field'}`}>{text || hint}</span>
         </button>
         {text && (
           <button
