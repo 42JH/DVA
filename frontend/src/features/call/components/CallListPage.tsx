@@ -98,9 +98,10 @@ function CallLine({
       className={`${COLS} relative h-[72px] items-center border-b border-line/70 text-body font-medium hover:bg-bg`}
     >
       {(dayLabel || r.isNew) && (
-        <span className="absolute top-1/2 -left-15 flex w-[42px] -translate-y-1/2 flex-col items-center gap-0.5 text-[12px] leading-none whitespace-nowrap">
-          {dayLabel && <span className="font-medium text-ink">{fmtMonthDay(r.day)}</span>}
+        <span className="absolute top-1/2 -left-15 flex w-[42px] -translate-y-1/2 flex-col items-center gap-1 text-[12px] leading-none whitespace-nowrap">
+          {/* 같은 줄에 둘 다면 new가 위 · 날짜가 아래 (11/06 사용자) */}
           {r.isNew && <span className="font-normal text-brand">new</span>}
+          {dayLabel && <span className="font-medium text-ink">{fmtMonthDay(r.day)}</span>}
         </span>
       )}
       <span className="pl-3 text-[12px] font-normal text-sub">{r.time}</span>
