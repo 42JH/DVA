@@ -40,8 +40,6 @@ export interface SearchProps {
   onOrder?: (orderSeq: number) => void // 주문 줄을 누르면 — 없으면 보기 전용 주문 상세 창 (03은 수정 · 취소가 되는 자기 창)
 }
 
-const SEARCH_PLACEHOLDER = '어떤 정보를 찾고 계신가요?'
-
 const TABS: { key: SearchTab; label: string; list: string; placeholder: string }[] = [
   {
     key: 'call',
@@ -117,10 +115,6 @@ export function GlobalSearch(props: SearchProps) {
   const [open, setOpen] = useState(false)
   const [orderId, setOrderId] = useState<number | null>(null)
   const text = props.onApply ? (props.q ?? '') : ''
-  // 안내 문구: 목록 화면(자기 탭에 검색)은 그 탭 안내 — FAQ '찾으시는 FAQ를 검색해 주세요' (Figma 'FAQ' 11/06), 나머지는 공통
-  const hint = props.onApply
-    ? TABS.find((t) => t.key === props.tab)!.placeholder
-    : SEARCH_PLACEHOLDER
   return (
     <>
       <div className="relative">
@@ -128,10 +122,13 @@ export function GlobalSearch(props: SearchProps) {
           type="button"
           aria-haspopup="dialog"
           onClick={() => setOpen(true)}
-          className="flex h-9 w-full items-center gap-2 rounded-lg bg-surface pr-9 pl-4 text-left text-body ring-1 ring-field ring-inset hover:bg-bg"
+          // 11/06 시안: 폭 320 · 위아래 8 · 왼쪽 16 · 선 #ced4da · 돋보기 16 + 8 · 안내 글 = 이 화면 탭의 안내 글(같은 색)
+          className="flex h-[38px] w-full items-center gap-2 rounded-lg bg-surface pr-9 pl-4 text-left text-body ring-1 ring-[#ced4da] ring-inset hover:bg-bg"
         >
-          <SearchIcon className="size-4" />
-          <span className={`truncate ${text ? 'text-ink' : 'text-field'}`}>{text || hint}</span>
+          <SearchIcon className="size-4 stroke-[#ced4da]" />
+          <span className={`truncate ${text ? 'text-ink' : 'text-[#ced4da]'}`}>
+            {text || TABS.find((t) => t.key === props.tab)!.placeholder}
+          </span>
         </button>
         {text && (
           <button

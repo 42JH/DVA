@@ -14,6 +14,7 @@ export function UnansweredPage() {
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar
+        wide
         crumbs={[vm.origin, { label: 'AI 미답변 문의' }]}
         center={
           <label className="flex h-9 min-w-0 items-center gap-2 rounded-lg pr-2 pl-4 ring-1 ring-field ring-inset focus-within:ring-brand">

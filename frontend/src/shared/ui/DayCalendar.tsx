@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { monthGrid, todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtLongDay } from '@/shared/lib/format'
+import { fmtLongDay, fmtMonthDay } from '@/shared/lib/format'
 import { useDismiss } from '@/shared/lib/useDismiss'
 import { ExitGhost } from '@/shared/lib/useExitGhost'
 import { slideClass, useSlideDir } from '@/shared/lib/useSlideDir'
@@ -140,7 +140,16 @@ export function DayCalendar({
 }
 
 /** 날짜별 목록 머리의 📅 날짜 (04 통화 · 03 주문, Figma 11/04) — 누르면 아래에 하루 고르기 달력 (고르면 그 날부터) */
-export function DayPick({ day, onPick }: { day: Ymd; onPick: (d: Ymd) => void }) {
+/** small = 표 머리줄 첫 칸 (03 주문 11/06 시안) — 달력 16 · '11월 4일' 16/600 */
+export function DayPick({
+  day,
+  onPick,
+  small,
+}: {
+  day: Ymd
+  onPick: (d: Ymd) => void
+  small?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const pop = useRef<HTMLDivElement>(null)
@@ -154,11 +163,11 @@ export function DayPick({ day, onPick }: { day: Ymd; onPick: (d: Ymd) => void })
         aria-expanded={open}
         aria-label={`${fmtLongDay(day)} — 날짜 고르기`}
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-3 text-title font-normal hover:text-brand"
+        className={`flex items-center hover:text-brand ${small ? 'gap-2 text-body font-semibold' : 'gap-3 text-title font-normal'}`}
       >
         <svg
           viewBox="0 0 32 32"
-          className="size-8 shrink-0"
+          className={`shrink-0 ${small ? 'size-4' : 'size-8'}`}
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
@@ -168,7 +177,7 @@ export function DayPick({ day, onPick }: { day: Ymd; onPick: (d: Ymd) => void })
         >
           <path d="M28 13.33H4M21.33 2.67V8M10.67 2.67V8M14 18.67l2-1.34V24M14.33 24h3.34M10.4 29.33h11.2c2.24 0 3.36 0 4.22-.43a4 4 0 0 0 1.75-1.75c.43-.86.43-1.98.43-4.22v-11.2c0-2.24 0-3.36-.43-4.22a4 4 0 0 0-1.75-1.75c-.86-.43-1.98-.43-4.22-.43H10.4c-2.24 0-3.36 0-4.22.43a4 4 0 0 0-1.75 1.75C4 8.37 4 9.49 4 11.73v11.2c0 2.24 0 3.36.43 4.22a4 4 0 0 0 1.75 1.75c.86.43 1.98.43 4.22.43Z" />
         </svg>
-        {fmtLongDay(day)}
+        {small ? fmtMonthDay(day) : fmtLongDay(day)}
       </button>
       {open && (
         <div

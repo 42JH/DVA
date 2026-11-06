@@ -52,6 +52,7 @@ export function FaqListPage() {
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar
+        wide
         crumbs={vm.q ? [{ label: 'FAQ', to: vm.listTo }, { label: `“${vm.q}” 검색` }] : undefined}
         search={{ tab: 'faq', q: vm.q, onApply: vm.setQ }}
       />
