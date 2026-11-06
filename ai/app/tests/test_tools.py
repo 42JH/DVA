@@ -298,6 +298,23 @@ def test_lookup_orders_scope_name_and_selection():
     assert call(ctx(db), "lookup_orders", {})["code"] == "CALL_NOT_REGISTERED"  # 고객 범위 없으면 조회 안 함
 
 
+def test_lookup_orders_refuses_other_customer_and_states_scope():
+    """운영 통화 c156341e: 다른 번호로 접수된 택배를 찾자 본인 주문을 '그 번호로 접수된 건'이라 안내함.
+    다른 번호·다른 고객 접수는 BE를 부르지 않고 거절하고, 모든 조회 결과에 '이 번호만'이라는 범위를 싣는다."""
+    from app.tools.lookup import OTHER_CUSTOMER, SCOPE
+    db = MockBackend()
+    cust = registered(db)
+    db.add_order(CALLER, "COLLECTING", [("이영희", "부산 해운대구 센텀로 10")])
+    db.add_order("01099990000", "ACCEPTED", [("김일", "남의 택배")])
+    c = ctx(db, customer=cust)
+    out = call(c, "lookup_orders", {"receiver_name": None, "other_customer": True})
+    assert out == {"status": "rejected", "code": "ORDER_OTHER_CUSTOMER", "facts": {"found": 0, "scope": OTHER_CUSTOMER}}
+    assert c.state.selected_order is None and c.state.candidates is None
+    assert "다른 고객의 접수 정보는 안내드릴 수 없" in OTHER_CUSTOMER
+    assert call(c, "lookup_orders", {"receiver_name": "김일"})["facts"] == {"found": 0, "scope": SCOPE}  # 남의 주문은 안 보임
+    assert call(c, "lookup_orders", {"receiver_name": "이영희"})["facts"]["scope"] == SCOPE
+
+
 def test_lookup_orders_gives_status_meaning_not_pickup():
     """통화 293: COLLECTING을 '수거 진행 중'으로 안내함 → 서버가 상태의 뜻을 같이 준다(수거·배송·결제 언급 없음)."""
     from app.tools.lookup import ORDER_STATUS_TEXT, status_text

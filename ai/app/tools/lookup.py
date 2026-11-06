@@ -100,12 +100,25 @@ def status_text(status: str | None) -> str:
     return ORDER_STATUS_TEXT.get(status or "", "확인 필요")
 
 
+# 조회 범위: BE가 통화 번호(call_session_seq)로 지금 전화한 고객의 주문만 준다. 다른 번호·다른 고객의 접수는 조회·안내하지 않는다
+# (2026-11-06 사용자 결정, 운영 통화 c156341e: 다른 번호 조회 요청에 본인 주문을 '그 번호로 접수된 건'이라 안내함).
+# 지시문이 아니라 도구 결과에 둔다(ORDER_STATUS_TEXT와 같은 이유).
+SCOPE = "지금 전화하신 번호로 접수된 택배만 조회됨. 다른 번호·다른 고객의 접수 정보는 안내할 수 없음"
+OTHER_CUSTOMER = "다른 고객의 접수 정보는 안내드릴 수 없음. 지금 전화하신 번호로 접수된 택배만 조회 가능"
+
+
 class LookupArgs(Args):
     receiver_name: str | None = Field(None, max_length=30, description="받는 분 성함(조사·호칭 빼고). 기억하지 못하면 null")
+    other_customer: bool = Field(False, description="고객이 다른 전화번호로 접수된 택배나 다른 사람(다른 고객)이 접수한 택배를 "
+                                                     "찾으면 true. 받는 분 성함은 다른 사람이어도 false")
 
 
-@model_tool("lookup_orders", "이 발신번호로 접수된 택배를 받는 분 성함으로 찾는다(가장 최근 것부터).", LookupArgs)
+@model_tool("lookup_orders", "지금 전화한 번호로 접수된 택배만 받는 분 성함으로 찾는다(가장 최근 것부터). "
+                             "다른 번호·다른 고객의 접수는 조회할 수 없다(other_customer=true로 부르면 안내할 사실을 준다).",
+            LookupArgs)
 async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
+    if args.other_customer:  # BE를 부르지 않는다: 본인 주문을 다른 번호의 결과처럼 안내하지 않게
+        return ToolOutcome("rejected", "ORDER_OTHER_CUSTOMER", {"found": 0, "scope": OTHER_CUSTOMER})
     seq = ctx.state.customer.call_session_seq
     if not seq:
         return ToolOutcome("unavailable", "CALL_NOT_REGISTERED")  # 2단계 고객 확인 전·실패: 고객 범위 없음
@@ -114,7 +127,7 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         said = "".join(words(args.receiver_name))
         orders = [o for o in orders if said and said in "".join(words(o.get("receiver_name")))]
     if not orders:
-        return ToolOutcome("needs_input", "ORDER_NOT_FOUND_BY_NAME", {"found": 0})
+        return ToolOutcome("needs_input", "ORDER_NOT_FOUND_BY_NAME", {"found": 0, "scope": SCOPE})
     labels = [f"{i}번 {o.get('receiver_name') or '받는 분 미상'}님 택배" for i, o in enumerate(orders, 1)]
     async with ctx.lock:
         if len(orders) == 1:  # 하나면 바로 대상으로(취소는 확인 관문을 거친다)
@@ -123,7 +136,7 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
         else:
             offer(ctx.state, "order", tuple(labels), tuple(orders))
     return ToolOutcome("needs_choice" if len(orders) > 1 else "ok", None,
-                       {"found": len(orders), "orders": [{"label": lb, "status": o.get("status"),
+                       {"found": len(orders), "scope": SCOPE, "orders": [{"label": lb, "status": o.get("status"),
                                                          "status_text": status_text(o.get("status"))}
                                                         for lb, o in zip(labels, orders)]})
 
