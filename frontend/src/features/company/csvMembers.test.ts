@@ -237,6 +237,7 @@ assert.match(
 assert.match(errs('사번,사원명,전화번호,부서\n1,가,01011112222,개발팀').errors[0]!, /첫 줄/)
 
 // 예시 엑셀(public/member-example.xlsx)이 지금 양식을 통과하고 앞 0이 남음 — 양식을 바꾸고 예시를 안 고치면 여기서 걸림
+// 전화번호는 하이픈 형식으로 적혀 있어도 숫자 11자리로 보냄
 const sheet = await readSheet('public/member-example.xlsx', { parseNumber: (s) => s })
 const ex = readMembersRows(sheet.map((r) => r.map((v) => (v === null ? '' : String(v)))))
 assert.ok(ex.ok)

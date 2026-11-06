@@ -20,6 +20,7 @@ export const CSV_HEADER = [
   '상세주소',
 ] as const
 // 예시 엑셀 (public/member-example.xlsx, 11/06) — 기업 등록 · 사원 추가 창 공용. 사번 · 전화번호 · 우편번호 열은 텍스트 형식(앞 0 유지)
+// 전화번호 예시는 하이픈 형식(010-0000-0001) — 엑셀은 하이픈 있는 값을 숫자로 안 바꿔서, CSV로 저장해 다시 열어도 앞 0이 남음 (읽을 땐 하이픈을 뺌)
 // 양식(CSV_HEADER)을 바꾸면 이 파일도 같이 고침
 export function downloadExample() {
   const a = document.createElement('a') // 내려받기는 <a download>로만 이름을 정할 수 있음
