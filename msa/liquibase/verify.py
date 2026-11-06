@@ -83,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',6,3),('delivery',4,1),('operations',13,6)]:
+    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',8,5),('delivery',4,1),('operations',14,7)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 7, 'consultation': 4}.get(service, 2)
+        changesets = {'customer': 7, 'operations': 8, 'consultation': 5}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -106,6 +106,9 @@ try:
             sql(db, (SOURCE / 'customer-reads-check.sql').read_text(encoding='utf-8'), 'customer-reads-workflow', 'customer_app')
         if service == 'operations':
             sql(db, (SOURCE / 'persona-settings-check.sql').read_text(encoding='utf-8'), 'persona-settings-workflow', 'operations_app')
+            sql(db, (SOURCE / 'consultation-persona-reference-check.sql').read_text(encoding='utf-8'), 'consultation-persona-reference-workflow', 'operations_app')
+        if service == 'consultation':
+            sql(db, (SOURCE / 'call-analysis-check.sql').read_text(encoding='utf-8'), 'call-analysis-workflow', 'consultation_app')
         fingerprint = preview_fingerprint(service, db, service+'-ci-preview-current')
         output = ci_command(service, db, 'apply', service+'-ci-apply-current', fingerprint)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
@@ -186,7 +189,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == '7'
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('8' if service == 'operations' else '7')
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -405,7 +408,7 @@ try:
     assert sql(db, legacy(''), 'persona-settings-atomic-data') == original_personas
     assert sql(db, 'SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', 'persona-settings-atomic-history') == original_history
     assert sql(db, "SELECT to_regclass('legacy_ai_personas') IS NULL AND to_regclass('ai_persona_versions') IS NULL AND to_regclass('ai_persona_drafts') IS NULL;", 'persona-settings-atomic-schema') == 't'
-    lb('operations', db, 'update', 'persona-settings-upgrade')
+    lb('operations', db, 'update-count', 'persona-settings-upgrade', extra=('--count=1',))
     assert sql(db, legacy('legacy_'), 'persona-settings-legacy-preserved') == original_personas
     assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id<>'007-persona-settings' ORDER BY orderexecuted;", 'persona-settings-old-history-preserved') == original_history
     assert sql(db, "SELECT (SELECT count(*) FROM ai_personas),(SELECT count(*) FROM ai_persona_versions),(SELECT count(*) FROM ai_persona_drafts);", 'persona-settings-no-invented-settings') == '0|0|0'
@@ -413,6 +416,42 @@ try:
     sql(db, "SELECT activate_ai_prompt(ai_prompt_version_seq) FROM legacy_ai_prompt_versions WHERE version=1 AND ai_persona_seq=(SELECT ai_persona_seq FROM legacy_ai_personas WHERE code='custom-history');", 'persona-settings-legacy-activation', 'operations_app')
     assert sql(db, "SELECT version FROM legacy_ai_prompt_versions WHERE is_active AND ai_persona_seq=(SELECT ai_persona_seq FROM legacy_ai_personas WHERE code='custom-history');", 'persona-settings-legacy-activation-result') == '1'
     sql(db, (SOURCE / 'persona-settings-check.sql').read_text(encoding='utf-8'), 'persona-settings-upgrade-workflow', 'operations_app')
+    # Append-only analysis/ref changes must preserve old rows/history and roll back as a unit.
+    for service, count, migration_name, test, seed, preserved, new_schema in [
+        ('consultation', 4, '005-call-analysis.sql', 'call-analysis-check.sql',
+         "INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at) VALUES('analysis-legacy','01012345678',NULL);",
+         "SELECT jsonb_agg(to_jsonb(c) ORDER BY call_session_seq) FROM call_sessions c;",
+         "SELECT to_regclass('call_analyses') IS NULL AND to_regclass('call_dashboard_metrics') IS NULL AND to_regprocedure('valid_call_latency_stats(jsonb)') IS NULL;"),
+        ('operations', 7, '008-consultation-persona-references.sql', 'consultation-persona-reference-check.sql',
+         "INSERT INTO consultation_audit_preparations(event_id,transaction_id,audit) VALUES('00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000012','{\"legacy\":true}');",
+         "SELECT jsonb_agg(to_jsonb(p) ORDER BY event_id) FROM consultation_audit_preparations p;",
+         "SELECT to_regclass('consultation_persona_references') IS NULL;"),
+    ]:
+        label = service+'-analysis-upgrade'
+        db = service+'_analysis_upgrade_db'
+        sql('postgres', f'CREATE DATABASE {db} OWNER {service}_app;', label+'-setup')
+        lb(service, db, 'update-count', label+'-baseline', extra=(f'--count={count}',))
+        sql(db, seed+"INSERT INTO outbox_events(destination,event_type,aggregate_seq,payload) VALUES('operations','LegacyPending',1,'{\"preserved\":true}');", label+'-seed', service+'_app')
+        data = sql(db, preserved, label+'-before')
+        history = sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', label+'-history-before')
+        failing = logs / ('atomicity-analysis-'+service)
+        shutil.copytree(BASE/'changelog', failing, dirs_exist_ok=True)
+        migration = failing/service/migration_name
+        migration.write_text(migration.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n', encoding='utf-8')
+        output = lb(service, db, 'update', label+'-failure', failure=True, changelog_root=failing)
+        assert 'division by zero' in output.lower(), output
+        assert sql(db, new_schema, label+'-atomic-schema') == 't'
+        assert sql(db, preserved, label+'-atomic-data') == data
+        assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', label+'-atomic-history') == history
+        lb(service, db, 'update', label+'-apply')
+        assert sql(db, preserved, label+'-preserved-data') == data
+        assert sql(db, f'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<={count} ORDER BY orderexecuted;', label+'-preserved-history') == history
+        assert sql(db, "SELECT payload->>'preserved' FROM outbox_events WHERE event_type='LegacyPending' AND delivered_at IS NULL;", label+'-preserved-outbox') == 'true'
+        if service == 'consultation':
+            assert sql(db, 'SELECT count(*) FROM call_analyses;', label+'-no-invented-analysis') == '0'
+        else:
+            assert sql(db, 'SELECT count(*) FROM consultation_persona_references;', label+'-no-invented-reference') == '0'
+        sql(db, (SOURCE/test).read_text(encoding='utf-8'), label+'-workflow', service+'_app')
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)
