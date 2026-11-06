@@ -5,11 +5,13 @@ async function migrate(pool) {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.DB_NAME, 'dva_webhook_test');
   assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-  assert.equal((await pool.query('SELECT count(*) FROM databasechangelog')).rows[0].count, '9');
+  assert.equal((await pool.query('SELECT count(*) FROM databasechangelog')).rows[0].count, '10');
+  assert.equal((await pool.query("SELECT count(*) FROM databasechangelog WHERE id='010-order-audit' AND author='dva'")).rows[0].count, '1');
   await pool.query('SELECT name,deleted_at FROM admin_users LIMIT 0');
   await pool.query('SELECT session_token_hash FROM admin_sessions LIMIT 0');
   await pool.query('SELECT actor_name,target_admin_name FROM audit_logs LIMIT 0');
   await pool.query('SELECT transaction_id,audit,aborted FROM customer_audit_preparations LIMIT 0');
+  await pool.query('SELECT transaction_id,audit,aborted FROM order_audit_preparations LIMIT 0');
   await pool.query('SELECT prepared_event_id,ai_persona_version_seq,committed FROM consultation_persona_references LIMIT 0');
 }
 module.exports = { migrate };

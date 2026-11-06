@@ -15,7 +15,7 @@ RUN npm run lint \
  && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
  && npm run build \
- && node --test test/environment.test.cjs test/faq-call-sources.test.cjs test/security-events.test.cjs
+ && node --test test/environment.test.cjs test/faq-call-sources.test.cjs test/security-events.test.cjs test/order-audit-recovery.test.cjs
 
 FROM builder AS checks
 CMD ["node", "--test", "test/auth.test.cjs", "test/auth.integration.test.cjs"]

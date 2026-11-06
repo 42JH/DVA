@@ -1,4 +1,4 @@
-"""Compare order reads against the unchanged monolith on five isolated PostgreSQL DBs."""
+"""Compare order reads and deletion against the unchanged monolith on five isolated PostgreSQL DBs."""
 import json
 from pathlib import Path
 import subprocess
@@ -86,6 +86,12 @@ def main():
                command=('node', '--test', 'test/order-reads-reference.cjs'))
         run('docker', 'cp', str(reference), name+':/app/test/order-reads-reference.cjs', label='reference-copy')
         complete(name)
+        name = RUN+'-reference-deletion-suite'
+        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
+               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
+               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
+               command=('node', '--test', '--test-name-pattern=new DELETE routes|order soft deletion|live calls|order/call deletion', 'test/soft-deletion.integration.test.cjs'))
+        complete(name)
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('order', 3002)):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
@@ -102,6 +108,14 @@ def main():
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         complete(name)
+        for suite in ['order-deletion-parity', 'order-deletion-recovery']:
+            name = RUN+'-'+suite
+            create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+                   '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+                   command=('node', '--test', 'test/'+suite+'.test.cjs'))
+            for file in [suite+'.test.cjs'] + (['order-deletion-claimant.cjs'] if suite.endswith('recovery') else []):
+                run('docker', 'cp', str(ROOT/'msa/parity'/file), name+':/app/service/test/'+file, label=suite+'-copy-'+file)
+            complete(name)
         run('docker', 'stop', '--time=5', RUN+'-consultation-app', label='consultation-outage')
         name = RUN+'-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

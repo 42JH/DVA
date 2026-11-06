@@ -54,3 +54,9 @@ python3 msa/liquibase/verify.py
 첫 명령은 호스트 포트 없는 임시 내부 네트워크와 PostgreSQL 17.11, Node.js 24 검증 이미지만 만든다. 실제 PG 트랜잭션·실제 HTTP·SIGKILL 후 재시작을 검사하며 생성한 자원 라벨을 확인한 뒤 해당 자원만 정리한다. 토큰·DB 비밀번호는 일회성 테스트 값이다. 운영 DB·Jenkins·k3s에 접속하지 않는다.
 
 외부 API 전체 동등성과 실제 서비스 장착·운영 장애 복구는 아직 미검증이다. [전체 계획](../../../docs/msa-parity-plan.md)을 따른다.
+
+## 주문 삭제의 조회와 영속 감사
+
+`OrderDeletionCheckRequested`는 order가 consultation의 `/internal/order-deletion-check`로 보내는 고정 조회다. payload는 양수 int32 `orderSeq` 하나, 응답은 같은 eventId·processed와 `{blocked:boolean}`뿐이다. 기존 CUSTOMER_AUTH_TOKEN, 설정된 consultation origin, 5초 제한·리다이렉트 거절·엄격한 UTF-8/JSON·4KiB ACK 검사를 사용한다. source/type/추가 필드는 거절한다. 원본 SQL처럼 연결된 미삭제/미종료 통화가 있으면 true이며 통화 보관 기산일은 필터하지 않는다. 같은 이벤트도 현재 상태를 읽고 inbox/outbox나 개인정보 응답을 저장하지 않는다.
+
+order의 쓰기 감사는 기존 `AuditPrepared`/`AuditCommitted`/`AuditAborted`를 사용한다. order 전용 준비 테이블과 source allowlist를 추가하고 업무 변경과 outbox를 같은 order 트랜잭션에 저장한다. 성공 응답 전 operations ACK를 확인하며 생산자 종료는 기존 advisory lock 증명과 `/internal/audit/flush`로 복구한다. 조회 ACK와 업무 확정 ACK를 혼동하지 않는다. 분리 DB의 전역 원자 트랜잭션을 주장하지 않는다.

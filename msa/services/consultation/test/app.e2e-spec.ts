@@ -161,6 +161,44 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .expect(503);
     await request(app.getHttpServer()).get('/consultation/health').expect(200);
   });
+  it('authenticates order deletion checks, validates fixed fields and exposes no public operation', async () => {
+    const token = app.get(ConfigService).get<string>('CUSTOMER_AUTH_TOKEN')!;
+    const body = {
+      eventId: '00000000-0000-4000-8000-000000000001',
+      source: 'order',
+      eventType: 'OrderDeletionCheckRequested',
+      payload: { orderSeq: 17 },
+    };
+    await request(app.getHttpServer())
+      .post('/internal/order-deletion-check')
+      .send(body)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/order-deletion-check')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...body, payload: { orderSeq: '17' } })
+      .expect(422);
+    pool.query.mockResolvedValueOnce({ rows: [{ blocked: true }] });
+    await request(app.getHttpServer())
+      .post('/internal/order-deletion-check')
+      .set('Authorization', 'Bearer ' + token)
+      .send(body)
+      .expect(200)
+      .expect({
+        eventId: body.eventId,
+        status: 'processed',
+        payload: { blocked: true },
+      });
+    const response = await request(app.getHttpServer())
+      .get('/consultation/docs-json')
+      .expect(200);
+    expect(
+      Object.keys(
+        (response.body as { paths: Record<string, unknown> }).paths,
+      ).some((path) => path.includes('order-deletion-check')),
+    ).toBe(false);
+  });
+
   it('authenticates FAQ source queries on the private path and rejects invalid envelopes', async () => {
     const token = 'faq-source-query-token-'.padEnd(48, 's');
     app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);

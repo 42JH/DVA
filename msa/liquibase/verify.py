@@ -86,7 +86,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-storage-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-storage-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',8,3),('consultation',10,9),('delivery',4,1),('operations',16,8)]:
+    for service, tables, fks in [('customer',8,7),('order',8,3),('consultation',10,9),('delivery',4,1),('operations',17,8)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -95,7 +95,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 9, 'consultation': 7, 'order': 3, 'delivery': 3}[service]
+        changesets = {'customer': 7, 'operations': 10, 'consultation': 7, 'order': 3, 'delivery': 3}[service]
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -195,7 +195,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('9' if service == 'operations' else '7')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('10' if service == 'operations' else '7')
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -532,6 +532,33 @@ try:
     assert sql(db,"SELECT count(*) FILTER(WHERE attempt_count=0 AND next_attempt_at IS NULL),count(*) FILTER(WHERE requires_review AND last_error_code='LEGACY_FAILURE') FROM pbx_webhooks.call_ended_events;",'retry-upgrade-legacy-state')=='5|3'
     assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=6 ORDER BY orderexecuted;','retry-upgrade-history-preserved')==history
     sql(db,(SOURCE/'recording-retry-check.sql').read_text(encoding='utf-8'),'retry-upgrade-checks','consultation_app')
+    # Append-only order audit upgrade preserves every existing business/event/preparation row.
+    db='order_audit_upgrade_db'
+    sql('postgres',f'CREATE DATABASE {db} OWNER operations_app;','order-audit-upgrade-setup')
+    lb('operations',db,'update-count','order-audit-upgrade-baseline',extra=('--count=9',))
+    sql(db,"""INSERT INTO customer_audit_preparations(event_id,transaction_id,audit) VALUES(gen_random_uuid(),gen_random_uuid(),'{"customer":true}');
+      INSERT INTO consultation_audit_preparations(event_id,transaction_id,audit) VALUES(gen_random_uuid(),gen_random_uuid(),'{"consultation":true}');
+      INSERT INTO outbox_events(destination,event_type,aggregate_seq,payload) VALUES('customer','LegacyPending',1,'{"preserved":true}');""",'order-audit-upgrade-seed','operations_app')
+    statement="SELECT jsonb_build_object('customer',(SELECT jsonb_agg(to_jsonb(t)) FROM customer_audit_preparations t),'consultation',(SELECT jsonb_agg(to_jsonb(t)) FROM consultation_audit_preparations t),'outbox',(SELECT jsonb_agg(to_jsonb(t)) FROM outbox_events t));"
+    data=sql(db,statement,'order-audit-upgrade-before')
+    history=sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','order-audit-upgrade-history')
+    failing=logs/'atomicity-order-audit'
+    shutil.copytree(BASE/'changelog',failing,dirs_exist_ok=True)
+    migration=failing/'operations/010-order-audit.sql'
+    migration.write_text(migration.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n',encoding='utf-8')
+    output=lb('operations',db,'update','order-audit-upgrade-late-failure',failure=True,changelog_root=failing)
+    assert 'division by zero' in output.lower(),output
+    assert sql(db,"SELECT to_regclass('order_audit_preparations') IS NULL;",'order-audit-upgrade-atomic-schema')=='t'
+    assert sql(db,statement,'order-audit-upgrade-atomic-data')==data
+    assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','order-audit-upgrade-atomic-history')==history
+    lb('operations',db,'update','order-audit-upgrade-apply')
+    assert sql(db,statement,'order-audit-upgrade-preserved-data')==data
+    assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=9 ORDER BY orderexecuted;','order-audit-upgrade-preserved-history')==history
+    assert sql(db,'SELECT count(*) FROM order_audit_preparations;','order-audit-upgrade-no-invented-audit')=='0'
+    sql(db,(SOURCE/'order-audit-check.sql').read_text(encoding='utf-8'),'order-audit-upgrade-constraints','operations_app')
+    history=sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','order-audit-upgrade-after')
+    lb('operations',db,'update','order-audit-upgrade-repeat')
+    assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','order-audit-upgrade-repeat-history')==history
     verify_order_schema(BASE, logs, sql, lb, report)
     report['passed'] = True
 except Exception as error:

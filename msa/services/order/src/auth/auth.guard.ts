@@ -7,6 +7,9 @@ import type { AdminPublic, AdminRole } from '../admins/admins.types';
 import { ApiException } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
 import type { AuthenticationType } from '../observability/security-events';
+import { AuditService } from '../audit/audit.service';
+import { AUDIT_OPERATION, type AuditOperationOptions, auditEvent } from '../audit/audit-operation';
+import type { AuditActorType } from '../audit/audit.types';
 import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
 
@@ -15,6 +18,7 @@ export const Roles = (...roles: AdminRole[]) => SetMetadata('auth:roles', roles)
 export type AuthRequest = Request & {
   requestId: string;
   admin?: AdminPublic;
+  auditActorType?: AuditActorType;
   securityAuthType?: AuthenticationType;
 };
 
@@ -22,14 +26,35 @@ export type AuthRequest = Request & {
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly auth: AuthService,
+    private readonly audit: AuditService,
     private readonly reflector: Reflector,
     private readonly config: ConfigService<Environment, true>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    try {
+      return await this.checkAccess(context);
+    } catch (error) {
+      const operation = this.reflector.get<AuditOperationOptions>(
+        AUDIT_OPERATION,
+        context.getHandler(),
+      );
+      if (operation)
+        await this.audit.recordFailure(
+          auditEvent(operation, context.switchToHttp().getRequest<AuthRequest>()),
+          error,
+        );
+      throw error;
+    }
+  }
+
+  private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
-    if (this.reflector.getAllAndOverride<boolean>('auth:internal-customer', targets)) {
+    if (
+      this.reflector.getAllAndOverride<boolean>('auth:internal-customer', targets) ||
+      this.reflector.getAllAndOverride<boolean>('auth:internal-operations', targets)
+    ) {
       const actual = Buffer.from(request.get('Authorization') ?? '');
       const expected = Buffer.from(
         'Bearer ' + this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
@@ -43,9 +68,16 @@ export class AuthGuard implements CanActivate {
       .split(';')
       .map((part) => part.trim())
       .filter((part) => part.startsWith('dva_session='));
-    if (this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler()) && cookies.length === 0)
+    if (this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler()) && cookies.length === 0) {
+      request.auditActorType = 'AI';
       return true;
+    }
     const token = cookies.length === 1 ? cookies[0].slice('dva_session='.length) : '';
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+      const origin = request.get('Origin');
+      if (!origin || !this.config.get('CORS_ORIGINS', { infer: true }).includes(origin))
+        throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
+    }
     request.securityAuthType = 'admin_session';
     request.admin = await this.auth.authenticate(token);
     delete request.securityAuthType;

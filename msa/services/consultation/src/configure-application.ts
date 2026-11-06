@@ -73,6 +73,7 @@ export function configureApplication(
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
+      { path: 'internal/order-deletion-check', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'consultation/health', method: RequestMethod.ALL },
       { path: 'consultation/health/ready', method: RequestMethod.ALL },

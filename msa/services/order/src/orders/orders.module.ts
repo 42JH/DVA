@@ -1,3 +1,4 @@
+import { OrderDeletionCheckClient } from './order-deletion-check.client';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { OrdersService } from './orders.service';
@@ -15,6 +16,6 @@ import { OrderReadController } from './order-read.controller';
     OrderAddressesController,
     OrderReadController,
   ],
-  providers: [OrdersService, OrdersRepository],
+  providers: [OrderDeletionCheckClient, OrdersService, OrdersRepository],
 })
 export class OrdersModule {}

@@ -5,6 +5,7 @@ import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/configure-app';
 import { DatabaseService } from '../src/database/database.service';
+import { AuditService } from '../src/audit/audit.service';
 import { AuthService } from '../src/auth/auth.service';
 import { ApiException } from '../src/common/errors/api.exception';
 
@@ -15,6 +16,8 @@ describe('Order read API (e2e)', () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DatabaseService)
       .useValue({ pool: { query } })
+      .overrideProvider(AuditService)
+      .useValue({ recordFailure: jest.fn().mockResolvedValue(undefined) })
       .overrideProvider(AuthService)
       .useValue({
         readiness: () => Promise.resolve(undefined),
@@ -36,7 +39,7 @@ describe('Order read API (e2e)', () => {
     await app.close();
   });
 
-  it('keeps health and Swagger and declares exactly four public business reads', async () => {
+  it('keeps health and Swagger and declares four public reads and the administrator DELETE', async () => {
     await request(app.getHttpServer()).get('/order/health').expect(200).expect({ status: 'ok' });
     await request(app.getHttpServer()).get('/order/health/ready').expect(200);
     await request(app.getHttpServer())
@@ -65,7 +68,9 @@ describe('Order read API (e2e)', () => {
           '/api/orders',
           '/api/orders/{id}',
         ])
-          expect(Object.keys(body.paths[path])).toEqual(['get']);
+          expect(Object.keys(body.paths[path]).sort()).toEqual(
+            path === '/api/orders/{id}' ? ['delete', 'get'] : ['get'],
+          );
       });
   });
 
@@ -95,5 +100,21 @@ describe('Order read API (e2e)', () => {
       .send({})
       .expect(422);
     expect(query.mock.calls.length).toBe(before);
+  });
+
+  it('requires an allowed Origin and administrator session for DELETE and protects audit recovery', async () => {
+    await request(app.getHttpServer()).delete('/api/orders/1').expect(403);
+    await request(app.getHttpServer())
+      .delete('/api/orders/1')
+      .set('Origin', 'http://localhost:5173')
+      .set('call_session_seq', '1')
+      .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+      .expect(401);
+    await request(app.getHttpServer()).post('/internal/audit/flush').send({}).expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/audit/flush')
+      .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
+      .send({})
+      .expect(400);
   });
 });
