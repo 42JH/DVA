@@ -6,7 +6,7 @@ import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
 
 const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",
  created_by_admin_user_seq AS "createdByAdminUserSeq",client_parcel_id AS "clientParcelId",creation_payload AS "creationPayload",
- parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_parcel_seq AS "orderParcelSeq",
+ parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
  created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
 const available = `deleted_at IS NULL AND retention_started_at>statement_timestamp()-interval '5 years'`;
@@ -67,7 +67,7 @@ export class ParcelDraftsRepository {
       FROM order_parcel_drafts WHERE ${available}
        AND ($1::int IS NULL OR customer_seq=$1) AND ($2::text='ALL' OR status=$2)
        AND ($3::int IS NULL OR call_session_seq=$3) AND ($4::int IS NULL OR call_session_seq=$4)
-       AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+       AND ($6::int IS NULL OR legacy_order_seq=$6) AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
         parcel_data->'origin'->>'name',parcel_data->'origin'->>'phoneNumber',parcel_data->'origin'->>'roadAddress',parcel_data->'origin'->>'jibunAddress',
         parcel_data->'destination'->>'name',parcel_data->'destination'->>'phoneNumber',parcel_data->'destination'->>'roadAddress',parcel_data->'destination'->>'jibunAddress'),NFC)),lower(normalize($5,NFC)))>0)`,
       [
@@ -76,6 +76,7 @@ export class ParcelDraftsRepository {
         query.callSessionSeq ?? null,
         endedCallId,
         query.q?.trim() || null,
+        query.legacyOrderSeq ?? null,
       ],
       query,
       '"createdAt" DESC,"draftSeq" DESC',

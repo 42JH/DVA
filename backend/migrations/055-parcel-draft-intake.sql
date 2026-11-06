@@ -12,6 +12,7 @@ CREATE TABLE order_parcel_drafts (
  status text NOT NULL CHECK (status IN ('READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED')),
  version integer NOT NULL DEFAULT 1 CHECK (version>0),
  source_draft_seq integer CHECK (source_draft_seq>0 AND source_draft_seq<>draft_seq),
+ order_seq integer CHECK (order_seq>0),
  order_parcel_seq integer CHECK (order_parcel_seq>0),
  legacy_order_seq integer CHECK (legacy_order_seq>0),
  legacy_order_parcel_seq integer CHECK (legacy_order_parcel_seq>0),
@@ -20,7 +21,7 @@ CREATE TABLE order_parcel_drafts (
  retention_started_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
  deleted_at timestamptz,
  CONSTRAINT parcel_draft_owner_check CHECK (call_session_seq IS NOT NULL OR created_by_admin_user_seq IS NOT NULL OR legacy_order_seq IS NOT NULL),
- CONSTRAINT parcel_draft_conversion_check CHECK ((status='CONVERTED')=(order_parcel_seq IS NOT NULL)),
+ CONSTRAINT parcel_draft_conversion_check CHECK ((status='CONVERTED')=(order_parcel_seq IS NOT NULL) AND (order_seq IS NULL)=(order_parcel_seq IS NULL)),
  CONSTRAINT parcel_draft_legacy_check CHECK (legacy_order_parcel_seq IS NULL OR legacy_order_seq IS NOT NULL)
 );
 CREATE UNIQUE INDEX parcel_draft_client_key ON order_parcel_drafts(call_session_seq,client_parcel_id) NULLS NOT DISTINCT;

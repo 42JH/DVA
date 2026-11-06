@@ -32,8 +32,8 @@ export class OrderIntakeRepository {
   ) {
     for (const mapping of mappings)
       await client.query(
-        `UPDATE order_parcel_drafts SET status='CONVERTED',order_parcel_seq=$2,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
-        [mapping.draftSeq, mapping.orderParcelSeq],
+        `UPDATE order_parcel_drafts SET status='CONVERTED',order_parcel_seq=$2,order_seq=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
+        [mapping.draftSeq, mapping.orderParcelSeq, orderSeq],
       );
     await client.query(
       `UPDATE order_parcel_drafts SET status='INCOMPLETE',version=version+1,updated_at=clock_timestamp()

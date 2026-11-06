@@ -129,7 +129,7 @@ test('055 atomically copies partial orders, preserves source records and keeps s
       const independent = async (values = {}) =>
         (
           await client.query(
-            "INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,order_parcel_seq) VALUES($1,$2,$3,'{}',$4,$5,$6,$7) RETURNING draft_seq",
+            "INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,order_parcel_seq,order_seq) VALUES($1,$2,$3,'{}',$4,$5,$6,$7,$8) RETURNING draft_seq",
             [
               newCall.call_session_seq,
               orphanCustomer,
@@ -138,6 +138,7 @@ test('055 atomically copies partial orders, preserves source records and keeps s
               values.status ?? 'INCOMPLETE',
               values.source ?? null,
               values.parcel ?? null,
+              values.order ?? null,
             ],
           )
         ).rows[0].draft_seq;
@@ -153,7 +154,7 @@ test('055 atomically copies partial orders, preserves source records and keeps s
           [actual],
         )
       ).rows[0].order_parcel_seq;
-      const converted = await independent({ status: 'CONVERTED', parcel });
+      const converted = await independent({ status: 'CONVERTED', order: actual, parcel });
       await client.query('DELETE FROM order_parcels WHERE order_parcel_seq=$1', [parcel]);
       await client.query('DELETE FROM orders WHERE order_seq=$1', [actual]);
       await client.query('DELETE FROM customers WHERE customer_seq=$1', [orphanCustomer]);

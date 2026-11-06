@@ -200,6 +200,7 @@ test('deployment verification rejects a registration policy that cannot retain u
 test('deployment verification requires 055, logical references, uniqueness and the finalization guard', async () => {
   for (const sql of [
     "DELETE FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql'",
+    'ALTER TABLE order_parcel_drafts DROP COLUMN order_seq',
     'DROP INDEX parcel_draft_source_key',
     'ALTER TABLE call_sessions DROP CONSTRAINT call_order_finalization_check',
   ])

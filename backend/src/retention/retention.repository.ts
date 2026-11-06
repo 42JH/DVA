@@ -153,6 +153,9 @@ export class RetentionRepository {
       )
         return;
       await client.query("SET LOCAL lock_timeout='1s'");
+      await client.query(`DELETE FROM order_parcel_drafts WHERE draft_seq IN (
+        SELECT draft_seq FROM order_parcel_drafts WHERE retention_started_at<=statement_timestamp()-interval '5 years'
+        ORDER BY retention_started_at,draft_seq LIMIT 100 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM audit_logs WHERE audit_log_seq IN (SELECT audit_log_seq FROM audit_logs
         WHERE occurred_at<=statement_timestamp()-interval '7 days' ORDER BY occurred_at,audit_log_seq LIMIT 1000 FOR UPDATE SKIP LOCKED)`);
       await client.query(`DELETE FROM faq_change_notifications WHERE faq_change_notification_seq IN (

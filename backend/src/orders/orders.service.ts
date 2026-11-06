@@ -405,6 +405,12 @@ export class OrdersService {
           '종료된 통화는 기존 연결 주문만 저장할 수 있습니다.',
         );
       const order = await this.repository.lockOrder(client, id);
+      if (await this.repository.hasMigratedDrafts(client, id))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
+        );
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       if (order.customerSeq === null)
         throw new ApiException(403, 'FORBIDDEN', '주문에 연결된 고객이 필요합니다.');
@@ -593,6 +599,12 @@ export class OrdersService {
         );
       const customerId = await this.readCustomer(client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
+      if (await this.repository.hasMigratedDrafts(client, id))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
+        );
       if (!order || (customerId !== null && order.customerSeq !== customerId))
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       const parcels = await this.repository.lockParcels(client, id);
@@ -696,6 +708,12 @@ export class OrdersService {
         );
       const customerId = await this.readCustomer(client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
+      if (await this.repository.hasMigratedDrafts(client, id))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '미완료 배송 초안으로 이관된 주문입니다. 배송 초안 API에서 보완해 주세요.',
+        );
       if (!order || (customerId !== null && order.customerSeq !== customerId))
         throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
       if (order.status !== 'COLLECTING') {

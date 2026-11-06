@@ -31,6 +31,7 @@ export interface ParcelDraftRow {
   status: ParcelDraftStatus;
   version: number;
   sourceDraftSeq: number | null;
+  orderSeq: number | null;
   orderParcelSeq: number | null;
   legacyOrderSeq: number | null;
   legacyOrderParcelSeq: number | null;

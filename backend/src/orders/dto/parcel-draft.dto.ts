@@ -153,6 +153,18 @@ export class ParcelDraftQueryDto extends PaginationQueryDto {
   @Max(2147483647)
   callSessionSeq?: number;
 
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: '이관 원본 주문 번호로 초안을 찾습니다.',
+  })
+  @IsOptional()
+  @Transform(integer)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  legacyOrderSeq?: number;
+
   @ApiPropertyOptional({ description: '발송·수령 이름/전화/주소 부분 검색.', maxLength: 100 })
   @IsOptional()
   @IsString()
@@ -175,6 +187,7 @@ export class ParcelDraftResponseDto {
   })
   intakeVersion?: number | null;
   @ApiProperty({ nullable: true }) sourceDraftSeq!: number | null;
+  @ApiProperty({ nullable: true }) orderSeq!: number | null;
   @ApiProperty({ nullable: true }) orderParcelSeq!: number | null;
   @ApiProperty({ nullable: true }) legacyOrderSeq!: number | null;
   @ApiProperty({ nullable: true }) legacyOrderParcelSeq!: number | null;

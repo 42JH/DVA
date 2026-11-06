@@ -219,7 +219,17 @@ export class OrderIntakeService {
   }
 
   async recoverPending() {
-    for (const id of await this.repository.candidates()) await this.finalize(id, randomUUID());
+    const candidates = await this.repository.candidates();
+    // A batch of slow Dver responses must not serialize ahead of payment/retry maintenance.
+    await Promise.all(
+      candidates.map(async (id) => {
+        try {
+          await this.finalize(id, randomUUID());
+        } catch {
+          this.logger.error({ event: 'order_intake_recovery_failed', callSessionSeq: id });
+        }
+      }),
+    );
   }
 
   async detail(

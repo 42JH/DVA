@@ -233,6 +233,7 @@ BEGIN
  RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, company PIN retirement/FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
  IF to_regclass('public.order_parcel_drafts') IS NULL
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql')
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_parcel_drafts' AND column_name='order_seq' AND udt_name='int4' AND is_nullable='YES')
   OR EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.order_parcel_drafts') AND contype='f')
   OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions'
    AND column_name IN ('order_intake_enabled','order_intake_version','order_completion_received_at','order_completion_payload',

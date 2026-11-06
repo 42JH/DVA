@@ -122,6 +122,17 @@ export class ConsultationsRepository {
     await client.query("SELECT pg_notify('call_sessions_changed','')");
   }
 
+  async orderIntakeInProgress(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query(
+        `SELECT 1 FROM call_sessions c WHERE c.call_session_seq=$1 AND c.order_finalized_at IS NULL
+      AND EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.call_session_seq=c.call_session_seq
+       AND d.deleted_at IS NULL AND d.status IN ('READY','EDITING') AND d.retention_started_at>statement_timestamp()-interval '5 years')`,
+        [id],
+      )
+    ).rowCount;
+  }
+
   async activeCount() {
     const row = (
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
