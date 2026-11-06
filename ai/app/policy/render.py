@@ -104,7 +104,9 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
 
 def render_backend(policy: Policy) -> str:
     free = ", ".join(f"{policy.fields[n].label}({n})" for n in policy.free_fields())
-    return _read("backend_rules.md").replace("{fields}", free) + "\n\n" + render_input_rules(policy)
+    rules = "\n".join(f"- {key}: {rule.guidance}" for key, rule in policy.parcel_items.rules.items())
+    return (_read("backend_rules.md").replace("{fields}", free).replace("{parcel_item_rules}", rules)
+            + "\n\n" + render_input_rules(policy))
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,

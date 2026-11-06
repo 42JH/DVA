@@ -10,6 +10,8 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Literal
 
+from app.domain.parcel_items import ItemIssue
+
 PARCEL_FIELDS = ("sender_name", "sender_phone", "sender_address", "sender_address_detail",
                  "receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail",
                  "items", "item_price")
@@ -93,12 +95,14 @@ class ParcelDraft:
     sender_geo: Geo | None = None
     receiver_geo: Geo | None = None
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
+    item_issues: dict[str, ItemIssue] = field(default_factory=dict)
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
 
     def empty(self) -> bool:
-        return all(f.status == FieldStatus.EMPTY or f.source == Source.CALLER_ID for f in self.fields.values())
+        return not self.item_issues and all(
+            f.status == FieldStatus.EMPTY or f.source == Source.CALLER_ID for f in self.fields.values())
 
 
 @dataclass
@@ -144,6 +148,8 @@ class ConversationState:
     intent: str | None = None             # order | lookup | cancel | inquiry | agent | end
     current: ParcelDraft | None = None
     editing: str | None = None            # current가 담은 택배를 꺼낸 것이면 그 parcel_id(P5)
+    unassigned_item_issues: dict[str, ItemIssue] = field(default_factory=dict)
+    latest_item_utterance_id: int = 0
     parcels: list[StoredParcel] = field(default_factory=list)
     pickup_at: FieldState = field(default_factory=FieldState)
     payment: FieldState = field(default_factory=FieldState)
@@ -242,5 +248,5 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
 
 
 def copy_draft(draft: ParcelDraft) -> ParcelDraft:
-    return ParcelDraft(fields={k: replace(v) for k, v in draft.fields.items()}, sender_geo=draft.sender_geo,
-                       receiver_geo=draft.receiver_geo, client_comment=draft.client_comment)
+    return replace(draft, fields={k: replace(v) for k, v in draft.fields.items()},
+                   item_issues=draft.item_issues.copy())

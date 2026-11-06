@@ -12,6 +12,66 @@ item_price_max = 100_000_000
 box_total_max = 10
 document_max = 100
 
+# 전화 접수에 적용하는 배송 FAQ 물품 규칙. terms는 전사에서 후보를 찾을 때 사용한다.
+[parcel_items]
+max_side_cm = 160
+max_weight_kg = 30
+
+[parcel_items.rules.cash_equivalents]
+kind = "prohibited"
+terms = ["현금", "지폐", "동전", "어음", "수표", "유가증권"]
+guidance = "현금·어음·수표·유가증권 등 현금화할 수 있는 물품은 보낼 수 없습니다."
+
+[parcel_items.rules.dangerous_goods]
+kind = "prohibited"
+terms = ["독극물", "농약", "폭발물", "폭죽", "총포", "총기", "도검"]
+guidance = "독극물·폭발물·총포류·도검류는 보낼 수 없습니다."
+
+[parcel_items.rules.animals]
+kind = "prohibited"
+terms = ["살아있는 동물", "살아 있는 동물", "동물 사체", "살아있는 강아지", "살아있는 고양이", "반려동물"]
+guidance = "살아있는 동물이나 동물 사체는 보낼 수 없습니다."
+
+[parcel_items.rules.valuables]
+kind = "prohibited"
+terms = ["귀금속", "보석", "골동품", "미술품", "금괴", "고가품", "대체 불가"]
+guidance = "귀금속·보석·골동품·미술품 등 고가이거나 대체하기 어려운 물품은 접수할 수 없습니다."
+
+[parcel_items.rules.flammables]
+kind = "prohibited"
+terms = ["인화성", "가연성", "라이터", "스프레이", "부탄", "가스통", "압축가스", "압축공기", "가스를", "가스만"]
+guidance = "인화성·가연성 물질과 가스·압축공기는 보낼 수 없습니다."
+
+[parcel_items.rules.batteries]
+kind = "conditional"
+terms = ["배터리", "보조배터리", "건전지"]
+guidance = "배터리만 따로 보내는 것은 접수할 수 없습니다. 기기에 장착된 상태인지 확인해 주세요."
+
+[parcel_items.rules.perishables]
+kind = "prohibited"
+terms = ["냉장", "냉동", "부패", "변질", "아이스크림", "생고기"]
+guidance = "냉장·냉동이 필요하거나 부패·변질되기 쉬운 물품은 접수할 수 없습니다."
+
+[parcel_items.rules.liquids]
+kind = "conditional"
+terms = ["액체", "음료", "화장품", "샴푸", "주스", "향수"]
+guidance = "액체류는 누수 방지 포장이 필요합니다. 새지 않게 포장했는지 확인해 주세요."
+
+[parcel_items.rules.fragile]
+kind = "conditional"
+terms = ["유리컵", "유리병", "유리 제품", "유리 그릇", "유리를", "유리가", "유리만", "도자기", "깨지기 쉬운"]
+guidance = "깨지기 쉬운 물품은 완충 포장이 필요합니다. 완충재로 감싸 포장했는지 확인해 주세요."
+
+[parcel_items.rules.restricted_goods]
+kind = "prohibited"
+terms = ["의약품", "마약", "음란물", "처방약", "불법 물품"]
+guidance = "의약품·마약류·음란물 등 FAQ에서 운송을 제한한 물품은 접수할 수 없습니다."
+
+[parcel_items.rules.format]
+kind = "format"
+terms = ["쇼핑백", "비닐봉지", "스티로폼", "박스 없이", "포장 없이"]
+guidance = "서류와 소형·중형·대형 박스로 접수합니다. 지원하는 규격으로 포장할 수 있는지 확인해 주세요."
+
 # 기존 전화번호 허용 범위를 유지한다. 한글 숫자/+82 정규화 뒤 적용한다.
 [phone]
 mobile_prefix = "010"

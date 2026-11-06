@@ -10,7 +10,7 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
@@ -20,6 +20,7 @@ from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
                                 release, take_cancel)
+from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
@@ -53,6 +54,7 @@ class Spoken:
 class Runtime:
     """통화별 S5 상태(세션에 붙는다). 업무 값은 state에만 있다."""
     cust: Spoken | None = None
+    customer_turns: list[Spoken] = field(default_factory=list)
     seq: int = 0
     ai: list[Spoken] = field(default_factory=list)   # 최근 AI 발화(직전 AI 발화·G3)
     endpoint: asyncio.TimerHandle | None = None
@@ -108,6 +110,8 @@ class LiveFlow:
         if rt.cust is None:
             rt.seq += 1
             rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
+            rt.customer_turns.append(rt.cust)
+            del rt.customer_turns[:-12]
         rt.cust.text += ev.get("delta", "")
         rt.cust.end_ms, rt.cust.t_last = ev.get("end_ms") or rt.cust.end_ms, now
         _transcript(s, "customer", rt.cust)
@@ -148,7 +152,25 @@ class LiveFlow:
             rt.cust_end_t = utt.t_last
         if utt and utt.text.strip() and s.phase == Phase.ACTIVE:
             prev = next((a for a in reversed(rt.ai) if a.t_start < utt.t_start), None)
-            s.spawn(self.judge(s, utt, prev), "decision")
+            s.spawn(self._judge_customer(s, utt, prev), "decision")
+
+    async def _judge_customer(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
+        judge_first = s.state.intent != "order"
+        if judge_first:  # 첫 발화가 "농약을 보내려고요"일 수도 있다
+            await self.judge(s, utt, prev)
+        async with s.lock:
+            review = {} if s.state.order_submitted or s.closed else hold_unclassified_items(
+                s.state, self.policy.parcel_items, utt.utterance_id, utt.text)
+            if review.get("code") == "ITEM_PARCEL_UNCLEAR":
+                review.update(self._edit(s.state))
+        if review:
+            s.note("물품 확인", review["code"])
+            if self._delegation_in(s, utt):
+                await self.notify(s, "N1'", {"item_review": review})
+            else:
+                s.spawn(self.notify(s, "N2", {"item_review": review}, again=True), "item_review")
+        if not judge_first:
+            await self.judge(s, utt, prev)
 
     def _ai_done(self, s: CallSession) -> None:
         """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)."""
@@ -340,6 +362,7 @@ class LiveFlow:
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
         elif what == "no_more":
+            await self._wait_delegations(s)
             async with s.lock:
                 st.no_more_parcels = True
                 done = assess(st, self.policy).stage == "closing"
@@ -372,6 +395,7 @@ class LiveFlow:
                     facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
                     facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
+            await self._wait_delegations(s)
             self._maybe_submit(s, force=True)
             facts["order"] = _order_status(s)
         await self.notify(s, "N2" if facts.get("closing") or "agent" in facts else "N1'", facts)
@@ -504,7 +528,8 @@ class LiveFlow:
             return
         st = s.state
         a = assess(st, self.policy)
-        ready = st.parcels and st.no_more_parcels and (st.payment.valid or a.payment_auto) and not st.candidates
+        ready = (st.parcels and st.no_more_parcels and (st.payment.valid or a.payment_auto)
+                 and not st.candidates and not item_issues_pending(st))
         if force and (st.parcels or st.intent) or ready:
             st.order_submitted = bool(st.parcels)
             results.start(s, self._on_result)
@@ -577,8 +602,17 @@ class LiveFlow:
                 "at": time.time()}
         s.tool_calls.append(view)
         s.stats["도구"] += 1
+        ctx = s.tools
+        if name == "record_fields":
+            offset = d0["offset_ms"]
+            turns = self.rt(s).customer_turns
+            utterance = next((u for u in reversed(turns) if offset is not None
+                              and u.start_ms <= offset <= u.end_ms + self.cfg.utterance_gap_ms), None)
+            if not utterance and offset is None and len(turns) == 1:
+                utterance = turns[0]
+            ctx = replace(ctx, item_utterance=(utterance.utterance_id, utterance.text) if utterance else (0, ""))
         with span("tool", tool=name):
-            out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
+            out = await run_tool(ctx, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
         s.timing(f"도구 {name}", view["elapsed_ms"])
@@ -587,6 +621,11 @@ class LiveFlow:
         s.note("도구", f"{name} {out.get('code') or out['status']}")
         if name == "record_fields":
             self._maybe_register(s)
+            if out.get("code") == "ITEM_PARCEL_UNCLEAR":
+                async with s.lock:
+                    selection = self._edit(s.state) if s.state.unassigned_item_issues else {}
+                if selection:
+                    out.setdefault("facts", {}).update(selection)
         if name == "search_manual":
             out = self._count_unanswered(s, out)
         if name == "lookup_orders" and s.state.selected_order:  # 1건이면 바로 취소 확인 대기(의도가 취소일 때)

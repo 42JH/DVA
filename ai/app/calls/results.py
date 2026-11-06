@@ -17,6 +17,7 @@ from app.calls.session import CallSession
 from app.calls.unanswered import ReviewError, apply_review, evidence_from_session
 from app.domain.assess import assess
 from app.domain.outcome import decide_outcome
+from app.domain.store import hold_unclassified_items
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
 from app.integrations.backend.mapping import submit_body, to_order
@@ -182,6 +183,9 @@ class ResultService:
                         break
                     await asyncio.sleep(0.1)
             async with s.lock:
+                if s.rt and s.rt.customer_turns:
+                    turn = s.rt.customer_turns[-1]
+                    hold_unclassified_items(s.state, self.policy.parcel_items, turn.utterance_id, turn.text)
                 outcome = decide_outcome(s.state, self.policy, datetime.now(timezone.utc), self.fare_of)
                 if outcome.kind is None or not s.caller:
                     return None  # 무의미 통화: 등록·쓰기 없음

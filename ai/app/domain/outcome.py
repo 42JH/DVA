@@ -13,7 +13,7 @@ from typing import Literal
 
 from app.domain.assess import assess
 from app.domain.state import ConversationState, draft_snapshot
-from app.domain.store import snapshot_for_submit
+from app.domain.store import item_issues_pending, snapshot_for_submit
 from app.policy.model import Policy
 
 ADDRESS_REQUIRED = ("sender_name", "sender_phone", "sender_address", "receiver_name", "receiver_phone",
@@ -53,7 +53,7 @@ def decide_outcome(state: ConversationState, policy: Policy, now: datetime,
     payment = state.payment.value if state.payment.valid else a.payment_auto
     pickup = state.pickup_at.value if state.pickup_at.valid else None
     submit = snapshot_for_submit(state)
-    current = (draft_snapshot(state.current),) if has_current else ()
+    current = (draft_snapshot(state.current),) if has_current and not state.current.item_issues else ()
     name = state.customer.name or next((p.get("sender_name") for p in (*submit, *current) if p.get("sender_name")), None)
 
     if state.order_cancelled:
@@ -61,11 +61,14 @@ def decide_outcome(state: ConversationState, policy: Policy, now: datetime,
     if not submit:  # 담은 택배 없음: 받던 값만(없으면 빈 결과 → BE NO_ORDER)
         # 받던 값도 없으면 결제 방식·수거 시각도 넣지 않는다 — BE는 paymentMethodType 하나만 있어도 주문 정보로 보고
         # COLLECTING 주문을 만든다(empty-ai-order-results.md, 운영 통화 3a0b9c7f orderSeq 59)
-        return Outcome("INCOMPLETE", current, payment=payment if current else None, reasons=("NO_CONFIRMED_PARCEL",),
+        reason = "ITEM_VALIDATION_PENDING" if item_issues_pending(state) else "NO_CONFIRMED_PARCEL"
+        return Outcome("INCOMPLETE", current, payment=payment if current else None, reasons=(reason,),
                        customer_name=name)
 
     fares = tuple(fare_of(p) for p in submit)
     reasons = [g for p in submit for g in _parcel_gaps(p)]
+    if item_issues_pending(state):
+        reasons.append("ITEM_VALIDATION_PENDING")
     if any(f is None or f <= 0 for f in fares):
         reasons.append("FARE_UNKNOWN")
     if not payment:
