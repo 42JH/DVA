@@ -1,5 +1,5 @@
 import { Button, FileDrop, Dialog } from '@/shared/ui'
-import { CSV_HEADER } from '@/features/company/csvMembers'
+import { CSV_HEADER, downloadExampleCsv } from '@/features/company/csvMembers'
 import { useMemberCsv } from '@/features/company/hooks/useMemberCsv'
 
 // 08 CSV로 사원 추가 창 (기존 기업) — 파일 → 미리 보기('신규 · 바뀜 · 변경 없음') + 바뀌는 사람 → [취소] [등록]
@@ -24,6 +24,9 @@ export function MemberCsvModal({
       onClose={onClose}
       footer={
         <>
+          <Button big onClick={downloadExampleCsv}>
+            예시 CSV 내려받기
+          </Button>
           {vm.errorMessage && (
             <p role="alert" className="min-w-0 text-body text-danger">
               {vm.errorMessage}

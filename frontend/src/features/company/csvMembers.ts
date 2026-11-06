@@ -19,6 +19,14 @@ export const CSV_HEADER = [
   '우편번호',
   '상세주소',
 ] as const
+// 예시 파일 (public/csv-example.csv, 11/06) — 기업 등록 · 사원 추가 창 공용. 양식(CSV_HEADER)을 바꾸면 이 파일도 같이 고침
+export function downloadExampleCsv() {
+  const a = document.createElement('a') // 내려받기는 <a download>로만 이름을 정할 수 있음
+  a.href = `${import.meta.env.BASE_URL}csv-example.csv`
+  a.download = '회사등록_양식_예시.csv'
+  a.click()
+}
+
 export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
 const SHOW_ERRORS = 3 // 오류는 처음 3줄까지 (11/01 결정), 나머지는 '외 n건'
 const REQUIRED_COLUMNS = 9 // 사번 ~ 우편번호
