@@ -1,4 +1,4 @@
-// AI 미답변 공용 — 사유 문구 (미답변 사유 연동 11/04) · 화면 주소 · 경로 첫 칸 (11/05). 09 AI 미답변 · 06 처리 내용 · 상단바 알림 · 통계가 같이 써서 shared (기능 폴더끼리 import 금지)
+// AI 미답변 공용 — 사유 문구 (미답변 사유 연동 11/04) · 화면 주소 · 경로 첫 칸 (11/05). 09 AI 미답변 · FAQ '답변 대기' · 06 처리 내용 · 통계가 같이 써서 shared (기능 폴더끼리 import 금지)
 /** 서버 코드 그대로. null = 사유 없이 들어온 질문 · 연동 전에 쌓인 질문 (백엔드는 원인을 추정하지 않음) */
 export type UnansweredReason = 'KB_NO_ANSWER' | 'KB_UNAVAILABLE'
 
@@ -23,9 +23,6 @@ const PAGE_NAMES: [RegExp, string][] = [
   [/^\/calls\/\d+/, '통화 상세'],
   [/^\/calls(?:[?#]|$)/, '통화'],
   [/^\/orders(?:[?#]|$)/, '주문'],
-  [/^\/faqs\/new(?:[?#]|$)/, 'FAQ 작성'],
-  [/^\/faqs\/\d+\/edit/, 'FAQ 수정'],
-  [/^\/faqs\/\d+(?:[?#]|$)/, 'FAQ 상세'],
   [/^\/faqs(?:[?#]|$)/, 'FAQ'],
   [/^\/dashboard/, '통계'],
   [/^\/companies/, '기업관리'],
@@ -39,11 +36,4 @@ export function originOf(from: string | null | undefined): { label: string; to: 
   const inside = !!from && from.startsWith('/') && !from.startsWith('//')
   const name = inside ? PAGE_NAMES.find(([re]) => re.test(from))?.[1] : undefined
   return name && from ? { label: name, to: from } : { label: 'FAQ', to: '/faqs' }
-}
-
-/** FAQ 작성(미답변에서 옴)의 경로 앞 두 칸 '[이동 전 위치] > AI 미답변'. back = 돌아갈 곳 — 미답변 목록 주소 */
-export function unansweredCrumbs(back: string): { label: string; to: string }[] {
-  const list = back.startsWith('/faqs/unanswered')
-  const from = list ? new URL(back, 'http://x').searchParams.get('from') : back
-  return [originOf(from), { label: 'AI 미답변', to: list ? back : unansweredTo(back) }]
 }

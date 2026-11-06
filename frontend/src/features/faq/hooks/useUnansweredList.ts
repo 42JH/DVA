@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
-import { FETCH_ALL_MAX, pageSlice } from '@/shared/api/paging'
+import { FETCH_ALL_MAX } from '@/shared/api/paging'
+import { ymd } from '@/shared/lib/dateRange'
 import { fmtListTime, fmtPhone } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
-import { originOf, reasonTag } from '@/shared/lib/unansweredReason'
+import { originOf } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
 import {
   deleteUnanswered,
@@ -14,28 +15,37 @@ import {
 
 export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
 
-/** 목록 한 줄 = 질문 + 화면용 글 (시각 칸 한 줄 또는 두 줄 · 하이픈 전화번호 · 사유 태그) */
-export type UnansweredRow = UnansweredQuestion & {
-  time: string[]
-  phone: string
-  reasonTag: ReturnType<typeof reasonTag>
-}
+/** 목록 한 줄 = 질문 + 화면용 글 (시각 '오후 3:02' · 하이픈 전화번호) */
+export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }
 
-const PAGE_SIZE = 20
+/** 날짜 묶음 머리 '11월 4일' (Figma 'FAQ 미답변' 11/06) — 다른 해면 '2025년 12월 29일'. 시각 모르는 질문은 '날짜 모름' */
+function dayLabel(day: string, now = new Date()): string {
+  if (!day) return '날짜 모름'
+  const sameYear = day.slice(0, 4) === String(now.getFullYear())
+  return new Date(`${day}T00:00:00+09:00`).toLocaleDateString('ko-KR', {
+    year: sameYear ? undefined : 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+const clock = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
 // from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 검색 · 쪽을 바꿔도 남음)
 const DEFAULTS = { q: '', call: '', from: '' }
 
+type Group = { day: string; label: string; rows: UnansweredRow[] }
+
 type Modal = { kind: 'delete'; item: UnansweredQuestion } | null
 
-/** 09 AI 미답변 목록 훅 (와이어프레임 09_AI미답변, 10/30) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리)
- * 검색 = 질문 · 이름 · 전화번호. 줄마다 [FAQ 추가](창 → 추가하면 처리됨) · [삭제](확인 창). 줄을 누르면 그 통화의 06
+/** 09 AI 미답변 문의 훅 (Figma 'FAQ 미답변' 11/06) — 처리 안 된 질문만 · 오래된 순(먼저 쌓인 것부터 처리) · 통화 날짜별로 묶음, 쪽 없이 스크롤
+ * 검색 = 질문 · 이름 · 전화번호. 줄마다 [+](FAQ 화면 맨 위 추가 칸 → 저장하면 처리됨) · [휴지통](확인 창). 줄을 누르면 그 통화의 06
  * 같은 질문 묶기 · 한꺼번에 처리 없음 (콜드 스타트, MVP 후) */
 export function useUnansweredList() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
-  const { params, page, set } = useListParams(DEFAULTS)
+  const { params, set } = useListParams(DEFAULTS)
   const [modal, setModal] = useState<Modal>(null)
   const list = useQuery(unansweredQueries.list())
   const total = useQuery(unansweredQueries.count()) // 사이드바와 같은 쿼리(캐시 공유) — 목록이 상한(2,000)에 걸렸는지 보는 용도
@@ -63,13 +73,18 @@ export function useUnansweredList() {
       : first
         ? `${first.customerName}${first.startedAt ? ` · ${fmtListTime(first.startedAt).join(' ')}` : ''} 통화의 질문만`
         : '이 통화의 질문만'
-  const sliced = pageSlice(hit, page, PAGE_SIZE)
-  const rows: UnansweredRow[] = sliced.rows.map((u) => ({
-    ...u,
-    time: u.startedAt ? fmtListTime(u.startedAt) : ['—'], // 시각을 못 받은 통화
-    phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
-    reasonTag: reasonTag(u.reason),
-  }))
+  const groups: Group[] = []
+  for (const u of hit) {
+    const day = u.startedAt ? ymd(new Date(u.startedAt)) : ''
+    let g = groups.find((x) => x.day === day)
+    if (!g) groups.push((g = { day, label: dayLabel(day), rows: [] }))
+    g.rows.push({
+      ...u,
+      time: u.startedAt ? clock(u.startedAt) : '—', // 시각을 못 받은 통화
+      phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
+    })
+  }
+  groups.sort((a, b) => (a.day || '~').localeCompare(b.day || '~')) // 오래된 날부터, 날짜 모름은 맨 뒤
 
   const remove = useMutation({
     mutationFn: (id: number) => deleteUnanswered(id),
@@ -85,24 +100,21 @@ export function useUnansweredList() {
     origin: originOf(params.from), // 경로 첫 칸 = 이동 전 화면 (모르면 FAQ)
     callChip, // 적용된 필터 칩 (06에서 왔을 때만)
     clearCall: () => set({ call: '' }), // ✕ → 전체 미답변으로 (이동 전 화면은 그대로)
-    rows,
-    count: hit.length, // 'AI 미답변 질문 22개' (검색 중엔 결과 수)
+    groups,
+    count: hit.length, // 검색 중엔 결과 수
     // 서버가 오래된 것부터 주고 2,000개까지만 받음 → 그 뒤(최신) 질문은 목록에 없음. 넘으면 서버 쪽 넘김으로 바꿔야 함 (11/02)
     listNote: capped
       ? `오래된 ${FETCH_ALL_MAX.toLocaleString('ko-KR')}개만 표시됩니다 (전체 ${(total.data ?? 0).toLocaleString('ko-KR')}개)`
       : null,
     isLoading: list.isPending,
     listError: list.error?.message ?? null,
-    page: sliced.page,
-    pages: sliced.pages,
-    goPage: (p: number) => set({ page: p }),
 
     openCall: (u: UnansweredQuestion) => navigate(`/calls/${u.callSessionSeq}`),
 
     modal,
-    // FAQ 추가 = FAQ 작성 화면(11/04 새 디자인)으로 — 질문 칸에 고객이 한 말을 채우고, 저장하면 이 질문이 처리됨(API-27) · 여기로 돌아옴
+    // [+] = FAQ 화면 맨 위 추가 칸(11/06)으로 — 질문 칸에 고객이 한 말을 채우고, 저장하면 이 질문이 처리됨(API-27) · 여기로 돌아옴
     openAdd: (u: UnansweredQuestion) =>
-      navigate('/faqs/new', { state: { from: u, back: pathname + search } }),
+      navigate('/faqs', { state: { from: u, back: pathname + search } }),
     openDelete: (u: UnansweredQuestion) => {
       remove.reset()
       setModal({ kind: 'delete', item: u })

@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import {
-  FAQ_CATEGORIES,
   createFaq,
   deleteFaq,
   faqQueries,
@@ -17,32 +16,29 @@ import {
   type UnansweredQuestion,
 } from '@/features/faq/api/unansweredApi'
 
-/** 09 FAQ 작성 · 수정 (11/04 화면 — AI 미답변 [FAQ 추가]로 온 작성 포함, 11/05) — 분류 · 질문 · 답변, 공백 검사(명세: 공백만 입력 불가) · 서버 칸별 오류 · 저장
- * 수정엔 [삭제] (모든 관리자) → 확인 창. AI 미답변에서 열면(from) 질문 = 고객이 한 말 그대로 미리 채움,
- * 추가는 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
+/** 09 FAQ 인라인 추가 · 수정 (Figma 'FAQ 등록' · 'FAQ 수정' 11/06 — 목록 줄 안에서 질문 · 답변만, 분류 고르기 없음)
+ * 분류: 수정 = 그 FAQ 분류 그대로 · 추가 = 왼쪽에서 고른 분류(글을 쓰다 분류를 바꿔도 따라감). 공백만 입력 불가 · 서버 칸별 오류 · 저장
+ * AI 미답변 [+]로 연 추가(from)는 질문 = 고객이 한 말 그대로 미리 채움, 저장은 API-27 하나로 (FAQ 생성 + 그 질문 처리됨을 서버가 한 번에) */
 export function useFaqForm({
   faq = null,
   from,
-  category: initial,
+  category: picked,
   onSaved,
-  onDeleted,
 }: {
   faq?: Faq | null
   from?: UnansweredQuestion
-  category?: FaqCategory // 작성 화면: 목록에서 보던 분류를 골라 둔 채로 (11/04 — 왼쪽 분류 하나가 늘 파랑). 없으면 비워 두고 고르게
+  category?: FaqCategory // 추가할 때 넣을 분류
   onSaved: (category: FaqCategory) => void // 저장(추가 · 수정)에 성공하면 그 분류
-  onDeleted: (category: FaqCategory) => void
 }) {
   const qc = useQueryClient()
-  const [category, setCategory] = useState<FaqCategory | ''>(faq?.category ?? initial ?? '')
+  const category = faq?.category ?? picked
   const [question, setQuestion] = useState(faq?.question ?? from?.question ?? '')
   const [answer, setAnswer] = useState(faq?.answer ?? '')
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const mutation = useMutation({
     mutationFn: async () => {
       const input: FaqInput = {
-        category: category as FaqCategory,
+        category: category!,
         question: question.trim(),
         answer: answer.trim(),
       }
@@ -51,10 +47,7 @@ export function useFaqForm({
         else await createFaq(input)
         return
       }
-      const changed =
-        input.category !== faq.category ||
-        input.question !== faq.question ||
-        input.answer !== faq.answer
+      const changed = input.question !== faq.question || input.answer !== faq.answer
       if (changed) await updateFaq(faq.faqEntrySeq, input) // 세 칸 다 보냄 (부분 수정 없음). 안 바뀌었으면 요청 없이 닫음
     },
     onSuccess: async () => {
@@ -62,7 +55,7 @@ export function useFaqForm({
         qc.invalidateQueries({ queryKey: faqQueries.all() }),
         from && qc.invalidateQueries({ queryKey: unansweredQueries.all() }),
       ])
-      onSaved(category as FaqCategory)
+      onSaved(category!)
     },
     // 없어졌거나(404) 다른 관리자가 먼저 처리한(409 INVALID_STATE) 질문 · FAQ → 목록을 다시 받아 지금 상태로
     onError: (e) => {
@@ -73,56 +66,55 @@ export function useFaqForm({
     },
   })
 
-  const remove = useMutation({
-    mutationFn: () => deleteFaq(faq!.faqEntrySeq),
-    onSuccess: () => onDeleted(faq!.category),
-    onSettled: () => qc.invalidateQueries({ queryKey: faqQueries.all() }), // 404(이미 지워짐)여도 목록은 다시 받음
-  })
-
   const err = mutation.error
-  // 같은 질문의 FAQ가 이미 있음 (409 DUPLICATE_RESOURCE) → 질문 칸 아래에 서버 문구
+  // 같은 질문의 FAQ가 이미 있음 (409 DUPLICATE_RESOURCE) → 서버 문구 그대로
   const duplicate = err instanceof ApiError && err.code === 'DUPLICATE_RESOURCE'
   // 칸별 오류 경로는 'question' 또는 'items.0.question' (추가는 items 배열이라)
   const fieldError = (field: keyof FaqInput) =>
     err instanceof ApiError
       ? err.details.find((d) => d.field.replace(/^items\.\d+\./, '') === field)?.reason
       : undefined
-  const errorMessage = !err
+  const error = !err
     ? null
-    : duplicate || (err instanceof ApiError && err.details.length)
-      ? null // 칸별 오류는 칸 아래에
-      : err instanceof ApiError && err.code === 'INVALID_STATE'
-        ? '이미 처리된 질문입니다. 목록을 확인해 주세요.'
-        : err.message
+    : duplicate
+      ? err.message
+      : (fieldError('question') ??
+        fieldError('answer') ??
+        fieldError('category') ??
+        (err instanceof ApiError && err.code === 'INVALID_STATE'
+          ? '이미 처리된 질문입니다. 목록을 확인해 주세요.'
+          : err.message))
 
   return {
-    isEdit: faq !== null,
-    category,
-    categoryOptions: FAQ_CATEGORIES.map((c) => ({ value: c.name, label: c.name })),
     question,
     answer,
-    setCategory: (v: string) => setCategory(v as FaqCategory | ''),
     setQuestion,
     setAnswer,
-    categoryError: fieldError('category'),
-    questionError: duplicate ? err.message : fieldError('question'),
-    answerError: fieldError('answer'),
-    errorMessage,
-    canSubmit:
-      category !== '' && question.trim() !== '' && answer.trim() !== '' && !mutation.isPending,
-    isSubmitting: mutation.isPending,
+    error, // 한 줄 — 저장 · 취소 왼쪽
+    canSubmit: !!category && question.trim() !== '' && answer.trim() !== '' && !mutation.isPending,
     submit: () => mutation.mutate(),
+  }
+}
 
-    // 삭제 (수정 창에서만): [삭제] → 확인 창 → [삭제]. [취소]는 수정 창으로 돌아감 (적던 내용 그대로)
-    confirmingDelete,
-    askDelete: () => {
+/** FAQ 삭제 — 펼친 줄의 휴지통 → 확인 창 → [삭제]. 404(이미 지워짐)여도 목록은 다시 받음 */
+export function useFaqDelete(faq: Faq, onDeleted: () => void) {
+  const qc = useQueryClient()
+  const [confirming, setConfirming] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => deleteFaq(faq.faqEntrySeq),
+    onSuccess: onDeleted,
+    onSettled: () => qc.invalidateQueries({ queryKey: faqQueries.all() }),
+  })
+  return {
+    confirming,
+    ask: () => {
       remove.reset() // 지난번 실패 문구가 새 확인 창에 먼저 뜨지 않게
-      setConfirmingDelete(true)
+      setConfirming(true)
     },
-    cancelDelete: () => setConfirmingDelete(false),
-    confirmDelete: () => remove.mutate(),
-    isDeleting: remove.isPending,
-    deleteError: remove.error?.message ?? null,
-    deleteTarget: `“${faq?.question ?? ''}”`,
+    cancel: () => setConfirming(false),
+    confirm: () => remove.mutate(),
+    pending: remove.isPending,
+    error: remove.error?.message ?? null,
+    target: `“${faq.question}”`,
   }
 }
