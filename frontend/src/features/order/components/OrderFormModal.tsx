@@ -167,16 +167,13 @@ export function OrderFormModal({
               onChange={(e) => vm.setDeclaredValue(e.target.value)}
             />
             {vm.showFee && (
-              // 배송비 — 요청자가 입력(자동 견적 API 없음, 명세 4.4). 추가 · 미완료 주문 수정에만 (그 외 수정은 그대로 유지)
+              // 배송비 — 품목 개수로 자동 계산(11/06), 잠긴 칸. 추가 · 미완료 주문 수정에만 (그 외 수정은 그대로 유지)
               <TextField
                 label="배송비"
                 inline
-                inputMode="numeric"
-                suffix="원"
-                placeholder="숫자만 입력"
+                locked
+                placeholder="품목을 넣으면 계산돼요"
                 value={vm.shippingFee}
-                error={vm.feeError}
-                onChange={(e) => vm.setShippingFee(e.target.value)}
               />
             )}
             <TextField

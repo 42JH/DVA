@@ -21,6 +21,7 @@ import {
 } from '@/features/order/api/orderApi'
 import { orderErrorText } from '@/features/order/labels'
 import { MAX_BOXES, MAX_DOCUMENTS, pickupRange, priceOk } from '@/features/order/api/orderLimits'
+import { shippingFeeOf } from '@/features/order/api/orderFee'
 import {
   buildCustomerPatch,
   buildOrderPatch,
@@ -98,8 +99,6 @@ export function useOrderForm(
   const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
   const initialPrice = order?.itemPrice?.toString() ?? ''
   const [declaredValue, setDeclaredValue] = useState(initialPrice) // 숫자만
-  // 배송비 — 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지), 숫자만 · 1원 이상
-  const [shippingFee, setShippingFee] = useState(order?.notifiedPrice?.toString() ?? '')
   const initialPickup = order?.pickupRequestedAt
     ? toDateTimeLocal(new Date(order.pickupRequestedAt))
     : ''
@@ -140,12 +139,17 @@ export function useOrderForm(
   const docsOut =
     counts.document > MAX_DOCUMENTS && counts.document !== (order?.items.document ?? 0)
   const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
+  // 배송비 — 품목 개수로 자동 계산, 직접 입력 없음 (11/06). 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지)
+  const shippingFee = shippingFeeOf(counts)
+  // 기타 품목만 있으면 0원 → 서버가 1원 이상 필수라 접수 못 함
+  const feeMissing = etcItem.trim() !== '' && shippingFee === 0
   const partyOk = (p: PartyDraft) =>
     p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
   // 결제 방식은 접수 중단(COLLECTING)일 때만 바꿀 수 있음 (명세 4.3, 11/01). 가짜 주문(status 없음)은 그대로
   const paymentLocked = !!order?.status && order.status !== 'COLLECTING'
   // 접수 중단 주문 수정 = 저장하면서 접수 (11/01 결정: 버튼 이름 [접수], 조건이 다 채워져야 켜짐)
   const collecting = order?.status === 'COLLECTING'
+  const showFee = order === undefined || collecting
 
   const input = (): OrderInput => {
     const party = (p: PartyDraft): PartyInput => ({
@@ -169,7 +173,7 @@ export function useOrderForm(
             : null,
       paymentMethod: payment,
       request: orNull(request),
-      shippingFee: collecting ? (shippingFee ? Number(shippingFee) : null) : undefined,
+      shippingFee: collecting ? shippingFee || null : undefined,
     }
   }
 
@@ -214,10 +218,9 @@ export function useOrderForm(
         }
         return 'ok'
       }
-      const fee = Number(shippingFee)
-      const json = JSON.stringify([body, fee])
+      const json = JSON.stringify([body, shippingFee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      await createOrder(body, fee, sent.current.key)
+      await createOrder(body, shippingFee, sent.current.key)
       return 'ok'
     },
     onSuccess: (result) => {
@@ -265,7 +268,7 @@ export function useOrderForm(
 
   return {
     isEdit: order !== undefined,
-    showFee: order === undefined || collecting, // 배송비 칸
+    showFee, // 배송비 칸
     submitLabel: order === undefined || collecting ? '접수' : '저장',
     missing, // '접수하려면: 배송비 · 받는 분 주소(다시 검색)'
     sender: party('sender'),
@@ -283,6 +286,7 @@ export function useOrderForm(
       [
         boxesOut && `박스는 소 · 중 · 대 합계 ${MAX_BOXES}개까지예요.`,
         docsOut && `서류는 ${MAX_DOCUMENTS}개까지예요.`,
+        showFee && feeMissing && '배송비를 계산하려면 박스나 서류를 1개 이상 넣어 주세요.',
       ]
         .filter(Boolean)
         .join(' ') || undefined,
@@ -290,9 +294,7 @@ export function useOrderForm(
     setEtcItem,
     declaredValue,
     setDeclaredValue: (v: string) => setDeclaredValue(digits(v, 10)),
-    shippingFee,
-    setShippingFee: (v: string) => setShippingFee(digits(v, 9)),
-    feeError: fieldError('parcels.0.notifiedPrice') ?? fieldError('totalAmount'),
+    shippingFee: shippingFee ? `${shippingFee.toLocaleString()}원` : '', // 잠긴 칸은 suffix를 안 그림
     pickupAt,
     setPickupAt,
     pickupMin: pickup.min,
@@ -329,7 +331,7 @@ export function useOrderForm(
       partyOk(parties.sender) &&
       partyOk(parties.receiver) &&
       hasItem &&
-      (order !== undefined || Number(shippingFee) >= 1) && // 추가: 배송비 필수 (명세 4.4, 자동 견적 없음)
+      (order !== undefined || shippingFee >= 1) && // 추가: 배송비 필수 (명세 4.4)
       (order !== undefined || (!!parties.sender.picked && !!parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
       !pickupOut &&
