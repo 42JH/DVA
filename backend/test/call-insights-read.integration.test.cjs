@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -370,6 +371,7 @@ test('inquiries keep the original customer after employee phone updates and neve
   });
   assert.equal(changed.status, 204, await changed.clone().text());
   const replacement = await f.write('POST', '/api/customers', {
+    address: customerAddress(),
     name: marker(),
     phoneNumber: caller.phone,
   });
@@ -388,6 +390,7 @@ test('inquiries keep the original customer after employee phone updates and neve
   const unknown = await start(unknownPhone);
   await analyse(unknown);
   const registeredLater = await f.write('POST', '/api/customers', {
+    address: customerAddress(),
     name: marker(),
     phoneNumber: unknownPhone,
   });

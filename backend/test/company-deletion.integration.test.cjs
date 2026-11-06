@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -89,8 +90,13 @@ async function fixture() {
     })
   ).body.data.departmentSeq;
   const phone = '010' + phoneSequence++;
-  const customer = (await request('POST', '/customers', { name: '소속 개인', phoneNumber: phone }))
-    .body.data.customerSeq;
+  const customer = (
+    await request('POST', '/customers', {
+      address: customerAddress(),
+      name: '소속 개인',
+      phoneNumber: phone,
+    })
+  ).body.data.customerSeq;
   assert.equal(
     (
       await request('POST', `/companies/${company}/members`, {
@@ -341,7 +347,11 @@ test('department deletion detaches only its employees and preserves other depart
   const other = (await request('POST', `/companies/${f.company}/departments`, { name: '영업팀' }))
     .body.data.departmentSeq;
   const coworker = (
-    await request('POST', '/customers', { name: '남는 사원', phoneNumber: '010' + phoneSequence++ })
+    await request('POST', '/customers', {
+      address: customerAddress(),
+      name: '남는 사원',
+      phoneNumber: '010' + phoneSequence++,
+    })
   ).body.data.customerSeq;
   assert.equal(
     (
@@ -632,7 +642,11 @@ test('deleting a company without departments unlinks employees and preserves cus
   ).body.data.organizationSeq;
   const phone = '016' + phoneSequence++;
   const customer = (
-    await request('POST', '/customers', { name: '부서 없는 삭제 직원', phoneNumber: phone })
+    await request('POST', '/customers', {
+      address: customerAddress(),
+      name: '부서 없는 삭제 직원',
+      phoneNumber: phone,
+    })
   ).body.data.customerSeq;
   assert.equal(
     (

@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -213,8 +214,13 @@ test('monthly and group settlement require their own eligibility while corporate
   const department = (await request(`/companies/${company}/departments`, { name: '정산팀' })).body
     .data.departmentSeq;
   const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
-  const customer = (await request('/customers', { name: '정산 구성원', phoneNumber: phone })).body
-    .data.customerSeq;
+  const customer = (
+    await request('/customers', {
+      address: customerAddress(),
+      name: '정산 구성원',
+      phoneNumber: phone,
+    })
+  ).body.data.customerSeq;
   assert.equal(
     (
       await request(`/companies/${company}/members`, {
@@ -387,8 +393,13 @@ test('department membership scopes monthly and group eligibility and only admins
   const wrongDepartment = (await request(`/companies/${other}/departments`, { name: '외부팀' }))
     .body.data.departmentSeq;
   const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
-  const customer = (await request('/customers', { name: '기업 고객', phoneNumber: phone })).body
-    .data.customerSeq;
+  const customer = (
+    await request('/customers', {
+      address: customerAddress(),
+      name: '기업 고객',
+      phoneNumber: phone,
+    })
+  ).body.data.customerSeq;
   const member = {
     customerSeq: customer,
     employeeNo: '001',
@@ -429,7 +440,12 @@ test('department membership scopes monthly and group eligibility and only admins
     (
       await request(
         '/customers',
-        { name: '임의 자격 상승', phoneNumber: '01000138003', monthlyBillingEnabled: true },
+        {
+          address: customerAddress(),
+          name: '임의 자격 상승',
+          phoneNumber: '01000138003',
+          monthlyBillingEnabled: true,
+        },
         true,
       )
     ).status,
@@ -459,8 +475,13 @@ test('corporate totals count at payment completion once, retain previous months,
     })
   ).body.data.departmentSeq;
   const phone = '010' + String(Math.floor(Math.random() * 90000000) + 10000000);
-  const customer = (await request('/customers', { name: '월별 구성원', phoneNumber: phone })).body
-    .data.customerSeq;
+  const customer = (
+    await request('/customers', {
+      address: customerAddress(),
+      name: '월별 구성원',
+      phoneNumber: phone,
+    })
+  ).body.data.customerSeq;
   await request(`/companies/${company}/members`, {
     customerSeq: customer,
     employeeNo: 'MONTH138',
@@ -748,8 +769,13 @@ test('employees without departments retain corporate credit and cannot use group
     await request('/companies', { name: '부서 없는 월결제 기업', monthlyBillingEnabled: true })
   ).body.data.organizationSeq;
   const phone = '017' + String(Math.floor(Math.random() * 90000000) + 10000000);
-  const customer = (await request('/customers', { name: '부서 없는 직원', phoneNumber: phone }))
-    .body.data.customerSeq;
+  const customer = (
+    await request('/customers', {
+      address: customerAddress(),
+      name: '부서 없는 직원',
+      phoneNumber: phone,
+    })
+  ).body.data.customerSeq;
   assert.equal(
     (
       await request(`/companies/${company}/members`, {

@@ -7,9 +7,53 @@ const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 const { UpdateOrderDto } = require('../dist/orders/dto/update-order.dto');
 const { CancelOrderParcelsDto } = require('../dist/orders/dto/cancel-order-parcels.dto');
 const { assertOrderUpdate } = require('../dist/orders/order-update.validation');
+const customerAddress = require('./helpers/customer-address.cjs');
 
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
+
+test('customer registration requires a complete address while detail address remains optional', async () => {
+  const {
+    CreateCustomerDto,
+    UpdateCustomerDto,
+  } = require('../dist/customers/dto/customer-request.dto');
+  const address = {
+    roadAddress: '등록로 1',
+    jibunAddress: '등록동 1',
+    dongName: '등록동',
+    postalCode: '00001',
+  };
+  const transform = (value) =>
+    pipe.transform(
+      { name: '고객', phoneNumber: '01012345678', address: value },
+      { type: 'body', metatype: CreateCustomerDto },
+    );
+  for (const detail of [undefined, '']) {
+    const input = await transform({ ...address, detailAddress: detail });
+    assert.equal(input.address.postalCode, '00001');
+    assert.equal(input.address.detailAddress, detail);
+  }
+  for (const value of [undefined, null, {}, [], '주소']) {
+    await assert.rejects(
+      () => transform(value),
+      (error) =>
+        error.getStatus() === 400 &&
+        error.getResponse().details.some((detail) => detail.field.startsWith('address')),
+    );
+  }
+  for (const field of ['roadAddress', 'jibunAddress', 'dongName', 'postalCode']) {
+    for (const missing of [undefined, null, '']) {
+      await assert.rejects(
+        () => transform({ ...address, [field]: missing }),
+        (error) =>
+          error.getStatus() === 400 &&
+          error.getResponse().details.some((detail) => detail.field === 'address.' + field),
+      );
+    }
+  }
+  await pipe.transform({ name: '수정 이름' }, { type: 'body', metatype: UpdateCustomerDto });
+  await pipe.transform({ address: null }, { type: 'body', metatype: UpdateCustomerDto });
+});
 
 test('order item values are limited to one won through one hundred million across create, manual and update', async () => {
   const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
@@ -65,7 +109,10 @@ test('business phone inputs require exactly eleven ASCII digits without normaliz
     postalCode: '00001',
   });
   for (const [metatype, body] of [
-    [CreateCustomerDto, (phoneNumber) => ({ name: '고객', phoneNumber })],
+    [
+      CreateCustomerDto,
+      (phoneNumber) => ({ name: '고객', phoneNumber, address: customerAddress() }),
+    ],
     [ListCustomersQueryDto, (phoneNumber) => ({ phoneNumber })],
     [CallerContextRequestDto, (phoneNumber) => ({ phoneNumber })],
     [InlineMemberDto, (phoneNumber) => ({ employeeNo: '001', name: '직원', phoneNumber })],

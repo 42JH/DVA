@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 module.exports = function registerOrdersCallContext(suite) {
   const { businessHeaders } = require('./helpers/application.cjs');
   const {
@@ -164,7 +165,11 @@ module.exports = function registerOrdersCallContext(suite) {
     const registered = await fetch(hosts[0] + '/api/customers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...businessHeaders() },
-      body: JSON.stringify({ name: '통화 중 등록', phoneNumber: phone }),
+      body: JSON.stringify({
+        address: customerAddress(),
+        name: '통화 중 등록',
+        phoneNumber: phone,
+      }),
     });
     assert.equal(registered.status, 201);
     const list = await readOrders('', aiReadHeaders(data.callSessionSeq));
