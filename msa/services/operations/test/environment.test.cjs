@@ -65,3 +65,10 @@ test('FAQ token is optional, preserves original bytes and needs its original AI 
   for (const value of ['short', {}, '가'.repeat(32), 'x'.repeat(32)+'\n'])
     assert.throws(() => validateEnvironment({ ...valid, AI_AGENT_URL:'http://ai:8000', AI_FAQ_TOKEN:value }),/AI_FAQ_TOKEN/);
 });
+
+ test('order audit recovery is optional and only accepts a service origin',()=> {
+  assert.equal(validateEnvironment(valid).ORDER_URL,undefined);
+  assert.equal(validateEnvironment({...valid,ORDER_URL:'http://order:3002'}).ORDER_URL,'http://order:3002');
+  for(const ORDER_URL of [{},'file:///private','http://user:private@order:3002','http://order:3002/path','http://order:3002?token=private'])
+    assert.throws(()=>validateEnvironment({...valid,ORDER_URL}),error=>error.fields.includes('ORDER_URL')&&!error.message.includes('private'));
+});

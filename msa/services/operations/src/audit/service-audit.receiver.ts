@@ -50,7 +50,10 @@ const consultationActions = new Set([
   'CALL_DROPOFF_RECORDED',
   'CALL_RESPONSE_WAIT_RECORDED',
 ]);
-function auditInput(payload: Record<string, unknown>, service: 'customer' | 'consultation') {
+function auditInput(
+  payload: Record<string, unknown>,
+  service: 'customer' | 'consultation' | 'order',
+) {
   const audit = payload.audit;
   const personaReference =
     service === 'consultation' &&
@@ -88,15 +91,19 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
     (audit.actorType === 'ADMIN') !== (audit.actorId !== null) ||
     !(service === 'customer'
       ? actions.has(audit.action as string)
-      : consultationActions.has(audit.action as string)) ||
+      : service === 'order'
+        ? audit.action === 'ORDER_DELETED'
+        : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
       ? targets.has(audit.targetType as string)
-      : audit.targetType ===
-        (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
-          audit.action as string,
-        )
-          ? 'UNANSWERED_QUESTION'
-          : 'CALL_SESSION')) ||
+      : service === 'order'
+        ? audit.targetType === 'ORDER'
+        : audit.targetType ===
+          (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
+            audit.action as string,
+          )
+            ? 'UNANSWERED_QUESTION'
+            : 'CALL_SESSION')) ||
     typeof audit.requestId !== 'string' ||
     audit.requestId.length < 1 ||
     audit.requestId.length > 128 ||
@@ -115,6 +122,10 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
           ? 'ADMIN'
           : 'AI') ||
         audit.targetId === null)) ||
+    (service === 'order' &&
+      (audit.metadata !== undefined ||
+        (payload.result === 'SUCCESS' &&
+          (audit.actorType !== 'ADMIN' || audit.targetId === null)))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))
   )
@@ -158,11 +169,10 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
   ) {
     const sources: Record<string, string> = {};
     const handlers: Record<string, (client: PoolClient, event: Event) => Promise<void>> = {};
-    for (const service of ['customer', 'consultation'] as const) {
-      const table =
-        service === 'customer' ? 'customer_audit_preparations' : 'consultation_audit_preparations';
+    for (const service of ['customer', 'consultation', 'order'] as const) {
+      const table = `${service}_audit_preparations`;
       const token = config.get(
-        service === 'customer' ? 'CUSTOMER_AUTH_TOKEN' : 'CONSULTATION_AUTH_TOKEN',
+        service === 'consultation' ? 'CONSULTATION_AUTH_TOKEN' : 'CUSTOMER_AUTH_TOKEN',
         { infer: true },
       );
       if (token) sources[service] = token;
@@ -256,9 +266,13 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.timer = setInterval(() => {
       if (!this.running)
-        this.running = this.flushPending(['consultation'])
-          .catch(() => {
-            this.logger.error({ event: 'consultation_audit_recovery_unavailable' });
+        this.running = Promise.allSettled([
+          this.flushPending(['consultation']),
+          this.flushPending(['order']),
+        ])
+          .then((results) => {
+            if (results.some((result) => result.status === 'rejected'))
+              this.logger.error({ event: 'service_audit_recovery_unavailable' });
           })
           .finally(() => {
             this.running = undefined;
@@ -272,25 +286,35 @@ export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
   }
 
   async flushPending(
-    services: readonly ('customer' | 'consultation')[] = ['customer', 'consultation'],
+    services: readonly ('customer' | 'consultation' | 'order')[] = [
+      'customer',
+      'consultation',
+      'order',
+    ],
   ): Promise<void> {
     for (const service of services) {
-      const table =
-        service === 'customer' ? 'customer_audit_preparations' : 'consultation_audit_preparations';
+      const table = `${service}_audit_preparations`;
       const { rows } = await this.database.pool.query<{ transaction_id: string }>(
         `SELECT DISTINCT transaction_id FROM (SELECT transaction_id FROM ${table} WHERE NOT aborted
          ${service === 'consultation' ? 'UNION SELECT transaction_id FROM consultation_persona_references WHERE NOT committed' : ''}
          ) pending ORDER BY transaction_id LIMIT 128`,
       );
       if (!rows.length) continue;
-      const url = this.config.get(service === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL', {
-        infer: true,
-      });
+      const url = this.config.get(
+        service === 'order'
+          ? 'ORDER_URL'
+          : service === 'customer'
+            ? 'CUSTOMER_URL'
+            : 'CONSULTATION_URL',
+        {
+          infer: true,
+        },
+      );
       const token = this.config.get(
-        service === 'customer' ? 'CUSTOMER_AUTH_TOKEN' : 'CONSULTATION_AUTH_TOKEN',
+        service === 'consultation' ? 'CONSULTATION_AUTH_TOKEN' : 'CUSTOMER_AUTH_TOKEN',
         { infer: true },
       );
-      if (!url || !token) throw new Error('Customer audit confirmation unavailable');
+      if (!url || !token) throw new Error('Service audit confirmation unavailable');
       await sendEvent(url + '/internal/audit/flush', token, {
         eventId: randomUUID(),
         source: 'operations',

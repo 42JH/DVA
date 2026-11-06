@@ -59,6 +59,8 @@ spec:
               value: "true"
             - name: CONSULTATION_URL
               value: http://consultation:3004
+            - name: ORDER_URL
+              value: http://order:3002
             - name: CUSTOMER_URL
               value: "http://customer:3001"
             - name: CUSTOMER_AUTH_TOKEN

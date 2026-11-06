@@ -20,6 +20,7 @@ export interface Environment {
   CONSULTATION_AUTH_TOKEN?: string;
   CUSTOMER_URL?: string;
   CONSULTATION_URL?: string;
+  ORDER_URL?: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -148,6 +149,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CUSTOMER_AUTH_TOKEN:
       typeof raw.CUSTOMER_AUTH_TOKEN === 'string' ? raw.CUSTOMER_AUTH_TOKEN : undefined,
     CUSTOMER_URL: typeof raw.CUSTOMER_URL === 'string' ? raw.CUSTOMER_URL : undefined,
+    ORDER_URL: typeof raw.ORDER_URL === 'string' ? raw.ORDER_URL : undefined,
     CONSULTATION_URL: typeof raw.CONSULTATION_URL === 'string' ? raw.CONSULTATION_URL : undefined,
     CONSULTATION_AUTH_TOKEN:
       typeof raw.CONSULTATION_AUTH_TOKEN === 'string' ? raw.CONSULTATION_AUTH_TOKEN : undefined,
@@ -182,6 +184,16 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         errors.push('CONSULTATION_URL');
     } catch {
       errors.push('CONSULTATION_URL');
+    }
+  }
+  if (raw.ORDER_URL !== undefined) {
+    try {
+      if (typeof raw.ORDER_URL !== 'string') throw new Error();
+      const url = new URL(raw.ORDER_URL);
+      if (!['http:', 'https:'].includes(url.protocol) || url.origin !== raw.ORDER_URL)
+        errors.push('ORDER_URL');
+    } catch {
+      errors.push('ORDER_URL');
     }
   }
   if (errors.length) throw new EnvironmentValidationError(errors);

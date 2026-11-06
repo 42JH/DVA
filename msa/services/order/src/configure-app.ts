@@ -41,6 +41,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
     exclude: [
       { path: 'order/health', method: RequestMethod.ALL },
       { path: 'order/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
     ],
   });
@@ -53,7 +54,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
       app,
       new DocumentBuilder()
         .setTitle('DVA Order API')
-        .setDescription('모놀리식과 동일한 주문·이전 주문 주소 조회 API')
+        .setDescription('모놀리식과 동일한 주문 조회·삭제 및 이전 주문 주소 API')
         .setVersion('0.1.0')
         .addBearerAuth()
         .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')

@@ -7,12 +7,49 @@ import {
   PreviousOrderAddressDto,
 } from './dto/order-address-history.dto';
 import { OrderDetailDto, OrderSummaryDto } from './dto/order-response.dto';
+import type { OrderStatus } from './orders.types';
 import { OrderQueryDto } from './dto/order-query.dto';
 const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 
 @Injectable()
 export class OrdersRepository {
+  async paymentDeletionBlocked(client: PoolClient, id: number): Promise<boolean> {
+    const requests = await client.query<{ blocked: boolean }>(
+      `SELECT ((approval_started_at IS NOT NULL AND completed_at IS NULL AND invalidated_at IS NULL)
+        OR notification_status='SENDING' OR completion_notification_status='SENDING') AS blocked
+       FROM order_payment_requests WHERE order_seq=$1 ORDER BY payment_request_id FOR UPDATE`,
+      [id],
+    );
+    return requests.rows.some((row) => row.blocked);
+  }
+
+  async softDelete(client: PoolClient, id: number): Promise<void> {
+    await client.query(
+      `UPDATE order_payment_requests SET
+      notification_status=CASE WHEN notification_status='PENDING' THEN 'FAILED' ELSE notification_status END,
+      completion_notification_status=CASE WHEN completion_notification_status IN ('WAITING','PENDING') THEN 'FAILED' ELSE completion_notification_status END
+      WHERE order_seq=$1`,
+      [id],
+    );
+    await client.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1', [id]);
+  }
+
+  async lockOrder(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        customerSeq: number | null;
+        status: OrderStatus;
+        version: number;
+        totalAmount: number | null;
+        paymentMethodType: string | null;
+      }>(
+        'SELECT customer_seq AS "customerSeq",status,version,total_amount AS "totalAmount",payment_method_type AS "paymentMethodType" FROM orders WHERE order_seq=$1 AND deleted_at IS NULL AND COALESCE(closed_at,created_at)>clock_timestamp()-interval \'5 years\' FOR UPDATE',
+        [id],
+      )
+    ).rows[0];
+  }
+
   async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
     // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
     const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';

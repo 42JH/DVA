@@ -110,3 +110,9 @@ production은 SECURITY_LOG_HMAC_KEY(64자리 hex)를 필수로 검증한다. 배
 
 
 consultation의 미답변 수집·삭제와 통화 삭제는 기존 감사 준비/확정/중단 이벤트를 사용한다. 수신 허용 목록에는 UNANSWERED_QUESTION_RECORDED·UNANSWERED_QUESTION_DELETED·CALL_DELETED와 해당 대상만 추가한다. 수집 성공은 AI, 삭제 성공은 ADMIN이며 customer 토큰/이벤트로 이 동작을 대신할 수 없다. [통화 콘텐츠 계획](../../../docs/msa-call-content-plan.md)에 원본 대조·위조 입력·장애/종료 복구 범위를 기록한다. operations를 consultation보다 먼저 배포하는 기존 순서는 유지한다.
+
+## 주문 삭제 감사 연결
+
+[주문 삭제 이식](../../../docs/msa-order-deletion-plan.md)은 기존 영속 감사 수신기에 `order` source와 `ORDER_DELETED`/`ORDER`만 추가한다. 성공은 ADMIN과 실제 대상 ID를 요구하고 다른 action·target·AI 성공·추가 metadata를 거절한다. 별도 `order_audit_preparations`는 Liquibase 010으로 추가하며 기존 준비/감사 행은 보존한다. `ORDER_URL`은 선택 설정이고 배포 manifest는 `http://order:3002`를 주입한다. 기존 CUSTOMER_AUTH_TOKEN으로 `/internal/audit/flush`를 호출하며 현재 승인된 토큰 종류를 늘리지 않는다.
+
+주문 감사는 기존 준비·로컬 outbox 커밋·operations 확정/ACK와 중복 방지를 따른다. 1초 복구 루프와 감사 조회가 order의 생산자 잠금/커밋 증명을 확인한다. customer/consultation의 action/자격 증명/참조 처리 규칙은 유지한다. 운영 앱보다 010 DB 적용을 먼저 완료해야 한다.
