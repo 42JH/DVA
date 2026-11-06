@@ -34,7 +34,7 @@ export function CallListPage() {
         lead={<CallFilter value={vm.form} active={vm.isFiltered} onApply={vm.applyForm} />}
       />
       <div
-        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
+        className={`${COLS} mt-v28 h-[19px] shrink-0 grid-rows-[19px] items-center ${PAD} text-body font-semibold`}
       >
         <DayPick small day={day} onPick={vm.setDate} />
         <HeadPick
@@ -104,7 +104,7 @@ function CallLine({
         </span>
       )}
       <span className="pl-3 text-[12px] font-normal text-sub">{r.time}</span>
-      <span className="-ml-3 flex min-w-0 items-center gap-1 overflow-hidden">
+      <span className="flex min-w-0 items-center gap-1 overflow-hidden">
         {r.counts ? <KindChips small kinds={r.kinds} /> : <PendingChip small />}
       </span>
       <span className="truncate text-center" title={r.company || undefined}>
