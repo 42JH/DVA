@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type UIEvent } from 'react'
+import { useCallback, useState } from 'react'
 import { useLocation } from 'react-router'
 import { fmtMonthDay } from '@/shared/lib/format'
 import type { Ymd } from '@/shared/lib/dateRange'
@@ -28,32 +28,26 @@ export function OrderListPage() {
   const [seen, setSeen] = useState<{ key: string; day: Ymd } | null>(null) // 맨 위에 보이는 줄의 날
   const day = (seen?.key === key && seen.day) || vm.anchor
   const onTop = useCallback((row: HTMLElement) => setSeen({ key, day: row.dataset.day! }), [key])
-  const fold = useFoldOnScroll()
   // 날마다 첫 줄 — 그 줄 왼쪽에 '11월 3일' (머리줄 날짜와 같은 날이면 안 붙임)
   const firstOfDay = new Set(vm.feed.days.map((d) => d.rows[0]?.key))
 
   return (
-    <div className="flex min-h-0 flex-[1_1_0px] flex-col" onScrollCapture={fold.onScroll}>
+    <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar search={{ tab: 'order', q: vm.q, onApply: vm.setQ, onOrder: vm.openOrderSeq }} />
-      {/* 표 머리줄: 목록을 내리면 위로 접히고 올리면 다시 나옴 (11/05 사용자). 접힌 동안만 잘라 냄 — 펼쳐 있을 땐 날짜 · '주문 상태 ⌄' 창이 아래로 나와야 해서 */}
       <div
-        className={`grid shrink-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${fold.folded ? 'grid-rows-[0fr] overflow-hidden' : 'grid-rows-[1fr]'}`}
+        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
       >
-        <div className="min-h-0" inert={fold.folded}>
-          <div className={`${COLS} mt-v28 h-[19px] items-center ${PAD} text-body font-semibold`}>
-            <DayPick small day={day} onPick={vm.setDate} />
-            <HeadPick
-              label="주문 상태"
-              all="ALL"
-              value={vm.group}
-              options={vm.groups}
-              onPick={vm.setGroup}
-            />
-            <span>보내는 분</span>
-            <span>받는 분</span>
-            <span className="text-right">주문번호</span>
-          </div>
-        </div>
+        <DayPick small day={day} onPick={vm.setDate} />
+        <HeadPick
+          label="주문 상태"
+          all="ALL"
+          value={vm.group}
+          options={vm.groups}
+          onPick={vm.setGroup}
+        />
+        <span>보내는 분</span>
+        <span>받는 분</span>
+        <span className="text-right">주문번호</span>
       </div>
       <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       {/* 줄 상자: 왼쪽 68 = 머리줄과 같은 선(날이 바뀌는 줄의 '11월 3일'은 그 왼쪽 여백에) · 오른쪽 90 = 68 + 32(막대를 카드 끝으로 뺀 만큼) − 10(막대) */}
@@ -193,19 +187,4 @@ function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
       </span>
     </span>
   )
-}
-
-/** 목록을 내리면 접힘 · 올리면(또는 맨 위면) 펼침 — 줄 상자(DayScroll)의 스크롤을 바깥에서 잡음(capture, 스크롤은 위로 안 번져서)
- *  한 번에 크게 뛴 건 무시: 위에 날이 붙을 때 DayScroll이 보던 줄을 제자리에 두려고 scrollTop을 크게 옮김(사람 스크롤 아님) */
-function useFoldOnScroll() {
-  const [folded, setFolded] = useState(false)
-  const last = useRef(0)
-  const onScroll = (e: UIEvent) => {
-    const y = (e.target as HTMLElement).scrollTop
-    const d = y - last.current
-    last.current = y
-    if (y < 40) setFolded(false)
-    else if (Math.abs(d) > 4 && Math.abs(d) < 250) setFolded(d > 0)
-  }
-  return { folded, onScroll }
 }
