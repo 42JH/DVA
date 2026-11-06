@@ -1,5 +1,7 @@
 # MSA 모놀리식 동등성 구현 계획
 
+MR !326 병합 기준 `3d8bf7b9`로 착수한 뒤 최신 `bae5074`(원본 054·보안 기록/녹취 재시도)를 동기화하며 [FAQ 6개 API·AI 알림 워커 및 상세 원본 통화 조회](msa-faqs-plan.md)을 이식한다. 질문 사례 생성·통화 이벤트 수집과 전체 동등성은 후속이다.
+
 현재 동기화 기준은 develop-backend `ce8de44`이며 96개 선언과 원본 053까지 검사한다. [Jenkins #29 복구 계획·검증](msa-build-29-fix.md)을 따른다. 아래 단계별 수치·기준 커밋은 해당 단계 당시의 기록이다.
 
 `e20b7b34`(MR !321 병합) 이후 [통화 분석·이탈 단계·응답 대기시간 이식](msa-call-analysis-plan.md)을 진행한다. backend tree는 `c19c5594540415c579b00eee1917df1cbd954a93`로 동일하다. 이번 범위는 AI POST 3개, consultation 005·operations 008 및 기존 이벤트 감사 절차의 실제 버전 참조다.

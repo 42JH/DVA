@@ -97,6 +97,19 @@ def main():
                 target = '/app/test/' if side == 'monolith' else '/app/service/test/'
                 run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
             complete(name)
+        for side in ('monolith', 'consultation'):
+            name=RUN+'-'+side+'-recording-policy-suite'
+            create(name,images[side+'-checks'],'-e','NODE_ENV=test','-e','DB_HOST=127.0.0.1',
+                   '-e','DB_PORT=5432','-e','DB_USER='+side+'_app','-e','DB_PASSWORD='+password,
+                   '-e','DB_NAME=dva_webhook_test','-e','AI_BUSINESS_TOKEN='+password,'-e','AI_AGENT_URL=http://ai.invalid:8000',
+                   '-e','CUSTOMER_URL=http://customer-app:3001','-e','OPERATIONS_URL=http://operations-app:3005',
+                   '-e','CONSULTATION_AUTH_TOKEN='+token,'-e','CUSTOMER_AUTH_TOKEN='+password,
+                   network='container:'+RUN+'-'+side+'-db',command=('node','--test',
+                   '--test-name-pattern=transient recording errors|policy errors stop|attempts survive worker crashes|legacy review holds',
+                   'test/recordings.integration.test.cjs'))
+            target='/app/test/' if side=='monolith' else '/app/service/test/'
+            run('docker','cp',str(ROOT/'backend/test/recordings.integration.test.cjs'),name+':'+target+'recordings.integration.test.cjs',label=side+'-recording-policy-copy')
+            complete(name)
         def start_apps(environment):
             for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001'), ('consultation', '3004')):
                 name = RUN+'-'+side+'-app'

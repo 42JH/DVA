@@ -29,7 +29,12 @@ export function configureApplication(
       request.url = request.url.slice(4);
     next();
   });
-  app.use(requestContext(logger));
+  app.use(
+    requestContext(logger, {
+      key: config.get('SECURITY_LOG_HMAC_KEY', { infer: true }),
+      proxyHops: config.get('AUTH_PROXY_HOPS', { infer: true }),
+    }),
+  );
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use(
@@ -64,6 +69,7 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/faq-call-sources', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },

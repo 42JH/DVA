@@ -204,7 +204,43 @@ test('DNS checks apply to the addresses actually passed to the connection', asyn
   ];
   await assert.rejects(() => storage.download(new URL(source)), /recording_address_not_public/);
   answers = [{ address: '1.1.1.1', family: 4 }];
-  await assert.rejects(() => storage.download(new URL(source)), /public-lookup-verified/);
+  await assert.rejects(
+    () => storage.download(new URL(source)),
+    (error) =>
+      error.code === 'DOWNLOAD_UNAVAILABLE' &&
+      error.retryable &&
+      !error.message.includes('public-lookup-verified'),
+  );
+});
+
+test('source HTTP failures expose only bounded retry codes while unsafe redirects remain terminal', async (t) => {
+  let status = 403;
+  const endpoint = await server(t, (_req, res) => {
+    res.writeHead(status, { 'content-type': 'text/html' });
+    res.end('private provider URL and credentials');
+  });
+  t.mock.method(https, 'get', (_url, options, callback) =>
+    http.get(endpoint, { signal: options.signal }, callback),
+  );
+  const storage = new RecordingStorage(config());
+  t.after(() => storage.onApplicationShutdown());
+  for (const [httpStatus, code, retryable] of [
+    [401, 'SOURCE_ACCESS_DENIED', true],
+    [403, 'SOURCE_ACCESS_DENIED', true],
+    [404, 'SOURCE_NOT_FOUND', true],
+    [410, 'SOURCE_NOT_FOUND', true],
+    [429, 'SOURCE_RATE_LIMITED', true],
+    [500, 'SOURCE_UNAVAILABLE', true],
+    [503, 'SOURCE_UNAVAILABLE', true],
+    [302, 'DOWNLOAD_REJECTED', false],
+  ]) {
+    status = httpStatus;
+    await assert.rejects(
+      () => storage.download(new URL(source)),
+      (error) =>
+        error.code === code && error.retryable === retryable && !error.message.includes('private'),
+    );
+  }
 });
 
 test('a stalled download times out rather than holding the worker forever', async (t) => {

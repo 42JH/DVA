@@ -79,7 +79,10 @@ test('unknown upload outcome retries the fixed call and stores one recording',as
   await worker.processPending();let stored=await event(data.recordingId);
   assert.equal(stored.processing_status,'FAILED');assert.equal(stored.claim_id,null);assert.equal(stored.call_session_seq,id);
   assert.equal((await pool.query('SELECT count(*)::int AS n FROM recordings')).rows[0].n,0);
-  await pool.query("UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=clock_timestamp()-interval '2 minutes' WHERE recording_id=$1",[data.recordingId]);
+  assert.equal(stored.attempt_count,1);assert.equal(stored.last_error_code,'PROCESSING_UNAVAILABLE');
+  assert.equal(stored.requires_review,false);assert.ok(stored.next_attempt_at>Date.now());
+  await worker.processPending();assert.equal(attempts,1,'source backoff must prevent an immediate retry');
+  await pool.query("UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=clock_timestamp()-interval '2 minutes',next_attempt_at=clock_timestamp()-interval '1 second' WHERE recording_id=$1",[data.recordingId]);
   await worker.processPending();stored=await event(data.recordingId);
   assert.equal(stored.processing_status,'PROCESSED');assert.equal(stored.claim_id,null);assert.equal(attempts,2);assert.equal(uploads,1);
   assert.deepEqual((await pool.query('SELECT call_session_seq,object_key FROM recordings')).rows,[{call_session_seq:id,object_key:'fixture/reused-audio'}]);

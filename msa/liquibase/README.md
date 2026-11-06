@@ -9,17 +9,21 @@ Jenkins 자동화의 실행 흐름과 연결 설정은 [MSA CI/CD](../README.md)
 |---|---|---|---:|---:|
 | customer | customer_db | customer-db | 8 | 10 |
 | order | order_db | order-db | 4 | 6 |
-| consultation | consultation_db | consultation-db | 9 | 11 |
+| consultation | consultation_db | consultation-db | 11 | 13 |
 | delivery | delivery_db | delivery-db | 4 | 6 |
-| operations | operations_db | operations-db | 14 | 16 |
+| operations | operations_db | operations-db | 16 | 18 |
 
-현재 public 업무·보관 테이블 25개 + outbox/inbox 10개 + customer/consultation 감사 준비 2개 + 페르소나 참조 1개 = 38개. Liquibase의 DATABASECHANGELOG와
-DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 48개가 된다.
-consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 49개다. 위 consultation 수는 이 수신함도 포함한다.
+현재 public 업무·이벤트·감사 준비·참조 테이블은 42개다. Liquibase의 DATABASECHANGELOG와
+DATABASECHANGELOGLOCK이 DB마다 추가되어 전체 public 테이블은 52개가 된다.
+consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 전체 53개다. 위 consultation 수는 이 수신함도 포함한다.
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 초기 페르소나 2개와 편집용 프롬프트는 operations 007에서 legacy 테이블에 그대로 보존한다. 새 API의 설정 이력·초안과 ACTIVE/PENDING은 비어 있으며 구 프롬프트를 실제 상담 설정으로 자동 선택하지 않는다.
 
 ## 변경 관리
+
+- consultation `007`은 원본 054의 녹취 재시도/운영 확인 정책을 추가한다. 과거 FAILED만 LEGACY_FAILURE로 확인 대기하며 payload·통화 연결·claim/시각·녹취와 기존 이력은 보존한다. 최대 5회·안전한 오류 코드·운영 확인 제약과 후반 SQL 실패 rollback을 검증한다.
+
+- operations `009`는 기존 FAQ의 원본 분류표·활성 질문 유일성·soft delete, 알림 대기와 질문 사례를 연결한다. 미분류/중복 행은 전체 롤백하며 ID·질문·답변·기존 시각을 보존한다. consultation `006`은 FAQ 상세의 원본 통화 연결을 위한 원본 이벤트/미답변 스키마를 추가한다. 신규 사례·과거 이벤트는 만들지 않는다. 현재 customer 7개·operations 9개·consultation 7개 changeset이다. [범위와 검증](../../docs/msa-faqs-plan.md)을 따른다.
 
 - consultation `005`는 원본의 최종 call_analyses·call_dashboard_metrics·CHECK/함수/로컬 FK를 추가한다. operations `008`은 실제 버전을 보호하는 consultation_persona_references FK를 추가한다. customer 7개·operations 8개·consultation 5개 changeset이다. 기존 통화·페르소나·감사 준비·대기 이벤트·이력 보존, 과거 분석/참조 미생성 및 각 changeset 후반 실패 시 전체 롤백을 검사한다. 비공개 참조는 AuditPrepared/Committed/Aborted와 함께 처리한다.
 - operations `007`은 기존 identity/prompt·시퀀스·설정·불변 이력과 기존 SQL 활성화 함수를 legacy 이름으로 보존하고 새 페르소나 identity/불변 버전/초안 3개 테이블을 추가한다. 이전 001~006 이력·대기 이벤트와 행 값을 보존한다. 초기·업그레이드 제약 및 후반 SQL 실패 시 rename/함수/DDL/데이터/이력 전체 롤백을 검사한다. 과거의 전체 설정을 추정하거나 구 프롬프트를 자동 publish하지 않는다.

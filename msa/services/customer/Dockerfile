@@ -8,10 +8,12 @@ RUN npm ci
 COPY services/customer/nest-cli.json services/customer/tsconfig*.json services/customer/.prettierrc services/customer/eslint.config.mjs ./
 COPY services/customer/src ./src
 COPY services/customer/test ./test
+COPY parity/security-events.test.cjs ./test/security-events.test.cjs
 RUN npm run lint \
  && npm test -- --runInBand \
  && npm run test:e2e -- --runInBand \
- && npm run build
+ && npm run build \
+ && node --test test/security-events.test.cjs
 
 FROM builder AS checks
 RUN node --test test/auth-bridge.test.cjs test/database-audit.test.cjs test/call-context.test.cjs

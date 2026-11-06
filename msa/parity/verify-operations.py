@@ -51,6 +51,7 @@ def main():
             ('customer-checks', 'msa/services/customer', 'checks'),
             ('operations-checks', 'msa/services/operations', 'checks'),
             ('operations', 'msa/services/operations', None),
+            ('consultation', 'msa/services/consultation', None),
             ('monolith-checks', 'backend', 'checks'),
             ('monolith', 'backend', None),
             ('liquibase', 'msa/liquibase', None),
@@ -63,7 +64,7 @@ def main():
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
         addresses = {}
-        for side in ('monolith', 'operations'):
+        for side in ('monolith', 'operations', 'consultation'):
             name = RUN + '-' + side + '-db'
             create(name, 'postgres:17.11-bookworm', '--network-alias', side + '-db',
                    '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER=operations_app',
@@ -87,6 +88,13 @@ def main():
                '-e', 'LIQUIBASE_COMMAND_PASSWORD=' + password,
                command=('--changelog-file=operations/db.changelog.xml', 'update'))
         complete(name)
+        name = RUN + '-consultation-migrate'
+        create(name, images['liquibase'],
+               '-e', 'LIQUIBASE_COMMAND_URL=jdbc:postgresql://consultation-db:5432/dva_webhook_test',
+               '-e', 'LIQUIBASE_COMMAND_USERNAME=operations_app',
+               '-e', 'LIQUIBASE_COMMAND_PASSWORD=' + password,
+               command=('--changelog-file=consultation/db.changelog.xml', 'update'))
+        complete(name)
         fixture = RUN + '-customer-runtime'
         create(fixture, images['customer-checks'])
         runtime = LOGS / RUN / 'customer-runtime'
@@ -96,7 +104,9 @@ def main():
                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
                   '-e', 'AUTH_PROXY_HOPS=1', '-e', 'AI_BUSINESS_TOKEN=' + password,
-                  '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex]
+                  '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex,
+                  '-e', 'CONSULTATION_AUTH_TOKEN=' + password,
+                  '-e', 'CONSULTATION_URL=http://consultation-app:3004']
         name = RUN + '-persona-peer'
         create(name, images['operations-checks'], '--network-alias', 'persona-fixture',
                '-e', 'NODE_ENV=test', '-e', 'AI_PERSONA_TOKEN=' + password,
@@ -118,7 +128,7 @@ def main():
             complete(name)
             if side == 'monolith':
                 name = RUN + '-monolith-limits-suite'
-                create(name, images['monolith-checks'], *common, '--add-host=db:' + addresses[side],
+                create(name, images[side+'-checks'], *common, '--add-host=db:' + addresses[side],
                        '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db',
                        command=('node', '--test', 'test/auth-limits.integration.test.cjs'))
                 complete(name)
@@ -135,6 +145,19 @@ def main():
                     copy('backend/test/' + file, name, '/app/service/test/' + file)
                 copy('backend/migrations', name, '/app/service/migrations')
             complete(name)
+            name = RUN + '-' + side + '-faq-suite'
+            create(name, images[side + '-checks'], *common, '--add-host=db:' + addresses[side],
+                   '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db', command=('node', '--test',
+                   '--test-concurrency=1', 'test/faq-input.test.cjs', 'test/faqs.integration.test.cjs',
+                   'test/faq-categories.integration.test.cjs', 'test/faq-seed.integration.test.cjs',
+                   'test/faq-notifications.integration.test.cjs'))
+            if side == 'operations':
+                for file in (ROOT / 'backend/test').glob('faq*.cjs'):
+                    copy(file.relative_to(ROOT), name, '/app/service/test/' + file.name)
+                for file in ('helpers/faqs.cjs', 'helpers/application.cjs'):
+                    copy('backend/test/' + file, name, '/app/service/test/' + file)
+                copy('backend/migrations', name, '/app/service/migrations')
+            complete(name)
             name = RUN + '-' + side + '-app'
             create(name, images[side], *common, '--network-alias', side + '-app',
                    '--network-alias', side,
@@ -142,6 +165,16 @@ def main():
                    '-e', 'AI_PERSONA_TOKEN=' + password,
                    '-e', 'NODE_ENV=production', '-e', 'DB_HOST=' + side + '-db', '-e', 'PORT=3005')
             run('docker', 'start', name, label=side + '-app-start')
+        name = RUN + '-consultation-app'
+        create(name, images['consultation'], '--network-alias', 'consultation-app',
+               '-e', 'NODE_ENV=production', '-e', 'DB_HOST=consultation-db',
+               '-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=' + password,
+               '-e', 'DB_NAME=dva_webhook_test', '-e', 'CONSULTATION_AUTH_TOKEN=' + password,
+               '-e', 'CUSTOMER_AUTH_TOKEN=' + password, '-e', 'CUSTOMER_URL=http://customer:3001',
+               '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
+               '-e', 'OPERATIONS_URL=http://operations-app:3005',
+               '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true')
+        run('docker', 'start', name, label='faq-consultation-start')
         name = RUN + '-differential'
         create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
                '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
@@ -154,6 +187,21 @@ def main():
                '-e', 'PGDATABASE=dva_webhook_test', command=('node', '--test', 'test/auth-limits-parity.test.cjs'))
         copy('msa/parity/auth-limits-parity.test.cjs', name, '/app/service/test/auth-limits-parity.test.cjs')
         complete(name)
+        for side in ('monolith','operations'):
+            output=run('docker','logs',RUN+'-'+side+'-app',label=side+'-security-records')
+            records=[]
+            for line in output.splitlines():
+                try: record=json.loads(line)
+                except ValueError: continue
+                if record.get('event') in ('authentication_success','authentication_failure'):
+                    records.append(record)
+            assert records and any(r.get('event')=='authentication_success' for r in records)
+            assert any(r.get('reason')=='rate_limited' for r in records)
+            for record in records:
+                assert set(record)<=set(('timestamp','service','environment','level','event','requestId','statusCode','authType','reason','accountKey','sourceKey')),record
+                for field in ('accountKey','sourceKey'):
+                    if field in record:
+                        assert len(record[field])==64 and all(c in 'abcdef0123456789' for c in record[field])
         name = RUN + '-personas'
         create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
                '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
@@ -176,6 +224,47 @@ def main():
         run('docker', 'cp', str(LOGS / 'persona-before-restart.json'),
             name + ':/app/service/test/persona-before-restart.json', label='persona-recovery-copy-state')
         complete(name)
+        name = RUN + '-faqs'
+        create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CONSULTATION_AUTH_TOKEN=' + password,
+               command=('node', '--test', 'test/faqs-parity.test.cjs'))
+        copy('msa/parity/faqs-parity.test.cjs', name, '/app/service/test/faqs-parity.test.cjs')
+        complete(name)
+        # All ordinary API comparisons run with notifications disabled, then use real workers.
+        for side in ('monolith', 'operations'):
+            run('docker', 'stop', RUN+'-'+side+'-app', label=side+'-faq-stop-before-worker')
+            name=RUN+'-'+side+'-faq-app'
+            create(name, images[side], *common, '--network-alias', side+'-faq-app',
+                   '-e', 'AI_AGENT_URL=http://persona-fixture:8000/'+side,
+                   '-e', 'AI_FAQ_TOKEN='+password, '-e', 'NODE_ENV=production',
+                   '-e', 'DB_HOST='+side+'-db', '-e', 'PORT=3005')
+            run('docker', 'start', name, label=side+'-faq-worker-start')
+        name=RUN+'-faq-before-restart'
+        create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD='+password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'AI_FAQ_TOKEN='+password,
+               command=('node', '--test', 'test/faq-recovery.test.cjs'))
+        copy('msa/parity/faq-recovery.test.cjs',name,'/app/service/test/faq-recovery.test.cjs')
+        complete(name)
+        for side in ('monolith','operations'):
+            run('docker','kill',RUN+'-'+side+'-faq-app',label=side+'-faq-sigkill')
+        run('docker','cp',name+':/app/service/test/faq-before-restart.json',str(LOGS/'faq-before-restart.json'),label='faq-before-restart')
+        for side in ('monolith','operations'):
+            run('docker','start',RUN+'-'+side+'-faq-app',label=side+'-faq-restart')
+        name=RUN+'-faq-after-restart'
+        create(name,images['operations-checks'],'-e','NODE_ENV=test','-e','PGUSER=operations_app',
+               '-e','PGPASSWORD='+password,'-e','PGDATABASE=dva_webhook_test',
+               '-e','AI_FAQ_TOKEN='+password,'-e','FAQ_RECOVERY=after',
+               command=('node','--test','test/faq-recovery.test.cjs'))
+        copy('msa/parity/faq-recovery.test.cjs',name,'/app/service/test/faq-recovery.test.cjs')
+        run('docker','cp',str(LOGS/'faq-before-restart.json'),name+':/app/service/test/faq-before-restart.json',label='faq-recovery-copy-state')
+        complete(name)
+        # Leave the usual operation app running for the existing deployment probe.
+        run('docker','start',RUN+'-operations-app',label='operations-after-faq-start')
+        run('docker','exec',RUN+'-operations-app','node','-e',
+            "(async()=>{for(let n=0;n<60;n++){try{if((await fetch('http://127.0.0.1:3005/operations/health/ready')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('restarted app not ready')})().catch(e=>{console.error(e.message);process.exit(1)})",
+            label='operations-after-faq-ready')
         spec = importlib.util.spec_from_file_location('app_release', ROOT / 'msa/deploy/app-release.py')
         release = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(release)

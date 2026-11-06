@@ -83,7 +83,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',8,5),('delivery',4,1),('operations',14,7)]:
+    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',10,9),('delivery',4,1),('operations',16,8)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +92,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 8, 'consultation': 5}.get(service, 2)
+        changesets = {'customer': 7, 'operations': 9, 'consultation': 7}.get(service, 2)
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -105,9 +105,12 @@ try:
         if service == 'customer':
             sql(db, (SOURCE / 'customer-reads-check.sql').read_text(encoding='utf-8'), 'customer-reads-workflow', 'customer_app')
         if service == 'operations':
+            sql(db, (SOURCE / 'faqs-check.sql').read_text(encoding='utf-8'), 'faqs-workflow', 'operations_app')
             sql(db, (SOURCE / 'persona-settings-check.sql').read_text(encoding='utf-8'), 'persona-settings-workflow', 'operations_app')
             sql(db, (SOURCE / 'consultation-persona-reference-check.sql').read_text(encoding='utf-8'), 'consultation-persona-reference-workflow', 'operations_app')
         if service == 'consultation':
+            sql(db, (SOURCE / 'recording-retry-check.sql').read_text(encoding='utf-8'), 'recording-retry-workflow', 'consultation_app')
+            sql(db, (SOURCE / 'call-event-sources-check.sql').read_text(encoding='utf-8'), 'call-event-sources-workflow', 'consultation_app')
             sql(db, (SOURCE / 'call-analysis-check.sql').read_text(encoding='utf-8'), 'call-analysis-workflow', 'consultation_app')
         fingerprint = preview_fingerprint(service, db, service+'-ci-preview-current')
         output = ci_command(service, db, 'apply', service+'-ci-apply-current', fingerprint)
@@ -189,7 +192,7 @@ try:
         assert sql(db, restored, service+'-002-constraints-rolled-back') == expected
         output = ci_command(service, db, 'apply', service+'-upgrade', approved)
         assert f'DVA_MIGRATION_COMPLETE={service}' in output, output
-        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('8' if service == 'operations' else '7')
+        assert sql(db, 'SELECT count(*) FROM databasechangelog;', service+'-upgrade-count') == ('9' if service == 'operations' else '7')
         assert sql(db, "SELECT id,author,filename,md5sum,dateexecuted FROM databasechangelog WHERE id='001-initial';", service+'-001-unchanged') == baseline
         sql(db, (SOURCE / checks[service]).read_text(encoding='utf-8'), service+'-upgrade-workflow', service+'_app')
         output = ci_command(service, db, 'apply', service+'-stale-approval-rejected', approved, failure=True)
@@ -452,6 +455,80 @@ try:
         else:
             assert sql(db, 'SELECT count(*) FROM consultation_persona_references;', label+'-no-invented-reference') == '0'
         sql(db, (SOURCE/test).read_text(encoding='utf-8'), label+'-workflow', service+'_app')
+    # Latest FAQ changes preserve existing content/timestamps and never guess an unknown category.
+    for service, count, filename, check, seed, preserved, absent in [
+        ('operations', 8, '009-faqs.sql', 'faqs-check.sql',
+         "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('faqlegacy','Legacy FAQ admin','preserved','OPERATOR','ACTIVE'); INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,created_at,updated_at) VALUES('택배 접수는 어떻게 하나요?','original answer',1,'2001-01-01Z','2002-01-01Z');",
+         "SELECT to_jsonb(f)-'category'-'deleted_at' FROM faq_entries f;",
+         "SELECT NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='faq_entries' AND column_name='category') AND to_regclass('faq_change_notifications') IS NULL AND to_regclass('faq_question_examples') IS NULL;"),
+        ('consultation', 5, '006-call-event-sources.sql', 'call-event-sources-check.sql',
+         "INSERT INTO call_sessions(provider_call_id,incoming_at) VALUES('faq-source-legacy',NULL); INSERT INTO call_utterances(call_session_seq,utterance_order,speaker,utterance_text,last_sentence_seq) VALUES(1,1,'CUSTOMER','preserved text',1);",
+         "SELECT (SELECT jsonb_agg(to_jsonb(c)) FROM call_sessions c),(SELECT jsonb_agg(to_jsonb(u)) FROM call_utterances u);",
+         "SELECT to_regclass('call_insight_events') IS NULL AND to_regclass('unanswered_questions') IS NULL;"),
+    ]:
+        prefix=service+'-faq-upgrade'
+        db=service+'_faq_upgrade_db'
+        sql('postgres',f'CREATE DATABASE {db} OWNER {service}_app;',prefix+'-setup')
+        lb(service,db,'update-count',prefix+'-baseline',extra=(f'--count={count}',))
+        sql(db,seed,prefix+'-seed',service+'_app')
+        original=sql(db,preserved,prefix+'-before')
+        history=sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;',prefix+'-history')
+        if service=='operations':
+            sql(db,"INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES('unknown legacy category','unmapped',1);",prefix+'-unmapped-seed',service+'_app')
+            output=lb(service,db,'update',prefix+'-unmapped-rejected',failure=True)
+            assert 'Unmapped FAQ' in output,output
+            assert sql(db,absent,prefix+'-unmapped-schema')=='t'
+            assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;',prefix+'-unmapped-history')==history
+            assert sql(db,"SELECT answer FROM faq_entries WHERE question='unknown legacy category';",prefix+'-unmapped-preserved')=='unmapped'
+            sql(db,"DELETE FROM faq_entries WHERE question='unknown legacy category'; INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq) VALUES('택배 접수는 어떻게 하나요?','duplicate',1);",prefix+'-duplicate-seed',service+'_app')
+            output=lb(service,db,'update',prefix+'-duplicate-rejected',failure=True)
+            assert 'Duplicate FAQ question IDs' in output,output
+            assert sql(db,absent,prefix+'-duplicate-schema')=='t'
+            assert sql(db,'SELECT count(*) FROM faq_entries;',prefix+'-duplicate-preserved')=='2'
+            sql(db,"DELETE FROM faq_entries WHERE answer='duplicate';",prefix+'-duplicate-fixture-cleanup',service+'_app')
+        failing=logs/('atomicity-faq-'+service)
+        shutil.copytree(BASE/'changelog',failing,dirs_exist_ok=True)
+        migration=failing/service/filename
+        migration.write_text(migration.read_text(encoding='utf-8')+'\nSELECT 1 / 0;\n',encoding='utf-8')
+        output=lb(service,db,'update',prefix+'-late-failure',failure=True,changelog_root=failing)
+        assert 'division by zero' in output.lower(),output
+        assert sql(db,absent,prefix+'-atomic-schema')=='t'
+        assert sql(db,preserved,prefix+'-atomic-data')==original
+        assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;',prefix+'-atomic-history')==history
+        lb(service,db,'update',prefix+'-apply')
+        assert sql(db,preserved,prefix+'-data-preserved')==original
+        assert sql(db,f'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<={count} ORDER BY orderexecuted;',prefix+'-history-preserved')==history
+        if service=='operations':
+            assert sql(db,"SELECT category FROM faq_entries;",prefix+'-verified-category')=='접수'
+            assert sql(db,'SELECT (SELECT count(*) FROM faq_change_notifications),(SELECT count(*) FROM faq_question_examples);',prefix+'-no-invented-history')=='0|0'
+        else:
+            assert sql(db,'SELECT (SELECT count(*) FROM call_insight_events),(SELECT count(*) FROM unanswered_questions);',prefix+'-no-invented-events')=='0|0'
+        sql(db,(SOURCE/check).read_text(encoding='utf-8'),prefix+'-workflow',service+'_app')
+    db='recording_retry_upgrade_db'
+    sql('postgres',f'CREATE DATABASE {db} OWNER consultation_app;','retry-upgrade-setup')
+    lb('consultation',db,'update-count','retry-upgrade-baseline',extra=('--count=6',))
+    sql(db,"""INSERT INTO call_sessions(provider_call_id) VALUES('retry-upgrade');
+      INSERT INTO pbx_webhooks.call_ended_events(recording_id,payload,processing_status,call_session_seq)
+      SELECT s,jsonb_build_object('fixture',s),CASE WHEN s='received' THEN 'RECEIVED' WHEN s='processed' THEN 'PROCESSED' ELSE 'FAILED' END,
+        CASE WHEN s='unmatched' THEN NULL ELSE 1 END FROM unnest(ARRAY['received','processed','failed','unmatched','claimed']) s;
+      UPDATE pbx_webhooks.call_ended_events SET claim_id='00000000-0000-4000-8000-000000000054',claimed_until=clock_timestamp()+interval '5 minutes',last_attempt_at=clock_timestamp() WHERE recording_id='claimed';""",'retry-upgrade-seed','consultation_app')
+    snapshot="SELECT jsonb_agg(to_jsonb(e)-ARRAY['attempt_count','next_attempt_at','last_error_code','requires_review'] ORDER BY recording_id) FROM pbx_webhooks.call_ended_events e;"
+    before=sql(db,snapshot,'retry-upgrade-before')
+    history=sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','retry-upgrade-history')
+    failing=logs/'atomicity-recording-retry'
+    shutil.copytree(BASE/'changelog',failing,dirs_exist_ok=True)
+    migration=failing/'consultation/007-recording-retry.sql'
+    migration.write_text(migration.read_text(encoding='utf-8')+'\nSELECT 1/0;\n',encoding='utf-8')
+    output=lb('consultation',db,'update','retry-upgrade-late-failure',failure=True,changelog_root=failing)
+    assert 'division by zero' in output.lower(),output
+    assert sql(db,snapshot,'retry-upgrade-atomic-data')==before
+    assert sql(db,"SELECT count(*) FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events' AND column_name='requires_review';",'retry-upgrade-atomic-schema')=='0'
+    assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','retry-upgrade-atomic-history')==history
+    lb('consultation',db,'update','retry-upgrade-apply')
+    assert sql(db,snapshot,'retry-upgrade-data-preserved')==before
+    assert sql(db,"SELECT count(*) FILTER(WHERE attempt_count=0 AND next_attempt_at IS NULL),count(*) FILTER(WHERE requires_review AND last_error_code='LEGACY_FAILURE') FROM pbx_webhooks.call_ended_events;",'retry-upgrade-legacy-state')=='5|3'
+    assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=6 ORDER BY orderexecuted;','retry-upgrade-history-preserved')==history
+    sql(db,(SOURCE/'recording-retry-check.sql').read_text(encoding='utf-8'),'retry-upgrade-checks','consultation_app')
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

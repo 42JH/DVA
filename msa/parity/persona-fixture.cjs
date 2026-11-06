@@ -11,6 +11,7 @@ const options = {
 };
 const peers = Object.fromEntries(['monolith', 'operations'].map((side) => [side, {
   optionsMode: 'ok', refreshStatus: 202, notifications: [], optionRequests: 0,
+  faqStatus: 503, faqHold: false, faqNotifications: [],
 }]));
 const server = createServer(async (request, response) => {
   try {
@@ -32,7 +33,7 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify(peer));
     } else if (path === '/__control' && request.method === 'POST') {
       const input = JSON.parse(body);
-      assert.deepEqual(Object.keys(input).filter((key) => !['optionsMode', 'refreshStatus'].includes(key)), []);
+      assert.deepEqual(Object.keys(input).filter((key) => !['optionsMode', 'refreshStatus', 'faqStatus', 'faqHold'].includes(key)), []);
       Object.assign(peer, input);
       response.writeHead(204).end();
     } else if (path === '/internal/persona/options' && request.method === 'GET') {
@@ -56,6 +57,14 @@ const server = createServer(async (request, response) => {
       assert.match(input.applicationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       peer.notifications.push(input);
       response.writeHead(peer.refreshStatus).end();
+    } else if (path === '/internal/faqs/refresh' && request.method === 'POST') {
+      const input = JSON.parse(body);
+      assert.deepEqual(Object.keys(input).sort(), ['eventId', 'faqEntrySeqs', 'operation']);
+      assert.match(input.eventId, /^[0-9a-f-]{36}$/);
+      assert.ok(['INSERT', 'UPDATE', 'DELETE'].includes(input.operation));
+      assert.ok(Array.isArray(input.faqEntrySeqs) && input.faqEntrySeqs.length > 0);
+      peer.faqNotifications.push(input);
+      if (!peer.faqHold) response.writeHead(peer.faqStatus).end();
     } else response.writeHead(404).end();
   } catch {
     response.writeHead(500).end();

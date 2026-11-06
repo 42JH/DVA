@@ -61,6 +61,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.pool.query(
       'SELECT response_wait_payload_hash FROM call_dashboard_metrics LIMIT 0',
     );
+    await this.pool.query('SELECT event_id FROM call_insight_events LIMIT 0');
+    await this.pool.query('SELECT reason FROM unanswered_questions LIMIT 0');
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

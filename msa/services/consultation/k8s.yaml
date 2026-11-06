@@ -35,6 +35,9 @@ spec:
               value: production
             - name: PORT
               value: "3004"
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
             - name: DB_HOST
               valueFrom:
                 secretKeyRef: { name: consultation-db, key: PGHOST }

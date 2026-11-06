@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -131,5 +132,49 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .get('/consultation/health/ready')
       .expect(503);
     await request(app.getHttpServer()).get('/consultation/health').expect(200);
+  });
+  it('authenticates FAQ source queries on the private path and rejects invalid envelopes', async () => {
+    const token = 'faq-source-query-token-'.padEnd(48, 's');
+    app.get(ConfigService).set('CONSULTATION_AUTH_TOKEN', token);
+    const body = {
+      eventId: '00000000-0000-4000-8000-000000000001',
+      source: 'operations',
+      eventType: 'FaqCallSourcesRequested',
+      payload: { eventIds: ['00000000-0000-4000-8000-000000000002'] },
+    };
+    await request(app.getHttpServer())
+      .post('/internal/faq-call-sources')
+      .send(body)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post('/internal/faq-call-sources')
+      .set('Authorization', 'Bearer ' + token)
+      .send({})
+      .expect(400);
+    await request(app.getHttpServer())
+      .post('/internal/faq-call-sources')
+      .set('Authorization', 'Bearer ' + token)
+      .send({ ...body, source: 'customer' })
+      .expect(422);
+    await request(app.getHttpServer())
+      .post('/internal/faq-call-sources')
+      .set('Authorization', 'Bearer ' + token)
+      .send(body)
+      .expect(200)
+      .expect({
+        eventId: body.eventId,
+        status: 'processed',
+        payload: {
+          calls: [{ eventId: body.payload.eventIds[0], callSessionSeq: null }],
+        },
+      });
+    const response = await request(app.getHttpServer())
+      .get('/consultation/docs-json')
+      .expect(200);
+    expect(
+      Object.keys(
+        (response.body as { paths: Record<string, unknown> }).paths,
+      ).some((path) => path.includes('faq-call-sources')),
+    ).toBe(false);
   });
 });

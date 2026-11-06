@@ -29,8 +29,8 @@ BEGIN
   UPDATE legacy_ai_personas SET turn_wait_level='INVALID' WHERE ai_persona_seq=persona_id;
   RAISE EXCEPTION 'Invalid wait level accepted';
  EXCEPTION WHEN check_violation THEN NULL; END;
- INSERT INTO faq_entries(question,answer,updated_by_admin_user_seq,updated_at)
- VALUES('test question','test answer',admin_id,'2000-01-01Z') RETURNING faq_entry_seq INTO faq_id;
+ INSERT INTO faq_entries(category,question,answer,updated_by_admin_user_seq,updated_at)
+ VALUES('기타','test question','test answer',admin_id,'2000-01-01Z') RETURNING faq_entry_seq INTO faq_id;
  UPDATE faq_entries SET answer='changed answer' WHERE faq_entry_seq=faq_id;
  IF (SELECT updated_at FROM faq_entries WHERE faq_entry_seq=faq_id)<='2000-01-01Z'::timestamptz THEN
   RAISE EXCEPTION 'FAQ timestamp did not update'; END IF;

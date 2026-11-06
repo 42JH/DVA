@@ -21,4 +21,10 @@
   <changeSet id="005-call-analysis" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="005-call-analysis.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="006-call-event-sources" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="006-call-event-sources.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="007-recording-retry" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-recording-retry.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

@@ -55,3 +55,13 @@ test('auth proxy trust is bounded and AI business credentials retain the source 
   for (const value of ['', 'x'.repeat(32)]) assert.equal(validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }).AI_BUSINESS_TOKEN, value || undefined);
   for (const value of ['short', '가'.repeat(32), 'x'.repeat(32) + '\n', {}]) assert.throws(() => validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }), /AI_BUSINESS_TOKEN/);
 });
+
+test('FAQ token is optional, preserves original bytes and needs its original AI URL when enabled', () => {
+  assert.equal(validateEnvironment(valid).AI_FAQ_TOKEN, undefined);
+  assert.equal(validateEnvironment({ ...valid, AI_FAQ_TOKEN: '' }).AI_FAQ_TOKEN, undefined);
+  const token='faq-token-'.padEnd(40,'x');
+  assert.equal(validateEnvironment({ ...valid, AI_AGENT_URL:'http://ai:8000', AI_FAQ_TOKEN:token }).AI_FAQ_TOKEN,token);
+  assert.throws(() => validateEnvironment({ ...valid, AI_FAQ_TOKEN:token }),/AI_AGENT_URL/);
+  for (const value of ['short', {}, '가'.repeat(32), 'x'.repeat(32)+'\n'])
+    assert.throws(() => validateEnvironment({ ...valid, AI_AGENT_URL:'http://ai:8000', AI_FAQ_TOKEN:value }),/AI_FAQ_TOKEN/);
+});
