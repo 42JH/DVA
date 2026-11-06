@@ -71,7 +71,7 @@ const e = errs(
 assert.deepEqual(e.errors, [
   '2행 사번이 비어 있습니다.',
   '3행 사원명이 비어 있습니다.',
-  '4행 전화번호 형식이 맞지 않습니다.',
+  '4행 전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)',
 ])
 assert.equal(e.more, 1) // 5행 대표자 X (6행은 5행이 오류라 사번이 기록 안 돼 겹침 아님)
 
@@ -82,6 +82,41 @@ assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('1,나,010333
 assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('2,나,010-1111-2222')}`).errors, [
   '3행 전화번호가 2행과 겹칩니다.',
 ])
+
+// 엑셀이 지운 앞 0 (11/06): 0을 붙여 국내 번호 모양이 되면 되살림 — 휴대전화 · 지역번호 · 070 모두
+const one = (phone: string) => readMembersCsv(`${HEAD}\n${row(`1,가,${phone}`)}`)
+const phoneOf = (phone: string) => {
+  const r = one(phone)
+  assert.ok(r.ok, `${phone}: ${JSON.stringify(r)}`)
+  return r.members[0]!.phoneNumber
+}
+assert.equal(phoneOf('1012345678'), '01012345678') // 010
+assert.equal(phoneOf('10-1234-5679'), '01012345679') // 하이픈이 있어도
+assert.equal(phoneOf('1612345678'), '01612345678') // 016 (11자리)
+assert.equal(phoneOf('3112345678'), '03112345678') // 031 지역번호 11자리
+assert.equal(phoneOf('7012345678'), '07012345678') // 070
+assert.equal(phoneOf('01012345678'), '01012345678') // 원래 맞는 번호는 그대로
+// 9~10자리 지역번호도 되살리지만, 서버(숫자 11자리만)가 아직 안 받아 이유를 밝혀 막음
+const LANDLINE =
+  '2행 9~10자리 지역번호 전화는 아직 서버에서 받지 않습니다. 11자리 번호(휴대전화 등)를 넣어 주세요.'
+for (const landline of [
+  '21234567',
+  '212345678',
+  '02-123-4567',
+  '541234567',
+  '054-123-4567',
+  '111234567',
+])
+  assert.deepEqual(one(landline).ok ? [] : (one(landline) as { errors: string[] }).errors, [
+    LANDLINE,
+  ])
+// 0을 붙여도 국내 번호가 아니면 형식 오류 (대표번호 · 아무 숫자 · 너무 긺)
+const BAD = '2행 전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)'
+for (const bad of ['15881234', '1234567890', '010123456789', '0812345678', '123'])
+  assert.deepEqual(errs(`${HEAD}\n${row(`1,가,${bad}`)}`).errors, [BAD])
+// 엑셀 지수 표기는 원래 숫자를 알 수 없음 → 열을 텍스트로 바꾸라고
+assert.match(errs(`${HEAD}\n${row('1,가,1.01E+10')}`).errors[0]!, /전화번호 열을 텍스트/)
+assert.match(errs(`${HEAD}\n${row('1.23E+11,가,01012345678')}`).errors[0]!, /사번 열을 텍스트/)
 
 // 서버 오류 경로 → 행 번호 (items 순서 = members 순서)
 const rows: CsvMember[] = [
@@ -185,6 +220,19 @@ assert.deepEqual(
 )
 assert.deepEqual(pv.leaders, ['00134'])
 assert.deepEqual(pv.errors, ['5행 전화번호를 이미 김하린(사번 00152) 님이 쓰고 있습니다.'])
+
+// 엑셀이 사번 앞 0을 지움(00134 → 134): 새 사원으로 따로 만들지 않고 막음 (사번은 등록 뒤 못 바꿈)
+const csvOf = (r: string) => ok(`${HEAD}\n${row(r)}`)
+const lost = previewAgainst(csvOf('134,박준호,01011110002'), existing, new Map())
+assert.deepEqual(lost.added, [])
+assert.match(lost.errors[0]!, /2행 사번 '134'은 기존 사번 '00134'\(박준호\)과 앞의 0만 다릅니다/)
+// 진짜 다른 번호는 그대로 신규
+assert.deepEqual(
+  previewAgainst(csvOf('1340,새사람,01022223333'), existing, new Map()).added.map(
+    (r) => r.employeeNo,
+  ),
+  ['1340'],
+)
 
 // 창 한 줄 설명: 이유 코드가 있으면 그 문장, 없으면 상태 코드별 설명
 assert.equal(

@@ -12,7 +12,7 @@ import {
   type CustomerAddress,
   type Member,
 } from '@/features/company/api/companyApi'
-import { isPhone, phoneDigits } from '@/features/company/csvMembers'
+import { phoneDigits, phoneError } from '@/features/company/csvMembers'
 import { errorText } from '@/features/company/labels'
 
 type Role = Member['membership']['role']
@@ -141,11 +141,10 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
         ? `이미 있는 사번입니다 (${sameNo.customer.name}). 정보를 바꾸려면 [수정]을 눌러 주세요.`
         : undefined,
       phone:
-        form.phone && !isPhone(digits)
-          ? '전화번호 형식이 맞지 않습니다.'
-          : samePhone
-            ? `${samePhone.customer.name}(사번 ${samePhone.membership.employeeNo}) 님이 쓰는 번호입니다.`
-            : undefined,
+        (form.phone && phoneError(digits)) ||
+        (samePhone
+          ? `${samePhone.customer.name}(사번 ${samePhone.membership.employeeNo}) 님이 쓰는 번호입니다.`
+          : undefined),
       detail: detailWithoutRoad ? '주소를 먼저 검색해 골라 주세요.' : undefined,
     },
     // 대표자 지정 · 주소 번호 찾기 실패는 우리가 만든 문장(Error), 서버 오류는 설명으로 바꿈
@@ -163,7 +162,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     canSubmit:
       no !== '' &&
       form.name.trim() !== '' &&
-      isPhone(digits) &&
+      phoneError(digits) === null &&
       !sameNo &&
       !samePhone &&
       !detailWithoutRoad &&
