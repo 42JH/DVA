@@ -19,6 +19,10 @@ export const fmtLongDay = (day: Ymd) =>
 export const fmtMonthDay = (day: Ymd) =>
   `${Number(day.slice(5, 7))}월 ${Number(day.slice(8, 10))}일`
 
+/** 표 줄 앞 시각 '오후 3:02' — 날은 머리줄 · 표 왼쪽 날짜가 보여 줌 (11/06 시안 03 주문 · 04 통화 · 09 미답변 같은 형식) */
+export const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+
 /** 날짜별 목록 줄 시각: 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40' (04 통화 · 03 주문) */
 export function fmtRowTime(iso: string, today: Ymd): string {
   const d = new Date(iso)

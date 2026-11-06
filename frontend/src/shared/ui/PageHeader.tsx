@@ -40,7 +40,7 @@ export function TopBar({
     >
       <div className="flex min-w-0 items-center">
         {crumbs && (
-          <Crumbs items={crumbs} className={`min-w-0 truncate ${wide ? 'text-card' : ''}`} />
+          <Crumbs items={crumbs} className={`min-w-0 truncate ${wide ? 'text-card!' : ''}`} />
         )}
         {lead && <div className="-mr-2 ml-auto shrink-0">{lead}</div>}
       </div>
