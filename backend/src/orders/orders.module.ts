@@ -16,6 +16,9 @@ import { OrganizationsModule } from '../organizations/organizations.module';
 import { OrderMaintenanceWorker } from './order-maintenance.worker';
 import { DeliveriesModule } from '../deliveries/deliveries.module';
 import { OrderSubmissionService } from './order-submission.service';
+import { ParcelDraftsController } from './parcel-drafts.controller';
+import { ParcelDraftsService } from './parcel-drafts.service';
+import { ParcelDraftsRepository } from './parcel-drafts.repository';
 
 @Module({
   imports: [
@@ -26,7 +29,12 @@ import { OrderSubmissionService } from './order-submission.service';
     OrganizationsModule,
     DeliveriesModule,
   ],
-  controllers: [OrdersController, OrderAddressesController, AdminOrdersController],
+  controllers: [
+    OrdersController,
+    OrderAddressesController,
+    AdminOrdersController,
+    ParcelDraftsController,
+  ],
   providers: [
     OrdersRepository,
     OrdersService,
@@ -36,6 +44,8 @@ import { OrderSubmissionService } from './order-submission.service';
     OrderPaymentsRepository,
     OrderPaymentsService,
     OrderMaintenanceWorker,
+    ParcelDraftsService,
+    ParcelDraftsRepository,
   ],
   exports: [OrderPaymentsService],
 })

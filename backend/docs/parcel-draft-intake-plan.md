@@ -32,3 +32,7 @@
 - 시작 기준: origin/develop-backend 5c10eed, feature/parcel-draft-intake. 기존 작업 트리 변경 없음.
 
 - 1단계 검증: 임시 PostgreSQL 17에서 055 이관·실패 롤백·원본 시각/버전 보존·논리 참조 원본 삭제 후 스냅샷 보존 1개 통과. 배포 스키마 회귀 21개 통과. 초기 테스트 접속/필수 상태 fixture 오류는 보완 후 재검증했다. 운영 적용 없음.
+
+- 2단계 계획: 기존 ParcelInputDto·주문 필수 검증·통합 응답/페이지네이션을 재사용한다. AI Bearer와 통화 고객을 확인하고, 초안/통화 잠금 및 expectedVersion으로 수정·재개를 원자 처리한다. READY 수정은 START_EDIT가 선행하며 영향 필드를 지운다. 생성 키 재전송·버전 충돌·동시 재개·삭제된 원본 보존·권한을 실제 HTTP/DB에서 검증한다.
+
+- 2단계 검증: build·변경 TS lint·format 통과. 임시 PostgreSQL+실제 HTTP 11개 통과(생성/재전송/부분 수정/동시 수정/통화·고객 권한/종료 후 정리/동시 재개/원본 삭제 후 조회). DTO의 undefined가 기존 수집값을 덮는 회귀를 발견해 생략 필드를 제외하는 병합으로 수정 후 재검증했다.

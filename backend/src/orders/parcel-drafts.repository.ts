@@ -1,0 +1,138 @@
+import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
+import { readPage } from '../common/pagination-query';
+import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
+import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
+
+const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",
+ created_by_admin_user_seq AS "createdByAdminUserSeq",client_parcel_id AS "clientParcelId",creation_payload AS "creationPayload",
+ parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_parcel_seq AS "orderParcelSeq",
+ legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
+ created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
+const available = `deleted_at IS NULL AND retention_started_at>statement_timestamp()-interval '5 years'`;
+
+@Injectable()
+export class ParcelDraftsRepository {
+  async call(client: PoolClient, id: number, update = true) {
+    return (
+      await client.query<OrderIntakeCall>(
+        `SELECT call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",
+      ended_at AS "endedAt",order_seq AS "orderSeq",order_intake_enabled AS enabled,order_intake_version AS "intakeVersion",
+      order_completion_received_at AS "completionReceivedAt",order_completion_payload AS "completionPayload",
+      order_finalized_at AS "finalizedAt",order_finalization_result AS "finalizationResult",order_finalization_error_code AS "errorCode"
+      FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL
+       AND incoming_at>statement_timestamp()-interval '5 years' FOR ${update ? 'UPDATE' : 'SHARE'}`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async customer(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query(
+        "SELECT 1 FROM customers WHERE customer_seq=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE",
+        [id],
+      )
+    ).rowCount;
+  }
+
+  async draft(client: PoolClient, id: number, update = false) {
+    return (
+      await client.query<ParcelDraftRow>(
+        `SELECT ${columns} FROM order_parcel_drafts WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE' : ''}`,
+        [id],
+      )
+    ).rows[0];
+  }
+
+  async byClientId(client: PoolClient, callId: number | null, key: string) {
+    return (
+      await client.query<ParcelDraftRow & { unavailable: boolean }>(
+        `SELECT ${columns},NOT(${available}) AS unavailable
+      FROM order_parcel_drafts WHERE call_session_seq IS NOT DISTINCT FROM $1::int AND client_parcel_id=$2::uuid FOR UPDATE`,
+        [callId, key],
+      )
+    ).rows[0];
+  }
+
+  async list(
+    client: PoolClient,
+    query: ParcelDraftQueryDto,
+    customerId: number | null,
+    endedCallId: number | null,
+  ) {
+    return readPage<Omit<ParcelDraftRow, 'creationPayload'>>(
+      client,
+      `SELECT ${columns.replace(',creation_payload AS "creationPayload"', '')}
+      FROM order_parcel_drafts WHERE ${available}
+       AND ($1::int IS NULL OR customer_seq=$1) AND ($2::text='ALL' OR status=$2)
+       AND ($3::int IS NULL OR call_session_seq=$3) AND ($4::int IS NULL OR call_session_seq=$4)
+       AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
+        parcel_data->'origin'->>'name',parcel_data->'origin'->>'phoneNumber',parcel_data->'origin'->>'roadAddress',parcel_data->'origin'->>'jibunAddress',
+        parcel_data->'destination'->>'name',parcel_data->'destination'->>'phoneNumber',parcel_data->'destination'->>'roadAddress',parcel_data->'destination'->>'jibunAddress'),NFC)),lower(normalize($5,NFC)))>0)`,
+      [
+        customerId,
+        query.status,
+        query.callSessionSeq ?? null,
+        endedCallId,
+        query.q?.trim() || null,
+      ],
+      query,
+      '"createdAt" DESC,"draftSeq" DESC',
+    );
+  }
+
+  async insert(
+    client: PoolClient,
+    input: {
+      callId: number | null;
+      customerId: number;
+      adminId: number | null;
+      key: string;
+      payload: Record<string, unknown>;
+      parcel: ParcelDraftRow['parcel'];
+      status: 'READY' | 'EDITING';
+      source?: ParcelDraftRow;
+    },
+  ) {
+    const id = (
+      await client.query<{ id: number }>(
+        `INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,retention_started_at)
+      VALUES($1,$2,$3,$4::uuid,$5::jsonb,$6::jsonb,$7,$8,COALESCE($9::timestamptz,clock_timestamp())) RETURNING draft_seq AS id`,
+        [
+          input.callId,
+          input.customerId,
+          input.adminId,
+          input.key,
+          JSON.stringify(input.payload),
+          JSON.stringify(input.parcel),
+          input.status,
+          input.source?.draftSeq ?? null,
+          input.source?.retentionStartedAt ?? null,
+        ],
+      )
+    ).rows[0].id;
+    return (await this.draft(client, id))!;
+  }
+
+  async update(
+    client: PoolClient,
+    id: number,
+    parcel: ParcelDraftRow['parcel'],
+    status: ParcelDraftRow['status'],
+  ) {
+    await client.query(
+      `UPDATE order_parcel_drafts SET parcel_data=$2::jsonb,status=$3,version=version+1,updated_at=clock_timestamp() WHERE draft_seq=$1`,
+      [id, JSON.stringify(parcel), status],
+    );
+  }
+
+  async bumpCall(client: PoolClient, id: number): Promise<number> {
+    return (
+      await client.query<{ version: number }>(
+        'UPDATE call_sessions SET order_intake_version=order_intake_version+1 WHERE call_session_seq=$1 RETURNING order_intake_version AS version',
+        [id],
+      )
+    ).rows[0].version;
+  }
+}
