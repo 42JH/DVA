@@ -1,4 +1,7 @@
+import { randomBytes } from 'node:crypto';
+const developmentSecurityLogKey = randomBytes(32).toString('hex');
 export interface Environment {
+  SECURITY_LOG_HMAC_KEY: string;
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
   AI_BUSINESS_TOKEN?: string;
@@ -114,7 +117,19 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   )
     errors.push('AI_FAQ_TOKEN');
   if (faqToken && !aiUrl) errors.push('AI_AGENT_URL');
+  const securityLogKey = raw.SECURITY_LOG_HMAC_KEY;
+  if (
+    (nodeEnv === 'production' && !securityLogKey) ||
+    (securityLogKey !== undefined &&
+      securityLogKey !== '' &&
+      (typeof securityLogKey !== 'string' || !/^[a-fA-F0-9]{64}$/.test(securityLogKey)))
+  )
+    errors.push('SECURITY_LOG_HMAC_KEY');
   const config: Environment = {
+    SECURITY_LOG_HMAC_KEY:
+      typeof securityLogKey === 'string' && securityLogKey
+        ? securityLogKey
+        : developmentSecurityLogKey,
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     AI_BUSINESS_TOKEN:
       typeof businessToken === 'string' && businessToken ? businessToken : undefined,

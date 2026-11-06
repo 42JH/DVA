@@ -130,22 +130,23 @@ def rollout(service):
 
 
 def ensure_service_auth_secret(service):
-    if service not in ('customer', 'consultation'):
+    if service not in ('customer', 'consultation', 'security-logs'):
         raise ValueError('Unsupported service authentication secret')
-    name = f'msa-{service}-auth'
-    key = f'{service}-token'
+    name = 'msa-security-logs' if service == 'security-logs' else f'msa-{service}-auth'
+    key = 'hmac-key' if service == 'security-logs' else f'{service}-token'
+    pattern = r'[a-fA-F0-9]{64}' if service == 'security-logs' else r'[\x21-\x7e]{32,256}'
     try:
         existing = kube('-n', 'dva', 'get', 'secret', name, '--ignore-not-found', '-o', 'json')
         if existing.strip():
             value = json.loads(existing)
             token = base64.b64decode(value['data'][key], validate=True).decode('ascii')
-            if value['metadata']['name'] != name or value['metadata']['namespace'] != 'dva' or not re.fullmatch(r'[\x21-\x7e]{32,256}', token):
+            if value['metadata']['name'] != name or value['metadata']['namespace'] != 'dva' or not re.fullmatch(pattern, token):
                 raise ValueError('Invalid existing service authentication secret')
             return
         kube('create', '-f', '-', data=json.dumps({
             'apiVersion': 'v1', 'kind': 'Secret', 'type': 'Opaque',
             'metadata': {'name': name, 'namespace': 'dva'},
-            'stringData': {key: secrets.token_urlsafe(48)},
+            'stringData': {key: secrets.token_hex(32) if service == 'security-logs' else secrets.token_urlsafe(48)},
         }))
     except Exception:
         raise RuntimeError(f'{service.capitalize()} authentication secret is unavailable; existing values were not replaced') from None
@@ -155,8 +156,9 @@ def apply_release(service, release, image):
     desired = parse_resources(kube("apply", "--dry-run=server", "-f", "k8s.yaml", "-o", "json"))
     validate_resources(desired, service, image)
     container = next(r for r in desired if r['kind'] == 'Deployment')['spec']['template']['spec']['containers'][0]
-    for peer in ('customer', 'consultation'):
-        if any(e.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == f'msa-{peer}-auth' for e in container.get('env', [])):
+    for peer in ('customer', 'consultation', 'security-logs'):
+        secret_name = 'msa-security-logs' if peer == 'security-logs' else f'msa-{peer}-auth'
+        if any(e.get('valueFrom', {}).get('secretKeyRef', {}).get('name') == secret_name for e in container.get('env', [])):
             ensure_service_auth_secret(peer)
     previous = []
     for resource in desired:

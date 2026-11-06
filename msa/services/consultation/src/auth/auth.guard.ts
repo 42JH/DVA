@@ -20,6 +20,7 @@ import {
 } from '../audit/audit-operation';
 import type { AuditActorType } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticationType } from '../observability/security-events';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 export const Roles = (...roles: AdminRole[]) =>
@@ -29,6 +30,7 @@ export type AuthRequest = Request & {
   admin: AdminPublic;
   sessionToken: string;
   auditActorType?: AuditActorType;
+  securityAuthType?: AuthenticationType;
 };
 export function readSessionToken(request: Request): string | undefined {
   const values = (request.headers.cookie ?? '')
@@ -115,7 +117,9 @@ export class AuthGuard implements CanActivate {
         throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
     }
     request.sessionToken = readSessionToken(request) ?? '';
+    request.securityAuthType = 'admin_session';
     request.admin = await this.auth.authenticate(request.sessionToken);
+    delete request.securityAuthType;
     const roles = this.reflector.getAllAndOverride<AdminRole[]>(
       'auth:roles',
       targets,

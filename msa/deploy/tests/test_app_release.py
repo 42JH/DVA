@@ -173,6 +173,34 @@ class DeliveryPlanTests(unittest.TestCase):
 
 
 class ReleaseRecoveryTests(unittest.TestCase):
+    def test_manifest_hmac_secret_is_provisioned_before_any_rollout(self):
+        desired=deployment('a'*40)
+        desired['spec']['template']['spec']['containers'][0]['env']=[{'name':'SECURITY_LOG_HMAC_KEY','valueFrom':{'secretKeyRef':{'name':'msa-security-logs','key':'hmac-key'}}}]
+        service={'apiVersion':'v1','kind':'Service','metadata':{'name':'customer','namespace':'dva'},'spec':{'ports':[{'name':'http','port':3001}]}}
+        with patch.object(release,'kube',side_effect=[json.dumps({'kind':'List','items':[desired,service]}),RuntimeError('stop before rollout')]), patch.object(release,'ensure_service_auth_secret') as ensure:
+            with self.assertRaisesRegex(RuntimeError,'stop before rollout'):
+                release.apply_release('customer','b'*40+'-1','old')
+            ensure.assert_called_once_with('security-logs')
+
+    def test_security_hmac_key_is_created_once_and_invalid_values_are_never_replaced(self):
+        with patch.object(release, 'kube', side_effect=['', 'created']) as kube:
+            release.ensure_service_auth_secret('security-logs')
+            value=json.loads(kube.call_args_list[1].kwargs['data'])
+            token=value['stringData']['hmac-key']
+            self.assertRegex(token,r'^[a-f0-9]{64}$')
+            self.assertNotIn(token,' '.join(kube.call_args_list[1].args))
+            self.assertEqual(value['metadata'],{'name':'msa-security-logs','namespace':'dva'})
+        for token in [token,'private-invalid']:
+            existing={'metadata':value['metadata'],'data':{'hmac-key':base64.b64encode(token.encode()).decode()}}
+            with patch.object(release,'kube',return_value=json.dumps(existing)) as kube:
+                if token=='private-invalid':
+                    with self.assertRaisesRegex(RuntimeError,'not replaced') as raised:
+                        release.ensure_service_auth_secret('security-logs')
+                    self.assertNotIn(token,str(raised.exception))
+                else:
+                    release.ensure_service_auth_secret('security-logs')
+                self.assertEqual(kube.call_count,1)
+
     def test_consultation_auth_secret_created_and_preserved(self):
         with patch.object(release, 'kube', side_effect=['', 'created']) as kube:
             release.ensure_service_auth_secret('consultation')

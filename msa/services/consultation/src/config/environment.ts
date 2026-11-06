@@ -1,4 +1,8 @@
+import { randomBytes } from 'node:crypto';
+const developmentSecurityLogKey = randomBytes(32).toString('hex');
 export interface Environment {
+  AUTH_PROXY_HOPS: number;
+  SECURITY_LOG_HMAC_KEY: string;
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
   DB_HOST: string;
@@ -92,7 +96,24 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   ) {
     errors.push('PBX_WEBHOOK_TOKEN');
   }
+  const authProxyHops = raw.AUTH_PROXY_HOPS ?? '0';
+  if (typeof authProxyHops !== 'string' || !/^[012]$/.test(authProxyHops))
+    errors.push('AUTH_PROXY_HOPS');
+  const securityLogKey = raw.SECURITY_LOG_HMAC_KEY;
+  if (
+    (nodeEnv === 'production' && !securityLogKey) ||
+    (securityLogKey !== undefined &&
+      securityLogKey !== '' &&
+      (typeof securityLogKey !== 'string' ||
+        !/^[a-fA-F0-9]{64}$/.test(securityLogKey)))
+  )
+    errors.push('SECURITY_LOG_HMAC_KEY');
   const config: Environment = {
+    AUTH_PROXY_HOPS: Number(authProxyHops),
+    SECURITY_LOG_HMAC_KEY:
+      typeof securityLogKey === 'string' && securityLogKey
+        ? securityLogKey
+        : developmentSecurityLogKey,
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3004),
     DB_HOST: required('DB_HOST'),

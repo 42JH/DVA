@@ -1,10 +1,13 @@
 import { LoggerService } from '@nestjs/common';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { isUUID } from 'class-validator';
+import { authenticationReasons, authenticationTypes } from './security-events';
 
 export const logContext = new AsyncLocalStorage<{ requestId: string }>();
 const events = new Set([
   'http_request',
+  'authentication_success',
+  'authentication_failure',
   'request_failed',
   'audit_write_failed',
   'recording_processing_failed',
@@ -53,7 +56,7 @@ export function logRecord(
       : {};
   const record: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
-    service: 'customer',
+    service: 'consultation',
     environment:
       process.env.NODE_ENV === 'production' ? 'production' : 'development',
     level,
@@ -109,8 +112,26 @@ export function logRecord(
     record.route = value.route;
   if (typeof value.outcome === 'string' && outcomes.has(value.outcome))
     record.outcome = value.outcome;
-  if (typeof value.reason === 'string' && reasons.has(value.reason))
+  const authentication = [
+    'authentication_success',
+    'authentication_failure',
+  ].includes(String(record.event));
+  if (
+    typeof value.reason === 'string' &&
+    (reasons.has(value.reason) ||
+      (authentication && authenticationReasons.has(value.reason)))
+  )
     record.reason = value.reason;
+  if (authentication) {
+    if (
+      typeof value.authType === 'string' &&
+      authenticationTypes.has(value.authType)
+    )
+      record.authType = value.authType;
+    for (const key of ['accountKey', 'sourceKey'])
+      if (typeof value[key] === 'string' && /^[a-f0-9]{64}$/.test(value[key]))
+        record[key] = value[key];
+  }
   if (typeof value.receipt === 'string' && /^[a-f0-9]{64}$/.test(value.receipt))
     record.receipt = value.receipt;
   return record;

@@ -11,7 +11,12 @@ import { type Environment } from './config/environment';
 
 export function configureApplication(app: INestApplication, logger = new Logger('Http')): void {
   const config = app.get<ConfigService<Environment, true>>(ConfigService);
-  app.use(requestContext(logger));
+  app.use(
+    requestContext(logger, {
+      key: config.get('SECURITY_LOG_HMAC_KEY', { infer: true }),
+      proxyHops: config.get('AUTH_PROXY_HOPS', { infer: true }),
+    }),
+  );
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use('/internal/call-scope', (request: Request, response: Response, next: NextFunction) => {

@@ -119,6 +119,7 @@ def main():
         if db_services:
             app.ensure_service_auth_secret('customer')
             app.ensure_service_auth_secret('consultation')
+            app.ensure_service_auth_secret('security-logs')
             tokens = {peer: base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-' + peer + '-auth', '-o', 'json'))['data'][peer + '-token']).decode('ascii') for peer in ('customer', 'consultation')}
         if service in ('customer', 'consultation'):
             operations = network + '-operations-app'

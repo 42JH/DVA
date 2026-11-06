@@ -29,7 +29,12 @@ export function configureApplication(
       request.url = request.url.slice(4);
     next();
   });
-  app.use(requestContext(logger));
+  app.use(
+    requestContext(logger, {
+      key: config.get('SECURITY_LOG_HMAC_KEY', { infer: true }),
+      proxyHops: config.get('AUTH_PROXY_HOPS', { infer: true }),
+    }),
+  );
   const scopeParser = json({ limit: '256kb' });
   // Keep Nest's default public parser; only the authenticated internal envelope needs extra space.
   app.use(

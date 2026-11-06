@@ -56,6 +56,7 @@ export class AiSettingsGuard implements CanActivate {
       request.admin?.role === 'SYSTEM_ADMIN'
     )
       return true;
+    request.securityAuthType = 'ai_persona';
     const expected = this.config.get('AI_PERSONA_TOKEN', { infer: true });
     if (!expected)
       throw new ApiException(
@@ -75,6 +76,7 @@ export class AiSettingsGuard implements CanActivate {
         createHash('sha256').update(expected).digest(),
       );
     if (!valid) throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 서비스 인증이 필요합니다.');
+    delete request.securityAuthType;
     request.auditActorType = 'AI';
     return true;
   }
