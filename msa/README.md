@@ -6,6 +6,8 @@
 
 [Jenkins #29 복구 및 최신 계약 동기화](../docs/msa-build-29-fix.md)는 새 관리자 사원 검색, 인증 제한·AI 업무 Bearer와 기업 PIN 퇴역을 포함한다. 프론트·AI 요청은 최신 backend와 같은 형식을 사용한다.
 
+[통화 최종 분석·이탈 단계·응답 대기시간 3개 API](../docs/msa-call-analysis-plan.md)를 consultation에 연결했다. 실제 페르소나 버전은 operations 조회 이벤트와 감사 확정에 연결한 FK 참조로 보호한다. 공개 Ingress는 기존 `/api/ai/calls`를 그대로 사용하고 새 토큰을 만들지 않으며 기존 AI_INSIGHTS_TOKEN을 consultation-runtime에 주입한다. 전체 상담 조회/발화·주문·FAQ·보관 워커는 후속 MR이다.
+
 Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.io`의 k3s에 배포한다. 모놀리식 `backend/`와 루트 `Jenkinsfile`은 별개다.
 
 현재 5개 서비스 DB의 Liquibase CI/CD와 customer·order·delivery·consultation·operations NestJS 서비스의 테스트·이미지 빌드·k3s 배포를 지원한다. **develop-backend Push Webhook은 변경된 앱의 CI부터 CD까지 자동 실행한다.** 앱 배포용 체크박스를 매번 켤 필요가 없다. DB changeset도 같은 실행에서 자동 적용한 뒤 앱을 배포한다. 별도 배포 체크박스나 승인 입력은 없다.

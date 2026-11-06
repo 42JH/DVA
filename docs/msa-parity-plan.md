@@ -2,6 +2,8 @@
 
 현재 동기화 기준은 develop-backend `ce8de44`이며 96개 선언과 원본 053까지 검사한다. [Jenkins #29 복구 계획·검증](msa-build-29-fix.md)을 따른다. 아래 단계별 수치·기준 커밋은 해당 단계 당시의 기록이다.
 
+`e20b7b34`(MR !321 병합) 이후 [통화 분석·이탈 단계·응답 대기시간 이식](msa-call-analysis-plan.md)을 진행한다. backend tree는 `c19c5594540415c579b00eee1917df1cbd954a93`로 동일하다. 이번 범위는 AI POST 3개, consultation 005·operations 008 및 기존 이벤트 감사 절차의 실제 버전 참조다.
+
 Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
 기준은 `develop-backend`의 `6a141a0512b73837905f6154c4ff84bcf33f912b`이다. 최신 모놀리식의 코드·테스트·migration 052까지를 계약으로 삼는다. 기존 MSA 설계 문서의 결제 미지원·자동 재접수 미지원 등 과거 정책은 최신 모놀리식과 다른 부분을 구현 근거로 사용하지 않는다.

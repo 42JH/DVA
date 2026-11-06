@@ -85,8 +85,15 @@ def main():
                    '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                    '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
-                   command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs', *(['test/caller-context.integration.test.cjs', 'test/customers.integration.test.cjs', 'test/pins.integration.test.cjs'] if side == 'monolith' else [])))
-            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs', *([ROOT/'backend/test/caller-context.integration.test.cjs', ROOT/'backend/test/customers.integration.test.cjs', ROOT/'backend/test/pins.integration.test.cjs'] if side == 'monolith' else [])):
+                   command=('node', *(['--require', './test/analysis-environment-fixture.cjs'] if side == 'consultation' else []),
+                            '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs',
+                            'test/call-analysis.test.cjs', 'test/call-dashboard-metrics.test.cjs',
+                            *(['test/caller-context.integration.test.cjs', 'test/customers.integration.test.cjs', 'test/pins.integration.test.cjs',
+                               'test/call-analysis.integration.test.cjs', 'test/call-dashboard-metrics.integration.test.cjs'] if side == 'monolith' else [])))
+            for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs',
+                           ROOT/'backend/test/call-analysis.test.cjs', ROOT/'backend/test/call-dashboard-metrics.test.cjs',
+                           *([ROOT/'backend/test/caller-context.integration.test.cjs', ROOT/'backend/test/customers.integration.test.cjs', ROOT/'backend/test/pins.integration.test.cjs',
+                              ROOT/'backend/test/call-analysis.integration.test.cjs', ROOT/'backend/test/call-dashboard-metrics.integration.test.cjs'] if side == 'monolith' else [ROOT/'msa/parity/analysis-environment-fixture.cjs'])):
                 target = '/app/test/' if side == 'monolith' else '/app/service/test/'
                 run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
             complete(name)
@@ -97,7 +104,7 @@ def main():
                        '-e', 'NODE_ENV='+environment, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
                        '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
-                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
+                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
                        '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                        '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                        '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
@@ -111,6 +118,14 @@ def main():
                command=('node', '--test', 'test/consultation-pbx.test.cjs'))
         for source in (ROOT/'msa/parity/consultation-pbx.test.cjs', LOGS/'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
+        complete(name)
+        name = RUN+'-call-analysis'
+        create(name, images['consultation-checks'], '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'PGPASSWORD='+password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+               '-e', 'CUSTOMER_AUTH_TOKEN='+password,
+               command=('node', '--test', 'test/call-analysis-parity.test.cjs'))
+        for source in (ROOT/'msa/parity/call-analysis-parity.test.cjs', ROOT/'msa/parity/analysis-claimant.cjs'):
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='analysis-copy-'+source.name)
         complete(name)
         # Keep production PBX/SSE distinct from foreground context checks without the
         # monolith's still-unported monthly order/billing maintenance worker.
