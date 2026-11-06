@@ -45,6 +45,8 @@ class FakeDecisions:
             answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
         if "origin" in names:
             answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
+        if "resume" in names:
+            answers.append(choice("resume", "yes" if said[:1] in "예네" else "no" if "새로" in said else "not_answer"))
         if "more" in names:
             answers.append(choice("more", "no_more" if "없어요" in said else "not_answer"))
         if "switch" in names:

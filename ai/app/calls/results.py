@@ -20,7 +20,7 @@ from app.domain.outcome import decide_outcome
 from app.domain.store import hold_unclassified_items
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
-from app.integrations.backend.mapping import submit_body, to_order
+from app.integrations.backend.mapping import resume_patch, submit_body, to_order
 from app.persistence.outbox import Outbox
 
 log = logging.getLogger(__name__)
@@ -174,6 +174,8 @@ class ResultService:
         return t
 
     async def submit(self, s: CallSession, on_result=None) -> dict | None:
+        if s.state.resume_version is not None:  # 이어받은 주문에 연결된 통화: 새 주문(POST)은 BE가 거절한다(409)
+            return await self._submit_resumed(s, on_result)
         row = await asyncio.to_thread(self.outbox.result, s.call_id)
         if row is None:
             reg = s.tools.ops.get("register")
@@ -202,6 +204,52 @@ class ResultService:
             s.note("결과", str(data.get("status")))
             if on_result:
                 await on_result(s, data)
+        return data
+
+    async def _submit_resumed(self, s: CallSession, on_result=None) -> dict | None:
+        """이어받은 미완료 주문 보완(B/order-update.md) → 다 갖췄으면 확정(B/order-submit.md, 진행 중 통화만).
+        끊긴 뒤에는 PATCH만 된다(연결된 주문에 마저 저장). CANCELLED면 이어받은 상세만 취소한다.
+        shortcut: 아웃박스·재시작 복구·409 재조회가 없다 — 2단계(사용자 결정 2026-11-06 단계별 구현)."""
+        st, api = s.state, self.backend.api
+        async with s.lock:
+            if s.rt and s.rt.customer_turns:
+                turn = s.rt.customer_turns[-1]
+                hold_unclassified_items(st, self.policy.parcel_items, turn.utterance_id, turn.text)
+            outcome = decide_outcome(st, self.policy, datetime.now(timezone.utc), self.fare_of)
+            cand, version, seq = st.resume, st.resume_version, st.customer.call_session_seq
+            body = resume_patch(outcome, cand, version) if outcome.kind not in (None, "CANCELLED") else None
+            st.bump()
+        s.note("결과 본문", f"이어받기 order={cand.order_seq} {outcome.kind} {','.join(outcome.reasons) or ''}")
+        data = {"orderSeq": cand.order_seq, "status": "COLLECTING"}
+        try:
+            if outcome.kind == "CANCELLED":
+                r = await self.backend.write("resume_cancel", api.cancel_parcels, seq, cand.order_seq, [cand.parcel_seq])
+                if r == "ok" and not cand.other_fares:
+                    data["status"] = "CANCELLED"
+            elif body and len(body) > 1:  # expectedVersion만 있으면 BE 400 — 바꿀 값이 있을 때만
+                version = await self.backend.write("resume_save", api.patch_order, seq, cand.order_seq, body)
+                st.resume_version = version
+                if outcome.kind == "COMPLETE" and "totalAmount" in body:
+                    done = await self.backend.write("resume_submit", api.submit_order, seq, cand.order_seq, version,
+                                                    budget_sec=self.submit_budget_sec)
+                    data["status"] = done.get("status")
+                    if data["status"] == "ACCEPTED":
+                        try:  # 접수번호 안내용(없어도 결과는 그대로)
+                            detail = await self.backend.read("resume_detail", api.order_detail, seq, cand.order_seq)
+                            data["parcelNo"] = (detail or {}).get("parcelNo")
+                        except BackendFailure as e:
+                            s.note("접수번호 조회 실패", e.code)
+        except BackendFailure as e:
+            log.error("이어받기 결과 %s %s", s.call_id, e)
+            s.note("이어받기 결과 실패", e.code)
+            return None
+        if data["status"] in SAVED:
+            s.tools.ops["resume_result"] = {"status": "done", "parcels": len(outcome.parcels) + len(cand.other_fares)}
+        st.result_accepted = data["status"] == "ACCEPTED"
+        s.result = data
+        s.note("결과", str(data["status"]))
+        if on_result:
+            await on_result(s, data)
         return data
 
     async def _send(self, row: dict) -> dict | None:
@@ -416,7 +464,8 @@ class ResultService:
         events = [{"eventId": str(uuid.uuid5(NAMESPACE, f"{s.call_id}:{i}")), "eventOrder": i, "kind": kind,
                    "occurredAt": _iso(ts), "offsetSeconds": off(ts), "payload": payload}
                   for i, (ts, kind, payload) in enumerate(rows, 1)]
-        submitted = _parcel_count(self.outbox, s.call_id) if data.get("status") in SAVED else 0
+        submitted = (_parcel_count(self.outbox, s.call_id) or s.tools.ops.get("resume_result", {}).get("parcels", 0)
+                     if data.get("status") in SAVED else 0)
         analysis = {
             "providerCallId": s.call_id, "startedAt": _iso(started), "endedAt": _iso(now),
             "aiPersonaVersionSeq": s.persona_version_seq,           # 서버 기본 프롬프트면 null(BE가 ACTIVE로 채우지 않음)

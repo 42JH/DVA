@@ -926,3 +926,12 @@
 - 브랜치 `fix/lookup-other-customer`. `lookup_orders`에 `other_customer`(다른 전화번호·다른 사람이 접수한 택배를 찾으면 true) — true면 BE를 부르지 않고 `rejected`·`ORDER_OTHER_CUSTOMER`·`scope`(안내 문구). 모든 조회 결과(0건·1건·여러 건)에 `scope`(지금 전화한 번호로 접수된 택배만)를 실어 본인 주문을 다른 번호의 결과처럼 말하지 않게. policy/ 안의 시스템 프롬프트는 고치지 않는다(사용자 지시). 도구 설명·인수 설명(코드, Live 'Backend tools'·Backend 함수 스키마에 렌더링)은 허용 범위라 같은 범위 문구로 바꿈.
 - 고객 범위 자체는 그대로 BE 헤더(call_session_seq)가 강제한다(외부 계약 변경 없음).
 - 테스트: 도구 단위 1개 추가(다른 고객 거절·상태 불변·남의 주문 안 보임·범위 사실). app·monitor·backend_client 487 passed, 3 failed(로컬 address.db 스키마 — 이전과 같음). 실통화 미확인: 모델이 `other_customer`를 실제로 켜는지, '김일 님이 접수한 거'처럼 접수자를 이름으로만 말할 때(번호 언급 없음)는 false로 불러 0건 + scope로 안내될 수 있음.
+
+## 2026-11-06 — 미완료 주문 이어받기 1단계
+
+- 사용자 결정: 끊긴 통화의 미완료(COLLECTING) 주문은 주문 `createdAt`부터 일주일 안이면(처음 1시간 → 같은 날 일주일로 연장, `[call] resume_window_sec`) 이어받기를 먼저 묻는다. 기한은 묻는 시점에 판정하고 확정은 넘겨도 마무리. 가장 최근 미취소 상세 1건만 불러와 빠진 항목을 묻고 되읽기로 접수 여부를 확인. 다시 끊겨도 기준은 처음 `createdAt`. BE 확인: 이전 통화 주문 PATCH 가능, 미등록 고객은 고객이 없어 대상 아님, 서비스 토큰 불필요.
+- 흐름: 등록 고객 통화 등록 뒤 `GET /api/orders?status=COLLECTING&limit=1` → 상세(백그라운드). 접수 의도 때 최대 `resume_wait_sec`(1.5초) 기다려 출발지 질문보다 먼저 `resume_confirm`. Decision `resume` yes → 같은 값 PATCH(결제 방식 → 수거 시각 → clientComment)로 통화 연결 → 불러오기(Source.HISTORY, geo 없는 주소는 다시 받음) → 빠진 항목 없으면 바로 되읽기. no·연결 실패 → 새 접수(출발지 단계).
+- 결과: 연결된 통화는 POST /api/orders 대신 PATCH(기존 상세 수정 시 수량 4종·기타 물품 명시, 합계는 같은 주문 다른 상세 배송비까지 다 알 때만) → COMPLETE면 submit. 끊긴 뒤엔 PATCH만. CANCELLED면 이어받은 상세만 취소.
+- 파일: backend_client/api.py·mock.py, app/domain/resume.py(신규)·state.py, app/integrations/backend/mapping.py, app/calls/live.py·results.py, app/policy/model.py·render.py, policy/workflow.toml(resume_confirm·resume 결과, decision.resume), app/config.py, config/server.toml, docs/contracts/be-api.md §9.
+- 테스트: app/tests/test_resume.py 10개(후보·기한 경계·묻기 조건·불러오기·BE 본문·경로·통화 E2E 예/끊김/거절/기한 초과). 전체 699 passed, 3 failed(로컬 data/address.db 스키마가 오래된 환경 문제 — 기반 브랜치에서도 같은 3건).
+- 2단계(미구현): 아웃박스·재시작 복구, 409 VERSION_CONFLICT 재조회, 연결 PATCH 응답 유실 시 상세 재조회. 미확인: 실제 BE에서 같은 값 PATCH로 연결되는지, 끊긴 뒤 PATCH 허용, Live가 resume_confirm 문구를 따르는지(실통화).

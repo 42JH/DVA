@@ -166,6 +166,56 @@ def result_body(outcome: str, call: dict, customer_seq: int | None, customer_nam
     return body
 
 
+def detail_order(parcel: dict) -> Order:
+    """주문 상세의 parcels[] 하나 → Order(B/order-read.md). 없는 값은 None. 좌표는 계약에 없다."""
+    out: dict = {}
+    for role, side in (("sender", "origin"), ("receiver", "destination")):
+        a = parcel.get(side) or {}
+        out |= {f"{role}_name": a.get("name"), f"{role}_phone": a.get("phoneNumber"),
+                f"{role}_address": a.get("roadAddress"), f"{role}_address_detail": a.get("detailAddress")}
+        if all(a.get(k) not in (None, "") for k in ("jibunAddress", "dongName", "postalCode")):
+            out[f"{role}_geo"] = Geo(jibun_address=a["jibunAddress"], dong_name=a["dongName"],
+                                     postal_code=a["postalCode"])
+    out |= {f: parcel.get(_camel(f)) or None for f in COUNT_FIELDS}
+    return Order(**out, other_item=parcel.get("otherItemDescription") or None, item_price=parcel.get("itemPrice"),
+                 client_comment=parcel.get("clientComment") or None)
+
+
+def link_body(version: int, detail: dict, order_parcel_seq: int) -> dict:
+    """이어받기 동의 직후 통화를 주문에 연결하는 PATCH. 변경값이 하나 필요해 기존 값을 그대로 다시 저장한다
+    (같은 값도 저장·버전 증가, B/order-update.md): 결제 방식 → 수거 시각 → 그 상세의 요청사항(항상 문자열) 순."""
+    body: dict = {"expectedVersion": version}
+    if detail.get("paymentMethodType"):
+        return body | {"paymentMethodType": detail["paymentMethodType"]}
+    if detail.get("pickupRequestedAt"):
+        return body | {"pickupRequestedAt": detail["pickupRequestedAt"]}
+    parcel = next(p for p in detail["parcels"] if p["orderParcelSeq"] == order_parcel_seq)
+    return body | {"parcels": [{"orderParcelSeq": order_parcel_seq, "clientComment": parcel.get("clientComment") or ""}]}
+
+
+def resume_body(version: int, parcels: list[tuple[Order, int | None, int | None]], payment: str | None,
+                pickup_at: str | None, total: int | None) -> dict:
+    """이어받은 주문 보완 PATCH. parcels = (택배, 배송비, 기존 상세 번호|None=새 상세).
+    기존 상세는 수량 4종·기타 물품을 0·빈 문자열까지 명시한다(생략하면 이전 값이 남는다)."""
+    body: dict = {"expectedVersion": version}
+    out = []
+    for order, fare, seq in parcels:
+        p = parcel_body(order, fare)
+        if seq is not None:
+            p |= {_camel(f): getattr(order, f) or 0 for f in COUNT_FIELDS}
+            p |= {"otherItemDescription": order.other_item or "", "orderParcelSeq": seq}
+        out.append(p)
+    if out:
+        body["parcels"] = out
+    if payment:
+        body["paymentMethodType"] = payment
+    if pickup_at:
+        body["pickupRequestedAt"] = pickup_at
+    if total is not None:
+        body["totalAmount"] = total
+    return body
+
+
 def _parcels(detail: dict) -> list[dict]:
     """주문 상세 → 조회·취소(C 흐름)가 쓰는 택배 단위. status는 취소한 상세면 CANCELLED, 아니면 주문 상태."""
     out = []
@@ -359,6 +409,33 @@ class BackendAPI:
         if result is None:
             raise _fail("/api/orders/{id}/parcels/cancel", resp)
         return result
+
+    # --- 미완료 주문 이어받기(B/order-update.md ORD-04, B/order-submit.md ORD-06) ---
+
+    async def collecting_orders(self, call_session_seq: int, limit: int) -> list[dict]:
+        """통화 고객의 미완료(COLLECTING) 주문 목록, createdAt 최근 것부터(목록 data 그대로)."""
+        resp = await self.http.get("/api/orders", params={"status": "COLLECTING", "limit": limit},
+                                   headers=_call(call_session_seq))
+        if resp.status_code != 200:
+            raise _fail("/api/orders", resp)
+        return resp.json().get("data") or []
+
+    async def patch_order(self, call_session_seq: int, order_seq: int, body: dict) -> int:
+        """미완료 주문 보완. body = {expectedVersion, ...변경}. 저장 뒤 실제 version(+1로 계산하지 않는다).
+        진행 중 미연결 통화면 이 저장으로 통화가 주문에 연결된다. 409(버전·상태 충돌)는 BackendError."""
+        resp = await self.http.patch(f"/api/orders/{int(order_seq)}", json=body, headers=_call(call_session_seq))
+        if resp.status_code != 200:
+            raise _fail("/api/orders/{id}", resp)
+        return _data(resp)["version"]
+
+    async def submit_order(self, call_session_seq: int, order_seq: int, expected_version: int) -> dict:
+        """미완료 주문 최종 확정(진행 중 통화만). data = {status}(200 notPaid·PAID·ACCEPTED·SUBMISSION_FAILED, 202 SUBMITTING).
+        HTTP 200만으로 접수 성공이라 하지 않는다 — status로 본다."""
+        resp = await self.http.post(f"/api/orders/{int(order_seq)}/submit", json={"expectedVersion": expected_version},
+                                    headers=_call(call_session_seq))
+        if resp.status_code not in (200, 202):
+            raise _fail("/api/orders/{id}/submit", resp)
+        return _data(resp)
 
     async def submit_result(self, body: dict, idempotency_key: str) -> dict:
         """통화 결과 한 번. 결과가 불확실하면(연결 실패·504·202·409 처리 중) 같은 키·같은 본문으로 다시 확인한다.

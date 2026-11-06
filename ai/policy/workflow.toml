@@ -230,6 +230,8 @@ confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
 origin = "발송 주소. prefilled = 기존 정보로 보내는 분 성함·주소·상세를 채웠다(다시 묻지 않고 저장된 상세주소는 읽지 않는다). name_only = 성함만 채웠으므로 발송 주소를 묻는다"
 origin_confirm = "기존 출발지를 쓸지 '{그 주소}에서 발송하시나요?'라고 한 번 묻는다"
+resume_confirm = "직전 통화에서 끝내지 못한 접수가 있다. receiver_name이 있으면 '아까 {받는 분} 님께 보내시던 택배 접수를 이어서 진행할까요?', 없으면 '아까 접수하시던 택배를 이어서 진행할까요?'라고 한 번 묻는다. 다른 질문(출발지 등)은 답을 들은 뒤에 한다"
+resume = "이어받기 결과. loaded = 이전 접수 내용을 불러왔다 — readback이 오면 그대로 되읽어 확인받고, 아니면 missing의 첫 항목만 묻는다(불러온 값은 다시 묻지 않는다). declined = 새로 접수한다. unavailable = 이전 접수를 불러오지 못했다고 짧게 말하고 새로 접수한다"
 order = "통화 결과(주문) 상태. ACCEPTED만 접수 완료(parcelNo가 있으면 접수번호로 안내), pending·notPaid나 그 밖은 '접수 내용은 담당자가 확인 후 안내드린다'로 마무리한다. 접수 완료라고 단정하지 않는다"
 submitted = "order가 submitted면 접수가 이미 넘어가 이 통화에서는 택배를 고치거나 더 담을 수 없다. 바꿨다·담았다고 말하지 않고, 변경은 담당자가 확인 후 연락드린다고 안내한다"
 
@@ -263,6 +265,12 @@ name = "callback"
 type = "choice"
 choices = ["yes", "no", "not_answer"]
 instructions = "직전 AI 발화가 상담원 대신 담당자가 나중에 연락드려도 되는지 물었고 고객이 답했으면 고른다: 좋다=yes, 싫다=no. 답이 아니면 not_answer."
+
+[[decision.resume.questions]]
+name = "resume"
+type = "choice"
+choices = ["yes", "no", "not_answer"]
+instructions = "직전 AI 발화가 이전에 하던 택배 접수를 이어서 진행할지 물었고 고객이 답했으면 고른다: 이어서 한다·네·그거요=yes, 새로 한다·아니요·다른 거예요=no. 그 질문의 답이 아니면 not_answer."
 
 [[decision.origin.questions]]
 name = "origin"

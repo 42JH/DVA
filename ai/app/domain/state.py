@@ -96,6 +96,7 @@ class ParcelDraft:
     receiver_geo: Geo | None = None
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
+    order_parcel_seq: int | None = None   # 이어받은 미완료 주문의 기존 상세 번호(PATCH 때 그 상세를 고친다)
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
@@ -124,6 +125,19 @@ class PendingConfirmation:
     issued_t: float                       # 발급 시각(서버 시계). 되읽기 발화가 이 뒤에 시작돼야 한다(G3)
     parcel_id: str | None = None          # 담은 택배를 수정 중이면 그 택배
     done: bool = False
+
+
+@dataclass(frozen=True)
+class ResumeCandidate:
+    """이어받을 미완료 주문(가장 최근 상세 1건). 값은 도메인 스냅샷 모양(draft_snapshot), BE 이름은 mapping에만."""
+    order_seq: int
+    version: int
+    created_at: str                       # 주문 생성 시각(ISO, BE). 이어받기 기한의 기준(사용자 결정 2026-11-06)
+    parcel_seq: int
+    parcel: dict                          # 필드 값 + sender_geo·receiver_geo·client_comment
+    other_fares: tuple[int | None, ...] = ()  # 같은 주문의 다른 미취소 상세 배송비(합계용, 대화에는 불러오지 않음)
+    payment: str | None = None
+    pickup_at: str | None = None
 
 
 @dataclass
@@ -169,6 +183,10 @@ class ConversationState:
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
+    resume: ResumeCandidate | None = None  # 이어받을 미완료 주문(찾았고 아직 거절되지 않음)
+    resume_offered: bool = False           # 이어받을지 물음
+    resume_answer: bool | None = None      # 이어받기 = True, 새로 = False
+    resume_version: int | None = None      # 연결(PATCH) 뒤 주문 version. 있으면 이 통화는 그 주문에 연결됨
     _next_parcel: int = 1
 
     # --- 변경(잠금 안에서만) ---
@@ -244,6 +262,8 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
     """택배의 현재 VALID 값(되읽기·확인·전송의 단위). geo·요청사항 포함, 상태·버전은 뺀다."""
     out = {name: f.value for name, f in draft.fields.items() if f.valid}
     out |= {"sender_geo": draft.sender_geo, "receiver_geo": draft.receiver_geo, "client_comment": draft.client_comment}
+    if draft.order_parcel_seq is not None:  # 이어받은 상세: 전송 때 같은 상세를 고친다(되읽기에는 쓰지 않음)
+        out["order_parcel_seq"] = draft.order_parcel_seq
     return out
 
 

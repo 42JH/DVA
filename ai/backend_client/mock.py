@@ -4,6 +4,8 @@
 BackendAPI의 공개 메서드는 모두 같은 이름으로 둔다(새 API를 붙이면 여기도, backend_client/tests/test_mock.py가 검사).
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
+import copy
+from datetime import datetime, timezone
 import itertools
 import unicodedata
 
@@ -39,6 +41,7 @@ class MockBackend:
         self.unanswered: dict[str, dict] = {}  # eventId → {seq, body}
         # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
+        self.linked: dict[int, int] = {}  # callSessionSeq → PATCH로 연결된 주문
         self.insights_enabled = True
         self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
         self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
@@ -156,12 +159,17 @@ class MockBackend:
             self.recent[phone] = recent
         return seq
 
-    def add_order(self, phone: str, status: str, receivers: list[tuple[str, str]]) -> int:
-        """받는 분(이름, 도로명주소)마다 상세 하나인 주문. 주문 번호를 돌려준다."""
+    def add_order(self, phone: str, status: str, receivers: list[tuple[str, str]], parcels: list[dict] | None = None,
+                  created_at: str | None = None, payment: str | None = None, total: int | None = None) -> int:
+        """받는 분(이름, 도로명주소)마다 상세 하나인 주문, 또는 parcels(BE 상세 모양) 그대로. 주문 번호를 돌려준다."""
         seq = next(self._seq)
-        self.orders.append({"orderSeq": seq, "phone": phone, "status": status, "parcels": [
-            {"orderParcelSeq": next(self._seq), "status": "ACTIVE", "destination": {"name": n, "roadAddress": a}}
-            for n, a in receivers]})
+        if parcels is None:
+            parcels = [{"destination": {"name": n, "roadAddress": a}} for n, a in receivers]
+        self.orders.append({"orderSeq": seq, "phone": phone, "status": status, "version": 1, "paymentMethodType": payment,
+                            "pickupRequestedAt": None, "totalAmount": total, "parcelNo": None,
+                            "createdAt": created_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            "parcels": [{"orderParcelSeq": next(self._seq), "status": "ACTIVE", **copy.deepcopy(p)}
+                                        for p in parcels]})
         return seq
 
     # --- 고객 확인 ---
@@ -250,7 +258,68 @@ class MockBackend:
 
     async def order_detail(self, call_session_seq, order_seq):
         order = self._order(call_session_seq, order_seq)
-        return {k: v for k, v in order.items() if k != "phone"} if order else None
+        return copy.deepcopy({k: v for k, v in order.items() if k != "phone"}) if order else None
+
+    # --- 미완료 주문 이어받기(B/order-update.md·order-submit.md) ---
+
+    async def collecting_orders(self, call_session_seq, limit):
+        phone = self._phone(call_session_seq)
+        mine = sorted((o for o in self.orders if o["phone"] == phone and o["status"] == "COLLECTING"),
+                      key=lambda o: (o["createdAt"], o["orderSeq"]), reverse=True)[:limit]
+        return [{"orderSeq": o["orderSeq"], "status": o["status"], "createdAt": o["createdAt"]} for o in mine]
+
+    def _editable(self, call_session_seq, order_seq, version, path):
+        order = self._order(call_session_seq, order_seq)
+        if order is None:
+            raise BackendError(f"{path} 404 NOT_FOUND", 404, "NOT_FOUND")
+        if order["status"] != "COLLECTING":
+            raise BackendError(f"{path} 409 INVALID_STATE", 409, "INVALID_STATE")
+        if order["version"] != version:
+            raise BackendError(f"{path} 409 VERSION_CONFLICT", 409, "VERSION_CONFLICT")
+        linked = self.linked.get(call_session_seq)
+        if linked not in (None, order_seq):  # 통화에 다른 주문이 연결됨
+            raise BackendError(f"{path} 409 INVALID_STATE", 409, "INVALID_STATE")
+        return order
+
+    async def patch_order(self, call_session_seq, order_seq, body):
+        order = self._editable(call_session_seq, order_seq, body.get("expectedVersion"), "/api/orders/{id}")
+        changes = {k: v for k, v in body.items() if k != "expectedVersion"}
+        if not changes or "parcels" in changes and not changes["parcels"]:
+            raise BackendError("/api/orders/{id} 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
+        _no_coordinates("/api/orders/{id}", *(p.get(side) for p in changes.get("parcels", [])
+                                               for side in ("origin", "destination") if p.get(side)))
+        for change in changes.get("parcels", []):
+            seq = change.get("orderParcelSeq")
+            if seq is None:
+                order["parcels"].append({"orderParcelSeq": next(self._seq), "status": "ACTIVE", **copy.deepcopy(change)})
+                continue
+            parcel = next((x for x in order["parcels"] if x["orderParcelSeq"] == seq), None)
+            if parcel is None:
+                raise BackendError("/api/orders/{id} 404 NOT_FOUND", 404, "NOT_FOUND")
+            for k, v in change.items():
+                if k in ("origin", "destination"):
+                    parcel[k] = {**(parcel.get(k) or {}), **v}  # 제공한 주소 하위 필드만 바꾼다
+                else:
+                    parcel[k] = v
+        for k in ("paymentMethodType", "pickupRequestedAt", "totalAmount"):
+            if k in changes:
+                order[k] = changes[k]
+        order["version"] += 1
+        self.linked[call_session_seq] = order_seq  # 진행 중 미연결 통화는 PATCH로 연결
+        return order["version"]
+
+    async def submit_order(self, call_session_seq, order_seq, expected_version):
+        order = self._editable(call_session_seq, order_seq, expected_version, "/api/orders/{id}/submit")
+        active = [x for x in order["parcels"] if x["status"] != "CANCELLED"]
+        _check_complete({"customerSeq": 0, "paymentMethodType": order["paymentMethodType"], "parcels": active,
+                         "totalAmount": order["totalAmount"]})
+        if order["paymentMethodType"] not in self.payment_methods.get(order["phone"], []):
+            raise BackendError("/api/orders/{id}/submit 403 FORBIDDEN", 403, "FORBIDDEN")
+        order["status"] = "notPaid" if order["paymentMethodType"] == "billing" else self.dver_status
+        order["version"] += 1
+        if order["status"] == "ACCEPTED":
+            order["parcelNo"] = "TEST0001"
+        return {"status": order["status"]}
 
     async def parcel(self, call_session_seq, order_seq, order_parcel_seq):
         detail = await self.order_detail(call_session_seq, order_seq)
@@ -292,9 +361,8 @@ class MockBackend:
             status = "notPaid" if body["paymentMethodType"] == "billing" else self.dver_status
         else:
             status = {"INCOMPLETE": "COLLECTING", "CANCELLED": "CANCELLED"}[body["outcome"]]
-        order_seq = self.add_order(call["callerPhoneNumber"], status,
-                                   [(p.get("destination", {}).get("name"), p.get("destination", {}).get("roadAddress"))
-                                    for p in body.get("parcels", [])])
+        order_seq = self.add_order(call["callerPhoneNumber"], status, [], parcels=body.get("parcels", []),
+                                   payment=body.get("paymentMethodType"), total=body.get("totalAmount"))
         data = {"orderSeq": order_seq, "version": 1, "status": status, "totalAmount": body.get("totalAmount"),
                 "callSessionSeq": next(self._seq), "parcelNo": "TEST0001" if status == "ACCEPTED" else None,
                 "paymentRequest": None}

@@ -221,12 +221,15 @@
 - COMPLETE 전송 후 끊겨도 INCOMPLETE/CANCELLED를 따로 보내지 않음.
 - COMPLETE 필수: 고객, 결제 방식, 택배 ≥1, 택배마다 주소 필수 필드, 수량>0 또는 기타 물품, 물품 가액, 양의 배송비, 합계 일치. 배송비는 AI 요금표(`[fare]`)로 계산, 모르면 INCOMPLETE(`A/backend-api.md` §3) — 요금표는 원본 그대로 `config/server.toml` `[fare]`, 계산 `app/domain/fare.py`(2026-11-03 이관).
 
-## 9. `PATCH /api/orders/{orderSeq}`, `POST /api/orders/{orderSeq}/submit` — 미사용(계약만)
+## 9. `PATCH /api/orders/{orderSeq}`, `POST /api/orders/{orderSeq}/submit` — 미완료 주문 이어받기
 
 근거: `B/order-update.md`, `B/order-submit.md`
 - PATCH: `call_session_seq`, `{expectedVersion, ...변경}`, AI는 COLLECTING만. 200 `{data:{version}}`. 409 `VERSION_CONFLICT`/`INVALID_STATE`/`REQUEST_IN_PROGRESS`, 422 `VALIDATION_FAILED`.
 - submit: `{expectedVersion}` → 200/202 `{status}`.
-- 현 흐름(통화 끝 1회 전송)에서는 사용하지 않음. 코드 `update_order`는 **BE에 없는 옛 경로** `POST /internal/ai/orders/{no}/update`(`api.py:427-433`).
+- 이어받기(2026-11-06, 1단계): 등록 고객의 통화 등록 뒤 `GET /api/orders?status=COLLECTING&limit=1` → 상세. `createdAt`부터 일주일(`[call] resume_window_sec`) 안이면 먼저 묻고, 예면 같은 값 PATCH(결제 방식 → 수거 시각 → 그 상세의 clientComment)로 통화를 주문에 연결. 가장 최근 미취소 상세 1건만 불러온다.
+- 연결된 통화는 새 주문(`POST /api/orders`)을 만들 수 없으므로 결과는 PATCH(기존 상세 `orderParcelSeq` 수정·새 상세 추가, 수량 4종 명시) → COMPLETE이고 합계를 알면 submit. 끊긴 뒤에는 PATCH만(submit은 진행 중 통화만). CANCELLED면 이어받은 상세만 취소 API. 코드: `api.py` `collecting_orders`·`patch_order`·`submit_order`·`link_body`·`resume_body`, `mapping.py` `resume_candidate`·`resume_patch`, `results.py` `_submit_resumed`.
+- 2단계 미구현: 아웃박스·재시작 복구, 409 VERSION_CONFLICT 재조회, 연결 PATCH 응답 유실 확인.
+- 코드 `update_order`는 **BE에 없는 옛 경로** `POST /internal/ai/orders/{no}/update`.
 
 ## 10. `POST /api/ai/calls/{callSessionSeq}/events` — 통화 이벤트
 
