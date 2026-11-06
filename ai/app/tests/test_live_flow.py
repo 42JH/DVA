@@ -793,3 +793,57 @@ def test_cancel_target_carries_status_meaning():
     from app.calls.live import _order_facts
     facts = _order_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})
     assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전"}
+
+
+def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
+    """관제·통화 기록: Decision 입력·답 확률, 위임 메타, Backend 출력 문장·추론 요약, 도구 인수(dict)·결과, 전달 원문."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요, 디바콜입니다.", 0)
+        await say(conn, "택배 보내려고요", 1000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1", "target": "responses"},
+                   "offset_ms": 2100})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.created"}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "reasoning", "summary": [
+                {"type": "summary_text", "text": "보내는 분 성함을 기록한다"}]}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                          "name": "record_fields",
+                                                          "arguments": json.dumps({"sender_name": "김철수"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "message", "content": [
+                {"type": "output_text", "text": "김철수 님으로 적었습니다."}]}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.completed", "response": {"status": "completed", "usage": {"total_tokens": 42}}}})
+        await until(lambda: s.tool_calls and s.tool_calls[0]["done_at"])
+        await until(lambda: any(e["kind"] == "전달 N2" for e in s.events))
+
+        by = {}
+        for e in s.events:
+            by.setdefault(e["kind"], []).append(e)
+        dec = by["Decision"][0]["data"]
+        assert "고객 발화: 택배 보내려고요" in dec["input"] and dec["answers"]["task"]["choice"] == "order"
+        assert dec["answers"]["task"]["probabilities"] == {"order": 0.97}
+        assert by["위임 시작"][0]["data"]["target"] == "responses"
+        assert by["위임 시작"][0]["data"]["last_customer"].strip() == "택배 보내려고요"
+        assert by["Backend 추론 요약"][0]["text"] == "보내는 분 성함을 기록한다"
+        assert by["Backend 출력"][0]["text"] == "김철수 님으로 적었습니다."
+        assert by["함수 호출 도착"][0]["data"]["arguments"] == {"sender_name": "김철수"}
+        assert by["Backend 응답 끝"][0]["data"]["usage"] == {"total_tokens": 42}
+        tool = s.tool_calls[0]
+        assert tool["args"] == {"sender_name": "김철수"} and tool["delegation"] == "d1" and tool["call_id"] == "call_1"
+        assert tool["output"]["status"] and isinstance(by["전달 N2"][0]["data"]["content"], dict)
+        snap = s.snapshot()
+        assert snap["transcript"][0]["t"] and any("data" in e for e in snap["events"])
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())

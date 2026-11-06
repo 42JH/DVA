@@ -34,6 +34,7 @@ ENDED = (Phase.CLOSING, Phase.CLOSED, Phase.FAILED, Phase.FINALIZING, Phase.DONE
 # BE 호출 op → 대시보드 processType(고객 조회 1·2단계·등록 후 재확인, 통화 종료 뒤 결과 전송)
 BACKEND_LATENCY = {"caller_context": "CUSTOMER_LOOKUP", "caller_context2": "CUSTOMER_LOOKUP",
                    "caller_context3": "CUSTOMER_LOOKUP", "submit": "ORDER_SAVE"}
+EVENTS_KEPT = 3000  # 통화 기록에 남기는 사건 수(관제 스냅샷은 최근 400개만 보낸다)
 
 
 @dataclass
@@ -56,7 +57,7 @@ class CallSession:
     last_input_t: float = 0.0
     last_output_t: float = 0.0
     last_output_end_ms: int = 0       # 출력 전사의 세션 타임라인 끝(오디오 재생 끝 추정용)
-    events: list[dict] = field(default_factory=list)   # 관제용 사건(개인정보 값 없음)
+    events: list[dict] = field(default_factory=list)   # 관제·통화 기록 사건(data: Decision 입출력·Backend 출력·전달 원문 — 개인정보 포함)
     send_seq: int = 0
     rt: Any = None                    # S5 통화 중 흐름 상태(app/calls/live.py Runtime)
     transcript: list[dict] = field(default_factory=list)  # 관제·통화 기록(개인정보: 관제는 인증, 기록은 logs/)
@@ -108,9 +109,13 @@ class CallSession:
         if (t := self.timers.pop(name, None)) is not None:
             t.cancel()
 
-    def note(self, kind: str, text: str = "") -> None:
-        self.events.append({"at": time.time(), "kind": kind, "text": text})
-        del self.events[:-200]
+    def note(self, kind: str, text: str = "", data: dict | None = None) -> None:
+        """사건 1건. data는 관제에서 펼쳐 보는 상세(통화 기록에도 그대로 남는다)."""
+        e = {"at": time.time(), "kind": kind, "text": text}
+        if data is not None:
+            e["data"] = data
+        self.events.append(e)
+        del self.events[:-EVENTS_KEPT]
         self.changed()
 
     def changed(self) -> None:
@@ -186,8 +191,8 @@ class CallSession:
                   "trace_id": self.trace_id}
         return {"session_id": self.call_id, "caller": mask_phone(self.caller), "started_at": self.started_t,
                 "status": self.phase.value, "stage": a.stage, "end_reason": self.close_reason,
-                "transcript": [{"speaker": r["speaker"], "text": r["text"]} for r in self.transcript],
-                "tool_calls": self.tool_calls[-50:], "events": self.events[-200:],
+                "transcript": [{"speaker": r["speaker"], "text": r["text"], "t": r.get("t")} for r in self.transcript],
+                "tool_calls": self.tool_calls[-80:], "events": self.events[-400:],
                 "backend_calls": self.backend_calls[-100:], "latency": _latency_table(self.timings),
                 "errors": [{"at": e["at"], "message": e["text"]} for e in self.events if e["kind"] == "오류"],
                 "detail": detail}
