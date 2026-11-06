@@ -60,6 +60,9 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
       m.membership.membershipSeq !== target?.membership.membershipSeq,
   )
   const detailWithoutRoad = form.detail.trim() !== '' && road === '' // 상세주소만 있으면 저장할 주소가 없음
+  // 주소 필수 — CSV 추가와 같은 규칙 · 상단바 사원 검색(DIR-01)이 주소 있는 사원만 찾음 (11/06).
+  // 수정에서 원래 주소가 있으면 road가 그 주소라 통과, 없으면 새로 골라야 함
+  const noAddress = road === ''
 
   const save = useMutation({
     mutationFn: async (): Promise<'ok' | 'addressFailed'> => {
@@ -154,6 +157,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     addressFailMessage: addressFail
       ? `사원은 저장됐지만 주소 저장에 실패했습니다. ${errorText(retry.error ?? addressFail.error, '저장')}`
       : null,
+    addressHint: noAddress ? '주소를 검색해서 골라 주세요.' : null, // [추가/저장]이 꺼진 이유
     retryAddress: () => retry.mutate(),
     retrying: retry.isPending,
     canSubmit:
@@ -163,6 +167,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
       !sameNo &&
       !samePhone &&
       !detailWithoutRoad &&
+      !noAddress &&
       changed && // 수정에서 아무것도 안 바꿨으면 [저장] 꺼짐 (11/01 결정)
       !addressFail && // 사원은 이미 저장됨 → 주소 재시도 · 닫기만
       !save.isPending,

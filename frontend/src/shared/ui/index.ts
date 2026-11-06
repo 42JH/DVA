@@ -14,7 +14,7 @@ export {
   type Option,
 } from './filters'
 export { Pagination } from './Pagination'
-export { Table, TwoLines, type Column } from './Table'
+export { Table, TwoLines, Fold, type Column } from './Table'
 export { COL } from './tableCols'
 export { ListPage, FilterBar } from './ListPage'
 export { ConfirmDialog, Dialog, FormModal, Overlay } from './Modal'

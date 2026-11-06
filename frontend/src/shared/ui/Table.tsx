@@ -183,7 +183,7 @@ export function Table<Row>({
                   {/* 펼침 띠는 내용이 있을 때만 SubRow를 붙이고, 닫히면 떼어 냄 → 퇴장 애니메이션이 돎 */}
                   {(() => {
                     const sub = subRows?.(row, { tinted, gridCols })
-                    return sub ? <SubRow>{sub}</SubRow> : null
+                    return sub ? <Fold>{sub}</Fold> : null
                   })()}
                 </li>
               )
@@ -197,9 +197,10 @@ export function Table<Row>({
 }
 
 const SUB_SWAP = [['motion-safe:animate-expand', 'animate-collapse']] as const
-/** 줄 아래 펼침 띠(09 답변) — 열릴 때 높이가 0 → 내용만큼 자라고(grid 1fr), 닫힐 때 복제본이 접혀 사라짐 (11/01)
+/** 펼침 띠 — 열릴 때 높이가 0 → 내용만큼 자라고(grid 1fr), 닫힐 때 복제본이 접혀 사라짐 (11/01)
+ *  표 줄 아래 띠 · 09 FAQ 답변 펼침 · 추가 · 수정 칸이 같이 씀 (11/06 사용자: 눌렀을 때 효과 통일). 조건부로 붙였다 떼면 됨
  *  overflow-y-clip: 세로만 자름 — 띠가 -mx-4 로 좌우로 나오는 건 그대로 */
-function SubRow({ children }: { children: ReactNode }) {
+export function Fold({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   useExitGhost(ref, SUB_SWAP, 200)
   return (
