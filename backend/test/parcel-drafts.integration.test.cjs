@@ -353,3 +353,178 @@ test('admin reads retain text and reference IDs after customer/call physical del
   );
   await f.error(await f.get('/api/parcel-drafts/' + draft.draftSeq), 404, 'NOT_FOUND');
 });
+
+test('unregistered callers keep partial drafts, cannot claim READY and can resume only their own ended call after registration', async () => {
+  const phone = '01023334444';
+  const unknownCall = async (number) =>
+    (
+      await f.pool.query(
+        'INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at) VALUES($1,$2,clock_timestamp()) RETURNING call_session_seq',
+        [randomUUID(), number],
+      )
+    ).rows[0].call_session_seq;
+  const id = await unknownCall(phone);
+  const saved = await createDraft(
+    body({ status: 'EDITING', parcel: { origin: { roadAddress: '미등록 보존 주소' } } }),
+    id,
+  );
+  assert.equal(saved.customerSeq, null);
+  assert.equal(saved.callerPhoneNumber, phone);
+  await f.error(
+    await patch(
+      saved,
+      { expectedVersion: 1, action: 'SAVE', status: 'READY', parcel: parcel() },
+      id,
+    ),
+    403,
+    'FORBIDDEN',
+  );
+  await endCall(id);
+  const seal = await f.write(
+    'POST',
+    `/api/calls/${id}/order-intake/complete`,
+    { expectedIntakeVersion: saved.intakeVersion },
+    0,
+    headers(id),
+  );
+  assert.equal((await data(seal, 200)).status, 'NO_ORDER');
+  const foreign = await unknownCall('01023335555');
+  await f.error(
+    await f.get('/api/parcel-drafts/' + saved.draftSeq, 0, headers(foreign)),
+    404,
+    'NOT_FOUND',
+  );
+  assert.deepEqual(
+    (await (await f.get('/api/parcel-drafts', 0, headers(foreign))).json()).data,
+    [],
+  );
+  await f.pool.query('DELETE FROM call_sessions WHERE call_session_seq=$1', [id]);
+  assert.equal(
+    (await data(await f.get('/api/parcel-drafts/' + saved.draftSeq), 200)).callerPhoneNumber,
+    phone,
+  );
+  const registered = await data(
+    await f.write(
+      'POST',
+      '/api/customers',
+      {
+        name: '나중 등록',
+        phoneNumber: phone,
+        address: {
+          roadAddress: '등록로',
+          jibunAddress: '등록동',
+          dongName: '등록동',
+          postalCode: '01234',
+        },
+      },
+      0,
+      headers(id),
+    ),
+    201,
+  );
+  const next = await unknownCall(phone);
+  const list = await f.get('/api/parcel-drafts', 0, headers(next));
+  assert.ok((await list.json()).data.some((row) => row.draftSeq === saved.draftSeq));
+  const resumed = await createDraft(
+    { clientParcelId: randomUUID(), status: 'EDITING', sourceDraftSeq: saved.draftSeq },
+    next,
+  );
+  assert.equal(resumed.customerSeq, registered.customerSeq);
+  assert.equal(resumed.parcel.origin.roadAddress, '미등록 보존 주소');
+  assert.equal(
+    (
+      await f.pool.query('SELECT customer_seq FROM order_parcel_drafts WHERE draft_seq=$1', [
+        saved.draftSeq,
+      ])
+    ).rows[0].customer_seq,
+    registered.customerSeq,
+  );
+});
+
+test('Swagger describes numeric nullable identities and a complete historical snapshot rather than the input price cap', async () => {
+  const spec = await (await f.get('/api/docs-json')).json();
+  const properties = spec.components.schemas.ParcelDraftResponseDto.properties;
+  for (const field of [
+    'customerSeq',
+    'callSessionSeq',
+    'sourceDraftSeq',
+    'orderSeq',
+    'orderParcelSeq',
+    'intakeVersion',
+  ]) {
+    assert.equal(properties[field].type, 'number', field);
+    assert.equal(properties[field].nullable, true, field);
+  }
+  const snapshot = spec.components.schemas.DraftParcelSnapshotDto;
+  assert.ok(snapshot.required.includes('origin'));
+  assert.ok(snapshot.properties.itemPrice.maximum > 100000000);
+});
+
+test('retired COMPANY references may resume only the unchanged historical address and never authorize a new selection', async () => {
+  await f.error(
+    await create(body({ parcel: { ...parcel(), originPin: { scope: 'COMPANY', pinSeq: 901 } } })),
+    403,
+    'FORBIDDEN',
+  );
+  const oldCall = await callFor();
+  const source = await createDraft(body({ status: 'EDITING' }), oldCall);
+  await endCall(oldCall);
+  await f.pool.query(
+    'UPDATE order_parcel_drafts SET status=\'INCOMPLETE\',parcel_data=jsonb_set(parcel_data,\'{originPin}\',\'{"scope":"COMPANY","pinSeq":901}\') WHERE draft_seq=$1',
+    [source.draftSeq],
+  );
+  const next = await callFor();
+  const resumed = await createDraft(
+    { clientParcelId: randomUUID(), sourceDraftSeq: source.draftSeq, status: 'READY' },
+    next,
+  );
+  assert.deepEqual(resumed.parcel.originPin, { scope: 'COMPANY', pinSeq: 901 });
+  const editing = await data(
+    await patch(
+      resumed,
+      { expectedVersion: 1, action: 'START_EDIT', clearFields: ['items'] },
+      next,
+    ),
+    200,
+  );
+  const saved = await data(
+    await patch(
+      resumed,
+      {
+        expectedVersion: editing.version,
+        action: 'SAVE',
+        status: 'READY',
+        parcel: { smallBoxCount: 2, notifiedPrice: 4000 },
+      },
+      next,
+    ),
+    200,
+  );
+  assert.deepEqual(saved.parcel.originPin, { scope: 'COMPANY', pinSeq: 901 });
+  const addressEdit = await data(
+    await patch(
+      resumed,
+      { expectedVersion: saved.version, action: 'START_EDIT', clearFields: ['origin'] },
+      next,
+    ),
+    200,
+  );
+  await f.error(
+    await patch(
+      resumed,
+      {
+        expectedVersion: addressEdit.version,
+        action: 'SAVE',
+        status: 'READY',
+        parcel: {
+          origin: { ...address, roadAddress: '다른 주소' },
+          originPin: { scope: 'COMPANY', pinSeq: 901 },
+          notifiedPrice: 4000,
+        },
+      },
+      next,
+    ),
+    403,
+    'FORBIDDEN',
+  );
+});

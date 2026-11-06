@@ -11,7 +11,7 @@ import {
   PatchParcelDraftDto,
 } from './dto/parcel-draft.dto';
 import { ParcelInputDto } from './dto/create-order.dto';
-import { orderDraft } from './order-draft';
+import { orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
 import { assertOrderSubmissionReady } from './order-submission.validation';
 import { writeOrder } from './order-write';
 import { OrdersRepository } from './orders.repository';
@@ -79,8 +79,16 @@ export class ParcelDraftsService {
           [id, call.customerSeq],
         );
     }
-    if (call.customerSeq === null || !(await this.repository.customer(client, call.customerSeq)))
-      throw new ApiException(403, 'FORBIDDEN', '통화에 연결된 활성 고객이 필요합니다.');
+    if (
+      !call.callerPhoneNumber ||
+      (call.customerSeq !== null && !(await this.repository.customer(client, call.customerSeq)))
+    )
+      throw new ApiException(403, 'FORBIDDEN', '통화 발신번호와 활성 고객 연결을 확인해 주세요.');
+    if (write && call.customerSeq !== null)
+      await client.query(
+        'UPDATE order_parcel_drafts SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
+        [id, call.customerSeq],
+      );
     if (write && !allowSealed && (call.completionReceivedAt !== null || call.orderSeq !== null))
       throw new ApiException(409, 'INVALID_STATE', '주문 입력이 확정된 통화입니다.');
     return call;
@@ -99,12 +107,21 @@ export class ParcelDraftsService {
   }
 
   private scope(row: ParcelDraftRow, call: OrderIntakeCall | null, write: boolean) {
-    if (
-      call &&
-      (row.customerSeq !== call.customerSeq ||
-        ((write || call.endedAt !== null) && row.callSessionSeq !== call.callSessionSeq))
-    )
-      throw new ApiException(404, 'NOT_FOUND', '초안을 찾을 수 없습니다.');
+    if (call) {
+      const ownCall =
+        row.callSessionSeq === call.callSessionSeq &&
+        (row.customerSeq === null || row.customerSeq === call.customerSeq);
+      const history =
+        !write &&
+        call.endedAt === null &&
+        (row.customerSeq !== null
+          ? row.customerSeq === call.customerSeq
+          : row.status === 'INCOMPLETE' &&
+            row.callerPhoneNumber !== null &&
+            row.callerPhoneNumber === call.callerPhoneNumber);
+      if (!ownCall && !history)
+        throw new ApiException(404, 'NOT_FOUND', '초안을 찾을 수 없습니다.');
+    }
     if (!call && write && row.callSessionSeq !== null)
       throw new ApiException(
         409,
@@ -115,16 +132,26 @@ export class ParcelDraftsService {
 
   private async validate(
     client: PoolClient,
-    customerId: number,
+    customerId: number | null,
     parcel: ParcelDraftRow['parcel'],
     ready: boolean,
+    previous?: ParcelDraftRow['parcel'],
   ) {
+    const historicalCompany =
+      parcel.originPin?.scope === 'COMPANY' &&
+      previous?.originPin?.scope === 'COMPANY' &&
+      parcel.originPin.pinSeq === previous.originPin.pinSeq &&
+      ORDER_ADDRESS_FIELDS.every((field) => parcel.origin[field] === previous.origin[field]);
     if (
       parcel.originPin &&
-      (parcel.originPin.scope !== 'PERSONAL' ||
+      !historicalCompany &&
+      (customerId === null ||
+        parcel.originPin.scope !== 'PERSONAL' ||
         !(await this.orders.canUsePin(client, customerId, parcel.originPin)))
     )
       throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
+    if (ready && customerId === null)
+      throw new ApiException(403, 'FORBIDDEN', 'READY 확정에는 등록된 활성 고객이 필요합니다.');
     if (ready)
       assertOrderSubmissionReady(
         { paymentMethodType: 'billing', pickupRequestedAt: null, parcels: [parcel] },
@@ -167,17 +194,22 @@ export class ParcelDraftsService {
         input.sourceDraftSeq === undefined
           ? undefined
           : await this.repository.draft(client, input.sourceDraftSeq);
-      const customerId = input.customerSeq ?? call?.customerSeq ?? sourceHint?.customerSeq;
-      if (!customerId || (call && customerId !== call.customerSeq))
+      const customerId = call
+        ? call.customerSeq
+        : (input.customerSeq ?? sourceHint?.customerSeq ?? null);
+      if (
+        (call && input.customerSeq !== undefined && input.customerSeq !== call.customerSeq) ||
+        (!call && customerId === null)
+      )
         throw new ApiException(403, 'FORBIDDEN', '통화 고객과 초안 고객이 일치해야 합니다.');
-      if (!(await this.repository.customer(client, customerId)))
+      if (customerId !== null && !(await this.repository.customer(client, customerId)))
         throw new ApiException(404, 'NOT_FOUND', '활성 고객을 찾을 수 없습니다.');
       const payload: Record<string, unknown> = JSON.parse(
         JSON.stringify({
           status: input.status,
           parcel: input.parcel ?? null,
           sourceDraftSeq: input.sourceDraftSeq ?? null,
-          customerSeq: customerId,
+          customerSeq: input.customerSeq ?? null,
         }),
       );
       // Serialize administrator standalone creates too; the row uniqueness remains the final guard.
@@ -207,7 +239,10 @@ export class ParcelDraftsService {
         input.sourceDraftSeq === undefined
           ? undefined
           : await this.repository.draft(client, input.sourceDraftSeq, true);
-      if (input.sourceDraftSeq !== undefined && (!source || source.customerSeq !== customerId))
+      if (
+        input.sourceDraftSeq !== undefined &&
+        (!source || (source.customerSeq !== null && source.customerSeq !== customerId))
+      )
         throw new ApiException(404, 'NOT_FOUND', '재개할 초안을 찾을 수 없습니다.');
       if (
         source &&
@@ -218,14 +253,16 @@ export class ParcelDraftsService {
           'INVALID_STATE',
           '다른 통화에서 미완료로 확정된 초안만 재개할 수 있습니다.',
         );
+      if (source && call) this.scope(source, call, false);
       const parcel = mergeParcel(
         source?.parcel ?? orderDraft({ parcels: [{}] }).parcels[0],
         input.parcel,
       );
-      await this.validate(client, customerId, parcel, input.status === 'READY');
+      await this.validate(client, customerId, parcel, input.status === 'READY', source?.parcel);
       const row = await this.repository.insert(client, {
         callId: call?.callSessionSeq ?? null,
         customerId,
+        callerPhoneNumber: call?.callerPhoneNumber ?? source?.callerPhoneNumber ?? null,
         adminId,
         key: input.clientParcelId,
         payload,
@@ -234,6 +271,11 @@ export class ParcelDraftsService {
         source,
       });
       if (source) {
+        if (source.customerSeq === null && customerId !== null)
+          await client.query('UPDATE order_parcel_drafts SET customer_seq=$2 WHERE draft_seq=$1', [
+            source.draftSeq,
+            customerId,
+          ]);
         await this.repository.update(client, source.draftSeq, source.parcel, 'RESUMED');
         await this.record(client, adminId, source.draftSeq, 'PARCEL_DRAFT_RESUMED', requestId);
       }
@@ -267,7 +309,7 @@ export class ParcelDraftsService {
       const hint = await this.repository.draft(client, id);
       if (!hint) throw new ApiException(404, 'NOT_FOUND', '초안을 찾을 수 없습니다.');
       this.scope(hint, call, true);
-      if (hint.customerSeq === null || !(await this.repository.customer(client, hint.customerSeq)))
+      if (hint.customerSeq !== null && !(await this.repository.customer(client, hint.customerSeq)))
         throw new ApiException(404, 'NOT_FOUND', '활성 고객을 찾을 수 없습니다.');
       const row = (await this.repository.draft(client, id, true))!;
       if (!row) throw new ApiException(404, 'NOT_FOUND', '초안을 찾을 수 없습니다.');
@@ -307,7 +349,7 @@ export class ParcelDraftsService {
           );
         parcel = mergeParcel(row.parcel, input.parcel);
         status = input.status!;
-        await this.validate(client, row.customerSeq!, parcel, status === 'READY');
+        await this.validate(client, row.customerSeq, parcel, status === 'READY', row.parcel);
       } else status = 'CANCELLED';
       await this.repository.update(client, id, parcel, status);
       const intakeVersion = call
@@ -345,6 +387,7 @@ export class ParcelDraftsService {
           query,
           call?.customerSeq ?? query.customerSeq ?? null,
           call?.endedAt ? call.callSessionSeq : null,
+          call,
         ),
         query.limit,
       );

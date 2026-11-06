@@ -240,6 +240,7 @@ BEGIN
     'order_finalized_at','order_finalization_result','order_finalization_error_code','order_finalization_attempted_at'))<>8
   OR to_regclass('public.parcel_draft_source_key') IS NULL
   OR to_regclass('public.parcel_draft_client_key') IS NULL
+  OR to_regclass('public.parcel_draft_unregistered_caller_idx') IS NULL
   OR to_regclass('public.parcel_draft_retention_idx') IS NULL
   OR to_regclass('public.call_order_finalization_idx') IS NULL
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_sessions'::regclass AND conname='call_order_finalization_check') THEN

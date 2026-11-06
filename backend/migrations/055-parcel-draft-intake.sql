@@ -5,6 +5,7 @@ CREATE TABLE order_parcel_drafts (
  draft_seq integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
  call_session_seq integer CHECK (call_session_seq>0),
  customer_seq integer CHECK (customer_seq>0),
+ caller_phone_number text,
  created_by_admin_user_seq integer CHECK (created_by_admin_user_seq>0),
  client_parcel_id uuid NOT NULL,
  creation_payload jsonb NOT NULL CHECK (jsonb_typeof(creation_payload)='object'),
@@ -29,6 +30,7 @@ CREATE UNIQUE INDEX parcel_draft_source_key ON order_parcel_drafts(source_draft_
 CREATE UNIQUE INDEX parcel_draft_converted_key ON order_parcel_drafts(order_parcel_seq) WHERE order_parcel_seq IS NOT NULL;
 CREATE UNIQUE INDEX parcel_draft_legacy_key ON order_parcel_drafts(legacy_order_seq,legacy_order_parcel_seq) NULLS NOT DISTINCT WHERE legacy_order_seq IS NOT NULL;
 CREATE INDEX parcel_draft_customer_idx ON order_parcel_drafts(customer_seq,status,created_at DESC,draft_seq DESC) WHERE deleted_at IS NULL;
+CREATE INDEX parcel_draft_unregistered_caller_idx ON order_parcel_drafts(caller_phone_number,status,created_at DESC,draft_seq DESC) WHERE customer_seq IS NULL AND deleted_at IS NULL;
 CREATE INDEX parcel_draft_created_idx ON order_parcel_drafts(created_at DESC,draft_seq DESC) WHERE deleted_at IS NULL;
 CREATE INDEX parcel_draft_retention_idx ON order_parcel_drafts(retention_started_at,draft_seq);
 
@@ -50,10 +52,10 @@ CREATE INDEX call_order_finalization_idx ON call_sessions(order_finalization_att
  WHERE order_intake_enabled AND order_completion_received_at IS NOT NULL AND order_finalized_at IS NULL AND deleted_at IS NULL;
 
 -- Copy historical partial snapshots; never infer confirmation or charge a legacy order.
-INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,created_by_admin_user_seq,client_parcel_id,
+INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,
  creation_payload,parcel_data,status,legacy_order_seq,legacy_order_parcel_seq,created_at,updated_at,retention_started_at,deleted_at)
 SELECT (SELECT CASE WHEN count(*)=1 THEN min(c.call_session_seq) END FROM call_sessions c WHERE c.order_seq=o.order_seq),
- o.customer_seq,o.created_by_admin_user_seq,gen_random_uuid(),'{}'::jsonb,
+ o.customer_seq,(SELECT CASE WHEN count(*)=1 THEN min(c.caller_phone_number) END FROM call_sessions c WHERE c.order_seq=o.order_seq),o.created_by_admin_user_seq,gen_random_uuid(),'{}'::jsonb,
  jsonb_build_object(
   'origin',jsonb_build_object('name',p.origin_name,'phoneNumber',p.origin_phone_number,'roadAddress',p.origin_road_address,
    'jibunAddress',p.origin_jibun_address,'detailAddress',p.origin_detail_address,'dongName',p.origin_dong_name,'postalCode',p.origin_postal_code),
@@ -74,3 +76,5 @@ COMMENT ON COLUMN order_parcel_drafts.source_draft_seq IS '재개 전 원본 초
 COMMENT ON COLUMN order_parcel_drafts.creation_payload IS '동일 client_parcel_id의 생성 재전송 본문 비교용. 현행 parcel_data와 별도로 보존';
 COMMENT ON COLUMN order_parcel_drafts.retention_started_at IS '최초 생성 기준 5년. 재개 사본은 원본 기준을 상속하며 수정·삭제로 연장하지 않음';
 COMMENT ON COLUMN call_sessions.order_intake_enabled IS '055 이전 통화 false, 이후 등록 true. 신규 AI는 초안·완료 신호 계약 사용';
+
+COMMENT ON COLUMN order_parcel_drafts.caller_phone_number IS '최초 생성 시 확인한 발신번호 사본. 미등록 고객 초안의 조회·재개 범위 확인에 사용하며 원본 통화 삭제와 독립적으로 5년 보관';

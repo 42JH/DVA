@@ -24,6 +24,7 @@ export interface ParcelDraftRow {
   draftSeq: number;
   callSessionSeq: number | null;
   customerSeq: number | null;
+  callerPhoneNumber: string | null;
   createdByAdminUserSeq: number | null;
   clientParcelId: string;
   creationPayload: Record<string, unknown>;

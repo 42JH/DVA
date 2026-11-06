@@ -7,7 +7,7 @@ const { ConfigService } = require('@nestjs/config');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
-const { applicationFixture } = require('./helpers/application.cjs');
+const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
 const f = applicationFixture();
 const marker = () => 'private-call-read-' + randomUUID();
 const phone = () => '010' + randomInt(10000000, 100000000);
@@ -401,22 +401,30 @@ test('inquiries keep the original customer after employee phone updates and neve
   assert.equal(inquiry.analysis.hasComplaint, null);
   assert.equal(Object.hasOwn(inquiry.analysis, 'result'), false);
   const customerSeq = (await registeredLater.json()).data.customerSeq;
-  const finalResult = await f.write(
+  const context = await f.write(
     'POST',
-    '/api/orders',
+    '/api/customers/context',
     {
-      outcome: 'INCOMPLETE',
-      call: {
-        providerCallId: unknown.providerCallId,
-        incomingAt: unknown.incomingAt,
-        callerPhoneNumber: unknownPhone,
-      },
-      customerSeq,
+      phoneNumber: unknownPhone,
+      call: { providerCallId: unknown.providerCallId, incomingAt: unknown.incomingAt },
     },
     0,
-    { Cookie: undefined, 'Idempotency-Key': randomUUID() },
+    { Cookie: undefined, ...businessHeaders() },
   );
-  assert.equal(finalResult.status, 201, await finalResult.clone().text());
+  assert.equal(context.status, 200);
+  // PBX time is separate from the final AI analysis clock.
+  await f.pool.query(
+    "UPDATE call_sessions SET started_at=incoming_at,ended_at=incoming_at+interval '1 minute' WHERE call_session_seq=$1",
+    [unknown.id],
+  );
+  const finalResult = await f.write(
+    'POST',
+    '/api/calls/' + unknown.id + '/order-intake/complete',
+    { expectedIntakeVersion: 1 },
+    0,
+    { Cookie: undefined, ...businessHeaders() },
+  );
+  assert.equal(finalResult.status, 200, await finalResult.clone().text());
   assert.equal((await finalResult.json()).data.status, 'NO_ORDER');
   const linked = (await ok(await detail(unknown), true)).data.call;
   assert.equal(linked.customerSeq, customerSeq);

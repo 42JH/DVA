@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -18,6 +18,7 @@ import {
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { ParcelInputDto } from './create-order.dto';
+import { OrderParcelDto } from './order-response.dto';
 import {
   DRAFT_CLEAR_FIELDS,
   DraftClearField,
@@ -172,25 +173,39 @@ export class ParcelDraftQueryDto extends PaginationQueryDto {
   q?: string;
 }
 
+export class DraftParcelSnapshotDto extends OmitType(OrderParcelDto, [
+  'orderSeq',
+  'orderParcelSeq',
+  'parcelPosition',
+  'status',
+] as const) {}
+
 export class ParcelDraftResponseDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '생성 당시 발신번호 사본. 원본 통화 삭제와 독립적으로 보존.',
+  })
+  callerPhoneNumber!: string | null;
   @ApiProperty() draftSeq!: number;
-  @ApiProperty({ nullable: true }) callSessionSeq!: number | null;
-  @ApiProperty({ nullable: true }) customerSeq!: number | null;
-  @ApiProperty({ nullable: true }) createdByAdminUserSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) callSessionSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) customerSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) createdByAdminUserSeq!: number | null;
   @ApiProperty({ format: 'uuid' }) clientParcelId!: string;
-  @ApiProperty({ type: () => ParcelInputDto }) parcel!: ParcelInputDto;
+  @ApiProperty({ type: () => DraftParcelSnapshotDto }) parcel!: DraftParcelSnapshotDto;
   @ApiProperty({ enum: PARCEL_DRAFT_STATUSES }) status!: ParcelDraftStatus;
   @ApiProperty() version!: number;
   @ApiPropertyOptional({
+    type: Number,
     nullable: true,
     description: '변경 응답의 최신 통화 초안 집합 버전. 관리자 단독 초안은 null.',
   })
   intakeVersion?: number | null;
-  @ApiProperty({ nullable: true }) sourceDraftSeq!: number | null;
-  @ApiProperty({ nullable: true }) orderSeq!: number | null;
-  @ApiProperty({ nullable: true }) orderParcelSeq!: number | null;
-  @ApiProperty({ nullable: true }) legacyOrderSeq!: number | null;
-  @ApiProperty({ nullable: true }) legacyOrderParcelSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) sourceDraftSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) orderSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) orderParcelSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) legacyOrderSeq!: number | null;
+  @ApiProperty({ type: Number, nullable: true }) legacyOrderParcelSeq!: number | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: Date;
   @ApiProperty({ format: 'date-time' }) updatedAt!: Date;
   @ApiProperty({ format: 'date-time' }) retentionStartedAt!: Date;

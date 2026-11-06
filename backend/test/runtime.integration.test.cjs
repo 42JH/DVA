@@ -152,80 +152,98 @@ test('Nginx preserves the admin-only manual order boundary without a service-tok
   assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
 });
 
-test('Nginx forwards an AI consultation result in the JSON body without a call header', async () => {
-  const key = randomUUID();
-  const input = {
-    outcome: 'INCOMPLETE',
-    call: {
-      providerCallId: `runtime-${key}`,
-      callerPhoneNumber: '01099008877',
-      incomingAt: '2026-10-27T01:00:00Z',
-    },
-    parcels: [{ smallBoxCount: 1 }],
+async function draftRuntimeCall(phone) {
+  const c = {
+    phone,
+    providerCallId: 'runtime-draft-' + randomUUID(),
+    incomingAt: new Date(Date.now() - 60000).toISOString(),
   };
+  const registered = await fetch('http://proxy/api/customers/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...businessHeaders() },
+    body: JSON.stringify({
+      phoneNumber: phone,
+      call: { providerCallId: c.providerCallId, incomingAt: c.incomingAt },
+    }),
+  });
+  assert.equal(registered.status, 200, await registered.clone().text());
+  c.id = (await registered.json()).data.callSessionSeq;
+  c.headers = {
+    'Content-Type': 'application/json',
+    ...businessHeaders(),
+    call_session_seq: String(c.id),
+  };
+  return c;
+}
+async function finishRuntimeCall(c, version) {
   const send = () =>
-    fetch('http://proxy/api/orders', {
+    fetch('http://proxy/api/calls/' + c.id + '/order-intake/complete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-      body: JSON.stringify(input),
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
+      body: JSON.stringify({ expectedIntakeVersion: version }),
     });
-  const response = await send();
-  assert.equal(response.status, 201);
-  const { data } = await response.json();
-  assert.equal(data.status, 'COLLECTING');
-  assert.ok(data.orderSeq > 0);
-  assert.ok(data.callSessionSeq > 0);
-  assert.equal(data.paymentRequest, null);
-  assert.deepEqual((await (await send()).json()).data, data);
-});
-
-test('Nginx preserves an empty AI call without an order and replays the same result', async () => {
-  const root = 'http://proxy/api';
-  const key = randomUUID();
-  const input = {
-    outcome: 'INCOMPLETE',
-    call: {
-      providerCallId: `runtime-empty-${key}`,
-      callerPhoneNumber: '01099008878',
-      incomingAt: '2026-10-27T01:00:00Z',
+  const waiting = await send();
+  assert.equal(waiting.status, 200, await waiting.clone().text());
+  const receipt = await fetch('http://proxy/api/webhooks/pbx/call-ended', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer ' + process.env.TEST_WEBHOOK_TOKEN,
     },
-    customer: { name: '빈 통화 검증', phoneNumber: '01099008878' },
-    totalAmount: null,
-    pickupRequestedAt: null,
-    parcels: [{ origin: { name: null }, destination: {}, smallBoxCount: 0 }],
-  };
+    body: JSON.stringify({
+      recordingId: randomUUID(),
+      callFrom: c.phone,
+      callTo: '07012345678',
+      startedAt: c.incomingAt,
+      endedAt: new Date(Date.parse(c.incomingAt) + 30000).toISOString(),
+      durationSeconds: 30,
+      recordingUrl: 'https://recordings.example.invalid/runtime.mp3',
+    }),
+  });
+  assert.equal(receipt.status, 200, await receipt.clone().text());
+  const finalized = await send();
+  assert.equal(finalized.status, 200, await finalized.clone().text());
+  return (await finalized.json()).data;
+}
+test('Nginx forwards a new AI parcel draft, preserves its call header and replays the fixed UUID', async () => {
+  const c = await draftRuntimeCall('01099008877');
+  const input = { clientParcelId: randomUUID(), status: 'EDITING', parcel: { smallBoxCount: 1 } };
   const send = () =>
-    fetch(root + '/orders', {
+    fetch('http://proxy/api/parcel-drafts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
+      headers: c.headers,
       body: JSON.stringify(input),
     });
   const first = await send();
   assert.equal(first.status, 201, await first.clone().text());
-  const { data } = await first.json();
-  assert.equal(data.status, 'NO_ORDER');
-  assert.equal(data.orderSeq, null);
-  assert.equal(data.version, null);
-  assert.equal(data.paymentRequest, null);
-  assert.equal(data.totalAmount, null);
-  assert.ok(data.callSessionSeq > 0);
-  const replay = await send();
-  assert.equal(replay.status, 201, await replay.clone().text());
-  assert.deepEqual((await replay.json()).data, data);
-  const login = await fetch(root + '/auth/login', {
+  const saved = (await first.json()).data;
+  assert.equal(saved.status, 'EDITING');
+  assert.equal(saved.callSessionSeq, c.id);
+  assert.equal(saved.orderSeq, null);
+  assert.equal((await (await send()).json()).data.draftSeq, saved.draftSeq);
+  const result = await finishRuntimeCall(c, saved.intakeVersion);
+  assert.equal(result.status, 'NO_ORDER');
+  assert.equal(result.orderSeq, null);
+});
+test('Nginx preserves a new empty AI call with completion replay and no actual order', async () => {
+  const c = await draftRuntimeCall('01099008878');
+  const result = await finishRuntimeCall(c, 1);
+  assert.equal(result.status, 'NO_ORDER');
+  assert.equal(result.order, null);
+  assert.deepEqual(result.parcelMappings, []);
+  const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
     body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
   });
   assert.equal(login.status, 200);
-  const detail = await fetch(root + '/calls/' + data.callSessionSeq, {
+  const detail = await fetch('http://proxy/api/calls/' + c.id, {
     headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
   });
   assert.equal(detail.status, 200);
-  const savedCall = (await detail.json()).data.call;
-  assert.equal(savedCall.callSessionSeq, data.callSessionSeq);
-  assert.equal(savedCall.providerCallId, input.call.providerCallId);
-  assert.equal(savedCall.orderSeq, null);
+  const saved = (await detail.json()).data.call;
+  assert.equal(saved.providerCallId, c.providerCallId);
+  assert.equal(saved.orderSeq, null);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);
@@ -837,85 +855,70 @@ test('production company directory searches current member addresses through Ngi
   );
 });
 
-test('production cancellation preserves AI phone scope and admin sessions through Nginx', async () => {
-  const root = 'http://proxy/api';
-  const create = async (phone) => {
-    const response = await fetch(root + '/orders', {
+test('production draft cancellation preserves AI call scope and administrator sessions through Nginx', async () => {
+  const c = await draftRuntimeCall('01064000641');
+  const create = async (call) => {
+    const response = await fetch('http://proxy/api/parcel-drafts', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      headers: call.headers,
       body: JSON.stringify({
-        outcome: 'INCOMPLETE',
-        call: {
-          providerCallId: randomUUID(),
-          callerPhoneNumber: phone,
-          incomingAt: new Date().toISOString(),
-        },
-        customer: { name: '취소 프록시 검증', phoneNumber: phone },
-        parcels: [{ smallBoxCount: 1 }, { smallBoxCount: 2 }, { smallBoxCount: 3 }],
+        clientParcelId: randomUUID(),
+        status: 'EDITING',
+        parcel: { smallBoxCount: 1 },
       }),
     });
     assert.equal(response.status, 201, await response.clone().text());
-    const { data } = await response.json();
-    assert.equal(data.status, 'COLLECTING');
-    assert.ok(data.orderSeq > 0);
-    return data;
+    return (await response.json()).data;
   };
-  const order = await create('01064000641');
-  const headers = {
-    call_session_seq: String(order.callSessionSeq),
-    'Content-Type': 'application/json',
-  };
-  const detail = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json()).data;
-  const partialPath = `/orders/${order.orderSeq}/parcels/cancel`;
-  const partialBody = JSON.stringify({
-    orderParcelSeqs: detail.parcels.slice(0, 2).map((parcel) => parcel.orderParcelSeq),
-  });
-  assert.equal(
-    (await fetch(root + partialPath, { method: 'POST', headers, body: partialBody })).status,
-    204,
-  );
-  const partial = (await (await fetch(root + `/orders/${order.orderSeq}`, { headers })).json())
-    .data;
-  assert.equal(partial.status, 'COLLECTING');
-  assert.deepEqual(
-    partial.parcels.map((p) => p.status),
-    ['CANCELLED', 'CANCELLED', 'ACTIVE'],
-  );
-  const foreign = await create('01064000642');
-  assert.equal(
-    (await fetch(root + `/orders/${foreign.orderSeq}/cancel`, { method: 'POST', headers })).status,
-    404,
-  );
-  const login = await fetch(root + '/auth/login', {
+  const own = await create(c);
+  const other = await create(await draftRuntimeCall('01064000642'));
+  const patch = (id) =>
+    fetch('http://proxy/api/parcel-drafts/' + id, {
+      method: 'PATCH',
+      headers: c.headers,
+      body: JSON.stringify({ expectedVersion: 1, action: 'CANCEL' }),
+    });
+  assert.equal((await patch(other.draftSeq)).status, 404);
+  const response = await patch(own.draftSeq);
+  assert.equal(response.status, 200);
+  const cancelled = (await response.json()).data;
+  assert.equal(cancelled.status, 'CANCELLED');
+  const login = await fetch('http://proxy/api/auth/login', {
     method: 'POST',
     headers: { Origin: 'https://13.209.59.180', 'Content-Type': 'application/json' },
     body: JSON.stringify({ loginId: 'runtimeAdmin83', password: 'runtime-only-password' }),
   });
   assert.equal(login.status, 200);
-  const adminHeaders = {
+  const admin = {
     Origin: 'https://13.209.59.180',
     Cookie: login.headers.get('set-cookie').split(';')[0],
+    'Content-Type': 'application/json',
   };
-  const whole = await fetch(root + `/orders/${order.orderSeq}/cancel`, {
-    method: 'POST',
-    headers: adminHeaders,
-  });
-  assert.equal(whole.status, 204);
-  assert.equal(await whole.text(), '');
   assert.equal(
-    (await fetch(root + partialPath, { method: 'POST', headers, body: partialBody })).status,
+    (
+      await fetch('http://proxy/api/parcel-drafts/' + own.draftSeq, {
+        method: 'DELETE',
+        headers: admin,
+      })
+    ).status,
     204,
   );
+  const order = await fetch('http://proxy/api/orders', {
+    method: 'POST',
+    headers: { ...admin, 'Idempotency-Key': randomUUID() },
+    body: JSON.stringify({
+      customer: { name: '관리자 취소 검증', phoneNumber: '01064000999' },
+      parcels: [],
+    }),
+  });
+  assert.equal(order.status, 201, await order.clone().text());
+  const id = (await order.json()).data.orderSeq;
   assert.equal(
-    (await fetch(root + `/orders/${order.orderSeq}/cancel`, { method: 'POST', headers })).status,
-    409,
-  );
-  const sameCustomer = await create('01064000641');
-  assert.equal(
-    (await fetch(root + `/orders/${sameCustomer.orderSeq}/cancel`, { method: 'POST', headers }))
+    (await fetch('http://proxy/api/orders/' + id + '/cancel', { method: 'POST', headers: admin }))
       .status,
     204,
   );
+  await finishRuntimeCall(c, cancelled.intakeVersion);
 });
 
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {

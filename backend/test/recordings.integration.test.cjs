@@ -113,28 +113,33 @@ after(async () => {
   await pool.end();
 });
 
-test('real AI result and authenticated PBX receipt connect order, call times and S3 reference', async () => {
-  const response = await fetch(urls[0] + '/api/orders', {
+test('new AI intake and authenticated PBX receipt connect call times and the independent recording', async () => {
+  const input = {
+    phoneNumber: '01098880001',
+    call: { providerCallId: randomUUID(), incomingAt: '2026-10-27T01:00:02Z' },
+  };
+  const registered = await fetch(urls[0] + '/api/customers/context', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
-    body: JSON.stringify({
-      outcome: 'INCOMPLETE',
-      call: {
-        providerCallId: randomUUID(),
-        callerPhoneNumber: '+821098880001',
-        incomingAt: '2026-10-27T01:00:02Z',
-      },
-      parcels: [],
-    }),
+    headers: { 'Content-Type': 'application/json', ...businessHeaders() },
+    body: JSON.stringify(input),
   });
-  assert.equal(response.status, 201);
-  const order = (await response.json()).data;
+  assert.equal(registered.status, 200);
+  const id = (await registered.json()).data.callSessionSeq;
+  const close = () =>
+    fetch(urls[0] + '/api/calls/' + id + '/order-intake/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...businessHeaders() },
+      body: JSON.stringify({ expectedIntakeVersion: 1 }),
+    });
+  assert.equal((await (await close()).json()).data.status, 'WAITING_PBX');
+  const order = { callSessionSeq: id, orderSeq: null };
   const data = payload();
   assert.deepEqual(await receipt(data), {
     status: 'received',
     recordingId: data.recordingId,
     duplicate: false,
   });
+  assert.equal((await (await close()).json()).data.status, 'NO_ORDER');
   assert.equal(uploads, 0);
   await workers[0].processPending();
   const stored = await state(data.recordingId);

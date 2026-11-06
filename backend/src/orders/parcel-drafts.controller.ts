@@ -61,7 +61,7 @@ export class ParcelDraftsController {
     summary: '배송 초안 생성·미완료 재개',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      '통화 중에는 실제 주문·결제·디버 요청을 생성하지 않습니다. 동일 clientParcelId·동일 생성 본문 재전송은 현재 초안을 반환하며, 다른 본문은 409입니다. AI는 완료 신호 전까지 종료 후 정리 전송도 가능합니다. 재개는 같은 고객의 INCOMPLETE를 새 초안으로 복사하며 원본 보관 기한을 상속합니다.',
+      '미등록 고객도 EDITING은 보존하며 READY에는 활성 고객이 필요합니다. 통화 중에는 실제 주문·결제·디버 요청을 생성하지 않습니다. 동일 clientParcelId·동일 생성 본문 재전송은 현재 초안을 반환하며, 다른 본문은 409입니다. AI는 완료 신호 전까지 종료 후 정리 전송도 가능합니다. 재개는 같은 고객의 INCOMPLETE를 새 초안으로 복사하며 원본 보관 기한을 상속합니다.',
   })
   @ApiCreatedResponse({ schema: envelope })
   create(
@@ -112,7 +112,7 @@ export class ParcelDraftsController {
     summary: '미완료·배송 초안 목록',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      '기본 INCOMPLETE. status=ALL로 전체 상태, customerSeq·callSessionSeq·q 필터와 limit/offset을 사용합니다. 최신 생성 시각·번호순. AI는 같은 고객만, 종료 통화는 그 통화의 초안만 조회합니다. 삭제/5년 만료는 숨깁니다.',
+      '기본 INCOMPLETE. status=ALL로 전체 상태, customerSeq·callSessionSeq·legacyOrderSeq·q 필터와 limit/offset을 사용합니다. 최신 생성 시각·번호순. AI는 같은 고객만 조회하며 미등록 이력은 최초 발신번호 사본을 확인합니다. 종료 통화는 그 통화의 초안만 조회합니다. 삭제/5년 만료는 숨깁니다.',
   })
   @ApiOkResponse({
     schema: {

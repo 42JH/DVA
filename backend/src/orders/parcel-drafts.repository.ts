@@ -4,7 +4,7 @@ import { readPage } from '../common/pagination-query';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
 
-const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",
+const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
  created_by_admin_user_seq AS "createdByAdminUserSeq",client_parcel_id AS "clientParcelId",creation_payload AS "creationPayload",
  parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
@@ -60,12 +60,16 @@ export class ParcelDraftsRepository {
     query: ParcelDraftQueryDto,
     customerId: number | null,
     endedCallId: number | null,
+    call: OrderIntakeCall | null,
   ) {
     return readPage<Omit<ParcelDraftRow, 'creationPayload'>>(
       client,
       `SELECT ${columns.replace(',creation_payload AS "creationPayload"', '')}
       FROM order_parcel_drafts WHERE ${available}
-       AND ($1::int IS NULL OR customer_seq=$1) AND ($2::text='ALL' OR status=$2)
+       AND ($7::int IS NOT NULL OR $1::int IS NULL OR customer_seq=$1)
+       AND ($7::int IS NULL OR (customer_seq IS NOT NULL AND customer_seq=$1) OR
+        (customer_seq IS NULL AND (call_session_seq=$7 OR (status='INCOMPLETE' AND caller_phone_number=$8))))
+       AND ($2::text='ALL' OR status=$2)
        AND ($3::int IS NULL OR call_session_seq=$3) AND ($4::int IS NULL OR call_session_seq=$4)
        AND ($6::int IS NULL OR legacy_order_seq=$6) AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
         parcel_data->'origin'->>'name',parcel_data->'origin'->>'phoneNumber',parcel_data->'origin'->>'roadAddress',parcel_data->'origin'->>'jibunAddress',
@@ -77,6 +81,8 @@ export class ParcelDraftsRepository {
         endedCallId,
         query.q?.trim() || null,
         query.legacyOrderSeq ?? null,
+        call?.callSessionSeq ?? null,
+        call?.callerPhoneNumber ?? null,
       ],
       query,
       '"createdAt" DESC,"draftSeq" DESC',
@@ -87,7 +93,8 @@ export class ParcelDraftsRepository {
     client: PoolClient,
     input: {
       callId: number | null;
-      customerId: number;
+      customerId: number | null;
+      callerPhoneNumber: string | null;
       adminId: number | null;
       key: string;
       payload: Record<string, unknown>;
@@ -98,8 +105,8 @@ export class ParcelDraftsRepository {
   ) {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,retention_started_at)
-      VALUES($1,$2,$3,$4::uuid,$5::jsonb,$6::jsonb,$7,$8,COALESCE($9::timestamptz,clock_timestamp())) RETURNING draft_seq AS id`,
+        `INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,retention_started_at)
+      VALUES($1,$2,$10,$3,$4::uuid,$5::jsonb,$6::jsonb,$7,$8,COALESCE($9::timestamptz,clock_timestamp())) RETURNING draft_seq AS id`,
         [
           input.callId,
           input.customerId,
@@ -110,6 +117,7 @@ export class ParcelDraftsRepository {
           input.status,
           input.source?.draftSeq ?? null,
           input.source?.retentionStartedAt ?? null,
+          input.callerPhoneNumber,
         ],
       )
     ).rows[0].id;
