@@ -15,6 +15,10 @@ export const fmtLongDay = (day: Ymd) =>
     weekday: 'long',
   })
 
+/** 날짜만 '11월 4일' (03 주문 11/06 시안 — 머리줄 날짜 · 날이 바뀌는 줄 왼쪽). 요일 없음, 'YYYY-MM-DD' 그대로 읽음(시간대 무관) */
+export const fmtMonthDay = (day: Ymd) =>
+  `${Number(day.slice(5, 7))}월 ${Number(day.slice(8, 10))}일`
+
 /** 날짜별 목록 줄 시각: 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40' (04 통화 · 03 주문) */
 export function fmtRowTime(iso: string, today: Ymd): string {
   const d = new Date(iso)
