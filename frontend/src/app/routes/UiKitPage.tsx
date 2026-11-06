@@ -203,6 +203,7 @@ export function UiKitPage() {
 
       <div className="flex items-center gap-6">
         <Stepper label="소박스" value={qty} onChange={setQty} />
+        <Stepper label="직접 입력" value={qty} onChange={setQty} max={10} editable />
         <TextField label="물품 가액" inline suffix="원" placeholder="숫자만 입력" />
       </div>
 
