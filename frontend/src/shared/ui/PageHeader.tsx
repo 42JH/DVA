@@ -27,11 +27,10 @@ export function TopBar({
   center?: ReactNode
   wide?: boolean
 }) {
-  const { persona, calls, live } = useContext(TopBarInfo)
   // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
   const box = search ?? (crumbs ? false : ({ tab: 'order' } as const))
   return (
-    // 11/06 시안(주문 '프레임' 1521:7385): 가운데 검색칸(폭 320) · 오른쪽 끝 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중'
+    // 11/06 시안(주문 '프레임' 1521:7385): 가운데 검색칸(폭 320) · 오른쪽 끝 상태(LiveStatus — AppLayout이 고정 자리에 그림)
     // 왼쪽 = 경로(뎁스 화면)만. AI 미답변 알림은 뺌(11/06 시안 · 사용자) — 미답변 화면은 FAQ 목록의 '답변 대기 →'로 들어감
     // 검색칸 가운데 = 화면 가운데(시안 1440에서 560~880): 왼쪽 칸 = 50vw − 160 − 상단바 왼쪽 끝(88) − 사이(24). 상태는 카드 오른쪽 20 앞까지(-mr-3)
     <header
@@ -49,23 +48,29 @@ export function TopBar({
           // 검색칸이 없는 화면은 가운데 칸 오른쪽에 화면 정보 (06 발신번호)
           <div className="flex min-w-0 justify-end">{extra}</div>
         ))}
-      <div className="flex min-w-0 justify-end">
-        {persona && (
-          <span
-            title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
-            className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
-          >
-            <span
-              aria-hidden
-              className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
-            />
-            <span className="truncate">
-              {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
-            </span>
-          </span>
-        )}
-      </div>
+      {/* 오른쪽 칸 = 상태 자리(비움) — 상태는 AppLayout이 카드 오른쪽 위 같은 자리에 그림(LiveStatus) */}
+      <div />
     </header>
+  )
+}
+
+/** 상단 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 모든 화면 같은 자리(카드 오른쪽 20 · 상단바 가운데 줄, 11/06 사용자)
+ *  화면마다 상단바 칸 나누기(BAR_COLS 등)가 달라 위치가 흔들려서, 각 TopBar가 아니라 AppLayout이 카드 위에 한 번 그림. 화면이 바뀌어도 안 움직임
+ *  점은 라이브처럼 깜빡임 · 0건이면 '접수 중'만 · 실시간 연결이 끊기면 점이 회색으로 멈춤 */
+export function LiveStatus({ className = '' }: { className?: string }) {
+  const { persona, calls, live } = useContext(TopBarInfo)
+  if (!persona) return null
+  return (
+    <span
+      title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
+      className={`flex items-center gap-2 text-body font-medium whitespace-nowrap text-brand ${className}`}
+    >
+      <span
+        aria-hidden
+        className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
+      />
+      {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+    </span>
   )
 }
 

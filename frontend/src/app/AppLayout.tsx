@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { Outlet, useLocation, useMatches } from 'react-router'
 import { useSession } from '@/shared/auth/useSession'
-import { Crumbs, Sidebar, TopBar, TopBarInfo } from '@/shared/ui'
+import { Crumbs, LiveStatus, Sidebar, TopBar, TopBarInfo } from '@/shared/ui'
 import { useActiveCallCount } from '@/features/call/hooks/useActiveCallCount'
 import { useActivePersonaName } from '@/features/persona/hooks/useActivePersonaName'
 
@@ -35,7 +35,9 @@ export function AppLayout() {
           onLogout={logout}
           showAdmins={isSystemAdmin} // 설정 ▸ 관리자(10 관리자 권한 관리)는 최고 관리자만 (RequireRole과 짝)
         />
-        <div className="my-1 mr-1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-surface">
+        <div className="relative my-1 mr-1 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-surface">
+          {/* 상태 — 모든 화면 같은 자리: 카드 오른쪽 20 · 상단바(높이 72) 가운데 줄. 본문 스크롤 · 화면 전환과 상관없이 고정 */}
+          <LiveStatus className="absolute top-9 right-5 z-10 -translate-y-1/2" />
           <main
             ref={main}
             // 스크롤 막대는 디자인처럼 바탕 없이 얇은 회색 손잡이만
