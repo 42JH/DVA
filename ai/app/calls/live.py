@@ -204,20 +204,26 @@ class LiveFlow:
                 d = await asyncio.wait_for(asyncio.shield(call), self.cfg.decision_budget_sec)
         except TimeoutError:
             s.stats["Decision 판단 없음"] += 1
-            s.note("Decision", f"DECISION_TIMEOUT >{self.cfg.decision_budget_sec * 1000:.0f}ms 입력 {len(text)}자")
+            s.note("Decision", f"DECISION_TIMEOUT >{self.cfg.decision_budget_sec * 1000:.0f}ms 입력 {len(text)}자",
+                   {"stage": stage, "pending": pending_id, "input": text, "questions": [q["name"] for q in questions]})
             # 늦은 답은 쓰지 않고 실제 응답 시간만 남긴다(예산 조정 근거). 추가 호출 없음
             call.add_done_callback(lambda f: f.cancelled() or f.exception() or s.note(
                 "Decision 늦은 응답", f"{(time.monotonic() - started) * 1000:.0f}ms") or s.timing(
                 "Decision(시간 초과분)", (time.monotonic() - started) * 1000))
             return
         except Exception as e:
-            s.note("Decision", f"DECISION_UNAVAILABLE {type(e).__name__}")
+            s.note("Decision", f"DECISION_UNAVAILABLE {type(e).__name__}",
+                   {"stage": stage, "pending": pending_id, "input": text, "questions": [q["name"] for q in questions],
+                    "error": str(e)[:500]})
             return
         ms = round((time.monotonic() - started) * 1000)
         s.decision_ms.append(ms)
         s.timing("Decision", ms)
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
-        s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms")
+        s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
+               {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
+                "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
+                            for k, v in answers.items()}})
         await self.apply(s, utt, prev, answers, pending_id)
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None):
@@ -586,7 +592,10 @@ class LiveFlow:
     def on_delegation(self, s: CallSession, ev: dict) -> None:
         d = ev.get("delegation") or {}
         s.stats["위임"] += 1
-        s.note("위임 시작", f"{(d.get('id') or '_')[-6:]} offset={ev.get('offset_ms')}")
+        said = next((r["text"] for r in reversed(s.transcript) if r["speaker"] == "customer"), None)
+        s.note("위임 시작", f"{(d.get('id') or '_')[-6:]} offset={ev.get('offset_ms')}",
+               {"delegation": d.get("id"), "target": d.get("target"), "response_id": d.get("response_id"),
+                "offset_ms": ev.get("offset_ms"), "last_customer": said})
         self.rt(s).delegations[d.get("id") or "_"] = {"offset_ms": ev.get("offset_ms"), "inflight": 0, "outputs": 0,
                                                        "completed": False, "done": asyncio.Event(), "t": time.time()}
 
@@ -605,12 +614,22 @@ class LiveFlow:
         if t == "response.output_item.done" and (inner.get("item") or {}).get("type") == "function_call":
             d = self._dl(s, did)
             d["inflight"] += 1
-            s.note("함수 호출 도착", f"{str(did)[-6:]} {(inner.get('item') or {}).get('name')}")
-            s.spawn(self.call_tool(s, did, inner["item"]), "tool")
+            item = inner["item"]
+            s.note("함수 호출 도착", f"{str(did)[-6:]} {item.get('name')}",
+                   {"delegation": did, "call_id": item.get("call_id"), "name": item.get("name"),
+                    "arguments": _args(item.get("arguments"))})
+            s.spawn(self.call_tool(s, did, item), "tool")
+        elif t == "response.output_item.done" and (text := _item_text(inner.get("item") or {})):
+            kind = "Backend 출력" if inner["item"].get("type") == "message" else "Backend 추론 요약"
+            s.note(kind, text, {"delegation": did, "item_type": inner["item"].get("type")})
         elif t in ("response.completed", "response.failed", "response.incomplete"):
             d = self._dl(s, did)
             d["completed"] = True
-            s.note("Backend 응답 끝", f"{str(did)[-6:]} {t.split('.')[-1]} inflight={d['inflight']}")
+            r = inner.get("response") or {}
+            s.note("Backend 응답 끝", f"{str(did)[-6:]} {t.split('.')[-1]} inflight={d['inflight']}",
+                   {"delegation": did, "status": r.get("status") or t.split(".")[-1], "error": r.get("error"),
+                    "incomplete": r.get("incomplete_details"), "usage": r.get("usage"),
+                    "elapsed_ms": round((time.time() - d["t"]) * 1000)})
             s.spawn(self.resume(s, did), "resume")
             if d["inflight"] == 0 and d["outputs"] == 0:
                 d["done"].set()  # 최종 문장까지 끝남
@@ -629,8 +648,9 @@ class LiveFlow:
         if name == "lookup_orders":
             await self.svc.call_session_seq(s)  # 2단계 통화 등록을 기다린다(실패면 도구가 CALL_NOT_REGISTERED)
         t0 = time.monotonic()
-        view = {"name": name, "status": "실행 중", "arguments": item.get("arguments"), "elapsed_ms": None, "output": None,
-                "at": time.time()}
+        view = {"name": name, "status": "실행 중", "arguments": item.get("arguments"), "args": _args(item.get("arguments")),
+                "elapsed_ms": None, "output": None, "at": time.time(), "done_at": None, "delegation": did,
+                "call_id": call_id}
         s.tool_calls.append(view)
         s.stats["도구"] += 1
         ctx = s.tools
@@ -645,7 +665,7 @@ class LiveFlow:
         with span("tool", tool=name):
             out = await run_tool(ctx, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
-                    elapsed_ms=round((time.monotonic() - t0) * 1000))
+                    elapsed_ms=round((time.monotonic() - t0) * 1000), done_at=time.time())
         if out["status"] != "ok":
             d0["needs"] = True  # 재질문·실패 결과: 이 위임 끝에 되읽기를 다시 열지 않는다
         s.timing(f"도구 {name}", view["elapsed_ms"])
@@ -667,6 +687,8 @@ class LiveFlow:
                     issued = issue_cancel_confirmation(s.state, s.tools.clock())
                     if issued:
                         out = out | {"facts": out.get("facts", {}) | {"cancel_target": _order_facts(issued.snapshot)}}
+        view["output"] = out  # Live에 실제로 넘긴 결과(매뉴얼 미답변 집계·취소 대상이 덧붙은 것)
+        s.changed()
         await self.send(s, {"type": "response.item.create", "item": {
             "type": "function_call_output", "call_id": call_id, "output": json.dumps(out, ensure_ascii=False)}})
         d = self._dl(s, did)
@@ -724,7 +746,7 @@ class LiveFlow:
         etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append",
                  "N3": "session.instructions.append"}[level]
         s.stats[f"전달 {level}"] += 1
-        s.note(f"전달 {level}", content[:200])
+        s.note(f"전달 {level}", content[:200], {"content": json.loads(content)})
         await self.send(s, {"type": etype, "delegation_id": None, "content": f"[서버 결과] {content}"[:1800]})
         if level == "N2":
             rt.await_speech = ("N2→AI 발화", time.time())
@@ -763,6 +785,27 @@ def _transcript(s: CallSession, speaker: str, u: Spoken) -> None:
     s.transcript.append({"id": u.utterance_id, "speaker": speaker, "text": u.text, "t": u.t_start})
     del s.transcript[:-300]
     s.changed()
+
+
+def _args(raw) -> dict | str | None:
+    """함수 호출 인수(JSON 문자열) → dict. 깨진 JSON은 원문 그대로(관제·기록용)."""
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return raw
+
+
+def _item_text(item: dict) -> str:
+    """Backend 출력 항목의 문장: message는 output_text, reasoning은 요약. 그 밖의 항목은 빈 문자열."""
+    if item.get("type") == "message":
+        parts = item.get("content") or []
+    elif item.get("type") == "reasoning":
+        parts = item.get("summary") or []
+    else:
+        return ""
+    return "\n".join(p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")).strip()
 
 
 def _answer(a) -> tuple[str, float, dict]:

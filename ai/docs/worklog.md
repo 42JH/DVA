@@ -884,3 +884,13 @@
 
 - 최신 develop-ai a6146c2에서 `fix/monitor-transcript-autoscroll` 생성. 가운데 받아쓰기가 맨 아래에 있으면 새 발화를 따라가고, 위로 올려 이전 발화를 읽는 중이면 위치를 유지한다. 다른 통화를 선택하면 최신 발화부터 표시한다.
 - 기존 관제 테스트 5개 통과. Node에서 발화 추가, 이전 위치 유지, 맨 아래에서 자동 추적 재개, 발화가 그대로인 갱신, 통화 전환을 확인했다. 운영 화면은 검증하지 않았다.
+
+## 2026-11-06 — 관제 화면·통화 기록 상세화(Decision 입출력·Backend 출력 문장·도구 인수/결과·전달 원문)
+
+- 브랜치 `feat/monitor-call-log-detail`(develop-ai c9457cd 기반). 지금까지 기록은 Decision 요약 한 줄, 전달 앞 200자, 도구 인수 원문 문자열뿐이었고 Backend 모델이 낸 문장은 전혀 남지 않았다.
+- session.py: `note(kind, text, data=None)` — 사건에 펼쳐 보는 상세를 붙인다. 기록 상한 200 → 3000(스냅샷은 최근 400). 스냅샷 전사에 시각 `t`.
+- live.py: Decision(입력 문장·질문·답별 choice/confidence/확률·ms·단계·pending, 시간 초과·장애 때도 입력 남김), 위임 시작(id·target·response_id·offset·직전 고객 발화), 함수 호출 인수(dict), `response.output_item.done`의 message 문장(`Backend 출력`)·reasoning 요약(`Backend 추론 요약`), 응답 끝 상태·error·incomplete_details·usage·위임 경과, 도구 카드에 위임 id·call_id·인수 dict·끝난 시각·Live에 실제로 넘긴 결과, 전달 N1'/N2/N3 원문 전체.
+- main.py: 통화 기록 파일에 `backend_calls`·`timings`·`stats` 추가.
+- 관제 화면: 가운데 칸 `대화`/`타임라인` 전환(받아쓰기·Decision·위임·Backend 출력·도구·전달을 시간순, 종류별 색), 사건·도구 상세 펼치기(다시 그려도 펼친 상태 유지).
+- 테스트: 흐름 테스트 1개 추가(Decision 입력·확률, 위임 메타, Backend 출력·추론 요약, 도구 인수·결과, usage, 전달 원문, 스냅샷 전사 시각). app·monitor 테스트 426 passed, 3 failed(로컬 `data/address.db` 스키마가 옛것이라 lifespan 기동 실패 — 변경 전에도 같은 실패). 화면 JS는 `node --check`와 Node에서 타임라인 순서·이스케이프·중복 제거·펼침 유지만 확인, 브라우저 실화면 미확인.
+- 확인 안 된 것: Responses 위임에서 sideband `response.event`로 message·reasoning 항목이 실제로 오는지(SDK 주석은 "세부 출력 이벤트로 받으라"고만 함). 오지 않으면 `Backend 출력`이 비어 있고 나머지 기록은 그대로다. reasoning 요약은 Backend 요청에 summary 설정이 있어야 나온다.

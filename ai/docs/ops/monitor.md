@@ -28,15 +28,19 @@
 {
   "session_id": "…", "caller": "010****5678", "started_at": 1762140000.0,
   "status": "accepting|active|ended", "stage": "선택", "end_reason": "remote_hangup|…|null",
-  "transcript": [{"speaker": "customer|agent", "text": "…"}],
-  "tool_calls": [{"name": "…", "status": "…", "elapsed_ms": 12, "arguments": "…", "output": {}}],
-  "events": [{"at": 1762140001.0, "kind": "Decision(input)", "text": "…"}],
+  "transcript": [{"speaker": "customer|agent", "text": "…", "t": 1762140000.5}],
+  "tool_calls": [{"name": "…", "status": "…", "elapsed_ms": 12, "arguments": "원문 JSON", "args": {},
+                  "output": {"Live에 넘긴 결과": "…"}, "at": 0.0, "done_at": 0.0, "delegation": "…", "call_id": "…"}],
+  "events": [{"at": 1762140001.0, "kind": "Decision", "text": "요약", "data": {"상세(선택)": "…"}}],
   "errors": [{"at": 1762140002.0, "message": "…"}],
   "detail": {"아무 키": "값 또는 객체"}
 }
 ```
 - `caller`는 반드시 마스킹(`pbx_webhook.mask_phone`).
 - `detail`은 표로 그대로 보인다(새 서버는 Business State 요약·필드 상태를 여기에).
+- 사건 `data`(펼쳐 보는 상세): `Decision` 입력 문장·질문·답별 choice·confidence·확률·ms / `위임 시작` 위임 id·대상·response_id·offset·직전 고객 발화 / `함수 호출 도착` 인수 / `Backend 출력`(message 문장)·`Backend 추론 요약`(reasoning summary) / `Backend 응답 끝` 상태·오류·incomplete·usage·위임 경과 ms / `전달 N1'·N2·N3` 보낸 사실 원문.
+- 가운데 칸: `대화`(받아쓰기) / `타임라인`(받아쓰기·사건·도구 호출을 시간순으로, 사건 `도구`는 도구 카드와 겹쳐 뺌).
+- 통화 기록 파일(`CALL_LOG_DIR/<trace_id>.json`): `snapshot`·`events`(최근 3000개, data 포함)·`tool_calls`(전부)·`transcript`·`backend_calls`·`timings`·`stats`. 스냅샷은 사건 최근 400개·도구 최근 80개만.
 
 ## 연결 방법
 ```python

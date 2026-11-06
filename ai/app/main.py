@@ -114,7 +114,7 @@ CALL_LOG_DIR = Path(os.environ.get("CALL_LOG_DIR", ROOT / "logs" / "calls"))
 
 
 async def write_call_log(s) -> None:
-    """통화 기록(스냅샷: 업무 값·전사 포함, 사건, 도구 호출). 개인정보 — logs/는 커밋 안 함.
+    """통화 기록(스냅샷: 업무 값·전사 포함, 사건과 상세, 도구 호출, BE 통신, 지연). 개인정보 — logs/는 커밋 안 함.
     스냅샷이 실패해도 사건·전사·도구 기록은 남긴다(분석 근거를 잃지 않게)."""
     import json
     CALL_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -123,8 +123,11 @@ async def write_call_log(s) -> None:
         snap = s.snapshot()
     except Exception as e:
         snap = {"error": f"{type(e).__name__}: {e}"}
+    # events.data: Decision 입출력·위임·Backend 출력 문장·전달 원문 / tool_calls: 인수·Live에 넘긴 결과
     path.write_text(json.dumps({"snapshot": snap, "events": s.events, "tool_calls": s.tool_calls,
-                                "transcript": s.transcript}, ensure_ascii=False, indent=1, default=str),
+                                "transcript": s.transcript, "backend_calls": s.backend_calls,
+                                "timings": s.timings, "stats": dict(s.stats)}, ensure_ascii=False, indent=1,
+                               default=str),
                     encoding="utf-8")
     log.info("통화 기록 %s", path)
 
