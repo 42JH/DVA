@@ -35,6 +35,7 @@ services:
       BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in .env}
       AI_PERSONA_TOKEN: ${AI_PERSONA_TOKEN:-}
       AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
+      AI_BUSINESS_TOKEN: ${AI_BUSINESS_TOKEN:-}
       KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
       # RAG: 컨테이너 안에서는 서비스 이름으로 접근
       QDRANT_URL: http://qdrant:6333

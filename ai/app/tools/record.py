@@ -33,7 +33,7 @@ COUNTS = ("document_count", "small_box_count", "medium_box_count", "big_box_coun
 
 class RecordArgs(Args):
     sender_name: str | None = Field(None, max_length=30)
-    sender_address: str | None = Field(None, max_length=120, description="보내는 곳 기본 주소(도로명·지번)")
+    sender_address: str | None = Field(None, max_length=120, description="발송 주소(택배를 보내는 곳의 도로명·지번 주소)")
     sender_address_detail: str | None = Field(None, max_length=60, description="동·호수 등. 없다고 하면 빈 문자열")
     receiver_name: str | None = Field(None, max_length=30)
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
@@ -165,8 +165,12 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             _apply_address(ctx, addr, r, given, facts, needs)
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
-        if not facts["recorded"] and not needs:
+        if facts["recorded"]:
+            s.awaiting_fix = False
+        nothing = not facts["recorded"] and not needs
+        if nothing and (s.pending or s.awaiting_fix):
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
+        # 같은 값을 다시 말했는데 확인 대기가 풀려 있으면(no·change 뒤) 되읽기로 다시 연다(운영 통화 56c133c8)
         pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs else None
         moved = False
         if pending and not s.pickup_at.valid:  # 되읽기 때 기본 수거 시각을 정해 함께 안내
@@ -175,8 +179,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
             sources = {n: f.source for n, f in s.current.fields.items()}
             facts["readback"] = readback_facts(pending.snapshot, sources, policy)
-            # 주소 저장은 되읽기 확인과 섞지 않고, 택배를 담은 뒤 따로 묻는다(사용자 결정 2026-11-05). 여기서는 제안만 정해 둔다
-            s.address_offer, s.address_consent = (save_offer(s) or None), None
+            # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
+            s.address_offer = save_offer(s) or None
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]
@@ -184,7 +188,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             facts["phones_to_read"] = phones  # 고객이 새로 불러 준 번호: 한 번 끊어 읽어 확인(README §5)
         facts = {k: v for k, v in facts.items() if v}
         status = "needs_input" if needs else "ok"
-        return ToolOutcome(status, needs[0]["reason"] if needs else None, facts, needs, state_summary(s, policy))
+        code = needs[0]["reason"] if needs else "NOTHING_CHANGED" if nothing else None
+        return ToolOutcome(status, code, facts, needs, state_summary(s, policy))
 
 
 def invalid_fields(needs: list[dict]) -> list[str]:

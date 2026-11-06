@@ -80,7 +80,7 @@ class FakeClient:
 
 
 def service(client=None, backend=None, **cfg) -> CallService:
-    base = {"closing_quiet_ms": 50, "closing_max_sec": 1.0, "silence_sec": 30.0, "finalize_wait_sec": 0.5} | cfg
+    base = {"closing_quiet_ms": 1000, "closing_max_sec": 1.0, "silence_sec": 30.0, "finalize_wait_sec": 0.5} | cfg
     svc = CallService(CallDeps(client or FakeClient(), BackendGateway(backend or MockBackend()), P,
                                CallConfig(**base), "gpt-6-luna"))
     svc.done = []
@@ -405,3 +405,11 @@ def test_registered_customer_origin_goes_to_call_info_without_detail():
     s = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", st, svc.d.policy, None))
     text = svc.session_config(s, None)["instructions"]
     assert "- 등록된 출발지: 서울 강남구 테헤란로 212" in text and "1201호" not in text.split("# 통화 정보")[1]
+
+
+def test_closing_quiet_must_be_at_least_one_second():
+    """AI 발화가 고객에게 전달되는 지연 때문에 마무리 뒤 최소 1초는 기다린다(설정으로 줄일 수 없다)."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        CallConfig(closing_quiet_ms=999)
+    assert CallConfig(closing_quiet_ms=1000).closing_quiet_ms == 1000

@@ -3,6 +3,7 @@
 
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 from conftest import CALLER, run
@@ -32,10 +33,14 @@ class FakeDecisions:
         said = input.split("고객 발화: ")[1]
         answers = []
         if "confirm" in names:
-            answers.append(choice("confirm", "yes" if said.startswith("네") else
-                                  "proceed" if "접수해 주세요" in said else "not_answer"))
+            if said.startswith("음"):  # 애매한 '네'(운영 통화 b8f3795c "아 그렇게 접수해줘" yes 0.56)
+                answers.append(choice("confirm", "yes", 0.56))
+            else:
+                answers.append(choice("confirm", "yes" if said.startswith("네") else "no" if said.startswith("아니") else
+                                      "change" if "바꿔" in said else
+                                      "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
-            answers.append(choice("task", "order"))
+            answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
         if "origin" in names:
             answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
         if "more" in names:
@@ -49,7 +54,7 @@ def flow(tmp_path=None):
     client = FakeClient()
     client.decisions = FakeDecisions()
     svc = service(client, utterance_gap_ms=40, commit_delay_ms=30, notify_quiet_ms=30, response_fallback_sec=0.2,
-                  closing_quiet_ms=60, closing_max_sec=2.0)
+                  closing_quiet_ms=1000, closing_max_sec=3.0)
     LiveFlow(svc)
     if tmp_path is not None:  # S6: 결과·인사이트까지
         from app.calls.results import ResultService
@@ -107,20 +112,22 @@ def test_order_flow_end_to_end(tmp_path):
         await until(lambda: s.state.parcels)
         await until(lambda: "session.commentary.append" in sent_types(conn))   # N2: 담기 완료
         await ai(conn, "담아 두었어요. 더 보내실 택배 있으세요?", 9000)
-        await say(conn, "아니요 없어요", 11000)                       # more=no_more → 더 없음(아직 끊지 않음)
-        await until(lambda: s.state.no_more_parcels)
-        assert s.phase == Phase.ACTIVE
-        await ai(conn, "더 궁금하신 점 있으세요?", 12000)
-        await say(conn, "아니요 끊어주세요", 12500)                   # switch=end → 마무리
+        await say(conn, "아니요 없어요", 11000)                       # more=no_more → 접수 완료 단계 → 결과 뒤 마무리
         await until(lambda: s.phase == Phase.CLOSING)
+        assert s.result and s.close_reason == "flow_complete"         # 결과를 받은 뒤 마무리 안내
         await ai(conn, "감사합니다. 좋은 하루 보내세요.", 13000)       # 마무리 인사 뒤 끊는다
+        said_t = s.last_output_t
         await task
-        return s, conn
+        return s, conn, said_t
 
-    s, conn = run(scenario())
+    hung = []
+    hangup = client.live.sessions.hangup
+    client.live.sessions.hangup = lambda sid: (hung.append(time.time()), hangup(sid))[1]
+    s, conn, said_t = run(scenario())
+    assert hung[0] - said_t >= 1.0  # 마무리 인사(마지막 출력) 뒤 최소 1초 기다려 끊는다
     assert svc.snapshot_errors == [] and not s.stats.get("관제 오류")  # 값이 든 중간 상태에서도 관제 스냅샷이 된다
     snap = json.loads(json.dumps(s.snapshot(), ensure_ascii=False))  # 관제 SSE·통화 기록이 직렬화할 수 있어야
-    assert snap["detail"]["담은 택배"][0]["받는 분"] == "이영희" and snap["detail"]["통계"]["Decision 호출"] == 4
+    assert snap["detail"]["담은 택배"][0]["받는 분"] == "이영희" and snap["detail"]["통계"]["Decision 호출"] == 3
     assert snap["tool_calls"][0]["name"] == "record_fields" and snap["transcript"]
     assert s.state.intent == "order" and len(s.state.parcels) == 1 and s.state.no_more_parcels
     assert s.state.parcels[0].confirmed_snapshot["receiver_phone"] == "01098765432"
@@ -132,14 +139,15 @@ def test_order_flow_end_to_end(tmp_path):
     assert result["body"]["outcome"] == "INCOMPLETE"  # 주소 보정 없이(geo 없음) — 사유 ADDRESS_GEO_MISSING
     assert s.state.customer.call_session_seq in db.analyses and db.events[s.state.customer.call_session_seq]
     closing = next(e for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"])
-    assert '"order"' in closing["content"]  # 마무리 안내에 결과 상태(사실)
-    assert client.hangups == ["live_1"] and s.close_reason in ("customer_end", "close_requested")
+    assert '"order"' in closing["content"] and '"pending"' not in closing["content"]  # 받은 결과 상태로 마무리
+    assert "more_parcels" not in "".join(e["content"] for e in conn.sent if e["type"] == "session.thinking.append")
+    assert client.hangups == ["live_1"]
     types = sent_types(conn)
     assert types.index("response.item.create") < types.index("response.create")  # 결과 뒤 재개(S0b)
     assert all(e["event_id"].startswith(s.trace_id) for e in conn.sent)
     # Decision은 고객 발화 끝마다 1번(트리거 아님), 확인 질문은 확인 대기 중에만
     names = [n for _, n in client.decisions.calls]
-    assert len(names) == 4 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
+    assert len(names) == 3 and names[0] == ["task"] and names[1][0] == "confirm" and "confirm" not in names[2]
     assert names[2] == ["more", "switch"]
     lat = {r["구간"] for r in snap["latency"]}  # 관제 지연 표
     assert {"Decision", "위임→도구 호출", "도구 record_fields", "확인 '네'→담기", "통화 준비(accept 전)", "accept"} <= lat
@@ -250,6 +258,161 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
     ask = next(e for e in client.conns[0].sent if "ask_again" in e.get("content", ""))
     assert "이영희" in ask["content"]  # 되읽을 값을 같이 준다
     assert s.decision_ms and "Decision ms P50" in s.snapshot()["detail"]["통계"]
+
+
+def test_unclear_yes_reasks_each_time_then_clear_yes_commits(tmp_path):
+    """운영 통화 b8f3795c: 애매한 '네'(yes 0.56)는 확정하지 않고 Live에 아무것도 안 보내 32초 멈춘 뒤 무음 종료.
+    이제 확정 없이 다시 묻게 하고(두 번째 애매한 답에도), 분명한 '네'에 확정한다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "택배 보내려고요", 1000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                         "name": "record_fields", "arguments": json.dumps(FULL)}}})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.pending)
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+        asks = lambda: [e for e in conn.sent if e["type"] == "session.commentary.append" and "ask_again" in e["content"]]  # noqa: E731
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "음 그렇게 해줘", 6500)
+        await until(lambda: len(asks()) == 1)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 7500)
+        await say(conn, "음 그렇게 해줘", 9000)
+        await until(lambda: len(asks()) == 2)  # 같은 내용이어도 다시 묻는다
+        assert s.state.parcels == [] and s.state.pending
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 10000)
+        await say(conn, "네 해주세요", 11500)
+        await until(lambda: s.state.parcels)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert len(s.state.parcels) == 1
+
+
+async def _collect_full(conn, s):
+    """접수 값 전부 기록(d1) → 확인 대기까지."""
+    await say(conn, "택배 보내려고요", 1000)
+    conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+        "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                     "name": "record_fields", "arguments": json.dumps(FULL)}}})
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+    await until(lambda: s.state.pending)
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+
+
+def _asks(conn):
+    return [e for e in conn.sent if e["type"] == "session.commentary.append" and "ask_again" in e["content"]]
+
+
+def test_change_then_rejected_fix_then_plain_answer_reopens_readback_and_yes_commits(tmp_path):
+    """운영 통화 56c133c8: 되읽기 뒤 '바꿔 주세요'(change)로 확인 대기를 풀고, 정정 위임은 수거 시각 거절(needs)이라
+    대기를 다시 열지 않음. 다음 답의 위임이 도구 없이 끝나자 Live가 스스로 확인 질문을 했고 '네'가 갈 곳이 없어 무음 종료.
+    이제 도구 없이 끝난 위임 뒤 서버 되읽기(ask_again)로 대기를 다시 열고, 그 뒤 '네'에 확정한다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "승용차로 바꿔 주세요", 6500)                         # confirm=change → 대기 해제
+        await until(lambda: s.state.pending is None)
+        assert s.state.awaiting_fix
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d2"}, "offset_ms": 6500})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_2", "name": "record_fields",
+                                                         "arguments": json.dumps({"client_comment": "승용차",
+                                                                                  "pickup_at": "2000-01-01T09:00:00+09:00"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})
+        await until(lambda: any(c["name"] == "record_fields" and c["status"] not in ("실행 중", "ok") for c in s.tool_calls))
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})
+        await asyncio.sleep(0.15)
+        assert s.state.pending is None and not _asks(conn) and not s.state.awaiting_fix  # 거절(needs) 위임엔 되읽기를 얹지 않음
+        await ai(conn, "오전 열 시 이후로 괜찮으신가요?", 8000)
+        await say(conn, "그렇게 해요", 9500)                                   # confirm=not_answer
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 9500})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})  # 도구 없음
+        await until(lambda: len(_asks(conn)) == 1)                             # 서버 되읽기로 대기를 다시 연다
+        assert s.state.pending and s.state.parcels == []
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 11000)
+        await say(conn, "네 해주세요", 12500)
+        await until(lambda: s.state.parcels)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert len(s.state.parcels) == 1 and s.state.parcels[0].confirmed_snapshot["client_comment"] == "승용차"
+
+
+def test_no_answer_waits_for_fix_without_rereading_then_fix_reopens(tmp_path):
+    """'아니요' 직후 도구 없이 끝난 위임(Live가 어디를 고칠지 물음)에는 되읽기를 다시 열지 않고,
+    고친 값이 기록되면 record_fields가 새 되읽기를 준다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "아니요 틀렸어요", 6500)                               # confirm=no
+        await until(lambda: s.state.pending is None)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d2"}, "offset_ms": 6500})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})  # 도구 없음
+        await asyncio.sleep(0.15)
+        assert s.state.pending is None and not _asks(conn)                    # 고칠 값을 기다린다
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 8000})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_3", "name": "record_fields",
+                                                         "arguments": json.dumps({"receiver_name": "박영희"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.pending)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert s.state.pending.snapshot["receiver_name"] == "박영희" and not s.state.awaiting_fix
+    assert s.tool_calls[-1]["output"]["facts"]["readback"]["receiver_name"] == "박영희"
+
+
+def test_cancel_reask_carries_cancel_target_not_parcel_readback():
+    from app.domain.confirm import issue_cancel_confirmation
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    sent = []
+
+    async def notify(s, level, facts, again=False):
+        sent.append((level, facts, again))
+
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.policy, lf.notify = P, notify
+    st = filled()  # 받던 택배가 있어도 취소 확인이면 택배 되읽기를 주지 않는다
+    st.selected_order = {"receiver_name": "홍길동", "status": "COLLECTING", "order_seq": 1, "order_parcel_seq": 2}
+    p = issue_cancel_confirmation(st, 100.0)
+    run(lf._follow(session(st), "ask_confirm", p.id))
+    [(level, facts, again)] = sent
+    assert level == "N2" and again and facts["confirmation"] == "ask_again" and "readback" not in facts
+    assert facts["cancel_target"]["receiver_name"] == "홍길동"
 
 
 def test_agent_greets_first_on_session_start():
@@ -363,66 +526,38 @@ def test_callback_question_only_while_offered():
     assert "callback" in names(callback=True) and "callback" not in names()
 
 
-def test_address_save_after_commit_one_answer_for_both():
-    """담기 전에는 묻지 않고, 담은 뒤 한 번의 답으로 제안한 주소(보내는 곳·받는 곳)를 함께 정한다."""
-    from app.calls.live import _save_pending
-    lf = LiveFlow.__new__(LiveFlow)
-    saved = []
-
-    async def save_addresses(s, seq, snap, offer):
-        saved.append(offer)
-
-    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
-    from app.tests.test_domain import confirm_once, filled
-    st = filled()
-    pid = confirm_once(st)
-    spawned = []
-    s = SimpleNamespace(state=st, spawn=lambda coro, name: spawned.append(coro))
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
-    assert _save_pending(st) == ()  # 되읽기 중(담기 전)에는 저장을 묻지 않는다
-    lf._maybe_save_addresses(s)
-    assert not spawned
-    st.address_offer = st.address_offer | {"parcel": pid}
-    assert _save_pending(st) == ("sender", "receiver")
-    lf._maybe_save_addresses(s)
-    assert not spawned  # 답 전
-    st.address_consent = False
-    lf._maybe_save_addresses(s)
-    assert not spawned and st.address_offer is None and _save_pending(st) == ()  # 거절 → 둘 다 버림
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True, "parcel": pid}, True
-    lf._maybe_save_addresses(s)
-    run(spawned[0])
-    assert saved == [{"sender": True, "receiver": True, "parcel": pid}] and st.address_offer is None  # 둘 다 저장
-
-
-def test_save_question_only_after_commit_and_blocks_more():
-    """담은 뒤 N2에 저장 제안이 실리고, 저장 답을 기다리는 동안은 '더 없음'을 판정하지 않는다."""
-    from app.calls.live import Spoken
+def test_customer_info_saved_on_commit_without_asking():
+    """택배를 담으면 묻지 않고 저장 대상(성함·보내는 곳·받는 곳)을 저장한다(2026-11-06). 담기 전에는 저장하지 않는다."""
     from app.domain.confirm import issue_parcel_confirmation
     from app.policy.render import decision_questions
     from app.tests.test_domain import P, filled
     from app.tests.test_results import session
-    lf = LiveFlow.__new__(LiveFlow)
-    lf.policy, lf.svc = P, SimpleNamespace(results=None)
-    lf.cfg = SimpleNamespace(decision_min_confidence=0.6)
-    sent = []
+    saved, sent = [], []
+
+    async def save_addresses(s, seq, snap, offer):
+        saved.append(offer)
 
     async def notify(s, level, facts):
         sent.append((level, facts))
 
-    lf.notify = notify
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.policy, lf.notify = P, notify
+    lf.svc = SimpleNamespace(results=SimpleNamespace(save_addresses=save_addresses), call_session_seq=None)
     st = filled()
+    s = session(st)
+    spawned = []
+    s.spawn = lambda coro, name: spawned.append(coro)
     p = issue_parcel_confirmation(st, P, 100.0)
-    st.address_offer, st.address_consent = {"sender": True, "receiver": True}, None
-    run(lf.commit(session(st), p.id))
+    st.address_offer = {"name": True, "sender": True, "receiver": True}
+    lf._maybe_save_addresses(s)
+    assert not spawned  # 되읽기 중(담기 전)에는 저장하지 않는다
+    run(lf.commit(s, p.id))
     [(level, facts)] = sent
-    assert level == "N2" and facts["parcel_added"] and facts["address_save"] == {"sender": True, "receiver": True}
-    names = lambda **kw: [q["name"] for q in decision_questions(P, "more_parcels", **kw)]  # noqa: E731
-    assert names(save=True) == ["save", "switch"]  # 저장 답 대기: more 없음
-    assert names() == ["more", "switch"]  # 답을 들은 뒤에는 다시 더 보낼 택배를 듣는다
-    utt = Spoken(9, "네 해 주세요", 0, 500, 200.0, 200.5)
-    run(lf.apply(session(st), utt, None, {"save": ("yes", 0.95, {})}, None))
-    assert st.address_consent is True and st.address_offer is None  # 한 번의 답으로 둘 다
+    assert level == "N2" and facts["parcel_added"] and "address_save" not in facts  # 저장 여부를 묻지 않는다
+    run(spawned[0])
+    assert saved == [{"name": True, "sender": True, "receiver": True, "parcel": facts["parcel_added"]}]
+    assert st.address_offer is None
+    assert [q["name"] for q in decision_questions(P, "more_parcels")] == ["more", "switch"]  # 저장 질문 없음
 
 
 def test_order_intent_notice_carries_missing_so_first_question_follows_order():
@@ -506,3 +641,125 @@ def test_origin_paths_other_place_and_recent_only():
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
     out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
     assert "sender_address" in out and "sender_address_detail" not in out
+
+
+def test_customer_end_mid_collection_greets_then_hangs_up():
+    """접수 도중 고객이 끝내면(switch=end) 기존대로 마무리 인사 뒤 끊는다(완료 단계가 아니어도)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "택배 보내려고요", 1000)
+        await say(conn, "그냥 끊어주세요", 2000)
+        await until(lambda: s.phase == Phase.CLOSING)
+        reason = s.close_reason
+        await ai(conn, "감사합니다. 좋은 하루 보내세요.", 3000)
+        await task
+        return reason, conn
+
+    reason, conn = run(scenario())
+    assert reason == "customer_end" and client.hangups == ["live_1"]
+    assert any(e["type"] == "session.commentary.append" and "closing" in e["content"] for e in conn.sent)
+
+
+def test_inquiry_intent_still_hears_end_and_hangs_up():
+    """문의로 시작한 통화도 '끊어 주세요'를 듣고 마무리 인사 뒤 끊는다(운영 통화 8df5dd7f·6cb7ff73: 판단이 없어 무음 종료)."""
+    svc, client = flow()
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "궁금한 게 있어요", 1000)
+        intent = s.state.intent
+        await say(conn, "네 끊어주세요", 2000)
+        await until(lambda: s.phase == Phase.CLOSING)
+        reason = s.close_reason
+        await ai(conn, "감사합니다. 좋은 하루 보내세요.", 3000)
+        await task
+        return intent, reason
+
+    intent, reason = run(scenario())
+    assert intent == "inquiry" and reason == "customer_end" and client.hangups == ["live_1"]
+
+
+def test_order_tool_after_inquiry_or_lookup_switches_intent_to_order():
+    """문의·조회 뒤 접수 도구를 부르면 접수로 바뀌어 더 보낼 택배·마무리 판단을 받는다. 접수 중 조회 도구는 접수를 유지."""
+    from app.domain.assess import assess
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    lf = LiveFlow.__new__(LiveFlow)
+    lf.svc = SimpleNamespace(stage2=lambda s: None)
+    lf.rt = lambda s: SimpleNamespace(intent_started=True)
+    for before in ("inquiry", "lookup", "cancel", "agent"):
+        assert [q["name"] for q in decision_questions(P, before)] == ["switch"]  # 끝내기·전환을 듣는다
+        st = filled()
+        st.intent = before
+        lf._business(session(st), "order")
+        assert st.intent == "order" and assess(st, P).stage == "readback"
+    lf._business(session(st), "lookup")
+    lf._business(session(st), "inquiry")
+    assert st.intent == "order"
+
+
+class SlowResults:
+    """결과 전송이 끝나지 않는 가짜(마무리 결과 대기 상한 확인)."""
+    def __init__(self):
+        self.tasks = {}
+
+    def start(self, s, on_result):
+        self.tasks[s.call_id] = asyncio.ensure_future(asyncio.sleep(30))
+
+
+def test_flow_complete_without_result_closes_with_pending_and_reminds_silent_greeting():
+    """완료 단계: 결과가 상한 안에 안 오면 pending으로 마무리 인사를 시키고, AI가 말하지 않으면 1번 다시 요청한 뒤
+    인사가 끝나고 최소 1초 뒤에 끊는다."""
+    from app.tests.test_domain import confirm_once, filled
+    client = FakeClient()
+    client.decisions = FakeDecisions()
+    svc = service(client, utterance_gap_ms=40, notify_quiet_ms=30, closing_quiet_ms=1000, closing_max_sec=12.0,
+                  closing_result_wait_sec=0.2)
+    lf = LiveFlow(svc)
+    svc.results = SlowResults()
+    hung = []
+    hangup = client.live.sessions.hangup
+    client.live.sessions.hangup = lambda sid: (hung.append(time.time()), hangup(sid))[1]
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        st = filled()
+        confirm_once(st)
+        s.tools.state = st
+        await lf._follow(s, "no_more", None)                       # 완료 단계 → 결과 0.2초 대기 → pending 마무리
+        assert s.phase == Phase.CLOSING and s.close_reason == "flow_complete"
+        await until(lambda: sum("closing" in e.get("content", "") for e in conn.sent) == 2, timeout=6.0)  # 4초 무발화 → 재요청
+        await ai(conn, "이용해 주셔서 감사합니다. 좋은 하루 보내세요.", 9000)
+        said_t = s.last_output_t
+        await task
+        svc.results.tasks["live_1"].cancel()
+        return conn, said_t
+
+    conn, said_t = run(scenario())
+    closings = [e["content"] for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"]]
+    assert len(closings) == 2 and all('"pending"' in c for c in closings)
+    assert client.hangups == ["live_1"] and hung[0] - said_t >= 1.0
+
+
+def test_cancel_target_carries_status_meaning():
+    from app.calls.live import _order_facts
+    facts = _order_facts({"receiver_name": "홍길동", "status": "COLLECTING", "receiver_address": "부산"})
+    assert facts == {"receiver_name": "홍길동", "status": "COLLECTING", "status_text": "접수 미완료(정보 수집 중), 최종 접수 전"}

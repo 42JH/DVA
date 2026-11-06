@@ -131,23 +131,31 @@ class ResultService:
             s.note("고객 등록 실패", e.code)
 
     async def save_addresses(self, s: CallSession, call_session_seq, snap: dict, offer: dict) -> None:
-        """고객 동의 후 저장(BE 계약 ai-call-follow-up.md): 기본 주소 PATCH(통화 중, call_session_seq 헤더),
-        받는 곳 PIN 추가(같은 주소 409 DUPLICATE_RESOURCE는 이미 있음). 실패는 주문에 영향 없음(관측만)."""
+        """택배를 담으면 묻지 않고 저장(사용자 결정 2026-11-06): 고객 이름·기본 주소 PATCH 한 번(통화 중, call_session_seq
+        헤더) 뒤 통화 중 고객 정보도 갱신, 받는 곳 PIN 추가(같은 주소 409 DUPLICATE_RESOURCE는 이미 있음).
+        실패는 주문에 영향 없음(관측만)."""
         try:
             seq = await call_session_seq(s)
             c = s.state.customer
             if not seq or not c.customer_seq:
                 s.note("주소 저장 생략", "통화 번호·고객 번호 없음")
                 return
+            fields = {}
+            if offer.get("name") and (snap.get("sender_name") or "").strip():
+                fields["name"] = snap["sender_name"].strip()
             if offer.get("sender") and (geo := snap.get("sender_geo")):
-                address = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,
-                           "detailAddress": snap.get("sender_address_detail") or "", "dongName": geo.dong_name,
-                           "postalCode": geo.postal_code}
-                await self.backend.write("update_customer_address", self.backend.api.update_customer_address,
-                                         c.customer_seq, seq, address)
-                c.default_address = snap["sender_address"]
-                c.default_address_detail = snap.get("sender_address_detail") or ""
-                s.note("기본 주소 저장", "ok")
+                fields["address"] = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,
+                                     "detailAddress": snap.get("sender_address_detail") or "",
+                                     "dongName": geo.dong_name, "postalCode": geo.postal_code}
+            if fields:
+                await self.backend.write("update_customer", self.backend.api.update_customer,
+                                         c.customer_seq, seq, fields)
+                if "name" in fields:
+                    c.name = fields["name"]
+                if "address" in fields:
+                    c.default_address = snap["sender_address"]
+                    c.default_address_detail = snap.get("sender_address_detail") or ""
+                s.note("고객 정보 저장", ",".join(fields))
             if offer.get("receiver") and snap.get("receiver_geo"):
                 await self.backend.write("create_pin", self.backend.api.create_pin, seq, c.customer_seq,
                                          to_order(snap), "receiver", snap.get("receiver_name") or "받는 곳")

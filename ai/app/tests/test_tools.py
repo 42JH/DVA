@@ -208,9 +208,32 @@ def test_full_parcel_opens_readback_with_facts(corrector, address):
     assert out["can_proceed"] is True and c.state.pending is not None and c.state.pending.issued_t == 100.0
     facts = out["facts"]["readback"]
     assert "sender_phone" not in facts and facts["receiver_phone"] == "01098765432"  # 발신번호는 읽지 않는다
-    # 주소 저장은 되읽기 확인과 섞지 않는다: 제안은 상태에만 두고 담은 뒤 따로 묻는다(2026-11-05)
+    # 저장 대상은 상태에만 두고 담을 때 묻지 않고 저장한다(2026-11-06)
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
-    assert c.state.address_consent is None
+
+
+def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(corrector, address):
+    """no·change로 확인 대기를 푼 뒤(운영 통화 56c133c8): 고친 값이 기록되기 전 같은 값은 NOTHING_CHANGED만,
+    고친 값이 기록된 뒤 같은 값을 다시 말하면 되읽기로 대기를 다시 연다. 대기가 있으면 되읽기를 또 주지 않는다."""
+    from app.domain.confirm import release
+    c = ctx(address=address)
+    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
+                              "sender_address_detail": "3층"})
+    call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
+                              "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
+                              "small_box_count": 1, "item_price": 30000})
+    again = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert again["code"] == "NOTHING_CHANGED" and "readback" not in again.get("facts", {})  # 대기 유지, 되읽기 반복 없음
+    assert release(c.state, c.state.pending.id) and c.state.awaiting_fix and c.state.pending is None
+    same = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert same["code"] == "NOTHING_CHANGED" and c.state.pending is None                   # 고칠 값을 기다린다
+    fixed = call(c, "record_fields", {"client_comment": "승용차"})
+    assert c.state.pending and "readback" in fixed["facts"] and not c.state.awaiting_fix    # 정정 기록 → 새 되읽기
+    release(c.state, c.state.pending.id)
+    c.state.awaiting_fix = False                                                             # 정정이 다른 경로로 끝난 뒤
+    reopened = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert reopened["code"] == "NOTHING_CHANGED" and reopened["facts"]["readback"]["receiver_name"] == "이영희"
+    assert c.state.pending is not None
 
 
 # --- find_destination ---
@@ -273,6 +296,21 @@ def test_lookup_orders_scope_name_and_selection():
     assert out["status"] == "needs_choice" and len(c.state.candidates.labels) == 2
     assert call(c, "lookup_orders", {"receiver_name": "없음"})["code"] == "ORDER_NOT_FOUND_BY_NAME"
     assert call(ctx(db), "lookup_orders", {})["code"] == "CALL_NOT_REGISTERED"  # 고객 범위 없으면 조회 안 함
+
+
+def test_lookup_orders_gives_status_meaning_not_pickup():
+    """통화 293: COLLECTING을 '수거 진행 중'으로 안내함 → 서버가 상태의 뜻을 같이 준다(수거·배송·결제 언급 없음)."""
+    from app.tools.lookup import ORDER_STATUS_TEXT, status_text
+    db = MockBackend()
+    cust = registered(db)
+    db.add_order(CALLER, "COLLECTING", [("홍길동", "부산 해운대구 센텀로 10")])
+    [order] = call(ctx(db, customer=cust), "lookup_orders", {"receiver_name": "홍길동"})["facts"]["orders"]
+    assert order["status"] == "COLLECTING" and order["status_text"].startswith("접수 미완료")
+    statuses = ("COLLECTING", "notPaid", "PAID", "SUBMITTING", "ACCEPTED", "SUBMISSION_FAILED", "CANCELLED")
+    assert set(ORDER_STATUS_TEXT) == set(statuses)  # BE 계약의 주문 상태 전부
+    assert not any(w in text for text in ORDER_STATUS_TEXT.values() for w in ("수거", "배송", "결제 완료", "결제 전"))
+    assert ORDER_STATUS_TEXT["ACCEPTED"] == "접수 완료"
+    assert status_text("SOMETHING_NEW") == status_text(None) == "확인 필요"  # 모르는 상태는 추측하지 않는다
 
 
 def _order(db, status="COLLECTING"):

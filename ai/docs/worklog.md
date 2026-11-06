@@ -527,6 +527,21 @@
 - 무관한 요청: 1억 이상 같은 터무니없는 가격·택배와 무관한 요청은 처리하기 어렵다고 응대, 계속되면 안내 후 상담 종료
 - 사용자가 작성한 수정을 요청에 따라 커밋(코드 변경 없음)
 
+## 2026-11-05 — develop-ai 최신화 및 프로젝트 구조 점검
+- origin fetch 후 develop-ai를 f34343f에서 2ac6717로 fast-forward(27개 커밋). 기존 미추적 output/, tmp/ 보존.
+- 실제 진입점 app/main.py 기준으로 calls(통화·위임·결과), domain(업무 상태·확인), tools, address, rag, persistence(outbox), monitor, backend_client 구조 확인. 소스코드·외부 API 계약 변경 없음.
+- 이 브랜치의 frontend는 .gitkeep만 있고 backend는 NestJS 상태 확인용 기본 코드. 전체 서비스 구현 범위와 혼동하지 않도록 각 개발 브랜치 구분 필요.
+- README 및 architecture/current-state.md의 부품 모음·서버 부재 설명은 현재 구현과 차이 있음. Dockerfile은 현재 app.main:app을 실행하며 단일 워커 사용.
+- 검증: 기존 가상환경(Python 3.14.7)에서 플러그인 자동 로딩·pytest 캐시를 끄고 test_dashboard_metrics.py의 이탈 단계·대기시간·측정 범위 테스트 18 passed, 4 deselected. 전체 테스트와 확대 실행은 완료되지 않아 중단(일부 오류 표시 포함, 원인 미확정). 전체 통과로 판단하지 않음.
+- 실제 OpenAI·PBX·백엔드·카카오·Qdrant 통합 검증 및 배포는 수행하지 않음.
+
+## 2026-11-05 — LIVE-1 위임 대기 발화 원인 조사
+- docs/architecture/live-waiting-speech-investigation.md에 코드·기존 실험·공식 문서 근거와 다음 검증 계획 기록. 구현·외부 계약 변경 없음.
+- 공통 정책은 결과 전 짧은 대기 안내를 요구하고, 기본 페르소나는 안내 문구 혼합을 요구함. 운영 BE ACTIVE 페르소나 적용 여부는 미확인.
+- Responses 위임 중 LIVE 자율 발화와 이후 결과 안내가 이어지는 현상을 유력 원인으로 분류. 문장 중단·무관한 발화의 정확한 원인은 최신 녹음·이벤트 부재로 미확정.
+- 공식 문서의 자동 acknowledgment 억제는 client 위임용이며 현재 Responses에 직접 적용 불가. 설치 SDK에도 해당 delay 필드는 없음.
+- 검증은 코드·설치 SDK·공식 문서·기존 실험 보고서 읽기만 수행. 테스트·실통화·유료 API 호출 없음.
+
 ## 2026-11-05 — FAQ 응대 근거 배열 연동 구현
 
 - 사용자 요청으로 구현 재개. Jira 번호 없이 진행하라는 지시에 따라 origin/develop-ai e5a9dee에서 feature/faq-answer-evidence 생성. 기존 로컬 develop-ai c296bfa·output/tmp 보존.
@@ -689,6 +704,7 @@
 - 기본 페르소나는 고객이 이해할 수 있는 선에서 매우 빠르게 말하기, 고객 발화 시 즉시 멈추기, 짧은 받는 말 없이 기다리기 및 맞장구 문구를 사용자 수정대로 반영한다. BE 활성 페르소나 사용 시 기본 페르소나 수정 적용 범위는 기존과 같다.
 - 기존 정책·페르소나 관련 테스트 **27 passed, 13 warnings / 1.68초**, git diff --check 통과. 실제 모델의 공격 방어·음성 속도를 검증한 것은 아니다. 서비스 코드·외부 API 계약·운영 데이터는 변경하지 않았고 output/·tmp/는 포함하지 않는다. 운영 배포는 별도다.
 
+
 ## 2026-11-05 주소 보정 전면 재설계 — 분석·설계(구현 전, 승인 대기)
 - 요구: STT 주소를 실제 주소로, 도로부터·건물명만·구/동부터 말해도 인식, 지번→도로명, 낮은 STT 정확도 내성, 카카오 `analyze_type=similar` 활용
 - 현황: v1 시험지 106/106·15/15, 보정 p50 8ms. 구조적 전제 = 시도→시군구를 앞에서 반드시 찾음 → 도로만·건물명만·동부터는 not_found. 전국 중복(중앙로 92개 시군구)이라 지역 없는 발화는 "되묻기"가 정답인 경우가 많음(사용자 이전 실험 실패 7건 모두 다른 지역 같은 도로명)
@@ -734,3 +750,105 @@
 - 검증 scripts/compare_geo.py: 시험지 정답 주소 + 무작위 100건 = 146건에서 로컬·카카오 세 값 일치 145, 다름 0, 로컬 없음 0, 카카오 없음 1 → 전환
 - 결과: v1 106/106·15/15 warm p50 7.7·p95 172ms, v2 48/55(카카오 끔)·되묻기 10/10·없는 주소 6/6 p50 100·p95 211ms (address_v*_redesign_s4.json). 시험 +3(geo 표기·시도 줄임·서비스 로컬 우선과 카카오 보완). 문서: tool-contracts·error-recovery·decisions P12
 - 운영 반영 시: address.db 재업로드(859MB, 새 색인 포함) 필요. 다음: 1번 방안(확인 질문 띠) 재검토
+=======
+## 2026-11-05 — S15P31D109-162 업무 무관 질문 응답 제한 작업 준비
+
+- 사용자 요청으로 origin/develop-ai를 fetch하고 최신 6c8499f에서 `fix/S15P31D109-162-live-off-topic-guard` 브랜치를 생성했다. 로컬 develop-ai의 미병합 문서 커밋 2개와 기존 output/·tmp/는 보존했다.
+- 고정 business_rules.md에 무관한 요청 거절 규칙이 있으나, ‘고객이 무슨 말을 하든 응대’ 지시와 ‘정상적인 응대가 어렵다고 판단될 경우’라는 조건이 함께 있음을 확인했다. 실제 라면 추천 발화의 로그·운영 페르소나는 확인하지 않아 원인으로 확정하지 않는다.
+- 후속 수정안: 고정 업무 규칙에 상담 범위와 일상 질문의 짧은 업무 복귀 응대를 명시하고, 정상 배송 문의·인사·혼합 발화를 구분한다. 프롬프트 검증과 실제 모델 대화 평가로 효과를 확인한 뒤 추가 서버 제어 필요성을 판단한다.
+- 이번 요청 범위는 분석과 작업 준비다. 서비스 코드·프롬프트·외부 계약 변경 및 모델 호출·테스트·커밋·푸시·배포 없음.
+
+## 2026-11-05 — S15P31D109-162 상담 범위 및 FAQ 자료 열람 제한
+
+- 사용자가 수정한 business_rules.md·backend_rules.md를 검토하고 커밋·푸시·develop-ai 대상 MR 생성 요청에 따라 반영한다. fetch로 origin/develop-ai 6c8499f와 작업 브랜치 기준이 같음을 확인했다.
+- Live 고정 업무 규칙에 택배 상담 범위와 정상 서비스 문의 구분, 업무 밖 답변·추천 제한, 확인·선택 단계 복귀를 명시했다. 무관한 요청 반복 시 종료 지시를 제거하고 범위 안내로 대체했다. 마무리의 일반 종료 금지 문장은 사용자 수정대로 삭제했으며 workflow.toml의 기존 금지 규칙과 서버 closing 절차는 유지한다.
+- Live·Backend 양쪽에 FAQ 번호·문서 ID로 자료 열람·목록·원문·요약을 요청하는 경우 검색·공개하지 않는 지시를 반영했다. Backend에는 순차 읽기·번역 및 이미 검색된 자료 반환 제한과 혼합 요청의 정상 서비스 질문만 검색하는 지시를 추가했다.
+- 기존 정책·페르소나·공통 입력 제한·RAG 프롬프트 테스트 64 passed, 13 warnings / 2.53초. 샌드박스 실행은 비동기 테스트 대기로 중단한 뒤 동일 테스트를 외부 실행으로 완료했다. git diff --check 통과. 사용자 QA 결과와 별개로 이번 작업에서 실제 모델 공격 방어·실통화·응답 지연은 검증하지 않았다.
+- 서비스 코드·외부 API 계약·검색 접근 권한 변경 없음. 프롬프트만으로 기밀 보호를 보장하지 않으며, 비공개 자료의 검색 권한 분리는 별도 작업이다. output/·tmp/는 커밋에서 제외하고 운영 배포·병합은 수행하지 않는다.
+
+## 2026-11-05 — 접수 완료 단계에서 마무리 인사 뒤 자동 종료
+
+- 브랜치 `fix/auto-close-after-flow`(develop-ai 6c8499f 기반). 지시문(workflow.toml·business_rules.md)은 다른 개발자가 수정 중이라 변경하지 않았다.
+- 문제: 종료는 고객이 끝내겠다고 말할 때(Decision end)뿐이었다. "더 없음"으로 assess 단계가 closing이 돼도 N1' more_parcels만 보내고 무발화 30초까지 통화가 유지됐다.
+- live.py: no_more 뒤 단계가 closing이면 `_finish` — 결과 전송 시작 → 결과를 `closing_result_wait_sec`(기본 5초)까지 기다림(실패·초과면 pending) → 기존 고객 종료와 같은 N2 `{more_parcels:false, closing:true, order}` → `begin_closing("flow_complete")`. 인사 문구는 기존 지시문의 closing 규칙을 따른다. 고객이 먼저 끝냈거나 마무리 중이면 실행하지 않는다.
+- service.py: 마무리 인사를 요청하고 4초 안에 말이 없으면 closing N2를 1번 다시 보낸다(고객 종료 경로도 같음). 상한 `closing_max_sec`에 걸려도 마지막 출력 전사 뒤 `closing_quiet_ms`는 지킨다(계속 말하면 +5초까지). `closing_quiet_ms`는 설정 검증 1000 이상(운영 1200 유지).
+- 관제: "마무리 결과 대기", "마무리 마지막 발화→끊기", "마무리 오디오 끝 추정−전사 수신"(session.started + 출력 전사 end_ms 기준 추정 — 미실측이라 끊는 시점에는 쓰지 않고 기록만).
+- 테스트: 접수 E2E를 "더 없음 → 결과 → 마무리 인사 → 1초 이상 뒤 끊김"으로 바꿈, 접수 도중 고객 종료, 결과 미수신 pending·무발화 재요청·1초 보장, closing_quiet_ms<1000 거부. 전체 **640 passed**.
+- 외부 계약(BE API·PBX hangup·Live 이벤트) 변경 없음. 미확인: 전사 수신과 실제 오디오 재생·PBX 전달 지연의 차이(실통화로 관제 값 확인 필요), 결과 대기 5초의 적정성. 남은 한계: 마무리 중 고객 발화는 듣지 않고 끊는다. 조회·취소·문의는 state에 완료 단계가 없어 범위 밖. 결과 대기 동안 "궁금한 점 있는지 묻는" 기존 지시문 문구(more_parcels)와는 N1' more_parcels를 보내지 않아 충돌하지 않지만, 지시문 수정 시 closing 규칙과 맞춰야 한다.
+
+## 2026-11-05 — S15P31D109-162 최신 develop-ai 병합 충돌 해결
+
+- origin/develop-ai 70c839c의 접수 완료 후 자동 종료 변경을 작업 브랜치에 병합했다. 충돌은 worklog.md 끝의 기록 추가 부분 1곳이며, 양쪽 기록을 모두 보존했다. 팀원 코드와 사용자 프롬프트는 수정하지 않았다.
+- 정책·페르소나·입력 제한·RAG 프롬프트·통화 서비스·통화 흐름 회귀 테스트 98 passed, 13 warnings / 16.01초. git diff --check 통과. 실제 모델·실통화 검증 및 develop-ai 병합은 수행하지 않는다.
+
+## 2026-11-05 — 관제페이지 글씨 크기·통화 상태 표시 개선
+- 사용자 요청으로 develop-ai에 origin/develop-ai af62245 병합. 로컬 문서 커밋 2개를 보존했고, worklog 끝의 추가 기록 충돌은 양쪽 내용을 모두 유지해 해결했다.
+- monitor/static/index.html: 가운데 받아쓰기 말풍선 글씨를 18px에서 16px로 축소. 왼쪽 통화 목록에 active는 파란색 ‘통화중’, ended는 빨간색 ‘통화 종료’ 배지로 표시. accepting은 중립색 ‘연결 중’, 알 수 없는 상태는 기존 값 표시.
+- 기존 SSE 갱신 흐름으로 종료 시 배지도 즉시 갱신. 외부 API·인증·통화 처리 로직 변경 없음.
+- 검증: 기존 관제 테스트 5 passed. Node 실행으로 SSE active→ended 갱신, accepting·미지 상태 표시와 HTML 이스케이프 확인. git diff --check 통과. 제한 환경 pytest는 출력 없이 대기해 권한 확장 실행으로 검증 완료.
+- 운영 URL은 웹 도구로 접근하지 못해 운영 화면의 시각 검증은 미수행. 서버 배포·원격 push는 수행하지 않음.
+- 사용자 지시에 따라 Jira 이슈 번호 없이 design/monitor-readability 브랜치로 작업을 분리했다. develop-ai는 수정 전 최신화 병합 상태(5bb221d)로 복원하고, 수정 커밋 제목을 팀 규칙의 한국어 형식으로 정리했다.
+
+## 2026-11-05 — 고객·기업 검색 API 서비스 토큰(AI_BUSINESS_TOKEN)
+
+- BE 요청: POST /api/customers/context, POST /api/customers, PATCH /api/customers/{id}, GET /api/companies/search에 `Authorization: Bearer <AI_BUSINESS_TOKEN>`. 요청 본문·응답 해석·call_session_seq 헤더는 그대로. 페르소나·분석 API는 기존 토큰 유지, 쿠키는 보내지 않는다.
+- GET /api/customers/{id}는 통화 흐름이 쓰지 않지만 요청 목록에 있어 `customer_detail`(200 data·404 None)을 토큰과 함께 추가(MockBackend도 같은 메서드). /api/customers/{id}/pins·addresses는 요청 범위 밖이라 토큰을 붙이지 않았다.
+- 토큰 미설정이면 헤더 없이 호출하고 시작 시 경고(BE 인증 적용 전 배포 호환). 401은 gateway에서 `BE_AUTH_FAILED`(kind contract, 재시도 없음, 경보 로그)로 분류.
+- .env.example·compose.yaml에 AI_BUSINESS_TOKEN 추가. 테스트: 5개 호출 헤더·상세 404·미설정·기존 토큰 분리·401 1회. develop-ai 병합 후 전체 **647 passed**.
+
+## 2026-11-06 — 조회·취소 확인 결과에 주문 상태의 뜻을 서버가 함께 전달
+
+- 브랜치 `fix/lookup-order-status-text`(develop-ai 20e7e12 기반). 통화 293에서 통화 267의 주문(orderSeq 97, COLLECTING)을 "현재 수거 진행 중"으로 잘못 안내. 원인: `_parcels`가 주문 상태 원문을 넘기고 `lookup_orders`·취소 확인(`_order_facts`)이 뜻 없이 모델에 전달, 지시문에도 조회 상태의 뜻이 없음(옛 `[status_names]`는 새 구조에서 빠짐).
+- `app/tools/lookup.py`에 `ORDER_STATUS_TEXT`·`status_text` 추가, 조회 결과 orders와 취소 확인 cancel_target에 `status_text`를 붙임(`status` 원문은 유지). 문구는 BE 계약 기준, 사용자 결정: ACCEPTED = "접수 완료"만, 수거·배송 언급 없음, COLLECTING에 "결제 전" 언급 없음, 결제 완료도 말하지 않음(PAID = "접수 대기 중"), 모르는 상태 = "확인 필요".
+- 표는 지시문이 아니라 서버 코드에 둔다: 다른 개발자가 수정 중인 지시문과 간섭하지 않게(사용자 결정, 코드 주석에 명시). 정책 단일 출처 원칙과는 어긋나므로 지시문 정리 후 옮길지 별도 결정.
+- 테스트: COLLECTING 조회에 "접수 미완료", 7개 상태 전부 문구 있음, 수거·배송·결제 단어 없음, 모르는 상태, 취소 확인 결과. 전체 **649 passed**. BE API·응답 형식·취소 가능 상태 판정 변경 없음. 실제 모델이 status_text대로 말하는지는 실통화 미확인.
+
+## 2026-11-06 — 고객 정보(성함·기본 주소) 자동 갱신, 주소 저장 동의 절차 제거
+
+- 브랜치 `feat/auto-save-customer-info`(develop-ai c2a9661 기반). 사용자 결정: 기존 고객이 접수 중 보내는 분 성함·보내는 곳을 바꾸면 고객 정보도 PATCH로 갱신하고, 동의는 묻지 않는다. 기존 주소 저장 제안(보내는 곳 기본 주소·받는 곳 PIN)도 묻지 않고 자동 저장.
+- `save_offer`(address_book.py): 보내는 분 성함(앞뒤 공백 제거)이 등록 이름과 다르면 `name` 추가. 저장 시점은 그대로 택배를 담을 때(되읽기 중에는 저장하지 않음).
+- `BackendAPI.update_customer_address` → `update_customer(customer_seq, call_session_seq, fields)`: name·address를 PATCH /api/customers/{id} 한 번에(customers.md:30 "name·address 중 한 개 이상"). 헤더(call_session_seq·AI_BUSINESS_TOKEN)는 그대로. MockBackend도 같은 이름·검증(빈 이름·지원 외 필드 400).
+- `ResultService.save_addresses`: PATCH 성공 뒤 통화 중 고객 정보(`customer.name`·`default_address`·`default_address_detail`) 갱신. 실패는 기존처럼 관측만.
+- 동의 절차 제거: `address_consent`·`_save_pending`·Decision `save` 질문 세트·`[results].address_save`·parcel_added의 저장 질문 문장. business_rules.md는 "저장 여부를 묻지 않는다" 한 줄로 교체.
+- 계약 차이: BE 문서(ai-call-follow-up.md)는 "AI가 고객 동의를 받은 경우에만 저장"이라 되어 있다. 사용자 결정으로 동의 없이 저장하며, BE와 공유 필요.
+- 테스트: 성함 다를 때 name 대상, 이름+주소 한 번의 PATCH 본문, 담을 때 묻지 않고 저장·N2에 address_save 없음·more_parcels에 save 질문 없음. 전체 **648 passed**(교체 테스트 2→1). 실통화·실 BE 미확인.
+
+
+## 2026-11-06 — 문의·조회로 시작한 통화가 접수 뒤 마무리를 못 하던 문제(업무 의도 고정)
+
+- 브랜치 `fix/intent-lock-after-inquiry`(develop-ai 9765f25 기반). 운영 로그(11/5 23:42 자동 종료 배포 이후 21건) 점검: 접수가 들어간 11건 중 4건(8df5dd7f·6cb7ff73·7a77756f·b8f3795c)이 업무 의도 inquiry로 고정된 채 진행. 8df5dd7f는 "아니요 없어요"를 판정하지 못해 "접수 결과를 확인하고 있습니다"로 30초 멈춘 뒤 무음 종료(결과는 통화 뒤 전송). 6cb7ff73은 "제가 끊을까요?"에 AI가 "임의로 끊지 않는다".
+- 원인: (1) `_business`가 의도가 비었을 때만 정해, 문의·조회 뒤 접수 도구를 불러도 의도가 그대로. (2) `decision_questions`가 정책 단계가 아닌 업무(inquiry·lookup·cancel·agent)에 질문 0개 → 끝내기·전환·더 없음을 못 들음.
+- 수정: `_business`(live.py) — 접수 도구(record_fields·find_destination)가 오면 다른 업무 의도를 order로 바꾸고 관제에 "업무 전환" 기록. 접수 중 조회·문의 도구는 의도를 바꾸지 않음(기존). `decision_questions`(render.py) — inquiry·lookup·cancel·agent 단계에 collect 세트(switch: 끝내기·업무 전환)를 묻는다. Decision의 order 판정으로는 의도를 바꾸지 않는다(조회 중 받는 분 성함을 접수 정보로 오판할 위험).
+- 테스트: 문의 의도에서 "끊어 주세요" → 마무리 인사 뒤 끊김, 네 업무 의도 모두 switch 질문·접수 도구 뒤 order 전환(readback 단계), 접수 중 조회·문의 도구는 order 유지. 수정 전 코드에서 두 테스트 실패 확인. 전체 **650 passed**.
+- 남은 점검 항목(별도 작업): 확인 '네' 신뢰도 미달(CONFIRM_UNCLEAR) 때 Live에 알리지 않아 멈춤(b8f3795c), 마무리 중 Decision 반영·고객 발화 중 끊기, 끝내기 경로의 결과 미대기. switch 지시문은 "하던 접수와 다른 일"이라는 표현 그대로(접수 단계 판정에 영향 주지 않으려고) — 문의·조회 단계 판정 정확도는 실통화 미확인.
+
+## 2026-11-06 — 상담 용어를 ‘발송 주소’로 통일
+
+- `fix/dispatch-address-wording`(`develop-ai` 9765f25 기준, Jira 이슈 없음). 택배를 보내는 곳의 주소는 요청·재질문·되읽기에 ‘발송 주소’를 쓴다. 동·호수는 기존 문구로 묻는다.
+- 고객이 ‘발송 주소’, ‘보내는 주소’, ‘보내는 곳’, ‘출발지’라고 말하면 발송 주소로 이해한다. `sender_address`·`sender_address_detail`, BE 주문의 `origin` 및 주소록 저장 데이터는 유지했다.
+- 초안은 전체 테스트 648개, 문구 정리 후 상담 정책·도구·통화 흐름·BE 계약 테스트 93개 통과. 실제 통화 음성은 미확인.
+
+## 2026-11-06 — 애매한 확인 답('네' 신뢰도 미달)에 다시 묻기
+
+- 브랜치 `fix/confirm-unclear-reask`(develop-ai 1e1b8dd 기반, MR 318과 독립). 운영 통화 b8f3795c: 되읽기 뒤 "아 그렇게 접수해줘"가 confirm=yes 0.56(yes_min 0.7 미만) → 관문 CONFIRM_UNCLEAR로 확정하지 않으면서 Live에 아무것도 보내지 않음. AI는 "접수 진행 여부를 확인하겠습니다" 뒤 32초 멈췄고 무음 종료, 결과 INCOMPLETE NO_CONFIRMED_PARCEL.
+- 수정(live.py `_on_confirm`): CONFIRM_UNCLEAR이면 확정하지 않고 기존 '다시 묻기'(N2 confirmation=ask_again + 되읽기 값)를 보낸다. 같은 발화로 위임이 돌고 있으면(고친 값의 되읽기가 따라옴) 묻지 않는다. 다른 관문 실패(되읽기 도중 '네'·내용 바뀜·통화 끝)는 그대로.
+- `ask_confirm` 후속: 같은 내용이어도 다시 보낸다(again — 두 번째 애매한 답에도 멈추지 않게). 취소 확인 대기면 택배 되읽기 대신 cancel_target(받는 분·상태)을 준다(이전에는 받던 택배가 있으면 택배 되읽기를 줄 수 있었음). workflow.toml [results].confirmation에 cancel_target 함께 오면 취소 여부를 다시 묻고, 처리했다고 말하지 않는다는 문장 추가.
+- 확인 기준(yes_min 0.7)은 바꾸지 않았다(정확도 우선).
+- 테스트: 애매한 '네' 두 번 → ask_again 두 번·확정 없음 → 분명한 '네'로 확정, 취소 다시 묻기는 cancel_target. 수정 전 코드에서 두 테스트 실패 확인. 전체 **650 passed**. 실통화 미확인.
+
+## 2026-11-06 — 운영 통화 56c133c8 멈춤 분석(확인 대기 해제 뒤 '네'에 응답 없음)
+
+- 통화 56c133c83d0e(08:50~08:59 KST, 배포 4878a08 = fix/confirm-unclear-reask 포함). 되읽기 뒤 "네, 근데 더 빨리는 안돼요"(confirm=not_answer 0.66) → "네, 그리고 승용차로 해주세요"(confirm=change 0.91) → 서버가 확인 대기를 해제(release, N1' cancelled_by_customer).
+- 그 뒤 record_fields는 PICKUP_TOO_SOON(needs 있음)이라 확인 대기를 다시 열지 않았고, 다음 위임(ZRw971)은 함수 호출 없이 끝났다. Live는 서버 되읽기 없이 스스로 "…접수 내용 확인 부탁드릴게요. 이대로 접수할까요?"를 물었다(금지 항목 "서버가 확인 내용을 주기 전에 확정 질문하기" 위반).
+- 고객 "네"(447초): pending이 없어 Decision에 confirm 질문 자체가 없었고(origin만 판정) 후속 알림이 없었다. Live는 확인 답을 서버가 처리할 것으로 보고 침묵(b8f3795c와 같은 양상) → "여보세요" 2회 뒤 43초 만에 고객이 끊음. 결과 INCOMPLETE NO_CONFIRMED_PARCEL.
+- CONFIRM_UNCLEAR 수정(47bc9d5)은 이 경우를 덮지 못한다: 관문 이전에 pending이 없어 `_on_confirm`에 들어가지 않는다. 코드 변경 없음(분석만).
+- 서버 통화 로그 114건 전수 조사(고객 발화 뒤 AI 발화 없이 15초 이상): 20건에서 발생. 같은 구조(Live가 서버를 기다리는데 서버가 아무것도 보내지 않음)의 유형: ① 확인 답 버림(56c133c8·28713d01 change 뒤 재되읽기 없음, 25317d3f·b8f3795c confirm=not_answer/UNCLEAR) ② 확인 밖 짧은 '네'가 Decision 타임아웃·신뢰도 미달(67d29fc5 인사 "네" 15초, 3001ee9e·339a7062) ③ 값 발화를 Live가 맡기지 않는데 서버 안전망 없음(03d23c97 19초 무이벤트, 0b1144e8) ④ 위임·RAG 지연(05cc6bc7 22초, cd39ecfa KB_UNAVAILABLE). 구 설계의 '위임 안전망'(flow.md delegate_wait_sec)은 새 app에 없음(grep 확인). 15초 지표는 고객이 연달아 말한 구간도 포함하므로 상한 추정.
+
+## 2026-11-06 — 확인 대기가 풀린 뒤 되읽기를 다시 열기(운영 통화 56c133c8)
+
+- 브랜치 `fix/readback-pending-reissue`(develop-ai 4878a08 기반). 원인: `change`로 확인 대기(pending)를 푼 뒤 record_fields가 거절(needs)이거나 도구 호출 없는 위임이면 대기가 다시 열리지 않음 → Live가 스스로 "이대로 접수할까요?"를 묻고 '네'는 Decision에 confirm 질문이 없어(pending 없음) 버려짐 → 무음.
+- 상태(state.py): `awaiting_fix` — no·change로 대기를 푼 뒤 고친 값이 기록될 때까지 되읽기를 다시 열지 않는다(release가 켜고 record_fields가 값을 기록하면 끈다). 거절 직후 같은 내용을 되읽지 않게 하는 보호.
+- live.py: ① 위임이 최종 완료(도구 미결 없음)되었는데 readback 단계·pending 없음·awaiting_fix 아님이면 확인 대기를 발급하고 ask_again 되읽기(N2)를 보낸다. 재질문·실패 결과(status≠ok)가 난 위임에는 얹지 않는다. ② readback 단계면 pending이 없어도 Decision에 confirm 질문을 넣고, yes·proceed(yes_min 이상)인데 pending이 없으면 확정하지 않고 발급 후 ask_again, no·change면 awaiting_fix. 시간 기반 감시 없음(사건 기반).
+- record.py: NOTHING_CHANGED여도 pending 없음·awaiting_fix 아님이면 발급해 readback을 같은 결과에 담는다(별도 N2 턴 없이).
+- 테스트: 56c133c8 재현(change → 수거 시각 거절 → 도구 없는 위임 → ask_again → '네' 확정), '아니요' 뒤 되읽기 반복 없음·정정 기록 시 새 되읽기, 도구 단위(같은 값 반복·release·awaiting_fix). 수정 전 코드에서 3개 실패 확인. 전체 **655 passed**. 실통화 미확인.
+- 남은 위험: readback 단계에서 고객이 문의만 한 뒤 도구 없이 끝난 위임에도 되읽기를 다시 보낸다(정책 "다른 질문에 답했으면 '이대로 접수할까요?'로 끝낸다"와 일치, 같은 내용은 notify 중복 제거로 한 번만). assess.py:28 주석("수거 일시 VALID")과 코드(수집 필드만)가 다름 — 미수정.

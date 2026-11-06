@@ -75,6 +75,7 @@ persona_report_attempts = 3
 persona_max_prompt_chars = 20000
 recent_destinations = 5
 closing_quiet_ms = 1200
+closing_result_wait_sec = 5.0
 closing_max_sec = 15.0
 silence_sec = 30.0
 expire_margin_sec = 60.0

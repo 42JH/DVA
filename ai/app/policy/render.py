@@ -109,20 +109,19 @@ def render_backend(policy: Policy) -> str:
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
-                       callback: bool = False, save: bool = False, origin: bool = False) -> list[dict]:
+                       callback: bool = False, origin: bool = False) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
     if stage is None and stage_id == "intent":
         sets = ["intent"]
+    elif stage is None and stage_id in ("inquiry", "lookup", "cancel", "agent"):
+        # 접수 밖 업무에도 끝내기·업무 전환을 듣는다(없으면 문의·조회 뒤 '끊을게요'를 못 들어 무음 종료만 남음, 운영 통화 8df5dd7f)
+        sets = ["collect"]
     if pending:
         sets.insert(0, "confirm")  # confirm은 확인 대기가 있을 때만(delegation.md §3.2)
     if callback:
         sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
-    if save:  # 담은 뒤 주소 저장을 물었고 답을 기다릴 때만(업무 규칙 g)
-        sets.insert(0, "save")
-        # 저장 질문에 답하는 동안 "더 없음"은 듣지 않는다: 저장에 대한 "아니요"가 더 없음으로 읽히면 결과가 바로 전송된다
-        sets = [d for d in sets if d != "more"]
     if origin:
         sets.insert(0, "origin")  # 기존 고객에게 출발지를 물었고 답을 기다릴 때만
     out = []

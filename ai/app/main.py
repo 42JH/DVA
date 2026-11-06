@@ -98,10 +98,13 @@ def build_backend(cfg: BackendConfig, env=os.environ) -> BackendGateway:
         if not url:
             raise RuntimeError("BACKEND_API_URL이 비어 있습니다(가짜 BE는 BACKEND_MOCK=true)")
         log.warning("BE: 실제 BE %s", url)
+        if not env.get("AI_BUSINESS_TOKEN"):
+            log.warning("AI_BUSINESS_TOKEN 미설정: 고객·기업 검색 API를 인증 없이 호출한다")
         api = BackendAPI(url, cfg.timeout_sec, submit_timeout_sec=cfg.submit_timeout_sec,
                          submit_retry_sec=cfg.submit_retry_sec,
                          persona_token=env.get("AI_PERSONA_TOKEN") or None,
                          insights_token=env.get("AI_INSIGHTS_TOKEN") or None,
+                         business_token=env.get("AI_BUSINESS_TOKEN") or None,
                          limits=httpx2.Limits(max_connections=cfg.max_concurrency,
                                               max_keepalive_connections=cfg.max_concurrency))
     return BackendGateway(api, cfg.max_concurrency, cfg.read_budget_sec, cfg.write_budget_sec)

@@ -23,6 +23,7 @@ from backend_client.api import BackendError
     (BackendError("m", 404), "not_found", "BE_NOT_FOUND", False),
     (BackendError("m", 400, "INVALID_REQUEST"), "contract", "BE_CONTRACT_VIOLATION", False),
     (BackendError("m", 422, "VALIDATION_FAILED"), "contract", "BE_CONTRACT_VIOLATION", False),
+    (BackendError("m", 401, "UNAUTHORIZED"), "contract", "BE_AUTH_FAILED", False),  # 서비스 토큰 설정 오류
     (BackendError("m", code="RESPONSE_INVALID"), "contract", "BE_CONTRACT_VIOLATION", False),
     (BackendError("m", code="TRANSPORT"), "unavailable", "BE_UNAVAILABLE", True),
     (BackendError("/api/orders 결과 확인 시간 초과"), "unavailable", "BE_UNAVAILABLE", False),
@@ -31,6 +32,14 @@ from backend_client.api import BackendError
 def test_classify(exc, kind, code, retryable):
     f = classify(exc, "op")
     assert (f.kind, f.code, f.retryable) == (kind, code, retryable)
+
+
+def test_read_does_not_retry_401():
+    gw = BackendGateway(object())
+    fn = Flaky(BackendError("m", 401), "ok")
+    with pytest.raises(BackendFailure) as e:
+        run(gw.read("op", fn))
+    assert e.value.code == "BE_AUTH_FAILED" and fn.calls == 1
 
 
 def test_classify_does_not_swallow_unexpected_errors():

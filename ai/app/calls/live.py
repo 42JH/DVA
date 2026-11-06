@@ -19,11 +19,12 @@ from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
-                                release, take_cancel)
+                                issue_parcel_confirmation, release, take_cancel)
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
+from app.tools.lookup import status_text
 from app.tools.outcome import state_summary
 
 log = logging.getLogger(__name__)
@@ -165,10 +166,10 @@ class LiveFlow:
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
-            save = bool(_save_pending(s.state))
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
-        questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       callback=callback, save=save, origin=origin)
+        # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
+        questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
+                                       pick_labels=pick, callback=callback, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -213,6 +214,13 @@ class LiveFlow:
                     followups.append(("origin", None))
             if "confirm" in answers and pending_id:
                 followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
+            elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
+                # 확인 대기 없이 온 '네'(Live가 서버 되읽기 없이 물음): 확정하지 않고 서버 되읽기로 다시 묻는다
+                st.awaiting_fix = False
+                if pid := self._reissue(s):
+                    followups.append(("ask_confirm", pid))
+            elif c and c[0] in ("no", "change") and c[1] >= th:
+                st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             if (p := answers.get("pick")) and p[1] >= th:
                 if p[0] == "none":
                     reject_candidates(st)
@@ -224,10 +232,6 @@ class LiveFlow:
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
-            if (sv := answers.get("save")) and sv[1] >= th and sv[0] in ("yes", "no") and _save_pending(st):
-                st.address_consent = sv[0] == "yes"  # 제안한 주소(보내는 곳·받는 곳) 전체에 한 번의 답
-                s.note("주소 저장 동의", sv[0])
-                followups.append(("save", None))
             if (cb := answers.get("callback")) and cb[1] >= th and cb[0] in ("yes", "no") and st.callback_offered:
                 st.callback_offered = False
                 st.callback_requested = cb[0] == "yes"
@@ -251,6 +255,10 @@ class LiveFlow:
                           prev.utterance() if prev else None, latest_applied_utterance=None, closed=s.closed)
         if not gate.ok:
             s.note("확인 관문", gate.code)
+            if gate.code == "CONFIRM_UNCLEAR" and not self._delegation_in(s, utt):
+                # 애매한 '네'는 확정하지 않되 다시 묻게 한다(알리지 않으면 Live가 기다리다 무음 종료, 운영 통화 b8f3795c).
+                # 같은 발화로 위임이 돌면 고친 값의 되읽기가 따라오므로 묻지 않는다
+                return ("ask_confirm", pending_id)
             return None
         if self._delegation_in(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
@@ -259,6 +267,28 @@ class LiveFlow:
         rt.confirm_t = utt.t_last
         self._arm_commit(s, pending_id)
         return None
+
+    def _reissue(self, s: CallSession) -> str | None:
+        """잠금 안. readback 단계인데 확인 대기가 없으면(no·change로 푼 뒤 값이 다시 갖춰짐) 현재 값으로 다시 연다.
+        고친 값을 기다리는 중(awaiting_fix)이면 열지 않는다(거절 직후 같은 내용을 되읽지 않게)."""
+        st = s.state
+        if s.closed or st.pending or st.awaiting_fix or not st.pickup_at.valid \
+                or assess(st, self.policy).stage != "readback":
+            return None
+        p = issue_parcel_confirmation(st, self.policy, s.tools.clock())
+        if p:
+            s.note("확인 대기 재발급", p.id)
+        return p.id if p else None
+
+    async def _reopen_readback(self, s: CallSession, d: dict) -> None:
+        """위임이 끝났는데 확인 대기가 없으면 서버 되읽기로 다시 연다(운영 통화 56c133c8: 없으면 Live가 스스로 확인 질문을
+        하고 '네'를 받을 곳이 없어 무음). 재질문 결과(needs)가 난 위임에는 얹지 않는다."""
+        if d.get("needs"):
+            return
+        async with s.lock:
+            pid = self._reissue(s)
+        if pid:
+            await self._follow(s, "ask_confirm", pid)
 
     def _arm_commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
@@ -283,8 +313,6 @@ class LiveFlow:
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
-                if facts and (keys := _save_pending(s.state)):  # 담은 뒤 저장 여부를 따로 묻게 한다
-                    facts["address_save"] = {k: True for k in keys}
                 target = None
             else:
                 target = take_cancel(s.state, self.policy, pending_id)
@@ -313,12 +341,14 @@ class LiveFlow:
             async with s.lock:
                 pending = st.pending if st.pending and st.pending.id == value else None
                 facts = None
-                if pending and st.current is not None:
+                if pending and pending.kind == "cancel":
+                    facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
+                elif pending and st.current is not None:
                     sources = {n: f.source for n, f in st.current.fields.items()}
                     facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
             if facts:
                 s.note("확인 다시 묻기", value)
-                await self.notify(s, "N2", facts)
+                await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
         elif what == "released":
             await self.notify(s, "N1'", {"confirmation": "cancelled_by_customer", "answer": value,
                                          "summary": state_summary(st, self.policy)})
@@ -330,8 +360,6 @@ class LiveFlow:
                 summary = state_summary(st, self.policy)
             await self.notify(s, "N1'", {"picked": value, "summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
-        elif what == "save":
-            self._maybe_save_addresses(s)
         elif what == "origin":  # 접수 중에 출발지 답이 옴 → 채우고 다음 질문 기준을 다시 준다
             async with s.lock:
                 facts = self._origin_step(st)
@@ -341,9 +369,13 @@ class LiveFlow:
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
-        elif what == "no_more":  # 더 없음: 마무리는 고객이 끝낼 때(문의가 남았을 수 있다)
+        elif what == "no_more":
             async with s.lock:
                 st.no_more_parcels = True
+                done = assess(st, self.policy).stage == "closing"
+            if done:  # 접수 완료 단계 → 결과로 마무리 인사 뒤 끊는다
+                await self._finish(s)
+                return
             await self.notify(s, "N1'", {"more_parcels": False})
             self._maybe_submit(s)
 
@@ -374,7 +406,28 @@ class LiveFlow:
             facts["order"] = _order_status(s)
         await self.notify(s, "N2" if facts.get("closing") or "agent" in facts else "N1'", facts)
         if facts.get("closing"):
-            self.svc.begin_closing(s, "customer_end", after_speech=True)  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+            self.svc.begin_closing(s, "customer_end", after_speech=True,  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
+                                   remind=lambda: self.notify(s, "N2", facts, again=True))
+
+    async def _finish(self, s: CallSession) -> None:
+        """접수 완료 단계(assess closing): 결과를 closing_result_wait_sec까지 기다려 그 상태로 마무리 인사(N2 closing)를
+        시키고 끊는다. 고객이 먼저 끝냈거나 이미 끝나는 중이면 하지 않는다."""
+        if s.phase != Phase.ACTIVE:
+            return
+        self._maybe_submit(s, force=True)
+        results = getattr(self.svc, "results", None)
+        task = results.tasks.get(s.call_id) if results is not None else None
+        if task is not None:
+            t0 = time.monotonic()
+            await asyncio.wait({task}, timeout=self.cfg.closing_result_wait_sec)  # 실패·초과여도 pending으로 마무리
+            s.timing("마무리 결과 대기", (time.monotonic() - t0) * 1000)
+        if s.phase != Phase.ACTIVE:
+            return
+        facts = {"more_parcels": False, "closing": True, "order": _order_status(s)}
+        s.note("마무리", "접수 완료 단계")
+        await self.notify(s, "N2", facts)
+        self.svc.begin_closing(s, "flow_complete", after_speech=True,
+                               remind=lambda: self.notify(s, "N2", facts, again=True))
 
     def _edit(self, st) -> dict:
         from app.domain.store import open_for_edit
@@ -406,15 +459,15 @@ class LiveFlow:
         return {"origin": "name_only"} if done else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
-        """택배를 담은 뒤 고객이 답했으면: 동의면 제안한 주소를 저장(백그라운드, 통화 중 — 기본 주소는 종료 후 409),
-        거절이면 제안을 버린다. 답이 없으면 남아 있다가 통화가 끝나면 저장하지 않는다(다시 묻지 않음)."""
+        """택배를 담았으면 묻지 않고 고객 정보·주소를 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409).
+        담기 전(되읽기 중)에는 저장하지 않는다(사용자 결정 2026-11-06)."""
         st, results = s.state, getattr(self.svc, "results", None)
         offer = st.address_offer
-        if not offer or not offer.get("parcel") or st.address_consent is None:
+        if not offer or not offer.get("parcel"):
             return
         st.address_offer = None
         snap = next((p.confirmed_snapshot for p in st.parcels if p.parcel_id == offer["parcel"]), None)
-        if results is not None and st.address_consent and snap:
+        if results is not None and snap:
             s.spawn(results.save_addresses(s, self.svc.call_session_seq, snap, offer), "address_save")
 
     def _agent_route(self, s: CallSession) -> dict:
@@ -496,6 +549,10 @@ class LiveFlow:
         rt = self.rt(s)
         if s.state.intent is None:
             s.state.intent = intent
+        elif intent == "order" and s.state.intent != "order":
+            # 문의·조회 뒤 접수 도구를 부르면 접수로 바꾼다(그대로 두면 '더 없음'·마무리를 못 들음, 운영 통화 8df5dd7f)
+            s.note("업무 전환", f"{s.state.intent}→order")
+            s.state.intent = "order"
         if not rt.intent_started:
             rt.intent_started = True
             self.svc.stage2(s)
@@ -532,6 +589,7 @@ class LiveFlow:
             s.spawn(self.resume(s, did), "resume")
             if d["inflight"] == 0 and d["outputs"] == 0:
                 d["done"].set()  # 최종 문장까지 끝남
+                s.spawn(self._reopen_readback(s, d), "reopen")
         elif t == "response.created":
             self._dl(s, did)["completed"] = False
 
@@ -554,6 +612,8 @@ class LiveFlow:
             out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
+        if out["status"] != "ok":
+            d0["needs"] = True  # 재질문·실패 결과: 이 위임 끝에 되읽기를 다시 열지 않는다
         s.timing(f"도구 {name}", view["elapsed_ms"])
         if name in TOOL_LATENCY:
             s.measure(TOOL_LATENCY[name], view["elapsed_ms"])
@@ -600,12 +660,13 @@ class LiveFlow:
             await asyncio.wait([asyncio.create_task(e.wait()) for e in events], timeout=timeout)
 
     # ------------------------------------------------------------------ 전달(N1'/N2/N3)
-    async def notify(self, s: CallSession, level: str, facts: dict) -> None:
-        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한)."""
+    async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False) -> None:
+        """N1' thinking(무음) · N2 commentary(말할 것, AI 발화가 멈춘 뒤·진행 위임 뒤) · N3 instructions(정정, 상한).
+        again: 같은 내용이라도 다시 보낸다(마무리 인사 재요청)."""
         rt = self.rt(s)
         content = json.dumps(facts, ensure_ascii=False, sort_keys=True)
         h = hashlib.sha256(f"{level}:{content}".encode()).hexdigest()
-        if h in rt.sent_hashes:
+        if h in rt.sent_hashes and not again:
             return  # 같은 내용 중복 송신 안 함(§6.3)
         rt.sent_hashes.add(h)
         if level == "N3":
@@ -670,17 +731,6 @@ def _answer(a) -> tuple[str, float, dict]:
     return str(a.choice), float(a.confidence or 0), probs
 
 
-SAVE_KEYS = ("sender", "receiver")
-
-
-def _save_pending(st) -> tuple[str, ...]:
-    """담은 택배의 저장 제안 항목(답을 기다리는 동안만). 담기 전(되읽기 중)에는 묻지 않으므로 없다."""
-    offer = st.address_offer
-    if not offer or not offer.get("parcel") or st.address_consent is not None:
-        return ()
-    return tuple(k for k in SAVE_KEYS if offer.get(k))
-
-
 def _order_status(s: CallSession) -> dict:
     """결과 상태 사실(정책 [results].order). 응답 전이면 pending."""
     data = s.result or {}
@@ -694,5 +744,6 @@ def _order_status(s: CallSession) -> dict:
 
 def _order_facts(order: dict) -> dict:
     """취소 확인 때 읽을 것: 받는 분·상태만(주소는 시·구 수준으로 Live가 읽는다)."""
-    return {"receiver_name": order.get("receiver_name"), "status": order.get("status")}
+    return {"receiver_name": order.get("receiver_name"), "status": order.get("status"),
+            "status_text": status_text(order.get("status"))}
 
