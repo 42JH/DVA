@@ -107,3 +107,6 @@ python msa/deploy/tests/integration_app_rollout.py --service operations --image 
 ## 원본 인증 보안 기록
 
 production은 SECURITY_LOG_HMAC_KEY(64자리 hex)를 필수로 검증한다. 배포기가 공유 `msa-security-logs` Secret의 hmac-key를 최초 생성하고 기존 값은 그대로 사용한다. 잘못된 기존 키는 출력·교체하지 않고 거절한다. 원본처럼 인증 실패/로그인 성공의 안전한 사유와 HMAC 키만 출력하며 계정명·IP·비밀번호·토큰을 기록하지 않는다. 업무 API·감사와 내부 오류 응답은 유지한다. [최신 기준 및 검증](../../../docs/msa-faqs-plan.md)을 따른다.
+
+
+consultation의 미답변 수집·삭제와 통화 삭제는 기존 감사 준비/확정/중단 이벤트를 사용한다. 수신 허용 목록에는 UNANSWERED_QUESTION_RECORDED·UNANSWERED_QUESTION_DELETED·CALL_DELETED와 해당 대상만 추가한다. 수집 성공은 AI, 삭제 성공은 ADMIN이며 customer 토큰/이벤트로 이 동작을 대신할 수 없다. [통화 콘텐츠 계획](../../../docs/msa-call-content-plan.md)에 원본 대조·위조 입력·장애/종료 복구 범위를 기록한다. operations를 consultation보다 먼저 배포하는 기존 순서는 유지한다.
