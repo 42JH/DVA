@@ -9,9 +9,9 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog
-      label="엑셀로 기업 등록"
+      label="CSV로 기업 등록"
       width={600}
-      title="엑셀로 기업 등록"
+      title="CSV로 기업 등록"
       onClose={onClose}
       footer={
         <>
