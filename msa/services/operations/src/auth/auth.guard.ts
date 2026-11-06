@@ -61,8 +61,12 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
     const session = this.reflector.getAllAndOverride<boolean>('auth:internal-session', targets);
-    if (session) {
-      const tokens = [this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true })];
+    const consultation = this.reflector.getAllAndOverride<boolean>(
+      'auth:internal-consultation',
+      targets,
+    );
+    if (session || consultation) {
+      const tokens = consultation ? [] : [this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true })];
       tokens.push(this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }));
       const actual = Buffer.from(request.get('Authorization') ?? '');
       const accepted = tokens.some((token) => {

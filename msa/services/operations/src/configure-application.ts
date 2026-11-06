@@ -38,6 +38,7 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       { path: 'operations/health/ready', method: RequestMethod.ALL },
       { path: 'internal/auth/session', method: RequestMethod.ALL },
       { path: 'internal/events', method: RequestMethod.ALL },
+      { path: 'internal/persona-version', method: RequestMethod.ALL },
     ],
   });
   app.useGlobalPipes(createValidationPipe());

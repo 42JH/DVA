@@ -68,6 +68,9 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .expect(200)
       .expect(({ body }: { body: { paths: Record<string, unknown> } }) => {
         expect(Object.keys(body.paths).sort()).toEqual([
+          '/api/ai/calls/{id}/analysis',
+          '/api/ai/calls/{id}/response-wait-metrics',
+          '/api/ai/calls/{id}/stage-metrics',
           '/api/calls/active-count',
           '/api/calls/active-count/stream',
           '/consultation/health',

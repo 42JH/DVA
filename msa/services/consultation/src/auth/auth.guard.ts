@@ -12,6 +12,14 @@ import { Request } from 'express';
 import { AdminPublic, AdminRole } from '../admins/admins.types';
 import { ApiException } from '../common/errors/api.exception';
 import { AuthService } from './auth.service';
+import { MVP_AI_ACCESS } from './mvp-ai-access';
+import {
+  AUDIT_OPERATION,
+  type AuditOperationOptions,
+  auditEvent,
+} from '../audit/audit-operation';
+import type { AuditActorType } from '../audit/audit.types';
+import { AuditService } from '../audit/audit.service';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 export const Roles = (...roles: AdminRole[]) =>
@@ -20,6 +28,7 @@ export type AuthRequest = Request & {
   requestId: string;
   admin: AdminPublic;
   sessionToken: string;
+  auditActorType?: AuditActorType;
 };
 export function readSessionToken(request: Request): string | undefined {
   const values = (request.headers.cookie ?? '')
@@ -36,8 +45,28 @@ export class AuthGuard implements CanActivate {
     private readonly auth: AuthService,
     private readonly reflector: Reflector,
     private readonly config: ConfigService<Environment, true>,
+    private readonly audit: AuditService,
   ) {}
   async canActivate(context: ExecutionContext): Promise<boolean> {
+    try {
+      return await this.checkAccess(context);
+    } catch (error) {
+      const operation = this.reflector.get<AuditOperationOptions>(
+        AUDIT_OPERATION,
+        context.getHandler(),
+      );
+      if (operation)
+        await this.audit.recordFailure(
+          auditEvent(
+            operation,
+            context.switchToHttp().getRequest<AuthRequest>(),
+          ),
+          error,
+        );
+      throw error;
+    }
+  }
+  private async checkAccess(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     const targets = [context.getHandler(), context.getClass()];
     const fromCustomer = this.reflector.getAllAndOverride<boolean>(
@@ -70,6 +99,21 @@ export class AuthGuard implements CanActivate {
       return true;
     if (this.reflector.getAllAndOverride<boolean>('auth:public', targets))
       return true;
+    if (this.reflector.get<boolean>(MVP_AI_ACCESS, context.getHandler())) {
+      const hasCookie = (request.headers.cookie ?? '')
+        .split(';')
+        .some((part) => part.trim().startsWith(`${SESSION_COOKIE}=`));
+      if (!hasCookie) {
+        request.auditActorType = 'AI';
+        return true;
+      }
+      const origin = request.get('Origin');
+      if (
+        !origin ||
+        !this.config.get('CORS_ORIGINS', { infer: true }).includes(origin)
+      )
+        throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
+    }
     request.sessionToken = readSessionToken(request) ?? '';
     request.admin = await this.auth.authenticate(request.sessionToken);
     const roles = this.reflector.getAllAndOverride<AdminRole[]>(
