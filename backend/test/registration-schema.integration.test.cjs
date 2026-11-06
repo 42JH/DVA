@@ -89,7 +89,7 @@ test('deployment verification requires migration 053 and the company PIN table t
   );
   await verify(
     ['CREATE TABLE company_pins(company_pin_seq integer)'],
-    'Expected 29 public tables, found 30',
+    'Expected 30 public tables, found 31',
   );
 });
 
@@ -196,3 +196,18 @@ test('deployment verification rejects a registration policy that cannot retain u
     'UPDATE organizations SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL',
     'ALTER TABLE organizations ALTER COLUMN created_at SET NOT NULL',
   ]));
+
+test('deployment verification requires 055, logical references, uniqueness and the finalization guard', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql'",
+    'DROP INDEX parcel_draft_source_key',
+    'ALTER TABLE call_sessions DROP CONSTRAINT call_order_finalization_check',
+  ])
+    await verify([sql], 'Parcel draft intake schema or migration missing');
+  await verify(
+    [
+      'ALTER TABLE order_parcel_drafts ADD FOREIGN KEY(customer_seq) REFERENCES customers(customer_seq)',
+    ],
+    'Expected 25 foreign keys, found 26',
+  );
+});

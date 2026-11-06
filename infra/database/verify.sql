@@ -4,7 +4,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, found %',n; END IF;
+ IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, found %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, found %',n; END IF;
@@ -231,6 +231,18 @@ BEGIN
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='052-faq-question-examples.sql') THEN
   RAISE EXCEPTION 'FAQ question snapshots, independent retention or migration missing'; END IF;
  RAISE NOTICE 'PASS: 29 public tables, 25 FKs, 10 triggers, company PIN retirement/FAQ snapshots/dashboard/retention/retry/payment recovery schema and migration ledger';
+ IF to_regclass('public.order_parcel_drafts') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='055-parcel-draft-intake.sql')
+  OR EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('public.order_parcel_drafts') AND contype='f')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions'
+   AND column_name IN ('order_intake_enabled','order_intake_version','order_completion_received_at','order_completion_payload',
+    'order_finalized_at','order_finalization_result','order_finalization_error_code','order_finalization_attempted_at'))<>8
+  OR to_regclass('public.parcel_draft_source_key') IS NULL
+  OR to_regclass('public.parcel_draft_client_key') IS NULL
+  OR to_regclass('public.parcel_draft_retention_idx') IS NULL
+  OR to_regclass('public.call_order_finalization_idx') IS NULL
+  OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_sessions'::regclass AND conname='call_order_finalization_check') THEN
+  RAISE EXCEPTION 'Parcel draft intake schema or migration missing'; END IF;
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
