@@ -80,7 +80,7 @@ export class CustomersController {
     summary: '고객 등록',
     security: [{ adminSession: [] }, { bearer: [] }],
     description:
-      'AI_BUSINESS_TOKEN의 Bearer 인증 또는 ACTIVE 관리자 세션이 필요합니다. 신규 상태 ACTIVE. 이미 등록된 전화번호는 409 DUPLICATE_RESOURCE를 반환합니다. 월결제 자격 설정은 관리자 전용입니다.',
+      'AI_BUSINESS_TOKEN의 Bearer 인증 또는 ACTIVE 관리자 세션이 필요합니다. 이름·전화번호·주소가 필수이며 상세주소는 선택입니다. 신규 상태 ACTIVE. 이미 등록된 전화번호는 409 DUPLICATE_RESOURCE를 반환합니다. 월결제 자격 설정은 관리자 전용입니다.',
   })
   @ApiCreatedResponse({ type: CreatedCustomerEnvelopeDto })
   create(@Body() input: CreateCustomerDto, @Req() request: authGuard.AuthRequest) {

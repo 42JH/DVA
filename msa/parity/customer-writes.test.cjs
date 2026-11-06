@@ -67,7 +67,13 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   }
   for(const loginId of ['root','writer'])await request('POST','/api/auth/login',{loginId,password},200,null,{login:loginId});
   const address={roadAddress:'서울 도로 10',jibunAddress:'서울 지번 20',detailAddress:'3층',dongName:'역삼동',postalCode:'01234'};
-  const person=(name,phoneNumber)=>({name,phoneNumber});
+  const person=(name,phoneNumber)=>({name,phoneNumber,address});
+  for(const actor of [null,'root']){
+    for(const addressValue of [undefined,null,[],{},'invalid',{...address,postalCode:undefined}])
+      await request('POST','/api/customers',{name:'주소 필수',phoneNumber:'01011110999',address:addressValue},400,actor);
+  }
+  for(const [phoneNumber,detailAddress]of [['01011110997',undefined],['01011110998','']])
+    await request('POST','/api/customers',{name:'상세주소 선택',phoneNumber,address:{...address,detailAddress}},201,null);
   const ai=(await request('POST','/api/customers',person('AI 고객','01011110001'),201,null)).data.customerSeq;
   await request('POST','/api/customers',person('중복','01011110001'),409,null);
   await request('POST','/api/customers',{...person('권한 없음','01011110002'),monthlyBillingEnabled:true},403,null);

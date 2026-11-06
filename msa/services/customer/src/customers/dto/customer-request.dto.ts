@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsDefined,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -23,17 +24,16 @@ const trim = ({ value }: TransformFnParams): unknown =>
   typeof value === 'string' ? value.trim() : value;
 
 export class CreateCustomerDto {
-  @ApiPropertyOptional({
+  @ApiProperty({
     type: CustomerAddressDto,
-    nullable: true,
     description:
-      '고객의 내 주소. PIN과 독립. 생략 시 유지(생성 시 null), null로 삭제, 객체는 전체 교체.',
+      '등록 시 필수인 고객의 내 주소. 도로명·지번·동·우편번호 필수, 상세주소는 생략·빈 문자열 허용. PIN과 독립.',
   })
-  @ValidateIf((_o, value) => value !== undefined && value !== null)
+  @IsDefined()
   @IsObject()
   @ValidateNested()
   @Type(() => CustomerAddressDto)
-  address?: CustomerAddressDto | null;
+  address!: CustomerAddressDto;
   @ApiPropertyOptional({
     description: '개인 월결제 자격. 관리자만 true로 설정 가능. 미입력 시 false.',
     default: false,
