@@ -48,6 +48,7 @@ def main():
     try:
         images = {}
         for name, path, target in (
+            ('customer-checks', 'msa/services/customer', 'checks'),
             ('operations-checks', 'msa/services/operations', 'checks'),
             ('operations', 'msa/services/operations', None),
             ('monolith-checks', 'backend', 'checks'),
@@ -86,23 +87,59 @@ def main():
                '-e', 'LIQUIBASE_COMMAND_PASSWORD=' + password,
                command=('--changelog-file=operations/db.changelog.xml', 'update'))
         complete(name)
+        fixture = RUN + '-customer-runtime'
+        create(fixture, images['customer-checks'])
+        runtime = LOGS / RUN / 'customer-runtime'
+        runtime.mkdir(parents=True)
+        run('docker', 'cp', fixture + ':/app/service/dist/.', str(runtime), label='customer-runtime')
         common = ['-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=' + password,
                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
+                  '-e', 'AUTH_PROXY_HOPS=1', '-e', 'AI_BUSINESS_TOKEN=' + password,
                   '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex]
+        name = RUN + '-persona-peer'
+        create(name, images['operations-checks'], '--network-alias', 'persona-fixture',
+               '-e', 'NODE_ENV=test', '-e', 'AI_PERSONA_TOKEN=' + password,
+               command=('node', 'test/persona-fixture.cjs'))
+        copy('msa/parity/persona-fixture.cjs', name, '/app/service/test/persona-fixture.cjs')
+        run('docker', 'start', name, label='persona-peer-start')
         for side in ('monolith', 'operations'):
             name = RUN + '-' + side + '-suite'
             create(name, images[side + '-checks'], *common, '--add-host=db:' + addresses[side],
-                   '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db', command=('node', '--test',
+                   '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db', command=('node',
+                   *(['--require', './test/auth-consumer-fixture.cjs'] if side == 'operations' else []), '--test',
                    '--test-concurrency=1', 'test/auth.test.cjs', 'test/auth.integration.test.cjs',
                    *(['test/environment.test.cjs'] if side == 'operations' else [])))
             if side == 'operations':
+                run('docker', 'cp', str(runtime), name + ':/app/service/test/customer-runtime', label='auth-consumer-runtime')
                 for file in ('auth.test.cjs', 'auth.integration.test.cjs'):
                     copy('backend/test/' + file, name, '/app/service/test/' + file)
+                copy('msa/parity/auth-consumer-fixture.cjs', name, '/app/service/test/auth-consumer-fixture.cjs')
+            complete(name)
+            if side == 'monolith':
+                name = RUN + '-monolith-limits-suite'
+                create(name, images['monolith-checks'], *common, '--add-host=db:' + addresses[side],
+                       '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db',
+                       command=('node', '--test', 'test/auth-limits.integration.test.cjs'))
+                complete(name)
+            # Auth bootstrap requires zero administrators; persona fixtures create their own.
+            # Run the unchanged suites separately so Node's file sorting cannot reverse them.
+            name = RUN + '-' + side + '-persona-suite'
+            create(name, images[side + '-checks'], *common, '--add-host=db:' + addresses[side],
+                   '-e', 'NODE_ENV=test', '-e', 'DB_HOST=db', command=('node',
+                   '--test', '--test-concurrency=1', 'test/ai-settings.test.cjs', 'test/ai-settings.integration.test.cjs'))
+            if side == 'operations':
+                for file in (ROOT / 'backend/test').glob('ai-settings*.cjs'):
+                    copy(file.relative_to(ROOT), name, '/app/service/test/' + file.name)
+                for file in ('helpers/ai-settings.cjs', 'helpers/application.cjs'):
+                    copy('backend/test/' + file, name, '/app/service/test/' + file)
+                copy('backend/migrations', name, '/app/service/migrations')
             complete(name)
             name = RUN + '-' + side + '-app'
             create(name, images[side], *common, '--network-alias', side + '-app',
                    '--network-alias', side,
+                   '-e', 'AI_AGENT_URL=http://persona-fixture:8000/' + side,
+                   '-e', 'AI_PERSONA_TOKEN=' + password,
                    '-e', 'NODE_ENV=production', '-e', 'DB_HOST=' + side + '-db', '-e', 'PORT=3005')
             run('docker', 'start', name, label=side + '-app-start')
         name = RUN + '-differential'
@@ -110,6 +147,34 @@ def main():
                '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
                '-e', 'PGDATABASE=dva_webhook_test', command=('node', '--test', 'test/operations-auth.test.cjs'))
         copy('msa/parity/operations-auth.test.cjs', name, '/app/service/test/operations-auth.test.cjs')
+        complete(name)
+        name = RUN + '-limits-parity'
+        create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+               '-e', 'PGDATABASE=dva_webhook_test', command=('node', '--test', 'test/auth-limits-parity.test.cjs'))
+        copy('msa/parity/auth-limits-parity.test.cjs', name, '/app/service/test/auth-limits-parity.test.cjs')
+        complete(name)
+        name = RUN + '-personas'
+        create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'AI_PERSONA_TOKEN=' + password,
+               command=('node', '--test', 'test/persona-settings.test.cjs'))
+        copy('msa/parity/persona-settings.test.cjs', name, '/app/service/test/persona-settings.test.cjs')
+        complete(name)
+        run('docker', 'cp', name + ':/app/service/test/persona-before-restart.json',
+            str(LOGS / 'persona-before-restart.json'), label='persona-before-restart')
+        for side in ('monolith', 'operations'):
+            run('docker', 'kill', RUN + '-' + side + '-app', label=side + '-persona-sigkill')
+        for side in ('monolith', 'operations'):
+            run('docker', 'start', RUN + '-' + side + '-app', label=side + '-persona-restart')
+        name = RUN + '-persona-recovery'
+        create(name, images['operations-checks'], '-e', 'NODE_ENV=test',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'AI_PERSONA_TOKEN=' + password,
+               command=('node', '--test', 'test/persona-recovery.test.cjs'))
+        copy('msa/parity/persona-recovery.test.cjs', name, '/app/service/test/persona-recovery.test.cjs')
+        run('docker', 'cp', str(LOGS / 'persona-before-restart.json'),
+            name + ':/app/service/test/persona-before-restart.json', label='persona-recovery-copy-state')
         complete(name)
         spec = importlib.util.spec_from_file_location('app_release', ROOT / 'msa/deploy/app-release.py')
         release = importlib.util.module_from_spec(spec)

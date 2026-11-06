@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 
 describe('Customer read API (e2e)', () => {
   let app: INestApplication<App>;
+  const businessToken = 'business-test-only-token-'.padEnd(48, 'b');
   const pool = { query: jest.fn().mockResolvedValue({ rows: [] }) };
   const auth = {
     authenticate: jest
@@ -36,10 +37,12 @@ describe('Customer read API (e2e)', () => {
     app = module.createNestApplication();
     configureApplication(app);
     await app.init();
+    app.get(ConfigService).set('AI_BUSINESS_TOKEN', businessToken);
   });
-  it('preserves anonymous context, cookie authentication and input validation without registering a call', async () => {
+  it('preserves AI context, cookie authentication and input validation without registering a call', async () => {
     await request(app.getHttpServer())
       .post('/api/customers/context')
+      .set('Authorization', 'Bearer ' + businessToken)
       .send({ phoneNumber: '01000000001' })
       .expect(({ status, body }: { status: number; body: unknown }) => {
         if (status !== 200) throw new Error(JSON.stringify(body));
@@ -58,7 +61,11 @@ describe('Customer read API (e2e)', () => {
         call: { providerCallId: 'x', incomingAt: 'invalid' },
       },
     ])
-      await request(app.getHttpServer()).post('/api/customers/context').send(body).expect(400);
+      await request(app.getHttpServer())
+        .post('/api/customers/context')
+        .set('Authorization', 'Bearer ' + businessToken)
+        .send(body)
+        .expect(400);
     await request(app.getHttpServer())
       .post('/api/customers/context')
       .set('Cookie', 'dva_session=bad')
@@ -140,6 +147,7 @@ describe('Customer read API (e2e)', () => {
           '/api/pins/{id}': ['patch'],
           '/api/companies': ['get', 'post'],
           '/api/companies/search': ['get'],
+          '/api/companies/members/search': ['get'],
           '/api/companies/{id}': ['get', 'patch', 'delete'],
           '/api/companies/{id}/members': ['get', 'post'],
           '/api/companies/{id}/departments': ['get', 'post'],
@@ -209,7 +217,37 @@ describe('Customer read API (e2e)', () => {
         expect(body.error.code).toBe('UNAUTHORIZED');
         expect(body.meta.requestId).toEqual(expect.any(String));
       });
-    await request(app.getHttpServer()).post('/api/customers').send({}).expect(400);
+    await request(app.getHttpServer())
+      .post('/api/customers')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .send({})
+      .expect(400);
+  });
+  it('requires the AI business token independently of internal tokens and stale cookies', async () => {
+    for (const authorization of ['', 'Bearer wrong', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN])
+      await request(app.getHttpServer())
+        .post('/api/customers/context')
+        .set('Authorization', authorization)
+        .send({ phoneNumber: '01000000001' })
+        .expect(401);
+    await request(app.getHttpServer()).get('/api/companies/search?q=test').expect(401);
+    pool.query.mockResolvedValueOnce({ rows: [{ __total_count: '0', __page_ordinal: null }] });
+    await request(app.getHttpServer())
+      .get('/api/companies/search?q=test')
+      .set('Cookie', 'dva_session=stale')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/companies/members/search?q=test')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .expect(401);
+    app.get(ConfigService).set('AI_BUSINESS_TOKEN', '');
+    await request(app.getHttpServer())
+      .post('/api/customers/context')
+      .set('Authorization', 'Bearer ' + businessToken)
+      .send({ phoneNumber: '01000000001' })
+      .expect(503);
+    app.get(ConfigService).set('AI_BUSINESS_TOKEN', businessToken);
   });
   it('fails readiness on DB or authentication dependency failure while keeping liveness', async () => {
     pool.query.mockRejectedValueOnce(new Error('unavailable'));

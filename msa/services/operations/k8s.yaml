@@ -64,6 +64,12 @@ spec:
             - name: CONSULTATION_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
+            - name: AI_AGENT_URL
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_AGENT_URL, optional: true}
+            - name: AI_PERSONA_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_PERSONA_TOKEN, optional: true}
           resources:
             requests:
               cpu: 100m
@@ -141,6 +147,27 @@ spec:
                 port:
                   number: 3005
           - path: /api/audit-logs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/personas
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/options
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/config
             pathType: Prefix
             backend:
               service:

@@ -9,13 +9,17 @@ import { DatabaseService } from '../src/database/database.service';
 
 describe('Operations infrastructure (e2e)', () => {
   let app: INestApplication<App>;
+  const pool = { query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }) };
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(DatabaseService)
-      .useValue({ pool: { query: jest.fn().mockResolvedValue({ rows: [] }) } })
+      .useValue({
+        pool,
+        transaction: (work: (client: typeof pool) => Promise<unknown>) => work(pool),
+      })
       .compile();
     app = module.createNestApplication();
     configureApplication(app);
@@ -66,6 +70,13 @@ describe('Operations infrastructure (e2e)', () => {
             '/api/admins/{id}/password',
             '/api/audit-logs',
             '/api/audit-logs/{id}',
+            '/api/personas',
+            '/api/personas/{id}',
+            '/api/personas/{id}/versions',
+            '/api/personas/{id}/activate',
+            '/api/ai/options',
+            '/api/ai/config',
+            '/api/ai/config/apply-result',
           ]),
         );
       });
@@ -79,6 +90,36 @@ describe('Operations infrastructure (e2e)', () => {
         expect(body.error.code).toBe('UNAUTHORIZED');
         expect(body.meta.requestId).toEqual(expect.any(String));
       });
+  });
+
+  it('keeps persona AI access separate from the service session tokens', async () => {
+    for (const authorization of [
+      '',
+      'Bearer wrong',
+      'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a'),
+    ]) {
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', authorization)
+        .expect(503);
+    }
+    await request(app.getHttpServer()).get('/api/personas').expect(401);
+    await request(app.getHttpServer()).get('/api/ai/options').expect(401);
+    const token = 'persona-test-token-'.padEnd(40, 'p');
+    app.get(ConfigService).set('AI_PERSONA_TOKEN', token);
+    try {
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', 'Bearer wrong')
+        .expect(401);
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', 'Bearer ' + token)
+        .set('Cookie', 'dva_session=invalid')
+        .expect(401);
+    } finally {
+      app.get(ConfigService).set('AI_PERSONA_TOKEN', undefined);
+    }
   });
 
   it('fails readiness while keeping liveness when the database is unavailable', async () => {
@@ -154,5 +195,60 @@ describe('Operations infrastructure (e2e)', () => {
         expect(body.paths['/internal/auth/session']).toBeUndefined();
         expect(body.paths['/api/internal/auth/session']).toBeUndefined();
       });
+  });
+  it('serves uncached persona queries only on the private path with consultation credentials', async () => {
+    const config = app.get(ConfigService);
+    const previous = config.get<string>('CONSULTATION_AUTH_TOKEN');
+    const token = 'local-test-consultation-token-'.padEnd(48, 'c');
+    config.set('CONSULTATION_AUTH_TOKEN', token);
+    const event = {
+      eventId: '00000000-0000-4000-8000-000000000001',
+      source: 'consultation',
+      eventType: 'PersonaVersionRequested',
+      payload: {
+        versionSeq: 7,
+        callSessionSeq: 1,
+        transactionId: '00000000-0000-4000-8000-000000000002',
+      },
+    };
+    try {
+      for (const authorization of [
+        '',
+        'Bearer wrong',
+        'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a'),
+      ])
+        await request(app.getHttpServer())
+          .post('/internal/persona-version')
+          .set('Authorization', authorization)
+          .send(event)
+          .expect(403);
+      await request(app.getHttpServer())
+        .post('/internal/persona-version')
+        .set('Authorization', 'Bearer ' + token)
+        .send(event)
+        .expect(200)
+        .expect('Cache-Control', 'no-store')
+        .expect({ eventId: event.eventId, status: 'processed', payload: { exists: false } });
+      await request(app.getHttpServer())
+        .post('/internal/persona-version')
+        .set('Authorization', 'Bearer ' + token)
+        .send({ ...event, source: 'customer' })
+        .expect(422);
+      await request(app.getHttpServer())
+        .post('/api/internal/persona-version')
+        .set('Authorization', 'Bearer ' + token)
+        .send(event)
+        .expect(404);
+      await request(app.getHttpServer())
+        .get('/operations/docs-json')
+        .expect(200)
+        .expect(({ body }: { body: { paths: Record<string, unknown> } }) => {
+          expect(Object.keys(body.paths).some((path) => path.includes('persona-version'))).toBe(
+            false,
+          );
+        });
+    } finally {
+      config.set('CONSULTATION_AUTH_TOKEN', previous);
+    }
   });
 });

@@ -60,6 +60,9 @@ spec:
             - name: CONSULTATION_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
+            - name: AI_BUSINESS_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-business, key: AI_BUSINESS_TOKEN, optional: true}
             - name: CORS_ORIGINS
               value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
             - name: SWAGGER_ENABLED

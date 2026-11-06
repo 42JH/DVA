@@ -1,7 +1,7 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, Logger } from '@nestjs/common';
 import { Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { ApiException, ErrorCode } from '../errors/api.exception';
+import { ApiException, ErrorCode, RateLimitException } from '../errors/api.exception';
 import { ContextRequest, isApiRequest } from './request-context';
 
 const statusCodes: Record<number, ErrorCode> = {
@@ -43,6 +43,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const request = host.switchToHttp().getRequest<ContextRequest>();
     const response = host.switchToHttp().getResponse<Response>();
     if (response.headersSent) return;
+    if (exception instanceof RateLimitException)
+      response.setHeader('Retry-After', exception.retryAfterSeconds);
     const requestId = request.requestId ?? randomUUID();
     response.setHeader('X-Request-Id', requestId);
     let status = exception instanceof HttpException ? exception.getStatus() : 500;

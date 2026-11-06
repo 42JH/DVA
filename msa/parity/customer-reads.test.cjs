@@ -69,7 +69,8 @@ test('customer reads match monolith with independent operations sessions and imm
     for (const side of sides) {
       const response = await fetch((path.startsWith('/api/auth') || path.startsWith('/api/admins') ? side.auth : side.base)+path, {
         method, redirect: 'error', signal: AbortSignal.timeout(5000),
-        headers: { 'X-Request-Id': id, ...(options.noOrigin ? {} : { Origin: options.origin ?? origin }),
+        headers: { 'X-Request-Id': id,
+          ...((/^\/api\/customers\/\d/.test(path)||path.startsWith('/api/companies/search')) && options.ai !== false ? {Authorization:'Bearer '+(options.token ?? process.env.AI_BUSINESS_TOKEN)} : {}), ...(options.noOrigin ? {} : { Origin: options.origin ?? origin }),
           ...(actor && side.cookies[actor] ? { Cookie: options.duplicate ? side.cookies[actor]+'; '+side.cookies[actor] : side.cookies[actor] } : {}),
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
         body: body === undefined ? undefined : JSON.stringify(body),
@@ -123,6 +124,24 @@ test('customer reads match monolith with independent operations sessions and imm
     const result = await request('GET',path,undefined,200);
     for (const item of result.data) for (const field of ['employeeNo','role','personalPins']) assert.equal(item[field], undefined);
   }
+  await request('GET','/api/companies/search?q=한빛','root',401,undefined,{ai:false});
+  await request('GET','/api/customers/1',undefined,401,undefined,{ai:false});
+  await request('GET','/api/customers/1',undefined,401,undefined,{token:'wrong'});
+  await request('GET','/api/companies/members/search?q=김',undefined,401);
+  for(const actor of ['root','operator','supervisor']) {
+    const result=await request('GET','/api/companies/members/search?q=0007',actor,200);
+    assert.equal(result.total_count,1);assert.equal(result.data[0].employeeNo,'0007');
+  }
+  for(const [q,total] of [['검색',1],['010-0000-0002',1],['연구 김',1],['한빛',0],['서울',0],['김 없는단어',0],['새',0]]) {
+    const result=await request('GET','/api/companies/members/search?q='+encodeURIComponent(q),'root',200);
+    assert.equal(result.total_count,total,q);
+  }
+  const inactive=await request('GET','/api/companies/members/search?q=새&includeInactive=true','root',200);
+  assert.equal(inactive.total_count,1);assert.equal(inactive.data[0].membershipStatus,'INACTIVE');
+  const emptyPage=await request('GET','/api/companies/members/search?q=검색&limit=1&offset=100','root',200);
+  assert.equal(emptyPage.total_count,1);assert.deepEqual(emptyPage.data,[]);assert.equal(emptyPage.hasNext,false);
+  for(const query of ['', '?q=%20%20', '?q='+encodeURIComponent('x'.repeat(101)), '?q=a%00b','?q=a&includeInactive=1','?q=a&limit=0','?q=a&unknown=true'])
+    await request('GET','/api/companies/members/search'+query,'root',400);
   for (const path of ['/api/customers?status=PENDING','/api/customers?limit=0','/api/customers?limit=101',
     '/api/customers?offset=-1','/api/customers?limit=1&limit=2','/api/customers?extra=true',
     '/api/customers/0','/api/customers/2147483648','/api/companies/invalid',
@@ -136,14 +155,14 @@ test('customer reads match monolith with independent operations sessions and imm
   await request('GET','/api/customers/1','operator',401,undefined,{ duplicate:true });
   await request('PATCH','/api/admins/2','root',204,{ status:'INACTIVE' });
   await request('GET','/api/customers','operator',401);
-  await request('GET','/api/companies/search?q=한빛','operator',401);
+  await request('GET','/api/companies/search?q=한빛','operator',200);
   await request('GET','/api/customers/1','operator',401);
   await request('PATCH','/api/admins/2','root',204,{ status:'ACTIVE' });
   await request('GET','/api/companies','operator',401);
   await login('operator');
   await request('GET','/api/companies','operator',200);
   await request('POST','/api/auth/logout','operator',204);
-  await request('GET','/api/companies/search?q=한빛','operator',401);
+  await request('GET','/api/companies/search?q=한빛','operator',200);
   await request('GET','/api/companies/search?q=한빛',undefined,200);
   await login('operator');
   await request('DELETE','/api/admins/2','root',204);
@@ -164,7 +183,7 @@ test('customer reads match monolith with independent operations sessions and imm
     for (const child of Object.values(value)) compareSchemas(child);
   }
   for (const path of ['/api/customers','/api/customers/{id}','/api/companies','/api/companies/search',
-    '/api/companies/{id}','/api/companies/{id}/members','/api/companies/{id}/departments']) {
+    '/api/companies/members/search','/api/companies/{id}','/api/companies/{id}/members','/api/companies/{id}/departments']) {
     assert.deepEqual(docs[1].paths[path].get, docs[0].paths[path].get, path+' OpenAPI');
     compareSchemas(docs[0].paths[path].get);
   }

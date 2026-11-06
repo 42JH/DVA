@@ -1,5 +1,5 @@
 {
-  "commit": "6a141a0512b73837905f6154c4ff84bcf33f912b",
+  "commit": "669b10fdb5f4175fb4f6f63bca7b3834e6d8eed3",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -352,6 +352,13 @@
         "service": "operations",
         "stream": false,
         "file": "backend/src/health/health.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/members/search",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
       },
       {
         "method": "GET",
@@ -873,6 +880,14 @@
       {
         "file": "backend/migrations/052-faq-question-examples.sql",
         "sha256": "c87a323ca944edc7e2260f86bccecb419ab4fb49a2d8c44d7559e089e1688f79"
+      },
+      {
+        "file": "backend/migrations/053-drop-company-pins.sql",
+        "sha256": "b91b328aedf61f942ced044cc6198dc7463d4cbd29b9ea531749117461e74fb7"
+      },
+      {
+        "file": "backend/migrations/054-recording-retry-policy.sql",
+        "sha256": "df69ab6106142b85879192a7d0c40263fb4cbec00be97949cd0f58f1f86f1f2a"
       }
     ],
     "workers": [

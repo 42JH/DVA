@@ -16,7 +16,7 @@ test('customer PATCH and personal PIN APIs preserve HTTP, call locks and separat
  const hash=await hashPassword(password);
  for(const side of sides){
   await side.calls.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
-  await side.db.query('TRUNCATE customers,organizations,departments,memberships,company_pins,personal_pins RESTART IDENTITY CASCADE');
+  await side.db.query('TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
   await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
   if(side===sides[1]){await customer.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await calls.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await operations.query('TRUNCATE inbox_events,outbox_events,customer_audit_preparations,consultation_audit_preparations RESTART IDENTITY');}
   await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at) VALUES
@@ -44,7 +44,6 @@ test('customer PATCH and personal PIN APIs preserve HTTP, call locks and separat
   'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
   'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
   'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
-  'SELECT company_pin_seq,organization_seq,department_seq,department_name,label,address_data,version,deleted_at FROM company_pins ORDER BY company_pin_seq',
   'SELECT personal_pin_seq,customer_seq,label,address_data,search_text,version,deleted_at FROM personal_pins ORDER BY personal_pin_seq'];
  const callSQL='SELECT call_session_seq,provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,deleted_at,customer_seq,order_seq FROM call_sessions ORDER BY call_session_seq';
  const auditSQL='SELECT audit_log_seq,actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata,occurred_at FROM audit_logs ORDER BY audit_log_seq';
@@ -57,7 +56,7 @@ test('customer PATCH and personal PIN APIs preserve HTTP, call locks and separat
  let count=0;
  async function fetchSide(side,method,path,body,options={},requestId=randomUUID()){
   const endpoint=/^\/api\/(auth|audit-logs)(\/|\?|$)/.test(path)?side.auth:side.base;
-  const response=await fetch(endpoint+path,{method,redirect:'error',signal:AbortSignal.timeout(28000),headers:{'X-Request-Id':requestId,
+  const response=await fetch(endpoint+path,{method,redirect:'error',signal:AbortSignal.timeout(28000),headers:{'X-Request-Id':requestId,...(path.startsWith('/api/customers')?{Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN}:{}),
    ...(options.admin?{Cookie:side.cookies[options.admin],Origin:origin}:{}),...(options.cookie?{Cookie:options.cookie}:{}),
    ...(options.origin?{Origin:options.origin}:{}),...(options.key?{'Idempotency-Key':options.key}:{}),...(options.call===undefined?{}:{call_session_seq:String(options.call)}),
    ...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:options.raw?body:JSON.stringify(body)});

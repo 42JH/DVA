@@ -77,7 +77,7 @@ def main():
                 name = RUN+'-monolith-schema'
                 create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PGHOST=monolith-db', '-e', 'PGUSER=monolith_app',
-                       '-e', 'PGPASSWORD='+password, command=('node', '-e',
+                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password, command=('node', '-e',
                        "const {Pool}=require('pg');const p=new Pool();require('./test/helpers/migrations.cjs').migrate(p).then(()=>p.end(),async e=>{console.error(e.code||'schema-failed');await p.end();process.exit(1)})"))
             else:
                 name = RUN+'-'+side+'-schema'
@@ -94,7 +94,7 @@ def main():
                    '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
                    '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
                    '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
-                   '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+                   '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                    '-e', 'CUSTOMER_URL=http://customer-app:3001',
                    '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token)
             run('docker', 'start', name, label=side+'-app-start')
@@ -103,7 +103,7 @@ def main():
             str(LOGS / 'seed-password.cjs'), label='password-fixture-copy')
         name = RUN+'-differential'
         create(name, images['customer-checks'], '-e', 'NODE_ENV=test',
-               '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                '-e', 'CUSTOMER_AUTH_TOKEN='+auth_token, command=('node', '--test', '--test-concurrency=1', 'test/member-input.test.cjs', 'test/customer-reads.test.cjs'))
         for source in (ROOT / 'backend/test/member-input.test.cjs', ROOT / 'msa/parity/customer-reads.test.cjs', ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='copy-'+source.name)
@@ -121,7 +121,7 @@ def main():
             resources.remove(('container',name))
         applications('test')
         name = RUN+'-writes'
-        create(name, images['customer-checks'], '-e','NODE_ENV=test','-e','PGPASSWORD='+password,
+        create(name, images['customer-checks'], '-e','NODE_ENV=test','-e','AI_BUSINESS_TOKEN='+password, '-e','PGPASSWORD='+password,
                '-e','PGDATABASE=dva_webhook_test','-e','CUSTOMER_AUTH_TOKEN='+auth_token,
                command=('node','--test','test/customer-writes.test.cjs'))
         for source in (ROOT / 'msa/parity/customer-writes.test.cjs', LOGS / 'seed-password.cjs'):

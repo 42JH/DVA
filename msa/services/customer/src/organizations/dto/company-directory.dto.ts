@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { Transform, TransformFnParams } from 'class-transformer';
+import { IsNotEmpty, IsString, Matches, MaxLength } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { PinAddressDto } from '../../customers/dto/caller-context.dto';
 
@@ -9,12 +9,16 @@ export class CompanyDirectoryQueryDto extends PaginationQueryDto {
     description:
       '기업명·부서명·사원 이름·전화번호·현재 주소 검색. 공백으로 구분한 모든 단어가 일치해야 합니다.',
     example: '예시기업 물류센터',
+    maxLength: 100,
   })
-  @Transform(({ value }: { value: unknown }) =>
+  @Transform(({ value }: TransformFnParams): unknown =>
     typeof value === 'string' ? value.normalize('NFC').trim().replace(/\s+/gu, ' ') : value,
   )
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
+  // eslint-disable-next-line no-control-regex -- Reject NUL before PostgreSQL text binding, matching the source API.
+  @Matches(/^[^\u0000]+$/u)
   q!: string;
 }
 
