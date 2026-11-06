@@ -55,6 +55,8 @@ function auditInput(
   service: 'customer' | 'consultation' | 'order',
 ) {
   const audit = payload.audit;
+  const billingInitialization =
+    service === 'order' && object(audit) && audit.action === 'BILLING_MONTH_INITIALIZED';
   const personaReference =
     service === 'consultation' &&
     object(audit) &&
@@ -93,6 +95,7 @@ function auditInput(
       ? actions.has(audit.action as string)
       : service === 'order'
         ? [
+            'BILLING_MONTH_INITIALIZED',
             'ORDER_DELETED',
             'ORDER_CANCELLED',
             'ORDER_PARCEL_CANCELLED',
@@ -103,9 +106,11 @@ function auditInput(
       ? targets.has(audit.targetType as string)
       : service === 'order'
         ? audit.targetType ===
-          (audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
-            ? 'ORDER_PARCEL'
-            : 'ORDER')
+          (billingInitialization
+            ? 'ORGANIZATION'
+            : audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
+              ? 'ORDER_PARCEL'
+              : 'ORDER')
         : audit.targetType ===
           (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
             audit.action as string,
@@ -131,25 +136,41 @@ function auditInput(
           : 'AI') ||
         audit.targetId === null)) ||
     (service === 'order' &&
-      ((audit.action === 'ORDER_AMOUNT_CHANGED'
+      ((billingInitialization
         ? payload.result !== 'SUCCESS' ||
+          audit.actorType !== 'SYSTEM' ||
+          audit.actorId !== null ||
+          audit.actorName !== undefined ||
           !object(audit.metadata) ||
           Object.keys(audit.metadata).sort().join(',') !==
-            'amountAfter,amountBefore,orderParcelSeqs' ||
-          ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
-            (value) =>
-              value === null ||
-              (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
-          ) ||
-          !Array.isArray(audit.metadata.orderParcelSeqs) ||
-          audit.metadata.orderParcelSeqs.length < 1 ||
-          !audit.metadata.orderParcelSeqs.every(integer) ||
-          new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
-        : audit.metadata !== undefined) ||
+            'amountAfter,amountBefore,billingMonth,paymentMethodType' ||
+          typeof audit.metadata.billingMonth !== 'string' ||
+          !/^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/.test(audit.metadata.billingMonth) ||
+          !['credit', 'groupBilling'].includes(audit.metadata.paymentMethodType as string) ||
+          !Number.isSafeInteger(audit.metadata.amountBefore) ||
+          Number(audit.metadata.amountBefore) < 0 ||
+          audit.metadata.amountAfter !== 0
+        : audit.action === 'ORDER_AMOUNT_CHANGED'
+          ? payload.result !== 'SUCCESS' ||
+            !object(audit.metadata) ||
+            Object.keys(audit.metadata).sort().join(',') !==
+              'amountAfter,amountBefore,orderParcelSeqs' ||
+            ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
+              (value) =>
+                value === null ||
+                (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
+            ) ||
+            !Array.isArray(audit.metadata.orderParcelSeqs) ||
+            audit.metadata.orderParcelSeqs.length < 1 ||
+            !audit.metadata.orderParcelSeqs.every(integer) ||
+            new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
+          : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (!(audit.action === 'ORDER_DELETED'
-            ? audit.actorType === 'ADMIN'
-            : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
+          (!(billingInitialization
+            ? audit.actorType === 'SYSTEM'
+            : audit.action === 'ORDER_DELETED'
+              ? audit.actorType === 'ADMIN'
+              : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
             audit.targetId === null)))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))

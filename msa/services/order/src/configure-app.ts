@@ -51,6 +51,8 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
     exclude: [
       { path: 'order/health', method: RequestMethod.ALL },
       { path: 'order/health/ready', method: RequestMethod.ALL },
+      { path: 'internal/billing/read', method: RequestMethod.ALL },
+      { path: 'internal/billing/initialize', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },

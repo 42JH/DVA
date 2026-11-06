@@ -149,6 +149,7 @@ describe('Customer read API (e2e)', () => {
           '/api/companies/search': ['get'],
           '/api/companies/members/search': ['get'],
           '/api/companies/{id}': ['get', 'patch', 'delete'],
+          '/api/companies/{id}/billing': ['get'],
           '/api/companies/{id}/members': ['get', 'post'],
           '/api/companies/{id}/departments': ['get', 'post'],
           '/api/members/{id}': ['patch', 'delete'],
@@ -156,7 +157,8 @@ describe('Customer read API (e2e)', () => {
         })) {
           expect(Object.keys(paths[path]).sort()).toEqual(methods.sort());
         }
-        expect(paths['/api/companies/{id}/billing']).toBeUndefined();
+        expect(paths['/internal/billing/companies']).toBeUndefined();
+        expect(paths['/internal/billing/rollover']).toBeUndefined();
         expect(paths['/internal/audit/flush']).toBeUndefined();
         expect(paths['/internal/call-scope']).toBeUndefined();
       });

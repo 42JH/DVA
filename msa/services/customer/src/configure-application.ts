@@ -55,6 +55,8 @@ export function configureApplication(app: INestApplication, logger = new Logger(
       { path: 'internal/order-cancellation/call', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
       { path: 'internal/order-read/call', method: RequestMethod.ALL },
+      { path: 'internal/billing/companies', method: RequestMethod.ALL },
+      { path: 'internal/billing/rollover', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
     ],
   });

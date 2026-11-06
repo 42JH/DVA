@@ -71,6 +71,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
         : statusCodes[status];
     if (
       !isApiRequest(request) &&
+      !request.path.startsWith('/internal/billing/') &&
       ![
         '/internal/call-scope',
         '/internal/order-read',
