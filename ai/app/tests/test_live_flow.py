@@ -5,7 +5,9 @@ import asyncio
 import json
 import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 from conftest import CALLER, run
 
 from app.calls.live import LiveFlow
@@ -46,7 +48,7 @@ class FakeDecisions:
         if "more" in names:
             answers.append(choice("more", "no_more" if "없어요" in said else "not_answer"))
         if "switch" in names:
-            answers.append(choice("switch", "end" if "끊어" in said else "none"))
+            answers.append(choice("switch", "end" if "끊어" in said else "agent" if "상담원 연결" in said else "none"))
         return SimpleNamespace(answers=answers)
 
 
@@ -503,7 +505,7 @@ def test_late_result_and_n2_wait_while_customer_is_speaking():
 
 
 def test_three_unanswered_manual_searches_suggest_agent_then_reset():
-    """같은 질문에 3번 연속 답을 못 드리면 상담원 권유(업무 규칙 h), 답이 나오면 0으로."""
+    """매뉴얼 검색이 3번 연속 실패하면 상담원 권유, 성공하면 0으로."""
     lf = LiveFlow.__new__(LiveFlow)
     lf.cfg = SimpleNamespace(unanswered_agent_after=3)
     s = SimpleNamespace(rt=None, note=lambda *a: None)
@@ -515,6 +517,33 @@ def test_three_unanswered_manual_searches_suggest_agent_then_reset():
     assert "agent" not in lf._count_unanswered(s, miss)["facts"] and "facts" not in lf._count_unanswered(s, down)
     out = lf._count_unanswered(s, miss)
     assert out["facts"]["agent"] == "suggest" and s.rt.unanswered == 0
+
+
+@pytest.mark.parametrize(("customer_request", "intent"), [("상담원 연결해 주세요", "agent"), ("끊어 주세요", "end")])
+def test_readback_handoff_or_end_takes_priority_over_yes(customer_request, intent):
+    from app.calls.live import Spoken
+    from app.calls.session import CallSession
+    from app.domain.confirm import issue_parcel_confirmation
+    from app.tests.test_calls import INCOMING_AT
+    from app.tests.test_domain import filled
+    from app.tools.context import ToolContext
+
+    client = FakeClient()
+    client.decisions = FakeDecisions()
+    svc = service(client)
+    lf = LiveFlow(svc)
+    lf._follow = AsyncMock()
+    state, policy = filled(), svc.d.policy
+    pending = issue_parcel_confirmation(state, policy, 1.0)
+    session = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", state, policy, None))
+    previous = Spoken(1, "이대로 접수할까요?", 1000, 1800, 2.0, 2.8)
+    utterance = Spoken(2, f"네, 그런데 {customer_request}", 2000, 2800, 3.0, 3.8)
+
+    run(lf.judge(session, utterance, previous))
+
+    assert client.decisions.calls[0][1] == ["confirm", "switch"]
+    lf._follow.assert_awaited_once_with(session, "intent", intent)
+    assert state.pending is pending and not state.parcels and lf.rt(session).commit is None
 
 
 def _agent_flow(uri="", now=None):

@@ -60,12 +60,13 @@ def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
         assert out.startswith(default_persona()) and rules in out
 
 
-def test_business_rules_explain_every_server_result_key_they_mention():
-    """규칙 파일이 서버 결과 신호(call_started·closing·agent suggest·phones_to_read)를 쓰는 대로 설명한다."""
-    rules = business_rules()
-    for key in ("call_started", "closing", "phones_to_read", "suggest", "missing"):
-        assert key in rules
-    assert all(k in POLICY.results for k in ("call_started", "closing", "agent"))
+def test_server_results_are_rendered_from_workflow_policy():
+    text = render_live(None, POLICY)
+    for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup"):
+        assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
+    assert "접수 정보를 수집할 때만" in text
+    assert "궁금한 점이 더 있는지" not in POLICY.results["more_parcels"]
+    assert "{pickup_allowed}" not in text
 
 
 def test_backend_instructions_list_free_fields_and_no_choice_judgment():
@@ -83,8 +84,8 @@ def test_server_missing_uses_same_order_as_instructions():
 
 
 @pytest.mark.parametrize("stage, pending, expected", [
-    ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm"]),
-    ("readback", False, []), ("more_parcels", True, ["confirm", "more", "switch"]),
+    ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm", "switch"]),
+    ("readback", False, ["switch"]), ("more_parcels", True, ["confirm", "more", "switch"]),
     ("closing", False, ["switch"]),
 ])
 def test_decision_questions_per_stage(stage, pending, expected):

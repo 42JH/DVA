@@ -113,6 +113,7 @@ def test_readback_facts_hide_caller_and_saved_values():
     facts = readback_facts(issue_parcel_confirmation(s, P, 1.0).snapshot, sources, P)
     assert "sender_phone" not in facts and "receiver_address_detail" not in facts  # 발신번호·저장된 상세주소
     assert facts["receiver_phone"] == "01098765432" and "sender_geo" not in facts
+    assert facts["sender_address_detail"] == "1201호"  # 이번 통화에서 직접 말한 상세주소
 
 
 # --- 확인 관문 ---

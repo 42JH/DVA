@@ -390,21 +390,24 @@ def test_ai_speech_keeps_silence_timer_from_firing():
     assert svc.done[0].close_reason in ("silence", "close_requested")
 
 
-def test_registered_customer_origin_goes_to_call_info_without_detail():
+@pytest.mark.parametrize("has_default", [True, False])
+def test_only_default_origin_goes_to_call_info_without_detail(has_default):
     from types import SimpleNamespace
     from app.calls.service import _apply_context
     from app.domain.state import ConversationState, Customer
     st = ConversationState(customer=Customer(caller_phone=CALLER))
     origin = SimpleNamespace(name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212", address_detail="1201호", geo=None)
     ctx = SimpleNamespace(status="REGISTERED", customer_seq=12, name="김철수", payment_methods=["billing"],
-                          call_session_seq=None, recent_destinations=[], places=[], default_origin=origin, recent_origin=None)
+                          call_session_seq=None, recent_destinations=[], places=[],
+                          default_origin=origin if has_default else None, recent_origin=None if has_default else origin)
     _apply_context(st, ctx, CALLER)
     svc = service()
     from app.calls.session import CallSession
     from app.tools.context import ToolContext
     s = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", st, svc.d.policy, None))
-    text = svc.session_config(s, None)["instructions"]
-    assert "- 등록된 출발지: 서울 강남구 테헤란로 212" in text and "1201호" not in text.split("# 통화 정보")[1]
+    info = svc.session_config(s, None)["instructions"].split("# 통화 정보")[1]
+    assert ("- 등록된 출발지: 서울 강남구 테헤란로 212" in info) == has_default
+    assert "1201호" not in info and st.origin_offered == has_default
 
 
 def test_closing_quiet_must_be_at_least_one_second():
