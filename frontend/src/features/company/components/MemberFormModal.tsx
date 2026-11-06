@@ -54,6 +54,9 @@ export function MemberFormModal({
           </>
         ) : (
           <>
+            {!vm.errorMessage && vm.addressHint && (
+              <p className="min-w-0 text-body text-sub">{vm.addressHint}</p>
+            )}
             {vm.errorMessage && (
               <p role="alert" className="min-w-0 text-body text-danger">
                 {vm.errorMessage}
@@ -107,6 +110,7 @@ export function MemberFormModal({
 
         <AddressField
           label="발송/수신 주소"
+          placeholder="검색으로 고르기 (필수)"
           value={vm.road}
           onSearch={vm.openSearch}
           searchLabel="사원 주소 검색"
