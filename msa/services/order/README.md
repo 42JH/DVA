@@ -15,7 +15,7 @@ order DB에는 주문/상세/결제 요청/청구만 두고 타 소유자 테이
 
 ## 실행과 배포
 
-Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 003까지 먼저 적용해야 한다. 토큰/로그 Secret을 새로 만들거나 기존 값을 교체하지 않는다.
+Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 003까지 먼저 적용해야 한다. 별도 토큰/로그 Secret 종류를 추가하지 않고 기존 최초 생성·값 보존 정책을 사용한다.
 
 저장소 루트에서 실행한다.
 
