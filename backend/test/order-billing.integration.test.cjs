@@ -1,3 +1,4 @@
+const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -53,11 +54,11 @@ before(async () => {
   ).rows[0].customer_seq;
   callId = (
     await pool.query(
-      "INSERT INTO call_sessions(provider_call_id,caller_phone_number) VALUES($1,'01000138001') RETURNING call_session_seq",
+      "INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_intake_enabled) VALUES($1,'01000138001',false) RETURNING call_session_seq",
       [randomUUID()],
     )
   ).rows[0].call_session_seq;
-  app = await NestFactory.create(AppModule, { logger: false });
+  app = legacyOrderIntake(await NestFactory.create(AppModule, { logger: false }));
   payments = app.get(OrderPaymentsService);
   billing = app.get(OrganizationBillingService);
   maintenance = app.get(OrderMaintenanceWorker);

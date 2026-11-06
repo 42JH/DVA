@@ -15,7 +15,7 @@ DO $$
 DECLARE n integer;
 BEGIN
  SELECT count(*) INTO n FROM pg_tables WHERE schemaname='public';
- IF n<>29 THEN RAISE EXCEPTION 'Expected 29 public tables, got %',n; END IF;
+ IF n<>30 THEN RAISE EXCEPTION 'Expected 30 public tables, got %',n; END IF;
  SELECT count(*) INTO n FROM pg_constraint c JOIN pg_namespace s ON s.oid=c.connamespace
  WHERE s.nspname='public' AND c.contype='f';
  IF n<>25 THEN RAISE EXCEPTION 'Expected 25 foreign keys, got %',n; END IF;

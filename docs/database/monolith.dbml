@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-11-05 / 053 기업 PIN 테이블 및 FK 2개 제거 반영. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
+  Note: '2026-11-06 / 055 배송 초안·통화 완료 신호 반영. 신규 초안의 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
@@ -255,6 +255,41 @@ Table order_parcels {
 // End of order module
 
 // Module consultation: 통화·발화·녹취·상담원 연결·PBX 수신
+// 055: 모든 번호는 논리 참조. FK/연쇄 삭제 없이 원본 사본과 번호를 보존한다.
+Table order_parcel_drafts {
+  draft_seq integer [pk, increment, not null]
+  call_session_seq integer [note: '논리 참조. AI 통화 번호, 관리자 단독은 NULL']
+  customer_seq integer [note: '논리 참조. 미등록 수집 중 NULL, READY는 활성 고객 필요']
+  caller_phone_number text [note: '최초 발신번호 사본. 원본 통화 삭제 뒤 미등록 이력 범위 확인']
+  created_by_admin_user_seq integer [note: '관리자 생성자 논리 참조']
+  client_parcel_id uuid [not null, note: '통화 내 단건 생성 고정 UUID']
+  creation_payload jsonb [not null, note: '생성 재전송 원문 비교 사본. 일반 응답 미노출']
+  parcel_data jsonb [not null, note: '주소·물품·가액·배송비 독립 사본. 좌표 없음']
+  status text [not null, note: 'READY / EDITING / INCOMPLETE / CONVERTED / CANCELLED / RESUMED']
+  version integer [not null, default: 1, note: '해당 행의 동시 수정 버전']
+  source_draft_seq integer [note: '재개 원본 논리 참조. 원본 폐기 후에도 번호 보존']
+  order_seq integer [note: '변환된 실제 주문 논리 참조']
+  order_parcel_seq integer [note: '변환된 실제 상세 논리 참조']
+  legacy_order_seq integer [note: '055 이관 원본 주문 논리 참조. 중복 조회·재접수 차단']
+  legacy_order_parcel_seq integer [note: '이관 원본 상세 논리 참조. 상세 없으면 NULL']
+  created_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  updated_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
+  retention_started_at timestamptz [not null, default: `CURRENT_TIMESTAMP`, note: '최초 수집부터 5년. 재개는 원본 기준 상속']
+  deleted_at timestamptz [note: 'soft delete. 보관 시작을 연장하지 않음']
+  indexes {
+    (call_session_seq, client_parcel_id) [unique, note: 'SQL NULLS NOT DISTINCT']
+    source_draft_seq [unique, note: 'SQL 부분 인덱스: NULL 제외']
+    order_parcel_seq [unique, note: 'SQL 부분 인덱스: NULL 제외']
+    (retention_started_at, draft_seq)
+  }
+  checks {
+    `version>0`
+    `status IN ('READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED')`
+    `(status='CONVERTED')=(order_parcel_seq IS NOT NULL) AND (order_seq IS NULL)=(order_parcel_seq IS NULL)`
+  }
+  Note: 'order / 실제 접수는 PBX+AI 완료 후 READY만 변환. 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 이관 원본 NULLS NOT DISTINCT 부분 인덱스·발신번호 검색 인덱스·나머지 양수 및 소유 검증은 055 SQL을 따른다.'
+}
+
 Table call_sessions {
   call_session_seq integer [pk, increment, not null, note: '행의 고유 기본키']
   customer_seq integer [note: '040: 확인된 고객 번호 논리 참조. 미등록 NULL, 전화번호 변경 후에도 연결 보존']
@@ -264,6 +299,14 @@ Table call_sessions {
   incoming_at timestamptz [note: 'OpenAI 수신 이벤트 created_at. PBX 매칭용 기준 시각이며 실제 통화 시작 시각과 별도']
   started_at timestamptz [note: '종료 결과로 전달받는 실제 통화 시작 시각']
   ended_at timestamptz [note: '종료 결과로 전달받는 실제 통화 종료 시각']
+  order_intake_enabled boolean [not null, default: true, note: '055 이전 등록 false, 이후 true']
+  order_intake_version integer [not null, default: 1, note: '통화 초안 집합 버전']
+  order_completion_received_at timestamptz [note: 'AI 주문 데이터 전송 완료 수신']
+  order_completion_payload jsonb [note: '확정 본문 재전송 비교 사본']
+  order_finalized_at timestamptz [note: 'PBX 종료와 AI 완료 후 로컬 주문 확정']
+  order_finalization_result jsonb [note: 'orderSeq·draftSeq→orderParcelSeq 논리 참조 결과']
+  order_finalization_error_code text [note: '재처리용 안전한 오류 코드']
+  order_finalization_attempted_at timestamptz [note: '실패 복구 1분 간격 기준']
   checks {
     `btrim(provider_call_id)<>''`
     `(started_at IS NULL AND ended_at IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`

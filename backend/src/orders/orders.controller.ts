@@ -148,10 +148,10 @@ export class OrdersController {
   @MvpAiOrderAccess()
   @AuditOperation({ action: 'ORDER_CREATED', targetType: 'ORDER', target: 'none' })
   @ApiOperation({
-    summary: '주문 생성·AI 상담 결과 수신',
+    summary: '관리자 부분 주문 생성·이전 AI 계약 호환',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 개인 카드 결제를 대기하거나 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '055 이후 등록된 AI 통화는 409이며 parcel-drafts → order-intake/complete를 사용합니다. 이 경로의 AI 쓰기는 055 이전 등록 통화만 마무리하는 호환 기능입니다.\n\nAI는 call과 outcome을 한 번 전송합니다. COMPLETE는 검증 후 개인 카드 결제를 대기하거나 월·그룹결제 완료 후 디버 접수 결과를 반환하고, INCOMPLETE는 COLLECTING, CANCELLED는 CANCELLED로 저장합니다. ACCEPTED만 접수 성공입니다.\n\n관리자의 기존 부분 저장도 지원합니다. 같은 UUID 재전송은 기존 결과만 반환합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiBody({
     description:
@@ -323,7 +323,7 @@ export class OrdersController {
     summary: '주문 정보 수정',
     security: [{ adminSession: [] }, {}],
     description:
-      'AI는 COLLECTING 주문의 미취소 상세만 수정합니다. 관리자는 모든 주문 상태에서 상세 추가·수정·제거가 가능하며 상태·확정 결제수단은 유지합니다. 관리자 총액은 미취소 상세 배송비로 재계산하고 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '055 이후 등록 AI 통화는 배송 초안 API로 수정하며 이 경로는 409입니다. 이전 등록 통화의 AI는 COLLECTING 주문의 미취소 상세만 수정합니다. 관리자는 모든 주문 상태에서 상세 추가·수정·제거가 가능하며 상태·확정 결제수단은 유지합니다. 관리자 총액은 미취소 상세 배송비로 재계산하고 디버에는 전송하지 않습니다. 생략한 값은 유지하고 nullable 필드의 null은 값을 비웁니다.\n\nAI는 발신번호가 일치하는 활성 고객의 주문만 저장합니다. 진행 중 통화는 선택한 주문에 연결하고, 종료된 통화는 기존 연결 주문의 후처리만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -424,7 +424,7 @@ export class OrdersController {
     summary: '주문 전체 취소',
     security: [{ adminSession: [] }, {}],
     description:
-      'COLLECTING 또는 notPaid 주문을 즉시 취소합니다. 주문·상세는 보존하고 총액을 0원으로 변경하며 결제 요청을 닫습니다. 결제 완료 이후 취소는 거절하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
+      '신규 AI 통화의 수정·취소·확정은 배송 초안과 통화 주문 완료 API를 사용하며 이 쓰기 경로는 409입니다. 관리자의 기존 권한과 이전 통화 호환은 유지합니다.\n\nCOLLECTING 또는 notPaid 주문을 즉시 취소합니다. 주문·상세는 보존하고 총액을 0원으로 변경하며 결제 요청을 닫습니다. 결제 완료 이후 취소는 거절하며 디버 취소 API는 호출하지 않습니다. 이미 취소한 상세는 건너뛰고 주문 전체가 취소된 경우에만 409를 반환합니다. 본문·Idempotency-Key는 필요하지 않습니다.\n\n관리자는 모든 주문, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -466,7 +466,7 @@ export class OrdersController {
     summary: '주문 상세 단건·복수 취소',
     security: [{ adminSession: [] }, {}],
     description:
-      'orderParcelSeqs에 같은 주문의 상세번호를 한 개 이상 보냅니다. 이미 취소된 상세는 건너뛰고, 남은 대상이 모두 미완료 또는 결제 전(notPaid)일 때 한 번에 취소합니다. 하나라도 없거나 취소할 수 없으면 전부 변경하지 않습니다. 모든 상세가 취소되면 주문도 CANCELLED입니다. 전부 이미 취소된 요청은 변경·이력 추가 없이 204입니다.\n\n관리자는 전체, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. Idempotency-Key·expectedVersion은 필요하지 않습니다. 디버 취소 API와 AI 서비스 인증은 아직 적용되지 않습니다.',
+      '신규 AI 통화의 수정·취소·확정은 배송 초안과 통화 주문 완료 API를 사용하며 이 쓰기 경로는 409입니다. 관리자의 기존 권한과 이전 통화 호환은 유지합니다.\n\norderParcelSeqs에 같은 주문의 상세번호를 한 개 이상 보냅니다. 이미 취소된 상세는 건너뛰고, 남은 대상이 모두 미완료 또는 결제 전(notPaid)일 때 한 번에 취소합니다. 하나라도 없거나 취소할 수 없으면 전부 변경하지 않습니다. 모든 상세가 취소되면 주문도 CANCELLED입니다. 전부 이미 취소된 요청은 변경·이력 추가 없이 204입니다.\n\n관리자는 전체, AI는 기존 상세 조회와 같은 발신번호·활성 고객 범위만 허용합니다. Idempotency-Key·expectedVersion은 필요하지 않습니다. 디버 취소 API와 AI 서비스 인증은 아직 적용되지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',
@@ -511,7 +511,7 @@ export class OrdersController {
     summary: '기존 미완료 주문 최종 접수',
     security: [{ adminSession: [] }, {}],
     description:
-      '기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. AI의 새 상담 완료는 POST /api/orders에서 처리하므로 이 API를 추가 호출하지 않습니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 기본값은 billing이며 주소·물품·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
+      '신규 AI 통화의 수정·취소·확정은 배송 초안과 통화 주문 완료 API를 사용하며 이 쓰기 경로는 409입니다. 관리자의 기존 권한과 이전 통화 호환은 유지합니다.\n\n기존 COLLECTING 주문을 최종 확정합니다. 개인 카드는 결제 대기, 월·그룹결제는 결제 완료 후 미취소 상세만 디버에 전송합니다. 이전 등록 통화의 AI 상담 완료는 POST /api/orders, 신규 AI 통화는 order-intake/complete로 처리합니다. 같은 주문 재호출은 현재 상태만 반환하며 Idempotency-Key는 필요하지 않습니다.\n\n결제: credit은 자격이 활성화된 월결제, groupBilling은 소속 부서의 그룹결제, billing은 개인·기업 고객의 개인 카드입니다. 최종 접수 시 결제수단·주소·물품·총액과 상세별 배송비가 필요합니다.\n\n관리자는 세션, AI는 진행 중 통화와 고객 범위를 확인합니다. AI 서비스 인증은 아직 적용되지 않습니다. 결과가 불명확해도 자동 재접수하지 않습니다.',
   })
   @ApiHeader({
     name: 'call_session_seq',

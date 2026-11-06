@@ -1,3 +1,4 @@
+const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
 const { testMembership } = require('./membership.cjs');
 require('reflect-metadata');
 const { before, beforeEach, after } = require('node:test');
@@ -47,7 +48,7 @@ module.exports = function manualOrders() {
     ],
   });
   f.start = async () => {
-    const app = await NestFactory.create(AppModule, { logger: false });
+    const app = legacyOrderIntake(await NestFactory.create(AppModule, { logger: false }));
     f.apps.push(app);
     configureApplication(app, { log: () => {} });
     app.get(ConfigService).set('DVER_API_URL', f.dverUrl);

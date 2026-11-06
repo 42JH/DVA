@@ -7,6 +7,7 @@ import { OrganizationBillingService } from '../organizations/organization-billin
 import { OrderSubmissionService } from './order-submission.service';
 import { OrdersRepository } from './orders.repository';
 import { OrderPaymentsRepository } from './order-payments.repository';
+import { OrderIntakeService } from './order-intake.service';
 
 @Injectable()
 export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleDestroy {
@@ -22,6 +23,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     private readonly repository: OrdersRepository,
     private readonly payments: OrderPaymentsRepository,
     private readonly config: ConfigService,
+    private readonly intake: OrderIntakeService,
   ) {}
   onApplicationBootstrap() {
     if (this.config.get('NODE_ENV') === 'test') return;
@@ -45,6 +47,7 @@ export class OrderMaintenanceWorker implements OnApplicationBootstrap, OnModuleD
     return this.running;
   }
   private async work(now: Date) {
+    await this.intake.recoverPending();
     await this.submissions.recoverPending();
     // Rollover commits before locking orders, preserving the payment lock order.
     await this.billing.rollover(now);

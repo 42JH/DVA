@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+055 배송 단건 초안은 [AI 전송 명세](docs/parcel-draft-ai-integration.md), [프론트 연동 명세](docs/parcel-draft-frontend-integration.md), [배포·복구](docs/parcel-draft-rollout.md)를 우선한다. 통화 중에는 초안만 저장하고 PBX 종료와 AI 완료 후 READY를 실제 주문 하나로 변환한다. EDITING은 고객 등록 전에도 보존한다. 새 참조는 논리 참조이며 주소·물품·발신번호 사본은 원본 삭제와 독립적으로 최초 수집부터 5년 보관한다. 055는 한 번의 migration으로 적용하며 기존 쓰기 중지·백업 후 새 AI/프론트와 함께 전환한다. 아래 AI ORD-01 일괄 생성 설명은 055 이전 등록 통화의 호환 경로에 해당한다.
+
 고객 단독 등록 `POST /api/customers`는 이름·11자리 전화번호·주소가 필수다. 상세주소만 생략·빈 문자열을 허용한다. [주소 필수 연동 안내](docs/customer-registration-address.md)와 [고객 API](../docs/api/customers.md)를 따른다. 주소 수정·과거 고객 조회·주문 내 고객 연결·기업 사원 등록의 별도 계약과 DB 스키마는 유지한다.
 
 주문 상세 물품가액은 [주문 결제 계약](../docs/api/order-billing.md)에 따라 1원~1억원 정수만 받는다. AI·수기 생성과 수정의 범위 오류는 400, 저장된 범위 밖 가액의 최종 접수·최초 카드 승인·디버 전송은 422다. 승인 절차가 이미 시작된 결제의 결과 확인·복구는 유지한다. 수집 중 생략·null과 과거 값 조회는 유지하며 배송비 정책·DB 스키마는 변경하지 않는다.

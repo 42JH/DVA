@@ -74,7 +74,7 @@ export class OrdersRepository {
       await client.query<import('./dto/order-response.dto').OrderResultDto>(
         `SELECT order_seq AS "orderSeq",version,status,total_amount AS "totalAmount",parcel_no AS "parcelNo",$2::int AS "callSessionSeq",
         payment_due_at AS "paymentDueAt",${paymentRequestJson} AS "paymentRequest"
-       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL`,
+       FROM orders o WHERE order_seq=$1 AND o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>statement_timestamp()-interval '5 years'`,
         [id, callId],
       )
     ).rows[0];
@@ -202,7 +202,7 @@ export class OrdersRepository {
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
          ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=o.order_seq),'[]'::jsonb) AS parcels
        FROM orders o
-       WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+       WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq) AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
         AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
@@ -233,7 +233,8 @@ export class OrdersRepository {
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
          FROM orders o
-         WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+         WHERE o.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
+           AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
            AND ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)
@@ -335,11 +336,43 @@ export class OrdersRepository {
 
   async call(client: PoolClient, id: number) {
     return (
-      await client.query<{ orderSeq: number | null; endedAt: Date | null; phone: string | null }>(
-        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
+      await client.query<{
+        orderSeq: number | null;
+        endedAt: Date | null;
+        phone: string | null;
+        orderIntakeEnabled: boolean;
+      }>(
+        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
         [id],
       )
     ).rows[0];
+  }
+
+  async isDraftCall(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query(
+        'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
+        [id],
+      )
+    ).rowCount;
+  }
+
+  async hasMigratedDrafts(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query('SELECT 1 FROM order_parcel_drafts WHERE legacy_order_seq=$1 LIMIT 1', [
+        id,
+      ])
+    ).rowCount;
+  }
+
+  async submissionAllowed(client: PoolClient, id: number): Promise<boolean> {
+    return !(
+      await client.query(
+        `SELECT 1 FROM call_sessions WHERE order_seq=$1 AND order_intake_enabled
+      AND (ended_at IS NULL OR order_finalized_at IS NULL)`,
+        [id],
+      )
+    ).rowCount;
   }
 
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {
