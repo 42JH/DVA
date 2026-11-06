@@ -105,7 +105,7 @@ module.exports = function registerOrdersPayment(suite) {
           origin: address,
           destination: address,
           smallBoxCount: 1,
-          itemPrice: 0,
+          itemPrice: 1,
           originPin: { scope: 'PERSONAL', pinSeq: suite.personalPin },
         },
       ],
@@ -131,7 +131,7 @@ module.exports = function registerOrdersPayment(suite) {
           origin: address,
           destination: address,
           smallBoxCount: 1,
-          itemPrice: 0,
+          itemPrice: 1,
         },
       ],
     });

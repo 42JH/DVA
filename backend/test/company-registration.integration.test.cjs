@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -244,7 +245,7 @@ test('existing company member batches save all customer addresses and distinguis
   const before = (await get(path)).data[0];
   const number = phone();
   const existing = await post(
-    { name: '미소속 고객', phoneNumber: number },
+    { address: customerAddress(), name: '미소속 고객', phoneNumber: number },
     { path: '/api/customers' },
   );
   assert.equal(existing.status, 201);
@@ -550,7 +551,10 @@ test('company POST accepts a 1000-employee body above 100 KiB and rejects bodies
   const before = await counts();
   await error(await post({ name: '가'.repeat(400000) }), 413, 'PAYLOAD_TOO_LARGE');
   await error(
-    await post({ name: '가'.repeat(40000), phoneNumber: phone() }, { path: '/api/customers' }),
+    await post(
+      { address: customerAddress(), name: '가'.repeat(40000), phoneNumber: phone() },
+      { path: '/api/customers' },
+    ),
     413,
     'PAYLOAD_TOO_LARGE',
   );

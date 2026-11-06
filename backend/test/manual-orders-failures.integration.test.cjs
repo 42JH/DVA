@@ -75,6 +75,33 @@ test('69: malformed orders and client-supplied AI/server fields are rejected wit
   assert.equal(f.requests.length, 0);
 });
 
+test('manual order item values outside the allowed range fail before writes or Dver calls', async () => {
+  const before = await f.counts();
+  for (const itemPrice of [0, -1, 100000001, 9000000000]) {
+    const input = f.body();
+    delete input.customerSeq;
+    input.customer = { name: '거절할 신규 고객', phoneNumber: f.phone() };
+    input.parcels[0].itemPrice = itemPrice;
+    const error = await f.error(await f.send(input), 400, 'INVALID_REQUEST');
+    assert.ok(error.error.details.some((detail) => detail.field === 'parcels.0.itemPrice'));
+  }
+  assert.deepEqual(await f.counts(), before);
+  assert.equal(f.requests.length, 0);
+});
+
+test('manual order item values include both allowed boundaries without changing the delivery fee', async () => {
+  for (const itemPrice of [1, 100000000]) {
+    const input = f.body();
+    input.parcels[0].itemPrice = itemPrice;
+    const response = await f.send(input);
+    assert.equal(response.status, 201);
+    assert.equal((await response.json()).data.status, 'ACCEPTED');
+    const sent = f.requests.at(-1).body.outboundParcels[0];
+    assert.equal(sent.itemPrice, itemPrice);
+    assert.equal(sent.notifiedPrice, input.parcels[0].notifiedPrice);
+  }
+});
+
 test('69: customer state, PIN ownership and company payment eligibility reuse common validation', async () => {
   const before = await f.counts();
   await f.error(await f.send({ ...f.body(), customerSeq: 2147483647 }), 404, 'NOT_FOUND');

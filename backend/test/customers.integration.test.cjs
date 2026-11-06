@@ -1,4 +1,5 @@
 const { testMembership } = require('./helpers/membership.cjs');
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -77,7 +78,11 @@ function create(
         ...(key === undefined ? {} : { 'Idempotency-Key': key }),
         ...headers,
       },
-      body: JSON.stringify(input),
+      body: JSON.stringify(
+        input && typeof input === 'object' && !Array.isArray(input)
+          ? { address: customerAddress(), ...input }
+          : input,
+      ),
     },
     host,
   );
@@ -208,12 +213,55 @@ test('authenticated AI can register, read and rename without a cookie, call head
     phoneNumber: input.phoneNumber,
     status: 'ACTIVE',
     monthlyBillingEnabled: false,
-    address: null,
+    address: customerAddress(),
   });
   const updated = await patch(id, { name: '  변경 고객  ' });
   assert.equal(updated.status, 204);
   assert.equal(await updated.text(), '');
   assert.equal((await (await request('/' + id)).json()).data.name, '변경 고객');
+});
+
+test('registration requires an address for AI and administrators without creating partial customers', async () => {
+  const before = (await pool.query('SELECT count(*) FROM customers')).rows[0].count;
+  const incomplete = ['roadAddress', 'jibunAddress', 'dongName', 'postalCode'].map((field) => ({
+    ...customerAddress(),
+    [field]: undefined,
+  }));
+  for (const headers of [{}, adminHeaders()]) {
+    for (const address of [undefined, null, {}, [], '주소', ...incomplete]) {
+      const response = await create(
+        { name: '미등록 주소 고객', phoneNumber: phone(), address },
+        undefined,
+        base,
+        headers,
+      );
+      assert.equal(response.status, 400);
+      const body = await response.json();
+      assert.equal(body.error.code, 'INVALID_REQUEST');
+      assert.ok(body.error.details.some((detail) => detail.field.startsWith('address')));
+    }
+  }
+  assert.equal((await pool.query('SELECT count(*) FROM customers')).rows[0].count, before);
+  for (const headers of [{}, adminHeaders()]) {
+    for (const detailAddress of [undefined, '']) {
+      const address = {
+        ...customerAddress(),
+        ...(detailAddress === undefined ? {} : { detailAddress }),
+      };
+      const response = await create(
+        { name: '주소 등록 고객', phoneNumber: phone(), address },
+        undefined,
+        base,
+        headers,
+      );
+      assert.equal(response.status, 201);
+      const id = (await response.json()).data.customerSeq;
+      assert.deepEqual((await (await request('/' + id)).json()).data.address, address);
+    }
+  }
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  assert.ok(document.components.schemas.CreateCustomerDto.required.includes('address'));
+  assert.notEqual(document.components.schemas.CreateCustomerDto.properties.address.nullable, true);
 });
 
 test('customer list and status changes require a real active administrator; forged headers grant nothing', async () => {
@@ -473,7 +521,7 @@ test('withdrawal preserves related data, prevents AI access, duplicate registrat
     ...input,
     status: 'WITHDRAWN',
     monthlyBillingEnabled: false,
-    address: null,
+    address: customerAddress(),
   });
   assert.equal(
     (await pool.query('SELECT status FROM memberships WHERE customer_seq=$1', [id])).rows[0].status,
@@ -661,7 +709,7 @@ test('address-only updates roll back when success audit fails', async () => {
   } finally {
     audit.recordSuccess = original;
   }
-  assert.equal((await (await request('/' + id)).json()).data.address, null);
+  assert.deepEqual((await (await request('/' + id)).json()).data.address, customerAddress());
 });
 
 test('AI basic address changes require a matching ongoing call while administrator and name-only updates keep their contracts', async () => {

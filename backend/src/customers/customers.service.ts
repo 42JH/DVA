@@ -69,7 +69,7 @@ export class CustomersService {
 
   async resolveForOrder(
     client: PoolClient,
-    input: { customerSeq?: number; customer?: CreateCustomerDto },
+    input: { customerSeq?: number; customer?: Pick<CreateCustomerDto, 'name' | 'phoneNumber'> },
     actorId: number | null,
     requestId: string,
   ) {

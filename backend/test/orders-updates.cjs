@@ -56,7 +56,7 @@ module.exports = function registerOrdersUpdates(suite) {
           {
             destination: { name: '새 상세', phoneNumber: '01000012345' },
             smallBoxCount: 1,
-            itemPrice: Number.MAX_SAFE_INTEGER,
+            itemPrice: 100000000,
           },
         ],
       },
@@ -88,7 +88,7 @@ module.exports = function registerOrdersUpdates(suite) {
     assert.equal(added.documentCount, 0);
     assert.equal(added.clientComment, '');
     assert.equal(added.notifiedPrice, null);
-    assert.equal(added.itemPrice, Number.MAX_SAFE_INTEGER);
+    assert.equal(added.itemPrice, 100000000);
     assert.equal(Object.hasOwn(added, 'shipment'), false);
     assert.equal(after.parcelNo, null);
     assert.equal(after.dverReceivedAt, null);

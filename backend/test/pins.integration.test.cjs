@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 const { testMembership } = require('./helpers/membership.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
@@ -315,7 +316,7 @@ test('an ended call cannot modify a new customer who reuses the deleted original
   const response = await request(
     'POST',
     '/customers',
-    { name: '새 고객', phoneNumber: f.phone },
+    { address: customerAddress(), name: '새 고객', phoneNumber: f.phone },
     businessHeaders(),
   );
   const customer = await success(response, 201);

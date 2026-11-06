@@ -97,7 +97,7 @@ export class CustomersRepository {
 
   async insertForOrder(
     client: PoolClient,
-    input: CreateCustomerDto,
+    input: Pick<CreateCustomerDto, 'name' | 'phoneNumber'>,
   ): Promise<Customer | undefined> {
     return (
       await client.query<Customer>(

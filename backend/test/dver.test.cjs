@@ -26,7 +26,7 @@ const complete = () =>
         origin: address,
         destination: address,
         smallBoxCount: 1,
-        itemPrice: 0,
+        itemPrice: 1,
         notifiedPrice: 3500,
         originPin: { scope: 'PERSONAL', pinSeq: 1 },
       },
@@ -34,7 +34,7 @@ const complete = () =>
         origin: address,
         destination: address,
         otherItemDescription: '기타 물품',
-        itemPrice: Number.MAX_SAFE_INTEGER,
+        itemPrice: 100000000,
         notifiedPrice: 3500,
       },
     ],
@@ -118,10 +118,10 @@ test('Dver v2 mapping sends each parcel and its own fee without internal identif
         'postalCode',
         'roadAddress',
       ]);
-  assert.equal(parcel.itemPrice, 0);
+  assert.equal(parcel.itemPrice, 1);
   assert.equal(parcel.notifiedPrice, 3500);
   assert.equal(payload.outboundParcels[1].notifiedPrice, 3500);
-  assert.equal(payload.outboundParcels[1].itemPrice, Number.MAX_SAFE_INTEGER);
+  assert.equal(payload.outboundParcels[1].itemPrice, 100000000);
   assert.throws(
     () => dverPayload(orderDraft({})),
     (error) => error.getStatus() === 422,

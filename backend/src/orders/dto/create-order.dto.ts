@@ -16,6 +16,7 @@ import {
 import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
 import { CreateCustomerDto } from '../../customers/dto/customer-request.dto';
 import { MOBILE_PHONE_PATTERN } from '../../common/mobile-phone';
+import { MAX_ORDER_ITEM_PRICE, MIN_ORDER_ITEM_PRICE } from '../orders.types';
 import { OrderCallDto } from './order-call.dto';
 
 const present = (_object: unknown, value: unknown) => value !== undefined;
@@ -191,16 +192,17 @@ export class ParcelInputDto {
   clientComment?: string;
 
   @ApiPropertyOptional({
-    description: '물품 가액(원). 생성 시 기본 null, 수정 시 생략하면 유지·null이면 비우기.',
+    description:
+      '물품 가액(원). 입력 시 1원~1억원 정수. 생성 시 기본 null, 수정 시 생략하면 유지·null이면 비우기. 최종 접수 시 필수.',
     type: Number,
     nullable: true,
-    minimum: 0,
-    maximum: Number.MAX_SAFE_INTEGER,
+    minimum: MIN_ORDER_ITEM_PRICE,
+    maximum: MAX_ORDER_ITEM_PRICE,
   })
   @IsOptional()
   @IsInt()
-  @Min(0)
-  @Max(Number.MAX_SAFE_INTEGER)
+  @Min(MIN_ORDER_ITEM_PRICE)
+  @Max(MAX_ORDER_ITEM_PRICE)
   itemPrice?: number | null;
 }
 

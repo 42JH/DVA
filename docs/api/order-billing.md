@@ -22,7 +22,9 @@ Jira: [S15P31D109-138](https://ssafy.atlassian.net/browse/S15P31D109-138).
 
 AI는 기존 POST /api/orders의 outcome=COMPLETE, 관리자 수기는 POST /api/admin/orders를 사용한다. 기존 미완료 주문은 PATCH /api/orders/{id}로 보완한 뒤 POST /api/orders/{id}/submit에 최신 expectedVersion을 보낸다.
 
-최종 확정에는 totalAmount와 각 parcels[].notifiedPrice가 필수다. 배송비는 1~2,147,483,647원 정수이며 합계도 이 범위 안이어야 한다. totalAmount는 미취소 상세의 합계와 정확히 일치해야 한다. itemPrice는 별도의 물품 가액이다. JSON 형식·입력 범위 오류는 400, 저장된 배송비 누락·합계 오류는 422로 거절하고 최종 확정·디버 전송을 하지 않는다.
+최종 확정에는 totalAmount와 각 parcels[].notifiedPrice가 필수다. 배송비는 1~2,147,483,647원 정수이며 합계도 이 범위 안이어야 한다. totalAmount는 미취소 상세의 합계와 정확히 일치해야 한다. itemPrice는 별도의 물품 가액으로 1~100,000,000원 정수만 허용한다. AI·수기 생성과 수정에서 범위 밖 값은 400으로 거절한다. 미수집 값의 생략·null은 유지하되, 최종 확정·디버 전송에는 필수이며 저장된 범위 밖 가액은 422 VALIDATION_FAILED(details의 parcels.N.itemPrice / priceRange)로 거절한다. 과거 저장값을 자동 변경하거나 조회에서 숨기지 않는다. JSON 형식·입력 범위 오류는 400, 저장된 배송비 누락·합계 오류는 422로 거절하고 최종 확정·디버 전송을 하지 않는다.
+
+기존 결제 대기 주문도 최초 카드 승인 전에 같은 가액을 검증하며, 오류 시 외부 결제사 호출과 승인 키 예약을 하지 않는다. 결제 대기 상태의 확정 상세는 기존처럼 수정할 수 없으므로 범위 밖 과거 가액은 미결제 주문을 취소한 뒤 정상 가액으로 다시 접수한다. 승인 절차가 이미 시작됐거나 완료된 결제는 새 입력 검증으로 결과 확인·복구를 중단하지 않으며 기존 승인 이력을 보존한다.
 
 - billing: 개인 카드. 개인·기업 고객 모두 사용하며 notPaid로 저장한다.
 - credit: 월결제. 개인 고객은 본인 설정, 기업 구성원은 활성 소속·활성 기업의 설정을 검증한 뒤 PAID로 저장한다.

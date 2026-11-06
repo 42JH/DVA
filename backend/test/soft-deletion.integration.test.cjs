@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -466,7 +467,11 @@ test('company deletion preserves rows and historical identifiers while membershi
     201,
   );
   const customer = await data(
-    await f.write('POST', '/api/customers', { name: '보존 고객', phoneNumber: phone() }),
+    await f.write('POST', '/api/customers', {
+      address: customerAddress(),
+      name: '보존 고객',
+      phoneNumber: phone(),
+    }),
     201,
   );
   const co = company.organizationSeq,

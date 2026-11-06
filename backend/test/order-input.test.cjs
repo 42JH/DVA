@@ -7,9 +7,89 @@ const { createValidationPipe } = require('../dist/common/http/validation.pipe');
 const { UpdateOrderDto } = require('../dist/orders/dto/update-order.dto');
 const { CancelOrderParcelsDto } = require('../dist/orders/dto/cancel-order-parcels.dto');
 const { assertOrderUpdate } = require('../dist/orders/order-update.validation');
+const customerAddress = require('./helpers/customer-address.cjs');
 
 const pipe = createValidationPipe();
 const validate = (body) => pipe.transform(body, { type: 'body', metatype: CreateOrderDto });
+
+test('customer registration requires a complete address while detail address remains optional', async () => {
+  const {
+    CreateCustomerDto,
+    UpdateCustomerDto,
+  } = require('../dist/customers/dto/customer-request.dto');
+  const address = {
+    roadAddress: '등록로 1',
+    jibunAddress: '등록동 1',
+    dongName: '등록동',
+    postalCode: '00001',
+  };
+  const transform = (value) =>
+    pipe.transform(
+      { name: '고객', phoneNumber: '01012345678', address: value },
+      { type: 'body', metatype: CreateCustomerDto },
+    );
+  for (const detail of [undefined, '']) {
+    const input = await transform({ ...address, detailAddress: detail });
+    assert.equal(input.address.postalCode, '00001');
+    assert.equal(input.address.detailAddress, detail);
+  }
+  for (const value of [undefined, null, {}, [], '주소']) {
+    await assert.rejects(
+      () => transform(value),
+      (error) =>
+        error.getStatus() === 400 &&
+        error.getResponse().details.some((detail) => detail.field.startsWith('address')),
+    );
+  }
+  for (const field of ['roadAddress', 'jibunAddress', 'dongName', 'postalCode']) {
+    for (const missing of [undefined, null, '']) {
+      await assert.rejects(
+        () => transform({ ...address, [field]: missing }),
+        (error) =>
+          error.getStatus() === 400 &&
+          error.getResponse().details.some((detail) => detail.field === 'address.' + field),
+      );
+    }
+  }
+  await pipe.transform({ name: '수정 이름' }, { type: 'body', metatype: UpdateCustomerDto });
+  await pipe.transform({ address: null }, { type: 'body', metatype: UpdateCustomerDto });
+});
+
+test('order item values are limited to one won through one hundred million across create, manual and update', async () => {
+  const { CreateManualOrderDto } = require('../dist/orders/dto/manual-order.dto');
+  for (const [metatype, base] of [
+    [CreateOrderDto, { customerSeq: 1 }],
+    [CreateManualOrderDto, { customerSeq: 1 }],
+    [UpdateOrderDto, { expectedVersion: 1 }],
+  ]) {
+    const transform = (parcel) =>
+      pipe.transform({ ...base, parcels: [parcel] }, { type: 'body', metatype });
+    for (const itemPrice of [1, 99999999, 100000000]) {
+      const input = await transform({ itemPrice });
+      assert.equal(input.parcels[0].itemPrice, itemPrice);
+    }
+    for (const itemPrice of [
+      0,
+      -1,
+      100000001,
+      9000000000,
+      Number.MAX_SAFE_INTEGER,
+      1.5,
+      '1000',
+      true,
+    ]) {
+      await assert.rejects(
+        () => transform({ itemPrice }),
+        (error) =>
+          error.getStatus() === 400 &&
+          error.getResponse().details.some((detail) => detail.field === 'parcels.0.itemPrice'),
+        metatype.name + ': ' + JSON.stringify(itemPrice),
+      );
+    }
+    assert.equal((await transform({})).parcels[0].itemPrice, undefined);
+    assert.equal((await transform({ itemPrice: null })).parcels[0].itemPrice, null);
+  }
+});
 
 test('business phone inputs require exactly eleven ASCII digits without normalization', async () => {
   const {
@@ -29,7 +109,10 @@ test('business phone inputs require exactly eleven ASCII digits without normaliz
     postalCode: '00001',
   });
   for (const [metatype, body] of [
-    [CreateCustomerDto, (phoneNumber) => ({ name: '고객', phoneNumber })],
+    [
+      CreateCustomerDto,
+      (phoneNumber) => ({ name: '고객', phoneNumber, address: customerAddress() }),
+    ],
     [ListCustomersQueryDto, (phoneNumber) => ({ phoneNumber })],
     [CallerContextRequestDto, (phoneNumber) => ({ phoneNumber })],
     [InlineMemberDto, (phoneNumber) => ({ employeeNo: '001', name: '직원', phoneNumber })],
@@ -381,13 +464,13 @@ test('order inputs preserve zero, explicit timezone and PostgreSQL numeric bound
         origin: { postalCode: '00001' },
         documentCount: 0,
         smallBoxCount: 2147483647,
-        itemPrice: Number.MAX_SAFE_INTEGER,
+        itemPrice: 100000000,
       },
     ],
   });
   assert.equal(result.parcels[0].origin.postalCode, '00001');
   assert.equal(result.parcels[0].documentCount, 0);
-  assert.equal(result.parcels[0].itemPrice, Number.MAX_SAFE_INTEGER);
+  assert.equal(result.parcels[0].itemPrice, 100000000);
 });
 
 test('orders accept customer identity without an existing customer ID', async () => {

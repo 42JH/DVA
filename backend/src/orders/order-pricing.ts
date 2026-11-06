@@ -1,4 +1,14 @@
 import { ApiException } from '../common/errors/api.exception';
+import { MAX_ORDER_ITEM_PRICE, MIN_ORDER_ITEM_PRICE } from './orders.types';
+
+export function orderItemPriceError(value: number | null): 'required' | 'priceRange' | null {
+  if (value === null) return 'required';
+  return Number.isSafeInteger(value) &&
+    value >= MIN_ORDER_ITEM_PRICE &&
+    value <= MAX_ORDER_ITEM_PRICE
+    ? null
+    : 'priceRange';
+}
 
 export function assertOrderAmount(order: {
   totalAmount: number | null;

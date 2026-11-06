@@ -1,3 +1,4 @@
+const customerAddress = require('./helpers/customer-address.cjs');
 const { before, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -316,6 +317,7 @@ test('production customer service authentication through Nginx preserves AI and 
   const input = {
     name: 'runtime-customer-' + randomUUID(),
     phoneNumber: '010' + String(require('node:crypto').randomInt(10000000, 100000000)),
+    address: customerAddress(),
   };
   const headers = { 'Content-Type': 'application/json', ...businessHeaders() };
   for (const authorization of [undefined, 'Bearer wrong-business-token']) {
@@ -633,7 +635,11 @@ test('production personal PIN APIs accept stale versions and company PIN routes 
   const customer = await fetch(root + '/customers', {
     method: 'POST',
     headers: admin,
-    body: JSON.stringify({ name: '주소록 운영 검증', phoneNumber: number }),
+    body: JSON.stringify({
+      address: customerAddress(),
+      name: '주소록 운영 검증',
+      phoneNumber: number,
+    }),
   });
   assert.equal(customer.status, 201);
   const customerId = (await customer.json()).data.customerSeq;
