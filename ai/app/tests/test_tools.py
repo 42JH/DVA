@@ -212,6 +212,30 @@ def test_full_parcel_opens_readback_with_facts(corrector, address):
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
 
 
+def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(corrector, address):
+    """no·change로 확인 대기를 푼 뒤(운영 통화 56c133c8): 고친 값이 기록되기 전 같은 값은 NOTHING_CHANGED만,
+    고친 값이 기록된 뒤 같은 값을 다시 말하면 되읽기로 대기를 다시 연다. 대기가 있으면 되읽기를 또 주지 않는다."""
+    from app.domain.confirm import release
+    c = ctx(address=address)
+    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
+                              "sender_address_detail": "3층"})
+    call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
+                              "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
+                              "small_box_count": 1, "item_price": 30000})
+    again = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert again["code"] == "NOTHING_CHANGED" and "readback" not in again.get("facts", {})  # 대기 유지, 되읽기 반복 없음
+    assert release(c.state, c.state.pending.id) and c.state.awaiting_fix and c.state.pending is None
+    same = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert same["code"] == "NOTHING_CHANGED" and c.state.pending is None                   # 고칠 값을 기다린다
+    fixed = call(c, "record_fields", {"client_comment": "승용차"})
+    assert c.state.pending and "readback" in fixed["facts"] and not c.state.awaiting_fix    # 정정 기록 → 새 되읽기
+    release(c.state, c.state.pending.id)
+    c.state.awaiting_fix = False                                                             # 정정이 다른 경로로 끝난 뒤
+    reopened = call(c, "record_fields", {"receiver_name": "이영희"})
+    assert reopened["code"] == "NOTHING_CHANGED" and reopened["facts"]["readback"]["receiver_name"] == "이영희"
+    assert c.state.pending is not None
+
+
 # --- find_destination ---
 
 def place(name, address_, source=Source.PIN, detail="101호"):

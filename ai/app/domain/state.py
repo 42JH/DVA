@@ -154,6 +154,7 @@ class ConversationState:
     pickup_at: FieldState = field(default_factory=FieldState)
     payment: FieldState = field(default_factory=FieldState)
     pending: PendingConfirmation | None = None
+    awaiting_fix: bool = False             # no·change로 확인 대기를 푼 뒤 고친 값을 기다림(그동안 되읽기를 다시 열지 않는다)
     candidates: CandidateSet | None = None
     selected_order: dict | None = None     # 취소 대상(조회 후보에서 고른 것)
     state_version: int = 0

@@ -137,5 +137,6 @@ def release(state: ConversationState, pending_id: str) -> bool:
     if state.pending is None or state.pending.id != pending_id:
         return False
     state.pending = None
+    state.awaiting_fix = True  # 고친 값이 기록될 때까지 되읽기를 다시 열지 않는다(record_fields가 푼다)
     state.bump()
     return True

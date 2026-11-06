@@ -811,3 +811,24 @@
 
 - Live 업무 지침에 현재 택배의 최신 서버 결과에서 missing 첫 항목만 묻고, valid 항목이나 응답 대기 중인 항목은 반복해서 묻지 않도록 보강했다. 정정, 서버 재질문, 되읽기·선택 확인은 기존대로 따른다.
 - 정책 렌더링·페르소나·가상 통화 흐름 테스트 49개 통과. 모델 실통화는 확인하지 않았다.
+
+## 2026-11-06 — 운영 통화 56c133c8 멈춤 분석(확인 대기 해제 뒤 '네'에 응답 없음)
+
+- 통화 56c133c83d0e(08:50~08:59 KST, 배포 4878a08 = fix/confirm-unclear-reask 포함). 되읽기 뒤 "네, 근데 더 빨리는 안돼요"(confirm=not_answer 0.66) → "네, 그리고 승용차로 해주세요"(confirm=change 0.91) → 서버가 확인 대기를 해제(release, N1' cancelled_by_customer).
+- 그 뒤 record_fields는 PICKUP_TOO_SOON(needs 있음)이라 확인 대기를 다시 열지 않았고, 다음 위임(ZRw971)은 함수 호출 없이 끝났다. Live는 서버 되읽기 없이 스스로 "…접수 내용 확인 부탁드릴게요. 이대로 접수할까요?"를 물었다(금지 항목 "서버가 확인 내용을 주기 전에 확정 질문하기" 위반).
+- 고객 "네"(447초): pending이 없어 Decision에 confirm 질문 자체가 없었고(origin만 판정) 후속 알림이 없었다. Live는 확인 답을 서버가 처리할 것으로 보고 침묵(b8f3795c와 같은 양상) → "여보세요" 2회 뒤 43초 만에 고객이 끊음. 결과 INCOMPLETE NO_CONFIRMED_PARCEL.
+- CONFIRM_UNCLEAR 수정(47bc9d5)은 이 경우를 덮지 못한다: 관문 이전에 pending이 없어 `_on_confirm`에 들어가지 않는다. 코드 변경 없음(분석만).
+- 서버 통화 로그 114건 전수 조사(고객 발화 뒤 AI 발화 없이 15초 이상): 20건에서 발생. 같은 구조(Live가 서버를 기다리는데 서버가 아무것도 보내지 않음)의 유형: ① 확인 답 버림(56c133c8·28713d01 change 뒤 재되읽기 없음, 25317d3f·b8f3795c confirm=not_answer/UNCLEAR) ② 확인 밖 짧은 '네'가 Decision 타임아웃·신뢰도 미달(67d29fc5 인사 "네" 15초, 3001ee9e·339a7062) ③ 값 발화를 Live가 맡기지 않는데 서버 안전망 없음(03d23c97 19초 무이벤트, 0b1144e8) ④ 위임·RAG 지연(05cc6bc7 22초, cd39ecfa KB_UNAVAILABLE). 구 설계의 '위임 안전망'(flow.md delegate_wait_sec)은 새 app에 없음(grep 확인). 15초 지표는 고객이 연달아 말한 구간도 포함하므로 상한 추정.
+
+## 2026-11-06 — 확인 대기가 풀린 뒤 되읽기를 다시 열기(운영 통화 56c133c8)
+
+- 브랜치 `fix/readback-pending-reissue`(develop-ai 4878a08 기반). 원인: `change`로 확인 대기(pending)를 푼 뒤 record_fields가 거절(needs)이거나 도구 호출 없는 위임이면 대기가 다시 열리지 않음 → Live가 스스로 "이대로 접수할까요?"를 묻고 '네'는 Decision에 confirm 질문이 없어(pending 없음) 버려짐 → 무음.
+- 상태(state.py): `awaiting_fix` — no·change로 대기를 푼 뒤 고친 값이 기록될 때까지 되읽기를 다시 열지 않는다(release가 켜고 record_fields가 값을 기록하면 끈다). 거절 직후 같은 내용을 되읽지 않게 하는 보호.
+- live.py: ① 위임이 최종 완료(도구 미결 없음)되었는데 readback 단계·pending 없음·awaiting_fix 아님이면 확인 대기를 발급하고 ask_again 되읽기(N2)를 보낸다. 재질문·실패 결과(status≠ok)가 난 위임에는 얹지 않는다. ② readback 단계면 pending이 없어도 Decision에 confirm 질문을 넣고, yes·proceed(yes_min 이상)인데 pending이 없으면 확정하지 않고 발급 후 ask_again, no·change면 awaiting_fix. 시간 기반 감시 없음(사건 기반).
+- record.py: NOTHING_CHANGED여도 pending 없음·awaiting_fix 아님이면 발급해 readback을 같은 결과에 담는다(별도 N2 턴 없이).
+- 테스트: 56c133c8 재현(change → 수거 시각 거절 → 도구 없는 위임 → ask_again → '네' 확정), '아니요' 뒤 되읽기 반복 없음·정정 기록 시 새 되읽기, 도구 단위(같은 값 반복·release·awaiting_fix). 수정 전 코드에서 3개 실패 확인. 전체 **655 passed**. 실통화 미확인.
+- 남은 위험: readback 단계에서 고객이 문의만 한 뒤 도구 없이 끝난 위임에도 되읽기를 다시 보낸다(정책 "다른 질문에 답했으면 '이대로 접수할까요?'로 끝낸다"와 일치, 같은 내용은 notify 중복 제거로 한 번만). assess.py:28 주석("수거 일시 VALID")과 코드(수집 필드만)가 다름 — 미수정.
+
+## 2026-11-06 — 물품 검증 브랜치에 최신 develop-ai 반영
+
+- 되읽기 대기 재발급과 택배 물품 차단을 함께 유지하도록 live.py와 record.py 충돌을 해결했다. 양쪽 작업 기록을 보존했다. 병합 후 전체 AI 테스트 671개 통과.

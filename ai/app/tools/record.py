@@ -176,8 +176,13 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             _apply_address(ctx, addr, r, given, facts, needs)
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
-        if not facts["recorded"] and not needs and not facts.get("blocked_parcel_omitted"):
+        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted"))
+        if changed:
+            s.awaiting_fix = False
+        nothing = not changed and not needs
+        if nothing and (s.pending or s.awaiting_fix):
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
+        # 같은 값을 다시 말했는데 확인 대기가 풀려 있으면(no·change 뒤) 되읽기로 다시 연다(운영 통화 56c133c8)
         pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs else None
         moved = False
         if pending and not s.pickup_at.valid:  # 되읽기 때 기본 수거 시각을 정해 함께 안내
@@ -195,7 +200,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             facts["phones_to_read"] = phones  # 고객이 새로 불러 준 번호: 한 번 끊어 읽어 확인(README §5)
         facts = {k: v for k, v in facts.items() if v}
         status = "needs_input" if needs else "ok"
-        return ToolOutcome(status, needs[0]["reason"] if needs else None, facts, needs, state_summary(s, policy))
+        code = needs[0]["reason"] if needs else "NOTHING_CHANGED" if nothing else None
+        return ToolOutcome(status, code, facts, needs, state_summary(s, policy))
 
 
 def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, needs: list[dict]) -> None:
