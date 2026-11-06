@@ -1,5 +1,5 @@
 import { Button, FileDrop, Dialog, TextField } from '@/shared/ui'
-import { CSV_HEADER } from '@/features/company/csvMembers'
+import { CSV_HEADER, downloadExampleCsv } from '@/features/company/csvMembers'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 
 // 08 CSV로 기업 등록 창 (Figma 08_기업관리_CSV기업등록 · CSV오류, 11/01) — 기업명 + CSV 파일 → [취소] [등록]
@@ -15,6 +15,9 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       footer={
         <>
+          <Button big onClick={downloadExampleCsv}>
+            예시 CSV 내려받기
+          </Button>
           {vm.errorMessage && (
             <p role="alert" className="min-w-0 text-body text-danger">
               {vm.errorMessage}
