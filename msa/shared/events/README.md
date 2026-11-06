@@ -28,6 +28,14 @@ customer와 operations의 감사 이벤트에 연결했다. 나머지 서비스�
 
 consultation이 통화를 소유하고 customer의 실제 업무·감사 ACK 동안 쓰기 행 잠금을 유지한다. customer는 내부 쓰기의 정렬된 입력 해시와 결과 식별자/버전만 자기 inbox에 업무와 함께 저장한다. 같은 이벤트/다른 명령은 충돌로 거절하고 동일 명령은 재반영하지 않는다. 조회는 같은 이벤트라도 최신 페이지를 읽으며 개인정보 응답을 저장하지 않는다. 이 요청/응답 함수는 자체 큐나 자동 재시도를 추가하지 않는다. 감사 결정은 기존 outbox/relay로 전달한다.
 
+## 주문 조회 이벤트
+
+`@dva/events/order-read.cjs`는 기존 공개 GET 4개의 통화/고객 범위 확인에 사용한다. `OrderReadRequested`의 고정 operation은 `OrdersListed`, `OrderDetailRead`, `OrderAddressesListed`다. AI는 order → consultation → customer → order, 관리자 이전 주소 조회는 order → customer → order 순서로 요청/응답한다. 관리자 주문 목록/상세는 order DB만 읽는다.
+
+consultation은 삭제/보관/종료 조건을 확인한 통화를, customer는 현재 발신번호의 활성 고객 또는 관리자 조회 고객을 공유 잠금으로 보호한 동안 order가 로컬 REPEATABLE READ 스냅샷을 읽는다. 원격 대기 중 order DB 연결을 보유하지 않아 callback이 자기 연결 풀을 기다리는 순환을 피한다. 같은 이벤트 재수신도 현재 상태를 다시 검사하며 개인정보 응답·inbox/outbox 업무 행을 저장하지 않는다. 쓰기/영속 이벤트의 ACK 규칙은 유지한다.
+
+기존 두 서비스 토큰과 설정된 origin만 사용한다. source/type/command/결과 필드와 ACK ID를 검증하고 리다이렉트를 거절한다. 요청 단계별 timeout은 15/10/5초로 안쪽부터 해제한다. 원본이 모든 저장 상세를 반환하므로 응답 크기/상세 수를 새로 제한하지 않는다. 장애/잘못된 ACK는 공개 503이며 관리자 로컬 조회는 상담 의존 장애 중에도 동작한다. 분리 DB에는 전역 MVCC 스냅샷이 없으므로 접근 범위의 소유 행 잠금과 order 스냅샷으로 한 시점의 일관된 결과를 만든다. 동시 통화 종료/고객 수정은 조회 동안 대기할 수 있다.
+
 ## DB 적용과 호환
 
 각 서비스에 후속 Liquibase changeset만 추가한다. 기존 outbox/inbox 행과 적용 이력을 보존하고 outbox 순번·시도 횟수·다음 시각·마지막 HTTP 상태·조회 인덱스를 추가한다. customer에도 같은 메시지 테이블 2개를 추가한다. 적용 전부터 있던 행의 순번은 업그레이드 시 부여되며, 과거 작성 순서를 소급 보장하지 않는다. 기존 이벤트 테이블은 자동 삭제·TTL 정리하지 않는다.

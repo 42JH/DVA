@@ -86,8 +86,8 @@ def plan(base, delivery, deployments, annotations):
             raise ValueError(f"Missing Dockerfile/k8s.yaml: {service}")
         selected.append(service)
         print(f"BUILD: {service} (baseline={app_base or 'unknown'})")
-    # Consultation depends on customer reads; both depend on operations authentication.
-    first = ('operations', 'customer', 'consultation')
+    # Deploy query owners before order, which uses their private read handlers.
+    first = ('operations', 'customer', 'consultation', 'order')
     return [s for s in first if s in selected] + [s for s in selected if s not in first]
 
 

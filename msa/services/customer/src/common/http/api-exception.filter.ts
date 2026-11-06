@@ -69,7 +69,12 @@ export class ApiExceptionFilter implements ExceptionFilter {
       exception instanceof ApiException
         ? (exception.getResponse() as { code: string }).code
         : statusCodes[status];
-    if (!isApiRequest(request) && request.path.replace(/\/$/, '') !== '/internal/call-scope') {
+    if (
+      !isApiRequest(request) &&
+      !['/internal/call-scope', '/internal/order-read', '/internal/order-read/call'].includes(
+        request.path.replace(/\/$/, ''),
+      )
+    ) {
       // Keep the established health/PBX response contract while redacting unknown failures.
       const body = exception instanceof HttpException ? exception.getResponse() : undefined;
       response.status(status).json(

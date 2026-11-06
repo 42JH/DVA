@@ -1,3 +1,4 @@
+import { OrderReadScopeController } from './order-read-scope.controller';
 import { CallScopeController } from './call-scope.controller';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
@@ -8,7 +9,11 @@ import { CustomerContextClient } from './customer-context.client';
 
 @Module({
   imports: [DatabaseModule, ConsultationsModule],
-  controllers: [CallerContextCommandController, CallScopeController],
+  controllers: [
+    OrderReadScopeController,
+    CallerContextCommandController,
+    CallScopeController,
+  ],
   providers: [CustomersService, CustomerContextClient],
   exports: [CustomerContextClient],
 })

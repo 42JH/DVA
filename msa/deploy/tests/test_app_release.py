@@ -118,6 +118,14 @@ class DeliveryPlanTests(unittest.TestCase):
         self.commit('msa/services/analytics/k8s.yaml', 'manifest')
         self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['analytics'])
 
+    def test_order_reads_deploy_after_their_identity_and_call_owners(self):
+        for service in ('order', 'consultation', 'operations', 'delivery'):
+            self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
+            self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
+        self.commit('msa/services/customer/src/main.ts', 'order read scope')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}),
+                         ['operations', 'customer', 'consultation', 'order', 'delivery'])
+
     def test_ci_success_does_not_hide_undeployed_change(self):
         self.commit('msa/services/customer/src/main.ts', 'new app')
         ci_success = self.git('rev-parse', 'HEAD')

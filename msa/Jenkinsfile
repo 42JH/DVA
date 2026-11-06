@@ -127,6 +127,20 @@ pipeline {
             }
         }
 
+        stage('Verify Order Parity') {
+            when {
+                expression {
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'order'] }
+                }
+            }
+            steps { sh 'python3 msa/parity/verify-order.py' }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'msa/liquibase/verification-logs/order/**', allowEmptyArchive: true
+                }
+            }
+        }
+
         stage('Verify and Build Services') {
             when { expression { env.RUN_MSA_CI == 'true' } }
             steps {
@@ -136,7 +150,7 @@ pipeline {
                     while IFS= read -r service; do
                         directory="msa/services/$service"
                         echo "BUILD: $service"
-                        if [ "$service" = customer ] || [ "$service" = operations ] || [ "$service" = consultation ]; then
+                        if [ "$service" = customer ] || [ "$service" = operations ] || [ "$service" = consultation ] || [ "$service" = order ]; then
                             set -- -f "$directory/Dockerfile" msa
                         else
                             set -- "$directory"

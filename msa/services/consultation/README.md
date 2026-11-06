@@ -1,5 +1,7 @@
 # Consultation 서비스
 
+[주문 조회 이식](../../../docs/msa-order-reads-plan.md)은 기존 공개 상담 API를 유지하고 `/internal/order-read`만 추가한다. 기존 customer 토큰과 `OrderReadRequested`를 검증하고, 통화의 삭제/보관·종료·연결 주문 조건을 확인한 뒤 customer에 현재 발신번호의 활성 고객 확인을 요청한다. 조회가 끝날 때까지 통화 공유 잠금을 유지한다. 내부 경로는 Ingress/Swagger에 공개하지 않으며 이벤트 업무 행이나 개인정보 응답을 저장하지 않는다.
+
 모놀리식과 같은 PBX 수신·녹취 워커와 진행 통화 수/SSE를 제공한다. 프론트·AI의 요청 형식은 바꾸지 않는다. Jira [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [이번 단계 계획·검증](../../../docs/msa-consultation-pbx-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 제공 API

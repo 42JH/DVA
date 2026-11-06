@@ -58,6 +58,8 @@ spec:
             - name: CUSTOMER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: ORDER_URL
+              value: http://order:3002
             - name: CONSULTATION_URL
               value: http://consultation:3004
             - name: CONSULTATION_AUTH_TOKEN
