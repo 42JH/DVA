@@ -100,7 +100,7 @@ export function MemberFormModal({
           label="전화번호"
           inline
           inputMode="tel"
-          placeholder="숫자만 입력"
+          placeholder="010-1234-5678"
           value={vm.form.phone}
           onChange={(e) => vm.setPhone(e.target.value)}
           error={vm.errors.phone}

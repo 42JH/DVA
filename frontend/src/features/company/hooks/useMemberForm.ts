@@ -12,7 +12,7 @@ import {
   type CustomerAddress,
   type Member,
 } from '@/features/company/api/companyApi'
-import { phoneDigits, phoneError } from '@/features/company/csvMembers'
+import { phoneDigits, phoneError, phoneInput } from '@/features/company/csvMembers'
 import { errorText } from '@/features/company/labels'
 
 type Role = Member['membership']['role']
@@ -27,7 +27,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
   const [form, setForm] = useState({
     employeeNo: target?.membership.employeeNo ?? '',
     name: target?.customer.name ?? '',
-    phone: target?.customer.phoneNumber ?? '',
+    phone: phoneInput(target?.customer.phoneNumber ?? ''), // 전화번호 형식 010-1234-5678 (CSV와 같은 모양, 11/06)
     role: target?.membership.role ?? ('MEMBER' as Role),
     detail: before?.detailAddress ?? '',
   })
@@ -123,7 +123,7 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
     form,
     setEmployeeNo: set('employeeNo'),
     setName: set('name'),
-    setPhone: set('phone'),
+    setPhone: (v: string) => set('phone')(phoneInput(v)), // 치는 대로 하이픈
     setRole: (r: Role) => set('role')(r),
     setDetail: set('detail'),
 

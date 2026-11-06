@@ -16,7 +16,7 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <Button big onClick={downloadExample}>
-            예시 엑셀 내려받기
+            예시 CSV 내려받기
           </Button>
           {vm.errorMessage && (
             <p role="alert" className="min-w-0 text-body text-danger">
@@ -52,8 +52,9 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           <p className="text-caption text-sub">
             엑셀(.xlsx) 또는 CSV · 첫 줄: {CSV_HEADER.join(',')} (상세주소 열은 빼도 됨) · 주소는
             도로명 · 지번 · 동 · 우편번호 모두 필수 · 대표자(Y) · 부서 · 상세주소는 빈칸 가능 · 없는
-            부서는 새로 만듦 · 사번 · 전화번호 · 우편번호 칸은 텍스트 형식이어야 앞자리 0이
-            남습니다(예시 엑셀은 이미 텍스트).
+            부서는 새로 만듦 · 전화번호는 010-1234-5678 형식 · 예시 CSV는 엑셀로 열어도 사번 ·
+            우편번호 앞 0이 남습니다 · 엑셀에서 새로 적는 사번이 0으로 시작하면 앞에 '를 붙여
+            주세요(예: '004).
             {vm.count > 0 && ` · 사원 ${vm.count}명`}
           </p>
         </div>
