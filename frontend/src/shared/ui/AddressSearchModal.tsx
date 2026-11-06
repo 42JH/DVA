@@ -80,8 +80,10 @@ export function AddressField({
   error,
   onSearch,
   searchLabel,
+  placeholder = '검색으로 고르기',
 }: {
   label?: string
+  placeholder?: string // 필수인 곳은 '검색으로 고르기 (필수)' (08 사원 창)
   value: string
   error?: string
   onSearch: () => void
@@ -95,7 +97,7 @@ export function AddressField({
           label={label}
           inline
           readOnly
-          placeholder="검색으로 고르기"
+          placeholder={placeholder}
           value={value}
           error={error}
           onClick={onSearch}
