@@ -44,10 +44,10 @@ const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 const toView = (r: CallRow, day: Ymd): CallListRow => ({
   ...r,
   day,
-  time: r.startedAt ? fmtTime(r.startedAt) : '—',
-  name: r.customerName ?? '—',
+  time: r.startedAt ? fmtTime(r.startedAt) : '', // 모르는 값은 빈칸 (11/06 사용자 — '—' 안 씀)
+  name: r.customerName ?? '',
   company: r.company ?? '',
-  phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
+  phone: r.callerNumber ? fmtPhone(r.callerNumber) : '',
   kinds: kindChips(r.counts),
   complaint: r.complaints.length
     ? { label: COMPLAINT_LABEL[r.complaints[0].type], reasons: r.complaints.map((c) => c.reason) }
