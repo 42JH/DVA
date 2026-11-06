@@ -2,12 +2,13 @@
 
 [주문 조회 이식](../../../docs/msa-order-reads-plan.md)은 기존 공개 customer API를 유지하고 내부 주문 조회 범위 확인만 추가한다. `ORDER_URL`은 미설정 시 기존 API의 시작을 막지 않으며, k3s에는 `http://order:3002`를 주입한다. 관리자 이전 주소는 삭제되지 않은 고객, AI는 현재 발신번호의 ACTIVE 고객을 공유 잠금으로 확인한 동안 order의 조회 callback을 기다린다. 내부 요청은 기존 토큰·source/type/payload 검증을 거치며 개인정보 응답을 저장하지 않는다. 공개 `/api/customers/:id/addresses`는 order Ingress로 전달한다.
 
-모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN 23개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
+모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN·기업 청구 조회 24개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 공개 API
 
 - `GET /api/customers`, `GET /api/customers/:id`
 - `GET /api/companies`, `GET /api/companies/search`, `GET /api/companies/members/search`, `GET /api/companies/:id`
+- `GET /api/companies/:id/billing`
 - `GET /api/companies/:id/departments`, `GET /api/companies/:id/members`
 - `POST /api/customers`
 - `POST /api/customers/context`, `PATCH /api/customers/:id`
@@ -20,7 +21,7 @@
 
 고객 확인은 call 없이 현재 고객·소속·결제 자격·개인 PIN 전체를 조회하며 통화·감사를 저장하지 않는다. call이 있으면 consultation에 등록 이벤트를 보내 같은 통화를 생성·재사용하고 CALL_STARTED 감사 확정까지 기다린다. 공개 경로·Origin/쿠키·오류·메타·후행 슬래시는 기존 customer가 처리한다. 최신 `04b7346`처럼 고객 생성·전화번호 검색·구성원 등록·고객 확인의 전화번호는 숫자 문자열 11자리다.
 
-현재 공개 선언은 23/24개다. 기업 월 청구 GET 1개와 월별 청구 초기화 등 자동 업무 워커는 주문·청구 단계에서 연결한다. [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)을 따른다.
+현재 공개 선언은 24/24개다. [기업 청구 조회·월 전환](../../../docs/msa-billing-months-plan.md)은 기존 ORDER_URL과 CUSTOMER_AUTH_TOKEN으로 order 원장을 연결한다. 조회는 월 원장을 만들지 않으며 삭제 기업의 과거 스냅샷도 반환한다. order의 월 초기화 callback 동안 customer의 비삭제 기업 공유 잠금을 유지한다. 결제 완료 사용액 적립과 다른 자동 업무 워커는 후속이다. [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)을 따른다.
 
 ## 최신 기업 검색·AI 인증
 

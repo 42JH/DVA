@@ -68,3 +68,9 @@ order의 쓰기 감사는 기존 `AuditPrepared`/`AuditCommitted`/`AuditAborted`
 조회 OrderReadRequested는 읽기 전용으로 유지한다. 취소 명령은 큐/자동 재시도/개인정보 결과 저장을 추가하지 않으며, 원본의 전체 재시도 409·상세 기취소 no-op 204를 따른다. 성공 ACK는 같은 eventId/processed/payload=null이다. 감사 확정 ACK와 구분하며 영속 감사는 기존 outbox/relay/생산자 종료 복구를 사용한다. 공개 100KiB 한도는 유지하고 필드가 더해지는 내부 취소/배송 envelope만 256KiB 파서를 사용한다. 내부 callback에는 감사 준비·확정이 포함되므로 hop timeout은 30/25/20초다. 의존 장애·잘못된 ACK는 503으로 실패한다.
 
 OrderShipmentCheckRequested는 order → delivery의 `/internal/order-shipment-check`에서 실제 선택 상세의 배송 존재 여부만 확인한다. 기존 CUSTOMER_AUTH_TOKEN, 5초 timeout과 UTF-8/JSON·4KiB boolean ACK 검증을 사용한다. 원본 취소는 어떤 상태의 배송이라도 차단하므로 배송 변경은 없다. 같은 이벤트도 최신 배송을 읽고 수신 이력/응답 캐시를 남기지 않는다. 후속 생성 경로의 부모 주문 잠금/최신 상태 확인과 전체 분리 DB 장애 검증은 그 기능을 이식할 때 함께 확인한다.
+
+## 기업 청구 조회·월 전환
+
+`billing.cjs`의 고정 BillingReadRequested(customer→order), BillingOrganizationsReadRequested(order→customer), BillingRolloverRequested(order→customer 잠금→order 초기화)만 허용한다. 기존 CUSTOMER_AUTH_TOKEN을 재사용한다. 한 배치는 원본과 같은 최대 10개 기업/월이며 고객 잠금 이름만 전달한다. actor·잔액을 명령 입력으로 받지 않는다. 응답의 eventId/status와 원장 식별자·월·안전한 정수 금액 또는 boolean을 검증하고 JSON/UTF-8 오류·리디렉션·유실은 성공으로 보지 않는다.
+
+조회와 기업 발견 응답은 캐시·inbox에 저장하지 않는다. 초기화 중복은 order의 기존 기업/월 PK로 no-op이며 새 원장이 생긴 경우만 두 SYSTEM 감사와 로컬 AuditCommitted를 남긴다. 최초 준비 뒤/커밋 뒤 종료는 기존 order 감사 생산자 잠금 증명 복구를 사용한다. 공개 API/토큰은 추가하지 않는다.

@@ -1,3 +1,5 @@
+import { BillingScopeController } from './billing-scope.controller';
+import { OrganizationBillingService } from './organization-billing.service';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { OrganizationsController } from './organizations.controller';
@@ -12,8 +14,9 @@ import { OrganizationDeletionService } from './organization-deletion.service';
 
 @Module({
   imports: [DatabaseModule, MembersModule],
-  controllers: [OrganizationsController, DepartmentsController],
+  controllers: [OrganizationsController, DepartmentsController, BillingScopeController],
   providers: [
+    OrganizationBillingService,
     OrganizationsService,
     OrganizationDeletionRepository,
     OrganizationDeletionService,

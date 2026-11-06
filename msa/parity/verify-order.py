@@ -1,4 +1,4 @@
-"""Compare order reads, deletion and cancellation against the monolith on six isolated PostgreSQL DBs."""
+"""Compare order APIs and billing-month initialization on six isolated PostgreSQL DBs."""
 import json
 from pathlib import Path
 import subprocess
@@ -15,6 +15,8 @@ def main():
     LOGS.mkdir(parents=True, exist_ok=True)
     resources = []
     report = {'passed': False, 'checks': [], 'environment': 'production',
+              'billingPhases': {'deterministic': {'nodeEnv': 'test', 'automaticBusinessWorkers': False},
+                                'scheduler': {'nodeEnv': 'production', 'automaticBusinessWorkers': True}},
               'reference': subprocess.check_output(['git', 'rev-parse', 'HEAD:backend'], cwd=ROOT, text=True).strip()}
 
     def run(*args, label):
@@ -99,6 +101,12 @@ def main():
                '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
                command=('node', '--test', 'test/order-cancellation.integration.test.cjs'))
         complete(name)
+        name = RUN+'-reference-billing-suite'
+        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
+               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
+               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
+               command=('node', '--test', 'test/order-billing.integration.test.cjs'))
+        complete(name)
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
@@ -134,6 +142,43 @@ def main():
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/order-read-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-read-outage.test.cjs'), name+':/app/service/test/order-read-outage.test.cjs', label='outage-copy')
+        complete(name)
+        # Isolate deterministic rollover instants from the real 10-second production timers.
+        for side in ('monolith', 'order'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-app', label=side+'-billing-controlled-stop')
+            name = RUN+'-'+side+'-billing-app'
+            create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=test', '-e', 'PORT='+('3000' if side=='monolith' else '3002'),
+                   '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
+                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
+                   '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
+                   '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
+                   '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'CUSTOMER_AUTH_TOKEN='+password)
+            run('docker', 'start', name, label=side+'-billing-controlled-start')
+        runtime = LOGS/'billing-monolith-runtime'
+        runtime.mkdir(exist_ok=True)
+        run('docker', 'cp', RUN+'-monolith-app:/app/dist/.', str(runtime), label='billing-source-runtime')
+        for suite in ('billing-months-parity', 'billing-months-recovery'):
+            name = RUN+'-'+suite
+            create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+                   '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+                   command=('node', '--test', 'test/'+suite+'.test.cjs'))
+            run('docker', 'cp', str(runtime), name+':/app/service/test/monolith-runtime', label=suite+'-source-copy')
+            for file in [suite+'.test.cjs'] + (['billing-months-claimant.cjs'] if suite.endswith('recovery') else []):
+                run('docker', 'cp', str(ROOT/'msa/parity'/file), name+':/app/service/test/'+file, label=suite+'-copy-'+file)
+            complete(name)
+        for side in ('monolith', 'order'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-billing-app', label=side+'-billing-controlled-finish')
+            run('docker', 'start', RUN+'-'+side+'-app', label=side+'-billing-production-restart')
+        name = RUN+'-billing-scheduler'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', 'test/billing-months-scheduler.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/billing-months-scheduler.test.cjs'), name+':/app/service/test/billing-months-scheduler.test.cjs', label='billing-scheduler-copy')
+        complete(name)
+        run('docker', 'stop', '--time=5', RUN+'-order-app', label='billing-order-outage')
+        name = RUN+'-billing-outage'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', 'test/billing-months-outage.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/billing-months-outage.test.cjs'), name+':/app/service/test/billing-months-outage.test.cjs', label='billing-outage-copy')
         complete(name)
         report['passed'] = True
     finally:

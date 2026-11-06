@@ -1,6 +1,6 @@
 # Order 서비스
 
-최신 모놀리식과 같은 주문 조회 4개·관리자 삭제·전체/상세 취소 2개 API를 제공한다. [계획과 검증 근거](../../../docs/msa-order-reads-plan.md), [전체 이식 계획](../../../docs/msa-parity-plan.md)을 따른다. [삭제 계획과 검증 근거](../../../docs/msa-order-deletion-plan.md)를 함께 따른다. [취소 계획과 검증 근거](../../../docs/msa-order-cancellation-plan.md)를 함께 따른다. 주문 생성·수정·결제·청구·접수/배송 생성 이벤트·보관 워커는 후속이다.
+최신 모놀리식과 같은 주문 조회 4개·관리자 삭제·전체/상세 취소 2개 API를 제공한다. [계획과 검증 근거](../../../docs/msa-order-reads-plan.md), [전체 이식 계획](../../../docs/msa-parity-plan.md)을 따른다. [삭제 계획과 검증 근거](../../../docs/msa-order-deletion-plan.md)를 함께 따른다. [취소 계획과 검증 근거](../../../docs/msa-order-cancellation-plan.md)를 함께 따른다. 주문 생성·수정·결제/사용액 적립·접수/배송 생성 이벤트·보관 워커는 후속이다.
 
 | API | 동작 |
 | --- | --- |
@@ -55,3 +55,11 @@ operations Liquibase 010을 앱보다 먼저 적용하고 operations → consult
 상세별·부모·금액 감사 순서, DB trigger의 버전/최초 closed_at, 주소/물품/PIN 스냅샷을 보존한다. 기존 notPaid 요청은 무효화하고 잔액이 양수면 같은 payment_due_at으로 새 요청을 만든다. 기존 안내 SENDING 자체는 이 취소의 차단 조건이 아니다. 결제 승인 중만 차단하며 안내 상태를 임의로 바꾸지 않는다. 감사는 기존 outbox/확정 ACK/생산자 잠금 복구를 사용한다.
 
 배포에는 기존 delivery DB Secret과 msa-customer-auth를 연결하고 order에 DELIVERY_URL=http://delivery:3003을 추가한다. 모든 서비스는 msa 공통 Docker context이며 delivery가 order보다 먼저 배포된다. DB changeset은 추가/수정하지 않는다. 분리 DB에는 업무 COMMIT과 원격 감사 ACK 사이가 있으며 응답 유실 시 전체 취소 재시도는 409, 기취소 상세 재시도는 204인 원본 규칙을 유지한다.
+
+## 기업 월 청구 초기화
+
+[기업 청구 조회·월 전환 계획](../../../docs/msa-billing-months-plan.md)을 따른다. 청구 원장은 order DB, 현재 기업 정보는 customer DB에만 둔다. customer의 공개 청구 GET은 이름과 삭제 여부를 잠금으로 확인한 후 내부 조회로 월 스냅샷·원래 정수 금액을 반환한다. 한국 시간 현재 월을 기본으로 하며 과거 원장을 새 이름으로 덮어쓰지 않는다. GET은 원장을 생성하거나 감사를 기록하지 않는다.
+
+production의 10초 워커가 비삭제 기업을 발견하고 원본 generate_series 규칙으로 누락 월을 찾는다. 10건씩 customer 공유 잠금 → order callback → 원장·AuditCommitted 커밋 → operations 감사 확정 ACK를 기다린다. INACTIVE 기업도 포함하며 source와 같은 advisory lock `(20261030,139)`·유일성으로 중복 실행을 조정한다. 초기화한 월마다 credit/groupBilling 두 SYSTEM 감사를 남기고 직전 금액과 0을 기록한다. 청구 사용액을 이전 월에서 이월하지 않는다. test 환경은 자동 워커를 실행하지 않는다.
+
+기존 CUSTOMER_URL/ORDER_URL/CUSTOMER_AUTH_TOKEN과 order 003·operations 010을 재사용한다. 비공개 `/internal/billing/*`는 Ingress와 OpenAPI에서 제외하며 조회/기업 응답을 inbox에 저장하지 않는다. 서비스 장애는 다음 tick에서 다시 확인한다. 원장 SQL·감사 준비 실패는 해당 배치 전체를 롤백한다. 이미 커밋된 응답 유실은 원장 유일성과 기존 감사 복구로 수렴한다. 분리 DB의 전역 원자성을 보장하지 않는다. 주문 결제 시 사용액 적립은 후속 결제/접수 단위에서 연결한다.
