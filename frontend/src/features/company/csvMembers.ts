@@ -19,12 +19,26 @@ export const CSV_HEADER = [
   '우편번호',
   '상세주소',
 ] as const
-// 예시 파일 (public/csv-example.csv, 11/06) — 기업 등록 · 사원 추가 창 공용. 양식(CSV_HEADER)을 바꾸면 이 파일도 같이 고침
-export function downloadExampleCsv() {
+// 예시 엑셀 (public/member-example.xlsx, 11/06) — 기업 등록 · 사원 추가 창 공용. 사번 · 전화번호 · 우편번호 열은 텍스트 형식(앞 0 유지)
+// 양식(CSV_HEADER)을 바꾸면 이 파일도 같이 고침
+export function downloadExample() {
   const a = document.createElement('a') // 내려받기는 <a download>로만 이름을 정할 수 있음
-  a.href = `${import.meta.env.BASE_URL}csv-example.csv`
-  a.download = '회사등록_양식_예시.csv'
+  a.href = `${import.meta.env.BASE_URL}member-example.xlsx`
+  a.download = '회사등록_양식_예시.xlsx'
   a.click()
+}
+
+/** 올린 파일 → 검사 결과. 엑셀(.xlsx)이면 첫 시트를, 아니면 CSV로 읽어 같은 검사(readMembersRows)에 넘김 (11/06) */
+export async function readMembersFile(file: File): Promise<CsvResult> {
+  if (!/\.xlsx$/i.test(file.name)) return readMembersCsv(decodeCsv(await file.arrayBuffer()))
+  try {
+    const { readSheet } = await import('read-excel-file/browser') // 엑셀을 올릴 때만 받음 (첫 화면이 무거워지지 않게)
+    // 숫자 칸도 엑셀에 저장된 글자 그대로 — 숫자로 바꾸면 '001'이 1, 큰 번호가 1.01E+10이 됨
+    const rows = await readSheet(file, { parseNumber: (s) => s })
+    return readMembersRows(rows.map((r) => r.map((v) => (v === null ? '' : String(v)))))
+  } catch {
+    return fail(['엑셀 파일을 읽지 못했습니다. .xlsx로 저장했는지 확인해 주세요.'])
+  }
 }
 
 export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
@@ -78,8 +92,11 @@ const fail = (all: string[]): CsvResult => ({
   more: Math.max(0, all.length - SHOW_ERRORS),
 })
 
-export function readMembersCsv(text: string): CsvResult {
-  const [head, ...body] = parseCsv(text).map((r) => r.map((v) => v.trim()))
+export const readMembersCsv = (text: string): CsvResult => readMembersRows(parseCsv(text))
+
+/** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
+export function readMembersRows(rows: string[][]): CsvResult {
+  const [head, ...body] = rows.map((r) => r.map((v) => v.trim()))
   // 우편번호까지는 꼭, 상세주소는 있어도 없어도 (그 뒤 빈 열 이름은 엑셀이 붙인 것 — 허용)
   const headOk =
     head !== undefined &&

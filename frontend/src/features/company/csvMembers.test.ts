@@ -1,7 +1,9 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/company/csvMembers.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
+import { readSheet } from 'read-excel-file/node'
 import type { Member } from './api/companyApi'
 import {
+  readMembersRows,
   decodeCsv,
   previewAgainst,
   readMembersCsv,
@@ -233,5 +235,18 @@ assert.match(
 )
 // 머리줄 순서가 다르면 거절
 assert.match(errs('사번,사원명,전화번호,부서\n1,가,01011112222,개발팀').errors[0]!, /첫 줄/)
+
+// 예시 엑셀(public/member-example.xlsx)이 지금 양식을 통과하고 앞 0이 남음 — 양식을 바꾸고 예시를 안 고치면 여기서 걸림
+const sheet = await readSheet('public/member-example.xlsx', { parseNumber: (s) => s })
+const ex = readMembersRows(sheet.map((r) => r.map((v) => (v === null ? '' : String(v)))))
+assert.ok(ex.ok)
+assert.deepEqual(
+  ex.members.map((m) => [m.employeeNo, m.phoneNumber, m.address.postalCode]),
+  [
+    ['001', '01000000001', '04524'],
+    ['002', '01000000002', '04524'],
+    ['003', '01000000003', '04524'],
+  ],
+)
 
 console.log('csvMembers OK')

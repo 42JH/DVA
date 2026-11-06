@@ -6,12 +6,7 @@ import {
   createCompany,
   saveMemberAddresses,
 } from '@/features/company/api/companyApi'
-import {
-  decodeCsv,
-  readMembersCsv,
-  serverRowErrors,
-  type CsvMember,
-} from '@/features/company/csvMembers'
+import { readMembersFile, serverRowErrors, type CsvMember } from '@/features/company/csvMembers'
 import { errorText } from '@/features/company/labels'
 
 /** 파일 상태 — 아직 없음 / 읽음(사원 목록) / 틀림(처음 3줄 + 나머지 건수) */
@@ -29,7 +24,7 @@ export function useCompanyCsv(onDone: () => void) {
   const [picked, setPicked] = useState<Picked>({ kind: 'none' })
 
   const pick = async (file: File) => {
-    const r = readMembersCsv(decodeCsv(await file.arrayBuffer()))
+    const r = await readMembersFile(file)
     setPicked(r.ok ? { kind: 'ok', file, members: r.members } : { kind: 'bad', file, ...r })
     reg.reset()
   }

@@ -9,9 +9,8 @@ import {
   saveMemberAddresses,
 } from '@/features/company/api/companyApi'
 import {
-  decodeCsv,
   previewAgainst,
-  readMembersCsv,
+  readMembersFile,
   serverRowErrors,
   type CsvMember,
   type CsvPreview,
@@ -74,7 +73,7 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
   })
 
   const pick = async (file: File) => {
-    const r = readMembersCsv(decodeCsv(await file.arrayBuffer()))
+    const r = await readMembersFile(file)
     setPicked(r.ok ? { kind: 'ok', file, rows: r.members } : { kind: 'bad', file, ...r })
     reg.reset()
   }
