@@ -16,7 +16,7 @@ test('customer context and call registration preserve HTTP, independent business
  const hash=await hashPassword(password);
  for(const side of sides){
   await side.calls.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
-  await side.db.query('TRUNCATE customers,organizations,departments,memberships,company_pins,personal_pins RESTART IDENTITY CASCADE');
+  await side.db.query('TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
   await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
   if(side===sides[1]){await operations.query('TRUNCATE customer_audit_preparations,consultation_audit_preparations,inbox_events,outbox_events RESTART IDENTITY');await consultation.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');}
   await side.identity.query("INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at) VALUES('operator','고객 확인 운영자',$1,'OPERATOR','ACTIVE','2026-01-01Z')",[hash]);
@@ -47,7 +47,6 @@ test('customer context and call registration preserve HTTP, independent business
   'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
   'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
   'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
-  'SELECT company_pin_seq,organization_seq,department_seq,department_name,label,address_data,version,deleted_at FROM company_pins ORDER BY company_pin_seq',
   'SELECT personal_pin_seq,customer_seq,label,address_data,version,deleted_at FROM personal_pins ORDER BY personal_pin_seq'];
  const callsSQL=['SELECT call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,started_at,ended_at,deleted_at,customer_seq,order_seq FROM call_sessions ORDER BY call_session_seq',
   'SELECT recording_id,payload,received_at,processing_status,call_session_seq FROM pbx_webhooks.call_ended_events ORDER BY recording_id',
@@ -64,7 +63,7 @@ test('customer context and call registration preserve HTTP, independent business
   const requestId=randomUUID(),results=[];
   for(const side of sides){
    const base=path.startsWith('/api/auth/')||path.startsWith('/api/audit-logs')?side.auth:path.startsWith('/webhooks/')||path.startsWith('/api/calls/')?side.pbx:side.base;
-   const response=await fetch(base+path,{method,redirect:'error',signal:AbortSignal.timeout(20000),headers:{'X-Request-Id':requestId,
+   const response=await fetch(base+path,{method,redirect:'error',signal:AbortSignal.timeout(20000),headers:{'X-Request-Id':requestId,...(path.startsWith('/api/customers')?{Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN}:{}),
     ...(options.noOrigin?{}:{Origin:options.origin??origin}),...(options.session?{Cookie:options.cookie??side.cookie}:{}),
     ...(options.pbx?{Authorization:'Bearer '+process.env.PBX_WEBHOOK_TOKEN}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
    const text=await response.text();assert.equal(response.status,status,side.base+' '+method+' '+path+' '+text.slice(0,900));
@@ -115,7 +114,7 @@ test('customer context and call registration preserve HTTP, independent business
  await request('POST','/api/customers/context/',{phoneNumber:'01098880001'},200);await request('GET','/api/customers/context',undefined,400,{session:true});
  for(const [body,status] of [['{',400],[JSON.stringify({phoneNumber:'0'.repeat(103000)}),413]]){
   const requestId=randomUUID(),values=[];
-  for(const side of sides){const r=await fetch(side.base+'/api/customers/context',{method:'POST',headers:{'Content-Type':'application/json','X-Request-Id':requestId,Origin:origin},body});assert.equal(r.status,status);assert.equal(r.headers.get('x-request-id'),requestId);assert.equal(r.headers.get('cache-control'),'no-store');values.push(await r.json());}
+  for(const side of sides){const r=await fetch(side.base+'/api/customers/context',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN,'X-Request-Id':requestId,Origin:origin},body});assert.equal(r.status,status);assert.equal(r.headers.get('x-request-id'),requestId);assert.equal(r.headers.get('cache-control'),'no-store');values.push(await r.json());}
   assert.deepEqual(values[1],values[0]);await compare('raw JSON rejection');count++;
  }
  const payload={recordingId:'before-call',callFrom:'01098885555',callTo:'0212345678',startedAt:'2026-10-27T02:00:00Z',endedAt:'2026-10-27T02:01:00Z',durationSeconds:60,recordingUrl:'https://recordings.example.test/audio.mp3'};
@@ -139,7 +138,7 @@ test('customer context and call registration preserve HTTP, independent business
   try{
    await gate.query('SELECT pg_advisory_lock(916011,160)');
    await side.identity.query('CREATE FUNCTION context_audit_gate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(916011,160); RETURN NEW; END $$; CREATE TRIGGER context_audit_gate BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION context_audit_gate();');
-   const attempt=i=>fetch(side.base+'/api/customers/context',{method:'POST',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json','X-Request-Id':concurrentIds[i]},body:JSON.stringify({phoneNumber:'01098880001',call:call('concurrent')})}).then(async r=>{assert.equal(r.status,200);return(await r.json()).data.callSessionSeq;});
+   const attempt=i=>fetch(side.base+'/api/customers/context',{method:'POST',signal:AbortSignal.timeout(20000),headers:{'Content-Type':'application/json',Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN,'X-Request-Id':concurrentIds[i]},body:JSON.stringify({phoneNumber:'01098880001',call:call('concurrent')})}).then(async r=>{assert.equal(r.status,200);return(await r.json()).data.callSessionSeq;});
    const first=attempt(0);
    for(let n=0;;n++){if((await side.identity.query("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted AND classid=916011 AND objid=160) AS waiting")).rows[0].waiting)break;assert.ok(n<100,'first creator did not reach audit gate');await delay(10);}
    // Fix the creator while the other requests contend, so its audit request ID is comparable.
@@ -213,7 +212,7 @@ test('customer context and call registration preserve HTTP, independent business
   }
   assert.equal((await operations.query('SELECT count(*)::int AS n FROM audit_logs WHERE request_id=$1',[payload.requestId])).rows[0].n,0);
   let saved;
-  for(let n=0;n<2;n++){const response=await fetch(sides[1].base+'/api/customers/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload.input)});assert.equal(response.status,200);const value=await response.json();if(saved)assert.equal(value.data.callSessionSeq,saved);saved=value.data.callSessionSeq;}
+  for(let n=0;n<2;n++){const response=await fetch(sides[1].base+'/api/customers/context',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN},body:JSON.stringify(payload.input)});assert.equal(response.status,200);const value=await response.json();if(saved)assert.equal(value.data.callSessionSeq,saved);saved=value.data.callSessionSeq;}
   assert.equal((await consultation.query('SELECT count(*)::int AS n FROM call_sessions WHERE provider_call_id=$1',[payload.input.call.providerCallId])).rows[0].n,1);
   assert.equal((await operations.query("SELECT count(*)::int AS n FROM audit_logs WHERE action='CALL_STARTED' AND target_seq=$1",[saved])).rows[0].n,1);
  });

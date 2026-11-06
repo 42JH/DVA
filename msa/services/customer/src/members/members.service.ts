@@ -1,3 +1,4 @@
+import { SearchMembersQueryDto } from './dto/search-members.dto';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
@@ -34,6 +35,10 @@ export class MembersService {
   async list(companyId: number, query: ListMembersQueryDto) {
     await this.company(companyId);
     return new ListResponse(await this.repository.list(companyId, query), query.limit);
+  }
+
+  async search(query: SearchMembersQueryDto) {
+    return new ListResponse(await this.repository.search(query), query.limit);
   }
 
   private record(

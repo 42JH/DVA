@@ -1,3 +1,4 @@
+import { MemberSearchEntryDto, SearchMembersQueryDto } from './dto/search-members.dto';
 import { readPage, PageRows } from '../common/pagination-query';
 import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
@@ -18,6 +19,29 @@ const memberColumns =
 @Injectable()
 export class MembersRepository {
   constructor(private readonly database: DatabaseService) {}
+
+  async search(query: SearchMembersQueryDto): Promise<PageRows<MemberSearchEntryDto>> {
+    return readPage<MemberSearchEntryDto>(
+      this.database.pool,
+      `SELECT o.organization_seq AS "organizationSeq",o.name AS "organizationName",
+        o.status AS "organizationStatus",m.membership_seq AS "membershipSeq",
+        m.status AS "membershipStatus",m.employee_no AS "employeeNo",
+        d.name AS "departmentName",c.name,c.phone_number AS "phoneNumber"
+       FROM memberships m JOIN organizations o ON o.organization_seq=m.organization_seq
+       JOIN customers c ON c.customer_seq=m.customer_seq
+       LEFT JOIN departments d ON d.department_seq=m.department_seq
+         AND d.organization_seq=o.organization_seq AND d.deleted_at IS NULL
+       WHERE o.deleted_at IS NULL AND m.deleted_at IS NULL AND c.deleted_at IS NULL
+         AND c.status='ACTIVE' AND ($2::boolean OR (o.status='ACTIVE' AND m.status='ACTIVE'))
+         AND NOT EXISTS(SELECT 1 FROM unnest($1::text[]) AS terms(term)
+           WHERE strpos(lower(normalize(concat_ws(' ',c.name,m.employee_no,d.name),NFC)),lower(normalize(term,NFC)))=0
+             AND NOT (term ~ '^[0-9-]+$' AND replace(term,'-','')<>''
+               AND strpos(regexp_replace(c.phone_number,'[^0-9]','','g'),replace(term,'-',''))>0))`,
+      [query.q.split(' '), query.includeInactive],
+      query,
+      'lower(normalize("organizationName",NFC)),"organizationSeq","membershipSeq"',
+    );
+  }
 
   async company(id: number, client?: PoolClient) {
     const result = await (client ?? this.database.pool).query<{

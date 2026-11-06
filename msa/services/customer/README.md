@@ -1,11 +1,11 @@
 # Customer 서비스
 
-모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN 22개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
+모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN 23개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 공개 API
 
 - `GET /api/customers`, `GET /api/customers/:id`
-- `GET /api/companies`, `GET /api/companies/search`, `GET /api/companies/:id`
+- `GET /api/companies`, `GET /api/companies/search`, `GET /api/companies/members/search`, `GET /api/companies/:id`
 - `GET /api/companies/:id/departments`, `GET /api/companies/:id/members`
 - `POST /api/customers`
 - `POST /api/customers/context`, `PATCH /api/customers/:id`
@@ -14,11 +14,19 @@
 - `POST /api/companies/:id/departments`, `PATCH /api/departments/:id`, `DELETE /api/departments/:id`
 - `POST /api/companies/:id/members`, `PATCH /api/members/:id`, `DELETE /api/members/:id`
 
-필터·페이지네이션·검증 오류·soft delete·탈퇴 고객 처리·기본 주소·집계와 기존 MVP AI 접근 범위를 유지한다. 쿠키가 없을 때 원본이 허용한 요청만 AI로 처리하며, 잘못되거나 회수된 쿠키를 AI 요청으로 전환하지 않는다. 단건/일괄 직원 등록과 기존 고객 식별·중복·부서 변경·탈퇴·기업 삭제 시 연결 데이터의 처리 및 감사도 이식했다. 조회에는 원본과 동일하게 감사 쓰기가 없다.
+필터·페이지네이션·검증 오류·soft delete·탈퇴 고객 처리·기본 주소·집계와 기존 MVP AI 접근 범위를 유지한다. 고객 확인·생성·상세·수정은 관리자 쿠키가 없으면 원본과 동일한 AI_BUSINESS_TOKEN Bearer를 요구하며, 잘못되거나 회수된 쿠키를 AI 요청으로 전환하지 않는다. 단건/일괄 직원 등록과 기존 고객 식별·중복·부서 변경·탈퇴·기업 삭제 시 연결 데이터의 처리 및 감사도 이식했다. 조회에는 원본과 동일하게 감사 쓰기가 없다.
 
 고객 확인은 call 없이 현재 고객·소속·결제 자격·개인 PIN 전체를 조회하며 통화·감사를 저장하지 않는다. call이 있으면 consultation에 등록 이벤트를 보내 같은 통화를 생성·재사용하고 CALL_STARTED 감사 확정까지 기다린다. 공개 경로·Origin/쿠키·오류·메타·후행 슬래시는 기존 customer가 처리한다. 최신 `04b7346`처럼 고객 생성·전화번호 검색·구성원 등록·고객 확인의 전화번호는 숫자 문자열 11자리다.
 
-현재 공개 선언은 22/23개다. 기업 월 청구 GET 1개와 월별 청구 초기화 등 자동 업무 워커는 주문·청구 단계에서 연결한다. [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)을 따른다.
+현재 공개 선언은 23/24개다. 기업 월 청구 GET 1개와 월별 청구 초기화 등 자동 업무 워커는 주문·청구 단계에서 연결한다. [고객 수정·개인 PIN 계획](../../../docs/msa-customer-pins-plan.md)을 따른다.
+
+## 최신 기업 검색·AI 인증
+
+`GET /api/companies/search`는 관리자 쿠키와 독립적으로 AI_BUSINESS_TOKEN Bearer를 요구한다. `GET /api/companies/members/search`는 모든 ACTIVE 관리자 세션을 요구하며 서비스 토큰으로 대체할 수 없다. 사원 검색은 이름·전화번호·사번·부서명으로 모든 단어를 검색하고 주소 없는 사원을 포함한다. 기업명·주소는 사원 검색에서 제외한다. 두 검색의 q는 NFC/공백 정규화 후 1~100자이고 NUL을 거절한다.
+
+배포는 선택 Secret `dva/msa-ai-business`의 `AI_BUSINESS_TOKEN` 키를 참조한다. 최신 backend와 같은 기존 AI 토큰을 설정하며 값을 임의 생성·교체하지 않는다. 없으면 해당 AI 요청은 503이고 관리자 세션과 내부 서비스 인증은 독립적으로 동작한다. PIN의 별도 MVP 접근 계약은 원본 그대로다.
+
+원본 053에서 퇴역한 기업 PIN은 더 이상 읽기·부서 이름 갱신·기업/부서 삭제·감사에 사용하지 않는다. customer 007은 기존 `company_pins`를 같은 물리 이름의 보관 테이블로 유지한다. DB 선적용 중 구버전 앱의 SQL과 기존 데이터를 보존하기 위해 DROP/rename하지 않는다. 이 테이블은 현재 업무 데이터 비교 대상에서 제외하고 실제 행 보존을 별도로 검증한다. 개인 PIN·주문 주소 스냅샷은 이 퇴역의 대상이 아니다.
 
 ## 고객 수정·개인 PIN
 
@@ -37,7 +45,7 @@ Node.js 24에서 `npm ci` 후 아래 환경을 설정하고 `npm run start:dev`�
 - `CONSULTATION_AUTH_TOKEN`: consultation에서 오는 내부 고객 조회·통화 범위 실행의 서비스 비밀 값. 공개 API 인증을 대신하지 않는다.
 - `CORS_ORIGINS`: 정확한 origin 목록, `PORT` 기본 3001, `SWAGGER_ENABLED` 기본 true
 
-customer·operations `006`과 consultation `004`까지 먼저 적용한다. 구버전 고객·기업·구성원·대기 이벤트를 보존하고, 원본이 없는 과거 기업 등록 시각·부서 배정·기본 주소는 NULL로 남긴다. customer `005`의 좌표 제거는 운영 백업을 먼저 준비해야 한다. `006`은 개인 PIN의 soft delete·활성 주소 유일성을 추가하고 기존 소유권·주소·버전을 보존한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다.
+customer·operations `007`과 consultation `004`까지 먼저 적용한다. 구버전 고객·기업·구성원·대기 이벤트를 보존하고, 원본이 없는 과거 기업 등록 시각·부서 배정·기본 주소는 NULL로 남긴다. customer `005`의 좌표 제거는 운영 백업을 먼저 준비해야 한다. `006`은 개인 PIN의 soft delete·활성 주소 유일성을 추가하고 기존 소유권·주소·버전을 보존한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다.
 
 세션은 operations DB에만 저장한다. customer는 매 요청 `POST /internal/auth/session`에 서비스 Bearer와 기존 세션 토큰을 전달해 현재 권한을 확인한다. 관리자·세션을 복제하거나 operations DB를 직접 조회하지 않는다. 응답 크기 8KiB·요청 2초 제한과 리다이렉트 거절을 적용하며 인증 서비스 장애는 서버 오류로 처리한다.
 
@@ -56,7 +64,7 @@ python msa/deploy/tests/integration_app_rollout.py --service customer --image dv
 
 Docker 빌드는 ESLint·단위·E2E·TypeScript 검사를 실행한다. `checks` target은 실제 HTTP를 사용하는 인증 연결·설정 경계 테스트도 실행한다. 운영 이미지에는 개발 의존성을 넣지 않는다.
 
-비교 검증은 변경하지 않은 backend 이미지와 독립 customer/operations 이미지, 실제 Liquibase 스키마를 사용한다. production의 동일한 조회/인증 77개 요청과 Secure 쿠키·7개 GET OpenAPI를 비교한다. 이어 같은 compiled 이미지를 기본 NODE_ENV=test로 실행해 자동 업무 워커를 끈 상태에서 쓰기/조회/인증 54개 요청, 추가 쓰기 10개 OpenAPI와 매 응답 직후 고객 업무 6개 테이블·감사 전체 행을 비교한다. 감사 행을 필터링하지 않는다. 원본 직원 입력 테스트 4개와 중복·변조·준비 실패·rollback·지연 확정·실제 생산자 SIGKILL 복구도 검사한다. production의 자동 청구 워커·전체 DB 동등성은 후속 검증이다. 보고서에 두 환경을 구분하며 로그는 `msa/liquibase/verification-logs/customer/`에 남는다.
+비교 검증은 변경하지 않은 backend 이미지와 독립 customer/operations 이미지, 실제 Liquibase 스키마를 사용한다. production의 동일한 조회/인증 100개 요청과 Secure 쿠키·8개 GET OpenAPI를 비교한다. 이어 같은 compiled 이미지를 기본 NODE_ENV=test로 실행해 자동 업무 워커를 끈 상태에서 쓰기/조회/인증 54개 요청, 추가 쓰기 10개 OpenAPI와 매 응답 직후 고객 업무 5개 테이블·감사 전체 행을 비교한다. 감사 행을 필터링하지 않는다. 원본 직원 입력 테스트 4개와 중복·변조·준비 실패·rollback·지연 확정·실제 생산자 SIGKILL 복구도 검사한다. production의 자동 청구 워커·전체 DB 동등성은 후속 검증이다. 보고서에 두 환경을 구분하며 로그는 `msa/liquibase/verification-logs/customer/`에 남는다.
 
 Jenkins는 customer 선택 시 `Verify Customer Parity`를 실행한다. DB 적용 뒤 operations를 먼저 배포하고 customer를 배포한다. 공통 배포 스크립트가 `dva/msa-customer-auth` Secret의 `customer-token`을 최초 한 번 생성한다. 기존 값은 보존하며 잘못된 값이나 접근 실패가 있으면 교체하지 않고 배포를 중단한다. 실제 비밀 값은 Git·명령 인자·오류 메시지에 넣지 않는다. 두 앱은 각 `<service>-db` Secret의 PG* 필드를 사용한다.
 

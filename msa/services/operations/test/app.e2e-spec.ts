@@ -66,6 +66,13 @@ describe('Operations infrastructure (e2e)', () => {
             '/api/admins/{id}/password',
             '/api/audit-logs',
             '/api/audit-logs/{id}',
+            '/api/personas',
+            '/api/personas/{id}',
+            '/api/personas/{id}/versions',
+            '/api/personas/{id}/activate',
+            '/api/ai/options',
+            '/api/ai/config',
+            '/api/ai/config/apply-result',
           ]),
         );
       });
@@ -79,6 +86,36 @@ describe('Operations infrastructure (e2e)', () => {
         expect(body.error.code).toBe('UNAUTHORIZED');
         expect(body.meta.requestId).toEqual(expect.any(String));
       });
+  });
+
+  it('keeps persona AI access separate from the service session tokens', async () => {
+    for (const authorization of [
+      '',
+      'Bearer wrong',
+      'Bearer ' + 'local-test-only-token-'.padEnd(40, 'a'),
+    ]) {
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', authorization)
+        .expect(503);
+    }
+    await request(app.getHttpServer()).get('/api/personas').expect(401);
+    await request(app.getHttpServer()).get('/api/ai/options').expect(401);
+    const token = 'persona-test-token-'.padEnd(40, 'p');
+    app.get(ConfigService).set('AI_PERSONA_TOKEN', token);
+    try {
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', 'Bearer wrong')
+        .expect(401);
+      await request(app.getHttpServer())
+        .get('/api/ai/config')
+        .set('Authorization', 'Bearer ' + token)
+        .set('Cookie', 'dva_session=invalid')
+        .expect(401);
+    } finally {
+      app.get(ConfigService).set('AI_PERSONA_TOKEN', undefined);
+    }
   });
 
   it('fails readiness while keeping liveness when the database is unavailable', async () => {

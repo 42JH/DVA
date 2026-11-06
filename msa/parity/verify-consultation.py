@@ -71,7 +71,7 @@ def main():
             if side == 'monolith':
                 create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PGHOST=monolith-db',
-                       '-e', 'PGUSER=monolith_app', '-e', 'PGPASSWORD='+password,
+                       '-e', 'PGUSER=monolith_app', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                        command=('node', '-e', "const{Pool}=require('pg');const p=new Pool();require('./test/helpers/migrations.cjs').migrate(p).then(()=>p.end(),async e=>{console.error(e.code||'schema-failed');await p.end();process.exit(1)})"))
             else:
                 create(name, images['liquibase'], '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{side}-db:5432/dva_webhook_test',
@@ -82,7 +82,7 @@ def main():
             name = RUN+'-'+side+'-suite'
             create(name, images[side+'-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1',
                    '-e', 'DB_PORT=5432', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
-                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
+                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                    '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
                    command=('node', '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs', *(['test/caller-context.integration.test.cjs', 'test/customers.integration.test.cjs', 'test/pins.integration.test.cjs'] if side == 'monolith' else [])))
@@ -97,7 +97,7 @@ def main():
                        '-e', 'NODE_ENV='+environment, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
                        '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
-                       '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
+                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
                        '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                        '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_URL=http://consultation-app:3004',
                        '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
@@ -106,7 +106,7 @@ def main():
         run('docker', 'cp', RUN+'-operations-app:/app/service/dist/auth/password.js',
             str(LOGS/'seed-password.cjs'), label='password-fixture-copy')
         name = RUN+'-differential'
-        create(name, images['consultation-checks'], '-e', 'PGPASSWORD='+password,
+        create(name, images['consultation-checks'], '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
                command=('node', '--test', 'test/consultation-pbx.test.cjs'))
         for source in (ROOT/'msa/parity/consultation-pbx.test.cjs', LOGS/'seed-password.cjs'):
@@ -123,7 +123,7 @@ def main():
         runtime = LOGS/'customer-runtime'
         runtime.mkdir(exist_ok=True)
         run('docker', 'cp', RUN+'-customer-app:/app/service/dist/.', str(runtime), label='context-consumer-runtime')
-        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password,
+        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PBX_WEBHOOK_TOKEN='+pbx,
                '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                command=('node', '--test', 'test/caller-context.test.cjs'))
@@ -132,7 +132,7 @@ def main():
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='context-copy-'+source.name)
         complete(name)
         name = RUN+'-customer-pins'
-        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password,
+        create(name, images['consultation-checks'], '-e', 'NODE_ENV=test', '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
                '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CUSTOMER_AUTH_TOKEN='+password,
                '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                command=('node', '--test', 'test/customer-pins.test.cjs'))

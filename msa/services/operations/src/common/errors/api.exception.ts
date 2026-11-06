@@ -35,3 +35,9 @@ export class ApiException extends HttpException {
     super({ code, message, details }, status);
   }
 }
+
+export class RateLimitException extends ApiException {
+  constructor(readonly retryAfterSeconds: number) {
+    super(429, 'RATE_LIMITED', '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.');
+  }
+}

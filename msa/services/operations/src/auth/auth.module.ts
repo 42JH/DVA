@@ -10,10 +10,19 @@ import { AuthGuard } from './auth.guard';
 import { AuthController } from './auth.controller';
 import { AdminAccessController } from './admin-access.controller';
 import { InternalAuthController } from './internal-auth.controller';
+import { AuthLimitsService } from './auth-limits.service';
+import { AuthLimitsGuard } from './auth-limits.guard';
 @Module({
   imports: [ApplicationConfigModule, DatabaseModule, AdminsModule, AuditModule],
   controllers: [AuthController, AdminAccessController, InternalAuthController],
-  providers: [AuthRepository, AuthService, { provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [
+    AuthRepository,
+    AuthService,
+    AuthLimitsService,
+    AuthLimitsGuard,
+    { provide: APP_GUARD, useExisting: AuthLimitsGuard },
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
   exports: [AuthService],
 })
 export class AuthModule {}

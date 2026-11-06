@@ -40,7 +40,6 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
     'SELECT organization_seq,name,status,monthly_billing_enabled,created_at,deleted_at FROM organizations ORDER BY organization_seq',
     'SELECT department_seq,organization_seq,name,group_billing_enabled,created_at,deleted_at FROM departments ORDER BY department_seq',
     'SELECT membership_seq,customer_seq,organization_seq,department_seq,employee_no,role,status,deleted_at FROM memberships ORDER BY membership_seq',
-    'SELECT company_pin_seq,organization_seq,department_seq,department_name,label,address_data,version,deleted_at FROM company_pins ORDER BY company_pin_seq',
     'SELECT personal_pin_seq,customer_seq,label,address_data,version FROM personal_pins ORDER BY personal_pin_seq'];
   const auditSQL='SELECT audit_log_seq,actor_type,actor_seq,actor_name,action,target_type,target_seq,target_admin_name,request_id,result,metadata,occurred_at FROM audit_logs ORDER BY audit_log_seq';
   async function compareState(label){
@@ -54,7 +53,7 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
     for(const side of sides){
       const endpoint=/^\/api\/(auth|admins|audit-logs)(\/|\?|$)/.test(path)?side.auth:side.base;
       const r=await fetch(endpoint+path,{method,signal:AbortSignal.timeout(15000),redirect:'error',
-        headers:{'X-Request-Id':id,...(options.noOrigin?{}:{Origin:options.origin??'http://localhost:5173'}),
+        headers:{'X-Request-Id':id,Authorization:'Bearer '+process.env.AI_BUSINESS_TOKEN,...(options.noOrigin?{}:{Origin:options.origin??'http://localhost:5173'}),
           ...(actor&&side.cookies[actor]?{Cookie:side.cookies[actor]}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},body:body===undefined?undefined:JSON.stringify(body)});
       assert.equal(r.status,status,method+' '+path+' '+side.base);assert.equal(r.headers.get('x-request-id'),id);
       assert.equal(r.headers.get('cache-control'),'no-store');
@@ -112,16 +111,19 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   await request('DELETE',`/api/members/${member}`,undefined,404);
   await request('POST',`/api/companies/${company}/members`,{customerSeq:ai,employeeNo:'0003',role:'MEMBER',departmentSeq:dept},204);
   const pinAddress={...address,name:'수신자',phoneNumber:'01011110001'};
+  assert.equal((await reference.query("SELECT to_regclass('company_pins') IS NULL AS retired")).rows[0].retired,true);
+  await customer.query('INSERT INTO company_pins(organization_seq,department_seq,department_name,label,address_data) VALUES($1,$2,$3,$4,$5)',[company,dept,'신규 이름','회사 PIN',pinAddress]);
+  const legacyPins=(await customer.query('SELECT * FROM company_pins ORDER BY company_pin_seq')).rows;
   for(const side of sides){
-    await side.db.query('INSERT INTO company_pins(organization_seq,department_seq,department_name,label,address_data) VALUES($1,$2,$3,$4,$5)',[company,dept,'신규 이름','회사 PIN',pinAddress]);
     await side.db.query('INSERT INTO personal_pins(customer_seq,label,address_data) VALUES($1,$2,$3)',[ai,'개인 PIN',pinAddress]);
   }
   await request('PATCH',`/api/departments/${dept}`,{name:'배송 부서'},204);
-  assert.equal((await customer.query('SELECT version FROM company_pins WHERE company_pin_seq=1')).rows[0].version,2);
+  assert.deepEqual((await customer.query('SELECT * FROM company_pins ORDER BY company_pin_seq')).rows,legacyPins);
   await request('DELETE',`/api/departments/${dept}`,undefined,204);
   await request('DELETE',`/api/departments/${dept}`,undefined,404);
   await request('DELETE',`/api/companies/${company}`,undefined,204);
   await request('GET',`/api/companies/${company}`,undefined,404);
+  assert.deepEqual((await customer.query('SELECT * FROM company_pins ORDER BY company_pin_seq')).rows,legacyPins);
   assert.equal((await customer.query('SELECT count(*)::int AS n FROM personal_pins WHERE customer_seq=$1',[ai])).rows[0].n,1);
   for(const side of sides)await side.db.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1",[ai]);
   await request('POST','/api/companies',{name:'전체 rollback',departments:[{name:'준비 부서'}],members:[{name:'탈퇴 충돌',phoneNumber:'01011110001',employeeNo:'R001'}]},422);

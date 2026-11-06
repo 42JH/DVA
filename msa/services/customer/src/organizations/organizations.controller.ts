@@ -38,7 +38,7 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { OrganizationsService } from './organizations.service';
 import { CreateOrganizationPipe } from './create-organization.pipe';
 import { AuditOperation } from '../audit/audit-operation';
-import { MvpAiDirectoryAccess } from '../auth/mvp-ai-access';
+import { AiBusinessAccess } from '../auth/auth.guard';
 import { CompanyDirectoryEnvelopeDto, CompanyDirectoryQueryDto } from './dto/company-directory.dto';
 import { OrganizationDeletionService } from './organization-deletion.service';
 
@@ -67,12 +67,12 @@ export class OrganizationsController {
 
   // 정적 경로를 :id보다 먼저 등록하여 search를 기업 번호로 해석하지 않는다.
   @Get('search')
-  @MvpAiDirectoryAccess()
+  @AiBusinessAccess()
   @ApiOperation({
     summary: '기업 공식 배송지 검색 (DIR-01)',
-    security: [{ adminSession: [] }, {}],
+    security: [{ bearer: [] }],
     description:
-      '활성 기업·활성 소속·활성 고객의 현재 기본 주소를 기업 간 공유 배송지로 검색합니다. 사번·역할·개인 PIN은 제공하지 않습니다. MVP AI 서비스 인증·통화 헤더는 요구하지 않습니다.',
+      'AI_BUSINESS_TOKEN Bearer 필수. 활성 기업·활성 소속·활성 고객의 현재 기본 주소를 기업 간 공유 배송지로 검색합니다. 사번·역할·개인 PIN은 제공하지 않습니다. 관리자 검색은 GET /api/companies/members/search를 사용합니다.',
   })
   @ApiOkResponse({ type: CompanyDirectoryEnvelopeDto })
   search(@Query() query: CompanyDirectoryQueryDto) {

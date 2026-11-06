@@ -1,6 +1,7 @@
 export interface Environment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
+  AI_BUSINESS_TOKEN?: string;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
@@ -41,6 +42,15 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) errors.push(key);
     return parsed;
   };
+  const businessToken = raw.AI_BUSINESS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      businessToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   const nodeEnv = raw.NODE_ENV ?? 'development';
   if (typeof nodeEnv !== 'string' || !['development', 'test', 'production'].includes(nodeEnv))
     errors.push('NODE_ENV');
@@ -65,6 +75,8 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
   const config: Environment = {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     PORT: port('PORT', 3001),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
