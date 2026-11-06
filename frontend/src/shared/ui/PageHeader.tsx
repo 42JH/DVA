@@ -35,7 +35,7 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
   )
 }
 
-// 새 상단바 (Figma '프레임' · 'FAQ' · '통화' 11/04) — 상태 | 검색칸(폭 317, 가운데) | AI 미답변 알림. 화면이 본문 맨 위에 그림
+// 새 상단바 (Figma '프레임' · 'FAQ' · '통화' 11/04 → 11/06 주문 시안) — 경로 · AI 미답변 알림 | 검색칸(폭 320, 가운데) | 상태. 화면이 본문 맨 위에 그림
 // (본문 위 여백 24를 끌어올려 카드 위에서 36 높이에 가운데가 오게). 정보는 AppLayout이 TopBarInfo로 채워 줌
 // 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중' — 점은 라이브처럼 깜빡임, 0건이면 '접수 중'만(11/04 사용자). 실시간 연결이 끊기면 점이 회색으로 멈춤
 // 날짜는 뺌 (11/04 사용자 — 04 통화처럼 FAQ도). 상태는 카드 왼쪽 24부터(Figma '통화'), 좁은 화면(1280)에선 말줄임 — 검색칸은 늘 가운데
@@ -56,25 +56,15 @@ export function TopBar({
   // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
   const box = search ?? (crumbs ? false : ({ tab: 'order' } as const))
   return (
-    <header className="-mt-6 -ml-4 grid h-18 shrink-0 grid-cols-[minmax(0,1fr)_317px_minmax(0,1fr)] items-center gap-6 pr-12 pl-2">
+    // 11/06 시안(주문 '프레임' 1521:7385): 가운데 검색칸(폭 320) · 오른쪽 끝 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중'
+    // 왼쪽 = 경로(뎁스 화면) 또는 AI 미답변 알림 — 시안엔 알림이 없지만 AI 미답변 화면으로 가는 길이 이것뿐이라 남김(사용자 확인 중)
+    // 검색칸 가운데 = 화면 가운데(시안 1440에서 560~880): 왼쪽 칸 = 50vw − 160 − 상단바 왼쪽 끝(88) − 사이(24). 상태는 카드 오른쪽 20 앞까지(-mr-3)
+    <header className="-mt-6 -mr-3 -ml-4 grid h-18 shrink-0 grid-cols-[calc(50vw-272px)_320px_minmax(0,1fr)] items-center gap-6 pl-2">
       <div className="flex min-w-0 items-center">
         {crumbs ? (
           <Crumbs items={crumbs} className="min-w-0 truncate" />
         ) : (
-          persona && (
-            <span
-              title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
-              className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
-            >
-              <span
-                aria-hidden
-                className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
-              />
-              <span className="truncate">
-                {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
-              </span>
-            </span>
-          )
+          <UnansweredAlert count={unanswered} className="min-w-0" />
         )}
       </div>
       {box ? (
@@ -83,7 +73,22 @@ export function TopBar({
         // 검색칸이 없는 화면은 가운데 칸 오른쪽에 화면 정보 (06 발신번호)
         <div className="flex min-w-0 justify-end">{extra}</div>
       )}
-      <UnansweredAlert count={unanswered} className="justify-self-end" />
+      <div className="flex min-w-0 justify-end">
+        {persona && (
+          <span
+            title={live ? undefined : '실시간 연결이 끊겨 다시 연결하는 중입니다'}
+            className="flex min-w-0 items-center gap-2 text-body font-medium text-brand"
+          >
+            <span
+              aria-hidden
+              className={`size-3 shrink-0 rounded-full ${live ? 'bg-brand motion-safe:animate-blink' : 'bg-muted'}`}
+            />
+            <span className="truncate">
+              {persona} AI 상담가 · {calls ? `${calls}건 ` : ''}접수 중
+            </span>
+          </span>
+        )}
+      </div>
     </header>
   )
 }
