@@ -43,14 +43,20 @@ function UnansweredAlert({ count, className = '' }: { count: number; className?:
 // 뎁스가 있는 화면(통화 상세 · FAQ 상세 · 작성 · 수정 · AI 미답변 · 기업 상세 · 그래프 보기)은 crumbs — 상태 자리에 경로, 검색칸 없음 (11/05 사용자 이미지)
 // FAQ 목록은 검색 중일 때만 crumbs('FAQ > “박스” 검색') + 검색칸 그대로
 // extra = 검색칸 자리(가운데 칸) 오른쪽에 붙는 화면 정보 — 검색칸이 없을 때만 (06 통화 상세의 발신번호, 11/05 사용자 이미지)
+// wide = FAQ 화면들 (Figma 'FAQ' · 'FAQ 미답변' 11/06) — 검색칸 760(x 340~1100) · 칸은 BAR_COLS(본문 질문 열과 줄 맞춤) · 왼쪽은 경로만(알림 대신 FAQ '답변 대기 →')
+// center = 검색칸 대신 가운데 칸 (AI 미답변 문의의 자기 검색칸)
 export function TopBar({
   search,
   crumbs,
   extra,
+  center,
+  wide,
 }: {
   search?: SearchProps | false
   crumbs?: Crumb[]
   extra?: ReactNode
+  center?: ReactNode
+  wide?: boolean
 }) {
   const { unanswered, persona, calls, live } = useContext(TopBarInfo)
   // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
@@ -59,20 +65,23 @@ export function TopBar({
     // 11/06 시안(주문 '프레임' 1521:7385): 가운데 검색칸(폭 320) · 오른쪽 끝 상태 '● 빠른 접수형 AI 상담가 · N건 접수 중'
     // 왼쪽 = 경로(뎁스 화면) 또는 AI 미답변 알림 — 시안엔 알림이 없지만 AI 미답변 화면으로 가는 길이 이것뿐이라 남김(사용자 확인 중)
     // 검색칸 가운데 = 화면 가운데(시안 1440에서 560~880): 왼쪽 칸 = 50vw − 160 − 상단바 왼쪽 끝(88) − 사이(24). 상태는 카드 오른쪽 20 앞까지(-mr-3)
-    <header className="-mt-6 -mr-3 -ml-4 grid h-18 shrink-0 grid-cols-[calc(50vw-272px)_320px_minmax(0,1fr)] items-center gap-6 pl-2">
+    <header
+      className={`-mt-6 h-18 shrink-0 items-center ${wide ? BAR_COLS : '-mr-3 -ml-4 grid grid-cols-[calc(50vw-272px)_320px_minmax(0,1fr)] gap-6 pl-2'}`}
+    >
       <div className="flex min-w-0 items-center">
         {crumbs ? (
-          <Crumbs items={crumbs} className="min-w-0 truncate" />
+          <Crumbs items={crumbs} className={`min-w-0 truncate ${wide ? 'text-card' : ''}`} />
         ) : (
-          <UnansweredAlert count={unanswered} className="min-w-0" />
+          !wide && <UnansweredAlert count={unanswered} className="min-w-0" />
         )}
       </div>
-      {box ? (
-        <GlobalSearch {...box} />
-      ) : (
-        // 검색칸이 없는 화면은 가운데 칸 오른쪽에 화면 정보 (06 발신번호)
-        <div className="flex min-w-0 justify-end">{extra}</div>
-      )}
+      {center ??
+        (box ? (
+          <GlobalSearch {...box} />
+        ) : (
+          // 검색칸이 없는 화면은 가운데 칸 오른쪽에 화면 정보 (06 발신번호)
+          <div className="flex min-w-0 justify-end">{extra}</div>
+        ))}
       <div className="flex min-w-0 justify-end">
         {persona && (
           <span
@@ -92,6 +101,12 @@ export function TopBar({
     </header>
   )
 }
+
+/** wide 상단바 세 칸 — 왼쪽(경로) | 가운데 검색칸(최대 760) | 오른쪽 상태. 카드 양끝 40 안쪽 (Figma 'FAQ' · 'FAQ 미답변' 11/06)
+ *  1440에서 왼쪽 212 · 오른쪽 272 (디자인 검색칸 x 340~1100). FAQ 본문도 같은 칸을 써서 질문 열이 검색칸 아래로 줄이 맞음
+ *  옆 칸은 192 · 240 이상 — 좁은 창(1280)에서 검색칸이 줄어듦 */
+export const BAR_COLS =
+  '-mx-content grid grid-cols-[minmax(12rem,1fr)_minmax(0,760px)_minmax(15rem,1.28fr)] gap-x-6 px-10'
 
 type Crumb = { label: string; to?: string }
 

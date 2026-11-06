@@ -6,9 +6,7 @@ import { CallDetailPage } from '@/features/call/components/CallDetailPage'
 import { CallListPage } from '@/features/call/components/CallListPage'
 import { DashboardPage } from '@/features/dashboard/components/DashboardPage'
 import { GraphPage } from '@/features/dashboard/components/GraphPage'
-import { FaqListPage } from '@/features/faq/components/FaqListPage'
-import { FaqDetailPage } from '@/features/faq/components/FaqDetailPage'
-import { FaqEditPage } from '@/features/faq/components/FaqEditPage'
+import { FaqListPage, FaqOpenRedirect } from '@/features/faq/components/FaqListPage'
 import { UnansweredPage } from '@/features/faq/components/UnansweredPage'
 import { OrderListPage } from '@/features/order/components/OrderListPage'
 import { PersonaPage } from '@/features/persona/components/PersonaPage'
@@ -70,11 +68,10 @@ export const router = createBrowserRouter([
           { path: 'companies/:companyId', element: <CompanyDetailPage /> },
           // 07 페르소나 관리 (11/05 새 디자인 — 구성 그대로 모양만) — handle 없음(화면이 상단바를 그림)
           { path: 'personas', element: <PersonaPage /> },
-          // 09 FAQ (Figma 11/04) — 목록 · 상세 · 작성 · 수정은 handle 없음(화면이 상단바 · 경로를 그림)
+          // 09 FAQ (Figma 11/06) — handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'faqs', element: <FaqListPage /> },
-          { path: 'faqs/new', element: <FaqEditPage /> },
-          { path: 'faqs/:faqId', element: <FaqDetailPage /> },
-          { path: 'faqs/:faqId/edit', element: <FaqEditPage /> },
+          // 옛 상세 주소 (검색 창 · 최근 조회) → 그 FAQ를 펼친 목록. 상세 · 작성 · 수정은 목록 안으로 (11/06)
+          { path: 'faqs/:faqId', element: <FaqOpenRedirect /> },
           // AI 미답변 (11/05 새 디자인 — FAQ 목록과 같은 틀) — handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'faqs/unanswered', element: <UnansweredPage /> },
           {

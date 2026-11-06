@@ -1,4 +1,5 @@
 // 실행: npx tsx src/shared/lib/format.test.ts  (프레임워크 없이 assert만 — 규칙이 깨지면 여기서 먼저 터짐)
+process.env.TZ = 'Asia/Seoul'
 import assert from 'node:assert/strict'
 import {
   fmtDate,
