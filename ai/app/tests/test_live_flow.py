@@ -36,7 +36,8 @@ class FakeDecisions:
             if said.startswith("음"):  # 애매한 '네'(운영 통화 b8f3795c "아 그렇게 접수해줘" yes 0.56)
                 answers.append(choice("confirm", "yes", 0.56))
             else:
-                answers.append(choice("confirm", "yes" if said.startswith("네") else
+                answers.append(choice("confirm", "yes" if said.startswith("네") else "no" if said.startswith("아니") else
+                                      "change" if "바꿔" in said else
                                       "proceed" if "접수해 주세요" in said else "not_answer"))
         if "task" in names:
             answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
@@ -296,6 +297,102 @@ def test_unclear_yes_reasks_each_time_then_clear_yes_commits(tmp_path):
 
     s = run(scenario())
     assert len(s.state.parcels) == 1
+
+
+async def _collect_full(conn, s):
+    """접수 값 전부 기록(d1) → 확인 대기까지."""
+    await say(conn, "택배 보내려고요", 1000)
+    conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 2100})
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+        "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_1",
+                                                     "name": "record_fields", "arguments": json.dumps(FULL)}}})
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+    await until(lambda: s.state.pending)
+    conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
+
+
+def _asks(conn):
+    return [e for e in conn.sent if e["type"] == "session.commentary.append" and "ask_again" in e["content"]]
+
+
+def test_change_then_rejected_fix_then_plain_answer_reopens_readback_and_yes_commits(tmp_path):
+    """운영 통화 56c133c8: 되읽기 뒤 '바꿔 주세요'(change)로 확인 대기를 풀고, 정정 위임은 수거 시각 거절(needs)이라
+    대기를 다시 열지 않음. 다음 답의 위임이 도구 없이 끝나자 Live가 스스로 확인 질문을 했고 '네'가 갈 곳이 없어 무음 종료.
+    이제 도구 없이 끝난 위임 뒤 서버 되읽기(ask_again)로 대기를 다시 열고, 그 뒤 '네'에 확정한다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "승용차로 바꿔 주세요", 6500)                         # confirm=change → 대기 해제
+        await until(lambda: s.state.pending is None)
+        assert s.state.awaiting_fix
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d2"}, "offset_ms": 6500})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_2", "name": "record_fields",
+                                                         "arguments": json.dumps({"client_comment": "승용차",
+                                                                                  "pickup_at": "2000-01-01T09:00:00+09:00"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})
+        await until(lambda: any(c["name"] == "record_fields" and c["status"] not in ("실행 중", "ok") for c in s.tool_calls))
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})
+        await asyncio.sleep(0.15)
+        assert s.state.pending is None and not _asks(conn) and not s.state.awaiting_fix  # 거절(needs) 위임엔 되읽기를 얹지 않음
+        await ai(conn, "오전 열 시 이후로 괜찮으신가요?", 8000)
+        await say(conn, "그렇게 해요", 9500)                                   # confirm=not_answer
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 9500})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})  # 도구 없음
+        await until(lambda: len(_asks(conn)) == 1)                             # 서버 되읽기로 대기를 다시 연다
+        assert s.state.pending and s.state.parcels == []
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 11000)
+        await say(conn, "네 해주세요", 12500)
+        await until(lambda: s.state.parcels)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert len(s.state.parcels) == 1 and s.state.parcels[0].confirmed_snapshot["client_comment"] == "승용차"
+
+
+def test_no_answer_waits_for_fix_without_rereading_then_fix_reopens(tmp_path):
+    """'아니요' 직후 도구 없이 끝난 위임(Live가 어디를 고칠지 물음)에는 되읽기를 다시 열지 않고,
+    고친 값이 기록되면 record_fields가 새 되읽기를 준다."""
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await _collect_full(conn, s)
+        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
+        await say(conn, "아니요 틀렸어요", 6500)                               # confirm=no
+        await until(lambda: s.state.pending is None)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d2"}, "offset_ms": 6500})
+        conn.push({"type": "response.event", "delegation_id": "d2", "event": {"type": "response.completed"}})  # 도구 없음
+        await asyncio.sleep(0.15)
+        assert s.state.pending is None and not _asks(conn)                    # 고칠 값을 기다린다
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d3"}, "offset_ms": 8000})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "call_3", "name": "record_fields",
+                                                         "arguments": json.dumps({"receiver_name": "박영희"})}}})
+        conn.push({"type": "response.event", "delegation_id": "d3", "event": {"type": "response.completed"}})
+        await until(lambda: s.state.pending)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    s = run(scenario())
+    assert s.state.pending.snapshot["receiver_name"] == "박영희" and not s.state.awaiting_fix
+    assert s.tool_calls[-1]["output"]["facts"]["readback"]["receiver_name"] == "박영희"
 
 
 def test_cancel_reask_carries_cancel_target_not_parcel_readback():

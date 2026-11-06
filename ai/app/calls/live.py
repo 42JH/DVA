@@ -19,7 +19,7 @@ from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
-                                release, take_cancel)
+                                issue_parcel_confirmation, release, take_cancel)
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
@@ -167,8 +167,9 @@ class LiveFlow:
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
-        questions = decision_questions(self.policy, stage, pending=pending is not None, pick_labels=pick,
-                                       callback=callback, origin=origin)
+        # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
+        questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
+                                       pick_labels=pick, callback=callback, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -213,6 +214,13 @@ class LiveFlow:
                     followups.append(("origin", None))
             if "confirm" in answers and pending_id:
                 followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
+            elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
+                # 확인 대기 없이 온 '네'(Live가 서버 되읽기 없이 물음): 확정하지 않고 서버 되읽기로 다시 묻는다
+                st.awaiting_fix = False
+                if pid := self._reissue(s):
+                    followups.append(("ask_confirm", pid))
+            elif c and c[0] in ("no", "change") and c[1] >= th:
+                st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
             if (p := answers.get("pick")) and p[1] >= th:
                 if p[0] == "none":
                     reject_candidates(st)
@@ -259,6 +267,28 @@ class LiveFlow:
         rt.confirm_t = utt.t_last
         self._arm_commit(s, pending_id)
         return None
+
+    def _reissue(self, s: CallSession) -> str | None:
+        """잠금 안. readback 단계인데 확인 대기가 없으면(no·change로 푼 뒤 값이 다시 갖춰짐) 현재 값으로 다시 연다.
+        고친 값을 기다리는 중(awaiting_fix)이면 열지 않는다(거절 직후 같은 내용을 되읽지 않게)."""
+        st = s.state
+        if s.closed or st.pending or st.awaiting_fix or not st.pickup_at.valid \
+                or assess(st, self.policy).stage != "readback":
+            return None
+        p = issue_parcel_confirmation(st, self.policy, s.tools.clock())
+        if p:
+            s.note("확인 대기 재발급", p.id)
+        return p.id if p else None
+
+    async def _reopen_readback(self, s: CallSession, d: dict) -> None:
+        """위임이 끝났는데 확인 대기가 없으면 서버 되읽기로 다시 연다(운영 통화 56c133c8: 없으면 Live가 스스로 확인 질문을
+        하고 '네'를 받을 곳이 없어 무음). 재질문 결과(needs)가 난 위임에는 얹지 않는다."""
+        if d.get("needs"):
+            return
+        async with s.lock:
+            pid = self._reissue(s)
+        if pid:
+            await self._follow(s, "ask_confirm", pid)
 
     def _arm_commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
@@ -559,6 +589,7 @@ class LiveFlow:
             s.spawn(self.resume(s, did), "resume")
             if d["inflight"] == 0 and d["outputs"] == 0:
                 d["done"].set()  # 최종 문장까지 끝남
+                s.spawn(self._reopen_readback(s, d), "reopen")
         elif t == "response.created":
             self._dl(s, did)["completed"] = False
 
@@ -581,6 +612,8 @@ class LiveFlow:
             out = await run_tool(s.tools, name, item.get("arguments") or "{}", call_id, allowed=MODEL_TOOLS)
         view.update(status=out.get("code") or out["status"], output=out,
                     elapsed_ms=round((time.monotonic() - t0) * 1000))
+        if out["status"] != "ok":
+            d0["needs"] = True  # 재질문·실패 결과: 이 위임 끝에 되읽기를 다시 열지 않는다
         s.timing(f"도구 {name}", view["elapsed_ms"])
         if name in TOOL_LATENCY:
             s.measure(TOOL_LATENCY[name], view["elapsed_ms"])
