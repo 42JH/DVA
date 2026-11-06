@@ -35,7 +35,7 @@ export function OrderListPage() {
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar search={{ tab: 'order', q: vm.q, onApply: vm.setQ, onOrder: vm.openOrderSeq }} />
       <div
-        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
+        className={`${COLS} mt-v28 h-[19px] shrink-0 grid-rows-[19px] items-center ${PAD} text-body font-semibold`}
       >
         <DayPick small day={day} onPick={vm.setDate} />
         <HeadPick
@@ -45,8 +45,8 @@ export function OrderListPage() {
           options={vm.groups}
           onPick={vm.setGroup}
         />
-        <span>보내는 분</span>
-        <span>받는 분</span>
+        <span className="w-[70px] text-center whitespace-nowrap">보내는 분</span>
+        <span className="w-[70px] text-center whitespace-nowrap">받는 분</span>
         <span className="text-right">주문번호</span>
       </div>
       <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
@@ -64,7 +64,7 @@ export function OrderListPage() {
               ? '맞는 주문이 없습니다.'
               : '주문이 없습니다.'
         }
-        className="pt-1 pr-[90px] pl-[68px]"
+        className="pr-[90px] pl-[68px]"
       />
       {/* 아래 오른쪽 [추가] (11/06 시안) · 취소 · 다시 접수 결과 한 줄은 그 왼쪽 */}
       <div className={`flex shrink-0 items-center justify-end gap-6 pt-3 ${PAD}`}>
@@ -157,11 +157,11 @@ function OrderLine({
       className={`${COLS} relative h-[72px] w-full items-center border-b border-line/70 text-left hover:bg-bg`}
     >
       {dayLabel && (
-        <span className="absolute top-1/2 -left-15 -translate-y-1/2 text-[12px] font-medium whitespace-nowrap">
+        <span className="absolute top-1/2 -left-15 w-[42px] -translate-y-1/2 text-center text-[12px] font-medium whitespace-nowrap">
           {fmtMonthDay(r.day)}
         </span>
       )}
-      <span className="pl-[13px] text-[12px] text-sub">{r.time}</span>
+      <span className="pl-3 text-[12px] text-sub">{r.time}</span>
       <span>
         <OrderChip small group={r.group} />
       </span>
@@ -172,19 +172,22 @@ function OrderLine({
   )
 }
 
-/** '이름  주소' 한 줄 (사이 20, 글자 16/500). 길면 주소부터 말줄임, 올리면 전체. 검색어와 맞은 자리는 하이라이트 */
+/** '이름  주소' 한 줄 (사이 20, 글자 16/500). 이름 자리는 폭 70(다섯 글자) 고정 · 가운데 맞춤 — 여섯 글자부터 말줄임이라 주소 시작이 줄마다 같음 · 주소도 길면 말줄임, 올리면 전체. 없는 값은 빈칸. 검색어와 맞은 자리는 하이라이트 */
 function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
   return (
     <span
       title={[p.name, p.address].filter(Boolean).join(' ')}
       className="flex min-w-0 items-center gap-5 pr-6 text-body font-medium"
     >
-      <span className={`shrink-0 ${p.name ? '' : 'text-muted'}`}>
-        {p.name ? <Highlight text={p.name} q={q} /> : '—'}
+      {/* 이름이 없어도 자리는 남김 — 주소 시작을 다른 줄과 맞춤 */}
+      <span className="w-[70px] shrink-0 truncate text-center">
+        {p.name && <Highlight text={p.name} q={q} />}
       </span>
-      <span className={`min-w-0 truncate ${p.address ? '' : 'text-muted'}`}>
-        {p.address ? <Highlight text={p.address} q={q} /> : '—'}
-      </span>
+      {p.address && (
+        <span className="min-w-0 truncate">
+          <Highlight text={p.address} q={q} />
+        </span>
+      )}
     </span>
   )
 }
