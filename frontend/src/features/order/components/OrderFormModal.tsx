@@ -130,7 +130,13 @@ export function OrderFormModal({
             <span className="text-body text-sub">품목</span>
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               {vm.items.map((i) => (
-                <Stepper key={i.key} label={i.label} value={i.count} onChange={i.setCount} />
+                <Stepper
+                  key={i.key}
+                  label={i.label}
+                  value={i.count}
+                  max={i.max}
+                  onChange={i.setCount}
+                />
               ))}
             </div>
           </div>
@@ -171,6 +177,7 @@ export function OrderFormModal({
               inline
               type="datetime-local"
               min={vm.pickupMin}
+              max={vm.pickupMax}
               hint="선택"
               value={vm.pickupAt}
               error={vm.pickupError}
