@@ -9,6 +9,7 @@ const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worke
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 const { DatabaseService } = require('../dist/database/database.service');
 const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
+const { RecordingProcessingError } = require('../dist/webhooks/pbx/recording-retry');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -51,13 +52,13 @@ const receipt = async (data) => {
 };
 const replayable = (id) =>
   pool.query(
-    'UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=NULL WHERE recording_id=$1',
+    'UPDATE pbx_webhooks.call_ended_events SET last_attempt_at=NULL,next_attempt_at=NULL WHERE recording_id=$1',
     [id],
   );
 const state = async (id) =>
   (
     await pool.query(
-      `SELECT processing_status,call_session_seq,last_attempt_at,
+      `SELECT processing_status,call_session_seq,last_attempt_at,attempt_count,next_attempt_at,last_error_code,requires_review,
  (SELECT count(*)::int FROM recordings r WHERE r.call_session_seq=e.call_session_seq) AS recordings
  FROM pbx_webhooks.call_ended_events e WHERE recording_id=$1`,
       [id],
@@ -219,6 +220,7 @@ test('matching refuses ambiguous candidates, a wrong phone and timestamps outsid
   await receipt(data);
   await workers[0].processPending();
   assert.equal((await state(data.recordingId)).call_session_seq, null);
+  assert.equal((await state(data.recordingId)).attempt_count, 0);
   await call('01098880001', 1);
   await call('01098880001', 10);
   await replayable(data.recordingId);
@@ -358,7 +360,15 @@ test('expired claims recover and stale completion, failure and release cannot re
   );
   const second = await repo.next(true);
   assert.notEqual(second.claimId, first.claimId);
-  await repo.failed(data.recordingId, first.claimId);
+  assert.equal(
+    await repo.failed(
+      data.recordingId,
+      first.claimId,
+      new RecordingProcessingError('PROCESSING_UNAVAILABLE'),
+      false,
+    ),
+    false,
+  );
   await repo.release(data.recordingId, first.claimId);
   assert.equal(await repo.match(data, 30, first.claimId), null);
   assert.equal(
@@ -512,6 +522,7 @@ test('expired unmatched receipts are removed with S3 disabled while registered o
     assert.equal(await state(unmatched.recordingId), undefined);
     assert.equal((await state(matched.recordingId)).call_session_seq, callId);
     assert.equal((await state(matched.recordingId)).processing_status, 'RECEIVED');
+    assert.equal((await state(matched.recordingId)).attempt_count, 0);
     assert.equal(uploads, 0);
     const attempted = (await state(matched.recordingId)).last_attempt_at;
     await replayable(matched.recordingId);
@@ -615,4 +626,164 @@ test('unmatched corrupt or conflicting historical receipts also expire without b
   assert.equal(await state(conflicting.recordingId), undefined);
   assert.equal((await state(valid.recordingId)).processing_status, 'PROCESSED');
   assert.equal(uploads, 1);
+});
+
+test('transient recording errors retry five times with persisted backoff, then wait for review without blocking healthy receipts', async () => {
+  await call();
+  const data = payload();
+  await receipt(data);
+  const savedPayload = (
+    await pool.query('SELECT payload FROM pbx_webhooks.call_ended_events WHERE recording_id=$1', [
+      data.recordingId,
+    ])
+  ).rows[0].payload;
+  let attempts = 0;
+  const goodSave = saving;
+  saving = async () => {
+    attempts++;
+    throw new RecordingProcessingError('SOURCE_NOT_FOUND');
+  };
+  const delays = [1, 5, 15, 30];
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await workers[attempt % 2].processPending();
+    const failed = await state(data.recordingId);
+    assert.equal(failed.attempt_count, attempt);
+    assert.equal(attempts, attempt);
+    assert.equal(failed.last_error_code, 'SOURCE_NOT_FOUND');
+    assert.equal(failed.requires_review, attempt === 5);
+    assert.equal(failed.recordings, 0);
+    if (attempt < 5) {
+      const seconds = (
+        await pool.query(
+          'SELECT extract(epoch FROM next_attempt_at-clock_timestamp())::float AS seconds FROM pbx_webhooks.call_ended_events WHERE recording_id=$1',
+          [data.recordingId],
+        )
+      ).rows[0].seconds;
+      assert.ok(seconds > delays[attempt - 1] * 60 - 5 && seconds <= delays[attempt - 1] * 60);
+      await workers[0].processPending();
+      assert.equal(attempts, attempt);
+      await replayable(data.recordingId);
+    } else assert.equal(failed.next_attempt_at, null);
+  }
+  assert.equal((await receipt(data)).duplicate, true);
+  await replayable(data.recordingId);
+  saving = goodSave;
+  await workers[0].processPending();
+  assert.equal((await state(data.recordingId)).requires_review, true);
+  assert.equal(uploads, 0);
+  assert.deepEqual(
+    (
+      await pool.query('SELECT payload FROM pbx_webhooks.call_ended_events WHERE recording_id=$1', [
+        data.recordingId,
+      ])
+    ).rows[0].payload,
+    savedPayload,
+  );
+  const healthy = payload();
+  await receipt(healthy);
+  await workers[1].processPending();
+  assert.equal((await state(healthy.recordingId)).processing_status, 'PROCESSED');
+  assert.equal(uploads, 1);
+});
+
+test('policy errors stop after one attempt, and an explicit review reset can resume the same receipt', async () => {
+  const callId = await call();
+  const data = payload();
+  await receipt(data);
+  const goodSave = saving;
+  saving = async () => {
+    throw new RecordingProcessingError('SOURCE_NOT_ALLOWED', false);
+  };
+  await workers[0].processPending();
+  const held = await state(data.recordingId);
+  assert.equal(held.attempt_count, 1);
+  assert.equal(held.requires_review, true);
+  assert.equal(held.next_attempt_at, null);
+  assert.equal(held.last_error_code, 'SOURCE_NOT_ALLOWED');
+  await replayable(data.recordingId);
+  saving = goodSave;
+  await workers[1].processPending();
+  assert.equal(uploads, 0);
+  const changed = await fetch(urls[0] + '/webhooks/pbx/call-ended', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.PBX_WEBHOOK_TOKEN}`,
+    },
+    body: JSON.stringify({ ...data, recordingUrl: 'https://recordings.example.test/changed.mp3' }),
+  });
+  assert.equal(changed.status, 409);
+  const resumed = await pool.query(
+    `UPDATE pbx_webhooks.call_ended_events SET attempt_count=0,next_attempt_at=NULL,last_error_code=NULL,requires_review=false,last_attempt_at=NULL,claim_id=NULL,claimed_until=NULL
+    WHERE recording_id=$1 AND requires_review AND processing_status='FAILED' AND (claimed_until IS NULL OR claimed_until<=clock_timestamp()) RETURNING recording_id`,
+    [data.recordingId],
+  );
+  assert.equal(resumed.rowCount, 1);
+  await workers[1].processPending();
+  const done = await state(data.recordingId);
+  assert.equal(done.call_session_seq, callId);
+  assert.equal(done.processing_status, 'PROCESSED');
+  assert.equal(done.attempt_count, 1);
+  assert.equal(done.last_error_code, null);
+  assert.equal(done.next_attempt_at, null);
+  assert.equal(done.requires_review, false);
+  assert.equal(done.recordings, 1);
+});
+
+test('attempts survive worker crashes and a fifth interrupted attempt is held without a sixth storage call', async () => {
+  const callId = await call();
+  const data = payload();
+  await receipt(data);
+  const repo = apps[0].get(PbxWebhookRepository);
+  let stale;
+  for (let count = 1; count <= 5; count++) {
+    const claim = await repo.next(true);
+    assert.ok(claim);
+    assert.equal(claim.attemptCount, count - 1);
+    assert.equal(await repo.match(data, 30, claim.claimId), callId);
+    assert.equal(await repo.startAttempt(data.recordingId, claim.claimId), true);
+    if (stale) {
+      assert.equal(await repo.startAttempt(data.recordingId, stale), false);
+      assert.equal(
+        await repo.failed(
+          data.recordingId,
+          stale,
+          new RecordingProcessingError('PROCESSING_UNAVAILABLE'),
+          true,
+        ),
+        false,
+      );
+    }
+    stale = claim.claimId;
+    await pool.query(
+      "UPDATE pbx_webhooks.call_ended_events SET claimed_until=clock_timestamp()-interval '1 second',last_attempt_at=NULL,next_attempt_at=NULL WHERE recording_id=$1",
+      [data.recordingId],
+    );
+  }
+  await workers[1].processPending();
+  const held = await state(data.recordingId);
+  assert.equal(held.attempt_count, 5);
+  assert.equal(held.requires_review, true);
+  assert.equal(held.last_error_code, 'ATTEMPT_INTERRUPTED');
+  assert.equal(uploads, 0);
+  await workers[0].processPending();
+  assert.deepEqual(await state(data.recordingId), held);
+});
+
+test('legacy review holds still allow unmatched thirty-minute cleanup with storage disabled', async () => {
+  const data = { ...payload(), callFrom: '01098889990' };
+  await receipt(data);
+  await pool.query(
+    "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes',processing_status='FAILED',requires_review=true,last_error_code='LEGACY_FAILURE' WHERE recording_id=$1",
+    [data.recordingId],
+  );
+  const config = apps[0].get(ConfigService);
+  config.set('S3_RECORDINGS_BUCKET', '');
+  try {
+    await workers[0].processPending();
+  } finally {
+    config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
+  }
+  assert.equal(await state(data.recordingId), undefined);
+  assert.equal(uploads, 0);
 });

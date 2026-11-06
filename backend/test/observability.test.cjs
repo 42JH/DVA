@@ -8,6 +8,177 @@ const { JsonLogger, logRecord, logContext } = require('../dist/observability/jso
 const { ObservabilityService } = require('../dist/observability/observability.service');
 const { recordHttp, httpMetrics } = require('../dist/observability/http-metrics');
 const { requestContext } = require('../dist/common/http/request-context');
+const { authenticationRecord } = require('../dist/observability/security-events');
+const securityKey = 'ab'.repeat(32);
+const securityRequest = (extra = {}) => ({
+  method: 'POST',
+  path: '/api/auth/login',
+  requestId: randomUUID(),
+  body: { loginId: 'Operator01', password: 'PRIVATE-password' },
+  socket: { remoteAddress: '::ffff:192.0.2.1' },
+  get: () => undefined,
+  ...extra,
+});
+
+test('authentication pseudonyms link identical claims, preserve case and separate source and key domains', () => {
+  const request = securityRequest();
+  const failed = authenticationRecord(request, 401, securityKey, 0);
+  const success = authenticationRecord(securityRequest(), 200, securityKey, 0);
+  assert.equal(failed.reason, 'invalid_credentials');
+  assert.equal(success.event, 'authentication_success');
+  assert.equal(failed.accountKey, success.accountKey);
+  assert.equal(failed.sourceKey, success.sourceKey);
+  assert.notEqual(
+    failed.accountKey,
+    authenticationRecord(securityRequest({ body: { loginId: 'operator01' } }), 401, securityKey, 0)
+      .accountKey,
+  );
+  assert.notEqual(
+    failed.accountKey,
+    authenticationRecord(request, 401, 'cd'.repeat(32), 0).accountKey,
+  );
+  assert.notEqual(
+    failed.accountKey,
+    authenticationRecord(securityRequest({ body: { loginId: '1920021' } }), 401, securityKey, 0)
+      .sourceKey,
+  );
+  for (const value of [failed.accountKey, failed.sourceKey]) assert.match(value, /^[a-f0-9]{64}$/);
+  const text = JSON.stringify(failed);
+  for (const secret of [securityKey, 'Operator01', '192.0.2.1', 'PRIVATE-password'])
+    assert.ok(!text.includes(secret));
+});
+
+test('authentication logs use the existing trusted proxy tail and ignore forged direct-peer headers', () => {
+  const request = securityRequest({ get: () => '198.51.100.99, 203.0.113.2, 10.0.0.4' });
+  const direct = authenticationRecord(securityRequest(), 401, securityKey, 0);
+  assert.equal(authenticationRecord(request, 401, securityKey, 0).sourceKey, direct.sourceKey);
+  const trusted = authenticationRecord(request, 401, securityKey, 2);
+  assert.equal(
+    trusted.sourceKey,
+    authenticationRecord(
+      securityRequest({ socket: { remoteAddress: '203.0.113.2' } }),
+      401,
+      securityKey,
+      0,
+    ).sourceKey,
+  );
+  assert.equal(
+    authenticationRecord(securityRequest({ get: () => 'garbage, 10.0.0.4' }), 401, securityKey, 2)
+      .sourceKey,
+    direct.sourceKey,
+  );
+  assert.equal(
+    authenticationRecord(securityRequest({ socket: {} }), 401, securityKey, 0).sourceKey,
+    undefined,
+  );
+});
+
+test('authentication failure types distinguish credentials, throttling, account policy and invalid input', () => {
+  for (const [status, code, reason] of [
+    [401, 'UNAUTHORIZED', 'invalid_credentials'],
+    [429, 'RATE_LIMITED', 'rate_limited'],
+    [403, 'ACCOUNT_PENDING', 'account_pending'],
+    [403, 'ACCOUNT_INACTIVE', 'account_inactive'],
+    [403, 'FORBIDDEN', 'access_denied'],
+    [400, 'INVALID_REQUEST', 'invalid_input'],
+  ]) {
+    const record = authenticationRecord(
+      securityRequest({ securityErrorCode: code }),
+      status,
+      securityKey,
+      0,
+    );
+    assert.equal(record.reason, reason);
+    if (reason === 'invalid_input') assert.equal(record.accountKey, undefined);
+  }
+  for (const loginId of ['', 'x'.repeat(21), '한글', 'user\nsecret', {}, null])
+    assert.equal(
+      authenticationRecord(securityRequest({ body: { loginId } }), 401, securityKey, 0).accountKey,
+      undefined,
+    );
+  assert.equal(authenticationRecord(securityRequest(), 500, securityKey, 0), undefined);
+  assert.equal(
+    authenticationRecord(securityRequest({ path: '/api/auth/login/unknown' }), 401, securityKey, 0),
+    undefined,
+  );
+});
+
+test('only server-marked service or session failures enter security logs and successful business calls do not', () => {
+  for (const authType of ['ai_business', 'ai_persona', 'ai_insights', 'admin_session']) {
+    const request = securityRequest({ path: '/api/private', securityAuthType: authType });
+    assert.equal(
+      authenticationRecord(request, 401, securityKey, 0).reason,
+      authType === 'admin_session' ? 'invalid_session' : 'invalid_service_token',
+    );
+    assert.equal(authenticationRecord(request, 200, securityKey, 0), undefined);
+    assert.equal(authenticationRecord(request, 401, securityKey, 0).accountKey, undefined);
+    if (authType.startsWith('ai_'))
+      assert.equal(
+        authenticationRecord(request, 503, securityKey, 0).reason,
+        'service_unconfigured',
+      );
+  }
+  assert.equal(
+    authenticationRecord(
+      securityRequest({ path: '/api/private', body: { securityAuthType: 'ai_business' } }),
+      401,
+      securityKey,
+      0,
+    ),
+    undefined,
+  );
+});
+
+test('security log allowlist accepts only fixed types, reasons and hexadecimal pseudonyms', () => {
+  const record = logRecord('info', {
+    ...authenticationRecord(securityRequest(), 401, securityKey, 0),
+    loginId: 'PRIVATE-user',
+    ip: '192.0.2.1',
+    token: securityKey,
+  });
+  assert.equal(record.authType, 'admin_login');
+  assert.match(record.accountKey, /^[a-f0-9]{64}$/);
+  assert.equal(record.loginId, undefined);
+  assert.equal(record.ip, undefined);
+  assert.equal(record.token, undefined);
+  const invalid = logRecord('warn', {
+    event: 'authentication_failure',
+    authType: 'PRIVATE',
+    reason: 'PRIVATE',
+    accountKey: 'PRIVATE',
+    sourceKey: 'a'.repeat(65),
+  });
+  for (const field of ['authType', 'reason', 'accountKey', 'sourceKey'])
+    assert.equal(invalid[field], undefined);
+  const ordinary = logRecord('info', {
+    event: 'http_request',
+    authType: 'admin_login',
+    accountKey: 'a'.repeat(64),
+  });
+  assert.equal(ordinary.authType, undefined);
+  assert.equal(ordinary.accountKey, undefined);
+});
+
+test('response completion emits one security result and preserves the HTTP record without exposing credentials', () => {
+  const logs = [];
+  const response = new EventEmitter();
+  response.statusCode = 401;
+  response.setHeader = () => {};
+  const request = securityRequest({ route: { path: '/api/auth/login' } });
+  requestContext({ log: (record) => logs.push(record) }, { key: securityKey, proxyHops: 0 })(
+    request,
+    response,
+    () => {},
+  );
+  response.emit('finish');
+  response.emit('finish');
+  assert.equal(logs.filter((x) => x.event === 'http_request').length, 1);
+  assert.equal(logs.filter((x) => x.event === 'authentication_failure').length, 1);
+  assert.equal(logs[0].requestId, logs[1].requestId);
+  assert.ok(!JSON.stringify(logs).includes('PRIVATE-password'));
+  assert.ok(!httpMetrics().includes(logs[1].accountKey));
+  assert.ok(!httpMetrics().includes(logs[1].sourceKey));
+});
 const transactionStatistics = {
   count: 7,
   failures: 2,

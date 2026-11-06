@@ -133,6 +133,8 @@ try {
     '-e',
     'NODE_ENV=production',
     '-e',
+    'SECURITY_LOG_HMAC_KEY=' + randomBytes(32).toString('hex'),
+    '-e',
     'AUTH_PROXY_HOPS=2',
     '-e',
     'DB_HOST=db',

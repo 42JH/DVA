@@ -95,7 +95,8 @@ def main():
         common = ['-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=' + password,
                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
                   '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
-                  '-e', 'AUTH_PROXY_HOPS=1', '-e', 'AI_BUSINESS_TOKEN=' + password]
+                  '-e', 'AUTH_PROXY_HOPS=1', '-e', 'AI_BUSINESS_TOKEN=' + password,
+                  '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex]
         name = RUN + '-persona-peer'
         create(name, images['operations-checks'], '--network-alias', 'persona-fixture',
                '-e', 'NODE_ENV=test', '-e', 'AI_PERSONA_TOKEN=' + password,

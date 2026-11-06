@@ -1,5 +1,5 @@
 {
-  "commit": "ce8de447bea0a0976be9d710708d614c53e91d99",
+  "commit": "669b10fdb5f4175fb4f6f63bca7b3834e6d8eed3",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -884,6 +884,10 @@
       {
         "file": "backend/migrations/053-drop-company-pins.sql",
         "sha256": "b91b328aedf61f942ced044cc6198dc7463d4cbd29b9ea531749117461e74fb7"
+      },
+      {
+        "file": "backend/migrations/054-recording-retry-policy.sql",
+        "sha256": "df69ab6106142b85879192a7d0c40263fb4cbec00be97949cd0f58f1f86f1f2a"
       }
     ],
     "workers": [

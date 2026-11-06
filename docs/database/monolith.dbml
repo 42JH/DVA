@@ -358,15 +358,20 @@ Table pbx_webhooks.call_ended_events {
   recording_id varchar(200) [pk, not null, note: 'PBX 녹취 고유 ID. 같은 ID와 같은 본문의 재전송은 한 번만 수신']
   payload jsonb [not null, note: '정규화한 웹훅 원문. 발신·수신번호, 실제 시각, 재생 시간, 다운로드 URL 포함']
   received_at timestamptz [not null, default: `CURRENT_TIMESTAMP`]
-  processing_status text [not null, default: 'RECEIVED', note: 'RECEIVED: 대기·매칭 보류 / FAILED: 저장 실패 재시도 / PROCESSED: S3·DB 완료']
+  processing_status text [not null, default: 'RECEIVED', note: 'RECEIVED: 대기·매칭 보류 / FAILED: 제한 재시도 또는 운영 확인 / PROCESSED: S3·DB 완료']
   call_session_seq integer [note: '처음 결정한 통화 연결. 이후 재시도에서 재매칭하지 않음']
   last_attempt_at timestamptz [note: '공정한 순환 재시도용 마지막 시도 시각']
   claim_id uuid [note: '031: 현재 녹취 처리권 UUID. 미선점 NULL']
   claimed_until timestamptz [note: '031: 처리권 만료 시각. claim_id와 함께 NULL 또는 함께 값']
+  attempt_count smallint [not null, default: 0, note: '054: 최초 포함 최대 5회. 매칭 대기·S3 미설정 제외']
+  next_attempt_at timestamptz [note: '054: 1·5·15·30분 재시도 시각. 최초·확인 대기는 NULL']
+  last_error_code text [note: '054: 원문·서명 URL을 포함하지 않는 고정 실패 코드']
+  requires_review boolean [not null, default: false, note: '054: 자동 재시도 중지. 기존 FAILED는 원인 미상 확인 대기로 이행']
   checks {
     `jsonb_typeof(payload)='object'`
     `processing_status IN ('RECEIVED','PROCESSED','FAILED')`
     `(claim_id IS NULL) = (claimed_until IS NULL)`
+    `attempt_count BETWEEN 0 AND 5`
   }
   Note: 'consultation / 별도 스키마의 기존 PBX 수신함. 매칭 후 통화 FK를 저장하고 재시도에서 연결을 바꾸지 않는다. 별도 중복 검증·작업 큐 테이블을 만들지 않는다.'
 }

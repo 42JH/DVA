@@ -1,5 +1,11 @@
 # 모놀리식 백엔드 공통 기반
 
+S10은 [인증 보안 기록·탐지 운영](docs/security-auth-observability.md)을 따른다. production은 backend 전용 `SECURITY_LOG_HMAC_KEY`(32바이트 난수의 64자리 hex)를 먼저 주입한다. AI·프론트에는 공유하지 않는다. 인증 계약·S04 제한·DB는 유지하며, Alloy/Grafana 관측 설정은 별도로 반영한다.
+
+S11 의존성 변경·npm 재검사와 미해결 개발 도구 항목은 [의존성 보안 정리](docs/dependency-security-review.md)를 따른다. 운영 패키지 버전은 유지하고 취약 개발 도구의 전이 의존성만 교체했다.
+
+S09 녹취 처리는 [재시도·이행·운영 재개 절차](docs/recording-retry-policy.md)를 따른다. 새 앱 전에 054를 적용하고 기존 워커를 중지·백업한다. 최초 포함 최대 5회, 실패 후 1·5·15·30분 간격이며 정책 위반·상한 초과는 확인 대기다. 기존 FAILED는 원인 미상으로 보류하며 원본·녹취·기존 보관 정책을 유지한다. AI·프론트·PBX 계약과 환경변수는 그대로다.
+
 S05 결제 복구는 [실패 판정·연동 영향·운영 절차](docs/payment-approval-recovery.md)를 따른다. 최초 승인에서 확인한 결제 정보 없음·세션 만료는 기존 422로 반환하고 같은 링크의 재결제를 허용한다. 미확정 건의 조회 404·인증 오류·타임아웃은 확인 대기를 유지한다. AI·관리자 프론트의 API·환경변수와 DB 스키마는 변경하지 않는다.
 
 관리자 로그인·가입과 비밀번호 처리는 [S04 인증 요청 제한](docs/auth-request-limits.md)을 따른다. 로그인 IP 평균 30회/분·burst 5, 가입 IP 10분 5회·24시간 20회, ID별 15분 5회 실패 시 5분 제한, 비밀번호 처리 전체 동시 2개를 적용한다. 가입 이름은 50자·새 비밀번호는 256자까지이며 기존 비밀번호 검증은 유지한다. 429·Retry-After 처리와 호스트 Nginx 별도 적용 순서를 확인한다. 승인 대기 30일은 수동 검토 기준이다.
@@ -105,6 +111,7 @@ npm run start:dev
 | 설정 | 규칙 |
 |---|---|
 | `NODE_ENV` | development / test / production |
+| `SECURITY_LOG_HMAC_KEY` | backend 전용 32바이트 난수의 64자리 hex. production 필수; development/test 미설정은 프로세스 임시 키 |
 | `PORT`, `DB_PORT` | 정수 1~65535, 기본 3000 / 5432 |
 | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | 필수, 누락/빈 값이면 시작 중단 |
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |
