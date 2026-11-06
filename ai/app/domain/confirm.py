@@ -113,7 +113,9 @@ def check_gate(state: ConversationState, policy: Policy, pending_id: str, answer
 def commit_parcel(state: ConversationState, policy: Policy, pending_id: str) -> str | None:
     """확정 지연 뒤 실행. 잠금 안에서 G1·G2를 다시 보고 보관소에 넣는다. 담은 택배 id, 조건이 깨졌으면 None."""
     p = state.pending
-    if p is None or p.id != pending_id or p.done or p.kind != "parcel" or not _same_snapshot(state, policy, p):
+    if (p is None or p.id != pending_id or p.done or p.kind != "parcel"
+            or state.unassigned_item_issues or state.current and state.current.item_issues
+            or not _same_snapshot(state, policy, p)):
         return None
     pid = add_confirmed(state, dict(p.snapshot), parcel_id=p.parcel_id)
     state.pending = None

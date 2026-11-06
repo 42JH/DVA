@@ -4,7 +4,9 @@
 (P5 후속 B안, decisions.md).
 """
 
+from app.domain.parcel_items import ItemIssue, unclassified_mentions
 from app.domain.state import ConversationState, StoredParcel, copy_draft, draft_snapshot, snapshot_hash
+from app.policy.model import ParcelItems
 
 
 def add_confirmed(state: ConversationState, snapshot: dict, parcel_id: str | None = None) -> str:
@@ -25,6 +27,8 @@ def add_confirmed(state: ConversationState, snapshot: dict, parcel_id: str | Non
 
 def open_for_edit(state: ConversationState, parcel_id: str) -> None:
     """담은 택배를 current로 꺼낸다(confirmed_snapshot은 유지). 진행 중이던 다른 택배는 미확인 항목으로 보관한다."""
+    if state.editing == parcel_id:
+        return
     target = next(p for p in state.parcels if p.parcel_id == parcel_id)
     if state.current is not None and not state.current.empty() and state.editing != parcel_id:
         if state.editing:  # 다른 담은 택배를 고치던 중 → 그 항목에 되돌려 둔다(수정 중 상태로)
@@ -33,7 +37,48 @@ def open_for_edit(state: ConversationState, parcel_id: str) -> None:
         else:              # 새로 받던 택배 → 확인 전 항목으로 보관
             state.parcels.append(StoredParcel(state.new_parcel_id(), copy_draft(state.current), None, None))
     state.current, state.editing, state.pending = copy_draft(target.draft), parcel_id, None
+    if state.unassigned_item_issues:
+        hold_items(state, state.unassigned_item_issues)
+        state.unassigned_item_issues = {}
     state.bump()
+
+
+def hold_items(state: ConversationState, issues: dict[str, ItemIssue]) -> None:
+    """문제가 생긴 택배의 이전 확인으로 제출하는 경로도 닫는다."""
+    state.field_of("items")  # 현재 택배가 없으면 생성
+    for key, issue in issues.items():
+        if issue.code != "ITEM_MENTION_UNCLEAR" or key not in state.current.item_issues:
+            state.current.item_issues[key] = issue
+    if state.pending and state.pending.kind == "parcel":
+        state.pending = None
+        state.address_offer = None
+    if state.editing:
+        parcel = next(p for p in state.parcels if p.parcel_id == state.editing)
+        parcel.confirmed_snapshot = parcel.confirmed_hash = None
+    state.bump()
+
+
+def hold_unclassified_items(state: ConversationState, policy: ParcelItems, utterance_id: int, text: str) -> dict:
+    """도구 호출이 늦거나 생략돼도 발화에 나타난 제한 후보를 먼저 보류한다."""
+    if state.intent != "order" or state.latest_item_utterance_id >= utterance_id:
+        return {}
+    issues = unclassified_mentions(policy, text)
+    if not issues:
+        return {}
+    state.latest_item_utterance_id = utterance_id
+    if (state.current is None or state.current.empty()) and state.parcels:
+        if len(state.parcels) > 1:
+            state.unassigned_item_issues.update(issues)
+            return {"code": "ITEM_PARCEL_UNCLEAR"}
+        open_for_edit(state, state.parcels[0].parcel_id)
+    hold_items(state, issues)
+    return {"code": next(iter(issues.values())).code, "guidance": [issue.guidance for issue in issues.values()]}
+
+
+def item_issues_pending(state: ConversationState) -> bool:
+    return (bool(state.unassigned_item_issues)
+            or bool(state.current and state.current.item_issues)
+            or any(p.draft.item_issues for p in state.parcels if p.parcel_id != state.editing))
 
 
 def is_pending_reconfirm(p: StoredParcel) -> bool:
@@ -50,8 +95,12 @@ def pending_reconfirm(state: ConversationState) -> list[str]:
 
 def snapshot_for_submit(state: ConversationState) -> list[dict]:
     """전송할 택배: 확인된 항목은 현재 내용, 수정 중 항목은 마지막 확인 스냅샷. 한 번도 확인받지 않은 항목은 뺀다."""
+    if state.unassigned_item_issues:
+        return []  # 어느 택배가 제한 대상인지 모르면 마지막 확인본도 제출할 수 없다
     out = []
     for p in state.parcels:
+        if p.draft.item_issues:
+            continue
         if p.parcel_id == state.editing or is_pending_reconfirm(p):
             if p.confirmed_snapshot is not None:
                 out.append(p.confirmed_snapshot)

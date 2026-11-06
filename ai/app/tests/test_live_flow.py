@@ -83,6 +83,36 @@ def sent_types(conn):
     return [e["type"] for e in conn.sent]
 
 
+def test_item_restriction_from_transcript_without_a_model_tool_call(tmp_path):
+    from app.tests.test_domain import confirm_once, filled
+
+    svc, client = flow(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await say(conn, "폭죽을 보내려고요", 1000)
+        await until(lambda: s.state.current and "dangerous_goods" in s.state.current.item_issues)
+        await until(lambda: s.state.customer.call_session_seq)
+        s.tools.state = filled()
+        confirm_once(s.state)
+        await say(conn, "아까 박스 안에 라이터도 있어요", 3000)
+        assert s.state.current.item_issues["flammables"].code == "ITEM_MENTION_UNCLEAR"
+        assert not s.tool_calls
+        await say(conn, "전화 끊어 주세요", 5000)
+        await until(lambda: s.phase == Phase.CLOSING)
+        await ai(conn, "감사합니다.", 7000)
+        await task
+        [result] = svc.d.backend.api.results
+        assert result["body"]["outcome"] == "INCOMPLETE" and not result["body"].get("parcels")
+
+    run(scenario())
+
+
 def test_order_flow_end_to_end(tmp_path):
     svc, client = flow(tmp_path)
 

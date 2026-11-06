@@ -59,6 +59,11 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
                 m.append(name)
             if f is not None and f.status in (FieldStatus.INVALID, FieldStatus.PENDING_CHOICE):
                 b.append(name)
+        if "items" in s.required and (state.unassigned_item_issues or state.current and state.current.item_issues):
+            if "items" not in m:
+                m.append("items")
+            if "items" not in b:
+                b.append("items")
         stages[s.id] = StageStatus(s.id, not m, tuple(m), tuple(b))
         missing += m
 

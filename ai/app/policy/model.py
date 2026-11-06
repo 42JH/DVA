@@ -104,6 +104,18 @@ class InputLimits(_Strict):
         return self
 
 
+class ItemRestriction(_Strict):
+    kind: Literal["prohibited", "conditional", "format"]
+    terms: tuple[str, ...] = Field(min_length=1)
+    guidance: str = Field(min_length=1)
+
+
+class ParcelItems(_Strict):
+    max_side_cm: int = Field(gt=0)
+    max_weight_kg: int = Field(gt=0)
+    rules: dict[str, ItemRestriction]
+
+
 class Phone(_Strict):
     mobile_prefix: str
     mobile_digits: int = Field(gt=0)
@@ -144,6 +156,7 @@ class Policy(_Strict):
     stage: tuple[Stage, ...]
     pickup: Pickup
     input_limits: InputLimits
+    parcel_items: ParcelItems
     phone: Phone
     reask: Reask
     confirm: Confirm
