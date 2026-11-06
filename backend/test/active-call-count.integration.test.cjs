@@ -431,16 +431,12 @@ test('a durable receipt survives immediate matching failure and duplicate delive
 test('a final NO_ORDER AI result after PBX completion preserves the closed call and creates no order', async () => {
   const call = await register();
   assert.equal((await receipt(ending(call.input))).status, 200);
-  const result = await json('/api/orders', {
+  const result = await json('/api/calls/' + call.id + '/order-intake/complete', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
-    body: JSON.stringify({
-      outcome: 'INCOMPLETE',
-      call: { ...call.input.call, callerPhoneNumber: call.input.phoneNumber },
-      parcels: [],
-    }),
+    headers: { 'Content-Type': 'application/json', ...businessHeaders() },
+    body: JSON.stringify({ expectedIntakeVersion: 1 }),
   });
-  assert.equal(result.status, 201, JSON.stringify(result.body));
+  assert.equal(result.status, 200, JSON.stringify(result.body));
   assert.equal(result.body.data.status, 'NO_ORDER');
   assert.equal(await count(), 0);
   assert.equal(

@@ -1,3 +1,4 @@
+const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -141,7 +142,7 @@ before(async () => {
       "INSERT INTO customers(name,phone_number,status) VALUES('실주문 검증','01000210001','ACTIVE') ON CONFLICT(phone_number) WHERE deleted_at IS NULL DO UPDATE SET status='ACTIVE' RETURNING customer_seq",
     )
   ).rows[0].customer_seq;
-  app = await startTestApp(apps);
+  app = legacyOrderIntake(await startTestApp(apps));
   origin = await app.getUrl();
   base = origin + '/api';
   app.get(ConfigService).set('PAYMENT_PUBLIC_URL', base + '/payments');

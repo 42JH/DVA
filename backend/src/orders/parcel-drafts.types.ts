@@ -41,6 +41,7 @@ export interface ParcelDraftRow {
 
 export interface OrderIntakeCall {
   callSessionSeq: number;
+  callerPhoneNumber: string | null;
   customerSeq: number | null;
   endedAt: Date | null;
   orderSeq: number | null;

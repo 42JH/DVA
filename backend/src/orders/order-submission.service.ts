@@ -64,6 +64,8 @@ export class OrderSubmissionService {
     const prepared = await writeOrder(this.database, async (client) => {
       const order = await this.repository.lockOrder(client, id);
       if (!order) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      if (!(await this.repository.submissionAllowed(client, id)))
+        throw new ApiException(409, 'INVALID_STATE', '통화 종료와 AI 주문 입력 확정이 필요합니다.');
       if (order.status === 'SUBMITTING') {
         const recovered = await this.recoverStale(client, id, requestId);
         return { status: recovered ?? order.status };

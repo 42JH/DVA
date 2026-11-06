@@ -1,4 +1,5 @@
 const { createTestPool, startTestApp, businessHeaders } = require('./application.cjs');
+const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
 
 module.exports = function ordersFixture() {
   const { testMembership } = require('./membership.cjs');
@@ -59,7 +60,7 @@ module.exports = function ordersFixture() {
       );
       if (index === 0) adminId = result.rows[0].admin_user_seq;
       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
-      const app = index < 2 ? await startTestApp(apps) : apps[0];
+      const app = index < 2 ? legacyOrderIntake(await startTestApp(apps)) : apps[0];
       hosts.push(await app.getUrl());
       const response = await fetch(hosts[index] + '/api/auth/login', {
         method: 'POST',
@@ -162,8 +163,8 @@ module.exports = function ordersFixture() {
   const call = async (phone = null, ended = false) =>
     (
       await pool.query(
-        `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at)
-   VALUES($1,$2,$3,$4) RETURNING call_session_seq`,
+        `INSERT INTO call_sessions(provider_call_id,caller_phone_number,started_at,ended_at,order_intake_enabled)
+   VALUES($1,$2,$3,$4,false) RETURNING call_session_seq`,
         [
           randomUUID(),
           phone,

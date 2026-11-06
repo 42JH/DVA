@@ -16,7 +16,7 @@ export class ParcelDraftsRepository {
   async call(client: PoolClient, id: number, update = true) {
     return (
       await client.query<OrderIntakeCall>(
-        `SELECT call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",
+        `SELECT call_session_seq AS "callSessionSeq",caller_phone_number AS "callerPhoneNumber",customer_seq AS "customerSeq",
       ended_at AS "endedAt",order_seq AS "orderSeq",order_intake_enabled AS enabled,order_intake_version AS "intakeVersion",
       order_completion_received_at AS "completionReceivedAt",order_completion_payload AS "completionPayload",
       order_finalized_at AS "finalizedAt",order_finalization_result AS "finalizationResult",order_finalization_error_code AS "errorCode"

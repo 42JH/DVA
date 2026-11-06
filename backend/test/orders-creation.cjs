@@ -1,4 +1,5 @@
 const { startTestApp } = require('./helpers/application.cjs');
+const { legacyOrderIntake } = require('./helpers/legacy-order-intake.cjs');
 module.exports = function registerOrdersCreation(suite) {
   const {
     test,
@@ -705,7 +706,7 @@ module.exports = function registerOrdersCreation(suite) {
     await pool.query("UPDATE orders SET payment_method_type='cat' WHERE order_seq=$1", [orderSeq]);
     await errorCode(await aiCreate(await call(), body, key), 403, 'FORBIDDEN');
     await errorCode(await create(body, key), 403, 'FORBIDDEN');
-    const restarted = await startTestApp(apps);
+    const restarted = legacyOrderIntake(await startTestApp(apps));
     const retry = await fetch((await restarted.getUrl()) + '/api/orders', {
       method: 'POST',
       headers: {

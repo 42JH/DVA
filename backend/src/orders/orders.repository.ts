@@ -335,11 +335,35 @@ export class OrdersRepository {
 
   async call(client: PoolClient, id: number) {
     return (
-      await client.query<{ orderSeq: number | null; endedAt: Date | null; phone: string | null }>(
-        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
+      await client.query<{
+        orderSeq: number | null;
+        endedAt: Date | null;
+        phone: string | null;
+        orderIntakeEnabled: boolean;
+      }>(
+        'SELECT order_seq AS "orderSeq", ended_at AS "endedAt", caller_phone_number AS phone,order_intake_enabled AS "orderIntakeEnabled" FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval \'5 years\') FOR UPDATE',
         [id],
       )
     ).rows[0];
+  }
+
+  async isDraftCall(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query(
+        'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
+        [id],
+      )
+    ).rowCount;
+  }
+
+  async submissionAllowed(client: PoolClient, id: number): Promise<boolean> {
+    return !(
+      await client.query(
+        `SELECT 1 FROM call_sessions WHERE order_seq=$1 AND order_intake_enabled
+      AND (ended_at IS NULL OR order_finalized_at IS NULL)`,
+        [id],
+      )
+    ).rowCount;
   }
 
   async canUsePin(client: PoolClient, customerId: number, pin: OriginPinDto): Promise<boolean> {

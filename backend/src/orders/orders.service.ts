@@ -260,6 +260,12 @@ export class OrdersService {
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
+      if (call?.orderIntakeEnabled)
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화는 parcel-drafts와 order-intake/complete API를 사용해 주세요.',
+        );
       if (callId !== null && (await this.repository.hasEmptyResult(client, callId)))
         throw new ApiException(
           409,
@@ -381,6 +387,12 @@ export class OrdersService {
       throw new ApiException(403, 'FORBIDDEN', '배송상세 제거는 관리자만 할 수 있습니다.');
     const callId = this.callId(adminId, callSessionHeader);
     return writeOrder(this.database, async (client) => {
+      if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+        );
       const call = callId === null ? undefined : await this.repository.call(client, callId);
       if (callId !== null && !call)
         throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
@@ -573,6 +585,12 @@ export class OrdersService {
   ): Promise<void> {
     const callId = this.callId(adminId, callSessionHeader);
     await this.database.transaction(async (client) => {
+      if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+        );
       const customerId = await this.readCustomer(client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
       if (!order || (customerId !== null && order.customerSeq !== customerId))
@@ -670,6 +688,12 @@ export class OrdersService {
   ): Promise<SubmittedOrderDto> {
     const callId = this.callId(adminId, callSessionHeader);
     const prepared = await writeOrder(this.database, async (client) => {
+      if (adminId === null && (await this.repository.isDraftCall(client, callId!)))
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '신규 통화의 최종 확정은 order-intake/complete API를 사용해 주세요.',
+        );
       const customerId = await this.readCustomer(client, adminId, callId, id);
       const order = await this.repository.lockOrder(client, id);
       if (!order || (customerId !== null && order.customerSeq !== customerId))

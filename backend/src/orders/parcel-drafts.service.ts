@@ -56,7 +56,12 @@ export class ParcelDraftsService {
     return Number(header);
   }
 
-  async accessCall(client: PoolClient, id: number, write: boolean): Promise<OrderIntakeCall> {
+  async accessCall(
+    client: PoolClient,
+    id: number,
+    write: boolean,
+    allowSealed = false,
+  ): Promise<OrderIntakeCall> {
     const call = await this.repository.call(client, id, write);
     if (!call) throw new ApiException(404, 'NOT_FOUND', '통화를 찾을 수 없습니다.');
     if (!call.enabled)
@@ -65,9 +70,18 @@ export class ParcelDraftsService {
         'INVALID_STATE',
         '이전 계약의 통화입니다. 새 통화에서 초안을 접수해 주세요.',
       );
+    if (call.customerSeq === null && call.callerPhoneNumber) {
+      const customer = await this.orders.customerByPhone(client, call.callerPhoneNumber);
+      call.customerSeq = customer?.customerSeq ?? null;
+      if (write && call.customerSeq !== null)
+        await client.query(
+          'UPDATE call_sessions SET customer_seq=$2 WHERE call_session_seq=$1 AND customer_seq IS NULL',
+          [id, call.customerSeq],
+        );
+    }
     if (call.customerSeq === null || !(await this.repository.customer(client, call.customerSeq)))
       throw new ApiException(403, 'FORBIDDEN', '통화에 연결된 활성 고객이 필요합니다.');
-    if (write && (call.completionReceivedAt !== null || call.orderSeq !== null))
+    if (write && !allowSealed && (call.completionReceivedAt !== null || call.orderSeq !== null))
       throw new ApiException(409, 'INVALID_STATE', '주문 입력이 확정된 통화입니다.');
     return call;
   }
@@ -77,8 +91,11 @@ export class ParcelDraftsService {
     adminId: number | null,
     header: string | undefined,
     write: boolean,
+    allowSealed = false,
   ) {
-    return adminId === null ? this.accessCall(client, this.headerId(header), write) : null;
+    return adminId === null
+      ? this.accessCall(client, this.headerId(header), write, allowSealed)
+      : null;
   }
 
   private scope(row: ParcelDraftRow, call: OrderIntakeCall | null, write: boolean) {
@@ -145,7 +162,7 @@ export class ParcelDraftsService {
     if (input.parcel === undefined && input.sourceDraftSeq === undefined)
       throw new ApiException(400, 'INVALID_REQUEST', '새 배송 초안에는 parcel이 필요합니다.');
     return writeOrder(this.database, async (client) => {
-      const call = await this.context(client, adminId, header, true);
+      const call = await this.context(client, adminId, header, true, true);
       const sourceHint =
         input.sourceDraftSeq === undefined
           ? undefined
@@ -184,6 +201,8 @@ export class ParcelDraftsService {
         delete row.unavailable;
         return { ...response(row), intakeVersion: call?.intakeVersion ?? null };
       }
+      if (call && (call.completionReceivedAt !== null || call.orderSeq !== null))
+        throw new ApiException(409, 'INVALID_STATE', '주문 입력이 확정된 통화입니다.');
       const source =
         input.sourceDraftSeq === undefined
           ? undefined

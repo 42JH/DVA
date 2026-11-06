@@ -52,7 +52,7 @@ before(async () => {
   ).rows[0].customer_seq;
   callId = (
     await pool.query(
-      'INSERT INTO call_sessions(provider_call_id,caller_phone_number) VALUES($1,$2) RETURNING call_session_seq',
+      'INSERT INTO call_sessions(provider_call_id,caller_phone_number,order_intake_enabled) VALUES($1,$2,false) RETURNING call_session_seq',
       [randomUUID(), phone],
     )
   ).rows[0].call_session_seq;
