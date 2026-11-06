@@ -1,10 +1,10 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/company/csvMembers.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
-import { readSheet } from 'read-excel-file/node'
 import type { Member } from './api/companyApi'
 import {
-  readMembersRows,
   decodeCsv,
+  exampleCsv,
+  phoneInput,
   previewAgainst,
   readMembersCsv,
   serverRowErrors,
@@ -71,7 +71,7 @@ const e = errs(
 assert.deepEqual(e.errors, [
   '2행 사번이 비어 있습니다.',
   '3행 사원명이 비어 있습니다.',
-  '4행 전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)',
+  '4행 전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.',
 ])
 assert.equal(e.more, 1) // 5행 대표자 X (6행은 5행이 오류라 사번이 기록 안 돼 겹침 아님)
 
@@ -83,37 +83,38 @@ assert.deepEqual(errs(`${HEAD}\n${row('1,가,01011112222')}\n${row('2,나,010-11
   '3행 전화번호가 2행과 겹칩니다.',
 ])
 
-// 엑셀이 지운 앞 0 (11/06): 0을 붙여 국내 번호 모양이 되면 되살림 — 휴대전화 · 지역번호 · 070 모두
-const one = (phone: string) => readMembersCsv(`${HEAD}\n${row(`1,가,${phone}`)}`)
+// 전화번호 = 010-1234-5678 형식 하나로 통일 (11/06) — 하이픈은 있어도 없어도, 서버엔 숫자 11자리
 const phoneOf = (phone: string) => {
-  const r = one(phone)
+  const r = readMembersCsv(`${HEAD}\n${row(`1,가,${phone}`)}`)
   assert.ok(r.ok, `${phone}: ${JSON.stringify(r)}`)
   return r.members[0]!.phoneNumber
 }
-assert.equal(phoneOf('1012345678'), '01012345678') // 010
-assert.equal(phoneOf('10-1234-5679'), '01012345679') // 하이픈이 있어도
-assert.equal(phoneOf('1612345678'), '01612345678') // 016 (11자리)
-assert.equal(phoneOf('3112345678'), '03112345678') // 031 지역번호 11자리
-assert.equal(phoneOf('7012345678'), '07012345678') // 070
-assert.equal(phoneOf('01012345678'), '01012345678') // 원래 맞는 번호는 그대로
-// 9~10자리 지역번호도 되살리지만, 서버(숫자 11자리만)가 아직 안 받아 이유를 밝혀 막음
-const LANDLINE =
-  '2행 9~10자리 지역번호 전화는 아직 서버에서 받지 않습니다. 11자리 번호(휴대전화 등)를 넣어 주세요.'
-for (const landline of [
-  '21234567',
-  '212345678',
-  '02-123-4567',
-  '541234567',
-  '054-123-4567',
-  '111234567',
-])
-  assert.deepEqual(one(landline).ok ? [] : (one(landline) as { errors: string[] }).errors, [
-    LANDLINE,
-  ])
-// 0을 붙여도 국내 번호가 아니면 형식 오류 (대표번호 · 아무 숫자 · 너무 긺)
-const BAD = '2행 전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)'
-for (const bad of ['15881234', '1234567890', '010123456789', '0812345678', '123'])
+assert.equal(phoneOf('010-1234-5678'), '01012345678')
+assert.equal(phoneOf('01012345678'), '01012345678')
+// 안전망: 엑셀이 지운 휴대전화 앞 0(10자리 '1012345678')은 되살림
+assert.equal(phoneOf('1012345678'), '01012345678')
+assert.equal(phoneOf('1612345678'), '01612345678')
+// 11자리가 아니면 거절 (02 · 지역번호 9~10자리 · 대표번호 · 아무 숫자 · 너무 긺)
+const BAD = '2행 전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.'
+for (const bad of ['02-123-4567', '054-123-4567', '15881234', '1234567890', '010123456789', '123'])
   assert.deepEqual(errs(`${HEAD}\n${row(`1,가,${bad}`)}`).errors, [BAD])
+// 수기 등록 칸: 치는 대로 3-4-4 하이픈, 11자리까지만
+assert.deepEqual(
+  ['010', '0101', '0101234', '01012345', '01012345678', '010-1234-56789', '010 1234 5678'].map(
+    phoneInput,
+  ),
+  ['010', '010-1', '010-1234', '010-1234-5', '010-1234-5678', '010-1234-5678', '010-1234-5678'],
+)
+// 엑셀 글자 칸 표기: 예시의 ="001" · 엑셀에서 쓴 '004 → 그대로 글자
+assert.deepEqual(
+  ok(
+    `${HEAD}\n"=""001""",가,010-1111-2222,,,도로,지번,동,"=""04524"""\n'004,나,010-1111-3333,,,${ADDR}`,
+  ).map((m) => [m.employeeNo, m.address.postalCode]),
+  [
+    ['001', '04524'],
+    ['004', '06236'],
+  ],
+)
 // 엑셀 지수 표기는 원래 숫자를 알 수 없음 → 열을 텍스트로 바꾸라고
 assert.match(errs(`${HEAD}\n${row('1,가,1.01E+10')}`).errors[0]!, /전화번호 열을 텍스트/)
 assert.match(errs(`${HEAD}\n${row('1.23E+11,가,01012345678')}`).errors[0]!, /사번 열을 텍스트/)
@@ -284,13 +285,14 @@ assert.match(
 // 머리줄 순서가 다르면 거절
 assert.match(errs('사번,사원명,전화번호,부서\n1,가,01011112222,개발팀').errors[0]!, /첫 줄/)
 
-// 예시 엑셀(public/member-example.xlsx)이 지금 양식을 통과하고 앞 0이 남음 — 양식을 바꾸고 예시를 안 고치면 여기서 걸림
-// 전화번호는 하이픈 형식으로 적혀 있어도 숫자 11자리로 보냄
-const sheet = await readSheet('public/member-example.xlsx', { parseNumber: (s) => s })
-const ex = readMembersRows(sheet.map((r) => r.map((v) => (v === null ? '' : String(v)))))
-assert.ok(ex.ok)
+// 예시 CSV(예시 CSV 내려받기)가 지금 양식을 통과하고 앞 0이 남음 — 양식을 바꾸고 예시를 안 고치면 여기서 걸림
+// 엑셀이 0을 지우지 않게: 맨 앞 BOM(한글) · 사번 · 우편번호는 ="001" · 전화번호는 010-0000-0001 형식
+const exText = exampleCsv()
+assert.equal(exText.charCodeAt(0), 0xfeff)
+assert.ok(exText.includes(`"=""001""",김예시,010-0000-0001,Y,`))
+assert.ok(exText.includes(`,"=""04524""",`))
 assert.deepEqual(
-  ex.members.map((m) => [m.employeeNo, m.phoneNumber, m.address.postalCode]),
+  ok(exText).map((m) => [m.employeeNo, m.phoneNumber, m.address.postalCode]),
   [
     ['001', '01000000001', '04524'],
     ['002', '01000000002', '04524'],

@@ -19,15 +19,36 @@ export const CSV_HEADER = [
   '우편번호',
   '상세주소',
 ] as const
-// 예시 엑셀 (public/member-example.xlsx, 11/06) — 기업 등록 · 사원 추가 창 공용. 사번 · 전화번호 · 우편번호 열은 텍스트 형식(앞 0 유지)
-// 전화번호 예시는 하이픈 형식(010-0000-0001) — 엑셀은 하이픈 있는 값을 숫자로 안 바꿔서, CSV로 저장해 다시 열어도 앞 0이 남음 (읽을 땐 하이픈을 뺌)
-// 양식(CSV_HEADER)을 바꾸면 이 파일도 같이 고침
-export function downloadExample() {
-  const a = document.createElement('a') // 내려받기는 <a download>로만 이름을 정할 수 있음
-  a.href = `${import.meta.env.BASE_URL}member-example.xlsx`
-  a.download = '회사등록_양식_예시.xlsx'
-  a.click()
+// 예시 CSV (11/06 사용자: 예시 CSV를 내려받아 엑셀로 열어도 앞 0이 사라지지 않게) — 기업 등록 · 사원 추가 창 공용
+//   엑셀은 CSV를 열 때 숫자처럼 보이는 칸('001' · '04524')을 숫자로 바꿔 앞 0을 지움 (CSV엔 칸 형식이 없어서)
+//   → 사번 · 우편번호는 ="001" 로 적음: 엑셀이 글자를 돌려주는 수식으로 읽어 0이 남고, 엑셀에서 저장하면 001로 저장됨
+//   → 전화번호는 전화번호 형식 010-0000-0001 (11/06 사용자: 전화번호 형식으로 통일) — 하이픈이 있어 엑셀이 숫자로 안 바꿈
+//   맨 앞 BOM — 엑셀이 UTF-8로 읽게 (없으면 한글이 깨짐). 양식(CSV_HEADER)을 바꾸면 여기도 같이 고침
+const ADDR = ['서울특별시 중구 세종대로 110', '서울특별시 중구 태평로1가 31', '태평로1가', '04524']
+const EXAMPLE_ROWS = [
+  ['001', '김예시', '010-0000-0001', 'Y', '경영지원팀', ...ADDR, '예시 101호'],
+  ['002', '이샘플', '010-0000-0002', '', '개발팀', ...ADDR, '예시 102호'],
+  ['003', '박테스트', '010-0000-0003', '', '개발팀', ...ADDR, ''],
+]
+const KEEP_ZERO = new Set([0, 8]) // 사번 · 우편번호 열
+const csvCell = (v: string) => (/[",\r\n]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v)
+/** 예시 CSV 글 (테스트에서 이 글을 그대로 읽어 봄) */
+export function exampleCsv(): string {
+  const body = EXAMPLE_ROWS.map((r) =>
+    r.map((v, i) => csvCell(KEEP_ZERO.has(i) && v ? `="${v}"` : v)).join(','),
+  )
+  return `\uFEFF${[CSV_HEADER.join(','), ...body].join('\r\n')}\r\n`
 }
+export function downloadExample() {
+  const url = URL.createObjectURL(new Blob([exampleCsv()], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a') // 내려받기는 <a download>로만 이름을 정할 수 있음
+  a.href = url
+  a.download = '회사등록_양식_예시.csv'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+/** 엑셀 글자 칸 표기를 벗김 — 예시의 ="001" (엑셀 말고 메모장으로 고친 파일) · 엑셀에서 쓴 '001 */
+const plainCell = (v: string) => /^="(.*)"$/s.exec(v)?.[1] ?? v.replace(/^'(?=\d)/, '')
 
 /** 올린 파일 → 검사 결과. 엑셀(.xlsx)이면 첫 시트를, 아니면 CSV로 읽어 같은 검사(readMembersRows)에 넘김 (11/06) */
 export async function readMembersFile(file: File): Promise<CsvResult> {
@@ -57,33 +78,29 @@ export function decodeCsv(bytes: ArrayBuffer): string {
   }
 }
 
-/** 전화번호 하이픈 · 공백 빼기 (CSV · 사원 추가 창 공용) */
+// 전화번호 = 전화번호 형식 010-1234-5678 하나로 통일 (11/06 사용자: 무조건 전화번호 형식) — CSV · 사원 추가 창(수기 등록) 공용
+//   하이픈 · 공백은 있어도 없어도 받고, 서버엔 숫자 11자리로 보냄 = 백엔드 사원 전화(MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
 export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
-
-// 국내 전화번호 모양 (11/06 사용자: 02 · 054 같은 지역번호 집 전화도 있음 — 9~11자리)
-//   02 서울 9~10자리 · 031~064 지역번호 10~11자리 · 070 인터넷전화 11자리 · 010 11자리 · 011 · 016~019 10~11자리
-//   1588 같은 대표번호 · 080 수신자부담 · 050 안심번호는 사람 번호가 아니라 뺌
-const KR_PHONE =
-  /^(?:02\d{7,8}|0(?:3[1-3]|4[1-4]|5[1-5]|6[1-4])\d{7,8}|070\d{8}|010\d{8}|01[16-9]\d{7,8})$/
-export const isPhone = (digits: string) => KR_PHONE.test(digits)
-/** 백엔드 사원 전화 = 숫자 11자리만 (MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
- *  9~10자리 지역번호는 맞는 번호여도 서버가 400 → 보내기 전에 이유를 밝혀 막음. 백엔드가 넓히면 이 검사만 지움 */
-const serverTakes = (digits: string) => /^\d{11}$/.test(digits)
-/** 전화번호 오류 문구 (없으면 null) — CSV 줄 · 사원 추가 창 공용 */
-export function phoneError(digits: string): string | null {
-  if (!isPhone(digits)) return '전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)'
-  if (!serverTakes(digits))
-    return '9~10자리 지역번호 전화는 아직 서버에서 받지 않습니다. 11자리 번호(휴대전화 등)를 넣어 주세요.'
-  return null
+export const isPhone = (digits: string) => /^0\d{10}$/.test(digits)
+export const PHONE_RULE = '전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.'
+/** 전화번호 오류 문구 (없으면 null) */
+export const phoneError = (digits: string): string | null => (isPhone(digits) ? null : PHONE_RULE)
+/** 화면에 보이는 전화번호 형식 — 치는 대로 3-4-4로 하이픈 (사원 추가 창 입력 칸). 숫자 11자리까지만 */
+export function phoneInput(v: string): string {
+  const d = v.replace(/\D/g, '').slice(0, 11)
+  return d.length > 7
+    ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`
+    : d.length > 3
+      ? `${d.slice(0, 3)}-${d.slice(3)}`
+      : d
 }
 
-// 엑셀은 '01012345678' · '0541234567'을 숫자로 바꾸며 앞 0을 지움 (CSV를 엑셀로 다시 열고 저장 · 숫자 칸 붙여넣기)
-// 국내 번호는 늘 0 하나로 시작하고 그다음 자리는 0이 아님 → 0을 붙여 국내 번호 모양이 되면 그 번호로 (어느 번호인지 헷갈릴 일 없음)
-// 1588 · 아무 숫자처럼 0을 붙여도 국내 번호가 아니면 그대로 둬서 형식 오류로 막힘
-/** CSV · 엑셀 칸의 전화번호 → 숫자만 (엑셀이 지운 앞 0을 되살림) */
+// 안전망: 그래도 엑셀이 숫자로 바꿔 앞 0이 지워진 전화번호(10자리 '1012345678')는 0을 붙여 11자리로
+//   (예시 CSV를 쓰지 않고 직접 만든 파일 · 숫자 칸을 붙여 넣은 경우) — 0을 붙여 휴대전화 앞자리(010 · 011 · 016~019)가 될 때만
+/** CSV · 엑셀 칸의 전화번호 → 숫자만 */
 export const csvPhone = (v: string) => {
   const d = phoneDigits(v)
-  return /^[1-9]/.test(d) && isPhone(`0${d}`) ? `0${d}` : d
+  return /^1[016-9]\d{8}$/.test(d) ? `0${d}` : d
 }
 // 엑셀이 긴 숫자를 지수로 바꿔 저장한 값 '1.01E+10' — 원래 숫자를 알 수 없어 고칠 수 없음 → 원인을 알려 줌
 const EXCEL_NUMBER = /^\d(?:\.\d+)?e\+?\d+$/i
@@ -126,7 +143,7 @@ export const readMembersCsv = (text: string): CsvResult => readMembersRows(parse
 
 /** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
 export function readMembersRows(rows: string[][]): CsvResult {
-  const [head, ...body] = rows.map((r) => r.map((v) => v.trim()))
+  const [head, ...body] = rows.map((r) => r.map((v) => plainCell(v.trim())))
   // 우편번호까지는 꼭, 상세주소는 있어도 없어도 (그 뒤 빈 열 이름은 엑셀이 붙인 것 — 허용)
   const headOk =
     head !== undefined &&
