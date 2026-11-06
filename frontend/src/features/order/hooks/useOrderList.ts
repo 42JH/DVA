@@ -57,7 +57,7 @@ const DONE: ReadonlySet<OrderStatus> = new Set(['ACCEPTED', 'CANCELLED', 'SUBMIS
 const DEFAULTS = { date: '', status: 'ALL', q: '' }
 const GROUPS = Object.keys(STATUS_GROUP_LABEL) as StatusGroup[]
 
-// 미완료 주문은 이름 · 주소가 아직 비어 있을 수 있음 → 빈 글자 (칸에서 '—')
+// 미완료 주문은 이름 · 주소가 아직 비어 있을 수 있음 → 빈 글자 (칸도 빈칸)
 const party = (p: ListParty | undefined) => ({
   name: p?.name ?? '',
   address: [p?.roadAddress, p?.detailAddress].filter(Boolean).join(' '),

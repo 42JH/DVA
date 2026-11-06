@@ -172,19 +172,23 @@ function OrderLine({
   )
 }
 
-/** '이름  주소' 한 줄 (사이 20, 글자 16/500). 길면 주소부터 말줄임, 올리면 전체. 검색어와 맞은 자리는 하이라이트 */
+/** '이름  주소' 한 줄 (사이 20, 글자 16/500). 길면 주소부터 말줄임 · 이름도 칸 절반까지만(넘으면 말줄임), 올리면 전체. 없는 값은 빈칸. 검색어와 맞은 자리는 하이라이트 */
 function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
   return (
     <span
       title={[p.name, p.address].filter(Boolean).join(' ')}
       className="flex min-w-0 items-center gap-5 pr-6 text-body font-medium"
     >
-      <span className={`shrink-0 ${p.name ? '' : 'text-muted'}`}>
-        {p.name ? <Highlight text={p.name} q={q} /> : '—'}
-      </span>
-      <span className={`min-w-0 truncate ${p.address ? '' : 'text-muted'}`}>
-        {p.address ? <Highlight text={p.address} q={q} /> : '—'}
-      </span>
+      {p.name && (
+        <span className="max-w-1/2 shrink-0 truncate">
+          <Highlight text={p.name} q={q} />
+        </span>
+      )}
+      {p.address && (
+        <span className="min-w-0 truncate">
+          <Highlight text={p.address} q={q} />
+        </span>
+      )}
     </span>
   )
 }

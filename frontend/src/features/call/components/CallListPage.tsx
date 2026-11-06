@@ -9,7 +9,7 @@ import { CallFilter } from './CallFilter'
 
 // 04 통화 내역 (Figma 디자인/목업 '통화' 1514:21223, 11/06 새 시안 — 03 주문과 같은 틀)
 // 상단바: 필터 단추(검색칸 왼쪽) · 검색칸 '고객 정보를 입력해 주세요' · 상태(AppLayout)
-// 표 머리줄(16/600): 📅 날짜 | 상담 유형 ⌄(하나 고르기) | 기업 | 이름 | 전화 번호 | (불만) | 통화 시간(오른쪽), 아래 1 회색 선
+// 표 머리줄(16/600): 📅 날짜 | 상담 유형 ⌄(하나 고르기) | 기업 | 이름 | 전화 번호 | (불만) | 통화 시간(표 오른쪽 끝에 맞춤 — 03 주문번호와 같음), 아래 1 회색 선
 // 줄(높이 72): 시각 12 회색 | 상담 유형 알약(테두리 · 12) | 기업 · 이름 · 전화 번호(가운데 맞춤, 16/500) | 불만(빨간 알약, 올리면 근거) | 통화 시간 16 회색
 // 표 왼쪽 바깥: 신규 고객이면 'new'(파랑) · 날이 바뀌는 첫 줄이면 '11월 3일' (머리줄 날짜 = 맨 위 줄의 날이라 같으면 안 붙음)
 // 무한 스크롤 · 줄을 누르면 06 · 06에서 돌아오면 보던 자리 그대로 (shared/ui/DayScroll). 예전 날짜 옆 상담가 토글은 새 시안에 없어 뺌
@@ -48,7 +48,7 @@ export function CallListPage() {
         <span className="text-center">이름</span>
         <span className="text-center">전화 번호</span>
         <span />
-        <span className="pr-3 text-right">통화 시간</span>
+        <span className="text-right">통화 시간</span>
       </div>
       <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       <DayScroll
@@ -108,7 +108,7 @@ function CallLine({
         {r.counts ? <KindChips small kinds={r.kinds} /> : <PendingChip small />}
       </span>
       <span className="truncate text-center" title={r.company || undefined}>
-        {r.company || <span className="text-muted">—</span>}
+        {r.company}
       </span>
       <span className="truncate text-center" title={r.name}>
         <Highlight text={r.name} q={q} />
@@ -117,7 +117,7 @@ function CallLine({
         <Highlight text={r.phone} q={q} />
       </span>
       <span className="flex min-w-0 pl-8">{r.complaint && <Complaint c={r.complaint} />}</span>
-      <span className="pr-3 text-right font-normal text-sub">{r.duration}</span>
+      <span className="text-right font-normal text-sub">{r.duration}</span>
     </Link>
   )
 }
