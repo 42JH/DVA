@@ -43,6 +43,9 @@ const targets = new Set([
 ]);
 const consultationActions = new Set([
   'CALL_STARTED',
+  'CALL_DELETED',
+  'UNANSWERED_QUESTION_RECORDED',
+  'UNANSWERED_QUESTION_DELETED',
   'CALL_ANALYSIS_RECORDED',
   'CALL_DROPOFF_RECORDED',
   'CALL_RESPONSE_WAIT_RECORDED',
@@ -88,7 +91,12 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
       : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
       ? targets.has(audit.targetType as string)
-      : audit.targetType === 'CALL_SESSION') ||
+      : audit.targetType ===
+        (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
+          audit.action as string,
+        )
+          ? 'UNANSWERED_QUESTION'
+          : 'CALL_SESSION')) ||
     typeof audit.requestId !== 'string' ||
     audit.requestId.length < 1 ||
     audit.requestId.length > 128 ||
@@ -102,7 +110,11 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
     (service === 'consultation' &&
       audit.action !== 'CALL_STARTED' &&
       payload.result === 'SUCCESS' &&
-      (audit.actorType !== 'AI' || audit.targetId === null)) ||
+      (audit.actorType !==
+        (['CALL_DELETED', 'UNANSWERED_QUESTION_DELETED'].includes(audit.action as string)
+          ? 'ADMIN'
+          : 'AI') ||
+        audit.targetId === null)) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))
   )

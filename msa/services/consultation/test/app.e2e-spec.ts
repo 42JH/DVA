@@ -89,7 +89,26 @@ describe('Consultation PBX and active calls (e2e)', () => {
         ]);
       });
     await request(app.getHttpServer()).get('/api/calls').expect(404);
-    await request(app.getHttpServer()).delete('/api/calls/1').expect(401);
+    await request(app.getHttpServer())
+      .delete('/api/calls/1')
+      .set('Origin', 'http://localhost:5173')
+      .expect(401);
+  });
+  it('requires allowed Origin on content deletion before authenticating the session', async () => {
+    const previous = auth.authenticate.mock.calls.length;
+    for (const path of ['/api/calls/1', '/api/unanswered-questions/1']) {
+      await request(app.getHttpServer()).delete(path).expect(403);
+      await request(app.getHttpServer())
+        .delete(path)
+        .set('Origin', 'https://evil.invalid')
+        .expect(403);
+    }
+    expect(auth.authenticate.mock.calls.length).toBe(previous);
+    for (const path of ['/api/calls/1', '/api/unanswered-questions/1'])
+      await request(app.getHttpServer())
+        .delete(path)
+        .set('Origin', 'http://localhost:5173')
+        .expect(401);
   });
   it('requires administrator sessions for both active count routes', async () => {
     for (const path of [

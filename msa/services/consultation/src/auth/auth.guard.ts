@@ -109,6 +109,9 @@ export class AuthGuard implements CanActivate {
         request.auditActorType = 'AI';
         return true;
       }
+    }
+    request.sessionToken = readSessionToken(request) ?? '';
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
       const origin = request.get('Origin');
       if (
         !origin ||
@@ -116,7 +119,6 @@ export class AuthGuard implements CanActivate {
       )
         throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
     }
-    request.sessionToken = readSessionToken(request) ?? '';
     request.securityAuthType = 'admin_session';
     request.admin = await this.auth.authenticate(request.sessionToken);
     delete request.securityAuthType;

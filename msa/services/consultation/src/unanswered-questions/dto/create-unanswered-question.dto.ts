@@ -42,8 +42,7 @@ export class CreateUnansweredQuestionDto {
   })
   @IsString()
   @MaxLength(200)
-  @Matches(/^\S+$/)
-  @NotContains('\u0000')
+  @Matches(/^[^\s\0]+$/)
   providerCallId!: string;
 
   @ApiProperty({
