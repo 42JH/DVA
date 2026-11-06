@@ -8,11 +8,13 @@ export function Stepper({
   value,
   onChange,
   max = 99,
+  editable = false,
 }: {
   label: string
   value: number
   onChange: (n: number) => void
   max?: number
+  editable?: boolean // 가운데 숫자를 직접 입력 (03 주문 추가). 0은 빈 칸, max는 [+]만 막음 — 넘는 값은 화면이 오류로 알림
 }) {
   const fresh = useContext(NewLook)
   const btn = 'grid size-8 place-items-center text-body disabled:text-muted'
@@ -31,9 +33,19 @@ export function Stepper({
         >
           −
         </button>
-        <span className="w-6 text-center text-body font-bold" aria-live="polite">
-          {value}
-        </span>
+        {editable ? (
+          <input
+            className="w-8 text-center text-body font-bold"
+            inputMode="numeric"
+            aria-label={`${label} 수량`}
+            value={value || ''}
+            onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, '').slice(0, 3)))}
+          />
+        ) : (
+          <span className="w-6 text-center text-body font-bold" aria-live="polite">
+            {value}
+          </span>
+        )}
         <button
           type="button"
           className={`${btn} font-bold ${fresh ? 'text-brand' : 'text-action'}`}

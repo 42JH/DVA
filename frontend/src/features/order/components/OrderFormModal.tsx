@@ -126,7 +126,7 @@ export function OrderFormModal({
 
         <section className="flex flex-col gap-3 [--field-label:116px]">
           <h3 className="text-strong font-bold">접수 정보</h3>
-          <div className="grid grid-cols-[var(--field-label)_minmax(0,1fr)] items-center gap-x-4">
+          <div className="grid grid-cols-[var(--field-label)_minmax(0,1fr)] items-center gap-x-4 gap-y-1">
             <span className="text-body text-sub">품목</span>
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               {vm.items.map((i) => (
@@ -135,10 +135,17 @@ export function OrderFormModal({
                   label={i.label}
                   value={i.count}
                   max={i.max}
+                  editable
                   onChange={i.setCount}
                 />
               ))}
             </div>
+            {vm.itemsError && (
+              // 칸 오류(TextField)와 같은 모양 — 품목 줄은 칸이 넷이라 줄 아래 한 줄
+              <span role="alert" className="col-start-2 text-caption font-semibold text-danger">
+                {vm.itemsError}
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-x-10 gap-y-3">
             <TextField

@@ -133,6 +133,12 @@ export function useOrderForm(
   const priceOut =
     declaredValue !== '' && declaredValue !== initialPrice && !priceOk(Number(declaredValue))
   const boxTotal = counts.small + counts.medium + counts.big
+  // 직접 입력은 max를 넘을 수 있음 — 몰래 줄이지 않고 알림 (11/06). 수정에서 옛 값 그대로면 통과
+  const boxesOut =
+    boxTotal > MAX_BOXES &&
+    boxTotal !== (order ? order.items.small + order.items.medium + order.items.big : 0)
+  const docsOut =
+    counts.document > MAX_DOCUMENTS && counts.document !== (order?.items.document ?? 0)
   const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
   const partyOk = (p: PartyDraft) =>
     p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
@@ -273,6 +279,13 @@ export function useOrderForm(
       max: b.key === 'document' ? MAX_DOCUMENTS : MAX_BOXES - boxTotal + counts[b.key],
       setCount: (n: number) => setCounts((c) => ({ ...c, [b.key]: n })),
     })),
+    itemsError:
+      [
+        boxesOut && `박스는 소 · 중 · 대 합계 ${MAX_BOXES}개까지예요.`,
+        docsOut && `서류는 ${MAX_DOCUMENTS}개까지예요.`,
+      ]
+        .filter(Boolean)
+        .join(' ') || undefined,
     etcItem,
     setEtcItem,
     declaredValue,
@@ -321,6 +334,8 @@ export function useOrderForm(
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
       !pickupOut &&
       !priceOut &&
+      !boxesOut &&
+      !docsOut &&
       (!draft ||
         (collecting
           ? missing.length === 0 // 접수 중단: 바뀐 게 없어도 조건만 채워지면 접수
