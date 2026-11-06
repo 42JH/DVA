@@ -21,7 +21,7 @@ import {
 } from '@/features/order/api/orderApi'
 import { orderErrorText } from '@/features/order/labels'
 import { MAX_BOXES, MAX_DOCUMENTS, pickupRange, priceOk } from '@/features/order/api/orderLimits'
-import { shippingFeeOf } from '@/features/order/api/orderFee'
+import { isJeju, shippingFeeOf } from '@/features/order/api/orderFee'
 import {
   buildCustomerPatch,
   buildOrderPatch,
@@ -140,7 +140,10 @@ export function useOrderForm(
     counts.document > MAX_DOCUMENTS && counts.document !== (order?.items.document ?? 0)
   const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
   // 배송비 — 품목 개수로 자동 계산, 직접 입력 없음 (11/06). 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지)
-  const shippingFee = shippingFeeOf(counts)
+  const shippingFee = shippingFeeOf(
+    counts,
+    isJeju(parties.sender.roadAddress) || isJeju(parties.receiver.roadAddress), // 제주 +3,000원
+  )
   // 기타 품목만 있으면 0원 → 서버가 1원 이상 필수라 접수 못 함
   const feeMissing = etcItem.trim() !== '' && shippingFee === 0
   const partyOk = (p: PartyDraft) =>

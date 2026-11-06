@@ -9,5 +9,15 @@ export const UNIT_PRICE: Record<BoxKey, number> = {
   big: 8_800,
 }
 
-export const shippingFeeOf = (counts: Record<BoxKey, number>) =>
-  (Object.keys(UNIT_PRICE) as BoxKey[]).reduce((sum, k) => sum + counts[k] * UNIT_PRICE[k], 0)
+export const JEJU_EXTRA = 3_000 // 보내는 분 · 받는 분 중 하나라도 제주면 주문당 한 번 (11/06)
+
+// 도로명 주소 첫머리 '제주특별자치도 …' — 새로 검색한 주소 · 수정 창의 옛 주소 둘 다 이 글자로 옴
+export const isJeju = (roadAddress: string) => roadAddress.trim().startsWith('제주')
+
+export function shippingFeeOf(counts: Record<BoxKey, number>, jeju: boolean) {
+  const base = (Object.keys(UNIT_PRICE) as BoxKey[]).reduce(
+    (sum, k) => sum + counts[k] * UNIT_PRICE[k],
+    0,
+  )
+  return base > 0 && jeju ? base + JEJU_EXTRA : base // 품목이 없으면 0 그대로 (접수 막음)
+}
