@@ -1,5 +1,5 @@
 import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtDuration, fmtPhone, fmtRowTime } from '@/shared/lib/format'
+import { fmtDuration, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
 import { KINDS, KIND_LABEL, kindChips } from '@/shared/lib/callKind'
@@ -29,7 +29,7 @@ export const NO_FILTER: CallFilterForm = { newOnly: false, kinds: [], min: 0, ma
 /** 목록 한 줄 = 통화 + 화면용 글 (Figma '통화' 11/04) */
 export type CallListRow = CallRow & {
   day: Ymd // 받은 날 (머리 날짜 · 스크롤 위치)
-  time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40'
+  time: string // '오후 3:02' (날은 머리줄 · 표 왼쪽 날짜)
   name: string
   phone: string // 마스킹 안 함 (11/04 사용자)
   kinds: { kind: CallKind; label: string }[] // 한 것만 — 두 번 이상이면 '접수 3'
@@ -41,10 +41,10 @@ export type CallListRow = CallRow & {
 // date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
 const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 
-const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
+const toView = (r: CallRow, day: Ymd): CallListRow => ({
   ...r,
   day,
-  time: r.startedAt ? fmtRowTime(r.startedAt, today) : '—',
+  time: r.startedAt ? fmtTime(r.startedAt) : '—',
   name: r.customerName ?? '—',
   company: r.company ?? '',
   phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
@@ -95,7 +95,7 @@ export function useCallList() {
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,
-    rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day, today)),
+    rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day)),
   }))
   const isFiltered = form.newOnly || form.kinds.length > 0 || form.min > 0 || form.max < DUR_MAX
 

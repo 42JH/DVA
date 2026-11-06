@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { FETCH_ALL_MAX } from '@/shared/api/paging'
 import { ymd } from '@/shared/lib/dateRange'
-import { fmtListTime, fmtPhone } from '@/shared/lib/format'
+import { fmtListTime, fmtMonthDay, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { matchKo, phoneDigits } from '@/shared/lib/search'
 import { originOf } from '@/shared/lib/unansweredReason'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -18,18 +18,6 @@ export type { UnansweredQuestion } from '@/features/faq/api/unansweredApi'
 /** 목록 한 줄 = 질문 + 화면용 글 (시각 '오후 3:02' · 하이픈 전화번호) */
 export type UnansweredRow = UnansweredQuestion & { time: string; phone: string }
 
-/** 날짜 묶음 머리 '11월 4일' (Figma 'FAQ 미답변' 11/06) — 다른 해면 '2025년 12월 29일'. 시각 모르는 질문은 '날짜 모름' */
-function dayLabel(day: string, now = new Date()): string {
-  if (!day) return '날짜 모름'
-  const sameYear = day.slice(0, 4) === String(now.getFullYear())
-  return new Date(`${day}T00:00:00+09:00`).toLocaleDateString('ko-KR', {
-    year: sameYear ? undefined : 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
 // URL 쿼리 기본값 (모듈 상수 — useListParams 규칙). call = 06 '처리 내용 › AI 미답변 보기'로 오면 그 통화 번호 → 그 통화의 질문만
 // from = 이동 전 화면 주소 (경로 첫 칸, 11/05 — 검색 · 쪽을 바꿔도 남음)
 const DEFAULTS = { q: '', call: '', from: '' }
@@ -77,10 +65,10 @@ export function useUnansweredList() {
   for (const u of hit) {
     const day = u.startedAt ? ymd(new Date(u.startedAt)) : ''
     let g = groups.find((x) => x.day === day)
-    if (!g) groups.push((g = { day, label: dayLabel(day), rows: [] }))
+    if (!g) groups.push((g = { day, label: day ? fmtMonthDay(day) : '날짜 모름', rows: [] }))
     g.rows.push({
       ...u,
-      time: u.startedAt ? clock(u.startedAt) : '—', // 시각을 못 받은 통화
+      time: u.startedAt ? fmtTime(u.startedAt) : '—', // 시각을 못 받은 통화
       phone: u.callerNumber ? fmtPhone(u.callerNumber) : '—',
     })
   }

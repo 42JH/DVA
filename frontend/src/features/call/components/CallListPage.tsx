@@ -13,8 +13,8 @@ import { CallFilter } from './CallFilter'
 // 줄(높이 72): 시각 12 회색 | 상담 유형 알약(테두리 · 12) | 기업 · 이름 · 전화 번호(가운데 맞춤, 16/500) | 불만(빨간 알약, 올리면 근거) | 통화 시간 16 회색
 // 표 왼쪽 바깥: 신규 고객이면 'new'(파랑) · 날이 바뀌는 첫 줄이면 '11월 3일' (머리줄 날짜 = 맨 위 줄의 날이라 같으면 안 붙음)
 // 무한 스크롤 · 줄을 누르면 06 · 06에서 돌아오면 보던 자리 그대로 (shared/ui/DayScroll). 예전 날짜 옆 상담가 토글은 새 시안에 없어 뺌
-// 칸 = 시안 자리(표 1172 기준): 시각 109 · 상담 유형 267 · 기업 140 · 이름 100 · 전화 번호 120 · 불만(나머지) · 통화 시간 100
-const COLS = 'grid grid-cols-[109px_minmax(0,267fr)_140px_100px_120px_minmax(0,336fr)_100px]'
+// 칸 = 시안 자리(표 1172 기준): 시각 121(글자는 12 안쪽, 03 · 09와 같은 자리) · 상담 유형 252 · 기업 140 · 이름 100 · 전화 번호 120 · 불만(나머지) · 통화 시간 100
+const COLS = 'grid grid-cols-[121px_minmax(0,252fr)_140px_100px_120px_minmax(0,339fr)_100px]'
 // 표 좌우 자리: 카드에서 100 (본문 여백 32 빼고 68). 줄 상자는 막대 자리 때문에 오른쪽 90 (03 주문과 같음)
 const PAD = 'pr-[68px] pl-[68px]'
 
@@ -33,7 +33,9 @@ export function CallListPage() {
         search={{ tab: 'call', q: vm.q, onApply: vm.setQ }}
         lead={<CallFilter value={vm.form} active={vm.isFiltered} onApply={vm.applyForm} />}
       />
-      <div className={`${COLS} mt-v44 h-6 shrink-0 items-center ${PAD} text-body font-semibold`}>
+      <div
+        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
+      >
         <DayPick small day={day} onPick={vm.setDate} />
         <HeadPick
           label="상담 유형"
@@ -48,7 +50,7 @@ export function CallListPage() {
         <span />
         <span className="pr-3 text-right">통화 시간</span>
       </div>
-      <div className="mt-[10px] mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
+      <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       <DayScroll
         feed={vm.feed}
         at={vm.at}
@@ -69,7 +71,7 @@ export function CallListPage() {
               ? '맞는 통화가 없습니다.'
               : '통화가 없습니다.'
         }
-        className="pt-px pr-[90px] pl-[68px]"
+        className="pr-[90px] pl-[68px]"
       />
     </div>
   )
@@ -96,12 +98,12 @@ function CallLine({
       className={`${COLS} relative h-[72px] items-center border-b border-line/70 text-body font-medium hover:bg-bg`}
     >
       {(dayLabel || r.isNew) && (
-        <span className="absolute top-1/2 -left-15 flex w-12 -translate-y-1/2 flex-col items-center gap-0.5 text-[12px] leading-none whitespace-nowrap">
+        <span className="absolute top-1/2 -left-15 flex w-[42px] -translate-y-1/2 flex-col items-center gap-0.5 text-[12px] leading-none whitespace-nowrap">
           {dayLabel && <span className="font-medium text-ink">{fmtMonthDay(r.day)}</span>}
           {r.isNew && <span className="font-normal text-brand">new</span>}
         </span>
       )}
-      <span className="text-[12px] font-normal text-sub">{r.time}</span>
+      <span className="pl-3 text-[12px] font-normal text-sub">{r.time}</span>
       <span className="-ml-3 flex min-w-0 items-center gap-1 overflow-hidden">
         {r.counts ? <KindChips small kinds={r.kinds} /> : <PendingChip small />}
       </span>
@@ -114,7 +116,7 @@ function CallLine({
       <span className="text-center tabular-nums">
         <Highlight text={r.phone} q={q} />
       </span>
-      <span className="flex min-w-0 pl-[29px]">{r.complaint && <Complaint c={r.complaint} />}</span>
+      <span className="flex min-w-0 pl-8">{r.complaint && <Complaint c={r.complaint} />}</span>
       <span className="pr-3 text-right font-normal text-sub">{r.duration}</span>
     </Link>
   )

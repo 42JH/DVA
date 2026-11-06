@@ -40,7 +40,7 @@ export function OrderListPage() {
         className={`grid shrink-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${fold.folded ? 'grid-rows-[0fr] overflow-hidden' : 'grid-rows-[1fr]'}`}
       >
         <div className="min-h-0" inert={fold.folded}>
-          <div className={`${COLS} mt-v44 h-6 items-center ${PAD} text-body font-semibold`}>
+          <div className={`${COLS} mt-v28 h-[19px] items-center ${PAD} text-body font-semibold`}>
             <DayPick small day={day} onPick={vm.setDate} />
             <HeadPick
               label="주문 상태"
@@ -55,7 +55,7 @@ export function OrderListPage() {
           </div>
         </div>
       </div>
-      <div className="mt-[10px] mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
+      <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       {/* 줄 상자: 왼쪽 68 = 머리줄과 같은 선(날이 바뀌는 줄의 '11월 3일'은 그 왼쪽 여백에) · 오른쪽 90 = 68 + 32(막대를 카드 끝으로 뺀 만큼) − 10(막대) */}
       <DayScroll
         feed={vm.feed}
@@ -70,7 +70,7 @@ export function OrderListPage() {
               ? '맞는 주문이 없습니다.'
               : '주문이 없습니다.'
         }
-        className="pt-[5px] pr-[90px] pl-[68px]"
+        className="pt-1 pr-[90px] pl-[68px]"
       />
       {/* 아래 오른쪽 [추가] (11/06 시안) · 취소 · 다시 접수 결과 한 줄은 그 왼쪽 */}
       <div className={`flex shrink-0 items-center justify-end gap-6 pt-3 ${PAD}`}>
