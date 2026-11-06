@@ -113,7 +113,9 @@ class LookupArgs(Args):
                                                      "찾으면 true. 받는 분 성함은 다른 사람이어도 false")
 
 
-@model_tool("lookup_orders", "이 발신번호로 접수된 택배를 받는 분 성함으로 찾는다(가장 최근 것부터).", LookupArgs)
+@model_tool("lookup_orders", "지금 전화한 번호로 접수된 택배만 받는 분 성함으로 찾는다(가장 최근 것부터). "
+                             "다른 번호·다른 고객의 접수는 조회할 수 없다(other_customer=true로 부르면 안내할 사실을 준다).",
+            LookupArgs)
 async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
     if args.other_customer:  # BE를 부르지 않는다: 본인 주문을 다른 번호의 결과처럼 안내하지 않게
         return ToolOutcome("rejected", "ORDER_OTHER_CUSTOMER", {"found": 0, "scope": OTHER_CUSTOMER})

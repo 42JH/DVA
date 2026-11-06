@@ -923,6 +923,6 @@
 
 - 분석: 이여름 님(010****2446)이 오전에 김일 님(010****5701, 멈춤 통화 56c133c8, 주문 119 COLLECTING)이 접수한 택배를 찾음. 조회는 BE 통화 번호(call_session_seq) 범위라 남의 주문은 원래 보이지 않는데, ① '김일'을 받는 분 필터로 넣어 0건 ② 다른 번호를 불러 주자 번호 인자 없이 본인 주문 2건(COLLECTING)을 받아 "그 번호로 접수된 건이 두 건"이라고 잘못 안내 ③ "접수 완료된 택배는 조회가 되지 않아요"라는 근거 없는 말로 끝남.
 - 결정(사용자): 다른 번호의 접수 기록은 조회할 수 없어야 하고 '다른 고객의 접수 정보는 안내드릴 수 없음'을 안내한다.
-- 브랜치 `fix/lookup-other-customer`. `lookup_orders`에 `other_customer`(다른 전화번호·다른 사람이 접수한 택배를 찾으면 true) — true면 BE를 부르지 않고 `rejected`·`ORDER_OTHER_CUSTOMER`·`scope`(안내 문구). 모든 조회 결과(0건·1건·여러 건)에 `scope`(지금 전화한 번호로 접수된 택배만)를 실어 본인 주문을 다른 번호의 결과처럼 말하지 않게. 프롬프트는 고치지 않는다(사용자 지시): 도구 설명(Live 지시문 'Backend tools'에 렌더링)은 원래 문구로 되돌림. 범위·거절 안내는 도구 결과 facts로만.
+- 브랜치 `fix/lookup-other-customer`. `lookup_orders`에 `other_customer`(다른 전화번호·다른 사람이 접수한 택배를 찾으면 true) — true면 BE를 부르지 않고 `rejected`·`ORDER_OTHER_CUSTOMER`·`scope`(안내 문구). 모든 조회 결과(0건·1건·여러 건)에 `scope`(지금 전화한 번호로 접수된 택배만)를 실어 본인 주문을 다른 번호의 결과처럼 말하지 않게. policy/ 안의 시스템 프롬프트는 고치지 않는다(사용자 지시). 도구 설명·인수 설명(코드, Live 'Backend tools'·Backend 함수 스키마에 렌더링)은 허용 범위라 같은 범위 문구로 바꿈.
 - 고객 범위 자체는 그대로 BE 헤더(call_session_seq)가 강제한다(외부 계약 변경 없음).
 - 테스트: 도구 단위 1개 추가(다른 고객 거절·상태 불변·남의 주문 안 보임·범위 사실). app·monitor·backend_client 487 passed, 3 failed(로컬 address.db 스키마 — 이전과 같음). 실통화 미확인: 모델이 `other_customer`를 실제로 켜는지, '김일 님이 접수한 거'처럼 접수자를 이름으로만 말할 때(번호 언급 없음)는 false로 불러 0건 + scope로 안내될 수 있음.
