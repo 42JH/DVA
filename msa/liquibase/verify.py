@@ -7,6 +7,7 @@ import uuid
 import os
 import re
 import shutil
+from verify_order_schema import verify_order_schema
 
 BASE = Path(__file__).resolve().parent
 SOURCE = BASE / 'tests'
@@ -18,15 +19,17 @@ report = {'passed': False, 'checks': [], 'postgres': '17.11', 'liquibase': '5.0.
 report['image'] = IMAGE
 
 def run(args, label, stdin=None, failure=False):
-    result = subprocess.run(args, input=stdin, text=True, encoding='utf-8',
-                            errors='replace', stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    # Byte input prevents Windows from rewriting SQL function/literal newlines.
+    result = subprocess.run(args, input=stdin.encode('utf-8') if stdin is not None else None,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             timeout=240)
-    (logs / (label + '.log')).write_text(result.stdout, encoding='utf-8')
+    output = result.stdout.decode('utf-8', 'replace').replace('\r\n', '\n').replace('\r', '\n')
+    (logs / (label + '.log')).write_text(output, encoding='utf-8')
     if (result.returncode == 0) == failure:
-        raise RuntimeError(label + ': ' + result.stdout[-5000:])
+        raise RuntimeError(label + ': ' + output[-5000:])
     report['checks'].append(label)
     print(label, flush=True)
-    return result.stdout.strip()
+    return output.strip()
 
 def sql(db, statement, label, user='postgres'):
     return run(['docker', 'exec', '-i', name, 'psql', '-X', '-At', '-v', 'ON_ERROR_STOP=1',
@@ -81,9 +84,9 @@ try:
     else:
         raise RuntimeError('PostgreSQL not ready')
 
-    checks = {'customer': 'customer-check.sql', 'order': 'order-workflow-check.sql', 'consultation': 'consultation-pbx-check.sql',
-              'delivery': 'delivery-workflow-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',4,1),('consultation',10,9),('delivery',4,1),('operations',16,8)]:
+    checks = {'customer': 'customer-check.sql', 'order': 'order-storage-check.sql', 'consultation': 'consultation-pbx-check.sql',
+              'delivery': 'delivery-storage-check.sql', 'operations': 'operations-check.sql'}
+    for service, tables, fks in [('customer',8,7),('order',8,3),('consultation',10,9),('delivery',4,1),('operations',16,8)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -92,7 +95,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 9, 'consultation': 7}.get(service, 2)
+        changesets = {'customer': 7, 'operations': 9, 'consultation': 7, 'order': 3, 'delivery': 3}[service]
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -529,6 +532,7 @@ try:
     assert sql(db,"SELECT count(*) FILTER(WHERE attempt_count=0 AND next_attempt_at IS NULL),count(*) FILTER(WHERE requires_review AND last_error_code='LEGACY_FAILURE') FROM pbx_webhooks.call_ended_events;",'retry-upgrade-legacy-state')=='5|3'
     assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=6 ORDER BY orderexecuted;','retry-upgrade-history-preserved')==history
     sql(db,(SOURCE/'recording-retry-check.sql').read_text(encoding='utf-8'),'retry-upgrade-checks','consultation_app')
+    verify_order_schema(BASE, logs, sql, lb, report)
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)
