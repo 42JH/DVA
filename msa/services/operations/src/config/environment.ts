@@ -10,6 +10,7 @@ export interface Environment {
   DB_NAME: string;
   AI_AGENT_URL?: string;
   AI_PERSONA_TOKEN?: string;
+  AI_FAQ_TOKEN?: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   CUSTOMER_AUTH_TOKEN?: string;
@@ -105,6 +106,14 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       !/^[\x21-\x7e]+$/.test(personaToken))
   )
     errors.push('AI_PERSONA_TOKEN');
+  const faqToken = raw.AI_FAQ_TOKEN;
+  if (
+    faqToken !== undefined &&
+    faqToken !== '' &&
+    (typeof faqToken !== 'string' || faqToken.length < 32 || !/^[\x21-\x7e]+$/.test(faqToken))
+  )
+    errors.push('AI_FAQ_TOKEN');
+  if (faqToken && !aiUrl) errors.push('AI_AGENT_URL');
   const config: Environment = {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     AI_BUSINESS_TOKEN:
@@ -118,6 +127,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_NAME: required('DB_NAME'),
     AI_AGENT_URL: typeof aiUrl === 'string' ? aiUrl.replace(/\/$/, '') : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
+    AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
     CUSTOMER_AUTH_TOKEN:

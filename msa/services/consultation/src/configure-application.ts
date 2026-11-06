@@ -64,6 +64,7 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      { path: 'internal/faq-call-sources', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },

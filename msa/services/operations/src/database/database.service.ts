@@ -44,6 +44,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT created_by_admin_user_name,previous_active_version_seq FROM ai_persona_versions LIMIT 0',
     );
     await this.pool.query('SELECT draft_revision,base_version FROM ai_persona_drafts LIMIT 0');
+    await this.pool.query('SELECT category,deleted_at FROM faq_entries LIMIT 0');
+    await this.pool.query('SELECT claim_id FROM faq_change_notifications LIMIT 0');
+    await this.pool.query('SELECT event_id FROM faq_question_examples LIMIT 0');
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

@@ -67,6 +67,9 @@ spec:
             - name: AI_AGENT_URL
               valueFrom:
                 secretKeyRef: {name: msa-ai-persona, key: AI_AGENT_URL, optional: true}
+            - name: AI_FAQ_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_FAQ_TOKEN, optional: true}
             - name: AI_PERSONA_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-ai-persona, key: AI_PERSONA_TOKEN, optional: true}
@@ -168,6 +171,20 @@ spec:
                 port:
                   number: 3005
           - path: /api/ai/config
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/faqs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/faqs
             pathType: Prefix
             backend:
               service:
