@@ -231,10 +231,15 @@ module.exports = function registerOrdersReads(suite) {
   test('ORD-03 returns draft details, every nullable address field and the actual version without writes', async () => {
     const { customer } = await readCustomer();
     const id = await readOrder(customer, [
-      { origin: { name: '수집한 이름', phoneNumber: '01000000001' }, itemPrice: 0 },
-      { destination: address, itemPrice: Number.MAX_SAFE_INTEGER, documentCount: 2 },
+      { origin: { name: '수집한 이름', phoneNumber: '01000000001' }, itemPrice: 1 },
+      { destination: address, itemPrice: 100000000, documentCount: 2 },
       {},
     ]);
+    // Past stored values remain readable even when new requests no longer accept them.
+    await pool.query(
+      'UPDATE order_parcels SET item_price=CASE parcel_position WHEN 1 THEN 0 ELSE 9007199254740991 END WHERE order_seq=$1 AND parcel_position IN (1,2)',
+      [id],
+    );
     const before = (
       await pool.query('SELECT version,updated_at FROM orders WHERE order_seq=$1', [id])
     ).rows[0];
@@ -299,7 +304,7 @@ module.exports = function registerOrdersReads(suite) {
         originPin: { scope: 'PERSONAL', pinSeq: pin },
         destination: address,
         smallBoxCount: 1,
-        itemPrice: 0,
+        itemPrice: 1,
       },
       { destination: { name: '두 번째 수령인' } },
     ]);
@@ -333,7 +338,7 @@ module.exports = function registerOrdersReads(suite) {
     assert.deepEqual(order.parcels[0].originPin, { scope: 'PERSONAL', pinSeq: pin });
     assert.deepEqual(order.parcels[0].destination, address);
     assert.equal(order.parcels[0].smallBoxCount, 1);
-    assert.equal(order.parcels[0].itemPrice, 0);
+    assert.equal(order.parcels[0].itemPrice, 1);
     for (const parcel of order.parcels) {
       assert.equal(Object.hasOwn(parcel, 'shipment'), false);
       assert.equal(Object.hasOwn(parcel, 'trackingNumber'), false);

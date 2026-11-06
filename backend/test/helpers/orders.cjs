@@ -243,7 +243,7 @@ module.exports = function ordersFixture() {
 
   const readyOrder = async (changes = {}) => {
     const parcels = (
-      changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }]
+      changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 }]
     ).map((p) => ({ notifiedPrice: 3500, ...p }));
     const response = await create({
       customerSeq: otherId,
@@ -282,7 +282,7 @@ module.exports = function ordersFixture() {
 
   const aiResult = (outcome = 'COMPLETE', changes = {}) => {
     const parcels = (
-      changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }]
+      changes.parcels ?? [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 }]
     ).map((p) => ({ notifiedPrice: 3500, ...p }));
     return {
       outcome,

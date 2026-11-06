@@ -44,7 +44,7 @@ AI는 `parcels[].status=CANCELLED`인 상세를 수정할 수 없으며 전체 �
 | parcels[].originPin | PERSONAL과 pinSeq. 생략 유지, null이면 해제. COMPANY는 기존 동일 상세의 동일 참조·출발지 주소 유지에만 허용 |
 | 수량 4종 | 0~2147483647 정수. 기존 상세는 생략 유지, 새 상세는 기본 0 |
 | otherItemDescription / clientComment | 문자열. 빈 문자열로 비우기. 새 상세는 기본 빈 문자열 |
-| itemPrice | 0~9007199254740991 정수 또는 null. 기존 상세는 생략 유지, 새 상세는 기본 null |
+| itemPrice | 1~100,000,000원 정수 또는 null. 기존 상세는 생략 유지, 새 상세는 기본 null |
 
 - `expectedVersion` 외 변경 필드가 하나 이상 필요하다. 빈 배열만으로는 저장하지 않는다. 배열의 각 상세에도 변경값이 필요하며, 상세 번호·빈 주소 객체만 있는 항목은 400이다.
 - 주소 객체 자체의 null, 중복 상세 번호, 변경 불가 필드(customerSeq·status·parcelPosition 등)는 400이다. 타 주문의 상세와 없는 상세는 모두 404다.

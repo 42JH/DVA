@@ -54,11 +54,42 @@ const complete = () =>
         origin: address,
         destination: address,
         smallBoxCount: 1,
-        itemPrice: 0,
+        itemPrice: 1,
         notifiedPrice: 3500,
       },
     ],
   });
+test('stored item values outside one won through one hundred million cannot be submitted', () => {
+  for (const itemPrice of [1, 100000000]) {
+    const draft = complete();
+    draft.parcels[0].itemPrice = itemPrice;
+    assert.doesNotThrow(() => assertOrderSubmissionReady(draft, now));
+  }
+  for (const itemPrice of [0, -1, 100000001, 9000000000, Number.MAX_SAFE_INTEGER, 1.5]) {
+    const draft = complete();
+    draft.parcels[0].itemPrice = itemPrice;
+    assert.throws(
+      () => assertOrderSubmissionReady(draft, now),
+      (error) =>
+        error.getStatus() === 422 &&
+        error
+          .getResponse()
+          .details.some(
+            (detail) => detail.field === 'parcels.0.itemPrice' && detail.reason === 'priceRange',
+          ),
+      String(itemPrice),
+    );
+  }
+  const draft = complete();
+  draft.parcels[0].itemPrice = 1;
+  draft.parcels.unshift({
+    ...structuredClone(draft.parcels[0]),
+    status: 'CANCELLED',
+    itemPrice: 9000000000,
+  });
+  assert.doesNotThrow(() => assertOrderSubmissionReady(draft, now));
+});
+
 test('final submission checks stored origin and destination phones for eleven digits', () => {
   for (const side of ['origin', 'destination'])
     for (const phoneNumber of ['021234567', '0101234567', '010123456789', '01012345678\n']) {

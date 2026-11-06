@@ -15,6 +15,9 @@ const { PaymentsWorker } = require('../dist/payments/payments.worker');
 const { PaymentClient } = require('../dist/payments/payment.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const { OrderPaymentsRepository } = require('../dist/orders/order-payments.repository');
+const { OrdersRepository } = require('../dist/orders/orders.repository');
+const { orderDraft } = require('../dist/orders/order-draft');
+const { DatabaseService } = require('../dist/database/database.service');
 const { OrderMaintenanceWorker } = require('../dist/orders/order-maintenance.worker');
 const { AuditService } = require('../dist/audit/audit.service');
 const { testMembership } = require('./helpers/membership.cjs');
@@ -181,7 +184,7 @@ function orderBody() {
         origin: address,
         destination: { ...address, name: '테스트 수령인' },
         smallBoxCount: 1,
-        itemPrice: 0,
+        itemPrice: 1,
         notifiedPrice: 3500,
       },
     ],
@@ -340,6 +343,43 @@ test('pickup preserves requested times and calculates Korean 09:00-17:00 boundar
         transaction.release();
       }
     });
+});
+
+test('legacy invalid item values cannot start a card approval or alter pending payment records', async () => {
+  for (const itemPrice of [0, 100000001, 9000000000]) {
+    // Seed a pre-policy order before finalizing; pending parcel snapshots stay immutable.
+    const order = await app.get(DatabaseService).transaction(async (transaction) => {
+      const draft = orderDraft(orderBody());
+      draft.parcels[0].itemPrice = itemPrice;
+      const repository = app.get(OrdersRepository);
+      const inserted = await repository.insert(
+        transaction,
+        draft,
+        customerId,
+        randomUUID(),
+        'ADMIN',
+      );
+      await app.get(OrderPaymentsRepository).waitForPayment(transaction, inserted.orderSeq);
+      return repository.result(transaction, inserted.orderSeq, null);
+    });
+    const id = order.paymentRequest.paymentRequestId;
+    const beforeOrder = await stored(order.orderSeq);
+    const beforeRequest = await storedPayment(id);
+    const beforeCalls = calls.length;
+    const beforeParcels = parcels.length;
+    const response = await confirm(order);
+    assert.equal(response.status, 422);
+    assert.equal(response.body.error.code, 'VALIDATION_FAILED');
+    assert.ok(
+      response.body.error.details.some(
+        (detail) => detail.field === 'parcels.0.itemPrice' && detail.reason === 'priceRange',
+      ),
+    );
+    assert.equal(calls.length, beforeCalls);
+    assert.equal(parcels.length, beforeParcels);
+    assert.deepEqual(await stored(order.orderSeq), beforeOrder);
+    assert.deepEqual(await storedPayment(id), beforeRequest);
+  }
 });
 
 test('real AI/admin orders queue one message after commit; no upfront pickup or Dver call', async () => {

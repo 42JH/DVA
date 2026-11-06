@@ -99,7 +99,7 @@ function finalBody(overrides = {}) {
       origin: { ...address },
       destination: { ...address },
       smallBoxCount: 1,
-      itemPrice: 0,
+      itemPrice: 1,
       notifiedPrice,
     })),
     ...overrides,
