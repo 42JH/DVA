@@ -16,6 +16,7 @@ export interface Environment {
   CUSTOMER_AUTH_TOKEN: string;
   CONSULTATION_URL: string;
   CUSTOMER_URL: string;
+  DELIVERY_URL: string;
 }
 
 export class EnvironmentValidationError extends Error {
@@ -97,6 +98,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     CUSTOMER_AUTH_TOKEN: required('CUSTOMER_AUTH_TOKEN'),
     CONSULTATION_URL: required('CONSULTATION_URL'),
     CUSTOMER_URL: required('CUSTOMER_URL'),
+    DELIVERY_URL: required('DELIVERY_URL'),
   };
   try {
     const url = new URL(config.OPERATIONS_URL);
@@ -111,7 +113,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     errors.push('OPERATIONS_URL');
   }
   if (!/^[\x21-\x7e]{32,256}$/.test(config.CUSTOMER_AUTH_TOKEN)) errors.push('CUSTOMER_AUTH_TOKEN');
-  for (const key of ['CONSULTATION_URL', 'CUSTOMER_URL'] as const) {
+  for (const key of ['CONSULTATION_URL', 'CUSTOMER_URL', 'DELIVERY_URL'] as const) {
     try {
       const url = new URL(config[key]);
       if (

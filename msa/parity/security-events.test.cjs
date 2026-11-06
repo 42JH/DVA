@@ -54,7 +54,7 @@ test('HTTP completion emits one source authentication record without breaking th
 });
 
 test('production requires the exact source HMAC key format without exposing rejected values',()=>{
-  const base={DB_HOST:'db',DB_USER:'test',DB_PASSWORD:'private',DB_NAME:'test',OPERATIONS_URL:'http://operations:3005',CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:'x'.repeat(48),CONSULTATION_AUTH_TOKEN:'x'.repeat(48)};
+  const base={DB_HOST:'db',DB_USER:'test',DB_PASSWORD:'private',DB_NAME:'test',OPERATIONS_URL:'http://operations:3005',DELIVERY_URL:'http://delivery:3003',CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:'x'.repeat(48),CONSULTATION_AUTH_TOKEN:'x'.repeat(48)};
   assert.match(validateEnvironment(base).SECURITY_LOG_HMAC_KEY,/^[a-f0-9]{64}$/);
   assert.equal(validateEnvironment({...base,NODE_ENV:'production',SECURITY_LOG_HMAC_KEY:key}).SECURITY_LOG_HMAC_KEY,key);
   for(const value of [undefined,'','PRIVATE',{},'x'.repeat(64),'ab'.repeat(32)+'\n']) assert.throws(()=>validateEnvironment({...base,NODE_ENV:'production',SECURITY_LOG_HMAC_KEY:value}),error=>{

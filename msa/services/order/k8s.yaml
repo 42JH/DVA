@@ -62,6 +62,8 @@ spec:
               value: http://customer:3001
             - name: CONSULTATION_URL
               value: http://consultation:3004
+            - name: DELIVERY_URL
+              value: http://delivery:3003
             - name: CORS_ORIGINS
               value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
             - name: SWAGGER_ENABLED

@@ -1,3 +1,8 @@
+import {
+  requestOrderCancellation,
+  OrderCancellationError,
+} from '@dva/events/order-cancellation.cjs';
+import { OrderShipmentCheckClient } from './order-shipment-check.client';
 import { AuditService } from '../audit/audit.service';
 import { writeOrder } from './order-write';
 import { OrderDeletionCheckClient } from './order-deletion-check.client';
@@ -28,6 +33,7 @@ export class OrdersService {
     private readonly config: ConfigService<Environment, true>,
     private readonly audit: AuditService,
     private readonly deletionCheck: OrderDeletionCheckClient,
+    private readonly shipmentCheck: OrderShipmentCheckClient,
   ) {}
 
   async delete(id: number, adminId: number, requestId: string): Promise<void> {
@@ -49,6 +55,144 @@ export class OrdersService {
         { actorId: adminId, action: 'ORDER_DELETED', targetType: 'ORDER', targetId: id, requestId },
         client,
       );
+    });
+  }
+
+  async cancel(
+    adminId: number | null,
+    id: number,
+    requestId: string,
+    callSessionHeader?: string,
+    orderParcelSeqs?: number[],
+  ): Promise<void> {
+    const callId = this.callId(adminId, callSessionHeader);
+    if (adminId !== null) return this.cancelScoped(adminId, id, requestId, orderParcelSeqs, null);
+    try {
+      await requestOrderCancellation(
+        this.config.get('CONSULTATION_URL', { infer: true }) + '/internal/order-cancellation',
+        this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+        {
+          eventId: randomUUID(),
+          source: 'order',
+          eventType: 'OrderCancellationRequested',
+          payload: {
+            command: {
+              id,
+              callSessionSeq: callId!,
+              requestId,
+              orderParcelSeqs: orderParcelSeqs ?? null,
+            },
+          },
+        },
+      );
+    } catch (error) {
+      if (error instanceof OrderCancellationError)
+        throw new ApiException(
+          error.status,
+          error.error.code as ErrorCode,
+          error.error.message,
+          error.error.details,
+        );
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
+
+  async cancelScoped(
+    adminId: number | null,
+    id: number,
+    requestId: string,
+    orderParcelSeqs: number[] | undefined,
+    customerId: number | null,
+  ): Promise<void> {
+    await this.database.transaction(async (client) => {
+      const order = await this.repository.lockOrder(client, id);
+      if (!order || (customerId !== null && order.customerSeq !== customerId))
+        throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+      const parcels = await this.repository.lockParcels(client, id);
+      const selectedIds = orderParcelSeqs === undefined ? null : new Set(orderParcelSeqs);
+      const selected = selectedIds
+        ? parcels.filter((parcel) => selectedIds.has(parcel.orderParcelSeq))
+        : parcels;
+      if (selectedIds && selected.length !== selectedIds.size)
+        throw new ApiException(404, 'NOT_FOUND', '해당 주문의 상세를 찾을 수 없습니다.');
+      const targets = selected.filter((parcel) => parcel.status === 'ACTIVE');
+      if (selectedIds && targets.length === 0) return;
+      if (order.status === 'CANCELLED')
+        throw new ApiException(409, 'INVALID_STATE', '이미 취소된 주문입니다.');
+      if (order.status !== 'COLLECTING' && order.status !== 'notPaid')
+        throw new ApiException(409, 'INVALID_STATE', '현재 주문 상태에서는 취소할 수 없습니다.');
+
+      if (await this.repository.isApproving(client, id))
+        throw new ApiException(
+          409,
+          'REQUEST_IN_PROGRESS',
+          '결제 승인 처리 중에는 취소할 수 없습니다.',
+        );
+      const parcelIds = targets.map((parcel) => parcel.orderParcelSeq);
+      const hasShipments = await this.shipmentCheck.blocked(parcelIds);
+      if (
+        (order.status === 'COLLECTING' && hasShipments) ||
+        (order.status === 'notPaid' && (parcels.length === 0 || hasShipments))
+      )
+        throw new ApiException(
+          409,
+          'INVALID_STATE',
+          '결제 전 상태가 확인된 주문만 취소할 수 있습니다.',
+        );
+
+      // Every shipment blocks cancellation above; the source shipment UPDATE has no targets.
+      for (const parcel of selectedIds ? targets : []) {
+        await this.repository.cancelParcel(client, parcel.orderParcelSeq);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: parcel.orderParcelSeq,
+            targetType: 'ORDER_PARCEL',
+            action: 'ORDER_PARCEL_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      if (
+        !selectedIds ||
+        parcels.every(
+          (parcel) => parcel.status === 'CANCELLED' || selectedIds.has(parcel.orderParcelSeq),
+        )
+      ) {
+        await this.repository.cancel(client, id);
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: id,
+            targetType: 'ORDER',
+            action: 'ORDER_CANCELLED',
+            requestId,
+          },
+          client,
+        );
+      }
+      const amountAfter = await this.repository.recalculateAmount(client, id);
+      if (order.status === 'notPaid') await this.repository.replaceRequest(client, id);
+      if (targets.length > 0)
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: id,
+            targetType: 'ORDER',
+            action: 'ORDER_AMOUNT_CHANGED',
+            requestId,
+            metadata: { amountBefore: order.totalAmount, amountAfter, orderParcelSeqs: parcelIds },
+          },
+          client,
+        );
     });
   }
 

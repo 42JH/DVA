@@ -32,3 +32,9 @@
 ## 남은 범위
 
 주문 생성·수정·접수/재시도, 공개 결제/청구 API 및 자동 워커, 배송 생성/후속 이벤트, 남은 상담과 교차 서비스 보관·전체 동등성 검증은 별도 후속이다. 실제 운영 Jenkins/k3s/HTTPS·외부 결제/디버/AI 검증은 로컬 production 비교와 구분한다.
+
+## 구현 중 확인한 입력 경계
+
+최초 production 비교에서 공개 원본 한도 아래인 102,321바이트 선택 목록은 원본 404였으나 MSA 내부 envelope의 기본 100KiB 파서가 413을 내고 공개 503으로 변환했다. 배송 내부 조회에도 같은 413을 재현했다. 공개 한도/원본 기대값은 유지하고 새 내부 경로만 기존 call-scope와 같은 256KiB 파서로 연결한다. 이 큰 입력 비교와 공개 413 회귀를 남기며 최종 재검증 결과는 아래에 기록한다.
+
+공개 413 회귀는 내부 express.json을 직접 등록하면 Nest가 함수 이름 jsonParser만 보고 기본 공개 파서 등록을 생략한다는 추가 원인도 검출했다(설치된 express-adapter의 registerParserMiddleware/isMiddlewareApplied 확인). 기존 customer/consultation과 같은 익명 래퍼로 내부 파서를 등록해 공개 파서를 보존한다. 413 기대값과 실제 production 입력 비교는 유지한다.

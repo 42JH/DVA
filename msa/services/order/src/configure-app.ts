@@ -1,3 +1,4 @@
+import { json, type Request, type Response, type NextFunction } from 'express';
 import { ForbiddenException, INestApplication, Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -15,6 +16,15 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
       key: config.get('SECURITY_LOG_HMAC_KEY', { infer: true }),
       proxyHops: config.get('AUTH_PROXY_HOPS', { infer: true }),
     }),
+  );
+  // The internal envelope adds fields to the unchanged 100KiB public body.
+  const scopeParser = json({ limit: '256kb' });
+  // Nest detects parsers by function name; keep its default public JSON parser.
+  app.use(
+    '/internal/order-cancellation',
+    (request: Request, response: Response, next: NextFunction) => {
+      scopeParser(request, response, next);
+    },
   );
   app.enableCors({
     origin: (
@@ -43,6 +53,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
       { path: 'order/health/ready', method: RequestMethod.ALL },
       { path: 'internal/audit/flush', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
+      { path: 'internal/order-cancellation', method: RequestMethod.ALL },
     ],
   });
   app.useGlobalPipes(createValidationPipe());
@@ -54,7 +65,7 @@ export function configureApp(app: INestApplication, logger = new Logger('Http'))
       app,
       new DocumentBuilder()
         .setTitle('DVA Order API')
-        .setDescription('모놀리식과 동일한 주문 조회·삭제 및 이전 주문 주소 API')
+        .setDescription('모놀리식과 동일한 주문 조회·삭제·취소 및 이전 주문 주소 API')
         .setVersion('0.1.0')
         .addBearerAuth()
         .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')

@@ -1,4 +1,6 @@
 import { OrderDeletionCheckClient } from './order-deletion-check.client';
+import { OrderCancellationController } from './order-cancellation.controller';
+import { OrderShipmentCheckClient } from './order-shipment-check.client';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { OrdersService } from './orders.service';
@@ -12,10 +14,11 @@ import { OrderReadController } from './order-read.controller';
   imports: [DatabaseModule],
   controllers: [
     OrdersController,
+    OrderCancellationController,
     AdminOrdersController,
     OrderAddressesController,
     OrderReadController,
   ],
-  providers: [OrderDeletionCheckClient, OrdersService, OrdersRepository],
+  providers: [OrderShipmentCheckClient, OrderDeletionCheckClient, OrdersService, OrdersRepository],
 })
 export class OrdersModule {}

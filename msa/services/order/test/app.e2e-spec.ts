@@ -39,7 +39,7 @@ describe('Order read API (e2e)', () => {
     await app.close();
   });
 
-  it('keeps health and Swagger and declares four public reads and the administrator DELETE', async () => {
+  it('keeps health and Swagger and declares reads, DELETE and both cancellation routes', async () => {
     await request(app.getHttpServer()).get('/order/health').expect(200).expect({ status: 'ok' });
     await request(app.getHttpServer()).get('/order/health/ready').expect(200);
     await request(app.getHttpServer())
@@ -59,9 +59,13 @@ describe('Order read API (e2e)', () => {
           '/api/customers/{id}/addresses',
           '/api/orders',
           '/api/orders/{id}',
+          '/api/orders/{id}/cancel',
+          '/api/orders/{id}/parcels/cancel',
           '/order/health',
           '/order/health/ready',
         ]);
+        expect(Object.keys(body.paths['/api/orders/{id}/cancel'])).toEqual(['post']);
+        expect(Object.keys(body.paths['/api/orders/{id}/parcels/cancel'])).toEqual(['post']);
         for (const path of [
           '/api/admin/orders',
           '/api/customers/{id}/addresses',
@@ -94,12 +98,35 @@ describe('Order read API (e2e)', () => {
   it('requires the internal token and rejects unknown payloads without business queries', async () => {
     const before = query.mock.calls.length;
     await request(app.getHttpServer()).post('/internal/order-read').send({}).expect(403);
+    await request(app.getHttpServer()).post('/internal/order-cancellation').send({}).expect(403);
     await request(app.getHttpServer())
       .post('/internal/order-read')
       .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
       .send({})
       .expect(422);
     expect(query.mock.calls.length).toBe(before);
+  });
+
+  it('validates cancellation input before accepting AI scope', async () => {
+    for (const body of [
+      {},
+      { orderParcelSeqs: [] },
+      { orderParcelSeqs: [1, 1] },
+      { orderParcelSeqs: ['1'] },
+      { orderParcelSeqs: [0] },
+      { orderParcelSeqs: [1], adminId: 1 },
+    ])
+      await request(app.getHttpServer())
+        .post('/api/orders/1/parcels/cancel')
+        .send(body)
+        .expect(400);
+    await request(app.getHttpServer()).post('/api/orders/1/cancel').expect(400);
+    await request(app.getHttpServer())
+      .post('/api/orders/1/cancel')
+      .set('Origin', 'http://localhost:5173')
+      .set('Cookie', 'dva_session=bad')
+      .set('call_session_seq', '1')
+      .expect(401);
   });
 
   it('requires an allowed Origin and administrator session for DELETE and protects audit recovery', async () => {
@@ -116,5 +143,11 @@ describe('Order read API (e2e)', () => {
       .set('Authorization', 'Bearer ' + process.env.CUSTOMER_AUTH_TOKEN)
       .send({})
       .expect(400);
+  });
+  it('keeps the original public body limit when the internal envelope parser is larger', async () => {
+    await request(app.getHttpServer())
+      .post('/api/orders/1/parcels/cancel')
+      .send({ orderParcelSeqs: [], padding: 'x'.repeat(103000) })
+      .expect(413);
   });
 });

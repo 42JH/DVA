@@ -1,4 +1,10 @@
 import {
+  validateOrderCancellation,
+  requestOrderCancellation,
+  OrderCancellationError,
+  type OrderCancellationEvent,
+} from '@dva/events/order-cancellation.cjs';
+import {
   Body,
   Controller,
   Header,
@@ -20,14 +26,14 @@ import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 
 @ApiExcludeController()
-@Controller('internal/order-read')
+@Controller('internal')
 export class OrderReadScopeController {
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
 
-  @Post()
+  @Post('order-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   @SetMetadata('auth:internal-operations', true)
@@ -41,7 +47,7 @@ export class OrderReadScopeController {
     return this.query(event);
   }
 
-  @Post('call')
+  @Post('order-read/call')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   @SetMetadata('auth:internal-consultation', true)
@@ -54,7 +60,20 @@ export class OrderReadScopeController {
     return this.query(event);
   }
 
-  private async query(event: OrderReadEvent) {
+  @Post('order-cancellation/call')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  @SetMetadata('auth:internal-consultation', true)
+  async cancel(@Body() event: unknown) {
+    try {
+      validateOrderCancellation(event, 'consultation');
+    } catch {
+      throw new HttpException({ error: 'INVALID_ORDER_CANCELLATION' }, 422);
+    }
+    return this.query(event);
+  }
+
+  private async query(event: OrderReadEvent | OrderCancellationEvent) {
     try {
       return await this.database.transaction(async (client) => {
         const command = event.payload.command;
@@ -77,16 +96,29 @@ export class OrderReadScopeController {
         }
         const origin = this.config.get('ORDER_URL', { infer: true });
         if (!origin) throw new Error('Order service unavailable');
-        const payload = await requestOrderRead(
-          origin + '/internal/order-read',
-          this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
-          { ...event, source: 'customer', payload: { command, customerSeq: customer.id } },
-        );
+        const next = {
+          ...event,
+          source: 'customer',
+          payload: { command, customerSeq: customer.id },
+        };
+        const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+        const payload =
+          event.eventType === 'OrderCancellationRequested'
+            ? await requestOrderCancellation(
+                origin + '/internal/order-cancellation',
+                token,
+                next as OrderCancellationEvent,
+              )
+            : await requestOrderRead(
+                origin + '/internal/order-read',
+                token,
+                next as OrderReadEvent,
+              );
         return { eventId: event.eventId, status: 'processed', payload };
       });
     } catch (error) {
       if (error instanceof ApiException) throw error;
-      if (error instanceof OrderReadError)
+      if (error instanceof OrderReadError || error instanceof OrderCancellationError)
         throw new ApiException(
           error.status,
           error.error.code as ErrorCode,
