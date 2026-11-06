@@ -35,7 +35,7 @@ export function OrderListPage() {
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar search={{ tab: 'order', q: vm.q, onApply: vm.setQ, onOrder: vm.openOrderSeq }} />
       <div
-        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
+        className={`${COLS} mt-v28 h-[19px] shrink-0 grid-rows-[19px] items-center ${PAD} text-body font-semibold`}
       >
         <DayPick small day={day} onPick={vm.setDate} />
         <HeadPick
@@ -64,7 +64,7 @@ export function OrderListPage() {
               ? '맞는 주문이 없습니다.'
               : '주문이 없습니다.'
         }
-        className="pt-1 pr-[90px] pl-[68px]"
+        className="pr-[90px] pl-[68px]"
       />
       {/* 아래 오른쪽 [추가] (11/06 시안) · 취소 · 다시 접수 결과 한 줄은 그 왼쪽 */}
       <div className={`flex shrink-0 items-center justify-end gap-6 pt-3 ${PAD}`}>
@@ -157,11 +157,11 @@ function OrderLine({
       className={`${COLS} relative h-[72px] w-full items-center border-b border-line/70 text-left hover:bg-bg`}
     >
       {dayLabel && (
-        <span className="absolute top-1/2 -left-15 -translate-y-1/2 text-[12px] font-medium whitespace-nowrap">
+        <span className="absolute top-1/2 -left-15 w-[42px] -translate-y-1/2 text-center text-[12px] font-medium whitespace-nowrap">
           {fmtMonthDay(r.day)}
         </span>
       )}
-      <span className="pl-[13px] text-[12px] text-sub">{r.time}</span>
+      <span className="pl-3 text-[12px] text-sub">{r.time}</span>
       <span>
         <OrderChip small group={r.group} />
       </span>

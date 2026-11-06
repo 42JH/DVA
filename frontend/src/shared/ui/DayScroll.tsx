@@ -156,7 +156,7 @@ function Rows<R>({
       // 보정은 직접 하므로 브라우저 고정(overflow-anchor)은 끔
       className={`-mr-8 min-h-0 flex-[1_1_0px] [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] [scrollbar-gutter:stable] overflow-y-auto transition-opacity [overflow-anchor:none] ${feed.stale ? 'opacity-50' : ''} ${className}`}
     >
-      <div ref={top} aria-hidden className="h-px" />
+      <div ref={top} aria-hidden className="-mb-px h-px" />
       {loadingNewer && <p className={note}>불러오는 중…</p>}
       {newerError && retry(feed.loadNewer)}
       {feed.isLoading && <p className={note}>불러오는 중…</p>}
