@@ -4,7 +4,7 @@ set -euo pipefail
 test_root="$(mktemp -d)"
 trap 'rm -rf -- "$test_root"' EXIT
 mkdir -p "$test_root/bin" "$test_root/site/shared" "$test_root/site/releases"
-printf 'DB_USER=test\nDB_PASSWORD=test-only\nDB_NAME=test\n' > "$test_root/site/shared/.env"
+printf 'DB_USER=test\nDB_PASSWORD=test-only\nDB_NAME=test\nSECURITY_LOG_HMAC_KEY=abababababababababababababababababababababababababababababababab\n' > "$test_root/site/shared/.env"
 export TEST_DOCKER_LOG="$test_root/docker.log"
 export TEST_CREATION_SCHEMA="$test_root/creation-schema"
 export TEST_MEMBERSHIP_TABLE="$test_root/membership-table"

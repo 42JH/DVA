@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+S10은 [인증 보안 기록·탐지 운영](docs/security-auth-observability.md)을 따른다. production은 backend 전용 `SECURITY_LOG_HMAC_KEY`(32바이트 난수의 64자리 hex)를 먼저 주입한다. AI·프론트에는 공유하지 않는다. 인증 계약·S04 제한·DB는 유지하며, Alloy/Grafana 관측 설정은 별도로 반영한다.
+
 S09 녹취 처리는 [재시도·이행·운영 재개 절차](docs/recording-retry-policy.md)를 따른다. 새 앱 전에 054를 적용하고 기존 워커를 중지·백업한다. 최초 포함 최대 5회, 실패 후 1·5·15·30분 간격이며 정책 위반·상한 초과는 확인 대기다. 기존 FAILED는 원인 미상으로 보류하며 원본·녹취·기존 보관 정책을 유지한다. AI·프론트·PBX 계약과 환경변수는 그대로다.
 
 S05 결제 복구는 [실패 판정·연동 영향·운영 절차](docs/payment-approval-recovery.md)를 따른다. 최초 승인에서 확인한 결제 정보 없음·세션 만료는 기존 422로 반환하고 같은 링크의 재결제를 허용한다. 미확정 건의 조회 404·인증 오류·타임아웃은 확인 대기를 유지한다. AI·관리자 프론트의 API·환경변수와 DB 스키마는 변경하지 않는다.
@@ -107,6 +109,7 @@ npm run start:dev
 | 설정 | 규칙 |
 |---|---|
 | `NODE_ENV` | development / test / production |
+| `SECURITY_LOG_HMAC_KEY` | backend 전용 32바이트 난수의 64자리 hex. production 필수; development/test 미설정은 프로세스 임시 키 |
 | `PORT`, `DB_PORT` | 정수 1~65535, 기본 3000 / 5432 |
 | `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | 필수, 누락/빈 값이면 시작 중단 |
 | `AI_AGENT_URL` | 필수 HTTP(S) URL. 기존 readiness가 AI 연결까지 확인한다. 자격정보·query·fragment 금지 |

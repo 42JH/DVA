@@ -30,6 +30,6 @@ chmod 0700 "$runtime"
 compose=(docker compose --project-name dva-observability --env-file "$settings" --file "$root/compose.yaml")
 "${compose[@]}" config --quiet
 "${compose[@]}" up -d --remove-orphans
-# 파일 provisioning 변경을 다시 읽는다. 업무 앱은 재시작하지 않는다.
-"${compose[@]}" restart grafana
+# Bind-mounted file contents alone do not recreate containers; reload collection/query/alert rules.
+"${compose[@]}" restart loki alloy grafana
 echo 'Observability containers started. Verify health, sources and notification settings using README.md.'

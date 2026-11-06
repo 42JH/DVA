@@ -1,5 +1,7 @@
 # Lightsail 이미지 파일 배포
 
+S10 포함 릴리스 전에 운영 `shared/.env`에 backend 전용 `SECURITY_LOG_HMAC_KEY`(32바이트 난수의 64자리 hex)를 추가한다. 미설정/잘못된 값은 새 앱 시작을 거절한다. AI·프론트에 공유하지 않는다. Compose 재생성과 별도의 Alloy/Grafana 설정 반영은 [S10 운영 절차](../../backend/docs/security-auth-observability.md)를 따른다. 실제 키를 릴리스 산출물에 포함하지 않는다.
+
 ## AI 배포 관리 분리
 
 백엔드 패키징(`package.sh`, `package.ps1`)은 Backend·PostgreSQL·Nginx만 포함한다.

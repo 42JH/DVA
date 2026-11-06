@@ -88,7 +88,8 @@ def main():
         complete(name)
         common = ['-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=' + password,
                   '-e', 'DB_NAME=dva_webhook_test', '-e', 'AI_AGENT_URL=http://ai.invalid:8000',
-                  '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true']
+                  '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
+                  '-e', 'SECURITY_LOG_HMAC_KEY=' + uuid.uuid4().hex + uuid.uuid4().hex]
         for side in ('monolith', 'operations'):
             name = RUN + '-' + side + '-suite'
             create(name, images[side + '-checks'], *common, '--add-host=db:' + addresses[side],

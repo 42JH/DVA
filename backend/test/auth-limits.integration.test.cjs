@@ -1,6 +1,7 @@
 require('reflect-metadata');
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.AUTH_PROXY_HOPS = '0';
+process.env.AI_BUSINESS_TOKEN ??= 's10-business-test-only-token-with-32-characters';
 const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
@@ -76,6 +77,43 @@ beforeEach(() => {
 });
 after(async () => {
   if (app) await app.close();
+});
+
+test('security events correlate failed and successful logins, ignore forged IP headers and retain API contracts', async () => {
+  const loginId = await account('S10');
+  const start = logs.length;
+  const first = await login(loginId, 'wrong password');
+  const second = await login(loginId, 'wrong password', { 'X-Forwarded-For': '198.51.100.1' });
+  assert.equal(first.status, 401);
+  assert.equal(second.body.error.code, 'UNAUTHORIZED');
+  const other = await login(loginId + 'x', 'wrong password');
+  assert.equal(other.status, 401);
+  const success = await login(loginId);
+  assert.equal(success.status, 200);
+  assert.match(success.headers.get('set-cookie'), /dva_session=/);
+  const service = await call('GET', '/api/companies/search?q=securitytest');
+  assert.equal(service.status, 401);
+  const events = logs.slice(start).filter((row) => row.event.startsWith('authentication_'));
+  assert.equal(events.length, 5);
+  assert.equal(events[0].accountKey, events[1].accountKey);
+  assert.equal(events[0].sourceKey, events[1].sourceKey);
+  assert.notEqual(events[0].accountKey, events[2].accountKey);
+  assert.equal(events[0].accountKey, events[3].accountKey);
+  assert.equal(events[3].event, 'authentication_success');
+  assert.equal(events[4].authType, 'ai_business');
+  assert.equal(events[4].reason, 'invalid_service_token');
+  assert.equal(events[0].requestId, first.body.meta.requestId);
+  for (const secret of [loginId, password, 'wrong password', '198.51.100.1'])
+    assert.ok(!JSON.stringify(events).includes(secret));
+  const beforeLimits = logs.length;
+  for (let index = 0; index < 5; index++)
+    assert.equal((await login(loginId, 'wrong password')).status, 401);
+  assert.equal((await login(loginId, 'wrong password')).status, 429);
+  const limitedEvents = logs
+    .slice(beforeLimits)
+    .filter((row) => row.event === 'authentication_failure');
+  assert.equal(limitedEvents.filter((row) => row.reason === 'invalid_credentials').length, 5);
+  assert.equal(limitedEvents.filter((row) => row.reason === 'rate_limited').length, 1);
 });
 
 test('signup limits malformed attempts before validation/DB and ignores forged direct-peer IP headers', async () => {
