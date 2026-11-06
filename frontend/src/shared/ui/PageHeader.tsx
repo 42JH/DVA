@@ -20,12 +20,14 @@ export function TopBar({
   extra,
   center,
   wide,
+  lead,
 }: {
   search?: SearchProps | false
   crumbs?: Crumb[]
   extra?: ReactNode
   center?: ReactNode
   wide?: boolean
+  lead?: ReactNode // 검색칸 바로 왼쪽 (04 필터 단추, 11/06 시안 — 검색칸과 사이 16)
 }) {
   // 검색칸: 넘긴 대로. 안 넘기면 경로 화면은 없음 · 나머지는 주문 탭이 먼저
   const box = search ?? (crumbs ? false : ({ tab: 'order' } as const))
@@ -40,6 +42,7 @@ export function TopBar({
         {crumbs && (
           <Crumbs items={crumbs} className={`min-w-0 truncate ${wide ? 'text-card' : ''}`} />
         )}
+        {lead && <div className="-mr-2 ml-auto shrink-0">{lead}</div>}
       </div>
       {center ??
         (box ? (

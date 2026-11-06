@@ -512,6 +512,8 @@ const recordingsOf = (r: CallRow) => {
 }
 
 /** 통화 기본 (CallListItem · Call 공통 부분) */
+const ORGS = ['(주)서강물산', '디버물류', '한빛상사', '세종테크', '오렌지마켓']
+
 function callOf(r: CallRow) {
   const scene = sceneOf(r.callSessionSeq)
   const order = scene?.results.find((x) => x.kind !== 'UNANSWERED')
@@ -732,7 +734,13 @@ export const callHandlers = [
     })
     return HttpResponse.json(
       pageOf(
-        hit.map((r) => ({ ...callOf(r), analysis: pending(r) ? null : analysisOf(r) })),
+        hit.map((r) => ({
+          ...callOf(r),
+          // 11/06 시안 '기업' 열 — 백엔드 추가 요청 중인 칸. 가짜는 통화 번호로 기업을 돌려 씀(3통화에 1통화는 개인 = null)
+          organizationName:
+            r.callSessionSeq % 3 === 0 ? null : ORGS[r.callSessionSeq % ORGS.length],
+          analysis: pending(r) ? null : analysisOf(r),
+        })),
         url,
       ),
     )
