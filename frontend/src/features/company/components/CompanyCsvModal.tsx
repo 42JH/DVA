@@ -1,5 +1,5 @@
 import { Button, FileDrop, Dialog, TextField } from '@/shared/ui'
-import { CSV_HEADER, downloadExampleCsv } from '@/features/company/csvMembers'
+import { CSV_HEADER, downloadExample } from '@/features/company/csvMembers'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 
 // 08 CSV로 기업 등록 창 (Figma 08_기업관리_CSV기업등록 · CSV오류, 11/01) — 기업명 + CSV 파일 → [취소] [등록]
@@ -9,14 +9,14 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog
-      label="CSV로 기업 등록"
+      label="엑셀로 기업 등록"
       width={600}
-      title="CSV로 기업 등록"
+      title="엑셀로 기업 등록"
       onClose={onClose}
       footer={
         <>
-          <Button big onClick={downloadExampleCsv}>
-            예시 CSV 내려받기
+          <Button big onClick={downloadExample}>
+            예시 엑셀 내려받기
           </Button>
           {vm.errorMessage && (
             <p role="alert" className="min-w-0 text-body text-danger">
@@ -43,16 +43,17 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col gap-2">
           <FileDrop
             file={vm.file}
-            accept=".csv"
+            accept=".xlsx,.csv"
             error={vm.fileError}
             onPick={(f) => void vm.pick(f)}
             onRemove={vm.removeFile}
           />
           {/* 파일 모양 안내 — 엑셀이 사번 앞 0을 지우는 일이 많아 함께 알림 */}
           <p className="text-caption text-sub">
-            첫 줄: {CSV_HEADER.join(',')} (상세주소 열은 빼도 됨) · 주소는 도로명 · 지번 · 동 ·
-            우편번호 모두 필수 · 대표자(Y) · 부서 · 상세주소는 빈칸 가능 · 없는 부서는 새로 만듦 ·
-            사번 칸은 텍스트로 저장해야 앞자리 0이 남습니다.
+            엑셀(.xlsx) 또는 CSV · 첫 줄: {CSV_HEADER.join(',')} (상세주소 열은 빼도 됨) · 주소는
+            도로명 · 지번 · 동 · 우편번호 모두 필수 · 대표자(Y) · 부서 · 상세주소는 빈칸 가능 · 없는
+            부서는 새로 만듦 · 사번 · 전화번호 · 우편번호 칸은 텍스트 형식이어야 앞자리 0이
+            남습니다(예시 엑셀은 이미 텍스트).
             {vm.count > 0 && ` · 사원 ${vm.count}명`}
           </p>
         </div>
