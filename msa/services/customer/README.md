@@ -1,5 +1,7 @@
 # Customer 서비스
 
+[주문 조회 이식](../../../docs/msa-order-reads-plan.md)은 기존 공개 customer API를 유지하고 내부 주문 조회 범위 확인만 추가한다. `ORDER_URL`은 미설정 시 기존 API의 시작을 막지 않으며, k3s에는 `http://order:3002`를 주입한다. 관리자 이전 주소는 삭제되지 않은 고객, AI는 현재 발신번호의 ACTIVE 고객을 공유 잠금으로 확인한 동안 order의 조회 callback을 기다린다. 내부 요청은 기존 토큰·source/type/payload 검증을 거치며 개인정보 응답을 저장하지 않는다. 공개 `/api/customers/:id/addresses`는 order Ingress로 전달한다.
+
 모놀리식의 고객·기업·부서·구성원과 고객 확인/통화 등록·개인 PIN 23개 API를 제공한다. 프론트·AI 요청 형식은 바꾸지 않는다. 관련 작업은 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [쓰기 계획](../../../docs/msa-customer-writes-plan.md), [고객 확인·통화 등록 계획](../../../docs/msa-caller-context-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
 ## 공개 API

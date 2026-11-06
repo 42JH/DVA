@@ -13,6 +13,7 @@ export interface Environment {
   DB_NAME: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
+  ORDER_URL?: string;
   OPERATIONS_URL: string;
   CUSTOMER_AUTH_TOKEN: string;
   CONSULTATION_AUTH_TOKEN?: string;
@@ -105,6 +106,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     DB_NAME: required('DB_NAME'),
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
+    ORDER_URL: typeof raw.ORDER_URL === 'string' ? raw.ORDER_URL : undefined,
     OPERATIONS_URL: required('OPERATIONS_URL'),
     CUSTOMER_AUTH_TOKEN: required('CUSTOMER_AUTH_TOKEN'),
     CONSULTATION_URL: typeof raw.CONSULTATION_URL === 'string' ? raw.CONSULTATION_URL : undefined,
@@ -138,6 +140,21 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         errors.push('CONSULTATION_URL');
     } catch {
       errors.push('CONSULTATION_URL');
+    }
+  }
+  if (raw.ORDER_URL !== undefined) {
+    try {
+      if (typeof raw.ORDER_URL !== 'string') throw new Error();
+      const url = new URL(raw.ORDER_URL);
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.origin !== raw.ORDER_URL ||
+        url.username ||
+        url.password
+      )
+        errors.push('ORDER_URL');
+    } catch {
+      errors.push('ORDER_URL');
     }
   }
   if (errors.length) throw new EnvironmentValidationError(errors);

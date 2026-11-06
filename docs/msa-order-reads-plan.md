@@ -22,7 +22,7 @@
 
 1. order에 기존 MSA의 PostgreSQL·설정·관리자 세션 조회·HTTP 검증/에러/보안 기록 기반을 적용하고 네 조회 controller·DTO·repository·service를 연결한다. 기존 패키지 버전을 재사용하며 새 종류의 의존성/앱/Redis/브로커를 도입하지 않는다.
 2. 내부 `OrderReadRequested` 조회 이벤트를 order → consultation → customer → order로 전달한다. consultation은 유효한 통화의 상태/발신번호를, customer는 활성 고객 또는 관리자 주소 조회 고객 존재를 확인한다. 해당 행의 공유 잠금을 유지하는 동안 order가 로컬 REPEATABLE READ 스냅샷으로 조회한다. order는 원격 대기 중 자기 DB 연결을 점유하지 않는다. 다른 소유자의 테이블과 개인정보 응답 캐시를 복제하지 않는다. 조회 재시도는 현재 상태를 다시 읽으며 outbox/inbox 업무 이력을 생성하지 않는다.
-3. 기존 내부 토큰·보안 로그 Secret을 재사용한다. 내부 source/type/payload/응답 ID·구조·크기·timeout을 검증하고 오류/응답 유실은 안전한 오류로 반환한다. 내부 controller는 공개 Ingress·OpenAPI에서 제외한다. 고객 잠금은 원본과 동일한 일관된 접근 판정을 위한 것으로, 동시 쓰기는 짧게 대기할 수 있다.
+3. 기존 내부 토큰·보안 로그 Secret을 재사용한다. 내부 source/type/payload/요청 크기·응답 ID·구조·timeout을 검증하고 오류/응답 유실은 안전한 오류로 반환한다. 내부 controller는 공개 Ingress·OpenAPI에서 제외한다. 고객 잠금은 원본과 동일한 일관된 접근 판정을 위한 것으로, 동시 쓰기는 짧게 대기할 수 있다.
 4. Docker context·health/readiness·k3s 환경/기존 공개 경로·Jenkins parity 단계·서비스 선택/배포 순서와 문서를 함께 연결한다. `/api/customers/:id/addresses`는 customer Prefix보다 구체적인 order 라우트로 보낸다. 기존 customer API 경로를 덮어쓰지 않는다.
 
 ## 검증 및 완료 조건

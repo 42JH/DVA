@@ -1,3 +1,5 @@
+MR !352 병합 `c400c72`를 기준으로 [주문 조회 4개 API](../docs/msa-order-reads-plan.md)를 이식한다. 원본 054/backend tree `f5b00cd9f9d2f7e09805ed042cbc56a7e305c799`가 기준이다. 주문 목록·상세·관리자 목록·이전 주문 주소와 기존 관리자 세션/AI 통화·고객 범위를 연결한다. 주문 쓰기·결제·청구·접수/배송 이벤트·통화 이벤트/미답변 목록/FAQ 전환·보관 워커와 전체 동등성은 후속이다.
+
 # MSA CI/CD
 
 MR !337 병합 기준 `1597c62`에서 착수하고 최신 `ad40526`(고객 등록 주소 필수·주문 가격 정책)을 반영해 [미답변 수집·삭제와 통화 콘텐츠 조회·삭제 6개 API](../docs/msa-call-content-plan.md)를 이식한다. 원본 054와 동일 입력/응답·삭제 조건·감사를 유지하며 통화 이벤트 수집/FAQ 사례 생성·미답변 목록/전환·주문과 전체 동등성은 후속이다.
@@ -31,8 +33,8 @@ Webhook → develop-backend checkout → 스크립트 검사 → 실제 배포 �
 앱은 서비스별 **실제 배포 성공 커밋**과 비교한다. CI만 성공했거나 배포가 실패한 변경을 누락하지 않는다. 기존 정상 customer는 이미지 태그의 커밋으로 최초 이력을 이어받는다. 클러스터 이력 조회 실패는 배포를 중단한다.
 
 - 서비스 폴더 변경: 해당 서비스만 빌드한다. 앱 공통 배포 코드 변경: 모든 서비스를 빌드한다.
-- customer/consultation/operations 이미지는 `@dva/events` 파일 의존성을 포함하도록 `docker build -f msa/services/<서비스>/Dockerfile msa`로 빌드한다. order/delivery는 기존 개별 폴더 context를 사용한다. Jenkins·비교 검증기·k3s fixture도 같은 경로를 사용한다.
-- customer/consultation은 operations에 현재 세션을 확인하며 consultation은 customer 조회 이벤트에도 의존한다. 모두 선택되면 operations → customer → consultation 순서로 배포한다. 기존 서비스 Secret 값은 보존하며 customer의 조회에는 consultation의 readiness를 요구하지 않아 의존 순환을 만들지 않는다. 통화 등록 요청의 의존 장애는 503으로 반환한다.
+- customer/consultation/operations/order 이미지는 `@dva/events` 파일 의존성을 포함하도록 `docker build -f msa/services/<서비스>/Dockerfile msa`로 빌드한다. delivery는 기존 개별 폴더 context를 사용한다. Jenkins·비교 검증기·k3s fixture도 같은 경로를 사용한다.
+- customer/consultation은 operations에 현재 세션을 확인하며 consultation은 customer 조회 이벤트에도 의존한다. order는 조회 범위 확인을 위해 customer·consultation에 의존한다. 모두 선택되면 operations → customer → consultation → order 순서로 배포한다. 기존 서비스 Secret 값은 보존하며 customer의 조회에는 consultation의 readiness를 요구하지 않아 의존 순환을 만들지 않는다. 통화 등록 요청의 의존 장애는 503으로 반환한다.
 - DB CI는 마지막 성공 CI 커밋 기준으로 DB 관련 경로를 비교한다. 앱 전용 코드·문서 변경만으로 DB 검사를 실행하지 않는다. Jenkinsfile, DB 배포 코드, 공통 SSH 설정 변경이나 비교 이력 누락은 DB CI를 실행한다.
 - Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
 - `develop-backend` 실행은 CI와 CD를 함께 수행한다. 수동 재실행도 동일한 흐름이다. 작업 브랜치는 CI만 수행한다.

@@ -35,6 +35,37 @@ spec:
               value: production
             - name: PORT
               value: "3002"
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGDATABASE}
+            - name: OPERATIONS_URL
+              value: "http://operations:3005"
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: CUSTOMER_URL
+              value: http://customer:3001
+            - name: CONSULTATION_URL
+              value: http://consultation:3004
+            - name: CORS_ORIGINS
+              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+            - name: SWAGGER_ENABLED
+              value: "true"
           resources:
             requests:
               cpu: 100m
@@ -50,7 +81,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /order/health
+              path: /order/health/ready
               port: http
             periodSeconds: 3
             timeoutSeconds: 2
@@ -88,6 +119,7 @@ metadata:
   name: order
   namespace: dva
   annotations:
+    traefik.ingress.kubernetes.io/router.pathmatcher: PathRegexp
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: "true"
     traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
@@ -97,6 +129,18 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/orders
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /api/admin/orders
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /api/customers/[^/]+/addresses/?$
+            pathType: ImplementationSpecific
+            backend:
+              service: { name: order, port: { number: 3002 } }
           - path: /order
             pathType: Prefix
             backend:

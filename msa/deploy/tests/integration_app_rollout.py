@@ -47,7 +47,7 @@ def main():
     cluster_created = False
     database_resources = []
     try:
-        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations',) if service == 'operations' else ()
+        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations', 'order') if service == 'order' else ('operations',) if service == 'operations' else ()
         addresses = {}
         if db_services:
             if not created:
@@ -121,12 +121,13 @@ def main():
             app.ensure_service_auth_secret('consultation')
             app.ensure_service_auth_secret('security-logs')
             tokens = {peer: base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-' + peer + '-auth', '-o', 'json'))['data'][peer + '-token']).decode('ascii') for peer in ('customer', 'consultation')}
-        if service in ('customer', 'consultation'):
+            security_key = base64.b64decode(json.loads(kube('-n', 'dva', 'get', 'secret', 'msa-security-logs', '-o', 'json'))['data']['hmac-key']).decode('ascii')
+        if service in ('customer', 'consultation', 'order'):
             operations = network + '-operations-app'
             command(['docker', 'build', '--label', label, '-t', operations, '-f', str(ROOT / 'msa/services/operations/Dockerfile'), str(ROOT / 'msa')])
             database_resources.append(('image', operations))
             command(['docker', 'run', '-d', '--name', operations, '--label', label, '--network', network,
-                     '-e', 'NODE_ENV=production', '-e', 'PORT=3005', '-e', 'SWAGGER_ENABLED=true',
+                     '-e', 'NODE_ENV=production', '-e', 'SECURITY_LOG_HMAC_KEY=' + security_key, '-e', 'PORT=3005', '-e', 'SWAGGER_ENABLED=true',
                      '-e', f'DB_HOST={addresses["operations"]}', '-e', 'DB_PORT=5432',
                      '-e', 'DB_USER=operations_app', '-e', 'DB_PASSWORD=disposable-test-only',
                      '-e', 'DB_NAME=dva_webhook_test', '-e', 'CUSTOMER_AUTH_TOKEN=' + tokens['customer'],
@@ -139,7 +140,7 @@ def main():
             command(['docker', 'build', '--label', label, '-t', customer, '-f', str(ROOT / 'msa/services/customer/Dockerfile'), str(ROOT / 'msa')])
             database_resources.append(('image', customer))
             command(['docker', 'run', '-d', '--name', customer, '--label', label, '--network', network,
-                     '-e', 'NODE_ENV=production', '-e', 'PORT=3001', '-e', 'SWAGGER_ENABLED=true',
+                     '-e', 'NODE_ENV=production', '-e', 'SECURITY_LOG_HMAC_KEY=' + security_key, '-e', 'PORT=3001', '-e', 'SWAGGER_ENABLED=true',
                      '-e', 'DB_HOST=' + addresses['customer'], '-e', 'DB_USER=customer_app', '-e', 'DB_PORT=5432',
                      '-e', 'DB_PASSWORD=disposable-test-only', '-e', 'DB_NAME=dva_webhook_test',
                      '-e', 'OPERATIONS_URL=http://' + operations_address + ':3005',
@@ -159,7 +160,7 @@ def main():
             manifest = '---'.join(manifest.split('---')[:2])
             resources = app.parse_resources(kube('create', '--dry-run=client', '-f', '-', '-o', 'json', data=manifest))
             dep = next(r for r in resources if r['kind'] == 'Deployment')
-            if service in ('customer', 'consultation'):
+            if service in ('customer', 'consultation', 'order'):
                 env = dep['spec']['template']['spec']['containers'][0]['env']
                 next(item for item in env if item['name'] == 'OPERATIONS_URL')['value'] = f'http://{operations_address}:3005'
                 if service == 'consultation':
