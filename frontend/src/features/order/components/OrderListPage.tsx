@@ -1,13 +1,11 @@
-import { useCallback, useRef, useState, type UIEvent } from 'react'
+import { useCallback, useState } from 'react'
 import { useLocation } from 'react-router'
 import { fmtMonthDay } from '@/shared/lib/format'
 import type { Ymd } from '@/shared/lib/dateRange'
-import { useDismiss } from '@/shared/lib/useDismiss'
-import { Button, ConfirmDialog, DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { Button, ConfirmDialog, DayPick, DayScroll, HeadPick, Highlight, TopBar } from '@/shared/ui'
 import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
-import type { StatusGroup } from '@/features/order/api/orderApi'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
@@ -30,28 +28,28 @@ export function OrderListPage() {
   const [seen, setSeen] = useState<{ key: string; day: Ymd } | null>(null) // 맨 위에 보이는 줄의 날
   const day = (seen?.key === key && seen.day) || vm.anchor
   const onTop = useCallback((row: HTMLElement) => setSeen({ key, day: row.dataset.day! }), [key])
-  const fold = useFoldOnScroll()
   // 날마다 첫 줄 — 그 줄 왼쪽에 '11월 3일' (머리줄 날짜와 같은 날이면 안 붙임)
   const firstOfDay = new Set(vm.feed.days.map((d) => d.rows[0]?.key))
 
   return (
-    <div className="flex min-h-0 flex-[1_1_0px] flex-col" onScrollCapture={fold.onScroll}>
+    <div className="flex min-h-0 flex-[1_1_0px] flex-col">
       <TopBar search={{ tab: 'order', q: vm.q, onApply: vm.setQ, onOrder: vm.openOrderSeq }} />
-      {/* 표 머리줄: 목록을 내리면 위로 접히고 올리면 다시 나옴 (11/05 사용자). 접힌 동안만 잘라 냄 — 펼쳐 있을 땐 날짜 · '주문 상태 ⌄' 창이 아래로 나와야 해서 */}
       <div
-        className={`grid shrink-0 transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${fold.folded ? 'grid-rows-[0fr] overflow-hidden' : 'grid-rows-[1fr]'}`}
+        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
       >
-        <div className="min-h-0" inert={fold.folded}>
-          <div className={`${COLS} mt-v44 h-6 items-center ${PAD} text-body font-semibold`}>
-            <DayPick small day={day} onPick={vm.setDate} />
-            <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
-            <span>보내는 분</span>
-            <span>받는 분</span>
-            <span className="text-right">주문번호</span>
-          </div>
-        </div>
+        <DayPick small day={day} onPick={vm.setDate} />
+        <HeadPick
+          label="주문 상태"
+          all="ALL"
+          value={vm.group}
+          options={vm.groups}
+          onPick={vm.setGroup}
+        />
+        <span>보내는 분</span>
+        <span>받는 분</span>
+        <span className="text-right">주문번호</span>
       </div>
-      <div className="mt-[10px] mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
+      <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       {/* 줄 상자: 왼쪽 68 = 머리줄과 같은 선(날이 바뀌는 줄의 '11월 3일'은 그 왼쪽 여백에) · 오른쪽 90 = 68 + 32(막대를 카드 끝으로 뺀 만큼) − 10(막대) */}
       <DayScroll
         feed={vm.feed}
@@ -66,7 +64,7 @@ export function OrderListPage() {
               ? '맞는 주문이 없습니다.'
               : '주문이 없습니다.'
         }
-        className="pt-[5px] pr-[90px] pl-[68px]"
+        className="pt-1 pr-[90px] pl-[68px]"
       />
       {/* 아래 오른쪽 [추가] (11/06 시안) · 취소 · 다시 접수 결과 한 줄은 그 왼쪽 */}
       <div className={`flex shrink-0 items-center justify-end gap-6 pt-3 ${PAD}`}>
@@ -188,85 +186,5 @@ function Party({ p, q }: { p: OrderListRow['sender']; q: string }) {
         {p.address ? <Highlight text={p.address} q={q} /> : '—'}
       </span>
     </span>
-  )
-}
-
-/** 목록을 내리면 접힘 · 올리면(또는 맨 위면) 펼침 — 줄 상자(DayScroll)의 스크롤을 바깥에서 잡음(capture, 스크롤은 위로 안 번져서)
- *  한 번에 크게 뛴 건 무시: 위에 날이 붙을 때 DayScroll이 보던 줄을 제자리에 두려고 scrollTop을 크게 옮김(사람 스크롤 아님) */
-function useFoldOnScroll() {
-  const [folded, setFolded] = useState(false)
-  const last = useRef(0)
-  const onScroll = (e: UIEvent) => {
-    const y = (e.target as HTMLElement).scrollTop
-    const d = y - last.current
-    last.current = y
-    if (y < 40) setFolded(false)
-    else if (Math.abs(d) > 4 && Math.abs(d) < 250) setFolded(d > 0)
-  }
-  return { folded, onScroll }
-}
-
-/** 열 머리 '주문 상태 ⌄' — 누르면 상태 고르기. 고르면 머리가 그 상태 이름(파랑)으로 */
-function StatusPick({
-  value,
-  options,
-  onPick,
-}: {
-  value: StatusGroup
-  options: { value: StatusGroup; label: string }[]
-  onPick: (g: StatusGroup) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => setOpen(false), [])
-  useDismiss(open, root, close)
-  const on = value !== 'ALL'
-  return (
-    <div ref={root} className="relative justify-self-start">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1 ${on ? 'text-brand' : 'hover:text-brand'}`}
-      >
-        {on ? options.find((o) => o.value === value)?.label : '주문 상태'}
-        <svg
-          viewBox="0 0 24 24"
-          className={`size-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="주문 상태 — 고르면 그 상태만"
-          className="absolute top-full left-0 z-20 mt-2 w-max min-w-44 origin-top-left overflow-hidden rounded-xl bg-surface py-1 shadow-[0_12px_12px_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.04)] ring-1 ring-line motion-safe:animate-pop-in"
-        >
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={o.value === value}
-              onClick={() => {
-                onPick(o.value)
-                close()
-              }}
-              className={`flex h-11 w-full items-center px-4 text-left text-body ${o.value === value ? 'font-semibold text-brand' : 'font-normal text-ink hover:bg-bg'}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }

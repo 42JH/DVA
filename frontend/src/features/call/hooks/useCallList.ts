@@ -1,15 +1,12 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
 import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtDuration, fmtPhone, fmtRowTime } from '@/shared/lib/format'
+import { fmtDuration, fmtPhone, fmtTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
-import { KINDS, kindChips } from '@/shared/lib/callKind'
+import { KINDS, KIND_LABEL, kindChips } from '@/shared/lib/callKind'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import { matchCall, type CallFilter, type CallKind } from '@/features/call/api/callDto'
 import {
-  callPersonaQueries,
   fetchCallDay,
-  latestCallOf,
   prevCallDay,
   nextCallDay,
   type CallRow,
@@ -32,7 +29,7 @@ export const NO_FILTER: CallFilterForm = { newOnly: false, kinds: [], min: 0, ma
 /** 목록 한 줄 = 통화 + 화면용 글 (Figma '통화' 11/04) */
 export type CallListRow = CallRow & {
   day: Ymd // 받은 날 (머리 날짜 · 스크롤 위치)
-  time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40'
+  time: string // '오후 3:02' (날은 머리줄 · 표 왼쪽 날짜)
   name: string
   phone: string // 마스킹 안 함 (11/04 사용자)
   kinds: { kind: CallKind; label: string }[] // 한 것만 — 두 번 이상이면 '접수 3'
@@ -44,11 +41,12 @@ export type CallListRow = CallRow & {
 // date '' = 오늘 · at = 그 통화가 맨 위에 오게(상담가를 골라 옮겨 왔을 때) · new '1' = 신규만 · kinds 'accept,faq' · dur '3-10'(분, 끝이 비면 제한 없음)
 const DEFAULTS = { date: '', at: '', q: '', new: '', kinds: '', dur: '' }
 
-const toView = (r: CallRow, day: Ymd, today: Ymd): CallListRow => ({
+const toView = (r: CallRow, day: Ymd): CallListRow => ({
   ...r,
   day,
-  time: r.startedAt ? fmtRowTime(r.startedAt, today) : '—',
+  time: r.startedAt ? fmtTime(r.startedAt) : '—',
   name: r.customerName ?? '—',
+  company: r.company ?? '',
   phone: r.callerNumber ? fmtPhone(r.callerNumber) : '—',
   kinds: kindChips(r.counts),
   complaint: r.complaints.length
@@ -76,7 +74,7 @@ const toFilter = (f: CallFilterForm): CallFilter => ({
 })
 
 /** 04 통화 내역 훅 (Figma '통화' 11/04) — 고른 날짜(기본 오늘)부터 하루씩 무한 스크롤, 오늘은 5초마다 새로
- *  거르기: 검색(이름 · 전화번호, 서버) · 상담가 토글 · 필터 창(신규 · 상담 유형 · 통화 시간, 화면). 줄을 누르면 그 통화의 06 */
+ *  거르기: 검색(이름 · 전화번호, 서버) · 머리줄 '상담 유형 ⌄'(하나) · 필터 창(신규 · 상담 유형 · 통화 시간, 화면). 줄을 누르면 그 통화의 06 */
 export function useCallList() {
   const { params, set } = useListParams(DEFAULTS)
   const today = todayYmd()
@@ -85,14 +83,6 @@ export function useCallList() {
   const q = params.q.trim()
   const form = parseForm(params)
   const filter = toFilter(form)
-
-  // 상담가: 이름은 화면이 스크롤 따라 맨 위 통화의 상담가로 바꿔 보여 줌. 고르면 그 상담가가 받은 가장 최근 통화로 이동 (거르지 않음)
-  const personas = useQuery(callPersonaQueries.list())
-  const jump = useMutation({
-    mutationFn: latestCallOf,
-    onSuccess: (hit) =>
-      hit && set({ date: hit.day >= today ? '' : hit.day, at: String(hit.callSessionSeq) }),
-  })
 
   const feed = useDayFeed({
     key: ['calls', 'list'],
@@ -105,7 +95,7 @@ export function useCallList() {
   })
   const days = feed.days.map(({ day, rows }) => ({
     day,
-    rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day, today)),
+    rows: rows.filter((r) => matchCall(r, filter)).map((r) => toView(r, day)),
   }))
   const isFiltered = form.newOnly || form.kinds.length > 0 || form.min > 0 || form.max < DUR_MAX
 
@@ -116,17 +106,6 @@ export function useCallList() {
 
     setDate: (d: Ymd) => set({ date: d >= today ? '' : d, at: '' }),
 
-    personas: personas.data ?? [],
-    activePersona: personas.data?.find((p) => p.inUse)?.name ?? null, // 맨 위 통화의 상담가를 모를 때(분석 전)
-    pickPersona: (personaSeq: number) => jump.mutate(personaSeq),
-    jumping: jump.isPending,
-    jumpNote: jump.isError
-      ? '찾지 못했습니다. 다시 시도해 주세요.'
-      : jump.isSuccess && !jump.data
-        ? '이 상담가가 받은 통화가 없습니다.'
-        : null,
-    resetJump: jump.reset,
-
     q: params.q,
     // 검색하면 오늘부터 (최근 통화가 위) — 지난 날짜에 머물러 있으면 새 결과가 안 보임. 같은 값이면 그대로
     setQ: (v: string) => {
@@ -135,6 +114,13 @@ export function useCallList() {
 
     form,
     isFiltered,
+    // 머리줄 '상담 유형 ⌄' (11/06 시안) — 하나만 고름(필터 창에서 여럿 고른 상태면 '전체'로 보임). 신규 · 통화 시간 조건은 그대로
+    kind: (form.kinds.length === 1 ? form.kinds[0] : 'ALL') as CallKind | 'ALL',
+    kindOptions: [
+      { value: 'ALL' as const, label: '전체' },
+      ...KINDS.map((k) => ({ value: k, label: KIND_LABEL[k] })),
+    ],
+    setKind: (k: CallKind | 'ALL') => set({ at: '', kinds: k === 'ALL' ? '' : k }),
     applyForm: (f: CallFilterForm) =>
       set({
         at: '',

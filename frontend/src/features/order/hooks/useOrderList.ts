@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtRowTime } from '@/shared/lib/format'
+import { fmtTime } from '@/shared/lib/format'
 import { useDayFeed } from '@/shared/lib/useDayFeed'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ORDER_GROUP, orderNo, type OrderGroup } from '@/shared/order/labels'
@@ -25,7 +25,7 @@ export interface OrderListRow {
   day: Ymd // 접수한 날 (머리 날짜 · 스크롤 위치)
   orderSeq: number // 줄을 누르면 이 주문 상세 (미완료 · 취소도 열림, 11/01 결정)
   parcelSeq: number | null // 그 줄의 배송 상세 → 상세 창이 이 상세를 보여 줌 (상세 없는 주문은 null)
-  time: string // 오늘 '오후 3:02' · 지난 날 '11.03 17:24'
+  time: string // '오후 3:02' (날은 머리줄 · 표 왼쪽 날짜)
   group: OrderGroup // 상태 칩
   sender: { name: string; address: string }
   receiver: { name: string; address: string }
@@ -63,12 +63,12 @@ const party = (p: ListParty | undefined) => ({
   address: [p?.roadAddress, p?.detailAddress].filter(Boolean).join(' '),
 })
 
-const toRow = (r: ParcelRow, day: Ymd, today: Ymd): OrderListRow => ({
+const toRow = (r: ParcelRow, day: Ymd): OrderListRow => ({
   key: r.key,
   day,
   orderSeq: r.orderSeq,
   parcelSeq: r.parcel?.orderParcelSeq ?? null,
-  time: fmtRowTime(r.createdAt, today),
+  time: fmtTime(r.createdAt),
   group: ORDER_GROUP[r.status],
   sender: party(r.parcel?.origin),
   receiver: party(r.parcel?.destination),
@@ -111,7 +111,7 @@ export function useOrderList() {
     rows: rows
       .flatMap(parcelRows)
       .filter(fits(q))
-      .map((r) => toRow(r, day, today)),
+      .map((r) => toRow(r, day)),
   }))
 
   // 취소 · 다시 접수 — 확인 창 [확인] → 요청 → 목록 · 상세 다시 받기 → 그 줄의 상세로 돌아감

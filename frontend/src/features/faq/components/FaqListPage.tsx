@@ -57,7 +57,7 @@ export function FaqListPage() {
         search={{ tab: 'faq', q: vm.q, onApply: vm.setQ }}
       />
 
-      <div className={`${BAR_COLS} min-h-0 flex-[1_1_0px] grid-rows-[minmax(0,1fr)_auto] pt-v44`}>
+      <div className={`${BAR_COLS} min-h-0 flex-[1_1_0px] grid-rows-[minmax(0,1fr)_auto] pt-v28`}>
         <CategoryNav value={vm.category} />
         <div className="min-h-0 [scrollbar-width:thin] [scrollbar-color:var(--color-line)_transparent] overflow-y-auto pb-2">
           {/* 추가 칸은 분류를 바꿔도 남음 (쓰던 글 그대로, 분류만 따라감) — 그래서 다시 그려지는 질문 목록 밖에 */}

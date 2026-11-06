@@ -45,7 +45,7 @@ const TABS: { key: SearchTab; label: string; list: string; placeholder: string }
     key: 'call',
     label: '통화',
     list: '/calls',
-    placeholder: '고객 이름이나 전화번호를 입력해 주세요',
+    placeholder: '고객 정보를 입력해 주세요',
   },
   {
     key: 'order',

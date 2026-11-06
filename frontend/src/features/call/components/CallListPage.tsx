@@ -1,65 +1,69 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link, useLocation } from 'react-router'
 import type { Ymd } from '@/shared/lib/dateRange'
-import { useDismiss } from '@/shared/lib/useDismiss'
-import { DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { fmtMonthDay } from '@/shared/lib/format'
+import { DayPick, DayScroll, HeadPick, Highlight, TopBar } from '@/shared/ui'
+import { KindChips, PendingChip } from '@/shared/ui/KindChips'
 import { useCallList, type CallListRow } from '@/features/call/hooks/useCallList'
 import { CallFilter } from './CallFilter'
-import { KindChips, PendingChip } from '@/shared/ui/KindChips'
 
-// 04 통화 내역 (Figma 디자인/목업 '통화' 11/04) — 상단바(상태 · AI 미답변 알림) · 머리(📅 날짜 · 상담가 | 필터) · 줄 목록
-// 머리의 날짜 · 상담가는 맨 위 줄을 따라 바뀜. 날짜를 고르면 그 날로, 상담가를 고르면 그 상담가가 받은 가장 최근 통화로 이동
-// 검색은 상단바 공용 탭 검색(통화 탭이 먼저) — Enter는 이 목록에 (11/05 사용자: 모든 화면 같은 상단바)
-// 줄 = 시각 | 상담 유형 칩(접수 · 조회 · 취소 · FAQ, 두 번 이상이면 숫자) · 불만(빨간 알약, 올리면 근거) | 이름(신규면 new) | 전화번호 | 통화 시간
-// 무한 스크롤 (11/04 사용자 · shared/ui/DayScroll): 고른 날짜(기본 오늘)부터 — 아래로 내리면 지난 날, 위로 올리면 다음 날을 이어 받고, 머리 날짜는 맨 위 줄의 날짜를 따라감
-// 목록만 스크롤(머리는 고정) · 줄을 누르면 06. 06에서 돌아오면 보던 자리 그대로 (받아 둔 목록 + 스크롤 위치)
+// 04 통화 내역 (Figma 디자인/목업 '통화' 1514:21223, 11/06 새 시안 — 03 주문과 같은 틀)
+// 상단바: 필터 단추(검색칸 왼쪽) · 검색칸 '고객 정보를 입력해 주세요' · 상태(AppLayout)
+// 표 머리줄(16/600): 📅 날짜 | 상담 유형 ⌄(하나 고르기) | 기업 | 이름 | 전화 번호 | (불만) | 통화 시간(오른쪽), 아래 1 회색 선
+// 줄(높이 72): 시각 12 회색 | 상담 유형 알약(테두리 · 12) | 기업 · 이름 · 전화 번호(가운데 맞춤, 16/500) | 불만(빨간 알약, 올리면 근거) | 통화 시간 16 회색
+// 표 왼쪽 바깥: 신규 고객이면 'new'(파랑) · 날이 바뀌는 첫 줄이면 '11월 3일' (머리줄 날짜 = 맨 위 줄의 날이라 같으면 안 붙음)
+// 무한 스크롤 · 줄을 누르면 06 · 06에서 돌아오면 보던 자리 그대로 (shared/ui/DayScroll). 예전 날짜 옆 상담가 토글은 새 시안에 없어 뺌
+// 칸 = 시안 자리(표 1172 기준): 시각 121(글자는 12 안쪽, 03 · 09와 같은 자리) · 상담 유형 252 · 기업 140 · 이름 100 · 전화 번호 120 · 불만(나머지) · 통화 시간 100
+const COLS = 'grid grid-cols-[121px_minmax(0,252fr)_140px_100px_120px_minmax(0,339fr)_100px]'
+// 표 좌우 자리: 카드에서 100 (본문 여백 32 빼고 68). 줄 상자는 막대 자리 때문에 오른쪽 90 (03 주문과 같음)
+const PAD = 'pr-[68px] pl-[68px]'
 
 export function CallListPage() {
   const vm = useCallList()
   const key = useLocation().search // 조건이 바뀌면 머리를 고른 날짜로 (목록도 맨 위부터 새로)
-  // 맨 위에 보이는 줄의 날짜 · 상담가 (11/04 사용자: 둘 다 스크롤 따라 바뀜) — 조건이 바뀌면(key) 고른 날짜로 돌아감
-  const [seen, setSeen] = useState<{ key: string; day: Ymd; persona: string | null } | null>(null)
-  const now = seen?.key === key ? seen : null
-  const day = now?.day ?? vm.anchor
-  const persona = now?.persona ?? vm.activePersona // 맨 위 통화의 상담가를 모르면(분석 전) 지금 상담가
-  const onTop = useCallback(
-    (row: HTMLElement) => {
-      // 상담가: 맨 위 줄이 분석 전이면 그 아래 줄들 중 처음 아는 것
-      let n: Element | null = row
-      let p: string | null = null
-      while (n && !p) {
-        p = (n as HTMLElement).dataset.persona ?? null
-        n = n.nextElementSibling
-      }
-      setSeen({ key, day: row.dataset.day!, persona: p })
-    },
-    [key],
-  )
+  const [seen, setSeen] = useState<{ key: string; day: Ymd } | null>(null) // 맨 위에 보이는 줄의 날
+  const day = (seen?.key === key && seen.day) || vm.anchor
+  const onTop = useCallback((row: HTMLElement) => setSeen({ key, day: row.dataset.day! }), [key])
+  // 날마다 첫 줄 — 그 줄 왼쪽에 '11월 3일' (머리줄 날짜와 같은 날이면 안 붙임)
+  const firstOfDay = new Set(vm.feed.days.map((d) => d.rows[0]?.callSessionSeq))
 
   return (
     <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar search={{ tab: 'call', q: vm.q, onApply: vm.setQ }} />
-      <div className="mt-2 flex h-[37px] shrink-0 items-center pr-[50px] pl-[58px]">
-        <DayPick day={day} onPick={vm.setDate} />
-        <PersonaToggle
-          label={persona}
-          personas={vm.personas}
-          onPick={vm.pickPersona}
-          jumping={vm.jumping}
-          note={vm.jumpNote}
-          onOpen={vm.resetJump}
+      <TopBar
+        search={{ tab: 'call', q: vm.q, onApply: vm.setQ }}
+        lead={<CallFilter value={vm.form} active={vm.isFiltered} onApply={vm.applyForm} />}
+      />
+      <div
+        className={`${COLS} mt-v28 h-[19px] shrink-0 items-center ${PAD} text-body font-semibold`}
+      >
+        <DayPick small day={day} onPick={vm.setDate} />
+        <HeadPick
+          label="상담 유형"
+          all="ALL"
+          value={vm.kind}
+          options={vm.kindOptions}
+          onPick={vm.setKind}
         />
-        <div className="ml-auto flex items-center gap-6">
-          <CallFilter value={vm.form} active={vm.isFiltered} onApply={vm.applyForm} />
-        </div>
+        <span className="text-center">기업</span>
+        <span className="text-center">이름</span>
+        <span className="text-center">전화 번호</span>
+        <span />
+        <span className="pr-3 text-right">통화 시간</span>
       </div>
-      <div className="mt-5 mr-[50px] ml-[58px] shrink-0 border-t border-line" />
-      {/* 오른쪽 72 = 줄 끝이 디자인 1354(크롬 얇은 막대 10 포함) */}
+      <div className="mt-3 mr-[68px] ml-[68px] shrink-0 border-t border-sub" />
       <DayScroll
         feed={vm.feed}
         at={vm.at}
         onTop={onTop}
-        row={(r) => <CallLine key={r.callSessionSeq} r={r} q={vm.q} from={`/calls${key}`} />}
+        row={(r) => (
+          <CallLine
+            key={r.callSessionSeq}
+            r={r}
+            q={vm.q}
+            from={`/calls${key}`}
+            dayLabel={firstOfDay.has(r.callSessionSeq) && r.day !== day}
+          />
+        )}
         end={(hasRows) =>
           hasRows
             ? '이전 통화가 없습니다.'
@@ -67,53 +71,67 @@ export function CallListPage() {
               ? '맞는 통화가 없습니다.'
               : '통화가 없습니다.'
         }
-        className="pt-1.5 pr-[72px] pl-[58px]"
+        className="pr-[90px] pl-[68px]"
       />
     </div>
   )
 }
 
-/** 한 줄 (Figma 행 높이 70 · 글자 20) — 줄 전체가 06 링크 */
-function CallLine({ r, q, from }: { r: CallListRow; q: string; from: string }) {
+/** 한 줄 (11/06 시안 높이 72) — 줄 전체가 06 링크. 표 왼쪽 바깥에 '11월 3일'(날이 바뀌는 첫 줄) · 'new'(신규 고객) */
+function CallLine({
+  r,
+  q,
+  from,
+  dayLabel,
+}: {
+  r: CallListRow
+  q: string
+  from: string
+  dayLabel: boolean
+}) {
   return (
     <Link
       to={`/calls/${r.callSessionSeq}`}
       state={{ from }} // 06 경로 '통화'가 이 목록(날짜 · 검색 · 필터)으로 돌아오게
       data-row={r.callSessionSeq}
       data-day={r.day}
-      data-persona={r.persona ?? undefined}
-      // 칸 = Figma 자리(행 1200 기준): 시각 170 · 칩(남는 폭) · 이름 113 · 번호 171 · 통화 시간 120(오른쪽 맞춤). 칸 폭이 고정이라 줄마다 자리가 같음
-      className="grid h-[70px] grid-cols-[170px_minmax(0,1fr)_113px_171px_120px] items-center border-b border-bg pr-[15px] pl-2 text-card hover:bg-bg"
+      className={`${COLS} relative h-[72px] items-center border-b border-line/70 text-body font-medium hover:bg-bg`}
     >
-      <span className="text-sub">{r.time}</span>
-      <span className="flex min-w-0 items-center gap-2 pr-4">
-        {r.counts ? <KindChips kinds={r.kinds} /> : <PendingChip />}
-        {r.complaint && <Complaint c={r.complaint} />}
-      </span>
-      <span className="flex min-w-0 items-start font-medium" title={r.name}>
-        <span className="truncate">
-          <Highlight text={r.name} q={q} />
+      {(dayLabel || r.isNew) && (
+        <span className="absolute top-1/2 -left-15 flex w-[42px] -translate-y-1/2 flex-col items-center gap-0.5 text-[12px] leading-none whitespace-nowrap">
+          {dayLabel && <span className="font-medium text-ink">{fmtMonthDay(r.day)}</span>}
+          {r.isNew && <span className="font-normal text-brand">new</span>}
         </span>
-        {r.isNew && <sup className="mt-1 ml-1 text-[12px] font-normal text-brand">new</sup>}
+      )}
+      <span className="pl-3 text-[12px] font-normal text-sub">{r.time}</span>
+      <span className="-ml-3 flex min-w-0 items-center gap-1 overflow-hidden">
+        {r.counts ? <KindChips small kinds={r.kinds} /> : <PendingChip small />}
       </span>
-      <span className="font-medium tabular-nums">
+      <span className="truncate text-center" title={r.company || undefined}>
+        {r.company || <span className="text-muted">—</span>}
+      </span>
+      <span className="truncate text-center" title={r.name}>
+        <Highlight text={r.name} q={q} />
+      </span>
+      <span className="text-center tabular-nums">
         <Highlight text={r.phone} q={q} />
       </span>
-      <span className="text-right text-sub">{r.duration}</span>
+      <span className="flex min-w-0 pl-8">{r.complaint && <Complaint c={r.complaint} />}</span>
+      <span className="pr-3 text-right font-normal text-sub">{r.duration}</span>
     </Link>
   )
 }
 
-/** 불만 알약 — 마우스를 올리면 아래에 고객이 한 말(근거) */
+/** 불만 알약 (11/06 시안: #fe4950 · 모서리 12 · 12/700 흰 글자) — 마우스를 올리면 아래에 고객이 한 말(근거) */
 function Complaint({ c }: { c: NonNullable<CallListRow['complaint']> }) {
   return (
-    <span className="group/c relative ml-auto shrink-0">
-      <span className="inline-flex h-7 items-center rounded-xl bg-danger px-3 text-body font-bold text-white">
+    <span className="group/c relative shrink-0">
+      <span className="inline-flex h-6 items-center rounded-xl bg-[#fe4950] px-3 text-[12px] font-bold whitespace-nowrap text-white">
         {c.label}
       </span>
       <span
         role="tooltip"
-        className="invisible absolute top-full left-0 z-10 mt-2 flex flex-col gap-1 rounded-lg bg-surface py-1 pr-7 pl-3 text-body whitespace-nowrap text-sub shadow-[0_4px_10px_rgba(0,0,0,0.07)] group-hover/c:visible"
+        className="absolute top-full left-0 z-10 mt-2 hidden flex-col gap-1 rounded-lg bg-surface py-1 pr-7 pl-3 text-body font-normal whitespace-nowrap text-sub shadow-[0_4px_10px_rgba(0,0,0,0.07)] group-hover/c:flex"
       >
         {c.reasons.map((t, i) => (
           <span key={i} className="flex h-6 items-center gap-2">
@@ -134,70 +152,5 @@ function Complaint({ c }: { c: NonNullable<CallListRow['complaint']> }) {
         ))}
       </span>
     </span>
-  )
-}
-
-/** 날짜 옆 상담가 이름 — 맨 위 통화를 받은 상담가(스크롤 따라 바뀜). 누르고 고르면 그 상담가가 받은 가장 최근 통화로 (11/04 사용자) */
-function PersonaToggle({
-  label,
-  personas,
-  onPick,
-  jumping,
-  note,
-  onOpen,
-}: {
-  label: string | null
-  personas: { personaSeq: number; name: string; inUse: boolean }[]
-  onPick: (personaSeq: number) => void
-  jumping: boolean
-  note: string | null // 찾지 못함 · 받은 통화 없음
-  onOpen: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => setOpen(false), [])
-  useDismiss(open, root, close)
-  return (
-    // 날짜 글자와 같은 가운데 줄 (11/05 사용자 — 예전엔 위 10 띄워 날짜보다 아래에 있었음)
-    <div ref={root} className="relative ml-6 flex items-baseline gap-3">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => {
-          if (!open) onOpen()
-          setOpen((o) => !o)
-        }}
-        className="text-body font-semibold hover:text-brand"
-      >
-        {label ?? '상담가'}
-      </button>
-      {(jumping || note) && (
-        <span className="text-caption text-muted">{jumping ? '찾는 중…' : note}</span>
-      )}
-      {open && (
-        <div
-          role="menu"
-          aria-label="상담가 — 고르면 그 상담가가 받은 가장 최근 통화로"
-          className="absolute top-full left-0 z-20 mt-2 w-max min-w-44 origin-top-left overflow-hidden rounded-xl bg-surface py-1 shadow-[0_12px_12px_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.04)] ring-1 ring-line motion-safe:animate-pop-in"
-        >
-          {personas.map((p) => (
-            <button
-              key={p.personaSeq}
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                onPick(p.personaSeq)
-                close()
-              }}
-              className={`flex h-11 w-full items-center gap-2 px-4 text-left text-body ${p.name === label ? 'font-semibold text-brand' : 'text-ink hover:bg-bg'}`}
-            >
-              {p.name}
-              {p.inUse && <span className="text-caption font-normal text-muted">사용 중</span>}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
   )
 }
