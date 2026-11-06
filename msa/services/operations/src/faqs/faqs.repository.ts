@@ -38,9 +38,14 @@ export class FaqsRepository {
     );
   }
 
-  async find(id: number): Promise<StoredFaqDetail | undefined> {
+  async find(client: PoolClient, id: number): Promise<StoredFaqDetail | undefined> {
+    const locked = await client.query(
+      'SELECT 1 FROM faq_entries WHERE faq_entry_seq=$1 AND deleted_at IS NULL FOR SHARE',
+      [id],
+    );
+    if (!locked.rowCount) return undefined;
     return (
-      await this.database.pool.query<StoredFaqDetail>(
+      await client.query<StoredFaqDetail>(
         `SELECT ${ADMIN_FIELDS},COALESCE((
            SELECT jsonb_agg(jsonb_build_object('faqQuestionExampleSeq',e.faq_question_example_seq,
              'questionText',e.question_text,'occurredAt',e.occurred_at,'eventId',e.event_id)

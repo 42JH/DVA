@@ -23,16 +23,19 @@ export class FaqsService {
   }
 
   async find(id: number) {
-    const row = await this.repository.find(id);
-    if (!row) throw new ApiException(404, 'NOT_FOUND', 'FAQ를 찾을 수 없습니다.');
-    const calls = await this.calls.resolve(row.recentQuestions.map((example) => example.eventId));
-    return {
-      ...row,
-      recentQuestions: row.recentQuestions.map(({ eventId, ...example }) => ({
-        ...example,
-        callSessionSeq: calls.get(eventId) ?? null,
-      })),
-    };
+    return this.database.transaction(async (client) => {
+      const row = await this.repository.find(client, id);
+      if (!row) throw new ApiException(404, 'NOT_FOUND', 'FAQ를 찾을 수 없습니다.');
+      // Hold the FAQ row while its source call is read so edits cannot mix two DB snapshots.
+      const calls = await this.calls.resolve(row.recentQuestions.map((example) => example.eventId));
+      return {
+        ...row,
+        recentQuestions: row.recentQuestions.map(({ eventId, ...example }) => ({
+          ...example,
+          callSessionSeq: calls.get(eventId) ?? null,
+        })),
+      };
+    });
   }
 
   async create(items: CreateFaqDto[], adminId: number, requestId: string) {
