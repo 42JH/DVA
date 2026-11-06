@@ -83,6 +83,7 @@ export interface CallDto {
   handoff: HandoffDto | null
 }
 export interface CallListItemDto extends CallDto {
+  organizationName?: string | null // 발신 고객의 소속 기업명 (11/06 시안 '기업' 열 — 백엔드 추가 요청 중, 없거나 개인이면 null)
   analysis: CallAnalysisDto | null // 아직 안 왔으면 null — 성공 · 불만 없음으로 보지 않기 (§5.1)
 }
 export interface RecordingDto {
@@ -133,6 +134,7 @@ export type { CallKind } // 상담 유형 (접수 · 조회 · 취소 · FAQ 칩
 export interface CallRow {
   callSessionSeq: number
   startedAt: string | null
+  company: string | null // 소속 기업명 (null = 없음 · 개인 · 서버가 아직 안 줌)
   customerName: string | null
   callerNumber: string // 숫자만. 모르면 ''
   isNew: boolean | null // 신규 고객 (null = 모름)
@@ -248,6 +250,7 @@ export function toCallRow(d: CallListItemDto): CallRow {
     callSessionSeq: d.callSessionSeq,
     startedAt: d.startedAt,
     customerName: d.customerName,
+    company: d.organizationName ?? null,
     callerNumber: digits(d.callerPhoneNumber),
     isNew: a?.isNewCustomer ?? null,
     counts: countsOf(a),

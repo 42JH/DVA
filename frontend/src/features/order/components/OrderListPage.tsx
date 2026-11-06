@@ -2,12 +2,10 @@ import { useCallback, useRef, useState, type UIEvent } from 'react'
 import { useLocation } from 'react-router'
 import { fmtMonthDay } from '@/shared/lib/format'
 import type { Ymd } from '@/shared/lib/dateRange'
-import { useDismiss } from '@/shared/lib/useDismiss'
-import { Button, ConfirmDialog, DayPick, DayScroll, Highlight, TopBar } from '@/shared/ui'
+import { Button, ConfirmDialog, DayPick, DayScroll, HeadPick, Highlight, TopBar } from '@/shared/ui'
 import { OrderChip } from '@/shared/order/OrderChip'
 import { OrderDetailModal } from '@/shared/order/OrderDetailModal'
 import { orderNo } from '@/shared/order/labels'
-import type { StatusGroup } from '@/features/order/api/orderApi'
 import { useOrderList, type OrderListRow } from '@/features/order/hooks/useOrderList'
 import { OrderEditModal } from './OrderEditModal'
 import { OrderFormModal } from './OrderFormModal'
@@ -44,7 +42,13 @@ export function OrderListPage() {
         <div className="min-h-0" inert={fold.folded}>
           <div className={`${COLS} mt-v44 h-6 items-center ${PAD} text-body font-semibold`}>
             <DayPick small day={day} onPick={vm.setDate} />
-            <StatusPick value={vm.group} options={vm.groups} onPick={vm.setGroup} />
+            <HeadPick
+              label="주문 상태"
+              all="ALL"
+              value={vm.group}
+              options={vm.groups}
+              onPick={vm.setGroup}
+            />
             <span>보내는 분</span>
             <span>받는 분</span>
             <span className="text-right">주문번호</span>
@@ -204,69 +208,4 @@ function useFoldOnScroll() {
     else if (Math.abs(d) > 4 && Math.abs(d) < 250) setFolded(d > 0)
   }
   return { folded, onScroll }
-}
-
-/** 열 머리 '주문 상태 ⌄' — 누르면 상태 고르기. 고르면 머리가 그 상태 이름(파랑)으로 */
-function StatusPick({
-  value,
-  options,
-  onPick,
-}: {
-  value: StatusGroup
-  options: { value: StatusGroup; label: string }[]
-  onPick: (g: StatusGroup) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => setOpen(false), [])
-  useDismiss(open, root, close)
-  const on = value !== 'ALL'
-  return (
-    <div ref={root} className="relative justify-self-start">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className={`flex items-center gap-1 ${on ? 'text-brand' : 'hover:text-brand'}`}
-      >
-        {on ? options.find((o) => o.value === value)?.label : '주문 상태'}
-        <svg
-          viewBox="0 0 24 24"
-          className={`size-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="주문 상태 — 고르면 그 상태만"
-          className="absolute top-full left-0 z-20 mt-2 w-max min-w-44 origin-top-left overflow-hidden rounded-xl bg-surface py-1 shadow-[0_12px_12px_rgba(0,0,0,0.08),0_2px_4px_rgba(0,0,0,0.04)] ring-1 ring-line motion-safe:animate-pop-in"
-        >
-          {options.map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="menuitemradio"
-              aria-checked={o.value === value}
-              onClick={() => {
-                onPick(o.value)
-                close()
-              }}
-              className={`flex h-11 w-full items-center px-4 text-left text-body ${o.value === value ? 'font-semibold text-brand' : 'font-normal text-ink hover:bg-bg'}`}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
 }
