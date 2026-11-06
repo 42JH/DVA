@@ -10,7 +10,7 @@
 
 | 모델 도구(strict) | 인수 | 결과 |
 |---|---|---|
-| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
+| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 주소가 여러 시군구에 있음 — needs에 `regions`·`heard`, 2026-11-05), `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
 | `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
 | `lookup_orders` | receiver_name | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / unavailable(`CALL_NOT_REGISTERED`) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
@@ -18,7 +18,7 @@
 
 **서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
 
-**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 카카오는 공유 클라이언트 + 세마포어, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음.
+**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
 작성일: 2026-11-03 · 근거: `tools/*.py`, `backend_client/order.py`, `address_resolver/`, `app/rag/text_agent.py`(당시 `tools/rag/`, 지금은 원본 경로)
 표기: **[코드]** 구현 확인 · **[문서]** 문서만 · **확인 필요**
 

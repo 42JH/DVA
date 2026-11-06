@@ -20,6 +20,11 @@ def branch_key(num, letter=""):
     return num + letter
 
 
+def is_number_token(token):
+    """토큰 전체가 번호인가: "212", "217-60", "이백십이", "212번지", "10길". "63빌딩"·"2차"처럼 글자가 섞이면 아니다."""
+    return bool(token and TAIL_TOKEN.fullmatch(token) and token not in ("다시", "대시") and re.search(rf"[{NUM_CHARS}]", token))
+
+
 def to_number(s):
     """'이백 십이' / '이 일 이' / '20' / '이백12' -> '212' 같은 숫자 문자열. 숫자가 없으면 ''."""
     s = re.sub(r"\s|번지|번|호", "", s)

@@ -1,0 +1,719 @@
+{
+ "version": "address_v2",
+ "created": "2026-11-05",
+ "description": "주소 보정 재설계 시험지(지역 생략·순서 자유·건물명·POI·되묻기). heard = Backend LLM이 record_fields에 넘기는 기본주소 문자열. expect = 고객이 뜻한 실제 도로명주소(행안부 주소DB 표기) 또는 null. expect_status='region_needed' = 같은 이름·번호가 서로 다른 시군구에 실제로 있어 지역을 되묻는 것이 정답(expect는 null). 정답은 보정기 출력이 아니라 뜻한 주소로 먼저 정했고, 주소DB(2026-09-30 기준)로 확인했다: 도로명의 전국 시군구 수·번호가 실제로 있는 곳, 법정동 중복, 부가정보 건물명 → 주소. 태그 kakao = 부가정보에 없는 상호·약칭이라 카카오 키워드 검색이 있어야 찾는 문항(네트워크 없는 측정에선 missed가 정상). address_v1은 그대로 회귀 시험지로 같이 돌린다.",
+ "cases": [
+  {
+   "id": "r01",
+   "heard": "테헤란로 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "road_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r02",
+   "heard": "판교역로 166",
+   "expect": "경기도 성남시 분당구 판교역로 166",
+   "tags": [
+    "road_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r03",
+   "heard": "한누리대로 2130",
+   "expect": "세종특별자치시 한누리대로 2130",
+   "tags": [
+    "road_only",
+    "sejong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r04",
+   "heard": "킨텍스로 217-60",
+   "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+   "tags": [
+    "road_only",
+    "sub_number"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r05",
+   "heard": "해운대해변로 264",
+   "expect": "부산광역시 해운대구 해운대해변로 264",
+   "tags": [
+    "road_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r06",
+   "heard": "테헤란로 이백십이요",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "road_only",
+    "korean_number",
+    "ending"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r07",
+   "heard": "태헤란노 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "road_only",
+    "road_misheard"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r08",
+   "heard": "신정이펜일로 50",
+   "expect": "서울특별시 양천구 신정이펜1로 50",
+   "tags": [
+    "road_only",
+    "number_in_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r09",
+   "heard": "도청대로 455",
+   "expect": "경상북도 안동시 풍천면 도청대로 455",
+   "tags": [
+    "road_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r10",
+   "heard": "효자로 225",
+   "expect": "전북특별자치도 전주시 완산구 효자로 225",
+   "tags": [
+    "road_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r11",
+   "heard": "인동 구길 칠 다시 삼",
+   "expect": "경상북도 구미시 인동9길 7-3",
+   "tags": [
+    "road_only",
+    "gil",
+    "dasi"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "r12",
+   "heard": "세종대로 110",
+   "expect": "서울특별시 중구 세종대로 110",
+   "tags": [
+    "road_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s01",
+   "heard": "서울 테헤란로 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s02",
+   "heard": "경기도 판교역로 166",
+   "expect": "경기도 성남시 분당구 판교역로 166",
+   "tags": [
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s03",
+   "heard": "부산 해운대해변로 264",
+   "expect": "부산광역시 해운대구 해운대해변로 264",
+   "tags": [
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s04",
+   "heard": "서울 중앙로 232",
+   "expect": "서울특별시 양천구 중앙로 232",
+   "tags": [
+    "sido_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s05",
+   "heard": "경북 도청대로 455",
+   "expect": "경상북도 안동시 풍천면 도청대로 455",
+   "tags": [
+    "sido_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s06",
+   "heard": "서울 올림픽로 300",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "sido_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s07",
+   "heard": "전북 효자로 225",
+   "expect": "전북특별자치도 전주시 완산구 효자로 225",
+   "tags": [
+    "sido_only",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "s08",
+   "heard": "서울시 세종대로 백십",
+   "expect": "서울특별시 중구 세종대로 110",
+   "tags": [
+    "sido_only",
+    "korean_number"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "d01",
+   "heard": "역삼동 테헤란로 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "dong_first"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "d02",
+   "heard": "백현동 판교역로 166",
+   "expect": "경기도 성남시 분당구 판교역로 166",
+   "tags": [
+    "dong_first"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "d03",
+   "heard": "서울 역삼동 테헤란로 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "dong_first",
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "d04",
+   "heard": "신천동 올림픽로 300",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "dong_first",
+    "common_dong",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "d05",
+   "heard": "강남구 역삼동 테헤란로 212",
+   "expect": "서울특별시 강남구 테헤란로 212",
+   "tags": [
+    "dong_after_gu"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j01",
+   "heard": "역삼동 737",
+   "expect": "서울특별시 강남구 테헤란로 152",
+   "tags": [
+    "dong_jibun"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j02",
+   "heard": "역삼동 칠백삼십칠",
+   "expect": "서울특별시 강남구 테헤란로 152",
+   "tags": [
+    "dong_jibun",
+    "korean_number"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j03",
+   "heard": "백현동 532",
+   "expect": "경기도 성남시 분당구 판교역로 166",
+   "tags": [
+    "dong_jibun"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j04",
+   "heard": "신천동 29",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "dong_jibun",
+    "common_dong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j05",
+   "heard": "인의동 565-3",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "dong_jibun",
+    "common_dong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j06",
+   "heard": "서울 신천동 29",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "dong_jibun",
+    "sido_only",
+    "common_dong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j07",
+   "heard": "이니동 565-3",
+   "expect": "경상북도 구미시 인동5길 25-1",
+   "tags": [
+    "dong_jibun",
+    "linked_sound",
+    "common_dong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "j08",
+   "heard": "서울 태평로1가 31",
+   "expect": "서울특별시 중구 세종대로 110",
+   "tags": [
+    "dong_jibun",
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b01",
+   "heard": "롯데월드타워",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "building_only",
+    "building_partial"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b02",
+   "heard": "송파구 롯데월드타워",
+   "expect": "서울특별시 송파구 올림픽로 300",
+   "tags": [
+    "building_only",
+    "building_partial"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b03",
+   "heard": "서울특별시청",
+   "expect": "서울특별시 중구 세종대로 110",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b04",
+   "heard": "인천광역시청",
+   "expect": "인천광역시 남동구 정각로 29",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b05",
+   "heard": "킨텍스",
+   "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b06",
+   "heard": "포스코센터",
+   "expect": "서울특별시 강남구 테헤란로 440",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b07",
+   "heard": "강남파이낸스센터",
+   "expect": "서울특별시 강남구 테헤란로 152",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b08",
+   "heard": "삼성서울병원",
+   "expect": "서울특별시 강남구 일원로 81",
+   "tags": [
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b09",
+   "heard": "강남 파이낸스 센터",
+   "expect": "서울특별시 강남구 테헤란로 152",
+   "tags": [
+    "building_only",
+    "spacing"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b10",
+   "heard": "포스코 센타",
+   "expect": "서울특별시 강남구 테헤란로 440",
+   "tags": [
+    "building_only",
+    "building_typo"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b11",
+   "heard": "킨텍스요",
+   "expect": "경기도 고양시 일산서구 킨텍스로 217-60",
+   "tags": [
+    "building_only",
+    "ending"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b12",
+   "heard": "카카오 판교아지트",
+   "expect": "경기도 성남시 분당구 판교역로 166",
+   "tags": [
+    "building_only",
+    "spacing"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b13",
+   "heard": "서울 코엑스",
+   "expect": "서울특별시 강남구 영동대로 513",
+   "tags": [
+    "building_only",
+    "sido_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b14",
+   "heard": "세종특별자치시청",
+   "expect": "세종특별자치시 한누리대로 2130",
+   "tags": [
+    "building_only",
+    "sejong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b15",
+   "heard": "부산광역시청",
+   "expect": "부산광역시 연제구 중앙대로 1001",
+   "tags": [
+    "building_only",
+    "building_partial"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "b16",
+   "heard": "롯데월드",
+   "expect": "서울특별시 송파구 올림픽로 240",
+   "tags": [
+    "building_only",
+    "building_exact_over_partial"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p01",
+   "heard": "63빌딩",
+   "expect": "서울특별시 영등포구 63로 50",
+   "tags": [
+    "poi",
+    "kakao"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p02",
+   "heard": "국회의사당",
+   "expect": "서울특별시 영등포구 의사당대로 1",
+   "tags": [
+    "poi",
+    "kakao"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p03",
+   "heard": "동대문디자인플라자",
+   "expect": "서울특별시 중구 을지로 281",
+   "tags": [
+    "poi",
+    "kakao"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p04",
+   "heard": "서울시청",
+   "expect": "서울특별시 중구 세종대로 110",
+   "tags": [
+    "poi",
+    "kakao"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p05",
+   "heard": "인천시청",
+   "expect": "인천광역시 남동구 정각로 29",
+   "tags": [
+    "poi",
+    "kakao"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "p06",
+   "heard": "세종시청",
+   "expect": "세종특별자치시 한누리대로 2130",
+   "tags": [
+    "poi",
+    "kakao",
+    "sejong"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "n01",
+   "heard": "중앙로 232",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n02",
+   "heard": "대학로 291",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n03",
+   "heard": "시청로 1",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n04",
+   "heard": "사직로 161",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n05",
+   "heard": "교동 12",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "dong_jibun",
+    "common_dong"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n06",
+   "heard": "올림픽로 300",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n07",
+   "heard": "경기 중앙로 232",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "sido_only",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n08",
+   "heard": "코엑스",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "building_only"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n09",
+   "heard": "현대아파트",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "building_only"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "n10",
+   "heard": "대학로 이백구십일",
+   "expect": null,
+   "tags": [
+    "region_needed",
+    "korean_number",
+    "common_road"
+   ],
+   "source": "new",
+   "expect_status": "region_needed"
+  },
+  {
+   "id": "x01",
+   "heard": "없는로 12",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "road_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "x02",
+   "heard": "테헤란로 99999",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "road_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "x03",
+   "heard": "역삼동 99999",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "dong_jibun"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "x04",
+   "heard": "없는빌딩타워",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "building_only"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "x05",
+   "heard": "중앙로 1001",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "common_road"
+   ],
+   "source": "new"
+  },
+  {
+   "id": "x06",
+   "heard": "서울 없는로 12",
+   "expect": null,
+   "tags": [
+    "nonexistent",
+    "sido_only"
+   ],
+   "source": "new"
+  }
+ ]
+}
