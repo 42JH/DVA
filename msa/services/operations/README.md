@@ -39,7 +39,7 @@ API는 공통 `/api` 응답/에러 envelope·페이지네이션·요청 ID·Orig
 
 ## 페르소나·AI 적용 API
 
-원본 페르소나 10개 선언을 포함해 공개 업무 API는 21개다.
+원본 페르소나 10개·FAQ 6개 선언을 포함해 공개 업무 API는 27개다.
 
 - `GET/POST /api/personas`, `GET/PATCH /api/personas/:id`
 - `GET/POST /api/personas/:id/versions`, `POST /api/personas/:id/activate`
@@ -52,6 +52,16 @@ AI_AGENT_URL과 AI_PERSONA_TOKEN은 기존 AI와 같은 값을 사용한다. 둘
 배포는 선택 Secret `dva/msa-ai-persona`의 `AI_AGENT_URL`, `AI_PERSONA_TOKEN` 키를 참조한다. Secret/키가 없으면 해당 환경 변수를 생략한다. 토큰을 임의 생성·교체하지 않으며 실제 AI의 동일 토큰/주소 설정이 필요하다. Secret 값은 저장소·MR·로그에 넣지 않는다.
 
 operations 007은 기존 MSA identity/prompt를 `legacy_ai_personas`, `legacy_ai_prompt_versions`로 행·ID·시각·설정 그대로 보존한다. `activate_ai_prompt`도 이 보관 테이블에서 계속 동작한다. 과거 버전의 전체 설정 스냅샷은 알 수 없어 새 이력으로 꾸미거나 자동 publish하지 않는다. 새 API의 이력·초안과 ACTIVE/PENDING은 처음에는 비어 있다. 실제 구 설정 이관은 검증된 전체 스냅샷을 준비한 별도 작업이다. [계획·검증·제한](../../../docs/msa-personas-plan.md)을 따른다.
+
+## FAQ·AI 변경 알림
+
+원본 `GET/POST/DELETE /api/faqs`, `GET/PATCH /api/faqs/:id`, `GET /api/ai/faqs`를 제공한다. 관리자 읽기·쓰기는 모든 ACTIVE 역할에 허용한다. AI 목록은 원본 MVP 메타데이터를 유지하며 쿠키가 있으면 세션을 검증하며 쓰기는 원본처럼 Origin도 검증한다. AI 응답에는 분류·관리자 번호를 추가하지 않는다. 등록/수정/삭제의 업무·감사·알림 대기는 같은 operations 트랜잭션이다. 단건 등록의 Location, NFC·공백·대소문자 중복과 soft delete 후 질문 재사용도 원본을 따른다.
+
+상세의 최근 질문은 operations 스냅샷에서 발생 시각·번호 내림차순 최대 10개를 조회한다. consultation의 비공개 `/internal/faq-call-sources`에 `FaqCallSourcesRequested` 조회 이벤트를 보내 원본 이벤트의 현재 통화 링크만 확인한다. 인증은 기존 CONSULTATION_AUTH_TOKEN을 사용한다. 원본 삭제·통화 soft delete/5년 만료이면 사례는 유지하고 callSessionSeq는 null이다. peer 실패를 빈 사례/없는 통화로 위장하지 않는다. AI 이벤트 수집·사례 생성과 전체 보관 워커는 후속 단계다.
+
+알림은 원본 AI_AGENT_URL의 `/internal/faqs/refresh`로 AI_FAQ_TOKEN Bearer와 eventId/operation/faqEntrySeqs만 전송한다. 202만 ACK로 인정하고 2초 timeout·리다이렉트 거절·5초 워커·30초 claim·지수 재시도·선행 대기 순서를 유지한다. 토큰이 없으면 쓰기와 대기 저장은 계속하고 전송만 비활성이다. 원본과 같은 토큰/URL을 기존 선택 Secret `msa-ai-persona`의 AI_FAQ_TOKEN/AI_AGENT_URL로 주입하며 새 토큰을 만들지 않는다. FAQ 전송만 설정해도 페르소나 토큰은 필수가 아니다.
+
+`node dist/faqs/bootstrap-faq.js <활성 관리자 로그인 ID>`는 이미지의 원본 32개 FAQ 데이터를 원자적으로 초기 등록한다. FAQ가 한 건이라도 존재하면 건너뛰고 기존 데이터를 덮어쓰지 않는다. 앱보다 operations 009와 consultation 006을 먼저 적용한다. 실제 운영·AI 연결과 상세 사례 생성은 [계획 문서](../../../docs/msa-faqs-plan.md)의 범위와 구분한다.
 
 ## 서비스 내부 인증
 
@@ -93,3 +103,7 @@ python msa/deploy/tests/integration_app_rollout.py --service operations --image 
 페르소나 비교는 실제 production 이미지의 동일 요청 77건·10개 선언/21개 참조 스키마와 전체 설정·초안·감사 행을 대조한다. 실제 5초 워커의 AI HTTP 전송과 production 앱 SIGKILL/재시작 후 동일 publish UUID 복구도 확인한다. UUID는 응답/DB/후속 요청 관계를, 시각은 범위를 확인한다. lastNotifiedAt의 비동기 관측은 실제 전송·DB claim/오류가 수렴한 뒤 검증한다. [검증 기록과 범위](../../../docs/msa-personas-plan.md)에 원본 suite·DB/배포 회귀와 미검증 사항을 구분했다.
 
 2026-11-05 customer 쓰기 연결 후 재검증: 원본 인증 40개를 양쪽에 실행해 통과했고 operations 설정 2개, 단위 1개, E2E 6개, production HTTP·DB 비교와 실제 배포 probe도 통과했다. 별도 customer 비교에서 준비·확정·중단·중복·변조·지연·SIGKILL 복구를 확인했다. 임시 k3s 최초 배포·교체·실패 복구 중 operations HTTP 450건의 실패는 0건이었다. DB 전체 228단계와 Linux 배포 회귀 54개도 통과했다. 운영 Jenkins·공개 HTTPS·자동 업무/보관 워커·전체 95개 API는 미검증이다.
+
+## 원본 인증 보안 기록
+
+production은 SECURITY_LOG_HMAC_KEY(64자리 hex)를 필수로 검증한다. 배포기가 공유 `msa-security-logs` Secret의 hmac-key를 최초 생성하고 기존 값은 그대로 사용한다. 잘못된 기존 키는 출력·교체하지 않고 거절한다. 원본처럼 인증 실패/로그인 성공의 안전한 사유와 HMAC 키만 출력하며 계정명·IP·비밀번호·토큰을 기록하지 않는다. 업무 API·감사와 내부 오류 응답은 유지한다. [최신 기준 및 검증](../../../docs/msa-faqs-plan.md)을 따른다.

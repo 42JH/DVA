@@ -1,5 +1,7 @@
 # MSA CI/CD
 
+MR !326 병합 기준 `3d8bf7b9`로 착수한 뒤 최신 `bae5074`(원본 054·보안 기록/녹취 재시도)를 동기화하며 [FAQ 6개 API·AI 알림 워커 및 상세 원본 통화 조회](../docs/msa-faqs-plan.md)을 이식한다. 질문 사례 생성·통화 이벤트 수집과 전체 동등성은 후속이다.
+
 모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. [operations의 인증·관리자·감사 11개 API](services/operations/README.md)와 [customer 조회 7개·쓰기 10개 API 및 세션/감사 연결](services/customer/README.md)을 구현했다. 남은 업무 API·자동 워커·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`의 임시 PostgreSQL·HTTP 검증과 기준 목록 검사, 선택한 서비스의 `Verify Operations Parity`/`Verify Customer Parity`에서 원본 모놀리식과 HTTP·DB 비교를 실행하고 실패 시 이후 배포를 중단한다. customer 쓰기 비교는 자동 업무 워커를 제외한 기본 test 환경이며 production 조회 검증과 구분한다.
 
 [consultation의 PBX 수신·녹취·진행 통화 수/SSE](services/consultation/README.md) 3개 API와 customer의 [고객 확인·통화 등록](../docs/msa-caller-context-plan.md)을 연결했다. customer 공개 선언은 고객 수정·개인 PIN 4개를 포함해 23/24개다. 고객 확인 API는 call 없는 조회에서 쓰기를 하지 않고, call이 있으면 consultation 통화·PBX·operations 감사 확정 후 응답한다. Verify Consultation Parity는 production PBX/SSE와 별도 test 환경의 고객 확인·실제 분리 DB·등록 SSE·응답 유실/강제 종료 복구를 비교한다. [고객 수정·개인 PIN 비교](../docs/msa-customer-pins-plan.md)도 같은 단계에서 네 공개 API·통화 잠금 경합·재수신/프로세스 종료 복구를 확인한다. 상담 분석의 실제 페르소나 버전 참조를 준비하기 위해 [operations 페르소나 10개 API·초안/HEAD/publish·AI 알림](../docs/msa-personas-plan.md)을 먼저 연결해 operations는 21개 선언을 제공한다. 기업 청구 조회·자동 월별 청구·나머지 상담/주문·FAQ·전체 보관 워커/96개 API 동등성은 후속이다.

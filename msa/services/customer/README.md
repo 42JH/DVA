@@ -77,3 +77,7 @@ Ingress는 기존 `/customer`와 `/api/customers`, `/api/companies`, `/api/membe
 기업 삭제처럼 감사가 많은 트랜잭션은 확정 ID를 1,000개씩 나눠 같은 업무 트랜잭션의 outbox에 저장한다. 같은 aggregate의 전달 순서를 유지하고 마지막 확정 ACK까지 기다린다. 감사 조회도 남은 준비가 있으면 전송을 확인하므로 중간 일부만 성공 조회로 반환하지 않는다.
 
 operations 감사 조회는 미확정 준비가 있으면 서비스 Bearer 전용 `POST /internal/audit/flush`로 결정 확인을 요청한다. customer는 업무 트랜잭션 잠금과 확정 outbox로 진행 중·커밋·중단을 구분한다. 종료된 생산자의 업무가 rollback됐으면 준비를 중단하고 늦은 준비를 차단한다. 다른 DB를 직접 조회하거나 관리자/세션을 복제하지 않는다. 기술 상태의 장기 보관·정리와 전체 분산 장애 검증은 후속 단계다.
+
+## 원본 인증 보안 기록
+
+production은 SECURITY_LOG_HMAC_KEY(64자리 hex)를 필수로 검증한다. 배포기가 공유 `msa-security-logs` Secret의 hmac-key를 최초 생성하고 기존 값은 그대로 사용한다. 잘못된 기존 키는 출력·교체하지 않고 거절한다. 원본처럼 인증 실패/로그인 성공의 안전한 사유와 HMAC 키만 출력하며 계정명·IP·비밀번호·토큰을 기록하지 않는다. 업무 API·감사와 내부 오류 응답은 유지한다. [최신 기준 및 검증](../../../docs/msa-faqs-plan.md)을 따른다.

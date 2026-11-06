@@ -30,7 +30,7 @@ Node.js 24에서 `npm ci` 후 환경을 설정하고 `npm run start:dev`를 실�
 - 기존 `PBX_WEBHOOK_TOKEN`, `AWS_REGION` 기본 ap-northeast-2, `S3_RECORDINGS_BUCKET`, `RECORDING_ALLOWED_HOSTS`, `RECORDING_MATCH_WINDOW_SECONDS` 기본 30(1~300)
 - `AI_INSIGHTS_TOKEN`: 원본과 같은 선택적 32자 이상 공백 없는 ASCII 토큰. consultation-runtime Secret의 기존 원본 값을 사용한다. 미설정이면 분석/지표 세 API만 503이며 관리자 쿠키도 이 토큰을 대신하지 않는다.
 
-consultation `005`, customer `007`, operations `008`까지 먼저 적용한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다. 기존 통화·발화·녹취·메시지·과거 종료 사유를 보존하며 근거 없는 과거 등록 시각·고객 참조·분석은 만들지 않는다.
+consultation `007`, customer `007`, operations `009`까지 먼저 적용한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다. 기존 통화·발화·녹취·메시지·과거 종료 사유를 보존하며 근거 없는 과거 등록 시각·고객 참조·분석은 만들지 않는다.
 
 세션/관리자를 복제하지 않고 operations의 기존 `POST /internal/auth/session`에 위임한다. 매 요청/heartbeat에 현재 세션을 확인하고 시간·응답 크기·정확한 필드·리다이렉트 경계를 적용한다. consultation 토큰은 customer 감사 이벤트나 공개 관리자 API 접근 권한을 부여하지 않는다.
 
@@ -54,3 +54,13 @@ Jenkins는 customer·consultation·operations 중 하나가 선택되면 `Verify
 운영 PBX/S3 설정과 자격정보는 기존 값으로 `dva/consultation-runtime` Secret에서 주입한다. PBX 토큰·S3 버킷·허용 호스트·AWS 자격정보를 Git/명령 인자/로그에 넣지 않는다. Secret 자체는 선택 사항이며 토큰 미설정 시 PBX는 원본처럼 503을 반환한다. S3 미설정 시 통화 종료 매칭은 유지하고 파일 저장을 보류한다. 준비된 새 Pod부터 트래픽을 받고 실패 시 기존 리소스/이미지로 복구하지만 DB 변환은 앱 롤백으로 되돌리지 않는다.
 
 실제 운영 Jenkins/공개 HTTPS·PBX/S3 자격정보를 사용한 외부 연동 및 전체 96개 API 동등성은 별도 검증 대상이다.
+
+## FAQ 상세의 원본 통화 조회
+
+operations의 `POST /internal/faq-call-sources` 조회 이벤트만 `auth:internal-operations`와 기존 CONSULTATION_AUTH_TOKEN으로 허용한다. event envelope/source/type/최대 10개 중복 없는 UUID를 검증하며 현재 이벤트→통화의 조회 가능 번호만 반환한다. 공개 prefix·Swagger·Ingress에 노출하지 않는다. 006은 원본 026/045/049의 이벤트/미답변 스키마와 로컬 제약을 추가한다. 이벤트 수집 API와 사례 생성 이벤트·전체 보관 워커는 아직 후속이다. [FAQ 계획](../../../docs/msa-faqs-plan.md)을 따른다.
+
+## 원본 054와 보안 기록 동기화
+
+녹취 처리 시도는 최초 포함 최대 5회이며 1/5/15/30분 대기를 DB에 저장한다. 정책 위반은 첫 실패부터, 재시도 소진/마지막 시도 중단은 운영 확인으로 보존한다. 안전한 코드만 기록하고 원문 URL·외부 오류를 노출하지 않는다. S3 미설정·미매칭 대기는 시도를 소비하지 않으며 미연결 수신의 30분 만료는 유지한다. [원본 운영 정책](../../../backend/docs/recording-retry-policy.md)을 따른다.
+
+인증 실패 기록은 기존 API 응답/감사와 별도로 원본 HMAC 익명 키·사유만 출력한다. production은 `msa-security-logs` Secret의 64자리 hex hmac-key를 사용하며 배포기가 최초 생성/기존 값 검증을 수행한다. 기존 키는 재생성하지 않는다. 기본 AUTH_PROXY_HOPS=0이며 실제 신뢰 프록시 구성이 확인된 경우에만 1/2로 설정한다.
