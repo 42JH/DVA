@@ -35,12 +35,13 @@
 <header><h1>디바콜 관제</h1><span id="conn" class="muted"></span></header>
 <main>
   <section><h2>통화</h2><div id="calls"></div></section>
-  <section><h2>받아쓰기</h2><div id="transcript"></div></section>
+  <section id="transcript-pane"><h2>받아쓰기</h2><div id="transcript"></div></section>
   <section><h2>상세</h2><div id="detail"></div><h2>지연(ms)</h2><div id="latency"></div><h2>백엔드 통신</h2><div id="backend"></div><h2>도구 호출</h2><div id="tools"></div><h2>사건</h2><div id="events"></div></section>
 </main>
 <script>
 const calls = new Map();
 let selected = null;
+let renderedTranscript = "";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const time = (t) => t ? new Date(t * 1000).toLocaleTimeString("ko-KR") : "";
@@ -51,7 +52,7 @@ const callStatus = (status) => {
   return `<span class="call-status ${color}">${esc(Object.hasOwn(labels, status) ? labels[status] : status)}</span>`;
 };
 
-function render() {
+function render(followTranscript = false) {
   const list = [...calls.values()].sort((a, b) => b.started_at - a.started_at);
   if (!selected && list.length) selected = list[0].session_id;
   $("calls").innerHTML = list.map((c) => `<div class="call ${c.session_id === selected ? "sel" : ""}" data-id="${esc(c.session_id)}">
@@ -59,7 +60,18 @@ function render() {
     ${c.end_reason ? `<br><span class="muted">종료: ${esc(c.end_reason)}</span>` : ""}</div>`).join("");
   const c = calls.get(selected);
   if (!c) return;
-  $("transcript").innerHTML = (c.transcript || []).map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
+  const transcript = (c.transcript || []).map((b) => `<div class="bubble ${esc(b.speaker)}">${esc(b.text)}</div>`).join("");
+  const pane = $("transcript-pane");
+  if (transcript !== renderedTranscript || followTranscript) {
+    const previousTop = pane.scrollTop;
+    // scrollTop can be fractional while scrollHeight and clientHeight are rounded.
+    const atBottom = pane.scrollHeight - pane.clientHeight - previousTop <= 1;
+    if (transcript !== renderedTranscript) {
+      $("transcript").innerHTML = transcript;
+      renderedTranscript = transcript;
+    }
+    pane.scrollTop = followTranscript || atBottom ? pane.scrollHeight : previousTop;
+  }
   $("detail").innerHTML = `<table>${Object.entries(c.detail || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${show(v)}</td></tr>`).join("")}</table>
     ${(c.errors || []).map((e) => `<div class="error">${time(e.at)} ${esc(e.message)}</div>`).join("")}`;
   const lat = c.latency || [];
@@ -74,7 +86,10 @@ function render() {
 
 $("calls").addEventListener("click", (e) => {
   const el = e.target.closest(".call");
-  if (el) { selected = el.dataset.id; render(); }
+  if (!el) return;
+  const changedCall = selected !== el.dataset.id;
+  selected = el.dataset.id;
+  render(changedCall);
 });
 
 const source = new EventSource("/monitor/api/stream");
