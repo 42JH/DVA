@@ -87,13 +87,13 @@ def main():
                    '-e', 'CONSULTATION_AUTH_TOKEN='+token, '-e', 'CUSTOMER_AUTH_TOKEN='+password, network='container:'+RUN+'-'+side+'-db',
                    command=('node', *(['--require', './test/analysis-environment-fixture.cjs'] if side == 'consultation' else []),
                             '--test', '--test-concurrency=1', 'test/webhook.integration.test.cjs', 'test/consultation-worker.test.cjs',
-                            'test/call-analysis.test.cjs', 'test/call-dashboard-metrics.test.cjs',
+                            'test/call-analysis.test.cjs', 'test/call-dashboard-metrics.test.cjs', 'test/unanswered-questions.test.cjs',
                             *(['test/caller-context.integration.test.cjs', 'test/customers.integration.test.cjs', 'test/pins.integration.test.cjs',
-                               'test/call-analysis.integration.test.cjs', 'test/call-dashboard-metrics.integration.test.cjs'] if side == 'monolith' else [])))
+                               'test/call-analysis.integration.test.cjs', 'test/call-dashboard-metrics.integration.test.cjs', 'test/unanswered-questions.integration.test.cjs'] if side == 'monolith' else [])))
             for source in (ROOT/'backend/test/webhook.integration.test.cjs', ROOT/'msa/parity/consultation-worker.test.cjs',
-                           ROOT/'backend/test/call-analysis.test.cjs', ROOT/'backend/test/call-dashboard-metrics.test.cjs',
+                           ROOT/'backend/test/call-analysis.test.cjs', ROOT/'backend/test/call-dashboard-metrics.test.cjs', ROOT/'backend/test/unanswered-questions.test.cjs',
                            *([ROOT/'backend/test/caller-context.integration.test.cjs', ROOT/'backend/test/customers.integration.test.cjs', ROOT/'backend/test/pins.integration.test.cjs',
-                              ROOT/'backend/test/call-analysis.integration.test.cjs', ROOT/'backend/test/call-dashboard-metrics.integration.test.cjs'] if side == 'monolith' else [ROOT/'msa/parity/analysis-environment-fixture.cjs'])):
+                              ROOT/'backend/test/call-analysis.integration.test.cjs', ROOT/'backend/test/call-dashboard-metrics.integration.test.cjs', ROOT/'backend/test/unanswered-questions.integration.test.cjs'] if side == 'monolith' else [ROOT/'msa/parity/analysis-environment-fixture.cjs'])):
                 target = '/app/test/' if side == 'monolith' else '/app/service/test/'
                 run('docker', 'cp', str(source), name+':'+target+source.name, label=side+'-copy-'+source.name)
             complete(name)
@@ -140,6 +140,14 @@ def main():
                command=('node', '--test', 'test/call-analysis-parity.test.cjs'))
         for source in (ROOT/'msa/parity/call-analysis-parity.test.cjs', ROOT/'msa/parity/analysis-claimant.cjs'):
             run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='analysis-copy-'+source.name)
+        complete(name)
+        name = RUN+'-call-content'
+        create(name, images['consultation-checks'], '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'PGPASSWORD='+password,
+               '-e', 'PGDATABASE=dva_webhook_test', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
+               '-e', 'CUSTOMER_AUTH_TOKEN='+password,
+               command=('node', '--test', 'test/call-content-parity.test.cjs'))
+        for source in (ROOT/'msa/parity/call-content-parity.test.cjs', ROOT/'msa/parity/call-content-claimant.cjs'):
+            run('docker', 'cp', str(source), name+':/app/service/test/'+source.name, label='content-copy-'+source.name)
         complete(name)
         # Keep production PBX/SSE distinct from foreground context checks without the
         # monolith's still-unported monthly order/billing maintenance worker.

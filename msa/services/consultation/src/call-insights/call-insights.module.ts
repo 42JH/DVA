@@ -1,3 +1,6 @@
+import { CallEventsReadController } from './call-events-read.controller';
+import { CallEventsService } from './call-events.service';
+import { CallEventsRepository } from './call-events.repository';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { AuditModule } from '../audit/audit.module';
@@ -11,8 +14,15 @@ import { CallDashboardMetricsRepository } from './call-dashboard-metrics.reposit
 
 @Module({
   imports: [DatabaseModule, AuditModule],
-  controllers: [CallInsightsController, CallDashboardMetricsController],
+  controllers: [
+    CallInsightsController,
+    CallDashboardMetricsController,
+    CallEventsReadController,
+  ],
+  exports: [CallInsightsGuard],
   providers: [
+    CallEventsService,
+    CallEventsRepository,
     CallInsightsGuard,
     CallInsightsService,
     CallInsightsRepository,

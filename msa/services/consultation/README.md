@@ -28,7 +28,7 @@ Node.js 24에서 `npm ci` 후 환경을 설정하고 `npm run start:dev`를 실�
 - `CONSULTATION_AUTH_TOKEN`: operations와 공유하는 별도 32~256자 ASCII 서비스 비밀 값
 - `CORS_ORIGINS`, `PORT` 기본 3004, `SWAGGER_ENABLED` 기본 true
 - 기존 `PBX_WEBHOOK_TOKEN`, `AWS_REGION` 기본 ap-northeast-2, `S3_RECORDINGS_BUCKET`, `RECORDING_ALLOWED_HOSTS`, `RECORDING_MATCH_WINDOW_SECONDS` 기본 30(1~300)
-- `AI_INSIGHTS_TOKEN`: 원본과 같은 선택적 32자 이상 공백 없는 ASCII 토큰. consultation-runtime Secret의 기존 원본 값을 사용한다. 미설정이면 분석/지표 세 API만 503이며 관리자 쿠키도 이 토큰을 대신하지 않는다.
+- `AI_INSIGHTS_TOKEN`: 원본과 같은 선택적 32자 이상 공백 없는 ASCII 토큰. consultation-runtime Secret의 기존 원본 값을 사용한다. 미설정이면 분석/지표·미답변 수집 네 API만 503이며 관리자 쿠키도 이 토큰을 대신하지 않는다.
 
 consultation `007`, customer `007`, operations `009`까지 먼저 적용한다. 앱은 스키마를 확인하며 DDL을 실행하지 않는다. 기존 통화·발화·녹취·메시지·과거 종료 사유를 보존하며 근거 없는 과거 등록 시각·고객 참조·분석은 만들지 않는다.
 
@@ -57,10 +57,19 @@ Jenkins는 customer·consultation·operations 중 하나가 선택되면 `Verify
 
 ## FAQ 상세의 원본 통화 조회
 
-operations의 `POST /internal/faq-call-sources` 조회 이벤트만 `auth:internal-operations`와 기존 CONSULTATION_AUTH_TOKEN으로 허용한다. event envelope/source/type/최대 10개 중복 없는 UUID를 검증하며 현재 이벤트→통화의 조회 가능 번호만 반환한다. 공개 prefix·Swagger·Ingress에 노출하지 않는다. 006은 원본 026/045/049의 이벤트/미답변 스키마와 로컬 제약을 추가한다. 이벤트 수집 API와 사례 생성 이벤트·전체 보관 워커는 아직 후속이다. [FAQ 계획](../../../docs/msa-faqs-plan.md)을 따른다.
+operations의 `POST /internal/faq-call-sources` 조회 이벤트만 `auth:internal-operations`와 기존 CONSULTATION_AUTH_TOKEN으로 허용한다. event envelope/source/type/최대 10개 중복 없는 UUID를 검증하며 현재 이벤트→통화의 조회 가능 번호만 반환한다. 공개 prefix·Swagger·Ingress에 노출하지 않는다. 006은 원본 026/045/049의 이벤트/미답변 스키마와 로컬 제약을 추가한다. 미답변 수집·삭제와 통화 콘텐츠 조회·삭제는 아래 범위로 연결하며 이벤트 수집 API와 사례 생성 이벤트·전체 보관 워커는 아직 후속이다. [FAQ 계획](../../../docs/msa-faqs-plan.md)을 따른다.
 
 ## 원본 054와 보안 기록 동기화
 
 녹취 처리 시도는 최초 포함 최대 5회이며 1/5/15/30분 대기를 DB에 저장한다. 정책 위반은 첫 실패부터, 재시도 소진/마지막 시도 중단은 운영 확인으로 보존한다. 안전한 코드만 기록하고 원문 URL·외부 오류를 노출하지 않는다. S3 미설정·미매칭 대기는 시도를 소비하지 않으며 미연결 수신의 30분 만료는 유지한다. [원본 운영 정책](../../../backend/docs/recording-retry-policy.md)을 따른다.
 
 인증 실패 기록은 기존 API 응답/감사와 별도로 원본 HMAC 익명 키·사유만 출력한다. production은 `msa-security-logs` Secret의 64자리 hex hmac-key를 사용하며 배포기가 최초 생성/기존 값 검증을 수행한다. 기존 키는 재생성하지 않는다. 기본 AUTH_PROXY_HOPS=0이며 실제 신뢰 프록시 구성이 확인된 경우에만 1/2로 설정한다.
+
+
+## 미답변과 통화 콘텐츠
+
+[통화 콘텐츠 이식 계획](../../../docs/msa-call-content-plan.md)에 따라 consultation 공개 선언은 12개다. 새 선언은 POST /api/ai/unanswered-questions, DELETE /api/unanswered-questions/:id, GET /api/calls/:id/transcript·actions·processing-results와 DELETE /api/calls/:id 6개다. 동일 AI_INSIGHTS_TOKEN·관리자 세션/Origin·DTO·오류/응답·페이지네이션을 사용한다. 미답변 수집은 최초 201/동일 발생 200이며 사유·원문·해시·상태를 보존한다. 최신 원본처럼 삭제는 원문을 보존하고 통화 처리 결과에서만 원문/사유를 숨긴다. 원본 Swagger의 과거 원문 삭제 설명보다 실제 SQL/045 이후 보존 정책을 따른다.
+
+미답변 쓰기·통화 삭제와 operations 감사는 기존 준비/확정/중단 이벤트로 연결한다. FAQ·고객·주문 테이블을 상담 DB에 복제하지 않는다. 통화 삭제는 종료·녹취 완료와 2초 잠금 조건을 유지하고 PBX·분석·발화·FAQ 원본 링크를 기존 조회 조건으로 숨긴다. 물리 폐기 워커는 후속이다. 기존 consultation 007로 충분하며 새 migration/의존성/Secret은 없다. Ingress는 기존 미답변 URL을 consultation에 연결한다.
+
+이벤트 수집·FAQ 사례 생성, 주문 소유권 확인, 미답변 목록/FAQ 전환, 통화 목록/상세·녹취 재생과 전체 동등성은 아직 후속이다. 새 조회 검증의 발화·AI 동작·처리 결과는 기존 정상 업무 행을 주입한 fixture이며 수집 API 검증을 뜻하지 않는다.

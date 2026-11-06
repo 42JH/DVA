@@ -1,5 +1,7 @@
 # MSA CI/CD
 
+MR !337 병합 기준 `1597c62`에서 착수하고 최신 `ad40526`(고객 등록 주소 필수·주문 가격 정책)을 반영해 [미답변 수집·삭제와 통화 콘텐츠 조회·삭제 6개 API](../docs/msa-call-content-plan.md)를 이식한다. 원본 054와 동일 입력/응답·삭제 조건·감사를 유지하며 통화 이벤트 수집/FAQ 사례 생성·미답변 목록/전환·주문과 전체 동등성은 후속이다.
+
 MR !326 병합 기준 `3d8bf7b9`로 착수한 뒤 최신 `bae5074`(원본 054·보안 기록/녹취 재시도)를 동기화하며 [FAQ 6개 API·AI 알림 워커 및 상세 원본 통화 조회](../docs/msa-faqs-plan.md)을 이식한다. 질문 사례 생성·통화 이벤트 수집과 전체 동등성은 후속이다.
 
 모놀리식 업무 동등성 구현은 [전체 계획](../docs/msa-parity-plan.md)과 [이벤트 전달 기반](shared/events/README.md)을 따른다. [operations의 인증·관리자·감사 11개 API](services/operations/README.md)와 [customer 조회 7개·쓰기 10개 API 및 세션/감사 연결](services/customer/README.md)을 구현했다. 남은 업무 API·자동 워커·이벤트 연동은 후속 MR이며 전체 기능 동등성을 의미하지 않는다. Jenkins는 `Verify Event Transport`의 임시 PostgreSQL·HTTP 검증과 기준 목록 검사, 선택한 서비스의 `Verify Operations Parity`/`Verify Customer Parity`에서 원본 모놀리식과 HTTP·DB 비교를 실행하고 실패 시 이후 배포를 중단한다. customer 쓰기 비교는 자동 업무 워커를 제외한 기본 test 환경이며 production 조회 검증과 구분한다.

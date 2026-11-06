@@ -21,7 +21,8 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   // The source readiness also probes the external AI app, absent from this API-input fixture.
   const sides=[{base:'http://monolith-app:3000',db:mono,identity:mono,health:'/health'},
     {base:'http://consultation-app:3004',db:cons,identity:ops,health:'/consultation/health/ready'}];
-  t.after(async()=>{await Promise.all([mono.end(),cons.end(),ops.end()]);});
+  const expiryFixtures=[];
+  t.after(async()=>{for(const fixture of expiryFixtures){await fixture.query('ROLLBACK');fixture.release();}await Promise.all([mono.end(),cons.end(),ops.end()]);});
   for(const side of sides)for(let retry=0;;retry++){
     try{if((await fetch(side.base+side.health)).status===200)break;}catch{}
     assert.ok(retry<60,'production app did not start');await delay(250);
@@ -82,8 +83,14 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   async function call(extra={}){
     const provider='analysis-'+randomUUID(),ids=[];
     for(const side of sides)ids.push((await side.db.query(`INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,started_at,ended_at,deleted_at,registered_at)
-      VALUES($1,'01012345678',$2,$3,$4,$5,'2026-11-01T01:00:00Z') RETURNING call_session_seq`,[provider,extra.incoming??'2026-11-01T01:00:00Z',
+      VALUES($1,'01012345678',$2,$3,$4,$5,'2026-11-01T01:00:00Z') RETURNING call_session_seq`,[provider,'2026-11-01T01:00:00Z',
       extra.fallback?null:'2026-11-01T01:00:00Z',extra.fallback?null:'2026-11-01T01:03:00Z',extra.deleted??null])).rows[0].call_session_seq);
+    // Keep foreground expiry fixtures stable while production retention uses FOR UPDATE SKIP LOCKED.
+    if(extra.incoming)for(const [index,side]of sides.entries()){
+      const fixture=await side.db.connect();expiryFixtures.push(fixture);await fixture.query('BEGIN');
+      await fixture.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[ids[index]]);
+      await side.db.query('UPDATE call_sessions SET incoming_at=$2 WHERE call_session_seq=$1',[ids[index],extra.incoming]);
+    }
     assert.equal(ids[0],ids[1]);return{id:ids[0],provider};
   }
   const c=await call();

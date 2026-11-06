@@ -1,4 +1,21 @@
-import { Controller, Get, Header, Req, Sse } from '@nestjs/common';
+import { ConsultationsService } from './consultations.service';
+import { CallIdParamsDto } from './dto/call-id-params.dto';
+import {
+  TranscriptQueryDto,
+  TranscriptResponseDto,
+} from './dto/transcript.dto';
+import { AuditOperation } from '../audit/audit-operation';
+import {
+  Controller,
+  Delete,
+  Get,
+  Header,
+  HttpCode,
+  Param,
+  Query,
+  Req,
+  Sse,
+} from '@nestjs/common';
 import {
   ApiCookieAuth,
   ApiOkResponse,
@@ -30,7 +47,64 @@ import { ActiveCallCountResponseDto } from './dto/active-call-count.dto';
 })
 @Controller('calls')
 export class ConsultationsController {
-  constructor(private readonly activeCalls: ActiveCallCountService) {}
+  constructor(
+    private readonly activeCalls: ActiveCallCountService,
+    private readonly consultations: ConsultationsService,
+  ) {}
+
+  @Delete(':id')
+  @HttpCode(204)
+  @AuditOperation({
+    action: 'CALL_DELETED',
+    targetType: 'CALL_SESSION',
+    target: 'id',
+  })
+  @ApiOperation({
+    summary: '통화 soft delete',
+    description:
+      '허용 Origin 필수. 통화와 분석·AI 이벤트·STT·녹취를 일반 조회에서 숨깁니다. 실제 폐기는 최초 incomingAt부터 5년 후 수행하며 주문은 별도로 유지합니다.',
+  })
+  @ApiResponse({ status: 204, description: '삭제 처리 완료.' })
+  @ApiResponse({
+    status: 404,
+    type: ErrorResponseDto,
+    description: '없거나 삭제·만료된 통화.',
+  })
+  @ApiResponse({
+    status: 409,
+    type: ErrorResponseDto,
+    description: '통화 종료 전 또는 녹취 대기·실패·업로드 중.',
+  })
+  delete(@Param() params: CallIdParamsDto, @Req() request: AuthRequest) {
+    return this.consultations.delete(
+      params.id,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
+
+  @Get(':id/transcript')
+  @ApiOperation({
+    summary: '통화 대화 내용 조회',
+    description:
+      '저장된 STT 구간을 발화 순서로 조회합니다. 화자·누적 대화·최초 수신 시각을 반환하며, 기록이 없으면 빈 목록입니다. 녹취로부터 STT를 새로 생성하지 않습니다.',
+  })
+  @ApiOkResponse({
+    description:
+      '발화 목록과 다음 페이지 여부. 미수집은 빈 배열이며 무음 통화라는 뜻이 아닙니다.',
+    type: TranscriptResponseDto,
+  })
+  @ApiResponse({
+    status: 404,
+    description: '해당 통화 기록이 없음.',
+    type: ErrorResponseDto,
+  })
+  findTranscript(
+    @Param() params: CallIdParamsDto,
+    @Query() query: TranscriptQueryDto,
+  ) {
+    return this.consultations.findTranscript(params.id, query);
+  }
 
   @Get('active-count')
   @ApiOperation({
