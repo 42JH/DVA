@@ -12,5 +12,7 @@ test('a missing consultation service fails AI reads closed while local admin rea
   }
   const failedDelete=await fetch(base+'/api/orders/1001',{method:'DELETE',headers:{Cookie:'dva_session='+'a'.repeat(64),Origin:'http://localhost:5173'},signal:AbortSignal.timeout(20000)});
   assert.equal(failedDelete.status,503);assert.equal((await failedDelete.json()).error.code,'DEPENDENCY_UNAVAILABLE');
+  const failedCancel=await fetch(base+'/api/orders/1001/cancel',{method:'POST',headers:{call_session_seq:'1011'},signal:AbortSignal.timeout(40000)});
+  assert.equal(failedCancel.status,503);assert.equal((await failedCancel.json()).error.code,'DEPENDENCY_UNAVAILABLE');
   assert.deepEqual((await db.query('SELECT jsonb_agg(to_jsonb(o) ORDER BY order_seq) AS rows FROM orders o')).rows,before);
 });

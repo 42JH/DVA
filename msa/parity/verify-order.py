@@ -1,4 +1,4 @@
-"""Compare order reads and deletion against the unchanged monolith on five isolated PostgreSQL DBs."""
+"""Compare order reads, deletion and cancellation against the monolith on six isolated PostgreSQL DBs."""
 import json
 from pathlib import Path
 import subprocess
@@ -41,6 +41,7 @@ def main():
     try:
         images = {}
         for side, path, target in (
+            ('delivery-checks', 'msa/services/delivery', 'checks'), ('delivery', 'msa/services/delivery', None),
             ('order-checks', 'msa/services/order', 'checks'), ('order', 'msa/services/order', None),
             ('customer', 'msa/services/customer', None), ('consultation', 'msa/services/consultation', None),
             ('operations', 'msa/services/operations', None), ('monolith-checks', 'backend', 'checks'),
@@ -53,7 +54,7 @@ def main():
             images[side] = image
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
-        for side in ('monolith', 'operations', 'customer', 'consultation', 'order'):
+        for side in ('monolith', 'operations', 'customer', 'consultation', 'delivery', 'order'):
             name = RUN+'-'+side+'-db'
             create(name, 'postgres:17.11-bookworm', '--network-alias', side+'-db', '--tmpfs', '/var/lib/postgresql/data',
                    '-e', 'POSTGRES_USER='+side+'_app', '-e', 'POSTGRES_PASSWORD='+password, '-e', 'POSTGRES_DB=dva_webhook_test')
@@ -92,7 +93,13 @@ def main():
                '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
                command=('node', '--test', '--test-name-pattern=new DELETE routes|order soft deletion|live calls|order/call deletion', 'test/soft-deletion.integration.test.cjs'))
         complete(name)
-        for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('order', 3002)):
+        name = RUN+'-reference-cancellation-suite'
+        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
+               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
+               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
+               command=('node', '--test', 'test/order-cancellation.integration.test.cjs'))
+        complete(name)
+        for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
                    '-e', 'DB_HOST='+side+'-db', '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password,
@@ -100,7 +107,7 @@ def main():
                    '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true', '-e', 'AI_BUSINESS_TOKEN='+password,
                    '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'OPERATIONS_URL=http://operations-app:3005',
                    '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'CONSULTATION_URL=http://consultation-app:3004',
-                   '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
+                   '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'ORDER_URL=http://order-app:3002', '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token)
             run('docker', 'start', name, label=side+'-app-start')
         name = RUN+'-differential'
         create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
@@ -108,14 +115,20 @@ def main():
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         complete(name)
-        for suite in ['order-deletion-parity', 'order-deletion-recovery']:
+        for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery']:
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                    '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                    command=('node', '--test', 'test/'+suite+'.test.cjs'))
-            for file in [suite+'.test.cjs'] + (['order-deletion-claimant.cjs'] if suite.endswith('recovery') else []):
+            for file in [suite+'.test.cjs'] + ([suite.replace('-recovery', '-claimant')+'.cjs'] if suite.endswith('recovery') else []):
                 run('docker', 'cp', str(ROOT/'msa/parity'/file), name+':/app/service/test/'+file, label=suite+'-copy-'+file)
             complete(name)
+        run('docker', 'stop', '--time=5', RUN+'-delivery-app', label='delivery-outage')
+        name = RUN+'-delivery-outage'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', 'test/order-cancellation-outage.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/order-cancellation-outage.test.cjs'), name+':/app/service/test/order-cancellation-outage.test.cjs', label='delivery-outage-copy')
+        complete(name)
         run('docker', 'stop', '--time=5', RUN+'-consultation-app', label='consultation-outage')
         name = RUN+'-outage'
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',

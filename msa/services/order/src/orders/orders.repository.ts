@@ -50,6 +50,66 @@ export class OrdersRepository {
     ).rows[0];
   }
 
+  async cancel(client: PoolClient, id: number) {
+    await client.query(
+      "UPDATE orders SET status='CANCELLED',version=version+1 WHERE order_seq=$1",
+      [id],
+    );
+  }
+
+  async lockParcels(client: PoolClient, id: number) {
+    return (
+      await client.query<{
+        orderParcelSeq: number;
+        status: 'ACTIVE' | 'CANCELLED';
+        notifiedPrice: number | null;
+      }>(
+        `SELECT order_parcel_seq AS "orderParcelSeq",status,notified_price AS "notifiedPrice" FROM order_parcels
+         WHERE order_seq=$1 ORDER BY order_parcel_seq FOR UPDATE`,
+        [id],
+      )
+    ).rows;
+  }
+
+  async cancelParcel(client: PoolClient, id: number) {
+    await client.query("UPDATE order_parcels SET status='CANCELLED' WHERE order_parcel_seq=$1", [
+      id,
+    ]);
+  }
+
+  async recalculateAmount(client: PoolClient, id: number): Promise<number | null> {
+    return (
+      await client.query<{ amount: number | null }>(
+        `UPDATE orders SET total_amount=(SELECT CASE WHEN count(*)=0 THEN 0
+         WHEN count(notified_price)=count(*) THEN sum(notified_price)::int END
+         FROM order_parcels WHERE order_seq=$1 AND status='ACTIVE')
+       WHERE order_seq=$1 RETURNING total_amount AS amount`,
+        [id],
+      )
+    ).rows[0].amount;
+  }
+
+  async replaceRequest(client: PoolClient, id: number) {
+    await client.query(
+      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE order_seq=$1 AND invalidated_at IS NULL AND completed_at IS NULL',
+      [id],
+    );
+    await client.query(
+      `INSERT INTO order_payment_requests(order_seq,amount,expires_at)
+      SELECT order_seq,total_amount,payment_due_at FROM orders WHERE order_seq=$1 AND status='notPaid' AND total_amount>0`,
+      [id],
+    );
+  }
+  async isApproving(client: PoolClient, id: number) {
+    return (
+      (
+        await client.query(
+          `SELECT 1 FROM order_payment_requests WHERE order_seq=$1 AND invalidated_at IS NULL AND completed_at IS NULL AND approval_started_at IS NOT NULL`,
+          [id],
+        )
+      ).rowCount !== 0
+    );
+  }
   async addressHistory(client: PoolClient, customerId: number, query: OrderAddressHistoryQueryDto) {
     // SQL 식별자는 검증된 두 방향의 상수에서만 선택한다. 검색값은 모두 바인딩한다.
     const side = query.direction === 'ORIGIN' ? 'origin' : 'destination';

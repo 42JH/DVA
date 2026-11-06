@@ -47,7 +47,7 @@ def main():
     cluster_created = False
     database_resources = []
     try:
-        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations', 'order') if service == 'order' else ('operations',) if service == 'operations' else ()
+        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations', 'order') if service == 'order' else ('operations',) if service == 'operations' else ('delivery',) if service == 'delivery' else ()
         addresses = {}
         if db_services:
             if not created:

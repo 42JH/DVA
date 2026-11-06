@@ -130,7 +130,7 @@ pipeline {
         stage('Verify Order Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'order'] }
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'delivery', 'order'] }
                 }
             }
             steps { sh 'python3 msa/parity/verify-order.py' }
@@ -150,11 +150,7 @@ pipeline {
                     while IFS= read -r service; do
                         directory="msa/services/$service"
                         echo "BUILD: $service"
-                        if [ "$service" = customer ] || [ "$service" = operations ] || [ "$service" = consultation ] || [ "$service" = order ]; then
-                            set -- -f "$directory/Dockerfile" msa
-                        else
-                            set -- "$directory"
-                        fi
+                        set -- -f "$directory/Dockerfile" msa
                         docker build \
                             --tag "docker.io/library/dva-$service:$RELEASE_NAME" \
                             "$@"

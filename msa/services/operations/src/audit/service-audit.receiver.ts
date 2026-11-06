@@ -92,12 +92,20 @@ function auditInput(
     !(service === 'customer'
       ? actions.has(audit.action as string)
       : service === 'order'
-        ? audit.action === 'ORDER_DELETED'
+        ? [
+            'ORDER_DELETED',
+            'ORDER_CANCELLED',
+            'ORDER_PARCEL_CANCELLED',
+            'ORDER_AMOUNT_CHANGED',
+          ].includes(audit.action as string)
         : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
       ? targets.has(audit.targetType as string)
       : service === 'order'
-        ? audit.targetType === 'ORDER'
+        ? audit.targetType ===
+          (audit.action === 'ORDER_PARCEL_CANCELLED' && payload.result === 'SUCCESS'
+            ? 'ORDER_PARCEL'
+            : 'ORDER')
         : audit.targetType ===
           (['UNANSWERED_QUESTION_RECORDED', 'UNANSWERED_QUESTION_DELETED'].includes(
             audit.action as string,
@@ -123,9 +131,26 @@ function auditInput(
           : 'AI') ||
         audit.targetId === null)) ||
     (service === 'order' &&
-      (audit.metadata !== undefined ||
+      ((audit.action === 'ORDER_AMOUNT_CHANGED'
+        ? payload.result !== 'SUCCESS' ||
+          !object(audit.metadata) ||
+          Object.keys(audit.metadata).sort().join(',') !==
+            'amountAfter,amountBefore,orderParcelSeqs' ||
+          ![audit.metadata.amountBefore, audit.metadata.amountAfter].every(
+            (value) =>
+              value === null ||
+              (Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 2147483647),
+          ) ||
+          !Array.isArray(audit.metadata.orderParcelSeqs) ||
+          audit.metadata.orderParcelSeqs.length < 1 ||
+          !audit.metadata.orderParcelSeqs.every(integer) ||
+          new Set(audit.metadata.orderParcelSeqs).size !== audit.metadata.orderParcelSeqs.length
+        : audit.metadata !== undefined) ||
         (payload.result === 'SUCCESS' &&
-          (audit.actorType !== 'ADMIN' || audit.targetId === null)))) ||
+          (!(audit.action === 'ORDER_DELETED'
+            ? audit.actorType === 'ADMIN'
+            : ['ADMIN', 'AI'].includes(audit.actorType as string)) ||
+            audit.targetId === null)))) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))
   )

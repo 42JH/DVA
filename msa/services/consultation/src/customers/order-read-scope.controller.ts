@@ -1,4 +1,10 @@
 import {
+  validateOrderCancellation,
+  requestOrderCancellation,
+  OrderCancellationError,
+  type OrderCancellationEvent,
+} from '@dva/events/order-cancellation.cjs';
+import {
   Body,
   Controller,
   Header,
@@ -13,6 +19,7 @@ import {
   validateOrderRead,
   requestOrderRead,
   OrderReadError,
+  type OrderReadEvent,
 } from '@dva/events/order-read.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
@@ -20,14 +27,14 @@ import { DatabaseService } from '../database/database.service';
 
 @ApiExcludeController()
 @SetMetadata('auth:internal-customer', true)
-@Controller('internal/order-read')
+@Controller('internal')
 export class OrderReadScopeController {
   constructor(
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
 
-  @Post()
+  @Post('order-read')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   async query(@Body() event: unknown) {
@@ -38,6 +45,22 @@ export class OrderReadScopeController {
     } catch {
       throw new HttpException({ error: 'INVALID_ORDER_READ' }, 422);
     }
+    return this.queryScoped(event);
+  }
+
+  @Post('order-cancellation')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async cancel(@Body() event: unknown) {
+    try {
+      validateOrderCancellation(event, 'order');
+    } catch {
+      throw new HttpException({ error: 'INVALID_ORDER_CANCELLATION' }, 422);
+    }
+    return this.queryScoped(event);
+  }
+
+  private async queryScoped(event: OrderReadEvent | OrderCancellationEvent) {
     try {
       return await this.database.transaction(async (client) => {
         const command = event.payload.command;
@@ -58,7 +81,9 @@ export class OrderReadScopeController {
         if (
           caller.endedAt !== null &&
           !(
-            command.operation === 'OrderDetailRead' &&
+            (event.eventType === 'OrderCancellationRequested' ||
+              ('operation' in command &&
+                command.operation === 'OrderDetailRead')) &&
             caller.orderSeq === command.id
           )
         )
@@ -67,27 +92,41 @@ export class OrderReadScopeController {
             'INVALID_STATE',
             '종료된 통화는 기존 연결 주문만 사용할 수 있습니다.',
           );
-        const payload = await requestOrderRead(
-          this.config.get('CUSTOMER_URL', { infer: true }) +
-            '/internal/order-read/call',
-          this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
-          {
-            ...event,
-            source: 'consultation',
-            payload: {
-              command,
-              caller: {
-                ...caller,
-                endedAt: caller.endedAt?.toISOString() ?? null,
-              },
+        const next = {
+          ...event,
+          source: 'consultation',
+          payload: {
+            command,
+            caller: {
+              ...caller,
+              endedAt: caller.endedAt?.toISOString() ?? null,
             },
           },
-        );
+        };
+        const origin = this.config.get('CUSTOMER_URL', { infer: true });
+        const token = this.config.get('CONSULTATION_AUTH_TOKEN', {
+          infer: true,
+        });
+        const payload =
+          event.eventType === 'OrderCancellationRequested'
+            ? await requestOrderCancellation(
+                origin + '/internal/order-cancellation/call',
+                token,
+                next as OrderCancellationEvent,
+              )
+            : await requestOrderRead(
+                origin + '/internal/order-read/call',
+                token,
+                next as OrderReadEvent,
+              );
         return { eventId: event.eventId, status: 'processed', payload };
       });
     } catch (error) {
       if (error instanceof ApiException) throw error;
-      if (error instanceof OrderReadError)
+      if (
+        error instanceof OrderReadError ||
+        error instanceof OrderCancellationError
+      )
         throw new ApiException(
           error.status,
           error.error.code as ErrorCode,

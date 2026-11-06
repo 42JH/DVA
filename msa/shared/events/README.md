@@ -60,3 +60,11 @@ python3 msa/liquibase/verify.py
 `OrderDeletionCheckRequested`는 order가 consultation의 `/internal/order-deletion-check`로 보내는 고정 조회다. payload는 양수 int32 `orderSeq` 하나, 응답은 같은 eventId·processed와 `{blocked:boolean}`뿐이다. 기존 CUSTOMER_AUTH_TOKEN, 설정된 consultation origin, 5초 제한·리다이렉트 거절·엄격한 UTF-8/JSON·4KiB ACK 검사를 사용한다. source/type/추가 필드는 거절한다. 원본 SQL처럼 연결된 미삭제/미종료 통화가 있으면 true이며 통화 보관 기산일은 필터하지 않는다. 같은 이벤트도 현재 상태를 읽고 inbox/outbox나 개인정보 응답을 저장하지 않는다.
 
 order의 쓰기 감사는 기존 `AuditPrepared`/`AuditCommitted`/`AuditAborted`를 사용한다. order 전용 준비 테이블과 source allowlist를 추가하고 업무 변경과 outbox를 같은 order 트랜잭션에 저장한다. 성공 응답 전 operations ACK를 확인하며 생산자 종료는 기존 advisory lock 증명과 `/internal/audit/flush`로 복구한다. 조회 ACK와 업무 확정 ACK를 혼동하지 않는다. 분리 DB의 전역 원자 트랜잭션을 주장하지 않는다.
+
+## 주문 취소 명령과 배송 조회
+
+`@dva/events/order-cancellation.cjs`의 OrderCancellationRequested는 AI의 기존 두 POST를 위한 고정 명령이다. order → consultation → customer → order 순서이며 통화/고객의 기존 공유 잠금을 업무/감사 ACK까지 유지한다. id·callSessionSeq·requestId·orderParcelSeqs만 입력받고 타 소유자가 확인한 caller/customerSeq만 다음 단계로 전달한다. 관리자 actor를 입력으로 받지 않는다. 각 내부 경로는 기존 token/source/정확한 키·ID·결과를 검증하고 OpenAPI/Ingress에서 제외한다.
+
+조회 OrderReadRequested는 읽기 전용으로 유지한다. 취소 명령은 큐/자동 재시도/개인정보 결과 저장을 추가하지 않으며, 원본의 전체 재시도 409·상세 기취소 no-op 204를 따른다. 성공 ACK는 같은 eventId/processed/payload=null이다. 감사 확정 ACK와 구분하며 영속 감사는 기존 outbox/relay/생산자 종료 복구를 사용한다. 공개 100KiB 한도는 유지하고 필드가 더해지는 내부 취소/배송 envelope만 256KiB 파서를 사용한다. 내부 callback에는 감사 준비·확정이 포함되므로 hop timeout은 30/25/20초다. 의존 장애·잘못된 ACK는 503으로 실패한다.
+
+OrderShipmentCheckRequested는 order → delivery의 `/internal/order-shipment-check`에서 실제 선택 상세의 배송 존재 여부만 확인한다. 기존 CUSTOMER_AUTH_TOKEN, 5초 timeout과 UTF-8/JSON·4KiB boolean ACK 검증을 사용한다. 원본 취소는 어떤 상태의 배송이라도 차단하므로 배송 변경은 없다. 같은 이벤트도 최신 배송을 읽고 수신 이력/응답 캐시를 남기지 않는다. 후속 생성 경로의 부모 주문 잠금/최신 상태 확인과 전체 분리 DB 장애 검증은 그 기능을 이식할 때 함께 확인한다.

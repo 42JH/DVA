@@ -54,9 +54,9 @@ test('accepts only matching schema-validated acknowledgements and preserves stru
 
 test('rejects unexpected origins, credentials and absent production security keys', () => {
   const valid={DB_HOST:'db',DB_USER:'order_app',DB_PASSWORD:'secret',DB_NAME:'order',OPERATIONS_URL:'http://operations:3005',
-    CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:token};
+    DELIVERY_URL:'http://delivery:3003',CUSTOMER_URL:'http://customer:3001',CONSULTATION_URL:'http://consultation:3004',CUSTOMER_AUTH_TOKEN:token};
   assert.equal(validateEnvironment(valid).PORT,3002);
-  for (const field of ['OPERATIONS_URL','CUSTOMER_URL','CONSULTATION_URL']) for (const value of ['', 'http://user:password@service:3000','file:///private','http://service/path'])
+  for (const field of ['OPERATIONS_URL','CUSTOMER_URL','CONSULTATION_URL','DELIVERY_URL']) for (const value of ['', 'http://user:password@service:3000','file:///private','http://service/path'])
     assert.throws(()=>validateEnvironment({...valid,[field]:value}),error=>error.fields.includes(field)&&!error.message.includes('secret'));
   assert.throws(()=>validateEnvironment({...valid,NODE_ENV:'production'}),error=>error.fields.includes('SECURITY_LOG_HMAC_KEY'));
 });

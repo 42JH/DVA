@@ -1,9 +1,11 @@
 # Order 서비스
 
-최신 모놀리식과 같은 주문 조회 4개 및 관리자 삭제 API를 제공한다. [계획과 검증 근거](../../../docs/msa-order-reads-plan.md), [전체 이식 계획](../../../docs/msa-parity-plan.md)을 따른다. [삭제 계획과 검증 근거](../../../docs/msa-order-deletion-plan.md)를 함께 따른다. 주문 생성·수정·취소·결제·청구·접수/배송 업무 이벤트·보관 워커는 후속이다.
+최신 모놀리식과 같은 주문 조회 4개·관리자 삭제·전체/상세 취소 2개 API를 제공한다. [계획과 검증 근거](../../../docs/msa-order-reads-plan.md), [전체 이식 계획](../../../docs/msa-parity-plan.md)을 따른다. [삭제 계획과 검증 근거](../../../docs/msa-order-deletion-plan.md)를 함께 따른다. [취소 계획과 검증 근거](../../../docs/msa-order-cancellation-plan.md)를 함께 따른다. 주문 생성·수정·결제·청구·접수/배송 생성 이벤트·보관 워커는 후속이다.
 
 | API | 동작 |
 | --- | --- |
+| `POST /api/orders/:id/cancel` | 관리자/AI 전체 취소·총액 재계산·결제 요청 무효화 |
+| `POST /api/orders/:id/parcels/cancel` | 관리자/AI 상세 선택 취소·남은 결제 요청 교체·완료 시 부모 취소 |
 | `DELETE /api/orders/:id` | 관리자 soft delete·통화/결제 진행 차단·감사 확정 |
 | `GET /api/orders` | 관리자 전체/AI 통화 고객 범위의 요약, 검색·기간·페이지·전체 개수 |
 | `GET /api/orders/:id` | 저장 버전·상세/주소/PIN/청구 스냅샷·유효 결제 요청 |
@@ -16,7 +18,7 @@ order DB에는 주문/상세/결제 요청/청구만 두고 타 소유자 테이
 
 ## 실행과 배포
 
-Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 003까지 먼저 적용해야 한다. 별도 토큰/로그 Secret 종류를 추가하지 않고 기존 최초 생성·값 보존 정책을 사용한다.
+Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `DELIVERY_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 003까지 먼저 적용해야 한다. 별도 토큰/로그 Secret 종류를 추가하지 않고 기존 최초 생성·값 보존 정책을 사용한다.
 
 저장소 루트에서 실행한다.
 
@@ -29,10 +31,10 @@ python3 -m unittest discover -s msa/deploy/tests -v
 python3 msa/deploy/tests/integration_app_rollout.py --service order --image dva-order:local
 ```
 
-이미지는 기존 MSA 패키지 버전·공통 이벤트 파일 의존성을 재사용한다. Redis·브로커·새 런타임 앱은 추가하지 않는다. Jenkins `Verify Order Parity`는 operations/customer/consultation/order가 선택되면 실행하고 실패 시 배포를 중단한다. 각 서비스의 실제 배포 이력을 유지하며 모두 선택되면 operations → customer → consultation → order 순으로 배포한다.
+이미지는 기존 MSA 패키지 버전·공통 이벤트 파일 의존성을 재사용한다. Redis·브로커·새 런타임 앱은 추가하지 않는다. Jenkins `Verify Order Parity`는 operations/customer/consultation/order가 선택되면 실행하고 실패 시 배포를 중단한다. 각 서비스의 실제 배포 이력을 유지하며 모두 선택되면 operations → customer → consultation → delivery → order 순으로 배포한다.
 
 - `/order/health`: 프로세스 상태. `/order/health/ready`: 실제 order DB와 operations 세션 인증 의존 확인.
-- `/order/docs`, `/order/docs-json`: 네 업무 조회·삭제와 health만 공개한다. `/internal/order-read`, `/internal/audit/flush`는 Ingress/OpenAPI에서 제외한다.
+- `/order/docs`, `/order/docs-json`: 업무 조회·삭제·취소와 health만 공개한다. `/internal/order-read`, `/internal/order-cancellation`, `/internal/audit/flush`는 Ingress/OpenAPI에서 제외한다.
 - Ingress는 기존 `/api/orders`, `/api/admin/orders`를 전달한다. 고객 주소는 `/api/customers/[^/]+/addresses/?$`만 `ImplementationSpecific`/`PathRegexp`로 선택한다. 나머지 customer 경로와 일반 Prefix 경로는 유지한다. [Traefik 공식 설정](https://doc.traefik.io/traefik/reference/routing-configuration/kubernetes/ingress/) 및 [v3.5.4 구현의 경로별 matcher 선택](https://github.com/traefik/traefik/blob/v3.5.4/pkg/provider/kubernetes/ingress/kubernetes.go#L640)을 근거로 한다.
 - 기존 RollingUpdate·앱 패키징·실패 복구를 사용한다. 운영 Jenkins/k3s/HTTPS 확인은 로컬 컨테이너·격리 k3s 검증과 구분해 보고한다.
 
@@ -43,3 +45,13 @@ python3 msa/deploy/tests/integration_app_rollout.py --service order --image dva-
 order 로컬 트랜잭션은 대기 결제 안내 상태와 deleted_at을 바꾸고 operations에 성공 감사를 준비한다. 업무와 AuditCommitted outbox를 함께 커밋한 뒤 감사 COMMIT/ACK까지 확인해야 204를 반환한다. 실패는 rollback/AuditAborted와 기존 FAILED/DENIED 감사를 따른다. 릴레이는 기존 250ms 재시도이며 operations는 생산자 트랜잭션 잠금 증명을 확인해 강제 종료 후 미확정 준비를 중단하거나 커밋된 감사를 확정한다. 이미 커밋된 응답 유실은 실패로 단정해 되돌리지 않는다. 분리 DB의 전역 원자성을 보장하지 않으며 장애 응답 뒤 확정 결과는 기존 GET과 감사 조회로 확인한다.
 
 operations Liquibase 010을 앱보다 먼저 적용하고 operations → consultation → order를 배포한다. operations에 `ORDER_URL=http://order:3002`를 주입하며 기존 CUSTOMER_AUTH_TOKEN을 재사용한다. 새로운 프론트/AI 토큰과 공개 API는 요구하지 않는다. 수거/결제 취소와 물리 폐기는 이 DELETE의 역할이 아니다.
+
+## 전체·상세 취소
+
+두 기존 POST 경로는 관리자 cookie·역할·Origin과 AI call_session_seq 예외를 원본대로 사용한다. AI는 consultation 통화와 customer의 현재 활성 발신 고객을 공유 잠금으로 보호한 동안 order callback에서 취소한다. 종료 통화는 연결 주문만 허용한다. public order 요청은 callback을 기다릴 때 DB 연결을 잡지 않는다. 비공개 취소 명령은 actorId를 입력받지 않고 AI 범위만 수행한다.
+
+부모 주문·모든 상세 잠금, 소속 검사, 선택 상세가 전부 기취소면 204, 상태/승인/배송 차단 순서를 유지한다. 대상 ACTIVE 상세에 배송이 하나라도 있으면 원본대로 409다. 배송 상태와 무관하며 이미 취소된 상세의 배송은 대상이 아니다. 배송 생성/배송 변경은 이 API에서 수행하지 않는다. 배송 의존 장애는 변경을 커밋하지 않고 503이며 기존 관리자 로컬 조회와 기취소 상세의 no-op은 계속 가능하다.
+
+상세별·부모·금액 감사 순서, DB trigger의 버전/최초 closed_at, 주소/물품/PIN 스냅샷을 보존한다. 기존 notPaid 요청은 무효화하고 잔액이 양수면 같은 payment_due_at으로 새 요청을 만든다. 기존 안내 SENDING 자체는 이 취소의 차단 조건이 아니다. 결제 승인 중만 차단하며 안내 상태를 임의로 바꾸지 않는다. 감사는 기존 outbox/확정 ACK/생산자 잠금 복구를 사용한다.
+
+배포에는 기존 delivery DB Secret과 msa-customer-auth를 연결하고 order에 DELIVERY_URL=http://delivery:3003을 추가한다. 모든 서비스는 msa 공통 Docker context이며 delivery가 order보다 먼저 배포된다. DB changeset은 추가/수정하지 않는다. 분리 DB에는 업무 COMMIT과 원격 감사 ACK 사이가 있으며 응답 유실 시 전체 취소 재시도는 409, 기취소 상세 재시도는 204인 원본 규칙을 유지한다.

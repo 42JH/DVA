@@ -35,6 +35,24 @@ spec:
               value: production
             - name: PORT
               value: "3003"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: delivery-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: delivery-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: delivery-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: delivery-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: delivery-db, key: PGDATABASE}
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
           resources:
             requests:
               cpu: 100m
@@ -50,7 +68,7 @@ spec:
             failureThreshold: 30
           readinessProbe:
             httpGet:
-              path: /delivery/health
+              path: /delivery/health/ready
               port: http
             periodSeconds: 3
             timeoutSeconds: 2
