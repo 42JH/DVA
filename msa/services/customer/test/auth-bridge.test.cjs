@@ -40,6 +40,11 @@ test('requires an exact operations origin and a bounded service token without ex
   const valid = { DB_HOST: 'db', DB_USER: 'customer_app', DB_PASSWORD: 'private-password', DB_NAME: 'customer_db',
     OPERATIONS_URL: 'http://operations:3005', CUSTOMER_AUTH_TOKEN: serviceToken };
   assert.equal(validateEnvironment(valid).PORT, 3001);
+  assert.equal(validateEnvironment(valid).AI_BUSINESS_TOKEN, undefined);
+  assert.equal(validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: '' }).AI_BUSINESS_TOKEN, undefined);
+  assert.equal(validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: serviceToken }).AI_BUSINESS_TOKEN, serviceToken);
+  for (const value of ['short', serviceToken + '\n', '가'.repeat(32), {}])
+    assert.throws(() => validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }), error => error.fields.includes('AI_BUSINESS_TOKEN') && !error.message.includes(serviceToken));
   for (const extra of [{ OPERATIONS_URL: '' }, { OPERATIONS_URL: 'http://user:password@operations:3005' },
     { OPERATIONS_URL: 'http://operations:3005/path' }, { OPERATIONS_URL: 'file:///tmp/auth' },
     { CUSTOMER_AUTH_TOKEN: '' }, { CUSTOMER_AUTH_TOKEN: 'x'.repeat(257) }, { CUSTOMER_AUTH_TOKEN: serviceToken+'\n' }]) {

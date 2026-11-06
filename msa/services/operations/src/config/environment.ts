@@ -1,11 +1,15 @@
 export interface Environment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
+  AI_BUSINESS_TOKEN?: string;
+  AUTH_PROXY_HOPS: number;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
   DB_PASSWORD: string;
   DB_NAME: string;
+  AI_AGENT_URL?: string;
+  AI_PERSONA_TOKEN?: string;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   CUSTOMER_AUTH_TOKEN?: string;
@@ -41,7 +45,19 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) errors.push(key);
     return parsed;
   };
+  const businessToken = raw.AI_BUSINESS_TOKEN;
+  if (
+    businessToken !== undefined &&
+    businessToken !== '' &&
+    (typeof businessToken !== 'string' ||
+      businessToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(businessToken))
+  )
+    errors.push('AI_BUSINESS_TOKEN');
   const nodeEnv = raw.NODE_ENV ?? 'development';
+  const authProxyHops = raw.AUTH_PROXY_HOPS ?? '0';
+  if (typeof authProxyHops !== 'string' || !/^[012]$/.test(authProxyHops))
+    errors.push('AUTH_PROXY_HOPS');
   if (typeof nodeEnv !== 'string' || !['development', 'test', 'production'].includes(nodeEnv))
     errors.push('NODE_ENV');
   const origins =
@@ -63,14 +79,45 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   }
   const swagger = raw.SWAGGER_ENABLED ?? 'true';
   if (swagger !== 'true' && swagger !== 'false') errors.push('SWAGGER_ENABLED');
+  const aiUrl = raw.AI_AGENT_URL;
+  if (aiUrl !== undefined) {
+    try {
+      if (typeof aiUrl !== 'string') throw new Error();
+      const url = new URL(aiUrl);
+      if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        errors.push('AI_AGENT_URL');
+    } catch {
+      errors.push('AI_AGENT_URL');
+    }
+  }
+  const personaToken = raw.AI_PERSONA_TOKEN;
+  if (
+    personaToken !== undefined &&
+    personaToken !== '' &&
+    (typeof personaToken !== 'string' ||
+      personaToken.length < 32 ||
+      !/^[\x21-\x7e]+$/.test(personaToken))
+  )
+    errors.push('AI_PERSONA_TOKEN');
   const config: Environment = {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
+    AI_BUSINESS_TOKEN:
+      typeof businessToken === 'string' && businessToken ? businessToken : undefined,
+    AUTH_PROXY_HOPS: Number(authProxyHops),
     PORT: port('PORT', 3005),
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
     DB_USER: required('DB_USER'),
     DB_PASSWORD: required('DB_PASSWORD'),
     DB_NAME: required('DB_NAME'),
+    AI_AGENT_URL: typeof aiUrl === 'string' ? aiUrl.replace(/\/$/, '') : undefined,
+    AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     CORS_ORIGINS: origins,
     SWAGGER_ENABLED: swagger === 'true',
     CUSTOMER_AUTH_TOKEN:

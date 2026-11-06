@@ -30,4 +30,7 @@
   <changeSet id="006-context-pins" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="006-context-pins.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="007-retire-company-pins" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-retire-company-pins.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

@@ -31,4 +31,7 @@
   <changeSet id="006-consultation-audit" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="006-consultation-audit.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="007-persona-settings" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-persona-settings.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

@@ -2,6 +2,7 @@ import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nes
 import { Reflector } from '@nestjs/core';
 import { catchError } from 'rxjs';
 import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from './audit-operation';
+import { RateLimitException } from '../common/errors/api.exception';
 import { AuditService } from './audit.service';
 
 @Injectable()
@@ -20,10 +21,12 @@ export class AuditFailureInterceptor implements NestInterceptor {
     return next.handle().pipe(
       catchError(async (error: unknown) => {
         // Service transaction promises reject only after rollback has finished.
-        await this.audit.recordFailure(
-          auditEvent(operation, context.switchToHttp().getRequest()),
-          error,
-        );
+        // Rate-limit drops must not consume the database pool.
+        if (!(error instanceof RateLimitException))
+          await this.audit.recordFailure(
+            auditEvent(operation, context.switchToHttp().getRequest()),
+            error,
+          );
         throw error;
       }),
     );

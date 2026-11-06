@@ -47,22 +47,6 @@ export class OrganizationDeletionService {
             },
             client,
           );
-        for (const pin of await this.repository.removePins(client, companyId, departmentId))
-          await this.audit.recordSuccess(
-            {
-              actorId: adminId,
-              action: 'COMPANY_PIN_DELETED',
-              targetType: 'COMPANY_PIN',
-              targetId: pin.id,
-              requestId,
-              metadata: {
-                ...context,
-                departmentSeq: pin.departmentSeq,
-                departmentName: pin.departmentName,
-              },
-            },
-            client,
-          );
         await this.repository.removeDepartments(client, companyId, departmentId);
         for (const department of departments)
           await this.audit.recordSuccess(

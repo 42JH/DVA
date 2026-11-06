@@ -27,3 +27,31 @@ test('invalid config reports field names without exposing submitted secrets', ()
     return true;
   });
 });
+
+test('persona integration is optional and accepts only the original URL/token format', () => {
+  assert.equal(validateEnvironment(valid).AI_AGENT_URL, undefined);
+  assert.equal(validateEnvironment(valid).AI_PERSONA_TOKEN, undefined);
+  const configured = validateEnvironment({ ...valid, AI_AGENT_URL: 'https://agent.example/base/', AI_PERSONA_TOKEN: 'a'.repeat(32) });
+  assert.equal(configured.AI_AGENT_URL, 'https://agent.example/base');
+  assert.equal(configured.AI_PERSONA_TOKEN, 'a'.repeat(32));
+  assert.equal(validateEnvironment({ ...valid, AI_PERSONA_TOKEN: '' }).AI_PERSONA_TOKEN, undefined);
+  for (const extra of [{ AI_AGENT_URL: {} }, { AI_AGENT_URL: 'file:///private' },
+    { AI_AGENT_URL: 'https://user:private@agent.example' }, { AI_AGENT_URL: 'http://agent:8000?secret=private' },
+    { AI_AGENT_URL: 'http://agent:8000#private' }, { AI_PERSONA_TOKEN: 'private-short' },
+    { AI_PERSONA_TOKEN: 'x'.repeat(32) + '\n' }, { AI_PERSONA_TOKEN: '가'.repeat(32) }]) {
+    assert.throws(() => validateEnvironment({ ...valid, ...extra }), (error) => {
+      assert.ok(error.fields.includes(Object.keys(extra)[0]));
+      assert.ok(!error.message.includes('private'));
+      return true;
+    });
+  }
+});
+
+test('auth proxy trust is bounded and AI business credentials retain the source validation', () => {
+  assert.equal(validateEnvironment(valid).AUTH_PROXY_HOPS, 0);
+  assert.equal(validateEnvironment(valid).AI_BUSINESS_TOKEN, undefined);
+  for (const value of ['0', '1', '2']) assert.equal(validateEnvironment({ ...valid, AUTH_PROXY_HOPS: value }).AUTH_PROXY_HOPS, Number(value));
+  for (const value of ['-1', '3', '01', 1, {}, '1.0']) assert.throws(() => validateEnvironment({ ...valid, AUTH_PROXY_HOPS: value }), /AUTH_PROXY_HOPS/);
+  for (const value of ['', 'x'.repeat(32)]) assert.equal(validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }).AI_BUSINESS_TOKEN, value || undefined);
+  for (const value of ['short', '가'.repeat(32), 'x'.repeat(32) + '\n', {}]) assert.throws(() => validateEnvironment({ ...valid, AI_BUSINESS_TOKEN: value }), /AI_BUSINESS_TOKEN/);
+});

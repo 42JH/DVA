@@ -1,3 +1,4 @@
+import { MemberSearchEnvelopeDto, SearchMembersQueryDto } from './dto/search-members.dto';
 import {
   Body,
   Controller,
@@ -54,6 +55,16 @@ import { CreateMemberPipe } from './create-member.pipe';
 @Controller()
 export class MembersController {
   constructor(private readonly members: MembersService) {}
+
+  @Get('companies/members/search')
+  @ApiOperation({
+    summary: '관리자 사원 검색',
+    description: '모든 ACTIVE 관리자. 주소 없는 사원 포함. 기업명·주소는 검색하지 않습니다.',
+  })
+  @ApiOkResponse({ type: MemberSearchEnvelopeDto })
+  search(@Query() query: SearchMembersQueryDto) {
+    return this.members.search(query);
+  }
 
   @Get('companies/:id/members')
   @ApiOperation({
