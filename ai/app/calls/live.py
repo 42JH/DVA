@@ -234,6 +234,10 @@ class LiveFlow:
                 s.note("Decision", "DECISION_STALE")
                 return
             rt.latest_applied = utt.utterance_id
+            switch = answers.get("switch")
+            if switch and switch[1] >= th and switch[0] in ("agent", "end"):
+                # 연결·종료 요청이 섞인 "네"는 접수 확인으로도 처리하지 않는다.
+                answers = {"switch": switch}
             if (og := answers.get("origin")) and og[1] >= th and og[0] in ("yes", "no") and st.origin_offered \
                     and st.origin_answer is None:
                 st.origin_answer = og[0] == "yes"
@@ -533,8 +537,7 @@ class LiveFlow:
             await self.notify(s, "N2", {"agent": "transfer_failed"})
 
     def _count_unanswered(self, s: CallSession, out: dict) -> dict:
-        """같은 질문에 3번 연속 답을 못 드리면 상담원 연결 권유(업무 규칙). 답이 나오면 0으로.
-        shortcut: 질문이 같은지 보지 않고 연속 실패만 센다 — 다른 질문으로 바뀌어도 이어 센다."""
+        """매뉴얼 검색이 설정 횟수만큼 연속 실패하면 상담원 연결을 권유한다. 성공하면 초기화한다."""
         rt = self.rt(s)
         if out.get("status") == "ok" and (out.get("facts") or {}).get("answerable"):
             rt.unanswered = 0

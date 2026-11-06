@@ -127,8 +127,8 @@ class CallService:
         info = {"전화 받은 시각": _kst(s.incoming_at), "고객": "등록 고객" if c.customer_seq else "처음 이용하는 고객"}
         if c.name:
             info["고객 성함"] = c.name
-        if c.customer_seq and c.origin_address:
-            info["등록된 출발지"] = c.origin_address  # 인사 문구(business_rules.md). 상세주소는 넣지 않는다
+        if c.customer_seq and c.default_address:
+            info["등록된 출발지"] = c.default_address  # 최근 출발지는 접수를 시작한 뒤 확인한다.
         specs = function_specs(policy=self.d.policy)
         tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",
@@ -422,8 +422,6 @@ def _apply_context(state: ConversationState, ctx, caller: str) -> None:
         c.origin_place = Place(c.name or origin.name, origin.phone, origin.address, origin.address_detail or "",
                                Geo(g.jibun_address, g.dong_name, g.postal_code) if g else None, src)
         state.origin_offered = state.origin_offered or src == Source.PROFILE  # 기본 주소는 인사에서 묻는다
-    if origin and origin.address:
-        c.origin_address = origin.address
     places, seen = [], set()
     for src, items in ((Source.HISTORY, ctx.recent_destinations), (Source.PIN, ctx.places)):
         for p in items:

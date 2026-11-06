@@ -7,7 +7,7 @@ Backend 지시문 = policy/backend_rules.md. 문장은 파일에 두고 코드�
 
 from app.config import ROOT
 from app.domain.pickup import describe, rule_of
-from app.policy.model import Policy, load_policy
+from app.policy.model import Policy
 
 POLICY_DIR = ROOT / "policy"
 
@@ -21,9 +21,8 @@ def default_persona() -> str:
     return _read("persona_default.md")
 
 
-def business_rules(policy: Policy | None = None) -> str:
-    policy = policy if policy is not None else load_policy()
-    return _read("business_rules.md").replace("{pickup_allowed}", describe(rule_of(policy.pickup)))
+def business_rules() -> str:
+    return _read("business_rules.md")
 
 
 def render_input_rules(policy: Policy) -> str:
@@ -55,8 +54,10 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
              "## 택배 정보 받는 순서(고정, 한 번에 하나씩)",
              " → ".join(f"{i}. {label}" for i, label in enumerate(_labels(policy, order), 1)),
              f"- {', '.join(_labels(policy, auto))}는 서버가 채웁니다. 묻지 않습니다.",
-             "- 이미 기록된 항목은 다시 묻지 않습니다. 서버 결과의 missing이 아직 받지 못한 항목입니다.",
-             "- 순서 밖에서 말한 값과 정정도 버리지 않고 맡깁니다. 그다음 질문은 여전히 이 순서에서 빠진 첫 항목입니다."]
+             "- 접수 정보를 수집할 때만 현재 택배의 최신 서버 결과(또는 summary)에 있는 missing의 첫 항목을 하나만 묻습니다. "
+             "fields에서 valid인 항목은 건너뛰고, missing이 비어 있으면 새 수집 질문을 하지 않습니다.",
+             "- 서버가 needs, 선택 확인, 되읽기를 요청하면 수집 질문보다 먼저 처리합니다. 고객의 정정은 해당 항목을 다룹니다.",
+             "- 순서 밖의 값이나 한 번에 말한 값도 함께 맡기고, 결과를 기다리는 동안 같은 값을 다시 묻지 않습니다."]
     lines += [f"- {policy.fields[n].label}: {s.rule}" for s in collect for n in s.required if s.rule]
     lines += ["", render_input_rules(policy), "", "## 단계"]
     lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
@@ -71,6 +72,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
               "- 고객이 말한 가액·수량·전화번호가 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
               "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
+              "- 고객이 상담원 연결이나 통화 종료만 명확하게 요청할 때(서버가 직접 듣고 처리합니다).",
               "- 인사, 맞장구, 대기 요청, 이미 받은 결과로 답할 수 있는 말", "",
               "Do not guess the result while waiting.",
               "- 결과를 기다리는 동안 채우는 말은 정해진 문장 없이, 고객이 방금 한 말에 이어지는 자연스러운 한마디로 그때그때 짓습니다. "
@@ -84,7 +86,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     lines += ["", "## 읽기 규칙"] + [f"- {v}" for v in policy.speech.values()]
     if policy.results:
         lines += ["", "## 서버 결과 읽는 법",
-                  "- 도구 결과와 '[서버 결과]'로 시작하는 알림은 서버가 확인한 사실(JSON)이다. 그대로 읽지 않고 뜻대로 안내한다."]
+                  "- 도구 결과와 '[서버 결과]'로 시작하는 알림은 서버가 확인한 사실(JSON)이다. 결과에 없는 사실은 추측하지 않고, 결과는 뜻대로 안내한다."]
         lines += [f"- {k}: {v}" for k, v in policy.results.items()]
     lines += ["", "## 다시 묻기",
               f"- 같은 항목을 {policy.reask.max_attempts}번 받지 못하면 다른 방법을 제안합니다."
@@ -96,7 +98,7 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
                 tools: tuple[tuple[str, str], ...] = ()) -> str:
     """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
     persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
-    parts = [persona, "", business_rules(policy), "", render_policy(policy, tools)]
+    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)
