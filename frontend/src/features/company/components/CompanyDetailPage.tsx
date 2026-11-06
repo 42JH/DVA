@@ -94,7 +94,7 @@ export function CompanyDetailPage() {
           <span className="text-body text-sub">{vm.summary}</span>
           <span className="ml-auto flex gap-3">
             <Button big kind="brandLine" onClick={vm.openCsv}>
-              엑셀로 사원 추가
+              CSV로 사원 추가
             </Button>
             <Button big kind="brand" onClick={vm.openAdd}>
               사원 추가

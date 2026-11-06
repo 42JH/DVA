@@ -65,7 +65,7 @@ export function CompanyListPage() {
             삭제
           </Button>
           <Button big kind="brand" onClick={vm.openCsv}>
-            엑셀로 기업 등록
+            CSV로 기업 등록
           </Button>
         </FilterBar>
 

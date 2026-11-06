@@ -17,9 +17,9 @@ export function MemberCsvModal({
 
   return (
     <Dialog
-      label="엑셀로 사원 추가"
+      label="CSV로 사원 추가"
       width={600}
-      title="엑셀로 사원 추가"
+      title="CSV로 사원 추가"
       sub={companyName}
       onClose={onClose}
       footer={
