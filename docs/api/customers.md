@@ -26,7 +26,7 @@ AI 요청으로 전환하지 않고 401로 거절한다. 관리자 변경 요청
 
 | 메서드·경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
-| POST /api/customers | `{ name, phoneNumber, monthlyBillingEnabled?, address? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
+| POST /api/customers | `{ name, phoneNumber, address, monthlyBillingEnabled? }` | 201, `{ data: { customerSeq }, meta: { requestId } }` |
 | GET /api/customers | 관리자 세션, q·phoneNumber·status·limit·offset | 200, `{ data: Customer[], hasNext, total_count }` |
 | GET /api/customers/{id} | 양의 PostgreSQL integer 범위 ID | 200, `{ data: Customer, meta: { requestId } }` |
 | PATCH /api/customers/{id} | name·address 또는 관리자 전용 status·monthlyBillingEnabled 중 한 개 이상 | 204, 본문 없음 |
@@ -89,7 +89,7 @@ POST /api/customers
 Authorization: Bearer <AI_BUSINESS_TOKEN>
 Content-Type: application/json
 
-{"name":"예시 고객","phoneNumber":"01012345678"}
+{"name":"예시 고객","phoneNumber":"01012345678","address":{"roadAddress":"서울시 예시로 1","jibunAddress":"서울시 예시동 1","dongName":"예시동","postalCode":"01234"}}
 ```
 
 201의 data.customerSeq를 이후 상세 조회·이름 수정에 사용한다.
@@ -108,14 +108,14 @@ Content-Type: application/json
 
 028 migration의 customers.address_data(jsonb)에 저장하며 개인/기업 PIN과 독립이다.
 기존 고객은 null이며 PIN·과거 주문에서 추측해 채우지 않는다. PIN 생성·변경·삭제는 내 주소를 변경하지 않는다.
-POST /api/customers와 PATCH /api/customers/{id}에 선택 address를 보낼 수 있다. 객체는 전체 교체, 생략은 유지(신규는 null), null은 삭제다.
+POST /api/customers의 address는 필수 객체다. 생략·null·빈 객체와 필수 항목 누락은 400 INVALID_REQUEST이며 고객을 생성하지 않는다. PATCH /api/customers/{id}의 address는 기존처럼 선택이며 객체는 전체 교체, 생략은 유지, null은 삭제다. 이름만 수정하는 기존 요청은 유지한다.
 
 ```json
-{"address":{"roadAddress":"서울시 예시로 1","jibunAddress":"서울시 예시동 1","detailAddress":"101호","dongName":"예시동","postalCode":"01234","latitude":37.5,"longitude":127}}
+{"address":{"roadAddress":"서울시 예시로 1","jibunAddress":"서울시 예시동 1","detailAddress":"101호","dongName":"예시동","postalCode":"01234"}}
 ```
 
-객체 안에서 detailAddress만 선택이며 생략/빈 문자열은 허용하고 null은 거절한다. 나머지 문자열·좌표는 필수다.
-우편번호는 숫자 5자리, 위도 -90~90·경도 -180~180이다. 이름·전화번호를 주소에 중복 저장하지 않는다.
+객체 안에서 detailAddress만 선택이며 생략/빈 문자열은 허용하고 null은 거절한다. roadAddress·jibunAddress·dongName은 비어 있지 않은 문자열, postalCode는 숫자 5자리 문자열로 필수다.
+위도·경도는 받지 않는다. 이름·전화번호를 주소에 중복 저장하지 않는다.
 고객 목록·상세·발신자 context·직원 목록의 customer.address는 항상 주소 객체 또는 null이다.
 주문 본문의 인라인 customer에는 address를 받지 않으며, 주문 주소·과거 스냅샷은 이 기능으로 변경하지 않는다.
 고객 주소 수정도 기존 CUSTOMER_UPDATED 성공 감사와 같은 트랜잭션으로 처리한다.

@@ -4,6 +4,8 @@ import { AuditService } from '../audit/audit.service';
 import { ApiException } from '../common/errors/api.exception';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { OrderSubmissionService } from './order-submission.service';
+import { OrdersRepository } from './orders.repository';
+import { orderItemPriceError } from './order-pricing';
 import { randomUUID } from 'node:crypto';
 
 // Internal domain seam. PaymentsService reserves a durable provider key and lease
@@ -15,6 +17,7 @@ export class OrderPaymentsService {
     private readonly repository: OrderPaymentsRepository,
     private readonly audit: AuditService,
     private readonly submissions: OrderSubmissionService,
+    private readonly orders: OrdersRepository,
   ) {}
 
   async claimApproval(id: string, amount: number, key?: string) {
@@ -38,6 +41,21 @@ export class OrderPaymentsService {
         throw new ApiException(409, 'REQUEST_IN_PROGRESS', '결제 결과를 확인 중입니다.');
       const paymentKey = r.providerPaymentKey || key;
       if (!paymentKey) throw new ApiException(409, 'INVALID_STATE', '조회할 결제 정보가 없습니다.');
+      if (!r.approvalStartedAt) {
+        const snapshot = await this.orders.detail(client, r.orderSeq, null);
+        if (!snapshot) throw new ApiException(404, 'NOT_FOUND', '주문을 찾을 수 없습니다.');
+        const errors = snapshot.parcels.flatMap((parcel, index) => {
+          const reason = parcel.status !== 'CANCELLED' && orderItemPriceError(parcel.itemPrice);
+          return reason ? [{ field: `parcels.${index}.itemPrice`, reason }] : [];
+        });
+        if (errors.length)
+          throw new ApiException(
+            422,
+            'VALIDATION_FAILED',
+            '물품가액은 1원~1억원 정수로 입력해 주세요.',
+            errors,
+          );
+      }
       const claimId = randomUUID();
       if (!(await this.repository.reserveApproval(client, id, paymentKey, claimId)))
         throw new ApiException(404, 'NOT_FOUND', '결제 요청을 찾을 수 없습니다.');

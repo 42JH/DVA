@@ -98,7 +98,7 @@ Idempotency-Key: 00000000-0000-4000-8000-000000000055
 | `originPin` | 선택. 새 선택은 `scope: PERSONAL`과 `pinSeq`, 해당 고객의 사용 권한 검사. 신규 COMPANY는 400이며 기업 배송지는 주소 사본으로 전달 |
 | 수량 | `documentCount`, `smallBoxCount`, `mediumBoxCount`, `bigBoxCount`: 정수 0~2147483647, 기본 0 |
 | 물품·요청 사항 | `otherItemDescription`, `clientComment`: 기본 빈 문자열. 완료는 양의 수량 또는 기타 물품 설명 필요 |
-| `itemPrice` | 물품 가액, 0~Number.MAX_SAFE_INTEGER 정수. 완료 시 필수 |
+| `itemPrice` | 물품 가액, 입력 시 1~100,000,000원 정수. 미수집은 생략·null 허용, 완료 시 필수 |
 
 AI는 totalAmount와 상세별 notifiedPrice를 전달한다. 최종 확정에는 양의 정수 배송비와 미취소 상세 합계의 일치가 필요하며 itemPrice는 별도 물품 가액이다. 서버는 상세 순번을 지정한다. 호출자는 `status`, `version`, 디버 결과를 지정할 수 없다.
 

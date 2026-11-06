@@ -1,6 +1,7 @@
 import { ApiException, ErrorDetail } from '../common/errors/api.exception';
 import { MOBILE_PHONE_PATTERN } from '../common/mobile-phone';
 import { isZonedDate, ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
+import { orderItemPriceError } from './order-pricing';
 const QUANTITY_FIELDS = [
   'documentCount',
   'smallBoxCount',
@@ -59,9 +60,8 @@ export function assertOrderSubmissionReady(
       !parcel.otherItemDescription?.trim()
     )
       missing(`${prefix}.items`);
-    if (parcel.itemPrice === null) missing(`${prefix}.itemPrice`);
-    else if (!Number.isSafeInteger(parcel.itemPrice) || parcel.itemPrice < 0)
-      invalid(`${prefix}.itemPrice`, 'priceRange');
+    const priceError = orderItemPriceError(parcel.itemPrice);
+    if (priceError) invalid(`${prefix}.itemPrice`, priceError);
     if (parcel.notifiedPrice === null) missing(`${prefix}.notifiedPrice`);
     else if (
       !Number.isInteger(parcel.notifiedPrice) ||

@@ -45,7 +45,7 @@ module.exports = function registerOrdersConcurrency(suite) {
           origin: address,
           destination: address,
           smallBoxCount: 1,
-          itemPrice: 0,
+          itemPrice: 1,
         };
         const order =
           operation === 'create'
@@ -175,7 +175,7 @@ module.exports = function registerOrdersConcurrency(suite) {
               origin: address,
               destination: address,
               smallBoxCount: 1,
-              itemPrice: 0,
+              itemPrice: 1,
             },
           ],
         });

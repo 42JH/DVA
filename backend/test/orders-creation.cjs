@@ -25,7 +25,7 @@ module.exports = function registerOrdersCreation(suite) {
   test('AI uses the same ORD-01 for partial and complete data, with one linked order and no shipment', async () => {
     for (const parcels of [
       [{ origin: { name: '수집 중' } }],
-      [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+      [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 }],
     ]) {
       const callId = await call('01000000001');
       const response = await aiCreate(callId, {
@@ -286,7 +286,7 @@ module.exports = function registerOrdersCreation(suite) {
     for (const change of [
       { parcels: [{ destination: { name: '수령인만 수집' } }] },
       { parcels: [{ smallBoxCount: 1 }] },
-      { parcels: [{ itemPrice: 0 }] },
+      { parcels: [{ itemPrice: 1 }] },
       { paymentMethodType: 'billing' },
       { pickupRequestedAt: '2026-12-01T00:00:00Z' },
     ]) {
@@ -1044,7 +1044,7 @@ module.exports = function registerOrdersCreation(suite) {
       customer: { name: '정보 완성 고객', phoneNumber: '01000550020' },
       pickupRequestedAt: '2026-10-28T10:00:00+09:00',
       paymentMethodType: 'billing',
-      parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+      parcels: [{ origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 }],
     });
     assert.equal(response.status, 201);
     const { data } = await response.json();

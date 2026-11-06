@@ -25,6 +25,40 @@ module.exports = function registerOrdersSubmission(suite) {
     OrderPaymentsService,
     storedOrder,
   } = suite;
+  test('legacy stored item values remain readable but cannot create payment requests or shipments', async () => {
+    resetDver();
+    for (const itemPrice of [0, 100000001, 9000000000]) {
+      const order = await readyOrder({ paymentMethodType: 'billing' });
+      await pool.query('UPDATE order_parcels SET item_price=$2 WHERE order_seq=$1', [
+        order.orderSeq,
+        itemPrice,
+      ]);
+      const before = await storedOrder(order.orderSeq);
+      const totals = await counts();
+      assert.equal(before.parcels[0].itemPrice, itemPrice);
+      const response = await submitOrder({ ...order, version: before.version });
+      assert.equal(response.status, 422);
+      const error = await response.json();
+      assert.equal(error.error.code, 'VALIDATION_FAILED');
+      assert.ok(
+        error.error.details.some(
+          (detail) => detail.field === 'parcels.0.itemPrice' && detail.reason === 'priceRange',
+        ),
+      );
+      assert.deepEqual(await storedOrder(order.orderSeq), before);
+      assert.deepEqual(await counts(), totals);
+      assert.equal(
+        (
+          await pool.query('SELECT 1 FROM order_payment_requests WHERE order_seq=$1', [
+            order.orderSeq,
+          ])
+        ).rowCount,
+        0,
+      );
+      assert.equal(suite.dverRequests.length, 0);
+    }
+  });
+
   test('AI sends COMPLETE once to ORD-01 and receives the committed Dver result without submit', async () => {
     resetDver();
     const input = aiResult(),
@@ -221,7 +255,7 @@ module.exports = function registerOrdersSubmission(suite) {
   test('AI cannot edit cancelled draft details or sent to Dver, and only remaining details get shipments', async () => {
     resetDver();
     const order = await readyOrder({
-      parcels: [{}, { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 }],
+      parcels: [{}, { origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 }],
     });
     const callId = await call('01000000003');
     const before = (await (await readDetail(order.orderSeq)).json()).data;
@@ -293,7 +327,7 @@ module.exports = function registerOrdersSubmission(suite) {
 
   test('cancelled accepted snapshots stay out of previous address suggestions while siblings remain', async () => {
     resetDver();
-    const parcel = { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 };
+    const parcel = { origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 };
     const order = await readyOrder({ paymentMethodType: 'billing', parcels: [parcel, parcel] });
     assert.equal((await submitOrder(order)).status, 200);
     const detail = (await (await readDetail(order.orderSeq)).json()).data;
@@ -382,7 +416,7 @@ module.exports = function registerOrdersSubmission(suite) {
     );
     const order = await readyOrder({
       parcels: [
-        { origin: address, destination: address, smallBoxCount: 1, itemPrice: 0 },
+        { origin: address, destination: address, smallBoxCount: 1, itemPrice: 1 },
         { origin: address, destination: address, otherItemDescription: '기타', itemPrice: 3000 },
       ],
     });
