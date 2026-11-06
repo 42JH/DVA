@@ -13,6 +13,7 @@ import type { PoolClient } from 'pg';
 import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
 import type { AuditEvent, AuditResult } from './audit.types';
+import { ApiException } from '../common/errors/api.exception';
 
 @Injectable()
 export class AuditService implements OnModuleInit, OnModuleDestroy {
@@ -63,12 +64,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   async recordSuccess(event: AuditEvent, client: PoolClient): Promise<void> {
     return this.recordResult(event, 'SUCCESS', client);
   }
-  async recordResult(
-    event: AuditEvent,
-    result: AuditResult,
-    client: PoolClient,
-  ): Promise<void> {
-    const id = randomUUID();
+  async begin(client: PoolClient): Promise<string> {
     let pending = this.pending.get(client);
     if (!pending) {
       pending = { transactionId: randomUUID(), eventIds: [] };
@@ -79,16 +75,34 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
         [pending.transactionId],
       );
     }
-    pending.eventIds.push(id);
+    return pending.transactionId;
+  }
+  async recordResult(
+    event: AuditEvent,
+    result: AuditResult,
+    client: PoolClient,
+  ): Promise<void> {
+    const id = randomUUID();
+    const transactionId = await this.begin(client);
+    this.pending.get(client)!.eventIds.push(id);
     const at = (
       await client.query<{ at: Date }>('SELECT transaction_timestamp() AS at')
     ).rows[0].at.toISOString();
-    await sendEvent(this.url, this.token, {
+    const personaVersionSeq =
+      result === 'SUCCESS' && event.action === 'CALL_ANALYSIS_RECORDED'
+        ? (
+            await client.query<{ ai_persona_version_seq: number | null }>(
+              'SELECT ai_persona_version_seq FROM call_analyses WHERE call_session_seq=$1',
+              [event.targetId],
+            )
+          ).rows[0]?.ai_persona_version_seq
+        : undefined;
+    const prepared = {
       eventId: id,
       source: 'consultation',
       eventType: 'AuditPrepared',
       payload: {
-        transactionId: pending.transactionId,
+        transactionId,
         audit: {
           ...event,
           actorType:
@@ -96,8 +110,56 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
         },
         result,
         occurredAt: at,
+        ...(personaVersionSeq != null ? { personaVersionSeq } : {}),
       },
+    };
+    if (personaVersionSeq == null)
+      return sendEvent(this.url, this.token, prepared);
+    // The operations FK closes the race between existence lookup and the local business commit.
+    const response = await fetch(this.url, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(5000),
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(prepared),
     });
+    if (
+      response.status !== 200 ||
+      !/^application\/json(?:\s*;|$)/i.test(
+        response.headers.get('content-type') ?? '',
+      )
+    ) {
+      await response.body?.cancel();
+      if (response.status === 404)
+        throw new ApiException(
+          404,
+          'NOT_FOUND',
+          '실제 사용한 페르소나 버전을 찾을 수 없습니다.',
+        );
+      throw new Error('Audit preparation unavailable');
+    }
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    for await (const chunk of response.body ?? []) {
+      size += chunk.length;
+      if (size > 4096) throw new Error('Invalid audit acknowledgement');
+      chunks.push(chunk);
+    }
+    const ack: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (
+      !ack ||
+      typeof ack !== 'object' ||
+      Array.isArray(ack) ||
+      !('eventId' in ack) ||
+      ack.eventId !== id ||
+      !('status' in ack) ||
+      typeof ack.status !== 'string' ||
+      !['processed', 'duplicate'].includes(ack.status)
+    )
+      throw new Error('Invalid audit acknowledgement');
   }
   async recordFailure(event: AuditEvent, error: unknown): Promise<void> {
     const status = error instanceof HttpException ? error.getStatus() : 500;
@@ -120,8 +182,16 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
     client: PoolClient,
   ): Promise<(() => Promise<void>) | undefined> {
     const pending = this.pending.get(client);
-    if (!pending?.eventIds.length) return;
+    if (!pending) return;
     let eventId: string | undefined;
+    // A replay only read a version: release its provisional FK without inventing a success audit.
+    if (!pending.eventIds.length)
+      eventId = await enqueue(client, {
+        destination: 'operations',
+        eventType: 'AuditAborted',
+        aggregateSeq: 1,
+        payload: { transactionId: pending.transactionId },
+      });
     // Bound confirmation bodies when a company deletion produces thousands of audit rows.
     for (let offset = 0; offset < pending.eventIds.length; offset += 1000)
       eventId = await enqueue(client, {
@@ -137,7 +207,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   }
   async rollback(client: PoolClient): Promise<void> {
     const pending = this.pending.get(client);
-    if (!pending?.eventIds.length) return;
+    if (!pending) return;
     await client.query('BEGIN');
     try {
       await enqueue(client, {

@@ -1,4 +1,4 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { HttpException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createReceiver, sendEvent, type Event } from '@dva/events';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +6,7 @@ import type { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import type { Environment } from '../config/environment';
 import { AuditRepository } from './audit.repository';
+import { ApiException } from '../common/errors/api.exception';
 import { AUDIT_ACTOR_TYPES, AUDIT_RESULTS, type AuditEvent, type AuditResult } from './audit.types';
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -40,10 +41,26 @@ const targets = new Set([
   'MEMBERSHIP',
   'COMPANY_PIN',
 ]);
+const consultationActions = new Set([
+  'CALL_STARTED',
+  'CALL_ANALYSIS_RECORDED',
+  'CALL_DROPOFF_RECORDED',
+  'CALL_RESPONSE_WAIT_RECORDED',
+]);
 function auditInput(payload: Record<string, unknown>, service: 'customer' | 'consultation') {
   const audit = payload.audit;
+  const personaReference =
+    service === 'consultation' &&
+    object(audit) &&
+    audit.action === 'CALL_ANALYSIS_RECORDED' &&
+    payload.result === 'SUCCESS' &&
+    Object.hasOwn(payload, 'personaVersionSeq');
   if (
-    Object.keys(payload).sort().join(',') !== 'audit,occurredAt,result,transactionId' ||
+    Object.keys(payload).sort().join(',') !==
+      (personaReference
+        ? 'audit,occurredAt,personaVersionSeq,result,transactionId'
+        : 'audit,occurredAt,result,transactionId') ||
+    (personaReference && !integer(payload.personaVersionSeq)) ||
     !object(audit) ||
     Object.keys(audit).some(
       (key) =>
@@ -68,7 +85,7 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
     (audit.actorType === 'ADMIN') !== (audit.actorId !== null) ||
     !(service === 'customer'
       ? actions.has(audit.action as string)
-      : audit.action === 'CALL_STARTED') ||
+      : consultationActions.has(audit.action as string)) ||
     !(service === 'customer'
       ? targets.has(audit.targetType as string)
       : audit.targetType === 'CALL_SESSION') ||
@@ -78,9 +95,14 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
     !(audit.metadata === undefined || object(audit.metadata)) ||
     !AUDIT_RESULTS.includes(payload.result as never) ||
     (service === 'consultation' &&
+      audit.action === 'CALL_STARTED' &&
       (payload.result !== 'SUCCESS' ||
         audit.targetId === null ||
         !['AI', 'ADMIN'].includes(audit.actorType as string))) ||
+    (service === 'consultation' &&
+      audit.action !== 'CALL_STARTED' &&
+      payload.result === 'SUCCESS' &&
+      (audit.actorType !== 'AI' || audit.targetId === null)) ||
     typeof payload.occurredAt !== 'string' ||
     !Number.isFinite(Date.parse(payload.occurredAt))
   )
@@ -90,6 +112,7 @@ function auditInput(payload: Record<string, unknown>, service: 'customer' | 'con
     result: payload.result as AuditResult,
     at: payload.occurredAt,
     transactionId: transaction(payload),
+    personaVersionSeq: personaReference ? (payload.personaVersionSeq as number) : undefined,
   };
 }
 function references(payload: Record<string, unknown>): string[] {
@@ -111,7 +134,10 @@ function transaction(payload: Record<string, unknown>): string {
 }
 
 @Injectable()
-export class ServiceAuditReceiver {
+export class ServiceAuditReceiver implements OnModuleInit, OnModuleDestroy {
+  private timer?: NodeJS.Timeout;
+  private running?: Promise<void>;
+  private readonly logger = new Logger(ServiceAuditReceiver.name);
   readonly receive: ReturnType<typeof createReceiver>;
   constructor(
     private readonly database: DatabaseService,
@@ -139,6 +165,24 @@ export class ServiceAuditReceiver {
             [input.transactionId],
           );
           if (existing.rows[0]?.aborted) return;
+          if (input.personaVersionSeq !== undefined) {
+            const version = await client.query(
+              'SELECT 1 FROM ai_persona_versions WHERE ai_persona_version_seq=$1 FOR KEY SHARE',
+              [input.personaVersionSeq],
+            );
+            if (!version.rowCount)
+              throw new ApiException(
+                404,
+                'NOT_FOUND',
+                '실제 사용한 페르소나 버전을 찾을 수 없습니다.',
+              );
+            const reference = await client.query(
+              `UPDATE consultation_persona_references SET prepared_event_id=$1
+               WHERE transaction_id=$2 AND call_session_seq=$3 AND ai_persona_version_seq=$4 AND NOT committed RETURNING prepared_event_id`,
+              [event.eventId, input.transactionId, input.audit.targetId, input.personaVersionSeq],
+            );
+            if (reference.rowCount !== 1) throw invalid();
+          }
           await repository.insert(input.audit, input.result, client, input.at);
           await client.query(
             `WITH prepared AS (
@@ -165,6 +209,11 @@ export class ServiceAuditReceiver {
             [ids],
           );
           await client.query(`DELETE FROM ${table} WHERE event_id=ANY($1::uuid[])`, [ids]);
+          if (service === 'consultation')
+            await client.query(
+              'UPDATE consultation_persona_references SET committed=true WHERE prepared_event_id=ANY($1::uuid[]) AND transaction_id=$2',
+              [ids, transactionId],
+            );
         },
         [service + ':AuditAborted']: async (client: PoolClient, event: Event) => {
           if (Object.keys(event.payload).join(',') !== 'transactionId') throw invalid();
@@ -172,6 +221,11 @@ export class ServiceAuditReceiver {
           await client.query('SELECT pg_advisory_xact_lock(20261105,hashtext($1))', [
             transactionId,
           ]);
+          if (service === 'consultation')
+            await client.query(
+              'DELETE FROM consultation_persona_references WHERE transaction_id=$1 AND NOT committed',
+              [transactionId],
+            );
           await client.query(
             `UPDATE ${table} SET audit=NULL,aborted=true WHERE transaction_id=$1`,
             [transactionId],
@@ -187,12 +241,34 @@ export class ServiceAuditReceiver {
     this.receive = createReceiver<PoolClient>({ pool: database.pool, sources, handlers });
   }
 
-  async flushPending(): Promise<void> {
-    for (const service of ['customer', 'consultation'] as const) {
+  onModuleInit() {
+    this.timer = setInterval(() => {
+      if (!this.running)
+        this.running = this.flushPending(['consultation'])
+          .catch(() => {
+            this.logger.error({ event: 'consultation_audit_recovery_unavailable' });
+          })
+          .finally(() => {
+            this.running = undefined;
+          });
+    }, 1000);
+    this.timer.unref();
+  }
+  async onModuleDestroy() {
+    clearInterval(this.timer);
+    await this.running;
+  }
+
+  async flushPending(
+    services: readonly ('customer' | 'consultation')[] = ['customer', 'consultation'],
+  ): Promise<void> {
+    for (const service of services) {
       const table =
         service === 'customer' ? 'customer_audit_preparations' : 'consultation_audit_preparations';
       const { rows } = await this.database.pool.query<{ transaction_id: string }>(
-        `SELECT DISTINCT transaction_id FROM ${table} WHERE NOT aborted ORDER BY transaction_id LIMIT 128`,
+        `SELECT DISTINCT transaction_id FROM (SELECT transaction_id FROM ${table} WHERE NOT aborted
+         ${service === 'consultation' ? 'UNION SELECT transaction_id FROM consultation_persona_references WHERE NOT committed' : ''}
+         ) pending ORDER BY transaction_id LIMIT 128`,
       );
       if (!rows.length) continue;
       const url = this.config.get(service === 'customer' ? 'CUSTOMER_URL' : 'CONSULTATION_URL', {

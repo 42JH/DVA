@@ -55,6 +55,12 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT claim_id,claimed_until,call_session_seq FROM pbx_webhooks.call_ended_events LIMIT 0',
     );
     await this.pool.query('SELECT object_key FROM recordings LIMIT 0');
+    await this.pool.query(
+      'SELECT ai_persona_version_seq,has_callback_request FROM call_analyses LIMIT 0',
+    );
+    await this.pool.query(
+      'SELECT response_wait_payload_hash FROM call_dashboard_metrics LIMIT 0',
+    );
   }
 
   async transaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {

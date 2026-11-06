@@ -7,6 +7,7 @@ import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
+import { CallInsightsModule } from './call-insights/call-insights.module';
 @Module({
   imports: [
     ApplicationConfigModule,
@@ -16,6 +17,7 @@ import { PbxWebhookModule } from './webhooks/pbx/pbx-webhook.module';
     AuthModule,
     ConsultationsModule,
     PbxWebhookModule,
+    CallInsightsModule,
   ],
   controllers: [AppController],
 })
