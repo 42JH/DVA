@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useReducer, useRef, useState } from 'react'
 import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
@@ -20,6 +20,7 @@ import {
   type PickedAddress,
 } from '@/features/order/api/orderApi'
 import { orderErrorText } from '@/features/order/labels'
+import { MAX_BOXES, MAX_DOCUMENTS, pickupRange, priceOk } from '@/features/order/api/orderLimits'
 import {
   buildCustomerPatch,
   buildOrderPatch,
@@ -95,7 +96,8 @@ export function useOrderForm(
       : NO_ITEMS,
   )
   const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
-  const [declaredValue, setDeclaredValue] = useState(order?.itemPrice?.toString() ?? '') // 숫자만
+  const initialPrice = order?.itemPrice?.toString() ?? ''
+  const [declaredValue, setDeclaredValue] = useState(initialPrice) // 숫자만
   // 배송비 — 추가 · 접수 중단 주문 수정에만 (그 외 수정은 그대로 유지), 숫자만 · 1원 이상
   const [shippingFee, setShippingFee] = useState(order?.notifiedPrice?.toString() ?? '')
   const initialPickup = order?.pickupRequestedAt
@@ -115,9 +117,22 @@ export function useOrderForm(
     null,
   )
 
-  const now = toDateTimeLocal(new Date())
-  // 같은 형식 문자열이라 비교 가능. 수정에서 원래 값을 안 건드렸으면 지났어도 통과 (이미 지난 주문의 다른 칸만 고칠 때)
-  const pickupPast = pickupAt !== '' && pickupAt !== initialPickup && pickupAt <= now
+  const pickup = pickupRange(new Date())
+  // 같은 형식 문자열이라 비교 가능. 수정에서 원래 값을 안 건드렸으면 범위 밖이어도 통과 (이미 지난 주문의 다른 칸만 고칠 때)
+  const outAt = (r: { min: string; max: string }) =>
+    pickupAt !== '' && pickupAt !== initialPickup && (pickupAt < r.min || pickupAt > r.max)
+  const pickupOut = outAt(pickup)
+  // 창을 오래 열어 두면 '지금'이 흘러 범위를 벗어남 — 누르는 순간 다시 보고, 벗어났으면 다시 그려 오류 · [접수] 꺼짐
+  const [, redraw] = useReducer((n: number) => n + 1, 0)
+  const pickupStillOk = () => {
+    if (!outAt(pickupRange(new Date()))) return true
+    redraw()
+    return false
+  }
+  // 가액도 같은 기준 — 안 건드렸으면 옛 주문 값이 범위 밖이어도 통과
+  const priceOut =
+    declaredValue !== '' && declaredValue !== initialPrice && !priceOk(Number(declaredValue))
+  const boxTotal = counts.small + counts.medium + counts.big
   const hasItem = BOX_TYPES.some((b) => counts[b.key] > 0) || etcItem.trim() !== ''
   const partyOk = (p: PartyDraft) =>
     p.name.trim() !== '' && phoneOk(p.phone) && p.roadAddress !== ''
@@ -254,6 +269,8 @@ export function useOrderForm(
       key: b.key,
       label: b.label,
       count: counts[b.key],
+      // 박스는 셋 합계가 10을 넘지 않게 — 남은 개수까지만 [+]
+      max: b.key === 'document' ? MAX_DOCUMENTS : MAX_BOXES - boxTotal + counts[b.key],
       setCount: (n: number) => setCounts((c) => ({ ...c, [b.key]: n })),
     })),
     etcItem,
@@ -265,10 +282,13 @@ export function useOrderForm(
     feeError: fieldError('parcels.0.notifiedPrice') ?? fieldError('totalAmount'),
     pickupAt,
     setPickupAt,
-    pickupMin: now,
-    pickupError: pickupPast ? '지금 이후 시각을 골라 주세요.' : fieldError('pickupRequestedAt'),
+    pickupMin: pickup.min,
+    pickupMax: pickup.max,
+    pickupError: pickupOut
+      ? '지금부터 1시간 뒤 ~ 3일 안으로 골라 주세요.'
+      : fieldError('pickupRequestedAt'),
     etcError: fieldError('items.other'),
-    priceError: fieldError('itemPrice'),
+    priceError: priceOut ? '1원 ~ 1억 원 사이로 입력해 주세요.' : fieldError('itemPrice'),
     requestError: fieldError('clientComment'),
     payment,
     paymentOptions: PAYMENT_OPTIONS,
@@ -299,7 +319,8 @@ export function useOrderForm(
       (order !== undefined || Number(shippingFee) >= 1) && // 추가: 배송비 필수 (명세 4.4, 자동 견적 없음)
       (order !== undefined || (!!parties.sender.picked && !!parties.receiver.picked)) && // 추가: 주소는 검색으로 고른 것만
       declaredValue !== '' && // 물품 가액 필수 (명세 4.4, 11/01 결정)
-      !pickupPast &&
+      !pickupOut &&
+      !priceOut &&
       (!draft ||
         (collecting
           ? missing.length === 0 // 접수 중단: 바뀐 게 없어도 조건만 채워지면 접수
@@ -316,12 +337,16 @@ export function useOrderForm(
           ? null // 칸 아래에 이미 보임
           : orderErrorText(err, order ? '저장' : '접수'),
     // 수정에서 보내는 분 이름 · 주소가 바뀌었으면 먼저 묻고, 아니면 바로 저장
-    submit: () => (customerDraft ? setAsking(true) : mutation.mutate(false)),
+    submit: () => {
+      if (!pickupStillOk()) return
+      if (customerDraft) setAsking(true)
+      else mutation.mutate(false)
+    },
     asking,
     cancelAsk: () => setAsking(false),
     answer: (alsoCustomer: boolean) => {
       setAsking(false)
-      mutation.mutate(alsoCustomer)
+      if (pickupStillOk()) mutation.mutate(alsoCustomer) // 묻는 창을 띄워 둔 사이에도 시간이 흐름
     },
     customerFailMessage: customerFail
       ? `주문은 수정됐지만 고객정보 저장에 실패했습니다. ${orderErrorText(retry.error ?? customerFail.error, '저장')}`
