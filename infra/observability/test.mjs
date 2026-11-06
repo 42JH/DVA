@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { resources, render, checks } from "./render.mjs";
+import { resources, render, checks, securityChecks } from "./render.mjs";
 
 const work = mkdtempSync(join(tmpdir(), "dva-observability-check-"));
 try {
@@ -15,6 +15,23 @@ try {
     true,
   );
   assert.equal(checks.length, 6);
+  assert.equal(securityChecks.length, 4);
+  assert.equal(paused.groups[0].rules.length, 10);
+  for (const [uid] of securityChecks) {
+    const rule = paused.groups[0].rules.find((row) => row.uid === `dva_${uid}`);
+    assert.equal(rule.data[0].datasourceUid, "loki");
+    assert.equal(rule.data[0].model.queryType, "instant");
+    assert.equal(rule.execErrState, "Error");
+    assert.deepEqual(rule.labels, { service: "backend", incident: uid });
+    assert.ok(rule.data[0].model.expr.endsWith("or vector(0)"));
+    assert.ok(!rule.annotations.summary.includes("{{"));
+  }
+  assert.ok(
+    paused.templates[0].template.includes(
+      'eq .Labels.alertname "DatasourceError"',
+    ),
+  );
+  assert.ok(!paused.templates[0].template.includes(".Annotations.Error"));
   for (const uid of ["backend_down", "database_down", "nginx_down"])
     assert.equal(checks.find((row) => row[0] === uid)[3], "1m");
   assert.throws(() => resources("http://example.invalid/hooks/test"));

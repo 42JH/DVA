@@ -1,8 +1,11 @@
 import { PaymentEnvironment, paymentEnvironment } from '../payments/payment-config';
+import { randomBytes } from 'node:crypto';
+const developmentSecurityLogKey = randomBytes(32).toString('hex');
 export interface Environment extends PaymentEnvironment {
   NODE_ENV: 'development' | 'test' | 'production';
   PORT: number;
   AUTH_PROXY_HOPS: number;
+  SECURITY_LOG_HMAC_KEY: string;
   DB_HOST: string;
   DB_PORT: number;
   DB_USER: string;
@@ -56,6 +59,14 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   if (typeof authProxyHops !== 'string' || !/^[012]$/.test(authProxyHops))
     errors.push('AUTH_PROXY_HOPS');
   if (!['development', 'test', 'production'].includes(String(nodeEnv))) errors.push('NODE_ENV');
+  const securityLogKey = raw.SECURITY_LOG_HMAC_KEY;
+  if (
+    (nodeEnv === 'production' && !securityLogKey) ||
+    (securityLogKey !== undefined &&
+      securityLogKey !== '' &&
+      (typeof securityLogKey !== 'string' || !/^[a-fA-F0-9]{64}$/.test(securityLogKey)))
+  )
+    errors.push('SECURITY_LOG_HMAC_KEY');
   const aiUrl = required('AI_AGENT_URL');
   try {
     const url = new URL(aiUrl);
@@ -164,6 +175,10 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
     NODE_ENV: nodeEnv as Environment['NODE_ENV'],
     PORT: port('PORT', 3000),
     AUTH_PROXY_HOPS: Number(authProxyHops),
+    SECURITY_LOG_HMAC_KEY:
+      typeof securityLogKey === 'string' && securityLogKey
+        ? securityLogKey
+        : developmentSecurityLogKey,
     DB_HOST: required('DB_HOST'),
     DB_PORT: port('DB_PORT', 5432),
     DB_USER: required('DB_USER'),

@@ -13,6 +13,7 @@ import { lookup } from 'node:dns';
 import { get } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { Environment } from '../../config/environment';
+import { RecordingProcessingError } from './recording-retry';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const blocked = new BlockList();
@@ -46,7 +47,12 @@ export function publicRecordingAddress(address: string): boolean {
 }
 
 export function recordingSource(value: string, allowedHosts: string[]): URL {
-  const url = new URL(value);
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new RecordingProcessingError('SOURCE_NOT_ALLOWED', false);
+  }
   if (
     url.protocol !== 'https:' ||
     url.username ||
@@ -55,7 +61,7 @@ export function recordingSource(value: string, allowedHosts: string[]): URL {
     url.port ||
     !allowedHosts.includes(url.hostname)
   )
-    throw new Error('recording_source_not_allowed');
+    throw new RecordingProcessingError('SOURCE_NOT_ALLOWED', false);
   return url;
 }
 
@@ -115,7 +121,7 @@ export class RecordingStorage implements OnApplicationShutdown {
         !object.ContentLength ||
         object.ContentLength > MAX_BYTES
       )
-        throw new Error('recording_object_conflict');
+        throw new RecordingProcessingError('OBJECT_CONFLICT', false);
       return true;
     } catch (error) {
       if (
@@ -125,7 +131,8 @@ export class RecordingStorage implements OnApplicationShutdown {
         (error.$metadata as { httpStatusCode?: number }).httpStatusCode === 404
       )
         return false;
-      throw error;
+      if (error instanceof RecordingProcessingError) throw error;
+      throw new RecordingProcessingError('STORAGE_UNAVAILABLE');
     }
   }
 
@@ -143,7 +150,7 @@ export class RecordingStorage implements OnApplicationShutdown {
                 !addresses.length ||
                 addresses.some((entry) => !publicRecordingAddress(entry.address))
               )
-                return callback(new Error('recording_address_not_public'), '', 4);
+                return callback(new RecordingProcessingError('ADDRESS_NOT_PUBLIC', false), '', 4);
               if (options.all) callback(null, addresses);
               else callback(null, addresses[0].address, addresses[0].family);
             });
@@ -155,38 +162,53 @@ export class RecordingStorage implements OnApplicationShutdown {
               .split(';')[0]
               .trim()
               .toLowerCase();
-            if (
-              response.statusCode !== 200 ||
-              (!contentType.startsWith('audio/') && contentType !== 'application/octet-stream')
-            )
-              throw new Error('recording_download_rejected');
+            const status = response.statusCode ?? 0;
+            if (status === 401 || status === 403)
+              throw new RecordingProcessingError('SOURCE_ACCESS_DENIED');
+            if (status === 404 || status === 410)
+              throw new RecordingProcessingError('SOURCE_NOT_FOUND');
+            if (status === 429) throw new RecordingProcessingError('SOURCE_RATE_LIMITED');
+            if (status >= 500) throw new RecordingProcessingError('SOURCE_UNAVAILABLE');
+            if (status !== 200) throw new RecordingProcessingError('DOWNLOAD_REJECTED', false);
+            if (!contentType.startsWith('audio/') && contentType !== 'application/octet-stream')
+              throw new RecordingProcessingError('CONTENT_TYPE_REJECTED', false);
             const length = response.headers['content-length'];
             if (length !== undefined && (!/^\d+$/.test(length) || Number(length) > MAX_BYTES))
-              throw new Error('recording_too_large');
+              throw new RecordingProcessingError('TOO_LARGE', false);
             const chunks: Buffer[] = [];
             let size = 0;
             for await (const chunk of response) {
               const bytes = Buffer.from(chunk);
               size += bytes.length;
-              if (size > MAX_BYTES) throw new Error('recording_too_large');
+              if (size > MAX_BYTES) throw new RecordingProcessingError('TOO_LARGE', false);
               chunks.push(bytes);
             }
             if (!size || (length !== undefined && Number(length) !== size))
-              throw new Error('recording_download_incomplete');
+              throw new RecordingProcessingError('DOWNLOAD_INCOMPLETE');
             resolve({ bytes: Buffer.concat(chunks, size), contentType });
           } catch (error) {
             response.destroy();
-            reject(error);
+            reject(
+              error instanceof RecordingProcessingError
+                ? error
+                : new RecordingProcessingError('DOWNLOAD_UNAVAILABLE'),
+            );
           }
         },
       );
-      request.on('error', reject);
+      request.on('error', (error) =>
+        reject(
+          error instanceof RecordingProcessingError
+            ? error
+            : new RecordingProcessingError('DOWNLOAD_UNAVAILABLE'),
+        ),
+      );
     });
   }
 
   async save(recordingId: string, callId: number, source: string): Promise<string> {
     const bucket = this.config.get('S3_RECORDINGS_BUCKET', { infer: true });
-    if (!bucket) throw new Error('recording_storage_not_configured');
+    if (!bucket) throw new RecordingProcessingError('STORAGE_UNAVAILABLE');
     const key = `recordings/${createHash('sha256').update(recordingId).digest('hex')}`;
     // DB 저장 전에 중단되었어도 기존 객체를 재사용한다. 만료된 원본 URL을 다시 받을 필요가 없다.
     if (await this.stored(bucket, key, callId)) return key;
@@ -217,7 +239,7 @@ export class RecordingStorage implements OnApplicationShutdown {
         (error.$metadata as { httpStatusCode?: number }).httpStatusCode === 412 &&
         (await this.stored(bucket, key, callId))
       ))
-        throw error;
+        throw new RecordingProcessingError('STORAGE_UNAVAILABLE');
     }
     return key;
   }

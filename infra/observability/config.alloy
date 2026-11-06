@@ -51,13 +51,26 @@ loki.process "privacy" {
 		selector = "{service=\"backend\"}"
 
 		stage.json {
-			expressions    = {event = "event", requestId = "requestId", orderSeq = "orderSeq", callSessionSeq = "callSessionSeq", level = "level", route = "route", method = "method", statusCode = "statusCode", durationMs = "durationMs", outcome = "outcome", reason = "reason", receipt = "receipt"}
+			expressions    = {event = "event", requestId = "requestId", orderSeq = "orderSeq", callSessionSeq = "callSessionSeq", level = "level", route = "route", method = "method", statusCode = "statusCode", durationMs = "durationMs", outcome = "outcome", reason = "reason", receipt = "receipt", authType = "authType", accountKey = "accountKey", sourceKey = "sourceKey"}
 			drop_malformed = true
+		}
+
+		stage.regex {
+			source     = "accountKey"
+			expression = "^(?P<safeAccountKey>[a-f0-9]{64})$"
+		}
+		stage.regex {
+			source     = "sourceKey"
+			expression = "^(?P<safeSourceKey>[a-f0-9]{64})$"
+		}
+		stage.regex {
+			source     = "authType"
+			expression = "^(?P<safeAuthType>admin_login|admin_session|ai_business|ai_persona|ai_insights)$"
 		}
 
 		stage.template {
 			source   = "sanitized"
-			template = `{{ dict "event" (.event | default "") "requestId" (.requestId | default "") "orderSeq" (.orderSeq | default "") "callSessionSeq" (.callSessionSeq | default "") "level" (.level | default "") "route" (.route | default "") "method" (.method | default "") "statusCode" (.statusCode | default "") "durationMs" (.durationMs | default "") "outcome" (.outcome | default "") "reason" (.reason | default "") "receipt" (.receipt | default "") | toJson }}`
+			template = `{{ dict "event" (.event | default "") "requestId" (.requestId | default "") "orderSeq" (.orderSeq | default "") "callSessionSeq" (.callSessionSeq | default "") "level" (.level | default "") "route" (.route | default "") "method" (.method | default "") "statusCode" (.statusCode | default "") "durationMs" (.durationMs | default "") "outcome" (.outcome | default "") "reason" (.reason | default "") "receipt" (.receipt | default "") "authType" (.safeAuthType | default "") "accountKey" (.safeAccountKey | default "") "sourceKey" (.safeSourceKey | default "") | toJson }}`
 		}
 
 		stage.output {

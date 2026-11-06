@@ -11,5 +11,5 @@ test('the complete monolith route, migration and worker inventory matches the pi
   for (const required of ['GET /api/calls/active-count/stream', 'POST /webhooks/pbx/call-ended',
     'GET /api/companies/members/search', 'GET /api/payments/p/:id', 'POST /api/ai/calls/:id/events', 'GET /health/ready'])
     assert.ok(keys.includes(required), required);
-  assert.ok(baseline.inventory.migrations.at(-1).file.endsWith('053-drop-company-pins.sql'));
+  assert.ok(baseline.inventory.migrations.at(-1).file.endsWith('054-recording-retry-policy.sql'));
 });

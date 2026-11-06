@@ -102,6 +102,7 @@ def main():
                 name = RUN+'-'+side+'-app'
                 create(name, images[side], '--network-alias', side+'-app',
                        '-e', 'NODE_ENV='+environment, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
+                       '-e', 'SECURITY_LOG_HMAC_KEY='+uuid.uuid4().hex+uuid.uuid4().hex,
                        '-e', 'DB_USER='+side+'_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'CORS_ORIGINS=http://localhost:5173', '-e', 'SWAGGER_ENABLED=true',
                        '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',

@@ -1,5 +1,7 @@
 # Lightsail 이미지 파일 배포
 
+S10 포함 릴리스 전에 운영 `shared/.env`에 backend 전용 `SECURITY_LOG_HMAC_KEY`(32바이트 난수의 64자리 hex)를 추가한다. 미설정/잘못된 값은 새 앱 시작을 거절한다. AI·프론트에 공유하지 않는다. Compose 재생성과 별도의 Alloy/Grafana 설정 반영은 [S10 운영 절차](../../backend/docs/security-auth-observability.md)를 따른다. 실제 키를 릴리스 산출물에 포함하지 않는다.
+
 ## AI 배포 관리 분리
 
 백엔드 패키징(`package.sh`, `package.ps1`)은 Backend·PostgreSQL·Nginx만 포함한다.
@@ -148,6 +150,8 @@ ssh -i 'C:\Users\SSAFY\Desktop\기업연계\dva-monolith.pem' -N -L 18082:127.0.
 - 공개 프록시의 `/api/health/ready` → 의도적으로 404. 상세 의존성 상태는 배포 스크립트가 내부에서 확인한다.
 
 ## 5. 롤백과 보관
+
+054 녹취 재시도 제한도 최초 적용 시 기존 워커 중지 → 백업 → SQL·verify → 새 앱 순서를 적용한다. 기존 FAILED는 자동 재시도를 멈추므로 [S09 이행·재개 절차](../../backend/docs/recording-retry-policy.md)를 먼저 확인한다. 새 deploy.sh는 054 적용 DB에 해당 migration이 없는 앱의 배포·명시적 롤백·자동 복귀를 차단한다. 이행 실패로 054가 커밋되지 않았으면 기존 앱 복구를 허용하고, 커밋 후 실패하면 호환 앱을 사용한다. 보호 기능이 없는 과거 deploy.sh를 직접 실행하지 않는다.
 
 서버에서 `<현재버전>`을 실제 폴더명으로 바꿔 실행한다.
 

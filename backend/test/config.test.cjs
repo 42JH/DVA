@@ -5,12 +5,44 @@ const { validateEnvironment } = require('../dist/config/environment');
 
 const valid = {
   NODE_ENV: 'test',
+  SECURITY_LOG_HMAC_KEY: 'ab'.repeat(32),
   DB_HOST: 'db',
   DB_USER: 'test_user',
   DB_PASSWORD: 'test-only-not-a-real-password',
   DB_NAME: 'dva_webhook_test',
   AI_AGENT_URL: 'http://ai:8000',
 };
+
+test('security logging requires a separate 32-byte hex key in production and never echoes invalid values', () => {
+  const withoutKey = { ...valid };
+  delete withoutKey.SECURITY_LOG_HMAC_KEY;
+  const temporary = validateEnvironment(withoutKey).SECURITY_LOG_HMAC_KEY;
+  assert.match(temporary, /^[a-f0-9]{64}$/);
+  assert.equal(validateEnvironment(withoutKey).SECURITY_LOG_HMAC_KEY, temporary);
+  assert.throws(
+    () => validateEnvironment({ ...withoutKey, NODE_ENV: 'production' }),
+    /SECURITY_LOG_HMAC_KEY/,
+  );
+  for (const value of [
+    '',
+    'short-private-value',
+    'a'.repeat(63),
+    'g'.repeat(64),
+    'a'.repeat(64) + '\n',
+    123,
+  ])
+    assert.throws(
+      () => validateEnvironment({ ...valid, NODE_ENV: 'production', SECURITY_LOG_HMAC_KEY: value }),
+      (error) => {
+        assert.equal(error.message, 'Invalid environment variables: SECURITY_LOG_HMAC_KEY');
+        return true;
+      },
+    );
+  assert.equal(
+    validateEnvironment({ ...valid, NODE_ENV: 'production' }).SECURITY_LOG_HMAC_KEY,
+    valid.SECURITY_LOG_HMAC_KEY,
+  );
+});
 
 test('auth proxy hops default to direct peers and accept only the supported private proxy topology', () => {
   assert.equal(validateEnvironment(valid).AUTH_PROXY_HOPS, 0);

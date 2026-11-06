@@ -11,6 +11,7 @@ import { AUDIT_OPERATION, AuditOperationOptions, auditEvent } from '../audit/aud
 import { AuditActorType } from '../audit/audit.types';
 import { AuthService } from './auth.service';
 import { MVP_AI_ACCESS } from './mvp-ai-access';
+import type { AuthenticationType } from '../observability/security-events';
 export const SESSION_COOKIE = 'dva_session';
 export const PublicAuth = () => SetMetadata('auth:public', true);
 // Customer service token or administrator session; keep this permission method-scoped.
@@ -22,6 +23,7 @@ export type AuthRequest = Request & {
   admin: AdminPublic;
   sessionToken: string;
   auditActorType?: AuditActorType;
+  securityAuthType?: AuthenticationType;
 };
 export function readSessionToken(request: Request): string | undefined {
   const values = (request.headers.cookie ?? '')
@@ -95,7 +97,9 @@ export class AuthGuard implements CanActivate {
         throw new ApiException(403, 'FORBIDDEN', '허용된 Origin이 필요합니다.');
     }
     if (this.reflector.getAllAndOverride<boolean>('auth:public', targets)) return true;
+    request.securityAuthType = 'admin_session';
     request.admin = await this.auth.authenticate(request.sessionToken);
+    delete request.securityAuthType;
     const roles = this.reflector.getAllAndOverride<AdminRole[]>('auth:roles', targets);
     if (roles && !roles.includes(request.admin.role))
       throw new ApiException(403, 'FORBIDDEN', '접근 권한이 없습니다.');
@@ -103,6 +107,7 @@ export class AuthGuard implements CanActivate {
   }
 
   private authenticateAi(request: AuthRequest): void {
+    request.securityAuthType = 'ai_business';
     const expected = this.config.get('AI_BUSINESS_TOKEN', { infer: true });
     if (!expected)
       throw new ApiException(503, 'DEPENDENCY_UNAVAILABLE', 'AI 업무 인증이 설정되지 않았습니다.');
@@ -119,6 +124,7 @@ export class AuthGuard implements CanActivate {
       )
     )
       throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 업무 인증이 필요합니다.');
+    delete request.securityAuthType;
     request.auditActorType = 'AI';
   }
 }

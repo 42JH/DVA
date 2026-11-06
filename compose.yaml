@@ -44,6 +44,7 @@ services:
       NODE_ENV: development
       PORT: "3000"
       AUTH_PROXY_HOPS: "1"
+      SECURITY_LOG_HMAC_KEY: ${SECURITY_LOG_HMAC_KEY:-}
       DB_HOST: db
       DB_PORT: "5432"
       DB_USER: ${DB_USER:?Set DB_USER in .env}

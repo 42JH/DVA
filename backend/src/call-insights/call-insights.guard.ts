@@ -20,6 +20,7 @@ export class CallInsightsGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthRequest>();
     request.auditActorType = undefined;
     try {
+      request.securityAuthType = 'ai_insights';
       const expected = this.config.get('AI_INSIGHTS_TOKEN', { infer: true });
       if (!expected)
         throw new ApiException(
@@ -40,6 +41,7 @@ export class CallInsightsGuard implements CanActivate {
         )
       )
         throw new ApiException(401, 'UNAUTHORIZED', '유효한 AI 통화 기록 인증이 필요합니다.');
+      delete request.securityAuthType;
       request.auditActorType = 'AI';
       return true;
     } catch (error) {
