@@ -56,9 +56,38 @@ export function decodeCsv(bytes: ArrayBuffer): string {
   }
 }
 
-/** 전화번호: 하이픈 · 공백을 빼고 0으로 시작하는 10~11자리 (CSV · 사원 추가 창 공용) */
+/** 전화번호 하이픈 · 공백 빼기 (CSV · 사원 추가 창 공용) */
 export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
-export const isPhone = (digits: string) => /^0\d{9,10}$/.test(digits)
+
+// 국내 전화번호 모양 (11/06 사용자: 02 · 054 같은 지역번호 집 전화도 있음 — 9~11자리)
+//   02 서울 9~10자리 · 031~064 지역번호 10~11자리 · 070 인터넷전화 11자리 · 010 11자리 · 011 · 016~019 10~11자리
+//   1588 같은 대표번호 · 080 수신자부담 · 050 안심번호는 사람 번호가 아니라 뺌
+const KR_PHONE =
+  /^(?:02\d{7,8}|0(?:3[1-3]|4[1-4]|5[1-5]|6[1-4])\d{7,8}|070\d{8}|010\d{8}|01[16-9]\d{7,8})$/
+export const isPhone = (digits: string) => KR_PHONE.test(digits)
+/** 백엔드 사원 전화 = 숫자 11자리만 (MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
+ *  9~10자리 지역번호는 맞는 번호여도 서버가 400 → 보내기 전에 이유를 밝혀 막음. 백엔드가 넓히면 이 검사만 지움 */
+const serverTakes = (digits: string) => /^\d{11}$/.test(digits)
+/** 전화번호 오류 문구 (없으면 null) — CSV 줄 · 사원 추가 창 공용 */
+export function phoneError(digits: string): string | null {
+  if (!isPhone(digits)) return '전화번호 형식이 맞지 않습니다. (예: 010-1234-5678 · 02-123-4567)'
+  if (!serverTakes(digits))
+    return '9~10자리 지역번호 전화는 아직 서버에서 받지 않습니다. 11자리 번호(휴대전화 등)를 넣어 주세요.'
+  return null
+}
+
+// 엑셀은 '01012345678' · '0541234567'을 숫자로 바꾸며 앞 0을 지움 (CSV를 엑셀로 다시 열고 저장 · 숫자 칸 붙여넣기)
+// 국내 번호는 늘 0 하나로 시작하고 그다음 자리는 0이 아님 → 0을 붙여 국내 번호 모양이 되면 그 번호로 (어느 번호인지 헷갈릴 일 없음)
+// 1588 · 아무 숫자처럼 0을 붙여도 국내 번호가 아니면 그대로 둬서 형식 오류로 막힘
+/** CSV · 엑셀 칸의 전화번호 → 숫자만 (엑셀이 지운 앞 0을 되살림) */
+export const csvPhone = (v: string) => {
+  const d = phoneDigits(v)
+  return /^[1-9]/.test(d) && isPhone(`0${d}`) ? `0${d}` : d
+}
+// 엑셀이 긴 숫자를 지수로 바꿔 저장한 값 '1.01E+10' — 원래 숫자를 알 수 없어 고칠 수 없음 → 원인을 알려 줌
+const EXCEL_NUMBER = /^\d(?:\.\d+)?e\+?\d+$/i
+const excelNumberError = (line: number, col: string) =>
+  `${line}행 ${col}이 엑셀에서 숫자(지수 표기)로 바뀌었습니다. ${col} 열을 텍스트 형식으로 바꿔 다시 저장해 주세요.`
 
 /** CSV 주소 — 서버 주소의 필수 칸(좌표 빼고) + 상세주소(빈칸 가능) */
 export interface CsvAddress {
@@ -113,10 +142,13 @@ export function readMembersRows(rows: string[][]): CsvResult {
   const seenPhone = new Map<string, number>()
   body.forEach(([no = '', name = '', phone = '', leader = '', dept = '', ...addr], i) => {
     const line = i + 2 // 머리줄 다음부터
-    const digits = phoneDigits(phone)
+    const digits = csvPhone(phone)
     if (!no) return errors.push(`${line}행 사번이 비어 있습니다.`)
+    if (EXCEL_NUMBER.test(no)) return errors.push(excelNumberError(line, '사번'))
     if (!name) return errors.push(`${line}행 사원명이 비어 있습니다.`)
-    if (!isPhone(digits)) return errors.push(`${line}행 전화번호 형식이 맞지 않습니다.`)
+    if (EXCEL_NUMBER.test(phone)) return errors.push(excelNumberError(line, '전화번호'))
+    const badPhone = phoneError(digits)
+    if (badPhone) return errors.push(`${line}행 ${badPhone}`)
     if (leader !== '' && leader.toUpperCase() !== 'Y')
       return errors.push(`${line}행 대표자는 Y 또는 빈칸이어야 합니다.`)
     if (dept.length > MAX_DEPARTMENT_NAME)
@@ -205,10 +237,25 @@ export function previewAgainst(
   departmentNames: Map<number, string>,
 ): CsvPreview {
   const byNo = new Map(existing.map((m) => [m.membership.employeeNo, m]))
+  // 숫자만인 사번은 앞 0을 뗀 값으로도 찾음 — 엑셀이 '001'을 1로 바꾸면 같은 사람이 새 사원 '1'로 따로 생김 (사번은 등록 뒤 못 바꿈)
+  const unpad = (no: string) => (/^\d+$/.test(no) ? no.replace(/^0+(?=\d)/, '') : null)
+  const byNumber = new Map(
+    existing.flatMap((m) => {
+      const k = unpad(m.membership.employeeNo)
+      return k === null ? [] : [[k, m] as const]
+    }),
+  )
   const byPhone = new Map(existing.map((m) => [m.customer.phoneNumber, m]))
   const out: CsvPreview = { added: [], changed: [], same: [], leaders: [], errors: [] }
   for (const r of rows) {
     const old = byNo.get(r.employeeNo)
+    const padded = old ? undefined : byNumber.get(unpad(r.employeeNo) ?? '')
+    if (padded) {
+      out.errors.push(
+        `${r.line}행 사번 '${r.employeeNo}'은 기존 사번 '${padded.membership.employeeNo}'(${padded.customer.name})과 앞의 0만 다릅니다. 엑셀이 0을 지웠을 수 있으니 사번 열을 텍스트 형식으로 바꿔 다시 저장해 주세요.`,
+      )
+      continue
+    }
     const owner = byPhone.get(r.phoneNumber)
     // 이 번호를 다른 사번의 사원이 이미 씀 → 서버가 전체 거절 (명세 7장)
     if (owner && owner.membership.employeeNo !== r.employeeNo) {
