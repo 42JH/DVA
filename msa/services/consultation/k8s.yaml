@@ -131,6 +131,18 @@ spec:
     - host: k15d109.p.ssafy.io
       http:
         paths:
+          - path: /api/ai/unanswered-questions
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
+          - path: /api/unanswered-questions
+            pathType: Prefix
+            backend:
+              service:
+                name: consultation
+                port: { number: 3004 }
           - path: /api/ai/calls
             pathType: Prefix
             backend:

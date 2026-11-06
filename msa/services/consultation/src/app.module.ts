@@ -1,3 +1,4 @@
+import { UnansweredQuestionsModule } from './unanswered-questions/unanswered-questions.module';
 import { CustomersModule } from './customers/customers.module';
 import { AuditModule } from './audit/audit.module';
 import { Module } from '@nestjs/common';
@@ -18,6 +19,7 @@ import { CallInsightsModule } from './call-insights/call-insights.module';
     ConsultationsModule,
     PbxWebhookModule,
     CallInsightsModule,
+    UnansweredQuestionsModule,
   ],
   controllers: [AppController],
 })

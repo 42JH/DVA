@@ -33,7 +33,10 @@ describe('Consultation PBX and active calls (e2e)', () => {
       .overrideProvider(AuthService)
       .useValue(auth)
       .overrideProvider(AuditService)
-      .useValue({ flush: jest.fn().mockResolvedValue(undefined) })
+      .useValue({
+        flush: jest.fn().mockResolvedValue(undefined),
+        recordFailure: jest.fn().mockResolvedValue(undefined),
+      })
       .overrideProvider(CustomerContextClient)
       .useValue({
         callCustomer: jest.fn().mockResolvedValue(null),
@@ -72,15 +75,21 @@ describe('Consultation PBX and active calls (e2e)', () => {
           '/api/ai/calls/{id}/analysis',
           '/api/ai/calls/{id}/response-wait-metrics',
           '/api/ai/calls/{id}/stage-metrics',
+          '/api/ai/unanswered-questions',
           '/api/calls/active-count',
           '/api/calls/active-count/stream',
+          '/api/calls/{id}',
+          '/api/calls/{id}/actions',
+          '/api/calls/{id}/processing-results',
+          '/api/calls/{id}/transcript',
+          '/api/unanswered-questions/{id}',
           '/consultation/health',
           '/consultation/health/ready',
           '/webhooks/pbx/call-ended',
         ]);
       });
     await request(app.getHttpServer()).get('/api/calls').expect(404);
-    await request(app.getHttpServer()).delete('/api/calls/1').expect(404);
+    await request(app.getHttpServer()).delete('/api/calls/1').expect(401);
   });
   it('requires administrator sessions for both active count routes', async () => {
     for (const path of [
