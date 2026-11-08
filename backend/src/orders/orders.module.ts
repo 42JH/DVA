@@ -57,6 +57,6 @@ import { AdminParcelDraftsService } from './admin-parcel-drafts.service';
     OrderIntakeRepository,
     AdminParcelDraftsService,
   ],
-  exports: [OrderPaymentsService],
+  exports: [OrderPaymentsService, OrdersRepository, ParcelDraftsRepository],
 })
 export class OrdersModule {}

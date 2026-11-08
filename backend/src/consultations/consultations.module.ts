@@ -21,6 +21,6 @@ import { CallEndRepository } from './call-end.repository';
     CallEndRepository,
     ActiveCallCountService,
   ],
-  exports: [ConsultationsService],
+  exports: [ConsultationsService, ConsultationsRepository],
 })
 export class ConsultationsModule {}

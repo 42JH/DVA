@@ -54,9 +54,12 @@ export class UnansweredQuestionsRepository {
     );
   }
 
-  async findMany(query: UnansweredQuestionQueryDto): Promise<PageRows<UnansweredQuestionDto>> {
+  async findMany(
+    query: UnansweredQuestionQueryDto,
+    client?: PoolClient,
+  ): Promise<PageRows<UnansweredQuestionDto>> {
     return await readPage<UnansweredQuestionDto>(
-      this.database.pool,
+      client ?? this.database.pool,
       `SELECT u.unanswered_question_seq AS "unansweredQuestionSeq",u.call_session_seq AS "callSessionSeq",
          COALESCE(c.started_at,a.ai_started_at) AS "callStartedAt",u.occurred_at AS "occurredAt",
          u.offset_seconds::double precision AS "offsetSeconds",customer.customer_seq AS "customerSeq",
@@ -68,7 +71,7 @@ export class UnansweredQuestionsRepository {
          LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
          LEFT JOIN faq_entries f ON f.faq_entry_seq=u.faq_entry_seq AND f.deleted_at IS NULL
          WHERE u.status IN ('OPEN','REGISTERED') AND ($1::text='ALL' OR u.status=$1) AND c.deleted_at IS NULL
-           AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
+           AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
            AND ($2::integer IS NULL OR u.unanswered_question_seq=$2)
            AND ($3::integer IS NULL OR u.call_session_seq=$3)
            AND ($4::integer IS NULL OR a.ai_persona_version_seq=$4)

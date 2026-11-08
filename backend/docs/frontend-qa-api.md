@@ -24,3 +24,19 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 ### 1단계 검증
 
 2026-11-08 격리 PostgreSQL 17·전체 migration 적용 환경에서 신규 집계 5개와 기존 주문·현재 기업 소속·초안 경로를 포함한 HTTP 통합 테스트 131개가 통과했다. 상태 그룹·페이지 범위·검색·기간·기업 조건, 이관 중복·삭제·보관 만료 제외, 별도 연결의 동시 추가 시 스냅샷 일치, 관리자 역할·AI 거절·Swagger 계약을 확인했다. Docker checks의 컴파일·lint·format과 단위 테스트 194개·결제 모듈 21개도 통과했다. 운영 DB·배포·프론트 화면은 검증 대상이 아니다.
+
+## 2. 홈 조회
+
+`GET /api/dashboard/home`은 관리자 3개 역할에 `{data,meta}`로 제공한다. 별도 필터 없이 전체 보관 데이터 기준이며 `data.observedAt`은 DB 트랜잭션 시작 시각이다. 모든 영역을 하나의 읽기 전용 REPEATABLE READ 스냅샷에서 조회한다.
+
+- `pendingWork`: `incomplete`(INCOMPLETE 초안), `notPaid`(결제 대기), `submissionFailed`(두 실패 상태), `unansweredQuestions`(OPEN 질문 발생 수). 해당 목록의 기본 조건과 같다. 서로 다른 단위이므로 합산하지 않는다.
+- `recentCalls`: 기존 `/api/calls?limit=5`와 같은 최신순 미리보기. `callSessionSeq`로 상세에 이동한다.
+- `incompleteDrafts`: 기존 `/api/parcel-drafts?status=INCOMPLETE&limit=5`와 같은 최신순. `draftSeq`로 초안 상세에 이동한다. 원본 고객·통화 삭제와 독립적인 보관 기준을 유지하고 creationPayload는 공개하지 않는다.
+- `unansweredQuestions`: 기존 `/api/unanswered-questions?status=OPEN&limit=5`와 같은 오래된 통화 우선. `callSessionSeq`로 질문이 나온 통화에 이동한다.
+- `aiPerformance`: `stageDropoffs`, `registrationTime`, `complaintCalls`, `responseWait`. 기존 대시보드 4개 API의 `customerType=ALL` 응답 data와 동일하다. 미측정/null과 0, 현재·직전 활성 버전 비교 기준도 유지한다.
+
+미리보기는 각 최대 5개이며 건수는 전체 대상이다. 빈 영역은 빈 배열·0건, 측정이 없는 비율·평균은 기존 통계처럼 null이다. UI는 반환된 배열에서 필요한 줄만 표시할 수 있다. 녹취 URL 발급이나 외부 AI 호출은 하지 않으며 추가 migration·환경변수는 없다.
+
+### 2단계 검증
+
+2026-11-08 격리 PostgreSQL·HTTP에서 신규 홈 4개와 기존 대시보드·통화·미답변·주문 집계를 포함한 통합 테스트 58개가 통과했다. 기존 API와 전체 값·정렬·최대 5개·전체 건수 일치, 빈/미측정 기준, 삭제·만료·상태 제외, 권한·Swagger와 동시 추가 시 건수/미리보기 스냅샷 일치를 확인했다. DB의 read_only=on·repeatable read도 실제 조회했다. 컴파일·lint·format·단위 194개·결제 21개가 통과했다. 운영 부하·실제 UI 호출은 미검증이다.

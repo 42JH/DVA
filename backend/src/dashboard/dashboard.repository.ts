@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import {
   DROPOFF_STAGES,
@@ -16,7 +17,7 @@ import {
 const FROM_CALLS = 'FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)';
 const CALL_DURATION_MS =
   '(extract(epoch FROM (COALESCE(c.ended_at,a.ai_ended_at)-COALESCE(c.started_at,a.ai_started_at)))*1000)';
-const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>statement_timestamp()-interval '5 years')
+const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
  AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL
  AND ($1::text='ALL' OR ($1='NEW' AND a.is_new_customer IS TRUE) OR ($1='EXISTING' AND a.is_new_customer IS FALSE))`;
 
@@ -24,11 +25,14 @@ const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.
 export class DashboardRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  private async read<T>(sql: string, values: unknown[]): Promise<T> {
-    return (await this.database.pool.query<{ data: T }>(sql, values)).rows[0].data;
+  private async read<T>(sql: string, values: unknown[], client?: PoolClient): Promise<T> {
+    return (await (client ?? this.database.pool).query<{ data: T }>(sql, values)).rows[0].data;
   }
 
-  stageDropoffs(customerType: DashboardCustomerType): Promise<StageDropoffsDto> {
+  stageDropoffs(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<StageDropoffsDto> {
     return this.read(
       `WITH calls AS (
       SELECT a.is_new_customer,m.dropoff_stage ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
@@ -44,10 +48,14 @@ export class DashboardRepository {
        FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN stages ON stages.dropoff_stage=code)) AS data
      FROM summary s`,
       [customerType, DROPOFF_STAGES.filter((stage) => stage !== 'NONE')],
+      client,
     );
   }
 
-  registrationTime(customerType: DashboardCustomerType): Promise<RegistrationTimeDto> {
+  registrationTime(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<RegistrationTimeDto> {
     return this.read(
       `WITH calls AS (
       SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms
@@ -80,10 +88,14 @@ export class DashboardRepository {
        'previousMinusCurrentSeconds',(SELECT average FROM comparison WHERE role='PREVIOUS')-(SELECT average FROM comparison WHERE role='CURRENT'))) AS data
      FROM summary s`,
       [customerType],
+      client,
     );
   }
 
-  complaintCalls(customerType: DashboardCustomerType): Promise<ComplaintCallsDto> {
+  complaintCalls(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<ComplaintCallsDto> {
     return this.read(
       `WITH calls AS (
       SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}
@@ -104,10 +116,11 @@ export class DashboardRepository {
        FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN types ON types.type=code)) AS data
      FROM summary s CROSS JOIN type_total t`,
       [customerType, [...DASHBOARD_COMPLAINT_TYPES]],
+      client,
     );
   }
 
-  responseWait(customerType: DashboardCustomerType): Promise<ResponseWaitDto> {
+  responseWait(customerType: DashboardCustomerType, client?: PoolClient): Promise<ResponseWaitDto> {
     return this.read(
       `WITH calls AS (
       SELECT a.is_new_customer,${CALL_DURATION_MS} AS duration_ms,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
@@ -132,6 +145,7 @@ export class DashboardRepository {
        FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN processes p ON p.type=code)) AS data
      FROM summary s CROSS JOIN totals t`,
       [customerType, [...LATENCY_PROCESS_TYPES]],
+      client,
     );
   }
 }

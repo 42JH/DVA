@@ -151,9 +151,9 @@ export class ConsultationsRepository {
 
   constructor(private readonly database: DatabaseService) {}
 
-  async findMany(query: CallQueryDto): Promise<PageRows<CallListItemDto>> {
+  async findMany(query: CallQueryDto, client?: PoolClient): Promise<PageRows<CallListItemDto>> {
     const conditions: string[] = [
-      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')",
+      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')",
     ];
     const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
@@ -179,7 +179,7 @@ export class ConsultationsRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await readPage<CallRow>(
-      this.database.pool,
+      client ?? this.database.pool,
       `${CALL_SELECT} ${where}`,
       values,
       query,
