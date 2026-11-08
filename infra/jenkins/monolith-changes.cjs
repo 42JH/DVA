@@ -6,6 +6,7 @@ function allChecks(reason) {
 
 function selectChecks(paths) {
   if (!paths?.length) return allChecks('missing_baseline_or_changes');
+  const documentation = /^(?:README\.md$|docs\/|backend\/README\.md$|backend\/docs\/.*\.md$)/;
   const checks = {
     backend: false,
     observability: false,
@@ -13,8 +14,12 @@ function selectChecks(paths) {
     full: false,
     reason: 'changed_paths',
   };
+  if (paths.every((path) => documentation.test(path))) {
+    checks.reason = 'documentation_only';
+    return checks;
+  }
   for (const path of paths) {
-    if (/^(?:README\.md$|docs\/|frontend\/|ai\/|msa\/)/.test(path)) continue;
+    if (documentation.test(path) || /^(?:frontend\/|ai\/|msa\/)/.test(path)) continue;
     if (/^infra\/observability\//.test(path)) checks.observability = true;
     else if (/^infra\/payment-test\//.test(path)) checks.paymentDemo = true;
     else if (/^backend\/payment-test\//.test(path)) {

@@ -120,6 +120,24 @@ test('ordinary backend changes retain all backend regressions without unrelated 
   for (const files of [null, []]) assert.equal(selectChecks(files).full, true);
 });
 
+test('backend Markdown alone skips heavy checks; executable files and mixed changes remain checked', () => {
+  for (const files of [
+    ['backend/README.md'],
+    ['backend/docs/guide.md', 'docs/database/notes.md'],
+  ]) {
+    const checks = selectChecks(files);
+    assert.equal(checks.backend, false);
+    assert.equal(checks.observability, false);
+    assert.equal(checks.paymentDemo, false);
+    assert.equal(checks.reason, 'documentation_only');
+  }
+  for (const file of ['backend/docs/schema.sql', 'backend/docs/tool.cjs', 'backend/docs/guide.md.js'])
+    assert.equal(selectChecks([file]).backend, true, file);
+  assert.equal(selectChecks(['backend/docs/guide.md', 'backend/src/auth/auth.service.ts']).backend, true);
+  assert.equal(selectChecks(['backend/docs/guide.md', 'infra/deploy/deploy.sh']).full, true);
+  assert.equal(selectChecks(['backend/src/old.ts', 'backend/docs/moved.md']).backend, true);
+});
+
 test('backend observability contracts also select the real monitoring stack checks', () => {
   for (const file of [
     'backend/src/observability/json-logger.ts',

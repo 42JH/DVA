@@ -14,4 +14,12 @@ fi
 if SOURCE_BRANCH=origin/feature/test bash "$checker" true; then
     echo 'A feature branch unexpectedly deployed.' >&2; exit 1
 fi
+
+if CI_DOCUMENTATION_ONLY=true bash "$checker" false; then
+    echo 'Documentation-only push unexpectedly deployed.' >&2; exit 1
+fi
+CI_DOCUMENTATION_ONLY=true bash "$checker" true
+if CI_DOCUMENTATION_ONLY=true SOURCE_BRANCH=origin/feature/test bash "$checker" true; then
+    echo 'Documentation override bypassed protected-branch checks.' >&2; exit 1
+fi
 echo 'PASS: protected-branch push auto deploy, manual selection, other events/projects/branches excluded.'
