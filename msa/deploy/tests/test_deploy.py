@@ -35,12 +35,22 @@ elif name=='liquibase':
         mode=os.environ.get('FAKE_STATUS','current')
         text={'current':'Database is up to date, no changesets to execute\n',
               'unknown':'unknown status format\n',
-              'pending':'1 changesets have not been applied\n  dva/customer/db.changelog.xml::002-employee-no-and-status::dva\n'}[mode]
+              'pending':'1 changesets have not been applied\n  dva/customer/db.changelog.xml::002-employee-no-and-status::dva\n',
+              'parcel':'1 changesets have not been applied\n  dva/order/db.changelog.xml::004-parcel-drafts::dva\n',
+              'intake':'1 changesets have not been applied\n  dva/consultation/db.changelog.xml::008-order-intake::dva\n'}[mode]
         pathlib.Path(output).write_text(text)
 '''
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_055_pending_preview_marks_the_quiescent_cutover_without_applying(self):
+        for mode, service in [('parcel', 'order'), ('intake', 'consultation')]:
+            with self.subTest(service=service):
+                self.env['FAKE_STATUS'] = mode
+                output = self.run_script('liquibase/ci-command.sh', service, 'preview').stdout
+                self.assertIn('DVA_QUIESCENT_CUTOVER_REQUIRED=055', output)
+                self.assertFalse(any('update' in call for call in self.calls() if call[0] == 'liquibase'))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

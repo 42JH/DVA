@@ -69,6 +69,14 @@ export function configureApplication(
   });
   app.setGlobalPrefix(API_PREFIX, {
     exclude: [
+      {
+        path: 'internal/legacy-draft-call-bindings/read',
+        method: RequestMethod.ALL,
+      },
+      {
+        path: 'internal/legacy-draft-call-bindings/prune',
+        method: RequestMethod.ALL,
+      },
       { path: 'internal/faq-call-sources', method: RequestMethod.ALL },
       { path: 'internal/caller-context', method: RequestMethod.ALL },
       { path: 'internal/call-scope', method: RequestMethod.ALL },

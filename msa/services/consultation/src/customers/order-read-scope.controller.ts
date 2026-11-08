@@ -64,6 +64,20 @@ export class OrderReadScopeController {
     try {
       return await this.database.transaction(async (client) => {
         const command = event.payload.command;
+        if (
+          event.eventType === 'OrderCancellationRequested' &&
+          (
+            await client.query(
+              'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND order_intake_enabled',
+              [command.callSessionSeq],
+            )
+          ).rowCount
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '신규 통화의 수정·취소는 배송 초안 API를 사용해 주세요.',
+          );
         const caller = (
           await client.query<{
             phone: string | null;

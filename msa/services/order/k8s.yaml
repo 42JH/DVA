@@ -18,6 +18,8 @@ spec:
       app: dva-order
   template:
     metadata:
+      annotations:
+        dva.ssafy.io/parcel-drafts-contract: "055"
       labels:
         app: dva-order
     spec:

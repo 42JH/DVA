@@ -18,6 +18,8 @@ spec:
       app: dva-consultation
   template:
     metadata:
+      annotations:
+        dva.ssafy.io/parcel-drafts-contract: "055"
       labels:
         app: dva-consultation
     spec:
@@ -56,6 +58,8 @@ spec:
             - name: CUSTOMER_AUTH_TOKEN
               valueFrom:
                 secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: ORDER_URL
+              value: http://order:3002
             - name: CUSTOMER_URL
               value: http://customer:3001
             - name: OPERATIONS_URL

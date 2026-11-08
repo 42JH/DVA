@@ -49,12 +49,15 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     // Liquibase owns DDL; fail startup before accepting traffic on an incomplete schema.
     await this.pool.query(
-      'SELECT incoming_at,registered_at,deleted_at,customer_seq FROM call_sessions LIMIT 0',
+      'SELECT incoming_at,registered_at,deleted_at,customer_seq,purge_claim_id,purge_claimed_until,order_intake_enabled,order_intake_version,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result,order_finalization_error_code,order_finalization_attempted_at FROM call_sessions LIMIT 0',
     );
     await this.pool.query(
       'SELECT claim_id,claimed_until,call_session_seq FROM pbx_webhooks.call_ended_events LIMIT 0',
     );
     await this.pool.query('SELECT object_key FROM recordings LIMIT 0');
+    await this.pool.query(
+      'SELECT legacy_order_seq,call_session_seq,caller_phone_number FROM legacy_parcel_draft_call_snapshots LIMIT 0',
+    );
     await this.pool.query(
       'SELECT ai_persona_version_seq,has_callback_request FROM call_analyses LIMIT 0',
     );
@@ -62,6 +65,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       'SELECT response_wait_payload_hash FROM call_dashboard_metrics LIMIT 0',
     );
     await this.pool.query('SELECT event_id FROM call_insight_events LIMIT 0');
+    await this.pool.query(
+      'SELECT singleton,pruned FROM parcel_draft_call_snapshot_state LIMIT 0',
+    );
     await this.pool.query('SELECT reason FROM unanswered_questions LIMIT 0');
   }
 

@@ -1,3 +1,4 @@
+import { ParcelDraftMigrationService } from '../src/orders/parcel-draft-migration.service';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -14,6 +15,8 @@ describe('Order read API (e2e)', () => {
   const query = jest.fn().mockResolvedValue({ rows: [] });
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(ParcelDraftMigrationService)
+      .useValue({ onApplicationBootstrap: jest.fn().mockResolvedValue(undefined) })
       .overrideProvider(DatabaseService)
       .useValue({ pool: { query } })
       .overrideProvider(AuditService)

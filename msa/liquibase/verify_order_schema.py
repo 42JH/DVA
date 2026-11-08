@@ -4,7 +4,7 @@ import shutil
 
 
 ORDER_TABLES = ('orders', 'order_parcels', 'order_payment_requests',
-                'organization_billing_months', 'order_billing_charges', 'empty_ai_order_results')
+                'organization_billing_months', 'order_billing_charges', 'empty_ai_order_results', 'order_parcel_drafts')
 DELIVERY_TABLES = ('shipments', 'shipment_status_history')
 SOURCE_FUNCTIONS = ('valid_parcel_address', 'touch_order_header', 'guard_order_parcel_edit',
                     'touch_order_parcel_parent', 'cancel_order_parcels')
@@ -12,7 +12,7 @@ SOURCE_FUNCTIONS = ('valid_parcel_address', 'touch_order_header', 'guard_order_p
 
 def verify_order_schema(base, logs, sql, lb, report):
     migrations = sorted((base.parents[1] / 'backend/migrations').glob('[0-9][0-9][0-9]-*.sql'))
-    assert migrations and migrations[-1].name.startswith('054-'), 'Reconcile the latest source migration contract'
+    assert migrations and migrations[-1].name.startswith('055-'), 'Reconcile the latest source migration contract'
     report['orderStorageSourceMigrations'] = [p.name for p in migrations]
 
     def apply_source(db, files, label):

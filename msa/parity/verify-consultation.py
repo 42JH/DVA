@@ -42,19 +42,19 @@ def main():
         for side, path, target in (
             ('consultation-checks', 'msa/services/consultation', 'checks'),
             ('consultation', 'msa/services/consultation', None),
-            ('operations', 'msa/services/operations', None), ('customer', 'msa/services/customer', None),
+            ('order', 'msa/services/order', None), ('operations', 'msa/services/operations', None), ('customer', 'msa/services/customer', None),
             ('monolith-checks', 'backend', 'checks'), ('monolith', 'backend', None),
             ('liquibase', 'msa/liquibase', None),
         ):
             image = RUN+'-'+side
             resources.append(('image', image))
-            context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if side in ('operations', 'customer', 'consultation', 'consultation-checks') else [str(ROOT/path)]
+            context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if side in ('order', 'operations', 'customer', 'consultation', 'consultation-checks') else [str(ROOT/path)]
             run('docker', 'build', '--label', LABEL, '-t', image,
                 *(['--target', target] if target else []), *context, label=side+'-build')
             images[side] = image
         run('docker', 'network', 'create', '--internal', '--label', LABEL, RUN, label='network')
         resources.append(('network', RUN))
-        for side in ('monolith', 'operations', 'customer', 'consultation'):
+        for side in ('monolith', 'operations', 'customer', 'consultation', 'order'):
             name = RUN+'-'+side+'-db'
             create(name, 'postgres:17.11-bookworm', '--network-alias', side+'-db',
                    '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_USER='+side+'_app',
@@ -111,7 +111,7 @@ def main():
             run('docker','cp',str(ROOT/'backend/test/recordings.integration.test.cjs'),name+':'+target+'recordings.integration.test.cjs',label=side+'-recording-policy-copy')
             complete(name)
         def start_apps(environment):
-            for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001'), ('consultation', '3004')):
+            for side, port in (('monolith', '3000'), ('operations', '3005'), ('customer', '3001'), ('consultation', '3004'), ('order', '3002')):
                 name = RUN+'-'+side+'-app'
                 create(name, images[side], '--network-alias', side+'-app',
                        '-e', 'NODE_ENV='+environment, '-e', 'PORT='+port, '-e', 'DB_HOST='+side+'-db',
@@ -121,8 +121,10 @@ def main():
                        '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_INSIGHTS_TOKEN='+pbx, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', '-e', 'S3_RECORDINGS_BUCKET=',
                        '-e', 'CUSTOMER_URL=http://customer-app:3001', '-e', 'OPERATIONS_URL=http://operations-app:3005', '-e', 'CONSULTATION_AUTH_TOKEN='+token,
                        '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_URL=http://consultation-app:3004',
-                       '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
+                       '-e', 'ORDER_URL=http://order-app:3002', '-e', 'DELIVERY_URL=http://delivery-app:3003', '-e', 'PBX_WEBHOOK_TOKEN='+pbx)
                 run('docker', 'start', name, label=side+'-app-start')
+                if side == 'consultation':
+                    run('docker', 'exec', name, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='consultation-startup-'+environment)
         start_apps('production')
         run('docker', 'cp', RUN+'-operations-app:/app/service/dist/auth/password.js',
             str(LOGS/'seed-password.cjs'), label='password-fixture-copy')
@@ -151,7 +153,7 @@ def main():
         complete(name)
         # Keep production PBX/SSE distinct from foreground context checks without the
         # monolith's still-unported monthly order/billing maintenance worker.
-        for side in ('monolith', 'operations', 'customer', 'consultation'):
+        for side in ('monolith', 'operations', 'customer', 'consultation', 'order'):
             name = RUN+'-'+side+'-app'
             run('docker', 'stop', '--time=5', name, label=side+'-production-stop')
             run('docker', 'rm', name, label=side+'-production-remove')
