@@ -210,6 +210,17 @@ export class ConsultationsRepository {
     ).rows;
   }
 
+  async callExists(id: number): Promise<boolean> {
+    return (
+      (
+        await this.database.pool.query(
+          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          [id],
+        )
+      ).rowCount === 1
+    );
+  }
+
   async countActions(id: number): Promise<number> {
     return (
       await this.database.pool.query<{ count: number }>(
