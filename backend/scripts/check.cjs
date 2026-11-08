@@ -20,6 +20,7 @@ const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
 const personaToken = randomBytes(32).toString('hex');
 const businessToken = randomBytes(32).toString('hex');
+const insightsToken = randomBytes(32).toString('hex');
 let networkCreated = false,
   databaseCreated = false,
   imageCreated = false;
@@ -156,6 +157,8 @@ try {
     `AI_PERSONA_TOKEN=${personaToken}`,
     '-e',
     `AI_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
+    `AI_INSIGHTS_TOKEN=${insightsToken}`,
     runtimeImage,
   ]);
   applicationCreated = true;
@@ -286,6 +289,8 @@ try {
     `TEST_PERSONA_TOKEN=${personaToken}`,
     '-e',
     `TEST_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
+    `TEST_INSIGHTS_TOKEN=${insightsToken}`,
     '-e',
     'TEST_HTTPS_API_ROOT=https://backend/api',
     '-e',

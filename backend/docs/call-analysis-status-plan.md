@@ -34,3 +34,11 @@
 - 2단계 계획: 기존 AI_INSIGHTS_TOKEN 가드·providerCallId DTO·감사 패턴을 재사용해 실패 POST를 추가한다. 실패 전용 FOR UPDATE 잠금 뒤 정상 분석을 확인하고 최초 실패만 기록한다. 공통 통화 SQL/DTO에 완료 우선 상태와 MIN 녹취 저장 시각을 추가한다. 구현 전 HTTP 회귀로 누락된 계약을 재현한 뒤 권한·순서/동시성·롤백·페이지네이션을 검증한다.
 
 - 2단계 검증: 구현 전 HTTP 테스트에서 analysisStatus 누락(undefined)을 재현했다. 구현 후 신규 9개 HTTP 테스트 통과, 동일 제품 코드로 기존 분석/목록·상세/녹취 50개 통과. build·전체 src lint·format 통과. 신규 인증 fixture는 기존 관리자 Origin 검사와 ConfigService의 환경변수 fallback을 반영해 보완했으며 기존 보안 검사/기대값은 완화하지 않았다.
+
+- 3단계 계획: AI·프론트 별도 명세와 DB 선적용/과거 미분류 정책을 작성하고 ERD에 컬럼 하나를 맞춘다. 공식 검증의 운영 이미지와 런타임 테스트에 서로 다른 insights/business 토큰을 주입해 실제 Nginx 경로에서 실패 POST·상태 조회·정상 복구를 확인한다. 전체 Docker 및 DB runner를 통과한 후 커밋하고 MR 생성 전 보고한다.
+
+- 3단계 보완: 첫 전체 검증에서 기존 consultations 통합 테스트 10개가 새 두 필드의 기대값 누락으로 실패했다. 기존 전체 응답 deepEqual은 유지하고, 분석 없는 fixture의 PENDING/null과 녹취가 있는 fixture의 최초 저장 시각을 명시한다. 해당 테스트와 신규 상태 테스트를 먼저 재검증한 뒤 공식 전체 검증을 다시 실행한다.
+
+- 3단계 검증: 보완한 기존 통화 조회 24개와 신규 상태 9개를 격리 PostgreSQL에서 재실행해 33개 통과. 최종 `node backend/scripts/check.cjs`는 1,050개 통과·실패/취소/생략 0·종료 0이며 lint/format/Linux 빌드·전체 DB 통합 테스트·운영 이미지·실제 Nginx 실패/복구 경로를 포함한다. 별도 `infra/database/test-monolith.ps1`도 종료 0으로 migration 재실행/변조 거절·원자적 롤백·채워진 구버전 업그레이드·백업/복구를 통과했다. 056/ERD 컬럼 일치·전달 문서 링크·git diff 공백 검사를 확인했다.
+
+- 최종 범위 확인: 원격 develop-backend를 다시 fetch했으며 기준 9624b77과 동일하다. 실제 운영 DB/배포·원격 CI·AI/프론트/MSA 소스·원격 dbdiagram은 변경하거나 연동 검증하지 않았다. 첫 전체 실행 실패 로그와 재실행 성공 로그는 작업 트리 밖 outputs/call-analysis-status-verification-20261108에 보존한다. 실패 통보 누락은 PENDING으로 남으므로 AI의 분석 단계별 영속 통보 연동이 필요하다.

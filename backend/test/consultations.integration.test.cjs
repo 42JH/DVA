@@ -64,6 +64,8 @@ async function call(input = {}) {
     customerSeq: null,
     customerName: null,
     analysis: null,
+    analysisStatus: 'PENDING',
+    recordedAt: null,
   };
 }
 const list = (query = {}, headers = operator.headers) =>
@@ -292,7 +294,7 @@ test('request logs do not contain phone numbers, provider IDs or search text', a
 });
 
 const detail = (id, headers = operator.headers) => fetch(base + '/api/calls/' + id, { headers });
-const callInfo = ({ analysis, ...value }) => value;
+const callInfo = ({ analysis, ...value }, recordedAt = null) => ({ ...value, recordedAt });
 async function recording(callId) {
   const row = (
     await pool.query(
@@ -313,7 +315,7 @@ test('detail returns only the selected call and recordings with signed URLs', as
   const second = await recording(row.callSessionSeq);
   await recording((await call()).callSessionSeq);
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, callInfo(row));
+  assert.deepEqual(body.data.call, callInfo(row, first.createdAt));
   assert.equal(body.data.analysis, null);
   assert.deepEqual(
     body.data.recordings.map(({ recordingSeq, createdAt }) => ({ recordingSeq, createdAt })),
@@ -548,7 +550,7 @@ test('S3 settings and missing files are recording errors while call detail and m
   const saved = await recording(row.callSessionSeq);
   config.set('S3_RECORDINGS_BUCKET', '');
   assert.deepEqual((await result(await detail(row.callSessionSeq), false)).data, {
-    call: callInfo(row),
+    call: callInfo(row, saved.createdAt),
     analysis: null,
     aiActionCount: 0,
     recordings: [{ ...saved, url: null, expiresAt: null, playbackError: 'DEPENDENCY_UNAVAILABLE' }],
@@ -586,7 +588,7 @@ test('storage denial, outage and timeout preserve call detail with a redacted re
     const response = await detail(row.callSessionSeq);
     assert.equal((await response.clone().text()).includes('private secret'), false);
     assert.deepEqual((await result(response, false)).data, {
-      call: callInfo(row),
+      call: callInfo(row, saved.createdAt),
       analysis: null,
       aiActionCount: 0,
       recordings: [
@@ -614,7 +616,7 @@ test('one missing recording does not hide the call or another playable recording
     return { $metadata: { httpStatusCode: 200 } };
   });
   const body = await result(await detail(row.callSessionSeq), false);
-  assert.deepEqual(body.data.call, callInfo(row));
+  assert.deepEqual(body.data.call, callInfo(row, first.createdAt));
   assert.equal(body.data.analysis, null);
   assert.deepEqual(body.data.recordings[0], {
     ...first,

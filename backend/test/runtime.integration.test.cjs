@@ -244,6 +244,50 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   const saved = (await detail.json()).data.call;
   assert.equal(saved.providerCallId, c.providerCallId);
   assert.equal(saved.orderSeq, null);
+  assert.equal(saved.analysisStatus, 'PENDING');
+  assert.equal(saved.recordedAt, null);
+  assert.notEqual(process.env.TEST_INSIGHTS_TOKEN, process.env.TEST_BUSINESS_TOKEN);
+  const analysisUrl = 'http://proxy/api/ai/calls/' + c.id + '/analysis';
+  const sendFailure = (authorization) =>
+    fetch(analysisUrl + '/failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authorization },
+      body: JSON.stringify({ providerCallId: c.providerCallId }),
+    });
+  assert.equal((await sendFailure('Bearer ' + process.env.TEST_BUSINESS_TOKEN)).status, 401);
+  const authorization = 'Bearer ' + process.env.TEST_INSIGHTS_TOKEN;
+  assert.equal((await sendFailure(authorization)).status, 204);
+  assert.equal((await sendFailure(authorization)).status, 204);
+  const list = await fetch('http://proxy/api/calls?callerPhoneNumber=' + c.phone, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(list.status, 200);
+  const failed = (await list.json()).data.find((row) => row.callSessionSeq === c.id);
+  assert.equal(failed.analysisStatus, 'FAILED');
+  assert.equal(failed.recordedAt, null);
+  const recovered = await fetch(analysisUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authorization },
+    body: JSON.stringify({
+      providerCallId: c.providerCallId,
+      startedAt: c.incomingAt,
+      endedAt: new Date(Date.parse(c.incomingAt) + 30000).toISOString(),
+      aiPersonaVersionSeq: null,
+      repeatQuestionCount: null,
+      hasComplaint: null,
+      complaints: [],
+    }),
+  });
+  assert.equal(recovered.status, 204, await recovered.clone().text());
+  assert.equal((await sendFailure(authorization)).status, 204);
+  const after = await fetch('http://proxy/api/calls/' + c.id, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(after.status, 200);
+  const completed = (await after.json()).data;
+  assert.equal(completed.call.analysisStatus, 'COMPLETED');
+  assert.equal(completed.call.orderSeq, null);
+  assert.ok(completed.analysis);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);

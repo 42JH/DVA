@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+통화 분석 상태는 [AI 실패 통보](docs/call-analysis-status-ai-integration.md), [프론트 조회](docs/call-analysis-status-frontend-integration.md), [056 적용 순서](docs/call-analysis-status-rollout.md)를 따른다. 목록·상세에 analysisStatus와 최초 녹취 DB 저장 시각 recordedAt을 제공한다. 정상 분석이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING이다. 실패 API는 기존 AI_INSIGHTS_TOKEN을 사용하며 AI_BUSINESS_TOKEN과 다르다. 시간 경과·녹취·주문 결과로 실패를 추정하지 않는다.
+
 055 배송 단건 초안은 [AI 전송 명세](docs/parcel-draft-ai-integration.md), [프론트 연동 명세](docs/parcel-draft-frontend-integration.md), [배포·복구](docs/parcel-draft-rollout.md)를 우선한다. 통화 중에는 초안만 저장하고 PBX 종료와 AI 완료 후 READY를 실제 주문 하나로 변환한다. EDITING은 고객 등록 전에도 보존한다. 새 참조는 논리 참조이며 주소·물품·발신번호 사본은 원본 삭제와 독립적으로 최초 수집부터 5년 보관한다. 055는 한 번의 migration으로 적용하며 기존 쓰기 중지·백업 후 새 AI/프론트와 함께 전환한다. 아래 AI ORD-01 일괄 생성 설명은 055 이전 등록 통화의 호환 경로에 해당한다.
 
 고객 단독 등록 `POST /api/customers`는 이름·11자리 전화번호·주소가 필수다. 상세주소만 생략·빈 문자열을 허용한다. [주소 필수 연동 안내](docs/customer-registration-address.md)와 [고객 API](../docs/api/customers.md)를 따른다. 주소 수정·과거 고객 조회·주문 내 고객 연결·기업 사원 등록의 별도 계약과 DB 스키마는 유지한다.
