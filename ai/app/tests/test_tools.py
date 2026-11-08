@@ -154,19 +154,39 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     assert out["status"] == "ok" and s.field_of("sender_address_detail").value == "3층"
     out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12", "receiver_address_detail": "403호"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").status == FieldStatus.INVALID
-    assert s.field_of("receiver_address_detail").status == FieldStatus.EMPTY  # 못 찾은 주소의 상세주소도 믿지 않는다
+    assert s.field_of("receiver_address_detail").value == "403호"  # 상세주소는 기본주소와 독립 — 다시 묻지 않는다(결정 1)
     best, *rest = correct(corrector, "서울 강남구 대해남노 211").candidates  # 도로명을 많이 고쳐 확정하지 않는 주소
     out = call(c, "record_fields", {"receiver_address": "서울 강남구 대해남노 211", "receiver_address_detail": "101호"})
     f = s.field_of("receiver_address")
     assert f.value == best and f.candidates == tuple(rest) and out["facts"]["auto_selected"] == ["receiver_address"]
 
 
-def test_changed_address_without_detail_clears_detail(corrector, address):
+def test_changed_road_without_detail_clears_detail_but_number_fix_keeps_it(corrector, address):
     c = ctx(address=address)
     call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211", "sender_address_detail": "3층"})
-    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})
-    assert out["facts"]["changed"] == ["sender_address"] and out["facts"]["cleared"] == ["sender_address_detail"]
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})  # 같은 도로의 번호 정정(결정 2)
+    assert out["facts"]["changed"] == ["sender_address"] and "cleared" not in out["facts"]
+    assert c.state.field_of("sender_address_detail").value == "3층"
+    out = call(c, "record_fields", {"sender_address": "서울 송파구 올림픽로 300"})
+    assert out["facts"]["cleared"] == ["sender_address_detail"]
     assert c.state.field_of("sender_address_detail").status == FieldStatus.EMPTY
+
+
+def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):
+    c = ctx(address=address)
+    s = c.state
+    out = call(c, "record_fields", {"sender_address": "경북 구미시 인동구길 칠다시삼 이백삼호요"})  # 한 문장 통째로
+    assert s.field_of("sender_address").value == "경상북도 구미시 인동9길 7-3"
+    assert s.field_of("sender_address_detail").value == "203호" and s.field_of("sender_address_detail").source == Source.RESOLVER
+    assert set(out["facts"]["recorded"]) == {"sender_address", "sender_address_detail"}
+    # 모델이 나눠 넘긴 상세의 수사도 서버가 숫자로. 기본주소에 꼬리가 있으면 서버가 뗀 상세가 우선(결정 3: 번호 뒤 이름도 상세)
+    call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212 멀티캠퍼스 십팔층", "receiver_address_detail": "십팔층"})
+    assert s.field_of("receiver_address").value == "서울특별시 강남구 테헤란로 212"
+    assert s.field_of("receiver_address_detail").value == "멀티캠퍼스 18층"
+    call(c, "record_fields", {"receiver_address_detail": "삼백십이동 사백삼호"})
+    assert s.field_of("receiver_address_detail").value == "312동 403호"
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12 지하 이층"})  # 못 찾아도 상세는 남는다
+    assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address_detail").value == "지하 2층"
 
 
 def test_address_service_down_keeps_heard_value_without_geo(corrector, monkeypatch):

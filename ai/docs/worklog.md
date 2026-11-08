@@ -963,3 +963,11 @@
 - `AddressService._resolve`가 `matcher.resolve_detail`을 써서 기본주소만 보정하고 뗀 상세는 `AddressResult.detail`(수사 → 숫자)로 돌려준다. not_found·region_needed에도 detail을 실어 상세가 버려지지 않게. 카카오 두 번째 근거는 뗀 기본주소로 부른다.
 - `scripts/evaluate_address.py`: 문항의 `expect_detail`과 `detail_only` 변환을 함께 채점(summary.detail).
 - 측정(로컬 DB만, 서비스 경로): v3 기본주소 48/49·오답 0·상세 52/52·변환 17/17, warm p50 14.6ms·p95 153ms(최대 1016ms = 되읽기까지 가는 못 찾음). v1 106/106(p50 6.8ms), v2 48/55(이전과 동일). 테스트 714 passed.
+
+## 2026-11-09 — 주소 분리·수사 변환 서버 이관 3단계(record 도구·정책·문서)
+
+- `record_fields`: 서버가 뗀 상세(`AddressResult.detail`)를 `_detail`에 기록(출처 RESOLVER, 모델이 따로 넘긴 상세보다 우선). 모델이 넘긴 상세도 `detail_text`로 수사 → 숫자. 기본주소를 못 찾아도 상세를 지우지 않고(결정 1), 주소가 바뀌어도 같은 도로의 번호 정정이면 상세 유지·도로가 바뀌면 지움(결정 2, `_road_of`). 번호 뒤 이름은 상세로 옮김(결정 3).
+- `policy/backend_rules.md` 주소 규칙 교체: 문장 전체를 한글 그대로 기본주소에, 숫자 변환·분리 지시 삭제, 따로 들은 상세만 `_detail`에. 도구 필드·BE 계약·Live 규칙은 그대로.
+- 문서: `docs/contracts/tool-contracts.md` 주소 항, `docs/architecture/decisions.md` P13.
+- 테스트: test_tools 2개(한 문장 → 기본+상세 기록·수사 변환·서버 상세 우선·못 찾아도 상세 유지, 같은 도로 정정은 상세 유지·도로 변경은 지움), 기존 not_found 상세 기대값 수정, 정책 지시문 테스트 기대값 수정. 전체 715 passed.
+- 미확인·후속: 운영 Backend가 새 규칙대로 한글 그대로 넘기는지는 실통화로 확인 필요(숫자로 넘겨도 서버는 받는다). Live가 위임 결과 전에 missing을 보고 상세를 먼저 묻는 타이밍은 별도 안건. 상세 실존 검증 없음. push는 지시 때까지 보류.
