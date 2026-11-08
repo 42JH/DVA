@@ -101,6 +101,27 @@ export class AdminOrderListItemDto extends PickType(OrderSummaryDto, [
   parcels!: OrderListParcelDto[];
 }
 
+export class AdminOrderStatusCountsDto {
+  @ApiProperty({
+    minimum: 0,
+    description: '같은 조건의 실제 주문 수. 배송 초안은 포함하지 않습니다.',
+  })
+  all!: number;
+  @ApiProperty({
+    minimum: 0,
+    description: '같은 조건의 INCOMPLETE 배송 초안 수. 초안 목록으로 이동합니다.',
+  })
+  incomplete!: number;
+  @ApiProperty({ minimum: 0 })
+  notPaid!: number;
+  @ApiProperty({ minimum: 0, description: 'PAID·SUBMITTING·ACCEPTED 주문 수.' })
+  paid!: number;
+  @ApiProperty({ minimum: 0, description: 'SUBMITTING_FAILED·SUBMISSION_FAILED 주문 수.' })
+  submissionFailed!: number;
+  @ApiProperty({ minimum: 0 })
+  cancelled!: number;
+}
+
 export class AdminOrderListResponseDto {
   @ApiProperty({ type: [AdminOrderListItemDto] })
   data!: AdminOrderListItemDto[];
@@ -112,4 +133,11 @@ export class AdminOrderListResponseDto {
     description: '검색·기간·상태 탭 조건을 모두 만족하는 주문 수. 페이지 제한 적용 전 개수.',
   })
   total_count!: number;
+
+  @ApiProperty({
+    type: AdminOrderStatusCountsDto,
+    description:
+      '검색·기간·기업 조건의 탭별 건수. 선택 상태·limit·offset은 적용하지 않습니다. 미완료는 별도 배송 초안이므로 all에 합산하지 않습니다.',
+  })
+  statusCounts!: AdminOrderStatusCountsDto;
 }

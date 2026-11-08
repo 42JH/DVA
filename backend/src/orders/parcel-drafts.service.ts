@@ -11,7 +11,7 @@ import {
   PatchParcelDraftDto,
 } from './dto/parcel-draft.dto';
 import { ParcelInputDto } from './dto/create-order.dto';
-import { orderDraft, ORDER_ADDRESS_FIELDS } from './order-draft';
+import { orderDraft, ORDER_ADDRESS_FIELDS, isZonedDate } from './order-draft';
 import { assertOrderSubmissionReady } from './order-submission.validation';
 import { writeOrder } from './order-write';
 import { OrdersRepository } from './orders.repository';
@@ -377,6 +377,16 @@ export class ParcelDraftsService {
   }
 
   async list(adminId: number | null, query: ParcelDraftQueryDto, header?: string) {
+    if (
+      (query.from !== undefined && !isZonedDate(query.from)) ||
+      (query.to !== undefined && !isZonedDate(query.to)) ||
+      (query.from && query.to && Date.parse(query.from) >= Date.parse(query.to))
+    )
+      throw new ApiException(
+        400,
+        'INVALID_REQUEST',
+        '조회 기간을 확인해 주세요. from은 to보다 빨라야 합니다.',
+      );
     return this.database.transaction(async (client) => {
       const call = await this.context(client, adminId, header, false);
       if (call && query.customerSeq !== undefined && query.customerSeq !== call.customerSeq)

@@ -9,7 +9,7 @@ const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",cu
  parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
  created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
-const available = `deleted_at IS NULL AND retention_started_at>statement_timestamp()-interval '5 years'`;
+const available = `deleted_at IS NULL AND retention_started_at>transaction_timestamp()-interval '5 years'`;
 
 @Injectable()
 export class ParcelDraftsRepository {
@@ -55,17 +55,16 @@ export class ParcelDraftsRepository {
     ).rows[0];
   }
 
-  async list(
-    client: PoolClient,
+  private matching(
     query: ParcelDraftQueryDto,
     customerId: number | null,
     endedCallId: number | null,
     call: OrderIntakeCall | null,
   ) {
-    return readPage<Omit<ParcelDraftRow, 'creationPayload'>>(
-      client,
-      `SELECT ${columns.replace(',creation_payload AS "creationPayload"', '')}
-      FROM order_parcel_drafts WHERE ${available}
+    const phoneQuery =
+      query.q && /^[0-9+() -]+$/.test(query.q) ? query.q.replace(/[^0-9]/g, '') : null;
+    return {
+      sql: `FROM order_parcel_drafts WHERE ${available}
        AND ($7::int IS NOT NULL OR $1::int IS NULL OR customer_seq=$1)
        AND ($7::int IS NULL OR (customer_seq IS NOT NULL AND customer_seq=$1) OR
         (customer_seq IS NULL AND (call_session_seq=$7 OR (status='INCOMPLETE' AND caller_phone_number=$8))))
@@ -73,8 +72,14 @@ export class ParcelDraftsRepository {
        AND ($3::int IS NULL OR call_session_seq=$3) AND ($4::int IS NULL OR call_session_seq=$4)
        AND ($6::int IS NULL OR legacy_order_seq=$6) AND ($5::text IS NULL OR strpos(lower(normalize(concat_ws(' ',
         parcel_data->'origin'->>'name',parcel_data->'origin'->>'phoneNumber',parcel_data->'origin'->>'roadAddress',parcel_data->'origin'->>'jibunAddress',
-        parcel_data->'destination'->>'name',parcel_data->'destination'->>'phoneNumber',parcel_data->'destination'->>'roadAddress',parcel_data->'destination'->>'jibunAddress'),NFC)),lower(normalize($5,NFC)))>0)`,
-      [
+        parcel_data->'destination'->>'name',parcel_data->'destination'->>'phoneNumber',parcel_data->'destination'->>'roadAddress',parcel_data->'destination'->>'jibunAddress',
+        parcel_data->'origin'->>'detailAddress',parcel_data->'destination'->>'detailAddress'),NFC)),lower(normalize($5,NFC)))>0
+        OR ($12::text IS NOT NULL AND (strpos(parcel_data->'origin'->>'phoneNumber',$12)>0 OR strpos(parcel_data->'destination'->>'phoneNumber',$12)>0)))
+       AND ($9::timestamptz IS NULL OR created_at>=$9) AND ($10::timestamptz IS NULL OR created_at<$10)
+       AND ($11::int IS NULL OR EXISTS(SELECT 1 FROM customers c JOIN memberships m USING(customer_seq)
+        JOIN organizations o ON o.organization_seq=m.organization_seq WHERE c.customer_seq=order_parcel_drafts.customer_seq
+         AND c.deleted_at IS NULL AND m.deleted_at IS NULL AND o.deleted_at IS NULL AND o.organization_seq=$11))`,
+      values: [
         customerId,
         query.status,
         query.callSessionSeq ?? null,
@@ -83,7 +88,36 @@ export class ParcelDraftsRepository {
         query.legacyOrderSeq ?? null,
         call?.callSessionSeq ?? null,
         call?.callerPhoneNumber ?? null,
+        query.from ?? null,
+        query.to ?? null,
+        query.organizationSeq ?? null,
+        phoneQuery || null,
       ],
+    };
+  }
+
+  async countIncomplete(client: PoolClient, query: ParcelDraftQueryDto): Promise<number> {
+    const filter = this.matching({ ...query, status: 'INCOMPLETE' }, null, null, null);
+    return (
+      await client.query<{ count: number }>(
+        `SELECT count(*)::integer AS count ${filter.sql}`,
+        filter.values,
+      )
+    ).rows[0].count;
+  }
+
+  async list(
+    client: PoolClient,
+    query: ParcelDraftQueryDto,
+    customerId: number | null,
+    endedCallId: number | null,
+    call: OrderIntakeCall | null,
+  ) {
+    const filter = this.matching(query, customerId, endedCallId, call);
+    return readPage<Omit<ParcelDraftRow, 'creationPayload'>>(
+      client,
+      `SELECT ${columns.replace(',creation_payload AS "creationPayload"', '')} ${filter.sql}`,
+      filter.values,
       query,
       '"createdAt" DESC,"draftSeq" DESC',
     );

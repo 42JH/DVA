@@ -291,6 +291,14 @@ test('admin order company changes use current membership with matching filter, p
       data: [],
       hasNext: false,
       total_count: 0,
+      statusCounts: {
+        all: changed.statusGroup ? 3 : 0,
+        incomplete: 0,
+        notPaid: 0,
+        paid: 0,
+        submissionFailed: 0,
+        cancelled: 0,
+      },
     });
 });
 

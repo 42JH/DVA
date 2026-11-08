@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional, OmitType } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional, OmitType, PickType } from '@nestjs/swagger';
 import { Transform, TransformFnParams, Type } from 'class-transformer';
 import {
   ArrayMinSize,
@@ -16,7 +16,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
+import { OrderQueryDto } from './order-query.dto';
 import { ParcelInputDto } from './create-order.dto';
 import { OrderParcelDto } from './order-response.dto';
 import {
@@ -133,7 +133,24 @@ export class PatchParcelDraftDto {
   parcel?: ParcelInputDto;
 }
 
-export class ParcelDraftQueryDto extends PaginationQueryDto {
+export class ParcelDraftQueryDto extends PickType(OrderQueryDto, [
+  'from',
+  'to',
+  'limit',
+  'offset',
+] as const) {
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 2147483647,
+    description: '연결 고객의 현재 소속 기업 번호. 삭제된 연결은 제외합니다.',
+  })
+  @IsOptional()
+  @Transform(integer)
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  organizationSeq?: number;
+
   @ApiPropertyOptional({ enum: [...PARCEL_DRAFT_STATUSES, 'ALL'], default: 'INCOMPLETE' })
   @IsIn([...PARCEL_DRAFT_STATUSES, 'ALL'])
   status: ParcelDraftStatus | 'ALL' = 'INCOMPLETE';
@@ -166,10 +183,16 @@ export class ParcelDraftQueryDto extends PaginationQueryDto {
   @Max(2147483647)
   legacyOrderSeq?: number;
 
-  @ApiPropertyOptional({ description: '발송·수령 이름/전화/주소 부분 검색.', maxLength: 100 })
+  @ApiPropertyOptional({
+    description: '발송·수령 이름/전화/주소 부분 검색. 전화번호는 하이픈 허용.',
+    maxLength: 200,
+  })
   @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' ? value.normalize('NFC').trim() : value,
+  )
   @IsString()
-  @MaxLength(100)
+  @MaxLength(200)
   q?: string;
 }
 
