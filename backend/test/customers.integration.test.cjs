@@ -386,6 +386,235 @@ test('list supports literal name search, exact phone, state and stable offset pa
     await error(await request('?' + query, { headers: adminHeaders() }), 400, 'INVALID_REQUEST');
 });
 
+async function paymentCustomer({
+  name = '결제수단' + randomUUID(),
+  customerMonthly = true,
+  membershipStatus,
+  organizationStatus = 'ACTIVE',
+  organizationMonthly = true,
+  groupBilling = true,
+} = {}) {
+  const customer = (
+    await pool.query(
+      `INSERT INTO customers(name,phone_number,status,monthly_billing_enabled)
+       VALUES($1,$2,'ACTIVE',$3) RETURNING customer_seq,phone_number`,
+      [name, phone(), customerMonthly],
+    )
+  ).rows[0];
+  if (membershipStatus !== undefined) {
+    customer.organization_seq = (
+      await pool.query(
+        `INSERT INTO organizations(name,status,monthly_billing_enabled)
+         VALUES('결제 검증 기업',$1,$2) RETURNING organization_seq`,
+        [organizationStatus, organizationMonthly],
+      )
+    ).rows[0].organization_seq;
+    customer.membership_seq = (
+      await testMembership(pool, {
+        customerSeq: customer.customer_seq,
+        organizationSeq: customer.organization_seq,
+        employeeNo: randomUUID(),
+        status: membershipStatus,
+        groupBillingEnabled: groupBilling,
+      })
+    ).rows[0].membership_seq;
+  }
+  return customer;
+}
+
+async function paymentMethods(customer, expected) {
+  const listing = await request('?phoneNumber=' + customer.phone_number, {
+    headers: adminHeaders(),
+  });
+  assert.equal(listing.status, 200);
+  assert.equal(listing.headers.get('cache-control'), 'no-store');
+  const body = await listing.json();
+  assert.equal(body.total_count, 1);
+  assert.equal(body.hasNext, false);
+  assert.equal(body.data.length, 1);
+  const row = body.data[0];
+  assert.equal(row.customerSeq, customer.customer_seq);
+  assert.deepEqual(row.availablePaymentMethods, expected);
+  assert.deepEqual(Object.keys(row).sort(), [
+    'address',
+    'availablePaymentMethods',
+    'customerSeq',
+    'monthlyBillingEnabled',
+    'name',
+    'phoneNumber',
+    'status',
+  ]);
+  const response = await request('/context', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phoneNumber: customer.phone_number }),
+  });
+  assert.equal(response.status, 200);
+  const context = (await response.json()).data;
+  assert.deepEqual(row.availablePaymentMethods, context.availablePaymentMethods);
+  const { availablePaymentMethods, ...profile } = row;
+  if (context.customer) assert.deepEqual(profile, context.customer);
+}
+
+test('customer list and caller context agree on personal and independent company payment eligibility', async () => {
+  for (const customerMonthly of [false, true]) {
+    const customer = await paymentCustomer({ customerMonthly });
+    await paymentMethods(customer, customerMonthly ? ['billing', 'credit'] : ['billing']);
+  }
+  for (const membershipStatus of ['ACTIVE', 'INACTIVE']) {
+    for (const organizationStatus of ['ACTIVE', 'INACTIVE']) {
+      for (const organizationMonthly of [false, true]) {
+        for (const groupBilling of [false, true]) {
+          const customer = await paymentCustomer({
+            membershipStatus,
+            organizationStatus,
+            organizationMonthly,
+            groupBilling,
+          });
+          const active = membershipStatus === 'ACTIVE' && organizationStatus === 'ACTIVE';
+          await paymentMethods(customer, [
+            'billing',
+            ...(active && organizationMonthly ? ['credit'] : []),
+            ...(active && groupBilling ? ['groupBilling'] : []),
+          ]);
+        }
+      }
+    }
+  }
+});
+
+test('customer list payment methods reflect withdrawal and deleted or missing company links on the next read', async () => {
+  for (const change of [
+    'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
+    'UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=(SELECT organization_seq FROM memberships WHERE customer_seq=$1)',
+    'UPDATE departments SET deleted_at=clock_timestamp() WHERE department_seq=(SELECT department_seq FROM memberships WHERE customer_seq=$1)',
+    'UPDATE memberships SET department_seq=NULL WHERE customer_seq=$1',
+    "UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1",
+    'UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
+  ]) {
+    const customer = await paymentCustomer({ membershipStatus: 'ACTIVE' });
+    await paymentMethods(customer, ['billing', 'credit', 'groupBilling']);
+    await pool.query(change, [customer.customer_seq]);
+    if (change.startsWith('UPDATE customers SET deleted_at')) {
+      const response = await request('?phoneNumber=' + customer.phone_number, {
+        headers: adminHeaders(),
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { data: [], hasNext: false, total_count: 0 });
+    } else {
+      const expected = change.includes("status='WITHDRAWN'")
+        ? []
+        : change.startsWith('UPDATE organizations')
+          ? ['billing']
+          : ['billing', 'credit'];
+      await paymentMethods(customer, expected);
+    }
+  }
+});
+
+test('deleted membership history does not duplicate customer payment rows or pagination totals', async () => {
+  const prefix = '결제페이지' + randomUUID();
+  const customers = [];
+  for (let index = 0; index < 3; index++) {
+    const customer = await paymentCustomer({ name: prefix + index, membershipStatus: 'ACTIVE' });
+    for (let history = 0; history < 2; history++) {
+      await pool.query(
+        'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=$1',
+        [customer.customer_seq],
+      );
+      await testMembership(pool, {
+        customerSeq: customer.customer_seq,
+        organizationSeq: customer.organization_seq,
+        employeeNo: randomUUID(),
+        groupBillingEnabled: true,
+      });
+    }
+    customers.push(customer);
+  }
+  for (const [offset, ids, hasNext] of [
+    [0, customers.toReversed().slice(0, 2), true],
+    [2, [customers[0]], false],
+    [20, [], false],
+  ]) {
+    const response = await request(`?q=${prefix}&limit=2&offset=${offset}`, {
+      headers: adminHeaders(),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.total_count, 3);
+    assert.equal(result.hasNext, hasNext);
+    assert.deepEqual(
+      result.data.map((row) => row.customerSeq),
+      ids.map((customer) => customer.customer_seq),
+    );
+    for (const row of result.data)
+      assert.deepEqual(row.availablePaymentMethods, ['billing', 'credit', 'groupBilling']);
+  }
+});
+
+test('customer payment list reads have a fixed query count without business writes or context calls', async () => {
+  const prefix = '결제조회' + randomUUID();
+  for (let index = 0; index < 3; index++)
+    await paymentCustomer({ name: prefix + index, membershipStatus: 'ACTIVE' });
+  const counts = async () =>
+    (
+      await pool.query(`SELECT (SELECT count(*) FROM customers) AS customers,
+        (SELECT count(*) FROM call_sessions) AS calls, (SELECT count(*) FROM orders) AS orders,
+        (SELECT count(*) FROM audit_logs) AS audits`)
+    ).rows[0];
+  const before = await counts();
+  const database = app.get(require('../dist/database/database.service').DatabaseService);
+  const originalQuery = database.pool.query;
+  const originalContext = repository.context;
+  let queries = 0;
+  try {
+    database.pool.query = function (...args) {
+      queries++;
+      return originalQuery.apply(this, args);
+    };
+    repository.context = async () => {
+      throw new Error('list must not call customer context');
+    };
+    const queryCounts = [];
+    for (const limit of [1, 100]) {
+      queries = 0;
+      const response = await request(`?q=${prefix}&limit=${limit}`, { headers: adminHeaders() });
+      assert.equal(response.status, 200);
+      assert.equal((await response.json()).data.length, Math.min(limit, 3));
+      queryCounts.push(queries);
+    }
+    assert.ok(queryCounts[0] > 0);
+    assert.equal(queryCounts[0], queryCounts[1]);
+  } finally {
+    database.pool.query = originalQuery;
+    repository.context = originalContext;
+  }
+  assert.deepEqual(await counts(), before);
+  await error(await request('', { headers: businessHeaders() }), 401, 'UNAUTHORIZED');
+});
+
+test('Swagger exposes payment methods only on the customer list item and retains the existing detail schema', async () => {
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const schemas = document.components.schemas;
+  const listItem = schemas.CustomerListItemDto;
+  assert.ok(listItem);
+  assert.ok(listItem.required.includes('availablePaymentMethods'));
+  assert.equal(listItem.properties.availablePaymentMethods.type, 'array');
+  assert.deepEqual(listItem.properties.availablePaymentMethods.items.enum, [
+    'billing',
+    'credit',
+    'groupBilling',
+  ]);
+  assert.equal(
+    schemas.CustomersEnvelopeDto.properties.data.items.$ref,
+    '#/components/schemas/CustomerListItemDto',
+  );
+  assert.equal(
+    Object.hasOwn(schemas.CustomerResponseDto.properties, 'availablePaymentMethods'),
+    false,
+  );
+});
+
 test('validation rejects invalid bodies, nulls, phone changes, unknown fields and invalid IDs without writes', async () => {
   const id = await register();
   const before = (await pool.query('SELECT count(*) FROM customers')).rows[0].count;

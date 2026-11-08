@@ -38,8 +38,10 @@ export class AdminsRepository {
     return await readPage<AdminAccount>(
       this.database.pool,
       `SELECT ${columns} FROM admin_users
-   WHERE deleted_at IS NULL AND ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)`,
-      [query.role ?? null, query.status ?? null],
+   WHERE deleted_at IS NULL AND ($1::text IS NULL OR role=$1) AND ($2::text IS NULL OR status=$2)
+     AND ($3::text IS NULL OR strpos(lower(normalize(name,NFC)),lower($3))>0
+       OR strpos(lower(normalize(login_id,NFC)),lower($3))>0)`,
+      [query.role ?? null, query.status ?? null, query.q || null],
       query,
       '"adminUserSeq" DESC',
     );

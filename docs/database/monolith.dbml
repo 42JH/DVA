@@ -1,6 +1,6 @@
 Project dva_monolith {
   database_type: 'PostgreSQL'
-  Note: '2026-11-06 / 055 배송 초안·통화 완료 신호 반영. 신규 초안의 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
+  Note: '2026-11-08 / 056 분석 실패 수신 시각 및 055 배송 초안·통화 완료 신호 반영. 신규 초안의 모든 seq는 논리 참조이며 관계선을 만들지 않는다. 다른 필드는 기존 문서 범위이며 최신 컬럼·개수·제약은 backend/migrations와 infra/database/verify.sql을 기준으로 한다.'
 }
 
 // 시각화용 DBML. 배포 원본은 backend/migrations/*.sql. 함수·트리거·특수 인덱스는 SQL을 따른다.
@@ -307,6 +307,7 @@ Table call_sessions {
   order_finalization_result jsonb [note: 'orderSeq·draftSeq→orderParcelSeq 논리 참조 결과']
   order_finalization_error_code text [note: '재처리용 안전한 오류 코드']
   order_finalization_attempted_at timestamptz [note: '실패 복구 1분 간격 기준']
+  analysis_failed_at timestamptz [note: '056: AI 최종 분석 실패 최초 수신. 정상 분석이 있으면 COMPLETED 우선, 통화 보관 정책 적용']
   checks {
     `btrim(provider_call_id)<>''`
     `(started_at IS NULL AND ended_at IS NULL) OR (started_at IS NOT NULL AND ended_at IS NOT NULL AND ended_at>=started_at)`

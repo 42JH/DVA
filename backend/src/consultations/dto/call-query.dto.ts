@@ -17,6 +17,21 @@ import { ORDER_STATUSES, OrderStatus } from '../../orders/orders.types';
 
 export class CallQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '연결 고객의 현재 소속 기업 번호. 비활성 소속·기업 포함, 삭제된 연결 제외.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  organizationSeq?: number;
+
+  @ApiPropertyOptional({
     maxLength: 200,
     description: '현재 연결 고객 이름·발신번호 부분 검색. %·_는 일반 문자.',
   })

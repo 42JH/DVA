@@ -244,6 +244,69 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   const saved = (await detail.json()).data.call;
   assert.equal(saved.providerCallId, c.providerCallId);
   assert.equal(saved.orderSeq, null);
+  assert.equal(saved.analysisStatus, 'PENDING');
+  assert.equal(saved.recordedAt, null);
+  assert.equal(saved.customerSeq, null);
+  assert.equal(saved.organizationName, null);
+  assert.notEqual(process.env.TEST_INSIGHTS_TOKEN, process.env.TEST_BUSINESS_TOKEN);
+  const analysisUrl = 'http://proxy/api/ai/calls/' + c.id + '/analysis';
+  const sendFailure = (authorization) =>
+    fetch(analysisUrl + '/failure', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: authorization },
+      body: JSON.stringify({ providerCallId: c.providerCallId }),
+    });
+  assert.equal((await sendFailure('Bearer ' + process.env.TEST_BUSINESS_TOKEN)).status, 401);
+  const authorization = 'Bearer ' + process.env.TEST_INSIGHTS_TOKEN;
+  assert.equal((await sendFailure(authorization)).status, 204);
+  assert.equal((await sendFailure(authorization)).status, 204);
+  const list = await fetch('http://proxy/api/calls?callerPhoneNumber=' + c.phone, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(list.status, 200);
+  const failed = (await list.json()).data.find((row) => row.callSessionSeq === c.id);
+  assert.equal(failed.analysisStatus, 'FAILED');
+  assert.equal(failed.recordedAt, null);
+  assert.equal(failed.organizationName, null);
+  const recovered = await fetch(analysisUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: authorization },
+    body: JSON.stringify({
+      providerCallId: c.providerCallId,
+      startedAt: c.incomingAt,
+      endedAt: new Date(Date.parse(c.incomingAt) + 30000).toISOString(),
+      aiPersonaVersionSeq: null,
+      repeatQuestionCount: null,
+      hasComplaint: null,
+      complaints: [],
+    }),
+  });
+  assert.equal(recovered.status, 204, await recovered.clone().text());
+  assert.equal((await sendFailure(authorization)).status, 204);
+  const after = await fetch('http://proxy/api/calls/' + c.id, {
+    headers: { Cookie: login.headers.get('set-cookie').split(';')[0] },
+  });
+  assert.equal(after.status, 200);
+  const completed = (await after.json()).data;
+  assert.equal(completed.call.analysisStatus, 'COMPLETED');
+  assert.equal(completed.call.orderSeq, null);
+  assert.ok(completed.analysis);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  for (const path of ['/api/calls', '/api/admin/orders']) {
+    const filtered = await fetch('http://proxy' + path + '?organizationSeq=2147483647', {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(filtered.status, 200);
+    assert.deepEqual(await filtered.json(), { data: [], hasNext: false, total_count: 0 });
+  }
+  const orders = await fetch('http://proxy/api/admin/orders?limit=1', {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(orders.status, 200);
+  const rows = (await orders.json()).data;
+  assert.equal(rows.length, 1);
+  for (const field of ['customerSeq', 'organizationName']) assert.ok(Object.hasOwn(rows[0], field));
+  assert.equal(Object.hasOwn(rows[0], 'customerCategory'), false);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);
@@ -400,6 +463,19 @@ test('production customer service authentication through Nginx preserves AI and 
     Cookie: login.headers.get('set-cookie').split(';')[0],
     Origin: 'https://13.209.59.180',
   };
+  const list = await fetch('http://proxy/api/customers?phoneNumber=' + input.phoneNumber, {
+    headers: adminHeaders,
+  });
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get('cache-control'), 'no-store');
+  const listBody = await list.json();
+  assert.equal(listBody.total_count, 1);
+  assert.equal(listBody.data[0].customerSeq, id);
+  assert.deepEqual(listBody.data[0].availablePaymentMethods, ['billing']);
+  assert.deepEqual(
+    listBody.data[0].availablePaymentMethods,
+    initialBody.data.availablePaymentMethods,
+  );
   const withdrawn = await fetch('http://proxy/api/customers/' + id, {
     method: 'PATCH',
     headers: adminHeaders,
@@ -487,6 +563,18 @@ test('production member JSON supports single and bulk registration through Nginx
   const row = (await list.json()).data[0];
   const customerId = row.customer.customerSeq,
     membershipId = row.membership.membershipSeq;
+  const search = await fetch(
+    root +
+      `/companies/${companyId}/members?` +
+      new URLSearchParams({
+        q: number.slice(0, 3) + '-' + number.slice(3),
+        status: 'ACTIVE',
+      }),
+    { headers: { Cookie: session } },
+  );
+  assert.equal(search.status, 200);
+  assert.equal(search.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await search.json(), { data: [row], hasNext: false, total_count: 1 });
   const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
   assert.equal(
     (
@@ -578,6 +666,10 @@ test('production login through Nginx authorizes company operations and logout re
   const me = await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } });
   assert.equal(me.status, 200);
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
+  const deniedAdminSearch = await fetch('http://proxy/api/admins?q=runtime&status=ACTIVE', {
+    headers: { Cookie: session },
+  });
+  assert.equal(deniedAdminSearch.status, 403);
   const name = 'runtime-company-' + randomUUID();
   const companyHeaders = { ...headers, Cookie: session };
   const register = () =>
@@ -1056,6 +1148,36 @@ test('production active count SSE crosses HTTPS and both Nginx proxies, keeps he
     controller.abort();
     await reader.cancel().catch(() => {});
   }
+});
+
+test('production administrator search through Nginx keeps system-only scope, filters and public fields', async () => {
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeSearchAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = { Cookie: login.headers.get('set-cookie').split(';')[0] };
+  const path = 'http://proxy/api/admins?q=RUNTIMESEARCHADMIN83&role=SYSTEM_ADMIN&status=ACTIVE';
+  const response = await fetch(path, { headers });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const result = await response.json();
+  assert.equal(result.total_count, 1);
+  assert.equal(result.hasNext, false);
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].loginId, 'runtimeSearchAdmin83');
+  assert.deepEqual(Object.keys(result.data[0]).sort(), [
+    'adminUserSeq',
+    'createdAt',
+    'lastLoginAt',
+    'loginId',
+    'name',
+    'role',
+    'status',
+  ]);
+  for (const unauthorized of [{}, businessHeaders()])
+    assert.equal((await fetch(path, { headers: unauthorized })).status, 401);
 });
 
 test('HTTPS proxy preserves administrator authentication, internal blocking and PBX POST-only routing', async () => {

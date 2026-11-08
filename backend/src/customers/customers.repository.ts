@@ -9,9 +9,18 @@ import {
 } from './dto/customer-request.dto';
 import { Customer, EmployeeCustomerIdentity } from './customers.types';
 import { CallerContextDto } from './dto/caller-context.dto';
+import { CustomerListItemDto } from './dto/customer-response.dto';
 
 const columns =
   'customer_seq AS "customerSeq", name, phone_number AS "phoneNumber", status,monthly_billing_enabled AS "monthlyBillingEnabled",address_data AS address';
+
+const availablePaymentMethods = `CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
+  '["billing"]'::jsonb || CASE WHEN
+    (m.membership_seq IS NULL AND c.monthly_billing_enabled)
+    OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
+    THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
+  || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
+    THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END`;
 
 @Injectable()
 export class CustomersRepository {
@@ -56,13 +65,7 @@ export class CustomersRepository {
           'organizationSeq',o.organization_seq,'name',o.name,'status',o.status,'monthlyBillingEnabled',o.monthly_billing_enabled) END,
         'department',CASE WHEN c.status='ACTIVE' AND d.department_seq IS NOT NULL THEN jsonb_build_object(
           'departmentSeq',d.department_seq,'organizationSeq',d.organization_seq,'name',d.name,'groupBillingEnabled',d.group_billing_enabled) END,
-        'availablePaymentMethods',CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb ELSE
-          '["billing"]'::jsonb || CASE WHEN
-            (m.membership_seq IS NULL AND c.monthly_billing_enabled)
-            OR (m.status='ACTIVE' AND o.status='ACTIVE' AND o.monthly_billing_enabled)
-            THEN '["credit"]'::jsonb ELSE '[]'::jsonb END
-          || CASE WHEN m.status='ACTIVE' AND o.status='ACTIVE' AND d.group_billing_enabled
-            THEN '["groupBilling"]'::jsonb ELSE '[]'::jsonb END END,
+        'availablePaymentMethods',${availablePaymentMethods},
         'availableUsageTypes', CASE
           WHEN c.status<>'ACTIVE' THEN '[]'::jsonb
           WHEN m.status='ACTIVE' AND o.status='ACTIVE' THEN '["PERSONAL","COMPANY"]'::jsonb
@@ -117,13 +120,19 @@ export class CustomersRepository {
     ).rows[0];
   }
 
-  async list(query: ListCustomersQueryDto): Promise<PageRows<Customer>> {
-    const result = await readPage<Customer>(
+  async list(query: ListCustomersQueryDto): Promise<PageRows<CustomerListItemDto>> {
+    const result = await readPage<CustomerListItemDto>(
       this.database.pool,
-      `SELECT ${columns} FROM customers
-       WHERE deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(name), lower($1)) > 0)
-         AND ($2::text IS NULL OR phone_number = $2)
-         AND ($3::text IS NULL OR status = $3)`,
+      `SELECT c.customer_seq AS "customerSeq",c.name,c.phone_number AS "phoneNumber",c.status,
+         c.monthly_billing_enabled AS "monthlyBillingEnabled",c.address_data AS address,
+         ${availablePaymentMethods} AS "availablePaymentMethods"
+       FROM customers c
+       LEFT JOIN memberships m ON m.customer_seq=c.customer_seq AND m.deleted_at IS NULL
+       LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
+       LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
+       WHERE c.deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(c.name), lower($1)) > 0)
+         AND ($2::text IS NULL OR c.phone_number = $2)
+         AND ($3::text IS NULL OR c.status = $3)`,
       [query.q || null, query.phoneNumber ?? null, query.status ?? null],
       query,
       '"customerSeq" DESC',

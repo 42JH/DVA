@@ -1,5 +1,15 @@
 # 모놀리식 백엔드 공통 기반
 
+관리자 목록 GET /api/admins는 선택 q로 이름·로그인 아이디를 대소문자 구분 없이 부분 검색한다. 앞뒤 공백 제거 후 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. 기존 권한·상태 필터와 함께 페이지 적용 전 전체 계정에 검색하고 SYSTEM_ADMIN 전용 세션·삭제 계정 제외·공개 응답 정제를 유지한다. 실제 로그인 규칙과 DB는 변경하지 않으며 [작업·검증 기록](docs/admin-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
+
+기업별 사원 목록 GET /api/companies/{id}/members는 선택 q로 해당 기업의 이름·사번·전화번호를 부분 검색한다. 이름·사번은 대소문자를 구분하지 않고 전화번호는 하이픈·뒷자리 검색을 허용한다. 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. status와 함께 적용하며 응답·정렬·페이지/전체 건수·관리자 권한·삭제 기준과 전체 사원 검색 API는 유지한다. DB 변경은 없고 [작업·검증 기록](docs/company-member-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
+
+고객 목록 GET /api/customers의 availablePaymentMethods는 고객 확인 API와 같은 기준으로 현재 가능한 billing(개인 카드)·credit(월결제)·groupBilling(부서 그룹결제)을 순서대로 반환한다. 탈퇴 고객은 빈 배열이며 삭제 고객은 제외한다. 목록 SQL에서 함께 계산하므로 고객별 context 호출이 필요 없다. 고객 상세·공통 고객 DTO와 실제 주문·결제 자격 재검증은 유지하며 DB 변경은 없다. [작업·검증 기록](docs/customer-list-payment-methods-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
+
+통화 목록·상세와 관리자 주문 목록은 현재 소속 기업명 organizationName을 반환하며 organizationSeq 필터를 받는다. 관리자 주문 목록에는 customerSeq도 제공한다. 기업명 있음은 기업 고객, 기업명 없음+customerSeq 있음은 현재 무소속, customerSeq=null은 미확인으로 표시할 수 있으며 별도 고객 유형 필드는 추가하지 않는다. 비활성 소속·기업도 표시하고 삭제된 연결은 숨긴다. 현재 소속 기준이므로 과거 목록 표시도 바뀌며 결제 당시 기업 스냅샷과 다르다. DB 변경과 AI 일반 주문 조회 변경은 없고 전달 명세는 후속 작업과 누적한다. [작업·검증 기록](docs/list-customer-organization-plan.md)을 따른다.
+
+통화 분석 상태는 [AI 실패 통보](docs/call-analysis-status-ai-integration.md), [프론트 조회](docs/call-analysis-status-frontend-integration.md), [056 적용 순서](docs/call-analysis-status-rollout.md)를 따른다. 목록·상세에 analysisStatus와 최초 녹취 DB 저장 시각 recordedAt을 제공한다. 정상 분석이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING이다. 실패 API는 기존 AI_INSIGHTS_TOKEN을 사용하며 AI_BUSINESS_TOKEN과 다르다. 시간 경과·녹취·주문 결과로 실패를 추정하지 않는다.
+
 055 배송 단건 초안은 [AI 전송 명세](docs/parcel-draft-ai-integration.md), [프론트 연동 명세](docs/parcel-draft-frontend-integration.md), [배포·복구](docs/parcel-draft-rollout.md)를 우선한다. 통화 중에는 초안만 저장하고 PBX 종료와 AI 완료 후 READY를 실제 주문 하나로 변환한다. EDITING은 고객 등록 전에도 보존한다. 새 참조는 논리 참조이며 주소·물품·발신번호 사본은 원본 삭제와 독립적으로 최초 수집부터 5년 보관한다. 055는 한 번의 migration으로 적용하며 기존 쓰기 중지·백업 후 새 AI/프론트와 함께 전환한다. 아래 AI ORD-01 일괄 생성 설명은 055 이전 등록 통화의 호환 경로에 해당한다.
 
 고객 단독 등록 `POST /api/customers`는 이름·11자리 전화번호·주소가 필수다. 상세주소만 생략·빈 문자열을 허용한다. [주소 필수 연동 안내](docs/customer-registration-address.md)와 [고객 API](../docs/api/customers.md)를 따른다. 주소 수정·과거 고객 조회·주문 내 고객 연결·기업 사원 등록의 별도 계약과 DB 스키마는 유지한다.

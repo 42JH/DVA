@@ -4,6 +4,26 @@ import { CreateCallAnalysisDto } from './dto/create-call-analysis.dto';
 
 @Injectable()
 export class CallInsightsRepository {
+  async lockFailureCall(client: PoolClient, id: number): Promise<string | undefined> {
+    // Lock before checking analysis so the existing success path's FOR SHARE cannot race us.
+    const result = await client.query<{ provider_call_id: string }>(
+      "SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE",
+      [id],
+    );
+    return result.rows[0]?.provider_call_id;
+  }
+
+  async recordFailure(client: PoolClient, id: number): Promise<boolean> {
+    const result = await client.query(
+      `UPDATE call_sessions c SET analysis_failed_at=clock_timestamp()
+       WHERE c.call_session_seq=$1 AND c.analysis_failed_at IS NULL
+         AND NOT EXISTS(SELECT 1 FROM call_analyses a WHERE a.call_session_seq=c.call_session_seq)
+       RETURNING c.call_session_seq`,
+      [id],
+    );
+    return result.rowCount === 1;
+  }
+
   async findProviderCallId(client: PoolClient, id: number): Promise<string | undefined> {
     const result = await client.query<{ provider_call_id: string }>(
       "SELECT provider_call_id FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR SHARE",
