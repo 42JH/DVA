@@ -55,12 +55,7 @@ export class HomeService {
         recentCalls: calls.rows.slice(0, 5),
         incompleteDrafts: drafts.rows.slice(0, 5),
         unansweredQuestions: questions.rows.slice(0, 5),
-        aiPerformance: {
-          stageDropoffs: await this.dashboard.stageDropoffs('ALL', client),
-          registrationTime: await this.dashboard.registrationTime('ALL', client),
-          complaintCalls: await this.dashboard.complaintCalls('ALL', client),
-          responseWait: await this.dashboard.responseWait('ALL', client),
-        },
+        aiPerformance: await this.dashboard.performance('ALL', client),
       };
     });
   }
