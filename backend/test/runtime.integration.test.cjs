@@ -463,6 +463,19 @@ test('production customer service authentication through Nginx preserves AI and 
     Cookie: login.headers.get('set-cookie').split(';')[0],
     Origin: 'https://13.209.59.180',
   };
+  const list = await fetch('http://proxy/api/customers?phoneNumber=' + input.phoneNumber, {
+    headers: adminHeaders,
+  });
+  assert.equal(list.status, 200);
+  assert.equal(list.headers.get('cache-control'), 'no-store');
+  const listBody = await list.json();
+  assert.equal(listBody.total_count, 1);
+  assert.equal(listBody.data[0].customerSeq, id);
+  assert.deepEqual(listBody.data[0].availablePaymentMethods, ['billing']);
+  assert.deepEqual(
+    listBody.data[0].availablePaymentMethods,
+    initialBody.data.availablePaymentMethods,
+  );
   const withdrawn = await fetch('http://proxy/api/customers/' + id, {
     method: 'PATCH',
     headers: adminHeaders,

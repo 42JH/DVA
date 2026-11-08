@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { RequestMetaDto } from '../../common/dto/api-response.dto';
-import { CUSTOMER_STATUSES, CustomerStatus } from '../customers.types';
+import { CUSTOMER_STATUSES, CustomerPaymentMethod, CustomerStatus } from '../customers.types';
 
 import { CustomerAddressDto } from './customer-address.dto';
 
@@ -23,6 +23,15 @@ export class CustomerResponseDto extends CreatedCustomerDto {
   @ApiProperty({ enum: CUSTOMER_STATUSES })
   status!: CustomerStatus;
 }
+export class CustomerListItemDto extends CustomerResponseDto {
+  @ApiProperty({
+    enum: ['billing', 'credit', 'groupBilling'],
+    isArray: true,
+    description:
+      '조회 시점의 결제 가능 수단. billing 개인 카드, credit 월결제, groupBilling 부서 그룹결제 순서. 고객 확인 API와 동일한 기준이며 탈퇴 고객은 빈 배열.',
+  })
+  availablePaymentMethods!: CustomerPaymentMethod[];
+}
 export class CreatedCustomerEnvelopeDto {
   @ApiProperty({ type: CreatedCustomerDto })
   data!: CreatedCustomerDto;
@@ -36,8 +45,8 @@ export class CustomerEnvelopeDto {
   meta!: RequestMetaDto;
 }
 export class CustomersEnvelopeDto {
-  @ApiProperty({ type: [CustomerResponseDto] })
-  data!: CustomerResponseDto[];
+  @ApiProperty({ type: [CustomerListItemDto] })
+  data!: CustomerListItemDto[];
   @ApiProperty()
   hasNext!: boolean;
   @ApiProperty({

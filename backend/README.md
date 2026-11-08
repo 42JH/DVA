@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+고객 목록 GET /api/customers의 availablePaymentMethods는 고객 확인 API와 같은 기준으로 현재 가능한 billing(개인 카드)·credit(월결제)·groupBilling(부서 그룹결제)을 순서대로 반환한다. 탈퇴 고객은 빈 배열이며 삭제 고객은 제외한다. 목록 SQL에서 함께 계산하므로 고객별 context 호출이 필요 없다. 고객 상세·공통 고객 DTO와 실제 주문·결제 자격 재검증은 유지하며 DB 변경은 없다. [작업·검증 기록](docs/customer-list-payment-methods-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
+
 통화 목록·상세와 관리자 주문 목록은 현재 소속 기업명 organizationName을 반환하며 organizationSeq 필터를 받는다. 관리자 주문 목록에는 customerSeq도 제공한다. 기업명 있음은 기업 고객, 기업명 없음+customerSeq 있음은 현재 무소속, customerSeq=null은 미확인으로 표시할 수 있으며 별도 고객 유형 필드는 추가하지 않는다. 비활성 소속·기업도 표시하고 삭제된 연결은 숨긴다. 현재 소속 기준이므로 과거 목록 표시도 바뀌며 결제 당시 기업 스냅샷과 다르다. DB 변경과 AI 일반 주문 조회 변경은 없고 전달 명세는 후속 작업과 누적한다. [작업·검증 기록](docs/list-customer-organization-plan.md)을 따른다.
 
 통화 분석 상태는 [AI 실패 통보](docs/call-analysis-status-ai-integration.md), [프론트 조회](docs/call-analysis-status-frontend-integration.md), [056 적용 순서](docs/call-analysis-status-rollout.md)를 따른다. 목록·상세에 analysisStatus와 최초 녹취 DB 저장 시각 recordedAt을 제공한다. 정상 분석이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING이다. 실패 API는 기존 AI_INSIGHTS_TOKEN을 사용하며 AI_BUSINESS_TOKEN과 다르다. 시간 경과·녹취·주문 결과로 실패를 추정하지 않는다.
