@@ -16,7 +16,7 @@ RUN npm run lint \
  && node --test test/security-events.test.cjs
 
 FROM builder AS checks
-RUN node --test test/order-read.test.cjs test/database-audit.test.cjs test/order-deletion-check.test.cjs test/order-shipment-check.test.cjs test/order-cancellation.test.cjs test/billing.test.cjs
+RUN node --test test/order-read.test.cjs test/database-audit.test.cjs test/order-deletion-check.test.cjs test/order-shipment-check.test.cjs test/order-cancellation.test.cjs test/billing.test.cjs test/parcel-draft-retention.test.cjs
 
 FROM node:24-bookworm-slim
 WORKDIR /app/service

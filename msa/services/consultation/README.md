@@ -4,6 +4,10 @@
 
 모놀리식과 같은 PBX 수신·녹취 워커와 진행 통화 수/SSE를 제공한다. 프론트·AI의 요청 형식은 바꾸지 않는다. Jira [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160), [이번 단계 계획·검증](../../../docs/msa-consultation-pbx-plan.md), [전체 동등성 계획](../../../docs/msa-parity-plan.md)을 따른다.
 
+055 이전 통화는 order_intake_enabled=false, 이후 등록은 true다. 신규 통화의 AI 주문 취소는 삭제/보관 조건보다 먼저 원본 409로 거절한다. 관리자 통화 삭제는 미확정 통화의 유효 READY/EDITING 초안을 order에 확인하며, 확정 완료된 통화는 이 의존 확인을 건너뛴다. 기존 통화/녹취 진행 차단·감사·잠금은 유지한다.
+
+consultation 008은 과거 주문 연결의 통화 수/발신번호를 임시 보관한다. order가 모든 초안 연결을 커밋한 뒤 인증된 정리 이벤트로 이 사본을 지운다. 내부 조회/정리는 Swagger·Ingress에 공개하지 않는다. [055 전환과 검증](../../../docs/msa-draft-compatibility-plan.md)을 따른다.
+
 ## 제공 API
 
 - `POST /webhooks/pbx/call-ended`: 기존 Bearer·7개 필드·원문 응답. 수신함 저장 후 ACK하며 중복/충돌·5년 경계를 유지한다.
@@ -25,6 +29,7 @@ Node.js 24에서 `npm ci` 후 환경을 설정하고 `npm run start:dev`를 실�
 
 - consultation 전용 `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
 - `OPERATIONS_URL`: 경로·자격정보 없는 정확한 HTTP(S) origin, 예시 `http://operations:3005`
+- `ORDER_URL`: 통화 삭제의 미확정 READY/EDITING 초안 확인용 정확한 HTTP(S) origin. k8s는 `http://order:3002`이며 누락/장애 시 해당 삭제는 503으로 롤백한다.
 - `CUSTOMER_URL`: customer의 정확한 HTTP(S) origin, k8s는 `http://customer:3001`
 - `CUSTOMER_AUTH_TOKEN`: customer 등록 이벤트 인증용 32~256자 ASCII 비밀 값
 - `CONSULTATION_AUTH_TOKEN`: operations와 공유하는 별도 32~256자 ASCII 서비스 비밀 값
@@ -51,7 +56,7 @@ python msa/deploy/tests/integration_app_rollout.py --service consultation --imag
 
 Docker 빌드는 ESLint·단위·E2E·TypeScript를 검사한다. checks target은 기존 27개와 페르소나 조회 응답 검증/제한 시간 3개·분석 감사 준비와 ACK/404 검증 3개, 총 33개다. 검증기는 원본 분석/지표 단위 테스트를 양쪽에 실행하고 분리 서비스 필수 환경만 fixture로 추가한다. 원본 통합 테스트는 변경 없이 모놀리식에서 실행한다. production 분석·지표 HTTP/DB/해시/감사 비교, 버전 삭제 경합·실제 SIGKILL 복구와 기존 PBX/HTTP·DB·SSE를 검사한다. 고객 확인/PIN은 별도 test 환경에서 원본 업무 행·DTO·등록 SSE·명령 유실·종료 복구를 비교하며 아직 이식하지 않은 월별 청구 자동 워커를 제외한다. 로그는 `msa/liquibase/verification-logs/consultation/`에 남긴다.
 
-Jenkins는 customer·consultation·operations 중 하나가 선택되면 `Verify Consultation Parity`를 실행하고 실패 시 배포를 중단한다. DB 적용 후 operations → customer → consultation 순서로 배포하며 다른 서비스 선택은 보존한다. 두 서비스 토큰은 기존 Secret에서 최초 생성/기존 값 보존 정책으로 공유한다. DB는 기존 서비스별 PG* Secret을 사용한다. Ingress는 기존 공개 경로를 유지하고 등록/조회/감사 내부 경로는 공개하지 않는다.
+Jenkins는 customer·consultation·operations·order 중 하나가 선택되면 `Verify Consultation Parity`를 실행하고 실패 시 배포를 중단한다. DB 적용 후 operations → customer → consultation 순서로 배포하며 다른 서비스 선택은 보존한다. 두 서비스 토큰은 기존 Secret에서 최초 생성/기존 값 보존 정책으로 공유한다. DB는 기존 서비스별 PG* Secret을 사용한다. Ingress는 기존 공개 경로를 유지하고 등록/조회/감사 내부 경로는 공개하지 않는다.
 
 운영 PBX/S3 설정과 자격정보는 기존 값으로 `dva/consultation-runtime` Secret에서 주입한다. PBX 토큰·S3 버킷·허용 호스트·AWS 자격정보를 Git/명령 인자/로그에 넣지 않는다. Secret 자체는 선택 사항이며 토큰 미설정 시 PBX는 원본처럼 503을 반환한다. S3 미설정 시 통화 종료 매칭은 유지하고 파일 저장을 보류한다. 준비된 새 Pod부터 트래픽을 받고 실패 시 기존 리소스/이미지로 복구하지만 DB 변환은 앱 롤백으로 되돌리지 않는다.
 

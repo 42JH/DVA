@@ -1,3 +1,6 @@
+import { ParcelDraftRetentionWorker } from './parcel-draft-retention.worker';
+import { ParcelDraftMigrationService } from './parcel-draft-migration.service';
+import { CallDraftDeletionController } from './call-draft-deletion.controller';
 import { OrderDeletionCheckClient } from './order-deletion-check.client';
 import { OrderCancellationController } from './order-cancellation.controller';
 import { OrderShipmentCheckClient } from './order-shipment-check.client';
@@ -14,11 +17,19 @@ import { OrderReadController } from './order-read.controller';
   imports: [DatabaseModule],
   controllers: [
     OrdersController,
+    CallDraftDeletionController,
     OrderCancellationController,
     AdminOrdersController,
     OrderAddressesController,
     OrderReadController,
   ],
-  providers: [OrderShipmentCheckClient, OrderDeletionCheckClient, OrdersService, OrdersRepository],
+  providers: [
+    ParcelDraftMigrationService,
+    ParcelDraftRetentionWorker,
+    OrderShipmentCheckClient,
+    OrderDeletionCheckClient,
+    OrdersService,
+    OrdersRepository,
+  ],
 })
 export class OrdersModule {}

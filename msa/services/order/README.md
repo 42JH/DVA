@@ -16,9 +16,17 @@
 
 order DB에는 주문/상세/결제 요청/청구만 두고 타 소유자 테이블을 복제하지 않는다. 상담/고객 확인은 [인증된 조회 이벤트](../../shared/events/README.md)로 연결하며 같은 조회 재시도도 최신 상태를 확인한다. GET 조회는 업무/감사·outbox/inbox 쓰기를 만들지 않는다. 소유 행의 공유 잠금과 로컬 REPEATABLE READ를 사용하므로 동시 통화 종료·고객 상태 변경은 조회가 끝날 때까지 짧게 대기한다. 서비스 의존 장애는 503이며 관리자 로컬 주문 조회는 계속 제공한다.
 
+## 055 저장 구조와 기존 API
+
+[055 이관 계획](../../../docs/msa-draft-compatibility-plan.md)에 따라 과거 COLLECTING을 원래 보관/삭제 시각으로 부분 초안에 복사한다. 기존 목록은 이관 원본을 숨기고 취소는 409로 거절한다. 신규 통화의 AI 취소도 원본처럼 409다. 새 초안 CRUD/완료 API는 아직 제공하지 않는다.
+
+order 시작 전에 consultation의 불변 이관 사본을 인증 이벤트로 읽어 초안 연결과 완료 표식을 같은 로컬 트랜잭션으로 저장한다. 모두 커밋한 뒤 임시 통화/발신번호 사본을 정리하고 요청을 받는다. 실패한 시작은 미완료 표식을 다음 시작에서 이어 처리한다. 최초 시작에는 consultation이 필요하며, 완료 후 시작은 이관 의존 없이 가능하다. 영구 inbox/outbox에 전화번호를 복제하지 않는다.
+
+최초 이관 완료 뒤 초안 보관 워커가 10초마다 원래 retention_started_at에서 5년 지난 행을 100개씩 폐기한다. 수정·삭제·재개로 보관을 연장하지 않고 잠긴 행은 다음 주기에 처리한다. 주문/통화 원본·감사/결제의 전체 보관 처리는 후속이다.
+
 ## 실행과 배포
 
-Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `DELIVERY_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 003까지 먼저 적용해야 한다. 별도 토큰/로그 Secret 종류를 추가하지 않고 기존 최초 생성·값 보존 정책을 사용한다.
+Node.js 24와 기존 PostgreSQL을 사용한다. `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `OPERATIONS_URL`, `CUSTOMER_URL`, `CONSULTATION_URL`, `DELIVERY_URL`, `CUSTOMER_AUTH_TOKEN`을 설정한다. `PORT` 기본값은 3002, 운영에는 기존 `SECURITY_LOG_HMAC_KEY` 64자리 hex와 `CORS_ORIGINS`를 주입한다. Liquibase order 004와 consultation 008을 먼저 적용해야 한다. 별도 토큰/로그 Secret 종류를 추가하지 않고 기존 최초 생성·값 보존 정책을 사용한다.
 
 저장소 루트에서 실행한다.
 

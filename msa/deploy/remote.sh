@@ -42,6 +42,26 @@ if len(rows)!=1 or len(rows[0])<3 or rows[0][2]!=sys.argv[2]:
 ' "$image" "$image_id"
 if [[ "$action" != prepare ]]; then
   sudo -n k3s kubectl -n dva get secret "$service-db" -o name
+  if [[ "$action" == apply && ( "$service" == order || "$service" == consultation ) ]]; then
+    preview=$(bash ./run-service.sh "$service" preview "$image")
+    printf '%s\n' "$preview"
+    if grep -Fxq 'DVA_QUIESCENT_CUTOVER_REQUIRED=055' <<< "$preview"; then
+      # Both snapshots must be taken at one quiescent business epoch, as in source 055.
+      sudo -n k3s kubectl -n dva get deployment order consultation --ignore-not-found -o json | python3 -c '
+import json,sys
+for deployment in json.load(sys.stdin)["items"]:
+    if deployment.get("spec",{}).get("replicas",1)!=0 or deployment.get("status",{}).get("replicas",0)!=0:
+        raise SystemExit("055 cutover requires inbound/AI outbox drain, backup and stopped order/consultation pods before migration.")
+'
+      sudo -n k3s kubectl -n dva get pods -l 'app in (dva-order,dva-consultation)' -o json | python3 -c '
+import json,sys
+if json.load(sys.stdin)["items"]:
+    raise SystemExit("055 cutover waits until all order/consultation pods, including terminating writers, are gone.")
+'
+      # Fence old releases before DDL, including an ambiguous migration/annotation response.
+      sudo -n k3s kubectl annotate namespace dva 'dva.ssafy.io/parcel-drafts-schema=055' --overwrite
+    fi
+  fi
   bash ./run-service.sh "$service" "$action" "$image" "$expected"
 fi
 

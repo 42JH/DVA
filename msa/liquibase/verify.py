@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 from verify_order_schema import verify_order_schema
+from verify_parcel_draft_schema import verify_parcel_draft_schema
 
 BASE = Path(__file__).resolve().parent
 SOURCE = BASE / 'tests'
@@ -86,7 +87,7 @@ try:
 
     checks = {'customer': 'customer-check.sql', 'order': 'order-storage-check.sql', 'consultation': 'consultation-pbx-check.sql',
               'delivery': 'delivery-storage-check.sql', 'operations': 'operations-check.sql'}
-    for service, tables, fks in [('customer',8,7),('order',8,3),('consultation',10,9),('delivery',4,1),('operations',17,8)]:
+    for service, tables, fks in [('customer',8,7),('order',11,3),('consultation',12,9),('delivery',4,1),('operations',17,8)]:
         db = service + '_db'
         sql('postgres', f'CREATE ROLE {service}_app LOGIN;\nCREATE DATABASE {db} OWNER {service}_app;\nREVOKE ALL ON DATABASE {db} FROM PUBLIC;', service+'-setup')
         lb(service, db, 'validate', service+'-validate')
@@ -95,7 +96,7 @@ try:
         assert before == '0', before
         lb(service, db, 'update', service+'-update')
         catalog = sql(db, "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('databasechangelog','databasechangeloglock')), (SELECT count(*) FROM pg_constraint WHERE contype='f' AND connamespace='public'::regnamespace), (SELECT count(*) FROM databasechangelog);", service+'-catalog')
-        changesets = {'customer': 7, 'operations': 10, 'consultation': 7, 'order': 3, 'delivery': 3}[service]
+        changesets = {'customer': 7, 'operations': 10, 'consultation': 8, 'order': 4, 'delivery': 3}[service]
         assert catalog == f'{tables}|{fks}|{changesets}', catalog
         owners = sql(db, f"SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner <> '{service}_app';", service+'-owners')
         assert owners == '0', owners
@@ -344,7 +345,7 @@ try:
     assert sql(db, legacy, 'call-customer-atomic-data') == calls_before_customer
     assert sql(db, "SELECT count(*) FROM information_schema.columns WHERE table_name='call_sessions' AND column_name='customer_seq';", 'call-customer-atomic-column') == '0'
     assert sql(db, 'SELECT id,author,md5sum FROM databasechangelog ORDER BY orderexecuted;', 'call-customer-atomic-history') == history
-    lb('consultation', db, 'update', 'call-customer-upgrade')
+    lb('consultation', db, 'update-count', 'call-customer-upgrade', extra=('--count=1',))
     assert sql(db, "SELECT jsonb_agg(to_jsonb(c)-'customer_seq') FROM call_sessions c;", 'call-customer-preserved') == calls_before_customer
     assert sql(db, 'SELECT count(*) FILTER(WHERE customer_seq IS NULL),count(*) FROM call_sessions;', 'call-customer-no-invented-ref') == '2|2'
     sql(db, 'UPDATE call_sessions SET customer_seq=17 WHERE call_session_seq=1;', 'call-customer-logical-ref', 'consultation_app')
@@ -449,7 +450,7 @@ try:
         assert sql(db, new_schema, label+'-atomic-schema') == 't'
         assert sql(db, preserved, label+'-atomic-data') == data
         assert sql(db, 'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;', label+'-atomic-history') == history
-        lb(service, db, 'update', label+'-apply')
+        lb(service, db, 'update-count', label+'-apply', extra=('--count=1',))
         assert sql(db, preserved, label+'-preserved-data') == data
         assert sql(db, f'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<={count} ORDER BY orderexecuted;', label+'-preserved-history') == history
         assert sql(db, "SELECT payload->>'preserved' FROM outbox_events WHERE event_type='LegacyPending' AND delivered_at IS NULL;", label+'-preserved-outbox') == 'true'
@@ -498,7 +499,7 @@ try:
         assert sql(db,absent,prefix+'-atomic-schema')=='t'
         assert sql(db,preserved,prefix+'-atomic-data')==original
         assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;',prefix+'-atomic-history')==history
-        lb(service,db,'update',prefix+'-apply')
+        lb(service,db,'update-count',prefix+'-apply',extra=('--count=1',))
         assert sql(db,preserved,prefix+'-data-preserved')==original
         assert sql(db,f'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<={count} ORDER BY orderexecuted;',prefix+'-history-preserved')==history
         if service=='operations':
@@ -527,7 +528,7 @@ try:
     assert sql(db,snapshot,'retry-upgrade-atomic-data')==before
     assert sql(db,"SELECT count(*) FROM information_schema.columns WHERE table_schema='pbx_webhooks' AND table_name='call_ended_events' AND column_name='requires_review';",'retry-upgrade-atomic-schema')=='0'
     assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','retry-upgrade-atomic-history')==history
-    lb('consultation',db,'update','retry-upgrade-apply')
+    lb('consultation',db,'update-count','retry-upgrade-apply',extra=('--count=1',))
     assert sql(db,snapshot,'retry-upgrade-data-preserved')==before
     assert sql(db,"SELECT count(*) FILTER(WHERE attempt_count=0 AND next_attempt_at IS NULL),count(*) FILTER(WHERE requires_review AND last_error_code='LEGACY_FAILURE') FROM pbx_webhooks.call_ended_events;",'retry-upgrade-legacy-state')=='5|3'
     assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog WHERE orderexecuted<=6 ORDER BY orderexecuted;','retry-upgrade-history-preserved')==history
@@ -560,6 +561,7 @@ try:
     lb('operations',db,'update','order-audit-upgrade-repeat')
     assert sql(db,'SELECT id,md5sum,dateexecuted FROM databasechangelog ORDER BY orderexecuted;','order-audit-upgrade-repeat-history')==history
     verify_order_schema(BASE, logs, sql, lb, report)
+    verify_parcel_draft_schema(BASE, logs, sql, lb, report)
     report['passed'] = True
 except Exception as error:
     report['error'] = str(error)

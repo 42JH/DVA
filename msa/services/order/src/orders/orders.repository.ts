@@ -35,6 +35,14 @@ export class OrdersRepository {
     await client.query('UPDATE orders SET deleted_at=clock_timestamp() WHERE order_seq=$1', [id]);
   }
 
+  async hasMigratedDrafts(client: PoolClient, id: number): Promise<boolean> {
+    return !!(
+      await client.query('SELECT 1 FROM order_parcel_drafts WHERE legacy_order_seq=$1 LIMIT 1', [
+        id,
+      ])
+    ).rowCount;
+  }
+
   async lockOrder(client: PoolClient, id: number) {
     return (
       await client.query<{
@@ -157,7 +165,9 @@ export class OrdersRepository {
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
          ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=o.order_seq),'[]'::jsonb) AS parcels
        FROM orders o
-       WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+       WHERE o.deleted_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
+       AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
         AND ($1::text IS NULL OR EXISTS(SELECT 1 FROM order_parcels p WHERE p.order_seq=o.order_seq AND (
          EXISTS(SELECT 1 FROM unnest(ARRAY[p.origin_name,p.origin_phone_number,p.origin_road_address,p.origin_jibun_address,p.origin_detail_address,
            p.destination_name,p.destination_phone_number,p.destination_road_address,p.destination_jibun_address,p.destination_detail_address]) AS v(value)
@@ -188,7 +198,9 @@ export class OrdersRepository {
           o.created_at AS "createdAt",
           (SELECT count(*)::int FROM order_parcels p WHERE p.order_seq=o.order_seq) AS "parcelCount"
          FROM orders o
-         WHERE o.deleted_at IS NULL AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
+         WHERE o.deleted_at IS NULL
+       AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
+       AND COALESCE(o.closed_at,o.created_at)>clock_timestamp()-interval '5 years'
            AND ($1::int IS NULL OR o.customer_seq=$1)
            AND ($2::timestamptz IS NULL OR o.created_at >= $2)
            AND ($3::timestamptz IS NULL OR o.created_at < $3)

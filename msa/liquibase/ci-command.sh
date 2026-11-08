@@ -37,6 +37,9 @@ pending() {
 pending
 if [[ "$action" == preview ]]; then
   "${lb[@]}" update-sql
+  if grep -Eq '::(004-parcel-drafts|008-order-intake)::dva$' "$work/pending.txt"; then
+    printf '\nDVA_QUIESCENT_CUTOVER_REQUIRED=055\n'
+  fi
   printf '\nDVA_PENDING_SHA256=%s\n' "$fingerprint"
 else
   if [[ "$fingerprint" != "$expected" ]]; then

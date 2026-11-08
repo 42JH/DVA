@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+from verify_parcel_draft_upgrade import verify_parcel_draft_upgrade
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = 'dva-order-check-' + uuid.uuid4().hex[:12]
@@ -79,6 +80,7 @@ def main():
                        '-e', 'LIQUIBASE_COMMAND_USERNAME='+side+'_app', '-e', 'LIQUIBASE_COMMAND_PASSWORD='+password,
                        command=('--changelog-file='+side+'/db.changelog.xml', 'update'))
             complete(name)
+        verify_parcel_draft_upgrade(ROOT, RUN, images, password, token, run, create, complete)
         # The original fixture and ORD-02/03 assertions run without modifying backend files.
         reference = LOGS/'order-reads-reference.cjs'
         reference.write_text("const suite=require('./helpers/orders.cjs')();require('./orders-reads.cjs')(suite);\n", encoding='utf-8')
@@ -123,7 +125,7 @@ def main():
                command=('node', '--test', 'test/order-reads-parity.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/order-reads-parity.test.cjs'), name+':/app/service/test/order-reads-parity.test.cjs', label='differential-copy')
         complete(name)
-        for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery']:
+        for suite in ['order-deletion-parity', 'order-deletion-recovery', 'order-cancellation-parity', 'order-cancellation-recovery', 'parcel-draft-compatibility']:
             name = RUN+'-'+suite
             create(name, images['order-checks'], '-e', 'NODE_ENV=test', '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                    '-e', 'CUSTOMER_AUTH_TOKEN='+password, '-e', 'CONSULTATION_AUTH_TOKEN='+token,
@@ -179,6 +181,13 @@ def main():
         create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
                command=('node', '--test', 'test/billing-months-outage.test.cjs'))
         run('docker', 'cp', str(ROOT/'msa/parity/billing-months-outage.test.cjs'), name+':/app/service/test/billing-months-outage.test.cjs', label='billing-outage-copy')
+        complete(name)
+        run('docker', 'start', RUN+'-consultation-app', label='draft-deletion-consultation-restart')
+        run('docker', 'exec', RUN+'-consultation-app', 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))", label='draft-deletion-consultation-ready')
+        name = RUN+'-draft-deletion-outage'
+        create(name, images['order-checks'], '-e', 'PGPASSWORD='+password, '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', 'test/parcel-draft-deletion-outage.test.cjs'))
+        run('docker', 'cp', str(ROOT/'msa/parity/parcel-draft-deletion-outage.test.cjs'), name+':/app/service/test/parcel-draft-deletion-outage.test.cjs', label='draft-deletion-outage-copy')
         complete(name)
         report['passed'] = True
     finally:

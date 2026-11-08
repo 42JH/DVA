@@ -116,7 +116,7 @@ pipeline {
         stage('Verify Consultation Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation'] }
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'order'] }
                 }
             }
             steps { sh 'python3 msa/parity/verify-consultation.py' }

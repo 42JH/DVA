@@ -1,3 +1,4 @@
+import { CallDraftDeletionClient } from './call-draft-deletion.client';
 import { DatabaseService } from '../database/database.service';
 import { ConsultationsRepository } from './consultations.repository';
 import { ApiException } from '../common/errors/api.exception';
@@ -18,6 +19,7 @@ export class ConsultationsService {
     private readonly audit: AuditService,
     private readonly repository: ConsultationsRepository,
     private readonly database: DatabaseService,
+    private readonly draftDeletion: CallDraftDeletionClient,
   ) {}
   attachRecording(client: PoolClient, callId: number, objectKey: string) {
     return this.sessions.attachRecording(client, callId, objectKey);
@@ -82,6 +84,15 @@ export class ConsultationsService {
             409,
             'INVALID_STATE',
             '통화 종료와 녹취 저장이 완료된 뒤 삭제해 주세요.',
+          );
+        if (
+          call.orderFinalizedAt === null &&
+          (await this.draftDeletion.blocked(id))
+        )
+          throw new ApiException(
+            409,
+            'INVALID_STATE',
+            '배송 초안의 주문 확정을 마친 뒤 통화를 삭제해 주세요.',
           );
         await this.repository.softDelete(client, id);
         await this.audit.recordSuccess(

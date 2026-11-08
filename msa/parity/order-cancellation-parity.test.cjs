@@ -22,7 +22,7 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
     await side.db.query('TRUNCATE '+orderTables.join(',')+' RESTART IDENTITY CASCADE');
     await side.audit.query('TRUNCATE audit_logs RESTART IDENTITY CASCADE');
     await side.db.query("INSERT INTO orders(order_seq,customer_seq,status,version,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES(1001,1,'COLLECTING',23,'2030-01-01Z','2030-01-01Z')");
-    await side.calls.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at) OVERRIDING SYSTEM VALUE VALUES(1011,'cancel-access-call','01000000001','2030-01-01Z','2030-01-01Z')");
+    await side.calls.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled) OVERRIDING SYSTEM VALUE VALUES(1011,'cancel-access-call','01000000001','2030-01-01Z','2030-01-01Z',false)");
   }
   for(let i=0;;i++){try{if((await fetch('http://delivery-app:3003/delivery/health/ready')).status===200)break;}catch{}assert.ok(i<60,'delivery ready');await pause(100);}
   for(const [owner,forbidden] of [['delivery',['orders','order_parcels','customers','admin_users']],['order',['shipments','call_sessions','customers']]])
@@ -69,8 +69,8 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
   }
   async function call({phone='01000000001',ended=false,order=null,expired=false,deleted=false,customer=2}={}){
     const id=++next;
-    for(const side of sides){await side.calls.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at)
-      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null]);
+    for(const side of sides){await side.calls.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,customer_seq,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at,order_intake_enabled)
+      OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',$7,$8,$9,false)`,[id,'cancel-scope-'+id,phone,customer,order,expired?'2000-01-01Z':'2030-01-01Z',ended?'2030-01-01Z':null,ended?'2030-01-02Z':null,deleted?'2030-01-03Z':null]);
       if(expired){const lock=await side.calls.connect();retained.push(lock);await lock.query('BEGIN');await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[id]);}}
     return{call_session_seq:String(id)};
   }
