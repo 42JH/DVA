@@ -82,6 +82,8 @@ agent-secret은 에이전트 실행에 필요하므로 유지한다.
 - 관측 인프라만 변경되면 해당 검증만, 결제 데모 인프라만 변경되면 해당 검증만 실행한다.
 - 선택된 Backend checks는 배포 여부와 관계없이 운영 이미지·Nginx smoke까지 실행한다. 배포 없는 실행은 릴리스 archive·SSH 접근 단계를 생략한다. 수동 릴리스 파일은 기존 package 스크립트로 만들 수 있다.
 - Docker checks는 builder가 컴파일한 결과로 `test:compiled`를 실행한다. 로컬 `npm test`는 컴파일부터 실행하는 기존 동작을 유지한다.
+- 배포 빌드는 운영 이미지·Nginx/HTTPS smoke가 모두 통과한 뒤에만 릴리스 태그를 남긴다. 패키징은 이 이미지를 재사용하며 없거나 다른 버전·플랫폼이면 실패한다. 백엔드 검증을 실행하지 않은 인프라 전용 배포와 `package.sh <version>` 수동 실행은 기존처럼 이미지를 빌드한다.
+- Docker 29 BuildKit의 `/root/.npm` 다운로드 캐시를 사용한다. `npm ci`·lock 무결성 검사·의존성 audit는 유지한다. `node_modules`는 각 단계에서 설치하며 다운로드 캐시 mount는 운영 이미지에 포함되지 않는다.
 - 기본 `node backend/scripts/check.cjs`, Docker checks CMD 및 `npm run test:integration`은 전체 실행이다. 선택 프로필은 Jenkins가 diff로 정하며 `BACKEND_TEST_PROFILE=faq|dashboard`로 로컬 재현할 수 있다. 유효하지 않은 프로필·누락된 필수 테스트·해석 불가능한 테스트 명령은 오류로 종료한다. 테스트 목록의 기준은 기존 `package.json` 하나다.
 - 웹훅 경로에 `infra/database`, `infra/observability`, `infra/payment-test`를 포함한다. 저장소의 설정 스크립트 변경과 실제 Jenkins Job 재설정은 별도다.
 

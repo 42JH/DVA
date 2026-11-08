@@ -16,7 +16,10 @@ cat > "$test_root/bin/docker" <<'MOCK'
 set -eu
 printf 'docker %s\n' "$*" >> "$TEST_COMMAND_LOG"
 if [[ "${TEST_BUILD_FAIL:-}" == 1 && "$1" == build ]]; then exit 1; fi
-if [[ "$1 ${2:-}" == 'image inspect' ]]; then printf 'linux/amd64\n'; fi
+if [[ "$1 ${2:-}" == 'image inspect' ]]; then
+ [[ "${TEST_IMAGE_MISSING:-}" != 1 ]] || exit 1
+ printf '%s\n' "${TEST_IMAGE_PLATFORM:-linux/amd64}"
+fi
 if [[ "$1 ${2:-}" == 'image save' ]]; then
  while [[ "$1" != --output ]]; do shift; done
  printf 'test image archive\n' > "$2"
@@ -59,6 +62,21 @@ if bash "$test_root/repo/infra/deploy/package.sh" test-one; then echo 'Duplicate
 if bash "$test_root/repo/infra/deploy/package.sh" '../escape'; then echo 'Invalid version accepted' >&2; exit 1; fi
 if TEST_BUILD_FAIL=1 bash "$test_root/repo/infra/deploy/package.sh" test-fail; then echo 'Build failure accepted' >&2; exit 1; fi
 test ! -e "$test_root/repo/.deploy/test-fail"
+TEST_BUILD_FAIL=1 bash "$test_root/repo/infra/deploy/package.sh" test-reuse dva-backend:test-reuse
+grep -F 'docker image inspect dva-backend:test-reuse' "$TEST_COMMAND_LOG"
+if grep -F 'docker build --platform linux/amd64 -t dva-backend:test-reuse ' "$TEST_COMMAND_LOG"; then
+ echo 'Verified backend image was rebuilt' >&2; exit 1
+fi
+(cd "$test_root/repo/.deploy/test-reuse" && sha256sum --check --status release-files.sha256 && sha256sum --check --status images.tar.sha256)
+before_reject="$(wc -l < "$TEST_COMMAND_LOG")"
+if bash "$test_root/repo/infra/deploy/package.sh" test-wrong dva-backend:another; then echo 'Foreign verified image accepted' >&2; exit 1; fi
+test "$(wc -l < "$TEST_COMMAND_LOG")" = "$before_reject"
+if TEST_IMAGE_MISSING=1 TEST_BUILD_FAIL=1 bash "$test_root/repo/infra/deploy/package.sh" test-missing dva-backend:test-missing; then echo 'Missing verified image accepted' >&2; exit 1; fi
+if TEST_IMAGE_PLATFORM=linux/arm64 TEST_BUILD_FAIL=1 bash "$test_root/repo/infra/deploy/package.sh" test-arm dva-backend:test-arm; then echo 'Wrong verified platform accepted' >&2; exit 1; fi
+for failed in test-wrong test-missing test-arm; do
+ test ! -e "$test_root/repo/.deploy/$failed"
+ if grep -F "docker build --platform linux/amd64 -t dva-backend:$failed " "$TEST_COMMAND_LOG"; then echo 'Invalid verified image fell back to a build' >&2; exit 1; fi
+done
 before_verify="$(wc -l < "$TEST_COMMAND_LOG")"
 bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity" ubuntu --verify-only
 test "$(($(wc -l < "$TEST_COMMAND_LOG") - before_verify))" = 1
@@ -75,4 +93,4 @@ before="$(wc -l < "$TEST_COMMAND_LOG")"
 printf 'tampered\n' >> "$release/images.tar"
 if bash "$test_root/repo/infra/deploy/upload.sh" test-one "$test_root/identity"; then echo 'Tampered release accepted' >&2; exit 1; fi
 test "$(wc -l < "$TEST_COMMAND_LOG")" = "$before"
-echo 'PASS: Linux packaging with exact SQL bytes, fail-fast builds, pinned SSH, temporary key permissions and image/SQL transfer integrity.'
+echo 'PASS: Linux build/verified-image reuse with fail-closed version/platform checks, exact SQL bytes, pinned SSH and image/SQL transfer integrity.'

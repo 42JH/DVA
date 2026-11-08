@@ -32,6 +32,7 @@ pipeline {
                         env.CHECK_BACKEND = 'true'
                         env.BACKEND_TEST_PROFILE = 'full'
                     }
+                    env.BACKEND_RELEASE_IMAGE = (env.SHOULD_DEPLOY == 'true' && env.CHECK_BACKEND == 'true') ? "dva-backend:${env.RELEASE_VERSION}" : ''
                     echo "CI selection: ${selection}"
                 }
             }
@@ -75,8 +76,7 @@ pipeline {
         stage('Build and Package Images') {
             when { expression { env.SHOULD_DEPLOY == 'true' } }
             steps {
-                // NestJS compilation runs inside the backend Docker build stage.
-                sh 'bash infra/deploy/package.sh "$RELEASE_VERSION"'
+                sh 'bash infra/deploy/package.sh "$RELEASE_VERSION" "$BACKEND_RELEASE_IMAGE"'
                 archiveArtifacts artifacts: ".deploy/${env.RELEASE_VERSION}/**", onlyIfSuccessful: true
             }
         }

@@ -7,6 +7,9 @@ const path = require('node:path');
 const { integrationCommand } = require('./integration-profile.cjs');
 const profile = process.env.BACKEND_TEST_PROFILE ?? 'full';
 const command = integrationCommand(profile);
+const releaseImage = process.env.BACKEND_RELEASE_IMAGE ?? '';
+if (releaseImage && !/^dva-backend:[a-z0-9][a-z0-9.-]{0,79}$/.test(releaseImage))
+  throw new Error('Invalid backend release image');
 const started = Date.now();
 const run = 'dva-backend-check-' + randomBytes(6).toString('hex');
 const network = run + '-net';
@@ -326,6 +329,10 @@ try {
   ]);
   // 임시 DB의 기존 FAQ를 보존하면서 운영 이미지에서도 초기 등록 명령이 실행되는지 확인한다.
   docker(['exec', application, 'node', 'dist/faqs/bootstrap-faq.js', 'runtimeAdmin83']);
+  if (releaseImage) {
+    docker(['tag', runtimeImage, releaseImage]);
+    console.log(`Verified backend release image: ${releaseImage}`);
+  }
   console.log(
     'PASS: backend checks, isolated PostgreSQL, production image and Nginx/PBX contracts.',
   );

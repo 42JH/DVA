@@ -2,7 +2,7 @@
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY tsconfig.json ./
 COPY src ./src
 COPY scripts/copy-payment-assets.cjs ./scripts/copy-payment-assets.cjs
@@ -22,7 +22,7 @@ FROM node:24-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY migrations ./migrations
 COPY data ./data
