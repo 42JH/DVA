@@ -30,3 +30,7 @@
 - 1단계 계획: nullable 컬럼 하나만 추가하고 기존 데이터와 적용 migration은 보존한다. 후반 SQL 실패 시 전체 rollback, 기존/신규 통화 기본 NULL, 배포 검증의 미적용/잘못된 스키마 거절을 실제 임시 PostgreSQL에서 확인한다.
 
 - 1단계 검증: 임시 PostgreSQL에서 채워진 055→056 데이터 보존/후반 오류 롤백과 배포 스키마 회귀 합계 23개 통과, build 종료 0. 최초 실행은 verify.sql 편집의 달러 인용 종료 오타로 실패해 수정 후 같은 검증 전체를 다시 실행했다. 운영 적용 없음.
+
+- 2단계 계획: 기존 AI_INSIGHTS_TOKEN 가드·providerCallId DTO·감사 패턴을 재사용해 실패 POST를 추가한다. 실패 전용 FOR UPDATE 잠금 뒤 정상 분석을 확인하고 최초 실패만 기록한다. 공통 통화 SQL/DTO에 완료 우선 상태와 MIN 녹취 저장 시각을 추가한다. 구현 전 HTTP 회귀로 누락된 계약을 재현한 뒤 권한·순서/동시성·롤백·페이지네이션을 검증한다.
+
+- 2단계 검증: 구현 전 HTTP 테스트에서 analysisStatus 누락(undefined)을 재현했다. 구현 후 신규 9개 HTTP 테스트 통과, 동일 제품 코드로 기존 분석/목록·상세/녹취 50개 통과. build·전체 src lint·format 통과. 신규 인증 fixture는 기존 관리자 Origin 검사와 ConfigService의 환경변수 fallback을 반영해 보완했으며 기존 보안 검사/기대값은 완화하지 않았다.

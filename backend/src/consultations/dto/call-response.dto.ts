@@ -5,6 +5,21 @@ import { CallAnalysisDto } from './call-analysis-response.dto';
 
 export class CallDto {
   @ApiProperty({
+    enum: ['PENDING', 'COMPLETED', 'FAILED'],
+    description:
+      '정상 분석 저장이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING. 시간 경과·녹취·주문 상태로 실패를 추정하지 않습니다.',
+  })
+  analysisStatus!: 'PENDING' | 'COMPLETED' | 'FAILED';
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: '최초 녹취 참조의 DB 저장 시각. 실제 녹음 시작과 다르며 녹취가 없으면 null.',
+  })
+  recordedAt!: Date | null;
+
+  @ApiProperty({
     type: Number,
     nullable: true,
     description: '연결 주문 고객 우선, 없으면 발신번호와 일치한 고객 번호.',

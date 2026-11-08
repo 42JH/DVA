@@ -31,6 +31,9 @@ type CallRow = CallDto & {
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
 
 const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
+ CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
+  WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED' ELSE 'PENDING' END AS "analysisStatus",
+ (SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",
