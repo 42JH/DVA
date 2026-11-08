@@ -194,8 +194,6 @@ function CategoryNav({ value }: { value: FaqCategory | null }) {
   )
 }
 
-const ICON_BTN = 'grid size-7 place-items-center rounded text-sub hover:bg-bg hover:text-ink'
-
 /** 'Q 질문' 한 줄 — 누르면 답변이 펼쳐지고 접힘. 펼친 줄은 질문 옆에 연필 · 휴지통 */
 function FaqRow({
   faq,
@@ -227,24 +225,12 @@ function FaqRow({
         </button>
         {open && (
           <span className="flex shrink-0 gap-1 motion-safe:animate-dim-in">
-            <button
-              type="button"
-              aria-label="수정"
-              title="수정"
-              onClick={onEdit}
-              className={ICON_BTN}
-            >
-              <Icon name="edit" className="size-5" />
-            </button>
-            <button
-              type="button"
-              aria-label="삭제"
-              title="삭제"
-              onClick={del.ask}
-              className={ICON_BTN}
-            >
-              <Icon name="trash" className="size-5" />
-            </button>
+            <Button kind="editBadge" onClick={onEdit}>
+              수정
+            </Button>
+            <Button kind="deleteBadge" onClick={del.ask}>
+              삭제
+            </Button>
           </span>
         )}
       </div>

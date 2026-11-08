@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fmtClock, fmtShortDate } from '@/shared/lib/format'
+import { fmtClock, fmtDate, fmtShortDate } from '@/shared/lib/format'
 import type { TagKind } from '@/shared/ui'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
@@ -41,7 +41,7 @@ export interface PersonaItem {
 export interface VersionItem {
   version: number
   tags: { label: string; kind: TagKind }[] // 저장됨 · 적용 중 · 음성 설정
-  date: string // '10.02'
+  date: string // '2026-10-02' (v2 날짜 형식)
   summary: string
   author: string
   selected: boolean
@@ -380,7 +380,7 @@ export function usePersonaPage() {
           ...(VERSION_TAG[v.status] ? [VERSION_TAG[v.status]!] : []),
           ...(v.voiceOnly ? [{ label: '음성 설정', kind: 'gray' as TagKind }] : []),
         ],
-        date: fmtShortDate(v.savedAt),
+        date: fmtDate(v.savedAt),
         summary: versionSummary(v.changes),
         author: v.author,
         selected: v.version === viewing?.version,

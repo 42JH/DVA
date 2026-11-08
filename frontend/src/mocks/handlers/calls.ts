@@ -1,7 +1,11 @@
 import { delay, http, HttpResponse, sse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 import { addDays, todayYmd, type Ymd } from '@/shared/lib/dateRange'
-import { fmtDetailTime, fmtPhone } from '@/shared/lib/format'
+import { fmtPhone } from '@/shared/lib/format'
+import { dateTime } from '@/v2/lib/when'
+import { allOrders, type OrderDetail } from '@/shared/order/orderApi'
+import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
+import { SEED as FAQ_SEED, unansweredOfCall } from './faq'
 
 // 가짜 통화 — 연동 상세명세 10/31 API-21~25 모양 그대로 (목록 · 상세 · 대화 · AI 동작 · 처리 결과)
 // 장면 데이터는 features/call/api 에 있던 메모리 가짜를 그대로 옮긴 것 (와이어프레임 04 줄 + 06 세 장면). 아래 '명세 모양으로'에서 DTO로 바꿈
@@ -51,7 +55,9 @@ type AiAction =
   | { atSec: number; kind: 'SEARCH' | 'CANCEL' | 'SEND'; text: string }
 type ResultBlock =
   | { atSec: number; kind: 'ACCEPTED' | 'CANCELLED'; orderSeq: number }
-  | { atSec: number; kind: 'UNANSWERED'; question: string }
+  | { atSec: number; kind: 'UNANSWERED'; question: string; seq?: number; reason?: string | null }
+  | { atSec: number; kind: 'ANSWERED'; question: string; answer: string }
+  | { atSec: number; kind: 'HANDOFF' }
 interface CallDetail {
   callSessionSeq: number
   customerName: string
@@ -331,7 +337,7 @@ const CALLS: CallDetail[] = [
       act(57, 'SEARCH', "주소 검색 '독막로 301' → 1건"),
       save(58, 'destination.roadAddress', '서울 마포구 독막로 301'),
       save(66, 'destination.detailAddress', '402호'),
-      save(77, 'pickupRequestedAt', fmtDetailTime(tomorrow('09:00'))),
+      save(77, 'pickupRequestedAt', dateTime(tomorrow('09:00'))),
       save(85, 'parcels', '서류 1'),
       save(91, 'clientComment', '경비실에 맡겨 주세요'),
       act(94, 'SEARCH', 'FAQ 근거 없음'), // AI가 보내는 검색 요약 그대로 — 미답변(94초)과 같은 시각 → 06 AI 동작 '… · 근거 부족'
@@ -399,6 +405,292 @@ const CALLS: CallDetail[] = [
   },
 ]
 
+// ---------- 장면이 없는 통화의 대화 · 처리 기록 (나머지 통화 전부) ----------
+// 결과(접수 · 실패 · 이관 · 취소 · 문의)대로 대화를 만들고, 접수 · 취소 통화는 같은 날 실제 가짜 주문과 이어 줌
+// (주문 상세의 '이어진 통화' · 통화 상세의 주문 칸 · 목록의 접수 주문 칸이 같은 주문을 봄). 통화 번호로 정해져 새로고침해도 같음
+const callLinks = new Map<number, number>() // 통화 → 주문
+const kstDay = (s: string) => new Date(Date.parse(s) + 9 * 3600_000).toISOString().slice(0, 10)
+function linkOrders() {
+  const used = new Set<number>()
+  for (const c of CALLS)
+    for (const x of c.results)
+      if (x.kind === 'ACCEPTED' || x.kind === 'CANCELLED') used.add(x.orderSeq)
+  const orders = allOrders().filter((o) => o.route === 'PHONE')
+  const rows = ROWS.filter(
+    (r) =>
+      (r.outcome === 'SUCCESS' || r.outcome === 'CANCELLED') &&
+      !CALLS.some((c) => c.callSessionSeq === r.callSessionSeq),
+  )
+  const claim = (r: CallRow, o: OrderDetail) => {
+    used.add(o.orderSeq)
+    callLinks.set(r.callSessionSeq, o.orderSeq)
+  }
+  // 1) 같은 날 같은 번호로 접수된 주문 (고정 줄: 9108 이서연 → 10526, 9103 박지호 → 10531)
+  for (const r of rows) {
+    const o = orders.find(
+      (o) =>
+        !used.has(o.orderSeq) &&
+        o.sender.phoneNumber === r.callerNumber &&
+        kstDay(o.acceptedAt) === kstDay(r.startedAt),
+    )
+    if (o) claim(r, o)
+  }
+  // 2) 나머지는 같은 날 시각이 가장 가까운 주문 — 생성 줄은 그 주문의 보내는 분으로 이름 · 번호를 맞춤
+  for (const r of rows) {
+    if (callLinks.has(r.callSessionSeq)) continue
+    const start = Date.parse(r.startedAt)
+    const near = orders
+      .filter(
+        (o) =>
+          !used.has(o.orderSeq) &&
+          kstDay(o.acceptedAt) === kstDay(r.startedAt) &&
+          o.cancelled === (r.outcome === 'CANCELLED'),
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(Date.parse(a.acceptedAt) - start) - Math.abs(Date.parse(b.acceptedAt) - start),
+      )[0]
+    // 같은 날 주문이 모자라면 아직 안 이어진 다른 날 주문 중 가장 가까운 것 (접수 통화가 '못 함'으로 보이지 않게)
+    const any =
+      near ??
+      orders
+        .filter((o) => !used.has(o.orderSeq) && o.cancelled === (r.outcome === 'CANCELLED'))
+        .sort(
+          (a, b) =>
+            Math.abs(Date.parse(a.acceptedAt) - start) - Math.abs(Date.parse(b.acceptedAt) - start),
+        )[0]
+    if (!any) continue
+    claim(r, any)
+    if (r.callSessionSeq >= 9200) {
+      r.customerName = any.sender.name
+      r.callerNumber = any.sender.phoneNumber
+    }
+  }
+}
+
+const ITEM_WORD = { document: '서류', small: '소박스', medium: '중박스', big: '대박스' } as const
+const itemsOf = (o: OrderDetail, unit = '개') =>
+  (Object.keys(ITEM_WORD) as (keyof typeof ITEM_WORD)[])
+    .filter((k) => o.items[k] > 0)
+    .map((k) => `${ITEM_WORD[k]} ${o.items[k]}${unit}`)
+    .concat(o.items.other ? [o.items.other] : [])
+    .join(', ')
+const spokenAt = (s: string) => {
+  const d = new Date(s)
+  const h = d.getHours()
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${h < 12 ? '오전' : '오후'} ${h % 12 || 12}시`
+}
+const street = (road: string) => road.split(' ').slice(-2).join(' ') // '서울 마포구 독막로 301' → '독막로 301'
+const FAQS = FAQ_SEED.filter(([, , a]) => !a.includes('|')) // 표 답변은 말로 읽지 않음
+const COMPLAINT_TALK: Record<string, [Utterance['speaker'], string][]> = {
+  '되묻기 반복': [
+    ['AI', '죄송합니다. 다시 한 번 말씀해 주세요.'],
+    ['CUSTOMER', '아까 말했잖아요.'],
+    ['AI', '죄송합니다. 한 번만 더 말씀해 주세요.'],
+    ['CUSTOMER', '몇 번을 말해요, 진짜.'],
+  ],
+  '말이 빠름': [
+    ['AI', '수거 희망 일시와 물품 크기와 물품 가액과 요청 사항을 차례로 여쭤볼게요.'],
+    ['CUSTOMER', '잠깐만요, 너무 빨라요. 천천히 말해 주세요.'],
+    ['AI', '네, 천천히 다시 말씀드릴게요.'],
+  ],
+  '못 알아들음': [
+    ['CUSTOMER', '중간 박스요, 중간.'],
+    ['AI', '죄송합니다. 잘 알아듣지 못했어요. 서류, 소박스, 중박스, 대박스 중에 말씀해 주세요.'],
+    ['CUSTOMER', '중박스요!'],
+  ],
+  '답답함 · 느림': [
+    ['CUSTOMER', '여보세요? 왜 이렇게 대답이 늦어요?'],
+    ['AI', '기다리시게 해서 죄송합니다.'],
+  ],
+  'AI라서 거부': [
+    ['CUSTOMER', '기계 말고 사람이랑 통화할래요.'],
+    ['AI', '상담원 연결을 원하시면 도와드릴게요.'],
+  ],
+}
+
+const generated = new Map<number, CallDetail>()
+function generatedScene(id: number): CallDetail | undefined {
+  const made = generated.get(id)
+  if (made) return made
+  const r = rowsNow().find((x) => x.callSessionSeq === id)
+  if (!r) return undefined
+  const order = allOrders().find((o) => o.orderSeq === callLinks.get(id))
+  const utterances: Utterance[] = []
+  const actions: AiAction[] = []
+  const results: ResultBlock[] = []
+  const complaints: Complaint[] = []
+  let now = 0
+  const line = (speaker: Utterance['speaker'], text: string) => {
+    utterances.push(say(now, speaker, text))
+    now += 1.5 + text.length / (speaker === 'AI' ? 7 : 5)
+  }
+  const ai = (text: string) => line('AI', text)
+  const me = (text: string) => line('CUSTOMER', text)
+  const store = (field: OrderField, value: string) => actions.push(save(now, field, value))
+  const step = (kind: 'SEARCH' | 'CANCEL' | 'SEND', text: string) =>
+    actions.push(act(now, kind, text))
+  const complain = () => {
+    if (!r.complaint) return
+    const from = now
+    for (const [who, text] of COMPLAINT_TALK[r.complaint.kind] ?? COMPLAINT_TALK['되묻기 반복'])
+      line(who, text)
+    complaints.push({ ...r.complaint, fromSec: from, toSec: now })
+  }
+  const faq = (k: number) => {
+    const [, question, answer] = FAQS[k % FAQS.length]
+    me(question)
+    step('SEARCH', 'FAQ 근거 있음')
+    results.push({ atSec: now, kind: 'ANSWERED', question, answer })
+    ai(answer)
+  }
+  const lookup = () => {
+    me('그 전에, 지난번에 보낸 택배는 어디쯤 왔는지 알 수 있어요?')
+    step('SEARCH', '발신번호로 주문 검색 → 1건')
+    ai('지난번 접수하신 건은 기사님이 수거해서 이동 중이에요. 내일 안에 도착할 예정입니다.')
+    me('네, 알겠어요.')
+  }
+  const place = (who: 'origin' | 'destination', p: OrderDetail['sender']) => {
+    const detail = p.detailAddress ? ` ${p.detailAddress}` : ''
+    me(`${street(p.roadAddress)}${detail}이요.`)
+    step('SEARCH', `주소 검색 '${street(p.roadAddress)}' → 1건`)
+    store(`${who}.roadAddress`, p.roadAddress)
+    if (p.detailAddress) store(`${who}.detailAddress`, p.detailAddress)
+    ai(`${p.roadAddress}${detail} 맞으실까요?`)
+    me('네.')
+  }
+
+  ai('안녕하세요, 디버 택배 접수입니다. 무엇을 도와드릴까요?')
+  if (r.outcome === 'SUCCESS' && order) {
+    me('택배 하나 보내려고요.')
+    if (id % 3 === 1) lookup()
+    ai('보내는 분 성함을 말씀해 주세요.')
+    me(`${order.sender.name}이요.`)
+    store('origin.name', order.sender.name)
+    ai('물건을 가져갈 주소를 말씀해 주세요.')
+    place('origin', order.sender)
+    complain()
+    ai('받는 분 성함과 전화번호를 말씀해 주세요.')
+    me(`${order.receiver.name}, ${fmtPhone(order.receiver.phoneNumber)}이요.`)
+    store('destination.name', order.receiver.name)
+    store('destination.phoneNumber', order.receiver.phoneNumber)
+    ai('받는 분 주소를 말씀해 주세요.')
+    place('destination', order.receiver)
+    ai('보내실 물건은 서류, 소박스, 중박스, 대박스 중 어떤 크기인가요?')
+    me(`${itemsOf(order)}요.`)
+    store('parcels', itemsOf(order, ''))
+    if (order.pickupRequestedAt) {
+      ai('물건은 언제 가져가면 될까요?')
+      me(`${spokenAt(order.pickupRequestedAt)}에 와 주세요.`)
+      store('pickupRequestedAt', dateTime(order.pickupRequestedAt))
+    }
+    if (order.itemPrice) {
+      ai('보내시는 물건 값은 대략 얼마인가요?')
+      me(`${order.itemPrice / 10000}만 원 정도요.`)
+      store('itemPrice', `${order.itemPrice.toLocaleString()}원`)
+    }
+    if (order.clientComment) {
+      ai('배송 요청 사항이 있으시면 말씀해 주세요.')
+      me(`${order.clientComment}.`)
+      store('clientComment', order.clientComment)
+    }
+    if (id % 5 === 0) faq(id)
+    const pay = order.paymentMethod ? PAYMENT_METHOD_LABEL[order.paymentMethod] : '월정산'
+    ai(`결제는 ${pay}로 처리됩니다. 지금까지 말씀하신 내용으로 접수할까요?`)
+    me('네, 해 주세요.')
+    store('paymentMethodType', pay)
+    step('SEND', '디버 접수 완료')
+    results.push({ atSec: now, kind: 'ACCEPTED', orderSeq: order.orderSeq })
+    ai('접수되었습니다. 기사님이 방문하기 전에 문자로 안내해 드릴게요.')
+    me('네, 감사합니다.')
+  } else if (r.outcome === 'CANCELLED' && order) {
+    me('아까 접수한 택배 취소하고 싶어요.')
+    step('SEARCH', '발신번호로 주문 검색 → 1건 (결제 대기)')
+    ai(`${order.receiver.name} 님께 보내는 ${itemsOf(order)} 맞으실까요?`)
+    me('네, 그거요.')
+    ai('아직 결제 전이라 바로 취소할 수 있어요. 취소할까요?')
+    me('네, 취소해 주세요.')
+    step('CANCEL', '주문 취소 (결제 전)')
+    results.push({ atSec: now, kind: 'CANCELLED', orderSeq: order.orderSeq })
+    ai('주문을 취소했습니다. 다시 보내실 때 전화 주세요.')
+  } else if (r.outcome === 'INQUIRY') {
+    faq(id)
+    complain()
+    if (id % 2 === 0) faq(id + 7)
+    else me('아 네, 알겠어요.')
+    ai('더 궁금하신 점 있으실까요?')
+    me('아니요, 됐어요.')
+  } else if (r.outcome === 'HANDOFF') {
+    me(
+      [
+        '지난주에 보낸 게 깨져서 왔어요. 이거 어떻게 해야 돼요?',
+        '기사님이 물건을 안 가져가셨는데요.',
+        '세금계산서를 따로 받아야 하는데요.',
+      ][id % 3],
+    )
+    complain()
+    ai('그 부분은 상담원이 도와드려야 해요. 상담원에게 연결해 드릴게요.')
+    results.push({ atSec: now, kind: 'HANDOFF' })
+    ai('잠시만 기다려 주세요.')
+  } else {
+    // 접수 실패 (또는 이어 줄 주문이 없는 접수)
+    me('택배 보내려고요.')
+    ai('보내는 분 성함을 말씀해 주세요.')
+    me(`${r.customerName}이요.`)
+    store('origin.name', r.customerName)
+    complain()
+    ai('물건을 가져갈 주소를 말씀해 주세요.')
+    if (id % 2 === 0) {
+      me('성수동 쪽인데요, 번지는 잘 모르겠어요.')
+      step('SEARCH', "주소 검색 '성수동' → 결과가 너무 많음")
+      ai('주소가 여러 곳으로 나와요. 도로명과 건물 번호를 말씀해 주실 수 있을까요?')
+      me('지금 밖이라 확인이 안 되네요. 나중에 다시 할게요.')
+      ai('네, 주소를 확인하신 뒤 다시 전화 주세요.')
+    } else {
+      me('냉장고 하나 보내려고요. 집 앞에 있어요.')
+      ai('죄송합니다. 냉장고처럼 큰 가전은 방문 수거로 보낼 수 없어요.')
+      me('아, 그래요? 그럼 됐어요.')
+    }
+  }
+  // 미답변 문의 목록에 이 통화의 질문이 있으면 대화에도 그 질문과 AI가 답하지 못한 장면을 넣음
+  for (const u of unansweredOfCall(id)) {
+    me(u.question)
+    step('SEARCH', 'FAQ 근거 없음')
+    results.push({
+      atSec: now,
+      kind: 'UNANSWERED',
+      question: u.question,
+      seq: u.seq,
+      reason: u.reason,
+    })
+    ai('그 부분은 지금 바로 안내해 드리기 어려워요. 확인해서 다시 알려 드릴게요.')
+  }
+  ai('감사합니다. 좋은 하루 보내세요.')
+
+  // 통화 길이에 맞게 시각을 늘이거나 줄임
+  const k = Math.max(1, r.durationSec - 3) / Math.max(1, now)
+  const fit = <T extends { atSec: number }>(x: T): T => ({ ...x, atSec: Math.round(x.atSec * k) })
+  const scene: CallDetail = {
+    callSessionSeq: id,
+    customerName: r.customerName,
+    outcome: r.outcome,
+    startedAt: r.startedAt,
+    durationSec: r.durationSec,
+    callerNumber: r.callerNumber,
+    persona: personaOf(r),
+    complaints: complaints.map((c) => ({
+      ...c,
+      fromSec: Math.round(c.fromSec * k),
+      toSec: Math.round(c.toSec * k),
+    })),
+    utterances: utterances.map(fit),
+    actions: actions.map(fit),
+    results: results.map(fit),
+  }
+  generated.set(id, scene)
+  return scene
+}
+
 // ---------- 명세 모양으로 (DTO) ----------
 const RESULT: Record<Outcome, string> = {
   SUCCESS: 'REGISTERED',
@@ -422,7 +714,8 @@ const UNANSWERED_OF: Record<number, [number, 'KB_NO_ANSWER' | 'KB_UNAVAILABLE']>
 }
 const iso = (s: string) => new Date(s).toISOString()
 const plus = (s: string, sec: number) => new Date(Date.parse(s) + sec * 1000).toISOString()
-const sceneOf = (id: number) => CALLS.find((c) => c.callSessionSeq === id)
+const sceneOf = (id: number): CallDetail | undefined =>
+  CALLS.find((c) => c.callSessionSeq === id) ?? generatedScene(id)
 const rowOf = (id: number) => rowsNow().find((r) => r.callSessionSeq === id) // 20초 뒤 생기는 새 통화도
 
 // ---------- 늦게 도착하는 데이터 (11/02 '통화 내역 자동 갱신 프론트 연동 명세'의 완료 조건을 가짜 서버로 재현) ----------
@@ -447,7 +740,10 @@ const NEW_ROW: CallRow = {
 }
 const rowsNow = () => (elapsed() >= 20 ? [NEW_ROW, ...SORTED] : SORTED)
 /** 아직 분석이 안 온 통화 */
+// 녹취는 10분 전에 왔는데 분석이 끝내 안 온 통화 — '분석 실패' 확인용 (11000 = 어제 첫 통화, 오늘 통화가 아직 미래 시각일 때도 보이게)
+const LOST = new Set([9106, 11000])
 const pending = (r: CallRow) =>
+  LOST.has(r.callSessionSeq) ||
   (r.callSessionSeq === seqAt(0) && elapsed() < 15) ||
   (r.callSessionSeq === seqAt(2) && elapsed() < 20) ||
   (r.callSessionSeq === NEW_ROW.callSessionSeq && elapsed() < 35)
@@ -464,11 +760,13 @@ const unavailable = () =>
     },
     { status: 503 },
   )
-let silentWav: string | null = null
-/** 30초 무음 WAV(8kHz 8bit) — 가짜 서버엔 녹취 파일이 없어 재생 · 위치 복원을 이걸로 봄 */
-const silentWavUrl = () => {
-  if (silentWav || typeof URL === 'undefined' || !URL.createObjectURL) return silentWav
-  const n = 8000 * 30
+const silentWavs = new Map<number, string>()
+/** 무음 WAV(8kHz 8bit, 통화 길이만큼) — 가짜 서버엔 녹취 파일이 없어 재생 · 위치 복원을 이걸로 봄 */
+const silentWavUrl = (seconds = 30) => {
+  if (typeof URL === 'undefined' || !URL.createObjectURL) return null
+  const made = silentWavs.get(seconds)
+  if (made) return made
+  const n = 8000 * seconds
   const b = new Uint8Array(44 + n)
   const w = (o: number, s: string) => [...s].forEach((c, i) => (b[o + i] = c.charCodeAt(0)))
   const u32 = (o: number, v: number) => new DataView(b.buffer).setUint32(o, v, true)
@@ -487,28 +785,32 @@ const silentWavUrl = () => {
   w(36, 'data')
   u32(40, n)
   b.fill(0x80, 44)
-  silentWav = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }))
-  return silentWav
+  const url = URL.createObjectURL(new Blob([b], { type: 'audio/wav' }))
+  silentWavs.set(seconds, url)
+  return url
 }
 const recording = (
   seq: number,
   url: string | null,
   ttlSec: number,
   error: 'NOT_FOUND' | 'DEPENDENCY_UNAVAILABLE' | null,
+  agoSec = 0,
 ) => ({
   recordingSeq: seq,
-  createdAt: new Date().toISOString(),
+  createdAt: new Date(Date.now() - agoSec * 1000).toISOString(),
   url: url ? `${url}#${Date.now()}` : null, // 실서버처럼 조회마다 URL 글자가 바뀜 → 같은 녹취면 재생 중 소리가 안 끊겨야 함
   expiresAt: url ? new Date(Date.now() + ttlSec * 1000).toISOString() : null,
   playbackError: error,
 })
 const recordingsOf = (r: CallRow) => {
   const id = r.callSessionSeq
-  if (id === seqAt(0)) return elapsed() >= 25 ? [recording(9001, silentWavUrl(), 20, null)] : []
+  if (id === seqAt(0))
+    return elapsed() >= 25 ? [recording(9001, silentWavUrl(r.durationSec), 20, null)] : []
   if (id === seqAt(1)) return [recording(9002, null, 0, 'DEPENDENCY_UNAVAILABLE')]
-  if (id === seqAt(2)) return [recording(9003, silentWavUrl(), 300, null)]
+  if (id === seqAt(2)) return [recording(9003, silentWavUrl(r.durationSec), 300, null)]
   if (id === seqAt(3)) return [recording(9004, null, 0, 'NOT_FOUND')]
-  return []
+  if (LOST.has(id)) return [recording(id * 10, silentWavUrl(r.durationSec), 600, null, 600)]
+  return [recording(id * 10, silentWavUrl(r.durationSec), 600, null)]
 }
 
 /** 통화 기본 (CallListItem · Call 공통 부분) */
@@ -516,10 +818,20 @@ const ORGS = ['(주)서강물산', '디버물류', '한빛상사', '세종테크
 
 function callOf(r: CallRow) {
   const scene = sceneOf(r.callSessionSeq)
-  const order = scene?.results.find((x) => x.kind !== 'UNANSWERED')
+  const order = scene?.results.find((x) => x.kind === 'ACCEPTED' || x.kind === 'CANCELLED')
+  const recs = recordingsOf(r)
+    .map((x) => x.createdAt)
+    .sort()
   return {
-    customerSeq: null,
+    customerSeq: r.callSessionSeq % 5 === 0 ? null : r.callSessionSeq, // 5통화에 1통화는 고객 미확인
     customerName: r.customerName,
+    // 3통화에 1통화는 개인(null) — 기업명은 돌려 씀
+    organizationName:
+      r.callSessionSeq % 3 === 0 || r.callSessionSeq % 5 === 0
+        ? null
+        : ORGS[r.callSessionSeq % ORGS.length],
+    analysisStatus: !pending(r) ? 'COMPLETED' : LOST.has(r.callSessionSeq) ? 'FAILED' : 'PENDING',
+    recordedAt: recs[0] ?? null,
     orderStatus: null,
     orderTotalAmount: null,
     callSessionSeq: r.callSessionSeq,
@@ -542,6 +854,9 @@ function callOf(r: CallRow) {
         : null,
   }
 }
+
+const count = (scene: CallDetail | undefined, f: (x: ResultBlock) => boolean) =>
+  scene?.results.filter(f).length ?? 0
 
 /** 분석 — 장면이 있으면 불만 구간(fromSec~toSec)을 발화 순번으로, 없으면 목록 줄의 불만 한 건 */
 function analysisOf(r: CallRow) {
@@ -570,10 +885,12 @@ function analysisOf(r: CallRow) {
     result: RESULT[r.outcome], // 11/04 서버에서 빠짐 — 옛 화면(주문 상세 관련 통화)이 아직 읽어서 남김
     // 통화 요약 (연동 명세 11/04 §3) — 04 줄의 접수 · 조회 · 취소 · FAQ 칩, new
     isNewCustomer: n % 7 === 0,
-    registeredParcelCount: r.outcome === 'SUCCESS' ? 1 + (n % 4) : 0,
-    orderLookupCount: n % 3,
-    cancelledParcelCount: r.outcome === 'CANCELLED' ? 1 : n % 9 === 0 ? 2 : 0,
-    faqAnswerCount: r.outcome === 'INQUIRY' ? 1 + (n % 2) : n % 5 === 0 ? 1 : 0,
+    // 상담 유형 횟수 = 그 통화 대화에서 실제로 한 일 (줄 칩과 상세가 맞게)
+    registeredParcelCount: count(scene, (x) => x.kind === 'ACCEPTED'),
+    orderLookupCount:
+      scene?.actions.filter((a) => a.kind === 'SEARCH' && a.text.includes('주문 검색')).length ?? 0,
+    cancelledParcelCount: count(scene, (x) => x.kind === 'CANCELLED'),
+    faqAnswerCount: count(scene, (x) => x.kind === 'ANSWERED'),
     hasHandoffRequest: r.outcome === 'HANDOFF',
     hasCallbackRequest: false,
     aiPersonaVersionSeq: personaOf(r).seq,
@@ -628,24 +945,34 @@ function eventsOf(scene: CallDetail) {
     const x = e.result
     if (!x) return []
     const unanswered = x.kind === 'UNANSWERED'
+    const order = x.kind === 'ACCEPTED' || x.kind === 'CANCELLED' ? x : null
+    const question = x.kind === 'UNANSWERED' || x.kind === 'ANSWERED' ? x.question : null
     return [
       {
         ...base(e.at, i),
-        summaryText: unanswered
-          ? x.question
-          : `${x.kind === 'ACCEPTED' ? '주문 접수' : '주문 취소'} (${x.orderSeq})`,
-        orderSeq: unanswered ? null : x.orderSeq,
-        action: unanswered
-          ? 'QUESTION_UNANSWERED'
-          : x.kind === 'ACCEPTED'
+        summaryText: order
+          ? `${order.kind === 'ACCEPTED' ? '주문 접수' : '주문 취소'} (${order.orderSeq})`
+          : (question ?? '상담원 연결 요청'),
+        orderSeq: order?.orderSeq ?? null,
+        action: order
+          ? order.kind === 'ACCEPTED'
             ? 'ORDER_CREATED'
-            : 'ORDER_CANCELLED',
+            : 'ORDER_CANCELLED'
+          : x.kind === 'UNANSWERED'
+            ? 'QUESTION_UNANSWERED'
+            : x.kind === 'ANSWERED'
+              ? 'FAQ_ANSWERED'
+              : 'HANDOFF_REQUESTED',
         unansweredQuestionSeq: unanswered
-          ? (UNANSWERED_OF[scene.callSessionSeq]?.[0] ?? null)
+          ? (x.seq ?? UNANSWERED_OF[scene.callSessionSeq]?.[0] ?? null)
           : null,
-        unansweredReason: unanswered ? (UNANSWERED_OF[scene.callSessionSeq]?.[1] ?? null) : null,
-        questionText: unanswered ? x.question : null,
-        answerText: null,
+        unansweredReason: unanswered
+          ? x.reason !== undefined
+            ? x.reason
+            : (UNANSWERED_OF[scene.callSessionSeq]?.[1] ?? null)
+          : null,
+        questionText: question,
+        answerText: x.kind === 'ANSWERED' ? x.answer : null,
         faqEntrySeq: null,
         questionUtteranceOrder: null,
         answerUtteranceOrder: null,
@@ -680,6 +1007,7 @@ const notFound = () =>
   )
 const meta = () => ({ requestId: crypto.randomUUID() })
 const SORTED = [...ROWS].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt)) // PBX 시작 최신순
+linkOrders()
 
 export const callHandlers = [
   // 진행 통화 수 (연동 명세 11/04 §4) — SSE: 연결하면 현재값 · 5초마다 heartbeat(실서버와 같음) · 8초마다 0 → 1 → 2 → 3 → 0
@@ -736,9 +1064,6 @@ export const callHandlers = [
       pageOf(
         hit.map((r) => ({
           ...callOf(r),
-          // 11/06 시안 '기업' 열 — 백엔드 추가 요청 중인 칸. 가짜는 통화 번호로 기업을 돌려 씀(3통화에 1통화는 개인 = null)
-          organizationName:
-            r.callSessionSeq % 3 === 0 ? null : ORGS[r.callSessionSeq % ORGS.length],
           analysis: pending(r) ? null : analysisOf(r),
         })),
         url,

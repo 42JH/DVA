@@ -64,10 +64,10 @@ export function CompanyDetailPage() {
       align: 'right',
       cell: (r) => (
         <span className="flex justify-end gap-2">
-          <Button big kind="brandLine" onClick={() => vm.openEdit(r.member)}>
+          <Button kind="editBadge" onClick={() => vm.openEdit(r.member)}>
             수정
           </Button>
-          <Button big kind="dangerLine" onClick={() => vm.askDelete(r.member)}>
+          <Button kind="deleteBadge" onClick={() => vm.askDelete(r.member)}>
             삭제
           </Button>
         </span>

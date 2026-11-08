@@ -50,30 +50,38 @@ const KIND_VERSIONS = [
 ].map((v) => ({ ...v, aiPersonaSeq: KIND_SEQ, code: 'kind', name: '친절형' }))
 const page = <T>(items: T[]) => ({ data: items, hasNext: false, total_count: items.length })
 
+// 목록 · 상세가 같은 페르소나 (상세 GET /personas/:id — 화면이 고른 페르소나를 다시 받음, 11/06 가짜에 추가)
+const personas = () => [
+  // 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
+  {
+    aiPersonaSeq: PERSONA_SEQ,
+    code: 'parcel',
+    headVersion: VERSIONS[0], // v7 확정만(미적용)
+    activeVersion: VERSIONS[1], // v6 적용 중 → 상단바 '빠른 접수형 AI 상담가'
+    pendingVersion: null,
+    draft: null,
+  },
+  {
+    aiPersonaSeq: KIND_SEQ,
+    code: 'kind',
+    headVersion: KIND_VERSIONS[0],
+    activeVersion: null,
+    pendingVersion: null,
+    draft: null,
+  },
+]
+
 export const personaHandlers = [
-  http.get(`${API_BASE_URL}/personas`, () =>
-    HttpResponse.json(
-      page([
-        // 지금 API 모양 (PersonaDto — headVersion · activeVersion · pendingVersion · draft 객체, 11/04 맞춤)
-        {
-          aiPersonaSeq: PERSONA_SEQ,
-          code: 'parcel',
-          headVersion: VERSIONS[0], // v7 확정만(미적용)
-          activeVersion: VERSIONS[1], // v6 적용 중 → 상단바 '빠른 접수형 AI 상담가'
-          pendingVersion: null,
-          draft: null,
-        },
-        {
-          aiPersonaSeq: KIND_SEQ,
-          code: 'kind',
-          headVersion: KIND_VERSIONS[0],
-          activeVersion: null,
-          pendingVersion: null,
-          draft: null,
-        },
-      ]),
-    ),
-  ),
+  http.get(`${API_BASE_URL}/personas`, () => HttpResponse.json(page(personas()))),
+  http.get(`${API_BASE_URL}/personas/:id`, ({ params }) => {
+    const p = personas().find((x) => x.aiPersonaSeq === Number(params.id))
+    return p
+      ? HttpResponse.json({ data: p })
+      : HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '페르소나가 없습니다.', details: [] } },
+          { status: 404 },
+        )
+  }),
   http.get(`${API_BASE_URL}/personas/:id/versions`, ({ params }) =>
     Number(params.id) === PERSONA_SEQ
       ? HttpResponse.json(page(VERSIONS))

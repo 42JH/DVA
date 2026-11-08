@@ -1,6 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useReducer, useRef, useState } from 'react'
-import { fromDateTimeLocal, toDateTimeLocal } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
 import type { Option, SearchedAddress } from '@/shared/ui'
@@ -20,7 +19,16 @@ import {
   type PickedAddress,
 } from '@/features/order/api/orderApi'
 import { orderErrorText } from '@/features/order/labels'
-import { MAX_BOXES, MAX_DOCUMENTS, pickupRange, priceOk } from '@/features/order/api/orderLimits'
+import { submitDraft } from '@/features/order/api/draftApi'
+import {
+  MAX_BOXES,
+  MAX_DOCUMENTS,
+  fromKstLocal,
+  kstLocal,
+  pickupOk,
+  pickupRange,
+  priceOk,
+} from '@/features/order/api/orderLimits'
 import { isJeju, shippingFeeOf } from '@/features/order/api/orderFee'
 import {
   buildCustomerPatch,
@@ -76,7 +84,7 @@ const phoneOk = (p: string) => p.length === 10 || p.length === 11
  * 보내는 분 · 받는 분(이름 · 전화번호 · 주소 검색 · 상세주소) + 품목 수량 · 기타 품목 · 물품 가액 · 수거 희망 일시(선택) · 결제 방식 · 요청 사항
  * 주소는 직접 칠 수 없고 검색으로만 고름 (오타 주소로 수거 실패 방지). 접수되면 목록을 다시 받고 창을 닫음 */
 export function useOrderForm(
-  onDone: (notice?: string) => void, // notice = 접수 중단 주문 접수 결과 (목록 위 한 줄)
+  onDone: (notice?: string, newOrderSeq?: number) => void, // notice = 접수 중단 주문 접수 결과 · newOrderSeq = 초안을 접수해 생긴 주문
   order?: OrderDetail,
   parcelSeq: number | null = null,
   onConflict?: () => void,
@@ -99,9 +107,8 @@ export function useOrderForm(
   const [etcItem, setEtcItem] = useState(order?.items.other ?? '')
   const initialPrice = order?.itemPrice?.toString() ?? ''
   const [declaredValue, setDeclaredValue] = useState(initialPrice) // 숫자만
-  const initialPickup = order?.pickupRequestedAt
-    ? toDateTimeLocal(new Date(order.pickupRequestedAt))
-    : ''
+  // 칸 값은 한국 시간 (수거 규칙이 한국 시간 09 ~ 17시라 브라우저 시간대와 상관없이)
+  const initialPickup = order?.pickupRequestedAt ? kstLocal(new Date(order.pickupRequestedAt)) : ''
   const [pickupAt, setPickupAt] = useState(initialPickup) // datetime-local 값
   // 새 주문만 월정산 기본(와이어프레임). 수정은 서버 값 그대로 — 미정(null)을 월정산으로 채우면 안 바꿔도 credit이 나감
   const [payment, setPayment] = useState<PaymentMethod | null>(
@@ -119,7 +126,7 @@ export function useOrderForm(
   const pickup = pickupRange(new Date())
   // 같은 형식 문자열이라 비교 가능. 수정에서 원래 값을 안 건드렸으면 범위 밖이어도 통과 (이미 지난 주문의 다른 칸만 고칠 때)
   const outAt = (r: { min: string; max: string }) =>
-    pickupAt !== '' && pickupAt !== initialPickup && (pickupAt < r.min || pickupAt > r.max)
+    pickupAt !== '' && pickupAt !== initialPickup && !pickupOk(pickupAt, r)
   const pickupOut = outAt(pickup)
   // 창을 오래 열어 두면 '지금'이 흘러 범위를 벗어남 — 누르는 순간 다시 보고, 벗어났으면 다시 그려 오류 · [접수] 꺼짐
   const [, redraw] = useReducer((n: number) => n + 1, 0)
@@ -172,7 +179,7 @@ export function useOrderForm(
         pickupAt === initialPickup
           ? (order?.pickupRequestedAt ?? null)
           : pickupAt
-            ? fromDateTimeLocal(pickupAt)
+            ? fromKstLocal(pickupAt)
             : null,
       paymentMethod: payment,
       request: orNull(request),
@@ -187,9 +194,17 @@ export function useOrderForm(
   // 접수하려면 모자란 것 — 버튼 위에 보여 주고, 다 채워져야 [접수]
   const missing = collecting && order ? submitMissing(order, input()) : []
   const submitNotice = useRef<string | undefined>(undefined) // 접수 결과 — 고객정보 재시도 뒤 닫을 때도 전달
+  const madeOrder = useRef<number | undefined>(undefined) // 초안을 접수해 새로 생긴 주문
   const finish = async () => {
+    if (order?.draft) {
+      // 초안은 접수되면 사라짐 → 먼저 새 주문으로 넘어간 뒤 목록 · 건수를 새로 받음 (사라진 초안을 다시 묻지 않게)
+      onDone(submitNotice.current, madeOrder.current)
+      void qc.invalidateQueries({ queryKey: ['v2'] })
+      void qc.invalidateQueries({ queryKey: orderQueries.all() })
+      return
+    }
     await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
-    onDone(submitNotice.current)
+    onDone(submitNotice.current, madeOrder.current)
   }
 
   // 멱등키: 같은 본문을 다시 보내면(실패 후 재시도) 같은 키, 본문이 바뀌면 새 키 (명세서 1.2)
@@ -198,7 +213,15 @@ export function useOrderForm(
     // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
     mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
       const body = input()
-      if (order) {
+      if (order?.draft) {
+        // 배송 초안(미완료, 055): 채운 내용으로 새 초안을 만들어 바로 접수. 같은 본문을 다시 보내면 같은 키 → 서버가 같은 초안을 돌려줌
+        const json = JSON.stringify([body, shippingFee])
+        if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
+        const r = await submitDraft(order, body, shippingFee, sent.current.key)
+        madeOrder.current = r.orderSeq
+        submitNotice.current =
+          SUBMIT_RESULT[r.status] ?? '접수를 요청했습니다. 목록에서 상태를 확인해 주세요.'
+      } else if (order) {
         let version = order.version ?? 0
         if (draft?.patch) version = (await saveOrder(order.orderSeq, draft.patch)).data.version
         // 접수 중단: 저장한 새 버전으로 최종 접수. 실패해도 저장은 유지 — 이유를 들고 상세로 (11/01 결정)
@@ -211,6 +234,8 @@ export function useOrderForm(
             submitNotice.current = `저장은 됐지만 접수하지 못했어요. ${orderErrorText(e, '접수')}`
           }
         }
+      }
+      if (order) {
         if (alsoCustomer && customerDraft && order.customerSeq) {
           try {
             await patchCustomer(order.customerSeq, customerDraft)
@@ -303,7 +328,7 @@ export function useOrderForm(
     pickupMin: pickup.min,
     pickupMax: pickup.max,
     pickupError: pickupOut
-      ? '지금부터 1시간 뒤 ~ 3일 안으로 골라 주세요.'
+      ? '09:00 ~ 17:00 사이, 지금부터 1시간 뒤 ~ 3일 안으로 골라 주세요.'
       : fieldError('pickupRequestedAt'),
     etcError: fieldError('items.other'),
     priceError: priceOut ? '1원 ~ 1억 원 사이로 입력해 주세요.' : fieldError('itemPrice'),

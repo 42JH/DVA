@@ -8,6 +8,7 @@ import { fetchAll } from '@/shared/api/paging'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
 import { toOrderDetail, type OrderDetailDto, type OrderStatusDto } from './orderDto'
 import { countsOf, type KindCounts, type KindCountsDto } from '@/shared/lib/callKind'
+import { fetchDraft } from './draftApi'
 
 export interface Party {
   name: string
@@ -53,6 +54,7 @@ export interface OrderDetail {
   notifiedPrice?: number | null // 배송비 (첫 상세 · pickParcel이면 고른 상세) — 접수 중단 주문 접수에 필요
   customerSeq?: number | null // 주문 고객 — 보내는 분 수정을 고객정보에도 저장할 때 (미완료 주문은 null)
   status?: OrderStatusDto // 실제 상태 — 결제 방식은 COLLECTING에서만 바꿀 수 있음
+  draft?: { draftSeq: number; label: string } // 미완료 = 배송 초안 (orderSeq는 -draftSeq, 055)
 }
 
 /** 배송 상세 하나 — 보내는 분 1 + 받는 분 1 */
@@ -72,7 +74,7 @@ export const orderQueries = {
   detail: (id: number) =>
     queryOptions({
       queryKey: [...orderQueries.all(), id],
-      queryFn: ({ signal }) => fetchOrder(id, signal),
+      queryFn: ({ signal }) => (id < 0 ? fetchDraft(-id, signal) : fetchOrder(id, signal)), // 음수 = 배송 초안
     }),
 }
 
@@ -80,7 +82,7 @@ export const orderQueries = {
 interface RelatedCallDto {
   callSessionSeq: number
   startedAt: string | null
-  analysis: ({ result: string } & KindCountsDto) | null
+  analysis: ({ result?: string } & KindCountsDto) | null // result는 실서버에 없음 — 취소 건수로 판단
 }
 
 export async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail> {
@@ -95,7 +97,11 @@ export async function fetchOrder(id: number, signal?: AbortSignal): Promise<Orde
       .map((c) => ({
         callSessionSeq: c.callSessionSeq,
         startedAt: c.startedAt,
-        kind: c.analysis?.result === 'CANCELLED' ? ('CANCEL' as const) : ('ACCEPT' as const),
+        kind:
+          c.analysis?.result === 'CANCELLED' ||
+          (!!c.analysis?.cancelledParcelCount && !c.analysis.registeredParcelCount)
+            ? ('CANCEL' as const)
+            : ('ACCEPT' as const),
         counts: countsOf(c.analysis),
       }))
       .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)),
@@ -331,6 +337,7 @@ function makeDay(day: string, count: number, startSeq: number, endMinute: number
         NAMES[n % NAMES.length],
         `010${String(20000000 + n * 7919).slice(-8)}`,
         ROADS[n % ROADS.length],
+        n % 4 === 0 ? null : `${(n % 12) + 2}층`, // 상세주소 없는 고객도 섞음
       ),
       receiver: p(
         NAMES[(n + 5) % NAMES.length],

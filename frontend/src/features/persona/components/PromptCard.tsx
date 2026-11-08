@@ -32,7 +32,7 @@ export function PromptCard({
             </Button>
           )}
           {prompt.canEdit && (
-            <Button big kind="brand" onClick={onEdit}>
+            <Button kind="editBadge" onClick={onEdit}>
               수정
             </Button>
           )}

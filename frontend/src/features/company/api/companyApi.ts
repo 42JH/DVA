@@ -98,7 +98,7 @@ export const companyQueries = {
       queryFn: async ({ signal }) =>
         (await api.get<ApiItem<Company>>(`/companies/${id}`, { signal })).data,
     }),
-  members: (id: number, q: { limit: number; offset: number }) =>
+  members: (id: number, q: { limit: number; offset: number; q?: string }) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'members', q],
       queryFn: ({ signal }) =>

@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type UIEvent } from 'react'
-import { ConfirmDialog, Highlight, TopBar } from '@/shared/ui'
+import { Button, ConfirmDialog, Highlight, TopBar } from '@/shared/ui'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 import { Icon } from './icons'
 
@@ -182,15 +182,9 @@ function Row({
         >
           <Icon name="plus" className="size-6" />
         </button>
-        <button
-          type="button"
-          aria-label="삭제"
-          title="삭제"
-          onClick={() => vm.openDelete(r)}
-          className={ICON_BTN}
-        >
-          <Icon name="trash" className="size-6" />
-        </button>
+        <Button kind="deleteBadge" onClick={() => vm.openDelete(r)}>
+          삭제
+        </Button>
       </span>
     </li>
   )

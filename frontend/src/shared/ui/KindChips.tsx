@@ -3,7 +3,7 @@ import { CHIP_CLASS, KIND_BG, type CallKind } from '@/shared/lib/callKind'
 // 상담 유형 칩 — 04 줄 · 06 머리 · 주문 상세 '관련 통화' (모양 · 색 = shared/lib/callKind)
 // small = 04 목록 줄 (11/06 시안) — 테두리 1 · 둥근 알약 · 위아래 4 · 좌우 12 · 글자 12/500 · 글자색 = 테두리색
 const SMALL =
-  'inline-flex h-6 shrink-0 items-center rounded-full border px-3 text-[12px] font-medium whitespace-nowrap'
+  'inline-flex h-6 shrink-0 items-center rounded-full border px-3 text-[12px] font-medium whitespace-nowrap leading-[22px]'
 const SMALL_COLOR: Record<CallKind, string> = {
   accept: 'border-[#3182f6] text-[#3182f6]',
   lookup: 'border-[#fe9800] text-[#fe9800]',

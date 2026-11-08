@@ -1,8 +1,8 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { fmtDate } from '@/shared/lib/format'
-import { pageCount, pageSlice } from '@/shared/api/paging'
-import { matchKo } from '@/shared/lib/search'
+import { fmtDate, fmtDateTime } from '@/shared/lib/format'
+import { pageCount } from '@/shared/api/paging'
+import { useDebounced } from '@/v2/lib/useDebounced'
 import { useListParams } from '@/shared/lib/useListParams'
 import { useSession } from '@/shared/auth/useSession'
 import {
@@ -33,7 +33,8 @@ export interface AdminRow {
   name: string
   loginId: string
   role: string // '최고 관리자' · '일반 관리자'
-  date: string // 가입 신청일 '2026.03.02'
+  date: string // 가입 신청일 '2026.03.02' (승인된 계정은 계정이 생긴 날)
+  lastLogin: string | null // 마지막 로그인 '2026-11-07 14:02', 로그인한 적 없으면 null
   pending: boolean // 승인 대기 탭 줄 → [승인] [거절]
   actions: AdminAction[] // ⋮ 메뉴 (빈 배열이면 ⋮ 없음)
 }
@@ -49,7 +50,7 @@ const withoutMe = (tab: AdminStatus, n: number | undefined) =>
   n === undefined ? undefined : tab === 'ACTIVE' ? Math.max(0, n - 1) : n
 
 /** 10 관리자 권한 관리 훅 — 탭 · 쪽(URL) · 목록 · 탭 건수 · 줄마다 할 수 있는 일 · 확인 창 · 요청 */
-export function useAdminList() {
+export function useAdminList(size = PAGE_SIZE) {
   const { params, page, set } = useListParams(DEFAULTS)
   // 주소창에 엉뚱한 값(?tab=foo)이 와도 기본 탭으로
   const tab = ADMIN_TABS.some((t) => t.key === params.tab) ? params.tab : DEFAULTS.tab
@@ -57,25 +58,19 @@ export function useAdminList() {
   const qc = useQueryClient()
   const [confirming, setConfirming] = useState<Confirming>(null)
 
-  // 검색 (11/05 — 이름 · 아이디, 지금 탭 안에서): 서버에 검색 조건이 없어 탭 전체(최대 100명)를 받아 앞에서 거름
-  // ponytail: 한 탭 100명까지만 찾음 — 넘으면 서버 검색 조건(q)을 요청
-  const q = params.q.trim()
+  // 검색 (이름 · 아이디, 지금 탭 안에서) — 서버 q (11/08). 칠 때마다 묻지 않게 잠깐 기다림
+  const q = useDebounced(params.q.trim().normalize('NFC').slice(0, 100))
   const list = useQuery(
-    q
-      ? adminQueries.list({ status: tab, limit: 100, offset: 0 })
-      : adminQueries.list({ status: tab, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    adminQueries.list({ status: tab, limit: size, offset: (page - 1) * size, q: q || undefined }),
   )
-  const hit = q
-    ? (list.data?.data ?? []).filter((a) => matchKo(a.name, q) || matchKo(a.loginId, q))
-    : null
   // 탭 건수: 상태마다 1건만 받아 total_count만 씀
   const counts = useQueries({
     queries: ADMIN_TABS.map((t) => adminQueries.list({ status: t.key, limit: 1, offset: 0 })),
   })
 
   // 쪽 수는 서버 건수(나 포함)로 — 나를 빼고 세면 마지막 쪽이 사라져 한 명이 안 보일 수 있음
-  const total = hit ? hit.length : (list.data?.total_count ?? 0)
-  const pages = pageCount(total, PAGE_SIZE)
+  const total = list.data?.total_count ?? 0
+  const pages = pageCount(total, size)
   // 지워서 마지막 쪽이 비면 앞쪽으로 (예: 2쪽의 1명을 삭제)
   useEffect(() => {
     if (list.data && page > pages) set({ page: pages })
@@ -99,7 +94,7 @@ export function useAdminList() {
 
   // 본인 줄은 안 보임 (11/02 사용자 — 본인에게 할 수 있는 일이 없음, 내 정보는 11 화면)
   // shortcut: 서버에 '나 빼고' 조건이 없어 받은 쪽에서 거름 → 내가 있는 쪽만 한 줄 적게 보임. 서버가 제외 조건을 주면 그걸로
-  const rows: AdminRow[] = (hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? []))
+  const rows: AdminRow[] = (list.data?.data ?? [])
     .filter((a) => a.adminUserSeq !== me?.adminUserSeq)
     .map((a) => ({
       id: a.adminUserSeq,
@@ -107,6 +102,9 @@ export function useAdminList() {
       loginId: a.loginId,
       role: ROLE_LABEL[a.role],
       date: fmtDate(a.createdAt),
+      lastLogin: a.lastLoginAt
+        ? `${fmtDate(a.lastLoginAt)} ${fmtDateTime(a.lastLoginAt).slice(-5)}`
+        : null,
       pending: a.status === 'PENDING',
       actions: actionsOf(a),
     }))
@@ -128,6 +126,7 @@ export function useAdminList() {
     rows,
     isLoading: list.isPending,
     loadError: list.error?.message ?? null,
+    total: withoutMe(tab, total) ?? total, // 활성화 탭 = 나를 뺀 수 (탭 숫자와 같게)
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),

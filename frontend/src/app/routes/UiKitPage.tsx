@@ -173,7 +173,7 @@ export function UiKitPage() {
         right={
           <>
             <Button>CSV 내보내기</Button>
-            <Button kind="dangerLine" disabled={selected.size === 0}>
+            <Button kind="deleteBadge" disabled={selected.size === 0}>
               삭제
             </Button>
           </>
@@ -285,7 +285,7 @@ export function UiKitPage() {
       <div className="flex flex-wrap items-center gap-3">
         <Button kind="primary">저장</Button>
         <Button>취소</Button>
-        <Button kind="danger">삭제</Button>
+        <Button kind="deleteBadge">삭제</Button>
         <Button kind="dangerLine">거절</Button>
         <Button disabled>비활성</Button>
         <Button small>FAQ 추가</Button>
@@ -311,7 +311,7 @@ export function UiKitPage() {
       </div>
 
       <div className="grid w-[576px] gap-11 rounded-xl border border-line p-8">
-        <TextField label="이메일" value="jaehoon.lee@dver.co.kr" locked readOnly />
+        <TextField label="이메일" value="jaehoon.lee@example.com" locked readOnly />
         <TextField label="신규 비밀번호" type="password" defaultValue="••••••••••" />
         <TextField
           label="전화번호"
@@ -337,7 +337,7 @@ export function UiKitPage() {
       {modal === 'warn' && (
         <ConfirmDialog
           title="관리자 계정을 삭제하시겠습니까?"
-          target="김지훈 · jihoon.kim@dver.co.kr"
+          target="김지훈 · jihoon.kim@example.com"
           warn="삭제하면 이 계정으로 더 이상 로그인할 수 없습니다."
           okLabel="삭제"
           onOk={() => setModal(null)}

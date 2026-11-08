@@ -1,9 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { fmtPhone, fmtShortDate } from '@/shared/lib/format'
-import { ymd } from '@/shared/lib/dateRange'
-import { pageCount, pageSlice } from '@/shared/api/paging'
-import { matchKo, phoneDigits } from '@/shared/lib/search'
+import { fmtDate, fmtPhone } from '@/shared/lib/format'
+import { pageCount } from '@/shared/api/paging'
+import { useDebounced } from '@/v2/lib/useDebounced'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ApiError } from '@/shared/api/client'
 import { companyQueries, removeMember, type Member } from '@/features/company/api/companyApi'
@@ -33,14 +32,16 @@ export type MemberModal =
   | null
 
 /** 08 기업 상세 훅 — 기업 · 제목 줄(사원 수 · 대표자) · 사원 표(쪽은 URL) · 창 상태 · 사원 삭제 */
-export function useCompanyDetail(id: number) {
+export function useCompanyDetail(id: number, size = PAGE_SIZE) {
   const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
   const [modal, setModal] = useState<MemberModal>(null)
 
   const company = useQuery(companyQueries.detail(id))
+  // 사원 검색은 서버에서 (11/08 — 이름 · 사번 · 전화번호 부분 검색, 전체에서 찾은 뒤 쪽을 자름). 칠 때마다 묻지 않게 잠깐 기다림
+  const q = useDebounced(params.q.trim().normalize('NFC').slice(0, 100))
   const members = useQuery({
-    ...companyQueries.members(id, { limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    ...companyQueries.members(id, { limit: size, offset: (page - 1) * size, q: q || undefined }),
     placeholderData: keepPreviousData,
   })
   // 대표자는 쪽과 상관없이 전체에서 — 제목 줄 '대표자 이서미 외 1명' (11/01 디자인 추가 c)
@@ -50,24 +51,13 @@ export function useCompanyDetail(id: number) {
   )
   const leaders = leaderMembers.map((m) => m.customer.name)
 
-  // 사원 검색 (11/05): 서버에 검색 조건이 없어 대표자용으로 받아 둔 전체에서 거름 (사원명 초성 · 사번 · 전화번호 숫자)
-  const q = params.q.trim()
-  const digits = phoneDigits(q)
-  const hit = q
-    ? (all.data ?? []).filter(
-        (m) =>
-          matchKo(m.customer.name, q) ||
-          m.membership.employeeNo.includes(q) ||
-          (!!digits && m.customer.phoneNumber.includes(digits)),
-      )
-    : null
-  const shown = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (members.data?.data ?? [])
+  const shown = members.data?.data ?? []
 
-  const total = hit ? hit.length : (members.data?.total_count ?? 0)
-  const pages = pageCount(total, PAGE_SIZE)
+  const total = members.data?.total_count ?? 0
+  const pages = pageCount(total, size)
   useEffect(() => {
-    if ((hit ? all.data : members.data) && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
-  }, [hit, all.data, members.data, page, pages, set])
+    if (members.data && page > pages) set({ page: pages }) // 마지막 쪽의 마지막 사원을 지우면 앞쪽으로
+  }, [members.data, page, pages, set])
 
   const remove = useMutation({
     mutationFn: (m: Member) => removeMember(m.membership.membershipSeq),
@@ -106,9 +96,7 @@ export function useCompanyDetail(id: number) {
     // 제목 줄 '사원 12명 · 등록 05.22 · 대표자 이서미 외 1명' (디자인 + 대표자, 11/01)
     summary: [
       company.data ? `사원 ${company.data.memberCount}명` : null,
-      company.data?.createdAt
-        ? `등록 ${fmtShortDate(ymd(new Date(company.data.createdAt)))}`
-        : null,
+      company.data?.createdAt ? `등록 ${fmtDate(company.data.createdAt)}` : null,
       leaders.length === 0
         ? null
         : `대표자 ${leaders[0]}${leaders.length > 1 ? ` 외 ${leaders.length - 1}명` : ''}`,
@@ -120,7 +108,7 @@ export function useCompanyDetail(id: number) {
     q: params.q,
     setQ: (v: string) => set({ q: v }), // 쪽은 1로
     rows,
-    isLoading: hit ? all.isPending : members.isPending,
+    isLoading: members.isPending,
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),

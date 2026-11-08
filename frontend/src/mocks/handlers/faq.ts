@@ -29,7 +29,7 @@ const CATEGORIES = [
 ]
 
 // (분류, 질문, 답변)
-const SEED: [string, string, string][] = [
+export const SEED: [string, string, string][] = [
   [
     '수거 일정',
     '방문 수거는 몇 시까지 오나요?',
@@ -298,6 +298,12 @@ const unanswered: Unanswered[] = UA_SEED.map(([at, name, phone, question, call, 
     faqEntrySeq: null,
   }
 })
+/** 이 통화에서 AI가 답하지 못한 질문 — 가짜 통화 대화가 그 질문을 실제로 담게 (calls.ts) */
+export const unansweredOfCall = (call: number) =>
+  unanswered
+    .filter((u) => u.callSessionSeq === call)
+    .map((u) => ({ seq: u.unansweredQuestionSeq, question: u.questionText, reason: u.reason }))
+
 const deleted = new Set<number>() // 지운 질문 번호 (서버는 DELETED 상태로 남기고 목록에서 뺌)
 const edited = new Set<number>() // 내용이 바뀐 FAQ — 서버는 고객 질문 사례를 비움
 const sameContent = (f: Faq, b: Record<string, unknown>) =>

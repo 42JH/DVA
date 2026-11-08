@@ -140,7 +140,7 @@ export function ConfirmDialog({
   big,
 }: {
   title: string // '정말로 삭제하시겠습니까?'
-  target?: string // '선택한 통화 3건' · '김지훈 · jihoon.kim@dver.co.kr'
+  target?: string // '선택한 통화 3건' · '김지훈 · jihoon.kim@example.com'
   note?: string // 회색 안내 (거절: '신청이 지워지며 …')
   warn?: string // 빨간 경고 (되돌릴 수 없음 · 미처리 질문 있음)
   okLabel: string // '삭제' · '거절'
@@ -194,7 +194,9 @@ export function ConfirmDialog({
           </Button>
           <Button
             big={big}
-            kind={big && okKind === 'primary' ? 'brand' : okKind}
+            kind={
+              okLabel === '삭제' ? 'deleteBadge' : big && okKind === 'primary' ? 'brand' : okKind
+            }
             onClick={onOk}
             disabled={pending}
           >

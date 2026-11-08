@@ -122,7 +122,139 @@ const GROUP: Record<string, OrderStatusDto[]> = {
   SUBMISSION_FAILED: ['SUBMITTING_FAILED', 'SUBMISSION_FAILED'],
 }
 
+// ---------- 배송 초안 (055) — 가짜 미완료 주문을 초안으로 (draftSeq = 옛 주문번호, legacyOrderSeq도 같음) ----------
+const draftGone = new Set<number>() // 삭제 · 재개(RESUMED)된 원본
+const madeDrafts = new Map<string, ReturnType<typeof draftOf>>() // clientParcelId → 새 초안 (같은 키면 같은 초안)
+let nextDraft = 90000
+const found = (road: string | null) =>
+  road ? { jibunAddress: road, dongName: '가짜동', postalCode: '04000' } : {}
+function draftOf(o: OrderDetail) {
+  const p = toDto(o).parcels[0]
+  return {
+    draftSeq: o.orderSeq,
+    callSessionSeq: null as number | null,
+    customerSeq: o.orderSeq % 3 === 0 ? null : o.orderSeq, // 3건에 1건은 고객 없음
+    createdByAdminUserSeq: null,
+    callerPhoneNumber: o.sender.phoneNumber || null,
+    clientParcelId: `legacy-${o.orderSeq}`,
+    // 빈 칸이 있는 초안처럼 — 물품 가액 · 받는 분 전화를 비움. 주소는 AI가 검색해 둔 것처럼 지번 · 동 · 우편번호까지
+    parcel: {
+      ...p,
+      itemPrice: null,
+      origin: { ...p.origin, ...found(p.origin.roadAddress) },
+      destination: { ...p.destination, ...found(p.destination.roadAddress), phoneNumber: null },
+    },
+    status: 'INCOMPLETE' as string,
+    version: 1,
+    intakeVersion: null,
+    sourceDraftSeq: null as number | null,
+    orderSeq: null as number | null,
+    orderParcelSeq: null,
+    legacyOrderSeq: o.orderSeq as number | null,
+    legacyOrderParcelSeq: o.orderSeq * 10 + 1,
+    createdAt: new Date(o.acceptedAt).toISOString(),
+    updatedAt: new Date(o.acceptedAt).toISOString(),
+    retentionStartedAt: new Date(o.acceptedAt).toISOString(),
+  }
+}
+const openDrafts = () =>
+  allOrders()
+    .filter((o) => statusOf(o) === 'COLLECTING' && !draftGone.has(o.orderSeq))
+    .map(draftOf)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+const draftById = (id: number) =>
+  openDrafts().find((d) => d.draftSeq === id) ??
+  [...madeDrafts.values()].find((d) => d.draftSeq === id)
+const meta = () => ({ requestId: crypto.randomUUID() })
+
+const draftHandlers = [
+  http.get(`${API_BASE_URL}/parcel-drafts`, ({ request }) => {
+    const u = new URL(request.url).searchParams
+    const q = u.get('q')?.toLowerCase()
+    const limit = Number(u.get('limit') ?? 20)
+    const offset = Number(u.get('offset') ?? 0)
+    const rows = openDrafts().filter(
+      (d) =>
+        !q ||
+        [d.parcel.origin, d.parcel.destination].some((x) =>
+          Object.values(x).some((v) => v?.toLowerCase().includes(q)),
+        ),
+    )
+    return HttpResponse.json({
+      data: rows.slice(offset, offset + limit),
+      hasNext: offset + limit < rows.length,
+      total_count: rows.length,
+    })
+  }),
+  http.get(`${API_BASE_URL}/parcel-drafts/:id`, ({ params }) => {
+    const d = draftById(Number(params.id))
+    return d
+      ? HttpResponse.json({ data: d, meta: meta() })
+      : HttpResponse.json(
+          { error: { code: 'NOT_FOUND', message: '초안이 없습니다.', details: [] } },
+          { status: 404 },
+        )
+  }),
+  http.delete(`${API_BASE_URL}/parcel-drafts/:id`, ({ params }) => {
+    draftGone.add(Number(params.id))
+    return new HttpResponse(null, { status: 204 })
+  }),
+  // 원본으로 새 READY 초안 — 같은 clientParcelId면 같은 초안 (응답 유실 재전송)
+  http.post(`${API_BASE_URL}/parcel-drafts`, async ({ request }) => {
+    const b = (await request.json()) as {
+      clientParcelId: string
+      sourceDraftSeq: number
+      parcel: object
+      status: string
+    }
+    const had = madeDrafts.get(b.clientParcelId)
+    if (had) return HttpResponse.json({ data: had, meta: meta() }, { status: 201 })
+    const src = draftById(b.sourceDraftSeq)
+    if (!src)
+      return HttpResponse.json(
+        { error: { code: 'NOT_FOUND', message: '원본이 없습니다.', details: [] } },
+        { status: 404 },
+      )
+    const made = {
+      ...src,
+      ...{
+        draftSeq: nextDraft++,
+        status: b.status,
+        sourceDraftSeq: src.draftSeq,
+        legacyOrderSeq: null,
+        clientParcelId: b.clientParcelId,
+        parcel: { ...src.parcel, ...b.parcel },
+      },
+    }
+    madeDrafts.set(b.clientParcelId, made)
+    draftGone.add(src.draftSeq) // 원본은 RESUMED → 미완료에서 빠짐
+    return HttpResponse.json({ data: made, meta: meta() }, { status: 201 })
+  }),
+  // 최종 접수 — 카드면 결제 대기, 월 · 그룹결제면 접수 완료
+  http.post(`${API_BASE_URL}/admin/parcel-drafts/:id/submit`, async ({ request, params }) => {
+    const b = (await request.json()) as { paymentMethodType?: string }
+    return HttpResponse.json({
+      data: {
+        // 가짜: 새 주문 대신 원본의 옛 주문번호(가짜 저장소에 있는 주문)로 — 패널이 열리게
+        orderSeq:
+          [...madeDrafts.values()].find((d) => d.draftSeq === Number(params.id))?.sourceDraftSeq ??
+          0,
+        draftSeq: Number(params.id),
+        orderParcelSeq: Number(params.id) * 10 + 1,
+        status: b.paymentMethodType === 'billing' ? 'notPaid' : 'ACCEPTED',
+        version: 1,
+        paymentDueAt: null,
+        totalAmount: null,
+        callSessionSeq: null,
+        parcelNo: null,
+      },
+      meta: meta(),
+    })
+  }),
+]
+
 export const orderHandlers = [
+  ...draftHandlers,
   // q = 보내는 분 · 받는 분의 이름 · 전화번호 · 주소 부분 검색 · from 포함 · to 미포함 · 접수 최신순
   http.get(`${API_BASE_URL}/admin/orders`, ({ request }) => {
     const u = new URL(request.url).searchParams
@@ -139,6 +271,7 @@ export const orderHandlers = [
         return (
           at >= from &&
           at < to &&
+          o.status !== 'COLLECTING' && // 055: 미완료는 배송 초안으로 옮겨져 주문 목록에 안 나옴
           (!group || (GROUP[group] ?? [group]).includes(o.status)) &&
           (!q ||
             o.parcels.some((p) =>
