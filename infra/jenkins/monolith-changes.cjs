@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const { selectIntegrationProfile } = require('../../backend/scripts/integration-profile.cjs');
 
 function allChecks(reason) {
   return { backend: true, observability: true, paymentDemo: true, full: true, reason };
@@ -62,7 +63,7 @@ function changedPaths(base, head, cwd = process.cwd()) {
 if (require.main === module) {
   const paths = changedPaths(process.env.CI_BASE_COMMIT, process.env.SOURCE_COMMIT);
   const checks = selectChecks(paths);
-  console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason].join(','));
+  console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason, selectIntegrationProfile(paths)].join(','));
 }
 
 module.exports = { changedPaths, selectChecks };

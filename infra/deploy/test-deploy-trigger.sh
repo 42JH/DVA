@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 checker="$(dirname -- "${BASH_SOURCE[0]}")/should-deploy.sh"
-export SOURCE_BRANCH=origin/develop-backend
+export SOURCE_BRANCH=origin/develop-backend CI_DOCUMENTATION_ONLY=false
 export monolith_event=push monolith_project=1462697 monolith_ref=refs/heads/develop-backend
 bash "$checker" false
 for assignment in 'monolith_event=merge_request' 'monolith_project=other' 'monolith_ref=refs/heads/develop-ai' 'SOURCE_BRANCH=origin/feature/test'; do

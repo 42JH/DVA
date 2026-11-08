@@ -4,6 +4,10 @@ const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require('
 const { tmpdir } = require('node:os');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { integrationCommand } = require('./integration-profile.cjs');
+const profile = process.env.BACKEND_TEST_PROFILE ?? 'full';
+const command = integrationCommand(profile);
+const started = Date.now();
 const run = 'dva-backend-check-' + randomBytes(6).toString('hex');
 const network = run + '-net';
 const database = run + '-db';
@@ -88,6 +92,8 @@ try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
   if (!ready) throw new Error('Disposable PostgreSQL did not become ready');
+  const integrationStarted = Date.now();
+  console.log(`Backend integration profile: ${profile}`);
   docker([
     'run',
     '--rm',
@@ -116,7 +122,11 @@ try {
     '-e',
     `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
     image,
+    'sh',
+    '-c',
+    command,
   ]);
+  console.log(`Backend integration checks: ${Date.now() - integrationStarted} ms (${profile})`);
   docker(['build', '-t', runtimeImage, root]);
   runtimeCreated = true;
   docker([
@@ -301,9 +311,11 @@ try {
     'test/runtime.integration.test.cjs',
   ]);
   runtimeTestsCreated = true;
+  const runtimeStarted = Date.now();
   // Jenkins and its Docker daemon have separate filesystems; stream the client-local certificate.
   docker(['cp', certificate, `${runtimeTests}:/test-proxy-ca.pem`]);
   docker(['start', '--attach', runtimeTests]);
+  console.log(`Backend runtime checks: ${Date.now() - runtimeStarted} ms`);
   docker(['exec', proxy, 'nginx', '-t']);
   docker([
     'exec',
@@ -317,6 +329,7 @@ try {
   console.log(
     'PASS: backend checks, isolated PostgreSQL, production image and Nginx/PBX contracts.',
   );
+  console.log(`Backend verification total: ${Date.now() - started} ms (${profile})`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

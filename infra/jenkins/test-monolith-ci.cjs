@@ -18,7 +18,7 @@ test('CLI returns strict scalar flags that Jenkins can read without a JSON parse
     encoding: 'utf8',
     env: { ...process.env, CI_BASE_COMMIT: '', SOURCE_COMMIT: '', SHOULD_DEPLOY: 'false' },
   });
-  assert.equal(output.trim(), 'true,true,true,missing_baseline_or_changes');
+  assert.equal(output.trim(), 'true,true,true,missing_baseline_or_changes,full');
 });
 
 test('webhook includes every monolith infrastructure directory and preserves event guards', () => {
@@ -207,8 +207,15 @@ test('git comparison covers all commits, deletions and renames; missing or diver
           env: { ...process.env, CI_BASE_COMMIT: base, SOURCE_COMMIT: head, SHOULD_DEPLOY: deploy },
         },
       );
-      assert.equal(output.trim(), 'true,false,false,changed_paths', `deploy=${deploy}`);
+      assert.equal(output.trim(), 'true,false,false,changed_paths,full', `deploy=${deploy}`);
     }
+    const faqHead = save('backend/src/faqs/faqs.service.ts', 'isolated FAQ change');
+    const selected = execFileSync(process.execPath, [path.join(__dirname, 'monolith-changes.cjs')], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, CI_BASE_COMMIT: head, SOURCE_COMMIT: faqHead },
+    });
+    assert.equal(selected.trim(), 'true,false,false,changed_paths,faq');
     renameSync(path.join(directory, 'backend/old.ts'), path.join(directory, 'docs/renamed.md'));
     const renamed = save('docs/notes.md', 'rename');
     const paths = changedPaths(head, renamed, directory);
