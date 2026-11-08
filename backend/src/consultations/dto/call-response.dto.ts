@@ -34,6 +34,14 @@ export class CallDto {
   customerName!: string | null;
 
   @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      '연결 고객의 현재 소속 기업명. 비활성 소속·기업도 표시하며 미연결·삭제 시 null. 통화 당시 기업명이나 결제 기업 스냅샷과 다릅니다.',
+  })
+  organizationName!: string | null;
+
+  @ApiProperty({
     enum: ORDER_STATUSES,
     nullable: true,
     description: '연결 주문의 현재 결제·접수 상태. 통화 종료 사유와 별개.',

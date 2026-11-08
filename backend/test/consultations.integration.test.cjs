@@ -63,6 +63,7 @@ async function call(input = {}) {
     orderTotalAmount: null,
     customerSeq: null,
     customerName: null,
+    organizationName: null,
     analysis: null,
     analysisStatus: 'PENDING',
     recordedAt: null,
