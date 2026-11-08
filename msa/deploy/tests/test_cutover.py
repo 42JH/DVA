@@ -39,6 +39,8 @@ class CutoverTests(unittest.TestCase):
 
     def kube(self, *args, **kwargs):
         if 'deployment' in args and 'get' in args:
+            if not self.replicas:
+                return ''  # kubectl --ignore-not-found emits no JSON when neither owner exists.
             return json.dumps({'items': [{'metadata': {'name': s, 'uid': 'uid-' + s},
                                          'spec': {'replicas': n, 'template': {'spec': {'containers': [{'name': s, 'image': 'old-' + s}]}}},
                                          'status': {'replicas': n}}
@@ -187,6 +189,13 @@ class CutoverTests(unittest.TestCase):
         cutover.verify(RELEASE)
         self.assertFalse(any(e[0] == 'scale' for e in self.events))
         self.assertEqual(len([e for e in self.events if e[0] == 'backup']), 2)
+
+    def test_only_existing_owner_is_stopped_and_restored(self):
+        self.replicas = {'order': 2}
+        cutover.prepare(RELEASE)
+        cutover.verify(RELEASE)
+        cutover.restore(RELEASE)
+        self.assertEqual(self.replicas, {'order': 2})
 
 
 if __name__ == '__main__':

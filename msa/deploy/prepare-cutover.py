@@ -62,8 +62,13 @@ def quiet(databases):
         raise RuntimeError('055 waits for active calls and pending PBX work')
 
 
+def get_deployments():
+    document = kube('-n', 'dva', 'get', 'deployment', *OWNERS, '--ignore-not-found', '-o', 'json')
+    return json.loads(document)['items'] if document else []
+
+
 def stopped():
-    deployments = json.loads(kube('-n', 'dva', 'get', 'deployment', *OWNERS, '--ignore-not-found', '-o', 'json'))['items']
+    deployments = get_deployments()
     if any(d.get('spec', {}).get('replicas', 1) != 0 or d.get('status', {}).get('replicas', 0) != 0 for d in deployments):
         return False
     return not json.loads(kube('-n', 'dva', 'get', 'pods', '-l',
@@ -114,7 +119,7 @@ def prepare(release):
     if path.exists():
         raise RuntimeError('Cutover backup directory already exists; use a new build')
     staged(release)
-    deployments = json.loads(kube('-n', 'dva', 'get', 'deployment', *OWNERS, '--ignore-not-found', '-o', 'json'))['items']
+    deployments = get_deployments()
     replicas = {d['metadata']['name']: d.get('spec', {}).get('replicas', 1) for d in deployments}
     databases = {service: database(service) for service in SERVICES}
     if len(set(databases.values())) != len(SERVICES):
@@ -187,7 +192,7 @@ def restore(release):
     document = json.loads(recovery.read_text())
     if document['release'] != release or set(document['replicas']) - set(OWNERS):
         raise RuntimeError('Cutover recovery state does not match this release')
-    deployments = json.loads(kube('-n', 'dva', 'get', 'deployment', *OWNERS, '--ignore-not-found', '-o', 'json'))['items']
+    deployments = get_deployments()
     actual = {d['metadata']['name']: {'uid': d['metadata']['uid'],
               'containers': d['spec']['template']['spec']['containers']} for d in deployments}
     if actual != document['previous']:
