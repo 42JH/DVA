@@ -1,4 +1,5 @@
 const { execFileSync } = require('node:child_process');
+const { selectIntegrationProfile } = require('../../backend/scripts/integration-profile.cjs');
 
 function allChecks(reason) {
   return { backend: true, observability: true, paymentDemo: true, full: true, reason };
@@ -6,6 +7,7 @@ function allChecks(reason) {
 
 function selectChecks(paths) {
   if (!paths?.length) return allChecks('missing_baseline_or_changes');
+  const documentation = /^(?:README\.md$|docs\/|backend\/README\.md$|backend\/docs\/.*\.md$)/;
   const checks = {
     backend: false,
     observability: false,
@@ -13,8 +15,12 @@ function selectChecks(paths) {
     full: false,
     reason: 'changed_paths',
   };
+  if (paths.every((path) => documentation.test(path))) {
+    checks.reason = 'documentation_only';
+    return checks;
+  }
   for (const path of paths) {
-    if (/^(?:README\.md$|docs\/|frontend\/|ai\/|msa\/)/.test(path)) continue;
+    if (documentation.test(path) || /^(?:frontend\/|ai\/|msa\/)/.test(path)) continue;
     if (/^infra\/observability\//.test(path)) checks.observability = true;
     else if (/^infra\/payment-test\//.test(path)) checks.paymentDemo = true;
     else if (/^backend\/payment-test\//.test(path)) {
@@ -57,7 +63,7 @@ function changedPaths(base, head, cwd = process.cwd()) {
 if (require.main === module) {
   const paths = changedPaths(process.env.CI_BASE_COMMIT, process.env.SOURCE_COMMIT);
   const checks = selectChecks(paths);
-  console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason].join(','));
+  console.log([checks.backend, checks.observability, checks.paymentDemo, checks.reason, selectIntegrationProfile(paths)].join(','));
 }
 
 module.exports = { changedPaths, selectChecks };
