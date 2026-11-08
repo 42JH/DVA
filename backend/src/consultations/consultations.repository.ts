@@ -30,10 +30,12 @@ type CallRow = CallDto & {
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
 
-const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
+const callSelect = (
+  includeRecordedAt = true,
+) => `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
   WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED' ELSE 'PENDING' END AS "analysisStatus",
- (SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",
+ ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
  customer.customer_seq AS "customerSeq",customer.name AS "customerName",company.name AS "organizationName",
@@ -180,17 +182,18 @@ export class ConsultationsRepository {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await readPage<CallRow>(
       client ?? this.database.pool,
-      `${CALL_SELECT} ${where}`,
+      `${callSelect(false)} ${where}`,
       values,
       query,
       '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC',
+      `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`,
     );
     return { ...result, rows: result.rows.map(callResult) };
   }
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
-      `${CALL_SELECT} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
       [id],
     );
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
