@@ -563,6 +563,18 @@ test('production member JSON supports single and bulk registration through Nginx
   const row = (await list.json()).data[0];
   const customerId = row.customer.customerSeq,
     membershipId = row.membership.membershipSeq;
+  const search = await fetch(
+    root +
+      `/companies/${companyId}/members?` +
+      new URLSearchParams({
+        q: number.slice(0, 3) + '-' + number.slice(3),
+        status: 'ACTIVE',
+      }),
+    { headers: { Cookie: session } },
+  );
+  assert.equal(search.status, 200);
+  assert.equal(search.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await search.json(), { data: [row], hasNext: false, total_count: 1 });
   const nextPhone = '018' + String(require('node:crypto').randomInt(10000000, 100000000));
   assert.equal(
     (

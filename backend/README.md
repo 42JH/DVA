@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+기업별 사원 목록 GET /api/companies/{id}/members는 선택 q로 해당 기업의 이름·사번·전화번호를 부분 검색한다. 이름·사번은 대소문자를 구분하지 않고 전화번호는 하이픈·뒷자리 검색을 허용한다. 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. status와 함께 적용하며 응답·정렬·페이지/전체 건수·관리자 권한·삭제 기준과 전체 사원 검색 API는 유지한다. DB 변경은 없고 [작업·검증 기록](docs/company-member-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
+
 고객 목록 GET /api/customers의 availablePaymentMethods는 고객 확인 API와 같은 기준으로 현재 가능한 billing(개인 카드)·credit(월결제)·groupBilling(부서 그룹결제)을 순서대로 반환한다. 탈퇴 고객은 빈 배열이며 삭제 고객은 제외한다. 목록 SQL에서 함께 계산하므로 고객별 context 호출이 필요 없다. 고객 상세·공통 고객 DTO와 실제 주문·결제 자격 재검증은 유지하며 DB 변경은 없다. [작업·검증 기록](docs/customer-list-payment-methods-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
 
 통화 목록·상세와 관리자 주문 목록은 현재 소속 기업명 organizationName을 반환하며 organizationSeq 필터를 받는다. 관리자 주문 목록에는 customerSeq도 제공한다. 기업명 있음은 기업 고객, 기업명 없음+customerSeq 있음은 현재 무소속, customerSeq=null은 미확인으로 표시할 수 있으며 별도 고객 유형 필드는 추가하지 않는다. 비활성 소속·기업도 표시하고 삭제된 연결은 숨긴다. 현재 소속 기준이므로 과거 목록 표시도 바뀌며 결제 당시 기업 스냅샷과 다르다. DB 변경과 AI 일반 주문 조회 변경은 없고 전달 명세는 후속 작업과 누적한다. [작업·검증 기록](docs/list-customer-organization-plan.md)을 따른다.
