@@ -212,3 +212,13 @@ test('deployment verification requires 055, logical references, uniqueness and t
     'Expected 25 foreign keys, found 26',
   );
 });
+
+test('deployment verification requires 056 and cannot infer failure through a default or change its timestamp type', async () => {
+  for (const sql of [
+    "DELETE FROM db_migrations.applied_versions WHERE version='056-call-analysis-failure.sql'",
+    'ALTER TABLE call_sessions DROP COLUMN analysis_failed_at',
+    'ALTER TABLE call_sessions ALTER COLUMN analysis_failed_at SET DEFAULT clock_timestamp()',
+    'ALTER TABLE call_sessions ALTER COLUMN analysis_failed_at TYPE timestamp without time zone',
+  ])
+    await verify([sql], 'Call analysis failure schema or migration missing');
+});

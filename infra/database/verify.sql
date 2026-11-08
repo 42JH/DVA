@@ -245,6 +245,10 @@ BEGIN
   OR to_regclass('public.call_order_finalization_idx') IS NULL
   OR NOT EXISTS(SELECT 1 FROM pg_constraint WHERE conrelid='public.call_sessions'::regclass AND conname='call_order_finalization_check') THEN
   RAISE EXCEPTION 'Parcel draft intake schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions'
+    AND column_name='analysis_failed_at' AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL)
+  OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='056-call-analysis-failure.sql') THEN
+  RAISE EXCEPTION 'Call analysis failure schema or migration missing'; END IF;
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
