@@ -20,7 +20,13 @@ from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
                                 issue_parcel_confirmation, release, take_cancel)
+from app.domain.pickup import default_pickup, describe, rule_of
+from app.domain.resume import can_offer, load_resumed
+from app.domain.state import Source
 from app.domain.store import hold_unclassified_items, item_issues_pending
+from app.integrations.backend.gateway import BackendFailure
+from app.integrations.backend.mapping import resume_candidate
+from backend_client.api import link_body
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
@@ -70,6 +76,8 @@ class Runtime:
     cust_end_t: float = 0.0                           # 관제: 마지막 고객 발화 끝(→ AI 말 시작)
     await_speech: tuple[str, float] | None = None     # 관제: (구간 이름, 시작) — 다음 AI 발화 시작까지
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
+    resume_task: asyncio.Task | None = None           # 미완료 주문 찾기(통화 등록 뒤 1회)
+    resume_detail: dict | None = None                 # 찾은 주문 상세(연결 PATCH 본문용)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -189,9 +197,10 @@ class LiveFlow:
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
+            resume = s.state.resume_offered and s.state.resume_answer is None
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
-                                       pick_labels=pick, callback=callback, origin=origin)
+                                       pick_labels=pick, callback=callback, origin=origin, resume=resume)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -244,6 +253,11 @@ class LiveFlow:
                 s.note("출발지", og[0])
                 if st.intent == "order":
                     followups.append(("origin", None))
+            if (ra := answers.get("resume")) and ra[1] >= th and ra[0] in ("yes", "no") and st.resume_offered \
+                    and st.resume_answer is None:
+                st.resume_answer = ra[0] == "yes"
+                s.note("이어받기", ra[0])
+                followups.append(("resume", ra[0] == "yes"))
             if "confirm" in answers and pending_id:
                 followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
             elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
@@ -398,6 +412,8 @@ class LiveFlow:
                 facts["summary"] = state_summary(st, self.policy)
             if facts.get("origin"):
                 await self.notify(s, "N1'", facts)
+        elif what == "resume":
+            await self._resume_answer(s, value)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -416,6 +432,9 @@ class LiveFlow:
         st = s.state
         if intent in BUSINESS:
             self._business(s, intent)
+        task = self.rt(s).resume_task
+        if intent == "order" and task is not None and not task.done() and self.cfg.resume_wait_sec:
+            await asyncio.wait({task}, timeout=self.cfg.resume_wait_sec)  # 이어받기를 출발지 질문보다 먼저 묻는다
         async with s.lock:
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
@@ -431,7 +450,9 @@ class LiveFlow:
                 if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
-                if st.intent == "order":
+                if st.intent == "order" and (offer_facts := self._resume_offer(s)):
+                    facts |= offer_facts
+                elif st.intent == "order":
                     facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
                     facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
@@ -491,6 +512,104 @@ class LiveFlow:
         done = prefill_sender(st, full=False)  # 출발지 후보 없음: 성함만
         st.origin_applied = True
         return {"origin": "name_only"} if done else {}
+
+    # ------------------------------------------------------------------ 미완료 주문 이어받기(사용자 결정 2026-11-06)
+    async def _resume_lookup(self, s: CallSession, stage2: asyncio.Task) -> None:
+        """통화 등록 뒤 가장 최근 미완료 주문 1건과 상세를 읽는다. 실패하면 이어받기 없이 진행(새 접수)."""
+        seq = await asyncio.shield(stage2)
+        backend = self.svc.d.backend
+        if not seq or s.state.customer.status != "REGISTERED":
+            return
+        try:
+            orders = await backend.read("resume_orders", backend.api.collecting_orders, seq, 1)
+            detail = await backend.read("resume_detail", backend.api.order_detail, seq, orders[0]["orderSeq"]) \
+                if orders else None
+            cand = resume_candidate(detail) if detail else None
+        except BackendFailure as e:
+            s.note("이어받기 조회 실패", e.code)
+            return
+        except (KeyError, TypeError, ValueError) as e:  # 응답 형식 오류: 이어받지 않는다
+            s.note("이어받기 조회 실패", f"RESPONSE_INVALID {type(e).__name__}")
+            return
+        if cand is None:
+            return
+        async with s.lock:
+            s.state.resume = cand
+            self.rt(s).resume_detail = detail
+            facts = self._resume_offer(s)  # 접수 의도 판단이 먼저 끝났으면 지금 묻는다
+            if facts:
+                facts["summary"] = state_summary(s.state, self.policy)
+        s.note("이어받기 후보", f"order={cand.order_seq} created={cand.created_at}")
+        if facts:
+            await self.notify(s, "N1'", facts)
+
+    def _resume_offer(self, s: CallSession) -> dict:
+        """잠금 안. 물을 수 있으면 묻는 사실을 만든다(한 번만)."""
+        st = s.state
+        if not can_offer(st, s.tools.now(), self.cfg.resume_window_sec):
+            return {}
+        st.resume_offered = True
+        name = st.resume.parcel.get("receiver_name")
+        return {"resume_confirm": {"receiver_name": name} if name else {}}
+
+    async def _resume_answer(self, s: CallSession, yes: bool) -> None:
+        """이어받기 답. 예 → 같은 값 PATCH로 통화를 주문에 연결 → 상세를 불러와 빠진 항목·되읽기. 아니오·실패 → 새 접수."""
+        st, backend, rt = s.state, self.svc.d.backend, self.rt(s)
+        result, version = "declined", None
+        if yes and st.resume and rt.resume_detail:
+            cand = st.resume
+            try:
+                version = await backend.write("resume_link", backend.api.patch_order, st.customer.call_session_seq,
+                                              cand.order_seq, link_body(cand.version, rt.resume_detail, cand.parcel_seq))
+                result = "loaded"
+            except BackendFailure as e:
+                s.note("이어받기 연결 실패", e.code)
+                if e.kind in ("unavailable", "in_progress") or e.error_code == "VERSION_CONFLICT":
+                    cand, version = await self._resume_relink(s, cand)
+                result = "loaded" if version is not None else "unavailable"
+        async with s.lock:
+            if result == "loaded":
+                st.resume = cand
+                load_resumed(st, version)
+                facts = {"resume": "loaded"} | self._readback_if_ready(s)
+            else:
+                st.resume = None
+                facts = {"resume": result} | self._origin_step(st)
+            facts["summary"] = state_summary(st, self.policy)
+        s.note("이어받기", result)
+        await self.notify(s, "N1'", facts)
+
+    async def _resume_relink(self, s: CallSession, cand):
+        """연결 PATCH 응답 유실·버전 충돌 뒤 한 번: 상세를 다시 읽어 지금 version으로 같은 값 PATCH(B/order-update.md).
+        이미 이 통화가 연결됐어도 같은 주문 PATCH는 허용된다. 다시 실패하면 (cand, None) → 새 접수(실제로 연결돼
+        있었다면 종료 때 새 주문 POST가 409로 FAILED — 담당자 확인, 사용자 결정 2026-11-08)."""
+        backend, seq = self.svc.d.backend, s.state.customer.call_session_seq
+        try:
+            detail = await backend.read("resume_detail", backend.api.order_detail, seq, cand.order_seq)
+            fresh = resume_candidate(detail) if detail else None
+            if fresh is None or fresh.parcel_seq != cand.parcel_seq:  # 그새 확정·취소됐거나 상세가 바뀜
+                s.note("이어받기 연결 불확실", "주문 상태 변경")
+                return cand, None
+            version = await backend.write("resume_link", backend.api.patch_order, seq, cand.order_seq,
+                                          link_body(fresh.version, detail, fresh.parcel_seq))
+            return fresh, version
+        except BackendFailure as e:
+            s.note("이어받기 연결 불확실", e.code)
+            return cand, None
+
+    def _readback_if_ready(self, s: CallSession) -> dict:
+        """잠금 안. 불러온 택배에 빠진 항목이 없으면 되읽기 확인을 연다(record_fields와 같은 규칙: 기본 수거 시각 함께)."""
+        st = s.state
+        pending = issue_parcel_confirmation(st, self.policy, s.tools.clock())
+        if not pending:
+            return {}
+        rule, moved = rule_of(self.policy.pickup), False
+        if not st.pickup_at.valid:
+            iso, moved = default_pickup(s.tools.now(), rule)
+            st.record("pickup_at", iso, Source.SERVER)
+        sources = {n: f.source for n, f in st.current.fields.items()}
+        return {"readback": readback_facts(pending.snapshot, sources, self.policy),
+                "pickup": {"at": st.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
         """택배를 담았으면 묻지 않고 고객 정보·주소를 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409).
@@ -589,7 +708,9 @@ class LiveFlow:
             s.state.intent = "order"
         if not rt.intent_started:
             rt.intent_started = True
-            self.svc.stage2(s)
+            stage2 = self.svc.stage2(s)
+            if stage2 is not None and rt.resume_task is None and s.state.customer.status == "REGISTERED":
+                rt.resume_task = s.spawn(self._resume_lookup(s, stage2), "resume_lookup")
 
     # ------------------------------------------------------------------ 위임 → 함수 호출
     def on_delegation(self, s: CallSession, ev: dict) -> None:

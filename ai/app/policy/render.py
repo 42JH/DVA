@@ -113,7 +113,7 @@ def render_backend(policy: Policy) -> str:
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
-                       callback: bool = False, origin: bool = False) -> list[dict]:
+                       callback: bool = False, origin: bool = False, resume: bool = False) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
@@ -128,6 +128,8 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
     if origin:
         sets.insert(0, "origin")  # 기존 고객에게 출발지를 물었고 답을 기다릴 때만
+    if resume:
+        sets.insert(0, "resume")  # 미완료 주문을 이어서 할지 물었고 답을 기다릴 때만
     out = []
     for name in dict.fromkeys(sets):
         for q in policy.decision[name].questions:
