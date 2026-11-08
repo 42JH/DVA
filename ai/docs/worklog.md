@@ -944,3 +944,4 @@
 - 1단계 임시 처리 `ops["resume_result"]` 삭제, 분석 접수 택배 수는 아웃박스 본문에서 셈. `resume_patch` → `resume_target`, `resume_body`는 expectedVersion 없는 목표 상태. Mock: `ended`(끝난 통화 submit 409).
 - 테스트: test_resume.py 17개(+7: 남은 변경 계산, 재시작 복구 PATCH·POST 없음, PATCH 응답 유실 뒤 중복 상세 없음, 버전 충돌 재조회·고객 값 우선, 3회 충돌 SENT_UNCERTAIN·주문 상태 변경 FAILED, 끊긴 뒤 submit 거절 FAILED·PATCH 저장, 연결 응답 유실 재연결). 전체 706 passed, 3 failed(로컬 address.db — 기존과 같음).
 - 미확인(실제 BE): 0·빈 값을 null로 돌려주는지(같은 값으로 취급), 끊긴 통화 submit 거절 코드가 409 INVALID_STATE인지, 같은 값 PATCH 재연결이 이미 연결된 통화에서 허용되는지.
+- MR: `feat/resume-incomplete-order` → develop-ai(1·2단계 함께). 로컬 주소 DB를 S15P31D109-rebuild의 address.db(건물명 포함)로 바꾼 뒤 develop-ai 기준 전체 692 passed.
