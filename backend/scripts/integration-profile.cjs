@@ -1,3 +1,16 @@
+const orderFlow = [
+  'orders',
+  'order-cancellation',
+  'manual-orders',
+  'manual-orders-failures',
+  'order-billing',
+  'order-payments',
+  'order-submission-recovery',
+  'parcel-drafts',
+  'order-intake',
+  'admin-parcel-drafts',
+];
+const lifecycle = ['soft-deletion', 'data-retention'];
 const suites = {
   faq: [
     'faq-seed',
@@ -11,8 +24,7 @@ const suites = {
     'call-events',
     'call-insights-read',
     'pagination-query',
-    'soft-deletion',
-    'data-retention',
+    ...lifecycle,
   ],
   dashboard: [
     'dashboard',
@@ -22,7 +34,195 @@ const suites = {
     'ai-settings',
     'data-retention',
   ],
+  persona: [
+    'ai-settings',
+    'dashboard',
+    'call-dashboard-metrics',
+    'call-analysis',
+    'data-retention',
+  ],
+  customers: [
+    'customers',
+    'members',
+    'caller-context',
+    'customer-organizations',
+    'pins',
+    'company-registration',
+    'orders',
+    'manual-orders',
+    'manual-orders-failures',
+    'parcel-drafts',
+    'order-intake',
+    'admin-parcel-drafts',
+    'consultations',
+    'order-address-history',
+    'pagination-query',
+    ...lifecycle,
+  ],
+  companies: [
+    'organizations',
+    'members',
+    'company-directory',
+    'company-registration',
+    'company-summaries',
+    'company-deletion',
+    'caller-context',
+    'customer-organizations',
+    'customers',
+    'order-billing',
+    'order-payments',
+    'order-intake',
+    'order-address-history',
+    'dashboard',
+    'consultations',
+    'pagination-query',
+    ...lifecycle,
+  ],
+  pins: [
+    'pins',
+    'orders',
+    'parcel-drafts',
+    'order-address-history',
+    'pagination-query',
+    ...lifecycle,
+  ],
+  drafts: [
+    'parcel-drafts',
+    'admin-parcel-drafts',
+    'order-intake',
+    'consultations',
+    'customer-organizations',
+    ...lifecycle,
+  ],
+  intake: [
+    'parcel-drafts',
+    'admin-parcel-drafts',
+    'order-intake',
+    'order-payments',
+    'order-billing',
+    'order-submission-recovery',
+    'consultations',
+    ...lifecycle,
+  ],
+  orders: [
+    ...orderFlow,
+    'order-address-history',
+    'consultations',
+    'caller-context',
+    'call-events',
+    'call-insights-read',
+    'customer-organizations',
+    'dashboard',
+    ...lifecycle,
+  ],
+  payments: [...orderFlow, 'company-deletion', 'company-summaries', ...lifecycle],
+  calls: [
+    'consultations',
+    'recordings',
+    'call-analysis',
+    'call-analysis-status',
+    'call-insights-read',
+    'customer-organizations',
+    'pagination-query',
+    'parcel-drafts',
+    'order-intake',
+    'dashboard',
+    ...lifecycle,
+  ],
+  analysis: [
+    'call-analysis',
+    'call-events',
+    'unanswered-questions',
+    'unanswered-questions-read',
+    'unanswered-questions-management',
+    'call-analysis-status',
+    'call-dashboard-metrics',
+    'dashboard',
+    'call-insights-read',
+    'consultations',
+    ...lifecycle,
+  ],
+  events: [
+    'call-events',
+    'call-insights-read',
+    'call-analysis',
+    'call-analysis-status',
+    'consultations',
+    'faq-question-examples',
+    'unanswered-questions',
+    'unanswered-questions-read',
+    'unanswered-questions-management',
+    ...lifecycle,
+  ],
+  recordings: [
+    'recordings',
+    'active-call-count',
+    'consultations',
+    'call-analysis-status',
+    'caller-context',
+    'order-intake',
+    ...lifecycle,
+  ],
+  active: ['active-call-count', 'consultations', ...lifecycle],
 };
+
+// Include direct callers and SQL consumers; shared foundations and module wiring stay full.
+const sourceRules = [
+  [
+    /^orders\/(?:parcel-drafts\.|admin-parcel-drafts\.|dto\/(?:parcel-draft|admin-parcel-draft)\.)/,
+    'drafts',
+  ],
+  [/^orders\/(?:order-intake\.|dto\/order-intake\.)/, 'intake'],
+  [
+    /^(?:payments\/|orders\/(?:order-payments\.|order-maintenance\.)|organizations\/organization-billing\.)/,
+    'payments',
+  ],
+  [/^(?:orders|deliveries)\//, 'orders'],
+  [/^(?:organizations|members)\//, 'companies'],
+  [/^customers\//, 'customers'],
+  [/^pins\//, 'pins'],
+  [/^consultations\/(?:active-call-count\.|dto\/active-call-count\.)/, 'active'],
+  [/^(?:webhooks\/pbx\/|consultations\/recording-playback\.)/, 'recordings'],
+  [
+    /^consultations\/(?:consultations\.(?:repository|controller)\.ts$|dto\/(?:call-query|call-response|transcript)\.)/,
+    'calls',
+  ],
+  [
+    /^call-insights\/(?:call-events(?:-read)?|call-event-input|dto\/(?:create-call-events|call-event-response))\./,
+    'events',
+  ],
+  [
+    /^(?:dashboard\/|call-insights\/(?:call-dashboard-metrics\.|dto\/create-call-dashboard-metrics\.))/,
+    'dashboard',
+  ],
+  [/^call-insights\//, 'analysis'],
+  [/^(?:faqs|unanswered-questions)\//, 'faq'],
+  [/^ai-settings\//, 'persona'],
+];
+const testRules = [
+  [
+    /^(?:helpers\/faqs|faq-input|faq-seed|faqs|faq-notifications|faq-categories|faq-question-examples|unanswered-questions(?:-read|-management)?)$/,
+    'faq',
+  ],
+  [
+    /^(?:helpers\/orders|helpers\/manual-orders|helpers\/legacy-order-intake|orders(?:-[a-z-]+)?|order-input|order-validation|order-pricing|order-address-history|order-submission-recovery|dver|manual-orders(?:-failures)?)$/,
+    'orders',
+  ],
+  [/^(?:order-payments|order-billing|payment-input|payment-recovery)$/, 'payments'],
+  [/^(?:parcel-drafts|admin-parcel-drafts)$/, 'drafts'],
+  [/^order-intake$/, 'intake'],
+  [/^(?:customers|caller-context)$/, 'customers'],
+  [/^(?:organizations|members|member-input|company-[a-z-]+|customer-organizations)$/, 'companies'],
+  [/^pins$/, 'pins'],
+  [/^(?:consultations|call-insights-read)$/, 'calls'],
+  [/^call-analysis(?:-status)?$/, 'analysis'],
+  [/^call-events$/, 'events'],
+  [/^dashboard$/, 'dashboard'],
+  [/^call-dashboard-metrics$/, 'dashboard'],
+  [/^(?:recordings|recording-storage|recording-playback)$/, 'recordings'],
+  [/^active-call-count$/, 'active'],
+  [/^(?:helpers\/ai-settings|ai-settings(?:-[a-z-]+)?)$/, 'persona'],
+];
 
 function selectIntegrationProfile(paths) {
   if (!paths?.length) return 'full';
@@ -34,22 +234,28 @@ function selectIntegrationProfile(paths) {
       )
     )
       continue;
-    if (path.endsWith('.module.ts')) return 'full';
-    if (
-      /^backend\/(?:src\/faqs\/.*\.ts$|test\/(?:faq-input\.test\.cjs$|(?:faqs|faq-seed|faq-notifications|faq-categories|faq-question-examples)\.integration\.test\.cjs$|helpers\/faqs\.cjs$))/.test(
-        path,
-      )
+    if (path.endsWith('.module.ts') || /migrations/.test(path)) return 'full';
+    let profile;
+    if (/^backend\/src\/.*\.ts$/.test(path)) {
+      profile = sourceRules.find(([pattern]) =>
+        pattern.test(path.slice('backend/src/'.length)),
+      )?.[1];
+    } else if (/^backend\/test\/.*\.cjs$/.test(path)) {
+      const name = path
+        .slice('backend/test/'.length)
+        .replace(/(?:\.integration)?\.test\.cjs$|\.cjs$/, '');
+      profile = testRules.find(([pattern]) => pattern.test(name))?.[1];
+      if (profile && path.endsWith('.integration.test.cjs') && !suites[profile].includes(name))
+        return 'full';
+    } else if (
+      path.startsWith('backend/payment-test/') ||
+      path.startsWith('backend/src/payments/assets/')
     )
-      profiles.add('faq');
-    else if (
-      /^backend\/(?:src\/dashboard\/.*\.ts$|test\/dashboard(?:\.integration)?\.test\.cjs$)/.test(
-        path,
-      )
-    )
-      profiles.add('dashboard');
-    else return 'full';
+      profile = 'payments';
+    if (!profile) return 'full';
+    profiles.add(profile);
   }
-  return profiles.size === 1 ? [...profiles][0] : 'full';
+  return profiles.size ? [...profiles].sort().join('+') : 'full';
 }
 
 function integrationCommand(
@@ -57,11 +263,13 @@ function integrationCommand(
   command = require('../package.json').scripts['test:integration'],
 ) {
   if (profile === 'full') return command;
-  if (!Object.hasOwn(suites, profile)) throw new Error('Unknown integration profile');
+  const profiles = profile.split('+');
+  if (!profiles.every((name) => Object.hasOwn(suites, name)))
+    throw new Error('Unknown integration profile');
+  // Production smoke owns its data instead of depending on unrelated auth/address-history tests.
   const required = new Set(
-    // Runtime address-history smoke reads the accepted snapshot left by this integration suite.
-    ['database', 'webhook', 'auth', 'auth-limits', 'order-address-history', ...suites[profile]].map(
-      (suite) => `test/${suite}.integration.test.cjs`,
+    ['database', 'webhook', 'runtime-fixture', ...profiles.flatMap((name) => suites[name])].map(
+      (suite) => 'test/' + suite + '.integration.test.cjs',
     ),
   );
   const found = new Set();

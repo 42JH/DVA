@@ -33,7 +33,7 @@ function selectChecks(paths) {
         )
       )
         return allChecks('shared_backend');
-      // Any backend module change runs all backend regressions, including its callers.
+      // The backend profile includes the changed feature and its callers.
       checks.backend = true;
       if (
         /^backend\/(?:src\/(?:observability\/|common\/http\/|health\/)|test\/observability(?:\.integration)?\.test\.cjs$)/.test(
