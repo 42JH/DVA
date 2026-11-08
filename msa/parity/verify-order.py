@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+from ci_images import prepared_image
 from verify_parcel_draft_upgrade import verify_parcel_draft_upgrade
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,6 +51,12 @@ def main():
             ('operations', 'msa/services/operations', None), ('monolith-checks', 'backend', 'checks'),
             ('monolith', 'backend', None), ('liquibase', 'msa/liquibase', None),
         ):
+            image = prepared_image(side)
+            if image:
+                images[side] = image
+                report.setdefault('images', {})[side] = image
+                print(side + '-reuse', flush=True)
+                continue
             image = RUN+'-'+side
             resources.append(('image', image))
             context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if path.startswith('msa/services/') else [str(ROOT/path)]

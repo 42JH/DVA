@@ -7,6 +7,9 @@ import uuid
 import os
 import re
 import shutil
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'parity'))
+from ci_images import prepared_image
 from verify_order_schema import verify_order_schema
 from verify_parcel_draft_schema import verify_parcel_draft_schema
 
@@ -68,8 +71,10 @@ def preview_fingerprint(service, db, label):
 
 network_created = pg_created = False
 try:
-    run(['docker', 'build', '--platform', 'linux/amd64', '-t', IMAGE, str(BASE)], 'image-build')
-    report['imageId'] = run(['docker', 'image', 'inspect', IMAGE, '--format', '{{.Id}}'], 'image-id')
+    report['imageId'] = prepared_image('liquibase')
+    if not report['imageId']:
+        run(['docker', 'build', '--platform', 'linux/amd64', '-t', IMAGE, str(BASE)], 'image-build')
+        report['imageId'] = run(['docker', 'image', 'inspect', IMAGE, '--format', '{{.Id}}'], 'image-id')
     run(['docker', 'network', 'create', '--internal', name], 'network-create')
     network_created = True
     run(['docker', 'run', '-d', '--name', name, '--network', name,

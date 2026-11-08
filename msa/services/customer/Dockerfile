@@ -2,8 +2,9 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /app/service
 
 COPY services/customer/package*.json ./
-COPY shared/events /shared/events
+COPY shared/events/package.json /shared/events/package.json
 RUN npm ci
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY services/customer/nest-cli.json services/customer/tsconfig*.json services/customer/.prettierrc services/customer/eslint.config.mjs ./
 COPY services/customer/src ./src
@@ -24,8 +25,9 @@ ENV NODE_ENV=production
 ENV PORT=3001
 
 COPY services/customer/package*.json ./
-COPY shared/events /shared/events
+COPY shared/events/package.json /shared/events/package.json
 RUN npm ci --omit=dev && npm cache clean --force
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY --from=builder /app/service/dist ./dist
 
