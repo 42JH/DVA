@@ -1,5 +1,5 @@
 {
-  "commit": "669b10fdb5f4175fb4f6f63bca7b3834e6d8eed3",
+  "commit": "9624b7789ee7876648b6c56b5e7a4a7a5a9ef378",
   "jira": "S15P31D109-160",
   "inventory": {
     "routes": [
@@ -417,11 +417,39 @@
         "file": "backend/src/orders/admin-orders.controller.ts"
       },
       {
+        "method": "POST",
+        "path": "/api/admin/parcel-drafts/:id/submit",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-parcel-drafts.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-parcel-drafts.controller.ts"
+      },
+      {
         "method": "GET",
         "path": "/api/customers/:id/addresses",
         "service": "order",
         "stream": false,
         "file": "backend/src/orders/order-addresses.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/calls/:id/order-intake/complete",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/order-intake.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id/order-intake",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/order-intake.controller.ts"
       },
       {
         "method": "DELETE",
@@ -478,6 +506,34 @@
         "service": "order",
         "stream": false,
         "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/parcel-drafts",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/parcel-drafts",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
       },
       {
         "method": "GET",
@@ -888,6 +944,10 @@
       {
         "file": "backend/migrations/054-recording-retry-policy.sql",
         "sha256": "df69ab6106142b85879192a7d0c40263fb4cbec00be97949cd0f58f1f86f1f2a"
+      },
+      {
+        "file": "backend/migrations/055-parcel-draft-intake.sql",
+        "sha256": "4ea7e8bca1e95e8d2a1ebf2a067df3dd961fb72a05840ab32822ec5354651d72"
       }
     ],
     "workers": [
