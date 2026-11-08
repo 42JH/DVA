@@ -2,7 +2,7 @@
 
 작성일: 2026-11-08. 이번 요청 1~6번을 모은 **모놀리식 backend** 계약이다. 아래 예시 응답은 표시한 필드만 발췌한 경우를 명시했다. 기존 API 전체 계약을 대체하지 않는다.
 
-백엔드와 프론트는 별도 작업 브랜치/MR이다. 백엔드 병합·배포 뒤 1~5번을 화면에 연결하고, 6번 수거 입력 변경은 프론트 MR을 배포한다. 문서 작성·MR 생성 자체가 배포를 뜻하지 않는다.
+이번 MR의 구현 범위는 backend와 연동 명세다. 프론트·AI 소스 변경은 포함하지 않는다. 백엔드 병합·배포 뒤 프론트팀이 1~5번을 화면에 연결하고, 6번 수거 입력 정책도 구현한다. 문서 작성·MR 생성 자체가 배포를 뜻하지 않는다.
 
 ## 변경 목록
 
@@ -16,7 +16,7 @@
 | 3 | GET /api/customers | data[].availablePaymentMethods 추가 |
 | 4 | GET /api/companies/{id}/members | q 이름·사번·전화번호 검색 추가 |
 | 5 | GET /api/admins | q 이름·로그인 아이디 검색 추가 |
-| 6 | 수기 주문 추가·수정 화면 | 한국 시간 09:00~17:00 입력 검증·시각 변환. 추가 API/DB 없음 |
+| 6 | 수기 주문 추가·수정 화면 | 프론트팀 적용 요청: 한국 시간 09:00~17:00 입력 검증·시각 변환. 추가 API/DB 없음 |
 
 ## 공통 호출·페이지네이션·오류
 
@@ -163,9 +163,9 @@ GET /api/admins?q=operator&role=OPERATOR&status=ACTIVE&limit=20&offset=0
 - 기존 응답 필드 adminUserSeq·loginId·name·role·status·createdAt·lastLoginAt을 유지한다. 비밀번호 관련 필드를 반환하지 않는다.
 - 이 검색의 대소문자 무시는 실제 로그인 아이디 비교 규칙을 바꾸지 않는다.
 
-## 6. 수거 시간 — 프론트 별도 MR
+## 6. 수거 시간 — 프론트팀 작업 요청
 
-수기 주문의 신규 입력·수거 시각 변경은 아래 조건을 **동시에** 만족해야 한다.
+프론트팀은 수기 주문의 신규 입력·수거 시각 변경이 아래 조건을 **동시에** 만족하도록 검증을 반영한다. 이번 backend MR에서 프론트 코드를 구현한 것은 아니다.
 
 1. 한국 시간(Asia/Seoul) **09:00~17:00**, 양 끝 포함.
 2. 현재 시각+1시간 이상, 현재 시각+72시간 이하.
@@ -185,7 +185,7 @@ GET /api/admins?q=operator&role=OPERATOR&status=ACTIVE&limit=20&offset=0
 1. 기존 백업·DB runner 절차로 migration **056** 적용 및 infra DB 검증. 신규 테이블 없이 call_sessions.analysis_failed_at nullable timestamptz 한 컬럼만 추가한다.
 2. backend MR 배포. 기업명·결제수단·검색에는 추가 migration이나 새 환경변수가 없다.
 3. AI가 분석 최종 실패 통보를 연결한다. AI 미구현/미전송 건은 PENDING으로 남는다.
-4. 프론트 타입·API query·페이지네이션·화면을 1~5번에 연결하고, 6번 프론트 MR을 배포한다.
+4. 프론트팀이 타입·API query·페이지네이션·화면을 1~5번에 연결하고, 6번 입력 정책도 구현·배포한다.
 5. PENDING → FAILED → COMPLETED와 늦은 실패, 녹취 없는 통화, 기업/개인/고객 미확인, 소속 변경, 결제수단 빈 배열, 검색 후 다음 페이지, 09:00/17:00 및 늦은 결제 보정을 확인한다.
 
 기존 soft delete·보관 만료 필터와 관리자 인증은 유지한다. 이번 backend는 모놀리식 대상이며 별도 MSA API/DB 동기화는 포함하지 않는다. AI 전달본: [AI 분석 실패·수거 시간 명세](list-improvements-ai-integration.md). 상세 DB 배포 절차: [056 배포 명세](call-analysis-status-rollout.md).
