@@ -203,6 +203,29 @@ class DeliveryPlanTests(unittest.TestCase):
         annotations['dva.ssafy.io/db-order-commit'] = current
         self.assertEqual(planner.databases(current, True, annotations), [])
 
+    def test_partial_055_retry_keeps_both_db_targets_while_writers_are_stopped(self):
+        for service in ('order', 'consultation'):
+            self.commit(f'msa/services/{service}/Dockerfile', 'FROM node')
+            self.commit(f'msa/services/{service}/k8s.yaml', 'manifest')
+            value = deployment(self.deployed)
+            value['metadata']['name'] = service
+            value['spec']['replicas'] = 0
+            value['status'] = {'replicas': 0}
+            self.state[service] = value
+        self.commit('msa/liquibase/changelog/consultation/008.sql', 'pending 055 snapshot')
+        current = self.git('rev-parse', 'HEAD')
+        annotations = {f'dva.ssafy.io/db-{s}-commit': current for s in ('customer', 'operations', 'order', 'consultation', 'delivery')}
+        annotations['dva.ssafy.io/db-consultation-commit'] = self.deployed
+        annotations['dva.ssafy.io/parcel-drafts-schema'] = '055'
+        out = Path('msa-release')
+        out.mkdir()
+        (out / 'cluster-state.json').write_text(json.dumps({'items': list(self.state.values())}) + '\n' +
+            json.dumps({'metadata': {'name': 'dva', 'annotations': annotations}}))
+        with patch.dict(os.environ, DELIVER_APPS='true', MSA_BASE_COMMIT=current):
+            planner.main()
+        self.assertEqual(set((out / 'databases.txt').read_text().split()), {'order', 'consultation'})
+        self.assertEqual(set((out / 'services.txt').read_text().split()), {'order', 'consultation'})
+
     def test_missing_database_history_checks_all_databases(self):
         self.assertEqual(planner.databases('', True, {}), ['customer', 'operations', 'order', 'consultation', 'delivery'])
 

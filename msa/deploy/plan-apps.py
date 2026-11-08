@@ -139,7 +139,9 @@ def main():
     base = os.environ.get("MSA_BASE_COMMIT", "")
     services = plan(base, delivery, deployments, annotations)
     db_services = databases(base, delivery, annotations)
-    if annotations.get('dva.ssafy.io/parcel-drafts-schema') != '055' and {'order', 'consultation'}.intersection(db_services):
+    cutover = annotations.get('dva.ssafy.io/parcel-drafts-schema') != '055' or any(
+        not deployments.get(service) or not healthy(deployments[service]) for service in ('order', 'consultation'))
+    if cutover and {'order', 'consultation'}.intersection(db_services):
         # Both source DBs and their compatible apps belong to one 055 cutover.
         for service in ('consultation', 'order'):
             if service not in db_services:
