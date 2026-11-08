@@ -27,4 +27,7 @@
   <changeSet id="007-recording-retry" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="007-recording-retry.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="008-order-intake" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="008-order-intake.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>

@@ -47,7 +47,7 @@ def main():
     cluster_created = False
     database_resources = []
     try:
-        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations', 'order') if service == 'order' else ('operations',) if service == 'operations' else ('delivery',) if service == 'delivery' else ()
+        db_services = ('operations', 'customer', 'consultation') if service == 'consultation' else ('operations', 'customer') if service == 'customer' else ('operations', 'order', 'consultation') if service == 'order' else ('operations',) if service == 'operations' else ('delivery',) if service == 'delivery' else ()
         addresses = {}
         if db_services:
             if not created:
@@ -147,6 +147,19 @@ def main():
                      '-e', 'CUSTOMER_AUTH_TOKEN=' + tokens['customer'], '-e', 'CONSULTATION_AUTH_TOKEN=' + tokens['consultation'], customer])
             database_resources.append(('container', customer))
             customer_address = command(['docker', 'inspect', customer, '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}']).strip()
+        if service == 'order':
+            consultation = network + '-consultation-app'
+            command(['docker', 'build', '--label', label, '-t', consultation, '-f', str(ROOT / 'msa/services/consultation/Dockerfile'), str(ROOT / 'msa')])
+            database_resources.append(('image', consultation))
+            command(['docker', 'run', '-d', '--name', consultation, '--label', label, '--network', network,
+                     '-e', 'NODE_ENV=test', '-e', 'PORT=3004', '-e', 'SWAGGER_ENABLED=true',
+                     '-e', 'DB_HOST=' + addresses['consultation'], '-e', 'DB_USER=consultation_app', '-e', 'DB_PORT=5432',
+                     '-e', 'DB_PASSWORD=disposable-test-only', '-e', 'DB_NAME=dva_webhook_test',
+                     '-e', 'OPERATIONS_URL=http://' + operations_address + ':3005', '-e', 'CUSTOMER_URL=http://customer.invalid:3001',
+                     '-e', 'CUSTOMER_AUTH_TOKEN=' + tokens['customer'], '-e', 'CONSULTATION_AUTH_TOKEN=' + tokens['consultation'], consultation])
+            database_resources.append(('container', consultation))
+            consultation_address = command(['docker', 'inspect', consultation, '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}']).strip()
+            command(['docker', 'exec', consultation, 'node', '-e', "(async()=>{for(let i=0;i<100;i++){try{if((await fetch('http://127.0.0.1:3004/consultation/health')).ok)return;}catch{}await new Promise(r=>setTimeout(r,100));}throw Error('consultation startup unavailable')})().catch(()=>process.exit(1))"])
         port = command(['docker', 'port', cluster, '30081/tcp']).strip()
         url = f'http://{port}/{service}/health'
         with tempfile.TemporaryDirectory() as temp, contextlib.chdir(temp):
@@ -165,6 +178,8 @@ def main():
                 next(item for item in env if item['name'] == 'OPERATIONS_URL')['value'] = f'http://{operations_address}:3005'
                 if service == 'consultation':
                     next(item for item in env if item['name'] == 'CUSTOMER_URL')['value'] = f'http://{customer_address}:3001'
+                if service == 'order':
+                    next(item for item in env if item['name'] == 'CONSULTATION_URL')['value'] = f'http://{consultation_address}:3004'
             svc = next(r for r in resources if r['kind'] == 'Service')
             svc['spec']['type'] = 'NodePort'
             svc['spec']['ports'][0]['nodePort'] = 30081

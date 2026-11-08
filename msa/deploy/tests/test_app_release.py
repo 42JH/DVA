@@ -181,6 +181,69 @@ class DeliveryPlanTests(unittest.TestCase):
 
 
 class ReleaseRecoveryTests(unittest.TestCase):
+    def test_first_055_failed_rollout_never_restores_the_legacy_app(self):
+        old = deployment('a' * 40)
+        old['metadata']['name'] = 'order'
+        old['spec']['template']['spec']['containers'][0]['name'] = 'order'
+        old['spec']['replicas'] = 0
+        old['status'] = {'replicas': 0}
+        desired = copy.deepcopy(old)
+        desired['spec']['replicas'] = 1
+        desired['spec']['template'].setdefault('metadata', {})['annotations'] = {'dva.ssafy.io/parcel-drafts-contract': '055'}
+        desired['spec']['template']['spec']['containers'][0]['image'] = 'new'
+        service = {'apiVersion': 'v1', 'kind': 'Service', 'metadata': {'name': 'order', 'namespace': 'dva'},
+                   'spec': {'ports': [{'name': 'http', 'port': 3002}]}}
+        calls = []
+        def kube(*args, **kwargs):
+            calls.append(args)
+            if '--dry-run=server' in args:
+                return json.dumps({'kind': 'List', 'items': [desired, service]})
+            if 'namespace' in args:
+                return json.dumps({'metadata': {'annotations': {'dva.ssafy.io/parcel-drafts-schema': '055'}}})
+            if 'get' in args:
+                return json.dumps(old if 'deployment' in args else service)
+            return ''
+        with tempfile.TemporaryDirectory() as temp:
+            original = Path.cwd()
+            os.chdir(temp)
+            try:
+                with patch.object(release, 'kube', side_effect=kube), patch.object(release, 'rollout', side_effect=RuntimeError('not ready')), patch.object(release, 'probe') as probe:
+                    with self.assertRaisesRegex(RuntimeError, 'not ready'):
+                        release.apply_release('order', 'b' * 40 + '-1', 'new')
+                    self.assertNotIn(('apply', '-f', 'previous-resources.json'), calls)
+                    self.assertFalse(any('annotate' in c for c in calls))
+                    probe.assert_not_called()
+            finally:
+                os.chdir(original)
+
+    def test_055_schema_rejects_old_order_and_consultation_candidates(self):
+        namespace = {'metadata': {'annotations': {'dva.ssafy.io/parcel-drafts-schema': '055'}}}
+        with patch.object(release, 'kube', return_value=json.dumps(namespace)):
+            for service in ('order', 'consultation'):
+                with self.subTest(service=service), self.assertRaisesRegex(RuntimeError, 'pre-parcel-draft'):
+                    release.parcel_cutover(service, deployment('a'*40), None)
+
+    def test_055_accepts_only_fully_stopped_cutover_and_compatible_new_app(self):
+        candidate = deployment('a'*40)
+        candidate['spec']['template'].setdefault('metadata', {})['annotations'] = {'dva.ssafy.io/parcel-drafts-contract': '055'}
+        old = deployment('b'*40)
+        old['spec']['replicas'] = 0
+        old['status'] = {'replicas': 0}
+        namespace = {'metadata': {'annotations': {'dva.ssafy.io/parcel-drafts-schema': '055'}}}
+        with patch.object(release, 'kube', return_value=json.dumps(namespace)):
+            self.assertTrue(release.parcel_cutover('order', candidate, old))
+            old['status']['replicas'] = 1
+            self.assertFalse(release.parcel_cutover('order', candidate, old))
+            old['status']['replicas'] = 0
+            old['spec']['replicas'] = 1
+            self.assertFalse(release.parcel_cutover('order', candidate, old))
+
+    def test_existing_055_pod_fences_rollback_even_without_namespace_annotation(self):
+        old = deployment('b'*40)
+        old['spec']['template'].setdefault('metadata', {})['annotations'] = {'dva.ssafy.io/parcel-drafts-contract': '055'}
+        with patch.object(release, 'kube', return_value='{}'), self.assertRaisesRegex(RuntimeError, 'pre-parcel-draft'):
+            release.parcel_cutover('order', deployment('a'*40), old)
+
     def test_manifest_hmac_secret_is_provisioned_before_any_rollout(self):
         desired=deployment('a'*40)
         desired['spec']['template']['spec']['containers'][0]['env']=[{'name':'SECURITY_LOG_HMAC_KEY','valueFrom':{'secretKeyRef':{'name':'msa-security-logs','key':'hmac-key'}}}]

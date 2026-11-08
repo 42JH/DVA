@@ -25,8 +25,11 @@ export class ConsultationsRepository {
 
   async lockForDeletion(client: PoolClient, id: number) {
     return (
-      await client.query<{ endedAt: Date | null }>(
-        `SELECT ended_at AS "endedAt" FROM call_sessions
+      await client.query<{
+        endedAt: Date | null;
+        orderFinalizedAt: Date | null;
+      }>(
+        `SELECT ended_at AS "endedAt",order_finalized_at AS "orderFinalizedAt" FROM call_sessions
       WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years') FOR UPDATE`,
         [id],
       )

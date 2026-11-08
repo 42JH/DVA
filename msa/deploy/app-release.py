@@ -57,6 +57,24 @@ def ready(deployment):
             and status.get("availableReplicas", 0) == replicas and status.get("readyReplicas", 0) == replicas)
 
 
+def parcel_contract(deployment):
+    return deployment.get('spec', {}).get('template', {}).get('metadata', {}).get('annotations', {}).get('dva.ssafy.io/parcel-drafts-contract') == '055'
+
+
+def stopped(deployment):
+    return deployment.get('spec', {}).get('replicas', 1) == 0 and deployment.get('status', {}).get('replicas', 0) == 0
+
+
+def parcel_cutover(service, desired, previous):
+    if service not in ('order', 'consultation'):
+        return False
+    namespace = json.loads(kube('get', 'namespace', 'dva', '-o', 'json'))
+    upgraded = namespace.get('metadata', {}).get('annotations', {}).get('dva.ssafy.io/parcel-drafts-schema') == '055' or bool(previous and parcel_contract(previous))
+    if upgraded and not parcel_contract(desired):
+        raise RuntimeError('055 schema refuses a pre-parcel-draft app; use a compatible release')
+    return upgraded and parcel_contract(desired) and bool(previous and stopped(previous))
+
+
 def verify_digest(table, image, expected):
     rows = [line.split() for line in table.splitlines() if line.split() and line.split()[0] == image]
     if len(rows) != 1 or len(rows[0]) < 3 or rows[0][2] != expected:
@@ -154,7 +172,7 @@ def ensure_service_auth_secret(service):
 
 def apply_release(service, release, image):
     desired = parse_resources(kube("apply", "--dry-run=server", "-f", "k8s.yaml", "-o", "json"))
-    validate_resources(desired, service, image)
+    desired_dep = validate_resources(desired, service, image)
     container = next(r for r in desired if r['kind'] == 'Deployment')['spec']['template']['spec']['containers'][0]
     for peer in ('customer', 'consultation', 'security-logs'):
         secret_name = 'msa-security-logs' if peer == 'security-logs' else f'msa-{peer}-auth'
@@ -166,7 +184,8 @@ def apply_release(service, release, image):
         if value.strip():
             previous.append(json.loads(value))
     old_dep = next((r for r in previous if r["kind"] == "Deployment"), None)
-    if old_dep and not ready(old_dep):
+    paused_cutover = parcel_cutover(service, desired_dep, old_dep)
+    if old_dep and not ready(old_dep) and not paused_cutover:
         raise RuntimeError("Existing deployment is not stable; inspect it before starting another rollout")
     snapshot = {"apiVersion": "v1", "kind": "List", "items": [clean(r) for r in previous]}
     Path("previous-resources.json").write_text(json.dumps(snapshot, indent=2))
@@ -186,6 +205,8 @@ def apply_release(service, release, image):
         print(f"Deployment failed: {failure}", file=sys.stderr)
         if started and old_dep:
             try:
+                if service in ('order', 'consultation') and parcel_contract(desired_dep) and not parcel_contract(old_dep):
+                    raise RuntimeError('055 schema refuses automatic rollback to an incompatible app; keep writes stopped and deploy a compatible release')
                 # A recovery must not overwrite a different operator's newer image.
                 current = json.loads(kube("-n", "dva", "get", "deployment", service, "-o", "json"))
                 old_image = old_dep["spec"]["template"]["spec"]["containers"][0]["image"]

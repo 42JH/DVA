@@ -15,4 +15,7 @@
   <changeSet id="003-payment-order-schema" author="dva" dbms="postgresql" runInTransaction="true">
     <sqlFile path="003-payment-order-schema.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
   </changeSet>
+  <changeSet id="004-parcel-drafts" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="004-parcel-drafts.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
 </databaseChangeLog>
