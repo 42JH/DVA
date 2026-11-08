@@ -3,7 +3,7 @@ WORKDIR /app/service
 
 COPY services/operations/package*.json ./
 COPY shared/events/package.json /shared/events/package.json
-RUN npm ci
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci
 COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY services/operations/nest-cli.json services/operations/tsconfig*.json services/operations/.prettierrc services/operations/eslint.config.mjs ./
@@ -28,7 +28,7 @@ ENV PORT=3005
 
 COPY services/operations/package*.json ./
 COPY shared/events/package.json /shared/events/package.json
-RUN npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci --omit=dev
 COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY --from=builder /app/service/dist ./dist

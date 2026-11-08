@@ -94,7 +94,7 @@ def build():
         # Record before building so cleanup also covers a partially failed preparation.
         document['images'][key] = {'tag': tag}
         MANIFEST.write_text(json.dumps(document))
-        subprocess.run(['docker', 'build', '--label', 'dva.ci-run=' + release, '-t', tag, *context(key)], cwd=ROOT, check=True)
+        subprocess.run(['docker', 'build', '--label', 'dva.ci-run=' + release, '-t', tag, *context(key)], cwd=ROOT, check=True, timeout=900)
         document['images'][key]['id'] = run('docker', 'image', 'inspect', tag, '--format', '{{.Id}}')
         MANIFEST.write_text(json.dumps(document, indent=2) + '\n')
 
