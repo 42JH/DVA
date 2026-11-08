@@ -935,3 +935,12 @@
 - 파일: backend_client/api.py·mock.py, app/domain/resume.py(신규)·state.py, app/integrations/backend/mapping.py, app/calls/live.py·results.py, app/policy/model.py·render.py, policy/workflow.toml(resume_confirm·resume 결과, decision.resume), app/config.py, config/server.toml, docs/contracts/be-api.md §9.
 - 테스트: app/tests/test_resume.py 10개(후보·기한 경계·묻기 조건·불러오기·BE 본문·경로·통화 E2E 예/끊김/거절/기한 초과). 전체 699 passed, 3 failed(로컬 data/address.db 스키마가 오래된 환경 문제 — 기반 브랜치에서도 같은 3건).
 - 2단계(미구현): 아웃박스·재시작 복구, 409 VERSION_CONFLICT 재조회, 연결 PATCH 응답 유실 시 상세 재조회. 미확인: 실제 BE에서 같은 값 PATCH로 연결되는지, 끊긴 뒤 PATCH 허용, Live가 resume_confirm 문구를 따르는지(실통화).
+
+## 2026-11-08 — 미완료 주문 이어받기 2단계(아웃박스·재조회·연결 유실)
+
+- 사용자 결정: ① 관리자 수정과 겹치면 고객 값 우선 ② 끊긴 뒤 확정 불가면 PATCH 저장 후 FAILED(담당자 마무리) ③ 연결이 끝내 불확실하면 종료 때 POST 409 → FAILED ④ 주문 1개 = 상세 1개로 BE 변경 중이라 '다른 택배 함께 접수' 안내는 넣지 않음.
+- 방식: 같은 PATCH를 재전송하지 않고 목표 상태와 맞춘다. `_resume_row`가 `call_results`에 `{resume: {orderSeq, callSessionSeq, baseSeqs, target, submit, cancel, onlyParcel}}`를 먼저 저장(스키마 그대로) → `_send`가 `resume` 행을 `_send_resumed`로 보냄(POST 금지) → 상세 재조회 → `remaining_patch`(다른 값만, 새 상세 중복 방지, 시각 표기 차이·0/null 동일) → PATCH → submit. 409 VERSION_CONFLICT는 재조회 후 최대 3회, 그래도 충돌이면 SENT_UNCERTAIN.
+- 연결: 연결 PATCH가 연결 실패·시간 초과·처리 중·버전 충돌이면 `_resume_relink`가 상세를 다시 읽어 지금 version으로 같은 값 PATCH 1회(후보도 새 상세로 교체).
+- 1단계 임시 처리 `ops["resume_result"]` 삭제, 분석 접수 택배 수는 아웃박스 본문에서 셈. `resume_patch` → `resume_target`, `resume_body`는 expectedVersion 없는 목표 상태. Mock: `ended`(끝난 통화 submit 409).
+- 테스트: test_resume.py 17개(+7: 남은 변경 계산, 재시작 복구 PATCH·POST 없음, PATCH 응답 유실 뒤 중복 상세 없음, 버전 충돌 재조회·고객 값 우선, 3회 충돌 SENT_UNCERTAIN·주문 상태 변경 FAILED, 끊긴 뒤 submit 거절 FAILED·PATCH 저장, 연결 응답 유실 재연결). 전체 706 passed, 3 failed(로컬 address.db — 기존과 같음).
+- 미확인(실제 BE): 0·빈 값을 null로 돌려주는지(같은 값으로 취급), 끊긴 통화 submit 거절 코드가 409 INVALID_STATE인지, 같은 값 PATCH 재연결이 이미 연결된 통화에서 허용되는지.

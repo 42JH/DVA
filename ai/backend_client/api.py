@@ -12,6 +12,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from urllib.parse import quote
 
 import httpx2
@@ -193,11 +194,11 @@ def link_body(version: int, detail: dict, order_parcel_seq: int) -> dict:
     return body | {"parcels": [{"orderParcelSeq": order_parcel_seq, "clientComment": parcel.get("clientComment") or ""}]}
 
 
-def resume_body(version: int, parcels: list[tuple[Order, int | None, int | None]], payment: str | None,
+def resume_body(parcels: list[tuple[Order, int | None, int | None]], payment: str | None,
                 pickup_at: str | None, total: int | None) -> dict:
-    """이어받은 주문 보완 PATCH. parcels = (택배, 배송비, 기존 상세 번호|None=새 상세).
+    """이어받은 주문의 목표 상태(PATCH 본문에서 expectedVersion을 뺀 모양). parcels = (택배, 배송비, 기존 상세 번호|None=새 상세).
     기존 상세는 수량 4종·기타 물품을 0·빈 문자열까지 명시한다(생략하면 이전 값이 남는다)."""
-    body: dict = {"expectedVersion": version}
+    body: dict = {}
     out = []
     for order, fare, seq in parcels:
         p = parcel_body(order, fare)
@@ -214,6 +215,57 @@ def resume_body(version: int, parcels: list[tuple[Order, int | None, int | None]
     if total is not None:
         body["totalAmount"] = total
     return body
+
+
+def _same(key: str, want, have) -> bool:
+    if want in (None, 0, "") and have in (None, 0, ""):  # BE가 0·빈 값을 null로 돌려줘도 같은 값
+        return True
+    if key == "pickupRequestedAt" and isinstance(want, str) and isinstance(have, str):
+        try:  # 같은 시각의 다른 표기(+09:00·Z)
+            return datetime.fromisoformat(want.replace("Z", "+00:00")) == datetime.fromisoformat(have.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+    return want == have
+
+
+def _parcel_changes(want: dict, have: dict) -> dict:
+    """목표 상세 중 지금 상세와 다른 값만. 주소는 하위 필드 단위(BE가 제공한 하위 필드만 바꾼다)."""
+    out = {}
+    for k, v in want.items():
+        if k == "orderParcelSeq":
+            continue
+        if k in ("origin", "destination"):
+            cur = have.get(k) or {}
+            diff = {sk: sv for sk, sv in v.items() if not _same(sk, sv, cur.get(sk))}
+            if diff:
+                out[k] = diff
+        elif not _same(k, v, have.get(k)):
+            out[k] = v
+    return out
+
+
+def remaining_patch(target: dict, detail: dict, base_seqs: list[int]) -> dict:
+    """이어받은 주문의 목표 상태(resume_body) − 지금 상세(B/order-read.md) = 아직 보낼 변경(expectedVersion 제외, 없으면 {}).
+    같은 PATCH를 다시 보내지 않고 매번 다시 읽어 맞추므로 응답 유실·재시작·409 뒤에도 결과가 같다(B/order-update.md:
+    유실·충돌이면 재조회, 새 상세 무조건 재전송 금지). 새 상세는 이어받을 때 없던 미취소 상세 중 내용이 같은 것이 있으면
+    이미 추가된 것으로 본다. 목표 값이 지금 값과 다르면 목표(고객이 확인한 값)로 덮는다(사용자 결정 2026-11-08)."""
+    current = {p["orderParcelSeq"]: p for p in detail.get("parcels") or []}
+    added = [p for seq, p in current.items() if seq not in base_seqs and p.get("status") != "CANCELLED"]
+    parcels = []
+    for want in target.get("parcels") or []:
+        seq = want.get("orderParcelSeq")
+        if seq is None:
+            match = next((p for p in added if not _parcel_changes(want, p)), None)
+            if match is not None:
+                added.remove(match)  # 같은 내용의 새 상세 두 개를 하나로 합치지 않는다
+            else:
+                parcels.append(want)
+        elif diff := _parcel_changes(want, current.get(seq) or {}):
+            parcels.append({"orderParcelSeq": seq} | diff)
+    out = {k: v for k, v in target.items() if k != "parcels" and not _same(k, v, detail.get(k))}
+    if parcels:
+        out["parcels"] = parcels
+    return out
 
 
 def _parcels(detail: dict) -> list[dict]:

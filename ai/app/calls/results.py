@@ -20,8 +20,9 @@ from app.domain.outcome import decide_outcome
 from app.domain.store import hold_unclassified_items
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
-from app.integrations.backend.mapping import resume_patch, submit_body, to_order
+from app.integrations.backend.mapping import resume_target, submit_body, to_order
 from app.persistence.outbox import Outbox
+from backend_client.api import remaining_patch
 
 log = logging.getLogger(__name__)
 NAMESPACE = uuid.UUID("6f1d3c52-6a59-4c4c-9a39-4b7c5f0f2d11")  # 원본 insights.py와 같은 규칙: uuid5(통화 ID:순번)
@@ -174,9 +175,11 @@ class ResultService:
         return t
 
     async def submit(self, s: CallSession, on_result=None) -> dict | None:
-        if s.state.resume_version is not None:  # 이어받은 주문에 연결된 통화: 새 주문(POST)은 BE가 거절한다(409)
-            return await self._submit_resumed(s, on_result)
         row = await asyncio.to_thread(self.outbox.result, s.call_id)
+        if row is None and s.state.resume_version is not None:  # 이어받은 주문에 연결된 통화: 새 주문(POST)은 BE가 거절한다(409)
+            row = await self._resume_row(s)
+            if row is None:
+                return None
         if row is None:
             reg = s.tools.ops.get("register")
             if reg and reg.get("status") == "running":  # 등록 중이면 끝나길 잠깐 기다린다(customerSeq로 보내려고)
@@ -206,56 +209,88 @@ class ResultService:
                 await on_result(s, data)
         return data
 
-    async def _submit_resumed(self, s: CallSession, on_result=None) -> dict | None:
-        """이어받은 미완료 주문 보완(B/order-update.md) → 다 갖췄으면 확정(B/order-submit.md, 진행 중 통화만).
-        끊긴 뒤에는 PATCH만 된다(연결된 주문에 마저 저장). CANCELLED면 이어받은 상세만 취소한다.
-        shortcut: 아웃박스·재시작 복구·409 재조회가 없다 — 2단계(사용자 결정 2026-11-06 단계별 구현)."""
-        st, api = s.state, self.backend.api
+    async def _resume_row(self, s: CallSession) -> dict | None:
+        """이어받은 통화의 목표 상태를 아웃박스에 먼저 남긴다(전송·재시작 복구는 _send_resumed). 무의미 통화면 None."""
+        st = s.state
         async with s.lock:
             if s.rt and s.rt.customer_turns:
                 turn = s.rt.customer_turns[-1]
                 hold_unclassified_items(st, self.policy.parcel_items, turn.utterance_id, turn.text)
             outcome = decide_outcome(st, self.policy, datetime.now(timezone.utc), self.fare_of)
-            cand, version, seq = st.resume, st.resume_version, st.customer.call_session_seq
-            body = resume_patch(outcome, cand, version) if outcome.kind not in (None, "CANCELLED") else None
+            if outcome.kind is None:
+                return None
+            body = {"resume": resume_target(outcome, st.resume, st.customer.call_session_seq)}
             st.bump()
-        s.note("결과 본문", f"이어받기 order={cand.order_seq} {outcome.kind} {','.join(outcome.reasons) or ''}")
-        data = {"orderSeq": cand.order_seq, "status": "COLLECTING"}
+        s.note("결과 본문", f"이어받기 order={st.resume.order_seq} {outcome.kind} {','.join(outcome.reasons) or ''}")
+        return await asyncio.to_thread(self.outbox.create_result, s.call_id, str(uuid.uuid4()), body)
+
+    async def _send_resumed(self, row: dict) -> dict | None:
+        """이어받은 주문 결과: 같은 PATCH를 다시 보내지 않고 매번 상세를 다시 읽어 목표와 다른 것만 PATCH → 확정
+        (B/order-update.md·order-submit.md). 응답 유실·재시작·409 VERSION_CONFLICT가 모두 같은 길이다.
+        확정은 진행 중 통화만 된다 — 끊긴 뒤 거절되면 PATCH 저장까지만 하고 FAILED(담당자 마무리, 사용자 결정 2026-11-08)."""
+        sid, r, api = row["session_id"], row["body"]["resume"], self.backend.api
+        seq, order_seq = r["callSessionSeq"], r["orderSeq"]
+        data: dict = {"orderSeq": order_seq}
         try:
-            if outcome.kind == "CANCELLED":
-                r = await self.backend.write("resume_cancel", api.cancel_parcels, seq, cand.order_seq, [cand.parcel_seq])
-                if r == "ok" and not cand.other_fares:
-                    data["status"] = "CANCELLED"
-            elif body and len(body) > 1:  # expectedVersion만 있으면 BE 400 — 바꿀 값이 있을 때만
-                version = await self.backend.write("resume_save", api.patch_order, seq, cand.order_seq, body)
-                st.resume_version = version
-                if outcome.kind == "COMPLETE" and "totalAmount" in body:
-                    done = await self.backend.write("resume_submit", api.submit_order, seq, cand.order_seq, version,
-                                                    budget_sec=self.submit_budget_sec)
-                    data["status"] = done.get("status")
-                    if data["status"] == "ACCEPTED":
-                        try:  # 접수번호 안내용(없어도 결과는 그대로)
-                            detail = await self.backend.read("resume_detail", api.order_detail, seq, cand.order_seq)
-                            data["parcelNo"] = (detail or {}).get("parcelNo")
-                        except BackendFailure as e:
-                            s.note("접수번호 조회 실패", e.code)
+            if r["cancel"] is not None:
+                res = await self.backend.write("resume_cancel", api.cancel_parcels, seq, order_seq, [r["cancel"]])
+                if res != "ok":  # 404·409(이미 확정·결제 중 등)
+                    return await self._resumed_failed(sid, data | {"error": f"CANCEL_{res.upper()}"})
+                data["status"] = "CANCELLED" if r["onlyParcel"] else "COLLECTING"
+            else:
+                for attempt in range(3):
+                    detail = await self.backend.read("resume_detail", api.order_detail, seq, order_seq)
+                    if detail is None:
+                        return await self._resumed_failed(sid, data | {"error": "NOT_FOUND"})
+                    if detail["status"] != "COLLECTING":
+                        if r["submit"] and detail["status"] in SAVED:  # 확정 응답만 잃었다(또는 관리자가 확정)
+                            data["status"] = detail["status"]
+                            break
+                        return await self._resumed_failed(sid, data | {"status": detail["status"], "error": "INVALID_STATE"})
+                    patch = remaining_patch(r["target"], detail, r["baseSeqs"])
+                    try:
+                        version = detail["version"]
+                        if patch:
+                            version = await self.backend.write("resume_save", api.patch_order, seq, order_seq,
+                                                               {"expectedVersion": version} | patch)
+                        if r["submit"]:
+                            done = await self.backend.write("resume_submit", api.submit_order, seq, order_seq, version,
+                                                            budget_sec=self.submit_budget_sec)
+                            data["status"] = done.get("status")
+                        else:
+                            data["status"] = "COLLECTING"
+                        break
+                    except BackendFailure as e:
+                        if e.error_code != "VERSION_CONFLICT" or attempt == 2:
+                            raise  # 3번 연속 충돌이면 SENT_UNCERTAIN으로 남겨 다음 주기에 다시 읽는다
+                if data["status"] == "ACCEPTED":
+                    try:  # 접수번호 안내용(없어도 결과는 그대로)
+                        detail = await self.backend.read("resume_detail", api.order_detail, seq, order_seq)
+                        data["parcelNo"] = (detail or {}).get("parcelNo")
+                    except BackendFailure as e:
+                        log.warning("접수번호 조회 실패 %s %s", sid, e)
         except BackendFailure as e:
-            log.error("이어받기 결과 %s %s", s.call_id, e)
-            s.note("이어받기 결과 실패", e.code)
+            retry = e.kind in ("unavailable", "in_progress") or e.error_code == "VERSION_CONFLICT"
+            status = "SENT_UNCERTAIN" if retry else "FAILED"
+            await asyncio.to_thread(self.outbox.update_result, sid, status, data | {
+                "error": e.code, "http": e.http_status, "errorCode": e.error_code})
+            log.error("이어받기 결과 %s %s %s", sid, status, e)
             return None
-        if data["status"] in SAVED:
-            s.tools.ops["resume_result"] = {"status": "done", "parcels": len(outcome.parcels) + len(cand.other_fares)}
-        st.result_accepted = data["status"] == "ACCEPTED"
-        s.result = data
-        s.note("결과", str(data["status"]))
-        if on_result:
-            await on_result(s, data)
+        await asyncio.to_thread(self.outbox.update_result, sid, "DONE", data)
+        log.info("이어받기 결과 %s → %s", sid, data["status"])
         return data
+
+    async def _resumed_failed(self, sid: str, data: dict) -> None:
+        """업무 상태 때문에 맞출 수 없음(주문 없음·확정/취소됨·통화 연결 충돌) — 다시 보내지 않고 담당자 확인으로 남긴다."""
+        await asyncio.to_thread(self.outbox.update_result, sid, "FAILED", data)
+        log.error("이어받기 결과 %s FAILED %s", sid, data)
 
     async def _send(self, row: dict) -> dict | None:
         sid = row["session_id"]
         if row["status"] in ("DONE", "FAILED"):
             return row["data"]
+        if "resume" in row["body"]:  # 이어받은 주문: 새 주문 POST로 보내면 안 된다
+            return await self._send_resumed(row)
         try:
             data = await self.backend.write("submit", self.backend.api.submit_result, row["body"], row["key"],
                                             budget_sec=self.submit_budget_sec)
@@ -464,8 +499,7 @@ class ResultService:
         events = [{"eventId": str(uuid.uuid5(NAMESPACE, f"{s.call_id}:{i}")), "eventOrder": i, "kind": kind,
                    "occurredAt": _iso(ts), "offsetSeconds": off(ts), "payload": payload}
                   for i, (ts, kind, payload) in enumerate(rows, 1)]
-        submitted = (_parcel_count(self.outbox, s.call_id) or s.tools.ops.get("resume_result", {}).get("parcels", 0)
-                     if data.get("status") in SAVED else 0)
+        submitted = _parcel_count(self.outbox, s.call_id) if data.get("status") in SAVED else 0
         analysis = {
             "providerCallId": s.call_id, "startedAt": _iso(started), "endedAt": _iso(now),
             "aiPersonaVersionSeq": s.persona_version_seq,           # 서버 기본 프롬프트면 null(BE가 ACTIVE로 채우지 않음)
@@ -682,6 +716,8 @@ def _repeats(state) -> int:
 
 def _parcel_count(outbox: Outbox, session_id: str) -> int:
     row = outbox.result(session_id)
+    if row and (r := row["body"].get("resume")):
+        return len(r["target"].get("parcels") or []) if r["submit"] else 0
     return len(row["body"].get("parcels") or []) if row and row["body"].get("outcome") == "COMPLETE" else 0
 
 

@@ -138,6 +138,7 @@ class ResumeCandidate:
     other_fares: tuple[int | None, ...] = ()  # 같은 주문의 다른 미취소 상세 배송비(합계용, 대화에는 불러오지 않음)
     payment: str | None = None
     pickup_at: str | None = None
+    parcel_seqs: tuple[int, ...] = ()     # 이어받을 때 주문에 있던 상세 번호 전부(새 상세가 이미 추가됐는지 가리는 기준)
 
 
 @dataclass

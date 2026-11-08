@@ -67,14 +67,21 @@ def resume_candidate(detail: dict) -> ResumeCandidate | None:
     return ResumeCandidate(order_seq=detail["orderSeq"], version=detail["version"], created_at=detail["createdAt"],
                            parcel_seq=latest["orderParcelSeq"], parcel=from_order(detail_order(latest)),
                            other_fares=tuple(p.get("notifiedPrice") for p in active if p is not latest),
-                           payment=detail.get("paymentMethodType"), pickup_at=detail.get("pickupRequestedAt"))
+                           payment=detail.get("paymentMethodType"), pickup_at=detail.get("pickupRequestedAt"),
+                           parcel_seqs=tuple(p["orderParcelSeq"] for p in detail.get("parcels") or []))
 
 
-def resume_patch(outcome: Outcome, cand: ResumeCandidate, version: int) -> dict:
-    """이어받은 통화의 결과 → 주문 보완 PATCH 본문. 합계는 이 통화 택배 배송비 + 같은 주문의 다른 상세 배송비를
-    모두 알 때만 넣는다(BE가 확정 때 합계·상세 배송비 일치를 검사한다)."""
+def resume_target(outcome: Outcome, cand: ResumeCandidate, call_session_seq: int) -> dict:
+    """이어받은 통화의 결과 → 아웃박스에 남기는 목표 상태(재시작 뒤에도 이것만으로 PATCH·확정·취소를 다시 맞춘다).
+    합계는 이 통화 택배 배송비 + 같은 주문의 다른 상세 배송비를 모두 알 때만 넣는다(BE가 확정 때 일치를 검사한다).
+    확정(submit)은 COMPLETE이고 합계가 있을 때만. CANCELLED면 이어받은 상세만 취소한다."""
+    out = {"orderSeq": cand.order_seq, "callSessionSeq": call_session_seq, "baseSeqs": list(cand.parcel_seqs),
+           "target": {}, "submit": False, "cancel": None, "onlyParcel": not cand.other_fares}
+    if outcome.kind == "CANCELLED":
+        return out | {"cancel": cand.parcel_seq}
     fares = list(outcome.fares) if len(outcome.fares) == len(outcome.parcels) else [None] * len(outcome.parcels)
     parcels = [(to_order(p), f, p.get("order_parcel_seq")) for p, f in zip(outcome.parcels, fares)]
     every = fares + list(cand.other_fares)
     total = sum(every) if every and all(isinstance(f, int) and f > 0 for f in every) else None
-    return resume_body(version, parcels, outcome.payment, outcome.pickup_at, total)
+    target = resume_body(parcels, outcome.payment, outcome.pickup_at, total)
+    return out | {"target": target, "submit": outcome.kind == "COMPLETE" and "totalAmount" in target}

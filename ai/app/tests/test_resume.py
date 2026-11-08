@@ -1,5 +1,6 @@
-"""미완료 주문 이어받기 1단계(사용자 결정 2026-11-06): createdAt 일주일 안 → 먼저 묻고 → 예면 같은 값 PATCH로 연결 →
-가장 최근 상세 1건을 불러와 빠진 항목·되읽기 → 확정은 PATCH + submit(새 주문 POST 없음). 끊기면 PATCH만."""
+"""미완료 주문 이어받기(사용자 결정 2026-11-06·11-08): createdAt 일주일 안 → 먼저 묻고 → 예면 같은 값 PATCH로 연결 →
+가장 최근 상세 1건을 불러와 빠진 항목·되읽기 → 확정은 PATCH + submit(새 주문 POST 없음). 끊기면 PATCH만.
+2단계: 결과는 아웃박스(목표 상태)로 남기고 보낼 때마다 다시 읽어 남은 변경만 — 유실·재시작·409에도 같은 결과."""
 
 import asyncio
 import json
@@ -14,7 +15,12 @@ from app.domain.state import ConversationState, Customer, FieldStatus, Items, Re
 from app.integrations.backend.mapping import resume_candidate
 from app.tests.test_calls import incoming, started, until
 from app.tests.test_live_flow import ai, flow, say
-from backend_client.api import BackendAPI, link_body, resume_body
+from app.calls.results import ResultService
+from app.integrations.backend.gateway import BackendGateway
+from app.persistence.outbox import Outbox
+from app.tests.test_domain import P, fare
+from backend_client.api import BackendAPI, BackendError, link_body, remaining_patch, resume_body
+from backend_client.mock import MockBackend
 from backend_client.order import Order
 
 NOW = datetime(2026, 11, 6, 3, 0, tzinfo=timezone.utc)
@@ -101,12 +107,12 @@ def test_link_body_resaves_an_existing_value():
 
 
 def test_resume_body_zeroes_omitted_counts_on_existing_parcel():
-    body = resume_body(4, [(Order(medium_box_count=1, item_price=1000), 5000, 11), (Order(document_count=2), 3000, None)],
+    body = resume_body([(Order(medium_box_count=1, item_price=1000), 5000, 11), (Order(document_count=2), 3000, None)],
                        "billing", None, 8000)
     old, new = body["parcels"]
     assert old["orderParcelSeq"] == 11 and old["smallBoxCount"] == 0 and old["mediumBoxCount"] == 1
     assert old["otherItemDescription"] == "" and "orderParcelSeq" not in new and "smallBoxCount" not in new
-    assert body["expectedVersion"] == 4 and body["totalAmount"] == 8000 and body["paymentMethodType"] == "billing"
+    assert "expectedVersion" not in body and body["totalAmount"] == 8000 and body["paymentMethodType"] == "billing"
 
 
 def test_api_paths_and_call_header():
@@ -236,3 +242,134 @@ def test_resume_declined_or_expired_takes_a_new_order(tmp_path):
         s = run(scenario())
         assert s.state.resume_version is None and db.linked == {}
         assert next(o for o in db.orders if o["orderSeq"] == order_seq)["version"] == 1  # 이전 주문은 그대로
+
+
+# --- 2단계: 남은 변경 계산(순수 함수) ---
+
+def test_remaining_patch_sends_only_differences_and_never_duplicates_a_new_parcel():
+    target = {"parcels": [{"orderParcelSeq": 11, **parcel(clientComment="문 앞")}, parcel(destination=DEST | {"name": "박민수"})],
+              "paymentMethodType": "billing", "pickupRequestedAt": "2026-11-07T10:00:00+09:00", "totalAmount": 8000}
+    d = detail(paymentMethodType="billing", pickupRequestedAt="2026-11-07T01:00:00Z")  # 같은 시각 다른 표기
+    assert remaining_patch(target, d, [11]) == {"totalAmount": 8000, "parcels": [
+        {"orderParcelSeq": 11, "clientComment": "문 앞"}, target["parcels"][1]]}
+    # PATCH는 저장됐는데 응답만 잃음 → 다시 읽으면 보낼 것이 없다(새 상세 23을 다시 추가하지 않는다)
+    saved = detail(paymentMethodType="billing", pickupRequestedAt="2026-11-07T01:00:00Z", totalAmount=8000, parcels=[
+        {"orderParcelSeq": 11, "status": "ACTIVE", **parcel(clientComment="문 앞")},
+        {"orderParcelSeq": 23, "status": "ACTIVE", **parcel(destination=DEST | {"name": "박민수"})}])
+    assert remaining_patch(target, saved, [11]) == {}
+    # 이어받을 때 있던 상세(11)는 새 상세의 짝이 아니다 / 관리자가 그새 바꾼 값은 고객이 확인한 값으로 덮는다
+    admin = detail(paymentMethodType="billing", pickupRequestedAt="2026-11-07T01:00:00Z", totalAmount=8000, parcels=[
+        {"orderParcelSeq": 11, "status": "ACTIVE", **parcel(clientComment="문 앞", itemPrice=50000,
+                                                            destination=DEST | {"name": "박민수"})}])
+    assert remaining_patch(target, admin, [11])["parcels"] == [
+        {"orderParcelSeq": 11, "itemPrice": 30000, "destination": {"name": "이영희"}}, target["parcels"][1]]
+
+
+# --- 2단계: 아웃박스 전송(가짜 BE) ---
+
+SEQ = 20
+
+
+def _outbox_case(tmp_path, submit=True, new_parcel=False):
+    db = MockBackend()
+    db.add_customer(CALLER, "김철수")
+    db.call_sessions[SEQ] = CALLER
+    order_seq = db.add_order(CALLER, "COLLECTING", [], parcels=[parcel()])
+    base = db.orders[-1]["parcels"][0]["orderParcelSeq"]
+    db.linked[SEQ] = order_seq  # 통화 중 연결 PATCH를 했다
+    parcels = [{"orderParcelSeq": base, **parcel(notifiedPrice=4000, clientComment="문 앞")}]
+    if new_parcel:
+        parcels.append(parcel(destination=DEST | {"name": "박민수"}, notifiedPrice=4000))
+    target = {"parcels": parcels, "paymentMethodType": "billing", "totalAmount": 4000 * len(parcels)}
+    body = {"resume": {"orderSeq": order_seq, "callSessionSeq": SEQ, "baseSeqs": [base], "target": target,
+                       "submit": submit, "cancel": None, "onlyParcel": True}}
+    outbox = Outbox(tmp_path / "outbox.sqlite3")
+    outbox.create_result("live_1", "key-1", body)
+    rs = ResultService(BackendGateway(db), outbox, P, fare)
+    return rs, db, next(o for o in db.orders if o["orderSeq"] == order_seq)
+
+
+def _lose_first(db, method):
+    """첫 호출은 BE에 반영되지만 응답을 잃는다(연결 끊김)."""
+    real, calls = getattr(db, method), []
+
+    async def wrapped(*a):
+        calls.append(a)
+        out = await real(*a)
+        if len(calls) == 1:
+            raise BackendError("connection reset", None, "TRANSPORT")
+        return out
+    setattr(db, method, wrapped)
+    return calls
+
+
+def test_restart_recovery_patches_and_submits_never_posts(tmp_path):
+    rs, db, order = _outbox_case(tmp_path)
+    run(rs.recover())  # 재시작 복구가 이어받기 행을 새 주문 POST로 보내지 않는다
+    assert db.results == [] and order["status"] == "notPaid" and order["parcels"][0]["clientComment"] == "문 앞"
+    assert rs.outbox.result("live_1")["status"] == "DONE" and rs.outbox.unfinished_results() == []
+
+
+def test_lost_patch_response_is_reconciled_without_duplicate_parcel(tmp_path):
+    rs, db, order = _outbox_case(tmp_path, new_parcel=True)
+    patches = _lose_first(db, "patch_order")
+    assert run(rs._send(rs.outbox.result("live_1"))) is None
+    assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN" and order["status"] == "COLLECTING"
+    data = run(rs._send(rs.outbox.result("live_1")))  # 주기 재확인: 다시 읽으니 보낼 PATCH가 없다 → 확정만
+    assert len(patches) == 1 and len(order["parcels"]) == 2 and data["status"] == "notPaid"
+
+
+def test_version_conflict_rereads_and_customer_value_wins(tmp_path):
+    rs, db, order = _outbox_case(tmp_path)
+    real = db.patch_order
+
+    async def admin_first(*a):
+        if order["version"] == 1:  # 우리 PATCH 직전에 관리자가 요청사항을 고침
+            order["parcels"][0]["clientComment"], order["version"] = "경비실", 2
+        return await real(*a)
+    db.patch_order = admin_first
+    data = run(rs._send(rs.outbox.result("live_1")))
+    assert data["status"] == "notPaid" and order["parcels"][0]["clientComment"] == "문 앞"
+
+
+def test_three_conflicts_stay_for_retry_and_changed_order_fails(tmp_path):
+    rs, db, order = _outbox_case(tmp_path)
+
+    async def always_conflict(*a):
+        raise BackendError("409", 409, "VERSION_CONFLICT")
+    db.patch_order = always_conflict
+    assert run(rs._send(rs.outbox.result("live_1"))) is None
+    assert rs.outbox.result("live_1")["status"] == "SENT_UNCERTAIN"
+    order["status"] = "CANCELLED"  # 관리자가 주문을 취소함 → 다시 보내지 않는다
+    assert run(rs._send(rs.outbox.result("live_1"))) is None
+    row = rs.outbox.result("live_1")
+    assert row["status"] == "FAILED" and row["data"]["error"] == "INVALID_STATE" and rs.outbox.unfinished_results() == []
+
+
+def test_submit_after_call_ended_saves_patch_and_fails_for_staff(tmp_path):
+    rs, db, order = _outbox_case(tmp_path)
+    db.ended.add(SEQ)
+    assert run(rs._send(rs.outbox.result("live_1"))) is None
+    row = rs.outbox.result("live_1")
+    assert row["status"] == "FAILED" and row["data"]["errorCode"] == "INVALID_STATE"
+    assert order["status"] == "COLLECTING" and order["totalAmount"] == 4000 and order["parcels"][0]["clientComment"] == "문 앞"
+
+
+def test_lost_link_response_relinks_with_current_version(tmp_path):
+    svc, client, db, order_seq = _setup(tmp_path)
+    links = _lose_first(db, "patch_order")
+
+    async def scenario():
+        task, conn, s = await _open(svc, client)
+        await say(conn, "택배 보내려고요", 1000)
+        await until(lambda: _facts(conn, "resume_confirm"))
+        await ai(conn, "아까 이영희 님께 보내시던 택배 접수를 이어서 진행할까요?", 2000)
+        await say(conn, "네", 3000)
+        await until(lambda: _facts(conn, "resume"))
+        assert _facts(conn, "resume")["resume"] == "loaded" and s.state.resume_version == 3
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return s
+
+    run(scenario())
+    assert len(links) >= 2 and db.results == []  # 같은 값 PATCH 한 번 더로 연결 확정, 새 주문 없음

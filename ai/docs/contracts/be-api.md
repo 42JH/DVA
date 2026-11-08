@@ -227,8 +227,10 @@
 - PATCH: `call_session_seq`, `{expectedVersion, ...변경}`, AI는 COLLECTING만. 200 `{data:{version}}`. 409 `VERSION_CONFLICT`/`INVALID_STATE`/`REQUEST_IN_PROGRESS`, 422 `VALIDATION_FAILED`.
 - submit: `{expectedVersion}` → 200/202 `{status}`.
 - 이어받기(2026-11-06, 1단계): 등록 고객의 통화 등록 뒤 `GET /api/orders?status=COLLECTING&limit=1` → 상세. `createdAt`부터 일주일(`[call] resume_window_sec`) 안이면 먼저 묻고, 예면 같은 값 PATCH(결제 방식 → 수거 시각 → 그 상세의 clientComment)로 통화를 주문에 연결. 가장 최근 미취소 상세 1건만 불러온다.
-- 연결된 통화는 새 주문(`POST /api/orders`)을 만들 수 없으므로 결과는 PATCH(기존 상세 `orderParcelSeq` 수정·새 상세 추가, 수량 4종 명시) → COMPLETE이고 합계를 알면 submit. 끊긴 뒤에는 PATCH만(submit은 진행 중 통화만). CANCELLED면 이어받은 상세만 취소 API. 코드: `api.py` `collecting_orders`·`patch_order`·`submit_order`·`link_body`·`resume_body`, `mapping.py` `resume_candidate`·`resume_patch`, `results.py` `_submit_resumed`.
-- 2단계 미구현: 아웃박스·재시작 복구, 409 VERSION_CONFLICT 재조회, 연결 PATCH 응답 유실 확인.
+- 연결된 통화는 새 주문(`POST /api/orders`)을 만들 수 없으므로 결과는 PATCH(기존 상세 `orderParcelSeq` 수정·새 상세 추가, 수량 4종 명시) → COMPLETE이고 합계를 알면 submit. 끊긴 뒤에는 PATCH만(submit은 진행 중 통화만). CANCELLED면 이어받은 상세만 취소 API. 코드: `api.py` `collecting_orders`·`patch_order`·`submit_order`·`link_body`·`resume_body`·`remaining_patch`, `mapping.py` `resume_candidate`·`resume_target`, `results.py` `_resume_row`·`_send_resumed`, `live.py` `_resume_relink`.
+- 2단계(2026-11-08): 결과는 아웃박스 `call_results`에 목표 상태(`body.resume`)로 남기고, 보낼 때마다 상세(ORD-03)를 다시 읽어 다른 값만 PATCH → 필요하면 submit. 같은 PATCH를 재전송하지 않으므로 응답 유실·재시작·409 VERSION_CONFLICT(재조회 후 최대 3회)에도 결과가 같다. 새 상세는 이어받을 때 없던 상세 중 내용이 같은 것이 있으면 추가된 것으로 본다. 목표 값이 지금 값과 다르면 고객 값으로 덮는다(사용자 결정). `body.resume` 행은 POST로 보내지 않는다.
+  - 상태: 연결 실패·5xx·3회 연속 충돌 → SENT_UNCERTAIN(주기 재확인). 주문 없음·COLLECTING 아님(확정 의도이고 저장 상태면 DONE)·403/404/400·끊긴 뒤 submit 409 → FAILED(PATCH 저장까지만, 담당자 마무리).
+  - 연결 PATCH 실패(연결 끊김·시간 초과·처리 중·VERSION_CONFLICT) → 상세 재조회 후 지금 version으로 같은 값 PATCH 1회. 다시 실패하면 새 접수(실제로 연결돼 있었다면 종료 때 POST 409 → FAILED).
 - 코드 `update_order`는 **BE에 없는 옛 경로** `POST /internal/ai/orders/{no}/update`.
 
 ## 10. `POST /api/ai/calls/{callSessionSeq}/events` — 통화 이벤트

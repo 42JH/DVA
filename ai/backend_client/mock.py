@@ -42,6 +42,7 @@ class MockBackend:
         # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
         self.linked: dict[int, int] = {}  # callSessionSeq → PATCH로 연결된 주문
+        self.ended: set[int] = set()  # 끝난 통화(callSessionSeq) — 확정(submit)은 진행 중 통화만(B/order-submit.md)
         self.insights_enabled = True
         self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
         self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
@@ -309,6 +310,8 @@ class MockBackend:
         return order["version"]
 
     async def submit_order(self, call_session_seq, order_seq, expected_version):
+        if call_session_seq in self.ended:
+            raise BackendError("/api/orders/{id}/submit 409 INVALID_STATE", 409, "INVALID_STATE")
         order = self._editable(call_session_seq, order_seq, expected_version, "/api/orders/{id}/submit")
         active = [x for x in order["parcels"] if x["status"] != "CANCELLED"]
         _check_complete({"customerSeq": 0, "paymentMethodType": order["paymentMethodType"], "parcels": active,

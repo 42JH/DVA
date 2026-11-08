@@ -563,11 +563,13 @@ class LiveFlow:
                                               cand.order_seq, link_body(cand.version, rt.resume_detail, cand.parcel_seq))
                 result = "loaded"
             except BackendFailure as e:
-                # shortcut: 응답 유실(시간 초과)이면 실제로는 연결됐을 수 있다 — 2단계에서 상세 재조회로 확인
                 s.note("이어받기 연결 실패", e.code)
-                result = "unavailable"
+                if e.kind in ("unavailable", "in_progress") or e.error_code == "VERSION_CONFLICT":
+                    cand, version = await self._resume_relink(s, cand)
+                result = "loaded" if version is not None else "unavailable"
         async with s.lock:
             if result == "loaded":
+                st.resume = cand
                 load_resumed(st, version)
                 facts = {"resume": "loaded"} | self._readback_if_ready(s)
             else:
@@ -576,6 +578,24 @@ class LiveFlow:
             facts["summary"] = state_summary(st, self.policy)
         s.note("이어받기", result)
         await self.notify(s, "N1'", facts)
+
+    async def _resume_relink(self, s: CallSession, cand):
+        """연결 PATCH 응답 유실·버전 충돌 뒤 한 번: 상세를 다시 읽어 지금 version으로 같은 값 PATCH(B/order-update.md).
+        이미 이 통화가 연결됐어도 같은 주문 PATCH는 허용된다. 다시 실패하면 (cand, None) → 새 접수(실제로 연결돼
+        있었다면 종료 때 새 주문 POST가 409로 FAILED — 담당자 확인, 사용자 결정 2026-11-08)."""
+        backend, seq = self.svc.d.backend, s.state.customer.call_session_seq
+        try:
+            detail = await backend.read("resume_detail", backend.api.order_detail, seq, cand.order_seq)
+            fresh = resume_candidate(detail) if detail else None
+            if fresh is None or fresh.parcel_seq != cand.parcel_seq:  # 그새 확정·취소됐거나 상세가 바뀜
+                s.note("이어받기 연결 불확실", "주문 상태 변경")
+                return cand, None
+            version = await backend.write("resume_link", backend.api.patch_order, seq, cand.order_seq,
+                                          link_body(fresh.version, detail, fresh.parcel_seq))
+            return fresh, version
+        except BackendFailure as e:
+            s.note("이어받기 연결 불확실", e.code)
+            return cand, None
 
     def _readback_if_ready(self, s: CallSession) -> dict:
         """잠금 안. 불러온 택배에 빠진 항목이 없으면 되읽기 확인을 연다(record_fields와 같은 규칙: 기본 수거 시각 함께)."""
