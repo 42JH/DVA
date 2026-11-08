@@ -241,17 +241,16 @@ export class OrdersRepository {
     return readPage<AdminOrderListItemDto>(
       client,
       `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
-       customer.customer_seq AS "customerSeq",company.name AS "organizationName",
-       COALESCE((SELECT jsonb_agg(jsonb_build_object(
+       customer.customer_seq AS "customerSeq",company.name AS "organizationName" ${filter.sql}`,
+      filter.values,
+      query,
+      '"createdAt" DESC,"orderSeq" DESC',
+      `page.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
          'orderParcelSeq',p.order_parcel_seq,'status',p.status,
          'origin',jsonb_build_object('name',p.origin_name,'phoneNumber',p.origin_phone_number,'roadAddress',p.origin_road_address,'jibunAddress',p.origin_jibun_address,'detailAddress',p.origin_detail_address),
          'destination',jsonb_build_object('name',p.destination_name,'phoneNumber',p.destination_phone_number,'roadAddress',p.destination_road_address,'jibunAddress',p.destination_jibun_address,'detailAddress',p.destination_detail_address),
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
-         ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=o.order_seq),'[]'::jsonb) AS parcels
-       ${filter.sql}`,
-      filter.values,
-      query,
-      '"createdAt" DESC,"orderSeq" DESC',
+         ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=page."orderSeq"),'[]'::jsonb) AS parcels`,
     );
   }
 
