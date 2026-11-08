@@ -945,3 +945,9 @@
 - 테스트: test_resume.py 17개(+7: 남은 변경 계산, 재시작 복구 PATCH·POST 없음, PATCH 응답 유실 뒤 중복 상세 없음, 버전 충돌 재조회·고객 값 우선, 3회 충돌 SENT_UNCERTAIN·주문 상태 변경 FAILED, 끊긴 뒤 submit 거절 FAILED·PATCH 저장, 연결 응답 유실 재연결). 전체 706 passed, 3 failed(로컬 address.db — 기존과 같음).
 - 미확인(실제 BE): 0·빈 값을 null로 돌려주는지(같은 값으로 취급), 끊긴 통화 submit 거절 코드가 409 INVALID_STATE인지, 같은 값 PATCH 재연결이 이미 연결된 통화에서 허용되는지.
 - MR: `feat/resume-incomplete-order` → develop-ai(1·2단계 함께). 로컬 주소 DB를 S15P31D109-rebuild의 address.db(건물명 포함)로 바꾼 뒤 develop-ai 기준 전체 692 passed.
+
+## 2026-11-09 — 주소 분리·수사 변환 서버 이관 0단계(시험지 v3)
+
+- 배경: 통화 기록 139건 분석 — Backend LLM의 숫자 변환 오류 9통화 17호출(오십→5, 구십구→9, 이십이다시일→21-1·20-1, 오십삼백십이동→53|12동 등), 기본주소 실패로 같이 온 상세주소가 버려진 호출 38건. 전사와 Live 되읽기는 맞았고 값 추출 단계만 틀림. 사용자 결정: 기본·상세 분리와 한글 수사 변환을 서버가 맡는다. 결정 1·2·3 권고안 채택(기본주소 실패 때 상세 유지, 같은 도로 번호 정정 때 상세 유지, 번호 뒤 이름은 상세로).
+- 시험지 `evaluation/datasets/address_v3.json`: 운영 통화의 고객 전사 그대로(한글 수사·말끝·쉼표) 52문항(기본+상세 35, 기본 17) + 상세 변환 17건(`detail_only`). expect_detail 추가.
+- 기준치(현재 코드, 로컬 DB만) `address_v3_baseline.json`: 정답 49문항 중 30 정답·18 못 찾음·1 오답("십오라고요"→봉곡남로 2). 상세는 아직 평가 안 함.
