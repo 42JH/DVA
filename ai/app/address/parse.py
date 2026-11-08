@@ -6,9 +6,9 @@
 import itertools
 import re
 
-from app.address.numbers import korean_to_int
+from app.address.numbers import UNITS, korean_to_int
 
-NUM_CHARS = "영공일이삼사오육칠팔구십백천만0-9"
+NUM_CHARS = "영공일이삼사오육륙칠팔구십백천만0-9"
 # 도로명 뒤에 오는 숫자 토큰: "십", "이백", "10길", "십길", "길", "212번지", "212-1", "다시"
 # STT가 "번길"을 "펀킬", "번낄"처럼 쓰는 경우까지
 GIL = "(?:[번펀뻔]?[길낄킬])"
@@ -40,6 +40,7 @@ def normalize_text(text):
     text = re.sub(rf"(\d)([번펀뻔]|{LETTER})\s+([길낄킬])(?=\s|$)", r"\1\2\3", text)  # "59번 길", "10다 길" 붙이기
     text = re.sub(rf"(?<=[가-힣])(?=\d+{LETTER}?{GIL}(?:\s|$))", " ", text)
     text = re.sub(rf"(?<=[로노])(?=[{NUM_CHARS}]+{GIL}(?:\s|$))", " ", text)
+    text = re.sub(rf"({GIL})(?=[{NUM_CHARS}])", r"\1 ", text)  # "광양구길십이요" -> "광양구길 십이요" (길 뒤에 붙은 번호)
     # 지번 "123번지 4호" -> "123 다시 4호" (본번-부번), "산12" -> "산 12"
     text = re.sub(rf"번지\s*(?=[{NUM_CHARS}]+\s*호)", " 다시 ", text)
     text = re.sub(r"(?<=\s)산(?=\d)", "산 ", text)
@@ -77,8 +78,149 @@ def split_tail(head, tail):
     return head, branch, number
 
 
+# --- 기본주소 | 상세주소 가르기(서버가 한다, 2026-11-09) -----------------------------
+# 들은 문장 전체("신정이펜일로 오십삼백십이동 사백삼호요")에서 상세주소(동·호·층·건물 이름)를 뗀다. 수사가 붙어 와 경계가
+# 여럿이면 가능한 자르기를 모두 돌려주고 어느 기본주소가 실존하는지는 주소DB가 가린다(matcher.resolve_detail).
+SYL = "영공일이삼사오육륙칠팔구십백천"
+_ANCHOR = re.compile(rf"^(지하)?([{SYL}]*|\d*)(호|층|동)$")
+_LETTER_DONG = re.compile(r"^[가나다라마바사아자차카타파하]동$")
+_NAME = re.compile(r"(아파트|빌라|빌딩|타워|오피스텔|캠퍼스|센터|학교|경영관|사무실|교무실|비서실|주차장|상가|플라자|점|관)$")
+_VERB_TAIL = re.compile(r"\s*(?:으로|로)?\s*(?:보내|보낼|할게|할래|바꿀|해\s*주|주세요)[가-힣]*[.?!\s]*$")
+_PLAIN_ENDING = re.compile(r"(이라고요|라고요|이거든요|거든요|인데요|입니다|이에요|이에유|예요|에요|이요|에서|이야|요)[.!?\s]*$")
+SPLIT_MAX = 6  # 자르기 후보 상한(붙은 수사 한 덩이에서 많아야 대여섯)
+
+
+def valid_numeral(s: str) -> bool:
+    """읽을 수 있는 수사인가: 자릿값이 내림차순이고 숫자 글자가 연달아 오지 않는다("삼백십이"·"백이"·"삼공일" O,
+    "십삼백십이"·"일오백이" X). 아라비아 숫자는 그 자체로 하나의 수(앞자리 0 불가)."""
+    if not s:
+        return False
+    if s.isdigit():
+        return s == "0" or s[0] != "0"
+    if not re.fullmatch(rf"[{SYL}]+", s):
+        return False
+    if not any(c in UNITS for c in s):
+        return True  # 한 자리씩 읽음("삼공일")
+    last_unit, after_digit = 10 ** 9, False
+    for c in s:
+        if c in UNITS:
+            if UNITS[c] >= last_unit:
+                return False
+            last_unit, after_digit = UNITS[c], False
+        else:
+            if after_digit or c in "영공":
+                return False
+            after_digit = True
+    return True
+
+
+def _number_like(token: str) -> bool:
+    """기본주소의 마지막이 될 수 있는 토큰: 번호·길 번호·번지("212", "이십이", "321번길", "번지")."""
+    return bool(TAIL_TOKEN.fullmatch(token)) and token not in ("다시", "대시") and (
+        bool(re.search(rf"[{NUM_CHARS}]", token)) or token.endswith("번지"))
+
+
+def _numeral_only(token: str) -> bool:
+    return bool(re.fullmatch(rf"[{SYL}]+", token))
+
+
+def _is_anchor(tokens: list[str], i: int, is_area) -> bool:
+    """상세주소가 시작될 수 있는 토큰: N호·N층(항상), N동은 수사 두 음절 이상·아라비아 숫자·뒤에 호/층이 있을 때, 가~하동.
+    법정동 이름("사이동")은 is_area로 뺀다."""
+    t = tokens[i]
+    m = _ANCHOR.fullmatch(t)
+    if t.endswith("동") and is_area and is_area(t):  # 법정동 이름과 같다("이동", "사동") → 바로 뒤에 호 번호가 이어질 때만 상세
+        rest = tokens[i + 1:]
+        j = next((k for k, x in enumerate(rest) if _ANCHOR.fullmatch(x) and x[-1] in "호층"), None)
+        if m is None or j is None or not all(_numeral_only(x) for x in rest[:j]):
+            return False
+        return valid_numeral("".join(rest[:j]) + _ANCHOR.fullmatch(rest[j])[2])
+    if _LETTER_DONG.fullmatch(t):
+        return True
+    if not m:
+        return False
+    if m[3] in ("호", "층"):
+        return bool(m[2]) or (i > 0 and _numeral_only(tokens[i - 1]))  # "오백 이 호"의 맨 "호"
+    num = m[2]
+    return len(num) >= 2 or num.isdigit() or any(_ANCHOR.fullmatch(x) and x[-1] in "호층" for x in tokens[i + 1:])
+
+
+def clean_text(text: str) -> str:
+    """상세 가르기 전 정리: 쉼표·말끝·동사 꼬리("…으로 할게요")·붙은 '다시'. "삼홉니다"(=삼호입니다)도 바로잡는다."""
+    text = re.sub(r"[,，]", " ", text).replace("홉니다", "호").replace("-", " - ")
+    text = _VERB_TAIL.sub("", text)
+    text = _PLAIN_ENDING.sub("", text.strip())
+    text = split_dasi(text) or [text]
+    return re.sub(r"\s+", " ", text[0]).strip()
+
+
+def split_detail(text: str, is_area=None) -> list[tuple[str, str, bool]]:
+    """들은 문장 → [(기본주소, 상세주소 원문, 확실한 경계인가), ...] 자르기 후보, 그럴듯한 순서. 상세가 없으면 [].
+    경계가 띄어쓰기·이름 자리면 확실한 후보 하나다. 수사가 붙어 와("오십삼백십이동") 경계를 모르면 수사 안 모든 지점이
+    후보이고(확실하지 않음), 어느 기본주소가 실존하는지는 주소DB가 가린다(matcher.resolve_detail)."""
+    tokens = clean_text(text).split()
+    anchor = next((i for i in range(1, len(tokens)) if _is_anchor(tokens, i, is_area)), None)
+    last_num = max((i for i, t in enumerate(tokens[:anchor]) if i > 0 and (_number_like(t) or t in ("다시", "대시", "-"))),
+                   default=None)
+    if anchor is None:
+        if last_num is None or last_num == len(tokens) - 1:
+            return []
+        return [(" ".join(tokens[:last_num + 1]), " ".join(tokens[last_num + 1:]), True)]  # 번호 뒤 이름("… 212 롯데월드타워")
+    if last_num is not None and last_num + 1 < anchor:  # 번호와 표지 사이의 이름은 상세("… 다시 삼 아슬란 삼백오호")
+        return [(" ".join(tokens[:last_num + 1]), " ".join(tokens[last_num + 1:]), True)]
+    m = _ANCHOR.fullmatch(tokens[anchor])
+    if m is None:  # 가~하동
+        return [(" ".join(tokens[:anchor]), " ".join(tokens[anchor:]), True)]
+    under, run, suffix = m[1] or "", m[2], m[3]
+    k = anchor  # 표지 바로 앞의 수사 토큰들("오십 삼백십이동"의 "오십", "오백 이 호"의 "오백 이")도 한 덩이로 본다
+    while k > 1 and _numeral_only(tokens[k - 1]):
+        k -= 1
+    parts, head = tokens[k:anchor], tokens[:k]
+    s = "".join(parts) + run
+    bounds = {sum(len(p) for p in parts[:j]) for j in range(len(parts) + 1)}  # 원래 띄어쓰기 자리
+    digits = any(ch.isdigit() for ch in s)
+    cands = []
+    for i in sorted(range(len(s)), key=lambda i: (i not in bounds, -i if i in bounds else i)):  # 띄어쓰기 자리 → 짧은 번호부터
+        if digits and i not in bounds:
+            continue  # 아라비아 숫자는 자르지 않는다(이미 나뉘어 온다)
+        prefix, rest = s[:i], s[i:]
+        if not (valid_numeral(prefix) if prefix else head and _number_like(head[-1])) or not valid_numeral(rest):
+            continue
+        base = " ".join(head + ([prefix] if prefix else []))
+        cands.append((base, " ".join([under + rest + suffix] + tokens[anchor + 1:]), i in bounds))
+    return cands[:SPLIT_MAX]
+
+
+_DETAIL_SPLIT = re.compile(rf"([{SYL}\d]+(?:동|층))(?=[{SYL}\d])")
+
+
+def detail_text(raw: str) -> str:
+    """상세주소의 수사를 숫자로: "삼백십이동 사백삼호" → "312동 403호", "오백 이 호" → "502호", "지하구십구층" → "지하 99층".
+    이름은 그대로("소담미인 501호", "가동")."""
+    text = clean_text(raw) if raw.strip() else ""
+    tokens = _DETAIL_SPLIT.sub(r"\1 ", text).split()  # "일동일호" → "일동 일호"
+    out, acc = [], []
+    for t in tokens:
+        m = _ANCHOR.fullmatch(t)
+        if m and (acc or m[2]):
+            num = "".join(acc) + m[2]
+            if valid_numeral(num):
+                n = num if num.isdigit() else str(korean_to_int(num))
+                out.append(f"{m[1] + ' ' if m[1] else ''}{n}{m[3]}")
+                acc = []
+                continue
+        if _numeral_only(t) and not _LETTER_DONG.fullmatch(t):
+            acc.append(t)
+            continue
+        out.extend(acc)
+        acc = []
+        out.append(t)
+    out.extend(acc)
+    return " ".join(out)
+
+
 # --- 못 찾았을 때 다시 볼 표기 ----------------------------------------------------
-NUMBER_SYLLABLES = set("영공일이삼사오육칠팔구십백")
+NUMBER_SYLLABLES = set("영공일이삼사오육륙칠팔구십백")
 
 
 def unlink_gil(text):
@@ -95,7 +237,7 @@ def unlink_gil(text):
     return fixed if fixed != text else None
 
 
-_GIL = re.compile(r"(?<=[가-힣])([영공일이삼사오육칠팔구십백]+번?길)(?=\s|$)")
+_GIL = re.compile(rf"(?<=[가-힣])([영공일이삼사오육륙칠팔구십백]+번?길)(?=[\s{SYL}\d]|$)")  # "광양구길십" 뒤에 붙은 번호도
 
 
 def split_gil(heard: str) -> str | None:
@@ -107,7 +249,7 @@ def split_gil(heard: str) -> str | None:
 
 # 받아쓴 그대로 넘긴 기본주소의 말끝. "이요"·"이에요"는 앞 글자에 받침이 있으면 두 가지로 읽힌다
 # ("테헤란로 이일이요" = "이일이"+"요" / "이일"+"이요") — 글자만으로 못 정해서 두 해석을 다 보고 주소DB가 가린다
-_ENDING = re.compile(r"\s*(입니다|이에요|예요|에요|이요|요)[.!?\s]*$")
+_ENDING = re.compile(r"\s*(이라고요|라고요|이거든요|거든요|인데요|입니다|이에요|예요|에요|이요|에서|이야|요)[.!?\s]*$")
 
 
 def _has_final(ch: str) -> bool:
@@ -120,8 +262,10 @@ def strip_ending(text: str) -> list[str] | None:
     if not m:
         return None
     base = text[:m.start()].rstrip()
-    if m[1] in ("이요", "이에요") and not base[-1:].isdigit():
-        out = [base, base + "이"] if _has_final(base[-1:]) else [base + "이"]
+    if m[1] in ("이요", "이에요", "이거든요", "이라고요") and not base[-1:].isdigit():
+        last = base.split()[-1] if base.split() else ""
+        readable = not _numeral_only(last) or valid_numeral(last + "이")  # "이십칠이"처럼 못 읽는 수사는 해석에서 뺀다
+        out = ([base] if _has_final(base[-1:]) else []) + ([base + "이"] if readable else [])
     else:
         out = [base]
     return [x for x in out if x] or None
