@@ -7,13 +7,22 @@ import subprocess
 
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-APP_COMMON = ["msa/Jenkinsfile", "msa/deploy/package-app.sh", "msa/deploy/upload-app.sh",
+APP_COMMON = ["msa/deploy/package-app.sh", "msa/deploy/upload-app.sh",
               "msa/deploy/remote-app.sh", "msa/deploy/app-release.py", "msa/deploy/read-app-state.sh",
-              "msa/deploy/plan-apps.py", "msa/deploy/ssh-common.sh", "msa/deploy/known_hosts",
-              "msa/shared/", "msa/parity/", "msa/.dockerignore", "msa/services/package.json", "msa/services/package-lock.json"]
+              "msa/deploy/ssh-common.sh", "msa/deploy/known_hosts",
+              ":(glob)msa/shared/events/*.cjs", ":(glob)msa/shared/events/*.d.cts", "msa/shared/events/package.json",
+              "msa/.dockerignore", "msa/services/package.json", "msa/services/package-lock.json"]
+CI_COMMON = ["msa/Jenkinsfile", "msa/deploy/", "msa/.dockerignore", *APP_COMMON]
+PARITY = Path(__file__).resolve().parents[1] / 'parity'
+SUITE_DEPENDENCIES = {
+    'operations': {'operations'}, 'customer': {'operations', 'customer'},
+    'consultation': {'operations', 'customer', 'consultation', 'order'},
+    'order': {'operations', 'customer', 'consultation', 'delivery', 'order'},
+}
 DB_PATHS = ["msa/liquibase/", "msa/Jenkinsfile", "msa/deploy/package.sh", "msa/deploy/upload.sh",
             "msa/deploy/remote.sh", "msa/deploy/run-remote.sh", "msa/deploy/ssh-common.sh",
             "msa/deploy/known_hosts", "msa/deploy/has-msa-changes.sh", "msa/deploy/deliver-databases.sh", "msa/deploy/plan-apps.py",
+            "msa/deploy/prepare-cutover.py", "msa/deploy/tests/test_cutover.py", "msa/deploy/tests/test_cutover_delivery.py",
             "msa/deploy/tests/test_changes.py", "msa/deploy/tests/test_deploy.py"]
 
 
@@ -100,6 +109,28 @@ def databases(base, delivery, annotations):
     return selected
 
 
+def verification(base, applications):
+    # CI compares the last successful verification; delivery still uses actual rollout history.
+    return [directory.name for directory in sorted(Path('msa/services').iterdir())
+            if directory.is_dir() and (directory.name in applications or changed(base, [
+                directory.as_posix() + '/', 'msa/liquibase/changelog/' + directory.name + '/',
+                'msa/liquibase/changelog/shared/', *CI_COMMON]))]
+
+
+def parity_suites(base, verified):
+    dependencies = {}
+    for suite in SUITE_DEPENDENCIES:
+        driver = PARITY / ('verify-' + suite + '.py')
+        source = driver.read_text()
+        dependencies[suite] = ['msa/parity/' + path.name for path in PARITY.iterdir()
+                               if path.is_file() and (path == driver or path.name in source)]
+    known = {path for paths in dependencies.values() for path in paths}
+    # Unknown/new helpers require the full matrix; a named suite test reruns its consumers.
+    unknown = changed(base, ['msa/parity/', *[':(exclude)' + path for path in sorted(known)]])
+    return [suite for suite, services in SUITE_DEPENDENCIES.items()
+            if unknown or services.intersection(verified) or changed(base, dependencies[suite])]
+
+
 def main():
     out = Path("msa-release")
     out.mkdir(exist_ok=True)
@@ -108,11 +139,22 @@ def main():
     base = os.environ.get("MSA_BASE_COMMIT", "")
     services = plan(base, delivery, deployments, annotations)
     db_services = databases(base, delivery, annotations)
+    if annotations.get('dva.ssafy.io/parcel-drafts-schema') != '055' and {'order', 'consultation'}.intersection(db_services):
+        # Both source DBs and their compatible apps belong to one 055 cutover.
+        for service in ('consultation', 'order'):
+            if service not in db_services:
+                db_services.append(service)
+            if service not in services:
+                services.append(service)
+    verified = verification(base, services)
+    suites = parity_suites(base, verified)
     db = bool(db_services) or changed(base, DB_PATHS)
     (out / "services.txt").write_text("".join(s + "\n" for s in services))
     (out / "databases.txt").write_text("".join(s + "\n" for s in db_services))
     (out / "database-ci.txt").write_text(str(db).lower())
+    (out / 'parity-suites.txt').write_text(''.join(s + '\n' for s in suites))
     print(f"Database CI: {db}; apps: {services}; databases: {db_services}")
+    print(f'Parity suites: {suites}')
 
 
 if __name__ == "__main__":

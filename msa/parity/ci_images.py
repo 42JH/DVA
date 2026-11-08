@@ -21,6 +21,20 @@ def run(*args):
     return subprocess.check_output(args, cwd=ROOT, text=True).strip()
 
 
+def source_commit():
+    source = os.environ.get('MSA_CI_ORIGINAL_COMMIT')
+    if not source:
+        return run('git', 'rev-parse', 'HEAD')
+    if not re.fullmatch(r'[0-9a-f]{40}', source):
+        raise ValueError('Invalid original CI source commit')
+    reference = json.loads((ROOT / 'msa/parity/baseline.json').read_text())['commit']
+    values = run('git', 'rev-parse', 'HEAD^', 'HEAD:msa', source + ':msa',
+                 'HEAD:backend', reference + ':backend').splitlines()
+    if len(values) != 5 or values[0] != source or values[1] != values[2] or values[3] != values[4]:
+        raise RuntimeError('CI snapshot does not match the original MSA and pinned backend')
+    return source
+
+
 def required(suites, services, database):
     if set(suites) - SUITES.keys() or set(services) - set(SERVICES):
         raise ValueError('Unknown CI suite/service')
@@ -47,8 +61,10 @@ def prepared_image(key):
     if not path:
         return None
     document = json.loads(Path(path).read_text())
-    if document.get('commit') != run('git', 'rev-parse', 'HEAD'):
+    if document.get('commit') != source_commit():
         raise RuntimeError('CI images belong to a different source commit')
+    if document.get('referenceTree') != run('git', 'rev-parse', 'HEAD:backend'):
+        raise RuntimeError('CI images belong to a different monolith reference')
     subprocess.run(['git', 'diff', '--quiet', 'HEAD', '--', 'backend', 'msa'], cwd=ROOT, check=True)
     image = document['images'][key]
     if not re.fullmatch(r'sha256:[0-9a-f]{64}', image['id']):
@@ -63,14 +79,14 @@ def build():
     release = os.environ['RELEASE_NAME']
     if not re.fullmatch(r'[0-9a-f]{40}-[0-9]+', release):
         raise ValueError('Invalid CI release')
-    commit = run('git', 'rev-parse', 'HEAD')
+    commit = source_commit()
     if release.rsplit('-', 1)[0] != commit or MANIFEST.exists():
         raise RuntimeError('Source mismatch or reused CI image manifest')
     out = MANIFEST.parent
     suites = (out / 'parity-suites.txt').read_text().split()
     services = (out / 'services.txt').read_text().split()
     database = (out / 'database-ci.txt').read_text().strip() == 'true'
-    document = {'commit': commit, 'release': release, 'images': {}}
+    document = {'commit': commit, 'release': release, 'referenceTree': run('git', 'rev-parse', 'HEAD:backend'), 'images': {}}
     out.mkdir(exist_ok=True)
     MANIFEST.write_text(json.dumps(document))
     for key in required(suites, services, database):

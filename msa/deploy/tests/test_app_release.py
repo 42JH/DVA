@@ -141,7 +141,50 @@ class DeliveryPlanTests(unittest.TestCase):
 
     def test_parity_change_verifies_deployed_services_again(self):
         self.commit('msa/parity/operations-auth.test.cjs', 'updated contract check')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), [])
+        self.assertEqual(planner.verification(self.deployed, []), [])
+        self.assertEqual(planner.parity_suites(self.deployed, []), ['operations'])
+
+    def test_event_test_change_verifies_without_redeploying(self):
+        self.commit('msa/shared/events/verify.py', 'updated CI only')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), [])
+        self.assertEqual(planner.verification(self.deployed, []), [])
+        self.assertEqual(planner.parity_suites(self.deployed, []), [])
+
+    def test_event_runtime_change_still_redeploys_and_verifies(self):
+        self.commit('msa/shared/events/index.cjs', 'updated runtime')
         self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['customer'])
+        self.assertEqual(planner.verification(self.deployed, []), ['customer'])
+
+    def test_event_protocol_submodule_change_still_redeploys(self):
+        self.commit('msa/shared/events/billing.cjs', 'updated protocol')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), ['customer'])
+
+    def test_event_unit_test_does_not_redeploy(self):
+        self.commit('msa/shared/events/test/unit.test.cjs', 'updated test')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), [])
+        self.assertEqual(planner.verification(self.deployed, []), [])
+
+    def test_unknown_parity_helper_fails_closed_to_all_suites(self):
+        self.commit('msa/parity/new-helper.cjs', 'new helper')
+        self.assertEqual(planner.parity_suites(self.deployed, []), list(planner.SUITE_DEPENDENCIES))
+
+    def test_order_test_change_only_reruns_its_consumer(self):
+        self.commit('msa/parity/order-reads-parity.test.cjs', 'updated order comparison')
+        self.assertEqual(planner.parity_suites(self.deployed, []), ['order'])
+
+    def test_runtime_dependencies_keep_cross_service_regressions(self):
+        self.assertEqual(planner.parity_suites(self.deployed, ['customer']), ['customer', 'consultation', 'order'])
+        self.assertEqual(planner.parity_suites(self.deployed, ['operations']), list(planner.SUITE_DEPENDENCIES))
+
+    def test_unknown_verification_baseline_runs_all_available_services(self):
+        self.assertEqual(planner.verification('', []), ['customer'])
+
+    def test_later_backend_api_change_does_not_change_the_frozen_regression_scope(self):
+        self.commit('backend/src/auth.ts', 'reference changed')
+        self.assertEqual(planner.plan(self.deployed, True, self.state, {}), [])
+        self.assertEqual(planner.verification(self.deployed, []), [])
+        self.assertEqual(planner.parity_suites(self.deployed, []), [])
 
     def test_database_only_change_is_selected_without_app(self):
         annotations = {f'dva.ssafy.io/db-{name}-commit': self.deployed for name in ('customer', 'operations', 'order', 'consultation', 'delivery')}

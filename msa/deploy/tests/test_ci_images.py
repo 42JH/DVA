@@ -40,18 +40,18 @@ class CiImageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'images.json'
             image_id = 'sha256:' + 'b' * 64
-            data = {'commit': 'a' * 40, 'release': 'a' * 40 + '-1', 'images': {'customer': {'id': image_id}}}
+            data = {'commit': 'a' * 40, 'referenceTree': 'd' * 40, 'release': 'a' * 40 + '-1', 'images': {'customer': {'id': image_id}}}
             path.write_text(json.dumps(data))
             with patch.dict(os.environ, MSA_CI_IMAGES=str(path)), patch.object(images.subprocess, 'run'):
                 with patch.object(images, 'run', return_value='c' * 40):
                     with self.assertRaisesRegex(RuntimeError, 'source commit'):
                         images.prepared_image('customer')
                 actual = {'Id': image_id, 'Config': {'Labels': {'dva.ci-run': 'other'}}}
-                with patch.object(images, 'run', side_effect=['a' * 40, json.dumps([actual])]):
+                with patch.object(images, 'run', side_effect=['a' * 40, 'd' * 40, json.dumps([actual])]):
                     with self.assertRaisesRegex(RuntimeError, 'ownership'):
                         images.prepared_image('customer')
                 actual['Config']['Labels']['dva.ci-run'] = data['release']
-                with patch.object(images, 'run', side_effect=['a' * 40, json.dumps([actual])]):
+                with patch.object(images, 'run', side_effect=['a' * 40, 'd' * 40, json.dumps([actual])]):
                     self.assertEqual(images.prepared_image('customer'), image_id)
 
     def test_cleanup_removes_only_its_checks_and_release_tags(self):
