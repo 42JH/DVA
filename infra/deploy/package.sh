@@ -2,13 +2,20 @@
 set -euo pipefail
 umask 077
 version="${1:-}"
-[[ "$version" =~ ^[a-z0-9][a-z0-9.-]{0,79}$ ]] || { echo 'Usage: package.sh <release-version>' >&2; exit 1; }
+verified_image="${2:-}"
+[[ $# -le 2 && "$version" =~ ^[a-z0-9][a-z0-9.-]{0,79}$ ]] || { echo 'Usage: package.sh <release-version> [verified-backend-image]' >&2; exit 1; }
+[[ -z "$verified_image" || "$verified_image" == "dva-backend:$version" ]] || { echo 'Verified image must match the release version.' >&2; exit 1; }
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 release_dir="$repo_root/.deploy/$version"
 [[ ! -e "$release_dir" ]] || { echo 'Release already exists.' >&2; exit 1; }
 cd "$repo_root"
 docker info >/dev/null
-docker build --platform linux/amd64 -t "dva-backend:$version" ./backend
+if [[ -n "$verified_image" ]]; then
+ docker image inspect "$verified_image" >/dev/null
+ echo "Reusing verified backend image: $verified_image"
+else
+ docker build --platform linux/amd64 -t "dva-backend:$version" ./backend
+fi
 docker pull --platform linux/amd64 postgres:17-alpine
 docker pull --platform linux/amd64 nginx:stable-alpine
 docker tag postgres:17-alpine "dva-postgres:$version"
