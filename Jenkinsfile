@@ -19,13 +19,20 @@ pipeline {
                     env.SOURCE_COMMIT = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
                     env.CI_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     env.RELEASE_VERSION = "${env.SOURCE_COMMIT.take(12)}-${env.BUILD_NUMBER}"
-                    env.SHOULD_DEPLOY = (sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0).toString()
                     def selection = sh(script: 'node infra/jenkins/monolith-changes.cjs', returnStdout: true).trim()
-                    assert selection ==~ /(?:true|false),(?:true|false),(?:true|false),[a-z_]+/
+                    assert selection ==~ /(?:true|false),(?:true|false),(?:true|false),[a-z_]+,(?:full|faq|dashboard)/
                     def checks = selection.split(',')
                     env.CHECK_BACKEND = checks[0]
                     env.CHECK_OBSERVABILITY = checks[1]
                     env.CHECK_PAYMENT_DEMO = checks[2]
+                    env.BACKEND_TEST_PROFILE = checks[4]
+                    env.CI_DOCUMENTATION_ONLY = (checks[3] == 'documentation_only').toString()
+                    env.SHOULD_DEPLOY = (sh(script: "bash infra/deploy/should-deploy.sh '${params.DEPLOY_LIGHTSAIL}'", returnStatus: true) == 0).toString()
+                    if (env.SHOULD_DEPLOY == 'true' && env.CI_DOCUMENTATION_ONLY == 'true') {
+                        env.CHECK_BACKEND = 'true'
+                        env.BACKEND_TEST_PROFILE = 'full'
+                    }
+                    env.BACKEND_RELEASE_IMAGE = (env.SHOULD_DEPLOY == 'true' && env.CHECK_BACKEND == 'true') ? "dva-backend:${env.RELEASE_VERSION}" : ''
                     echo "CI selection: ${selection}"
                 }
             }
@@ -69,8 +76,7 @@ pipeline {
         stage('Build and Package Images') {
             when { expression { env.SHOULD_DEPLOY == 'true' } }
             steps {
-                // NestJS compilation runs inside the backend Docker build stage.
-                sh 'bash infra/deploy/package.sh "$RELEASE_VERSION"'
+                sh 'bash infra/deploy/package.sh "$RELEASE_VERSION" "$BACKEND_RELEASE_IMAGE"'
                 archiveArtifacts artifacts: ".deploy/${env.RELEASE_VERSION}/**", onlyIfSuccessful: true
             }
         }
