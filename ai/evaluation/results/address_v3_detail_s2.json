@@ -1,0 +1,1144 @@
+{
+  "dataset": "address_v3",
+  "commit": "adb182e9",
+  "resolver": "app.address",
+  "db_bytes": 971194368,
+  "repeat": 2,
+  "geocode": "off",
+  "kakao_witness": "off",
+  "summary": {
+    "cases": 52,
+    "outcomes": {
+      "confirmed": 48,
+      "rejected": 3,
+      "missed": 1
+    },
+    "positive": {
+      "total": 49,
+      "correct_recorded": 48,
+      "confirmed": 48,
+      "auto": 0,
+      "wrong": 0,
+      "missed": 1
+    },
+    "negative": {
+      "total": 3,
+      "rejected": 3,
+      "wrong": 0
+    },
+    "ask": {
+      "total": 0,
+      "asked": 0,
+      "wrong": 0,
+      "missed": 0
+    },
+    "latency_ms": {
+      "cold_p50": 14.3,
+      "cold_p95": 90.9,
+      "cold_max": 776.7,
+      "warm_p50": 14.6,
+      "warm_p95": 153.2,
+      "warm_max": 1016.4,
+      "concurrent_all_wall": 1841.2,
+      "sequential_sum_warm_p50": 2667.8
+    },
+    "by_tag": {
+      "building_name": {
+        "confirmed": 6
+      },
+      "comma": {
+        "confirmed": 6
+      },
+      "detail": {
+        "confirmed": 33,
+        "rejected": 2
+      },
+      "digits": {
+        "confirmed": 3
+      },
+      "digitwise": {
+        "confirmed": 4
+      },
+      "ending": {
+        "confirmed": 7
+      },
+      "ending_ambiguous": {
+        "confirmed": 2
+      },
+      "ending_rago": {
+        "confirmed": 1
+      },
+      "false_start": {
+        "missed": 1
+      },
+      "glued": {
+        "confirmed": 5
+      },
+      "glued_dasi": {
+        "confirmed": 4
+      },
+      "glued_gil": {
+        "confirmed": 2
+      },
+      "holdout": {
+        "missed": 1
+      },
+      "hyphen": {
+        "confirmed": 1
+      },
+      "jibun": {
+        "confirmed": 6
+      },
+      "letter_dong": {
+        "rejected": 1
+      },
+      "name_only": {
+        "confirmed": 1
+      },
+      "no_number": {
+        "rejected": 1
+      },
+      "nonexistent": {
+        "rejected": 2
+      },
+      "numeral_dong": {
+        "confirmed": 3
+      },
+      "road_only": {
+        "confirmed": 1
+      },
+      "ryuk": {
+        "confirmed": 2
+      },
+      "short_region": {
+        "confirmed": 1
+      },
+      "sigungu_only": {
+        "confirmed": 2
+      },
+      "spaced": {
+        "confirmed": 4
+      },
+      "spaced_beongil": {
+        "confirmed": 2
+      },
+      "stt_split": {
+        "confirmed": 4
+      },
+      "typo": {
+        "confirmed": 4
+      },
+      "verb_ending": {
+        "confirmed": 1
+      }
+    },
+    "detail": {
+      "total": 52,
+      "correct": 52,
+      "with_base": 51,
+      "detail_only": {
+        "total": 17,
+        "correct": 17
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "s01",
+      "heard": "서울시 양천구 신정이패닐로 오십 삼백십이동 사백삼호요",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "spaced",
+        "typo"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 17.3,
+      "warm_p50_ms": 6.6,
+      "detail": "312동 403호",
+      "expect_detail": "312동 403호",
+      "detail_ok": true
+    },
+    {
+      "id": "s02",
+      "heard": "서울시 양천구 신정이펜일로 오십삼백십이동 사백삼호입니다",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 12.1,
+      "warm_p50_ms": 13.5,
+      "detail": "312동 403호",
+      "expect_detail": "312동 403호",
+      "detail_ok": true
+    },
+    {
+      "id": "s03",
+      "heard": "서울시 양천구 신정이편일로 오십삼백십 이동 사백 삼홉니다",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued",
+        "stt_split"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 9.4,
+      "warm_p50_ms": 8.9,
+      "detail": "312동 403호",
+      "expect_detail": "312동 403호",
+      "detail_ok": true
+    },
+    {
+      "id": "s04",
+      "heard": "서울시 양천구 신정이편일로 오십, 삼백십이동 삼백삼 호요",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 5.1,
+      "warm_p50_ms": 5.3,
+      "detail": "312동 303호",
+      "expect_detail": "312동 303호",
+      "detail_ok": true
+    },
+    {
+      "id": "s05",
+      "heard": "경북 구미시 인동구길 칠 다시 삼 이백삼호요",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "spaced"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 24.9,
+      "warm_p50_ms": 17.5,
+      "detail": "203호",
+      "expect_detail": "203호",
+      "detail_ok": true
+    },
+    {
+      "id": "s06",
+      "heard": "경북 구미시 인동 구길 칠다시삼 이백삼홉니다",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued_dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 6.8,
+      "warm_p50_ms": 7.3,
+      "detail": "203호",
+      "expect_detail": "203호",
+      "detail_ok": true
+    },
+    {
+      "id": "s07",
+      "heard": "경북 구미시 인동 구길 7-3, 203호입니다",
+      "expect": "경상북도 구미시 인동9길 7-3",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digits",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 7-3",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 6.2,
+      "warm_p50_ms": 7.3,
+      "detail": "203호",
+      "expect_detail": "203호",
+      "detail_ok": true
+    },
+    {
+      "id": "s08",
+      "heard": "경북 구미시 인동구길 ,22 -1, 501호에요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digits",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 11.8,
+      "warm_p50_ms": 15.6,
+      "detail": "501호",
+      "expect_detail": "501호",
+      "detail_ok": true
+    },
+    {
+      "id": "s09",
+      "heard": "구미 인동구길 이십이 다시 일 오백이호요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "spaced",
+        "short_region"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 14.9,
+      "warm_p50_ms": 17.1,
+      "detail": "502호",
+      "expect_detail": "502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s10",
+      "heard": "구미 인동 구길, 이십이 다시 일, 오백삼호요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 7.6,
+      "warm_p50_ms": 7.9,
+      "detail": "503호",
+      "expect_detail": "503호",
+      "detail_ok": true
+    },
+    {
+      "id": "s11",
+      "heard": "구미 인동 구길 이십이 다시 일 오백 이 호요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "stt_split"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 7.9,
+      "warm_p50_ms": 7.7,
+      "detail": "502호",
+      "expect_detail": "502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s12",
+      "heard": "구미 인동구길 이십이 다시 일오백이호입니다",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 30.2,
+      "warm_p50_ms": 30.3,
+      "detail": "502호",
+      "expect_detail": "502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s13",
+      "heard": "경상북도 구미시 인동구길 이십이다시일 오백이호요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued_dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 11.8,
+      "warm_p50_ms": 16.1,
+      "detail": "502호",
+      "expect_detail": "502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s14",
+      "heard": "경북 구미시 인동구길 이십이 다시 일 오백일호입니다",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "spaced"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 12.4,
+      "warm_p50_ms": 17.8,
+      "detail": "501호",
+      "expect_detail": "501호",
+      "detail_ok": true
+    },
+    {
+      "id": "s15",
+      "heard": "경북 구미시 인동구길 이십이다시일 오백삼호",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued_dasi"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 13.9,
+      "warm_p50_ms": 22.1,
+      "detail": "503호",
+      "expect_detail": "503호",
+      "detail_ok": true
+    },
+    {
+      "id": "s16",
+      "heard": "서구 구덕로 삼백이십일번길 이십사 이백일호요",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "sigungu_only"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 81.1,
+      "warm_p50_ms": 81.3,
+      "detail": "201호",
+      "expect_detail": "201호",
+      "detail_ok": true
+    },
+    {
+      "id": "s17",
+      "heard": "부산광역시 서구 보덕로 삼백이십일 번길 이십사, 이백일호요",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "typo",
+        "spaced_beongil",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 16.2,
+      "warm_p50_ms": 16.8,
+      "detail": "201호",
+      "expect_detail": "201호",
+      "detail_ok": true
+    },
+    {
+      "id": "s18",
+      "heard": "부산광역시 서구 구덕로 삼백이십일번길 이십사 오백일 호요",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "stt_split"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 15.8,
+      "warm_p50_ms": 17.2,
+      "detail": "501호",
+      "expect_detail": "501호",
+      "detail_ok": true
+    },
+    {
+      "id": "s19",
+      "heard": "서울특별시 영등포구 도림로백사십삼길 이십칠 이백일동 천오백이호요",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued_gil"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 22.2,
+      "warm_p50_ms": 22.8,
+      "detail": "201동 1502호",
+      "expect_detail": "201동 1502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s20",
+      "heard": "서울특별시 영등포구 도림로 백사십삼길 이십칠 이백일동천오백이호요",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 15.1,
+      "warm_p50_ms": 15.9,
+      "detail": "201동 1502호",
+      "expect_detail": "201동 1502호",
+      "detail_ok": true
+    },
+    {
+      "id": "s21",
+      "heard": "서울시 강남구 테헤란로 이일이 멀티캠퍼스 십팔층입니다",
+      "expect": "서울특별시 강남구 테헤란로 212",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digitwise",
+        "building_name"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 212",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 14.3,
+      "warm_p50_ms": 5.7,
+      "detail": "멀티캠퍼스 18층",
+      "expect_detail": "멀티캠퍼스 18층",
+      "detail_ok": true
+    },
+    {
+      "id": "s22",
+      "heard": "서울시 강남구 테헤란로 이일일 멀티캠퍼스 십팔층입니다",
+      "expect": "서울특별시 강남구 테헤란로 211",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digitwise",
+        "building_name"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 강남구 테헤란로 211",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 4.5,
+      "warm_p50_ms": 5.4,
+      "detail": "멀티캠퍼스 18층",
+      "expect_detail": "멀티캠퍼스 18층",
+      "detail_ok": true
+    },
+    {
+      "id": "s23",
+      "heard": "서울 종로구 성균관로 이십오 다시 이 경영관으로 할게요",
+      "expect": "서울특별시 종로구 성균관로 25-2",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "building_name",
+        "verb_ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 종로구 성균관로 25-2",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 10.6,
+      "warm_p50_ms": 4.0,
+      "detail": "경영관",
+      "expect_detail": "경영관",
+      "detail_ok": true
+    },
+    {
+      "id": "s24",
+      "heard": "서울 마포구 양화로 사십오 메세나폴리스 지하 이층, 홈플러스 합정점",
+      "expect": "서울특별시 마포구 양화로 45",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "building_name",
+        "comma"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 마포구 양화로 45",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 10.1,
+      "warm_p50_ms": 5.1,
+      "detail": "메세나폴리스 지하 2층 홈플러스 합정점",
+      "expect_detail": "메세나폴리스 지하 2층 홈플러스 합정점",
+      "detail_ok": true
+    },
+    {
+      "id": "s25",
+      "heard": "서울 마포구 백범로 삼십오 서강대학교 일층 교무실",
+      "expect": "서울특별시 마포구 백범로 35",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "building_name"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 마포구 백범로 35",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 3.7,
+      "warm_p50_ms": 4.1,
+      "detail": "서강대학교 1층 교무실",
+      "expect_detail": "서강대학교 1층 교무실",
+      "detail_ok": true
+    },
+    {
+      "id": "s26",
+      "heard": "서울특별시 종로구 청와대로 일 대통령 비서실이요",
+      "expect": "서울특별시 종로구 청와대로 1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "name_only"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 종로구 청와대로 1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 4.5,
+      "warm_p50_ms": 4.3,
+      "detail": "대통령 비서실",
+      "expect_detail": "대통령 비서실",
+      "detail_ok": true
+    },
+    {
+      "id": "s27",
+      "heard": "서울시 종로구 효자로 13길 52 1층입니다",
+      "expect": "서울특별시 종로구 효자로13길 52",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digits"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 종로구 효자로13길 52",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 6.5,
+      "warm_p50_ms": 7.0,
+      "detail": "1층",
+      "expect_detail": "1층",
+      "detail_ok": true
+    },
+    {
+      "id": "s28",
+      "heard": "구미시 인의동 오륙오 다시 삼 아슬란 삼백오호입니다",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "jibun",
+        "ryuk"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 36.0,
+      "warm_p50_ms": 42.1,
+      "detail": "아슬란 305호",
+      "expect_detail": "아슬란 305호",
+      "detail_ok": true
+    },
+    {
+      "id": "s29",
+      "heard": "서울특별시 마포구 독막로 삼공일 사층에서",
+      "expect": "서울특별시 마포구 독막로 301",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "digitwise",
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 마포구 독막로 301",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 4.4,
+      "warm_p50_ms": 4.5,
+      "detail": "4층",
+      "expect_detail": "4층",
+      "detail_ok": true
+    },
+    {
+      "id": "s30",
+      "heard": "서울시 마포구 망원동 사백팔십오 다시 오 일층",
+      "expect": "서울특별시 마포구 월드컵로23길 12",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 마포구 월드컵로23길 12",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 6.0,
+      "warm_p50_ms": 8.5,
+      "detail": "1층",
+      "expect_detail": "1층",
+      "detail_ok": true
+    },
+    {
+      "id": "s31",
+      "heard": "송파구 올림픽로 백팔 삼백오동 천이백오호",
+      "expect": "서울특별시 송파구 올림픽로 108",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "sigungu_only"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 108",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 21.3,
+      "warm_p50_ms": 17.5,
+      "detail": "305동 1205호",
+      "expect_detail": "305동 1205호",
+      "detail_ok": true
+    },
+    {
+      "id": "s32",
+      "heard": "구미시 진평길 칠십구 다시 일 일동일호",
+      "expect": "경상북도 구미시 진평길 79-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "glued"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 진평길 79-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 14.4,
+      "warm_p50_ms": 13.5,
+      "detail": "1동 1호",
+      "expect_detail": "1동 1호",
+      "detail_ok": true
+    },
+    {
+      "id": "s33",
+      "heard": "부산광역시 서구 구덕로 삼백이십일번길 오층이야",
+      "expect": null,
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "no_number"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "outcome": "rejected",
+      "cold_ms": 48.0,
+      "warm_p50_ms": 51.7,
+      "detail": "5층",
+      "expect_detail": "5층",
+      "detail_ok": true
+    },
+    {
+      "id": "s34",
+      "heard": "서울시 중랑구 섬오동 이백오십오번지 베르디움 가동 사백일 호예요",
+      "expect": null,
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "nonexistent",
+        "letter_dong"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "outcome": "rejected",
+      "cold_ms": 14.7,
+      "warm_p50_ms": 12.9,
+      "detail": "베르디움 가동 401호",
+      "expect_detail": "베르디움 가동 401호",
+      "detail_ok": true
+    },
+    {
+      "id": "s35",
+      "heard": "인동구길 이십이다시일 소담미인 백이호요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "detail",
+        "road_only",
+        "building_name"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 124.9,
+      "warm_p50_ms": 154.0,
+      "detail": "소담미인 102호",
+      "expect_detail": "소담미인 102호",
+      "detail_ok": true
+    },
+    {
+      "id": "b01",
+      "heard": "경북 구미시 인동구길 이십이다시일이요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "glued_dasi",
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 776.7,
+      "warm_p50_ms": 986.2,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b02",
+      "heard": "전주시 금암이동 백사십구 다시 십일 번지요",
+      "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "expect_status": null,
+      "tags": [
+        "jibun",
+        "numeral_dong"
+      ],
+      "status": "confirmed",
+      "recorded": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 69.7,
+      "warm_p50_ms": 71.4,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b03",
+      "heard": "전주시 덕진구 금암이동 백사십구-십일번지요",
+      "expect": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "expect_status": null,
+      "tags": [
+        "jibun",
+        "numeral_dong",
+        "hyphen"
+      ],
+      "status": "confirmed",
+      "recorded": "전북특별자치도 전주시 덕진구 모래내8길 34",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 8.5,
+      "warm_p50_ms": 9.4,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b04",
+      "heard": "경북 구미시 산동읍 봉산리 오백팔십 번지요",
+      "expect": "경상북도 구미시 산동읍 산호대로41길 13",
+      "expect_status": null,
+      "tags": [
+        "jibun"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 산동읍 산호대로41길 13",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 12.1,
+      "warm_p50_ms": 19.9,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b05",
+      "heard": "서울시 송파구 올림픽로 구십구요",
+      "expect": "서울특별시 송파구 올림픽로 99",
+      "expect_status": null,
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 송파구 올림픽로 99",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 4.9,
+      "warm_p50_ms": 4.8,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b06",
+      "heard": "경상북도 구미시 임동 이길 십사 다시 십삼",
+      "expect": "경상북도 구미시 인동2길 14-13",
+      "expect_status": null,
+      "tags": [
+        "typo"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동2길 14-13",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 9.9,
+      "warm_p50_ms": 12.7,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b07",
+      "heard": "구미시 봉공남로 이십길 십오라고요",
+      "expect": "경상북도 구미시 봉곡남로20길 15",
+      "expect_status": null,
+      "tags": [
+        "typo",
+        "ending_rago"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 봉곡남로20길 15",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 14.7,
+      "warm_p50_ms": 18.9,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b08",
+      "heard": "구미 인동구길 이십 이 다시 일이요",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "stt_split",
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동9길 22-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 90.9,
+      "warm_p50_ms": 127.9,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b09",
+      "heard": "인천 부평구 아트센터로 일일팔이거든요",
+      "expect": "인천광역시 부평구 아트센터로 118",
+      "expect_status": null,
+      "tags": [
+        "digitwise",
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "인천광역시 부평구 아트센터로 118",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 14.0,
+      "warm_p50_ms": 11.9,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b10",
+      "heard": "제주시 이도이동 광양구길 십",
+      "expect": "제주특별자치도 제주시 광양9길 10",
+      "expect_status": null,
+      "tags": [
+        "numeral_dong"
+      ],
+      "status": "confirmed",
+      "recorded": "제주특별자치도 제주시 광양9길 10",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 70.3,
+      "warm_p50_ms": 52.9,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b11",
+      "heard": "제주시 이도이동 광양구길십이요",
+      "expect": "제주특별자치도 제주시 광양9길 10",
+      "expect_status": null,
+      "tags": [
+        "glued_gil",
+        "ending_ambiguous"
+      ],
+      "status": "confirmed",
+      "recorded": "제주특별자치도 제주시 광양9길 10",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 377.2,
+      "warm_p50_ms": 415.3,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b12",
+      "heard": "서울시 양천구 신정이펜일로 오십이요",
+      "expect": "서울특별시 양천구 신정이펜1로 50",
+      "expect_status": null,
+      "tags": [
+        "ending_ambiguous"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 양천구 신정이펜1로 50",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 9.1,
+      "warm_p50_ms": 10.4,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b13",
+      "heard": "서울특별시 영등포구 도림로 백사십삼길 이십칠이요",
+      "expect": "서울특별시 영등포구 도림로143길 27",
+      "expect_status": null,
+      "tags": [
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "서울특별시 영등포구 도림로143길 27",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 15.6,
+      "warm_p50_ms": 15.0,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b14",
+      "heard": "서울 송파구 올림픽로 십삼 다시 오요",
+      "expect": null,
+      "expect_status": null,
+      "tags": [
+        "nonexistent"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "outcome": "rejected",
+      "cold_ms": 11.7,
+      "warm_p50_ms": 16.0,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b15",
+      "heard": "부산광역시 서구 구덕로 삼백이십일 번길 이십사",
+      "expect": "부산광역시 서구 구덕로321번길 24",
+      "expect_status": null,
+      "tags": [
+        "spaced_beongil"
+      ],
+      "status": "confirmed",
+      "recorded": "부산광역시 서구 구덕로321번길 24",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 17.6,
+      "warm_p50_ms": 24.2,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b16",
+      "heard": "구미시 인의동 오륙오 다시 삼이요",
+      "expect": "경상북도 구미시 인동5길 25-1",
+      "expect_status": null,
+      "tags": [
+        "jibun",
+        "ryuk",
+        "ending"
+      ],
+      "status": "confirmed",
+      "recorded": "경상북도 구미시 인동5길 25-1",
+      "alternatives": [],
+      "outcome": "confirmed",
+      "cold_ms": 71.0,
+      "warm_p50_ms": 89.4,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    },
+    {
+      "id": "b17",
+      "heard": "경기도 김천 어 경북 구미시 인동구길 이십이 다시 일",
+      "expect": "경상북도 구미시 인동9길 22-1",
+      "expect_status": null,
+      "tags": [
+        "false_start",
+        "holdout"
+      ],
+      "status": "not_found",
+      "recorded": null,
+      "alternatives": [],
+      "outcome": "missed",
+      "cold_ms": 83.7,
+      "warm_p50_ms": 86.5,
+      "detail": null,
+      "expect_detail": "",
+      "detail_ok": true
+    }
+  ]
+}

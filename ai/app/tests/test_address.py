@@ -509,6 +509,15 @@ def test_kakao_sido_abbreviation():
         ["세종특별자치시", "제주특별자치도", "강원특별자치도", "전남광주통합특별시"]
 
 
+def test_service_splits_detail_and_keeps_it_when_base_fails(db_path, fake_kakao):
+    svc = AddressService(open_db(db_path))
+    r = run(svc.resolve("경북 구미시 인동구길 칠다시삼 이백삼홉니다"))
+    assert (r.status, r.address, r.detail) == ("confirmed", "경상북도 구미시 인동9길 7-3", "203호")
+    r = run(svc.resolve("서울 강남구 없는로 12, 삼층 교무실"))
+    assert (r.status, r.address, r.detail) == ("not_found", None, "3층 교무실")  # 상세는 돌려준다(기록 유지)
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).detail is None
+
+
 def test_service_uses_local_geo_and_falls_back_to_kakao(db_path, monkeypatch):
     calls = []
 

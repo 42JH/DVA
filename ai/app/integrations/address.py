@@ -16,6 +16,7 @@ import httpx2
 
 from app.address import matcher
 from app.address.gazetteer import AddressDB
+from app.address.parse import detail_text
 from app.domain.state import Geo
 from app.integrations import kakao
 from app.observability.trace import span
@@ -29,6 +30,7 @@ class AddressResult:
     address: str | None           # 기록할 주소(confirmed·ambiguous=보정 주소 1순위, off·error=들은 그대로)
     alternatives: tuple[str, ...]  # ambiguous일 때 나머지 후보(P6: 보관), region_needed일 때 되물을 지역 이름(최대 3)
     geo: Geo | None
+    detail: str | None = None     # 들은 문장에서 서버가 뗀 상세주소(수사는 숫자로, "312동 403호"). 없으면 None
 
 
 class AddressService:
@@ -56,16 +58,19 @@ class AddressService:
             return AddressResult("error", heard, (), None)
 
     async def _resolve(self, heard: str) -> AddressResult:
+        detail = None
         if self.db is None:
             status, address, alternatives = "off", heard, ()
         else:
-            with span("address", step="correct"):
-                r = await asyncio.get_running_loop().run_in_executor(self.pool, matcher.resolve, self.db, heard)
+            with span("address", step="correct"):  # 들은 문장에서 상세주소를 떼고(서버가 가른다) 기본주소를 보정
+                r, heard, raw = await asyncio.get_running_loop().run_in_executor(
+                    self.pool, matcher.resolve_detail, self.db, heard)
+            detail = detail_text(raw) if raw else None
             if (r.status == "not_found" or r.weak) and kakao.has_key():
                 with span("address", step="witness"):
                     r = await self._witness(heard, r)
             if r.status in ("not_found", "region_needed"):
-                return AddressResult(r.status, None, r.candidates, None)
+                return AddressResult(r.status, None, r.candidates, None, detail)
             cands = list(r.candidates) or [r.address]
             status, address, alternatives = r.status, cands[0], tuple(cands[1:])
         geo = None
@@ -76,7 +81,7 @@ class AddressService:
             with span("address", step="geocode"):
                 async with self.kakao_sem:
                     geo = await kakao.geocode(address, self.kakao_timeout_sec, http=self.http)
-        return AddressResult(status, address, alternatives, geo)
+        return AddressResult(status, address, alternatives, geo, detail)
 
     async def _witness(self, heard: str, local: matcher.Resolution) -> matcher.Resolution:
         """두 번째 근거: 로컬이 못 찾았거나 약하면(지역 없는 건물명 확정·소리를 고친 되묻기) 카카오 키워드·주소(similar) 검색을
