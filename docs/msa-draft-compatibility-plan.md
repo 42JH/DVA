@@ -11,7 +11,8 @@ Jira는 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)이�
 1. 적용된 changeset을 수정하지 않고 consultation 008에 055의 통화 주문 확정 필드·제약·기본값을, order 004에 원본 배송 초안 테이블·인덱스·과거 COLLECTING 주문의 부분 스냅샷을 추가한다. 기존 통화는 intake=false, 이후 등록은 true다. 논리 참조와 원래 보관 시작/삭제 시각을 유지한다.
 2. 055의 과거 주문 이관이 참조하는 통화는 consultation에서 자기 변경 시점에 불변 스냅샷으로 캡처한다. 연결 통화가 정확히 하나일 때만 ID·발신번호를 제공하고 삭제/만료 통화도 원본처럼 집계한다. order는 인증된 조회 이벤트로 이를 가져와 초안과 완료 표식을 같은 로컬 트랜잭션에 저장한다. 미완료 표식은 재시작해 이어 처리하며, 모든 적용이 커밋된 뒤 consultation 임시 스냅샷을 정리한다. 타 소유자 테이블·DB 직접 조회/복제는 하지 않는다.
 3. 기존 주문 목록 두 경로의 이관 주문 숨김, 전체/상세 취소의 신규 통화·이관 초안 409와 검사 순서, 공개 OpenAPI를 원본에 맞춘다. 조회 상세 등 바뀌지 않은 계약을 유지한다. 기존 통화 삭제는 확정 전 유효 READY/EDITING 초안 존재를 order에 확인하고 원본 409·감사·롤백을 유지한다.
-4. 모듈·시작/DB 준비 검사·환경/k8s·공개 경로 제외·소유자 인증·오류 처리·기존 검증기·목록을 함께 연결한다. 기존 HTTP 이벤트/PostgreSQL/Secret·5개 앱만 사용하고 Redis·브로커·새 의존성을 추가하지 않는다.
+4. 초안은 최초 retention_started_at부터 5년이 지나면 원본과 같은 10초 워커·100건·잠금 건너뛰기로 폐기한다. 최초 이관 완료 후 워커를 시작하고 원본 주문/통화·전체 보관 정책은 별도 후속 범위를 유지한다.
+5. 모듈·시작/DB 준비 검사·환경/k8s·공개 경로 제외·소유자 인증·오류 처리·기존 검증기·목록을 함께 연결한다. 기존 HTTP 이벤트/PostgreSQL/Secret·5개 앱만 사용하고 Redis·브로커·새 의존성을 추가하지 않는다.
 
 ## 검증
 
@@ -22,3 +23,48 @@ Jira는 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)이�
 - 최신 기준 목록·Docker lint/타입/단위/E2E·전체 DB·customer/consultation/operations/order 회귀와 Linux 배포 검사를 실행한다. 배포 연결/시작 조건은 격리 실행으로 확인한다.
 
 분리 DB의 전역 원자성을 보장하지 않는다. 소유 DB별 이관 시점과 완료 표식/인증 이벤트로 복구하며 원본 주문/통화가 살아 있는 동안의 동시 변경과 공개 API 검사를 따로 확인한다. 운영 Jenkins·DB·HTTPS와 외부 결제/디버/AI 확인은 로컬 검증과 구분해 보고한다.
+
+## Jenkins #39 실패와 수정
+
+[Jenkins #39](https://13.209.59.180/jenkins/job/dva-msa/39/console)는 9624b77을 checkout하고 Linux 배포 회귀 62개를 통과한 뒤 Verify Event Transport에서 실패했다. 원본 목록에 추가된 공개 API 8개와 055 SQL 해시가 기존 96개/054 기준에 없었다. DB·앱 빌드·배포에는 도달하지 않았다. 로컬에서 같은 deep equality 실패를 재현했으며 해시·전체 목록·경로 중복 검사를 유지한 채 최신 104개 선언·54개 SQL 파일(마지막 055)·6개 워커로 갱신했다. 단순 목록 갱신과 별개로 기존 목록/취소/통화 삭제의 055 의미 변화와 실제 데이터 이관을 함께 연결한다.
+
+## 최초 전환과 복구 조건
+
+원본 `backend/docs/parcel-draft-rollout.md`처럼 새 유입을 중지하고 기존 통화·AI outbox를 비운 뒤 기존 order/consultation 쓰기를 중지하고 백업한다. MSA의 기존 앱/DB 배포는 이번 로컬 작업에서 실행하지 않는다. 신규 초안/완료 API가 남아 있으므로 이 MR만으로 신규 전체 흐름의 운영 전환 준비가 끝났다고 판단하지 않는다.
+
+Liquibase preview는 004/008이 대기 중이면 055 전환 표식을 출력한다. 원격 apply는 두 Deployment의 desired replicas와 남은 실제 replicas가 모두 0이며 종료 중인 Pod까지 사라졌는지 확인한다. 적용을 시작하기 전에 namespace의 055 호환 요구 표식을 기록해 응답 유실이나 migration 실패 후에도 구버전을 자동 복구 대상으로 선택하지 않는다. 쓰기 중지 상태를 유지하고 호환 릴리스로 전진 복구한다. 이 표식은 migration 성공을 단정하는 기록이 아니며 기존 DB 배포 성공 annotation은 정상 검증 후에만 기록한다.
+
+새 order/consultation manifest는 pod template에 055 계약을 표시한다. 현재 배포기는 055 전환이 시작된 namespace 또는 이미 055인 Deployment에 구버전 후보를 거절하고, 최초 새 앱 실패 후 호환되지 않는 이전 앱을 자동 재가동하지 않는다. 호환 이전 앱의 정상 rolling update·실패 복구는 유지한다. 예전 배포 스크립트로 이 검사를 우회하거나 이미지만 수동 복귀하지 않는다. DB/두 앱 업그레이드가 끝나고 후속 공개 API까지 준비된 뒤 유입을 연다.
+
+
+## 전체 통화 스냅샷 비교에서 확인한 저장 구조 보완
+
+초안 7개 행의 모든 필드 비교를 통과한 뒤 통화 원본 행의 전체 비교에서, 기존 MSA call_sessions에 원본 045의 purge_claim_id/claimed_until과 짝 제약이 없고 원본 047에서 퇴역한 end_reason이 남은 것을 확인했다. 런타임 전체 참조 검색 결과 end_reason 사용자는 없었다. 적용된 changeset은 그대로 두고 consultation 008에 두 원본 migration의 해당 통화 DDL을 함께 추가한다. 원본 047처럼 end_reason은 제거되므로 첫 전환 백업 대상에 포함한다. 통화 보관 워커 전체 구현을 완료한 것으로 확대하지 않는다. 새 기본값·제약·모든 현재 통화 필드는 원본과 전체 비교하고 고의 실패 때 기존 end_reason 값까지 rollback되는지 확인한다.
+
+이관 사본 정리와 개인정보 없는 정리 완료 표식은 consultation의 같은 트랜잭션에서 커밋한다. 정리 이후의 조회는 409로 거절하고, 이미 order에 완료 표식이 있으면 조회 없이 정리 ACK만 재시도한다. 따라서 order만 과거로 복원되어 연결 재이관을 시도하면 시작을 중단하며 NULL 연결을 정상 결과로 저장하지 않는다. 두 DB는 같은 전환 시점의 백업으로 복구해야 한다.
+
+order의 초안 존재 확인 변경이 상담 삭제에도 영향을 주므로 Jenkins의 Verify Consultation Parity 선택 조건에 order를 추가한다. 검증기는 임시 응답 대신 실제 order 서비스/DB를 띄우며 production/test 두 단계에서 같은 의존을 사용한다.
+
+## 2026-11-08 최종 로컬 검증
+
+구현 커밋은 `8e6daf2`, #39 목록 복구는 `f0fcaea`다. 마지막 fetch에서도 develop-backend는 9624b77, backend tree는 12c6fa0f17354f53b28244d8b804bd564f1141be였다. 수정은 msa/docs 61개 파일이며 backend·프론트·AI·기존 적용 SQL changeset은 변경하지 않았다. 아래 label은 실행/검사 기록 수로 개별 테스트 수와 구분한다.
+
+| 검증 | 결과와 근거 |
+| --- | --- |
+| Jenkins #39 실패 단계 | `python msa/shared/events/verify.py` exit 0. 실행 5775c8a81b44에서 실제 PostgreSQL 이벤트 통합 15개·새 계약 단위 3개·원본 전체 목록 1개가 통과했다. source 104개 API/54개 SQL 파일(마지막 055)/6개 워커의 전체 비교와 해시·중복 검사를 유지했다. |
+| Liquibase | `python msa/liquibase/verify.py` passed=true, 623 labels. 최종 이미지 `sha256:a04d828a35b94de68e77ac43494e71a7c53e347b78a39660597fc11fa84adbd0`. 5개 소유 스키마의 신규/재적용·기존 이력/업무/대기 이벤트, 원본 주문/배송 9개 테이블과 함수 5개, 055 업그레이드/중간 SQL 실패 전체 rollback을 비교했다. 원본 통화의 현재 모든 필드·신규 제약/인덱스·이전 false/신규 true도 확인했다. |
+| 주문·초안·청구 | `verify-order.py` passed=true, 212 labels, f40f46e199c6. 기본 DB 6개와 이관 DB 3개를 격리했다. 054/기존 MSA에 같은 과거 주문·상세·통화를 넣고 055/후속 SQL·실제 소유 HTTP 이벤트를 적용하여 모든 초안 필드와 원본 주문/통화 행을 비교했다. 생성 UUID는 형식·유일성을 검증한 뒤 비교에서 제외했고 기존 참조/업무 값은 제외하지 않았다. |
+| 복구·보관 | 실제 이관 시작/정리 및 복구 7개 테스트 통과. 사본 정리 후 pending order 복원의 409/롤백, 실제 SIGKILL 전/커밋 뒤 복구, 정리 ACK 유실 뒤 조회 없는 재정리, 100건 초과/동시 4개 시작을 확인했다. 원본 폐기 SQL과 같은 5년 cutoff·100건 배치·잠긴 행/미래 보관 행 유지·생성/수정/삭제일로 연장되지 않음을 실제 PG에서 비교했다. |
+| 기존 API | 055 신규 조건 26쌍과 기존 주문 조회 136쌍·삭제 69쌍·취소 168쌍·청구 33쌍의 HTTP/업무/감사 비교가 통과했다. 신규 통화의 삭제/만료/미등록 번호 409 우선순위, 삭제/만료 원본·삭제 초안/논리 참조의 이관 차단, READY/EDITING/미완료/취소/재개·삭제·보관·확정별 통화 DELETE를 확인했다. order 중단 시 미확정 통화 삭제 503/행 롤백/실패 감사와 확정 완료 통화의 의존 우회 204도 통과했다. |
+| 원본 회귀 | backend 파일 수정 없이 원본 조회 9개·삭제 4개·취소 18개·청구 11개를 그대로 실행해 통과했다. |
+| 다른 소유자 | 최종 consultation 726c1e8a85b1: 161 labels, customer 3e018e2db42a: 71 labels, operations 22d27bb82cae: 164 labels, 모두 passed=true. 기존 PBX/녹취·SSE·분석·통화 콘텐츠·고객 확인/PIN·인증·페르소나/FAQ·감사 확정/강제 종료 복구를 포함한다. |
+| Linux 빌드/배포 검사 | Dockerfile의 lint·단위/E2E·TypeScript와 서비스별 추가 검사를 통과했다. 최종 Linux Bash/배포 회귀 67개 통과. 최초 055 실패 시 구버전 자동 복귀 차단과 기존 호환 앱 복구를 함께 검사했다. |
+| 격리 k3s | 새 dva-delivery-check-643abf57, v1.35.5+k3s1에서 실제 consultation 소유 DB/HTTP를 포함한 order 최초 배포·정상 교체·고의 readiness 실패와 호환 이전 앱 복구 통과. 요청 520건, 실패 0건. 로그의 progress deadline 오류는 주입한 실패다. |
+| 런타임 의존성 | 최종 order/consultation 이미지의 npm audit --omit=dev 결과 알려진 취약점 각각 0개. 의존성/lockfile 버전은 변경하지 않았다. |
+| 범위 | Python 구문·전체 변경의 git diff --check와 수정 경로/원본 SQL 불변성을 확인했다. 로그/JSON/스크린샷은 git에 넣지 않는다. |
+
+최종 런타임 이미지 ID는 order `sha256:525b0274aa893692a56a07cfc144a61828168900fc0e2bdcbad9de96413e38b7`, consultation `sha256:a330e384625630447e9927396a412b37ebf182fe7fed637dcd66259e42f329ad`다.
+
+검증 중 기존 통화 저장 구조 누락을 보완했다. 과거 단계 보존 검사는 해당 changeset 하나만 update-count로 적용해 기존 전체 행/체크섬 검사를 유지하고, 최신 전체 업그레이드는 별도 055 검사로 확인했다. 새 fixture의 Node IPC 부가 인자·이전 통화 flag·장애 시험의 서비스 재시작 준비도 바로잡았으며 업무 기대 상태/값이나 실패 검사를 완화하지 않았다. Windows 호스트 HTTP 검사는 localhost EACCES로 성공 기록에서 제외하고 같은 검사를 Linux 컨테이너에서 통과시켰다.
+
+실제 운영 Jenkins 재실행·운영 DB/k3s/HTTPS·외부 AI/결제/디버는 확인하지 않았다. 이관 데이터가 많을 때의 운영 소요 시간과 전역 원자성을 보장하지 않는다. 최초 전환은 두 앱 쓰기 중지/Pod 종료와 일관된 백업이 필요하며 새 초안/완료 API가 준비되기 전에 신규 전체 흐름을 운영에 열지 않는다. 신규 공개 초안/완료·확정/결제·배송·남은 상담·교차 소유자 보관과 마지막 전체 동등성 검증은 후속이다.
