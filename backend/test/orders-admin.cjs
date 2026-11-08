@@ -67,12 +67,16 @@ module.exports = function registerOrdersAdmin(suite) {
     const row = second.data[0];
     assert.deepEqual(Object.keys(row).sort(), [
       'createdAt',
+      'customerSeq',
       'orderSeq',
+      'organizationName',
       'parcels',
       'pickupRequestedAt',
       'status',
     ]);
     assert.equal(row.orderSeq, id);
+    assert.equal(row.customerSeq, customer);
+    assert.equal(row.organizationName, null);
     assert.equal(row.parcels.length, 2);
     assert.equal(row.parcels[0].origin.name, parcels[0].origin.name);
     assert.equal(row.parcels[1].destination.name, parcels[1].destination.name);
@@ -190,7 +194,15 @@ module.exports = function registerOrdersAdmin(suite) {
     );
     assert.deepEqual(
       Object.keys(document.components.schemas.AdminOrderListItemDto.properties).sort(),
-      ['createdAt', 'orderSeq', 'parcels', 'pickupRequestedAt', 'status'],
+      [
+        'createdAt',
+        'customerSeq',
+        'orderSeq',
+        'organizationName',
+        'parcels',
+        'pickupRequestedAt',
+        'status',
+      ],
     );
   });
 

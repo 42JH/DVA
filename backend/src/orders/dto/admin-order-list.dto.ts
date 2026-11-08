@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { OrderQueryDto } from './order-query.dto';
 import { OrderAddressValueDto, OrderParcelDto, OrderSummaryDto } from './order-response.dto';
 
@@ -10,6 +10,21 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   'limit',
   'offset',
 ] as const) {
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '주문 고객의 현재 소속 기업 번호. 비활성 소속·기업 포함, 삭제된 연결 제외.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  organizationSeq?: number;
+
   @ApiPropertyOptional({
     description:
       '발송인·수령인 이름·전화번호·주소의 부분 검색. NFC·대소문자 무시. %·_는 일반 문자.',
@@ -63,6 +78,21 @@ export class AdminOrderListItemDto extends PickType(OrderSummaryDto, [
   'createdAt',
   'pickupRequestedAt',
 ] as const) {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '현재 연결된 고객 번호. 미연결·삭제 고객은 null이며 원본 주문 참조는 보존합니다.',
+  })
+  customerSeq!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      '주문 고객의 현재 소속 기업명. 비활성 소속·기업도 표시하며 미연결·삭제 시 null. 결제 당시 기업 스냅샷과 다릅니다.',
+  })
+  organizationName!: string | null;
+
   @ApiProperty({
     type: [OrderListParcelDto],
     description:

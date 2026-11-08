@@ -246,6 +246,8 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.equal(saved.orderSeq, null);
   assert.equal(saved.analysisStatus, 'PENDING');
   assert.equal(saved.recordedAt, null);
+  assert.equal(saved.customerSeq, null);
+  assert.equal(saved.organizationName, null);
   assert.notEqual(process.env.TEST_INSIGHTS_TOKEN, process.env.TEST_BUSINESS_TOKEN);
   const analysisUrl = 'http://proxy/api/ai/calls/' + c.id + '/analysis';
   const sendFailure = (authorization) =>
@@ -265,6 +267,7 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   const failed = (await list.json()).data.find((row) => row.callSessionSeq === c.id);
   assert.equal(failed.analysisStatus, 'FAILED');
   assert.equal(failed.recordedAt, null);
+  assert.equal(failed.organizationName, null);
   const recovered = await fetch(analysisUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: authorization },
@@ -288,6 +291,22 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.equal(completed.call.analysisStatus, 'COMPLETED');
   assert.equal(completed.call.orderSeq, null);
   assert.ok(completed.analysis);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  for (const path of ['/api/calls', '/api/admin/orders']) {
+    const filtered = await fetch('http://proxy' + path + '?organizationSeq=2147483647', {
+      headers: { Cookie: cookie },
+    });
+    assert.equal(filtered.status, 200);
+    assert.deepEqual(await filtered.json(), { data: [], hasNext: false, total_count: 0 });
+  }
+  const orders = await fetch('http://proxy/api/admin/orders?limit=1', {
+    headers: { Cookie: cookie },
+  });
+  assert.equal(orders.status, 200);
+  const rows = (await orders.json()).data;
+  assert.equal(rows.length, 1);
+  for (const field of ['customerSeq', 'organizationName']) assert.ok(Object.hasOwn(rows[0], field));
+  assert.equal(Object.hasOwn(rows[0], 'customerCategory'), false);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);

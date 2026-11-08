@@ -26,3 +26,8 @@
 
 - 1단계 RED: 제품 수정 전 신규 HTTP 테스트에서 organizationName 누락(undefined)과 유효한 organizationSeq의 기존 400 거절을 재현했다.
 - 1단계 검증: 통화 기업 조회 5개와 기존 통화 목록/상세·분석 상태·분석 조회·녹취를 새 임시 PostgreSQL에서 합계 74개 통과(실패/생략 0, 종료 0). build·전체 src lint·format 검사도 종료 0이다. 기존 전체 응답 비교는 유지하고 organizationName=null 기대값만 추가했다.
+- 2단계 RED: 관리자 제품 수정 전 기존 통화 5개는 통과하고 관리자 신규 5개는 customerSeq 누락과 정상 기업 필터 400으로 실패했다.
+- 2단계 검증: 관리자/통화 신규 10개와 기존 주문·재접수 목록·soft delete 회귀 합계 141개를 새 임시 PostgreSQL에서 통과했다(실패/생략 0, 종료 0). build 종료 0. 일반 AI 주문 목록/상세에는 organizationName·고객 유형 필드를 추가하지 않았으며 실제 HTTP로 기존 본인 고객 범위와 원본 주문 데이터 보존을 확인했다. 기존 관리자 목록의 전체 필드·Swagger 비교도 유지했다.
+- 최종 검증 계획: 공식 Docker 검증의 운영 이미지·실제 Nginx에서 통화 기업명/고객번호와 두 목록의 기업 필터, 관리자 주문 새 필드가 보존되는지 확인한다. 기존 분석 실패/복구 경로와 모든 회귀를 함께 통과한 뒤 두 번째 단위를 커밋한다.
+- 최종 결과: 공식 `node backend/scripts/check.cjs` 종료 0, 합계 1,060개 통과, 실패/취소/생략/할 일 0. lint/format·Linux 빌드·전체 격리 DB 통합 테스트·운영 이미지·Nginx/HTTPS/PBX 회귀를 포함한다. 실제 Nginx에서 통화의 organizationName=null과 기존 분석 상태, 두 목록의 유효한 기업 필터, 관리자 주문의 customerSeq/organizationName 필드가 보존됨을 확인했다.
+- 범위 재확인: 이번 2번 변경에는 migration·DB/FK·infra·AI/프론트·공유 일반 주문 DTO/컨트롤러 변경이 없다. 검증은 로컬 임시 PostgreSQL과 Docker이며 실제 운영 배포·프론트 화면·원격 CI 검증은 하지 않았다. 별도 연동 명세 전달은 후속 작업까지 누적한다.
