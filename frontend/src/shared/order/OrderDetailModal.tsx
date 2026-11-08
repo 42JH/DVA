@@ -72,7 +72,7 @@ export function OrderDetailModal({
             </Button>
           )}
           {order?.canEdit && onEdit && (
-            <Button big kind={retry ? 'brandLine' : 'brand'} onClick={() => onEdit(order.orderSeq)}>
+            <Button kind="editBadge" onClick={() => onEdit(order.orderSeq)}>
               수정
             </Button>
           )}

@@ -1,5 +1,83 @@
 @import 'tailwindcss';
 
+thead th {
+  text-align: center;
+}
+
+@layer base {
+  tbody td {
+    text-align: center;
+  }
+}
+
+@layer components {
+  .ops-table {
+    width: 100%;
+    flex-shrink: 0;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  .ops-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #e8eff8;
+  }
+
+  .ops-table thead::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background: #c5d6ec;
+    pointer-events: none;
+  }
+
+  .ops-table th {
+    height: 36px;
+    padding: 0;
+    color: #000;
+    font-size: 14px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .ops-table tbody {
+    color: #333;
+  }
+
+  .ops-table td {
+    height: 44px;
+    padding: 0 15px;
+  }
+
+  .ops-table tr > :not(:last-child) {
+    border-right: 1px solid #c5d6ec;
+  }
+
+  .ops-table tbody tr > td {
+    border-bottom: 1px dashed #c5d6ec;
+  }
+
+  /* 상자가 스크롤될 만큼 가득 차면 마지막 행 테두리는 숨김 (상자 테두리와 겹치지 않게) */
+  [data-scrollable] .ops-table tbody tr:last-child > td {
+    border-bottom: 0;
+  }
+
+  .ops-table tbody tr:nth-child(even),
+  .ops-table tbody tr:hover {
+    background-color: color-mix(in srgb, var(--color-ops-route-soft) 40%, transparent);
+  }
+
+  .ops-table tbody tr[aria-selected='true'] {
+    background-color: var(--color-ops-route-soft);
+  }
+}
+
 /* 디자인 토큰 — 와이어프레임 v2 값 (임시). 디자인이 확정되면 값만 바꾼다, 이름은 유지.
    @theme 안의 변수는 Tailwind 유틸리티가 됨: --color-action → bg-action · text-action · border-action,
    --text-title → text-title, --font-sans → font-sans */
@@ -227,5 +305,42 @@
   select:not(:disabled),
   summary {
     cursor: pointer;
+  }
+}
+
+/* v2 운영 콘솔 (11/06 시안 실험, src/v2) — 기존 화면은 안 씀. text-ops-ink · bg-ops-paper 처럼 */
+@theme {
+  --color-ops-ink: #1d2433; /* 글자 */
+  --color-ops-sub: #5b6475; /* 보조 글자 */
+  --color-ops-faint: #8a94a6; /* 흐린 글자 · 미완료 */
+  --color-ops-paper: #f5f6f8; /* 바탕 */
+  --color-ops-line: #e3e6eb; /* 선 */
+  --color-ops-route: #1f6feb; /* 선택 · 링크 · 진행 중 */
+  --color-ops-route-soft: #eaf2fe;
+  --color-ops-wait: #b86e00; /* 결제 대기 · 입력 필요 */
+  --color-ops-wait-soft: #fff4e0;
+  --color-ops-done: #138a5b; /* 완료 */
+  --color-ops-done-soft: #e7f6ef;
+  --color-ops-stop: #d93b3b; /* 실패 · 불만 */
+  --color-ops-stop-soft: #fdecec;
+  --color-ops-cancel: #7c3aed; /* 취소 */
+  --color-ops-cancel-soft: #f3e8ff;
+  --color-ops-idle-soft: #eef0f3; /* 미완료 · 분석 전 바탕 */
+  --animate-panel-in: panel-in 0.18s ease-out backwards; /* 오른쪽 상세 패널이 열릴 때 */
+  --animate-load-bar: load-bar 1.2s ease-out infinite; /* 화면 코드를 받는 동안 위쪽 막대 */
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
+  }
+  @keyframes load-bar {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+      opacity: 0.3;
+    }
   }
 }

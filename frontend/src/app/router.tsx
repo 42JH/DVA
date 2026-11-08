@@ -20,6 +20,7 @@ import { RequireGuest } from './guards/RequireGuest'
 import { RequireRole } from './guards/RequireRole'
 import { RouteError } from './RouteError'
 import { UiKitPage } from './routes/UiKitPage'
+import { V2Layout } from '@/v2/V2Layout'
 
 // 경로 = 와이어프레임 사이드바 메뉴. handle.title = 상단바 제목(AppLayout이 그림). 화면을 만들면 Placeholder를 그 화면으로 바꾼다
 export const router = createBrowserRouter([
@@ -51,8 +52,8 @@ export const router = createBrowserRouter([
           </RequireAuth>
         ),
         children: [
-          // 홈 화면은 없앰 (11/05 사용자) — 로그인하면 02 통계로
-          { index: true, element: <Navigate to="/dashboard" replace /> },
+          // 로그인하면 v2 운영 콘솔 홈으로 (기존 화면은 v2 사이드바 '기존 화면'으로 들어감)
+          { index: true, element: <Navigate to="/v2" replace /> },
           // 02 통계 'AI 상담 성능' (Figma 11/05) · 그래프 보기 두 화면 — handle 없음(화면이 상단바 · 경로를 그림)
           { path: 'dashboard', element: <DashboardPage /> },
           { path: 'dashboard/response-wait', element: <GraphPage kind="response-wait" /> },
@@ -93,6 +94,82 @@ export const router = createBrowserRouter([
                 },
               ]
             : []), // 공통 부품 확인용, 개발 중에만
+        ],
+      },
+      // v2 운영 콘솔 (11/06 실험 — 기존 화면은 그대로, 새 디자인을 /v2에서 따로 쌓음)
+      {
+        path: '/v2',
+        element: (
+          <RequireAuth>
+            <V2Layout />
+          </RequireAuth>
+        ),
+        children: [
+          // 화면마다 따로 받음 (기존 화면을 여는 데 v2 코드가 같이 실리지 않게)
+          {
+            index: true,
+            lazy: () => import('@/v2/home/TodayPage').then((m) => ({ Component: m.TodayPage })),
+          },
+          {
+            path: 'orders',
+            lazy: () => import('@/v2/orders/OrdersPage').then((m) => ({ Component: m.OrdersPage })),
+          },
+          {
+            path: 'calls',
+            lazy: () => import('@/v2/calls/CallsPage').then((m) => ({ Component: m.CallsPage })),
+          },
+          {
+            path: 'calls/:callId',
+            lazy: () => import('@/v2/calls/CallPage').then((m) => ({ Component: m.CallPage })),
+          },
+          {
+            path: 'unanswered',
+            lazy: () =>
+              import('@/v2/faq/UnansweredPage').then((m) => ({ Component: m.UnansweredPage })),
+          },
+          {
+            path: 'faqs',
+            lazy: () => import('@/v2/faq/FaqsPage').then((m) => ({ Component: m.FaqsPage })),
+          },
+          {
+            path: 'customers',
+            lazy: () =>
+              import('@/v2/customers/CustomersPage').then((m) => ({ Component: m.CustomersPage })),
+          },
+          {
+            path: 'companies',
+            lazy: () =>
+              import('@/v2/companies/CompaniesPage').then((m) => ({ Component: m.CompaniesPage })),
+          },
+          {
+            path: 'companies/:companyId',
+            lazy: () =>
+              import('@/v2/companies/CompanyPage').then((m) => ({ Component: m.CompanyPage })),
+          },
+          {
+            path: 'personas',
+            lazy: () =>
+              import('@/v2/personas/PersonasPage').then((m) => ({ Component: m.PersonasPage })),
+          },
+          {
+            path: 'stats',
+            lazy: () => import('@/v2/stats/StatsPage').then((m) => ({ Component: m.StatsPage })),
+          },
+          {
+            path: 'admins', // 최고 관리자만 (기존 /admins와 같은 가드)
+            lazy: () =>
+              import('@/v2/settings/AdminsPage').then((m) => ({
+                Component: () => (
+                  <RequireRole roles={['SYSTEM_ADMIN']}>
+                    <m.AdminsPage />
+                  </RequireRole>
+                ),
+              })),
+          },
+          {
+            path: 'me',
+            lazy: () => import('@/v2/settings/MePage').then((m) => ({ Component: m.MePage })),
+          },
         ],
       },
       { path: '*', element: <Navigate to="/" replace /> },

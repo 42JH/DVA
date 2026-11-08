@@ -16,6 +16,15 @@ const ACCOUNTS: {
   { adminUserSeq: 2, loginId: 'manager', name: '이매니', role: 'SUPERVISOR', status: 'ACTIVE' },
   { adminUserSeq: 3, loginId: 'pending', name: '박대기', role: 'OPERATOR', status: 'PENDING' },
   { adminUserSeq: 4, loginId: 'inactive', name: '최비활', role: 'OPERATOR', status: 'INACTIVE' },
+  // 관리자 화면(10)에 줄이 차도록 더 둠 — 비밀번호는 모두 test1234
+  { adminUserSeq: 5, loginId: 'ops01', name: '정운영', role: 'OPERATOR', status: 'ACTIVE' },
+  { adminUserSeq: 6, loginId: 'ops02', name: '한상담', role: 'OPERATOR', status: 'ACTIVE' },
+  { adminUserSeq: 7, loginId: 'ops03', name: '오지원', role: 'OPERATOR', status: 'ACTIVE' },
+  { adminUserSeq: 8, loginId: 'lead01', name: '강팀장', role: 'SUPERVISOR', status: 'ACTIVE' },
+  { adminUserSeq: 9, loginId: 'ops04', name: '윤미래', role: 'OPERATOR', status: 'ACTIVE' },
+  { adminUserSeq: 10, loginId: 'newbie1', name: '서신입', role: 'OPERATOR', status: 'PENDING' },
+  { adminUserSeq: 11, loginId: 'newbie2', name: '임가입', role: 'OPERATOR', status: 'PENDING' },
+  { adminUserSeq: 12, loginId: 'ops05', name: '조퇴사', role: 'OPERATOR', status: 'INACTIVE' },
 ]
 // 비밀번호는 계정과 따로 — /auth/me 응답에 섞이지 않게
 const PASSWORDS = new Map(ACCOUNTS.map((a) => [a.loginId, 'test1234']))
@@ -51,6 +60,56 @@ const invalid = (b: Record<string, unknown>, withName: boolean) => {
   return d
 }
 
+// 10 관리자 권한 관리 (API-06~10) — 위 계정을 그대로 씀: 승인하면 그 아이디로 로그인됨
+const createdAt = (seq: number) => new Date(Date.now() - (40 - seq * 3) * 86_400_000).toISOString()
+const lastLoginAt = (seq: number) => new Date(Date.now() - seq * 3_600_000).toISOString()
+const adminOf = (a: (typeof ACCOUNTS)[number]) => ({
+  ...a,
+  createdAt: createdAt(a.adminUserSeq),
+  lastLoginAt: a.status === 'PENDING' ? null : lastLoginAt(a.adminUserSeq),
+})
+const findAdmin = (id: unknown) => ACCOUNTS.find((a) => a.adminUserSeq === Number(id))
+const noContent = () => new HttpResponse(null, { status: 204 })
+
+export const adminHandlers = [
+  http.get(`${API_BASE_URL}/admins`, ({ request }) => {
+    const u = new URL(request.url).searchParams
+    const limit = Math.min(100, Math.max(1, Number(u.get('limit') ?? 20)))
+    const offset = Math.max(0, Number(u.get('offset') ?? 0))
+    const q = (u.get('q') ?? '').trim().toLowerCase()
+    const rows = ACCOUNTS.filter((a) => !u.get('status') || a.status === u.get('status'))
+      .filter((a) => !q || a.name.toLowerCase().includes(q) || a.loginId.toLowerCase().includes(q))
+      .map(adminOf)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    return HttpResponse.json({
+      data: rows.slice(offset, offset + limit),
+      hasNext: offset + limit < rows.length,
+      total_count: rows.length,
+    })
+  }),
+  http.patch(`${API_BASE_URL}/admins/:id/password`, ({ params }) => {
+    const a = findAdmin(params.id)
+    if (!a) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
+    PASSWORDS.set(a.loginId, 'dva1234')
+    return noContent()
+  }),
+  http.patch(`${API_BASE_URL}/admins/:id`, async ({ params, request }) => {
+    const a = findAdmin(params.id)
+    if (!a) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
+    if (a.role === 'SYSTEM_ADMIN') return fail(403, 'FORBIDDEN', '최고 관리자는 바꿀 수 없습니다.')
+    a.status = ((await request.json()) as { status: 'ACTIVE' | 'INACTIVE' }).status
+    return noContent()
+  }),
+  http.delete(`${API_BASE_URL}/admins/:id`, ({ params }) => {
+    const i = ACCOUNTS.findIndex((a) => a.adminUserSeq === Number(params.id))
+    if (i < 0) return fail(404, 'NOT_FOUND', '관리자가 없습니다.')
+    if (ACCOUNTS[i].role === 'SYSTEM_ADMIN')
+      return fail(403, 'FORBIDDEN', '최고 관리자는 지울 수 없습니다.')
+    ACCOUNTS.splice(i, 1)
+    return noContent()
+  }),
+]
+
 export const authHandlers = [
   http.post(`${API_BASE_URL}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>
@@ -77,7 +136,7 @@ export const authHandlers = [
       return fail(409, 'DUPLICATE_RESOURCE', '이미 사용 중인 로그인 ID입니다.')
     PASSWORDS.set(loginId, password)
     ACCOUNTS.push({
-      adminUserSeq: ACCOUNTS.length + 1,
+      adminUserSeq: Math.max(...ACCOUNTS.map((a) => a.adminUserSeq)) + 1,
       loginId,
       name,
       role: 'OPERATOR',

@@ -57,7 +57,7 @@ export function CompanyListPage() {
         <FilterBar>
           <Button
             big
-            kind="dangerLine"
+            kind="deleteBadge"
             className="ml-auto"
             disabled={vm.selected.size === 0}
             onClick={vm.askDelete}

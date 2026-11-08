@@ -28,6 +28,7 @@ export interface AdminListQuery {
   status: AdminStatus
   limit: number // 1~100
   offset: number
+  q?: string // 이름 · 로그인 아이디 부분 검색 (11/08)
 }
 
 export const adminQueries = {

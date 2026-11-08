@@ -73,7 +73,11 @@ export interface HandoffDto {
 }
 export interface CallDto {
   callSessionSeq: number
+  customerSeq: number | null
   customerName: string | null
+  organizationName: string | null // 고객의 지금 소속 기업 (없으면 null — 고객 있으면 개인, 둘 다 없으면 미확인)
+  analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' // 백엔드 판정 (11/08) — 실패 통보가 안 오면 계속 PENDING
+  recordedAt: string | null // 첫 녹취가 DB에 저장된 시각 (재생 가능 여부 아님)
   callerPhoneNumber: string | null
   orderSeq: number | null
   orderStatus: string | null
@@ -83,7 +87,6 @@ export interface CallDto {
   handoff: HandoffDto | null
 }
 export interface CallListItemDto extends CallDto {
-  organizationName?: string | null // 발신 고객의 소속 기업명 (11/06 시안 '기업' 열 — 백엔드 추가 요청 중, 없거나 개인이면 null)
   analysis: CallAnalysisDto | null // 아직 안 왔으면 null — 성공 · 불만 없음으로 보지 않기 (§5.1)
 }
 export interface RecordingDto {

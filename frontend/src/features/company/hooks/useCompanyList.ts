@@ -2,8 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useDeferredValue, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageCount, pageSlice } from '@/shared/api/paging'
-import { ymd } from '@/shared/lib/dateRange'
-import { fmtShortDate } from '@/shared/lib/format'
+import { fmtDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { matchKo } from '@/shared/lib/search'
 import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
@@ -17,12 +16,12 @@ export interface CompanyRow {
   name: string
   inactive: boolean // '비활성' 태그
   members: number // 사원 수 (서버 memberCount)
-  date: string // 등록일 '03.04' · 다른 해 '2025.12.29' · 없으면 '—'
+  date: string // 등록일 '2026-03-04' (v2 날짜 형식) · 없으면 '—'
   billing: string // 월결제 '사용' · '미사용'
 }
 
 /** 08 기업 목록 훅 — 검색 · 쪽(URL) · 목록 · 사원 수 · 체크 선택 · 여러 곳 삭제 · CSV 창 열기 */
-export function useCompanyList() {
+export function useCompanyList(size = PAGE_SIZE) {
   const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -31,16 +30,16 @@ export function useCompanyList() {
   const q = useDeferredValue(params.q.trim()) // 칠 때마다 거르니 입력이 먼저, 목록은 한 박자 늦게 (09와 같음)
   const searching = q !== ''
   const list = useQuery({
-    ...companyQueries.list({ q: '', limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE }),
+    ...companyQueries.list({ q: '', limit: size, offset: (page - 1) * size }),
     placeholderData: keepPreviousData, // 쪽이 바뀌는 동안 이전 표 유지 (깜빡임 방지)
     enabled: !searching,
   })
   const pool = useQuery({ ...companyQueries.pool(), enabled: searching })
   const hit = searching ? (pool.data ?? []).filter((c) => matchKo(c.name, q)) : null
-  const companies = hit ? pageSlice(hit, page, PAGE_SIZE).rows : (list.data?.data ?? [])
+  const companies = hit ? pageSlice(hit, page, size).rows : (list.data?.data ?? [])
 
   const total = hit ? hit.length : (list.data?.total_count ?? 0)
-  const pages = pageCount(total, PAGE_SIZE)
+  const pages = pageCount(total, size)
   const loaded = searching ? !!pool.data : !!list.data
   useEffect(() => {
     if (loaded && page > pages) set({ page: pages }) // 지워서 마지막 쪽이 비면 앞쪽으로
@@ -82,7 +81,7 @@ export function useCompanyList() {
     name: c.name,
     inactive: c.status === 'INACTIVE',
     members: c.memberCount,
-    date: c.createdAt ? fmtShortDate(ymd(new Date(c.createdAt))) : '—',
+    date: c.createdAt ? fmtDate(c.createdAt) : '—',
     billing: BILLING_LABEL(c.monthlyBillingEnabled),
   }))
 
