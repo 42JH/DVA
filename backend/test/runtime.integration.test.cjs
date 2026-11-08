@@ -666,6 +666,10 @@ test('production login through Nginx authorizes company operations and logout re
   const me = await fetch('http://proxy/api/auth/me', { headers: { Cookie: session } });
   assert.equal(me.status, 200);
   assert.equal((await me.json()).data.loginId, 'runtimeAdmin83');
+  const deniedAdminSearch = await fetch('http://proxy/api/admins?q=runtime&status=ACTIVE', {
+    headers: { Cookie: session },
+  });
+  assert.equal(deniedAdminSearch.status, 403);
   const name = 'runtime-company-' + randomUUID();
   const companyHeaders = { ...headers, Cookie: session };
   const register = () =>
@@ -1144,6 +1148,36 @@ test('production active count SSE crosses HTTPS and both Nginx proxies, keeps he
     controller.abort();
     await reader.cancel().catch(() => {});
   }
+});
+
+test('production administrator search through Nginx keeps system-only scope, filters and public fields', async () => {
+  const login = await fetch('http://proxy/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://13.209.59.180' },
+    body: JSON.stringify({ loginId: 'runtimeSearchAdmin83', password: 'runtime-only-password' }),
+  });
+  assert.equal(login.status, 200);
+  const headers = { Cookie: login.headers.get('set-cookie').split(';')[0] };
+  const path = 'http://proxy/api/admins?q=RUNTIMESEARCHADMIN83&role=SYSTEM_ADMIN&status=ACTIVE';
+  const response = await fetch(path, { headers });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const result = await response.json();
+  assert.equal(result.total_count, 1);
+  assert.equal(result.hasNext, false);
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0].loginId, 'runtimeSearchAdmin83');
+  assert.deepEqual(Object.keys(result.data[0]).sort(), [
+    'adminUserSeq',
+    'createdAt',
+    'lastLoginAt',
+    'loginId',
+    'name',
+    'role',
+    'status',
+  ]);
+  for (const unauthorized of [{}, businessHeaders()])
+    assert.equal((await fetch(path, { headers: unauthorized })).status, 401);
 });
 
 test('HTTPS proxy preserves administrator authentication, internal blocking and PBX POST-only routing', async () => {

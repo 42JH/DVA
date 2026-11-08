@@ -70,7 +70,8 @@ export class AdminAccessController {
   @Get()
   @ApiOperation({
     summary: '관리자 목록 조회',
-    description: 'SYSTEM_ADMIN 전용. 권한·상태로 필터링하며 관리자 번호 내림차순으로 조회합니다.',
+    description:
+      'SYSTEM_ADMIN 전용. 선택 q로 이름·로그인 아이디를 부분 검색하고 권한·상태 필터와 함께 적용합니다. 관리자 번호 내림차순이며 total_count는 검색·필터 후 페이지 적용 전 전체 건수입니다.',
   })
   @ApiQuery({ name: 'limit', required: false, description: '조회 개수. 기본 20, 최대 100.' })
   @ApiQuery({ name: 'offset', required: false, description: '건너뛸 개수. 기본 0.' })
