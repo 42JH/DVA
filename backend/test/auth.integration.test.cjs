@@ -368,6 +368,244 @@ test('login distinguishes pending and inactive accounts only after valid credent
   }
 });
 
+test('administrator q searches names and login IDs without changing login identity matching or public fields', async () => {
+  const owner = await account('SearchOwner', 'SYSTEM_ADMIN');
+  const session = (await login(owner)).session;
+  const target = await account('SearchTarget');
+  const name = prefix + '홍길동Alpha';
+  await db.pool.query('UPDATE admin_users SET name=$1 WHERE admin_user_seq=$2', [name, target.id]);
+  const expected = (await call('GET', '/api/admins', undefined, session)).body.data.find(
+    (row) => row.adminUserSeq === target.id,
+  );
+  assert.deepEqual(Object.keys(expected).sort(), [
+    'adminUserSeq',
+    'createdAt',
+    'lastLoginAt',
+    'loginId',
+    'name',
+    'role',
+    'status',
+  ]);
+  for (const q of [
+    name.toUpperCase(),
+    prefix + '홍길동Alpha',
+    target.loginId.toUpperCase(),
+    '  searchtarget  ',
+  ]) {
+    const result = await call(
+      'GET',
+      '/api/admins?' + new URLSearchParams({ q }),
+      undefined,
+      session,
+    );
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(result.body, { data: [expected], hasNext: false, total_count: 1 });
+  }
+  assert.equal((await login({ loginId: target.loginId.toUpperCase() })).status, 401);
+  assert.equal((await login(target)).status, 200);
+});
+
+test('administrator q applies before the first hundred rows and combines role, status and stable pages', async () => {
+  const owner = await account('PageOwner', 'SYSTEM_ADMIN');
+  const session = (await login(owner)).session;
+  const term = prefix + '관리자필터';
+  const targets = [];
+  for (const [role, status] of [
+    ['OPERATOR', 'ACTIVE'],
+    ['OPERATOR', 'PENDING'],
+    ['SUPERVISOR', 'ACTIVE'],
+    ['SYSTEM_ADMIN', 'INACTIVE'],
+  ]) {
+    const user = await account('PageTarget' + targets.length, role, status);
+    await db.pool.query('UPDATE admin_users SET name=$1 WHERE admin_user_seq=$2', [term, user.id]);
+    targets.push(user);
+  }
+  await db.pool.query(
+    `INSERT INTO admin_users(login_id,name,password_hash,role,status)
+    SELECT $1::text||'SearchNoise'||n::text,'검색과 무관한 계정',$2,'OPERATOR','ACTIVE'
+    FROM generate_series(1,101) AS n`,
+    [prefix, hash],
+  );
+  const unfiltered = await call('GET', '/api/admins?limit=100', undefined, session);
+  assert.equal(unfiltered.status, 200);
+  assert.ok(
+    unfiltered.body.data.every((row) => !targets.some((user) => user.id === row.adminUserSeq)),
+  );
+  const read = async (filters = {}) => {
+    const result = await call(
+      'GET',
+      '/api/admins?' + new URLSearchParams({ q: term, ...filters }),
+      undefined,
+      session,
+    );
+    assert.equal(result.status, 200);
+    return result.body;
+  };
+  const first = await read({ limit: '2' });
+  assert.equal(first.total_count, 4);
+  assert.equal(first.hasNext, true);
+  assert.deepEqual(
+    first.data.map((row) => row.adminUserSeq),
+    [targets[3].id, targets[2].id],
+  );
+  const second = await read({ limit: '2', offset: '2' });
+  assert.equal(second.total_count, 4);
+  assert.equal(second.hasNext, false);
+  assert.deepEqual(
+    second.data.map((row) => row.adminUserSeq),
+    [targets[1].id, targets[0].id],
+  );
+  assert.equal((await read({ role: 'OPERATOR' })).total_count, 2);
+  assert.equal((await read({ status: 'ACTIVE' })).total_count, 2);
+  assert.deepEqual(
+    (await read({ role: 'OPERATOR', status: 'ACTIVE' })).data.map((row) => row.adminUserSeq),
+    [targets[0].id],
+  );
+  assert.deepEqual(await read({ offset: '1000' }), { data: [], hasNext: false, total_count: 4 });
+  const baseline = (await call('GET', '/api/admins?limit=2', undefined, session)).body;
+  for (const q of ['', '  ', '\t\n'])
+    assert.deepEqual(
+      (
+        await call(
+          'GET',
+          '/api/admins?' + new URLSearchParams({ q, limit: '2' }),
+          undefined,
+          session,
+        )
+      ).body,
+      baseline,
+    );
+});
+
+test('administrator q uses literal special characters and rejects malformed search input', async () => {
+  const owner = await account('LiteralOwner', 'SYSTEM_ADMIN');
+  const session = (await login(owner)).session;
+  const term = prefix + 'Literal';
+  const targets = [];
+  for (const suffix of ['%_A', 'XXA', '_A']) {
+    const user = await account('LiteralRow' + targets.length);
+    await db.pool.query('UPDATE admin_users SET name=$1 WHERE admin_user_seq=$2', [
+      term + suffix,
+      user.id,
+    ]);
+    targets.push(user);
+  }
+  for (const [q, expected] of [
+    [term + '%', [targets[0].id]],
+    [term + '%_', [targets[0].id]],
+    [term + '_', [targets[2].id]],
+    ["' OR 1=1 --", []],
+    ['x'.repeat(100), []],
+  ]) {
+    const result = await call(
+      'GET',
+      '/api/admins?' + new URLSearchParams({ q }),
+      undefined,
+      session,
+    );
+    assert.equal(result.status, 200);
+    assert.deepEqual(
+      result.body.data.map((row) => row.adminUserSeq),
+      expected,
+    );
+    assert.equal(result.body.total_count, expected.length);
+  }
+  for (const query of ['q=' + 'x'.repeat(101), 'q=a&q=b', 'q%5B%5D=a', 'q%5Bname%5D=a', 'q=%00']) {
+    const result = await call('GET', '/api/admins?' + query, undefined, session);
+    assert.equal(result.status, 400);
+    assert.equal(result.body.error.code, 'INVALID_REQUEST');
+  }
+});
+
+test('administrator q hides deleted accounts, preserves read-only behavior and requires an active system session', async () => {
+  const owner = await account('ScopeOwner', 'SYSTEM_ADMIN');
+  const session = (await login(owner)).session;
+  const target = await account('ScopeTarget');
+  const term = prefix + '목록권한';
+  await db.pool.query('UPDATE admin_users SET name=$1 WHERE admin_user_seq=$2', [term, target.id]);
+  const snapshot = async () =>
+    (
+      await db.pool.query(
+        `SELECT
+    (SELECT row_to_json(a) FROM (SELECT name,role,status,deleted_at,last_login_at FROM admin_users WHERE admin_user_seq=$1) a) AS account,
+    (SELECT count(*) FROM admin_sessions) AS sessions,(SELECT count(*) FROM audit_logs) AS audits,
+    (SELECT count(*) FROM customers) AS customers,(SELECT count(*) FROM orders) AS orders,
+    (SELECT count(*) FROM call_sessions) AS calls`,
+        [target.id],
+      )
+    ).rows[0];
+  const before = await snapshot();
+  for (let index = 0; index < 2; index++)
+    assert.equal(
+      (await call('GET', '/api/admins?' + new URLSearchParams({ q: term }), undefined, session))
+        .status,
+      200,
+    );
+  assert.deepEqual(await snapshot(), before);
+  await db.pool.query(
+    'UPDATE admin_users SET deleted_at=clock_timestamp() WHERE admin_user_seq=$1',
+    [target.id],
+  );
+  for (const filters of [
+    {},
+    { role: 'OPERATOR' },
+    { status: 'ACTIVE' },
+    { status: 'PENDING' },
+    { status: 'INACTIVE' },
+  ]) {
+    const result = await call(
+      'GET',
+      '/api/admins?' + new URLSearchParams({ q: term, ...filters }),
+      undefined,
+      session,
+    );
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body, { data: [], hasNext: false, total_count: 0 });
+  }
+  for (const role of ['OPERATOR', 'SUPERVISOR']) {
+    const actor = await account('Scope' + role, role);
+    assert.equal(
+      (await call('GET', '/api/admins?q=Scope', undefined, (await login(actor)).session)).status,
+      403,
+    );
+  }
+  for (const headers of [{}, { Authorization: 'Bearer ' + process.env.AI_BUSINESS_TOKEN }])
+    assert.equal(
+      (await call('GET', '/api/admins?q=Scope', undefined, undefined, headers)).status,
+      401,
+    );
+  await db.pool.query(
+    "UPDATE admin_sessions SET created_at=clock_timestamp()-interval '10 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE admin_user_seq=$1",
+    [owner.id],
+  );
+  assert.equal((await call('GET', '/api/admins?q=Scope', undefined, session)).status, 401);
+});
+
+test('administrator search Swagger adds only an optional bounded q to the existing session response', async () => {
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const route = document.paths['/api/admins'].get;
+  const q = route.parameters.find((parameter) => parameter.name === 'q');
+  assert.ok(q);
+  assert.equal(q.required, false);
+  assert.equal(q.schema.type, 'string');
+  assert.equal(q.schema.maxLength, 100);
+  assert.deepEqual(route.security, [{ adminSession: [] }]);
+  assert.equal(
+    route.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/AdminListDto',
+  );
+  assert.deepEqual(Object.keys(document.components.schemas.AdminResponseDto.properties).sort(), [
+    'adminUserSeq',
+    'createdAt',
+    'lastLoginAt',
+    'loginId',
+    'name',
+    'role',
+    'status',
+  ]);
+});
+
 test('admin status changes revoke all sessions and reactivation requires a new login', async () => {
   const system = await account('statusManager', 'SYSTEM_ADMIN');
   const cookie = (await login(system)).session;
@@ -876,7 +1114,9 @@ test('retired role-only route is absent from routing and Swagger', async () => {
 
 test('prepare disposable runtime account for production-image cookie checks', async () => {
   await db.pool.query(
-    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('runtimeAdmin83','Runtime test',$1,'OPERATOR','ACTIVE')",
+    `INSERT INTO admin_users(login_id,name,password_hash,role,status)
+     VALUES('runtimeAdmin83','Runtime test',$1,'OPERATOR','ACTIVE'),
+       ('runtimeSearchAdmin83','Runtime search admin',$1,'SYSTEM_ADMIN','ACTIVE')`,
     [await hashPassword('runtime-only-password')],
   );
 });

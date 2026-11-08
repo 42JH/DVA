@@ -66,7 +66,8 @@ export class CustomersController {
   @ApiCookieAuth('adminSession')
   @ApiOperation({
     summary: '고객 목록',
-    description: '모든 ACTIVE 관리자. 고객 번호 내림차순. AI 초기 데이터 조회는 별도 API입니다.',
+    description:
+      '모든 ACTIVE 관리자. 고객 번호 내림차순. availablePaymentMethods는 고객 확인 API와 동일한 현재 결제 가능 수단이며 탈퇴 고객은 빈 배열입니다. 실제 주문·결제 시 자격은 다시 확인합니다. AI 초기 데이터 조회는 별도 API입니다.',
   })
   @ApiOkResponse({ type: CustomersEnvelopeDto })
   list(@Query() query: ListCustomersQueryDto) {

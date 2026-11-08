@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, ValidateIf } from 'class-validator';
+import { Transform, TransformFnParams } from 'class-transformer';
+import { IsIn, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import {
   ADMIN_ROLES,
@@ -10,6 +11,20 @@ import {
   AssignableAdminRole,
 } from '../admins.types';
 export class AdminQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    description:
+      '관리자 이름·로그인 아이디 부분 검색. 대소문자 구분 없이 앞뒤 공백 제거 후 최대 100자. 빈 검색어는 검색하지 않으며 %, _는 일반 문자입니다. 실제 로그인의 아이디 일치 규칙은 유지합니다.',
+    maxLength: 100,
+  })
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' ? value.normalize('NFC').trim() : value,
+  )
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[^\u0000]*$/u)
+  q?: string;
+
   @ApiPropertyOptional({ description: '관리자 권한 필터.', enum: ADMIN_ROLES })
   @ValidateIf((_object, value) => value !== undefined)
   @IsIn(ADMIN_ROLES)
