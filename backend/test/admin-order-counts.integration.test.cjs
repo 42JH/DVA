@@ -1,9 +1,30 @@
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
+const {
+  applicationFixture,
+  businessHeaders,
+  createTestPool,
+} = require('./helpers/application.cjs');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const f = applicationFixture('주문 탭 집계');
+const orderIds = [],
+  draftIds = [];
+after(async () => {
+  const pool = createTestPool();
+  try {
+    // 전체 검증의 후속 운영 이미지 테스트가 이 미래 시각의 부분 스냅샷을 선택하지 않게 한다.
+    await pool.query('UPDATE orders SET deleted_at=now() WHERE order_seq=ANY($1::int[])', [
+      orderIds,
+    ]);
+    await pool.query(
+      'UPDATE order_parcel_drafts SET deleted_at=now() WHERE draft_seq=ANY($1::int[])',
+      [draftIds],
+    );
+  } finally {
+    await pool.end();
+  }
+});
 const empty = { all: 0, incomplete: 0, notPaid: 0, paid: 0, submissionFailed: 0, cancelled: 0 };
 const range = { from: '2096-01-01T00:00:00+09:00', to: '2096-01-02T00:00:00+09:00' };
 async function json(response) {
@@ -21,6 +42,7 @@ async function order(marker, status = 'COLLECTING', changes = {}) {
       [changes.customer ?? null],
     )
   ).rows[0].order_seq;
+  orderIds.push(id);
   await f.pool.query(
     'INSERT INTO order_parcels(order_seq,parcel_position,origin_name,origin_phone_number,document_count) VALUES($1,1,$2,$3,1)',
     [id, marker, '01012345678'],
@@ -39,7 +61,7 @@ async function draft(
   customer = null,
   createdAt = '2096-01-01T01:00:00+09:00',
 ) {
-  return (
+  const id = (
     await f.pool.query(
       `INSERT INTO order_parcel_drafts(client_parcel_id,creation_payload,parcel_data,status,customer_seq,created_at,created_by_admin_user_seq,order_seq,order_parcel_seq)
      VALUES($1,'{}',$2,$3,$4,$5,$6,CASE WHEN $3='CONVERTED' THEN 2147483646 END,CASE WHEN $3='CONVERTED' THEN 2147483646 END) RETURNING draft_seq`,
@@ -53,6 +75,8 @@ async function draft(
       ],
     )
   ).rows[0].draft_seq;
+  draftIds.push(id);
+  return id;
 }
 
 test('status counts retain payment groups independently of the selected tab and page', async () => {

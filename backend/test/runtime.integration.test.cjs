@@ -297,7 +297,23 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
       headers: { Cookie: cookie },
     });
     assert.equal(filtered.status, 200);
-    assert.deepEqual(await filtered.json(), { data: [], hasNext: false, total_count: 0 });
+    assert.deepEqual(await filtered.json(), {
+      data: [],
+      hasNext: false,
+      total_count: 0,
+      ...(path === '/api/admin/orders'
+        ? {
+            statusCounts: {
+              all: 0,
+              incomplete: 0,
+              notPaid: 0,
+              paid: 0,
+              submissionFailed: 0,
+              cancelled: 0,
+            },
+          }
+        : {}),
+    });
   }
   const orders = await fetch('http://proxy/api/admin/orders?limit=1', {
     headers: { Cookie: cookie },
@@ -307,6 +323,38 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.equal(rows.length, 1);
   for (const field of ['customerSeq', 'organizationName']) assert.ok(Object.hasOwn(rows[0], field));
   assert.equal(Object.hasOwn(rows[0], 'customerCategory'), false);
+  const home = await fetch('http://proxy/api/dashboard/home', { headers: { Cookie: cookie } });
+  assert.equal(home.status, 200, await home.clone().text());
+  assert.equal(home.headers.get('cache-control'), 'no-store');
+  const summary = (await home.json()).data;
+  assert.ok(summary.pendingWork.incomplete >= 0);
+  for (const field of ['recentCalls', 'incompleteDrafts', 'unansweredQuestions'])
+    assert.ok(Array.isArray(summary[field]) && summary[field].length <= 5);
+  assert.ok(summary.aiPerformance.stageDropoffs);
+  const headers = {
+    Cookie: cookie,
+    Origin: 'https://13.209.59.180',
+    'Content-Type': 'application/json',
+  };
+  const ids = [];
+  for (let index = 0; index < 2; index++) {
+    const created = await fetch('http://proxy/api/companies', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'runtime-qa-' + randomUUID() }),
+    });
+    assert.equal(created.status, 201, await created.clone().text());
+    ids.push((await created.json()).data.organizationSeq);
+  }
+  const deleted = await fetch('http://proxy/api/companies', {
+    method: 'DELETE',
+    headers,
+    body: JSON.stringify({ organizationSeqs: ids }),
+  });
+  assert.equal(deleted.status, 204, await deleted.clone().text());
+  assert.equal(await deleted.text(), '');
+  for (const id of ids)
+    assert.equal((await fetch('http://proxy/api/companies/' + id, { headers })).status, 404);
 });
 assert.equal(process.env.NODE_ENV, 'test');
 assert.ok(process.env.TEST_WEBHOOK_TOKEN);

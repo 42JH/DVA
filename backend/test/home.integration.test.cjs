@@ -1,9 +1,34 @@
-const { test } = require('node:test');
+const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
+const {
+  applicationFixture,
+  businessHeaders,
+  createTestPool,
+} = require('./helpers/application.cjs');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const f = applicationFixture('홈 QA');
+const draftIds = [],
+  callIds = [],
+  orderIds = [];
+after(async () => {
+  const pool = createTestPool();
+  try {
+    await pool.query(
+      'UPDATE order_parcel_drafts SET deleted_at=now() WHERE draft_seq=ANY($1::int[])',
+      [draftIds],
+    );
+    await pool.query(
+      'UPDATE call_sessions SET deleted_at=now() WHERE call_session_seq=ANY($1::int[])',
+      [callIds],
+    );
+    await pool.query('UPDATE orders SET deleted_at=now() WHERE order_seq=ANY($1::int[])', [
+      orderIds,
+    ]);
+  } finally {
+    await pool.end();
+  }
+});
 async function json(response) {
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -17,7 +42,7 @@ async function home(actor = 0) {
   return body.data;
 }
 async function draft(changes = {}) {
-  return (
+  const id = (
     await f.pool.query(
       `INSERT INTO order_parcel_drafts(client_parcel_id,creation_payload,parcel_data,status,created_by_admin_user_seq,created_at,deleted_at,retention_started_at)
      VALUES($1,'{"private":"never expose creation copy"}','{}',$2,$3,'2097-01-01',$4,$5) RETURNING draft_seq`,
@@ -30,6 +55,8 @@ async function draft(changes = {}) {
       ],
     )
   ).rows[0].draft_seq;
+  draftIds.push(id);
+  return id;
 }
 async function compareWithLists(value) {
   const orders = await json(await f.get('/api/admin/orders?limit=5'));
@@ -76,6 +103,7 @@ test('home bounds previews, counts all pending rows and shares deletion, expiry 
         ['home-' + randomUUID()],
       )
     ).rows[0].call_session_seq;
+    callIds.push(call);
     await f.pool.query(
       `INSERT INTO unanswered_questions(event_id,call_session_seq,question_text,occurred_at,payload_hash)
        VALUES($1,$2,'홈 미답변 질문','2097-01-01T00:00:10Z',repeat('a',64))`,
@@ -88,9 +116,13 @@ test('home bounds previews, counts all pending rows and shares deletion, expiry 
   const editing = await draft({ status: 'EDITING' });
   const cancelled = await draft({ status: 'CANCELLED' });
   for (const status of ['notPaid', 'SUBMITTING_FAILED', 'SUBMISSION_FAILED'])
-    await f.pool.query(
-      "INSERT INTO orders(status,payment_method_type,total_amount) VALUES($1,'billing',1000)",
-      [status],
+    orderIds.push(
+      (
+        await f.pool.query(
+          "INSERT INTO orders(status,payment_method_type,total_amount) VALUES($1,'billing',1000) RETURNING order_seq",
+          [status],
+        )
+      ).rows[0].order_seq,
     );
   const value = await home();
   assert.deepEqual(value.pendingWork, {

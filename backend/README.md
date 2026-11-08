@@ -1,6 +1,6 @@
 # 모놀리식 백엔드 공통 기반
 
-프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. 추가 migration은 없다.
+프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리하고 기존 단건 URL도 유지한다. 추가 migration은 없다.
 
 관리자 목록 GET /api/admins는 선택 q로 이름·로그인 아이디를 대소문자 구분 없이 부분 검색한다. 앞뒤 공백 제거 후 최대 100자이며 빈 검색어는 기존 목록, %, _는 일반 문자다. 기존 권한·상태 필터와 함께 페이지 적용 전 전체 계정에 검색하고 SYSTEM_ADMIN 전용 세션·삭제 계정 제외·공개 응답 정제를 유지한다. 실제 로그인 규칙과 DB는 변경하지 않으며 [작업·검증 기록](docs/admin-list-search-plan.md)을 따른다. 전달 명세는 후속 작업과 누적한다.
 
