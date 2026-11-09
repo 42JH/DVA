@@ -4,7 +4,7 @@ set -euo pipefail
 action=${1:?Specify prepare, preview or apply}
 service=${2:-}
 expected=${3:-}
-case "$action" in prepare|preview|apply) ;; *) exit 2 ;; esac
+case "$action" in prepare|preview|apply|prepare-cutover|restore-cutover) ;; *) exit 2 ;; esac
 if [[ "$action" != prepare ]]; then
   case "$service" in customer|operations|order|consultation|delivery) ;; *) exit 2 ;; esac
 fi
@@ -40,24 +40,25 @@ rows=[line.split() for line in sys.stdin if line.split() and line.split()[0]==sy
 if len(rows)!=1 or len(rows[0])<3 or rows[0][2]!=sys.argv[2]:
     raise SystemExit("Imported image digest does not match the CI image.")
 ' "$image" "$image_id"
+if [[ "$action" == prepare-cutover || "$action" == restore-cutover ]]; then
+  [[ "$service" == order && -z "$expected" ]] || exit 2
+  mode=prepare
+  if [[ "$action" == restore-cutover ]]; then mode=restore; fi
+  python3 ./prepare-cutover.py "$mode" "$release"
+  exit 0
+fi
 if [[ "$action" != prepare ]]; then
   sudo -n k3s kubectl -n dva get secret "$service-db" -o name
+  if [[ "$action" == preview ]]; then
+    bash ./run-service.sh "$service" preview "$image" | tee "$service-preview.log"
+    exit 0
+  fi
+  [[ -f "$service-preview.log" ]] || { echo 'A release-bound preview is required.' >&2; exit 1; }
+  grep -Fx "DVA_PENDING_SHA256=$expected" "$service-preview.log"
   if [[ "$action" == apply && ( "$service" == order || "$service" == consultation ) ]]; then
-    preview=$(bash ./run-service.sh "$service" preview "$image")
-    printf '%s\n' "$preview"
-    if grep -Fxq 'DVA_QUIESCENT_CUTOVER_REQUIRED=055' <<< "$preview"; then
+    if grep -Fxq 'DVA_QUIESCENT_CUTOVER_REQUIRED=055' "$service-preview.log"; then
       # Both snapshots must be taken at one quiescent business epoch, as in source 055.
-      sudo -n k3s kubectl -n dva get deployment order consultation --ignore-not-found -o json | python3 -c '
-import json,sys
-for deployment in json.load(sys.stdin)["items"]:
-    if deployment.get("spec",{}).get("replicas",1)!=0 or deployment.get("status",{}).get("replicas",0)!=0:
-        raise SystemExit("055 cutover requires inbound/AI outbox drain, backup and stopped order/consultation pods before migration.")
-'
-      sudo -n k3s kubectl -n dva get pods -l 'app in (dva-order,dva-consultation)' -o json | python3 -c '
-import json,sys
-if json.load(sys.stdin)["items"]:
-    raise SystemExit("055 cutover waits until all order/consultation pods, including terminating writers, are gone.")
-'
+      python3 ./prepare-cutover.py verify "$release"
       # Fence old releases before DDL, including an ambiguous migration/annotation response.
       sudo -n k3s kubectl annotate namespace dva 'dva.ssafy.io/parcel-drafts-schema=055' --overwrite
     fi

@@ -39,7 +39,7 @@ pipeline {
                     set -eu
                     test "$(uname -s)" = Linux
                     test "$(uname -m)" = x86_64
-                    for tool in docker python3 bash ssh scp sha256sum realpath; do command -v "$tool"; done
+                    for tool in docker python3 git bash ssh scp sha256sum realpath; do command -v "$tool"; done
                     docker version
                     python3 --version
                     for script in msa/deploy/*.sh msa/liquibase/*.sh; do bash -n "$script"; done
@@ -48,9 +48,16 @@ pipeline {
             }
         }
 
+        stage('Prepare CI Reference') {
+            steps {
+                sh 'python3 msa/parity/ci_workspace.py'
+                script { env.MSA_CI_ORIGINAL_COMMIT = env.SOURCE_COMMIT }
+            }
+        }
+
         stage('Verify Event Transport') {
             when { expression { env.RUN_MSA_CI == 'true' } }
-            steps { sh 'python3 msa/shared/events/verify.py' }
+            steps { sh 'python3 msa/.ci-source/msa/shared/events/verify.py' }
         }
 
         stage('Select Build Scope') {
@@ -71,13 +78,21 @@ pipeline {
             }
         }
 
+        stage('Build CI Images') {
+            when { expression { env.RUN_MSA_CI == 'true' } }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/ci_images.py build'
+                script { env.MSA_CI_IMAGES = "${env.WORKSPACE}/msa-release/ci-images.json" }
+            }
+        }
+
         stage('Verify Database') {
             when {
                 expression {
                     env.RUN_MSA_CI == 'true' && env.RUN_DB_CI == 'true'
                 }
             }
-            steps { sh 'python3 msa/liquibase/verify.py' }
+            steps { sh 'python3 msa/.ci-source/msa/liquibase/verify.py' }
             post {
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification.json,msa/liquibase/verification-logs/**', allowEmptyArchive: true
@@ -88,10 +103,10 @@ pipeline {
         stage('Verify Operations Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().contains('operations')
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('operations')
                 }
             }
-            steps { sh 'python3 msa/parity/verify-operations.py' }
+            steps { sh 'python3 msa/.ci-source/msa/parity/verify-operations.py' }
             post {
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/operations/**', allowEmptyArchive: true
@@ -102,10 +117,10 @@ pipeline {
         stage('Verify Customer Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().contains('customer')
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('customer')
                 }
             }
-            steps { sh 'python3 msa/parity/verify-customer.py' }
+            steps { sh 'python3 msa/.ci-source/msa/parity/verify-customer.py' }
             post {
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/customer/**', allowEmptyArchive: true
@@ -116,10 +131,10 @@ pipeline {
         stage('Verify Consultation Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'order'] }
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('consultation')
                 }
             }
-            steps { sh 'python3 msa/parity/verify-consultation.py' }
+            steps { sh 'python3 msa/.ci-source/msa/parity/verify-consultation.py' }
             post {
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/consultation/**', allowEmptyArchive: true
@@ -130,10 +145,10 @@ pipeline {
         stage('Verify Order Parity') {
             when {
                 expression {
-                    env.RUN_MSA_CI == 'true' && readFile('msa-release/services.txt').tokenize().any { it in ['operations', 'customer', 'consultation', 'delivery', 'order'] }
+                    env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('order')
                 }
             }
-            steps { sh 'python3 msa/parity/verify-order.py' }
+            steps { sh 'python3 msa/.ci-source/msa/parity/verify-order.py' }
             post {
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/order/**', allowEmptyArchive: true
@@ -148,13 +163,9 @@ pipeline {
                     set -eu
 
                     while IFS= read -r service; do
-                        directory="msa/services/$service"
-                        echo "BUILD: $service"
-                        set -- -f "$directory/Dockerfile" msa
-                        docker build \
-                            --tag "docker.io/library/dva-$service:$RELEASE_NAME" \
-                            "$@"
-
+                        image=$(python3 msa/.ci-source/msa/parity/ci_images.py "$service")
+                        test -n "$image"
+                        docker tag "$image" "docker.io/library/dva-$service:$RELEASE_NAME"
                         bash msa/deploy/package-app.sh "$service"
                     done < msa-release/services.txt
                 '''
@@ -190,6 +201,27 @@ pipeline {
                 lock(resource: 'dva-msa-database-deploy')
             }
             stages {
+                stage('Stage Application Images') {
+                    when { expression { env.HAS_APP_BUILD == 'true' } }
+                    steps {
+                        withCredentials([sshUserPrivateKey(credentialsId: 'dva-msa-ssh', keyFileVariable: 'MSA_SSH_KEY')]) {
+                            sh '''
+                                set +x
+                                set -eu
+                                mkdir -p msa-release/app-logs
+                                while IFS= read -r service; do
+                                    if ! bash msa/deploy/upload-app.sh "msa-release/apps/$RELEASE_NAME/$service" "$MSA_SSH_KEY" prepare > "msa-release/app-logs/$service-prepare.log" 2>&1; then
+                                        cat "msa-release/app-logs/$service-prepare.log" >&2
+                                        exit 1
+                                    fi
+                                    cat "msa-release/app-logs/$service-prepare.log"
+                                    grep -Fx "DVA_APP_IMAGE_PREPARED=$service" "msa-release/app-logs/$service-prepare.log"
+                                done < msa-release/services.txt
+                            '''
+                        }
+                    }
+                    post { always { archiveArtifacts artifacts: 'msa-release/app-logs/**', allowEmptyArchive: true } }
+                }
                 stage('Database Delivery') {
                     when { expression { env.HAS_DB_DELIVERY == 'true' } }
                     steps {
@@ -231,7 +263,7 @@ pipeline {
                                     test -d "$package"
 
                                     bash msa/deploy/upload-app.sh \
-                                        "$package" "$MSA_SSH_KEY" \
+                                        "$package" "$MSA_SSH_KEY" apply \
                                         2>&1 | tee "msa-release/app-logs/$service.log"
 
                                     grep -Fx "DVA_APP_ROLLOUT_COMPLETE=$service" \
@@ -260,6 +292,14 @@ pipeline {
         }
     }
     post {
+        always {
+            archiveArtifacts artifacts: 'msa-release/ci-images.json,msa-release/reference.json', allowEmptyArchive: true
+            script {
+                if (fileExists('msa/parity/ci_images.py')) {
+                    sh 'python3 msa/parity/ci_images.py cleanup'
+                }
+            }
+        }
         failure { echo 'Release failed. Application delivery does not run after a database failure. Inspect migration/rollout logs before retrying.' }
         aborted { echo 'Pipeline aborted. An already-started k3s Job may still be running; inspect it before retrying.' }
     }
