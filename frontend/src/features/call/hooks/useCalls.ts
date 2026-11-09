@@ -84,13 +84,15 @@ export function useCalls() {
       phone: row.callerNumber ? fmtPhone(row.callerNumber) : '',
       kinds: callKinds(row.counts),
       analyzed: row.counts !== null,
-      // 불만 칩 — 이름만 (근거는 통화 상세, 칩에 올리면 근거가 뜸)
-      complaints: row.complaints.map((c, i) => ({
-        key: `${c.type}${i}`,
-        label: COMPLAINT_LABEL[c.type],
-        title: c.reason,
-        tone: 'stop' as const,
-      })),
+      // 불만 칩 — 유형마다 하나만 (11/09 사용자: 같은 유형이 여러 번이어도 목록에선 한 번). 근거는 첫 번째 것
+      complaints: row.complaints
+        .filter((c, i, all) => all.findIndex((x) => x.type === c.type) === i)
+        .map((c) => ({
+          key: c.type,
+          label: COMPLAINT_LABEL[c.type],
+          title: c.reason,
+          tone: 'stop' as const,
+        })),
       duration: row.durationSec === null ? '' : fmtDuration(row.durationSec),
       // 이 통화로 접수된 주문 — 번호만 (주문 상태는 주문 화면에서, 11/07 사용자)
       order: d.orderSeq ? { seq: d.orderSeq, no: orderNo(d.orderSeq) } : null,

@@ -16,8 +16,8 @@ const COLS = [
   { label: '기업', className: 'w-[180px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
   { label: '전화번호', className: 'w-[130px]' },
   { label: '접수 주문', className: 'w-[110px]' },
-  { label: '고객 용건', className: '', half: true }, // 고객 용건 · 불만은 늘 같은 폭(반반)
-  { label: '불만', className: '', half: true },
+  { label: '고객 용건', className: '', chips: 'kinds' }, // 폭은 useChipColumns가 칩에 맞춰 정함
+  { label: '불만', className: '', chips: 'complaints' }, // 남는 자리 전부
   { label: '통화 시간', className: 'w-[90px] max-[1600px]:hidden' },
 ]
 
@@ -25,7 +25,7 @@ export function CallsPage() {
   const vm = useCalls()
   const from = useLocation().search
   const table = useRef<HTMLTableElement>(null)
-  const minWidth = useHalfColumns(table, vm.rows)
+  const { minWidth, kindsWidth } = useChipColumns(table, vm.rows)
   return (
     <>
       <PageHead title="통화">
@@ -57,7 +57,7 @@ export function CallsPage() {
               : '이 기간에 통화가 없습니다.'
           }
         >
-          {/* 칩은 늘 모두 보이게 — 칩이 반 칸보다 길면 두 칸을 똑같이 넓히고, 화면보다 넓으면 표 안에서 가로 스크롤 */}
+          {/* 칩은 늘 모두 보이게 — 용건 칸은 칩 폭만큼, 불만 칩이 남는 자리보다 길면 표를 넓혀 표 안에서 가로 스크롤 */}
           <table ref={table} className="ops-table" style={{ minWidth }}>
             <thead>
               <tr>
@@ -74,7 +74,8 @@ export function CallsPage() {
                     <th
                       key={c.label}
                       scope="col"
-                      data-half={c.half || undefined}
+                      data-chips-col={c.chips}
+                      style={c.chips === 'kinds' ? { width: kindsWidth } : undefined}
                       className={`${c.className} font-semibold`}
                     >
                       {c.label}
@@ -95,29 +96,38 @@ export function CallsPage() {
   )
 }
 
-/** 고객 용건 · 불만을 반반으로 — 둘 다 폭을 안 정해 남는 자리를 똑같이 나눔(table-layout fixed).
- *  한 줄이라도 칩이 반 칸에 안 들어가면, 그 칩 줄이 들어갈 만큼 표 최소 너비를 늘림 → 두 칸이 똑같이 넓어지고 가로 스크롤 */
-function useHalfColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
-  const [px, setPx] = useState(1120)
+// 한 자리 숫자 칩 4개(택배 접수 · 주문 확인 · 접수 취소 · 문의)가 들어가는 폭 — 쪽마다 칩 수에 따라 칸이 줄었다 늘었다 하지 않게 바닥으로
+const KINDS_BASE = 340
+
+/** 고객 용건 칸은 칩 폭에 맞추고(바닥 KINDS_BASE, 더 긴 줄이 있을 때만 늘림), 불만 칸은 남는 자리 전부(table-layout fixed).
+ *  불만 칩이 남는 자리에 안 들어가면 표 최소 너비를 늘려 가로 스크롤 */
+function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) {
+  const [minWidth, setMinWidth] = useState(1120)
+  const [kindsWidth, setKindsWidth] = useState(KINDS_BASE)
   useLayoutEffect(() => {
     const t = ref.current
     if (!t) return
-    const measure = () => {
-      const fixed = [...t.querySelectorAll<HTMLElement>('thead th')]
-        .filter((th) => !th.dataset.half && th.offsetWidth > 0) // 숨긴 칸(1600 아래 기업 · 통화 시간)은 0
-        .reduce((sum, th) => sum + th.offsetWidth, 0)
+    const widest = (chips: string) => {
       let need = 0
-      t.querySelectorAll<HTMLElement>('[data-chips]').forEach((el) => {
+      t.querySelectorAll<HTMLElement>(`[data-chips="${chips}"]`).forEach((el) => {
         need = Math.max(need, el.scrollWidth)
       })
-      setPx(Math.max(1120, fixed + 2 * (need + 32))) // 32 = 칸 안 여백(좌우 15) + 테두리
+      return need + 32 // 32 = 칸 안 여백(좌우 15) + 테두리
+    }
+    const measure = () => {
+      const fixed = [...t.querySelectorAll<HTMLElement>('thead th')]
+        .filter((th) => !th.dataset.chipsCol && th.offsetWidth > 0) // 숨긴 칸(1600 아래 기업 · 통화 시간)은 0
+        .reduce((sum, th) => sum + th.offsetWidth, 0)
+      const kinds = Math.max(KINDS_BASE, widest('kinds'))
+      setKindsWidth(kinds)
+      setMinWidth(Math.max(1120, fixed + kinds + widest('complaints')))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(t.parentElement ?? t)
     return () => ro.disconnect()
   }, [ref, rows])
-  return px
+  return { minWidth, kindsWidth }
 }
 
 function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => void }) {
@@ -188,14 +198,14 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
         ),
       )}
       {cell(
-        <span data-chips className="flex gap-1 whitespace-nowrap">
+        <span data-chips="kinds" className="flex gap-1 whitespace-nowrap">
           <Kinds kinds={r.kinds} />
         </span>,
         false,
         'left',
       )}
       {cell(
-        <span data-chips className="flex gap-1 whitespace-nowrap">
+        <span data-chips="complaints" className="flex gap-1 whitespace-nowrap">
           {r.complaints.map((c) => (
             <span key={c.key} title={c.title}>
               <Badge tone="stop">{c.label}</Badge>
