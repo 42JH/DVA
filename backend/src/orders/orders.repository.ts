@@ -13,6 +13,7 @@ import { OrderQueryDto } from './dto/order-query.dto';
 import { ParcelChangeDto, UpdateOrderDto, UpdatedOrderDto } from './dto/update-order.dto';
 import { ORDER_ADDRESS_FIELDS, OrderDraft } from './order-draft';
 import { OrderCreationSource, OrderStatus } from './orders.types';
+import { ParcelDraftsRepository } from './parcel-drafts.repository';
 const paymentRequestJson = `(SELECT jsonb_build_object('paymentRequestId',r.payment_request_id,'amount',r.amount,'expiresAt',r.expires_at,'notificationStatus',r.notification_status)
  FROM order_payment_requests r WHERE r.order_seq=o.order_seq AND r.invalidated_at IS NULL AND r.completed_at IS NULL AND r.expires_at>clock_timestamp())`;
 import {
@@ -22,6 +23,7 @@ import {
 
 @Injectable()
 export class OrdersRepository {
+  constructor(private readonly drafts: ParcelDraftsRepository) {}
   async deletionBlocked(client: PoolClient, id: number): Promise<boolean> {
     const requests = await client.query<{ blocked: boolean }>(
       `SELECT ((approval_started_at IS NOT NULL AND completed_at IS NULL AND invalidated_at IS NULL)
@@ -238,19 +240,43 @@ export class OrdersRepository {
 
   async adminList(client: Pool | PoolClient, query: AdminOrderListQueryDto) {
     const filter = this.adminFilter(query);
+    const orders = `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
+       customer.customer_seq AS "customerSeq",company.name AS "organizationName",NULL::int AS "draftSeq",NULL::jsonb AS "_draftParcel" ${filter.sql}`;
+    const drafts = this.drafts.adminIncompleteRows(query);
+    const onlyDrafts = query.statusGroup === 'COLLECTING';
+    const combined = query.statusGroup === undefined;
+    const sql = onlyDrafts
+      ? drafts.sql
+      : combined
+        ? `${orders} UNION ALL ${drafts.sql.replace(/\$(\d+)/g, (_, n: string) => `$${Number(n) + filter.values.length}`)}`
+        : orders;
+    const values = onlyDrafts
+      ? drafts.values
+      : combined
+        ? [...filter.values, ...drafts.values]
+        : filter.values;
     return readPage<AdminOrderListItemDto>(
       client,
-      `SELECT o.order_seq AS "orderSeq",o.status,o.created_at AS "createdAt",o.pickup_requested_at AS "pickupRequestedAt",
-       customer.customer_seq AS "customerSeq",company.name AS "organizationName" ${filter.sql}`,
-      filter.values,
+      sql,
+      values,
       query,
       '"createdAt" DESC,"orderSeq" DESC',
-      `page.*,COALESCE((SELECT jsonb_agg(jsonb_build_object(
+      `page."orderSeq",page.status,page."createdAt",page."pickupRequestedAt",page."customerSeq",page."organizationName",page."draftSeq",page.__page_ordinal,
+       CASE WHEN page."draftSeq" IS NOT NULL THEN jsonb_build_array(jsonb_build_object(
+         'orderParcelSeq',NULL,'status','ACTIVE',
+         'origin',jsonb_build_object('name',page."_draftParcel"->'origin'->'name','phoneNumber',page."_draftParcel"->'origin'->'phoneNumber',
+           'roadAddress',page."_draftParcel"->'origin'->'roadAddress','jibunAddress',page."_draftParcel"->'origin'->'jibunAddress','detailAddress',page."_draftParcel"->'origin'->'detailAddress'),
+         'destination',jsonb_build_object('name',page."_draftParcel"->'destination'->'name','phoneNumber',page."_draftParcel"->'destination'->'phoneNumber',
+           'roadAddress',page."_draftParcel"->'destination'->'roadAddress','jibunAddress',page."_draftParcel"->'destination'->'jibunAddress','detailAddress',page."_draftParcel"->'destination'->'detailAddress'),
+         'documentCount',COALESCE((page."_draftParcel"->>'documentCount')::int,0),'smallBoxCount',COALESCE((page."_draftParcel"->>'smallBoxCount')::int,0),
+         'mediumBoxCount',COALESCE((page."_draftParcel"->>'mediumBoxCount')::int,0),'bigBoxCount',COALESCE((page."_draftParcel"->>'bigBoxCount')::int,0),
+         'otherItemDescription',COALESCE(page."_draftParcel"->>'otherItemDescription','')))
+       ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object(
          'orderParcelSeq',p.order_parcel_seq,'status',p.status,
          'origin',jsonb_build_object('name',p.origin_name,'phoneNumber',p.origin_phone_number,'roadAddress',p.origin_road_address,'jibunAddress',p.origin_jibun_address,'detailAddress',p.origin_detail_address),
          'destination',jsonb_build_object('name',p.destination_name,'phoneNumber',p.destination_phone_number,'roadAddress',p.destination_road_address,'jibunAddress',p.destination_jibun_address,'detailAddress',p.destination_detail_address),
          'documentCount',p.document_count,'smallBoxCount',p.small_box_count,'mediumBoxCount',p.medium_box_count,'bigBoxCount',p.big_box_count,'otherItemDescription',p.other_item_description)
-         ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=page."orderSeq"),'[]'::jsonb) AS parcels`,
+         ORDER BY p.parcel_position,p.order_parcel_seq) FROM order_parcels p WHERE p.order_seq=page."orderSeq"),'[]'::jsonb) END AS parcels`,
     );
   }
 

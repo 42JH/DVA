@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PoolClient } from 'pg';
 import { readPage } from '../common/pagination-query';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
+import { AdminOrderListQueryDto } from './dto/admin-order-list.dto';
 import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
 
 const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
@@ -93,6 +94,31 @@ export class ParcelDraftsRepository {
         query.organizationSeq ?? null,
         phoneQuery || null,
       ],
+    };
+  }
+
+  adminIncompleteRows(query: AdminOrderListQueryDto) {
+    const filter = this.matching(
+      Object.assign(new ParcelDraftQueryDto(), {
+        status: 'INCOMPLETE',
+        q: query.q,
+        from: query.from,
+        to: query.to,
+        organizationSeq: query.organizationSeq,
+      }),
+      null,
+      null,
+      null,
+    );
+    return {
+      sql: `SELECT d.reserved_order_seq AS "orderSeq",'COLLECTING'::text AS status,d.created_at AS "createdAt",
+        NULL::timestamptz AS "pickupRequestedAt",customer.customer_seq AS "customerSeq",company.name AS "organizationName",
+        d.draft_seq AS "draftSeq",d.parcel_data AS "_draftParcel"
+        FROM (SELECT draft_seq,reserved_order_seq,created_at,customer_seq,parcel_data ${filter.sql}) d
+        LEFT JOIN customers customer ON customer.customer_seq=d.customer_seq AND customer.deleted_at IS NULL
+        LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
+        LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL`,
+      values: filter.values,
     };
   }
 

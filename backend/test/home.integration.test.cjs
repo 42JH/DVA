@@ -74,9 +74,10 @@ async function compareWithLists(value) {
     to: new Date(from.getTime() + 24 * 60 * 60 * 1000).toISOString(),
     limit: '1',
   });
+  const todayOrders = await json(await f.get('/api/admin/orders?' + range));
   assert.equal(
     value.todayOrderCount,
-    (await json(await f.get('/api/admin/orders?' + range))).total_count,
+    todayOrders.statusCounts.all - todayOrders.statusCounts.incomplete,
   );
   assert.equal(value.todayCallCount, (await json(await f.get('/api/calls?' + range))).total_count);
   assert.deepEqual(value.pendingWork, {

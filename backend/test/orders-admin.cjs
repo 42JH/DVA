@@ -75,6 +75,7 @@ module.exports = function registerOrdersAdmin(suite) {
     assert.deepEqual(Object.keys(row).sort(), [
       'createdAt',
       'customerSeq',
+      'draftSeq',
       'orderSeq',
       'organizationName',
       'parcels',
@@ -82,6 +83,7 @@ module.exports = function registerOrdersAdmin(suite) {
       'status',
     ]);
     assert.equal(row.orderSeq, id);
+    assert.equal(row.draftSeq, null);
     assert.equal(row.customerSeq, customer);
     assert.equal(row.organizationName, null);
     assert.equal(row.parcels.length, 2);
@@ -179,11 +181,13 @@ module.exports = function registerOrdersAdmin(suite) {
         })
       ).json();
       const expected =
-        statusGroup === 'PAID'
-          ? ['PAID', 'SUBMITTING', 'ACCEPTED']
-          : statusGroup === 'SUBMISSION_FAILED'
-            ? ['SUBMITTING_FAILED', 'SUBMISSION_FAILED']
-            : [statusGroup];
+        statusGroup === 'COLLECTING'
+          ? []
+          : statusGroup === 'PAID'
+            ? ['PAID', 'SUBMITTING', 'ACCEPTED']
+            : statusGroup === 'SUBMISSION_FAILED'
+              ? ['SUBMITTING_FAILED', 'SUBMISSION_FAILED']
+              : [statusGroup];
       assert.equal(body.total_count, expected.length);
       assert.deepEqual(body.statusCounts, {
         all: 8,

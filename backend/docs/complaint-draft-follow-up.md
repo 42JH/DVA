@@ -23,3 +23,12 @@
 - 최초 전체 검증은 orders의 ALWAYS IDENTITY 열에 명시 값을 넣는 경로가 실패했다. 기존 identity 제약을 바꾸지 않고 내부 INSERT에 OVERRIDING SYSTEM VALUE를 적용한 뒤 전체를 다시 실행했다.
 - `BACKEND_TEST_PROFILE=full node backend/scripts/check.cjs` 종료 코드 0. 단위 214·결제 21·격리 DB/API 647·운영 이미지 13 = 895개 통과, 실패·취소·skip 0, 총 244,952ms.
 - 실제 DB로 058의 기존 데이터 backfill·예약 유일성·legacy 참조·주문 미생성, 생성 재전송 번호 보존, 관리자 이어가기의 동일 번호 접수, 여러 READY 배송의 대표 번호 한 건 전환, 기존 권한·결제·동시성·롤백을 검증했다.
+
+## 3단계 검증
+
+- 관리자 전체 목록을 SQL UNION ALL로 통합하고 정렬·페이지 제한을 함께 적용했다. 주소 JSON 조립은 페이지 선택 후 수행하고 기존 초안 필터를 재사용한다. 실제 주문은 draftSeq=null, 초안은 draftSeq와 예약번호를 제공한다.
+- all은 실제 주문 수와 미완료 수를 합산한다. COLLECTING은 초안만 조회한다. 홈의 오늘 주문 수는 기존 실제 주문 기준을 유지한다.
+- 최초 전체 검증에서 기존 기업 회귀가 COLLECTING 탭에 실제 주문 fixture를 조회하던 기대와 충돌했다. 실제 주문의 기업 이동·페이지·교차 탭 검증은 전체 탭으로 유지하고, 새 혼합 목록 회귀에서 초안 전용 COLLECTING·예약번호·기간·전체 페이지를 검증했다.
+- 최종 `BACKEND_TEST_PROFILE=full node backend/scripts/check.cjs` 종료 코드 0. 단위 214·결제 21·격리 DB/API 648·운영 이미지 13 = 896개 통과, 실패·취소·skip 0, 로컬 250,333ms. 이 시간은 원격 Jenkins 측정이 아니다.
+- Linux Jenkins/Git 회귀 8개, 배포 trigger/deploy/package mock 3종, 셸 문법 검사와 diff 검사가 통과했다. 기존 237개 테스트 정리를 되돌리지 않고 신규 기능과 재현 오류에 필요한 22개 검증을 더했다.
+- [최신 프론트 전달](parcel-draft-order-reservation.md), [누적 연동 명세](frontend-qa-api.md)를 갱신했다. 운영 배포 전에 057·058과 프론트의 draftSeq 분기가 필요하다. 기존 MR !383의 원격 브랜치는 수정하지 않았고 새 MR·병합·운영 배포는 수행하지 않았다.
