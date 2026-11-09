@@ -62,13 +62,17 @@ export function useFaqs() {
 /** 펼친 FAQ의 최근 고객 질문 사례 (최대 10, 최신순) — 누르면 그 통화. enabled=false면 요청 안 함 */
 export function useExamples(id: number, enabled = true) {
   const q = useQuery({ ...faqQueries.detail(id), enabled })
-  return (q.data?.recentQuestions ?? []).map((e) => ({
-    key: e.faqQuestionExampleSeq,
-    text: e.questionText,
-    at: dateTime(e.occurredAt),
-    iso: e.occurredAt, // 통화 상세가 그 말로 스크롤하는 데 씀
-    call: e.callSessionSeq,
-  }))
+  // 최근 5개만 (11/09 사용자) — 서버 순서에 기대지 않고 최근 것부터
+  return [...(q.data?.recentQuestions ?? [])]
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+    .slice(0, 5)
+    .map((e) => ({
+      key: e.faqQuestionExampleSeq,
+      text: e.questionText,
+      at: dateTime(e.occurredAt),
+      iso: e.occurredAt, // 통화 상세가 그 말로 스크롤하는 데 씀
+      call: e.callSessionSeq,
+    }))
 }
 
 export type FaqsVm = ReturnType<typeof useFaqs>
