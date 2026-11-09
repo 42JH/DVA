@@ -49,12 +49,19 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         [first] = db.drafts.values()
         assert first["status"] == "READY"
         assert db.intakes[first["callSessionSeq"]].get("complete") is None
+        assert s.rt.ready_notice is not None
+        lf.on_output(s, {"delta": "택배가 접수됐습니다. 더 보내실 택배가 있으세요?"})
+        s.rt.ai_end.cancel()
+        lf._ai_done(s)
+        assert not any(event["kind"] == "결과 문구" for event in s.events)
+        assert s.rt.ready_notice is None
         return first
 
     first = run(scenario())
     out = call(s.tools, "lookup_orders", {"receiver_name": "이영희"})
     assert out["status"] == "needs_choice"
     assert [row["source"] for row in out["facts"]["orders"]] == ["order", "draft"]
+    assert out["facts"]["orders"][1]["status_text"] == "이번 통화에서 접수된 택배"
 
     async def add_and_end():
         s.state.current = filled(receiver="박민수").current
@@ -146,6 +153,7 @@ def test_confirmation_reports_missing_requirements_instead_of_ready(tmp_path):
         [draft] = db.drafts.values()
         assert draft["status"] == "EDITING"
         assert any(e.get("data", {}).get("content", {}).get("draft_intake") == "not_ready" for e in s.events)
+        assert s.rt.ready_notice is None
 
     run(scenario())
 

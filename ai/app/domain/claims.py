@@ -10,13 +10,15 @@ import re
 from app.domain.state import ConversationState
 from app.policy.model import Policy
 
+READY_RECEIPT = re.compile(r"(?:네,?)?택배가접수(?:됐|되었)습니다(?:,?더보내실택배가(?:있으세요|있으신가요))?")
+
 
 def _holds(state: ConversationState, condition: str) -> bool:
     return {"result_accepted": state.result_accepted, "cancel_done": state.cancel_done,
             "no_pending": state.pending is None, "never": False}[condition]
 
 
-def unverified_claims(text: str, state: ConversationState, policy: Policy) -> list[str]:
+def unverified_claims(text: str, state: ConversationState, policy: Policy, *, ready_receipt: bool = False) -> list[str]:
     """걸린 문구(정책에 적힌 첫 형태). 띄어쓰기는 무시한다."""
     sentences = [x for x in re.split(r"[.?!…\n]+", text) if x.strip()]
     skip = policy.forbid.claim_skip
@@ -26,7 +28,11 @@ def unverified_claims(text: str, state: ConversationState, policy: Policy) -> li
             continue
         for sentence in sentences:
             squeezed = "".join(sentence.split())
-            if any("".join(p.split()) in squeezed for p in claim.phrases) and                     not (claim.use_skip and any(w in sentence for w in skip)):
+            if claim.unless == "result_accepted" and ready_receipt and READY_RECEIPT.fullmatch(squeezed):
+                ready_receipt = False  # 이 발화에서 확인된 택배 한 건만 안내한다.
+                continue
+            if any("".join(p.split()) in squeezed for p in claim.phrases) and not (
+                    claim.use_skip and any(w in sentence for w in skip)):
                 out.append(claim.phrases[0])
                 break
     return out

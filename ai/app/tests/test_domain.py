@@ -251,6 +251,16 @@ def test_unverified_claims():
     assert unverified_claims("결제 완료됐어요", s, P) == ["결제되었"]  # 결제 완료는 늘 금지
 
 
+def test_ready_receipt_allows_only_one_parcel_acknowledgement():
+    s = ConversationState()
+    receipt = "택배가 접수됐습니다"
+    assert unverified_claims(f"{receipt}. 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
+    assert unverified_claims(f"{receipt} 더 보내실 택배가 있으세요?", s, P, ready_receipt=True) == []
+    assert unverified_claims(receipt, s, P) == ["접수되었"]
+    assert unverified_claims(f"{receipt}. {receipt}.", s, P, ready_receipt=True) == ["접수되었"]
+    assert unverified_claims(f"{receipt}. 주문 접수 완료됐습니다.", s, P, ready_receipt=True) == ["접수되었"]
+
+
 def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
     """overview.md §2.1: domain·policy는 SDK·HTTP·BE 계약을 import하지 않는다."""
     import ast
