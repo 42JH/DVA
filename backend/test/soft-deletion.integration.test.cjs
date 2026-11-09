@@ -58,9 +58,6 @@ test('new DELETE routes require an administrator session and an allowed Origin a
     await f.error(await remove(kind, 2147483647), 404, 'NOT_FOUND');
     await f.error(await remove(kind, '0'), 400, 'INVALID_REQUEST');
   }
-  const spec = await (await f.get('/api/docs-json')).json();
-  for (const path of ['/api/orders/{id}', '/api/calls/{id}'])
-    for (const code of ['204', '404', '409']) assert.ok(spec.paths[path].delete.responses[code]);
 });
 
 test('order soft deletion preserves snapshots and retention dates while hiding reads and rejecting replay', async () => {

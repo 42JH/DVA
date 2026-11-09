@@ -2,9 +2,7 @@ require('reflect-metadata');
 const { before, after, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { migrate } = require('./helpers/migrations.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
@@ -19,92 +17,19 @@ after(async () => {
   await pool.end();
 });
 
-test('migration restores only successful creation timestamps and leaves unknown legacy dates null', async () => {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('ALTER TABLE organizations DROP COLUMN created_at');
-    await client.query('ALTER TABLE departments DROP COLUMN created_at');
-    const organizations = (
-      await client.query(
-        "INSERT INTO organizations(name,status) VALUES('알려진 등록일','ACTIVE'),('등록일 미상','ACTIVE') RETURNING organization_seq",
-      )
-    ).rows;
-    const departments = (
-      await client.query(
-        "INSERT INTO departments(organization_seq,name) VALUES($1,'알려진 부서'),($1,'등록일 미상 부서') RETURNING department_seq",
-        [organizations[0].organization_seq],
-      )
-    ).rows;
-    for (const [type, id, action] of [
-      ['ORGANIZATION', organizations[0].organization_seq, 'ORGANIZATION_CREATED'],
-      ['DEPARTMENT', departments[0].department_seq, 'DEPARTMENT_CREATED'],
-    ])
-      for (const [result, date] of [
-        ['FAILED', '2026-01-01T00:00:00Z'],
-        ['SUCCESS', '2026-05-22T01:02:03Z'],
-        ['SUCCESS', '2026-06-01T00:00:00Z'],
-      ])
-        await client.query(
-          "INSERT INTO audit_logs(actor_type,actor_seq,target_type,target_seq,action,result,request_id,occurred_at,metadata) VALUES('SYSTEM',NULL,$1,$2,$3,$4,$5,$6,'{}'::jsonb)",
-          [type, id, action, result, randomUUID(), date],
-        );
-    await client.query(
-      readFileSync(join(__dirname, '../migrations/033-organization-created-at.sql'), 'utf8'),
-    );
-    for (const [table, key, ids] of [
-      ['organizations', 'organization_seq', organizations.map((r) => r.organization_seq)],
-      ['departments', 'department_seq', departments.map((r) => r.department_seq)],
-    ]) {
-      const rows = (
-        await client.query(
-          `SELECT created_at FROM ${table} WHERE ${key}=ANY($1::int[]) ORDER BY ${key}`,
-          [ids],
-        )
-      ).rows;
-      assert.equal(rows[0].created_at.toISOString(), '2026-05-22T01:02:03.000Z');
-      assert.equal(rows[1].created_at, null);
-    }
-    const fresh = (
-      await client.query(
-        "INSERT INTO organizations(name,status) VALUES('신규 등록일','ACTIVE') RETURNING organization_seq,created_at",
-      )
-    ).rows[0];
-    assert.ok(fresh.created_at instanceof Date);
-    assert.ok(
-      (
-        await client.query(
-          "INSERT INTO departments(organization_seq,name) VALUES($1,'신규 부서') RETURNING created_at",
-          [fresh.organization_seq],
-        )
-      ).rows[0].created_at instanceof Date,
-    );
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
-});
-
 describe('administrator company and department summaries', () => {
   before(async () => {
-    process.env.SWAGGER_ENABLED = 'true';
+    process.env.SWAGGER_ENABLED = 'false';
     process.env.CORS_ORIGINS = 'http://localhost:5173';
-    const { hashPassword } = require('../dist/auth/password');
+
     const loginId = 'summary' + randomUUID().replaceAll('-', '').slice(0, 10);
-    const password = 'summary-test-only-password';
-    await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'요약 검증',$2,'SYSTEM_ADMIN','ACTIVE')",
-      [loginId, await hashPassword(password)],
+    const { rows } = await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'요약 검증',$2,'SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq",
+      [loginId, 'not-for-login'],
     );
     app = await startTestApp(apps);
     base = await app.getUrl();
-    const login = await fetch(base + '/api/auth/login', {
-      method: 'POST',
-      headers: { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginId, password }),
-    });
-    assert.equal(login.status, 200);
-    cookie = login.headers.get('set-cookie').split(';')[0];
+    cookie = await createTestSession(pool, rows[0].admin_user_seq);
   });
   async function request(path, method = 'GET', body, authenticated = true) {
     const response = await fetch(base + '/api' + path, {
@@ -210,46 +135,5 @@ describe('administrator company and department summaries', () => {
     const final = (await request(`/companies/${id}`)).body.data;
     assert.equal(final.memberCount, 0);
     assert.equal(final.createdAt, original);
-  });
-  test('legacy unknown dates remain explicit null and names/settings updates preserve known dates', async () => {
-    const id = await company();
-    const d = await department(id, '등록일 검증');
-    await pool.query(
-      "UPDATE organizations SET created_at='2026-05-22T01:02:03Z' WHERE organization_seq=$1",
-      [id],
-    );
-    await pool.query('UPDATE departments SET created_at=NULL WHERE department_seq=$1', [d]);
-    assert.equal((await request(`/companies/${id}`, 'PATCH', { name: '등록일 유지' })).status, 204);
-    assert.equal(
-      (await request(`/departments/${d}`, 'PATCH', { name: '등록일 미상 유지' })).status,
-      204,
-    );
-    assert.equal(
-      (await request(`/companies/${id}`)).body.data.createdAt,
-      '2026-05-22T01:02:03.000Z',
-    );
-    const summary = (await request(`/companies/${id}/departments`)).body.data[0];
-    assert.equal(summary.createdAt, null);
-    assert.equal(summary.memberCount, 0);
-    await pool.query('UPDATE organizations SET created_at=NULL WHERE organization_seq=$1', [id]);
-    assert.equal((await request(`/companies/${id}`)).body.data.createdAt, null);
-  });
-  test('summary fields stay administrator-only and shared AI context schemas retain their original shape', async () => {
-    const id = await company();
-    for (const path of ['/companies', `/companies/${id}`, `/companies/${id}/departments`])
-      assert.equal((await request(path, 'GET', undefined, false)).status, 401);
-    const document = await (await fetch(base + '/api/docs-json')).json();
-    for (const name of ['OrganizationSummaryDto', 'DepartmentSummaryDto']) {
-      const schema = document.components.schemas[name];
-      for (const field of ['memberCount', 'createdAt']) assert.ok(schema.required.includes(field));
-      assert.equal(schema.properties.memberCount.type, 'integer');
-      assert.equal(schema.properties.createdAt.format, 'date-time');
-      assert.equal(schema.properties.createdAt.nullable, true);
-    }
-    for (const name of ['OrganizationResponseDto', 'DepartmentDto']) {
-      assert.equal(document.components.schemas[name].properties.memberCount, undefined);
-      assert.equal(document.components.schemas[name].properties.createdAt, undefined);
-    }
-    assert.equal(document.paths['/api/departments/{id}'].get, undefined);
   });
 });

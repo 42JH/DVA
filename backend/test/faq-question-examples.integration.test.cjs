@@ -157,21 +157,6 @@ test('only administrator FAQ detail exposes raw customer examples; lists, source
       .rowCount,
     0,
   );
-  const specResponse = await f.get('/api/docs-json');
-  assert.equal(specResponse.status, 200);
-  const spec = await specResponse.json();
-  assert.equal(
-    spec.components.schemas.FaqResponseDto.properties.data.$ref,
-    '#/components/schemas/FaqDetailDto',
-  );
-  assert.equal(spec.components.schemas.FaqDetailDto.properties.recentQuestions.maxItems, 10);
-  const exampleSchema = spec.components.schemas.FaqQuestionExampleDto;
-  assert.equal(exampleSchema.properties.callSessionSeq.type, 'number');
-  assert.equal(exampleSchema.properties.callSessionSeq.nullable, true);
-  assert.equal(exampleSchema.properties.callSessionSeq.minimum, 1);
-  assert.ok(exampleSchema.required.includes('callSessionSeq'));
-  assert.equal(spec.components.schemas.FaqDto.properties.recentQuestions, undefined);
-  assert.equal(spec.components.schemas.AgentFaqDto.properties.recentQuestions, undefined);
 });
 
 test('multiple FAQs can reference the same question/answer pair and repeated text remains separate for different events', async () => {

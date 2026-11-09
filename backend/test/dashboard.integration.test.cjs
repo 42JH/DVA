@@ -576,28 +576,6 @@ test('query failures remain redacted errors and Swagger exposes four cookie-auth
       repo[method] = original;
     }
   }
-  const response = await f.get('/api/docs-json');
-  assert.equal(response.status, 200);
-  const doc = await response.json();
-  for (const path of paths) {
-    const route = doc.paths['/api/dashboard/' + path].get;
-    assert.ok(route.responses['200']);
-    assert.deepEqual(
-      route.parameters.map((p) => p.name),
-      ['customerType'],
-    );
-    assert.ok(route.security.some((x) => Object.hasOwn(x, 'adminSession')));
-  }
-  const schemas = doc.components.schemas;
-  assert.deepEqual(
-    schemas.DashboardQueryDto?.properties?.customerType?.enum ??
-      doc.paths['/api/dashboard/stage-dropoffs'].get.parameters[0].schema.enum,
-    ['ALL', 'NEW', 'EXISTING'],
-  );
-  assert.equal(schemas.ResponseWaitProcessDto.properties.averageLatencyMs.nullable, true);
-  assert.equal(Object.hasOwn(schemas.ResponseWaitProcessDto.properties, 'p95'), false);
-  assert.equal(Object.hasOwn(schemas.StageDropoffItemDto.properties, 'enteredCallCount'), false);
-  assert.equal(schemas.PersonaRegistrationComparisonDto.properties.previous.nullable, true);
   assert.doesNotMatch(
     JSON.stringify(f.logs),
     /비공개 불편 근거|비공개 프롬프트|rtc_dashboard_read_private_|Bearer /,

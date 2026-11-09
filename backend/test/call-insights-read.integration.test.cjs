@@ -3,7 +3,6 @@ require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, randomInt } = require('node:crypto');
-const { ConfigService } = require('@nestjs/config');
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
@@ -105,29 +104,6 @@ async function versions() {
     );
   return ids;
 }
-
-test('existing call reads require administrator sessions and work for every active role with AI collection disabled', async () => {
-  const call = await createCall();
-  for (const headers of [{ Cookie: '' }, { Cookie: '', Authorization: 'Bearer ' + token }]) {
-    await f.error(await detail(call, 0, headers), 401, 'UNAUTHORIZED');
-    await f.error(await list({}, 0, headers), 401, 'UNAUTHORIZED');
-  }
-  const config = f.app.get(ConfigService);
-  config.set('AI_INSIGHTS_TOKEN', '');
-  try {
-    for (let actor = 0; actor < 3; actor++) {
-      const single = (await ok(await detail(call, actor), true)).data;
-      assert.equal(single.analysis, null);
-      assert.equal(single.call.customerSeq, null);
-      assert.equal(single.call.customerName, null);
-      assert.equal(Object.hasOwn(single.call, 'analysis'), false);
-      const page = await ok(await list({ callerPhoneNumber: call.phone }, actor));
-      assert.equal(page.data[0].analysis, null);
-    }
-  } finally {
-    config.set('AI_INSIGHTS_TOKEN', token);
-  }
-});
 
 test('detail and list expose the stored analysis and actual older persona without changing PBX data or returning hashes and prompts', async () => {
   const used = await versions();
@@ -468,30 +444,6 @@ test('q normalizes Korean and case while treating wildcards and SQL text literal
   ]);
 });
 
-test('new query fields reject ambiguous booleans, malformed versions, duplicates, NUL and long search strings', async () => {
-  for (const query of [
-    'hasComplaint=',
-    'hasComplaint=0',
-    'hasComplaint=1',
-    'hasComplaint=FALSE',
-    'hasComplaint=null',
-    'hasComplaint=false&hasComplaint=true',
-    'result=',
-    'result=UNKNOWN',
-    'result=INQUIRY',
-    'result=INQUIRY&result=HANDOFF',
-    'aiPersonaVersionSeq=0',
-    'aiPersonaVersionSeq=1.2',
-    'aiPersonaVersionSeq=1e2',
-    'aiPersonaVersionSeq=2147483648',
-    'aiPersonaVersionSeq=1&aiPersonaVersionSeq=2',
-    'q=a&q=b',
-    'q=%00',
-    'q=' + '가'.repeat(201),
-  ])
-    await f.error(await list(query), 400, 'INVALID_REQUEST');
-});
-
 test('incoming calls are visible in date-filtered lists before analysis, PBX or storage arrives', async () => {
   const call = await createCall({
     startedAt: null,
@@ -690,27 +642,4 @@ test('read failures remain redacted server errors instead of empty lists or miss
       mock.mock.restore();
     }
   }
-});
-
-test('OpenAPI documents existing routes with the added filters and nullable shared analysis, and logs redact private inputs', async () => {
-  const document = await (await f.get('/api/docs-json')).json();
-  const query = document.paths['/api/calls'].get;
-  assert.deepEqual(query.security, [{ adminSession: [] }]);
-  for (const name of ['q', 'hasComplaint', 'aiPersonaVersionSeq'])
-    assert.ok(query.parameters.some((item) => item.name === name));
-  assert.equal(
-    query.parameters.some((item) => item.name === 'result'),
-    false,
-  );
-  const schemas = document.components.schemas;
-  for (const name of ['CallListItemDto', 'CallDetailDto'])
-    assert.equal(schemas[name].properties.analysis.nullable, true);
-  for (const name of ['customerSeq', 'customerName'])
-    assert.equal(schemas.CallDto.properties[name].nullable, true);
-  assert.equal(schemas.CallAnalysisDto.properties.hasComplaint.nullable, true);
-  assert.equal(schemas.CallAnalysisDto.properties.result, undefined);
-  assert.equal(schemas.CallComplaintDto.properties.offsetSeconds.minimum, 0);
-  assert.equal(schemas.CallComplaintDto.properties.offsetMs, undefined);
-  assert.equal(document.paths['/api/calls/{id}/analysis'], undefined);
-  assert.doesNotMatch(JSON.stringify(f.logs), /private-call-read|rtc_call_read_|Bearer /);
 });

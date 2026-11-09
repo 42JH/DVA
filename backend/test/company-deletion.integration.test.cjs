@@ -3,11 +3,11 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 const { configureApplication } = require('../dist/configure-application');
-const { hashPassword } = require('../dist/auth/password');
+
 const { DverClient } = require('../dist/orders/dver.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const {
@@ -51,7 +51,7 @@ before(async () => {
   adminId = (
     await pool.query(
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('deletion1030','삭제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
-      [await hashPassword('deletion-test-only')],
+      ['not-for-login'],
     )
   ).rows[0].admin_user_seq;
   app = await NestFactory.create(AppModule, { logger: false });
@@ -66,13 +66,7 @@ before(async () => {
   configureApplication(app, { log: () => {} });
   await app.listen(0, '127.0.0.1');
   base = (await app.getUrl()) + '/api';
-  const login = await fetch(base + '/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: origin },
-    body: JSON.stringify({ loginId: 'deletion1030', password: 'deletion-test-only' }),
-  });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get('set-cookie').split(';')[0];
+  cookie = await createTestSession(pool, adminId);
 });
 after(async () => {
   await app?.close();
@@ -604,17 +598,11 @@ test('deletion requires an active admin session, valid origin and valid ID; all 
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const data = await fixture();
     const loginId = 'del' + randomUUID().slice(0, 8);
-    await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'역할 검증',$2,$3,'ACTIVE')",
-      [loginId, await hashPassword('role-test-only'), role],
+    const admin = await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'역할 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
+      [loginId, 'not-for-login', role],
     );
-    const login = await fetch(base + '/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: origin },
-      body: JSON.stringify({ loginId, password: 'role-test-only' }),
-    });
-    assert.equal(login.status, 200);
-    const token = login.headers.get('set-cookie').split(';')[0];
+    const token = await createTestSession(pool, admin.rows[0].admin_user_seq);
     assert.equal(
       (await request('DELETE', `/departments/${data.department}`, undefined, { Cookie: token }))
         .status,

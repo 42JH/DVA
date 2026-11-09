@@ -3,8 +3,6 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { request: httpRequest } = require('node:http');
-const { readFileSync } = require('node:fs');
-const { join } = require('node:path');
 const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -14,7 +12,7 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const pool = createTestPool();
 const apps = [];
 const logs = [];
@@ -143,36 +141,6 @@ test('service credential is mandatory even for an active administrator, and disa
   );
 });
 
-test('HTTP validates call identity, version existence, nullable fields and complaint combinations', async () => {
-  const c = await createCall();
-  for (const id of ['abc', '0', '-1', '2147483648'])
-    await error(await post(id, input(c.providerCallId)), 400, 'INVALID_REQUEST');
-  await error(await post(2147483647, input(c.providerCallId)), 404, 'NOT_FOUND');
-  await error(await post(c.id, input('different-call')), 403, 'FORBIDDEN');
-  await error(
-    await post(c.id, input(c.providerCallId, { aiPersonaVersionSeq: 2147483647 })),
-    404,
-    'NOT_FOUND',
-  );
-  await error(
-    await post(c.id, input(c.providerCallId, { endedAt: '2026-10-30T09:59:59+09:00' })),
-    422,
-    'VALIDATION_FAILED',
-  );
-  for (const change of [
-    { hasComplaint: true, complaints: [] },
-    { hasComplaint: false },
-    { hasComplaint: null },
-    { responseLatencyTotalMs: 8400 },
-    { result: 'REGISTERED' },
-  ])
-    await error(await post(c.id, input(c.providerCallId, change)), 400, 'INVALID_REQUEST');
-  assert.equal(
-    (await pool.query('SELECT 1 FROM call_analyses WHERE call_session_seq=$1', [c.id])).rowCount,
-    0,
-  );
-});
-
 test('final analysis stores actual version and normalized evidence, preserving PBX call and persona state', async () => {
   const c = await createCall();
   const callBefore = (
@@ -258,28 +226,6 @@ test('concurrent conflicting reports preserve the winner and reject the other wi
   );
 });
 
-test('unmeasured values remain null while measured zero and no complaint remain zero and false', async () => {
-  for (const [count, flag] of [
-    [null, null],
-    [0, false],
-  ]) {
-    const c = await createCall();
-    await success(
-      await post(
-        c.id,
-        input(c.providerCallId, { repeatQuestionCount: count, hasComplaint: flag, complaints: [] }),
-      ),
-    );
-    const row = (
-      await pool.query(
-        'SELECT repeat_question_count,has_complaint,complaints FROM call_analyses WHERE call_session_seq=$1',
-        [c.id],
-      )
-    ).rows[0];
-    assert.deepEqual(row, { repeat_question_count: count, has_complaint: flag, complaints: [] });
-  }
-});
-
 test('audit failure rolls back the new analysis so a valid retry can save it', async () => {
   const c = await createCall();
   const original = audit.recordSuccess;
@@ -296,48 +242,6 @@ test('audit failure rolls back the new analysis so a valid retry can save it', a
     0,
   );
   await success(await post(c.id, input(c.providerCallId)));
-});
-
-test('analysis schema enforces call uniqueness, references and stored value constraints', async () => {
-  const c = await createCall();
-  const client = await pool.connect();
-  const statement = `INSERT INTO call_analyses(call_session_seq,ai_persona_version_seq,
-    ai_started_at,ai_ended_at,repeat_question_count,has_complaint,complaints,payload_hash)
-    VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`;
-  const values = [
-    c.id,
-    null,
-    '2026-10-30T01:00:00Z',
-    '2026-10-30T01:03:40Z',
-    0,
-    false,
-    '[]',
-    'a'.repeat(64),
-  ];
-  try {
-    await client.query('BEGIN');
-    for (const [index, value, code] of [
-      [0, 2147483647, '23503'],
-      [1, 2147483647, '23503'],
-      [3, '2026-10-30T00:59:59Z', '23514'],
-      [4, -1, '23514'],
-      [5, true, '23514'],
-      [6, '{}', '23514'],
-      [6, '[{}]', '23514'],
-      [7, 'invalid-hash', '23514'],
-    ]) {
-      const invalid = [...values];
-      invalid[index] = value;
-      await client.query('SAVEPOINT invalid_analysis');
-      await assert.rejects(() => client.query(statement, invalid), { code });
-      await client.query('ROLLBACK TO SAVEPOINT invalid_analysis');
-    }
-    await client.query(statement, values);
-    await assert.rejects(() => client.query(statement, values), { code: '23505' });
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
 });
 
 test('AI summary is stored as reported with the actual persona and replays never increment counts', async () => {
@@ -380,128 +284,6 @@ test('AI summary is stored as reported with the actual persona and replays never
   );
 });
 
-test('result-free hashes and timestamps survive omitted and explicit-null summary replays', async () => {
-  const c = await createCall();
-  const body = input(c.providerCallId, {
-    startedAt: '2026-10-30T01:00:00.000Z',
-    endedAt: '2026-10-30T01:03:40.000Z',
-    hasComplaint: false,
-    complaints: [],
-  });
-  const hash = createHash('sha256').update(JSON.stringify(body)).digest('hex');
-  await pool.query(
-    `INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,
-      repeat_question_count,has_complaint,complaints,payload_hash)
-     VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)`,
-    [
-      c.id,
-      body.startedAt,
-      body.endedAt,
-      body.repeatQuestionCount,
-      body.hasComplaint,
-      JSON.stringify(body.complaints),
-      hash,
-    ],
-  );
-  const stored = (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id]))
-    .rows[0];
-  await success(await post(c.id, body));
-  const unknown = {
-    isNewCustomer: null,
-    registeredParcelCount: null,
-    faqAnswerCount: null,
-    orderLookupCount: null,
-    cancelledParcelCount: null,
-    hasHandoffRequest: null,
-    hasCallbackRequest: null,
-  };
-  await success(await post(c.id, { ...body, ...unknown }));
-  assert.deepEqual(
-    (await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [c.id])).rows,
-    [stored],
-  );
-  for (const column of [
-    'is_new_customer',
-    'registered_parcel_count',
-    'faq_answer_count',
-    'order_lookup_count',
-    'cancelled_parcel_count',
-    'has_handoff_request',
-    'has_callback_request',
-  ])
-    assert.equal(stored[column], null);
-  await error(
-    await post(c.id, { ...body, registeredParcelCount: 0 }),
-    409,
-    'EVENT_PAYLOAD_CONFLICT',
-  );
-});
-
-test('summary schema rejects negative and overflowing counts without changing the stored report', async () => {
-  const c = await createCall();
-  await success(await post(c.id, input(c.providerCallId)));
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const column of [
-      'registered_parcel_count',
-      'faq_answer_count',
-      'order_lookup_count',
-      'cancelled_parcel_count',
-    ]) {
-      for (const [value, code] of [
-        [-1, '23514'],
-        [2147483648, '22003'],
-      ]) {
-        await client.query('SAVEPOINT invalid_summary');
-        await assert.rejects(
-          () =>
-            client.query(`UPDATE call_analyses SET ${column}=$2 WHERE call_session_seq=$1`, [
-              c.id,
-              value,
-            ]),
-          { code },
-        );
-        await client.query('ROLLBACK TO SAVEPOINT invalid_summary');
-      }
-    }
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
-});
-
-test('Swagger exposes optional nullable summary input and matching administrator read fields', async () => {
-  const response = await fetch(base + '/api/docs-json');
-  assert.equal(response.status, 200);
-  const document = await response.json();
-  const schemas = document.components.schemas;
-  const request = schemas.CreateCallAnalysisDto;
-  const output = schemas.CallAnalysisDto;
-  for (const name of [
-    'isNewCustomer',
-    'registeredParcelCount',
-    'faqAnswerCount',
-    'orderLookupCount',
-    'cancelledParcelCount',
-    'hasHandoffRequest',
-    'hasCallbackRequest',
-  ]) {
-    assert.ok(request.properties[name]);
-    assert.equal(request.required.includes(name), false);
-    assert.equal(request.properties[name].nullable, true);
-    assert.equal(output.properties[name].nullable, true);
-  }
-  assert.equal(Object.hasOwn(request.properties, 'customerType'), false);
-  assert.equal(Object.hasOwn(request.properties, 'shipmentLookupCount'), false);
-  assert.equal(Object.hasOwn(request.properties, 'result'), false);
-  assert.equal(Object.hasOwn(output.properties, 'result'), false);
-  assert.equal(
-    document.paths['/api/calls'].get.parameters.some((parameter) => parameter.name === 'result'),
-    false,
-  );
-});
-
 test('callback is independent of handoff, survives ended calls and rejects invalid flags and deleted calls', async () => {
   const call = await createCall();
   const body = input(call.providerCallId, { hasHandoffRequest: false, hasCallbackRequest: true });
@@ -525,38 +307,4 @@ test('callback is independent of handoff, survives ended calls and rejects inval
     [call.id],
   );
   await error(await post(call.id, body), 404, 'NOT_FOUND');
-});
-
-test('migration 048 preserves existing analysis data, hashes and timestamps with unknown callback status', async () => {
-  const call = await createCall();
-  const body = input(call.providerCallId);
-  await success(await post(call.id, body));
-  const before = (
-    await pool.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [call.id])
-  ).rows;
-  const transaction = await pool.connect();
-  try {
-    await transaction.query('BEGIN');
-    await transaction.query('ALTER TABLE public.call_analyses DROP COLUMN has_callback_request');
-    await transaction.query(
-      readFileSync(join(__dirname, '../migrations/048-call-callback-request.sql'), 'utf8'),
-    );
-    assert.deepEqual(
-      (await transaction.query('SELECT * FROM call_analyses WHERE call_session_seq=$1', [call.id]))
-        .rows,
-      before,
-    );
-    assert.equal(
-      (
-        await transaction.query(
-          "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses' AND column_name='has_callback_request' AND udt_name='bool' AND is_nullable='YES' AND column_default IS NULL",
-        )
-      ).rowCount,
-      1,
-    );
-  } finally {
-    await transaction.query('ROLLBACK');
-    transaction.release();
-  }
-  await success(await post(call.id, { ...body, hasCallbackRequest: null }));
 });

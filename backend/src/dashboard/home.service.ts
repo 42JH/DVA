@@ -31,30 +31,31 @@ export class HomeService {
       const counts = await this.orders.adminStatusCounts(client, new AdminOrderListQueryDto());
       const drafts = await this.drafts.list(
         client,
-        Object.assign(new ParcelDraftQueryDto(), { limit: 5 }),
+        Object.assign(new ParcelDraftQueryDto(), { limit: 11 }),
         null,
         null,
         null,
       );
       const questions = await this.questions.findMany(
-        Object.assign(new UnansweredQuestionQueryDto(), { limit: 5 }),
+        Object.assign(new UnansweredQuestionQueryDto(), { limit: 11 }),
         client,
       );
       const calls = await this.calls.findMany(
-        Object.assign(new CallQueryDto(), { limit: 5 }),
+        Object.assign(new CallQueryDto(), { limit: 11 }),
         client,
       );
       return {
         observedAt,
+        ...(await this.dashboard.todayCounts(observedAt, client)),
         pendingWork: {
           incomplete: drafts.total_count,
           notPaid: counts.notPaid,
           submissionFailed: counts.submissionFailed,
           unansweredQuestions: questions.total_count,
         },
-        recentCalls: calls.rows.slice(0, 5),
-        incompleteDrafts: drafts.rows.slice(0, 5),
-        unansweredQuestions: questions.rows.slice(0, 5),
+        recentCalls: calls.rows.slice(0, 11),
+        incompleteDrafts: drafts.rows.slice(0, 11),
+        unansweredQuestions: questions.rows.slice(0, 11),
         aiPerformance: await this.dashboard.performance('ALL', client),
       };
     });

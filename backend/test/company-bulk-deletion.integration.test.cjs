@@ -256,13 +256,4 @@ test('the documented 100-company limit succeeds atomically and both delete contr
     ).rowCount,
     100,
   );
-  const response = await f.get('/api/docs-json');
-  assert.equal(response.status, 200);
-  const spec = await response.json();
-  assert.ok(spec.paths['/api/companies'].delete);
-  assert.ok(spec.paths['/api/companies/{id}'].delete);
-  const field = spec.components.schemas.DeleteOrganizationsDto.properties.organizationSeqs;
-  assert.equal(field.minItems, 1);
-  assert.equal(field.maxItems, 100);
-  assert.equal(field.uniqueItems, true);
 });

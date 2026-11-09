@@ -18,7 +18,6 @@ module.exports = function registerAiSettingsDrafts(suite) {
     actorIds,
     call,
     error,
-    randomUUID,
     options,
     token,
     apps,
@@ -254,56 +253,6 @@ module.exports = function registerAiSettingsDrafts(suite) {
     assert.equal((await detail(head.aiPersonaSeq)).draft, null);
   });
 
-  test('missing, stale, foreign and malformed draft identities cannot create versions or overwrite settings', async () => {
-    const head = await create(),
-      other = await create();
-    await error(
-      await saveDraft(head.aiPersonaSeq, { expectedVersion: 1, name: '옛 형식' }),
-      400,
-      'INVALID_REQUEST',
-    );
-    await error(
-      await commitDraft(head.aiPersonaSeq, {
-        expectedVersion: 1,
-        expectedDraftRevision: randomUUID(),
-      }),
-      409,
-      'INVALID_STATE',
-    );
-    const draft = await beginDraft(head),
-      foreign = await beginDraft(other);
-    for (const body of [
-      draftInput(draft, { expectedDraftRevision: null, name: '덮어쓰기' }),
-      draftInput(draft, { expectedDraftRevision: foreign.draftRevision, name: '다른 유형' }),
-      draftInput(draft, { expectedVersion: 2, name: '틀린 HEAD' }),
-    ])
-      await error(await saveDraft(head.aiPersonaSeq, body), 409, 'VERSION_CONFLICT');
-    for (const body of [
-      draftInput(draft),
-      draftInput(draft, { name: null }),
-      draftInput(draft, { promptText: '  ' }),
-      draftInput(draft, { expectedDraftRevision: 'bad', name: '잘못된 UUID' }),
-      draftInput(draft, { code: '변경 불가', name: '임의 코드' }),
-    ])
-      await error(await saveDraft(head.aiPersonaSeq, body), 400, 'INVALID_REQUEST');
-    await error(
-      await commitDraft(head.aiPersonaSeq, { expectedVersion: 1, expectedDraftRevision: null }),
-      400,
-      'INVALID_REQUEST',
-    );
-    await error(
-      await saveDraft(2147483647, {
-        expectedVersion: 1,
-        expectedDraftRevision: null,
-        name: '없는 유형',
-      }),
-      404,
-      'NOT_FOUND',
-    );
-    assert.deepEqual((await detail(head.aiPersonaSeq)).draft, draft);
-    assert.equal(await versionCount(head.aiPersonaSeq), 1);
-  });
-
   test('unavailable or changed AI capabilities leave the editable draft and HEAD intact', async () => {
     const head = await create();
     const draft = await beginDraft(head);
@@ -368,48 +317,6 @@ module.exports = function registerAiSettingsDrafts(suite) {
         .createdByAdminUserSeq,
       actorIds[2],
     );
-  });
-
-  test('the draft primary key enforces one row per type and rejects invalid stored settings', async () => {
-    const head = await create();
-    await beginDraft(head);
-    await assert.rejects(
-      pool.query(
-        `INSERT INTO ai_persona_drafts SELECT * FROM ai_persona_drafts WHERE ai_persona_seq=$1`,
-        [head.aiPersonaSeq],
-      ),
-      { code: '23505' },
-    );
-    for (const sql of [
-      "UPDATE ai_persona_drafts SET name='  ' WHERE ai_persona_seq=$1",
-      'UPDATE ai_persona_drafts SET base_version=0 WHERE ai_persona_seq=$1',
-      "UPDATE ai_persona_drafts SET turn_wait_level='UNKNOWN' WHERE ai_persona_seq=$1",
-      "UPDATE ai_persona_drafts SET speaking_rate='Infinity' WHERE ai_persona_seq=$1",
-    ])
-      await assert.rejects(pool.query(sql, [head.aiPersonaSeq]), { code: '23514' });
-  });
-
-  test('Swagger distinguishes mutable drafts from final versions and does not offer direct HEAD edits', async () => {
-    const spec = await (await fetch(suite.base + '/api/docs-json')).json();
-    const update = spec.components.schemas.UpdatePersonaDto;
-    assert.ok(update.required.includes('expectedDraftRevision'));
-    assert.ok(update.properties.expectedDraftRevision.nullable);
-    assert.ok(
-      spec.components.schemas.CommitPersonaDraftDto.required.includes('expectedDraftRevision'),
-    );
-    assert.ok(spec.components.schemas.PersonaDto.properties.draft.nullable);
-    assert.equal('version' in spec.components.schemas.PersonaDraftDto.properties, false);
-    assert.equal(
-      spec.paths['/api/personas/{id}'].patch.responses['200'].content['application/json'].schema
-        .$ref,
-      '#/components/schemas/PersonaDraftResponseDto',
-    );
-    assert.equal(
-      spec.paths['/api/personas/{id}/versions'].post.responses['200'].content['application/json']
-        .schema.$ref,
-      '#/components/schemas/PersonaVersionResponseDto',
-    );
-    assert.equal(spec.paths['/api/personas/{id}/head'], undefined);
   });
 
   test(

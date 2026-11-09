@@ -7,7 +7,9 @@ const {
   createTestPool,
 } = require('./helpers/application.cjs');
 const { OrdersRepository } = require('../dist/orders/orders.repository');
+const { DashboardRepository } = require('../dist/dashboard/dashboard.repository');
 const f = applicationFixture('홈 QA');
+process.env.SWAGGER_ENABLED = 'true';
 const draftIds = [],
   callIds = [],
   orderIds = [];
@@ -59,10 +61,24 @@ async function draft(changes = {}) {
   return id;
 }
 async function compareWithLists(value) {
-  const orders = await json(await f.get('/api/admin/orders?limit=5'));
-  const drafts = await json(await f.get('/api/parcel-drafts?status=INCOMPLETE&limit=5'));
-  const calls = await json(await f.get('/api/calls?limit=5'));
-  const questions = await json(await f.get('/api/unanswered-questions?status=OPEN&limit=5'));
+  const orders = await json(await f.get('/api/admin/orders?limit=11'));
+  const drafts = await json(await f.get('/api/parcel-drafts?status=INCOMPLETE&limit=11'));
+  const calls = await json(await f.get('/api/calls?limit=11'));
+  const questions = await json(await f.get('/api/unanswered-questions?status=OPEN&limit=11'));
+  const day = new Date(Date.parse(value.observedAt) + 9 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const from = new Date(day + 'T00:00:00+09:00');
+  const range = new URLSearchParams({
+    from: from.toISOString(),
+    to: new Date(from.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    limit: '1',
+  });
+  assert.equal(
+    value.todayOrderCount,
+    (await json(await f.get('/api/admin/orders?' + range))).total_count,
+  );
+  assert.equal(value.todayCallCount, (await json(await f.get('/api/calls?' + range))).total_count);
   assert.deepEqual(value.pendingWork, {
     incomplete: drafts.total_count,
     notPaid: orders.statusCounts.notPaid,
@@ -74,7 +90,7 @@ async function compareWithLists(value) {
   assert.deepEqual(value.recentCalls, calls.data);
   assert.deepEqual(value.unansweredQuestions, questions.data);
   for (const rows of [value.incompleteDrafts, value.recentCalls, value.unansweredQuestions])
-    assert.ok(rows.length <= 5);
+    assert.ok(rows.length <= 11);
   for (const [field, path] of Object.entries({
     stageDropoffs: 'stage-dropoffs',
     registrationTime: 'registration-time',
@@ -94,7 +110,7 @@ test('home agrees with the existing lists and all four statistics, including emp
 test('home bounds previews, counts all pending rows and shares deletion, expiry and OPEN/INCOMPLETE rules', async () => {
   const baseline = (await home()).pendingWork;
   const kept = [];
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 13; i++) {
     kept.push(await draft());
     const call = (
       await f.pool.query(
@@ -126,14 +142,14 @@ test('home bounds previews, counts all pending rows and shares deletion, expiry 
     );
   const value = await home();
   assert.deepEqual(value.pendingWork, {
-    incomplete: baseline.incomplete + 7,
+    incomplete: baseline.incomplete + 13,
     notPaid: baseline.notPaid + 1,
     submissionFailed: baseline.submissionFailed + 2,
-    unansweredQuestions: baseline.unansweredQuestions + 7,
+    unansweredQuestions: baseline.unansweredQuestions + 13,
   });
-  assert.equal(value.incompleteDrafts.length, 5);
-  assert.equal(value.recentCalls.length, 5);
-  assert.equal(value.unansweredQuestions.length, 5);
+  assert.equal(value.incompleteDrafts.length, 11);
+  assert.equal(value.recentCalls.length, 11);
+  assert.equal(value.unansweredQuestions.length, 11);
   for (const row of value.incompleteDrafts) {
     assert.ok(kept.includes(row.draftSeq));
     assert.ok(![deleted, expired, ready, editing, cancelled].includes(row.draftSeq));
@@ -147,6 +163,7 @@ test('home uses one read-only repeatable snapshot across counts, previews and me
   const repository = f.app.get(OrdersRepository);
   const original = repository.adminStatusCounts;
   let added;
+  let addedOrder;
   repository.adminStatusCounts = async function (client, query) {
     assert.equal(
       (await client.query('SHOW transaction_read_only')).rows[0].transaction_read_only,
@@ -158,16 +175,25 @@ test('home uses one read-only repeatable snapshot across counts, previews and me
     );
     const result = await original.call(this, client, query);
     added = await draft();
+    addedOrder = (
+      await f.pool.query(
+        "INSERT INTO orders(status,payment_method_type,total_amount) VALUES('notPaid','billing',1000) RETURNING order_seq",
+      )
+    ).rows[0].order_seq;
+    orderIds.push(addedOrder);
     return result;
   };
   try {
     const value = await home();
     assert.deepEqual(value.pendingWork, baseline.pendingWork);
+    assert.equal(value.todayOrderCount, baseline.todayOrderCount);
+    assert.equal(value.todayCallCount, baseline.todayCallCount);
     assert.ok(!value.incompleteDrafts.some((row) => row.draftSeq === added));
   } finally {
     repository.adminStatusCounts = original;
   }
   assert.equal((await home()).pendingWork.incomplete, baseline.pendingWork.incomplete + 1);
+  assert.equal((await home()).todayOrderCount, baseline.todayOrderCount + 1);
 });
 
 test('home requires an active administrator, supports all existing roles and documents reusable payloads', async () => {
@@ -184,6 +210,8 @@ test('home requires an active administrator, supports all existing roles and doc
     Object.keys(spec.components.schemas.HomeDto.properties).sort(),
     [
       'observedAt',
+      'todayOrderCount',
+      'todayCallCount',
       'pendingWork',
       'recentCalls',
       'incompleteDrafts',
@@ -191,5 +219,81 @@ test('home requires an active administrator, supports all existing roles and doc
       'aiPerformance',
     ].sort(),
   );
-  assert.equal(spec.components.schemas.HomeDto.properties.incompleteDrafts.maxItems, 5);
+  assert.equal(spec.components.schemas.HomeDto.properties.incompleteDrafts.maxItems, 11);
+});
+
+test('today counts use KST midnight, actual orders, call start precedence and existing visibility rules', async () => {
+  const first = '2094-05-31T15:00:00.000Z';
+  const last = '2094-06-01T14:59:59.999Z';
+  const next = '2094-06-01T15:00:00.000Z';
+  const before = '2094-05-31T14:59:59.999Z';
+  async function order(at, changes = {}) {
+    const id = (
+      await f.pool.query(
+        `INSERT INTO orders(status,payment_method_type,total_amount,created_at,deleted_at)
+       VALUES($1,'billing',1000,$2,$3) RETURNING order_seq`,
+        [changes.status ?? 'notPaid', at, changes.deleted ? new Date() : null],
+      )
+    ).rows[0].order_seq;
+    orderIds.push(id);
+    return id;
+  }
+  async function call(incoming, started = incoming, changes = {}) {
+    const id = (
+      await f.pool.query(
+        `INSERT INTO call_sessions(provider_call_id,incoming_at,started_at,ended_at,deleted_at)
+       VALUES($1,$2,$3,$3,$4) RETURNING call_session_seq`,
+        ['home-day-' + randomUUID(), incoming, started, changes.deleted ? new Date() : null],
+      )
+    ).rows[0].call_session_seq;
+    callIds.push(id);
+    return id;
+  }
+  await order(first);
+  await order(last);
+  await order(first, { status: 'CANCELLED' });
+  await order(before);
+  await order(next);
+  await order(first, { deleted: true });
+  const legacy = await order(first);
+  const copied = await draft();
+  await f.pool.query('UPDATE order_parcel_drafts SET legacy_order_seq=$1 WHERE draft_seq=$2', [
+    legacy,
+    copied,
+  ]);
+  await draft();
+  await call(first);
+  await call(last);
+  await call(before);
+  await call(next);
+  await call(first, before);
+  await call(first, null);
+  await call(first, first, { deleted: true });
+  await call('2000-01-01', first);
+  const analysed = await call(before, null);
+  await f.pool.query(
+    `INSERT INTO call_analyses(call_session_seq,ai_started_at,ai_ended_at,has_complaint,complaints,payload_hash,is_new_customer,registered_parcel_count)
+     VALUES($1,$2,$2,false,'[]',repeat('a',64),true,0)`,
+    [analysed, first],
+  );
+  const client = await f.pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const repository = f.app.get(DashboardRepository);
+    assert.deepEqual(await repository.todayCounts(new Date(last), client), {
+      todayOrderCount: 3,
+      todayCallCount: 4,
+    });
+    assert.deepEqual(await repository.todayCounts(new Date(next), client), {
+      todayOrderCount: 1,
+      todayCallCount: 1,
+    });
+    assert.deepEqual(await repository.todayCounts(new Date('2094-06-03T00:00:00+09:00'), client), {
+      todayOrderCount: 0,
+      todayCallCount: 0,
+    });
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
 });

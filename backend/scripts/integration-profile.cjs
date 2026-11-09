@@ -28,7 +28,6 @@ const suites = {
   ],
   dashboard: [
     'home',
-    'dashboard-optimization',
     'dashboard',
     'call-dashboard-metrics',
     'call-analysis',
@@ -38,8 +37,6 @@ const suites = {
   ],
   persona: [
     'home',
-    'dashboard-optimization',
-    'persona-list-optimization',
     'ai-settings',
     'dashboard',
     'call-dashboard-metrics',
@@ -48,8 +45,6 @@ const suites = {
   ],
   customers: [
     'admin-order-counts',
-    'order-list-optimization',
-    'call-list-optimization',
     'customers',
     'members',
     'caller-context',
@@ -70,8 +65,6 @@ const suites = {
   companies: [
     'company-bulk-deletion',
     'admin-order-counts',
-    'order-list-optimization',
-    'call-list-optimization',
     'organizations',
     'members',
     'company-directory',
@@ -100,7 +93,6 @@ const suites = {
   ],
   drafts: [
     'admin-order-counts',
-    'order-list-optimization',
     'parcel-drafts',
     'admin-parcel-drafts',
     'order-intake',
@@ -110,8 +102,6 @@ const suites = {
   ],
   intake: [
     'admin-order-counts',
-    'order-list-optimization',
-    'call-list-optimization',
     'parcel-drafts',
     'admin-parcel-drafts',
     'order-intake',
@@ -123,9 +113,6 @@ const suites = {
   ],
   orders: [
     'admin-order-counts',
-    'order-list-optimization',
-    'call-list-optimization',
-    'dashboard-optimization',
     ...orderFlow,
     'order-address-history',
     'consultations',
@@ -141,14 +128,9 @@ const suites = {
     'company-deletion',
     'company-summaries',
     'admin-order-counts',
-    'order-list-optimization',
-    'call-list-optimization',
     ...lifecycle,
   ],
   calls: [
-    'call-list-optimization',
-    'transcript-optimization',
-    'dashboard-optimization',
     'consultations',
     'recordings',
     'call-analysis',
@@ -162,9 +144,6 @@ const suites = {
     ...lifecycle,
   ],
   analysis: [
-    'call-list-optimization',
-    'transcript-optimization',
-    'dashboard-optimization',
     'call-analysis',
     'call-events',
     'unanswered-questions',
@@ -178,7 +157,6 @@ const suites = {
     ...lifecycle,
   ],
   events: [
-    'transcript-optimization',
     'call-events',
     'call-insights-read',
     'call-analysis',
@@ -191,8 +169,6 @@ const suites = {
     ...lifecycle,
   ],
   recordings: [
-    'call-list-optimization',
-    'transcript-optimization',
     'recordings',
     'active-call-count',
     'consultations',

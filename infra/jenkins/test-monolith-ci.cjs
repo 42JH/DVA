@@ -243,3 +243,82 @@ test('git comparison covers all commits, deletions and renames; missing or diver
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('an isolated checkout survives the shared HEAD lock and preserves its interrupted checkout', () => {
+  const parent = path.resolve(tmpdir());
+  const directory = mkdtempSync(path.join(parent, 'dva-checkout-ci-'));
+  const git = (cwd, ...args) =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  const source = path.join(directory, 'source');
+  const shared = path.join(directory, 'workspace', 'dva-ci-linux-validation');
+  const isolated = path.join(directory, 'workspace', 'dva-ci-linux-validation@build-116');
+  mkdirSync(source);
+  const commit = (body) => {
+    writeFileSync(path.join(source, 'tracked.txt'), body);
+    git(source, 'add', 'tracked.txt');
+    git(
+      source,
+      '-c',
+      'user.name=CI Test',
+      '-c',
+      'user.email=ci-test@example.invalid',
+      '-c',
+      'commit.gpgSign=false',
+      'commit',
+      '-qm',
+      'fixture',
+    );
+    return git(source, 'rev-parse', 'HEAD');
+  };
+  try {
+    git(source, 'init', '-q');
+    const previous = commit('previous success');
+    const current = commit('next build');
+    mkdirSync(path.dirname(shared), { recursive: true });
+    git(directory, 'clone', '--no-hardlinks', source, shared);
+    git(shared, 'checkout', '--detach', previous);
+    writeFileSync(path.join(shared, '.git', 'HEAD.lock'), 'held by another operation');
+    writeFileSync(path.join(shared, 'untracked.txt'), 'preserve this evidence');
+    assert.throws(
+      () => git(shared, 'checkout', '-f', current),
+      (error) => error.status === 128 && /HEAD\.lock/.test(error.stderr),
+    );
+    const files = ['.git/HEAD', '.git/HEAD.lock', '.git/index', 'tracked.txt', 'untracked.txt'];
+    const before = files.map((file) => readFileSync(path.join(shared, file)));
+    git(directory, 'clone', '--no-hardlinks', source, isolated);
+    git(isolated, 'checkout', '--detach', current);
+    assert.equal(git(isolated, 'rev-parse', 'HEAD'), current);
+    assert.equal(readFileSync(path.join(isolated, 'tracked.txt'), 'utf8'), 'next build');
+    assert.deepEqual(changedPaths(previous, current, isolated), ['tracked.txt']);
+    assert.deepEqual(
+      files.map((file) => readFileSync(path.join(shared, file))),
+      before,
+    );
+  } finally {
+    assert.equal(path.dirname(directory), parent);
+    assert.ok(path.basename(directory).startsWith('dva-checkout-ci-'));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the entire pipeline uses a build-specific workspace and guards its final cleanup', () => {
+  const pipeline = readFileSync(path.join(__dirname, '../../Jenkinsfile'), 'utf8');
+  const agent = pipeline.slice(0, pipeline.indexOf('    options {'));
+  assert.match(agent, /agent\s*\{\s*node\s*\{/);
+  assert.ok(
+    agent.includes('customWorkspace "workspace/${env.JOB_NAME}@build-${env.BUILD_NUMBER}"'),
+  );
+  assert.equal((pipeline.match(/customWorkspace/g) ?? []).length, 1);
+  assert.ok(pipeline.includes('skipDefaultCheckout(true)'));
+  assert.ok(pipeline.includes('disableConcurrentBuilds()'));
+  assert.ok(pipeline.includes('def source = checkout scm'));
+  assert.ok(pipeline.includes('archiveArtifacts'));
+  const cleanup = pipeline.slice(pipeline.indexOf('        cleanup {'));
+  assert.ok(cleanup.includes('pwd().endsWith("/${env.JOB_NAME}@build-${env.BUILD_NUMBER}")'));
+  assert.ok(cleanup.includes("error('Refusing to clean a workspace outside this build')"));
+  assert.ok(cleanup.indexOf('deleteDir()') > cleanup.indexOf('error('));
+});

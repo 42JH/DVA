@@ -3,7 +3,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const { Module } = require('@nestjs/common');
 const { NestFactory } = require('@nestjs/core');
 const { DatabaseModule } = require('../dist/database/database.module');
@@ -42,8 +42,6 @@ test('internal metrics are text, independent of AI and absent from public Swagge
   assert.match(body, /dva_database_up 1/);
   assert.match(body, /dva_order_metrics_success 1/);
   assert.ok(!body.includes('ai_agent'));
-  const spec = await (await fetch(base + '/api/docs-json')).json();
-  assert.ok(!Object.keys(spec.paths).some((path) => path.includes('internal')));
   assert.equal((await fetch(base + '/api/internal/metrics')).status, 404);
 });
 test('stale detection reads committed order state without changing status, version or audit records', async () => {

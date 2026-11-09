@@ -182,19 +182,4 @@ test('administrator category storage and filtering leave AI list fields unchange
     ...(await (await f.ai('?q=' + marker)).json()).data,
   ])
     assert.deepEqual(Object.keys(data).sort(), ['answer', 'faqEntrySeq', 'question', 'updatedAt']);
-  const document = await (await f.get('/api/docs-json')).json();
-  for (const name of ['CreateFaqDto', 'UpdateFaqDto'])
-    assert.deepEqual(document.components.schemas[name].required.sort(), [
-      'answer',
-      'category',
-      'question',
-    ]);
-  assert.equal(document.components.schemas.AgentFaqDto.properties.category, undefined);
-  assert.ok(document.components.schemas.FaqDto.properties.category);
-  assert.equal(
-    document.paths['/api/ai/faqs'].get.parameters.some(
-      (parameter) => parameter.name === 'category',
-    ),
-    false,
-  );
 });

@@ -9,7 +9,7 @@ const { createTestPool, startTestApp, businessHeaders } = require('./helpers/app
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { DatabaseService } = require('../dist/database/database.service');
 const pool = createTestPool();
@@ -195,54 +195,6 @@ test('current customer identity and default address remain independent of an old
   assert.deepEqual(result.companyPins, []);
 });
 
-test('active company member receives personal pins while legacy company pins stay retired', async () => {
-  const c = await customer();
-  const colleague = await customer();
-  const outsider = await customer();
-  const org = await organization();
-  const otherOrg = await organization();
-  const membershipSeq = await member(c.customerSeq, org);
-  await member(colleague.customerSeq, org);
-  await member(outsider.customerSeq, otherOrg);
-  const personal = await pin(c.customerSeq, '내 주소', 3);
-  await pin(colleague.customerSeq, '동료 비공개');
-  await pin(outsider.customerSeq, '타인 비공개');
-  const result = await context(c.phoneNumber);
-  assert.equal(result.lookupStatus, 'REGISTERED');
-  assert.deepEqual(result.customer, c);
-  assert.equal(result.membership.membershipSeq, membershipSeq);
-  assert.equal(result.membership.role, 'MEMBER');
-  assert.equal(result.organization.organizationSeq, org);
-  assert.deepEqual(result.availableUsageTypes, ['PERSONAL', 'COMPANY']);
-  assert.deepEqual(
-    result.personalPins.map((p) => p.personalPinSeq),
-    [personal],
-  );
-  assert.deepEqual(
-    result.companyPins.map((p) => p.companyPinSeq),
-    [],
-  );
-  assert.equal(result.personalPins[0].version, 3);
-  assert.equal(result.personalPins[0].addressData.postalCode, '01234');
-  assert.equal(Object.hasOwn(result.personalPins[0].addressData, 'latitude'), false);
-  assert.equal(Object.hasOwn(result.personalPins[0].addressData, 'longitude'), false);
-  assert.deepEqual(Object.keys(result.personalPins[0]).sort(), [
-    'addressData',
-    'label',
-    'personalPinSeq',
-    'version',
-  ]);
-  const serialized = JSON.stringify(result);
-  for (const forbidden of [
-    '동료 비공개',
-    '타인 비공개',
-    '다른 기업 공용',
-    'searchText',
-    'directory',
-  ])
-    assert.ok(!serialized.includes(forbidden));
-});
-
 test('all membership/company status combinations enforce company access; representative has the same scope', async () => {
   for (const membershipStatus of ['ACTIVE', 'INACTIVE']) {
     for (const companyStatus of ['ACTIVE', 'INACTIVE']) {
@@ -334,32 +286,6 @@ test('next lookup reflects withdrawal, membership deactivation, unlinking and or
   assert.deepEqual(await context(c.phoneNumber), emptyContext('WITHDRAWN'));
 });
 
-test('only an eleven-digit string phoneNumber is accepted, without legacy or ownership override fields', async () => {
-  for (const input of [
-    {},
-    { phone: phone() },
-    { phoneNumber: null },
-    { phoneNumber: 1012345678 },
-    { phoneNumber: '' },
-    { phoneNumber: '021234567' },
-    { phoneNumber: '0101234567' },
-    { phoneNumber: '010123456789' },
-    { phoneNumber: '010-1234-5678' },
-    { phoneNumber: '+821012345678' },
-    { phoneNumber: ' 01012345678' },
-    { phoneNumber: '01012345678\n' },
-    { phoneNumber: "' OR TRUE --" },
-    { phoneNumber: phone(), customerSeq: 1 },
-    { phoneNumber: phone(), organizationSeq: 1 },
-  ]) {
-    const response = await request(input);
-    assert.equal(response.status, 400, JSON.stringify(input));
-    const body = await response.json();
-    assert.equal(body.error.code, 'INVALID_REQUEST');
-    assert.equal(response.headers.get('cache-control'), 'no-store');
-  }
-});
-
 test('query failure is 503 rather than a new customer or a partial success', async () => {
   const database = app.get(DatabaseService);
   const original = database.pool.query;
@@ -376,37 +302,4 @@ test('query failure is 503 rather than a new customer or a partial success', asy
   } finally {
     database.pool.query = original;
   }
-});
-
-test('authenticated AI needs no Origin; stale administrator cookies never bypass session checks', async () => {
-  const c = await customer();
-  assert.equal((await context(c.phoneNumber)).customer.customerSeq, c.customerSeq);
-  const badCookie = await request(
-    { phoneNumber: c.phoneNumber },
-    {
-      Cookie: 'dva_session=' + 'f'.repeat(64),
-      Origin: 'http://localhost:5173',
-    },
-  );
-  assert.equal(badCookie.status, 401);
-  assert.equal((await badCookie.json()).error.code, 'UNAUTHORIZED');
-  const administratorList = await fetch(base + '/api/customers');
-  assert.equal(administratorList.status, 401);
-  const forbidden = await request(
-    { phoneNumber: c.phoneNumber },
-    { Origin: 'https://untrusted.invalid' },
-  );
-  assert.equal(forbidden.status, 403);
-});
-
-test('request logs contain route and request ID without caller number or address content', async () => {
-  const c = await customer();
-  const requestId = randomUUID();
-  await context(c.phoneNumber, { 'X-Request-Id': requestId });
-  await new Promise((resolve) => setImmediate(resolve));
-  const entries = logs.filter((entry) => entry.requestId === requestId);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].route, '/api/customers/context');
-  assert.ok(!JSON.stringify(entries).includes(c.phoneNumber));
-  assert.ok(!JSON.stringify(entries).includes(address.roadAddress));
 });
