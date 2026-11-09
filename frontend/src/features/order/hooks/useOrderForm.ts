@@ -262,6 +262,9 @@ export function useOrderForm(
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'VERSION_CONFLICT') onConflict?.()
+      // 채우던 미완료가 그새 사라졌으면(24시간 · 더 최신 통화) 목록 · 건수를 다시 읽음 (백엔드 후속 명세 11/09)
+      if (order?.draft && e instanceof ApiError && e.status === 404)
+        void qc.invalidateQueries({ queryKey: ['screen'] })
     },
   })
 
