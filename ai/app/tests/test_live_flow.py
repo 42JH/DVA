@@ -249,10 +249,10 @@ def test_submit_locks_edit_and_add():
     lf = LiveFlow.__new__(LiveFlow)
     lf.svc = SimpleNamespace(results=SimpleNamespace(tasks={}, start=lambda s, cb: started.append(s)))
     lf.policy = P
-    s = SimpleNamespace(state=st, call_id="live_1")
+    s = SimpleNamespace(state=st, call_id="live_1", tools=SimpleNamespace(draft_intake=False))
     lf._maybe_submit(s, force=True)
     assert started and st.order_submitted
-    assert lf._edit(st) == {"order": "submitted"} and st.current is None  # 다시 열지 않는다
+    assert lf._edit(s) == {"order": "submitted"} and st.current is None  # 다시 열지 않는다
 
 
 def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(tmp_path):

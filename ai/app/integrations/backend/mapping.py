@@ -71,6 +71,12 @@ def resume_candidate(detail: dict) -> ResumeCandidate | None:
                            parcel_seqs=tuple(p["orderParcelSeq"] for p in detail.get("parcels") or []))
 
 
+def resume_draft_candidate(detail: dict) -> ResumeCandidate:
+    return ResumeCandidate(order_seq=None, parcel_seq=None, version=detail["version"],
+                           created_at=detail.get("firstCollectedAt") or detail["createdAt"],
+                           parcel=from_order(detail_order(detail["parcel"])), draft_seq=detail["draftSeq"])
+
+
 def resume_target(outcome: Outcome, cand: ResumeCandidate, call_session_seq: int) -> dict:
     """이어받은 통화의 결과 → 아웃박스에 남기는 목표 상태(재시작 뒤에도 이것만으로 PATCH·확정·취소를 다시 맞춘다).
     합계는 이 통화 택배 배송비 + 같은 주문의 다른 상세 배송비를 모두 알 때만 넣는다(BE가 확정 때 일치를 검사한다).

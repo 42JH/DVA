@@ -12,10 +12,12 @@ from backend_client.mock import MockBackend
 def test_build_backend_choices():
     cfg = load_server_config().backend
     assert isinstance(build_backend(cfg, {"BACKEND_MOCK": "true"}).api, MockBackend)
-    gw = build_backend(cfg, {"BACKEND_API_URL": "http://be", "AI_PERSONA_TOKEN": ""})
+    gw = build_backend(cfg, {"BACKEND_API_URL": "http://be", "AI_PERSONA_TOKEN": "", "AI_BUSINESS_TOKEN": "test-token"})
     assert isinstance(gw.api, BackendAPI) and gw.api.persona_token is None and gw.sem._value == cfg.max_concurrency
     with pytest.raises(RuntimeError, match="BACKEND_API_URL"):
         build_backend(cfg, {})
+    with pytest.raises(RuntimeError, match="AI_BUSINESS_TOKEN"):
+        build_backend(cfg.model_copy(update={"parcel_draft_intake": True}), {"BACKEND_API_URL": "http://be"})
 
 
 def test_lifespan_and_healthz(monkeypatch):

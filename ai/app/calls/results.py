@@ -99,6 +99,7 @@ class ResultService:
         self.review_lock = asyncio.Lock()  # 한 프로세스 안에서 종료·복구 작업의 중복 판정/전송 방지
         self.insight_lock = asyncio.Lock()  # 전사 작업과 검토 작업이 같은 진행 상태를 덮지 않게 한다.
         self.result_lock = asyncio.Lock()   # 기동 복구와 주기 재확인이 같은 결과 행을 동시에 보내지 않게
+        self.intake = None
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
     async def register(self, s: CallSession, call_session_seq) -> None:
@@ -106,12 +107,15 @@ class ResultService:
         실패해도 통화는 신규 고객으로 이어 가고 결과는 customer{name, phoneNumber}로 보낸다."""
         op = s.tools.ops["register"]
         try:
-            seq = await call_session_seq(s)
             async with s.lock:
                 cur = s.state.current
+                if cur is None:
+                    op["status"] = "failed"
+                    return
                 name = cur["sender_name"].value
                 snap = draft_snapshot(cur)
                 geo = cur.sender_geo
+            seq = await call_session_seq(s)
             address = None
             if geo:  # 주소 7항목 중 이름·번호를 뺀 완성 주소만(부분 주소로 기본 출발지를 만들지 않는다)
                 address = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,
@@ -123,6 +127,9 @@ class ResultService:
             from app.calls.service import _apply_context
             async with s.lock:
                 _apply_context(s.state, ctx, s.caller)
+                saved = self.intake is not None and s.tools.draft_intake and not s.closed and self.intake.sync(s)
+            if saved:
+                s.spawn(self.intake.flush(s.call_id), "draft_save")
             if ctx.status == "REGISTERED" and geo and seq:
                 await self.backend.write("create_pin", self.backend.api.create_pin, seq, ctx.customer_seq,
                                          to_order(snap), "sender", "보내는 곳")
@@ -308,6 +315,8 @@ class ResultService:
 
     async def recover(self) -> None:
         """재시작 후: 끝나지 않은 결과·인사이트를 같은 키·본문·eventId로 다시 보낸다."""
+        if self.intake is not None:
+            await self.intake.recover()
         async with self.result_lock:
             for row in await asyncio.to_thread(self.outbox.unfinished_results):
                 await self._send(row)
@@ -323,6 +332,8 @@ class ResultService:
     async def resend_unfinished(self) -> None:
         """실행 중에도 SENT_UNCERTAIN(503·연결 끊김·시간 초과) 주문 결과를 같은 키·본문으로 다시 확인한다(BE 확인 2026-11-05 2번).
         새 키를 만들지 않으므로 BE가 이미 저장했으면 기존 결과를 돌려주고, 못 받았으면 그때 저장한다."""
+        if self.intake is not None:
+            await self.intake.recover()
         async with self.result_lock:
             for row in await asyncio.to_thread(self.outbox.unfinished_results):
                 task = self.tasks.get(row["session_id"])
@@ -408,7 +419,11 @@ class ResultService:
     # ------------------------------------------------------------------ 분석·이벤트·미답변(통화 끝)
     async def finish(self, s: CallSession) -> None:
         """정리 훅: 결과 전송을 끝까지 기다린 뒤(없으면 지금 시작) 인사이트를 만들어 보낸다."""
-        task = self.tasks.get(s.call_id) or (self.start(s) if s.state.intent or s.state.parcels else None)
+        if self.intake is not None and s.tools.draft_intake:
+            await self.intake.finish(s)
+        task = self.tasks.get(s.call_id)
+        if task is None and not s.tools.draft_intake and (s.state.intent or s.state.parcels):
+            task = self.start(s)
         if task is not None:
             try:
                 await task
@@ -479,9 +494,10 @@ class ResultService:
                                        "offsetSeconds": off(t.get("at"))})
         data = getattr(s, "result", None) or {}
         order_seq = data.get("orderSeq") if isinstance(data.get("orderSeq"), int) else None
-        if data:
+        intake = s.tools.ops.get("intake", {}) if s.tools.draft_intake else {}
+        if data or intake.get("status") in ("WAITING_PBX", "FINALIZING", "FAILED"):
             rows.append((now, "AI_ACTION", {"action": "ORDER_SUBMITTED", "orderSeq": order_seq,
-                                            "summaryText": f"통화 결과 전송: {data.get('status') or '응답 없음'}"}))
+                                            "summaryText": f"통화 결과 전송: {data.get('status') or intake.get('status') or '응답 없음'}"}))
         if data.get("status") in SAVED:
             rows.append((now, "BUSINESS_RESULT", {"action": "ORDER_CREATED", "orderSeq": order_seq,
                                                   "unansweredQuestionSeq": None, "summaryText": "택배 접수 주문 저장"}))
@@ -499,7 +515,8 @@ class ResultService:
         events = [{"eventId": str(uuid.uuid5(NAMESPACE, f"{s.call_id}:{i}")), "eventOrder": i, "kind": kind,
                    "occurredAt": _iso(ts), "offsetSeconds": off(ts), "payload": payload}
                   for i, (ts, kind, payload) in enumerate(rows, 1)]
-        submitted = _parcel_count(self.outbox, s.call_id) if data.get("status") in SAVED else 0
+        submitted = (intake.get("ready_count", 0) if s.tools.draft_intake
+                     else _parcel_count(self.outbox, s.call_id) if data.get("status") in SAVED else 0)
         analysis = {
             "providerCallId": s.call_id, "startedAt": _iso(started), "endedAt": _iso(now),
             "aiPersonaVersionSeq": s.persona_version_seq,           # 서버 기본 프롬프트면 null(BE가 ACTIVE로 채우지 않음)
@@ -509,7 +526,7 @@ class ResultService:
                                   and ((t.get("output") or {}).get("facts") or {}).get("answerable")),
             "orderLookupCount": sum(1 for t in s.tool_calls if t["name"] == "lookup_orders"
                                     and ((t.get("output") or {}).get("facts") or {}).get("found")),
-            "cancelledParcelCount": len(cancels),
+            "cancelledParcelCount": len(cancels) + intake.get("cancelled_count", 0),
             "hasHandoffRequest": bool(st.agent_transferred),
             **({"hasCallbackRequest": bool(st.callback_requested)} if self.callback_field else {}),
             "repeatQuestionCount": _repeats(st),                    # 서버가 다시 받게 한 횟수(검증 실패 기준)

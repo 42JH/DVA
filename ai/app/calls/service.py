@@ -63,13 +63,17 @@ class CallService:
         self.on_change: Callable[[CallSession], None] = lambda s: None         # 관제 알림
         self.accepting_new = True
         self.results = None                                                    # S6: app.calls.results.ResultService
+        self.intake = None                                                     # 055: app.calls.intake.IntakeService
 
     # --- 수신 ---
     async def on_incoming(self, inc: IncomingCall) -> None:
         trace = new_trace()
         state = ConversationState(customer=Customer(caller_phone=inc.caller))
         tools = ToolContext(inc.session_id, state, self.d.policy, self.d.backend, self.d.address, self.d.rag,
-                            rag_min_score=self.d.rag_min_score, rag_budget_sec=self.d.rag_budget_sec)
+                            rag_min_score=self.d.rag_min_score, rag_budget_sec=self.d.rag_budget_sec,
+                            draft_intake=self.intake is not None)
+        if self.intake is not None:
+            tools.pending_drafts = lambda: self.intake.outbox.has_pending_drafts(inc.session_id)
         s = CallSession(inc.session_id, trace, inc.caller, inc.incoming_at or _utc_now(), tools)
         s.on_change = self.on_change
         current_call.set(s)  # 이 통화 태스크·자식 태스크의 BE 호출을 관제에 남긴다

@@ -30,10 +30,10 @@ def can_offer(state: ConversationState, now: datetime, window_sec: float) -> boo
     return within_window(state.resume, now, window_sec)
 
 
-def load_resumed(state: ConversationState, version: int) -> None:
+def load_resumed(state: ConversationState, version: int, *, client_parcel_id: str | None = None) -> None:
     """연결(PATCH) 성공 뒤: 후보 상세를 받는 중인 택배로 불러온다. 고객이 말한 값이 없을 때만 부른다(can_offer)."""
     cand = state.resume
-    draft = ParcelDraft(order_parcel_seq=cand.parcel_seq)
+    draft = ParcelDraft(order_parcel_seq=cand.parcel_seq, client_parcel_id=client_parcel_id)
     state.current, state.editing = draft, None
     v = state.bump()
     # 지번·동명·우편번호가 없는 주소는 확정할 수 없으므로 그 쪽 주소·상세를 다시 받는다
@@ -49,6 +49,6 @@ def load_resumed(state: ConversationState, version: int) -> None:
     draft.client_comment = cand.parcel.get("client_comment")
     if cand.payment and cand.payment in state.customer.payment_methods and not state.payment.valid:
         state.record("payment", cand.payment, Source.HISTORY)
-    state.resume_version = version
+    state.resume_version = version if client_parcel_id is None else None
     state.origin_applied = True  # 보내는 분은 이어받은 상세 값(출발지 질문을 따로 하지 않는다)
     state.bump()

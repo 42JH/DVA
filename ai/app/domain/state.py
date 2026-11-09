@@ -97,6 +97,7 @@ class ParcelDraft:
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
     order_parcel_seq: int | None = None   # 이어받은 미완료 주문의 기존 상세 번호(PATCH 때 그 상세를 고친다)
+    client_parcel_id: str | None = None   # 같은 통화의 배송 초안 생성 및 재시도에 사용하는 UUID
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
@@ -130,15 +131,16 @@ class PendingConfirmation:
 @dataclass(frozen=True)
 class ResumeCandidate:
     """이어받을 미완료 주문(가장 최근 상세 1건). 값은 도메인 스냅샷 모양(draft_snapshot), BE 이름은 mapping에만."""
-    order_seq: int
+    order_seq: int | None
     version: int
     created_at: str                       # 주문 생성 시각(ISO, BE). 이어받기 기한의 기준(사용자 결정 2026-11-06)
-    parcel_seq: int
+    parcel_seq: int | None
     parcel: dict                          # 필드 값 + sender_geo·receiver_geo·client_comment
     other_fares: tuple[int | None, ...] = ()  # 같은 주문의 다른 미취소 상세 배송비(합계용, 대화에는 불러오지 않음)
     payment: str | None = None
     pickup_at: str | None = None
     parcel_seqs: tuple[int, ...] = ()     # 이어받을 때 주문에 있던 상세 번호 전부(새 상세가 이미 추가됐는지 가리는 기준)
+    draft_seq: int | None = None
 
 
 @dataclass

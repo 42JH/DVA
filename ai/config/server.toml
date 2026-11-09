@@ -41,6 +41,8 @@ retry_max_sec = 300.0
 reconcile_sec = 30.0
 
 [backend]
+# 055 백엔드 연동 테스트를 위해 새 통화에 배송 초안 API를 사용한다.
+parcel_draft_intake = true
 timeout_sec = 3.0
 # 새 서버 전용(app/integrations/backend/gateway.py). 측정 후 조정
 max_concurrency = 16

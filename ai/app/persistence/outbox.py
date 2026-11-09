@@ -16,6 +16,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS call_results(
   session_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL, body_json TEXT NOT NULL,
   status TEXT NOT NULL, last_data_json TEXT, attempts INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS intake_steps(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, call_seq INTEGER NOT NULL,
+  parcel_id TEXT, action TEXT NOT NULL, payload TEXT NOT NULL, request TEXT, result TEXT);
+CREATE INDEX IF NOT EXISTS intake_steps_session ON intake_steps(session_id, id);
 CREATE TABLE IF NOT EXISTS insights(
   session_id TEXT PRIMARY KEY, call_session_seq INTEGER NOT NULL, payload_json TEXT NOT NULL,
   status TEXT NOT NULL, progress_json TEXT NOT NULL DEFAULT '{}', updated_at REAL NOT NULL);
@@ -70,6 +74,42 @@ class Outbox:
             ids = [r[0] for r in self.db.execute(
                 "SELECT session_id FROM call_results WHERE status IN ('PENDING','SENT_UNCERTAIN')")]
         return [self.result(i) for i in ids]
+
+    def add_intake_step(self, session_id: str, call_seq: int, parcel_id: str | None, action: str, payload: dict) -> int:
+        with self.lock:
+            body = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            last = self.db.execute("SELECT id,action,payload FROM intake_steps WHERE session_id=? AND parcel_id IS ? "
+                                   "ORDER BY id DESC LIMIT 1", (session_id, parcel_id)).fetchone()
+            if last and last[1:] == (action, body):
+                return last[0]
+            return self.db.execute("INSERT INTO intake_steps(session_id,call_seq,parcel_id,action,payload) VALUES(?,?,?,?,?)",
+                                   (session_id, call_seq, parcel_id, action, body)).lastrowid
+
+    def intake_steps(self, session_id: str) -> list[dict]:
+        with self.lock:
+            rows = self.db.execute("SELECT id,call_seq,parcel_id,action,payload,request,result FROM intake_steps "
+                                   "WHERE session_id=? ORDER BY id", (session_id,)).fetchall()
+        return [{"id": i, "call_seq": seq, "parcel_id": pid, "action": action, "payload": json.loads(payload),
+                 "request": json.loads(request) if request else None, "result": json.loads(result) if result else None}
+                for i, seq, pid, action, payload, request, result in rows]
+
+    def intake_request(self, step: int, body: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE intake_steps SET request=? WHERE id=? AND request IS NULL",
+                            (json.dumps(body, ensure_ascii=False), step))
+
+    def intake_result(self, step: int, result: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE intake_steps SET result=? WHERE id=?", (json.dumps(result, ensure_ascii=False), step))
+
+    def unfinished_intakes(self) -> list[str]:
+        with self.lock:
+            return [row[0] for row in self.db.execute("SELECT DISTINCT session_id FROM intake_steps WHERE result IS NULL")]
+
+    def has_pending_drafts(self, session_id: str) -> bool:
+        with self.lock:
+            return self.db.execute("SELECT 1 FROM intake_steps WHERE session_id=? AND action!='COMPLETE' "
+                                   "AND result IS NULL LIMIT 1", (session_id,)).fetchone() is not None
 
     # --- 인사이트 ---
     def insight(self, session_id: str) -> dict | None:
