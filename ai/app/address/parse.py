@@ -148,6 +148,7 @@ def _is_anchor(tokens: list[str], i: int, is_area) -> bool:
 def clean_text(text: str) -> str:
     """상세 가르기 전 정리: 쉼표·말끝·동사 꼬리("…으로 할게요")·붙은 '다시'. "삼홉니다"(=삼호입니다)도 바로잡는다."""
     text = re.sub(r"[,，]", " ", text).replace("홉니다", "호").replace("-", " - ")
+    text = re.sub(rf"(\d)(?=[{SYL}])", r"\1 ", text)  # "22-1오백이호"처럼 숫자에 붙은 한글 수사 띄우기
     text = _VERB_TAIL.sub("", text)
     text = _PLAIN_ENDING.sub("", text.strip())
     text = split_dasi(text) or [text]

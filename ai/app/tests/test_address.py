@@ -276,6 +276,7 @@ def test_split_detail_candidates_and_order():
     assert split_detail("구미 인동구길 이십이 다시 일오백이호")[0] == ("구미 인동구길 이십이 다시 일", "오백이호", False)
     assert split_detail("서울시 양천구 신정이펜일로 오십 삼백십이동")[0] == ("서울시 양천구 신정이펜일로 오십", "삼백십이동", True)
     assert split_detail("구미 인동 구길 이십이 다시 일 오백 이 호")[0] == ("구미 인동 구길 이십이 다시 일", "오백이호", True)
+    assert split_detail("구미 인동 9길 22-1오백이호")[0] == ("구미 인동 9길 22 - 1", "오백이호", True)  # 숫자+한글 혼합
     # 상세가 없으면 빈 목록(지금 경로 그대로): 법정동·번지·길 번호는 상세가 아니다
     assert split_detail("전주시 금암이동 백사십구 다시 십일 번지요") == []
     assert split_detail("서울 강남구 테헤란로 이백십이요") == [] and split_detail("안산시 상록구 사이동 1234", {"사이동"}.__contains__) == []
