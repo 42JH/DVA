@@ -1,4 +1,4 @@
-// 고객 (11/06) — 모든 고객 표(이름 · 전화번호 · 기본 주소 · 상세주소 · 결제 방법) → 줄을 누르면 오른쪽에 고객 정보 · 개인 주소록 · 주문 내역 · 통화 내역 바로 가기
+// 고객 (11/06) — 모든 고객 표(이름 · 전화번호 · 구분(개인/기업) · 기본 주소 · 상세주소 · 결제 방법) → 줄을 누르면 오른쪽에 고객 정보 · 개인 주소록 · 주문 내역 · 통화 내역 바로 가기
 import { useRef } from 'react'
 import { Link } from 'react-router'
 import { PageHead } from '@/shared/ui'
@@ -43,6 +43,9 @@ export function CustomersPage() {
                   <th scope="col" className="w-[130px]">
                     전화번호
                   </th>
+                  <th scope="col" className="w-[80px]">
+                    구분
+                  </th>
                   <th scope="col">기본 주소</th>
                   <th scope="col">상세주소</th>
                   <th scope="col" className="w-[200px]">
@@ -72,6 +75,9 @@ export function CustomersPage() {
                         {r.withdrawn && <span className="ml-1.5 text-[12px]">(탈퇴)</span>}
                       </td>
                       <td className="text-[13px] whitespace-nowrap tabular-nums">{r.phone}</td>
+                      <td className="text-[13px]" title={r.company}>
+                        {r.kind}
+                      </td>
                       <td className="truncate text-left text-[13px]" title={r.address}>
                         {r.address}
                       </td>
@@ -196,7 +202,6 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
                           <span className="whitespace-nowrap text-ops-sub tabular-nums">
                             {p.phone}
                           </span>
-                          {p.label && <span className="text-[12px] text-ops-route">{p.label}</span>}
                         </span>
                         <span className="block text-ops-ink/80">{p.address}</span>
                       </span>
