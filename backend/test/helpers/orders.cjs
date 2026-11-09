@@ -1,4 +1,9 @@
-const { createTestPool, startTestApp, businessHeaders } = require('./application.cjs');
+const {
+  createTestPool,
+  createTestSession,
+  startTestApp,
+  businessHeaders,
+} = require('./application.cjs');
 const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
 
 module.exports = function ordersFixture() {
@@ -21,12 +26,10 @@ module.exports = function ordersFixture() {
   const { OrdersRepository } = require('../../dist/orders/orders.repository');
   const { AuditService } = require('../../dist/audit/audit.service');
   const { DatabaseService } = require('../../dist/database/database.service');
-  const { hashPassword } = require('../../dist/auth/password');
   const pool = createTestPool();
   const apps = [],
     hosts = [],
     cookies = [];
-  const password = 'order-test-only-password';
   const origin = 'http://localhost:5173';
   let customerId,
     withdrawnId,
@@ -52,23 +55,16 @@ module.exports = function ordersFixture() {
 
   before(async () => {
     await migrate(pool);
-    const hash = await hashPassword(password);
     for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
       const result = await pool.query(
-        `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
-        [`orderTest${index}`, hash, role],
+        `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq`,
+        [`orderTest${index}`, role],
       );
       if (index === 0) adminId = result.rows[0].admin_user_seq;
       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
       const app = index < 2 ? legacyOrderIntake(await startTestApp(apps)) : apps[0];
       hosts.push(await app.getUrl());
-      const response = await fetch(hosts[index] + '/api/auth/login', {
-        method: 'POST',
-        headers: { Origin: origin, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginId: `orderTest${index}`, password }),
-      });
-      assert.equal(response.status, 200);
-      cookies.push(response.headers.get('set-cookie').split(';')[0]);
+      cookies.push(await createTestSession(pool, result.rows[0].admin_user_seq));
     }
     repository = apps[0].get(OrdersRepository);
     const customer = async (phone, status) =>

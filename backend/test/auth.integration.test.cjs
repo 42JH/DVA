@@ -1112,14 +1112,6 @@ test('retired role-only route is absent from routing and Swagger', async () => {
   assert.equal(document.components.schemas.UpdateAdminRoleDto, undefined);
 });
 
-test('prepare disposable runtime account for production-image cookie checks', async () => {
-  await db.pool.query(
-    `INSERT INTO admin_users(login_id,name,password_hash,role,status)
-     VALUES('runtimeAdmin83','Runtime test',$1,'OPERATOR','ACTIVE'),
-       ('runtimeSearchAdmin83','Runtime search admin',$1,'SYSTEM_ADMIN','ACTIVE')`,
-    [await hashPassword('runtime-only-password')],
-  );
-});
 test('OPS-02 requires a session and permits only supervisors and system administrators', async () => {
   assert.equal((await call('GET', '/api/audit-logs')).status, 401);
   assert.equal(

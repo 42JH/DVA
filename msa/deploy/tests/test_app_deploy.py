@@ -80,6 +80,16 @@ if name == 'ssh' and 'bash remote-app.sh' in args[-1]:
             str(self.key), scp[scp.index('image.tar'):]
         )
 
+    def test_stage_uploads_once_and_apply_does_not_retransfer(self):
+        self.package()
+        self.run_script('deploy/upload-app.sh', self.app_release, self.key, 'prepare')
+        staged_calls = self.calls()
+        self.assertIn("'prepare'", [c for c in staged_calls if c[0] == 'ssh'][-1][-1])
+        transfers = len([c for c in staged_calls if c[0] == 'scp'])
+        self.run_script('deploy/upload-app.sh', self.app_release, self.key, 'apply')
+        self.assertEqual(len([c for c in self.calls() if c[0] == 'scp']), transfers)
+        self.assertIn("'apply'", [c for c in self.calls() if c[0] == 'ssh'][-1][-1])
+
     def test_corruption_blocks_network(self):
         self.package()
         (self.app_release / 'image.tar').write_text('corrupted')

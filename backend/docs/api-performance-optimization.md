@@ -120,3 +120,13 @@
 최종 결정: 적용. 선택 목록 회귀 4개가 통과했고, 최신 기준 병합 상태에서 `BACKEND_TEST_PROFILE=full node backend/scripts/check.cjs`가 종료 코드 0으로 통과했다. 컴파일·ESLint·Prettier, 단위 198개·결제 21개·PostgreSQL 통합 865개·운영 이미지/Nginx/HTTPS 23개, 합계 1,107개다. 실패·건너뜀 0개이며 임시 DB·이미지·컨테이너·네트워크 정리를 확인했다. full 검증은 424,402ms였으며 이번에는 FAQ/dashboard 부분 프로필 전체를 별도로 재실행하지 않았다.
 
 이 결과는 격리 합성 데이터와 로컬 운영 이미지의 검증이다. 운영 DB·실제 프론트·외부 AI/결제/디버/S3 실서비스·운영 부하·배포·원격 CI는 미검증이다. 추가 migration·환경변수·기존 데이터 보정은 없다. MR은 생성하지 않았다.
+
+## 2026-11-09 MR 생성 전 최신 원격 반영
+
+사용자 요청에 따라 origin/develop-backend 3b897e62를 같은 feature/frontend-qa에 병합한다. 새 기준의 CI·테스트 준비·독립 운영 fixture와 MSA 변경 이력을 보존하며, 이번 반영에서 업무 src·migration은 이전 최적화 커밋 이후 수정하지 않는다.
+
+package.json, integration-profile.cjs, integration-profile.test.cjs의 충돌 3곳을 해결했다. DB/웹훅과 인증 실행 그룹을 분리한 최신 구조를 보존하고 QA·최적화 8개 테스트를 모두 등록했다. runtime-fixture는 마지막에 실행해 운영 smoke의 선행 데이터를 준비한다. 각 기능 선택 목록에는 이번 변경의 직접 소비자·회귀를 연결했고 미분류·공통 변경의 full 기준을 유지한다. 선택·전체 실행 목록 회귀 7개가 통과했다.
+
+최신 병합 상태에서 full Docker 검증을 수행한 뒤 커밋·푸시하고, Git CLI push option으로 develop-backend 대상 MR을 생성한다. 병합·자동 병합·브랜치 삭제·Jira 완료 전환은 수행하지 않는다.
+
+최신 기준 3b897e62의 최종 결과: full 검증 종료 코드 0. 컴파일·ESLint·Prettier, 단위 201개·결제 21개·PostgreSQL/API 통합 865개·운영 이미지/Nginx/HTTPS 23개, 총 1110개가 통과했다. 실패·건너뜀 0개, 전체 406367ms이며 임시 자원 정리를 확인했다. 이전 1,107개는 2026-11-08 CI 기준의 기록이고 이번 MR 검증은 2026-11-09 최신 기준으로 다시 수행했다. 원격 CI·실제 프론트·외부 실서비스·운영 부하·배포는 미검증이다.

@@ -358,6 +358,13 @@ test/
 DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션을 적용한 뒤 실행한다.
 공통 코드 변경 시 기존 정상 경로와 PBX 회귀 검증도 수행한다.
 
+Jenkins는 [테스트 정리 계획](docs/test-cleanup-plan.md)에 따라 기능별 DB 회귀를 선택하고,
+여러 기능 변경은 합집합을 순차 실행한다. 새 진입점이 전체 목록에서 빠지거나 중복되면 단위 검증이 실패한다.
+기능 간 호출·SQL 소비 관계가 바뀌면 `scripts/integration-profile.cjs`의 영향 범위도 갱신한다.
+공통 업무 fixture는 비밀번호 로그인을 반복하지 않고 임시 DB 세션을 준비하며 실제 guard는 통과한다.
+인증 상세 회귀는 전체/인증 변경에서, 인증 단위·production/Nginx/HTTPS 검증은 모든 백엔드 실행에서 유지한다.
+기본 `npm run check:docker`는 전체 검증이고 Jenkins `FULL_BACKEND_TESTS=true`로도 전체를 강제할 수 있다.
+
 ### 신규 API 작업 순서와 미확정 계약
 
 1. [Git 협업 컨벤션](../docs/CONVENTION.md)에 따라 최신 `develop-backend`에서 작업 브랜치를 만든다.

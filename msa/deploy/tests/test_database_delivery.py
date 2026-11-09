@@ -38,12 +38,12 @@ fi
     def test_all_changed_databases_applied_in_order(self):
         result, calls = self.execute('success')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(calls, ['upload', 'customer preview', 'customer apply', 'order preview', 'order apply'])
+        self.assertEqual(calls, ['upload', 'customer preview', 'order preview', 'customer apply', 'order apply'])
 
     def test_failure_stops_remaining_databases(self):
         result, calls = self.execute('fail')
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(calls, ['upload', 'customer preview', 'customer apply'])
+        self.assertEqual(calls, ['upload', 'customer preview', 'order preview', 'customer apply'])
 
     def test_missing_fingerprint_stops_before_update(self):
         result, calls = self.execute('missing')
