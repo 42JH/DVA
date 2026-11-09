@@ -127,6 +127,17 @@ class VerificationHistoryTests(unittest.TestCase):
                 (self.out / 'verification-history.json').write_text(value if isinstance(value, str) else json.dumps(value))
                 self.assertTrue(self.selection()['database'])
 
+    def test_diverged_success_history_uses_the_current_branch_fallback(self):
+        self.git('checkout', '-qb', 'verified-on-another-branch')
+        self.commit('docs/other.md', 'a different branch')
+        unrelated = self.git('rev-parse', 'HEAD')
+        self.git('checkout', '-q', '--detach', self.deployed)
+        self.commit('msa/services/customer/src/main.ts', 'changed current behavior')
+        self.history(unrelated)
+        origin = verification.previous('customer', self.deployed, Path.cwd())
+        self.assertEqual(origin, {'commit': self.deployed, 'build': None})
+        self.assertEqual(self.selection()['paritySuites'], ['customer', 'consultation', 'order'])
+
     def test_reused_database_report_requires_identical_inputs_and_current_image(self):
         self.history(self.deployed)
         image_id = 'sha256:' + 'b' * 64
