@@ -39,15 +39,6 @@ export function CallsPage() {
       <section aria-label="통화 목록" className="flex min-h-0 flex-1 flex-col gap-3 px-6 pt-4 pb-4">
         <div className="flex flex-wrap items-center gap-3">
           <Segments label="상태" value={vm.state} items={[...STATE_FILTERS]} onPick={vm.setState} />
-          {/* 불만 있는 통화만 — 상태와 같이 걸 수 있음 */}
-          <button
-            type="button"
-            aria-pressed={vm.complaint}
-            onClick={vm.toggleComplaint}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${vm.complaint ? 'bg-ops-stop-soft text-ops-stop' : 'text-ops-sub hover:text-ops-ink'}`}
-          >
-            불만 있는 통화만
-          </button>
           {vm.capped && (
             <span className="text-[12px] text-ops-wait">
               통화가 많아 최근 2,000건에서만 찾았습니다. 기간을 줄여 보세요.
@@ -61,7 +52,7 @@ export function CallsPage() {
           list={vm.list}
           unit="통화"
           empty={
-            vm.q || vm.state || vm.complaint
+            vm.q || vm.state
               ? '조건에 맞는 통화가 없습니다. 기간을 넓혀 보세요.'
               : '이 기간에 통화가 없습니다.'
           }

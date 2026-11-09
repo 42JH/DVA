@@ -17,8 +17,8 @@ import { fetchAll, FETCH_ALL_MAX } from '@/shared/api/paging'
 import { usePageSize } from '@/v2/lib/paging'
 import { orderNo } from '@/shared/order/labels'
 
-// at = 목록 기준 시각 · s = 상태 필터(STATE_FILTERS) · c = '1'이면 불만 있는 통화만
-const DEFAULTS = { q: '', r: '7d', at: '', s: '', c: '' }
+// at = 목록 기준 시각 · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
+const DEFAULTS = { q: '', r: '7d', at: '', s: '' }
 
 /** 통화 상태 — 끝났는지(PBX 종료 시각)와 분석이 왔는지로 */
 
@@ -27,11 +27,7 @@ export function useCalls() {
   const qc = useQueryClient()
   const r = params.r as Range
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
-  const query = {
-    q: (phoneDigits(t) || t).slice(0, 200) || undefined,
-    from: rangeFrom(r),
-    hasComplaint: params.c ? 'true' : undefined, // 서버 조건
-  }
+  const query = { q: (phoneDigits(t) || t).slice(0, 200) || undefined, from: rangeFrom(r) }
   const s = (STATE_FILTERS.some((f) => f.value === params.s) ? params.s : '') as StateFilter
 
   const list = useSnapshotList<CallListItemDto>({
@@ -104,8 +100,6 @@ export function useCalls() {
     setRange: (v: Range) => set({ r: v, at: '' }),
     state: s,
     setState: (v: StateFilter) => set({ s: v, at: '' }),
-    complaint: !!params.c,
-    toggleComplaint: () => set({ c: params.c ? '' : '1', at: '' }),
     // 상태로 거를 때 받은 통화가 상한에 걸리면 알림 (기간을 줄이게)
     capped: !!s && (all.data?.length ?? 0) >= FETCH_ALL_MAX,
     rows,
