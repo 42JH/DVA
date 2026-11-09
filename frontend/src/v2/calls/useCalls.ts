@@ -5,17 +5,20 @@ import { callKinds } from '@/v2/lib/kinds'
 import { phoneDigits } from '@/shared/lib/search'
 import { useListParams } from '@/shared/lib/useListParams'
 import { useDebounced } from '@/v2/lib/useDebounced'
-import { useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toCallRow, type CallListItemDto } from '@/features/call/api/callDto'
 import { callQueries } from '@/features/call/api/callApi'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import { useSnapshotList } from '@/v2/lib/useSnapshotList'
 import { rangeFrom, type Range } from '@/v2/lib/range'
 import { dateTime } from '@/v2/lib/when'
-import { callState, memberOf } from './callState'
+import { callState, memberOf, STATE_FILTERS, stateKey, type StateFilter } from './callState'
+import { fetchAll, FETCH_ALL_MAX } from '@/shared/api/paging'
+import { usePageSize } from '@/v2/lib/paging'
 import { orderNo } from '@/shared/order/labels'
 
-const DEFAULTS = { q: '', r: '7d', at: '' } // at = 목록 기준 시각
+// at = 목록 기준 시각 · s = 상태 필터(STATE_FILTERS) · c = '1'이면 불만 있는 통화만
+const DEFAULTS = { q: '', r: '7d', at: '', s: '', c: '' }
 
 /** 통화 상태 — 끝났는지(PBX 종료 시각)와 분석이 왔는지로 */
 
@@ -24,7 +27,12 @@ export function useCalls() {
   const qc = useQueryClient()
   const r = params.r as Range
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
-  const query = { q: (phoneDigits(t) || t).slice(0, 200) || undefined, from: rangeFrom(r) }
+  const query = {
+    q: (phoneDigits(t) || t).slice(0, 200) || undefined,
+    from: rangeFrom(r),
+    hasComplaint: params.c ? 'true' : undefined, // 서버 조건
+  }
+  const s = (STATE_FILTERS.some((f) => f.value === params.s) ? params.s : '') as StateFilter
 
   const list = useSnapshotList<CallListItemDto>({
     key: 'calls',
@@ -36,7 +44,35 @@ export function useCalls() {
     go: set,
   })
 
-  const rows = list.items.map((d) => {
+  // 상태 필터: 서버에 분석 상태 조건이 없어(11/09) 그 기간 · 검색의 통화를 모두 받아 화면에서 거르고 쪽을 나눔
+  // ponytail: 최대 2,000건(FETCH_ALL_MAX). 백엔드가 GET /calls?analysisStatus를 주면 그 조건으로 바꾸고 이 덩어리를 지움
+  const [size, setSize] = usePageSize()
+  const to = list.asOf ? new Date(list.asOf).toISOString() : undefined
+  const all = useQuery({
+    queryKey: ['v2', 'calls', 'all', query, to],
+    enabled: !!s && !!to,
+    queryFn: ({ signal }) => fetchAll<CallListItemDto>('/calls', { ...query, to }, signal),
+    staleTime: Infinity, // 기준 시각에 묶임 — [최신 목록 보기]로만 바뀜
+    placeholderData: keepPreviousData,
+  })
+  const hit = (all.data ?? []).filter((d) => stateKey(callState(d).label) === s)
+  const shown = s
+    ? {
+        items: hit.slice((page - 1) * size, page * size),
+        isLoading: all.isPending,
+        isStale: all.isPlaceholderData,
+        error: all.error ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
+        total: hit.length,
+        page,
+        size,
+        setPage: (p: number) => set({ page: p, at: to ? String(list.asOf) : '' }),
+        setSize,
+        fresh: list.fresh,
+        latest: list.latest,
+      }
+    : list
+
+  const rows = shown.items.map((d) => {
     const row = toCallRow(d)
     return {
       seq: d.callSessionSeq,
@@ -66,8 +102,14 @@ export function useCalls() {
     setQ: (q: string) => set({ q, at: '' }),
     range: r,
     setRange: (v: Range) => set({ r: v, at: '' }),
+    state: s,
+    setState: (v: StateFilter) => set({ s: v, at: '' }),
+    complaint: !!params.c,
+    toggleComplaint: () => set({ c: params.c ? '' : '1', at: '' }),
+    // 상태로 거를 때 받은 통화가 상한에 걸리면 알림 (기간을 줄이게)
+    capped: !!s && (all.data?.length ?? 0) >= FETCH_ALL_MAX,
     rows,
-    list,
+    list: shown,
     // 줄에 마우스를 올리면 통화 기본 정보 · 대화를 미리 받음 — 상세가 바로 그려짐
     warm: (seq: number) => {
       void qc.prefetchQuery({ ...callQueries.detail(seq), staleTime: 30_000 })

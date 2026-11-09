@@ -19,6 +19,18 @@ export function callState(d: {
   return { label: '분석 중', tone: 'idle' }
 }
 
+/** 상태 필터 (통화 목록) — callState 글자와 짝 */
+export const STATE_FILTERS = [
+  { value: '', label: '전체' },
+  { value: 'live', label: '통화 중' },
+  { value: 'pending', label: '분석 중' },
+  { value: 'failed', label: '분석 실패' },
+  { value: 'done', label: '분석 완료' },
+] as const
+export type StateFilter = (typeof STATE_FILTERS)[number]['value']
+export const stateKey = (label: string): StateFilter =>
+  STATE_FILTERS.find((f) => f.label === label)?.value ?? ''
+
 /** 고객 소속 — 기업명 · 개인 · 고객 미확인('') (백엔드 11/08 표) */
 export const memberOf = (d: { organizationName: string | null; customerSeq: number | null }) =>
   d.organizationName ?? (d.customerSeq ? '개인' : '')

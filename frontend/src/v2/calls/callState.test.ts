@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { callState, memberOf } from './callState'
+import { callState, memberOf, stateKey } from './callState'
 
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString()
 
@@ -21,4 +21,11 @@ test('고객 소속 — 기업 · 개인 · 미확인', () => {
   assert.equal(memberOf({ organizationName: '별빛스튜디오', customerSeq: 3 }), '별빛스튜디오')
   assert.equal(memberOf({ organizationName: null, customerSeq: 3 }), '개인')
   assert.equal(memberOf({ organizationName: null, customerSeq: null }), '')
+})
+
+test('상태 필터 — callState 글자와 짝', () => {
+  assert.equal(stateKey('통화 중'), 'live')
+  assert.equal(stateKey('분석 중'), 'pending')
+  assert.equal(stateKey('분석 실패'), 'failed')
+  assert.equal(stateKey('분석 완료'), 'done')
 })
