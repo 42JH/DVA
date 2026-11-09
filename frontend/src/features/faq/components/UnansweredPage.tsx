@@ -168,13 +168,16 @@ function Row({
   const asking = vm.modal?.item.unansweredQuestionSeq === r.unansweredQuestionSeq
   return (
     <tr className={`${asking ? 'bg-ops-stop-soft/50' : ''}`}>
-      <td className="text-left">
-        {/* 누르면 화면을 옮기지 않고 그 통화 창 (질문한 말로 바로 스크롤) */}
+      {/* 칸 어디를 눌러도 화면을 옮기지 않고 그 통화 창 (질문한 말로 바로 스크롤, 11/09 사용자).
+          버튼은 onClick 없이 남김 — 마우스 · Enter 클릭이 칸으로 올라와 한 번만 열리고, 키보드로도 열림 */}
+      <td
+        onClick={onOpen}
+        title="이 질문이 나온 통화 보기"
+        className="group cursor-pointer text-left"
+      >
         <button
           type="button"
-          onClick={onOpen}
-          title="이 질문이 나온 통화 보기"
-          className="line-clamp-2 text-left font-medium hover:text-ops-route"
+          className="line-clamp-2 text-left font-medium group-hover:text-ops-route"
         >
           “{r.question}”
         </button>
