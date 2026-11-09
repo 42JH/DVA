@@ -1,7 +1,13 @@
 // 고객 — 기업 · 개인 상관없이 모든 고객 (기업 피드백: 고객 관리 화면 · 개인 주소록 확인)
 // GET /customers (이름 부분 검색 · 휴대전화 11자리 정확히) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
 import { useEffect } from 'react'
-import { keepPreviousData, queryOptions, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  queryOptions,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { api, type ApiItem, type ApiList } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -23,7 +29,7 @@ const PAY_LABEL: Record<PayMethod, string> = {
   groupBilling: '그룹카드',
 } // 주문 화면 결제 방식과 같은 말
 
-/** 고객 정보 패널의 소속 · 결제 (한 명만 열 때 1번) */
+/** 소속 · 결제 — 목록 '구분' 칸(보이는 줄마다)과 고객 정보 패널이 같은 캐시를 씀 */
 const contextOpts = (phone: string) =>
   queryOptions({
     queryKey: ['screen', 'customer-context', phone],
@@ -59,7 +65,6 @@ interface CustomerDto {
   monthlyBillingEnabled: boolean
   status: 'ACTIVE' | 'WITHDRAWN'
   availablePaymentMethods: PayMethod[] // 조회 시점 결제 자격 (목록 전용, 11/08). 실제 결제 때 서버가 다시 확인
-  organization?: { name: string } | null // 소속 기업 (11/09 백엔드 요청 — 오기 전엔 없음 → 구분 칸 빈칸)
 }
 interface PinDto {
   personalPinSeq: number
@@ -99,6 +104,9 @@ export function useCustomers() {
   }, [list.data, total, page, pages, set])
   const open = Number(params.c) || null
   const shown = list.data?.data ?? []
+  // 구분(일반 · 기업 고객): 목록 응답엔 소속이 없어 보이는 줄마다 고객 확인으로 (패널과 같은 말)
+  // ponytail: 한 쪽 줄 수만큼 요청(5분 캐시). 목록 응답에 소속이 오면 그걸로 바꾸고 지움
+  const contexts = useQueries({ queries: shown.map((c) => contextOpts(c.phoneNumber)) })
 
   return {
     q: params.q,
@@ -107,7 +115,7 @@ export function useCustomers() {
       /^\d+$/.test(t) && !query.phoneNumber && t
         ? '전화번호는 11자리를 모두 입력해 주세요.' // 서버가 정확히 일치만 찾음
         : null,
-    rows: shown.map((c) => ({
+    rows: shown.map((c, i) => ({
       seq: c.customerSeq,
       name: c.name,
       phone: fmtPhone(c.phoneNumber),
@@ -116,8 +124,8 @@ export function useCustomers() {
       detail: c.address?.detailAddress ?? '',
       payments: c.availablePaymentMethods.map((m) => PAY_LABEL[m]),
       withdrawn: c.status === 'WITHDRAWN',
-      kind: c.organization === undefined ? '' : c.organization ? '기업' : '개인',
-      company: c.organization?.name ?? '',
+      kind: contexts[i]?.data ? (contexts[i].data.company ? '기업 고객' : '일반 고객') : '',
+      company: contexts[i]?.data?.company ?? '', // '디버물류 영업팀' — 마우스를 올리면
     })),
     isLoading: list.isPending,
     isStale: list.isPlaceholderData,
