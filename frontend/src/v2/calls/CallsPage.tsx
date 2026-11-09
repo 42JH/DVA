@@ -2,7 +2,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { Link, useLocation } from 'react-router'
 import { PageHead } from '@/v2/V2Layout'
-import { Badge, Kinds, Segments } from '@/v2/ui'
+import { Badge, Kinds, Segments, SortTh } from '@/v2/ui'
 import { ListFrame, SearchBox } from '@/v2/ui/ListFrame'
 import { RANGES } from '@/v2/lib/range'
 import { useCalls, type CallRowV2 } from './useCalls'
@@ -61,16 +61,26 @@ export function CallsPage() {
           <table ref={table} className="ops-table" style={{ minWidth }}>
             <thead>
               <tr>
-                {COLS.map((c) => (
-                  <th
-                    key={c.label}
-                    scope="col"
-                    data-half={c.half || undefined}
-                    className={`${c.className} font-semibold`}
-                  >
-                    {c.label}
-                  </th>
-                ))}
+                {COLS.map((c) =>
+                  c.label === '시작' ? (
+                    <SortTh
+                      key={c.label}
+                      label={c.label}
+                      asc={vm.asc}
+                      onToggle={vm.toggleSort}
+                      className={`${c.className} font-semibold`}
+                    />
+                  ) : (
+                    <th
+                      key={c.label}
+                      scope="col"
+                      data-half={c.half || undefined}
+                      className={`${c.className} font-semibold`}
+                    >
+                      {c.label}
+                    </th>
+                  ),
+                )}
               </tr>
             </thead>
             <tbody>

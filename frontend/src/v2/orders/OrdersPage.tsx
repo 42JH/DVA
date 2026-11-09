@@ -2,7 +2,7 @@
 // 기업 피드백 반영: 주문번호 맨 앞 · 전화번호 · 물품 칸 추가 · 미완료는 회색으로 죽임 · 모달 대신 옆 패널
 import { useState } from 'react'
 import { PageHead } from '@/v2/V2Layout'
-import { Badge, Btn, Icon, Segments } from '@/v2/ui'
+import { Badge, Btn, Icon, Segments, SortTh } from '@/v2/ui'
 import { rowKeys } from '@/v2/lib/keys'
 import { ListFrame, SearchBox } from '@/v2/ui/ListFrame'
 import { RANGES } from '@/v2/lib/range'
@@ -99,11 +99,21 @@ function Table({ vm }: { vm: OrdersVm }) {
       >
         <thead>
           <tr>
-            {COLS.filter((c) => !(vm.picked && c.more)).map((c) => (
-              <th key={c.label} scope="col" className={`${c.className} font-semibold text-black`}>
-                {c.label}
-              </th>
-            ))}
+            {COLS.filter((c) => !(vm.picked && c.more)).map((c) =>
+              c.label === '접수' ? (
+                <SortTh
+                  key={c.label}
+                  label={c.label}
+                  asc={vm.asc}
+                  onToggle={vm.toggleSort}
+                  className={`${c.className} font-semibold text-black`}
+                />
+              ) : (
+                <th key={c.label} scope="col" className={`${c.className} font-semibold text-black`}>
+                  {c.label}
+                </th>
+              ),
+            )}
           </tr>
         </thead>
         <tbody className="text-[#333]">

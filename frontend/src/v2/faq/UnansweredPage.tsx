@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from 'react-router'
 import { reasonTag } from '@/shared/lib/unansweredReason'
 import { useUnansweredList, type UnansweredRow } from '@/features/faq/hooks/useUnansweredList'
 import { PageHead } from '@/v2/V2Layout'
-import { Badge, Btn, Icon } from '@/v2/ui'
+import { Badge, Btn, Icon, SortTh } from '@/v2/ui'
 import { SearchBox } from '@/v2/ui/ListFrame'
 import { useScrollable } from '@/v2/lib/useScrollable'
 import { Confirm } from '@/v2/ui/Modal'
@@ -16,15 +16,18 @@ import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/v2/lib/paging'
 import { Pagination } from '@/v2/ui/Pagination'
 
-const NO_PARAMS = {}
+// d = 통화 시각 정렬 — 처리 대기열이라 기본은 오래된 순, 'desc'면 최신순
+const PARAMS = { d: 'asc' }
 
 export function UnansweredPage() {
   const vm = useUnansweredList()
   const navigate = useNavigate()
   const { pathname, search } = useLocation()
-  const all = vm.groups.flatMap((g) => g.rows.map((r) => ({ ...r, day: g.label })))
   // 목록은 한 번에 받아 두고 화면에서 쪽을 나눔 (검색을 바꾸면 기존 훅이 쪽을 1로)
-  const { page: rawPage, set } = useListParams(NO_PARAMS)
+  const { params, page: rawPage, set } = useListParams(PARAMS)
+  const asc = params.d !== 'desc'
+  const all = vm.groups.flatMap((g) => g.rows.map((r) => ({ ...r, day: g.label })))
+  if (!asc) all.reverse()
   const [size, setSize] = usePageSize()
   const page = Math.min(rawPage, Math.max(1, Math.ceil(all.length / size)))
   const rows = all.slice((page - 1) * size, page * size)
@@ -83,9 +86,12 @@ export function UnansweredPage() {
                 <th scope="col" className="w-[230px]">
                   고객
                 </th>
-                <th scope="col" className="w-[150px]">
-                  통화
-                </th>
+                <SortTh
+                  label="통화"
+                  asc={asc}
+                  onToggle={() => set({ d: asc ? 'desc' : 'asc' })}
+                  className="w-[150px]"
+                />
                 <th scope="col" className="w-[150px] text-right">
                   처리
                 </th>

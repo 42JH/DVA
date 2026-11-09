@@ -52,6 +52,33 @@ export function Btn({
   )
 }
 
+/** 시각 칸 머리 — 누르면 최신순 ↔ 오래된 순 (화살표 아래 = 최신이 위) */
+export function SortTh({
+  label,
+  asc,
+  onToggle,
+  className = '',
+}: {
+  label: string
+  asc: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <th scope="col" aria-sort={asc ? 'ascending' : 'descending'} className={className}>
+      <button
+        type="button"
+        onClick={onToggle}
+        title={asc ? '오래된 순 (누르면 최신순)' : '최신순 (누르면 오래된 순)'}
+        className="inline-flex items-center gap-1 rounded outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route"
+      >
+        {label}
+        <Icon name="chevron" className={`size-3.5 ${asc ? 'rotate-180' : ''}`} />
+      </button>
+    </th>
+  )
+}
+
 /** 상태 묶음 고르기 — 옆에 건수 */
 export function Segments<T extends string>({
   value,

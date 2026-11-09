@@ -1,7 +1,7 @@
 // v2 주문 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 새 주문 알림 + 상태 묶음별 건수 + 기간 · 검색. 서버 API는 기존과 같음 (GET /admin/orders)
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { draftList, draftListItem } from '@/features/order/api/draftApi'
-import { usePageSize } from '@/v2/lib/paging'
+import { oldestPage, usePageSize } from '@/v2/lib/paging'
 import { api, type ApiList } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -26,7 +26,8 @@ export const GROUPS: { value: StatusGroup; label: string }[] = [
 ]
 // at = 목록 기준 시각 (useSnapshotList) — 조건을 바꾸면 '' 로 지워 지금 최신 · 첫 쪽으로
 // o = 열어 둔 주문 '주문번호' 또는 '주문번호-배송번호' (통화 상세의 주문 링크도 이걸로 엶) · 미완료(배송 초안)는 'd초안번호'
-const DEFAULTS = { q: '', g: 'ALL', r: '7d', at: '', o: '' }
+// d = 접수 시각 정렬 ('asc' = 오래된 순)
+const DEFAULTS = { q: '', g: 'ALL', r: '7d', at: '', o: '', d: 'desc' }
 
 const party = (p: { name: string | null; phoneNumber: string | null } | undefined) => ({
   name: p?.name ?? '',
@@ -38,6 +39,7 @@ export function useOrders() {
   const qc = useQueryClient()
   const g = params.g as StatusGroup
   const r = params.r as Range
+  const asc = params.d === 'asc'
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
   const base = {
     q: (phoneDigits(t) || t).slice(0, 200) || undefined,
@@ -59,21 +61,26 @@ export function useOrders() {
     page,
     asOf: params.at,
     go: set,
+    asc,
   })
   // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 기간 조건 없음, 쪽 번호만
   const drafting = g === 'COLLECTING'
   const [size, setSize] = usePageSize()
-  const drafts = useQuery({
-    queryKey: ['v2', 'drafts', base.q, size, page],
-    enabled: drafting,
-    queryFn: ({ signal }) =>
-      draftList({ q: base.q, limit: size, offset: (page - 1) * size }, signal),
-    placeholderData: keepPreviousData,
-  })
   const draftCount = useQuery({
     queryKey: ['v2', 'drafts', 'count', base.q],
     queryFn: ({ signal }) =>
       draftList({ q: base.q, limit: 1, offset: 0 }, signal).then((r) => r.total_count),
+  })
+  // 오래된 순이면 총 건수로 뒤쪽부터 (oldestPage)
+  const dn = draftCount.data ?? 0
+  const drafts = useQuery({
+    queryKey: ['v2', 'drafts', base.q, size, page, asc ? dn : 'desc'],
+    enabled: drafting && (!asc || draftCount.data !== undefined),
+    queryFn: ({ signal }) => {
+      const get = (limit: number, offset: number) => draftList({ q: base.q, limit, offset }, signal)
+      return asc ? oldestPage(dn, page, size, get) : get(size, (page - 1) * size)
+    },
+    placeholderData: keepPreviousData,
   })
   const draftItems = (drafts.data?.data ?? []).map(draftListItem)
   const draftLabels = new Map(draftItems.map((d) => [d.orderSeq, d.label]))
@@ -150,6 +157,8 @@ export function useOrders() {
     ranged: !drafting, // 미완료(초안)는 기간 조건이 없음
     setGroup: (v: StatusGroup) => set({ g: v, at: '' }),
     range: r,
+    asc,
+    toggleSort: () => set({ d: asc ? 'desc' : 'asc' }),
     setRange: (v: Range) => set({ r: v, at: '' }),
     rows,
     list: shown,

@@ -7,7 +7,7 @@
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { api, type ApiList } from '@/shared/api/client'
-import { usePageSize } from './paging'
+import { oldestPage, usePageSize } from './paging'
 
 type Q = Record<string, string | number | undefined>
 const iso = (ms: number) => new Date(ms).toISOString()
@@ -20,6 +20,7 @@ export function useSnapshotList<T>({
   page,
   asOf,
   go,
+  asc = false,
 }: {
   key: string // 쿼리 키 이름 ('orders' · 'calls')
   path: string // GET 경로 (최신순)
@@ -28,6 +29,7 @@ export function useSnapshotList<T>({
   page: number // 주소의 쪽
   asOf: string // 주소의 기준 시각(ms) — 비면 지금 최신
   go: (p: { page: number; at?: string }) => void // 주소 바꾸기
+  asc?: boolean // 오래된 순
 }) {
   const [size, setSize] = usePageSize()
   const qc = useQueryClient()
@@ -47,12 +49,24 @@ export function useSnapshotList<T>({
   })
   const to = Number(asOf) || anchor.data
 
-  const opts = (p: number) => ({
-    queryKey: ['v2', key, query, to, size, p] as const,
-    enabled: to !== undefined,
+  // 오래된 순: 서버는 최신순만 줌 → 기준 이전 총 건수로 뒤쪽부터 잘라 받아 뒤집음
+  const count = useQuery({
+    queryKey: ['v2', key, 'count', query, to],
+    enabled: asc && to !== undefined,
     staleTime: Infinity,
-    queryFn: ({ signal }: { signal: AbortSignal }) =>
-      get({ ...query, to: iso(to!), limit: size, offset: (p - 1) * size }, signal),
+    queryFn: ({ signal }) =>
+      get({ ...query, to: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
+  })
+  const n = count.data ?? 0
+  const opts = (p: number) => ({
+    queryKey: ['v2', key, query, to, size, p, asc ? n : 'desc'] as const,
+    enabled: to !== undefined && (!asc || count.data !== undefined),
+    staleTime: Infinity,
+    queryFn: ({ signal }: { signal: AbortSignal }) => {
+      const page = (limit: number, offset: number) =>
+        get({ ...query, to: iso(to!), limit, offset }, signal)
+      return asc ? oldestPage(n, p, size, page) : page(size, (p - 1) * size)
+    },
   })
   const list = useQuery({ ...opts(page), placeholderData: keepPreviousData })
   const total = list.data?.total_count ?? 0
