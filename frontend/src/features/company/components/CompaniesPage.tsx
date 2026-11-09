@@ -2,7 +2,7 @@
 // 삭제: 줄의 [삭제] → 확인 창. 체크한 줄의 [삭제]를 누르면 체크한 곳 모두 (체크해야만 나타나는 버튼은 두지 않음)
 // 목록 · 여러 곳 삭제 · CSV는 기존 useCompanyList · CSV 창(CompanyModals)
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { errorText } from '@/features/company/labels'
 import { useCompanyList } from '@/features/company/hooks/useCompanyList'
 import { PageHead } from '@/shared/ui'
@@ -15,6 +15,7 @@ import { usePageSize } from '@/shared/lib/paging'
 import { Confirm } from '@/shared/ui/Modal'
 
 export function CompaniesPage() {
+  const navigate = useNavigate()
   const [size, setSize] = usePageSize()
   const vm = useCompanyList(size)
   const all = vm.rows.length > 0 && vm.selected.size === vm.rows.length
@@ -82,8 +83,14 @@ export function CompaniesPage() {
             </thead>
             <tbody>
               {vm.rows.map((r) => (
-                <tr key={r.id} aria-selected={vm.selected.has(r.id)} className="h-11">
-                  <td>
+                // 줄 어디를 눌러도 기업 상세로 (11/09 사용자: 이름 글자를 정확히 눌러야 들어가져 불편). 체크 · [삭제]는 따로
+                <tr
+                  key={r.id}
+                  aria-selected={vm.selected.has(r.id)}
+                  onClick={() => navigate(`/companies/${r.id}`)}
+                  className="h-11 cursor-pointer"
+                >
+                  <td onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       aria-label={`${r.name} 선택`}
@@ -92,22 +99,22 @@ export function CompaniesPage() {
                       className="mx-auto block size-4 accent-ops-route"
                     />
                   </td>
-                  <td className="text-left">
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Link
-                        to={`/companies/${r.id}`}
-                        className="truncate font-medium hover:text-ops-route"
-                      >
-                        {r.name}
-                      </Link>
-                    </span>
+                  {/* 이름 칸은 칸 전체가 링크 (키보드 · 새 탭 열기용) */}
+                  <td className="p-0! text-left">
+                    <Link
+                      to={`/companies/${r.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex h-11 w-full min-w-0 items-center px-[15px] font-medium outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+                    >
+                      <span className="truncate">{r.name}</span>
+                    </Link>
                   </td>
                   <td className="tabular-nums">{r.members.toLocaleString('ko-KR')}명</td>
                   <td className="text-[13px]">{r.billing}</td>
                   <td className="text-[13px] whitespace-nowrap text-ops-sub tabular-nums">
                     {r.date}
                   </td>
-                  <td>
+                  <td onClick={(e) => e.stopPropagation()}>
                     <span className="flex justify-center">
                       <Btn kind="dangerBadge" onClick={() => askRow(r.id, r.name)}>
                         삭제
