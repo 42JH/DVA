@@ -18,8 +18,9 @@ from app.domain.address_book import prefill_sender
 from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
-from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
+from app.domain.confirm import (ConfirmAnswer, Utterance, asks, check_gate, commit_parcel, issue_cancel_confirmation,
                                 issue_parcel_confirmation, release, take_cancel)
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -27,6 +28,7 @@ from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
 from app.tools.lookup import lookup_order_facts, status_text
 from app.tools.outcome import state_summary
+from app.tools.record import RecordArgs, record_fields
 
 log = logging.getLogger(__name__)
 BUSINESS = ("order", "lookup", "cancel", "inquiry", "agent")
@@ -205,10 +207,12 @@ class LiveFlow:
             callback = s.state.callback_offered and not s.state.callback_requested
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
             current = s.state.current
+            box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
-                                       pick_labels=pick, callback=callback, origin=origin, cancel_current=cancel_current)
+                                       pick_labels=pick, callback=callback, origin=origin, cancel_current=cancel_current,
+                                       box_label=box.label if box else None)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -241,9 +245,10 @@ class LiveFlow:
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        await self.apply(s, utt, prev, answers, pending_id)
+        await self.apply(s, utt, prev, answers, pending_id, box=box)
 
-    async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None):
+    async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
+                    *, box: BoxProposal | None = None):
         rt, st, th = self.rt(s), s.state, self.cfg.decision_min_confidence
         followups = []
         async with s.lock:
@@ -255,6 +260,13 @@ class LiveFlow:
             if switch and switch[1] >= th and switch[0] in ("agent", "end", "cancel_current"):
                 # 연결·종료·현재 택배 취소 요청이 섞인 "네"는 접수 확인으로 처리하지 않는다.
                 answers = {"switch": switch}
+            if (box and st.intent == "order" and not st.pending and st.current and st.current.box_proposal is box
+                    and (answer := answers.get("box")) and answer[1] >= th and answer[0] in ("yes", "no")
+                    and (not switch or switch[1] < th or switch[0] == "none")
+                    and prev and prev.t_start >= box.issued_t and asks(prev.text)
+                    and BOX_SIZE_NAMES[box.size] in prev.text and "박스" in prev.text
+                    and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms):
+                followups.append(("box_answer", (box, answer[0], utt)))
             if (og := answers.get("origin")) and og[1] >= th and og[0] in ("yes", "no") and st.origin_offered \
                     and st.origin_answer is None:
                 st.origin_answer = og[0] == "yes"
@@ -439,6 +451,8 @@ class LiveFlow:
                                          "summary": state_summary(st, self.policy)})
         elif what == "intent":
             await self._on_intent(s, value)
+        elif what == "box_answer":
+            await self._answer_box(s, *value)
         elif what == "lookup_picked":
             await self.notify(s, "N2", {"lookup_order": value})
         elif what == "picked":
@@ -466,6 +480,31 @@ class LiveFlow:
                 return
             await self.notify(s, "N1'", {"more_parcels": False})
             self._maybe_submit(s)
+
+    async def _answer_box(self, s: CallSession, box: BoxProposal, answer: str, utt: Spoken) -> None:
+        await self._wait_delegations(s)  # 같은 발화에서 직접 말한 정정이 먼저 반영된다.
+        async with s.lock:
+            st, rt = s.state, self.rt(s)
+            if (s.closed or st.intent != "order" or not st.current or st.current.box_proposal is not box
+                    or rt.latest_applied != utt.utterance_id
+                    or (rt.customer_turns and rt.customer_turns[-1].utterance_id > utt.utterance_id)):
+                return
+            if answer == "no":
+                st.current.box_proposal = None
+                st.bump()
+        if answer == "no":
+            await self.notify(s, "N2", {"box_proposal_declined": True})
+            return
+        ctx = replace(s.tools, item_utterance=(utt.utterance_id, utt.text))
+        out = await record_fields(ctx, RecordArgs(**{f"{box.size}_box_count": box.count}), expected_box=box)
+        if out.code == "RESULT_SUPERSEDED":
+            return
+        async with s.lock:
+            self._sync_intake(s)
+        facts = out.facts | {"summary": out.summary}
+        if out.needs:
+            facts["needs"] = out.needs
+        await self.notify(s, "N2", facts)
 
     async def _on_intent(self, s: CallSession, intent: str) -> None:
         st = s.state

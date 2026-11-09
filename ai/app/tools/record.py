@@ -11,6 +11,7 @@ ambiguous는 1순위 자동 확정 + 나머지 후보 보관(P6, ADDRESS_AUTO_SE
 import asyncio
 import re
 import time
+from dataclasses import replace
 from functools import lru_cache
 from typing import Literal
 from pydantic import Field, create_model, model_validator
@@ -18,10 +19,11 @@ from pydantic import Field, create_model, model_validator
 from app.domain.address_book import save_offer
 from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
-from app.domain.parcel_items import ItemIssue, measurements, size_issues, unclassified_mentions
+from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, size_issues,
+                                     unclassified_mentions)
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
-from app.domain.state import Items, Source
+from app.domain.state import BoxProposal, Items, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
 from app.policy.model import InputLimits, Policy
@@ -37,9 +39,15 @@ COUNTS = ("document_count", "small_box_count", "medium_box_count", "big_box_coun
 class ItemEvidence(Args):
     rule: str = Field(min_length=1, max_length=40, description="접수 물품 정책의 규칙 ID")
     quote: str = Field(min_length=1, max_length=200, description="이번 고객 발화에서 근거를 그대로 인용")
-    status: Literal["included", "removed", "inquiry", "condition_met", "condition_unmet"]
+    status: Literal["included", "removed", "inquiry", "condition_met", "condition_unmet", "not_applicable"]
     side_cm: float | None = Field(None, gt=0, description="한 변의 길이(cm), 세 변의 합은 제외")
     weight_kg: float | None = Field(None, gt=0)
+
+
+class BoxSuggestion(Args):
+    size: Literal["small", "medium", "big"]
+    count: int = Field(ge=1)
+    quote: str = Field(min_length=1, max_length=200, description="후보의 근거가 된 이번 고객 발화 그대로")
 
 
 class RecordArgs(Args):
@@ -54,6 +62,7 @@ class RecordArgs(Args):
     small_box_count: int | None = Field(None, ge=0, description="소형 박스 수")
     medium_box_count: int | None = Field(None, ge=0, description="중형 박스 수")
     big_box_count: int | None = Field(None, ge=0, description="대형 박스 수")
+    box_suggestion: BoxSuggestion | None = Field(None, description="박스 규격을 직접 말하지 않았을 때 제안할 후보. 확정 수량과 함께 넣지 않는다")
     item_evidence: list[ItemEvidence] | None = Field(None, max_length=12, description="고객이 언급한 제한 품목·포장·규격 초과의 근거")
     omit_blocked_parcel: str | None = Field(None, max_length=200, description="문제 택배 전체를 빼 달라는 고객 발화 원문")
     item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
@@ -114,7 +123,7 @@ def clean_name(raw: str) -> str:
             "고객이 말한 택배 값(보내는 분·받는 분·주소·물품·물품 가액·요청 사항)을 기록한다(정정도 같은 도구). "
             "이번에 들은 항목만 채우고 나머지는 null. 전화번호는 들은 그대로 넘기면 서버가 숫자로 바꾸고 자릿수를 검사한다.",
             RecordArgs, args_factory=record_args)
-async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
+async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: BoxProposal | None = None) -> ToolOutcome:
     given = args.model_dump(exclude_none=True)
     if not given:
         return ToolOutcome("needs_input", "NOTHING_TO_RECORD")
@@ -157,6 +166,8 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         facts: dict = {"recorded": [], "changed": [], "cleared": []}
         if draft is not s.current:
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        if expected_box is not None and (draft.box_proposal is not expected_box or s.intent != "order" or s.pending):
+            return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         _check_items(ctx, args, item_parts, facts, needs)
         for name, value in values.items():
             prev = s.field_of(name)
@@ -176,7 +187,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             _apply_address(ctx, addr, r, given, facts, needs)
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
-        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted"))
+        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal"))
         if changed:
             s.awaiting_fix = False
         nothing = not changed and not needs
@@ -209,17 +220,23 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
     utterance_id, text = ctx.item_utterance or (0, "")
     evidence = [e for e in args.item_evidence or () if e.quote.strip()
                 and (ctx.item_utterance is None or e.quote.strip() in text)]
-    issues = unclassified_mentions(policy, text)
-    if not (counts or evidence or issues or args.omit_blocked_parcel):
+    issues = {key: replace(issue, utterance_id=utterance_id)
+              for key, issue in unclassified_mentions(policy, text).items()}
+    if not (counts or evidence or issues or args.omit_blocked_parcel or args.box_suggestion):
         return
     if utterance_id and utterance_id < s.latest_item_utterance_id:
         needs.append({"field": "items", "reason": "RESULT_SUPERSEDED"})
         return
     s.latest_item_utterance_id = max(s.latest_item_utterance_id, utterance_id)
     # 이미 담은 택배의 내용물이 드러나면 그 택배를 다시 연다. 여러 건이면 대상 선택을 기다린다.
-    confirmed, resolved = {}, {}
+    confirmed, resolved, dismissed = {}, {}, {}
     for e in evidence:
         if e.status == "inquiry":
+            continue
+        if e.status == "not_applicable":
+            rule = policy.rules.get(e.rule)
+            if text and rule and contextual_keyword(rule, e.quote):
+                dismissed.setdefault(e.rule, []).append(e.quote.strip())
             continue
         if e.rule == "size":
             sizes = measurements(e.quote) | {key: value for key, value in
@@ -229,22 +246,26 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
             for key in sizes.keys() - exceeded.keys():
                 resolved.setdefault(key, []).append(e.quote.strip())
         elif rule := policy.rules.get(e.rule):
+            if excluded_evidence(rule, e.quote, text):
+                continue
             if e.status == "removed" or rule.kind == "conditional" and e.status == "condition_met":
                 resolved.setdefault(e.rule, []).append(e.quote.strip())
             else:
                 code = {"prohibited": "PROHIBITED_ITEM", "format": "UNSUPPORTED_FORMAT",
                         "conditional": "CONDITION_UNMET" if e.status == "condition_unmet" else "NEEDS_CONDITION"}[rule.kind]
                 confirmed[e.rule] = ItemIssue(code, rule.guidance)
-    for key, quotes in resolved.items():
+    for key in resolved.keys() | dismissed.keys():
         remaining = text
-        for quote in quotes:
+        for quote in (*resolved.get(key, ()), *dismissed.get(key, ())):
             remaining = remaining.replace(quote, "")
         if key not in unclassified_mentions(policy, remaining):
             issues.pop(key, None)
     issues.update(confirmed)
     if issues and s.current.empty() and s.parcels and not s.editing:
         if len(s.parcels) > 1:
-            s.unassigned_item_issues.update(issues)
+            for key, issue in issues.items():
+                if issue.code != "ITEM_MENTION_UNCLEAR" or key not in s.unassigned_item_issues:
+                    s.unassigned_item_issues[key] = issue
             needs.append({"field": "items", "reason": "ITEM_PARCEL_UNCLEAR"})
             return
         open_for_edit(s, s.parcels[0].parcel_id)
@@ -262,26 +283,46 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
         return
     for key in resolved.keys() - issues.keys():
         draft.item_issues.pop(key, None)
+    for key in dismissed.keys() - issues.keys():
+        for pending_issues in (draft.item_issues, s.unassigned_item_issues):
+            prior = pending_issues.get(key)
+            if prior and prior.code == "ITEM_MENTION_UNCLEAR" and prior.utterance_id == utterance_id:
+                pending_issues.pop(key)
+    if s.unassigned_item_issues and draft.empty():
+        needs.append({"field": "items", "reason": "ITEM_PARCEL_UNCLEAR"})
+        return
     items = Items(**counts)
     if items.any() and "format" not in issues:
         draft.item_issues.pop("format", None)
     if issues:
         hold_items(s, issues)
     if items.any() and not any(key in draft.item_issues for key in ("format", "side_cm", "weight_kg")):
+        draft.box_proposal = None
         s.record("items", items)
         facts["recorded"].append("items")
     if draft.item_issues:
         needs.extend({"field": "items", "reason": issue.code, "detail": issue.guidance}
                      for issue in draft.item_issues.values())
+    elif args.box_suggestion and not counts and not draft["items"].valid:
+        suggestion = args.box_suggestion
+        quote = suggestion.quote.strip()
+        if (not s.unassigned_item_issues and quote and suggestion.count <= ctx.policy.input_limits.box_total_max
+                and (not text or quote in text)):
+            proposal = draft.box_proposal = BoxProposal(suggestion.size, suggestion.count, ctx.clock())
+            s.bump()
+            facts["box_proposal"] = {"label": proposal.label}
+        else:
+            draft.box_proposal = None
+            needs.append({"field": "items", "reason": "ITEM_UNSPECIFIED"})
     elif (counts and not items.any()) or not draft["items"].valid:
         needs.append({"field": "items", "reason": "ITEM_UNSPECIFIED"})
-    elif resolved:
+    elif resolved or dismissed:
         facts["recorded"].append("items")
 
 
 def invalid_fields(needs: list[dict]) -> list[str]:
     """값을 저장하지 않고 재질문할 항목(정정 실패면 기존 값 유지). 늦은 결과·경고는 제외."""
-    keep = {"RESULT_SUPERSEDED", "ADDRESS_GEO_MISSING", "ADDRESS_AUTO_SELECTED"}
+    keep = {"RESULT_SUPERSEDED", "ADDRESS_GEO_MISSING", "ADDRESS_AUTO_SELECTED", "ITEM_PARCEL_UNCLEAR"}
     return list(dict.fromkeys(n["field"] for n in needs if n["reason"] not in keep))
 
 

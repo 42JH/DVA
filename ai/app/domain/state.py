@@ -15,6 +15,7 @@ from app.domain.parcel_items import ItemIssue
 PARCEL_FIELDS = ("sender_name", "sender_phone", "sender_address", "sender_address_detail",
                  "receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail",
                  "items", "item_price")
+BOX_SIZE_NAMES = {"small": "소형", "medium": "중형", "big": "대형"}
 
 
 class FieldStatus(StrEnum):
@@ -43,6 +44,17 @@ class Items:
     def any(self) -> bool:
         return bool(self.document_count or self.small_box_count or self.medium_box_count or self.big_box_count
                     or self.other_item)
+
+
+@dataclass(frozen=True)
+class BoxProposal:
+    size: Literal["small", "medium", "big"]
+    count: int
+    issued_t: float
+
+    @property
+    def label(self) -> str:
+        return f"{BOX_SIZE_NAMES[self.size]} 박스 {self.count}개"
 
 
 @dataclass(frozen=True)
@@ -96,13 +108,14 @@ class ParcelDraft:
     receiver_geo: Geo | None = None
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
+    box_proposal: BoxProposal | None = None  # 고객이 확인하기 전에는 물품 수량으로 보내지 않는다
     client_parcel_id: str | None = None   # 같은 통화의 배송 초안과 연결하는 UUID
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
 
     def empty(self) -> bool:
-        return not self.item_issues and all(
+        return not self.item_issues and self.box_proposal is None and all(
             f.status == FieldStatus.EMPTY or f.source == Source.CALLER_ID for f in self.fields.values())
 
 
@@ -251,4 +264,4 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
 
 def copy_draft(draft: ParcelDraft) -> ParcelDraft:
     return replace(draft, fields={k: replace(v) for k, v in draft.fields.items()},
-                   item_issues=draft.item_issues.copy())
+                   item_issues=draft.item_issues.copy(), box_proposal=None)

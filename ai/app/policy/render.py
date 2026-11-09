@@ -63,6 +63,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
     lines += ["", "## 백엔드에 맡기기", "Generate <|SpawnThinking|> when:",
               f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}",
+              "- 고객이 물건 이름만 말해도 구체적인 박스 후보를 제안할 근거가 있으면 box_suggestion으로 맡깁니다.",
               "- 수거 시각 변경은 서버의 현재 시각 기준 최종 검사를 거치도록 맡깁니다. 통화 시작 시각만으로 허용 여부를 확정하지 않습니다.",
               "- 정상 정보와 잘못된 값이 섞이면 정상 정보는 버리지 않고 맡기고, 잘못된 항목은 다시 묻습니다. "
               "기록 성공은 서버 결과로만 안내합니다."]
@@ -106,14 +107,18 @@ def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, st
 
 def render_backend(policy: Policy) -> str:
     free = ", ".join(f"{policy.fields[n].label}({n})" for n in policy.free_fields())
-    rules = "\n".join(f"- {key}: {rule.guidance}" for key, rule in policy.parcel_items.rules.items())
+    rules = "\n".join(f"- {key}: {rule.guidance}" +
+                      (f" {', '.join(rule.excluded_terms)} 자체는 이 규칙에 해당하지 않습니다."
+                       if rule.excluded_terms else "")
+                      for key, rule in policy.parcel_items.rules.items())
     return (_read("backend_rules.md").replace("{fields}", free).replace("{parcel_item_rules}", rules)
             + "\n\n" + render_input_rules(policy))
 
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
-                       callback: bool = False, origin: bool = False, cancel_current: bool = False) -> list[dict]:
+                       callback: bool = False, origin: bool = False, cancel_current: bool = False,
+                       box_label: str | None = None) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
@@ -128,10 +133,14 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
         sets.insert(0, "callback")  # 콜백 제안에 답을 기다릴 때만(업무 규칙 e)
     if origin:
         sets.insert(0, "origin")  # 기존 고객에게 출발지를 물었고 답을 기다릴 때만
+    if box_label:
+        sets.insert(0, "box")
     out = []
     for name in dict.fromkeys(sets):
         for q in policy.decision[name].questions:
             item = {"type": q.type, "name": q.name, "instructions": q.instructions}
+            if q.name == "box" and box_label:
+                item["instructions"] += f" 현재 확인할 후보는 '{box_label}'이다."
             if q.type == "choice":
                 item["choices"] = [{"value": c} for c in q.choices]
                 if q.name == "switch" and cancel_current:
