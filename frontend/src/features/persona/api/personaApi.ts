@@ -14,6 +14,16 @@ import {
   type PersonaVersionDto,
   type VoiceSettings,
 } from './personaMap'
+import {
+  demoApply,
+  demoCreate,
+  demoPersonas,
+  demoSaveDraft,
+  demoVersions,
+  PERSONA_DEMO,
+} from './personaDemo'
+
+export { PERSONA_DEMO }
 
 export type {
   Persona,
@@ -56,11 +66,16 @@ export const personaQueries = {
 
 /** 페르소나 목록 — 적용본(HEAD) · 초안이 목록에 같이 옴 */
 export async function fetchPersonas(signal?: AbortSignal) {
+  if (PERSONA_DEMO) return (await demoPersonas(signal)).map(toPersona) // 시연 모드: 브라우저 안 사본
   return (await fetchAll<PersonaDto>('/personas', {}, signal)).map(toPersona)
 }
 
 /** 버전 기록 + 초안(있으면 맨 위 'v(HEAD+1) 저장됨') — 높은 번호가 위. 버전 기록 API엔 초안이 없어 상세에서 받음 */
 export async function fetchVersions(personaSeq: number, signal?: AbortSignal) {
+  if (PERSONA_DEMO) {
+    const d = await demoVersions(personaSeq, signal)
+    return toVersions(d.list, d.persona.headVersion.version, d.persona.draft)
+  }
   const [persona, list] = await Promise.all([
     api.get<ApiItem<PersonaDto>>(`/personas/${personaSeq}`, { signal }),
     fetchAll<PersonaVersionDto>(`/personas/${personaSeq}/versions`, {}, signal),
@@ -96,14 +111,18 @@ export async function saveDraft(
   },
 ): Promise<void> {
   const { voice, speed, waitTime } = input.voice
+  const changed = {
+    ...(input.prompt !== null && { promptText: input.prompt }),
+    ...(voice !== undefined && { voiceId: voice || null }),
+    ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),
+    ...(waitTime !== undefined && { turnWaitLevel: waitTime }),
+  }
+  if (PERSONA_DEMO) return demoSaveDraft(personaSeq, changed) // 시연 모드: 실서버에 안 보냄
   await api.patch<ApiItem<PersonaDraftDto>>(`/personas/${personaSeq}`, {
     body: {
       expectedVersion: input.expectedVersion,
       expectedDraftRevision: input.expectedDraftRevision,
-      ...(input.prompt !== null && { promptText: input.prompt }),
-      ...(voice !== undefined && { voiceId: voice || null }),
-      ...(speed !== undefined && { speakingRate: toRate(speed, input.rateRange) }),
-      ...(waitTime !== undefined && { turnWaitLevel: waitTime }),
+      ...changed,
     },
   })
 }
@@ -114,9 +133,11 @@ export const requestApply = (
   personaSeq: number,
   head: { seq: number; version: number },
 ): Promise<void> =>
-  api.post(`/personas/${personaSeq}/activate`, {
-    body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
-  })
+  PERSONA_DEMO
+    ? demoApply(personaSeq) // 시연 모드: 실서버 AI에 적용 요청을 안 보냄
+    : api.post(`/personas/${personaSeq}/activate`, {
+        body: { aiPersonaVersionSeq: head.seq, expectedVersion: head.version },
+      })
 
 /** [적용] — 초안이 있으면 확정(POST versions → 새 HEAD)한 뒤 그 HEAD를 적용 요청. 초안이 없으면 HEAD를 바로 적용 요청
  * 확정 뒤 적용 요청만 실패하면 새 HEAD가 '저장됨'으로 남고, [적용]을 다시 누르면 적용 요청만 다시 감 */
@@ -125,6 +146,7 @@ export async function applyLatest(
   head: { seq: number; version: number },
   draftRevision: string | null,
 ): Promise<void> {
+  if (PERSONA_DEMO) return demoApply(personaSeq) // 시연 모드: 실서버 AI에 적용 요청을 안 보냄
   if (draftRevision === null) return requestApply(personaSeq, head)
   const { data } = await api.post<ApiItem<PersonaVersionDto>>(`/personas/${personaSeq}/versions`, {
     body: { expectedVersion: head.version, expectedDraftRevision: draftRevision },
@@ -140,15 +162,16 @@ export async function createPersona(input: {
   voice: VoiceSettings
   rateRange: AiOptions['rateRange']
 }): Promise<number> {
+  const body = {
+    name: input.name,
+    promptText: input.prompt,
+    voiceId: input.voice.voice || null,
+    speakingRate: toRate(input.voice.speed, input.rateRange),
+    turnWaitLevel: input.voice.waitTime,
+  }
+  if (PERSONA_DEMO) return demoCreate(input.code, body) // 시연 모드: 실서버에 안 만듦
   const res = await api.post<ApiItem<{ aiPersonaSeq: number }>>('/personas', {
-    body: {
-      code: input.code,
-      name: input.name,
-      promptText: input.prompt,
-      voiceId: input.voice.voice || null,
-      speakingRate: toRate(input.voice.speed, input.rateRange),
-      turnWaitLevel: input.voice.waitTime,
-    },
+    body: { code: input.code, ...body },
   })
   return res.data.aiPersonaSeq
 }
