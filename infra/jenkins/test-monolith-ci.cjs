@@ -59,7 +59,7 @@ test('webhook includes every monolith infrastructure directory and preserves eve
   assert.equal(matches(['docs/README.md'], { count: '21' }), true);
 });
 
-test('ordinary backend changes retain all backend regressions without unrelated infrastructure checks', () => {
+test('ordinary backend changes select backend regressions without unrelated infrastructure checks', () => {
   assert.deepEqual(selectChecks(['infra/observability/test.mjs']), {
     backend: false,
     observability: true,
@@ -216,6 +216,18 @@ test('git comparison covers all commits, deletions and renames; missing or diver
       env: { ...process.env, CI_BASE_COMMIT: head, SOURCE_COMMIT: faqHead },
     });
     assert.equal(selected.trim(), 'true,false,false,changed_paths,faq');
+    const pinHead = save('backend/src/pins/pins.service.ts', 'PIN change after FAQ');
+    const mixed = execFileSync(process.execPath, [path.join(__dirname, 'monolith-changes.cjs')], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, CI_BASE_COMMIT: head, SOURCE_COMMIT: pinHead },
+    });
+    assert.equal(mixed.trim(), 'true,false,false,changed_paths,faq+pins');
+    const pipeline = readFileSync(path.join(__dirname, '../../Jenkinsfile'), 'utf8');
+    const scalarPattern = pipeline.match(/assert selection ==~ \/(.+)\//)[1];
+    assert.match(mixed.trim(), new RegExp('^' + scalarPattern + '$'));
+    assert.ok(pipeline.includes('if (params.FULL_BACKEND_TESTS)'));
+    assert.ok(pipeline.includes("env.BACKEND_TEST_PROFILE = 'full'"));
     renameSync(path.join(directory, 'backend/old.ts'), path.join(directory, 'docs/renamed.md'));
     const renamed = save('docs/notes.md', 'rename');
     const paths = changedPaths(head, renamed, directory);

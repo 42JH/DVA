@@ -97,6 +97,9 @@ try {
   if (!ready) throw new Error('Disposable PostgreSQL did not become ready');
   const integrationStarted = Date.now();
   console.log(`Backend integration profile: ${profile}`);
+  console.log(
+    `Backend integration files: ${command.split(' ').filter((arg) => arg.startsWith('test/')).length}`,
+  );
   docker([
     'run',
     '--rm',
