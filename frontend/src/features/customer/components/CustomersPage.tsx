@@ -43,7 +43,7 @@ export function CustomersPage() {
                   <th scope="col" className="w-[130px]">
                     전화번호
                   </th>
-                  <th scope="col" className="w-[80px]">
+                  <th scope="col" className="w-[100px]">
                     구분
                   </th>
                   <th scope="col">기본 주소</th>
