@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useLocation } from 'react-router'
 import type {
   CardState,
   ComplaintView,
@@ -145,9 +145,11 @@ const Chip = ({ children }: { children: ReactNode }) => (
 
 /** '그래프 보기' (Figma 118×28 · 파랑 · 모서리 4 · bar-chart-07 아이콘 20 + 13/700) — 신규 · 기존 비교 화면으로 */
 function GraphLink({ to }: { to: string }) {
+  // v2 통계에서 열면 v2 그래프 화면으로 (위 줄 · 사이드바가 v2 그대로)
+  const v2 = useLocation().pathname.startsWith('/v2')
   return (
     <Link
-      to={to}
+      to={v2 ? to.replace('/dashboard/', '/v2/stats/') : to}
       className="ml-auto flex h-7 shrink-0 items-center gap-2 rounded bg-brand px-3 text-[13px] font-bold text-white hover:opacity-90"
     >
       <svg
