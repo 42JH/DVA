@@ -629,7 +629,7 @@ class LiveFlow:
                 return
             if result == "loaded":
                 st.resume = cand
-                load_resumed(st, version, client_parcel_id=client_id)
+                load_resumed(st, version, self.policy.input_limits, client_parcel_id=client_id)
                 facts = {"resume": "loaded"} | self._readback_if_ready(s)
             else:
                 st.resume = None

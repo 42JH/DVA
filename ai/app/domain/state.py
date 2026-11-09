@@ -44,6 +44,10 @@ class Items:
         return bool(self.document_count or self.small_box_count or self.medium_box_count or self.big_box_count
                     or self.other_item)
 
+    def documents_only(self) -> bool:
+        return self.document_count > 0 and not (self.small_box_count or self.medium_box_count or self.big_box_count
+                                                 or self.other_item)
+
 
 @dataclass(frozen=True)
 class Geo:
@@ -244,6 +248,18 @@ class ConversationState:
         if f.status != FieldStatus.EMPTY:
             f.previous = f.value if f.valid else f.previous
             f.value, f.status, f.source, f.version = None, FieldStatus.EMPTY, None, self.bump()
+
+    def sync_document_item_price(self) -> str | None:
+        """서류만 보낼 때 가액을 채우고, 구성이 바뀌면 서버가 채운 값만 비운다."""
+        if self.current is None:
+            return None
+        items = self.current["items"]
+        if items.valid and items.value.documents_only():
+            return "recorded" if self.record("item_price", 1, Source.SERVER) else None
+        if self.current["item_price"].source == Source.SERVER:
+            self.clear("item_price")
+            return "cleared"
+        return None
 
     def new_parcel_id(self) -> str:
         pid = f"p{self._next_parcel}"

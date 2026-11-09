@@ -6,7 +6,9 @@
 
 from datetime import datetime
 
+from app.domain.rules import round_item_price
 from app.domain.state import PARCEL_FIELDS, ConversationState, FieldStatus, ParcelDraft, ResumeCandidate, Source
+from app.policy.model import InputLimits
 
 
 def within_window(cand: ResumeCandidate, now: datetime, window_sec: float) -> bool:
@@ -30,7 +32,8 @@ def can_offer(state: ConversationState, now: datetime, window_sec: float) -> boo
     return within_window(state.resume, now, window_sec)
 
 
-def load_resumed(state: ConversationState, version: int, *, client_parcel_id: str | None = None) -> None:
+def load_resumed(state: ConversationState, version: int, limits: InputLimits, *,
+                 client_parcel_id: str | None = None) -> None:
     """연결(PATCH) 성공 뒤: 후보 상세를 받는 중인 택배로 불러온다. 고객이 말한 값이 없을 때만 부른다(can_offer)."""
     cand = state.resume
     draft = ParcelDraft(order_parcel_seq=cand.parcel_seq, client_parcel_id=client_parcel_id)
@@ -45,6 +48,10 @@ def load_resumed(state: ConversationState, version: int, *, client_parcel_id: st
             continue
         f = draft[name]
         f.value, f.status, f.source, f.version = value, FieldStatus.VALID, Source.HISTORY, v
+    state.sync_document_item_price()
+    price = draft["item_price"]
+    if price.source == Source.HISTORY and limits.item_price_min <= price.value <= limits.item_price_max:
+        state.record("item_price", round_item_price(price.value, limits), Source.HISTORY)
     draft.sender_geo, draft.receiver_geo = cand.parcel.get("sender_geo"), cand.parcel.get("receiver_geo")
     draft.client_comment = cand.parcel.get("client_comment")
     if cand.payment and cand.payment in state.customer.payment_methods and not state.payment.valid:
