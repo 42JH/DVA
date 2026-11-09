@@ -302,8 +302,15 @@ def test_progress_claim_only_while_confirmation_pending():
     s = ConversationState()
     assert unverified_claims("네, 접수 진행하겠습니다", s, P) == []  # 확인 대기 없음: 정상 안내
     s.pending = object()
-    assert unverified_claims("네, 접수 진행하겠습니다. 잠시만 기다려주세요", s, P) == ["진행하겠"]
+    assert unverified_claims("네, 접수 진행하겠습니다. 잠시만 기다려주세요", s, P) == ["접수 진행하겠"]
+    assert unverified_claims("접수를 진행해 드릴게요", s, P) == ["접수 진행하겠"]
+    assert unverified_claims("취소 진행하겠습니다", s, P) == ["접수 진행하겠"]
+    assert unverified_claims("네, 이대로진행할게요", s, P) == ["접수 진행하겠"]  # 띄어쓰기 무시
     assert unverified_claims("이대로 진행할까요?", s, P) == []  # 확인 질문은 괜찮다
+    # 접수·취소와 무관한 진행 안내는 잡지 않는다(S15P31D109-144)
+    assert unverified_claims("상담원 연결 진행해 드릴게요", s, P) == []
+    assert unverified_claims("주소 확인 진행할게요", s, P) == []
+    assert unverified_claims("매뉴얼 검색 진행 중입니다", s, P) == []
 
 
 def test_clean_name_strips_spoken_endings():
