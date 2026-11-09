@@ -36,7 +36,9 @@ def prefill_sender(state: ConversationState, full: bool) -> list[str]:
     place = c.origin_place
     values = {"sender_name": c.name}
     if full and place:
-        values |= {"sender_address": place.address, "sender_address_detail": place.address_detail or ""}
+        address = state.field_of("sender_address")
+        if address.status == FieldStatus.EMPTY or (address.valid and address.value == place.address):
+            values |= {"sender_address": place.address, "sender_address_detail": place.address_detail or ""}
     done = []
     for name, value in values.items():
         if value is None:

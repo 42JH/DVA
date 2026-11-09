@@ -406,7 +406,7 @@ def test_only_default_origin_goes_to_call_info_without_detail(has_default):
     from app.tools.context import ToolContext
     s = CallSession("live_1", "t", CALLER, INCOMING_AT, ToolContext("live_1", st, svc.d.policy, None))
     info = svc.session_config(s, None)["instructions"].split("# 통화 정보")[1]
-    assert ("- 등록된 출발지: 서울 강남구 테헤란로 212" in info) == has_default
+    assert ("- 등록된 발송 주소: 서울 강남구 테헤란로 212" in info) == has_default
     assert "1201호" not in info and st.origin_offered == has_default
 
 

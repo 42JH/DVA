@@ -132,7 +132,7 @@ class CallService:
         if c.name:
             info["고객 성함"] = c.name
         if c.customer_seq and c.default_address:
-            info["등록된 출발지"] = c.default_address  # 최근 출발지는 접수를 시작한 뒤 확인한다.
+            info["등록된 발송 주소"] = c.default_address  # 최근 발송 주소는 접수를 시작한 뒤 확인한다.
         specs = function_specs(policy=self.d.policy)
         tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",

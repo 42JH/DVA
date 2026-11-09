@@ -15,6 +15,7 @@ from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
 from app.tools.outcome import ToolOutcome, state_summary
+from backend_client.api import parcel_lookup_details
 from backend_client.order import Place as BEPlace
 from backend_client.order import match_places, pin_labels, words
 
@@ -193,13 +194,23 @@ async def lookup_orders(ctx: ToolContext, args: LookupArgs) -> ToolOutcome:
     facts["orders"] = [{"label": label, "status": o.get("status"), "status_text": status_text(o.get("status")),
                         **({"source": "draft" if "draft_seq" in o else "order"} if ctx.draft_intake else {})}
                        for label, o in zip(labels, orders)]
+    if len(orders) == 1 and not current_cancel and ctx.state.intent != "cancel":
+        facts["lookup_order"] = lookup_order_facts(orders[0])
     return ToolOutcome("needs_choice" if len(orders) > 1 else "ok", None,
                        facts)
 
 
 def _draft_result(row: dict) -> dict:
+    parcel = row["parcel"] or {}
     return {"draft_seq": row["draftSeq"], "version": row["version"], "status": row["status"],
-            "receiver_name": ((row["parcel"] or {}).get("destination") or {}).get("name")}
+            "receiver_name": (parcel.get("destination") or {}).get("name"), "details": parcel_lookup_details(parcel)}
+
+
+def lookup_order_facts(order: dict) -> dict:
+    status = order.get("status")
+    return {"receiver_name": order.get("receiver_name"), "status": status,
+            "status_text": "접수된 택배" if status == "ACCEPTED" else status_text(status),
+            "source": "draft" if "draft_seq" in order else "order", **(order.get("details") or {})}
 
 
 # --- search_manual ---

@@ -292,8 +292,10 @@ def test_lookup_orders_scope_name_and_selection():
     c = ctx(db, customer=cust)
     out = call(c, "lookup_orders", {"receiver_name": "이영희"})
     assert out["status"] == "ok" and out["facts"]["found"] == 1 and c.state.selected_order["receiver_name"] == "이영희"
+    assert out["facts"]["lookup_order"]["receiver_address"] == "부산 해운대구 센텀로 10"
     out = call(c, "lookup_orders", {"receiver_name": None})
     assert out["status"] == "needs_choice" and len(c.state.candidates.labels) == 2
+    assert "lookup_order" not in out["facts"]
     assert call(c, "lookup_orders", {"receiver_name": "없음"})["code"] == "ORDER_NOT_FOUND_BY_NAME"
     assert call(ctx(db), "lookup_orders", {})["code"] == "CALL_NOT_REGISTERED"  # 고객 범위 없으면 조회 안 함
 

@@ -669,7 +669,7 @@ def test_registered_greeting_yes_prefills_sender_and_asks_receiver_first():
         return s, conn
 
     s, conn = run(scenario())
-    assert "등록된 출발지: 서울 강남구 테헤란로 212" in client.accepted[0][1]["instructions"]
+    assert "등록된 발송 주소: 서울 강남구 테헤란로 212" in client.accepted[0][1]["instructions"]
     facts = json.loads(next(e for e in conn.sent if '"intent"' in e.get("content", ""))["content"].split("[서버 결과] ", 1)[1])
     assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
     cur = s.state.parcels[0].draft if s.state.parcels else s.state.current
@@ -700,6 +700,13 @@ def test_origin_paths_other_place_and_recent_only():
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
     out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
     assert "sender_address" in out and "sender_address_detail" not in out
+
+    st = ConversationState(customer=Customer(customer_seq=12, name="김철수", origin_place=recent), intent="order")
+    st.record("sender_address", "서울 강남구 테헤란로 212")
+    st.origin_answer = True
+    assert lf._origin_step(st) == {"origin": "address_recorded"}
+    assert st.current["sender_address"].value == "서울 강남구 테헤란로 212"
+    assert not st.current["sender_address_detail"].valid
 
 
 def test_customer_end_mid_collection_greets_then_hangs_up():

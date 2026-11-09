@@ -287,9 +287,9 @@ def test_find_parcels_reads_details_without_name_in_url():
     parcels = run(client.find_parcels(20, 5))
     assert parcels == [
         {"order_seq": 101, "order_parcel_seq": 301, "receiver_name": "박민수", "receiver_address": "대구로 1",
-         "status": "notPaid"},
+         "status": "notPaid", "details": {"receiver_address": "대구로 1"}},
         {"order_seq": 101, "order_parcel_seq": 302, "receiver_name": "최지우", "receiver_address": "서울로 2",
-         "status": "CANCELLED"}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
+         "status": "CANCELLED", "details": {"receiver_address": "서울로 2"}}]  # 취소한 상세는 CANCELLED, 없는 주문(404)은 뺀다
     assert dict(seen[0].url.params) == {"limit": "5"}  # 받는 분 이름(개인정보)을 URL에 넣지 않는다
     assert all(r.headers["call_session_seq"] == "20" for r in seen)
     assert run(client.parcel(20, 101, 302))["status"] == "CANCELLED" and run(client.parcel(20, 9, 1)) is None

@@ -25,7 +25,7 @@ from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
 from app.tools.cancel import cancel_parcel
-from app.tools.lookup import status_text
+from app.tools.lookup import lookup_order_facts, status_text
 from app.tools.outcome import state_summary
 
 log = logging.getLogger(__name__)
@@ -270,15 +270,22 @@ class LiveFlow:
                     followups.append(("ask_confirm", pid))
             elif c and c[0] in ("no", "change") and c[1] >= th:
                 st.awaiting_fix = True  # 고친 값이 올 때까지 되읽기를 다시 열지 않는다
+            picked_lookup = False
             if (p := answers.get("pick")) and p[1] >= th:
+                kind = st.candidates.kind if st.candidates else None
                 if p[0] == "none":
                     reject_candidates(st)
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
                     self._sync_intake(s)
-                    followups.append(("picked", p[0]))
+                    picked_lookup = (kind == "order" and st.intent == "lookup"
+                                     and (not switch or switch[1] < th or switch[0] in ("none", "lookup")))
+                    if picked_lookup:
+                        followups.append(("lookup_picked", lookup_order_facts(st.selected_order)))
+                    else:
+                        followups.append(("picked", p[0]))
             if (t := answers.get("task")) and t[1] >= th and t[0] in BUSINESS + ("end",):
                 followups.append(("intent", t[0]))
-            if (w := answers.get("switch")) and w[1] >= th and w[0] != "none":
+            if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not (picked_lookup and w[0] == "lookup"):
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
                 followups.append(("no_more", None))
@@ -432,6 +439,8 @@ class LiveFlow:
                                          "summary": state_summary(st, self.policy)})
         elif what == "intent":
             await self._on_intent(s, value)
+        elif what == "lookup_picked":
+            await self.notify(s, "N2", {"lookup_order": value})
         elif what == "picked":
             async with s.lock:
                 issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
@@ -551,20 +560,20 @@ class LiveFlow:
         return {"edit_parcel": "choose", "labels": list(labels)}
 
     def _origin_step(self, st) -> dict:
-        """잠금 안. 기존 고객의 보내는 분 채우기: 출발지 답이 있으면 채우고(prefilled·name_only), 아직 안 물었으면 묻게 한다."""
+        """잠금 안. 등록 고객의 발송 주소 확인과 자동 입력을 안내한다."""
         c = st.customer
         if st.origin_applied or not c.customer_seq:
             return {}
-        if st.origin_answer is not None:
-            done = prefill_sender(st, full=st.origin_answer)
-            st.origin_applied = True
-            return {"origin": "prefilled" if st.origin_answer and "sender_address" in done else "name_only"}
-        if c.origin_place and not st.field_of("sender_address").valid:
+        if st.origin_answer is None and c.origin_place and not st.field_of("sender_address").valid:
             st.origin_offered = True
             return {"origin_confirm": c.origin_place.address}
-        done = prefill_sender(st, full=False)  # 출발지 후보 없음: 성함만
+        done = prefill_sender(st, full=st.origin_answer is True)
         st.origin_applied = True
-        return {"origin": "name_only"} if done else {}
+        if "sender_address" in done:
+            return {"origin": "prefilled"}
+        if st.field_of("sender_address").valid:
+            return {"origin": "address_recorded"}
+        return {"origin": "name_only"} if done or st.origin_answer is not None else {}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
         """택배를 담았으면 묻지 않고 고객 정보·주소를 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409).
