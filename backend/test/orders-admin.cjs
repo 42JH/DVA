@@ -56,7 +56,15 @@ module.exports = function registerOrdersAdmin(suite) {
     assert.equal(response.status, 200, await response.clone().text());
     assert.equal(response.headers.get('cache-control'), 'no-store');
     const first = await response.json();
-    assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'total_count']);
+    assert.deepEqual(Object.keys(first).sort(), ['data', 'hasNext', 'statusCounts', 'total_count']);
+    assert.deepEqual(first.statusCounts, {
+      all: 2,
+      incomplete: 0,
+      notPaid: 0,
+      paid: 0,
+      submissionFailed: 0,
+      cancelled: 0,
+    });
     assert.equal(first.total_count, 2);
     assert.equal(first.hasNext, true);
     assert.equal(first.data[0].orderSeq, emptyId);
@@ -114,11 +122,27 @@ module.exports = function registerOrdersAdmin(suite) {
       data: [],
       hasNext: false,
       total_count: 2,
+      statusCounts: {
+        all: 2,
+        incomplete: 0,
+        notPaid: 0,
+        paid: 0,
+        submissionFailed: 0,
+        cancelled: 0,
+      },
     });
     assert.deepEqual(await (await screenOrders({ ...range, q: "' OR 1=1 --" })).json(), {
       data: [],
       hasNext: false,
       total_count: 0,
+      statusCounts: {
+        all: 0,
+        incomplete: 0,
+        notPaid: 0,
+        paid: 0,
+        submissionFailed: 0,
+        cancelled: 0,
+      },
     });
     for (let index = 0; index < 3; index++)
       assert.equal((await screenOrders(range, {}, index)).status, 200);
@@ -162,6 +186,14 @@ module.exports = function registerOrdersAdmin(suite) {
             ? ['SUBMITTING_FAILED', 'SUBMISSION_FAILED']
             : [statusGroup];
       assert.equal(body.total_count, expected.length);
+      assert.deepEqual(body.statusCounts, {
+        all: 8,
+        incomplete: 0,
+        notPaid: 1,
+        paid: 3,
+        submissionFailed: 2,
+        cancelled: 1,
+      });
       assert.ok(body.data.every((order) => order.parcels.length === 1));
       assert.deepEqual(body.data.map((o) => o.status).sort(), expected.sort());
     }

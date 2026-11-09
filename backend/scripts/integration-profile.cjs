@@ -10,7 +10,7 @@ const orderFlow = [
   'order-intake',
   'admin-parcel-drafts',
 ];
-const lifecycle = ['soft-deletion', 'data-retention'];
+const lifecycle = ['soft-deletion', 'data-retention', 'home'];
 const suites = {
   faq: [
     'faq-seed',
@@ -27,6 +27,8 @@ const suites = {
     ...lifecycle,
   ],
   dashboard: [
+    'home',
+    'dashboard-optimization',
     'dashboard',
     'call-dashboard-metrics',
     'call-analysis',
@@ -35,6 +37,9 @@ const suites = {
     'data-retention',
   ],
   persona: [
+    'home',
+    'dashboard-optimization',
+    'persona-list-optimization',
     'ai-settings',
     'dashboard',
     'call-dashboard-metrics',
@@ -42,6 +47,9 @@ const suites = {
     'data-retention',
   ],
   customers: [
+    'admin-order-counts',
+    'order-list-optimization',
+    'call-list-optimization',
     'customers',
     'members',
     'caller-context',
@@ -60,6 +68,10 @@ const suites = {
     ...lifecycle,
   ],
   companies: [
+    'company-bulk-deletion',
+    'admin-order-counts',
+    'order-list-optimization',
+    'call-list-optimization',
     'organizations',
     'members',
     'company-directory',
@@ -87,6 +99,8 @@ const suites = {
     ...lifecycle,
   ],
   drafts: [
+    'admin-order-counts',
+    'order-list-optimization',
     'parcel-drafts',
     'admin-parcel-drafts',
     'order-intake',
@@ -95,6 +109,9 @@ const suites = {
     ...lifecycle,
   ],
   intake: [
+    'admin-order-counts',
+    'order-list-optimization',
+    'call-list-optimization',
     'parcel-drafts',
     'admin-parcel-drafts',
     'order-intake',
@@ -105,6 +122,10 @@ const suites = {
     ...lifecycle,
   ],
   orders: [
+    'admin-order-counts',
+    'order-list-optimization',
+    'call-list-optimization',
+    'dashboard-optimization',
     ...orderFlow,
     'order-address-history',
     'consultations',
@@ -115,8 +136,19 @@ const suites = {
     'dashboard',
     ...lifecycle,
   ],
-  payments: [...orderFlow, 'company-deletion', 'company-summaries', ...lifecycle],
+  payments: [
+    ...orderFlow,
+    'company-deletion',
+    'company-summaries',
+    'admin-order-counts',
+    'order-list-optimization',
+    'call-list-optimization',
+    ...lifecycle,
+  ],
   calls: [
+    'call-list-optimization',
+    'transcript-optimization',
+    'dashboard-optimization',
     'consultations',
     'recordings',
     'call-analysis',
@@ -130,6 +162,9 @@ const suites = {
     ...lifecycle,
   ],
   analysis: [
+    'call-list-optimization',
+    'transcript-optimization',
+    'dashboard-optimization',
     'call-analysis',
     'call-events',
     'unanswered-questions',
@@ -143,6 +178,7 @@ const suites = {
     ...lifecycle,
   ],
   events: [
+    'transcript-optimization',
     'call-events',
     'call-insights-read',
     'call-analysis',
@@ -155,6 +191,8 @@ const suites = {
     ...lifecycle,
   ],
   recordings: [
+    'call-list-optimization',
+    'transcript-optimization',
     'recordings',
     'active-call-count',
     'consultations',

@@ -25,6 +25,56 @@ const examples = {
   active: 'consultations/active-call-count.service.ts',
 };
 
+test('selected FAQ/dashboard checks retain the home consumer and shared-statistics regression', () => {
+  assert.equal(selectIntegrationProfile(['backend/src/dashboard/home.service.ts']), 'dashboard');
+  for (const profile of ['faq', 'dashboard'])
+    assert.ok(integrationCommand(profile).includes('test/home.integration.test.cjs'), profile);
+  assert.ok(
+    integrationCommand('dashboard').includes('test/dashboard-optimization.integration.test.cjs'),
+  );
+});
+
+test('feature profiles retain the new QA API consumers and performance regressions', () => {
+  for (const [profile, names] of Object.entries({
+    dashboard: ['home', 'dashboard-optimization'],
+    persona: ['home', 'dashboard-optimization', 'persona-list-optimization'],
+    customers: ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'],
+    companies: [
+      'company-bulk-deletion',
+      'admin-order-counts',
+      'order-list-optimization',
+      'call-list-optimization',
+    ],
+    drafts: ['admin-order-counts', 'order-list-optimization'],
+    intake: ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'],
+    orders: [
+      'admin-order-counts',
+      'order-list-optimization',
+      'call-list-optimization',
+      'dashboard-optimization',
+    ],
+    calls: ['call-list-optimization', 'transcript-optimization', 'dashboard-optimization'],
+    analysis: ['call-list-optimization', 'transcript-optimization', 'dashboard-optimization'],
+    events: ['transcript-optimization'],
+    recordings: ['call-list-optimization', 'transcript-optimization'],
+  }))
+    for (const name of names)
+      assert.ok(
+        files(integrationCommand(profile)).includes('test/' + name + '.integration.test.cjs'),
+        profile + ': ' + name,
+      );
+  for (const profile of Object.keys(examples))
+    assert.ok(
+      files(integrationCommand(profile)).includes('test/home.integration.test.cjs'),
+      profile + ': home',
+    );
+  for (const name of ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'])
+    assert.ok(
+      files(integrationCommand('payments')).includes('test/' + name + '.integration.test.cjs'),
+      'payments: ' + name,
+    );
+});
+
 test('feature changes and known feature fixtures select their affected regressions', () => {
   for (const [profile, path] of Object.entries(examples))
     assert.equal(selectIntegrationProfile(['backend/src/' + path]), profile, path);

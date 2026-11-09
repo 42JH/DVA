@@ -23,6 +23,8 @@ import { CreateManualOrderDto, ManualOrderResultDto } from './dto/manual-order.d
 import { ConsultationsService } from '../consultations/consultations.service';
 import { OrderPaymentsRepository } from './order-payments.repository';
 import { DeliveriesService } from '../deliveries/deliveries.service';
+import { ParcelDraftsRepository } from './parcel-drafts.repository';
+import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 
 @Injectable()
 export class OrdersService {
@@ -35,6 +37,7 @@ export class OrdersService {
     private readonly payments: OrderPaymentsRepository,
     private readonly deliveries: DeliveriesService,
     private readonly submission: OrderSubmissionService,
+    private readonly drafts: ParcelDraftsRepository,
   ) {}
 
   async delete(id: number, adminId: number, requestId: string): Promise<void> {
@@ -107,10 +110,21 @@ export class OrdersService {
 
   async adminList(query: AdminOrderListQueryDto) {
     this.assertDateRange(query);
-    return new ListResponse(
-      await this.repository.adminList(this.database.pool, query),
-      query.limit,
-    );
+    return this.database.transaction(async (client) => {
+      await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const page = new ListResponse(await this.repository.adminList(client, query), query.limit);
+      const statusCounts = await this.repository.adminStatusCounts(client, query);
+      const incomplete = await this.drafts.countIncomplete(
+        client,
+        Object.assign(new ParcelDraftQueryDto(), {
+          q: query.q,
+          from: query.from,
+          to: query.to,
+          organizationSeq: query.organizationSeq,
+        }),
+      );
+      return Object.assign(page, { statusCounts: { ...statusCounts, incomplete } });
+    });
   }
 
   async list(adminId: number | null, query: OrderQueryDto, callSessionHeader?: string) {

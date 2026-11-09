@@ -4,6 +4,8 @@ import { Roles } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { DashboardService } from './dashboard.service';
 import { DashboardQueryDto } from './dto/dashboard-query.dto';
+import { HomeService } from './home.service';
+import { HomeResponseDto } from './dto/home-response.dto';
 import {
   ComplaintCallsResponseDto,
   RegistrationTimeResponseDto,
@@ -20,7 +22,21 @@ import {
 @ApiResponse({ status: 500, type: ErrorResponseDto })
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly dashboard: DashboardService) {}
+  constructor(
+    private readonly dashboard: DashboardService,
+    private readonly homeService: HomeService,
+  ) {}
+
+  @Get('home')
+  @ApiOperation({
+    summary: '홈 처리할 일·미리보기·AI 성능 요약',
+    description:
+      '필터 없는 전체 보관 데이터. 기존 목록·통계 조회 기준을 재사용하며 같은 읽기 전용 DB 스냅샷으로 반환합니다. 미리보기는 영역별 최대 5개입니다.',
+  })
+  @ApiOkResponse({ type: HomeResponseDto })
+  home() {
+    return this.homeService.home();
+  }
 
   @Get('stage-dropoffs')
   @ApiOperation({
