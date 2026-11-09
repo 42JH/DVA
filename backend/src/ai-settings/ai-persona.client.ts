@@ -59,7 +59,10 @@ export function readCapabilities(value: unknown): AiCapabilities {
   };
 }
 
-export function validatePersonaOptions(settings: PersonaSettings, options: AiCapabilities): void {
+export function validatePersonaOptions(
+  settings: Pick<PersonaSettings, 'voiceId' | 'speakingRate' | 'turnWaitLevel'>,
+  options: AiCapabilities,
+): void {
   const invalid: string[] = [];
   if (settings.voiceId !== null && !options.voices.some((voice) => voice.id === settings.voiceId))
     invalid.push('voiceId');

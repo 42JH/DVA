@@ -117,7 +117,7 @@ module.exports = function registerAiSettingsApplication(suite) {
     const saved2 = await data(
       await saveVersion(active.aiPersonaSeq, {
         expectedVersion: pending1.version,
-        promptText: '수정 2',
+        role: '수정 2',
       }),
     );
     assert.equal(saved2.status, 'INACTIVE');

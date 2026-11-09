@@ -80,9 +80,44 @@ module.exports = function registerAiSettingsManagement(suite) {
     assert.equal(detail.activeVersionSeq, null);
     assert.equal(detail.pendingVersionSeq, null);
     await error(await call('POST', '/api/personas', body), 409, 'DUPLICATE_RESOURCE');
+    await error(
+      await call('POST', '/api/personas', input({ role: undefined })),
+      400,
+      'INVALID_REQUEST',
+    );
+    await error(
+      await call('POST', '/api/personas', input({ personality: '' })),
+      400,
+      'INVALID_REQUEST',
+    );
+    await error(
+      await call('POST', '/api/personas', input({ promptText: '구형 입력' })),
+      400,
+      'INVALID_REQUEST',
+    );
+    await error(
+      await call('POST', '/api/personas', input({ role: '가'.repeat(20001) })),
+      422,
+      'BUSINESS_RULE_VIOLATION',
+    );
+    await error(
+      await call('PATCH', `/api/personas/${v.aiPersonaSeq}`, {
+        expectedVersion: v.version,
+        expectedDraftRevision: null,
+        promptText: '구형 입력',
+      }),
+      400,
+      'INVALID_REQUEST',
+    );
     for (const [column, value] of [
       ['name', '변경'],
       ['prompt_text', '변경'],
+      ['role_text', '변경'],
+      ['personality_text', '변경'],
+      ['tone_text', '변경'],
+      ['speed_instruction', '변경'],
+      ['backchannel_text', '변경'],
+      ['interruption_text', '변경'],
       ['voice_id', 'other'],
       ['turn_wait_level', 'SHORT'],
       ['speaking_rate', 1],
@@ -108,10 +143,13 @@ module.exports = function registerAiSettingsManagement(suite) {
   test('draft commits append whole snapshots, preserve omitted values, and reject stale or empty edits', async () => {
     const v1 = await create();
     const v2 = await data(
-      await saveVersion(v1.aiPersonaSeq, { expectedVersion: 1, promptText: '새로운 원문' }),
+      await saveVersion(v1.aiPersonaSeq, { expectedVersion: 1, role: '새로운 원문' }),
     );
     assert.equal(v2.version, 2);
     assert.equal(v2.status, 'INACTIVE');
+    assert.equal(v2.role, '새로운 원문');
+    for (const key of ['personality', 'tone', 'speedInstruction', 'backchannel', 'interruption'])
+      assert.equal(v2[key], v1[key]);
     for (const key of ['name', 'voiceId', 'speakingRate', 'turnWaitLevel'])
       assert.equal(v2[key], v1[key]);
     await error(
