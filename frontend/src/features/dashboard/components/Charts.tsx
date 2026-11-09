@@ -27,11 +27,11 @@ function Plot({
       {ticks.map((t, i) => (
         <div
           key={t}
-          className={`absolute inset-x-0 border-t border-line ${i % 2 ? '[@media(max-height:720px)]:hidden' : ''}`}
+          className={`absolute inset-x-0 border-t border-ops-line ${i % 2 ? '[@media(max-height:720px)]:hidden' : ''}`}
           style={{ bottom: at(t, top) }}
         >
           <span
-            className={`absolute top-0 right-full mr-[9px] -translate-y-1/2 text-muted ${tick}`}
+            className={`absolute top-0 right-full mr-[9px] -translate-y-1/2 text-ops-faint ${tick}`}
           >
             {t}
           </span>
@@ -42,10 +42,10 @@ function Plot({
   )
 }
 
-/** 막대 색 — 첫 막대(현재 운영 버전) 파랑 · 둘째(직전 버전) 연보라. 클래스 이름은 글자 그대로 */
+/** 막대 색 — 첫 막대(현재 운영 버전) v2 파랑 · 둘째(직전 버전) 회색. 클래스 이름은 글자 그대로 */
 const BAR = [
-  { bar: 'bg-brand', text: 'text-brand' },
-  { bar: 'bg-chart-prev', text: 'text-ink' },
+  { bar: 'bg-ops-route', text: 'text-ops-route' },
+  { bar: 'bg-ops-faint', text: 'text-ops-sub' },
 ]
 
 /** 버전별 막대 (Figma 'AI 상담 성능' 접수 소요 시간 · 페르소나 막대그래프) — 막대 폭 112 · 모서리 4
@@ -61,7 +61,7 @@ export function BarChart({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Plot ticks={ticks} tick="text-[10px]" className="mt-4 mr-5 ml-11">
+      <Plot ticks={ticks} tick="text-[12px]" className="mt-4 mr-5 ml-11">
         <div className="absolute inset-0 grid px-[8%]" style={cols}>
           {bars.map((b, i) => (
             <div key={b.key} className="relative flex items-end justify-center">
@@ -72,7 +72,7 @@ export function BarChart({
                 />
               )}
               <span
-                className={`absolute left-1/2 mb-0.5 -translate-x-1/2 text-[16px] font-bold whitespace-nowrap tabular-nums motion-safe:animate-label-in ${b.value === null ? 'text-ink' : BAR[i % 2].text}`}
+                className={`absolute left-1/2 mb-0.5 -translate-x-1/2 text-[16px] font-bold whitespace-nowrap tabular-nums motion-safe:animate-label-in ${b.value === null ? 'text-ops-ink' : BAR[i % 2].text}`}
                 style={{ bottom: at(b.value ?? 0, top) }}
               >
                 {b.label}
@@ -81,11 +81,11 @@ export function BarChart({
           ))}
         </div>
       </Plot>
-      <div className="mr-5 ml-11 grid shrink-0 px-[8%] pt-2 text-center text-muted" style={cols}>
+      <div className="mr-5 ml-11 grid shrink-0 px-[8%] pt-2 text-center text-ops-sub" style={cols}>
         {bars.map((b) => (
           <p key={b.key} className="flex min-w-0 flex-col">
-            <span className="truncate text-[11px]">{b.name}</span>
-            <span className="text-[10px]">{b.sub}</span>
+            <span className="truncate text-[12px]">{b.name}</span>
+            <span className="text-[12px] text-ops-faint">{b.sub}</span>
           </p>
         ))}
       </div>
@@ -141,7 +141,10 @@ export function GroupedBars({
           ))}
         </div>
       </Plot>
-      <div className="mr-5 ml-14 grid shrink-0 pt-5 text-center text-[13px] font-bold" style={cols}>
+      <div
+        className="mr-5 ml-14 grid shrink-0 pt-5 text-center text-[13px] font-semibold text-ops-ink"
+        style={cols}
+      >
         {groups.map((g) => (
           <span key={g.key} className="px-1 break-keep">
             {g.label}
@@ -171,7 +174,14 @@ export function Donut({
     <div className="@container relative aspect-square h-full max-h-[166px]">
       <svg viewBox="0 0 166 166" className="absolute inset-0 size-full -rotate-90" aria-hidden>
         {sum === 0 ? (
-          <circle cx={83} cy={83} r={R} fill="none" strokeWidth={SW} className="stroke-bg" />
+          <circle
+            cx={83}
+            cy={83}
+            r={R}
+            fill="none"
+            strokeWidth={SW}
+            className="stroke-ops-idle-soft"
+          />
         ) : (
           slices.map((s, i) =>
             s.value > 0 ? (
@@ -191,9 +201,9 @@ export function Donut({
         )}
       </svg>
       {/* 도넛이 작아지면(낮은 화면) 작은 글자는 고리에 걸려서 숫자만 */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center text-[10px] text-muted">
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-[12px] text-ops-faint">
         <span className="@max-[120px]:hidden">유형별 집계</span>
-        <b className="text-[25px] leading-[33px] tracking-[-0.7px] text-ink">{total}</b>
+        <b className="text-[25px] leading-[33px] tracking-[-0.7px] text-ops-ink">{total}</b>
         <span className="@max-[120px]:hidden">건 · 중복 포함</span>
       </div>
     </div>

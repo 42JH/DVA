@@ -13,7 +13,7 @@ import { BarChart, Donut } from './Charts'
 // 제목 15/700 + 오른쪽 회색 칩(또는 '그래프 보기') · 대표 수치(30/700 + 단위) + 오른쪽 설명 · 내용 · 맨 아래 집계 기준(10)
 // 카드 높이 = 화면에 남는 높이의 반 → 표 줄은 16~25 사이로 줄고 늘며, 그래도 모자라면(1280×650 등) 표 안에서 스크롤
 // 카드마다 따로 받음: 처음엔 '불러오는 중…', 실패면 0으로 바꾸지 않고 '다시 시도'(명세 §6)
-// 파랑은 brand 하나 (디자인 안에 #1687ed · #2ea3ff가 섞여 있어 새 화면 쪽 brand로 맞춤)
+// 11/09 v2 모양으로 (구성은 그대로): 흰 카드 · 회색 선 · v2 색(ops-*) · 표는 v2 표처럼 · 작은 글자 12px 이상 · [그래프 보기]는 연한 파랑 버튼
 
 function Card<V>({
   title,
@@ -27,9 +27,9 @@ function Card<V>({
   children: (v: V) => ReactNode
 }) {
   return (
-    <section className="flex min-h-0 min-w-0 flex-col gap-v8 rounded-xl border border-line px-5 py-v16">
+    <section className="flex min-h-0 min-w-0 flex-col gap-v8 rounded-lg border border-ops-line bg-white px-5 py-v16">
       <header className="flex h-7 shrink-0 items-center gap-2">
-        <h2 className="text-[15px] font-bold">{title}</h2>
+        <h2 className="text-[14px] font-bold">{title}</h2>
         {aside}
       </header>
       {c.view ? (
@@ -39,14 +39,14 @@ function Card<V>({
           {children(c.view)}
         </div>
       ) : (
-        <p className="m-auto text-[12px] text-muted">
+        <p className="m-auto text-[13px] text-ops-sub">
           {c.failed ? (
             <>
               불러오지 못했습니다.{' '}
               <button
                 type="button"
                 onClick={c.retry}
-                className="font-semibold text-brand hover:underline"
+                className="font-semibold text-ops-route hover:underline"
               >
                 다시 시도
               </button>
@@ -75,16 +75,18 @@ function Headline({
   return (
     <div className="flex shrink-0 items-center gap-[5px]">
       <span
-        className={`text-v30 font-bold tabular-nums ${blue ? 'tracking-[-1px] text-brand' : ''}`}
+        className={`text-v30 font-bold tabular-nums ${blue ? 'tracking-[-1px] text-ops-route' : 'text-ops-ink'}`}
       >
         {value}
       </span>
       {value !== '—' && (
-        <span className={blue ? 'text-[16px] text-brand' : 'text-[13px] font-medium text-muted'}>
+        <span
+          className={blue ? 'text-[15px] text-ops-route' : 'text-[13px] font-medium text-ops-sub'}
+        >
           {unit}
         </span>
       )}
-      <div className="ml-auto text-right text-[11px] text-muted">{children}</div>
+      <div className="ml-auto text-right text-[12px] text-ops-sub">{children}</div>
     </div>
   )
 }
@@ -104,7 +106,7 @@ function MetricTable({
   return (
     <div className="flex min-h-0 flex-1 [scrollbar-width:thin] flex-col overflow-y-auto">
       <div
-        className={`${grid} max-h-7 min-h-5 flex-[1.12_1_0px] bg-bg text-[11px] font-medium text-muted`}
+        className={`${grid} max-h-8 min-h-6 flex-[1.12_1_0px] rounded-t-md bg-[#e8eff8] text-[12px] font-semibold text-ops-ink`}
       >
         {head.map((h) => (
           <span key={h}>{h}</span>
@@ -113,14 +115,14 @@ function MetricTable({
       {rows.map((r) => (
         <div
           key={r.key}
-          className={`${grid} max-h-[25px] min-h-4 flex-[1_1_0px] border-b border-line text-[12px] tabular-nums ${r.hot ? 'bg-attention-soft' : ''}`}
+          className={`${grid} max-h-[28px] min-h-5 flex-[1_1_0px] border-b border-dashed border-[#c5d6ec] text-[13px] tabular-nums ${r.hot ? 'bg-ops-wait-soft' : ''}`}
         >
           {r.cells.map((c, i) => (
             <span
               key={i}
               className={
                 i === r.cells.length - 1
-                  ? `font-bold ${r.hot ? 'text-attention' : 'text-brand'}`
+                  ? `font-bold ${r.hot ? 'text-ops-wait' : 'text-ops-route'}`
                   : ''
               }
             >
@@ -134,13 +136,11 @@ function MetricTable({
 }
 
 const Foot = ({ children }: { children: ReactNode }) => (
-  <p className="shrink-0 text-[10px] text-muted">{children}</p>
+  <p className="shrink-0 text-[12px] text-ops-faint">{children}</p>
 )
 
 const Chip = ({ children }: { children: ReactNode }) => (
-  <span className="ml-auto grid h-6 place-items-center rounded-md bg-bg px-2 text-[11px] font-medium text-muted">
-    {children}
-  </span>
+  <span className="ml-auto text-[12px] text-ops-sub">{children}</span>
 )
 
 /** '그래프 보기' (Figma 118×28 · 파랑 · 모서리 4 · bar-chart-07 아이콘 20 + 13/700) — 신규 · 기존 비교 화면으로 */
@@ -150,11 +150,11 @@ function GraphLink({ to }: { to: string }) {
   return (
     <Link
       to={v2 ? to.replace('/dashboard/', '/v2/stats/') : to}
-      className="ml-auto flex h-7 shrink-0 items-center gap-2 rounded bg-brand px-3 text-[13px] font-bold text-white hover:opacity-90"
+      className="ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ops-route-soft px-3 text-[13px] font-semibold text-ops-route outline-none hover:bg-[#d6e4ff] focus-visible:ring-2 focus-visible:ring-ops-route"
     >
       <svg
         viewBox="0 0 20 20"
-        className="size-5"
+        className="size-4"
         fill="none"
         stroke="currentColor"
         strokeWidth={2}
@@ -202,10 +202,10 @@ export function RegistrationCard({ c }: { c: CardState<RegistrationView> }) {
           {v.bars.length ? (
             <BarChart bars={v.bars} />
           ) : (
-            <p className="m-auto text-[12px] text-muted">운영 중인 상담가 버전이 없습니다.</p>
+            <p className="m-auto text-[13px] text-ops-sub">운영 중인 상담가 버전이 없습니다.</p>
           )}
           {v.callout && (
-            <p className="flex h-[26px] shrink-0 items-center rounded-md bg-frame pl-3 text-[11px] font-medium text-brand">
+            <p className="flex h-7 shrink-0 items-center rounded-md bg-ops-route-soft pl-3 text-[12px] font-medium text-ops-route">
               {v.callout}
             </p>
           )}
@@ -229,7 +229,7 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
       {(v) => (
         <>
           <Headline value={v.value} unit="%" blue>
-            <p className="font-medium text-ink">{v.ratio}</p>
+            <p className="font-medium text-ops-ink">{v.ratio}</p>
             <p>{v.excluded}</p>
           </Headline>
           <div className="grid min-h-0 flex-1 grid-cols-[clamp(140px,36%,244px)_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4 pt-1">
@@ -237,7 +237,7 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
               <Donut slices={v.slices} total={v.total} />
             </div>
             <div className="flex min-h-0 [scrollbar-width:thin] flex-col justify-center overflow-y-auto">
-              <div className={`${LEGEND} shrink-0 pb-1.5 text-[10px] text-muted`}>
+              <div className={`${LEGEND} shrink-0 pb-1.5 text-[12px] text-ops-sub`}>
                 <span>불편 유형</span>
                 <span className={COUNT}>통화 수</span>
                 <span className="text-right">구성비</span>
@@ -245,21 +245,21 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
               {v.slices.map((s) => (
                 <div
                   key={s.key}
-                  className={`${LEGEND} max-h-[27px] min-h-4 flex-[1_1_0px] rounded-[5px] text-[11px] tabular-nums ${s.hot ? 'bg-frame' : ''}`}
+                  className={`${LEGEND} max-h-[28px] min-h-5 flex-[1_1_0px] rounded-md text-[13px] tabular-nums ${s.hot ? 'bg-ops-route-soft' : ''}`}
                 >
                   <span className="flex min-w-0 items-center gap-2">
                     <i className={`size-2 shrink-0 rounded-[3px] ${s.bg}`} />
                     <span className="truncate">{s.label}</span>
                   </span>
                   <span className={COUNT}>{s.count}</span>
-                  <span className="text-right text-sub">{s.share}</span>
+                  <span className="text-right text-ops-sub">{s.share}</span>
                 </div>
               ))}
             </div>
           </div>
-          <div className="shrink-0 border-t border-line pt-[9px] text-[10px]">
-            <p className="font-medium text-sub">{v.foot[0]}</p>
-            <p className="text-muted">{v.foot[1]}</p>
+          <div className="shrink-0 border-t border-ops-line pt-2 text-[12px]">
+            <p className="font-medium text-ops-sub">{v.foot[0]}</p>
+            <p className="text-ops-faint">{v.foot[1]}</p>
           </div>
         </>
       )}
