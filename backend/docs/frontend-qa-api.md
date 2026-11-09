@@ -1,5 +1,7 @@
 # 프론트 QA 반영 API — S15P31D109-174
 
+2026-11-09 최신 페르소나·전화번호 검색·고객/주소록 삭제의 전체 검증과 운영 데이터 이관 결과는 [QA 검증 기록](persona-prompt-fields-verification.md)을 따른다. 전체 911개가 통과했고 페르소나 데이터는 삭제 없이 이관했다. 새 API 사용에는 앱 배포가 필요하다.
+
 관리자 주소록 단건·다건 soft delete는 [DELETE /api/pins 연동 명세](personal-pin-bulk-deletion.md)를 따른다. personalPinSeqs 배열로 요청하며 고객 기본 주소·주문 주소는 보존한다.
 
 관리자 고객 단건·다건 soft delete는 [DELETE /api/customers 연동 명세](customer-bulk-deletion.md)를 따른다. customerSeqs 배열로 요청하며 전체 성공 204, 일부 미존재·기삭제는 전체 롤백 후 404다.
