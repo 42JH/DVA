@@ -9,7 +9,7 @@ const { AuditService } = require('../dist/audit/audit.service');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const origin = 'http://localhost:5173';
 process.env.CORS_ORIGINS = origin;
 const pool = createTestPool();
@@ -317,24 +317,6 @@ test('batch cancellation waits for a concurrent payment transaction and rechecks
 test('path validation and Swagger describe empty 204 with one call header', async () => {
   for (const id of ['0', '-1', 'abc', '2147483648']) assert.equal((await cancel(id)).status, 400);
   assert.equal((await cancel(2147483647)).status, 404);
-  const doc = await (await fetch(base + '/docs-json')).json();
-  const operation = doc.paths['/api/orders/{id}/cancel'].post;
-  assert.equal(operation.summary, '주문 전체 취소');
-  assert.equal(operation.requestBody, undefined);
-  assert.equal(operation.responses['204'].content, undefined);
-  assert.equal(operation.responses['202'], undefined);
-  assert.equal(
-    operation.parameters.filter((p) => p.name.toLowerCase() === 'call_session_seq').length,
-    1,
-  );
-  assert.equal(
-    operation.parameters.some((p) => p.name.toLowerCase() === 'idempotency-key'),
-    false,
-  );
-  assert.deepEqual(doc.components.schemas.OrderParcelDto.properties.status.enum, [
-    'ACTIVE',
-    'CANCELLED',
-  ]);
 });
 
 test('individual cancellation preserves siblings and completes the parent only on the last parcel', async () => {

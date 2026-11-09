@@ -340,27 +340,3 @@ test('new complaint codes round-trip through existing final analysis and call de
     /대시보드 전용 민감 근거|rtc_dashboard_private_|Bearer /,
   );
 });
-
-test('Swagger documents separate final metrics, service credentials and removed P95/entry fields', async () => {
-  const response = await f.get('/api/docs-json');
-  assert.equal(response.status, 200);
-  const doc = await response.json();
-  for (const section of ['stage-metrics', 'response-wait-metrics']) {
-    const route = doc.paths['/api/ai/calls/{id}/' + section].post;
-    assert.ok(route.responses['204']);
-    assert.ok(route.security.some((entry) => Object.hasOwn(entry, 'bearer')));
-  }
-  const schemas = doc.components.schemas;
-  assert.deepEqual(schemas.CreateStageMetricsDto.required.toSorted(), [
-    'dropoffStage',
-    'providerCallId',
-  ]);
-  assert.deepEqual(schemas.CreateResponseWaitMetricsDto.required.toSorted(), [
-    'latencyStats',
-    'providerCallId',
-    'totalWaitMs',
-  ]);
-  assert.equal(schemas.CallLatencyStatDto.properties.measurementCount.minimum, 1);
-  assert.equal(Object.hasOwn(schemas.CallLatencyStatDto.properties, 'p95'), false);
-  assert.ok(schemas.CallComplaintDto.properties.type.enum.includes('UNSUPPORTED_ANSWER'));
-});

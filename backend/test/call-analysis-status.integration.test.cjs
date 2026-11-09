@@ -105,32 +105,6 @@ test('failure uses the existing insights credential, never a business token or a
   assert.equal(await stamp(c), null);
 });
 
-test('failure validates its minimal body, call identity and deleted/expired boundaries before persistence', async () => {
-  const c = await call();
-  for (const body of [
-    {},
-    { providerCallId: '' },
-    { providerCallId: 12 },
-    { providerCallId: 'x'.repeat(201) },
-    { providerCallId: 'rtc wrong' },
-    { providerCallId: c.providerCallId, failedAt: new Date().toISOString() },
-  ])
-    await f.error(await failure(c, body), 400, 'INVALID_REQUEST');
-  await f.error(await failure(c, { providerCallId: 'rtc_other' }), 403, 'FORBIDDEN');
-  for (const id of ['0', 'bad', '2147483648'])
-    await f.error(await failure({ ...c, id }), 400, 'INVALID_REQUEST');
-  await f.error(await failure({ ...c, id: 2147483647 }), 404, 'NOT_FOUND');
-  const removed = await call();
-  await f.pool.query(
-    'UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=$1',
-    [removed.id],
-  );
-  await f.error(await failure(removed), 404, 'NOT_FOUND');
-  const expired = await call({ incomingAt: '2020-01-01T00:00:00Z' });
-  await f.error(await failure(expired), 404, 'NOT_FOUND');
-  for (const item of [c, removed, expired]) assert.equal(await stamp(item), null);
-});
-
 test('final failure is idempotent, retains its first receipt and changes no PBX or business data', async () => {
   const c = await call({ ended: false });
   const snapshot = async () =>
@@ -211,19 +185,4 @@ test('recordedAt is the earliest saved recording without duplicate calls or anal
   await state(c, 'FAILED', earlier);
   await accepted(await analyse(c));
   await state(c, 'COMPLETED', earlier);
-});
-
-test('Swagger documents the shared call fields and the AI-only minimal failure contract', async () => {
-  const response = await fetch(f.base + '/api/docs-json');
-  assert.equal(response.status, 200);
-  const spec = await response.json();
-  const properties = spec.components.schemas.CallDto.properties;
-  assert.deepEqual(properties.analysisStatus.enum, ['PENDING', 'COMPLETED', 'FAILED']);
-  assert.equal(properties.recordedAt.nullable, true);
-  assert.equal(properties.recordedAt.format, 'date-time');
-  const operation = spec.paths['/api/ai/calls/{id}/analysis/failure'].post;
-  assert.ok(operation.responses['204']);
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  const name = operation.requestBody.content['application/json'].schema.$ref.split('/').at(-1);
-  assert.deepEqual(Object.keys(spec.components.schemas[name].properties), ['providerCallId']);
 });

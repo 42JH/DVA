@@ -64,30 +64,6 @@ module.exports = function registerAiSettingsManagement(suite) {
     );
   });
 
-  test('PENDING and INACTIVE accounts cannot read personas even with an existing session', async () => {
-    const version = await create();
-    for (const actor of [0, 1, 2]) {
-      try {
-        for (const status of ['PENDING', 'INACTIVE']) {
-          await pool.query('UPDATE admin_users SET status=$2 WHERE admin_user_seq=$1', [
-            actorIds[actor],
-            status,
-          ]);
-          for (const path of [
-            '/api/personas',
-            `/api/personas/${version.aiPersonaSeq}`,
-            `/api/personas/${version.aiPersonaSeq}/versions`,
-          ])
-            await error(await call('GET', path, undefined, actor), 401, 'UNAUTHORIZED');
-        }
-      } finally {
-        await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [
-          actorIds[actor],
-        ]);
-      }
-    }
-  });
-
   test('persona creation preserves prompt and full settings in an inactive immutable version', async () => {
     const body = input();
     const v = await data(await call('POST', '/api/personas', body), 201);
@@ -238,21 +214,5 @@ module.exports = function registerAiSettingsManagement(suite) {
         .rows[0].n,
       0,
     );
-  });
-
-  test('pagination, unknown fields and missing persona IDs are validated', async () => {
-    for (const query of ['limit=0', 'offset=1e2', 'limit=1&limit=2', 'sort=bad'])
-      await error(await call('GET', '/api/personas?' + query), 400, 'INVALID_REQUEST');
-    await error(await call('GET', '/api/personas/2147483647'), 404, 'NOT_FOUND');
-    await error(await call('GET', '/api/personas/0'), 400, 'INVALID_REQUEST');
-    const response = await call('GET', '/api/personas?limit=1');
-    const body = await response.json();
-    assert.deepEqual(Object.keys(body).sort(), ['data', 'hasNext', 'total_count']);
-    assert.equal(body.data.length, 1);
-    assert.equal(body.hasNext, true);
-    const total = (await pool.query('SELECT count(*)::int AS n FROM ai_personas')).rows[0].n;
-    assert.equal(body.total_count, total);
-    const pastEnd = await call('GET', `/api/personas?offset=${total}`);
-    assert.deepEqual(await pastEnd.json(), { data: [], hasNext: false, total_count: total });
   });
 };

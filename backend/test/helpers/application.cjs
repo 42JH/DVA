@@ -49,7 +49,7 @@ async function createTestSession(pool, adminUserSeq) {
 
 function applicationFixture(name = '통합 테스트 관리자') {
   const pool = createTestPool();
-  process.env.SWAGGER_ENABLED = 'true';
+  process.env.SWAGGER_ENABLED = 'false';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
   const f = {
     pool,

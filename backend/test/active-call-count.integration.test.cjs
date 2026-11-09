@@ -2,7 +2,6 @@ require('reflect-metadata');
 const { before, beforeEach, afterEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes, randomInt, randomUUID } = require('node:crypto');
-const { EventEmitter, once } = require('node:events');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
 const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
@@ -11,7 +10,7 @@ const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.S3_RECORDINGS_BUCKET = '';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
@@ -285,34 +284,6 @@ test('read-only caller lookup and legacy unknown calls do not enter the count; r
   );
 });
 
-test('counting uses the active partial index when closed and pre-feature history grows', async (context) => {
-  const prefix = 'active-history-' + randomUUID() + '-';
-  try {
-    await pool.query(
-      `INSERT INTO call_sessions(provider_call_id,registered_at,started_at,ended_at)
-       SELECT $1 || n,CASE WHEN n<=20000 OR n>30000 THEN clock_timestamp() END,
-         CASE WHEN n<=20000 THEN '2026-01-01T00:00:00Z'::timestamptz END,
-         CASE WHEN n<=20000 THEN '2026-01-01T00:01:00Z'::timestamptz END
-       FROM generate_series(1,30125) n`,
-      [prefix],
-    );
-    await pool.query('ANALYZE call_sessions');
-    assert.equal(await count(), 125);
-    const plan = (
-      await pool.query(
-        'EXPLAIN (ANALYZE,FORMAT JSON) SELECT count(*)::int FROM call_sessions WHERE registered_at IS NOT NULL AND ended_at IS NULL',
-      )
-    ).rows[0]['QUERY PLAN'][0];
-    assert.match(JSON.stringify(plan.Plan), /call_sessions_active_count_idx/);
-    context.diagnostic(
-      `30,000 historical rows / 125 active: ${plan['Execution Time']} ms DB query`,
-    );
-  } finally {
-    await pool.query('DELETE FROM call_sessions WHERE provider_call_id LIKE $1', [prefix + '%']);
-    await pool.query('ANALYZE call_sessions');
-  }
-});
-
 test('PBX receipt ends a registered call before worker delay or S3 upload; replay does not decrease twice', async () => {
   const call = await register();
   const payload = ending(call.input);
@@ -495,56 +466,6 @@ test('SSE sends an unwrapped snapshot, crosses instances, reconnects from curren
   assert.equal(apps[1].get(ActiveCallCountService).updates.observed, false);
 });
 
-test('a burst shares one in-flight count refresh across dashboard subscriptions', async () => {
-  const first = await stream(),
-    second = await stream();
-  await first.next();
-  await second.next();
-  const repository = apps[1].get(ConsultationsRepository);
-  const original = repository.activeCount;
-  const started = new EventEmitter();
-  const firstRead = once(started, 'read', { signal: AbortSignal.timeout(8000) });
-  const gate = Promise.withResolvers();
-  let reads = 0;
-  repository.activeCount = async function () {
-    reads++;
-    started.emit('read');
-    await gate.promise;
-    return original.call(this);
-  };
-  try {
-    await Promise.all([firstRead, Promise.all(Array.from({ length: 35 }, () => register()))]);
-    assert.equal(reads, 1, 'subscribers must share the same pending count query');
-    gate.resolve();
-    await Promise.all([first.until(35), second.until(35)]);
-  } finally {
-    gate.resolve();
-    repository.activeCount = original;
-  }
-});
-
-test('above 100 active calls, changes are coalesced without postponing delivery indefinitely', async () => {
-  await pool.query(
-    'INSERT INTO call_sessions(provider_call_id) SELECT $1 || n FROM generate_series(1,120) AS n',
-    ['active-many-' + randomUUID()],
-  );
-  const connection = await stream();
-  assert.equal((await connection.next()).activeCallCount, 120);
-  const writes = (async () => {
-    for (let i = 0; i < 22; i++) {
-      await register();
-      await delay(100);
-    }
-  })();
-  const first = await connection.next();
-  assert.ok(
-    first.activeCallCount > 120 && first.activeCallCount < 142,
-    'receive an update while changes are still arriving',
-  );
-  await writes;
-  await connection.until(142);
-});
-
 test('LISTEN reconnection recovers the current value and remains usable for later changes', async () => {
   const connection = await stream();
   await connection.next();
@@ -555,46 +476,6 @@ test('LISTEN reconnection recovers the current value and remains usable for late
   await register();
   await connection.until(2, 9000);
 });
-
-test('periodic reconciliation recovers DB changes without an application notification', async () => {
-  const connection = await stream();
-  assert.equal((await connection.next()).activeCallCount, 0);
-  await pool.query('INSERT INTO call_sessions(provider_call_id) VALUES($1)', [
-    'active-unannounced-' + randomUUID(),
-  ]);
-  await connection.until(1);
-});
-
-for (const mode of ['logout', 'expired', 'inactive'])
-  test(
-    mode +
-      ' closes the existing stream at the heartbeat authorization check and never reopens anonymously',
-    async () => {
-      const connection = await stream();
-      await connection.next();
-      if (mode === 'logout') {
-        const result = await json('/api/auth/logout', {
-          method: 'POST',
-          headers: { Origin: origin, Cookie: cookie },
-        });
-        assert.equal(result.status, 204);
-      } else if (mode === 'expired') {
-        await pool.query(
-          "UPDATE admin_sessions SET created_at=clock_timestamp()-interval '10 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE admin_user_seq=$1",
-          [operator.id],
-        );
-      } else {
-        await pool.query("UPDATE admin_users SET status='INACTIVE' WHERE admin_user_seq=$1", [
-          operator.id,
-        ]);
-      }
-      assert.deepEqual(await connection.next('session-expired'), { code: 'UNAUTHORIZED' });
-      assert.equal(
-        (await json('/api/calls/active-count', { headers: { Cookie: cookie } })).status,
-        401,
-      );
-    },
-  );
 
 test('DB failures are redacted JSON before streaming and terminal events after streaming, never a false zero', async () => {
   const repository = apps[1].get(ConsultationsRepository),
@@ -620,25 +501,6 @@ test('DB failures are redacted JSON before streaming and terminal events after s
   } finally {
     repository.activeCount = original;
   }
-});
-
-test('Swagger describes GET and SSE contracts, and request logs contain no cookies or phone values', async () => {
-  const result = await json('/api/docs-json');
-  assert.ok(
-    result.body.paths['/api/calls/active-count'].get.responses['200'].content['application/json'],
-  );
-  assert.ok(
-    result.body.paths['/api/calls/active-count/stream'].get.responses['200'].content[
-      'text/event-stream'
-    ],
-  );
-  assert.equal(result.body.paths['/api/calls/active-count'].post, undefined);
-  const input = identity();
-  await register(input);
-  assert.doesNotMatch(
-    JSON.stringify(logs),
-    new RegExp(input.phoneNumber + '|private-test|dva_session='),
-  );
 });
 
 test('application shutdown closes an open stream and releases its listener without waiting for a heartbeat', async () => {

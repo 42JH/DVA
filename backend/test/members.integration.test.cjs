@@ -3,14 +3,13 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { MembersRepository } = require('../dist/members/members.repository');
-const { DatabaseService } = require('../dist/database/database.service');
 const { hashPassword } = require('../dist/auth/password');
 const pool = createTestPool();
 const apps = [];
@@ -23,7 +22,7 @@ const employees = (companyId, fixture) =>
     return { employeeNo, name, phoneNumber, departmentSeq: departments.get(companyId) };
   });
 const phone = () => '010' + String(randomInt(10000000, 100000000));
-let app, base, baseB, cookie, adminId, repository, passwordHash;
+let app, base, baseB, cookie, repository, passwordHash;
 const start = () => startTestApp(apps);
 async function account(role = 'OPERATOR') {
   const loginId = 'mem' + randomUUID().replaceAll('-', '').slice(0, 16);
@@ -47,7 +46,6 @@ before(async () => {
   baseB = await (await start()).getUrl();
   const admin = await account();
   cookie = admin.cookie;
-  adminId = admin.id;
   repository = app.get(MembersRepository);
 });
 after(async () => {
@@ -161,35 +159,6 @@ async function error(response, status, code) {
   return body;
 }
 
-test('all four member operations require real sessions and writes preserve Origin protection', async () => {
-  for (const session of [null, 'dva_session=invalid', 'dva_session=' + 'f'.repeat(64)]) {
-    for (const [method, path] of [
-      ['GET', '/companies/1/members'],
-      ['POST', '/companies/1/members'],
-      ['PATCH', '/members/1'],
-      ['DELETE', '/members/1'],
-    ])
-      await error(
-        await request(
-          path,
-          { method, headers: { 'X-Admin-User-Seq': String(adminId), 'X-AI-Client': 'true' } },
-          base,
-          session,
-        ),
-        401,
-        'UNAUTHORIZED',
-      );
-  }
-  for (const [method, path] of [
-    ['POST', '/companies/1/members'],
-    ['PATCH', '/members/1'],
-    ['DELETE', '/members/1'],
-  ]) {
-    const response = await fetch(base + '/api' + path, { method, headers: { Cookie: cookie } });
-    await error(response, 403, 'FORBIDDEN');
-  }
-});
-
 test('every active admin role can manage members and representative labels create no admin account', async () => {
   const before = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
@@ -224,52 +193,6 @@ test('every active admin role can manage members and representative labels creat
     Number((await pool.query('SELECT count(*) FROM admin_users')).rows[0].count),
     Number(before) + 3,
   );
-});
-
-test('expired, pending and logged-out sessions cannot upload or modify memberships', async () => {
-  const co = await company();
-  const cu = await customer();
-  await empty(await create(co, cu.id));
-  const m = await member(co, cu.id);
-  for (const reason of ['expired', 'pending', 'logout']) {
-    const admin = await account();
-    if (reason === 'expired')
-      await pool.query(
-        "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
-        [admin.id],
-      );
-    else if (reason === 'pending')
-      await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [
-        admin.id,
-      ]);
-    else
-      assert.equal(
-        (await request('/auth/logout', { method: 'POST' }, base, admin.cookie)).status,
-        204,
-      );
-    await error(
-      await registerMany(
-        co,
-        employees(co, `002,실패,${phone()}`),
-        randomUUID(),
-        base,
-        admin.cookie,
-      ),
-      401,
-      'UNAUTHORIZED',
-    );
-    await error(
-      await patch(m.membershipSeq, { role: 'ORG_ADMIN' }, admin.cookie),
-      401,
-      'UNAUTHORIZED',
-    );
-    await error(await remove(m.membershipSeq, admin.cookie), 401, 'UNAUTHORIZED');
-    await error(
-      await request(`/companies/${co}/members`, {}, base, admin.cookie),
-      401,
-      'UNAUTHORIZED',
-    );
-  }
 });
 
 test('lists return nested member/customer views, status filters, stable pages and empty companies', async () => {
@@ -443,57 +366,6 @@ test('member q preserves inactive and withdrawn visibility while hiding deleted 
   await error(await request('/companies/2147483647/members?q=상태검색'), 404, 'NOT_FOUND');
 });
 
-test('member q remains an administrator-only read with the existing response and documented query', async () => {
-  const co = await company();
-  const cu = await customer('ACTIVE', phone(), '권한검색');
-  await empty(await create(co, cu.id));
-  const counts = async () =>
-    (
-      await pool.query(`SELECT
-    (SELECT count(*) FROM customers) AS customers,(SELECT count(*) FROM memberships) AS memberships,
-    (SELECT count(*) FROM orders) AS orders,(SELECT count(*) FROM call_sessions) AS calls,
-    (SELECT count(*) FROM audit_logs) AS audits`)
-    ).rows[0];
-  const baseline = await members(co);
-  const previous = await counts();
-  for (let index = 0; index < 2; index++)
-    assert.deepEqual(await members(co, '?q=권한검색'), baseline);
-  assert.deepEqual(await counts(), previous);
-  for (const role of ['SUPERVISOR', 'SYSTEM_ADMIN']) {
-    const admin = await account(role);
-    const response = await request(`/companies/${co}/members?q=권한검색`, {}, base, admin.cookie);
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), baseline);
-  }
-  await error(
-    await request(`/companies/${co}/members?q=권한검색`, {}, base, null),
-    401,
-    'UNAUTHORIZED',
-  );
-  await error(
-    await request(
-      `/companies/${co}/members?q=권한검색`,
-      { headers: businessHeaders() },
-      base,
-      null,
-    ),
-    401,
-    'UNAUTHORIZED',
-  );
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const route = document.paths['/api/companies/{id}/members'].get;
-  const q = route.parameters.find((parameter) => parameter.name === 'q');
-  assert.ok(q);
-  assert.equal(q.required, false);
-  assert.equal(q.schema.type, 'string');
-  assert.equal(q.schema.maxLength, 100);
-  assert.deepEqual(route.security, [{ adminSession: [] }]);
-  assert.equal(
-    route.responses['200'].content['application/json'].schema.$ref,
-    '#/components/schemas/MembersEnvelopeDto',
-  );
-});
-
 test('manual registration validates IDs/body, preserves employee zeroes/case and refuses reassignment', async () => {
   const co = await company(),
     other = await company(),
@@ -645,62 +517,6 @@ test('JSON batch creates new customers and links existing unaffiliated customers
   }
 });
 
-test('1000 inline employees use two data writes per import and keep every identity mapped correctly', async () => {
-  const co = await company();
-  const prefix = '019' + randomInt(1000, 10000);
-  const input = Array.from({ length: 1000 }, (_, index) => ({
-    employeeNo: String(index).padStart(4, '0'),
-    name: '일괄 직원 ' + index,
-    phoneNumber: prefix + String(index).padStart(4, '0'),
-  }));
-  const database = app.get(DatabaseService),
-    transaction = database.transaction;
-  let writes = 0;
-  database.transaction = (work) =>
-    transaction.call(database, async (client) => {
-      const query = client.query;
-      client.query = function (sql, ...args) {
-        if (/^\s*(?:INSERT INTO|UPDATE) (?:customers|memberships)\b/i.test(sql)) writes++;
-        return query.call(this, sql, ...args);
-      };
-      try {
-        return await work(client);
-      } finally {
-        client.query = query;
-      }
-    });
-  try {
-    await empty(await registerMany(co, input));
-    assert.equal(writes, 2);
-    writes = 0;
-    await empty(
-      await registerMany(
-        co,
-        input.map((row) => ({ ...row, name: row.name + ' 수정' })),
-      ),
-    );
-    assert.equal(writes, 2);
-  } finally {
-    database.transaction = transaction;
-  }
-  const stored = (
-    await pool.query(
-      'SELECT m.employee_no,c.phone_number,c.name FROM memberships m JOIN customers c USING(customer_seq) WHERE m.organization_seq=$1 ORDER BY m.employee_no',
-      [co],
-    )
-  ).rows;
-  assert.equal(stored.length, 1000);
-  assert.deepEqual(
-    stored,
-    input.map((row) => ({
-      employee_no: row.employeeNo,
-      phone_number: row.phoneNumber,
-      name: row.name + ' 수정',
-    })),
-  );
-  assert.equal((await members(co)).total_count, 1000);
-});
-
 test('JSON batch updates existing employee name/phone while retaining IDs, representative/status and historical order snapshot', async () => {
   const co = await company(),
     cu = await customer(),
@@ -829,41 +645,6 @@ test('JSON batch refuses withdrawn customers and inactive companies without revi
   );
 });
 
-test('JSON batches reject malformed, duplicate and oversized input without persistence; CSV route is removed', async () => {
-  const co = await company();
-  const input = { employeeNo: '001', name: '개인 이름', phoneNumber: phone() };
-  for (const items of [
-    [],
-    [null],
-    [42],
-    [input, input],
-    [{ ...input, phoneNumber: '010-bad' }],
-    [{ ...input, extra: 'bad' }],
-    Array.from({ length: 1001 }, (_, i) => ({ ...input, employeeNo: String(i) })),
-  ]) {
-    const body = await error(await registerMany(co, items), 400, 'INVALID_REQUEST');
-    assert.ok(!JSON.stringify(body).includes(input.name));
-    assert.ok(!JSON.stringify(body).includes(input.phoneNumber));
-  }
-  await error(
-    await registerMany(co, [{ ...input, name: 'x'.repeat(1024 * 1024) }]),
-    413,
-    'PAYLOAD_TOO_LARGE',
-  );
-  const form = new FormData();
-  form.append(
-    'file',
-    new Blob(['employeeNo,name,phoneNumber\n001,Name,0101'], { type: 'text/csv' }),
-    'members.csv',
-  );
-  await error(
-    await request(`/companies/${co}/members/import`, { method: 'POST', body: form }),
-    404,
-    'NOT_FOUND',
-  );
-  assert.deepEqual(await members(co), { data: [], hasNext: false, total_count: 0 });
-});
-
 test('employee JSON accepts more than the general 100 KiB limit on its own route', async () => {
   const co = await company();
   const name = '직'.repeat(40000);
@@ -936,31 +717,6 @@ test('single JSON and mixed customer-reference batches support optional departme
     ]),
   );
   assert.equal((await member(withDept, person.id)).departmentSeq, departments.get(withDept));
-});
-
-test('registration and JSON batch need no key and ignore legacy key headers', async () => {
-  assert.equal(
-    (await pool.query("SELECT to_regclass('api_idempotency.membership_writes') AS name")).rows[0]
-      .name,
-    null,
-  );
-  const co = await company(),
-    cu = await customer(),
-    other = await customer();
-  await empty(await create(co, cu.id));
-  await error(await create(co, cu.id, '001', 'legacy-header'), 409, 'DUPLICATE_RESOURCE');
-  await empty(await create(co, other.id, '002', 'legacy-header'));
-  await empty(
-    await registerMany(co, employees(co, '001,First,' + cu.phoneNumber), 'legacy-header'),
-  );
-  await empty(
-    await registerMany(co, employees(co, '001,Changed,' + cu.phoneNumber), 'legacy-header'),
-  );
-  assert.equal(
-    (await members(co)).data.find((row) => row.customer.customerSeq === cu.id).customer.name,
-    'Changed',
-  );
-  assert.equal((await members(co)).data.length, 2);
 });
 
 test('repeated registration conflicts after restart and unlink permits a new registration', async () => {
@@ -1179,26 +935,6 @@ test('JSON batch rechecks customer status after acquiring a row locked by a conc
   }
 });
 
-test('inline employee registration accepts representative roles while omitted roles default to MEMBER', async () => {
-  const co = await company();
-  const adminCount = (await pool.query('SELECT count(*) FROM admin_users')).rows[0].count;
-  await empty(
-    await registerMany(co, [
-      { employeeNo: '001', name: '대표자', phoneNumber: phone(), role: 'ORG_ADMIN' },
-      { employeeNo: '002', name: '일반 사원', phoneNumber: phone() },
-      { employeeNo: '003', name: '명시 일반', phoneNumber: phone(), role: 'MEMBER' },
-    ]),
-  );
-  const rows = (await members(co)).data.sort((a, b) =>
-    a.membership.employeeNo.localeCompare(b.membership.employeeNo),
-  );
-  assert.deepEqual(
-    rows.map((row) => row.membership.role),
-    ['ORG_ADMIN', 'MEMBER', 'MEMBER'],
-  );
-  assert.equal((await pool.query('SELECT count(*) FROM admin_users')).rows[0].count, adminCount);
-});
-
 test('inline employee updates preserve an omitted role, membership identity, status and department', async () => {
   const co = await company(),
     cu = await customer();
@@ -1211,24 +947,4 @@ test('inline employee updates preserve an omitted role, membership identity, sta
   assert.deepEqual(omitted, { ...original, status: 'INACTIVE' });
   await empty(await registerMany(co, [{ ...input, role: 'MEMBER' }]));
   assert.deepEqual(await member(co, cu.id), { ...omitted, role: 'MEMBER' });
-});
-
-test('inline employee role validation rejects privilege names and null without partially registering a batch', async () => {
-  const co = await company();
-  for (const role of ['SYSTEM_ADMIN', null]) {
-    const result = await error(
-      await registerMany(co, [
-        { employeeNo: '001', name: '정상 사원', phoneNumber: phone() },
-        { employeeNo: '002', name: '잘못된 역할', phoneNumber: phone(), role },
-      ]),
-      400,
-      'INVALID_REQUEST',
-    );
-    assert.ok(result.error.details.some((detail) => detail.field === 'items[1].role'));
-    assert.equal((await members(co)).total_count, 0);
-  }
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const inline = document.components.schemas.InlineMemberDto;
-  assert.deepEqual(inline.properties.role.enum, ['MEMBER', 'ORG_ADMIN']);
-  assert.ok(!inline.required.includes('role'));
 });

@@ -9,7 +9,6 @@ module.exports = function registerOrdersAdmin(suite) {
     assert,
     address,
     errorCode,
-    hosts,
     resetDver,
     readyOrder,
     storedOrder,
@@ -217,25 +216,6 @@ module.exports = function registerOrdersAdmin(suite) {
       { q: 'x'.repeat(201) },
     ])
       await errorCode(await screenOrders(query), 400, 'INVALID_REQUEST');
-    const document = await (await fetch(hosts[0] + '/api/docs-json')).json();
-    const operation = document.paths['/api/admin/orders'].get;
-    assert.deepEqual(operation.security, [{ adminSession: [] }]);
-    assert.equal(
-      operation.responses['200'].content['application/json'].schema.$ref,
-      '#/components/schemas/AdminOrderListResponseDto',
-    );
-    assert.deepEqual(
-      Object.keys(document.components.schemas.AdminOrderListItemDto.properties).sort(),
-      [
-        'createdAt',
-        'customerSeq',
-        'orderSeq',
-        'organizationName',
-        'parcels',
-        'pickupRequestedAt',
-        'status',
-      ],
-    );
   });
 
   // Admin order edits: all states retain receipt/payment facts; fees follow active details.

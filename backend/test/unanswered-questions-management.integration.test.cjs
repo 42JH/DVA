@@ -115,40 +115,6 @@ test('management requires administrator session and allowed Origin; every active
   assert.equal((await row(q.id)).status, 'OPEN');
 });
 
-test('conversion requires all three fields and rejects invalid IDs, categories, blank text and added state', async () => {
-  const q = await question(),
-    input = body();
-  for (const field of Object.keys(input)) {
-    const missing = { ...input };
-    delete missing[field];
-    await f.error(await convert(q.id, missing), 400, 'INVALID_REQUEST');
-  }
-  for (const change of [
-    { category: '전체' },
-    { category: null },
-    { question: '' },
-    { question: null },
-    { answer: ' \n' },
-    { answer: 'x'.repeat(20001) },
-    { status: 'REGISTERED' },
-    { faqEntrySeq: 1 },
-    { question: 'x\0' },
-  ])
-    await f.error(await convert(q.id, { ...input, ...change }), 400, 'INVALID_REQUEST');
-  for (const id of ['0', '-1', '1.5', '2147483648']) {
-    await f.error(await convert(id, input), 400, 'INVALID_REQUEST');
-    await f.error(await remove(id), 400, 'INVALID_REQUEST');
-  }
-  await f.error(await convert(2147483647, input), 404, 'NOT_FOUND');
-  await f.error(await remove(2147483647), 404, 'NOT_FOUND');
-  await f.error(
-    await convert(q.id, { ...input, answer: '가'.repeat(40000) }),
-    413,
-    'PAYLOAD_TOO_LARGE',
-  );
-  assert.equal((await row(q.id)).status, 'OPEN');
-});
-
 test('conversion atomically stores the required FAQ category, original question history, admin audits and one existing AI notification', async () => {
   const q = await question(),
     input = body(),

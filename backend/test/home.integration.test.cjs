@@ -9,6 +9,7 @@ const {
 const { OrdersRepository } = require('../dist/orders/orders.repository');
 const { DashboardRepository } = require('../dist/dashboard/dashboard.repository');
 const f = applicationFixture('홈 QA');
+process.env.SWAGGER_ENABLED = 'true';
 const draftIds = [],
   callIds = [],
   orderIds = [];

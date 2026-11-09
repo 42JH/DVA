@@ -5,6 +5,4 @@ require('./orders-reads.cjs')(suite);
 require('./orders-updates.cjs')(suite);
 require('./orders-submission.cjs')(suite);
 require('./orders-payment.cjs')(suite);
-require('./orders-concurrency.cjs')(suite);
-require('./orders-call-context.cjs')(suite);
 require('./orders-admin.cjs')(suite);

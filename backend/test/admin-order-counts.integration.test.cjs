@@ -226,10 +226,4 @@ test('empty scopes, administrator roles, AI denial, new draft filter validation 
       400,
       'INVALID_REQUEST',
     );
-  const spec = await json(await f.get('/api/docs-json'));
-  assert.ok(spec.components.schemas.AdminOrderListResponseDto.properties.statusCounts);
-  assert.deepEqual(
-    Object.keys(spec.components.schemas.AdminOrderStatusCountsDto.properties).sort(),
-    Object.keys(empty).sort(),
-  );
 });

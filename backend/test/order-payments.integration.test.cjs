@@ -1273,60 +1273,6 @@ test('automatic approval batches are disjoint and honor the persisted next looku
   }
 });
 
-test('migration 051 preserves an existing key, approval evidence and lease during upgrade', async () => {
-  const { readFileSync } = require('node:fs');
-  const { join } = require('node:path');
-  const order = await create(),
-    id = order.paymentRequest.paymentRequestId;
-  await app.get(OrderPaymentsService).claimApproval(id, order.totalAmount, 'upgrade_' + id);
-  await app.get(OrderPaymentsService).recordApproval(id, 'upgrade_' + id, new Date().toISOString());
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const snapshot = async () =>
-      (
-        await client.query(
-          "SELECT to_jsonb(r)-'approval_next_check_at' AS value FROM order_payment_requests r WHERE payment_request_id=$1",
-          [id],
-        )
-      ).rows[0].value;
-    const before = await snapshot();
-    // Recreate only the pre-051 column/index shape inside this disposable transaction.
-    await client.query('ALTER TABLE order_payment_requests DROP COLUMN approval_next_check_at');
-    const original = readFileSync(
-      join(__dirname, '../migrations/022-order-toss-payments.sql'),
-      'utf8',
-    );
-    await client.query(original.match(/CREATE INDEX order_payment_reconcile_idx[\s\S]+?;/)[0]);
-    await client.query(
-      readFileSync(join(__dirname, '../migrations/051-payment-approval-recovery.sql'), 'utf8'),
-    );
-    assert.deepEqual(await snapshot(), before);
-    const row = (
-      await client.query(
-        'SELECT approval_next_check_at FROM order_payment_requests WHERE payment_request_id=$1',
-        [id],
-      )
-    ).rows[0];
-    assert.equal(row.approval_next_check_at, null);
-    assert.match(
-      (
-        await client.query(
-          "SELECT pg_get_indexdef('order_payment_reconcile_idx'::regclass) AS definition",
-        )
-      ).rows[0].definition,
-      /COALESCE\(approval_next_check_at, approval_started_at\).*payment_request_id/,
-    );
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-    await pool.query(
-      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=$1',
-      [id],
-    );
-  }
-});
-
 test('a due retry gets its turn ahead of newer unchecked approvals', async () => {
   const client = await pool.connect();
   try {

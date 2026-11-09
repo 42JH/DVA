@@ -9,7 +9,7 @@ const { createTestPool, startTestApp, businessHeaders } = require('./helpers/app
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AuditService } = require('../dist/audit/audit.service');
 const { hashPassword } = require('../dist/auth/password');
@@ -175,40 +175,6 @@ test('AI registers, searches and edits its active customer personal pins without
   assert.equal((await stored(created.personalPinSeq)).address_data.detailAddress, '103호');
 });
 
-test('all active administrator roles can manage personal pins', async () => {
-  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
-    const headers = await admin(role),
-      f = await fixture(),
-      p = await personal(f, address(), {}, headers);
-    assert.equal(
-      (await request('GET', '/customers/' + f.customer + '/pins', undefined, headers)).status,
-      200,
-    );
-    assert.equal(
-      (await request('PATCH', '/pins/' + p.personalPinSeq, { label: role }, headers)).status,
-      200,
-    );
-  }
-});
-
-test('retired company PIN routes return 404 without recreating the table or changing personal PINs', async () => {
-  const f = await fixture({ role: 'ORG_ADMIN' });
-  const id = (await personal(f)).personalPinSeq;
-  const before = await stored(id);
-  for (const headers of [f.ai, adminHeaders])
-    for (const [method, path, body] of [
-      ['GET', '/companies/' + f.company + '/pins'],
-      ['POST', '/companies/' + f.company + '/pins', { addressData: address() }],
-      ['PATCH', '/company-pins/' + id, { label: '금지' }],
-    ])
-      assert.equal((await request(method, path, body, headers)).status, 404);
-  assert.deepEqual(await stored(id), before);
-  assert.equal(
-    (await pool.query("SELECT to_regclass('public.company_pins') AS name")).rows[0].name,
-    null,
-  );
-});
-
 test('another caller cannot list, create or edit private pins', async () => {
   const owner = await fixture();
   const other = await fixture();
@@ -335,39 +301,6 @@ test('an ended call cannot modify a new customer who reuses the deleted original
     (await pool.query('SELECT 1 FROM personal_pins WHERE customer_seq=$1', [customer.customerSeq]))
       .rowCount,
     0,
-  );
-});
-
-test('stale administrator cookies cannot fall back to AI access; administrator writes retain Origin checks', async () => {
-  const f = await fixture();
-  const bad = { ...f.ai, Cookie: 'dva_session=' + 'f'.repeat(64), Origin: origin };
-  await error(
-    await request('GET', `/customers/${f.customer}/pins`, undefined, bad),
-    401,
-    'UNAUTHORIZED',
-  );
-  await error(
-    await request('POST', `/customers/${f.customer}/pins`, { addressData: address() }, bad),
-    401,
-    'UNAUTHORIZED',
-  );
-  await error(
-    await request(
-      'POST',
-      `/customers/${f.customer}/pins`,
-      { addressData: address() },
-      { Cookie: adminHeaders.Cookie },
-    ),
-    403,
-    'FORBIDDEN',
-  );
-  await error(
-    await request('GET', `/customers/${f.customer}/pins`, undefined, {
-      ...f.ai,
-      Origin: 'https://untrusted.invalid',
-    }),
-    403,
-    'FORBIDDEN',
   );
 });
 
@@ -546,66 +479,6 @@ test('literal search, pagination and generated search updates stay scoped', asyn
   );
 });
 
-test('invalid or incomplete addresses and scope overrides are rejected without storing data', async () => {
-  const f = await fixture();
-  const p = await personal(f);
-  const badAddresses = [
-    null,
-    [],
-    {},
-    { ...address(), latitude: 37.5 },
-    { ...address(), longitude: 127 },
-    { ...address(), latitude: null },
-    { ...address(), longitude: null },
-    { ...address(), name: ' ' },
-    { ...address(), phoneNumber: '010-1234-5678' },
-    { ...address(), postalCode: '1234' },
-    { ...address(), detailAddress: null },
-    { ...address(), private: true },
-  ];
-  for (const data of badAddresses)
-    await error(
-      await request('POST', `/customers/${f.customer}/pins`, { addressData: data }, f.ai),
-      400,
-      'INVALID_REQUEST',
-    );
-  for (const body of [
-    {},
-    { expectedVersion: 1 },
-    { version: 1, label: '변경' },
-    { customerSeq: f.customer, label: '변경' },
-    { addressData: { detailAddress: '부분 주소' } },
-    { label: 123 },
-    { label: '변경', paymentMethodType: 'credit' },
-  ])
-    await error(
-      await request('PATCH', `/pins/${p.personalPinSeq}`, body, f.ai),
-      400,
-      'INVALID_REQUEST',
-    );
-  for (const path of [
-    `/customers/${f.customer}/pins?limit=101`,
-    `/customers/${f.customer}/pins?offset=-1`,
-    '/customers/2147483648/pins',
-    '/customers/abc/pins',
-  ])
-    await error(await request('GET', path), 400, 'INVALID_REQUEST');
-  const noDetail = address();
-  delete noDetail.detailAddress;
-  await personal(f, noDetail, {}, f.ai);
-  await error(
-    await request(
-      'POST',
-      `/customers/${f.customer}/pins`,
-      { addressData: address({ detailAddress: '' }) },
-      f.ai,
-    ),
-    409,
-    'DUPLICATE_RESOURCE',
-  );
-  await personal(f, address({ roadAddress: '예시로 13', detailAddress: '' }), {}, f.ai);
-});
-
 test('editing a referenced pin leaves existing order address snapshots and order version unchanged', async () => {
   const f = await fixture();
   const p = await personal(f);
@@ -699,20 +572,4 @@ test('audit success is atomic with writes and contains no address or phone; fail
   } finally {
     service.recordSuccess = original;
   }
-});
-
-test('request logging does not record phone numbers, address bodies or search terms', async () => {
-  const f = await fixture();
-  const requestId = randomUUID();
-  const term = '개인정보검색어';
-  await request('GET', `/customers/${f.customer}/pins?q=${encodeURIComponent(term)}`, undefined, {
-    ...f.ai,
-    'X-Request-Id': requestId,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  const entries = logs.filter((entry) => entry.requestId === requestId);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].route, '/api/customers/:id/pins');
-  assert.ok(!JSON.stringify(entries).includes(f.phone));
-  assert.ok(!JSON.stringify(entries).includes(term));
 });

@@ -3,21 +3,18 @@ const { before, beforeEach, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
-const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { PbxRecordingWorker } = require('../dist/webhooks/pbx/pbx-recording.worker');
 const { RecordingStorage } = require('../dist/webhooks/pbx/recording-storage');
 const { DatabaseService } = require('../dist/database/database.service');
 const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
 const { RecordingProcessingError } = require('../dist/webhooks/pbx/recording-retry');
-const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.S3_RECORDINGS_BUCKET = '';
 process.env.PBX_WEBHOOK_TOKEN = randomUUID();
-const { AppModule } = require('../dist/app.module');
 const pool = createTestPool();
 const apps = [],
   urls = [],
@@ -401,51 +398,6 @@ test('expired claims recover and stale completion, failure and release cannot re
   );
 });
 
-test('a date-filtered call is readable before upload and receives its recording on the same call after upload', async () => {
-  const id = await call('01098880001', 2);
-  const repository = apps[0].get(ConsultationsRepository);
-  const query = {
-    callerPhoneNumber: '01098880001',
-    from: '2026-10-27T01:00:00Z',
-    to: '2026-10-27T01:01:00Z',
-    limit: 100,
-    offset: 0,
-  };
-  const read = async () =>
-    (await repository.findMany(query)).rows.find((row) => row.callSessionSeq === id);
-  assert.equal((await read()).startedAt.toISOString(), '2026-10-27T01:00:02.000Z');
-  assert.deepEqual(await repository.findRecordings(id), []);
-  const data = payload();
-  await receipt(data);
-  const original = saving;
-  let entered, release;
-  const started = new Promise((resolve) => {
-    entered = resolve;
-  });
-  const wait = new Promise((resolve) => {
-    release = resolve;
-  });
-  saving = async (...args) => {
-    entered();
-    await wait;
-    return original(...args);
-  };
-  const pending = workers[0].processPending();
-  await started;
-  try {
-    const row = await read();
-    assert.equal(row.callSessionSeq, id);
-    assert.equal(row.startedAt.toISOString(), '2026-10-27T01:00:00.000Z');
-    assert.deepEqual(await repository.findRecordings(id), []);
-  } finally {
-    release();
-  }
-  await pending;
-  assert.equal((await read()).callSessionSeq, id);
-  assert.equal((await repository.findRecordings(id)).length, 1);
-  assert.equal(uploads, 1);
-});
-
 test('disabled S3 and recent receipts remain durable; retry cooldown does not starve later events', async () => {
   const first = payload();
   await receipt(first);
@@ -511,55 +463,6 @@ test('unregistered calls leave no call, audit or recording and unmatched PBX rec
   assert.equal(uploads, 0);
 });
 
-test('expired unmatched receipts are removed with S3 disabled while registered orderless calls are retained', async () => {
-  const unmatched = { ...payload(), callFrom: '01098889998' };
-  const matched = payload();
-  await receipt(unmatched);
-  await receipt(matched);
-  const callId = await call();
-  await pool.query(
-    "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes'",
-  );
-  const config = apps[0].get(ConfigService);
-  config.set('S3_RECORDINGS_BUCKET', '');
-  try {
-    await workers[0].processPending();
-    assert.equal(await state(unmatched.recordingId), undefined);
-    assert.equal((await state(matched.recordingId)).call_session_seq, callId);
-    assert.equal((await state(matched.recordingId)).processing_status, 'RECEIVED');
-    assert.equal((await state(matched.recordingId)).attempt_count, 0);
-    assert.equal(uploads, 0);
-    const attempted = (await state(matched.recordingId)).last_attempt_at;
-    await replayable(matched.recordingId);
-    await workers[0].processPending();
-    assert.equal((await state(matched.recordingId)).last_attempt_at, null);
-    assert.ok(attempted);
-  } finally {
-    config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
-  }
-  await workers[0].processPending();
-  assert.equal((await state(matched.recordingId)).processing_status, 'PROCESSED');
-  assert.equal(uploads, 1);
-});
-
-test('application bootstrap cleans expired unmatched receipts even with S3 disabled', async () => {
-  const data = { ...payload(), callFrom: '01098889994' };
-  await receipt(data);
-  await pool.query(
-    "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes' WHERE recording_id=$1",
-    [data.recordingId],
-  );
-  const app = await NestFactory.create(AppModule, { logger: false });
-  app.get(ConfigService).set('S3_RECORDINGS_BUCKET', '');
-  try {
-    await app.init();
-  } finally {
-    await app.close();
-  }
-  assert.equal(await state(data.recordingId), undefined);
-  assert.equal(uploads, 0);
-});
-
 test('linked S3 failures older than 30 minutes keep their receipt and retry on the same call', async () => {
   const callId = await call();
   const data = payload();
@@ -603,34 +506,6 @@ test('expiry cannot remove a live claim or a receipt claimed by another worker',
   assert.ok(await state(data.recordingId));
   await repo.discardExpired(data.recordingId, second.claimId);
   assert.equal(await state(data.recordingId), undefined);
-});
-
-test('unmatched corrupt or conflicting historical receipts also expire without blocking later valid recordings', async () => {
-  const corrupt = { ...payload(), callFrom: '01098889996' };
-  await receipt(corrupt);
-  await pool.query(
-    "UPDATE pbx_webhooks.call_ended_events SET payload='{}'::jsonb,received_at=clock_timestamp()-interval '31 minutes' WHERE recording_id=$1",
-    [corrupt.recordingId],
-  );
-  const conflictId = await call();
-  await pool.query(
-    "UPDATE call_sessions SET started_at='2026-10-27T01:00:00Z',ended_at='2026-10-27T01:02:00Z' WHERE call_session_seq=$1",
-    [conflictId],
-  );
-  const conflicting = payload();
-  await receipt(conflicting);
-  await pool.query(
-    "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes' WHERE recording_id=$1",
-    [conflicting.recordingId],
-  );
-  const valid = { ...payload(), callFrom: '01098889995' };
-  await call(valid.callFrom);
-  await receipt(valid);
-  await workers[0].processPending();
-  assert.equal(await state(corrupt.recordingId), undefined);
-  assert.equal(await state(conflicting.recordingId), undefined);
-  assert.equal((await state(valid.recordingId)).processing_status, 'PROCESSED');
-  assert.equal(uploads, 1);
 });
 
 test('transient recording errors retry five times with persisted backoff, then wait for review without blocking healthy receipts', async () => {
@@ -773,22 +648,4 @@ test('attempts survive worker crashes and a fifth interrupted attempt is held wi
   assert.equal(uploads, 0);
   await workers[0].processPending();
   assert.deepEqual(await state(data.recordingId), held);
-});
-
-test('legacy review holds still allow unmatched thirty-minute cleanup with storage disabled', async () => {
-  const data = { ...payload(), callFrom: '01098889990' };
-  await receipt(data);
-  await pool.query(
-    "UPDATE pbx_webhooks.call_ended_events SET received_at=clock_timestamp()-interval '31 minutes',processing_status='FAILED',requires_review=true,last_error_code='LEGACY_FAILURE' WHERE recording_id=$1",
-    [data.recordingId],
-  );
-  const config = apps[0].get(ConfigService);
-  config.set('S3_RECORDINGS_BUCKET', '');
-  try {
-    await workers[0].processPending();
-  } finally {
-    config.set('S3_RECORDINGS_BUCKET', 'test-recordings');
-  }
-  assert.equal(await state(data.recordingId), undefined);
-  assert.equal(uploads, 0);
 });

@@ -25,38 +25,26 @@ const examples = {
   active: 'consultations/active-call-count.service.ts',
 };
 
-test('selected FAQ/dashboard checks retain the home consumer and shared-statistics regression', () => {
+test('selected FAQ/dashboard checks retain home and current statistics contracts', () => {
   assert.equal(selectIntegrationProfile(['backend/src/dashboard/home.service.ts']), 'dashboard');
   for (const profile of ['faq', 'dashboard'])
     assert.ok(integrationCommand(profile).includes('test/home.integration.test.cjs'), profile);
-  assert.ok(
-    integrationCommand('dashboard').includes('test/dashboard-optimization.integration.test.cjs'),
-  );
+  assert.ok(integrationCommand('dashboard').includes('test/dashboard.integration.test.cjs'));
 });
 
-test('feature profiles retain the new QA API consumers and performance regressions', () => {
+test('feature profiles retain current API consumers without old SQL benchmarks', () => {
   for (const [profile, names] of Object.entries({
-    dashboard: ['home', 'dashboard-optimization'],
-    persona: ['home', 'dashboard-optimization', 'persona-list-optimization'],
-    customers: ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'],
-    companies: [
-      'company-bulk-deletion',
-      'admin-order-counts',
-      'order-list-optimization',
-      'call-list-optimization',
-    ],
-    drafts: ['admin-order-counts', 'order-list-optimization'],
-    intake: ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'],
-    orders: [
-      'admin-order-counts',
-      'order-list-optimization',
-      'call-list-optimization',
-      'dashboard-optimization',
-    ],
-    calls: ['call-list-optimization', 'transcript-optimization', 'dashboard-optimization'],
-    analysis: ['call-list-optimization', 'transcript-optimization', 'dashboard-optimization'],
-    events: ['transcript-optimization'],
-    recordings: ['call-list-optimization', 'transcript-optimization'],
+    dashboard: ['home', 'dashboard'],
+    persona: ['home', 'ai-settings'],
+    customers: ['admin-order-counts', 'customers'],
+    companies: ['company-bulk-deletion', 'admin-order-counts', 'members'],
+    drafts: ['admin-order-counts', 'parcel-drafts'],
+    intake: ['admin-order-counts', 'order-intake'],
+    orders: ['admin-order-counts', 'orders'],
+    calls: ['consultations', 'call-insights-read'],
+    analysis: ['call-analysis', 'call-insights-read'],
+    events: ['call-events'],
+    recordings: ['recordings'],
   }))
     for (const name of names)
       assert.ok(
@@ -68,7 +56,7 @@ test('feature profiles retain the new QA API consumers and performance regressio
       files(integrationCommand(profile)).includes('test/home.integration.test.cjs'),
       profile + ': home',
     );
-  for (const name of ['admin-order-counts', 'order-list-optimization', 'call-list-optimization'])
+  for (const name of ['admin-order-counts', 'order-payments'])
     assert.ok(
       files(integrationCommand('payments')).includes('test/' + name + '.integration.test.cjs'),
       'payments: ' + name,

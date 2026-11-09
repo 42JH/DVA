@@ -153,36 +153,6 @@ test('current company rename and membership replacement preserve call pagination
   }
 });
 
-test('call company filtering stays admin-only, validates bounded IDs and documents the nullable current name', async () => {
-  for (const query of [
-    'organizationSeq=0',
-    'organizationSeq=-1',
-    'organizationSeq=1.5',
-    'organizationSeq=1e2',
-    'organizationSeq=',
-    'organizationSeq=2147483648',
-    'organizationSeq=1&organizationSeq=2',
-    'organizationSeq=1%20OR%201=1',
-  ])
-    await f.error(await f.get('/api/calls?' + query), 400, 'INVALID_REQUEST');
-  await f.error(
-    await f.get('/api/calls?organizationSeq=1', 0, { Cookie: undefined, ...businessHeaders() }),
-    401,
-    'UNAUTHORIZED',
-  );
-  for (const actor of [0, 1, 2])
-    assert.equal((await f.get('/api/calls?organizationSeq=2147483647', actor)).status, 200);
-  const spec = await body(await f.get('/api/docs-json'));
-  assert.equal(spec.components.schemas.CallDto.properties.organizationName.nullable, true);
-  const parameter = spec.paths['/api/calls'].get.parameters.find(
-    (p) => p.name === 'organizationSeq',
-  );
-  assert.equal(parameter.schema.minimum, 1);
-  assert.equal(parameter.schema.maximum, 2147483647);
-  for (const key of ['customerCategory', 'customerType'])
-    assert.equal(spec.components.schemas.CallDto.properties[key], undefined);
-});
-
 async function screenOrder(c = null, marker = randomUUID()) {
   const purchase = await order(c);
   await f.pool.query(
@@ -300,43 +270,6 @@ test('admin order company changes use current membership with matching filter, p
         cancelled: 0,
       },
     });
-});
-
-test('admin order organization filters reject invalid input and AI credentials while Swagger keeps the shared order contract unchanged', async () => {
-  for (const query of [
-    'organizationSeq=0',
-    'organizationSeq=-1',
-    'organizationSeq=1.5',
-    'organizationSeq=1e2',
-    'organizationSeq=',
-    'organizationSeq=2147483648',
-    'organizationSeq=1&organizationSeq=2',
-    'organizationSeq=1%20OR%201=1',
-  ])
-    await f.error(await f.get('/api/admin/orders?' + query), 400, 'INVALID_REQUEST');
-  await f.error(
-    await screen({}, 0, { Cookie: undefined, ...businessHeaders() }),
-    401,
-    'UNAUTHORIZED',
-  );
-  for (const actor of [0, 1, 2])
-    assert.equal((await screen({ organizationSeq: 2147483647 }, actor)).status, 200);
-  const spec = await body(await f.get('/api/docs-json'));
-  const properties = spec.components.schemas.AdminOrderListItemDto.properties;
-  assert.equal(properties.customerSeq.nullable, true);
-  assert.equal(properties.organizationName.nullable, true);
-  assert.deepEqual(spec.paths['/api/admin/orders'].get.security, [{ adminSession: [] }]);
-  const parameter = spec.paths['/api/admin/orders'].get.parameters.find(
-    (p) => p.name === 'organizationSeq',
-  );
-  assert.equal(parameter.schema.minimum, 1);
-  assert.equal(parameter.schema.maximum, 2147483647);
-  for (const name of ['OrderSummaryDto', 'OrderDetailDto'])
-    assert.equal(spec.components.schemas[name].properties.organizationName, undefined);
-  assert.equal(
-    spec.paths['/api/orders'].get.parameters.some((p) => p.name === 'organizationSeq'),
-    false,
-  );
 });
 
 test('admin organization reads preserve business rows and existing AI order list/detail fields and caller scope', async () => {

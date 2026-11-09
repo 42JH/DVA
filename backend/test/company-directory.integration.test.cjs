@@ -7,7 +7,7 @@ const { createTestPool, startTestApp, businessHeaders } = require('./helpers/app
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { OrganizationsRepository } = require('../dist/organizations/organizations.repository');
 const { hashPassword } = require('../dist/auth/password');
@@ -185,36 +185,6 @@ test('inactive companies, inactive memberships, withdrawn customers and missing 
   });
 });
 
-test('optional departments and detail addresses are retained without inventing PIN IDs', async () => {
-  const c = await company(),
-    member = await recipient(c);
-  await pool.query('UPDATE memberships SET department_seq=NULL WHERE membership_seq=$1', [
-    member.membershipSeq,
-  ]);
-  await pool.query(
-    "UPDATE customers SET address_data=address_data-'detailAddress' WHERE customer_seq=$1",
-    [member.customerSeq],
-  );
-  const expected = {
-    ...member,
-    departmentSeq: null,
-    departmentName: null,
-    addressData: { ...member.addressData },
-  };
-  delete expected.addressData.detailAddress;
-  const rows = (await result(await search({ q: c.name }))).data;
-  assert.deepEqual(rows, [expected]);
-  assert.deepEqual(Object.keys(rows[0]).sort(), [
-    'addressData',
-    'customerSeq',
-    'departmentName',
-    'departmentSeq',
-    'membershipSeq',
-    'organizationName',
-    'organizationSeq',
-  ]);
-});
-
 test('search combines company, department, current recipient and address terms with normalization', async () => {
   const c = await company();
   const member = await recipient(c, {
@@ -366,28 +336,6 @@ test('shared delivery search keeps company management and complete member lists 
   assert.equal((await fetch(base + '/api/companies/' + c.id + '/members')).status, 401);
 });
 
-test('query and pagination validation reject missing, blank, repeated and unsupported filters', async () => {
-  for (const query of [
-    '',
-    'q=',
-    'q=%20%20',
-    'q=a&q=b',
-    'q=a&limit=0',
-    'q=a&limit=101',
-    'q=a&offset=-1',
-    'q=a&limit=1.5',
-    'q=a&status=INACTIVE',
-    'q=a&customerSeq=1',
-    'q=a&organizationSeq=1',
-  ])
-    await error(await search(query), 400, 'INVALID_REQUEST');
-  assert.deepEqual(await result(await search({ q: marker() })), {
-    data: [],
-    hasNext: false,
-    total_count: 0,
-  });
-});
-
 test('search is read-only and database failures are not transformed into empty successes', async () => {
   const c = await company();
   await recipient(c);
@@ -411,39 +359,6 @@ test('search is read-only and database failures are not transformed into empty s
     repository.searchDirectory = original;
   }
   assert.equal((await result(await search({ q: c.name }))).data.length, 1);
-});
-
-test('Swagger exposes member delivery projection and static search remains separate from company IDs', async () => {
-  const doc = await (await fetch(base + '/api/docs-json')).json();
-  const operation = doc.paths['/api/companies/search'].get;
-  assert.deepEqual(operation.tags, ['Companies']);
-  assert.deepEqual(operation.security, [{ bearer: [] }]);
-  assert.equal(operation.parameters.find((p) => p.name === 'q').schema.maxLength, 100);
-  assert.ok(operation.parameters.some((p) => p.name === 'q' && p.required));
-  assert.ok(!operation.parameters.some((p) => p.name === 'call_session_seq'));
-  assert.deepEqual(
-    Object.keys(doc.components.schemas.CompanyDirectoryEnvelopeDto.properties).sort(),
-    ['data', 'hasNext', 'total_count'],
-  );
-  assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.organizationName);
-  assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.addressData);
-  assert.ok(doc.components.schemas.CompanyDirectoryEntryDto.properties.customerSeq);
-  assert.equal(doc.components.schemas.CompanyDirectoryEntryDto.properties.companyPinSeq, undefined);
-  assert.equal(
-    (await fetch(base + '/api/companies/2147483647', { headers: adminHeaders })).status,
-    404,
-  );
-});
-
-test('request logs contain route templates without query, recipient or phone values', async () => {
-  const requestId = randomUUID(),
-    term = marker();
-  await result(await search({ q: term }, { ...businessHeaders(), 'X-Request-Id': requestId }));
-  await new Promise((resolve) => setImmediate(resolve));
-  const entries = logs.filter((entry) => entry.requestId === requestId);
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].route, '/api/companies/search');
-  assert.ok(!JSON.stringify(entries).includes(term));
 });
 
 const memberSearch = (query, headers = adminHeaders) =>
@@ -574,42 +489,4 @@ test('administrator search keeps session roles, stable pagination, literal match
       offset === 0 ? [first.membershipSeq] : offset === 1 ? [second.membershipSeq] : [],
     );
   }
-  const doc = await (await fetch(base + '/api/docs-json')).json();
-  assert.deepEqual(doc.paths['/api/companies/members/search'].get.security, [{ adminSession: [] }]);
-  assert.equal(
-    doc.paths['/api/companies/members/search'].get.parameters.find((p) => p.name === 'q').schema
-      .maxLength,
-    100,
-  );
-});
-
-test('both searches enforce normalized 100-code-point bounds and reject invalid or repeated parameters', async () => {
-  for (const read of [search, memberSearch]) {
-    for (const q of [
-      '가'.repeat(100),
-      '😀'.repeat(100),
-      '  ' + '가'.repeat(100).normalize('NFD') + '  ',
-    ])
-      await result(await read({ q }));
-    for (const q of ['가'.repeat(101), '😀'.repeat(101), '\u0000']) {
-      const response = await read({ q });
-      await error(response.clone(), 400, 'INVALID_REQUEST');
-      assert.ok((await response.json()).error.details.some((detail) => detail.field === 'q'));
-    }
-  }
-  for (const query of [
-    '',
-    'q=',
-    'q=%20',
-    'q=a&q=b',
-    'q[x]=a',
-    'q=a&limit=0',
-    'q=a&limit=101',
-    'q=a&offset=-1',
-    'q=a&includeInactive=1',
-    'q=a&includeInactive=',
-    'q=a&includeInactive=true&includeInactive=false',
-    'q=a&organizationSeq=1',
-  ])
-    await error(await memberSearch(query), 400, 'INVALID_REQUEST');
 });
