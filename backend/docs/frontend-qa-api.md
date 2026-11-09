@@ -67,3 +67,27 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 운영 DB·실제 프론트 화면·외부 AI/결제/디버 실서비스·운영 부하·배포·원격 CI는 미검증이다. 추가 migration·환경변수·데이터 보정은 없다. MR 대상은 develop-backend이며 생성 전 사용자 보고 단계에서 멈춘다.
 
 후속 조회 성능 개선은 [기존 결과 비교·계획·측정·검증 기록](api-performance-optimization.md)을 따른다. 위 1,093개는 최초 기능 3건 시점의 기록이며, 후속 최적화와 최신 CI 병합 검증은 별도 기록을 확인한다. 공개 응답·페이지·건수·권한·오류·보관 기준과 위 프론트 연동 계약은 유지한다.
+
+## 4. 최종 화면의 주문·미답변 연결 기준 — 2026-11-09
+
+최신 develop-backend `5d3bd189`와 최종 화면을 다시 대조하고 다음 기준을 확정했다. 이 절은 기존 API의 사용 방법을 명확히 하며 주문 생성·집계·미답변 수집 계약을 변경하지 않는다.
+
+### 주문 전체와 미완료
+
+055 이후 실제 주문과 미완료 배송 단건은 별도 리소스다. 한 통화에서 배송 3개 중 2개를 완성하면 실제 주문 1건(배송상세 2개)과 미완료 초안 1건이 남는다. 따라서 `statusCounts.all + statusCounts.incomplete`를 전체 주문 수로 표시하지 않는다.
+
+- 전체·결제·접수 실패·취소 탭: 기존 `GET /api/admin/orders`와 `orderSeq`를 사용한다.
+- 미완료 탭: `GET /api/parcel-drafts?status=INCOMPLETE`와 `draftSeq`를 사용한다. 검색·기간·기업 조건은 같은 값으로 전달한다.
+- 신규 미완료에는 실제 `orderSeq`가 없을 수 있다. `draftSeq`를 실제 주문 번호로 표시하거나 `/api/orders/{draftSeq}`로 이동하지 않는다. 초안 번호로 구분해 표시한다.
+- 미완료 보완은 [055 프론트 명세](parcel-draft-frontend-integration.md)의 원본 재개 → 새 초안 보완 → 관리자 접수 흐름을 따른다. 이관 원본 주문을 다시 접수하지 않는다.
+
+### 미답변 질문에서 통화 열기
+
+1. AI는 기존 `POST /api/ai/unanswered-questions`에 질문 원문·통화 번호·발생 시각·`offsetSeconds`를 전송한다. 위치를 모르면 명시적으로 null을 전송한다.
+2. 프론트는 `GET /api/unanswered-questions`에서 `unansweredQuestionSeq`, `callSessionSeq`, `questionText`, `offsetSeconds`를 받는다.
+3. `callSessionSeq`로 기존 `GET /api/calls/{id}`와 `GET /api/calls/{id}/transcript`를 조회한다. AI 동작·처리 결과는 기존 `/actions`, `/processing-results`를 조회한다. 긴 대화는 기존 limit·offset 페이지를 이어 읽는다.
+4. 시간·원문 대조는 해당 발화의 후보를 찾는 데 사용할 수 있지만, 미답변 질문과 특정 발화의 직접 연결을 보장하지 않는다. 같은 질문 반복·위치 null·발화 미수집으로 특정할 수 없으면 통화는 열고 정확한 줄 강조는 생략한다. 위치 null을 00:00으로 대체하지 않는다.
+
+미답변 응답에는 `utteranceOrder`나 `callUtteranceSeq`가 없다. 처리 결과의 `questionUtteranceOrder`·`answerUtteranceOrder`는 FAQ_ANSWERED 전용이며 QUESTION_UNANSWERED의 발화 연결로 사용하지 않는다. 이번 확정에서는 현행 API를 유지한다. 정확한 미답변 발화 연결·주변 발화 전용 조회는 별도 후속 범위로 남긴다. AI에 새로운 필드나 전송 변경은 요구하지 않는다.
+
+후속 홈 화면·CI 변경과 단계별 검증은 [최종 화면 후속 작업 기록](final-wireframe-follow-up.md)을 따른다.
