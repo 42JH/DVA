@@ -17,8 +17,8 @@ import { fetchAll, FETCH_ALL_MAX } from '@/shared/api/paging'
 import { usePageSize } from '@/v2/lib/paging'
 import { orderNo } from '@/shared/order/labels'
 
-// at = 목록 기준 시각 · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
-const DEFAULTS = { q: '', r: '7d', at: '', s: '' }
+// at = 목록 기준 시각 · d = 시작 시각 정렬('asc' = 오래된 순) · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
+const DEFAULTS = { q: '', r: '7d', at: '', s: '', d: 'desc' }
 
 /** 통화 상태 — 끝났는지(PBX 종료 시각)와 분석이 왔는지로 */
 
@@ -26,6 +26,7 @@ export function useCalls() {
   const { params, page, set } = useListParams(DEFAULTS)
   const qc = useQueryClient()
   const r = params.r as Range
+  const asc = params.d === 'asc'
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
   const query = { q: (phoneDigits(t) || t).slice(0, 200) || undefined, from: rangeFrom(r) }
   const s = (STATE_FILTERS.some((f) => f.value === params.s) ? params.s : '') as StateFilter
@@ -38,6 +39,7 @@ export function useCalls() {
     page,
     asOf: params.at,
     go: set,
+    asc,
   })
 
   // 상태 필터: 서버에 분석 상태 조건이 없어(11/09) 그 기간 · 검색의 통화를 모두 받아 화면에서 거르고 쪽을 나눔
@@ -52,6 +54,7 @@ export function useCalls() {
     placeholderData: keepPreviousData,
   })
   const hit = (all.data ?? []).filter((d) => stateKey(callState(d).label) === s)
+  if (asc) hit.reverse() // 서버는 최신순
   const shown = s
     ? {
         items: hit.slice((page - 1) * size, page * size),
@@ -95,6 +98,8 @@ export function useCalls() {
 
   return {
     q: params.q,
+    asc,
+    toggleSort: () => set({ d: asc ? 'desc' : 'asc' }),
     setQ: (q: string) => set({ q, at: '' }),
     range: r,
     setRange: (v: Range) => set({ r: v, at: '' }),
