@@ -315,16 +315,6 @@ export const orderHandlers = [
       statusCounts,
     })
   }),
-  // 홈 (GET /dashboard/home) — 오늘(한국 시간) 만든 실제 주문 수. 미완료 초안 제외
-  http.get(`${API_BASE_URL}/dashboard/home`, () => {
-    const kstDay = (t: string | number) =>
-      new Date(new Date(t).getTime() + 9 * 3600e3).toISOString().slice(0, 10)
-    const today = kstDay(Date.now())
-    const todayOrderCount = allOrders().filter(
-      (o) => statusOf(o) !== 'COLLECTING' && kstDay(o.acceptedAt) === today,
-    ).length
-    return HttpResponse.json({ data: { todayOrderCount }, meta: meta() })
-  }),
   http.get(`${API_BASE_URL}/orders/:id`, ({ params }) => {
     const o = allOrders().find((x) => x.orderSeq === Number(params.id))
     if (!o)

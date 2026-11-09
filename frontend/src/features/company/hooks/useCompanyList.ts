@@ -5,7 +5,7 @@ import { pageCount, pageSlice } from '@/shared/api/paging'
 import { fmtDate } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { matchKo } from '@/shared/lib/search'
-import { companyQueries, deleteCompany } from '@/features/company/api/companyApi'
+import { companyQueries, deleteCompanies, deleteCompany } from '@/features/company/api/companyApi'
 import { BILLING_LABEL, errorText } from '@/features/company/labels'
 
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
@@ -55,19 +55,14 @@ export function useCompanyList(size = PAGE_SIZE) {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  // 삭제 API는 한 곳씩 → 차례로. 중간에 실패하면 멈추고 몇 곳 지웠는지 알림 (11/01 결정 2)
+  // 고른 기업을 한 번에 (DELETE /companies) — 한 곳이라도 실패하면 서버가 전체를 되돌려 일부만 지워지지 않음. 고르기는 보이는 쪽 안(최대 100곳)
   const removeSelected = async () => {
-    const ids = [...selected]
     setDeleting(true)
     setDeleteError(null)
-    let done = 0
     try {
-      for (const id of ids) {
-        await deleteCompany(id)
-        done++
-      }
+      await deleteCompanies([...selected])
     } catch (e) {
-      setDeleteError(`${ids.length}곳 중 ${done}곳 삭제했습니다. 나머지는 ${errorText(e, '삭제')}`)
+      setDeleteError(`한 곳도 지우지 않았습니다. ${errorText(e, '삭제')}`)
     } finally {
       setDeleting(false)
       setConfirming(false)

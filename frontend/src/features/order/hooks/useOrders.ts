@@ -1,6 +1,6 @@
 // 주문 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 새 주문 알림 + 상태 묶음별 건수 + 기간 · 검색. 서버 API는 기존과 같음 (GET /admin/orders)
 import { useEffect } from 'react'
-import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { draftList, draftListItem, fromAdminList } from '@/features/order/api/draftApi'
 import { oldestPage } from '@/shared/lib/paging'
 import { pageCount } from '@/shared/api/paging'
@@ -17,6 +17,24 @@ import { useSnapshotList } from '@/shared/lib/useSnapshotList'
 import { rangeFrom, type Range } from '@/shared/lib/range'
 import { itemsText, STATUS_LOOK } from '../../../shared/order/look'
 import { dateTime } from '@/shared/lib/when'
+
+// GET /admin/orders statusCounts — all = 실제 주문 + 미완료 초안(057 · 058 뒤), incomplete = 그중 초안
+interface StatusCounts {
+  all: number
+  incomplete: number
+  notPaid: number
+  paid: number
+  submissionFailed: number
+  cancelled: number
+}
+const COUNT_KEY: Record<StatusGroup, keyof StatusCounts> = {
+  ALL: 'all',
+  COLLECTING: 'incomplete',
+  notPaid: 'notPaid',
+  PAID: 'paid',
+  SUBMISSION_FAILED: 'submissionFailed',
+  CANCELLED: 'cancelled',
+}
 
 const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'ALL', label: '전체' },
@@ -120,26 +138,18 @@ export function useOrders() {
       }
     : { ...list, items: listItems as OrderListItem[] }
   const to = list.asOf ? new Date(list.asOf).toISOString() : undefined
-  // 묶음마다 건수 — 1건만 받아 total_count (검색 · 기간 · 목록 기준 시각은 같이 적용 → 탭 건수와 아래 총 건수가 같음)
-  const counts = useQueries({
-    queries: GROUPS.map((x) => ({
-      queryKey: ['screen', 'orders', 'count', { ...base, to, statusGroup: x.value }],
-      enabled: !!to && x.value !== 'COLLECTING', // 미완료 건수는 초안에서
-      placeholderData: keepPreviousData, // 기간 · 검색을 바꿔 새로 받는 동안 숫자를 비우지 않음 (탭이 줄었다 늘며 울렁이던 것)
-      queryFn: ({ signal }: { signal: AbortSignal }) =>
-        api
-          .get<ApiList<OrderListItem>>('/admin/orders', {
-            query: {
-              ...base,
-              to,
-              statusGroup: x.value === 'ALL' ? undefined : x.value,
-              limit: 1,
-              offset: 0,
-            },
-            signal,
-          })
-          .then((res) => res.total_count),
-    })),
+  // 탭 건수 — 목록 응답의 statusCounts 한 번 (검색 · 기간 · 목록 기준 시각 같이 적용, 서버가 같은 시점으로 셈). 미완료는 아직 초안 목록 건수
+  const counts = useQuery<StatusCounts>({
+    queryKey: ['screen', 'orders', 'statusCounts', { ...base, to }],
+    enabled: !!to,
+    placeholderData: keepPreviousData, // 기간 · 검색을 바꿔 새로 받는 동안 숫자를 비우지 않음 (탭이 줄었다 늘며 울렁이던 것)
+    queryFn: ({ signal }) =>
+      api
+        .get<ApiList<OrderListItem> & { statusCounts: StatusCounts }>('/admin/orders', {
+          query: { ...base, to, limit: 1, offset: 0 },
+          signal,
+        })
+        .then((res) => res.statusCounts),
   })
 
   const rows = shown.items.flatMap(parcelRows).map((row) => {
@@ -171,9 +181,12 @@ export function useOrders() {
     q: params.q,
     setQ: (q: string) => set({ q, at: '' }),
     group: g,
-    groups: GROUPS.map((x, i) => ({
+    groups: GROUPS.map((x) => ({
       ...x,
-      count: x.value === 'COLLECTING' ? (draftCount.data ?? null) : (counts[i].data ?? null),
+      count:
+        x.value === 'COLLECTING'
+          ? (draftCount.data ?? null)
+          : (counts.data?.[COUNT_KEY[x.value]] ?? null),
     })),
     ranged: !drafting, // 미완료(초안)는 기간 조건이 없음
     setGroup: (v: StatusGroup) => set({ g: v, at: '' }),
