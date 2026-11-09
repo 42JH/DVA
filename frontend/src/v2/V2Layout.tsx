@@ -124,7 +124,9 @@ export function V2Layout() {
           </button>
         </div>
       </nav>
-      <main className="relative flex min-w-0 flex-1 flex-col">
+      {/* overflow-hidden: 화면이 바뀔 때 새 화면이 6px 아래에서 떠오르는데(animate-page-in), 그만큼 창 밖으로 삐져나가
+          창 스크롤바가 잠깐 생겼다 사라지며 화면 폭이 출렁였음 → 본문 밖은 잘라 냄 (스크롤은 화면마다 안쪽 상자에서) */}
+      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* 화면을 받는 동안(처음 여는 화면 코드) 위쪽 가는 막대 — 눌렀는데 반응이 없어 보이지 않게 */}
         {nav.state === 'loading' && (
           <span
