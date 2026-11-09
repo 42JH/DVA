@@ -278,7 +278,7 @@ test('customer list and status changes require a real active administrator; forg
   }
 });
 
-test('list supports literal name search, exact phone, state and stable offset pages', async () => {
+test('list supports literal name search, partial phone, state and stable offset pages', async () => {
   const prefix = '목록' + randomUUID();
   const inputs = ['Alpha%_', 'alpha', 'beta'].map((name) => ({
     name: prefix + name,
@@ -308,6 +308,30 @@ test('list supports literal name search, exact phone, state and stable offset pa
   assert.equal(second.hasNext, false);
   assert.equal((await list({ q: prefix.toUpperCase() + 'ALPHA%_' })).data[0].customerSeq, ids[0]);
   assert.equal((await list({ phoneNumber: inputs[0].phoneNumber })).data[0].customerSeq, ids[0]);
+  for (const fragment of [
+    inputs[0].phoneNumber.slice(0, 3),
+    inputs[0].phoneNumber.slice(3, 7),
+    inputs[0].phoneNumber.slice(-4),
+    inputs[0].phoneNumber.slice(1),
+  ]) {
+    const expected = inputs
+      .map((input, index) => ({ ...input, id: ids[index] }))
+      .filter((input) => input.phoneNumber.includes(fragment))
+      .map((input) => input.id)
+      .toReversed();
+    const partial = await list({ q: prefix, phoneNumber: fragment });
+    assert.deepEqual(
+      partial.data.map((row) => row.customerSeq),
+      expected,
+    );
+    assert.equal(partial.total_count, expected.length);
+  }
+  const filtered = await list({ q: prefix, phoneNumber: '010', status: 'WITHDRAWN', limit: '1' });
+  assert.deepEqual(
+    filtered.data.map((row) => row.customerSeq),
+    [ids[1]],
+  );
+  assert.equal(filtered.total_count, 1);
   assert.deepEqual((await list({ phoneNumber: phone() })).data, []);
   assert.deepEqual(
     (await list({ q: prefix, status: 'WITHDRAWN' })).data.map((row) => row.customerSeq),
@@ -325,7 +349,10 @@ test('list supports literal name search, exact phone, state and stable offset pa
     'offset=1.5',
     'q=a&q=b',
     'phoneNumber=010-1234',
-    'phoneNumber=' + inputs[0].phoneNumber.slice(1),
+    'phoneNumber=',
+    'phoneNumber=123456789012',
+    'phoneNumber=%25',
+    'phoneNumber=123&phoneNumber=456',
     'status=INACTIVE',
     'page=1',
   ])

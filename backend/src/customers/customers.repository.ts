@@ -131,7 +131,7 @@ export class CustomersRepository {
        LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
        LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
        WHERE c.deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(c.name), lower($1)) > 0)
-         AND ($2::text IS NULL OR c.phone_number = $2)
+         AND ($2::text IS NULL OR strpos(c.phone_number, $2) > 0)
          AND ($3::text IS NULL OR c.status = $3)`,
       [query.q || null, query.phoneNumber ?? null, query.status ?? null],
       query,
