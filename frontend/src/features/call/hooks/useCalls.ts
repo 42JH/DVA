@@ -49,7 +49,8 @@ export function useCalls() {
     queryKey: ['screen', 'calls', 'all', query, to],
     enabled: !!s && !!to,
     queryFn: ({ signal }) => fetchAll<CallListItemDto>('/calls', { ...query, to }, signal),
-    staleTime: Infinity, // 기준 시각에 묶임 — [최신 목록 보기]로만 바뀜
+    staleTime: Infinity, // 기준 시각에 묶임 — 새 통화는 [최신 목록 보기]로만
+    refetchInterval: 15_000, // 받은 통화의 상태(통화 중 → 분석 중 → 분석 완료)는 15초마다 새로
     placeholderData: keepPreviousData,
   })
   const hit = (all.data ?? []).filter((d) => stateKey(callState(d).label) === s)
