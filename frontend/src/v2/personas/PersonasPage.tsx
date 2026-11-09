@@ -9,6 +9,7 @@ import { AddPersonaModal } from '@/features/persona/components/AddPersonaModal'
 import { PromptEditor } from '@/features/persona/components/PromptEditor'
 import { TestCallModal } from '@/features/persona/components/TestCallModal'
 import { PageHead } from '@/v2/V2Layout'
+import { PERSONA_DEMO } from '@/features/persona/api/personaApi'
 import type { TagKind } from '@/shared/ui'
 import { Badge, Btn, Icon, type Tone } from '@/v2/ui'
 import { Confirm } from '@/v2/ui/Modal'
@@ -35,6 +36,16 @@ export function PersonasPage() {
           </Btn>
         )}
       </PageHead>
+      {PERSONA_DEMO && (
+        // 시연 모드 (11/09) — 고쳐 봐도 실서버 AI 상담가에는 안 감
+        <p
+          role="note"
+          className="shrink-0 border-b border-ops-wait/20 bg-ops-wait-soft px-6 py-2 text-[13px] text-ops-wait"
+        >
+          시연 모드입니다. 여기서 저장 · 적용한 내용은 실제 AI 상담가에 반영되지 않고, 새로고침하면
+          원래대로 돌아갑니다.
+        </p>
+      )}
       {vm.error || vm.isLoading || !vm.prompt || !vm.editTarget ? (
         <p className="flex flex-1 items-center justify-center py-16 text-center text-[14px] text-ops-sub">
           {vm.error ?? (vm.isLoading ? '불러오는 중…' : '상담가가 없습니다.')}
