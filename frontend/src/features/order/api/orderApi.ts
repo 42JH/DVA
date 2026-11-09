@@ -54,6 +54,8 @@ export interface OrderListItem {
   createdAt: string // 주문 생성 시각 (화면 '접수 시각')
   pickupRequestedAt: string | null
   parcels: ListParcel[] // 상세 순번대로, 취소된 상세도 포함
+  // 미완료 초안 줄이면 초안 번호 (백엔드 057 · 058 — 전체 목록에 초안이 섞여 옴, orderSeq는 예약번호). 실제 주문 · 배포 전은 없음 · null
+  draftSeq?: number | null
 }
 
 export const orderQueries = {

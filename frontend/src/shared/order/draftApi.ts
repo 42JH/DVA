@@ -14,6 +14,7 @@ export interface ParcelDraftDto {
   status: 'READY' | 'EDITING' | 'INCOMPLETE' | 'CONVERTED' | 'CANCELLED' | 'RESUMED'
   version: number
   legacyOrderSeq: number | null // 055 이관 전 미완료 주문 번호 (통화 목록에 남아 있는 번호)
+  reservedOrderSeq?: number | null // 예약 주문번호 (백엔드 057 · 058 — 접수하면 이 번호가 실제 주문번호). 배포 전엔 없음
   createdAt: string
   parcel: {
     origin: OrderAddressDto
@@ -29,9 +30,13 @@ export interface ParcelDraftDto {
   }
 }
 
-/** 화면 번호 — 이관된 건은 옛 주문번호(통화 목록과 같은 번호), 새 건은 '미완료 n' */
-export const draftLabel = (d: Pick<ParcelDraftDto, 'draftSeq' | 'legacyOrderSeq'>) =>
-  d.legacyOrderSeq ? orderNo(d.legacyOrderSeq) : `미완료 ${d.draftSeq}`
+/** 화면 번호 — 예약 주문번호(DV-…). 예약번호가 없는 옛 서버에선 이관 건은 옛 주문번호, 새 건은 '미완료 n' */
+export const draftLabel = (
+  d: Pick<ParcelDraftDto, 'draftSeq' | 'legacyOrderSeq' | 'reservedOrderSeq'>,
+) => {
+  const no = d.reservedOrderSeq ?? d.legacyOrderSeq
+  return no ? orderNo(no) : `미완료 ${d.draftSeq}`
+}
 
 /** 초안 상세 → 주문 상세 모양 (상태 COLLECTING · 결제 방식 미정) + 그 통화 */
 export async function fetchDraft(draftSeq: number, signal?: AbortSignal): Promise<OrderDetail> {

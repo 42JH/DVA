@@ -1,7 +1,7 @@
 // 주문 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 새 주문 알림 + 상태 묶음별 건수 + 기간 · 검색. 서버 API는 기존과 같음 (GET /admin/orders)
 import { useEffect } from 'react'
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { draftList, draftListItem } from '@/features/order/api/draftApi'
+import { draftList, draftListItem, fromAdminList } from '@/features/order/api/draftApi'
 import { oldestPage } from '@/shared/lib/paging'
 import { pageCount } from '@/shared/api/paging'
 import { api, type ApiList } from '@/shared/api/client'
@@ -97,7 +97,10 @@ export function useOrders() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 받은 결과가 바뀔 때만
   }, [drafts.data, page, draftPages])
   const draftItems = (drafts.data?.data ?? []).map(draftListItem)
-  const draftLabels = new Map(draftItems.map((d) => [d.orderSeq, d.label]))
+  const listItems = list.items.map(fromAdminList) // 전체 목록에 섞여 온 초안 줄은 초안으로 엶 (057 · 058 뒤)
+  const draftLabels = new Map(
+    [...draftItems, ...listItems].flatMap((d) => (d.label ? [[d.orderSeq, d.label] as const] : [])),
+  )
   const shown = drafting
     ? {
         items: draftItems as OrderListItem[],
@@ -115,7 +118,7 @@ export function useOrders() {
         fresh: 0,
         latest: () => {},
       }
-    : list
+    : { ...list, items: listItems as OrderListItem[] }
   const to = list.asOf ? new Date(list.asOf).toISOString() : undefined
   // 묶음마다 건수 — 1건만 받아 total_count (검색 · 기간 · 목록 기준 시각은 같이 적용 → 탭 건수와 아래 총 건수가 같음)
   const counts = useQueries({

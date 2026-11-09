@@ -13,6 +13,7 @@ test('통화 상태 — 통화 중 · 분석 중 · 분석 실패 · 분석 완�
   )
   assert.equal(s({ ...ended, analysis: null, analysisStatus: 'PENDING' }), '분석 중')
   assert.equal(s({ ...ended, analysis: null, analysisStatus: 'FAILED' }), '분석 실패')
+  assert.equal(s({ ...ended, analysis: null, analysisStatus: 'EXPIRED' }), '분석 만료')
   assert.equal(s({ ...ended, analysis: {}, analysisStatus: 'COMPLETED' }), '분석 완료')
   assert.equal(s({ ...ended, analysis: {}, analysisStatus: 'FAILED' }), '분석 완료') // 정상 분석이 실패보다 우선
 })
