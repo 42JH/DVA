@@ -66,7 +66,13 @@ export function useMemberForm(companyId: number, target: Member | null, onDone: 
 
   const save = useMutation({
     mutationFn: async (): Promise<'ok' | 'addressFailed'> => {
-      const item = { employeeNo: no, name: form.name.trim(), phoneNumber: digits }
+      const item = {
+        employeeNo: no,
+        name: form.name.trim(),
+        phoneNumber: digits,
+        // 수정은 다시 등록하는 방식 — 부서를 안 보내면 서버가 '부서 없음'으로 바꿈 → 지금 부서 그대로 (11/09 검수)
+        ...(editing ? { departmentSeq: target.membership.departmentSeq } : {}),
+      }
       const infoChanged =
         !editing || item.name !== target.customer.name || digits !== target.customer.phoneNumber
       if (infoChanged) await addMembers(companyId, [item])

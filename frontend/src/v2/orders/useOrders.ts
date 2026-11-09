@@ -64,6 +64,7 @@ export function useOrders() {
     asOf: params.at,
     go: set,
     asc,
+    enabled: g !== 'COLLECTING', // 미완료 탭은 초안 목록 — 주문 목록 · 쪽 당기기가 초안 쪽을 되돌리지 않게
   })
   // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 기간 조건 없음, 쪽 번호만
   const drafting = g === 'COLLECTING'

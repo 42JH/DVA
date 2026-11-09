@@ -126,7 +126,14 @@ export function useAdminList(size = PAGE_SIZE) {
     rows,
     isLoading: list.isPending,
     loadError: list.error?.message ?? null,
-    total: withoutMe(tab, total) ?? total, // 활성화 탭 = 나를 뺀 수 (탭 숫자와 같게)
+    // 활성화 탭 = 나를 뺀 수 (탭 숫자와 같게). 검색 결과에 내가 없으면 빼지 않음 (11/09 검수: 2명인데 '1명'으로)
+    total:
+      !q ||
+      [me?.name, me?.loginId].some((s) =>
+        s?.normalize('NFC').toLowerCase().includes(q.toLowerCase()),
+      )
+        ? (withoutMe(tab, total) ?? total)
+        : total,
     page: Math.min(page, pages),
     pages,
     setPage: (p: number) => set({ page: p }),
