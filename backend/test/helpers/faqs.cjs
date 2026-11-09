@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { applicationFixture } = require('./application.cjs');
+const { applicationFixture, businessHeaders } = require('./application.cjs');
 
 module.exports = function faqFixture() {
   const f = applicationFixture('FAQ 관리자');
@@ -9,7 +9,7 @@ module.exports = function faqFixture() {
   f.patch = (id, body, actor = 0, headers = {}) =>
     f.write('PATCH', `/api/faqs/${id}`, body, actor, headers);
   f.ai = (suffix = '', headers = {}) =>
-    f.get('/api/ai/faqs' + suffix, 0, { Cookie: undefined, ...headers });
+    f.get('/api/ai/faqs' + suffix, 0, { Cookie: undefined, ...businessHeaders(), ...headers });
   f.createdId = async (input, actor = 0) => {
     const response = await f.create({ items: [input] }, actor);
     assert.equal(response.status, 204, await response.clone().text());

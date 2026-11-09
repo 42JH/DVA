@@ -490,7 +490,11 @@ test('production login through Nginx authorizes company operations and logout re
 });
 
 test('Nginx forwards the call_session_seq header without losing its underscores', async () => {
-  const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() };
+  const headers = {
+    ...businessHeaders(),
+    'Content-Type': 'application/json',
+    'Idempotency-Key': randomUUID(),
+  };
   const body = JSON.stringify({ customer: { name: '주문 검증', phoneNumber: '01000880088' } });
   const missing = await fetch('http://proxy/api/orders', { method: 'POST', headers, body });
   assert.equal(missing.status, 400);
@@ -678,7 +682,7 @@ test('HTTPS and development login IP buckets reject bursts with the established 
       headers: { Origin: 'https://13.209.59.180', 'Access-Control-Request-Method': 'POST' },
     });
     assert.equal(preflight.status, 204);
-    assert.equal((await fetch(root + '/ai/faqs')).status, 200);
+    assert.equal((await fetch(root + '/ai/faqs', { headers: businessHeaders() })).status, 200);
   }
 });
 

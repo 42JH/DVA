@@ -2,7 +2,12 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 
 const { AuditService } = require('../dist/audit/audit.service');
 
@@ -111,7 +116,7 @@ function cancel(id, { cookie = cookies[0], call, requestId = randomUUID(), parce
       Origin: origin,
       'X-Request-Id': requestId,
       'Content-Type': 'application/json',
-      ...(cookie ? { Cookie: cookie } : {}),
+      ...(cookie ? { Cookie: cookie } : businessHeaders()),
       ...(call === undefined ? {} : { call_session_seq: String(call) }),
     },
     body: parcels === undefined ? undefined : JSON.stringify({ orderParcelSeqs: parcels }),

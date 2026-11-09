@@ -107,7 +107,7 @@ async function createFinal(body = finalBody(), ai = false, key = randomUUID()) {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
-      ...(ai ? {} : { Cookie: cookie, Origin: origin }),
+      ...(ai ? businessHeaders() : { Cookie: cookie, Origin: origin }),
     },
     body: JSON.stringify(
       ai

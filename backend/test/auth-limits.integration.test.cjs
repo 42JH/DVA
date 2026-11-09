@@ -253,7 +253,14 @@ test('two held login operations reject a third before its transaction while norm
     limited(await login(prefix + 'third'), 1);
     assert.equal(spy.mock.callCount(), 2);
     assert.equal((await call('GET', '/api/auth/me', undefined, headers)).status, 200);
-    assert.equal((await call('GET', '/api/ai/faqs')).status, 200);
+    assert.equal(
+      (
+        await call('GET', '/api/ai/faqs', undefined, {
+          Authorization: 'Bearer ' + process.env.AI_BUSINESS_TOKEN,
+        })
+      ).status,
+      200,
+    );
   } finally {
     release();
     const results = await Promise.all([first, second]);

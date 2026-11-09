@@ -22,8 +22,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { AuditOperation } from '../audit/audit-operation';
-import { AuthRequest } from '../auth/auth.guard';
-import { MvpAiPinAccess } from '../auth/mvp-ai-access';
+import { AuthRequest, MvpAiCustomerAccess as AiOrAdminAccess } from '../auth/auth.guard';
 import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import {
   CreatePinDto,
@@ -45,7 +44,7 @@ const callHeader = {
   description: 'AI 필수·관리자 불필요. 통화 고객 범위를 확인하며 인증 토큰은 아닙니다.',
   schema: { type: 'integer', minimum: 1, maximum: 2147483647 },
 };
-const aiSecurity: Record<string, string[]>[] = [{ adminSession: [] }, {}];
+const aiSecurity: Record<string, string[]>[] = [{ adminSession: [] }, { bearer: [] }];
 
 @ApiTags('Pins')
 @ApiResponse({ status: 400, type: ErrorResponseDto })
@@ -81,7 +80,7 @@ export class PinsController {
   }
 
   @Get('customers/:id/pins')
-  @MvpAiPinAccess()
+  @AiOrAdminAccess()
   @ApiOperation({ summary: '개인 주소록 목록·검색', security: aiSecurity })
   @ApiHeader(callHeader)
   @ApiOkResponse({ type: PersonalPinsEnvelopeDto })
@@ -95,7 +94,7 @@ export class PinsController {
   }
 
   @Post('customers/:id/pins')
-  @MvpAiPinAccess()
+  @AiOrAdminAccess()
   @AuditOperation({ action: 'PERSONAL_PIN_CREATED', targetType: 'PERSONAL_PIN', target: 'none' })
   @ApiOperation({
     summary: '개인 주소록 등록',
@@ -121,7 +120,7 @@ export class PinsController {
   }
 
   @Patch('pins/:id')
-  @MvpAiPinAccess()
+  @AiOrAdminAccess()
   @AuditOperation({ action: 'PERSONAL_PIN_UPDATED', targetType: 'PERSONAL_PIN', target: 'id' })
   @ApiOperation({
     summary: '개인 주소록 수정',

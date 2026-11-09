@@ -122,7 +122,13 @@ async function fixture({
       ],
     )
   ).rows[0].call_session_seq;
-  return { customer, company, call, phone, ai: { call_session_seq: String(call) } };
+  return {
+    customer,
+    company,
+    call,
+    phone,
+    ai: { ...businessHeaders(), call_session_seq: String(call) },
+  };
 }
 async function personal(f, data = address(), extra = {}, headers = adminHeaders) {
   return success(
@@ -139,7 +145,7 @@ async function stored(id) {
   return (await pool.query('SELECT * FROM personal_pins WHERE personal_pin_seq=$1', [id])).rows[0];
 }
 
-test('AI registers, searches and edits its active customer personal pins without service authentication', async () => {
+test('AI registers, searches and edits its active customer personal pins with business authentication', async () => {
   const f = await fixture();
   const input = address({ detailAddress: '101호' });
   const created = await personal(f, input, { label: '  집  ' }, f.ai);
@@ -202,7 +208,10 @@ test('invalid call IDs are rejected and ended calls permit personal PIN writes w
   const f = await fixture();
   const p = await personal(f);
   for (const header of [undefined, '0', '-1', '1.5', 'abc', '2147483648']) {
-    const headers = header === undefined ? {} : { call_session_seq: header };
+    const headers = {
+      ...businessHeaders(),
+      ...(header === undefined ? {} : { call_session_seq: header }),
+    };
     await error(
       await request('GET', `/customers/${f.customer}/pins`, undefined, headers),
       400,
@@ -211,6 +220,7 @@ test('invalid call IDs are rejected and ended calls permit personal PIN writes w
   }
   await error(
     await request('GET', `/customers/${f.customer}/pins`, undefined, {
+      ...businessHeaders(),
       call_session_seq: '2147483647',
     }),
     404,
