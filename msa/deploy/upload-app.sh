@@ -39,10 +39,10 @@ remote_dir="$remote_parent/$service"
 
 # 동일 빌드의 기존 패키지를 덮어쓰지 않는다.
 if [[ "$action" != apply ]]; then
-  ssh "${ssh_options[@]}" "$server" \
+  ssh -n "${ssh_options[@]}" "$server" \
     "umask 077; mkdir -p '$remote_parent' && mkdir '$remote_dir'"
   scp "${ssh_options[@]}" "${files[@]}" "$server:$remote_dir/"
 fi
 
-ssh "${ssh_options[@]}" "$server" \
+ssh -n "${ssh_options[@]}" "$server" \
   "cd '$remote_dir' && sha256sum --check --strict SHA256SUMS && bash remote-app.sh '$service' '$release' '$action'"
