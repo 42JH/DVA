@@ -1,10 +1,10 @@
 import { useRef, useState, type AudioHTMLAttributes, type SyntheticEvent } from 'react'
-import type { Recording } from '@/features/call/api/callApi'
+import type { Recording } from '@/shared/call/callApi'
 
 export type PlayerState = 'ok' | 'none' | 'failed' // 재생 가능 · 녹취 없음 · 발급 실패 또는 재생 오류
 
 /** <audio>에 실제로 꽂혀 있는 소리 — 어느 녹취의 어느 URL인지 (재조회로 받은 최신 Recording과 다를 수 있음) */
-export interface AudioSource {
+interface AudioSource {
   recordingSeq: number
   url: string
   expiresAt: string | null

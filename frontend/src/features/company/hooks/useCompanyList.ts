@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useDeferredValue, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { pageCount, pageSlice } from '@/shared/api/paging'
@@ -11,12 +11,12 @@ import { BILLING_LABEL, errorText } from '@/features/company/labels'
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
 const DEFAULTS = { q: '' }
 
-export interface CompanyRow {
+interface CompanyRow {
   id: number
   name: string
   inactive: boolean // '비활성' 태그
   members: number // 사원 수 (서버 memberCount)
-  date: string // 등록일 '2026-03-04' (v2 날짜 형식) · 없으면 '—'
+  date: string // 등록일 '2026-03-04' (날짜 형식) · 없으면 '—'
   billing: string // 월결제 '사용' · '미사용'
 }
 
@@ -85,7 +85,14 @@ export function useCompanyList(size = PAGE_SIZE) {
     billing: BILLING_LABEL(c.monthlyBillingEnabled),
   }))
 
+  // 줄의 [삭제] — 한 곳만
+  const removeOne = useMutation({
+    mutationFn: (id: number) => deleteCompany(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: companyQueries.all() }),
+  })
+
   return {
+    removeOne,
     q: params.q,
     setQ: (v: string) => set({ q: v }), // 쪽은 1로
     rows,

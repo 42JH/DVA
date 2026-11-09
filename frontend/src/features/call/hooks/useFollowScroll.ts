@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
+import { useEffect, useRef, type RefObject } from 'react'
 
 const PAUSE_MS = 3000 // 사람이 목록을 굴린 뒤 이만큼은 따라가지 않음
 
@@ -34,39 +34,4 @@ export function useFollowScroll(
   return () => {
     touchedAt.current = Date.now()
   }
-}
-
-/** 하이라이트 상자 하나가 줄 사이를 미끄러져 옮겨 감 (11/05 사용자: 줄마다 색이 켜졌다 꺼지면 뚝뚝 끊겨 보임)
- *  keys = 하이라이트할 줄들(data-key) — 여러 줄이면(AI 동작) 첫 줄 위 ~ 끝 줄 아래를 한 상자로. 없으면 상자를 숨김
- *  목록은 relative, 상자는 목록 맨 앞 absolute, 줄은 relative(글자가 상자 위로). 위치는 그린 뒤 재서 style로 (렌더마다 상태를 안 바꾸게) */
-export function useSlidingMark(list: RefObject<HTMLElement | null>, keys: number[]) {
-  const mark = useRef<HTMLLIElement>(null)
-  const sig = keys.join(',')
-  useLayoutEffect(() => {
-    const ul = list.current
-    const box = mark.current
-    if (!ul || !box) return
-    const place = () => {
-      const els = sig
-        .split(',')
-        .filter(Boolean)
-        .map((k) => ul.querySelector<HTMLElement>(`[data-key="${k}"]`))
-        .filter((el): el is HTMLElement => el !== null)
-      if (!els.length) {
-        box.style.opacity = '0'
-        return
-      }
-      const base = ul.getBoundingClientRect().top - ul.scrollTop
-      const top = Math.min(...els.map((el) => el.getBoundingClientRect().top)) - base
-      const bottom = Math.max(...els.map((el) => el.getBoundingClientRect().bottom)) - base
-      box.style.opacity = '1'
-      box.style.transform = `translateY(${top}px)`
-      box.style.height = `${bottom - top}px`
-    }
-    place()
-    const watch = new ResizeObserver(place) // 폭이 바뀌어 줄이 꺾이면 다시 잼
-    watch.observe(ul)
-    return () => watch.disconnect()
-  }, [list, sig])
-  return mark
 }

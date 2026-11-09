@@ -200,12 +200,12 @@ export function useOrderForm(
     if (order?.draft) {
       // 초안은 접수되면 사라짐 → 먼저 새 주문으로 넘어간 뒤 목록 · 건수를 새로 받음 (사라진 초안을 다시 묻지 않게)
       onDone(submitNotice.current, madeOrder.current)
-      void qc.invalidateQueries({ queryKey: ['v2'] })
+      void qc.invalidateQueries({ queryKey: ['screen'] })
       void qc.invalidateQueries({ queryKey: orderQueries.all() })
       return
     }
     await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
-    void qc.invalidateQueries({ queryKey: ['v2'] }) // v2 목록 줄 · 탭 건수도 (11/09 검수: 수정해도 목록이 옛 값)
+    void qc.invalidateQueries({ queryKey: ['screen'] }) // 목록 줄 · 탭 건수도 (11/09 검수: 수정해도 목록이 옛 값)
     onDone(submitNotice.current, madeOrder.current)
   }
 
@@ -328,6 +328,7 @@ export function useOrderForm(
     setEtcItem,
     declaredValue,
     setDeclaredValue: (v: string) => setDeclaredValue(digits(v, 10)),
+    priceInRange: declaredValue !== '' && priceOk(Number(declaredValue)), // 1원 ~ 1억 (구간 고르기에서 범위 밖 금액은 '구간 선택')
     shippingFee: shippingFee ? `${shippingFee.toLocaleString()}원` : '', // 잠긴 칸은 suffix를 안 그림
     pickupAt,
     setPickupAt,

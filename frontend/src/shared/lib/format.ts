@@ -2,18 +2,10 @@
 // 목록의 활동 시각 = 'MM.DD HH:MM' · 오래 남는 날짜(등록일 · 가입 신청일 · 버전 생성일) = 'YYYY.MM.DD'
 // 상세 화면의 시각 = 'MM.DD (요일) HH:MM' (06 · 05 상세) — 서버는 ISO 8601(타임존 포함), 화면은 Asia/Seoul
 // 10/30 연도 규칙 (모든 페이지): 올해면 연도 생략, 다른 해(작년 포함)면 'YYYY.MM.DD' → 새 목록은 fmtListTime
-import { ymd, type Ymd } from './dateRange'
+import { type Ymd } from './dateRange'
 
 const two = (n: number) => String(n).padStart(2, '0')
 const DAY = ['일', '월', '화', '수', '목', '금', '토']
-
-/** 날짜별 목록 머리 '11월 4일 수요일' (Figma '통화' · '주문' 11/04) */
-export const fmtLongDay = (day: Ymd) =>
-  new Date(`${day}T00:00:00+09:00`).toLocaleDateString('ko-KR', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  })
 
 /** 날짜만 '11월 4일' (03 주문 11/06 시안 — 머리줄 날짜 · 날이 바뀌는 줄 왼쪽). 요일 없음, 'YYYY-MM-DD' 그대로 읽음(시간대 무관) */
 export const fmtMonthDay = (day: Ymd) =>
@@ -22,15 +14,6 @@ export const fmtMonthDay = (day: Ymd) =>
 /** 표 줄 앞 시각 '오후 3:02' — 날은 머리줄 · 표 왼쪽 날짜가 보여 줌 (11/06 시안 03 주문 · 04 통화 · 09 미답변 같은 형식) */
 export const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
-
-/** 날짜별 목록 줄 시각: 오늘 '오후 3:02' · 지난 날 '11.03 17:24' · 다른 해 '2025.12.29 13:40' (04 통화 · 03 주문) */
-export function fmtRowTime(iso: string, today: Ymd): string {
-  const d = new Date(iso)
-  const day = ymd(d)
-  if (day === today) return d.toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
-  const date = day.slice(0, 4) === today.slice(0, 4) ? day.slice(5) : day
-  return `${date.replaceAll('-', '.')} ${two(d.getHours())}:${two(d.getMinutes())}`
-}
 
 /** 상세 화면 시각 (10/30 연도 규칙): 올해 '10.20 (화) 13:12', 다른 해 '2025.12.29 (월) 13:12'. seconds면 '13:12:08' (06 통화 시작 시각)
  * year를 주면 그대로 (기간처럼 여러 날짜의 연도 표시를 맞출 때) */
@@ -93,21 +76,6 @@ export function fmtPhone(digits: string): string {
   if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`
   if (d.length === 10) return `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}`
   return digits
-}
-
-/** '10.20 (화)' (01 홈 '오늘' 기준일) */
-export function fmtDateDay(d: Date): string {
-  return `${two(d.getMonth() + 1)}-${two(d.getDate())} (${DAY[d.getDay()]})`
-}
-
-/** Date → datetime-local 칸 값 'YYYY-MM-DDTHH:mm' (브라우저 시간대 = 화면 시간대) */
-export function toDateTimeLocal(d: Date): string {
-  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`
-}
-
-/** datetime-local 칸 값 → 서버로 보낼 ISO 8601 (UTC) */
-export function fromDateTimeLocal(value: string): string {
-  return new Date(value).toISOString()
 }
 
 /** 날짜만 (10/30 연도 규칙): 올해 '10.02', 다른 해 '2025.12.29' — 07 버전 저장일 · 02 하루 범위. 'YYYY-MM-DD'를 받음 (Date 파싱 없음 → 시간대 무관) */

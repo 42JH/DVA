@@ -18,13 +18,13 @@ export interface Admin {
 }
 
 /** AdminList — 서버 키는 total_count (공용 ApiList의 totalCount와 이름이 달라 여기서 따로 정의) */
-export interface AdminList {
+interface AdminList {
   data: Admin[]
   hasNext: boolean
   total_count: number // 필터 적용 후 · limit/offset 적용 전 전체 건수 → 탭 건수 · 쪽 수
 }
 
-export interface AdminListQuery {
+interface AdminListQuery {
   status: AdminStatus
   limit: number // 1~100
   offset: number

@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useEffect, useState } from 'react'
 import { fmtDate, fmtPhone } from '@/shared/lib/format'
 import { pageCount } from '@/shared/api/paging'
-import { useDebounced } from '@/v2/lib/useDebounced'
+import { useDebounced } from '@/shared/lib/useDebounced'
 import { useListParams } from '@/shared/lib/useListParams'
 import { ApiError } from '@/shared/api/client'
 import { companyQueries, removeMember, type Member } from '@/features/company/api/companyApi'
@@ -11,7 +11,7 @@ import { errorText } from '@/features/company/labels'
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10명
 const DEFAULTS = { q: '' }
 
-export interface MemberRow {
+interface MemberRow {
   id: number // membershipSeq
   employeeNo: string
   name: string
@@ -24,7 +24,7 @@ export interface MemberRow {
 }
 
 /** 창 — 한 번에 하나 (구분 유니온) */
-export type MemberModal =
+type MemberModal =
   | { kind: 'add' }
   | { kind: 'edit'; member: Member }
   | { kind: 'delete'; member: Member }
@@ -80,7 +80,12 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
     member: m,
   }))
 
+  // 부서 번호 → 이름 (사원 응답엔 번호만 있음)
+  const depts = useQuery(companyQueries.departments(id))
+  const deptName = new Map((depts.data ?? []).map((d) => [d.departmentSeq, d.name]))
+
   return {
+    deptName,
     notFound: company.error instanceof ApiError && company.error.status === 404,
     loadError:
       (company.error ?? members.error)

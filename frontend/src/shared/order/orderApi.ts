@@ -3,7 +3,7 @@
 // 아래 ORDERS 메모리 저장소는 03 주문 내역(팀원)의 가짜 목록 · 추가 · 수정용. MSW GET /orders/:id도 이 저장소를 읽음 (mocks/handlers/orders.ts)
 // api 역할: React를 모른다. 화면용 값은 useOrderDetail.ts
 import { queryOptions } from '@tanstack/react-query'
-import { api, NotFoundError, type ApiItem } from '@/shared/api/client'
+import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
 import { addDays, todayYmd } from '@/shared/lib/dateRange'
 import { toOrderDetail, type OrderDetailDto, type OrderStatusDto } from './orderDto'
@@ -85,7 +85,7 @@ interface RelatedCallDto {
   analysis: ({ result?: string } & KindCountsDto) | null // result는 실서버에 없음 — 취소 건수로 판단
 }
 
-export async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail> {
+async function fetchOrder(id: number, signal?: AbortSignal): Promise<OrderDetail> {
   const [res, calls] = await Promise.all([
     api.get<ApiItem<OrderDetailDto>>(`/orders/${id}`, { signal }),
     fetchAll<RelatedCallDto>('/calls', { orderSeq: id }, signal), // 응답에 관련 통화가 없어 통화 목록에서
@@ -199,31 +199,6 @@ const ORDERS: OrderDetail[] = [
 
 /** 03 주문 목록 · 주문 추가가 같은 가짜 저장소를 쓰도록 (목록 · 상세 · 06이 같은 주문을 봄). 명세가 오면 둘 다 지움 */
 export const allOrders = (): readonly OrderDetail[] => ORDERS
-
-export function addOrder(order: Omit<OrderDetail, 'orderSeq'>): number {
-  const orderSeq = Math.max(...ORDERS.map((o) => o.orderSeq)) + 1
-  ORDERS.push({ ...order, orderSeq })
-  return orderSeq
-}
-
-/** 03 주문 수정 — 바꿀 수 있는 칸만 (경로 · 접수 시각 · 결제 상태 · 관련 통화는 그대로) */
-export function updateOrder(
-  orderSeq: number,
-  patch: Pick<
-    OrderDetail,
-    | 'sender'
-    | 'receiver'
-    | 'items'
-    | 'pickupRequestedAt'
-    | 'itemPrice'
-    | 'clientComment'
-    | 'paymentMethod'
-  >,
-): void {
-  const i = ORDERS.findIndex((o) => o.orderSeq === orderSeq)
-  if (i < 0) throw new NotFoundError('주문을 찾을 수 없습니다.')
-  ORDERS[i] = { ...ORDERS[i], ...patch }
-}
 
 // ---------- 03 목록 가짜 줄 (와이어프레임 03_주문내역 + 규칙 생성) ----------
 // 위 3건(10519 · 10530 · 10531)과 합쳐 오늘 103건 + 지난 6일. 목록의 '접수 중' 1줄은 아직 주문이 아니라 03 목록 쪽에 따로 있음

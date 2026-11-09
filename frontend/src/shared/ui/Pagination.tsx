@@ -1,77 +1,86 @@
-// 페이지 번호 — 카드 아래 가운데. ‹ 1 2 3 4 5 … 13 › 칸 36 · 사이 4, 지금 쪽 = 남색 바탕 흰 글자
-// 총 쪽수를 모르면(D2 미결 — 명세서는 hasNext만 줌) ‹ 현재 › 만 보여 준다
-// big = 새 디자인(Figma 11/04~, FAQ부터): 칸 36 동그라미 · 글자 18, 지금 쪽 = 파랑(brand) 바탕
+// 목록 아래 줄 (모든 목록 공통) — 일반 게시판 방식, 쪽 이동은 가운데
+//   왼쪽 '1–50 / 526건' | 가운데 « ‹ 1 2 3 … 10 › » | 오른쪽 [50개씩]
+import { PAGE_SIZES, pageGroup } from '@/shared/lib/paging'
+import { Icon, type IconName } from './controls'
 
-function pageItems(page: number, pages: number): (number | '…')[] {
-  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1)
-  if (page <= 4) return [1, 2, 3, 4, 5, '…', pages]
-  if (page >= pages - 3) return [1, '…', pages - 4, pages - 3, pages - 2, pages - 1, pages]
-  return [1, '…', page - 1, page, page + 1, '…', pages]
-}
+const box =
+  'grid size-8 place-items-center rounded-md text-[13px] tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ops-route'
 
 export function Pagination({
   page,
-  pages,
-  hasNext,
-  big,
-  onChange,
+  size,
+  total,
+  pages: pagesProp,
+  unit = '건',
+  onPage,
+  onSize,
 }: {
-  page: number // 1부터
-  pages?: number // 총 쪽수. 모르면 생략하고 hasNext만
-  hasNext?: boolean
-  big?: boolean
-  onChange: (page: number) => void
+  page: number
+  size: number
+  total: number
+  pages?: number // 쪽 수를 따로 셀 때 (관리자 활성화: 보이는 수는 나를 빼고, 쪽은 서버 건수로)
+  unit?: string // '건', '명', '곳'
+  onPage: (p: number) => void
+  onSize: (n: number) => void
 }) {
-  const cell = big ? 'size-9 rounded-full text-strong' : 'h-8 min-w-8 rounded-lg px-1.5 text-label'
-  const items = pages ? pageItems(page, pages) : [page]
-  const prevOff = page <= 1
-  const nextOff = pages ? page >= pages : !hasNext
-  const arrow = (dir: 'prev' | 'next', off: boolean) => (
+  if (total <= 0) return null
+  const pages = pagesProp ?? Math.max(1, Math.ceil(total / size))
+  const from = (page - 1) * size + 1
+  const to = Math.min(page * size, total)
+  const move = (label: string, icon: IconName, turn: string, p: number, off: boolean) => (
     <button
       type="button"
+      aria-label={label}
       disabled={off}
-      aria-label={dir === 'prev' ? '이전 쪽' : '다음 쪽'}
-      onClick={() => onChange(page + (dir === 'prev' ? -1 : 1))}
-      className={`grid place-items-center ${big ? 'size-9 rounded-full' : 'size-8 rounded-lg'} ${off ? 'text-muted' : 'text-sub hover:bg-bg'}`}
+      onClick={() => onPage(p)}
+      className={`${box} text-ops-sub hover:bg-white hover:text-ops-ink disabled:pointer-events-none disabled:opacity-30`}
     >
-      <svg
-        viewBox="0 0 20 20"
-        className="size-4"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {dir === 'prev' ? <path d="M12 5l-5 5 5 5" /> : <path d="M8 5l5 5-5 5" />}
-      </svg>
+      <Icon name={icon} className={`size-4 ${turn}`} />
     </button>
   )
   return (
-    <nav className="flex items-center justify-center gap-1" aria-label="페이지">
-      {arrow('prev', prevOff)}
-      {items.map((it, i) =>
-        it === '…' ? (
-          <span key={`e${i}`} className={`grid place-items-center text-sub ${cell}`}>
-            …
-          </span>
-        ) : (
-          <button
-            key={it}
-            type="button"
-            aria-current={it === page ? 'page' : undefined}
-            onClick={() => onChange(it)}
-            className={`grid place-items-center tabular-nums ${cell} ${
-              it === page
-                ? `${big ? 'bg-brand' : 'bg-action'} font-bold text-white`
-                : 'text-sub hover:bg-bg'
-            }`}
-          >
-            {it}
-          </button>
-        ),
-      )}
-      {arrow('next', nextOff)}
-    </nav>
+    <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 text-[13px] text-ops-sub">
+      <span className="tabular-nums">
+        {from.toLocaleString('ko-KR')}–{to.toLocaleString('ko-KR')} /{' '}
+        {total.toLocaleString('ko-KR')}
+        {unit}
+      </span>
+      <nav aria-label="쪽" className="flex items-center gap-0.5">
+        {move('첫 쪽', 'chevrons', '', 1, page <= 1)}
+        {move('이전 쪽', 'chevron', 'rotate-90', page - 1, page <= 1)}
+        <span className="mx-1 flex items-center gap-0.5">
+          {pageGroup(page, pages).map((p) => (
+            <button
+              key={p}
+              type="button"
+              aria-current={p === page ? 'page' : undefined}
+              onClick={() => onPage(p)}
+              className={`${box} ${p === page ? 'bg-ops-route font-semibold text-white' : 'text-ops-sub hover:bg-white hover:text-ops-ink'}`}
+            >
+              {p}
+            </button>
+          ))}
+        </span>
+        {move('다음 쪽', 'chevron', '-rotate-90', page + 1, page >= pages)}
+        {move('마지막 쪽', 'chevrons', 'rotate-180', pages, page >= pages)}
+      </nav>
+      <select
+        aria-label="한 쪽에 보일 개수"
+        value={size}
+        // 개수를 바꿔도 보던 첫 줄이 들어 있는 쪽으로
+        onChange={(e) => {
+          const n = Number(e.target.value)
+          onSize(n)
+          onPage(Math.floor((from - 1) / n) + 1)
+        }}
+        className="h-8 justify-self-end rounded-md bg-white px-2 text-[13px] text-ops-ink ring-1 ring-ops-line outline-none ring-inset focus-visible:ring-2 focus-visible:ring-ops-route"
+      >
+        {PAGE_SIZES.map((n) => (
+          <option key={n} value={n}>
+            {n}개씩 보기
+          </option>
+        ))}
+      </select>
+    </div>
   )
 }

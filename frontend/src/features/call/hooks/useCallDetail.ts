@@ -9,13 +9,13 @@ import {
   type Complaint,
   toCallDetail,
   type Utterance,
-} from '@/features/call/api/callApi'
-import { utteranceAt, utteranceForAction, type CallActionKind } from '@/features/call/api/callDto'
-import { faqResultText, groupActions } from '@/features/call/actionText'
+} from '@/shared/call/callApi'
+import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
+import { faqResultText, groupActions } from '@/shared/call/actionText'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */
-export interface ScriptLine {
+interface ScriptLine {
   key: number // 발화 순번 (= 서버 order)
   atSec: number | null
   time: string // '00:31' (위치를 모르면 '')
@@ -24,13 +24,13 @@ export interface ScriptLine {
   onClick?: () => void
 }
 /** 연속 구간: 불만이면 빨간 묶음으로 */
-export interface ScriptSegment {
+interface ScriptSegment {
   complaint: { label: string } | null
   lines: ScriptLine[]
 }
 
 /** AI 동작 기록 한 줄. onClick = 그 동작을 부른 고객 말로 스크립트를 넘기고 녹취를 그 말부터 재생 (시각을 모르면 없음) */
-export interface ActionView {
+interface ActionView {
   key: number
   kind: CallActionKind // 아이콘 (조회 · 저장 · 검색 · 전송 · 취소)
   text: string

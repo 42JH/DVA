@@ -2,7 +2,7 @@
 import type { ListParcel, ListParty, OrderListItem, OrderStatus } from './orderApi'
 
 /** 화면 한 줄 = 배송 상세 하나 (보내는 분 1 + 받는 분 1, 11/01 결정) */
-export interface ParcelRow {
+interface ParcelRow {
   key: string // 줄 키 — 같은 주문의 여러 줄을 구분
   orderSeq: number // 줄을 누르면 이 주문의 상세
   status: OrderStatus // 상세만 취소됐으면 그 줄은 'CANCELLED'

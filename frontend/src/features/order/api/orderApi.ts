@@ -1,9 +1,7 @@
 // 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
 // 목록 GET /admin/orders · 추가 POST /admin/orders · 수정 PATCH /orders/{id} — 모두 실서버 (연동 상세명세 4장, 11/01)
 // 11/04 디자인: 고른 날짜에서 시작하는 무한 스크롤 — 하루씩 받음 (shared/lib/useDayFeed가 아래 두 함수로)
-import { api, type ApiItem, type ApiList } from '@/shared/api/client'
-import { fetchAll } from '@/shared/api/paging'
-import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
+import { api, type ApiItem } from '@/shared/api/client'
 import { buildCreateOrder } from './orderCreate'
 import type { CustomerPatch, OrderPatch } from './orderPatch'
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
@@ -11,16 +9,9 @@ import type { OrderGroup } from '@/shared/order/labels'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
-/** 실제 주문 상태 8개 (연동 상세명세 4.1 · 서버 11/03 재시도 중 실패 추가). notPaid는 소문자 그대로 */
-export type OrderStatus =
-  | 'COLLECTING' // 미완료 (AI 통화로 모으다 끊김, 저장된 것만 목록에 나옴)
-  | 'notPaid' // 결제 대기
-  | 'PAID' // 결제 완료
-  | 'SUBMITTING' // 디버 접수 중
-  | 'SUBMITTING_FAILED' // 디버 접수 실패 — 서버가 자동으로 다시 시도하는 중
-  | 'ACCEPTED' // 디버 접수 완료 — '접수 완료'는 이것만
-  | 'SUBMISSION_FAILED' // 디버 접수 최종 실패 (상세에서 [다시 접수])
-  | 'CANCELLED' // 주문 취소
+/** 실제 주문 상태 8개 — 정의는 shared/order/orderDto (통화 상세 등 다른 기능도 씀) */
+import type { OrderStatusDto } from '@/shared/order/orderDto'
+export type OrderStatus = OrderStatusDto
 
 /** '주문 상태' 고르기 = 서버 statusGroup (11/01): 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = SUBMITTING_FAILED · SUBMISSION_FAILED */
 export type StatusGroup = 'ALL' | OrderGroup
@@ -65,70 +56,8 @@ export interface OrderListItem {
   parcels: ListParcel[] // 상세 순번대로, 취소된 상세도 포함
 }
 
-/** 목록 조건 — 검색어는 서버가 보내는 분 · 받는 분 둘 다의 이름 · 전화번호 · 주소에서 찾음 (누가 맞았는지는 화면이 다시 거름) */
-export interface OrderFilter {
-  q: string
-  group: StatusGroup
-}
-
-const toQuery = (f: OrderFilter) => ({
-  q: f.q.trim().slice(0, 200) || undefined,
-  statusGroup: f.group === 'ALL' ? undefined : f.group, // 전체는 생략
-})
-
 export const orderQueries = {
   all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
-}
-
-/** 그날 주문 전부 (접수 최신순, 100건씩 끝까지). 받는 사이 주문이 생기면 겹칠 수 있어 번호로 한 번 더 거름 */
-export async function fetchOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<OrderListItem[]> {
-  const seen = new Set<number>()
-  const query = { ...toQuery(f), from: kstDayStart(day), to: kstDayStart(addDays(day, 1)) }
-  return (await fetchAll<OrderListItem>('/admin/orders', query, signal)).filter(
-    (o) => !seen.has(o.orderSeq) && seen.add(o.orderSeq),
-  )
-}
-
-/** day 전에 주문이 있는 가장 가까운 날 (최신 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null */
-export async function prevOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<Ymd | null> {
-  const res = await api.get<ApiList<OrderListItem>>('/admin/orders', {
-    query: { ...toQuery(f), to: kstDayStart(day), limit: 1, offset: 0 },
-    signal,
-  })
-  const at = res.data[0]?.createdAt
-  return at ? ymd(new Date(at)) : null
-}
-
-/** day 다음에 주문이 있는 가장 가까운 날 (그 뒤 가장 오래된 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null
- *  서버는 최신순이라 건수를 먼저 받고, 2건 이상이면 맨 끝(offset = 건수 − 1) 1건을 다시 받음 */
-export async function nextOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<Ymd | null> {
-  const query = { ...toQuery(f), from: kstDayStart(addDays(day, 1)), limit: 1 }
-  const head = await api.get<ApiList<OrderListItem>>('/admin/orders', {
-    query: { ...query, offset: 0 },
-    signal,
-  })
-  const last =
-    head.total_count > 1
-      ? (
-          await api.get<ApiList<OrderListItem>>('/admin/orders', {
-            query: { ...query, offset: head.total_count - 1 },
-            signal,
-          })
-        ).data[0]
-      : head.data[0]
-  return last?.createdAt ? ymd(new Date(last.createdAt)) : null
 }
 
 // ---------- 주문 추가 · 수정 ----------

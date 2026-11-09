@@ -6,7 +6,7 @@ import { clearSession } from '@/shared/auth/session'
 
 export type AdminRole = 'OPERATOR' | 'SUPERVISOR' | 'SYSTEM_ADMIN'
 
-export interface AdminMe {
+interface AdminMe {
   adminUserSeq: number
   loginId: string
   name: string // 관리자 이름 '홍길동' (API-04) — 작성자 · 내정보 표시용
@@ -24,7 +24,7 @@ export const sessionQueries = {
 }
 
 /** AUTH-03 */
-export async function fetchMe(signal?: AbortSignal): Promise<AdminMe> {
+async function fetchMe(signal?: AbortSignal): Promise<AdminMe> {
   return (await api.get<ApiItem<AdminMe>>('/auth/me', { signal })).data
 }
 

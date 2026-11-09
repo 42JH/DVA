@@ -7,7 +7,7 @@ import { parseCsv } from '@/shared/lib/csv'
 import type { Member, MemberInput } from '@/features/company/api/companyApi'
 import { MEMBER_REASON } from '@/features/company/labels'
 
-export const CSV_HEADER = [
+const CSV_HEADER = [
   '사번',
   '사원명',
   '전화번호',
@@ -63,7 +63,7 @@ export async function readMembersFile(file: File): Promise<CsvResult> {
   }
 }
 
-export const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
+const MAX_MEMBERS = 1000 // 명세: 한 번에 1~1000건
 const SHOW_ERRORS = 3 // 오류는 처음 3줄까지 (11/01 결정), 나머지는 '외 n건'
 const REQUIRED_COLUMNS = 9 // 사번 ~ 우편번호
 const MAX_DEPARTMENT_NAME = 100 // 서버 부서 이름 최대 (CreateDepartmentDto)
@@ -81,8 +81,8 @@ export function decodeCsv(bytes: ArrayBuffer): string {
 // 전화번호 = 전화번호 형식 010-1234-5678 하나로 통일 (11/06 사용자: 무조건 전화번호 형식) — CSV · 사원 추가 창(수기 등록) 공용
 //   하이픈 · 공백은 있어도 없어도 받고, 서버엔 숫자 11자리로 보냄 = 백엔드 사원 전화(MOBILE_PHONE_PATTERN '휴대전화 번호 11자리 문자열, 선행 0 유지')
 export const phoneDigits = (v: string) => v.replace(/[-\s]/g, '')
-export const isPhone = (digits: string) => /^0\d{10}$/.test(digits)
-export const PHONE_RULE = '전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.'
+const isPhone = (digits: string) => /^0\d{10}$/.test(digits)
+const PHONE_RULE = '전화번호는 010-1234-5678 형식(숫자 11자리)으로 넣어 주세요.'
 /** 전화번호 오류 문구 (없으면 null) */
 export const phoneError = (digits: string): string | null => (isPhone(digits) ? null : PHONE_RULE)
 /** 화면에 보이는 전화번호 형식 — 치는 대로 3-4-4로 하이픈 (사원 추가 창 입력 칸). 숫자 11자리까지만 */
@@ -98,7 +98,7 @@ export function phoneInput(v: string): string {
 // 안전망: 그래도 엑셀이 숫자로 바꿔 앞 0이 지워진 전화번호(10자리 '1012345678')는 0을 붙여 11자리로
 //   (예시 CSV를 쓰지 않고 직접 만든 파일 · 숫자 칸을 붙여 넣은 경우) — 0을 붙여 휴대전화 앞자리(010 · 011 · 016~019)가 될 때만
 /** CSV · 엑셀 칸의 전화번호 → 숫자만 */
-export const csvPhone = (v: string) => {
+const csvPhone = (v: string) => {
   const d = phoneDigits(v)
   return /^1[016-9]\d{8}$/.test(d) ? `0${d}` : d
 }
@@ -123,8 +123,7 @@ export interface CsvMember extends MemberInput {
   line: number // 파일의 행 번호 (오류 안내용)
 }
 
-export type CsvResult =
-  { ok: true; members: CsvMember[] } | { ok: false; errors: string[]; more: number } // errors = 처음 3줄, more = 나머지 건수
+type CsvResult = { ok: true; members: CsvMember[] } | { ok: false; errors: string[]; more: number } // errors = 처음 3줄, more = 나머지 건수
 
 // 칸 이름 + 목적격 조사 ('사번을' · '전화번호를') — 서버 오류 안내용
 const FIELD: Record<keyof MemberInput, string> = {
@@ -142,7 +141,7 @@ const fail = (all: string[]): CsvResult => ({
 export const readMembersCsv = (text: string): CsvResult => readMembersRows(parseCsv(text))
 
 /** 줄 · 칸(CSV든 엑셀이든) → 사원 목록 또는 오류 */
-export function readMembersRows(rows: string[][]): CsvResult {
+function readMembersRows(rows: string[][]): CsvResult {
   const [head, ...body] = rows.map((r) => r.map((v) => plainCell(v.trim())))
   // 우편번호까지는 꼭, 상세주소는 있어도 없어도 (그 뒤 빈 열 이름은 엑셀이 붙인 것 — 허용)
   const headOk =
@@ -221,7 +220,7 @@ export function serverRowErrors(
 /** CSV 사원 추가 미리 보기 (11/01 결정 B) — 기존 사원과 비교해 신규 · 바뀜 · 변경 없음으로 나눔
  * 서버는 같은 사번이면 조용히 덮어써서, 무엇이 바뀌는지 [등록] 전에 보여 줌
  * 비교 칸 (11/01 결정): 이름 · 전화 · 대표자 · 부서 · 주소(좌표 빼고) */
-export type ChangedField = '사원명' | '전화번호' | '대표자' | '부서' | '주소'
+type ChangedField = '사원명' | '전화번호' | '대표자' | '부서' | '주소'
 export interface CsvChange {
   row: CsvMember
   before: {

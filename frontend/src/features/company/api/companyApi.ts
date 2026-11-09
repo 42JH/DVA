@@ -7,7 +7,7 @@ import { fetchAll } from '@/shared/api/paging'
 export type ActiveStatus = 'ACTIVE' | 'INACTIVE'
 
 /** OrganizationSummary — 사원 수 · 등록일은 11/01 백엔드 반영 */
-export interface Company {
+interface Company {
   organizationSeq: number
   name: string
   status: ActiveStatus
@@ -46,7 +46,7 @@ export interface Member {
 }
 
 /** 목록 응답 — 서버 키 total_count (공용 ApiList는 totalCount라 여기서 따로, 관리자 목록과 같은 이유) */
-export interface Page<T> {
+interface Page<T> {
   data: T[]
   hasNext: boolean
   total_count: number
@@ -66,7 +66,7 @@ export interface MemberItem extends MemberInput {
 }
 
 /** 부서 — 이름은 기업 안에서 고유 */
-export interface Department {
+interface Department {
   departmentSeq: number
   name: string
 }
@@ -132,7 +132,7 @@ export async function fetchAllMembers(id: number, signal?: AbortSignal): Promise
 /** 기업 등록 — 201 data.organizationSeq. 같은 이름도 등록됨 */
 /** 기업 + 부서 + 사원을 한 번에 — POST /companies (11/01 백엔드 확장). 하나의 트랜잭션: 전부 되거나 전부 안 됨
  * departmentName은 같은 요청의 departments[].name, role 생략 = MEMBER. 201 data.organizationSeq. 같은 이름 기업도 등록됨 */
-export interface NewCompanyMember extends MemberInput {
+interface NewCompanyMember extends MemberInput {
   role?: Member['membership']['role']
   departmentName?: string
 }

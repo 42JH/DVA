@@ -1,10 +1,3 @@
-// 주문 상태 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 칩 · 주문번호는 상세 창과 같이 써서 shared/order/labels
-import { ORDER_GROUP_LABEL } from '@/shared/order/labels'
-import type { StatusGroup } from './api/orderApi'
-
-/** '주문 상태' 고르기 = 전체 + 상태 묶음 (서버 statusGroup) */
-export const STATUS_GROUP_LABEL: Record<StatusGroup, string> = { ALL: '전체', ...ORDER_GROUP_LABEL }
-
 /** 주문 추가 · 수정 서버 오류 → 누구나 이해할 수 있는 설명 (서버 문구 · 코드를 그대로 보이지 않음, 11/01 기업관리와 같은 기준) */
 export function orderErrorText(e: unknown, action: '접수' | '저장' | '취소'): string {
   const status = (e as { status?: number })?.status

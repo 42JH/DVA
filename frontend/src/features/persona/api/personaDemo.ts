@@ -7,7 +7,7 @@ import type { PersonaDraftDto, PersonaDto, PersonaVersionDto, WaitTime } from '.
 export const PERSONA_DEMO = true
 
 /** 저장 · 추가 본문 — 서버로 보내던 것과 같은 모양 */
-export interface PersonaBody {
+interface PersonaBody {
   name?: string
   promptText?: string
   voiceId?: string | null
