@@ -1,0 +1,38 @@
+FROM node:24-bookworm-slim AS builder
+WORKDIR /app/service
+
+COPY services/operations/package*.json ./
+COPY shared/events/package.json /shared/events/package.json
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
+
+COPY services/operations/nest-cli.json services/operations/tsconfig*.json services/operations/.prettierrc services/operations/eslint.config.mjs ./
+COPY services/operations/src ./src
+COPY services/operations/test ./test
+COPY parity/security-events.test.cjs ./test/security-events.test.cjs
+COPY services/operations/scripts ./scripts
+COPY services/operations/data ./data
+RUN npm run lint \
+ && npm test -- --runInBand \
+ && npm run build \
+ && node --test test/environment.test.cjs test/faq-call-sources.test.cjs test/security-events.test.cjs test/order-audit-recovery.test.cjs
+
+FROM builder AS checks
+
+FROM node:24-bookworm-slim
+WORKDIR /app/service
+ENV NODE_ENV=production
+ENV PORT=3005
+
+COPY services/operations/package*.json ./
+COPY shared/events/package.json /shared/events/package.json
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci --omit=dev
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
+
+COPY --from=builder /app/service/dist ./dist
+COPY services/operations/scripts ./scripts
+COPY services/operations/data ./data
+
+USER node
+EXPOSE 3005
+CMD ["node", "dist/main.js"]

@@ -1,0 +1,6 @@
+*.sh text eol=lf
+backend/** text=auto eol=lf
+backend/migrations/*.sql text eol=lf
+# Preserve the exact bytes already deployed and recorded for the legacy migration.
+backend/migrations/001-pbx-call-ended.sql text eol=crlf
+backend/database-tests/docker text eol=lf

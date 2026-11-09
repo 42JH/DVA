@@ -1,0 +1,962 @@
+{
+  "commit": "9624b7789ee7876648b6c56b5e7a4a7a5a9ef378",
+  "jira": "S15P31D109-160",
+  "inventory": {
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/api/ai/options",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/ai-options.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/ai/config",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/ai-runtime.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/config/apply-result",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/ai-runtime.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/personas/:id/activate",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/personas",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/personas",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/personas/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/personas/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/personas/:id/versions",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/personas/:id/versions",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/ai-settings/personas.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/audit-logs",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/audit/audit.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/audit-logs/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/audit/audit.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/admins",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/admin-access.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/admins/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/admin-access.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/admins/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/admin-access.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/admins/:id/password",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/admin-access.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/login",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/auth.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/signup",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/auth.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/auth/logout",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/auth.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/auth/me",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/auth.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/auth/password",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/auth/auth.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/calls/:id/stage-metrics",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-dashboard-metrics.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/calls/:id/response-wait-metrics",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-dashboard-metrics.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id/actions",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-events-read.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id/processing-results",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-events-read.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/calls/:id/events",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-events.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/calls/:id/analysis",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/call-insights/call-insights.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/calls/:id",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/active-count",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/active-count/stream",
+        "service": "consultation",
+        "stream": true,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id/transcript",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/consultations/consultations.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/context",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/customers/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/customers/customers.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/stage-dropoffs",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/registration-time",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/complaint-calls",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/dashboard/response-wait",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/dashboard/dashboard.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/ai/faqs",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/ai-faqs.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/faqs",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/faqs.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/faqs/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/faqs.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/faqs",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/faqs.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/faqs",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/faqs.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/faqs/:id",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/faqs/faqs.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/health",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/health/health.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/health/ready",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/health/health.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/members/search",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/:id/members",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/companies/:id/members",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/members/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/members/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/members/members.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/internal/metrics",
+        "service": "operations",
+        "stream": false,
+        "file": "backend/src/observability/observability.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/admin/orders",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/orders/:id/retry",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/orders",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/admin/parcel-drafts/:id/submit",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-parcel-drafts.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/admin-parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/:id/addresses",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/order-addresses.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/calls/:id/order-intake/complete",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/order-intake.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/calls/:id/order-intake",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/order-intake.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/orders/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/orders",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/orders",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/orders/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/orders/:id/cancel",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/orders/:id/parcels/cancel",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/orders/:id/submit",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/orders/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/orders.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/parcel-drafts",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/parcel-drafts",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/parcel-drafts/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/orders/parcel-drafts.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/:id/departments",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/departments.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/companies/:id/departments",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/departments.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/departments/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/departments.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/departments/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/departments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/:id/billing",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/search",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/companies",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/companies/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/companies/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/companies/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/organizations/organizations.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/payments/notifications/:id/completion/retry",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/payments/notifications/:id/retry",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/payments/assets/:name",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/payments/p/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/payments/success/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/payments/fail/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/payments/requests/:id",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/payments/requests/:id/confirm",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/payments/requests/:id/reconcile",
+        "service": "order",
+        "stream": false,
+        "file": "backend/src/payments/payments.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/customers/:id/pins",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/pins/pins.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/customers/:id/pins",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/pins/pins.controller.ts"
+      },
+      {
+        "method": "PATCH",
+        "path": "/api/pins/:id",
+        "service": "customer",
+        "stream": false,
+        "file": "backend/src/pins/pins.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/unanswered-questions/:id/faqs",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/unanswered-questions/unanswered-questions-management.controller.ts"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/unanswered-questions/:id",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/unanswered-questions/unanswered-questions-management.controller.ts"
+      },
+      {
+        "method": "GET",
+        "path": "/api/unanswered-questions",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/unanswered-questions/unanswered-questions-read.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/api/ai/unanswered-questions",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/unanswered-questions/unanswered-questions.controller.ts"
+      },
+      {
+        "method": "POST",
+        "path": "/webhooks/pbx/call-ended",
+        "service": "consultation",
+        "stream": false,
+        "file": "backend/src/webhooks/pbx/pbx-webhook.controller.ts"
+      }
+    ],
+    "migrations": [
+      {
+        "file": "backend/migrations/001-pbx-call-ended.sql",
+        "sha256": "1e5d17fb9ef641f2324b8bb61dc30f7243c35d04d5f36ada08a362af30946a61"
+      },
+      {
+        "file": "backend/migrations/002-monolith-initial.sql",
+        "sha256": "0816166a3653b2e7e1107054efc55f47912aaba106747b5d1b3eef58ec20153e"
+      },
+      {
+        "file": "backend/migrations/003-admin-auth-sessions.sql",
+        "sha256": "a8f47ffffe08e9721e8c1a669e497e2b3c87240a5f00f85b45e0aa075b2f3da7"
+      },
+      {
+        "file": "backend/migrations/004-organization-creation-requests.sql",
+        "sha256": "636fbfbc4621c8236e54668008f44aa680fc4409f7b1fd88893a8c994c769bca"
+      },
+      {
+        "file": "backend/migrations/005-customer-creation-requests.sql",
+        "sha256": "0bb3aecdaaea2f7d2b416f8e6de99b284ba242b0cbd448fe69badf343e760cae"
+      },
+      {
+        "file": "backend/migrations/007-order-creation-requests.sql",
+        "sha256": "b4722cb8c1dd573dc023fc51069204e10c09596a127bd28db620878122ab6b91"
+      },
+      {
+        "file": "backend/migrations/008-simplify-creation-requests.sql",
+        "sha256": "a440618430f8fd0eca9d23c991eb6cd1cda54f7be32d259bdbf8ae519125f06e"
+      },
+      {
+        "file": "backend/migrations/009-membership-write-requests.sql",
+        "sha256": "ceb924d5385064f9a7b0c14dd64db81f34556d0706aa6e936c2c35afb12f53a0"
+      },
+      {
+        "file": "backend/migrations/010-remove-membership-write-requests.sql",
+        "sha256": "9a32f4628a9ffaebbcfd126e05700efd1697eb71c423bd49306aa6eff47e61e5"
+      },
+      {
+        "file": "backend/migrations/011-call-recording-correlation.sql",
+        "sha256": "dc25b4713cd19299fa62ef230b13318c6535797de266833fc601bf9d13703f91"
+      },
+      {
+        "file": "backend/migrations/012-order-creation-source.sql",
+        "sha256": "2c45b68de4e899789dbd58b110765b51ba0df54479fc37540911e03246eccb37"
+      },
+      {
+        "file": "backend/migrations/013-ai-persona-versions.sql",
+        "sha256": "d005a5de2df4a2e75d82d36b523e747abd2d07cb03a44c180b138c5d1992f1e8"
+      },
+      {
+        "file": "backend/migrations/014-order-cancellation.sql",
+        "sha256": "cc23a4c3089d113ed8989311982da868371b12bf8d72b2085d11f6460a6d2675"
+      },
+      {
+        "file": "backend/migrations/015-admin-deletion-audit.sql",
+        "sha256": "11d01eb0c346399bec4cec94c6cfafc05d14f30b062145e2077c91bf1c3cad9d"
+      },
+      {
+        "file": "backend/migrations/016-order-pricing-audit.sql",
+        "sha256": "8d868e212ccceca686cab7e0cf254c88965d7874343b42caeb8237e389a6b45c"
+      },
+      {
+        "file": "backend/migrations/017-department-billing-policy.sql",
+        "sha256": "304fcd70bd25126071a764f643c8607c4122895e8ca66b421ab305ced4494340"
+      },
+      {
+        "file": "backend/migrations/018-order-payment-flow.sql",
+        "sha256": "5fe918ced184638bc607f8ef2e8c1f7fba7d0fefef4c70815ac0e026a72b9679"
+      },
+      {
+        "file": "backend/migrations/019-organization-monthly-billing.sql",
+        "sha256": "34421ed80123289c701e68cb4487834f5b1e78a7dd43dabbf2c0c63b246c9f5d"
+      },
+      {
+        "file": "backend/migrations/020-faq-change-notifications.sql",
+        "sha256": "05143c9cea949d5d94063481e27f367fdcc9d9a3f98ac6a8f70c15ec3865c0b6"
+      },
+      {
+        "file": "backend/migrations/021-company-deletion-history.sql",
+        "sha256": "8c9ade6a6f2e66ecd4d75739840a2c147d17c0539d051a6654036d49c35c1795"
+      },
+      {
+        "file": "backend/migrations/022-order-toss-payments.sql",
+        "sha256": "d92a8a236e7f5287c089f31a0b72ec1cb5f238c4494558547ef9909333179f08"
+      },
+      {
+        "file": "backend/migrations/023-payment-completion-notifications.sql",
+        "sha256": "2aa01d6f02fdc01963f3e16a628b8e975949a339b533f95f2791ba0a5daf96f5"
+      },
+      {
+        "file": "backend/migrations/024-call-analyses.sql",
+        "sha256": "b7da45969eec99708920adb9e6511d18f1bf50821d20b059de623dbf8618fb39"
+      },
+      {
+        "file": "backend/migrations/025-call-analysis-seconds.sql",
+        "sha256": "ab436ce3fcc50ccb15c9f5260e57279892cd4cfd805fb3a55319f5e20daf5122"
+      },
+      {
+        "file": "backend/migrations/026-call-insight-events.sql",
+        "sha256": "cf0d6cab534e99b8e85100c1eb437a2e5c0b55c2f8561a295487c579c5b4d5a1"
+      },
+      {
+        "file": "backend/migrations/027-faq-categories.sql",
+        "sha256": "e6485628eb55e7bb930fc8499b0d39b8cb1a89de78b79b65c31302ab5df01dc9"
+      },
+      {
+        "file": "backend/migrations/028-customer-address-optional-department.sql",
+        "sha256": "264183dbfd75861433815c2f18cb63ee74213e68c4fec3e437499783b4917269"
+      },
+      {
+        "file": "backend/migrations/029-faq-question-uniqueness.sql",
+        "sha256": "06be76b2205fca9b5d59e7722153ccf998e867fad38ac97365299e5e1b6fd8db"
+      },
+      {
+        "file": "backend/migrations/030-admin-order-edit.sql",
+        "sha256": "c4d5a6c9789e1bce71ce16ec632d562a769ed315a6e12ea175feb9d1de82386e"
+      },
+      {
+        "file": "backend/migrations/031-recording-worker-claims.sql",
+        "sha256": "9b7468d61debff5e6900fef54faf5253673fef2fd6942af8f1929d4b08913d63"
+      },
+      {
+        "file": "backend/migrations/032-list-read-indexes.sql",
+        "sha256": "f4aa4c66dcbbc12b27e83d5f783112ef9e62cabd3f829c69f453e7aa2c62bc37"
+      },
+      {
+        "file": "backend/migrations/033-organization-created-at.sql",
+        "sha256": "0628768774c8887b2d22b7a8362d972b33f0dc319d0db003334d481fb3e6315a"
+      },
+      {
+        "file": "backend/migrations/034-persona-type-heads.sql",
+        "sha256": "a635f10dcbae904ef4c9a001e4e67281af3c535187491044f7cba4221f93c797"
+      },
+      {
+        "file": "backend/migrations/035-persona-latest-heads.sql",
+        "sha256": "b0075386a78c9e07cf84d0b7c945c78d6bbc3e8ba3fead6d0686502d961bd982"
+      },
+      {
+        "file": "backend/migrations/036-remove-redundant-persona-head.sql",
+        "sha256": "1e43eba10b16927dca9437816a02b0caa22c8f818a35081970a145c9102a15de"
+      },
+      {
+        "file": "backend/migrations/037-undecided-order-payment-method.sql",
+        "sha256": "1c87dad3ea0bb42005056343fddcee132c6509eb384a58e5d3da07116c909b1a"
+      },
+      {
+        "file": "backend/migrations/038-empty-ai-order-results.sql",
+        "sha256": "5cabf2b31899527914912a7444e4d3bfef1983dc98150e37b55c7533d0a697c4"
+      },
+      {
+        "file": "backend/migrations/039-persona-drafts.sql",
+        "sha256": "0282d3dfef42880ae312aca61cef153f0e5e5958e0e1f08e39ef868f683afc5e"
+      },
+      {
+        "file": "backend/migrations/040-call-customer-reference.sql",
+        "sha256": "d1867b8594c6d86cac1c1a8179e2bc15af6710247994b873fbf2bb43a9a8fb24"
+      },
+      {
+        "file": "backend/migrations/041-call-summary-metrics.sql",
+        "sha256": "09c30306bfa134b0bef489399dca36ac0b4859a042ed4893e9b6854f505bc082"
+      },
+      {
+        "file": "backend/migrations/042-remove-call-analysis-result.sql",
+        "sha256": "ad16bc929588f948e22307ef343c13450e8ecd284b5507bf6119dd37cf3c14d4"
+      },
+      {
+        "file": "backend/migrations/043-remove-address-coordinates.sql",
+        "sha256": "6d1b04e22a5ec1a671d8d85e835d7c4d860259a7aa0ba1e8174ec5a4a9598726"
+      },
+      {
+        "file": "backend/migrations/044-active-call-count.sql",
+        "sha256": "3ec5e3b94df245f21a130027f00f59379e7e53972218ebcc9db717a969b6eb9a"
+      },
+      {
+        "file": "backend/migrations/045-data-retention.sql",
+        "sha256": "0c247c6bf281eac59c06169826523beaf1c2450a78bb6be5d66b486ce76505ca"
+      },
+      {
+        "file": "backend/migrations/046-order-submission-retry-window.sql",
+        "sha256": "038ebfbcd06a53b762e99de10d3cba321824f81364abc6cfc8fcf35be9226ce6"
+      },
+      {
+        "file": "backend/migrations/047-remove-unused-schema.sql",
+        "sha256": "6a0aaad83d877a190b9de760d4ccf65608297030d5ce3c9d42b49cf0daf3426a"
+      },
+      {
+        "file": "backend/migrations/048-call-callback-request.sql",
+        "sha256": "caa0aaa2da86408a48d1b66f59ea369c2925795b8a9ae137f7a6e67d96788c72"
+      },
+      {
+        "file": "backend/migrations/049-unanswered-question-reason.sql",
+        "sha256": "86d6a0c618a4068ca539311fc59b93fb0d1ce6ed662a566db715e9bd749be2e5"
+      },
+      {
+        "file": "backend/migrations/050-call-dashboard-metrics.sql",
+        "sha256": "bb9cfcffbace8de5172dcf0d9139f1111fb8859c1358309365816c8fa701c1a7"
+      },
+      {
+        "file": "backend/migrations/051-payment-approval-recovery.sql",
+        "sha256": "4d6d8fb647e59dbdeba24c822f2cff1bce5b98d25fafb5dbbd2d8226c0493d8d"
+      },
+      {
+        "file": "backend/migrations/052-faq-question-examples.sql",
+        "sha256": "c87a323ca944edc7e2260f86bccecb419ab4fb49a2d8c44d7559e089e1688f79"
+      },
+      {
+        "file": "backend/migrations/053-drop-company-pins.sql",
+        "sha256": "b91b328aedf61f942ced044cc6198dc7463d4cbd29b9ea531749117461e74fb7"
+      },
+      {
+        "file": "backend/migrations/054-recording-retry-policy.sql",
+        "sha256": "df69ab6106142b85879192a7d0c40263fb4cbec00be97949cd0f58f1f86f1f2a"
+      },
+      {
+        "file": "backend/migrations/055-parcel-draft-intake.sql",
+        "sha256": "4ea7e8bca1e95e8d2a1ebf2a067df3dd961fb72a05840ab32822ec5354651d72"
+      }
+    ],
+    "workers": [
+      "backend/src/consultations/active-call-count.service.ts",
+      "backend/src/faqs/faq-notifications.worker.ts",
+      "backend/src/orders/order-maintenance.worker.ts",
+      "backend/src/payments/payments.worker.ts",
+      "backend/src/retention/retention.worker.ts",
+      "backend/src/webhooks/pbx/pbx-recording.worker.ts"
+    ]
+  }
+}

@@ -1,5 +1,5 @@
 // 입력 칸 공통 — 주문 · 사원 · CSV 창이 같이 씀. 글자: 칸 이름 12 · 입력 14 · 안내 · 오류 12
-import { useRef, useState, type ReactNode } from 'react'
+import { useId, useRef, useState, type ReactNode } from 'react'
 import { Btn, Icon } from './controls'
 
 const box = (error?: string | boolean) =>
@@ -50,6 +50,111 @@ export function TextInput({
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ops-faint"
         />
         {suffix && <span className="text-[13px] text-ops-sub">{suffix}</span>}
+      </span>
+      {error && <Err>{error}</Err>}
+    </label>
+  )
+}
+
+/** 치는 대로 추천이 아래에 뜨는 입력 칸 (TextInput과 같은 모양). ↑ ↓로 옮기고 Enter로 고름, Esc · 칸 밖으로 나가면 닫힘 */
+export function SuggestInput<T>({
+  label,
+  value,
+  onChange,
+  error,
+  placeholder,
+  inputMode,
+  invalid,
+  items,
+  itemKey,
+  renderItem,
+  onPick,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  error?: string
+  placeholder?: string
+  inputMode?: 'numeric' | 'tel'
+  invalid?: boolean
+  items: T[]
+  itemKey: (item: T) => string | number
+  renderItem: (item: T) => ReactNode
+  onPick: (item: T) => void
+}) {
+  const id = useId()
+  const [open, setOpen] = useState(false)
+  const [active, setActive] = useState(-1)
+  const shown = open && items.length > 0
+  const at = active < items.length ? active : -1 // 추천이 바뀌어 줄 수가 줄면 고른 줄 없음
+  const pick = (item: T) => {
+    onPick(item)
+    setOpen(false)
+    setActive(-1)
+  }
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <Label>{label}</Label>
+      <span className={`relative ${box(error || invalid)}`}>
+        <input
+          role="combobox"
+          aria-expanded={shown}
+          aria-controls={`${id}-list`}
+          aria-autocomplete="list"
+          aria-activedescendant={shown && at >= 0 ? `${id}-${at}` : undefined}
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            setOpen(true)
+            setActive(-1)
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setOpen(false)}
+          onKeyDown={(e) => {
+            if (!shown || e.nativeEvent.isComposing) return // 한글 조합 중 Enter는 글자 확정용
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              e.preventDefault()
+              const step = e.key === 'ArrowDown' ? 1 : -1
+              setActive((at + step + items.length) % items.length)
+            } else if (e.key === 'Enter' && at >= 0) {
+              e.preventDefault() // 폼 제출 대신 고르기
+              pick(items[at])
+            } else if (e.key === 'Escape') {
+              // 추천만 닫고 창(<dialog>)은 그대로 — 브라우저가 Esc로 창을 닫는 기본 동작을 막음
+              e.preventDefault()
+              e.stopPropagation()
+              setOpen(false)
+            }
+          }}
+          placeholder={placeholder}
+          inputMode={inputMode}
+          autoComplete="off"
+          aria-invalid={!!error || invalid}
+          className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-ops-faint"
+        />
+        {shown && (
+          <ul
+            id={`${id}-list`}
+            role="listbox"
+            className="absolute top-full right-0 left-0 z-20 mt-1 max-h-60 overflow-auto rounded-md bg-white py-1 shadow-lg ring-1 ring-ops-line"
+          >
+            {items.map((item, i) => (
+              <li
+                key={itemKey(item)}
+                id={`${id}-${i}`}
+                role="option"
+                aria-selected={i === at}
+                // mousedown에서 막아야 칸이 포커스를 잃어 목록이 먼저 닫히지 않음
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pick(item)}
+                onMouseEnter={() => setActive(i)}
+                className={`cursor-pointer px-3 py-2 text-[13px] ${i === at ? 'bg-ops-route-soft' : ''}`}
+              >
+                {renderItem(item)}
+              </li>
+            ))}
+          </ul>
+        )}
       </span>
       {error && <Err>{error}</Err>}
     </label>

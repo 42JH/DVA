@@ -36,6 +36,8 @@ import {
   submitMissing,
   type CustomerPatch,
 } from '@/features/order/api/orderPatch'
+import { customerQueries } from '@/shared/customer/customerApi'
+import { useCustomerSuggest, type Suggestion } from './useCustomerSuggest'
 
 type Side = 'sender' | 'receiver'
 /** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */
@@ -211,6 +213,7 @@ export function useOrderForm(
 
   // 멱등키: 같은 본문을 다시 보내면(실패 후 재시도) 같은 키, 본문이 바뀌면 새 키 (명세서 1.2)
   const sent = useRef<{ body: string; key: string } | null>(null)
+  const suggest = useCustomerSuggest(parties.sender, parties.receiver, order?.customerSeq ?? null)
   const mutation = useMutation({
     // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
     mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
@@ -252,6 +255,8 @@ export function useOrderForm(
       const json = JSON.stringify([body, shippingFee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
       await createOrder(body, shippingFee, sent.current.key)
+      // 서버가 받는 분을 주문 고객 주소록에 자동 등록(11/09 백엔드) → 다음 주문 추천에 바로 뜨게
+      void qc.invalidateQueries({ queryKey: customerQueries.all() })
       return 'ok'
     },
     onSuccess: (result) => {
@@ -300,6 +305,23 @@ export function useOrderForm(
       openSearch: () => setSearching(side),
       detailAddress: p.detailAddress,
       setDetailAddress: (v: string) => set({ detailAddress: v }),
+      // 추천(보내는 분 = 고객, 받는 분 = 주소록)을 칸 아래에. 고르면 한 번에 채움
+      suggest: suggest[side],
+      // 주소가 없는 고객이면 이름 · 번호만 (주소 칸은 그대로)
+      fill: (c: Suggestion) =>
+        set({
+          name: c.name,
+          phone: digits(c.phoneNumber, 11),
+          ...(c.address && {
+            roadAddress: c.address.roadAddress,
+            detailAddress: c.address.detailAddress ?? '',
+            picked: {
+              jibunAddress: c.address.jibunAddress,
+              dongName: c.address.dongName,
+              postalCode: c.address.postalCode,
+            },
+          }),
+        }),
     }
   }
 

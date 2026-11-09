@@ -1,0 +1,147 @@
+name: dva-observability
+
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "3"
+    mode: non-blocking
+    max-buffer-size: 1m
+
+services:
+  docker-reader:
+    image: node:24-bookworm-slim
+    entrypoint: [node, /app/docker-reader.mjs]
+    environment:
+      APP_PROJECT: ${APP_PROJECT:-dva-prod}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./docker-reader.mjs:/app/docker-reader.mjs:ro
+    networks: [collection]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 96m
+    cpus: 0.10
+    restart: unless-stopped
+    logging: *logging
+
+  loki:
+    image: grafana/loki:3.7.9
+    command: [-config.file=/etc/loki/config.yaml]
+    user: "10001:10001"
+    volumes:
+      - ./loki.yaml:/etc/loki/config.yaml:ro
+      - ${OBS_DATA_DIR:?Set OBS_DATA_DIR}/loki:/loki
+    networks: [collection, query]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.50
+    restart: unless-stopped
+    logging: *logging
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=2GB
+      - --web.enable-remote-write-receiver
+    user: "65534:65534"
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ${OBS_DATA_DIR:?Set OBS_DATA_DIR}/prometheus:/prometheus
+    networks: [collection, query, backend]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.50
+    restart: unless-stopped
+    logging: *logging
+
+  alloy:
+    image: grafana/alloy:v1.21.2
+    command:
+      [
+        run,
+        --server.http.listen-addr=0.0.0.0:12345,
+        --storage.path=/var/lib/alloy,
+        /etc/alloy/config.alloy,
+      ]
+    user: "65534:65534"
+    environment:
+      APP_PROJECT: ${APP_PROJECT:-dva-prod}
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - ${OBS_DATA_DIR:?Set OBS_DATA_DIR}/alloy:/var/lib/alloy
+    networks: [collection, backend]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 0.30
+    restart: unless-stopped
+    logging: *logging
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    user: "472:472"
+    ports: ["127.0.0.1:3001:3000"]
+    environment:
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:?Set GRAFANA_ROOT_URL}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/admin-password
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Viewer
+      GF_USERS_VIEWERS_CAN_EDIT: "false"
+      GF_EXPLORE_ENABLED: "true"
+      GF_AUTH_BASIC_ENABLED: "true"
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: Asia/Seoul
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_LOG_MODE: console
+      GF_LOG_CONSOLE_FORMAT: json
+      GF_LOG_LEVEL: warn
+      GF_UNIFIED_ALERTING_ALERTMANAGER_CONFIG_POLL_INTERVAL: 10s
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ${OBS_RUNTIME_DIR:?Set OBS_RUNTIME_DIR}/alerting:/etc/grafana/provisioning/alerting:ro
+      - ${OBS_RUNTIME_DIR:?Set OBS_RUNTIME_DIR}/admin-password:/run/secrets/admin-password:ro
+      - ${OBS_DATA_DIR:?Set OBS_DATA_DIR}/grafana:/var/lib/grafana
+    networks: [query, notification]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 0.50
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  collection:
+    internal: true
+  query:
+    internal: true
+  notification: {}
+  backend:
+    external: true
+    name: ${APP_NETWORK:-dva-prod_web_net}

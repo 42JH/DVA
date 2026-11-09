@@ -28,7 +28,6 @@ export function CustomersPage() {
           aria-label="고객 목록"
           className="flex min-w-0 flex-1 flex-col gap-3 px-6 pt-4 pb-4"
         >
-          {vm.hint && <p className="text-[12px] text-ops-wait">{vm.hint}</p>}
           <div
             ref={box}
             data-scrollable={scrollable || undefined}

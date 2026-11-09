@@ -1,0 +1,37 @@
+{
+  "customer": {
+    "database": "customer_db",
+    "tables": 5,
+    "source": "msa-service-design-20261020/msa/customer/schema.sql",
+    "source_sha256": "a36ab036329d0105ae4878cdf0c8f1179b626383694203916e680824df396ceb",
+    "migration_sha256": "2f1c54f523cc81da361eb7ec3a1dfab37646ca93e066081333e45ed241495be5"
+  },
+  "order": {
+    "database": "order_db",
+    "tables": 4,
+    "source": "msa-service-design-20261020/msa/order/schema.sql",
+    "source_sha256": "60d91fabe898fef5bd843784a10ed0ba491e786d9cd3cdc6eac943a298694138",
+    "migration_sha256": "f4fb41997df5995baa99432b439160db7cebc4f40c21cf53ef537925880f26fd"
+  },
+  "consultation": {
+    "database": "consultation_db",
+    "tables": 6,
+    "source": "msa-service-design-20261020/msa/consultation/schema.sql",
+    "source_sha256": "36dc8abb396718b2fdf9fb3978d6a4bbc3c87f46f854e4a0b4da0ba8abcf2625",
+    "migration_sha256": "bfe81b15edf5ea308648de10525c92e773bf49862b9bd16ecf73ef4e811c9d46"
+  },
+  "delivery": {
+    "database": "delivery_db",
+    "tables": 4,
+    "source": "msa-service-design-20261020/msa/delivery/schema.sql",
+    "source_sha256": "4d72ed9422881f1b89e6e6888b8bd6c3ba2a054e6a8bf7e91f75382d9e097c68",
+    "migration_sha256": "72b6dc4127581df2a8bcb0d24eb809e4f40cc9b721d4fd4f7b728a412d8fe5a8"
+  },
+  "operations": {
+    "database": "operations_db",
+    "tables": 7,
+    "source": "msa-service-design-20261020/msa/operations/schema.sql",
+    "source_sha256": "d66f535aea62e65d77fd900d1e9b2a5490b9ed73008c2a2443f69de628a812bc",
+    "migration_sha256": "db1c8134046c75144b4d9e44baff29f35865f3cbe364dc0fac8e836cfad1fc81"
+  }
+}

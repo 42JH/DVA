@@ -1,0 +1,109 @@
+아키텍처 보완 계약 (2026-10-21)
+
+2026-11-05 주의: 아래는 초기 설계 기록이다. 최신 구현 기준은 docs/msa-parity-plan.md와
+develop-backend의 backend 코드다. 결제·재시도·삭제·보관 등 현재 모놀리식과 다른 정책은
+그대로 이식하지 않는다. 새 이벤트 공통 기반은 msa/shared/events/README.md를 따른다.
+2026-11-06: order/delivery 003은 아래 초기 SQL workflow 함수와 암묵적 주문 이벤트 trigger를
+제거하고 최신 주문/결제/청구·배송 이력 저장 구조를 적용한다. docs/msa-order-schema-plan.md 참조.
+현재 order/delivery 앱에는 업무 API/receiver가 없으며 기존 대기 이벤트는 보존한다.
+
+1. 서비스 경계
+고객: customers, organizations, memberships, personal_pins, company_pins (5)
+주문: orders, order_parcels (2)
+상담: call_sessions, call_utterances, recordings, handoff_requests (4)
+배송: shipments, shipment_status_history (2)
+운영: admin_users, audit_logs, ai_personas, ai_prompt_versions, faq_entries (5)
+업무 테이블은 두 버전 모두 18개다. MSA는 주문/상담/배송/운영 DB마다
+outbox_events, inbox_events 2개씩 추가하므로 전체 물리 테이블은 26개다.
+고객 서비스에는 현재 외부 전달 작업이 없으므로 메시지 테이블을 추가하지 않는다.
+모놀리식은 모듈별 소유권을 지키되 같은 DB의 FK/트랜잭션을 사용한다.
+MSA는 다른 서비스 DB에 직접 접근하지 않고 ID와 인증된 API/이벤트로 연결한다.
+
+2. 주문과 배송
+orders.status는 디버 접수 처리 상태, shipments.status는 내부 물류 상태다.
+디버 성공은 결제 완료나 택배사 집하 완료를 의미하지 않는다.
+notPaid: 접수완료, 미결제
+paid: 결제완료, 지점 수령 전
+received: 지점이 고객 물품 수령
+waiting: 택배사 접수/송장 발급 완료, 기사 집하 대기
+sent: 택배사 인계 완료. 우리 서비스의 택배 처리 종점
+canceling: 고객 취소 요청, 관리자 처리 대기
+canceled: 관리자 취소 승인 완료
+진행 의미는 notPaid→paid→received→waiting→sent이며 취소 처리는 canceling→canceled다.
+어느 상태에서 취소 가능한지, 역방향 정정 가능한지는 미정이다.
+함수는 현재 허용 값 7개만 검증한다. 모든 상태 쌍이 사업적으로 승인됐다는 뜻은 아니다.
+관리자 화면에 전이 버튼을 확정하기 전에 이 두 정책을 정해야 한다.
+orders의 CANCELLED는 디버 제출 전 주문 중단이다. 배송 canceled와 서로 복사하지 않는다.
+결제 API를 추가하지 않는다. paid 등은 관리자/mock 갱신으로 처리한다.
+
+3. 배송 생성과 운송장
+디버 parcel_no는 외부 접수 참고값이며 중복 허용이다.
+shipment_seq는 내부 PK, tracking_number는 우리가 생성하는 UNIQUE 내부 추적번호다.
+생성 함수는 DVA-UUID로 내부 번호를 발급한다. 택배사 실운송장 번호라는 의미는 아니다.
+waiting은 mock으로 택배사 접수 완료를 표시한다. 실제 택배사 송장 연동은 범위 밖이다.
+모놀리식: finish_submission 성공 갱신 + 상세별 배송 생성 + 최초 이력을 같은 트랜잭션 처리.
+MSA: ACCEPTED 갱신과 OrderAccepted outbox INSERT를 같은 트랜잭션 처리.
+OrderAccepted payload = {orderSeq: 정수, orderParcelSeqs: [상세ID, ...]}.
+송신자는 order, 수신자는 delivery. HTTP 인증 주체에서 출처를 검증한다.
+배송 수신 함수는 inbox 기록 + 전체 상세 배송 생성 + 최초 이력을 한 트랜잭션 처리한다.
+같은 event_id/본문 재수신은 성공 반환하며 배송을 중복 생성하지 않는다.
+같은 ID의 다른 본문은 오류, 다른 event_id의 같은 상세도 UNIQUE 오류로 운영 점검한다.
+배송 상태 변경 함수는 request_id 중복 확인, row lock, version 비교, 현재 상태/시각/버전 변경,
+이력 INSERT를 한 번에 처리한다. API 응답 유실 후 같은 request_id 재시도는 기존 이력 ID 반환.
+직접 UPDATE는 이 보호를 우회하므로 앱 저장 경로는 반드시 함수를 사용해야 한다.
+인증/권한은 함수의 admin_id 파라미터를 신뢰하지 말고 서버 세션에서 결정한다.
+
+4. 외부 접수 실패와 재시도
+prepare_submission 커밋 후 디버 HTTP 요청, 응답 검증 후 finish_submission을 호출한다.
+403은 AUTH_FAILED, 타임아웃/모호한 응답은 REVIEW_REQUIRED로 처리한다.
+프로세스 중단으로 남은 SUBMITTING은 flag_stale_submissions(cutoff)로 REVIEW_REQUIRED 처리.
+cutoff는 HTTP timeout보다 충분히 긴 운영 설정이다. 스케줄러는 아직 연결하지 않았다.
+REVIEW_REQUIRED를 COLLECTING으로 되돌리거나 디버에 자동 재접수하지 않는다.
+디버의 멱등키/접수 조회 계약이 없으므로 외부 접수와 로컬 저장의 완전한 원자성은 보장할 수 없다.
+관리자가 확인한 결과를 반영하는 복구 API/증빙 절차는 외부 계약 확인 후 정한다.
+
+5. 내부 메시지 재전달
+outbox는 업무 변경과 같은 트랜잭션에 INSERT. 전송 실패 시 행을 남긴다.
+수신 성공 응답은 inbox와 업무 변경 COMMIT 이후 반환한다.
+송신자는 그 응답 이후에만 delivered_at을 기록한다. 응답 유실 시 같은 event_id로 다시 전송한다.
+수신자는 event_id가 같아도 source/event_type/payload가 다른 요청을 거부한다.
+여러 수신처는 destination별 별도 행/이벤트 ID를 사용한다.
+현재 DDL과 주문→배송 DB 함수까지 제공한다. 전송 워커, 인증 라우트, 재시도 간격,
+경고/보존 주기는 앱 구현이 필요하다. 메시지 테이블만으로 전송이 실행되는 것은 아니다.
+
+6. 상담→주문 및 감사
+모놀리식: 상담 결과와 주문 변경은 기존처럼 같은 DB 트랜잭션.
+MSA: 상담 저장과 주문 변경 명령 outbox를 같은 트랜잭션에 저장하고 주문 서비스가 소비한다.
+명령에는 event_id, provider_call_id, order_seq, expected_order_version, 변경 내용이 필요하다.
+주문 서비스는 inbox 중복 확인 후 주문 잠금/버전/수정 가능 상태 검증을 수행한다.
+늦은 통화 결과로 최신 주문을 덮어쓰지 않는다. 충돌은 재검토 응답으로 종료하고 무한 재시도하지 않는다.
+AI의 최종 결과 필드 계약이 미확정이므로 해당 이벤트 publisher/receiver는 아직 구현하지 않는다.
+MSA 상담의 order_seq/assigned_admin_user_seq는 외부 논리 참조이고 내부 FK는 유지한다.
+
+주문 수정 성공 예: 관리자를 서버에서 확인 → orders 버전 비교 → 변경 → audit 기록 → 커밋.
+모놀리식 SUCCESS audit_logs INSERT는 업무 트랜잭션 안에서 처리한다.
+MSA SUCCESS 감사 이벤트 outbox INSERT를 해당 서비스 업무 트랜잭션 안에서 처리한다.
+운영 서비스는 inbox INSERT와 audit_logs INSERT를 같은 트랜잭션으로 처리한다.
+DENIED/FAILED는 업무 트랜잭션 롤백 뒤 별도 기록한다. 성공 감사와 함께 롤백시키지 않는다.
+request_id는 요청 상관관계 값으로 UNIQUE가 아니다. 중복 방지는 event_id/inbox로 한다.
+metadata는 변경 필드명과 필요한 값만 기록하며 전화번호/주소/전체 대화 원문을 무차별 복제하지 않는다.
+감사 API와 각 변경 핸들러 연결은 앱 구현 범위다.
+
+7. 페르소나와 FAQ
+통화 시작 시 운영 서비스에서 활성 프롬프트+해당 페르소나의 voice_id/speaking_rate/turn_wait_level을
+한 SQL 조회로 받아 실행 중 통화 메모리에 고정한다. 운영 설정 변경은 다음 통화부터 적용한다.
+프롬프트가 없거나 엔진이 설정값을 지원하지 않으면 시작 단계에서 오류로 처리한다.
+통화 도중 설정을 매 턴 다시 조회하지 않는다. 프로세스 재시작 후 통화 재개는 현재 범위 밖이다.
+FAQ는 version/is_enabled/embedding 컬럼 없이 운영 DB에서 관리한다.
+faq_changed는 커밋된 변경의 신호다. AI는 현재 질문/답변을 조회하여 임베딩한다.
+LISTEN 연결 완료 후 전체 동기화하고, 수신한 ID를 다시 조회한다. 없는 ID는 벡터에서 제거한다.
+연결 재수립 때마다 전체 ID/본문 재동기화하며 단절 중 삭제도 반영한다.
+동기화 중 들어온 신호를 버리지 말고 큐에 모아 전체 동기화 뒤 최신 내용을 재조회한다.
+같은 FAQ 작업은 직렬화하여 오래된 임베딩 완료가 최신 값을 덮어쓰지 않도록 한다.
+운영 API/AI 수신기/벡터 저장소는 별도 구현이 필요하다.
+
+8. 적용 범위
+모든 schema.sql은 신규 DB 생성용이다. 기존 DB에 그대로 실행하는 마이그레이션이 아니다.
+이 산출물은 설계 DDL과 핵심 DB 함수이며 전체 서비스 실행 완료를 의미하지 않는다.
+원본 S15P31D109 앱은 수정하지 않았다. 실제 배포 전에 인증된 API, 워커, 위 미정 정책,
+운영 DB 권한 및 기존 데이터 마이그레이션을 별도 적용해야 한다.

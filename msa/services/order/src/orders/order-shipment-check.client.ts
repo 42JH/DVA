@@ -1,0 +1,76 @@
+import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'node:crypto';
+import { ApiException } from '../common/errors/api.exception';
+import type { Environment } from '../config/environment';
+
+@Injectable()
+export class OrderShipmentCheckClient {
+  constructor(private readonly config: ConfigService<Environment, true>) {}
+
+  async blocked(orderParcelSeqs: number[]): Promise<boolean> {
+    const eventId = randomUUID();
+    try {
+      const response = await fetch(
+        this.config.get('DELIVERY_URL', { infer: true }) + '/internal/order-shipment-check',
+        {
+          method: 'POST',
+          redirect: 'error',
+          signal: AbortSignal.timeout(5000),
+          headers: {
+            Authorization: 'Bearer ' + this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true }),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            eventId,
+            source: 'order',
+            eventType: 'OrderShipmentCheckRequested',
+            payload: { orderParcelSeqs },
+          }),
+        },
+      );
+      try {
+        if (
+          response.status !== 200 ||
+          !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')
+        )
+          throw new Error('Invalid shipment check response');
+        const parts: Uint8Array[] = [];
+        let size = 0;
+        for await (const part of response.body ?? []) {
+          size += part.length;
+          if (size > 4096) throw new Error('Invalid shipment check response');
+          parts.push(part);
+        }
+        const result: unknown = JSON.parse(
+          new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts)),
+        );
+        if (
+          !result ||
+          typeof result !== 'object' ||
+          Object.keys(result).sort().join(',') !== 'eventId,payload,status' ||
+          !('eventId' in result) ||
+          result.eventId !== eventId ||
+          !('status' in result) ||
+          result.status !== 'processed' ||
+          !('payload' in result) ||
+          !result.payload ||
+          typeof result.payload !== 'object' ||
+          Object.keys(result.payload).join(',') !== 'blocked' ||
+          !('blocked' in result.payload) ||
+          typeof result.payload.blocked !== 'boolean'
+        )
+          throw new Error('Invalid shipment check acknowledgement');
+        return result.payload.blocked;
+      } finally {
+        await response.body?.cancel();
+      }
+    } catch {
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
+}
