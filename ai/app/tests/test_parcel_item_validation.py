@@ -17,6 +17,58 @@ def record(c, text, rule=None, status="included", turn=1, **fields):
     return call(c, "record_fields", fields)
 
 
+def test_direct_box_count_wins_and_restricted_items_cannot_be_suggested():
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    suggestion = {"size": "small", "count": 1, "quote": "신발"}
+    result = record(c, "신발을 중형 박스 하나에 담아요", medium_box_count=1, box_suggestion=suggestion)
+    assert c.state.current["items"].value == Items(medium_box_count=1)
+    assert "box_proposal" not in result["facts"] and c.state.current.box_proposal is None
+
+    c.state.clear("items")
+    result = record(c, "신발과 수표를 보내요", "cash_equivalents", turn=2, box_suggestion=suggestion)
+    assert result["code"] == "PROHIBITED_ITEM" and c.state.current.box_proposal is None
+
+
+@pytest.mark.parametrize("quote", ["미니 냉장고", "냉장", "미니 냉장고 하나 보내려고요"])
+def test_appliance_is_not_classified_as_refrigerated_food(quote):
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    text = "미니 냉장고 하나 보내려고요"
+    assert not hold_unclassified_items(c.state, P.parcel_items, 1, text)
+    out = record(c, text, big_box_count=1, item_evidence=[{
+        "rule": "perishables", "quote": quote, "status": "included",
+    }])
+    assert out["status"] == "ok" and c.state.current["items"].value == Items(big_box_count=1)
+
+    assert record(c, "미니 냉장고와 냉동식품을 보낼게요", "perishables", turn=2)["code"] == "PROHIBITED_ITEM"
+    out = record(c, "미니 냉장고 한 변 170cm예요", "size", turn=3)
+    assert any(need["reason"] == "ITEM_SIZE_EXCEEDED" for need in out["needs"])
+
+
+def test_contextual_evidence_clears_only_the_matching_keyword_mention():
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    evidence = [{"rule": "cash_equivalents", "quote": "현금 영수증", "status": "not_applicable"}]
+    text = "현금 영수증을 보내려고요"
+    review = hold_unclassified_items(c.state, P.parcel_items, 1, text)
+    assert review["code"] == "ITEM_MENTION_UNCLEAR"
+    assert "접수할 수 없" not in review["guidance"][0]
+    assert record(c, text, document_count=1, item_evidence=evidence)["status"] == "ok"
+    assert not c.state.current.item_issues
+
+    assert record(c, "보조배터리 파우치", "batteries", "not_applicable", turn=2)["status"] == "ok"
+
+    out = record(c, "현금과 현금 영수증을 같이 보낼게요", turn=3, item_evidence=evidence)
+    assert out["code"] == "ITEM_MENTION_UNCLEAR"
+    assert record(c, "현금과 현금 영수증", "cash_equivalents", "not_applicable", turn=4)["code"] == "ITEM_MENTION_UNCLEAR"
+    assert record(c, text, turn=5, item_evidence=evidence)["code"] == "ITEM_MENTION_UNCLEAR"
+    assert record(c, "현금", "cash_equivalents", "not_applicable", turn=6)["code"] == "ITEM_MENTION_UNCLEAR"
+
+
 @pytest.mark.parametrize(("rule", "item"), [
     ("cash_equivalents", "수표"), ("dangerous_goods", "농약"), ("animals", "동물 사체"),
     ("valuables", "귀금속"), ("flammables", "부탄가스"), ("perishables", "냉동식품"),
@@ -110,11 +162,17 @@ def test_unclear_parcel_holds_submission_until_target_is_identified_and_omitted(
     c.state.current = filled(receiver="박영수").current
     second = confirm_once(c.state)
     assert hold_unclassified_items(c.state, P.parcel_items, 1, "박스에 수표가 들어 있어요")["code"] == "ITEM_PARCEL_UNCLEAR"
+    text = "현금 영수증도 보낼게요"
+    hold_unclassified_items(c.state, P.parcel_items, 2, text)
+    record(c, text, turn=2, item_evidence=[{
+        "rule": "cash_equivalents", "quote": "현금 영수증", "status": "not_applicable",
+    }])
+    assert c.state.unassigned_item_issues["cash_equivalents"].utterance_id == 1
     assert not decide_outcome(c.state, P, NOW, fare).parcels
     open_for_edit(c.state, second)
     outcome = decide_outcome(c.state, P, NOW, fare)
     assert outcome.kind == "INCOMPLETE" and len(outcome.parcels) == 1
-    assert record(c, "두 번째 택배는 빼 주세요", turn=2,
+    assert record(c, "두 번째 택배는 빼 주세요", turn=3,
                   omit_blocked_parcel="두 번째 택배는 빼 주세요")["facts"]["blocked_parcel_omitted"]
     assert [parcel.parcel_id for parcel in c.state.parcels] == [first]
     assert decide_outcome(c.state, P, NOW, fare).kind == "COMPLETE"

@@ -4,6 +4,8 @@
 (P5 후속 B안, decisions.md).
 """
 
+from dataclasses import replace
+
 from app.domain.parcel_items import ItemIssue, unclassified_mentions
 from app.domain.state import ConversationState, StoredParcel, copy_draft, draft_snapshot, snapshot_hash
 from app.policy.model import ParcelItems
@@ -46,6 +48,7 @@ def open_for_edit(state: ConversationState, parcel_id: str) -> None:
 def hold_items(state: ConversationState, issues: dict[str, ItemIssue]) -> None:
     """문제가 생긴 택배의 이전 확인으로 제출하는 경로도 닫는다."""
     state.field_of("items")  # 현재 택배가 없으면 생성
+    state.current.box_proposal = None
     for key, issue in issues.items():
         if issue.code != "ITEM_MENTION_UNCLEAR" or key not in state.current.item_issues:
             state.current.item_issues[key] = issue
@@ -62,13 +65,15 @@ def hold_unclassified_items(state: ConversationState, policy: ParcelItems, utter
     """도구 호출이 늦거나 생략돼도 발화에 나타난 제한 후보를 먼저 보류한다."""
     if state.intent != "order" or state.latest_item_utterance_id >= utterance_id:
         return {}
-    issues = unclassified_mentions(policy, text)
+    issues = {key: replace(issue, utterance_id=utterance_id)
+              for key, issue in unclassified_mentions(policy, text).items()}
     if not issues:
         return {}
     state.latest_item_utterance_id = utterance_id
     if (state.current is None or state.current.empty()) and state.parcels:
         if len(state.parcels) > 1:
-            state.unassigned_item_issues.update(issues)
+            for key, issue in issues.items():
+                state.unassigned_item_issues.setdefault(key, issue)
             return {"code": "ITEM_PARCEL_UNCLEAR"}
         open_for_edit(state, state.parcels[0].parcel_id)
     hold_items(state, issues)

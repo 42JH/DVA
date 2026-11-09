@@ -3,20 +3,57 @@
 import re
 from dataclasses import dataclass
 
-from app.policy.model import ParcelItems
+from app.policy.model import ItemRestriction, ParcelItems
 
 
 @dataclass(frozen=True)
 class ItemIssue:
     code: str
     guidance: str
+    utterance_id: int | None = None
 
 
 def mentions(policy: ParcelItems, text: str) -> list[str]:
     text = re.sub(r"현금(?:으로(?:는)?)?\s*(?:결제|납부)", "", text)
-    heard = re.sub(r"\s+", "", text)
-    return [key for key, rule in policy.rules.items()
-            if any(re.sub(r"\s+", "", term) in heard for term in rule.terms)]
+    heard = _compact(text)
+    return [key for key, rule in policy.rules.items() if _matches(rule, _without_exclusions(rule, heard))]
+
+
+def _compact(text: str) -> str:
+    return "".join(text.split())
+
+
+def _without_exclusions(rule: ItemRestriction, text: str) -> str:
+    for term in rule.excluded_terms:
+        if compact := _compact(term):
+            text = text.replace(compact, " ")
+    return text
+
+
+def _matches(rule: ItemRestriction, text: str) -> bool:
+    return any(_compact(term) in text for term in rule.terms)
+
+
+def excluded_evidence(rule: ItemRestriction, quote: str, text: str) -> bool:
+    """제외 단어만 근거로 낸 분류를 막고, 함께 언급된 제한 품목은 유지한다."""
+    if not rule.excluded_terms:
+        return False
+    quote, heard = _compact(quote), _compact(text)
+    remainder = _without_exclusions(rule, quote)
+    if remainder != quote:
+        return not _matches(rule, remainder)
+    return quote in heard and quote not in _without_exclusions(rule, heard)
+
+
+def contextual_keyword(rule: ItemRestriction, quote: str) -> bool:
+    """문맥 제외는 실제 단어가 포함된 구절에만 적용한다. 금지 단어 자체는 남긴다."""
+    quote = _compact(quote)
+    keywords = sorted({_compact(term) for term in rule.terms} - {""}, key=len, reverse=True)
+    if not keywords:
+        return False
+    pattern = "|".join(map(re.escape, keywords))
+    return len(re.findall(pattern, quote)) == 1 and not re.fullmatch(
+        rf"(?:{pattern})(?:은|는|이|가|을|를|도|만|요)?", quote)
 
 
 def measurements(text: str) -> dict[str, float]:
@@ -32,8 +69,8 @@ def measurements(text: str) -> dict[str, float]:
     return sizes
 
 
-def mention_issue(policy: ParcelItems, key: str) -> ItemIssue:
-    return ItemIssue("ITEM_MENTION_UNCLEAR", policy.rules[key].guidance)
+def mention_issue() -> ItemIssue:
+    return ItemIssue("ITEM_MENTION_UNCLEAR", "제한 품목 자체를 함께 보낸다는 뜻인지 확인해 주세요.")
 
 
 def size_issues(policy: ParcelItems, sizes: dict[str, float]) -> dict[str, ItemIssue]:
@@ -48,4 +85,4 @@ def unclassified_mentions(policy: ParcelItems, text: str) -> dict[str, ItemIssue
     if (re.search(r"(?:보내도|보낼 수|접수|배송|가능).{0,16}(?:되나요|있나요|있어요\?|될까요|인가요|한가요|해요\?)|돼요\?\s*$", text)
             and not re.search(r"넣었|담았|들어\s*있|포장했", text)):
         return {}
-    return {key: mention_issue(policy, key) for key in mentions(policy, text)} | size_issues(policy, measurements(text))
+    return dict.fromkeys(mentions(policy, text), mention_issue()) | size_issues(policy, measurements(text))

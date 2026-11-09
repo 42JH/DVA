@@ -447,6 +447,51 @@ def test_cancel_reask_carries_cancel_target_not_parcel_readback():
     assert facts["cancel_target"]["receiver_name"] == "홍길동"
 
 
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_box_proposal_uses_separate_confirmation(answer):
+    from app.calls.live import Spoken
+    from app.domain.state import Items
+    from app.policy.render import decision_questions
+    from app.tests.test_domain import P, filled
+    from app.tests.test_results import session
+    from app.tools import run_tool
+
+    svc, _ = flow()
+    lf = LiveFlow(svc)
+    st = filled()
+    st.clear("items")
+    st.clear("item_price")
+    s = session(st)
+    s.tools.clock = lambda: 100
+    s.tools.item_utterance = (1, "신발 한 켤레 보내려고요")
+
+    async def scenario():
+        result = await run_tool(s.tools, "record_fields", json.dumps({"box_suggestion": {
+            "size": "small", "count": 1, "quote": "신발 한 켤레"}}), "box-suggest")
+        assert result["facts"]["box_proposal"]["label"] == "소형 박스 1개"
+        assert result["missing"] == ["items", "item_price"] and not st.current["items"].valid
+        assert st.pending is None
+        box = st.current.box_proposal
+        questions = decision_questions(P, "item", box_label=box.label)
+        assert [q["name"] for q in questions] == ["box", "switch"]
+        reply = Spoken(2, "네" if answer == "yes" else "아니요", 1800, 1900, 102, 103)
+        unrelated = Spoken(1, "잠시 기다려 주시겠어요?", 1100, 1500, 101, 101)
+        await lf.apply(s, reply, unrelated, {"box": (answer, 1.0)}, None, box=box)
+        assert st.current.box_proposal is box
+        question = Spoken(1, "소형 박스 한 개 정도로 보면 될까요?", 1100, 1500, 101, 101)
+        await lf.apply(s, reply, question, {"box": (answer, 1.0)}, None, box=box)
+        assert st.current.box_proposal is None and st.pending is None and not st.parcels
+        if answer == "yes":
+            assert st.current["items"].value == Items(small_box_count=1)
+            assert any((e.get("data") or {}).get("content", {}).get("summary", {}).get("missing") == ["item_price"]
+                       for e in s.events)
+        else:
+            assert not st.current["items"].valid
+            assert any((e.get("data") or {}).get("content", {}).get("box_proposal_declined") for e in s.events)
+
+    run(scenario())
+
+
 def test_agent_greets_first_on_session_start():
     """고객이 먼저 말하기 전에 서버가 N2로 첫 인사를 시킨다(한 번)."""
     svc, client = flow()
