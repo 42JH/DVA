@@ -12,6 +12,9 @@ import { oldestPage, usePageSize } from './paging'
 type Q = Record<string, string | number | undefined>
 const iso = (ms: number) => new Date(ms).toISOString()
 
+/** 보고 있는 쪽 · 새 건수를 다시 받는 주기 */
+const REFRESH_MS = 15_000
+
 export function useSnapshotList<T>({
   key,
   path,
@@ -59,6 +62,7 @@ export function useSnapshotList<T>({
     queryKey: ['screen', key, 'count', query, to],
     enabled: on && asc && to !== undefined,
     staleTime: Infinity,
+    refetchInterval: REFRESH_MS, // 상태 탭이면 상태가 바뀐 줄이 빠지며 건수가 바뀜
     queryFn: ({ signal }) =>
       get({ ...query, to: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
   })
@@ -73,7 +77,12 @@ export function useSnapshotList<T>({
       return asc ? oldestPage(n, p, size, page) : page(size, (p - 1) * size)
     },
   })
-  const list = useQuery({ ...opts(page), placeholderData: keepPreviousData })
+  // 보고 있는 쪽은 15초마다 다시 받음 — 기준 시각이 같아 줄은 그대로, 상태만 새로 (11/09 사용자: 끝나고 분석까지 된 통화가 '통화 중'으로 남던 것)
+  const list = useQuery({
+    ...opts(page),
+    placeholderData: keepPreviousData,
+    refetchInterval: REFRESH_MS,
+  })
   const total = list.data?.total_count ?? 0
   const pages = Math.max(1, Math.ceil(total / size))
 
@@ -94,7 +103,7 @@ export function useSnapshotList<T>({
   const fresh = useQuery({
     queryKey: ['screen', key, 'fresh', query, to],
     enabled: on && to !== undefined,
-    refetchInterval: 15_000,
+    refetchInterval: REFRESH_MS,
     queryFn: ({ signal }) =>
       get({ ...query, from: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
   })
