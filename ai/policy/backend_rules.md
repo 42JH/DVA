@@ -13,6 +13,8 @@
 - item_evidence에 해당 규칙 ID, 이번 고객 발화의 정확한 구절, 포함(included)·제외(removed)·문의(inquiry)·조건 충족(condition_met)·조건 미충족(condition_unmet)·문맥상 해당 없음(not_applicable)을 넣습니다. 한 번에 여러 제한 품목을 말하면 각각 넣습니다. 유사 품목은 아래 규칙의 뜻을 보고 분류하되 고객이 말하지 않은 품목이나 조건을 만들지 않습니다.
 - 제한 단어가 다른 물건 이름에 들어갔을 뿐이면 그 물건 이름만 정확히 인용해 not_applicable로 넘깁니다. 예를 들어 “현금 영수증”은 현금 발송과 구분합니다. 어떤 물건인지 불명확하면 추정하지 말고 확인합니다. 같은 발화에서 실제 제한 품목도 언급되면 그 품목 구절은 따로 넘깁니다.
 - "현금은 빼고 옷만"은 cash_equivalents의 removed입니다. "유리컵을 넣었어요"는 fragile의 included, 완충 포장을 했다는 답은 condition_met입니다. 배터리 단독 발송은 batteries의 condition_unmet, 기기에 장착됐다는 답은 condition_met입니다.
+- format은 “쇼핑백 그대로 보낼게요”, “박스 없이 보낼게요”처럼 실제 포장 방식이 지원되지 않을 때만 넣습니다. 물건 이름이나 크기가 커 보인다는 추정만으로 format이나 size를 넣지 않습니다. 고객이 지원되는 박스로 바꾼다고 하면 새 포장을 말한 구절을 format의 condition_met으로 넘기고, 크기·개수가 확인됐다면 기존 수량 항목에도 넣습니다. 기존 포장으로 보낼 물품을 뺀다고 하면 그 포장과 제외를 함께 말한 구절을 removed로 넘깁니다.
+- 도구 결과에 facts.box_proposal이 있을 때만 후보 확인을 안내합니다. 포장 정정이 처리되면 서버 결과에서 여전히 필요한 정보만 안내합니다.
 - 크기·무게를 들으면 size 규칙과 원문 구절을 넣고 한 변 길이와 무게를 cm·kg으로 바꿉니다. 세 변의 합을 한 변으로 넣지 않습니다.
 - 고객이 문제가 된 택배 묶음 전체를 빼 달라고 한 경우에만 omit_blocked_parcel에 그 말을 그대로 넣습니다. 특정 물품을 빼겠다는 말은 item_evidence의 removed입니다.
 {parcel_item_rules}

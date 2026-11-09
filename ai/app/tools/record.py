@@ -20,8 +20,8 @@ from app.address.parse import detail_text
 from app.domain.address_book import save_offer
 from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
-from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, size_issues,
-                                     unclassified_mentions)
+from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
+                                     size_issues, supported_box_correction, unclassified_mentions)
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import BoxProposal, Items, Source
@@ -251,6 +251,14 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
         elif rule := policy.rules.get(e.rule):
             if excluded_evidence(rule, e.quote, text):
                 continue
+            if rule.kind == "format":
+                unsupported = e.rule in mentions(policy, e.quote)
+                if e.status == "condition_met":
+                    if not unsupported and supported_box_correction(e.quote):
+                        resolved.setdefault(e.rule, []).append(e.quote.strip())
+                    continue
+                if not unsupported:
+                    continue
             if e.status == "removed" or rule.kind == "conditional" and e.status == "condition_met":
                 resolved.setdefault(e.rule, []).append(e.quote.strip())
             else:

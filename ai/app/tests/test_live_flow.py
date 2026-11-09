@@ -463,9 +463,13 @@ def test_box_proposal_uses_separate_confirmation(answer):
     st.clear("item_price")
     s = session(st)
     s.tools.clock = lambda: 100
-    s.tools.item_utterance = (1, "신발 한 켤레 보내려고요")
 
     async def scenario():
+        s.tools.item_utterance = (1, "냉장고 하나 보내려고요")
+        old = await run_tool(s.tools, "record_fields", json.dumps({"item_evidence": [
+            {"rule": "format", "quote": "냉장고 하나", "status": "included"}]}), "unfounded-format")
+        assert old["code"] == "ITEM_UNSPECIFIED" and not st.current.item_issues
+        s.tools.item_utterance = (2, "신발 한 켤레 보내려고요")
         result = await run_tool(s.tools, "record_fields", json.dumps({"box_suggestion": {
             "size": "small", "count": 1, "quote": "신발 한 켤레"}}), "box-suggest")
         assert result["facts"]["box_proposal"]["label"] == "소형 박스 1개"
@@ -474,7 +478,7 @@ def test_box_proposal_uses_separate_confirmation(answer):
         box = st.current.box_proposal
         questions = decision_questions(P, "item", box_label=box.label)
         assert [q["name"] for q in questions] == ["box", "switch"]
-        reply = Spoken(2, "네" if answer == "yes" else "아니요", 1800, 1900, 102, 103)
+        reply = Spoken(3, "네" if answer == "yes" else "아니요", 1800, 1900, 102, 103)
         unrelated = Spoken(1, "잠시 기다려 주시겠어요?", 1100, 1500, 101, 101)
         await lf.apply(s, reply, unrelated, {"box": (answer, 1.0)}, None, box=box)
         assert st.current.box_proposal is box

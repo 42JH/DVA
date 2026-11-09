@@ -56,6 +56,15 @@ def contextual_keyword(rule: ItemRestriction, quote: str) -> bool:
         rf"(?:{pattern})(?:은|는|이|가|을|를|도|만|요)?", quote)
 
 
+def supported_box_correction(quote: str) -> bool:
+    """포장 정정은 박스 포장이나 규격을 답한 구절을 근거로 받는다."""
+    quote = _compact(quote).rstrip(".,!?")
+    if re.search(r"(?:안|못)(?:들어|넣|담|포장)|않|없이|수없|박스(?:가|는)?아니", quote):
+        return False
+    return bool(re.fullmatch(r"(?:소형|중형|대형)(?:이?요|입니다)?", quote)
+                or re.search(r"(?:소형|중형|대형|[소중대])박스|박스(?:에|로)|규격에맞(?:게|춰)포장", quote))
+
+
 def measurements(text: str) -> dict[str, float]:
     sizes: dict[str, float] = {}
     for amount, unit in re.findall(r"(\d+(?:\.\d+)?)\s*(센티미터|센티|cm|미터|m|킬로그램|킬로|kg)(?![a-z])",
