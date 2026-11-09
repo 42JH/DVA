@@ -197,7 +197,9 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
           <ul className="flex flex-col gap-1">
             {examples.map((e) => (
               <li key={e.key} className="flex items-baseline gap-3 text-[13px]">
-                <span className="w-24 shrink-0 text-ops-faint tabular-nums">{e.at}</span>
+                <span className="shrink-0 whitespace-nowrap text-ops-faint tabular-nums">
+                  {e.at}
+                </span>
                 {e.call ? (
                   <Link
                     to={`/calls/${e.call}`}
