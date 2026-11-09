@@ -59,6 +59,7 @@ interface CustomerDto {
   monthlyBillingEnabled: boolean
   status: 'ACTIVE' | 'WITHDRAWN'
   availablePaymentMethods: PayMethod[] // 조회 시점 결제 자격 (목록 전용, 11/08). 실제 결제 때 서버가 다시 확인
+  organization?: { name: string } | null // 소속 기업 (11/09 백엔드 요청 — 오기 전엔 없음 → 구분 칸 빈칸)
 }
 interface PinDto {
   personalPinSeq: number
@@ -115,6 +116,8 @@ export function useCustomers() {
       detail: c.address?.detailAddress ?? '',
       payments: c.availablePaymentMethods.map((m) => PAY_LABEL[m]),
       withdrawn: c.status === 'WITHDRAWN',
+      kind: c.organization === undefined ? '' : c.organization ? '기업' : '개인',
+      company: c.organization?.name ?? '',
     })),
     isLoading: list.isPending,
     isStale: list.isPlaceholderData,
@@ -169,7 +172,6 @@ export function useCustomer(seq: number) {
     error: c.error ? '고객 정보를 불러오지 못했습니다.' : null,
     pins: (pins.data?.data ?? []).map((p) => ({
       key: p.personalPinSeq,
-      label: p.label,
       name: p.addressData.name,
       phone: fmtPhone(p.addressData.phoneNumber),
       address: addr(p.addressData),
