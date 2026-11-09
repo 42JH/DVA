@@ -62,6 +62,7 @@ export class OrderIntakeService {
           'VERSION_CONFLICT',
           '마지막 초안 저장 응답의 intakeVersion을 확인해 주세요.',
         );
+      await this.drafts.lockScope(client, call.customerSeq, call.callerPhoneNumber);
       const rows = await this.lockDrafts(client, id);
       if (rows.some((row) => row.status === 'READY') && !input.paymentMethodType)
         throw new ApiException(
@@ -103,8 +104,10 @@ export class OrderIntakeService {
 
   private async lockDrafts(client: PoolClient, id: number): Promise<ParcelDraftRow[]> {
     const rows: ParcelDraftRow[] = [];
-    for (const draftId of await this.repository.draftIds(client, id))
-      rows.push((await this.drafts.draft(client, draftId))!);
+    for (const draftId of await this.repository.draftIds(client, id)) {
+      const row = await this.drafts.draft(client, draftId, true);
+      if (row) rows.push(row);
+    }
     return rows;
   }
 
@@ -117,6 +120,7 @@ export class OrderIntakeService {
           return null;
         if (call.orderSeq !== null)
           throw new ApiException(409, 'INVALID_STATE', '확정 전에 다른 주문이 연결되어 있습니다.');
+        await this.drafts.lockScope(client, call.customerSeq, call.callerPhoneNumber);
         const rows = await this.lockDrafts(client, id);
         const ready = rows.filter((row) => row.status === 'READY');
         if (!ready.length) {
@@ -156,6 +160,8 @@ export class OrderIntakeService {
           call.customerSeq,
           randomUUID(),
           'AI',
+          null,
+          ready[0].reservedOrderSeq,
         );
         await this.calls.attachOrder(client, id, created.orderSeq);
         await this.submissions.prepareSubmission(

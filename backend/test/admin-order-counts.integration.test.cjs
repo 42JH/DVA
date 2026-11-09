@@ -96,7 +96,7 @@ test('status counts retain payment groups independently of the selected tab and 
   for (const status of ['READY', 'EDITING', 'CONVERTED', 'CANCELLED', 'RESUMED'])
     await draft(q, status);
   const expected = {
-    all: 8,
+    all: 9,
     incomplete: 1,
     notPaid: 1,
     paid: 3,
@@ -155,7 +155,7 @@ test('draft counts and the incomplete list share search, date, current company, 
   );
   const query = { ...range, q, organizationSeq: company };
   const screen = await json(await list(query));
-  assert.deepEqual(screen.statusCounts, { ...empty, all: 1, notPaid: 1, incomplete: 1 });
+  assert.deepEqual(screen.statusCounts, { ...empty, all: 2, notPaid: 1, incomplete: 1 });
   const drafts = await json(await f.get('/api/parcel-drafts?' + new URLSearchParams(query)));
   assert.equal(drafts.total_count, screen.statusCounts.incomplete);
   assert.deepEqual(
@@ -183,8 +183,43 @@ test('migrated originals, deleted and expired orders do not contribute to actual
     expired,
   ]);
   const response = await json(await list({ q }));
-  assert.deepEqual(response.statusCounts, { ...empty, incomplete: 1 });
-  assert.equal(response.total_count, 0);
+  assert.deepEqual(response.statusCounts, { ...empty, all: 1, incomplete: 1 });
+  assert.equal(response.total_count, 1);
+});
+
+test('mixed order and incomplete rows paginate together and use reservation numbers without leaking snapshots', async () => {
+  const q = randomUUID();
+  const actual = await order(q, 'notPaid');
+  const newer = await draft(q, 'INCOMPLETE', null, '2096-01-01T02:00:00+09:00');
+  const older = await draft(q, 'INCOMPLETE', null, '2096-01-01T00:30:00+09:00');
+  const pages = [];
+  for (let offset = 0; offset < 3; offset++) {
+    const page = await json(await list({ ...range, q, limit: 1, offset }));
+    assert.equal(page.total_count, 3);
+    assert.equal(page.hasNext, offset < 2);
+    assert.deepEqual(page.statusCounts, { ...empty, all: 3, incomplete: 2, notPaid: 1 });
+    pages.push(page.data[0]);
+  }
+  assert.deepEqual(
+    pages.map((r) => r.draftSeq),
+    [newer, null, older],
+  );
+  assert.equal(pages[1].orderSeq, actual);
+  const detail = await json(await f.get('/api/parcel-drafts/' + newer));
+  assert.equal(pages[0].orderSeq, detail.data.reservedOrderSeq);
+  assert.equal(pages[0].status, 'COLLECTING');
+  assert.equal(pages[0].parcels[0].orderParcelSeq, null);
+  assert.equal(pages[0].parcels[0].origin.name, q);
+  assert.equal(pages[0]._draftParcel, undefined);
+  const incomplete = await json(await list({ ...range, q, statusGroup: 'COLLECTING' }));
+  assert.equal(incomplete.total_count, 2);
+  assert.deepEqual(
+    incomplete.data.map((r) => r.draftSeq),
+    [newer, older],
+  );
+  const before = await json(await list({ ...range, q, to: '2096-01-01T01:00:00+09:00' }));
+  assert.equal(before.total_count, 1);
+  assert.equal(before.data[0].draftSeq, older);
 });
 
 test('page and counts use the same snapshot when another connection inserts after the page query', async () => {

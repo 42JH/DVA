@@ -123,7 +123,9 @@ export class OrdersService {
           organizationSeq: query.organizationSeq,
         }),
       );
-      return Object.assign(page, { statusCounts: { ...statusCounts, incomplete } });
+      return Object.assign(page, {
+        statusCounts: { ...statusCounts, all: statusCounts.all + incomplete, incomplete },
+      });
     });
   }
 

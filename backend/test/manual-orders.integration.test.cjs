@@ -100,3 +100,58 @@ test('69: new customers are registered atomically and an existing phone does not
     '신규 수기 고객',
   );
 });
+
+test('manual reception saves only recipients once per customer across duplicate parcels and concurrent orders', async () => {
+  const destination = { ...f.address, name: '수령인', roadAddress: '자동 PIN ' + randomUUID() };
+  const second = { ...destination, detailAddress: '다른 호수' };
+  const input = f.body();
+  input.paymentMethodType = 'billing';
+  input.parcels[0].origin = { ...f.address, roadAddress: '보내는 곳 ' + randomUUID() };
+  input.parcels = [destination, second, destination, f.address].map((address) => ({
+    ...structuredClone(input.parcels[0]),
+    destination: address,
+  }));
+  input.totalAmount = 14000;
+  const existing = (
+    await f.pool.query(
+      'SELECT to_jsonb(p) AS data FROM personal_pins p WHERE personal_pin_seq=$1',
+      [f.pinId],
+    )
+  ).rows[0].data;
+  const reversed = structuredClone(input);
+  reversed.parcels.reverse();
+  for (const response of await Promise.all([f.send(input), f.send(reversed)])) {
+    assert.equal(response.status, 201, await response.clone().text());
+    assert.equal((await response.json()).data.status, 'notPaid');
+  }
+  const pins = async (customerId, address) =>
+    (
+      await f.pool.query(
+        'SELECT personal_pin_seq,label,address_data,version FROM personal_pins WHERE customer_seq=$1 AND deleted_at IS NULL AND pin_identity(address_data)=pin_identity($2::jsonb)',
+        [customerId, address],
+      )
+    ).rows;
+  for (const address of [destination, second]) {
+    const saved = await pins(f.customerId, address);
+    assert.equal(saved.length, 1);
+    assert.equal(saved[0].label, destination.name);
+    assert.deepEqual(saved[0].address_data, address);
+  }
+  assert.equal((await pins(f.customerId, input.parcels[0].origin)).length, 0);
+  assert.deepEqual(
+    (
+      await f.pool.query(
+        'SELECT to_jsonb(p) AS data FROM personal_pins p WHERE personal_pin_seq=$1',
+        [f.pinId],
+      )
+    ).rows[0].data,
+    existing,
+  );
+  const other = f.body();
+  other.customerSeq = f.otherId;
+  other.paymentMethodType = 'billing';
+  other.parcels[0].destination = destination;
+  assert.equal((await f.send(other)).status, 201);
+  assert.equal((await pins(f.otherId, destination)).length, 1);
+  assert.equal(f.requests.length, 0);
+});

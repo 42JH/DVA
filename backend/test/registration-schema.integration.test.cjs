@@ -78,3 +78,62 @@ test('deployment verification requires 056 and cannot infer failure through a de
   ])
     await verify([sql], 'Call analysis failure schema or migration missing');
 });
+
+test('deployment verification requires complaint judging and draft reservations', async () => {
+  await verify(
+    ["DELETE FROM db_migrations.applied_versions WHERE version='057-call-complaint-judging.sql'"],
+    'Complaint judging schema or migration missing',
+  );
+  await verify(
+    ['ALTER TABLE order_parcel_drafts DROP COLUMN reserved_order_seq CASCADE'],
+    'Parcel draft reservation schema or migration missing',
+  );
+});
+
+test('058 backfills unique reservations from the order sequence without creating orders or losing legacy references', async () => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const admin = (
+      await client.query(
+        "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('reservationMigration','예약 검증','not-for-login','OPERATOR','ACTIVE') RETURNING admin_user_seq",
+      )
+    ).rows[0].admin_user_seq;
+    const before = (
+      await client.query(
+        'SELECT count(*)::int AS count,COALESCE(max(order_seq),0) AS max FROM orders',
+      )
+    ).rows[0];
+    await client.query('ALTER TABLE order_parcel_drafts DROP COLUMN reserved_order_seq CASCADE');
+    const draft = (
+      await client.query(
+        "INSERT INTO order_parcel_drafts(created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,legacy_order_seq) VALUES($1,'05500000-0000-4000-8000-000000000058','{}','{}','INCOMPLETE',2147483000) RETURNING draft_seq",
+        [admin],
+      )
+    ).rows[0].draft_seq;
+    await client.query(
+      readFileSync(join(directory, '058-parcel-draft-order-reservation.sql'), 'utf8'),
+    );
+    const row = (
+      await client.query(
+        'SELECT reserved_order_seq,legacy_order_seq FROM order_parcel_drafts WHERE draft_seq=$1',
+        [draft],
+      )
+    ).rows[0];
+    assert.ok(row.reserved_order_seq > before.max);
+    assert.equal(row.legacy_order_seq, 2147483000);
+    assert.equal(
+      (await client.query('SELECT count(*)::int AS count FROM orders')).rows[0].count,
+      before.count,
+    );
+    const unique = (
+      await client.query(
+        "SELECT count(*)::int AS count,count(DISTINCT reserved_order_seq)::int AS distinct_count FROM order_parcel_drafts WHERE status<>'RESUMED'",
+      )
+    ).rows[0];
+    assert.equal(unique.count, unique.distinct_count);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});

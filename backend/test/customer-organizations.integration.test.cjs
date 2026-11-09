@@ -243,7 +243,6 @@ test('admin order company changes use current membership with matching filter, p
   const query = {
     q: first.marker,
     organizationSeq: nextCompany.id,
-    statusGroup: 'COLLECTING',
     limit: 1,
     offset: 1,
   };

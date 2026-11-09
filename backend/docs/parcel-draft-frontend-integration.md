@@ -1,10 +1,15 @@
 # 프론트 배송 초안·미완료 연동 — 055
 
+2026-11-09의 [24시간·최신 확정 통화 만료 정책](incomplete-expiry-latest-call.md)을 우선한다. 5년은 내부 보관 기한이며 미완료 업무상 유효기간은 아니다. 만료된 원본·재개 사본은 목록에서 제외하고 상세·보완·접수에 404를 반환한다.
+
+후속 058의 [예약번호·통합 주문 목록](parcel-draft-order-reservation.md)이 추가됐다. 아래 초안 API는 유지하며 관리자 전체 목록에서도 미완료를 조회할 수 있다. 예약번호와 실제 주문 참조를 구분한다.
+
 관리자 세션·허용 Origin과 기존 공통 응답을 사용한다. 프론트 코드는 이번 작업에서 수정하지 않았다. [배포 전환](parcel-draft-rollout.md)과 [AI 계약](parcel-draft-ai-integration.md)을 함께 확인한다.
 
 ## 리소스 구분
 
 - `draftSeq`: 수집 중·미완료·재개 배송 단건. 실제 주문 번호가 아니다.
+- `reservedOrderSeq`: orders와 같은 시퀀스의 표시용 예약번호. 관리자 재개 시 이어 쓰며 단독 접수하면 실제 orderSeq가 된다. AI 여러 READY 묶음은 대표 초안 번호 하나를 사용한다.
 - `orderSeq`, `orderParcelSeq`: 종료 확정 이후 생성되는 실제 주문·상세 번호.
 - `version`: 해당 초안의 동시 수정 버전. `intakeVersion`: AI 통화 전체 초안 집합의 버전. 관리자 단독 초안의 intakeVersion은 null이다.
 - `sourceDraftSeq`: 재개 전 원본 번호. 원본 행이 삭제돼도 보존하는 논리 참조다.
@@ -18,7 +23,7 @@
 | DELETE /api/parcel-drafts/{draftSeq} | 관리자 soft delete. 실제 주문·원본·재개 초안 삭제/취소를 대신하지 않음 |
 | GET /api/calls/{callSessionSeq}/order-intake | 신규 통화의 주문 확정 상태·결제/디버 상태·변환 매핑 |
 
-목록 필터는 status·customerSeq·callSessionSeq·legacyOrderSeq·q다. q는 발송/수령 이름·전화·주소 부분 검색이다. limit 기본20·최대100, offset 기본0. 최신 생성 시각·draftSeq 내림차순. 응답은 `{data:[], hasNext, total_count}`다. 나머지 JSON은 `{data, meta}`다. 삭제·5년 만료 필터는 서버에서 적용한다.
+목록 필터는 status·customerSeq·callSessionSeq·legacyOrderSeq·q·from·to·organizationSeq다. q는 발송/수령 이름·전화·주소 부분 검색이다. from 포함·to 미포함은 초안 생성 시각 기준이다. limit 기본20·최대100, offset 기본0. 최신 생성 시각·draftSeq 내림차순. 응답은 `{data:[], hasNext, total_count}`다. 나머지 JSON은 `{data, meta}`다. 삭제·5년 만료 필터는 서버에서 적용한다.
 
 초안 상세의 parcel은 양쪽 주소 객체와 documentCount/smallBoxCount/mediumBoxCount/bigBoxCount/otherItemDescription/clientComment/itemPrice/notifiedPrice/originPin을 가진다. 미수집 값은 null 또는 기존 기본 0·빈 문자열이다. 과거 가액은 조회에서 보존하지만 READY 저장은 현재 1원~1억원 정수 규칙을 적용한다. 과거 COMPANY PIN 참조는 출발지·PIN 번호가 같은 재개 사본에서 유지하며 새 선택에는 사용할 수 없다.
 

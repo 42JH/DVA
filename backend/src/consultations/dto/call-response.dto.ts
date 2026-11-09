@@ -5,11 +5,11 @@ import { CallAnalysisDto } from './call-analysis-response.dto';
 
 export class CallDto {
   @ApiProperty({
-    enum: ['PENDING', 'COMPLETED', 'FAILED'],
+    enum: ['PENDING', 'COMPLETED', 'FAILED', 'EXPIRED'],
     description:
-      '정상 분석 저장이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING. 시간 경과·녹취·주문 상태로 실패를 추정하지 않습니다.',
+      '정상 분석 저장이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED. 둘 다 없고 PBX 통화 종료 후 10분 이상이면 EXPIRED, 그 외 PENDING. 시간 경과만으로 완료 처리하지 않습니다.',
   })
-  analysisStatus!: 'PENDING' | 'COMPLETED' | 'FAILED';
+  analysisStatus!: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED';
 
   @ApiProperty({
     type: String,

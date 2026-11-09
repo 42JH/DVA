@@ -16,6 +16,9 @@ export interface Environment extends PaymentEnvironment {
   AI_PERSONA_TOKEN?: string;
   AI_FAQ_TOKEN?: string;
   AI_INSIGHTS_TOKEN?: string;
+  // 통화 불만 판정(후처리) 전용 OpenAI 키 — 실시간 상담 키와 따로. 없으면 판정 워커가 꺼짐
+  CALL_ANALYSIS_OPENAI_API_KEY?: string;
+  CALL_ANALYSIS_CONCURRENCY: number;
   CORS_ORIGINS: string[];
   SWAGGER_ENABLED: boolean;
   PBX_WEBHOOK_TOKEN?: string;
@@ -106,6 +109,18 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   const personaToken = raw.AI_PERSONA_TOKEN;
   const faqToken = raw.AI_FAQ_TOKEN;
   const insightsToken = raw.AI_INSIGHTS_TOKEN;
+  const analysisKey = raw.CALL_ANALYSIS_OPENAI_API_KEY;
+  if (
+    analysisKey !== undefined &&
+    analysisKey !== '' &&
+    (typeof analysisKey !== 'string' ||
+      analysisKey.length < 20 ||
+      !/^[\x21-\x7e]+$/.test(analysisKey))
+  )
+    errors.push('CALL_ANALYSIS_OPENAI_API_KEY');
+  const analysisConcurrency = raw.CALL_ANALYSIS_CONCURRENCY ?? '2';
+  if (typeof analysisConcurrency !== 'string' || !/^[1-4]$/.test(analysisConcurrency))
+    errors.push('CALL_ANALYSIS_CONCURRENCY');
   if (
     businessToken !== undefined &&
     businessToken !== '' &&
@@ -189,6 +204,9 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
       typeof businessToken === 'string' && businessToken ? businessToken : undefined,
     AI_PERSONA_TOKEN: typeof personaToken === 'string' && personaToken ? personaToken : undefined,
     AI_FAQ_TOKEN: typeof faqToken === 'string' && faqToken ? faqToken : undefined,
+    CALL_ANALYSIS_OPENAI_API_KEY:
+      typeof analysisKey === 'string' && analysisKey ? analysisKey : undefined,
+    CALL_ANALYSIS_CONCURRENCY: Number(analysisConcurrency) || 2,
     AI_INSIGHTS_TOKEN:
       typeof insightsToken === 'string' && insightsToken ? insightsToken : undefined,
     CORS_ORIGINS: [...new Set(origins)],

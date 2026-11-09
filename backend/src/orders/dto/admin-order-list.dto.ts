@@ -42,7 +42,7 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   @ApiPropertyOptional({
     enum: ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'],
     description:
-      '목록 탭. PAID는 PAID·SUBMITTING·ACCEPTED, SUBMISSION_FAILED는 재시도 중 실패(SUBMITTING_FAILED)와 최종 실패(SUBMISSION_FAILED)를 조회합니다. 전체는 생략합니다.',
+      '전체는 생략하며 실제 주문과 INCOMPLETE 초안을 함께 조회합니다. COLLECTING은 INCOMPLETE 초안만 조회합니다. PAID는 PAID·SUBMITTING·ACCEPTED, SUBMISSION_FAILED는 두 실패 상태를 조회합니다.',
   })
   @IsOptional()
   @IsIn(['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'])
@@ -58,7 +58,6 @@ export class OrderListPartyDto extends PickType(OrderAddressValueDto, [
 ] as const) {}
 
 export class OrderListParcelDto extends PickType(OrderParcelDto, [
-  'orderParcelSeq',
   'status',
   'documentCount',
   'smallBoxCount',
@@ -66,6 +65,12 @@ export class OrderListParcelDto extends PickType(OrderParcelDto, [
   'bigBoxCount',
   'otherItemDescription',
 ] as const) {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '실제 배송상세 번호. 미완료 초안 행은 null.',
+  })
+  orderParcelSeq!: number | null;
   @ApiProperty({ type: OrderListPartyDto, description: '주문에 저장한 발송인. 미수집 값은 null.' })
   origin!: OrderListPartyDto;
   @ApiProperty({ type: OrderListPartyDto, description: '주문에 저장한 수령인. 미수집 값은 null.' })
@@ -78,6 +83,13 @@ export class AdminOrderListItemDto extends PickType(OrderSummaryDto, [
   'createdAt',
   'pickupRequestedAt',
 ] as const) {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      '미완료 초안 번호. 이 값이 있으면 orderSeq는 예약번호이며 초안 상세로 이동합니다. 실제 주문은 null.',
+  })
+  draftSeq!: number | null;
   @ApiProperty({
     type: Number,
     nullable: true,
@@ -104,7 +116,7 @@ export class AdminOrderListItemDto extends PickType(OrderSummaryDto, [
 export class AdminOrderStatusCountsDto {
   @ApiProperty({
     minimum: 0,
-    description: '같은 조건의 실제 주문 수. 배송 초안은 포함하지 않습니다.',
+    description: '같은 조건의 실제 주문과 INCOMPLETE 배송 초안의 합계.',
   })
   all!: number;
   @ApiProperty({
@@ -137,7 +149,7 @@ export class AdminOrderListResponseDto {
   @ApiProperty({
     type: AdminOrderStatusCountsDto,
     description:
-      '검색·기간·기업 조건의 탭별 건수. 선택 상태·limit·offset은 적용하지 않습니다. 미완료는 별도 배송 초안이므로 all에 합산하지 않습니다.',
+      '검색·기간·기업 조건의 탭별 건수. 선택 상태·limit·offset은 적용하지 않습니다. all에 incomplete가 이미 포함됩니다.',
   })
   statusCounts!: AdminOrderStatusCountsDto;
 }

@@ -114,13 +114,22 @@ test('admin resumes one incomplete parcel into a separate order and leaves the o
   await setup();
   const source = await sourceCall(true);
   const original = source.finalized.orderSeq;
+  const pinCount = async () =>
+    (
+      await f.pool.query('SELECT count(*)::int AS n FROM personal_pins WHERE customer_seq=$1', [
+        customer,
+      ])
+    ).rows[0].n;
+  assert.equal(await pinCount(), 0);
   const before = (
     await f.pool.query('SELECT to_jsonb(o) AS value FROM orders o WHERE order_seq=$1', [original])
   ).rows[0].value;
   const resumed = await data(await create({ sourceDraftSeq: source.incomplete.draftSeq }), 201);
   assert.equal(resumed.callSessionSeq, null);
   assert.equal(resumed.sourceDraftSeq, source.incomplete.draftSeq);
+  assert.equal(resumed.reservedOrderSeq, source.incomplete.reservedOrderSeq);
   const result = await data(await submit(resumed));
+  assert.equal(result.orderSeq, source.incomplete.reservedOrderSeq);
   assert.notEqual(result.orderSeq, original);
   assert.equal(result.status, 'notPaid');
   assert.equal(result.callSessionSeq, null);
@@ -145,6 +154,7 @@ test('admin resumes one incomplete parcel into a separate order and leaves the o
   );
   const replay = await data(await submit(resumed));
   assert.equal(replay.orderSeq, result.orderSeq);
+  assert.equal(await pinCount(), 1);
   const detail = await data(await f.get('/api/parcel-drafts/' + resumed.draftSeq));
   assert.equal(detail.orderSeq, result.orderSeq);
   assert.equal(detail.orderParcelSeq, result.orderParcelSeq);
