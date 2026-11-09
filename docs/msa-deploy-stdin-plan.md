@@ -2,7 +2,8 @@
 
 Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
-기준: `develop-backend` `5d3bd1890454b85441e1c7891876ef2fb1ffb6e7`.
+착수 기준: `develop-backend` `5d3bd1890454b85441e1c7891876ef2fb1ffb6e7`.
+MR 생성 전 최신 `319de6fb0464c059965620b2e3c364eca1041f05`를 일반 병합했다.
 작업 브랜치: `fix/msa-deploy-stdin`. 수정은 msa/docs로 제한한다.
 
 ## 확인한 원인

@@ -2,8 +2,13 @@
 
 Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
-기준: `develop-backend` `5d3bd1890454b85441e1c7891876ef2fb1ffb6e7`.
+착수 기준: `develop-backend` `5d3bd1890454b85441e1c7891876ef2fb1ffb6e7`.
 변경은 msa/docs에 한정하며 frontend/AI/backend의 실제 checkout·업무 API·SQL은 보존한다.
+
+MR 생성 직전 대상이 `319de6fb0464c059965620b2e3c364eca1041f05`로 갱신돼
+작업 브랜치에 일반 병합했다(`70364efd`). 상류의 backend/루트 CI 변경은 그대로 가져왔으며
+대상 대비 이번 MR의 수정은 msa/docs뿐이다. 병합 전후 msa tree는 같고
+검증 대상 업무 API는 계속 고정 055 원본을 사용한다.
 
 ## #42 실패 원인과 수정
 
