@@ -132,7 +132,7 @@ def parity_suites(base, verified):
     # The manual 052 diagnostic has its own cheap checker; it does not drive these suites.
     known.update('msa/parity/' + name for name in (
         'final-contract.test.cjs', 'final-parity.cjs', 'final-peer.cjs', 'inventory.cjs',
-        'inventory.test.cjs', 'initial-baseline.json', 'verify-final.py'))
+        'inventory.test.cjs', 'fixture-reset.test.cjs', 'initial-baseline.json', 'verify-final.py'))
     # Unknown/new helpers require the full matrix; a named suite test reruns its consumers.
     unknown = changed(base, ['msa/parity/', ':(glob,exclude)msa/parity/**/*.md',
                             *[':(exclude)' + path for path in sorted(known)]])

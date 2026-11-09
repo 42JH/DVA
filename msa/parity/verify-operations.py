@@ -34,6 +34,9 @@ def main():
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', RUN,
             *args, image, *command, label=name + '-create')
         resources.append(('container', name))
+        if '--test' in command:
+            target = '/app/test/' if image == images.get('monolith-checks') else '/app/service/test/'
+            copy('msa/parity/fixture-reset.cjs', name, target + 'fixture-reset.cjs')
 
     def complete(name):
         run('docker', 'start', '--attach', name, label=name + '-run')
@@ -103,6 +106,13 @@ def main():
                command=('--changelog-file=consultation/db.changelog.xml', 'update'))
         complete(name)
         fixture = RUN + '-customer-runtime'
+        name = RUN + '-fixture-locks'
+        create(name, images['operations-checks'], '-e', 'PGHOST=operations-db',
+               '-e', 'PGUSER=operations_app', '-e', 'PGPASSWORD=' + password,
+               '-e', 'PGDATABASE=dva_webhook_test',
+               command=('node', '--test', 'test/fixture-reset.integration.test.cjs'))
+        copy('msa/parity/fixture-reset.integration.test.cjs', name, '/app/service/test/fixture-reset.integration.test.cjs')
+        complete(name)
         create(fixture, images['customer-checks'])
         runtime = LOGS / RUN / 'customer-runtime'
         runtime.mkdir(parents=True)

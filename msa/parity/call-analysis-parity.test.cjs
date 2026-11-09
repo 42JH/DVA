@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID,createHash}=require('node:crypto');
@@ -29,7 +30,7 @@ test('production analysis and metrics match the unchanged monolith and preserve 
   }
   const sessionToken='b'.repeat(64),cookie='dva_session='+sessionToken,requestIds=new Set(),equivalentRequests=new Map();
   for(const side of sides){
-    await side.db.query('TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
     // The preceding PBX fixture seeds admin 1 with OVERRIDING SYSTEM VALUE.
     await side.identity.query("SELECT setval(pg_get_serial_sequence('admin_users','admin_user_seq'),GREATEST(COALESCE(max(admin_user_seq),1),1),true) FROM admin_users");
     const admin=(await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status)

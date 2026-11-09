@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -29,7 +30,7 @@ test('identical production HTTP requests produce identical auth/admin/audit data
   const created = new Date().toISOString();
   for (const side of sides) {
     // These are labeled, private, disposable DBs, never production connections.
-    await side.db.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
     for (const [login, role] of [['root', 'SYSTEM_ADMIN'], ['operator', 'OPERATOR'], ['supervisor', 'SUPERVISOR']]) {
       await side.db.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at)
         VALUES($1,$2,$3,$4,'ACTIVE',$5)`, [login, `이름 ${login}`, hash, role, created]);

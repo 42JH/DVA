@@ -32,6 +32,10 @@ def main():
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', network,
             *args, image, *command, label=name+'-create')
         resources.append(('container', name))
+        if '--test' in command:
+            target = '/app/test/' if image == images.get('monolith-checks') else '/app/service/test/'
+            run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':'+target+'fixture-reset.cjs',
+                label=name+'-copy-fixture-reset')
 
     def complete(name):
         run('docker', 'start', '--attach', name, label=name+'-run')

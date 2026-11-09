@@ -110,7 +110,7 @@ pipeline {
 
         stage('Verify Contracts') {
             steps {
-                sh 'node --test msa/.ci-source/msa/parity/inventory.test.cjs msa/.ci-source/msa/parity/final-contract.test.cjs'
+                sh 'node --test msa/.ci-source/msa/parity/inventory.test.cjs msa/.ci-source/msa/parity/final-contract.test.cjs msa/.ci-source/msa/parity/fixture-reset.test.cjs'
             }
         }
 

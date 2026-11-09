@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -32,8 +33,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const forbidden=name==='order'?['customers','call_sessions','admin_users','shipments']:['orders','order_parcels'];
     for(const table of forbidden) assert.equal((await db.query('SELECT to_regclass($1) AS name',[table])).rows[0].name,null,name+' ownership '+table);
   }
-  await reference.query('TRUNCATE '+[...orderTables,'customers','organizations','call_sessions','admin_users','audit_logs','shipments'].join(',')+' RESTART IDENTITY CASCADE');
-  for(const [owner,tables] of Object.entries(owners)) await databases[owner].query('TRUNCATE '+tables.join(',')+' RESTART IDENTITY CASCADE');
+  await truncateFixture(reference, 'TRUNCATE '+[...orderTables,'customers','organizations','call_sessions','admin_users','audit_logs','shipments'].join(',')+' RESTART IDENTITY CASCADE');
+  for(const [owner,tables] of Object.entries(owners)) await truncateFixture(databases[owner], 'TRUNCATE '+tables.join(',')+' RESTART IDENTITY CASCADE');
   for(const db of [reference,databases.operations]) {
     for(const [i,role] of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()) {
       await db.query(`INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status,created_at)

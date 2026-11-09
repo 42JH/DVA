@@ -104,6 +104,21 @@ class VerificationHistoryTests(unittest.TestCase):
         self.assertEqual(result['paritySuites'], [])
         self.assertEqual((self.out / 'services.txt').read_text(), '')
 
+    def test_fixture_reset_change_keeps_every_consumer_suite(self):
+        self.history(self.deployed)
+        self.commit('msa/parity/fixture-reset.cjs', 'changed table reset')
+        self.assertEqual(self.selection()['paritySuites'], ['operations', 'customer', 'consultation', 'order'])
+
+    def test_fixture_lock_integration_change_selects_only_its_runner(self):
+        self.history(self.deployed)
+        self.commit('msa/parity/fixture-reset.integration.test.cjs', 'changed lock contention check')
+        self.assertEqual(self.selection()['paritySuites'], ['operations'])
+
+    def test_fixture_unit_change_stays_in_the_always_run_contract_stage(self):
+        self.history(self.deployed)
+        self.commit('msa/parity/fixture-reset.test.cjs', 'changed cheap unit assertion')
+        self.assertEqual(self.selection()['paritySuites'], [])
+
     def test_invalid_or_missing_history_never_skips_changed_inputs(self):
         self.commit('msa/liquibase/verify.py', 'changed verifier')
         for value in ({}, {'database': '0' * 40 + ':42'}, {'database': '--invalid'},
