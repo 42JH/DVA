@@ -10,10 +10,49 @@ const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq
  parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
  created_at AS "createdAt",updated_at AS "updatedAt",retention_started_at AS "retentionStartedAt"`;
-const available = `deleted_at IS NULL AND retention_started_at>transaction_timestamp()-interval '5 years'`;
+// A deleted newer call must not revive the older incomplete parcels it superseded.
+const available = `d.deleted_at IS NULL AND d.retention_started_at>transaction_timestamp()-interval '5 years'
+ AND (NOT(d.status='INCOMPLETE' OR (d.source_draft_seq IS NOT NULL AND d.status IN('READY','EDITING')))
+ OR (d.retention_started_at>transaction_timestamp()-interval '24 hours' AND NOT EXISTS(
+   SELECT 1 FROM call_sessions newer
+   LEFT JOIN order_parcel_drafts source ON source.draft_seq=d.source_draft_seq
+   LEFT JOIN call_sessions origin ON origin.call_session_seq=COALESCE(d.call_session_seq,source.call_session_seq)
+   WHERE newer.ended_at IS NOT NULL AND newer.order_finalized_at IS NOT NULL
+    AND ((d.customer_seq IS NOT NULL AND newer.customer_seq=d.customer_seq)
+      OR (d.customer_seq IS NULL AND newer.caller_phone_number=d.caller_phone_number))
+    AND (COALESCE(newer.incoming_at,newer.started_at,newer.registered_at),newer.call_session_seq)>
+      (COALESCE(origin.incoming_at,origin.started_at,origin.registered_at,d.retention_started_at),COALESCE(origin.call_session_seq,0))
+ )))`;
 
 @Injectable()
 export class ParcelDraftsRepository {
+  async lockScope(
+    client: PoolClient,
+    customerId: number | null,
+    callerPhone: string | null = null,
+  ) {
+    if (customerId !== null)
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('parcel-drafts.customer:'||$1::text,0))",
+        [customerId],
+      );
+    const phone =
+      callerPhone ??
+      (customerId === null
+        ? null
+        : (
+            await client.query<{ phone: string }>(
+              'SELECT phone_number AS phone FROM customers WHERE customer_seq=$1',
+              [customerId],
+            )
+          ).rows[0]?.phone);
+    if (phone)
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('parcel-drafts.phone:'||$1::text,0))",
+        [phone],
+      );
+  }
+
   async call(client: PoolClient, id: number, update = true) {
     return (
       await client.query<OrderIntakeCall>(
@@ -38,19 +77,31 @@ export class ParcelDraftsRepository {
   }
 
   async draft(client: PoolClient, id: number, update = false) {
-    return (
+    const row = (
       await client.query<ParcelDraftRow>(
-        `SELECT ${columns} FROM order_parcel_drafts WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE' : ''}`,
+        `SELECT ${columns} FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available}${update ? ' FOR UPDATE OF d' : ''}`,
         [id],
       )
     ).rows[0];
+    if (
+      update &&
+      row &&
+      !(
+        await client.query(
+          `SELECT 1 FROM order_parcel_drafts d WHERE draft_seq=$1 AND ${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}`,
+          [id],
+        )
+      ).rowCount
+    )
+      return undefined;
+    return row;
   }
 
   async byClientId(client: PoolClient, callId: number | null, key: string) {
     return (
       await client.query<ParcelDraftRow & { unavailable: boolean }>(
-        `SELECT ${columns},NOT(${available}) AS unavailable
-      FROM order_parcel_drafts WHERE call_session_seq IS NOT DISTINCT FROM $1::int AND client_parcel_id=$2::uuid FOR UPDATE`,
+        `SELECT ${columns},NOT(${available.replaceAll('transaction_timestamp()', 'clock_timestamp()')}) AS unavailable
+      FROM order_parcel_drafts d WHERE call_session_seq IS NOT DISTINCT FROM $1::int AND client_parcel_id=$2::uuid FOR UPDATE OF d`,
         [callId, key],
       )
     ).rows[0];
@@ -65,7 +116,7 @@ export class ParcelDraftsRepository {
     const phoneQuery =
       query.q && /^[0-9+() -]+$/.test(query.q) ? query.q.replace(/[^0-9]/g, '') : null;
     return {
-      sql: `FROM order_parcel_drafts WHERE ${available}
+      sql: `FROM order_parcel_drafts d WHERE ${available}
        AND ($7::int IS NOT NULL OR $1::int IS NULL OR customer_seq=$1)
        AND ($7::int IS NULL OR (customer_seq IS NOT NULL AND customer_seq=$1) OR
         (customer_seq IS NULL AND (call_session_seq=$7 OR (status='INCOMPLETE' AND caller_phone_number=$8))))
@@ -78,7 +129,7 @@ export class ParcelDraftsRepository {
         OR ($12::text IS NOT NULL AND (strpos(parcel_data->'origin'->>'phoneNumber',$12)>0 OR strpos(parcel_data->'destination'->>'phoneNumber',$12)>0)))
        AND ($9::timestamptz IS NULL OR created_at>=$9) AND ($10::timestamptz IS NULL OR created_at<$10)
        AND ($11::int IS NULL OR EXISTS(SELECT 1 FROM customers c JOIN memberships m USING(customer_seq)
-        JOIN organizations o ON o.organization_seq=m.organization_seq WHERE c.customer_seq=order_parcel_drafts.customer_seq
+        JOIN organizations o ON o.organization_seq=m.organization_seq WHERE c.customer_seq=d.customer_seq
          AND c.deleted_at IS NULL AND m.deleted_at IS NULL AND o.deleted_at IS NULL AND o.organization_seq=$11))`,
       values: [
         customerId,
@@ -182,7 +233,7 @@ export class ParcelDraftsRepository {
         ],
       )
     ).rows[0].id;
-    return (await this.draft(client, id))!;
+    return this.draft(client, id, input.source !== undefined);
   }
 
   async update(

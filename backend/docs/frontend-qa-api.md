@@ -8,6 +8,8 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 
 수기 주문과 관리자 초안 최종 접수는 수령인을 주문 고객의 개인 PIN에 자동 등록하고 기존 활성 중복은 보존한다. 요청·응답 변경이나 프론트의 추가 PIN POST는 없다. [수기 PIN 저장 기준](manual-order-recipient-pins.md)과 [운영 미완료 상세 현황](incomplete-draft-current-state-20261109.md)을 확인한다.
 
+최신 확정 정책: 미완료는 원본 최초 생성부터 24시간 또는 같은 고객의 더 최신 통화가 종료·결과 확정되면 유예 없이 제외한다. FAQ·조회·NO_ORDER도 포함하며 시작 중인 통화는 제외한다. 만료는 목록·건수에서 빠지고 상세·재개·보완·접수는 기존 404로 처리한다. [만료·이어가기·연동 명세](incomplete-expiry-latest-call.md)를 우선하며 전체 배포 전 057~059를 적용한다.
+
 ## 1. 주문 탭 건수
 
 `GET /api/admin/orders`의 기존 `data`, `hasNext`, `total_count`를 유지하고 `statusCounts`를 추가한다. 검색 `q`, 생성 기간 `from`(포함)·`to`(미포함), 현재 소속 `organizationSeq`는 집계에도 적용한다. 선택한 `statusGroup`, `limit`, `offset`은 탭별 건수에 적용하지 않는다. 목록과 모든 건수는 같은 읽기 전용 DB 스냅샷에서 조회한다.

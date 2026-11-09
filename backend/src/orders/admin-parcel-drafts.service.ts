@@ -30,6 +30,7 @@ export class AdminParcelDraftsService {
           'INVALID_STATE',
           '미완료 배송을 새 관리자 단독 초안으로 재개한 후 접수해 주세요.',
         );
+      await this.drafts.lockScope(client, hint.customerSeq, hint.callerPhoneNumber);
       if (hint.customerSeq === null || !(await this.drafts.customer(client, hint.customerSeq)))
         throw new ApiException(404, 'NOT_FOUND', '활성 고객이 필요합니다.');
       const row = await this.drafts.draft(client, id, true);

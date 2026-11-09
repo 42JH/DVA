@@ -202,6 +202,7 @@ export class ParcelDraftsService {
         (!call && customerId === null)
       )
         throw new ApiException(403, 'FORBIDDEN', '통화 고객과 초안 고객이 일치해야 합니다.');
+      await this.repository.lockScope(client, customerId, call?.callerPhoneNumber);
       if (customerId !== null && !(await this.repository.customer(client, customerId)))
         throw new ApiException(404, 'NOT_FOUND', '활성 고객을 찾을 수 없습니다.');
       const payload: Record<string, unknown> = JSON.parse(
@@ -280,6 +281,7 @@ export class ParcelDraftsService {
         status: input.status,
         source,
       });
+      if (!row) throw new ApiException(404, 'NOT_FOUND', '초안이 만료되었습니다.');
       const intakeVersion = call
         ? await this.repository.bumpCall(client, call.callSessionSeq)
         : null;
@@ -310,6 +312,11 @@ export class ParcelDraftsService {
       const hint = await this.repository.draft(client, id);
       if (!hint) throw new ApiException(404, 'NOT_FOUND', '초안을 찾을 수 없습니다.');
       this.scope(hint, call, true);
+      await this.repository.lockScope(
+        client,
+        hint.customerSeq,
+        call?.callerPhoneNumber ?? hint.callerPhoneNumber,
+      );
       if (hint.customerSeq !== null && !(await this.repository.customer(client, hint.customerSeq)))
         throw new ApiException(404, 'NOT_FOUND', '활성 고객을 찾을 수 없습니다.');
       const row = (await this.repository.draft(client, id, true))!;

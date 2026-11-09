@@ -6,6 +6,7 @@ const { ConfigService } = require('@nestjs/config');
 const { applicationFixture, businessHeaders } = require('./helpers/application.cjs');
 const { testMembership } = require('./helpers/membership.cjs');
 const { OrderIntakeService } = require('../dist/orders/order-intake.service');
+const { OrderIntakeRepository } = require('../dist/orders/order-intake.repository');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const { OrderMaintenanceWorker } = require('../dist/orders/order-maintenance.worker');
 const { AuditService } = require('../dist/audit/audit.service');
@@ -538,6 +539,206 @@ async function companyFor(c) {
   });
   return organization;
 }
+
+async function nextCall(c) {
+  const incomingAt = new Date(Date.parse(c.incomingAt) + 1000).toISOString();
+  const providerCallId = randomUUID();
+  const id = (
+    await f.pool.query(
+      'INSERT INTO call_sessions(provider_call_id,customer_seq,caller_phone_number,incoming_at) VALUES($1,$2,$3,$4) RETURNING call_session_seq',
+      [providerCallId, c.customer, c.phone, incomingAt],
+    )
+  ).rows[0].call_session_seq;
+  return { ...c, id, incomingAt, providerCallId };
+}
+async function finishCall(c, version = 1) {
+  await f.pool.query(
+    "UPDATE call_sessions SET started_at=incoming_at,ended_at=incoming_at+interval '30 seconds' WHERE call_session_seq=$1",
+    [c.id],
+  );
+  return data(await seal(c, { expectedIntakeVersion: version, paymentMethodType: 'billing' }));
+}
+async function unfinished(c) {
+  const partial = await draft(c, { status: 'EDITING' });
+  await finishCall(c, partial.intakeVersion);
+  return partial;
+}
+
+test('incomplete expires after 24 hours in detail, all lists and counts without deleting its snapshot', async () => {
+  const c = await call();
+  const partial = await unfinished(c);
+  await f.pool.query(
+    "UPDATE order_parcel_drafts SET retention_started_at=clock_timestamp()-interval '23 hours 59 minutes' WHERE draft_seq=$1",
+    [partial.draftSeq],
+  );
+  assert.equal(
+    (await data(await f.get('/api/parcel-drafts/' + partial.draftSeq))).status,
+    'INCOMPLETE',
+  );
+  const before = (await data(await f.get('/api/dashboard/home'))).pendingWork.incomplete;
+  await f.pool.query(
+    "UPDATE order_parcel_drafts SET retention_started_at=clock_timestamp()-interval '24 hours' WHERE draft_seq=$1",
+    [partial.draftSeq],
+  );
+  await f.error(await f.get('/api/parcel-drafts/' + partial.draftSeq), 404, 'NOT_FOUND');
+  const list = await (
+    await f.get(`/api/parcel-drafts?status=ALL&customerSeq=${c.customer}`)
+  ).json();
+  assert.equal(list.total_count, 0);
+  const orders = await (await f.get(`/api/admin/orders?q=${c.phone}`)).json();
+  assert.equal(orders.total_count, 0);
+  assert.equal(orders.statusCounts.incomplete, 0);
+  assert.equal((await data(await f.get('/api/dashboard/home'))).pendingWork.incomplete, before - 1);
+  assert.equal(
+    (await f.pool.query('SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1', [partial.draftSeq]))
+      .rowCount,
+    1,
+  );
+  const resumed = await nextCall(c);
+  await f.error(await create(resumed, { sourceDraftSeq: partial.draftSeq }), 404, 'NOT_FOUND');
+});
+
+test('only the latest ended and finalized call keeps incomplete parcels, including empty FAQ and lookup calls', async () => {
+  for (const known of [true, false]) {
+    const first = await call(known);
+    const one = await draft(first, { status: 'EDITING' });
+    const two = await draft(first, { status: 'EDITING' });
+    await finishCall(first, two.intakeVersion);
+    const second = await nextCall(first);
+    const fresh = await draft(second, { status: 'EDITING' });
+    assert.equal(
+      (
+        await data(
+          await seal(second, {
+            expectedIntakeVersion: fresh.intakeVersion,
+            paymentMethodType: 'billing',
+          }),
+        )
+      ).status,
+      'WAITING_PBX',
+    );
+    assert.equal((await f.get('/api/parcel-drafts/' + one.draftSeq)).status, 200);
+    await f.pool.query(
+      'UPDATE call_sessions SET started_at=incoming_at,ended_at=incoming_at WHERE call_session_seq=$1',
+      [second.id],
+    );
+    assert.equal((await f.get('/api/parcel-drafts/' + one.draftSeq)).status, 200);
+    await finishCall(second, fresh.intakeVersion);
+    for (const old of [one, two])
+      await f.error(await f.get('/api/parcel-drafts/' + old.draftSeq), 404, 'NOT_FOUND');
+    assert.equal((await f.get('/api/parcel-drafts/' + fresh.draftSeq)).status, 200);
+    const empty = await nextCall(second);
+    assert.equal((await finishCall(empty)).status, 'NO_ORDER');
+    await f.error(await f.get('/api/parcel-drafts/' + fresh.draftSeq), 404, 'NOT_FOUND');
+    const later = await nextCall(empty);
+    const pending = await unfinished(later);
+    const allReady = await nextCall(later);
+    const ready = await draft(allReady, { status: known ? 'READY' : 'EDITING' });
+    if (known) assert.equal((await finishCall(allReady, ready.intakeVersion)).status, 'FINALIZED');
+    else await finishCall(allReady, ready.intakeVersion);
+    await f.error(await f.get('/api/parcel-drafts/' + pending.draftSeq), 404, 'NOT_FOUND');
+  }
+});
+
+test('late older results and soft deletion of the newest call cannot revive superseded incomplete', async () => {
+  const older = await call();
+  const old = await draft(older, { status: 'EDITING' });
+  const newer = await nextCall(older);
+  const current = await unfinished(newer);
+  await finishCall(older, old.intakeVersion);
+  await f.error(await f.get('/api/parcel-drafts/' + old.draftSeq), 404, 'NOT_FOUND');
+  assert.equal((await f.get('/api/parcel-drafts/' + current.draftSeq)).status, 200);
+  await f.pool.query(
+    'UPDATE call_sessions SET deleted_at=clock_timestamp() WHERE call_session_seq=$1',
+    [newer.id],
+  );
+  await f.error(await f.get('/api/parcel-drafts/' + old.draftSeq), 404, 'NOT_FOUND');
+  const unrelated = await call();
+  assert.equal((await finishCall(unrelated)).status, 'NO_ORDER');
+  assert.equal((await f.get('/api/parcel-drafts/' + current.draftSeq)).status, 200);
+});
+
+test('resumed admin copies retain the original deadline and serialize submit with newer empty finalization', async () => {
+  const first = await call();
+  const source = await unfinished(first);
+  const copy = await data(
+    await f.write('POST', '/api/parcel-drafts', {
+      clientParcelId: randomUUID(),
+      sourceDraftSeq: source.draftSeq,
+      customerSeq: first.customer,
+      status: 'READY',
+    }),
+    201,
+  );
+  await f.pool.query(
+    "UPDATE order_parcel_drafts SET retention_started_at=clock_timestamp()-interval '24 hours' WHERE draft_seq=$1",
+    [copy.draftSeq],
+  );
+  const before = await orderCount();
+  await f.error(
+    await f.write('POST', `/api/admin/parcel-drafts/${copy.draftSeq}/submit`, {
+      expectedVersion: copy.version,
+      paymentMethodType: 'billing',
+    }),
+    404,
+    'NOT_FOUND',
+  );
+  assert.equal(await orderCount(), before);
+  const second = await nextCall(first);
+  const fresh = await unfinished(second);
+  const working = await data(
+    await f.write('POST', '/api/parcel-drafts', {
+      clientParcelId: randomUUID(),
+      sourceDraftSeq: fresh.draftSeq,
+      customerSeq: first.customer,
+      status: 'READY',
+    }),
+    201,
+  );
+  const latest = await nextCall(second);
+  const repository = f.app.get(OrderIntakeRepository);
+  const original = repository.finish;
+  let entered, release;
+  const reached = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  repository.finish = async function (...args) {
+    if (args[1] === latest.id) {
+      entered();
+      await gate;
+    }
+    return original.apply(this, args);
+  };
+  const completing = finishCall(latest);
+  await Promise.race([
+    reached,
+    completing.then(() => {
+      throw new Error('Finalization did not reach its checkpoint');
+    }),
+  ]);
+  const submitting = f.write('POST', `/api/admin/parcel-drafts/${working.draftSeq}/submit`, {
+    expectedVersion: working.version,
+    paymentMethodType: 'billing',
+  });
+  try {
+    assert.equal(
+      await Promise.race([
+        submitting.then(() => 'returned'),
+        new Promise((resolve) => setTimeout(() => resolve('waiting'), 50)),
+      ]),
+      'waiting',
+    );
+  } finally {
+    release();
+    repository.finish = original;
+  }
+  assert.equal((await completing).status, 'NO_ORDER');
+  await f.error(await submitting, 404, 'NOT_FOUND');
+  assert.equal(await orderCount(), before);
+});
 test('department group billing is held until end and records one company charge', async () => {
   dverRequests = [];
   const c = await call();

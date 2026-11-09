@@ -34,7 +34,7 @@
 
 클라이언트가 통화 종료 후 5분 경과나 녹취 존재 여부로 실패를 추정하는 우회를 제거한다. 목록 표시를 위해 통화마다 상세 API나 POST customers/context를 추가 호출하지 않는다. 이번 작업에 상태 필터·분석 재실행 API·SSE는 추가하지 않았다.
 
-현재 develop-fe의 `features/call/api/callDto.ts`와 `v2/calls/callState.ts` 타입에 EXPIRED를 추가하고 상태 표시 함수에 `EXPIRED → 분석 만료` 분기를 넣어야 한다. 기존 분기만 두면 기본값인 ‘분석 중’으로 표시된다. `useCallDetail.ts`는 이미 PENDING 이외 상태에서 폴링을 끝내는 조건을 사용한다(녹취 유무 조건도 별도 적용). 프론트 소스와 실제 화면은 이번 backend 작업에서 수정·검증하지 않았다.
+클라이언트의 상태 타입과 표시 함수는 EXPIRED를 지원해야 한다. 2026-11-09 최신 develop-fe `f23693d0`의 `features/call/callState.ts`에는 이미 `EXPIRED → 분석 만료` 분기가 있고 해당 상태 테스트도 확인했다. 이전 v2 경로 안내는 현재 구조와 다르다. 이 확인은 원격 소스의 정적 대조이며 프론트 소스 수정·테스트 실행·실제 화면 확인은 이번 backend 작업에 포함하지 않았다.
 
 ## recordedAt 의미
 

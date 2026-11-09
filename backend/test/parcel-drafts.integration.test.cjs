@@ -269,7 +269,7 @@ test('resuming copies into the new call, preserves the original expiry and preve
   );
   await endCall(oldCall);
   await f.pool.query(
-    "UPDATE order_parcel_drafts SET status='INCOMPLETE',retention_started_at=clock_timestamp()-interval '1 year' WHERE draft_seq=$1",
+    "UPDATE order_parcel_drafts SET status='INCOMPLETE',retention_started_at=clock_timestamp()-interval '1 hour' WHERE draft_seq=$1",
     [original.draftSeq],
   );
   const saved = (
