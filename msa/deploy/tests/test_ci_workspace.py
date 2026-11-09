@@ -26,7 +26,7 @@ class CiWorkspaceTests(unittest.TestCase):
         for folder in ('backend/src', 'msa/parity', 'msa/liquibase'):
             (self.root / folder).mkdir(parents=True)
         (self.root / 'backend/src/api.ts').write_text('original 055 contract\n')
-        for name in ('application', 'orders', 'manual-orders'):
+        for name in ('application',):
             path = self.root / 'backend/test/helpers' / (name + '.cjs')
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('module.exports = "original fixture";\n')
@@ -85,7 +85,7 @@ class CiWorkspaceTests(unittest.TestCase):
         self.source = self.git('rev-parse', 'HEAD')
 
     def test_test_fixture_cleanup_preserves_pinned_api_and_rejects_extra_changes(self):
-        paths = ['backend/test/helpers/' + name + '.cjs' for name in ('application', 'orders', 'manual-orders')]
+        paths = ['backend/test/helpers/application.cjs']
         self.fixture_patch(paths)
         with patch.object(workspace, 'ROOT', self.root):
             snapshot = workspace.prepare()
@@ -102,7 +102,7 @@ class CiWorkspaceTests(unittest.TestCase):
 
     def test_fixture_patch_cannot_change_api_or_test_expectations(self):
         self.fixture_patch(['backend/src/api.ts'])
-        with patch.object(workspace, 'ROOT', self.root), self.assertRaisesRegex(RuntimeError, 'three business helpers'):
+        with patch.object(workspace, 'ROOT', self.root), self.assertRaisesRegex(RuntimeError, 'application helper'):
             workspace.prepare()
         self.assertIn('later 056', (self.root / 'backend/src/api.ts').read_text())
 

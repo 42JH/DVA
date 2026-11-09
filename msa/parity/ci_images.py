@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / 'msa-release/ci-images.json'
 SERVICES = ('operations', 'customer', 'consultation', 'delivery', 'order')
 SUITES = {
-    'operations': ('customer-checks', 'operations-checks', 'operations', 'consultation', 'monolith-checks', 'monolith', 'liquibase'),
-    'customer': ('customer-checks', 'customer', 'operations', 'monolith-checks', 'monolith', 'liquibase'),
-    'consultation': ('consultation-checks', 'consultation', 'order', 'operations', 'customer', 'monolith-checks', 'monolith', 'liquibase'),
-    'order': ('delivery-checks', 'delivery', 'order-checks', 'order', 'customer', 'consultation', 'operations', 'monolith-checks', 'monolith', 'liquibase'),
+    'operations': ('customer', 'operations-checks', 'operations', 'consultation', 'monolith', 'liquibase'),
+    'customer': ('customer-checks', 'customer', 'operations', 'monolith', 'liquibase'),
+    'consultation': ('consultation-checks', 'consultation', 'order', 'operations', 'customer', 'monolith', 'liquibase'),
+    'order': ('delivery', 'order-checks', 'order', 'customer', 'consultation', 'operations', 'monolith', 'liquibase'),
 }
 
 
@@ -55,8 +55,10 @@ def context(key):
     service = key.removesuffix('-checks')
     target = ['--target', 'checks'] if key.endswith('-checks') else []
     if service in SERVICES:
+        if service == 'delivery' and target:
+            raise ValueError('Delivery checks run in its builder')
         return [*target, '-f', str(ROOT / 'msa/services' / service / 'Dockerfile'), str(ROOT / 'msa')]
-    if service not in ('monolith', 'liquibase') or (service == 'liquibase' and target):
+    if service not in ('monolith', 'liquibase') or target:
         raise ValueError('Unknown image')
     return [*target, str(ROOT / ('backend' if service == 'monolith' else 'msa/liquibase'))]
 

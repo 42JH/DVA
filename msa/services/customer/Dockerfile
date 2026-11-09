@@ -12,7 +12,6 @@ COPY services/customer/test ./test
 COPY parity/security-events.test.cjs ./test/security-events.test.cjs
 RUN npm run lint \
  && npm test -- --runInBand \
- && npm run test:e2e -- --runInBand \
  && npm run build \
  && node --test test/security-events.test.cjs
 

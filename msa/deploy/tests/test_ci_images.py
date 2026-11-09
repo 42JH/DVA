@@ -14,14 +14,15 @@ spec.loader.exec_module(images)
 
 
 class CiImageTests(unittest.TestCase):
-    def test_all_suites_share_thirteen_images(self):
+    def test_all_suites_share_eleven_images(self):
         wanted = images.required(list(images.SUITES), list(images.SERVICES), True)
-        self.assertEqual(len(wanted), 13)
+        self.assertEqual(len(wanted), 11)
         for dependencies in images.SUITES.values():
             self.assertTrue(set(dependencies).issubset(wanted))
-        self.assertTrue({s + '-checks' for s in images.SERVICES}.issubset(wanted))
+        self.assertTrue({s + '-checks' for s in images.SERVICES if s != 'delivery'}.issubset(wanted))
+        self.assertNotIn('monolith-checks', wanted)
 
-    def test_customer_keeps_monolith_checks_and_runtime(self):
+    def test_customer_keeps_reference_runtime_and_its_own_checks(self):
         self.assertEqual(set(images.required(['customer'], [], False)), set(images.SUITES['customer']))
         self.assertEqual(images.required([], ['delivery'], False), ['delivery'])
         with self.assertRaises(ValueError):
@@ -35,7 +36,10 @@ class CiImageTests(unittest.TestCase):
     def test_context_keeps_msa_events_and_original_backend(self):
         self.assertEqual(images.context('customer-checks')[:2], ['--target', 'checks'])
         self.assertEqual(images.context('customer')[-1], str(images.ROOT / 'msa'))
-        self.assertEqual(images.context('monolith-checks')[-1], str(images.ROOT / 'backend'))
+        self.assertEqual(images.context('monolith')[-1], str(images.ROOT / 'backend'))
+        for retired in ('monolith-checks', 'delivery-checks'):
+            with self.assertRaises(ValueError):
+                images.context(retired)
 
     def test_standalone_runner_still_builds_its_own_images(self):
         with patch.dict(os.environ, {}, clear=True):

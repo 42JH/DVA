@@ -34,9 +34,9 @@ def prepare():
         content = fixture_patch.read_text()
         paths = subprocess.check_output(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '--numstat', '-'],
                                         input=content, text=True).splitlines()
-        allowed = {'backend/test/helpers/' + name + '.cjs' for name in ('application', 'orders', 'manual-orders')}
+        allowed = {'backend/test/helpers/application.cjs'}
         if {line.split('\t')[-1] for line in paths} != allowed:
-            raise RuntimeError('Reference fixture patch must only update the three business helpers')
+            raise RuntimeError('Reference fixture patch must only update the application helper')
         subprocess.run(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '--check', '-'], input=content, text=True, check=True)
         subprocess.run(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '-'], input=content, text=True, check=True)
     git(snapshot, 'add', '--', 'backend')

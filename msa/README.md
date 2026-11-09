@@ -31,10 +31,10 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 ## 실행 흐름
 
 [CI 비용·#40 전환 실패 보완](../docs/msa-ci-runtime-plan.md)은 앱 배포와 회귀 선택을 분리하고,
-전체 선택 시 13개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
+전체 선택 시 11개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
 `baseline.json`의 055 커밋 `9624b778`로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
 원래 `backend/`는 변경하지 않는다. 이후 056/API는 이 검사에 섞지 않는다.
-임시 원본의 업무 테스트 helper 3개에는 !371의 반복 로그인 제거만 적용한다.
+임시 원본의 application 테스트 helper에는 !371의 반복 로그인 제거만 적용한다.
 API·migration·테스트 기대값은 그대로이며 승인된 fixture patch 이외의 backend 차이는 거부한다.
 실제 checkout의 backend와 최초 052 수동 진단 기준은 보존한다.
 최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
@@ -59,6 +59,7 @@ Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 �
 - DB·서비스 회귀·이벤트·배포 회귀의 성공 commit/build는 각 단계가 통과한 즉시 기록한다. 뒤의 CD 실패도 이 기록을 없애지 않는다. 다음 실행은 각 검사의 마지막 성공 입력과 비교하며, 없는 기록·잘못된 기록·이력 분기는 다시 검사한다.
 - DB CI는 migration·실행기·검증기·고정 기준 정책 변경으로 선택한다. 배포 pending·SSH 코드·DB 문서 변경만으로 전체 DB 검증을 반복하지 않는다. 동일 입력을 재사용한 DB 패키지에는 이전 검증 commit/build와 이번 이미지 ID를 함께 기록하며, 실제 서버의 fingerprint·migration·백업·복구 검사는 유지한다.
 - 준비된 이미지는 선택된 검사와 배포에 필요한 것만 빌드한다. 검증이 끝난 배포 재시도는 checks/monolith 이미지를 만들지 않는다. 배포 없는 CI는 앱·DB 전송 패키지를 만들지 않는다. inventory·최종 검증기·fixture 초기화 회귀 10개는 별도 Node 단계에서 빠르게 확인한다.
+- [테스트 정리](../docs/msa-test-prune-plan.md)는 불변 원본의 단위/통합 재검사와 구형 migration 버전별 재현을 제거한다. 원본 production 이미지와 MSA의 HTTP·DB 비교, MSA 직접 검사, 현재 055 데이터 전환·롤백은 유지한다. delivery 단위는 builder에서 한 번 실행하며 별도 checks 이미지를 만들지 않는다.
 - 실행 중인 워커와 테스트 데이터 초기화가 충돌하지 않도록 전용 테스트 DB의 TRUNCATE는 관련 테이블을 NOWAIT로 잠근 뒤 실행한다. 경합 시 초기화 트랜잭션만 되돌려 최대 5초 안에서 재시도하며 API 요청·업무 기대값은 그대로 검사한다. 실제 PostgreSQL의 잠금 경합 회귀는 operations 단계에서 한 번 실행한다.
 - Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
 - `develop-backend` 실행은 CI와 CD를 함께 수행한다. 수동 재실행도 동일한 흐름이다. 작업 브랜치는 CI만 수행한다.
@@ -84,7 +85,7 @@ Webhook 설정은 Jenkins·GitLab에서 관리한다. 앱과 DB 자동 배포는
 | 신규 설치 | 임시 PostgreSQL 17.11에 5개 스키마 설치, 테이블·제약·인덱스·함수·트리거 등 검증 |
 | 업무 규칙 | 서비스별 SQL 테스트, 참조 무결성 및 상태·사번 등 제약 검사 |
 | 반복 실행 | 재적용 시 중복 변경 없이 Liquibase 이력 유지 |
-| 업그레이드 | customer/operations의 001 → 002, 기존 데이터 보존과 부적합 데이터 차단 |
+| 업그레이드 | 현재 055 전환의 원본/분리 DB snapshot·데이터·이력 보존 및 rollback |
 | 실패 처리 | 초기 설치/후속 changeset 실패 시 해당 트랜잭션 롤백 |
 | 대상 일치 | 미리보기·적용 명령 실행, 잘못되거나 오래된 대기 changeset 해시 차단 |
 | 배포 산출물 | 성공 보고서의 이미지 ID와 현재 이미지 ID가 일치해야 패키징 |

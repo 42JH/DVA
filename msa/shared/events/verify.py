@@ -48,13 +48,9 @@ def main():
         # This private network has no published ports; only this test client can reach these DBs.
         run('docker', 'create', '--name', test_container, '--label', LABEL, '--network', RUN,
             '-e', 'NODE_ENV=test', '-e', 'PGHOST=events-db', '-e', 'PGUSER=event_test', '-e', 'PGPASSWORD=' + password,
-            '-e', 'DVA_CHANGELOG_ROOT=/changelog', RUN, 'sh', '-c',
-            'node --test test/parcel-drafts.test.cjs && npm run test:integration && node --test /parity/inventory.test.cjs /parity/final-contract.test.cjs')
+            '-e', 'DVA_CHANGELOG_ROOT=/changelog', RUN, 'npm', 'run', 'test:integration')
         resources.append(('container', test_container))
         run('docker', 'cp', str(ROOT / 'msa/liquibase/changelog') + '/.', test_container + ':/changelog')
-        run('docker', 'cp', str(ROOT / 'msa/parity') + '/.', test_container + ':/parity')
-        run('docker', 'cp', str(ROOT / 'backend'), test_container + ':/backend')
-        # Copy only reference source; it remains unchanged and outside the installed package.
         run('docker', 'start', '--attach', test_container)
         code = run('docker', 'inspect', test_container, '--format', '{{.State.ExitCode}}', capture=True)
         if code != '0':

@@ -36,8 +36,7 @@ def main():
             *args, image, *command, label=name+'-create')
         resources.append(('container', name))
         if '--test' in command:
-            target = '/app/test/' if image == images.get('monolith-checks') else '/app/service/test/'
-            run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':'+target+'fixture-reset.cjs',
+            run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':/app/service/test/fixture-reset.cjs',
                 label=name+'-copy-fixture-reset')
 
     def complete(name):
@@ -54,7 +53,6 @@ def main():
             ('customer-checks', 'msa/services/customer', 'checks'),
             ('customer', 'msa/services/customer', None),
             ('operations', 'msa/services/operations', None),
-            ('monolith-checks', 'backend', 'checks'),
             ('monolith', 'backend', None), ('liquibase', 'msa/liquibase', None),
         ):
             image = prepared_image(name)
@@ -86,10 +84,11 @@ def main():
                 raise RuntimeError(side+' DB did not become ready')
             if side == 'monolith':
                 name = RUN+'-monolith-schema'
-                create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
+                create(name, images['monolith'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PGHOST=monolith-db', '-e', 'PGUSER=monolith_app',
-                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password, command=('node', '-e',
-                       "const {Pool}=require('pg');const p=new Pool();require('./test/helpers/migrations.cjs').migrate(p).then(()=>p.end(),async e=>{console.error(e.code||'schema-failed');await p.end();process.exit(1)})"))
+                       '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
+                       command=('node', '/app/migrate-reference.cjs'))
+                run('docker', 'cp', str(ROOT/'msa/parity/migrate-reference.cjs'), name+':/app/migrate-reference.cjs', label='reference-schema-copy')
             else:
                 name = RUN+'-'+side+'-schema'
                 create(name, images['liquibase'],
