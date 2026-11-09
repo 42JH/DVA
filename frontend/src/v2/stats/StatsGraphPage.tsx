@@ -8,7 +8,7 @@ const KINDS: GraphKind[] = ['response-wait', 'stage-dropoffs']
 
 export function StatsGraphPage() {
   const kind = useParams().kind as GraphKind
-  if (!KINDS.includes(kind)) return <Navigate to="/v2/stats" replace />
+  if (!KINDS.includes(kind)) return <Navigate to="/stats" replace />
   return <Graph kind={kind} />
 }
 
@@ -16,7 +16,7 @@ function Graph({ kind }: { kind: GraphKind }) {
   const vm = useDashboardGraph(kind)
   return (
     <>
-      <PageHead title={vm.title} back={{ to: '/v2/stats', label: '통계로' }}>
+      <PageHead title={vm.title} back={{ to: '/stats', label: '통계로' }}>
         <span className="text-[13px] text-ops-sub">
           신규 · 기존 고객을 함께 보거나, 한 유형만 골라 비교하세요.
         </span>

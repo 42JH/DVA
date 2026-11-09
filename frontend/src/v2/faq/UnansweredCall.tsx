@@ -37,7 +37,7 @@ export function UnansweredCall({
         <>
           <AiToggle on={showAi} onChange={setShowAi} />
           <Link
-            to={`/v2/calls/${callSeq}`}
+            to={`/calls/${callSeq}`}
             state={{ from: pathname + search, unanswered: unansweredSeq }}
             className="ml-auto inline-flex h-8 items-center rounded-md px-3 text-[13px] font-semibold ring-1 ring-ops-line ring-inset hover:bg-ops-paper"
           >

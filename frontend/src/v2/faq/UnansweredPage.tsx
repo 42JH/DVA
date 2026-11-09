@@ -35,7 +35,7 @@ export function UnansweredPage() {
   const scrollable = useScrollable(box, [rows])
   const [open, setOpen] = useState<(UnansweredRow & { day: string }) | null>(null)
   const toFaq = (r: UnansweredRow) =>
-    navigate('/v2/faqs', { state: { from: r, back: pathname + search } })
+    navigate('/faqs', { state: { from: r, back: pathname + search } })
 
   return (
     <>

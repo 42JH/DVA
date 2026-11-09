@@ -21,17 +21,17 @@ export function V2Layout() {
     {
       title: '운영',
       items: [
-        { to: '/v2', label: '홈', icon: 'home' },
-        { to: '/v2/orders', label: '주문', icon: 'box', count: s.incomplete },
+        { to: '/', label: '홈', icon: 'home' },
+        { to: '/orders', label: '주문', icon: 'box', count: s.incomplete },
         {
-          to: '/v2/calls',
+          to: '/calls',
           label: '통화',
           icon: 'phone',
           count: s.liveCalls || null,
           live: !!s.liveCalls,
         },
         {
-          to: '/v2/unanswered',
+          to: '/unanswered',
           label: '미답변 문의',
           icon: 'inbox',
           count: s.unanswered,
@@ -41,19 +41,19 @@ export function V2Layout() {
     {
       title: '관리',
       items: [
-        { to: '/v2/faqs', label: 'FAQ', icon: 'book' },
-        { to: '/v2/customers', label: '고객', icon: 'users' },
-        { to: '/v2/companies', label: '기업', icon: 'building' },
-        { to: '/v2/personas', label: 'AI 상담가', icon: 'bot' },
-        { to: '/v2/stats', label: '통계', icon: 'chart' },
+        { to: '/faqs', label: 'FAQ', icon: 'book' },
+        { to: '/customers', label: '고객', icon: 'users' },
+        { to: '/companies', label: '기업', icon: 'building' },
+        { to: '/personas', label: 'AI 상담가', icon: 'bot' },
+        { to: '/stats', label: '통계', icon: 'chart' },
       ],
     },
     {
       title: '설정',
       items: [
         // 관리자 권한 관리는 최고 관리자만 (라우트 가드와 짝)
-        ...(s.isSystemAdmin ? [{ to: '/v2/admins', label: '관리자', icon: 'users' as const }] : []),
-        { to: '/v2/me', label: '내 정보', icon: 'gear' },
+        ...(s.isSystemAdmin ? [{ to: '/admins', label: '관리자', icon: 'users' as const }] : []),
+        { to: '/me', label: '내 정보', icon: 'gear' },
       ],
     },
   ]
@@ -67,7 +67,7 @@ export function V2Layout() {
         >
           {/* 로고를 누르면 홈 */}
           <Link
-            to="/v2"
+            to="/"
             aria-label="홈으로"
             className="flex h-14 items-center gap-2 px-5 outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
           >
@@ -83,7 +83,7 @@ export function V2Layout() {
                     <li key={it.to}>
                       <NavLink
                         to={it.to}
-                        end={it.to === '/v2'}
+                        end={it.to === '/'}
                         className={({ isActive }) =>
                           `flex h-9 items-center gap-2.5 rounded-md px-2 text-[14px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${isActive ? 'bg-ops-route-soft text-ops-route' : 'text-ops-ink hover:bg-ops-paper'}`
                         }
@@ -110,7 +110,7 @@ export function V2Layout() {
           </div>
           <div className="flex items-center gap-2 border-t border-ops-line px-4 py-3">
             <NavLink
-              to="/v2/me"
+              to="/me"
               className="min-w-0 flex-1 truncate text-[13px] font-medium hover:text-ops-route"
             >
               {s.name}

@@ -55,11 +55,11 @@ export function TodayPage() {
           <div className="grid min-h-0 flex-1 grid-cols-3 gap-3 max-xl:flex-none max-xl:grid-cols-1">
             <Panel
               title="최근 통화"
-              more="/v2/calls"
+              more="/calls"
               extra={vm.live ? `통화 중 ${vm.live}건` : undefined}
             >
               {vm.calls.map((c) => (
-                <Line key={c.seq} to={`/v2/calls/${c.seq}`} at={c.at}>
+                <Line key={c.seq} to={`/calls/${c.seq}`} at={c.at}>
                   <span className="text-ops-sub tabular-nums">#{c.seq}</span>
                   <span className="truncate font-medium">{c.name}</span>
                   {c.live && (
@@ -73,7 +73,7 @@ export function TodayPage() {
                 </Line>
               ))}
             </Panel>
-            <Panel title="미완료 주문" more="/v2/orders?g=COLLECTING">
+            <Panel title="미완료 주문" more="/orders?g=COLLECTING">
               {vm.incomplete.length === 0 && <Empty>미완료 주문이 없습니다.</Empty>}
               {vm.incomplete.map((o) => (
                 <Line key={o.seq} to={o.to} at={o.at}>
@@ -83,15 +83,10 @@ export function TodayPage() {
                 </Line>
               ))}
             </Panel>
-            <Panel title="미답변 문의" more="/v2/unanswered">
+            <Panel title="미답변 문의" more="/unanswered">
               {vm.unanswered.length === 0 && <Empty>답하지 못한 질문이 없습니다.</Empty>}
               {vm.unanswered.map((u) => (
-                <Line
-                  key={u.seq}
-                  to={`/v2/calls/${u.call}`}
-                  state={{ unanswered: u.seq }}
-                  at={u.at}
-                >
+                <Line key={u.seq} to={`/calls/${u.call}`} state={{ unanswered: u.seq }} at={u.at}>
                   <span className="truncate">“{u.question}”</span>
                 </Line>
               ))}
@@ -101,10 +96,7 @@ export function TodayPage() {
           <section aria-label="AI 상담 성능">
             <div className="mb-2 flex items-baseline justify-between">
               <h2 className="text-[14px] font-bold">AI 상담 성능</h2>
-              <Link
-                to="/v2/stats"
-                className="text-[13px] font-medium text-ops-route hover:underline"
-              >
+              <Link to="/stats" className="text-[13px] font-medium text-ops-route hover:underline">
                 그래프로 보기
               </Link>
             </div>

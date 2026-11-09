@@ -26,9 +26,9 @@ type Arrival = { at?: string; unanswered?: number; from?: string } | null
 
 /** 뒤로 가면 들어온 화면으로 — 미답변 · 주문에서 왔으면 그 화면 이름 */
 const backLabel = (from: string) =>
-  from.startsWith('/v2/unanswered')
+  from.startsWith('/unanswered')
     ? '미답변 문의로'
-    : from.startsWith('/v2/orders')
+    : from.startsWith('/orders')
       ? '주문으로'
       : '통화 목록으로'
 
@@ -41,7 +41,7 @@ function CallBody({ callId }: { callId: number }) {
   const vm = useCallView(callId)
   const [showAi, setShowAi] = useShowAi()
   const arrival = useLocation().state as Arrival
-  const from = arrival?.from ?? '/v2/calls'
+  const from = arrival?.from ?? '/calls'
   const s = vm.summary
 
   return (
@@ -303,7 +303,7 @@ function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
     [p.roadAddress, p.detailAddress].filter(Boolean).join(' ')
   return (
     <Link
-      to={`/v2/orders?o=${seq}&r=all`}
+      to={`/orders?o=${seq}&r=all`}
       className="block rounded-md border border-ops-line px-3 py-2.5 text-[13px] hover:border-ops-route"
     >
       <p className="flex items-center gap-2">

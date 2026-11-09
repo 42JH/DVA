@@ -27,7 +27,7 @@ export function CompanyPage() {
 
   return (
     <>
-      <PageHead title={vm.name || '기업'} back={{ to: '/v2/companies', label: '기업 목록으로' }}>
+      <PageHead title={vm.name || '기업'} back={{ to: '/companies', label: '기업 목록으로' }}>
         <SearchBox
           value={vm.q}
           onChange={vm.setQ}
