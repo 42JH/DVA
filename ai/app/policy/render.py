@@ -113,7 +113,7 @@ def render_backend(policy: Policy) -> str:
 
 def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
                        pick_labels: tuple[str, ...] = (),
-                       callback: bool = False, origin: bool = False) -> list[dict]:
+                       callback: bool = False, origin: bool = False, cancel_current: bool = False) -> list[dict]:
     """발화 끝 Decision 호출에 넣을 질문(SDK `questions` 모양). 선택형 판단이 없으면 빈 목록(호출하지 않음)."""
     stage = next((s for s in policy.stage if s.id == stage_id), None)
     sets = [d for d in stage.decision if d not in ("off", "confirm", "pick")] if stage else []
@@ -134,6 +134,10 @@ def decision_questions(policy: Policy, stage_id: str, *, pending: bool = False,
             item = {"type": q.type, "name": q.name, "instructions": q.instructions}
             if q.type == "choice":
                 item["choices"] = [{"value": c} for c in q.choices]
+                if q.name == "switch" and cancel_current:
+                    item["choices"].append({"value": "cancel_current"})
+                    item["instructions"] += (" 고객이 지금 정보를 받는 중인 택배만 빼 달라고 명확히 말하면 cancel_current. "
+                                             "이미 담은 다른 택배를 취소하거나 대상이 불분명하면 cancel을 고른다.")
             out.append(item)
     if pick_labels:
         out.append({"type": "choice", "name": "pick", "instructions":

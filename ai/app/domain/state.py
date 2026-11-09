@@ -96,6 +96,7 @@ class ParcelDraft:
     receiver_geo: Geo | None = None
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
+    client_parcel_id: str | None = None   # 같은 통화의 배송 초안과 연결하는 UUID
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
@@ -150,6 +151,7 @@ class ConversationState:
     unassigned_item_issues: dict[str, ItemIssue] = field(default_factory=dict)
     latest_item_utterance_id: int = 0
     parcels: list[StoredParcel] = field(default_factory=list)
+    discarded_parcel_ids: set[str] = field(default_factory=set)  # 백엔드 취소가 필요한 제외 항목
     pickup_at: FieldState = field(default_factory=FieldState)
     payment: FieldState = field(default_factory=FieldState)
     pending: PendingConfirmation | None = None

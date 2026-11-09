@@ -4,8 +4,10 @@
 BackendAPI의 공개 메서드는 모두 같은 이름으로 둔다(새 API를 붙이면 여기도, backend_client/tests/test_mock.py가 검사).
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
+import copy
 import itertools
 import unicodedata
+from datetime import datetime, timezone
 
 from backend_client.api import BackendError, CallerContext, CompanyDirectoryPage, _parcels
 from backend_client.order import CompanyPlace, Place
@@ -29,6 +31,7 @@ class MockBackend:
         self.payment_methods: dict[str, list[str]] = {}  # 전화번호 → availablePaymentMethods
         self.recent: dict[str, tuple[Place, Place]] = {}  # 전화번호 → 이전 접수(출발지, 도착지)
         self.call_sessions: dict[int, str] = {}  # callSessionSeq → 발신번호
+        self.call_numbers: dict[str, int] = {}   # providerCallId → callSessionSeq
         self.results: list[dict] = []  # 받은 통화 결과(본문 + 결과)
         self.keys: dict[str, dict] = {}  # Idempotency-Key → 결과 data
         self.calls: set[str] = set()  # 주문이 연결된 providerCallId
@@ -39,6 +42,10 @@ class MockBackend:
         self.unanswered: dict[str, dict] = {}  # eventId → {seq, body}
         # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
+        self.ended: set[int] = set()
+        self.drafts: dict[int, dict] = {}
+        self.draft_keys: dict[tuple[int, str], tuple[dict, int]] = {}
+        self.intakes: dict[int, dict] = {}
         self.insights_enabled = True
         self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
         self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
@@ -46,6 +53,107 @@ class MockBackend:
 
     async def close(self) -> None:
         pass
+
+    def _intake(self, seq):
+        return self.intakes.setdefault(seq, {"intakeVersion": 0})
+
+    async def create_draft(self, call_seq, body):
+        key = (call_seq, body["clientParcelId"])
+        if prior := self.draft_keys.get(key):
+            if body != prior[0]:
+                raise BackendError("different create body", 409, "IDEMPOTENCY_KEY_REUSED")
+            return copy.deepcopy(self.drafts[prior[1]])
+        intake = self._intake(call_seq)
+        if "complete" in intake:
+            raise BackendError("intake sealed", 409, "INVALID_STATE")
+        parcel = body.get("parcel", {})
+        if source_seq := body.get("sourceDraftSeq"):
+            source = await self.draft_detail(call_seq, source_seq)
+            if source["status"] != "INCOMPLETE":
+                raise BackendError("source already resumed", 409, "INVALID_STATE")
+            self.drafts[source_seq]["status"] = "RESUMED"
+            parcel = source["parcel"]
+        draft_seq = next(self._seq)
+        phone = self.call_sessions[call_seq]
+        intake["intakeVersion"] += 1
+        row = {"draftSeq": draft_seq, "version": 1, "intakeVersion": intake["intakeVersion"],
+               "callSessionSeq": call_seq, "callerPhoneNumber": phone, "status": body["status"],
+               "parcel": copy.deepcopy(parcel), "createdAt": datetime.now(timezone.utc).isoformat()}
+        self.drafts[draft_seq] = row
+        self.draft_keys[key] = (copy.deepcopy(body), draft_seq)
+        return copy.deepcopy(row)
+
+    async def patch_draft(self, call_seq, draft_seq, body):
+        row, intake = self.drafts[draft_seq], self._intake(call_seq)
+        if row["callSessionSeq"] != call_seq or "complete" in intake:
+            raise BackendError("draft not writable", 409, "INVALID_STATE")
+        if body["expectedVersion"] != row["version"]:
+            raise BackendError("stale draft", 409, "VERSION_CONFLICT")
+        action = body["action"]
+        if action == "START_EDIT":
+            for field in body["clearFields"]:
+                keys = ("documentCount", "smallBoxCount", "mediumBoxCount", "bigBoxCount", "otherItemDescription") \
+                    if field == "items" else (field,)
+                for key in keys:
+                    row["parcel"].pop(key, None)
+            row["status"] = "EDITING"
+        elif action == "SAVE":
+            if row["status"] != "EDITING":
+                raise BackendError("draft not editing", 409, "INVALID_STATE")
+            row["parcel"].update(copy.deepcopy(body["parcel"]))
+            row["status"] = body["status"]
+        else:
+            row["status"] = "CANCELLED"
+        row["version"] += 1
+        intake["intakeVersion"] += 1
+        row["intakeVersion"] = intake["intakeVersion"]
+        return copy.deepcopy(row)
+
+    async def list_drafts(self, call_seq, status, *, same_call=False, limit=100):
+        rows = [row for row in reversed(list(self.drafts.values())) if row["status"] == status
+                and row["callerPhoneNumber"] == self.call_sessions[call_seq]
+                and (not (same_call or call_seq in self.ended) or row["callSessionSeq"] == call_seq)]
+        return copy.deepcopy(rows if same_call else rows[:limit])
+
+    async def draft_detail(self, call_seq, draft_seq):
+        row = self.drafts.get(draft_seq)
+        if not row or row["callerPhoneNumber"] != self.call_sessions[call_seq]:
+            raise BackendError("draft not found", 404, "NOT_FOUND")
+        return copy.deepcopy(row)
+
+    async def complete_intake(self, call_seq, body):
+        intake = self._intake(call_seq)
+        if "complete" in intake and intake["complete"] != body:
+            raise BackendError("different complete body", 409, "EVENT_PAYLOAD_CONFLICT")
+        if body["expectedIntakeVersion"] != intake["intakeVersion"]:
+            raise BackendError("stale intake", 409, "VERSION_CONFLICT")
+        intake["complete"] = copy.deepcopy(body)
+        return await self.intake_detail(call_seq)
+
+    async def intake_detail(self, call_seq):
+        intake = self._intake(call_seq)
+        data = {"intakeVersion": intake["intakeVersion"]}
+        if "complete" not in intake:
+            return data | {"status": "WAITING_AI" if call_seq in self.ended else "COLLECTING"}
+        if call_seq not in self.ended:
+            return data | {"status": "WAITING_PBX"}
+        if "result" not in intake:
+            rows = [r for r in self.drafts.values() if r["callSessionSeq"] == call_seq]
+            ready = [r for r in rows if r["status"] == "READY"]
+            for row in rows:
+                if row["status"] == "EDITING":
+                    row["status"] = "INCOMPLETE"
+            result = {"status": "NO_ORDER"}
+            if ready:
+                status = "notPaid" if intake["complete"]["paymentMethodType"] == "billing" else self.dver_status
+                order_seq = next(self._seq)
+                parcels = [dict(row["parcel"], orderParcelSeq=next(self._seq), status="ACTIVE") for row in ready]
+                order = {"orderSeq": order_seq, "status": status, "phone": self.call_sessions[call_seq], "parcels": parcels}
+                self.orders.append(order)
+                result = {"status": "FINALIZED", "orderSeq": order_seq, "order": order, "parcelMappings": [
+                    {"draftSeq": row["draftSeq"], "orderParcelSeq": p["orderParcelSeq"]} for row, p in zip(ready, parcels)]}
+            intake["result"] = result
+        return data | copy.deepcopy(intake["result"])
 
     async def search_company_places(self, query, limit=20, offset=0):
         if not query.strip() or not 1 <= limit <= 100 or offset < 0:
@@ -169,7 +277,10 @@ class MockBackend:
     async def caller_context(self, phone, call=None, recent_limit=5):
         session = None
         if call:
-            session = next((s for s, p in self.call_sessions.items() if p == phone), None) or next(self._seq)
+            provider_id = call["providerCallId"]
+            session = self.call_numbers.get(provider_id)
+            if session is None:
+                session = self.call_numbers[provider_id] = next(self._seq)
             self.call_sessions[session] = phone
         c = self.customers.get(phone)
         if c is None:
