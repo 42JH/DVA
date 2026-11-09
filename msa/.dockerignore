@@ -6,3 +6,4 @@
 liquibase/verification-logs
 liquibase/verification.json
 **/__pycache__
+.ci-source
