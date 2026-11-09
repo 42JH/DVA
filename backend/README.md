@@ -1,5 +1,7 @@
 # 모놀리식 백엔드 공통 기반
 
+최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문, 미완료는 배송 단건 초안으로 유지하고 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
+
 API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-performance-optimization.md)을 따른다. 응답·기능·오류·권한·보관 기준을 유지하며, 관리자 주문 목록의 배송상세 JSON과 통화 목록의 recordedAt은 페이지 선택 후 해당 행만 계산한다. 홈의 AI 통계 4개는 대상 통화 조회를 공유하며 개별 통계 API와 같은 값을 반환한다. 페르소나 목록·상세는 기존 버전·초안·프롬프트를 유지하면서 현재 페이지의 상세만 구성한다. 추가 migration·환경변수는 없다.
 
 프론트 QA 반영 작업은 [API 계약·검증 기록](docs/frontend-qa-api.md)을 따른다. 관리자 주문 목록은 기존 목록 필드에 같은 검색·기간·기업 조건의 statusCounts를 추가하며 미완료는 INCOMPLETE 배송 초안 목록으로 연결한다. GET /api/dashboard/home은 처리할 일·최대 5개 미리보기·기존 AI 통계 4개를 하나의 조회 스냅샷으로 제공한다. DELETE /api/companies는 organizationSeqs 배열 1~100개를 전체 성공·실패 단위로 처리하고 기존 단건 URL도 유지한다. 추가 migration은 없다.

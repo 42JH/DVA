@@ -328,8 +328,10 @@ test('Nginx preserves a new empty AI call with completion replay and no actual o
   assert.equal(home.headers.get('cache-control'), 'no-store');
   const summary = (await home.json()).data;
   assert.ok(summary.pendingWork.incomplete >= 0);
+  for (const field of ['todayOrderCount', 'todayCallCount'])
+    assert.ok(Number.isInteger(summary[field]) && summary[field] >= 0);
   for (const field of ['recentCalls', 'incompleteDrafts', 'unansweredQuestions'])
-    assert.ok(Array.isArray(summary[field]) && summary[field].length <= 5);
+    assert.ok(Array.isArray(summary[field]) && summary[field].length <= 11);
   assert.ok(summary.aiPerformance.stageDropoffs);
   const headers = {
     Cookie: cookie,

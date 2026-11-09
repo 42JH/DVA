@@ -27,15 +27,17 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 
 ## 2. 홈 조회
 
-`GET /api/dashboard/home`은 관리자 3개 역할에 `{data,meta}`로 제공한다. 별도 필터 없이 전체 보관 데이터 기준이며 `data.observedAt`은 DB 트랜잭션 시작 시각이다. 모든 영역을 하나의 읽기 전용 REPEATABLE READ 스냅샷에서 조회한다.
+`GET /api/dashboard/home`은 관리자 3개 역할에 `{data,meta}`로 제공한다. 별도 필터 없이 오늘 건수와 전체 보관 기간의 처리할 일·미리보기·AI 통계를 제공하며 `data.observedAt`은 DB 트랜잭션 시작 시각이다. 모든 영역을 하나의 읽기 전용 REPEATABLE READ 스냅샷에서 조회한다.
 
 - `pendingWork`: `incomplete`(INCOMPLETE 초안), `notPaid`(결제 대기), `submissionFailed`(두 실패 상태), `unansweredQuestions`(OPEN 질문 발생 수). 해당 목록의 기본 조건과 같다. 서로 다른 단위이므로 합산하지 않는다.
-- `recentCalls`: 기존 `/api/calls?limit=5`와 같은 최신순 미리보기. `callSessionSeq`로 상세에 이동한다.
-- `incompleteDrafts`: 기존 `/api/parcel-drafts?status=INCOMPLETE&limit=5`와 같은 최신순. `draftSeq`로 초안 상세에 이동한다. 원본 고객·통화 삭제와 독립적인 보관 기준을 유지하고 creationPayload는 공개하지 않는다.
-- `unansweredQuestions`: 기존 `/api/unanswered-questions?status=OPEN&limit=5`와 같은 오래된 통화 우선. `callSessionSeq`로 질문이 나온 통화에 이동한다.
+- `todayOrderCount`: observedAt의 한국시간 날짜에 생성된 실제 주문 수. 해당 날짜의 00:00 이상·다음 날 00:00 미만이며 기존 주문 목록과 같은 삭제·보관·이관 중복 제외를 적용한다. 취소 주문도 생성 건수에 포함하며 미완료 배송 초안을 더하지 않는다.
+- `todayCallCount`: 같은 한국시간 날짜에 시작된 통화 수. 기존 통화 목록처럼 PBX 시작 → AI 시작 → 수신 시각을 사용한다. 삭제·보관 만료는 제외하며 진행 중 통화도 기준 시각이 오늘이면 포함한다.
+- `recentCalls`: 기존 `/api/calls?limit=11`와 같은 최신순 미리보기. `callSessionSeq`로 상세에 이동한다.
+- `incompleteDrafts`: 기존 `/api/parcel-drafts?status=INCOMPLETE&limit=11`와 같은 최신순. `draftSeq`로 초안 상세에 이동한다. 원본 고객·통화 삭제와 독립적인 보관 기준을 유지하고 creationPayload는 공개하지 않는다.
+- `unansweredQuestions`: 기존 `/api/unanswered-questions?status=OPEN&limit=11`와 같은 오래된 통화 우선. `callSessionSeq`로 질문이 나온 통화에 이동한다.
 - `aiPerformance`: `stageDropoffs`, `registrationTime`, `complaintCalls`, `responseWait`. 기존 대시보드 4개 API의 `customerType=ALL` 응답 data와 동일하다. 미측정/null과 0, 현재·직전 활성 버전 비교 기준도 유지한다.
 
-미리보기는 각 최대 5개이며 건수는 전체 대상이다. 빈 영역은 빈 배열·0건, 측정이 없는 비율·평균은 기존 통계처럼 null이다. UI는 반환된 배열에서 필요한 줄만 표시할 수 있다. 녹취 URL 발급이나 외부 AI 호출은 하지 않으며 추가 migration·환경변수는 없다.
+2026-11-09 최종 화면 반영에서 오늘 건수 두 필드를 추가하고 미리보기 상한을 5개에서 11개로 늘렸다. 오늘 건수만 날짜 범위를 적용하며 처리할 일·미리보기·AI 통계는 기존 전체 보관 기간 기준을 유지한다. 빈 영역은 빈 배열·0건, 측정이 없는 비율·평균은 기존 통계처럼 null이다. UI는 반환된 배열에서 필요한 줄만 표시할 수 있다. 녹취 URL 발급이나 외부 AI 호출은 하지 않으며 추가 migration·환경변수는 없다. 아래 2단계 검증은 최초 5개 구현 시점의 기록이고 이번 검증은 [후속 기록](final-wireframe-follow-up.md)을 따른다.
 
 ### 2단계 검증
 

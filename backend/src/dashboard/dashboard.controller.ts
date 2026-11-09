@@ -31,7 +31,7 @@ export class DashboardController {
   @ApiOperation({
     summary: '홈 처리할 일·미리보기·AI 성능 요약',
     description:
-      '필터 없는 전체 보관 데이터. 기존 목록·통계 조회 기준을 재사용하며 같은 읽기 전용 DB 스냅샷으로 반환합니다. 미리보기는 영역별 최대 5개입니다.',
+      '한국시간 오늘의 주문·통화 수와 전체 보관 기간의 처리할 일·미리보기·AI 성능을 조회합니다. 기존 목록·통계 기준과 같은 읽기 전용 DB 스냅샷을 사용하며 미리보기는 영역별 최대 11개입니다.',
   })
   @ApiOkResponse({ type: HomeResponseDto })
   home() {
