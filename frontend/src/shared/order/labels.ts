@@ -46,3 +46,15 @@ export const RELATED_CALL_LABEL: Record<
   ACCEPT: { text: '새 주문 접수' },
   CANCEL: { text: '주문 취소' },
 }
+
+/** 물품 가액 구간 (11/09 사용자) — 화면에선 구간으로 고르고 구간으로 보여 줌. 서버엔 그 구간의 가장 큰 금액(원)을 저장
+ * AI 전화 접수는 지금처럼 정확한 금액을 보냄 → 그 금액도 들어가는 구간 이름으로 보여 줌 */
+export const PRICE_BANDS = [
+  { max: 99_999, label: '10만원 미만' },
+  { max: 299_999, label: '30만원 미만' },
+  { max: 499_999, label: '50만원 미만' },
+  { max: 999_999, label: '100만원 미만' },
+  { max: 100_000_000, label: '100만원 이상' }, // 서버 상한 1억
+] as const
+export const priceBand = (won: number) =>
+  PRICE_BANDS.find((b) => won <= b.max) ?? PRICE_BANDS[PRICE_BANDS.length - 1]

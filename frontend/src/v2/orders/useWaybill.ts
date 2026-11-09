@@ -8,7 +8,12 @@ import { cancelOrder, retryOrder } from '@/features/order/api/orderApi'
 import { deleteDraft } from '@/features/order/api/draftApi'
 import { orderQueries, type Party } from '@/shared/order/orderApi'
 import { pickParcel } from '@/shared/order/useOrderDetail'
-import { orderNo, PAYMENT_METHOD_LABEL, PAYMENT_STATE_LABEL } from '@/shared/order/labels'
+import {
+  orderNo,
+  PAYMENT_METHOD_LABEL,
+  PAYMENT_STATE_LABEL,
+  priceBand,
+} from '@/shared/order/labels'
 import { itemsText, STATUS_LOOK, won } from './orderLook'
 
 const party = (p: Party) => ({
@@ -46,7 +51,7 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
     sender: party(o.sender),
     receiver: party(o.receiver),
     items: itemsText(o.items),
-    itemPrice: won(o.itemPrice),
+    itemPrice: o.itemPrice === null ? '' : priceBand(o.itemPrice).label,
     fee: won(o.notifiedPrice),
     payMethod: o.paymentMethod ? PAYMENT_METHOD_LABEL[o.paymentMethod] : '',
     payState: PAYMENT_STATE_LABEL[o.paymentState],

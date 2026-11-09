@@ -8,7 +8,7 @@ import { Link, useLocation, useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { orderQueries } from '@/shared/order/orderApi'
 import { pickParcel } from '@/shared/order/useOrderDetail'
-import { orderNo } from '@/shared/order/labels'
+import { orderNo, priceBand } from '@/shared/order/labels'
 import { fmtPhone } from '@/shared/lib/format'
 import { useFollowScroll } from '@/features/call/hooks/useFollowScroll'
 import { PageHead } from '@/v2/V2Layout'
@@ -329,7 +329,9 @@ function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
           <dd>{itemsText(o.items) || '없음'}</dd>
           {/* 통화에서 받은 가액이 맞게 들어갔는지 바로 보게 (11/09 사용자) */}
           <dt className="text-ops-sub">가액</dt>
-          <dd className="tabular-nums">{won(o.itemPrice) || '없음'}</dd>
+          <dd className="tabular-nums">
+            {o.itemPrice === null ? '없음' : priceBand(o.itemPrice).label}
+          </dd>
           <dt className="text-ops-sub">배송비</dt>
           <dd className="tabular-nums">{won(o.notifiedPrice) || '없음'}</dd>
           <dt className="text-ops-sub">수거</dt>
