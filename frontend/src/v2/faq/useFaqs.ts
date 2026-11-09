@@ -24,7 +24,11 @@ export function useFaqs() {
   ).sort(newest)
 
   // 미답변 [FAQ로 만들기]로 왔으면 추가 칸을 고객 말로 채워 엶 (저장하면 그 질문이 처리됨) — 저장 · 취소하면 미답변으로 돌아감
-  const state = useLocation().state as { from?: UnansweredQuestion; back?: string } | null
+  // 처음 들어올 때 한 번만 — 칩 · 검색이 주소를 바꾸면 state가 사라져 그냥 FAQ 추가가 되던 것 (11/09 검수)
+  const location = useLocation()
+  const [state] = useState(
+    () => location.state as { from?: UnansweredQuestion; back?: string } | null,
+  )
   const navigate = useNavigate()
   const [adding, setAdding] = useState(!!state?.from)
   const finishAdd = () => {

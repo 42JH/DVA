@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ApiError } from '@/shared/api/client'
 import { login } from '@/features/auth/api/loginApi'
-import { sessionQueries } from '@/shared/auth/sessionApi'
 
 /** 00 로그인 훅 — 입력값 · 제출 · 오류 문구 */
 export function useLogin() {
@@ -21,7 +20,7 @@ export function useLogin() {
   const mutation = useMutation({
     mutationFn: (v: { loginId: string; password: string }) => login(v.loginId.trim(), v.password),
     onSuccess: () => {
-      queryClient.removeQueries({ queryKey: sessionQueries.all() }) // 이전 계정의 내 정보가 남지 않게
+      queryClient.clear() // 이전 계정의 내 정보 · 목록이 남지 않게 (11/09 검수: 세션 만료 뒤 다른 계정 로그인)
       navigate(from, { replace: true })
     },
   })

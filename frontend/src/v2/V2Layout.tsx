@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router'
 import logo from '@/shared/assets/logo-dva.png'
 import { Icon, type IconName } from './ui'
-import { useShell } from './useShell'
+import { ShellContext, useShell, useShellState } from './useShell'
 
 type Item = {
   to: string
@@ -14,7 +14,7 @@ type Item = {
 }
 
 export function V2Layout() {
-  const s = useShell()
+  const s = useShellState()
   const { pathname } = useLocation()
   const nav = useNavigation()
   const groups: { title: string; items: Item[] }[] = [
@@ -59,90 +59,92 @@ export function V2Layout() {
   ]
 
   return (
-    <div className="flex h-full bg-ops-paper text-ops-ink">
-      <nav
-        aria-label="메뉴"
-        className="flex w-52 shrink-0 flex-col border-r border-ops-line bg-white max-xl:w-44"
-      >
-        {/* 로고를 누르면 홈 */}
-        <Link
-          to="/v2"
-          aria-label="홈으로"
-          className="flex h-14 items-center gap-2 px-5 outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
+    <ShellContext.Provider value={s}>
+      <div className="flex h-full bg-ops-paper text-ops-ink">
+        <nav
+          aria-label="메뉴"
+          className="flex w-52 shrink-0 flex-col border-r border-ops-line bg-white max-xl:w-44"
         >
-          <img src={logo} alt="DVA" className="w-9" />
-          <span className="text-[13px] font-semibold text-ops-sub">운영 콘솔</span>
-        </Link>
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pt-2 pb-4">
-          {groups.map((g) => (
-            <div key={g.title}>
-              <p className="px-2 pb-1 text-[12px] font-medium text-ops-faint">{g.title}</p>
-              <ul className="flex flex-col gap-0.5">
-                {g.items.map((it) => (
-                  <li key={it.to}>
-                    <NavLink
-                      to={it.to}
-                      end={it.to === '/v2'}
-                      className={({ isActive }) =>
-                        `flex h-9 items-center gap-2.5 rounded-md px-2 text-[14px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${isActive ? 'bg-ops-route-soft text-ops-route' : 'text-ops-ink hover:bg-ops-paper'}`
-                      }
-                    >
-                      <Icon name={it.icon} className="size-[18px]" />
-                      <span className="flex-1">{it.label}</span>
-                      {it.live && (
-                        <span
-                          aria-hidden
-                          className="size-2 rounded-full bg-ops-route motion-safe:animate-blink"
-                        />
-                      )}
-                      {it.count != null && it.count > 0 && (
-                        <span className="text-[12px] font-semibold text-ops-sub tabular-nums">
-                          {it.count}
-                        </span>
-                      )}
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 border-t border-ops-line px-4 py-3">
-          <NavLink
-            to="/v2/me"
-            className="min-w-0 flex-1 truncate text-[13px] font-medium hover:text-ops-route"
+          {/* 로고를 누르면 홈 */}
+          <Link
+            to="/v2"
+            aria-label="홈으로"
+            className="flex h-14 items-center gap-2 px-5 outline-none focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
           >
-            {s.name}
-          </NavLink>
-          <button
-            type="button"
-            onClick={s.logout}
-            aria-label="로그아웃"
-            className="grid size-7 place-items-center rounded text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
-          >
-            <Icon name="out" />
-          </button>
-        </div>
-      </nav>
-      {/* overflow-hidden: 화면이 바뀔 때 새 화면이 6px 아래에서 떠오르는데(animate-page-in), 그만큼 창 밖으로 삐져나가
+            <img src={logo} alt="DVA" className="w-9" />
+            <span className="text-[13px] font-semibold text-ops-sub">운영 콘솔</span>
+          </Link>
+          <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3 pt-2 pb-4">
+            {groups.map((g) => (
+              <div key={g.title}>
+                <p className="px-2 pb-1 text-[12px] font-medium text-ops-faint">{g.title}</p>
+                <ul className="flex flex-col gap-0.5">
+                  {g.items.map((it) => (
+                    <li key={it.to}>
+                      <NavLink
+                        to={it.to}
+                        end={it.to === '/v2'}
+                        className={({ isActive }) =>
+                          `flex h-9 items-center gap-2.5 rounded-md px-2 text-[14px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ops-route ${isActive ? 'bg-ops-route-soft text-ops-route' : 'text-ops-ink hover:bg-ops-paper'}`
+                        }
+                      >
+                        <Icon name={it.icon} className="size-[18px]" />
+                        <span className="flex-1">{it.label}</span>
+                        {it.live && (
+                          <span
+                            aria-hidden
+                            className="size-2 rounded-full bg-ops-route motion-safe:animate-blink"
+                          />
+                        )}
+                        {it.count != null && it.count > 0 && (
+                          <span className="text-[12px] font-semibold text-ops-sub tabular-nums">
+                            {it.count}
+                          </span>
+                        )}
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 border-t border-ops-line px-4 py-3">
+            <NavLink
+              to="/v2/me"
+              className="min-w-0 flex-1 truncate text-[13px] font-medium hover:text-ops-route"
+            >
+              {s.name}
+            </NavLink>
+            <button
+              type="button"
+              onClick={s.logout}
+              aria-label="로그아웃"
+              className="grid size-7 place-items-center rounded text-ops-sub hover:bg-ops-paper hover:text-ops-ink"
+            >
+              <Icon name="out" />
+            </button>
+          </div>
+        </nav>
+        {/* overflow-hidden: 화면이 바뀔 때 새 화면이 6px 아래에서 떠오르는데(animate-page-in), 그만큼 창 밖으로 삐져나가
           창 스크롤바가 잠깐 생겼다 사라지며 화면 폭이 출렁였음 → 본문 밖은 잘라 냄 (스크롤은 화면마다 안쪽 상자에서) */}
-      <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* 화면을 받는 동안(처음 여는 화면 코드) 위쪽 가는 막대 — 눌렀는데 반응이 없어 보이지 않게 */}
-        {nav.state === 'loading' && (
-          <span
-            aria-hidden
-            className="absolute top-0 right-0 left-0 z-30 h-0.5 origin-left bg-ops-route motion-safe:animate-load-bar"
-          />
-        )}
-        {/* 경로가 바뀌면 새 화면이 살짝 떠오름 (같은 화면 안 쪽 · 필터 · 패널은 안 움직임) */}
-        <div
-          key={pathname}
-          className="flex min-h-0 min-w-0 flex-1 flex-col motion-safe:animate-page-in"
-        >
-          <Outlet />
-        </div>
-      </main>
-    </div>
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* 화면을 받는 동안(처음 여는 화면 코드) 위쪽 가는 막대 — 눌렀는데 반응이 없어 보이지 않게 */}
+          {nav.state === 'loading' && (
+            <span
+              aria-hidden
+              className="absolute top-0 right-0 left-0 z-30 h-0.5 origin-left bg-ops-route motion-safe:animate-load-bar"
+            />
+          )}
+          {/* 경로가 바뀌면 새 화면이 살짝 떠오름 (같은 화면 안 쪽 · 필터 · 패널은 안 움직임) */}
+          <div
+            key={pathname}
+            className="flex min-h-0 min-w-0 flex-1 flex-col motion-safe:animate-page-in"
+          >
+            <Outlet />
+          </div>
+        </main>
+      </div>
+    </ShellContext.Provider>
   )
 }
 

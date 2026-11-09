@@ -12,8 +12,9 @@ export type { AiAction, CallDetail, Complaint, Recording, ResultBlock, Utterance
 
 /** 열어 둔 통화 상세를 다시 받는 주기 (명세 권장 5초) */
 export const CALL_REFRESH_MS = 5_000
-/** 404(통화 없음)면 그 조회의 반복을 멈춤 (명세: 통화 상세 404는 통화 없음 처리 후 반복 중단) */
-const poll = (q: { state: { error: unknown } }) =>
+/** 404(통화 없음)면 그 조회의 반복을 멈춤 (명세: 통화 상세 404는 통화 없음 처리 후 반복 중단)
+ * 반복은 통화 상세(useCallDetail)에서만 걸음 — 같은 통화를 읽는 다른 곳(옆 창 대화 기록 등)은 반복하지 않음 (11/09 검수) */
+export const poll = (q: { state: { error: unknown } }) =>
   q.state.error instanceof ApiError && q.state.error.status === 404 ? false : CALL_REFRESH_MS
 
 export const callQueries = {
@@ -24,26 +25,22 @@ export const callQueries = {
       queryKey: [...callQueries.all(), id],
       queryFn: async ({ signal }) =>
         (await api.get<ApiItem<CallDetailDto>>(`/calls/${id}`, { signal })).data,
-      refetchInterval: poll,
     }),
   // 아래 셋은 처음 100개가 전부라는 보장이 없어 끝까지 받음(fetchAll)
   transcript: (id: number) =>
     queryOptions({
       queryKey: [...callQueries.all(), id, 'transcript'],
       queryFn: ({ signal }) => fetchAll<UtteranceDto>(`/calls/${id}/transcript`, {}, signal),
-      refetchInterval: poll,
     }),
   results: (id: number) =>
     queryOptions({
       queryKey: [...callQueries.all(), id, 'results'],
       queryFn: ({ signal }) =>
         fetchAll<CallProcessingResultDto>(`/calls/${id}/processing-results`, {}, signal),
-      refetchInterval: poll,
     }),
   actions: (id: number) =>
     queryOptions({
       queryKey: [...callQueries.all(), id, 'actions'],
       queryFn: ({ signal }) => fetchAll<CallActionDto>(`/calls/${id}/actions`, {}, signal),
-      refetchInterval: poll,
     }),
 }

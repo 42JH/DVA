@@ -21,6 +21,7 @@ export function useSnapshotList<T>({
   asOf,
   go,
   asc = false,
+  enabled: on = true,
 }: {
   key: string // 쿼리 키 이름 ('orders' · 'calls')
   path: string // GET 경로 (최신순)
@@ -30,6 +31,7 @@ export function useSnapshotList<T>({
   asOf: string // 주소의 기준 시각(ms) — 비면 지금 최신
   go: (p: { page: number; at?: string }) => void // 주소 바꾸기
   asc?: boolean // 오래된 순
+  enabled?: boolean // false면 목록 · 건수 · 새 건수를 안 받음(기준 시각만) — 주문 미완료 탭(초안 목록)일 때
 }) {
   const [size, setSize] = usePageSize()
   const qc = useQueryClient()
@@ -52,7 +54,7 @@ export function useSnapshotList<T>({
   // 오래된 순: 서버는 최신순만 줌 → 기준 이전 총 건수로 뒤쪽부터 잘라 받아 뒤집음
   const count = useQuery({
     queryKey: ['v2', key, 'count', query, to],
-    enabled: asc && to !== undefined,
+    enabled: on && asc && to !== undefined,
     staleTime: Infinity,
     queryFn: ({ signal }) =>
       get({ ...query, to: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
@@ -60,7 +62,7 @@ export function useSnapshotList<T>({
   const n = count.data ?? 0
   const opts = (p: number) => ({
     queryKey: ['v2', key, query, to, size, p, asc ? n : 'desc'] as const,
-    enabled: to !== undefined && (!asc || count.data !== undefined),
+    enabled: on && to !== undefined && (!asc || count.data !== undefined),
     staleTime: Infinity,
     queryFn: ({ signal }: { signal: AbortSignal }) => {
       const page = (limit: number, offset: number) =>
@@ -74,34 +76,34 @@ export function useSnapshotList<T>({
 
   // 없는 쪽(주소를 직접 고침 · 다른 사람이 지움)이면 마지막 쪽으로
   useEffect(() => {
-    if (list.data && !list.isPlaceholderData && total > 0 && page > pages) go({ page: pages })
+    if (on && list.data && !list.isPlaceholderData && total > 0 && page > pages) go({ page: pages })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 받은 결과가 바뀔 때만
   }, [list.data, page, pages])
 
   // 다음 쪽을 미리 받아 둠 — 넘기며 훑는 운영 업무
   useEffect(() => {
-    if (list.data && !list.isPlaceholderData && page < pages) void qc.prefetchQuery(opts(page + 1))
+    if (on && list.data && !list.isPlaceholderData && page < pages)
+      void qc.prefetchQuery(opts(page + 1))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 쪽 · 기준이 바뀔 때만
   }, [list.data, page, pages])
 
   // 기준 이후 새로 들어온 수 — 15초마다
   const fresh = useQuery({
     queryKey: ['v2', key, 'fresh', query, to],
-    enabled: to !== undefined,
+    enabled: on && to !== undefined,
     refetchInterval: 15_000,
     queryFn: ({ signal }) =>
       get({ ...query, from: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
   })
 
+  const stuck = (!asOf && !!anchor.error) || (on && asc && !!count.error)
   return {
     items: list.data?.data ?? [],
     // 기준 시각 · 건수가 실패하면 목록은 영영 안 불림 → 그것도 실패로 (11/09 검수: 뼈대만 계속 보이던 것)
-    isLoading: list.isPending && !anchor.error && !count.error,
+    // 지금 쓰는 쪽의 실패만 — 꺼진 조회에 남은 옛 실패는 안 봄
+    isLoading: list.isPending && !stuck,
     isStale: list.isPlaceholderData,
-    error:
-      list.error || anchor.error || count.error
-        ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'
-        : null,
+    error: list.error || stuck ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
     total,
     page: Math.min(page, pages),
     size,

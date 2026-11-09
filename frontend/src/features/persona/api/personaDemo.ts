@@ -89,7 +89,7 @@ export async function demoApply(personaSeq: number) {
     other.activeVersion = null
     other.pendingVersion = null
     for (const v of versions.get(other.aiPersonaSeq) ?? [])
-      if (v.status === 'ACTIVE') v.status = 'INACTIVE'
+      if (v.status === 'ACTIVE' || v.status === 'PENDING') v.status = 'INACTIVE'
   }
   const head = list.find((v) => v.version === p.headVersion.version)!
   head.status = 'ACTIVE'

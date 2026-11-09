@@ -138,6 +138,12 @@ function Chat({ vm, arrival, showAi }: { vm: CallView; arrival: Arrival; showAi:
       ref={list}
       onWheel={touched}
       onTouchMove={touched}
+      // 스크롤 막대 끌기(목록 자체를 누름) · 키보드 스크롤도 사람이 움직인 것
+      onPointerDown={(e) => e.target === e.currentTarget && touched()}
+      onKeyDown={(e) =>
+        ['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(e.key) &&
+        touched()
+      }
       aria-label="통화 대화"
       className="relative flex min-h-0 min-w-0 flex-1 [scrollbar-width:thin] flex-col gap-0.5 overflow-y-auto bg-white px-4 py-4"
     >

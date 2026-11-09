@@ -66,7 +66,6 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
       await qc.invalidateQueries({ queryKey: companyQueries.all() })
       setModal(null)
     },
-    onError: () => setModal(null),
   })
 
   const rows: MemberRow[] = shown.map((m) => ({
@@ -116,7 +115,10 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
     modal,
     openAdd: () => setModal({ kind: 'add' }),
     openEdit: (m: Member) => setModal({ kind: 'edit', member: m }),
-    askDelete: (m: Member) => setModal({ kind: 'delete', member: m }),
+    askDelete: (m: Member) => {
+      remove.reset() // 지난 실패 문구가 다른 사원 창에 남지 않게
+      setModal({ kind: 'delete', member: m })
+    },
     openCsv: () => setModal({ kind: 'csv' }),
     close: () => setModal(null),
 

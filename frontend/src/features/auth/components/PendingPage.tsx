@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router'
+import { clearSession } from '@/shared/auth/session'
 import { Button } from '@/shared/ui'
 import { AuthLayout } from './AuthLayout'
 
@@ -26,7 +27,15 @@ export function PendingPage() {
         '가입 신청이 완료되었습니다.\n최고 관리자 승인 후 로그인할 수 있으며,\n승인 여부는 로그인을 시도해 확인해 주세요.'
       }
     >
-      <Button kind="primary" tall className="w-full" onClick={() => navigate('/login')}>
+      <Button
+        kind="primary"
+        tall
+        className="w-full"
+        onClick={() => {
+          clearSession() // 승인 전 계정의 로그인 표시가 남으면 로그인 화면 → 홈 → 다시 여기로 돌아옴 (11/09 검수)
+          navigate('/login')
+        }}
+      >
         로그인으로
       </Button>
     </AuthLayout>

@@ -5,6 +5,7 @@ import { fmtClock, fmtPhone } from '@/shared/lib/format'
 import { COMPLAINT_LABEL } from '@/features/call/labels'
 import {
   callQueries,
+  poll,
   type Complaint,
   toCallDetail,
   type Utterance,
@@ -94,10 +95,17 @@ export function useCallDetail(callId: number, fromFaq?: number) {
   // 고른 줄 (누름 · ⏮ ⏭ · AI 동작) — 시각이 같은 줄이 여럿이면 시각만으로는 앞 줄을 못 고름(뒤 줄이 이김) → 고른 줄을 다음 줄 시작 전까지 붙잡음
   const [pin, setPin] = useState<{ key: number; sec: number } | null>(null)
 
-  const detail = useQuery(callQueries.detail(callId))
-  const transcript = useQuery(callQueries.transcript(callId))
-  const resultsQ = useQuery(callQueries.results(callId))
-  const actionsQ = useQuery(callQueries.actions(callId))
+  // 끝나고 분석까지 끝났고 녹취도 왔으면 더 올 게 없음 → 5초 반복을 멈춤 (11/09 검수: 다 끝난 통화를 열어 두면 네 요청을 계속 보냄)
+  // 창을 다시 보면 한 번 받는 건 그대로(React Query 기본)
+  const [settled, setSettled] = useState(false)
+  const every = settled ? false : poll
+  const detail = useQuery({ ...callQueries.detail(callId), refetchInterval: every })
+  const transcript = useQuery({ ...callQueries.transcript(callId), refetchInterval: every })
+  const resultsQ = useQuery({ ...callQueries.results(callId), refetchInterval: every })
+  const actionsQ = useQuery({ ...callQueries.actions(callId), refetchInterval: every })
+  const d = detail.data
+  const done = !!d?.call.endedAt && d.call.analysisStatus !== 'PENDING' && d.recordings.length > 0
+  if (done !== settled) setSettled(done)
   // 기본 정보가 오면 바로 그림. 나머지는 받은 만큼 (아직 못 받은 영역은 빈 칸 + 그 영역 문구)
   const call = detail.data
     ? toCallDetail(detail.data, transcript.data ?? [], resultsQ.data ?? [], actionsQ.data ?? [])
