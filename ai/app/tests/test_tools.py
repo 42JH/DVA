@@ -179,15 +179,19 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     assert f.value == best and f.candidates == tuple(rest) and out["facts"]["auto_selected"] == ["receiver_address"]
 
 
-def test_changed_road_without_detail_clears_detail_but_number_fix_keeps_it(corrector, address):
+def test_changed_address_without_detail_clears_detail(corrector, address):
     c = ctx(address=address)
     call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211", "sender_address_detail": "3층"})
-    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})  # 같은 도로의 번호 정정(결정 2)
-    assert out["facts"]["changed"] == ["sender_address"] and "cleared" not in out["facts"]
-    assert c.state.field_of("sender_address_detail").value == "3층"
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211"})  # 같은 주소를 다시 말함: 유지
+    assert "cleared" not in out.get("facts", {}) and c.state.field_of("sender_address_detail").value == "3층"
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})  # 같은 도로의 번호만 바뀌어도 비운다
+    assert out["facts"]["cleared"] == ["sender_address_detail"] and "sender_address_detail" in out["missing"]
+    assert c.state.field_of("sender_address_detail").status == FieldStatus.EMPTY
+    call(c, "record_fields", {"sender_address_detail": "5층"})
     out = call(c, "record_fields", {"sender_address": "서울 송파구 올림픽로 300"})
     assert out["facts"]["cleared"] == ["sender_address_detail"]
-    assert c.state.field_of("sender_address_detail").status == FieldStatus.EMPTY
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211", "sender_address_detail": "7층"})
+    assert "cleared" not in out["facts"] and c.state.field_of("sender_address_detail").value == "7층"
 
 
 def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):

@@ -294,11 +294,6 @@ def invalid_fields(needs: list[dict]) -> list[str]:
     return list(dict.fromkeys(n["field"] for n in needs if n["reason"] not in keep))
 
 
-def _road_of(address) -> str:
-    """보정된 도로명주소에서 건물번호를 뺀 부분("서울특별시 강남구 테헤란로 212" → "… 테헤란로"). 비교용."""
-    return (address or "").rsplit(" ", 1)[0]
-
-
 async def _resolve(ctx: ToolContext, heard: str):
     if ctx.address is None:
         return None
@@ -334,8 +329,9 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
         facts["recorded"].append(addr)
         if had:
             facts["changed"].append(addr)
-            # 도로가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않다. 같은 도로의 번호 정정은 유지(결정 2)
-            if detail not in given and not (r and r.detail) and _road_of(was) != _road_of(value):
+            # 기본주소가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않을 수 있어 비우고 다시 묻는다.
+            # 같은 도로의 번호만 바뀌어도 비운다 — 저장된 상세는 되읽지 않아 다른 건물로 틀리게 접수된다(사용자 결정 2026-11-09)
+            if detail not in given and not (r and r.detail) and was != value:
                 s.clear(detail)
                 facts["cleared"].append(detail)
     setattr(s.current, f"{role}_geo", r.geo if r else None)
