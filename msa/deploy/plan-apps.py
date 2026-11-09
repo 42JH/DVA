@@ -34,7 +34,9 @@ def changed(base, paths):
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", base, "HEAD"], capture_output=True)
     if ancestor.returncode != 0:
         return True
-    result = subprocess.run(["git", "diff", "--quiet", base, "HEAD", "--", *paths])
+    result = subprocess.run(["git", "diff", "--quiet", base, "HEAD", "--", *paths,
+                             ":(glob,exclude)msa/services/**/README.md",
+                             ":(glob,exclude)msa/shared/events/**/*.md"])
     if result.returncode not in (0, 1):
         raise RuntimeError("Cannot compare Git changes")
     return result.returncode == 1
@@ -127,8 +129,13 @@ def parity_suites(base, verified):
         dependencies[suite] = ['msa/parity/' + path.name for path in PARITY.iterdir()
                                if path.is_file() and (path == driver or path.name in source)]
     known = {path for paths in dependencies.values() for path in paths}
+    # The manual 052 diagnostic has its own cheap checker; it does not drive these suites.
+    known.update('msa/parity/' + name for name in (
+        'final-contract.test.cjs', 'final-parity.cjs', 'final-peer.cjs', 'inventory.cjs',
+        'inventory.test.cjs', 'initial-baseline.json', 'verify-final.py'))
     # Unknown/new helpers require the full matrix; a named suite test reruns its consumers.
-    unknown = changed(base, ['msa/parity/', *[':(exclude)' + path for path in sorted(known)]])
+    unknown = changed(base, ['msa/parity/', ':(glob,exclude)msa/parity/**/*.md',
+                            *[':(exclude)' + path for path in sorted(known)]])
     return [suite for suite, services in SUITE_DEPENDENCIES.items()
             if unknown or services.intersection(verified) or changed(base, dependencies[suite])]
 

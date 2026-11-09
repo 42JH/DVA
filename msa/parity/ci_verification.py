@@ -12,10 +12,7 @@ POLICY_PATHS = ['msa/parity/ci_verification.py', 'msa/deploy/plan-apps.py',
                 'msa/parity/ci_images.py', 'msa/parity/ci_workspace.py', 'msa/parity/baseline.json']
 DB_PATHS = ['msa/liquibase/', *POLICY_PATHS, 'msa/parity/reference-tests.patch',
             ':(glob,exclude)msa/liquibase/**/*.md']
-EVENT_PATHS = ['msa/shared/events/', 'msa/liquibase/changelog/shared/',
-               'msa/parity/inventory.cjs', 'msa/parity/inventory.test.cjs',
-               'msa/parity/final-contract.test.cjs', 'msa/parity/final-parity.cjs',
-               *POLICY_PATHS]
+EVENT_PATHS = ['msa/shared/events/', 'msa/liquibase/changelog/', *POLICY_PATHS]
 DEPLOY_PATHS = ['msa/deploy/', 'msa/Jenkinsfile', *POLICY_PATHS]
 
 

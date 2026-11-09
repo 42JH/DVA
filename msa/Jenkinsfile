@@ -46,7 +46,9 @@ pipeline {
                     env.RUN_MSA_CI = 'true'
                     env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     sh 'mkdir -p msa-release'
-                    writeFile file: 'msa-release/verification-history.json', text: groovy.json.JsonOutput.toJson(verificationHistory())
+                    def history = verificationHistory()
+                    history.each { scope, stamp -> env["MSA_VERIFIED_${scope.toUpperCase()}"] = stamp }
+                    writeFile file: 'msa-release/verification-history.json', text: groovy.json.JsonOutput.toJson(history)
                     def backendBranch = env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend']
                     env.DELIVER_APPS = (backendBranch && !env.CHANGE_ID).toString()
                     if (env.DELIVER_APPS == 'true') {
@@ -63,7 +65,7 @@ pipeline {
                     set -eu
                     test "$(uname -s)" = Linux
                     test "$(uname -m)" = x86_64
-                    for tool in docker python3 git bash ssh scp sha256sum realpath; do command -v "$tool"; done
+                    for tool in docker node python3 git bash ssh scp sha256sum realpath; do command -v "$tool"; done
                     docker version
                     python3 --version
                     for script in msa/deploy/*.sh msa/liquibase/*.sh; do bash -n "$script"; done
@@ -100,14 +102,24 @@ pipeline {
 
         stage('Verify Deployment Scripts') {
             when { expression { env.RUN_DEPLOY_CI == 'true' } }
-            steps { sh 'python3 -m unittest discover -s msa/deploy/tests -v' }
-            post { success { script { recordVerification('deployment') } } }
+            steps {
+                sh 'python3 -m unittest discover -s msa/deploy/tests -v'
+                script { recordVerification('deployment') }
+            }
+        }
+
+        stage('Verify Contracts') {
+            steps {
+                sh 'node --test msa/.ci-source/msa/parity/inventory.test.cjs msa/.ci-source/msa/parity/final-contract.test.cjs'
+            }
         }
 
         stage('Verify Event Transport') {
             when { expression { env.RUN_EVENT_CI == 'true' } }
-            steps { sh 'python3 msa/.ci-source/msa/shared/events/verify.py' }
-            post { success { script { recordVerification('events') } } }
+            steps {
+                sh 'python3 msa/.ci-source/msa/shared/events/verify.py'
+                script { recordVerification('events') }
+            }
         }
 
         stage('Build CI Images') {
@@ -124,9 +136,11 @@ pipeline {
                     env.RUN_MSA_CI == 'true' && env.RUN_DB_CI == 'true'
                 }
             }
-            steps { sh 'python3 msa/.ci-source/msa/liquibase/verify.py' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/liquibase/verify.py'
+                script { recordVerification('database') }
+            }
             post {
-                success { script { recordVerification('database') } }
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification.json,msa/liquibase/verification-logs/**', allowEmptyArchive: true
                 }
@@ -135,9 +149,11 @@ pipeline {
 
         stage('Reuse Unchanged Database Verification') {
             when { expression { env.RUN_DB_CI == 'false' && env.HAS_DB_DELIVERY == 'true' } }
-            steps { sh 'python3 msa/.ci-source/msa/parity/ci_verification.py reuse-database' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/ci_verification.py reuse-database'
+                script { recordVerification('database') }
+            }
             post {
-                success { script { recordVerification('database') } }
                 always { archiveArtifacts artifacts: 'msa/liquibase/verification.json', allowEmptyArchive: false }
             }
         }
@@ -148,9 +164,11 @@ pipeline {
                     env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('operations')
                 }
             }
-            steps { sh 'python3 msa/.ci-source/msa/parity/verify-operations.py' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/verify-operations.py'
+                script { recordVerification('operations') }
+            }
             post {
-                success { script { recordVerification('operations') } }
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/operations/**', allowEmptyArchive: true
                 }
@@ -163,9 +181,11 @@ pipeline {
                     env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('customer')
                 }
             }
-            steps { sh 'python3 msa/.ci-source/msa/parity/verify-customer.py' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/verify-customer.py'
+                script { recordVerification('customer') }
+            }
             post {
-                success { script { recordVerification('customer') } }
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/customer/**', allowEmptyArchive: true
                 }
@@ -178,9 +198,11 @@ pipeline {
                     env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('consultation')
                 }
             }
-            steps { sh 'python3 msa/.ci-source/msa/parity/verify-consultation.py' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/verify-consultation.py'
+                script { recordVerification('consultation') }
+            }
             post {
-                success { script { recordVerification('consultation') } }
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/consultation/**', allowEmptyArchive: true
                 }
@@ -193,9 +215,11 @@ pipeline {
                     env.RUN_MSA_CI == 'true' && readFile('msa-release/parity-suites.txt').tokenize().contains('order')
                 }
             }
-            steps { sh 'python3 msa/.ci-source/msa/parity/verify-order.py' }
+            steps {
+                sh 'python3 msa/.ci-source/msa/parity/verify-order.py'
+                script { recordVerification('order') }
+            }
             post {
-                success { script { recordVerification('order') } }
                 always {
                     archiveArtifacts artifacts: 'msa/liquibase/verification-logs/order/**', allowEmptyArchive: true
                 }

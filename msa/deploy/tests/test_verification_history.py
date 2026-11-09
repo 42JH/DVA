@@ -89,6 +89,21 @@ class VerificationHistoryTests(unittest.TestCase):
         self.assertFalse(result['database'])
         self.assertEqual(result['paritySuites'], [])
 
+    def test_final_checker_change_does_not_run_unrelated_business_or_event_suites(self):
+        self.history(self.deployed)
+        self.commit('msa/parity/final-parity.cjs', 'updated manual diagnostic')
+        result = self.selection()
+        self.assertFalse(result['events'])
+        self.assertFalse(result['database'])
+        self.assertEqual(result['paritySuites'], [])
+
+    def test_service_documentation_does_not_rebuild_or_retest_runtime(self):
+        self.history(self.deployed)
+        self.commit('msa/services/customer/README.md', 'updated docs')
+        result = self.selection()
+        self.assertEqual(result['paritySuites'], [])
+        self.assertEqual((self.out / 'services.txt').read_text(), '')
+
     def test_invalid_or_missing_history_never_skips_changed_inputs(self):
         self.commit('msa/liquibase/verify.py', 'changed verifier')
         for value in ({}, {'database': '0' * 40 + ':42'}, {'database': '--invalid'},

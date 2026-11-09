@@ -47,7 +47,7 @@ class CiImageTests(unittest.TestCase):
             image_id = 'sha256:' + 'b' * 64
             data = {'commit': 'a' * 40, 'referenceTree': 'd' * 40, 'release': 'a' * 40 + '-1', 'images': {'customer': {'id': image_id}}}
             path.write_text(json.dumps(data))
-            with patch.dict(os.environ, MSA_CI_IMAGES=str(path)), patch.object(images.subprocess, 'run'):
+            with patch.dict(os.environ, MSA_CI_IMAGES=str(path), MSA_CI_ORIGINAL_COMMIT=''), patch.object(images.subprocess, 'run'):
                 with patch.object(images, 'run', return_value='c' * 40):
                     with self.assertRaisesRegex(RuntimeError, 'source commit'):
                         images.prepared_image('customer')

@@ -34,6 +34,9 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 전체 선택 시 13개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
 `baseline.json`의 055 커밋 `9624b778`로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
 원래 `backend/`는 변경하지 않는다. 이후 056/API는 이 검사에 섞지 않는다.
+임시 원본의 업무 테스트 helper 3개에는 !371의 반복 로그인 제거만 적용한다.
+API·migration·테스트 기대값은 그대로이며 승인된 fixture patch 이외의 backend 차이는 거부한다.
+실제 checkout의 backend와 최초 052 수동 진단 기준은 보존한다.
 최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
 다섯 서비스의 npm 다운로드는 기존 BuildKit의 잠금 캐시로 공유한다. 다운로드 캐시는 운영 이미지에
 포함하지 않으며, 이벤트 검증 파일 변경은 의존성 설치 레이어를 무효화하지 않는다.
@@ -53,7 +56,9 @@ Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 �
 - 서비스 폴더 변경: 해당 서비스만 빌드한다. 앱 공통 배포 코드 변경: 모든 서비스를 빌드한다.
 - 5개 서비스 이미지는 `@dva/events` 파일 의존성을 포함하도록 `docker build -f msa/services/<서비스>/Dockerfile msa`로 빌드한다. delivery도 같은 context를 사용한다. Jenkins·비교 검증기·k3s fixture도 같은 경로를 사용한다.
 - customer/consultation은 operations에 현재 세션을 확인하며 consultation은 customer 조회 이벤트에도 의존한다. order는 AI 범위 확인을 위해 customer·consultation, 취소 시 배송 확인을 위해 delivery에 의존한다. delivery readiness는 자기 DB만 검사한다. 모두 선택되면 operations → customer → consultation → delivery → order 순서로 배포한다. 기존 서비스 Secret 값은 보존하며 customer의 조회에는 consultation의 readiness를 요구하지 않아 의존 순환을 만들지 않는다. 통화 등록 요청의 의존 장애는 503으로 반환한다.
-- DB CI는 마지막 성공 CI 커밋 기준으로 DB 관련 경로를 비교한다. 앱 전용 코드·문서 변경만으로 DB 검사를 실행하지 않는다. Jenkinsfile, DB 배포 코드, 공통 SSH 설정 변경이나 비교 이력 누락은 DB CI를 실행한다.
+- DB·서비스 회귀·이벤트·배포 회귀의 성공 commit/build는 각 단계가 통과한 즉시 기록한다. 뒤의 CD 실패도 이 기록을 없애지 않는다. 다음 실행은 각 검사의 마지막 성공 입력과 비교하며, 없는 기록·잘못된 기록·이력 분기는 다시 검사한다.
+- DB CI는 migration·실행기·검증기·고정 기준 정책 변경으로 선택한다. 배포 pending·SSH 코드·DB 문서 변경만으로 전체 DB 검증을 반복하지 않는다. 동일 입력을 재사용한 DB 패키지에는 이전 검증 commit/build와 이번 이미지 ID를 함께 기록하며, 실제 서버의 fingerprint·migration·백업·복구 검사는 유지한다.
+- 준비된 이미지는 선택된 검사와 배포에 필요한 것만 빌드한다. 검증이 끝난 배포 재시도는 checks/monolith 이미지를 만들지 않는다. 배포 없는 CI는 앱·DB 전송 패키지를 만들지 않는다. inventory와 최종 검증기 회귀 6개는 별도 Node 단계에서 빠르게 확인한다.
 - Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
 - `develop-backend` 실행은 CI와 CD를 함께 수행한다. 수동 재실행도 동일한 흐름이다. 작업 브랜치는 CI만 수행한다.
 - DB는 namespace의 `dva.ssafy.io/db-<서비스>-commit`부터 서비스별 changelog 변경을 비교한다. DB만 변경되어도 자동 적용한다. 성공한 DB만 적용 커밋을 갱신하므로 이후 실패한 DB는 재실행 시 누락되지 않는다.
