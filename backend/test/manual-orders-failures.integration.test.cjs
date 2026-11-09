@@ -94,14 +94,22 @@ test('69: configuration or payment preparation failures roll back the collecting
   };
   const audit = f.app.get(AuditService),
     record = audit.recordSuccess;
-  audit.recordSuccess = async function (...args) {
-    if (args[0].action === 'ORDER_PAYMENT_PENDING') throw Error('manual-prepare-failure');
-    return record.apply(this, args);
-  };
-  try {
-    await f.error(await f.send(input, key), 500, 'INTERNAL_ERROR');
-  } finally {
-    audit.recordSuccess = record;
+  const pinsBefore = (await f.pool.query('SELECT count(*)::int AS n FROM personal_pins')).rows[0].n;
+  for (const action of ['PERSONAL_PIN_CREATED', 'ORDER_PAYMENT_PENDING']) {
+    audit.recordSuccess = async function (...args) {
+      if (args[0].action === action) throw Error('manual-prepare-failure');
+      return record.apply(this, args);
+    };
+    try {
+      await f.error(await f.send(input, key), 500, 'INTERNAL_ERROR');
+    } finally {
+      audit.recordSuccess = record;
+    }
+    assert.deepEqual(await f.counts(), before);
+    assert.equal(
+      (await f.pool.query('SELECT count(*)::int AS n FROM personal_pins')).rows[0].n,
+      pinsBefore,
+    );
   }
   assert.deepEqual(await f.counts(), before);
   assert.equal(f.requests.length, 0);

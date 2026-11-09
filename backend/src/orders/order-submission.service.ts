@@ -149,6 +149,19 @@ export class OrderSubmissionService {
       )
         throw new ApiException(403, 'FORBIDDEN', '고객이 사용할 수 없는 출발지 PIN입니다.');
     }
+    if (snapshot.creationSource === 'ADMIN')
+      for (const pin of await this.repository.saveRecipientPins(client, id, customerId))
+        await this.audit.recordSuccess(
+          {
+            actorId: adminId,
+            actorType: adminId === null ? 'AI' : 'ADMIN',
+            targetId: pin.personalPinSeq,
+            targetType: 'PERSONAL_PIN',
+            action: 'PERSONAL_PIN_CREATED',
+            requestId,
+          },
+          client,
+        );
     if (snapshot.paymentMethodType === 'billing') {
       await this.payments.waitForPayment(client, id);
       await this.audit.recordSuccess(

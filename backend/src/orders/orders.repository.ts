@@ -441,6 +441,24 @@ export class OrdersRepository {
     return result.rowCount === 1;
   }
 
+  async saveRecipientPins(client: PoolClient, id: number, customerId: number) {
+    return (
+      await client.query<{ personalPinSeq: number }>(
+        `WITH recipients AS (
+          SELECT jsonb_build_object('name',destination_name,'phoneNumber',destination_phone_number,
+            'roadAddress',destination_road_address,'jibunAddress',destination_jibun_address,
+            'detailAddress',COALESCE(destination_detail_address,''),'dongName',destination_dong_name,
+            'postalCode',destination_postal_code) AS address
+          FROM order_parcels WHERE order_seq=$1 AND status='ACTIVE'
+        ) INSERT INTO personal_pins(customer_seq,label,address_data)
+        SELECT $2,address->>'name',address FROM recipients ORDER BY pin_identity(address)
+        ON CONFLICT(customer_seq,pin_identity(address_data)) WHERE deleted_at IS NULL DO NOTHING
+        RETURNING personal_pin_seq AS "personalPinSeq"`,
+        [id, customerId],
+      )
+    ).rows;
+  }
+
   async lockOrder(client: PoolClient, id: number) {
     return (
       await client.query<{
