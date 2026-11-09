@@ -471,6 +471,16 @@ def test_record_rejects_pickup_out_of_hours_with_allowed_range():
     assert not c.state.pickup_at.valid
 
 
+def test_name_only_address_asks_to_confirm_district_and_dong(corrector, address):
+    """'올리브영 OO점'처럼 이름만 말한 주소는 기록하되 facts.confirm_area로 구·동만 확인시킨다(S15P31D109-165). 번호가 있으면 없다."""
+    c = ctx(address=address)
+    out = call(c, "record_fields", {"receiver_address": "송파구 롯데월드타워"})
+    assert out["status"] == "ok" and out["facts"]["confirm_area"] == {"receiver_address": "송파구 신천동"}
+    assert c.state.field_of("receiver_address").value == "서울특별시 송파구 올림픽로 300"
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
+    assert "confirm_area" not in out["facts"]
+
+
 def test_address_in_several_regions_asks_region(corrector, address):
     """같은 주소가 여러 시군구에 있으면 기록하지 않고 지역을 되묻는다(ADDRESS_REGION_NEEDED). 모델은 heard와 지역을 합쳐 다시 넘긴다."""
     c = ctx(address=address)

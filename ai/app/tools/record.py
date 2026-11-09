@@ -331,6 +331,8 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
                 s.clear(detail)
                 facts["cleared"].append(detail)
     setattr(s.current, f"{role}_geo", r.geo if r else None)
+    if r is not None and r.area:  # 상호·건물 이름만으로 찾은 주소: 구·동이 맞는지 확인시킨다(S15P31D109-165)
+        facts.setdefault("confirm_area", {})[addr] = r.area
     if r is not None and r.status == "ambiguous":
         s.field_of(addr).candidates = r.alternatives  # P6: 나머지 후보 보관
         facts.setdefault("auto_selected", []).append(addr)

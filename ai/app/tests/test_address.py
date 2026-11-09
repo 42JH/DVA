@@ -519,6 +519,20 @@ def test_service_splits_detail_and_keeps_it_when_base_fails(db_path, fake_kakao)
     assert run(svc.resolve("서울 강남구 테헤란로 212")).detail is None
 
 
+def test_service_gives_area_to_confirm_for_name_only_addresses(db_path, fake_kakao, monkeypatch):
+    """상호·건물 이름만으로 찾은 주소(S15P31D109-165): 구·동을 돌려줘 Live가 그것만 읽어 확인한다. 번호를 들었으면 없다."""
+    from app.integrations.address import area_of
+    svc = AddressService(open_db(db_path))
+    r = run(svc.resolve("송파구 롯데월드타워"))  # 주소DB 건물명
+    assert (r.address, r.area) == ("서울특별시 송파구 올림픽로 300", "송파구 신천동")
+    witness(monkeypatch, places=["서울 강남구 테헤란로 212"])  # 카카오 키워드 검색(상호)
+    assert run(svc.resolve("스타벅스 강남역점")).area == "강남구 역삼동"
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).area is None
+    assert run(svc.resolve("서울 강남구 없는로 12")).area is None
+    assert area_of("전북특별자치도 익산시 왕궁면 왕궁로 100", Geo("전북특별자치도 익산시 선산읍 완전리 산 12", "선산읍 완전리", "54546"))         == "익산시 선산읍 완전리"
+    assert area_of("경기도 성남시 분당구 판교역로 166", None) == "성남시 분당구"  # 지번이 없으면 시·군·구만
+
+
 def test_service_uses_local_geo_and_falls_back_to_kakao(db_path, monkeypatch):
     calls = []
 
