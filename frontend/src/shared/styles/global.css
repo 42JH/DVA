@@ -68,9 +68,13 @@ thead th {
     border-bottom: 0;
   }
 
-  .ops-table tbody tr:nth-child(even),
-  .ops-table tbody tr:hover {
+  .ops-table tbody tr:nth-child(even) {
     background-color: color-mix(in srgb, var(--color-ops-route-soft) 40%, transparent);
+  }
+
+  /* 마우스를 올린 줄 — 짝수 줄 바탕과 같으면 올렸는지 모름(11/09) → 한 단계 진하게. 고른 줄은 아래 색이 이김 */
+  .ops-table tbody tr:hover {
+    background-color: color-mix(in srgb, var(--color-ops-route) 12%, white);
   }
 
   .ops-table tbody tr[aria-selected='true'] {
