@@ -144,6 +144,24 @@ def test_items_replaced_as_whole_and_unspecified():
     assert call(c, "record_fields", {})["code"] == "NOTHING_TO_RECORD"
 
 
+def test_document_price_clears_when_a_box_is_added_and_accepts_box_value():
+    c = ctx()
+    out = call(c, "record_fields", {"document_count": 2})
+    assert "item_price" not in out["missing"]
+    assert c.state.current["item_price"].source == Source.SERVER
+
+    call(c, "record_fields", {"item_price": 9000})
+    assert c.state.current["item_price"].value == 1
+
+    out = call(c, "record_fields", {"document_count": 2, "small_box_count": 1})
+    assert "item_price" in out["facts"]["cleared"] and "item_price" in out["missing"]
+    assert c.state.current["item_price"].value is None
+
+    call(c, "record_fields", {"item_price": 30000})
+    assert c.state.current["item_price"].value == 30000
+    assert c.state.current["item_price"].source == Source.CUSTOMER
+
+
 def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     c = ctx(address=address)
     out = call(c, "record_fields", {"sender_address": "서울 강남구 태헤란노 이백십일", "sender_address_detail": "3층"})

@@ -93,10 +93,13 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
 
 
 def readback_facts(snapshot: dict, sources: dict[str, Source | None], policy: Policy) -> dict[str, object]:
-    """Live에 줄 확인 내용(읽어도 되는 값만, README §5): 발신번호·저장된 번호·저장된 상세주소는 빼고, geo는 넣지 않는다."""
+    """Live에 줄 확인 내용. 저장된 연락처·상세주소와 서류 전용 가액은 읽지 않는다."""
     out = {}
+    items = snapshot.get("items")
     for name, value in snapshot.items():
         if name not in policy.fields or value is None:
+            continue
+        if name == "item_price" and items and items.documents_only():
             continue
         src = sources.get(name)
         if name.endswith("_phone") and src != Source.CUSTOMER:

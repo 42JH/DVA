@@ -1,17 +1,21 @@
 """055 계약의 통화 중 조회, 수정, 종료와 전송 복구."""
 
 import asyncio
+import json
 
 import httpx2
+import pytest
 from conftest import CALLER, run
 
 from app.calls.intake import IntakeService
 from app.calls.live import LiveFlow
 from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmation
+from app.domain.fare import parcel_fare
 from app.tests.test_domain import P, confirm_once, filled
 from app.tests.test_live_flow import flow
 from app.tests.test_results import service, session
 from app.tests.test_tools import call, ctx, registered
+from app.tools import run_tool
 from backend_client.api import BackendAPI, BackendError
 from backend_client.mock import MockBackend
 
@@ -27,6 +31,33 @@ def setup_intake(tmp_path, db=None):
     intake = IntakeService(results.backend, results.outbox, results.policy, results.fare_of)
     results.intake = intake
     return intake, results, db, s
+
+
+@pytest.mark.parametrize(("items", "price", "shipping"), [
+    ({"document_count": 2}, 1, 7700),
+    ({"document_count": 2, "small_box_count": 1, "item_price": 100_000}, 100_000, 12650),
+    ({"small_box_count": 1, "item_price": 128_000}, 130_000, 4950),
+    ({"small_box_count": 1, "item_price": 125_000}, 130_000, 4950),
+    ({"small_box_count": 1, "item_price": 7_000}, 10_000, 4950),
+])
+def test_live_document_and_box_values_in_readback_and_ready_draft(tmp_path, items, price, shipping):
+    intake, results, db, s = setup_intake(tmp_path)
+    intake.fare_of = lambda parcel: parcel_fare(parcel, {"document": 3850, "small_box": 4950})
+    svc, _ = flow()
+    svc.intake, svc.results, svc.d.backend = intake, results, results.backend
+    lf = LiveFlow(svc)
+    s.state.clear("items")
+    s.state.clear("item_price")
+
+    async def scenario():
+        out = await run_tool(s.tools, "record_fields", json.dumps(items), "record-items")
+        assert out["facts"]["readback"].get("item_price") == (price if "item_price" in items else None)
+        await lf.commit(s, s.state.pending.id)
+        [draft] = db.drafts.values()
+        assert draft["status"] == "READY"
+        assert (draft["parcel"]["itemPrice"], draft["parcel"]["notifiedPrice"]) == (price, shipping)
+
+    run(scenario())
 
 
 def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):

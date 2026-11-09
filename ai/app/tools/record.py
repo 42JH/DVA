@@ -21,7 +21,7 @@ from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import ItemIssue, measurements, size_issues, unclassified_mentions
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
-from app.domain.rules import normalize_phone, parse_pickup
+from app.domain.rules import normalize_phone, parse_pickup, round_item_price
 from app.domain.state import Items, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
@@ -57,7 +57,8 @@ class RecordArgs(Args):
     big_box_count: int | None = Field(None, ge=0, description="대형 박스 수")
     item_evidence: list[ItemEvidence] | None = Field(None, max_length=12, description="고객이 언급한 제한 품목·포장·규격 초과의 근거")
     omit_blocked_parcel: str | None = Field(None, max_length=200, description="문제 택배 전체를 빼 달라는 고객 발화 원문")
-    item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
+    item_price: int | None = Field(None, description="박스 안 물건의 대략적인 가액 합계(원). 고객이 말한 기준 금액을 넣고 "
+                                                    "만 원 단위 반올림은 서버에 맡긴다. 예: 3만 원 넘어요 → 30000. 서류와 배송비는 제외")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
     pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
                                   "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
@@ -135,7 +136,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         else:
             needs.append({"field": "receiver_phone", "reason": "PHONE_INVALID_DIGITS"})
     if "item_price" in given:
-        values["item_price"] = given["item_price"]
+        values["item_price"] = round_item_price(given["item_price"], policy.input_limits)
     rule = rule_of(policy.pickup)
     if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
         now = ctx.now()
@@ -161,6 +162,10 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if draft is not s.current:
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         _check_items(ctx, args, item_parts, facts, needs)
+        if price_update := s.sync_document_item_price():
+            facts[price_update].append("item_price")
+        if s.current is None or s.current["item_price"].source == Source.SERVER:
+            values.pop("item_price", None)
         for name, value in values.items():
             prev = s.field_of(name)
             was = prev.value if prev.valid else None

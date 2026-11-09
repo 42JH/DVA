@@ -39,7 +39,9 @@ def test_input_boundaries_are_enforced_by_executor(args, accepted):
         assert c.state.field_of("item_price").value == 1000
         assert c.state.field_of("items").value == Items(small_box_count=1)
     elif "item_price" in args:
-        assert c.state.field_of("item_price").value == args["item_price"]
+        price = args["item_price"]
+        expected = {1: 10_000, 99_999_999: 100_000_000}.get(price, price)
+        assert c.state.field_of("item_price").value == expected
     else:
         assert c.state.field_of("items").value == Items(**args)
 
@@ -85,6 +87,7 @@ def test_toml_change_reaches_prompts_session_schema_and_executor(tmp_path):
     assert call(c, "record_fields", {"item_price": 1})["code"] == "TOOL_ARGS_INVALID"
     assert call(c, "record_fields", {"item_price": 123_456, "document_count": 80,
                                       "small_box_count": 3, "big_box_count": 4})["status"] == "ok"
+    assert c.state.field_of("item_price").value == 120_000
     assert call(c, "record_fields", {"small_box_count": 4, "big_box_count": 4})["code"] == "TOOL_ARGS_INVALID"
     assert call(c, "record_fields", {"document_count": 81})["code"] == "TOOL_ARGS_INVALID"
     assert call(c, "record_fields", {"receiver_phone": "01012345678"})["code"] == "PHONE_INVALID_DIGITS"

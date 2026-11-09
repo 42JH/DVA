@@ -4,9 +4,10 @@
 import re
 from datetime import datetime, timedelta, timezone
 
-from app.policy.model import Phone, load_policy
+from app.policy.model import InputLimits, Phone, load_policy
 
 KST = timezone(timedelta(hours=9))
+ITEM_PRICE_UNIT_WON = 10_000
 
 _KOREAN_DIGITS = {"공": "0", "영": "0", "빵": "0", "일": "1", "이": "2", "삼": "3", "사": "4",
                   "오": "5", "육": "6", "륙": "6", "칠": "7", "팔": "8", "구": "9"}
@@ -31,6 +32,17 @@ def normalize_phone(raw: str, rule: Phone | None = None) -> str | None:
     if digits.startswith("0") and rule.domestic_min_digits <= len(digits) <= rule.domestic_max_digits:
         return digits
     return None
+
+
+def round_item_price(price: int, limits: InputLimits) -> int:
+    """검증된 박스 가액을 허용 범위 안에서 만 원 단위로 반올림한다."""
+    unit = ITEM_PRICE_UNIT_WON
+    minimum = ((limits.item_price_min + unit - 1) // unit) * unit
+    maximum = (limits.item_price_max // unit) * unit
+    if minimum > maximum:  # 사용자 지정 범위에 만 원 단위 값이 없으면 검증된 원래 값을 유지한다.
+        return price
+    rounded = ((price + unit // 2) // unit) * unit
+    return min(max(rounded, minimum), maximum)
 
 
 def parse_pickup(raw: str, now: datetime, min_lead_minutes: int) -> tuple[str | None, str | None]:

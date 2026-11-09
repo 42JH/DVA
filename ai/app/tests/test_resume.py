@@ -10,9 +10,10 @@ import httpx2
 from conftest import CALLER, run
 
 from app.calls.session import Phase
+from app.domain.assess import assess
 from app.domain.resume import can_offer, load_resumed, within_window
 from app.domain.state import ConversationState, Customer, FieldStatus, Items, ResumeCandidate, Source
-from app.integrations.backend.mapping import resume_candidate
+from app.integrations.backend.mapping import resume_candidate, resume_draft_candidate
 from app.tests.test_calls import incoming, started, until
 from app.tests.test_live_flow import ai, flow, say
 from app.calls.results import ResultService
@@ -88,14 +89,31 @@ def test_offer_only_once_before_customer_gives_parcel_values():
 
 def test_load_resumed_marks_history_and_rereads_address_without_geo():
     st = state()
-    load_resumed(st, 4)
+    load_resumed(st, 4, P.input_limits)
     cur = st.current
     assert st.resume_version == 4 and st.origin_applied and cur.order_parcel_seq == 11
     assert cur["receiver_name"].source == Source.HISTORY and cur["item_price"].value == 30000
     st = state(resume_candidate(detail(parcels=[{"orderParcelSeq": 11, "status": "ACTIVE",
                                                  **parcel(destination={"name": "이영희", "roadAddress": "부산 어딘가"})}])))
-    load_resumed(st, 4)
+    load_resumed(st, 4, P.input_limits)
     assert st.current["receiver_address"].status == FieldStatus.EMPTY and st.current["receiver_name"].valid
+
+
+def test_load_resumed_document_draft_sets_server_value():
+    cand = resume_draft_candidate({"draftSeq": 7, "version": 1, "createdAt": NOW.isoformat(),
+                                   "parcel": parcel(documentCount=2, smallBoxCount=0, itemPrice=None)})
+    st = state(cand)
+    load_resumed(st, 1, P.input_limits, client_parcel_id="document-draft")
+    assert (st.current["item_price"].value, st.current["item_price"].source) == (1, Source.SERVER)
+    assert "item_price" not in assess(st, P).missing
+
+
+def test_load_resumed_box_price_is_rounded():
+    cand = resume_draft_candidate({"draftSeq": 7, "version": 1, "createdAt": NOW.isoformat(),
+                                   "parcel": parcel(itemPrice=128_000)})
+    st = state(cand)
+    load_resumed(st, 1, P.input_limits, client_parcel_id="box-draft")
+    assert (st.current["item_price"].value, st.current["item_price"].source) == (130_000, Source.HISTORY)
 
 
 # --- BE 본문 ---
