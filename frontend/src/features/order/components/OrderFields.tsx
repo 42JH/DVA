@@ -22,7 +22,14 @@ export function OrderFields({
   wide?: boolean // 주문 추가 창: 보내는 분 | 받는 분 나란히, 한 화면에 (배송비는 창 아래 줄에)
 }) {
   if (f.searching)
-    return <AddressPicker title={f.searchTitle} onPick={f.pickAddress} onClose={f.closeSearch} />
+    return (
+      <AddressPicker
+        title={f.searchTitle}
+        query={f.searchQuery}
+        onPick={f.pickAddress}
+        onClose={f.closeSearch}
+      />
+    )
   const noItem = f.items.every((i) => i.count === 0) && !f.etcItem.trim()
   const itemsErr = f.itemsError ?? (showEmpty && noItem ? '물품을 1개 이상 넣어 주세요.' : null)
   const priceErr =
@@ -122,14 +129,13 @@ export function OrderFields({
   )
 }
 
-/** 추천 한 줄 — 이름 · 번호 (별칭), 아래에 주소 */
+/** 추천 한 줄 — 이름 · 번호, 아래에 주소 */
 function SuggestRow(s: Suggestion) {
   return (
     <span className="flex min-w-0 flex-col">
       <span className="flex items-baseline gap-2">
         <span className="font-medium">{s.name}</span>
         <span className="text-ops-sub tabular-nums">{fmtPhone(s.phoneNumber)}</span>
-        {s.label && <span className="text-[12px] text-ops-faint">{s.label}</span>}
       </span>
       <span className="truncate text-[12px] text-ops-faint">
         {s.address ? `${s.address.roadAddress} ${s.address.detailAddress ?? ''}` : '주소 없음'}
