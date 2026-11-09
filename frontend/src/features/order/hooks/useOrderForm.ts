@@ -36,6 +36,8 @@ import {
   submitMissing,
   type CustomerPatch,
 } from '@/features/order/api/orderPatch'
+import { createPin, customerQueries } from '@/shared/customer/customerApi'
+import { useCustomerSuggest, type Suggestion } from './useCustomerSuggest'
 
 type Side = 'sender' | 'receiver'
 /** 입력 중인 칸 그대로 (전부 글자). 보낼 때 Party로 바꿈 */
@@ -211,6 +213,25 @@ export function useOrderForm(
 
   // 멱등키: 같은 본문을 다시 보내면(실패 후 재시도) 같은 키, 본문이 바뀌면 새 키 (명세서 1.2)
   const sent = useRef<{ body: string; key: string } | null>(null)
+  const suggest = useCustomerSuggest(parties.sender, parties.receiver, order?.customerSeq ?? null)
+  // 주문 추가 뒤 받는 분을 보내는 분 고객의 개인 주소록에 (11/09 사용자: 새 받는 분이면 주소록에 추가)
+  // 이미 있는 주소는 서버가 거절(DB 중복 제약) → 새 사람인지 따로 안 따짐. 실패해도 주문은 이미 됐으니 조용히 넘어감
+  const savePin = async () => {
+    const r = parties.receiver
+    if (!suggest.owner || !r.picked || !/^01\d{9}$/.test(r.phone)) return // 서버가 휴대전화 11자리만 받음
+    try {
+      await createPin(suggest.owner, {
+        name: r.name.trim(),
+        phoneNumber: r.phone,
+        roadAddress: r.roadAddress,
+        detailAddress: r.detailAddress.trim(),
+        ...r.picked,
+      })
+      void qc.invalidateQueries({ queryKey: customerQueries.all() })
+    } catch {
+      // shortcut: 중복 · 다른 실패를 구분 없이 무시 — 실패를 알려야 하면 오류 코드로 나눠 안내
+    }
+  }
   const mutation = useMutation({
     // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
     mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
@@ -252,6 +273,7 @@ export function useOrderForm(
       const json = JSON.stringify([body, shippingFee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
       await createOrder(body, shippingFee, sent.current.key)
+      await savePin()
       return 'ok'
     },
     onSuccess: (result) => {
@@ -300,6 +322,23 @@ export function useOrderForm(
       openSearch: () => setSearching(side),
       detailAddress: p.detailAddress,
       setDetailAddress: (v: string) => set({ detailAddress: v }),
+      // 추천(보내는 분 = 고객, 받는 분 = 주소록)을 칸 아래에. 고르면 한 번에 채움
+      suggest: suggest[side],
+      // 주소가 없는 고객이면 이름 · 번호만 (주소 칸은 그대로)
+      fill: (c: Suggestion) =>
+        set({
+          name: c.name,
+          phone: digits(c.phoneNumber, 11),
+          ...(c.address && {
+            roadAddress: c.address.roadAddress,
+            detailAddress: c.address.detailAddress ?? '',
+            picked: {
+              jibunAddress: c.address.jibunAddress,
+              dongName: c.address.dongName,
+              postalCode: c.address.postalCode,
+            },
+          }),
+        }),
     }
   }
 

@@ -2,9 +2,11 @@
 // 주소 칸을 누르면 칸 자리에 주소 검색이 펼쳐짐 (고르면 돌아옴). 규칙은 기존 useOrderForm 그대로
 import type { ReactNode } from 'react'
 import type { useOrderForm } from '@/features/order/hooks/useOrderForm'
+import { fmtPhone } from '@/shared/lib/format'
 import { PRICE_BANDS, priceBand } from '@/shared/order/labels'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
-import { AddressButton, Choice, Err, Label, TextInput } from '@/shared/ui/Field'
+import { AddressButton, Choice, Err, Label, SuggestInput, TextInput } from '@/shared/ui/Field'
+import type { Suggestion } from '@/features/order/hooks/useCustomerSuggest'
 
 type OrderForm = ReturnType<typeof useOrderForm>
 
@@ -120,6 +122,22 @@ export function OrderFields({
   )
 }
 
+/** 추천 한 줄 — 이름 · 번호 (별칭), 아래에 주소 */
+function SuggestRow(s: Suggestion) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="flex items-baseline gap-2">
+        <span className="font-medium">{s.name}</span>
+        <span className="text-ops-sub tabular-nums">{fmtPhone(s.phoneNumber)}</span>
+        {s.label && <span className="text-[12px] text-ops-faint">{s.label}</span>}
+      </span>
+      <span className="truncate text-[12px] text-ops-faint">
+        {s.address ? `${s.address.roadAddress} ${s.address.detailAddress ?? ''}` : '주소 없음'}
+      </span>
+    </span>
+  )
+}
+
 /** 이름 · 전화번호 · 주소(검색으로만) · 상세주소 */
 function PartyFields({
   title,
@@ -136,19 +154,27 @@ function PartyFields({
   const fields = (
     <Group title={title}>
       <div className="grid grid-cols-2 gap-2">
-        <TextInput
+        <SuggestInput
           label="이름"
           value={p.name}
           onChange={p.setName}
           error={p.nameError ?? (showEmpty && !p.name.trim() ? '이름을 입력해 주세요.' : undefined)}
+          items={p.suggest.byName}
+          itemKey={(s) => s.key}
+          renderItem={SuggestRow}
+          onPick={p.fill}
         />
-        <TextInput
+        <SuggestInput
           label="전화번호"
           value={p.phone}
           onChange={p.setPhone}
           inputMode="numeric"
           placeholder="숫자만"
           error={p.phoneError ?? (showEmpty && !p.phone ? '전화번호를 입력해 주세요.' : undefined)}
+          items={p.suggest.byPhone}
+          itemKey={(s) => s.key}
+          renderItem={SuggestRow}
+          onPick={p.fill}
         />
       </div>
       <AddressButton

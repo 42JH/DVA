@@ -13,11 +13,12 @@ import { fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
 import { usePageSize } from '@/shared/lib/paging'
 import { useDebounced } from '@/shared/lib/useDebounced'
+import type { Address, CustomerDto, PayMethod, PinDto } from '@/shared/customer/customerApi'
+import { customerSearch } from '@/shared/customer/customerSearch'
 
 // 고객 확인 POST /customers/context — 서버가 계산한 '쓸 수 있는 결제'와 소속 기업 · 부서 (develop-backend customers.repository)
 // billing 개인카드(항상) · credit 월정산(일반 고객은 고객 허용, 기업 고객은 기업 허용) · groupBilling 그룹카드(소속 부서 허용)
 // 전화번호만 보내면 통화 · 감사 기록을 남기지 않음 (백엔드 설명)
-type PayMethod = 'billing' | 'credit' | 'groupBilling'
 interface CallerContext {
   organization: { name: string } | null
   department: { name: string } | null
@@ -50,28 +51,6 @@ const contextOpts = (phone: string) =>
 
 const DEFAULTS = { q: '', c: '' } // c = 열어 둔 고객 번호
 
-interface Address {
-  roadAddress: string
-  jibunAddress: string
-  detailAddress?: string
-  dongName: string
-  postalCode: string
-}
-interface CustomerDto {
-  customerSeq: number
-  name: string
-  phoneNumber: string
-  address: Address | null
-  monthlyBillingEnabled: boolean
-  status: 'ACTIVE' | 'WITHDRAWN'
-  availablePaymentMethods: PayMethod[] // 조회 시점 결제 자격 (목록 전용, 11/08). 실제 결제 때 서버가 다시 확인
-}
-interface PinDto {
-  personalPinSeq: number
-  label: string | null
-  addressData: Address & { name: string; phoneNumber: string }
-}
-
 const addr = (a: Address | null) =>
   a ? [a.roadAddress, a.detailAddress].filter(Boolean).join(' ') : ''
 
@@ -80,13 +59,7 @@ export function useCustomers() {
   const [size, setSize] = usePageSize()
   const qc = useQueryClient()
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
-  const digits = t.replace(/\D/g, '')
-  // 숫자 11자리면 전화번호로(서버는 정확히 일치만), 아니면 이름 부분 검색
-  const query = /^01\d{9}$/.test(digits)
-    ? { phoneNumber: digits }
-    : t && !/^\d+$/.test(t)
-      ? { q: t }
-      : {}
+  const query = customerSearch(t) ?? {} // 숫자 11자리면 전화번호, 아니면 이름 부분 검색 (shared/customer)
   const list = useQuery({
     queryKey: ['screen', 'customers', query, size, page],
     queryFn: ({ signal }) =>
@@ -112,7 +85,7 @@ export function useCustomers() {
     q: params.q,
     setQ: (q: string) => set({ q, c: '' }),
     hint:
-      /^\d+$/.test(t) && !query.phoneNumber && t
+      /^\d+$/.test(t) && !('phoneNumber' in query)
         ? '전화번호는 11자리를 모두 입력해 주세요.' // 서버가 정확히 일치만 찾음
         : null,
     rows: shown.map((c, i) => ({
