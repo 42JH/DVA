@@ -27,6 +27,11 @@ class CiImageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             images.required(['unknown'], [], False)
 
+    def test_deployment_retry_builds_only_production_and_required_database_images(self):
+        wanted = images.required([], list(images.SERVICES), True)
+        self.assertEqual(set(wanted), {*images.SERVICES, 'liquibase'})
+        self.assertEqual(images.required([], [], False), [])
+
     def test_context_keeps_msa_events_and_original_backend(self):
         self.assertEqual(images.context('customer-checks')[:2], ['--target', 'checks'])
         self.assertEqual(images.context('customer')[-1], str(images.ROOT / 'msa'))

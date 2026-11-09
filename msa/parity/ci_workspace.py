@@ -29,6 +29,16 @@ def prepare():
     paths = ['msa', 'backend', *[p for p in ('.gitignore', '.gitattributes') if (ROOT / p).is_file()]]
     git(snapshot, 'restore', '--source', original, '--worktree', '--', *paths)
     git(snapshot, 'restore', '--source', reference, '--worktree', '--', 'backend')
+    fixture_patch = ROOT / 'msa/parity/reference-tests.patch'
+    if fixture_patch.exists():
+        content = fixture_patch.read_text()
+        paths = subprocess.check_output(['git', '-C', str(snapshot), 'apply', '--numstat', '-'],
+                                        input=content, text=True).splitlines()
+        allowed = {'backend/test/helpers/' + name + '.cjs' for name in ('application', 'orders', 'manual-orders')}
+        if {line.split('\t')[-1] for line in paths} != allowed:
+            raise RuntimeError('Reference fixture patch must only update the three business helpers')
+        subprocess.run(['git', '-C', str(snapshot), 'apply', '--check', '-'], input=content, text=True, check=True)
+        subprocess.run(['git', '-C', str(snapshot), 'apply', '-'], input=content, text=True, check=True)
     git(snapshot, 'add', '--', 'backend')
     tree = git(snapshot, 'write-tree')
     commit = git(snapshot, '-c', 'user.name=Dva CI verification', '-c', 'user.email=ci@dva.invalid',
@@ -42,7 +52,9 @@ def prepare():
     (snapshot / 'msa/liquibase/verification-logs').symlink_to(logs, target_is_directory=True)
     (snapshot / 'msa/liquibase/verification.json').symlink_to(ROOT / 'msa/liquibase/verification.json')
     report = {'sourceCommit': original, 'snapshotCommit': commit, 'referenceCommit': reference,
-              'referenceTree': git(snapshot, 'rev-parse', 'HEAD:backend'),
+              'referenceTree': git(snapshot, 'rev-parse', reference + ':backend'),
+              'snapshotBackendTree': git(snapshot, 'rev-parse', 'HEAD:backend'),
+              'testFixturePatch': git(ROOT, 'hash-object', str(fixture_patch)) if fixture_patch.exists() else None,
               'msaTree': git(snapshot, 'rev-parse', 'HEAD:msa')}
     (out / 'reference.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))

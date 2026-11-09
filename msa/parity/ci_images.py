@@ -30,8 +30,13 @@ def source_commit():
     reference = json.loads((ROOT / 'msa/parity/baseline.json').read_text())['commit']
     values = run('git', 'rev-parse', 'HEAD^', 'HEAD:msa', source + ':msa',
                  'HEAD:backend', reference + ':backend').splitlines()
-    if len(values) != 5 or values[0] != source or values[1] != values[2] or values[3] != values[4]:
+    if len(values) != 5 or values[0] != source or values[1] != values[2]:
         raise RuntimeError('CI snapshot does not match the original MSA and pinned backend')
+    if values[3] != values[4]:
+        fixture_patch = ROOT / 'msa/parity/reference-tests.patch'
+        actual = run('git', 'diff', '--binary', '--full-index', reference, 'HEAD', '--', 'backend')
+        if not fixture_patch.exists() or actual != fixture_patch.read_text().strip():
+            raise RuntimeError('CI snapshot changed more than the approved reference test fixtures')
     return source
 
 
@@ -85,7 +90,8 @@ def build():
     out = MANIFEST.parent
     suites = (out / 'parity-suites.txt').read_text().split()
     services = (out / 'services.txt').read_text().split()
-    database = (out / 'database-ci.txt').read_text().strip() == 'true'
+    database = (out / 'database-ci.txt').read_text().strip() == 'true' or (
+        os.environ.get('DELIVER_APPS') == 'true' and bool((out / 'databases.txt').read_text().strip()))
     document = {'commit': commit, 'release': release, 'referenceTree': run('git', 'rev-parse', 'HEAD:backend'), 'images': {}}
     out.mkdir(exist_ok=True)
     MANIFEST.write_text(json.dumps(document))

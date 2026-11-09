@@ -26,6 +26,10 @@ class CiWorkspaceTests(unittest.TestCase):
         for folder in ('backend/src', 'msa/parity', 'msa/liquibase'):
             (self.root / folder).mkdir(parents=True)
         (self.root / 'backend/src/api.ts').write_text('original 055 contract\n')
+        for name in ('application', 'orders', 'manual-orders'):
+            path = self.root / 'backend/test/helpers' / (name + '.cjs')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('module.exports = "original fixture";\n')
         (self.root / 'msa/.gitignore').write_text('.ci-source/\nliquibase/verification-logs/\n')
         (self.root / 'msa/liquibase/Dockerfile').write_text('FROM liquibase/liquibase:5.0.4\n')
         (self.root / '.gitignore').write_text('msa-release/\n')
@@ -70,6 +74,37 @@ class CiWorkspaceTests(unittest.TestCase):
         with patch.object(workspace, 'ROOT', self.root), self.assertRaises(ValueError):
             workspace.prepare()
         self.assertFalse((self.root / 'msa/.ci-source').exists())
+
+    def fixture_patch(self, paths):
+        for path in paths:
+            (self.root / path).write_text('module.exports = "session fixture";\n')
+        content = self.git('diff', '--binary', '--full-index', '--', 'backend') + '\n'
+        self.git('restore', '--', *paths)
+        (self.root / 'msa/parity/reference-tests.patch').write_text(content)
+        self.commit()
+        self.source = self.git('rev-parse', 'HEAD')
+
+    def test_test_fixture_cleanup_preserves_pinned_api_and_rejects_extra_changes(self):
+        paths = ['backend/test/helpers/' + name + '.cjs' for name in ('application', 'orders', 'manual-orders')]
+        self.fixture_patch(paths)
+        with patch.object(workspace, 'ROOT', self.root):
+            snapshot = workspace.prepare()
+        self.assertEqual((snapshot / 'backend/src/api.ts').read_text(), 'original 055 contract\n')
+        self.assertIn('later 056', (self.root / 'backend/src/api.ts').read_text())
+        self.assertIn('session fixture', (snapshot / paths[0]).read_text())
+        with patch.object(test_ci_images.images, 'ROOT', snapshot), patch.dict(os.environ, MSA_CI_ORIGINAL_COMMIT=self.source):
+            self.assertEqual(test_ci_images.images.source_commit(), self.source)
+            (snapshot / 'backend/src/api.ts').write_text('unexpected contract change\n')
+            workspace.git(snapshot, 'add', 'backend/src/api.ts')
+            workspace.git(snapshot, '-c', 'user.name=Test', '-c', 'user.email=test@invalid', 'commit', '--amend', '--no-edit')
+            with self.assertRaisesRegex(RuntimeError, 'approved reference test fixtures'):
+                test_ci_images.images.source_commit()
+
+    def test_fixture_patch_cannot_change_api_or_test_expectations(self):
+        self.fixture_patch(['backend/src/api.ts'])
+        with patch.object(workspace, 'ROOT', self.root), self.assertRaisesRegex(RuntimeError, 'three business helpers'):
+            workspace.prepare()
+        self.assertIn('later 056', (self.root / 'backend/src/api.ts').read_text())
 
 
 if __name__ == '__main__':

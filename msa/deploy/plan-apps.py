@@ -4,6 +4,10 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'parity'))
+import ci_verification
 
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -12,18 +16,16 @@ APP_COMMON = ["msa/deploy/package-app.sh", "msa/deploy/upload-app.sh",
               "msa/deploy/ssh-common.sh", "msa/deploy/known_hosts",
               ":(glob)msa/shared/events/*.cjs", ":(glob)msa/shared/events/*.d.cts", "msa/shared/events/package.json",
               "msa/.dockerignore", "msa/services/package.json", "msa/services/package-lock.json"]
-CI_COMMON = ["msa/Jenkinsfile", "msa/deploy/", "msa/.dockerignore", *APP_COMMON]
+CI_COMMON = ["msa/.dockerignore", *ci_verification.POLICY_PATHS,
+             ":(glob)msa/shared/events/*.cjs", ":(glob)msa/shared/events/*.d.cts",
+             "msa/shared/events/package.json", "msa/services/package.json", "msa/services/package-lock.json"]
 PARITY = Path(__file__).resolve().parents[1] / 'parity'
 SUITE_DEPENDENCIES = {
     'operations': {'operations'}, 'customer': {'operations', 'customer'},
     'consultation': {'operations', 'customer', 'consultation', 'order'},
     'order': {'operations', 'customer', 'consultation', 'delivery', 'order'},
 }
-DB_PATHS = ["msa/liquibase/", "msa/Jenkinsfile", "msa/deploy/package.sh", "msa/deploy/upload.sh",
-            "msa/deploy/remote.sh", "msa/deploy/run-remote.sh", "msa/deploy/ssh-common.sh",
-            "msa/deploy/known_hosts", "msa/deploy/has-msa-changes.sh", "msa/deploy/deliver-databases.sh", "msa/deploy/plan-apps.py",
-            "msa/deploy/prepare-cutover.py", "msa/deploy/tests/test_cutover.py", "msa/deploy/tests/test_cutover_delivery.py",
-            "msa/deploy/tests/test_changes.py", "msa/deploy/tests/test_deploy.py"]
+DB_PATHS = ci_verification.DB_PATHS
 
 
 def changed(base, paths):
@@ -148,13 +150,25 @@ def main():
                 db_services.append(service)
             if service not in services:
                 services.append(service)
-    verified = verification(base, services)
-    suites = parity_suites(base, verified)
-    db = bool(db_services) or changed(base, DB_PATHS)
+    # A pending rollout is not evidence that an already-passed regression must run again.
+    suites = []
+    origins = {scope: ci_verification.previous(scope, base, Path.cwd()) for scope in ci_verification.SCOPES}
+    for suite in SUITE_DEPENDENCIES:
+        baseline = origins[suite]['commit']
+        if suite in parity_suites(baseline, verification(baseline, [])):
+            suites.append(suite)
+    db = changed(origins['database']['commit'], DB_PATHS)
+    events = changed(origins['events']['commit'], ci_verification.EVENT_PATHS)
+    deployment_ci = changed(origins['deployment']['commit'], ci_verification.DEPLOY_PATHS)
     (out / "services.txt").write_text("".join(s + "\n" for s in services))
     (out / "databases.txt").write_text("".join(s + "\n" for s in db_services))
     (out / "database-ci.txt").write_text(str(db).lower())
     (out / 'parity-suites.txt').write_text(''.join(s + '\n' for s in suites))
+    (out / 'event-ci.txt').write_text(str(events).lower())
+    (out / 'deployment-ci.txt').write_text(str(deployment_ci).lower())
+    (out / 'verification-plan.json').write_text(json.dumps({
+        'origins': origins, 'database': db, 'events': events, 'deployment': deployment_ci,
+        'paritySuites': suites}, indent=2) + '\n')
     print(f"Database CI: {db}; apps: {services}; databases: {db_services}")
     print(f'Parity suites: {suites}')
 
