@@ -49,7 +49,7 @@ def main():
         run('docker', 'create', '--name', test_container, '--label', LABEL, '--network', RUN,
             '-e', 'NODE_ENV=test', '-e', 'PGHOST=events-db', '-e', 'PGUSER=event_test', '-e', 'PGPASSWORD=' + password,
             '-e', 'DVA_CHANGELOG_ROOT=/changelog', RUN, 'sh', '-c',
-            'node --test test/parcel-drafts.test.cjs && npm run test:integration && node --test /parity/inventory.test.cjs')
+            'node --test test/parcel-drafts.test.cjs && npm run test:integration && node --test /parity/inventory.test.cjs /parity/final-contract.test.cjs')
         resources.append(('container', test_container))
         run('docker', 'cp', str(ROOT / 'msa/liquibase/changelog') + '/.', test_container + ':/changelog')
         run('docker', 'cp', str(ROOT / 'msa/parity') + '/.', test_container + ':/parity')

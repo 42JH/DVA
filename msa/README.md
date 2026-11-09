@@ -1,3 +1,5 @@
+전체 동등성 최종 검증은 사용자 요청에 따라 최초 기준 `6a141a0`(052, HTTP 선언 95개)으로 고정한다. [검증 계획](../docs/msa-final-parity-plan.md)과 [실행 결과](../docs/msa-final-parity-results.md)를 따른다. 이후 API 변경 이식은 보류하며 현재 구현을 보존한 상태에서 최초 계약과의 차이를 기록한다. 기존 Jenkins의 055 inventory 검사는 !369의 고정 원본 CI 작업공간에서 유지한다. 아래 내용은 단계별 구현 당시 기록이다.
+
 055 배송 초안 변경이 포함된 `develop-backend` `9624b7789ee7876648b6c56b5e7a4a7a5a9ef378`을 기준으로 [초안 저장 구조·기존 API 호환](../docs/msa-draft-compatibility-plan.md)을 동기화한다. 원본 기준 목록은 공개 선언 104개·SQL 54개 파일(마지막 번호 055)·워커 6개다. order 004/consultation 008 이관, 기존 주문 목록·취소·통화 삭제, 초안의 최초 5년 보관과 배포 전환 검사를 연결한다. 신규 초안 CRUD/재개·관리자 보완·통화 주문 완료/확정 API와 결제/배송·남은 상담·전체 동등성은 후속이다.
 
 MR !360 병합 `cf85fe37ff9b4426f25859fa8e2a5f6a71031021`에서 [기업 청구 조회·월 전환](../docs/msa-billing-months-plan.md)을 연결한다. customer의 기존 `GET /api/companies/:id/billing`은 order의 청구 원장을 읽으며 공개 customer 선언은 24/24개다. order의 10초 워커는 한국 시간 누락 월을 10건씩 초기화하고 기업명 스냅샷·감사 확정/복구를 유지한다. 결제 완료 시 사용액 적립과 주문 생성/수정·접수/배송·남은 상담/보관·최종 전체 동등성은 후속이다.

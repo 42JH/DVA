@@ -2,7 +2,6 @@ const { readFileSync, readdirSync } = require('node:fs');
 const { join, relative } = require('node:path');
 const { createHash } = require('node:crypto');
 
-const root = join(__dirname, '../..');
 const owners = {
   'ai-settings': 'operations', audit: 'operations', auth: 'operations', faqs: 'operations',
   health: 'operations', observability: 'operations', customers: 'customer', members: 'customer',
@@ -18,7 +17,7 @@ function files(directory) {
   }).sort();
 }
 
-function inventory() {
+function inventory(root = join(__dirname, '../..')) {
   const source = files(join(root, 'backend/src'));
   const routes = source.filter(path => path.endsWith('.controller.ts')).flatMap(path => {
     const text = readFileSync(path, 'utf8');
@@ -44,4 +43,4 @@ function inventory() {
 }
 
 module.exports = { inventory };
-if (require.main === module) process.stdout.write(JSON.stringify(inventory(), null, 2) + '\n');
+if (require.main === module) process.stdout.write(JSON.stringify(inventory(process.argv[2]), null, 2) + '\n');
