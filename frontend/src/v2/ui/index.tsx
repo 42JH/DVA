@@ -70,10 +70,11 @@ export function SortTh({
         type="button"
         onClick={onToggle}
         title={asc ? '오래된 순 (누르면 최신순)' : '최신순 (누르면 오래된 순)'}
-        className="inline-flex items-center gap-1 rounded outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route"
+        // 글자는 다른 칸 머리처럼 가운데, 화살표는 칸 오른쪽 끝 (11/09 사용자)
+        className="relative flex h-9 w-full items-center justify-center outline-none hover:text-ops-route focus-visible:ring-2 focus-visible:ring-ops-route focus-visible:ring-inset"
       >
         {label}
-        <Icon name="chevron" className={`size-3.5 ${asc ? 'rotate-180' : ''}`} />
+        <Icon name="chevron" className={`absolute right-3 size-3.5 ${asc ? 'rotate-180' : ''}`} />
       </button>
     </th>
   )
