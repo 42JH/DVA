@@ -22,16 +22,25 @@ export const STAGE_LABEL: Record<Stage, string> = {
 
 /** 불편 유형 (명세 §4) → 이름 · 도넛 조각(stroke) · 범례 네모(bg). 클래스 이름은 글자 그대로 있어야 Tailwind가 만듦 (조립 금지) */
 export const COMPLAINT: Record<ComplaintType, { label: string; stroke: string; bg: string }> = {
+  // 11/09 v2 색으로: 파랑 계열 짙은 → 옅은, 마지막은 회색
   INFORMATION_RECOGNITION_ERROR: {
     label: '정보 인식 오류',
-    stroke: 'stroke-brand',
-    bg: 'bg-brand',
+    stroke: 'stroke-[#1f6feb]',
+    bg: 'bg-[#1f6feb]',
   },
-  INTENT_RECOGNITION_ERROR: { label: '용건 인식 오류', stroke: 'stroke-chart-2', bg: 'bg-chart-2' },
-  UNSUPPORTED_ANSWER: { label: '근거 없는 답변', stroke: 'stroke-chart-3', bg: 'bg-chart-3' },
-  SLOW_RESPONSE: { label: '응답 지연', stroke: 'stroke-chart-4', bg: 'bg-chart-4' },
-  INTERRUPTION: { label: '말 끊김', stroke: 'stroke-chart-5', bg: 'bg-chart-5' },
-  DISSATISFACTION_EXPRESSION: { label: '불만 표현', stroke: 'stroke-chart-6', bg: 'bg-chart-6' },
+  INTENT_RECOGNITION_ERROR: {
+    label: '용건 인식 오류',
+    stroke: 'stroke-[#4b8cf0]',
+    bg: 'bg-[#4b8cf0]',
+  },
+  UNSUPPORTED_ANSWER: { label: '근거 없는 답변', stroke: 'stroke-[#78a9f4]', bg: 'bg-[#78a9f4]' },
+  SLOW_RESPONSE: { label: '응답 지연', stroke: 'stroke-[#a5c6f8]', bg: 'bg-[#a5c6f8]' },
+  INTERRUPTION: { label: '말 끊김', stroke: 'stroke-[#cfe0fb]', bg: 'bg-[#cfe0fb]' },
+  DISSATISFACTION_EXPRESSION: {
+    label: '불만 표현',
+    stroke: 'stroke-ops-faint',
+    bg: 'bg-ops-faint',
+  },
 }
 
 /** 응답 대기 처리 유형 (명세 §5) */
