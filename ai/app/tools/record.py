@@ -15,6 +15,7 @@ from functools import lru_cache
 from typing import Literal
 from pydantic import Field, create_model, model_validator
 
+from app.address.parse import detail_text
 from app.domain.address_book import save_offer
 from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
@@ -124,7 +125,9 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
     values, needs = {}, []
     for name in TEXT:
         if name in given:
-            values[name] = clean_name(given[name]) if name.endswith("_name") else given[name].strip()
+            values[name] = (clean_name(given[name]) if name.endswith("_name")
+                            else detail_text(given[name]) if name.endswith("_detail")  # 상세주소 수사 → 숫자(서버가 한다)
+                            else given[name].strip())
     if "receiver_phone" in given:
         phone = normalize_phone(given["receiver_phone"], policy.phone)
         if phone:
@@ -283,6 +286,11 @@ def invalid_fields(needs: list[dict]) -> list[str]:
     return list(dict.fromkeys(n["field"] for n in needs if n["reason"] not in keep))
 
 
+def _road_of(address) -> str:
+    """보정된 도로명주소에서 건물번호를 뺀 부분("서울특별시 강남구 테헤란로 212" → "… 테헤란로"). 비교용."""
+    return (address or "").rsplit(" ", 1)[0]
+
+
 async def _resolve(ctx: ToolContext, heard: str):
     if ctx.address is None:
         return None
@@ -297,25 +305,29 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
     s = ctx.state
     role = addr.removesuffix("_address")
     detail = f"{role}_address_detail"
+    # 들은 문장에서 서버가 뗀 상세주소("… 오십삼백십이동 사백삼호" → 312동 403호)는 기본주소를 못 찾아도 기록해 둔다 —
+    # 기본주소와 독립된 값이라 다시 묻지 않는다(결정 1, 2026-11-09). 모델이 따로 넘긴 상세보다 우선한다
+    if r is not None and r.detail:
+        if s.record(detail, r.detail, Source.RESOLVER) and detail not in facts["recorded"]:
+            facts["recorded"].append(detail)
     if r is not None and r.status in ("not_found", "region_needed"):
         need = {"field": addr, "reason": "ADDRESS_NOT_FOUND"}
         if r.status == "region_needed":  # 같은 주소가 여러 지역에 있음: Live가 지역을 묻고, 모델이 heard와 합쳐 다시 넘긴다
             need = {"field": addr, "reason": "ADDRESS_REGION_NEEDED", "regions": list(r.alternatives),
                     "heard": given[addr].strip()}
         needs.append(need)
-        if detail in facts["recorded"] and not s.field_of(addr).valid:
-            s.clear(detail)  # 못 찾은 주소에 붙은 상세주소도 믿을 수 없다
-            facts["recorded"].remove(detail)
         return
     value = r.address if r else given[addr].strip()
     source = Source.RESOLVER if r and r.status in ("confirmed", "ambiguous") and value != given[addr].strip() \
         else Source.CUSTOMER
-    had = s.field_of(addr).valid
+    before = s.field_of(addr)
+    had, was = before.valid, before.value
     if s.record(addr, value, source):
         facts["recorded"].append(addr)
         if had:
             facts["changed"].append(addr)
-            if detail not in given:  # 주소가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않다
+            # 도로가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않다. 같은 도로의 번호 정정은 유지(결정 2)
+            if detail not in given and not (r and r.detail) and _road_of(was) != _road_of(value):
                 s.clear(detail)
                 facts["cleared"].append(detail)
     setattr(s.current, f"{role}_geo", r.geo if r else None)

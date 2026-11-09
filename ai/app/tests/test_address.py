@@ -252,12 +252,68 @@ def test_rewrites_each_fix_only_what_it_targets():
     assert ga_digits("서울 중구 태평로 일가 삼십일") == ["서울 중구 태평로1가 삼십일"]
 
 
+# --- 기본주소 | 상세주소 가르기(서버가 한다, 2026-11-09) ---
+
+def test_valid_numeral_rejects_unreadable_runs():
+    from app.address.parse import valid_numeral
+    assert all(map(valid_numeral, ["삼백십이", "백이", "삼공일", "오십", "212", "일", "천오백이"]))
+    assert not any(map(valid_numeral, ["십삼백십이", "일오백이", "오십삼백", "이백십일이", "012", "", "공십"]))
+
+
+def test_split_detail_candidates_and_order():
+    from app.address.parse import split_detail
+    sure = lambda text, areas=None: [c for c in split_detail(text, areas) if c[2]]
+    # 띄어쓰기 자리가 확실한 경계: 확실한 후보 하나(붙여 읽은 자르기는 그 뒤에), 말끝·쉼표·동사 꼬리는 뗀다
+    assert sure("경북 구미시 인동 구길 칠 다시 삼, 이백삼호요") == [("경북 구미시 인동 구길 칠 다시 삼", "이백삼호", True)]
+    assert split_detail("서울 종로구 성균관로 이십오 다시 이 경영관으로 할게요") == [("서울 종로구 성균관로 이십오 다시 이", "경영관", True)]
+    assert split_detail("구미시 인의동 오륙오 다시 삼 아슬란 삼백오호입니다") == [("구미시 인의동 오륙오 다시 삼", "아슬란 삼백오호", True)]
+    assert split_detail("서울 강남구 테헤란로 212 롯데월드타워") == [("서울 강남구 테헤란로 212", "롯데월드타워", True)]  # 번호 뒤 이름
+    assert split_detail("부산 서구 구덕로 삼백이십일번길 오층이야") == [("부산 서구 구덕로 삼백이십일번길", "오층", True)]  # 번호 없이 가지만
+    # 수사가 붙은 경계: 띄어쓰기 자리(확실) 다음에 읽을 수 있는 자르기만, 짧은 번호부터
+    cands = split_detail("서울시 양천구 신정이펜일로 오십삼백십이동 사백삼호")
+    assert [(b.split()[-1], d, s) for b, d, s in cands] == [  # "오십삼백|십이"는 못 읽는 수사라 후보가 아니다
+        ("오십", "삼백십이동 사백삼호", False), ("오십삼", "백십이동 사백삼호", False)]
+    assert split_detail("구미 인동구길 이십이 다시 일오백이호")[0] == ("구미 인동구길 이십이 다시 일", "오백이호", False)
+    assert split_detail("서울시 양천구 신정이펜일로 오십 삼백십이동")[0] == ("서울시 양천구 신정이펜일로 오십", "삼백십이동", True)
+    assert split_detail("구미 인동 구길 이십이 다시 일 오백 이 호")[0] == ("구미 인동 구길 이십이 다시 일", "오백이호", True)
+    assert split_detail("구미 인동 9길 22-1오백이호")[0] == ("구미 인동 9길 22 - 1", "오백이호", True)  # 숫자+한글 혼합
+    # 상세가 없으면 빈 목록(지금 경로 그대로): 법정동·번지·길 번호는 상세가 아니다
+    assert split_detail("전주시 금암이동 백사십구 다시 십일 번지요") == []
+    assert split_detail("서울 강남구 테헤란로 이백십이요") == [] and split_detail("안산시 상록구 사이동 1234", {"사이동"}.__contains__) == []
+    assert split_detail("서울시 양천구 신정이펜일로 오십 이동 사백삼호", {"이동"}.__contains__)[0][1] == "이동 사백삼호"  # 법정동과 같아도 호가 이어지면 상세
+
+
+def test_detail_text_converts_numerals_only():
+    from app.address.parse import detail_text
+    assert detail_text("삼백십이동 사백삼호요") == "312동 403호" and detail_text("오백 이 호") == "502호"
+    assert detail_text("일동일호") == "1동 1호" and detail_text("지하구십구층") == "지하 99층"
+    assert detail_text("소담미인 오백일호") == "소담미인 501호" and detail_text("베르디움 가동 사백일 호") == "베르디움 가동 401호"
+    assert detail_text("미소지음 503호") == "미소지음 503호" and detail_text("오션 드파이") == "오션 드파이" and detail_text("") == ""
+
+
+def test_resolve_detail_lets_the_db_pick_the_cut(db):
+    from app.address.matcher import resolve_detail
+    r, base, detail = resolve_detail(db, "경북 구미시 인동구길 칠다시삼 이백삼홉니다")  # 붙은 다시·"삼홉니다"
+    assert (r.address, base, detail) == ("경상북도 구미시 인동9길 7-3", "경북 구미시 인동구길 칠 다시 삼", "이백삼호")
+    r, _, detail = resolve_detail(db, "서울 강남구 테헤란로 이백십이백일동 삼호")  # 212|101동만 읽히고 실존
+    assert (r.status, r.address, detail) == ("confirmed", "서울특별시 강남구 테헤란로 212", "백일동 삼호")
+    r, _, detail = resolve_detail(db, "서울 강남구 테헤란로 이일이 멀티캠퍼스 십팔층입니다")
+    assert (r.address, detail) == ("서울특별시 강남구 테헤란로 212", "멀티캠퍼스 십팔층")
+    r, _, detail = resolve_detail(db, "서울 강남구 테헤란로 이일이백삼호")  # 21|이백삼 · 212|백삼 둘 다 실존 → 확정하지 않음
+    assert r.status == "ambiguous" and set(r.candidates) == {"서울특별시 강남구 테헤란로 21", "서울특별시 강남구 테헤란로 212"}
+    r, base, detail = resolve_detail(db, "서울 강남구 테헤란로 212요")  # 상세 없음: resolve와 같다
+    assert (r.address, base, detail) == ("서울특별시 강남구 테헤란로 212", "서울 강남구 테헤란로 212요", None)
+    r, _, detail = resolve_detail(db, "서울 강남구 없는로 12 삼층")  # 못 찾아도 상세는 돌려준다(기록은 유지)
+    assert r.status == "not_found" and detail == "삼층"
+
+
 def test_resolve_retries_only_when_not_found_and_readings_decide(db):
     from app.address.matcher import resolve
     r = resolve(db, "서울 강남구 테헤란로 이백십이요")  # "이백십"(210 없음)·"이백십이"(212) 중 확정된 쪽
     assert (r.status, r.address) == ("confirmed", "서울특별시 강남구 테헤란로 212")
-    r = resolve(db, "서울 강남구 테헤란로 이백십일이요")  # 211·212 둘 다 실제 주소 → 확정하지 않는다
-    assert r.status == "ambiguous" and r.candidates == ("서울특별시 강남구 테헤란로 211", "서울특별시 강남구 테헤란로 212")
+    r = resolve(db, "서울 강남구 테헤란로 이일이요")  # "이일"(21)·"이일이"(212) 둘 다 실제 주소 → 확정하지 않는다
+    assert r.status == "ambiguous" and r.candidates == ("서울특별시 강남구 테헤란로 21", "서울특별시 강남구 테헤란로 212")
+    assert resolve(db, "서울 강남구 테헤란로 이백십일이요").address == "서울특별시 강남구 테헤란로 211"  # "이백십일이"는 못 읽는 수사
     assert resolve(db, "경북 구미시 인동 구길 칠다시삼").address == "경상북도 구미시 인동9길 7-3"
     assert resolve(db, "경북 구미 인동구길 칠 다시 삼이요").address == "경상북도 구미시 인동9길 7-3"  # 말끝 + 붙인 길
     assert resolve(db, "서울 강남구 테헤란로 212 무슨타워").address == "서울특별시 강남구 테헤란로 212"
@@ -452,6 +508,15 @@ def test_kakao_sido_abbreviation():
     assert [kakao_sido(s) for s in ("서울특별시", "부산광역시", "경기도", "경상북도", "충청남도")] == ["서울", "부산", "경기", "경북", "충남"]
     assert [kakao_sido(s) for s in ("세종특별자치시", "제주특별자치도", "강원특별자치도", "전남광주통합특별시")] == \
         ["세종특별자치시", "제주특별자치도", "강원특별자치도", "전남광주통합특별시"]
+
+
+def test_service_splits_detail_and_keeps_it_when_base_fails(db_path, fake_kakao):
+    svc = AddressService(open_db(db_path))
+    r = run(svc.resolve("경북 구미시 인동구길 칠다시삼 이백삼홉니다"))
+    assert (r.status, r.address, r.detail) == ("confirmed", "경상북도 구미시 인동9길 7-3", "203호")
+    r = run(svc.resolve("서울 강남구 없는로 12, 삼층 교무실"))
+    assert (r.status, r.address, r.detail) == ("not_found", None, "3층 교무실")  # 상세는 돌려준다(기록 유지)
+    assert run(svc.resolve("서울 강남구 테헤란로 212")).detail is None
 
 
 def test_service_uses_local_geo_and_falls_back_to_kakao(db_path, monkeypatch):
