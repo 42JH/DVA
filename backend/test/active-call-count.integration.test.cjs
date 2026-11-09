@@ -4,7 +4,12 @@ const assert = require('node:assert/strict');
 const { randomBytes, randomInt, randomUUID } = require('node:crypto');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
-const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
@@ -16,7 +21,7 @@ process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
-const { hashPassword } = require('../dist/auth/password');
+
 const { ConsultationsRepository } = require('../dist/consultations/consultations.repository');
 const { ActiveCallCountService } = require('../dist/consultations/active-call-count.service');
 const { PbxWebhookRepository } = require('../dist/webhooks/pbx/pbx-webhook.repository');
@@ -27,7 +32,7 @@ const apps = [],
 const origin = 'http://localhost:5173';
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const logs = [];
-let operator, passwordHash, cookie;
+let operator, cookie;
 const identity = () => ({
   phoneNumber: '010' + randomInt(10000000, 100000000),
   call: {
@@ -51,20 +56,11 @@ async function json(path, options = {}, instance = 0) {
     body: text ? JSON.parse(text) : undefined,
   };
 }
-async function login(user = operator) {
-  const result = await json('/api/auth/login', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId: user.loginId, password: 'active-count-test-password' }),
-  });
-  assert.equal(result.status, 200);
-  return result.headers.get('set-cookie').split(';')[0];
-}
 async function account(role = 'OPERATOR') {
   const loginId = 'ac' + randomUUID().replaceAll('-', '').slice(0, 16);
   const result = await pool.query(
     "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'활성 통화 테스트',$2,$3,'ACTIVE') RETURNING admin_user_seq",
-    [loginId, passwordHash, role],
+    [loginId, 'not-for-login', role],
   );
   return { id: result.rows[0].admin_user_seq, loginId };
 }
@@ -195,7 +191,6 @@ async function stream(instance = 1) {
 }
 before(async () => {
   await migrate(pool);
-  passwordHash = await hashPassword('active-count-test-password');
   for (let index = 0; index < 2; index++) {
     const app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
     urls.push(await app.getUrl());
@@ -207,7 +202,7 @@ beforeEach(async () => {
   await pool.query('UPDATE call_sessions SET registered_at=NULL WHERE registered_at IS NOT NULL');
   await pool.query('DELETE FROM pbx_webhooks.call_ended_events');
   await pool.query("UPDATE admin_users SET status='ACTIVE' WHERE admin_user_seq=$1", [operator.id]);
-  cookie = await login();
+  cookie = await createTestSession(pool, operator.id);
 });
 afterEach(async () => {
   await Promise.all(connections.splice(0).map((connection) => connection.close()));
@@ -419,7 +414,7 @@ test('a final NO_ORDER AI result after PBX completion preserves the closed call 
 
 test('all ACTIVE administrator roles can read; missing, expired, inactive and disallowed-origin requests are rejected', async () => {
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
-    const session = await login(await account(role));
+    const session = await createTestSession(pool, (await account(role)).id);
     assert.equal(await count(0, session), 0);
   }
   for (const path of ['/api/calls/active-count', '/api/calls/active-count/stream']) {

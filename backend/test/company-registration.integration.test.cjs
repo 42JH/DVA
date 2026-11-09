@@ -3,14 +3,14 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { hashPassword } = require('../dist/auth/password');
+
 const { DatabaseService } = require('../dist/database/database.service');
 const { MembersRepository } = require('../dist/members/members.repository');
 const pool = createTestPool();
@@ -37,23 +37,15 @@ const address = (suffix) => ({
 let app, base;
 before(async () => {
   await migrate(pool);
-  const password = 'registration-test-only-password';
-  const hash = await hashPassword(password);
   app = await startTestApp(apps);
   base = await app.getUrl();
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const loginId = 'reg' + randomUUID().replaceAll('-', '').slice(0, 16);
-    await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'통합 등록 검증',$2,$3,'ACTIVE')",
-      [loginId, hash, role],
+    const { rows } = await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'통합 등록 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
+      [loginId, 'not-for-login', role],
     );
-    const response = await fetch(base + '/api/auth/login', {
-      method: 'POST',
-      headers: { Origin: origin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginId, password }),
-    });
-    assert.equal(response.status, 200);
-    cookies.push(response.headers.get('set-cookie').split(';')[0]);
+    cookies.push(await createTestSession(pool, rows[0].admin_user_seq));
   }
 });
 after(async () => {

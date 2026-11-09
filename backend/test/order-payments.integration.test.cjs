@@ -5,11 +5,11 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
-const { hashPassword } = require('../dist/auth/password');
+
 const { PaymentsService } = require('../dist/payments/payments.service');
 const { PaymentsRepository } = require('../dist/payments/payments.repository');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
@@ -133,9 +133,9 @@ before(async () => {
     DVER_API_URL: external + '/parcel',
     DVER_API_KEY: 'dver-fixture',
   });
-  await pool.query(
-    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash",
-    [await hashPassword('payment-fixture-only')],
+  const admin = await pool.query(
+    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
+    ['not-for-login'],
   );
   customerId = (
     await pool.query(
@@ -150,13 +150,7 @@ before(async () => {
   worker = app.get(PaymentsWorker);
   payments = app.get(PaymentsService);
   client = app.get(PaymentClient);
-  const login = await fetch(base + '/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: adminOrigin },
-    body: JSON.stringify({ loginId: 'payment021', password: 'payment-fixture-only' }),
-  });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get('set-cookie').split(';')[0];
+  cookie = await createTestSession(pool, admin.rows[0].admin_user_seq);
 });
 after(async () => {
   for (const application of apps) await application.close();

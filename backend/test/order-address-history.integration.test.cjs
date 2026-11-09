@@ -3,18 +3,16 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { OrdersRepository } = require('../dist/orders/orders.repository');
-const { hashPassword } = require('../dist/auth/password');
+
 const pool = createTestPool();
 const apps = [];
-const origin = 'http://localhost:5173',
-  password = 'history-test-only-password';
 const addressFields = [
   'name',
   'phoneNumber',
@@ -43,7 +41,7 @@ const address = (prefix = '도착', extra = {}) => ({
   postalCode: '01234',
   ...extra,
 });
-let app, base, adminHeaders, passwordHash;
+let app, base, adminHeaders;
 const logs = [];
 async function request(customerId, query = { direction: 'DESTINATION' }, headers = adminHeaders) {
   const search = typeof query === 'string' ? query : new URLSearchParams(query).toString();
@@ -69,25 +67,18 @@ async function error(response, status, code) {
 }
 async function account(role = 'OPERATOR') {
   const loginId = 'history' + randomUUID().replaceAll('-', '').slice(0, 13);
-  await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO admin_users(login_id,name,password_hash,role,status)
-    VALUES($1,'이력 관리자',$2,$3,'ACTIVE')`,
-    [loginId, passwordHash, role],
+    VALUES($1,'이력 관리자',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
+    [loginId, 'not-for-login', role],
   );
-  const response = await fetch(base + '/api/auth/login', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId, password }),
-  });
-  assert.equal(response.status, 200, await response.clone().text());
-  return { Cookie: response.headers.get('set-cookie').split(';')[0] };
+  return { Cookie: await createTestSession(pool, rows[0].admin_user_seq) };
 }
 before(async () => {
   // check:docker의 DB·주문 선행 검증이 배포 마이그레이션을 적용한다.
   assert.ok((await pool.query("SELECT to_regclass('public.orders') AS name")).rows[0].name);
   app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
-  passwordHash = await hashPassword(password);
   adminHeaders = await account();
 });
 after(async () => {

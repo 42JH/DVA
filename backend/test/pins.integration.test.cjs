@@ -4,7 +4,12 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -12,12 +17,11 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { AuditService } = require('../dist/audit/audit.service');
-const { hashPassword } = require('../dist/auth/password');
+
 const pool = createTestPool();
 const apps = [];
 const origin = 'http://localhost:5173';
-const password = 'pin-test-only-password';
-let app, base, adminHeaders, passwordHash;
+let app, base, adminHeaders;
 const logs = [];
 const address = (overrides = {}) => ({
   name: '수령인',
@@ -52,14 +56,12 @@ async function error(response, status, code) {
 }
 async function admin(role = 'OPERATOR') {
   const loginId = 'pin' + randomUUID().replaceAll('-', '').slice(0, 17);
-  await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO admin_users(login_id,name,password_hash,role,status)
-    VALUES($1,'주소록 관리자',$2,$3,'ACTIVE')`,
-    [loginId, passwordHash, role],
+    VALUES($1,'주소록 관리자',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
+    [loginId, 'not-for-login', role],
   );
-  const response = await request('POST', '/auth/login', { loginId, password }, { Origin: origin });
-  assert.equal(response.status, 200);
-  return { Origin: origin, Cookie: response.headers.get('set-cookie').split(';')[0] };
+  return { Origin: origin, Cookie: await createTestSession(pool, rows[0].admin_user_seq) };
 }
 before(async () => {
   // check:docker의 선행 DB/주문 테스트가 배포 마이그레이션을 적용한다.
@@ -72,7 +74,6 @@ before(async () => {
   );
   app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
-  passwordHash = await hashPassword(password);
   adminHeaders = await admin();
 });
 after(async () => {

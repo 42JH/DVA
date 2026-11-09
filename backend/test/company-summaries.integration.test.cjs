@@ -2,7 +2,7 @@ require('reflect-metadata');
 const { before, after, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { migrate } = require('./helpers/migrations.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
@@ -21,22 +21,15 @@ describe('administrator company and department summaries', () => {
   before(async () => {
     process.env.SWAGGER_ENABLED = 'false';
     process.env.CORS_ORIGINS = 'http://localhost:5173';
-    const { hashPassword } = require('../dist/auth/password');
+
     const loginId = 'summary' + randomUUID().replaceAll('-', '').slice(0, 10);
-    const password = 'summary-test-only-password';
-    await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'요약 검증',$2,'SYSTEM_ADMIN','ACTIVE')",
-      [loginId, await hashPassword(password)],
+    const { rows } = await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'요약 검증',$2,'SYSTEM_ADMIN','ACTIVE') RETURNING admin_user_seq",
+      [loginId, 'not-for-login'],
     );
     app = await startTestApp(apps);
     base = await app.getUrl();
-    const login = await fetch(base + '/api/auth/login', {
-      method: 'POST',
-      headers: { Origin: 'http://localhost:5173', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginId, password }),
-    });
-    assert.equal(login.status, 200);
-    cookie = login.headers.get('set-cookie').split(';')[0];
+    cookie = await createTestSession(pool, rows[0].admin_user_seq);
   });
   async function request(path, method = 'GET', body, authenticated = true) {
     const response = await fetch(base + '/api' + path, {

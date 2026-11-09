@@ -3,17 +3,16 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { MembersRepository } = require('../dist/members/members.repository');
-const { hashPassword } = require('../dist/auth/password');
+
 const pool = createTestPool();
 const apps = [];
-const password = 'member-test-only-password';
 const origin = 'http://localhost:5173';
 const departments = new Map();
 const employees = (companyId, fixture) =>
@@ -22,25 +21,21 @@ const employees = (companyId, fixture) =>
     return { employeeNo, name, phoneNumber, departmentSeq: departments.get(companyId) };
   });
 const phone = () => '010' + String(randomInt(10000000, 100000000));
-let app, base, baseB, cookie, repository, passwordHash;
+let app, base, baseB, cookie, repository;
 const start = () => startTestApp(apps);
 async function account(role = 'OPERATOR') {
   const loginId = 'mem' + randomUUID().replaceAll('-', '').slice(0, 16);
   const { rows } = await pool.query(
     "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'구성원 테스트',$2,$3,'ACTIVE') RETURNING admin_user_seq",
-    [loginId, passwordHash, role],
+    [loginId, 'not-for-login', role],
   );
-  const response = await fetch(base + '/api/auth/login', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId, password }),
-  });
-  assert.equal(response.status, 200);
-  return { id: rows[0].admin_user_seq, cookie: response.headers.get('set-cookie').split(';')[0] };
+  return {
+    id: rows[0].admin_user_seq,
+    cookie: await createTestSession(pool, rows[0].admin_user_seq),
+  };
 }
 before(async () => {
   await migrate(pool);
-  passwordHash = await hashPassword(password);
   app = await start();
   base = await app.getUrl();
   baseB = await (await start()).getUrl();

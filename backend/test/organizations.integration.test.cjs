@@ -4,51 +4,39 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { hashPassword } = require('../dist/auth/password');
 
 const pool = createTestPool();
-let app, appB, base, baseB, adminA, hash, sessionA;
+let app, appB, base, baseB, adminA, sessionA;
 const apps = [];
 const cookies = new Map();
-const password = 'company-test-only-password';
 const mutationHeaders = { Origin: 'http://localhost:5173' };
 
 const start = () => startTestApp(apps);
-async function login(loginId, host = base) {
-  const response = await fetch(host + '/api/auth/login', {
-    method: 'POST',
-    headers: { ...mutationHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId, password }),
-  });
-  assert.equal(response.status, 200);
-  return response.headers.get('set-cookie').split(';')[0];
-}
 async function account(loginId, role = 'OPERATOR', status = 'ACTIVE') {
   const result = await pool.query(
     'INSERT INTO admin_users (login_id,name,password_hash,role,status) VALUES ($1,$2,$3,$4,$5) RETURNING admin_user_seq',
-    [loginId, '기업 테스트', hash, role, status],
+    [loginId, '기업 테스트', 'not-for-login', role, status],
   );
   return result.rows[0].admin_user_seq;
 }
 before(async () => {
   await migrate(pool);
-  hash = await hashPassword(password);
   adminA = await account('companyTestA');
-  await account('companyTestB', 'SYSTEM_ADMIN');
+  const adminB = await account('companyTestB', 'SYSTEM_ADMIN');
   app = await start();
   appB = await start();
   base = await app.getUrl();
   baseB = await appB.getUrl();
-  sessionA = await login('companyTestA');
+  sessionA = await createTestSession(pool, adminA);
   cookies.set(base, sessionA);
-  cookies.set(baseB, await login('companyTestB', baseB));
+  cookies.set(baseB, await createTestSession(pool, adminB));
 });
 after(async () => {
   for (const application of apps) await application.close();
@@ -102,8 +90,8 @@ test('every company operation rejects missing, forged and malformed sessions bef
 });
 
 test('all active administrator roles can register, list, read and update companies', async () => {
-  await account('companySupervisor', 'SUPERVISOR');
-  for (const cookie of [sessionA, cookies.get(baseB), await login('companySupervisor')]) {
+  const supervisor = await account('companySupervisor', 'SUPERVISOR');
+  for (const cookie of [sessionA, cookies.get(baseB), await createTestSession(pool, supervisor)]) {
     const name = '역할 검증 ' + randomUUID();
     const created = await request('', {
       method: 'POST',

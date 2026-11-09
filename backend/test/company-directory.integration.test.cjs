@@ -3,19 +3,23 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 const { OrganizationsRepository } = require('../dist/organizations/organizations.repository');
-const { hashPassword } = require('../dist/auth/password');
+
 const pool = createTestPool();
 const apps = [];
-const origin = 'http://localhost:5173',
-  password = 'directory-test-only-password';
-let app, base, adminHeaders, passwordHash;
+const origin = 'http://localhost:5173';
+let app, base, adminHeaders;
 const logs = [];
 const marker = () => 'dir' + randomUUID().replaceAll('-', '');
 const address = (extra = {}) => ({
@@ -52,19 +56,13 @@ async function error(response, status, code) {
 }
 async function account(role = 'OPERATOR') {
   const loginId = 'dir' + randomUUID().replaceAll('-', '').slice(0, 17);
-  await pool.query(
+  const { rows } = await pool.query(
     `INSERT INTO admin_users(login_id,name,password_hash,role,status)
-    VALUES($1,'디렉터리 관리자',$2,$3,'ACTIVE')`,
-    [loginId, passwordHash, role],
+    VALUES($1,'디렉터리 관리자',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
+    [loginId, 'not-for-login', role],
   );
-  const response = await fetch(base + '/api/auth/login', {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId, password }),
-  });
-  assert.equal(response.status, 200, await response.clone().text());
   return {
-    Cookie: response.headers.get('set-cookie').split(';')[0],
+    Cookie: await createTestSession(pool, rows[0].admin_user_seq),
     Origin: origin,
     'Content-Type': 'application/json',
   };
@@ -77,7 +75,6 @@ before(async () => {
   );
   app = await startTestApp(apps, { log: (entry) => logs.push(entry) });
   base = await app.getUrl();
-  passwordHash = await hashPassword(password);
   adminHeaders = await account();
 });
 after(async () => {
