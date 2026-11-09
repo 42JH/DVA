@@ -154,6 +154,39 @@ python msa/.ci-source/msa/shared/events/verify.py
 
 원본 자체의 보관 경합 테스트가 두 번째 실행에서 1회 실패했다. `data-retention.integration.test.cjs:171`에서 동시 정리 후 통화 행이 남아 `true !== false`가 발생했다. 첫 번째·세 번째 실행에서는 원본 전체 735개가 통과했다. 고정 원본이나 테스트 기대값은 수정하지 않았으며, 불안정성의 세부 원인은 추가 재현 근거가 필요하다.
 
+## 2026-11-09 최신 develop-backend 반영
+
+사용자 요청에 따라 `test/msa-final-parity`에 최신 대상 `581344039532cf3475dbda3e56c39624e744a0f6`을 일반 병합했다.
+병합 커밋은 `b7ec2015fc3b7c4732ebec4ce38a5cbaf2a9a3d9`이며 Git 충돌 0건으로 자동 병합됐다.
+!369의 CI 이미지 공유·고정 055 원본·배포 준비 흐름을 보존했다. 이번 MR이 대상 브랜치에 추가하는 변경은 계속 msa/docs 11개 파일이다.
+
+최초 052 baseline은 최초 계획 `7266964`의 Git blob과 바이트·JSON이 모두 같았다. archive를 다시 추출해
+API 95개·SQL 51개 해시·워커 6개 전체 목록이 일치함을 확인했다.
+서비스 src·공통 이벤트 CJS·Liquibase changelog는 최초 실행 대상 `06ce863b`와 차이가 없다.
+현재 소스 선언의 누락도 업무 23개·인프라 3개 그대로다. 위의 395개 실제 대조 결과는 원래 실행 기록으로 보존한다.
+
+| 갱신 검증 | 결과 |
+| --- | --- |
+| Git 충돌·범위·diff 검사 | 충돌 0, msa/docs 11개 파일, 대상의 backend/frontend/AI와 차이 없음 |
+| 검증기 회귀 | Node 24.22.1에서 5개 통과 |
+| 배포·이미지 공유·범위 선택 회귀 | Linux Docker에서 111개 통과, 24.154초 |
+| CJS/Python 구문 | MR의 CJS 4개·Python 2개 통과 |
+| 실제 CI 원본 준비 | 1.222초, 원래 backend tree 보존·snapshot의 MSA tree 일치 |
+| CI 소스/고정 원본 연결 | 0.165초, 원본 source commit과 고정 backend 확인 |
+| 실제 PG/HTTP 이벤트 경로 | 42.209초, exit 0. 이미지 단위 10개·초안 단위 3개·PG/HTTP 통합 15개·inventory/검증기 회귀 6개 통과 |
+| 변경 범위 선택 | 0.406초, diff 기준 앱/DB 대상 0개·DB CI false, 기존 서비스 회귀 4개 선택 |
+| 검증 자원 정리 | 해당 실행의 컨테이너·이미지 태그·네트워크 잔여 0개 |
+
+CI 연결은 기존 Jenkins agent/dind의 독립 작업공간에서 배포 없이 확인했다.
+고정 CI 원본은 `9624b7789ee7876648b6c56b5e7a4a7a5a9ef378`/backend tree `12c6fa0f17354f53b28244d8b804bd564f1141be`이며,
+검증한 MSA tree는 `0e369ee8f962c22b41a428f34b91bb46390c7221`이다.
+문서의 이전 직접 inventory 실행 안내도 고정 CI 작업공간 경로에 맞췄다.
+로그·정리 확인·소스 기록은 Git 제외 경로 `msa/liquibase/verification-logs/mr364-sync-ab78ae7f/`에 보존했다.
+
+이번 갱신에서 전체 95개 API/DB 수집·원본 735개 integration·기존 서비스 회귀 4개 전체·운영 Jenkins Job/CD는 재실행하지 않았다.
+전체 동등성 미달 판정과 기존 실패·미검증 기록을 유지한다. `verify-final.py` 전체 비교는 Jenkins 자동 단계에 추가하지 않았고,
+이벤트 단계에는 검증기 회귀만 연결한다. 실제 CD 선택은 기존처럼 서버의 배포 성공 이력을 따르며 위의 diff 범위 검사와 구분한다.
+
 ## 다음 작업
 
 최초 범위의 주문 쓰기 → 접수·배송 → 결제·자동 워커 → 상담 이벤트/조회·대시보드·FAQ 사례 → 교차 소유자 보관을 구현·검증한 뒤 전체 동등성 검증을 반복한다. 후속 계약의 고객 주소 필수·전화번호 11자리·AI 업무 Bearer·055 초안 변경으로 발생하는 차이는 최초부터 빠진 경로와 분리해 기록하고 이번 검증 MR에서 되돌리지 않는다.
