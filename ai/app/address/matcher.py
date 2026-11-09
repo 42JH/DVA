@@ -287,14 +287,21 @@ def jibun_candidates(db, text):
     return [(area, san, number, d, key) for area, (d, key) in found.items()]
 
 
+def named_only(text) -> bool:
+    """번호 없이 이름만 말했는가("올리브영 강남점", "송파구 롯데월드타워"). 이렇게 찾은 주소는 이름에서 미룬 것이라
+    기록 뒤 고객에게 시·군·구와 동을 확인한다(S15P31D109-165)."""
+    tokens, branch, number = parse(text)[0]
+    return branch is None and not number and not any(map(is_number_token, tokens))
+
+
 def building_candidates(db, text):
     """건물명(부가정보)으로 찾기: 번호 없는 발화("롯데월드타워", "송파구 롯데월드타워")를 건물명 색인과 소리로 비교.
     복합 표기는 빌드 때 풀어 두었으므로(gazetteer.name_variants) 여기서는 같은 이름인지(거리)만 본다.
     -> {도로명주소: (거리, (시도, 시군구))}. 지역이 둘 이상이면 어차피 되묻기라 주소를 읽지 않고 이름을 자리에 넣는다(judge는 지역만 본다)."""
-    tokens, branch, number = parse(text)[0]
     # 번호 토큰이 하나라도 있으면("한누리대로 2130 세종시청이요") 건물명이 아니다 — 번호는 도로·지번 경로가 본다
-    if branch is not None or number or any(map(is_number_token, tokens)) or not hasattr(db, "search_names"):
+    if not named_only(text) or not hasattr(db, "search_names"):
         return {}
+    tokens = parse(text)[0][0]
     scopes, rest = db.match_region(tokens)
     if not scopes:
         scopes, rest = sido_scope(db, tokens)

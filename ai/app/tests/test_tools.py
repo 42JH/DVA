@@ -471,6 +471,28 @@ def test_record_rejects_pickup_out_of_hours_with_allowed_range():
     assert not c.state.pickup_at.valid
 
 
+def test_name_only_address_asks_to_confirm_district_and_dong(corrector, address):
+    """'올리브영 OO점'처럼 이름만 말한 주소는 기록하되 facts.confirm_area로 구·동만 확인시킨다(S15P31D109-165). 번호가 있으면 없다."""
+    c = ctx(address=address)
+    out = call(c, "record_fields", {"receiver_address": "송파구 롯데월드타워"})
+    assert out["status"] == "ok" and out["facts"]["confirm_area"] == {"receiver_address": "송파구 신천동"}
+    assert c.state.field_of("receiver_address").value == "서울특별시 송파구 올림픽로 300"
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
+    assert "confirm_area" not in out["facts"]
+
+
+def test_place_not_in_book_is_recorded_as_receiver_address(corrector, address):
+    """주소록·기업에 없는 장소(상호·지점 이름)는 find_destination이 받는 곳 주소로 찾아 기록한다 — 운영 통화 a97347a8에서
+    모델이 DEST_NONE 뒤 주소로 넘기지 않아 '다이소 구미 인동점'을 못 찾았다. 이름만으로 찾았으니 구·동 확인을 붙인다."""
+    c = ctx(address=address)
+    out = call(c, "find_destination", {"name": "한태원", "place": "송파구 롯데월드타워", "detail": "3층"})
+    assert out["status"] == "ok" and out["facts"]["found"] == 0 and out["facts"]["confirm_area"] == {"receiver_address": "송파구 신천동"}
+    s = c.state
+    assert (s.field_of("receiver_name").value, s.field_of("receiver_address").value, s.field_of("receiver_address_detail").value)         == ("한태원", "서울특별시 송파구 올림픽로 300", "3층")
+    out = call(c, "find_destination", {"organization": "없는기업", "place": "없는로 12"})  # 기업명도 붙여 찾는다
+    assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").value == "서울특별시 송파구 올림픽로 300"
+
+
 def test_address_in_several_regions_asks_region(corrector, address):
     """같은 주소가 여러 시군구에 있으면 기록하지 않고 지역을 되묻는다(ADDRESS_REGION_NEEDED). 모델은 heard와 지역을 합쳐 다시 넘긴다."""
     c = ctx(address=address)

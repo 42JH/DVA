@@ -75,6 +75,7 @@ def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     assert "예/아니요" in text and "하지 않습니다" in text and "{fields}" not in text
     assert "그 부분만 바꾼 전체 번호" in text  # 번호 부분 정정(업무 규칙 d)
     assert "들은 그대로 기록" in text and "숫자로 바꾸지 않습니다" in text  # 주소 기록 규칙: 수사 변환·상세 분리는 서버가(P13)
+    assert "confirm_area" in text and "confirm_area" in business_rules()  # 이름만으로 찾은 주소는 구·동만 확인(S15P31D109-165)
 
 
 def test_server_missing_uses_same_order_as_instructions():

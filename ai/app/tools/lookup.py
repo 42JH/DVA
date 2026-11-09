@@ -15,6 +15,7 @@ from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
 from app.tools.outcome import ToolOutcome, state_summary
+from app.tools.record import RecordArgs, record_fields
 from backend_client.order import Place as BEPlace
 from backend_client.order import match_places, pin_labels, words
 
@@ -45,7 +46,8 @@ def _from_be(p: BEPlace, source: Source) -> Place:
 
 @model_tool("find_destination",
             "주소록·이전 도착지와 기업·사원 배송지에서 고객이 말한 받는 곳을 찾는다. 기업명은 organization, 부서는 department. "
-            "고객이 말한 문자열만 채우고 나머지는 null.", DestinationArgs)
+            "고객이 말한 문자열만 채우고 나머지는 null. 어디에도 없으면 말한 장소(상호·지점·건물 이름 포함)를 받는 곳 주소로 "
+            "찾아 기록한다.", DestinationArgs)
 async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutcome:
     said = {k: v.strip() for k, v in args.model_dump().items() if v and v.strip()}
     if not said:
@@ -65,6 +67,12 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
                            [{"field": "receiver_place", "reason": "DEST_TOO_MANY"}])
     if page.places:
         return await _offer(ctx, [_from_be(p, Source.COMPANY) for p in page.places], page.places)
+    if place:  # 주소록·기업에 없는 장소는 받는 곳 주소로 받는다 — 상호·지점("다이소 구미 인동점")은 주소DB·지도 검색이 찾고
+        # 이름만으로 찾은 주소는 구·동 확인(confirm_area)을 받는다. 모델이 DEST_NONE 뒤 주소로 다시 넘기지 않던 문제(운영 통화 a97347a8)
+        org = said.get("organization")
+        heard = place if not org or org in place else f"{org} {place}"
+        out = await record_fields(ctx, RecordArgs(receiver_name=name, receiver_address=heard, receiver_address_detail=detail))
+        return ToolOutcome(out.status, out.code, {"found": 0, **out.facts}, out.needs, out.summary)
     ask = "receiver_place" if name and not place else "receiver_name" if place and not name else None
     return ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
                        [{"field": ask, "reason": "DEST_NONE"}] if ask else [])
