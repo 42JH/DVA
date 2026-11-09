@@ -70,6 +70,7 @@ export class CallInsightsRepository {
         input.hasCallbackRequest ?? null,
       ],
     );
+    if (result.rowCount === 1) await client.query("SELECT pg_notify('call_sessions_changed','')");
     return result.rowCount === 1;
   }
 

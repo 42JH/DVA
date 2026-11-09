@@ -132,6 +132,7 @@ const suites = {
   ],
   calls: [
     'consultations',
+    'active-call-count',
     'recordings',
     'call-analysis',
     'call-analysis-status',
@@ -145,6 +146,7 @@ const suites = {
   ],
   analysis: [
     'call-analysis',
+    'active-call-count',
     'call-events',
     'unanswered-questions',
     'unanswered-questions-read',

@@ -51,7 +51,7 @@ export class ConsultationsController {
   @ApiOperation({
     summary: '진행 중 통화 수 조회',
     description:
-      '기능 도입 후 등록된 통화 중 PBX 종료 미확인 건수를 제공합니다. 과거 미확인 통화·주문 상태·AI 분석 완료 여부는 집계 기준으로 사용하지 않습니다.',
+      '기능 도입 후 등록된 통화 중 PBX·AI 분석 어느 쪽에도 종료 시각이 없는 건수를 제공합니다. 과거 미확인 통화·삭제·보관 만료는 제외하며 주문 상태는 집계 기준으로 사용하지 않습니다.',
   })
   @ApiOkResponse({ type: ActiveCallCountResponseDto })
   @ApiResponse({

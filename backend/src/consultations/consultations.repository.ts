@@ -146,8 +146,10 @@ export class ConsultationsRepository {
     const row = (
       await this.database.pool.query<{ activeCallCount: number; observedAt: Date }>(
         `SELECT count(*)::int AS "activeCallCount",statement_timestamp() AS "observedAt"
-       FROM call_sessions WHERE registered_at IS NOT NULL AND ended_at IS NULL AND deleted_at IS NULL
-        AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')`,
+       FROM call_sessions c WHERE c.registered_at IS NOT NULL AND c.ended_at IS NULL AND c.deleted_at IS NULL
+        AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')
+        AND NOT EXISTS(SELECT 1 FROM call_analyses a
+          WHERE a.call_session_seq=c.call_session_seq AND a.ai_ended_at IS NOT NULL)`,
       )
     ).rows[0];
     return { activeCallCount: row.activeCallCount, observedAt: row.observedAt.toISOString() };
