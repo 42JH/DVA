@@ -161,6 +161,7 @@ test('PBX first waits for AI, then READY alone becomes a card-pending order with
   assert.equal(await orderCount(), before);
   const input = completeInput(cancel);
   const result = await data(await seal(c, input));
+  assert.equal(result.orderSeq, ready.reservedOrderSeq);
   assert.equal(result.status, 'FINALIZED');
   assert.equal(result.order.status, 'notPaid');
   assert.equal(result.order.totalAmount, 3500);
@@ -223,10 +224,20 @@ test('multiple complete parcels are billed and submitted in one whole-order Dver
   dverRequests = [];
   const c = await call();
   await companyFor(c);
-  await draft(c);
+  const first = await draft(c);
   const last = await draft(c, { parcel: { ...parcel(c), notifiedPrice: 4200 } });
   await end(c);
   const result = await data(await seal(c, completeInput(last, 'credit')));
+  assert.equal(result.orderSeq, first.reservedOrderSeq);
+  assert.notEqual(first.reservedOrderSeq, last.reservedOrderSeq);
+  assert.equal(
+    (
+      await f.pool.query('SELECT count(*)::int AS count FROM orders WHERE order_seq=$1', [
+        last.reservedOrderSeq,
+      ])
+    ).rows[0].count,
+    0,
+  );
   assert.equal(result.order.status, 'ACCEPTED');
   assert.equal(result.order.totalAmount, 7700);
   assert.equal(result.parcelMappings.length, 2);

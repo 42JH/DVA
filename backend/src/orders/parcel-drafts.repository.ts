@@ -4,7 +4,7 @@ import { readPage } from '../common/pagination-query';
 import { ParcelDraftQueryDto } from './dto/parcel-draft.dto';
 import { OrderIntakeCall, ParcelDraftRow } from './parcel-drafts.types';
 
-const columns = `draft_seq AS "draftSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
+const columns = `draft_seq AS "draftSeq",reserved_order_seq AS "reservedOrderSeq",call_session_seq AS "callSessionSeq",customer_seq AS "customerSeq",caller_phone_number AS "callerPhoneNumber",
  created_by_admin_user_seq AS "createdByAdminUserSeq",client_parcel_id AS "clientParcelId",creation_payload AS "creationPayload",
  parcel_data AS parcel,status,version,source_draft_seq AS "sourceDraftSeq",order_seq AS "orderSeq",order_parcel_seq AS "orderParcelSeq",
  legacy_order_seq AS "legacyOrderSeq",legacy_order_parcel_seq AS "legacyOrderParcelSeq",
@@ -139,8 +139,8 @@ export class ParcelDraftsRepository {
   ) {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,retention_started_at)
-      VALUES($1,$2,$10,$3,$4::uuid,$5::jsonb,$6::jsonb,$7,$8,COALESCE($9::timestamptz,clock_timestamp())) RETURNING draft_seq AS id`,
+        `INSERT INTO order_parcel_drafts(call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,source_draft_seq,retention_started_at,reserved_order_seq)
+      VALUES($1,$2,$10,$3,$4::uuid,$5::jsonb,$6::jsonb,$7,$8,COALESCE($9::timestamptz,clock_timestamp()),COALESCE($11::int,nextval('orders_order_seq_seq'::regclass))) RETURNING draft_seq AS id`,
         [
           input.callId,
           input.customerId,
@@ -152,6 +152,7 @@ export class ParcelDraftsRepository {
           input.source?.draftSeq ?? null,
           input.source?.retentionStartedAt ?? null,
           input.callerPhoneNumber,
+          input.source?.reservedOrderSeq ?? null,
         ],
       )
     ).rows[0].id;

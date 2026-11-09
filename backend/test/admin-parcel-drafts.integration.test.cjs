@@ -120,7 +120,9 @@ test('admin resumes one incomplete parcel into a separate order and leaves the o
   const resumed = await data(await create({ sourceDraftSeq: source.incomplete.draftSeq }), 201);
   assert.equal(resumed.callSessionSeq, null);
   assert.equal(resumed.sourceDraftSeq, source.incomplete.draftSeq);
+  assert.equal(resumed.reservedOrderSeq, source.incomplete.reservedOrderSeq);
   const result = await data(await submit(resumed));
+  assert.equal(result.orderSeq, source.incomplete.reservedOrderSeq);
   assert.notEqual(result.orderSeq, original);
   assert.equal(result.status, 'notPaid');
   assert.equal(result.callSessionSeq, null);

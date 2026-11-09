@@ -156,6 +156,8 @@ export class OrderIntakeService {
           call.customerSeq,
           randomUUID(),
           'AI',
+          null,
+          ready[0].reservedOrderSeq,
         );
         await this.calls.attachOrder(client, id, created.orderSeq);
         await this.submissions.prepareSubmission(

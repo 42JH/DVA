@@ -522,11 +522,13 @@ export class OrdersRepository {
     key: string,
     creationSource: OrderCreationSource,
     adminId: number | null = null,
+    reservedOrderSeq: number | null = null,
   ): Promise<CreatedOrderDto> {
     const id = (
       await client.query<{ id: number }>(
-        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount,created_by_admin_user_seq)
-       VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6,$7) RETURNING order_seq AS id`,
+        `INSERT INTO orders(customer_seq,payment_method_type,pickup_requested_at,status,creation_request_id,creation_source,total_amount,created_by_admin_user_seq,order_seq)
+         OVERRIDING SYSTEM VALUE
+         VALUES($1,$2,$3,'COLLECTING',$4::uuid,$5,$6,$7,COALESCE($8::int,nextval('orders_order_seq_seq'::regclass))) RETURNING order_seq AS id`,
         [
           customerId,
           draft.paymentMethodType,
@@ -535,6 +537,7 @@ export class OrdersRepository {
           creationSource,
           draft.totalAmount,
           adminId,
+          reservedOrderSeq,
         ],
       )
     ).rows[0].id;

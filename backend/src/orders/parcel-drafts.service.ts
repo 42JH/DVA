@@ -259,6 +259,16 @@ export class ParcelDraftsService {
         input.parcel,
       );
       await this.validate(client, customerId, parcel, input.status === 'READY', source?.parcel);
+      // Transfer the reservation while holding the source lock; rollback restores both rows.
+      if (source) {
+        if (source.customerSeq === null && customerId !== null)
+          await client.query('UPDATE order_parcel_drafts SET customer_seq=$2 WHERE draft_seq=$1', [
+            source.draftSeq,
+            customerId,
+          ]);
+        await this.repository.update(client, source.draftSeq, source.parcel, 'RESUMED');
+        await this.record(client, adminId, source.draftSeq, 'PARCEL_DRAFT_RESUMED', requestId);
+      }
       const row = await this.repository.insert(client, {
         callId: call?.callSessionSeq ?? null,
         customerId,
@@ -270,15 +280,6 @@ export class ParcelDraftsService {
         status: input.status,
         source,
       });
-      if (source) {
-        if (source.customerSeq === null && customerId !== null)
-          await client.query('UPDATE order_parcel_drafts SET customer_seq=$2 WHERE draft_seq=$1', [
-            source.draftSeq,
-            customerId,
-          ]);
-        await this.repository.update(client, source.draftSeq, source.parcel, 'RESUMED');
-        await this.record(client, adminId, source.draftSeq, 'PARCEL_DRAFT_RESUMED', requestId);
-      }
       const intakeVersion = call
         ? await this.repository.bumpCall(client, call.callSessionSeq)
         : null;

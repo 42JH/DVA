@@ -60,6 +60,7 @@ export class AdminParcelDraftsService {
         randomUUID(),
         'ADMIN',
         adminId,
+        row.reservedOrderSeq,
       );
       await this.submissions.prepareSubmission(
         client,
