@@ -166,14 +166,32 @@ def result_body(outcome: str, call: dict, customer_seq: int | None, customer_nam
     return body
 
 
+def parcel_lookup_details(parcel: dict) -> dict:
+    """통화 중 선택된 택배에 대해 안내할 수 있는 백엔드 값만 남긴다."""
+    origin, destination = parcel.get("origin") or {}, parcel.get("destination") or {}
+    values = {"sender_name": origin.get("name"), "sender_address": origin.get("roadAddress"),
+              "receiver_address": destination.get("roadAddress"), "item_price": parcel.get("itemPrice"),
+              "shipping_fee": parcel.get("notifiedPrice"), "delivery_note": parcel.get("clientComment")}
+    items = {name: parcel[key] for name, key in (("document_count", "documentCount"),
+             ("small_box_count", "smallBoxCount"), ("medium_box_count", "mediumBoxCount"),
+             ("big_box_count", "bigBoxCount"), ("other_item", "otherItemDescription")) if parcel.get(key)}
+    return {key: value for key, value in (values | {"items": items or None}).items() if value is not None}
+
+
 def _parcels(detail: dict) -> list[dict]:
     """주문 상세 → 조회·취소(C 흐름)가 쓰는 택배 단위. status는 취소한 상세면 CANCELLED, 아니면 주문 상태."""
     out = []
     for p in detail.get("parcels") or []:
         dest = p.get("destination") or {}
+        status = "CANCELLED" if p.get("status") == "CANCELLED" else detail.get("status")
+        facts = parcel_lookup_details(p)
+        if detail.get("pickupRequestedAt"):
+            facts["pickup_requested_at"] = detail["pickupRequestedAt"]
+        if status == "ACCEPTED" and detail.get("parcelNo"):
+            facts["receipt_number"] = detail["parcelNo"]
         out.append({"order_seq": detail["orderSeq"], "order_parcel_seq": p["orderParcelSeq"],
                     "receiver_name": dest.get("name"), "receiver_address": dest.get("roadAddress"),
-                    "status": "CANCELLED" if p.get("status") == "CANCELLED" else detail.get("status")})
+                    "status": status, "details": facts})
     return out
 
 

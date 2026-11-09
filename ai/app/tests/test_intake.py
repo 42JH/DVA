@@ -7,7 +7,7 @@ import pytest
 from conftest import CALLER, run
 
 from app.calls.intake import IntakeService
-from app.calls.live import LiveFlow
+from app.calls.live import LiveFlow, Spoken
 from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmation
 from app.domain.parcel_items import ItemIssue
 from app.domain.store import hold_items, open_for_edit
@@ -62,6 +62,24 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
     assert out["status"] == "needs_choice"
     assert [row["source"] for row in out["facts"]["orders"]] == ["order", "draft"]
     assert out["facts"]["orders"][1]["status_text"] == "이번 통화에서 접수된 택배"
+    assert "lookup_order" not in out["facts"]
+
+    async def pick_draft():
+        s.state.intent = "lookup"
+        label = out["facts"]["orders"][1]["label"]
+        await lf.apply(s, Spoken(1, "이번 통화에서 접수된 택배요", 0, 1, 0, 1), None,
+                       {"pick": (label, 1.0), "switch": ("lookup", 1.0)}, None)
+        [selected] = [e["data"]["content"]["lookup_order"] for e in s.events
+                      if "lookup_order" in e.get("data", {}).get("content", {})]
+        assert selected["status"] == "READY"
+        assert selected["receiver_address"] == first["parcel"]["destination"]["roadAddress"]
+        assert selected["sender_address"] == first["parcel"]["origin"]["roadAddress"]
+        assert selected["items"] == {"small_box_count": 1}
+        assert selected["item_price"] == 30000 and selected["shipping_fee"] > 0
+        assert not any("phone" in key or "detail" in key for key in selected)
+
+    run(pick_draft())
+    s.state.intent = "order"
 
     async def add_and_end():
         s.state.current = filled(receiver="박민수").current

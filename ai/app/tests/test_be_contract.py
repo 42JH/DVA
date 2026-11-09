@@ -78,7 +78,8 @@ def test_company_search_and_orders_list_examples(version, extra):
     assert page.places and page.places[0].organization_name == "예시기업" and page.total_count == search["total_count"]
     parcels = run(api.find_parcels(7, 5))
     assert parcels == [{"order_seq": 123, "order_parcel_seq": 1, "receiver_name": "이영희",
-                        "receiver_address": "부산 센텀로 10", "status": "COLLECTING"}]
+                        "receiver_address": "부산 센텀로 10", "status": "COLLECTING",
+                        "details": {"receiver_address": "부산 센텀로 10"}}]
 
 
 @pytest.mark.parametrize("version", VERSIONS)

@@ -77,6 +77,17 @@ def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     assert "들은 그대로 기록" in text and "312동 403호" in text  # 주소 기록 규칙(기존 서버 backend.md에서 옮김)
 
 
+def test_address_directions_and_short_detail_questions_are_rendered():
+    live, backend = render_live(None, POLICY), render_backend(POLICY)
+    for text in (live, backend):
+        assert "“○○에서 보낼게요”는 발송 주소, “○○로 보낼게요”는 받는 곳 주소" in text
+    assert POLICY.fields["sender_address_detail"].label == "발송지 상세주소"
+    assert POLICY.fields["receiver_address_detail"].label == "받는 곳 상세주소"
+    assert "고객이 뜻을 되묻거나 무엇을 말해야 할지 몰라 하면" in live
+    origin = next(q for q in decision_questions(POLICY, "sender", origin=True) if q["name"] == "origin")
+    assert "받는 곳만 말하고 발송 주소에 답하지 않으면 not_answer" in origin["instructions"]
+
+
 def test_server_missing_uses_same_order_as_instructions():
     state = ConversationState(intent="order")
     a = assess(state, POLICY)

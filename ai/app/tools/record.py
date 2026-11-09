@@ -44,12 +44,12 @@ class ItemEvidence(Args):
 
 class RecordArgs(Args):
     sender_name: str | None = Field(None, max_length=30)
-    sender_address: str | None = Field(None, max_length=120, description="발송 주소(택배를 보내는 곳의 도로명·지번 주소)")
-    sender_address_detail: str | None = Field(None, max_length=60, description="동·호수 등. 없다고 하면 빈 문자열")
+    sender_address: str | None = Field(None, max_length=120, description="발송 기본주소(도로명·지번). '○○에서 보낼게요'의 ○○")
+    sender_address_detail: str | None = Field(None, max_length=60, description="발송지 상세주소. 없다고 하면 빈 문자열")
     receiver_name: str | None = Field(None, max_length=30)
     receiver_phone: str | None = Field(None, max_length=40, description="들은 그대로(한글 숫자 가능)")
-    receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본 주소(도로명·지번)")
-    receiver_address_detail: str | None = Field(None, max_length=60, description="동·호수 등. 없다고 하면 빈 문자열")
+    receiver_address: str | None = Field(None, max_length=120, description="받는 곳 기본주소(도로명·지번). '○○로 보낼게요'의 ○○")
+    receiver_address_detail: str | None = Field(None, max_length=60, description="받는 곳 상세주소. 없다고 하면 빈 문자열")
     document_count: int | None = Field(None, ge=0, description="서류 봉투 수. 물품은 지금 보낼 전체 구성을 넣는다")
     small_box_count: int | None = Field(None, ge=0, description="소형 박스 수")
     medium_box_count: int | None = Field(None, ge=0, description="중형 박스 수")
