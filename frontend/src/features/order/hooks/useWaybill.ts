@@ -1,4 +1,5 @@
 // 주문 상세(운송장 패널) — GET /orders/{id} 그대로, 고른 배송 상세로 바꿔 끼움. 미완료면 빈 필수 칸을 짚어 줌
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
@@ -14,7 +15,7 @@ import {
   PAYMENT_STATE_LABEL,
   priceBand,
 } from '@/shared/order/labels'
-import { itemsText, STATUS_LOOK, won } from '../../../shared/order/look'
+import { itemsText, STATUS_LOOK, won } from '@/shared/order/look'
 
 const party = (p: Party) => ({
   name: p.name,
@@ -27,6 +28,11 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
   const qc = useQueryClient()
   // 30초 안에 받은 상세(줄에 마우스를 올려 미리 받은 것)는 다시 묻지 않음 — 수정 · 취소는 무효화로 새로 받음
   const q = useQuery({ ...orderQueries.detail(orderSeq), staleTime: 30_000 })
+  // 미완료가 사라졌으면(24시간 지남 · 더 최신 통화로 정리 · 다른 관리자가 처리) 404 → 목록 · 건수를 다시 읽음 (백엔드 후속 명세 11/09)
+  const gone = orderSeq < 0 && q.error instanceof ApiError && q.error.status === 404
+  useEffect(() => {
+    if (gone) void qc.invalidateQueries({ queryKey: ['screen'] })
+  }, [gone, qc])
   const done = () =>
     qc
       .invalidateQueries({ queryKey: ['orders'] })
@@ -35,6 +41,11 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
   const cancel = useMutation({
     mutationFn: () => (orderSeq < 0 ? deleteDraft(-orderSeq) : cancelOrder(orderSeq)),
     onSuccess: () => (orderSeq < 0 ? void qc.invalidateQueries({ queryKey: ['screen'] }) : done()),
+    // 지우려던 미완료가 이미 사라졌으면 목록만 다시 읽음
+    onError: (e) => {
+      if (orderSeq < 0 && e instanceof ApiError && e.status === 404)
+        void qc.invalidateQueries({ queryKey: ['screen'] })
+    },
   })
   const retry = useMutation({ mutationFn: () => retryOrder(orderSeq), onSuccess: done })
 
@@ -88,9 +99,11 @@ export function useWaybill(orderSeq: number, parcelSeq: number | null) {
     isLoading: q.isPending,
     error: !q.error
       ? null
-      : q.error instanceof ApiError && q.error.status === 404
-        ? '주문을 찾을 수 없습니다.'
-        : '불러오지 못했습니다. 다시 시도해 주세요.',
+      : gone
+        ? '이 미완료 주문은 목록에서 빠졌습니다. 24시간이 지났거나, 더 최근 통화로 정리됐거나, 이미 처리됐습니다.'
+        : q.error instanceof ApiError && q.error.status === 404
+          ? '주문을 찾을 수 없습니다.'
+          : '불러오지 못했습니다. 다시 시도해 주세요.',
     canEdit:
       !!status && status !== 'CANCELLED' && !['PAID', 'SUBMITTING', 'ACCEPTED'].includes(status),
     canCancel: status === 'COLLECTING' || status === 'notPaid',
