@@ -115,6 +115,36 @@ def test_format_changes_and_numeric_faq_limits():
     assert record(c, "무게 31kg이에요", turn=5, medium_box_count=1)["code"] == "ITEM_SIZE_EXCEEDED"
 
 
+def test_box_correction_clears_only_the_packing_issue():
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    assert record(c, "냉장고 하나 보낼게요", "format")["code"] == "ITEM_UNSPECIFIED"
+    assert record(c, "쇼핑백 그대로예요", "format", turn=2)["code"] == "UNSUPPORTED_FORMAT"
+    assert record(c, "접수 규격에 맞습니다", "format", "condition_met", turn=3)["code"] == "UNSUPPORTED_FORMAT"
+    assert record(c, "대형 박스에 안 들어가요", "format", "condition_met", turn=4)["code"] == "UNSUPPORTED_FORMAT"
+    out = record(c, "대형 박스에 담고 다른 물건은 쇼핑백에 담아요", turn=5, big_box_count=1,
+                 item_evidence=[{"rule": "format", "quote": "대형 박스에 담고", "status": "condition_met"}])
+    assert out["code"] == "UNSUPPORTED_FORMAT" and "format" in c.state.current.item_issues
+    record(c, "무게 31kg에 현금도 넣었어요", "cash_equivalents", turn=6)
+    out = record(c, "대형이요", "format", "condition_met", turn=7, big_box_count=1)
+    assert {need["reason"] for need in out["needs"]} == {"ITEM_SIZE_EXCEEDED", "PROHIBITED_ITEM"}
+    assert "format" not in c.state.current.item_issues
+
+
+def test_explicit_packing_correction_allows_a_new_box_candidate():
+    c = ctx()
+    c.state = filled()
+    c.state.clear("items")
+    record(c, "쇼핑백으로 보낼게요", "format")
+    out = record(c, "쇼핑백 대신 박스로 포장할게요. 신발 한 켤레예요", turn=2,
+                 item_evidence=[{"rule": "format", "quote": "쇼핑백 대신", "status": "removed"},
+                                {"rule": "format", "quote": "박스로 포장할게요", "status": "condition_met"}],
+                 box_suggestion={"size": "small", "count": 1, "quote": "신발 한 켤레"})
+    assert out["facts"]["box_proposal"]["label"] == "소형 박스 1개"
+    assert not c.state.current.item_issues and not c.state.current["items"].valid
+
+
 def test_weight_correction_does_not_clear_oversized_side():
     c = ctx()
     c.state = filled()
