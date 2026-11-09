@@ -239,7 +239,25 @@ function ItemStepper({ it, bad = false }: { it: Item; bad?: boolean }) {
         >
           −
         </Step>
-        <span className="w-6 text-center text-[14px] font-semibold tabular-nums">{it.count}</span>
+        {/* 숫자를 바로 쳐도 됨 (11/09 사용자) — 0 ~ 최대로 맞춤, ↑ ↓도 한 개씩 */}
+        <input
+          inputMode="numeric"
+          aria-label={`${it.label} 개수`}
+          value={it.count}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => {
+            const n = Number(e.target.value.replace(/\D/g, '') || 0)
+            it.setCount(Math.min(it.max, n))
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+              e.preventDefault()
+              const n = it.count + (e.key === 'ArrowUp' ? 1 : -1)
+              it.setCount(Math.min(it.max, Math.max(0, n)))
+            }
+          }}
+          className="h-7 w-9 rounded text-center text-[14px] font-semibold tabular-nums outline-none focus:bg-ops-route-soft focus:ring-1 focus:ring-ops-route"
+        />
         <Step
           label={`${it.label} 더하기`}
           onClick={() => it.setCount(it.count + 1)}
