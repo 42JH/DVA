@@ -211,6 +211,13 @@ export class ParcelDraftResponseDto {
   })
   callerPhoneNumber!: string | null;
   @ApiProperty() draftSeq!: number;
+  @ApiProperty({
+    type: Number,
+    minimum: 1,
+    description:
+      'DV 표시용 예약 주문번호. 실제 주문 생성 전에도 존재하며 draftSeq로 초안을 조회합니다.',
+  })
+  reservedOrderSeq!: number;
   @ApiProperty({ type: Number, nullable: true }) callSessionSeq!: number | null;
   @ApiProperty({ type: Number, nullable: true }) customerSeq!: number | null;
   @ApiProperty({ type: Number, nullable: true }) createdByAdminUserSeq!: number | null;

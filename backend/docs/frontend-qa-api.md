@@ -1,6 +1,14 @@
 # 프론트 QA 반영 API — S15P31D109-174
 
+2026-11-09 후속 작업 브랜치 `feature/complaint-draft-follow-up`에서는 [예약번호·통합 목록 명세](parcel-draft-order-reservation.md)를 적용한다. 전체에 INCOMPLETE 초안을 포함하고 draftSeq로 행을 구분한다. 아래 단계별 검증 건수는 해당 시점의 이력이며 최신 검증은 [후속 기록](complaint-draft-follow-up.md)을 따른다. 운영 반영 전 057·058 migration과 프론트의 행 분기 적용이 필요하다.
+
 backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 허용 Origin이 필요하다. 기존 삭제·5년 보관·역할 기준을 유지한다. 프론트·AI·MSA·운영 배포는 별도다.
+
+2026-11-09 추가: 통화 목록·상세·홈 recentCalls의 analysisStatus에 EXPIRED를 추가한다. 정상 분석·최종 실패 통보 없이 PBX 종료 후 10분이 지나면 ‘분석 만료’로 표시한다. 시간만으로 완료 처리하지 않는다. [프론트 변경 지점과 상태 우선순위](call-analysis-status-frontend-integration.md), [미완료·고객명 조사 결과](analysis-expiry-and-draft-findings-20261109.md)를 함께 전달한다.
+
+수기 주문과 관리자 초안 최종 접수는 수령인을 주문 고객의 개인 PIN에 자동 등록하고 기존 활성 중복은 보존한다. 요청·응답 변경이나 프론트의 추가 PIN POST는 없다. [수기 PIN 저장 기준](manual-order-recipient-pins.md)과 [운영 미완료 상세 현황](incomplete-draft-current-state-20261109.md)을 확인한다.
+
+최신 확정 정책: 미완료는 원본 최초 생성부터 24시간 또는 같은 고객의 더 최신 통화가 종료·결과 확정되면 유예 없이 제외한다. FAQ·조회·NO_ORDER도 포함하며 시작 중인 통화는 제외한다. 만료는 목록·건수에서 빠지고 상세·재개·보완·접수는 기존 404로 처리한다. [만료·이어가기·연동 명세](incomplete-expiry-latest-call.md)를 우선하며 전체 배포 전 057~059를 적용한다.
 
 ## 1. 주문 탭 건수
 
@@ -8,14 +16,14 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 
 | statusCounts 필드 | 대상 |
 | --- | --- |
-| all | 조회 가능한 실제 주문 전체. 이관 원본 중복 제외 |
+| all | 조회 가능한 실제 주문 + INCOMPLETE 초안. 이관 원본 중복 제외 |
 | incomplete | INCOMPLETE 배송 초안. 원본 주문·고객·통화 삭제와 독립적인 초안 보관 기준 적용 |
 | notPaid | 결제 대기 주문 |
 | paid | PAID·SUBMITTING·ACCEPTED 주문 |
 | submissionFailed | SUBMITTING_FAILED·SUBMISSION_FAILED 주문 |
 | cancelled | CANCELLED 주문 |
 
-`all`은 실제 주문 수이고 `incomplete`는 배송 단건 초안 수이므로 두 값을 더하거나 탭 건수의 합을 전체 주문 수로 해석하지 않는다. 미완료 탭은 `GET /api/parcel-drafts?status=INCOMPLETE`로 이동한다. 이전 `statusGroup=COLLECTING` 요청의 기존 부분 주문 조회와 `total_count` 의미도 유지한다.
+`all`에 `incomplete`가 이미 포함되므로 두 값을 다시 더하지 않는다. `GET /api/admin/orders?statusGroup=COLLECTING`은 INCOMPLETE 초안만 조회하며 기존 단독 초안 목록도 유지한다. 통합 목록의 초안 행은 `draftSeq`가 있고 `orderSeq`가 예약번호다. 실제 주문 행은 `draftSeq=null`이다. 초안 상세·생성·수정 응답에는 별도 `reservedOrderSeq`를 제공한다.
 
 초안 목록에도 같은 `from`·`to`·`organizationSeq` 필터를 추가했다. 날짜는 초안 생성 시각 기준이며 시간대가 필요하다. 검색은 NFC·앞뒤 공백 제거 후 최대 200자이며 전화번호의 하이픈을 허용한다. 기존 AI 통화/고객 범위 검사는 유지한다. 미완료 숫자에서 이동할 때 같은 검색·기간·기업 조건을 전달한다.
 
@@ -76,11 +84,11 @@ backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 �
 
 ### 주문 전체와 미완료
 
-055 이후 실제 주문과 미완료 배송 단건은 별도 리소스다. 한 통화에서 배송 3개 중 2개를 완성하면 실제 주문 1건(배송상세 2개)과 미완료 초안 1건이 남는다. 따라서 `statusCounts.all + statusCounts.incomplete`를 전체 주문 수로 표시하지 않는다.
+055 이후 실제 주문과 미완료 배송 단건은 별도 리소스다. 한 통화에서 배송 3개 중 2개를 완성하면 실제 주문 1건(배송상세 2개)과 미완료 초안 1건이 남는다. 후속 통합 목록의 all은 두 행을 포함한 2건이고 incomplete는 그중 1건이다. `statusCounts.all + statusCounts.incomplete`로 다시 더하지 않는다.
 
-- 전체·결제·접수 실패·취소 탭: 기존 `GET /api/admin/orders`와 `orderSeq`를 사용한다.
-- 미완료 탭: `GET /api/parcel-drafts?status=INCOMPLETE`와 `draftSeq`를 사용한다. 검색·기간·기업 조건은 같은 값으로 전달한다.
-- 신규 미완료에는 실제 `orderSeq`가 없을 수 있다. `draftSeq`를 실제 주문 번호로 표시하거나 `/api/orders/{draftSeq}`로 이동하지 않는다. 초안 번호로 구분해 표시한다.
+- 전체·결제·접수 실패·취소 탭은 `GET /api/admin/orders`를 사용한다. 전체의 draftSeq가 있는 행은 초안 상세로 분기한다.
+- 미완료 탭은 같은 API의 `statusGroup=COLLECTING` 또는 단독 초안 목록을 사용한다. 검색·기간·기업 조건은 같은 값으로 전달한다.
+- 미완료 번호는 reservedOrderSeq로 표시한다. 통합 행의 orderSeq도 이 예약번호이므로 draftSeq가 있으면 실제 주문 상세 API로 이동하지 않는다. 단독 초안 응답의 orderSeq는 변환된 실제 주문 참조이며 그전에는 null이다.
 - 미완료 보완은 [055 프론트 명세](parcel-draft-frontend-integration.md)의 원본 재개 → 새 초안 보완 → 관리자 접수 흐름을 따른다. 이관 원본 주문을 다시 접수하지 않는다.
 
 ### 미답변 질문에서 통화 열기

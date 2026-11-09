@@ -22,6 +22,7 @@ export type DraftClearField = (typeof DRAFT_CLEAR_FIELDS)[number];
 
 export interface ParcelDraftRow {
   draftSeq: number;
+  reservedOrderSeq: number;
   callSessionSeq: number | null;
   customerSeq: number | null;
   callerPhoneNumber: string | null;

@@ -2,6 +2,8 @@
 
 적용 대상은 모놀리식 backend와 기존 DB runner다. AI·프론트·MSA 소스와 운영 시스템은 이번 작업에서 수정하지 않는다.
 
+2026-11-09 후속: 정상 분석·실패 통보 없이 PBX 종료 후 10분이면 조회 시 EXPIRED로 계산한다. 이 조건 자체에 추가 migration·환경변수는 없다. 프론트의 EXPIRED 타입·‘분석 만료’ 표시를 함께 반영하며 [최신 계약](call-analysis-status-frontend-integration.md)을 우선한다. 이하 056 배포·검증은 최초 구현 이력이다.
+
 ## DB
 
 신규 `056-call-analysis-failure.sql` 한 개에서 call_sessions.analysis_failed_at nullable timestamptz만 추가한다. 기본값·신규 테이블·FK·과거 실패 backfill은 없다. 기존 분석·녹취·주문·시각·적용 migration checksum은 보존한다. 기존 앱은 추가 컬럼을 무시할 수 있으며 기존 runner/백업 정책을 따른다.
@@ -25,4 +27,4 @@ analysisStatus는 정상 분석 우선으로 조회 시 계산하고 recordedAt�
 - 목록과 상세의 공통 상태·최초 녹취·중복 없는 total_count 및 기존 분석/녹취 회귀.
 - 공식 Docker lint/format/빌드·전체 테스트와 운영 이미지·실제 Nginx 경로의 실패/복구 인증 검증. runtime 검증용 두 토큰은 매 실행 별도 난수다.
 
-실제 AI 서버·결제사·디버·운영 DB 연동과 원격 dbdiagram 갱신은 포함하지 않는다. 실패 통보 누락은 PENDING으로 남으며 과거 원인을 추정해 바꾸지 않는다.
+실제 AI 서버·결제사·디버·운영 DB 연동과 원격 dbdiagram 갱신은 포함하지 않는다. 실패 통보 누락은 정상 분석도 없고 PBX 종료 후 10분이면 EXPIRED, 그 외 PENDING이다. 과거 원인을 추정해 실패 증거를 만들지 않는다.

@@ -81,9 +81,24 @@ const audits = async (c) =>
     )
   ).rows[0].n;
 
-test('list and detail expose PENDING independently of elapsed time and PBX completion', async () => {
+test('list and detail expire missing analysis ten minutes after completion and keep ongoing calls pending', async () => {
   await state(await call(), 'PENDING');
-  await state(await call({ ended: false }), 'PENDING');
+  await state(
+    await call({ ended: false, incomingAt: new Date(Date.now() - 86400000).toISOString() }),
+    'PENDING',
+  );
+  const expired = await call();
+  await f.pool.query(
+    "UPDATE call_sessions SET started_at=clock_timestamp()-interval '20 minutes',ended_at=clock_timestamp()-interval '11 minutes' WHERE call_session_seq=$1",
+    [expired.id],
+  );
+  await state(expired, 'EXPIRED');
+  assert.equal(await stamp(expired), null);
+  assert.equal(await audits(expired), 0);
+  await accepted(await failure(expired));
+  await state(expired, 'FAILED');
+  await accepted(await analyse(expired));
+  await state(expired, 'COMPLETED');
 });
 
 test('failure uses the existing insights credential, never a business token or administrator cookie', async () => {

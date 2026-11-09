@@ -96,6 +96,7 @@ test('READY creation saves an independent snapshot and creates no order or payme
   const before = await counts();
   const draft = await createDraft();
   assert.equal(draft.status, 'READY');
+  assert.ok(Number.isInteger(draft.reservedOrderSeq) && draft.reservedOrderSeq > 0);
   assert.equal(draft.version, 1);
   assert.ok(draft.intakeVersion > 1);
   assert.equal(draft.customerSeq, customer);
@@ -110,6 +111,7 @@ test('same create UUID replays once, changed content conflicts and listing never
   const first = await createDraft(input);
   const replay = await createDraft(input);
   assert.equal(replay.draftSeq, first.draftSeq);
+  assert.equal(replay.reservedOrderSeq, first.reservedOrderSeq);
   assert.equal(replay.intakeVersion, first.intakeVersion);
   await f.error(
     await create({ ...input, parcel: { ...input.parcel, notifiedPrice: 4000 } }),
@@ -267,7 +269,7 @@ test('resuming copies into the new call, preserves the original expiry and preve
   );
   await endCall(oldCall);
   await f.pool.query(
-    "UPDATE order_parcel_drafts SET status='INCOMPLETE',retention_started_at=clock_timestamp()-interval '1 year' WHERE draft_seq=$1",
+    "UPDATE order_parcel_drafts SET status='INCOMPLETE',retention_started_at=clock_timestamp()-interval '1 hour' WHERE draft_seq=$1",
     [original.draftSeq],
   );
   const saved = (

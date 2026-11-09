@@ -57,7 +57,7 @@ export class AdminOrdersController {
   @ApiOperation({
     summary: '관리자 주문 목록 화면 조회',
     description:
-      '디자인/목업 03 주문 내역용. 저장된 주문당 한 줄이며 모든 배송상세를 parcels로 제공합니다. 현재 연결 고객 번호·소속 기업명을 함께 반환하며 소속 변경 시 과거 목록 표시도 바뀝니다. 생성 시각·주문 번호 내림차순. 검색·기간·상태 탭·현재 소속 기업을 AND로 적용합니다. 주문 저장 전 통화는 포함하지 않습니다.',
+      '실제 주문과 INCOMPLETE 초안을 생성 시각·표시 주문번호 최신순으로 함께 조회합니다. 초안은 COLLECTING이며 draftSeq가 있고 orderSeq는 예약번호입니다. 실제 주문은 draftSeq=null입니다. COLLECTING 탭은 초안만 조회하며 검색·기간·현재 기업·페이지 조건과 total_count를 같은 기준으로 적용합니다. 통화 자체는 목록 행으로 만들지 않습니다.',
   })
   @ApiOkResponse({ type: AdminOrderListResponseDto })
   @ApiBadRequestResponse({

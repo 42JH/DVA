@@ -1,6 +1,6 @@
 # 모놀리식 백엔드 공통 기반
 
-최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문, 미완료는 배송 단건 초안으로 유지하고 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
+최종 홈 화면의 오늘 주문·통화 건수와 최대 11개 미리보기는 [프론트 QA 연동 명세](docs/frontend-qa-api.md)를 따른다. 주문 전체는 실제 주문과 유효한 미완료 배송 단건 초안을 함께 반환한다. 미완료의 24시간·최신 확정 통화 조건은 [만료 명세](docs/incomplete-expiry-latest-call.md)를 따른다. 미답변 질문의 정확한 발화 연결은 현행 보장 범위에 포함하지 않는다. [후속 작업·검증 기록](docs/final-wireframe-follow-up.md)을 함께 확인한다.
 
 API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-performance-optimization.md)을 따른다. 응답·기능·오류·권한·보관 기준을 유지하며, 관리자 주문 목록의 배송상세 JSON과 통화 목록의 recordedAt은 페이지 선택 후 해당 행만 계산한다. 홈의 AI 통계 4개는 대상 통화 조회를 공유하며 개별 통계 API와 같은 값을 반환한다. 페르소나 목록·상세는 기존 버전·초안·프롬프트를 유지하면서 현재 페이지의 상세만 구성한다. 추가 migration·환경변수는 없다.
 
@@ -15,6 +15,8 @@ API 성능 개선은 [계획·동일 결과 검증·측정 기록](docs/api-perf
 통화 목록·상세와 관리자 주문 목록은 현재 소속 기업명 organizationName을 반환하며 organizationSeq 필터를 받는다. 관리자 주문 목록에는 customerSeq도 제공한다. 기업명 있음은 기업 고객, 기업명 없음+customerSeq 있음은 현재 무소속, customerSeq=null은 미확인으로 표시할 수 있으며 별도 고객 유형 필드는 추가하지 않는다. 비활성 소속·기업도 표시하고 삭제된 연결은 숨긴다. 현재 소속 기준이므로 과거 목록 표시도 바뀌며 결제 당시 기업 스냅샷과 다르다. DB 변경과 AI 일반 주문 조회 변경은 없고 전달 명세는 후속 작업과 누적한다. [작업·검증 기록](docs/list-customer-organization-plan.md)을 따른다.
 
 통화 분석 상태는 [AI 실패 통보](docs/call-analysis-status-ai-integration.md), [프론트 조회](docs/call-analysis-status-frontend-integration.md), [056 적용 순서](docs/call-analysis-status-rollout.md)를 따른다. 목록·상세에 analysisStatus와 최초 녹취 DB 저장 시각 recordedAt을 제공한다. 정상 분석이면 COMPLETED 우선, 없고 AI 최종 실패 통보가 있으면 FAILED, 둘 다 없으면 PENDING이다. 실패 API는 기존 AI_INSIGHTS_TOKEN을 사용하며 AI_BUSINESS_TOKEN과 다르다. 시간 경과·녹취·주문 결과로 실패를 추정하지 않는다.
+
+통화 불만 판정은 [후처리 판정](docs/call-complaint-judging.md)을 따른다. 새 앱 전에 migration 057을 적용한다. AI는 불만 칸을 비워 보내고, `CALL_ANALYSIS_OPENAI_API_KEY`(전용 키)가 있으면 워커가 AI 분석이 저장된 통화를 최신부터 판정해 `call_analyses`의 `has_complaint` · `complaints`만 채운다(지난 통화 포함). 판정 규칙은 기준 구현 `ai/call_analysis`와 같으며 키가 없으면 워커는 꺼진다. 조회 API · 프론트 변경은 없다.
 
 055 배송 단건 초안은 [AI 전송 명세](docs/parcel-draft-ai-integration.md), [프론트 연동 명세](docs/parcel-draft-frontend-integration.md), [배포·복구](docs/parcel-draft-rollout.md)를 우선한다. 통화 중에는 초안만 저장하고 PBX 종료와 AI 완료 후 READY를 실제 주문 하나로 변환한다. EDITING은 고객 등록 전에도 보존한다. 새 참조는 논리 참조이며 주소·물품·발신번호 사본은 원본 삭제와 독립적으로 최초 수집부터 5년 보관한다. 055는 한 번의 migration으로 적용하며 기존 쓰기 중지·백업 후 새 AI/프론트와 함께 전환한다. 아래 AI ORD-01 일괄 생성 설명은 055 이전 등록 통화의 호환 경로에 해당한다.
 

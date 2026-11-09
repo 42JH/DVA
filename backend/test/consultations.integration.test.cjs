@@ -56,7 +56,7 @@ async function call(input = {}) {
     customerName: null,
     organizationName: null,
     analysis: null,
-    analysisStatus: 'PENDING',
+    analysisStatus: row.endedAt === null ? 'PENDING' : 'EXPIRED',
     recordedAt: null,
   };
 }

@@ -34,7 +34,9 @@ const callSelect = (
   includeRecordedAt = true,
 ) => `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
  CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
-  WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED' ELSE 'PENDING' END AS "analysisStatus",
+  WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED'
+  WHEN c.ended_at<=transaction_timestamp()-interval '10 minutes' THEN 'EXPIRED'
+  ELSE 'PENDING' END AS "analysisStatus",
  ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",

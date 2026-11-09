@@ -46,6 +46,10 @@ q의 이름·발신번호 조건만 OR이며 다른 조건은 AND다. 빈 q는 �
 | `startedAt`, `endedAt` | 위 우선순위의 표시 시각. 사용할 시각이 모두 없으면 null |
 | `customerSeq`, `customerName` | 연결 고객 번호와 현재 이름. 미확인은 null |
 | `analysis` | 아래 분석 객체. 분석을 수신하지 않았으면 null |
+| `analysisStatus` | COMPLETED=정상 분석 저장, FAILED=정상 분석 없이 AI 최종 실패 수신, EXPIRED=둘 다 없이 PBX 종료 후 10분 이상, 그 외 PENDING. 시간만으로 완료 처리하지 않음 |
+| `recordedAt` | 최초 녹취 참조의 DB 저장 시각. 녹취가 없으면 null이며 실제 통화 시작 시각과 다름 |
+
+analysisStatus는 목록·상세 data.call·홈 recentCalls에 같은 기준으로 제공한다. EXPIRED는 2026-11-09 후속 작업 계약이며 프론트 타입·표시는 [최신 연동 명세](../../backend/docs/call-analysis-status-frontend-integration.md)를 따른다.
 
 고객은 연결 주문의 customer_seq를 우선하고 없으면 통화 발신번호와 고객 전화번호의 정확한 일치로 연결한다.
 탈퇴 고객의 과거 통화를 숨기지 않으며 고객 이름 변경은 다음 조회·검색에 반영된다. 고객의 다른 전화번호로 통화 발신번호를 바꾸지 않는다.

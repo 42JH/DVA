@@ -249,6 +249,22 @@ BEGIN
     AND column_name='analysis_failed_at' AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL)
   OR NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='056-call-analysis-failure.sql') THEN
   RAISE EXCEPTION 'Call analysis failure schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='057-call-complaint-judging.sql')
+  OR (SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='call_analyses'
+    AND column_name IN ('complaint_attempts','complaint_retry_at'))<>2
+  OR to_regclass('public.call_analyses_complaint_pending_idx') IS NULL THEN
+  RAISE EXCEPTION 'Complaint judging schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='058-parcel-draft-order-reservation.sql')
+  OR NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='order_parcel_drafts'
+    AND column_name='reserved_order_seq' AND udt_name='int4' AND is_nullable='NO'
+    AND column_default LIKE '%orders_order_seq_seq%')
+  OR NOT EXISTS(SELECT 1 FROM pg_index WHERE indexrelid=to_regclass('public.order_parcel_drafts_reserved_order_key')
+    AND indisvalid AND indisunique) THEN
+  RAISE EXCEPTION 'Parcel draft reservation schema or migration missing'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM db_migrations.applied_versions WHERE version='059-incomplete-latest-call-index.sql')
+  OR to_regclass('public.call_sessions_finalized_customer_idx') IS NULL
+  OR to_regclass('public.call_sessions_finalized_caller_idx') IS NULL THEN
+  RAISE EXCEPTION 'Incomplete latest call indexes or migration missing'; END IF;
 END $$;
 SELECT version,sha256,applied_at FROM db_migrations.applied_versions ORDER BY version;
 SELECT schemaname,tablename FROM pg_tables
