@@ -17,7 +17,7 @@ from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text
 from app.domain.address_book import save_offer
-from app.domain.assess import readback_facts
+from app.domain.assess import area_label, readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import ItemIssue, measurements, size_issues, unclassified_mentions
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
@@ -197,10 +197,13 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             iso, moved = default_pickup(ctx.now(), rule)
             s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
-            sources = {n: f.source for n, f in s.current.fields.items()}
-            facts["readback"] = readback_facts(pending.snapshot, sources, policy)
+            facts["readback"] = readback_facts(pending.snapshot)
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
+        elif any(a in facts["recorded"] for a in ADDRESSES) and all(s.field_of(a).valid for a in ADDRESSES):
+            # 두 주소가 갖춰진 순간 동 이름으로 한 번 확인(사용자 결정 2026-11-09). 되읽기가 열리면 거기에 같은 값이 있다
+            facts["confirm_route"] = {"from": area_label(s.current["sender_address"].value, s.current.sender_geo),
+                                      "to": area_label(s.current["receiver_address"].value, s.current.receiver_geo)}
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]
