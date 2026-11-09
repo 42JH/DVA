@@ -13,8 +13,7 @@ import { useSnapshotList } from '@/v2/lib/useSnapshotList'
 import { rangeFrom, type Range } from '@/v2/lib/range'
 import { dateTime } from '@/v2/lib/when'
 import { callState, memberOf, STATE_FILTERS, stateKey, type StateFilter } from './callState'
-import { fetchAll, FETCH_ALL_MAX } from '@/shared/api/paging'
-import { usePageSize } from '@/v2/lib/paging'
+import { fetchAll, FETCH_ALL_MAX, pageCount } from '@/shared/api/paging'
 import { orderNo } from '@/shared/order/labels'
 
 // at = 목록 기준 시각 · d = 시작 시각 정렬('asc' = 오래된 순) · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
@@ -44,7 +43,7 @@ export function useCalls() {
 
   // 상태 필터: 서버에 분석 상태 조건이 없어(11/09) 그 기간 · 검색의 통화를 모두 받아 화면에서 거르고 쪽을 나눔
   // ponytail: 최대 2,000건(FETCH_ALL_MAX). 백엔드가 GET /calls?analysisStatus를 주면 그 조건으로 바꾸고 이 덩어리를 지움
-  const [size, setSize] = usePageSize()
+  const { size, setSize } = list // 쪽 크기는 목록과 하나로 (따로 두면 상태를 바꿀 때 크기가 어긋남)
   const to = list.asOf ? new Date(list.asOf).toISOString() : undefined
   const all = useQuery({
     queryKey: ['v2', 'calls', 'all', query, to],
@@ -55,14 +54,15 @@ export function useCalls() {
   })
   const hit = (all.data ?? []).filter((d) => stateKey(callState(d).label) === s)
   if (asc) hit.reverse() // 서버는 최신순
+  const pg = Math.min(page, pageCount(hit.length, size)) // 걸러진 수가 줄면 마지막 쪽으로
   const shown = s
     ? {
-        items: hit.slice((page - 1) * size, page * size),
-        isLoading: all.isPending,
+        items: hit.slice((pg - 1) * size, pg * size),
+        isLoading: all.isPending && !list.error,
         isStale: all.isPlaceholderData,
-        error: all.error ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
+        error: all.error || list.error ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
         total: hit.length,
-        page,
+        page: pg,
         size,
         setPage: (p: number) => set({ page: p, at: to ? String(list.asOf) : '' }),
         setSize,

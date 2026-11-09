@@ -118,6 +118,7 @@ export function useOrderForm(
   const [searching, setSearching] = useState<Side | null>(null) // 주소 검색 창이 열린 쪽
   // 보내는 분 이름 · 주소를 고쳤을 때 '고객정보에도 저장할까요?' 창 (jiw/order-sender-customer-save.md)
   const [asking, setAsking] = useState(false)
+  const [finished, setFinished] = useState(false) // 저장 · 접수 성공 — 창이 닫힐 때까지 다시 못 보냄
   // 주문은 저장됐는데 고객정보 저장만 실패 — 고객만 다시 보냄(주문 PATCH는 다시 안 함)
   const [customerFail, setCustomerFail] = useState<{ body: CustomerPatch; error: unknown } | null>(
     null,
@@ -204,6 +205,7 @@ export function useOrderForm(
       return
     }
     await qc.invalidateQueries({ queryKey: orderQueries.all() }) // 다 끝난 뒤에 — 먼저 하면 새 버전으로 창이 다시 채워짐
+    void qc.invalidateQueries({ queryKey: ['v2'] }) // v2 목록 줄 · 탭 건수도 (11/09 검수: 수정해도 목록이 옛 값)
     onDone(submitNotice.current, madeOrder.current)
   }
 
@@ -215,7 +217,8 @@ export function useOrderForm(
       const body = input()
       if (order?.draft) {
         // 배송 초안(미완료, 055): 채운 내용으로 새 초안을 만들어 바로 접수. 같은 본문을 다시 보내면 같은 키 → 서버가 같은 초안을 돌려줌
-        const json = JSON.stringify([body, shippingFee])
+        // 키는 초안 본문(수거 · 결제 빼고)으로만 — 접수만 실패해 수거 시각 · 결제만 고쳐 다시 눌러도 같은 초안으로 접수 (11/09 검수)
+        const json = JSON.stringify([{ ...body, pickupAt: null, paymentMethod: null }, shippingFee])
         if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
         const r = await submitDraft(order, body, shippingFee, sent.current.key)
         madeOrder.current = r.orderSeq
@@ -252,7 +255,10 @@ export function useOrderForm(
       return 'ok'
     },
     onSuccess: (result) => {
-      if (result === 'ok') void finish()
+      if (result === 'ok') {
+        setFinished(true) // 목록을 새로 받는 동안 [저장]을 또 누르면 옛 버전으로 다시 보내 409가 남 (11/09 검수)
+        void finish()
+      }
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'VERSION_CONFLICT') onConflict?.()
@@ -371,6 +377,7 @@ export function useOrderForm(
           ? missing.length === 0 // 접수 중단: 바뀐 게 없어도 조건만 채워지면 접수
           : draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
       !customerFail && // 주문은 이미 저장됨 → 고객 재시도 · 닫기만
+      !finished &&
       !mutation.isPending,
     isSubmitting: mutation.isPending,
     // 칸에 못 붙인 오류 · 칸 오류가 없는 실패(연결 · 409 등)는 버튼 줄에 한 줄

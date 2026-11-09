@@ -185,6 +185,7 @@ export function AdminsPage() {
           page={vm.page}
           size={size}
           total={vm.total}
+          pages={vm.pages} // 활성화 탭 total은 나를 뺀 수 → 쪽 수는 서버 건수로 (마지막 쪽이 안 보이던 것)
           unit="명"
           onPage={vm.setPage}
           onSize={setSize}

@@ -95,9 +95,13 @@ export function useSnapshotList<T>({
 
   return {
     items: list.data?.data ?? [],
-    isLoading: list.isPending,
+    // 기준 시각 · 건수가 실패하면 목록은 영영 안 불림 → 그것도 실패로 (11/09 검수: 뼈대만 계속 보이던 것)
+    isLoading: list.isPending && !anchor.error && !count.error,
     isStale: list.isPlaceholderData,
-    error: list.error ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
+    error:
+      list.error || anchor.error || count.error
+        ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'
+        : null,
     total,
     page: Math.min(page, pages),
     size,

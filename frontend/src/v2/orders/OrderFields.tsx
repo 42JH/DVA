@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react'
 import type { useOrderForm } from '@/features/order/hooks/useOrderForm'
 import { PRICE_BANDS, priceBand } from '@/shared/order/labels'
+import { priceOk } from '@/features/order/api/orderLimits'
 import { AddressPicker } from '@/v2/ui/AddressPicker'
 import { AddressButton, Choice, Err, Label, TextInput } from '@/v2/ui/Field'
 
@@ -289,7 +290,9 @@ function Payment({ f }: { f: OrderForm }) {
 
 /** 물품 가액 — 구간 고르기. 고르면 그 구간의 가장 큰 금액이 들어감. 이미 있는 금액(AI 접수)은 그 구간으로 보이고, 안 고치면 그대로 */
 function PriceBand({ f, error }: { f: OrderForm; error?: string }) {
-  const v = f.declaredValue === '' ? '' : String(priceBand(Number(f.declaredValue)).max)
+  // 범위 밖 금액(0 · 1억 초과)은 '구간 선택'으로 — 보이는 구간을 다시 골라도 안 바뀌어 고칠 수 없던 것 (11/09 검수)
+  const n = Number(f.declaredValue)
+  const v = f.declaredValue === '' || !priceOk(n) ? '' : String(priceBand(n).max)
   return (
     <label className="flex min-w-0 flex-col gap-1">
       <Label>물품 가액</Label>
