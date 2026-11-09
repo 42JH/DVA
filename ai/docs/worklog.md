@@ -1003,3 +1003,10 @@
 - `matcher.named_only`(번호 토큰이 하나도 없는 발화)로 이름만으로 찾은 경우를 가리고, `AddressService`가 `AddressResult.area`(지번주소의 시·군·구와 동, 지번이 없으면 시·군·구만)를 돌려준다. `record_fields`는 기록은 그대로 하되 facts `confirm_area = {항목: "강남구 역삼동"}`을 붙인다.
 - 정책: `workflow.toml [results] confirm_area`(도로명·번지는 읽지 않고 "{값} 맞나요?"로 한 번 확인, 아니면 지역을 묻는다), `business_rules.md` 주소 듣기, `backend_rules.md` 주소 기록 규칙에 같은 규칙. 외부 계약(BE·PBX·도구 인자) 변경 없음.
 - 테스트: 서비스(주소DB 건물명·카카오 상호·번호 있는 주소·읍면리·지번 없음), record 도구 facts, 정책 렌더링. 남은 위험: "아니요" 답은 기존 정정 흐름(지역 + 상호를 다시 맡김)에 맡기며 기록을 보류하지 않는다.
+
+## 2026-11-09 — S15P31D109-165 (2) 주소록에 없는 장소를 find_destination이 받는 곳 주소로 넘김
+
+- 운영 통화 a97347a8(10:16): 고객이 "다이소 구미 인동점"·"다이소 구미점"·"다이소 인동점"을 말했는데 Backend는 세 번 모두 `find_destination(place=…)`만 부르고(주소록·기업 검색 → DEST_NONE) `record_fields.receiver_address`로는 넘기지 않아 주소DB·카카오 검색이 한 번도 돌지 않았다(운영 24시간 로그에 dapi.kakao.com 요청 0건, 키는 로컬과 같은 실제 키). 이전 통화들(59acffa0 등)에서는 DEST_NONE 뒤 모델이 주소로 다시 넘겨 찾았다 — 모델 재량에 맡긴 분기가 원인.
+- 수정: `find_destination`이 place를 받았는데 주소록·기업에 없으면 서버가 `record_fields`(receiver_name·receiver_address=place[·organization]·detail)로 넘기고 그 결과를 돌려준다(facts `found: 0` 유지). 이름만으로 찾은 주소는 (1)의 confirm_area로 구·동을 확인받는다. 이름만 말했을 때(place 없음)의 DEST_NONE은 그대로.
+- 실측(실제 주소DB + 카카오): "다이소 구미 인동점"·"다이소 인동점" → 경상북도 구미시 인동중앙로10길 24, confirm_area "구미시 인의동". "다이소 구미점" → 성남시 분당구 구미동(다른 지점 — 구·동 확인이 걸러 낼 사례). 로그 139건의 place 값은 전부 상호·건물·도로명이라 보통명사("회사"·"집") 입력은 없었다. 다만 주소DB에 "회사"·"학교"·"사무실"이라는 건물명이 실제로 있어 그런 단어가 place로 오면 ADDRESS_REGION_NEEDED(엉뚱한 지역 되묻기)가 나올 수 있다 — 발생하면 건물명 검색의 보통명사 처리로 다룬다.
+- 전체 테스트 724개 통과. Backend 규칙에 "상호·지점 이름은 find_destination에 place로, 서버가 주소로 찾는다"를 추가.
