@@ -32,13 +32,13 @@ def prepare():
     fixture_patch = ROOT / 'msa/parity/reference-tests.patch'
     if fixture_patch.exists():
         content = fixture_patch.read_text()
-        paths = subprocess.check_output(['git', '-C', str(snapshot), 'apply', '--numstat', '-'],
+        paths = subprocess.check_output(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '--numstat', '-'],
                                         input=content, text=True).splitlines()
         allowed = {'backend/test/helpers/' + name + '.cjs' for name in ('application', 'orders', 'manual-orders')}
         if {line.split('\t')[-1] for line in paths} != allowed:
             raise RuntimeError('Reference fixture patch must only update the three business helpers')
-        subprocess.run(['git', '-C', str(snapshot), 'apply', '--check', '-'], input=content, text=True, check=True)
-        subprocess.run(['git', '-C', str(snapshot), 'apply', '-'], input=content, text=True, check=True)
+        subprocess.run(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '--check', '-'], input=content, text=True, check=True)
+        subprocess.run(['git', '-C', str(snapshot), 'apply', '--unidiff-zero', '-'], input=content, text=True, check=True)
     git(snapshot, 'add', '--', 'backend')
     tree = git(snapshot, 'write-tree')
     commit = git(snapshot, '-c', 'user.name=Dva CI verification', '-c', 'user.email=ci@dva.invalid',

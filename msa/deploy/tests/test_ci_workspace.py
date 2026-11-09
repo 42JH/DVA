@@ -78,7 +78,7 @@ class CiWorkspaceTests(unittest.TestCase):
     def fixture_patch(self, paths):
         for path in paths:
             (self.root / path).write_text('module.exports = "session fixture";\n')
-        content = self.git('diff', '--binary', '--full-index', '--', 'backend') + '\n'
+        content = self.git('diff', '--unified=0', '--binary', '--full-index', '--', 'backend') + '\n'
         self.git('restore', '--', *paths)
         (self.root / 'msa/parity/reference-tests.patch').write_text(content)
         self.commit()

@@ -34,7 +34,7 @@ def source_commit():
         raise RuntimeError('CI snapshot does not match the original MSA and pinned backend')
     if values[3] != values[4]:
         fixture_patch = ROOT / 'msa/parity/reference-tests.patch'
-        actual = run('git', 'diff', '--binary', '--full-index', reference, 'HEAD', '--', 'backend')
+        actual = run('git', 'diff', '--unified=0', '--binary', '--full-index', reference, 'HEAD', '--', 'backend')
         if not fixture_patch.exists() or actual != fixture_patch.read_text().strip():
             raise RuntimeError('CI snapshot changed more than the approved reference test fixtures')
     return source

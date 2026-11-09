@@ -2,19 +2,10 @@ diff --git a/backend/test/helpers/application.cjs b/backend/test/helpers/applica
 index 1f855ab628e10b80adfdf5ab7ca8fced6e9db6fc..c44525a82be6c25e856a8eab1dce88ac98a8b88d 100644
 --- a/backend/test/helpers/application.cjs
 +++ b/backend/test/helpers/application.cjs
-@@ -1,7 +1,7 @@
- require('reflect-metadata');
- const { before, after } = require('node:test');
- const assert = require('node:assert/strict');
+@@ -4 +4 @@ const assert = require('node:assert/strict');
 -const { randomUUID } = require('node:crypto');
 +const { randomUUID, randomBytes, createHash } = require('node:crypto');
- const { Pool } = require('pg');
- const { NestFactory } = require('@nestjs/core');
- const { migrate } = require('./migrations.cjs');
-@@ -34,11 +34,23 @@ async function startTestApp(apps, logger = { log: () => {} }) {
-   return app;
- }
- 
+@@ -36,0 +37,13 @@ async function startTestApp(apps, logger = { log: () => {} }) {
 +// Business fixtures exercise the real guard; password/login behavior belongs to the auth suites.
 +async function createTestSession(pool, adminUserSeq) {
 +  assert.equal(process.env.NODE_ENV, 'test');
@@ -28,33 +19,17 @@ index 1f855ab628e10b80adfdf5ab7ca8fced6e9db6fc..c44525a82be6c25e856a8eab1dce88ac
 +  return `${SESSION_COOKIE}=${token}`;
 +}
 +
- function applicationFixture(name = '통합 테스트 관리자') {
-   const pool = createTestPool();
-   process.env.SWAGGER_ENABLED = 'true';
-   process.env.CORS_ORIGINS = 'http://localhost:5173';
+@@ -41 +53,0 @@ function applicationFixture(name = '통합 테스트 관리자') {
 -  const { hashPassword } = require('../../dist/auth/password');
-   const f = {
-     pool,
-     origin: 'http://localhost:5173',
-@@ -80,26 +92,18 @@ function applicationFixture(name = '통합 테스트 관리자') {
-     await migrate(pool);
-     f.app = await f.start();
-     f.base = await f.app.getUrl();
+@@ -83,2 +94,0 @@ function applicationFixture(name = '통합 테스트 관리자') {
 -    const password = 'integration-test-only-password';
 -    const hash = await hashPassword(password);
-     for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
-       const loginId = 'test' + randomUUID().replaceAll('-', '').slice(0, 16);
-       f.loginIds.push(loginId);
-       f.ids.push(
-         (
-           await pool.query(
+@@ -91,2 +101,2 @@ function applicationFixture(name = '통합 테스트 관리자') {
 -            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,$2,$3,$4,'ACTIVE') RETURNING admin_user_seq",
 -            [loginId, name, hash, role],
 +            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,$2,'not-for-login',$3,'ACTIVE') RETURNING admin_user_seq",
 +            [loginId, name, role],
-           )
-         ).rows[0].admin_user_seq,
-       );
+@@ -96,7 +106 @@ function applicationFixture(name = '통합 테스트 관리자') {
 -      const response = await fetch(f.base + '/api/auth/login', {
 -        method: 'POST',
 -        headers: { Origin: f.origin, 'Content-Type': 'application/json' },
@@ -63,13 +38,7 @@ index 1f855ab628e10b80adfdf5ab7ca8fced6e9db6fc..c44525a82be6c25e856a8eab1dce88ac
 -      assert.equal(response.status, 200, await response.clone().text());
 -      f.cookies.push(response.headers.get('set-cookie').split(';')[0]);
 +      f.cookies.push(await createTestSession(pool, f.ids.at(-1)));
-     }
-   });
-   after(async () => {
-@@ -109,4 +113,10 @@ function applicationFixture(name = '통합 테스트 관리자') {
-   return f;
- }
- 
+@@ -112 +116,7 @@ function applicationFixture(name = '통합 테스트 관리자') {
 -module.exports = { applicationFixture, createTestPool, startTestApp, businessHeaders };
 +module.exports = {
 +  applicationFixture,
@@ -82,41 +51,20 @@ diff --git a/backend/test/helpers/manual-orders.cjs b/backend/test/helpers/manua
 index 784cbf2fa535b42e0243452ef425fe219c00b033..4718c4473752004c39d752bb41c40dab3fb3167e 100644
 --- a/backend/test/helpers/manual-orders.cjs
 +++ b/backend/test/helpers/manual-orders.cjs
-@@ -5,7 +5,7 @@ const { before, beforeEach, after } = require('node:test');
- const assert = require('node:assert/strict');
- const { randomUUID, randomInt } = require('node:crypto');
- const { createServer } = require('node:http');
+@@ -8 +8 @@ const { createServer } = require('node:http');
 -const { createTestPool } = require('./application.cjs');
 +const { createTestPool, createTestSession } = require('./application.cjs');
- const { NestFactory } = require('@nestjs/core');
- const { ConfigService } = require('@nestjs/config');
- 
-@@ -17,7 +17,6 @@ module.exports = function manualOrders() {
-   process.env.CORS_ORIGINS = 'http://localhost:5173';
-   const { AppModule } = require('../../dist/app.module');
-   const { configureApplication } = require('../../dist/configure-application');
+@@ -20 +19,0 @@ module.exports = function manualOrders() {
 -  const { hashPassword } = require('../../dist/auth/password');
-   const pool = createTestPool();
-   const origin = 'http://localhost:5173';
-   const f = { pool, origin, apps: [], cookies: [], adminIds: [], requests: [] };
-@@ -114,25 +113,17 @@ module.exports = function manualOrders() {
-     f.dverUrl = `http://127.0.0.1:${f.server.address().port}/parcel`;
-     f.app = await f.start();
-     f.host = await f.app.getUrl();
+@@ -117,2 +115,0 @@ module.exports = function manualOrders() {
 -    const password = 'manual-order-test-password';
 -    const hash = await hashPassword(password);
-     for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
-       const loginId = 'manual' + randomUUID().replaceAll('-', '').slice(0, 14);
-       f.adminIds.push(
-         (
-           await pool.query(
+@@ -124,2 +121,2 @@ module.exports = function manualOrders() {
 -            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'수기 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
 -            [loginId, hash, role],
 +            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'수기 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq",
 +            [loginId, role],
-           )
-         ).rows[0].admin_user_seq,
-       );
+@@ -129,7 +126 @@ module.exports = function manualOrders() {
 -      const login = await fetch(f.host + '/api/auth/login', {
 -        method: 'POST',
 -        headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -125,14 +73,11 @@ index 784cbf2fa535b42e0243452ef425fe219c00b033..4718c4473752004c39d752bb41c40dab
 -      assert.equal(login.status, 200);
 -      f.cookies.push(login.headers.get('set-cookie').split(';')[0]);
 +      f.cookies.push(await createTestSession(pool, f.adminIds.at(-1)));
-     }
-     f.customerId = (
-       await pool.query(
 diff --git a/backend/test/helpers/orders.cjs b/backend/test/helpers/orders.cjs
 index 76b98341aaabf207d0a60244fa92055096bf0894..cfdbb2407cd2478f41d5e1aeafb09e21ce043746 100644
 --- a/backend/test/helpers/orders.cjs
 +++ b/backend/test/helpers/orders.cjs
-@@ -1,4 +1,9 @@
+@@ -1 +1,6 @@
 -const { createTestPool, startTestApp, businessHeaders } = require('./application.cjs');
 +const {
 +  createTestPool,
@@ -140,38 +85,18 @@ index 76b98341aaabf207d0a60244fa92055096bf0894..cfdbb2407cd2478f41d5e1aeafb09e21
 +  startTestApp,
 +  businessHeaders,
 +} = require('./application.cjs');
- const { legacyOrderIntake } = require('./legacy-order-intake.cjs');
- 
- module.exports = function ordersFixture() {
-@@ -21,12 +26,10 @@ module.exports = function ordersFixture() {
-   const { OrdersRepository } = require('../../dist/orders/orders.repository');
-   const { AuditService } = require('../../dist/audit/audit.service');
-   const { DatabaseService } = require('../../dist/database/database.service');
+@@ -24 +28,0 @@ module.exports = function ordersFixture() {
 -  const { hashPassword } = require('../../dist/auth/password');
-   const pool = createTestPool();
-   const apps = [],
-     hosts = [],
-     cookies = [];
+@@ -29 +32,0 @@ module.exports = function ordersFixture() {
 -  const password = 'order-test-only-password';
-   const origin = 'http://localhost:5173';
-   let customerId,
-     withdrawnId,
-@@ -52,23 +55,16 @@ module.exports = function ordersFixture() {
- 
-   before(async () => {
-     await migrate(pool);
+@@ -55 +57,0 @@ module.exports = function ordersFixture() {
 -    const hash = await hashPassword(password);
-     for (const [index, role] of ['OPERATOR', 'SYSTEM_ADMIN', 'SUPERVISOR'].entries()) {
-       const result = await pool.query(
+@@ -58,2 +60,2 @@ module.exports = function ordersFixture() {
 -        `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq`,
 -        [`orderTest${index}`, hash, role],
 +        `INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'주문 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq`,
 +        [`orderTest${index}`, role],
-       );
-       if (index === 0) adminId = result.rows[0].admin_user_seq;
-       // 두 인스턴스의 동시성 검증은 유지하고 세 번째 역할은 첫 앱에서 인증한다.
-       const app = index < 2 ? legacyOrderIntake(await startTestApp(apps)) : apps[0];
-       hosts.push(await app.getUrl());
+@@ -65,7 +67 @@ module.exports = function ordersFixture() {
 -      const response = await fetch(hosts[index] + '/api/auth/login', {
 -        method: 'POST',
 -        headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -180,6 +105,3 @@ index 76b98341aaabf207d0a60244fa92055096bf0894..cfdbb2407cd2478f41d5e1aeafb09e21
 -      assert.equal(response.status, 200);
 -      cookies.push(response.headers.get('set-cookie').split(';')[0]);
 +      cookies.push(await createTestSession(pool, result.rows[0].admin_user_seq));
-     }
-     repository = apps[0].get(OrdersRepository);
-     const customer = async (phone, status) =>
