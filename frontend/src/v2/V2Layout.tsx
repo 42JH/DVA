@@ -22,7 +22,8 @@ export function V2Layout() {
       title: '운영',
       items: [
         { to: '/v2', label: '홈', icon: 'home' },
-        { to: '/v2/orders', label: '주문', icon: 'box', count: s.incomplete },
+        // 주문 옆 숫자는 뺌 (11/09 사용자: '주문 72'가 주문 수로 읽힘. 미완료는 홈 '처리할 일' · 주문 미완료 탭에서)
+        { to: '/v2/orders', label: '주문', icon: 'box' },
         {
           to: '/v2/calls',
           label: '통화',
