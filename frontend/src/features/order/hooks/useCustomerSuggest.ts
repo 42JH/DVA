@@ -10,7 +10,6 @@ export interface Suggestion {
   name: string
   phoneNumber: string
   address: Address | null
-  label?: string | null // 주소록 별칭 ('회사' 등)
 }
 
 type Typed = { name: string; phone: string }
@@ -56,7 +55,6 @@ export function useCustomerSuggest(
           name: p.addressData.name,
           phoneNumber: p.addressData.phoneNumber,
           address: p.addressData,
-          label: p.label,
         }))
 
   return {

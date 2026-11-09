@@ -122,14 +122,13 @@ export function OrderFields({
   )
 }
 
-/** 추천 한 줄 — 이름 · 번호 (별칭), 아래에 주소 */
+/** 추천 한 줄 — 이름 · 번호, 아래에 주소 */
 function SuggestRow(s: Suggestion) {
   return (
     <span className="flex min-w-0 flex-col">
       <span className="flex items-baseline gap-2">
         <span className="font-medium">{s.name}</span>
         <span className="text-ops-sub tabular-nums">{fmtPhone(s.phoneNumber)}</span>
-        {s.label && <span className="text-[12px] text-ops-faint">{s.label}</span>}
       </span>
       <span className="truncate text-[12px] text-ops-faint">
         {s.address ? `${s.address.roadAddress} ${s.address.detailAddress ?? ''}` : '주소 없음'}
