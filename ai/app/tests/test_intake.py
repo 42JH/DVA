@@ -52,7 +52,8 @@ def test_live_document_and_box_values_in_readback_and_ready_draft(tmp_path, item
 
     async def scenario():
         out = await run_tool(s.tools, "record_fields", json.dumps(items), "record-items")
-        assert out["facts"]["readback"].get("item_price") == (price if "item_price" in items else None)
+        assert "item_price" not in out["facts"]["readback"]  # 되읽기는 성함·동 이름만(2026-11-09); 가액은 스냅샷으로 확인
+        assert s.state.pending.snapshot["item_price"] == price
         await lf.commit(s, s.state.pending.id)
         [draft] = db.drafts.values()
         assert draft["status"] == "READY"

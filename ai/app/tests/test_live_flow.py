@@ -699,10 +699,9 @@ def test_origin_paths_other_place_and_recent_only():
     assert lf._origin_step(st) == {"origin_confirm": "부산 해운대구 센텀로 10"} and st.origin_offered
     st.origin_answer = True
     assert lf._origin_step(st) == {"origin": "prefilled"}
-    # 되읽기에는 저장된 상세주소를 넣지 않는다
+    # 되읽기에는 성함과 동 이름만(geo가 없으면 건물번호를 뺀 주소)
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
-    out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
-    assert "sender_address" in out and "sender_address_detail" not in out
+    assert readback_facts(snap) == {"sender_name": "김철수", "from": "부산 해운대구 센텀로"}
 
 
 def test_customer_end_mid_collection_greets_then_hangs_up():

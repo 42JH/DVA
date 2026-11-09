@@ -19,10 +19,11 @@ def raw() -> dict:
 
 
 def test_receive_order_matches_call_flow_rule():
-    """README '반드시 지킬 것' 1: 보내는 분 성함 → 주소 → 상세 → 받는 분 성함 → 연락처 → 주소 → 상세 → 물품 → 가액 → 수거 일시."""
+    """README '반드시 지킬 것' 1(2026-11-09): 보내는 분 성함 → 받는 분 성함 → 연락처 → 보내는 곳 주소 → 상세 → 받는 곳 주소 → 상세
+    → 물품 → 가액 → 수거 일시."""
     order = [n for s in POLICY.collect_stages() for n in s.required]
     # 수거 일시는 묻지 않는다(사용자 결정 2026-11-03, BE가 결제 완료 + 1시간으로 정함)
-    assert order == ["sender_name", "sender_address", "sender_address_detail", "receiver_name", "receiver_phone",
+    assert order == ["sender_name", "receiver_name", "receiver_phone", "sender_address", "sender_address_detail",
                      "receiver_address", "receiver_address_detail", "items", "item_price"]
     assert POLICY.fields["sender_phone"].kind == "auto" and "sender_phone" not in order  # 발신번호, 묻지 않음
 
@@ -62,8 +63,10 @@ def test_persona_first_then_fixed_business_rules_and_fallback_on_blank():
 
 def test_server_results_are_rendered_from_workflow_policy():
     text = render_live(None, POLICY)
-    for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup"):
+    for key in ("call_started", "closing", "agent", "phones_to_read", "missing", "origin_confirm", "pickup",
+                "confirm_route", "readback"):
         assert text.count(f"\n- {key}: {POLICY.results[key]}") == 1
+    assert "이대로 접수할까요?" in POLICY.results["readback"]  # 간소화한 되읽기도 질문으로 끝나야 G3을 통과한다
     assert "접수 정보를 수집할 때만" in text
     assert "궁금한 점이 더 있는지" not in POLICY.results["more_parcels"]
     assert "{pickup_allowed}" not in text
@@ -76,6 +79,7 @@ def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     assert "그 부분만 바꾼 전체 번호" in text  # 번호 부분 정정(업무 규칙 d)
     assert "들은 그대로 기록" in text and "숫자로 바꾸지 않습니다" in text  # 주소 기록 규칙: 수사 변환·상세 분리는 서버가(P13)
     assert "confirm_area" in text and "confirm_area" in business_rules()  # 이름만으로 찾은 주소는 구·동만 확인(S15P31D109-165)
+    assert "confirm_route" in text and "confirm_route" in business_rules()  # 두 주소가 갖춰지면 동 이름으로 확인(2026-11-09)
 
 
 def test_server_missing_uses_same_order_as_instructions():

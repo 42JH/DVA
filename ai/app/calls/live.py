@@ -418,8 +418,7 @@ class LiveFlow:
                 if pending and pending.kind == "cancel":
                     facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
                 elif pending and st.current is not None:
-                    sources = {n: f.source for n, f in st.current.fields.items()}
-                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
+                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot)}
             if facts:
                 s.note("확인 다시 묻기", value)
                 await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
@@ -680,8 +679,7 @@ class LiveFlow:
         if not st.pickup_at.valid:
             iso, moved = default_pickup(s.tools.now(), rule)
             st.record("pickup_at", iso, Source.SERVER)
-        sources = {n: f.source for n, f in st.current.fields.items()}
-        return {"readback": readback_facts(pending.snapshot, sources, self.policy),
+        return {"readback": readback_facts(pending.snapshot),
                 "pickup": {"at": st.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
