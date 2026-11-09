@@ -103,7 +103,8 @@ class ResultService:
 
     # ------------------------------------------------------------------ 신규 고객 등록(원본 register_customer)
     async def register(self, s: CallSession, call_session_seq) -> None:
-        """보내는 분 성함·주소·상세가 다 찬 미등록 고객을 통화당 1번 등록 → 고객 확인 재호출 → 보내는 곳 PIN.
+        """보내는 분 성함·주소·상세가 다 찬 미등록 고객을 통화당 1번 등록(보내는 곳 = 고객 기본 주소) → 고객 확인 재호출.
+        PIN은 받는 곳 전용이라 보내는 곳 PIN은 만들지 않는다(사용자 결정 2026-11-09).
         실패해도 통화는 신규 고객으로 이어 가고 결과는 customer{name, phoneNumber}로 보낸다."""
         op = s.tools.ops["register"]
         try:
@@ -115,7 +116,7 @@ class ResultService:
                 name = cur["sender_name"].value
                 snap = draft_snapshot(cur)
                 geo = cur.sender_geo
-            seq = await call_session_seq(s)
+            await call_session_seq(s)
             address = None
             if geo:  # 주소 7항목 중 이름·번호를 뺀 완성 주소만(부분 주소로 기본 출발지를 만들지 않는다)
                 address = {"roadAddress": snap["sender_address"], "jibunAddress": geo.jibun_address,
@@ -130,9 +131,6 @@ class ResultService:
                 saved = self.intake is not None and s.tools.draft_intake and not s.closed and self.intake.sync(s)
             if saved:
                 s.spawn(self.intake.flush(s.call_id), "draft_save")
-            if ctx.status == "REGISTERED" and geo and seq:
-                await self.backend.write("create_pin", self.backend.api.create_pin, seq, ctx.customer_seq,
-                                         to_order(snap), "sender", "보내는 곳")
             op["status"] = "done" if ctx.status == "REGISTERED" else "failed"
             s.note("고객 등록", ctx.status)
         except BackendFailure as e:
