@@ -1,5 +1,13 @@
 # 프론트 QA 반영 API — S15P31D109-174
 
+2026-11-09 최신 페르소나·전화번호 검색·고객/주소록 삭제의 전체 검증과 운영 데이터 이관 결과는 [QA 검증 기록](persona-prompt-fields-verification.md)을 따른다. 전체 911개가 통과했고 페르소나 데이터는 삭제 없이 이관했다. 새 API 사용에는 앱 배포가 필요하다.
+
+관리자 주소록 단건·다건 soft delete는 [DELETE /api/pins 연동 명세](personal-pin-bulk-deletion.md)를 따른다. personalPinSeqs 배열로 요청하며 고객 기본 주소·주문 주소는 보존한다.
+
+관리자 고객 단건·다건 soft delete는 [DELETE /api/customers 연동 명세](customer-bulk-deletion.md)를 따른다. customerSeqs 배열로 요청하며 전체 성공 204, 일부 미존재·기삭제는 전체 롤백 후 404다.
+
+2026-11-09 추가: [페르소나 6개 항목별 입력·조회와 기존 데이터 이관](persona-prompt-fields.md), [고객 전화번호 부분 검색](customer-phone-search.md)을 따른다. 기존 URL을 재사용하며 페르소나 생성·수정은 promptText 대신 개별 항목으로 전환한다.
+
 2026-11-09 후속 작업 브랜치 `feature/complaint-draft-follow-up`에서는 [예약번호·통합 목록 명세](parcel-draft-order-reservation.md)를 적용한다. 전체에 INCOMPLETE 초안을 포함하고 draftSeq로 행을 구분한다. 아래 단계별 검증 건수는 해당 시점의 이력이며 최신 검증은 [후속 기록](complaint-draft-follow-up.md)을 따른다. 운영 반영 전 057·058 migration과 프론트의 행 분기 적용이 필요하다.
 
 backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 허용 Origin이 필요하다. 기존 삭제·5년 보관·역할 기준을 유지한다. 프론트·AI·MSA·운영 배포는 별도다.

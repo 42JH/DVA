@@ -1,6 +1,20 @@
-import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import {
   ApiCreatedResponse,
+  ApiCookieAuth,
+  ApiNoContentResponse,
   ApiHeader,
   ApiOkResponse,
   ApiOperation,
@@ -23,6 +37,7 @@ import {
   PinVersionEnvelopeDto,
 } from './dto/pin-response.dto';
 import { PinsService } from './pins.service';
+import { DeletePinsDto } from './dto/delete-pins.dto';
 
 const callHeader = {
   name: 'call_session_seq',
@@ -46,6 +61,24 @@ const aiSecurity: Record<string, string[]>[] = [{ adminSession: [] }, {}];
 @Controller()
 export class PinsController {
   constructor(private readonly pins: PinsService) {}
+
+  @Delete('pins')
+  @HttpCode(204)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'PERSONAL_PIN_DELETED', targetType: 'PERSONAL_PIN', target: 'none' })
+  @ApiOperation({
+    summary: '개인 주소록 단건·다건 soft delete',
+    description:
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. personalPinSeqs 배열 1~100개. 여러 고객의 PIN도 함께 선택할 수 있습니다. 고객 기본 주소와 주문 주소 스냅샷은 유지합니다. 미존재·기삭제 또는 감사 저장 실패 시 전체 롤백하며 잠금 경합은 409입니다. AI 통화 헤더로 사용할 수 없습니다.',
+  })
+  @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
+  removeMany(@Body() input: DeletePinsDto, @Req() request: AuthRequest) {
+    return this.pins.removeMany(
+      input.personalPinSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
 
   @Get('customers/:id/pins')
   @MvpAiPinAccess()

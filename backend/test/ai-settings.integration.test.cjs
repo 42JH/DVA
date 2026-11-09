@@ -5,3 +5,4 @@ require('./ai-settings-application.cjs')(suite);
 require('./ai-settings-publishing.cjs')(suite);
 require('./ai-settings-drafts.cjs')(suite);
 require('./ai-settings-predecessor.cjs')(suite);
+require('./ai-settings-prompt-fields.cjs')(suite);

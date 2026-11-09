@@ -574,3 +574,147 @@ test('audit success is atomic with writes and contains no address or phone; fail
     service.recordSuccess = original;
   }
 });
+
+test('all admin roles delete PIN arrays across customers without changing owners or order snapshots', async () => {
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const headers = await admin(role);
+    const a = await fixture(),
+      b = await fixture();
+    const first = await personal(a),
+      second = await personal(b);
+    const ids = [first.personalPinSeq, second.personalPinSeq];
+    const order = (
+      await pool.query(
+        "INSERT INTO orders(customer_seq,status) VALUES($1,'COLLECTING') RETURNING order_seq",
+        [a.customer],
+      )
+    ).rows[0].order_seq;
+    await pool.query(
+      "INSERT INTO order_parcels(order_seq,parcel_position,origin_name,origin_phone_number,document_count) VALUES($1,1,'과거 발송인','01012345678',1)",
+      [order],
+    );
+    const preserved = async () =>
+      (
+        await pool.query(
+          "SELECT jsonb_build_object('customers',(SELECT jsonb_agg(c ORDER BY customer_seq) FROM customers c WHERE customer_seq=ANY($1::int[])),'parcels',(SELECT jsonb_agg(p ORDER BY order_parcel_seq) FROM order_parcels p WHERE order_seq=$2)) AS data",
+          [[a.customer, b.customer], order],
+        )
+      ).rows[0].data;
+    const before = await preserved();
+    const requestId = randomUUID();
+    const response = await request(
+      'DELETE',
+      '/pins',
+      { personalPinSeqs: ids.toReversed() },
+      { ...headers, 'X-Request-Id': requestId },
+    );
+    assert.equal(response.status, 204, await response.clone().text());
+    assert.equal(await response.text(), '');
+    assert.deepEqual(await preserved(), before);
+    assert.ok((await stored(ids[0])).deleted_at);
+    assert.ok((await stored(ids[1])).deleted_at);
+    const listed = await request('GET', `/customers/${a.customer}/pins`, undefined, headers);
+    assert.equal((await listed.json()).total_count, 0);
+    assert.equal(
+      (
+        await pool.query(
+          "SELECT 1 FROM audit_logs WHERE request_id=$1 AND action='PERSONAL_PIN_DELETED' AND result='SUCCESS'",
+          [requestId],
+        )
+      ).rowCount,
+      2,
+    );
+    const replacement = await personal(a, (await stored(ids[0])).address_data);
+    assert.notEqual(replacement.personalPinSeq, ids[0]);
+    assert.equal(
+      (await request('DELETE', '/pins', { personalPinSeqs: [replacement.personalPinSeq] }, headers))
+        .status,
+      204,
+    );
+  }
+});
+
+test('PIN deletion rejects AI and invalid arrays and rolls back all rows on missing pins or audit failure', async () => {
+  const owner = await fixture();
+  const pins = [await personal(owner), await personal(owner)];
+  const ids = pins.map((p) => p.personalPinSeq);
+  const remove = (values, headers = adminHeaders) =>
+    request('DELETE', '/pins', { personalPinSeqs: values }, headers);
+  for (const values of [
+    [],
+    [ids[0], ids[0]],
+    ['1'],
+    [0],
+    [-1],
+    [1.1],
+    [2147483648],
+    Array.from({ length: 101 }, (_, i) => i + 1),
+    null,
+  ])
+    await error(await remove(values), 400, 'INVALID_REQUEST');
+  await error(await remove(ids, { ...owner.ai, Origin: origin }), 401, 'UNAUTHORIZED');
+  await error(await remove(ids, { ...businessHeaders(), Origin: origin }), 401, 'UNAUTHORIZED');
+  await error(
+    await remove(ids, { ...adminHeaders, Origin: 'https://untrusted.example' }),
+    403,
+    'FORBIDDEN',
+  );
+  await error(await remove([ids[0], 2147483647]), 404, 'NOT_FOUND');
+  const audit = app.get(AuditService),
+    original = audit.recordSuccess;
+  let writes = 0;
+  const requestId = randomUUID();
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'PERSONAL_PIN_DELETED' && ++writes === 2)
+      throw new Error('test-only PIN audit failure');
+    return original.call(this, event, client);
+  };
+  try {
+    await error(
+      await remove(ids, { ...adminHeaders, 'X-Request-Id': requestId }),
+      500,
+      'INTERNAL_ERROR',
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal((await stored(ids[0])).deleted_at, null);
+  assert.equal((await stored(ids[1])).deleted_at, null);
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        requestId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal((await remove([ids[1]])).status, 204);
+  await error(await remove(ids), 404, 'NOT_FOUND');
+  assert.equal((await stored(ids[0])).deleted_at, null);
+});
+
+test('PIN deletion uses a consistent customer-first lock order for overlap and lock-timeout recovery', async () => {
+  const owner = await fixture(),
+    a = await personal(owner),
+    b = await personal(owner);
+  const ids = [a.personalPinSeq, b.personalPinSeq];
+  const remove = (values) => request('DELETE', '/pins', { personalPinSeqs: values });
+  assert.deepEqual(
+    (await Promise.all([remove(ids), remove(ids.toReversed())])).map((r) => r.status).sort(),
+    [204, 404],
+  );
+  const held = await personal(owner);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [
+      owner.customer,
+    ]);
+    await error(await remove([held.personalPinSeq]), 409, 'REQUEST_IN_PROGRESS');
+    assert.equal((await stored(held.personalPinSeq)).deleted_at, null);
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  assert.equal((await remove([held.personalPinSeq])).status, 204);
+});

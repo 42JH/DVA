@@ -278,7 +278,7 @@ test('customer list and status changes require a real active administrator; forg
   }
 });
 
-test('list supports literal name search, exact phone, state and stable offset pages', async () => {
+test('list supports literal name search, partial phone, state and stable offset pages', async () => {
   const prefix = '목록' + randomUUID();
   const inputs = ['Alpha%_', 'alpha', 'beta'].map((name) => ({
     name: prefix + name,
@@ -308,6 +308,30 @@ test('list supports literal name search, exact phone, state and stable offset pa
   assert.equal(second.hasNext, false);
   assert.equal((await list({ q: prefix.toUpperCase() + 'ALPHA%_' })).data[0].customerSeq, ids[0]);
   assert.equal((await list({ phoneNumber: inputs[0].phoneNumber })).data[0].customerSeq, ids[0]);
+  for (const fragment of [
+    inputs[0].phoneNumber.slice(0, 3),
+    inputs[0].phoneNumber.slice(3, 7),
+    inputs[0].phoneNumber.slice(-4),
+    inputs[0].phoneNumber.slice(1),
+  ]) {
+    const expected = inputs
+      .map((input, index) => ({ ...input, id: ids[index] }))
+      .filter((input) => input.phoneNumber.includes(fragment))
+      .map((input) => input.id)
+      .toReversed();
+    const partial = await list({ q: prefix, phoneNumber: fragment });
+    assert.deepEqual(
+      partial.data.map((row) => row.customerSeq),
+      expected,
+    );
+    assert.equal(partial.total_count, expected.length);
+  }
+  const filtered = await list({ q: prefix, phoneNumber: '010', status: 'WITHDRAWN', limit: '1' });
+  assert.deepEqual(
+    filtered.data.map((row) => row.customerSeq),
+    [ids[1]],
+  );
+  assert.equal(filtered.total_count, 1);
   assert.deepEqual((await list({ phoneNumber: phone() })).data, []);
   assert.deepEqual(
     (await list({ q: prefix, status: 'WITHDRAWN' })).data.map((row) => row.customerSeq),
@@ -325,7 +349,10 @@ test('list supports literal name search, exact phone, state and stable offset pa
     'offset=1.5',
     'q=a&q=b',
     'phoneNumber=010-1234',
-    'phoneNumber=' + inputs[0].phoneNumber.slice(1),
+    'phoneNumber=',
+    'phoneNumber=123456789012',
+    'phoneNumber=%25',
+    'phoneNumber=123&phoneNumber=456',
     'status=INACTIVE',
     'page=1',
   ])
@@ -931,4 +958,202 @@ test('a customer address write waiting behind call termination rechecks the end 
     transaction.release();
     await pending?.catch(() => {});
   }
+});
+
+test('admin arrays soft-delete customers, memberships and PINs while preserving orders and calls', async () => {
+  for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const actor = await account(role);
+    const ids = [await register(), await register()];
+    const organization = (
+      await pool.query(
+        "INSERT INTO organizations(name,status) VALUES('삭제 회귀 기업','ACTIVE') RETURNING organization_seq",
+      )
+    ).rows[0].organization_seq;
+    await testMembership(pool, {
+      customerSeq: ids[0],
+      organizationSeq: organization,
+      employeeNo: randomUUID(),
+      role: 'MEMBER',
+      status: 'ACTIVE',
+    });
+    const pin = (
+      await pool.query(
+        'INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2) RETURNING personal_pin_seq',
+        [ids[0], { ...customerAddress(), name: '보존 수령인', phoneNumber: phone() }],
+      )
+    ).rows[0].personal_pin_seq;
+    const order = (
+      await pool.query(
+        "INSERT INTO orders(customer_seq,status) VALUES($1,'COLLECTING') RETURNING order_seq",
+        [ids[0]],
+      )
+    ).rows[0].order_seq;
+    const callId = (
+      await pool.query(
+        'INSERT INTO call_sessions(provider_call_id,customer_seq,order_seq) VALUES($1,$2,$3) RETURNING call_session_seq',
+        [randomUUID(), ids[0], order],
+      )
+    ).rows[0].call_session_seq;
+    const history = async () =>
+      (
+        await pool.query(
+          "SELECT jsonb_build_object('order',(SELECT to_jsonb(o) FROM orders o WHERE order_seq=$1),'call',(SELECT to_jsonb(c) FROM call_sessions c WHERE call_session_seq=$2)) AS data",
+          [order, callId],
+        )
+      ).rows[0].data;
+    const before = await history();
+    const requestId = randomUUID();
+    const response = await request('', {
+      method: 'DELETE',
+      headers: {
+        Origin: origin,
+        Cookie: actor.cookie,
+        'Content-Type': 'application/json',
+        'X-Request-Id': requestId,
+      },
+      body: JSON.stringify({ customerSeqs: ids.toReversed() }),
+    });
+    assert.equal(response.status, 204, await response.clone().text());
+    assert.equal(await response.text(), '');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await history(), before);
+    const deleted = await pool.query(
+      'SELECT deleted_at FROM customers WHERE customer_seq=ANY($1::int[])',
+      [ids],
+    );
+    assert.equal(deleted.rowCount, 2);
+    assert.ok(deleted.rows.every((row) => row.deleted_at));
+    assert.ok(
+      (await pool.query('SELECT deleted_at FROM personal_pins WHERE personal_pin_seq=$1', [pin]))
+        .rows[0].deleted_at,
+    );
+    assert.ok(
+      (await pool.query('SELECT deleted_at FROM memberships WHERE customer_seq=$1', [ids[0]]))
+        .rows[0].deleted_at,
+    );
+    for (const id of ids)
+      await error(await request('/' + id, { headers: { Cookie: actor.cookie } }), 404, 'NOT_FOUND');
+    const audits = (
+      await pool.query(
+        "SELECT actor_seq,target_seq FROM audit_logs WHERE request_id=$1 AND action='CUSTOMER_DELETED' AND result='SUCCESS' ORDER BY target_seq",
+        [requestId],
+      )
+    ).rows;
+    assert.deepEqual(
+      audits,
+      ids.map((id) => ({ actor_seq: actor.id, target_seq: id })),
+    );
+    const single = await register();
+    assert.equal(
+      (
+        await request('', {
+          method: 'DELETE',
+          headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customerSeqs: [single] }),
+        })
+      ).status,
+      204,
+    );
+  }
+});
+
+test('customer deletion validates arrays and admin access and rolls back missing rows or audit failure', async () => {
+  const ids = [await register(), await register()];
+  const remove = (values, headers = adminHeaders()) =>
+    request('', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ customerSeqs: values }),
+    });
+  for (const values of [
+    [],
+    [ids[0], ids[0]],
+    ['1'],
+    [0],
+    [-1],
+    [1.1],
+    [2147483648],
+    Array.from({ length: 101 }, (_, i) => i + 1),
+    null,
+  ])
+    await error(await remove(values), 400, 'INVALID_REQUEST');
+  await error(await remove(ids, { ...businessHeaders(), Origin: origin }), 401, 'UNAUTHORIZED');
+  await error(
+    await remove(ids, { ...adminHeaders(), Origin: 'https://untrusted.example' }),
+    403,
+    'FORBIDDEN',
+  );
+  await error(await remove([ids[0], 2147483647]), 404, 'NOT_FOUND');
+  const audit = app.get(require('../dist/audit/audit.service').AuditService);
+  const original = audit.recordSuccess;
+  const requestId = randomUUID();
+  let writes = 0;
+  audit.recordSuccess = async function (event, client) {
+    if (event.action === 'CUSTOMER_DELETED' && ++writes === 2)
+      throw new Error('test-only customer audit failure');
+    return original.call(this, event, client);
+  };
+  try {
+    await error(
+      await remove(ids, { ...adminHeaders(), 'X-Request-Id': requestId }),
+      500,
+      'INTERNAL_ERROR',
+    );
+  } finally {
+    audit.recordSuccess = original;
+  }
+  assert.equal(
+    (
+      await pool.query(
+        'SELECT 1 FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+        [ids],
+      )
+    ).rowCount,
+    2,
+  );
+  assert.equal(
+    (
+      await pool.query("SELECT 1 FROM audit_logs WHERE request_id=$1 AND result='SUCCESS'", [
+        requestId,
+      ])
+    ).rowCount,
+    0,
+  );
+  assert.equal((await remove([ids[1]])).status, 204);
+  await error(await remove(ids), 404, 'NOT_FOUND');
+  assert.equal(
+    (await pool.query('SELECT deleted_at FROM customers WHERE customer_seq=$1', [ids[0]])).rows[0]
+      .deleted_at,
+    null,
+  );
+});
+
+test('customer deletion serializes reverse overlapping arrays and recovers after a bounded lock conflict', async () => {
+  const ids = [await register(), await register()];
+  const remove = (values) =>
+    request('', {
+      method: 'DELETE',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ customerSeqs: values }),
+    });
+  assert.deepEqual(
+    (await Promise.all([remove(ids), remove(ids.toReversed())])).map((r) => r.status).sort(),
+    [204, 404],
+  );
+  const held = await register();
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT 1 FROM customers WHERE customer_seq=$1 FOR UPDATE', [held]);
+    await error(await remove([held]), 409, 'REQUEST_IN_PROGRESS');
+    assert.equal(
+      (await client.query('SELECT deleted_at FROM customers WHERE customer_seq=$1', [held])).rows[0]
+        .deleted_at,
+      null,
+    );
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+  assert.equal((await remove([held])).status, 204);
 });

@@ -113,7 +113,6 @@ test('business phone inputs require exactly eleven ASCII digits without normaliz
       CreateCustomerDto,
       (phoneNumber) => ({ name: '고객', phoneNumber, address: customerAddress() }),
     ],
-    [ListCustomersQueryDto, (phoneNumber) => ({ phoneNumber })],
     [CallerContextRequestDto, (phoneNumber) => ({ phoneNumber })],
     [InlineMemberDto, (phoneNumber) => ({ employeeNo: '001', name: '직원', phoneNumber })],
     [CreatePinDto, (phoneNumber) => ({ addressData: address(phoneNumber) })],
@@ -167,6 +166,27 @@ test('collecting an order still permits omitted or cleared phones and partial se
     assert.equal(updated.parcels[0].destination.phoneNumber, phoneNumber);
   }
   const { ListCustomersQueryDto } = require('../dist/customers/dto/customer-request.dto');
+  for (const phoneNumber of ['0', '010', '1234', '021234567', '01012345678'])
+    assert.equal(
+      (await pipe.transform({ phoneNumber }, { type: 'query', metatype: ListCustomersQueryDto }))
+        .phoneNumber,
+      phoneNumber,
+    );
+  for (const phoneNumber of [
+    '',
+    '123456789012',
+    '010-1234',
+    '123\n',
+    ' 123',
+    '１２３',
+    '%',
+    ['123', '456'],
+    123,
+  ])
+    await assert.rejects(
+      () => pipe.transform({ phoneNumber }, { type: 'query', metatype: ListCustomersQueryDto }),
+      (error) => error.getStatus() === 400,
+    );
   assert.equal(
     (await pipe.transform({ q: '010' }, { type: 'query', metatype: ListCustomersQueryDto })).q,
     '010',

@@ -26,9 +26,22 @@ module.exports = function registerAiSettingsDrafts(suite) {
   } = suite;
   test('draft saves overwrite one row without changing HEAD, history, ACTIVE or PENDING; commit consumes it atomically', async () => {
     const head = await create();
-    await data(await report(await data(await activate(head), 202)));
+    const applied = await data(await report(await data(await activate(head), 202)));
+    const runtimeHead = await data(await runtime());
+    assert.equal(runtimeHead.promptText, head.promptText);
+    for (const key of [
+      'role',
+      'personality',
+      'tone',
+      'speedInstruction',
+      'backchannel',
+      'interruption',
+    ]) {
+      assert.equal(key in runtimeHead, false);
+      assert.equal(key in applied, false);
+    }
     const pending = await data(await activate(await create()), 202);
-    let draft = await beginDraft(head, { promptText: '초안 원문\n보존' });
+    let draft = await beginDraft(head, { role: '초안 원문\n보존' });
     const createdAt = draft.createdAt;
     for (let i = 0; i < 5; i++) {
       const previous = draft;
@@ -59,6 +72,9 @@ module.exports = function registerAiSettingsDrafts(suite) {
     const committed = await data(await commitDraft(head.aiPersonaSeq, draftInput(draft)));
     assert.equal(committed.version, 2);
     assert.equal(committed.promptText, draft.promptText);
+    assert.equal(committed.role, '초안 원문\n보존');
+    for (const key of ['personality', 'tone', 'speedInstruction', 'backchannel', 'interruption'])
+      assert.equal(committed[key], head[key]);
     assert.equal(committed.name, draft.name);
     assert.equal(committed.status, 'INACTIVE');
     assert.equal((await detail(head.aiPersonaSeq)).draft, null);
@@ -79,7 +95,7 @@ module.exports = function registerAiSettingsDrafts(suite) {
     const next = await data(
       await saveDraft(
         a.aiPersonaSeq,
-        draftInput(first, { promptText: '계속 작업', speakingRate: null }),
+        draftInput(first, { role: '계속 작업', speakingRate: null }),
         2,
       ),
     );

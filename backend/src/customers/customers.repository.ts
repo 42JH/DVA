@@ -24,6 +24,29 @@ const availablePaymentMethods = `CASE WHEN c.status<>'ACTIVE' THEN '[]'::jsonb E
 
 @Injectable()
 export class CustomersRepository {
+  async lockMany(client: PoolClient, ids: number[]): Promise<number[]> {
+    const result = await client.query<{ id: number }>(
+      'SELECT customer_seq AS id FROM customers WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL ORDER BY customer_seq FOR UPDATE',
+      [ids],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
+  async removeMany(client: PoolClient, ids: number[]): Promise<void> {
+    await client.query(
+      'UPDATE memberships SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+    await client.query(
+      'UPDATE personal_pins SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+    await client.query(
+      'UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=ANY($1::int[]) AND deleted_at IS NULL',
+      [ids],
+    );
+  }
+
   constructor(private readonly database: DatabaseService) {}
 
   async updateIdentities(client: PoolClient, rows: EmployeeCustomerIdentity[]): Promise<void> {
@@ -131,7 +154,7 @@ export class CustomersRepository {
        LEFT JOIN organizations o ON o.organization_seq=m.organization_seq AND o.deleted_at IS NULL
        LEFT JOIN departments d ON d.department_seq=m.department_seq AND d.organization_seq=m.organization_seq AND d.deleted_at IS NULL
        WHERE c.deleted_at IS NULL AND ($1::text IS NULL OR strpos(lower(c.name), lower($1)) > 0)
-         AND ($2::text IS NULL OR c.phone_number = $2)
+         AND ($2::text IS NULL OR strpos(c.phone_number, $2) > 0)
          AND ($3::text IS NULL OR c.status = $3)`,
       [query.q || null, query.phoneNumber ?? null, query.status ?? null],
       query,

@@ -58,7 +58,12 @@ module.exports = function aiSettingsFixture() {
   const input = (changes = {}) => ({
     code: 'test-' + randomUUID(),
     name: '테스트 상담원',
-    promptText: ' 원문\n보존 ',
+    role: ' 원문\n보존 ',
+    personality: '밝은 성격',
+    tone: '존댓말',
+    speedInstruction: '간결하게',
+    backchannel: '작게 맞장구',
+    interruption: '즉시 멈춤',
     voiceId: 'test-voice',
     speakingRate: 1.2,
     turnWaitLevel: 'LONG',
@@ -169,7 +174,15 @@ module.exports = function aiSettingsFixture() {
     return app.get(DatabaseService).transaction(async (client) => {
       const repository = app.get(AiSettingsRepository);
       const id = await repository.create('legacy-' + randomUUID(), client);
-      const version = await repository.append(id, 1, input(), actorId, client);
+      const settings = input();
+      const { composePersonaPrompt } = require('../../dist/ai-settings/persona-prompt');
+      const version = await repository.append(
+        id,
+        1,
+        { ...settings, promptText: composePersonaPrompt(settings) },
+        actorId,
+        client,
+      );
       if (recordAudit)
         await app.get(AuditService).recordSuccess(
           {

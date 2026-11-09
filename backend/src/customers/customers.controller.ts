@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
@@ -25,6 +26,7 @@ import { ErrorResponseDto } from '../common/dto/api-response.dto';
 import { CustomersService } from './customers.service';
 import { AuditOperation } from '../audit/audit-operation';
 import { CallerContextEnvelopeDto, CallerContextRequestDto } from './dto/caller-context.dto';
+import { DeleteCustomersDto } from './dto/delete-customers.dto';
 import {
   CreateCustomerDto,
   CustomerIdParamsDto,
@@ -47,6 +49,24 @@ import {
 @Controller('customers')
 export class CustomersController {
   constructor(private readonly customers: CustomersService) {}
+
+  @Delete()
+  @HttpCode(204)
+  @ApiCookieAuth('adminSession')
+  @AuditOperation({ action: 'CUSTOMER_DELETED', targetType: 'CUSTOMER', target: 'none' })
+  @ApiOperation({
+    summary: '고객 단건·다건 soft delete',
+    description:
+      '모든 ACTIVE 관리자 세션·허용 Origin 전용. customerSeqs 배열 1~100개. 고객과 소속·개인 PIN을 soft delete하며 주문·통화·결제 이력은 보존합니다. 미존재·기삭제가 있거나 감사 저장에 실패하면 전체 롤백합니다. 잠금 경합은 409입니다.',
+  })
+  @ApiNoContentResponse({ description: '전체 삭제 완료. 응답 본문 없음.' })
+  removeMany(@Body() input: DeleteCustomersDto, @Req() request: AuthRequest) {
+    return this.customers.removeMany(
+      input.customerSeqs,
+      request.admin.adminUserSeq,
+      request.requestId,
+    );
+  }
 
   @Post('context')
   @HttpCode(200)

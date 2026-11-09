@@ -126,6 +126,10 @@ async function migrate(pool) {
         "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='analysis_failed_at' AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL",
       );
       assert.equal(analysisFailure.rowCount, 1, 'Apply migration 056 to the isolated DB first');
+      const promptFields = await client.query(
+        "SELECT count(*)::int AS n FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('ai_persona_versions','ai_persona_drafts') AND column_name IN ('role_text','personality_text','tone_text','speed_instruction','backchannel_text','interruption_text') AND is_nullable='NO'",
+      );
+      assert.equal(promptFields.rows[0].n, 12, 'Apply migration 060 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
