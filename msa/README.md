@@ -38,6 +38,8 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 API·migration·테스트 기대값은 그대로이며 승인된 fixture patch 이외의 backend 차이는 거부한다.
 실제 checkout의 backend와 최초 052 수동 진단 기준은 보존한다.
 최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
+[Jenkins #44 샌드박스 오류 수정](../docs/msa-build-44-fix.md)은 검증 성공 기록과 Checkout 승계를
+실제 Jenkins 속성 쓰기로 연결한다. 같은 Jenkins/플러그인의 CPS·샌드박스에서 기록·후속 실패·승계를 검증했다.
 다섯 서비스의 npm 다운로드는 기존 BuildKit의 잠금 캐시로 공유한다. 다운로드 캐시는 운영 이미지에
 포함하지 않으며, 이벤트 검증 파일 변경은 의존성 설치 레이어를 무효화하지 않는다.
 
