@@ -282,8 +282,10 @@ class LiveFlow:
                 "utterance_id": utt.utterance_id, "start_ms": utt.start_ms, "end_ms": utt.end_ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        if (v := answers.get("value")) and v[0] == "yes" and v[1] >= self.cfg.decision_min_confidence:
-            s.stats["값 발화(그림자)"] += 1  # 서버가 백엔드를 불렀을 발화 수. 동작은 없다(2026-11-10 1단계)
+        if (v := answers.get("value")) and (v[2].get("yes") or 0) >= 0.5:
+            # 서버가 백엔드를 불렀을 발화 수. 동작은 없다(2026-11-10 1단계). confidence가 아니라 p(yes)로 본다 —
+            # 재생 533발화에서 choice=yes인데 confidence 0.1대인 값 발화가 흔했다(shortcut: 0.5 고정, 2단계 조정 때 설정값으로)
+            s.stats["값 발화(그림자)"] += 1
         await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:

@@ -26,11 +26,13 @@ def bound(decision: dict, dls: list[dict], gap_ms: int) -> bool:
     """이 발화(Decision 이벤트의 구간)에 묶인 위임이 있는가. 1순위 offset_ms가 [start, end+gap] 안(R1), 2순위 마지막 고객 발화 글자 일치."""
     start, end = decision.get("start_ms"), decision.get("end_ms")
     text = (decision.get("input") or "").rsplit("고객 발화: ", 1)[-1].strip()
+    windowed = start is not None and end is not None
     for d in dls:
         off = d.get("offset_ms")
-        if start is not None and end is not None and off is not None and start <= off <= end + gap_ms:
-            return True
-        if off is None and text and (d.get("last_customer") or "").strip() == text:
+        if windowed and off is not None:
+            if start <= off <= end + gap_ms:
+                return True
+        elif text and (d.get("last_customer") or "").strip() == text:  # 구간이 없는 기록(재생·옛 로그)은 글자 일치로
             return True
     return False
 
@@ -47,8 +49,12 @@ def rows_of(record: dict, gap_ms: int, min_conf: float) -> list[dict]:
         if not v:
             continue
         said = (d.get("input") or "").rsplit("고객 발화: ", 1)[-1].strip()
-        out.append({"stage": d.get("stage"), "text": said, "value": v["choice"], "confidence": v["confidence"],
-                    "server_yes": v["choice"] == "yes" and v["confidence"] >= min_conf, "delegated": bound(d, dls, gap_ms)})
+        p_yes = (v.get("probabilities") or {}).get("yes")
+        if p_yes is None:  # 확률이 없는 기록: choice로 대신
+            p_yes = 1.0 if v["choice"] == "yes" else 0.0
+        out.append({"stage": d.get("stage"), "text": said, "value": v["choice"], "confidence": p_yes,
+                    # confidence가 아니라 p(yes)로 거른다: 재생에서 choice=yes·confidence 0.1대인 값 발화가 흔했다(2026-11-10)
+                    "server_yes": p_yes >= min_conf, "delegated": bound(d, dls, gap_ms)})
     return out
 
 
@@ -66,7 +72,7 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", nargs="?")
     ap.add_argument("--gap-ms", type=int, default=GAP_MS)
-    ap.add_argument("--min-confidence", type=float, default=0.6)
+    ap.add_argument("--min-confidence", type=float, default=0.5, help="p(yes) 하한")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args(argv)
     if a.selftest:
@@ -98,7 +104,7 @@ def main(argv: list[str]) -> int:
 
 def selftest() -> int:
     ev = [{"kind": "Decision", "data": {"stage": "receiver", "input": "직전 AI 발화: 성함?\n고객 발화: 신지환이요",
-                                         "start_ms": 1000, "end_ms": 2000, "answers": {"value": {"choice": "yes", "confidence": 0.9}}}},
+                                         "start_ms": 1000, "end_ms": 2000, "answers": {"value": {"choice": "yes", "confidence": 0.9, "probabilities": {"yes": 0.9, "no": 0.1}}}}},
           {"kind": "위임 시작", "data": {"offset_ms": 2500, "last_customer": "신지환이요"}},
           {"kind": "Decision", "data": {"stage": "receiver", "input": "직전 AI 발화: 맞나요?\n고객 발화: 네",
                                          "start_ms": 5000, "end_ms": 5300, "answers": {"value": {"choice": "no", "confidence": 0.95}}}},
