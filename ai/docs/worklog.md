@@ -974,3 +974,15 @@
 ### Jira 178 브랜치 최신화
 
 - `develop-ai`의 `6bfaaa4e`를 반영했다. 작업 기록에 두 브랜치의 변경 내용을 함께 남겼다. 반영 후 전체 AI 테스트 714개 통과.
+
+## 2026-11-09 — 주소 분리·수사 변환 서버 이관 재적용(feat/address-detail-split-v2)
+
+- 배경: `feat/address-detail-split`(efc3ffd5..5beecda6, P13)은 763fdbdf로 병합됐다가 되돌림(4704d18d, develop-ai를 f9e2ca35로)에 함께 빠졌다. `origin/develop-ai` 위에 스쿼시로 다시 올렸다. 주소 모듈(`app/address/*`, `integrations/address.py`, `scripts/evaluate_address.py`, `tests/test_address.py`)은 되돌림 뒤에도 브랜치 베이스와 같아 그대로 적용됐고, 충돌은 `policy/backend_rules.md`(develop-ai의 발송·받는 곳 방향 규칙은 유지, 분리·숫자 변환 블록만 교체)와 worklog뿐.
+- 브랜치 그대로 가져오지 않은 두 가지(모두 `tools/record.py`):
+  - 결정 2(같은 도로의 번호 정정 때 상세 유지) 폐기 — 같은 날 사용자 결정(de083008, 역시 되돌림에 빠짐)대로 기본주소가 바뀌었는데 상세를 같이 말하지 않으면 비우고 다시 묻는다(`was != value`, `_road_of` 삭제). 서버가 문장에서 뗀 상세가 같이 오면 지우지 않고 그 상세로 바꾼다.
+  - 서버가 뗀 상세의 출처를 RESOLVER → CUSTOMER로. `assess.readback_facts`는 `_address_detail`을 CUSTOMER가 아니면 "저장된 상세"로 보고 되읽기에서 빼므로, 고객이 방금 말한 상세주소(건물 이름·동·호수·층)가 확인 문장에서 빠지는 버그였다. 이제 되읽기가 상세주소 값 전체를 읽는다.
+- 최적화 시도(별도 커밋): `resolve_detail`이 같은 후보를 `correct`로 두 번 보지 않게(`resolve(first=)`), `AddressDB.is_dong`은 `areas.dong`에 색인이 없어 토큰마다 전체 탐색이던 것을 전국 동 이름 집합 1회 적재로. **같은 기기에서 A/B 측정 결과 차이 없음**(v3 warm p50 30.0 → 30.4ms, p95 313.6 → 359.8ms; v1 warm p50 15.1 → 14.2ms — 모두 잡음 범위). 지연의 실제 주범은 못 찾았을 때 되읽기(`readings` 8묶음, 1초 상한)로 가는 사례(warm max 1.3초)이며 이번 범위 밖.
+- 측정(로컬 DB만, 이 기기): v3 기본주소 48/49(남은 1건은 말실수 holdout b17)·오답 0·상세 52/52·변환 17/17, v1 106/106, v2 48/55 — 브랜치 당시와 같다. 절대 지연은 브랜치 기록(v3 warm p50 14.6ms)보다 2배쯤 크지만 브랜치 원본 코드도 이 기기에서 같은 값이라 환경 차이. 결과 `evaluation/results/address_v3_detail_s3.json`(중간 산출물 JSON 5개는 가져오지 않음). 동시 52건 한꺼번에 돌리는 구간은 예산 2.5초를 넘겨 "시간 초과" 경고가 찍히며 이전 측정과 같다.
+- 테스트: app·backend_client·monitor 511 passed. test_tools의 결정 2 테스트를 de083008 버전으로 교체하고 서버가 뗀 상세가 같이 오는 경우를 추가.
+- 미확인·후속: 운영 Backend가 새 규칙대로 한글 그대로 넘기는지는 실통화 확인 필요(숫자로 넘겨도 서버는 받는다). Live가 위임 결과 전에 missing을 보고 상세를 먼저 묻는 타이밍은 별도 안건. 상세 실존 검증 없음. push·MR은 지시 때까지 보류.
+

@@ -199,6 +199,7 @@ class AddressDB(RoadDict):
         self.parts = {}
         self.roads = _LazyRoads(self)
         self._areas = {}
+        self._dongs: frozenset[str] | None = None
         self.set_regions(self.conn.execute("SELECT DISTINCT sido, sigungu FROM roads"))
 
     @property
@@ -223,8 +224,11 @@ class AddressDB(RoadDict):
         return row and address(sido, sigungu, road, number, *row)
 
     def is_dong(self, name):
-        """전국 어딘가의 법정동 이름인가("사이동"): 상세주소의 N동 표지와 구분(parse.split_detail)."""
-        return self.conn.execute("SELECT 1 FROM areas WHERE dong = ? LIMIT 1", (name,)).fetchone() is not None
+        """전국 어딘가의 법정동 이름인가("사이동"): 상세주소의 N동 표지와 구분(parse.split_detail).
+        전국 동 이름은 한 번만 읽어 둔다(토큰마다 질의하지 않게. 동시에 채워도 같은 값)."""
+        if self._dongs is None:
+            self._dongs = frozenset(d for (d,) in self.conn.execute("SELECT DISTINCT dong FROM areas"))
+        return name in self._dongs
 
     def areas(self, key):
         """(시도, 시군구) 안의 법정동·리 -> [(areas.id, 비교 이름들)]. "선산읍 완전리"는 "완전리"로도 말함."""
