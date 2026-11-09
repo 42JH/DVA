@@ -30,6 +30,10 @@ Jira: S15P31D109-111 · 브랜치: `ci/jenkins-lightsail` · MR 대상: `develop
 동일 서버이므로 Jenkins와 서비스가 하드웨어 자원을 공유한다. 별도 CI 서버로 분리한 것과 같은
 장애 격리나 성능 보장을 의미하지 않는다. 동시 빌드는 1개로 제한한다.
 
+모놀리식 파이프라인은 `workspace/${JOB_NAME}@build-${BUILD_NUMBER}`의 빌드별 작업 디렉터리를 사용한다. Checkout부터 검증·패키징·배포까지 같은 디렉터리에서 실행한다. #115의 공유 체크아웃 `.git/HEAD.lock` 충돌 이후 이전 디렉터리의 Git 잠금을 삭제하거나 중단된 체크아웃을 재사용하지 않도록 변경했다. 기존 공유 작업 디렉터리는 보존한다. 마지막 성공 커밋의 변경 비교와 Docker 캐시는 유지하고 Git 소스는 매 빌드 새로 가져온다.
+
+산출물 보관과 실행 단계가 끝나면 post cleanup에서 현재 빌드 디렉터리만 삭제한다. 실제 경로가 예상한 Job·빌드 번호 접미사와 다르면 삭제를 거절한다. Git 잠금 생성 프로세스의 과거 신원은 확인하지 못했으며 이번 변경은 빌드 사이의 작업공간 재사용을 제거한다. [재현·검증 기록](../../backend/docs/final-wireframe-follow-up.md)을 참고한다.
+
 agent는 `init: true`로 실행하여 빌드 중 부모를 잃은 자식 프로세스를 회수한다.
 이 설정이 없으면 종료된 Git·셸 프로세스가 누적되어 `pids_limit: 512`에 도달하고,
 `fork: Resource temporarily unavailable` 또는 출력 없는 빌드 정지가 발생할 수 있다.

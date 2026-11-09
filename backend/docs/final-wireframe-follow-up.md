@@ -21,6 +21,16 @@
 
 최종 단계 검증: `BACKEND_TEST_PROFILE=dashboard node backend/scripts/check.cjs` 종료 코드 0. 컴파일·ESLint·Prettier, 단위 201 + 결제 21 + PostgreSQL/API 143 + 운영 이미지/Nginx/HTTPS 23 = 388개 통과, 실패·건너뜀 0. 한국시간 자정 양쪽 경계·0건·삭제/보관/이관 제외·통화 시각 우선순위·오늘 목록 total_count 일치·11개 경계·동시 삽입의 동일 스냅샷·권한·Swagger를 확인했다. 공식 스크립트의 임시 컨테이너·네트워크·이미지 정리를 확인하고 적용한다. 운영 DB·실제 프론트·외부 AI·원격 Jenkins는 미검증이다.
 
+## 3단계: Jenkins 체크아웃 격리
+
+#115는 `5d3bd189` 체크아웃 중 공유 작업 디렉터리의 `.git/HEAD.lock` 충돌로 실패했으며 컴파일·테스트·배포는 실행하지 못했다. 이후 읽기 전용 확인에서 잠금 파일은 없고 HEAD는 직전 성공 커밋인 채 일부 파일만 바뀐 상태였다. 잠금을 만든 프로세스의 신원은 확인하지 못했다.
+
+파이프라인 전체의 node agent에 `workspace/${JOB_NAME}@build-${BUILD_NUMBER}`를 지정했다. 기존 공유 디렉터리를 수정·정리하거나 잠금 파일을 강제로 삭제하지 않는다. 각 빌드는 새 소스 체크아웃을 사용하며 마지막 성공 커밋 비교·Docker 캐시·배포 조건·검증 단계·artifact 보관은 유지한다. post cleanup은 예상한 현재 Job·빌드 번호의 경로인지 확인한 뒤 해당 빌드 디렉터리만 정리한다. Jenkins 기본 [customWorkspace·post cleanup 문법](https://www.jenkins.io/doc/book/pipeline/syntax/)을 사용하며 새 플러그인은 필요하지 않다.
+
+실제 임시 Git 저장소에서 HEAD.lock을 남긴 체크아웃이 exit 128로 실패하는 것을 재현했다. 같은 커밋을 별도 디렉터리로 체크아웃하면 성공하고, 이전 HEAD·인덱스·잠금·추적/미추적 파일의 바이트가 그대로 남으며 새 체크아웃에서도 이전 성공 커밋과의 diff가 가능함을 확인했다. 기존 Jenkinsfile에서는 새 경로 회귀가 실패했고 수정 후 통과했다.
+
+Windows와 일회용 Linux 컨테이너에서 `node --test infra/jenkins/test-monolith-ci.cjs` 각 8개 통과, 실패·건너뜀 0. Linux에서 셸 문법 검사와 배포 조건·배포/복구 mock·Linux 릴리스 mock 회귀 3종도 통과했다. 호스트 소스는 읽기 전용으로 마운트했고 운영 Docker·SSH·DB에는 연결하지 않았다. 단계 검증 근거로 적용하며 원격 Jenkins의 실제 파이프라인 실행은 아직 검증하지 않았다. 다른 프로세스가 같은 새 빌드 디렉터리에 직접 쓰는 경우까지 차단하는 변경은 아니다.
+
 ## 후속 검증
 
 홈 변경·Checkout 격리·최종 전체 검증 결과는 각 단계 검증 후 이 문서에 기록한다. 아직 실행하지 않은 검증을 성공으로 표시하지 않는다.

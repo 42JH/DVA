@@ -1,5 +1,11 @@
 pipeline {
-    agent { label 'linux-docker-builder' }
+    agent {
+        node {
+            label 'linux-docker-builder'
+            // Keep Git locks and interrupted checkouts outside every later build.
+            customWorkspace "workspace/${env.JOB_NAME}@build-${env.BUILD_NUMBER}"
+        }
+    }
     options {
         skipDefaultCheckout(true)
         disableConcurrentBuilds()
@@ -114,5 +120,13 @@ pipeline {
     post {
         success { echo 'Dva Linux CI 파이프라인 성공' }
         failure { echo 'Dva Linux CI 파이프라인 실패' }
+        cleanup {
+            script {
+                if (!pwd().endsWith("/${env.JOB_NAME}@build-${env.BUILD_NUMBER}")) {
+                    error('Refusing to clean a workspace outside this build')
+                }
+                deleteDir()
+            }
+        }
     }
 }
