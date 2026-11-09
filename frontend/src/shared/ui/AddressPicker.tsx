@@ -5,10 +5,12 @@ import { Btn } from './controls'
 
 export function AddressPicker({
   title,
+  query,
   onPick,
   onClose,
 }: {
   title: string
+  query?: string // 열자마자 이 말로 검색 (이미 고른 주소를 다시 고를 때)
   onPick: (a: SearchedAddress) => void
   onClose: () => void
 }) {
@@ -22,6 +24,7 @@ export function AddressPicker({
       </div>
       <div className="overflow-hidden rounded-md ring-1 ring-ops-line ring-inset">
         <KakaoPostcodeEmbed
+          defaultQuery={query || undefined}
           onComplete={(a) =>
             onPick({
               roadAddress: a.roadAddress || a.address, // 지번을 고르면 도로명이 빌 수 있음

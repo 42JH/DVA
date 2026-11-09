@@ -377,6 +377,8 @@ export function useOrderForm(
     // 주소 검색 창 (폼 창 대신 뜸 — 두 창이 겹치면 Esc가 둘 다 닫음)
     searching: searching !== null,
     searchTitle: searching === 'receiver' ? '받는 분 주소 검색' : '보내는 분 주소 검색',
+    // 이미 채운 도로명으로 바로 검색 (11/09 사용자). 상세주소는 넣으면 결과가 안 나올 수 있어 뺌
+    searchQuery: searching ? parties[searching].roadAddress : '',
     pickAddress: ({ roadAddress, ...picked }: SearchedAddress) => {
       if (searching)
         setParties((all) => ({

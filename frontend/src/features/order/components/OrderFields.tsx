@@ -22,7 +22,14 @@ export function OrderFields({
   wide?: boolean // 주문 추가 창: 보내는 분 | 받는 분 나란히, 한 화면에 (배송비는 창 아래 줄에)
 }) {
   if (f.searching)
-    return <AddressPicker title={f.searchTitle} onPick={f.pickAddress} onClose={f.closeSearch} />
+    return (
+      <AddressPicker
+        title={f.searchTitle}
+        query={f.searchQuery}
+        onPick={f.pickAddress}
+        onClose={f.closeSearch}
+      />
+    )
   const noItem = f.items.every((i) => i.count === 0) && !f.etcItem.trim()
   const itemsErr = f.itemsError ?? (showEmpty && noItem ? '물품을 1개 이상 넣어 주세요.' : null)
   const priceErr =
