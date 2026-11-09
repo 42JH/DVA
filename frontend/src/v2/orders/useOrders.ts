@@ -154,6 +154,7 @@ export function useOrders() {
     rows,
     list: shown,
     picked,
+    // 열고 닫기는 필터가 아님 → 보던 쪽 그대로 (page를 안 넘기면 useListParams가 1쪽으로 되돌림)
     pick: (orderSeq: number, parcelSeq: number | null) =>
       set({
         o:
@@ -162,8 +163,9 @@ export function useOrders() {
             : parcelSeq
               ? `${orderSeq}-${parcelSeq}`
               : String(orderSeq),
+        page,
       }),
-    unpick: () => set({ o: '' }),
+    unpick: () => set({ o: '', page }),
     // 줄에 마우스를 올리면(키보드로 오면) 상세를 미리 받음 — 누르면 패널이 바로 참
     warm: (orderSeq: number) =>
       void qc.prefetchQuery({ ...orderQueries.detail(orderSeq), staleTime: 30_000 }),
