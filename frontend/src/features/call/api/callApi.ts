@@ -8,10 +8,10 @@ import { fetchAll } from '@/shared/api/paging'
 import type { CallActionDto, CallDetailDto, CallProcessingResultDto, UtteranceDto } from './callDto'
 
 export { toCallDetail } from './callDto'
-export type { AiAction, CallDetail, Complaint, Recording, ResultBlock, Utterance } from './callDto'
+export type { Complaint, Recording, Utterance } from './callDto'
 
 /** 열어 둔 통화 상세를 다시 받는 주기 (명세 권장 5초) */
-export const CALL_REFRESH_MS = 5_000
+const CALL_REFRESH_MS = 5_000
 /** 404(통화 없음)면 그 조회의 반복을 멈춤 (명세: 통화 상세 404는 통화 없음 처리 후 반복 중단)
  * 반복은 통화 상세(useCallDetail)에서만 걸음 — 같은 통화를 읽는 다른 곳(옆 창 대화 기록 등)은 반복하지 않음 (11/09 검수) */
 export const poll = (q: { state: { error: unknown } }) =>

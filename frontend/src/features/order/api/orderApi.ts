@@ -1,9 +1,7 @@
 // 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
 // 목록 GET /admin/orders · 추가 POST /admin/orders · 수정 PATCH /orders/{id} — 모두 실서버 (연동 상세명세 4장, 11/01)
 // 11/04 디자인: 고른 날짜에서 시작하는 무한 스크롤 — 하루씩 받음 (shared/lib/useDayFeed가 아래 두 함수로)
-import { api, type ApiItem, type ApiList } from '@/shared/api/client'
-import { fetchAll } from '@/shared/api/paging'
-import { addDays, kstDayStart, ymd, type Ymd } from '@/shared/lib/dateRange'
+import { api, type ApiItem } from '@/shared/api/client'
 import { buildCreateOrder } from './orderCreate'
 import type { CustomerPatch, OrderPatch } from './orderPatch'
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
@@ -65,70 +63,8 @@ export interface OrderListItem {
   parcels: ListParcel[] // 상세 순번대로, 취소된 상세도 포함
 }
 
-/** 목록 조건 — 검색어는 서버가 보내는 분 · 받는 분 둘 다의 이름 · 전화번호 · 주소에서 찾음 (누가 맞았는지는 화면이 다시 거름) */
-export interface OrderFilter {
-  q: string
-  group: StatusGroup
-}
-
-const toQuery = (f: OrderFilter) => ({
-  q: f.q.trim().slice(0, 200) || undefined,
-  statusGroup: f.group === 'ALL' ? undefined : f.group, // 전체는 생략
-})
-
 export const orderQueries = {
   all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
-}
-
-/** 그날 주문 전부 (접수 최신순, 100건씩 끝까지). 받는 사이 주문이 생기면 겹칠 수 있어 번호로 한 번 더 거름 */
-export async function fetchOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<OrderListItem[]> {
-  const seen = new Set<number>()
-  const query = { ...toQuery(f), from: kstDayStart(day), to: kstDayStart(addDays(day, 1)) }
-  return (await fetchAll<OrderListItem>('/admin/orders', query, signal)).filter(
-    (o) => !seen.has(o.orderSeq) && seen.add(o.orderSeq),
-  )
-}
-
-/** day 전에 주문이 있는 가장 가까운 날 (최신 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null */
-export async function prevOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<Ymd | null> {
-  const res = await api.get<ApiList<OrderListItem>>('/admin/orders', {
-    query: { ...toQuery(f), to: kstDayStart(day), limit: 1, offset: 0 },
-    signal,
-  })
-  const at = res.data[0]?.createdAt
-  return at ? ymd(new Date(at)) : null
-}
-
-/** day 다음에 주문이 있는 가장 가까운 날 (그 뒤 가장 오래된 1건의 접수 날짜 — 주문 없는 날은 건너뜀). 없으면 null
- *  서버는 최신순이라 건수를 먼저 받고, 2건 이상이면 맨 끝(offset = 건수 − 1) 1건을 다시 받음 */
-export async function nextOrderDay(
-  day: Ymd,
-  f: OrderFilter,
-  signal?: AbortSignal,
-): Promise<Ymd | null> {
-  const query = { ...toQuery(f), from: kstDayStart(addDays(day, 1)), limit: 1 }
-  const head = await api.get<ApiList<OrderListItem>>('/admin/orders', {
-    query: { ...query, offset: 0 },
-    signal,
-  })
-  const last =
-    head.total_count > 1
-      ? (
-          await api.get<ApiList<OrderListItem>>('/admin/orders', {
-            query: { ...query, offset: head.total_count - 1 },
-            signal,
-          })
-        ).data[0]
-      : head.data[0]
-  return last?.createdAt ? ymd(new Date(last.createdAt)) : null
 }
 
 // ---------- 주문 추가 · 수정 ----------

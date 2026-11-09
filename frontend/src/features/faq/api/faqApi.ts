@@ -33,7 +33,7 @@ export interface Faq {
 }
 
 /** 고객 질문 사례 — 이 FAQ로 AI가 답한 실제 고객 발화 원문 (공백 · 줄바꿈 그대로, 일반 글로만 보여 줌) */
-export interface FaqQuestionExample {
+interface FaqQuestionExample {
   faqQuestionExampleSeq: number // 렌더링 key (같은 문장도 다른 사례)
   questionText: string
   occurredAt: string // 응대 시각 ISO 8601
@@ -41,7 +41,7 @@ export interface FaqQuestionExample {
 }
 
 /** FAQ 상세 = FAQ + 최근 고객 질문 사례 (최대 10 · 최신순 · 서버 순서 그대로 · 없으면 []) */
-export interface FaqDetail extends Faq {
+interface FaqDetail extends Faq {
   recentQuestions: FaqQuestionExample[]
 }
 
@@ -67,7 +67,7 @@ export const faqQueries = {
 }
 
 /** FAQ 상세 — 구버전 서버(배포 과도기)는 recentQuestions · callSessionSeq 칸이 없을 수 있음 → [] · null */
-export async function fetchFaqDetail(id: number, signal?: AbortSignal): Promise<FaqDetail> {
+async function fetchFaqDetail(id: number, signal?: AbortSignal): Promise<FaqDetail> {
   const { data } = await api.get<ApiItem<FaqDetail>>(`/faqs/${id}`, { signal })
   return {
     ...data,
@@ -79,8 +79,7 @@ export async function fetchFaqDetail(id: number, signal?: AbortSignal): Promise<
 }
 
 /** API-29 — FAQ는 수십 개라 다 받고, 검색(띄어쓰기 · 초성) · 분류 · 쪽 나누기 · 최신순은 화면에서 (서버 q는 단순 부분 일치 · 번호순뿐) */
-export const fetchFaqs = (signal?: AbortSignal): Promise<Faq[]> =>
-  fetchAll<Faq>('/faqs', {}, signal)
+const fetchFaqs = (signal?: AbortSignal): Promise<Faq[]> => fetchAll<Faq>('/faqs', {}, signal)
 
 /** API-30 — 한 건도 늘 items 배열. 204. 같은 질문(띄어쓰기 · 대소문자 정규화)이 있으면 409 DUPLICATE_RESOURCE */
 export function createFaq(input: FaqInput): Promise<void> {

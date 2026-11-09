@@ -2,7 +2,7 @@
 // React를 모르는 순수 함수 (실행해서 확인: lineDiff.test.ts). 프롬프트는 수십~수백 줄이라 줄 수 곱만큼 표를 만들어도 충분히 빠름
 // 바뀐 묶음 안에서는 빠진 줄을 먼저, 더한 줄을 뒤에 (디자인: − 줄 아래 + 줄)
 
-export interface DiffLine {
+interface DiffLine {
   kind: 'same' | 'del' | 'add'
   text: string
   from: number | null // 앞 버전 줄 번호 (더한 줄은 없음)

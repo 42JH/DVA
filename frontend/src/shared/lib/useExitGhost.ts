@@ -38,20 +38,3 @@ export function useExitGhost(
     }
   }, [ref, swap, ms])
 }
-
-/** 조건부로 그려지는 요소(달력 · 더 보기 · 검색 추천) 안에 자식으로 두면, 그 요소가 사라질 때 퇴장 애니메이션 — 그리는 건 없음 */
-export function ExitGhost({
-  target,
-  swap = POP_SWAP,
-  ms = 200,
-}: {
-  target: RefObject<HTMLElement | null>
-  swap?: readonly (readonly [string, string])[]
-  ms?: number
-}) {
-  useExitGhost(target, swap, ms)
-  return null
-}
-
-/** 팝오버 공통: 등장 pop-in ↔ 퇴장 pop-out */
-export const POP_SWAP = [['motion-safe:animate-pop-in', 'animate-pop-out']] as const

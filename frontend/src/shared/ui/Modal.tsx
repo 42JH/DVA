@@ -24,7 +24,7 @@ const EXIT_SWAP = [
 // dim = 뒤 화면을 어둡게(기본). 끄면 투명 — 바깥을 누르면 닫히는 건 같음 (09 FAQ 검색 창, 11/04 사용자)
 // movable = 창 안의 data-drag 칸(예: 검색 창 윗줄)을 잡고 끌어 옮김. 그 안의 입력칸 · 버튼 · 링크 · 고를 줄은 원래대로
 //   화면 밖으로 다 나가지 않게: 위는 화면 안, 옆 · 아래는 80px 남김
-export function Overlay({
+function Overlay({
   onClose,
   children,
   label,
@@ -203,45 +203,6 @@ export function ConfirmDialog({
             {okLabel}
           </Button>
         </div>
-      </div>
-    </Overlay>
-  )
-}
-
-export function FormModal({
-  title,
-  titleExtra,
-  description,
-  width = 600,
-  onClose,
-  children,
-  footer,
-}: {
-  title: string
-  titleExtra?: ReactNode // 제목 옆 태그 (06 주문 상세 [전화] [주문 취소])
-  description?: string // 제목 아래 회색 한 줄 (03 주문 추가)
-  width?: number // 600 · 680 · 960
-  onClose: () => void
-  children: ReactNode
-  footer: ReactNode // 보통 <Button>취소</Button> <Button kind="primary">저장</Button>
-}) {
-  return (
-    <Overlay onClose={onClose} label={title}>
-      <div className="flex min-h-0 flex-col gap-6" style={{ width: width - 64 }}>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="flex items-center gap-3 text-card font-bold">
-              {title}
-              {titleExtra}
-            </h2>
-            {description && <p className="mt-1 text-label text-sub">{description}</p>}
-          </div>
-          <CloseX onClose={onClose} />
-        </div>
-        <div className="border-t border-line" />
-        {/* 제목줄 · 버튼줄은 고정, 내용만 스크롤. -mx-8 px-8: 스크롤 막대를 창 오른쪽 끝에 붙이고 글자 자리는 그대로 */}
-        <div className="-mx-8 flex min-h-0 flex-col gap-6 overflow-y-auto px-8">{children}</div>
-        <div className="flex justify-end gap-3">{footer}</div>
       </div>
     </Overlay>
   )

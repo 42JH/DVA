@@ -1,4 +1,3 @@
-import { TopBar } from '@/shared/ui'
 import type { CustomerType } from '@/features/dashboard/api/dashboardApi'
 import { useDashboardGraph, type GraphKind } from '@/features/dashboard/hooks/useDashboardGraph'
 import { CUSTOMER_LABEL } from '@/features/dashboard/labels'
@@ -13,22 +12,6 @@ const SERIES = [
   { key: 'NEW', on: 'bg-ops-route', bar: 'bg-ops-route', text: 'text-ops-route' },
   { key: 'EXISTING', on: 'bg-ops-faint', bar: 'bg-ops-faint', text: 'text-ops-sub' },
 ] as const satisfies readonly { key: CustomerType; on: string; bar: string; text: string }[]
-
-export function GraphPage({ kind }: { kind: GraphKind }) {
-  const vm = useDashboardGraph(kind)
-  return (
-    <div className="flex min-h-0 flex-[1_1_0px] flex-col">
-      <TopBar crumbs={[{ label: '통계', to: '/dashboard' }, { label: '그래프 보기' }]} />
-      <div className="shrink-0 pt-v44">
-        <h1 className="text-v24 font-bold">{vm.title}</h1>
-        <p className="mt-[3px] text-[12px] text-muted">
-          신규·기존 고객을 함께 보거나, 한 유형만 선택해 비교하세요.
-        </p>
-      </div>
-      <GraphChart kind={kind} className="mt-3" />
-    </div>
-  )
-}
 
 /** 큰 그래프 상자 (고객군 평균 · 묶음 막대 · 범례) — 기존 화면 · v2 통계 그래프가 같이 씀 */
 export function GraphChart({ kind, className = '' }: { kind: GraphKind; className?: string }) {

@@ -1,6 +1,6 @@
 // 수기 주문 규칙 (11/06) — 서버 문서엔 이 제한이 없어 화면이 막음. 순수 함수 (orderLimits.test.ts)
 
-export const MAX_PRICE = 100_000_000 // 물품 가액 1원 ~ 1억 원
+const MAX_PRICE = 100_000_000 // 물품 가액 1원 ~ 1억 원
 export const MAX_BOXES = 10 // 받는 곳별 묶음마다 소 · 중 · 대 합계 (이 창은 받는 분 하나 = 묶음 하나)
 export const MAX_DOCUMENTS = 100 // 같은 묶음에서 박스와 따로
 
@@ -8,8 +8,8 @@ const HOUR = 3_600_000
 
 export const priceOk = (n: number) => n >= 1 && n <= MAX_PRICE
 
-export const PICKUP_OPEN = '09:00' // 수거는 한국 시간 09:00 ~ 17:00, 양 끝 포함 (백엔드 결제 보정 · AI와 같은 규칙)
-export const PICKUP_CLOSE = '17:00'
+const PICKUP_OPEN = '09:00' // 수거는 한국 시간 09:00 ~ 17:00, 양 끝 포함 (백엔드 결제 보정 · AI와 같은 규칙)
+const PICKUP_CLOSE = '17:00'
 
 // 주문 화면만 한국 시간으로 표시 · 전송 (브라우저 시간대가 UTC여도 09:00 = 00:00Z). 다른 화면의 공통 날짜 함수는 그대로
 /** Date → 한국 시간 datetime-local 값 'YYYY-MM-DDTHH:mm' (초는 버림) */

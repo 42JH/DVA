@@ -60,7 +60,7 @@ export const unansweredQueries = {
 }
 
 /** 처리 안 된(OPEN) 질문 전부 — 서버가 오래된 통화부터 줌. 초성 검색 · ?call · 오늘만 · 쪽 나누기는 훅이 화면에서 */
-export async function fetchUnanswered(signal?: AbortSignal): Promise<UnansweredQuestion[]> {
+async function fetchUnanswered(signal?: AbortSignal): Promise<UnansweredQuestion[]> {
   return (await fetchAll<UnansweredDto>('/unanswered-questions', {}, signal)).map(toScreen)
 }
 

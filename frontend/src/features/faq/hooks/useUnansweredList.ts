@@ -113,8 +113,3 @@ export function useUnansweredList() {
     deleteError: remove.error?.message ?? null,
   }
 }
-
-/** 사이드바 'AI 미답변' 옆 빨간 숫자 — total_count 1건 요청. 처리 · 삭제가 ['unanswered']를 무효화해 같이 줄어듦 (app/AppLayout이 사이드바에 넘김) */
-export function useUnansweredCount() {
-  return useQuery(unansweredQueries.count()).data ?? 0
-}

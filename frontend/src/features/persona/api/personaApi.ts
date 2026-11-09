@@ -38,7 +38,7 @@ export type {
 export const DEFAULT_VOICE: VoiceSettings = { voice: '', speed: 'NORMAL', waitTime: 'NORMAL' } // '' = AI 기본 음성
 
 /** AI가 실제 지원하는 음성 설정 (GET /api/ai/options). rateRange null = 숫자 속도 미지원 → 속도는 '보통'만 */
-export interface AiOptions {
+interface AiOptions {
   voices: { id: string; label: string }[]
   rateRange: { min: number; max: number } | null
   waitTimes: VoiceSettings['waitTime'][]
@@ -65,13 +65,13 @@ export const personaQueries = {
 }
 
 /** 페르소나 목록 — 적용본(HEAD) · 초안이 목록에 같이 옴 */
-export async function fetchPersonas(signal?: AbortSignal) {
+async function fetchPersonas(signal?: AbortSignal) {
   if (PERSONA_DEMO) return (await demoPersonas(signal)).map(toPersona) // 시연 모드: 브라우저 안 사본
   return (await fetchAll<PersonaDto>('/personas', {}, signal)).map(toPersona)
 }
 
 /** 버전 기록 + 초안(있으면 맨 위 'v(HEAD+1) 저장됨') — 높은 번호가 위. 버전 기록 API엔 초안이 없어 상세에서 받음 */
-export async function fetchVersions(personaSeq: number, signal?: AbortSignal) {
+async function fetchVersions(personaSeq: number, signal?: AbortSignal) {
   if (PERSONA_DEMO) {
     const d = await demoVersions(personaSeq, signal)
     return toVersions(d.list, d.persona.headVersion.version, d.persona.draft)
@@ -88,7 +88,7 @@ interface AiOptionsDto {
   speakingRate: { min: number | null; max: number | null } | null
   turnWaitLevels: VoiceSettings['waitTime'][]
 }
-export async function fetchAiOptions(signal?: AbortSignal): Promise<AiOptions> {
+async function fetchAiOptions(signal?: AbortSignal): Promise<AiOptions> {
   const { data } = await api.get<ApiItem<AiOptionsDto>>('/ai/options', { signal })
   const r = data.speakingRate
   return {
@@ -178,7 +178,7 @@ export async function createPersona(input: {
 
 // ---------- 시험 통화 ----------
 /** 시험 통화 한 줄 — AI 말 · 내 말 + 통화 시작부터 몇 초 */
-export interface TestCallLine {
+interface TestCallLine {
   atSec: number
   speaker: 'AI' | 'ME'
   text: string

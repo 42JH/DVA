@@ -28,7 +28,7 @@ type Job = {
   id: number
 }
 
-export interface AdminRow {
+interface AdminRow {
   id: number
   name: string
   loginId: string

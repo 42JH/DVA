@@ -11,7 +11,7 @@ import { BILLING_LABEL, errorText } from '@/features/company/labels'
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10곳
 const DEFAULTS = { q: '' }
 
-export interface CompanyRow {
+interface CompanyRow {
   id: number
   name: string
   inactive: boolean // '비활성' 태그

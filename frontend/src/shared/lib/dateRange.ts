@@ -52,7 +52,7 @@ export function periodToRange(
 }
 
 /** 표시용 (10/30 연도 규칙): 올해면 'MM.DD', 하나라도 다른 해면 전부 'YYYY.MM.DD' — 같이 보이는 날짜는 같이 넘겨 연도 여부를 맞춤 */
-export function fmtYmds(days: Ymd[], today = todayYmd()): string[] {
+function fmtYmds(days: Ymd[], today = todayYmd()): string[] {
   const withYear = days.some((s) => s.slice(0, 4) !== today.slice(0, 4))
   return days.map((s) => (withYear ? s : s.slice(5))) // 구분자는 '-' 그대로 (11/02 현업: 시간 ':'와 짝)
 }

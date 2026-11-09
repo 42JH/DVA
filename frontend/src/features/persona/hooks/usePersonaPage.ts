@@ -23,7 +23,7 @@ import {
   type PersonaVersion,
 } from '@/features/persona/api/personaApi'
 
-export type PanelTab = 'persona' | 'history'
+type PanelTab = 'persona' | 'history'
 
 /** 오른쪽 '페르소나' 탭 한 칸 */
 export interface PersonaItem {
@@ -51,7 +51,7 @@ export interface VersionItem {
 }
 
 /** 왼쪽 '시스템 프롬프트' 카드 */
-export interface PromptView {
+interface PromptView {
   tag: string // 'v7 · 저장됨' · 'v6 · 적용 중' · 'v4'
   subtitle: string // '빠른 접수형 · 10.30 김지훈'
   lines: { no: number; text: string; heading: boolean }[] // '# '로 시작하는 줄 = 굵게
@@ -65,7 +65,7 @@ const withEul = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? 
 const withI = (n: number) => `v${n}${'013678'.includes(String(n).slice(-1)) ? '이' : '가'}` // 'v6이' · 'v5가'
 
 /** [적용] · [사용하기] 확인 창 문구 */
-export interface ApplyConfirm {
+interface ApplyConfirm {
   title: string // 'v7을 적용할까요?' · '친절 안내형을 통화에 쓸까요?'
   target: string // '빠른 접수형 · v7 (저장됨)'
   note: string
@@ -99,7 +99,7 @@ const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전
 
 /** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v4 [적용 중] → v5 [저장됨]
  * 적용본 ↔ 맨 위(수정 중인 초안)만 (11/02 결정 — 고르는 드롭다운 없음) */
-export interface CompareView {
+interface CompareView {
   base: string // 'v6'
   baseTag: string // '적용 중' · '마지막 적용'
   target: string // 'v7'

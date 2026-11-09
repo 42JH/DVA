@@ -179,5 +179,3 @@ export function useCustomer(seq: number) {
     pinsError: pins.error ? '주소록을 불러오지 못했습니다.' : null,
   }
 }
-
-export type CustomersVm = ReturnType<typeof useCustomers>

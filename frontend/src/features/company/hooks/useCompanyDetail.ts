@@ -11,7 +11,7 @@ import { errorText } from '@/features/company/labels'
 const PAGE_SIZE = 10 // 디자인: 한 쪽 10명
 const DEFAULTS = { q: '' }
 
-export interface MemberRow {
+interface MemberRow {
   id: number // membershipSeq
   employeeNo: string
   name: string
@@ -24,7 +24,7 @@ export interface MemberRow {
 }
 
 /** 창 — 한 번에 하나 (구분 유니온) */
-export type MemberModal =
+type MemberModal =
   | { kind: 'add' }
   | { kind: 'edit'; member: Member }
   | { kind: 'delete'; member: Member }

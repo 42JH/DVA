@@ -4,7 +4,7 @@ import type { UnansweredReason } from '@/shared/lib/unansweredReason'
 import { countsOf, type CallKind } from '../../../shared/lib/callKind' // 값 import라 상대 경로 (위 주석: tsx로 바로 돌림)
 
 // ---------- 서버 DTO ----------
-export type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
+type ResultDto = 'REGISTERED' | 'REGISTRATION_FAILED' | 'HANDOFF' | 'CANCELLED' | 'INQUIRY'
 export type ComplaintType =
   | 'REPEATED_QUESTION'
   | 'SPEAKING_TOO_FAST'
@@ -35,7 +35,7 @@ export type ProcessingKind =
   | 'INQUIRY'
   | 'FAQ_ANSWERED'
 
-export interface CallComplaintDto {
+interface CallComplaintDto {
   type: ComplaintType
   evidenceText: string
   offsetSeconds: number | null
@@ -63,7 +63,7 @@ export interface CallAnalysisDto {
   hasCallbackRequest?: boolean | null
   hasHandoffRequest?: boolean | null
 }
-export interface HandoffDto {
+interface HandoffDto {
   handoffRequestSeq: number
   reason: string
   status: 'REQUESTED' | 'CONNECTED' | 'FAILED'
@@ -134,7 +134,7 @@ export interface CallProcessingResultDto extends Omit<CallActionDto, 'action'> {
 
 // ---------- 화면 모양 ----------
 export type { CallKind } // 상담 유형 (접수 · 조회 · 취소 · FAQ 칩) — 주문 상세도 써서 shared/lib/callKind
-export interface CallRow {
+interface CallRow {
   callSessionSeq: number
   startedAt: string | null
   company: string | null // 소속 기업명 (null = 없음 · 개인 · 서버가 아직 안 줌)
@@ -204,7 +204,7 @@ export interface AiAction {
   kind: CallActionKind
   text: string // 서버 summaryText 그대로
 }
-export interface ResultBlock {
+interface ResultBlock {
   order: number
   atSec: number | null
   kind: ProcessingKind
@@ -219,7 +219,7 @@ export interface Recording {
   expiresAt: string | null
   error: RecordingDto['playbackError']
 }
-export interface CallDetail {
+interface CallDetail {
   callSessionSeq: number
   customerName: string | null
   startedAt: string | null
@@ -239,7 +239,7 @@ export interface CallDetail {
   recording: Recording | null // 첫 녹취 (url 있는 것 우선). 빈 배열(아직 연결 안 됨)이면 null
 }
 
-export const digits = (phone: string | null) => (phone ?? '').replace(/\D/g, '')
+const digits = (phone: string | null) => (phone ?? '').replace(/\D/g, '')
 
 /** 통화 시간 = PBX 종료 − 시작 (초). 한쪽이라도 없으면 null */
 export function durationSec(startedAt: string | null, endedAt: string | null): number | null {

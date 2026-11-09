@@ -18,7 +18,7 @@ import { rangeFrom, type Range } from '@/v2/lib/range'
 import { itemsText, STATUS_LOOK } from './orderLook'
 import { dateTime } from '@/v2/lib/when'
 
-export const GROUPS: { value: StatusGroup; label: string }[] = [
+const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'ALL', label: '전체' },
   { value: 'COLLECTING', label: '미완료' },
   { value: 'notPaid', label: '결제 대기' },

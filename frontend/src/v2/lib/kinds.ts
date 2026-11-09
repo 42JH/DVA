@@ -22,7 +22,7 @@ const LOOK: Record<CallKind, { label: (n: number) => string; title: (n: number) 
   },
 }
 
-export interface KindChip {
+interface KindChip {
   kind: CallKind
   label: string
   title: string

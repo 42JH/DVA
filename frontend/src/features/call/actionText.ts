@@ -98,7 +98,7 @@ export function faqResultText(
 }
 
 /** 화면 한 줄 = 동작 한 개 또는 연달아 나온 '기록'(칸 채우기) 여러 개를 합친 것 — 'n개 항목' 합계 */
-export interface ActionGroup {
+interface ActionGroup {
   head: AiAction // 시각 · 종류 · 누르면 갈 곳은 첫 동작 기준
   all: AiAction[] // 하이라이트는 이 중 하나라도 짚은 말이 불렀으면
   text: string

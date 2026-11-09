@@ -10,10 +10,6 @@ export const reasonTag = (r: UnansweredReason | null): { label: string; bg: stri
     ? { label: '유사한 질문 없음', bg: 'bg-kind-faq' }
     : { label: '서버 에러', bg: 'bg-kind-cancel' }
 
-/** 사유 칩 모양 — bg와 같이 씀 */
-export const REASON_TAG_CLASS =
-  'inline-grid h-7 min-w-19 shrink-0 place-items-center rounded-full px-3 text-body'
-
 /** AI 미답변 화면 주소 — from = 지금 화면 주소(경로 첫 칸 '이동 전 위치', 11/05 사용자) · call = 그 통화의 질문만 (06에서) */
 export const unansweredTo = (from: string, call?: number) =>
   `/faqs/unanswered?${new URLSearchParams(call ? { call: String(call), from } : { from })}`
