@@ -121,15 +121,16 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
   const messageCounts={};
   for(const owner of Object.keys(owners)) messageCounts[owner]=await snapshot(databases[owner],['outbox_events','inbox_events']);
   let compared=0;
+  async function request(side,path,expected,extra,requestId) {
+    const response=await fetch(side.base+path,{headers:{...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
+    const body=await response.json();
+    assert.equal(response.status,expected,side.name+' '+path+' '+JSON.stringify(body));
+    assert.equal(response.headers.get('x-request-id'),requestId);assert.equal(response.headers.get('cache-control'),'no-store');
+    return body;
+  }
   async function compare(path,expected=200,extra=headers) {
     const requestId=randomUUID(),results=[];
-    for(const side of sides) {
-      const response=await fetch(side.base+path,{headers:{...extra,'X-Request-Id':requestId},signal:AbortSignal.timeout(20000)});
-      const body=await response.json();
-      assert.equal(response.status,expected,side.name+' '+path+' '+JSON.stringify(body));
-      assert.equal(response.headers.get('x-request-id'),requestId);assert.equal(response.headers.get('cache-control'),'no-store');
-      results.push(body);
-    }
+    for(const side of sides) results.push(await request(side,path,expected,extra,requestId));
     assert.deepEqual(results[1],results[0],path);compared++;return results[0];
   }
   await t.test('the four OpenAPI operations and every referenced request/response schema match',async()=> {
@@ -211,7 +212,12 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     for(const query of ['?statusGroup=ACCEPTED','?q='+encodeURIComponent('\0'),'?q='+'x'.repeat(201)]) await compare('/api/admin/orders'+query,400);
   });
   await t.test('more simultaneous AI reads than any owner pool finish without a callback deadlock',async()=> {
-    await Promise.all(Array.from({length:12},()=>compare('/api/orders/1001',200,ai(1011))));
+    const path='/api/orders/1001',requestId=randomUUID();
+    // Sample the unchanged oracle once before saturating the MSA owner callbacks.
+    const expected=await request(sides[0],path,200,ai(1011),requestId);
+    await Promise.all(Array.from({length:12},async()=> {
+      assert.deepEqual(await request(sides[1],path,200,ai(1011),requestId),expected,path);compared++;
+    }));
   });
   await t.test('all public reads leave business rows, versions, timestamps, audit and event history unchanged',async()=> {
     for(const [owner,tables] of Object.entries(owners)) {

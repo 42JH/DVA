@@ -92,6 +92,8 @@ def main():
                        command=('--changelog-file='+side+'/db.changelog.xml', 'update'))
             complete(name)
         verify_parcel_draft_upgrade(ROOT, RUN, images, password, token, run, create, complete)
+        for side in ('order', 'consultation'):
+            run('docker', 'stop', '--time=5', RUN+'-'+side+'-draft-app', label='draft-'+side+'-stop')
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),
@@ -174,6 +176,14 @@ def main():
         complete(name)
         report['passed'] = True
     finally:
+        if not report['passed']:
+            names = [name for kind, name in resources if kind == 'container']
+            if names:
+                try:
+                    result = subprocess.run(['docker', 'stats', '--no-stream', *names], capture_output=True, timeout=20)
+                    (LOGS / 'failure-resources.log').write_text((result.stdout + result.stderr).decode('utf-8', 'replace'), encoding='utf-8')
+                except subprocess.TimeoutExpired:
+                    (LOGS / 'failure-resources.log').write_text('Resource snapshot timed out; preserve the original verification failure.\n')
         for kind, name in reversed(resources):
             result = subprocess.run(['docker', kind, 'inspect', name], capture_output=True)
             if result.returncode:
@@ -182,7 +192,7 @@ def main():
             labels = item.get('Labels') if kind == 'network' else item.get('Config', {}).get('Labels')
             if not labels or labels.get('dva.test-run') != RUN:
                 raise RuntimeError('Refusing cleanup of unowned Docker resource: '+name)
-            if kind == 'container' and name.endswith('-app'):
+            if kind == 'container' and name.endswith(('-app', '-db')):
                 result = subprocess.run(['docker', 'logs', name], capture_output=True)
                 (LOGS/(name+'.log')).write_text((result.stdout+result.stderr).decode('utf-8', 'replace'), encoding='utf-8')
             run('docker', kind, 'rm', *(['-f'] if kind == 'container' else []), name, label=name+'-cleanup')

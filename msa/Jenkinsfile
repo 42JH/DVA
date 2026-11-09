@@ -370,7 +370,7 @@ pipeline {
                 }
             }
         }
-        failure { echo 'Release failed. Application delivery does not run after a database failure. Inspect migration/rollout logs before retrying.' }
+        failure { echo 'Release failed. Inspect the first failing stage and its archived verification/package/delivery logs before retrying.' }
         aborted { echo 'Pipeline aborted. An already-started k3s Job may still be running; inspect it before retrying.' }
     }
 }
