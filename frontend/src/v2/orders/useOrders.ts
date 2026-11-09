@@ -29,7 +29,8 @@ export const GROUPS: { value: StatusGroup; label: string }[] = [
 // at = 목록 기준 시각 (useSnapshotList) — 조건을 바꾸면 '' 로 지워 지금 최신 · 첫 쪽으로
 // o = 열어 둔 주문 '주문번호' 또는 '주문번호-배송번호' (통화 상세의 주문 링크도 이걸로 엶) · 미완료(배송 초안)는 'd초안번호'
 // d = 접수 시각 정렬 ('asc' = 오래된 순)
-const DEFAULTS = { q: '', g: 'ALL', r: '7d', at: '', o: '', d: 'desc' }
+// c = 주문 상세에서 띄운 이어진 통화 번호 (통화 상세에 갔다가 ‹로 돌아오면 그 창 그대로)
+const DEFAULTS = { q: '', g: 'ALL', r: '7d', at: '', o: '', d: 'desc', c: '' }
 
 const party = (p: { name: string | null; phoneNumber: string | null } | undefined) => ({
   name: p?.name ?? '',
@@ -188,9 +189,12 @@ export function useOrders() {
             : parcelSeq
               ? `${orderSeq}-${parcelSeq}`
               : String(orderSeq),
+        c: '', // 다른 주문을 고르면 통화 창은 닫힘
         page,
       }),
-    unpick: () => set({ o: '', page }),
+    unpick: () => set({ o: '', c: '', page }),
+    callSeq: Number(params.c) || null,
+    setCall: (seq: number | null) => set({ c: seq ? String(seq) : '', page }),
     // 줄에 마우스를 올리면(키보드로 오면) 상세를 미리 받음 — 누르면 패널이 바로 참
     warm: (orderSeq: number) =>
       void qc.prefetchQuery({ ...orderQueries.detail(orderSeq), staleTime: 30_000 }),

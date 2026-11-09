@@ -9,15 +9,13 @@ import { RANGES } from '@/v2/lib/range'
 import { useOrders, type OrderRow, type OrdersVm } from './useOrders'
 import { WaybillPanel } from './Waybill'
 import { OrderAddModal } from './OrderAdd'
-import { CallOverlay, type LinkedCall } from './CallOverlay'
+import { CallOverlay } from './CallOverlay'
+import { useWaybill } from './useWaybill'
 
 export function OrdersPage() {
   const vm = useOrders()
   const [adding, setAdding] = useState(false)
-  const [call, setCall] = useState<{ order: string; call: LinkedCall } | null>(null)
   const [moved, setMoved] = useState<{ seq: number; notice?: string } | null>(null) // 미완료 접수로 생긴 주문 · 결과
-  const orderKey = vm.picked ? `${vm.picked.orderSeq}-${vm.picked.parcelSeq}` : ''
-  const shown = call?.order === orderKey ? call.call : null // 다른 주문을 고르면 통화 창은 닫힘
 
   return (
     <>
@@ -45,7 +43,14 @@ export function OrdersPage() {
             )}
           </div>
           <Table vm={vm} />
-          {shown && <CallOverlay call={shown} onClose={() => setCall(null)} />}
+          {vm.picked && vm.callSeq && (
+            <OpenCall
+              orderSeq={vm.picked.orderSeq}
+              parcelSeq={vm.picked.parcelSeq}
+              seq={vm.callSeq}
+              onClose={() => vm.setCall(null)}
+            />
+          )}
         </section>
         {vm.picked && (
           // 패널 틀은 처음 열 때만 미끄러져 들어오고, 줄을 바꾸면 안쪽만 바뀜
@@ -55,8 +60,8 @@ export function OrdersPage() {
               orderSeq={vm.picked.orderSeq}
               parcelSeq={vm.picked.parcelSeq}
               onClose={vm.unpick}
-              openCall={shown?.seq ?? null}
-              onOpenCall={(c) => setCall({ order: orderKey, call: c })}
+              openCall={vm.callSeq}
+              onOpenCall={(c) => vm.setCall(c.seq)}
               // 미완료를 접수하면 새로 생긴 주문을 열고 결과 안내를 이어서 보여 줌
               onMoved={(seq, notice) => {
                 setMoved({ seq, notice })
@@ -186,6 +191,22 @@ function Row({
       )}
     </tr>
   )
+}
+
+/** 주소의 통화 번호(c) → 띄울 통화. 주문 상세는 오른쪽 패널이 받아 둔 것을 같이 씀 (요청 더 없음) */
+function OpenCall({
+  orderSeq,
+  parcelSeq,
+  seq,
+  onClose,
+}: {
+  orderSeq: number
+  parcelSeq: number | null
+  seq: number
+  onClose: () => void
+}) {
+  const call = useWaybill(orderSeq, parcelSeq).view?.calls.find((c) => c.seq === seq)
+  return call ? <CallOverlay call={call} onClose={onClose} /> : null
 }
 
 function Person({ p }: { p: { name: string; phone: string } }) {
