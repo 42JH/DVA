@@ -69,10 +69,11 @@ export function useOrders() {
   // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 기간 조건 없음, 쪽 번호만
   const drafting = g === 'COLLECTING'
   const { size, setSize } = list // 쪽 크기는 목록과 하나로
-  const draftCount = useQuery({
+  const draftCount = useQuery<number>({
     queryKey: ['v2', 'drafts', 'count', base.q],
     queryFn: ({ signal }) =>
       draftList({ q: base.q, limit: 1, offset: 0 }, signal).then((r) => r.total_count),
+    placeholderData: keepPreviousData,
   })
   // 오래된 순이면 총 건수로 뒤쪽부터 (oldestPage)
   const dn = draftCount.data ?? 0
@@ -119,6 +120,7 @@ export function useOrders() {
     queries: GROUPS.map((x) => ({
       queryKey: ['v2', 'orders', 'count', { ...base, to, statusGroup: x.value }],
       enabled: !!to && x.value !== 'COLLECTING', // 미완료 건수는 초안에서
+      placeholderData: keepPreviousData, // 기간 · 검색을 바꿔 새로 받는 동안 숫자를 비우지 않음 (탭이 줄었다 늘며 울렁이던 것)
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         api
           .get<ApiList<OrderListItem>>('/admin/orders', {
