@@ -3,7 +3,12 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -100,7 +105,7 @@ async function fixture(status = 'ACTIVE', phone = '010' + String(randomInt(10000
       [randomUUID(), phone],
     )
   ).rows[0].call_session_seq;
-  return { customer, call, phone, ai: { call_session_seq: String(call) } };
+  return { customer, call, phone, ai: { ...businessHeaders(), call_session_seq: String(call) } };
 }
 async function order(
   f,
@@ -344,17 +349,16 @@ test('AI calls require an existing ongoing call and an ACTIVE customer with matc
   const f = await fixture();
   for (const header of [undefined, '0', '-1', 'abc', '1.5', '2147483648']) {
     await error(
-      await request(
-        f.customer,
-        undefined,
-        header === undefined ? {} : { call_session_seq: header },
-      ),
+      await request(f.customer, undefined, {
+        ...businessHeaders(),
+        ...(header === undefined ? {} : { call_session_seq: header }),
+      }),
       400,
       'INVALID_REQUEST',
     );
   }
   await error(
-    await request(f.customer, undefined, { call_session_seq: '2147483647' }),
+    await request(f.customer, undefined, { ...businessHeaders(), call_session_seq: '2147483647' }),
     404,
     'NOT_FOUND',
   );

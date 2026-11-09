@@ -5,7 +5,12 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+const {
+  createTestSession,
+  createTestPool,
+  startTestApp,
+  businessHeaders,
+} = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -203,7 +208,7 @@ async function create(body = orderBody(), key = randomUUID(), ai = false) {
     headers: {
       'Content-Type': 'application/json',
       'Idempotency-Key': key,
-      ...(ai ? {} : { Cookie: cookie, Origin: adminOrigin }),
+      ...(ai ? businessHeaders() : { Cookie: cookie, Origin: adminOrigin }),
     },
     body: JSON.stringify(
       ai

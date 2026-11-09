@@ -171,6 +171,7 @@ module.exports = function ordersFixture() {
     ).rows[0].call_session_seq;
   const aiCreate = (callId, body, key = randomUUID(), index = 0, extra = {}) =>
     create(body, key, index, {
+      ...businessHeaders(),
       Cookie: undefined,
       Origin: undefined,
       call_session_seq: callId === undefined ? undefined : String(callId),
@@ -210,7 +211,11 @@ module.exports = function ordersFixture() {
         Object.entries({ Cookie: cookies[index], ...extra }).filter(([, v]) => v !== undefined),
       ),
     });
-  const aiReadHeaders = (callId) => ({ Cookie: undefined, call_session_seq: String(callId) });
+  const aiReadHeaders = (callId) => ({
+    ...businessHeaders(),
+    Cookie: undefined,
+    call_session_seq: callId === undefined ? undefined : String(callId),
+  });
 
   const readDetail = (id, extra = {}, index = 0) =>
     fetch(hosts[index] + '/api/orders/' + id, {

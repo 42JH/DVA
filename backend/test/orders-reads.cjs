@@ -246,7 +246,7 @@ module.exports = function registerOrdersReads(suite) {
       401,
       'UNAUTHORIZED',
     );
-    await errorCode(await readDetail(own, { Cookie: undefined }), 400, 'INVALID_REQUEST');
+    await errorCode(await readDetail(own, aiReadHeaders(undefined)), 400, 'INVALID_REQUEST');
     await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [customer]);
     await errorCode(await readDetail(own, aiReadHeaders(callId)), 403, 'FORBIDDEN');
     assert.equal((await readDetail(own)).status, 200);

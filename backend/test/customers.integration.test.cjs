@@ -25,6 +25,119 @@ const origin = 'http://localhost:5173';
 let app, base, baseB, repository, adminCookie, adminId;
 const phone = () => '010' + String(randomInt(10000000, 100000000));
 const start = () => startTestApp(apps);
+
+test('all 12 shared entries require business authentication or an administrator session independently of AI configuration', async () => {
+  const { ConfigService } = require('@nestjs/config');
+  const { SwaggerModule, DocumentBuilder } = require('@nestjs/swagger');
+  const routes = [
+    ['GET', '/api/orders', '/api/orders'],
+    ['POST', '/api/orders', '/api/orders', {}],
+    ['GET', '/api/orders/2147483647', '/api/orders/{id}'],
+    ['PATCH', '/api/orders/2147483647', '/api/orders/{id}', { expectedVersion: 1 }],
+    ['POST', '/api/orders/2147483647/cancel', '/api/orders/{id}/cancel'],
+    [
+      'POST',
+      '/api/orders/2147483647/parcels/cancel',
+      '/api/orders/{id}/parcels/cancel',
+      { orderParcelSeqs: [2147483647] },
+    ],
+    ['POST', '/api/orders/2147483647/submit', '/api/orders/{id}/submit', { expectedVersion: 1 }],
+    [
+      'GET',
+      '/api/customers/2147483647/addresses?direction=DESTINATION',
+      '/api/customers/{id}/addresses',
+    ],
+    ['GET', '/api/customers/2147483647/pins', '/api/customers/{id}/pins'],
+    ['POST', '/api/customers/2147483647/pins', '/api/customers/{id}/pins', {}],
+    ['PATCH', '/api/pins/2147483647', '/api/pins/{id}', {}],
+    ['GET', '/api/ai/faqs', '/api/ai/faqs'],
+  ];
+  const send = ([method, path, , body], headers = {}) =>
+    fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID(), ...headers },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const counts = async () =>
+    (
+      await pool.query(`SELECT
+    (SELECT count(*) FROM orders) AS orders,
+    (SELECT count(*) FROM personal_pins) AS pins,
+    (SELECT count(*) FROM faq_entries) AS faqs`)
+    ).rows[0];
+  const before = await counts();
+  const document = SwaggerModule.createDocument(
+    app,
+    new DocumentBuilder()
+      .addBearerAuth()
+      .addCookieAuth('dva_session', { type: 'apiKey', in: 'cookie' }, 'adminSession')
+      .build(),
+  );
+  for (const route of routes) {
+    const [method, path, schemaPath] = route;
+    assert.deepEqual(
+      document.paths[schemaPath][method.toLowerCase()].security,
+      [{ adminSession: [] }, { bearer: [] }],
+      `${method} ${path}`,
+    );
+    for (const headers of [
+      {},
+      { Authorization: 'Bearer wrong', call_session_seq: '2147483647' },
+      { Authorization: 'Basic invalid' },
+      { Authorization: businessHeaders().Authorization + ', ' + businessHeaders().Authorization },
+      { ...businessHeaders(), Cookie: 'dva_session=invalid', Origin: origin },
+      { ...businessHeaders(), Cookie: 'dva_session=' + 'f'.repeat(64), Origin: origin },
+      { ...businessHeaders(), Cookie: adminCookie + '; ' + adminCookie, Origin: origin },
+    ]) {
+      const response = await send(route, headers);
+      assert.equal(response.status, 401, `${method} ${path}`);
+      assert.equal((await response.json()).error.code, 'UNAUTHORIZED');
+    }
+    const authenticated = await send(route, businessHeaders());
+    assert.ok(
+      [200, 400, 404, 409, 422].includes(authenticated.status),
+      `${method} ${path}: ${authenticated.status}`,
+    );
+    if (method !== 'GET') {
+      assert.equal((await send(route, { Cookie: adminCookie })).status, 403);
+      assert.equal(
+        (await send(route, { Cookie: adminCookie, Origin: 'https://untrusted.invalid' })).status,
+        403,
+      );
+    }
+  }
+  const config = app.get(ConfigService);
+  const token = config.get('AI_BUSINESS_TOKEN');
+  config.set('AI_BUSINESS_TOKEN', '');
+  try {
+    assert.equal(config.get('AI_BUSINESS_TOKEN'), '');
+    for (const route of routes) {
+      const disabled = await send(route, { Authorization: 'Bearer ' + token });
+      assert.equal(disabled.status, 503, `${route[0]} ${route[1]}`);
+      assert.equal((await disabled.json()).error.code, 'DEPENDENCY_UNAVAILABLE');
+    }
+    for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
+      const admin = await account(role);
+      for (const route of routes) {
+        const response = await send(route, { Cookie: admin.cookie, Origin: origin });
+        assert.ok(
+          [200, 400, 404, 409, 422].includes(response.status),
+          `${role} ${route[0]} ${route[1]}: ${response.status}`,
+        );
+        const withBearer = await send(route, {
+          Cookie: admin.cookie,
+          Origin: origin,
+          Authorization: 'Bearer ignored-for-admin',
+        });
+        assert.equal(withBearer.status, response.status);
+      }
+    }
+  } finally {
+    config.set('AI_BUSINESS_TOKEN', token);
+  }
+  assert.deepEqual(await counts(), before);
+});
+
 async function account(role = 'OPERATOR') {
   const loginId = 'cus' + randomUUID().replaceAll('-', '').slice(0, 16);
   const { rows } = await pool.query(

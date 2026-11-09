@@ -1,4 +1,5 @@
 const customerAddress = require('./helpers/customer-address.cjs');
+const { businessHeaders } = require('./helpers/application.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -232,7 +233,11 @@ test('deleted calls reject AI registration, STT/events, analysis, questions and 
     'NOT_FOUND',
   );
   await f.error(
-    await f.get('/api/orders', 0, { Cookie: undefined, call_session_seq: String(c.id) }),
+    await f.get('/api/orders', 0, {
+      Cookie: undefined,
+      ...businessHeaders(),
+      call_session_seq: String(c.id),
+    }),
     404,
     'NOT_FOUND',
   );
