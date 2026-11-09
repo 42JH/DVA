@@ -351,6 +351,20 @@ export const companyHandlers = [
     const o = orgOf(params.id)
     return o ? HttpResponse.json({ data: summary(o) }) : notFound()
   }),
+  // 여러 곳 한 번에 — 하나라도 없으면 404, 아무것도 안 지움
+  http.delete(`${API_BASE_URL}/companies`, async ({ request }) => {
+    const { organizationSeqs: ids } = (await request.json()) as { organizationSeqs: number[] }
+    if (!ids.every((id) => orgs.some((o) => o.organizationSeq === id))) return notFound()
+    for (const id of ids) {
+      orgs.splice(
+        orgs.findIndex((o) => o.organizationSeq === id),
+        1,
+      )
+      for (let k = members.length - 1; k >= 0; k--)
+        if (members[k].membership.organizationSeq === id) members.splice(k, 1)
+    }
+    return noContent()
+  }),
   http.delete(`${API_BASE_URL}/companies/:id`, ({ params }) => {
     const i = orgs.findIndex((o) => o.organizationSeq === Number(params.id))
     if (i < 0) return notFound()

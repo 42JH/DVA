@@ -18,7 +18,7 @@ export interface UnansweredQuestion {
 }
 
 /** 서버 UnansweredQuestion (§13) — 화면에서 안 쓰는 칸(occurredAt · offsetSeconds · status 등)은 뺌 */
-interface UnansweredDto {
+export interface UnansweredDto {
   unansweredQuestionSeq: number
   callSessionSeq: number
   callStartedAt: string | null
@@ -28,7 +28,7 @@ interface UnansweredDto {
   reason?: UnansweredReason | null // 사유 연동(DB 049) 전 서버는 칸이 없음 → 미분류
 }
 
-const toScreen = (d: UnansweredDto): UnansweredQuestion => ({
+export const toScreen = (d: UnansweredDto): UnansweredQuestion => ({
   unansweredQuestionSeq: d.unansweredQuestionSeq,
   callSessionSeq: d.callSessionSeq,
   startedAt: d.callStartedAt,

@@ -3,7 +3,7 @@ import { adminHandlers, authHandlers } from './auth'
 import { callHandlers } from './calls'
 import { companyHandlers } from './companies'
 import { customerHandlers } from './customers'
-import { dashboardHandlers } from './dashboard'
+import { dashboardHandlers, homeHandler } from './dashboard'
 import { faqHandlers } from './faq'
 import { orderHandlers } from './orders'
 import { personaHandlers } from './personas'
@@ -14,6 +14,7 @@ export const handlers = [
   ...callHandlers,
   ...companyHandlers,
   ...customerHandlers,
+  homeHandler,
   ...dashboardHandlers,
   ...faqHandlers,
   ...orderHandlers,
