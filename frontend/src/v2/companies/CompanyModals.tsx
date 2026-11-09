@@ -1,7 +1,8 @@
 // v2 기업 창 셋 — 사원 추가 · 수정, CSV로 사원 추가, CSV로 기업 등록. 규칙 · 요청은 기존 훅 그대로 (화면만 v2)
 // 파일 칸 규칙은 긴 설명 대신 [예시 파일 받기]로 (예시 파일에 칸 이름 · 형식이 다 들어 있음)
 import type { Member } from '@/features/company/api/companyApi'
-import { downloadExample } from '@/features/company/csvMembers'
+import { downloadExample, type CsvMember } from '@/features/company/csvMembers'
+import { fmtPhone } from '@/shared/lib/format'
 import { MEMBER_ROLE } from '@/features/company/labels'
 import { useCompanyCsv } from '@/features/company/hooks/useCompanyCsv'
 import { useMemberCsv } from '@/features/company/hooks/useMemberCsv'
@@ -177,8 +178,54 @@ export function MemberCsvModal({
             )}
           </section>
         )}
+        <CsvTable rows={vm.rows} />
       </div>
     </Modal>
+  )
+}
+
+/** 올린 파일에서 읽은 사원 — 등록 전에 그대로 확인 (11/09 사용자: 엑셀에서 앞 0이 사라져 보여도 여기선 010-1234-5678)
+ *  mark = 사원 추가에서 신규 · 바뀜 · 그대로 */
+function CsvTable({ rows }: { rows: (CsvMember & { mark?: string })[] }) {
+  if (!rows.length) return null
+  const marked = rows.some((r) => r.mark)
+  return (
+    <section aria-label="읽은 사원" className="flex flex-col gap-1.5">
+      <p className="text-[12px] text-ops-sub">읽은 사원 {rows.length}명</p>
+      <div className="max-h-[232px] [scrollbar-width:thin] overflow-y-auto rounded-md ring-1 ring-ops-line">
+        <table className="w-full text-[13px] tabular-nums">
+          <thead className="sticky top-0 bg-[#e8eff8] text-[12px] font-semibold">
+            <tr className="[&>th]:h-8 [&>th]:px-3 [&>th]:text-left">
+              {marked && <th className="w-16">구분</th>}
+              <th className="w-20">사번</th>
+              <th>이름</th>
+              <th className="w-32">전화번호</th>
+              <th className="w-16">대표자</th>
+              <th>부서</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr
+                key={r.line}
+                className="border-t border-ops-line [&>td]:h-8 [&>td]:truncate [&>td]:px-3"
+              >
+                {marked && (
+                  <td className={r.mark === '그대로' ? 'text-ops-faint' : 'text-ops-route'}>
+                    {r.mark}
+                  </td>
+                )}
+                <td>{r.employeeNo}</td>
+                <td>{r.name}</td>
+                <td>{fmtPhone(r.phoneNumber)}</td>
+                <td>{r.leader ? '대표자' : ''}</td>
+                <td className="text-ops-sub">{r.department ?? ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 
@@ -212,6 +259,7 @@ export function CompanyCsvModal({ onClose }: { onClose: () => void }) {
           onRemove={vm.removeFile}
         />
         <Example />
+        <CsvTable rows={vm.members} />
       </div>
     </Modal>
   )

@@ -104,6 +104,15 @@ export function useMemberCsv(companyId: number, onDone: () => void) {
       picked.kind === 'ok' && (all.error ?? deps.error)
         ? '지금 등록된 사원 · 부서를 불러오지 못해 비교할 수 없습니다. 창을 닫고 다시 열어 주세요.'
         : null,
+    // 읽은 사원 + 구분 — 등록 전에 표로 보여 줌 (오류가 있으면 안 보임)
+    rows:
+      pv && pv.errors.length === 0
+        ? [
+            ...pv.added.map((r) => ({ ...r, mark: '신규' })),
+            ...pv.changed.map((c) => ({ ...c.row, mark: '바뀜' })),
+            ...pv.same.map((r) => ({ ...r, mark: '그대로' })),
+          ].sort((a, b) => a.line - b.line)
+        : [],
     // 미리 보기 — 오류가 있으면 안 보임(먼저 고쳐야 함)
     preview:
       pv && pv.errors.length === 0

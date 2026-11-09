@@ -74,6 +74,7 @@ export function useCompanyCsv(onDone: () => void) {
           ? rowErrors.slice(0, 3).join('\n')
           : undefined,
     count: picked.kind === 'ok' ? picked.members.length : 0, // '사원 24명'
+    members: picked.kind === 'ok' ? picked.members : [], // 읽은 사원 — 등록 전에 표로 보여 줌
     pick,
     removeFile: () => {
       setPicked({ kind: 'none' })
