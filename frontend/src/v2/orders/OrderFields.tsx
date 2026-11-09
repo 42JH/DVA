@@ -2,6 +2,7 @@
 // 주소 칸을 누르면 칸 자리에 주소 검색이 펼쳐짐 (고르면 돌아옴). 규칙은 기존 useOrderForm 그대로
 import type { ReactNode } from 'react'
 import type { useOrderForm } from '@/features/order/hooks/useOrderForm'
+import { PRICE_BANDS, priceBand } from '@/shared/order/labels'
 import { AddressPicker } from '@/v2/ui/AddressPicker'
 import { AddressButton, Choice, Err, Label, TextInput } from '@/v2/ui/Field'
 
@@ -23,7 +24,7 @@ export function OrderFields({
   const noItem = f.items.every((i) => i.count === 0) && !f.etcItem.trim()
   const itemsErr = f.itemsError ?? (showEmpty && noItem ? '물품을 1개 이상 넣어 주세요.' : null)
   const priceErr =
-    f.priceError ?? (showEmpty && f.declaredValue === '' ? '물품 가액을 입력해 주세요.' : undefined)
+    f.priceError ?? (showEmpty && f.declaredValue === '' ? '물품 가액을 골라 주세요.' : undefined)
   if (wide)
     return (
       <div className="flex flex-col gap-5">
@@ -55,15 +56,7 @@ export function OrderFields({
         </Group>
 
         <div className="grid grid-cols-[200px_240px_minmax(0,1fr)] items-start gap-4">
-          <TextInput
-            label="물품 가액"
-            value={f.declaredValue}
-            onChange={f.setDeclaredValue}
-            error={priceErr}
-            suffix="원"
-            inputMode="numeric"
-            placeholder="숫자만"
-          />
+          <PriceBand f={f} error={priceErr} />
           <Pickup f={f} />
           <Payment f={f} />
         </div>
@@ -100,15 +93,7 @@ export function OrderFields({
       </Group>
 
       <div className="grid grid-cols-2 gap-3">
-        <TextInput
-          label="물품 가액"
-          value={f.declaredValue}
-          onChange={f.setDeclaredValue}
-          error={priceErr}
-          suffix="원"
-          inputMode="numeric"
-          placeholder="숫자만"
-        />
+        <PriceBand f={f} error={priceErr} />
         {/* 배송비: 추가 · 미완료 주문은 물품으로 자동 계산, 그 밖엔 상세 값 그대로 (바꿀 수 없음) */}
         <Read
           label="배송비"
@@ -299,6 +284,32 @@ function Payment({ f }: { f: OrderForm }) {
       />
       {!f.payment && <Err>결제 방식을 골라 주세요.</Err>}
     </div>
+  )
+}
+
+/** 물품 가액 — 구간 고르기. 고르면 그 구간의 가장 큰 금액이 들어감. 이미 있는 금액(AI 접수)은 그 구간으로 보이고, 안 고치면 그대로 */
+function PriceBand({ f, error }: { f: OrderForm; error?: string }) {
+  const v = f.declaredValue === '' ? '' : String(priceBand(Number(f.declaredValue)).max)
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <Label>물품 가액</Label>
+      <select
+        value={v}
+        onChange={(e) => f.setDeclaredValue(e.target.value)}
+        aria-invalid={!!error}
+        className={`h-9 rounded-md bg-white px-2 text-[14px] ring-1 outline-none ring-inset focus:ring-ops-route ${error ? 'ring-ops-stop' : 'ring-ops-line'} ${v ? '' : 'text-ops-faint'}`}
+      >
+        <option value="" disabled>
+          구간 선택
+        </option>
+        {PRICE_BANDS.map((b) => (
+          <option key={b.max} value={b.max} className="text-ops-ink">
+            {b.label}
+          </option>
+        ))}
+      </select>
+      {error && <Err>{error}</Err>}
+    </label>
   )
 }
 
