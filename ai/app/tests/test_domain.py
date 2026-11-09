@@ -248,7 +248,7 @@ def test_unverified_claims():
     assert unverified_claims("성함 확인했습니다", s, P) == []  # 정상 안내에도 쓰는 말은 검사하지 않음
     s.result_accepted = True
     assert unverified_claims("접수되었습니다", s, P) == []
-    assert unverified_claims("결제 완료됐어요", s, P) == ["결제되었"]  # 결제 완료는 늘 금지
+    assert unverified_claims("결제가 완료되어 취소가 어렵습니다", s, P) == []  # 결제 완료 안내는 허용(S15P31D109-178)
 
 
 def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
