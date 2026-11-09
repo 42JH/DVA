@@ -13,7 +13,7 @@ import { fmtPhone } from '@/shared/lib/format'
 import { useFollowScroll } from '@/features/call/hooks/useFollowScroll'
 import { PageHead } from '@/v2/V2Layout'
 import { Badge, Kinds } from '@/v2/ui'
-import { itemsText, STATUS_LOOK } from '@/v2/orders/orderLook'
+import { itemsText, STATUS_LOOK, won } from '@/v2/orders/orderLook'
 import { dateTime } from '@/v2/lib/when'
 import { useCallView, type CallView } from './useCallView'
 import { Player } from './Player'
@@ -286,7 +286,7 @@ function Contents({ vm }: { vm: CallView }) {
   )
 }
 
-/** 이 통화의 주문 한 건 — 출발지 · 도착지 · 물품 · 수거 희망 (주문 상세에서) */
+/** 이 통화의 주문 한 건 — 출발지 · 도착지 · 물품 · 가액 · 배송비 · 수거 희망 (주문 상세에서) */
 function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
   const q = useQuery({ ...orderQueries.detail(seq), staleTime: 30_000 })
   const o = q.data ? pickParcel(q.data) : null
@@ -314,7 +314,7 @@ function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
           {q.error ? '주문을 불러오지 못했습니다.' : '불러오는 중…'}
         </p>
       ) : (
-        <dl className="mt-2 grid grid-cols-[48px_1fr] gap-y-1.5">
+        <dl className="mt-2 grid grid-cols-[56px_1fr] gap-y-1.5">
           <dt className="text-ops-sub">출발지</dt>
           <dd>
             <span className="block font-medium">{who(o.sender)}</span>
@@ -327,6 +327,11 @@ function OrderCard({ seq, what }: { seq: number; what: '접수' | '취소' }) {
           </dd>
           <dt className="text-ops-sub">물품</dt>
           <dd>{itemsText(o.items) || '없음'}</dd>
+          {/* 통화에서 받은 가액이 맞게 들어갔는지 바로 보게 (11/09 사용자) */}
+          <dt className="text-ops-sub">가액</dt>
+          <dd className="tabular-nums">{won(o.itemPrice) || '없음'}</dd>
+          <dt className="text-ops-sub">배송비</dt>
+          <dd className="tabular-nums">{won(o.notifiedPrice) || '없음'}</dd>
           <dt className="text-ops-sub">수거</dt>
           <dd className="tabular-nums">{dateTime(o.pickupRequestedAt) || '없음'}</dd>
         </dl>
