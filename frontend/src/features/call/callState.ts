@@ -8,7 +8,7 @@ export function callState(d: {
   startedAt: string | null
   endedAt: string | null
   analysis: unknown
-  analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED'
+  analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED'
 }): {
   label: string
   tone: Tone
@@ -16,6 +16,7 @@ export function callState(d: {
   if (d.startedAt && !d.endedAt) return { label: '통화 중', tone: 'route' }
   if (d.analysis || d.analysisStatus === 'COMPLETED') return { label: '분석 완료', tone: 'done' }
   if (d.analysisStatus === 'FAILED') return { label: '분석 실패', tone: 'wait' }
+  if (d.analysisStatus === 'EXPIRED') return { label: '분석 만료', tone: 'cancel' } // 끝난 지 10분이 지나도 분석이 안 옴
   return { label: '분석 중', tone: 'idle' }
 }
 
@@ -25,6 +26,7 @@ export const STATE_FILTERS = [
   { value: 'live', label: '통화 중' },
   { value: 'pending', label: '분석 중' },
   { value: 'failed', label: '분석 실패' },
+  { value: 'expired', label: '분석 만료' },
   { value: 'done', label: '분석 완료' },
 ] as const
 export type StateFilter = (typeof STATE_FILTERS)[number]['value']

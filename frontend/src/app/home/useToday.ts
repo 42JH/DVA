@@ -1,7 +1,7 @@
 // 오늘 (첫 화면) — 위: 지금 처리할 일(건수 · 바로 가기) · 오늘 숫자, 아래: AI 상담 성능 요약 (기업 피드백: 통계는 아래로, 운영 정보 먼저)
 import { draftLabel, draftList } from '@/features/order/api/draftApi'
 import { useQuery } from '@tanstack/react-query'
-import { api, type ApiList } from '@/shared/api/client'
+import { api, type ApiItem, type ApiList } from '@/shared/api/client'
 import { kstDayStart, todayYmd } from '@/shared/lib/dateRange'
 import { fmtPhone } from '@/shared/lib/format'
 import type { CallListItemDto } from '@/shared/call/callDto'
@@ -24,7 +24,15 @@ export function useToday() {
   const today = kstDayStart(todayYmd())
   const notPaid = useQuery(total('/admin/orders', { statusGroup: 'notPaid' }))
   const failed = useQuery(total('/admin/orders', { statusGroup: 'SUBMISSION_FAILED' }))
-  const ordersToday = useQuery(total('/admin/orders', { from: today }))
+  // 오늘 주문 = 홈 API의 실제 주문 수 (057 · 058 뒤 /admin/orders 전체엔 미완료 초안이 섞여 건수가 부풀므로)
+  const home = useQuery({
+    queryKey: ['screen', 'today', 'home'],
+    queryFn: ({ signal }) =>
+      api
+        .get<ApiItem<{ todayOrderCount: number }>>('/dashboard/home', { signal })
+        .then((r) => r.data),
+    refetchInterval: 30_000,
+  })
   const callsToday = useQuery(total('/calls', { from: today }))
   // 처리할 미완료 주문 (최근 것부터) — 20건 받아 칸 높이에 들어가는 만큼 보임
   // 미완료 = 배송 초안 (055)
@@ -79,7 +87,7 @@ export function useToday() {
       },
     ],
     live: s.liveCalls ?? 0,
-    ordersToday: ordersToday.data ?? null,
+    ordersToday: home.data?.todayOrderCount ?? null,
     callsToday: callsToday.data ?? null,
     incomplete: (incomplete.data?.data ?? []).map((d) => ({
       seq: d.draftSeq,

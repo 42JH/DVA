@@ -151,6 +151,7 @@ function draftOf(o: OrderDetail) {
     orderSeq: null as number | null,
     orderParcelSeq: null,
     legacyOrderSeq: o.orderSeq as number | null,
+    reservedOrderSeq: 20000 + o.orderSeq, // 057 · 058 예약 주문번호 (058은 옛 초안에도 새 번호)
     legacyOrderParcelSeq: o.orderSeq * 10 + 1,
     createdAt: new Date(o.acceptedAt).toISOString(),
     updatedAt: new Date(o.acceptedAt).toISOString(),
@@ -264,15 +265,28 @@ export const orderHandlers = [
     const to = u.get('to') ? Date.parse(u.get('to')!) : Infinity
     const limit = Number(u.get('limit') ?? 20)
     const offset = Number(u.get('offset') ?? 0)
-    const rows = allOrders()
-      .map(toListItem)
+    // 057 · 058: 전체 = 실제 주문 + 미완료 초안(status COLLECTING, orderSeq = 예약번호, draftSeq), COLLECTING 묶음 = 초안만
+    const listed = allOrders()
+      .filter((o) => statusOf(o) !== 'COLLECTING' || !draftGone.has(o.orderSeq))
+      .map((o) => {
+        const item = toListItem(o)
+        if (item.status !== 'COLLECTING') return { ...item, draftSeq: null as number | null }
+        const d = draftOf(o)
+        return {
+          ...item,
+          orderSeq: d.reservedOrderSeq,
+          draftSeq: d.draftSeq as number | null,
+          pickupRequestedAt: null,
+          parcels: item.parcels
+            .slice(0, 1)
+            .map((p) => ({ ...p, orderParcelSeq: null, status: 'ACTIVE' })),
+        }
+      })
       .filter((o) => {
         const at = Date.parse(o.createdAt)
         return (
           at >= from &&
           at < to &&
-          o.status !== 'COLLECTING' && // 055: 미완료는 배송 초안으로 옮겨져 주문 목록에 안 나옴
-          (!group || (GROUP[group] ?? [group]).includes(o.status)) &&
           (!q ||
             o.parcels.some((p) =>
               [p.origin, p.destination].some((x) =>
@@ -281,12 +295,35 @@ export const orderHandlers = [
             ))
         )
       })
+    const inGroup = (g: string) => (o: (typeof listed)[number]) =>
+      (GROUP[g] ?? [g]).includes(o.status)
+    const statusCounts = {
+      all: listed.length,
+      incomplete: listed.filter(inGroup('COLLECTING')).length,
+      notPaid: listed.filter(inGroup('notPaid')).length,
+      paid: listed.filter(inGroup('PAID')).length,
+      submissionFailed: listed.filter(inGroup('SUBMISSION_FAILED')).length,
+      cancelled: listed.filter(inGroup('CANCELLED')).length,
+    }
+    const rows = listed
+      .filter((o) => !group || inGroup(group)(o))
       .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.orderSeq - a.orderSeq)
     return HttpResponse.json({
       data: rows.slice(offset, offset + limit),
       hasNext: offset + limit < rows.length,
       total_count: rows.length,
+      statusCounts,
     })
+  }),
+  // 홈 (GET /dashboard/home) — 오늘(한국 시간) 만든 실제 주문 수. 미완료 초안 제외
+  http.get(`${API_BASE_URL}/dashboard/home`, () => {
+    const kstDay = (t: string | number) =>
+      new Date(new Date(t).getTime() + 9 * 3600e3).toISOString().slice(0, 10)
+    const today = kstDay(Date.now())
+    const todayOrderCount = allOrders().filter(
+      (o) => statusOf(o) !== 'COLLECTING' && kstDay(o.acceptedAt) === today,
+    ).length
+    return HttpResponse.json({ data: { todayOrderCount }, meta: meta() })
   }),
   http.get(`${API_BASE_URL}/orders/:id`, ({ params }) => {
     const o = allOrders().find((x) => x.orderSeq === Number(params.id))

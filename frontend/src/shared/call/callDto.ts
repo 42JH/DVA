@@ -76,7 +76,8 @@ export interface CallDto {
   customerSeq: number | null
   customerName: string | null
   organizationName: string | null // 고객의 지금 소속 기업 (없으면 null — 고객 있으면 개인, 둘 다 없으면 미확인)
-  analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' // 백엔드 판정 (11/08) — 실패 통보가 안 오면 계속 PENDING
+  // 백엔드 판정 (11/08) · EXPIRED = 분석도 실패 통보도 없이 통화가 끝난 지 10분 지남 (11/09 후속 명세, 배포 전엔 안 옴)
+  analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED'
   recordedAt: string | null // 첫 녹취가 DB에 저장된 시각 (재생 가능 여부 아님)
   callerPhoneNumber: string | null
   orderSeq: number | null

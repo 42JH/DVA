@@ -4,6 +4,7 @@
 // 삭제 = 서버 숨김(soft delete, 5년 보관). 실제 주문 · 결제와 무관
 import { api, ApiError, type ApiItem, type ApiList } from '@/shared/api/client'
 import { draftLabel, type ParcelDraftDto } from '@/shared/order/draftApi'
+import { orderNo } from '@/shared/order/labels'
 import type { OrderDetail, Party } from '@/shared/order/orderApi'
 import type { OrderInput, OrderListItem, PartyInput } from './orderApi'
 
@@ -18,6 +19,17 @@ export const draftListItem = (d: ParcelDraftDto): OrderListItem & { label: strin
   pickupRequestedAt: null,
   parcels: [{ ...d.parcel, orderParcelSeq: -d.draftSeq, status: 'ACTIVE' }],
 })
+
+/** 관리자 주문 목록에 섞여 온 초안 줄 → 초안 목록 줄과 같은 모양 (-draftSeq). orderSeq(예약번호)는 실제 주문 상세에 쓰면 안 됨 */
+export const fromAdminList = (o: OrderListItem): OrderListItem & { label?: string } =>
+  o.draftSeq == null
+    ? o
+    : {
+        ...o,
+        orderSeq: -o.draftSeq,
+        label: orderNo(o.orderSeq),
+        parcels: o.parcels.map((p) => ({ ...p, orderParcelSeq: -o.draftSeq! })),
+      }
 
 export const draftList = (q: { q?: string; limit: number; offset: number }, signal?: AbortSignal) =>
   api.get<ApiList<ParcelDraftDto>>('/parcel-drafts', {
