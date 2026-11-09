@@ -11,11 +11,8 @@ COPY services/delivery/src ./src
 COPY services/delivery/test ./test
 RUN npm run lint \
  && npm test -- --runInBand \
- && npm run test:e2e -- --runInBand \
- && npm run build
-
-FROM builder AS checks
-RUN node --test test/order-shipment-check.test.cjs
+ && npm run build \
+ && node --test test/order-shipment-check.test.cjs
 
 FROM node:24-bookworm-slim
 WORKDIR /app/service

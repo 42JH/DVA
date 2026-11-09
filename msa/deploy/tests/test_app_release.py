@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import test_changes
+import git_fixture
 
 DEPLOY = Path(__file__).resolve().parents[1]
 
@@ -37,11 +37,11 @@ def deployment(commit):
 
 
 class DeliveryPlanTests(unittest.TestCase):
-    git = test_changes.ChangeFilterTests.git
-    commit = test_changes.ChangeFilterTests.commit
+    git = git_fixture.GitFixture.git
+    commit = git_fixture.GitFixture.commit
 
     def setUp(self):
-        test_changes.ChangeFilterTests.setUp(self)
+        git_fixture.GitFixture.setUp(self)
         original = Path.cwd()
         os.chdir(self.root)
         self.addCleanup(os.chdir, original)

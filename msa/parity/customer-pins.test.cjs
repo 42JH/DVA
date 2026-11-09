@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
@@ -15,10 +16,10 @@ test('customer PATCH and personal PIN APIs preserve HTTP, call locks and separat
  for(const side of sides)for(let attempt=0;;attempt++){try{if((await fetch(side.base+'/api/docs-json')).ok)break;}catch{}assert.ok(attempt<80);await delay(250);}
  const hash=await hashPassword(password);
  for(const side of sides){
-  await side.calls.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
-  await side.db.query('TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
-  await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
-  if(side===sides[1]){await customer.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await calls.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await operations.query('TRUNCATE inbox_events,outbox_events,customer_audit_preparations,consultation_audit_preparations RESTART IDENTITY');}
+  await truncateFixture(side.calls, 'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
+  await truncateFixture(side.db, 'TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
+  await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+  if(side===sides[1]){await truncateFixture(customer, 'TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await truncateFixture(calls, 'TRUNCATE inbox_events,outbox_events RESTART IDENTITY');await truncateFixture(operations, 'TRUNCATE inbox_events,outbox_events,customer_audit_preparations,consultation_audit_preparations RESTART IDENTITY');}
   await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at) VALUES
    ('root','개발 운영자',$1,'SYSTEM_ADMIN','ACTIVE','2026-01-01Z'),('operator','상담 운영자',$1,'OPERATOR','ACTIVE','2026-01-01Z'),('supervisor','관리 운영자',$1,'SUPERVISOR','ACTIVE','2026-01-01Z')`,[hash]);
   await side.db.query(`INSERT INTO customers(name,phone_number,status,monthly_billing_enabled) VALUES

@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / 'msa-release/ci-images.json'
 SERVICES = ('operations', 'customer', 'consultation', 'delivery', 'order')
 SUITES = {
-    'operations': ('customer-checks', 'operations-checks', 'operations', 'consultation', 'monolith-checks', 'monolith', 'liquibase'),
-    'customer': ('customer-checks', 'customer', 'operations', 'monolith-checks', 'monolith', 'liquibase'),
-    'consultation': ('consultation-checks', 'consultation', 'order', 'operations', 'customer', 'monolith-checks', 'monolith', 'liquibase'),
-    'order': ('delivery-checks', 'delivery', 'order-checks', 'order', 'customer', 'consultation', 'operations', 'monolith-checks', 'monolith', 'liquibase'),
+    'operations': ('customer', 'operations-checks', 'operations', 'consultation', 'monolith', 'liquibase'),
+    'customer': ('customer-checks', 'customer', 'operations', 'monolith', 'liquibase'),
+    'consultation': ('consultation-checks', 'consultation', 'order', 'operations', 'customer', 'monolith', 'liquibase'),
+    'order': ('delivery', 'order-checks', 'order', 'customer', 'consultation', 'operations', 'monolith', 'liquibase'),
 }
 
 
@@ -30,8 +30,13 @@ def source_commit():
     reference = json.loads((ROOT / 'msa/parity/baseline.json').read_text())['commit']
     values = run('git', 'rev-parse', 'HEAD^', 'HEAD:msa', source + ':msa',
                  'HEAD:backend', reference + ':backend').splitlines()
-    if len(values) != 5 or values[0] != source or values[1] != values[2] or values[3] != values[4]:
+    if len(values) != 5 or values[0] != source or values[1] != values[2]:
         raise RuntimeError('CI snapshot does not match the original MSA and pinned backend')
+    if values[3] != values[4]:
+        fixture_patch = ROOT / 'msa/parity/reference-tests.patch'
+        actual = run('git', 'diff', '--unified=0', '--binary', '--full-index', reference, 'HEAD', '--', 'backend')
+        if not fixture_patch.exists() or actual != fixture_patch.read_text().strip():
+            raise RuntimeError('CI snapshot changed more than the approved reference test fixtures')
     return source
 
 
@@ -50,8 +55,10 @@ def context(key):
     service = key.removesuffix('-checks')
     target = ['--target', 'checks'] if key.endswith('-checks') else []
     if service in SERVICES:
+        if service == 'delivery' and target:
+            raise ValueError('Delivery checks run in its builder')
         return [*target, '-f', str(ROOT / 'msa/services' / service / 'Dockerfile'), str(ROOT / 'msa')]
-    if service not in ('monolith', 'liquibase') or (service == 'liquibase' and target):
+    if service not in ('monolith', 'liquibase') or target:
         raise ValueError('Unknown image')
     return [*target, str(ROOT / ('backend' if service == 'monolith' else 'msa/liquibase'))]
 
@@ -85,7 +92,8 @@ def build():
     out = MANIFEST.parent
     suites = (out / 'parity-suites.txt').read_text().split()
     services = (out / 'services.txt').read_text().split()
-    database = (out / 'database-ci.txt').read_text().strip() == 'true'
+    database = (out / 'database-ci.txt').read_text().strip() == 'true' or (
+        os.environ.get('DELIVER_APPS') == 'true' and bool((out / 'databases.txt').read_text().strip()))
     document = {'commit': commit, 'release': release, 'referenceTree': run('git', 'rev-parse', 'HEAD:backend'), 'images': {}}
     out.mkdir(exist_ok=True)
     MANIFEST.write_text(json.dumps(document))

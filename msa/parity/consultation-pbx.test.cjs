@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
@@ -17,8 +18,8 @@ test('production PBX, active count and SSE match with independent operations ses
   }
   const password='private-parity-test-password',hash=await hashPassword(password);
   for(const side of sides){
-    await side.db.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
-    await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
+    await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
     await side.identity.query("INSERT INTO admin_users(admin_user_seq,login_id,name,password_hash,role,status,created_at) OVERRIDING SYSTEM VALUE VALUES(1,'operator','비교 운영자',$1,'OPERATOR','ACTIVE','2026-01-01T00:00:00Z')",[hash]);
     await side.db.query(`INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,registered_at,deleted_at) VALUES
       ('unique','01098880001','2026-10-27T01:00:00Z','2026-10-27T01:00:00Z',NULL),

@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -18,9 +19,9 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
   // The preceding read-only differential finishes with a deliberately MSA-only concurrency edit.
   // Start this independent suite from equal stored rows, rather than filtering that difference away.
   for(const side of sides) {
-    await side.calls.query('TRUNCATE call_sessions RESTART IDENTITY CASCADE');
-    await side.db.query('TRUNCATE '+tables.join(',')+(side.name==='monolith'?',shipments':'')+' RESTART IDENTITY CASCADE');
-    await side.audit.query('TRUNCATE audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.calls, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE '+tables.join(',')+(side.name==='monolith'?',shipments':'')+' RESTART IDENTITY CASCADE');
+    await truncateFixture(side.audit, 'TRUNCATE audit_logs RESTART IDENTITY CASCADE');
     await side.db.query("INSERT INTO orders(order_seq,customer_seq,status,version,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES(1001,1,'COLLECTING',23,'2030-01-01Z','2030-01-01Z')");
     await side.calls.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at) OVERRIDING SYSTEM VALUE VALUES(1011,'deletion-access-call','01000000001','2030-01-01Z','2030-01-01Z')");
   }

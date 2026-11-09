@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -31,9 +32,9 @@ test('billing HTTP, snapshots, monthly initialization and audit groups match the
     try{return(await fetch(`http://${name}-app:${port}/${name==='monolith'?'api':name}/docs-json`)).ok;}catch{return false;}
   },name+' billing app start');
   for(const side of sides){
-    await side.org.query('TRUNCATE organizations RESTART IDENTITY CASCADE');
-    await side.ledger.query('TRUNCATE organization_billing_months,order_billing_charges');
-    await side.audit.query('TRUNCATE audit_logs');
+    await truncateFixture(side.org, 'TRUNCATE organizations RESTART IDENTITY CASCADE');
+    await truncateFixture(side.ledger, 'TRUNCATE organization_billing_months,order_billing_charges');
+    await truncateFixture(side.audit, 'TRUNCATE audit_logs');
   }
   for(const side of sides){
     const adminDb=side.audit;

@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID,createHash}=require('node:crypto');
@@ -20,7 +21,7 @@ test('production unanswered writes and call content/deletion match the monolith'
   const requestIds=new Set(),parallelRequests=new Map(),times=new Map();
   let comparisons=0;
   for(const side of sides){
-    await side.db.query('TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
     side.cookies=[];side.admins=[];
     for(const [index,role]of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
       const id=(await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status)

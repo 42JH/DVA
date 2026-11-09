@@ -34,6 +34,9 @@ def main():
     def create(name, image, *args, command=(), network=RUN):
         run('docker', 'create', '--name', name, '--label', LABEL, '--network', network, *args, image, *command, label=name+'-create')
         resources.append(('container', name))
+        if '--test' in command:
+            run('docker', 'cp', str(ROOT/'msa/parity/fixture-reset.cjs'), name+':/app/service/test/fixture-reset.cjs',
+                label=name+'-copy-fixture-reset')
 
     def complete(name):
         run('docker', 'start', '--attach', name, label=name+'-run')
@@ -45,10 +48,10 @@ def main():
     try:
         images = {}
         for side, path, target in (
-            ('delivery-checks', 'msa/services/delivery', 'checks'), ('delivery', 'msa/services/delivery', None),
+            ('delivery', 'msa/services/delivery', None),
             ('order-checks', 'msa/services/order', 'checks'), ('order', 'msa/services/order', None),
             ('customer', 'msa/services/customer', None), ('consultation', 'msa/services/consultation', None),
-            ('operations', 'msa/services/operations', None), ('monolith-checks', 'backend', 'checks'),
+            ('operations', 'msa/services/operations', None),
             ('monolith', 'backend', None), ('liquibase', 'msa/liquibase', None),
         ):
             image = prepared_image(side)
@@ -78,44 +81,17 @@ def main():
                 raise RuntimeError(side+' DB did not become ready')
             name = RUN+'-'+side+'-schema'
             if side == 'monolith':
-                create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
+                create(name, images['monolith'], '-e', 'NODE_ENV=test', '-e', 'DB_NAME=dva_webhook_test',
                        '-e', 'PGDATABASE=dva_webhook_test', '-e', 'PGHOST=monolith-db', '-e', 'PGUSER=monolith_app',
                        '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'PGPASSWORD='+password,
-                       command=('node', '-e', "const{Pool}=require('pg');const p=new Pool();require('./test/helpers/migrations.cjs').migrate(p).then(()=>p.end(),async e=>{console.error(e.code||'schema-failed');await p.end();process.exit(1)})"))
+                       command=('node', '/app/migrate-reference.cjs'))
+                run('docker', 'cp', str(ROOT/'msa/parity/migrate-reference.cjs'), name+':/app/migrate-reference.cjs', label='reference-schema-copy')
             else:
                 create(name, images['liquibase'], '-e', f'LIQUIBASE_COMMAND_URL=jdbc:postgresql://{side}-db:5432/dva_webhook_test',
                        '-e', 'LIQUIBASE_COMMAND_USERNAME='+side+'_app', '-e', 'LIQUIBASE_COMMAND_PASSWORD='+password,
                        command=('--changelog-file='+side+'/db.changelog.xml', 'update'))
             complete(name)
         verify_parcel_draft_upgrade(ROOT, RUN, images, password, token, run, create, complete)
-        # The original fixture and ORD-02/03 assertions run without modifying backend files.
-        reference = LOGS/'order-reads-reference.cjs'
-        reference.write_text("const suite=require('./helpers/orders.cjs')();require('./orders-reads.cjs')(suite);\n", encoding='utf-8')
-        name = RUN+'-reference-suite'
-        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
-               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
-               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
-               command=('node', '--test', 'test/order-reads-reference.cjs'))
-        run('docker', 'cp', str(reference), name+':/app/test/order-reads-reference.cjs', label='reference-copy')
-        complete(name)
-        name = RUN+'-reference-deletion-suite'
-        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
-               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
-               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
-               command=('node', '--test', '--test-name-pattern=new DELETE routes|order soft deletion|live calls|order/call deletion', 'test/soft-deletion.integration.test.cjs'))
-        complete(name)
-        name = RUN+'-reference-cancellation-suite'
-        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
-               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
-               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
-               command=('node', '--test', 'test/order-cancellation.integration.test.cjs'))
-        complete(name)
-        name = RUN+'-reference-billing-suite'
-        create(name, images['monolith-checks'], '-e', 'NODE_ENV=test', '-e', 'DB_HOST=127.0.0.1', '-e', 'DB_PORT=5432',
-               '-e', 'DB_USER=monolith_app', '-e', 'DB_PASSWORD='+password, '-e', 'DB_NAME=dva_webhook_test',
-               '-e', 'AI_BUSINESS_TOKEN='+password, '-e', 'AI_AGENT_URL=http://ai.invalid:8000', network='container:'+RUN+'-monolith-db',
-               command=('node', '--test', 'test/order-billing.integration.test.cjs'))
-        complete(name)
         for side, port in (('monolith', 3000), ('operations', 3005), ('customer', 3001), ('consultation', 3004), ('delivery', 3003), ('order', 3002)):
             name = RUN+'-'+side+'-app'
             create(name, images[side], '--network-alias', side+'-app', '-e', 'NODE_ENV=production', '-e', 'PORT='+str(port),

@@ -61,7 +61,7 @@ def main():
             raise RuntimeError('Initial archive inventory differs from the initial plan')
         images = {}
         for owner in ['monolith', *SERVICES]:
-            for target in ('checks', None):
+            for target in (('checks', None) if owner == 'monolith' else (None,)):
                 key = owner + ('-checks' if target else '')
                 tag = RUN + '-' + key
                 resources.append(('image', tag))

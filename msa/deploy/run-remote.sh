@@ -11,5 +11,5 @@ case "$action" in preview|apply) ;; prepare-cutover|restore-cutover) [[ "$servic
 if [[ "$action" == apply && ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then exit 2; fi
 if [[ "$action" == preview && -n "$expected" ]]; then exit 2; fi
 source "$(dirname -- "${BASH_SOURCE[0]}")/ssh-common.sh"
-ssh "${ssh_options[@]}" "$server" \
+ssh -n "${ssh_options[@]}" "$server" \
   "cd '$remote_root/$release' && sha256sum --check --strict SHA256SUMS && bash remote.sh '$action' '$service' '$expected'"
