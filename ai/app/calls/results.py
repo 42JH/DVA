@@ -615,7 +615,7 @@ def _summary(name: str, out: dict) -> str:
     if name == "record_fields":
         return f"기록: {len(facts.get('recorded') or [])}개 항목"
     if name == "find_destination":
-        return f"받는 곳 후보 {facts.get('found', 0)}건"
+        return "주소록 장소에 새 받는 분" if code == "DEST_NEW_RECEIVER" else f"받는 곳 후보 {facts.get('found', 0)}건"
     if name == "lookup_orders":
         return f"택배 {facts.get('found', 0)}건 찾음"
     if name == "search_manual":

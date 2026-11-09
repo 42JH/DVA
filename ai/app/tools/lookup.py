@@ -66,9 +66,45 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
                            [{"field": "receiver_place", "reason": "DEST_TOO_MANY"}])
     if page.places:
         return await _offer(ctx, [_from_be(p, Source.COMPANY) for p in page.places], page.places)
+    if name and place and not said.get("organization") and not said.get("department"):
+        known = _known_place(places, place)
+        if known:  # 주소록에 있는 장소로 새 받는 분께: 이름이 안 맞는다고 아는 주소를 버리지 않는다
+            return await _new_receiver(ctx, name, detail, *known)
     ask = "receiver_place" if name and not place else "receiver_name" if place and not name else None
     return ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
                        [{"field": ask, "reason": "DEST_NONE"}] if ask else [])
+
+
+def _known_place(places: list[Place], place: str) -> tuple | None:
+    """이름 없이 장소만으로 맞는 핀들이 한 기본주소면 (주소, geo). 여러 주소(체인점·동명 건물)면 None."""
+    hits = match_places([_to_be(p) for p in places], None, place, None)
+    if not hits or len({p.address for p in hits}) != 1:
+        return None
+    first = places[[_to_be(p) for p in places].index(hits[0])]
+    return first.address, first.geo
+
+
+async def _new_receiver(ctx: ToolContext, name: str, detail: str | None, address: str, geo) -> ToolOutcome:
+    """아는 장소·새 받는 분: 주소·geo는 핀에서, 성함은 고객 말로. 다른 사람의 상세주소·연락처는 가져오지 않는다(묻는다).
+    주소 출처는 RESOLVER — PIN이면 save_offer가 새 받는 분 핀을 저장하지 않는다."""
+    async with ctx.lock:
+        s = ctx.state
+        s.candidates = None
+        s.record("receiver_name", name, Source.CUSTOMER)
+        before = s.field_of("receiver_address")
+        changed = before.valid and before.value != address
+        s.record("receiver_address", address, Source.RESOLVER)
+        if detail:
+            s.record("receiver_address_detail", detail, Source.CUSTOMER)
+        elif changed:
+            s.clear("receiver_address_detail")
+        s.current.receiver_geo = geo
+        s.bump()
+        summary = state_summary(s, ctx.policy)
+    return ToolOutcome("ok", "DEST_NEW_RECEIVER", {
+        "address": address,
+        "guidance": "주소록에 있는 장소지만 받는 분은 새로운 분. 받는 분 성함과 주소를 확인하고 빠진 항목(연락처·상세주소)만 묻는다."},
+        summary=summary)
 
 
 async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:

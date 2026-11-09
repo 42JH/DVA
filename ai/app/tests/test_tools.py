@@ -281,6 +281,24 @@ def test_personal_place_found_first_and_pick_applies():
     assert s.current.receiver_geo is not None and s.candidates is None
 
 
+def test_new_receiver_at_known_place_keeps_pin_address():
+    same = "서울 송파구 올림픽로 300"
+    c = ctx(customer=Customer(caller_phone=CALLER, places=(place("김철수", same), place("이영희", same, detail="501호"),
+                                                           place("박지점", "부산 해운대구 센텀로 10"))))
+    assert call(c, "find_destination", {"place": "올림픽로"})["code"] == "DEST_MANY"
+    out = call(c, "find_destination", {"name": "박민수", "place": "올림픽로"})
+    s = c.state
+    assert out["code"] == "DEST_NEW_RECEIVER" and s.candidates is None
+    assert s.field_of("receiver_name").value == "박민수" and s.field_of("receiver_name").source == Source.CUSTOMER
+    assert s.field_of("receiver_address").value == same and s.field_of("receiver_address").source == Source.RESOLVER
+    assert s.current.receiver_geo is not None and s.field_of("receiver_address_detail").status == FieldStatus.EMPTY
+    assert "receiver_phone" in out["missing"] and "receiver_address" not in out["missing"]
+    # 같은 이름의 장소가 여러 주소면(체인점) 주소를 정하지 않는다
+    c2 = ctx(customer=Customer(caller_phone=CALLER, places=(place("김철수", "서울 강남구 테헤란로 1"),
+                                                            place("이영희", "서울 서초구 테헤란로 9"))))
+    assert call(c2, "find_destination", {"name": "박민수", "place": "테헤란로"})["code"] == "DEST_NONE"
+
+
 def company(name="주소하나", organization="주소기업", seq=26):
     return CompanyPlace(name=name, phone="01098765432", address="서울 중구 세종대로 110", address_detail="", geo=None,
                         organization_seq=6, organization_name=organization, membership_seq=seq, customer_seq=seq)
