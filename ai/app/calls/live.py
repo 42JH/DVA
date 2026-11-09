@@ -190,7 +190,7 @@ class LiveFlow:
             s.note("결과 문구", ",".join(claims))
             facts = truth(s.state)
             if s.tools.draft_intake:
-                facts["submit_when"] = "확인한 택배는 통화 중 저장하고, 실제 주문 접수는 통화 종료 후 진행한다"
+                facts["submit_when"] = "고객이 확인한 택배는 통화 중에 바로 저장된다"
             s.spawn(self.notify(s, "N3", {"unverified": claims, "truth": facts}), "n3")
 
     # ------------------------------------------------------------------ 발화 끝 Decision
@@ -382,7 +382,7 @@ class LiveFlow:
                 if draft_save is not None:
                     await asyncio.wait({draft_save}, timeout=1.5)
                 if s.tools.draft_intake:
-                    facts["draft_intake"] = "확인한 내용을 저장하며, 실제 접수는 통화 종료 후 진행된다"
+                    facts["draft_intake"] = "확인한 내용을 저장했다"
                 s.note("담기", facts["parcel_added"])
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
@@ -1029,7 +1029,7 @@ def _order_status(s: CallSession) -> dict:
     if not data:
         if s.tools.draft_intake:
             if any(p.confirmed_snapshot is not None for p in s.state.parcels):
-                return {"status": "pending", "guidance": "접수에 필요한 정보가 저장된 건은 통화 종료 후 처리됩니다"}
+                return {"status": "pending", "guidance": "확인하신 택배 정보는 저장되었습니다"}
             if s.state.current is not None and not s.state.current.empty():
                 return {"status": "pending", "guidance": "확인을 마치지 못한 택배는 취소됩니다"}
         return {"status": "pending"}
