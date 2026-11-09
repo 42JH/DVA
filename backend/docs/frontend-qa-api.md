@@ -4,6 +4,8 @@
 
 backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 허용 Origin이 필요하다. 기존 삭제·5년 보관·역할 기준을 유지한다. 프론트·AI·MSA·운영 배포는 별도다.
 
+2026-11-09 통화 중 오집계 수정: GET /api/calls/active-count와 같은 SSE는 목록처럼 PBX 또는 AI 분석에 종료 시각이 있으면 진행 통화에서 제외한다. 기존 요청·응답·SSE 형식과 프론트·AI 호출 방식은 그대로다. PBX 종료 미수신 통화도 종료 분석이 저장되면 건수 변경을 알린다. [집계·정확 시각 매칭 기준](active-call-count.md)을 따른다.
+
 2026-11-09 추가: 통화 목록·상세·홈 recentCalls의 analysisStatus에 EXPIRED를 추가한다. 정상 분석·최종 실패 통보 없이 PBX 종료 후 10분이 지나면 ‘분석 만료’로 표시한다. 시간만으로 완료 처리하지 않는다. [프론트 변경 지점과 상태 우선순위](call-analysis-status-frontend-integration.md), [미완료·고객명 조사 결과](analysis-expiry-and-draft-findings-20261109.md)를 함께 전달한다.
 
 수기 주문과 관리자 초안 최종 접수는 수령인을 주문 고객의 개인 PIN에 자동 등록하고 기존 활성 중복은 보존한다. 요청·응답 변경이나 프론트의 추가 PIN POST는 없다. [수기 PIN 저장 기준](manual-order-recipient-pins.md)과 [운영 미완료 상세 현황](incomplete-draft-current-state-20261109.md)을 확인한다.

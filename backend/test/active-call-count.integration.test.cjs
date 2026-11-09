@@ -19,6 +19,7 @@ process.env.SWAGGER_ENABLED = 'false';
 process.env.S3_RECORDINGS_BUCKET = '';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
 process.env.PBX_WEBHOOK_TOKEN = randomBytes(32).toString('hex');
+process.env.AI_INSIGHTS_TOKEN = randomBytes(32).toString('hex');
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 
@@ -300,6 +301,84 @@ test('PBX receipt ends a registered call before worker delay or S3 upload; repla
     ).rows[0].n,
     0,
   );
+});
+
+test('an AI-ended call leaves GET and SSE counts without overwriting missing PBX times', async () => {
+  const call = await register();
+  const connection = await stream();
+  assert.equal((await connection.next()).activeCallCount, 1);
+  const analysis = {
+    providerCallId: call.input.call.providerCallId,
+    startedAt: call.input.call.incomingAt,
+    endedAt: new Date(Date.parse(call.input.call.incomingAt) + 30000).toISOString(),
+    aiPersonaVersionSeq: null,
+    repeatQuestionCount: 0,
+    hasComplaint: false,
+    complaints: [],
+  };
+  const post = () =>
+    json(`/api/ai/calls/${call.id}/analysis`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + process.env.AI_INSIGHTS_TOKEN,
+      },
+      body: JSON.stringify(analysis),
+    });
+  assert.equal((await post()).status, 204);
+  assert.equal(await count(), 0);
+  await connection.until(0, 2000);
+  const row = (
+    await pool.query('SELECT started_at,ended_at FROM call_sessions WHERE call_session_seq=$1', [
+      call.id,
+    ])
+  ).rows[0];
+  assert.deepEqual(row, { started_at: null, ended_at: null });
+  const detail = await json(`/api/calls/${call.id}`, { headers: { Cookie: cookie } });
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.data.call.endedAt, analysis.endedAt);
+  assert.equal(detail.body.data.call.analysisStatus, 'COMPLETED');
+  assert.equal((await post()).status, 204);
+  assert.equal(await count(), 0);
+  await register();
+  assert.equal(await count(), 1);
+});
+
+test('exact PBX start closes a new call 27 seconds after the previous call without changing the old call', async () => {
+  const input = identity();
+  input.call.incomingAt = new Date(Date.now() - 120000).toISOString();
+  const previous = await register(input);
+  const previousEnd = ending(input, {
+    endedAt: new Date(Date.parse(input.call.incomingAt) + 24000).toISOString(),
+    durationSeconds: 24,
+  });
+  assert.equal((await receipt(previousEnd)).status, 200);
+  const current = await register({
+    ...input,
+    call: {
+      providerCallId: 'active-' + randomUUID(),
+      incomingAt: new Date(Date.parse(input.call.incomingAt) + 27000).toISOString(),
+    },
+  });
+  assert.equal(await count(), 1);
+  const currentEnd = ending(current.input);
+  assert.equal((await receipt(currentEnd)).status, 200);
+  assert.equal(await count(), 0);
+  const rows = (
+    await pool.query(
+      'SELECT call_session_seq,ended_at FROM call_sessions WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq',
+      [[previous.id, current.id]],
+    )
+  ).rows;
+  assert.deepEqual(
+    rows.map((row) => [row.call_session_seq, row.ended_at?.toISOString()]),
+    [
+      [previous.id, previousEnd.endedAt],
+      [current.id, currentEnd.endedAt],
+    ],
+  );
+  assert.equal((await receipt(currentEnd)).body.duplicate, true);
+  assert.equal(await count(), 0);
 });
 
 test('a receipt arriving first is reconciled within registration, including Korean international phone notation', async () => {
