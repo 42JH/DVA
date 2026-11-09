@@ -22,6 +22,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app.address.gazetteer import AddressDB, open_db
+from app.address.parse import detail_text
 from app.integrations import kakao
 from app.integrations.address import AddressService
 
@@ -112,7 +113,12 @@ async def main(dataset: str, repeat: int, out: Path | None, use_kakao: bool = Fa
                         "tags": c["tags"],
                         "status": r.status, "recorded": r.address, "alternatives": list(r.alternatives),
                         "outcome": outcome, "cold_ms": round(cold[c["id"]], 1),
-                        "warm_p50_ms": round(statistics.median(warm[c["id"]]), 1) if warm[c["id"]] else None})
+                        "warm_p50_ms": round(statistics.median(warm[c["id"]]), 1) if warm[c["id"]] else None,
+                        # 상세주소(v3): 서버가 뗀 상세가 정답과 같은가(문항에 expect_detail이 있을 때만)
+                        "detail": r.detail, "expect_detail": c.get("expect_detail"),
+                        "detail_ok": (r.detail or "") == c["expect_detail"] if "expect_detail" in c else None})
+    detail_cases = [x for x in results if x["detail_ok"] is not None]
+    detail_only = [(d["heard"], d["expect"], detail_text(d["heard"])) for d in data.get("detail_only", [])]
 
     counts = Counter(x["outcome"] for x in results)
     positive = [x for x in results if x["expect"] is not None]
@@ -145,6 +151,11 @@ async def main(dataset: str, repeat: int, out: Path | None, use_kakao: bool = Fa
                        "sequential_sum_warm_p50": round(sequential_ms, 1) if sequential_ms else None},
         "by_tag": {k: dict(v) for k, v in sorted(by_tag.items())},
     }
+    if detail_cases or detail_only:
+        summary["detail"] = {"total": len(detail_cases), "correct": sum(bool(x["detail_ok"]) for x in detail_cases),
+                             "with_base": sum(bool(x["detail_ok"]) and x["outcome"] in ("confirmed", "auto", "rejected")
+                                              for x in detail_cases),
+                             "detail_only": {"total": len(detail_only), "correct": sum(got == want for _, want, got in detail_only)}}
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
     report = {"dataset": data["version"], "commit": commit, "resolver": "app.address",
               "db_bytes": db_path.stat().st_size, "repeat": repeat, "geocode": "off",
@@ -157,6 +168,12 @@ async def main(dataset: str, repeat: int, out: Path | None, use_kakao: bool = Fa
         if x["outcome"] in ("wrong", "missed", "error"):
             print(f"  {x['id']} [{x['outcome']}] {x['heard']!r} → {x['status']} {x['recorded']!r}"
                   f" (정답 {x['expect']!r}, 후보 {x['alternatives']})")
+    for x in results:
+        if x["detail_ok"] is False:
+            print(f"  {x['id']} [detail] {x['heard']!r} → 상세 {x['detail']!r} (정답 {x['expect_detail']!r})")
+    for heard, want, got in detail_only:
+        if got != want:
+            print(f"  [detail_only] {heard!r} → {got!r} (정답 {want!r})")
     if out:
         out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"\n저장: {out}")
