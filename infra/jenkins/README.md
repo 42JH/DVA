@@ -34,6 +34,8 @@ Jira: S15P31D109-111 · 브랜치: `ci/jenkins-lightsail` · MR 대상: `develop
 
 산출물 보관과 실행 단계가 끝나면 post cleanup에서 현재 빌드 디렉터리만 삭제한다. 실제 경로가 예상한 Job·빌드 번호 접미사와 다르면 삭제를 거절한다. Git 잠금 생성 프로세스의 과거 신원은 확인하지 못했으며 이번 변경은 빌드 사이의 작업공간 재사용을 제거한다. [재현·검증 기록](../../backend/docs/final-wireframe-follow-up.md)을 참고한다.
 
+백엔드 전체 검증은 구형·중복 사례를 정리하여 1,111개에서 874개로 줄였다. 기능별 선택 실행과 전체 검증의 fail-closed 규칙은 유지한다. 삭제 범위·남긴 회귀·서버/로컬 시간은 [정리 기록](../../backend/docs/ci-test-cleanup.md)을 따른다.
+
 agent는 `init: true`로 실행하여 빌드 중 부모를 잃은 자식 프로세스를 회수한다.
 이 설정이 없으면 종료된 Git·셸 프로세스가 누적되어 `pids_limit: 512`에 도달하고,
 `fork: Resource temporarily unavailable` 또는 출력 없는 빌드 정지가 발생할 수 있다.

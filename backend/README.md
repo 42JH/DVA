@@ -360,7 +360,7 @@ test/
 DB 테스트는 기존 격리 환경에서 필요한 업무 마이그레이션을 적용한 뒤 실행한다.
 공통 코드 변경 시 기존 정상 경로와 PBX 회귀 검증도 수행한다.
 
-Jenkins는 [테스트 정리 계획](docs/test-cleanup-plan.md)에 따라 기능별 DB 회귀를 선택하고,
+Jenkins는 [테스트 정리 결과](docs/ci-test-cleanup.md)에 따라 구형·중복 검증을 제거하고, [영향 범위](docs/test-cleanup-plan.md)에 따라 기능별 DB 회귀를 선택한다.
 여러 기능 변경은 합집합을 순차 실행한다. 새 진입점이 전체 목록에서 빠지거나 중복되면 단위 검증이 실패한다.
 기능 간 호출·SQL 소비 관계가 바뀌면 `scripts/integration-profile.cjs`의 영향 범위도 갱신한다.
 공통 업무 fixture는 비밀번호 로그인을 반복하지 않고 임시 DB 세션을 준비하며 실제 guard는 통과한다.
