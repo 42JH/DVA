@@ -2,7 +2,7 @@
 #   ① Live 지시문(app/policy/render.py render_live) ② Backend 지시문(render_backend)
 #   ③ 서버 판정(app/domain/assess.py) ④ Decision 질문(decision_questions) ⑤ 결과 문구 검사(app/domain/claims.py)
 # 를 만든다. 업무 규칙 출처: docs/call-flow/README.md "반드시 지킬 것", decisions.md P1·P5·P6·P8·P11.
-version = "2026-11-05.3"
+version = "2026-11-09.1"
 
 # 전화 접수 제한의 단일 출처. Live·Responses·도구 스키마·서버 검사가 함께 사용한다.
 # 수량 단위: 현재 받는 곳별 접수 묶음(parcel). 서로 다른 접수 묶음을 자동 병합하지 않는다.
@@ -190,7 +190,7 @@ items = [
   "접수 완료·취소 완료·요금·조회 결과를 서버 결과 없이 말하기",
   "서버가 확인 내용을 주기 전에 주문 내용을 되읽거나 확정 질문하기",
   "발신번호, 주소록에 저장된 번호·상세주소를 먼저 읽어 주기(고객이 직접 말한 값은 요청하면 다시 읽어 준다)",
-  "결제가 끝났다거나 결제 안내를 보냈다고 말하기",
+  "결제 안내를 보냈다고 말하기",
   "확인 대기 중 고객 확인 없이 '접수 진행하겠다·진행 중이다'라고 말하기. 다른 질문에 답했으면 '이대로 접수할까요?'로 끝낸다",
   "스스로 통화 종료하기",
 ]
@@ -203,9 +203,6 @@ unless = "result_accepted"
 [[forbid.claims]]
 phrases = ["취소되었", "취소됐", "취소 완료", "취소완료"]
 unless = "cancel_done"
-[[forbid.claims]]
-phrases = ["결제되었", "결제됐", "결제 완료", "결제완료"]
-unless = "never"
 # 확인 대기 중 확인 없이 진행한다는 말(2026-11-03 통화 512a1b: "접수 진행하겠습니다"). 미래형이라 claim_skip을 쓰지 않는다
 [[forbid.claims]]
 phrases = ["진행하겠", "진행할게", "진행해 드리", "진행 요청 확인", "진행 중입니다", "진행중입니다"]
@@ -221,7 +218,7 @@ pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시�
 # --- 서버 결과 읽는 법(Live 지시문에 렌더링). 서버는 사실(JSON)만 보낸다 — 키의 뜻을 여기서 정한다 ---
 [results]
 parcel_added = "이 택배를 담았다. '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. 실제 접수 시점은 draft_intake가 오면 그 값을 따른다. 접수 완료라고 말하지 않는다"
-draft_intake = "고객이 확인한 택배 정보는 통화 중에 저장하고, 실제 주문 접수는 통화 종료 후 진행한다. 조회 결과의 READY와 EDITING은 통화 중 저장 상태다"
+draft_intake = "고객이 확인한 택배 정보는 통화 중에 바로 저장된다. 조회 결과는 다른 접수 건과 같은 방식으로 상태를 안내하고, 언제 처리되는지는 따로 덧붙이지 않는다"
 readback = "접수 확인 내용(sender_name·from·to·receiver_name). '{sender_name}님이 {from}에서 {to}의 {receiver_name}님께 보내시는 것으로 확인했습니다. 이대로 접수할까요?'처럼 한 문장으로 말하고 반드시 질문으로 끝낸다(고객이 그 질문을 끝까지 듣고 답해야 확정된다). 주소·연락처·물품·가액은 다시 읽지 않는다"
 missing = "현재 택배에 아직 받지 못한 필수 항목"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"

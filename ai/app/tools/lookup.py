@@ -104,7 +104,7 @@ ORDER_STATUS_TEXT = {
     "CANCELLED": "취소됨",
 }
 DRAFT_STATUS_TEXT = {
-    "READY": "이번 통화에서 확인해 둔 택배. 통화 종료 후 접수 진행 예정",
+    "READY": "접수 대기 중",
     "EDITING": "이번 통화에서 정보를 확인하거나 수정 중인 택배",
 }
 
