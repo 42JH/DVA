@@ -1,5 +1,5 @@
 // 가짜 고객 목록 GET /customers · 상세 GET /customers/:id · 개인 주소록 GET /customers/:id/pins (백엔드 develop-backend 11/06 모양 그대로)
-// 가짜 주문의 보내는 분 = 고객(전화번호로 하나), 그 고객이 보낸 받는 분 = 주소록 — v2 '고객' 화면 확인용
+// 가짜 주문의 보내는 분 = 고객(전화번호로 하나), 그 고객이 보낸 받는 분 = 주소록 — '고객' 화면 확인용
 import { http, HttpResponse } from 'msw'
 import { API_BASE_URL } from '@/shared/api/client'
 import { allOrders } from '@/shared/order/orderApi'

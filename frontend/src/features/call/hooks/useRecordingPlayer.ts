@@ -1,5 +1,5 @@
 import { useRef, useState, type AudioHTMLAttributes, type SyntheticEvent } from 'react'
-import type { Recording } from '@/features/call/api/callApi'
+import type { Recording } from '@/shared/call/callApi'
 
 export type PlayerState = 'ok' | 'none' | 'failed' // 재생 가능 · 녹취 없음 · 발급 실패 또는 재생 오류
 

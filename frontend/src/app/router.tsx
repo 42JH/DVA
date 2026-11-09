@@ -6,7 +6,7 @@ import { RequireAuth } from './guards/RequireAuth'
 import { RequireGuest } from './guards/RequireGuest'
 import { RequireRole } from './guards/RequireRole'
 import { RouteError } from './RouteError'
-import { V2Layout } from '@/v2/V2Layout'
+import { AppLayout } from './AppLayout'
 
 export const router = createBrowserRouter([
   {
@@ -35,69 +35,94 @@ export const router = createBrowserRouter([
         path: '/',
         element: (
           <RequireAuth>
-            <V2Layout />
+            <AppLayout />
           </RequireAuth>
         ),
         children: [
           // 화면마다 따로 받음 (처음 여는 화면만 받게)
           {
             index: true,
-            lazy: () => import('@/v2/home/TodayPage').then((m) => ({ Component: m.TodayPage })),
+            lazy: () => import('@/app/home/TodayPage').then((m) => ({ Component: m.TodayPage })),
           },
           {
             path: 'orders',
-            lazy: () => import('@/v2/orders/OrdersPage').then((m) => ({ Component: m.OrdersPage })),
+            lazy: () =>
+              import('@/features/order/components/OrdersPage').then((m) => ({
+                Component: m.OrdersPage,
+              })),
           },
           {
             path: 'calls',
-            lazy: () => import('@/v2/calls/CallsPage').then((m) => ({ Component: m.CallsPage })),
+            lazy: () =>
+              import('@/features/call/components/CallsPage').then((m) => ({
+                Component: m.CallsPage,
+              })),
           },
           {
             path: 'calls/:callId',
-            lazy: () => import('@/v2/calls/CallPage').then((m) => ({ Component: m.CallPage })),
+            lazy: () =>
+              import('@/features/call/components/CallPage').then((m) => ({
+                Component: m.CallPage,
+              })),
           },
           {
             path: 'unanswered',
             lazy: () =>
-              import('@/v2/faq/UnansweredPage').then((m) => ({ Component: m.UnansweredPage })),
+              import('@/features/faq/components/UnansweredPage').then((m) => ({
+                Component: m.UnansweredPage,
+              })),
           },
           {
             path: 'faqs',
-            lazy: () => import('@/v2/faq/FaqsPage').then((m) => ({ Component: m.FaqsPage })),
+            lazy: () =>
+              import('@/features/faq/components/FaqsPage').then((m) => ({ Component: m.FaqsPage })),
           },
           {
             path: 'customers',
             lazy: () =>
-              import('@/v2/customers/CustomersPage').then((m) => ({ Component: m.CustomersPage })),
+              import('@/features/customer/components/CustomersPage').then((m) => ({
+                Component: m.CustomersPage,
+              })),
           },
           {
             path: 'companies',
             lazy: () =>
-              import('@/v2/companies/CompaniesPage').then((m) => ({ Component: m.CompaniesPage })),
+              import('@/features/company/components/CompaniesPage').then((m) => ({
+                Component: m.CompaniesPage,
+              })),
           },
           {
             path: 'companies/:companyId',
             lazy: () =>
-              import('@/v2/companies/CompanyPage').then((m) => ({ Component: m.CompanyPage })),
+              import('@/features/company/components/CompanyPage').then((m) => ({
+                Component: m.CompanyPage,
+              })),
           },
           {
             path: 'personas',
             lazy: () =>
-              import('@/v2/personas/PersonasPage').then((m) => ({ Component: m.PersonasPage })),
+              import('@/features/persona/components/PersonasPage').then((m) => ({
+                Component: m.PersonasPage,
+              })),
           },
           {
             path: 'stats',
-            lazy: () => import('@/v2/stats/StatsPage').then((m) => ({ Component: m.StatsPage })),
+            lazy: () =>
+              import('@/features/stats/components/StatsPage').then((m) => ({
+                Component: m.StatsPage,
+              })),
           },
           {
             path: 'stats/:kind', // 그래프 보기 (응답 대기 · 단계별 이탈)
             lazy: () =>
-              import('@/v2/stats/StatsGraphPage').then((m) => ({ Component: m.StatsGraphPage })),
+              import('@/features/stats/components/StatsGraphPage').then((m) => ({
+                Component: m.StatsGraphPage,
+              })),
           },
           {
             path: 'admins', // 최고 관리자만 (기존 /admins와 같은 가드)
             lazy: () =>
-              import('@/v2/settings/AdminsPage').then((m) => ({
+              import('@/features/admin/components/AdminsPage').then((m) => ({
                 Component: () => (
                   <RequireRole roles={['SYSTEM_ADMIN']}>
                     <m.AdminsPage />
@@ -107,7 +132,8 @@ export const router = createBrowserRouter([
           },
           {
             path: 'me',
-            lazy: () => import('@/v2/settings/MePage').then((m) => ({ Component: m.MePage })),
+            lazy: () =>
+              import('@/features/me/components/MePage').then((m) => ({ Component: m.MePage })),
           },
         ],
       },

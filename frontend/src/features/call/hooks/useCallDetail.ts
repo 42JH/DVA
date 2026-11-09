@@ -9,9 +9,9 @@ import {
   type Complaint,
   toCallDetail,
   type Utterance,
-} from '@/features/call/api/callApi'
-import { utteranceAt, utteranceForAction, type CallActionKind } from '@/features/call/api/callDto'
-import { faqResultText, groupActions } from '@/features/call/actionText'
+} from '@/shared/call/callApi'
+import { utteranceAt, utteranceForAction, type CallActionKind } from '@/shared/call/callDto'
+import { faqResultText, groupActions } from '@/shared/call/actionText'
 import { useRecordingPlayer } from './useRecordingPlayer'
 
 /** 스크립트 한 줄 (말만 — AI 동작은 오른쪽 처리 내용으로, 10/30). onClick = 이 말부터 듣기 (11/01, 시각을 모르면 없음) */

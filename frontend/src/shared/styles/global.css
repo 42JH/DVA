@@ -308,7 +308,7 @@ thead th {
   }
 }
 
-/* v2 운영 콘솔 (11/06 시안 실험, src/v2) — 기존 화면은 안 씀. text-ops-ink · bg-ops-paper 처럼 */
+/* 운영 콘솔 색 · 표 — text-ops-ink · bg-ops-paper 처럼 */
 @theme {
   --color-ops-ink: #1d2433; /* 글자 */
   --color-ops-sub: #5b6475; /* 보조 글자 */

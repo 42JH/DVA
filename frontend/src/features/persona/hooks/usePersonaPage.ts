@@ -17,6 +17,7 @@ import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { lineDiff } from '@/features/persona/hooks/lineDiff'
 import {
   applyLatest,
+  PERSONA_DEMO,
   personaQueries,
   requestApply,
   type Persona,
@@ -41,7 +42,7 @@ export interface PersonaItem {
 export interface VersionItem {
   version: number
   tags: { label: string; kind: TagKind }[] // 저장됨 · 적용 중 · 음성 설정
-  date: string // '2026-10-02' (v2 날짜 형식)
+  date: string // '2026-10-02' (날짜 형식)
   summary: string
   author: string
   selected: boolean
@@ -224,6 +225,7 @@ export function usePersonaPage() {
   }
 
   return {
+    demo: PERSONA_DEMO, // 시연 모드 — 저장 · 적용이 실서버에 안 감
     tab,
     setTab,
     isLoading: personas.isPending || (persona !== null && versions.isPending),

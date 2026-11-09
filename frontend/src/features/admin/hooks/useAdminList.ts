@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { useEffect, useState } from 'react'
 import { fmtDate, fmtDateTime } from '@/shared/lib/format'
 import { pageCount } from '@/shared/api/paging'
-import { useDebounced } from '@/v2/lib/useDebounced'
+import { useDebounced } from '@/shared/lib/useDebounced'
 import { useListParams } from '@/shared/lib/useListParams'
 import { useSession } from '@/shared/auth/useSession'
 import {

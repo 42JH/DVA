@@ -70,6 +70,7 @@ export default defineConfig([
                 '@/shared/api/*',
                 '@/shared/auth/sessionApi',
                 '@/shared/order/orderApi',
+                '@/shared/call/callApi',
               ],
               allowTypeImports: true,
               message: 'components는 hooks를 통해서만 서버 데이터를 쓴다.',
@@ -91,6 +92,7 @@ export default defineConfig([
       'src/shared/api/**/*.ts',
       'src/shared/auth/sessionApi.ts',
       'src/shared/order/orderApi.ts',
+      'src/shared/call/callApi.ts',
     ],
     rules: {
       'no-restricted-imports': 'off',

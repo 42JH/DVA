@@ -9,7 +9,7 @@ import type {
   Stage,
   StageDropoffs,
   VersionTime,
-} from '@/features/dashboard/api/dashboardApi'
+} from '@/features/stats/api/dashboardApi'
 
 // 가짜 02 대시보드 'AI 상담 성능' — 대시보드 프론트 연동 명세(BE feature/ai-dashboard) 모양 그대로: 카드마다 GET 하나 · customerType만 · 단건 { data, meta }
 // 모르는 쿼리 · 중복 · 빈 값 · 이상한 customerType은 400 INVALID_REQUEST (명세 §1). 비율 · 평균은 서버처럼 반올림 없이 계산

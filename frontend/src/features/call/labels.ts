@@ -1,5 +1,5 @@
 // 04 · 06 코드 → 화면 문구 (컨벤션 6.3: 코드는 api/, 문구는 labels.ts). 서버 코드는 callDto.ts의 것 그대로
-import type { ComplaintType } from './api/callDto'
+import type { ComplaintType } from '../../shared/call/callDto'
 
 /** 불만 유형 (04 불만 열 · 06 불만 줄 같은 말). 아래 다섯은 대시보드 연동 명세 §4의 새 유형 — 이름은 02 대시보드와 같음 */
 export const COMPLAINT_LABEL: Record<ComplaintType, string> = {

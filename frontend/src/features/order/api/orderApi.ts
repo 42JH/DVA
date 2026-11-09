@@ -9,16 +9,9 @@ import type { OrderGroup } from '@/shared/order/labels'
 
 export type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
 
-/** 실제 주문 상태 8개 (연동 상세명세 4.1 · 서버 11/03 재시도 중 실패 추가). notPaid는 소문자 그대로 */
-export type OrderStatus =
-  | 'COLLECTING' // 미완료 (AI 통화로 모으다 끊김, 저장된 것만 목록에 나옴)
-  | 'notPaid' // 결제 대기
-  | 'PAID' // 결제 완료
-  | 'SUBMITTING' // 디버 접수 중
-  | 'SUBMITTING_FAILED' // 디버 접수 실패 — 서버가 자동으로 다시 시도하는 중
-  | 'ACCEPTED' // 디버 접수 완료 — '접수 완료'는 이것만
-  | 'SUBMISSION_FAILED' // 디버 접수 최종 실패 (상세에서 [다시 접수])
-  | 'CANCELLED' // 주문 취소
+/** 실제 주문 상태 8개 — 정의는 shared/order/orderDto (통화 상세 등 다른 기능도 씀) */
+import type { OrderStatusDto } from '@/shared/order/orderDto'
+export type OrderStatus = OrderStatusDto
 
 /** '주문 상태' 고르기 = 서버 statusGroup (11/01): 결제 완료 = PAID · SUBMITTING · ACCEPTED, 접수 실패 = SUBMITTING_FAILED · SUBMISSION_FAILED */
 export type StatusGroup = 'ALL' | OrderGroup
