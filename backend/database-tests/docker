@@ -1,0 +1,9 @@
+#!/bin/sh
+# Test-only Docker CLI stand-in: execute inside this isolated PostgreSQL container.
+set -eu
+test "$1" = exec
+shift
+if [ "$1" = '-i' ]; then shift; fi
+test "$1" = dva-db-129-check
+shift
+exec "$@"

@@ -1,0 +1,205 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operations
+  namespace: dva
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: dva-operations
+  template:
+    metadata:
+      labels:
+        app: dva-operations
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: operations
+          image: docker.io/library/dva-operations:RELEASE_TAG
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3005
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3005"
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: operations-db, key: PGDATABASE}
+            - name: CORS_ORIGINS
+              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+            - name: SWAGGER_ENABLED
+              value: "true"
+            - name: CONSULTATION_URL
+              value: http://consultation:3004
+            - name: ORDER_URL
+              value: http://order:3002
+            - name: CUSTOMER_URL
+              value: "http://customer:3001"
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: CONSULTATION_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-consultation-auth, key: consultation-token}
+            - name: AI_AGENT_URL
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_AGENT_URL, optional: true}
+            - name: AI_FAQ_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_FAQ_TOKEN, optional: true}
+            - name: AI_PERSONA_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-ai-persona, key: AI_PERSONA_TOKEN, optional: true}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /operations/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /operations/health/ready
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /operations/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: operations
+  namespace: dva
+spec:
+  type: ClusterIP
+  selector:
+    app: dva-operations
+  ports:
+    - name: http
+      port: 3005
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: operations
+  namespace: dva
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: k15d109.p.ssafy.io
+      http:
+        paths:
+          - path: /api/auth
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/admins
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/audit-logs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/personas
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/options
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/config
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/faqs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /api/ai/faqs
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005
+          - path: /operations
+            pathType: Prefix
+            backend:
+              service:
+                name: operations
+                port:
+                  number: 3005

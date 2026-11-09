@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.33.xsd"
+ logicalFilePath="dva/consultation/db.changelog.xml">
+  <changeSet id="001-initial" author="dva" dbms="postgresql" runInTransaction="true">
+    <preConditions onFail="HALT" onError="HALT">
+      <sqlCheck expectedResult="0">SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name NOT IN ('databasechangelog','databasechangeloglock')</sqlCheck>
+    </preConditions>
+    <sqlFile path="001-initial.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="002-event-transport" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="../shared/001-event-transport.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="003-pbx-active-calls" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="003-pbx-active-calls.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="004-call-customer" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="004-call-customer.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="005-call-analysis" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="005-call-analysis.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="006-call-event-sources" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="006-call-event-sources.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="007-recording-retry" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="007-recording-retry.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+  <changeSet id="008-order-intake" author="dva" dbms="postgresql" runInTransaction="true">
+    <sqlFile path="008-order-intake.sql" relativeToChangelogFile="true" encoding="UTF-8" splitStatements="false" stripComments="false"/>
+  </changeSet>
+</databaseChangeLog>

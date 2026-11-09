@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: dva
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 180
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: dva-order
+  template:
+    metadata:
+      annotations:
+        dva.ssafy.io/parcel-drafts-contract: "055"
+      labels:
+        app: dva-order
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: order
+          image: docker.io/library/dva-order:RELEASE_TAG
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 3002
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3002"
+            - name: SECURITY_LOG_HMAC_KEY
+              valueFrom:
+                secretKeyRef: {name: msa-security-logs, key: hmac-key}
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGHOST}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGPORT}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGUSER}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGPASSWORD}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef: {name: order-db, key: PGDATABASE}
+            - name: OPERATIONS_URL
+              value: "http://operations:3005"
+            - name: CUSTOMER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef: {name: msa-customer-auth, key: customer-token}
+            - name: CUSTOMER_URL
+              value: http://customer:3001
+            - name: CONSULTATION_URL
+              value: http://consultation:3004
+            - name: DELIVERY_URL
+              value: http://delivery:3003
+            - name: CORS_ORIGINS
+              value: "https://13.209.59.180,https://k15d109.p.ssafy.io"
+            - name: SWAGGER_ENABLED
+              value: "true"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /order/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /order/health/ready
+              port: http
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 2
+          livenessProbe:
+            httpGet:
+              path: /order/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 10"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: dva
+spec:
+  type: ClusterIP
+  selector:
+    app: dva-order
+  ports:
+    - name: http
+      port: 3002
+      targetPort: http
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: order
+  namespace: dva
+  annotations:
+    traefik.ingress.kubernetes.io/router.pathmatcher: PathRegexp
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    traefik.ingress.kubernetes.io/router.tls.certresolver: letsencrypt
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: k15d109.p.ssafy.io
+      http:
+        paths:
+          - path: /api/orders
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /api/admin/orders
+            pathType: Prefix
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /api/customers/[^/]+/addresses/?$
+            pathType: ImplementationSpecific
+            backend:
+              service: { name: order, port: { number: 3002 } }
+          - path: /order
+            pathType: Prefix
+            backend:
+              service:
+                name: order
+                port:
+                  number: 3002

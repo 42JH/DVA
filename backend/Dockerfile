@@ -2,17 +2,30 @@
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY scripts/copy-payment-assets.cjs ./scripts/copy-payment-assets.cjs
 RUN npm run build
+
+FROM builder AS checks
+COPY eslint.config.mjs .prettierrc.json ./
+COPY test ./test
+COPY scripts ./scripts
+COPY migrations ./migrations
+COPY data ./data
+COPY payment-test ./payment-test
+RUN npm run lint && npm run format:check && npm run test:compiled
+CMD ["npm", "run", "test:integration"]
 
 FROM node:24-bookworm-slim
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
+COPY migrations ./migrations
+COPY data ./data
 USER node
 EXPOSE 3000
 CMD ["node", "dist/main.js"]

@@ -1,0 +1,63 @@
+name: dva-jenkins
+services:
+  controller:
+    image: jenkins/jenkins:2.580.1-jdk21
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:8080:8080'
+    environment:
+      JAVA_OPTS: '-Xms256m -Xmx512m -Djenkins.install.runSetupWizard=false'
+      JENKINS_OPTS: '--prefix=/jenkins'
+    mem_limit: 1g
+    cpus: 0.5
+    pids_limit: 512
+    volumes:
+      - ./home:/var/jenkins_home
+      - ./bootstrap-output:/run/bootstrap-output
+    networks: [ci]
+  docker:
+    image: docker:29-dind
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    mem_limit: 2g
+    cpus: 1.0
+    pids_limit: 2048
+    volumes:
+      - docker_certs:/certs/client
+      - docker_data:/var/lib/docker
+    networks: [build]
+  agent:
+    image: dva-jenkins-agent:linux-20261025
+    init: true
+    build:
+      context: .
+      dockerfile: agent.Dockerfile
+    restart: unless-stopped
+    environment:
+      JENKINS_URL: http://controller:8080/jenkins/
+      JENKINS_AGENT_NAME: linux-docker-builder
+      JENKINS_SECRET: '@/run/secrets/agent-secret'
+      JENKINS_WEB_SOCKET: 'true'
+      JENKINS_AGENT_WORKDIR: /home/jenkins/agent
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: '1'
+      DOCKER_CERT_PATH: /certs/client
+    mem_limit: 1g
+    cpus: 0.5
+    pids_limit: 512
+    volumes:
+      - agent_workspace:/home/jenkins/agent
+      - docker_certs:/certs/client:ro
+      - ./bootstrap-output/agent-secret:/run/secrets/agent-secret:ro
+      - ./validation:/opt/dva-ci-validation:ro
+    networks: [ci, build]
+    depends_on: [controller, docker]
+networks:
+  ci:
+  build:
+volumes:
+  docker_certs:
+  docker_data:
+  agent_workspace:

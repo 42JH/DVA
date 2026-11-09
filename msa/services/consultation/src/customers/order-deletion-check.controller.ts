@@ -1,0 +1,46 @@
+import {
+  Body,
+  Controller,
+  Header,
+  HttpCode,
+  HttpException,
+  Post,
+  SetMetadata,
+} from '@nestjs/common';
+import { ApiExcludeController } from '@nestjs/swagger';
+import { validateEvent } from '@dva/events';
+import { DatabaseService } from '../database/database.service';
+
+@ApiExcludeController()
+@SetMetadata('auth:internal-customer', true)
+@Controller('internal/order-deletion-check')
+export class OrderDeletionCheckController {
+  constructor(private readonly database: DatabaseService) {}
+
+  @Post()
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async query(@Body() event: unknown) {
+    try {
+      validateEvent(event);
+      if (
+        event.source !== 'order' ||
+        event.eventType !== 'OrderDeletionCheckRequested' ||
+        Object.keys(event.payload).join(',') !== 'orderSeq' ||
+        !Number.isInteger(event.payload.orderSeq) ||
+        Number(event.payload.orderSeq) < 1 ||
+        Number(event.payload.orderSeq) > 2147483647
+      )
+        throw new Error('Invalid deletion check');
+    } catch {
+      throw new HttpException({ error: 'INVALID_ORDER_DELETION_CHECK' }, 422);
+    }
+    // Match the monolith predicate, including live calls older than the retention window.
+    const { rows } = await this.database.pool.query<{ blocked: boolean }>(
+      `SELECT EXISTS(SELECT 1 FROM call_sessions
+       WHERE order_seq=$1 AND deleted_at IS NULL AND ended_at IS NULL) AS blocked`,
+      [event.payload.orderSeq],
+    );
+    return { eventId: event.eventId, status: 'processed', payload: rows[0] };
+  }
+}
