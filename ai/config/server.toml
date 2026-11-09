@@ -41,6 +41,7 @@ retry_max_sec = 300.0
 reconcile_sec = 30.0
 
 [backend]
+parcel_draft_intake = false  # 055 백엔드와 연동 검증 후 전환한다.
 timeout_sec = 3.0
 # 새 서버 전용(app/integrations/backend/gateway.py). 측정 후 조정
 max_concurrency = 16

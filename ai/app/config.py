@@ -84,6 +84,7 @@ class BackendConfig(_Strict):
     result_resend_sec: float = Field(60.0, ge=0)   # SENT_UNCERTAIN 결과를 실행 중 같은 키로 재확인하는 주기(0이면 끔)
     # 분석에 hasCallbackRequest를 넣는다. 048 + 새 BE(feature/ai-call-updates) 배포 전에는 false(구버전 BE가 400으로 거절)
     analysis_callback_field: bool = False
+    parcel_draft_intake: bool = False   # 055 백엔드와 함께 전환
 
 
 class FareConfig(_Strict):

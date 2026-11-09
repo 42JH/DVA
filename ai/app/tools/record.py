@@ -252,6 +252,8 @@ def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, 
     omit = args.omit_blocked_parcel
     if (omit and draft.item_issues and (ctx.item_utterance is None or omit in text)
             and re.search(r"(?:택배|묶음|건).*?(?:빼|제외|취소|안\s*보내|보내지\s*않)", omit)):
+        if draft.client_parcel_id:
+            s.discarded_parcel_ids.add(draft.client_parcel_id)
         s.parcels[:] = [p for p in s.parcels if p.parcel_id != s.editing]
         s.current = s.editing = s.pending = None
         s.address_offer = None

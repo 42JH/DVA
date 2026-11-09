@@ -234,6 +234,53 @@ class BackendAPI:
         # shortcut: 미설정이면 헤더 없이 보낸다(BE 인증 적용 전 배포 호환). BE가 401을 주면 인증 설정 오류로 끝난다
         return {"Authorization": f"Bearer {self.business_token}"} if self.business_token else {}
 
+    async def _draft_request(self, method: str, path: str, *, call_seq: int | None = None,
+                             body: dict | None = None, params: dict | None = None) -> dict:
+        if not self.business_token:
+            raise BackendError("배송 초안 API 인증 미설정", 401)
+        headers = self._business_headers() | (_call(call_seq) if call_seq is not None else {})
+        resp = await self.http.request(method, path, json=body, params=params, headers=headers)
+        if resp.status_code not in (200, 201, 202):
+            raise _fail(path, resp)
+        return resp.json()
+
+    async def create_draft(self, call_seq: int, body: dict) -> dict:
+        return (await self._draft_request("POST", "/api/parcel-drafts", call_seq=call_seq, body=body))["data"]
+
+    async def patch_draft(self, call_seq: int, draft_seq: int, body: dict) -> dict:
+        return (await self._draft_request("PATCH", f"/api/parcel-drafts/{draft_seq}",
+                                          call_seq=call_seq, body=body))["data"]
+
+    async def draft_detail(self, call_seq: int, draft_seq: int) -> dict:
+        return (await self._draft_request("GET", f"/api/parcel-drafts/{draft_seq}", call_seq=call_seq))["data"]
+
+    async def list_drafts(self, call_seq: int, status: str, *, same_call: bool = False, limit: int = 100) -> list[dict]:
+        params = {"status": status, "limit": limit, "offset": 0}
+        if same_call:
+            params["callSessionSeq"] = call_seq
+        rows = []
+        while True:
+            page = await self._draft_request("GET", "/api/parcel-drafts", call_seq=call_seq, params=params)
+            batch = page["data"]
+            if not isinstance(batch, list) or any(not isinstance(row, dict) or not isinstance(row.get("draftSeq"), int)
+                                                   for row in batch):
+                raise ValueError("invalid parcel draft page")
+            if same_call and any(not {"callSessionSeq", "status", "version", "parcel"} <= row.keys() for row in batch):
+                raise ValueError("invalid current call parcel draft")
+            rows.extend(batch)
+            if not same_call or not page.get("hasNext", len(batch) == limit):
+                return rows
+            if not batch:
+                raise ValueError("empty parcel draft page")
+            params["offset"] += len(batch)
+
+    async def complete_intake(self, call_seq: int, body: dict) -> dict:
+        path = f"/api/calls/{call_seq}/order-intake/complete"
+        return (await self._draft_request("POST", path, body=body))["data"]
+
+    async def intake_detail(self, call_seq: int) -> dict:
+        return (await self._draft_request("GET", f"/api/calls/{call_seq}/order-intake"))["data"]
+
     async def _post(self, path: str, body: dict, ok=(200, 201), headers: dict | None = None) -> httpx2.Response:
         resp = await self.http.post(PREFIX + path, json=body, headers=headers)
         if resp.status_code not in ok:
