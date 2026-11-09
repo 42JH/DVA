@@ -1,5 +1,7 @@
 # 통화 분석 상태·첫 녹취 저장 시각 작업
 
+이하 내용은 056 최초 구현 이력이다. 2026-11-09 후속 작업에서 사용자 확정에 따라 PBX 종료 후 10분 미수신을 EXPIRED로 추가했다. 최신 계약은 [프론트 명세](call-analysis-status-frontend-integration.md), 조사 결과는 [후속 보고](analysis-expiry-and-draft-findings-20261109.md)를 따른다.
+
 범위는 프론트 요청 1번의 모놀리식 backend와 관련 infra 검증·문서다. AI·프론트·MSA 소스와 운영 DB/배포는 변경하지 않으며 MR 생성 전 보고한다.
 
 ## 계약

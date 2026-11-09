@@ -46,11 +46,11 @@ Content-Type: application/json
 - 400/401/403/404는 본문·인증·식별자/수명 문제를 확인한다. 5xx·타임아웃은 재전송 대상으로 관리한다. 인증 오류나 경로 오류를 정상 전송으로 처리하지 않는다.
 - 분석 복구 후 정상 결과를 기존 성공 API로 보내면 COMPLETED가 우선한다. 정상 분석을 가짜 0건·빈 값으로 만들어 실패를 표현하지 않는다.
 
-알림이 오지 않으면 서버는 미수신과 실패를 추정하지 않고 PENDING을 반환한다. 종료 후 5분 같은 자동 실패 기준은 없다.
+2026-11-09부터 정상 분석·실패 통보가 없는 통화는 PBX 종료 후 10분 이상이면 EXPIRED, 종료 미수집 또는 10분 미만이면 PENDING이다. 시간 경과만으로 FAILED나 COMPLETED를 만들지 않는다. 분석 성공·실패 POST 계약은 그대로이며 AI의 실제 정상 결과가 늦게 저장되면 COMPLETED가 우선한다.
 
 ## 조회와 과거 통화
 
-관리자 목록 data[]와 상세 data.call에 analysisStatus·recordedAt이 추가된다. 정상 분석 있음 → COMPLETED, 없고 실패 수신 기록 있음 → FAILED, 둘 다 없음 → PENDING이다. 녹취·주문 확정 완료는 분석 완료를 뜻하지 않는다.
+관리자 목록 data[]·상세 data.call·홈 data.recentCalls[]에 analysisStatus·recordedAt을 반환한다. 정상 분석 있음 → COMPLETED, 없고 실패 수신 기록 있음 → FAILED, 둘 다 없고 PBX 종료 후 10분 경과 → EXPIRED, 그 외 → PENDING이다. 녹취·주문 확정 완료는 분석 완료를 뜻하지 않는다.
 
 기존 분석은 자동으로 COMPLETED로 조회된다. 분석 없는 과거 통화는 일괄 FAILED로 바꾸지 않는다. AI가 실제 분석 단계 실패를 확인한 보관 기간 내 기존 통화만 새 API로 통보한다. 실패 시각은 재전송을 받은 현재 서버 시각이며 통화의 최초 보관 기한은 연장되지 않는다.
 

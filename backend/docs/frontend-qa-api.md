@@ -4,6 +4,8 @@
 
 backend 모놀리식의 관리자 세션을 사용한다. 쓰기에는 기존 허용 Origin이 필요하다. 기존 삭제·5년 보관·역할 기준을 유지한다. 프론트·AI·MSA·운영 배포는 별도다.
 
+2026-11-09 추가: 통화 목록·상세·홈 recentCalls의 analysisStatus에 EXPIRED를 추가한다. 정상 분석·최종 실패 통보 없이 PBX 종료 후 10분이 지나면 ‘분석 만료’로 표시한다. 시간만으로 완료 처리하지 않는다. [프론트 변경 지점과 상태 우선순위](call-analysis-status-frontend-integration.md), [미완료·고객명 조사 결과](analysis-expiry-and-draft-findings-20261109.md)를 함께 전달한다.
+
 ## 1. 주문 탭 건수
 
 `GET /api/admin/orders`의 기존 `data`, `hasNext`, `total_count`를 유지하고 `statusCounts`를 추가한다. 검색 `q`, 생성 기간 `from`(포함)·`to`(미포함), 현재 소속 `organizationSeq`는 집계에도 적용한다. 선택한 `statusGroup`, `limit`, `offset`은 탭별 건수에 적용하지 않는다. 목록과 모든 건수는 같은 읽기 전용 DB 스냅샷에서 조회한다.

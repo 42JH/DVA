@@ -31,15 +31,18 @@
 목록과 상세 call에 같은 두 필드가 추가된다.
 
 ```ts
-analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED'
+analysisStatus: 'PENDING' | 'COMPLETED' | 'FAILED' | 'EXPIRED'
 recordedAt: string | null
 ```
 
 | 상태 | 서버 판단 | 표시 예시 |
 | --- | --- | --- |
-| PENDING | 정상 분석도 최종 실패 통보도 없음 | 분석 대기 |
+| PENDING | 정상 분석·최종 실패 통보가 없고 PBX 종료 미수집 또는 종료 후 10분 미만 | 분석 대기 |
 | COMPLETED | 정상 분석이 저장됨. 실패 기록보다 우선 | 분석 완료 |
 | FAILED | 정상 분석 없이 AI의 최종 실패 통보 수신 | 분석 실패 |
+| EXPIRED | 정상 분석·최종 실패 통보 없이 PBX 종료 후 10분 이상 경과 | 분석 만료 |
+
+2026-11-09의 EXPIRED 추가가 이전 3상태 계약보다 우선한다. 홈 recentCalls에도 적용하며 [최신 표시·배포 기준](call-analysis-status-frontend-integration.md)을 따른다. 시간만으로 COMPLETED 처리하지 않는다.
 
 ```json
 {
@@ -51,7 +54,7 @@ recordedAt: string | null
 위 JSON은 목록 한 항목 또는 상세 `data.call`의 추가 필드만 발췌했다. 기존 `analysis`와 `recordings` 등은 유지한다.
 
 - 종료 후 5분 경과나 녹취 유무로 분석 실패를 추정하는 우회를 제거한다. 목록 상태 표시를 위해 통화마다 상세를 추가 호출하지 않는다.
-- PENDING만으로 통화 중·분석 중·AI 재전송·알림 누락을 구별할 수 없다. 실패 통보가 안 오면 계속 PENDING이다.
+- PENDING만으로 통화 중·분석 중·AI 재전송·알림 누락을 구별할 수 없다. 실패 통보·정상 분석 없이 종료 후 10분이 지나면 EXPIRED다.
 - 실패 뒤 정상 분석이 저장되면 COMPLETED다. 정상 분석 후 늦은 실패 통보는 완료 상태를 내리지 않는다.
 - `recordedAt`은 `recordings.created_at`의 최솟값, 즉 최초 녹취 참조가 **DB에 저장된 시각**이다. 실제 녹음·통화 시작 시각이 아니며 녹취가 없으면 null이다. ISO 8601 시각을 화면의 한국 시간으로 표시한다.
 - `recordedAt`으로 파일 재생 가능 여부를 판단하지 않는다. 기존 recordings의 재생 URL·개별 오류 처리를 유지한다.
