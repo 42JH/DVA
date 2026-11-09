@@ -1,6 +1,6 @@
 # 백엔드 테스트 정리 결과
 
-기준: develop-backend `f7f492c1`, 작업 브랜치 `ci/backend-test-scope`. 2026-11-08~09 로컬 Linux Docker의 임시 DB에서 검증했다. 운영 Jenkins·DB·프론트·AI 코드는 변경하지 않았다.
+기준: develop-backend `f7f492c1`, 작업 브랜치 `ci/backend-test-scope`. 2026-11-08~09 로컬 Linux Docker의 임시 DB에서 검증했다. 저장소의 CI·테스트·관련 문서만 변경했으며 운영 Jenkins 설정·운영 DB·프론트·AI 소스는 변경하지 않았다.
 
 ## 정리한 부분
 
