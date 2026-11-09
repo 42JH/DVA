@@ -67,18 +67,14 @@ def test_assess_stage_progression_and_missing_order():
     assert assess(s, P).stage == "sender"
     s.record("sender_name", "김철수")
     a = assess(s, P)
-    assert a.stage == "receiver" and a.missing[0] == "receiver_name" and not a.readback_ready  # 주소는 연락처 뒤(2026-11-09)
-    s.record("receiver_name", "이영희")
-    s.record("receiver_phone", "01098765432")
-    a = assess(s, P)
-    assert a.stage == "address" and a.missing[0] == "sender_address"
+    assert a.stage == "sender" and a.missing[0] == "sender_address" and not a.readback_ready
     s = filled()
     a = assess(s, P)
     assert (a.stage, a.missing, a.readback_ready) == ("readback", (), True)
     s.record_invalid("item_price", "x")  # VALID 유지
     s.clear("receiver_address_detail")
     a = assess(s, P)
-    assert a.stage == "address" and a.missing == ("receiver_address_detail",) and not a.readback_ready
+    assert a.stage == "receiver" and a.missing == ("receiver_address_detail",) and not a.readback_ready
 
 
 def test_assess_blocked_attempts_and_payment():
@@ -86,7 +82,7 @@ def test_assess_blocked_attempts_and_payment():
     for _ in range(P.reask.max_attempts):
         s.record_invalid("sender_address", "ADDRESS_NOT_FOUND")
     a = assess(s, P)
-    assert a.stages["address"].blocked == ("sender_address",) and a.attempts_exceeded == ("sender_address",)
+    assert a.stages["sender"].blocked == ("sender_address",) and a.attempts_exceeded == ("sender_address",)
     assert a.payment_auto == "groupBilling"
 
 
@@ -110,13 +106,14 @@ def test_assess_after_parcels():
     assert assess(s, P).stage == "closing"  # 결제 단계 없음: 더 없음 → 바로 마무리
 
 
-def test_readback_facts_are_names_and_dong_only():
-    """되읽기는 성함과 동 이름만(사용자 결정 2026-11-09). 주소·연락처·물품·가액은 주지 않는다."""
+def test_readback_facts_hide_caller_and_saved_values():
     s = filled()
-    snap = issue_parcel_confirmation(s, P, 1.0).snapshot
-    assert readback_facts(snap) == {"sender_name": "김철수", "from": "역삼동", "receiver_name": "이영희", "to": "역삼동"}
-    # 보정 실패로 geo가 없으면 건물번호를 뺀 주소로 대신한다
-    assert readback_facts(snap | {"receiver_geo": None})["to"] == "부산 해운대구 센텀로"
+    s.record("receiver_address_detail", "301호", Source.PIN)
+    sources = {n: f.source for n, f in s.current.fields.items()}
+    facts = readback_facts(issue_parcel_confirmation(s, P, 1.0).snapshot, sources, P)
+    assert "sender_phone" not in facts and "receiver_address_detail" not in facts  # 발신번호·저장된 상세주소
+    assert facts["receiver_phone"] == "01098765432" and "sender_geo" not in facts
+    assert facts["sender_address_detail"] == "1201호"  # 이번 통화에서 직접 말한 상세주소
 
 
 # --- 확인 관문 ---
@@ -177,13 +174,13 @@ def test_commit_rechecks_snapshot_and_release():
 
 # --- 담은 택배 수정(P5) ---
 
-def test_edit_parcel_is_excluded_until_reconfirmed():
+def test_edit_parcel_then_submit_uses_last_confirmed_snapshot_until_reconfirmed():
     s = filled()
     confirm_once(s)
     open_for_edit(s, "p1")
     s.record("receiver_name", "박민수")
     assert pending_reconfirm(s) == ["p1"]
-    assert snapshot_for_submit(s) == []
+    assert snapshot_for_submit(s)[0]["receiver_name"] == "이영희"  # B안: 미확인 수정은 보내지 않음
     assert confirm_once(s, t=200.0) == "p1" and len(s.parcels) == 1
     assert pending_reconfirm(s) == [] and snapshot_for_submit(s)[0]["receiver_name"] == "박민수"
 
@@ -193,8 +190,8 @@ def test_edit_while_collecting_new_parcel_keeps_it_unconfirmed():
     confirm_once(s)
     s.record("receiver_name", "최지우")  # 두 번째 택배 받는 중
     open_for_edit(s, "p1")
-    assert [p.confirmed_snapshot is None for p in s.parcels] == [True, True]
-    assert snapshot_for_submit(s) == []
+    assert [p.confirmed_snapshot is None for p in s.parcels] == [False, True]
+    assert len(snapshot_for_submit(s)) == 1  # 한 번도 확인받지 않은 택배는 보내지 않는다
 
 
 # --- 통화 결과 ---
@@ -216,7 +213,7 @@ def test_outcome_complete_and_body():
 
 
 @pytest.mark.parametrize("change, reason", [
-    (lambda s: setattr(s.parcels[0].draft, "receiver_geo", None), "NO_CONFIRMED_PARCEL"),
+    (lambda s: setattr(s.parcels[0].draft, "receiver_geo", None), None),  # 확인 뒤 geo 변경은 스냅샷에 영향 없음
     (lambda s: setattr(s, "agent_transferred", True), "AGENT_TRANSFER"),
     (lambda s: s.customer.__setattr__("customer_seq", None) or s.customer.__setattr__("name", None), None),  # 이름 = 보내는 분
     (lambda s: s.customer.__setattr__("payment_methods", ()), "PAYMENT_UNKNOWN"),
@@ -251,7 +248,7 @@ def test_unverified_claims():
     assert unverified_claims("성함 확인했습니다", s, P) == []  # 정상 안내에도 쓰는 말은 검사하지 않음
     s.result_accepted = True
     assert unverified_claims("접수되었습니다", s, P) == []
-    assert unverified_claims("결제가 완료되어 취소가 어렵습니다", s, P) == []  # 결제 완료 안내는 허용(S15P31D109-178)
+    assert unverified_claims("결제 완료됐어요", s, P) == ["결제되었"]  # 결제 완료는 늘 금지
 
 
 def test_domain_and_policy_do_not_import_sdk_http_or_be_contract():
@@ -302,15 +299,8 @@ def test_progress_claim_only_while_confirmation_pending():
     s = ConversationState()
     assert unverified_claims("네, 접수 진행하겠습니다", s, P) == []  # 확인 대기 없음: 정상 안내
     s.pending = object()
-    assert unverified_claims("네, 접수 진행하겠습니다. 잠시만 기다려주세요", s, P) == ["접수 진행하겠"]
-    assert unverified_claims("접수를 진행해 드릴게요", s, P) == ["접수 진행하겠"]
-    assert unverified_claims("취소 진행하겠습니다", s, P) == ["접수 진행하겠"]
-    assert unverified_claims("네, 이대로진행할게요", s, P) == ["접수 진행하겠"]  # 띄어쓰기 무시
+    assert unverified_claims("네, 접수 진행하겠습니다. 잠시만 기다려주세요", s, P) == ["진행하겠"]
     assert unverified_claims("이대로 진행할까요?", s, P) == []  # 확인 질문은 괜찮다
-    # 접수·취소와 무관한 진행 안내는 잡지 않는다(S15P31D109-144)
-    assert unverified_claims("상담원 연결 진행해 드릴게요", s, P) == []
-    assert unverified_claims("주소 확인 진행할게요", s, P) == []
-    assert unverified_claims("매뉴얼 검색 진행 중입니다", s, P) == []
 
 
 def test_clean_name_strips_spoken_endings():
@@ -326,9 +316,9 @@ def test_registered_customer_name_prefilled_regardless_of_origin_answer():
     assert s.origin_answer is None
     f = s.field_of("sender_name")
     assert f.valid and f.value == "현승준" and f.source == Source.CALLER_ID
-    assert assess(s, P).missing[0] == "receiver_name"
+    assert assess(s, P).missing[0] == "sender_address"
     assert s.current.empty()  # 서버가 채운 값뿐이면 빈 택배(빈 주문을 만들지 않음)
-    assert readback_facts({"sender_name": "현승준"}) == {"sender_name": "현승준"}
+    assert readback_facts({"sender_name": "현승준"}, {"sender_name": Source.CALLER_ID}, P) == {"sender_name": "현승준"}
     s.record("sender_name", "김영희")  # 고객이 다른 이름을 말하면 덮는다
     assert s.field_of("sender_name").value == "김영희" and s.field_of("sender_name").source == Source.CUSTOMER
     s.current = None  # 다음 택배도 같은 성함으로 시작

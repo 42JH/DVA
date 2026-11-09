@@ -138,7 +138,7 @@ def test_new_customer_registration_with_address_then_payment_auto(tmp_path):
     assert saved["name"] == "김철수" and saved["address"] == {
         "roadAddress": "서울 강남구 테헤란로 212", "jibunAddress": GEO.jibun_address, "detailAddress": "1201호",
         "dongName": GEO.dong_name, "postalCode": GEO.postal_code}  # 이름·번호·좌표 없는 내 주소
-    assert not db.pins.get(CALLER)  # 보내는 곳은 고객 기본 주소에만(PIN은 받는 곳 전용)
+    assert [p.address for p in db.pins[CALLER]] == ["서울 강남구 테헤란로 212"]  # 보내는 곳 PIN
     assert st.customer.payment_methods == ("billing",)  # 등록 후 받은 가능 방식(하나면 자동)
 
 
@@ -163,7 +163,6 @@ def test_registration_failure_keeps_unregistered_and_sends_customer_name(tmp_pat
     body = db.results[-1]["body"]
     assert body["outcome"] == "INCOMPLETE" and body["customer"] == {"name": "김철수", "phoneNumber": CALLER}
     assert "paymentMethodType" not in body  # 기본 billing 없음
-    assert "parcels" not in body and db.results[-1]["status"] == "NO_ORDER"
 
 
 def test_insights_analysis_events_and_unanswered(tmp_path):

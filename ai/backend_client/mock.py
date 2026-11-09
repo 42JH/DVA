@@ -4,8 +4,6 @@
 BackendAPI의 공개 메서드는 모두 같은 이름으로 둔다(새 API를 붙이면 여기도, backend_client/tests/test_mock.py가 검사).
 shortcut: 프로세스 메모리라 재시작·재배포하면 사라진다. 실제 백엔드를 쓰려면 BACKEND_MOCK을 비우거나 false."""
 
-import copy
-from datetime import datetime, timezone
 import itertools
 import unicodedata
 
@@ -31,7 +29,6 @@ class MockBackend:
         self.payment_methods: dict[str, list[str]] = {}  # 전화번호 → availablePaymentMethods
         self.recent: dict[str, tuple[Place, Place]] = {}  # 전화번호 → 이전 접수(출발지, 도착지)
         self.call_sessions: dict[int, str] = {}  # callSessionSeq → 발신번호
-        self.call_numbers: dict[str, int] = {}   # providerCallId → callSessionSeq
         self.results: list[dict] = []  # 받은 통화 결과(본문 + 결과)
         self.keys: dict[str, dict] = {}  # Idempotency-Key → 결과 data
         self.calls: set[str] = set()  # 주문이 연결된 providerCallId
@@ -42,11 +39,6 @@ class MockBackend:
         self.unanswered: dict[str, dict] = {}  # eventId → {seq, body}
         # 주문(최근 것이 뒤): {orderSeq, phone, status, parcels: [{orderParcelSeq, status, destination: {name, roadAddress}}]}
         self.orders: list[dict] = []
-        self.linked: dict[int, int] = {}  # callSessionSeq → PATCH로 연결된 주문
-        self.ended: set[int] = set()  # 끝난 통화(callSessionSeq) — 확정(submit)은 진행 중 통화만(B/order-submit.md)
-        self.drafts: dict[int, dict] = {}
-        self.draft_keys: dict[tuple[int, str], tuple[dict, int]] = {}
-        self.intakes: dict[int, dict] = {}
         self.insights_enabled = True
         self.events: dict[int, dict[int, dict]] = {}  # callSessionSeq → eventOrder → 이벤트
         self.analyses: dict[int, dict] = {}  # callSessionSeq → 분석
@@ -54,107 +46,6 @@ class MockBackend:
 
     async def close(self) -> None:
         pass
-
-    def _intake(self, seq):
-        return self.intakes.setdefault(seq, {"intakeVersion": 0})
-
-    async def create_draft(self, call_seq, body):
-        key = (call_seq, body["clientParcelId"])
-        if prior := self.draft_keys.get(key):
-            if body != prior[0]:
-                raise BackendError("different create body", 409, "IDEMPOTENCY_KEY_REUSED")
-            return copy.deepcopy(self.drafts[prior[1]])
-        intake = self._intake(call_seq)
-        if "complete" in intake:
-            raise BackendError("intake sealed", 409, "INVALID_STATE")
-        parcel = body.get("parcel", {})
-        if source_seq := body.get("sourceDraftSeq"):
-            source = await self.draft_detail(call_seq, source_seq)
-            if source["status"] != "INCOMPLETE":
-                raise BackendError("source already resumed", 409, "INVALID_STATE")
-            self.drafts[source_seq]["status"] = "RESUMED"
-            parcel = source["parcel"]
-        draft_seq = next(self._seq)
-        phone = self.call_sessions[call_seq]
-        intake["intakeVersion"] += 1
-        row = {"draftSeq": draft_seq, "version": 1, "intakeVersion": intake["intakeVersion"],
-               "callSessionSeq": call_seq, "callerPhoneNumber": phone, "status": body["status"],
-               "parcel": copy.deepcopy(parcel), "createdAt": datetime.now(timezone.utc).isoformat()}
-        self.drafts[draft_seq] = row
-        self.draft_keys[key] = (copy.deepcopy(body), draft_seq)
-        return copy.deepcopy(row)
-
-    async def patch_draft(self, call_seq, draft_seq, body):
-        row, intake = self.drafts[draft_seq], self._intake(call_seq)
-        if row["callSessionSeq"] != call_seq or "complete" in intake:
-            raise BackendError("draft not writable", 409, "INVALID_STATE")
-        if body["expectedVersion"] != row["version"]:
-            raise BackendError("stale draft", 409, "VERSION_CONFLICT")
-        action = body["action"]
-        if action == "START_EDIT":
-            for field in body["clearFields"]:
-                keys = ("documentCount", "smallBoxCount", "mediumBoxCount", "bigBoxCount", "otherItemDescription") \
-                    if field == "items" else (field,)
-                for key in keys:
-                    row["parcel"].pop(key, None)
-            row["status"] = "EDITING"
-        elif action == "SAVE":
-            if row["status"] != "EDITING":
-                raise BackendError("draft not editing", 409, "INVALID_STATE")
-            row["parcel"].update(copy.deepcopy(body["parcel"]))
-            row["status"] = body["status"]
-        else:
-            row["status"] = "CANCELLED"
-        row["version"] += 1
-        intake["intakeVersion"] += 1
-        row["intakeVersion"] = intake["intakeVersion"]
-        return copy.deepcopy(row)
-
-    async def list_drafts(self, call_seq, status, *, same_call=False, limit=100):
-        rows = [row for row in reversed(list(self.drafts.values())) if row["status"] == status
-                and row["callerPhoneNumber"] == self.call_sessions[call_seq]
-                and (not (same_call or call_seq in self.ended) or row["callSessionSeq"] == call_seq)]
-        return copy.deepcopy(rows if same_call else rows[:limit])
-
-    async def draft_detail(self, call_seq, draft_seq):
-        row = self.drafts.get(draft_seq)
-        if not row or row["callerPhoneNumber"] != self.call_sessions[call_seq]:
-            raise BackendError("draft not found", 404, "NOT_FOUND")
-        return copy.deepcopy(row)
-
-    async def complete_intake(self, call_seq, body):
-        intake = self._intake(call_seq)
-        if "complete" in intake and intake["complete"] != body:
-            raise BackendError("different complete body", 409, "EVENT_PAYLOAD_CONFLICT")
-        if body["expectedIntakeVersion"] != intake["intakeVersion"]:
-            raise BackendError("stale intake", 409, "VERSION_CONFLICT")
-        intake["complete"] = copy.deepcopy(body)
-        return await self.intake_detail(call_seq)
-
-    async def intake_detail(self, call_seq):
-        intake = self._intake(call_seq)
-        data = {"intakeVersion": intake["intakeVersion"]}
-        if "complete" not in intake:
-            return data | {"status": "WAITING_AI" if call_seq in self.ended else "COLLECTING"}
-        if call_seq not in self.ended:
-            return data | {"status": "WAITING_PBX"}
-        if "result" not in intake:
-            rows = [r for r in self.drafts.values() if r["callSessionSeq"] == call_seq]
-            ready = [r for r in rows if r["status"] == "READY"]
-            for row in rows:
-                if row["status"] == "EDITING":
-                    row["status"] = "INCOMPLETE"
-            result = {"status": "NO_ORDER"}
-            if ready:
-                status = "notPaid" if intake["complete"]["paymentMethodType"] == "billing" else self.dver_status
-                order_seq = next(self._seq)
-                parcels = [dict(row["parcel"], orderParcelSeq=next(self._seq), status="ACTIVE") for row in ready]
-                order = {"orderSeq": order_seq, "status": status, "phone": self.call_sessions[call_seq], "parcels": parcels}
-                self.orders.append(order)
-                result = {"status": "FINALIZED", "orderSeq": order_seq, "order": order, "parcelMappings": [
-                    {"draftSeq": row["draftSeq"], "orderParcelSeq": p["orderParcelSeq"]} for row, p in zip(ready, parcels)]}
-            intake["result"] = result
-        return data | copy.deepcopy(intake["result"])
 
     async def search_company_places(self, query, limit=20, offset=0):
         if not query.strip() or not 1 <= limit <= 100 or offset < 0:
@@ -265,17 +156,12 @@ class MockBackend:
             self.recent[phone] = recent
         return seq
 
-    def add_order(self, phone: str, status: str, receivers: list[tuple[str, str]], parcels: list[dict] | None = None,
-                  created_at: str | None = None, payment: str | None = None, total: int | None = None) -> int:
-        """받는 분(이름, 도로명주소)마다 상세 하나인 주문, 또는 parcels(BE 상세 모양) 그대로. 주문 번호를 돌려준다."""
+    def add_order(self, phone: str, status: str, receivers: list[tuple[str, str]]) -> int:
+        """받는 분(이름, 도로명주소)마다 상세 하나인 주문. 주문 번호를 돌려준다."""
         seq = next(self._seq)
-        if parcels is None:
-            parcels = [{"destination": {"name": n, "roadAddress": a}} for n, a in receivers]
-        self.orders.append({"orderSeq": seq, "phone": phone, "status": status, "version": 1, "paymentMethodType": payment,
-                            "pickupRequestedAt": None, "totalAmount": total, "parcelNo": None,
-                            "createdAt": created_at or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            "parcels": [{"orderParcelSeq": next(self._seq), "status": "ACTIVE", **copy.deepcopy(p)}
-                                        for p in parcels]})
+        self.orders.append({"orderSeq": seq, "phone": phone, "status": status, "parcels": [
+            {"orderParcelSeq": next(self._seq), "status": "ACTIVE", "destination": {"name": n, "roadAddress": a}}
+            for n, a in receivers]})
         return seq
 
     # --- 고객 확인 ---
@@ -283,10 +169,7 @@ class MockBackend:
     async def caller_context(self, phone, call=None, recent_limit=5):
         session = None
         if call:
-            provider_id = call["providerCallId"]
-            session = self.call_numbers.get(provider_id)
-            if session is None:
-                session = self.call_numbers[provider_id] = next(self._seq)
+            session = next((s for s, p in self.call_sessions.items() if p == phone), None) or next(self._seq)
             self.call_sessions[session] = phone
         c = self.customers.get(phone)
         if c is None:
@@ -367,70 +250,7 @@ class MockBackend:
 
     async def order_detail(self, call_session_seq, order_seq):
         order = self._order(call_session_seq, order_seq)
-        return copy.deepcopy({k: v for k, v in order.items() if k != "phone"}) if order else None
-
-    # --- 미완료 주문 이어받기(B/order-update.md·order-submit.md) ---
-
-    async def collecting_orders(self, call_session_seq, limit):
-        phone = self._phone(call_session_seq)
-        mine = sorted((o for o in self.orders if o["phone"] == phone and o["status"] == "COLLECTING"),
-                      key=lambda o: (o["createdAt"], o["orderSeq"]), reverse=True)[:limit]
-        return [{"orderSeq": o["orderSeq"], "status": o["status"], "createdAt": o["createdAt"]} for o in mine]
-
-    def _editable(self, call_session_seq, order_seq, version, path):
-        order = self._order(call_session_seq, order_seq)
-        if order is None:
-            raise BackendError(f"{path} 404 NOT_FOUND", 404, "NOT_FOUND")
-        if order["status"] != "COLLECTING":
-            raise BackendError(f"{path} 409 INVALID_STATE", 409, "INVALID_STATE")
-        if order["version"] != version:
-            raise BackendError(f"{path} 409 VERSION_CONFLICT", 409, "VERSION_CONFLICT")
-        linked = self.linked.get(call_session_seq)
-        if linked not in (None, order_seq):  # 통화에 다른 주문이 연결됨
-            raise BackendError(f"{path} 409 INVALID_STATE", 409, "INVALID_STATE")
-        return order
-
-    async def patch_order(self, call_session_seq, order_seq, body):
-        order = self._editable(call_session_seq, order_seq, body.get("expectedVersion"), "/api/orders/{id}")
-        changes = {k: v for k, v in body.items() if k != "expectedVersion"}
-        if not changes or "parcels" in changes and not changes["parcels"]:
-            raise BackendError("/api/orders/{id} 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
-        _no_coordinates("/api/orders/{id}", *(p.get(side) for p in changes.get("parcels", [])
-                                               for side in ("origin", "destination") if p.get(side)))
-        for change in changes.get("parcels", []):
-            seq = change.get("orderParcelSeq")
-            if seq is None:
-                order["parcels"].append({"orderParcelSeq": next(self._seq), "status": "ACTIVE", **copy.deepcopy(change)})
-                continue
-            parcel = next((x for x in order["parcels"] if x["orderParcelSeq"] == seq), None)
-            if parcel is None:
-                raise BackendError("/api/orders/{id} 404 NOT_FOUND", 404, "NOT_FOUND")
-            for k, v in change.items():
-                if k in ("origin", "destination"):
-                    parcel[k] = {**(parcel.get(k) or {}), **v}  # 제공한 주소 하위 필드만 바꾼다
-                else:
-                    parcel[k] = v
-        for k in ("paymentMethodType", "pickupRequestedAt", "totalAmount"):
-            if k in changes:
-                order[k] = changes[k]
-        order["version"] += 1
-        self.linked[call_session_seq] = order_seq  # 진행 중 미연결 통화는 PATCH로 연결
-        return order["version"]
-
-    async def submit_order(self, call_session_seq, order_seq, expected_version):
-        if call_session_seq in self.ended:
-            raise BackendError("/api/orders/{id}/submit 409 INVALID_STATE", 409, "INVALID_STATE")
-        order = self._editable(call_session_seq, order_seq, expected_version, "/api/orders/{id}/submit")
-        active = [x for x in order["parcels"] if x["status"] != "CANCELLED"]
-        _check_complete({"customerSeq": 0, "paymentMethodType": order["paymentMethodType"], "parcels": active,
-                         "totalAmount": order["totalAmount"]})
-        if order["paymentMethodType"] not in self.payment_methods.get(order["phone"], []):
-            raise BackendError("/api/orders/{id}/submit 403 FORBIDDEN", 403, "FORBIDDEN")
-        order["status"] = "notPaid" if order["paymentMethodType"] == "billing" else self.dver_status
-        order["version"] += 1
-        if order["status"] == "ACCEPTED":
-            order["parcelNo"] = "TEST0001"
-        return {"status": order["status"]}
+        return {k: v for k, v in order.items() if k != "phone"} if order else None
 
     async def parcel(self, call_session_seq, order_seq, order_parcel_seq):
         detail = await self.order_detail(call_session_seq, order_seq)
@@ -472,8 +292,9 @@ class MockBackend:
             status = "notPaid" if body["paymentMethodType"] == "billing" else self.dver_status
         else:
             status = {"INCOMPLETE": "COLLECTING", "CANCELLED": "CANCELLED"}[body["outcome"]]
-        order_seq = self.add_order(call["callerPhoneNumber"], status, [], parcels=body.get("parcels", []),
-                                   payment=body.get("paymentMethodType"), total=body.get("totalAmount"))
+        order_seq = self.add_order(call["callerPhoneNumber"], status,
+                                   [(p.get("destination", {}).get("name"), p.get("destination", {}).get("roadAddress"))
+                                    for p in body.get("parcels", [])])
         data = {"orderSeq": order_seq, "version": 1, "status": status, "totalAmount": body.get("totalAmount"),
                 "callSessionSeq": next(self._seq), "parcelNo": "TEST0001" if status == "ACCEPTED" else None,
                 "paymentRequest": None}

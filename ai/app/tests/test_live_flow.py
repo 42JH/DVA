@@ -45,8 +45,6 @@ class FakeDecisions:
             answers.append(choice("task", "inquiry" if "궁금" in said else "order"))
         if "origin" in names:
             answers.append(choice("origin", "no" if "다른" in said else "yes" if said[:1] in "예네" else "not_answer"))
-        if "resume" in names:
-            answers.append(choice("resume", "yes" if said[:1] in "예네" else "no" if "새로" in said else "not_answer"))
         if "more" in names:
             answers.append(choice("more", "no_more" if "없어요" in said else "not_answer"))
         if "switch" in names:
@@ -169,9 +167,8 @@ def test_order_flow_end_to_end(tmp_path):
     # S6: 미등록 고객 → 보내는 분 정보가 차면 등록(주소 geo가 없어 내 주소는 생략) → 결과는 고객 번호로 1번
     assert db.customers[CALLER]["name"] == "김철수" and db.customers[CALLER]["address"] is None
     [result] = db.results
-    assert result["body"]["customerSeq"] == s.state.customer.customer_seq
-    assert result["status"] == "NO_ORDER" and "parcels" not in result["body"]
-    assert "pickupRequestedAt" not in result["body"]  # 주소 보정 실패 건을 미완료 주문으로 저장하지 않는다
+    assert result["body"]["customerSeq"] == s.state.customer.customer_seq and result["body"]["pickupRequestedAt"].endswith("+09:00")
+    assert result["body"]["outcome"] == "INCOMPLETE"  # 주소 보정 없이(geo 없음) — 사유 ADDRESS_GEO_MISSING
     assert s.state.customer.call_session_seq in db.analyses and db.events[s.state.customer.call_session_seq]
     closing = next(e for e in conn.sent if e["type"] == "session.commentary.append" and "closing" in e["content"])
     assert '"order"' in closing["content"] and '"pending"' not in closing["content"]  # 받은 결과 상태로 마무리
@@ -250,10 +247,10 @@ def test_submit_locks_edit_and_add():
     lf = LiveFlow.__new__(LiveFlow)
     lf.svc = SimpleNamespace(results=SimpleNamespace(tasks={}, start=lambda s, cb: started.append(s)))
     lf.policy = P
-    s = SimpleNamespace(state=st, call_id="live_1", tools=SimpleNamespace(draft_intake=False))
+    s = SimpleNamespace(state=st, call_id="live_1")
     lf._maybe_submit(s, force=True)
     assert started and st.order_submitted
-    assert lf._edit(s) == {"order": "submitted"} and st.current is None  # 다시 열지 않는다
+    assert lf._edit(st) == {"order": "submitted"} and st.current is None  # 다시 열지 않는다
 
 
 def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(tmp_path):
@@ -699,9 +696,10 @@ def test_origin_paths_other_place_and_recent_only():
     assert lf._origin_step(st) == {"origin_confirm": "부산 해운대구 센텀로 10"} and st.origin_offered
     st.origin_answer = True
     assert lf._origin_step(st) == {"origin": "prefilled"}
-    # 되읽기에는 성함과 동 이름만(geo가 없으면 건물번호를 뺀 주소)
+    # 되읽기에는 저장된 상세주소를 넣지 않는다
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
-    assert readback_facts(snap) == {"sender_name": "김철수", "from": "부산 해운대구 센텀로"}
+    out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
+    assert "sender_address" in out and "sender_address_detail" not in out
 
 
 def test_customer_end_mid_collection_greets_then_hangs_up():

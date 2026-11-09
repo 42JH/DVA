@@ -20,13 +20,7 @@ from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, check_gate, commit_parcel, issue_cancel_confirmation,
                                 issue_parcel_confirmation, release, take_cancel)
-from app.domain.pickup import default_pickup, describe, rule_of
-from app.domain.resume import can_offer, load_resumed
-from app.domain.state import Source
 from app.domain.store import hold_unclassified_items, item_issues_pending
-from app.integrations.backend.gateway import BackendFailure
-from app.integrations.backend.mapping import resume_candidate, resume_draft_candidate
-from backend_client.api import link_body
 from app.observability.trace import span
 from app.policy.render import decision_questions
 from app.tools import MODEL_TOOLS, run_tool
@@ -76,8 +70,6 @@ class Runtime:
     cust_end_t: float = 0.0                           # 관제: 마지막 고객 발화 끝(→ AI 말 시작)
     await_speech: tuple[str, float] | None = None     # 관제: (구간 이름, 시작) — 다음 AI 발화 시작까지
     confirm_t: float = 0.0                            # 관제: 확인 "네" 발화 끝(→ 담기)
-    resume_task: asyncio.Task | None = None           # 미완료 주문 찾기(통화 등록 뒤 1회)
-    resume_detail: dict | None = None                 # 찾은 주문 상세(연결 PATCH 본문용)
 
     def cancel(self) -> None:
         for h in (self.endpoint, self.ai_end, self.commit):
@@ -170,9 +162,7 @@ class LiveFlow:
             review = {} if s.state.order_submitted or s.closed else hold_unclassified_items(
                 s.state, self.policy.parcel_items, utt.utterance_id, utt.text)
             if review.get("code") == "ITEM_PARCEL_UNCLEAR":
-                review.update(self._edit(s, use_lookup=False))
-            if review:
-                self._sync_intake(s)
+                review.update(self._edit(s.state))
         if review:
             s.note("물품 확인", review["code"])
             if self._delegation_in(s, utt):
@@ -188,10 +178,7 @@ class LiveFlow:
         rt.ai_end = None
         if rt.ai and (claims := unverified_claims(rt.ai[-1].text, s.state, self.policy)):
             s.note("결과 문구", ",".join(claims))
-            facts = truth(s.state)
-            if s.tools.draft_intake:
-                facts["submit_when"] = "고객이 확인한 택배는 통화 중에 바로 저장된다"
-            s.spawn(self.notify(s, "N3", {"unverified": claims, "truth": facts}), "n3")
+            s.spawn(self.notify(s, "N3", {"unverified": claims, "truth": truth(s.state)}), "n3")
 
     # ------------------------------------------------------------------ 발화 끝 Decision
     async def judge(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
@@ -202,10 +189,9 @@ class LiveFlow:
             pending_id = pending.id if pending else None
             callback = s.state.callback_offered and not s.state.callback_requested
             origin = s.state.origin_offered and s.state.origin_answer is None and not s.state.origin_applied
-            resume = s.state.resume_offered and s.state.resume_answer is None
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
-                                       pick_labels=pick, callback=callback, origin=origin, resume=resume)
+                                       pick_labels=pick, callback=callback, origin=origin)
         if not questions:
             return  # 선택형 판단이 없는 단계: 부르지 않는다
         s.stats["Decision 호출"] += 1
@@ -258,11 +244,6 @@ class LiveFlow:
                 s.note("출발지", og[0])
                 if st.intent == "order":
                     followups.append(("origin", None))
-            if (ra := answers.get("resume")) and ra[1] >= th and ra[0] in ("yes", "no") and st.resume_offered \
-                    and st.resume_answer is None:
-                st.resume_answer = ra[0] == "yes"
-                s.note("이어받기", ra[0])
-                followups.append(("resume", ra[0] == "yes"))
             if "confirm" in answers and pending_id:
                 followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
             elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
@@ -276,7 +257,6 @@ class LiveFlow:
                 if p[0] == "none":
                     reject_candidates(st)
                 elif p[0] != "not_answer" and apply_pick(st, p[0]):
-                    self._sync_intake(s)
                     followups.append(("picked", p[0]))
             if (t := answers.get("task")) and t[1] >= th and t[0] in BUSINESS + ("end",):
                 followups.append(("intent", t[0]))
@@ -353,8 +333,6 @@ class LiveFlow:
     async def commit(self, s: CallSession, pending_id: str) -> None:
         rt = self.rt(s)
         rt.commit = rt.commit_pid = None
-        draft_save = None
-        draft_cancel = None
         async with s.lock:
             if s.closed or not s.state.pending or s.state.pending.id != pending_id:
                 return
@@ -367,38 +345,18 @@ class LiveFlow:
                 if pid and s.state.address_offer:
                     s.state.address_offer = s.state.address_offer | {"parcel": pid}
                 facts = {"parcel_added": pid, "parcels": len(s.state.parcels)} if pid else None
-                if pid:
-                    s.state.selected_order = None
-                    draft_save = self._sync_intake(s)
                 target = None
             else:
                 target = take_cancel(s.state, self.policy, pending_id)
-                if target and "draft_seq" in target:
-                    draft_cancel = self.svc.intake.cancel(s, target)
                 facts = None
         if kind == "parcel":
             self._maybe_save_addresses(s)
             if facts:
-                if draft_save is not None:
-                    await asyncio.wait({draft_save}, timeout=1.5)
-                if s.tools.draft_intake:
-                    facts["draft_intake"] = "확인한 내용을 저장했다"
                 s.note("담기", facts["parcel_added"])
                 await self.notify(s, "N2", facts | {"summary": state_summary(s.state, self.policy)})
             return
         if target:  # 취소: 서버 전용 실행, 결과는 N2
             t0 = time.monotonic()
-            if draft_cancel is not None:
-                await self.svc.intake.flush(s.call_id)
-                result = self.svc.intake.step_result(s, draft_cancel)
-                cancelled = result is not None and result["status"] == "CANCELLED"
-                async with s.lock:
-                    s.state.cancel_done = cancelled
-                s.measure("ORDER_CANCEL", (time.monotonic() - t0) * 1000)
-                s.note("취소", "done" if cancelled else "unknown")
-                await self.notify(s, "N2", {"cancel": {"status": "ok" if cancelled else "unavailable",
-                                                       "facts": {"outcome": "done" if cancelled else "unknown"}}})
-                return
             out = await cancel_parcel(s.tools, target["order_seq"], target["order_parcel_seq"])
             s.measure("ORDER_CANCEL", (time.monotonic() - t0) * 1000)
             s.note("취소", out.code or out.facts.get("outcome", out.status))
@@ -418,7 +376,8 @@ class LiveFlow:
                 if pending and pending.kind == "cancel":
                     facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
                 elif pending and st.current is not None:
-                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot)}
+                    sources = {n: f.source for n, f in st.current.fields.items()}
+                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy)}
             if facts:
                 s.note("확인 다시 묻기", value)
                 await self.notify(s, "N2", facts, again=True)  # 두 번째 애매한 답에도 다시 묻는다(같은 내용 중복 제거 무시)
@@ -429,7 +388,7 @@ class LiveFlow:
             await self._on_intent(s, value)
         elif what == "picked":
             async with s.lock:
-                issued = issue_cancel_confirmation(st, s.tools.clock()) if st.intent == "cancel" else None
+                issued = issue_cancel_confirmation(st, s.tools.clock()) if st.selected_order else None
                 summary = state_summary(st, self.policy)
             await self.notify(s, "N1'", {"picked": value, "summary": summary}
                               | ({"cancel_target": _order_facts(issued.snapshot)} if issued else {}))
@@ -439,8 +398,6 @@ class LiveFlow:
                 facts["summary"] = state_summary(st, self.policy)
             if facts.get("origin"):
                 await self.notify(s, "N1'", facts)
-        elif what == "resume":
-            await self._resume_answer(s, value)
         elif what == "callback":  # 콜백 동의(yes) → 분석 hasCallbackRequest, 안내는 "담당자가 연락"
             s.note("콜백", value)
             await self.notify(s, "N2", {"agent": "callback_registered" if value == "yes" else "callback_declined"})
@@ -459,9 +416,6 @@ class LiveFlow:
         st = s.state
         if intent in BUSINESS:
             self._business(s, intent)
-        task = self.rt(s).resume_task
-        if intent == "order" and task is not None and not task.done() and self.cfg.resume_wait_sec:
-            await asyncio.wait({task}, timeout=self.cfg.resume_wait_sec)  # 이어받기를 출발지 질문보다 먼저 묻는다
         async with s.lock:
             if intent == "end":
                 if st.parcels and not st.no_more_parcels and assess(st, self.policy).stage == "more_parcels":
@@ -470,16 +424,14 @@ class LiveFlow:
                 else:
                     facts = {"closing": True}
             elif intent == "edit_parcel":
-                facts = self._edit(s)
+                facts = self._edit(st)
             elif intent == "agent":
                 facts = self._agent_route(s)
             else:  # 조회·취소로 전환(받던 택배는 state.current에 그대로), 문의는 하던 업무를 바꾸지 않는다
                 if intent in ("lookup", "cancel") or st.intent is None:
                     st.intent = intent
                 facts = {"intent": st.intent}
-                if st.intent == "order" and (offer_facts := self._resume_offer(s)):
-                    facts |= offer_facts
-                elif st.intent == "order":
+                if st.intent == "order":
                     facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
                     facts["summary"] = state_summary(st, self.policy)
         if facts.get("closing"):
@@ -511,33 +463,14 @@ class LiveFlow:
         self.svc.begin_closing(s, "flow_complete", after_speech=True,
                                remind=lambda: self.notify(s, "N2", facts, again=True))
 
-    def _edit(self, s, *, use_lookup: bool = True) -> dict:
+    def _edit(self, st) -> dict:
         from app.domain.store import open_for_edit
-        st = s.state
         if st.order_submitted:  # 이미 보낸 결과는 고치지 않는다(다시 열면 '수정됐다'는 거짓 안내가 된다)
             return {"order": "submitted"}
-        if s.tools.draft_intake and use_lookup and st.selected_order:
-            target = st.selected_order
-            if "draft_seq" not in target:
-                return {"edit_parcel": "existing_order", "guidance": "기존 주문은 현재 통화 초안처럼 수정할 수 없다"}
-            local_id = self.svc.intake.local_id(s, target["draft_seq"])
-            if local_id and st.current and st.current.client_parcel_id == local_id:
-                st.intent = "order"
-                if st.pending and st.pending.kind == "cancel":
-                    st.pending = None
-                return {"edit_parcel": "current", "summary": state_summary(st, self.policy)}
-            chosen = next((p for p in st.parcels if local_id and p.draft.client_parcel_id == local_id), None)
-            if chosen is None:
-                return {"edit_parcel": "unavailable"}
-            open_for_edit(st, chosen.parcel_id)
-            st.intent = "order"
-            self._sync_intake(s)
-            return {"edit_parcel": chosen.parcel_id, "summary": state_summary(st, self.policy)}
         if not st.parcels:
             return {"edit_parcel": "none"}
         if len(st.parcels) == 1:
             open_for_edit(st, st.parcels[0].parcel_id)
-            self._sync_intake(s)
             return {"edit_parcel": st.parcels[0].parcel_id, "summary": state_summary(st, self.policy)}
         labels = tuple(f"{i}번 {p.draft['receiver_name'].value or '받는 분'}님 택배" for i, p in enumerate(st.parcels, 1))
         offer(st, "parcel", labels, tuple(p.parcel_id for p in st.parcels))
@@ -558,129 +491,6 @@ class LiveFlow:
         done = prefill_sender(st, full=False)  # 출발지 후보 없음: 성함만
         st.origin_applied = True
         return {"origin": "name_only"} if done else {}
-
-    # ------------------------------------------------------------------ 미완료 주문 이어받기(사용자 결정 2026-11-06)
-    async def _resume_lookup(self, s: CallSession, stage2: asyncio.Task) -> None:
-        """통화 등록 뒤 가장 최근 미완료 주문 1건과 상세를 읽는다. 실패하면 이어받기 없이 진행(새 접수)."""
-        seq = await asyncio.shield(stage2)
-        backend = self.svc.d.backend
-        if not seq or (not s.tools.draft_intake and s.state.customer.status != "REGISTERED"):
-            return
-        try:
-            if s.tools.draft_intake:
-                drafts = await backend.read("resume_drafts", backend.api.list_drafts, seq, "INCOMPLETE", limit=1)
-                detail = await backend.read("draft_detail", backend.api.draft_detail, seq, drafts[0]["draftSeq"]) \
-                    if drafts else None
-                cand = resume_draft_candidate(detail) if detail and detail["status"] == "INCOMPLETE" else None
-            else:
-                orders = await backend.read("resume_orders", backend.api.collecting_orders, seq, 1)
-                detail = await backend.read("resume_detail", backend.api.order_detail, seq, orders[0]["orderSeq"]) \
-                    if orders else None
-                cand = resume_candidate(detail) if detail else None
-        except BackendFailure as e:
-            s.note("이어받기 조회 실패", e.code)
-            return
-        except (KeyError, TypeError, ValueError) as e:  # 응답 형식 오류: 이어받지 않는다
-            s.note("이어받기 조회 실패", f"RESPONSE_INVALID {type(e).__name__}")
-            return
-        if cand is None:
-            return
-        async with s.lock:
-            s.state.resume = cand
-            self.rt(s).resume_detail = detail
-            facts = self._resume_offer(s)  # 접수 의도 판단이 먼저 끝났으면 지금 묻는다
-            if facts:
-                facts["summary"] = state_summary(s.state, self.policy)
-        s.note("이어받기 후보", f"draft={cand.draft_seq}" if cand.draft_seq else f"order={cand.order_seq} created={cand.created_at}")
-        if facts:
-            await self.notify(s, "N1'", facts)
-
-    def _resume_offer(self, s: CallSession) -> dict:
-        """잠금 안. 물을 수 있으면 묻는 사실을 만든다(한 번만)."""
-        st = s.state
-        if not can_offer(st, s.tools.now(), self.cfg.resume_window_sec):
-            return {}
-        st.resume_offered = True
-        name = st.resume.parcel.get("receiver_name")
-        return {"resume_confirm": {"receiver_name": name} if name else {}}
-
-    async def _resume_answer(self, s: CallSession, yes: bool) -> None:
-        """이어받기 답. 예 → 같은 값 PATCH로 통화를 주문에 연결 → 상세를 불러와 빠진 항목·되읽기. 아니오·실패 → 새 접수."""
-        st, backend, rt = s.state, self.svc.d.backend, self.rt(s)
-        result, version, client_id = "declined", None, None
-        if yes and st.resume and rt.resume_detail:
-            cand = st.resume
-            if s.tools.draft_intake:
-                async with s.lock:
-                    if s.closed:
-                        return
-                    client_id, step = self.svc.intake.resume(s, cand.draft_seq)
-                await self.svc.intake.flush(s.call_id)
-                result = "unavailable"
-                data = self.svc.intake.step_result(s, step)
-                if data and not data.get("resume_rejected"):
-                    cand = resume_draft_candidate(data)
-                    version, result = data["version"], "loaded"
-            else:
-                cand, version, result = await self._resume_legacy(s, cand, rt.resume_detail)
-        async with s.lock:
-            if s.closed:
-                return
-            if result == "loaded":
-                st.resume = cand
-                load_resumed(st, version, self.policy.input_limits, client_parcel_id=client_id)
-                facts = {"resume": "loaded"} | self._readback_if_ready(s)
-            else:
-                st.resume = None
-                facts = {"resume": result} | self._origin_step(st)
-            facts["summary"] = state_summary(st, self.policy)
-        s.note("이어받기", result)
-        if s.tools.draft_intake and result == "loaded":
-            self._maybe_register(s)
-        await self.notify(s, "N1'", facts)
-
-    async def _resume_legacy(self, s, cand, detail):
-        backend, st = self.svc.d.backend, s.state
-        try:
-            version = await backend.write("resume_link", backend.api.patch_order, st.customer.call_session_seq,
-                                          cand.order_seq, link_body(cand.version, detail, cand.parcel_seq))
-        except BackendFailure as e:
-            s.note("이어받기 연결 실패", e.code)
-            version = None
-            if e.kind in ("unavailable", "in_progress") or e.error_code == "VERSION_CONFLICT":
-                cand, version = await self._resume_relink(s, cand)
-        return cand, version, "loaded" if version is not None else "unavailable"
-
-    async def _resume_relink(self, s: CallSession, cand):
-        """연결 PATCH 응답 유실·버전 충돌 뒤 한 번: 상세를 다시 읽어 지금 version으로 같은 값 PATCH(B/order-update.md).
-        이미 이 통화가 연결됐어도 같은 주문 PATCH는 허용된다. 다시 실패하면 (cand, None) → 새 접수(실제로 연결돼
-        있었다면 종료 때 새 주문 POST가 409로 FAILED — 담당자 확인, 사용자 결정 2026-11-08)."""
-        backend, seq = self.svc.d.backend, s.state.customer.call_session_seq
-        try:
-            detail = await backend.read("resume_detail", backend.api.order_detail, seq, cand.order_seq)
-            fresh = resume_candidate(detail) if detail else None
-            if fresh is None or fresh.parcel_seq != cand.parcel_seq:  # 그새 확정·취소됐거나 상세가 바뀜
-                s.note("이어받기 연결 불확실", "주문 상태 변경")
-                return cand, None
-            version = await backend.write("resume_link", backend.api.patch_order, seq, cand.order_seq,
-                                          link_body(fresh.version, detail, fresh.parcel_seq))
-            return fresh, version
-        except BackendFailure as e:
-            s.note("이어받기 연결 불확실", e.code)
-            return cand, None
-
-    def _readback_if_ready(self, s: CallSession) -> dict:
-        """잠금 안. 불러온 택배에 빠진 항목이 없으면 되읽기 확인을 연다(record_fields와 같은 규칙: 기본 수거 시각 함께)."""
-        st = s.state
-        pending = issue_parcel_confirmation(st, self.policy, s.tools.clock())
-        if not pending:
-            return {}
-        rule, moved = rule_of(self.policy.pickup), False
-        if not st.pickup_at.valid:
-            iso, moved = default_pickup(s.tools.now(), rule)
-            st.record("pickup_at", iso, Source.SERVER)
-        return {"readback": readback_facts(pending.snapshot),
-                "pickup": {"at": st.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}}
 
     def _maybe_save_addresses(self, s: CallSession) -> None:
         """택배를 담았으면 묻지 않고 고객 정보·주소를 저장한다(백그라운드, 통화 중 — 기본 주소는 종료 후 409).
@@ -746,8 +556,6 @@ class LiveFlow:
         c, cur = s.state.customer, s.state.current
         if results is None or c.status != "UNREGISTERED" or "register" in s.tools.ops or not s.caller or cur is None:
             return
-        if s.tools.draft_intake and (not cur.sender_geo or len(s.caller) != 11):
-            return
         if all(cur[n].valid for n in ("sender_name", "sender_address", "sender_address_detail")):
             s.tools.ops["register"] = {"status": "running"}
             s.spawn(results.register(s, self.svc.call_session_seq), "register")
@@ -755,7 +563,7 @@ class LiveFlow:
     def _maybe_submit(self, s: CallSession, force: bool = False) -> None:
         """더 없음 + 결제 방식을 알면(또는 고객이 끝낼 때) 결과 전송을 백그라운드로 시작한다(결제는 묻지 않는다)."""
         results = getattr(self.svc, "results", None)
-        if s.tools.draft_intake or results is None or s.call_id in results.tasks:
+        if results is None or s.call_id in results.tasks:
             return
         st = s.state
         a = assess(st, self.policy)
@@ -764,12 +572,6 @@ class LiveFlow:
         if force and (st.parcels or st.intent) or ready:
             st.order_submitted = bool(st.parcels)
             results.start(s, self._on_result)
-
-    def _sync_intake(self, s: CallSession) -> asyncio.Task | None:
-        """잠금 안에서 저장 순서를 고정하고, HTTP는 통화 작업에서 실행한다."""
-        if s.tools.draft_intake and not s.closed and self.svc.intake.sync(s):
-            return s.spawn(self.svc.intake.flush(s.call_id), "draft_save")
-        return None
 
     async def _on_result(self, s: CallSession, data: dict) -> None:
         """통화 중에 결과가 오면 무음으로 사실만(마무리 안내에 쓴다). ACCEPTED만 접수 성공."""
@@ -787,10 +589,7 @@ class LiveFlow:
             s.state.intent = "order"
         if not rt.intent_started:
             rt.intent_started = True
-            stage2 = self.svc.stage2(s)
-            if (self.cfg.resume_window_sec and stage2 is not None and rt.resume_task is None
-                    and (s.tools.draft_intake or s.state.customer.status == "REGISTERED")):
-                rt.resume_task = s.spawn(self._resume_lookup(s, stage2), "resume_lookup")
+            self.svc.stage2(s)
 
     # ------------------------------------------------------------------ 위임 → 함수 호출
     def on_delegation(self, s: CallSession, ev: dict) -> None:
@@ -880,13 +679,9 @@ class LiveFlow:
             self._maybe_register(s)
             if out.get("code") == "ITEM_PARCEL_UNCLEAR":
                 async with s.lock:
-                    selection = self._edit(s, use_lookup=False) if s.state.unassigned_item_issues else {}
+                    selection = self._edit(s.state) if s.state.unassigned_item_issues else {}
                 if selection:
                     out.setdefault("facts", {}).update(selection)
-            if s.tools.draft_intake:
-                await self.svc.call_session_seq(s)
-                async with s.lock:
-                    self._sync_intake(s)
         if name == "search_manual":
             out = self._count_unanswered(s, out)
         if name == "lookup_orders" and s.state.selected_order:  # 1건이면 바로 취소 확인 대기(의도가 취소일 때)
@@ -1025,11 +820,6 @@ def _order_status(s: CallSession) -> dict:
     """결과 상태 사실(정책 [results].order). 응답 전이면 pending."""
     data = s.result or {}
     if not data:
-        if s.tools.draft_intake:
-            if any(p.confirmed_snapshot is not None for p in s.state.parcels):
-                return {"status": "pending", "guidance": "확인하신 택배 정보는 저장되었습니다"}
-            if s.state.current is not None and not s.state.current.empty():
-                return {"status": "pending", "guidance": "확인을 마치지 못한 택배는 취소됩니다"}
         return {"status": "pending"}
     out = {"status": data.get("status")}
     if data.get("status") == "ACCEPTED" and data.get("parcelNo"):

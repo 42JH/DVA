@@ -44,10 +44,6 @@ class Items:
         return bool(self.document_count or self.small_box_count or self.medium_box_count or self.big_box_count
                     or self.other_item)
 
-    def documents_only(self) -> bool:
-        return self.document_count > 0 and not (self.small_box_count or self.medium_box_count or self.big_box_count
-                                                 or self.other_item)
-
 
 @dataclass(frozen=True)
 class Geo:
@@ -100,8 +96,6 @@ class ParcelDraft:
     receiver_geo: Geo | None = None
     client_comment: str | None = None     # 묻지 않고, 말하면 기록
     item_issues: dict[str, ItemIssue] = field(default_factory=dict)
-    order_parcel_seq: int | None = None   # 이어받은 미완료 주문의 기존 상세 번호(PATCH 때 그 상세를 고친다)
-    client_parcel_id: str | None = None   # 같은 통화의 배송 초안 생성 및 재시도에 사용하는 UUID
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
@@ -115,7 +109,7 @@ class ParcelDraft:
 class StoredParcel:
     parcel_id: str
     draft: ParcelDraft
-    confirmed_snapshot: dict | None       # 고객이 확인한 내용. 수정을 시작하면 비운다.
+    confirmed_snapshot: dict | None       # 마지막으로 고객이 확인한 내용(P5 후속 B안)
     confirmed_hash: str | None
 
 
@@ -130,21 +124,6 @@ class PendingConfirmation:
     issued_t: float                       # 발급 시각(서버 시계). 되읽기 발화가 이 뒤에 시작돼야 한다(G3)
     parcel_id: str | None = None          # 담은 택배를 수정 중이면 그 택배
     done: bool = False
-
-
-@dataclass(frozen=True)
-class ResumeCandidate:
-    """이어받을 미완료 주문(가장 최근 상세 1건). 값은 도메인 스냅샷 모양(draft_snapshot), BE 이름은 mapping에만."""
-    order_seq: int | None
-    version: int
-    created_at: str                       # 주문 생성 시각(ISO, BE). 이어받기 기한의 기준(사용자 결정 2026-11-06)
-    parcel_seq: int | None
-    parcel: dict                          # 필드 값 + sender_geo·receiver_geo·client_comment
-    other_fares: tuple[int | None, ...] = ()  # 같은 주문의 다른 미취소 상세 배송비(합계용, 대화에는 불러오지 않음)
-    payment: str | None = None
-    pickup_at: str | None = None
-    parcel_seqs: tuple[int, ...] = ()     # 이어받을 때 주문에 있던 상세 번호 전부(새 상세가 이미 추가됐는지 가리는 기준)
-    draft_seq: int | None = None
 
 
 @dataclass
@@ -190,10 +169,6 @@ class ConversationState:
     origin_applied: bool = False          # 보내는 분 미리 채우기를 마침
     result_accepted: bool = False          # 통화 결과가 ACCEPTED로 확정됨(결과 문구 검사)
     cancel_done: bool = False              # 이번 통화에서 택배 취소가 완료됨(결과 문구 검사)
-    resume: ResumeCandidate | None = None  # 이어받을 미완료 주문(찾았고 아직 거절되지 않음)
-    resume_offered: bool = False           # 이어받을지 물음
-    resume_answer: bool | None = None      # 이어받기 = True, 새로 = False
-    resume_version: int | None = None      # 연결(PATCH) 뒤 주문 version. 있으면 이 통화는 그 주문에 연결됨
     _next_parcel: int = 1
 
     # --- 변경(잠금 안에서만) ---
@@ -249,18 +224,6 @@ class ConversationState:
             f.previous = f.value if f.valid else f.previous
             f.value, f.status, f.source, f.version = None, FieldStatus.EMPTY, None, self.bump()
 
-    def sync_document_item_price(self) -> str | None:
-        """서류만 보낼 때 가액을 채우고, 구성이 바뀌면 서버가 채운 값만 비운다."""
-        if self.current is None:
-            return None
-        items = self.current["items"]
-        if items.valid and items.value.documents_only():
-            return "recorded" if self.record("item_price", 1, Source.SERVER) else None
-        if self.current["item_price"].source == Source.SERVER:
-            self.clear("item_price")
-            return "cleared"
-        return None
-
     def new_parcel_id(self) -> str:
         pid = f"p{self._next_parcel}"
         self._next_parcel += 1
@@ -281,8 +244,6 @@ def draft_snapshot(draft: ParcelDraft) -> dict:
     """택배의 현재 VALID 값(되읽기·확인·전송의 단위). geo·요청사항 포함, 상태·버전은 뺀다."""
     out = {name: f.value for name, f in draft.fields.items() if f.valid}
     out |= {"sender_geo": draft.sender_geo, "receiver_geo": draft.receiver_geo, "client_comment": draft.client_comment}
-    if draft.order_parcel_seq is not None:  # 이어받은 상세: 전송 때 같은 상세를 고친다(되읽기에는 쓰지 않음)
-        out["order_parcel_seq"] = draft.order_parcel_seq
     return out
 
 
