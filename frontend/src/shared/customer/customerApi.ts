@@ -32,7 +32,7 @@ export interface PinDto {
 
 export const customerQueries = {
   all: () => ['customers'] as const,
-  /** 추천용 — 조건이 없으면(빈 칸 · 번호 일부) 요청하지 않음 */
+  /** 추천용 — 조건이 없으면(빈 칸 · 번호 3자리 이하) 요청하지 않음 */
   search: (text: string, limit = 5) => {
     const where = customerSearch(text)
     return queryOptions({
@@ -58,7 +58,3 @@ export const customerQueries = {
       staleTime: 30_000,
     }),
 }
-
-/** 개인 주소록에 추가. 같은 주소가 이미 있으면 서버가 거절(DB 중복 제약) — 부르는 쪽에서 무시 */
-export const createPin = (customerSeq: number, addressData: PinDto['addressData']) =>
-  api.post(`/customers/${customerSeq}/pins`, { body: { addressData } })

@@ -1,5 +1,5 @@
 // 수기 주문 보내는 분 · 받는 분 추천 (11/09 사용자)
-// 보내는 분 = 전체 고객(이름 일부 · 번호 11자리), 받는 분 = 그 고객의 개인 주소록(이름 · 번호 일부, 칸을 누르면 바로)
+// 보내는 분 = 전체 고객(이름 일부 · 번호 4자리 이상 일부), 받는 분 = 그 고객의 개인 주소록(이름 · 번호 일부, 칸을 누르면 바로)
 import { useQuery } from '@tanstack/react-query'
 import { customerQueries, type Address } from '@/shared/customer/customerApi'
 import { useDebounced } from '@/shared/lib/useDebounced'
@@ -28,7 +28,7 @@ export function useCustomerSuggest(
   const byName = useQuery(customerQueries.search(senderName))
   const byPhone = useQuery(customerQueries.search(senderPhone))
 
-  // 받는 분 주소록의 주인: 보내는 분 번호(11자리)의 고객 → 없으면 수정 창의 주문 고객
+  // 받는 분 주소록의 주인: 보내는 분 번호와 똑같은 번호의 고객 (부분 검색 결과 중 정확히 일치) → 없으면 수정 창의 주문 고객
   // 추천에서 보내는 분을 고르면 번호가 채워지니 같은 길로 연결됨
   const owner =
     byPhone.data?.data.find((c) => c.phoneNumber === sender.phone)?.customerSeq ?? orderCustomerSeq
@@ -60,7 +60,6 @@ export function useCustomerSuggest(
         }))
 
   return {
-    owner, // 받는 분 주소록의 주인 — 주문 추가 뒤 새 받는 분을 여기에 저장
     sender: { byName: customers(byName.data), byPhone: customers(byPhone.data) },
     receiver: { byName: pins(pinsByName.data), byPhone: pins(pinsByPhone.data) },
   }

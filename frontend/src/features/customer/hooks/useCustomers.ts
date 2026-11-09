@@ -1,5 +1,5 @@
 // 고객 — 기업 · 개인 상관없이 모든 고객 (기업 피드백: 고객 관리 화면 · 개인 주소록 확인)
-// GET /customers (이름 부분 검색 · 휴대전화 11자리 정확히) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
+// GET /customers (이름 부분 검색 · 전화번호 4자리 이상 부분 검색) · GET /customers/{id}/pins (개인 주소록). 고객 번호 내림차순, 한 쪽 개수는 고른 대로
 import { useEffect } from 'react'
 import {
   keepPreviousData,
@@ -59,7 +59,7 @@ export function useCustomers() {
   const [size, setSize] = usePageSize()
   const qc = useQueryClient()
   const t = useDebounced(params.q.trim()) // 입력이 멈추면 한 번만 서버에
-  const query = customerSearch(t) ?? {} // 숫자 11자리면 전화번호, 아니면 이름 부분 검색 (shared/customer)
+  const query = customerSearch(t) ?? {} // 숫자면 전화번호 부분 검색(4자리부터), 아니면 이름 부분 검색 (shared/customer)
   const list = useQuery({
     queryKey: ['screen', 'customers', query, size, page],
     queryFn: ({ signal }) =>
@@ -84,10 +84,6 @@ export function useCustomers() {
   return {
     q: params.q,
     setQ: (q: string) => set({ q, c: '' }),
-    hint:
-      /^\d+$/.test(t) && !('phoneNumber' in query)
-        ? '전화번호는 11자리를 모두 입력해 주세요.' // 서버가 정확히 일치만 찾음
-        : null,
     rows: shown.map((c, i) => ({
       seq: c.customerSeq,
       name: c.name,
