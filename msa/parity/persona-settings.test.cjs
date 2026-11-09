@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -32,7 +33,7 @@ test('persona APIs preserve production HTTP, complete settings, drafts, publicat
       await delay(500);
     }
     // Drafts are logical references, so CASCADE from personas cannot clear prior suites.
-    await side.db.query('TRUNCATE ai_personas,ai_persona_drafts,admin_users,audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE ai_personas,ai_persona_drafts,admin_users,audit_logs RESTART IDENTITY CASCADE');
     assert.equal((await side.db.query('SELECT count(*) FROM ai_persona_drafts')).rows[0].count, '0');
   }
   const hash = await hashPassword('persona-parity-password');

@@ -54,7 +54,7 @@ python msa/parity/verify-consultation.py
 python msa/deploy/tests/integration_app_rollout.py --service consultation --image dva-consultation:local
 ```
 
-Docker 빌드는 ESLint·단위·E2E·TypeScript를 검사한다. checks target은 기존 27개와 페르소나 조회 응답 검증/제한 시간 3개·분석 감사 준비와 ACK/404 검증 3개, 총 33개다. 검증기는 원본 분석/지표 단위 테스트를 양쪽에 실행하고 분리 서비스 필수 환경만 fixture로 추가한다. 원본 통합 테스트는 변경 없이 모놀리식에서 실행한다. production 분석·지표 HTTP/DB/해시/감사 비교, 버전 삭제 경합·실제 SIGKILL 복구와 기존 PBX/HTTP·DB·SSE를 검사한다. 고객 확인/PIN은 별도 test 환경에서 원본 업무 행·DTO·등록 SSE·명령 유실·종료 복구를 비교하며 아직 이식하지 않은 월별 청구 자동 워커를 제외한다. 로그는 `msa/liquibase/verification-logs/consultation/`에 남긴다.
+Docker 빌드는 ESLint·E2E·TypeScript와 보안 로그 단위를 검사하며 checks target에서 인증·통화·녹취·감사·고객/분석 연결 단위를 실행한다. 업무 검증기는 고정 원본의 분석/지표·녹취 정책 회귀를 MSA에서 한 번 실행하며 분리 서비스 필수 환경만 fixture로 추가한다. 원본에서만 따로 실행하던 중복 회귀는 제거했다. production 분석·지표 HTTP/DB/해시/감사 비교, 버전 삭제 경합·실제 SIGKILL 복구와 PBX/HTTP·DB·SSE는 유지한다. 고객 확인/PIN은 별도 test 환경에서 원본 업무 행·DTO·등록 SSE·명령 유실·종료 복구를 비교하며 아직 이식하지 않은 월별 청구 자동 워커를 제외한다. 현재 업무 회귀는 50개이며 [정리 결과](../../../docs/msa-test-prune-results.md)에 전체 집계와 제거 근거가 있다. 로그는 `msa/liquibase/verification-logs/consultation/`에 남긴다.
 
 Jenkins는 customer·consultation·operations·order 중 하나가 선택되면 `Verify Consultation Parity`를 실행하고 실패 시 배포를 중단한다. DB 적용 후 operations → customer → consultation 순서로 배포하며 다른 서비스 선택은 보존한다. 두 서비스 토큰은 기존 Secret에서 최초 생성/기존 값 보존 정책으로 공유한다. DB는 기존 서비스별 PG* Secret을 사용한다. Ingress는 기존 공개 경로를 유지하고 등록/조회/감사 내부 경로는 공개하지 않는다.
 

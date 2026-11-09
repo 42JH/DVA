@@ -96,7 +96,7 @@ python msa/parity/verify-operations.py
 python msa/deploy/tests/integration_app_rollout.py --service operations --image dva-operations:local
 ```
 
-검증기는 변경하지 않은 `backend/test/auth.test.cjs`, `auth.integration.test.cjs`와 `ai-settings*.cjs` 및 원본 application/AI fixture를 양쪽 checks 이미지에서 실행한다. 인증 테스트가 참조하는 customer 컨트롤러는 실제 customer checks 이미지의 런타임으로 공급하며 운영 이미지에는 합치지 않는다. `auth-limits.integration.test.cjs`는 아직 미이식한 FAQ 확인도 있어 monolith에서 그대로 실행하고, operations의 제한/슬롯/감사 제외는 별도 production HTTP 비교와 원본 단위 테스트로 확인한다. 인증 bootstrap의 빈 관리자 DB 전제 때문에 인증과 페르소나 suite는 별도 프로세스에서 순서대로 실행한다. operations만 실제 Liquibase 스키마를 사용한다. 이후 양쪽 production 이미지에 같은 요청을 보내 응답·쿠키 속성·관리자·세션·감사 데이터를 비교한다. 무작위 토큰·생성 시각은 형식/9시간 TTL/해시 저장을 먼저 검증하고 비교에서 정규화한다. 다른 서비스의 테이블이나 전체 업무 동등성을 검증한 결과로 확대하지 않는다.
+검증기는 고정 원본의 인증·페르소나·FAQ 회귀를 operations checks 이미지에서 실행한다. 인증 테스트가 참조하는 customer 컨트롤러는 실제 customer production 이미지의 컴파일 결과로 공급하며 운영 이미지에는 합치지 않는다. 원본에서만 따로 실행하던 회귀와 environment 단위 검사의 재실행은 제거했다. 인증 bootstrap의 빈 관리자 DB 전제 때문에 인증과 페르소나 suite는 별도 프로세스에서 순서대로 실행한다. operations는 실제 Liquibase 스키마를 사용한다. 이어 양쪽 production 이미지에 같은 요청을 보내 제한·슬롯·감사, 응답·쿠키 속성·관리자·세션 데이터를 비교한다. 무작위 토큰·생성 시각은 형식/9시간 TTL/해시 저장을 먼저 검증하고 비교에서 정규화한다. 현재 업무 회귀는 163개이며 [정리 결과](../../../docs/msa-test-prune-results.md)에 전체 집계와 제거 근거가 있다. 다른 서비스의 테이블이나 전체 업무 동등성을 검증한 결과로 확대하지 않는다.
 
 로그/보고서는 `msa/liquibase/verification-logs/operations/`에 남는다. Jenkins는 operations가 빌드 대상으로 선택되면 이 검증을 통과한 뒤에만 앱 배포를 진행한다. 운영 Webhook 배포·외부 HTTPS·다른 서비스 연동은 별도 확인한다.
 

@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
@@ -28,13 +29,13 @@ test('customer reads match monolith with independent operations sessions and imm
   const hash = await hashPassword(password);
   const address = { roadAddress: '서울 도로 10', jibunAddress: '서울 지번 20', detailAddress: '3층', dongName: '역삼동', postalCode: '01234' };
   for (const side of sides) {
-    await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
     for (const [login, role, status] of [['root','SYSTEM_ADMIN','ACTIVE'], ['operator','OPERATOR','ACTIVE'],
       ['supervisor','SUPERVISOR','ACTIVE'], ['pending','OPERATOR','PENDING'], ['inactive','OPERATOR','INACTIVE']]) {
       await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at)
         VALUES($1,$2,$3,$4,$5,'2025-10-01T00:00:00Z')`, [login, '테스트 '+login, hash, role, status]);
     }
-    await side.db.query('TRUNCATE customers,organizations,departments,memberships RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE customers,organizations,departments,memberships RESTART IDENTITY CASCADE');
     for (const [name,status,deleted,created] of [['한빛 %_[회사]','ACTIVE',null,'2025-10-01T00:00:00Z'],
       ['비활성기업','INACTIVE',null,null], ['삭제기업','ACTIVE','2026-01-01T00:00:00Z',null], ['빈 기업','ACTIVE',null,null]]) {
       await side.db.query('INSERT INTO organizations(name,status,deleted_at,created_at,monthly_billing_enabled) VALUES($1,$2,$3,$4,true)', [name,status,deleted,created]);

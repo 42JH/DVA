@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
@@ -21,9 +22,9 @@ test('customer writes preserve monolith HTTP, business rows and immediately visi
   }
   const password='customer-writes-test-only-password'; const hash=await hashPassword(password);
   for(const side of sides){
-    await side.db.query('TRUNCATE customers,organizations,departments,memberships RESTART IDENTITY CASCADE');
-    await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
-    if(side===sides[1]){await customer.query('TRUNCATE outbox_events,inbox_events RESTART IDENTITY CASCADE');await operations.query('TRUNCATE customer_audit_preparations,outbox_events,inbox_events RESTART IDENTITY CASCADE');}
+    await truncateFixture(side.db, 'TRUNCATE customers,organizations,departments,memberships RESTART IDENTITY CASCADE');
+    await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+    if(side===sides[1]){await truncateFixture(customer, 'TRUNCATE outbox_events,inbox_events RESTART IDENTITY CASCADE');await truncateFixture(operations, 'TRUNCATE customer_audit_preparations,outbox_events,inbox_events RESTART IDENTITY CASCADE');}
     await side.identity.query(`INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at) VALUES
       ('root','전체 운영자',$1,'SYSTEM_ADMIN','ACTIVE','2025-01-01Z'),('writer','고객 담당자',$1,'OPERATOR','ACTIVE','2025-01-01Z')`,[hash]);
   }

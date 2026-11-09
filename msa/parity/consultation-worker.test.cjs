@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const {before,after,beforeEach,test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -28,7 +29,7 @@ before(async()=>{
 });
 after(async()=>{await worker?.onModuleDestroy();for(const application of apps)await application.close();await pool.end();});
 beforeEach(async()=>{
-  await pool.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
+  await truncateFixture(pool, 'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
   config.set('S3_RECORDINGS_BUCKET','test-recordings');
 });
 async function call(provider='worker-call',phone='01098880001'){

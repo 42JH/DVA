@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {randomUUID}=require('node:crypto');
@@ -15,10 +16,10 @@ test('customer context and call registration preserve HTTP, independent business
  for(const side of sides)for(let n=0;;n++){try{if((await fetch(side.base+'/api/docs-json')).ok)break;}catch{}assert.ok(n<80,'context app unavailable');await delay(250);}
  const hash=await hashPassword(password);
  for(const side of sides){
-  await side.calls.query('TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
-  await side.db.query('TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
-  await side.identity.query('TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
-  if(side===sides[1]){await operations.query('TRUNCATE customer_audit_preparations,consultation_audit_preparations,inbox_events,outbox_events RESTART IDENTITY');await consultation.query('TRUNCATE inbox_events,outbox_events RESTART IDENTITY');}
+  await truncateFixture(side.calls, 'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
+  await truncateFixture(side.db, 'TRUNCATE customers,organizations,departments,memberships,personal_pins RESTART IDENTITY CASCADE');
+  await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
+  if(side===sides[1]){await truncateFixture(operations, 'TRUNCATE customer_audit_preparations,consultation_audit_preparations,inbox_events,outbox_events RESTART IDENTITY');await truncateFixture(consultation, 'TRUNCATE inbox_events,outbox_events RESTART IDENTITY');}
   await side.identity.query("INSERT INTO admin_users(login_id,name,password_hash,role,status,created_at) VALUES('operator','고객 확인 운영자',$1,'OPERATOR','ACTIVE','2026-01-01Z')",[hash]);
   await side.db.query(`INSERT INTO customers(name,phone_number,status,monthly_billing_enabled,address_data) VALUES
    ('현재 고객','01098880001','ACTIVE',true,'{"roadAddress":"현재 도로","jibunAddress":"현재 지번","dongName":"현재동","postalCode":"01234"}'),

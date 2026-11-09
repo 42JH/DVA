@@ -1,3 +1,4 @@
+const { truncateFixture } = require('./fixture-reset.cjs');
 require('reflect-metadata');
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
@@ -17,10 +18,10 @@ test('both cancellation APIs preserve source HTTP, full order/payment/shipment r
   const sides=[{name:'monolith',url:'http://monolith-app:3000',db:pools.monolith,audit:pools.monolith,calls:pools.monolith,customers:pools.monolith,delivery:pools.monolith},
     {name:'msa',url:'http://order-app:3002',db:pools.order,audit:pools.operations,calls:pools.consultation,customers:pools.customer,delivery:pools.delivery}];
   for(const side of sides){
-    await side.calls.query('TRUNCATE call_sessions RESTART IDENTITY CASCADE');
-    await side.delivery.query('TRUNCATE shipments RESTART IDENTITY CASCADE');
-    await side.db.query('TRUNCATE '+orderTables.join(',')+' RESTART IDENTITY CASCADE');
-    await side.audit.query('TRUNCATE audit_logs RESTART IDENTITY CASCADE');
+    await truncateFixture(side.calls, 'TRUNCATE call_sessions RESTART IDENTITY CASCADE');
+    await truncateFixture(side.delivery, 'TRUNCATE shipments RESTART IDENTITY CASCADE');
+    await truncateFixture(side.db, 'TRUNCATE '+orderTables.join(',')+' RESTART IDENTITY CASCADE');
+    await truncateFixture(side.audit, 'TRUNCATE audit_logs RESTART IDENTITY CASCADE');
     await side.db.query("INSERT INTO orders(order_seq,customer_seq,status,version,created_at,updated_at) OVERRIDING SYSTEM VALUE VALUES(1001,1,'COLLECTING',23,'2030-01-01Z','2030-01-01Z')");
     await side.calls.query("INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,order_intake_enabled) OVERRIDING SYSTEM VALUE VALUES(1011,'cancel-access-call','01000000001','2030-01-01Z','2030-01-01Z',false)");
   }

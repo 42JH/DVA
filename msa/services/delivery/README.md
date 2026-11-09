@@ -8,7 +8,7 @@
 
 ```sh
 # 저장소 루트; 다른 서비스와 같은 msa 공통 context
-docker build --target checks -t dva-delivery-checks -f msa/services/delivery/Dockerfile msa
+# builder에서 현재 단위/e2e를 한 번 검사한 production 이미지
 docker build -t dva-delivery:local -f msa/services/delivery/Dockerfile msa
 python3 msa/parity/verify-order.py
 python3 -m unittest discover -s msa/deploy/tests -v
