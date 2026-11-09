@@ -119,7 +119,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["facts"]["phones_to_read"] == ["receiver_phone"]
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
-    assert out["missing"][0] == "sender_address" and out["stage"] == "address"  # 등록 고객 성함은 이미 채워짐
+    assert out["missing"][0] == "sender_address" and out["stage"] == "sender"  # 등록 고객 성함은 이미 채워짐
 
 
 def test_bad_phone_and_pickup_not_saved_other_values_are():
@@ -144,24 +144,6 @@ def test_items_replaced_as_whole_and_unspecified():
     assert call(c, "record_fields", {})["code"] == "NOTHING_TO_RECORD"
 
 
-def test_document_price_clears_when_a_box_is_added_and_accepts_box_value():
-    c = ctx()
-    out = call(c, "record_fields", {"document_count": 2})
-    assert "item_price" not in out["missing"]
-    assert c.state.current["item_price"].source == Source.SERVER
-
-    call(c, "record_fields", {"item_price": 9000})
-    assert c.state.current["item_price"].value == 1
-
-    out = call(c, "record_fields", {"document_count": 2, "small_box_count": 1})
-    assert "item_price" in out["facts"]["cleared"] and "item_price" in out["missing"]
-    assert c.state.current["item_price"].value is None
-
-    call(c, "record_fields", {"item_price": 30000})
-    assert c.state.current["item_price"].value == 30000
-    assert c.state.current["item_price"].source == Source.CUSTOMER
-
-
 def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     c = ctx(address=address)
     out = call(c, "record_fields", {"sender_address": "서울 강남구 태헤란노 이백십일", "sender_address_detail": "3층"})
@@ -172,7 +154,7 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
     assert out["status"] == "ok" and s.field_of("sender_address_detail").value == "3층"
     out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12", "receiver_address_detail": "403호"})
     assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").status == FieldStatus.INVALID
-    assert s.field_of("receiver_address_detail").value == "403호"  # 상세주소는 기본주소와 독립 — 다시 묻지 않는다(결정 1)
+    assert s.field_of("receiver_address_detail").status == FieldStatus.EMPTY  # 못 찾은 주소의 상세주소도 믿지 않는다
     best, *rest = correct(corrector, "서울 강남구 대해남노 211").candidates  # 도로명을 많이 고쳐 확정하지 않는 주소
     out = call(c, "record_fields", {"receiver_address": "서울 강남구 대해남노 211", "receiver_address_detail": "101호"})
     f = s.field_of("receiver_address")
@@ -182,33 +164,9 @@ def test_address_confirmed_not_found_and_ambiguous(corrector, address):
 def test_changed_address_without_detail_clears_detail(corrector, address):
     c = ctx(address=address)
     call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211", "sender_address_detail": "3층"})
-    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211"})  # 같은 주소를 다시 말함: 유지
-    assert "cleared" not in out.get("facts", {}) and c.state.field_of("sender_address_detail").value == "3층"
-    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})  # 같은 도로의 번호만 바뀌어도 비운다
-    assert out["facts"]["cleared"] == ["sender_address_detail"] and "sender_address_detail" in out["missing"]
+    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 212"})
+    assert out["facts"]["changed"] == ["sender_address"] and out["facts"]["cleared"] == ["sender_address_detail"]
     assert c.state.field_of("sender_address_detail").status == FieldStatus.EMPTY
-    call(c, "record_fields", {"sender_address_detail": "5층"})
-    out = call(c, "record_fields", {"sender_address": "서울 송파구 올림픽로 300"})
-    assert out["facts"]["cleared"] == ["sender_address_detail"]
-    out = call(c, "record_fields", {"sender_address": "서울 강남구 테헤란로 211", "sender_address_detail": "7층"})
-    assert "cleared" not in out["facts"] and c.state.field_of("sender_address_detail").value == "7층"
-
-
-def test_server_splits_detail_from_heard_sentence_and_converts_numerals(corrector, address):
-    c = ctx(address=address)
-    s = c.state
-    out = call(c, "record_fields", {"sender_address": "경북 구미시 인동구길 칠다시삼 이백삼호요"})  # 한 문장 통째로
-    assert s.field_of("sender_address").value == "경상북도 구미시 인동9길 7-3"
-    assert s.field_of("sender_address_detail").value == "203호" and s.field_of("sender_address_detail").source == Source.RESOLVER
-    assert set(out["facts"]["recorded"]) == {"sender_address", "sender_address_detail"}
-    # 모델이 나눠 넘긴 상세의 수사도 서버가 숫자로. 기본주소에 꼬리가 있으면 서버가 뗀 상세가 우선(결정 3: 번호 뒤 이름도 상세)
-    call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212 멀티캠퍼스 십팔층", "receiver_address_detail": "십팔층"})
-    assert s.field_of("receiver_address").value == "서울특별시 강남구 테헤란로 212"
-    assert s.field_of("receiver_address_detail").value == "멀티캠퍼스 18층"
-    call(c, "record_fields", {"receiver_address_detail": "삼백십이동 사백삼호"})
-    assert s.field_of("receiver_address_detail").value == "312동 403호"
-    out = call(c, "record_fields", {"receiver_address": "서울 강남구 없는로 12 지하 이층"})  # 못 찾아도 상세는 남는다
-    assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address_detail").value == "지하 2층"
 
 
 def test_address_service_down_keeps_heard_value_without_geo(corrector, monkeypatch):
@@ -242,30 +200,16 @@ def test_late_address_result_does_not_overwrite_newer_value(corrector, fake_kaka
 
 def test_full_parcel_opens_readback_with_facts(corrector, address):
     c = ctx(address=address)
-    first = call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
-                                      "sender_address_detail": "3층"})
-    assert "confirm_route" not in first["facts"]  # 받는 곳 주소가 아직 없다
+    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
+                              "sender_address_detail": "3층"})
     out = call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
                                     "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
                                     "small_box_count": 1, "item_price": 30000})
     assert out["can_proceed"] is True and c.state.pending is not None and c.state.pending.issued_t == 100.0
     facts = out["facts"]["readback"]
-    # 되읽기는 성함·동 이름만(2026-11-09). 되읽기가 열리면 confirm_route는 따로 주지 않는다
-    assert set(facts) == {"sender_name", "from", "receiver_name", "to"} and facts["receiver_name"] == "이영희"
-    assert "confirm_route" not in out["facts"]
+    assert "sender_phone" not in facts and facts["receiver_phone"] == "01098765432"  # 발신번호는 읽지 않는다
     # 저장 대상은 상태에만 두고 담을 때 묻지 않고 저장한다(2026-11-06)
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
-
-
-def test_both_addresses_known_confirms_route_by_dong(corrector, address):
-    """두 주소가 갖춰진 결과에 confirm_route(동 이름)를 준다(2026-11-09). 주소가 바뀌지 않은 뒤 호출에는 주지 않는다."""
-    c = ctx(address=address)
-    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211"})
-    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
-    route = out["facts"]["confirm_route"]
-    assert set(route) == {"from", "to"} and route["from"] == c.state.current.sender_geo.dong_name
-    assert "readback" not in out["facts"]
-    assert "confirm_route" not in call(c, "record_fields", {"receiver_name": "이영희"})["facts"]
 
 
 def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(corrector, address):
@@ -505,28 +449,6 @@ def test_record_rejects_pickup_out_of_hours_with_allowed_range():
     out = call(c, "record_fields", {"pickup_at": (NOW + timedelta(days=1)).replace(hour=20).isoformat()})
     assert out["code"] == "PICKUP_OUT_OF_HOURS" and "09:00~17:00" in out["facts"]["pickup"]["allowed"]
     assert not c.state.pickup_at.valid
-
-
-def test_name_only_address_asks_to_confirm_district_and_dong(corrector, address):
-    """'올리브영 OO점'처럼 이름만 말한 주소는 기록하되 facts.confirm_area로 구·동만 확인시킨다(S15P31D109-165). 번호가 있으면 없다."""
-    c = ctx(address=address)
-    out = call(c, "record_fields", {"receiver_address": "송파구 롯데월드타워"})
-    assert out["status"] == "ok" and out["facts"]["confirm_area"] == {"receiver_address": "송파구 신천동"}
-    assert c.state.field_of("receiver_address").value == "서울특별시 송파구 올림픽로 300"
-    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
-    assert "confirm_area" not in out["facts"]
-
-
-def test_place_not_in_book_is_recorded_as_receiver_address(corrector, address):
-    """주소록·기업에 없는 장소(상호·지점 이름)는 find_destination이 받는 곳 주소로 찾아 기록한다 — 운영 통화 a97347a8에서
-    모델이 DEST_NONE 뒤 주소로 넘기지 않아 '다이소 구미 인동점'을 못 찾았다. 이름만으로 찾았으니 구·동 확인을 붙인다."""
-    c = ctx(address=address)
-    out = call(c, "find_destination", {"name": "한태원", "place": "송파구 롯데월드타워", "detail": "3층"})
-    assert out["status"] == "ok" and out["facts"]["found"] == 0 and out["facts"]["confirm_area"] == {"receiver_address": "송파구 신천동"}
-    s = c.state
-    assert (s.field_of("receiver_name").value, s.field_of("receiver_address").value, s.field_of("receiver_address_detail").value)         == ("한태원", "서울특별시 송파구 올림픽로 300", "3층")
-    out = call(c, "find_destination", {"organization": "없는기업", "place": "없는로 12"})  # 기업명도 붙여 찾는다
-    assert out["code"] == "ADDRESS_NOT_FOUND" and s.field_of("receiver_address").value == "서울특별시 송파구 올림픽로 300"
 
 
 def test_address_in_several_regions_asks_region(corrector, address):

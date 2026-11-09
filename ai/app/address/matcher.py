@@ -14,8 +14,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Literal
 
-from app.address.parse import (LETTER, branch_key, is_number_token, parse, readings, split_detail, strip_ending,
-                               unlink_gil)
+from app.address.parse import LETTER, branch_key, is_number_token, parse, readings, unlink_gil
 from app.address.phonetic import Name, distance, num_distance, read_digits, road_readings
 
 
@@ -287,21 +286,14 @@ def jibun_candidates(db, text):
     return [(area, san, number, d, key) for area, (d, key) in found.items()]
 
 
-def named_only(text) -> bool:
-    """번호 없이 이름만 말했는가("올리브영 강남점", "송파구 롯데월드타워"). 이렇게 찾은 주소는 이름에서 미룬 것이라
-    기록 뒤 고객에게 시·군·구와 동을 확인한다(S15P31D109-165)."""
-    tokens, branch, number = parse(text)[0]
-    return branch is None and not number and not any(map(is_number_token, tokens))
-
-
 def building_candidates(db, text):
     """건물명(부가정보)으로 찾기: 번호 없는 발화("롯데월드타워", "송파구 롯데월드타워")를 건물명 색인과 소리로 비교.
     복합 표기는 빌드 때 풀어 두었으므로(gazetteer.name_variants) 여기서는 같은 이름인지(거리)만 본다.
     -> {도로명주소: (거리, (시도, 시군구))}. 지역이 둘 이상이면 어차피 되묻기라 주소를 읽지 않고 이름을 자리에 넣는다(judge는 지역만 본다)."""
+    tokens, branch, number = parse(text)[0]
     # 번호 토큰이 하나라도 있으면("한누리대로 2130 세종시청이요") 건물명이 아니다 — 번호는 도로·지번 경로가 본다
-    if not named_only(text) or not hasattr(db, "search_names"):
+    if branch is not None or number or any(map(is_number_token, tokens)) or not hasattr(db, "search_names"):
         return {}
-    tokens = parse(text)[0][0]
     scopes, rest = db.match_region(tokens)
     if not scopes:
         scopes, rest = sido_scope(db, tokens)
@@ -337,15 +329,14 @@ RETRY_GROUPS = 8     # 다시 볼 표기 묶음 상한(묶음당 표기 1~2개)
 RETRY_SEC = 1.0      # 다시 보기 시간 상한. 넘으면 못 찾음 — AddressService 예산(2.5초) 초과는 "장애"로 들은 값을 기록하게 되므로
 
 
-def resolve(db, heard: str, clock=time.monotonic, deadline: float | None = None) -> Resolution:
+def resolve(db, heard: str, clock=time.monotonic) -> Resolution:
     """서버가 쓰는 입구: 들은 그대로 먼저 본다(확정이면 그대로 — 고침이 기존 결과를 바꾸지 않게). 확정이 아니면
     parse.readings()의 표기 묶음을 적게 고친 것부터 본다: 못 찾았으면 처음 찾은 묶음을, 약한 결과(애매함·지역 되묻기)였으면
-    확정이 나오는 묶음만 받아들이고 없으면 원래 결과를 돌려준다("킨텍스요" → 말끝을 떼면 정확한 이름).
-    deadline: 여러 후보를 보는 호출자(resolve_detail)가 되읽기 시간을 함께 쓰게."""
+    확정이 나오는 묶음만 받아들이고 없으면 원래 결과를 돌려준다("킨텍스요" → 말끝을 떼면 정확한 이름)."""
     r = correct(db, heard)
     if r.status == "confirmed":
         return r
-    deadline = deadline or clock() + RETRY_SEC
+    deadline = clock() + RETRY_SEC
     for group in readings(heard)[:RETRY_GROUPS]:
         if clock() > deadline:
             break
@@ -355,41 +346,6 @@ def resolve(db, heard: str, clock=time.monotonic, deadline: float | None = None)
             if r.status == "not_found" or merged.status == "confirmed":
                 return merged
     return r
-
-
-def resolve_detail(db, heard: str, clock=time.monotonic) -> tuple[Resolution, str, str | None]:
-    """들은 문장 전체(기본주소 + 상세주소)로 → (판정, 기본주소 문장, 상세주소 원문 or None). 상세가 없으면 resolve와 같다.
-    확실한 경계 후보는 차례로 보고 처음 확정에서 멈춘다. 붙은 수사의 불확실한 후보는 모두 보고, 서로 다른 주소가 둘 이상
-    확정되면 확정하지 않는다(애매함 → 후보 보관). 아무것도 확정되지 않으면 첫 후보로 되읽기까지 한다."""
-    cands = split_detail(heard, getattr(db, "is_dong", None))
-    deadline = clock() + RETRY_SEC
-    if not cands:
-        # 상세 없음: 말끝("십오라고요")을 먼저 떼고 본다 — 말끝이 붙은 채 첫 통과에서 엉뚱한 주소로 확정되지 않게
-        group = strip_ending(heard)
-        if group:
-            found = [x for x in (correct(db, t) for t in group) if x.status != "not_found"]
-            if found and (m := _merge(found)).status == "confirmed":
-                return m, heard, None
-        return resolve(db, heard, clock, deadline), heard, None
-    for base, detail, sure in cands:  # 확실한 경계: 차례로, 처음 찾은 것
-        if sure and (r := resolve(db, base, clock, deadline)).status != "not_found":
-            return r, base, detail
-    unsure = [c for c in cands if not c[2]]
-    confirmed = [(r, base, detail) for base, detail, _ in unsure if (r := correct(db, base)).status == "confirmed"]
-    if not confirmed:  # 첫 통과로 못 찾으면 되읽기까지(시간은 함께 씀), 처음 확정에서 멈춤
-        for base, detail, _ in unsure:
-            if clock() > deadline:
-                break
-            if (r := resolve(db, base, clock, deadline)).status == "confirmed":
-                confirmed.append((r, base, detail))
-                break
-    if confirmed:
-        addresses = tuple(dict.fromkeys(r.address for r, _, _ in confirmed))
-        if len(addresses) == 1:
-            return confirmed[0]
-        return Resolution("ambiguous", None, addresses), confirmed[0][1], confirmed[0][2]
-    base, detail, _ = cands[0]
-    return correct(db, base), base, detail
 
 
 def _merge(found: list[Resolution]) -> Resolution:

@@ -15,13 +15,12 @@ from functools import lru_cache
 from typing import Literal
 from pydantic import Field, create_model, model_validator
 
-from app.address.parse import detail_text
 from app.domain.address_book import save_offer
-from app.domain.assess import area_label, readback_facts
+from app.domain.assess import readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import ItemIssue, measurements, size_issues, unclassified_mentions
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
-from app.domain.rules import normalize_phone, parse_pickup, round_item_price
+from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import Items, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
@@ -57,8 +56,7 @@ class RecordArgs(Args):
     big_box_count: int | None = Field(None, ge=0, description="대형 박스 수")
     item_evidence: list[ItemEvidence] | None = Field(None, max_length=12, description="고객이 언급한 제한 품목·포장·규격 초과의 근거")
     omit_blocked_parcel: str | None = Field(None, max_length=200, description="문제 택배 전체를 빼 달라는 고객 발화 원문")
-    item_price: int | None = Field(None, description="박스 안 물건의 대략적인 가액 합계(원). 고객이 말한 기준 금액을 넣고 "
-                                                    "만 원 단위 반올림은 서버에 맡긴다. 예: 3만 원 넘어요 → 30000. 서류와 배송비는 제외")
+    item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
     pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
                                   "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
@@ -126,9 +124,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
     values, needs = {}, []
     for name in TEXT:
         if name in given:
-            values[name] = (clean_name(given[name]) if name.endswith("_name")
-                            else detail_text(given[name]) if name.endswith("_detail")  # 상세주소 수사 → 숫자(서버가 한다)
-                            else given[name].strip())
+            values[name] = clean_name(given[name]) if name.endswith("_name") else given[name].strip()
     if "receiver_phone" in given:
         phone = normalize_phone(given["receiver_phone"], policy.phone)
         if phone:
@@ -136,7 +132,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         else:
             needs.append({"field": "receiver_phone", "reason": "PHONE_INVALID_DIGITS"})
     if "item_price" in given:
-        values["item_price"] = round_item_price(given["item_price"], policy.input_limits)
+        values["item_price"] = given["item_price"]
     rule = rule_of(policy.pickup)
     if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
         now = ctx.now()
@@ -162,10 +158,6 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
         if draft is not s.current:
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         _check_items(ctx, args, item_parts, facts, needs)
-        if price_update := s.sync_document_item_price():
-            facts[price_update].append("item_price")
-        if s.current is None or s.current["item_price"].source == Source.SERVER:
-            values.pop("item_price", None)
         for name, value in values.items():
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
@@ -197,13 +189,10 @@ async def record_fields(ctx: ToolContext, args: RecordArgs) -> ToolOutcome:
             iso, moved = default_pickup(ctx.now(), rule)
             s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
-            facts["readback"] = readback_facts(pending.snapshot)
+            sources = {n: f.source for n, f in s.current.fields.items()}
+            facts["readback"] = readback_facts(pending.snapshot, sources, policy)
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
-        elif any(a in facts["recorded"] for a in ADDRESSES) and all(s.field_of(a).valid for a in ADDRESSES):
-            # 두 주소가 갖춰진 순간 동 이름으로 한 번 확인(사용자 결정 2026-11-09). 되읽기가 열리면 거기에 같은 값이 있다
-            facts["confirm_route"] = {"from": area_label(s.current["sender_address"].value, s.current.sender_geo),
-                                      "to": area_label(s.current["receiver_address"].value, s.current.receiver_geo)}
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]
@@ -308,35 +297,28 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
     s = ctx.state
     role = addr.removesuffix("_address")
     detail = f"{role}_address_detail"
-    # 들은 문장에서 서버가 뗀 상세주소("… 오십삼백십이동 사백삼호" → 312동 403호)는 기본주소를 못 찾아도 기록해 둔다 —
-    # 기본주소와 독립된 값이라 다시 묻지 않는다(결정 1, 2026-11-09). 모델이 따로 넘긴 상세보다 우선한다
-    if r is not None and r.detail:
-        if s.record(detail, r.detail, Source.RESOLVER) and detail not in facts["recorded"]:
-            facts["recorded"].append(detail)
     if r is not None and r.status in ("not_found", "region_needed"):
         need = {"field": addr, "reason": "ADDRESS_NOT_FOUND"}
         if r.status == "region_needed":  # 같은 주소가 여러 지역에 있음: Live가 지역을 묻고, 모델이 heard와 합쳐 다시 넘긴다
             need = {"field": addr, "reason": "ADDRESS_REGION_NEEDED", "regions": list(r.alternatives),
                     "heard": given[addr].strip()}
         needs.append(need)
+        if detail in facts["recorded"] and not s.field_of(addr).valid:
+            s.clear(detail)  # 못 찾은 주소에 붙은 상세주소도 믿을 수 없다
+            facts["recorded"].remove(detail)
         return
     value = r.address if r else given[addr].strip()
     source = Source.RESOLVER if r and r.status in ("confirmed", "ambiguous") and value != given[addr].strip() \
         else Source.CUSTOMER
-    before = s.field_of(addr)
-    had, was = before.valid, before.value
+    had = s.field_of(addr).valid
     if s.record(addr, value, source):
         facts["recorded"].append(addr)
         if had:
             facts["changed"].append(addr)
-            # 기본주소가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않을 수 있어 비우고 다시 묻는다.
-            # 같은 도로의 번호만 바뀌어도 비운다 — 저장된 상세는 되읽지 않아 다른 건물로 틀리게 접수된다(사용자 결정 2026-11-09)
-            if detail not in given and not (r and r.detail) and was != value:
+            if detail not in given:  # 주소가 바뀌었는데 상세주소를 같이 말하지 않음 → 이전 상세주소는 맞지 않다
                 s.clear(detail)
                 facts["cleared"].append(detail)
     setattr(s.current, f"{role}_geo", r.geo if r else None)
-    if r is not None and r.area:  # 상호·건물 이름만으로 찾은 주소: 구·동이 맞는지 확인시킨다(S15P31D109-165)
-        facts.setdefault("confirm_area", {})[addr] = r.area
     if r is not None and r.status == "ambiguous":
         s.field_of(addr).candidates = r.alternatives  # P6: 나머지 후보 보관
         facts.setdefault("auto_selected", []).append(addr)

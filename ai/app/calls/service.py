@@ -63,17 +63,13 @@ class CallService:
         self.on_change: Callable[[CallSession], None] = lambda s: None         # 관제 알림
         self.accepting_new = True
         self.results = None                                                    # S6: app.calls.results.ResultService
-        self.intake = None                                                     # 055: app.calls.intake.IntakeService
 
     # --- 수신 ---
     async def on_incoming(self, inc: IncomingCall) -> None:
         trace = new_trace()
         state = ConversationState(customer=Customer(caller_phone=inc.caller))
         tools = ToolContext(inc.session_id, state, self.d.policy, self.d.backend, self.d.address, self.d.rag,
-                            rag_min_score=self.d.rag_min_score, rag_budget_sec=self.d.rag_budget_sec,
-                            draft_intake=self.intake is not None)
-        if self.intake is not None:
-            tools.pending_drafts = lambda: self.intake.outbox.has_pending_drafts(inc.session_id)
+                            rag_min_score=self.d.rag_min_score, rag_budget_sec=self.d.rag_budget_sec)
         s = CallSession(inc.session_id, trace, inc.caller, inc.incoming_at or _utc_now(), tools)
         s.on_change = self.on_change
         current_call.set(s)  # 이 통화 태스크·자식 태스크의 BE 호출을 관제에 남긴다
@@ -136,8 +132,7 @@ class CallService:
         specs = function_specs(policy=self.d.policy)
         tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",
-                "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools,
-                                            allow_resume=bool(self.d.cfg.resume_window_sec)),
+                "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
                 "delegation": {"type": "responses", "responses": {
                     "model": self.d.backend_model,
                     "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",

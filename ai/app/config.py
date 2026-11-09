@@ -84,7 +84,6 @@ class BackendConfig(_Strict):
     result_resend_sec: float = Field(60.0, ge=0)   # SENT_UNCERTAIN 결과를 실행 중 같은 키로 재확인하는 주기(0이면 끔)
     # 분석에 hasCallbackRequest를 넣는다. 048 + 새 BE(feature/ai-call-updates) 배포 전에는 false(구버전 BE가 400으로 거절)
     analysis_callback_field: bool = False
-    parcel_draft_intake: bool = False   # 055 백엔드와 함께 전환
 
 
 class FareConfig(_Strict):
@@ -105,9 +104,6 @@ class CallConfig(_Strict):
     persona_report_attempts: int = Field(3, gt=0)    # 적용 회신 시도 횟수(원본 report_attempts)
     persona_max_prompt_chars: int = Field(20000, gt=0)  # 넘으면 INVALID_CONFIG 회신(원본 max_prompt_chars)
     recent_destinations: int = Field(5, ge=0)
-    # 미완료 주문 이어받기(사용자 결정 2026-11-06, 일주일): 주문 createdAt부터 이 시간 안이면 묻는다. 확인은 접수 의도 때 이만큼 기다린다
-    resume_window_sec: float = Field(0.0, ge=0)
-    resume_wait_sec: float = Field(1.5, ge=0)
     closing_quiet_ms: int = Field(1200, ge=1000)     # 마무리: AI 발화 끝 뒤 이만큼 조용하면 끊는다(전달 지연 — 최소 1초)
     closing_result_wait_sec: float = Field(5.0, gt=0)  # 접수 완료 단계: 결과를 이만큼 기다려 마무리 안내에 쓴다(넘으면 pending)
     closing_max_sec: float = Field(15.0, gt=0)       # 마무리 최대 대기

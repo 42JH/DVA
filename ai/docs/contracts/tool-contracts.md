@@ -10,15 +10,15 @@
 
 | 모델 도구(strict) | 인수 | 결과 |
 |---|---|---|
-| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 주소가 여러 시군구에 있음 — needs에 `regions`·`heard`, 2026-11-05), `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·confirm_area(상호·건물 이름만으로 찾은 주소의 시·군·구와 동, 항목별 — Live는 이 값만 읽어 확인, S15P31D109-165)·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
-| `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / needs_input(`DEST_NONE`(이름만 말했을 때)·`DEST_TOO_MANY`) / unavailable(BE). place를 말했는데 주소록·기업에 없으면 `record_fields`(receiver_name·receiver_address·detail)로 넘겨 그 결과를 돌려준다(facts에 `found: 0` 추가, 2026-11-09 S15P31D109-165) |
+| `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 주소가 여러 시군구에 있음 — needs에 `regions`·`heard`, 2026-11-05), `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
+| `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
 | `lookup_orders` | receiver_name, other_customer | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / rejected(`ORDER_OTHER_CUSTOMER`: 다른 번호·다른 고객 접수, BE 호출 없음) / unavailable(`CALL_NOT_REGISTERED`). 조회 결과 facts에 `scope`(이 번호로 접수된 택배만) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
 | `get_state` | 없음 | ok + 상태 요약(아무것도 바꾸지 않음) |
 
 **서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
 
-**주소**(`app/integrations/address.py` + `app/address/`): (2026-11-09) 모델은 들은 문장을 한글 그대로 기본주소 필드에 넣고, 서버가 상세주소(동·호·층·건물 이름)를 떼어 `_detail`에 기록하며 수사를 숫자로 바꾼다(`parse.split_detail`·`detail_text`, `matcher.resolve_detail` — 수사가 붙어 경계가 여럿이면 실존하는 기본주소를 주소DB가 고르고, 둘 이상이면 ambiguous). 기본주소를 못 찾아도 뗀 상세는 기록하고(결정 1), 같은 도로의 번호 정정은 상세를 유지하며 도로가 바뀌면 지운다(결정 2), 번호 뒤 이름은 상세로(결정 3). 도구 필드는 그대로다. 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
+**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
 작성일: 2026-11-03 · 근거: `tools/*.py`, `backend_client/order.py`, `address_resolver/`, `app/rag/text_agent.py`(당시 `tools/rag/`, 지금은 원본 경로)
 표기: **[코드]** 구현 확인 · **[문서]** 문서만 · **확인 필요**
 
