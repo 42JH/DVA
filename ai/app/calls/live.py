@@ -45,6 +45,7 @@ class Spoken:
     end_ms: int
     t_start: float
     t_last: float
+    ready_parcel_id: str | None = None
 
     def utterance(self) -> Utterance:
         return Utterance(self.utterance_id, self.start_ms or 0, self.end_ms or 0, self.t_start, self.text)
@@ -63,6 +64,7 @@ class Runtime:
     delegations: dict[str, dict] = field(default_factory=dict)  # delegation_id → {offset_ms, inflight, outputs, completed}
     commit: asyncio.TimerHandle | None = None
     commit_pid: str | None = None
+    ready_notice: str | None = None                    # 다음 AI 발화에 한해 접수를 안내할 수 있는 택배 ID
     n3: int = 0
     sent_hashes: set[str] = field(default_factory=set)
     intent_started: bool = False
@@ -108,6 +110,7 @@ class LiveFlow:
     def on_input(self, s: CallSession, ev: dict) -> None:
         rt, now = self.rt(s), time.time()
         if rt.cust is None:
+            rt.ready_notice = None
             rt.seq += 1
             rt.cust = Spoken(rt.seq, "", ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now)
             rt.customer_turns.append(rt.cust)
@@ -131,7 +134,9 @@ class LiveFlow:
             last.end_ms, last.t_last = ev.get("end_ms") or last.end_ms, now
         else:
             rt.seq += 1
-            rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0, now, now))
+            rt.ai.append(Spoken(rt.seq, ev.get("delta", ""), ev.get("start_ms") or 0, ev.get("end_ms") or 0,
+                                now, now, ready_parcel_id=rt.ready_notice))
+            rt.ready_notice = None
             del rt.ai[:-20]
             if rt.cust_end_t:  # 새 AI 발화 시작 = 고객 말 끝 뒤 첫 반응
                 s.timing("고객 말 끝→AI 말 시작", (now - rt.cust_end_t) * 1000)
@@ -178,7 +183,12 @@ class LiveFlow:
         """AI 발화 끝: 결과 문구 검사(LLM 없음, delegation.md §6.2-5)."""
         rt = self.rt(s)
         rt.ai_end = None
-        if rt.ai and (claims := unverified_claims(rt.ai[-1].text, s.state, self.policy)):
+        if not rt.ai:
+            return
+        spoken = rt.ai[-1]
+        pid = spoken.ready_parcel_id
+        ready_receipt = pid is not None and self.svc.intake.confirmed_status(s, pid) == "ready"
+        if claims := unverified_claims(spoken.text, s.state, self.policy, ready_receipt=ready_receipt):
             s.note("결과 문구", ",".join(claims))
             facts = truth(s.state)
             if s.tools.draft_intake:
@@ -816,12 +826,19 @@ class LiveFlow:
             else:
                 rt.n3 += 1
         if level == "N2":
+            receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
-            await self._wait_quiet(s)
+            await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
             waited = time.monotonic() - t0
             s.timing("N2 대기(AI 발화 끝)", waited * 1000)
             if waited > 1.0:
                 s.note("N2 대기", f"{waited:.1f}s")
+            if receipt_pid:
+                status = self.svc.intake.confirmed_status(s, receipt_pid)
+                if status != "ready":
+                    content = json.dumps(facts | {"draft_intake": status}, ensure_ascii=False, sort_keys=True)
+                    receipt_pid = None
+            rt.ready_notice = receipt_pid
         etype = {"N1'": "session.thinking.append", "N2": "session.commentary.append",
                  "N3": "session.instructions.append"}[level]
         s.stats[f"전달 {level}"] += 1
@@ -830,9 +847,9 @@ class LiveFlow:
         if level == "N2":
             rt.await_speech = ("N2→AI 발화", time.time())
 
-    async def _wait_quiet(self, s: CallSession, timeout: float = 8.0) -> None:
+    async def _wait_quiet(self, s: CallSession, timeout: float = 8.0, *, min_quiet_ms: int = 0) -> None:
         deadline = time.monotonic() + timeout
-        quiet = self.cfg.notify_quiet_ms / 1000
+        quiet = max(self.cfg.notify_quiet_ms, min_quiet_ms) / 1000
         while time.monotonic() < deadline:
             busy = self.rt(s).cust is not None or any(d["inflight"] or d["offset_ms"] is not None for d in self._open(s))
             if not busy and time.time() - s.last_output_t >= quiet:

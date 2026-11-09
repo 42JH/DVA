@@ -135,7 +135,8 @@ class IntakeService:
 
     def confirmed_status(self, s, parcel_id: str) -> str:
         parcel = next((p for p in s.state.parcels if p.parcel_id == parcel_id), None)
-        if parcel is None:
+        if (parcel is None or s.state.editing == parcel_id or parcel.draft.item_issues
+                or s.state.unassigned_item_issues or is_pending_reconfirm(parcel)):
             return "not_ready"
         for step in reversed(self.outbox.intake_steps(s.call_id)):
             if step["parcel_id"] and step["parcel_id"] == parcel.draft.client_parcel_id:
