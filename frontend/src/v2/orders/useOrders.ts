@@ -1,7 +1,9 @@
 // v2 주문 목록 — 쪽 번호(기준 시각 고정, useSnapshotList) + 새 주문 알림 + 상태 묶음별 건수 + 기간 · 검색. 서버 API는 기존과 같음 (GET /admin/orders)
+import { useEffect } from 'react'
 import { keepPreviousData, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { draftList, draftListItem } from '@/features/order/api/draftApi'
-import { oldestPage, usePageSize } from '@/v2/lib/paging'
+import { oldestPage } from '@/v2/lib/paging'
+import { pageCount } from '@/shared/api/paging'
 import { api, type ApiList } from '@/shared/api/client'
 import { fmtPhone } from '@/shared/lib/format'
 import { useListParams } from '@/shared/lib/useListParams'
@@ -65,7 +67,7 @@ export function useOrders() {
   })
   // 미완료 = 배송 초안 (055 — 새 AI 접수 · 이관된 옛 미완료는 주문이 아님). 기간 조건 없음, 쪽 번호만
   const drafting = g === 'COLLECTING'
-  const [size, setSize] = usePageSize()
+  const { size, setSize } = list // 쪽 크기는 목록과 하나로
   const draftCount = useQuery({
     queryKey: ['v2', 'drafts', 'count', base.q],
     queryFn: ({ signal }) =>
@@ -82,16 +84,27 @@ export function useOrders() {
     },
     placeholderData: keepPreviousData,
   })
+  // 초안이 줄어 보던 쪽이 없어지면 마지막 쪽으로 (서버 offset이 쪽을 쓰므로 주소도 고침)
+  const draftTotal = drafts.data?.total_count ?? 0
+  const draftPages = pageCount(draftTotal, size)
+  useEffect(() => {
+    if (drafting && drafts.data && !drafts.isPlaceholderData && draftTotal > 0 && page > draftPages)
+      set({ page: draftPages })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 받은 결과가 바뀔 때만
+  }, [drafts.data, page, draftPages])
   const draftItems = (drafts.data?.data ?? []).map(draftListItem)
   const draftLabels = new Map(draftItems.map((d) => [d.orderSeq, d.label]))
   const shown = drafting
     ? {
         items: draftItems as OrderListItem[],
-        isLoading: drafts.isPending,
+        isLoading: drafts.isPending && !(asc && draftCount.error),
         isStale: drafts.isPlaceholderData,
-        error: drafts.error ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.' : null,
-        total: drafts.data?.total_count ?? 0,
-        page,
+        error:
+          drafts.error || (asc && draftCount.error)
+            ? '불러오지 못했습니다. 잠시 뒤 다시 시도해 주세요.'
+            : null,
+        total: draftTotal,
+        page: Math.min(page, draftPages),
         size,
         setPage: (p: number) => set({ page: p }),
         setSize,

@@ -10,6 +10,7 @@ export function Pagination({
   page,
   size,
   total,
+  pages: pagesProp,
   unit = '건',
   onPage,
   onSize,
@@ -17,12 +18,13 @@ export function Pagination({
   page: number
   size: number
   total: number
+  pages?: number // 쪽 수를 따로 셀 때 (관리자 활성화: 보이는 수는 나를 빼고, 쪽은 서버 건수로)
   unit?: string // '건', '명', '곳'
   onPage: (p: number) => void
   onSize: (n: number) => void
 }) {
   if (total <= 0) return null
-  const pages = Math.max(1, Math.ceil(total / size))
+  const pages = pagesProp ?? Math.max(1, Math.ceil(total / size))
   const from = (page - 1) * size + 1
   const to = Math.min(page * size, total)
   const move = (label: string, icon: IconName, turn: string, p: number, off: boolean) => (
