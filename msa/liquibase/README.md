@@ -19,7 +19,9 @@ consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 
 테이블뿐 아니라 원본의 인덱스, FK, CHECK, 함수, 트리거와 운영 초기 데이터도 포함한다.
 초기 페르소나 2개와 편집용 프롬프트는 operations 007에서 legacy 테이블에 그대로 보존한다. 새 API의 설정 이력·초안과 ACTIVE/PENDING은 비어 있으며 구 프롬프트를 실제 상담 설정으로 자동 선택하지 않는다.
 
-## 변경 관리
+## 변경 관리와 도입 당시 검증 기록
+
+아래 항목은 각 changeset을 도입했을 때의 설계·검증 기록이다. 현재 자동 회귀는 055 전환을 기준으로 하며, 001~054의 버전별 데이터 변환·실패 주입 재현은 반복하지 않는다. 현재 실행 범위와 개수는 [테스트 정리 결과](../../docs/msa-test-prune-results.md)를 따른다. 기존 changelog와 SQL checksum은 변경하지 않았다.
 
 - order `004`와 consultation `008`은 원본 055의 초안 테이블/제약/인덱스/부분 스냅샷 및 통화 주문 확정 8개 필드/짝 제약/기본값을 추가한다. 최초 전환은 유입·기존 통화·AI outbox를 정리하고 두 앱 쓰기를 중지/백업한 동일 시점에서 적용한다. 이관 표식/임시 통화 사본/비개인정보 완료 표식 4개 테이블은 서비스 사이의 재시작 복구용이다. 적용 중인 001~003/001~007 checksum은 변경하지 않는다. order는 현재 4개, consultation은 8개 changeset이다. [055 계획·검증과 운영 전환 조건](../../docs/msa-draft-compatibility-plan.md)을 따른다.
 - `verify_parcel_draft_schema.py`는 원본 054→055와 기존 order 003/consultation 007 업그레이드의 모든 스냅샷·통화 신규 필드/제약/인덱스, 재적용과 후반 SQL 실패 rollback을 비교한다. 별도 order 검증에서는 실제 소유 HTTP 이벤트·SIGKILL·정리 ACK 유실/재시작·초안 5년 폐기를 확인한다.
@@ -29,7 +31,7 @@ consultation의 비공개 `pbx_webhooks.call_ended_events` 1개를 포함하면 
 - order `003`은 원본 054까지의 주문·결제 요청·기업 청구·빈 AI 결과 저장 계약을 연결한다. delivery `003`은 원본 016의 ADMIN/AI/SYSTEM 배송 이력 주체를 연결한다. 해당 단계까지 두 서비스는 각각 3개 changeset이었다. 기존 001/002와 이벤트·업무 이력은 보존하며 고객/기업/부서/통화/관리자는 논리 참조다. [범위와 검증](../../docs/msa-order-schema-plan.md)을 따른다.
 - order 002의 `COLLECTING`/`CANCELLED`만 자동 이관한다. 나머지 과거 상태는 원본 018처럼 결제 결과를 확인하기 전 전체 적용을 거절한다. 과거 결제·청구·생성 요청·작성자를 추정하지 않는다. 취소 상세를 변환하고 확인 가능한 취소 감사가 없는 001/002의 최초 종료는 원본 045의 `created_at` fallback을 쓴다. 기존 버전·업무 시각은 보존한다.
 - 적용 전에 구 SQL 함수를 직접 사용하는 외부 writer를 중단하고 별도 백업한다. order 003은 원본 043처럼 주문 상세 좌표 4개를 제거하고, 최신 원본과 충돌하는 초기 접수/취소/회복 함수·암묵적 `OrderAccepted` trigger를 제거한다. delivery 003도 `notPaid`를 만드는 초기 수신/생성 함수와 모든 상태 쌍을 허용하던 변경 함수를 제거한다. 현재 앱은 이 함수들을 호출하지 않는다. 기존 대기 이벤트는 실행/폐기/재작성하지 않는다. 새 업무 API와 최신 주문→배송 이벤트 연결은 후속 MR이다.
-- `verify_order_schema.py`는 읽기 전용 `backend/migrations` 전체를 별도 임시 DB에 적용하여 9개 테이블의 컬럼·기본값·identity·CHECK/유일성/로컬 FK·인덱스·trigger와 주문 함수 5개를 비교한다. 원본의 외부 FK 2개만 이름을 확인해 제외한다. 원래 SQL workflow 검증은 002에서 유지하며 최신 workflow는 양쪽 DB에 실행한다. 채워진 002 이관·대기 이벤트/시퀀스 보존·후반 오류 전체 rollback·재적용도 검사한다.
+- `verify_order_schema.py`는 읽기 전용 `backend/migrations` 전체를 별도 임시 DB에 적용하여 현재 9개 테이블의 컬럼·기본값·identity·CHECK/유일성/로컬 FK·인덱스·trigger와 주문 함수 5개를 비교한다. 원본의 외부 FK 2개만 이름을 확인해 제외한다. 현행 업무 SQL은 서비스 DB에서 한 번 실행하며, 별도의 구형 002 데이터 이관·workflow 재현은 제거했다.
 
 - consultation `007`은 원본 054의 녹취 재시도/운영 확인 정책을 추가한다. 과거 FAILED만 LEGACY_FAILURE로 확인 대기하며 payload·통화 연결·claim/시각·녹취와 기존 이력은 보존한다. 최대 5회·안전한 오류 코드·운영 확인 제약과 후반 SQL 실패 rollback을 검증한다.
 
@@ -64,6 +66,7 @@ Docker와 Python 3가 있는 PC에서 `msa/liquibase`로 이동한 뒤 `python v
 임시 Docker network와 PostgreSQL 17.11 컨테이너만 만들며 기존 DB에 접속하지 않는다.
 호스트 DB 포트를 공개하지 않고, 종료 시 해당 테스트 컨테이너와 네트워크를 제거한다.
 검증 결과는 verification.json 및 verification-logs/에 저장된다.
+현재 자동 검증은 5개 서비스의 전체 스키마·업무 SQL·재적용, 비어 있지 않은 DB 보호, 공통 원자적 실패 복구와 pending/stale fingerprint, 원본 schema/function 비교 및 055 전환의 데이터·이력·rollback을 확인한다. DB 실행·검증 단계는 621개에서 176개로 줄었다. 이 단계 수는 Node/Jest/unittest 테스트 수와 별도로 집계한다.
 SQL 원본 체크섬은 source-manifest.json에 기록했다.
 운영 적용 이후 기존 SQL을 재생성하거나 수정하지 않는다.
 
@@ -71,7 +74,7 @@ SQL 원본 체크섬은 source-manifest.json에 기록했다.
 
 [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)에서 기존 changeset을 보존하고 `shared/001-event-transport.sql`을 서비스별 새 changeset으로 참조한다. customer 메시지 테이블 2개와 전체 서비스의 outbox 순번·재시도 시각·시도 횟수·HTTP 상태·인덱스를 추가한다. 기존 대기 이벤트의 ID·본문·전달 상태와 적용 이력은 보존한다.
 
-앱의 새 이벤트 런타임을 연결하기 전에 적용한다. 기존 앱은 추가 컬럼을 무시하며 이번 기반 MR은 업무 앱에 publisher/consumer를 등록하지 않는다. [런타임과 검증](../shared/events/README.md)을 참고한다. 새 설치뿐 아니라 5개 기존 서비스 DB의 업그레이드, customer/order의 신규 변경 실패 시 전체 changeset 롤백을 `verify.py`가 검사한다.
+이벤트 기반을 도입할 때는 앱의 새 런타임을 연결하기 전에 적용했다. 기존 앱은 추가 컬럼을 무시하며 당시 기반 MR은 업무 앱에 publisher/consumer를 등록하지 않았다. 현재 연결은 [런타임과 검증](../shared/events/README.md)을 참고한다. 당시의 서비스별 구형 업그레이드 재현은 제거했고, 현재 `verify.py`는 전체 새 스키마·공통 원자성·055 전환을 검사한다.
 
 ## 서버 준비 (운영 적용 전에 먼저 수행)
 
