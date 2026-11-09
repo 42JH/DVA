@@ -74,7 +74,7 @@ def test_backend_instructions_list_free_fields_and_no_choice_judgment():
     assert all(f"({n})" in text for n in POLICY.free_fields())
     assert "예/아니요" in text and "하지 않습니다" in text and "{fields}" not in text
     assert "그 부분만 바꾼 전체 번호" in text  # 번호 부분 정정(업무 규칙 d)
-    assert "들은 그대로 기록" in text and "312동 403호" in text  # 주소 기록 규칙(기존 서버 backend.md에서 옮김)
+    assert "들은 그대로 기록" in text and "숫자로 바꾸지 않습니다" in text  # 주소 기록 규칙: 수사 변환·상세 분리는 서버가(P13)
 
 
 def test_address_directions_and_short_detail_questions_are_rendered():

@@ -18,7 +18,7 @@
 
 **서버 전용**(모델에 없음): `app/tools/cancel.py cancel_parcel` — `ops["cancel:{o}:{p}"]`, 앞 시도가 불확실하면 상세 재조회 후 재요청, 결과 ok(done·`CANCEL_ALREADY`) / rejected(`CANCEL_LOCKED`·`ORDER_OUT_OF_RANGE`) / unknown(`CANCEL_OUTCOME_UNKNOWN`, 완료라고 말하지 않음). 선택형 판단(확인·후보 선택·용건)은 도구가 아니라 발화 끝 Decision(`delegation.md` §2).
 
-**주소**(`app/integrations/address.py` + `app/address/`): 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
+**주소**(`app/integrations/address.py` + `app/address/`): (2026-11-09) 모델은 들은 문장을 한글 그대로 기본주소 필드에 넣고, 서버가 상세주소(동·호·층·건물 이름)를 떼어 `_detail`에 기록하며 수사를 숫자로 바꾼다(`parse.split_detail`·`detail_text`, `matcher.resolve_detail` — 수사가 붙어 경계가 여럿이면 실존하는 기본주소를 주소DB가 고르고, 둘 이상이면 ambiguous). 기본주소를 못 찾아도 뗀 상세는 기록하고(결정 1), 번호 뒤 이름은 상세로(결정 3). 뗀 상세는 고객이 말한 값이라 출처 CUSTOMER로 기록해 되읽기에 넣는다. 기본주소가 바뀌었는데 상세를 같이(문장 안이든 따로든) 말하지 않으면 이전 상세를 비우고 다시 묻는다(같은 도로의 번호 정정도 — 사용자 결정 2026-11-09). 도구 필드는 그대로다. 주소DB 보정은 전용 스레드풀, 예산 2.5초. 장애·초과는 들은 값 그대로 + geo 없음. (2026-11-06) 접수용 지번·법정동·우편번호는 주소DB에서 만들고(`AddressDB.geo`, 카카오와 같은 표기) 비어 있을 때만 카카오 geocode. 카카오 키워드·similar 검색은 로컬이 못 찾았거나 약할 때만 두 번째 근거로(결과는 주소DB로 검증). 카카오는 공유 클라이언트 + 세마포어.
 작성일: 2026-11-03 · 근거: `tools/*.py`, `backend_client/order.py`, `address_resolver/`, `app/rag/text_agent.py`(당시 `tools/rag/`, 지금은 원본 경로)
 표기: **[코드]** 구현 확인 · **[문서]** 문서만 · **확인 필요**
 
