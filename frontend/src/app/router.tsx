@@ -156,6 +156,11 @@ export const router = createBrowserRouter([
             lazy: () => import('@/v2/stats/StatsPage').then((m) => ({ Component: m.StatsPage })),
           },
           {
+            path: 'stats/:kind', // 그래프 보기 (응답 대기 · 단계별 이탈)
+            lazy: () =>
+              import('@/v2/stats/StatsGraphPage').then((m) => ({ Component: m.StatsGraphPage })),
+          },
+          {
             path: 'admins', // 최고 관리자만 (기존 /admins와 같은 가드)
             lazy: () =>
               import('@/v2/settings/AdminsPage').then((m) => ({
