@@ -1,7 +1,6 @@
 """담은 택배 보관소(ParcelStore, P5): 접수(통화 결과 전송) 전까지 통화 안에서 수정할 수 있다.
 
-수정 중(미확인)인 택배는 현재 내용이 마지막 확인 스냅샷과 다르다. 그 상태로 통화가 끝나면 마지막 확인 스냅샷을 보낸다
-(P5 후속 B안, decisions.md).
+수정을 시작하면 이전 확인을 해제한다. 다시 확인되지 않은 택배는 최종 접수 대상에서 제외한다.
 """
 
 from app.domain.parcel_items import ItemIssue, unclassified_mentions
@@ -26,10 +25,11 @@ def add_confirmed(state: ConversationState, snapshot: dict, parcel_id: str | Non
 
 
 def open_for_edit(state: ConversationState, parcel_id: str) -> None:
-    """담은 택배를 current로 꺼낸다(confirmed_snapshot은 유지). 진행 중이던 다른 택배는 미확인 항목으로 보관한다."""
+    """담은 택배를 current로 꺼내 이전 확인을 해제한다. 진행 중이던 다른 택배는 통화 상태에 둔다."""
     if state.editing == parcel_id:
         return
     target = next(p for p in state.parcels if p.parcel_id == parcel_id)
+    target.confirmed_snapshot = target.confirmed_hash = None
     if state.current is not None and not state.current.empty() and state.editing != parcel_id:
         if state.editing:  # 다른 담은 택배를 고치던 중 → 그 항목에 되돌려 둔다(수정 중 상태로)
             prev = next(p for p in state.parcels if p.parcel_id == state.editing)
@@ -94,16 +94,8 @@ def pending_reconfirm(state: ConversationState) -> list[str]:
 
 
 def snapshot_for_submit(state: ConversationState) -> list[dict]:
-    """전송할 택배: 확인된 항목은 현재 내용, 수정 중 항목은 마지막 확인 스냅샷. 한 번도 확인받지 않은 항목은 뺀다."""
+    """현재 구성을 확인받았고 수정 중이 아닌 택배만 최종 접수에 보낸다."""
     if state.unassigned_item_issues:
         return []  # 어느 택배가 제한 대상인지 모르면 마지막 확인본도 제출할 수 없다
-    out = []
-    for p in state.parcels:
-        if p.draft.item_issues:
-            continue
-        if p.parcel_id == state.editing or is_pending_reconfirm(p):
-            if p.confirmed_snapshot is not None:
-                out.append(p.confirmed_snapshot)
-        else:
-            out.append(draft_snapshot(p.draft))
-    return out
+    return [draft_snapshot(p.draft) for p in state.parcels
+            if p.parcel_id != state.editing and not p.draft.item_issues and not is_pending_reconfirm(p)]

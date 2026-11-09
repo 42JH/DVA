@@ -115,7 +115,7 @@ class ParcelDraft:
 class StoredParcel:
     parcel_id: str
     draft: ParcelDraft
-    confirmed_snapshot: dict | None       # 마지막으로 고객이 확인한 내용(P5 후속 B안)
+    confirmed_snapshot: dict | None       # 고객이 확인한 내용. 수정을 시작하면 비운다.
     confirmed_hash: str | None
 
 

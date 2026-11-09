@@ -790,7 +790,8 @@ class LiveFlow:
         if not rt.intent_started:
             rt.intent_started = True
             stage2 = self.svc.stage2(s)
-            if stage2 is not None and rt.resume_task is None and (s.tools.draft_intake or s.state.customer.status == "REGISTERED"):
+            if (self.cfg.resume_window_sec and stage2 is not None and rt.resume_task is None
+                    and (s.tools.draft_intake or s.state.customer.status == "REGISTERED")):
                 rt.resume_task = s.spawn(self._resume_lookup(s, stage2), "resume_lookup")
 
     # ------------------------------------------------------------------ 위임 → 함수 호출
@@ -1026,8 +1027,11 @@ def _order_status(s: CallSession) -> dict:
     """결과 상태 사실(정책 [results].order). 응답 전이면 pending."""
     data = s.result or {}
     if not data:
-        if s.tools.draft_intake and s.state.parcels:
-            return {"status": "pending", "guidance": "접수에 필요한 정보가 저장된 건은 통화 종료 후 처리됩니다"}
+        if s.tools.draft_intake:
+            if any(p.confirmed_snapshot is not None for p in s.state.parcels):
+                return {"status": "pending", "guidance": "접수에 필요한 정보가 저장된 건은 통화 종료 후 처리됩니다"}
+            if s.state.current is not None and not s.state.current.empty():
+                return {"status": "pending", "guidance": "확인을 마치지 못한 택배는 취소됩니다"}
         return {"status": "pending"}
     out = {"status": data.get("status")}
     if data.get("status") == "ACCEPTED" and data.get("parcelNo"):

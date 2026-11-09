@@ -159,6 +159,7 @@ def test_api_paths_and_call_header():
 
 def _setup(tmp_path, minutes_ago=10):
     svc, client = flow(tmp_path)
+    svc.d.cfg.resume_window_sec = WEEK
     db = svc.d.backend.api
     db.add_customer(CALLER, "김철수")
     created = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat().replace("+00:00", "Z")
@@ -181,6 +182,23 @@ async def _open(svc, client):
     conn.push(started())
     await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
     return task, conn, svc.registry.calls["live_1"]
+
+
+def test_default_call_does_not_offer_or_load_previous_incomplete_order(tmp_path):
+    svc, client, _, _ = _setup(tmp_path)
+    svc.d.cfg.resume_window_sec = 0
+
+    async def scenario():
+        task, conn, s = await _open(svc, client)
+        await say(conn, "택배 보내려고요", 1000)
+        await until(lambda: s.state.customer.call_session_seq is not None)
+        assert s.rt.resume_task is None and s.state.resume is None
+        assert _facts(conn, "resume_confirm") is None
+        assert "resume_confirm" not in svc.session_config(s, None)["instructions"]
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
 
 
 def test_resume_yes_confirms_then_patches_and_submits_without_new_order(tmp_path):

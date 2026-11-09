@@ -174,13 +174,13 @@ def test_commit_rechecks_snapshot_and_release():
 
 # --- 담은 택배 수정(P5) ---
 
-def test_edit_parcel_then_submit_uses_last_confirmed_snapshot_until_reconfirmed():
+def test_edit_parcel_is_excluded_until_reconfirmed():
     s = filled()
     confirm_once(s)
     open_for_edit(s, "p1")
     s.record("receiver_name", "박민수")
     assert pending_reconfirm(s) == ["p1"]
-    assert snapshot_for_submit(s)[0]["receiver_name"] == "이영희"  # B안: 미확인 수정은 보내지 않음
+    assert snapshot_for_submit(s) == []
     assert confirm_once(s, t=200.0) == "p1" and len(s.parcels) == 1
     assert pending_reconfirm(s) == [] and snapshot_for_submit(s)[0]["receiver_name"] == "박민수"
 
@@ -190,8 +190,8 @@ def test_edit_while_collecting_new_parcel_keeps_it_unconfirmed():
     confirm_once(s)
     s.record("receiver_name", "최지우")  # 두 번째 택배 받는 중
     open_for_edit(s, "p1")
-    assert [p.confirmed_snapshot is None for p in s.parcels] == [False, True]
-    assert len(snapshot_for_submit(s)) == 1  # 한 번도 확인받지 않은 택배는 보내지 않는다
+    assert [p.confirmed_snapshot is None for p in s.parcels] == [True, True]
+    assert snapshot_for_submit(s) == []
 
 
 # --- 통화 결과 ---
@@ -213,7 +213,7 @@ def test_outcome_complete_and_body():
 
 
 @pytest.mark.parametrize("change, reason", [
-    (lambda s: setattr(s.parcels[0].draft, "receiver_geo", None), None),  # 확인 뒤 geo 변경은 스냅샷에 영향 없음
+    (lambda s: setattr(s.parcels[0].draft, "receiver_geo", None), "NO_CONFIRMED_PARCEL"),
     (lambda s: setattr(s, "agent_transferred", True), "AGENT_TRANSFER"),
     (lambda s: s.customer.__setattr__("customer_seq", None) or s.customer.__setattr__("name", None), None),  # 이름 = 보내는 분
     (lambda s: s.customer.__setattr__("payment_methods", ()), "PAYMENT_UNKNOWN"),

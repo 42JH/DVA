@@ -8,9 +8,10 @@ import pytest
 from conftest import CALLER, run
 
 from app.calls.intake import IntakeService
-from app.calls.live import LiveFlow
+from app.calls.live import LiveFlow, _order_status
 from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmation
 from app.domain.fare import parcel_fare
+from app.domain.store import open_for_edit
 from app.tests.test_domain import P, confirm_once, filled
 from app.tests.test_live_flow import flow
 from app.tests.test_results import service, session
@@ -98,6 +99,33 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
     run(add_and_end())
 
 
+@pytest.mark.parametrize("confirmed_first", [False, True])
+def test_hangup_discards_unconfirmed_parcel_without_saving_it(tmp_path, confirmed_first):
+    intake, results, db, s = setup_intake(tmp_path)
+
+    async def scenario():
+        seq = s.state.customer.call_session_seq
+        if confirmed_first:
+            confirm_once(s.state)
+            assert intake.sync(s)
+            await intake.flush(s.call_id)
+            s.state.current = filled(receiver="박민수").current
+        assert not intake.sync(s)
+        assert s.state.current.client_parcel_id is None
+        if not confirmed_first:
+            assert _order_status(s)["guidance"] == "확인을 마치지 못한 택배는 취소됩니다"
+        db.ended.add(seq)
+        await results.finish(s)
+        assert len(db.drafts) == len(db.orders) == int(confirmed_first)
+        if confirmed_first:
+            [parcel] = db.orders[0]["parcels"]
+            assert parcel["destination"]["name"] == "이영희"
+        else:
+            assert s.tools.ops["intake"]["status"] == "NO_ORDER"
+
+    run(scenario())
+
+
 def test_edit_on_pbx_first_does_not_submit_last_confirmed_address(tmp_path):
     intake, results, db, s = setup_intake(tmp_path)
     svc, _ = flow()
@@ -117,7 +145,7 @@ def test_edit_on_pbx_first_does_not_submit_last_confirmed_address(tmp_path):
         db.ended.add(draft["callSessionSeq"])
         await results.finish(s)
         assert s.tools.ops["intake"]["status"] == "NO_ORDER"
-        assert draft["status"] == "INCOMPLETE" and not db.orders
+        assert draft["status"] == "CANCELLED" and not db.orders
 
     run(scenario())
 
@@ -144,9 +172,12 @@ def test_lost_create_and_patch_responses_recover_before_complete(tmp_path):
     intake, results, db, s = setup_intake(tmp_path, LostResponse())
 
     async def scenario():
-        intake.sync(s)  # EDITING 생성
+        pid = confirm_once(s.state)
+        intake.sync(s)  # READY 생성
         assert (await intake.flush(s.call_id))["status"] == "SAVE_PENDING"
-        confirm_once(s.state)
+        open_for_edit(s.state, pid)
+        intake.sync(s)  # 기존 READY 해제
+        confirm_once(s.state, t=200)
         seq = s.state.customer.call_session_seq
         db.ended.add(seq)
         await results.finish(s)  # 같은 UUID 재전송 성공 → READY PATCH 응답 유실
@@ -164,6 +195,7 @@ def test_previous_incomplete_draft_is_copied_to_new_call_and_can_be_cancelled(tm
     svc, _ = flow()
     svc.intake, svc.results = intake, results
     svc.d.backend = results.backend
+    svc.d.cfg.resume_window_sec = 604800
     lf = LiveFlow(svc)
 
     async def scenario():

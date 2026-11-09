@@ -16,7 +16,7 @@ from pydantic import ValidationError
 from app.calls.session import CallSession
 from app.calls.unanswered import ReviewError, apply_review, evidence_from_session
 from app.domain.assess import assess
-from app.domain.outcome import decide_outcome
+from app.domain.outcome import Outcome, decide_outcome
 from app.domain.store import hold_unclassified_items
 from app.domain.state import Source, draft_snapshot
 from app.integrations.backend.gateway import BackendFailure, BackendGateway
@@ -201,6 +201,9 @@ class ResultService:
                 outcome = decide_outcome(s.state, self.policy, datetime.now(timezone.utc), self.fare_of)
                 if outcome.kind is None or not s.caller:
                     return None  # 무의미 통화: 등록·쓰기 없음
+                if outcome.kind == "INCOMPLETE":
+                    # 레거시 API에도 통화 결과만 남긴다. 수집값을 보내면 COLLECTING 주문이 생긴다.
+                    outcome = Outcome("INCOMPLETE", reasons=outcome.reasons, customer_name=outcome.customer_name)
                 c = s.state.customer
                 body = submit_body(outcome, {"providerCallId": s.call_id, "callerPhoneNumber": s.caller,
                                              "incomingAt": s.incoming_at}, c.customer_seq, None, s.caller)

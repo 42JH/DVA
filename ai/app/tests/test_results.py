@@ -163,6 +163,7 @@ def test_registration_failure_keeps_unregistered_and_sends_customer_name(tmp_pat
     body = db.results[-1]["body"]
     assert body["outcome"] == "INCOMPLETE" and body["customer"] == {"name": "김철수", "phoneNumber": CALLER}
     assert "paymentMethodType" not in body  # 기본 billing 없음
+    assert "parcels" not in body and db.results[-1]["status"] == "NO_ORDER"
 
 
 def test_insights_analysis_events_and_unanswered(tmp_path):

@@ -45,7 +45,7 @@ def _labels(policy: Policy, names) -> list[str]:
     return [policy.fields[n].label for n in names]
 
 
-def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> str:
+def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = (), *, allow_resume: bool = False) -> str:
     collect = policy.collect_stages()
     order = [n for s in collect for n in s.required]
     auto = [n for n, f in policy.fields.items() if f.kind == "auto"]
@@ -87,7 +87,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     if policy.results:
         lines += ["", "## 서버 결과 읽는 법",
                   "- 도구 결과와 '[서버 결과]'로 시작하는 알림은 서버가 확인한 사실(JSON)이다. 결과에 없는 사실은 추측하지 않고, 결과는 뜻대로 안내한다."]
-        lines += [f"- {k}: {v}" for k, v in policy.results.items()]
+        lines += [f"- {k}: {v}" for k, v in policy.results.items() if allow_resume or k not in ("resume", "resume_confirm")]
     lines += ["", "## 다시 묻기",
               f"- 같은 항목을 {policy.reask.max_attempts}번 받지 못하면 다른 방법을 제안합니다."
               + (" 다시 물을 때는 표현을 바꿉니다." if policy.reask.vary_wording else "")]
@@ -95,10 +95,10 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
 
 
 def render_live(prompt_text: str | None, policy: Policy, call_info: dict[str, str] | None = None,
-                tools: tuple[tuple[str, str], ...] = ()) -> str:
+                tools: tuple[tuple[str, str], ...] = (), *, allow_resume: bool = False) -> str:
     """페르소나(교체 가능) → 업무 규칙(고정) → 정책 절차 → 통화 정보. 페르소나가 비면 기본 페르소나(P2)."""
     persona = prompt_text.strip() if prompt_text and prompt_text.strip() else default_persona()
-    parts = [persona, "", business_rules(), "", render_policy(policy, tools)]
+    parts = [persona, "", business_rules(), "", render_policy(policy, tools, allow_resume=allow_resume)]
     if call_info:
         parts += ["", "# 통화 정보"] + [f"- {k}: {v}" for k, v in call_info.items()]
     return "\n".join(parts)
