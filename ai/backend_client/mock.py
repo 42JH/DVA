@@ -380,6 +380,58 @@ class MockBackend:
             order["status"] = "CANCELLED"
         return "ok"
 
+    async def cancel_order(self, call_session_seq, order_seq):
+        order = self._order(call_session_seq, order_seq)
+        if not order:
+            return "not_found"
+        if order["status"] not in CANCELLABLE:
+            return "conflict"  # 결제 완료 이후·전체 재요청
+        for p in order["parcels"]:
+            p["status"] = "CANCELLED"
+        order["status"] = "CANCELLED"
+        return "ok"
+
+    def _collecting(self, call_session_seq, order_seq, expected_version, path):
+        order = self._order(call_session_seq, order_seq)
+        if not order:
+            raise BackendError(f"{path} 404 NOT_FOUND", 404, "NOT_FOUND")
+        if order["status"] != "COLLECTING":
+            raise BackendError(f"{path} 409 INVALID_STATE", 409, "INVALID_STATE")
+        if expected_version != order.setdefault("version", 1):
+            raise BackendError(f"{path} 409 VERSION_CONFLICT", 409, "VERSION_CONFLICT")
+        return order
+
+    async def update_collecting_order(self, call_session_seq, order_seq, body):
+        order = self._collecting(call_session_seq, order_seq, body.get("expectedVersion"), "/api/orders/{id}")
+        order["version"] += 1  # shortcut: 변경 내용은 반영하지 않고 버전만 올린다(지금 통화 흐름이 부르지 않음)
+        return order["version"]
+
+    async def submit_order(self, call_session_seq, order_seq, expected_version):
+        order = self._collecting(call_session_seq, order_seq, expected_version, "/api/orders/{id}/submit")
+        order["status"] = "notPaid"
+        return {"status": "notPaid"}
+
+    def _pin_rows(self, phone):
+        return [{"personalPinSeq": i, "customerSeq": self.customers[phone]["seq"], "label": None, "version": 1,
+                 "addressData": {"name": p.name, "phoneNumber": p.phone, "roadAddress": p.address,
+                                 "detailAddress": p.address_detail}}
+                for i, p in enumerate(self.pins.get(phone, []), 1)]
+
+    async def list_pins(self, call_session_seq, customer_seq, q=None, limit=20, offset=0):
+        phone = self._phone(call_session_seq)
+        if self.customers.get(phone, {}).get("seq") != customer_seq:
+            raise BackendError("/api/customers/pins 403 FORBIDDEN", 403, "FORBIDDEN")
+        rows = [r for r in self._pin_rows(phone) if not q or q in str(r["addressData"])]
+        return {"data": rows[offset:offset + limit], "hasNext": offset + limit < len(rows), "total_count": len(rows)}
+
+    async def update_pin(self, call_session_seq, pin_seq, fields):
+        phone = self._phone(call_session_seq)
+        if not fields or set(fields) - {"label", "addressData"}:
+            raise BackendError("/api/pins/{id} 400 INVALID_REQUEST", 400, "INVALID_REQUEST")
+        if not 1 <= pin_seq <= len(self.pins.get(phone, [])):
+            raise BackendError("/api/pins/{id} 404 NOT_FOUND", 404, "NOT_FOUND")  # 통화 고객의 PIN만
+        return 2  # shortcut: 주소 교체는 반영하지 않는다(지금 통화 흐름이 부르지 않음)
+
     # --- 통화 결과 ---
 
     async def submit_result(self, body: dict, idempotency_key: str) -> dict:

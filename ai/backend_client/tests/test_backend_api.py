@@ -458,3 +458,66 @@ def test_persona_without_token_does_not_send_bearer_none():
     with pytest.raises(BackendError, match="AI_PERSONA_TOKEN"):
         run(client.persona_config("ACTIVE"))
     assert seen == []
+
+
+def order_api_handler(req):
+    path, m = req.url.path, req.method
+    if path == "/api/ai/faqs":
+        return httpx2.Response(503)  # 요청 헤더만 본다
+    if m == "POST" and path.endswith("cancel"):
+        return httpx2.Response(204)
+    if m == "PATCH":
+        return httpx2.Response(200, json={"data": {"version": 5}})
+    if path.endswith("/submit"):
+        return httpx2.Response(200, json={"data": {"status": "notPaid"}})
+    if path == "/api/orders" and m == "POST":
+        return httpx2.Response(201, json={"data": {"status": "ACCEPTED"}})
+    if path.endswith("/pins") and m == "POST":
+        return httpx2.Response(201, json={"data": {"personalPinSeq": 1, "version": 1}})
+    if path.endswith("/pins"):
+        return httpx2.Response(200, json={"data": [], "hasNext": False, "total_count": 0})
+    if path == "/api/orders/7":
+        return httpx2.Response(200, json={"data": {"orderSeq": 7, "parcels": []}})
+    return httpx2.Response(200, json={"data": []})
+
+
+def order_api_calls(client):
+    run(client.find_parcels(20, 3))
+    run(client.submit_result({"outcome": "COMPLETE"}, "uuid-1"))
+    run(client.order_detail(20, 7))
+    assert run(client.update_collecting_order(20, 7, {"expectedVersion": 4, "paymentMethodType": "billing"})) == 5
+    assert run(client.cancel_order(20, 7)) == "ok"
+    assert run(client.cancel_parcels(20, 7, [101])) == "ok"
+    assert run(client.submit_order(20, 7, 4)) == {"status": "notPaid"}
+    run(client.address_history(20, 33, "ORIGIN", 1))
+    assert run(client.list_pins(20, 33))["total_count"] == 0
+    run(client.create_pin(20, 33, ORDER, "receiver", "집"))
+    assert run(client.update_pin(20, 9, {"label": "회사"})) == 5
+    for call in (client.initial_faq_entries(), client.faq_entries([1])):
+        with pytest.raises(BackendError):
+            run(call)
+
+
+def test_order_pin_faq_calls_send_business_token():
+    """요청한 12개 API에 Authorization: Bearer <AI_BUSINESS_TOKEN>. 통화 헤더·Idempotency-Key·본문은 그대로."""
+    client, seen = api(order_api_handler, business_token="biz-token", persona_token="persona", insights_token="ins")
+    order_api_calls(client)
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("GET", "/api/orders"), ("POST", "/api/orders"), ("GET", "/api/orders/7"), ("PATCH", "/api/orders/7"),
+        ("POST", "/api/orders/7/cancel"), ("POST", "/api/orders/7/parcels/cancel"), ("POST", "/api/orders/7/submit"),
+        ("GET", "/api/customers/33/addresses"), ("GET", "/api/customers/33/pins"), ("POST", "/api/customers/33/pins"),
+        ("PATCH", "/api/pins/9"), ("GET", "/api/ai/faqs"), ("GET", "/api/ai/faqs")]
+    assert all(r.headers["authorization"] == "Bearer biz-token" and "cookie" not in r.headers for r in seen)
+    faq = seen[-2:]
+    assert all("call_session_seq" not in r.headers for r in faq + [seen[1]])  # FAQ·통화 결과는 통화 헤더 없음
+    assert all(r.headers["call_session_seq"] == "20" for r in seen[:-2] if r is not seen[1])
+    assert seen[1].headers["Idempotency-Key"] == "uuid-1" and body(seen[1]) == {"outcome": "COMPLETE"}
+    assert body(seen[3]) == {"expectedVersion": 4, "paymentMethodType": "billing"}
+    assert seen[4].content == b"" and body(seen[5]) == {"orderParcelSeqs": [101]}
+    assert body(seen[6]) == {"expectedVersion": 4} and body(seen[10]) == {"label": "회사"}
+
+
+def test_order_pin_faq_calls_without_business_token_send_no_authorization():
+    client, seen = api(order_api_handler)
+    order_api_calls(client)
+    assert len(seen) == 13 and all("authorization" not in r.headers for r in seen)

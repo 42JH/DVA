@@ -951,3 +951,10 @@
 - 상담원 안내는 발송 주소와 받는 곳 주소로 구분한다. 고객이 말한 출발과 도착 방향을 각각 대응하는 항목에 기록한다. 방향을 말하지 않으면 직전 주소 질문을 따르고, 그래도 불분명하면 다시 확인한다.
 - 상세주소 질문에는 먼저 항목명만 사용한다. 고객이 무엇을 말해야 할지 모를 때 건물 이름·동·호수를 예로 든다. 이미 기록한 다른 발송 주소에 저장된 상세주소가 붙지 않도록 자동 입력을 제한한다.
 - 전체 AI 테스트 704개 통과. 변경 후 실통화는 검증하지 않았다.
+
+### 주문·PIN·FAQ API에 AI_BUSINESS_TOKEN 인증 헤더 추가 (2026-11-09)
+
+- 요청 목록 12개(GET·POST /api/orders, GET·PATCH /api/orders/{id}, POST /api/orders/{id}/cancel·parcels/cancel·submit, GET /api/customers/{id}/addresses, GET·POST /api/customers/{id}/pins, PATCH /api/pins/{id}, GET /api/ai/faqs)에 기존 `_business_headers()`로 `Authorization: Bearer <AI_BUSINESS_TOKEN>`을 붙인다. 토큰이 비어 있으면 기존처럼 헤더 없이 보낸다.
+- call_session_seq·Idempotency-Key·요청 본문은 그대로 유지한다. FAQ 조회는 통화 헤더 없이 Bearer만 보내며 AI_FAQ_TOKEN은 쓰지 않는다.
+- 클라이언트에 없던 5개(PATCH 주문 수정, 전체 취소, submit, PIN 목록, PIN 수정)는 계약 문서(order-update·order-cancel·order-submit·pins.md)대로 메서드를 추가하고 MockBackend에도 둔다. 현재 통화 흐름은 이 5개를 부르지 않는다.
+- 전체 AI 테스트 707개 통과. 실제 백엔드(배포 전·후)에서의 헤더 수용 여부는 검증하지 않았다.

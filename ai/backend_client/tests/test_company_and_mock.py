@@ -73,3 +73,22 @@ def test_no_coordinates_anywhere_in_requests():
     with pytest.raises(BackendError, match="400"):
         run(MockBackend().submit_result({"outcome": "INCOMPLETE", "call": {"providerCallId": "p"},
                                          "parcels": [{"origin": {"latitude": 1}}]}, "k"))
+
+
+def test_mock_order_and_pin_apis_follow_contract_states():
+    from backend_client.order import Place
+    mock = MockBackend()
+    seq = mock.add_customer("01011112222", "김고객", pins=[Place(name="받는분", phone="01033334444", address="서울 예시로 1", address_detail="")])
+    call = run(mock.caller_context("01011112222", {"providerCallId": "c1", "incomingAt": "t"}, 0)).call_session_seq
+    order = mock.add_order("01011112222", "COLLECTING", [("받는분", "서울 예시로 1")])
+    assert run(mock.update_collecting_order(call, order, {"expectedVersion": 1})) == 2
+    with pytest.raises(BackendError) as e:
+        run(mock.submit_order(call, order, 1))
+    assert e.value.code == "VERSION_CONFLICT"
+    assert run(mock.submit_order(call, order, 2)) == {"status": "notPaid"}
+    assert run(mock.cancel_order(call, order)) == "ok" and run(mock.cancel_order(call, order)) == "conflict"
+    pins = run(mock.list_pins(call, seq))
+    assert pins["total_count"] == 1 and pins["data"][0]["addressData"]["name"] == "받는분"
+    assert run(mock.update_pin(call, 1, {"label": "집"})) == 2
+    with pytest.raises(BackendError):
+        run(mock.update_pin(call, 2, {"label": "집"}))
