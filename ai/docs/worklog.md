@@ -963,3 +963,14 @@
 - 제한 단어가 감지되면 실제로 그 품목을 보내는지 고객 발화에서 확인한다. 다른 물건 이름에 들어간 단어라면 같은 발화에서 그 구절에 해당하는 보류만 해제한다. 다른 구절이나 앞선 발화의 제한 근거는 유지한다.
 - 냉장·냉동고 자체는 냉장·냉동식품으로 분류하지 않는다. 실제 제한 품목이 함께 언급된 경우와 규격 초과는 별도로 검사한다.
 - 제한 단어가 들어간 물건 이름, 실제 제한 품목의 동시 언급, 이전 보류 유지, 규격 초과를 자동 테스트에서 확인했다. 전체 AI 테스트 711개 통과. 변경 후 실통화는 검증하지 않았다.
+
+### 주문·PIN·FAQ API에 AI_BUSINESS_TOKEN 인증 헤더 추가 (2026-11-09)
+
+- 요청 목록 12개(GET·POST /api/orders, GET·PATCH /api/orders/{id}, POST /api/orders/{id}/cancel·parcels/cancel·submit, GET /api/customers/{id}/addresses, GET·POST /api/customers/{id}/pins, PATCH /api/pins/{id}, GET /api/ai/faqs)에 기존 `_business_headers()`로 `Authorization: Bearer <AI_BUSINESS_TOKEN>`을 붙인다. 토큰이 비어 있으면 기존처럼 헤더 없이 보낸다.
+- call_session_seq·Idempotency-Key·요청 본문은 그대로 유지한다. FAQ 조회는 통화 헤더 없이 Bearer만 보내며 AI_FAQ_TOKEN은 쓰지 않는다.
+- 클라이언트에 없던 5개(PATCH 주문 수정, 전체 취소, submit, PIN 목록, PIN 수정)는 계약 문서(order-update·order-cancel·order-submit·pins.md)대로 메서드를 추가하고 MockBackend에도 둔다. 현재 통화 흐름은 이 5개를 부르지 않는다.
+- 전체 AI 테스트 707개 통과. 실제 백엔드(배포 전·후)에서의 헤더 수용 여부는 검증하지 않았다.
+
+### Jira 178 브랜치 최신화
+
+- `develop-ai`의 `6bfaaa4e`를 반영했다. 작업 기록에 두 브랜치의 변경 내용을 함께 남겼다. 반영 후 전체 AI 테스트 714개 통과.

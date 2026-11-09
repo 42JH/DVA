@@ -4,6 +4,7 @@ HTTP는 openai에 딸린 httpx2. 전화번호는 URL에 넣지 않고 본문으�
 AI가 부르는 것: 통화 시작의 고객 확인(POST /api/customers/context, 통화 번호 callSessionSeq를 받는다)과 최근 접수 주소,
 통화 중 조회·취소(GET /api/orders, GET /api/orders/{id}, POST /api/orders/{id}/parcels/cancel), 통화 결과 한 번(POST /api/orders).
 통화 번호는 주문 조회·취소·주소 이력 요청의 call_session_seq 헤더로 보낸다(인증 토큰이 아니라 고객 범위 확인용).
+고객·주문·PIN·FAQ 조회 API에는 AI_BUSINESS_TOKEN을 Authorization: Bearer로 함께 보낸다(_business_headers).
 통화가 끝나면 통화 기록·분석(POST /api/ai/calls/{id}/events·analysis)을 보낸다.
 FAQ 변경 알림 처리에서는 최신 원문(GET /api/ai/faqs)을 별도로 조회한다.
 보류한 수정 도구와 관제 화면 주문 목록만 옛 계약(/internal/ai/...)이다."""
@@ -371,7 +372,7 @@ class BackendAPI:
         DUPLICATE_RESOURCE) 그대로. 409라도 사용 불가 상태 등 다른 코드는 실패(B/pins.md "중복 주소·사용 불가 상태 409")."""
         resp = await self.http.post(f"/api/customers/{int(customer_seq)}/pins",
                                     json={"label": label, "addressData": _address(order, role)},
-                                    headers=_call(call_session_seq))
+                                    headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code in (200, 201) or (resp.status_code == 409 and _error_code(resp) == "DUPLICATE_RESOURCE"):
             return
         raise _fail("/api/customers/pins", resp)
@@ -379,7 +380,8 @@ class BackendAPI:
     async def address_history(self, call_session_seq: int, customer_seq: int, direction: str, limit: int) -> list[Place]:
         """이전 접수(ACCEPTED) 주문의 출발지(ORIGIN)·도착지(DESTINATION) 스냅샷, 최근 것부터. 같은 곳은 한 번만."""
         resp = await self.http.get(f"/api/customers/{int(customer_seq)}/addresses",
-                                   params={"direction": direction, "limit": limit}, headers=_call(call_session_seq))
+                                   params={"direction": direction, "limit": limit},
+                                   headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code != 200:
             raise _fail("/api/customers/addresses", resp)
         out: list[Place] = []
@@ -393,7 +395,8 @@ class BackendAPI:
     async def find_parcels(self, call_session_seq: int, limit: int) -> list[dict]:
         """통화 고객의 최근 주문 limit건을 택배(주문 상세) 단위로, 최근 것부터. 목록에는 받는 분이 없어 주문마다 상세를 읽는다.
         받는 분 성함으로 거르는 것은 부르는 쪽(Call.find_orders)이 한다: 이름을 URL(recipientName)에 넣지 않게."""
-        resp = await self.http.get("/api/orders", params={"limit": limit}, headers=_call(call_session_seq))
+        resp = await self.http.get("/api/orders", params={"limit": limit},
+                                   headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code != 200:
             raise _fail("/api/orders", resp)
         orders = resp.json().get("data") or []
@@ -402,7 +405,8 @@ class BackendAPI:
 
     async def order_detail(self, call_session_seq: int, order_seq: int) -> dict | None:
         """주문 상세(상태·금액·결제 요청·상세 목록). 없거나 다른 고객의 주문이면 None."""
-        resp = await self.http.get(f"/api/orders/{int(order_seq)}", headers=_call(call_session_seq))
+        resp = await self.http.get(f"/api/orders/{int(order_seq)}",
+                                   headers=_call(call_session_seq) | self._business_headers())
         if resp.status_code == 404:
             return None
         if resp.status_code != 200:
@@ -419,11 +423,58 @@ class BackendAPI:
         지금 상태는 다시 조회해서 본다)."""
         resp = await self.http.post(f"/api/orders/{int(order_seq)}/parcels/cancel",
                                     json={"orderParcelSeqs": [int(s) for s in order_parcel_seqs]},
-                                    headers=_call(call_session_seq))
+                                    headers=_call(call_session_seq) | self._business_headers())
         result = {204: "ok", 404: "not_found", 409: "conflict"}.get(resp.status_code)
         if result is None:
             raise _fail("/api/orders/{id}/parcels/cancel", resp)
         return result
+
+    async def cancel_order(self, call_session_seq: int, order_seq: int) -> str:
+        """주문 전체 취소(POST /api/orders/{id}/cancel, 본문 없음, order-cancel.md). 반환은 cancel_parcels와 같다."""
+        resp = await self.http.post(f"/api/orders/{int(order_seq)}/cancel",
+                                    headers=_call(call_session_seq) | self._business_headers())
+        result = {204: "ok", 404: "not_found", 409: "conflict"}.get(resp.status_code)
+        if result is None:
+            raise _fail("/api/orders/{id}/cancel", resp)
+        return result
+
+    async def update_collecting_order(self, call_session_seq: int, order_seq: int, body: dict) -> int:
+        """COLLECTING 주문 수정(PATCH /api/orders/{id}, order-update.md). body에 expectedVersion 필수. 새 version.
+        지금 통화 흐름은 부르지 않는다(계약만 맞춰 둠)."""
+        resp = await self.http.patch(f"/api/orders/{int(order_seq)}", json=body,
+                                     headers=_call(call_session_seq) | self._business_headers())
+        if resp.status_code != 200:
+            raise _fail("/api/orders/{id}", resp)
+        return _data(resp)["version"]
+
+    async def submit_order(self, call_session_seq: int, order_seq: int, expected_version: int) -> dict:
+        """COLLECTING 주문 최종 확정(POST /api/orders/{id}/submit, order-submit.md). data = {status}.
+        200만으로 접수 성공이 아니다(status 확인). 202는 SUBMITTING. 지금 통화 흐름은 부르지 않는다."""
+        resp = await self.http.post(f"/api/orders/{int(order_seq)}/submit", json={"expectedVersion": expected_version},
+                                    headers=_call(call_session_seq) | self._business_headers())
+        if resp.status_code not in (200, 202):
+            raise _fail("/api/orders/{id}/submit", resp)
+        return _data(resp)
+
+    async def list_pins(self, call_session_seq: int, customer_seq: int, q: str | None = None,
+                        limit: int = 20, offset: int = 0) -> dict:
+        """개인 PIN 목록(GET /api/customers/{id}/pins, pins.md). {data: PersonalPin[], hasNext, total_count} 그대로.
+        검색어는 URL에 들어가므로 부르는 쪽이 필요할 때만 넘긴다. 지금 통화 흐름은 부르지 않는다."""
+        params = {"limit": limit, "offset": offset} | ({"q": q} if q else {})
+        resp = await self.http.get(f"/api/customers/{int(customer_seq)}/pins", params=params,
+                                   headers=_call(call_session_seq) | self._business_headers())
+        if resp.status_code != 200:
+            raise _fail("/api/customers/pins", resp)
+        return resp.json()
+
+    async def update_pin(self, call_session_seq: int, pin_seq: int, fields: dict) -> int:
+        """개인 PIN 수정(PATCH /api/pins/{id}, pins.md). fields = label·addressData 중 하나 이상. 새 version.
+        지금 통화 흐름은 부르지 않는다."""
+        resp = await self.http.patch(f"/api/pins/{int(pin_seq)}", json=fields,
+                                     headers=_call(call_session_seq) | self._business_headers())
+        if resp.status_code != 200:
+            raise _fail("/api/pins/{id}", resp)
+        return _data(resp)["version"]
 
     async def submit_result(self, body: dict, idempotency_key: str) -> dict:
         """통화 결과 한 번. 결과가 불확실하면(연결 실패·504·202·409 처리 중) 같은 키·같은 본문으로 다시 확인한다.
@@ -433,7 +484,7 @@ class BackendAPI:
         last: dict | None = None
         while True:
             try:
-                resp = await self.http.post("/api/orders", json=body, headers={"Idempotency-Key": idempotency_key},
+                resp = await self.http.post("/api/orders", json=body, headers={"Idempotency-Key": idempotency_key} | self._business_headers(),
                                             timeout=self.submit_timeout_sec)
             except httpx2.TransportError as e:
                 log.warning("결과 전송 연결 실패, 다시 확인: %s", type(e).__name__)
@@ -460,7 +511,7 @@ class BackendAPI:
         from app.rag.faq_source import parse_initial_faqs
 
         request = httpx2.Request('GET', self.http.base_url.join('/api/ai/faqs'),
-            params={'limit':100, 'offset':0}, headers={'Accept':'application/json'})
+            params={'limit':100, 'offset':0}, headers={'Accept':'application/json'} | self._business_headers())
         try:
             response = await self.http.send(request, auth=None, follow_redirects=False)
         except httpx2.TransportError:
@@ -476,10 +527,10 @@ class BackendAPI:
         from app.rag.faq_source import parse_faq_lookup, validate_faq_ids
 
         requested = validate_faq_ids(ids)
-        # 별도 Request를 만들어 고객/관리자 쿠키·페르소나 토큰·통화 헤더를 상속하지 않는다.
+        # 별도 Request를 만들어 고객/관리자 쿠키·페르소나 토큰·통화 헤더를 상속하지 않는다. 인증은 AI_BUSINESS_TOKEN만.
         request = httpx2.Request('GET', self.http.base_url.join('/api/ai/faqs'),
             params={'faqEntrySeqs': ','.join(map(str, requested)), 'limit': 100, 'offset': 0},
-            headers={'Accept': 'application/json'})
+            headers={'Accept': 'application/json'} | self._business_headers())
         try:
             response = await self.http.send(request, auth=None, follow_redirects=False)
         except httpx2.TransportError:
