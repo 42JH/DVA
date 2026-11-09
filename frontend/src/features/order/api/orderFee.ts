@@ -1,4 +1,4 @@
-// 수기 주문 배송비 — 품목 개수 × 단가의 합 (11/06). 서버에 견적 API가 없어 화면이 계산 (orderFee.test.ts)
+// 수기 주문 배송비 — 박스는 개수 × 단가, 서류는 몇 장이든 한 번 (11/09 사용자). 그 합 (11/06). 서버에 견적 API가 없어 화면이 계산 (orderFee.test.ts)
 import type { BoxKey } from './orderApi'
 
 // shortcut: 단가를 화면에 고정, 서버가 요금표 · 견적 API를 주면 그걸로 바꾸기
@@ -16,7 +16,8 @@ export const isJeju = (roadAddress: string) => roadAddress.trim().startsWith('�
 
 export function shippingFeeOf(counts: Record<BoxKey, number>, jeju: boolean) {
   const base = (Object.keys(UNIT_PRICE) as BoxKey[]).reduce(
-    (sum, k) => sum + counts[k] * UNIT_PRICE[k],
+    // 서류는 1장이든 100장이든 같은 값
+    (sum, k) => sum + (k === 'document' ? Math.min(counts[k], 1) : counts[k]) * UNIT_PRICE[k],
     0,
   )
   return base > 0 && jeju ? base + JEJU_EXTRA : base // 품목이 없으면 0 그대로 (접수 막음)
