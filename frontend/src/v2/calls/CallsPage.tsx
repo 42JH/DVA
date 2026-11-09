@@ -85,7 +85,7 @@ export function CallsPage() {
             </thead>
             <tbody>
               {vm.rows.map((r) => (
-                <Row key={r.seq} r={r} from={`/v2/calls${from}`} onWarm={() => vm.warm(r.seq)} />
+                <Row key={r.seq} r={r} from={`/calls${from}`} onWarm={() => vm.warm(r.seq)} />
               ))}
             </tbody>
           </table>
@@ -121,7 +121,7 @@ function useHalfColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) 
 }
 
 function Row({ r, from, onWarm }: { r: CallRowV2; from: string; onWarm: () => void }) {
-  const to = `/v2/calls/${r.seq}`
+  const to = `/calls/${r.seq}`
   // 줄 전체가 링크처럼 — 칸마다 같은 Link (표 구조 유지 · 키보드는 첫 칸 링크로)
   const cell = (
     child: React.ReactNode,

@@ -104,7 +104,7 @@ export function CompaniesPage() {
                   <td className="text-left">
                     <span className="flex min-w-0 items-center gap-2">
                       <Link
-                        to={`/v2/companies/${r.id}`}
+                        to={`/companies/${r.id}`}
                         className="truncate font-medium hover:text-ops-route"
                       >
                         {r.name}

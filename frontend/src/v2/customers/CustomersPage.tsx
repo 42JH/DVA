@@ -157,14 +157,14 @@ function CustomerPanel({ seq, onClose }: { seq: number; onClose: () => void }) {
             </dl>
             <div className="mt-4 flex gap-2">
               <Link
-                to={`/v2/orders?q=${v.c.digits}&r=all`}
+                to={`/orders?q=${v.c.digits}&r=all`}
                 className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[13px] font-semibold ring-1 ring-ops-line ring-inset"
               >
                 <Icon name="box" className="size-4" />
                 주문 내역
               </Link>
               <Link
-                to={`/v2/calls?q=${v.c.digits}&r=all`}
+                to={`/calls?q=${v.c.digits}&r=all`}
                 className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-[13px] font-semibold ring-1 ring-ops-line ring-inset"
               >
                 <Icon name="phone" className="size-4" />

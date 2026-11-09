@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Link, useLocation } from 'react-router'
+import { Link } from 'react-router'
 import type {
   CardState,
   ComplaintView,
@@ -145,11 +145,9 @@ const Chip = ({ children }: { children: ReactNode }) => (
 
 /** '그래프 보기' (Figma 118×28 · 파랑 · 모서리 4 · bar-chart-07 아이콘 20 + 13/700) — 신규 · 기존 비교 화면으로 */
 function GraphLink({ to }: { to: string }) {
-  // v2 통계에서 열면 v2 그래프 화면으로 (위 줄 · 사이드바가 v2 그대로)
-  const v2 = useLocation().pathname.startsWith('/v2')
   return (
     <Link
-      to={v2 ? to.replace('/dashboard/', '/v2/stats/') : to}
+      to={to}
       className="ml-auto inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-ops-route-soft px-3 text-[13px] font-semibold text-ops-route outline-none hover:bg-[#d6e4ff] focus-visible:ring-2 focus-visible:ring-ops-route"
     >
       <svg
@@ -172,7 +170,7 @@ function GraphLink({ to }: { to: string }) {
 /** §2 단계별 고객 이탈 — 진입 수 열 없음, 비율 = 판정 완료 통화 대비 */
 export function DropOffCard({ c }: { c: CardState<DropOffView> }) {
   return (
-    <Card title="단계별 이탈률" aside={<GraphLink to="/dashboard/stage-dropoffs" />} c={c}>
+    <Card title="단계별 이탈률" aside={<GraphLink to="/stats/stage-dropoffs" />} c={c}>
       {(v) => (
         <>
           <Headline value={v.value} unit="%">
@@ -270,11 +268,7 @@ export function ComplaintCard({ c }: { c: CardState<ComplaintView> }) {
 /** §5 응답 대기에 쓰인 통화시간 — P95 열 없음, 평균 대기만 */
 export function WaitCard({ c }: { c: CardState<WaitView> }) {
   return (
-    <Card
-      title="응답 대기에 쓰인 통화시간"
-      aside={<GraphLink to="/dashboard/response-wait" />}
-      c={c}
-    >
+    <Card title="응답 대기에 쓰인 통화시간" aside={<GraphLink to="/stats/response-wait" />} c={c}>
       {(v) => (
         <>
           <Headline value={v.value} unit="%">

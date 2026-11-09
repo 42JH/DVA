@@ -200,7 +200,7 @@ function Opened({ f, open, onEdit }: { f: Faq; open: boolean; onEdit: () => void
                 <span className="w-24 shrink-0 text-ops-faint tabular-nums">{e.at}</span>
                 {e.call ? (
                   <Link
-                    to={`/v2/calls/${e.call}`}
+                    to={`/calls/${e.call}`}
                     state={{ at: e.iso }} // 통화 상세가 이 질문을 한 말로 바로 스크롤
                     className="min-w-0 hover:text-ops-route hover:underline"
                   >
