@@ -58,7 +58,8 @@ Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 �
 - customer/consultation은 operations에 현재 세션을 확인하며 consultation은 customer 조회 이벤트에도 의존한다. order는 AI 범위 확인을 위해 customer·consultation, 취소 시 배송 확인을 위해 delivery에 의존한다. delivery readiness는 자기 DB만 검사한다. 모두 선택되면 operations → customer → consultation → delivery → order 순서로 배포한다. 기존 서비스 Secret 값은 보존하며 customer의 조회에는 consultation의 readiness를 요구하지 않아 의존 순환을 만들지 않는다. 통화 등록 요청의 의존 장애는 503으로 반환한다.
 - DB·서비스 회귀·이벤트·배포 회귀의 성공 commit/build는 각 단계가 통과한 즉시 기록한다. 뒤의 CD 실패도 이 기록을 없애지 않는다. 다음 실행은 각 검사의 마지막 성공 입력과 비교하며, 없는 기록·잘못된 기록·이력 분기는 다시 검사한다.
 - DB CI는 migration·실행기·검증기·고정 기준 정책 변경으로 선택한다. 배포 pending·SSH 코드·DB 문서 변경만으로 전체 DB 검증을 반복하지 않는다. 동일 입력을 재사용한 DB 패키지에는 이전 검증 commit/build와 이번 이미지 ID를 함께 기록하며, 실제 서버의 fingerprint·migration·백업·복구 검사는 유지한다.
-- 준비된 이미지는 선택된 검사와 배포에 필요한 것만 빌드한다. 검증이 끝난 배포 재시도는 checks/monolith 이미지를 만들지 않는다. 배포 없는 CI는 앱·DB 전송 패키지를 만들지 않는다. inventory와 최종 검증기 회귀 6개는 별도 Node 단계에서 빠르게 확인한다.
+- 준비된 이미지는 선택된 검사와 배포에 필요한 것만 빌드한다. 검증이 끝난 배포 재시도는 checks/monolith 이미지를 만들지 않는다. 배포 없는 CI는 앱·DB 전송 패키지를 만들지 않는다. inventory·최종 검증기·fixture 초기화 회귀 10개는 별도 Node 단계에서 빠르게 확인한다.
+- 실행 중인 워커와 테스트 데이터 초기화가 충돌하지 않도록 전용 테스트 DB의 TRUNCATE는 관련 테이블을 NOWAIT로 잠근 뒤 실행한다. 경합 시 초기화 트랜잭션만 되돌려 최대 5초 안에서 재시도하며 API 요청·업무 기대값은 그대로 검사한다. 실제 PostgreSQL의 잠금 경합 회귀는 operations 단계에서 한 번 실행한다.
 - Webhook을 통한 앱 자동 배포는 `develop-backend`에서만 허용한다. MR/작업 브랜치에서는 배포하지 않는다.
 - `develop-backend` 실행은 CI와 CD를 함께 수행한다. 수동 재실행도 동일한 흐름이다. 작업 브랜치는 CI만 수행한다.
 - DB는 namespace의 `dva.ssafy.io/db-<서비스>-commit`부터 서비스별 changelog 변경을 비교한다. DB만 변경되어도 자동 적용한다. 성공한 DB만 적용 커밋을 갱신하므로 이후 실패한 DB는 재실행 시 누락되지 않는다.
