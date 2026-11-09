@@ -11,7 +11,7 @@ module.exports = function aiSettingsFixture() {
   assert.equal(process.env.DB_NAME, 'dva_webhook_test');
   assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
   process.env.CORS_ORIGINS = 'http://localhost:5173';
-  process.env.SWAGGER_ENABLED = 'true';
+  process.env.SWAGGER_ENABLED = 'false';
   const token = randomBytes(32).toString('hex');
   process.env.AI_PERSONA_TOKEN = token;
   const pool = createTestPool();

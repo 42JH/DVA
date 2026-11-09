@@ -13,7 +13,7 @@ module.exports = function manualOrders() {
   assert.equal(process.env.NODE_ENV, 'test');
   assert.equal(process.env.DB_NAME, 'dva_webhook_test');
   assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-  process.env.SWAGGER_ENABLED = 'true';
+  process.env.SWAGGER_ENABLED = 'false';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
   const { AppModule } = require('../../dist/app.module');
   const { configureApplication } = require('../../dist/configure-application');

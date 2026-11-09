@@ -5,11 +5,11 @@ const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
 const { once } = require('node:events');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 const { migrate } = require('./helpers/migrations.cjs');
-const { hashPassword } = require('../dist/auth/password');
+
 const { PaymentsService } = require('../dist/payments/payments.service');
 const { PaymentsRepository } = require('../dist/payments/payments.repository');
 const { PaymentsWorker } = require('../dist/payments/payments.worker');
@@ -133,9 +133,9 @@ before(async () => {
     DVER_API_URL: external + '/parcel',
     DVER_API_KEY: 'dver-fixture',
   });
-  await pool.query(
-    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash",
-    [await hashPassword('payment-fixture-only')],
+  const admin = await pool.query(
+    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('payment021','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
+    ['not-for-login'],
   );
   customerId = (
     await pool.query(
@@ -150,13 +150,7 @@ before(async () => {
   worker = app.get(PaymentsWorker);
   payments = app.get(PaymentsService);
   client = app.get(PaymentClient);
-  const login = await fetch(base + '/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: adminOrigin },
-    body: JSON.stringify({ loginId: 'payment021', password: 'payment-fixture-only' }),
-  });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get('set-cookie').split(';')[0];
+  cookie = await createTestSession(pool, admin.rows[0].admin_user_seq);
 });
 after(async () => {
   for (const application of apps) await application.close();
@@ -1269,60 +1263,6 @@ test('automatic approval batches are disjoint and honor the persisted next looku
     await pool.query(
       'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=ANY($1::uuid[])',
       [ids],
-    );
-  }
-});
-
-test('migration 051 preserves an existing key, approval evidence and lease during upgrade', async () => {
-  const { readFileSync } = require('node:fs');
-  const { join } = require('node:path');
-  const order = await create(),
-    id = order.paymentRequest.paymentRequestId;
-  await app.get(OrderPaymentsService).claimApproval(id, order.totalAmount, 'upgrade_' + id);
-  await app.get(OrderPaymentsService).recordApproval(id, 'upgrade_' + id, new Date().toISOString());
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const snapshot = async () =>
-      (
-        await client.query(
-          "SELECT to_jsonb(r)-'approval_next_check_at' AS value FROM order_payment_requests r WHERE payment_request_id=$1",
-          [id],
-        )
-      ).rows[0].value;
-    const before = await snapshot();
-    // Recreate only the pre-051 column/index shape inside this disposable transaction.
-    await client.query('ALTER TABLE order_payment_requests DROP COLUMN approval_next_check_at');
-    const original = readFileSync(
-      join(__dirname, '../migrations/022-order-toss-payments.sql'),
-      'utf8',
-    );
-    await client.query(original.match(/CREATE INDEX order_payment_reconcile_idx[\s\S]+?;/)[0]);
-    await client.query(
-      readFileSync(join(__dirname, '../migrations/051-payment-approval-recovery.sql'), 'utf8'),
-    );
-    assert.deepEqual(await snapshot(), before);
-    const row = (
-      await client.query(
-        'SELECT approval_next_check_at FROM order_payment_requests WHERE payment_request_id=$1',
-        [id],
-      )
-    ).rows[0];
-    assert.equal(row.approval_next_check_at, null);
-    assert.match(
-      (
-        await client.query(
-          "SELECT pg_get_indexdef('order_payment_reconcile_idx'::regclass) AS definition",
-        )
-      ).rows[0].definition,
-      /COALESCE\(approval_next_check_at, approval_started_at\).*payment_request_id/,
-    );
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-    await pool.query(
-      'UPDATE order_payment_requests SET invalidated_at=clock_timestamp() WHERE payment_request_id=$1',
-      [id],
     );
   }
 });

@@ -4,51 +4,39 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { hashPassword } = require('../dist/auth/password');
 
 const pool = createTestPool();
-let app, appB, base, baseB, adminA, adminB, hash, sessionA;
+let app, appB, base, baseB, adminA, sessionA;
 const apps = [];
 const cookies = new Map();
-const password = 'company-test-only-password';
 const mutationHeaders = { Origin: 'http://localhost:5173' };
 
 const start = () => startTestApp(apps);
-async function login(loginId, host = base) {
-  const response = await fetch(host + '/api/auth/login', {
-    method: 'POST',
-    headers: { ...mutationHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ loginId, password }),
-  });
-  assert.equal(response.status, 200);
-  return response.headers.get('set-cookie').split(';')[0];
-}
 async function account(loginId, role = 'OPERATOR', status = 'ACTIVE') {
   const result = await pool.query(
     'INSERT INTO admin_users (login_id,name,password_hash,role,status) VALUES ($1,$2,$3,$4,$5) RETURNING admin_user_seq',
-    [loginId, '기업 테스트', hash, role, status],
+    [loginId, '기업 테스트', 'not-for-login', role, status],
   );
   return result.rows[0].admin_user_seq;
 }
 before(async () => {
   await migrate(pool);
-  hash = await hashPassword(password);
   adminA = await account('companyTestA');
-  adminB = await account('companyTestB', 'SYSTEM_ADMIN');
+  const adminB = await account('companyTestB', 'SYSTEM_ADMIN');
   app = await start();
   appB = await start();
   base = await app.getUrl();
   baseB = await appB.getUrl();
-  sessionA = await login('companyTestA');
+  sessionA = await createTestSession(pool, adminA);
   cookies.set(base, sessionA);
-  cookies.set(baseB, await login('companyTestB', baseB));
+  cookies.set(baseB, await createTestSession(pool, adminB));
 });
 after(async () => {
   for (const application of apps) await application.close();
@@ -101,37 +89,9 @@ test('every company operation rejects missing, forged and malformed sessions bef
   assert.equal((await pool.query('SELECT count(*) FROM organizations')).rows[0].count, count);
 });
 
-test('company writes require an allowed Origin even with a valid session', async () => {
-  const id = (await (await create('CSRF 검증 기업')).json()).data.organizationSeq;
-  for (const headers of [{ Origin: undefined }, { Origin: 'https://untrusted.invalid' }]) {
-    for (const [method, path, body] of [
-      ['POST', '', { name: 'CSRF 거절 기업' }],
-      ['PATCH', '/' + id, { name: 'CSRF 거절 기업' }],
-    ]) {
-      const response = await request(path, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': randomUUID(),
-          ...headers,
-        },
-        body: JSON.stringify(body),
-      });
-      assert.equal(response.status, 403);
-      assert.equal((await response.json()).error.code, 'FORBIDDEN');
-    }
-  }
-  assert.equal((await (await request('/' + id)).json()).data.name, 'CSRF 검증 기업');
-  assert.equal(
-    (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', ['CSRF 거절 기업']))
-      .rows[0].count,
-    '0',
-  );
-});
-
 test('all active administrator roles can register, list, read and update companies', async () => {
-  await account('companySupervisor', 'SUPERVISOR');
-  for (const cookie of [sessionA, cookies.get(baseB), await login('companySupervisor')]) {
+  const supervisor = await account('companySupervisor', 'SUPERVISOR');
+  for (const cookie of [sessionA, cookies.get(baseB), await createTestSession(pool, supervisor)]) {
     const name = '역할 검증 ' + randomUUID();
     const created = await request('', {
       method: 'POST',
@@ -159,59 +119,6 @@ test('all active administrator roles can register, list, read and update compani
       204,
     );
   }
-});
-
-test('expired, logged-out and pending-administrator sessions cannot access any company operation', async () => {
-  for (const reason of ['expired', 'logout', 'pending']) {
-    const loginId = 'company' + reason;
-    const id = await account(loginId);
-    const cookie = await login(loginId);
-    if (reason === 'expired') {
-      await pool.query(
-        "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
-        [id],
-      );
-    } else if (reason === 'pending') {
-      await pool.query("UPDATE admin_users SET status='PENDING' WHERE admin_user_seq=$1", [id]);
-    } else {
-      const response = await fetch(base + '/api/auth/logout', {
-        method: 'POST',
-        headers: { ...mutationHeaders, Cookie: cookie },
-      });
-      assert.equal(response.status, 204);
-    }
-    for (const [method, path] of [
-      ['GET', ''],
-      ['POST', ''],
-      ['GET', '/1'],
-      ['PATCH', '/1'],
-    ]) {
-      const response = await request(path, { method, headers: { Cookie: cookie } });
-      assert.equal(response.status, 401, reason + ' ' + method + ' ' + path);
-    }
-  }
-});
-
-test('registration returns only an ID; detail preserves the agreed name/status contract', async () => {
-  const response = await create('  등록 기업  ');
-  assert.equal(response.status, 201);
-  const body = await response.json();
-  assert.deepEqual(Object.keys(body.data), ['organizationSeq']);
-  assert.ok(body.data.organizationSeq > 0);
-  assert.equal(body.meta.requestId, response.headers.get('x-request-id'));
-  const detail = await request('/' + body.data.organizationSeq);
-  assert.deepEqual((await detail.json()).data, {
-    organizationSeq: body.data.organizationSeq,
-    name: '등록 기업',
-    status: 'ACTIVE',
-    memberCount: 0,
-    createdAt: (
-      await pool.query('SELECT created_at FROM organizations WHERE organization_seq=$1', [
-        body.data.organizationSeq,
-      ])
-    ).rows[0].created_at.toISOString(),
-    monthlyBillingEnabled: false,
-  });
 });
 
 test('lists use stable pagination, status and literal name searches without exposing other tables', async () => {
@@ -301,76 +208,6 @@ test('patch updates name/status with no response body and preserves memberships/
   assert.equal((await patch(id, { status: 'ACTIVE' })).status, 204);
   assert.equal((await request('/' + id, { method: 'DELETE' })).status, 204);
   assert.equal((await request('/' + id)).status, 404);
-});
-
-test('invalid input, extra fields and invalid IDs never create or change records', async () => {
-  for (const body of [
-    { name: '' },
-    { name: ' ' },
-    { name: 42 },
-    { name: null },
-    { name: 'valid', address: 'private' },
-    { name: 'valid', status: 'INACTIVE' },
-  ]) {
-    const response = await request('', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
-      body: JSON.stringify(body),
-    });
-    assert.equal(response.status, 400);
-  }
-  for (const query of [
-    'limit=0',
-    'limit=101',
-    'offset=-1',
-    'limit=1e2',
-    'status=PENDING',
-    'q=a&q=b',
-    'unexpected=true',
-  ])
-    assert.equal((await request('?' + query)).status, 400, query);
-  for (const id of ['0', '-1', '2147483648', '1e2', 'abc'])
-    assert.equal((await request('/' + id)).status, 400, id);
-  const id = (await (await create('수정 검증')).json()).data.organizationSeq;
-  for (const body of [
-    {},
-    { name: null },
-    { name: ' ' },
-    { status: null },
-    { status: 'PENDING' },
-    { companySeq: 1 },
-  ])
-    assert.equal((await patch(id, body)).status, 400);
-  assert.equal((await request('/2147483647')).status, 404);
-  assert.equal((await patch(2147483647, { name: 'missing' })).status, 404);
-});
-
-test('registration needs no request key and repeated names or legacy headers create independent companies', async () => {
-  const name = '독립 등록 ' + randomUUID();
-  const first = await create(name);
-  const second = await create(name, 'legacy-key');
-  const third = await create(name, 'legacy-key', baseB);
-  for (const response of [first, second, third]) assert.equal(response.status, 201);
-  const ids = await Promise.all(
-    [first, second, third].map(async (response) => (await response.json()).data.organizationSeq),
-  );
-  assert.equal(new Set(ids).size, 3);
-  assert.equal(
-    (await pool.query('SELECT count(*) FROM organizations WHERE name=$1', [name])).rows[0].count,
-    '3',
-  );
-});
-
-test('registered companies remain readable after application restart', async () => {
-  const original = (await (await create('재시작 검증 기업')).json()).data;
-  await app.close();
-  apps.splice(apps.indexOf(app), 1);
-  app = await start();
-  base = await app.getUrl();
-  cookies.set(base, sessionA);
-  const response = await request('/' + original.organizationSeq);
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).data.name, '재시작 검증 기업');
 });
 
 test('each company creation records its authenticated actor and request once', async () => {

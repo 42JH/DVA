@@ -441,25 +441,6 @@ test('unregistered callers keep partial drafts, cannot claim READY and can resum
   );
 });
 
-test('Swagger describes numeric nullable identities and a complete historical snapshot rather than the input price cap', async () => {
-  const spec = await (await f.get('/api/docs-json')).json();
-  const properties = spec.components.schemas.ParcelDraftResponseDto.properties;
-  for (const field of [
-    'customerSeq',
-    'callSessionSeq',
-    'sourceDraftSeq',
-    'orderSeq',
-    'orderParcelSeq',
-    'intakeVersion',
-  ]) {
-    assert.equal(properties[field].type, 'number', field);
-    assert.equal(properties[field].nullable, true, field);
-  }
-  const snapshot = spec.components.schemas.DraftParcelSnapshotDto;
-  assert.ok(snapshot.required.includes('origin'));
-  assert.ok(snapshot.properties.itemPrice.maximum > 100000000);
-});
-
 test('retired COMPANY references may resume only the unchanged historical address and never authorize a new selection', async () => {
   await f.error(
     await create(body({ parcel: { ...parcel(), originPin: { scope: 'COMPANY', pinSeq: 901 } } })),

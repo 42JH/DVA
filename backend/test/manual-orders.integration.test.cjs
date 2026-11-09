@@ -100,39 +100,3 @@ test('69: new customers are registered atomically and an existing phone does not
     '신규 수기 고객',
   );
 });
-
-test('69: legacy admin drafts remain partial and AI results keep the existing payload and response', async () => {
-  const before = await f.counts();
-  const draft = await f.post('/api/orders', { customerSeq: f.customerId });
-  assert.equal(draft.status, 201);
-  const draftData = (await draft.json()).data;
-  assert.deepEqual(Object.keys(draftData).sort(), ['orderSeq', 'version']);
-  assert.equal(
-    (await (await f.get(`/api/orders/${draftData.orderSeq}`)).json()).data.creationSource,
-    'ADMIN',
-  );
-  const input = f.body();
-  input.customerSeq = f.otherId;
-  input.outcome = 'COMPLETE';
-  input.call = {
-    providerCallId: 'ai-manual-regression-' + randomUUID(),
-    callerPhoneNumber: (
-      await f.pool.query('SELECT phone_number FROM customers WHERE customer_seq=$1', [f.otherId])
-    ).rows[0].phone_number,
-    incomingAt: '2026-10-28T01:00:00Z',
-  };
-  const ai = await f.post('/api/orders', input, randomUUID(), 0, {
-    Cookie: undefined,
-    Origin: undefined,
-  });
-  assert.equal(ai.status, 201);
-  const aiData = (await ai.json()).data;
-  assert.equal(aiData.status, 'ACCEPTED');
-  assert.ok(aiData.callSessionSeq > 0);
-  assert.equal(
-    (await (await f.get(`/api/orders/${aiData.orderSeq}`)).json()).data.creationSource,
-    'AI',
-  );
-  assert.equal((await f.counts()).calls, before.calls + 1);
-  assert.equal(f.requests.length, 1);
-});

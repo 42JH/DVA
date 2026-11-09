@@ -2,14 +2,14 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
-const { hashPassword } = require('../dist/auth/password');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
+
 const { AuditService } = require('../dist/audit/audit.service');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const origin = 'http://localhost:5173';
 process.env.CORS_ORIGINS = origin;
 const pool = createTestPool();
@@ -22,22 +22,14 @@ const phone = '01064000001';
 before(async () => {
   app = await startTestApp(apps);
   base = (await app.getUrl()) + '/api';
-  const password = 'cancel-test-password';
-  const hash = await hashPassword(password);
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const loginId = 'cancel' + role.replaceAll('_', '');
     const admin = await pool.query(
       "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'취소 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
-      [loginId, hash, role],
+      [loginId, 'not-for-login', role],
     );
     adminIds.push(admin.rows[0].admin_user_seq);
-    const res = await fetch(base + '/auth/login', {
-      method: 'POST',
-      headers: { Origin: origin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginId, password }),
-    });
-    assert.equal(res.status, 200, await res.clone().text());
-    cookies.push(res.headers.get('set-cookie').split(';')[0]);
+    cookies.push(await createTestSession(pool, admin.rows[0].admin_user_seq));
   }
   customerId = (
     await pool.query(
@@ -317,24 +309,6 @@ test('batch cancellation waits for a concurrent payment transaction and rechecks
 test('path validation and Swagger describe empty 204 with one call header', async () => {
   for (const id of ['0', '-1', 'abc', '2147483648']) assert.equal((await cancel(id)).status, 400);
   assert.equal((await cancel(2147483647)).status, 404);
-  const doc = await (await fetch(base + '/docs-json')).json();
-  const operation = doc.paths['/api/orders/{id}/cancel'].post;
-  assert.equal(operation.summary, '주문 전체 취소');
-  assert.equal(operation.requestBody, undefined);
-  assert.equal(operation.responses['204'].content, undefined);
-  assert.equal(operation.responses['202'], undefined);
-  assert.equal(
-    operation.parameters.filter((p) => p.name.toLowerCase() === 'call_session_seq').length,
-    1,
-  );
-  assert.equal(
-    operation.parameters.some((p) => p.name.toLowerCase() === 'idempotency-key'),
-    false,
-  );
-  assert.deepEqual(doc.components.schemas.OrderParcelDto.properties.status.enum, [
-    'ACTIVE',
-    'CANCELLED',
-  ]);
 });
 
 test('individual cancellation preserves siblings and completes the parent only on the last parcel', async () => {

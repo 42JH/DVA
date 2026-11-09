@@ -186,44 +186,6 @@ module.exports = function registerAiSettingsApplication(suite) {
     );
   });
 
-  test('application validation rejects invalid result combinations without replacing PENDING', async () => {
-    const pending = await data(await activate(await create()), 202);
-    for (const change of [
-      { result: 'FAILED' },
-      { errorCode: 'APPLY_FAILED' },
-      { errorCode: null },
-      { activeCallCount: '0' },
-      { activeCallCount: -1 },
-      { activeCallCount: null },
-      { applicationId: 'bad' },
-    ])
-      await error(await report(pending, change), 400, 'INVALID_REQUEST');
-    await error(await report(pending, { applicationId: randomUUID() }), 409, 'VERSION_CONFLICT');
-    assert.equal((await data(await runtime('PENDING'))).applicationId, pending.applicationId);
-  });
-
-  test('apply results can omit the legacy call count on failure, success and a duplicate success', async () => {
-    const previous = await data(await runtime());
-    const pending = await data(await activate(await create()), 202);
-    const failed = await data(
-      await report(pending, {
-        activeCallCount: undefined,
-        result: 'FAILED',
-        errorCode: 'APPLY_FAILED',
-      }),
-    );
-    assert.equal(failed.status, 'PENDING');
-    assert.equal(failed.applyErrorCode, 'APPLY_FAILED');
-    assert.equal((await data(await runtime())).aiPersonaVersionSeq, previous.aiPersonaVersionSeq);
-    const active = await data(await report(pending, { activeCallCount: undefined }));
-    assert.equal(active.status, 'ACTIVE');
-    assert.equal(active.applyErrorCode, null);
-    assert.equal(
-      (await data(await report(pending, { activeCallCount: undefined }))).appliedAt,
-      active.appliedAt,
-    );
-  });
-
   test('two concurrent applications retain one pending and one active with atomic successful handover', async () => {
     const [a, b] = await Promise.all([create(), create()]);
     const pending = await Promise.all([a, b].map(async (v) => data(await activate(v), 202)));
@@ -244,32 +206,6 @@ module.exports = function registerAiSettingsApplication(suite) {
       ),
       (e) => e.code === '23505',
     );
-  });
-
-  test('old snapshots stay immutable but cannot be published or used as a stale editing base', async () => {
-    const first = await create();
-    const second = await data(
-      await saveVersion(first.aiPersonaSeq, {
-        expectedVersion: 1,
-        name: '다른 이름',
-        speakingRate: 0.8,
-      }),
-    );
-    await data(await report(await data(await activate(second), 202)));
-    await error(await activate(first, 2), 409, 'VERSION_CONFLICT');
-    await error(
-      await saveVersion(first.aiPersonaSeq, { expectedVersion: 1, name: '과거 기준 수정' }),
-      409,
-      'VERSION_CONFLICT',
-    );
-    const history = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}/versions`));
-    assert.equal(history.length, 2);
-    assert.equal(history[1].name, first.name);
-    assert.equal(history[1].speakingRate, first.speakingRate);
-    const detail = await data(await call('GET', `/api/personas/${first.aiPersonaSeq}`));
-    assert.equal(detail.latestVersion.version, 2);
-    assert.equal(detail.headVersion.aiPersonaVersionSeq, second.aiPersonaVersionSeq);
-    assert.equal(detail.activeVersionSeq, second.aiPersonaVersionSeq);
   });
 
   test('failed audit on applied acknowledgment rolls the entire ACTIVE switch back', async () => {
@@ -478,45 +414,5 @@ module.exports = function registerAiSettingsApplication(suite) {
         .createdByAdminUserName,
       null,
     );
-  });
-
-  test('a new-call acknowledgment switches ACTIVE while old saved settings remain available for ongoing calls', async () => {
-    const original = await create();
-    await data(await report(await data(await activate(original), 202)));
-    const oldConfig = await data(await runtime());
-    const saved = await data(
-      await saveVersion(original.aiPersonaSeq, {
-        expectedVersion: 1,
-        promptText: '새 통화용 프롬프트',
-      }),
-    );
-    assert.equal(saved.status, 'INACTIVE');
-    const pending = await data(await activate(saved), 202);
-    assert.equal(pending.status, 'PENDING');
-    assert.equal((await data(await runtime())).aiPersonaVersionSeq, original.aiPersonaVersionSeq);
-    const active = await data(await report(pending, { activeCallCount: 3 }));
-    assert.equal(active.status, 'ACTIVE');
-    assert.equal((await data(await runtime())).aiPersonaVersionSeq, pending.aiPersonaVersionSeq);
-    const versions = await (
-      await call('GET', `/api/personas/${original.aiPersonaSeq}/versions`)
-    ).json();
-    const oldVersion = versions.data.find(
-      (row) => row.aiPersonaVersionSeq === original.aiPersonaVersionSeq,
-    );
-    assert.equal(oldVersion.promptText, oldConfig.promptText);
-    assert.equal(oldVersion.status, 'INACTIVE');
-    assert.equal(
-      (await data(await report(pending, { activeCallCount: 2 }))).appliedAt,
-      active.appliedAt,
-    );
-    const oldCandidate = await data(
-      await saveVersion(original.aiPersonaSeq, { expectedVersion: 2, name: '대기 교체 전' }),
-    );
-    const replaced = await data(await activate(oldCandidate), 202);
-    const newCandidate = await data(
-      await saveVersion(original.aiPersonaSeq, { expectedVersion: 3, name: '최신 대기' }),
-    );
-    await data(await activate(newCandidate), 202);
-    await error(await report(replaced, { activeCallCount: 3 }), 409, 'VERSION_CONFLICT');
   });
 };

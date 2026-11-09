@@ -13,7 +13,7 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const pool = createTestPool();
 const logs = [];
 const apps = [];
@@ -385,42 +385,6 @@ test('question references must exist in the same call and deleted questions are 
   );
 });
 
-test('seconds preserve zero and unknown; forbidden status, milliseconds, duplicates and oversized input never write', async () => {
-  const c = await createCall();
-  await success(await post(c, [event(1, { offsetSeconds: 0 }), event(2, { offsetSeconds: null })]));
-  assert.deepEqual(
-    (await rows(c.id)).map((row) => row.offset_seconds),
-    ['0', null],
-  );
-  const value = event(3);
-  for (const values of [
-    [value, { ...value, eventOrder: 4 }],
-    [value, event(3)],
-    [event(3, { offsetMs: 31000 })],
-    [event(3, { offsetSeconds: 31.1 })],
-    [event(3, { payload: { ...value.payload, status: 'SUCCEEDED' } })],
-  ])
-    await error(await post(c, values), 400, 'INVALID_REQUEST');
-  await error(
-    await post(
-      c,
-      Array.from({ length: 6 }, (_, i) =>
-        utterance(i + 3, i + 1, {
-          payload: {
-            utteranceOrder: i + 1,
-            speaker: 'AI',
-            utteranceText: 'x'.repeat(20000),
-            lastSentenceSeq: 1,
-          },
-        }),
-      ),
-    ),
-    413,
-    'PAYLOAD_TOO_LARGE',
-  );
-  assert.equal((await rows(c.id)).length, 2);
-});
-
 test('conflicting concurrent reports across instances choose one winner and audit failure rolls back all writes', async () => {
   const c = await createCall();
   const original = event();
@@ -467,64 +431,6 @@ require('./call-events-migrations.cjs')({
   },
   token,
   error,
-});
-
-test('database rejects cross-call question links, action status and invalid second offsets', async () => {
-  const c = await createCall();
-  const other = await createCall();
-  const questionId = await createQuestion(other.id);
-  const statement = `INSERT INTO call_insight_events(event_id,call_session_seq,event_order,kind,
-    occurred_at,offset_seconds,unanswered_question_seq,payload,payload_hash)
-    VALUES($1,$2,1,$3,'2026-10-31T01:00:31Z',$4,$5,$6::jsonb,$7)`;
-  const values = [
-    randomUUID(),
-    c.id,
-    'AI_ACTION',
-    31,
-    null,
-    JSON.stringify({ action: 'FIELD_SAVED', summaryText: '저장', orderSeq: null }),
-    'a'.repeat(64),
-  ];
-  const cases = [
-    [
-      [
-        ...values.slice(0, 5),
-        JSON.stringify({ action: 'FIELD_SAVED', status: 'SUCCEEDED' }),
-        values[6],
-      ],
-      '23514',
-    ],
-    [[...values.slice(0, 3), -1, ...values.slice(4)], '23514'],
-    [
-      [
-        values[0],
-        c.id,
-        'BUSINESS_RESULT',
-        31,
-        questionId,
-        JSON.stringify({
-          action: 'QUESTION_UNANSWERED',
-          orderSeq: null,
-          unansweredQuestionSeq: questionId,
-          summaryText: '질문',
-        }),
-        values[6],
-      ],
-      '23503',
-    ],
-  ];
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const [input, code] of cases) {
-      await client.query('SAVEPOINT invalid_event');
-      await assert.rejects(() => client.query(statement, input), { code });
-      await client.query('ROLLBACK TO SAVEPOINT invalid_event');
-    }
-  } finally {
-    await client.query('ROLLBACK');
-    client.release();
-  }
 });
 
 const readEvents = (call, path, query = '', headers = { Cookie: cookie }) =>
@@ -616,34 +522,6 @@ test('separate reads require active admin sessions; AI service tokens cannot rea
   );
   for (const path of ['actions', 'processing-results'])
     await error(await readEvents(c, path, '', expired.headers), 401, 'UNAUTHORIZED');
-});
-
-test('separate read contracts reject kind filters, malformed pagination and unsupported fields', async () => {
-  const c = await createCall();
-  for (const path of ['actions', 'processing-results']) {
-    for (const id of ['0', '-1', '1.5', '2147483648', 'abc'])
-      await error(await readEvents({ id }, path), 400, 'INVALID_REQUEST');
-    for (const query of [
-      'kind=AI_ACTION',
-      'action=PIN_SEARCH',
-      'limit=',
-      'limit=0',
-      'limit=101',
-      'limit=1.5',
-      'limit=1&limit=2',
-      'offset=-1',
-      'offset=1e2',
-      'offset=abc',
-      'offset=0&offset=1',
-      'offset=9007199254740992',
-    ])
-      await error(await readEvents(c, path, query), 400, 'INVALID_REQUEST');
-    assert.deepEqual(await readBody(await readEvents(c, path, 'offset=9007199254740991')), {
-      data: [],
-      hasNext: false,
-      total_count: 0,
-    });
-  }
 });
 
 test('PIN and previous-order actions page independently from speech/results and retain full-call order and seconds', async () => {

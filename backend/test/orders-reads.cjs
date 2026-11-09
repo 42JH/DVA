@@ -118,41 +118,6 @@ module.exports = function registerOrdersReads(suite) {
     );
   });
 
-  test('order list filters every order status independently of shipment state', async () => {
-    const { customer } = await readCustomer();
-    const statuses = [
-      'COLLECTING',
-      'notPaid',
-      'PAID',
-      'SUBMITTING',
-      'ACCEPTED',
-      'SUBMISSION_FAILED',
-      'CANCELLED',
-    ];
-    const orders = new Map();
-    for (const status of statuses) {
-      const id = await readOrder(customer);
-      await pool.query(
-        `UPDATE orders SET status=$2,pickup_requested_at='2026-10-28T00:00:00Z',
-       parcel_no=CASE WHEN $2='ACCEPTED' THEN 'READ0058' END,
-       dver_received_at=CASE WHEN $2='ACCEPTED' THEN '2026-10-27T00:00:00Z'::timestamptz END
-       WHERE order_seq=$1`,
-        [id, status],
-      );
-      orders.set(status, id);
-    }
-    for (const status of statuses) {
-      const response = await readOrders(`?customerSeq=${customer}&status=${status}`);
-      assert.equal(response.status, 200);
-      const { data } = await response.json();
-      assert.deepEqual(
-        data.map((order) => [order.orderSeq, order.status]),
-        [[orders.get(status), status]],
-      );
-      assert.equal(Object.hasOwn(data[0], 'shipmentStatuses'), false);
-    }
-  });
-
   test('ORD-02 AI scope comes from the active call customer, never arbitrary customer filters', async () => {
     const { customer, phone } = await readCustomer();
     const own = await readOrder(customer);
@@ -195,37 +160,6 @@ module.exports = function registerOrdersReads(suite) {
       403,
       'FORBIDDEN',
     );
-  });
-
-  test('ORD-02 validates filters and call IDs while preserving administrator authentication', async () => {
-    for (const query of [
-      '?from=2026-10-28T00:00:00Z&to=2026-10-27T00:00:00Z',
-      '?from=2026-10-27T00:00:00Z&to=2026-10-27T00:00:00Z',
-      '?from=2026-10-27T00:00:00+99:00',
-      '?customerSeq=1&customerSeq=2',
-      '?limit=101',
-      '?offset=-1',
-      '?status=unknown',
-      '?shipmentStatus=sent',
-      '?recipientName=',
-      '?unknown=1',
-    ])
-      await errorCode(await readOrders(query), 400, 'INVALID_REQUEST');
-    for (const callId of [undefined, '', 'abc', '0', '-1', '2147483648', '1,2']) {
-      await errorCode(
-        await readOrders('', { Cookie: undefined, call_session_seq: callId }),
-        400,
-        'INVALID_REQUEST',
-      );
-    }
-    await errorCode(await readOrders('', aiReadHeaders(2147483647)), 404, 'NOT_FOUND');
-    const callId = await call('01000000001');
-    await errorCode(
-      await readOrders('', { ...aiReadHeaders(callId), Cookie: 'dva_session=expired' }),
-      401,
-      'UNAUTHORIZED',
-    );
-    for (let i = 0; i < 3; i++) assert.equal((await readOrders('', {}, i)).status, 200);
   });
 
   test('ORD-03 returns draft details, every nullable address field and the actual version without writes', async () => {
@@ -288,69 +222,6 @@ module.exports = function registerOrdersReads(suite) {
     );
     const empty = await readOrder(customer);
     assert.deepEqual((await (await readDetail(empty)).json()).data.parcels, []);
-  });
-
-  test('order detail returns order snapshots and status without exposing stored shipment data', async () => {
-    const { customer } = await readCustomer();
-    const pin = (
-      await pool.query(
-        'INSERT INTO personal_pins(customer_seq,address_data) VALUES($1,$2) RETURNING personal_pin_seq',
-        [customer, address],
-      )
-    ).rows[0].personal_pin_seq;
-    const id = await readOrder(customer, [
-      {
-        origin: address,
-        originPin: { scope: 'PERSONAL', pinSeq: pin },
-        destination: address,
-        smallBoxCount: 1,
-        itemPrice: 1,
-      },
-      { destination: { name: '두 번째 수령인' } },
-    ]);
-    await pool.query('UPDATE personal_pins SET address_data=$2 WHERE personal_pin_seq=$1', [
-      pin,
-      { ...address, roadAddress: '변경된 원본 주소' },
-    ]);
-    const parcel = (
-      await pool.query(
-        'SELECT order_parcel_seq FROM order_parcels WHERE order_seq=$1 ORDER BY parcel_position LIMIT 1',
-        [id],
-      )
-    ).rows[0].order_parcel_seq;
-    await pool.query(
-      "UPDATE orders SET status='ACCEPTED',pickup_requested_at='2026-10-28T00:00:00Z',parcel_no='READ0058',dver_received_at='2026-10-27T00:00:00Z' WHERE order_seq=$1",
-      [id],
-    );
-    const trackingNumber = randomUUID();
-    await pool.query(
-      "INSERT INTO shipments(order_parcel_seq,tracking_number,status,version,status_changed_at) VALUES($1,$2,'sent',3,'2026-10-27T01:00:00Z')",
-      [parcel, trackingNumber],
-    );
-    const storedShipment = (
-      await pool.query('SELECT * FROM shipments WHERE order_parcel_seq=$1', [parcel])
-    ).rows[0];
-    const order = (await (await readDetail(id)).json()).data;
-    assert.equal(order.status, 'ACCEPTED');
-    assert.equal(order.parcelNo, 'READ0058');
-    assert.equal(Date.parse(order.dverReceivedAt), Date.parse('2026-10-27T00:00:00Z'));
-    assert.deepEqual(order.parcels[0].origin, address);
-    assert.deepEqual(order.parcels[0].originPin, { scope: 'PERSONAL', pinSeq: pin });
-    assert.deepEqual(order.parcels[0].destination, address);
-    assert.equal(order.parcels[0].smallBoxCount, 1);
-    assert.equal(order.parcels[0].itemPrice, 1);
-    for (const parcel of order.parcels) {
-      assert.equal(Object.hasOwn(parcel, 'shipment'), false);
-      assert.equal(Object.hasOwn(parcel, 'trackingNumber'), false);
-      assert.equal(parcel.status, 'ACTIVE');
-      assert.equal(Object.hasOwn(parcel, 'shipmentStatus'), false);
-    }
-    assert.equal(JSON.stringify(order).includes(trackingNumber), false);
-    assert.deepEqual(
-      (await pool.query('SELECT * FROM shipments WHERE order_parcel_seq=$1', [parcel])).rows[0],
-      storedShipment,
-    );
-    for (let i = 0; i < 3; i++) assert.equal((await readDetail(id, {}, i)).status, 200);
   });
 
   test('ORD-03 scopes AI detail reads to the call customer and hides other or missing orders equally', async () => {

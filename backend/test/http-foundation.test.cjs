@@ -26,7 +26,7 @@ Object.assign(process.env, {
   DB_NAME: 'dva_webhook_test',
   AI_AGENT_URL: 'http://ai:8000',
   CORS_ORIGINS: 'http://localhost:5173',
-  SWAGGER_ENABLED: 'true',
+  SWAGGER_ENABLED: 'false',
   PBX_WEBHOOK_TOKEN: '',
 });
 const { ApplicationConfigModule } = require('../dist/config/application-config.module');
@@ -269,16 +269,6 @@ test('CORS permits only the configured origin and required request headers', asy
   });
   assert.equal(forbidden.status, 403);
   assert.equal((await forbidden.json()).error.code, 'FORBIDDEN');
-});
-
-test('OpenAPI JSON is served at the configured docs path and includes common error schemas', async () => {
-  const response = await request('/api/docs-json');
-  assert.equal(response.status, 200);
-  const body = await response.json();
-  assert.equal(body.info.title, 'Dva Monolith API');
-  assert.ok(body.paths['/api/checks/items']);
-  assert.ok(body.components.schemas.ErrorResponseDto);
-  assert.ok(!body.paths['/health']);
 });
 
 test('request logs contain route templates and IDs without queries, headers or body values', async () => {

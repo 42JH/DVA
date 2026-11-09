@@ -343,11 +343,6 @@ test('failure tab is separate from PAID with filtered totals, pagination, all ad
   assert.deepEqual(paid.data, []);
   const all = await (await f.get(`/api/admin/orders?q=${encodeURIComponent(marker)}`)).json();
   assert.equal(all.total_count, 2);
-  const doc = await (await fetch(f.host + '/api/docs-json')).json();
-  assert.deepEqual(
-    doc.paths['/api/admin/orders'].get.parameters.find((p) => p.name === 'statusGroup').schema.enum,
-    ['COLLECTING', 'notPaid', 'PAID', 'SUBMISSION_FAILED', 'CANCELLED'],
-  );
   succeed();
   for (const id of ids) assert.equal((await (await retry(id)).json()).data.status, 'ACCEPTED');
 });

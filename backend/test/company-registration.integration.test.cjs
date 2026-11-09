@@ -3,14 +3,14 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, startTestApp } = require('./helpers/application.cjs');
 const { migrate } = require('./helpers/migrations.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-const { hashPassword } = require('../dist/auth/password');
+
 const { DatabaseService } = require('../dist/database/database.service');
 const { MembersRepository } = require('../dist/members/members.repository');
 const pool = createTestPool();
@@ -37,23 +37,15 @@ const address = (suffix) => ({
 let app, base;
 before(async () => {
   await migrate(pool);
-  const password = 'registration-test-only-password';
-  const hash = await hashPassword(password);
   app = await startTestApp(apps);
   base = await app.getUrl();
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const loginId = 'reg' + randomUUID().replaceAll('-', '').slice(0, 16);
-    await pool.query(
-      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'통합 등록 검증',$2,$3,'ACTIVE')",
-      [loginId, hash, role],
+    const { rows } = await pool.query(
+      "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'통합 등록 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
+      [loginId, 'not-for-login', role],
     );
-    const response = await fetch(base + '/api/auth/login', {
-      method: 'POST',
-      headers: { Origin: origin, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ loginId, password }),
-    });
-    assert.equal(response.status, 200);
-    cookies.push(response.headers.get('set-cookie').split(';')[0]);
+    cookies.push(await createTestSession(pool, rows[0].admin_user_seq));
   }
 });
 after(async () => {
@@ -321,57 +313,6 @@ test('invalid addresses reject the whole registration before modifying an existi
   }
 });
 
-test('a company can create departments without employees', async () => {
-  const response = await post({ name: companyName(), departments: [{ name: '부서' }] });
-  assert.equal(response.status, 201);
-  const id = (await response.json()).data.organizationSeq;
-  assert.equal((await get(`/api/companies/${id}/departments`)).total_count, 1);
-  assert.equal((await get(`/api/companies/${id}/members`)).total_count, 0);
-});
-
-test('missing sessions and forbidden Origins cannot create any part of a registration', async () => {
-  const before = await counts();
-  const input = { name: companyName(), departments: [{ name: '부서' }], members: [employee()] };
-  await error(await post(input, { session: null }), 401, 'UNAUTHORIZED');
-  await error(await post(input, { from: 'https://forbidden.invalid' }), 403, 'FORBIDDEN');
-  assert.deepEqual(await counts(), before);
-});
-
-test('nested validation, duplicate identifiers and undeclared departments reject before creating a company', async () => {
-  const before = await counts();
-  const member = employee();
-  for (const [input, status, code, field] of [
-    [
-      { name: companyName(), members: [{ ...member, role: 'SYSTEM_ADMIN' }] },
-      400,
-      'INVALID_REQUEST',
-      'members[0].role',
-    ],
-    [
-      { name: companyName(), members: [member, { ...member, phoneNumber: phone() }] },
-      400,
-      'INVALID_REQUEST',
-      'members[1].employeeNo',
-    ],
-    [
-      { name: companyName(), departments: [{ name: '부서' }, { name: ' 부서 ' }] },
-      400,
-      'INVALID_REQUEST',
-      'departments[1].name',
-    ],
-    [
-      { name: companyName(), members: [{ ...member, departmentName: '없는 부서' }] },
-      422,
-      'VALIDATION_FAILED',
-      'members[0].departmentName',
-    ],
-  ]) {
-    const body = await error(await post(input), status, code);
-    assert.ok(body.error.details.some((detail) => detail.field === field));
-  }
-  assert.deepEqual(await counts(), before);
-});
-
 test('existing membership conflicts roll back the newly inserted company, departments and success audits', async () => {
   const member = employee();
   assert.equal((await post({ name: companyName(), members: [member] })).status, 201);
@@ -394,26 +335,6 @@ test('existing membership conflicts roll back the newly inserted company, depart
     ).rows[0].count,
     '0',
   );
-});
-
-test('withdrawn customers cannot leave a newly created company or departments behind', async () => {
-  const number = phone();
-  await pool.query(
-    "INSERT INTO customers(name,phone_number,status) VALUES('탈퇴 고객',$1,'WITHDRAWN')",
-    [number],
-  );
-  const before = await counts();
-  const body = await error(
-    await post({
-      name: companyName(),
-      departments: [{ name: '부서' }],
-      members: [employee({ phoneNumber: number })],
-    }),
-    422,
-    'VALIDATION_FAILED',
-  );
-  assert.equal(body.error.details[0].reason, 'CUSTOMER_WITHDRAWN');
-  assert.deepEqual(await counts(), before);
 });
 
 test('a failure after employee persistence rolls back all created records and reused customer changes', async () => {

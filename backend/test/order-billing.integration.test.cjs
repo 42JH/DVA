@@ -4,11 +4,11 @@ require('reflect-metadata');
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { createTestPool, businessHeaders } = require('./helpers/application.cjs');
+const { createTestSession, createTestPool, businessHeaders } = require('./helpers/application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { migrate } = require('./helpers/migrations.cjs');
 const { configureApplication } = require('../dist/configure-application');
-const { hashPassword } = require('../dist/auth/password');
+
 const { DverClient } = require('../dist/orders/dver.client');
 const { OrderPaymentsService } = require('../dist/orders/order-payments.service');
 const {
@@ -43,9 +43,9 @@ async function request(path, body, ai = false, method = 'POST') {
 }
 before(async () => {
   await migrate(pool);
-  await pool.query(
-    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('billing138','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash",
-    [await hashPassword('billing-test-only')],
+  const admin = await pool.query(
+    "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES('billing138','결제 운영자',$1,'SYSTEM_ADMIN','ACTIVE') ON CONFLICT(login_id) WHERE deleted_at IS NULL DO UPDATE SET password_hash=EXCLUDED.password_hash RETURNING admin_user_seq",
+    ['not-for-login'],
   );
   customerId = (
     await pool.query(
@@ -73,13 +73,7 @@ before(async () => {
   configureApplication(app, { log: () => {} });
   await app.listen(0, '127.0.0.1');
   base = (await app.getUrl()) + '/api';
-  const login = await fetch(base + '/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: origin },
-    body: JSON.stringify({ loginId: 'billing138', password: 'billing-test-only' }),
-  });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get('set-cookie').split(';')[0];
+  cookie = await createTestSession(pool, admin.rows[0].admin_user_seq);
 });
 
 function finalBody(overrides = {}) {

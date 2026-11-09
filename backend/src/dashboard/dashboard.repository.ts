@@ -6,7 +6,7 @@ import {
   LATENCY_PROCESS_TYPES,
 } from '../call-insights/call-dashboard-metrics.types';
 import { DashboardCustomerType } from './dto/dashboard-query.dto';
-import { HomeAiPerformanceDto } from './dto/home-response.dto';
+import { HomeAiPerformanceDto, HomeDto } from './dto/home-response.dto';
 import {
   ComplaintCallsDto,
   DASHBOARD_COMPLAINT_TYPES,
@@ -28,6 +28,30 @@ export class DashboardRepository {
 
   private async read<T>(sql: string, values: unknown[], client?: PoolClient): Promise<T> {
     return (await (client ?? this.database.pool).query<{ data: T }>(sql, values)).rows[0].data;
+  }
+
+  todayCounts(
+    observedAt: Date,
+    client: PoolClient,
+  ): Promise<Pick<HomeDto, 'todayOrderCount' | 'todayCallCount'>> {
+    return this.read(
+      `WITH day AS (SELECT ($1::timestamptz AT TIME ZONE 'Asia/Seoul')::date AS date),
+       bounds AS (SELECT date::timestamp AT TIME ZONE 'Asia/Seoul' AS from_at,
+        (date+1)::timestamp AT TIME ZONE 'Asia/Seoul' AS to_at FROM day)
+       SELECT jsonb_build_object('todayOrderCount',(
+        SELECT count(*) FROM orders o CROSS JOIN bounds b
+        WHERE o.created_at>=b.from_at AND o.created_at<b.to_at AND o.deleted_at IS NULL
+         AND COALESCE(o.closed_at,o.created_at)>transaction_timestamp()-interval '5 years'
+         AND NOT EXISTS(SELECT 1 FROM order_parcel_drafts d WHERE d.legacy_order_seq=o.order_seq)
+       ),'todayCallCount',(
+        SELECT count(*) ${FROM_CALLS} CROSS JOIN bounds b
+        WHERE COALESCE(c.started_at,a.ai_started_at,c.incoming_at)>=b.from_at
+         AND COALESCE(c.started_at,a.ai_started_at,c.incoming_at)<b.to_at AND c.deleted_at IS NULL
+         AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
+       )) AS data`,
+      [observedAt],
+      client,
+    );
   }
 
   stageDropoffs(

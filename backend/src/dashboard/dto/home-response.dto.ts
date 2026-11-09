@@ -33,23 +33,35 @@ export class HomeDto {
     description: '조회용 DB 트랜잭션 시작 시각. 모든 영역은 같은 스냅샷으로 조회.',
   })
   observedAt!: Date;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'observedAt의 한국시간 오늘 생성된 실제 주문 수. 미완료 초안·이관 원본 제외.',
+  })
+  todayOrderCount!: number;
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: '한국시간 오늘 시작된 통화 수. 기존 목록의 PBX·AI·수신 시각 우선순위 적용.',
+  })
+  todayCallCount!: number;
   @ApiProperty({ type: HomePendingWorkDto }) pendingWork!: HomePendingWorkDto;
   @ApiProperty({
     type: [CallListItemDto],
-    maxItems: 5,
-    description: '기존 통화 목록과 같은 최신순, 최대 5개.',
+    maxItems: 11,
+    description: '기존 통화 목록과 같은 최신순, 최대 11개.',
   })
   recentCalls!: CallListItemDto[];
   @ApiProperty({
     type: [ParcelDraftResponseDto],
-    maxItems: 5,
-    description: 'INCOMPLETE 배송 초안 최신순, 최대 5개. 원본 삭제와 독립적인 보관 기준.',
+    maxItems: 11,
+    description: 'INCOMPLETE 배송 초안 최신순, 최대 11개. 원본 삭제와 독립적인 보관 기준.',
   })
   incompleteDrafts!: ParcelDraftResponseDto[];
   @ApiProperty({
     type: [UnansweredQuestionDto],
-    maxItems: 5,
-    description: 'OPEN 질문. 기존 미답변 목록과 같은 통화 시작 오래된 순, 최대 5개.',
+    maxItems: 11,
+    description: 'OPEN 질문. 기존 미답변 목록과 같은 통화 시작 오래된 순, 최대 11개.',
   })
   unansweredQuestions!: UnansweredQuestionDto[];
   @ApiProperty({

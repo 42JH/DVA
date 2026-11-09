@@ -1,5 +1,7 @@
 # 백엔드 테스트 정리 계획
 
+이 문서는 최초 선택 실행 도입 당시 기록이다. 현재 실행 건수·삭제 범위·검증 결과는 [Jenkins 테스트 정리](ci-test-cleanup.md)를 따른다. 아래 과거 23개 운영 검증은 현재 13개로 통합했다.
+
 기준: develop-backend `f7f492c1`, 작업 브랜치 `ci/backend-test-scope`.
 대상은 backend 테스트·CI와 연결된 Jenkins 설정이다. 업무 소스·API·DB 스키마·프론트·AI는 변경하지 않는다.
 

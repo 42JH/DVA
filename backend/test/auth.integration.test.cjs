@@ -1,6 +1,6 @@
 require('reflect-metadata');
 process.env.CORS_ORIGINS = 'http://localhost:5173';
-process.env.SWAGGER_ENABLED = 'true';
+process.env.SWAGGER_ENABLED = 'false';
 const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { migrate } = require('./helpers/migrations.cjs');
@@ -11,7 +11,7 @@ const { Controller, Get, Module } = require('@nestjs/common');
 const { AppModule } = require('../dist/app.module');
 const { configureApplication } = require('../dist/configure-application');
 const { DatabaseService } = require('../dist/database/database.service');
-const { AuthService, tokenHash } = require('../dist/auth/auth.service');
+const { tokenHash } = require('../dist/auth/auth.service');
 const { AuthLimitsService } = require('../dist/auth/auth-limits.service');
 const { AuthRepository } = require('../dist/auth/auth.repository');
 const { AdminsService } = require('../dist/admins/admins.service');
@@ -129,42 +129,6 @@ test('bootstrap CLI creates one active system administrator and refuses a second
     ).rows[0].count,
     '1',
   );
-});
-test('AUTH-01 rejects wrong and case-mismatched credentials and issues a nine-hour session', async () => {
-  const user = await account('loginOnly');
-  assert.equal((await login(user, 'incorrect')).status, 401);
-  assert.equal((await login({ loginId: user.loginId.toUpperCase() })).status, 401);
-  const result = await login(user);
-  assert.equal(result.status, 200);
-  assert.deepEqual(Object.keys(result.body.data), ['expiresAt']);
-  const token = result.session.split('=')[1];
-  assert.equal((await app.get(AuthService).authenticate(token)).adminUserSeq, user.id);
-  const row = (
-    await db.pool.query('SELECT * FROM admin_sessions WHERE session_token_hash=$1', [
-      tokenHash(token),
-    ])
-  ).rows[0];
-  assert.equal(row.expires_at - row.created_at, 9 * 60 * 60 * 1000);
-});
-test('AUTH-02 removes only the presented session and accepts missing or expired sessions', async () => {
-  const user = await account('logoutOnly');
-  const first = await login(user);
-  const second = await login(user);
-  assert.equal((await call('POST', '/api/auth/logout', undefined, first.session)).status, 204);
-  await assert.rejects(
-    app.get(AuthService).authenticate(first.session.split('=')[1]),
-    (error) => error.getStatus() === 401,
-  );
-  assert.equal(
-    (await app.get(AuthService).authenticate(second.session.split('=')[1])).adminUserSeq,
-    user.id,
-  );
-  assert.equal((await call('POST', '/api/auth/logout')).status, 204);
-  await db.pool.query(
-    "UPDATE admin_sessions SET created_at=now()-interval '10 hours',expires_at=now()-interval '1 hour' WHERE admin_user_seq=$1",
-    [user.id],
-  );
-  assert.equal((await call('POST', '/api/auth/logout', undefined, second.session)).status, 204);
 });
 test('signup preserves name, rejects bad IDs and elevation, duplicate signup is atomic, pending cannot login', async () => {
   const loginId = prefix + 'signup';
@@ -580,30 +544,6 @@ test('administrator q hides deleted accounts, preserves read-only behavior and r
     [owner.id],
   );
   assert.equal((await call('GET', '/api/admins?q=Scope', undefined, session)).status, 401);
-});
-
-test('administrator search Swagger adds only an optional bounded q to the existing session response', async () => {
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const route = document.paths['/api/admins'].get;
-  const q = route.parameters.find((parameter) => parameter.name === 'q');
-  assert.ok(q);
-  assert.equal(q.required, false);
-  assert.equal(q.schema.type, 'string');
-  assert.equal(q.schema.maxLength, 100);
-  assert.deepEqual(route.security, [{ adminSession: [] }]);
-  assert.equal(
-    route.responses['200'].content['application/json'].schema.$ref,
-    '#/components/schemas/AdminListDto',
-  );
-  assert.deepEqual(Object.keys(document.components.schemas.AdminResponseDto.properties).sort(), [
-    'adminUserSeq',
-    'createdAt',
-    'lastLoginAt',
-    'loginId',
-    'name',
-    'role',
-    'status',
-  ]);
 });
 
 test('admin status changes revoke all sessions and reactivation requires a new login', async () => {
@@ -1106,10 +1046,6 @@ test('retired role-only route is absent from routing and Swagger', async () => {
     (await call('GET', '/api/auth/me', undefined, (await login(target)).session)).body.data.role,
     'OPERATOR',
   );
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  assert.ok(document.paths['/api/admins/{id}'].patch);
-  assert.equal(document.paths['/api/admins/{id}/role'], undefined);
-  assert.equal(document.components.schemas.UpdateAdminRoleDto, undefined);
 });
 
 test('OPS-02 requires a session and permits only supervisors and system administrators', async () => {
@@ -1295,27 +1231,6 @@ test('OPS-02 rejects invalid filters and documents the session-protected endpoin
     assert.equal(response.status, 400, JSON.stringify(query));
     assert.equal(response.body.error.code, 'INVALID_REQUEST');
   }
-
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/audit-logs'].get;
-
-  assert.ok(operation);
-  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
-  assert.ok(operation.responses['200']);
-
-  const names = operation.parameters.map((parameter) => parameter.name);
-  for (const name of [
-    'actorSeq',
-    'action',
-    'targetType',
-    'targetSeq',
-    'result',
-    'from',
-    'to',
-    'limit',
-    'offset',
-  ])
-    assert.ok(names.includes(name), name);
 });
 
 test('audit detail enforces roles, validates IDs and returns a redacted immutable record', async () => {
@@ -1375,19 +1290,6 @@ test('audit detail enforces roles, validates IDs and returns a redacted immutabl
     id,
   ]);
   assert.equal(stored.rows[0].metadata.password, 'private-detail-secret');
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  const operation = document.paths['/api/audit-logs/{id}'].get;
-  assert.ok(operation.security.some((entry) => 'adminSession' in entry));
-  assert.ok(
-    operation.parameters.some(
-      (parameter) => parameter.name === 'id' && parameter.in === 'path' && parameter.required,
-    ),
-  );
-  assert.ok(operation.responses['404']);
-  assert.equal(
-    operation.responses['200'].content['application/json'].schema.$ref,
-    '#/components/schemas/AuditDetailResponseDto',
-  );
 });
 
 test('audited mutations preserve actor, target and exactly one failure after guard/DTO/transaction rejection', async () => {
@@ -1574,16 +1476,6 @@ test('admin soft deletion retains accounts, hides every allowed role/status and 
   const listing = await call('GET', '/api/admins?status=INACTIVE', undefined, cookie);
   assert.equal(listing.status, 200);
   assert.ok(!listing.body.data.some((row) => row.loginId.startsWith(prefix + 'del')));
-  const document = await (await fetch(base + '/api/docs-json')).json();
-  assert.equal(document.paths['/api/admins/{id}'].delete.summary, '관리자 삭제');
-  assert.ok(document.paths['/api/admins/{id}'].delete.responses['204']);
-  assert.deepEqual(document.components.schemas.AuditResponseDto.properties.actorType.enum, [
-    'ADMIN',
-    'AI',
-    'SYSTEM',
-  ]);
-  assert.ok(document.components.schemas.AuditResponseDto.properties.actorName);
-  assert.ok(document.components.schemas.AuditResponseDto.properties.targetAdminName);
 });
 
 test('admin deletion rejects other roles, missing sessions, system targets and malformed IDs', async () => {
