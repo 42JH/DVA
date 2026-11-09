@@ -41,13 +41,10 @@ class IntakeService:
         self.locks = WeakValueDictionary()
 
     def sync(self, s, *, payment_available: bool = True) -> bool:
-        """통화 잠금 안에서 저장할 내용을 고정한다. 확인되지 않은 수정은 READY로 되돌리지 않는다."""
+        """확인된 택배만 저장한다. 저장된 택배를 수정할 때는 기존 READY를 즉시 해제한다."""
         st, seq = s.state, s.state.customer.call_session_seq
         if not seq:
             return False
-        if st.editing:
-            edited = next(p for p in st.parcels if p.parcel_id == st.editing)
-            edited.confirmed_snapshot = edited.confirmed_hash = None
         previous, saved = {}, {}
         for step in self.outbox.intake_steps(s.call_id):
             previous[step["parcel_id"]] = step
@@ -61,9 +58,7 @@ class IntakeService:
         for draft, confirmed in parcels:
             if draft.empty() and draft.client_parcel_id is None:
                 continue
-            draft.client_parcel_id = draft.client_parcel_id or str(uuid4())
-            pid = draft.client_parcel_id
-            prior = previous.get(pid)
+            prior = previous.get(draft.client_parcel_id) if draft.client_parcel_id else None
             if prior and prior["action"] == "CANCEL":
                 continue
             snapshot = confirmed if confirmed is not None else draft_snapshot(draft)
@@ -75,9 +70,14 @@ class IntakeService:
             ready = bool(confirmed is not None and st.customer.customer_seq and st.customer.status != "WITHDRAWN"
                          and payment_available and not blocked and fare and fare > 0
                          and self._ready(parcel))
-            body = {"status": "READY" if ready else "EDITING", "parcel": parcel}
-            if prior and prior["action"] == "SAVE" and prior["payload"] == body:
+            was_ready = prior and prior["action"] == "SAVE" and prior["payload"]["status"] == "READY"
+            if not ready and not was_ready:
                 continue
+            body = {"status": "READY", "parcel": parcel}
+            if ready and was_ready and prior["payload"] == body:
+                continue
+            draft.client_parcel_id = draft.client_parcel_id or str(uuid4())
+            pid = draft.client_parcel_id
             stored_parcel = (saved.get(pid) or {}).get("parcel") or {}
             previous_body = (prior["payload"] if prior and prior["action"] == "SAVE"
                              else saved.get(pid) or {})
@@ -87,11 +87,12 @@ class IntakeService:
             if stored_parcel.get("originPin") and any((old_origin.get(k) or "") != (new_origin.get(k) or "")
                                                       for k in origin_keys):
                 fields.append("originPin")
-            if previous_body.get("status") == "READY" and "notifiedPrice" not in fields:
+            if was_ready and "notifiedPrice" not in fields:
                 fields.append("notifiedPrice")
             if fields:
                 self.outbox.add_intake_step(s.call_id, seq, pid, "START_EDIT", {"clearFields": fields})
-            self.outbox.add_intake_step(s.call_id, seq, pid, "SAVE", body)
+            if ready:
+                self.outbox.add_intake_step(s.call_id, seq, pid, "SAVE", body)
             changed = True
         return changed
 
@@ -149,6 +150,7 @@ class IntakeService:
                 return
             payment = st.payment.value if st.payment.valid else assess(st, self.policy).payment_auto
             self.sync(s, payment_available=bool(payment))
+            self._cancel_open_drafts(s.call_id, seq)
             payload = {"paymentMethodType": payment, "pickupRequestedAt": st.pickup_at.value if st.pickup_at.valid else None}
             self.outbox.add_intake_step(s.call_id, seq, None, "COMPLETE", payload)
         result = await self.flush(s.call_id)
@@ -158,6 +160,13 @@ class IntakeService:
             s.result = order | {"orderSeq": result["orderSeq"]}
             st.result_accepted = order.get("status") == "ACCEPTED"
         s.note("접수 종료", result.get("status", "SAVE_PENDING"))
+
+    def _cancel_open_drafts(self, call_id: str, seq: int) -> None:
+        latest = {step["parcel_id"]: step for step in self.outbox.intake_steps(call_id) if step["parcel_id"] is not None}
+        for pid, step in latest.items():
+            action = step["action"]
+            if action in ("START_EDIT", "RESUME") or (action == "SAVE" and step["payload"]["status"] == "EDITING"):
+                self.outbox.add_intake_step(call_id, seq, pid, "CANCEL", {})
 
     async def recover(self) -> None:
         for sid in await asyncio.to_thread(self.outbox.unfinished_intakes):
@@ -178,6 +187,11 @@ class IntakeService:
                             await asyncio.to_thread(self.outbox.intake_result, step["id"], data)
                         return data | {"ready_count": ready,
                                        "cancelled_count": sum(row["status"] == "CANCELLED" for row in drafts.values())}
+                    if action == "CANCEL" and pid not in drafts and not step["payload"]:
+                        # 재개가 거절되어 실제 초안이 생기지 않았으면 취소할 대상이 없다.
+                        if step["result"] is None:
+                            await asyncio.to_thread(self.outbox.intake_result, step["id"], {"discarded": True})
+                        continue
                     data = step["result"] or await self._write(step, drafts.get(pid))
                     if data.get("resume_rejected"):
                         if step["result"] is None:
@@ -218,7 +232,7 @@ class IntakeService:
                         raise e
                 return {"resume_rejected": True}  # 원본 소실·다른 통화에서 재개. 새 접수는 계속할 수 있다.
         if action == "CANCEL":
-            target = payload["draftSeq"]
+            target = prior["draftSeq"] if prior else payload["draftSeq"]
             body = {"action": action, "expectedVersion": prior["version"] if prior else payload["version"]}
         else:
             target = prior["draftSeq"]

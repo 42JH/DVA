@@ -24,7 +24,7 @@ def within_window(cand: ResumeCandidate, now: datetime, window_sec: float) -> bo
 
 def can_offer(state: ConversationState, now: datetime, window_sec: float) -> bool:
     """접수 업무이고, 아직 묻지 않았고, 고객이 이번 통화에서 택배 정보를 말하기 전이며, 기한 안일 때."""
-    if state.resume is None or state.resume_offered or state.intent != "order":
+    if not window_sec or state.resume is None or state.resume_offered or state.intent != "order":
         return False
     if state.parcels or (state.current is not None and any(
             f.status != FieldStatus.EMPTY and f.source == Source.CUSTOMER for f in state.current.fields.values())):

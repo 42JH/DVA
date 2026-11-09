@@ -136,7 +136,8 @@ class CallService:
         specs = function_specs(policy=self.d.policy)
         tools = tuple((t["name"], t["description"]) for t in specs)
         config = {"type": "live", "model": "gpt-live-1",
-                "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools),
+                "instructions": render_live(persona and persona.prompt, self.d.policy, info, tools,
+                                            allow_resume=bool(self.d.cfg.resume_window_sec)),
                 "delegation": {"type": "responses", "responses": {
                     "model": self.d.backend_model,
                     "instructions": render_backend(self.d.policy) + f"\n현재 시각(한국): {_kst(_utc_now())}",
