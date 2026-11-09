@@ -61,8 +61,13 @@ export class MembersRepository {
         'organizationSeq',m.organization_seq,'departmentSeq',m.department_seq,'employeeNo',m.employee_no,'role',m.role,'status',m.status) AS membership,
         jsonb_build_object('customerSeq',c.customer_seq,'name',c.name,'phoneNumber',c.phone_number,'status',c.status,'monthlyBillingEnabled',c.monthly_billing_enabled,'address',c.address_data) AS customer
        FROM memberships m JOIN customers c ON c.customer_seq=m.customer_seq
-       WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL AND ($2::text IS NULL OR m.status=$2)`,
-      [companyId, query.status ?? null],
+       WHERE m.organization_seq=$1 AND m.deleted_at IS NULL AND c.deleted_at IS NULL AND ($2::text IS NULL OR m.status=$2)
+         AND ($3::text IS NULL
+           OR strpos(lower(normalize(c.name,NFC)),lower($3))>0
+           OR strpos(lower(normalize(m.employee_no,NFC)),lower($3))>0
+           OR ($3 ~ '^[0-9-]+$' AND replace($3,'-','')<>''
+             AND strpos(regexp_replace(c.phone_number,'[^0-9]','','g'),replace($3,'-',''))>0))`,
+      [companyId, query.status ?? null, query.q || null],
       query,
       "(membership->>'membershipSeq')::integer DESC",
     );

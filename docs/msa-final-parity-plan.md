@@ -4,9 +4,11 @@ Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
 ## 기준과 범위
 
-사용자 요청에 따라 이후 API 변경 이식은 보류한다. 처음 이 작업을 시작한 `develop-backend` **`6a141a0512b73837905f6154c4ff84bcf33f912b`**의 backend를 고정한다. 최초 계획 커밋 `7266964`의 `msa/parity/baseline.json`을 `initial-baseline.json`에 그대로 보존한다. HTTP 선언 95개(업무 92개·health/metrics 3개), SQL 파일 51개(마지막 번호 052), 워커 6개가 대상이다. 최신 backend를 따르는 기존 `baseline.json`/Jenkins inventory 검사는 유지한다.
+사용자 요청에 따라 이후 API 변경 이식은 보류한다. 처음 이 작업을 시작한 `develop-backend` **`6a141a0512b73837905f6154c4ff84bcf33f912b`**의 backend를 고정한다. 최초 계획 커밋 `7266964`의 `msa/parity/baseline.json`을 `initial-baseline.json`에 그대로 보존한다. HTTP 선언 95개(업무 92개·health/metrics 3개), SQL 파일 51개(마지막 번호 052), 워커 6개가 대상이다. 기존 `baseline.json`/Jenkins inventory는 !369의 고정 055 원본 CI 작업공간에서 유지한다.
 
 검증 대상 MSA는 MR !363 병합 커밋 `06ce863beaf44320111df3d609dc2b79a1bd5db0`이다. 브랜치는 `test/msa-final-parity`다. backend/frontend/AI는 읽기 전용이며 추적 수정은 msa/docs에 한정한다. 원본은 `git archive`로 무변형 추출한 복사본으로 빌드한다. 기존 055 구현을 되돌리거나 후속 API를 추가하지 않는다. 최초 계약과 현재 구현이 달라진 부분은 누락·동작 차이로 기록한다.
+
+2026-11-09 MR 갱신에서는 최신 `develop-backend` `581344039532cf3475dbda3e56c39624e744a0f6`을 작업 브랜치로 병합한다. 최초 실행 결과는 위의 원래 소스 기준 기록으로 보존한다. 갱신 검증은 병합 충돌·052 목록 보존·!369의 055 고정 CI 작업공간과 검증기 회귀·이벤트 통합의 결합을 확인하며, 전체 API/DB 재수집과 운영 배포는 포함하지 않는다.
 
 ## 검증 순서와 판정
 

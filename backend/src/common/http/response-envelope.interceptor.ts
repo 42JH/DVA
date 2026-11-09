@@ -18,8 +18,7 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
       map((value: unknown) => {
         if (!isApiRequest(request)) return value;
         if (response.statusCode === 204) return undefined;
-        if (value instanceof ListResponse)
-          return { data: value.data, hasNext: value.hasNext, total_count: value.total_count };
+        if (value instanceof ListResponse) return { ...value };
         return { data: value ?? null, meta: { requestId: request.requestId } };
       }),
     );

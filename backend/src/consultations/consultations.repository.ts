@@ -30,10 +30,15 @@ type CallRow = CallDto & {
 
 const CALL_STARTED_AT = 'COALESCE(c.started_at,a.ai_started_at,c.incoming_at)';
 
-const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
+const callSelect = (
+  includeRecordedAt = true,
+) => `SELECT c.call_session_seq AS "callSessionSeq",c.provider_call_id AS "providerCallId",
+ CASE WHEN a.call_session_seq IS NOT NULL THEN 'COMPLETED'
+  WHEN c.analysis_failed_at IS NOT NULL THEN 'FAILED' ELSE 'PENDING' END AS "analysisStatus",
+ ${includeRecordedAt ? '(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=c.call_session_seq) AS "recordedAt",' : ''}
  c.caller_phone_number AS "callerPhoneNumber",c.order_seq AS "orderSeq",o.status AS "orderStatus",o.total_amount AS "orderTotalAmount",
  ${CALL_STARTED_AT} AS "startedAt",COALESCE(c.ended_at,a.ai_ended_at) AS "endedAt",
- customer.customer_seq AS "customerSeq",customer.name AS "customerName",
+ customer.customer_seq AS "customerSeq",customer.name AS "customerName",company.name AS "organizationName",
  a.ai_persona_version_seq AS "aiPersonaVersionSeq",v.name AS "personaName",v.version AS "personaVersion",
  a.ai_started_at AS "aiStartedAt",a.ai_ended_at AS "aiEndedAt",a.repeat_question_count AS "repeatQuestionCount",
  a.has_complaint AS "hasComplaint",a.complaints,a.analysed_at AS "analysedAt",
@@ -43,6 +48,8 @@ const CALL_SELECT = `SELECT c.call_session_seq AS "callSessionSeq",c.provider_ca
  a.has_callback_request AS "hasCallbackRequest"
  FROM call_sessions c LEFT JOIN orders o ON o.order_seq=c.order_seq AND o.deleted_at IS NULL
  LEFT JOIN customers customer ON customer.customer_seq=COALESCE(o.customer_seq,c.customer_seq) AND customer.deleted_at IS NULL
+ LEFT JOIN memberships membership ON membership.customer_seq=customer.customer_seq AND membership.deleted_at IS NULL
+ LEFT JOIN organizations company ON company.organization_seq=membership.organization_seq AND company.deleted_at IS NULL
  LEFT JOIN call_analyses a ON a.call_session_seq=c.call_session_seq
  LEFT JOIN ai_persona_versions v ON v.ai_persona_version_seq=a.ai_persona_version_seq`;
 
@@ -146,13 +153,14 @@ export class ConsultationsRepository {
 
   constructor(private readonly database: DatabaseService) {}
 
-  async findMany(query: CallQueryDto): Promise<PageRows<CallListItemDto>> {
+  async findMany(query: CallQueryDto, client?: PoolClient): Promise<PageRows<CallListItemDto>> {
     const conditions: string[] = [
-      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')",
+      "c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')",
     ];
     const values: Array<string | number | boolean> = [];
     for (const [value, column, operator] of [
       [query.orderSeq, 'c.order_seq', '='],
+      [query.organizationSeq, 'company.organization_seq', '='],
       [query.orderStatus, 'o.status', '='],
       [query.callerPhoneNumber, 'c.caller_phone_number', '='],
       [query.from, CALL_STARTED_AT, '>='],
@@ -173,18 +181,19 @@ export class ConsultationsRepository {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await readPage<CallRow>(
-      this.database.pool,
-      `${CALL_SELECT} ${where}`,
+      client ?? this.database.pool,
+      `${callSelect(false)} ${where}`,
       values,
       query,
       '"startedAt" DESC NULLS LAST,"callSessionSeq" DESC',
+      `page.*,(SELECT min(r.created_at) FROM recordings r WHERE r.call_session_seq=page."callSessionSeq") AS "recordedAt"`,
     );
     return { ...result, rows: result.rows.map(callResult) };
   }
 
   async findOne(id: number): Promise<CallListItemDto | undefined> {
     const result = await this.database.pool.query<CallRow>(
-      `${CALL_SELECT} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
+      `${callSelect()} WHERE c.call_session_seq=$1 AND c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>clock_timestamp()-interval '5 years')`,
       [id],
     );
     return result.rows[0] ? callResult(result.rows[0]) : undefined;
@@ -199,6 +208,17 @@ export class ConsultationsRepository {
         [id],
       )
     ).rows;
+  }
+
+  async callExists(id: number): Promise<boolean> {
+    return (
+      (
+        await this.database.pool.query(
+          "SELECT 1 FROM call_sessions WHERE call_session_seq=$1 AND deleted_at IS NULL AND (incoming_at IS NULL OR incoming_at>clock_timestamp()-interval '5 years')",
+          [id],
+        )
+      ).rowCount === 1
+    );
   }
 
   async countActions(id: number): Promise<number> {

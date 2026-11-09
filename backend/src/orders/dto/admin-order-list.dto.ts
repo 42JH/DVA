@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, PickType } from '@nestjs/swagger';
 import { Transform, TransformFnParams } from 'class-transformer';
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 import { OrderQueryDto } from './order-query.dto';
 import { OrderAddressValueDto, OrderParcelDto, OrderSummaryDto } from './order-response.dto';
 
@@ -10,6 +10,21 @@ export class AdminOrderListQueryDto extends PickType(OrderQueryDto, [
   'limit',
   'offset',
 ] as const) {
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: 2147483647,
+    description: '주문 고객의 현재 소속 기업 번호. 비활성 소속·기업 포함, 삭제된 연결 제외.',
+  })
+  @IsOptional()
+  @Transform(({ value }: TransformFnParams) =>
+    typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : value,
+  )
+  @IsInt()
+  @Min(1)
+  @Max(2147483647)
+  organizationSeq?: number;
+
   @ApiPropertyOptional({
     description:
       '발송인·수령인 이름·전화번호·주소의 부분 검색. NFC·대소문자 무시. %·_는 일반 문자.',
@@ -64,11 +79,47 @@ export class AdminOrderListItemDto extends PickType(OrderSummaryDto, [
   'pickupRequestedAt',
 ] as const) {
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description: '현재 연결된 고객 번호. 미연결·삭제 고객은 null이며 원본 주문 참조는 보존합니다.',
+  })
+  customerSeq!: number | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      '주문 고객의 현재 소속 기업명. 비활성 소속·기업도 표시하며 미연결·삭제 시 null. 결제 당시 기업 스냅샷과 다릅니다.',
+  })
+  organizationName!: string | null;
+
+  @ApiProperty({
     type: [OrderListParcelDto],
     description:
       '모든 배송상세를 주문 내 순번대로 반환. 취소 상세는 status=CANCELLED로 구분하며 상세 없는 주문은 빈 배열.',
   })
   parcels!: OrderListParcelDto[];
+}
+
+export class AdminOrderStatusCountsDto {
+  @ApiProperty({
+    minimum: 0,
+    description: '같은 조건의 실제 주문 수. 배송 초안은 포함하지 않습니다.',
+  })
+  all!: number;
+  @ApiProperty({
+    minimum: 0,
+    description: '같은 조건의 INCOMPLETE 배송 초안 수. 초안 목록으로 이동합니다.',
+  })
+  incomplete!: number;
+  @ApiProperty({ minimum: 0 })
+  notPaid!: number;
+  @ApiProperty({ minimum: 0, description: 'PAID·SUBMITTING·ACCEPTED 주문 수.' })
+  paid!: number;
+  @ApiProperty({ minimum: 0, description: 'SUBMITTING_FAILED·SUBMISSION_FAILED 주문 수.' })
+  submissionFailed!: number;
+  @ApiProperty({ minimum: 0 })
+  cancelled!: number;
 }
 
 export class AdminOrderListResponseDto {
@@ -82,4 +133,11 @@ export class AdminOrderListResponseDto {
     description: '검색·기간·상태 탭 조건을 모두 만족하는 주문 수. 페이지 제한 적용 전 개수.',
   })
   total_count!: number;
+
+  @ApiProperty({
+    type: AdminOrderStatusCountsDto,
+    description:
+      '검색·기간·기업 조건의 탭별 건수. 선택 상태·limit·offset은 적용하지 않습니다. 미완료는 별도 배송 초안이므로 all에 합산하지 않습니다.',
+  })
+  statusCounts!: AdminOrderStatusCountsDto;
 }

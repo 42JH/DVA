@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+from ci_images import prepared_image
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = 'dva-consultation-check-' + uuid.uuid4().hex[:12]
@@ -46,6 +47,12 @@ def main():
             ('monolith-checks', 'backend', 'checks'), ('monolith', 'backend', None),
             ('liquibase', 'msa/liquibase', None),
         ):
+            image = prepared_image(side)
+            if image:
+                images[side] = image
+                report.setdefault('images', {})[side] = image
+                print(side + '-reuse', flush=True)
+                continue
             image = RUN+'-'+side
             resources.append(('image', image))
             context = ['-f', str(ROOT/path/'Dockerfile'), str(ROOT/'msa')] if side in ('order', 'operations', 'customer', 'consultation', 'consultation-checks') else [str(ROOT/path)]

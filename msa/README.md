@@ -1,4 +1,4 @@
-전체 동등성 최종 검증은 사용자 요청에 따라 최초 기준 `6a141a0`(052, HTTP 선언 95개)으로 고정한다. [검증 계획](../docs/msa-final-parity-plan.md)과 [실행 결과](../docs/msa-final-parity-results.md)를 따른다. 이후 API 변경 이식은 보류하며 현재 구현을 보존한 상태에서 최초 계약과의 차이를 기록한다. 기존 Jenkins의 최신 backend inventory 검사는 유지한다. 아래 내용은 단계별 구현 당시 기록이다.
+전체 동등성 최종 검증은 사용자 요청에 따라 최초 기준 `6a141a0`(052, HTTP 선언 95개)으로 고정한다. [검증 계획](../docs/msa-final-parity-plan.md)과 [실행 결과](../docs/msa-final-parity-results.md)를 따른다. 이후 API 변경 이식은 보류하며 현재 구현을 보존한 상태에서 최초 계약과의 차이를 기록한다. 기존 Jenkins의 055 inventory 검사는 !369의 고정 원본 CI 작업공간에서 유지한다. 아래 내용은 단계별 구현 당시 기록이다.
 
 055 배송 초안 변경이 포함된 `develop-backend` `9624b7789ee7876648b6c56b5e7a4a7a5a9ef378`을 기준으로 [초안 저장 구조·기존 API 호환](../docs/msa-draft-compatibility-plan.md)을 동기화한다. 원본 기준 목록은 공개 선언 104개·SQL 54개 파일(마지막 번호 055)·워커 6개다. order 004/consultation 008 이관, 기존 주문 목록·취소·통화 삭제, 초안의 최초 5년 보관과 배포 전환 검사를 연결한다. 신규 초안 CRUD/재개·관리자 보완·통화 주문 완료/확정 API와 결제/배송·남은 상담·전체 동등성은 후속이다.
 
@@ -30,12 +30,20 @@ Jenkins의 Linux 빌드 노드에서 검증하고, MSA 서버 `k15d109.p.ssafy.i
 
 ## 실행 흐름
 
+[CI 비용·#40 전환 실패 보완](../docs/msa-ci-runtime-plan.md)은 앱 배포와 회귀 선택을 분리하고,
+전체 선택 시 13개 checks/production/Liquibase 이미지를 공유한다. 기존 회귀의 원본은
+`baseline.json`의 055 커밋 `9624b778`로 고정하며 `msa/.ci-source/`에서 현재 MSA와 검증한다.
+원래 `backend/`는 변경하지 않는다. 이후 056/API는 이 검사에 섞지 않는다.
+최초 052 전체 동등성 진단은 별도 MR !364의 수동 검증이며, 현재 업무 동등성 완료를 의미하지 않는다.
+다섯 서비스의 npm 다운로드는 기존 BuildKit의 잠금 캐시로 공유한다. 다운로드 캐시는 운영 이미지에
+포함하지 않으며, 이벤트 검증 파일 변경은 의존성 설치 레이어를 무효화하지 않는다.
+
 ```text
-Webhook → develop-backend checkout → 스크립트 검사 → 실제 배포 이력 조회
-  → DB 관련 변경이 있을 때만 전체 DB CI·패키징
-  → 변경된 서비스만 테스트·이미지 빌드·패키징
-  → 변경된 모든 DB: SQL 기록 → changeset 적용 → 적용 결과 확인
-  → DB 전체 성공 후 앱 SSH 전송 → 이미지 검증 → 이전 리소스 보관 → RollingUpdate
+Webhook → develop-backend checkout → 스크립트 검사 → 고정 원본 격리 → 실제 배포 이력 조회
+  → 검증/배포 범위 선택 → 필요한 이미지 각 1회 빌드 → DB/동등성 회귀 → 패키징
+  → 앱 SSH 전송·이미지/manifest 사전 검증 → 모든 DB의 SQL/대기 fingerprint 확인
+  → 055 pending: 통화/PBX/이벤트 확인 → 두 앱 중지 → 두 DB 백업/검증
+  → 변경된 모든 DB 적용·확인 → 이전 리소스 보관 → RollingUpdate
   → 내부 health/OpenAPI + 외부 HTTPS health/Swagger/OpenAPI 확인
   → 성공: 배포 커밋 기록 / 실패: 이전 리소스 복원 후 빌드 실패
 ```
@@ -87,7 +95,11 @@ Webhook 설정은 Jenkins·GitLab에서 관리한다. 앱과 DB 자동 배포는
 6. `update` 후 `validate`와 `status`를 검사하고 미적용 changeset이 없어야 성공 처리한다. DB 적용 커밋을 기록한다.
 7. 선택한 모든 DB가 성공해야 앱 배포로 진행한다. DB 실패 시 앱을 배포하지 않는다. DB와 앱 단계 전체가 하나의 Jenkins 배포 잠금을 공유한다.
 
-**백업은 이 파이프라인이 생성하지 않는다.** 자동 DB 적용은 MR 리뷰를 통과한 changeset을 대상으로 하며, 파괴적인 변경 전에 별도 백업을 준비한다.
+055 최초 전환은 두 앱이 모두 멈춘 뒤 order/consultation DB를 서버의
+`/home/ubuntu/msa-deploy/backups/<release>/`에 백업한다. 디렉터리는 0700, dump/상태는 0600이며
+CI로 전송하지 않는다. checksum과 pg_restore 목록을 검사하고, DDL 전 준비 실패는 이전 복제 수로 복구한다.
+DDL 보호 표식 이후에는 구형 앱을 자동 재개하지 않는다. 일반 DB 변경과 별도 복구용 백업 정책은 운영자가 관리한다.
+외부 AI outbox/유입 전환과 새 계약 준비는 이 코드가 확인하지 않으며 기존 운영 협업 조건을 유지한다.
 
 미리보기는 배포용 SQL 확인 단계다. 별도 프리뷰 웹사이트를 생성하지 않는다. `update-sql`만으로 실제 DDL 성공을 보장하지 않으므로 CI에서 SQL을 실제 실행하고 CD에서도 적용 결과를 검사한다. Liquibase 조회 과정에서 관리 테이블이 만들어질 수 있다.
 
@@ -144,7 +156,7 @@ Traefik의 `websecure`와 `letsencrypt`를 사용한다. 앱은 `/<서비스>` �
 
 적용 전에 해당 서비스의 Deployment·Service·Ingress를 `previous-resources.json`으로 보관한다. rollout 또는 응답 검사 실패 시 이전 리소스를 적용하고 복구 응답을 확인한다. 복구에 성공해도 실패한 릴리스의 Jenkins 빌드는 실패 처리한다. 다른 이미지가 이미 배포되었다면 이를 덮어쓰지 않고 복구를 중단한다. 최초 배포는 이전 버전이 없으므로 진단용 리소스를 남긴다. SSH 단절·강제 종료·노드 장애에서는 자동 복구 완료를 보장하지 않는다.
 
-앱/DB 단계 전체는 한 배포 잠금을 공유한다. 앱 롤백은 DB를 되돌리지 않으므로 스키마 변경은 이전 앱과도 호환되게 적용해야 한다. DB 백업은 별도로 준비하며 추가 Jenkins 승인은 받지 않는다.
+앱/DB 단계 전체는 한 배포 잠금을 공유한다. 앱 롤백은 DB를 되돌리지 않는다. 055 최초 전환은 위의 정지·백업·구형 앱 차단을 적용하며, 그 외 파괴적 DB 변경의 백업은 별도로 준비한다. 추가 Jenkins 승인은 받지 않는다.
 
 | 파일 | 역할 |
 |---|---|
@@ -182,7 +194,7 @@ python3 msa/deploy/tests/integration_app_rollout.py --image dva-customer:local
 
 ## DB 자동 배포 연결 보완
 
-DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 안에서 `Database Delivery`가 먼저 실행되고, 모든 DB 적용이 성공해야 `Application Delivery`를 실행한다. DB만 변경된 MR도 실제 서버에 적용한다. 변경이 없는 DB만 생략한다. 이전 검증 기록의 41개 검사는 앱 배포 중심의 기록이며, 이번 보완은 DB 전용 변경·다중 DB·실패 중단·재실행 선택 경로를 추가로 검증한다.
+DB와 앱은 별도 수동 실행으로 나누지 않는다. `Release Delivery` 안에서 `Stage Application Images` → `Database Delivery` → `Application Delivery` 순서로 실행한다. 사전 전송은 앱을 적용하지 않으며, 모든 DB 적용이 성공해야 rollout한다. DB만 변경된 MR도 실제 서버에 적용한다. 변경이 없는 DB만 생략한다. 이전 검증 기록의 41개 검사는 당시 앱 배포 중심 기록이다.
 
 보완 검증: Linux Python 3.13 회귀 검사 46개와 Bash·Jenkinsfile Groovy 구문 검사 통과. DB 전용 변경 선택, 다중 DB 순차 적용, 적용 실패 시 중단, 미적용 DB 재선택을 확인했다. 신규 자동 DB 흐름의 운영 Jenkins 실행은 병합 후 확인한다.
 

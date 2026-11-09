@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import time
 import uuid
+from ci_images import prepared_image
 
 ROOT = Path(__file__).resolve().parents[2]
 RUN = 'dva-customer-check-' + uuid.uuid4().hex[:12]
@@ -52,6 +53,12 @@ def main():
             ('monolith-checks', 'backend', 'checks'),
             ('monolith', 'backend', None), ('liquibase', 'msa/liquibase', None),
         ):
+            image = prepared_image(name)
+            if image:
+                images[name] = image
+                report.setdefault('images', {})[name] = image
+                print(name + '-reuse', flush=True)
+                continue
             image = RUN + '-' + name
             resources.append(('image', image))
             run('docker', 'build', '--label', LABEL, '-t', image,

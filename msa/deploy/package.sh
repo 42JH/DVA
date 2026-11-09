@@ -25,6 +25,7 @@ printf '%s\n' "$DB_IMAGE" > "$dest/image-name.txt"
 printf '%s\n' "$image_id" > "$dest/image-id.txt"
 cp msa/liquibase/run-service.sh "$dest/"
 cp msa/deploy/remote.sh "$dest/"
+cp msa/deploy/prepare-cutover.py "$dest/"
 cp msa/liquibase/verification.json "$dest/"
 cd "$dest"
-sha256sum liquibase-image.tar image-name.txt image-id.txt run-service.sh remote.sh verification.json > SHA256SUMS
+sha256sum liquibase-image.tar image-name.txt image-id.txt run-service.sh remote.sh prepare-cutover.py verification.json > SHA256SUMS

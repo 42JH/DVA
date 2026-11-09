@@ -1,11 +1,32 @@
 require('reflect-metadata');
-const { test, before, beforeEach, after } = require('node:test');
+const { test, before, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomBytes } = require('node:crypto');
 const token = randomBytes(32).toString('hex');
 process.env.AI_INSIGHTS_TOKEN = token;
 const { applicationFixture, createTestPool } = require('./helpers/application.cjs');
 const f = applicationFixture();
+afterEach(async () => {
+  const { DashboardRepository } = require('../dist/dashboard/dashboard.repository');
+  const repository = f.app.get(DashboardRepository);
+  const client = await f.pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    for (const type of ['ALL', 'NEW', 'EXISTING']) {
+      const shared = await repository.performance(type, client);
+      for (const method of ['stageDropoffs', 'registrationTime', 'complaintCalls', 'responseWait'])
+        assert.deepEqual(
+          shared[method],
+          await repository[method](type, client),
+          type + ' ' + method,
+        );
+    }
+    await client.query('COMMIT');
+  } finally {
+    await client.query('ROLLBACK');
+    client.release();
+  }
+});
 const paths = ['stage-dropoffs', 'registration-time', 'complaint-calls', 'response-wait'];
 const get = (path, customerType, actor = 0, headers = {}) =>
   f.get(

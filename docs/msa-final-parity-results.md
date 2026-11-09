@@ -6,7 +6,7 @@ Jira: [S15P31D109-160](https://ssafy.atlassian.net/browse/S15P31D109-160)
 
 기준 원본은 최초 계획의 `6a141a0512b73837905f6154c4ff84bcf33f912b`, backend tree `12ad37a492879c47b6c1f78c3c3f3bdfdf98edda`다. HTTP 선언은 업무 92개·health/metrics 3개, SQL은 51개 파일(마지막 052), 워커는 6개다. [고정 목록](../msa/parity/initial-baseline.json)과 archive의 전체 API/SQL 해시/워커 비교가 일치했다.
 
-검사 대상 런타임은 MR !363 병합 `06ce863beaf44320111df3d609dc2b79a1bd5db0`이다. 서비스 소스 tree `371364acbb00deaac3112bf67af3c9908a4daf7f`를 보존했다. 이 MR의 추적 변경은 검증 코드·CI의 검증기 회귀 연결·문서다. 후속 API 이식은 보류한다. 기존 최신 backend 목록 검사와 현재 055 구현은 보존한다.
+최초 검사 대상 런타임은 MR !363 병합 `06ce863beaf44320111df3d609dc2b79a1bd5db0`이다. 서비스 소스 tree `371364acbb00deaac3112bf67af3c9908a4daf7f`를 보존했다. 이 MR의 추적 변경은 검증 코드·CI의 검증기 회귀 연결·문서다. 후속 API 이식은 보류한다. 기존 055 목록 검사와 구현은 보존하며, !369 병합 이후 Jenkins 검사는 고정 055 원본 CI 작업공간에서 실행한다.
 
 **전체 동등성 조건은 충족하지 못했다.** 최초 범위의 업무 API 23개가 MSA에 선언되지 않았다. 기존 부분 검증의 성공이나 같은 오류 응답을 전체 동등성 통과로 확대하지 않는다. 아래 존재 수는 소스 선언 기준이며 정상 분기 전체의 동등성 수가 아니다.
 
@@ -111,14 +111,16 @@ PBX/녹취, 진행 통화 수, FAQ 알림과 공통 outbox/inbox에는 기존 �
 ## 실행 방법과 비교 규칙
 
 ```sh
-# 고정 커밋을 포함한 Git 이력 + Docker Desktop/Linux 엔진; 운영 Secret/kubeconfig 불필요
+# 고정 커밋을 포함한 Git 이력 + Node 24/Python 3.12 이상 + Docker; 운영 Secret/kubeconfig 불필요
 # 전체 API/DB 실행 수집과 동등성 판정
 python msa/parity/verify-final.py
 # 소스 선언의 누락 별도 확인
 node -e "const p=require('./msa/parity/final-parity.cjs'); console.log(p.coverage(require('./msa/parity/initial-baseline.json').inventory.routes,p.msaRoutes(process.cwd())).filter(x=>!x.declared))"
-# 검증기 회귀와 기존 최신 inventory
-node --test msa/parity/final-contract.test.cjs msa/parity/inventory.test.cjs
-python msa/shared/events/verify.py
+# 검증기 회귀
+node --test msa/parity/final-contract.test.cjs
+# Jenkins와 같은 고정 055 inventory/이벤트 검사: Linux의 깨끗한 체크아웃에서 실행
+python msa/parity/ci_workspace.py
+python msa/.ci-source/msa/shared/events/verify.py
 ```
 
 `verify-final.py`는 최초 원본을 git archive로 추출해 checks/production 이미지와 다섯 MSA checks/production 이미지를 빌드한다. 원본 DB와 서비스별 다섯 DB에 같은 초기 업무 행·세션을 넣고 95개 경로에 익명·인증·금지 Origin 요청을 보낸다. source/OpenAPI 선언이 없는 경로는 같은 404를 받아도 실패다. 정상 업무 요청과 응답 직후 데이터·감사 비교를 수행한 뒤, 별도 DB에서 원본 전체 integration 명령을 실행한다. AI/디버는 기존 Node HTTP 테스트 패턴의 임시 peer를 앱 내부 네트워크에서 제공한다.

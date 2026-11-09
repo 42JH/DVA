@@ -1,10 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { PoolClient } from 'pg';
 import { DatabaseService } from '../database/database.service';
 import {
   DROPOFF_STAGES,
   LATENCY_PROCESS_TYPES,
 } from '../call-insights/call-dashboard-metrics.types';
 import { DashboardCustomerType } from './dto/dashboard-query.dto';
+import { HomeAiPerformanceDto } from './dto/home-response.dto';
 import {
   ComplaintCallsDto,
   DASHBOARD_COMPLAINT_TYPES,
@@ -16,7 +18,7 @@ import {
 const FROM_CALLS = 'FROM call_sessions c LEFT JOIN call_analyses a USING(call_session_seq)';
 const CALL_DURATION_MS =
   '(extract(epoch FROM (COALESCE(c.ended_at,a.ai_ended_at)-COALESCE(c.started_at,a.ai_started_at)))*1000)';
-const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>statement_timestamp()-interval '5 years')
+const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.incoming_at>transaction_timestamp()-interval '5 years')
  AND COALESCE(c.ended_at,a.ai_ended_at) IS NOT NULL
  AND ($1::text='ALL' OR ($1='NEW' AND a.is_new_customer IS TRUE) OR ($1='EXISTING' AND a.is_new_customer IS FALSE))`;
 
@@ -24,14 +26,24 @@ const CALL_FILTER = `WHERE c.deleted_at IS NULL AND (c.incoming_at IS NULL OR c.
 export class DashboardRepository {
   constructor(private readonly database: DatabaseService) {}
 
-  private async read<T>(sql: string, values: unknown[]): Promise<T> {
-    return (await this.database.pool.query<{ data: T }>(sql, values)).rows[0].data;
+  private async read<T>(sql: string, values: unknown[], client?: PoolClient): Promise<T> {
+    return (await (client ?? this.database.pool).query<{ data: T }>(sql, values)).rows[0].data;
   }
 
-  stageDropoffs(customerType: DashboardCustomerType): Promise<StageDropoffsDto> {
+  stageDropoffs(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<StageDropoffsDto> {
     return this.read(
-      `WITH calls AS (
-      SELECT a.is_new_customer,m.dropoff_stage ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
+      this.stageDropoffsSql(),
+      [customerType, DROPOFF_STAGES.filter((stage) => stage !== 'NONE')],
+      client,
+    );
+  }
+
+  private stageDropoffsSql(shared = false): string {
+    return `WITH calls AS (
+      ${shared ? 'SELECT is_new_customer,dropoff_stage FROM dashboard_calls' : `SELECT a.is_new_customer,m.dropoff_stage ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
        count(dropoff_stage) AS assessed,count(*) FILTER(WHERE dropoff_stage<>'NONE') AS dropped FROM calls
@@ -42,16 +54,19 @@ export class DashboardRepository {
        SELECT jsonb_agg(jsonb_build_object('stage',code,'callCount',COALESCE(n,0),
         'dropoffRatePercent',COALESCE(n,0)*100.0/NULLIF(s.assessed,0)) ORDER BY position)
        FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN stages ON stages.dropoff_stage=code)) AS data
-     FROM summary s`,
-      [customerType, DROPOFF_STAGES.filter((stage) => stage !== 'NONE')],
-    );
+     FROM summary s`;
   }
 
-  registrationTime(customerType: DashboardCustomerType): Promise<RegistrationTimeDto> {
-    return this.read(
-      `WITH calls AS (
-      SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms
-      ${FROM_CALLS} ${CALL_FILTER}
+  registrationTime(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<RegistrationTimeDto> {
+    return this.read(this.registrationTimeSql(), [customerType], client);
+  }
+
+  private registrationTimeSql(shared = false): string {
+    return `WITH calls AS (
+      ${shared ? 'SELECT is_new_customer,ai_persona_version_seq,registered_parcel_count,duration_ms FROM dashboard_calls' : `SELECT a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,${CALL_DURATION_MS} AS duration_ms ${FROM_CALLS} ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
        count(*) FILTER(WHERE registered_parcel_count>0) AS registrations,
@@ -78,40 +93,50 @@ export class DashboardRepository {
       'comparison',jsonb_build_object('current',(SELECT data FROM comparison WHERE role='CURRENT'),
        'previous',(SELECT data FROM comparison WHERE role='PREVIOUS'),
        'previousMinusCurrentSeconds',(SELECT average FROM comparison WHERE role='PREVIOUS')-(SELECT average FROM comparison WHERE role='CURRENT'))) AS data
-     FROM summary s`,
-      [customerType],
+     FROM summary s`;
+  }
+
+  complaintCalls(
+    customerType: DashboardCustomerType,
+    client?: PoolClient,
+  ): Promise<ComplaintCallsDto> {
+    return this.read(
+      this.complaintCallsSql(),
+      [customerType, [...DASHBOARD_COMPLAINT_TYPES]],
+      client,
     );
   }
 
-  complaintCalls(customerType: DashboardCustomerType): Promise<ComplaintCallsDto> {
-    return this.read(
-      `WITH calls AS (
-      SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}
+  private complaintCallsSql(shared = false): string {
+    const types = shared ? '$3' : '$2';
+    return `WITH calls AS (
+      ${shared ? 'SELECT call_session_seq,is_new_customer,has_complaint,complaints FROM dashboard_calls' : `SELECT c.call_session_seq,a.is_new_customer,a.has_complaint,a.complaints ${FROM_CALLS} ${CALL_FILTER}`}
      ), summary AS (
       SELECT count(*) AS total,count(*) FILTER(WHERE is_new_customer IS NULL) AS unknown_customer,
        count(has_complaint) AS assessed,count(*) FILTER(WHERE has_complaint IS TRUE) AS complained FROM calls
      ), call_types AS (
       SELECT DISTINCT c.call_session_seq,item->>'type' AS type
       FROM calls c CROSS JOIN LATERAL jsonb_array_elements(c.complaints) item WHERE c.has_complaint IS TRUE
-     ), types AS (SELECT type,count(*) AS n FROM call_types WHERE type=ANY($2::text[]) GROUP BY type),
+     ), types AS (SELECT type,count(*) AS n FROM call_types WHERE type=ANY(${types}::text[]) GROUP BY type),
      type_total AS (SELECT COALESCE(sum(n),0) AS n FROM types)
      SELECT jsonb_build_object('customerType',$1::text,'endedCallCount',s.total,'unclassifiedCustomerCallCount',s.unknown_customer,
       'assessedCallCount',s.assessed,'unassessedCallCount',s.total-s.assessed,'complaintCallCount',s.complained,
       'complaintRatePercent',s.complained*100.0/NULLIF(s.assessed,0),'typeTotalCount',t.n,
-      'legacyTypeCallCount',(SELECT count(DISTINCT call_session_seq) FROM call_types WHERE type IS NULL OR NOT(type=ANY($2::text[]))),
+      'legacyTypeCallCount',(SELECT count(DISTINCT call_session_seq) FROM call_types WHERE type IS NULL OR NOT(type=ANY(${types}::text[]))),
       'types',(SELECT jsonb_agg(jsonb_build_object('type',code,'callCount',COALESCE(types.n,0),
        'sharePercent',COALESCE(types.n,0)*100.0/NULLIF(t.n,0)) ORDER BY position)
-       FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN types ON types.type=code)) AS data
-     FROM summary s CROSS JOIN type_total t`,
-      [customerType, [...DASHBOARD_COMPLAINT_TYPES]],
-    );
+       FROM unnest(${types}::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN types ON types.type=code)) AS data
+     FROM summary s CROSS JOIN type_total t`;
   }
 
-  responseWait(customerType: DashboardCustomerType): Promise<ResponseWaitDto> {
-    return this.read(
-      `WITH calls AS (
-      SELECT a.is_new_customer,${CALL_DURATION_MS} AS duration_ms,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
-      ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
+  responseWait(customerType: DashboardCustomerType, client?: PoolClient): Promise<ResponseWaitDto> {
+    return this.read(this.responseWaitSql(), [customerType, [...LATENCY_PROCESS_TYPES]], client);
+  }
+
+  private responseWaitSql(shared = false): string {
+    const types = shared ? '$4' : '$2';
+    return `WITH calls AS (
+      ${shared ? 'SELECT is_new_customer,duration_ms,total_wait_ms,latency_stats,response_wait_received_at FROM dashboard_calls' : `SELECT a.is_new_customer,${CALL_DURATION_MS} AS duration_ms,m.total_wait_ms,m.latency_stats,m.response_wait_received_at ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}`}
      ), measured AS (
       SELECT * FROM calls WHERE response_wait_received_at IS NOT NULL AND total_wait_ms<=duration_ms
      ), summary AS (
@@ -129,9 +154,31 @@ export class DashboardRepository {
       'totalWaitMs',t.wait,'totalCallDurationMs',t.duration,'waitRatePercent',t.wait*100.0/NULLIF(t.duration,0),
       'processes',(SELECT jsonb_agg(jsonb_build_object('processType',code,'measurementCount',COALESCE(p.samples,0),
        'totalLatencyMs',COALESCE(p.latency,0),'averageLatencyMs',p.latency/NULLIF(p.samples,0)) ORDER BY position)
-       FROM unnest($2::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN processes p ON p.type=code)) AS data
-     FROM summary s CROSS JOIN totals t`,
-      [customerType, [...LATENCY_PROCESS_TYPES]],
+       FROM unnest(${types}::text[]) WITH ORDINALITY AS keys(code,position) LEFT JOIN processes p ON p.type=code)) AS data
+     FROM summary s CROSS JOIN totals t`;
+  }
+
+  performance(
+    customerType: DashboardCustomerType,
+    client: PoolClient,
+  ): Promise<HomeAiPerformanceDto> {
+    return this.read(
+      `WITH dashboard_calls AS MATERIALIZED (
+       SELECT c.call_session_seq,a.is_new_customer,a.ai_persona_version_seq,a.registered_parcel_count,
+        a.has_complaint,a.complaints,${CALL_DURATION_MS} AS duration_ms,
+        m.dropoff_stage,m.total_wait_ms,m.latency_stats,m.response_wait_received_at
+       ${FROM_CALLS} LEFT JOIN call_dashboard_metrics m USING(call_session_seq) ${CALL_FILTER}
+      ) SELECT jsonb_build_object('stageDropoffs',(${this.stageDropoffsSql(true)}),
+       'registrationTime',(${this.registrationTimeSql(true)}),
+       'complaintCalls',(${this.complaintCallsSql(true)}),
+       'responseWait',(${this.responseWaitSql(true)})) AS data`,
+      [
+        customerType,
+        DROPOFF_STAGES.filter((stage) => stage !== 'NONE'),
+        [...DASHBOARD_COMPLAINT_TYPES],
+        [...LATENCY_PROCESS_TYPES],
+      ],
+      client,
     );
   }
 }

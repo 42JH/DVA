@@ -5,7 +5,7 @@ const { before, beforeEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { createServer } = require('node:http');
-const { createTestPool } = require('./application.cjs');
+const { createTestPool, createTestSession } = require('./application.cjs');
 const { NestFactory } = require('@nestjs/core');
 const { ConfigService } = require('@nestjs/config');
 
@@ -17,7 +17,6 @@ module.exports = function manualOrders() {
   process.env.CORS_ORIGINS = 'http://localhost:5173';
   const { AppModule } = require('../../dist/app.module');
   const { configureApplication } = require('../../dist/configure-application');
-  const { hashPassword } = require('../../dist/auth/password');
   const pool = createTestPool();
   const origin = 'http://localhost:5173';
   const f = { pool, origin, apps: [], cookies: [], adminIds: [], requests: [] };
@@ -114,25 +113,17 @@ module.exports = function manualOrders() {
     f.dverUrl = `http://127.0.0.1:${f.server.address().port}/parcel`;
     f.app = await f.start();
     f.host = await f.app.getUrl();
-    const password = 'manual-order-test-password';
-    const hash = await hashPassword(password);
     for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
       const loginId = 'manual' + randomUUID().replaceAll('-', '').slice(0, 14);
       f.adminIds.push(
         (
           await pool.query(
-            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'수기 검증',$2,$3,'ACTIVE') RETURNING admin_user_seq",
-            [loginId, hash, role],
+            "INSERT INTO admin_users(login_id,name,password_hash,role,status) VALUES($1,'수기 검증','not-for-login',$2,'ACTIVE') RETURNING admin_user_seq",
+            [loginId, role],
           )
         ).rows[0].admin_user_seq,
       );
-      const login = await fetch(f.host + '/api/auth/login', {
-        method: 'POST',
-        headers: { Origin: origin, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ loginId, password }),
-      });
-      assert.equal(login.status, 200);
-      f.cookies.push(login.headers.get('set-cookie').split(';')[0]);
+      f.cookies.push(await createTestSession(pool, f.adminIds.at(-1)));
     }
     f.customerId = (
       await pool.query(

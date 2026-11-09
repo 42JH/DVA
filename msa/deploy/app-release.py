@@ -229,7 +229,10 @@ def apply_release(service, release, image):
 
 
 def main():
-    service, release = sys.argv[1:]
+    service, release = sys.argv[1:3]
+    action = sys.argv[3] if len(sys.argv) == 4 else 'deploy'
+    if action not in ('prepare', 'apply', 'deploy') or len(sys.argv) not in (3, 4):
+        raise ValueError('Invalid app delivery action')
     if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", service) or not re.fullmatch(r"[0-9a-f]{40}-[0-9]+", release):
         raise ValueError("Invalid release arguments")
     image = Path("image-name.txt").read_text().strip()
@@ -246,8 +249,22 @@ def main():
         or not any(c["type"] == "Ready" and c["status"] == "True" for c in node["status"]["conditions"])):
         raise RuntimeError("Expected a schedulable Ready linux/amd64 node")
     kube("get", "namespace", "dva", "-o", "name")
-    run(["sudo", "-n", "k3s", "ctr", "-n", "k8s.io", "images", "import", str(Path("image.tar").resolve())])
+    if action != 'apply':
+        run(["sudo", "-n", "k3s", "ctr", "-n", "k8s.io", "images", "import", str(Path("image.tar").resolve())])
     verify_digest(run(["sudo", "-n", "k3s", "ctr", "-n", "k8s.io", "images", "ls"]), image, digest)
+    if action == 'prepare':
+        desired = parse_resources(kube('apply', '--dry-run=server', '-f', 'k8s.yaml', '-o', 'json'))
+        deployment = validate_resources(desired, service, image)
+        Path('prepared-image.json').write_text(json.dumps({
+            'release': release, 'image': image, 'digest': digest,
+            'parcelDraftsContract': '055' if parcel_contract(deployment) else None,
+        }))
+        print(f'DVA_APP_IMAGE_PREPARED={service}')
+        return
+    if action == 'apply':
+        prepared = json.loads(Path('prepared-image.json').read_text())
+        if (prepared.get('release'), prepared.get('image'), prepared.get('digest')) != (release, image, digest):
+            raise RuntimeError('Application preparation does not match this release/image')
     apply_release(service, release, image)
 
 

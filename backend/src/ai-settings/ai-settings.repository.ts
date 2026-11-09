@@ -169,26 +169,37 @@ export class AiSettingsRepository {
   }
 
   async personas(query: PersonaListQueryDto, id?: number): Promise<PageRows<Persona>> {
-    const result = await readPage<Persona>(
+    const result = await readPage<
+      Pick<Persona, 'aiPersonaSeq' | 'code'> & {
+        details: Omit<Persona, 'aiPersonaSeq' | 'code'>;
+      }
+    >(
       this.database.pool,
-      `SELECT p.ai_persona_seq AS "aiPersonaSeq", p.code, row_to_json(latest) AS "latestVersion",
+      `SELECT p.ai_persona_seq AS "aiPersonaSeq",p.code FROM ai_personas p
+       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)
+        AND EXISTS(SELECT 1 FROM ai_persona_versions v WHERE v.ai_persona_seq=p.ai_persona_seq)`,
+      [id ?? null],
+      query,
+      '"aiPersonaSeq" DESC',
+      `page.*,(SELECT row_to_json(details) FROM (
+       SELECT row_to_json(latest) AS "latestVersion",
        row_to_json(latest) AS "headVersion",
        row_to_json(active) AS "activeVersion",row_to_json(pending) AS "pendingVersion",
        row_to_json(draft) AS draft,active."aiPersonaVersionSeq" AS "activeVersionSeq",
        pending."aiPersonaVersionSeq" AS "pendingVersionSeq"
-       FROM ai_personas p JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq ORDER BY v.version DESC LIMIT 1) latest ON true
+       FROM LATERAL (${VERSION_SELECT}
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" ORDER BY v.version DESC LIMIT 1) latest
        LEFT JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='ACTIVE') active ON true
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='ACTIVE') active ON true
        LEFT JOIN LATERAL (${VERSION_SELECT}
-        WHERE v.ai_persona_seq=p.ai_persona_seq AND v.status='PENDING') pending ON true
-       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=p.ai_persona_seq) draft ON true
-       WHERE ($1::int IS NULL OR p.ai_persona_seq=$1)`,
-      [id ?? null],
-      query,
-      '"aiPersonaSeq" DESC',
+        WHERE v.ai_persona_seq=page."aiPersonaSeq" AND v.status='PENDING') pending ON true
+       LEFT JOIN LATERAL (${DRAFT_SELECT} WHERE ai_persona_seq=page."aiPersonaSeq") draft ON true
+      ) details) AS details`,
     );
-    return result;
+    return {
+      ...result,
+      rows: result.rows.map(({ details, ...persona }) => ({ ...persona, ...details })),
+    };
   }
 
   async versions(id: number, query: PersonaListQueryDto): Promise<PageRows<PersonaVersion>> {

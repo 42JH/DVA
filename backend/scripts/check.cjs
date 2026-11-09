@@ -4,6 +4,13 @@ const { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } = require('
 const { tmpdir } = require('node:os');
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
+const { integrationCommand } = require('./integration-profile.cjs');
+const profile = process.env.BACKEND_TEST_PROFILE ?? 'full';
+const command = integrationCommand(profile);
+const releaseImage = process.env.BACKEND_RELEASE_IMAGE ?? '';
+if (releaseImage && !/^dva-backend:[a-z0-9][a-z0-9.-]{0,79}$/.test(releaseImage))
+  throw new Error('Invalid backend release image');
+const started = Date.now();
 const run = 'dva-backend-check-' + randomBytes(6).toString('hex');
 const network = run + '-net';
 const database = run + '-db';
@@ -20,6 +27,7 @@ const password = randomBytes(32).toString('hex');
 const webhookToken = randomBytes(32).toString('hex');
 const personaToken = randomBytes(32).toString('hex');
 const businessToken = randomBytes(32).toString('hex');
+const insightsToken = randomBytes(32).toString('hex');
 let networkCreated = false,
   databaseCreated = false,
   imageCreated = false;
@@ -87,6 +95,11 @@ try {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
   if (!ready) throw new Error('Disposable PostgreSQL did not become ready');
+  const integrationStarted = Date.now();
+  console.log(`Backend integration profile: ${profile}`);
+  console.log(
+    `Backend integration files: ${command.split(' ').filter((arg) => arg.startsWith('test/')).length}`,
+  );
   docker([
     'run',
     '--rm',
@@ -115,7 +128,11 @@ try {
     '-e',
     `DVA_TEST_DATABASE_VERIFY_SQL=${readFileSync(path.join(root, '../infra/database/verify.sql'), 'utf8')}`,
     image,
+    'sh',
+    '-c',
+    command,
   ]);
+  console.log(`Backend integration checks: ${Date.now() - integrationStarted} ms (${profile})`);
   docker(['build', '-t', runtimeImage, root]);
   runtimeCreated = true;
   docker([
@@ -156,6 +173,8 @@ try {
     `AI_PERSONA_TOKEN=${personaToken}`,
     '-e',
     `AI_BUSINESS_TOKEN=${businessToken}`,
+    '-e',
+    `AI_INSIGHTS_TOKEN=${insightsToken}`,
     runtimeImage,
   ]);
   applicationCreated = true;
@@ -287,6 +306,8 @@ try {
     '-e',
     `TEST_BUSINESS_TOKEN=${businessToken}`,
     '-e',
+    `TEST_INSIGHTS_TOKEN=${insightsToken}`,
+    '-e',
     'TEST_HTTPS_API_ROOT=https://backend/api',
     '-e',
     'NODE_EXTRA_CA_CERTS=/test-proxy-ca.pem',
@@ -296,9 +317,11 @@ try {
     'test/runtime.integration.test.cjs',
   ]);
   runtimeTestsCreated = true;
+  const runtimeStarted = Date.now();
   // Jenkins and its Docker daemon have separate filesystems; stream the client-local certificate.
   docker(['cp', certificate, `${runtimeTests}:/test-proxy-ca.pem`]);
   docker(['start', '--attach', runtimeTests]);
+  console.log(`Backend runtime checks: ${Date.now() - runtimeStarted} ms`);
   docker(['exec', proxy, 'nginx', '-t']);
   docker([
     'exec',
@@ -309,9 +332,14 @@ try {
   ]);
   // 임시 DB의 기존 FAQ를 보존하면서 운영 이미지에서도 초기 등록 명령이 실행되는지 확인한다.
   docker(['exec', application, 'node', 'dist/faqs/bootstrap-faq.js', 'runtimeAdmin83']);
+  if (releaseImage) {
+    docker(['tag', runtimeImage, releaseImage]);
+    console.log(`Verified backend release image: ${releaseImage}`);
+  }
   console.log(
     'PASS: backend checks, isolated PostgreSQL, production image and Nginx/PBX contracts.',
   );
+  console.log(`Backend verification total: ${Date.now() - started} ms (${profile})`);
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

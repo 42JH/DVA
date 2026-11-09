@@ -3,7 +3,7 @@ const { before, after, test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { migrate } = require('./helpers/migrations.cjs');
-const { createTestPool, startTestApp } = require('./helpers/application.cjs');
+const { createTestPool, startTestApp, businessHeaders } = require('./helpers/application.cjs');
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
 assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
@@ -305,6 +305,193 @@ test('lists return nested member/customer views, status filters, stable pages an
   ])
     await error(await request(`/companies/${co}/members?${query}`), 400, 'INVALID_REQUEST');
   await error(await request('/companies/2147483647/members'), 404, 'NOT_FOUND');
+});
+
+test('company member q searches names, employee numbers and formatted phone parts within one company', async () => {
+  const co = await company();
+  const other = await company();
+  const cu = await customer('ACTIVE', phone(), '홍길동 Alpha');
+  await empty(await create(co, cu.id, '00Ab-007'));
+  const outsider = await customer('ACTIVE', phone(), cu.name);
+  await empty(await create(other, outsider.id, '00Ab-007'));
+  const baseline = await members(co);
+  for (const q of [
+    '길동',
+    '  ALPHA  ',
+    '홍길동',
+    '00ab-007',
+    cu.phoneNumber,
+    `${cu.phoneNumber.slice(0, 3)}-${cu.phoneNumber.slice(3, 7)}-${cu.phoneNumber.slice(7)}`,
+    cu.phoneNumber.slice(-4),
+  ])
+    assert.deepEqual(await members(co, '?' + new URLSearchParams({ q })), baseline, q);
+  assert.deepEqual(await members(co, '?q=not-a-member'), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  assert.equal(Object.hasOwn(baseline.data[0].customer, 'availablePaymentMethods'), false);
+});
+
+test('member q combines with status, counts filtered rows and keeps blank queries and stable pages', async () => {
+  const co = await company();
+  const ids = [];
+  for (const name of ['검색대상', '검색대상', '다른사람', '검색대상']) {
+    const cu = await customer('ACTIVE', phone(), name);
+    await empty(await create(co, cu.id, String(ids.length).padStart(3, '0')));
+    ids.push((await member(co, cu.id)).membershipSeq);
+  }
+  await empty(await patch(ids[1], { status: 'INACTIVE' }));
+  const first = await members(co, '?q=검색대상&limit=2');
+  assert.equal(first.total_count, 3);
+  assert.equal(first.hasNext, true);
+  assert.deepEqual(
+    first.data.map((row) => row.membership.membershipSeq),
+    [ids[3], ids[1]],
+  );
+  const second = await members(co, '?q=검색대상&limit=2&offset=2');
+  assert.equal(second.total_count, 3);
+  assert.equal(second.hasNext, false);
+  assert.deepEqual(
+    second.data.map((row) => row.membership.membershipSeq),
+    [ids[0]],
+  );
+  assert.deepEqual(await members(co, '?q=없는이름&status=ACTIVE'), {
+    data: [],
+    hasNext: false,
+    total_count: 0,
+  });
+  assert.deepEqual(
+    (await members(co, '?q=검색대상&status=INACTIVE')).data.map(
+      (row) => row.membership.membershipSeq,
+    ),
+    [ids[1]],
+  );
+  assert.equal((await members(co, '?q=검색대상&status=ACTIVE')).total_count, 2);
+  assert.deepEqual(await members(co, '?q=검색대상&offset=100'), {
+    data: [],
+    hasNext: false,
+    total_count: 3,
+  });
+  const baseline = await members(co);
+  for (const q of ['', '   ', '\t\n'])
+    assert.deepEqual(await members(co, '?' + new URLSearchParams({ q })), baseline);
+});
+
+test('member q treats wildcard characters literally, rejects invalid queries and never removes the company boundary', async () => {
+  const co = await company();
+  const ids = [];
+  for (const employeeNo of ['00%_A', '00XA', 'dash-', 'x'.repeat(100)]) {
+    const cu = await customer();
+    await empty(await create(co, cu.id, employeeNo));
+    ids.push((await member(co, cu.id)).membershipSeq);
+  }
+  for (const [q, expected] of [
+    ['%', [ids[0]]],
+    ['_', [ids[0]]],
+    ['%_', [ids[0]]],
+    ['-', [ids[2]]],
+    ['x'.repeat(100), [ids[3]]],
+    ["' OR 1=1 --", []],
+    ['\\', []],
+  ]) {
+    const result = await members(co, '?' + new URLSearchParams({ q }));
+    assert.deepEqual(
+      result.data.map((row) => row.membership.membershipSeq),
+      expected,
+    );
+    assert.equal(result.total_count, expected.length);
+  }
+  for (const query of ['q=' + 'x'.repeat(101), 'q=a&q=b', 'q%5B%5D=a', 'q%5Bname%5D=a', 'q=%00'])
+    await error(await request(`/companies/${co}/members?${query}`), 400, 'INVALID_REQUEST');
+});
+
+test('member q preserves inactive and withdrawn visibility while hiding deleted links and companies', async () => {
+  const co = await company();
+  const customers = [];
+  const ids = [];
+  for (let index = 0; index < 4; index++) {
+    const cu = await customer('ACTIVE', phone(), '상태검색');
+    await empty(await create(co, cu.id, '00' + index));
+    customers.push(cu);
+    ids.push((await member(co, cu.id)).membershipSeq);
+  }
+  await empty(await patch(ids[1], { status: 'INACTIVE' }));
+  await pool.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=$1", [
+    customers[1].id,
+  ]);
+  await pool.query('UPDATE memberships SET deleted_at=clock_timestamp() WHERE membership_seq=$1', [
+    ids[2],
+  ]);
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    customers[3].id,
+  ]);
+  await pool.query("UPDATE organizations SET status='INACTIVE' WHERE organization_seq=$1", [co]);
+  const result = await members(co, '?q=상태검색');
+  assert.equal(result.total_count, 2);
+  assert.deepEqual(
+    result.data.map((row) => row.membership.membershipSeq),
+    [ids[1], ids[0]],
+  );
+  assert.equal(result.data[0].customer.status, 'WITHDRAWN');
+  assert.equal((await members(co, '?q=상태검색&status=ACTIVE')).total_count, 1);
+  await pool.query(
+    'UPDATE organizations SET deleted_at=clock_timestamp() WHERE organization_seq=$1',
+    [co],
+  );
+  await error(await request(`/companies/${co}/members?q=상태검색`), 404, 'NOT_FOUND');
+  await error(await request('/companies/2147483647/members?q=상태검색'), 404, 'NOT_FOUND');
+});
+
+test('member q remains an administrator-only read with the existing response and documented query', async () => {
+  const co = await company();
+  const cu = await customer('ACTIVE', phone(), '권한검색');
+  await empty(await create(co, cu.id));
+  const counts = async () =>
+    (
+      await pool.query(`SELECT
+    (SELECT count(*) FROM customers) AS customers,(SELECT count(*) FROM memberships) AS memberships,
+    (SELECT count(*) FROM orders) AS orders,(SELECT count(*) FROM call_sessions) AS calls,
+    (SELECT count(*) FROM audit_logs) AS audits`)
+    ).rows[0];
+  const baseline = await members(co);
+  const previous = await counts();
+  for (let index = 0; index < 2; index++)
+    assert.deepEqual(await members(co, '?q=권한검색'), baseline);
+  assert.deepEqual(await counts(), previous);
+  for (const role of ['SUPERVISOR', 'SYSTEM_ADMIN']) {
+    const admin = await account(role);
+    const response = await request(`/companies/${co}/members?q=권한검색`, {}, base, admin.cookie);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), baseline);
+  }
+  await error(
+    await request(`/companies/${co}/members?q=권한검색`, {}, base, null),
+    401,
+    'UNAUTHORIZED',
+  );
+  await error(
+    await request(
+      `/companies/${co}/members?q=권한검색`,
+      { headers: businessHeaders() },
+      base,
+      null,
+    ),
+    401,
+    'UNAUTHORIZED',
+  );
+  const document = await (await fetch(base + '/api/docs-json')).json();
+  const route = document.paths['/api/companies/{id}/members'].get;
+  const q = route.parameters.find((parameter) => parameter.name === 'q');
+  assert.ok(q);
+  assert.equal(q.required, false);
+  assert.equal(q.schema.type, 'string');
+  assert.equal(q.schema.maxLength, 100);
+  assert.deepEqual(route.security, [{ adminSession: [] }]);
+  assert.equal(
+    route.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/MembersEnvelopeDto',
+  );
 });
 
 test('manual registration validates IDs/body, preserves employee zeroes/case and refuses reassignment', async () => {

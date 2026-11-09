@@ -73,13 +73,20 @@ agent-secret은 에이전트 실행에 필요하므로 유지한다.
 ## 변경 범위와 최적화
 
 - 마지막 성공 커밋부터 현재 커밋까지 모든 변경·삭제·이동을 비교한다. 기준 누락·이력 분기·알 수 없는 경로는 전체 검증한다.
+- `backend/README.md`·`backend/docs/**/*.md` 등 문서만 변경되면 무거운 검증과 자동 배포를 생략한다. 문서 경로의 SQL·스크립트와 코드가 섞인 변경은 기존대로 검증한다. `DEPLOY_LIGHTSAIL=true`로 명시한 문서 전용 수동 배포는 백엔드 전체 검증 후 진행한다.
 - 검증 범위와 배포 여부는 따로 판정한다. 자동·수동 배포 요청도 변경 경로에 따라 검증하며, 배포 요청만으로 관측·결제 데모 검증을 강제하지 않는다.
-- 백엔드 모듈 변경은 인증·공통·DB 모듈을 포함해 백엔드 전체 회귀를 실행한다. 일반 업무·인증 변경은 관측·결제 데모 인프라 검증을 생략한다.
+- 기능별 source·등록된 전용 test 변경은 해당 기능과 호출자·DB 소비자의 통합 테스트 그룹을 선택한다. FAQ/미답변·대시보드·페르소나·고객·기업/사원·PIN·배송 초안·통화 종료 접수·주문·결제·통화 조회·분석·이벤트·녹취·실시간 통화 수의 15개 범위를 제공한다. 여러 기능은 합집합을 기존 순서로 한 번씩 실행한다.
+- 모든 단위 테스트, DB 트랜잭션·웹훅, 운영 이미지·Nginx/HTTPS 23개는 매번 유지한다. 실제 로그인·쿠키·로그아웃·권한·요청 제한도 운영 검증에 포함한다. `runtime-fixture.integration.test.cjs`가 임시 운영 계정·활성 페르소나·접수 완료 주소 스냅샷을 준비하므로 다른 테스트가 남긴 운영 데이터에 의존하지 않는다.
+- 공통·인증·감사·보존·통화 세션 생성/종료 기반·모듈 배선·새/공용 test는 백엔드 전체 회귀를 실행한다. 주문·결제는 해당 회귀와 상호 호출·취소·복구·삭제를 함께 검증한다. 일반 업무·인증 변경은 관련 없는 관측·결제 데모 인프라 검증을 생략한다. 공유 DB의 순차 실행은 유지한다.
+- 배포 mock 회귀 3종은 CI/배포·공유 설정·migration 변경, 기준 누락과 `FULL_BACKEND_TESTS=true`에서 실행한다. 일반 기능·문서 변경은 이를 반복하지 않는다. 실제 배포의 브랜치·웹훅 판정, 이미지/SQL 체크섬·고정 SSH 호스트 키·migration·readiness·복구 검사는 유지한다.
 - 백엔드 관측 모듈·HTTP 공통 처리·health·관측 테스트 변경은 백엔드와 관측 검증을 함께 실행한다. `backend/payment-test/` 변경은 백엔드와 결제 데모 검증을 함께 실행한다.
 - migration·의존성·Dockerfile·TypeScript 설정·앱 설정 및 시작 코드, 공용 인프라·파이프라인·알 수 없는 경로 변경은 전체 검증한다. 변경 기준을 판정할 수 없는 경우도 전체 검증한다.
 - 관측 인프라만 변경되면 해당 검증만, 결제 데모 인프라만 변경되면 해당 검증만 실행한다.
 - 선택된 Backend checks는 배포 여부와 관계없이 운영 이미지·Nginx smoke까지 실행한다. 배포 없는 실행은 릴리스 archive·SSH 접근 단계를 생략한다. 수동 릴리스 파일은 기존 package 스크립트로 만들 수 있다.
 - Docker checks는 builder가 컴파일한 결과로 `test:compiled`를 실행한다. 로컬 `npm test`는 컴파일부터 실행하는 기존 동작을 유지한다.
+- 배포 빌드는 운영 이미지·Nginx/HTTPS smoke가 모두 통과한 뒤에만 릴리스 태그를 남긴다. 패키징은 이 이미지를 재사용하며 없거나 다른 버전·플랫폼이면 실패한다. 백엔드 검증을 실행하지 않은 인프라 전용 배포와 `package.sh <version>` 수동 실행은 기존처럼 이미지를 빌드한다.
+- Docker 29 BuildKit의 `/root/.npm` 다운로드 캐시를 사용한다. `npm ci`·lock 무결성 검사·의존성 audit는 유지한다. `node_modules`는 각 단계에서 설치하며 다운로드 캐시 mount는 운영 이미지에 포함되지 않는다.
+- 기본 `node backend/scripts/check.cjs`, Docker checks CMD 및 `npm run test:integration`은 전체 실행이다. 선택 프로필은 Jenkins가 diff로 정하며 `BACKEND_TEST_PROFILE=pins node backend/scripts/check.cjs`, `BACKEND_TEST_PROFILE=faq+dashboard node backend/scripts/check.cjs`로 재현한다. Jenkins 수동 실행에서 `FULL_BACKEND_TESTS=true`면 전체 백엔드·관측·결제 데모·배포 mock 회귀를 강제한다. 유효하지 않은 프로필·누락된 필수 테스트·해석 불가능한 명령은 오류로 종료한다. 테스트 목록의 기준은 `package.json` 하나이며 전체 목록의 DB 테스트 누락·중복도 검사한다. [계획](../../backend/docs/test-cleanup-plan.md)을 참고한다.
 - 웹훅 경로에 `infra/database`, `infra/observability`, `infra/payment-test`를 포함한다. 저장소의 설정 스크립트 변경과 실제 Jenkins Job 재설정은 별도다.
 
 예를 들어 관리자 상태·인증 API만 바뀐 배포는 Backend checks를 실행하고 Observability checks와 Payment demo checks를 생략한다. 백엔드 검증의 컴파일·정적 검사·단위·DB 통합·운영 이미지/Nginx 검사는 유지한다. 변경한 단계의 실패는 기존대로 배포를 중단하며, 배포 브랜치·웹훅 인증·DB migration·readiness·복구 조건도 유지한다.

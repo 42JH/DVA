@@ -18,7 +18,7 @@ test('CLI returns strict scalar flags that Jenkins can read without a JSON parse
     encoding: 'utf8',
     env: { ...process.env, CI_BASE_COMMIT: '', SOURCE_COMMIT: '', SHOULD_DEPLOY: 'false' },
   });
-  assert.equal(output.trim(), 'true,true,true,missing_baseline_or_changes');
+  assert.equal(output.trim(), 'true,true,true,missing_baseline_or_changes,full');
 });
 
 test('webhook includes every monolith infrastructure directory and preserves event guards', () => {
@@ -59,7 +59,7 @@ test('webhook includes every monolith infrastructure directory and preserves eve
   assert.equal(matches(['docs/README.md'], { count: '21' }), true);
 });
 
-test('ordinary backend changes retain all backend regressions without unrelated infrastructure checks', () => {
+test('ordinary backend changes select backend regressions without unrelated infrastructure checks', () => {
   assert.deepEqual(selectChecks(['infra/observability/test.mjs']), {
     backend: false,
     observability: true,
@@ -118,6 +118,24 @@ test('ordinary backend changes retain all backend regressions without unrelated 
   ])
     assert.equal(selectChecks([file]).full, true, file);
   for (const files of [null, []]) assert.equal(selectChecks(files).full, true);
+});
+
+test('backend Markdown alone skips heavy checks; executable files and mixed changes remain checked', () => {
+  for (const files of [
+    ['backend/README.md'],
+    ['backend/docs/guide.md', 'docs/database/notes.md'],
+  ]) {
+    const checks = selectChecks(files);
+    assert.equal(checks.backend, false);
+    assert.equal(checks.observability, false);
+    assert.equal(checks.paymentDemo, false);
+    assert.equal(checks.reason, 'documentation_only');
+  }
+  for (const file of ['backend/docs/schema.sql', 'backend/docs/tool.cjs', 'backend/docs/guide.md.js'])
+    assert.equal(selectChecks([file]).backend, true, file);
+  assert.equal(selectChecks(['backend/docs/guide.md', 'backend/src/auth/auth.service.ts']).backend, true);
+  assert.equal(selectChecks(['backend/docs/guide.md', 'infra/deploy/deploy.sh']).full, true);
+  assert.equal(selectChecks(['backend/src/old.ts', 'backend/docs/moved.md']).backend, true);
 });
 
 test('backend observability contracts also select the real monitoring stack checks', () => {
@@ -189,8 +207,27 @@ test('git comparison covers all commits, deletions and renames; missing or diver
           env: { ...process.env, CI_BASE_COMMIT: base, SOURCE_COMMIT: head, SHOULD_DEPLOY: deploy },
         },
       );
-      assert.equal(output.trim(), 'true,false,false,changed_paths', `deploy=${deploy}`);
+      assert.equal(output.trim(), 'true,false,false,changed_paths,full', `deploy=${deploy}`);
     }
+    const faqHead = save('backend/src/faqs/faqs.service.ts', 'isolated FAQ change');
+    const selected = execFileSync(process.execPath, [path.join(__dirname, 'monolith-changes.cjs')], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, CI_BASE_COMMIT: head, SOURCE_COMMIT: faqHead },
+    });
+    assert.equal(selected.trim(), 'true,false,false,changed_paths,faq');
+    const pinHead = save('backend/src/pins/pins.service.ts', 'PIN change after FAQ');
+    const mixed = execFileSync(process.execPath, [path.join(__dirname, 'monolith-changes.cjs')], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { ...process.env, CI_BASE_COMMIT: head, SOURCE_COMMIT: pinHead },
+    });
+    assert.equal(mixed.trim(), 'true,false,false,changed_paths,faq+pins');
+    const pipeline = readFileSync(path.join(__dirname, '../../Jenkinsfile'), 'utf8');
+    const scalarPattern = pipeline.match(/assert selection ==~ \/(.+)\//)[1];
+    assert.match(mixed.trim(), new RegExp('^' + scalarPattern + '$'));
+    assert.ok(pipeline.includes('if (params.FULL_BACKEND_TESTS)'));
+    assert.ok(pipeline.includes("env.BACKEND_TEST_PROFILE = 'full'"));
     renameSync(path.join(directory, 'backend/old.ts'), path.join(directory, 'docs/renamed.md'));
     const renamed = save('docs/notes.md', 'rename');
     const paths = changedPaths(head, renamed, directory);

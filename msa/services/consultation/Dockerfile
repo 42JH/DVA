@@ -2,8 +2,9 @@ FROM node:24-bookworm-slim AS builder
 WORKDIR /app/service
 
 COPY services/consultation/package*.json ./
-COPY shared/events /shared/events
-RUN npm ci
+COPY shared/events/package.json /shared/events/package.json
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY services/consultation/nest-cli.json services/consultation/tsconfig*.json services/consultation/.prettierrc services/consultation/eslint.config.mjs ./
 COPY services/consultation/src ./src
@@ -24,8 +25,9 @@ ENV NODE_ENV=production
 ENV PORT=3004
 
 COPY services/consultation/package*.json ./
-COPY shared/events /shared/events
-RUN npm ci --omit=dev && npm cache clean --force
+COPY shared/events/package.json /shared/events/package.json
+RUN --mount=type=cache,id=dva-msa-npm,target=/root/.npm,sharing=locked npm ci --omit=dev
+COPY shared/events/*.cjs shared/events/*.d.cts /shared/events/
 
 COPY --from=builder /app/service/dist ./dist
 

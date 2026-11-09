@@ -4,6 +4,7 @@ const { randomBytes } = require('node:crypto');
 const { ConfigService } = require('@nestjs/config');
 const { validateEnvironment } = require('../dist/config/environment');
 const { DatabaseService } = require('../dist/database/database.service');
+const { migrate } = require('./helpers/migrations.cjs');
 
 assert.equal(process.env.NODE_ENV, 'test');
 assert.equal(process.env.DB_NAME, 'dva_webhook_test');
@@ -11,6 +12,7 @@ assert.ok(['db', '127.0.0.1'].includes(process.env.DB_HOST));
 const database = new DatabaseService(new ConfigService(validateEnvironment(process.env)));
 const table = 'foundation_tx_' + randomBytes(6).toString('hex');
 before(async () => {
+  await migrate(database.pool);
   await database.onModuleInit();
   await database.pool.query(`CREATE TABLE ${table} (id int PRIMARY KEY, value text NOT NULL)`);
 });

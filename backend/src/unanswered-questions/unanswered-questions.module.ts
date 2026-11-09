@@ -17,5 +17,6 @@ import { UnansweredQuestionsService } from './unanswered-questions.service';
     UnansweredQuestionsManagementController,
   ],
   providers: [UnansweredQuestionsRepository, UnansweredQuestionsService],
+  exports: [UnansweredQuestionsRepository],
 })
 export class UnansweredQuestionsModule {}

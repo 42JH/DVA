@@ -122,6 +122,10 @@ async function migrate(pool) {
           .name,
         'Apply migration 055 to the isolated DB first',
       );
+      const analysisFailure = await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='call_sessions' AND column_name='analysis_failed_at' AND udt_name='timestamptz' AND is_nullable='YES' AND column_default IS NULL",
+      );
+      assert.equal(analysisFailure.rowCount, 1, 'Apply migration 056 to the isolated DB first');
     } else {
       const directory = join(__dirname, '../../migrations');
       for (const file of readdirSync(directory)
