@@ -22,6 +22,7 @@ export function useSnapshotList<T>({
   go,
   asc = false,
   enabled: on = true,
+  anchorQuery = query,
 }: {
   key: string // 쿼리 키 이름 ('orders' · 'calls')
   path: string // GET 경로 (최신순)
@@ -31,6 +32,8 @@ export function useSnapshotList<T>({
   asOf: string // 주소의 기준 시각(ms) — 비면 지금 최신
   go: (p: { page: number; at?: string }) => void // 주소 바꾸기
   asc?: boolean // 오래된 순
+  // 기준 시각을 정할 조건 — 주문처럼 상태 탭마다 건수를 같이 보이면 탭 조건을 뺀 것을 줌 (탭마다 기준이 달라 건수가 흔들리지 않게)
+  anchorQuery?: Q
   enabled?: boolean // false면 목록 · 건수 · 새 건수를 안 받음(기준 시각만) — 주문 미완료 탭(초안 목록)일 때
 }) {
   const [size, setSize] = usePageSize()
@@ -38,13 +41,13 @@ export function useSnapshotList<T>({
   const get = (q: Q, signal: AbortSignal) => api.get<ApiList<T>>(path, { query: q, signal })
 
   // 기준 시각 정하기 — 주소에 없으면 최신 1건을 받아 그 시각 + 1ms
-  const anchorKey = ['screen', key, 'anchor', query] as const
+  const anchorKey = ['screen', key, 'anchor', anchorQuery] as const
   const anchor = useQuery({
     queryKey: anchorKey,
     enabled: !asOf,
     staleTime: Infinity, // 저절로 바뀌지 않게 — [최신 목록 보기]를 눌러야
     queryFn: ({ signal }) =>
-      get({ ...query, limit: 1, offset: 0 }, signal).then((r) => {
+      get({ ...anchorQuery, limit: 1, offset: 0 }, signal).then((r) => {
         const ms = Date.parse(r.data[0] ? (at(r.data[0]) ?? '') : '')
         return (Number.isNaN(ms) ? Date.now() : ms) + 1
       }),
