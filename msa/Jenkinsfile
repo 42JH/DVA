@@ -17,7 +17,7 @@ def verificationHistory() {
 
 def recordVerification(String scope) {
     sh "python3 msa/.ci-source/msa/parity/ci_verification.py record ${scope}"
-    env["MSA_VERIFIED_${scope.toUpperCase()}"] = readFile("msa-release/verified-${scope}.txt").trim()
+    env."MSA_VERIFIED_${scope.toUpperCase()}" = readFile("msa-release/verified-${scope}.txt").trim()
 }
 
 pipeline {
@@ -47,7 +47,7 @@ pipeline {
                     env.MSA_BASE_COMMIT = source.GIT_PREVIOUS_SUCCESSFUL_COMMIT ?: ''
                     sh 'mkdir -p msa-release'
                     def history = verificationHistory()
-                    history.each { scope, stamp -> env["MSA_VERIFIED_${scope.toUpperCase()}"] = stamp }
+                    history.each { scope, stamp -> env."MSA_VERIFIED_${scope.toUpperCase()}" = stamp }
                     writeFile file: 'msa-release/verification-history.json', text: groovy.json.JsonOutput.toJson(history)
                     def backendBranch = env.SOURCE_BRANCH in ['origin/develop-backend', 'develop-backend']
                     env.DELIVER_APPS = (backendBranch && !env.CHANGE_ID).toString()
