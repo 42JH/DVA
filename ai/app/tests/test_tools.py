@@ -119,7 +119,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["facts"]["phones_to_read"] == ["receiver_phone"]
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
-    assert out["missing"][0] == "sender_address" and out["stage"] == "sender"  # 등록 고객 성함은 이미 채워짐
+    assert out["missing"][0] == "sender_address" and out["stage"] == "address"  # 등록 고객 성함은 이미 채워짐
 
 
 def test_bad_phone_and_pickup_not_saved_other_values_are():
@@ -238,16 +238,30 @@ def test_late_address_result_does_not_overwrite_newer_value(corrector, fake_kaka
 
 def test_full_parcel_opens_readback_with_facts(corrector, address):
     c = ctx(address=address)
-    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
-                              "sender_address_detail": "3층"})
+    first = call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
+                                      "sender_address_detail": "3층"})
+    assert "confirm_route" not in first["facts"]  # 받는 곳 주소가 아직 없다
     out = call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
                                     "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
                                     "small_box_count": 1, "item_price": 30000})
     assert out["can_proceed"] is True and c.state.pending is not None and c.state.pending.issued_t == 100.0
     facts = out["facts"]["readback"]
-    assert "sender_phone" not in facts and facts["receiver_phone"] == "01098765432"  # 발신번호는 읽지 않는다
+    # 되읽기는 성함·동 이름만(2026-11-09). 되읽기가 열리면 confirm_route는 따로 주지 않는다
+    assert set(facts) == {"sender_name", "from", "receiver_name", "to"} and facts["receiver_name"] == "이영희"
+    assert "confirm_route" not in out["facts"]
     # 저장 대상은 상태에만 두고 담을 때 묻지 않고 저장한다(2026-11-06)
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
+
+
+def test_both_addresses_known_confirms_route_by_dong(corrector, address):
+    """두 주소가 갖춰진 결과에 confirm_route(동 이름)를 준다(2026-11-09). 주소가 바뀌지 않은 뒤 호출에는 주지 않는다."""
+    c = ctx(address=address)
+    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211"})
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
+    route = out["facts"]["confirm_route"]
+    assert set(route) == {"from", "to"} and route["from"] == c.state.current.sender_geo.dong_name
+    assert "readback" not in out["facts"]
+    assert "confirm_route" not in call(c, "record_fields", {"receiver_name": "이영희"})["facts"]
 
 
 def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(corrector, address):

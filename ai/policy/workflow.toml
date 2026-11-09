@@ -124,14 +124,20 @@ decision = "intent"
 
 [[stage]]
 id = "sender"
-goal = "보내는 분 정보를 받는다. 보내는 분 연락처는 발신번호로 채우고 묻지 않는다"
-required = ["sender_name", "sender_address", "sender_address_detail"]
+goal = "보내는 분 성함을 받는다. 보내는 분 연락처는 발신번호로 채우고 묻지 않는다"
+required = ["sender_name"]
 decision = "collect"
 
 [[stage]]
 id = "receiver"
-goal = "받는 분 정보를 받는다"
-required = ["receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail"]
+goal = "받는 분 성함과 연락처를 받는다"
+required = ["receiver_name", "receiver_phone"]
+decision = "collect"
+
+[[stage]]
+id = "address"
+goal = "발송 주소·상세, 받는 곳 주소·상세 순으로 받는다. 두 주소가 다 갖춰지면 서버 결과 confirm_route로 동 이름만 확인한다"   # 사용자 결정 2026-11-09
+required = ["sender_address", "sender_address_detail", "receiver_address", "receiver_address_detail"]
 decision = "collect"
 
 [[stage]]
@@ -205,7 +211,7 @@ use_skip = false
 
 [speech]                      # 읽는 규칙(README §5). P8: 지금은 사실·금지 표현만
 phone = "고객이 직접 불러 준 번호만 숫자를 끊어 읽는다"
-address = "주소는 시·구와 도로명·건물번호로 읽는다. 상세주소는 고객이 이번 통화에서 직접 말했고 서버가 readback에 넣어 준 경우에만 읽는다"
+address = "주소를 다시 물을 때는 시·구와 도로명·건물번호로 읽는다. 확인(confirm_route·readback)에서는 서버가 준 동 이름만 말하고 도로명·번지·상세주소는 읽지 않는다"
 amount = "접수번호와 요금은 서버가 준 값만 말한다"
 pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시각을 되읽기 때 안내하고, 고객이 바꾸고 싶어 하면 그 시각을 맡긴다"
 
@@ -213,11 +219,12 @@ pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시�
 [results]
 parcel_added = "이 택배를 담았다. '담아 두었다'고 안내하고 더 보낼 택배가 있는지 묻는다. 실제 접수 시점은 draft_intake가 오면 그 값을 따른다. 접수 완료라고 말하지 않는다"
 draft_intake = "고객이 확인한 택배 정보는 통화 중에 바로 저장된다. 조회 결과는 다른 접수 건과 같은 방식으로 상태를 안내하고, 언제 처리되는지는 따로 덧붙이지 않는다"
-readback = "이 값 그대로 되읽고 맞는지 묻는다(고객이 확인 질문을 끝까지 듣고 답해야 확정된다)"
+readback = "접수 확인 내용(sender_name·from·to·receiver_name). '{sender_name}님이 {from}에서 {to}의 {receiver_name}님께 보내시는 것으로 확인했습니다. 이대로 접수할까요?'처럼 한 문장으로 말하고 반드시 질문으로 끝낸다(고객이 그 질문을 끝까지 듣고 답해야 확정된다). 주소·연락처·물품·가액은 다시 읽지 않는다"
 missing = "현재 택배에 아직 받지 못한 필수 항목"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"
 confirm_area = "상호·건물 이름만으로 찾은 주소의 시·군·구와 동(주소 항목별, 예: 강남구 역삼동). 도로명·번지는 읽지 않고 '{값} 맞나요?'처럼 한 번 확인한다. 아니라고 하면 어느 지역의 지점인지 묻고 그 답을 맡긴다"
 phones_to_read = "고객이 이번 통화에서 직접 불러 주고 서버가 이 목록에 표시한 번호를 한 번 끊어 읽어 확인한다"
+confirm_route = "발송 주소와 받는 곳 주소가 다 갖춰졌을 때의 동 이름(from·to). '{from}에서 {to}으로 보내시는군요.'처럼 한 번 말해 확인하고 다음 항목을 묻는다. 도로명·번지는 읽지 않는다. confirm_area와 같이 오면 '{from}에서 {to}으로 보내시는 거 맞나요?'처럼 한 문장의 질문으로 합친다. 아니라고 하면 어느 주소가 틀렸는지 묻고 그 답을 맡긴다"
 more_parcels = "false면 더 보낼 택배가 없다"
 call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리지 않고 바로 첫 인사를 한다(인사 규칙대로, 한 번만)"
 closing = "true면 진행한 접수가 있을 때 함께 온 주문 결과를 먼저 안내하고 정해진 마무리 인사를 한 번 한다. 전화는 서버가 끊는다"
