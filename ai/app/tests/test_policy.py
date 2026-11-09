@@ -99,11 +99,12 @@ def test_server_missing_uses_same_order_as_instructions():
 
 
 @pytest.mark.parametrize("stage, pending, expected", [
-    ("intent", False, ["task"]), ("receiver", False, ["switch"]), ("readback", True, ["confirm", "switch"]),
-    ("readback", False, ["switch"]), ("more_parcels", True, ["confirm", "more", "switch"]),
-    ("closing", False, ["switch"]),
+    ("intent", False, ["task", "value"]), ("receiver", False, ["switch", "value"]),
+    ("readback", True, ["confirm", "switch", "value"]), ("readback", False, ["switch", "value"]),
+    ("more_parcels", True, ["confirm", "more", "switch", "value"]), ("closing", False, ["switch", "value"]),
 ])
 def test_decision_questions_per_stage(stage, pending, expected):
+    """value는 그림자 측정용(2026-11-10): 서버가 '값 발화'를 골라냈다면 Live 위임과 얼마나 맞는지 로그로만 잰다. 동작 없음."""
     qs = decision_questions(POLICY, stage, pending=pending)
     assert [q["name"] for q in qs] == expected
     assert all(q["type"] in ("choice", "predicate", "score") for q in qs)  # 자유형 추출 질문 없음(D1)

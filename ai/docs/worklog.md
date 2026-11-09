@@ -1045,3 +1045,11 @@
 - `offer_destination`: 후보 1건 결과에 "질문으로 확인한다" guidance를 붙인다(`record_fields` 경로의 guidance는 그대로).
 - Decision pick 하한·비교값(confidence → p(choice))은 이 커밋에서 바꾸지 않는다. 11-08 이후 통화 69건의 pick 판단 83건 중 후보 선택 11건, 하한 미달 2건(p 0.56·0.65), 오적용 0건. 별도 작업(그림자 측정 2단계)에서 pick 전용 설정값으로 다룬다.
 - 참고: `find_destination`의 ok 결과는 `record_fields`와 달리 즉시 intake 동기화를 하지 않는다(기존 `DEST_NEW_RECEIVER`와 같음). 다음 `record_fields`에서 동기화된다.
+
+## 2026-11-10 — 위임 거름망 그림자 측정 1단계(Decision value 질문, 동작 변경 없음)
+
+- 배경: Live가 값 발화를 위임하지 않아 기록이 비는 문제(통화 115b1ae1, 전날 접수 중 발화의 40%가 미위임). 해법 후보는 "서버가 발화 끝에 Decision 결과로 거른 값 발화만 백엔드를 직접 부른다"(Client Delegation, 이중 처리 없음)인데, 그 거름망이 얼마나 맞는지부터 운영 로그로 잰다(사용자 결정 2026-11-10). 옛 서버의 Client 시험(10-28·10-29)은 Live의 스폰을 기다리는 방식이라 지금 제안과 다르다.
+- 변경(측정만): `workflow.toml` Decision intent·collect 세트에 `value`(이 발화에 새 접수 값이 있는가, yes/no) 질문 추가. 서버는 답을 쓰지 않고 Decision 이벤트 데이터에 함께 남기며, yes(≥0.6)면 stats "값 발화(그림자)"만 센다. Decision 이벤트에 `utterance_id·start_ms·end_ms`를 추가해 위임(`offset_ms`)과 같은 발화로 묶을 수 있게 했다(R1 기준).
+- 집계: `scripts/delegation_shadow.py <calls 폴더>` — 서버 yes/no × Live 위임 유무 표, 구제 후보(서버 yes·위임 없음)와 놓침(서버 no·위임 있음) 목록. value 질문이 없는 옛 기록은 건너뛴다(`--selftest` 포함).
+- 테스트: 질문 세트 기대값 갱신(value 포함), 전체 520 passed. 운영 수치는 배포 뒤 며칠 모아서 본다. 다음 단계: 구제 후보 목록을 사람이 가려 정확도를 확인하고, 임계값·숫자·주소 단서 규칙을 조정한 뒤 Client Delegation 스파이크 여부를 정한다.
+

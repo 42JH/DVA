@@ -278,8 +278,12 @@ class LiveFlow:
             answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
+                # 발화 구간: 위임(session.delegation.created.offset_ms)과 같은 발화로 묶는 기준(R1). 그림자 측정(scripts/delegation_shadow.py)
+                "utterance_id": utt.utterance_id, "start_ms": utt.start_ms, "end_ms": utt.end_ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
+        if (v := answers.get("value")) and v[0] == "yes" and v[1] >= self.cfg.decision_min_confidence:
+            s.stats["값 발화(그림자)"] += 1  # 서버가 백엔드를 불렀을 발화 수. 동작은 없다(2026-11-10 1단계)
         await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
 
     async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
