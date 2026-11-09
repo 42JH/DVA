@@ -97,6 +97,8 @@ def build_backend(cfg: BackendConfig, env=os.environ) -> BackendGateway:
         url = env.get("BACKEND_API_URL", "").strip()
         if not url:
             raise RuntimeError("BACKEND_API_URL이 비어 있습니다(가짜 BE는 BACKEND_MOCK=true)")
+        if cfg.parcel_draft_intake and not env.get("AI_BUSINESS_TOKEN", "").strip():
+            raise RuntimeError("배송 초안 연동에는 AI_BUSINESS_TOKEN이 필요합니다")
         log.warning("BE: 실제 BE %s", url)
         if not env.get("AI_BUSINESS_TOKEN"):
             log.warning("AI_BUSINESS_TOKEN 미설정: 고객·기업 검색 API를 인증 없이 호출한다")
@@ -188,6 +190,10 @@ async def lifespan(app: FastAPI):
                                           reason_contract_enabled=cfg.unanswered_review.reason_contract_enabled,
                                           review_max_attempts=cfg.unanswered_review.max_attempts,
                                           faq_answered_enabled=cfg.unanswered_review.faq_answered_enabled)
+        if cfg.backend.parcel_draft_intake:
+            from app.calls.intake import IntakeService
+            svc.calls.intake = IntakeService(svc.backend, outbox, svc.calls.d.policy, svc.fare_of)
+            svc.calls.results.intake = svc.calls.intake
         if reviewer is not None:
             review_worker = asyncio.create_task(svc.calls.results.review_loop(cfg.unanswered_review.poll_sec))
         svc.calls.on_finalize.insert(0, svc.calls.results.finish)
