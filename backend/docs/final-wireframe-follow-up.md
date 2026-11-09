@@ -31,6 +31,12 @@
 
 Windows와 일회용 Linux 컨테이너에서 `node --test infra/jenkins/test-monolith-ci.cjs` 각 8개 통과, 실패·건너뜀 0. Linux에서 셸 문법 검사와 배포 조건·배포/복구 mock·Linux 릴리스 mock 회귀 3종도 통과했다. 호스트 소스는 읽기 전용으로 마운트했고 운영 Docker·SSH·DB에는 연결하지 않았다. 단계 검증 근거로 적용하며 원격 Jenkins의 실제 파이프라인 실행은 아직 검증하지 않았다. 다른 프로세스가 같은 새 빌드 디렉터리에 직접 쓰는 경우까지 차단하는 변경은 아니다.
 
-## 후속 검증
+## 최종 검증과 전달
 
-홈 변경·Checkout 격리·최종 전체 검증 결과는 각 단계 검증 후 이 문서에 기록한다. 아직 실행하지 않은 검증을 성공으로 표시하지 않는다.
+`BACKEND_TEST_PROFILE=full node backend/scripts/check.cjs` 종료 코드 0. 새로 실행한 PostgreSQL/API 866개와 운영 이미지/Nginx/HTTPS 23개가 모두 통과했다. 컴파일·ESLint·Prettier·단위 201개·결제 21개는 2단계에서 검증한 동일 backend 내용의 Docker checks 레이어를 재사용했다. 검증 범위는 합계 1,111개이며 최종 실행에서 새로 수행한 테스트는 889개다. 실패·건너뜀 0이고 임시 컨테이너·네트워크·이미지 정리를 확인했다.
+
+기존 CI 검사 코드의 포맷을 보존한 최종 파일로 Windows·Linux CI 회귀 각 8개, Linux 셸 문법 및 배포 mock 회귀 3종을 다시 통과했다. `node infra/observability/test.mjs`와 `node infra/payment-test/check.mjs`도 종료 코드 0이다. 최종 검증 시 원격 develop-backend는 기준 `5d3bd189`와 같았다.
+
+전달 명세는 [frontend-qa-api.md](frontend-qa-api.md)에 누적했다. 홈에는 오늘 건수 두 필드와 각 최대 11개 미리보기를 반영하며 미완료는 draftSeq로 이동한다. AI 수집 계약·migration·환경변수는 변경하지 않는다. 미답변의 정확한 발화 연결과 Task 전체 후속 항목은 이번 완료 범위에 포함하지 않는다.
+
+운영 DB·실제 프론트·외부 AI/결제/디버/S3·운영 부하·운영 배포·원격 Jenkins의 새 파이프라인 실행은 미검증이다. #115를 재실행하거나 운영 공유 작업공간을 변경하지 않았다. MR 대상은 develop-backend이며 승인·병합·자동 병합·브랜치 삭제는 수행하지 않는다.
