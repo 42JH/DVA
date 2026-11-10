@@ -292,6 +292,11 @@ def test_gate_requires_previous_ai_line_to_be_the_question():
     kw = {"latest_applied_utterance": None, "closed": False}
     assert check_gate(s, P, p.id, YES, cust, cut, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     assert check_gate(s, P, p.id, YES, cust, asked, **kw).ok
+    proceed = ConfirmAnswer("proceed", {"proceed": 0.98})
+    interrupted = Utterance(4, 3000, 5500, 101.0, "접수 내용 확인 부탁드릴게요. 보내는 분은")
+    assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).ok
+    s.record("item_price", 31000)
+    assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
 
 
 def test_unregistered_customer_name_is_sender_name_in_body():

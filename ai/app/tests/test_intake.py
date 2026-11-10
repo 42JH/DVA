@@ -12,6 +12,7 @@ from app.domain.confirm import issue_cancel_confirmation, issue_parcel_confirmat
 from app.domain.parcel_items import ItemIssue
 from app.domain.store import hold_items, open_for_edit
 from app.policy.render import decision_questions
+from app.tests.test_calls import until
 from app.tests.test_domain import P, confirm_once, filled
 from app.tests.test_live_flow import flow
 from app.tests.test_results import service, session
@@ -45,12 +46,20 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
 
     async def scenario():
         pending = issue_parcel_confirmation(s.state, P, 100)
-        await lf.commit(s, pending.id)
+        readback = Spoken(1, "접수 내용 확인 부탁드릴게요. 받는 분은", 3000, 4800, 101, 101)
+        await lf.apply(s, Spoken(2, "네", 4000, 4200, 102, 102), readback,
+                       {"confirm": ("yes", 0.98, {"yes": 0.98})}, pending.id)
+        assert not s.state.parcels and s.state.pending is pending and not db.drafts
+        assert any(event["text"] == "CONFIRM_BEFORE_READBACK_END" for event in s.events)
+        retry = Spoken(3, readback.text, 5000, 7000, 103, 103)
+        await lf.apply(s, Spoken(4, "네, 맞습니다. 그냥 그렇게 접수해 주세요", 6200, 6900, 104, 104), retry,
+                       {"confirm": ("proceed", 0.98, {"proceed": 0.98})}, pending.id)
+        await until(lambda: s.rt.ready_notice is not None)
         [first] = db.drafts.values()
         assert first["status"] == "READY"
         assert db.intakes[first["callSessionSeq"]].get("complete") is None
         assert s.rt.ready_notice is not None
-        lf.on_output(s, {"delta": "택배가 접수됐습니다. 더 보내실 택배가 있으세요?"})
+        lf.on_output(s, {"delta": "네, 이대로 택배가 접수됐습니다. 더 보내실 택배가 있으세요?"})
         s.rt.ai_end.cancel()
         lf._ai_done(s)
         assert not any(event["kind"] == "결과 문구" for event in s.events)
@@ -67,7 +76,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
     async def pick_draft():
         s.state.intent = "lookup"
         label = out["facts"]["orders"][1]["label"]
-        await lf.apply(s, Spoken(1, "이번 통화에서 접수된 택배요", 0, 1, 0, 1), None,
+        await lf.apply(s, Spoken(6, "이번 통화에서 접수된 택배요", 8000, 8100, 106, 106), None,
                        {"pick": (label, 1.0), "switch": ("lookup", 1.0)}, None)
         [selected] = [e["data"]["content"]["lookup_order"] for e in s.events
                       if "lookup_order" in e.get("data", {}).get("content", {})]

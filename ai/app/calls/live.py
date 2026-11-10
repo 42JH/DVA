@@ -194,7 +194,7 @@ class LiveFlow:
             s.note("결과 문구", ",".join(claims))
             facts = truth(s.state)
             if s.tools.draft_intake:
-                facts["submit_when"] = "확인한 택배는 통화 중 저장하고, 실제 주문 접수는 통화 종료 후 진행한다"
+                facts.pop("submit_when", None)
             s.spawn(self.notify(s, "N3", {"unverified": claims, "truth": facts}), "n3")
 
     # ------------------------------------------------------------------ 발화 끝 Decision
@@ -274,7 +274,9 @@ class LiveFlow:
                 if st.intent == "order":
                     followups.append(("origin", None))
             if "confirm" in answers and pending_id:
-                followups.append(self._on_confirm(s, utt, prev, answers["confirm"], pending_id))
+                confirmation = answers["confirm"]
+                if confirmation[0] != "proceed" or not switch or switch[1] < th or switch[0] == "none":
+                    followups.append(self._on_confirm(s, utt, prev, confirmation, pending_id))
             elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
                 # 확인 대기 없이 온 '네'(Live가 서버 되읽기 없이 물음): 확정하지 않고 서버 되읽기로 다시 묻는다
                 st.awaiting_fix = False
@@ -311,20 +313,20 @@ class LiveFlow:
 
     def _on_confirm(self, s: CallSession, utt: Spoken, prev: Spoken | None, ans: tuple, pending_id: str):
         """잠금 안. yes → 관문(G1~G5) → G6(같은 발화 위임 보류) → 확정 지연 / no·change → 즉시 해제."""
-        choice, conf, probs = ans
+        choice, _, probs = ans
         st, rt = s.state, self.rt(s)
+        if rt.customer_turns and rt.customer_turns[-1].utterance_id > utt.utterance_id:
+            return None
         if choice in ("no", "change") and probs.get(choice, 0) >= self.cfg.decision_min_confidence:
             release(st, pending_id)
             return ("released", choice)
-        if choice == "proceed" and conf >= self.cfg.decision_min_confidence:
-            return ("ask_confirm", pending_id)  # 질문 없이 "접수해 주세요": 확정하지 않고 확인 질문을 다시 하게 한다
-        if choice != "yes":
+        if choice not in ("yes", "proceed"):
             return None
         gate = check_gate(st, self.policy, pending_id, ConfirmAnswer(choice, probs), utt.utterance(),
                           prev.utterance() if prev else None, latest_applied_utterance=None, closed=s.closed)
         if not gate.ok:
             s.note("확인 관문", gate.code)
-            if gate.code == "CONFIRM_UNCLEAR" and not self._delegation_in(s, utt):
+            if gate.code in ("CONFIRM_UNCLEAR", "CONFIRM_BEFORE_READBACK_END") and not self._delegation_in(s, utt):
                 # 애매한 '네'는 확정하지 않되 다시 묻게 한다(알리지 않으면 Live가 기다리다 무음 종료, 운영 통화 b8f3795c).
                 # 같은 발화로 위임이 돌면 고친 값의 되읽기가 따라오므로 묻지 않는다
                 return ("ask_confirm", pending_id)
@@ -332,7 +334,7 @@ class LiveFlow:
         if self._delegation_in(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
             rt.confirm_t = utt.t_last
-            return ("hold", pending_id)
+            return ("hold", (pending_id, utt.utterance_id))
         rt.confirm_t = utt.t_last
         self._arm_commit(s, pending_id)
         return None
@@ -430,10 +432,14 @@ class LiveFlow:
     async def _follow(self, s: CallSession, what: str, value) -> None:
         st = s.state
         if what == "hold":
+            pending_id, utterance_id = value
             await self._wait_delegations(s)
             async with s.lock:  # G2 재검사는 commit에서
-                if st.pending and st.pending.id == value:
-                    self._arm_commit(s, value)
+                rt = self.rt(s)
+                if (not s.closed and st.pending and st.pending.id == pending_id
+                        and rt.latest_applied == utterance_id
+                        and (not rt.customer_turns or rt.customer_turns[-1].utterance_id == utterance_id)):
+                    self._arm_commit(s, pending_id)
         elif what == "ask_confirm":
             async with s.lock:
                 pending = st.pending if st.pending and st.pending.id == value else None
@@ -891,6 +897,8 @@ class LiveFlow:
                  "N3": "session.instructions.append"}[level]
         s.stats[f"전달 {level}"] += 1
         s.note(f"전달 {level}", content[:200], {"content": json.loads(content)})
+        if level == "N2" and facts.get("closing"):
+            s.closing_requested_t = time.time()
         await self.send(s, {"type": etype, "delegation_id": None, "content": f"[서버 결과] {content}"[:1800]})
         if level == "N2":
             rt.await_speech = ("N2→AI 발화", time.time())
@@ -961,8 +969,6 @@ def _order_status(s: CallSession) -> dict:
     """결과 상태 사실(정책 [results].order). 응답 전이면 pending."""
     data = s.result or {}
     if not data:
-        if s.tools.draft_intake and s.state.parcels:
-            return {"status": "pending", "guidance": "접수에 필요한 정보가 저장된 건은 통화 종료 후 처리됩니다"}
         return {"status": "pending"}
     out = {"status": data.get("status")}
     if data.get("status") == "ACCEPTED" and data.get("parcelNo"):

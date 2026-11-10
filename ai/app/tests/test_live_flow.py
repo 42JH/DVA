@@ -835,8 +835,8 @@ class SlowResults:
         self.tasks[s.call_id] = asyncio.ensure_future(asyncio.sleep(30))
 
 
-def test_flow_complete_without_result_closes_with_pending_and_reminds_silent_greeting():
-    """완료 단계: 결과가 상한 안에 안 오면 pending으로 마무리 인사를 시키고, AI가 말하지 않으면 1번 다시 요청한 뒤
+def test_flow_complete_without_result_reminds_until_full_greeting():
+    """완료 단계: 결과가 상한 안에 안 오면 pending으로 마무리 인사를 시키고, 맞장구만 하면 인사를 다시 요청한 뒤
     인사가 끝나고 최소 1초 뒤에 끊는다."""
     from app.tests.test_domain import confirm_once, filled
     client = FakeClient()
@@ -861,8 +861,12 @@ def test_flow_complete_without_result_closes_with_pending_and_reminds_silent_gre
         s.tools.state = st
         await lf._follow(s, "no_more", None)                       # 완료 단계 → 결과 0.2초 대기 → pending 마무리
         assert s.phase == Phase.CLOSING and s.close_reason == "flow_complete"
-        await until(lambda: sum("closing" in e.get("content", "") for e in conn.sent) == 2, timeout=6.0)  # 4초 무발화 → 재요청
-        await ai(conn, "이용해 주셔서 감사합니다. 좋은 하루 보내세요.", 9000)
+        await ai(conn, "네, 없습니다.", 6000)
+        await until(lambda: sum("closing" in e.get("content", "") for e in conn.sent) == 2, timeout=6.0)
+        assert not client.hangups
+        await ai(conn, "이용해 주셔서 감사합니다.", 9000)
+        assert not client.hangups
+        await ai(conn, "좋은 하루 보내세요.", 9800)
         said_t = s.last_output_t
         await task
         svc.results.tasks["live_1"].cancel()
