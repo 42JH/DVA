@@ -39,6 +39,8 @@ export function PromptEditor({
               {s.group && <h3 className="text-body font-bold">{s.group}</h3>}
               <TextArea
                 label={s.title}
+                // 발화 스타일 아래(톤 · 속도)가 아닌 칸은 '발화 스타일'과 같은 제목 크기 (11/10)
+                labelClassName={s.sub ? undefined : 'text-body font-bold'}
                 value={s.value}
                 spellCheck={false}
                 onChange={(e) => vm.setField(s.key, e.target.value)}
