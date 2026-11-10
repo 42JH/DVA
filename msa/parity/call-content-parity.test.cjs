@@ -597,7 +597,16 @@ test('call reference owners and public APIs preserve original joins, filters and
   const noActive=(await get('/api/dashboard/registration-time')).data;assert.equal(noActive.comparison.current,null);assert.equal(noActive.comparison.previous,null);
   const docs=await Promise.all(['http://monolith-app:3000','http://consultation-app:3004'].map(async base=>(await fetch(base+'/api/docs-json')).json()));
   for(const path of ['/api/calls','/api/calls/{id}','/api/unanswered-questions'])assert.deepEqual(docs[1].paths[path],docs[0].paths[path]);
-  for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){assert.ok(docs[0].components.schemas[name],name+' missing in source');assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name]);}
+  for(const name of ['CallDto','CallListItemDto','CallListResponseDto','CallDetailDto','CallDetailResponseDto','CallAnalysisDto','CallComplaintDto','RecordingDto','UnansweredQuestionDto','UnansweredQuestionListResponseDto']){
+    assert.ok(docs[0].components.schemas[name],name+' missing in source');
+    const expected=structuredClone(docs[0].components.schemas[name]);
+    // MR !476 adds these two fields; every other frozen source schema remains exact.
+    if(name==='CallComplaintDto')Object.assign(expected.properties,{
+      target:{type:'string',enum:['ai_service','price_policy','delivery_other'],nullable:true,description:'고객 불만 책임 대상. 다른 유형은 null.'},
+      level:{type:'string',enum:['explicit','mild'],nullable:true,description:'고객 불만 강도. 다른 유형은 null.'},
+    });
+    assert.deepEqual(docs[1].components.schemas[name],expected,name);
+  }
   for(const route of statistics)assert.deepEqual(docs[1].paths['/api/dashboard/'+route],docs[0].paths['/api/dashboard/'+route]);
   for(const name of Object.keys(docs[0].components.schemas).filter(name=>/^(StageDropoff|RegistrationTime|PersonaRegistrationTime|ComplaintCalls|ComplaintType|ResponseWait|ProcessLatency)/.test(name)))assert.deepEqual(docs[1].components.schemas[name],docs[0].components.schemas[name],name);
   assert.deepEqual(await requestReferences('faq','http://operations-app:3005/internal/call-read-references/faqs',process.env.CONSULTATION_AUTH_TOKEN,[9307001,9307002]),[]);

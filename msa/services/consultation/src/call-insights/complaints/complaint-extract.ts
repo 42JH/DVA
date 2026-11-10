@@ -2,7 +2,11 @@
 // - 응답 지연: AI가 말할 차례의 침묵이 녹음으로 10초 이상, 또는 3초 이상이고 고객이 기다림을 드러냄
 // - 정보 인식 오류(코드): 고객이 부른 번호와 AI 복창 번호가 다름 · 인사에서 부른 이름 · 등록 출발지를 다시 물음
 // - 말 끊김: AI 말이 문장 중간에 잘리고 고객이 바로 말함(Utterance.cut)
-import { CallComplaintType } from '../call-insights.types';
+import {
+  CallComplaintType,
+  CallComplaintTarget,
+  CallComplaintLevel,
+} from '../call-insights.types';
 import { CallRecord, Judged, digitsOf } from './complaint-judge';
 import { longestSilence, textGap } from './complaint-timing';
 
@@ -146,7 +150,7 @@ const MERGE_GAP = 1; // 같은 문제가 이만큼 차례 안에 다시 나오�
 const DEFAULT_REASON: Record<string, string> = {
   RECOGNITION_FAILURE: '고객이 준 정보를 잘못 받음',
   INTENT_FAILURE: '고객의 질문·요청을 다르게 받음',
-  UNGROUNDED_ANSWER: '확인 없이 답함',
+  UNGROUNDED_ANSWER: 'FAQ · 업무 규칙과 다르게 안내함',
   SLOW_RESPONSE: 'AI 응답이 늦어 고객이 기다림',
   INTERRUPTION: '고객이 끼어들어 AI 말이 중간에 끊김',
   CUSTOMER_CONFUSION: '고객이 AI 말을 못 알아들음',
@@ -167,9 +171,18 @@ export interface Complaint {
   evidenceText: string;
   offsetSeconds: number | null;
   utteranceOrders: number[];
+  target?: CallComplaintTarget | null;
+  level?: CallComplaintLevel | null;
 }
 
-type Mark = { t: number; issue: string | null; why: string };
+type Mark = {
+  t: number;
+  issue: string | null;
+  why: string;
+  complain_target?: CallComplaintTarget | null;
+  complain_level?: CallComplaintLevel | null;
+  complain_quote?: string;
+};
 
 /** 문제가 있는 차례를 불만으로. 유형마다 같은 문제가 이어지거나 MERGE_GAP 차례 안에 다시 나오면 한 건으로 합친다 */
 export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
@@ -180,8 +193,8 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
     marks.get(kind)!.push(m);
   };
   for (const t of analysis.turns) {
-    if (t.issue && t.issue !== 'FRUSTRATION') add(t.issue, t);
-    if (t.issue === 'FRUSTRATION' || t.complain) add('FRUSTRATION', t);
+    if (t.issue) add(t.issue, t);
+    if (t.complain) add('FRUSTRATION', t);
   }
   const turnOf = new Map(
     rec.turns.flatMap((t) => t.utterances.map((u) => [u.order, t.no] as const)),
@@ -219,8 +232,15 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
         for (let n = last + 1; n < m.t; n++)
           for (const u of byNo.get(n)?.utterances ?? []) between.push(u.order);
         out[out.length - 1][1].utteranceOrders.push(...between, ...orders);
+        if (kind === 'FRUSTRATION' && m.complain_level === 'explicit')
+          out[out.length - 1][1].level = 'explicit';
       } else {
-        const why = m.issue === kind ? m.why : '';
+        const why =
+          kind === 'FRUSTRATION'
+            ? m.complain_quote
+            : m.issue === kind
+              ? m.why
+              : '';
         out.push([
           m.t,
           {
@@ -228,6 +248,12 @@ export function complaints(analysis: Judged, rec: CallRecord): Complaint[] {
             evidenceText: why || DEFAULT_REASON[kind],
             offsetSeconds: byNo.get(m.t)!.utterances[0].offset,
             utteranceOrders: orders,
+            ...(kind === 'FRUSTRATION'
+              ? {
+                  target: m.complain_target ?? null,
+                  level: m.complain_level ?? null,
+                }
+              : {}),
           },
         ]);
       }
@@ -252,6 +278,8 @@ export function backendComplaints(
     evidenceText: string;
     offsetSeconds: number | null;
     utteranceOrders: number[];
+    target: CallComplaintTarget | null;
+    level: CallComplaintLevel | null;
   }[];
 } {
   const found = complaints(analysis, rec)
@@ -259,6 +287,8 @@ export function backendComplaints(
     .map((c) => ({
       type: BACKEND_TYPE[c.type],
       evidenceText: c.evidenceText,
+      target: c.target ?? null,
+      level: c.level ?? null,
       offsetSeconds:
         c.offsetSeconds === null
           ? null

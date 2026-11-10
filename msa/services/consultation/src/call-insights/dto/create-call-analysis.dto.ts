@@ -20,13 +20,39 @@ import {
 } from 'class-validator';
 import {
   CALL_COMPLAINT_TYPES,
+  CALL_COMPLAINT_TARGETS,
+  CALL_COMPLAINT_LEVELS,
   type CallComplaintType,
+  type CallComplaintTarget,
+  type CallComplaintLevel,
 } from '../call-insights.types';
 
 export class CallComplaintDto {
   @ApiProperty({ enum: CALL_COMPLAINT_TYPES, example: 'REPEATED_QUESTION' })
   @IsIn(CALL_COMPLAINT_TYPES)
   type!: CallComplaintType;
+
+  @ApiPropertyOptional({
+    enum: CALL_COMPLAINT_TARGETS,
+    nullable: true,
+    description: '고객 불만 책임 대상. 다른 유형은 null.',
+  })
+  @ValidateIf(
+    (_object: unknown, value: unknown) => value !== undefined && value !== null,
+  )
+  @IsIn(CALL_COMPLAINT_TARGETS)
+  target?: CallComplaintTarget | null;
+
+  @ApiPropertyOptional({
+    enum: CALL_COMPLAINT_LEVELS,
+    nullable: true,
+    description: '고객 불만 강도. 다른 유형은 null.',
+  })
+  @ValidateIf(
+    (_object: unknown, value: unknown) => value !== undefined && value !== null,
+  )
+  @IsIn(CALL_COMPLAINT_LEVELS)
+  level?: CallComplaintLevel | null;
 
   @ApiProperty({
     description: '불만으로 판단한 발언·상황. 원문을 보존합니다.',
