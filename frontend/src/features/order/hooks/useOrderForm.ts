@@ -1,9 +1,10 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useReducer, useRef, useState } from 'react'
 import { ApiError } from '@/shared/api/client'
 import { PAYMENT_METHOD_LABEL } from '@/shared/order/labels'
 import type { Option, SearchedAddress } from '@/shared/ui'
 import {
+  addMonthly,
   BOX_TYPES,
   createOrder,
   patchCustomer,
@@ -164,6 +165,42 @@ export function useOrderForm(
   const collecting = order?.status === 'COLLECTING'
   const showFee = order === undefined || collecting
 
+  // 결제 자격 (11/10) — 보내는 분 = 주문 고객. 번호를 다 넣기 전 · 불러오는 중엔 모두 켬 (접수 때 서버가 다시 확인)
+  // 기업 소속: 월정산 · 그룹카드는 기업 · 부서 설정이라 꺼져 있으면 못 고름. 개인: 그룹카드 불가, 월정산은 물어보고 추가
+  const senderPhone = parties.sender.phone
+  const payCtx = useQuery({
+    ...orderQueries.payContext(senderPhone),
+    enabled: phoneOk(senderPhone) && !paymentLocked,
+  }).data
+  const isCompany = !!payCtx && payCtx.company !== null
+  const canAddMonthly = !!payCtx && !isCompany && !payCtx.available.includes('MONTHLY')
+  const [monthlyFor, setMonthlyFor] = useState<string | null>(null) // 월정산 추가에 동의한 번호 — 번호가 바뀌면 다시 물음
+  const [askingMonthly, setAskingMonthly] = useState<{
+    revertTo: PaymentMethod | null // [취소]면 돌아갈 결제 방식
+    thenSubmit: boolean // [접수]를 눌러 물었으면 [추가] 뒤 이어서 접수
+  } | null>(null)
+  const monthlyAgreed = monthlyFor === senderPhone
+  const addingMonthly = payment === 'MONTHLY' && canAddMonthly && monthlyAgreed
+  const paymentOptions = PAYMENT_OPTIONS.map((o) =>
+    !payCtx || payCtx.available.includes(o.value) || (o.value === 'MONTHLY' && canAddMonthly)
+      ? o
+      : {
+          ...o,
+          disabledHint: isCompany
+            ? '기업 설정에서 꺼짐'
+            : o.value === 'GROUP_CARD'
+              ? '기업 고객만'
+              : '쓸 수 없음',
+        },
+  )
+  const paymentBlocked =
+    !paymentLocked && !!paymentOptions.find((o) => o.value === payment)?.disabledHint
+  const choosePayment = (v: PaymentMethod) => {
+    if (v === 'MONTHLY' && canAddMonthly && !monthlyAgreed)
+      setAskingMonthly({ revertTo: payment, thenSubmit: false })
+    setPayment(v)
+  }
+
   const input = (): OrderInput => {
     const party = (p: PartyDraft): PartyInput => ({
       name: p.name.trim(),
@@ -216,8 +253,27 @@ export function useOrderForm(
   const suggest = useCustomerSuggest(parties.sender, parties.receiver, order?.customerSeq ?? null)
   const mutation = useMutation({
     // alsoCustomer = '고객정보에도 저장'을 골랐는지 (주문 저장이 성공한 뒤에만 고객 PATCH — 별도 트랜잭션)
-    mutationFn: async (alsoCustomer: boolean): Promise<'ok' | 'customerFailed'> => {
+    // monthly = 보내기 전에 보내는 분에게 월정산을 켤지 — 상태가 아니라 인자로 ([추가] 직후 이어서 접수하면 상태가 아직 옛 값)
+    mutationFn: async ({
+      alsoCustomer,
+      monthly,
+    }: {
+      alsoCustomer: boolean
+      monthly: boolean
+    }): Promise<'ok' | 'customerFailed'> => {
       const body = input()
+      // 월정산 먼저 — 서버가 접수 순간 자격을 확인. 주소를 다시 안 골랐으면(수정 · 초안) 원래 주소의 나머지 칸으로 (새 고객 생성에 필요)
+      const was = order?.sender
+      const newCustomer = monthly
+        ? await addMonthly(order?.customerSeq ?? payCtx?.customerSeq ?? null, {
+            ...body.sender,
+            picked: body.sender.picked ?? {
+              jibunAddress: was?.jibunAddress ?? '',
+              dongName: was?.dongName ?? '',
+              postalCode: was?.postalCode ?? '',
+            },
+          })
+        : undefined
       if (order?.draft) {
         // 배송 초안(미완료, 055): 채운 내용으로 새 초안을 만들어 바로 접수. 같은 본문을 다시 보내면 같은 키 → 서버가 같은 초안을 돌려줌
         // 키는 초안 본문(수거 · 결제 빼고)으로만 — 접수만 실패해 수거 시각 · 결제만 고쳐 다시 눌러도 같은 초안으로 접수 (11/09 검수)
@@ -254,7 +310,7 @@ export function useOrderForm(
       }
       const json = JSON.stringify([body, shippingFee])
       if (sent.current?.body !== json) sent.current = { body: json, key: crypto.randomUUID() }
-      await createOrder(body, shippingFee, sent.current.key)
+      await createOrder(body, shippingFee, sent.current.key, newCustomer) // 초안 · 수정은 고객이 이미 있거나 customerFor가 방금 만든 고객을 찾음
       // 서버가 받는 분을 주문 고객 주소록에 자동 등록(11/09 백엔드) → 다음 주문 추천에 바로 뜨게
       void qc.invalidateQueries({ queryKey: customerQueries.all() })
       return 'ok'
@@ -272,6 +328,11 @@ export function useOrderForm(
         void qc.invalidateQueries({ queryKey: ['screen'] })
     },
   })
+
+  const submitNow = (monthly: boolean) => {
+    if (customerDraft) setAsking(true)
+    else mutation.mutate({ alsoCustomer: false, monthly })
+  }
 
   const retry = useMutation({
     mutationFn: (body: CustomerPatch) => patchCustomer(order!.customerSeq!, body),
@@ -366,10 +427,30 @@ export function useOrderForm(
     priceError: priceOut ? '1원 ~ 1억 원 사이로 입력해 주세요.' : fieldError('itemPrice'),
     requestError: fieldError('clientComment'),
     payment,
-    paymentOptions: PAYMENT_OPTIONS,
+    paymentOptions,
     paymentText: payment ? PAYMENT_METHOD_LABEL[payment] : '미정', // 잠긴 칸 글자 (지점 방문 포함)
-    setPayment,
+    setPayment: choosePayment,
     paymentLocked, // 잠겼으면 칩 대신 글자로
+    paymentError: paymentBlocked
+      ? `이 고객은 ${PAYMENT_METHOD_LABEL[payment!]}을 쓸 수 없어요. 다른 결제 방식을 골라 주세요.`
+      : undefined,
+    paymentHint:
+      isCompany && paymentOptions.some((o) => o.disabledHint)
+        ? `${payCtx.company || '소속 기업'}에서 꺼진 결제 수단은 기업 관리에서 켤 수 있어요.`
+        : undefined,
+    // 개인 고객이 등록 안 된 월정산을 고름 → '홍길동님에게 월정산을 추가할까요?'
+    askingMonthly: askingMonthly !== null,
+    monthlyName: parties.sender.name.trim() || '이 고객',
+    agreeMonthly: () => {
+      const a = askingMonthly
+      setMonthlyFor(senderPhone)
+      setAskingMonthly(null)
+      if (a?.thenSubmit && pickupStillOk()) submitNow(true)
+    },
+    declineMonthly: () => {
+      setPayment(askingMonthly?.revertTo ?? null)
+      setAskingMonthly(null)
+    },
 
     request,
     setRequest,
@@ -404,6 +485,7 @@ export function useOrderForm(
         (collecting
           ? missing.length === 0 // 접수 중단: 바뀐 게 없어도 조건만 채워지면 접수
           : draft.patch !== null && !draft.roadChanged)) && // 수정: 바뀐 게 있고 도로명은 그대로
+      !paymentBlocked && // 고객이 쓸 수 없는 결제 방식 (기업 설정에서 꺼짐 등)
       !customerFail && // 주문은 이미 저장됨 → 고객 재시도 · 닫기만
       !finished &&
       !mutation.isPending,
@@ -419,14 +501,16 @@ export function useOrderForm(
     // 수정에서 보내는 분 이름 · 주소가 바뀌었으면 먼저 묻고, 아니면 바로 저장
     submit: () => {
       if (!pickupStillOk()) return
-      if (customerDraft) setAsking(true)
-      else mutation.mutate(false)
+      // 월정산이 기본으로 골라져 있어 아직 안 물었으면(새 주문) 여기서 물음
+      if (payment === 'MONTHLY' && canAddMonthly && !monthlyAgreed)
+        return setAskingMonthly({ revertTo: null, thenSubmit: true })
+      submitNow(addingMonthly)
     },
     asking,
     cancelAsk: () => setAsking(false),
     answer: (alsoCustomer: boolean) => {
       setAsking(false)
-      if (pickupStillOk()) mutation.mutate(alsoCustomer) // 묻는 창을 띄워 둔 사이에도 시간이 흐름
+      if (pickupStillOk()) mutation.mutate({ alsoCustomer, monthly: addingMonthly }) // 묻는 창을 띄워 둔 사이에도 시간이 흐름
     },
     customerFailMessage: customerFail
       ? `주문은 수정됐지만 고객정보 저장에 실패했습니다. ${orderErrorText(retry.error ?? customerFail.error, '저장')}`

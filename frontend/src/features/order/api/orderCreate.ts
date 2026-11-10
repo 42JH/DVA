@@ -21,9 +21,12 @@ const address = (p: PartyInput) => ({
   postalCode: p.picked?.postalCode ?? '',
 })
 
-export function buildCreateOrder(input: OrderInput, shippingFee: number) {
+export function buildCreateOrder(input: OrderInput, shippingFee: number, customerSeq?: number) {
   return {
-    customer: { name: input.sender.name, phoneNumber: input.sender.phoneNumber }, // 수기 = 주문자가 보내는 분
+    // 수기 = 주문자가 보내는 분. 고객 번호가 있으면(월정산을 먼저 켬, 11/10) 그 고객 — 서버는 둘 중 하나만 받음
+    ...(customerSeq
+      ? { customerSeq }
+      : { customer: { name: input.sender.name, phoneNumber: input.sender.phoneNumber } }),
     ...(input.paymentMethod ? { paymentMethodType: METHOD[input.paymentMethod] } : {}), // 생략 = 미정(서버)
     totalAmount: shippingFee, // 상세 배송비 합계와 같아야 함 (상세 하나)
     ...(input.pickupAt ? { pickupRequestedAt: input.pickupAt } : {}), // 기존 호환용, 서버가 최종 결정

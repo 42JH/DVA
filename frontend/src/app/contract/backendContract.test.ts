@@ -163,6 +163,7 @@ const input: OrderInput = {
 }
 check('POST /api/admin/orders', buildCreateOrder(input, 3500))
 check('POST /api/admin/orders', buildCreateOrder({ ...input, pickupAt: null }, 3500))
+check('POST /api/admin/orders', buildCreateOrder({ ...input, paymentMethod: 'MONTHLY' }, 3500, 42))
 
 // ---------- 03 주문 수정 — PATCH /orders/{id} · 고객정보에도 저장 — PATCH /customers/{id} ----------
 const order: OrderDetail = {

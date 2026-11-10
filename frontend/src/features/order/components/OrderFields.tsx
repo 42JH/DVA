@@ -7,6 +7,7 @@ import { PRICE_BANDS, priceBand } from '@/shared/order/labels'
 import { AddressPicker } from '@/shared/ui/AddressPicker'
 import { AddressButton, Choice, Err, Label, SuggestInput, TextInput } from '@/shared/ui/Field'
 import type { Suggestion } from '@/features/order/hooks/useCustomerSuggest'
+import { Confirm } from '@/shared/ui/Modal'
 
 type OrderForm = ReturnType<typeof useOrderForm>
 
@@ -320,7 +321,7 @@ function Pickup({ f }: { f: OrderForm }) {
   )
 }
 
-/** 결제 방식 — 미완료 주문이 아니면 잠김 */
+/** 결제 방식 — 미완료 주문이 아니면 잠김. 고객이 못 쓰는 칩은 꺼짐 · 개인 고객 월정산은 물어보고 추가 (11/10) */
 function Payment({ f }: { f: OrderForm }) {
   if (f.paymentLocked)
     return <TextInput label="결제 방식" value={f.paymentText} onChange={() => {}} readOnly />
@@ -333,6 +334,18 @@ function Payment({ f }: { f: OrderForm }) {
         onChange={f.setPayment}
       />
       {!f.payment && <Err>결제 방식을 골라 주세요.</Err>}
+      {f.paymentError && <Err>{f.paymentError}</Err>}
+      {f.paymentHint && <p className="text-[12px] text-ops-sub">{f.paymentHint}</p>}
+      {f.askingMonthly && (
+        <Confirm
+          title={`${f.monthlyName}님에게 월정산을 추가할까요?`}
+          ok="추가"
+          onOk={f.agreeMonthly}
+          onClose={f.declineMonthly}
+        >
+          접수할 때 고객 정보의 결제 수단에도 추가됩니다.
+        </Confirm>
+      )}
     </div>
   )
 }
