@@ -158,7 +158,7 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
   ) {
     errors.push('PBX_WEBHOOK_TOKEN');
   }
-  const dverUrl = raw.DVER_API_URL ?? 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel';
+  const dverUrl = raw.DVER_API_URL ?? 'https://purple-wood-25a4.summer2.workers.dev';
   try {
     const url = new URL(String(dverUrl));
     if (

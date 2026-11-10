@@ -146,7 +146,7 @@ npm run start:dev
 | `CORS_ORIGINS` | 정확한 origin을 쉼표로 구분. 예: `http://localhost:5173,https://13.209.59.180`. 경로·와일드카드 금지 |
 | `SWAGGER_ENABLED` | true / false. 개발 기본 true, 테스트·운영 기본 false |
 | `PBX_WEBHOOK_TOKEN` | 선택, 설정하면 공백 없는 32바이트 이상 토큰. 미설정 시 PBX 수신은 기존대로 503 |
-| `DVER_API_URL` | 기본 `https://public-n8n.dvercorp.co.kr:47514/webhook/parcel`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용 |
+| `DVER_API_URL` | 기본 `https://purple-wood-25a4.summer2.workers.dev`. HTTPS, 자격정보·query·fragment 금지. test에서만 로컬 HTTP 모의 서버 허용. 기존 환경변수 변경은 [접수 주소 전환](docs/dver-endpoint-change.md) 참고 |
 | `DVER_API_KEY` | 서버 전용 디버 키. 빈 값이면 신규 최종 접수만 503. 공백·제어문자 금지. Compose가 backend에 전달 |
 | `AWS_REGION` | S3 대상 리전. 기본 ap-northeast-2 |
 | `S3_RECORDINGS_BUCKET` | 비공개 녹취 버킷명. 미설정이면 업로드만 비활성. 미연결 PBX 수신의 30분 정리는 계속 실행 |
