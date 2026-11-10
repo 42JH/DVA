@@ -16,6 +16,7 @@ PARCEL_FIELDS = ("sender_name", "sender_phone", "sender_address", "sender_addres
                  "receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail",
                  "items", "item_price")
 BOX_SIZE_NAMES = {"small": "소형", "medium": "중형", "big": "대형"}
+DOCUMENT_ITEM_PRICE = 1
 
 
 class FieldStatus(StrEnum):
@@ -44,6 +45,10 @@ class Items:
     def any(self) -> bool:
         return bool(self.document_count or self.small_box_count or self.medium_box_count or self.big_box_count
                     or self.other_item)
+
+    def documents_only(self) -> bool:
+        return bool(self.document_count and not (self.small_box_count or self.medium_box_count or self.big_box_count
+                                                 or self.other_item))
 
 
 @dataclass(frozen=True)
@@ -115,6 +120,17 @@ class ParcelDraft:
 
     def __getitem__(self, name: str) -> FieldState:
         return self.fields[name]
+
+    def documents_only(self) -> bool:
+        items = self["items"]
+        return not self.box_size_pending and items.valid and items.value.documents_only()
+
+    def declared_item_price(self) -> int | None:
+        """서류용 1원은 접수 값에서만 계산해 다른 물품에 넘어가지 않게 한다."""
+        if self.documents_only():
+            return DOCUMENT_ITEM_PRICE
+        price = self["item_price"]
+        return price.value if price.valid else None
 
     def empty(self) -> bool:
         return not self.item_issues and not self.box_size_pending and self.box_proposal is None and all(
@@ -260,6 +276,8 @@ def _plain(o):
 def draft_snapshot(draft: ParcelDraft) -> dict:
     """택배의 현재 VALID 값(되읽기·확인·전송의 단위). geo·요청사항 포함, 상태·버전은 뺀다."""
     out = {name: f.value for name, f in draft.fields.items() if f.valid}
+    if (price := draft.declared_item_price()) is not None:
+        out["item_price"] = price
     out |= {"sender_geo": draft.sender_geo, "receiver_geo": draft.receiver_geo, "client_comment": draft.client_comment}
     return out
 

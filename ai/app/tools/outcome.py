@@ -43,4 +43,6 @@ def state_summary(state: ConversationState, policy: Policy) -> dict:
     if state.current and state.current.box_size_pending:
         fields["items"] = FieldStatus.PENDING_CHOICE.value
         summary["box_size_pending"] = True
+    elif state.current and state.current.documents_only():
+        fields["item_price"] = FieldStatus.VALID.value
     return summary

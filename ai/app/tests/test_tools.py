@@ -172,12 +172,35 @@ def test_limits_apply_after_merging_existing_counts():
     c = ctx()
     initial = Items(document_count=100, medium_box_count=10)
     c.state.record("items", initial)
-    out = call(c, "record_fields", {"small_box_count": 1, "document_count": 1,
+    c.state.record("item_price", 10000)
+    out = call(c, "record_fields", {"small_box_count": 1, "document_count": 1, "item_price": 20000,
                                     "add_item_counts": ["document_count"]})
     assert {need["reason"] for need in out["needs"]} == {"ITEM_BOX_LIMIT", "ITEM_DOCUMENT_LIMIT"}
     assert c.state.current["items"].value == initial
+    assert c.state.current["item_price"].value == 10000
     out = call(c, "record_fields", {"medium_box_count": 9, "small_box_count": 1, "document_count": 100})
     assert out["status"] == "ok" and not c.state.current.item_issues
+
+
+def test_documents_only_value_does_not_carry_over_when_goods_are_added():
+    from app.domain.state import draft_snapshot
+    from app.tests.test_domain import filled
+
+    c = ctx()
+    c.state = filled(items=Items(document_count=10))
+    out = call(c, "record_fields", {"item_price": 80000})
+    assert "item_price" not in out["facts"]["readback"]
+    assert draft_snapshot(c.state.current)["item_price"] == 1
+    out = call(c, "record_fields", {"small_box_count": 1})
+    assert out["missing"] == ["item_price"] and "item_price" not in draft_snapshot(c.state.current)
+    out = call(c, "record_fields", {"item_price": 100000})
+    assert out["facts"]["readback"]["item_price"] == 100000
+    assert draft_snapshot(c.state.current)["item_price"] == 100000
+    out = call(c, "record_fields", {"document_count": 20})
+    assert out["facts"]["readback"]["item_price"] == 100000
+    out = call(c, "record_fields", {"small_box_count": 0})
+    assert "item_price" not in out["facts"]["readback"]
+    assert draft_snapshot(c.state.current)["item_price"] == 1
 
 
 def test_address_confirmed_not_found_and_ambiguous(corrector, address):

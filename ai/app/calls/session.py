@@ -175,8 +175,10 @@ class CallSession:
         if s.current is not None:  # 값은 문자열로(숫자·물품 객체 + 문자열은 TypeError — S5 실통화 관제 중단 버그)
             current = {label(n): (str(_show(f.value)) if f.valid else f.status.value) + (f" · {f.code}" if f.code else "")
                        for n, f in s.current.fields.items() if f.status != FieldStatus.EMPTY}
+            if s.current.documents_only():
+                current[label("item_price")] = str(s.current.declared_item_price())
         parcels = [{"id": p.parcel_id, "받는 분": p.draft["receiver_name"].value, "물품": _show(p.draft["items"].value),
-                    "가액": p.draft["item_price"].value, "확인": "확인됨" if p.confirmed_hash else "확인 전"}
+                    "가액": p.draft.declared_item_price(), "확인": "확인됨" if p.confirmed_hash else "확인 전"}
                    for p in s.parcels]
         detail = {"단계": a.stage, "업무": s.intent, "빠진 항목": [label(n) for n in a.missing],
                   "받는 중인 택배": current, "담은 택배": parcels, "수거 일시": s.pickup_at.value,
