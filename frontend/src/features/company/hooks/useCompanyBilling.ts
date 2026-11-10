@@ -1,21 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { addMonths, todayYmd } from '@/shared/lib/dateRange'
 import { useListParams } from '@/shared/lib/useListParams'
-import { companyQueries, setMonthlyBilling } from '@/features/company/api/companyApi'
-import { errorText } from '@/features/company/labels'
+import { companyQueries } from '@/features/company/api/companyApi'
+import { BILLING_LABEL } from '@/features/company/labels'
 
 const DEFAULTS = { month: '' } // '' = 이번 달 (주소에 안 남김)
 const MONTH = /^[1-9]\d{3}-(0[1-9]|1[0-2])$/ // 서버 BillingMonthQueryDto와 같은 형식
 
 const won = (n: number) => `${n.toLocaleString('ko-KR')}원`
 
-/** 08 기업 상세 — 월결제 사용 여부(확인 창 → 변경) · 월별 사용액(달은 URL ?month=) */
+/** 08 기업 상세 — 결제 수단 요약 한 줄 · 월별 사용액(달은 URL ?month=) */
 export function useCompanyBilling(id: number) {
   const { params, page, set } = useListParams(DEFAULTS)
-  const qc = useQueryClient()
-  // 확인 창에 띄울 바꿀 값 — null이면 창 닫힘
-  const [pending, setPending] = useState<boolean | null>(null)
 
   const thisMonth = todayYmd().slice(0, 7)
   // 주소는 누구나 고칠 수 있음 → 형식이 틀리거나 미래 달이면 이번 달로
@@ -25,28 +21,26 @@ export function useCompanyBilling(id: number) {
 
   const company = useQuery(companyQueries.detail(id))
   const usage = useQuery(companyQueries.billing(id, month))
+  const depts = useQuery(companyQueries.departments(id)) // 상세 훅과 같은 키 → 요청 한 번
 
-  const change = useMutation({
-    mutationFn: (enabled: boolean) => setMonthlyBilling(id, enabled),
-    onSuccess: async () => {
-      // 상세 · 목록의 '월결제' 열까지 한 번에
-      await qc.invalidateQueries({ queryKey: companyQueries.all() })
-      setPending(null)
-    },
-  })
+  // 그룹 카드는 부서 단위라 기업 한 줄로는 요약만
+  const deptCount = depts.data?.length ?? 0
+  const groupOn = (depts.data ?? []).filter((d) => d.groupBillingEnabled).length
+  const group =
+    deptCount === 0
+      ? '그룹 카드 미사용 (부서 없음)'
+      : `그룹 카드 부서 ${deptCount}곳 중 ${groupOn}곳`
 
   return {
-    enabled: company.data?.monthlyBillingEnabled, // 불러오기 전 undefined → 선택 칸 안 그림
-    ask: (next: boolean) => {
-      if (next === company.data?.monthlyBillingEnabled) return // 같은 값 다시 누름
-      change.reset() // 지난 실패 문구가 남지 않게
-      setPending(next)
-    },
-    pending,
-    cancel: () => setPending(null),
-    confirm: () => pending !== null && change.mutate(pending),
-    saving: change.isPending,
-    saveError: change.error ? errorText(change.error, '저장') : null,
+    // '개인 카드 사용 · 그룹 카드 부서 3곳 중 1곳 · 월결제 미사용' — 둘 다 받기 전엔 null
+    summary:
+      company.data && depts.data
+        ? [
+            '개인 카드 사용',
+            group,
+            `월결제 ${BILLING_LABEL(company.data.monthlyBillingEnabled)}`,
+          ].join(' · ')
+        : null,
 
     monthLabel: `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`,
     prevMonth: () => goMonth(addMonths(month, -1)),

@@ -29,6 +29,7 @@ type MemberModal =
   | { kind: 'edit'; member: Member }
   | { kind: 'delete'; member: Member }
   | { kind: 'csv' }
+  | { kind: 'payment' } // 결제 설정 (11/11)
   | null
 
 /** 08 기업 상세 훅 — 기업 · 제목 줄(사원 수 · 대표자) · 사원 표(쪽은 URL) · 창 상태 · 사원 삭제 */
@@ -125,6 +126,7 @@ export function useCompanyDetail(id: number, size = PAGE_SIZE) {
       setModal({ kind: 'delete', member: m })
     },
     openCsv: () => setModal({ kind: 'csv' }),
+    openPayment: () => setModal({ kind: 'payment' }),
     close: () => setModal(null),
 
     confirmDelete: () => modal?.kind === 'delete' && remove.mutate(modal.member),
