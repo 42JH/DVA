@@ -281,22 +281,25 @@ def test_personal_place_found_first_and_pick_applies():
     assert s.current.receiver_geo is not None and s.candidates is None
 
 
-def test_new_receiver_at_known_place_keeps_pin_address():
-    same = "서울 송파구 올림픽로 300"
-    c = ctx(customer=Customer(caller_phone=CALLER, places=(place("김철수", same), place("이영희", same, detail="501호"),
-                                                           place("박지점", "부산 해운대구 센텀로 10"))))
-    assert call(c, "find_destination", {"place": "올림픽로"})["code"] == "DEST_MANY"
-    out = call(c, "find_destination", {"name": "박민수", "place": "올림픽로"})
+def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector, fake_kakao):
+    """상호·도로명 → 실제 주소 → 그 주소의 핀이면 확인, 없으면 그 주소로 새 받는 분(통화 67d29423)."""
+    same = "서울특별시 송파구 올림픽로 300"
+    c = ctx(address=AddressService(corrector),
+            customer=Customer(caller_phone=CALLER, places=(place("김철수", same), place("이영희", same, detail="501호"),
+                                                           place("박지점", "경상북도 구미시 인동9길 7-3"))))
+    assert call(c, "find_destination", {"place": "송파구 올림픽로 삼백"})["code"] == "DEST_MANY"  # 같은 주소의 두 분
+    out = call(c, "find_destination", {"name": "박민수", "place": "송파구 올림픽로 삼백"})
     s = c.state
     assert out["code"] == "DEST_NEW_RECEIVER" and s.candidates is None
     assert s.field_of("receiver_name").value == "박민수" and s.field_of("receiver_name").source == Source.CUSTOMER
     assert s.field_of("receiver_address").value == same and s.field_of("receiver_address").source == Source.RESOLVER
     assert s.current.receiver_geo is not None and s.field_of("receiver_address_detail").status == FieldStatus.EMPTY
     assert "receiver_phone" in out["missing"] and "receiver_address" not in out["missing"]
-    # 같은 이름의 장소가 여러 주소면(체인점) 주소를 정하지 않는다
-    c2 = ctx(customer=Customer(caller_phone=CALLER, places=(place("김철수", "서울 강남구 테헤란로 1"),
-                                                            place("이영희", "서울 서초구 테헤란로 9"))))
-    assert call(c2, "find_destination", {"name": "박민수", "place": "테헤란로"})["code"] == "DEST_NONE"
+    # 같은 도로의 다른 건물번호는 핀과 다른 곳: 핀 주소를 쓰지 않고 해석한 주소로
+    out = call(c, "find_destination", {"place": "구미시 인동9길 8"})
+    assert out["code"] == "DEST_NEW_RECEIVER" and s.field_of("receiver_address").value == "경상북도 구미시 인동9길 8"
+    # 핀과 같은 건물이면 그 받는 분을 확인
+    assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["facts"]["labels"] == ["101호"]
 
 
 def company(name="주소하나", organization="주소기업", seq=26):
