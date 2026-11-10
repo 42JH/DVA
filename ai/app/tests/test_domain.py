@@ -302,8 +302,16 @@ def test_gate_requires_previous_ai_line_to_be_the_question():
     assert check_gate(s, P, p.id, proceed, cust, stale, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     interrupted = Utterance(4, 3000, 5500, 101.0, "바뀐 받는 분은", p.id)
     assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).ok
+    explicit_yes = Utterance(5, 5000, 5400, 104.0, "네, 그렇게 접수해 주세요")
+    short_yes = Utterance(5, 5000, 5400, 104.0, "네, 맞아요")
+    mixed_change = Utterance(5, 5000, 5400, 104.0, "주소를 바꿔서 접수해 주세요")
+    assert check_gate(s, P, p.id, YES, explicit_yes, interrupted, **kw).ok
+    for early in (short_yes, mixed_change):
+        assert check_gate(s, P, p.id, YES, early, interrupted, **kw).code == "CONFIRM_BEFORE_READBACK_END"
+    assert check_gate(s, P, p.id, YES, explicit_yes, unlinked, **kw).code == "CONFIRM_BEFORE_READBACK_END"
     s.record("item_price", 31000)
     assert check_gate(s, P, p.id, proceed, cust, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
+    assert check_gate(s, P, p.id, YES, explicit_yes, interrupted, **kw).code == "CONFIRM_SNAPSHOT_CHANGED"
 
 
 def test_unregistered_customer_name_is_sender_name_in_body():

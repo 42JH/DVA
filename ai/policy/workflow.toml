@@ -236,7 +236,7 @@ unverified = "방금 말한 표현 중 서버가 확인하지 않은 내용. tru
 cancel = "취소 결과: done=취소됨, already=이미 취소된 접수, locked=결제가 끝나 전화로 취소 불가, unknown=확인 중(완료라고 말하지 않는다)"
 agent = "상담원 연결 상태. 바로 연결한다고 말하는 것은 transferring일 때만 한다. suggest = 상담원 연결을 권한다. transferring = '담당 상담원에게 바로 연결해 드리겠습니다. 잠시만 기다려 주세요'라고 한 번 말한다(말이 끝나면 서버가 전화를 넘긴다). callback_offer = 지금은 상담원 연결 가능 시간이 아니다 — '죄송하지만 지금은 상담원 연결 가능 시간이 아니라 연결이 어렵습니다. 지금 거신 번호로 담당자가 다음 영업일 오전에 먼저 연락드려도 될까요?'라고 묻는다. callback_registered = 연락드리겠다고 안내한다. callback_declined = 알겠다고 하고 하던 일로 돌아간다. transfer_failed = 연결이 되지 않았다고 사과하고 callback_offer처럼 묻는다. not_configured = 지금은 바로 연결이 안 된다, 담당자가 확인 후 연락드린다고 안내한다"
 unavailable = "status가 unavailable이면 시스템 문제다. 고객 탓으로 말하지 않고 지금 확인이 어렵다고 안내한다"
-confirmation = "확인 대기 상태. ask_again이면 readback 값을 짧게 되읽고 '이대로 접수할까요?'로 묻는다(고객이 그 질문에 답해야 확정된다). cancel_target과 함께 오면 그 접수를 취소할지 다시 묻는다. 아직 접수·취소되지 않았으니 처리했다고 말하지 않는다. cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
+confirmation = "확인 대기 상태. ask_again이면 확인을 기다리는 중이므로 저장 결과를 확인 중이라고 말하지 않고, readback 값을 짧게 되읽고 '이대로 접수할까요?'로 한 번 묻는다. 짧은 답은 확인 질문에 답해야 확정되고, 되읽기 도중의 명확한 접수 요청은 서버가 판단한다. cancel_target과 함께 오면 그 접수를 취소할지 다시 묻는다. 처리했다고 말하지 않는다. cancelled_by_customer면 고객이 고친 값을 받아 기록한다"
 pickup = "수거 요청 시각. at = 안내할 시각(한국 시간), today_unavailable이 true면 '금일 수거는 어렵고 익일 수거가 가능합니다'를 먼저 말한다. allowed = 고객이 바꿀 수 있는 범위(거절 사유 PICKUP_TOO_SOON·PICKUP_OUT_OF_HOURS·PICKUP_TOO_FAR일 때 이 범위로 다시 묻는다)"
 origin = "발송 주소. prefilled = 기존 정보로 발송 주소를 채웠다(다시 묻지 않고 저장된 상세주소는 읽지 않는다). address_recorded = 발송 주소가 이미 기록됐으므로 다시 묻지 않고 missing을 따른다. name_only = 성함만 채웠으므로 발송 주소를 묻는다"
 origin_confirm = "기존 발송 주소를 쓸지 '{그 주소}에서 발송하시나요?'라고 한 번 묻는다"
