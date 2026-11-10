@@ -18,6 +18,16 @@ before(async () => {
     if (mode === 'status') res.statusCode = 503;
     const rows = [{ orderSeq: 1, callSessionSeq: 10, callerPhoneNumber: null }, { orderSeq: 2, callSessionSeq: null, callerPhoneNumber: null }];
     let payload = input.eventType === 'LegacyDraftCallBindingsReadRequested' ? rows : false;
+    if(input.eventType==='DraftCallReferencesRequested') {
+      assert.ok(Buffer.byteLength(JSON.stringify(input))<100*1024);
+      payload={calls:[{call_session_seq:1,started_at:'2030-01-01T00:00:00.123456+00:00'}],
+        customers:[{customer_seq:2,call_session_seq:9,started_at:'2030-01-01T00:00:00.123457+00:00'}],
+        phones:[{caller_phone_number:'장'.repeat(400000),call_session_seq:10,started_at:'infinity'}]};
+      if(mode==='draft-foreign')payload.customers[0].customer_seq=99;
+      if(mode==='draft-duplicate')payload.calls.push(payload.calls[0]);
+      if(mode==='draft-time')payload.calls[0].started_at='invalid';
+      if(mode==='draft-phone')payload.phones[0].caller_phone_number='unrequested';
+    }
     if (mode === 'duplicate') payload[1] = payload[0];
     if (mode === 'missing') payload.pop();
     if (mode === 'foreign') payload[0].orderSeq = 99;
@@ -57,4 +67,28 @@ test('deletion accepts only a matching boolean ACK and cleanup must explicitly s
     { eventId: randomUUID(), source: 'order', eventType: 'LegacyDraftCallBindingsPruneRequested', payload: {} }));
   await assert.rejects(requestParcelDraftCommand(url, 'short', check()));
   await assert.rejects(requestParcelDraftCommand(url + '?redirect=1', token, check()));
+});
+
+
+test('draft visibility references preserve microseconds, bound scope inputs and return complete large phone candidates',async()=>{
+  const {createHash}=require('node:crypto');
+  const {requestDraftCallReferences,validateDraftCallReferences}=require('../parcel-drafts.cjs');
+  const bigPhone='장'.repeat(400000);
+  const query={callIds:[1],customerIds:[2],phones:['01012345678'],phoneHashes:[createHash('sha256').update(bigPhone).digest('hex')]};
+  const event={eventId:randomUUID(),source:'order',eventType:'DraftCallReferencesRequested',payload:query};
+  validateParcelDraftCommand(event,event.eventType,'order');
+  for(const bad of [{...event,source:'consultation'},{...event,payload:{...query,sql:'SELECT private'}},
+    {...event,payload:{...query,callIds:[1,1]}},{...event,payload:{...query,callIds:['1']}},
+    {...event,payload:{...query,customerIds:Array.from({length:251},(_,n)=>n+1)}},
+    {...event,payload:{...query,phones:[bigPhone]}},{...event,payload:{...query,phoneHashes:['bad']}}])
+    assert.throws(()=>validateParcelDraftCommand(bad,'DraftCallReferencesRequested','order'));
+  mode='valid';
+  const value=await requestDraftCallReferences(url,token,{callIds:[1,1],customerIds:[2],phones:['01012345678',bigPhone]});
+  assert.equal(value.calls[0].started_at,'2030-01-01T00:00:00.123456+00:00');
+  assert.equal(value.phones[0].caller_phone_number,bigPhone);validateDraftCallReferences(value,query);
+  assert.deepEqual(await requestDraftCallReferences(url,token,{callIds:[],customerIds:[],phones:[]}),{calls:[],customers:[],phones:[]});
+  for(mode of ['draft-foreign','draft-duplicate','draft-time','draft-phone','id','ack','html','status','redirect'])
+    await assert.rejects(requestDraftCallReferences(url,token,{callIds:[1],customerIds:[2],phones:[bigPhone]}));
+  await assert.rejects(requestDraftCallReferences(url+'?private=1',token,{callIds:[1],customerIds:[2],phones:[]}));
+  await assert.rejects(requestDraftCallReferences(url,'short',{callIds:[1],customerIds:[2],phones:[]}));
 });

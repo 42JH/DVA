@@ -21,6 +21,10 @@ import {
   OrderReadError,
   type OrderReadEvent,
 } from '@dva/events/order-read.cjs';
+import {
+  validateParcelDraftCommand,
+  type DraftCallReferences,
+} from '@dva/events/parcel-drafts.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
 import { DatabaseService } from '../database/database.service';
@@ -33,6 +37,54 @@ export class OrderReadScopeController {
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  @Post('order-draft-call-references')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftCalls(@Body() event: unknown) {
+    try {
+      validateParcelDraftCommand(
+        event,
+        'DraftCallReferencesRequested',
+        'order',
+      );
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_CALL_QUERY' }, 422);
+    }
+    const query = event.payload;
+    const payload = await this.database.readOnly(async (client) => {
+      const started = 'COALESCE(incoming_at,started_at,registered_at)';
+      const completed =
+        'ended_at IS NOT NULL AND order_finalized_at IS NOT NULL';
+      const calls = (
+        await client.query<DraftCallReferences['calls'][number]>(
+          `SELECT call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions WHERE call_session_seq=ANY($1::int[]) ORDER BY call_session_seq`,
+          [query.callIds],
+        )
+      ).rows;
+      const customers = (
+        await client.query<DraftCallReferences['customers'][number]>(
+          `SELECT DISTINCT ON(customer_seq) customer_seq,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+          WHERE customer_seq=ANY($1::int[]) AND ${completed} AND ${started} IS NOT NULL ORDER BY customer_seq,${started} DESC,call_session_seq DESC`,
+          [query.customerIds],
+        )
+      ).rows;
+      const phoneFilter = query.phoneHashes.length
+        ? "(caller_phone_number=ANY($1::text[]) OR encode(sha256(convert_to(caller_phone_number,'UTF8')),'hex')=ANY($2::text[]))"
+        : 'caller_phone_number=ANY($1::text[])';
+      const phones = (
+        await client.query<DraftCallReferences['phones'][number]>(
+          `SELECT DISTINCT ON(caller_phone_number) caller_phone_number,call_session_seq,to_jsonb(${started})#>>'{}' AS started_at FROM call_sessions
+          WHERE ${phoneFilter} AND ${completed} AND ${started} IS NOT NULL ORDER BY caller_phone_number,${started} DESC,call_session_seq DESC`,
+          query.phoneHashes.length
+            ? [query.phones, query.phoneHashes]
+            : [query.phones],
+        )
+      ).rows;
+      return { calls, customers, phones };
+    });
+    return { eventId: event.eventId, status: 'processed', payload };
+  }
 
   @Post('order-read')
   @HttpCode(200)
