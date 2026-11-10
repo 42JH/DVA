@@ -1,5 +1,5 @@
 // 08 기업관리 — API-36~40 기업 · API-45~48 구성원 (API 연동 상세명세 7장). React를 모르는 데이터 · API 층
-// 부서는 CSV의 부서 이름 ↔ 번호에만 씀(화면 없음) · 기업 공유 주소록 · 월 사용액 API는 안 씀 (11/01 결정)
+// 부서는 CSV의 부서 이름 ↔ 번호에만 씀(화면 없음) · 기업 공유 주소록은 안 씀 (11/01 결정) · 월 사용액은 11/11부터 씀
 import { queryOptions } from '@tanstack/react-query'
 import { api, type ApiItem } from '@/shared/api/client'
 import { fetchAll } from '@/shared/api/paging'
@@ -71,6 +71,15 @@ interface Department {
   name: string
 }
 
+/** BillingMonth — 금액 단위 원. 기업 삭제 뒤에도 그 달 기업명은 남아 있음 */
+interface BillingMonth {
+  organizationSeq: number
+  organizationName: string | null
+  month: string
+  monthlyAmount: number // 월결제 사용액
+  groupBillingAmount: number // 부서 그룹결제 사용액 합계
+}
+
 const MAX_LIMIT = 100 // 목록 limit 최대
 
 export const companyQueries = {
@@ -110,6 +119,18 @@ export const companyQueries = {
       queryKey: [...companyQueries.all(), id, 'departments'],
       queryFn: ({ signal }) => fetchAll<Department>(`/companies/${id}/departments`, {}, signal),
     }),
+  // 월 사용액 (API-34) — 한 번에 한 달. month 'YYYY-MM'(한국 시각 기준 월)
+  billing: (id: number, month: string) =>
+    queryOptions({
+      queryKey: [...companyQueries.all(), id, 'billing', month],
+      queryFn: async ({ signal }) =>
+        (
+          await api.get<ApiItem<BillingMonth>>(`/companies/${id}/billing`, {
+            query: { month },
+            signal,
+          })
+        ).data,
+    }),
   allMembers: (id: number) =>
     queryOptions({
       queryKey: [...companyQueries.all(), id, 'members', 'all'],
@@ -146,6 +167,10 @@ export const createCompany = async (
       body: { name, departments: departments.map((d) => ({ name: d })), members },
     })
   ).data.organizationSeq
+
+/** 기업 월결제 사용 여부 변경 — PATCH /companies/{id} 204. 이름 · 상태는 안 보내면 그대로 */
+export const setMonthlyBilling = (id: number, enabled: boolean): Promise<void> =>
+  api.patch(`/companies/${id}`, { body: { monthlyBillingEnabled: enabled } })
 
 /** 기업 삭제 — 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
 export const deleteCompany = (id: number): Promise<void> => api.delete(`/companies/${id}`)
