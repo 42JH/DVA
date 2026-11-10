@@ -5,6 +5,7 @@ import { Btn, Icon } from './controls'
 
 export function Modal({
   title,
+  extra,
   sub,
   onClose,
   footer,
@@ -12,6 +13,7 @@ export function Modal({
   children,
 }: {
   title: string
+  extra?: ReactNode // 제목 바로 옆 뱃지 · 숫자 ('통화 중 00:12', 07 시험 통화)
   sub?: string // 제목 옆 흐린 글 (어느 기업의 창인지 등)
   onClose: () => void
   footer?: ReactNode
@@ -42,6 +44,7 @@ export function Modal({
     >
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-ops-line px-6">
         <h2 className="text-[16px] font-bold">{title}</h2>
+        {extra}
         {sub && <span className="truncate text-[13px] text-ops-sub">{sub}</span>}
         <button
           type="button"

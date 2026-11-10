@@ -5,7 +5,8 @@ import { AddPersonaModal } from './AddPersonaModal'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
 import { PageHead } from '@/shared/ui'
-import { Badge, Btn, Icon, SelectField } from '@/shared/ui'
+import { Badge, Btn, Icon } from '@/shared/ui'
+import { SelectInput } from '@/shared/ui/Field'
 import { Confirm } from '@/shared/ui/Modal'
 import { Markdown } from '@/shared/ui/Markdown'
 
@@ -127,7 +128,7 @@ function PersonaCard({ p, vm }: { p: PersonaItem; vm: Vm }) {
       </button>
       {h && (
         <div className="mt-3 flex flex-col gap-2">
-          <SelectField
+          <SelectInput
             label="히스토리"
             value={h.value}
             onChange={vm.selectVersion}

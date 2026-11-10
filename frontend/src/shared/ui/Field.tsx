@@ -56,6 +56,70 @@ export function TextInput({
   )
 }
 
+/** 여러 줄 입력 칸 (TextInput과 같은 선 · 글자). labelClassName = 칸 이름을 제목처럼 크게 (07 프롬프트 수정) */
+export function TextAreaInput({
+  label,
+  labelClassName,
+  value,
+  onChange,
+  error,
+  placeholder,
+  className = '',
+}: {
+  label: string
+  labelClassName?: string
+  value: string
+  onChange: (v: string) => void
+  error?: string
+  placeholder?: string
+  className?: string // 높이 등 (예: 글만큼 늘리기 [field-sizing:content])
+}) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      {labelClassName ? <span className={labelClassName}>{label}</span> : <Label>{label}</Label>}
+      <textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        aria-invalid={!!error}
+        className={`min-h-20 resize-none rounded-md bg-white px-3 py-2 text-[14px] leading-6 ring-1 outline-none ring-inset placeholder:text-ops-faint focus:ring-ops-route ${error ? 'ring-ops-stop' : 'ring-ops-line'} ${className}`}
+      />
+      {error && <Err>{error}</Err>}
+    </label>
+  )
+}
+
+/** 고르기 칸 (TextInput과 같은 모양) — 브라우저 기본 <select> */
+export function SelectInput({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  options: { value: string; label: string }[]
+}) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <Label>{label}</Label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="h-9 min-w-0 rounded-md bg-white px-2.5 text-[14px] ring-1 ring-ops-line outline-none ring-inset focus:ring-ops-route"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  )
+}
+
 /** 치는 대로 추천이 아래에 뜨는 입력 칸 (TextInput과 같은 모양). ↑ ↓로 옮기고 Enter로 고름, Esc · 칸 밖으로 나가면 닫힘 */
 export function SuggestInput<T>({
   label,
@@ -200,7 +264,7 @@ export function Choice<T extends string>({
 }: {
   label: string
   value: T | null
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; disabledHint?: string }[] // disabledHint = 끄고 칸 안에 작게 이유 ('AI 미지원', 07 음성)
   onChange: (v: T) => void
 }) {
   return (
@@ -212,10 +276,12 @@ export function Choice<T extends string>({
             key={o.value}
             type="button"
             aria-pressed={value === o.value}
+            disabled={!!o.disabledHint}
             onClick={() => onChange(o.value)}
-            className={`h-8 rounded-md px-3 text-[13px] font-medium ring-1 ring-inset ${value === o.value ? 'bg-ops-route-soft text-ops-route ring-ops-route' : 'ring-ops-line hover:bg-ops-paper'}`}
+            className={`h-8 rounded-md px-3 text-[13px] font-medium ring-1 ring-inset disabled:pointer-events-none disabled:text-ops-faint ${value === o.value ? 'bg-ops-route-soft text-ops-route ring-ops-route' : 'ring-ops-line hover:bg-ops-paper'}`}
           >
             {o.label}
+            {o.disabledHint && <span className="ml-1 text-[11px]">{o.disabledHint}</span>}
           </button>
         ))}
       </div>

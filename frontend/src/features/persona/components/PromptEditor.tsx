@@ -1,82 +1,73 @@
-import type { ReactNode } from 'react'
-import { Button, ConfirmDialog, Tag, TextArea } from '@/shared/ui'
+import { Btn } from '@/shared/ui'
+import { TextAreaInput } from '@/shared/ui/Field'
+import { Confirm } from '@/shared/ui/Modal'
 import { usePromptEditor, type EditTarget } from '@/features/persona/hooks/usePromptEditor'
 import { VoiceModal } from './VoiceModal'
 
-// 07 프롬프트 수정 (와이어프레임 07_페르소나관리_수정, 10/31) — 오른쪽에 페르소나 · 버전 히스토리 패널(aside, 접을 수 있음, 11/02)
-// 제목 줄 [음성 세부 조절] → 고정 제목 + 입력칸 여섯 개(11/10, 줄 번호 없음) → [취소] [저장 → v7]
-// 11/05 새 디자인 (구성 그대로 모양만): 버튼 big · 저장 파랑 · 글 칸 테두리 파랑 · 새 확인 창
+// 07 프롬프트 수정 (와이어프레임 07_페르소나관리_수정, 10/31)
+// 11/10 다른 화면과 같은 모양: 보기 화면 카드(Prompt)와 같은 틀 — 위 줄(버전 · 부제 · [음성 세부 조절]) · 고정 제목 + 입력칸 여섯 개 · 아래 줄([취소] [저장 → v7])
+// 제목 크기도 보기 화면과 같게: 발화 스타일 · 역할 등 18, 발화 스타일 아래(톤 · 속도) 15
 // 와이어프레임의 [v6과 비교]는 뺌 (10/31 결정): 비교는 저장 후 보기 화면에서
 // 칸은 글만큼 늘고(field-sizing, Chrome · Edge) 칸 묶음 전체가 한 번에 스크롤
 export function PromptEditor({
   target,
   onDone,
-  aside,
 }: {
   target: EditTarget
   onDone: (savedVersion?: number) => void
-  aside?: (leave: (then: () => void) => void) => ReactNode // 오른쪽 패널 — 고르면 leave(보기로 갈 일): 저장 안 한 내용이 있으면 확인 창부터
 }) {
   const vm = usePromptEditor(target, onDone)
 
   return (
-    <div className="flex h-full gap-6">
-      <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-4 rounded-xl bg-surface p-7 ring-1 ring-line ring-inset">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-card font-semibold">시스템 프롬프트</h2>
-          <Button big kind="brandLine" onClick={vm.openVoice}>
-            음성 세부 조절
-          </Button>
-        </div>
-        <p className="-mt-2 flex items-center gap-3">
-          <Tag kind="gray">{vm.tag}</Tag>
-          <span className="text-label text-sub">{vm.subtitle}</span>
-        </p>
+    <article className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-ops-line bg-white">
+      <header className="flex flex-wrap items-center gap-3 border-b border-ops-line px-5 py-3">
+        <span className="text-[15px] font-bold">{vm.tag}</span>
+        <span className="text-[13px] text-ops-sub">{vm.subtitle}</span>
+        <Btn className="ml-auto" onClick={vm.openVoice}>
+          음성 세부 조절
+        </Btn>
+      </header>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto pr-2">
-          {vm.sections.map((s) => (
-            <div key={s.key} className="flex flex-col gap-3">
-              {s.group && <h3 className="text-body font-bold">{s.group}</h3>}
-              <TextArea
-                label={s.title}
-                // 발화 스타일 아래(톤 · 속도)가 아닌 칸은 '발화 스타일'과 같은 제목 크기 (11/10)
-                labelClassName={s.sub ? undefined : 'text-body font-bold'}
-                value={s.value}
-                spellCheck={false}
-                onChange={(e) => vm.setField(s.key, e.target.value)}
-                className="[field-sizing:content] min-h-20! resize-none"
-              />
-            </div>
-          ))}
-        </div>
+      <div className="flex min-h-0 flex-1 [scrollbar-width:thin] flex-col gap-7 overflow-y-auto px-8 py-6">
+        {vm.sections.map((s) => (
+          <section key={s.key} className="flex flex-col gap-4">
+            {s.group && <h3 className="text-[18px] font-bold">{s.group}</h3>}
+            <TextAreaInput
+              label={s.title}
+              labelClassName={s.sub ? 'text-[15px] font-bold' : 'text-[18px] font-bold'}
+              value={s.value}
+              onChange={(v) => vm.setField(s.key, v)}
+              className="[field-sizing:content]"
+            />
+          </section>
+        ))}
+      </div>
 
-        <div className="flex items-center justify-end gap-3">
-          {(vm.emptyNotice ?? vm.saveError) && (
-            <p role="alert" className="mr-auto text-body text-danger">
-              {vm.emptyNotice ?? vm.saveError}
-            </p>
-          )}
-          <Button big onClick={vm.cancel}>
-            취소
-          </Button>
-          <Button big kind="brand" disabled={!vm.canSave} onClick={vm.save}>
-            {vm.saveLabel}
-          </Button>
-        </div>
-
-        {vm.voiceOpen && <VoiceModal vm={vm} subtitle={vm.subtitle} />}
-        {vm.confirmingDiscard && (
-          <ConfirmDialog
-            big
-            title="저장하지 않고 나갈까요?"
-            note="고친 내용이 사라집니다."
-            okLabel="나가기"
-            onOk={vm.discard}
-            onClose={vm.keepEditing}
-          />
+      <footer className="flex items-center gap-2 border-t border-ops-line px-5 py-3">
+        {(vm.emptyNotice ?? vm.saveError) && (
+          <p role="alert" className="min-w-0 flex-1 text-[12px] text-ops-stop">
+            {vm.emptyNotice ?? vm.saveError}
+          </p>
         )}
-      </section>
-      {aside?.(vm.leave)}
-    </div>
+        <Btn className="ml-auto" onClick={vm.cancel}>
+          취소
+        </Btn>
+        <Btn kind="primary" disabled={!vm.canSave} onClick={vm.save}>
+          {vm.saveLabel}
+        </Btn>
+      </footer>
+
+      {vm.voiceOpen && <VoiceModal vm={vm} subtitle={vm.subtitle} />}
+      {vm.confirmingDiscard && (
+        <Confirm
+          title="저장하지 않고 나갈까요?"
+          ok="나가기"
+          onOk={vm.discard}
+          onClose={vm.keepEditing}
+        >
+          고친 내용이 사라집니다.
+        </Confirm>
+      )}
+    </article>
   )
 }
