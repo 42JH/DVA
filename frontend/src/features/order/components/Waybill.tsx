@@ -107,6 +107,14 @@ export function WaybillPanel({
             )}
           </div>
           {w.actionError && <p className="text-[12px] text-ops-stop">{w.actionError}</p>}
+          {w.retryNotice && (
+            <p
+              role="status"
+              className={`text-[12px] ${w.retryNotice.tone === 'stop' ? 'text-ops-stop' : 'text-ops-wait'}`}
+            >
+              {w.retryNotice.text}
+            </p>
+          )}
         </div>
       )}
       {asking && w.canCancel && (
