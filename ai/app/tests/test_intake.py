@@ -49,8 +49,8 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         s.state.record("items", Items(document_count=10))
         s.tools.clock = lambda: 100
         combined = await run_tool(s.tools, "record_fields", '{"small_box_count": 1, "item_price": 30000}', "mixed-items")
-        assert combined["facts"]["readback"]["items"] == {"document_count": 10, "small_box_count": 1}
         pending = s.state.pending
+        assert "readback" in combined["facts"] and pending.snapshot["items"] == Items(document_count=10, small_box_count=1)
         readback = Spoken(1, "접수 내용 확인 부탁드릴게요. 받는 분은", 3000, 4800, 101, 101)
         await lf.apply(s, Spoken(2, "네", 4000, 4200, 102, 102), readback,
                        {"confirm": ("yes", 0.98, {"yes": 0.98})}, pending.id)
@@ -120,8 +120,8 @@ def test_documents_only_ready_stores_one_won_and_hides_the_amount_from_speech(tm
     async def scenario():
         result = await run_tool(s.tools, "record_fields", '{"document_count": 100, "small_box_count": 0}', "docs")
         assert result["can_proceed"] and "item_price" not in result["missing"]
-        assert result["facts"]["readback"]["items"] == {"document_count": 100}
-        assert "item_price" not in result["facts"]["readback"]
+        assert "readback" in result["facts"] and s.state.pending.snapshot["items"] == Items(document_count=100)
+        assert s.state.pending.snapshot["item_price"] == 1  # 서류 전용은 1원으로 저장, 되읽기는 가액을 읽지 않는다
         await lf.commit(s, s.state.pending.id)
         [draft] = db.drafts.values()
         assert draft["status"] == "READY" and draft["parcel"]["itemPrice"] == 1

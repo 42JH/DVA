@@ -6,7 +6,7 @@
 
 from dataclasses import dataclass
 
-from app.domain.state import ConversationState, FieldStatus, Items, Source
+from app.domain.state import ConversationState, FieldStatus, Geo
 from app.domain.store import pending_reconfirm
 from app.policy.model import Policy
 
@@ -93,21 +93,18 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
                       auto_payment(state.customer.payment_methods), exceeded, tuple(pending_reconfirm(state)))
 
 
-def readback_facts(snapshot: dict, sources: dict[str, Source | None], policy: Policy) -> dict[str, object]:
-    """Live에 줄 확인 내용(읽어도 되는 값만, README §5): 발신번호·저장된 번호·저장된 상세주소는 빼고, geo는 넣지 않는다."""
-    out = {}
-    items = snapshot.get("items")
-    for name, value in snapshot.items():
-        if name not in policy.fields or value is None:
-            continue
-        if name == "item_price" and items and items.documents_only():
-            continue
-        src = sources.get(name)
-        if name.endswith("_phone") and src != Source.CUSTOMER:
-            continue  # 발신번호(CALLER_ID)·주소록 번호는 읽지 않는다
-        if name.endswith("_address_detail") and src not in (Source.CUSTOMER, None):
-            continue  # 저장된 상세주소는 읽지 않는다
-        if isinstance(value, Items):  # 읽을 수 있는 형태(0개 규격은 뺀다)
-            value = {k: v for k, v in value.__dict__.items() if v}
-        out[name] = value
-    return out
+def area_label(address: str | None, geo: Geo | None) -> str | None:
+    """확인 때 주소 대신 말하는 동 이름. 보정 실패로 geo가 없으면 건물번호를 뺀 주소(도로명까지)."""
+    if geo is not None and geo.dong_name:
+        return geo.dong_name
+    return address.rsplit(" ", 1)[0] if address else None
+
+
+def readback_facts(snapshot: dict) -> dict[str, str]:
+    """Live에 줄 확인 내용(S15P31D109-164, 사용자 결정 2026-11-09): 보내는 분·받는 분 성함과 동 이름만. 주소·연락처·상세주소·
+    물품·가액은 다시 읽지 않는다(두 주소는 confirm_route로 이미 확인했다는 전제)."""
+    out = {"sender_name": snapshot.get("sender_name"),
+           "from": area_label(snapshot.get("sender_address"), snapshot.get("sender_geo")),
+           "receiver_name": snapshot.get("receiver_name"),
+           "to": area_label(snapshot.get("receiver_address"), snapshot.get("receiver_geo"))}
+    return {k: v for k, v in out.items() if v}

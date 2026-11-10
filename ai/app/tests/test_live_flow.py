@@ -756,7 +756,8 @@ def test_registered_greeting_answer_preserves_address_scope_without_model(greeti
         assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
         assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
     else:
-        assert facts["summary"]["missing"][0] == "sender_address" and not cur["sender_address"].valid
+        assert facts["summary"]["missing"][0] == "receiver_name" and "sender_address" in facts["summary"]["missing"]
+        assert not cur["sender_address"].valid
         assert ("origin_confirm" in facts) == (expected == "ask_origin")
         assert s.state.origin_answer is (False if expected == "name_only" else None)
 
@@ -805,10 +806,9 @@ def test_origin_paths_other_place_and_recent_only():
     assert lf._origin_step(st) == {"origin_confirm": "부산 해운대구 센텀로 10"} and st.origin_offered
     st.origin_answer = True
     assert lf._origin_step(st) == {"origin": "prefilled"}
-    # 되읽기에는 저장된 상세주소를 넣지 않는다
+    # 되읽기에는 성함과 동 이름만(geo가 없으면 건물번호를 뺀 주소)
     snap = {n: st.current[n].value for n in ("sender_name", "sender_address", "sender_address_detail")}
-    out = readback_facts(snap, {n: f.source for n, f in st.current.fields.items()}, P)
-    assert "sender_address" in out and "sender_address_detail" not in out
+    assert readback_facts(snap) == {"sender_name": "김철수", "from": "부산 해운대구 센텀로"}
 
     st = ConversationState(customer=Customer(customer_seq=12, name="김철수", origin_place=recent), intent="order")
     st.record("sender_address", "서울 강남구 테헤란로 212")

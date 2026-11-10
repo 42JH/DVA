@@ -119,7 +119,7 @@ def test_record_normalizes_reports_and_summarizes():
     assert out["facts"]["phones_to_read"] == ["receiver_phone"]
     assert s.field_of("sender_phone").source == Source.CALLER_ID  # 발신번호는 서버가 채운다
     assert out["fields"]["receiver_name"] == "valid" and "sender_phone" not in out["fields"]
-    assert out["missing"][0] == "sender_address" and out["stage"] == "sender"  # 등록 고객 성함은 이미 채워짐
+    assert out["missing"][0] == "sender_address" and out["stage"] == "address"  # 등록 고객 성함은 이미 채워짐
 
 
 def test_bad_phone_and_pickup_not_saved_other_values_are():
@@ -162,7 +162,7 @@ def test_additional_box_without_a_size_blocks_old_readback_until_resolved():
     c.item_utterance = (2, "그건 소형 박스 하나요")
     args = {"small_box_count": 1, "add_item_counts": ["small_box_count"]}
     out = call(c, "record_fields", args)
-    assert out["facts"]["readback"]["items"] == {"document_count": 10, "small_box_count": 2}
+    assert "readback" in out["facts"]
     call(c, "record_fields", args)
     assert c.state.current["items"].value == Items(document_count=10, small_box_count=2)
     assert not c.state.current.box_size_pending
@@ -189,17 +189,15 @@ def test_documents_only_value_does_not_carry_over_when_goods_are_added():
     c = ctx()
     c.state = filled(items=Items(document_count=10))
     out = call(c, "record_fields", {"item_price": 80000})
-    assert "item_price" not in out["facts"]["readback"]
+    assert "readback" in out["facts"]
     assert draft_snapshot(c.state.current)["item_price"] == 1
     out = call(c, "record_fields", {"small_box_count": 1})
     assert out["missing"] == ["item_price"] and "item_price" not in draft_snapshot(c.state.current)
     out = call(c, "record_fields", {"item_price": 100000})
-    assert out["facts"]["readback"]["item_price"] == 100000
     assert draft_snapshot(c.state.current)["item_price"] == 100000
     out = call(c, "record_fields", {"document_count": 20})
-    assert out["facts"]["readback"]["item_price"] == 100000
+    assert draft_snapshot(c.state.current)["item_price"] == 100000
     out = call(c, "record_fields", {"small_box_count": 0})
-    assert "item_price" not in out["facts"]["readback"]
     assert draft_snapshot(c.state.current)["item_price"] == 1
 
 
@@ -243,7 +241,7 @@ def test_server_splits_detail_from_heard_sentence_and_converts_numerals(correcto
     s = c.state
     out = call(c, "record_fields", {"sender_address": "경북 구미시 인동구길 칠다시삼 이백삼호요"})  # 한 문장 통째로
     assert s.field_of("sender_address").value == "경상북도 구미시 인동9길 7-3"
-    # 출처는 CUSTOMER: 고객이 말한 상세라 되읽기(readback_facts)에 들어간다
+    # 출처는 CUSTOMER: 고객이 말한 상세를 서버가 갈랐을 뿐이라 저장된 값(PIN·PROFILE)과 구분한다
     assert s.field_of("sender_address_detail").value == "203호" and s.field_of("sender_address_detail").source == Source.CUSTOMER
     assert set(out["facts"]["recorded"]) == {"sender_address", "sender_address_detail"}
     # 모델이 나눠 넘긴 상세의 수사도 서버가 숫자로. 기본주소에 꼬리가 있으면 서버가 뗀 상세가 우선(결정 3: 번호 뒤 이름도 상세)
@@ -287,16 +285,30 @@ def test_late_address_result_does_not_overwrite_newer_value(corrector, fake_kaka
 
 def test_full_parcel_opens_readback_with_facts(corrector, address):
     c = ctx(address=address)
-    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
-                              "sender_address_detail": "3층"})
+    first = call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211",
+                                      "sender_address_detail": "3층"})
+    assert "confirm_route" not in first["facts"]  # 받는 곳 주소가 아직 없다
     out = call(c, "record_fields", {"receiver_name": "이영희", "receiver_phone": "01098765432",
                                     "receiver_address": "서울 강남구 테헤란로 212", "receiver_address_detail": "",
                                     "small_box_count": 1, "item_price": 30000})
     assert out["can_proceed"] is True and c.state.pending is not None and c.state.pending.issued_t == 100.0
     facts = out["facts"]["readback"]
-    assert "sender_phone" not in facts and facts["receiver_phone"] == "01098765432"  # 발신번호는 읽지 않는다
+    # 되읽기는 성함·동 이름만(S15P31D109-164). 되읽기가 열리면 confirm_route는 따로 주지 않는다
+    assert set(facts) == {"sender_name", "from", "receiver_name", "to"} and facts["receiver_name"] == "이영희"
+    assert "confirm_route" not in out["facts"]
     # 저장 대상은 상태에만 두고 담을 때 묻지 않고 저장한다(2026-11-06)
     assert "address_save" not in out["facts"] and c.state.address_offer == {"sender": True, "receiver": True}
+
+
+def test_both_addresses_known_confirms_route_by_dong(corrector, address):
+    """두 주소가 갖춰진 결과에 confirm_route(동 이름)를 준다(S15P31D109-164). 주소가 바뀌지 않은 뒤 호출에는 주지 않는다."""
+    c = ctx(address=address)
+    call(c, "record_fields", {"sender_name": "김철수", "sender_address": "서울 강남구 테헤란로 211"})
+    out = call(c, "record_fields", {"receiver_address": "서울 강남구 테헤란로 212"})
+    route = out["facts"]["confirm_route"]
+    assert set(route) == {"from", "to"} and route["from"] == c.state.current.sender_geo.dong_name
+    assert "readback" not in out["facts"]
+    assert "confirm_route" not in call(c, "record_fields", {"receiver_name": "이영희"})["facts"]
 
 
 def test_same_values_after_release_reopen_readback_but_not_while_awaiting_fix(corrector, address):
