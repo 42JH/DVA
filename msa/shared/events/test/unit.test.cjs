@@ -311,3 +311,11 @@ test('administrator order read protocol preserves owner addresses, scopes and co
     assert.throws(()=>validateOrderOrganizationRows({organization_seq:2,organization_name:'기업',customer_seqs:[1,1]},2));
   } finally {global.fetch=oldFetch;}
 });
+
+
+test('read snapshots retry only rolled-back PostgreSQL serialization conflicts',async()=>{
+  const {retryReadSnapshot}=require('../read-scope.cjs');let attempts=0;
+  assert.equal(await retryReadSnapshot(async()=>{if(++attempts===1)throw Object.assign(new Error('snapshot conflict'),{code:'40001'});return 'new state';}),'new state');assert.equal(attempts,2);
+  attempts=0;const failure=Object.assign(new Error('connection failed'),{code:'08006'});
+  await assert.rejects(retryReadSnapshot(async()=>{attempts++;throw failure;}),error=>error===failure);assert.equal(attempts,1);
+});

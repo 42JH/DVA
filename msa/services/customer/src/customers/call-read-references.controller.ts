@@ -10,7 +10,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Pool, PoolClient } from 'pg';
-import { ReadScopes, validateReadScope, readCallbackUrl } from '@dva/events/read-scope.cjs';
+import { validateDraftRead, requestDraftReadCall } from '@dva/events/parcel-drafts.cjs';
+import { requestDraftRead } from '@dva/events/order-read.cjs';
+import {
+  ReadScopes,
+  retryReadSnapshot,
+  validateReadScope,
+  readCallbackUrl,
+} from '@dva/events/read-scope.cjs';
 import {
   validateAdminOrderRead,
   requestAdminOrderRead,
@@ -38,6 +45,97 @@ export class CallReadReferencesController {
     private readonly database: DatabaseService,
     private readonly config: ConfigService<Environment, true>,
   ) {}
+
+  @Post('parcel-drafts')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftRead(@Body() event: unknown) {
+    try {
+      validateDraftRead(event, 'consultation');
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_READ' }, 422);
+    }
+    try {
+      const id = event.payload.command.callSessionSeq;
+      const token = this.config.get('CUSTOMER_AUTH_TOKEN', { infer: true });
+      const call =
+        id === null
+          ? null
+          : await requestDraftReadCall(
+              readCallbackUrl(
+                this.config.get('CONSULTATION_URL', { infer: true }),
+                '/internal/parcel-draft-read/call',
+                event.payload.consultationAddress ?? null,
+              ),
+              token,
+              id,
+              event.eventId,
+              'customer',
+            );
+      return await retryReadSnapshot(() =>
+        this.database.transaction(async (client) => {
+          await client.query(
+            'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' + (call === null ? ' READ ONLY' : ''),
+          );
+          await client.query('SELECT 1');
+          let customerSeq: number | null = null;
+          if (call) {
+            if (!call.callerPhoneNumber)
+              throw new ApiException(
+                403,
+                'FORBIDDEN',
+                '통화 발신번호와 활성 고객 연결을 확인해 주세요.',
+              );
+            const customer = (
+              await client.query<{ id: number }>(
+                call.customerSeq === null
+                  ? "SELECT customer_seq AS id FROM customers WHERE phone_number=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE"
+                  : "SELECT customer_seq AS id FROM customers WHERE customer_seq=$1 AND status='ACTIVE' AND deleted_at IS NULL FOR SHARE",
+                [call.customerSeq ?? call.callerPhoneNumber],
+              )
+            ).rows[0];
+            if (call.customerSeq !== null && !customer)
+              throw new ApiException(
+                403,
+                'FORBIDDEN',
+                '통화 발신번호와 활성 고객 연결을 확인해 주세요.',
+              );
+            customerSeq = customer?.id ?? null;
+          }
+          return this.reads.run(event.eventId, client, async () => {
+            const payload = await requestDraftRead(
+              readCallbackUrl(
+                this.config.get('ORDER_URL', { infer: true }),
+                '/internal/parcel-draft-read',
+                event.payload.orderAddress,
+              ),
+              token,
+              {
+                ...event,
+                source: 'customer',
+                payload: {
+                  ...event.payload,
+                  customerSeq,
+                  customerAddress: this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+                },
+              },
+            );
+            return { eventId: event.eventId, status: 'processed', payload };
+          });
+        }),
+      );
+    } catch (error) {
+      if (error instanceof OrderReadError)
+        throw new HttpException({ error: error.error }, error.status);
+      if (error instanceof ApiException)
+        throw new HttpException({ error: error.getResponse() }, error.getStatus());
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
 
   @Post('admin-orders')
   @HttpCode(200)

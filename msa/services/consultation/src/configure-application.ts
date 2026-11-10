@@ -83,6 +83,9 @@ export function configureApplication(
       { path: 'internal/order-cancellation', method: RequestMethod.ALL },
       { path: 'internal/order-read', method: RequestMethod.ALL },
       { path: 'internal/admin-order-read', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-read', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-delete', method: RequestMethod.ALL },
+      { path: 'internal/parcel-draft-read/call', method: RequestMethod.ALL },
       {
         path: 'internal/order-draft-call-references',
         method: RequestMethod.ALL,

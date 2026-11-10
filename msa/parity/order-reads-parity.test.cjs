@@ -209,7 +209,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       }
       for(const child of Object.values(value)) schemas(child);
     }
-    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses','/api/payments/requests/{id}']) {
+    for(const path of ['/api/orders','/api/orders/{id}','/api/admin/orders','/api/customers/{id}/addresses','/api/payments/requests/{id}','/api/parcel-drafts','/api/parcel-drafts/{id}']) {
       assert.deepEqual(documents[1].paths[path].get,documents[0].paths[path].get,path);
       schemas(documents[0].paths[path].get);
     }
@@ -383,6 +383,98 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       await databases.consultation.query('UPDATE call_sessions SET incoming_at=$1 WHERE call_session_seq=1101',[oldStarted]);
     }
   });
+  await t.test('parcel draft read scopes preserve stored and anonymous callers and hold authorization locks',async()=>{
+    const {createServer}=require('node:http'),{networkInterfaces}=require('node:os');
+    const {requestDraftRead}=require('@dva/events/order-read.cjs');
+    const {requestDraftReadCall}=require('@dva/events/parcel-drafts.cjs');
+    const {requestReferences}=require('@dva/events/call-read-references.cjs');
+    const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
+    const base='http://consultation-app:3004',token=process.env.CUSTOMER_AUTH_TOKEN;
+    const longPhone='입'.repeat(40000);
+    const cases=[[15001,1,'different stored phone',true,'2030-01-01Z',false,null,200,1],
+      [15002,null,'01000000001',true,'2030-01-01Z',false,null,200,1],
+      [15003,null,'unknown caller',true,'2030-01-01Z',false,null,200,null],
+      [15004,3,'01000000003',true,'2030-01-01Z',false,null,403,null],
+      [15005,4,'01000000004',true,'2030-01-01Z',false,null,403,null],
+      [15006,null,null,true,'2030-01-01Z',false,null,403,null],
+      [15007,1,'01000000001',false,'2030-01-01Z',false,null,409,null],
+      [15008,1,'01000000001',true,null,false,null,404,null],
+      [15009,1,'01000000001',true,'2010-01-01Z',false,null,404,null],
+      [15010,1,'01000000001',true,'2030-01-01Z',true,null,200,1],
+      [15011,1,'01000000001',true,'2030-01-01Z',false,'2030-01-02Z',404,null],
+      [15012,null,longPhone,true,'2030-01-01Z',false,null,200,null]];
+    for(const db of [reference,databases.consultation])for(const [id,customer,phone,enabled,incoming,ended,deleted]of cases)await db.query(
+      `INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,order_intake_enabled,incoming_at,registered_at,started_at,ended_at,deleted_at)
+       OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2030-01-01Z',CASE WHEN $7 THEN '2030-01-01Z'::timestamptz ELSE NULL END,CASE WHEN $7 THEN '2030-01-02Z'::timestamptz ELSE NULL END,$8)`,
+      [id,'draft-read-scope-'+id,customer,phone,enabled,incoming,ended,deleted]);
+    const retained=[];for(const db of [reference,databases.consultation]){const client=await db.connect();await client.query('BEGIN');await client.query('SELECT 1 FROM call_sessions WHERE call_session_seq=15009 FOR KEY SHARE');retained.push(client);}
+    let hold=false,arrivals=[],entered,release;const gate=new Promise(r=>release=r),ready=new Promise(r=>entered=r);let pending=[],updates=[];
+    const packet=id=>({eventId:randomUUID(),source:'order',eventType:'ParcelDraftReadRequested',payload:{command:{operation:'ParcelDraftsListed',id:null,callSessionSeq:id,query:{limit:20,offset:0,status:'ALL',callSessionSeq:id??2147483647}},orderAddress:address}});
+    const server=createServer(async(req,res)=>{
+      try{
+        assert.equal(req.url,'/internal/parcel-draft-read');assert.equal(req.headers.authorization,'Bearer '+token);
+        const chunks=[];for await(const chunk of req)chunks.push(chunk);const bytes=Buffer.concat(chunks);assert.ok(bytes.length<4096);const event=JSON.parse(bytes);
+        assert.equal(event.source,'customer');const id=event.payload.command.callSessionSeq;
+        assert.equal(event.payload.customerSeq,id===null?null:cases.find(c=>c[0]===id)[8]);
+        if(hold){arrivals.push(event.eventId);if(arrivals.length===5)entered();await gate;}
+        if(id!==null){const call=await requestDraftReadCall(base+'/internal/parcel-draft-read/call',token,id,event.eventId);
+          assert.equal(call.callerPhoneNumber,cases.find(c=>c[0]===id)[2]);if(hold)assert.equal(call.endedAt,null);
+          await assert.rejects(requestDraftReadCall(base+'/internal/parcel-draft-read/call',token,1101,event.eventId));}
+        await requestReferences('customer','http://customer-app:3001/internal/call-read-references/for-orders',token,[1],'order',event.eventId);
+        res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({eventId:event.eventId,status:'processed',payload:{data:[],hasNext:false,total_count:0}}));
+      }catch(error){res.writeHead(500,{'Content-Type':'application/json'});res.end(JSON.stringify({error:String(error)}));}
+    });
+    await new Promise(r=>server.listen(3002,'0.0.0.0',r));
+    const post=(path,event,auth=token,scope)=>fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+auth,...(scope===undefined?{}:{'X-Msa-Read-Scope':scope})},body:JSON.stringify(event),signal:AbortSignal.timeout(30000)});
+    try{
+      for(const id of [null,...cases.map(c=>c[0])]){
+        const expected=id===null?200:cases.find(c=>c[0]===id)[7];
+        const original=await fetch(sides[0].base+'/api/parcel-drafts?status=ALL&callSessionSeq='+(id??2147483647),{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...(id===null?headers:ai(id))}});
+        const oracle=await original.json();assert.equal(original.status,expected,'source context '+id);
+        const response=await post('/internal/parcel-draft-read',packet(id));const body=await response.json();assert.equal(response.status,expected,'context '+id+' '+JSON.stringify(body));
+        if(expected===200)assert.deepEqual(body.payload,oracle);else assert.deepEqual(body.error,oracle.error);
+      }
+      assert.equal((await post('/internal/parcel-draft-read',packet(15001),'wrong')).status,403);
+      assert.equal((await post('/internal/parcel-draft-read',{...packet(15001),source:'customer'})).status,422);
+      const lookup={eventId:randomUUID(),source:'order',eventType:'ParcelDraftReadCallRequested',payload:{callSessionSeq:15001}};
+      assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,randomUUID())).status,503);
+      assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,'invalid')).status,422);
+      for(const kind of ['call','customer']){
+        let oracle;
+        for(const side of ['source','msa']){
+          const db=kind==='call'?(side==='source'?reference:databases.consultation):(side==='source'?reference:databases.customer);
+          const client=await db.connect();let reading;
+          try{
+            await client.query('BEGIN');
+            await client.query(kind==='call'?"UPDATE call_sessions SET order_intake_enabled=false WHERE call_session_seq=15001":"UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1");
+            reading=side==='source'?fetch(sides[0].base+'/api/parcel-drafts?status=ALL&callSessionSeq=15001',{headers:{Authorization:'Bearer '+process.env.PGPASSWORD,...ai(15001)}}):post('/internal/parcel-draft-read',packet(15001));
+            const pattern=kind==='call'?'%FROM call_sessions WHERE %FOR SHARE%':'%FROM customers WHERE %FOR SHARE%';
+            let blocked=false;for(let i=0;i<200;i++){if((await db.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1) AS blocked",[pattern])).rows[0].blocked){blocked=true;break;}await pause(10);}assert.ok(blocked,side+' pending '+kind+' authorization');
+            await client.query('COMMIT');
+            const response=await reading,body=await response.json();assert.equal(response.status,kind==='call'?409:403,side+' observes committed '+kind+' '+JSON.stringify(body));
+            if(side==='source')oracle=body.error;else assert.deepEqual(body.error,oracle);
+          } finally {
+            await client.query('ROLLBACK');client.release();await reading?.catch(()=>{});
+            await db.query(kind==='call'?"UPDATE call_sessions SET order_intake_enabled=true WHERE call_session_seq=15001":"UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
+          }
+        }
+      }
+      hold=true;pending=Array.from({length:5},()=>post('/internal/parcel-draft-read',packet(15001)));
+      let timer;try{await Promise.race([ready,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('draft pools did not enter')),10000);})]);}finally{clearTimeout(timer);}
+      updates=[databases.consultation.query("UPDATE call_sessions SET ended_at='2030-01-02Z',started_at='2030-01-01Z' WHERE call_session_seq=15001"),databases.customer.query("UPDATE customers SET status='WITHDRAWN' WHERE customer_seq=1")];
+      for(const [db,pattern]of [[databases.consultation,'UPDATE call_sessions SET ended_at%'],[databases.customer,'UPDATE customers SET status=%']]){
+        let blocked=false;for(let i=0;i<200;i++){if((await db.query("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query LIKE $1) AS blocked",[pattern])).rows[0].blocked){blocked=true;break;}await pause(10);}assert.ok(blocked,'authorization update was not blocked');
+      }
+      release();for(const response of await Promise.all(pending)){const body=await response.json();assert.equal(response.status,200,JSON.stringify(body));}await Promise.all(updates);
+      hold=false;assert.equal((await post('/internal/parcel-draft-read',packet(15001))).status,403);
+      for(const scope of arrivals)assert.equal((await post('/internal/parcel-draft-read/call',lookup,token,scope)).status,503);
+    } finally {
+      release();await Promise.allSettled(pending);await Promise.allSettled(updates);await new Promise(r=>server.close(r));
+      await databases.customer.query("UPDATE customers SET status='ACTIVE' WHERE customer_seq=1");
+      for(const client of retained){await client.query('ROLLBACK');client.release();}
+      for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-read-scope-%'");
+    }
+  });
   await t.test('all roles, filters, stable order, page boundaries and totals',async()=> {
     for(const token of tokens) await compare('/api/orders',200,{Cookie:'dva_session='+token});
     for(const path of ['/api/orders?customerSeq=1&limit=2','/api/orders?customerSeq=1&limit=2&offset=2','/api/orders?customerSeq=1&offset=100',
@@ -433,6 +525,89 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
       for(const query of ['?q='+encodeURIComponent('분할 초안 한글_%'),'','?statusGroup=COLLECTING','?q=010-9876-5432'])for(const offset of [0,249,250,251])await compare('/api/admin/orders'+(query||'?')+(query?'&':'')+'limit=1&offset='+offset);
     } finally {for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 14001 AND 14251');}
 
+  });
+  await t.test('parcel draft public reads preserve snapshots, all statuses, caller scope and filtered totals',async()=>{
+    const largePhone='입'.repeat(40000),retained=[];
+    const old=(await reference.query("SELECT to_jsonb(clock_timestamp()-interval '2 days')#>>'{}' AS instant")).rows[0].instant;
+    const contexts=[
+      {id:16001,customer:1,phone:'different stored phone'}, {id:16002,customer:null,phone:'01000000001'},
+      {id:16003,customer:1,phone:'01000000001',ended:true}, {id:16004,customer:2,phone:'01000000002'},
+      {id:16005,customer:null,phone:'anonymous repeated'}, {id:16006,customer:null,phone:'anonymous repeated'},
+      {id:16007,customer:null,phone:'anonymous repeated',ended:true},{id:16008,customer:null,phone:largePhone},
+      {id:16009,customer:null,phone:null},{id:16010,customer:3,phone:'01000000001'},
+      {id:16011,customer:4,phone:'01000000001'},{id:16012,customer:null,phone:'01000000003'},
+      {id:16013,customer:1,phone:'01000000001',enabled:false},{id:16014,customer:1,phone:'01000000001',deleted:true},
+      {id:16015,customer:1,phone:'01000000001',missingIncoming:true},{id:16016,customer:1,phone:'01000000001',expired:true},
+      {id:16017,customer:1,phone:'01000000001',ended:true,finalized:true},{id:16018,customer:1,phone:'01000000001',ended:true,order:1006},
+    ];
+    const rows=[
+      {id:17001,status:'READY',call:16001},{id:17002,status:'EDITING',call:16001},{id:17003,status:'INCOMPLETE',call:16001},
+      {id:17004,status:'RESUMED',call:16001},{id:17005,status:'READY',source:17004,reserved:72004},
+      {id:17006,status:'CANCELLED',call:16001},{id:17007,status:'CONVERTED',call:16001,order:1006,parcel:20061,reserved:1006},
+      {id:17008,status:'READY',call:16004,customer:2},{id:17009,status:'READY',call:16005,customer:null,phone:'anonymous repeated'},
+      {id:17010,status:'INCOMPLETE',customer:null,phone:'anonymous repeated'}, {id:17011,status:'READY',customer:null,phone:'anonymous repeated'},
+      {id:17012,status:'INCOMPLETE',call:16006,customer:null,phone:'anonymous repeated'}, {id:17013,status:'INCOMPLETE',customer:4},
+      {id:17014,status:'READY',call:16003},{id:17015,status:'EDITING',customer:3},{id:17016,status:'READY',deleted:true},
+      {id:17017,status:'READY',retention:'2010-01-01Z'},{id:17018,status:'INCOMPLETE',retention:old},
+      {id:17020,status:'RESUMED',call:16001},{id:17019,status:'READY',source:17020,reserved:72020,retention:old},
+      {id:17021,status:'READY',retention:old},{id:17022,status:'INCOMPLETE',call:1101},
+      {id:17023,status:'INCOMPLETE',customer:null,phone:largePhone}, {id:17024,status:'READY',legacy:999999},
+      {id:17025,status:'CONVERTED',call:16018,order:1006,parcel:20062,reserved:88001},
+      {id:17026,status:'INCOMPLETE',customer:null,phone:'01000000003'},
+      {id:17027,status:'READY',call:16007,customer:null,phone:'anonymous repeated'},
+    ];
+    const uuids=new Map(rows.map(row=>[row.id,randomUUID()]));
+    const party={name:'보존 한글_%',phoneNumber:'01098765432',roadAddress:'서울 도로',jibunAddress:'서울 지번',detailAddress:null,dongName:null,postalCode:'00123'};
+    try {
+      for(const db of [reference,databases.consultation])for(const c of contexts)await db.query(`INSERT INTO call_sessions(call_session_seq,provider_call_id,customer_seq,caller_phone_number,order_seq,incoming_at,registered_at,started_at,ended_at,deleted_at,
+        order_intake_enabled,order_intake_version,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result)
+        OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'2032-01-01Z',CASE WHEN $7 THEN '2032-01-01Z'::timestamptz ELSE NULL END,CASE WHEN $7 THEN '2032-01-02Z'::timestamptz ELSE NULL END,$8,$9,7,
+        CASE WHEN $10 THEN '2032-01-02Z'::timestamptz ELSE NULL END,CASE WHEN $10 THEN '{}'::jsonb ELSE NULL END,
+        CASE WHEN $10 THEN '2032-01-03Z'::timestamptz ELSE NULL END,CASE WHEN $10 THEN '{}'::jsonb ELSE NULL END)`,
+        [c.id,'draft-public-'+c.id,c.customer,c.phone,c.order??null,c.missingIncoming?null:c.expired?'2010-01-01Z':c.finalized?'2031-01-01Z':'2032-01-01Z',!!c.ended,c.deleted?'2032-01-02Z':null,c.enabled!==false,!!c.finalized]);
+      for(const db of [reference,databases.consultation]){const client=await db.connect();await client.query('BEGIN');await client.query('SELECT 1 FROM call_sessions WHERE call_session_seq=16016 FOR KEY SHARE');retained.push(client);}
+      for(const db of [reference,databases.order])for(const d of rows){
+        const parcel={origin:party,destination:{...party,name:'Alice_100%',detailAddress:'1201호'},documentCount:1,smallBoxCount:0,mediumBoxCount:0,bigBoxCount:0,itemPrice:10000,notifiedPrice:3500,clientComment:'</script> & 보존',otherItemDescription:'문서',originPin:null};
+        await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,customer_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,creation_payload,parcel_data,status,version,source_draft_seq,order_seq,order_parcel_seq,legacy_order_seq,legacy_order_parcel_seq,created_at,updated_at,retention_started_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,$7,'{"private":"never return"}',$8,$9,23,$10,$11,$12,$13,$14,'2032-01-01Z','2032-01-02Z',$15,$16)`,
+          [d.id,d.reserved??55000+d.id,d.call??null,Object.hasOwn(d,'customer')?d.customer:1,d.phone??'01000000001',d.call?null:1,uuids.get(d.id),parcel,d.status,d.source??null,d.order??null,d.parcel??null,d.legacy??null,d.legacy?888888:null,d.retention??'2032-01-01Z',d.deleted?'2032-01-03Z':null]);
+      }
+      for(const query of ['', '?status=ALL','?limit=1','?offset=999','?status=ALL&limit=2&offset=1','?customerSeq=1','?customerSeq=4','?callSessionSeq=16001','?legacyOrderSeq=999999',
+        '?q='+encodeURIComponent('한글'),'?q=010-9876-5432','?q=%25','?q=_','?q=%27%20OR%201%3D1--','?from=2032-01-01T00:00:00Z&to=2033-01-01T00:00:00Z'])await compare('/api/parcel-drafts'+query);
+      for(const status of ['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'])await compare('/api/parcel-drafts?status='+status);
+      for(const company of [6001,6002,6003,2147483647])await compare('/api/parcel-drafts?status=ALL&organizationSeq='+company);
+      for(const row of rows)await compare('/api/parcel-drafts/'+row.id,[17016,17017,17018,17019,17022].includes(row.id)?404:200);
+      const admin=await compare('/api/parcel-drafts/17013');assert.equal(admin.data.customerSeq,4);assert.equal(admin.data.intakeVersion,null);assert.ok(!Object.hasOwn(admin.data,'creationPayload'));
+      for(const role of tokens)await compare('/api/parcel-drafts?status=ALL&limit=1',200,{Cookie:'dva_session='+role,call_session_seq:'ignored-for-admin'});
+      for(const [call,id,status]of [[16001,17001,200],[16001,17008,404],[16001,17024,200],[16002,17001,200],
+        [16003,17014,200],[16003,17001,404],[16005,17009,200],[16005,17010,200],[16005,17011,404],
+        [16006,17012,200],[16007,17027,200],[16007,17010,404],[16008,17023,200],[16012,17026,200],[16017,17001,404],[16018,17025,200]]){
+        const value=await compare('/api/parcel-drafts/'+id,status,ai(call));if(status===200)assert.equal(value.data.intakeVersion,7);
+      }
+      for(const call of [16001,16002,16003,16005,16007,16008,16012,16017,16018])await compare('/api/parcel-drafts?status=ALL',200,ai(call));
+      for(const query of ['?status=ALL&customerSeq=2','?status=ALL&customerSeq=4'])await compare('/api/parcel-drafts'+query,403,ai(16001));
+      await compare('/api/parcel-drafts?customerSeq=1',403,ai(16005));
+      await compare('/api/parcel-drafts?status=ALL&callSessionSeq=16001',200,ai(16003));
+      for(const [call,status]of [[16009,403],[16010,403],[16011,403],[16013,409],[16014,404],[16015,404],[16016,404],[2147483647,404]]){
+        await compare('/api/parcel-drafts?status=ALL',status,ai(call));await compare('/api/parcel-drafts/17001',status,ai(call));
+      }
+      for(const query of ['?status=UNKNOWN','?status=READY&status=EDITING','?customerSeq=0','?customerSeq=1&customerSeq=2','?organizationSeq=0','?legacyOrderSeq=0','?callSessionSeq=0','?limit=101','?offset=-1','?q='+'x'.repeat(201),'?unexpected=1','?from=2032-01-01','?from=2033-01-01T00:00:00Z&to=2032-01-01T00:00:00Z'])await compare('/api/parcel-drafts'+query,400);
+      await compare('/api/parcel-drafts?q='+encodeURIComponent('\0'),500);
+      for(const call of [undefined,'bad','0','2147483648'])await compare('/api/parcel-drafts',400,call===undefined?{}:{call_session_seq:call});
+      await compare('/api/parcel-drafts',401,{Authorization:''});await compare('/api/parcel-drafts/17001',401,{Cookie:'dva_session=bad'});
+      const path='/api/parcel-drafts?status=ALL&callSessionSeq=16001&limit=1',requestId=randomUUID(),expected=await request(sides[0],path,200,ai(16001),requestId);
+      await Promise.all(Array.from({length:12},async()=>assert.deepEqual(await request(sides[1],path,200,ai(16001),requestId),expected)));
+      try{
+        const ids=Array.from({length:251},(_,n)=>18001+n),keys=ids.map(()=>randomUUID());
+        for(const db of [reference,databases.order])await db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,client_parcel_id,created_by_admin_user_seq,creation_payload,parcel_data,status,created_at,updated_at,retention_started_at)
+          OVERRIDING SYSTEM VALUE SELECT n,200000+n,key,1,'{}','{"origin":{"name":"초안 분할 확인"}}','INCOMPLETE','2032-01-01Z','2032-01-01Z','2032-01-01Z' FROM unnest($1::int[],$2::uuid[]) AS entries(n,key)`,[ids,keys]);
+        for(const offset of [0,249,250,251])await compare('/api/parcel-drafts?q='+encodeURIComponent('초안 분할 확인')+'&limit=1&offset='+offset);
+      }finally{for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 18001 AND 18251');}
+    } finally {
+      for(const client of retained){await client.query('ROLLBACK');client.release();}
+      for(const db of [reference,databases.order])await db.query('DELETE FROM order_parcel_drafts WHERE draft_seq BETWEEN 17001 AND 17027');
+      for(const db of [reference,databases.consultation])await db.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-public-%'");
+    }
   });
   await t.test('previous addresses use accepted active snapshots, existing customers and caller bounds',async()=> {
     for(const direction of ['ORIGIN','DESTINATION']) for(const query of ['', '&limit=1','&offset=100','&q=한글','&q=%25',

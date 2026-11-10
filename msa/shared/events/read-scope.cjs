@@ -32,3 +32,10 @@ class ReadScopes {
   }
 }
 module.exports={ReadScopes,validateReadScope,readCallbackUrl};
+
+// Permission locks can meet a preceding writer; retry only PostgreSQL snapshot conflicts after rollback.
+async function retryReadSnapshot(work) {
+  const deadline=performance.now()+5000;
+  for(;;){try{return await work();}catch(error){if(error?.code!=='40001'||performance.now()>=deadline)throw error;}}
+}
+module.exports.retryReadSnapshot=retryReadSnapshot;

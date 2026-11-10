@@ -92,3 +92,77 @@ test('draft visibility references preserve microseconds, bound scope inputs and 
   await assert.rejects(requestDraftCallReferences(url+'?private=1',token,{callIds:[1],customerIds:[2],phones:[]}));
   await assert.rejects(requestDraftCallReferences(url,'short',{callIds:[1],customerIds:[2],phones:[]}));
 });
+
+
+test('draft read scopes preserve anonymous and stored-customer context without large request bodies',async()=>{
+  const {validateDraftRead,requestDraftReadCall}=require('../parcel-drafts.cjs');
+  const {requestDraftRead,OrderReadError}=require('../order-read.cjs');
+  const scopeId=randomUUID(),input={eventId:scopeId,source:'order',eventType:'ParcelDraftReadRequested',payload:{command:{operation:'ParcelDraftsListed',id:null,callSessionSeq:1,query:{limit:20,offset:0,status:'ALL'}},orderAddress:null}};
+  validateDraftRead(input,'order');
+  const {validateDraftReadResult}=require('../parcel-drafts.cjs');
+  const row={draftSeq:3,reservedOrderSeq:7,callSessionSeq:1,customerSeq:null,callerPhoneNumber:null,createdByAdminUserSeq:null,clientParcelId:randomUUID(),parcel:{legacy:{keep:'unchanged'}},status:'EDITING',version:1,sourceDraftSeq:null,orderSeq:null,orderParcelSeq:null,legacyOrderSeq:null,legacyOrderParcelSeq:null,createdAt:'2030-01-01T00:00:00.000Z',updatedAt:'2030-01-01T00:00:00.000Z',retentionStartedAt:'2030-01-01T00:00:00.000Z'};
+  validateDraftReadResult({data:[row],hasNext:false,total_count:1},input.payload.command);
+  const detail={...input.payload.command,operation:'ParcelDraftDetailRead',id:3,query:{}};
+  validateDraftReadResult({...row,intakeVersion:null},detail);
+  assert.throws(()=>validateDraftReadResult({...row,intakeVersion:null,creationPayload:{}},detail));
+  assert.throws(()=>validateDraftReadResult({...row,draftSeq:4,intakeVersion:1},detail));
+
+  for(const changed of [{...input,source:'customer'},{...input,payload:{...input.payload,orderAddress:'127.0.0.1'}},{...input,payload:{...input.payload,command:{...input.payload.command,query:{limit:20,offset:0,status:'notPaid'}}}}])assert.throws(()=>validateDraftRead(changed,'order'));
+  const oldFetch=global.fetch;let mode='call',seen=0;const rawPhone='긴'.repeat(400000);
+  global.fetch=async(url,options)=>{
+    seen++;const request=JSON.parse(options.body);assert.ok(Buffer.byteLength(options.body)<4096);
+    if(mode==='error')return Response.json({error:{code:'FORBIDDEN',message:'source scope',details:[]}},{status:403});
+    const call={callSessionSeq:1,callerPhoneNumber:rawPhone,customerSeq:null,enabled:true,endedAt:'2030-01-01T00:00:00.123456+00:00',intakeVersion:1};
+    if(request.eventType==='ParcelDraftReadCallRequested'){
+      assert.equal(options.headers['X-Msa-Read-Scope'],scopeId);
+      if(mode==='wrongCall')call.callSessionSeq=2;
+      return Response.json({eventId:request.eventId,status:'processed',payload:call});
+    }
+    const payload={data:[],hasNext:false,total_count:0};if(mode==='extra')payload.secret=true;
+    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload});
+  };
+  try {
+    assert.equal((await requestDraftReadCall('http://consultation/private',token,1,scopeId,'customer')).callerPhoneNumber,rawPhone);
+    mode='wrongCall';await assert.rejects(requestDraftReadCall('http://consultation/private',token,1,scopeId));
+    mode='ok';assert.deepEqual(await requestDraftRead('http://consultation/private',token,input),{data:[],hasNext:false,total_count:0});
+    for(mode of ['extra','wrong'])await assert.rejects(requestDraftRead('http://consultation/private',token,input));
+    mode='error';await assert.rejects(requestDraftRead('http://consultation/private',token,input),error=>error instanceof OrderReadError&&error.status===403&&error.error.message==='source scope');
+    const before=seen;await assert.rejects(requestDraftReadCall('http://consultation/private',token,1,'invalid'));await assert.rejects(requestDraftRead('http://user:pass@consultation/private',token,input));assert.equal(seen,before);
+  } finally {global.fetch=oldFetch;}
+});
+
+
+test('draft deletion binds owner, actor, scope and phase and preserves source lock errors',async()=>{
+  const {validateDraftDeletion,validateDraftDeletionResult}=require('../parcel-drafts.cjs');
+  const {requestDraftDeletion,OrderReadError}=require('../order-read.cjs');
+  const root={eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command:{id:1,adminId:2,requestId:randomUUID()},orderAddress:null}};
+  const hint={...root,source:'consultation',payload:{command:root.payload.command,phase:'hint',callFinalized:null,consultationAddress:'10.1.2.3'}};
+  const deletion={...hint,payload:{...hint.payload,phase:'delete',callFinalized:false}};
+  for(const event of [root,hint,deletion])validateDraftDeletion(event,event.source);
+  for(const bad of [{...root,source:'customer'},{...root,eventId:'invalid'},
+    {...root,payload:{...root.payload,orderAddress:'127.0.0.1'}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,adminId:null}}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,id:'1'}}},
+    {...root,payload:{...root.payload,command:{...root.payload.command,sql:'DELETE'}}},
+    {...hint,payload:{...hint.payload,callFinalized:true}},
+    {...deletion,payload:{...deletion.payload,phase:'commit'}},
+    {...deletion,payload:{...deletion.payload,callFinalized:'false'}}])assert.throws(()=>validateDraftDeletion(bad,bad.source));
+  validateDraftDeletionResult(null,hint);validateDraftDeletionResult({callSessionSeq:null},hint);
+  validateDraftDeletionResult({callSessionSeq:1},hint);validateDraftDeletionResult(true,deletion);validateDraftDeletionResult(true,root);
+  for(const value of [true,{callSessionSeq:0},{callSessionSeq:1,finalized:true}])assert.throws(()=>validateDraftDeletionResult(value,hint));
+  for(const value of [null,false,{},'true'])assert.throws(()=>validateDraftDeletionResult(value,deletion));
+  const oldFetch=global.fetch;let mode='hint',calls=0;
+  global.fetch=async(url,options)=>{
+    calls++;const request=JSON.parse(options.body);
+    assert.equal(options.headers.Authorization,'Bearer '+token);
+    if(mode==='lock')return Response.json({error:{code:'REQUEST_IN_PROGRESS',message:'source lock timeout',details:[]}},{status:409});
+    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload:mode==='hint'?{callSessionSeq:3}:mode==='invalid'?false:true});
+  };
+  try {
+    assert.deepEqual(await requestDraftDeletion('http://order/private',token,hint),{callSessionSeq:3});
+    mode='delete';assert.equal(await requestDraftDeletion('http://consultation/private',token,root),true);
+    for(mode of ['wrong','invalid'])await assert.rejects(requestDraftDeletion('http://order/private',token,deletion));
+    mode='lock';await assert.rejects(requestDraftDeletion('http://order/private',token,deletion),error=>error instanceof OrderReadError&&error.status===409&&error.error.code==='REQUEST_IN_PROGRESS');
+    const before=calls;await assert.rejects(requestDraftDeletion('http://user:pass@order/private',token,deletion));assert.equal(calls,before);
+  } finally {global.fetch=oldFetch;}
+});

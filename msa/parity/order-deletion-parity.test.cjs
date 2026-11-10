@@ -7,7 +7,7 @@ const {Pool}=require('pg');
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const origin='http://localhost:5173';
 const cookie='dva_session='+'a'.repeat(64);
-const tables=['orders','order_parcels','order_payment_requests','order_billing_charges','organization_billing_months','empty_ai_order_results'];
+const tables=['order_parcel_drafts','orders','order_parcels','order_payment_requests','order_billing_charges','organization_billing_months','empty_ai_order_results'];
 
 test('order DELETE preserves source HTTP, business rows, audit and owner boundaries',async t=> {
   assert.equal(process.env.PGDATABASE,'dva_webhook_test');
@@ -80,13 +80,13 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
   function within(value,start,end,label) {
     assert.ok(Number.isFinite(Date.parse(value))&&Date.parse(value)>=start-1000&&Date.parse(value)<=end+1000,label+': '+value);
   }
-  async function audits(requestId,start,end) {
+  async function audits(requestId,start,end,action='ORDER_DELETED',target='ORDER') {
     const result=[];
     for(const side of sides) {
       const values=(await side.audit.query('SELECT * FROM audit_logs WHERE request_id=$1 ORDER BY audit_log_seq',[requestId])).rows;
       for(const row of values) {
         within(row.occurred_at,start,end,side.name+' audit time');
-        assert.equal(row.action,'ORDER_DELETED');assert.equal(row.target_type,'ORDER');
+        assert.equal(row.action,action);assert.equal(row.target_type,target);
         assert.ok(Number.isInteger(row.audit_log_seq)&&row.audit_log_seq>0);
         delete row.audit_log_seq;delete row.occurred_at;
       }
@@ -148,8 +148,10 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
       }
       Object.values(value).forEach(visit);
     }
-    const source=docs[0].paths['/api/orders/{id}'].delete;
-    assert.deepEqual(docs[1].paths['/api/orders/{id}'].delete,source);visit(source);
+    for(const path of ['/api/orders/{id}','/api/parcel-drafts/{id}']) {
+      const source=docs[0].paths[path].delete;
+      assert.deepEqual(docs[1].paths[path].delete,source,path);visit(source);
+    }
     assert.ok(Object.keys(docs[1].paths).every(path=>!path.includes('internal')));
   });
 
@@ -262,6 +264,132 @@ test('order DELETE preserves source HTTP, business rows, audit and owner boundar
     await pools.consultation.query("DELETE FROM call_sessions WHERE provider_call_id='delete-query-reread'");
     assert.equal((await send(event)).body.payload.blocked,false);
     assert.deepEqual(await rows(pools.consultation,'inbox_events'),before);
+  });
+
+  await t.test('parcel draft DELETE preserves source states, permissions, row locks, audits and snapshots',async()=>{
+    let nextDraft=40000,draftPairs=0;
+    const created=[],fixtureLocks=[],auth={Origin:origin,Cookie:cookie};
+    async function seedDraft({status='READY',call=null,retention='2032-01-01Z',deleted=false,source=null}={}){
+      const id=++nextDraft,uuid=randomUUID(),phone='010'+String(id).padStart(8,'0');created.push(id);
+      for(const side of sides){
+        if(call&&call!=='missing')await side.calls.query(
+          `INSERT INTO call_sessions(call_session_seq,provider_call_id,caller_phone_number,incoming_at,registered_at,started_at,ended_at,deleted_at,
+            order_intake_enabled,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result)
+            OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,'2032-01-01Z',CASE WHEN $5 THEN '2032-01-01Z'::timestamptz ELSE NULL END,
+            CASE WHEN $5 THEN '2032-01-02Z'::timestamptz ELSE NULL END,$6,$7,
+            CASE WHEN $8 THEN '2032-01-02Z'::timestamptz ELSE NULL END,CASE WHEN $8 THEN '{}'::jsonb ELSE NULL END,
+            CASE WHEN $8 THEN '2032-01-03Z'::timestamptz ELSE NULL END,CASE WHEN $8 THEN '{}'::jsonb ELSE NULL END)`,
+          [id,'draft-delete-'+id,phone,call==='no-incoming'?null:call==='expired'?'2000-01-01Z':'2032-01-01Z',
+            ['ended','finalized'].includes(call),call==='deleted'?'2032-01-02Z':null,call!=='disabled',call==='finalized']);
+        // Keep the independent retention worker from purging rows that the DELETE cannot lock.
+        if(call==='expired'){
+          const lock=await side.calls.connect();await lock.query('BEGIN');
+          await lock.query('SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR KEY SHARE',[id]);fixtureLocks.push(lock);
+        }
+        const party={name:'원문 그대로 보관',phoneNumber:'01012345678',roadAddress:'서울 도로',jibunAddress:'서울 지번',detailAddress:null,dongName:null,postalCode:'00123'};
+        const parcel={origin:party,destination:party,originPin:null,documentCount:1,smallBoxCount:0,mediumBoxCount:0,bigBoxCount:0,itemPrice:10000,notifiedPrice:3500,clientComment:'<보존> & %_',otherItemDescription:'문서'};
+        await side.db.query(`INSERT INTO order_parcel_drafts(draft_seq,reserved_order_seq,call_session_seq,caller_phone_number,created_by_admin_user_seq,client_parcel_id,
+          creation_payload,parcel_data,status,version,source_draft_seq,order_seq,order_parcel_seq,created_at,updated_at,retention_started_at,deleted_at)
+          OVERRIDING SYSTEM VALUE VALUES($1,$2,$3,$4,$5,$6,'{"original":"보존"}',$7,$8,23,$9,$10,$11,'2032-01-01Z','2032-01-02Z',$12,$13)`,
+          [id,300000+id,call?id:null,phone,call?null:1,uuid,parcel,status,source,status==='CONVERTED'?1001:null,status==='CONVERTED'?400000+id:null,retention,deleted?'2032-01-03Z':null]);
+        if(['2000-01-01Z','2020-01-01Z'].includes(retention)){
+          const lock=await side.db.connect();await lock.query('BEGIN');
+          await lock.query('SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1 FOR KEY SHARE',[id]);fixtureLocks.push(lock);
+        }
+      }
+      return id;
+    }
+    async function send(side,id,headers,requestId){
+      const response=await fetch(side.url+'/api/parcel-drafts/'+id,{method:'DELETE',headers:{...headers,'X-Request-Id':requestId},signal:AbortSignal.timeout(25000)});
+      const body=await response.text();assert.equal(response.headers.get('x-request-id'),requestId);
+      return {status:response.status,body:body?JSON.parse(body):null,cache:response.headers.get('cache-control')};
+    }
+    async function compareDraft(id,expected,headers=auth){
+      const before=await Promise.all(sides.map(side=>business(side.db)));
+      const calls=await Promise.all(sides.map(side=>rows(side.calls,'call_sessions')));
+      const requestId=randomUUID(),start=Date.now(),results=[];
+      for(const side of sides)results.push(await send(side,id,headers,requestId));
+      const end=Date.now();
+      for(let i=0;i<2;i++)assert.equal(results[i].status,expected,sides[i].name+' draft '+id+' '+JSON.stringify(results[i]));
+      assert.deepEqual(results[1],results[0]);draftPairs++;
+      const audit=await audits(requestId,start,end,'PARCEL_DRAFT_DELETED','ORDER_PARCEL_DRAFT');
+      for(let i=0;i<2;i++){
+        const after=await business(sides[i].db);
+        assert.deepEqual(await rows(sides[i].calls,'call_sessions'),calls[i],'draft deletion never changes calls');
+        for(const table of tables.filter(table=>table!=='order_parcel_drafts'))assert.deepEqual(after[table],before[i][table],'preserve '+table);
+        const draft=after.order_parcel_drafts.find(row=>row.draft_seq===id);
+        if(expected===204){
+          const old=before[i].order_parcel_drafts.find(row=>row.draft_seq===id);
+          within(draft.deleted_at,start,end,'draft deleted_at');within(draft.updated_at,start,end,'draft updated_at');
+          assert.deepEqual(draft,{...old,deleted_at:draft.deleted_at,updated_at:draft.updated_at,version:old.version+1});
+          assert.deepEqual(after.order_parcel_drafts.filter(row=>row.draft_seq!==id),before[i].order_parcel_drafts.filter(row=>row.draft_seq!==id),'parent, resumed child and every other draft unchanged');
+          const hidden=await fetch(sides[i].url+'/api/parcel-drafts/'+id,{headers:{Cookie:cookie}});assert.equal(hidden.status,404);
+          assert.equal(audit.length,1);assert.equal(audit[0].result,'SUCCESS');
+        }else assert.deepEqual(after,before[i],'rejected deletion rolls back every business row');
+      }
+      return {response:results[0],audit};
+    }
+    try {
+      for(const status of ['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'])await compareDraft(await seedDraft({status}),204);
+      for(const call of ['active','ended','disabled'])for(const status of ['READY','EDITING']){
+        const result=await compareDraft(await seedDraft({call,status}),409);assert.equal(result.response.body.error.code,'INVALID_STATE');
+      }
+      for(const call of ['finalized','missing','deleted','expired','no-incoming'])await compareDraft(await seedDraft({call}),204);
+      for(const status of ['INCOMPLETE','CONVERTED','CANCELLED','RESUMED'])await compareDraft(await seedDraft({call:'active',status}),204);
+      for(const input of [{deleted:true},{retention:'2000-01-01Z'},{status:'INCOMPLETE',retention:'2020-01-01Z'}])await compareDraft(await seedDraft(input),404);
+      const superseded=await seedDraft({status:'INCOMPLETE',call:'active'});
+      for(const side of sides)await side.calls.query(`INSERT INTO call_sessions(provider_call_id,caller_phone_number,incoming_at,registered_at,started_at,ended_at,order_completion_received_at,order_completion_payload,order_finalized_at,order_finalization_result)
+        VALUES('draft-delete-newer','010'||lpad($1::text,8,'0'),'2033-01-01Z','2033-01-01Z','2033-01-01Z','2033-01-02Z','2033-01-02Z','{}','2033-01-03Z','{}')`,[superseded]);
+      await compareDraft(superseded,404);
+      const parent=await seedDraft({status:'RESUMED'}),child=await seedDraft({source:parent});
+      await compareDraft(parent,204);await compareDraft(child,204);await compareDraft(child,404);
+      for(const headers of [{Origin:origin},{Origin:origin,Authorization:'Bearer '+process.env.CUSTOMER_AUTH_TOKEN},{Origin:origin,Cookie:'dva_session=bad'}])await compareDraft(await seedDraft(),401,headers);
+      const guarded=await seedDraft();await compareDraft(guarded,403,{Cookie:cookie});await compareDraft(guarded,403,{...auth,Origin:'https://untrusted.invalid'});
+      for(const id of ['0','-1','1.5','2147483648','abc'])await compareDraft(id,400);await compareDraft(2147483647,404);
+      for(const [n,role]of ['OPERATOR','SUPERVISOR','SYSTEM_ADMIN'].entries()){
+        const result=await compareDraft(await seedDraft(),204,{Origin:origin,Cookie:'dva_session='+['a','b','c'][n].repeat(64)});
+        assert.equal(result.audit[0].actor_seq,n+1,role);
+      }
+      for(const target of ['draft','call']){
+        const id=await seedDraft({status:'CANCELLED',call:'active'}),locks=[];
+        try {
+          for(const side of sides){const client=await(target==='draft'?side.db:side.calls).connect();await client.query('BEGIN');
+            await client.query(target==='draft'?'SELECT 1 FROM order_parcel_drafts WHERE draft_seq=$1 FOR UPDATE':'SELECT 1 FROM call_sessions WHERE call_session_seq=$1 FOR UPDATE',[id]);locks.push(client);}
+          const result=await compareDraft(id,409);assert.equal(result.response.body.error.code,'REQUEST_IN_PROGRESS');
+        }finally{for(const client of locks){await client.query('ROLLBACK');client.release();}}
+        await compareDraft(id,204);
+      }
+      const concurrent=await seedDraft();
+      for(const side of sides){
+        const start=Date.now(),before=(await side.db.query('SELECT to_jsonb(d) AS row FROM order_parcel_drafts d WHERE draft_seq=$1',[concurrent])).rows[0].row;
+        const result=await Promise.all([send(side,concurrent,auth,randomUUID()),send(side,concurrent,auth,randomUUID())]);
+        assert.deepEqual(result.map(value=>value.status).sort(),[204,404]);
+        const after=(await side.db.query('SELECT to_jsonb(d) AS row FROM order_parcel_drafts d WHERE draft_seq=$1',[concurrent])).rows[0].row;
+        within(after.deleted_at,start,Date.now(),'concurrent draft deletion');within(after.updated_at,start,Date.now(),'concurrent draft update');
+        assert.deepEqual(after,{...before,version:before.version+1,deleted_at:after.deleted_at,updated_at:after.updated_at});
+        assert.deepEqual((await side.audit.query("SELECT result FROM audit_logs WHERE action='PARCEL_DRAFT_DELETED' AND target_seq=$1 ORDER BY result",[concurrent])).rows,[{result:'FAILED'},{result:'SUCCESS'}]);
+      }
+      const failed=await seedDraft();
+      for(const side of sides)await side.audit.query(`CREATE FUNCTION reject_draft_delete_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+        IF NEW.action='PARCEL_DRAFT_DELETED' AND NEW.result='SUCCESS' THEN RAISE EXCEPTION 'fixture-draft-audit-failure'; END IF;
+        RETURN NEW; END $$; CREATE TRIGGER reject_draft_delete_audit BEFORE INSERT ON audit_logs FOR EACH ROW EXECUTE FUNCTION reject_draft_delete_audit();`);
+      try{const result=await compareDraft(failed,500);assert.equal(result.audit[0].result,'FAILED');}
+      finally{for(const side of sides)await side.audit.query('DROP TRIGGER reject_draft_delete_audit ON audit_logs; DROP FUNCTION reject_draft_delete_audit();');}
+      await compareDraft(failed,204);
+      const command={id:failed,adminId:1,requestId:randomUUID()};
+      for(const [url,event]of [
+        ['http://consultation-app:3004/internal/parcel-draft-delete',{eventId:randomUUID(),source:'order',eventType:'ParcelDraftDeletionRequested',payload:{command,orderAddress:null}}],
+        ['http://order-app:3002/internal/parcel-draft-delete',{eventId:randomUUID(),source:'consultation',eventType:'ParcelDraftDeletionRequested',payload:{command,phase:'delete',callFinalized:null,consultationAddress:null}}],
+      ]){
+        const sendPrivate=(value,token=process.env.CUSTOMER_AUTH_TOKEN)=>fetch(url,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify(value)});
+        assert.equal((await sendPrivate(event,'wrong')).status,403);
+        for(const bad of [{...event,source:'customer'},{...event,payload:{...event.payload,sql:'DELETE'}},{...event,payload:{...event.payload,command:{...command,adminId:null}}}])assert.equal((await sendPrivate(bad)).status,422);
+      }
+      console.log('PARCEL DRAFT DELETE HTTP PAIRS: '+draftPairs+'; concurrency, audit rollback and both owner locks compared');
+    }finally{
+      for(const lock of fixtureLocks){await lock.query('ROLLBACK');lock.release();}
+      for(const side of sides){await side.db.query('DELETE FROM order_parcel_drafts WHERE draft_seq=ANY($1::int[])',[created]);await side.calls.query("DELETE FROM call_sessions WHERE provider_call_id LIKE 'draft-delete-%'");}
+    }
   });
 
   assert.deepEqual(await rows(pools.customer,'customers'),preservedOwners.customer,'delete must not mutate customer-owned data');
