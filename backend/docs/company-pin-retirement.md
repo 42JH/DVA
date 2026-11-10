@@ -4,7 +4,7 @@
 
 ## API와 데이터
 
-- 기업 공유 배송지는 계속 활성 사원의 현재 고객 주소다. DIR-01의 AI Bearer 인증과 관리자 사원 검색 분리는 [검색 계약](../../docs/api/company-directory.md)·[관리자 검색](../../docs/api/company-members-search.md)을 따른다.
+- 기업 공유 배송지는 계속 활성 사원의 현재 고객 주소다. DIR-01은 관리자 세션 또는 기존 AI Bearer 인증을 허용한다. 주소 없는 사원·사번 조회에는 별도 관리자 사원 검색을 사용한다. [검색 계약](../../docs/api/company-directory.md)·[관리자 검색](../../docs/api/company-members-search.md)을 따른다.
 - 기업 PIN 등록·수정·목록 API는 계속 404다. 새 주문·새 상세의 COMPANY originPin은 400이다. 기업 배송지 선택은 주소 사본을 전송한다.
 - 과거 주문의 COMPANY originPin 번호와 주소 사본, 결제·배송·감사는 유지한다. 주문 조회·최종 접수는 없어진 테이블을 조회하지 않는다. 결제 자격·기존 주문 권한·버전·처리 중 보호는 계속 검증한다.
 - 기존 상세의 같은 COMPANY 참조·같은 출발지 주소를 유지하는 PATCH는 허용한다. 주소를 바꾸면 `originPin: null` 또는 유효한 PERSONAL로 전환한다. COMPANY 번호 변경·다른 상세에 복사·신규 선택은 400이다.

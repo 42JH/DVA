@@ -292,7 +292,7 @@ test('company rename, deactivation, address removal and membership unlinking aff
   assert.deepEqual((await result(await search({ q: renamed }))).data, []);
 });
 
-test('administrator cookies cannot replace the directory service credential', async () => {
+test('administrator sessions and AI Bearer return the same directory while invalid sessions cannot fall back', async () => {
   const c = await company();
   await recipient(c);
   const authenticated = await result(await search({ q: c.name }));
@@ -300,11 +300,35 @@ test('administrator cookies cannot replace the directory service credential', as
   await error(await search({ q: c.name }, { Authorization: 'Bearer wrong' }), 401, 'UNAUTHORIZED');
   for (const role of ['OPERATOR', 'SUPERVISOR', 'SYSTEM_ADMIN']) {
     const headers = await account(role);
-    await error(await search({ q: c.name }, headers), 401, 'UNAUTHORIZED');
+    assert.deepEqual(await result(await search({ q: c.name }, headers)), authenticated);
     assert.deepEqual(
       await result(await search({ q: c.name }, { ...headers, ...businessHeaders() })),
       authenticated,
     );
+    assert.deepEqual(
+      await result(await search({ q: c.name }, { ...headers, Authorization: 'Bearer wrong' })),
+      authenticated,
+    );
+  }
+  for (const Cookie of [
+    'dva_session=bad',
+    'dva_session=' + 'f'.repeat(64),
+    `${adminHeaders.Cookie}; ${adminHeaders.Cookie}`,
+  ])
+    await error(await search({ q: c.name }, { Cookie, ...businessHeaders() }), 401, 'UNAUTHORIZED');
+  const { ConfigService } = require('@nestjs/config');
+  const config = app.get(ConfigService);
+  const token = config.get('AI_BUSINESS_TOKEN');
+  try {
+    config.set('AI_BUSINESS_TOKEN', '');
+    assert.deepEqual(await result(await search({ q: c.name }, adminHeaders)), authenticated);
+    await error(
+      await search({ q: c.name }, { Authorization: 'Bearer ' + token }),
+      503,
+      'DEPENDENCY_UNAVAILABLE',
+    );
+  } finally {
+    config.set('AI_BUSINESS_TOKEN', token);
   }
 });
 
