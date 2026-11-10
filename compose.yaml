@@ -57,7 +57,7 @@ services:
       AI_INSIGHTS_TOKEN: ${AI_INSIGHTS_TOKEN:-}
       CALL_ANALYSIS_OPENAI_API_KEY: ${CALL_ANALYSIS_OPENAI_API_KEY:-}
       CALL_ANALYSIS_CONCURRENCY: ${CALL_ANALYSIS_CONCURRENCY:-2}
-      DVER_API_URL: ${DVER_API_URL:-https://public-n8n.dvercorp.co.kr:47514/webhook/parcel}
+      DVER_API_URL: ${DVER_API_URL:-https://purple-wood-25a4.summer2.workers.dev}
       DVER_API_KEY: ${DVER_API_KEY:-}
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       S3_RECORDINGS_BUCKET: ${S3_RECORDINGS_BUCKET:-}

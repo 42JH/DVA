@@ -189,7 +189,7 @@ test('the actual process exits before listening when a required setting is missi
 
 test('Dver requires HTTPS, rejects credential-bearing URLs and accepts empty keys as disabled', () => {
   const disabled = validateEnvironment(valid);
-  assert.equal(disabled.DVER_API_URL, 'https://public-n8n.dvercorp.co.kr:47514/webhook/parcel');
+  assert.equal(disabled.DVER_API_URL, 'https://purple-wood-25a4.summer2.workers.dev');
   assert.equal(disabled.DVER_API_KEY, undefined);
   assert.equal(validateEnvironment({ ...valid, DVER_API_KEY: '' }).DVER_API_KEY, undefined);
   assert.equal(
