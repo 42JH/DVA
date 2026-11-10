@@ -6,7 +6,6 @@ import {
   type PromptFields,
   type PromptKey,
   type Speed,
-  type VersionChange,
   type VersionStatus,
   type WaitTime,
 } from './api/personaApi'
@@ -86,20 +85,4 @@ export function unsupportedText(e: unknown): string | null {
   return fields.length
     ? `AI가 아직 지원하지 않는 설정입니다: ${fields.join(' · ')}. 다른 값을 골라 주세요.`
     : null
-}
-
-/** 버전 히스토리 한 줄 요약 — 서버에 요약 칸이 없어 바로 앞 버전과 비교해 만듦: '프롬프트 수정, 발화 속도 보통 → 빠르게' */
-export function versionSummary(c: VersionChange): string {
-  if (c.first) return '처음 만듦'
-  const voice = (v: string) => v || DEFAULT_VOICE_LABEL
-  return (
-    [
-      c.prompt && '프롬프트 수정',
-      c.voice && `목소리 ${voice(c.voice[0])} → ${voice(c.voice[1])}`,
-      c.speed && `발화 속도 ${SPEED_CHOICE[c.speed[0]]} → ${SPEED_CHOICE[c.speed[1]]}`,
-      c.waitTime && `말 끝 기다리기 ${WAIT_CHOICE[c.waitTime[0]]} → ${WAIT_CHOICE[c.waitTime[1]]}`,
-    ]
-      .filter(Boolean)
-      .join(', ') || '이름 수정' // 프롬프트 · 음성이 같으면 이름만 바뀐 버전
-  )
 }

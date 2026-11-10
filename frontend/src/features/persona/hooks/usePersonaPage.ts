@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fmtClock, fmtDate, fmtShortDate } from '@/shared/lib/format'
-import type { TagKind } from '@/shared/ui'
+import { fmtShortDate } from '@/shared/lib/format'
 import { ApiError } from '@/shared/api/client'
 import { useSession } from '@/shared/auth/useSession'
 import {
@@ -11,7 +10,6 @@ import {
   SPEED_LABEL,
   VERSION_TAG,
   WAIT_LABEL,
-  versionSummary,
 } from '@/features/persona/labels'
 import type { TestCallTarget } from '@/features/persona/hooks/useTestCall'
 import type { EditTarget } from '@/features/persona/hooks/usePromptEditor'
@@ -26,8 +24,6 @@ import {
   type PromptKey,
 } from '@/features/persona/api/personaApi'
 
-type PanelTab = 'persona' | 'history'
-
 /** 오른쪽 '페르소나' 탭 한 칸 */
 export interface PersonaItem {
   personaSeq: number
@@ -38,18 +34,14 @@ export interface PersonaItem {
   canUse: boolean // [사용하기] (쓰는 중 · 대기 중이 아닐 때. 한 번도 적용 안 했으면 누르면 안내)
   lines: string[] // 'marin · 속도 보통' · '기다리기 보통'
   versionLine: string // '적용 버전 v6 · v7 저장됨' · '마지막 적용 v3' · '적용 버전 없음 · v1 저장됨'
+  history: PersonaHistory | null // 고른 카드에만 — 버전 목록은 고른 상담가 것만 불러옴 (11/10)
 }
 
-/** 오른쪽 '버전 히스토리' 탭 한 칸 */
-export interface VersionItem {
-  version: number
-  tags: { label: string; kind: TagKind }[] // 저장됨 · 적용 중 · 음성 설정
-  date: string // '2026-10-02' (날짜 형식)
-  summary: string
-  author: string
-  selected: boolean
-  canApply: boolean // [적용]은 맨 위 '저장됨'(초안 등)에만 (11/02 결정 — 지난 버전은 시험 통화만)
-  testResult: string | null // '완료 · 01:12' — 시험 통화를 해 본 버전
+/** 고른 카드의 히스토리 드롭다운 + [시험 통화] · [적용] (11/10 — 버전 기록 목록 대신) */
+interface PersonaHistory {
+  options: { value: string; label: string }[] // 'v7 · 저장됨 · 11.09' (높은 번호가 위)
+  value: string // 보고 있는 버전
+  canApply: boolean // [적용]은 맨 위 '저장됨'(초안 등)을 볼 때만 (11/02 결정 — 지난 버전은 시험 통화만)
   canApplyNow: boolean // 시험 통화를 끝낸 버전만 [적용]이 눌림 (10/31 결정)
 }
 
@@ -98,8 +90,6 @@ const loadPanelOpen = () => {
   }
 }
 
-const HISTORY_FIRST = 6 // 버전 히스토리는 앞 6개, 나머지는 '이전 버전 n개 더 보기'
-
 /** 왼쪽 '버전 비교' 카드 (07_페르소나관리_버전비교) — v4 [적용 중] → v5 [저장됨]
  * 적용본 ↔ 맨 위(수정 중인 초안)만 (11/02 결정 — 고르는 드롭다운 없음) */
 interface CompareView {
@@ -129,10 +119,8 @@ interface CompareView {
  * 오른쪽에서 페르소나 · 버전을 고르면 왼쪽에 그 프롬프트. 처음엔 통화에 사용 중인 페르소나의 맨 위 버전
  * [수정] = 늘 맨 위(초안이 있으면 초안, 없으면 HEAD)에서 시작 · [저장] = 초안 덮어쓰기 · [적용] = 확정 + 적용 요청 · 지난 버전은 보기 + 시험 통화 */
 export function usePersonaPage() {
-  const [tab, setTab] = useState<PanelTab>('persona')
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 사용 중인 페르소나
   const [version, setVersion] = useState<number | null>(null) // null = 맨 위(초안 또는 HEAD)
-  const [showAll, setShowAll] = useState(false)
   const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
@@ -238,14 +226,26 @@ export function usePersonaPage() {
   const beginEdit = (mode: 'prompt' | 'voice') => {
     setComparing(false)
     setVersion(null)
-    setTab('history')
     setEditing(mode)
+  }
+
+  const history = (v: PersonaVersion): PersonaHistory => {
+    const canApply = canManage && v === latest && v.status === 'SAVED'
+    return {
+      options: all.map((x) => ({
+        value: String(x.version),
+        label: [`v${x.version}`, VERSION_TAG[x.status]?.label, fmtShortDate(x.savedAt)]
+          .filter(Boolean)
+          .join(' · '),
+      })),
+      value: String(v.version),
+      canApply,
+      canApplyNow: canApply && testedSec(v.version) !== undefined,
+    }
   }
 
   return {
     demo: PERSONA_DEMO, // 시연 모드 — 저장 · 적용이 실서버에 안 감
-    tab,
-    setTab,
     isLoading: personas.isPending || (persona !== null && versions.isPending),
     error: personas.error || versions.error ? '불러오지 못했습니다. 다시 시도해 주세요.' : null,
 
@@ -328,15 +328,11 @@ export function usePersonaPage() {
       setAdding(false)
       setPersonaSeq(seq)
       setVersion(null)
-      setTab('persona')
     },
 
     testCall,
-    // 버전 칸 [시험 통화] — 그 버전을 고르고 통화 창 (지난 버전도 가능, 11/02)
-    startTestCall: (v: number) => {
-      setVersion(v)
-      setTesting(v)
-    },
+    // 카드 [시험 통화] — 드롭다운에서 보고 있는 버전으로 (지난 버전도 가능, 11/02)
+    startTestCall: () => viewing && setTesting(viewing.version),
     endTestCall: (seconds: number) => {
       if (persona && testing !== null)
         setTested((t) => ({ ...t, [`${persona.personaSeq}-${testing}`]: seconds }))
@@ -382,39 +378,16 @@ export function usePersonaPage() {
       versionLine: `${p.inUse ? '적용 버전' : '마지막 적용'} v${p.appliedVersion}${
         p.savedVersion ? ` · v${p.savedVersion} 저장됨` : ''
       }`,
+      history: p.personaSeq === persona?.personaSeq && viewing ? history(viewing) : null,
     })),
-    // 페르소나를 고르면 패널이 그 페르소나의 버전 히스토리로 넘어감 (11/02 사용자)
     selectPersona: (seq: number) => {
       setPersonaSeq(seq)
       setVersion(null)
-      setShowAll(false)
       setComparing(false) // 다른 페르소나 버전끼리는 비교하지 않음
-      setTab('history')
     },
-
-    versions: (showAll ? all : all.slice(0, HISTORY_FIRST)).map((v): VersionItem => {
-      const canApply = canManage && v === latest && v.status === 'SAVED'
-      return {
-        version: v.version,
-        tags: [
-          ...(VERSION_TAG[v.status] ? [VERSION_TAG[v.status]!] : []),
-          ...(v.voiceOnly ? [{ label: '음성 설정', kind: 'gray' as TagKind }] : []),
-        ],
-        date: fmtDate(v.savedAt),
-        summary: versionSummary(v.changes),
-        author: v.author,
-        selected: v.version === viewing?.version,
-        canApply,
-        testResult:
-          testedSec(v.version) !== undefined ? `완료 · ${fmtClock(testedSec(v.version)!)}` : null,
-        canApplyNow: canApply && testedSec(v.version) !== undefined,
-      }
-    }),
-    moreVersions: showAll ? 0 : Math.max(0, all.length - HISTORY_FIRST),
-    showAllVersions: () => setShowAll(true),
     // 다른 버전을 고르면 비교를 닫고 그 버전을 봄 (비교는 정해진 두 버전뿐)
-    selectVersion: (v: number) => {
-      setVersion(v)
+    selectVersion: (v: string) => {
+      setVersion(Number(v)) // 드롭다운 값은 문자열
       setComparing(false)
     },
   }
