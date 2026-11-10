@@ -5,12 +5,14 @@
 
 import asyncio
 import logging
+import time
 
 from pydantic import Field
 
 from app.domain.candidates import offer
 from app.domain.state import DOCUMENT_ITEM_PRICE, Items, Place, Source
 from app.integrations.backend.gateway import BackendFailure
+from app.observability.trace import observe_latency
 from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
@@ -45,19 +47,33 @@ def _from_be(p: BEPlace, source: Source) -> Place:
 
 
 @model_tool("find_destination",
-            "주소록·이전 도착지와 기업·사원 배송지에서 고객이 말한 받는 곳을 찾는다. 기업명은 organization, 부서는 department. "
+            "주소록·이전 도착지와 기업·사원 배송지에서 고객이 말한 받는 곳을 찾는다. 상호·건물명·도로명은 place에(실제 주소로 바꿔 "
+            "주소록과 대조하고, 없으면 그 주소로 새 받는 분을 기록한다). 기업명은 organization, 부서는 department. "
             "고객이 말한 문자열만 채우고 나머지는 null.", DestinationArgs)
 async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutcome:
     said = {k: v.strip() for k, v in args.model_dump().items() if v and v.strip()}
     if not said:
         return ToolOutcome("needs_input", "NOTHING_TO_RECORD")
     name, place, detail = said.get("name"), said.get("place"), said.get("detail")
+    company = said.get("organization") or said.get("department")
     places = list(ctx.state.customer.places)
-    if not said.get("organization") and not said.get("department"):
-        be = [_to_be(p) for p in places]
+    be = [_to_be(p) for p in places]
+    # 상호·건물명·도로명 → 실제 주소(주소DB, 없으면 카카오 키워드). 핀 문자열은 상호를 담지 않으므로 주소로 대조한다
+    # (통화 67d29423: "다이소 구미 인동점"이 낱말 겹침으로 다른 건물의 핀 3건을 불러왔다)
+    resolved = await _resolve(ctx, place) if place and not company else None
+    if resolved and resolved.status in ("confirmed", "ambiguous"):
+        found = match_places(be, name, resolved.address, detail)  # 도로명·건물번호가 맞는 핀만(번호가 다르면 제외)
+        if found:  # 기존 수신인: 확인을 거친다
+            return await _offer(ctx, [places[be.index(p)] for p in found])
+        return await _new_receiver(ctx, name, detail or resolved.detail, resolved)
+    if not company:  # 주소로 못 바꾼 말(지역·약칭): 들은 낱말로 주소록 대조
         found = match_places(be[:ctx.pin_recent_count], name, place, detail) or match_places(be, name, place, detail)
         if found:  # 최근 N개에서 먼저
             return await _offer(ctx, [places[be.index(p)] for p in found])
+    if resolved and resolved.status == "region_needed":
+        return ToolOutcome("needs_input", "ADDRESS_REGION_NEEDED", {"found": 0}, [
+            {"field": "receiver_address", "reason": "ADDRESS_REGION_NEEDED", "regions": list(resolved.alternatives),
+             "heard": place}])
     query = " ".join(said[k] for k in ("organization", "department", "name", "place", "detail") if k in said)
     page = await ctx.backend.read("company_search", ctx.backend.api.search_company_places, query,
                                   limit=ctx.max_pin_options + 1)
@@ -69,6 +85,42 @@ async def find_destination(ctx: ToolContext, args: DestinationArgs) -> ToolOutco
     ask = "receiver_place" if name and not place else "receiver_name" if place and not name else None
     return ToolOutcome("needs_input", "DEST_NONE", {"found": 0},
                        [{"field": ask, "reason": "DEST_NONE"}] if ask else [])
+
+
+async def _resolve(ctx: ToolContext, heard: str):
+    if ctx.address is None:
+        return None
+    t0 = time.monotonic()
+    try:
+        return await ctx.address.resolve(heard)
+    finally:
+        observe_latency("ADDRESS_LOOKUP", (time.monotonic() - t0) * 1000)
+
+
+async def _new_receiver(ctx: ToolContext, name: str | None, detail: str | None, resolved) -> ToolOutcome:
+    """그 주소에 저장된 받는 분이 없음: 주소·geo는 해석 결과로, 성함은 고객 말로(없으면 missing이 묻는다).
+    주소 출처는 RESOLVER — PIN이면 save_offer가 새 받는 분 핀을 저장하지 않는다."""
+    async with ctx.lock:
+        s = ctx.state
+        s.candidates = None
+        if name:
+            s.record("receiver_name", name, Source.CUSTOMER)
+        before = s.field_of("receiver_address")
+        changed = before.valid and before.value != resolved.address
+        s.record("receiver_address", resolved.address, Source.RESOLVER)
+        if resolved.status == "ambiguous":
+            s.field_of("receiver_address").candidates = resolved.alternatives  # P6: 나머지 후보 보관
+        if detail:
+            s.record("receiver_address_detail", detail, Source.CUSTOMER)
+        elif changed:
+            s.clear("receiver_address_detail")
+        s.current.receiver_geo = resolved.geo
+        s.bump()
+        summary = state_summary(s, ctx.policy)
+    return ToolOutcome("ok", "DEST_NEW_RECEIVER", {
+        "address": resolved.address,
+        "guidance": "주소록에 없는 받는 곳. 주소를 그 주소로 기록했으니 받는 분 성함·주소를 확인하고 빠진 항목만 묻는다."},
+        summary=summary)
 
 
 async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:

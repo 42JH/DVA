@@ -11,7 +11,7 @@
 | 모델 도구(strict) | 인수 | 결과 |
 |---|---|---|
 | `record_fields` | 보내는 분 성함·주소·상세, 받는 분 성함·연락처·주소·상세, 수량 4종·기타 물품, 물품 가액, 요청사항, 수거 시각(들은 항목만) | ok / needs_input(`PHONE_INVALID_DIGITS`, `PICKUP_TOO_SOON`·`PICKUP_IN_PAST`·`PICKUP_INVALID_FORMAT`, `ADDRESS_NOT_FOUND`, `ADDRESS_REGION_NEEDED`(같은 주소가 여러 시군구에 있음 — needs에 `regions`·`heard`, 2026-11-05), `ITEM_UNSPECIFIED`, `NOTHING_TO_RECORD`, `RESULT_SUPERSEDED`). facts: recorded·changed·cleared·auto_selected(P6)·geo_missing·phones_to_read·readback(되읽기 gate가 열렸을 때 읽을 값, 발신번호·저장 상세주소 제외) |
-| `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
+| `find_destination` | name·place·detail·organization·department | needs_choice(이름표, 후보는 `state.candidates`) / ok(`DEST_NEW_RECEIVER`: place를 실제 주소로 바꾼 뒤 그 주소의 핀이 없으면 받는 곳 주소·성함 기록) / needs_input(`ADDRESS_REGION_NEEDED`) / needs_input(`DEST_NONE`·`DEST_TOO_MANY`) / unavailable(BE) |
 | `lookup_orders` | receiver_name, other_customer | ok(1건 → `state.selected_order`) / needs_choice(여러 건) / needs_input(`ORDER_NOT_FOUND_BY_NAME`) / rejected(`ORDER_OTHER_CUSTOMER`: 다른 번호·다른 고객 접수, BE 호출 없음) / unavailable(`CALL_NOT_REGISTERED`). 조회 결과 facts에 `scope`(이 번호로 접수된 택배만) |
 | `search_manual` | question | ok(answerable, context; `KB_NO_EVIDENCE`·`KB_LOW_SCORE`) / unavailable(`KB_UNAVAILABLE`·`KB_TIMEOUT`) |
 | `get_state` | 없음 | ok + 상태 요약(아무것도 바꾸지 않음) |
