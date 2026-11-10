@@ -118,22 +118,7 @@ class ParcelItems(_Strict):
 
 
 class Phone(_Strict):
-    mobile_prefix: str
-    mobile_digits: int = Field(gt=0)
-    domestic_min_digits: int = Field(gt=0)
-    domestic_max_digits: int = Field(gt=0)
-    service_prefixes: tuple[str, ...] = Field(min_length=1)
-    service_digits: int = Field(gt=0)
-
-    @model_validator(mode="after")
-    def valid_format(self):
-        if not self.mobile_prefix.startswith("0") or not self.mobile_prefix.isdigit():
-            raise ValueError("휴대전화 접두번호 오류")
-        if len(self.mobile_prefix) > self.mobile_digits or self.domestic_min_digits > self.domestic_max_digits:
-            raise ValueError("전화번호 자릿수 오류")
-        if any(not p.isdigit() or len(p) > self.service_digits for p in self.service_prefixes):
-            raise ValueError("대표번호 접두번호 오류")
-        return self
+    digits: int = Field(ge=2)  # 0 + 한 자리 이상
 
 
 class Reask(_Strict):

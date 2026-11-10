@@ -10,7 +10,7 @@ from conftest import CALLER, GEO, INCOMING_AT, run
 
 from app.address.gazetteer import AddressDB
 from app.address.matcher import correct
-from app.domain.candidates import apply_pick
+from app.domain.candidates import apply_pick, offer
 from app.domain.rules import normalize_phone, parse_pickup
 from app.domain.state import ConversationState, Customer, FieldStatus, Geo, Items, Place, Source
 from app.integrations.address import AddressService
@@ -54,9 +54,11 @@ def address(corrector, fake_kakao):
 @pytest.mark.parametrize("raw, expected", [
     ("공일공 일이삼사 오육칠팔", "01012345678"), ("공일공삼 하나하나오오사이팔", "01031155428"),
     ("공일공 일곱여덟아홉공 둘셋넷다섯", "01078902345"), ("010-1234-5678", "01012345678"),
-    ("+82 10 1234 5678", "01012345678"), ("0101234567", None), ("02-123-4567", "021234567"),
-    ("031 1234 5678", "03112345678"), ("1588-1234", "15881234"), ("일육공공 일이삼사", "16001234"),
-    ("12345", None), ("0212", None),
+    ("+82 10 1234 5678", "01012345678"), ("0101234567", None),
+    ("031 1234 5678", "03112345678"), ("12345", None), ("0212", None),
+    # BE 계약은 정확히 11자리(S15P31D109-170): 유선·대표번호·한 자리 빠진 정정·앞자리가 바뀐 11자리는 거부
+    ("02-123-4567", None), ("1588-1234", None), ("일육공공 일이삼사", None),
+    ("0112344155", None), ("일공 일이삼사 오륙칠팔이요", None),
     ("010-283-54286", "01028354286"),  # S0d 19:07: 잘못 받아쓴 번호도 11자리면 통과 — 자릿수 검사로는 못 잡고 되읽기로 잡는다
 ])
 def test_normalize_phone(raw, expected):
@@ -388,6 +390,16 @@ def test_place_resolves_to_address_then_book_confirms_or_new_receiver(corrector,
     assert out["code"] == "DEST_NEW_RECEIVER" and s.field_of("receiver_address").value == "경상북도 구미시 인동9길 8"
     # 핀과 같은 건물이면 그 받는 분을 확인
     assert call(c, "find_destination", {"place": "구미시 인동9길 7-3"})["facts"]["labels"] == ["박지점 구미시 y"]
+
+
+def test_pick_skips_saved_phone_that_breaks_be_contract():
+    """주소록에 11자리 계약 전 번호(10자리)가 남아 있으면 그 번호는 채우지 않고 다시 묻게 한다(S15P31D109-170)."""
+    old = Place("신지환", "0112344155", "서울특별시 양천구 신정이펜1로 50", "312동 403호", GEO, Source.PIN)
+    s = ConversationState(intent="order")
+    offer(s, "destination", ("신지환 양천구",), (old,))
+    assert apply_pick(s, "신지환 양천구")
+    assert s.field_of("receiver_name").value == "신지환" and s.field_of("receiver_address").valid
+    assert not s.field_of("receiver_phone").valid  # 비워 둔다 → missing에 남아 다시 묻는다
 
 
 def test_pin_labels_name_and_region_then_detail():

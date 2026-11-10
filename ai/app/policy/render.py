@@ -35,9 +35,8 @@ def render_input_rules(policy: Policy) -> str:
         f"- 현재 받는 곳별 접수 묶음(parcel)마다 소형·중형·대형 박스 합계 최대 {limits.box_total_max}개.",
         f"- 서류는 같은 묶음에서 박스와 별도로 최대 {limits.document_max}개. 서류를 박스 합계에 더하지 않습니다.",
         "- 수거 가능 범위: " + describe(rule_of(policy.pickup)) + ". 시간대는 한국 시간입니다.",
-        f"- 전화번호: 한글 숫자·국가번호 +82·구분 기호를 정리한 뒤 {phone.mobile_prefix} 시작은 "
-        f"정확히 {phone.mobile_digits}자리, 그 외 0 시작은 {phone.domestic_min_digits}~{phone.domestic_max_digits}자리. "
-        f"{'·'.join(phone.service_prefixes)} 시작 대표번호는 {phone.service_digits}자리입니다. 번호를 추측해 채우지 않습니다.",
+        f"- 전화번호: 한글 숫자·국가번호 +82·구분 기호를 정리한 뒤 0으로 시작하는 정확히 {phone.digits}자리 휴대전화 번호만 받습니다. "
+        "유선·대표번호는 받지 않습니다. 번호를 추측해 채우거나 자릿수를 맞추려고 숫자를 더하거나 빼지 않습니다.",
         "- 허용 범위 밖 값은 임의로 줄이거나 상한으로 바꾸지 않고 허용 범위를 설명한 뒤 다시 받습니다.",
     ])
 
