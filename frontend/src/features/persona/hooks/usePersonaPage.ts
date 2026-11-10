@@ -121,7 +121,7 @@ interface CompareView {
 export function usePersonaPage() {
   const [personaSeq, setPersonaSeq] = useState<number | null>(null) // null = 사용 중인 페르소나
   const [version, setVersion] = useState<number | null>(null) // null = 맨 위(초안 또는 HEAD)
-  const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // 수정 화면 (voice = 음성 창부터 열고 들어옴)
+  const [editing, setEditing] = useState<false | 'prompt' | 'voice'>(false) // prompt = 수정 화면, voice = 보기 화면 위 음성 창
   const [comparing, setComparing] = useState(false) // 왼쪽 카드 = 버전 비교
   const [testing, setTesting] = useState<number | null>(null) // 시험 통화 중인 버전
   // 시험 통화 결과 '페르소나-버전' → 걸린 초. shortcut: 시험 통화 API가 없어 화면에만 기억(새로고침하면 사라짐) — BE가 기록을 주면 그걸로
@@ -216,7 +216,6 @@ export function usePersonaPage() {
           basedOn: persona.head.version,
           draftRevision: persona.draftRevision,
           saveTo: persona.head.version + 1,
-          voiceFirst: editing === 'voice',
         }
       : null
   const canEdit =
@@ -343,7 +342,8 @@ export function usePersonaPage() {
     startCompare: () => setComparing(true),
     closeCompare: () => setComparing(false),
 
-    editing: editing !== false,
+    editing: editing === 'prompt',
+    voiceOnly: editing === 'voice',
     panelOpen,
     togglePanel: () => {
       const next = !panelOpen
@@ -356,7 +356,7 @@ export function usePersonaPage() {
     },
     editTarget,
     startEdit: () => beginEdit('prompt'),
-    // 보기 화면 [음성 세부 조절] = 음성만 바꿔도 새 버전이라 수정 화면으로 들어가며 음성 창을 엶
+    // 보기 화면 [음성 세부 조절] = 화면은 그대로 두고 음성 창만. 저장은 수정 화면 [저장]과 같은 초안 저장 (11/11 사용자)
     startVoice: () => beginEdit('voice'),
     // 저장하면 새로 생긴 버전을 보여 줌 (취소면 보던 버전 그대로)
     finishEdit: (savedVersion?: number) => {

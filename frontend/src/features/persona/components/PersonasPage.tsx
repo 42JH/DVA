@@ -4,6 +4,7 @@ import { usePersonaPage, type PersonaItem } from '@/features/persona/hooks/usePe
 import { AddPersonaModal } from './AddPersonaModal'
 import { PromptEditor } from './PromptEditor'
 import { TestCallModal } from './TestCallModal'
+import { VoiceEditor } from './VoiceEditor'
 import { PageHead } from '@/shared/ui'
 import { Badge, Btn, Icon, SelectField } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
@@ -73,6 +74,9 @@ export function PersonasPage() {
         >
           {vm.applyConfirm.note}
         </Confirm>
+      )}
+      {vm.voiceOnly && vm.editTarget && (
+        <VoiceEditor target={vm.editTarget} onDone={vm.finishEdit} />
       )}
       {vm.adding && <AddPersonaModal onDone={vm.added} onClose={vm.closeAdd} />}
       {vm.testCall && (

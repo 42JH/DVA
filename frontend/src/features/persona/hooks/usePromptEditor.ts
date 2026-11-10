@@ -27,7 +27,6 @@ export interface EditTarget {
   basedOn: number // HEAD 번호 = 서버 expectedVersion
   draftRevision: string | null // 초안의 UUID = 서버 expectedDraftRevision (초안이 없으면 null). 그새 누가 저장했으면 409
   saveTo: number // 화면 번호 = HEAD + 1. 몇 번을 저장해도 같은 번호(초안 덮어쓰기)
-  voiceFirst: boolean // 보기 화면의 [음성 세부 조절]로 들어왔으면 음성 창부터 열기
 }
 
 const SAMPLE = '받는 분 번호 공일공, 이삼사오, 육칠팔구 맞으실까요?' // 미리 듣기 문장 (와이어프레임 그대로)
@@ -43,12 +42,13 @@ export function usePromptEditor(target: EditTarget, onDone: (savedVersion?: numb
   const options = useVoiceOptions()
   const [prompt, setPrompt] = useState(target.prompt)
   const [voice, setVoice] = useState(target.voice)
-  const [voiceOpen, setVoiceOpen] = useState(target.voiceFirst)
+  const [voiceOpen, setVoiceOpen] = useState(false)
   const [askingCancel, setAskingCancel] = useState(false)
   const afterLeave = useRef<(() => void) | undefined>(undefined) // 확인 창에서 [나가기]를 누르면 할 일 (패널에서 고른 페르소나 · 버전 보기)
   const changedKeys = PROMPT_KEYS.filter((k) => prompt[k] !== target.prompt[k])
   const promptChanged = changedKeys.length > 0
-  const emptyNotice = emptyPromptNotice(prompt)
+  // 빈 칸은 프롬프트를 고칠 때만 막음 — 음성만 바꾼 저장은 프롬프트를 안 보내니 따로 저장되게 (11/11 사용자, 서버는 빈 칸 허용)
+  const emptyNotice = promptChanged ? emptyPromptNotice(prompt) : null
   const voiceChanged =
     voice.voice !== target.voice.voice ||
     voice.speed !== target.voice.speed ||
