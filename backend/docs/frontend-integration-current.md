@@ -177,7 +177,7 @@ source.onerror = () => {
 | SUBMISSION_FAILED | 자동 재시도 종료, 담당자 확인 |
 | CANCELLED         | 취소                          |
 
-화면 목록의 query는 `statusGroup`이다. `PAID` 탭은 PAID·SUBMITTING·ACCEPTED, `SUBMISSION_FAILED` 탭은 SUBMITTING_FAILED·SUBMISSION_FAILED를 포함한다. 그룹명과 각 행의 실제 status를 구분한다. 일반 주문 조회의 `status` 필터와도 섞지 않는다.
+화면 목록의 query는 `statusGroup`이다. 전체는 생략하고 COLLECTING·notPaid·PAID·ACCEPTED·SUBMISSION_FAILED·CANCELLED의 6개 그룹을 사용한다. `PAID`는 PAID·SUBMITTING·SUBMITTING_FAILED, `ACCEPTED`는 ACCEPTED, `SUBMISSION_FAILED`는 SUBMISSION_FAILED만 포함한다. `statusCounts.accepted`를 접수 완료 탭 건수로 사용하며 기존 `paid`·`submissionFailed`도 새 그룹 기준이다. 각 행의 실제 status는 유지하며 일반 주문 조회의 `status` 필터와도 섞지 않는다. [변경 명세](order-status-groups.md)를 따른다.
 
 디버 요청은 최대 10초, 첫 전송부터 10분 동안 최소 1분 간격으로 BE가 자동 재시도한다. 프론트의 refresh·재호출은 이 기한을 연장하지 않는다. 자동 재시도 중 매분 수동 API를 반복 호출하지 않는다. 명시적 재시도 버튼은 `POST /api/admin/orders/{id}/retry`이며 현재 상태를 재조회하고 409·처리 중을 구분한다. 수동 재시도도 자동 기한을 새로 열지 않는다. ACCEPTED만 접수 성공이다.
 

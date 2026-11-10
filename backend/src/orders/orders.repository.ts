@@ -211,8 +211,7 @@ export class OrdersRepository {
          OR ($5::text IS NOT NULL AND (strpos(p.origin_phone_number,$5)>0 OR strpos(p.destination_phone_number,$5)>0)))))
         AND ($2::timestamptz IS NULL OR o.created_at >= $2)
         AND ($3::timestamptz IS NULL OR o.created_at < $3)
-        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','ACCEPTED'))
-          OR ($4='SUBMISSION_FAILED' AND o.status='SUBMITTING_FAILED'))
+        AND ($4::text IS NULL OR o.status=$4 OR ($4='PAID' AND o.status IN ('SUBMITTING','SUBMITTING_FAILED')))
          AND ($6::int IS NULL OR company.organization_seq=$6)`,
       values: [
         query.q || null,
@@ -230,8 +229,9 @@ export class OrdersRepository {
     return (
       await client.query<{ data: Omit<AdminOrderStatusCountsDto, 'incomplete'> }>(
         `SELECT jsonb_build_object('all',count(*),'notPaid',count(*) FILTER(WHERE o.status='notPaid'),
-       'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','ACCEPTED')),
-       'submissionFailed',count(*) FILTER(WHERE o.status IN ('SUBMITTING_FAILED','SUBMISSION_FAILED')),
+       'paid',count(*) FILTER(WHERE o.status IN ('PAID','SUBMITTING','SUBMITTING_FAILED')),
+       'accepted',count(*) FILTER(WHERE o.status='ACCEPTED'),
+       'submissionFailed',count(*) FILTER(WHERE o.status='SUBMISSION_FAILED'),
        'cancelled',count(*) FILTER(WHERE o.status='CANCELLED')) AS data ${filter.sql}`,
         filter.values,
       )

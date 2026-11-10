@@ -319,9 +319,13 @@ test('twenty expired paid orders cannot occupy the retry batch ahead of a curren
   assert.equal((await f.pool.query("SELECT 1 FROM orders WHERE status='PAID'")).rowCount, 20);
 });
 
-test('failure tab is separate from PAID with filtered totals, pagination, all admin roles and Swagger', async () => {
+test('final failures, retrying paid orders and accepted orders use separate tabs with filtered totals and pagination', async () => {
   const marker = '실패탭-' + randomUUID();
-  const ids = [await failedOrder(marker), await failedOrder(marker)];
+  const ids = [await failedOrder(marker), await failedOrder(marker), await failedOrder(marker)];
+  await f.pool.query(
+    "UPDATE orders SET status='SUBMISSION_FAILED' WHERE order_seq=ANY($1::int[])",
+    [ids.slice(0, 2)],
+  );
   const url = `/api/admin/orders?q=${encodeURIComponent(marker)}&statusGroup=SUBMISSION_FAILED`;
   for (let actor = 0; actor < 3; actor++) {
     const response = await f.get(url + '&limit=1', actor);
@@ -330,7 +334,10 @@ test('failure tab is separate from PAID with filtered totals, pagination, all ad
     assert.equal(body.total_count, 2);
     assert.equal(body.hasNext, true);
     assert.equal(body.data.length, 1);
-    assert.equal(body.data[0].status, 'SUBMITTING_FAILED');
+    assert.equal(body.data[0].status, 'SUBMISSION_FAILED');
+    assert.equal(body.statusCounts.paid, 1);
+    assert.equal(body.statusCounts.accepted, 0);
+    assert.equal(body.statusCounts.submissionFailed, 2);
   }
   const emptyPage = await (await f.get(url + '&offset=100')).json();
   assert.equal(emptyPage.total_count, 2);
@@ -339,12 +346,21 @@ test('failure tab is separate from PAID with filtered totals, pagination, all ad
   const paid = await (
     await f.get(`/api/admin/orders?q=${encodeURIComponent(marker)}&statusGroup=PAID`)
   ).json();
-  assert.equal(paid.total_count, 0);
-  assert.deepEqual(paid.data, []);
+  assert.equal(paid.total_count, 1);
+  assert.equal(paid.data[0].orderSeq, ids[2]);
+  assert.equal(paid.data[0].status, 'SUBMITTING_FAILED');
   const all = await (await f.get(`/api/admin/orders?q=${encodeURIComponent(marker)}`)).json();
-  assert.equal(all.total_count, 2);
+  assert.equal(all.total_count, 3);
   succeed();
   for (const id of ids) assert.equal((await (await retry(id)).json()).data.status, 'ACCEPTED');
+  const accepted = await (
+    await f.get(`/api/admin/orders?q=${encodeURIComponent(marker)}&statusGroup=ACCEPTED`)
+  ).json();
+  assert.equal(accepted.total_count, 3);
+  assert.equal(accepted.statusCounts.accepted, 3);
+  assert.equal(accepted.statusCounts.paid, 0);
+  assert.equal(accepted.statusCounts.submissionFailed, 0);
+  assert.ok(accepted.data.every((order) => order.status === 'ACCEPTED'));
 });
 
 test('worker retries a failed order once per minute, preserves payment and pickup, and stops on success', async () => {
