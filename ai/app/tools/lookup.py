@@ -123,15 +123,27 @@ async def _new_receiver(ctx: ToolContext, name: str | None, detail: str | None, 
         summary=summary)
 
 
-async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:
-    chosen = found[:ctx.max_pin_options]
-    labels = pin_labels(be_places[:ctx.max_pin_options] if be_places else [_to_be(p) for p in chosen])
+def book_matches(places, name: str | None, place: str | None, detail: str | None) -> list[Place]:
+    """주소록에서 이름·장소(실제 주소 또는 들은 낱말)·상세가 맞는 핀."""
+    places = list(places)
+    be = [_to_be(p) for p in places]
+    return [places[be.index(p)] for p in match_places(be, name, place, detail)]
+
+
+def offer_destination(state, found: list[Place], max_options: int, be_places: list | None = None) -> ToolOutcome:
+    """후보를 state.candidates에 두고 이름표만 돌려준다(호출자가 잠금을 쥔다)."""
+    chosen = found[:max_options]
+    labels = pin_labels(be_places[:max_options] if be_places else [_to_be(p) for p in chosen])
     if len(set(labels)) != len(labels):  # 구별되지 않는 이름표는 번호로
         labels = [f"{i}번 {label}" for i, label in enumerate(labels, 1)]
-    async with ctx.lock:
-        offer(ctx.state, "destination", tuple(labels), tuple(chosen))
+    offer(state, "destination", tuple(labels), tuple(chosen))
     return ToolOutcome("needs_choice", "DEST_MANY" if len(chosen) > 1 else None,
                        {"found": len(found), "labels": labels})
+
+
+async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:
+    async with ctx.lock:
+        return offer_destination(ctx.state, found, ctx.max_pin_options, be_places)
 
 
 # --- lookup_orders ---

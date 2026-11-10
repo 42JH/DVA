@@ -375,6 +375,28 @@ def test_pin_labels_name_and_region_then_detail():
     assert pin_labels([_to_be(no_geo)]) == ["이영희 강남구 테헤란로"]
 
 
+def test_record_receiver_checks_address_book_without_request(corrector, fake_kakao):
+    """받는 분 성함이나 주소를 들으면 바로 주소록 핀을 확인한다. 고르면 핀 값으로, 아니면 들은 대로."""
+    pins = (place("김엄마", "대구광역시 수성구 달구벌대로 2450"), place("김철수", "서울특별시 송파구 올림픽로 300"))
+    c = ctx(address=AddressService(corrector), customer=Customer(customer_seq=12, caller_phone=CALLER, places=pins))
+    out = call(c, "record_fields", {"receiver_name": "김엄마"})
+    assert out["status"] == "needs_choice" and out["facts"]["labels"] == ["김엄마 수성구 y"]
+    assert c.state.field_of("receiver_name").value == "김엄마" and "receiver_name" in out["facts"]["recorded"]
+    assert apply_pick(c.state, "김엄마 수성구 y")
+    assert c.state.field_of("receiver_phone").value == "01098765432" and c.state.current.receiver_geo is not None
+    # 주소록에 없는 이름은 그대로 진행
+    c = ctx(address=AddressService(corrector), customer=Customer(customer_seq=12, caller_phone=CALLER, places=pins))
+    assert call(c, "record_fields", {"receiver_name": "없는분"})["status"] == "ok" and c.state.candidates is None
+    # 이미 들은 성함이 핀과 다르면 주소가 같아도 그 핀을 권하지 않는다
+    assert call(c, "record_fields", {"receiver_address": "송파구 올림픽로 삼백"})["status"] == "ok"
+    # 성함 전에 주소를 들으면 실제 주소로 대조: 같은 건물이면 확인, 다른 건물번호면 그대로
+    c = ctx(address=AddressService(corrector), customer=Customer(customer_seq=12, caller_phone=CALLER, places=pins))
+    out = call(c, "record_fields", {"receiver_address": "송파구 올림픽로 삼백"})
+    assert out["status"] == "needs_choice" and out["facts"]["labels"] == ["김철수 송파구 y"]
+    c.state.candidates = None
+    assert call(c, "record_fields", {"receiver_address": "구미시 인동9길 8"})["status"] == "ok" and c.state.candidates is None
+
+
 def company(name="주소하나", organization="주소기업", seq=26):
     return CompanyPlace(name=name, phone="01098765432", address="서울 중구 세종대로 110", address_detail="", geo=None,
                         organization_seq=6, organization_name=organization, membership_seq=seq, customer_seq=seq)

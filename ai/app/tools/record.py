@@ -30,6 +30,7 @@ from app.observability.trace import observe_latency
 from app.policy.model import InputLimits, Policy
 from app.tools.context import ToolContext
 from app.tools.executor import Args, model_tool
+from app.tools.lookup import book_matches, offer_destination
 from app.tools.outcome import ToolOutcome, state_summary
 
 TEXT = ("sender_name", "sender_address_detail", "receiver_name", "receiver_address_detail")
@@ -214,6 +215,20 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         nothing = not changed and not needs
         if nothing and (s.pending or s.awaiting_fix):
             return ToolOutcome("ok", "NOTHING_CHANGED", summary=state_summary(s, policy))
+        # 받는 분 성함·주소를 들으면 고객이 요청하지 않아도 주소록에 같은 받는 분·같은 주소가 있는지 바로 확인한다
+        # (사용자 결정 2026-11-10). 핀에서 고른 받는 곳이면 다시 찾지 않는다.
+        if (not needs and not s.pending and s.customer.places
+                and {"receiver_name", "receiver_address"} & set(facts["recorded"])
+                and s.field_of("receiver_address").source not in (Source.PIN, Source.HISTORY, Source.COMPANY)):
+            rn, ra = s.field_of("receiver_name"), s.field_of("receiver_address")
+            found = book_matches(s.customer.places, rn.value if rn.valid else None, ra.value if ra.valid else None, None)
+            if found:
+                out = offer_destination(s, found, ctx.max_pin_options)
+                out.facts |= {k: v for k, v in facts.items() if v}
+                out.facts["guidance"] = ("주소록에 같은 받는 분이나 같은 주소가 있음. 그분(그곳)께 보내는지 확인한다. "
+                                         "아니라고 하면 들은 값 그대로 진행한다.")
+                out.summary = state_summary(s, policy)
+                return out
         # 같은 값을 다시 말했는데 확인 대기가 풀려 있으면(no·change 뒤) 되읽기로 다시 연다(운영 통화 56c133c8)
         pending = issue_parcel_confirmation(s, policy, ctx.clock()) if not needs else None
         moved = False
