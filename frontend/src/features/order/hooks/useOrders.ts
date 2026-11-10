@@ -44,11 +44,11 @@ const GROUPS: { value: StatusGroup; label: string }[] = [
   { value: 'SUBMISSION_FAILED', label: '접수 실패' },
   { value: 'CANCELLED', label: '주문 취소' },
 ]
-// at = 목록 기준 시각 (useSnapshotList) — 조건을 바꾸면 '' 로 지워 지금 최신 · 첫 쪽으로
 // o = 열어 둔 주문 '주문번호' 또는 '주문번호-배송번호' (통화 상세의 주문 링크도 이걸로 엶) · 미완료(배송 초안)는 'd초안번호'
 // d = 접수 시각 정렬 ('asc' = 오래된 순)
 // c = 주문 상세에서 띄운 이어진 통화 번호 (통화 상세에 갔다가 ‹로 돌아오면 그 창 그대로)
-const DEFAULTS = { q: '', g: 'ALL', r: '7d', at: '', o: '', d: 'desc', c: '' }
+// 목록 기준 시각은 주소에 안 둠 (useSnapshotList, 11/10) — 조건을 바꾸거나 화면에 다시 오면 지금 최신으로
+const DEFAULTS = { q: '', g: 'ALL', r: '7d', o: '', d: 'desc', c: '' }
 
 const party = (p: { name: string | null; phoneNumber: string | null } | undefined) => ({
   name: p?.name ?? '',
@@ -80,7 +80,7 @@ export function useOrders() {
     query,
     at: (o) => o.createdAt,
     page,
-    asOf: params.at,
+    resetOn: g, // 탭을 옮기면 새로 들어온 주문까지 (기준 조건엔 탭을 안 넣음 — anchorQuery 설명)
     go: set,
     asc,
     anchorQuery: base, // 모든 상태 탭 · 탭 건수가 같은 기준 시각 (탭 조건을 넣으면 '주문 취소' 탭은 마지막 취소 시각이 기준이 돼 그 뒤 주문이 전체 건수에서 빠졌음)
@@ -179,7 +179,7 @@ export function useOrders() {
 
   return {
     q: params.q,
-    setQ: (q: string) => set({ q, at: '' }),
+    setQ: (q: string) => set({ q }),
     group: g,
     groups: GROUPS.map((x) => ({
       ...x,
@@ -189,11 +189,11 @@ export function useOrders() {
           : (counts.data?.[COUNT_KEY[x.value]] ?? null),
     })),
     ranged: !drafting, // 미완료(초안)는 기간 조건이 없음
-    setGroup: (v: StatusGroup) => set({ g: v, at: '' }),
+    setGroup: (v: StatusGroup) => set({ g: v }),
     range: r,
     asc,
     toggleSort: () => set({ d: asc ? 'desc' : 'asc' }),
-    setRange: (v: Range) => set({ r: v, at: '' }),
+    setRange: (v: Range) => set({ r: v }),
     rows,
     list: shown,
     picked,
