@@ -694,14 +694,19 @@ def test_order_intent_notice_carries_missing_so_first_question_follows_order():
 
 
 
-def test_registered_greeting_yes_prefills_sender_and_asks_receiver_first():
-    """기존 고객: 인사 "○○님, {기본 주소}에서 보내시는 택배 접수 도와드릴까요?"에 "예" → 접수 + 그 출발지 →
-    보내는 분 성함·주소·상세를 등록 정보(PROFILE)로 채우고 다음 질문은 받는 분 성함."""
+@pytest.mark.parametrize(("greeting_address", "reply", "expected"), [
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네", "prefilled"),
+    ("서울 강남구 가람구길 이백십이에서 보내시는 ", "네, 다른 주소에서 보낼게요", "name_only"),
+    ("서울 강남구 가람구길 이백십삼에서 보내시는 ", "예", "ask_origin"),
+    ("", "예", "ask_origin"),
+])
+def test_registered_greeting_answer_preserves_address_scope_without_model(greeting_address, reply, expected):
     from app.domain.state import Source
     from backend_client.order import Geo as BGeo, Place as BPlace
     svc, client = flow()
+    client.decisions.create = AsyncMock(side_effect=AssertionError("명확한 첫 인사 답변은 모델 호출이 필요 없다"))
     db = svc.d.backend.api
-    db.add_customer(CALLER, "김철수", default_origin=BPlace(name="김철수", phone=CALLER, address="서울 강남구 테헤란로 212",
+    db.add_customer(CALLER, "김철수", default_origin=BPlace(name="김철수", phone=CALLER, address="서울특별시 강남구 가람9길 212",
                                                         address_detail="1201호", geo=BGeo(jibun_address="서울 강남구 역삼동 737",
                                                                                          dong_name="역삼동", postal_code="06236")))
 
@@ -712,21 +717,55 @@ def test_registered_greeting_yes_prefills_sender_and_asks_receiver_first():
         conn.push(started())
         await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
         s = svc.registry.calls["live_1"]
-        await ai(conn, "안녕하세요, 김철수님, 서울 강남구 테헤란로 212에서 보내시는 택배 접수 도와드릴까요?", 0)
-        await say(conn, "예", 1500)
-        await until(lambda: any('"intent"' in e.get("content", "") for e in conn.sent))
+        await ai(conn, f"안녕하세요, 김철수님, {greeting_address}택배 접수 도와드릴까요?", 0)
+        await say(conn, reply, 1500)
+        await until(lambda: any('"greeting_confirmation"' in e.get("content", "") for e in conn.sent))
         conn.push({"type": "session.closed", "reason": "remote_hangup"})
         await task
         return s, conn
 
     s, conn = run(scenario())
-    assert "등록된 발송 주소: 서울 강남구 테헤란로 212" in client.accepted[0][1]["instructions"]
-    facts = json.loads(next(e for e in conn.sent if '"intent"' in e.get("content", ""))["content"].split("[서버 결과] ", 1)[1])
-    assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
+    client.decisions.create.assert_not_awaited()
+    event = next(e for e in conn.sent if '"greeting_confirmation"' in e.get("content", ""))
+    assert event["type"] == "session.commentary.append"
+    facts = json.loads(event["content"].split("[서버 결과] ", 1)[1])
+    assert facts["greeting_confirmation"] == "confirmed" and facts["intent"] == "order"
     cur = s.state.parcels[0].draft if s.state.parcels else s.state.current
-    assert cur["sender_name"].source == Source.CALLER_ID  # 등록 고객 성함은 처음부터 채워져 있다
-    assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
-    assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
+    assert cur["sender_name"].source == Source.CALLER_ID
+    if expected == "prefilled":
+        assert facts["origin"] == "prefilled" and facts["summary"]["missing"][0] == "receiver_name"
+        assert all(cur[n].source == Source.PROFILE for n in ("sender_address", "sender_address_detail"))
+        assert cur.sender_geo is not None and cur["sender_address_detail"].value == "1201호"
+    else:
+        assert facts["summary"]["missing"][0] == "sender_address" and not cur["sender_address"].valid
+        assert ("origin_confirm" in facts) == (expected == "ask_origin")
+        assert s.state.origin_answer is (False if expected == "name_only" else None)
+
+
+def test_unclear_greeting_timeout_asks_only_for_intent():
+    svc, client = flow()
+
+    async def slow(**kwargs):
+        await asyncio.sleep(10)
+
+    client.decisions.create = slow
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        await until(lambda: svc.registry.calls["live_1"].phase == Phase.ACTIVE)
+        s = svc.registry.calls["live_1"]
+        await ai(conn, "안녕하세요. 택배 접수 도와드릴까요?", 0)
+        await say(conn, "음 글쎄요", 1500)
+        await until(lambda: any('"ask_intent"' in e.get("content", "") for e in conn.sent), timeout=3.0)
+        assert s.state.intent is None and s.state.origin_answer is None
+        assert any("DECISION_TIMEOUT" in e["text"] for e in s.events)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+
+    run(scenario())
 
 
 def test_origin_paths_other_place_and_recent_only():

@@ -9,9 +9,12 @@ from datetime import time as dtime
 import hashlib
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field, replace
 
+from app.address.matcher import sido_aliases
+from app.address.parse import clean_text, parse, split_gil, unlink_gil
 from app.calls.session import CallSession, Phase
 from app.domain.rules import KST
 from app.domain.address_book import prefill_sender
@@ -20,7 +23,7 @@ from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, check_gate, commit_parcel, issue_cancel_confirmation,
                                 issue_parcel_confirmation, release, take_cancel)
-from app.domain.state import BOX_SIZE_NAMES, BoxProposal
+from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
 from app.policy.render import decision_questions
@@ -37,6 +40,10 @@ TOOL_INTENT = {"record_fields": "order", "find_destination": "order", "lookup_or
 # 도구 → 대시보드 processType(ai-dashboard-ai-integration.md §4). 받는 곳 후보 찾기는 주소 조회로 센다
 TOOL_LATENCY = {"record_fields": "INFORMATION_INPUT", "find_destination": "ADDRESS_LOOKUP",
                 "search_manual": "FAQ_LOOKUP", "lookup_orders": "ORDER_LOOKUP"}
+GREETING_ORDER = re.compile(r"택배접수(?:를)?(?:도와드릴까요|도와드려도될까요|해드릴까요|하시겠어요|할까요)$")
+GREETING_YES = re.compile(r"(?:네|예|응|맞아요|맞습니다|그렇습니다)+")
+GREETING_OTHER_ORIGIN = re.compile(r"(?:네|예|아니요)?(?:오늘은|이번에는)?다른(?:주소|곳)에서"
+                                  r"(?:보낼게요|보내려고요|보냅니다|발송할게요|발송하려고요)")
 
 
 @dataclass
@@ -200,7 +207,10 @@ class LiveFlow:
     # ------------------------------------------------------------------ 발화 끝 Decision
     async def judge(self, s: CallSession, utt: Spoken, prev: Spoken | None) -> None:
         async with s.lock:
+            rt = self.rt(s)
             stage = assess(s.state, self.policy).stage
+            greeting = (_greeting_offer(s.state, prev.text) if stage == "intent" and prev and rt.customer_turns == [utt]
+                        and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms else None)
             pending = s.state.pending
             pick = s.state.candidates.labels if s.state.candidates else ()
             pending_id = pending.id if pending else None
@@ -209,6 +219,15 @@ class LiveFlow:
             current = s.state.current
             box = current.box_proposal if current and s.state.intent == "order" and not pending else None
             cancel_current = s.tools.draft_intake and current is not None and not current.empty()
+        reply = re.sub(r"[\s,.!?…~]+", "", utt.text) if greeting else ""
+        other_origin = GREETING_OTHER_ORIGIN.fullmatch(reply)
+        if greeting and (other_origin or GREETING_YES.fullmatch(reply)):
+            answers = {"task": ("order", 1.0)}
+            if other_origin or greeting == "registered_origin":
+                answers["origin"] = ("no" if other_origin else "yes", 1.0)
+            s.note("Decision", "첫 인사 동의", {"origin": greeting})
+            await self.apply(s, utt, prev, answers, pending_id, greeting=True)
+            return
         # readback 단계는 확인 대기가 풀려 있어도 confirm을 듣는다(Live가 스스로 확인 질문을 하면 '네'가 갈 곳이 없음, 운영 통화 56c133c8)
         questions = decision_questions(self.policy, stage, pending=pending is not None or stage == "readback",
                                        pick_labels=pick, callback=callback, origin=origin, cancel_current=cancel_current,
@@ -231,29 +250,43 @@ class LiveFlow:
             call.add_done_callback(lambda f: f.cancelled() or f.exception() or s.note(
                 "Decision 늦은 응답", f"{(time.monotonic() - started) * 1000:.0f}ms") or s.timing(
                 "Decision(시간 초과분)", (time.monotonic() - started) * 1000))
+            if greeting:
+                await self._clarify_greeting(s, utt)
             return
         except Exception as e:
             s.note("Decision", f"DECISION_UNAVAILABLE {type(e).__name__}",
                    {"stage": stage, "pending": pending_id, "input": text, "questions": [q["name"] for q in questions],
                     "error": str(e)[:500]})
+            if greeting:
+                await self._clarify_greeting(s, utt)
             return
         ms = round((time.monotonic() - started) * 1000)
         s.decision_ms.append(ms)
         s.timing("Decision", ms)
         answers = {a.name: _answer(a) for a in d.answers if a.type == "choice"}
+        if greeting == "order" and answers.get("origin", (None,))[0] == "yes":
+            answers.pop("origin")  # 인사에서 등록 주소를 대조하지 못했으면 사용 여부는 별도로 묻는다.
         s.note("Decision", ", ".join(f"{k}={v[0]}({v[1]:.2f})" for k, v in answers.items()) + f" {ms}ms",
                {"stage": stage, "pending": pending_id, "input": text, "ms": ms,
                 "answers": {k: {"choice": v[0], "confidence": round(v[1], 3), "probabilities": v[2]}
                             for k, v in answers.items()}})
-        await self.apply(s, utt, prev, answers, pending_id, box=box)
+        await self.apply(s, utt, prev, answers, pending_id, box=box, greeting=bool(greeting))
+
+    async def _clarify_greeting(self, s: CallSession, utt: Spoken) -> None:
+        async with s.lock:
+            if s.phase != Phase.ACTIVE or s.state.intent is not None or self.rt(s).customer_turns != [utt]:
+                return
+        await self.notify(s, "N2", {"greeting_confirmation": "ask_intent"})
 
     async def apply(self, s: CallSession, utt: Spoken, prev: Spoken | None, answers: dict, pending_id: str | None,
-                    *, box: BoxProposal | None = None):
+                    *, box: BoxProposal | None = None, greeting: bool = False):
         rt, st, th = self.rt(s), s.state, self.cfg.decision_min_confidence
         followups = []
         async with s.lock:
             if s.closed or utt.utterance_id < rt.latest_applied:
                 s.note("Decision", "DECISION_STALE")
+                return
+            if greeting and (rt.customer_turns != [utt] or st.intent is not None):
                 return
             rt.latest_applied = utt.utterance_id
             switch = answers.get("switch")
@@ -267,7 +300,8 @@ class LiveFlow:
                     and BOX_SIZE_NAMES[box.size] in prev.text and "박스" in prev.text
                     and utt.start_ms >= prev.end_ms - self.policy.confirm.answer_after_readback_tolerance_ms):
                 followups.append(("box_answer", (box, answer[0], utt)))
-            if (og := answers.get("origin")) and og[1] >= th and og[0] in ("yes", "no") and st.origin_offered \
+            if (og := answers.get("origin")) and og[1] >= th and og[0] in ("yes", "no") \
+                    and (st.origin_offered or greeting and og[0] == "no") \
                     and st.origin_answer is None:
                 st.origin_answer = og[0] == "yes"
                 s.note("출발지", og[0])
@@ -298,7 +332,9 @@ class LiveFlow:
                     else:
                         followups.append(("picked", p[0]))
             if (t := answers.get("task")) and t[1] >= th and t[0] in BUSINESS + ("end",):
-                followups.append(("intent", t[0]))
+                followups.append(("greeting_order" if greeting and t[0] == "order" else "intent", t[0]))
+            elif greeting:
+                followups.append(("clarify_greeting", utt))
             if (w := answers.get("switch")) and w[1] >= th and w[0] != "none" and not (picked_lookup and w[0] == "lookup"):
                 followups.append(("intent", w[0]))
             if (m := answers.get("more")) and m[1] >= th and m[0] == "no_more" and st.parcels:
@@ -457,6 +493,10 @@ class LiveFlow:
                                          "summary": state_summary(st, self.policy)})
         elif what == "intent":
             await self._on_intent(s, value)
+        elif what == "greeting_order":
+            await self._on_intent(s, value, prompt_next=True)
+        elif what == "clarify_greeting":
+            await self._clarify_greeting(s, value)
         elif what == "box_answer":
             await self._answer_box(s, *value)
         elif what == "lookup_picked":
@@ -513,7 +553,7 @@ class LiveFlow:
             facts["needs"] = out.needs
         await self.notify(s, "N2", facts)
 
-    async def _on_intent(self, s: CallSession, intent: str) -> None:
+    async def _on_intent(self, s: CallSession, intent: str, *, prompt_next: bool = False) -> None:
         st = s.state
         if intent in BUSINESS:
             self._business(s, intent)
@@ -544,11 +584,13 @@ class LiveFlow:
                 if st.intent == "order":
                     facts |= self._origin_step(st)  # 다음 질문의 기준(missing 첫 항목)을 같이 준다 — 없으면 Live가 순서 밖 질문을 지어냄(운영 통화 3a0b9c7f)
                     facts["summary"] = state_summary(st, self.policy)
+                    if prompt_next:
+                        facts["greeting_confirmation"] = "confirmed"
         if facts.get("closing"):
             await self._wait_delegations(s)
             self._maybe_submit(s, force=True)
             facts["order"] = _order_status(s)
-        await self.notify(s, "N2" if facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'", facts)
+        await self.notify(s, "N2" if prompt_next or facts.get("closing") or "agent" in facts or "cancel_target" in facts else "N1'", facts)
         if facts.get("closing"):
             self.svc.begin_closing(s, "customer_end", after_speech=True,  # 마무리 인사 뒤 끊는다(S6: 결과 전송)
                                    remind=lambda: self.notify(s, "N2", facts, again=True))
@@ -884,6 +926,16 @@ class LiveFlow:
             receipt_pid = facts.get("parcel_added") if facts.get("draft_intake") == "ready" else None
             t0 = time.monotonic()
             await self._wait_quiet(s, min_quiet_ms=self.cfg.utterance_gap_ms if receipt_pid else 0)
+            if facts.get("greeting_confirmation") == "ask_intent" and (
+                    s.state.intent is not None or len(rt.customer_turns) != 1):
+                return
+            if facts.get("greeting_confirmation") == "confirmed":
+                if s.state.intent != "order":
+                    return
+                latest = facts | {"summary": state_summary(s.state, self.policy)}
+                if s.state.current and s.state.current["sender_address"].valid:
+                    latest.pop("origin_confirm", None)
+                content = json.dumps(latest, ensure_ascii=False, sort_keys=True)
             waited = time.monotonic() - t0
             s.timing("N2 대기(AI 발화 끝)", waited * 1000)
             if waited > 1.0:
@@ -964,6 +1016,31 @@ def _item_text(item: dict) -> str:
 def _answer(a) -> tuple[str, float, dict]:
     probs = {str(p.value): p.probability for p in (a.probabilities or [])}
     return str(a.choice), float(a.confidence or 0), probs
+
+
+def _greeting_offer(state: ConversationState, text: str) -> str | None:
+    """첫 인사에서 실제로 들려준 접수 질문과 등록 주소를 대조한다."""
+    question = re.split(r"[.!?…]", text.rstrip(" .!?…"))[-1]
+    if not asks(text) or not GREETING_ORDER.search("".join(question.split())):
+        return None
+    place = state.customer.origin_place
+    location = re.search(r"(.+?)에서\s*(?:발송|보내)", question)
+    if not (state.origin_offered and place and place.address and location):
+        return "order"
+    spoken = clean_text(re.split(r"님\s*[,，]?\s*", location[1], maxsplit=1)[-1])
+    heard_parts = [part for form in (spoken, split_gil(spoken), unlink_gil(spoken)) if form for part in parse(form)]
+    for expected, branch, number in parse(clean_text(place.address)):
+        if not number:
+            continue
+        for heard, heard_branch, heard_number in heard_parts:
+            if (heard_branch, heard_number) != (branch, number):
+                continue
+            if heard == expected:
+                return "registered_origin"
+            if expected[0].endswith(("특별시", "광역시", "도", "특별자치시")) and heard[1:] == expected[1:] \
+                    and heard[0] in sido_aliases(expected[0]):
+                return "registered_origin"
+    return "order"
 
 
 def _order_status(s: CallSession) -> dict:
