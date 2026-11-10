@@ -1,7 +1,8 @@
 // 실시간 목록 (주문 · 통화) — 쪽 번호 + 기준 시각
 // 통화 · 주문은 보는 중에도 계속 들어옴 → 쪽을 offset으로만 자르면 새 항목만큼 줄이 밀려 같은 줄이 두 번 보이거나 빠짐.
 // 그래서 처음 연 순간의 '가장 최근 항목 시각'을 기준(at)으로 정하고, 모든 쪽 · 총 건수를 '기준 이전' 항목에서만 셈 → 쪽을 넘겨도 밀리지 않음.
-// 기준은 주소에 남겨 새로고침 · 뒤로 가기 · 링크 공유에도 같은 목록. 기준 이후 들어온 것은 15초마다 세어 [새 N건 · 최신 목록 보기]로만 알림
+// 기준은 한 화면 안에서만 고정 (11/10 사용자): 쪽을 넘길 땐 그대로, 화면에 다시 들어오거나(다른 페이지 → 돌아옴 · 새로고침) 조건(검색 · 기간 · 탭)을 바꾸면 새로 정함
+// → 주소에 남기지 않고, 기준 캐시는 화면을 떠나면 바로 버림(gcTime 0). 기준 이후 들어온 것은 15초마다 세어 [새 N건 · 최신 목록 보기]로 알림
 // 서버 시각 범위: from 포함 · to 미포함. 기준 = 최신 항목 시각 + 1ms (내 컴퓨터 시계가 틀려도 서버 시각 기준)
 // ponytail: 기준 이전 항목의 상태가 바뀌어 상태 탭에서 빠지면(결제 대기 → 결제 완료) 그 탭의 뒤쪽 줄이 한 칸 당겨짐 — 탭을 다시 누르면 맞음
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,8 +22,8 @@ export function useSnapshotList<T>({
   query,
   at,
   page,
-  asOf,
   go,
+  resetOn,
   asc = false,
   enabled: on = true,
   anchorQuery = query,
@@ -32,8 +33,8 @@ export function useSnapshotList<T>({
   query: Q // 검색 · 상태 · 기간
   at: (x: T) => string | null // 정렬 시각 (서버 to가 거르는 칸)
   page: number // 주소의 쪽
-  asOf: string // 주소의 기준 시각(ms) — 비면 지금 최신
-  go: (p: { page: number; at?: string }) => void // 주소 바꾸기
+  go: (p: { page: number }) => void // 주소 바꾸기
+  resetOn?: string // 기준 조건엔 안 넣지만 바뀌면 기준을 새로 정할 값 — 주문 상태 탭 · 통화 상태 필터
   asc?: boolean // 오래된 순
   // 기준 시각을 정할 조건 — 주문처럼 상태 탭마다 건수를 같이 보이면 탭 조건을 뺀 것을 줌 (탭마다 기준이 달라 건수가 흔들리지 않게)
   anchorQuery?: Q
@@ -43,19 +44,19 @@ export function useSnapshotList<T>({
   const qc = useQueryClient()
   const get = (q: Q, signal: AbortSignal) => api.get<ApiList<T>>(path, { query: q, signal })
 
-  // 기준 시각 정하기 — 주소에 없으면 최신 1건을 받아 그 시각 + 1ms
-  const anchorKey = ['screen', key, 'anchor', anchorQuery] as const
+  // 기준 시각 정하기 — 최신 1건을 받아 그 시각 + 1ms
+  const anchorKey = ['screen', key, 'anchor', anchorQuery, resetOn] as const
   const anchor = useQuery({
     queryKey: anchorKey,
-    enabled: !asOf,
-    staleTime: Infinity, // 저절로 바뀌지 않게 — [최신 목록 보기]를 눌러야
+    staleTime: Infinity, // 보는 동안은 저절로 안 바뀜 — [최신 목록 보기]를 눌러야
+    gcTime: 0, // 화면을 떠나거나 조건이 바뀌면 바로 버림 → 다시 오면(같은 조건으로 돌아와도) 새 기준
     queryFn: ({ signal }) =>
       get({ ...anchorQuery, limit: 1, offset: 0 }, signal).then((r) => {
         const ms = Date.parse(r.data[0] ? (at(r.data[0]) ?? '') : '')
         return (Number.isNaN(ms) ? Date.now() : ms) + 1
       }),
   })
-  const to = Number(asOf) || anchor.data
+  const to = anchor.data
 
   // 오래된 순: 서버는 최신순만 줌 → 기준 이전 총 건수로 뒤쪽부터 잘라 받아 뒤집음
   const count = useQuery({
@@ -108,7 +109,7 @@ export function useSnapshotList<T>({
       get({ ...query, from: iso(to!), limit: 1, offset: 0 }, signal).then((r) => r.total_count),
   })
 
-  const stuck = (!asOf && !!anchor.error) || (on && asc && !!count.error)
+  const stuck = !!anchor.error || (on && asc && !!count.error)
   return {
     items: list.data?.data ?? [],
     // 기준 시각 · 건수가 실패하면 목록은 영영 안 불림 → 그것도 실패로 (11/09 검수: 뼈대만 계속 보이던 것)
@@ -121,11 +122,10 @@ export function useSnapshotList<T>({
     size,
     setSize,
     asOf: to, // 상태 탭 건수도 같은 기준으로 세라고
-    // 쪽을 넘기면 기준을 주소에 고정
-    setPage: (p: number) => go({ page: p, at: to ? String(to) : '' }),
+    setPage: (p: number) => go({ page: p }), // 기준은 그대로
     fresh: fresh.data ?? 0,
     latest: () => {
-      go({ page: 1, at: '' })
+      go({ page: 1 })
       void qc.resetQueries({ queryKey: anchorKey })
     },
   }

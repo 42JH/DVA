@@ -17,7 +17,7 @@ import { fetchAll, FETCH_ALL_MAX, pageCount } from '@/shared/api/paging'
 import { orderNo } from '@/shared/order/labels'
 
 // at = 목록 기준 시각 · d = 시작 시각 정렬('asc' = 오래된 순) · s = 상태 필터(STATE_FILTERS). 불만 필터는 뺌 (11/09 사용자 — 상태와 겹쳐 골라져 불편, 불만은 표의 칩으로)
-const DEFAULTS = { q: '', r: '7d', at: '', s: '', d: 'desc' }
+const DEFAULTS = { q: '', r: '7d', s: '', d: 'desc' } // 목록 기준 시각은 주소에 안 둠 (useSnapshotList, 11/10)
 
 /** 통화 상태 — 끝났는지(PBX 종료 시각)와 분석이 왔는지로 */
 
@@ -36,8 +36,8 @@ export function useCalls() {
     query,
     at: (c) => c.startedAt,
     page,
-    asOf: params.at,
     go: set,
+    resetOn: params.s, // 상태 필터를 바꾸면 새로 들어온 통화까지
     asc,
   })
 
@@ -65,7 +65,7 @@ export function useCalls() {
         total: hit.length,
         page: pg,
         size,
-        setPage: (p: number) => set({ page: p, at: to ? String(list.asOf) : '' }),
+        setPage: (p: number) => set({ page: p }),
         setSize,
         fresh: list.fresh,
         latest: list.latest,
@@ -103,11 +103,11 @@ export function useCalls() {
     q: params.q,
     asc,
     toggleSort: () => set({ d: asc ? 'desc' : 'asc' }),
-    setQ: (q: string) => set({ q, at: '' }),
+    setQ: (q: string) => set({ q }),
     range: r,
-    setRange: (v: Range) => set({ r: v, at: '' }),
+    setRange: (v: Range) => set({ r: v }),
     state: s,
-    setState: (v: StateFilter) => set({ s: v, at: '' }),
+    setState: (v: StateFilter) => set({ s: v }),
     // 상태로 거를 때 받은 통화가 상한에 걸리면 알림 (기간을 줄이게)
     capped: !!s && (all.data?.length ?? 0) >= FETCH_ALL_MAX,
     rows,
