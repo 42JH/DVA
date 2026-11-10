@@ -2,14 +2,20 @@
 // 읽기는 실서버에서 한 번 받아 시작점으로 쓰고, 저장 · 적용 · 추가는 이 브라우저 안에서만 바뀜 (새로고침하면 실서버 상태로)
 // 끄려면 PERSONA_DEMO = false → personaApi가 다시 실서버로 저장 · 적용함
 import { fetchAll } from '@/shared/api/paging'
-import type { PersonaDraftDto, PersonaDto, PersonaVersionDto, WaitTime } from './personaMap'
+import {
+  toPrompt,
+  type PersonaDraftDto,
+  type PersonaDto,
+  type PersonaVersionDto,
+  type PromptFields,
+  type WaitTime,
+} from './personaMap'
 
 export const PERSONA_DEMO = true
 
 /** 저장 · 추가 본문 — 서버로 보내던 것과 같은 모양 */
-interface PersonaBody {
+interface PersonaBody extends Partial<PromptFields> {
   name?: string
-  promptText?: string
   voiceId?: string | null
   speakingRate?: number | null
   turnWaitLevel?: WaitTime
@@ -48,14 +54,16 @@ export async function demoVersions(personaSeq: number, signal?: AbortSignal) {
 export async function demoSaveDraft(personaSeq: number, body: PersonaBody) {
   const p = await find(personaSeq)
   const base: PersonaDraftDto | PersonaVersionDto = p.draft ?? p.headVersion
+  const { name, voiceId, speakingRate, turnWaitLevel, ...prompt } = body // prompt = 보낸 칸만
   p.draft = {
     draftRevision: crypto.randomUUID(),
     baseVersion: p.headVersion.version,
-    name: body.name ?? base.name,
-    promptText: body.promptText ?? base.promptText,
-    voiceId: body.voiceId !== undefined ? body.voiceId : base.voiceId,
-    speakingRate: body.speakingRate !== undefined ? body.speakingRate : base.speakingRate,
-    turnWaitLevel: body.turnWaitLevel ?? base.turnWaitLevel,
+    ...toPrompt(base),
+    ...prompt,
+    name: name ?? base.name,
+    voiceId: voiceId !== undefined ? voiceId : base.voiceId,
+    speakingRate: speakingRate !== undefined ? speakingRate : base.speakingRate,
+    turnWaitLevel: turnWaitLevel ?? base.turnWaitLevel,
     updatedAt: now(),
   }
 }
@@ -70,7 +78,7 @@ export async function demoApply(personaSeq: number) {
       aiPersonaVersionSeq: nextSeq++,
       version: p.headVersion.version + 1,
       name: p.draft.name,
-      promptText: p.draft.promptText,
+      ...toPrompt(p.draft),
       voiceId: p.draft.voiceId,
       speakingRate: p.draft.speakingRate,
       turnWaitLevel: p.draft.turnWaitLevel,

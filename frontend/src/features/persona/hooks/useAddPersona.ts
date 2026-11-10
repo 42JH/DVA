@@ -6,10 +6,12 @@ import {
   DEFAULT_VOICE,
   createPersona,
   personaQueries,
+  type PromptFields,
+  type PromptKey,
   type VoiceSettings,
 } from '@/features/persona/api/personaApi'
 import { useVoiceOptions } from '@/features/persona/hooks/useVoiceOptions'
-import { unsupportedText } from '@/features/persona/labels'
+import { emptyPromptNotice, PROMPT_SECTIONS, unsupportedText } from '@/features/persona/labels'
 
 // Swagger 등록 API의 code(바꿀 수 없는 고유 코드)는 화면에서 받지 않고 자동으로 (10/31 결정 — 관리자가 정할 이유가 없음)
 // 창을 열 때 한 번 만들어 재시도에도 같은 값 → 첫 요청이 사실 성공했으면 두 번째는 409(중복)로 막혀 페르소나가 둘 생기지 않음
@@ -25,7 +27,16 @@ export function useAddPersona(onDone: (personaSeq: number) => void) {
   const options = useVoiceOptions()
   const [name, setName] = useState('')
   const [code] = useState(newCode)
-  const [prompt, setPrompt] = useState('')
+  const [prompt, setPrompt] = useState<PromptFields>({
+    role: '',
+    personality: '',
+    tone: '',
+    speedInstruction: '',
+    backchannel: '',
+    interruption: '',
+  })
+  const [triedSubmit, setTriedSubmit] = useState(false) // [추가]를 한 번 눌렀는지 — 빈칸 안내는 그 뒤부터 (11/10)
+  const emptyNotice = emptyPromptNotice(prompt)
   const [voice, setVoice] = useState(DEFAULT_VOICE)
 
   const mutation = useMutation({
@@ -46,8 +57,13 @@ export function useAddPersona(onDone: (personaSeq: number) => void) {
   return {
     name,
     setName,
-    prompt,
-    setPrompt,
+    sections: PROMPT_SECTIONS.map((s) => ({
+      ...s,
+      value: prompt[s.key],
+      empty: prompt[s.key].trim() === '',
+    })),
+    setField: (key: PromptKey, value: string) => setPrompt((p) => ({ ...p, [key]: value })),
+    emptyNotice: triedSubmit ? emptyNotice : null, // 처음부터 띄우면 여섯 칸 다 비어 있어 시끄러움
     voice,
     voiceOptions: options.voiceOptions(voice.voice),
     setVoiceName: (x: string) => setVoice((v) => ({ ...v, voice: x })),
@@ -56,9 +72,11 @@ export function useAddPersona(onDone: (personaSeq: number) => void) {
     waitOptions: options.waitOptions(voice.waitTime),
     setWaitTime: (waitTime: VoiceSettings['waitTime']) => setVoice((v) => ({ ...v, waitTime })),
 
-    canSubmit:
-      name.trim() !== '' && prompt.trim() !== '' && !options.isPending && !mutation.isPending,
-    submit: () => mutation.mutate(),
+    canSubmit: name.trim() !== '' && !options.isPending && !mutation.isPending, // 빈칸은 막지 않고 누르면 안내
+    submit: () => {
+      setTriedSubmit(true)
+      if (!emptyNotice) mutation.mutate()
+    },
     isSubmitting: mutation.isPending,
     submitError: !mutation.error
       ? null

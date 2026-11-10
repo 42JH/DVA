@@ -12,6 +12,7 @@ import { PageHead } from '@/shared/ui'
 import type { TagKind } from '@/shared/ui'
 import { Badge, Btn, Icon, type Tone } from '@/shared/ui'
 import { Confirm } from '@/shared/ui/Modal'
+import { Markdown } from '@/shared/ui/Markdown'
 
 type Vm = ReturnType<typeof usePersonaPage>
 // 기존 태그 색 이름 → 뱃지 색 (적용 중 = live, 저장됨 = blue, 대기 = outline)
@@ -153,18 +154,21 @@ function Prompt({ vm }: { vm: Vm }) {
           )}
         </span>
       </header>
-      <ol className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto py-3 font-[inherit] text-[14px] leading-6">
-        {p.lines.map((l) => (
-          <li key={l.no} className="grid grid-cols-[48px_1fr] px-2">
-            <span className="pr-3 text-right text-[12px] text-ops-faint tabular-nums select-none">
-              {l.no}
-            </span>
-            <span className={`pr-4 whitespace-pre-wrap ${l.heading ? 'pt-2 font-bold' : ''}`}>
-              {l.text || ' '}
-            </span>
-          </li>
+      {/* 칸 제목은 고정 글, 본문만 마크다운 (11/10) */}
+      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto px-8 py-6">
+        {p.sections.map((s) => (
+          <section key={s.key} className="mb-7 last:mb-0">
+            {s.group && <h3 className="mb-4 text-[18px] font-bold">{s.group}</h3>}
+            {/* 제목 단계도 서버 글과 같게: 발화 스타일 아래 톤 · 속도만 한 단계 아래 (화면 읽기 프로그램) */}
+            {s.sub ? (
+              <h4 className="mb-2 text-[15px] font-bold">{s.title}</h4>
+            ) : (
+              <h3 className="mb-2 text-[18px] font-bold">{s.title}</h3>
+            )}
+            <Markdown text={s.text} className="pl-4 text-[14px] leading-6" />
+          </section>
         ))}
-      </ol>
+      </div>
     </article>
   )
 }
@@ -183,23 +187,43 @@ function Compare({ vm }: { vm: Vm }) {
           비교 닫기
         </Btn>
       </header>
-      <ol className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto py-2 text-[14px] leading-6">
-        {c.rows.map((r) => (
-          <li
-            key={r.key}
-            className={`grid grid-cols-[40px_40px_20px_1fr] px-2 ${r.kind === 'del' ? 'bg-ops-stop-soft' : r.kind === 'add' ? 'bg-ops-done-soft' : ''}`}
-          >
-            <span className="text-right text-[12px] text-ops-faint tabular-nums">
-              {r.from ?? ''}
-            </span>
-            <span className="text-right text-[12px] text-ops-faint tabular-nums">{r.to ?? ''}</span>
-            <span className={`text-center ${r.kind === 'del' ? 'text-ops-stop' : 'text-ops-done'}`}>
-              {r.kind === 'del' ? '−' : r.kind === 'add' ? '+' : ''}
-            </span>
-            <span className="pr-4 whitespace-pre-wrap">{r.text || ' '}</span>
-          </li>
+      <div className="min-h-0 flex-1 [scrollbar-width:thin] overflow-y-auto py-2 text-[14px] leading-6">
+        {c.sections.map((s) => (
+          <section key={s.key} className="mb-4 last:mb-0">
+            {s.group && <h3 className="px-4 pt-2 text-[15px] font-bold">{s.group}</h3>}
+            <h4 className="flex items-baseline gap-2 px-4 py-1.5 font-bold">
+              {s.title}
+              {/* 안 바뀐 칸은 줄을 다 펼치지 않음 — 바뀐 칸만 눈에 띄게 */}
+              {!s.changed && (
+                <span className="text-[12px] font-normal text-ops-faint">변경 없음</span>
+              )}
+            </h4>
+            {s.changed && (
+              <ol>
+                {s.rows.map((r) => (
+                  <li
+                    key={r.key}
+                    className={`grid grid-cols-[40px_40px_20px_1fr] px-2 ${r.kind === 'del' ? 'bg-ops-stop-soft' : r.kind === 'add' ? 'bg-ops-done-soft' : ''}`}
+                  >
+                    <span className="text-right text-[12px] text-ops-faint tabular-nums">
+                      {r.from ?? ''}
+                    </span>
+                    <span className="text-right text-[12px] text-ops-faint tabular-nums">
+                      {r.to ?? ''}
+                    </span>
+                    <span
+                      className={`text-center ${r.kind === 'del' ? 'text-ops-stop' : 'text-ops-done'}`}
+                    >
+                      {r.kind === 'del' ? '−' : r.kind === 'add' ? '+' : ''}
+                    </span>
+                    <span className="pr-4 whitespace-pre-wrap">{r.text || ' '}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
         ))}
-      </ol>
+      </div>
     </article>
   )
 }

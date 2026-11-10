@@ -1,6 +1,7 @@
 // 실행: npx tsx --tsconfig tsconfig.app.json src/features/persona/api/personaMap.test.ts  (프레임워크 없이 assert만)
 import assert from 'node:assert/strict'
 import {
+  PROMPT_KEYS,
   toPersona,
   toRate,
   toSpeed,
@@ -8,13 +9,18 @@ import {
   type PersonaDraftDto,
   type PersonaDto,
   type PersonaVersionDto,
+  type PromptFields,
 } from './personaMap'
+
+// 여섯 칸 모두 같은 글 — 칸 하나만 바꾸는 경우는 { ...fields('A'), tone: 'B' }
+const fields = (text: string) =>
+  Object.fromEntries(PROMPT_KEYS.map((k) => [k, text])) as PromptFields
 
 const ver = (version: number, extra: Partial<PersonaVersionDto> = {}): PersonaVersionDto => ({
   aiPersonaVersionSeq: 100 + version,
   version,
   name: '빠른 접수형',
-  promptText: 'A',
+  ...fields('A'),
   voiceId: 'marin',
   speakingRate: null,
   turnWaitLevel: 'NORMAL',
@@ -40,7 +46,7 @@ const draft = (extra: Partial<PersonaDraftDto> = {}): PersonaDraftDto => ({
   draftRevision: 'rev-1',
   baseVersion: 4,
   name: '빠른 접수형',
-  promptText: 'C',
+  ...fields('C'),
   voiceId: 'marin',
   speakingRate: null,
   turnWaitLevel: 'NORMAL',
@@ -79,7 +85,7 @@ assert.deepEqual(
     [1, 'PAST', false, false],
   ],
 )
-assert.equal(av[0]!.prompt, 'C')
+assert.deepEqual(av[0]!.prompt, fields('C')) // 서버 다른 칸은 안 섞임
 assert.equal(av[0]!.changes.prompt, true) // 초안도 바로 앞(HEAD)과 비교
 assert.deepEqual(av[1]!.changes.speed, ['FAST', 'NORMAL']) // v3 빠르게 → v4 보통
 assert.equal(av[1]!.voiceOnly, true)
@@ -109,7 +115,7 @@ assert.deepEqual(
 )
 
 // 확정은 됐는데 적용 요청이 실패: HEAD v5 > 적용 중 v4 → v5 '저장됨'(적용 다시), 적용본은 v4
-const c = [ver(5, { promptText: 'B' }), ver(4, { status: 'ACTIVE' })]
+const c = [ver(5, fields('B')), ver(4, { status: 'ACTIVE' })]
 const pc = toPersona(dto(c[0]!, c[1]!))
 assert.deepEqual([pc.appliedVersion, pc.savedVersion], [4, 5])
 assert.deepEqual(
@@ -124,5 +130,10 @@ const d = [
 ]
 const pd = toPersona(dto(d[0]!, d[1]!, { pendingVersion: d[0]! }))
 assert.deepEqual([pd.savedVersion, pd.applyingVersion, pd.applyError], [null, 5, 'AI_UNAVAILABLE'])
+
+// 프롬프트 변경: 여섯 칸 중 하나만 달라도 바뀜(음성만 바뀐 버전 아님), 다 같으면 안 바뀜
+const e = toVersions([ver(2, { tone: 'B' }), ver(1)], 2, null)
+assert.deepEqual([e[0]!.changes.prompt, e[0]!.voiceOnly], [true, false])
+assert.equal(toVersions([ver(2), ver(1)], 2, null)[0]!.changes.prompt, false)
 
 console.log('personaMap OK')
