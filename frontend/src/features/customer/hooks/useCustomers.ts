@@ -64,7 +64,7 @@ export function useCustomers() {
     queryKey: ['screen', 'customers', query, size, page],
     queryFn: ({ signal }) =>
       api.get<ApiList<CustomerDto>>('/customers', {
-        query: { ...query, limit: size, offset: (page - 1) * size },
+        query: { ...query, status: 'ACTIVE', limit: size, offset: (page - 1) * size }, // 탈퇴 고객은 목록에서 뺌 (11/10)
         signal,
       }),
     placeholderData: keepPreviousData,
@@ -92,7 +92,6 @@ export function useCustomers() {
       address: c.address?.roadAddress ?? '',
       detail: c.address?.detailAddress ?? '',
       payments: c.availablePaymentMethods.map((m) => PAY_LABEL[m]),
-      withdrawn: c.status === 'WITHDRAWN',
       kind: contexts[i]?.data ? (contexts[i].data.company ? '기업 고객' : '일반 고객') : '',
       company: contexts[i]?.data?.company ?? '', // '디버물류 영업팀' — 마우스를 올리면
     })),

@@ -15,7 +15,7 @@ function saveError(e: unknown) {
 }
 
 /** before = 지금 고객(상세 조회 결과). 패널이 불러온 뒤에만 수정 모드를 열어서 항상 있음 */
-export function useCustomerEdit(before: CustomerDto, onDone: () => void) {
+export function useCustomerEdit(before: CustomerDto, onDone: () => void, onWithdrawn: () => void) {
   const qc = useQueryClient()
   const [name, setName] = useState(before.name)
   const [detail, setDetail] = useState(before.address?.detailAddress ?? '')
@@ -62,7 +62,7 @@ export function useCustomerEdit(before: CustomerDto, onDone: () => void) {
     mutationFn: () => updateCustomer(before.customerSeq, { status: 'WITHDRAWN' }),
     onSuccess: async () => {
       await refresh()
-      onDone()
+      onWithdrawn()
     },
     onSettled: () => setConfirming(false), // 실패하면 창을 닫고 폼 아래에 오류
   })

@@ -11,8 +11,16 @@ const MONTHLY = [
   { value: 'off', label: '미사용' },
 ] as const // 기업 화면 월결제 문구와 같은 말
 
-export function CustomerEditForm({ before, onDone }: { before: CustomerDto; onDone: () => void }) {
-  const vm = useCustomerEdit(before, onDone)
+export function CustomerEditForm({
+  before,
+  onDone,
+  onWithdrawn,
+}: {
+  before: CustomerDto
+  onDone: () => void
+  onWithdrawn: () => void // 탈퇴 고객은 목록에 없어서 패널을 닫음
+}) {
+  const vm = useCustomerEdit(before, onDone, onWithdrawn)
   if (vm.searching)
     return (
       <AddressPicker
