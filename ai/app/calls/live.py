@@ -513,8 +513,7 @@ class LiveFlow:
                 if pending and pending.kind == "cancel":
                     facts = {"confirmation": "ask_again", "cancel_target": _order_facts(pending.snapshot)}
                 elif pending and st.current is not None:
-                    sources = {n: f.source for n, f in st.current.fields.items()}
-                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot, sources, self.policy),
+                    facts = {"confirmation": "ask_again", "readback": readback_facts(pending.snapshot),
                              "readback_id": pending.id}
             if facts:
                 s.note("확인 다시 묻기", value)

@@ -125,14 +125,20 @@ decision = "intent"
 
 [[stage]]
 id = "sender"
-goal = "보내는 분 정보를 받는다. 보내는 분 연락처는 발신번호로 채우고 묻지 않는다"
-required = ["sender_name", "sender_address", "sender_address_detail"]
+goal = "보내는 분 성함을 받는다. 보내는 분 연락처는 발신번호로 채우고 묻지 않는다"
+required = ["sender_name"]
 decision = "collect"
 
 [[stage]]
 id = "receiver"
-goal = "받는 분 정보를 받는다"
-required = ["receiver_name", "receiver_phone", "receiver_address", "receiver_address_detail"]
+goal = "받는 분 성함과 연락처를 받는다"
+required = ["receiver_name", "receiver_phone"]
+decision = "collect"
+
+[[stage]]
+id = "address"
+goal = "발송 주소·상세, 받는 곳 주소·상세 순으로 받는다. 두 주소가 다 갖춰지면 서버 결과 confirm_route로 동 이름만 확인한다"   # S15P31D109-164, 사용자 결정 2026-11-09
+required = ["sender_address", "sender_address_detail", "receiver_address", "receiver_address_detail"]
 decision = "collect"
 
 [[stage]]
@@ -209,7 +215,7 @@ use_skip = false
 
 [speech]                      # 읽는 규칙(README §5). P8: 지금은 사실·금지 표현만
 phone = "고객이 직접 불러 준 번호만 숫자를 끊어 읽는다"
-address = "주소는 시·구와 도로명·건물번호로 읽는다. 상세주소는 고객이 이번 통화에서 직접 말했고 서버가 readback에 넣어 준 경우에만 읽는다"
+address = "주소를 다시 물을 때는 시·구와 도로명·건물번호로 읽는다. 확인(confirm_route·readback)에서는 서버가 준 동 이름만 말하고 도로명·번지·상세주소는 읽지 않는다"
 amount = "접수번호와 요금은 서버가 준 값만 말한다"
 pickup = "수거 시각은 먼저 묻지 않는다. 서버 결과 pickup의 시각을 되읽기 때 안내하고, 고객이 바꾸고 싶어 하면 그 시각을 맡긴다"
 
@@ -220,13 +226,14 @@ draft_intake = "ready일 때만 방금 확인한 택배에 대해 '택배가 접
 orders = "조회 결과가 여러 건이고 lookup_order가 없으면 이름표로 어느 택배인지 먼저 확인한다. 후보를 고르기 전에 개별 택배 정보를 읽지 않는다"
 lookup_order = "선택된 택배의 조회 결과. status_text로 상태를 안내하고 고객이 요청한 항목을 함께 답한다. 전체 접수 내용을 확인해 달라고 하면 확인된 발송 주소·받는 곳 주소·물품·가액·요금 등 관련 정보를 짧게 정리한다. 배송 요청 사항은 고객이 묻는 경우에 안내하고, 그 안에 포함된 연락처나 상세주소는 읽지 않는다. 같은 택배에 대한 추가 질문은 이 결과를 사용한다. 없는 정보는 앞선 대화에서 추정하지 않는다. READY는 '이번 통화에서 접수된 택배입니다'라고 말하고 통화 종료 후 처리 문구나 접수 직후 안내를 반복하지 않는다. sender_address는 '발송 주소'라고 말한다"
 cancel_current = "none이면 지금 수집 중인 취소 대상이 없다. 이미 담은 다른 택배의 취소는 대상부터 확인한다"
-readback = "서버가 준 값만 되읽고 맞는지 묻는다. item_price가 없으면 가액 안내를 생략한다. 택배 접수 내용을 읽는 중 고객이 그대로 접수하라고 명확히 요청하면 읽기를 멈추고 서버의 확인 결과를 기다린다. 짧은 맞장구는 서버의 확인 질문과 답을 거쳐야 한다"
+readback = "접수 확인 내용(sender_name·from·to·receiver_name). '{sender_name}님이 {from}에서 {to}의 {receiver_name}님께 보내시는 것으로 확인했습니다. 이대로 접수할까요?'처럼 한 문장으로 말하고 반드시 질문으로 끝낸다(고객이 그 질문을 끝까지 듣고 답해야 확정된다). 주소·연락처·상세주소·물품·가액은 다시 읽지 않는다. 고객이 그대로 접수하라고 명확히 요청하면 서버의 확인 결과를 기다린다. 짧은 맞장구는 서버의 확인 질문과 답을 거쳐야 한다"
 box_proposal = "label에 있는 박스 크기와 개수를 '… 정도로 보면 될까요?'로 한 번 확인한다. 아직 기록된 규격이 아니므로 가액 질문이나 접수 확인으로 넘어가지 않는다"
 box_proposal_declined = "박스 후보를 고객이 거절했다. 소형·중형·대형 중 어느 정도인지와 개수를 확인한다"
 box_size_pending = "기존 물품 수량은 유지하고 추가 박스의 규격·개수를 확인 중이다. 서버 후보가 있으면 후보를 확인하고, 없으면 규격·개수를 물으며 가액이나 최종 접수 확인으로 넘어가지 않는다"
 box_request_removed = "규격을 확인 중이던 추가 박스만 제외했다. 기존 물품은 유지한다"
 missing = "현재 택배에 아직 받지 못한 필수 항목"
 needs = "다시 물어야 할 항목과 사유(예: PHONE_INVALID_DIGITS = 자릿수가 맞지 않음)"
+confirm_route = "발송 주소와 받는 곳 주소가 다 갖춰졌을 때의 동 이름(from·to). '{from}에서 {to}으로 보내시는군요.'처럼 한 번 말해 확인하고 다음 항목을 묻는다. 도로명·번지·상세주소는 읽지 않는다. 아니라고 하면 어느 주소가 틀렸는지 묻고 그 답을 맡긴다"
 phones_to_read = "고객이 이번 통화에서 직접 불러 주고 서버가 이 목록에 표시한 번호를 한 번 끊어 읽어 확인한다"
 more_parcels = "false면 더 보낼 택배가 없다"
 call_started = "true면 전화가 연결된 것이다. 고객 말을 기다리지 않고 바로 첫 인사를 한다(인사 규칙대로, 한 번만)"

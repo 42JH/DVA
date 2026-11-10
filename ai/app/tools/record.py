@@ -18,7 +18,7 @@ from pydantic import Field, create_model, model_validator
 
 from app.address.parse import detail_text
 from app.domain.address_book import save_offer
-from app.domain.assess import readback_facts
+from app.domain.assess import area_label, readback_facts
 from app.domain.confirm import issue_parcel_confirmation
 from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evidence, measurements, mentions,
                                      size_issues, supported_box_correction, unclassified_mentions)
@@ -236,11 +236,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             iso, moved = default_pickup(ctx.now(), rule)
             s.record("pickup_at", iso, Source.SERVER)
         if pending:  # 되읽기 gate 개방: 확인 내용을 이 결과로 준다(N1)
-            sources = {n: f.source for n, f in s.current.fields.items()}
-            facts["readback"] = readback_facts(pending.snapshot, sources, policy)
+            facts["readback"] = readback_facts(pending.snapshot)
             facts["readback_id"] = pending.id
             # 고객 정보·주소 저장은 묻지 않고 택배를 담을 때 한다(사용자 결정 2026-11-06). 여기서는 대상만 정해 둔다
             s.address_offer = save_offer(s) or None
+        elif any(a in facts["recorded"] for a in ADDRESSES) and all(s.field_of(a).valid for a in ADDRESSES):
+            # 두 주소가 갖춰진 순간 동 이름으로 한 번 확인(S15P31D109-164). 되읽기가 열리면 거기에 같은 값이 있다
+            facts["confirm_route"] = {"from": area_label(s.current["sender_address"].value, s.current.sender_geo),
+                                      "to": area_label(s.current["receiver_address"].value, s.current.receiver_geo)}
         if pending or "pickup_at" in values or any(n["field"] == "pickup_at" for n in needs):
             facts["pickup"] = {"at": s.pickup_at.value, "today_unavailable": moved, "allowed": describe(rule)}
         phones = [n for n in facts["recorded"] if n.endswith("_phone")]
@@ -466,7 +469,7 @@ def _apply_address(ctx: ToolContext, addr: str, r, given: dict, facts: dict, nee
     detail = f"{role}_address_detail"
     # 들은 문장에서 서버가 뗀 상세주소("… 오십삼백십이동 사백삼호" → 312동 403호)는 기본주소를 못 찾아도 기록해 둔다 —
     # 기본주소와 독립된 값이라 다시 묻지 않는다(결정 1, 2026-11-09). 모델이 따로 넘긴 상세보다 우선한다.
-    # 출처는 CUSTOMER: 고객이 말한 상세를 서버가 갈랐을 뿐이라 되읽기에 넣는다(readback_facts는 저장된 상세만 뺀다)
+    # 출처는 CUSTOMER: 고객이 말한 상세를 서버가 갈랐을 뿐이라 저장된 값(PIN·PROFILE)과 구분한다
     if r is not None and r.detail:
         if s.record(detail, r.detail, Source.CUSTOMER) and detail not in facts["recorded"]:
             facts["recorded"].append(detail)
