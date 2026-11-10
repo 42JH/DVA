@@ -996,3 +996,46 @@ def test_call_record_keeps_decision_io_backend_text_tool_args_and_delivery():
         await task
 
     run(scenario())
+
+
+def test_tool_call_on_answer_to_candidates_waits_for_pick():
+    """후보 답과 같은 턴의 Backend 도구 호출은 Decision 반영 뒤에 처리한다(운영 통화: 선택으로 연락처가 채워졌는데
+    Backend가 반영 전 상태로 연락처를 다시 물음)."""
+    from app.domain.candidates import offer
+    from app.domain.state import Geo, Place, Source
+
+    svc, client = flow()
+    label = "현수민 서구 서대신동3가"
+
+    async def slow_pick(model, input, questions):
+        await asyncio.sleep(0.3)  # Backend 도구 호출이 먼저 도착한다
+        return SimpleNamespace(answers=[choice("pick", label, 0.99)])
+
+    client.decisions.create = slow_pick
+
+    async def scenario():
+        task = asyncio.create_task(svc.on_incoming(incoming()))
+        await until(lambda: client.conns)
+        conn = client.conns[0]
+        conn.push(started())
+        s = svc.registry.calls["live_1"]
+        await until(lambda: s.phase == Phase.ACTIVE)
+        async with s.lock:
+            s.state.intent = "order"
+            s.state.record("receiver_name", "현수민")
+            pin = Place("현수민", "01055556666", "부산광역시 서구 대신공원로 1", "201호", Geo("x", "y", "00000"), Source.PIN)
+            offer(s.state, "destination", (label,), (pin,))
+        await ai(conn, f"{label}로 보내시나요?", 0)
+        await say(conn, "네 서대신동이요", 1500)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "d1"}, "offset_ms": 1600})
+        conn.push({"type": "response.event", "delegation_id": "d1", "event": {
+            "type": "response.output_item.done", "item": {"type": "function_call", "call_id": "c1",
+                                                         "name": "get_state", "arguments": "{}"}}})
+        await until(lambda: "response.item.create" in sent_types(conn), timeout=3.0)
+        conn.push({"type": "session.closed", "reason": "remote_hangup"})
+        await task
+        return conn
+
+    conn = run(scenario())
+    out = json.loads(next(e for e in conn.sent if e["type"] == "response.item.create")["item"]["output"])
+    assert out["fields"]["receiver_phone"] == "valid" and "receiver_phone" not in out["missing"]
