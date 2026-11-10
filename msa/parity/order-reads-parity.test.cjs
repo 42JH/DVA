@@ -390,7 +390,8 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
     const {requestReferences}=require('@dva/events/call-read-references.cjs');
     const address=Object.values(networkInterfaces()).flat().find(row=>row.family==='IPv4'&&!row.internal)?.address;
     const base='http://consultation-app:3004',token=process.env.CUSTOMER_AUTH_TOKEN;
-    const longPhone='입'.repeat(40000);
+    // Keep 120KB Unicode payloads without glibc comparing two long repeated Hangul prefixes.
+    const longPhone='scope:'+'입'.repeat(39998);assert.equal(Buffer.byteLength(longPhone),120000);
     const cases=[[15001,1,'different stored phone',true,'2030-01-01Z',false,null,200,1],
       [15002,null,'01000000001',true,'2030-01-01Z',false,null,200,1],
       [15003,null,'unknown caller',true,'2030-01-01Z',false,null,200,null],
@@ -527,7 +528,7 @@ test('four order read APIs preserve monolith HTTP and stored data across owner d
 
   });
   await t.test('parcel draft public reads preserve snapshots, all statuses, caller scope and filtered totals',async()=>{
-    const largePhone='입'.repeat(40000),retained=[];
+    const largePhone='reads:'+'입'.repeat(39998),retained=[];assert.equal(Buffer.byteLength(largePhone),120000);
     const old=(await reference.query("SELECT to_jsonb(clock_timestamp()-interval '2 days')#>>'{}' AS instant")).rows[0].instant;
     const contexts=[
       {id:16001,customer:1,phone:'different stored phone'}, {id:16002,customer:null,phone:'01000000001'},

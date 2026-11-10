@@ -16,7 +16,8 @@ test('production PBX, active count and SSE match with independent operations ses
     try{if((await fetch(side.base+side.health)).status===200)break;}catch{}
     assert.ok(retry<60,'production application did not start');await delay(250);
   }
-  const password='private-parity-test-password',hash=await hashPassword(password);
+  const password='private-parity-test-password',hashStart=Date.now(),hash=await hashPassword(password);
+  t.diagnostic('PBX fixture password hash: '+(Date.now()-hashStart)+'ms');
   for(const side of sides){
     await truncateFixture(side.db, 'TRUNCATE pbx_webhooks.call_ended_events,recordings,call_utterances,call_sessions RESTART IDENTITY CASCADE');
     await truncateFixture(side.identity, 'TRUNCATE admin_users,audit_logs RESTART IDENTITY CASCADE');
@@ -53,10 +54,21 @@ test('production PBX, active count and SSE match with independent operations ses
     const requestId=randomUUID(),results=[];
     for(const side of sides){
       const auth=path.startsWith('/api/auth/'),url=(auth?side.auth:side.base)+(options.proxy&&side===sides[1]?'/api'+path:path);
-      const response=await fetch(url,{method,redirect:'error',signal:AbortSignal.timeout(10000),headers:{Origin:options.origin??origin,'X-Request-Id':requestId,
-        ...(side.cookie&&options.session!==false?{Cookie:side.cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'}),
-        ...(options.bearer===undefined?{}:{Authorization:'Bearer '+options.bearer})},body:body===undefined?undefined:JSON.stringify(body)});
-      const text=await response.text();assert.equal(response.status,status,method+' '+path+' '+text);
+      // Password hashing shares the CI daemon's single CPU with the other parity containers.
+      const requestTimeout=path==='/api/auth/login'?30000:10000;
+      const began=Date.now();let response,text;
+      try{
+        response=await fetch(url,{method,redirect:'error',signal:AbortSignal.timeout(requestTimeout),headers:{Origin:options.origin??origin,'X-Request-Id':requestId,
+          ...(side.cookie&&options.session!==false?{Cookie:side.cookie}:{}),...(body===undefined?{}:{'Content-Type':'application/json'}),
+          ...(options.bearer===undefined?{}:{Authorization:'Bearer '+options.bearer})},body:body===undefined?undefined:JSON.stringify(body)});
+        text=await response.text();
+      }catch(error){
+        let activity;try{activity=(await side.db.query({text:"SELECT state,wait_event_type,wait_event,pg_blocking_pids(pid) AS blockers,left(query,180) AS query FROM pg_stat_activity WHERE usename=current_user AND pid<>pg_backend_pid()",query_timeout:1500})).rows;}catch{activity='unavailable';}
+        console.error('PBX request diagnostic '+JSON.stringify({method,url,elapsedMs:Date.now()-began,activity}));
+        throw new Error(method+' '+url+' failed after '+(Date.now()-began)+'ms',{cause:error});
+      }
+      if(options.login)t.diagnostic('PBX login '+side.base+': '+(Date.now()-began)+'ms');
+      assert.equal(response.status,status,method+' '+path+' '+text);
       const cookie=response.headers.get('set-cookie');
       if(options.login){assert.match(cookie,/^dva_session=[a-f0-9]{64};/);assert.match(cookie,/; Secure/);side.cookie=cookie.split(';')[0];}
       const data=text?normalize(JSON.parse(text)):undefined;
