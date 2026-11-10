@@ -9,7 +9,7 @@ import time
 
 from pydantic import Field
 
-from app.domain.candidates import offer
+from app.domain.candidates import apply_pick, offer
 from app.domain.state import DOCUMENT_ITEM_PRICE, Items, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.observability.trace import observe_latency
@@ -137,13 +137,22 @@ def offer_destination(state, found: list[Place], max_options: int, be_places: li
     if len(set(labels)) != len(labels):  # 구별되지 않는 이름표는 번호로
         labels = [f"{i}번 {label}" for i, label in enumerate(labels, 1)]
     offer(state, "destination", tuple(labels), tuple(chosen))
-    return ToolOutcome("needs_choice", "DEST_MANY" if len(chosen) > 1 else None,
-                       {"found": len(found), "labels": labels})
+    facts = {"found": len(found), "labels": labels}
+    if len(chosen) == 1:  # 서술형("확인했습니다")으로 넘어가면 고객의 답이 pick으로 들어올 자리가 없다(통화 d9b5208e)
+        facts["guidance"] = f"주소록 후보 1건. '{labels[0]}(으)로 보내시는 거 맞나요?'처럼 질문으로 확인하고 답은 서버가 듣는다."
+    return ToolOutcome("needs_choice", "DEST_MANY" if len(chosen) > 1 else None, facts)
 
 
 async def _offer(ctx: ToolContext, found: list[Place], be_places: list | None = None) -> ToolOutcome:
     async with ctx.lock:
-        return offer_destination(ctx.state, found, ctx.max_pin_options, be_places)
+        s, c = ctx.state, ctx.state.candidates
+        if len(found) == 1 and c is not None and c.kind == "destination" and found[0] in c.items:
+            # 이미 제시한 후보 중 하나로 좁혀짐 = 고객이 고른 것(모델이 find_destination으로 전달). 재제시하면 Decision pick이
+            # 하한에 걸렸을 때 받는 곳이 빈 채 도로명 주소를 다시 묻게 된다(통화 d9b5208e) — 서버가 바로 적용한다
+            apply_pick(s, c.labels[c.items.index(found[0])])
+            return ToolOutcome("ok", "DEST_PICKED", {"guidance": "고객이 고른 주소록의 받는 분으로 기록했다. 다시 확인하지 않고 빠진 항목만 묻는다."},
+                               summary=state_summary(s, ctx.policy))
+        return offer_destination(s, found, ctx.max_pin_options, be_places)
 
 
 # --- lookup_orders ---
