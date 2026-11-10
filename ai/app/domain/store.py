@@ -87,7 +87,8 @@ def item_issues_pending(state: ConversationState) -> bool:
 
 
 def is_pending_reconfirm(p: StoredParcel) -> bool:
-    return p.confirmed_hash is None or snapshot_hash(draft_snapshot(p.draft)) != p.confirmed_hash
+    return (p.draft.box_size_pending or p.confirmed_hash is None
+            or snapshot_hash(draft_snapshot(p.draft)) != p.confirmed_hash)
 
 
 def pending_reconfirm(state: ConversationState) -> list[str]:

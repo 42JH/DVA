@@ -105,7 +105,7 @@ def test_format_changes_and_numeric_faq_limits():
     c = ctx()
     c.state = filled()
     assert record(c, "쇼핑백 그대로예요", "format")["code"] == "UNSUPPORTED_FORMAT"
-    assert record(c, "중형 박스 하나에 담았어요", turn=2, medium_box_count=1)["can_proceed"]
+    assert record(c, "중형 박스 하나에 담았어요", turn=2, medium_box_count=1, small_box_count=0)["can_proceed"]
     assert c.state.current["items"].value == Items(medium_box_count=1)
     assert record(c, "가로 161cm에 무게 30kg이에요", turn=3, medium_box_count=1)["code"] == "ITEM_SIZE_EXCEEDED"
     c.item_utterance = (4, "한 변 160cm, 무게 30kg이에요")

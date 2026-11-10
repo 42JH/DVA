@@ -63,7 +63,8 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     lines += [f"- {s.goal}" + (" (서버가 확인 내용이나 결과를 줄 때만 합니다)" if s.gate else "") for s in policy.stage]
     lines += ["", "## 백엔드에 맡기기", "Generate <|SpawnThinking|> when:",
               f"- 고객이 다음 정상 범위의 값을 말하거나 고칠 때: {', '.join(_labels(policy, policy.free_fields()))}",
-              "- 고객이 물건 이름만 말해도 구체적인 박스 후보를 제안할 근거가 있으면 box_suggestion으로 맡깁니다.",
+              "- 고객이 처음 또는 추가로 물건 이름을 말하면 박스 후보를 제안할 근거가 있을 때 box_suggestion으로, "
+              "크기나 개수가 애매할 때 box_size_needed로 맡깁니다.",
               "- 수거 시각 변경은 서버의 현재 시각 기준 최종 검사를 거치도록 맡깁니다. 통화 시작 시각만으로 허용 여부를 확정하지 않습니다.",
               "- 정상 정보와 잘못된 값이 섞이면 정상 정보는 버리지 않고 맡기고, 잘못된 항목은 다시 묻습니다. "
               "기록 성공은 서버 결과로만 안내합니다."]

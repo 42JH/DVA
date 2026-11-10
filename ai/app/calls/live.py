@@ -502,7 +502,8 @@ class LiveFlow:
             await self.notify(s, "N2", {"box_proposal_declined": True})
             return
         ctx = replace(s.tools, item_utterance=(utt.utterance_id, utt.text))
-        out = await record_fields(ctx, RecordArgs(**{f"{box.size}_box_count": box.count}), expected_box=box)
+        field = f"{box.size}_box_count"
+        out = await record_fields(ctx, RecordArgs(add_item_counts=[field], **{field: box.count}), expected_box=box)
         if out.code == "RESULT_SUPERSEDED":
             return
         async with s.lock:

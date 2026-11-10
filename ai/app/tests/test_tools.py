@@ -134,14 +134,50 @@ def test_bad_phone_and_pickup_not_saved_other_values_are():
     assert call(c, "record_fields", {"pickup_at": TOMORROW})["facts"]["pickup"]["at"] == TOMORROW  # 수거 일시는 받지 않는다
 
 
-def test_items_replaced_as_whole_and_unspecified():
-    """물품은 매번 전체 구성으로 교체(S5 실통화: "중형 두 개" → "중형 아니라 소형" 정정에서 중형이 남으면 안 된다)."""
+def test_item_changes_preserve_unmentioned_counts_and_respect_explicit_removal():
     c = ctx()
-    call(c, "record_fields", {"medium_box_count": 2})
+    call(c, "record_fields", {"document_count": 10, "medium_box_count": 2})
     call(c, "record_fields", {"small_box_count": 2})
-    assert c.state.field_of("items").value == Items(small_box_count=2)
+    assert c.state.field_of("items").value == Items(document_count=10, small_box_count=2, medium_box_count=2)
+    call(c, "record_fields", {"medium_box_count": 0, "small_box_count": 3})
+    assert c.state.field_of("items").value == Items(document_count=10, small_box_count=3)
     assert call(c, "record_fields", {"small_box_count": 0, "document_count": 0})["code"] == "ITEM_UNSPECIFIED"
+    assert not c.state.field_of("items").valid
     assert call(c, "record_fields", {})["code"] == "NOTHING_TO_RECORD"
+
+
+def test_additional_box_without_a_size_blocks_old_readback_until_resolved():
+    from app.domain.confirm import commit_parcel, issue_parcel_confirmation
+    from app.tests.test_domain import filled
+
+    c = ctx()
+    c.state = filled(items=Items(document_count=10, small_box_count=1))
+    previous = issue_parcel_confirmation(c.state, c.policy, 100)
+    c.item_utterance = (1, "전자제품도 하나 보낼게요")
+    out = call(c, "record_fields", {"box_size_needed": "전자제품도 하나 보낼게요"})
+    assert out["code"] == "ITEM_BOX_SIZE_NEEDED" and out["box_size_pending"]
+    assert out["fields"]["items"] == "pending_choice" and not out["can_proceed"]
+    assert c.state.pending is None and commit_parcel(c.state, c.policy, previous.id) is None
+    assert "readback" not in call(c, "record_fields", {"item_price": 40000})["facts"]
+    c.item_utterance = (2, "그건 소형 박스 하나요")
+    args = {"small_box_count": 1, "add_item_counts": ["small_box_count"]}
+    out = call(c, "record_fields", args)
+    assert out["facts"]["readback"]["items"] == {"document_count": 10, "small_box_count": 2}
+    call(c, "record_fields", args)
+    assert c.state.current["items"].value == Items(document_count=10, small_box_count=2)
+    assert not c.state.current.box_size_pending
+
+
+def test_limits_apply_after_merging_existing_counts():
+    c = ctx()
+    initial = Items(document_count=100, medium_box_count=10)
+    c.state.record("items", initial)
+    out = call(c, "record_fields", {"small_box_count": 1, "document_count": 1,
+                                    "add_item_counts": ["document_count"]})
+    assert {need["reason"] for need in out["needs"]} == {"ITEM_BOX_LIMIT", "ITEM_DOCUMENT_LIMIT"}
+    assert c.state.current["items"].value == initial
+    out = call(c, "record_fields", {"medium_box_count": 9, "small_box_count": 1, "document_count": 100})
+    assert out["status"] == "ok" and not c.state.current.item_issues
 
 
 def test_address_confirmed_not_found_and_ambiguous(corrector, address):
