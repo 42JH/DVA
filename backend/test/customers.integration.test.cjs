@@ -1270,3 +1270,68 @@ test('customer deletion serializes reverse overlapping arrays and recovers after
   }
   assert.equal((await remove([held])).status, 204);
 });
+
+test('name search preserves short terms, literal punctuation and Unicode forms with phone/state/deletion filters', async () => {
+  const phonePrefix = '010' + String(randomInt(10000, 100000));
+  const names = [
+    'literal%_!\\Slash',
+    'MiXeD Case',
+    '가나다 NFC',
+    '가나다 NFD',
+    'AA!BB',
+    'AAZZBB',
+    '😀😀 literal',
+    '😀😀😀 literal',
+  ];
+  const rows = [];
+  for (const [index, name] of names.entries()) {
+    const id = await register({ name, phoneNumber: phonePrefix + String(index).padStart(3, '0') });
+    rows.push({ id, name, status: index === 1 ? 'WITHDRAWN' : 'ACTIVE' });
+  }
+  await patch(rows[1].id, { status: 'WITHDRAWN' }, adminHeaders());
+  const deleted = await register({ name: names[0], phoneNumber: phonePrefix + '999' });
+  await pool.query('UPDATE customers SET deleted_at=clock_timestamp() WHERE customer_seq=$1', [
+    deleted,
+  ]);
+  for (const q of [
+    '%',
+    '_',
+    '!',
+    '\\',
+    '%_!\\',
+    'mixed',
+    '가',
+    '가나다',
+    '가나다',
+    'AA',
+    'A',
+    '!BB',
+    'AA!BB',
+    '없는검색어',
+    '😀',
+    '😀😀',
+    '😀😀😀',
+  ]) {
+    for (const status of [undefined, 'ACTIVE', 'WITHDRAWN']) {
+      const query = new URLSearchParams({ q, phoneNumber: phonePrefix });
+      if (status) query.set('status', status);
+      const response = await request('?' + query, { headers: adminHeaders() });
+      assert.equal(response.status, 200);
+      const actual = await response.json();
+      const expected = rows
+        .filter(
+          (row) =>
+            row.name.toLowerCase().includes(q.toLowerCase()) && (!status || row.status === status),
+        )
+        .map((row) => row.id)
+        .toReversed();
+      assert.deepEqual(
+        actual.data.map((row) => row.customerSeq),
+        expected,
+        JSON.stringify({ q, status }),
+      );
+      assert.equal(actual.total_count, expected.length);
+      assert.equal(actual.hasNext, false);
+    }
+  }
+});
