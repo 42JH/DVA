@@ -9,7 +9,7 @@ import logging
 from pydantic import Field
 
 from app.domain.candidates import offer
-from app.domain.state import Place, Source
+from app.domain.state import DOCUMENT_ITEM_PRICE, Items, Place, Source
 from app.integrations.backend.gateway import BackendFailure
 from app.rag.schemas import Evidence, SearchContext
 from app.tools.context import ToolContext
@@ -208,9 +208,12 @@ def _draft_result(row: dict) -> dict:
 
 def lookup_order_facts(order: dict) -> dict:
     status = order.get("status")
+    details = dict(order.get("details") or {})
+    if details.get("item_price") == DOCUMENT_ITEM_PRICE and Items(**(details.get("items") or {})).documents_only():
+        details.pop("item_price")
     return {"receiver_name": order.get("receiver_name"), "status": status,
             "status_text": "접수된 택배" if status == "ACCEPTED" else status_text(status),
-            "source": "draft" if "draft_seq" in order else "order", **(order.get("details") or {})}
+            "source": "draft" if "draft_seq" in order else "order", **details}
 
 
 # --- search_manual ---

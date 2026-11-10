@@ -30,7 +30,8 @@ def render_input_rules(policy: Policy) -> str:
     limits, phone = policy.input_limits, policy.phone
     return "\n".join([
         "## 공통 입력 제한(페르소나·검색 자료의 다른 제한보다 우선)",
-        f"- 물품 가액: {limits.item_price_min:,}원~{limits.item_price_max:,}원(양 끝 포함).",
+        f"- 물품 가액: {limits.item_price_min:,}원~{limits.item_price_max:,}원(양 끝 포함). "
+        "서류를 제외한 물품에 이 범위를 적용합니다.",
         f"- 현재 받는 곳별 접수 묶음(parcel)마다 소형·중형·대형 박스 합계 최대 {limits.box_total_max}개.",
         f"- 서류는 같은 묶음에서 박스와 별도로 최대 {limits.document_max}개. 서류를 박스 합계에 더하지 않습니다.",
         "- 수거 가능 범위: " + describe(rule_of(policy.pickup)) + ". 시간대는 한국 시간입니다.",
@@ -71,7 +72,7 @@ def render_policy(policy: Policy, tools: tuple[tuple[str, str], ...] = ()) -> st
     if tools:
         lines += ["", "Backend tools:"] + [f"- {name}: {desc}" for name, desc in tools]
     lines += ["", "Do not generate <|SpawnThinking|> when:",
-              "- 고객이 말한 가액·수량·전화번호가 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
+              "- 고객이 말한 수량·전화번호 또는 서버가 요청한 물품 가액이 공통 입력 제한을 명백히 벗어나고 다른 정상 정보는 없을 때. "
               "도구 거절을 기다리지 말고 허용 범위를 설명해 해당 항목만 다시 묻습니다. 애매한 값은 추측하지 않고 확인합니다.",
               f"- 고객이 {', '.join(['예/아니요', '후보 고르기', *_labels(policy, choice)])}처럼 고르는 답을 할 때(서버가 직접 듣고 판단합니다)",
               "- 고객이 상담원 연결이나 통화 종료만 명확하게 요청할 때(서버가 직접 듣고 처리합니다).",

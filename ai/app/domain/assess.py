@@ -53,9 +53,12 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
     collecting = state.current is not None and not state.current.empty() or state.editing is not None
     items_blocked = state.unassigned_item_issues or state.current and (
         state.current.item_issues or state.current.box_size_pending)
+    documents_only = state.current is not None and state.current.documents_only()
     for s in policy.collect_stages():
         m, b = [], []
         for name in s.required:
+            if name == "item_price" and documents_only:
+                continue
             f = _field(state, name)
             blocked = name == "items" and items_blocked
             if blocked or f is None or not f.valid:
@@ -83,7 +86,7 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
 
     fields = [(n, _field(state, n)) for n in policy.fields]
     exceeded = tuple(n for n, f in fields if f is not None and f.attempts >= policy.reask.max_attempts
-                     and not f.valid)
+                     and not f.valid and not (n == "item_price" and documents_only))
     # 빠진 항목은 받는 중이거나, 접수 업무인데 아직 담은 택배가 없을 때만(담은 뒤 마무리 단계에서 전부 빠진 것처럼 보이지 않게)
     show_missing = collecting or (state.intent == "order" and not state.parcels)
     return Assessment(stage, stages, tuple(missing) if show_missing else (), readback_ready,
@@ -93,8 +96,11 @@ def assess(state: ConversationState, policy: Policy) -> Assessment:
 def readback_facts(snapshot: dict, sources: dict[str, Source | None], policy: Policy) -> dict[str, object]:
     """Live에 줄 확인 내용(읽어도 되는 값만, README §5): 발신번호·저장된 번호·저장된 상세주소는 빼고, geo는 넣지 않는다."""
     out = {}
+    items = snapshot.get("items")
     for name, value in snapshot.items():
         if name not in policy.fields or value is None:
+            continue
+        if name == "item_price" and items and items.documents_only():
             continue
         src = sources.get(name)
         if name.endswith("_phone") and src != Source.CUSTOMER:

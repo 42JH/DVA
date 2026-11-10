@@ -24,7 +24,7 @@ from app.domain.parcel_items import (ItemIssue, contextual_keyword, excluded_evi
                                      size_issues, supported_box_correction, unclassified_mentions)
 from app.domain.pickup import check_pickup, default_pickup, describe, rule_of
 from app.domain.rules import normalize_phone, parse_pickup
-from app.domain.state import BoxProposal, ConversationState, Items, Source
+from app.domain.state import BoxProposal, ConversationState, Items, ParcelDraft, Source
 from app.domain.store import hold_items, open_for_edit
 from app.observability.trace import observe_latency
 from app.policy.model import InputLimits, Policy
@@ -71,7 +71,8 @@ class RecordArgs(Args):
     omit_unconfirmed_box: str | None = Field(None, min_length=1, max_length=200, description="확인 중인 추가 박스만 제외해 달라는 고객 발화 원문")
     item_evidence: list[ItemEvidence] | None = Field(None, max_length=12, description="고객이 언급한 제한 품목·포장·규격 초과의 근거")
     omit_blocked_parcel: str | None = Field(None, max_length=200, description="문제 택배 전체를 빼 달라는 고객 발화 원문")
-    item_price: int | None = Field(None, description="물품 가액(원). 예: 만 원 → 10000")
+    item_price: int | None = Field(None, description="서류·배송비를 제외한 물품의 대략적인 가액 합계(원). "
+                                                    "고객이 말한 기준 금액을 정수로 넣는다. 예: 10만 원 안 될 것 같아요 → 100000")
     client_comment: str | None = Field(None, max_length=100, description="배송 요청 사항(고객이 말했을 때만)")
     pickup_at: str | None = Field(None, max_length=40, description="고객이 수거 시각을 바꿀 때만. 한국 시간 ISO 8601"
                                   "(예: 2026-11-05T10:00:00+09:00). 오늘·내일은 지시문의 현재 시각 기준")
@@ -154,8 +155,6 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             values["receiver_phone"] = phone
         else:
             needs.append({"field": "receiver_phone", "reason": "PHONE_INVALID_DIGITS"})
-    if "item_price" in given:
-        values["item_price"] = given["item_price"]
     rule = rule_of(policy.pickup)
     if "pickup_at" in given:  # 고객 조정: 형식 → 업무 범위(1시간 이후·09~17시·3일 이내)
         now = ctx.now()
@@ -182,7 +181,14 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
         if expected_box is not None and (draft.box_proposal is not expected_box or s.intent != "order" or s.pending):
             return ToolOutcome("needs_input", "RESULT_SUPERSEDED", summary=state_summary(s, policy))
+        old_items = draft["items"].value if draft["items"].valid else None
+        was_box_pending = draft.box_size_pending
         _check_items(ctx, args, item_parts, facts, needs)
+        failed_items = {"RESULT_SUPERSEDED", "ITEM_BOX_LIMIT", "ITEM_DOCUMENT_LIMIT"}
+        if s.current is draft and not any(need["reason"] in failed_items for need in needs):
+            price = _price_for_items(s, draft, old_items, was_box_pending, args.item_price, facts)
+            if price is not None:
+                values["item_price"] = price
         for name, value in values.items():
             prev = s.field_of(name)
             was = prev.value if prev.valid else None
@@ -201,7 +207,7 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
             _apply_address(ctx, addr, r, given, facts, needs)
         for name in invalid_fields(needs):
             s.record_invalid(name, next(n["reason"] for n in needs if n["field"] == name))
-        changed = bool(facts["recorded"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal")
+        changed = bool(facts["recorded"] or facts["cleared"] or facts.get("blocked_parcel_omitted") or facts.get("box_proposal")
                        or facts.get("box_request_removed"))
         if changed:
             s.awaiting_fix = False
@@ -228,6 +234,20 @@ async def record_fields(ctx: ToolContext, args: RecordArgs, *, expected_box: Box
         status = "needs_input" if needs else "ok"
         code = needs[0]["reason"] if needs else "NOTHING_CHANGED" if nothing else None
         return ToolOutcome(status, code, facts, needs, state_summary(s, policy))
+
+
+def _price_for_items(state: ConversationState, draft: ParcelDraft, old_items: Items | None, was_box_pending: bool,
+                     heard: int | None, facts: dict) -> int | None:
+    documents_only = draft.documents_only()
+    items = draft["items"].value if draft["items"].valid else Items()
+    changed_goods = old_items is not None and (_box_total(old_items), old_items.other_item) != (
+        _box_total(items), items.other_item)
+    # 추가 박스를 묻기 시작할 때 기존 합계를 지운다. 후보를 확인하기 전에 새로 들은 합계는 유지한다.
+    invalidate = documents_only or not was_box_pending and (draft.box_size_pending or changed_goods)
+    if invalidate and (documents_only or heard is None) and draft["item_price"].valid:
+        state.clear("item_price")
+        facts["cleared"].append("item_price")
+    return None if documents_only else heard
 
 
 def _check_items(ctx: ToolContext, args: RecordArgs, counts: dict, facts: dict, needs: list[dict]) -> None:

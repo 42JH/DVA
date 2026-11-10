@@ -48,7 +48,7 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
     async def scenario():
         s.state.record("items", Items(document_count=10))
         s.tools.clock = lambda: 100
-        combined = await run_tool(s.tools, "record_fields", '{"small_box_count": 1}', "mixed-items")
+        combined = await run_tool(s.tools, "record_fields", '{"small_box_count": 1, "item_price": 30000}', "mixed-items")
         assert combined["facts"]["readback"]["items"] == {"document_count": 10, "small_box_count": 1}
         pending = s.state.pending
         readback = Spoken(1, "접수 내용 확인 부탁드릴게요. 받는 분은", 3000, 4800, 101, 101)
@@ -109,6 +109,28 @@ def test_live_confirmation_saves_and_lookup_combines_both_sources(tmp_path):
         assert len(db.orders) == 2 and not db.results  # 기존 주문 + 이번 통화 주문, 레거시 POST 없음
 
     run(add_and_end())
+
+
+def test_documents_only_ready_stores_one_won_and_hides_the_amount_from_speech(tmp_path):
+    intake, results, db, s = setup_intake(tmp_path)
+    svc, _ = flow()
+    svc.intake, svc.results = intake, results
+    lf = LiveFlow(svc)
+
+    async def scenario():
+        result = await run_tool(s.tools, "record_fields", '{"document_count": 100, "small_box_count": 0}', "docs")
+        assert result["can_proceed"] and "item_price" not in result["missing"]
+        assert result["facts"]["readback"]["items"] == {"document_count": 100}
+        assert "item_price" not in result["facts"]["readback"]
+        await lf.commit(s, s.state.pending.id)
+        [draft] = db.drafts.values()
+        assert draft["status"] == "READY" and draft["parcel"]["itemPrice"] == 1
+        s.state.intent = "lookup"
+        result = await run_tool(s.tools, "lookup_orders", "{}", "lookup-docs")
+        facts = result["facts"]["lookup_order"]
+        assert facts["items"] == {"document_count": 100} and "item_price" not in facts
+
+    run(scenario())
 
 
 @pytest.mark.parametrize("b_status", ["local", "EDITING", "READY"])
