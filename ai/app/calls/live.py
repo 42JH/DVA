@@ -22,7 +22,8 @@ from app.domain.assess import assess, readback_facts
 from app.domain.candidates import apply_pick, offer, reject_candidates
 from app.domain.claims import truth, unverified_claims
 from app.domain.confirm import (ConfirmAnswer, Utterance, asks, asks_parcel_confirmation, check_gate, commit_parcel,
-                                issue_cancel_confirmation, issue_parcel_confirmation, release, take_cancel)
+                                explicitly_requests_parcel, issue_cancel_confirmation, issue_parcel_confirmation,
+                                release, take_cancel)
 from app.domain.state import BOX_SIZE_NAMES, BoxProposal, ConversationState
 from app.domain.store import hold_unclassified_items, item_issues_pending
 from app.observability.trace import span
@@ -318,7 +319,9 @@ class LiveFlow:
                     followups.append(("origin", None))
             if "confirm" in answers and pending_id:
                 confirmation = answers["confirm"]
-                if confirmation[0] != "proceed" or not switch or switch[1] < th or switch[0] == "none":
+                explicit = confirmation[0] == "proceed" or (
+                    confirmation[0] == "yes" and explicitly_requests_parcel(utt.text))
+                if not explicit or not switch or switch[1] < th or switch[0] == "none":
                     followups.append(self._on_confirm(s, utt, prev, confirmation, pending_id))
             elif (c := answers.get("confirm")) and c[0] in ("yes", "proceed") and c[1] >= self.policy.confirm.yes_min:
                 # 확인 대기 없이 온 '네'(Live가 서버 되읽기 없이 물음): 확정하지 않고 서버 되읽기로 다시 묻는다
@@ -371,15 +374,15 @@ class LiveFlow:
                           prev.utterance() if prev else None, latest_applied_utterance=None, closed=s.closed)
         if not gate.ok:
             s.note("확인 관문", gate.code)
-            if gate.code in ("CONFIRM_UNCLEAR", "CONFIRM_BEFORE_READBACK_END") and not self._delegation_in(s, utt):
-                # 애매한 '네'는 확정하지 않되 다시 묻게 한다(알리지 않으면 Live가 기다리다 무음 종료, 운영 통화 b8f3795c).
-                # 같은 발화로 위임이 돌면 고친 값의 되읽기가 따라오므로 묻지 않는다
+            if gate.code in ("CONFIRM_UNCLEAR", "CONFIRM_BEFORE_READBACK_END"):
+                if delegations := self._delegations_for(s, utt):
+                    return ("ask_confirm_after_delegation", (pending_id, utt.utterance_id, delegations))
                 return ("ask_confirm", pending_id)
             return None
-        if self._delegation_in(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
+        if delegations := self._delegations_for(s, utt):  # G6: 같은 발화의 위임이 끝난 뒤 다시 본다
             s.note("확인 관문", "COMMIT_HELD_FOR_DELEGATION")
             rt.confirm_t = utt.t_last
-            return ("hold", (pending_id, utt.utterance_id))
+            return ("hold", (pending_id, utt.utterance_id, delegations))
         rt.confirm_t = utt.t_last
         self._arm_commit(s, pending_id)
         return None
@@ -477,14 +480,32 @@ class LiveFlow:
     async def _follow(self, s: CallSession, what: str, value) -> None:
         st = s.state
         if what == "hold":
-            pending_id, utterance_id = value
-            await self._wait_delegations(s)
+            pending_id, utterance_id, delegations = value
+            await self._wait_delegations(s, delegations=delegations)
+            retry = False
             async with s.lock:  # G2 재검사는 commit에서
                 rt = self.rt(s)
-                if (not s.closed and st.pending and st.pending.id == pending_id
+                if (s.phase == Phase.ACTIVE and not s.closed and st.pending and st.pending.id == pending_id
                         and rt.latest_applied == utterance_id
+                        and not any(d.get("needs") for d in delegations)
                         and (not rt.customer_turns or rt.customer_turns[-1].utterance_id == utterance_id)):
-                    self._arm_commit(s, pending_id)
+                    if all(d["done"].is_set() for d in delegations):
+                        self._arm_commit(s, pending_id)
+                    else:
+                        retry = True
+            if retry:
+                await self._follow(s, "ask_confirm", pending_id)
+        elif what == "ask_confirm_after_delegation":
+            pending_id, utterance_id, delegations = value
+            await self._wait_delegations(s, delegations=delegations)
+            async with s.lock:
+                rt = self.rt(s)
+                if (s.phase != Phase.ACTIVE or not st.pending or st.pending.id != pending_id
+                        or rt.latest_applied != utterance_id
+                        or rt.customer_turns and rt.customer_turns[-1].utterance_id != utterance_id
+                        or any(d.get("needs") or d.get("readback_sent_id") == pending_id for d in delegations)):
+                    return
+            await self._follow(s, "ask_confirm", pending_id)
         elif what == "ask_confirm":
             async with s.lock:
                 pending = st.pending if st.pending and st.pending.id == value else None
@@ -914,8 +935,12 @@ class LiveFlow:
             self.rt(s).await_speech = ("재개→AI 발화", time.time())
             offer = d.pop("readback_offer", None)
             marked = offer is not None and self._mark_readback(s, *offer)
-            if not await self.send(s, {"type": "response.create"}) and marked:
-                self.rt(s).readback_id = None
+            delivered = await self.send(s, {"type": "response.create"})
+            if marked:
+                if delivered:
+                    d["readback_sent_id"] = offer[0]
+                else:
+                    self.rt(s).readback_id = None
 
     def _mark_readback(self, s: CallSession, pending_id: str, customer_turn: int) -> bool:
         rt, pending = self.rt(s), s.state.pending
@@ -927,13 +952,21 @@ class LiveFlow:
         return True
 
     def _delegation_in(self, s: CallSession, utt: Spoken) -> bool:
-        lo, hi = utt.start_ms, utt.end_ms + self.cfg.utterance_gap_ms
-        return any(d["offset_ms"] is not None and lo <= d["offset_ms"] <= hi for d in self._open(s))
+        return bool(self._delegations_for(s, utt))
 
-    async def _wait_delegations(self, s: CallSession, timeout: float = 6.0) -> None:
-        events = [d["done"] for d in self._open(s)]
-        if events:
-            await asyncio.wait([asyncio.create_task(e.wait()) for e in events], timeout=timeout)
+    def _delegations_for(self, s: CallSession, utt: Spoken) -> list[dict]:
+        lo, hi = utt.start_ms, utt.end_ms + self.cfg.utterance_gap_ms
+        return [d for d in self._open(s) if d["offset_ms"] is not None and lo <= d["offset_ms"] <= hi]
+
+    async def _wait_delegations(self, s: CallSession, timeout: float = 6.0, *, delegations: list[dict] | None = None) -> None:
+        tasks = [asyncio.create_task(d["done"].wait()) for d in (self._open(s) if delegations is None else delegations)]
+        if tasks:
+            try:
+                await asyncio.wait(tasks, timeout=timeout)
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
 
     # ------------------------------------------------------------------ 전달(N1'/N2/N3)
     async def notify(self, s: CallSession, level: str, facts: dict, again: bool = False) -> None:

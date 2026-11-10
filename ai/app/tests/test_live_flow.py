@@ -119,6 +119,7 @@ def test_item_restriction_from_transcript_without_a_model_tool_call(tmp_path):
     ("받는 분 이영희님, 연락처 공일공 구팔칠육 오사삼이. 맞으세요?", "네 맞아요", 7000),
     ("변경된 받는 분은 이영희님입니다. 이대로 접수할까요?", "어 접수해 주세요", 7000),
     ("변경된 받는 분은 이영희님이고, 연락처는", "어 접수해 주세요", 5300),
+    ("받는 분은 이영희님이고, 연락처는", "네, 그렇게 접수해 주세요", 5300),
 ])
 def test_order_flow_end_to_end(tmp_path, readback, answer, answer_at):
     svc, client = flow(tmp_path)
@@ -147,7 +148,14 @@ def test_order_flow_end_to_end(tmp_path, readback, answer, answer_at):
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
         await ai(conn, readback, 5000)
         assert s.rt.ai[-1].readback_id == s.state.pending.id
+        with_delegation = answer.startswith("네,")
+        if with_delegation:
+            conn.push({"type": "session.delegation.created", "delegation": {"id": "consent"}, "offset_ms": answer_at})
         await say(conn, answer, answer_at)
+        if with_delegation:
+            assert not s.state.parcels
+            assert any(event["text"] == "COMMIT_HELD_FOR_DELEGATION" for event in s.events)
+            conn.push({"type": "response.event", "delegation_id": "consent", "event": {"type": "response.completed"}})
         await until(lambda: s.state.parcels)
         assert not any(event["kind"] == "확인 다시 묻기" for event in s.events)
         await until(lambda: "session.commentary.append" in sent_types(conn))   # N2: 담기 완료
@@ -302,8 +310,7 @@ def test_proceed_request_without_question_reasks_confirmation_then_yes_commits(t
 
 
 def test_unclear_yes_reasks_each_time_then_clear_yes_commits(tmp_path):
-    """운영 통화 b8f3795c: 애매한 '네'(yes 0.56)는 확정하지 않고 Live에 아무것도 안 보내 32초 멈춘 뒤 무음 종료.
-    이제 확정 없이 다시 묻게 하고(두 번째 애매한 답에도), 분명한 '네'에 확정한다."""
+    """되읽기 중 짧은 동의의 위임이 말만 하고 끝나면 한 번 재질문한다. 이후 분명한 '네'에 확정한다."""
     svc, client = flow(tmp_path)
 
     async def scenario():
@@ -322,8 +329,11 @@ def test_unclear_yes_reasks_each_time_then_clear_yes_commits(tmp_path):
         await until(lambda: s.state.pending)
         conn.push({"type": "response.event", "delegation_id": "d1", "event": {"type": "response.completed"}})
         asks = lambda: [e for e in conn.sent if e["type"] == "session.commentary.append" and "ask_again" in e["content"]]  # noqa: E731
-        await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 5000)
-        await say(conn, "음 그렇게 해줘", 6500)
+        await ai(conn, "받는 분 이영희님이고 연락처는", 5000)
+        conn.push({"type": "session.delegation.created", "delegation": {"id": "words-only"}, "offset_ms": 5300})
+        await say(conn, "네", 5300)
+        assert not asks() and not s.state.parcels
+        conn.push({"type": "response.event", "delegation_id": "words-only", "event": {"type": "response.completed"}})
         await until(lambda: len(asks()) == 1)
         await ai(conn, "받는 분 이영희님, 이대로 접수할까요?", 7500)
         await say(conn, "음 그렇게 해줘", 9000)
