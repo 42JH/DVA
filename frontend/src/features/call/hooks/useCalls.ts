@@ -80,7 +80,7 @@ export function useCalls() {
       startedAt: dateTime(d.startedAt),
       name: row.customerName ?? '',
       isNew: row.isNew === true,
-      company: memberOf(d),
+      kind: d.organizationName ? '기업' : memberOf(d), // 목록은 구분만 — 기업명은 통화 상세에서
       phone: row.callerNumber ? fmtPhone(row.callerNumber) : '',
       kinds: callKinds(row.counts),
       analyzed: row.counts !== null,

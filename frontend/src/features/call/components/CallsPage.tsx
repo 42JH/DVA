@@ -13,7 +13,7 @@ const COLS = [
   { label: '상태', className: 'w-[80px]' },
   { label: '시작', className: 'w-[140px]' },
   { label: '고객', className: 'w-[150px]' },
-  { label: '기업', className: 'w-[180px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
+  { label: '구분', className: 'w-[80px] max-[1600px]:hidden' }, // 1600 아래에선 숨김 (통화 상세에 있음)
   { label: '전화번호', className: 'w-[130px]' },
   { label: '접수 주문', className: 'w-[110px]' },
   { label: '고객 용건', className: '', chips: 'kinds' }, // 폭은 useChipColumns가 칩에 맞춰 정함
@@ -116,7 +116,7 @@ function useChipColumns(ref: RefObject<HTMLTableElement | null>, rows: unknown) 
     }
     const measure = () => {
       const fixed = [...t.querySelectorAll<HTMLElement>('thead th')]
-        .filter((th) => !th.dataset.chipsCol && th.offsetWidth > 0) // 숨긴 칸(1600 아래 기업 · 통화 시간)은 0
+        .filter((th) => !th.dataset.chipsCol && th.offsetWidth > 0) // 숨긴 칸(1600 아래 구분 · 통화 시간)은 0
         .reduce((sum, th) => sum + th.offsetWidth, 0)
       const kinds = Math.max(KINDS_BASE, widest('kinds'))
       setKindsWidth(kinds)
@@ -173,17 +173,18 @@ function Row({ r, from, onWarm }: { r: CallsRow; from: string; onWarm: () => voi
         </span>,
       )}
       {cell(
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate font-medium">{r.name}</span>
+        // 이름만 가운데 — 신규는 흐름 밖(absolute)에 두어 이름 위치를 밀지 않음
+        <span className="relative min-w-0">
+          <span className="block truncate font-medium">{r.name}</span>
           {r.isNew && (
-            <span className="shrink-0 rounded bg-ops-route-soft px-1 text-[11px] font-semibold text-ops-route">
+            <span className="absolute top-1/2 left-full ml-1.5 -translate-y-1/2 rounded bg-ops-route-soft px-1 text-[11px] font-semibold whitespace-nowrap text-ops-route">
               신규
             </span>
           )}
         </span>,
       )}
       {cell(
-        <span className="truncate text-[13px]">{r.company}</span>,
+        <span className="text-[13px] whitespace-nowrap">{r.kind}</span>,
         false,
         'center',
         'max-[1600px]:hidden',

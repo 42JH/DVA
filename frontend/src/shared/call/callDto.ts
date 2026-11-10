@@ -248,6 +248,12 @@ export function durationSec(startedAt: string | null, endedAt: string | null): n
   return Math.max(0, Math.round((Date.parse(endedAt) - Date.parse(startedAt)) / 1000))
 }
 
+/** 고객을 못 찾은 통화(번호만 있음)는 AI가 신규라 해도 신규로 안 봄 — 미등록 발신자를 신규로 부를지 팀 결정 전 (11/10) */
+function isNewOf(c: CallDto, isNewCustomer: boolean | null | undefined): boolean | null {
+  if (c.customerSeq === null || c.customerName === null) return null
+  return isNewCustomer ?? null
+}
+
 export function toCallRow(d: CallListItemDto): CallRow {
   const a = d.analysis
   return {
@@ -256,7 +262,7 @@ export function toCallRow(d: CallListItemDto): CallRow {
     customerName: d.customerName,
     company: d.organizationName ?? null,
     callerNumber: digits(d.callerPhoneNumber),
-    isNew: a?.isNewCustomer ?? null,
+    isNew: isNewOf(d, a?.isNewCustomer),
     counts: countsOf(a),
     complaints: (a?.complaints ?? []).map((c) => ({ type: c.type, reason: c.evidenceText })),
     persona: a?.personaName ?? null,
@@ -300,7 +306,7 @@ export function toCallDetail(
     startedAt: d.call.startedAt,
     durationSec: durationSec(d.call.startedAt, d.call.endedAt),
     callerNumber: digits(d.call.callerPhoneNumber),
-    isNew: a?.isNewCustomer ?? null,
+    isNew: isNewOf(d.call, a?.isNewCustomer),
     counts: countsOf(a),
     persona:
       a?.personaName && a.personaVersion !== null
