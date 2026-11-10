@@ -11,6 +11,7 @@ import { Pagination } from '@/shared/ui/Pagination'
 import { usePageSize } from '@/shared/lib/paging'
 import { MemberCsvModal, MemberFormModal } from './CompanyModals'
 import { CompanyBilling } from './CompanyBilling'
+import { PaymentSettingsModal } from './PaymentSettingsModal'
 import { Confirm } from '@/shared/ui/Modal'
 
 export function CompanyPage() {
@@ -31,6 +32,10 @@ export function CompanyPage() {
           label="사원 검색"
         />
         <span className="ml-auto flex gap-2">
+          <Btn onClick={vm.openPayment}>
+            <Icon name="gear" />
+            결제 설정
+          </Btn>
           <Btn kind="primaryLime" onClick={vm.openCsv}>
             <Icon name="sheet" />
             CSV로 사원 등록
@@ -165,6 +170,7 @@ export function CompanyPage() {
           삭제합니다. 고객 정보와 지난 주문은 남습니다.
         </Confirm>
       )}
+      {vm.modal?.kind === 'payment' && <PaymentSettingsModal id={id} onClose={vm.close} />}
       {vm.modal?.kind === 'csv' && (
         <MemberCsvModal companyId={id} companyName={vm.name} onClose={vm.close} />
       )}

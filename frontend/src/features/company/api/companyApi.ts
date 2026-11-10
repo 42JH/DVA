@@ -69,6 +69,7 @@ export interface MemberItem extends MemberInput {
 interface Department {
   departmentSeq: number
   name: string
+  groupBillingEnabled: boolean // 그룹 카드 — 이 부서 사원만 쓸 수 있음 (부서 없는 사원은 못 씀)
 }
 
 /** BillingMonth — 금액 단위 원. 기업 삭제 뒤에도 그 달 기업명은 남아 있음 */
@@ -171,6 +172,10 @@ export const createCompany = async (
 /** 기업 월결제 사용 여부 변경 — PATCH /companies/{id} 204. 이름 · 상태는 안 보내면 그대로 */
 export const setMonthlyBilling = (id: number, enabled: boolean): Promise<void> =>
   api.patch(`/companies/${id}`, { body: { monthlyBillingEnabled: enabled } })
+
+/** 부서 그룹 카드 사용 여부 변경 — PATCH /departments/{id} 204. 이름은 안 보내면 그대로 */
+export const setGroupBilling = (departmentSeq: number, enabled: boolean): Promise<void> =>
+  api.patch(`/departments/${departmentSeq}`, { body: { groupBillingEnabled: enabled } })
 
 /** 기업 삭제 — 소속 · 부서 · 기업 PIN 삭제, 고객 · 주문 · 통화 이력은 보존 */
 export const deleteCompany = (id: number): Promise<void> => api.delete(`/companies/${id}`)
