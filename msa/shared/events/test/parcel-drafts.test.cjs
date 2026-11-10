@@ -92,3 +92,41 @@ test('draft visibility references preserve microseconds, bound scope inputs and 
   await assert.rejects(requestDraftCallReferences(url+'?private=1',token,{callIds:[1],customerIds:[2],phones:[]}));
   await assert.rejects(requestDraftCallReferences(url,'short',{callIds:[1],customerIds:[2],phones:[]}));
 });
+
+
+test('draft read scopes preserve anonymous and stored-customer context without large request bodies',async()=>{
+  const {validateDraftRead,requestDraftReadCall}=require('../parcel-drafts.cjs');
+  const {requestDraftRead,OrderReadError}=require('../order-read.cjs');
+  const scopeId=randomUUID(),input={eventId:scopeId,source:'order',eventType:'ParcelDraftReadRequested',payload:{command:{operation:'ParcelDraftsListed',id:null,callSessionSeq:1,query:{limit:20,offset:0,status:'ALL'}},orderAddress:null}};
+  validateDraftRead(input,'order');
+  const {validateDraftReadResult}=require('../parcel-drafts.cjs');
+  const row={draftSeq:3,reservedOrderSeq:7,callSessionSeq:1,customerSeq:null,callerPhoneNumber:null,createdByAdminUserSeq:null,clientParcelId:randomUUID(),parcel:{legacy:{keep:'unchanged'}},status:'EDITING',version:1,sourceDraftSeq:null,orderSeq:null,orderParcelSeq:null,legacyOrderSeq:null,legacyOrderParcelSeq:null,createdAt:'2030-01-01T00:00:00.000Z',updatedAt:'2030-01-01T00:00:00.000Z',retentionStartedAt:'2030-01-01T00:00:00.000Z'};
+  validateDraftReadResult({data:[row],hasNext:false,total_count:1},input.payload.command);
+  const detail={...input.payload.command,operation:'ParcelDraftDetailRead',id:3,query:{}};
+  validateDraftReadResult({...row,intakeVersion:null},detail);
+  assert.throws(()=>validateDraftReadResult({...row,intakeVersion:null,creationPayload:{}},detail));
+  assert.throws(()=>validateDraftReadResult({...row,draftSeq:4,intakeVersion:1},detail));
+
+  for(const changed of [{...input,source:'customer'},{...input,payload:{...input.payload,orderAddress:'127.0.0.1'}},{...input,payload:{...input.payload,command:{...input.payload.command,query:{limit:20,offset:0,status:'notPaid'}}}}])assert.throws(()=>validateDraftRead(changed,'order'));
+  const oldFetch=global.fetch;let mode='call',seen=0;const rawPhone='긴'.repeat(400000);
+  global.fetch=async(url,options)=>{
+    seen++;const request=JSON.parse(options.body);assert.ok(Buffer.byteLength(options.body)<4096);
+    if(mode==='error')return Response.json({error:{code:'FORBIDDEN',message:'source scope',details:[]}},{status:403});
+    const call={callSessionSeq:1,callerPhoneNumber:rawPhone,customerSeq:null,enabled:true,endedAt:'2030-01-01T00:00:00.123456+00:00',intakeVersion:1};
+    if(request.eventType==='ParcelDraftReadCallRequested'){
+      assert.equal(options.headers['X-Msa-Read-Scope'],scopeId);
+      if(mode==='wrongCall')call.callSessionSeq=2;
+      return Response.json({eventId:request.eventId,status:'processed',payload:call});
+    }
+    const payload={data:[],hasNext:false,total_count:0};if(mode==='extra')payload.secret=true;
+    return Response.json({eventId:mode==='wrong'?randomUUID():request.eventId,status:'processed',payload});
+  };
+  try {
+    assert.equal((await requestDraftReadCall('http://consultation/private',token,1,scopeId,'customer')).callerPhoneNumber,rawPhone);
+    mode='wrongCall';await assert.rejects(requestDraftReadCall('http://consultation/private',token,1,scopeId));
+    mode='ok';assert.deepEqual(await requestDraftRead('http://consultation/private',token,input),{data:[],hasNext:false,total_count:0});
+    for(mode of ['extra','wrong'])await assert.rejects(requestDraftRead('http://consultation/private',token,input));
+    mode='error';await assert.rejects(requestDraftRead('http://consultation/private',token,input),error=>error instanceof OrderReadError&&error.status===403&&error.error.message==='source scope');
+    const before=seen;await assert.rejects(requestDraftReadCall('http://consultation/private',token,1,'invalid'));await assert.rejects(requestDraftRead('http://user:pass@consultation/private',token,input));assert.equal(seen,before);
+  } finally {global.fetch=oldFetch;}
+});

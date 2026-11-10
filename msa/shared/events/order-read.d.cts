@@ -31,3 +31,5 @@ export interface AdminOrderReadResult {
 }
 export function validateAdminOrderRead(event:unknown,source:AdminOrderReadEvent['source']):asserts event is AdminOrderReadEvent;
 export function requestAdminOrderRead(url:string,token:string,event:AdminOrderReadEvent):Promise<AdminOrderReadResult>;
+
+export function requestDraftRead(url:string,token:string,event:import('./parcel-drafts.cjs').DraftReadEvent):Promise<unknown>;

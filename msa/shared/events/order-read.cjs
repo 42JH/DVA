@@ -84,15 +84,17 @@ function adminPage(value,limit) {
     value.data.every(row=>keys(row,'createdAt,customerSeq,draftSeq,orderSeq,organizationName,parcels,pickupRequestedAt,status')&&id(row.orderSeq)&&nullable(row.customerSeq,id)&&nullable(row.draftSeq,id)&&nullable(row.organizationName,text)&&instant(row.createdAt)&&nullable(row.pickupRequestedAt,instant)&&ORDER_STATUSES.includes(row.status)&&
       Array.isArray(row.parcels)&&row.parcels.every(p=>keys(p,'bigBoxCount,destination,documentCount,mediumBoxCount,orderParcelSeq,origin,otherItemDescription,smallBoxCount,status')&&nullable(p.orderParcelSeq,id)&&['ACTIVE','CANCELLED'].includes(p.status)&&adminParty(p.origin)&&adminParty(p.destination)&&text(p.otherItemDescription)&&['documentCount','smallBoxCount','mediumBoxCount','bigBoxCount'].every(k=>amount(p[k]))));
 }
-async function requestOrderRead(url,token,event){return requestRead(url,token,event,false);}
-async function requestAdminOrderRead(url,token,event){validateAdminOrderRead(event,event.source);return requestRead(url,token,event,true);}
-async function requestRead(url, token, event, admin) {
+async function requestOrderRead(url,token,event){return requestRead(url,token,event,'order');}
+async function requestAdminOrderRead(url,token,event){validateAdminOrderRead(event,event.source);return requestRead(url,token,event,'admin');}
+async function requestDraftRead(url,token,event){require('./parcel-drafts.cjs').validateDraftRead(event,event.source);return requestRead(url,token,event,'draft');}
+async function requestRead(url, token, event, mode) {
+  const admin=mode==='admin';
   if (typeof token !== 'string' || !/^[\x21-\x7e]{32,256}$/.test(token)) throw new Error('Invalid read credentials');
   const endpoint = new URL(url);
   if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash)
     throw new Error('Invalid read endpoint');
   const response = await fetch(endpoint, {
-    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(admin ? 30000 : event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000),
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(mode!=='order' ? 30000 : event.source === 'order' ? 15000 : event.source === 'consultation' ? 10000 : 5000),
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(event),
   });
   if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
@@ -118,6 +120,7 @@ async function requestRead(url, token, event, admin) {
   if (!keys(result, 'eventId,payload,status') || result.eventId !== event.eventId || result.status !== 'processed')
     throw new Error('Invalid read acknowledgement');
   const value = result.payload;
+  if(mode==='draft'){require('./parcel-drafts.cjs').validateDraftReadResult(value,event.payload.command);return value;}
   if (admin ? !adminPage(value,event.payload.query.limit) : event.payload.command.operation === 'OrderDetailRead'
     ? !detail(value,event.payload.command.id)
     : !keys(value, 'data,hasNext,total_count') || !Array.isArray(value.data) || value.data.length > 100 ||
@@ -129,4 +132,4 @@ async function requestRead(url, token, event, admin) {
     throw new Error('Invalid order read result');
   return value;
 }
-module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead };
+module.exports = { validateOrderRead, requestOrderRead, OrderReadError, ORDER_STATUSES, validateAdminOrderRead, requestAdminOrderRead, requestDraftRead };

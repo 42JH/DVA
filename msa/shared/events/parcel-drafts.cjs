@@ -121,3 +121,53 @@ async function restoreLegacyDraftBindings(database, consultationUrl, token) {
 }
 
 module.exports = { validateParcelDraftCommand, requestParcelDraftCommand, restoreLegacyDraftBindings, validateDraftCallReferences, requestDraftCallReferences };
+
+const DRAFT_STATUSES=['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'];
+function validateDraftRead(event,source) {
+  validateEvent(event);require('./read-scope.cjs').validateReadScope(event.eventId);
+  const p=event.payload,c=p.command,q=c?.query;
+  const fields=source==='order'?'command,orderAddress':source==='consultation'?'command,consultationAddress,orderAddress':'command,consultationAddress,customerAddress,customerSeq,orderAddress';
+  if(!['order','consultation','customer'].includes(source)||event.source!==source||event.eventType!=='ParcelDraftReadRequested'||!keys(p,fields)||
+     !keys(c,'callSessionSeq,id,operation,query')||!['ParcelDraftsListed','ParcelDraftDetailRead'].includes(c.operation)||
+     !(c.callSessionSeq===null||id(c.callSessionSeq))||(c.operation==='ParcelDraftsListed'?c.id!==null:!id(c.id))||
+     !q||typeof q!=='object'||Array.isArray(q)||
+     ['orderAddress',...(source==='order'?[]:['consultationAddress']),...(source==='customer'?['customerAddress']:[])].some(k=>p[k]!==null&&!require('./call-event-reference.cjs').privateAddress(p[k]))||
+     source==='customer'&&(!(p.customerSeq===null||id(p.customerSeq))||c.callSessionSeq===null&&p.customerSeq!==null))throw new Error('Invalid parcel draft read');
+  if(c.operation==='ParcelDraftDetailRead'){if(!keys(q,''))throw new Error('Invalid draft detail query');return;}
+  if(!Object.keys(q).every(k=>['limit','offset','from','to','status','organizationSeq','customerSeq','callSessionSeq','legacyOrderSeq','q'].includes(k))||
+     !Number.isInteger(q.limit)||q.limit<1||q.limit>100||!Number.isSafeInteger(q.offset)||q.offset<0||![...DRAFT_STATUSES,'ALL'].includes(q.status)||
+     ['organizationSeq','customerSeq','callSessionSeq','legacyOrderSeq'].some(k=>q[k]!==undefined&&!id(q[k]))||
+     ['from','to'].some(k=>q[k]!==undefined&&typeof q[k]!=='string')||q.q!==undefined&&(typeof q.q!=='string'||[...q.q].length>200))throw new Error('Invalid draft list query');
+}
+function validateDraftReadCallQuery(event) {
+  validateEvent(event);
+  if(!['customer','order'].includes(event.source)||event.eventType!=='ParcelDraftReadCallRequested'||!keys(event.payload,'callSessionSeq')||!id(event.payload.callSessionSeq))throw new Error('Invalid draft read call query');
+}
+function validateDraftReadCall(value,callSessionSeq) {
+  if(!keys(value,'callSessionSeq,callerPhoneNumber,customerSeq,enabled,endedAt,intakeVersion')||value.callSessionSeq!==callSessionSeq||
+     !(value.callerPhoneNumber===null||phone(value.callerPhoneNumber))||!(value.customerSeq===null||id(value.customerSeq))||typeof value.enabled!=='boolean'||
+     !(value.endedAt===null||timestamp(value.endedAt))||!id(value.intakeVersion))throw new Error('Invalid draft read call');
+}
+async function requestDraftReadCall(url,token,callSessionSeq,readScopeId,source='order') {
+  require('./read-scope.cjs').validateReadScope(readScopeId);
+  const event={eventId:randomUUID(),source,eventType:'ParcelDraftReadCallRequested',payload:{callSessionSeq}};
+  validateDraftReadCallQuery(event);
+  const endpoint=new URL(url);
+  if(!['http:','https:'].includes(endpoint.protocol)||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||
+     typeof token!=='string'||!/^[\x21-\x7e]{32,256}$/.test(token))throw new Error('Invalid draft call destination');
+  const value=await require('./call-event-reference.cjs').requestPacket(endpoint.href,token,event,AbortSignal.timeout(5000),null,readScopeId);
+  validateDraftReadCall(value,callSessionSeq);return value;
+}
+function validateDraftReadResult(value,command) {
+  const row=(value,detail)=>{
+    const fields=['draftSeq','reservedOrderSeq','callSessionSeq','customerSeq','callerPhoneNumber','createdByAdminUserSeq','clientParcelId','parcel','status','version','sourceDraftSeq','orderSeq','orderParcelSeq','legacyOrderSeq','legacyOrderParcelSeq','createdAt','updatedAt','retentionStartedAt',...(detail?['intakeVersion']:[])].sort().join(',');
+    return keys(value,fields)&&id(value.draftSeq)&&id(value.reservedOrderSeq)&&id(value.version)&&DRAFT_STATUSES.includes(value.status)&&
+      ['callSessionSeq','customerSeq','createdByAdminUserSeq','sourceDraftSeq','orderSeq','orderParcelSeq','legacyOrderSeq','legacyOrderParcelSeq',...(detail?['intakeVersion']:[])].every(k=>value[k]===null||id(value[k]))&&
+      (value.callerPhoneNumber===null||phone(value.callerPhoneNumber))&&typeof value.clientParcelId==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value.clientParcelId)&&
+      value.parcel!==null&&typeof value.parcel==='object'&&!Array.isArray(value.parcel)&&['createdAt','updatedAt','retentionStartedAt'].every(k=>value[k]===null||timestamp(value[k]));
+  };
+  if(command.operation==='ParcelDraftDetailRead'? !row(value,true)||value.draftSeq!==command.id:
+     !keys(value,'data,hasNext,total_count')||!Array.isArray(value.data)||value.data.length>command.query.limit||!value.data.every(value=>row(value,false))||typeof value.hasNext!=='boolean'||!Number.isSafeInteger(value.total_count)||value.total_count<0)
+    throw new Error('Invalid parcel draft read result');
+}
+Object.assign(module.exports,{DRAFT_STATUSES,validateDraftRead,validateDraftReadCallQuery,validateDraftReadCall,requestDraftReadCall,validateDraftReadResult});

@@ -25,12 +25,16 @@ import { ConfigService } from '@nestjs/config';
 import {
   validateOrderRead,
   requestOrderRead,
+  requestDraftRead,
   OrderReadError,
   type OrderReadEvent,
 } from '@dva/events/order-read.cjs';
 import {
   validateParcelDraftCommand,
   type DraftCallReferences,
+  validateDraftRead,
+  validateDraftReadCallQuery,
+  type DraftReadCall,
 } from '@dva/events/parcel-drafts.cjs';
 import { ApiException, type ErrorCode } from '../common/errors/api.exception';
 import type { Environment } from '../config/environment';
@@ -40,6 +44,122 @@ import { DatabaseService } from '../database/database.service';
 @SetMetadata('auth:internal-customer', true)
 @Controller('internal')
 export class OrderReadScopeController {
+  private readonly draftCallIds = new Map<string, number | null>();
+
+  @Post('parcel-draft-read')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftRead(@Body() event: unknown) {
+    try {
+      validateDraftRead(event, 'order');
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_READ' }, 422);
+    }
+    try {
+      return await this.database.transaction(async (client) => {
+        const id = event.payload.command.callSessionSeq;
+        // Match the source read-committed permission locks after a preceding writer commits.
+        if (id === null) await client.query('SET TRANSACTION READ ONLY');
+        if (id === null) await client.query('SELECT 1');
+        else {
+          const call = await this.draftCall(client, id, true);
+          if (!call)
+            throw new ApiException(
+              404,
+              'NOT_FOUND',
+              '통화를 찾을 수 없습니다.',
+            );
+          if (!call.enabled)
+            throw new ApiException(
+              409,
+              'INVALID_STATE',
+              '이전 계약의 통화입니다. 새 통화에서 초안을 접수해 주세요.',
+            );
+        }
+        return this.reads.run(event.eventId, client, async () => {
+          this.draftCallIds.set(event.eventId, id);
+          try {
+            const payload = await requestDraftRead(
+              this.config.get('CUSTOMER_URL', { infer: true }) +
+                '/internal/call-read-references/parcel-drafts',
+              this.config.get('CONSULTATION_AUTH_TOKEN', { infer: true }),
+              {
+                ...event,
+                source: 'consultation',
+                payload: {
+                  ...event.payload,
+                  consultationAddress:
+                    this.config.get('MSA_INSTANCE_IP', { infer: true }) ?? null,
+                },
+              },
+            );
+            return { eventId: event.eventId, status: 'processed', payload };
+          } finally {
+            this.draftCallIds.delete(event.eventId);
+          }
+        });
+      });
+    } catch (error) {
+      if (error instanceof OrderReadError)
+        throw new HttpException({ error: error.error }, error.status);
+      if (error instanceof ApiException)
+        throw new HttpException(
+          { error: error.getResponse() },
+          error.getStatus(),
+        );
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    }
+  }
+
+  private async draftCall(client: PoolClient, id: number, lock = false) {
+    return (
+      await client.query<DraftReadCall>(
+        `SELECT call_session_seq AS "callSessionSeq",caller_phone_number AS "callerPhoneNumber",customer_seq AS "customerSeq",
+       to_jsonb(ended_at)#>>'{}' AS "endedAt",order_intake_enabled AS enabled,order_intake_version AS "intakeVersion"
+       FROM call_sessions WHERE call_session_seq=$1` +
+          (lock
+            ? " AND deleted_at IS NULL AND incoming_at>statement_timestamp()-interval '5 years' FOR SHARE"
+            : ''),
+        [id],
+      )
+    ).rows[0];
+  }
+
+  @Post('parcel-draft-read/call')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async draftReadCall(
+    @Body() event: unknown,
+    @Headers('x-msa-read-scope') scopeId: string,
+  ) {
+    try {
+      validateDraftReadCallQuery(event);
+      validateReadScope(scopeId);
+    } catch {
+      throw new HttpException({ error: 'INVALID_DRAFT_READ_CALL' }, 422);
+    }
+    if (this.draftCallIds.get(scopeId) !== event.payload.callSessionSeq)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    const payload = await this.reads.use(scopeId, (client) =>
+      this.draftCall(client, event.payload.callSessionSeq),
+    );
+    if (!payload)
+      throw new ApiException(
+        503,
+        'DEPENDENCY_UNAVAILABLE',
+        '서비스를 일시적으로 사용할 수 없습니다.',
+      );
+    return { eventId: event.eventId, status: 'processed', payload };
+  }
+
   private readonly reads = new ReadScopes<PoolClient>(
     () =>
       new ApiException(

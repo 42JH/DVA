@@ -21,3 +21,13 @@ export function validateParcelDraftCommand(event: unknown, type: 'DraftCallRefer
 export function requestParcelDraftCommand(url: string, token: string, event: DraftCallEvent, readScopeId?:string): Promise<DraftCallReferences>;
 export function validateDraftCallReferences(rows: unknown, query: DraftCallQuery): asserts rows is DraftCallReferences;
 export function requestDraftCallReferences(url: string, token: string, input: {callIds: number[]; customerIds: number[]; phones: string[]}, readScopeId?:string): Promise<DraftCallReferences>;
+
+export const DRAFT_STATUSES:readonly ['READY','EDITING','INCOMPLETE','CONVERTED','CANCELLED','RESUMED'];
+export interface DraftReadCommand {operation:'ParcelDraftsListed'|'ParcelDraftDetailRead';id:number|null;callSessionSeq:number|null;query:Record<string,unknown>}
+export interface DraftReadEvent extends Event {source:'order'|'consultation'|'customer';eventType:'ParcelDraftReadRequested';payload:{command:DraftReadCommand;orderAddress:string|null;consultationAddress?:string|null;customerAddress?:string|null;customerSeq?:number|null}}
+export interface DraftReadCall {callSessionSeq:number;callerPhoneNumber:string|null;customerSeq:number|null;endedAt:string|null;enabled:boolean;intakeVersion:number}
+export function validateDraftRead(event:unknown,source:DraftReadEvent['source']):asserts event is DraftReadEvent;
+export function validateDraftReadCallQuery(event:unknown):asserts event is Event&{payload:{callSessionSeq:number}};
+export function validateDraftReadCall(value:unknown,callSessionSeq:number):asserts value is DraftReadCall;
+export function requestDraftReadCall(url:string,token:string,callSessionSeq:number,readScopeId:string,source?:'order'|'customer'):Promise<DraftReadCall>;
+export function validateDraftReadResult(value:unknown,command:DraftReadCommand):void;
