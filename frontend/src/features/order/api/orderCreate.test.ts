@@ -54,4 +54,9 @@ assert.equal(
   false,
 )
 
+// 고객 번호를 주면(월정산을 먼저 켬, 11/10) customer 대신 customerSeq — 서버는 둘 중 하나만
+const b3 = buildCreateOrder({ ...input, paymentMethod: 'MONTHLY' }, 3500, 42)
+assert.equal(b3.customerSeq, 42)
+assert.equal('customer' in b3, false)
+
 console.log('orderCreate OK')

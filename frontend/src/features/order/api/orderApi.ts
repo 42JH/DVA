@@ -1,7 +1,8 @@
 // 03 주문 내역 Model — 주문 목록 · 주문 추가 · 수정. React를 모르는 데이터 층
 // 목록 GET /admin/orders · 추가 POST /admin/orders · 수정 PATCH /orders/{id} — 모두 실서버 (연동 상세명세 4장, 11/01)
 // 11/04 디자인: 고른 날짜에서 시작하는 무한 스크롤 — 하루씩 받음 (shared/lib/useDayFeed가 아래 두 함수로)
-import { api, type ApiItem } from '@/shared/api/client'
+import { queryOptions } from '@tanstack/react-query'
+import { api, ApiError, type ApiItem } from '@/shared/api/client'
 import { buildCreateOrder } from './orderCreate'
 import type { CustomerPatch, OrderPatch } from './orderPatch'
 import type { OrderDetail, Party, PaymentMethod } from '@/shared/order/orderApi'
@@ -60,6 +61,77 @@ export interface OrderListItem {
 
 export const orderQueries = {
   all: () => ['orders'] as const, // shared/order의 상세와 같은 뿌리 → 수정 · 추가 후 invalidate 한 번에 목록 · 상세 모두 갱신
+  // 보내는 분(= 주문 고객) 결제 자격 — 주문을 보내면 같은 뿌리라 함께 새로 받음 (월정산을 켠 뒤 등)
+  payContext: (phone: string) =>
+    queryOptions({
+      queryKey: [...orderQueries.all(), 'pay-context', phone],
+      queryFn: ({ signal }) => fetchPayContext(phone, signal),
+      staleTime: 60_000,
+    }),
+}
+
+// ---------- 결제 자격 (11/10) ----------
+// 서버 규칙 (customers.repository availablePaymentMethods · order-payments eligibility):
+// 개인카드 = 늘 · 월정산 = 개인 고객은 고객 설정, 기업 소속은 기업 설정 · 그룹카드 = 기업 소속 + 부서 설정. 접수 때 서버가 다시 확인(아니면 403)
+const PAY_FROM_DTO: Record<'billing' | 'credit' | 'groupBilling', PaymentMethod> = {
+  billing: 'PERSONAL_CARD',
+  credit: 'MONTHLY',
+  groupBilling: 'GROUP_CARD',
+}
+interface PayContextDto {
+  customer: { customerSeq: number; name: string } | null
+  membership: { status: string } | null
+  organization: { name: string } | null
+  availablePaymentMethods: (keyof typeof PAY_FROM_DTO)[]
+}
+export interface PayContext {
+  customerSeq: number | null // null = 처음 보는 번호 (주문 때 서버가 고객을 만듦)
+  // 기업 소속(멤버십이 있으면 비활성이어도)이면 기업 이름 — 서버는 소속이 있으면 고객의 월정산 설정을 안 봄
+  company: string | null
+  available: PaymentMethod[]
+}
+/** POST /customers/context (전화번호만 → 통화 · 감사 기록 안 남김) */
+async function fetchPayContext(phone: string, signal?: AbortSignal): Promise<PayContext> {
+  const { data } = await api.post<ApiItem<PayContextDto>>('/customers/context', {
+    body: { phoneNumber: phone },
+    signal,
+  })
+  return {
+    customerSeq: data.customer?.customerSeq ?? null,
+    company: data.membership ? (data.organization?.name ?? '') : null,
+    available: data.availablePaymentMethods.map((m) => PAY_FROM_DTO[m]),
+  }
+}
+
+/** 개인 고객에게 월정산 추가 — 주문을 보내기 전에 (서버가 접수 순간 자격을 확인). 고객 번호를 돌려줌
+ * 기존 고객 = PATCH /customers/{id} · 처음 보는 번호 = POST /customers(주소 필수)로 월정산 켠 채 생성
+ * 그 사이 같은 번호가 등록됐으면(409) 다시 찾아 PATCH. 주문이 나중에 실패해도 월정산은 켜진 채 남음 (11/10 결정) */
+export async function addMonthly(customerSeq: number | null, sender: PartyInput): Promise<number> {
+  const patch = (id: number) =>
+    api.patch(`/customers/${id}`, { body: { monthlyBillingEnabled: true } }).then(() => id)
+  if (customerSeq) return patch(customerSeq)
+  try {
+    const { data } = await api.post<ApiItem<{ customerSeq: number }>>('/customers', {
+      body: {
+        name: sender.name,
+        phoneNumber: sender.phoneNumber,
+        address: {
+          roadAddress: sender.roadAddress,
+          detailAddress: sender.detailAddress ?? '',
+          jibunAddress: sender.picked?.jibunAddress ?? '',
+          dongName: sender.picked?.dongName ?? '',
+          postalCode: sender.picked?.postalCode ?? '',
+        },
+        monthlyBillingEnabled: true,
+      },
+    })
+    return data.customerSeq
+  } catch (e) {
+    if (!(e instanceof ApiError && e.code === 'DUPLICATE_RESOURCE')) throw e
+    const again = (await fetchPayContext(sender.phoneNumber)).customerSeq
+    if (!again) throw e
+    return patch(again)
+  }
 }
 
 // ---------- 주문 추가 · 수정 ----------
@@ -92,8 +164,12 @@ export const createOrder = (
   input: OrderInput,
   shippingFee: number,
   idempotencyKey: string,
+  customerSeq?: number, // 월정산을 먼저 켠 고객 — 없으면 이름 · 전화로 서버가 찾거나 만듦
 ): Promise<ApiItem<{ orderSeq: number; status: OrderStatus }>> =>
-  api.post('/admin/orders', { body: buildCreateOrder(input, shippingFee), idempotencyKey })
+  api.post('/admin/orders', {
+    body: buildCreateOrder(input, shippingFee, customerSeq),
+    idempotencyKey,
+  })
 
 /** 주문 수정 — PATCH /orders/{id} (연동 상세명세 4.3). 본문은 buildOrderPatch(바뀐 칸만 + expectedVersion)
  * 성공 200 { data: { version } } → 화면은 상세를 다시 받음. 버전이 낡았으면 409 VERSION_CONFLICT (자동 덮어쓰기 금지) */
